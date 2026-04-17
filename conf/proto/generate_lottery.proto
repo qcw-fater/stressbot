@@ -1,0 +1,146 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+import "enum.proto";
+import "common.proto";
+import "custom_lottery.proto";
+
+//抽卡
+message LotteryLuckyDrawC2S
+{
+    LotteryType  lotteryType = 1;//抽卡类型
+    int32    lotteryPoolId = 2; //抽卡卡池id
+    LotteryConsumeType   lotteryConsumeType = 3;//抽卡消耗类型
+}
+//抽卡
+message LotteryLuckyDrawS2C
+{
+    LotteryType  lotteryType = 1;//抽卡类型
+    int32    lotteryPoolId = 2; //抽卡卡池id
+    int64 singleDrawTime = 3;//单抽免费时间
+    int64 moreDrawTime = 4;//多抽免费时间
+    repeated ShowReward fixedRewardList = 5; //固定奖励
+    repeated ShowReward rewardList = 6; //奖励道具
+}
+
+//获取抽卡信息
+message LotteryGetInfoC2S
+{
+}
+//获取抽卡信息
+message LotteryGetInfoS2C
+{
+    repeated LotteryInfo lotteryInfoList = 1;//抽卡信息
+}
+
+//领取自选角色
+message LotteryGetHeroC2S
+{
+    int32 lotteryPoolId = 1; //抽卡卡池id
+    int32 heroId = 2;//角色id
+}
+//领取自选角色
+message LotteryGetHeroS2C
+{
+    int32 lotteryPoolId = 1; //抽卡卡池id
+    int32 heroId = 2;//角色id
+}
+
+//获取抽卡记录
+message LotteryGetLogC2S
+{
+    int32 lotteryPoolId = 1; //抽卡卡池id
+}
+//获取抽卡记录
+message LotteryGetLogS2C
+{
+    int32 lotteryPoolId = 1; //抽卡卡池id
+    repeated LotteryLog LotteryLogList = 5;//抽卡日志
+}
+
+//抽卡信息推送
+message LotteryInfoS2C
+{
+     LotteryInfo lotteryInfo = 1;//抽卡信息
+}
+
+
+//获取刮刮卡信息（有变化才发）
+message LotteryGetScratchcardC2S
+{
+    repeated int32 lotteryPoolId = 1; //刮刮卡id
+}
+//获取刮刮卡信息
+message LotteryGetScratchcardS2C
+{
+    repeated ScratchCardInfo scratchCardInfo = 1;// 刮刮卡信息
+}
+
+//刮开刮刮卡
+message LotteryScratchcardDrawC2S
+{
+    int32 lotteryPoolId = 1; //卡池id
+    int32 drawCmt = 2;// 刮卡的数量
+}
+
+//刮开刮刮卡
+message LotteryScratchcardDrawS2C
+{
+    ScratchCardInfo scratchCardInfo = 1;// 刮刮卡信息
+    repeated ShowReward rewardList = 2; //奖励道具
+}
+
+
+//获取刮刮卡日志记录
+message LotteryGetScratchcardLogC2S
+{
+    int32 lotteryPoolId = 1; //刮刮卡池id
+}
+//获取刮刮卡日志记录
+message LotteryGetScratchcardLogS2C
+{
+    int32 lotteryPoolId = 1; //刮刮卡池id
+    repeated LotteryLog LotteryLogList = 2;//刮刮卡日志
+}
+
+//刮刮卡池关闭推送
+message LotteryScratchcardStopS2C
+{
+    int32 lotteryPoolId = 1; //刮刮卡池id
+}
+
+
+
+message ScratchcardPool{
+    ScratchCardInfo scratchCardInfo = 1;// 刮刮卡信息
+    repeated ShowReward rewardList = 2; //奖励道具
+}
+
+//获取刮刮卡信息
+message LotteryGetAllScratchcardC2S
+{
+}
+//获取刮刮卡信息
+message LotteryGetAllScratchcardS2C
+{
+    repeated ScratchCardInfo scratchCardInfo = 1;// 刮刮卡信息
+}
+
+//抽卡选择up角色
+message LotterySelectUpHeroC2S
+{
+    int32 lotteryPoolId = 1; // 抽卡卡池id
+    int32 heroId  = 2;       // 选择的英雄id
+}
+
+//抽卡选择up角色
+message LotterySelectUpHeroS2C
+{
+    int32 lotteryPoolId = 1; // 抽卡卡池id
+    int32 heroId  = 2;       // 选择的英雄id
+}
+
+//抽卡系统跨天
+message LotteryNewDayS2C
+{
+}

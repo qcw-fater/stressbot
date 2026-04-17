@@ -1,0 +1,159 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+
+import "custom_hero.proto";
+
+//请求玩家英雄数据
+message HeroGetDataS2C
+{
+  repeated HeroInfo           heroList    = 1; // 英雄列表
+}
+//英雄数据更新
+message HeroUpdateS2C
+{
+  HeroInfo heroDta = 1;
+}
+//英雄统计数据更新
+message HeroStatisticsUpdateS2C
+{
+  int32          heroId = 2; // 英雄id
+}
+//英雄升级
+message HeroUpLevelC2S
+{
+  int32 heroId = 1; // 英雄id
+}
+//英雄升级
+message HeroUpLevelS2C
+{
+  int32 heroId  = 1; // 英雄id
+  int32 level   = 2; // 英雄升级后的等级
+}
+//英雄觉醒
+message HeroAwakeC2S
+{
+  int32 heroId      = 1; // 英雄id
+}
+// 英雄觉醒
+message HeroAwakeS2C
+{
+  int32               heroId                = 1;    // 英雄id
+  repeated  int32     awakeList             = 2;    // 觉醒列表
+  int32               nextAwakeId           = 3;    // 下一个觉醒id
+}
+// 英雄天赋激活
+message HeroActivateTalentC2S
+{
+  	int32 heroId  		= 1;   // 英雄id
+  	int32 index   		= 2;   // 需要激活的天赋索引（从0开始）
+}
+// 英雄潜能激活
+message HeroActivateTalentS2C
+{
+	int32 heroId          	= 1;   // 英雄id
+}
+// 装备英雄天赋
+message HeroEquipmentTalentC2S
+{
+	int32 heroId          			= 1;   // 英雄id
+	repeated int32 index   			= 2;   // 操作天赋索引
+	repeated int32 talentIndex     	= 3;   // 小天赋的索引下标
+}
+
+// 装备英雄潜能
+message HeroEquipmentTalentS2C
+{
+	int32 heroId          	= 1;   // 英雄id
+}
+
+//英雄天赋激活
+message HeroActivateSuperTalentC2S
+{
+  int32 heroId      = 1;      // 英雄id
+  int32 talentId    = 2;      // 需要激活的天赋Id
+}
+//英雄天赋激活
+message HeroActivateSuperTalentS2C
+{
+  int32 heroId                          = 1;   // 英雄id
+  repeated int32 heroSuperTalent        = 2;   // 英雄当前拥有的天赋
+}
+
+//英雄提升认可度
+message HeroIncreaseApprovalsC2S
+{
+  int32 heroId = 1;   // 英雄ID
+  int32 itemId = 2;   // 认可度道具Id
+  int32 num    = 3;   // 道具数量
+}
+//英雄提升认可度
+message HeroIncreaseApprovalsS2C
+{
+  int32 heroId = 1;   // 英雄ID
+}
+//英雄认可度奖励
+message HeroGetApprovalsLevelRewardC2S
+{
+  int32 heroId = 1;    // 英雄ID
+  int32 level  = 2;    // 要领取奖励等级
+}
+//英雄认可度奖励
+message HeroGetApprovalsLevelRewardS2C
+{
+  int32 heroId = 1;   // 英雄ID
+}
+//英雄专精奖励领取
+message HeroGetPureEssenceRewardC2S
+{
+  int32 heroId = 1;   // 英雄ID
+  int32 level  = 2;    // 要领取奖励等级
+}
+//英雄专精奖励领取
+message HeroGetPureEssenceRewardS2C
+{
+  int32 heroId = 1;   // 英雄ID
+}
+//保存英雄表情（覆盖操作）
+message HeroSaveHeroExpressionC2S
+{
+  repeated int32 heroList       = 1; // 英雄列表
+  repeated int32 expression     = 2; // 表情列表
+}
+//保存英雄表情（覆盖操作）
+message HeroSaveHeroExpressionS2C
+{
+  repeated int32 heroList       = 1; // 英雄列表
+  repeated int32 expression     = 2; // 表情列表
+}
+//保存英雄动作
+message HeroSaveHeroActionC2S
+{
+	int32 			heroSkinId = 1; // 皮肤id
+	int32 			actionType = 2; // 动作类型
+	repeated int32 	actionList = 3; // 动作列表
+}
+//保存英雄动作
+message HeroSaveHeroActionS2C
+{
+}
+//领取观看cv奖励
+message HeroGetCvRewardC2S
+{
+  int32 heroId = 1;   // 英雄ID
+  int32 cvId = 2;   // cv的id
+}
+//领取观看cv奖励
+message HeroGetCvRewardS2C
+{
+}
+//选择英雄皮肤
+message HeroSelectSkinC2S
+{
+  int32 heroId = 1;   // 英雄ID
+  int32 skinId = 2;   // 皮肤id
+}
+//选择英雄皮肤
+message HeroSelectSkinS2C
+{
+}

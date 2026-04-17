@@ -1,0 +1,126 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+import "custom_works.proto";
+import "common.proto";
+
+//解锁区域
+message WorksUnlockAreaS2C
+{
+  int32 areaId = 1;
+  repeated BuildDB   builds = 2;
+}
+
+
+
+//解锁建筑
+message WorksUnlockBuildS2C
+{
+  BuildDB   build = 1;
+}
+
+
+
+//生产开始
+message WorksProductionBeginC2S
+{
+  int32           buildId = 1;    //配置Id
+  repeated int32  heros = 2;    //生产的英雄
+}
+//生产开始
+message WorksProductionBeginS2C
+{
+  BuildDB   build = 1;
+}
+
+
+
+//获取生产奖励
+message WorksGetProductionRewardC2S
+{
+  repeated int32     buildIds = 1;    //配置Id
+}
+//获取生产奖励
+message WorksGetProductionRewardS2C
+{
+  repeated BuildDB   builds = 1;
+}
+
+
+//更新建筑信息
+message WorksBuildUpdateS2C
+{
+  BuildDB   build = 1;
+}
+
+
+//获取产出
+message WorksProductionYieldC2S
+{
+  repeated int32 buildId = 1;    //配置Id
+}
+//获取产出
+message WorksProductionYieldS2C
+{
+  repeated BuildDB   build = 1;
+}
+//GAME_CMD_WORKS_COMPOUND_CS=6//配方合成
+message WorksCompoundC2S
+{
+}
+//GAME_CMD_WORKS_COMPOUND_CS=6//配方合成
+message WorksCompoundS2C
+{
+}
+//GAME_CMD_WORKS_RECAST_CS=7//重铸
+message WorksRecastC2S
+{
+}
+//GAME_CMD_WORKS_RECAST_CS=7//重铸
+message WorksRecastS2C
+{
+}
+
+//升级建筑
+message WorksUpgradeBuildC2S
+{
+  int32 buildId = 1;    //建筑Id
+}
+//升级建筑
+message WorksUpgradeBuildS2C
+{
+  BuildDB   build = 1; //建筑信息
+}
+
+//更换建筑
+message WorksChangeBuildC2S
+{
+  int32 buildId = 1;    //建筑Id
+  int32 buildLevel = 2;    //建筑等级
+}
+//更换建筑
+message WorksChangeBuildS2C
+{
+  BuildDB   build = 1; //建筑信息
+}
+
+
+//触发设定星
+message WorksTriggerEventPointC2S
+{
+  int32 pointId = 1; //设定星id
+}
+
+//触发设定星
+message WorksTriggerEventPointS2C
+{
+  int32 pointId = 1;//设定星id
+  int32 status = 2;//状态  0未完成 1完成
+  repeated RewardConfig  rewardList = 3;    //触发后的奖励
+}
+
+//更新设定星
+message WorksUpdateEventPointS2C
+{
+  repeated  DisPatchEventRecord disPatchEventRecordList = 1;// 更新设定星
+}

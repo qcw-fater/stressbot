@@ -1,0 +1,211 @@
+syntax            = "proto3";
+option go_package = ".;pb";
+package Game;
+import "enum.proto";
+import "player.proto";
+ import "common.proto";
+
+// 战队基础数据
+message GuildBaseInfoDB {
+    int64  uid         = 1; // 战队uid
+    string name        = 2; // 名字
+    int32  icon        = 3; // 图标
+    int32  totalActive = 4; // 活跃度
+    int32  level       = 5; // 等级(只升不降)
+    int32  leaderId    = 6; // 会长Id
+    string publicity   = 7; // 公告
+    int32  cupCount    = 8; // 总杯数
+}
+
+// 战队基础设置信息
+message GuildBaseSettingDB {
+    bool  acceptApply = 1; // 接受申请
+    bool  approval    = 2; // 入队审批
+    int32 limitLevel  = 3; // 等级限制
+    int32 ipScores    = 4; // 入社关注漫画总对战积分
+}
+
+message GuildStatisticsDB {
+    //    int32 lastNoLimitIcon                   = 1;  // 上次无限制图标
+    int32             season                = 1; // 赛季
+    map<int32, int32> lastWeekProficiency   = 2; // 上周积分
+    map<int32, int32> lastReasonProficiency = 3; // 上赛季积分
+}
+
+message GuildTimeRecordDB {
+    int64 createTime         = 1; // 创建时间
+    int64 lastDayRstTime     = 2; // 上次天重置时间
+    int64 lastWeekRstTime    = 3; // 上次周重置时间
+    int64 lastChangeNameTime = 4; // 上次改名时间
+}
+
+// 战队事件
+message GuildEventInfo {
+    repeated GuildEventDB guildEventList = 1; // 战队事件列表
+}
+// 上周排名
+message GuildLastWeekRankInfo {
+    map<int32, int32> ranks = 1; // key:Ip value:排名
+}
+
+// 战队信息DB
+message GuildDB {
+    GuildBaseInfoDB       baseInfo       = 1; // 基础信息
+    map<int32, bool>      members        = 2; // 成员列表
+    GuildStatisticsDB     statistics     = 3; // 统计数据
+    GuildTimeRecordDB     timeRecord     = 4; // 时间信息
+    GuildBaseSettingDB    baseSetting    = 5; // 基础设置
+    GuildEventInfo        guildEventData = 6; // 战队事件
+    GuildLastWeekRankInfo lastWeekRank   = 7; // 上周排名
+    GuildRouteDb          routeData      = 8; // 航路数据
+}
+
+// 战队成员信息
+message GuildMemberDB {
+    int32             playerId                   = 1;  // 玩家id
+    int32             weekSignCnt                = 2;  // 周签到次数
+    map<int32, int32>             weekActive     = 3;  // 周活跃度 按类型存储  1对战  2签到  3消费
+    GuildPositionType position                   = 4;  // 职位
+    string            account                    = 5;  // 玩家账号
+    int64             guildUid                   = 6;  // 战队Id
+    int64             nextSignTime               = 7;  // 下次可签到时间
+    int64             lastExitTime               = 8;  // 上次退出时间
+    int64             joinTimestamp              = 9;  // 加入时间
+    int32             CupNumber                  = 10; // 总杯数
+    repeated GuildMemberExitData offExitTimeList = 11; // 离线时被踢出时间 key:玩家id value:离线时间
+    map<int32, int32>             weekActiveRewardRecord                 = 12;  // 周活跃度奖励领取记录  配置id：1
+    int32 routeVectorTimes = 13; // 伟大航路胜场
+    int32 routeJoinTimes = 14; // 伟大航路参与场次
+    bool routeReward = 15; // 宝箱是否领奖 （手动领奖会修改为true）
+    bool selectRouteBattle = 16; // 是否消耗伟大航路次数
+    bool routeRankReward = 17; // 伟大航路排行榜是否领奖 （手动领奖会修改为true）
+    map<int64, int64> applyMap = 18; // 已申请的战队id：到期时间
+    int32 routeRankHistoryJoinTimes = 19; // 本期伟大航路历史参与次数
+}
+
+// 离线时被踢出时间
+message GuildMemberExitData {
+    int64 exitTimestamp = 1; // 退出时间
+    int64 joinTimestamp = 2; // 加入时间
+    int64 guildUid      = 3; // 战队id
+}
+
+message GuildMemberBase {
+    PlayerBase    baseData        = 1; // 玩家基础数据
+    PlayerStatus  state           = 2; // 玩家状态
+    int64         lastOfflineTime = 3; // 上次离线时间
+    GuildMemberDB guildData       = 4; // 玩家工会数
+}
+
+// 战队列表数据
+message GuildListInfo {
+    GuildBaseInfoDB    baseInfo    = 1; // 基础信息
+    GuildStatisticsDB  statistics  = 2; // 统计数据
+    GuildBaseSettingDB baseSetting = 3; // 基础设置
+    PlayerBase         leaderInfo  = 4; // 队长信息
+    int32              memberCnt   = 5; // 成员数量
+    bool               isApplied   = 6; // 是否已申请 true：已申请 false：未申请
+}
+
+message GuildLoginInfo {
+//    GuildMemberDB mydata = 1; // 我的工会数据
+  int64                             guildId               = 1; // 我的战队id
+  map<int32, bool>                 guildGamePlay          = 2; // 战队玩法红点
+  GuildBaseInfoDB    baseInfo    = 3; // 基础信息
+  GuildBaseSettingDB baseSetting = 4; // 基础设置
+  GuildMemberDB mydata = 5; // 我的工会数据
+  GuildRouteDb routeData = 6; // 伟大航路航路数据
+  map<int64, int64> applyMap = 7; // 已申请的战队id：到期时间
+}
+
+// 玩家加入申请
+message GuildJoinRequestDB {
+    int32  playerId   = 1;
+    string msg        = 2;
+    int64  createTime = 3; // 创建时间
+    string account    = 4; // 玩家账号
+}
+
+// 申请列表数据
+message GuildJoinRequest {
+    PlayerBase         info          = 1;
+    GuildJoinRequestDB request       = 2;
+}
+
+// 队伍管理器到逻辑服消息
+message GuildMgrToLogicMsg {
+    repeated int32 players = 1; // 玩家Id
+    uint32         cmd     = 2; // cmd
+    uint32         act     = 3; // act
+    uint32         index   = 4; // index
+    uint32         err     = 5; // 错误码
+    bytes          data    = 6; // 序列化消息
+}
+
+// 战斗事件日志
+message GuildEventDB {
+    int64        createTime   = 1; // 创建时间
+    GuildEventId type         = 2; // 日志类型
+    repeated string parameter = 3; // 消息参数
+    PlayerBase      baseData  = 4; // 玩家基础数据
+}
+
+// 战队战区排行榜 基础数据
+message GuildRankInfo {
+    int64    uid               = 1; // 战队uid
+    string   name              = 2; // 名字
+    int32    icons             = 3; // 图标
+    int64    proficiency       = 4; // 对战积分
+    string  leaderName         = 5; // 会长名
+    int32 rank = 6; // 排名
+}
+
+message UpdateIpProficiency {
+    map<int32, int32> ipProficiency = 1; // 改变的漫画总对战积分 key:Ip value:积分
+}
+
+message GlobalGuildRankDB {
+    int64 rankLastCheckTimeStamp = 1; // 排行榜上次检测时间
+    int32 version                = 2; // 更新版本
+    int32 serverId               = 3; // 更新服务器Id
+}
+
+//存储活跃值奖励
+message ActiveRewardDb{
+  repeated RewardConfig info = 1; // 奖励列表
+  int64 id = 2; // 唯一id
+}
+
+//战队伟大航路数据
+message GuildRouteDb {
+  int64 nextStepTime = 1; // 下一阶段的时间戳
+  int32 vectorTimes = 2; // 总胜场次数
+  GuildRouteStepType nowStep = 3; // 当前阶段
+  map<int32, GuildRouteRankInfo> rankData = 4; //成员参与的数据 转阶段会清除
+}
+
+//存储伟大航路胜场  （离线处理）
+message GuildRouteRewardDb{
+  int32 vectorTimes = 1; // 总胜场次数
+  int64 id = 2; // 唯一id
+  bool email = 3; // 是否通过邮件补发
+  int32 rank = 4;// 本次排名
+}
+
+
+message GuildRouteRankInfo{
+    int32 memberId = 1; //成员id
+    int32 icon = 2; // 成员头像
+    string name = 3; // 成员名
+    int32 routeVectorTimes = 4; // 伟大航路胜场
+    int32 routeJoinTimes = 5; // 伟大航路参与场次
+    int32 IFrame = 6; // 成员头像框
+    int64 timestamp = 7; // 时间戳
+}
+
+
+//退出时的数据
+message GuildExitData{
+    int64 guildUid = 1; // 战队id
+    int64 exitTimestamp = 2; // 退出时间
+}

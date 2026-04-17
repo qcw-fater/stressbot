@@ -1,0 +1,336 @@
+syntax             = "proto3";
+option  go_package = ".;pb";
+package Game;
+
+// 导入枚举
+import "enum.proto";
+import "enum_battle.proto";
+import "player.proto";
+import "custom_team.proto";
+import "common.proto";
+
+// 下发当前服务器在线玩家信息(临时功能)
+message TeamOnlinePlayerListC2S {}
+
+// 下发当前服务器在线玩家信息(临时功能)
+message TeamOnlinePlayerListS2C {
+    repeated PlayerInfo playerList = 1; // 在线玩家列表
+}
+
+// 队伍管理器到战斗服的消息
+message TeamMsgToBattle {
+    int64  teamId   = 1; // 队伍ID
+    int64  roomId   = 2; // 房间ID
+    int32  playerId = 3; // 请求玩家ID
+    int32  tmId     = 4; // 管理器ID
+    uint32 act      = 5; // act
+    uint32 index    = 6; // index
+    bytes  data     = 7; // 序列化消息
+}
+
+// 创建队伍
+message TeamCreateC2S {
+    GameModel      model       = 1; // 游戏模式
+    repeated int32 heroIdList  = 2; // 选择的英雄列表s
+    int32          gameModelId = 3; // 游戏模式id
+    bool           isConvene   = 4; // 是否通过招募创建
+}
+// 创建队伍
+message TeamCreateS2C {
+    int64     teamId = 1; // 队伍ID
+    GameModel model  = 2; // 游戏模式
+    GameType  gType  = 3; // 游戏类型
+    int32     modeId = 4; // 匹配类型
+}
+// 离开队伍
+message TeamLeaveC2S {
+    int64 teamId = 1; // 队伍ID
+}
+// 离开队伍
+message TeamLeaveS2C {
+    TargetTeamInfo targetTeam  = 1; // 新加入队伍信息
+    int64          leaveTeamId = 2; // 离开的队伍Id
+}
+// 更新队伍信息
+message TeamUpdateInfoS2C {
+    teamRoomInfo teamData = 1; // 队伍信息
+}
+// 组队邀请
+message TeamInviteC2S {
+    int32 beInviter = 1; // 被邀请人ID
+    bool  isInvite  = 2; // 是否主动邀请（true:主动发起，false：被邀请人求邀请）
+}
+// 组队邀请
+message TeamInviteS2C {
+    int32 beInviter = 1; // 被邀请人ID
+}
+// 求邀请
+message TeamRequestInviteC2S {
+    int32 tarPlayerId = 1; // 目标玩家的ID
+}
+// 求邀请
+message TeamRequestInviteS2C {}
+// 通知被邀请人
+message TeamNotifyInviteS2C {
+    PlayerBase inviteInfo   = 1; // 邀请者信息
+    int32      beInvite     = 2; // 被邀请人ID
+    int32      icon         = 3; // 被邀请人头像
+    int64      teamId       = 4; // 队伍ID
+    GameModel  model        = 5; // 游戏模式
+    GameType   gType        = 6; // 游戏类型
+    int32      battleModeId = 7; // 匹配类型
+    int64      roomId       = 8; // 房间id
+    bool       isInvite     = 9; // 是否主动邀请（true:主动发起，false：被邀请人求邀请）
+}
+
+// 通知求邀请目标
+message TeamNotifyRequestInviteS2C {
+    int32      targetPlayerId = 1; // 求邀目标玩家ID
+    PlayerBase beInvite       = 2; // 求邀请玩家信息
+}
+// 是否同意邀请
+message TeamAcceptC2S {
+    InviteTeamPro operation    = 1; // 操作指令
+    int64         teamId       = 2; // 队伍ID
+    int32         inviter      = 3; // 邀请人
+    int32         refuseReason = 4; // 拒绝原因
+    GameModel     model        = 5; // 游戏模式
+    GameType      gType        = 6; // 游戏类型
+    int32         battleModeId = 7; // 匹配类型
+    int64         roomId       = 8; // 房间id
+}
+// 通知邀请人玩家是否同意邀请
+message TeamNotifyAcceptS2C {
+    int32  inviter       = 1; // 邀请人Id
+    string beInviterName = 2; // 被邀请人名字
+    int32  reason        = 3; // 拒绝原因
+}
+// 检测加入队伍反馈
+message TeamCheckJoinS2C {
+    JoinTeamCode   code       = 1; // 加入队伍错误码
+    TargetTeamInfo targetTeam = 2; // 新加入队伍信息
+}
+// 加入队伍
+message TeamJoinS2C {
+    JoinTeamCode code   = 1; // 加入队伍错误码
+    int64        teamId = 2; // 队伍Id
+    GameModel    model  = 3; // 游戏模式
+    GameType     gType  = 4; // 游戏类型
+    int32        modeId = 5; // 匹配类型
+    int32        tsId   = 6; // 队伍服务器Id
+}
+// 踢出队伍
+message TeamKickOutC2S {
+    int64     teamId       = 1; // 队伍ID
+    GameModel model        = 2; // 游戏模式
+    GameType  gType        = 3; // 游戏类型
+    int32     modeId       = 4; // 匹配类型
+    int32     kickPlayerId = 5; // 踢出玩家Id
+}
+// 踢出队伍
+message TeamKickOutS2C {}
+// 队伍准备
+message TeamPrepareC2S {
+    bool isPrepare = 1; // 是否准备 true准备, false取消准备
+}
+// 切换游戏玩法
+message TeamChangeGameTypeC2S {
+    int32 changeId = 1; // 需要切换的游戏id
+}
+// 切换游戏玩法
+message TeamChangeGameTypeS2C {
+    int32    playerId = 1; // 玩家ID
+    GameType gType    = 2; // 游戏类型
+    int32    modeId   = 3; // 模式Id
+}
+// 切换英雄
+message TeamChangeHeroC2S {
+    repeated int32 selectHeroes = 1; // 选择的英雄数组（非武道会模式只填充1号位）
+    repeated int32 selectSkins  = 2; // 选择的皮肤数组
+}
+// 切换英雄
+message TeamChangeHeroS2C {
+    int32          playerId     = 1; // 玩家ID
+    repeated int32 selectHeroes = 2; // 选择的英雄数组（非武道会模式只填充1号位）
+    repeated int32 selectSkins  = 3; // 选择的皮肤数组
+}
+// 队伍开始匹配
+message TeamStartMatchC2S {}
+// 队伍开始匹配
+message TeamStartMatchS2C {
+    int64 startMatchTime = 1; // 开始匹配的时间
+    int32 modeId         = 2; // 模式Id
+    int32 predictCost    = 3; // 预计匹配时长
+}
+// 队伍取消匹配
+message TeamCancelMatchC2S {}
+// 队伍取消匹配
+message TeamCancelMatchS2C {}
+// 重连请求战斗房间数据
+message TeamRequestBattleInfoC2S {}
+// 重连请求战斗房间数据
+message TeamRequestBattleInfoS2C {
+    int32                   playerId     = 1; // 请求则ID
+    int64                   roomId       = 2; // 房间Id
+    BattleStatus            status       = 3; // 当前房间状态
+    GameModel               model        = 4; // 游戏模式
+    GameType                gType        = 5; // 游戏类型
+    int32                   battleModeId = 6; // 匹配类型
+    int64                   randSeed     = 7; // 随机种子
+    string                  address      = 8; // 战斗服地址
+    repeated PlayerGameInfo actorList    = 9; // 玩家列表
+}
+// 离开队伍检测结果
+message TeamCheckLeaveS2C {}
+
+// 重开时间未到
+message TeamReopenTimeArrivedS2C {
+    int32 playerId = 1; // 玩家id
+    int64 endTime  = 2; // 结束时间
+}
+
+// 队伍召集
+message TeamConveneC2S {
+    int32    currPeople   = 1; // 当前人数
+    int32    maxPeople    = 2; // 最大人数
+    int32    textId       = 3; // 组队内容id
+    ChatType cType        = 4; // 频道类型
+    int32    minRankLevel = 5; // 段位下限
+    int32    maxRankLevel = 6; // 段位上限
+    int32    limitCupNum  = 7; // 限制杯数(0为不限）
+}
+
+// 队伍召集
+message TeamConveneS2C {}
+
+// 队伍召集加入
+message TeamConveneJoinC2S {
+    int64                     teamId             = 1;  // 队伍id
+    int32                     tsId               = 2;  // 队伍服务器id
+    GameModel                 model              = 3;  // 游戏模式
+    GameType                  gType              = 4;  // 游戏类型
+    int32                     battleModeId       = 5;  // 匹配类型
+    int32                     minRankLevel       = 6;  // 段位下限
+    int32                     maxRankLevel       = 7;  // 段位上限
+    int32                     limitCupNum        = 8;  // 限制杯数(0为不限）
+    ActivityBattleRecruitData activityBattleData = 13; // 活动赛数据
+}
+
+// 队伍召集加入
+message TeamConveneJoinS2C {}
+
+// 个人开始匹配
+message TeamPersonalStartMatchC2S {
+    GameModel model        = 1; // 游戏模式
+    GameType  gType        = 2; // 游戏类型
+    int32     battleModeId = 3; // 匹配类型
+}
+// 个人开始匹配
+message TeamPersonalStartMatchS2C {
+    int64     teamId       = 1; // 队伍ID
+    GameModel model        = 2; // 游戏模式
+    GameType  gType        = 3; // 游戏类型
+    int32     battleModeId = 4; // 匹配类型
+}
+
+// 个人取消匹配
+message TeamPersonalCancelMatchC2S {}
+// 个人取消匹配
+message TeamPersonalCancelMatchS2C {}
+
+// 是否同意邀请回复
+message TeamAcceptS2C {}
+// 队伍有近期未匹配的人,时间未到
+message TeamNotReadyTimeArrivedS2C {
+    int32  playerId = 1; // 玩家id
+    int64  endTime  = 2; // 结束时间
+    string name     = 3; // 名字
+}
+
+// 战斗区域信息
+message BattleAreInfo {
+    int32          battleArea = 1; // 战斗区域
+    repeated int32 ipList     = 2; // ip
+}
+// 在线的玩家信息
+message TeamGetPlayerInfoC2S {
+    repeated int32 playerId = 1; // 玩家id
+}
+// 在线的玩家信息
+message TeamGetPlayerInfoS2C {
+    repeated PlayerInfo playerInfo = 1; // 在线玩家信息
+}
+
+// 最近一起玩玩家信息
+message TeamRecentPlayerListC2S {}
+// 最近一起玩玩家信息
+message TeamRecentPlayerListS2C {}
+// 队伍准备
+message TeamPrepareS2C {}
+// 设置预先选择数据
+message TeamSelectReserveDataC2S {}
+
+// 设置预先选择数据
+message TeamSelectReserveDataS2C {}
+
+// 设置预先选择数据
+message TeamBroadcastReserveHeroS2C {}
+// 取消预选模式
+message TeamCancelReserveHeroC2S {}
+// 取消预选模式
+message TeamCancelReserveHeroS2C {}
+// 修改形象
+message TeamChangeAppearanceS2C {}
+
+// 队伍开始匹配错误提示，英雄数量不足
+message TeamStartMatchErrS2C {
+    int32             needHeroCnt      = 1; // 需要英雄数量
+    int32             needHeroLevel    = 2; // 需要英雄等级
+    repeated int32    playerId         = 3; // 玩家id
+    repeated int32    errLadderPlayer  = 4; // 段位不匹配玩家
+    repeated int32    errCreditPlayer  = 5; // 信誉分不足的玩家
+    map<int32, int64> errPenaltyPlayer = 6; // 惩罚时间内的玩家
+    map<int32, int32> errHeroPlayer    = 7; // 未开放英雄的玩家Key: 玩家id,value:英雄
+}
+
+// 一键加入，招募快捷加入
+message TeamConveneEasyJoinC2S {
+    repeated TeamConveneJoinC2S teamList = 1; // 请求加入的队伍列表
+}
+
+// 一键加入，招募快捷加入
+message TeamConveneEasyJoinS2C {
+}
+// 准备提示
+message TeamPrepareHintC2S {
+}
+// 准备提示
+message TeamPrepareHintS2C {
+}
+// 更新无效招募队伍
+message TeamUpdateInvalidRecruitS2C {
+    repeated int64 invalidTeamId = 1;
+}
+// 检测是否有效的招募队伍
+message TeamCheckValidRecruitC2S {
+    repeated int64 teamList = 1; // 待检测的队伍列表
+}
+// 检测是否有效的招募队伍
+message TeamCheckValidRecruitS2C {
+    repeated int64 validTeamList = 1; // 有效的队伍列表
+}
+
+// 切换游戏玩法错误提示玩家未解锁该玩法
+message TeamChangeGameTypeErrS2C {
+    repeated int32 playerIdList = 1; // 玩家id列表
+    int32          changeId     = 2; // 需要切换的游戏id
+}
+// 队伍开始匹配错误提示，英雄等级不足
+message TeamStartMatchHeroLevelErrS2C {
+    repeated ErrPlayerLevel errData = 1; // 错误玩家数据
+}
+
+message ErrPlayerLevel {
+    int32          playerId = 1; // 玩家id
+    repeated int32 heroIds   = 2; // 英雄id
+}

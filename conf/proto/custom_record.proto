@@ -1,0 +1,6 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+

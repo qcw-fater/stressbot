@@ -1,0 +1,25 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+//cdn设备信息
+message CDNDivice
+{
+    string  id = 1;           //ID 名称
+    string serverType = 2;          //服务器类型
+    string describe = 3;          //描述
+}
+
+enum UrlType
+{
+    releaseCDN = 0;
+    releaseSerAddr = 1;
+    releasePackAddr = 2;
+    preCDN = 3;
+    preSerAddr = 4;
+    prePackAddr = 5;
+    chanCDN = 6;
+    chanSerAddr = 7;
+    chanPackAddr = 8;
+}

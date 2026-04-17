@@ -1,0 +1,12 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+//收藏品
+message CollectionInfo {
+    int32 id         = 1; // 收藏品配置id
+    int64 cUid       = 2; // 藏品guid
+    int64 updateTime = 3; // 解锁时间
+}
+

@@ -1,0 +1,129 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+import "common.proto";
+
+// 公告类型
+enum NoticeType
+{
+	NT_Normal           = 0;
+	NT_UpdateNotice     = 1;   // 更新公告
+	NT_Activity         = 2;   // 活动，推荐
+	NT_Game             = 3;   // 游戏公告
+	NT_FaceImage        = 4;   // 拍脸图[局内]
+	NT_JoinNotice      	= 5;   // 进入公告
+	NT_LoginNotice      = 6;   // 登录公告
+}
+
+// 公告标签
+enum NoticeLabel
+{
+	NL_Normal           = 0;
+	NL_Version          = 1;   // 版本
+	NL_Community        = 2;   // 社区
+	NL_PreNotice        = 3;   // 公告
+	NL_Activity         = 4;   // 活动
+	NL_New              = 5;   // 最新
+	NL_LimitTime        = 6;   // 限时
+	NL_MatchNotice      = 7;   // 赛事
+}
+
+// 服务器状态
+enum ServerStatus{
+	SS_Normal       = 0;//流畅
+	SS_Hot          = 1;//火爆
+	SS_Maintain     = 2;//维护（默认）
+}
+
+// 服务器标签
+enum ServerFlag{
+	SF_Hide         = 0;//隐藏
+	SF_Normal       = 1;//无标签（默认）
+	SF_Recommend    = 2;//推荐
+	SF_New          = 3;//新服
+}
+
+//公告时间类型
+enum NoticeTimeType{
+	Nt_Empt = 0; // 占位
+	NT_Absolute     = 1;//绝对时间
+	NT_ServerStart = 2; // 开服时间
+	NT_CreateRole = 3; // 创角时间
+
+}
+
+
+// raft节点信息
+message raftNodeInfo
+{
+	string id = 1;
+	string address = 2;
+}
+
+//服务器信息
+
+message ServerInfo
+{
+	int32 	Id	            = 1;  	//服务器id
+	string 	Name	        = 2;    //服务器名字
+	string 	RpcAddr	      	= 3;    //RPC连接地址
+	string 	ExtAddr	      	= 4;    //对外连接地址
+	string 	HttpAddr		= 5;	//http查询地址
+	string 	ServerType	   	= 6;    //服务器类型
+	string 	Version	      	= 7;    //服务器版本
+	int32 	HotUpdate	    = 8;    //热更标识 1:热更中
+	int32 	State	  		= 9;    //服务器状态
+	int32   RaftState       = 10;   //raft节点服务器状态
+	string 	Area	        = 11;    //服务器区域
+	string 	DDOSIp	        = 12;    // DDOSIp
+}
+
+//区服列表信息
+message AreaServerInfo
+{
+	int32 Id                    = 1;//区服ID
+	string Name                 = 2;//区服名字
+	int32 Status				= 3;//区服状态
+	int32 Flag					= 4;//区服标签
+	int64 ServerStartTime       = 5;//开服时间
+	string Channel      		= 6;//渠道列表(json数组）
+	bool IsQueueUp              = 7;//是否排队（默认：否）
+	bool IsUseActivationCode    = 8;//是否启用激活码（默认：否）
+	bool IsRegister				= 9;//是否允许注册（默认：是）
+}
+
+// 公告信息
+message NoticeInfo
+{
+	int64   id                 = 1;         // 公告id
+	string  content            = 2;         // 公告内容，公告描述
+	int64   sort               = 3;         // 排序
+	int64   start              = 4;         // 开始时间
+	int64   stop               = 5;         // 结束时间
+	int64   noticeType         = 6;         // 公告类型
+	string  channel            = 7;         // 渠道限制
+	string  serverList         = 8;         // 区服限制
+	Link    link               = 9;         // 跳转
+	int64   label              = 10;        // 标签
+	string  title              = 11;        // 内容标题
+	string  subTitle           = 12;        // 子标题
+	int64   minLevel           = 13;        // 最低玩家等级
+	int64   maxLevel           = 14;        // 最高玩家等级
+	int64   playerCreateTime   = 15;        // 玩家时间限制
+	string  imageAddr          = 16;        // 图片地址
+	string  multiTitle         = 17;        // 多语言标题
+	string  multiContent       = 18;        // 多语言内容
+	string  multiImg           = 19;        // 多语言图片
+	NoticeTimeType 	timeType   = 20; 				// 时间类型
+	int32   duration           = 21; 					// 持续时间（小时）
+	int64 ContentType 				 = 22; // 内容类型  1文字  2图片
+}
+
+// 服务器负载数据
+message ServerLoadInfo {
+	int32 onlineCount         = 1;  // 在线人数
+	int32 load        		  = 2;  // 负载
+	string  serverType        = 3;  // 服务器类型
+	map<int32,int32> areaLoad = 4;  // 区服加载人数
+}

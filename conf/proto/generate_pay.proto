@@ -1,0 +1,82 @@
+syntax             = "proto3";
+option  go_package = ".;pb";
+package Game;
+import "custom_pay.proto";
+import "common.proto";
+
+// Recharge.csv
+message RechargeStruct {
+    int32                 ID                  = 1; // 直购ID
+    string                Icon                = 2; // 档位图标
+    repeated RewardConfig FirstCharge         = 3; // 首充赠送
+    repeated RewardConfig Present             = 4; // 额外赠送
+    int32                 SortId              = 5; // 排序id
+    string                UIEffectAnimation   = 6; // UI特效动画
+    string                ProductNameMultiLan = 7; // 产品名
+}
+
+// CashGoods.csv
+message CashGoodsStruct {
+    string                ID               = 1;  // SDK商品ID
+    int32                 RechargeID       = 2;  // 直购id
+    repeated RewardConfig Item             = 3;  // 道具内容
+    int32                 GoodsValue       = 4;  // 商品价值
+    float                 PriceCNY         = 5;  // 人民币价格
+    float                 PriceTWD         = 6;  // 台币价格
+    float                 PriceUSD         = 7;  // 台币价格
+    float                 PriceHDK         = 8;  // 港币价格
+    int32                 DiscountRecharge = 9;  // 直购折扣
+    int32                 CouponID         = 10; // 代金券id
+    int32                 CouponNum        = 11; // 代金券数量
+}
+
+// 通知客户端充值成功
+message PaySucceedS2C {
+    map<int32, int32>  firstReward   = 1; // key:天数,value: 首冲奖励标识 0 未达成 1首冲奖励未领取 2 已领取首冲奖励
+    map<string, int32> payBuyCount   = 2; // 充值购买记录 key:商品id，value: 购买次数
+    int32              totalPayMoney = 3; // 累计充值价值
+}
+
+// 客户端打开充值商店
+message PayShopC2S {}
+// 客户端打开充值商店
+message PayShopS2C {
+    repeated RechargeStruct  RechargeConfigData  = 1;
+    repeated CashGoodsStruct CashGoodsConfigData = 2;
+}
+// 领取首冲奖励
+message PayGetFirstRewardC2S {
+    int32 day = 1; // 领取第X天的奖励
+}
+// 领取首冲奖励
+message PayGetFirstRewardS2C {
+    int32 day = 1; // 领取第X天的奖励
+    int32 firstReward =
+        2;         // 首冲奖励标识 0 未达成 1首冲奖励未领取 2 已领取首冲奖励
+}
+
+// 领取月卡奖励
+message PayGetMonthCardRewardC2S {
+    bool monthCard   = 1; // 领取月卡奖励
+    bool foreverCard = 2; // 领取终身卡奖励
+}
+// 领取月卡奖励
+message PayGetMonthCardRewardS2C {
+    int64               lastGetMonthReward   = 1; // 上次领取月卡每日奖励时间
+    int64               lastGetForeverReward = 2; // 上次领取终身卡每日奖励时间
+    repeated ShowReward rewardList           = 3; // 奖励数据
+}
+// 更新月卡数据
+message PayUpdateMonthCardS2C {
+    playerPayMonthCard data        = 1; // 月卡数据
+    playerPayMonthCard foreverData = 2; // 终身卡数据
+}
+// 兑换码能否使用
+message PayRedeemCodeCheckC2S {
+    string code = 1; // 兑换码
+}
+// 兑换码能否使用
+message PayRedeemCodeCheckS2C {
+    string code  = 1; // 兑换码
+    bool   check = 2; // true:可以使用 false:不能使用
+}

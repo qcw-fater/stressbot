@@ -1,0 +1,445 @@
+syntax             = "proto3";
+option  go_package = ".;pb";
+package Game;
+import "player.proto";
+import "enum_battle.proto";
+import "enum.proto";
+import "generate_battle.proto";
+import "custom_team.proto";
+import "custom_hero.proto";
+
+// 创建房间
+message RoomCreateRoomC2S {}
+
+// 创建房间
+message RoomCreateRoomS2C {
+    int64                   roomId          = 1; // 房间id
+    GameModel               model           = 2; // 游戏模式
+    GameType                gType           = 3; // 游戏类型
+    int32                   modeId          = 4; // 战斗模式id
+    repeated PlayerGameInfo members         = 5; // 成员数据
+    int32                   CaptainPlayerId = 6; // 房主id
+    repeated int32          modeIds         = 7; // 战斗模式id列表
+}
+
+// 交换位置请求
+message RoomTranspositionRequestC2S {
+    int32 targetType  = 1; // 目标位置类型 1：参战单位 2：观战单位
+    int32 targetIndex = 2; // 目标位置
+    int32 lookIndex   = 3; // 观战席位置
+}
+// 交换位置请求
+message RoomTranspositionRequestS2C {
+    int32 targetType  = 1; // 目标位置类型 1：参战单位 2：观战单位
+    int32 targetIndex = 2; // 目标位置
+    int32 lookIndex   = 3; // 观战席位置
+}
+
+// 踢出玩家
+message RoomKickOutC2S {
+    int32 index            = 1; // 被踢出队伍的成员index
+    int32 kickLookPlayerId = 2; // 踢出观战席上的玩家id
+}
+
+// 踢出玩家
+message RoomKickOutS2C {
+    int32 quitIndex    = 1; // 踢出房间的成员index
+    int32 quitPlayerId = 2; // 踢出房间的玩家id
+}
+
+// 退出房间
+message RoomQuitC2S {}
+// 退出房间
+message RoomQuitS2C {
+    int32          quitIndex       = 1; // 退出房间的成员index
+    int32          captainPlayerId = 2; // 队长的玩家id
+    int32          quitPlayerId    = 3; // 退出房间的玩家id
+    repeated int32 modelIds        = 4; // 战斗模式id列表
+}
+
+// 玩家加入房间
+message RoomJoinS2C {
+    PlayerGameInfo jsonPlayer = 1; // 加入的玩家数据
+    int32          lookIndex  = 2; // 观战席index
+}
+
+// 房间数据
+message RoomDataS2C {
+    repeated PlayerGameInfo playerList     = 1; // 房间内的玩家列表
+    LadderDraftType         draftType      = 2; // 征召类型
+    repeated PlayerGameInfo lookPlayerList = 3; // 观战席玩家列表
+    int32                   modeId         = 4; // 模式id
+    GameType                gType          = 5; // 游戏类型
+    repeated int32          affix          = 6; // 词缀
+}
+
+// 开始游戏
+message RoomStartC2S {}
+
+// 开始游戏
+message RoomStartS2C {
+    int64             overTime      = 1; // 选择英雄技能结束时间
+    int32             errParameter  = 2; // 错误参数
+    map<int32, int32> errHeroPlayer = 3; // 未开放英雄的玩家Key: 玩家index,value:英雄
+}
+
+// 添加机器人
+message RoomAddRobotC2S {
+    //    CampType  camp = 1;
+    int32 index = 1; // 机器人位置
+}
+// 添加机器人
+message RoomAddRobotS2C {}
+
+// 通知交换位置消息
+message RoomTranspositionNoticeS2C {
+    int32 sourcePlayerId = 1;
+}
+// 同意交换位置
+message RoomTranspositionAgreeC2S {
+    int32 sourcePlayerId = 1;
+}
+
+// 玩家加入房间成功
+message RoomSucceedJoinS2C {
+    GameModel               model           = 1;
+    GameType                gType           = 2;
+    int32                   battleModeId    = 3;
+    repeated PlayerGameInfo playerList      = 4; // 房间内的玩家列表
+    int32                   captainPlayerId = 5; // 队长id
+    int64                   roomId          = 6; // 房间id
+    bool                    isDraft         = 7; // 是否征召
+    repeated PlayerGameInfo lookPlayerList  = 8; // 观战列表
+    repeated int32          affix           = 9; // 词缀
+}
+// 玩家点赞
+message RoomPraiseC2S {
+    int32 targetPlayerIndex = 1; // 目标index
+    int64 battleId = 2; // 本场战斗id
+}
+// 玩家点赞
+message RoomPraiseS2C {
+    int32 sourcePlayerId      = 1;  // 来源角色id
+    int32 sourceCampType      = 2;  // 来源阵营
+    bool  sourceIsMvp         = 3;  // 来源是否mvp
+    int32 sourcePlayerIndex   = 4;  // 来源角色index
+    int32 targetPlayerId      = 5;  // 目标角色
+    int32 targetCampType      = 6;  // 目标阵营
+    bool  targetIsMvp         = 7;  // 目标是否mvp
+    int32 gameType            = 8;  // 游戏类型
+    int32 targetPlayerIdIndex = 9;  // 目标角色index
+    bool  targetIsDieMax      = 10; // 目标是否死亡最多
+    bool targetIsSameTeam    = 11; // 是否同一队伍  判断野人点赞的
+    int64 battleId           = 12; // 战斗id
+}
+// 检测加入自定义房间
+message RoomCheckJoinRoomS2C {}
+// 离开自定义房间检测
+message RoomCheckLeaveRoomS2C {}
+// 拒绝交换位置
+message RoomTranspositionRefuseC2S {
+    int32 sourcePlayerId = 1; // 请求交换者id
+}
+// 拒绝交换位置
+message RoomTranspositionRefuseS2C {
+    int32 PlayerId = 1; // 请求交换者id
+}
+// 自定义房间挂起
+message RoomHongOnStartC2S {}
+// 自定义房间挂起
+message RoomHongOnStartS2C {
+    int64 overTime = 1; // 挂起结束时间
+}
+// 自定义房间结束挂起
+message RoomHongOnOverC2S {}
+// 自定义房间结束挂起
+message RoomHongOnOverS2C {
+    int32 playerId = 1; // 结束挂起玩家id
+}
+// 同意交换位置
+message RoomTranspositionAgreeS2C {
+    int32 SourcePlayerId = 1; // 来源玩家id
+}
+
+// 想玩分路
+message RoomWantRoadC2S {}
+// 想玩分路
+message RoomWantRoadS2C {}
+// 切换开房间模式
+message RoomSwitchModeC2S {
+    bool            isDraft   = 1; // 是否征召模式(弃用)
+    LadderDraftType DraftType = 2; // 自定义房间征召类型
+}
+// 切换开房间模式
+message RoomSwitchModeS2C {
+    bool            isDraft   = 1; //(弃用)
+    LadderDraftType DraftType = 2; // 自定义房间征召类型
+}
+// 房间内超时
+message RoomTimeoutS2C {
+    BL_REASON TimeoutReason = 1; // 超时原因
+    int64     roomId        = 2; // 超时的房间id
+}
+
+message roomEasyUnitInfo {
+    int32          index    = 1; // 索引
+    int32          playerId = 2; // 玩家id
+    repeated int32 heroIds  = 3; // 英雄id
+}
+
+// 最终调整阶段
+message RoomFinalConfirmationS2C {
+    int64 roomStatusOverTime = 1; // 最终调整阶段结束时间
+}
+
+// 房间状态变化
+message RoomStateUpdateS2C {
+    int32 roomStatus = 1; // 房间状态
+    int64 roomId     = 2; // 房间id
+}
+
+// 房间异常退出
+message RoomExitSeason {
+    BL_REASON exitType = 1; // 退出原因
+    int64     roomId   = 2; // 房间id
+}
+
+// 裁判位退出观战
+message RoomLookQuitS2C {}
+// 结算举报(TCP)
+message RoomReportS2C {
+    repeated BattleReportInfo BattleReportInfoList = 1; // 结算举报的List
+}
+
+// 取消锁定英雄
+message RoomCancelLockHeroC2S {
+    int32 heroIndex = 1; // 武道会，英雄顺序索引
+}
+
+// 取消锁定英雄
+message RoomCancelLockHeroS2C {
+    int32 index     = 1; // 取消锁定的玩家index
+    int32 heroIndex = 2; // 武道会，英雄顺序索引
+}
+
+// 自定义房间战斗结束返回到房间，玩家结束置灰状态
+message RoomBackRoomC2S {}
+// 自定义房间战斗结束返回到房间，玩家结束置灰状态
+message RoomBackRoomS2C {}
+// 快速邀请加入房间
+message RoomFastInviteJoinRoomC2S {}
+// 切换游戏玩法
+message RoomChangeGameTypeC2S {
+    GameType changeType = 1; // 需要切换的游戏类型
+}
+// 切换游戏玩法
+message RoomChangeGameTypeS2C {
+    int32    playerId = 1; // 玩家ID
+    GameType gType    = 2; // 游戏类型
+    int32    modeId   = 3; // 模式Id
+}
+// 切换游戏模式Id
+message RoomChangeGameModeIdC2S {
+    int32 modeId = 1; // 模式Id
+}
+// 切换游戏模式Id
+message RoomChangeGameModeIdS2C {
+    int32 modeId = 1; // 模式Id
+}
+
+// 切换英雄
+message RoomChangeHeroC2S {
+    repeated int32 selectHeroes = 1; // 选择的英雄数组（非武道会模式只填充1号位）
+    repeated int32 selectSkins  = 2; // 选择的皮肤数组
+}
+// 切换英雄
+message RoomChangeHeroS2C {
+    int32          playerId     = 1; // 玩家ID
+    repeated int32 selectHeroes = 2; // 选择的英雄数组（非武道会模式只填充1号位）
+    repeated int32 selectSkins  = 3; // 选择的皮肤数组
+}
+// 房间成员准备
+message RoomPrepareC2S {
+    bool isPrepare = 1; // 是否准备 true准备, false取消准备
+}
+// 房间成员准备
+message RoomPrepareS2C {} // 改变准备状态
+message RoomChangeReadyStateC2S {}
+// 改变准备状态
+message RoomChangeReadyStateS2C {}
+
+// 选择皮肤
+message RoomSelectSkinC2S {
+    int32 skinId = 1; // 皮肤id
+}
+// 选择皮肤
+message RoomSelectSkinS2C {
+    int32 skinId = 1; // 皮肤id
+}
+// 广播当前行动步骤
+message RoomStepS2C {
+    int32          step        = 1; // 当前行动步骤
+    repeated int32 actionIndex = 2; // 当前行动者索引
+    int64          actionTime  = 3; // 当前行动者开始时间
+    int64          overTime    = 4; // 当前行动者超时时间
+}
+
+// 广播禁用数据
+message RoomBroadcastBanS2C {
+    repeated MemberBanHero banHeroList = 1; // 禁用英雄列表
+}
+// 选择英雄(MainTCP)
+message RoomSelectHeroC2S {
+    repeated int32 selectHeroes = 1; // 选择英雄
+    int32          heroIndex    = 2; // 武道会，英雄顺序索引
+    repeated int32 selectSkins  = 3; // 皮肤id，0默认皮肤
+}
+// 选择英雄(MainTCP)
+message RoomSelectHeroS2C {
+    int32          index        = 1; // 玩家索引
+    repeated int32 SelectHeroes = 2; // 玩家选择英雄ID
+    repeated int32 SelectSkins  = 3; // 英雄皮肤
+    int32          heroIndex    = 4; // 武道会，英雄顺序索引
+}
+// 广播选择英雄(MainTCP)
+message RoomBroadcastHeroS2C {
+    repeated BattleBroadcastHeroS2C broadcastHeroList = 1; // 英雄列表
+}
+// 锁定英雄(MainTCP)
+message RoomConfirmHeroC2S {}
+// 锁定英雄(MainTCP)
+message RoomConfirmHeroS2C {
+    int32          index        = 1; // 玩家索引
+    repeated int32 SelectHeroes = 2; // 玩家选择英雄ID
+    repeated int32 SelectSkins  = 3; // 英雄皮肤
+}
+// 禁用英雄
+message RoomBanHeroC2S {
+    int32 heroId    = 1; // ban英雄
+    bool  IsConfirm = 2; // 是否确认禁用
+}
+// 禁用英雄
+message RoomBanHeroS2C {
+    int32 heroId    = 1; // ban英雄
+    bool  IsConfirm = 2; // 是否确认禁用
+}
+// 请求帮抢
+message RoomReqGrabC2S {
+    int32 reqHeroId = 1; // 请求英雄id
+    int32 reqSkinId = 2; // 请求皮肤id
+}
+// 请求帮抢
+message RoomReqGrabS2C {
+    int32 reqHeroId = 1; // 请求英雄id
+    int32 reqSkinId = 2; // 请求皮肤id
+    int32 reqIndex  = 3; // 请求玩家索引
+}
+// 帮抢
+message RoomGrabC2S {
+    int32 reqPlayerId = 1; // 请求玩家id
+    int32 reqHeroId   = 2; // 请求英雄
+}
+// 帮抢
+message RoomGrabS2C {
+    int32 reqHeroId = 1; // 请求方英雄
+    int32 reqSkinId = 2; // 请求方皮肤id
+    int32 reqIndex  = 3; // 帮抢后请求方玩家索引
+    int32 grabIndex = 4; // 帮抢后帮抢方玩家索引
+}
+// 取消帮抢
+message RoomCancelGrabC2S {}
+// 取消帮抢
+message RoomCancelGrabS2C {
+    int32 index = 1; // 取消帮抢玩家索引
+}
+// 请求帮抢广播
+message RoomReqGrabBroadcastS2C {
+    int32 reqHeroId = 1; // 请求英雄id
+    int32 reqSkinId = 2; // 请求皮肤id
+    int32 reqIndex  = 3; // 请求玩家索引
+}
+// 帮抢广播
+message RoomGrabBroadcastS2C {
+    int32 reqHeroId   = 1; // 请求方英雄
+    int32 reqSkinId   = 2; // 请求方皮肤id
+    int32 reqIndex    = 3; // 帮抢后请求方玩家索引
+    int32 grabIndex   = 4; // 帮抢后帮抢方玩家索引
+    int32 reqPlayerId = 5; // 请求方玩家id
+}
+// 取消帮抢广播
+message RoomCancelGrabBroadcastS2C {
+    int32 index = 1; // 取消帮抢玩家索引
+}
+// 房间选择英雄异常
+message RoomSelectHeroErrS2C {
+    map<int32, SelectErrReason> selectErrReason = 1; // 选择英雄异常原因
+    teamRoomInfo                teamData        = 2; // 队伍信息
+}
+
+message SelectErrReason {
+    int32     playerId   = 1;
+    string    playerName = 2;
+    BL_REASON reason     = 3; // 返回大厅原因
+}
+// 装备潜能
+message RoomEquipmentTalentS2C {
+    int32          playerId    = 1; // 玩家id
+    int32          heroId      = 2; // 英雄id
+    repeated int32 equipTalent = 3; // 装备天赋
+}
+// 自定义房间选择词缀
+message RoomAffixC2S {
+    repeated int32 affix = 1; // 词缀
+}
+// 自定义房间选择词缀
+message RoomAffixS2C {
+    repeated int32 affix = 1; // 房间当前词缀
+}
+// 推送机器人属性
+message RoomRobotAttrBroadcastS2C {
+    map<int32, playerBattleAttr> battleAttr = 1; // 机器人属性
+}
+// 准备提示
+message RoomPrepareHintC2S {}
+// 准备提示
+message RoomPrepareHintS2C {}
+
+// 自定义房间房主给机器人选择英雄
+message RoomRobotSelectHeroC2S {
+    int32          robotIndex = 1; // 机器人索引
+    repeated int32 heroId     = 2; // 英雄id
+}
+
+// 自定义房间房主给机器人选择英雄
+message RoomRobotSelectHeroS2C {
+    int32          robotIndex = 1; // 机器人索引
+    repeated int32 heroId     = 2; // 英雄id
+    repeated int32 skinId     = 3; // 皮肤id
+}
+// 房间内战绩发送
+message RoomStandingsC2S {
+    int32          type = 1; // 战绩类型
+    repeated int32 para = 2; // 战绩参数
+}
+
+// 房间内战绩发送(广播)
+message RoomStandingsS2C {
+    int32          type = 1; // 战绩类型
+    repeated int32 para = 2; // 战绩参数
+}
+// 推送英雄数据
+message RoomHeroUpdateDataS2C {
+    int32    playerId = 1; // 玩家id
+    int32    heroId   = 2; // 英雄id
+    HeroInfo heroData = 3; // 英雄数据
+}
+// 推送玩家数据
+message RoomPlayerUpdateDataS2C {
+    int32      playerId   = 1; // 玩家id
+    PlayerBase playerData = 2; // 玩家数据
+}
+//推送英雄选择异常
+message RoomHeroValidityS2C
+{
+  map<int32, int32> errHeroPlayer = 1; // 未开放英雄的玩家Key: 玩家index,value:英雄
+}

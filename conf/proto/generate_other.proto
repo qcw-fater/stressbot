@@ -1,0 +1,68 @@
+syntax            = "proto3";
+option go_package = ".;pb";
+package Game;
+import "enum.proto";
+import "custom_friend.proto";
+
+message OtherPlayerSetting {
+    int32 index                    = 1;
+    int32 value                    = 2;
+    int32 heroId                   = 3;
+    SettingOperateType operateType = 4;  // 操作类型
+}
+
+// 玩家设置数据
+message OtherPlayerSettingC2S {
+    repeated OtherPlayerSetting data = 1;
+}
+
+// 玩家设置数据
+message OtherPlayerSettingS2C {
+    repeated OtherPlayerSetting data = 1;
+}
+// 更改玩家设置类型
+message OtherPlayerChangeSettingTypeC2S {
+    int32 heroId           = 1;
+    SettingOperateType old = 2;  // 操作类型
+    SettingOperateType new = 3;  // 操作类型
+}
+// 更改玩家设置类型
+message OtherPlayerChangeSettingTypeS2C {
+    int32 heroId           = 1;
+    SettingOperateType old = 2;  // 操作类型
+    SettingOperateType new = 3;  // 操作类型
+}
+//获取玩家的战斗定制数据
+message OtherPlayerGetCombatCustomizationC2S
+{
+}
+//获取玩家的战斗定制数据
+message OtherPlayerGetCombatCustomizationS2C
+{
+}
+//购买玩家的战斗定制数据
+message OtherPlayerBuyCombatCustomizationC2S
+{
+}
+//购买玩家的战斗定制数据
+message OtherPlayerBuyCombatCustomizationS2C
+{
+}
+//更新玩家的战斗定制数据
+message OtherPlayerUpdateCustomizationS2C
+{
+}
+//增加匹配黑名单
+message OtherAddMatchBlackC2S
+{
+  int32 playerId  =1;
+  string name = 2;
+  int64 battleId = 3;
+  int32 index = 4;
+}
+
+//增加匹配黑名单
+message OtherAddMatchBlackS2C
+{
+  repeated matchBlack mbList = 1; // 匹配黑名单列表
+}

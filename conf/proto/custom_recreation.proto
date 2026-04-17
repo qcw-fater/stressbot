@@ -1,0 +1,20 @@
+syntax             = "proto3"; //[proto2|proto3]
+option  go_package = ".;pb";
+package Game;
+
+// 娱乐赛基础信息
+message RecreationBase {
+    int32                       dayLimitScore = 1; // 每日通过战斗获得的战斗积分上限
+    int32                       score         = 2; // 总积分 总积分为各玩法积分之和，各玩法积分减少，总积分跟随减少
+    int32                       level         = 3; // 等级, 由每个玩法的等级累加得到
+    map<int32, RecreationScore> playingModel  = 4; // key：GameType玩法积分和等级
+    int32                       meSeason      = 5; // 自己所在赛季,参与时赋值
+    int32                       maxScore      = 6; // 当前赛季最大总积分 总积分为各玩法积分之和，各玩法积分减少，总积分跟随减少
+    int32                       currSeason    = 7; // 当前赛季
+    int64                       firstWinTime  = 8; // 首胜时间戳 秒
+}
+
+message RecreationScore {
+    int32 score = 1; // 积分
+    int32 level = 2; // 等级
+}

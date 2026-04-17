@@ -1,0 +1,87 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+import "custom_mail.proto";
+
+//获取邮件列表
+message MailGetListC2S
+{
+}
+
+//获取邮件列表
+message MailGetListS2C
+{
+    repeated MailBase mails = 1;     //玩家邮件
+    int32 friendMailGetCount = 2;    //好友邮件剩余领取次数
+}
+
+
+//获取邮件详细数据
+message MailGetDetailDataC2S
+{
+    int64 gid = 1;		        //邮件gid
+}
+//获取邮件详细数据
+message MailGetDetailDataS2C
+{
+    Mail mail = 1;              //邮件详细数据
+}
+
+
+
+//删除邮件
+message MailDeleteC2S
+{
+    repeated int64 gids = 1;
+}
+//删除邮件
+message MailDeleteS2C
+{
+    repeated int64 gids = 1;		//邮件gid
+}
+
+
+
+//领取附件
+message MailReceiveAttachmentC2S
+{
+    repeated int64 gids = 1;		//邮件gid
+    bool isdelete       =2 ;
+}
+
+//领取附件
+message MailReceiveAttachmentS2C
+{
+    repeated int64 gids = 1;		//领取成功邮件gid
+    repeated int64 delGids = 2;	    //过期不存在的邮件gid
+    int32 friendMailGetCount = 3;   //好友邮件剩余领取次数
+    repeated int64 failComicGids = 4;		//无法领取的带cos的邮件
+}
+
+
+//阅读邮件
+message MailReadC2S
+{
+    int64 gid = 1;		//邮件gid
+}
+//阅读邮件
+message MailReadS2C
+{
+    int64 gid = 1;		//邮件gid
+}
+
+
+//通知新邮件
+message MailNotifyNewS2C
+{
+    MailBase mails = 1;          //玩家邮件
+    int64 deleteGid = 2;         //删除邮件Gid
+}
+
+
+//通知撤回邮件
+message MailNotifyRecallS2C
+{
+    int32 CfgId = 1;             //邮件配置Id
+}
+

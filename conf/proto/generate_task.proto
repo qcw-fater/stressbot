@@ -1,0 +1,50 @@
+syntax             = "proto3";
+option  go_package = ".;pb";
+package Game;
+import "custom_task.proto";
+
+// 任务更新消息
+message TaskUpdateS2C {
+    repeated TaskInfo updateTaskList = 1; // 更新任务列表,包含新增和更新任务信息
+    repeated int64    delTaskList    = 2; // 删除任务列表
+}
+// 玩家完成任务领取奖励
+message TaskGetRewardC2S {
+    repeated int64 dynamicTaskId = 1; // 任务动态ID
+}
+// 玩家完成任务领取奖励
+message TaskGetRewardS2C {}
+
+// 玩家领取ip成就奖励
+message TaskGetAchievementRewardC2S {
+    int32 ipId  = 1; // 游戏ipId
+    int32 level = 2; // 领取的宝箱等级
+}
+
+// 玩家领取ip成就奖励
+message TaskGetAchievementRewardS2C {
+    map<int32, int32> IpAchievementReward = 1; // IP宝箱已领取标记
+}
+// 玩家领取日常任务奖励
+message TaskGetDailyRewardC2S {
+    repeated int32 getRewardList = 1; // 领取日常任务活跃奖励列表
+}
+// 玩家领取日常任务奖励
+message TaskGetDailyRewardS2C {
+    int32 dailyTaskRewardMask = 1; // 日常任务已领取掩码标记
+}
+
+// 玩家领取成就任务奖励
+message TaskGetAchievementTaskRewardC2S {
+    repeated int32 achievementId = 1; // 成就id
+}
+
+// 玩家领取成就任务奖励
+message TaskGetAchievementTaskRewardS2C {
+    map<int32, int64> newAchievementTasks = 1; // 新成就任务列表 key:achievementId value:finishTime
+}
+//推送成就数据
+message TaskGetAchievementS2C
+{
+    PlayerAchievementModel achievementInfo = 1; // 成就数据
+}

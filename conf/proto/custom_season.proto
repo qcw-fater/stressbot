@@ -1,0 +1,25 @@
+syntax             = "proto3";
+option  go_package = ".;pb";
+package Game;
+
+import "custom_recreation.proto";
+
+// 赛季保存的数据
+message SeasonRecord {
+    LadderSeasonRecord     ladderRecord     = 1;
+    RecreationSeasonRecord recreationRecord = 2;
+}
+
+// 排位记录
+message LadderSeasonRecord {
+    int32 ladderLevel = 1; // 段位等级
+    int32 starNum     = 2; // 星星数量
+    int32 maxLadder   = 3; // 历史最高
+}
+
+// 娱乐记录
+message RecreationSeasonRecord {
+    int32                       score        = 1; // 总积分
+    int32                       level        = 2; // 等级
+    map<int32, RecreationScore> playingModel = 3; // key：GameType玩法积分和等级
+}

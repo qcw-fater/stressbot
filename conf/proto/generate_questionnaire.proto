@@ -1,0 +1,22 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+
+import "custom_questionnaire.proto";
+//通知新调查问卷
+message QuestionnaireNotifyNewS2C
+{
+    QuestionnaireData data = 1;
+}
+
+//完成调查问卷
+message QuestionnaireFinishedC2S
+{
+  int32 id = 1; //问卷Id
+}
+//完成调查问卷
+message QuestionnaireFinishedS2C
+{
+    int32 id = 1; //问卷Id
+    int32 doingId = 2; // 进行中的问卷Id
+}

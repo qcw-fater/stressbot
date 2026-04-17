@@ -1,0 +1,51 @@
+syntax            = "proto3";
+option go_package = ".;pb";
+package Game;
+
+//导入枚举
+import "enum_battle.proto";
+import "enum.proto";
+//导入玩家数据
+import "player.proto";
+import "generate_room.proto";
+
+//匹配成功
+message MatchSucceedS2C {
+    int64    				session                  = 1;  // 当前房间session
+    GameType 				gType                    = 2;  // 游戏类型
+    int32    				modeId                   = 3;  // 匹配类型
+    int64    				overTime                 = 4;  // 阶段结束时间
+    string   				battleArea               = 5;  // 战斗区域
+    repeated PlayerGameInfo actorList 				 = 6;  // 玩家列表
+    GameModel               model     				 = 7;  // 游戏模式
+    LadderDraftType         DraftType 				 = 8;  // 征召类型
+    RoomStatus              status    				 = 9;  // 房间当前阶段
+    repeated int32 			affix              		 = 10; // 词缀
+}
+
+//确认准备
+message MatchWaitPrepareC2S {
+}
+//确认准备
+message MatchWaitPrepareS2C {
+    int32    index        	= 1; //玩家索引
+    int32    modeId 		= 2; //匹配模式
+    CampType camp         	= 3; //阵营
+}
+//准备超时
+message MatchPrepareTimeoutS2C {
+    map<int32, CampType> 	notPrepare  = 1; // 未准备的玩家列表,key:玩家id value：阵营
+    int32             		robotNumber = 2; // 机器人个数
+}
+//匹配成功,进入房间
+message MatchEnterRoomS2C {
+	int64 					roomId		 = 1;	// 房间Id
+	RoomStatus              status       = 2; 	// 房间当前状态
+    LadderDraftType         DraftType    = 3;  	// 征召类型
+	int64                   overTime     = 4; 	// 倒计时
+	RoomStepS2C				stepData	 = 5;
+}
+//获取战斗服错误
+message MatchGetBattleErrorS2C {}
+//匹配服通知
+message MatchNoticeS2C {}

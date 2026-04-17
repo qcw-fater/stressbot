@@ -1,0 +1,129 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+
+// 单个铭文数据
+message InscriptionInfo
+{
+    int32 inscriptionId = 1; // 配置id
+    int32 number        = 2; // 铭文数量
+}
+
+//单个插槽数据
+message InscriptionSlot {
+    int32 site            = 1; // 位置
+    int32 inscriptionType = 2; // 铭文类型
+}
+
+// 单个铭文页数据
+message InscriptionPage
+{
+    string                     name                = 1;
+    repeated InscriptionSlot   inscriptionSlotList = 2;  //只保存有效数据
+}
+
+//玩家镶嵌铭文
+message InscriptionSaveC2S
+{
+    int32           pageIndex               = 1;
+    InscriptionSlot newInscriptionSlotData  = 2;
+}
+
+//玩家镶嵌铭文
+message InscriptionSaveS2C
+{
+    int32           pageIndex               = 1;
+    InscriptionSlot newInscriptionSlotData  = 2;
+}
+
+//玩家解锁铭文卡槽
+message InscriptionSlotC2S
+{
+    int32  slotIndex = 1;
+}
+
+//玩家解锁铭文卡槽
+message InscriptionSlotS2C
+{
+    int32  slotIndex = 1;
+}
+
+//玩家选择铭文页
+message InscriptionSelectPageC2S
+{
+    int32 pageIndex = 1;
+}
+
+//玩家选择铭文页
+message InscriptionSelectPageS2C
+{
+    int32 pageIndex = 1;
+}
+
+//铭文页解锁
+message InscriptionPageUnlockC2S
+{
+}
+
+//铭文页解锁
+message InscriptionPageUnlockS2C
+{
+}
+
+//一键拆卸
+message InscriptionEaseDownC2S
+{
+    int32 pageIndex = 1;
+}
+
+//一键拆卸
+message InscriptionEaseDownS2C
+{
+    int32 pageIndex = 1;
+}
+
+message InscriptionUpLevelInfo{
+    int32 inscriptionId = 1;
+    int32 targetLevel   = 2; // 目标等级
+    int32 number        = 3; // 个数
+}
+
+//铭文升级
+message InscriptionLevelUpC2S
+{
+    repeated InscriptionUpLevelInfo  upLevelData = 1;
+}
+
+//铭文升级
+message InscriptionLevelUpS2C
+{
+    repeated InscriptionInfo  newData = 1;
+}
+
+//铭文重置
+message InscriptionResetC2S
+{
+    int32 inscriptionId     = 1;
+    int32 number            = 2; // 个数
+}
+
+//铭文重置
+message InscriptionResetS2C
+{
+    repeated InscriptionInfo  changeData = 1;
+}
+
+//铭文页重命名
+message InscriptionPageRenameC2S
+{
+    int32 pageIndex = 1;
+    string name     = 2;
+}
+
+//铭文页重命名
+message InscriptionPageRenameS2C
+{
+    int32 pageIndex = 1;
+    string name     = 2;
+}
+

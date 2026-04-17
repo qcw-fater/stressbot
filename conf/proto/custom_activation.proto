@@ -1,0 +1,67 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+import "common.proto";
+
+// 单个激活码信息
+message ActivationCodeInfo
+{
+    string   activationCode = 1;  // 激活码的编号
+    int64    useTime        = 2;  // 使用时间
+    string   area           = 3;  // 区服列表
+    string   useAccount     = 4;  // 使用账户
+}
+
+// 激活码  使用记录
+message ActivationCodeUseInfo
+{
+    string          activationCode  = 1;  // 激活码的编号
+    map<int32,bool> area            = 2;  // key:区服id value:true
+    int64           useTime         = 3;  // 使用时间
+}
+
+// 激活码作废信息
+message ActivationCodeValid
+{
+    bool valid = 1; // 是否有效
+    int64 endTime   = 2; // 激活码失效时间
+}
+
+// 账户激活码使用记录
+message AccountActivationCodeUseInfo
+{
+    repeated ActivationCodeUseInfo UseRecord = 1; // 使用记录
+}
+
+// 单个礼包码数据
+message GiftCodeInfo{
+    int64   useTime     = 1;
+    int32   usePlayerId = 2; // 使用玩家
+}
+
+// 礼包码批次信息
+message GiftCodeBatchInfo {
+    int32                   minLevel        = 1;  // 最低等级
+    int32                   maxLevel        = 2;  // 最高等级
+    map<int32,bool>         area            = 3;  // 区服
+    map<int32,bool>         channel         = 4;  // 渠道
+    int64                   createTime      = 5;  // 创建时间
+    int64                   endTime         = 6;  // 结束时间
+    repeated  RewardConfig  rewardList      = 7;  // 奖励列表
+    int32                   limitCount      = 8;  // 次数限制
+    int64                   playerTime      = 9;  // 角色创建时间
+    int32                   giftCodeType    = 10; // 礼包码类型 普通礼包码  通用礼包码
+    int32                   group           = 11; // 分组
+    bool                    valid           = 12; // 是否有效, true：有效 false：作废
+}
+
+// 玩家礼包码使用记录
+message PlayerUseGiftInfo {
+    string giftCode   = 1;  // 礼包码
+    int32  batchId    = 2;  // 批次编号
+    int64  useTime    = 3;  // 使用时间
+    int32  group      = 4;  // 分组
+}
+

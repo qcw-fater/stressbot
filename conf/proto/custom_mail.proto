@@ -1,0 +1,93 @@
+syntax = "proto3";  //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+import "enum.proto";
+import "player.proto";
+import "custom_item.proto";
+import "common.proto";
+import "custom_credit.proto";
+
+enum ReportMailType {
+  RMT_Accept = 0; // 举报受理
+  RMT_Verify = 1; // 举报核实
+  RMT_Notify = 2; // 违规通知
+  RMT_Notify_First = 3; // 首次违规通知
+}
+
+// 邮件举报信息
+message ReportMailInfo {
+    int32 reportId          = 1;  // 举报id
+    int64 battleId          = 2;  // 战斗id
+    int32 playerId          = 3;  // 举报玩家id
+    int32 tPlayerId         = 4;  // 被举报玩家id
+    repeated AddCreditRecordNew record = 5; // 违规信息
+    int64 battleEndTime = 6; // 本场战斗结束时间
+    int64 reportTime = 7; // 举报时间
+    string tPlayerName = 8; // 被举报玩家名称
+    ReportMailType typeId = 9; // 举报邮件小类型
+    int32 moralityScore = 10; // 当前信誉分
+}
+message MailParam {
+    MailParamsType type = 1;
+    string param        = 2;
+}
+
+//邮件多语言里面的替换参数
+message MailLanguageParams {
+  int32 mutiId = 1; // 多语言id
+  repeated string params = 2; // 多语言需要替换的参数
+}
+
+// 邮件详细数据
+message Mail {
+    int64 mailUid                  = 1;   // 邮件Id
+    int32 cfgId                    = 2;   // 邮件配置id
+    MailType mailType              = 3;   // 邮件类型
+    int64 time                     = 4;   // 邮件发送时间
+    string title                   = 5;   // 邮件标题
+    string content                 = 6;   // 邮件内容
+    int32 mailSkin                 = 7;   // 邮件皮肤
+    repeated Item attachments      = 8;   // 附件
+    MailState state                = 9;   // 邮件状态,1未读2已读 3 已读已领取
+    PlayerMailInfo sender          = 10;  // 发送者
+    int64 endTime                  = 11;  // 到期时间
+    Link link                      = 12;  // 跳转
+    repeated ItemInfo attachments2 = 13;  // 附件2
+    ReportMailInfo ReportMailInfo  = 14;  // 邮件举报信息
+    string multiTitle              = 15;  // 多语言邮件标题
+    string multiContent            = 16;  // 多语言邮件内容
+    repeated MailParam params      = 17;  // 格式化参数
+}
+
+// 邮件基础数据
+message MailBase {
+    int64 mailUid             = 1;   // 邮件Id
+    int32 cfgId               = 2;   // 邮件配置id
+    MailType mailType         = 3;   // 邮件类型
+    int64 time                = 4;   // 邮件发送时间
+    string title              = 5;   // 邮件标题
+    int32 mailSkin            = 6;   // 邮件皮肤
+    MailState state           = 7;   // 邮件状态,1未读2已读 3 已读已领取
+    PlayerMailInfo sender     = 8;   // 发送者
+    int64 endTime             = 9;   // 到期时间
+    bool isAttachment         = 10;  // 是否有附件
+    string multiTitle         = 11;  // 多语言邮件标题
+    repeated MailParam params = 12;  // 格式化参数
+}
+
+message GMMail {
+    int64 beginTime                 = 1;   // 开始时间
+    int64 endTime                   = 2;   // 结束时间
+    string channelList              = 3;   // 渠道列表 全部:[]
+    string arealList                = 4;   // 区服列表 全部:[]
+    string playerIdLimitList        = 5;   // 玩家id列表 全部:[]在列表的玩家发送
+    int32 playerLevelMin            = 6;   // 玩家等级限制
+    int32 playerLevelMax            = 7;   // 玩家等级限制
+    int64 playerCreateTimeLimit     = 8;   // 玩家创建时间限制（最大创建时间）
+    Mail mailInfo                   = 9;   // 邮件基础数据
+    int64 pushTime                  = 10;  // 添加到redis的时间
+    map<int32, int32> playerIdLSkip = 11;  // 跳过的玩家Id
+    int64 guildIdLimit              = 12;  // 公会id限制
+    int64 ttl                       = 13;  // 存放到玩家身上过期时间
+}

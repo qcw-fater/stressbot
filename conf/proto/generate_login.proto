@@ -1,0 +1,140 @@
+syntax             = "proto3";
+option  go_package = ".;pb";
+package Game;
+
+// 导入玩家数据
+import "player.proto";
+import "custom_hero.proto";
+import "custom_item.proto";
+import "generate_activity.proto";
+import "custom_friend.proto";
+import "generate_chat.proto";
+import "custom_skin.proto";
+import "enum.proto";
+import "common.proto";
+import "player_other.proto";
+import "generate_mail.proto";
+import "generate_hero.proto";
+import "custom_lottery.proto";
+import "custom_task.proto";
+import "custom_daily_win.proto";
+import "generate_bp.proto";
+import "custom_ladder.proto";
+import "custom_newbie_sgin.proto";
+import "custom_questionnaire.proto";
+import "clickhouse_table.proto";
+import "lbs.proto";
+import "custom_pay.proto";
+import "custom_adventure_gift.proto";
+import "custom_guild.proto";
+import "custom_credit.proto";
+import "generate_back_hero.proto";
+import "custom_month_sign.proto";
+import "custom_login.proto";
+import "custom_activity_battle.proto";
+
+// 玩家登陆
+message LoginPlayerC2S {
+    int32        playerId      = 1;  // 玩家id
+    string       channel       = 2;  // 渠道
+    string       session       = 3;  // 登录session
+    LoginType    ConnectType   = 4;  // 连接类型
+    string       battleVersion = 5;  // 客户端战斗版本
+    string       version       = 6;  // 客户端版本
+    string       lbs           = 7;  // 地理位置
+    LcxSdkCommon sdkCommon     = 8;  // LCX的SDK公共字段
+    string       account       = 9;  // 账号
+    int32        zoneId        = 10; // 区服id
+}
+// 玩家登陆
+message LoginPlayerS2C {
+    PlayerInfo      playerData      = 1; // 玩家数据
+    LoginResult     code            = 2; // 0为成功 1禁号 2登录失败
+    int64           start           = 3; // 开始禁号时间
+    int64           end             = 4; // 结束禁号时间
+    TimeRecord      tRecord         = 5; // 时间相关记录
+    PlayerAttrInfo  attr            = 6; // 玩家属性相关数据，货币，等级，经验等
+    string          sceneServerAddr = 7; // 场景服务器地址 ip "tcp://192.168.1.149:21000",
+    string          sceneSession    = 8; // 登录到场景服务器session
+    DailyWinBoxInfo dailyWinBox     = 9; // 每日胜场数据
+    int64           nowTimestamp    = 10; // 当前时间戳
+}
+
+// 推送消息发送完毕
+message LoginNotifyOverS2C {}
+
+// 玩家登陆返回玩家数据
+message LoginPlayerDataS2C {
+    repeated ItemInfo                itemData               = 1;  // 玩家背包数据
+    ActivityGetSignS2C               activitySignData       = 2;  // 签到信息
+    loginFriendInfo                  friendData             = 3;  // 好友数据
+    repeated ChatInfo                chats                  = 4;  // 聊天消息
+    repeated FuncList                funcList               = 5;  // 功能限制列表
+    bool                             isBattleReconnection   = 6;  // 是否需要战斗重连
+    string                           clientData             = 7;  // 客户端缓存数据
+    playerOtherInfo                  otherData              = 8;  // 玩家杂项数据
+    int32                            dailyFirstVictoryState = 9;  // 每日首胜状态 0 未领取 1可以领取 2 已领取
+    PlayerSeasonInfo                 seasonData             = 10; // 赛季数据
+    MailGetListS2C                   mailData               = 11; // 邮件数据
+    repeated LotteryInfo             lotteryInfoList        = 12; // 抽卡信息
+    loginHeroInfo                    loginHeroData          = 13; // 登录下发英雄相关数据
+    firstRewardFlag                  firstReward            = 14; // 首冲奖励标识 0 未达成 1首冲奖励未领取 2 已领取首冲奖励
+    map<int32, bool>                 upLevelRewards         = 15; // 荣誉之路领取状态
+    loginTaskInfo                    taskList               = 16; // 登录下发任务数据
+    map<int32, battlePassInfo>       battlePassData         = 17; // 战令数据
+    int64                            nextRefreshTime        = 18; // 下次刷新时间
+    NewbieSignInfo                   newbieSignData         = 19; // 新账号签到数据
+    repeated int32                   newbieGuildSteps       = 20; // 新手引导步骤数据
+    QuestionnaireData                questionnaireData      = 21; // 问券数据
+    map<int32, int32>                NewGameModelBpFlag     = 22; // 新玩法战令是否领奖标记
+    repeated LbsTitleData            titleList              = 23; // LBS称号列表
+    repeated AdventureGiftClientInfo adventureGiftList      = 24; // 奇遇礼包列表信息
+    payStatistics                    payStatis              = 25; // 充值购买记录
+    GuildLoginInfo                   guildInfo              = 26; // 我得战队信息
+    creditLoginData                  creditData             = 27; // 信誉分增长相关数据
+    PlayerBackHero                   heroBackData           = 28; // 英雄返回数据
+    playerPayMonthCard               MonthCardData          = 29; // 月卡数据
+    playerPayMonthCard               foreverCardData        = 30; // 终身卡数据
+    MonthSignDataClient              monthSignData          = 31; // 月签到数据
+    ShareInfoDB                      shareInfo              = 32; // 分享数据
+    ActivityBattleDbInfo             activityBattleData     = 33; //活动赛数据
+}
+
+// 充值统计数据
+message payStatistics {
+    map<string, int32> payBuyCount   = 1; // 充值购买记录 key:商品id，value: 购买次数
+    int32              totalPayMoney = 2; // 累计充值价值
+}
+
+// 返利信息
+message rebateInfo {
+    int32 recharge    = 1; // 充值金额
+    int32 restitution = 2; // 返利金额
+    bool  isReceived  = 3; // 是否已领取状态
+}
+
+// 众筹信息
+message crowdfundingInfo {
+    bool                  isReceived = 1; // 是否已领取状态
+    repeated RewardConfig rewards    = 2;
+}
+
+// 登录下发好友数据
+message loginFriendInfo {
+    repeated FriendDetailInfo friendMapData       = 1; // 好友列表
+    repeated PlayerBase       requestList         = 2; // 申请列表
+    repeated BlackDetailInfo  blackDetailInfoList = 3; // 黑名单列表
+}
+
+// 登录下发英雄相关数据
+message loginHeroInfo {
+    HeroGetDataS2C        HeroData    = 1; // 英雄数据
+    map<int32, HeroSkin>  Skins       = 2; // 英雄皮肤数据KEY：skinId value：HeroSkin
+    repeated HeroFormList HeroGmState = 3; // 英雄禁用和临停状态
+}
+
+// 登录下发任务数据
+message loginTaskInfo {
+    PlayerTaskInfo         taskList        = 1; // 玩家任务数据
+    PlayerAchievementModel achievementInfo = 2; // 成就数据列表
+}

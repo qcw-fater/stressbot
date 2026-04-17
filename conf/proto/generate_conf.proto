@@ -1,0 +1,5429 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+import "common.proto";
+
+//AchievementBase.csv
+message AchievementBaseConfig
+{
+	int32 ID = 1; //成就ID
+	int32 Type = 2; //成就类型
+	int32 TypeParameter = 3; //类型参数
+	repeated int32 TaskID = 4; //任务ID
+	repeated int32 TaskLogic = 5; //任务间逻辑
+	int32 Score = 6; //积分奖励
+	repeated RewardConfig Reward = 7; //成就奖励
+	int32 IsShowInGame = 8; //是否在局内弹出
+}
+
+//AchievementIP.csv
+message AchievementIPConfig
+{
+	int32 ID = 1; //ID
+	int32 IPID = 2; //IPID
+	int32 HeroID = 3; //英雄ID
+	string Image = 4; //单人图片
+	int32 TeamID = 5; //组ID
+	string TeamName = 6; //组名称
+	string TeamImage = 7; //组图片
+	string StartTime = 8; //展示时间
+}
+
+//AchievementReward.csv
+message AchievementRewardConfig
+{
+	int32 ID = 1; //IPID
+	repeated int32 Score = 2; //积分要求
+	repeated int32 Reward = 3; //奖励
+}
+
+//ActiveReward.csv
+message ActiveRewardConfig
+{
+	int32 ID = 1; //序号
+	int32 ActiveValue = 2; //活跃度
+	int32 Type = 3; //类型
+	repeated string Icons = 4; //图标组
+	int32 RewardID = 5; //奖励ID
+}
+
+//ActivityBase.csv
+message ActivityBaseConfig
+{
+	int32 ActivityID = 1; //活动ID
+	int32 PageID = 2; //页签ID
+	string PageName = 3; //页签名称
+	string PageIcon = 4; //页签图标
+	int32 PageIndex = 5; //页签排序
+	string Name = 6; //活动名称
+	string Desc = 7; //活动描述
+	int32 Type = 8; //活动类型
+	int32 Index = 9; //排序
+	int32 TimeType = 10; //计时类型
+	string StartTime = 11; //开始时间
+	int32 Time = 12; //持续时间
+	int32 TrophyLimit = 13; //可见奖杯
+	string BackGround = 14; //活动背景图
+	string Title = 15; //活动标题图片
+	string TitleText = 16; //活动名称（程序字时使用）
+	int32 DataSources = 17; //数据来源
+	repeated int32 UIGoTo = 18; //跳转ID
+	string HallButtonName = 19; //大厅入口名称
+	string HallButtonIcon = 20; //大厅入口图片
+	repeated int32 CashID = 21; //直购ID
+}
+
+//ActivityCompetitionBase.csv
+message ActivityCompetitionBaseConfig
+{
+	int32 ID = 1; //活动序号
+	int32 Name = 2; //活动赛主题
+	string StarTime = 3; //开始时间
+	int32 Days = 4; //持续时间
+	repeated int32 StageGameBattle = 5; //阶段地图
+	int32 BaseDefeat = 6; //基础失败次数
+	int32 BuyDefeatNum = 7; //购买失败次数
+	int32 MaxBuyNum = 8; //最大购买次数
+	repeated int32 BuyCost = 9; //购买消耗
+	string BackgroundImg = 10; //背景图片
+}
+
+//ActivityCompetitionReward.csv
+message ActivityCompetitionRewardConfig
+{
+	int32 ID = 1; //奖励id
+	int32 Stage = 2; //阶段
+	int32 CompetitionId = 3; //活动id
+	repeated RewardConfig Reward = 4; //胜场奖励
+	int32 VictorNum = 5; //胜场数
+	int32 IsEndReward = 6; //是否最终奖励
+}
+
+//ActivityExchange.csv
+message ActivityExchangeConfig
+{
+	int32 ID = 1; //兑换ID
+	int32 ActivityID = 2; //所属活动ID
+	repeated RewardConfig ItemNeed = 3; //兑换需要
+	repeated RewardConfig ItemExchange = 4; //兑换产出
+	int32 LimitNumber = 5; //限购次数
+	int32 Select = 6; //默认勾选
+}
+
+//ActivityHeroTrailHallButton.csv
+message ActivityHeroTrailHallButtonConfig
+{
+	int32 ID = 1; //试炼活动ID
+	string HallButtonName = 2; //大厅入口名称
+	string HallButtonIcon = 3; //大厅入口图片
+}
+
+//ActivityMain.csv
+message ActivityMainConfig
+{
+	int32 ID = 1; //活动序号
+	string Name = 2; //关联活动
+	string SubTitle = 3; //子标题
+	string NameEn = 4; //英文名
+	int32 UnLockCond = 5; //解锁条件
+	int32 UnlockParam = 6; //解锁参数
+	int32 Order = 7; //排序
+	int32 Tag = 8; //标签
+	string Icon = 9; //图标
+	int32 IsShow = 10; //是否开启
+}
+
+//ActivityPicture.csv
+message ActivityPictureConfig
+{
+	int32 ID = 1; //ID
+	int32 ActivityID = 2; //活动ID
+	string Name = 3; //图片资源名称
+	string Desc = 4; //活动描述
+	int32 UIGoToID = 5; //跳转界面
+}
+
+//ActivityPictures.csv
+message ActivityPicturesConfig
+{
+	int32 ID = 1; //ID
+	string Name = 2; //图片资源名称
+	int32 Index = 3; //排序
+	int32 UIGoToID = 4; //跳转界面
+	int32 Visible = 5; //可见条件
+	int32 FuncId = 6; //功能id
+	int32 UrlIsInside = 7; //链接是否是内部
+	string UrlGoTo = 8; //跳转链接
+}
+
+//ActivityShop.csv
+message ActivityShopConfig
+{
+	int32 ID = 1; //ID
+	int32 ActivityID = 2; //活动ID
+	repeated int32 GoodsList = 3; //商品列表
+	int32 ShopID = 4; //商店ID
+}
+
+//ActivitySign.csv
+message ActivitySignConfig
+{
+	int32 ID = 1; //序号
+	int32 ActivityID = 2; //活动id
+	int32 Days = 3; //累计登录天数
+	string TargetDesc = 4; //目标描述
+	int32 FreeRewardsID = 5; //免费奖励ID
+	int32 PayRewardsID = 6; //付费奖励ID
+	int32 SignInType = 7; //签到方式
+}
+
+//ActorDecoration.csv
+message ActorDecorationConfig
+{
+	int32 ID = 1; //ID
+	string FileName = 2; //AB包名字
+	string Node = 3; //挂点名称
+}
+
+//ActorLevel.csv
+message ActorLevelConfig
+{
+	int32 Level = 1; //Level
+	int32 NextExp = 2; //升级所需经验值
+}
+
+//ActorRenderModule.csv
+message ActorRenderModuleConfig
+{
+	int32 ActorRenderType = 1; //单位表现类型
+	int32 Avatar = 2; //模型
+	int32 Animator = 3; //动画
+	int32 Transform = 4; //位移、旋转、缩放
+	int32 HeadBar = 5; //头顶面板
+	int32 MiniMap = 6; //小地图
+	int32 DynamicBone = 7; //动态骨骼
+	int32 MatchingBone = 8; //物理骨骼
+	int32 Phantom = 9; //幻影
+	int32 SbtlState = 10; //战备状态
+	int32 DeadFall = 11; //死亡下落
+	int32 HitFly = 12; //击飞
+	int32 Imprison = 13; //禁锢
+	int32 LookIK = 14; //IK
+	int32 ParabolaHeight = 15; //抛物线位移
+	int32 FootEffect = 16; //身体、大招效果
+	int32 RangeEffect = 17; //攻击连线、预警
+}
+
+//ActorRevive.csv
+message ActorReviveConfig
+{
+	int32 ID = 1; //ID
+	int32 ReviveTime = 2; //复活时间
+}
+
+//AlwaysFreeHero.csv
+message AlwaysFreeHeroConfig
+{
+	int32 ID = 1; //ID
+	int32 LevelLimit = 2; //等级下限
+	int32 IgnoreLimitHero = 3; //是否忽略每周限免
+	repeated int32 HeroID = 4; //永久免费英雄池
+}
+
+//AppearanceLimit.csv
+message AppearanceLimitConfig
+{
+	int32 ID = 1; //限定ID
+	int32 ComponentId = 2; //装扮部件id
+	int32 OutputLimit = 3; //产出上限
+	int32 BatchNum = 4; //第几批次产出
+}
+
+//AreaParameter.csv
+message AreaParameterConfig
+{
+	int32 ID = 1; //ID
+	int32 Param1 = 2; //参数1
+	float Param2 = 3; //参数2
+	string Param3 = 4; //参数3
+	repeated int32 Param4 = 5; //参数4
+}
+
+//Attribute.csv
+message AttributeConfig
+{
+	int32 ID = 1; //ID
+	string AttrName = 2; //属性名称
+	string Name = 3; //Name
+	int32 ShowType = 4; //显示类型
+	string ShowUnit = 5; //显示单位
+	int32 KeepDecimal = 6; //保留小数位数
+	int32 IsShow = 7; //是否显示该属性
+	int32 AttrUnitValue = 8; //单位价值的属性值
+}
+
+//AudioPlayFMODPool.csv
+message AudioPlayFMODPoolConfig
+{
+	int32 ID = 1; //ID
+	int32 RandomType = 2; //随机类型
+	int32 RandomProbability = 3; //随机播放概率[0， 10000]
+	repeated int32 RandomWeights = 4; //随机权重列表
+	string AudioAssetName = 5; //音效资源名
+	string AudioEventName = 6; //音效事件列表
+	repeated string ParameterNames = 7; //音效参数名列表
+	repeated string ParameterValues = 8; //对应音效参数值列表
+	repeated string AudioClipNames = 9; //音频名称列表
+	int32 GroupType = 10; //音频组类型
+	int32 DelayPlayTime = 11; //延迟播放时间(ms)
+}
+
+//AudioPlayPool.csv
+message AudioPlayPoolConfig
+{
+	int32 ID = 1; //ID
+	string TemplateName = 2; //播放模板名称
+	int32 RandomType = 3; //随机类型
+	int32 RandomProbability = 4; //随机播放概率[0， 10000]
+	repeated int32 RandomWeights = 5; //随机权重列表
+	repeated string AudioClipNames = 6; //音频名称列表
+	repeated int32 Volumes = 7; //音频音量列表[0， 100]
+	int32 IsLoopRaw = 8; //是否循环播放
+	int32 GroupType = 9; //音频组类型
+	int32 DelayPlayTime = 10; //延迟播放时间(ms)
+	int32 FadeInTime = 11; //淡入时间(ms)
+	int32 FadeOutTime = 12; //淡出时间(ms)
+}
+
+//AutoEmojiRegister.csv
+message AutoEmojiRegisterConfig
+{
+	int32 ID = 1; //id
+	string Name = 2; //名称
+	repeated int32 Params = 3; //条件类型
+	int32 IsOn = 4; //是否启用
+}
+
+//AutoMessageConfig.csv
+message AutoMessageConfigConfig
+{
+	int32 ID = 1; //序号
+	int32 MessageType = 2; //消息类型
+	int32 CheckType = 3; //检测目标类型
+	string MessageGroup = 4; //消息分组(给优先级使用的)
+	int32 Priority = 5; //优先级
+	int32 StartTriggerID = 6; //开始触发的行为ID
+	int32 EndTriggerID = 7; //结束触发的行为ID
+	repeated int64 Desc = 8; //多语言描述
+	repeated int32 RandomWeight = 9; //随机权重
+	int64 BtnName = 10; //按钮名字
+	int32 ShowFireName = 11; //是否显示触发者名称
+	int32 ShowFireIcon = 12; //是否显示触发者头像
+	string BigIcon = 13; //大图标
+	string SmallIcon = 14; //小图标
+	repeated int32 EnableGameTypes = 15; //启用的游戏模式
+	int32 BtnShowDurationMS = 16; //按钮显示持续时间(毫秒)
+	int32 ShowDurationMS = 17; //消息持续时间
+	int32 CoolDownTimeMS = 18; //内置cd
+	repeated int32 AudioIDs = 19; //音频ID
+	int32 MaxScore = 20; //最大分
+	int32 AIRandomRate = 21; //AI发送概率（0-100）
+	int32 EmojiID = 22; //emoji表情id
+	int32 AIDelayTimeMS = 23; //随机时间
+}
+
+//BGMPool.csv
+message BGMPoolConfig
+{
+	int32 ID = 1; //ID
+	string UIID = 2; //应用界面
+	repeated string MusicName = 3; //音乐资源名
+	int32 UIGroup = 4; //界面组
+	int32 PlayMode = 5; //播放模式
+	int32 Volume = 6; //音量[0，100]
+}
+
+//BackHero.csv
+message BackHeroConfig
+{
+	int32 Soft = 1; //软排序
+	int32 ID = 2; //漫画ID
+	string ImgIcon = 3; //页签漫画LOGO
+	repeated int32 HeroIdList = 4; //英雄ID
+	repeated string HeroIconList = 5; //英雄立绘
+}
+
+//BattleAudioMatConfig.csv
+message BattleAudioMatConfigConfig
+{
+	int32 ID = 1; //ID
+	int32 BulletMatType = 2; //子弹材质类型
+	int32 CollisionMatType = 3; //阻挡材质类型
+	int32 TriggerType = 4; //触发类型
+	int32 AudioID = 5; //音效配置id
+}
+
+//BattleBehaviorTrigger.csv
+message BattleBehaviorTriggerConfig
+{
+	int32 ID = 1; //ID
+	int32 Enabled = 2; //是否启用
+	repeated int64 StageID = 3; //地图ID
+	repeated int32 GameTypes = 4; //玩法模式
+	int32 BehaviorType = 5; //行为类型
+	repeated int32 Params = 6; //额外参数
+	string StrParam = 7; //字符参数
+	repeated int32 ParamsCheckType = 8; //参数的检测类型，找不到匹配的就是等于
+	int32 IsInit = 9; //是否初始化
+}
+
+//BattleBranch.csv
+message BattleBranchConfig
+{
+	int32 ID = 1; //ID
+	string Name = 2; //分路名称
+	string Desc = 3; //分路介绍
+}
+
+//BattleBroadcast.csv
+message BattleBroadcastConfig
+{
+	int32 ID = 1; //播报ID
+	int32 BroadcastType = 2; //广播类型
+	int32 ShowTime = 3; //显示时间(毫秒)
+	string Conetnt = 4; //显示内容
+	string Icon = 5; //图标名称
+	repeated int32 HeroAIParams = 6; //英雄AI点赞参数
+	int32 AudioPlayPoolID = 7; //音频播放池ID
+	int32 PosType = 8; //位置类型
+	repeated int32 PosOffsets = 9; //位置偏移
+	repeated int32 WatchLanID = 10; //观战时映射播放的id 蓝色|红色
+}
+
+//BattleDropItem.csv
+message BattleDropItemConfig
+{
+	int32 ID = 1; //ID
+	int32 UnitID = 2; //单位ID
+	int32 Type = 3; //类型
+	string Name = 4; //道具名称
+	string IconName = 5; //图标
+	repeated string PickerViews = 6; //作用目标的拾取表现脚本
+	repeated string PickerEffects = 7; //作用目标的功能效果脚本
+	repeated int32 FriendCampHeroAddDropItems = 8; //拾取道具时，同时作用友方英雄的道具
+	repeated int32 Params = 9; //自定义参数
+	string StopBuffName = 10; //咒符消化后清除BUFF名字
+	int32 IsDeadReserved = 11; //死亡是否保留掉落物
+}
+
+//BattleEmoji.csv
+message BattleEmojiConfig
+{
+	int32 ID = 1; //id
+	string Name = 2; //名称
+	string Des = 3; //描述
+	string ResPrefix = 4; //（九宫格展示）图片
+	string EmojiShow = 5; //局内展示（图/预制体）
+	int32 IsPrefab = 6; //是否是预制体
+	int32 Priority = 7; //优先级
+	string CVID = 8; //CVID
+	int32 CVPlayProb = 9; //CV播放概率
+	int32 ShowID = 10; //动态表情展示ID（暂未实现）
+	int32 IsAutoPlay = 11; //是否在表情面板播放
+	int32 UIGoTo = 12; //获取途径(ID)
+	string UIGoToDes = 13; //无获取途径描述
+	int32 IsPlayerGet = 14; //是否玩家获得
+	int32 IsHideNotGet = 15; //未解锁是否不显示
+	string AutoShow = 16; //显示起始时间
+}
+
+//BattleEvent.csv
+message BattleEventConfig
+{
+	int32 ID = 1; //ID
+	int32 IsCommonAffix = 2; //是否通用事件
+	repeated int32 GameType = 3; //游戏类型
+	int32 EventName = 4; //事件名称
+	string IconName = 5; //图标
+	int32 EventType = 6; //事件类型
+	int32 TypeIndex = 7; //类型索引
+	int32 Describe = 8; //事件描述
+	repeated string Param = 9; //参数
+}
+
+//BattleMission.csv
+message BattleMissionConfig
+{
+	int32 ID = 1; //任务ID
+	int32 ShowTime = 2; //显示时间(毫秒)
+	int32 LastTime = 3; //持续显示时间(毫秒)
+	string Title = 4; //标题
+	string Content = 5; //显示内容
+}
+
+//BattlePass.csv
+message BattlePassConfig
+{
+	int32 ID = 1; //id
+	int32 Level = 2; //战令等级
+	int32 NeedExp = 3; //下级需求经验
+	int32 BasicRewardID = 4; //基础奖励
+	int32 AdvancedRewardID = 5; //进阶奖励
+	int32 IsKeyPoint = 6; //是否为关键点
+	int32 Season = 7; //所属赛季
+}
+
+//BattlePassAdvance.csv
+message BattlePassAdvanceConfig
+{
+	int32 ID = 1; //连续完成次数
+	int32 DiscountAdvance = 2; //高级折扣度
+	repeated int32 Advance = 3; //进阶购买货币
+	repeated int32 AdvanceNum = 4; //进阶购买数值
+	int32 DiscountLuxury = 5; //豪华折扣度
+	repeated int32 Luxury = 6; //豪华购买货币
+	repeated int32 LuxuryNum = 7; //豪华购买数值
+	int32 LuxuryReward = 8; //豪华进阶额外奖励
+}
+
+//BattlePassBattleReward.csv
+message BattlePassBattleRewardConfig
+{
+	int32 ID = 1; //游戏类型
+	repeated int32 BattlePassEXP = 2; //名次对应的战令经验数值
+	int32 BattlePassDrawEXP = 3; //平局战令数值
+}
+
+//BattlePassBigPrize.csv
+message BattlePassBigPrizeConfig
+{
+	int32 ID = 1; //顺序
+	int32 Advance = 2; //是否为进阶
+	RewardConfig BigReward = 3; //大奖
+	int32 Level = 4; //奖励对应战令等级
+	int32 Decoration = 5; //是否为局内外观
+}
+
+//BattlePassDailyTask.csv
+message BattlePassDailyTaskConfig
+{
+	int32 ID = 1; //id
+	int32 WeekDay = 2; //星期几
+	repeated int32 FixedTasks = 3; //固定任务ID
+	repeated int32 RandomTasks = 4; //随机任务Id
+	int32 RandomTaskNum = 5; //随机任务数量
+	int32 Season = 6; //所属赛季
+}
+
+//BattlePassHeroTask.csv
+message BattlePassHeroTaskConfig
+{
+	int32 HeroID = 1; //英雄ID
+	repeated int32 BaseLimitedTime = 2; //基础任务限时时间
+	repeated int32 BasePool = 3; //基础任务池
+}
+
+//BattlePassInfo.csv
+message BattlePassInfoConfig
+{
+	int32 ID = 1; //ID
+	int32 Type = 2; //类型
+	repeated RewardConfig ShowRewards = 3; //展示道具列表
+	int32 Season = 4; //所属赛季
+}
+
+//BattlePassLevel.csv
+message BattlePassLevelConfig
+{
+	int32 ID = 1; //id
+	int32 Level = 2; //战令等级
+	int32 NeedExp = 3; //下级需求经验
+	int32 BasicRewardID = 4; //基础奖励
+	int32 AdvancedRewardID = 5; //进阶奖励
+	int32 IsKeyPoint = 6; //是否为关键点
+	int32 Season = 7; //所属赛季
+}
+
+//BattlePassParameter.csv
+message BattlePassParameterConfig
+{
+	int32 ID = 1; //ID
+	int32 Param1 = 2; //参数1
+	float Param2 = 3; //参数2
+	string Param3 = 4; //参数3
+	repeated int32 Param4 = 5; //参数4
+}
+
+//BattlePassSeason.csv
+message BattlePassSeasonConfig
+{
+	int32 ID = 1; //ID
+	string Start = 2; //开始时间
+	string End = 3; //结束时间
+	int32 WeekCount = 4; //赛季周数
+}
+
+//BattlePassSeasonTask.csv
+message BattlePassSeasonTaskConfig
+{
+	int32 ID = 1; //赛季
+	repeated int32 TaskList = 2; //任务列表
+}
+
+//BattlePassSpecialReward.csv
+message BattlePassSpecialRewardConfig
+{
+	int32 ID = 1; //id
+	int32 ItemID = 2; //奖励ID
+	int32 Order = 3; //顺序
+	int32 Advance = 4; //是否为进阶
+	int32 Level = 5; //奖励对应战令等级
+	int32 Season = 6; //所属赛季
+}
+
+//BattlePassTask.csv
+message BattlePassTaskConfig
+{
+	int32 ID = 1; //任务id
+	int32 PlayerTaskType = 2; //玩家任务类型
+	int32 ConditionType = 3; //任务条件类型
+	int32 IsPer = 4; //是否累积
+	repeated int32 Params = 5; //参数
+	string Name = 6; //标题
+	string Desc = 7; //任务描述
+	int32 GoToID = 8; //跳转ID
+	int32 IsTeamBonus = 9; //是否有组队加成
+	int32 RewardID = 10; //奖励
+	int32 Liveness = 11; //战令活跃度
+	int32 UnlockLv = 12; //解锁等级
+	int32 IsAdvance = 13; //是否是进阶任务
+}
+
+//BattlePassTaskV2.csv
+message BattlePassTaskV2Config
+{
+	int32 ID = 1; //战令id
+	int32 BasicStartTask = 2; //赛季开始时基础任务数量
+	int32 AdvancedStartTask = 3; //赛季开始时进阶任务数量
+	int32 BasicDailyTask = 4; //基础每日任务刷新数量
+	int32 AdvancedGainDailyTask = 5; //进阶每日任务刷新数量
+	int32 GainDays = 6; //连续新增天数
+	repeated int32 SeasonBaseWeight1 = 7; //赛季基础权重1
+	repeated int32 SeasonBaseTask1 = 8; //赛季基础任务池1
+	repeated int32 SeasonBaseWeight2 = 9; //赛季基础权重2
+	repeated int32 SeasonBaseTask2 = 10; //赛季基础任务池2
+	repeated int32 SeasonBaseWeight3 = 11; //赛季基础权重3
+	repeated int32 SeasonBaseTask3 = 12; //赛季基础任务池3
+	repeated int32 SeasonAdvancedWeight1 = 13; //赛季进阶权重1
+	repeated int32 SeasonAdvancedTask1 = 14; //赛季进阶任务池1
+	repeated int32 DailyTaskWeight = 15; //每日任务池子权重
+	repeated int32 DailyTaskPool = 16; //每日任务池子
+	int32 RefreshTimes = 17; //刷新次数
+	repeated RewardConfig FreshItem = 18; //付费刷新消耗
+	int32 RefreshPeriod = 19; //刷新周期(天)
+}
+
+//BattlePassV2.csv
+message BattlePassV2Config
+{
+	int32 ID = 1; //ID
+	string Start = 2; //开始时间
+	string End = 3; //结束时间
+	int32 WeekCount = 4; //赛季周数
+	repeated int32 NeedExp = 5; //每级经验
+	repeated int32 BasicRewardID = 6; //基础奖励
+	repeated int32 AdvancedRewardID = 7; //进阶奖励
+	repeated int32 KeyPoint = 8; //关键等级点
+	int32 SpillExp = 9; //溢出经验
+	int32 SpillRewardID = 10; //溢出奖励id
+	int32 ShowItemID = 11; //英雄默认展示id
+	int32 ShowItemLevel = 12; //默认展示归属等级
+	repeated RewardConfig CommonBattlePass = 13; //高级版货币购买花费
+	repeated RewardConfig LuxuryBattlePass = 14; //豪华版货币购买花费
+	int32 LuxuryReward = 15; //豪华版额外奖励
+	repeated int32 ShowItems = 16; //高级和豪华购买展示的道具
+	int32 CommonBattleEXPMax = 17; //高级版每日战斗获取经验总上限
+	int32 LuxuryBattleEXPMax = 18; //进阶版每日战斗获取经验总上限
+}
+
+//BattlePassWeek.csv
+message BattlePassWeekConfig
+{
+	int32 ID = 1; //id
+	int32 Week = 2; //周
+	repeated int32 FixedTasks = 3; //任务id
+	int32 Season = 4; //赛季
+}
+
+//BattlePassWeekActive.csv
+message BattlePassWeekActiveConfig
+{
+	int32 ID = 1; //节点
+	int32 NeedActiveNum = 2; //需要活跃度
+	int32 RewardID = 3; //奖励
+	int32 Season = 4; //赛季
+}
+
+//BattleResourceAutoAdd.csv
+message BattleResourceAutoAddConfig
+{
+	int32 ID = 1; //ID
+	repeated int32 TimeRange = 2; //生效时间段
+	int32 AddTime = 3; //增加时间
+	int32 AddExp = 4; //增加经验
+	int32 AddGold = 5; //增加金币
+}
+
+//BattleResourceHeroScore.csv
+message BattleResourceHeroScoreConfig
+{
+	int32 Score = 1; //分数
+	int32 ExpAddRate = 2; //经验加成比例
+	int32 GoldAddRate = 3; //金币加成比例
+	repeated int32 DeathProvideExps = 4; //死亡提供经验
+	repeated int32 DeathProvideGolds = 5; //死亡提供金币
+	int32 TeamGold = 6; //团队金币
+	int32 KillScore = 7; //击杀英雄加积分
+	int32 AssistScore = 8; //助攻加积分
+	int32 DeathScore = 9; //被英雄击杀扣积分
+	int32 KillBossScore = 10; //击杀boss加积分
+	int32 KillGuardTowerScore = 11; //推塔(3个)加积分
+	int32 RewardCount = 12; //赏金数量
+}
+
+//BattleResourceShare.csv
+message BattleResourceShareConfig
+{
+	int32 ID = 1; //ID
+	int32 StageID = 2; //关卡ID
+	int32 Count = 3; //分摊人数
+	int32 GoldRate = 4; //金币分摊比例
+	int32 ExpRate = 5; //经验分摊比例
+}
+
+//BattleResultDataFactor.csv
+message BattleResultDataFactorConfig
+{
+	int32 ID = 1; //ID
+	repeated int32 Constant1 = 2; //雷达常数1
+	int32 Constant2 = 3; //雷达常数2
+	int32 Constant3 = 4; //雷达常数3
+}
+
+//BattleResultDataType.csv
+message BattleResultDataTypeConfig
+{
+	int32 ID = 1; //ID
+	int32 Type = 2; //类型
+	repeated int32 BattleResultDataType = 3; //显示属性
+}
+
+//BattleResultTitle.csv
+message BattleResultTitleConfig
+{
+	int32 ID = 1; //ID
+	int32 Enabled = 2; //是否启用
+	string Name = 3; //名字
+	string Describe = 4; //描述
+	repeated int32 GameTypes = 5; //玩法模式
+	int32 BehaviorTriggerID = 6; //行为表ID
+	int32 CheckType = 7; //检测类型
+	int32 TargetParam = 8; //目标参数
+	string Icon = 9; //图标
+	int32 HighLight = 10; //精彩时刻优先级
+	int32 ClipBeforeTime = 11; //精彩时刻前偏移时间毫秒
+	int32 ClipAfterTime = 12; //精彩时刻后偏移时间毫秒
+	int32 ShowInBattle = 13; //是否局内展示
+	string TitleImage = 14; //称号背景
+	string HighLightImage = 15; //精彩时刻背景
+	int32 ShowInResult = 16; //是否结算展示
+}
+
+//BattleSimpleEntity.csv
+message BattleSimpleEntityConfig
+{
+	int32 ID = 1; //ID
+	int32 Type = 2; //类型
+	int32 SubType = 3; //子类型
+	int32 Radius = 4; //可拾取半径(码)
+	string Name = 5; //物件名称
+	string IconName = 6; //图标
+	string EffectName = 7; //特效名
+	repeated int32 ParamsInt = 8; //参数_int
+}
+
+//BattleTrigger.csv
+message BattleTriggerConfig
+{
+	int32 ID = 1; //ID
+	int32 Priority = 2; //播放优先级
+	repeated int32 BattleModeTypes = 3; //战斗模式类型
+	int32 BindStageID = 4; //绑定关卡ID
+	int32 BindHeroID = 5; //绑定英雄ID
+	int32 BindHeroSkinID = 6; //绑定英雄皮肤ID
+	int32 InitDelayTime = 7; //初始化延迟时间(ms)
+	int32 TriggerIntervalTime = 8; //触发间隔时间(ms)
+	repeated int32 MutexIDs = 9; //互斥ID列表
+	int32 TriggerProbability = 10; //触发概率(1-10000)
+	int32 MaxTriggerCount = 11; //最大触发次数
+	int32 MaxTriggerCountType = 12; //最大触发次数计数类型
+	int32 TriggerConditionType = 13; //触发条件类型
+	repeated int32 TriggerConditionParams = 14; //触发条件参数列表
+	int32 TriggerExecuteType = 15; //触发执行类型
+	repeated int32 TriggerExecuteParams = 16; //触发执行参数列表
+}
+
+//BraveScore.csv
+message BraveScoreConfig
+{
+	int32 ID = 1; //ID
+	int32 Type = 2; //类型
+	int32 Parame1 = 3; //参数1
+	int32 Parame2 = 4; //参数2
+	int32 BraveScore = 5; //勇者积分变化
+	string Title = 6; //显示文本
+}
+
+//BraveScoreV2.csv
+message BraveScoreV2Config
+{
+	int32 ID = 1; //ID
+	repeated int32 Parame = 2; //参数1
+	repeated int32 BraveScore = 3; //勇者积分变化
+	string Title = 4; //显示文本
+}
+
+//BroadcastSkin.csv
+message BroadcastSkinConfig
+{
+	int32 BroadCastSkinId = 1; //道具序号
+	string BroadCastSkinName = 2; //名字多语言
+	string BroadCastSkinDesc = 3; //描述多语言（没过监修用不了描述）
+	int32 BroadCastSkinItemId = 4; //对应解锁道具id
+	string BroadCastSkinItemIcon = 5; //对应图标
+	int32 IsDefaultSkin = 6; //是否默认底板
+	string BroadCastSkinResource = 7; //对应底板UI底板资源名
+	string BroadCastSkinEffect = 8; //对应底板特效资源名
+	string BroadCastSkinBossResource = 9; //强者对应底板UI底板资源名
+	string BroadCastSkinBossEffect = 10; //强者对应底板特效资源名
+	string BroadCastSkinEnemyResource = 11; //敌方对应底板UI底板资源名
+	string BroadCastSkinEnemyEffect = 12; //敌方对应底板特效资源名
+	string BroadCastSkinEnemyBossResource = 13; //敌方强者对应底板UI底板资源名
+	string BroadCastSkinEnemyBossEffect = 14; //敌方强者对应底板特效资源名
+	int32 AudioPoolID = 15; //音效播放池id
+}
+
+//BuffDescribe.csv
+message BuffDescribeConfig
+{
+	int32 ID = 1; //ID
+	string Name = 2; //Buff名称
+	int32 IconPriority = 3; //Icon优先级
+	string Describe = 4; //Buff描述
+	int32 DescribeType = 5; //Buff描述类型(0.默认 1.读DmgHittedCureCorrect表的参数)
+	string Source = 6; //Buff来源
+}
+
+//CBPayBack.csv
+message CBPayBackConfig
+{
+	int32 ID = 1; //ID
+	string Level = 2; //充值档位
+	string PayBackPercentage = 3; //道具返还比例
+	repeated RewardConfig Reward = 4; //额外奖励
+}
+
+//CBTestReward.csv
+message CBTestRewardConfig
+{
+	int32 ID = 1; //档次ID
+	string Text = 2; //描述
+	int32 Trophy = 3; //要求总杯数
+	repeated RewardConfig Reward = 4; //奖励
+}
+
+//CVShowList.csv
+message CVShowListConfig
+{
+	int32 ID = 1; //序号
+	int32 HeroID = 2; //所属英雄
+	int32 ModeType = 3; //类型（局外/局内）
+	string TitleName = 4; //标题多语言（sys）
+	string DescribeName = 5; //内容多语言（sys）
+	string CVName = 6; //语音文件名
+	string FMODCvName = 7; //FMO语音文件名
+	string FMODCvEventName = 8; //FMO语音事件名
+	repeated int32 UnLockType = 9; //解锁类型条件
+	repeated int32 UnLockTrigger = 10; //解锁触发器
+	repeated int64 UnLockName = 11; //解锁描述多语言
+	int32 RewardID = 12; //奖励道具id
+	int32 RewardCount = 13; //奖励道具数量
+}
+
+//CashGoods.csv
+message CashGoodsConfig
+{
+	string ID = 1; //SDK商品ID
+	int32 RechargeID = 2; //游戏内直购ID
+	repeated RewardConfig Item = 3; //道具内容
+	int32 GoodsValue = 4; //商品价值
+	float PriceCNY = 5; //人民币价格
+	float PriceHDK = 6; //港币价格
+	float PriceTWD = 7; //台币价格
+	float PriceUSD = 8; //美元价格
+	int32 DiscountRecharge = 9; //直购折扣
+	int32 CouponID = 10; //代金券id
+	int32 CouponNum = 11; //代金券数量
+	int32 Platform = 12; //平台
+}
+
+//ChainGift.csv
+message ChainGiftConfig
+{
+	int32 ID = 1; //礼包id
+	int32 ActivityId = 2; //活动id
+	string Name = 3; //礼包名字
+	int32 Prev = 4; //解锁前置id
+	repeated RewardConfig Item = 5; //商品内容
+	int32 LimitNumber = 6; //个人限购数量
+	repeated RewardConfig Price = 7; //售价
+	repeated RewardConfig OriginalPrice = 8; //原价
+	int32 CashID = 9; //直购ID
+	string Tag = 10; //性价比标志
+	string TitleTag = 11; //性价比标志
+}
+
+//Chest.csv
+message ChestConfig
+{
+	int32 ID = 1; //宝箱ID
+	string Name = 2; //宝箱名字
+	repeated int32 ItemIds = 3; //可产出的道具ID列表
+	repeated int32 Weights  = 4; //道具基础权重(与 ItemIds -一对应，同品质内竞争权重)
+	repeated int32 FallbackQualities = 5; //兜底品质列表(当宝箱预算耗尽仍无道具时，从此列表随机一个品质进行保底)
+}
+
+//ChestItemPool.csv
+message ChestItemPoolConfig
+{
+	int32 ChestId = 1; //宝箱ID
+	repeated int32 ItemIds = 2; //可出现的道具ID列表
+	repeated int32 Weights = 3; //抽取权重
+}
+
+//ClubBase.csv
+message ClubBaseConfig
+{
+	int32 ID = 1; //ID
+	int32 ClubNameNumber = 2; //社团名称字符上限
+	int32 ClubNoticeNumber = 3; //社团公告字符上限
+	int32 JoinClubCup = 4; //默认入团杯数
+	repeated RewardConfig CreatedClub = 5; //创建社团消耗
+	int32 CaptainMax = 6; //队长上限
+	int32 MemberMax = 7; //成员上限
+	int32 PresidentMoveTime = 8; //团长转移时间（秒）
+	int32 CaptainMail = 9; //队长任命邮件ID
+	int32 CaptainMailOut = 10; //队长撤销邮件ID
+	int32 PresidentMail = 11; //团长移交邮件ID
+	int32 KickOutMail = 12; //被踢出邮件ID
+	int32 RefuseMail = 13; //被拒绝邮件ID
+	int32 AcceptMail = 14; //被接受邮件ID
+	int32 ChangeNameTime = 15; //社团更名冷却时间
+	int32 JoinClubTime = 16; //退团再加入冷却时间
+	int32 JoinClubMessage = 17; //社团申请过期时间
+}
+
+//ClubGrandLineReward.csv
+message ClubGrandLineRewardConfig
+{
+	int32 ID = 1; //ID
+	int32 WinTimes = 2; //胜场要求
+	string BoxName = 3; //宝箱名称
+	string BoxIcon = 4; //宝箱图标
+	repeated RewardConfig Reward = 5; //奖励
+}
+
+//ClubIcon.csv
+message ClubIconConfig
+{
+	int32 ID = 1; //ID
+	string Icon = 2; //社团图标
+}
+
+//ClubPlayModeBase.csv
+message ClubPlayModeBaseConfig
+{
+	int32 ID = 1; //ID
+	string GrandLineSwitch = 2; //伟大航路玩法开关
+	int32 GrandLinePrepareTime = 3; //伟大航路准备阶段持续时间
+	int32 GrandLineOpeningTime = 4; //伟大航路进行阶段持续时间
+	int32 GrandLineRewardTime = 5; //伟大航路领奖阶段持续时间
+	int32 GrandLineEndNoticeTime = 6; //进行阶段结束通知时间
+	int32 GrandLineMatchTimes = 7; //进行阶段参赛次数
+	repeated RewardConfig GrandLineRankReward = 8; //伟大航路排名额外奖励
+	int32 GrandLineRewardMail = 9; //伟大航路奖励补发邮件ID
+}
+
+//ClubTask.csv
+message ClubTaskConfig
+{
+	int32 ID = 1; //ID
+	string Icon = 2; //任务图标
+	string Name = 3; //任务名称
+	string Text = 4; //任务描述
+	int32 Type = 5; //任务类型
+	string Parameter = 6; //任务参数
+	int32 ScoreMax = 7; //每周活跃上限
+	int32 UIGoTo = 8; //跳转ID
+}
+
+//ClubTaskReward.csv
+message ClubTaskRewardConfig
+{
+	int32 ID = 1; //ID
+	int32 Score = 2; //活跃要求
+	string Icon = 3; //节点图标
+	repeated RewardConfig Reward = 4; //奖励
+}
+
+//Collection.csv
+message CollectionConfig
+{
+	int32 ID = 1; //ID
+	int32 ComicID = 2; //漫画ID
+	int32 ItemID = 3; //道具ID
+	string CollectionPrefabABPath = 4; //收藏品预制AB资源路径
+	int32 CollectionLockScale = 5; //藏品未解锁动效缩放
+	string DisplayPicture = 6; //展示大图
+	string DisplayIcon = 7; //展示小图
+	string ListIcon = 8; //列表图
+	int32 Season = 9; //赛季
+	string GetWayDesc = 10; //来源
+	string GoToGameUIID = 11; //跳转界面
+	int32 GoToParam = 12; //跳转参数
+	int32 JlvEXPReward = 13; //Jlv经验获得
+}
+
+//CommonAIEvaluateValue.csv
+message CommonAIEvaluateValueConfig
+{
+	int32 ID = 1; //ID
+	int32 Value_1 = 2; //分值1
+	int32 Value_2 = 3; //分值2
+	int32 Value_3 = 4; //分值3
+	int32 Value_4 = 5; //分值4
+	int32 Value_5 = 6; //分值5
+	int32 Value_6 = 7; //分值6
+	int32 Value_7 = 8; //分值7
+	int32 Value_8 = 9; //分值8
+	int32 Value_9 = 10; //分值9
+	int32 Value_10 = 11; //分值10
+	int32 Value_11 = 12; //分值11
+	int32 Value_12 = 13; //分值12
+	int32 Value_13 = 14; //分值13
+	int32 Value_14 = 15; //分值14
+	int32 Value_15 = 16; //分值15
+}
+
+//CommonAIHeroTree.csv
+message CommonAIHeroTreeConfig
+{
+	int32 ID = 1; //ID
+	repeated string Trees = 2; //行为树
+	string OutLine = 3; //掉线行为树
+}
+
+//CommonAIHeroValue.csv
+message CommonAIHeroValueConfig
+{
+	int32 ID = 1; //ID
+	repeated string EvaluateTrees1 = 2; //策略
+	repeated string EvaluateTreesDefault2 = 3; //通用数据
+	repeated string DoActionDefaultTrees = 4; //通用行为
+	repeated string EvaluateTrees2 = 5; //特殊数据
+	repeated string DoActionTrees = 6; //特殊行为
+	repeated int32 CustomInts = 7; //自定义整数
+	repeated string CustomArrayInts = 8; //自定义整数数组
+}
+
+//CommonAISkillValue.csv
+message CommonAISkillValueConfig
+{
+	int32 ID = 1; //SkillID
+	repeated string ExtendTrees = 2; //扩展子树
+	repeated int32 CustomInts = 3; //自定义整数
+}
+
+//CommonBuffMutualExclusion.csv
+message CommonBuffMutualExclusionConfig
+{
+	int32 BuffType = 1; //Buff类型
+	repeated int32 ImmuneTypes = 2; //被哪些类型驱散
+	repeated int32 RepellentTypes = 3; //驱散的类型
+}
+
+//CommonMonsterAI.csv
+message CommonMonsterAIConfig
+{
+	int32 ID = 1; //UnitId
+	int32 MonsterType = 2; //怪物类型
+	int32 DMPMonsterType = 3; //DMP打点相关-更细致的怪物类型
+	string ActRangeEffectBindPointName = 4; //行动区域场景绑定点
+	repeated string SkillConditions = 5; //技能释放条件
+	int32 DecisionCD = 6; //决策CD
+	int32 MoveType = 7; //移动类型
+	int32 HatredReduceSpeed = 8; //仇恨衰减速度
+	int32 LeaveAtcReplyHp = 9; //脱战回血比例
+	int32 LeaveAtcReplyInterval = 10; //脱战回血间隔时间
+	int32 BornUseSkillBtnIndex = 11; //出生动作播完后使用技能索引
+	int32 DeadReplyHpSkillBtnIndex = 12; //死亡触发技能索引
+	int32 BornAnimTime = 13; //出生动画时间
+	int32 WaitTime = 14; //脱离仇恨等待时间
+}
+
+//CommonReward.csv
+message CommonRewardConfig
+{
+	int32 ID = 1; //ID
+	repeated RewardConfig RewardList = 2; //奖励详情
+}
+
+//CommonSoldierAI.csv
+message CommonSoldierAIConfig
+{
+	int32 ID = 1; //UnitId
+	int32 LockTargetType = 2; //锁敌类型
+	repeated int32 LockTargetPriority = 3; //锁敌优先级
+}
+
+//Compound.csv
+message CompoundConfig
+{
+	int32 ID = 1; //ID
+	repeated RewardConfig Cost = 2; //制作消耗
+	repeated RewardConfig DropId = 3; //制作奖励
+	int32 ItemId = 4; //配方道具ID
+}
+
+//CreateRoleAvatar.csv
+message CreateRoleAvatarConfig
+{
+	int32 Type = 1; //类型
+	int32 TypeFollow = 2; //类型跟随
+	repeated int32 FitPartMale = 3; //包含部件-男
+	repeated int32 FitPartFemale = 4; //包含部件-女
+}
+
+//CreateRoleDialog.csv
+message CreateRoleDialogConfig
+{
+	int32 ID = 1; //ID
+	int32 Type = 2; //类型
+	string TitleName = 3; //对话者名字
+	string Content = 4; //对话
+	int32 WaitTime = 5; //等待时间
+	string NPCDisplayImage = 6; //NPC玩家形象ID
+	int32 IsStart = 7; //是否是初始id
+	int32 ContinueID = 8; //继续ID
+	int32 IsShowBackGround = 9; //是否展示背景
+	int32 ChooseEnabled = 10; //是否有选项
+	int32 ChooseIsLeft = 11; //选项是否在左侧
+	repeated int32 ChooseIDs = 12; //选项id
+	repeated string ChooseTitleNames = 13; //选项名字
+	repeated string ChooseIconNames = 14; //选项图标名字
+	string MessageStartUIOpen = 15; //对话开启时打开的UI
+	string MessageStartUIClose = 16; //对话开启时关闭的UI
+	string MessageEndUIOpen = 17; //对话结束时打开的UI
+	string MessageEndUIClose = 18; //对话结束时关闭的UI
+}
+
+//CrowdfundingReward.csv
+message CrowdfundingRewardConfig
+{
+	string LID = 1; //玩家LID
+	repeated RewardConfig Rewards = 2; //礼包物品
+}
+
+//CustomGameMode.csv
+message CustomGameModeConfig
+{
+	int32 ID = 1; //ID
+	int32 BattleModeID = 2; //游戏类型ID
+	string Name = 3; //名字
+	string NameEn = 4; //英文名
+	string NameDesc = 5; //名字描述
+	string TitleName = 6; //标题名字
+	string Desc = 7; //描述
+	string CornerTips = 8; //左上角提示
+	string Icon = 9; //图标
+	string Background = 10; //背景图
+	repeated int32 UIChooseHeroHideID = 11; //选择英雄界面隐藏部分ID
+	string LoadingTips = 12; //加载界面提示
+	string LoadingBg = 13; //加载界面背景图
+	int32 IsLoadingAllTeam = 14; //加载界面是否显示所有队伍
+	repeated int32 EvalStandard = 15; //评分标准
+	repeated string EvalIcon = 16; //评分图标
+	int32 MaxTeamCount = 17; //最大队伍数量
+	int32 BattleColorType = 18; //战斗配色方案
+	repeated string BattleColorArray = 19; //阵营配色数组
+	repeated string KillBGArray = 20; //阵营击杀播报背景底数组
+	repeated string BattleResultDescColor = 21; //结算界面装饰颜色
+	repeated int32 BattleResultDataType = 22; //结算显示属性
+}
+
+//CustomNewAction.csv
+message CustomNewActionConfig
+{
+	int32 ID = 1; //ID
+	string Desc = 2; //动作描述
+	string NameCN = 3; //动作名称——中文
+	string Name = 4; //动作名字
+	string ICON = 5; //动作图标
+	int32 Type = 6; //类型
+	int32 SkinID = 7; //所属皮肤ID
+	int32 IsDefault = 8; //是否默认动作
+	int32 IsPushShelf = 9; //是否上架
+	int32 NeedHide = 10; //播放前是否需要隐藏
+	string ActionName = 11; //动作状态机名字
+	repeated string ActorSubPrefabNames = 12; //角色附属模型文件夹名
+	string ActorActionReplace = 13; //动作资源替换数据
+	int32 AnimClipTime = 14; //动画播放时间(单位毫秒)
+	int32 ActionCVID = 15; //角色动作CVID
+	string GoToDesc = 16; //获取途径
+}
+
+//CustomRoleColor.csv
+message CustomRoleColorConfig
+{
+	int32 ID = 1; //id
+	string Name = 2; //名字
+	string ColorIcon = 3; //Icon图标
+	string Color = 4; //
+	int32 CustomFitPartID = 5; //所属部件ID
+	int32 SkinID = 6; //关联皮肤ID
+	int32 UnLock = 7; //默认解锁
+}
+
+//CustomRoleFitPart.csv
+message CustomRoleFitPartConfig
+{
+	int32 ID = 1; //id
+	string Name = 2; //名字
+	string Desc = 3; //道具描述
+	string Icon = 4; //Icon小图标
+	string FitPartIcon = 5; //Icon大图标
+	int32 SceneUnitID = 6; //所属角色SceneUnitID
+	int32 IsNeedDynamicBone = 7; //是否需要动骨
+	int32 ReplaceType = 8; //挂件类型
+	int32 Sex = 9; //性别
+	string FitPartABPath = 10; //配件AB路径
+	int32 SockLenthIndex = 11; //对应袜子长度
+	string PrefabName = 12; //预制件名称
+	repeated int32 FitPartColors = 13; //颜色(目前只有头发使用 )
+}
+
+//CustomRoleGroup.csv
+message CustomRoleGroupConfig
+{
+	int32 ID = 1; //id
+	int32 BelongingSetID = 2; //归属套装ID
+	int32 GroupType = 3; //类型
+	repeated int32 PortraitId = 4; //头像ID
+	repeated int32 Group = 5; //资源ID
+	int32 FitPartType = 6; //所需配件插槽
+	repeated int32 FitPartMutexTypeList = 7; //互斥配件插槽列表(不包括自己)
+	repeated RewardConfig DecItemList = 8; //分解获得道具id
+	int32 Unlock = 9; //解锁
+	int32 LimitId = 10; //限定Id
+	int32 ComicId = 11; //漫画ID
+	int32 HeroId = 12; //英雄ID
+}
+
+//CustomRoleSet.csv
+message CustomRoleSetConfig
+{
+	int32 ID = 1; //id
+	string Name = 2; //名字
+	string SetIcon = 3; //Icon图标
+	int32 SceneUnitID = 4; //所属角色SceneUnitID
+	int32 Sex = 5; //性别
+	repeated int32 FitPartIDS = 6; //所属PartID
+}
+
+//Customized.csv
+message CustomizedConfig
+{
+	int32 ID = 1; //序号
+	string Icon = 2; //动作展示图标
+	string Name = 3; //名字
+	string Desc = 4; //描述
+	int32 SkinId = 5; //限定皮肤id
+	int32 GetWay = 6; //获取途径
+	string GoToGameUIID = 7; //跳转界面
+	int32 GoToParam = 8; //跳转参数
+	int32 SwitchItemId = 9; //道具兑换id
+	string ActorActionABPath = 10; //动作资源AB路径
+	string ActorActionReplace = 11; //动作资源替换数据
+	repeated string BackCityState = 12; //回城脚本
+	repeated int32 ConvertTo = 13; //转换道具
+	repeated int32 ConvertNum = 14; //转换道具数量
+}
+
+//CustomizedAction.csv
+message CustomizedActionConfig
+{
+	int32 ID = 1; //ID
+	int32 SkinID = 2; //皮肤ID
+	int32 CustomID = 3; //类型
+	repeated string PreviewSubPrefabABPaths = 4; //预览角色附属预制AB包路径
+	string PreviewAvatarTimelineABPath = 5; //预览角色Timeline预制AB包路径
+	string PreviewAvatarSoundABPath = 6; //预览角色音效AB包路径
+	string ActorActionABPath = 7; //动作资源AB路径
+	repeated string ActorSubPrefabNames = 8; //角色附属模型文件夹名
+	string ActorActionReplace = 9; //动作资源替换数据
+	string ActionEffectABPath = 10; //个性化动作关联特效AB路径
+	repeated string ActionEffects = 11; //个性化动作关联特效名称
+	int32 AnimClipTime = 12; //动画播放时间(单位毫秒)
+}
+
+//CustomizedCommon.csv
+message CustomizedCommonConfig
+{
+	int32 ID = 1; //ID
+	int32 IsDefault = 2; //是否为默认
+	repeated int32 ComicIDs = 3; //漫画组
+	repeated int32 SkinIDs = 4; //皮肤组
+	string GetWayDesc = 5; //获取途径
+	int32 UIGoToID = 6; //跳转ID
+	RewardConfig Cost = 7; //购买消耗
+	int32 IsPushShelf = 8; //是否上架
+	string PushShelfTime = 9; //自动上架时间
+	repeated string PreviewSubPrefabABPaths = 10; //预览角色附属（子模型）预制AB包路径
+	string PreviewAvatarTimelineABPath = 11; //预览角色Timeline预制AB包路径
+	string PreviewAvatarEffectABPath = 12; //预览角色特效AB包路径
+	string PreviewAvatarSoundABPath = 13; //预览角色音效AB包路径
+	string EffectABPath = 14; //特效AB路径
+	repeated string EffectInfos = 15; //特效名称
+	repeated int32 EffectTime = 16; //播放特效时长
+	repeated string BroadcastIcon = 17; //播报背景底图
+	string BroadcastContentColor = 18; //播报字体颜色
+	repeated string BackCityDownEffects = 19; //回城结束播放特效
+	int32 BackCityDownEffectTime = 20; //回城结束播放特效时长
+	int32 AudioPoolID = 21; //音效播放池id
+	string SoundABPath = 22; //音效AB路径
+}
+
+//CustomizedHeroPreview.csv
+message CustomizedHeroPreviewConfig
+{
+	int32 ID = 1; //ID
+	int32 SkinID = 2; //皮肤ID
+	string PreviewAvatarPrefabABPath = 3; //预览角色预制AB包路径
+	string PreviewAnimationClipABPath = 4; //预览替换角色动画片段AB路径
+	string PreviewSceneName = 5; //预览场景名称
+	repeated int32 PreviewAvatarPos = 6; //预览角色坐标
+	repeated int32 PreviewAvatarScal = 7; //预览角色缩放
+}
+
+//CustomizedItemType.csv
+message CustomizedItemTypeConfig
+{
+	int32 ItemTrialCardSubType = 1; //道具对应体验卡子类型
+	int32 ItemSubType = 2; //Item表道具子类型
+	int32 CustomizedType = 3; //个性化枚举类型
+}
+
+//CustomizedPreview.csv
+message CustomizedPreviewConfig
+{
+	int32 ID = 1; //ID
+	int32 SkinID = 2; //皮肤ID
+	int32 CustomID = 3; //类型
+	string PreviewAvatarPrefabABPath = 4; //预览角色预制AB包路径
+	repeated string PreviewSubPrefabABPaths = 5; //预览角色附属预制AB包路径
+	string PreviewAvatarTimelineABPath = 6; //预览角色Timeline预制AB包路径
+	string PreviewAvatarEffectABPath = 7; //预览角色特效AB包路径
+	string PreviewAvatarSoundABPath = 8; //预览角色音效AB包路径
+	string PreviewSceneName = 9; //预览场景名称
+	repeated int32 PreviewAvatarPos = 10; //预览角色坐标
+	repeated int32 PreviewAvatarScal = 11; //预览角色缩放
+	string PreviewBroadcastEffectABPath = 12; //预览播报板特效AB路径
+	string PreviewBroadcastEffectName = 13; //预览播报板特效名称
+	string KillEffectABPath = 14; //击杀特效AB路径
+	string KillEffectName = 15; //击杀特效名称
+	string ActorActionABPath = 16; //动作资源AB路径
+	string ActorActionReplace = 17; //动作资源替换数据
+	string ActionEffectABPath = 18; //个性化动作关联特效AB路径
+	string ActionEffectName = 19; //个性化动作关联特效名称
+	repeated string BackCityState = 20; //回城脚本
+	int32 AnimClipTime = 21; //动画播放时间(单位毫秒)
+}
+
+//CustomizedSpecial.csv
+message CustomizedSpecialConfig
+{
+	int32 ID = 1; //序号
+	int32 IsDefault = 2; //是否为默认
+	int32 HeroID = 3; //英雄ID
+	repeated int32 SkinIds = 4; //限定皮肤id
+	string GetWayDesc = 5; //获取途径
+	int32 UIGoToID = 6; //跳转参数
+	RewardConfig Cost = 7; //购买消耗
+	int32 IsPushShelf = 8; //是否上架
+	string PushShelfTime = 9; //自动上架时间
+	int32 AudioPoolID = 10; //音效播放池id
+	string SoundABPath = 11; //音效AB路径
+}
+
+//DailyFirstVictory.csv
+message DailyFirstVictoryConfig
+{
+	int32 ID = 1; //每日首胜id
+	repeated int32 GameTypeList = 2; //适用模式类型
+	string Desc = 3; //描述
+	int32 RewardID = 4; //奖励ID
+	repeated int32 GetWayList = 5; //跳转id
+}
+
+//DailyTask.csv
+message DailyTaskConfig
+{
+	int32 ID = 1; //宝箱Id
+	string BoxIcon = 2; //宝箱图标
+	int32 Weight = 3; //权重
+	int32 DropMainId = 4; //掉落表
+	string ShowImg = 5; //掉落展示图标
+}
+
+//DailyTaskNew.csv
+message DailyTaskNewConfig
+{
+	int32 ID = 1; //ID
+	int32 Score = 2; //每日活跃积分要求
+	repeated RewardConfig Reward = 3; //奖励
+}
+
+//DailyUnlockedReward.csv
+message DailyUnlockedRewardConfig
+{
+	int32 ID = 1; //ID
+	int32 ActivityID = 2; //活动ID
+	string Reward = 3; //进度奖励
+}
+
+//DailyUnlockedTask.csv
+message DailyUnlockedTaskConfig
+{
+	int32 ID = 1; //ID
+	int32 ActivityID = 2; //活动ID
+	int32 Day = 3; //第几天开启
+	repeated int32 TaskID = 4; //任务ID
+	repeated int32 TaskScore = 5; //任务积分
+}
+
+//DailyWin.csv
+message DailyWinConfig
+{
+	int32 ID = 1; //胜场次数
+	int32 RewardID = 2; //奖励ID
+	string Icon = 3; //奖励图标
+	string Anim = 4; //动画使用
+}
+
+//DefRecEquip.csv
+message DefRecEquipConfig
+{
+	int32 ID = 1; //ID
+	repeated int32 DefEquips = 2; //默认推荐装备列表
+	string DefEquipsDesc = 3; //默认推荐装备描述
+}
+
+//DispatchBuild.csv
+message DispatchBuildConfig
+{
+	int32 ID = 1; //BuildID
+	string BuildIcon = 2; //建筑图标
+	string BuildColor = 3; //建筑主题颜色
+	string Name = 4; //名字
+	int32 ComicID = 5; //所属动漫ID
+	int32 ConditionLevel = 6; //解锁等级
+	int32 MaxDispatchNum = 7; //最大可上阵英雄数量
+	repeated int32 Conditions = 8; //各英雄位解锁条件
+	int32 ExpBase = 9; //毅之华基数 独立 计算/10
+	repeated int32 ExpHeroCntAdd = 10; //人数加成比例
+	repeated int32 ExpOneHeroStarAdd = 11; //单英雄星级加成
+	repeated int32 CommonItemList = 12; //通用产出道具
+	repeated int32 CommonItemProBase = 13; //通用道具基础概率
+	repeated int32 CommonItemHeroCntProAdd = 14; //通用道具人数加成比例
+	repeated int32 CommonItemHeroStarProAdd = 15; //通用道具单英雄星级加成
+	string Desc = 16; //描述
+}
+
+//DispatchBuildLevel.csv
+message DispatchBuildLevelConfig
+{
+	int32 ID = 1; //ID
+	int32 BuildId = 2; //建筑ID
+	int32 Level = 3; //建筑等级
+	int32 ExpUpgrade = 4; //解锁所需毅之华 独立
+	int32 ExpLimit = 5; //毅之华产出上限 独立
+	int32 ExpCost = 6; //单位时间毅之华消耗 独立 计算/10
+	repeated int32 SpecialItemList = 7; //特殊产出道具id 累计
+	repeated int32 SpecialItemBase = 8; //特殊产出基数 累计 计算/10
+	repeated int32 SpecialItemProbability = 9; //特殊产出概率 累计
+	int32 CommonItemProAdd = 10; //通用产出道具概率加成 累计
+	repeated int32 CommonItemBase = 11; //通用产出道具基数 独立 计算/10
+}
+
+//DispatchEvent.csv
+message DispatchEventConfig
+{
+	int32 ID = 1; //设定星ID
+	string Name = 2; //设定星名字
+	repeated int32 OutputHeroId = 3; //产出需求英雄ID
+	repeated int32 OutputHeroStar = 4; //产出英雄需求星级
+	int32 OutputProbability = 5; //产出基础概率
+	int32 ItemId = 6; //关联道具id
+	int32 ComicID = 7; //关联漫画ID
+	string ShowImg = 8; //缩略图
+	int32 RewardID = 9; //奖励
+	int32 RewardType = 10; //产出方式
+}
+
+//DispatchHeroItem.csv
+message DispatchHeroItemConfig
+{
+	int32 ID = 1; //ID
+	int32 OutputHeroId = 2; //产出需求英雄ID
+	int32 OutputProbability = 3; //产出基础概率
+	int32 ItemId1 = 4; //关联道具id
+	repeated int32 Num1 = 5; //单次产出数量
+	int32 MaxNum1 = 6; //可产出上限
+}
+
+//DispatchSkillLibrary.csv
+message DispatchSkillLibraryConfig
+{
+	int32 ID = 1; //ID
+	int32 BufferType = 2; //buffer类型
+	repeated int32 Effect = 3; //效果参数
+	string Icon = 4; //技能图标
+	string Name = 5; //技能名称
+	string Desc = 6; //技能描述
+}
+
+//DistrictCity.csv
+message DistrictCityConfig
+{
+	int32 ID = 1; //ID
+	string Name = 2; //市
+	string Abbreviation = 3; //简称
+	int32 ParentID = 4; //上级ID
+}
+
+//DistrictCounty.csv
+message DistrictCountyConfig
+{
+	int32 ID = 1; //ID
+	string Name = 2; //县（区）
+	string Abbreviation = 3; //简称
+	int32 ParentID = 4; //上级ID
+}
+
+//DistrictProvince.csv
+message DistrictProvinceConfig
+{
+	int32 ID = 1; //ID
+	string Name = 2; //省
+	string Abbreviation = 3; //简称
+}
+
+//DmgHittedCureCorrect.csv
+message DmgHittedCureCorrectConfig
+{
+	int32 ID = 1; //UnitId
+	repeated int32 RateValueArray = 2; //参数值
+}
+
+//DraftProcess.csv
+message DraftProcessConfig
+{
+	int32 ID = 1; //游戏类型
+	int32 MatchTypeId = 2; //匹配类型
+	int32 IsOpen = 3; //是否开启
+	int32 MinProficiency = 4; //可选英雄需求熟练度
+	int32 MinHeroCnt = 5; //最低英雄数量
+	int32 MinRankBigLevel = 6; //要求最低大段位
+	repeated int32 TeamCampList = 7; //对战队伍类型
+	int32 TotalBanCnt = 8; //可ban总数
+	string BanPickTimeString = 9; //阶段顺序与阶段时间
+	string OperationString = 10; //各阶段操作位，按配置队伍顺序依次
+}
+
+//DropMain.csv
+message DropMainConfig
+{
+	int32 ID = 1; //id
+	int32 Type = 2; //类型
+	int32 Fixed = 3; //是否固定奖励
+	int32 MustSubID1 = 4; //必掉子表id
+	int32 MustSubID2 = 5; //必掉子表id
+	int32 MustSubID3 = 6; //必掉子表id
+	int32 MustSubID4 = 7; //必掉子表id
+	int32 ProbabilitySubID1 = 8; //掉落子表1
+	int32 Weight1 = 9; //权值
+	int32 ProbabilitySubID2 = 10; //掉落子表2
+	int32 Weight2 = 11; //权值
+	int32 ProbabilitySubID3 = 12; //掉落子表3
+	int32 Weight4 = 13; //权值
+	int32 SpecialSubID = 14; //激活子表id
+	int32 SpecialWeight = 15; //权值1
+	int32 Num = 16; //激活次数
+	int32 PeriodSubID1 = 17; //周期子表id1
+	int32 PeriodNum1 = 18; //周期次数1
+	int32 PeriodSubID2 = 19; //周期子表id2
+	int32 PeriodNum2 = 20; //周期次数2
+	int32 PeriodSubID3 = 21; //周期子表id3
+	int32 PeriodNum3 = 22; //周期次数3
+	int32 PeriodSubID4 = 23; //周期子表id4
+	int32 PeriodNum4 = 24; //周期次数4
+}
+
+//DropPreview.csv
+message DropPreviewConfig
+{
+	int32 ID = 1; //id
+	string Items = 2; //显示信息
+}
+
+//DropSub.csv
+message DropSubConfig
+{
+	int32 ID = 1; //id
+	repeated DropItemConfig DropItems = 2; //掉落数据
+}
+
+//DynamicInfo.csv
+message DynamicInfoConfig
+{
+	int32 ID = 1; //ID
+	int32 Hide = 2; //个人主页是否隐藏
+	int32 Condition = 3; //条件
+	int64 Desc = 4; //描述（多语言id）
+	int32 Group = 5; //组
+	int32 Priority = 6; //优先级
+}
+
+//Emoji.csv
+message EmojiConfig
+{
+	int32 ID = 1; //ID
+	string ResPrefix = 2; //资源前缀名
+	string ShowID = 3; //展示图片序号
+	int32 IsAutoPlay = 4; //是否在表情面板播放
+}
+
+//EntertainmentMastery.csv
+message EntertainmentMasteryConfig
+{
+	int32 ID = 1; //ID
+	int32 Level = 2; //等级
+	repeated int32 GameType = 3; //所属玩法
+	string Name = 4; //专精名称
+	string Icon = 5; //专精图标
+	string BackGround = 6; //专精底板
+	string Number = 7; //专精数字
+	int32 Score = 8; //专精所需最小积分
+	int32 ScoreMax = 9; //专精所需最大积分
+}
+
+//EntertainmentMedal.csv
+message EntertainmentMedalConfig
+{
+	int32 ID = 1; //ID
+	string Name = 2; //勋章名称
+	string Icon = 3; //勋章大图标
+	string IconSmall = 4; //勋章小图标
+	int32 Score = 5; //勋章所需积分
+	int32 ScoreMax = 6; //勋章所需最大积分
+	int32 IsBigLevel = 7; //是否大等级
+	string BigName = 8; //大等级名称
+	int32 LbsMaxLimit = 9; //LBS最大分数限制
+}
+
+//EntertainmentScore.csv
+message EntertainmentScoreConfig
+{
+	int32 ID = 1; //ID
+	string Name = 2; //活动名称
+	string Describe = 3; //活动描述
+	int32 Type = 4; //类型
+	int32 TypeParameter = 5; //类型参数
+	repeated int32 GameType = 6; //加成玩法
+	int32 Times = 7; //加成次数
+	int32 Score = 8; //积分数量
+	int32 Priority = 9; //优先级
+	string StarTime = 10; //开启时间
+	string EndTime = 11; //结束时间
+	int32 IsInActivity = 12; //活动列表是否可见
+	string BackGround = 13; //背景图
+}
+
+//EntertainmentScoreBase.csv
+message EntertainmentScoreBaseConfig
+{
+	int32 ID = 1; //ID
+	int32 GameType = 2; //玩法类型
+	int32 Level = 3; //专精等级
+	repeated int32 CommonType = 4; //双阵营积分名次奖励
+	repeated int32 DuelOne = 5; //单人吃鸡名次积分奖励
+	repeated int32 DuelTwo = 6; //双人吃鸡名次积分奖励
+	int32 DrawCupReward = 7; //平局积分奖励
+}
+
+//EntertainmentSeasonReward.csv
+message EntertainmentSeasonRewardConfig
+{
+	int32 ID = 1; //ID
+	int32 SeasonID = 2; //赛季ID
+	int32 Score = 3; //所需积分
+	repeated RewardConfig Reward = 4; //奖励
+	int32 IsBigReward = 5; //是否大奖
+	int32 MeDalID = 6; //勋章等级标志
+}
+
+//EntertainmentSeasonTask.csv
+message EntertainmentSeasonTaskConfig
+{
+	int32 ID = 1; //玩法ID
+	repeated int32 TaskID = 2; //任务ID
+	repeated int32 Score = 3; //积分奖励
+}
+
+//EnumLocation.csv
+message EnumLocationConfig
+{
+	int32 ID = 1; //ID
+	int32 Type = 2; //类型
+	int32 Enum = 3; //枚举
+	repeated int32 SubEnum = 4; //子类型
+	int32 Enable = 5; //是否启用
+	int32 SortOrder = 6; //排序规则
+	string Name1 = 7; //名字
+	string Name2 = 8; //名字后缀
+	string Param1 = 9; //参数1
+	string Param2 = 10; //参数2
+	string Desc = 11; //介绍
+}
+
+//Equip.csv
+message EquipConfig
+{
+	int32 ID = 1; //Id
+	int32 Type = 2; //携带物类型
+	string Name = 3; //名字
+	int32 MainAttrType = 4; //主属性
+	int32 MainAttrValue = 5; //属性数值
+	int32 MainSkill = 6; //主效果
+	int32 Quality = 7; //品质
+	string Icon = 8; //icon
+	repeated int32 AllowIp = 9; //限制IP
+	repeated int32 AllowHeroId = 10; //限制角色
+	int32 AllowHeroScore = 11; //限制对战积分
+	int32 MaxLevel = 12; //最大可养成等级
+}
+
+//EquipExtraAttr.csv
+message EquipExtraAttrConfig
+{
+	int32 Id = 1; //id
+	int32 Quality = 2; //品质
+	int32 AttrType = 3; //属性
+	repeated int32 Values = 4; //区间
+	int32 Weights = 5; //权重
+}
+
+//EquipQuality.csv
+message EquipQualityConfig
+{
+	int32 ID = 1; //品质
+	int32 Count = 2; //初始副属性条数
+	repeated int32 ExpList = 3; //携带物养成需求经验
+	int32 Exp = 4; //默认品质对应经验
+}
+
+//ErrorCode.csv
+message ErrorCodeConfig
+{
+	int32 ID = 1; //ID
+	string ErrorMsg = 2; //错误消息
+}
+
+//EventBanner.csv
+message EventBannerConfig
+{
+	int32 BannerID = 1; //ID
+	int32 UIGoTo = 2; //跳转途径(ID)
+	string WebPageID = 3; //跳转网页ID
+	int32 DisplayOrder = 4; //展示顺序
+	string StartTime = 5; //上架时间
+	string EndTime = 6; //下架时间
+	string BelongUI = 7; //资源图片
+	int32 DaysAfterCreating = 8; //创号X天后自动下架
+}
+
+//ExpSource.csv
+message ExpSourceConfig
+{
+	int32 ID = 1; //获取类型
+	int32 Exp = 2; //增加经验数值
+}
+
+//FetterPhoto.csv
+message FetterPhotoConfig
+{
+	int32 ID = 1; //ID
+	int32 ComicID = 2; //所属ip
+	string ImgName = 3; //合影名字
+	string ImgId = 4; //合影编号
+	repeated int32 GroupIDs = 5; //组ID
+	repeated int32 Progress = 6; //奖励所需进度值
+	repeated int32 Rewards = 7; //奖励
+	repeated int32 NeedMoneyId = 8; //领取需要消耗能量
+	string DisplayPicture = 9; //缩略图
+	repeated int32 HeroIDs = 10; //关联英雄列表
+	repeated string ProMaskIcons = 11; //宝箱奖励图标
+	string FetterObjName = 12; //对应的展示预制件名称
+	int32 SmallFetterMoveYMax = 13; //对应相机Y轴最大正偏移量
+	int32 SmallFetterMoveYMin = 14; //Y轴最大负偏移量
+	int32 SmallFetterMoveXMax = 15; //X轴最大正偏移量
+	int32 SmallFetterMoveXMin = 16; //X轴最大负偏移量
+	int32 FetterScale = 17; //羁绊相册缩放
+	int32 FetterPosX = 18; //羁绊相册偏移X
+	int32 FetterPosY = 19; //羁绊相册偏移Y
+	int32 SmallFetterMoveCoefficient = 20; //羁绊相册移动系数
+	int32 BigFetterMoveYMax = 21; //对应大图Y轴最大正偏移量
+	int32 BigFetterMoveYMin = 22; //对应大图Y轴最大负偏移量
+	int32 BigFetterMoveXMax = 23; //对应大图X轴最大正偏移量
+	int32 BigFetterMoveXMin = 24; //对应大图X轴最大负偏移量
+	int32 BigFetterMoveCoefficient = 25; //对应大图羁绊相册移动系数
+	repeated int32 JlvEXPReward = 26; //Jlv经验获得
+}
+
+//FightDragonBallScoreRevise.csv
+message FightDragonBallScoreReviseConfig
+{
+	int32 ID = 1; //id
+	int32 Proportion = 2; //比例(百分比)
+	int32 Type = 3; //类型
+	int32 Score = 4; //分值
+}
+
+//FightDragonBallScoreRule.csv
+message FightDragonBallScoreRuleConfig
+{
+	int32 ID = 1; //id
+	int32 MinScore = 2; //最低积分
+	int32 MaxScore = 3; //最高积分
+	int32 Type = 4; //保底类型
+}
+
+//FightReward.csv
+message FightRewardConfig
+{
+	int32 ID = 1; //id
+	int32 Type = 2; //类型
+	int32 Griding = 3; //大段位
+	int32 Score = 4; //评分 取整
+	repeated int32 ExtentReward = 5; //活动时奖励掉落
+	repeated int32 Reward = 6; //平时奖励掉落
+	repeated int32 ScratchcardRandom = 7; //任意道具掉落概率（可在Parameter配置每日上限）
+	int32 WinProficiency = 8; //胜利英雄熟练度
+	int32 WinPBExp = 9; //胜利增加的战令经验
+	int32 LostProficiency = 10; //失败英雄熟练度
+	int32 LostPBExp = 11; //失败增加的战令经验
+	repeated RewardConfig Fixedwards = 12; //固定奖励(不论输赢)
+	int32 FixedProficiency = 13; //固定英雄熟练度
+	int32 SurrenderProficiency = 14; //投降熟练度
+	int32 SurrenderPBExp = 15; //投降增加的战令经验
+}
+
+//FightRewardDragonBall.csv
+message FightRewardDragonBallConfig
+{
+	int32 ID = 1; //id
+	int32 Griding = 2; //大段位(需要删掉)
+	int32 DragonScore = 3; //龙珠积分(在其下面)
+	int32 Score = 4; //评分 取整
+	repeated int32 ExtentReward = 5; //活动时奖励掉落
+	repeated int32 Reward = 6; //平时奖励掉落
+	repeated int32 ScratchcardRandom = 7; //道具掉落概率
+	int32 WinProficiency = 8; //获胜熟练度
+	int32 WinPBExp = 9; //胜利增加的战令经验
+	int32 WinType = 10; //获胜积分类型(用于修正积分)
+	int32 WinScore = 11; //获胜基础积分
+	int32 LostPBExp = 12; //失败增加的战令经验
+	int32 FailProficiency = 13; //失败熟练度奖励
+	int32 FailType = 14; //失败积分类型(用于修正积分)
+	int32 FailScore = 15; //失败基础积分
+	int32 Rank1PBExp = 16; //第一名战令增加经验
+	int32 Rank1Proficiency = 17; //第一名英雄熟练度奖励
+	int32 Rank1Type = 18; //第一名积分类型(用于修正积分)
+	int32 Rank1Score = 19; //第一名基础积分
+	int32 Rank2PBExp = 20; //第二名战令增加经验
+	int32 Rank2Proficiency = 21; //第二名英雄熟练度奖励
+	int32 Rank2Type = 22; //第二名积分类型(用于修正积分)
+	int32 Rank2Score = 23; //第二名基础积分
+	int32 Rank3PBExp = 24; //第三名战令增加经验
+	int32 Rank3Proficiency = 25; //英雄熟练度奖励
+	int32 Rank3Type = 26; //第三名积分类型(用于修正积分)
+	int32 Rank3Score = 27; //第三名基础积分
+}
+
+//FightRewardGuard.csv
+message FightRewardGuardConfig
+{
+	int32 ID = 1; //id
+	int32 EndType = 2; //结局类型
+	int32 ClearanceTime = 3; //通关时间
+	int32 GuardWaveNum = 4; //守卫波数
+	repeated RewardConfig Rewards = 5; //对应奖励
+	int32 Proficiency = 6; //英雄熟练度奖励
+}
+
+//FirstPay.csv
+message FirstPayConfig
+{
+	int32 ID = 1; //奖励节点ID
+	int32 RewardID = 2; //奖励ID
+	string Description = 3; //备注
+}
+
+//FriendRelationAdd.csv
+message FriendRelationAddConfig
+{
+	int32 ID = 1; //id
+	int32 Type = 2; //类型
+	string Desc = 3; //参数
+	int32 Addvalue = 4; //增加好友度
+	int32 Limit = 5; //是否计算上限
+}
+
+//FriendRelationLevel.csv
+message FriendRelationLevelConfig
+{
+	int32 ID = 1; //等级
+	int32 Value = 2; //需求亲密度
+	repeated string LevelIcons = 3; //图标
+	repeated string Icons = 4; //图标
+	string RelationDesc = 5; //亲密关系描述
+	string RewardDesc = 6; //亲密奖励描述
+	repeated RewardConfig Rewards = 7; //奖励
+}
+
+//FuncOpen.csv
+message FuncOpenConfig
+{
+	int32 ID = 1; //ID
+	int32 ModuleId = 2; //模块id
+	string LvUnLockShowName = 3; //功能名字
+	int32 JLevel = 4; //解锁需要账号总奖杯数
+	repeated int32 Type = 5; //系统解锁类型
+	repeated int32 UnlockCondition = 6; //解锁参数
+	string Icon = 7; //图标
+	string Toast = 8; //功能能未开启提示
+	int32 IsWaitMatchIn = 9; //队伍中是否可以进入
+}
+
+//GMOutBattleAct.csv
+message GMOutBattleActConfig
+{
+	int32 ID = 1; //ID
+	int32 Order = 2; //Order
+	string Act = 3; //指令
+	repeated int32 Params = 4; //
+	string ActDesc = 5; //指令名称
+}
+
+//GMOutBattleDesc.csv
+message GMOutBattleDescConfig
+{
+	int32 ID = 1; //ID
+	string Act = 2; //指令
+	string Title = 3; //类型
+	string Example = 4; //使用用例：
+}
+
+//GameBattleCupReward.csv
+message GameBattleCupRewardConfig
+{
+	int32 ID = 1; //ID
+	int32 CupMinLimit = 2; //英雄奖杯区间上限
+	int32 CupMaxLimit = 3; //英雄奖杯区间下限
+	repeated int32 CommonType = 4; //双阵营奖杯名次奖励
+	repeated int32 DuelOne = 5; //单人吃鸡名次奖杯奖励
+	repeated int32 DuelTwo = 6; //双人吃鸡名次奖杯奖励
+	int32 DrawCupReward = 7; //平局奖杯奖励
+	int32 ChallengeBonusCup = 8; //迎难而上加成奖杯
+}
+
+//GameBattleCupScore.csv
+message GameBattleCupScoreConfig
+{
+	int32 ID = 1; //唯一ID
+	int32 GameModel = 2; //模式
+	int32 GameType = 3; //游戏类型
+	int32 GameCupFactor = 4; //杯数系数(填写值/100)
+}
+
+//GameBattleCupStraightwin.csv
+message GameBattleCupStraightwinConfig
+{
+	int32 ID = 1; //ID
+	int32 Straightwin = 2; //连胜数量
+	int32 WinExtraCup = 3; //额外奖杯数量
+}
+
+//GameBattleHeroRandom.csv
+message GameBattleHeroRandomConfig
+{
+	int32 ID = 1; //ID
+	int32 HeroGlobalOnly = 2; //随机模式
+	int32 RandomCnt = 3; //随机次数
+	repeated RewardConfig ConsumeItemList = 4; //消耗道具
+	repeated int32 LimitHeroID = 5; //单独限免英雄ID
+	repeated int32 FixedHero = 6; //固定随机英雄
+}
+
+//GameBattleMode.csv
+message GameBattleModeConfig
+{
+	int32 ID = 1; //ID
+	int32 GameType = 2; //游戏类型
+	string Name = 3; //地图名字
+	string ComicName = 4; //漫画中的地名
+	string Logo = 5; //玩法logo图标
+	string Icon = 6; //玩法封面小图片
+	string Icon2 = 7; //玩法封面大图片
+	string RoomIcon = 8; //房间内玩法展示图
+	string MatchingIconLogo = 9; //匹配中显示的图片-玩法标题
+	string MatchingblurIcon = 10; //匹配中显示的图片-中间模糊大图
+	string MatchingIcon = 11; //匹配中显示的图片-中间大图
+	string MatchingIconLU = 12; //匹配中显示的图片-左上
+	string MatchingIconLD = 13; //匹配中显示的图片-左下
+	string MatchingIconRU = 14; //匹配中显示的图片-右上
+	string MatchingIconRD = 15; //匹配中显示的图片-右下
+	string IconMap = 16; //地图图片
+	string TypeName = 17; //游戏模式名字
+	string MapDesc = 18; //地图描述
+	string PVPType = 19; //玩法标签（3v3）
+	int32 PVPColourType = 20; //玩法标签底板颜色
+	repeated int32 ResultStep = 21; //结算流程
+	int32 ShowRecruit = 22; //是否显示召集
+	repeated int32 RecruitChatType = 23; //召集聊天类型
+	repeated int32 RecruitTemplate = 24; //组队召集模板
+	repeated int32 RecruitBranchTemplate = 25; //组队召集分路选择模板
+	repeated int32 InvitedTab = 26; //邀请列表标签
+	int32 IsOpen = 27; //是否开启
+	int32 BattleStageID = 28; //战场ID
+	int32 EnterType = 29; //入口类型
+	int32 MatchNumType = 30; //匹配人数类型
+	int32 MatchTeamPlayerNum = 31; //匹配房间队伍人数
+	int32 MatchSubType = 32; //匹配子类型
+	string MatchNumDesc = 33; //匹配人数描述
+	int32 MatchIsOpen = 34; //匹配是否开启(1开 0或不配关)
+	int32 TeamPlayerNum = 35; //每队多少人
+	int32 MaxTeamNum = 36; //最大队伍数量
+	int32 MinTeamNum = 37; //最小队伍数量
+	int32 CustomizeRoomCanUse = 38; //开房间是否启用
+	repeated int32 CampPlayerNum = 39; //房间每阵营最多人数
+	int32 CustomizeRoomMixGroup = 40; //开房间最小阵营数
+	int32 CustomizeRoomBGType = 41; //开房间背景样式
+	int32 WinRank = 42; //算作胜利的最低名次
+	int32 MatchId = 43; //匹配配置Id
+	int32 RobotMode = 44; //人机模式
+	int32 RobotTimeOut = 45; //超时填充机器人时间Id
+	repeated int32 LevelAffix = 46; //关卡事件
+	repeated string AffixStorm = 47; //事件风暴
+	repeated int32 LevelAffixGameRatio = 48; //关卡事件概率
+	int32 MapFeatures = 49; //地图特性
+	int32 CupNum = 50; //开放条件（总奖杯数）
+	int32 PlayTime = 51; //游玩时长
+	int32 OpenHookAI = 52; //是否开启托管AI
+	int32 IsUseAITree = 53; //电脑是否启用AI
+	int32 IsVisible = 54; //玩家是否可见
+	int32 HangUpTime = 55; //挂机AI启动时间挂机AI启动时间(毫秒)
+	int32 HangUpShowUITime = 56; //挂机AI启动时间挂机AI启动时间(毫秒)
+	repeated int32 AiHeroBanPool = 57; //AI不可随机英雄
+	string Extremelineup = 58; //极端阵容
+}
+
+//GameBattleModeDescription.csv
+message GameBattleModeDescriptionConfig
+{
+	int32 ID = 1; //玩法模式id
+	string DescriptionImage = 2; //玩法说明图片
+	repeated int32 DescriptionText = 3; //玩法说明文本
+}
+
+//GameBattleModeRobot.csv
+message GameBattleModeRobotConfig
+{
+	int32 ID = 1; //GameType*1000+真人数
+	int32 Camp1Num = 2; //阵营1的真人数
+	int32 Camp2Num = 3; //阵营2的真人数
+	int32 Camp3Num = 4; //阵营3的真人数
+	int32 Camp4Num = 5; //阵营4的真人数
+	int32 Camp5Num = 6; //阵营5的真人数
+	int32 Camp6Num = 7; //阵营6的真人数
+	int32 Camp7Num = 8; //阵营7的真人数
+	int32 Camp8Num = 9; //阵营8的真人数
+	int32 Camp9Num = 10; //阵营9的真人数
+	int32 Camp10Num = 11; //阵营10的真人数
+}
+
+//GameBattleModeRobotTimeOut.csv
+message GameBattleModeRobotTimeOutConfig
+{
+	int32 ID = 1; //ID
+	repeated int32 GameType1 = 2; //卷轴争夺
+	repeated int32 GameType2 = 3; //单人吃鸡
+	repeated int32 GameType3 = 4; // 双人吃鸡
+	repeated int32 GameType4 = 5; //武道会
+	repeated int32 GameType5 = 6; //3v3团竞
+	repeated int32 GameType6 = 7; // 3v3无限城
+	repeated int32 GameType7 = 8; //3v3咒术回战
+	repeated int32 GameType8 = 9; //3v3占点
+	repeated int32 GameType9 = 10; //3v3顶上战争
+	repeated int32 GameType10 = 11; //无限列车
+	repeated int32 GameType11 = 12; //3v3歼灭战争
+	repeated int32 GameType12 = 13; //3v3忍界大战
+	repeated int32 GameType15 = 14; //龙珠
+	repeated int32 GameType17 = 15; //搜打撤
+}
+
+//GameBattleNormalMapRule.csv
+message GameBattleNormalMapRuleConfig
+{
+	int32 ID = 1; //格子id
+	string OpenTimestamp = 2; //开启时间戳
+	string DailyOpenTime = 3; //每日开启时间
+	int32 Type = 4; //所属模式
+	repeated int32 GameBattleModeId = 5; //玩法地图池Id
+	int32 FirstRefreshTime = 6; //更新配置后第一次的刷新时间（分钟）
+	repeated int32 RefreshTime = 7; //常规刷新间隔（分钟）
+	int32 Order = 8; //玩法排序（小的在前）
+	int32 InterfaceType = 9; //样式类型
+	int32 IsUsed = 10; //格子是否启用
+	int32 CombinationId = 11; //关联id
+	string CombinationName = 12; //关联玩法名字
+	string AffixTime = 13; //词缀风暴开启时间
+	string PreviewTimes = 14; //预告时间
+	int32 Days = 15; //预告持续天数
+	int32 RefreshText = 16; //玩法刷新提示类型
+}
+
+//GameBattleReward.csv
+message GameBattleRewardConfig
+{
+	int32 ID = 1; //ID
+	int32 GameType = 2; //游戏类型
+	repeated RewardConfig BattlePassEXP = 3; //名次对应的战令经验
+}
+
+//GameSet.csv
+message GameSetConfig
+{
+	int32 ID = 1; //ID
+	int32 ServerIndex = 2; //服务器存储下标
+	int32 OperateType = 3; //存储位置
+	int32 Name = 4; //名称多语言
+	int32 ValueOn = 5; //开/关
+	int32 DefaultValue = 6; //默认值
+	repeated int32 ValueRange = 7; //值范围
+	int32 TipType = 8; //提示类型
+	string TipTitle = 9; //提示标题
+	string TipImage = 10; //提示图片
+	repeated int32 TipImageSize = 11; //提示图片大小
+	repeated int32 TipContents = 12; //提示文本
+}
+
+//GameUI.csv
+message GameUIConfig
+{
+	string ID = 1; //ID
+	int32 BackCache = 2; //是否回退
+	int32 UISystemID = 3; //系统ID
+	int32 IsFullScreen = 4; //是否全屏(1为全屏)
+	int32 SortingOrder = 5; //预制件层级
+	string BelongUI = 6; //归属UI
+	int32 BelongCfgID = 7; //对应配置ID
+	int32 IsShowHUD = 8; //是否显示Top条
+	int32 IsShowTitle = 9; //是否展示标题
+	string Title = 10; //标题
+	int32 BackType = 11; //返回按钮样式
+	int32 IsShowRule = 12; //是否显示规则说明
+	int32 EnableRuleRedDot = 13; //是否启用规则说明红点
+	string RuleTitle = 14; //弹窗标题
+	repeated int32 RuleSubTitle = 15; //UI规则副标题
+	repeated int32 RuleContentList = 16; //UI规则内容
+	int32 IsShowBackLobby = 17; //是否展示返回大厅按钮
+	int32 IsShowPhoneInfo = 18; //是否展示手机信息
+	repeated int32 ShowItemIDs = 19; //需要展示的货币ID
+	int32 IsShowRole = 20; //界面是否展示角色模型
+}
+
+//GameUIClass.csv
+message GameUIClassConfig
+{
+	int32 ID = 1; //ID
+	string Content = 2; //文字内容
+}
+
+//GroupDetail.csv
+message GroupDetailConfig
+{
+	int32 ID = 1; //GroupID
+	int32 Type = 2; //类型
+	repeated int32 Member = 3; //组内成员
+	string StrID = 4; //字符串ID
+	string Describe = 5; //描述
+}
+
+//GrowthTask.csv
+message GrowthTaskConfig
+{
+	int32 ID = 1; //任务id
+	int32 PlayerTaskType = 2; //玩家任务类型
+	int32 TaskType = 3; //任务类型
+	int32 Param1 = 4; //参数1
+	int32 Param2 = 5; //参数2
+	string Title = 6; //标题
+	string Desc = 7; //任务描述
+	repeated RewardConfig Rewards = 8; //奖励
+	int32 UnlockLv = 9; //解锁等级
+}
+
+//GuildLevel.csv
+message GuildLevelConfig
+{
+	int32 Level = 1; //战队等级
+	int32 MemberContain = 2; //容纳人数
+	int32 NeedActive = 3; //需求累计活跃度
+	repeated RewardConfig Consume = 4; //配置的为创建消耗
+}
+
+//GuildParameter.csv
+message GuildParameterConfig
+{
+	int32 ID = 1; //ID
+	int32 Param1 = 2; //参数1
+	float Param2 = 3; //参数2
+	string Param3 = 4; //参数3
+	repeated int32 Param4 = 5; //参数4
+}
+
+//GuildPortrait.csv
+message GuildPortraitConfig
+{
+	int32 ID = 1; //ID
+	int32 Type = 2; //类型
+	string Icon = 3; //头像
+	int32 Condition = 4; //条件
+	repeated int32 Parm = 5; //参数
+}
+
+//GuildProficiencyRank.csv
+message GuildProficiencyRankConfig
+{
+	int32 ID = 1; //ID
+	repeated int32 Ranking = 2; //排名
+	int32 ShowRewardID = 3; //奖励展示ID
+	int32 RewardID = 4; //奖励ID（不带头像框）
+	int32 MailID = 5; //邮件id
+	int32 Type = 6; //漫画Id
+}
+
+//HandBook.csv
+message HandBookConfig
+{
+	int32 ID = 1; // ID
+	int32 IsFilter = 2; //是否展示筛选
+	string Name = 3; //漫画名称
+	int32 Order = 4; //排序
+	string ImgLogo = 5; //IPLOGO
+	string ThemeColor = 6; //IP颜色
+	string Desc = 7; //漫画描述
+	int32 IsShow = 8; //是否展示漫画
+	string Icon = 9; //漫画封面
+	repeated int32 ClassList = 10; //包含类别
+	string NameEn = 11; //英文名
+	string NameEnIcon = 12; //英文名图片 创建用
+	string Icon2 = 13; //创角使用漫画封面
+	string Copyright = 14; //C标
+	string AchieveIcon = 15; //成就黑白立绘
+	string AchieveBg = 16; //成就背景
+}
+
+//HandBookClass.csv
+message HandBookClassConfig
+{
+	int32 ID = 1; //ID
+	string Name = 2; //名称
+	string Belong = 3; //所属漫画
+	repeated int32 HeroList = 4; //包含英雄
+	repeated int32 CardPosX = 5; //卡片水平位置
+	repeated int32 CardPosY = 6; //卡片垂直位置
+	repeated int32 CardLevel = 7; //卡片层级
+	repeated int32 HeroRedPointPosXList = 8; //英雄红点X坐标
+	repeated int32 HeroRedPointPosYList = 9; //英雄红点Y坐标
+}
+
+//Hero.csv
+message HeroConfig
+{
+	int32 ID = 1; //ID
+	int32 Enabled = 2; //是否启用
+	int32 EnabledComputerSelect = 3; //是否禁用系统自选随机
+	int32 EnabledShare = 4; //是否可被共享
+	int32 ComicID = 5; //所属动漫ID
+	int32 ViewOrder = 6; //排序顺序
+	string Name = 7; //英雄名称
+	int32 DefaultSkinID = 8; //默认皮肤ID
+	repeated int32 MainTagID = 9; //职业
+	string MainTagIcon = 10; //职业图标
+	repeated int32 RecPositionList = 11; //推荐分路
+	int32 BuffDemondType = 12; //Buff需求
+	int32 BattlePosition = 13; //团战定位
+	string AssistTag = 14; //角色介绍副标签（定位）
+	string Speciality = 15; //角色介绍特长
+	string Period = 16; //角色介绍时期
+	repeated int32 Character = 17; //角色介绍特性（1000半格，共10格）
+	repeated int32 DefRecEquips = 18; //默认推荐装备列表
+	repeated int32 DefRecSummonSkills = 19; //默认召唤师技能
+	repeated int32 BattleResultDataType = 20; //结算显示属性
+	string GameDesc = 21; //玩法描述
+	string NickName = 22; //别号
+	string NickNameIcon = 23; //漫画头像
+	string SetBookIcon = 24; //设定集展示图
+	string NameEn = 25; //英文名
+	string Slogan = 26; //口号
+	repeated int32 ShortWords = 27; //角色气泡台词区间
+	int32 Quality = 28; //品级
+	int32 StarLevel = 29; //星级
+	int32 CompoundID = 30; //合成关联SwitchID
+	repeated int32 ProficiencyLevelRewardID = 31; //熟练度等级奖励
+	repeated int32 HeroCardCR = 32; //英雄卡牌颜色
+	repeated int32 HeroCardShadingCR = 33; //英雄卡牌花纹颜色
+	int32 HeroType = 34; //英雄类型
+	string HandBookIcon = 35; //创建人物图/图鉴
+	int32 Taskable = 36; //是否可任务解锁
+	int32 Switchble = 37; //是否可兑换进度值
+	int32 TaskItemCost = 38; //英雄获取判断道具
+	int32 TaskValueCost = 39; //解锁任务所需进度值
+	int32 Achieveable = 40; //是否拥有成就
+	int32 AchieveRewardItem = 41; //成就奖励判断道具
+	repeated int32 AchieveRewardCost = 42; //成就奖励所需进度值
+	repeated int32 AchieveReward = 43; //成就奖励
+	int32 DirectMarketHeroDetailsViewCVID = 44; //英雄直购详情界面CV AudioPlayPoolID
+	repeated int32 AdaptiveHeroIDs = 45; //适配英雄列表
+	repeated int32 RestrainHeroIDs = 46; //被克制英雄列表
+	string LbsBg = 47; //国服最强十名的背景
+	string LbsShareBg = 48; //LBS分享背景
+	string MainCityScreenVideo = 49; //主界面屏幕视频路径
+	int32 VictoryAction = 50; //初始胜利动作ID
+	int32 StartAction = 51; //初始入场动作ID
+	int32 IsMainCharacter = 52; //是否是主角
+}
+
+//HeroAIFrame.csv
+message HeroAIFrameConfig
+{
+	int32 ID = 1; //UnitId
+	string IPCTree = 2; //兼修行为树路径
+	string OfflineTree = 3; //离线行为树
+	repeated int32 DefaultAILineTypeArray = 4; //默认分路
+	repeated int32 DefaultAIProp = 5; //默认装备
+	repeated int32 DefaultAISummonerSkill = 6; //默认技能
+	repeated string DefaultAITreeArray = 7; //默认行为树路径
+	repeated string GtNormalLineTypeArray = 8; //标准匹配模式分路
+	repeated string GtNormalProp = 9; //标准匹配装备
+	repeated string GtNormalSummonerSkill = 10; //标准匹配技能
+	repeated string GtNormalAITreeArray = 11; //标准匹配模式行为树路径
+	repeated string GtLadderLineTypeArray = 12; //5v5排位赛模式分路
+	repeated string GtLadderProp = 13; //5v5排位赛装备
+	repeated string GtLadderSummonerSkill = 14; //5v5排位赛技能
+	repeated string GtLadderAITreeArray = 15; //5v5排位赛模式行为树路径
+	repeated string GtTrainingLineTypeArray = 16; //训练模式分路
+	repeated string GtTrainingProp = 17; //训练模式装备
+	repeated string GtTrainingSummonerSkill = 18; //训练模式技能
+	repeated string GtTrainingAITreeArray = 19; //训练模式行为树路径
+	repeated string GtCustomLineTypeArray = 20; //自定义房间模式分路
+	repeated string GtCustomProp = 21; //自定义房间模式装备
+	repeated string GtCustomSummonerSkill = 22; //自定义房间模式技能
+	repeated string GtCustomAITreeArray = 23; //自定义房间模式行为树路径
+	repeated string GtDragonBallTournamentLineTypeArray = 24; //龙珠争霸赛分路
+	repeated string GtDragonBallTournamentProp = 25; //龙珠争霸赛装备
+	repeated string GtDragonBallTournamentSummonerSkill = 26; //龙珠争霸赛技能
+	repeated string GtDragonBallTournamentAITreeArray = 27; //龙珠争霸赛行为树
+	repeated string GtRobotLineTypeArray = 28; //人机分路
+	repeated string GtGtRobotProp = 29; //人机装备
+	repeated string GtGtRobotSummonerSkill = 30; //人机技能
+	repeated string GtGtRobotAITreeArray = 31; //人机行为树
+	repeated string GtGuardLineTypeArray = 32; //守卫木叶模式分路
+	repeated string GtGuardAITreeArray = 33; //守卫木叶模式行为树
+	repeated string GtFeaturesLineTypeArray = 34; //特色模式分路
+	repeated string GtFeaturesAITreeArray = 35; //特色模式行为树
+	repeated string GtPeakLineTypeArray = 36; //巅峰赛模式分路
+	repeated string GtPeakAITreeArray = 37; //巅峰赛模式行为树
+	repeated string GtTeamLineTypeArray = 38; //战队赛分路
+	repeated string GtTeamAITreeArray = 39; //战队赛行为树
+	repeated string GtHeroSurvivalLineTypeArray = 40; //英雄生存乱斗分路
+	repeated string GtHeroSurvivalAITreeArray = 41; //英雄生存乱斗行为树
+	repeated string GtRacingLineTypeArray = 42; //竞速模式分路
+	repeated string GtRacingAITreeArray = 43; //竞速模式行为树
+	repeated string GTGemCraftLineTypeArray = 44; //宝石争夺分路
+	repeated string GTGemCraftProp = 45; //宝石争夺装备
+	repeated string GTGemCraftSummonerSkill = 46; //宝石争夺技能
+	repeated string GTGemCraftAITreeArray = 47; //宝石争夺行为树
+	repeated string GTBattlegroundsLineTypeArray = 48; //吃鸡分路
+	repeated string GTBattlegroundsProp = 49; //吃鸡装备
+	repeated string GTBattlegroundsSummonerSkill = 50; //吃鸡技能
+	repeated string GTBattlegroundsAITreeArray = 51; //吃鸡行为树
+}
+
+//HeroApprovalsLevel.csv
+message HeroApprovalsLevelConfig
+{
+	int32 Level = 1; //Level
+	int32 NextApprovals = 2; //升级所需认可度
+}
+
+//HeroApprovalsLevelReward.csv
+message HeroApprovalsLevelRewardConfig
+{
+	int32 ID = 1; //id
+	int32 HeroID = 2; //英雄ID
+	int32 Level = 3; //等级
+	repeated RewardConfig Rewards = 4; //等级奖励
+	repeated int32 UnlockCVIds = 5; //解锁CV列表
+	repeated int32 UnlockBiographyIds = 6; //解锁传记列表
+}
+
+//HeroAwake.csv
+message HeroAwakeConfig
+{
+	int32 ID = 1; //ID
+	int32 HreoId = 2; //角色id
+	int32 Order = 3; //界面排序
+	int32 FrontId = 4; //前置id
+	int32 NextId = 5; //后置id
+	repeated int32 SrcSkillId = 6; //原技能id
+	repeated int32 SrcSkillId_2 = 7; //原技能id
+	repeated int32 AwakeSkillId = 8; //觉醒技能id
+	int32 AwakeLogicId = 9; //逻辑判断id（无用）
+	repeated RewardConfig AwakeCost = 10; //觉醒技能消耗
+	string Desc_1 = 11; //觉醒描述
+	string Desc_2 = 12; //觉醒描述
+	string Name = 13; //觉醒名字
+	string Icon = 14; //觉醒图标
+	string Icon2 = 15; //觉醒序号图标
+	repeated int32 AwakeTags = 16; //觉醒标签
+	repeated string AwakeVideo = 17; //觉醒视频
+}
+
+//HeroBiography.csv
+message HeroBiographyConfig
+{
+	int32 ID = 1; //序号
+	int32 HeroId = 2; //英雄ID
+	int32 DefaultUnlocked = 3; //默认解锁
+	int32 Visible = 4; //是否在档案界面显示
+	string Name = 5; //传记
+	string Desc = 6; //传记描述
+	int32 UnlockLevel = 7; //解锁等级
+	string Race = 8; //角色信息卡生日
+	string Hight = 9; //角色信息卡兴趣
+	string Energy = 10; //角色信息卡血型
+	string Place = 11; //角色信息卡声优
+	string Influence = 12; //初次登场
+	string Identity = 13; //角色信息卡身份
+	string Story = 14; //角色信息卡背景故事
+}
+
+//HeroConnection.csv
+message HeroConnectionConfig
+{
+	int32 ID = 1; //英雄ID
+	string AllImg = 2; //英雄立绘
+	string HeadIcon = 3; //英雄头像
+	repeated string ConnectionID = 4; //羁绊英雄ID
+	repeated string IconLayer = 5; //头像层级
+	string ConnectionText = 6; //羁绊英雄关系文本
+	repeated string LevelAttr = 7; //等级属性加成
+	repeated string AwakeLevelAttr = 8; //觉醒等级属性加成
+}
+
+//HeroCupLevel.csv
+message HeroCupLevelConfig
+{
+	int32 ID = 1; //ID
+	int32 Level = 2; //等级显示
+	int32 Cup = 3; //奖杯总量
+	string Icon = 4; //奖杯等级图标
+}
+
+//HeroDirectBuy.csv
+message HeroDirectBuyConfig
+{
+	int32 ID = 1; //ID
+	int32 StepType = 2; //阶段类型
+	int32 StepID = 3; //阶段ID
+	repeated int32 HeroIDs = 4; //所属角色
+	int32 MaxRange = 5; //最大展示范围
+	int32 Quality = 6; //存放的英雄品质
+	RewardConfig Cost1 = 7; //角色券消耗
+	RewardConfig Cost2 = 8; //钻石消耗
+	RewardConfig ChangeMoney = 9; //品质货币转化
+	int32 Discount = 10; //打折
+	string NewEndTime = 11; //上新结束时间
+	string UnlockTime = 12; //解锁时间
+	int32 UnlockTask = 13; //解锁任务
+	int32 LinkBP = 14; //链接战令
+	int32 IsSeniorBP = 15; //是否高级战令
+	int32 IsCirculate = 16; //是否循环（1是）
+	repeated RewardConfig CirculateReward = 17; //循环奖励
+	int32 IsInitHero = 18; //是否初始英雄（1是）
+}
+
+//HeroDispatch.csv
+message HeroDispatchConfig
+{
+	int32 ID = 1; //ID
+	int32 BuildId = 2; //建筑ID
+	int32 HeroId = 3; //英雄ID
+	int32 ProductTime = 4; //探索所需时长
+}
+
+//HeroEssenceCommonObtain.csv
+message HeroEssenceCommonObtainConfig
+{
+	int32 ID = 1; //ID
+	int32 CupMinLimit = 2; //英雄奖杯区间上限
+	int32 CupMaxLimit = 3; //英雄奖杯区间下限
+	repeated int32 CommonType = 4; //双阵营专精奖励
+	repeated int32 DuelOne = 5; //单人吃鸡名次专精奖励
+	repeated int32 DuelTwo = 6; //双人吃鸡名次专精奖励
+	int32 DrawEssenceReward = 7; //平局专精奖励
+}
+
+//HeroEssenceLevel.csv
+message HeroEssenceLevelConfig
+{
+	int32 ID = 1; //等级
+	int32 NeedEssence = 2; //专精节点
+}
+
+//HeroEssenceObtainFactor.csv
+message HeroEssenceObtainFactorConfig
+{
+	int32 ID = 1; //唯一ID
+	int32 GameMode = 2; //模式
+	int32 GameType = 3; //游戏类型
+	int32 EssenceFactor = 4; //专精点系数（填写值/100）
+}
+
+//HeroEssenceReward.csv
+message HeroEssenceRewardConfig
+{
+	int32 ID = 1; //ID
+	int32 EssenceLevel = 2; //等级
+	int32 HeroId = 3; //英雄id
+	repeated RewardConfig EssenceReward = 4; //专精奖励
+	string Icon1 = 5; //专精图标1
+	string Icon2 = 6; //专精奖励图标2
+}
+
+//HeroExclusion.csv
+message HeroExclusionConfig
+{
+	int32 ID = 1; //ID
+	int32 OnlyId = 2; //英雄唯一id
+	string Name = 3; //英雄名称
+}
+
+//HeroForCreate.csv
+message HeroForCreateConfig
+{
+	int32 ID = 1; //ID
+	string HandBookIcon = 2; //创建人物图
+	string HandBookBackIcon = 3; //创建人物背小幅背景图标
+	repeated int32 CardPos = 4; //创建人物图位置
+	string RoleColor = 5; //创建人物配色
+}
+
+//HeroGainTask.csv
+message HeroGainTaskConfig
+{
+	int32 ID = 1; //ID
+	int32 HeroID = 2; //英雄ID
+	int32 Type = 3; //任务类型
+	int32 SortOrder = 4; //排序
+	string Name = 5; //任务名称
+	string Icon = 6; //任务ICON
+	string Desc = 7; //任务描述
+	int32 ConditionType = 8; //条件类型
+	repeated int32 Params = 9; //附属条件
+	int32 RewardID = 10; //奖励ID
+	int32 HideType = 11; //隐藏类型
+	repeated int32 ProTaskId = 12; //前置任务ID
+	repeated int32 NextTaskId = 13; //后置任务ID
+	string GoToGameUIID = 14; //跳转界面
+	int32 GoToParam = 15; //跳转参数
+	int32 JlvEXPReward = 16; //Jlv经验获得
+	int32 IsDirect = 17; //是否可直接完成
+	int32 DirectMoney = 18; //直接完成需求货币
+	int32 DirectCost = 19; //直接完成消耗
+	string FinishIcon = 20; //任务完成ICON
+	string DescWorld = 21; //世界观描述
+	int32 IsPer = 22; //是否累积
+}
+
+//HeroInfoTag.csv
+message HeroInfoTagConfig
+{
+	int32 ID = 1; //ID
+	string TagIcon = 2; //图标名称
+	string TagName = 3; //标签
+	int32 Belong = 4; //归属分类
+}
+
+//HeroLevel.csv
+message HeroLevelConfig
+{
+	int32 ID = 1; //等级ID
+	repeated RewardConfig LevelCost = 2; //升级消耗（升到下一级）
+}
+
+//HeroLevelAttr.csv
+message HeroLevelAttrConfig
+{
+	int32 ID = 1; //ID
+	int32 HeroId = 2; //角色id
+	int32 Level = 3; //等级
+	int32 UintAttrbuteID = 4; //属性ID
+}
+
+//HeroLimitAttribute.csv
+message HeroLimitAttributeConfig
+{
+	int32 Id = 1; //id
+	int32 HeroId = 2; //英雄id
+	int32 Level = 3; //极限属性等级
+	repeated RewardConfig ConsumeItemList = 4; //消耗道具id
+	repeated RewardConfig UpgradeItemList = 5; //升级奖励id
+	repeated int32 AttrValueID = 6; //固定值属性ID
+	repeated int32 AttrRateID = 7; //比率属性ID
+}
+
+//HeroLocation.csv
+message HeroLocationConfig
+{
+	int32 ID = 1; //ID
+	int32 Type = 2; //类型
+	int32 Enum = 3; //枚举
+	string Name = 4; //名字
+	string Name2 = 5; //名字后缀
+	string IconName = 6; //标准图标
+	string BlackIconName = 7; //黑背景图标
+	string Desc = 8; //介绍
+}
+
+//HeroObtainGuide.csv
+message HeroObtainGuideConfig
+{
+	int32 ID = 1; //序号
+	repeated int32 Heros = 2; //目标英雄
+	repeated int32 UIGoToIDs = 3; // 关联跳转ID
+	string UIPrefabName = 4; //UI预制体
+	string MainFrameBanner = 5; //主界面入口
+}
+
+//HeroPreview.csv
+message HeroPreviewConfig
+{
+	int32 ID = 1; //ID
+	int32 UnitID = 2; //英雄ID
+	string PreviewAvatarPrefabABPath = 3; //预览角色预制AB包路径
+	string PreviewAvatarTimelineABPath = 4; //预览角色Timeline预制AB包路径
+	string PreviewAvatarEffectABPath = 5; //预览角色特效AB包路径
+	string PreviewAvatarSoundABPath = 6; //预览角色音效AB包路径
+	string PreviewAvatarFMODSoundNames = 7; //预览角色音效资源列表
+	repeated int32 PreviewAvatarPos = 8; //预览角色坐标
+	repeated int32 PreviewAvatarScal = 9; //预览角色缩放
+	string PreviewSceneName = 10; //预览场景名称
+	string PreviewSceneMp4 = 11; //角色背景视频
+	string PreviewSceneBGM = 12; //预览场景背景音乐
+	int32 PreviewSceneBGMVolume = 13; //预览场景背景音乐音量
+	repeated int32 PreviewCameraPos = 14; //预览摄像机坐标
+	repeated int32 PreviewCameraRot = 15; //预览摄像机旋转
+	int32 FMODCVAudioPlayPoolID = 16; //语音随机音频播放ID
+	int32 IdleCVRandomAudioPlayID = 17; //待机语音随机音频播放ID
+	float LowMScale = 18; //低模角色缩放
+}
+
+//HeroSkin.csv
+message HeroSkinConfig
+{
+	int32 ID = 1; //ID
+	int32 EnabledAssets = 2; //是否启用资源
+	int32 Enabled = 3; //是否启用
+	int32 HeroID = 4; //归属英雄
+	int32 UnitID = 5; //关联Unit
+	int32 BattleChooseConfigID = 6; //战斗选择展示
+	int32 HandBookConfigID = 7; //收藏册展示
+	string Name = 8; //外观名称
+	string Desc = 9; //描述
+	string Say = 10; //英雄说的话
+	string NameEn = 11; //英文名
+	string TitleName = 12; //购买皮肤弹窗标题名
+	repeated int32 Feature = 13; //特性
+	int32 Label = 14; //卡牌标签
+	string HeadIcon = 15; //头像
+	string OverviewIcon = 16; //英雄卡牌(英雄列表)
+	string HalfIconName = 17; //英雄半身像（长方形）
+	repeated int32 HalfIconPosCH = 18; //英雄半身像坐标(英雄选择界面)
+	string BigBGName = 19; //英雄海报图
+	string WholeBg = 20; //角色完整立绘
+	string BattleDeadIcon = 21; //角色死亡图
+	string BattleResultIcon = 22; //角色十连抽展示图（竖条）
+	string BattleOverBg = 23; //角色结算展示图（角色大图）
+	string SkinBackgroundIcon = 24; //皮肤界面背景大图
+	string LoadingIcon = 25; //玩法载入展示图（结算、皮肤切图）
+	string LoadingTrainIcon = 26; //火车玩法玩家载入展示图（结算、皮肤切图）
+	string LoadingTrainBossIcon = 27; //火车玩法Boss载入展示图（结算、皮肤切图）
+	string IllustratedIcon = 28; //图鉴立绘图
+	string HeroSlogan = 29; //MVP口号
+	int32 AttrValueID = 30; //固定值属性ID
+	int32 AttrRateID = 31; //比率属性ID
+	int32 GoodID = 32; //商品ID
+	repeated int32 ConvertTo = 33; //转换道具
+	repeated int32 ConvertNum = 34; //转换道具数量
+	repeated RewardConfig HeroSkinPrice = 35; //直购价格
+	string GetWayDesc = 36; //获取途径描述
+	int32 UIGoTo = 37; //获取途径(ID)
+	string GoToGameUIID = 38; //跳转界面
+	int32 GoToParam = 39; //跳转参数
+	int32 LotteryID = 40; //
+	string GetWayDescEn = 41; //获取途径英文描述
+	int32 JlvEXPReward = 42; //Jlv经验获得
+	repeated int32 LotteryHeroPos = 43; //抽卡立绘位置
+	int32 LotteryHeroScale = 44; //抽卡立绘比例
+	repeated int32 LotteryBgHeroPos = 45; //抽卡背景立绘位置
+	int32 LotteryBgHeroScale = 46; //抽卡背景立绘大小
+	int32 LotteryRewardViewCVIDOnlyTexture = 47; //抽卡奖励界面 仅图片展英雄时 AudioPlayPoolID
+	int32 HeroSkinAttrId = 48; //皮肤加成id
+	string WholeRoleBg = 49; //皮肤无底图立绘
+	repeated int32 WholeRoleBgOffset = 50; //无底图立绘偏移
+}
+
+//HeroSkinAttribute.csv
+message HeroSkinAttributeConfig
+{
+	int32 ID = 1; //ID
+	repeated int32 AttributeIdList = 2; //属性Id列表
+	repeated int32 ValueAddList = 3; //固定值加成列表
+	repeated int32 RateAddList = 4; //百分比加成列表(万分比)
+}
+
+//HeroSuperTalent.csv
+message HeroSuperTalentConfig
+{
+	int32 ID = 1; //ID
+	int32 HreoId = 2; //角色id
+	string Icon = 3; //天赋图标
+	repeated string BuffScripts = 4; //buff脚本名(全路径)
+	repeated int32 SrcSkillId = 5; //原技能id
+	repeated int32 TalentSkillId = 6; //天赋技能id
+	repeated RewardConfig Price = 7; //激活价格
+	string TalentDesc = 8; //天赋描述
+	string TalentName = 9; //天赋名字
+	repeated int32 TalentTags = 10; //天赋标签
+	string TalentVideo = 11; //预览视频
+}
+
+//HeroTalent.csv
+message HeroTalentConfig
+{
+	int32 ID = 1; //角色ID
+	repeated int32 TalentPool = 2; //角色天赋列表
+}
+
+//HeroTalentPool.csv
+message HeroTalentPoolConfig
+{
+	int32 ID = 1; //ID
+	int32 HreoId = 2; //角色id
+	string Icon = 3; //天赋图标
+	repeated string BuffScripts = 4; //buff脚本名(全路径)
+	repeated int32 SrcSkillId = 5; //原技能id
+	repeated int32 TalentSkillId = 6; //潜能技能id
+	int32 TalentLogicId = 7; //逻辑判断id（无用）
+	repeated RewardConfig Price = 8; //激活价格
+	string TalentDesc = 9; //描述
+	string TalentName = 10; //潜能名字
+}
+
+//HeroTalentTree.csv
+message HeroTalentTreeConfig
+{
+	int32 ID = 1; //ID
+	int32 TalentId = 2; //天赋ID
+	int32 HeroId = 3; //角色ID
+	int32 TalentType = 4; //天赋类型
+	int32 PreTalentId = 5; //前置天赋ID
+	repeated int32 TalentEffectList = 6; //天赋效果1
+	int32 UnlockLevel = 7; //天赋解锁等级
+	repeated RewardConfig Price = 8; //激活价格
+}
+
+//HeroTrailPass.csv
+message HeroTrailPassConfig
+{
+	int32 ID = 1; //序号
+	int32 Group = 2; //分组
+	int32 Days = 3; //累计登录天数
+	string TargetDesc = 4; //目标描述
+	int32 FreeRewardsID = 5; //免费奖励ID
+	int32 PayRewardsID = 6; //付费奖励ID
+}
+
+//HeroTrailTask.csv
+message HeroTrailTaskConfig
+{
+	int32 ID = 1; //ID
+	int32 ActivityID = 2; //活动ID
+	int32 TaskType = 3; //分页签类型
+	int32 Order = 4; //页签排序
+	string TaskName = 5; //页签名称
+	repeated int32 TaskIndex = 6; //任务列表
+}
+
+//HeroTutorial.csv
+message HeroTutorialConfig
+{
+	int32 ID = 1; //ID
+	int32 HeroID = 2; //英雄ID
+	string ConfigName = 3; //配置文件名
+	repeated int32 BattleUnitIDs = 4; //战斗额外需要的UnitID
+	int32 StageID = 5; //战斗场景
+}
+
+//HeroUpgradeStar.csv
+message HeroUpgradeStarConfig
+{
+	int32 Id = 1; //id
+	int32 HeroId = 2; //英雄id
+	int32 StarLevel = 3; //星级
+	repeated RewardConfig ConsumeItemList = 4; //消耗道具id1
+	repeated RewardConfig ConsumeItemList2 = 5; //消耗道具id2
+	repeated RewardConfig UpgradeItemList = 6; //升星奖励id
+	repeated RewardConfig DecItemList = 7; //分解获得道具id
+	int32 AddAttVal = 8; //附加属性（数值）
+	int32 AddAttPer = 9; //附加属性（百分比）
+	repeated int32 DispatchSkill = 10; //派遣技能ID
+	int32 JlvEXPReward = 11; //Jlv经验获取
+}
+
+//HeroVoice.csv
+message HeroVoiceConfig
+{
+	int32 ID = 1; //序号
+	int32 HeroId = 2; //英雄ID
+	int32 DefaultUnlocked = 3; //默认解锁
+	int32 Visible = 4; //是否在语音界面显示
+	int32 Type = 5; //类型
+	string Name = 6; //语音名
+	string Desc = 7; //语音描述
+	int32 UnlockLevel = 8; //等级
+	repeated string AudioClipNames = 9; //音频名称
+}
+
+//InheritProficiency.csv
+message InheritProficiencyConfig
+{
+	int32 ID = 1; //ID
+	int32 Level = 2; //熟练度等级
+	int32 ExtendType = 3; //继承方式
+	int32 ChangeValue = 4; //变化值
+	int32 SeasonReward = 5; //赛季奖励
+	int32 Season = 6; //赛季
+}
+
+//InheritRank.csv
+message InheritRankConfig
+{
+	int32 ID = 1; //id
+	int32 Ladderlevel = 2; //结算段位等级
+	int32 Star = 3; //结算超过段位星级
+	int32 InheritLadderlevel = 4; //继承段位等级
+	int32 InheritStar = 5; //继承段位星级
+}
+
+//InheritSeasonTask.csv
+message InheritSeasonTaskConfig
+{
+	int32 ID = 1; //id
+	int32 Type = 2; //归属模式
+	repeated int32 TaskList = 3; //任务组
+	int32 RewardID = 4; //奖励ID
+	int32 Reason = 5; //所属赛季
+}
+
+//Inscription.csv
+message InscriptionConfig
+{
+	int32 ID = 1; //ID
+	string Name = 2; //名称
+	int32 ColorType = 3; //铭文颜色类型
+	repeated int32 AttrType = 4; //铭文属性类型
+	int32 Level = 5; //等级
+	int32 AttrValueID = 6; //固定值属性ID
+	int32 AttrRateID = 7; //比率属性ID
+	int32 NextLevelID = 8; //下一级ID
+	int32 ResetID = 9; //重置ID
+	int32 CostItemId = 10; //消耗/重置道具id
+	int32 Cost = 11; //升级消耗
+	int32 ResetBack = 12; //重置返还
+	int32 Type = 13; //铭文类型
+	string Icon = 14; //Icon
+	string LevelIcon = 15; //等级图标
+	string LevelIconColor = 16; //等级图标颜色
+	string LevelBgIcon = 17; //等级背景图标
+}
+
+//InscriptionPage.csv
+message InscriptionPageConfig
+{
+	int32 ID = 1; //ID
+	string Name = 2; //名称
+	int32 UnlockType = 3; //解锁类型
+	int32 ConsumeItemId = 4; //解锁消耗资源ID
+	int32 Consume = 5; //解锁消耗
+}
+
+//InscriptionSlot.csv
+message InscriptionSlotConfig
+{
+	int32 ID = 1; //ID
+	int32 ColorType = 2; //槽位类型
+	int32 UnlockLevel = 3; //解锁等级
+	int32 CostItemId = 4; //提前解锁消耗资源ID
+	int32 Cost = 5; //提前解锁花费钻石
+	repeated int32 Position = 6; //坐标
+}
+
+//InteractiveComic.csv
+message InteractiveComicConfig
+{
+	int32 ID = 1; //PageID
+	int32 ComicID = 2; //漫画ID
+	string Name = 3; //图片名称
+	string Title = 4; //标题名字
+	string Chapter = 5; //多少话
+}
+
+//Item.csv
+message ItemConfig
+{
+	int32 ID = 1; //道具ID
+	int32 Type = 2; //道具类型
+	int32 SubType = 3; //子类型
+	int32 SubType2 = 4; //二级子类型
+	string Name = 5; //道具名称
+	int32 LotteryQuality = 6; //抽卡品质
+	int32 RepeatedCombatCustom = 7; //拥有永久个性化的道具再获取体验卡获取其他道具-掉落mianId
+	int32 RepeatedResolve = 8; //重复获得值是否分解
+	int32 Resolve = 9; //重复通用分解道具-掉落mianId
+	string Desc = 10; //道具描述
+	int32 IconShowType = 11; //道具展示类型
+	string Icon = 12; //道具ICON
+	string ShowIcon = 13; //展示ICON
+	int32 TipsType = 14; //TIPS显示类型
+	int32 MaxPile = 15; //堆叠上限
+	int32 IsSell = 16; //是否可出售
+	repeated RewardConfig Reward = 17; //出售获得
+	int32 UseType = 18; //玩家使用效果
+	int32 IsVaild = 19; //道具是否有效（服务器）
+	int32 Param1 = 20; //使用参数1
+	string Param2 = 21; //使用参数2
+	repeated int32 Param3 = 22; //使用参数3
+	repeated string Param4 = 23; //使用参数4
+	string Show = 24; //展示参数
+	int32 Quality = 25; //道具品质
+	int32 IsAuction = 26; //是否可拍卖
+	repeated int32 AuctionPrice = 27; //起拍价上下限设置
+	int32 AuctionChangePrice = 28; //起拍价加减价格
+	int32 AuctionType = 29; //竞拍类型
+	int32 AuctionSubType = 30; //竞拍小类型
+	int32 IsRecast = 31; //是否可加入重铸
+	int32 RecastProb = 32; //重铸成功率（每个）
+	int32 IsRecastReturn = 33; //重铸失败是否返还
+	int32 RecastReturnRate = 34; //重铸失败返还比例
+	int32 IsDispatchItem = 35; //是否为派遣物品
+	repeated int32 ItemAccess = 36; //道具获取途径
+	int32 HideShowReward = 37; //获取时隐藏恭喜获得弹窗
+	int32 TradeSellMoneyId = 38; //交易行售卖收益货币
+	int32 TradeBuyMoneyId = 39; //交易行购买消耗货币
+	int32 TradeUITable = 40; //道具在交易行归属页签
+	int32 RedPointEnable = 41; //是否显示红点
+	int32 TradeIsPile = 42; //交易行是否可叠加
+	int32 TimedItemShowType = 43; //限时道具显示类型（客户端用）
+	string StartTime = 44; //开始时间
+	int32 TimeType = 45; //时间类型
+	int32 OutTime = 46; //过期时间
+	string OutDate = 47; //过期时间
+	repeated RewardConfig ExpireReward = 48; //失效后获得
+}
+
+//ItemQualityInfo.csv
+message ItemQualityInfoConfig
+{
+	int32 ID = 1; //品质/ID
+	int32 TradeSellDuration = 2; //上架时间
+	int32 TradeShowDuration = 3; //公示期时间
+	repeated RewardConfig TradeUpSheldCost = 4; //交易上架消耗交易券
+	repeated RewardConfig TradeBuySheldCost = 5; //交易购买消耗交易券
+}
+
+//ItemRule.csv
+message ItemRuleConfig
+{
+	int32 ID = 1; //道具ID
+	repeated int32 RuleSubTitle = 2; //规则副标题
+	repeated int32 RuleContentList = 3; //规则内容
+}
+
+//ItemSwitch.csv
+message ItemSwitchConfig
+{
+	int32 ItemId = 1; //道具id
+	int32 Minimum = 2; //单次购买单位数量
+	int32 Type = 3; //后面的消耗是或0 是且1
+	repeated RewardConfig Price = 4; //单位数量单价
+	int32 IsSendReward = 5; //是否下发奖励
+}
+
+//JLevelAddition.csv
+message JLevelAdditionConfig
+{
+	int32 ID = 1; //Id
+	repeated int32 Types = 2; //类型
+	int32 JLevel = 3; //J-Level
+	int32 AttrValueID = 4; //固定值属性ID
+	int32 AttrRateID = 5; //比率属性ID
+	repeated int32 ShowAttrValueTypes = 6; //需要显示的属性类型
+	string ShowAttrValues = 7; //加成数值
+	string ShowAttrAddValues = 8; //下级变化数值
+}
+
+//JumptwAlluu.csv
+message JumptwAlluuConfig
+{
+	string ID = 1; //ID
+	float PayMoney = 2; //充值金额
+	int32 RegisterTime = 3; //注册时间
+	int32 LoginDay = 4; //登录天数
+	int32 Level = 5; //等级
+}
+
+//Language.csv
+message LanguageConfig
+{
+	string ID = 1; //ID
+	string Language = 2; //中文
+}
+
+//Lbs.csv
+message LbsConfig
+{
+	int32 ID = 1; //Lbs编号
+	string ProvinceName = 2; //省级名称
+	string CityName = 3; //市级名称
+	string CountyName = 4; //区/县名称
+	int32 UpperId = 5; //上级id
+	int32 DistrictLevel = 6; //行政区级别
+	int32 RankLevel = 7; //榜单等级
+	int32 MinScore = 8; //最低门槛
+	int32 JobMinScore = 9; //职业排行榜最低门槛
+}
+
+//LbsJob.csv
+message LbsJobConfig
+{
+	int32 ID = 1; //唯一ID
+	int32 Job = 2; //职业
+	int32 Lv = 3; //等级
+	int32 Exp = 4; //经验
+	string Icon = 5; //图标
+	repeated int32 Condition1 = 6; //条件1
+	repeated int32 Condition2 = 7; //条件2
+	repeated int32 LbsIcon = 8; //LBS底图级别
+}
+
+//LbsParameter.csv
+message LbsParameterConfig
+{
+	int32 ID = 1; //ID
+	string Desc = 2; //描述
+	int32 Param1 = 3; //参数1
+	float Param2 = 4; //参数2
+	string Param3 = 5; //参数3
+	repeated int32 Param4 = 6; //参数4
+}
+
+//LbsScore.csv
+message LbsScoreConfig
+{
+	int32 ID = 1; //唯一ID
+	int32 GameModel = 2; //模式
+	int32 GameType = 3; //游戏类型
+	int32 GameFactor = 4; //玩法系数(填写值/100)
+	int32 WinLoseFactor = 5; //胜利/失败系数(填写值/100)
+}
+
+//LimitedFreeHero.csv
+message LimitedFreeHeroConfig
+{
+	int32 ID = 1; //ID
+	string StartDate = 2; //限免起始日期
+	string EndDate = 3; //限免结束日期
+	repeated int32 HeroID = 4; //限免英雄ID
+}
+
+//LoadingTips.csv
+message LoadingTipsConfig
+{
+	int32 ID = 1; //卡池
+	int32 DescL = 2; //描述
+	int32 GroupId = 3; //组id
+	int32 HeroId = 4; //英雄id
+	int32 HeroUser = 5; //英雄使用者
+}
+
+//LoginCard.csv
+message LoginCardConfig
+{
+	int32 ID = 1; //ID
+	string CardName = 2; //卡片名称
+	string MainCityLoadingBG = 3; //通用加载到主城背景图
+	int32 Scale = 4; //卡片缩放
+	repeated int32 Position = 5; //卡片位置
+	int32 BGScale = 6; //卡片缩放
+	repeated int32 BGLeftPosition = 7; //卡片位置
+	repeated int32 BGRgithPosition = 8; //卡片位置
+}
+
+//LoginReward.csv
+message LoginRewardConfig
+{
+	int32 Day = 1; //登录天数
+	string GoToGameUIID = 2; //跳转界面
+	int32 GoToParam = 3; //跳转参数
+	int32 RewardID = 4; //奖励id
+}
+
+//LotterProduct.csv
+message LotterProductConfig
+{
+	int32 ID = 1; //产出id
+	int32 BaseDropSubID = 2; //基础掉落ID
+	int32 SpecialDropSubID01 = 3; //保底1掉落ID
+	repeated int32 Num01 = 4; //保底1激活计数
+	repeated int32 BaseProbability01 = 5; //保底1基础概率 万分
+	repeated int32 Probability01 = 6; //保底1增长概率 万分
+	repeated int32 Quality01 = 7; //保底1关联品质
+	int32 SpecialDropSubID02 = 8; //保底2掉落ID
+	repeated int32 Num02 = 9; //保底2激活计数
+	repeated int32 BaseProbability02 = 10; //保底2基础概率  万分
+	repeated int32 Probability02 = 11; //保底2增长概率 万分
+	repeated int32 Quality02 = 12; //保底2关联品质
+	int32 SpecialDropSubID03 = 13; //保底3掉落ID
+	repeated int32 Num03 = 14; //保底3激活计数
+	repeated int32 BaseProbability03 = 15; //保底3基础概率  万分
+	repeated int32 Probability03 = 16; //保底3增长概率  万分
+	repeated int32 Quality03 = 17; //保底3关联品质
+	int32 SpecialDropSubID04 = 18; //保底4掉落ID
+	repeated int32 Num04 = 19; //保底4激活计数
+	repeated int32 BaseProbability04 = 20; //保底4基础概率  万分
+	repeated int32 Probability04 = 21; //保底4增长概率  万分
+	repeated int32 Quality04 = 22; //保底4关联品质
+}
+
+//Lottery.csv
+message LotteryConfig
+{
+	int32 ID = 1; //卡池id
+	int32 PoolType = 2; //卡池类型
+	int32 PoolGroup = 3; //卡池组
+	string StartDate = 4; //开启时间
+	string EndDate = 5; //结束时间
+	repeated int32 UpHeroList = 6; //自选up英雄列表
+	int32 UpHeroCD = 7; //自选up英雄CD分钟
+	int32 IsOptional = 8; //是否开启自选
+	int32 OptionalCnt = 9; //自选需求次数
+	repeated int32 OptionalHero = 10; //自选角色清单
+	string OptionalDesc = 11; //自选清单描述
+	RewardConfig LimitReward = 12; //Up保底奖励
+	int32 LimitCnt = 13; //Up保底执行对应次数
+	repeated int32 SpecificQualityList = 14; //Up保底判定品质数组
+	string Name = 15; //卡池名
+	int32 CostItemID = 16; //单抽消耗
+	int32 CostNum = 17; //数量
+	int32 CostItemID2 = 18; //单抽替代消耗
+	int32 CostNum2 = 19; //数量
+	int32 CD = 20; //单次免费冷却 秒
+	RewardConfig Rewards = 21; //单抽固定奖励
+	int32 ProductID = 22; //单抽产出id
+	int32 ExtractNum = 23; //多抽次数
+	int32 NCostItemID = 24; //多抽消耗
+	int32 NCostNum = 25; //数量
+	int32 NCostItemID2 = 26; //多抽替代消耗
+	int32 NCostNum2 = 27; //数量
+	int32 NCD = 28; //多抽免费冷却
+	RewardConfig NRewards = 29; //多抽固定奖励
+	int32 NProductID = 30; //多抽产出id
+	repeated int32 SpecialTimes = 31; //指定次数
+	repeated int32 SpecialDropSubID = 32; //指定次数奖励
+	string CharactorImg = 33; //页签资源
+	string CharactorImgSelected = 34; //页签资源（选中）
+	string PrefabName = 35; //预设体
+	repeated int32 PreviewItemId = 36; //预览道具id
+	int32 IsSwitch = 37; //是否开启2次兑换
+	int32 SpecificId = 38; //特定奖励对应Id
+	repeated int32 SHeroId = 39; //封面英雄id
+	repeated int32 BHeroId = 40; //填充个卡池英雄id
+	repeated int32 IteamId = 41; //其他道具id
+	repeated int32 LimitTimes = 42; //小保底次数/大保底次数
+	string Description = 43; //卡池描述
+	int32 RaffleTime = 44; //每次抽卡次数
+	string NameEn = 45; //卡池英文名
+	string Backdrop = 46; //背景图
+	string ExtractImage = 47; //单抽物品图
+	string NExtractImage = 48; //多抽物品图
+	int32 IsMode = 49; //是否开启特殊模式
+	int32 ProductID2 = 50; //已拥有掉落池
+	int32 NProductID2 = 51; //已拥有掉落池
+	repeated int32 HeroTimeLine = 52; //角色出场演出
+	string PoolBackGround = 53; //卡池背景图片
+	repeated int32 NewHeroTag = 54; //特供刊物新英雄标签
+}
+
+//LotteryInfo.csv
+message LotteryInfoConfig
+{
+	int32 ID = 1; //卡池
+	string Items = 2; //卡池item
+	repeated string PoolDesc = 3; //卡池描述
+	repeated int32 Quality = 4; //关注品质
+	repeated string Probability = 5; //关注品质概率
+	repeated int32 DescListL = 6; //描述
+}
+
+//LuckyGift.csv
+message LuckyGiftConfig
+{
+	int32 ID = 1; //仅序号
+	string Name = 2; //礼包名称
+	repeated int32 TaskID = 3; //弹出任务ID
+	string TaskLogical = 4; //任务间逻辑
+	int32 Type = 5; //礼包类型
+	int32 Time = 6; //时限
+	int32 GroupID = 7; //组ID
+	int32 GroupShowTimes = 8; //组弹出次数
+	int32 ShowTimes = 9; //弹出次数
+	int32 IntervalTime = 10; //弹出冷却时间
+	int32 CashID = 11; //直购ID
+	repeated RewardConfig Item = 12; //商品内容
+	repeated RewardConfig Price = 13; //售价
+	repeated RewardConfig OriginalPrice = 14; //原价
+	string Tag = 15; //性价比标志
+}
+
+//MailMain.csv
+message MailMainConfig
+{
+	int32 ID = 1; //ID
+	int32 Type = 2; //公告类型
+	string Title = 3; //标题
+	string Content = 4; //内容
+	int32 Annex = 5; //附件（掉落ID）
+	int32 SkinID = 6; //皮肤id
+	string GoToBtnName = 7; //跳转按钮文本
+	int32 GoToID = 8; //跳转ID
+	string GoToHttp = 9; //跳转网页
+}
+
+//MailTheme.csv
+message MailThemeConfig
+{
+	int32 ID = 1; //ID
+	repeated string IconGroup = 2; //邮件图集
+	string ThemeBg = 3; //背底图
+	string ThemeDescIcon = 4; //底纹
+	string SenderNameColor = 5; //名字颜色
+	string AttachmentIcon = 6; //附件图标
+	string ThemeColor = 7; //附件图标叠色
+	string UIDetailPrefab = 8; //详情界面预制件
+}
+
+//MainCityScreen.csv
+message MainCityScreenConfig
+{
+	int32 Type = 1; //屏幕类型
+	string LEDConfigName = 2; //LED配置名
+}
+
+//MapProgress.csv
+message MapProgressConfig
+{
+	int32 ID = 1; //ID
+	int32 Percentage = 2; //百分比
+	repeated int32 Unlock = 3; //产量增加
+	string UnLockShow = 4; //展示信息
+}
+
+//Marquee.csv
+message MarqueeConfig
+{
+	int32 ID = 1; //ID
+	int32 StyleID = 2; //样式
+	int32 Priority = 3; //优先级
+	int32 Times = 4; //重复次数
+	int32 Interval = 5; //播放间隔
+	string Content = 6; //跑马灯内容
+}
+
+//Match.csv
+message MatchConfig
+{
+	int32 ID = 1; //自增ID
+	int32 IsMastery = 2; //是否采用专精匹配
+	int32 GameMode = 3; //游戏模式(5休闲 2排位 5娱乐赛 7活动赛  8搜打撤)
+	int32 GameType = 4; //游戏类型
+	int32 IsDraft = 5; //是否征召模式
+	int32 CampPlayerNum = 6; //阵营人数
+	int32 MaxCampNum = 7; //最大阵营数量
+	int32 MatchIsOpen = 8; //匹配是否开启(1开 0或不配关)
+	int32 RobotTimeOut = 9; //超时填充机器人时间
+	int32 MatchTimeOut = 10; //匹配超时踢出匹配池时间(秒)
+	repeated int32 RedisGetNumList = 11; //redis每次获取数据（1排2排等等）
+	repeated string RuleTypeList = 12; //规则列表
+	string MatchProcess = 13; //匹配处理器
+	string PickOrder = 14; //抓取顺序
+	int32 MinMatchTime = 15; //最小匹配时间（秒）
+	repeated int32 MatchRobotTime = 16; //最小填充时间|最大填充时间（秒）
+	int32 IsWarm = 17; //是否温暖局
+	int32 ActivityCompetitionStage = 18; //活动赛阶段
+}
+
+//MatchCareer.csv
+message MatchCareerConfig
+{
+	int32 ID = 1; //ID
+	int32 Priority = 2; //优先级
+	int32 IsExpand = 3; //是否可以扩级匹配
+	repeated int32 Job1 = 4; //职业1
+	repeated int32 Job2 = 5; //职业2
+	repeated int32 Job3 = 6; //职业3
+	int32 MapFeaturesId = 7; //地图特性
+}
+
+//MatchCupLevel.csv
+message MatchCupLevelConfig
+{
+	int32 ID = 1; //ID
+	int32 CupMin = 2; //匹配杯数区间上限
+	int32 CupMax = 3; //匹配杯数区间下限
+	repeated int32 ExpandLevelTime = 4; //扩段时间(匹配总时长)秒
+	repeated int32 ExpandDownLevelTime = 5; //往下扩段时间(匹配总时长)秒
+	repeated int32 ExpandCareerTime = 6; //职业优先级扩大时间(匹配总时长)秒
+	repeated int32 ExpandLevelRule = 7; //组成房间时是否可以扩段
+	repeated int32 ExpandRoomTime = 8; //成房间时队伍组合方式扩大时间
+	int32 WarmMatch = 9; //温暖局连败次数
+	repeated int32 WinningRate = 10; //胜率临界值/胜场临界值
+	repeated int32 RobotLevelRange = 11; //机器人等级最小/最大值
+	int32 RobotDynamicLevel = 12; //机器人等级浮动值
+	int32 RobotDynamicCup = 13; //机器人杯数浮动值
+	repeated int32 RobotMasteryRange = 14; //机器人专精最小/最大值
+	int32 RobotDynamicMastery = 15; //机器人专精等级浮动值
+	repeated int32 MatchRobotLevel = 16; //超时匹配机器人等级：我方
+	repeated int32 MatchEnemyRobotLevel = 17; //超时匹配机器人等级：敌方
+	repeated int32 WarmFriendRobotLevel = 18; //温暖局机器人等级：我方
+	repeated int32 WarmEnemyRobotLevel = 19; //温暖局机器人等级：敌方
+	repeated int32 MatchRobot = 20; //超时匹配机器人难度：我方
+	repeated int32 MatchEnemyRobot = 21; //超时匹配机器人难度：敌方
+	repeated int32 WarmFriendRobot = 22; //温暖局机器人难度：我方
+	repeated int32 WarmEnemyRobot = 23; //温暖局机器人难度：敌方
+	int32 RobotTimeOut = 24; //休闲玩法超时填充机器人时间Id
+	repeated int32 ExpandPlayerLeveTime = 25; //等级扩大时间(匹配总时长)秒
+	repeated int32 PlayerLeveL1 = 26; //自身等级差距
+	repeated int32 PlayerLeveL2 = 27; //自身等级差距
+	repeated int32 PlayerLeveL3 = 28; //自身等级差距
+	repeated int32 AiHeroPool = 29; //AI可随机英雄
+}
+
+//MatchMasteryLevel.csv
+message MatchMasteryLevelConfig
+{
+	int32 ID = 1; //ID
+	int32 ScoreMin = 2; //漫斗玩法积分下限
+	int32 ScoreMax = 3; //漫斗玩法积分上限
+	repeated int32 ExpandLevelTime = 4; //扩段时间(匹配总时长)秒
+	repeated int32 ExpandDownLevelTime = 5; //往下扩段时间(匹配总时长)秒
+	repeated int32 ExpandCareerTime = 6; //职业优先级扩大时间(匹配总时长)秒
+	repeated int32 ExpandLevelRule = 7; //组成房间时是否可以扩段
+	repeated int32 ExpandRoomTime = 8; //成房间时队伍组合方式扩大时间
+	int32 WarmMatch = 9; //温暖局连败次数
+	repeated int32 WinningRate = 10; //胜率临界值/胜场临界值
+	repeated int32 RobotLevelRange = 11; //机器人等级最小/最大值
+	int32 RobotDynamicLevel = 12; //机器人等级浮动值
+	int32 RobotDynamicCup = 13; //机器人杯数浮动值
+	repeated int32 RobotMasteryRange = 14; //机器人专精最小/最大值
+	int32 RobotDynamicMastery = 15; //机器人专精等级浮动值
+	repeated int32 MatchRobotLevel = 16; //超时匹配机器人等级：我方
+	repeated int32 MatchEnemyRobotLevel = 17; //超时匹配机器人等级：敌方
+	repeated int32 WarmFriendRobotLevel = 18; //温暖局机器人等级：我方
+	repeated int32 WarmEnemyRobotLevel = 19; //温暖局机器人等级：敌方
+	repeated int32 MatchRobot = 20; //超时匹配机器人难度：我方
+	repeated int32 MatchEnemyRobot = 21; //超时匹配机器人难度：敌方
+	repeated int32 WarmFriendRobot = 22; //温暖局机器人难度：我方
+	repeated int32 WarmEnemyRobot = 23; //温暖局机器人难度：敌方
+	int32 RobotTimeOut = 24; //休闲玩法超时填充机器人时间Id
+	repeated int32 ExpandPlayerLeveTime = 25; //等级扩大时间(匹配总时长)秒
+	repeated int32 PlayerLeveL1 = 26; //自身等级差距
+	repeated int32 PlayerLeveL2 = 27; //自身等级差距
+	repeated int32 PlayerLeveL3 = 28; //自身等级差距
+	repeated int32 AiHeroPool = 29; //AI可随机英雄
+}
+
+//MatchParameter.csv
+message MatchParameterConfig
+{
+	int32 ID = 1; //ID
+	string Desc = 2; //描述
+	int32 Param1 = 3; //参数1
+	float Param2 = 4; //参数2
+	string Param3 = 5; //参数3
+	repeated int32 Param4 = 6; //参数4
+}
+
+//MatchRankLevel.csv
+message MatchRankLevelConfig
+{
+	int32 ID = 1; //ID
+	int32 RankMin = 2; //匹配小段位区间上限
+	int32 RankMax = 3; //匹配小段位区间上限
+	repeated int32 ExpandLevelTime = 4; //往上扩段时间(匹配总时长)秒
+	repeated int32 ExpandDownLevelTime = 5; //往下扩段时间(匹配总时长)秒
+	repeated int32 ExpandLevelRule = 6; //组成阵营时是否可以扩段
+	repeated int32 ExpandRoomTime = 7; //成房间时队伍组合方式扩大时间
+	int32 WarmMatch = 8; //温暖局连败次数
+	repeated int32 WinningRate = 9; //胜率临界值/胜场临界值
+	repeated int32 RobotLevelRange = 10; //机器人等级最小/最大值
+	repeated int32 RobotCupRange = 11; //机器人杯数最小/最大值
+	repeated int32 MatchRobot = 12; //超时匹配机器人难度：我方
+	repeated int32 MatchEnemyRobot = 13; //超时匹配机器人难度：敌方
+	repeated int32 WarmFriendRobot = 14; //温暖局机器人难度：我方
+	repeated int32 WarmEnemyRobot = 15; //温暖局机器人难度：敌方
+	repeated int32 MatchRobotTime = 16; //最小填充时间|最大填充时间（秒）
+	repeated int32 AiHeroPool = 17; //AI可随机英雄
+}
+
+//MiniMap.csv
+message MiniMapConfig
+{
+	int32 ID = 1; //MapID
+	int32 UISystemID = 2; //UISystemID
+	repeated int32 TeleportPos = 3; //传送点小地图位置
+	string Name = 4; //名字
+	string TransportRuleID = 5; //传送点参数
+	int32 GoToID = 6; //GoToID
+	string Icon = 7; //图标
+}
+
+//MobileDevicesInfo.csv
+message MobileDevicesInfoConfig
+{
+	string ID = 1; //设备名称作为ID
+	int32 CPUMark = 2; //性能评分
+	int32 RenderLevel = 3; //配置分级
+}
+
+//MobileSpecialScreen.csv
+message MobileSpecialScreenConfig
+{
+	int32 ID = 1; //ID
+	string Desc = 2; //说明
+	string DeviceName = 3; //设备名称
+	string DeviceFriendlyName = 4; //模拟器名称
+	int32 WidthPlus = 5; //零长度补宽
+	int32 HightPlus = 6; //零长度补高
+	int32 WebViewPortraitPlus = 7; //WebView竖屏补高
+	int32 WebViewLandscapePlus = 8; //WebView横屏补高
+}
+
+//ModelAnimaScale.csv
+message ModelAnimaScaleConfig
+{
+	int32 ID = 1; //ID
+	string ModelName = 2; //模型名
+	int32 Enable = 3; //是否导出
+	repeated string ScaleNodes = 4; //节点名数组
+}
+
+//ModelPrefabComponent.csv
+message ModelPrefabComponentConfig
+{
+	int32 ID = 1; //ID
+	string ModelName = 2; //预制名字
+	int32 Enable = 3; //是否导出
+	string NodeName = 4; //节点名称
+	float X = 5; //X
+	float Y = 6; //Y
+	float Z = 7; //Z
+}
+
+//MonthSignConf.csv
+message MonthSignConfConfig
+{
+	int32 ID = 1; //ID
+	int32 RetroactiveSignMaxCnt = 2; //最大补签次数
+	repeated int32 Cost = 3; //补签消耗
+	int32 MailId = 4; //补发邮件id
+	int32 StartTimes = 5; //创角X天后开启功能
+	repeated int32 GetRetroactiveSign = 6; //获得补签次数
+}
+
+//MonthSignReward.csv
+message MonthSignRewardConfig
+{
+	int32 ID = 1; //ID
+	int32 Round = 2; //轮次
+	int32 Day = 3; //天数
+	repeated RewardConfig Reward = 4; //签到奖励
+	repeated RewardConfig TotalReward = 5; //累签奖励
+}
+
+//MonthlyCard.csv
+message MonthlyCardConfig
+{
+	int32 ID = 1; //id
+	int32 Type = 2; //月卡类型
+	string Des = 3; //描述
+	int32 ValidTime = 4; //道具有效时间（天）
+	int32 MaxValidTime = 5; //最大有效时间（天）
+	repeated RewardConfig GetNowReward = 6; //立刻获得奖励
+	repeated RewardConfig DailyReward = 7; //每日获得奖励
+	int32 PayId = 8; //充值ID
+}
+
+//MonthlyCardPrivilege.csv
+message MonthlyCardPrivilegeConfig
+{
+	int32 ID = 1; //特权ID
+	string Des = 2; //特权描述
+	int32 CardType = 3; //月卡类型
+	string Icon = 4; //特权图标
+	int32 Condition = 5; //条件ID
+	repeated int32 Param = 6; //条件参数
+}
+
+//MultiLangFont.csv
+message MultiLangFontConfig
+{
+	string ID = 1; //ID
+	string Chinese = 2; //中文
+	string English = 3; //英语
+	string Japanese = 4; //日语
+	string Indonesian = 5; //印尼语
+	string Korean = 6; //韩语
+	string Malay = 7; //马来语
+	string Thai = 8; //泰语
+	string Arabic = 9; //阿拉伯语
+	string Traditional = 10; //繁体中文
+}
+
+//MultiLangParam.csv
+message MultiLangParamConfig
+{
+	int64 ID = 1; //多语言ID
+	repeated string Params = 2; //参数组
+}
+
+//MultiLanguage.csv
+message MultiLanguageConfig
+{
+	int64 ID = 1; //ID
+	string Chinese = 2; //中文文本
+	string English = 3; //英文文本
+	string Japanese = 4; //日语
+	string Indonesian = 5; //印尼语
+	string Korean = 6; //韩语
+	string Malay = 7; //马来语
+	string Thai = 8; //泰语
+	string Arabic = 9; //阿拉伯语
+	string Traditional = 10; //繁体中文
+}
+
+//MuyeDefendBuffList.csv
+message MuyeDefendBuffListConfig
+{
+	int32 ID = 1; //效果ID
+	repeated int32 SkillID = 2; //技能ID
+	string Name = 3; //效果名称
+	string Desc = 4; //技能描述
+	string Icon = 5; //效果图标
+	int32 Quality = 6; //品质
+	repeated int32 BuffList = 7; //修正效果ID
+	repeated int32 FixWeight = 8; //修正权重比例
+}
+
+//MuyeDefendBuffRd.csv
+message MuyeDefendBuffRdConfig
+{
+	int32 ID = 1; //ID
+	int32 UnitID = 2; //UnitID
+	int32 Frequency = 3; //波次
+	repeated int32 BuffIDs = 4; //效果卡ID
+	repeated int32 BuffWeights = 5; //效果卡权重
+}
+
+//MuyeDefendLevel.csv
+message MuyeDefendLevelConfig
+{
+	int32 ID = 1; //ID
+	int32 JLevelAttr = 2; //J-Level基础属性
+	repeated int32 BaseAttrValues = 3; //基础属性牌价值
+	repeated int32 AdvAttrValues = 4; //高级属性牌价值
+	string LevelDesc = 5; //难度描述
+}
+
+//MuyeDefendRdAttr.csv
+message MuyeDefendRdAttrConfig
+{
+	int32 ID = 1; //角色id
+	repeated int32 BaseAttrIDs = 2; //基础属性卡ID
+	repeated int32 BaseAttrLowerLimits = 3; //基础属性卡下限
+	repeated int32 BaseAttrUpperLimits = 4; //基础属性卡上限
+	repeated int32 AdvAttrIDs = 5; //高级属性卡ID
+	repeated int32 AdvAttrLowerLimits = 6; //高级属性卡下限
+	repeated int32 AdvAttrUpperLimits = 7; //高级属性卡上限
+	int32 BaseAttrNum = 8; //基础属性条数
+	int32 AdvAttrNum = 9; //高级属性条数
+}
+
+//MuyeDefendRdType.csv
+message MuyeDefendRdTypeConfig
+{
+	int32 ID = 1; //抽牌次数
+	int32 Type = 2; //抽牌类型
+}
+
+//MuyeDefendTalentBuff.csv
+message MuyeDefendTalentBuffConfig
+{
+	int32 ID = 1; //ID
+	repeated string ConfigSkillScript = 2; //技能脚本配置
+	int32 SkillID = 3; //技能ID
+}
+
+//MuyeDefendTalentList.csv
+message MuyeDefendTalentListConfig
+{
+	int32 ID = 1; //ID
+	repeated int32 BuffID = 2; //天赋ID
+	int32 TalentType = 3; //天赋类型
+	string Name = 4; //天赋名称
+	string Desc = 5; //天赋描述
+	string Icon = 6; //天赋图标
+}
+
+//MuyeDefendTalentRd.csv
+message MuyeDefendTalentRdConfig
+{
+	int32 ID = 1; //ID
+	int32 UnitID = 2; //UnitID
+	int32 Level = 3; //等级
+	repeated int32 TalentID = 4; //远
+}
+
+//NameLibrary.csv
+message NameLibraryConfig
+{
+	int32 ID = 1; //ID
+	string Name1 = 2; //名字1
+	string Name2 = 3; //名字2
+	string Name3 = 4; //名字3
+}
+
+//NewPlayerAttr.csv
+message NewPlayerAttrConfig
+{
+	int32 ID = 1; //ID
+	repeated RewardConfig Param1 = 2; //参数1
+	int32 Param2 = 3; //参数2
+	repeated int32 Param3 = 4; //参数3
+}
+
+//NewPlayerCheckIn.csv
+message NewPlayerCheckInConfig
+{
+	int32 ID = 1; //累计登录次数
+	int32 RewardId = 2; //奖励id
+	int32 StyleType = 3; //样式类型
+	int32 Point = 4; //立绘更换节点
+	string TopShowPic = 5; //立绘图片
+	string Name = 6; //文本
+}
+
+//NewPlayerTip.csv
+message NewPlayerTipConfig
+{
+	int32 ID = 1; //ID
+	int32 GameBattleType = 2; //玩法类型
+	int32 TipType = 3; //提示类型
+	repeated int32 Params = 4; //条件参数
+	int32 UsaNum = 5; //生效次数
+	int32 Time = 6; //持续时间(毫秒)
+	int32 Priority = 7; //优先级
+	string Text = 8; //展示文本
+}
+
+//NewUserGuide.csv
+message NewUserGuideConfig
+{
+	int32 ID = 1; //引导ID
+	int32 IsEnabled = 2; //是否启用
+	string ConfigName = 3; //配置名称
+	int32 IsBeforeLogin = 4; //是否登录前引导
+	int32 IsTest = 5; //是否测试
+}
+
+//NoviceGuide.csv
+message NoviceGuideConfig
+{
+	int32 ID = 1; //引导步骤ID
+	repeated int32 SubEntry = 2; //子入口，多触发引导使用
+	string ComponentID = 3; //组件名称
+	string TriggerIntergace = 4; //触发条件2界面名称
+	int32 IsTracked = 5; //步骤结束后是否保存
+	int32 KeyPoints = 6; //是否为关键步骤
+	repeated int32 Certification = 7; //步骤验证条件
+	repeated int32 CertificationParameter = 8; //步骤验证条件参数
+	repeated int32 PickerParameter = 9; //选中框偏移参数
+	repeated int32 FingerParameter = 10; //手指偏移参数
+	repeated int32 TextParameter = 11; //文本框偏移参数
+	int32 PredecessorStep = 12; //前置步骤ID
+	int32 SuccessorStep = 13; //后置步骤ID
+	int32 TriggerCondition = 14; //触发条件1
+	int32 ConditionParameter = 15; //条件参数
+	int32 EndCondition = 16; //结束条件
+	int32 EndConditionParameter = 17; //结束条件参数
+	int32 UseEffects = 18; //是否使用特效效果
+	int32 UsePicker = 19; //是否使用选中框
+	int32 FingerGuidance = 20; //手指指引使用与方向调整
+	int32 UseText = 21; //引导文本使用与方向调整                        
+	string GuideText = 22; //引导文本ID
+	int32 DelayFrame = 23; //延迟引导帧数
+	int32 IsMandatory = 24; //此步骤是否强制
+	int32 StepOrder = 25; //步骤次序
+}
+
+//OldAccountBack.csv
+message OldAccountBackConfig
+{
+	int32 ID = 1; //档位ID
+	int32 Type = 2; //类型
+	repeated int32 Condition = 3; //条件范围
+	repeated RewardConfig Reward = 4; //奖励
+	int32 Condition1 = 5; //累计登录天数大于等于X天以上
+	int32 Condition2 = 6; //账号等级大于等于X
+}
+
+//OperationTask.csv
+message OperationTaskConfig
+{
+	int32 ID = 1; //ID（任务类型）
+	string Condition = 2; //备注
+	repeated string Param = 3; //参数
+	string GoToGameUIID = 4; //跳转界面
+	int32 GoToParam = 5; //跳转参数
+}
+
+//OutsideAttribute.csv
+message OutsideAttributeConfig
+{
+	int32 ID = 1; //ID
+	string AttrName = 2; //属性名称
+	int32 DailyMaxValue = 3; //每日加成上限
+	int32 ItemId = 4; //道具id
+	int32 ItemNum = 5; //道具数量
+	repeated int32 GameType = 6; //游戏模式
+}
+
+//PackagePreview.csv
+message PackagePreviewConfig
+{
+	int32 ID = 1; //ID
+	string Items = 2; //显示信息
+}
+
+//Parameter.csv
+message ParameterConfig
+{
+	int32 ID = 1; //ID
+	int32 Param1 = 2; //参数1
+	float Param2 = 3; //参数2
+	string Param3 = 4; //参数3
+	repeated int32 Param4 = 5; //参数4
+}
+
+//PermissionInfo.csv
+message PermissionInfoConfig
+{
+	int32 ID = 1; //权限ID
+	int32 APILevel = 2; //支持的最大APIlevel
+	int32 IsNeedGotoSetting = 3; //是否需要玩家手动设置
+	string AndroidPermissionName = 4; //安卓权限名
+	string PermissionName = 5; //权限多语言名称
+	string PermissionIntroduction = 6; //权限说明
+}
+
+//PlayerAchievement.csv
+message PlayerAchievementConfig
+{
+	int32 ID = 1; //ID
+	int32 ComicId = 2; //ip
+	int32 SubType = 3; //成就细分类型
+	string AchieveIcon = 4; //成就图标
+	string AchieveIconMini = 5; //成就图标小
+	int32 Score = 6; //成就积分
+	int32 HideName = 7; //是否隐藏成就名字
+	int32 HideDesc = 8; //隐藏描述
+	int32 ShowSpecial = 9; //显示特殊图标
+	int32 HideBebeforeComplete = 10; //完成前是否隐藏
+	int32 Notification = 11; //是否显示通知
+	int32 SortOrder = 12; //排序权重
+	int32 ShowDelay = 13; //延后展示（当前刮刮卡和抽卡成就在用）
+}
+
+//PlayerAwardTask.csv
+message PlayerAwardTaskConfig
+{
+	int32 Level = 1; //J_Level
+	repeated int32 ItemIDs = 2; //道具ID
+	repeated int32 Rates = 3; //每个间隔增长的数量
+	repeated int32 ItemLimits = 4; //道具数量上限
+}
+
+//PlayerBackground.csv
+message PlayerBackgroundConfig
+{
+	int32 ID = 1; //ID
+	int32 Order = 2; //排序
+	int32 HeroId = 3; //英雄id
+	int32 AudioPlayId = 4; //英雄语音id
+	int32 ComicID = 5; //所属漫画id
+	string Name = 6; //名称
+	string SmallPicture = 7; //列表小图片
+	string Picture = 8; //背景图片资源（无用）
+	string BackgroundPrefab = 9; //背景Prefab
+	string GoToDes = 10; //获取途径描述
+	string ShowTime = 11; //上架时间（不配则直接显示）
+}
+
+//PlayerLevel.csv
+message PlayerLevelConfig
+{
+	int32 ID = 1; //等级奖励ID
+	int32 NeedLevel = 2; //需要玩家奖杯数
+	string UnLockShow = 3; //解锁展示信息
+	int32 ShowStyle = 4; //奖励类型
+	repeated int32 HeroId = 5; //路飞、悟空、鸣人
+	repeated int32 RewardID = 6; //等级奖励
+	repeated int32 RewardID2 = 7; //{单数，双数}
+	int32 TriggerTaskId = 8; //触发任务id(用于解锁什么功能的任务)
+	repeated int32 AddtionTypes = 9; //展示的加成类型
+	string NameEn = 10; //英文名
+	int32 ImgPower = 11; //能量上限
+}
+
+//PlayerPortrait.csv
+message PlayerPortraitConfig
+{
+	int32 ID = 1; //ID
+	string Name = 2; //名称
+	string Portrait = 3; //头像
+	int32 UIGoTo = 4; //获取途径
+	string UIGoToDes = 5; //无获取途径描述
+	int32 IsHideNotGet = 6; //未解锁时是否不显示
+	string StartTime = 7; //展示时间
+	repeated int32 ComponentIds = 8; //部件ID
+	int32 IsRobotUse = 9; //是否人机使用
+}
+
+//PlayerPortraitFrame.csv
+message PlayerPortraitFrameConfig
+{
+	int32 ID = 1; //ID
+	string Name = 2; //名字
+	string PortraitFrame = 3; //头像框
+	int32 IsDefault = 4; //是否默认 1就是默认
+	int32 UIGoTo = 5; //获取途径
+	int32 IsHideNotGet = 6; //未解锁时是否不显示
+	string UIGoToDes = 7; //无获取途径描述
+	repeated int32 Parm = 8; //参数
+	int32 Condition = 9; //条件
+}
+
+//PlayerQuestionnaire.csv
+message PlayerQuestionnaireConfig
+{
+	int32 ID = 1; //id
+	repeated int32 Type = 2; //推送条件类型
+	repeated string Parame1 = 3; //范围区间[]
+	repeated RewardConfig QuestionnaireReward = 4; //奖励[]
+	int32 QuestionnaireMail = 5; //系统邮件id
+	int32 Order = 6; //权重
+	string StartDate = 7; //开启时间
+	string EndDate = 8; //结束时间
+	string QuestionId = 9; //问卷id
+}
+
+//PlayerTask.csv
+message PlayerTaskConfig
+{
+	int32 ID = 1; //任务id
+	int32 PlayerTaskType = 2; //玩家任务类型
+	int32 IsShow = 3; //是否作为主任务显示
+	repeated int32 FrontTask = 4; //前置任务
+	repeated int32 NextTask = 5; //后置任务
+	repeated int32 NextTaskUnit = 6; //后置任务前置条件
+	int32 GuildType = 7; //寻路目标类型
+	string Guild = 8; //指引目标
+	repeated string TriggerRuleIDs = 9; //执行中刷新触发器
+	int32 HeroID = 10; //英雄ID
+	int32 GroupID = 11; //参数组
+	int32 FetterPhotoID = 12; //合影ID
+	string Name = 13; //标题
+	string TaskIcon = 14; //任务图标
+	int32 ConditionType = 15; //任务条件类型
+	int32 IsPer = 16; //是否累积
+	repeated int32 Params = 17; //参数
+	string Desc = 18; //任务描述
+	int32 RewardID = 19; //奖励ID
+	int32 ProgressReward = 20; //合影进度奖励
+	int32 IsRandom = 21; //是否随机
+	int32 UnlockLv = 22; //解锁等级
+	string GoToGameUIID = 23; //跳转界面
+	int32 GoToParam = 24; //跳转参数
+	int32 AutoNext = 25; //是否自动完成并进入下一步
+	int32 CannotReceiveAwards = 26; //不能领取奖励
+}
+
+//PlayerTitle.csv
+message PlayerTitleConfig
+{
+	int32 ID = 1; //id
+	int32 IsPlayerGet = 2; //是否玩家默认获得
+	int32 TitleTxt = 3; //称号文本
+	string TitleFrame = 4; //称号边框
+	string UIGoTo = 5; //获取途径
+}
+
+//PopUpProfile.csv
+message PopUpProfileConfig
+{
+	string ID = 1; //弹窗ID
+	int32 FuncId = 2; //系统ID
+	int32 Priority = 3; //优先级
+	string OnlyOpenOn = 4; //允许弹出界面
+	string CanNotOpenOn = 5; //不可弹出界面
+	int32 MaxShowcount = 6; //弹出次数
+	int32 AllowInBattleResult = 7; //是否允许在战斗结算弹出
+	int32 CanOverlaySelf = 8; //是否可叠加
+}
+
+//ProficiencyLevel.csv
+message ProficiencyLevelConfig
+{
+	int32 Level = 1; //等级
+	int32 Proficiency = 2; //需求切合度
+	string Icon = 3; //图标
+	string Name = 4; //名称
+	int32 IsDowngrade = 5; //是否掉级
+	repeated int32 SettlementDeviation = 6; //结算契合度偏差  （普通|排位|龙珠|人机）
+	int32 PredictProficiencyUnit = 7; //模拟计算升级场次的单次契合度
+}
+
+//Prop.csv
+message PropConfig
+{
+	int32 ID = 1; //ID
+	string Name = 2; //道具名称
+	int32 IsShowInMap = 3; //是否地图显示
+	string MapIcon = 4; //地图显示的图标
+	int32 Type = 5; //道具类型
+	int32 IsSave = 6; //获取时，是否存入对应栏位
+	int32 CanRepeatPick = 7; //可否重复拾取
+	int32 IsProperEquip = 8; //是否为专精装备
+	int32 BuyCDAfterSell = 9; //出售后购买CD
+	repeated int32 BelongHero = 10; //专属英雄
+	repeated int32 NeedItemID = 11; //需要道具ID
+	repeated int32 NeedTalentID = 12; //需要天赋ID
+	repeated int32 GameMode = 13; //所属玩法
+	string IconName = 14; //图标
+	string EffectName = 15; //特效名称
+	string SortDescribe = 16; //短描述
+	string Describe = 17; //描述
+	int32 Price = 18; //价格
+	repeated int32 NeedProps = 19; //需要道具
+	int32 IsFinalEquip = 20; //是否是成装
+	int32 BaseAttrID = 21; //基础属性ID
+	int32 RateAttrID = 22; //百分比属性ID
+	repeated int32 SkillIDs = 23; //技能ID
+	int32 ActiveSkillID = 24; //主动技能ID
+	repeated int32 StageSwitch = 25; //关卡开关
+	int32 ExTagID = 26; //互斥ID
+	int32 PropMainType = 27; //道具主类型
+	int32 PropSubType = 28; //道具子类型
+}
+
+//QualityInfo.csv
+message QualityInfoConfig
+{
+	int32 Quality = 1; //品质/ID
+	string Name = 2; //品质名称
+	string TextColor = 3; //文本颜色
+	string BGColor = 4; //名字背景叠色
+	string ItemBg = 5; //Icon背景
+	string ItemDescriptionBg = 6; //物品描述宽背景
+	string Card1 = 7; //英雄卡片
+	string Card2 = 8; //英雄信息卡背景
+	string LotteryCard1 = 9; //抽卡英雄背底卡片
+	string LotteryOutline = 10; //抽卡卡牌描边
+	string LotteryItem = 11; //抽卡道具背底卡片
+	string LotteryCard2 = 12; //自选英雄背底卡片
+	string LotteryVideo = 13; //抽卡视频
+	string UnknowCardBG = 14; //未知卡牌背景
+	string LotteryHeroAni = 15; //抽卡英雄动画
+	string LotteryItemAni = 16; //抽卡英雄动画
+	string AppearanceBg = 17; //cos装icon底板
+	string CustomziedOutline = 18; //个性化道具描边
+	int32 LotteryVideoAudioPlayPoolID = 19; //抽卡视频的音频播放池ID
+	int32 LotteryRewardAudioPlayPoolID = 20; //抽卡奖励的音频播放池ID
+}
+
+//Questionnaire.csv
+message QuestionnaireConfig
+{
+	int32 ID = 1; //ID
+	int32 ConditionType = 2; //触发条件
+	repeated int32 Params = 3; //参数
+	int32 RewardID = 4; //奖励
+	int32 Priority = 5; //优先级
+	int32 MailID = 6; //邮件ID
+	string Tid = 7; //问卷Id
+}
+
+//QueueRandom.csv
+message QueueRandomConfig
+{
+	int32 ID = 1; //id
+	int32 Num = 2; //减少随机数
+}
+
+//QuickBroadCast.csv
+message QuickBroadCastConfig
+{
+	int32 ID = 1; //id
+	int32 PlayMode = 2; //所属玩法
+	int32 Type = 3; //类型
+	int32 IsPlayerGet = 4; //是否玩家获得
+	int32 IsDefault = 5; //是否默认
+	int32 UIGoTo = 6; //获取途径
+	int32 RelatedID = 7; //关联局内播报ID
+	int32 IsHideNotGet = 8; //未解锁是否不显示
+}
+
+//RandomAudioPlay.csv
+message RandomAudioPlayConfig
+{
+	int32 ID = 1; //ID
+	int32 RandomType = 2; //随机类型
+	int32 RandomProbability = 3; //随机播放概率[0， 10000]
+	repeated int32 RandomWeights = 4; //随机权重列表
+	repeated string AudioPlayPoolIDs = 5; //音频名称列表
+	int32 InitDelayTime = 6; //初始化延迟时间(ms)
+	int32 IntervalTime = 7; //间隔时间(ms)
+}
+
+//RankLevel.csv
+message RankLevelConfig
+{
+	int32 RankLevel = 1; //段位等级
+	int32 Griding = 2; //大段位
+	int32 Weight = 3; //权值
+	string GridingName = 4; //段位名
+	string GridingNameEn = 5; //段位英文名
+	string GridingIcon = 6; //段位图标
+	string GridingIconMid = 7; //段位图标中
+	string SubGrindingPicBold = 8; //子段位图标粗体
+	string SubGrindingPicFine = 9; //子段位图标细体
+	string GridingBadge = 10; //段位徽章
+	string GridingColor = 11; //段位颜色
+	int32 MinimStar = 12; //最低星
+	int32 InitStar = 13; //初始星级
+	int32 FullStar = 14; //满星
+	int32 BraveScoreMax = 15; //勇者积分最大值
+	int32 BraveScoreCost = 16; //1次保星
+	int32 StarScoreCost = 17; //加星消耗
+	int32 BraveScoreMvp = 18; //勇者积分MVP加分
+	int32 BraveScoreSvp = 19; //勇者积分SVP加分
+	int32 BraveScoreCompensation = 20; //勇者积分补偿
+	int32 ExtraPoints = 21; //顶上战争额外勇者加分
+	int32 IsFive = 22; //是否可以五排
+	int32 Demotion = 23; //是否允许降级
+	int32 Promotion = 24; //是否有晋级赛
+	int32 LevelScore = 25; //段位分
+	int32 MinRankScore = 26; //最低rank值
+	int32 MaxRankScore = 27; //最高rank值
+	repeated int32 EssenceRankObtain = 28; //排位发放专精数量(名次)
+	int32 EssenceRankDraw = 29; //排位平局发放专精奖励
+	repeated int32 HeroLimit = 30; //段位英雄限制
+	int32 LadderPerformanceBattlePowerLimit = 31; //排位表现战力段位上限
+	int32 LadderPerformanceBattlePowerLimitMin = 32; //排位表现战力段位下限
+	int32 LadderRankCoefficientEx = 33; //排位战力额外系数（*10000）
+	int32 VictoryRankAverageMaxEx = 34; //胜利平均分系数（*10000）
+	int32 VictoryRankAverageMinEx = 35; //胜利平均分系数（*10000）
+	int32 DefaultRankAverageMaxEx = 36; //失败平均分系数（*10000）
+	int32 DefaultRankAverageMinEx = 37; //失败平均分系数（*10000）
+	repeated int32 GameModeType = 38; //模式id
+	repeated string GameMapType = 39; //类型和地图ID
+	repeated string GameTypeRate = 40; //类型和地图权重
+	repeated string GameEvent = 41; //词缀
+	repeated string GameEventRate = 42; //词缀权重
+	int32 ExtendLadder = 43; //赛季重置
+	repeated int32 FirstGameMapType = 44; //首次段位必定随机类型和地图ID
+	repeated int32 FirstGameTypeRate = 45; //类型和地图权重
+	string RankSound = 46; //升段音效
+}
+
+//RankLevelDragon.csv
+message RankLevelDragonConfig
+{
+	int32 RankLevel = 1; //段位等级
+	string GridingName = 2; //段位名
+	string GridingNameEn = 3; //段位英文名
+	string GridingIcon = 4; //段位图标
+	string GridingBadge = 5; //段位徽章
+	string GridingColor = 6; //段位颜色
+	int32 FullScore = 7; //满分
+	int32 Score = 8; //积分上限
+	int32 Griding = 9; //大段位
+	int32 ProtectCnt = 10; //保段次数
+}
+
+//RankSeasonMatch.csv
+message RankSeasonMatchConfig
+{
+	int32 ID = 1; //赛季
+	repeated int32 GamePool = 2; //游戏地图id
+}
+
+//RebateReward.csv
+message RebateRewardConfig
+{
+	string LID = 1; //玩家LID
+	int32 Recharge = 2; //已储值数量
+	int32 Restitution = 3; //待返利数量
+}
+
+//RecastLevel.csv
+message RecastLevelConfig
+{
+	int32 Jlevel = 1; //等级
+	int32 ItemNum = 2; //物品放置数量
+	int32 ProbLimit = 3; //成功率上限
+}
+
+//Recharge.csv
+message RechargeConfig
+{
+	int32 ID = 1; //直购ID
+	string Icon = 2; //档位图标
+	repeated RewardConfig FirstCharge = 3; //首充赠送
+	repeated RewardConfig Present = 4; //额外赠送
+	int32 SortId = 5; //排序id
+	string UIEffectAnimation = 6; //UI特效名
+	string ProductNameMultiLan = 7; //产品名
+}
+
+//RedEnvelopeLimit.csv
+message RedEnvelopeLimitConfig
+{
+	int32 ID = 1; //ID
+	int32 Type = 2; //红包类型ID
+	int32 NumLimit = 3; //次数限制
+	int32 IncomeLimit = 4; //收益限制
+	int32 SendCountLimit = 5; //发送数量限制
+}
+
+//RenderLevel.csv
+message RenderLevelConfig
+{
+	int32 ID = 1; //ID
+	int32 Resolution = 2; //分辨率
+	int32 AntiAliasing = 3; //抗锯齿
+	int32 SceneQuality = 4; //场景质量
+	int32 RoleQuality = 5; //角色质量
+	int32 FrameRate = 6; //帧率
+	int32 EffectQuality = 7; //战斗特效质量
+	int32 PostProcessing = 8; //战斗后处理
+	int32 BattleDamageTx = 9; //战斗飘字
+}
+
+//ReportSysHeroDead.csv
+message ReportSysHeroDeadConfig
+{
+	int32 ID = 1; //ID
+	int32 TimeStage = 2; //开始时间
+	int32 DeadGap = 3; //死亡gap
+}
+
+//ReportSysTimeGap.csv
+message ReportSysTimeGapConfig
+{
+	int32 ID = 1; //ID
+	int32 GapTime = 2; //间隔时间
+	int32 Param1 = 3; //参数1
+	int32 CommunicateWarning = 4; //几次触发聊天警告
+	int32 CommunicateWarningMultiTime = 5; //可以触发几次
+	int32 PopUpWarning = 6; //几次触发弹窗警告
+	int32 PopUpWarningMultiTime = 7; //是否可以多次触发
+	int32 CWariningMultiLan = 8; //聊天警告的多语言ID
+	int32 PWariningMultiLan = 9; //弹窗警告的多语言ID
+}
+
+//ResourceLevel.csv
+message ResourceLevelConfig
+{
+	int32 ResourceLevel = 1; //资源等级
+	repeated int32 QualityValueRatio = 2; //各品质的权重倍率（万分比
+}
+
+//RobotSelectHero.csv
+message RobotSelectHeroConfig
+{
+	int32 ID = 1; //ID
+	int32 AfterOpenServer = 2; //开服第x+1天
+	repeated int32 HeroIdList = 3; //机器人可以随机英雄ID（也是当天开放的英雄）
+}
+
+//RoleToUI.csv
+message RoleToUIConfig
+{
+	int32 ID = 1; //ID
+	int32 HeroSkinID = 2; //英雄皮肤ID
+	int32 OpenType = 3; //打开类型
+	repeated int32 RolePos = 4; //角色位置
+	repeated int32 RoleScale = 5; //角色缩放
+	repeated int32 RoleRot = 6; //角色旋转
+	repeated int32 CameraPos = 7; //摄像机位置
+	repeated int32 CameraNearPos = 8; //摄像机位置
+	repeated int32 CameraNearDownPos = 9; //摄像机位置
+	repeated int32 CameraRot = 10; //摄像机旋转
+	repeated int32 ShadowDir = 11; //角色阴影方向
+	int32 ShadowInsitensy = 12; //角色阴影强度
+	int32 CameraFOV = 13; //摄像机FOV
+	repeated int32 BagChatBubblePos = 14; //背包聊天气泡位置
+	repeated int32 StoreChatBubblePos = 15; //商店聊天气泡位置
+	int32 DisplayCVAudioPlayPoolID = 16; //展示时语音音频播放ID(AudioPlayPool表)
+	int32 FMODCVAudioPlayPoolID = 17; //语音随机音频播放ID
+	int32 IdleCVRandomAudioPlayID = 18; //待机语音随机音频播放ID(RandomAudioPlay表)
+}
+
+//RoomParameter.csv
+message RoomParameterConfig
+{
+	int32 ID = 1; //游戏类型
+	int32 SelectHeroTime = 2; //自由选人模式英雄时间秒
+	int32 BanTime = 3; //BP模式禁用英雄时间
+	int32 BPSelectTime = 4; //BP模式下每个人选择英雄时间
+	int32 FinalConfirmationTime = 5; //BP模式最后调整时间秒
+}
+
+//RoomRobotHero.csv
+message RoomRobotHeroConfig
+{
+	int32 ID = 1; //ID
+	int32 GameType = 2; //游戏类型
+	string Name = 3; //地图名字
+	repeated string SiteHero = 4; //该点位的英雄id
+}
+
+//SDCArmorEnergyConfig.csv
+message SDCArmorEnergyConfigConfig
+{
+	int32 ID = 1; //id
+	int32 ArmorMaxShield = 2; //最大护盾量
+	repeated int32 ArmorAttributeTypes = 3; //属性类型数组
+	repeated int32 ArmorAttributeValues = 4; //属性加成值数组
+}
+
+//SDCBattleSimpleEntity.csv
+message SDCBattleSimpleEntityConfig
+{
+	int32 ID = 1; //ID
+	int32 Type = 2; //类型
+	int32 SubType = 3; //子类型
+	int32 Radius = 4; //可拾取半径(码)
+	string Name = 5; //物件名称
+	string IconName = 6; //图标
+	string EffectName = 7; //特效名
+	repeated int32 ParamsInt = 8; //参数_int
+}
+
+//SDCChest.csv
+message SDCChestConfig
+{
+	int32 ID = 1; //宝箱ID
+	string Name = 2; //宝箱名字
+	int32 ChestType = 3; //宝箱类型
+	repeated int32 ItemIds = 4; //可产出的道具ID列表
+	repeated int32 Weights = 5; //道具基础权重(与 ItemIds -一对应，同品质内竞争权重)
+	repeated int32 FallbackQualities = 6; //兜底品质列表(当宝箱预算耗尽仍无道具时，从此列表随机一个品质进行保底)
+	int32 KeyItemId = 7; //钥匙宝箱所需道具ID
+	int32 IsHighValueChest = 8; //是否是高级宝箱
+	string IconName = 9; //小地图显示图标
+	string Desc = 10; //小地图描述
+}
+
+//SDCChipConfig.csv
+message SDCChipConfigConfig
+{
+	int32 ID = 1; //id
+	int32 Type = 2; //类型
+	int32 Limit = 3; //同类型上限
+	string GnodePath = 4; //脚本路径
+}
+
+//SDCConsumablesConfig.csv
+message SDCConsumablesConfigConfig
+{
+	int32 ID = 1; //id
+	int32 Type = 2; //类型
+	int32 Count = 3; //恢复效果
+	int32 Frequency = 4; //触发次数
+	int32 Interval = 5; //触发间隔
+	int32 ReduceDeBuffCount = 6; //减少灰血万分比（类型为药品时生效）
+	int32 Durability = 7; //耐久
+}
+
+//SDCHeroSpecialSkillConfig.csv
+message SDCHeroSpecialSkillConfigConfig
+{
+	int32 ID = 1; //序号
+	int32 Type = 2; //类型
+	string EffectScriptPath = 3; //脚本路径
+	int32 Durability = 4; //耐久
+}
+
+//SDCItem.csv
+message SDCItemConfig
+{
+	int32 ID = 1; //道具ID
+	int32 Value = 2; //价值
+	string Prefab = 3; //预制体
+	int32 DropItemID = 4; //局内效果（映射DropItem）
+	int32 DetailConfigID = 5; //效果表映射
+	int32 CastTime = 6; //引导时间
+	repeated int32 Attribute = 7; //道具属性
+}
+
+//SDCParameter.csv
+message SDCParameterConfig
+{
+	int32 ID = 1; //ID
+	string Desc = 2; //描述
+	int32 Param1 = 3; //参数1
+	float Param2 = 4; //参数2
+	string Param3 = 5; //参数3
+	repeated int32 Param4 = 6; //参数4
+}
+
+//SDCResourceLevel.csv
+message SDCResourceLevelConfig
+{
+	int32 ID = 1; //资源等级
+	repeated int32 QualityValueRatio = 2; //各品质的权重倍率（万分比
+	int32 Priority = 3; //优先级（高优先级覆盖低优先级）
+}
+
+//SDCSkillAmplifierConfig.csv
+message SDCSkillAmplifierConfigConfig
+{
+	int32 ID = 1; //序号
+	int32 Type = 2; //类型
+	int32 Durability = 3; //耐久
+	int32 DmgRatio = 4; //伤害
+	int32 EnergySpeedRatio = 5; //能量回复速度
+}
+
+//Scene.csv
+message SceneConfig
+{
+	int32 ID = 1; //id
+	int32 Type = 2; //类型
+	string SceneName = 3; //关卡资源名称
+	string SceneInteractiveABName = 4; //关卡交互资源名称
+	string SceneConfig = 5; //关卡配置名称
+	string SceneTimeline = 6; //关卡Timeline配置
+	string SceneLED = 7; //关卡LED配置
+	string StageEffectABPath = 8; //关卡特效AB包名称
+	string SceneElevator = 9; //关卡电梯名称
+	repeated int32 Grids = 10; //格子
+}
+
+//SceneEvent.csv
+message SceneEventConfig
+{
+	int32 ID = 1; //ID
+	int32 Type = 2; //类型
+	repeated int32 ConditionId = 3; //触发条件类型
+	repeated int32 EffectId = 4; //触发效果Id
+	int32 TriggerCount = 5; //触发次数
+	repeated string TriggerRuleIDs = 6; //触发器名称列表
+}
+
+//SceneEventParamters.csv
+message SceneEventParamtersConfig
+{
+	int32 ID = 1; //GroupID
+	int32 ConditonType = 2; //条件类型
+	int32 EffectType = 3; //效果类型
+	repeated int32 ParamtersInt = 4; //整形参数
+	repeated string ParamtersStr = 5; //字符串参数
+	repeated RewardConfig ParamterItems = 6; //道具参数
+	int32 ShowType = 7; //给道具消息
+}
+
+//SceneObjectRefresh.csv
+message SceneObjectRefreshConfig
+{
+	int32 ID = 1; //ID
+	string BeginTime = 2; //开始时间
+	int32 Ttl = 3; //持续时间
+	int32 Interval = 4; //间隔时间
+	repeated int32 TriggerTime = 5; //触发时间
+	int32 BeginType = 6; //开始时间类型
+	int32 SceneId = 7; //场景ID
+	int32 Probability = 8; //刷新概率
+	int32 ObjTtl = 9; //对象存活时长(s)
+	string ObjectId = 10; //场景对象Id
+	repeated int32 EventList = 11; //事件列表
+	int32 TriggerRange = 12; //触发范围
+}
+
+//SceneUnit.csv
+message SceneUnitConfig
+{
+	int32 ID = 1; //id
+	string Name = 2; //名字
+	int32 ActorType = 3; //角色类型
+	int32 UnitID = 4; //英雄皮肤ID
+	string ActorPrefabABPath = 5; //角色预制AB包资源路径
+	string ActorEffectABPath = 6; //角色特效AB包路径
+	string ActorSoundABPath = 7; //角色音效AB包路径
+	int32 HightOffset = 8; //头顶挂点偏移量
+	string HeadInfoColor = 9; //玩家头顶信息
+	int32 ActorScale = 10; //英雄的缩放倍数默认100（一倍）
+	int32 CameraNearFocusYOffset = 11; //近点(需*100）
+	int32 CameraFarFocusYOffset = 12; //远点(需*100）
+}
+
+//ScratchCard.csv
+message ScratchCardConfig
+{
+	int32 ID = 1; //卡池ID
+	int32 SortOrder = 2; //排序
+	string Name = 3; //卡池名称
+	int32 Style = 4; //卡池样式
+	int32 Type = 5; //卡池类型
+	repeated RewardConfig ConsumeRewards = 6; //抽一次卡消耗的道具
+	string StartTime = 7; //开始时间
+	string EndTime = 8; //结束时间
+	repeated int32 LimitItems = 9; //限定展示道具（id）
+	repeated int32 Items = 10; //非限定展示道具
+	repeated int32 ShowRewardItems = 11; //展示道具（id）
+	repeated string FemaleItemIcons = 12; //女服装道具展示
+	repeated string MaleItemIcons = 13; //男服装道具展示
+	int32 LotteryProductID = 14; //产出id
+	string ImageCardFemale = 15; //服装女
+	string ImageCardMale = 16; //服装男
+	string ImageTitle = 17; //卡池标题
+	string TimeDesc = 18; //活动时间显示
+	string TipsDesc = 19; //卡池问号描述
+	string RateDesc = 20; //卡池概率描述
+	int32 RedDotParam = 21; //玩家拥有对应活动的刮刮卡数量≥X，显示红点
+}
+
+//ScratchLimit.csv
+message ScratchLimitConfig
+{
+	int32 ID = 1; //消耗货币类型
+	int32 DailyLimit = 2; //每日限定次数
+	repeated RewardConfig ConsumeRewards = 3; //消耗多少货币获得一个刮刮卡（只能配置一种货币）
+	repeated RewardConfig RechargeRewards = 4; //充值多少货币获得一个刮刮卡（只能配置一种货币）
+	int32 RedDotParam = 5; //每新获得X张，显示红点
+}
+
+//SeasonReward.csv
+message SeasonRewardConfig
+{
+	int32 ID = 1; //ID
+	int32 Season = 2; //赛季
+	int32 NeedRankLevel = 3; //需要达到的小段位
+	int32 RewardId = 4; //奖励id
+	string ShowRewardPicture = 5; //
+	string ShowPicture = 6; //排位赛主界面展示立绘
+}
+
+//SelectPack.csv
+message SelectPackConfig
+{
+	int32 ID = 1; //礼包ID
+	string Name = 2; //礼包名称
+	int32 Type = 3; //礼包类型
+	repeated RewardConfig ItemContains = 4; //礼包物品
+	int32 CanSelectNum = 5; //可获得奖励数量
+	int32 RandomGift = 6; //随机掉落id
+	int32 MaxSpecific = 7; //随机礼包保底次数
+	RewardConfig SpecificReward = 8; //随机礼包保底物品
+}
+
+//SensitiveWords_CN.csv
+message SensitiveWords_CNConfig
+{
+	int32 Id = 1; //编号
+	string Key = 2; //文字
+}
+
+//SensitiveWords_KR.csv
+message SensitiveWords_KRConfig
+{
+	int32 Id = 1; //编号
+	string Key = 2; //文字
+}
+
+//SensitiveWords_SEA.csv
+message SensitiveWords_SEAConfig
+{
+	int32 Id = 1; //编号
+	string Key = 2; //文字
+}
+
+//SensitiveWords_TC.csv
+message SensitiveWords_TCConfig
+{
+	int32 Id = 1; //编号
+	string Key = 2; //文字
+}
+
+//SensitivityName.csv
+message SensitivityNameConfig
+{
+	int32 ID = 1; //玩家ID
+	string OldName = 2; //违规名字
+}
+
+//SetBook.csv
+message SetBookConfig
+{
+	int32 ID = 1; //ID
+	int32 Type = 2; //类型
+	int32 IsUseable = 3; //是否可用
+	string ImageName = 4; //页签背景
+	string PagePrefab = 5; //页签关联的预制件
+	repeated int32 RelateFuncs = 6; //RelateFunc
+	repeated int32 Param1 = 7; //参数1
+	string Param2 = 8; //参数2
+}
+
+//Share.csv
+message ShareConfig
+{
+	int32 Id = 1; //Id
+	int32 ShareType = 2; //类型
+	repeated RewardConfig RewardID = 3; //分享奖励
+}
+
+//ShareHeroInfo.csv
+message ShareHeroInfoConfig
+{
+	int32 HeroSkinId = 1; //Id
+	string NewHeroTxtColor = 2; //新获得英雄/皮肤颜色
+	string PersonTxtColor = 3; //个人结算文本颜色
+	string NewHeroImage = 4; //新获得英雄/皮肤
+	string PersonImage = 5; //个人结算资源
+	string MVPImage = 6; //Mvp资源
+	string RankImage = 7; //Rank资源
+}
+
+//ShareInterface.csv
+message ShareInterfaceConfig
+{
+	int32 ID = 1; //ID
+	string UIID = 2; //应用界面
+	repeated string Name = 3; //组件名
+}
+
+//Shop.csv
+message ShopConfig
+{
+	int32 ID = 1; //商店ID
+	int32 ShopNumber = 2; //商店一级页签id
+	int32 ShopType = 3; //商店类型
+	int32 SystemId = 4; //关联系统id
+	int32 ShopName = 5; //商店一级页签名字
+	int32 SubShopName = 6; //商店二级页签名字
+	repeated int32 GoodsList = 7; //商品列表list
+	repeated int32 TopId = 8; //top条显示资源
+	int32 Cycle = 9; //更新周期
+	int32 IsRandom = 10; //是否随机
+	repeated int32 Weight = 11; //随机权重
+	int32 IsShow = 12; //是否显示
+	repeated int32 Discount = 13; //玩家折扣（万分比）
+	repeated int32 DiscountWeight = 14; //折扣权重
+}
+
+//ShopList.csv
+message ShopListConfig
+{
+	int32 ID = 1; //商品列表ID
+	repeated int32 GoodsList = 2; //商品list
+}
+
+//Skill.csv
+message SkillConfig
+{
+	int32 ID = 1; //ID
+	int32 IsNeedMoveRelease = 2; //是否需要移动时释放
+	int32 LevelUpInterval = 3; //技能升级间隔
+	int32 OriginLevel = 4; //技能初始等级
+	int32 MaxLevel = 5; //技能等级上限
+	int32 DamageType = 6; //技能伤害类型
+	int32 SkillType = 7; //类型
+	int32 SkillSubType = 8; //子类型
+	int32 EquipSkillType = 9; //装备技能的类型
+	int32 EquipSkillPriority = 10; //装备技能的优先级
+	repeated string DontRemoveBuffByRemoveEquip = 11; //档装备删除时不移除的Buff
+	int32 EquipSkillNeedRefresh = 12; //装备技能是否需要刷新
+	int32 IsLongZhuBigSkill = 13; //是否是龙珠争霸大招
+	repeated int32 ReleatedEnergySkillID = 14; //同步能量消耗关联技能ID
+	repeated int32 ReleatedSkillID = 15; //技能关联ID
+	repeated int32 ReleatedCDSkillID = 16; //同步CD关联技能ID
+	int32 BelongSkillID = 17; //归属技能ID（死亡统计用）
+	int32 InputCmdMutualId = 18; //技能指令队列互斥ID
+	int32 PhysicalVampireRatio = 19; //物理吸血比率
+	int32 MagicVampireRatio = 20; //法术吸血比例
+	int32 SkillCanCrit = 21; //技能是否可以暴击
+	int32 SkillButton = 22; //技能对应的按键索引
+	int32 SkillCmdType = 23; //技能指令类型
+	int32 IsPredictSkillView = 24; //是否预测技能表现
+	int32 IsShowNoTargetTips = 25; //是否显示没有目标提示
+	int32 IsLimitDragDisExecute = 26; //是否限制拖拽距离释放
+	repeated int32 TargetIsNeedRandom = 27; //目标是否需要随机筛选
+	string WheelSkillStateParams = 28; //使用轮盘选择技能
+	repeated int32 TargetCullingSubType = 29; //目标剔除类型
+	int32 BulletSyncRate = 30; //技能使用的子弹缩放范围
+	repeated int32 TargetAttackType = 31; //目标攻击类型
+	repeated int32 TargetCampType = 32; //目标阵营类型
+	int32 CastSkillInoreRange = 33; //搜索到目标超出攻击范围是否直接释放技能
+	int32 CastSkillDirToTarget = 34; //释放技能是否将角色朝向目标
+	int32 TargetSearchRadius = 35; //搜寻范围(半径)
+	int32 TargetRangeRadiusOrHeight = 36; //技能攻击范围
+	int32 TargetRangeAngleOrWidth = 37; //攻击判定的宽度
+	int32 TargetRangeType = 38; //攻击范围类型
+	int32 IsNeedSerchNotVisibleActor = 39; //是否需要搜索无视野角色
+	int32 IsContainCanNotSelectActor = 40; //是否需要搜索不可选中的角色
+	int32 IsContainCamouflageActor = 41; //是否需要搜索伪装中的角色
+	int32 IsSkillSelectTargetHighPriority = 42; //是否技能搜索目标高优先级（不需要精准普攻锁定的目标，针对强化普攻）
+	repeated string TargetSelectExtraRules = 43; //技能拖拽选敌规则
+	string TndicatorShowInMiniMap = 44; //指示器是否显示到小地图
+	string TndicatorLockInMiniMap = 45; //指示器是否与光柱一样锁定
+	int32 SearchTndicatorType = 46; //搜寻指示器类型
+	int32 IsIgnoreSpecialTndicatorShow = 47; //是否忽略指示器预警
+	int32 BSSkillTargetSelectTypeClick = 48; //荒野乱斗搜索目标选择类型(点放)
+	int32 BSSkillTargetSelectTypeDrag = 49; //荒野乱斗搜索目标选择类型(拖放)
+	repeated int32 BSSkillTargetSelectCellFlagMasks = 50; //荒野乱斗目标选择特殊参数，格子标记（仅锁敌用）
+	repeated int32 BSSkillTargetSelectCellFlagTndicatorMasks = 51; //荒野乱斗目标选择特殊参数，格子标记（仅指示器用）
+	repeated int32 BSSkillSpecificTypeMasks = 52; //荒野乱斗技能特殊类型
+	repeated int32 BSSkillSpecificTypeMaskParams = 53; //荒野乱斗技能特殊类型参数
+	int32 BSTargetSortRuleType = 54; //荒野目标乱斗排序规则
+	repeated int32 TndicatorType = 55; //指示器类型
+	repeated string TndicatorParams = 56; //新指示器参数
+	repeated string TndicatorExtraParams = 57; //指示器空岛贝相关参数
+	repeated string TndicatorExtraDisPlayName = 58; //指示器被阻挡后显示内容
+	int32 TndicatorHeight = 59; //指示器高度
+	string TndicatorSpecialStyles = 60; //指示器特效自定义风格
+	int32 IsCameraFollowTndicator = 61; //摄像机是否跟随指示器
+	int32 CameraFollowTndicatorDeadZoneRange = 62; //技能摇杆死区范围(百分制)
+	int32 CameraFollowTndicatorWaitTime = 63; //技能释放完毕后相机停留时间(毫秒)
+	int32 CameraFollowTndicatorStartSpeed = 64; //摄像机跟随指示器时开始阶段平滑速度
+	int32 CameraFollowTndicatorStartDecelerationRange = 65; //摄像机跟随指示器时开始阶段减速范围
+	int32 CameraFollowTndicatorStartSpeedY = 66; //摄像机跟随指示器时拉高高度开始阶段平滑速度
+	int32 CameraFollowTndicatorReturnSpeed = 67; //摄像机跟随指示器时返回阶段平滑速度
+	int32 CameraFollowTndicatorReturnDecelerationRange = 68; //摄像机跟随指示器时返回阶段减速范围
+	int32 CameraFollowTndicatorReturnSpeedY = 69; //摄像机跟随指示器时拉高高度返回阶段平滑速度
+	int32 CameraFollowTndicatorNotReplaceAngle = 70; //摄像机跟随指示器时，在这个范围内不会被替换下一个跟随
+	int32 CameraFollowTndicatorMaxRange = 71; //摄像机跟随指示器最大范围
+	int32 CameraFollowTndicatorLiftDis = 72; //摄像机跟随指示器拉高距离
+	int32 CameraFollowTndicatorReturnDecelerationCurve = 73; //镜头缓动的曲线
+	int32 IsIgnoreJoystickLimitArea = 74; //是否忽略技能指示器空区范围
+	int32 TndicatorShowType = 75; //指示器显示类型
+	int32 TndicatorShowDis = 76; //指示器显示距离
+	int32 IsShowLockInfo = 77; //是否显示锁定信息
+	int32 StackMaxCount = 78; //释放次数最大堆叠
+	int32 MaxOverlerpCastCount = 79; //技能可施放次数
+	int32 StackInitCount = 80; //技能升到1级赋予的时堆叠次数
+	int32 StackCD = 81; //增加堆叠次数CD
+	int32 SkillCD = 82; //技能CD时间
+	int32 IsTimelineData = 83; //技能数据是否来源Timeline
+	repeated int32 CanUseWhileControl = 84; //被控制时是否可以使用
+	string SkillTimeline = 85; //技能的Timeline
+	repeated int32 SkillTimelineGroupParams = 86; //timeline组索引自动切换规则
+	repeated string ConfigSkillScripts = 87; //装备技能用，配置的技能脚本
+	int32 ExecuteAfterDie = 88; //死亡后继续技能
+	int32 IsControllStop = 89; //被控制是否停技能
+	int32 IsTimePauseUnScaled = 90; //是否受时停影响
+	string SkillBtnEffectName = 91; //技能按钮特效名称
+	int32 SkillConsumeType = 92; //技能消耗类型
+	int32 Consume = 93; //技能消耗
+	int32 ShowProgressBorder = 94; //展示进度边框(仅大招)
+	float DamageCombineTime = 95; //伤害合并时间(0不合并)
+	int32 SDCDurableConsumption = 96; //搜打撤增幅器消耗值
+	repeated int32 SkillSpecificType = 97; //技能特殊类型标签
+	repeated int32 StopByNodeBuffTypes = 98; //受Action_StopSkillByBuffType匹配Buff类型停止技能
+	string TypeDesc = 99; //技能分类
+	string Params = 100; //技能动态参数
+}
+
+//SkillAwake.csv
+message SkillAwakeConfig
+{
+	int32 ID = 1; //索引ID
+	int32 HeroID = 2; //英雄id
+	int32 SkillType = 3; //技能位
+	int32 SkillID = 4; //关联技能ID
+	int32 Index = 5; //序号
+	repeated int32 PreID = 6; //前置点序号
+	string Coordinate = 7; //位置
+	int32 Type = 8; //觉醒点类型
+	int32 TypeParam = 9; //觉醒效果关联参数
+	string Name = 10; //潜能点名字
+	int32 MainPoint = 11; //主线点
+	string IconName = 12; //图标名称
+	int32 PotentialFactor = 13; //技能判断值
+	repeated int32 EffectID = 14; //关联效果id
+	repeated int32 AttrValueID = 15; //固定值属性ID
+	repeated int32 AttrRateID = 16; //比率属性ID
+	string EffectDesc = 17; //效果描述
+	string StoryDesc = 18; //故事描述
+	int32 Fit = 19; //契合度增加
+	repeated RewardConfig Cost = 20; //激活消耗
+	int32 NeedStar = 21; //需求英雄星级
+	int32 JlvEXPReward = 22; //Jlv经验获取
+}
+
+//SkillAwakeData.csv
+message SkillAwakeDataConfig
+{
+	int32 HeroID = 1; //英雄ID
+	string HeroColor = 2; //英雄潜能颜色
+	string Icon = 3; //训练营显示图标
+	string HeroComicPrefixName = 4; //漫画资源前缀
+}
+
+//SkillAwakeEffect.csv
+message SkillAwakeEffectConfig
+{
+	int32 ID = 1; //效果id
+	repeated int32 EffectSkills = 2; //作用的技能ID
+	repeated int32 SkillEffectiveLevel = 3; //觉醒效果作用局内技能等级区间
+	int32 AwakeType = 4; //效果类型
+	string Params = 5; //动态参数新增值
+	repeated string SkillArea = 6; //技能范围添加值
+}
+
+//SkillAwakeRelation.csv
+message SkillAwakeRelationConfig
+{
+	int32 ID = 1; //索引ID
+	int32 HeroID = 2; //英雄id
+	int32 SkillType = 3; //技能位
+	int32 PotentialFactorGroup = 4; //潜能效果组合结果
+	string SkillID = 5; //新技能ID
+	string ExtraSkillID = 6; //额外附带技能
+}
+
+//SkillDescribe.csv
+message SkillDescribeConfig
+{
+	int32 ID = 1; //ID
+	string SkillName = 2; //技能名
+	string TypeDesc = 3; //技能分类，两个汉字
+	string SkillIconName = 4; //技能图标名称
+	string Desc = 5; //局外技能描述，数值固定，取1级
+	string DescBattle = 6; //局内技能描述，数值按等级动态
+	repeated int32 GrowthAttrTypes = 7; //技能成长属性类型
+	string GrowthAttrs = 8; //技能成长属性
+	repeated int32 AwakeSkills = 9; //觉醒技能描述
+	repeated int32 SkillTags = 10; //技能标签（BS体系中只用于新手对局引导提示是否为可被墙阻挡的位移，如果是则）填6
+	string ConsumeType = 11; //消耗类型
+	repeated int32 AwakeEffectIDs = 12; //需要切换技能名字的觉醒点
+	string SkillAwakeNames = 13; //新技能名字
+	repeated string SkillAwakeIconNames = 14; //新技能图标，不替换填写原资源
+	string PreviewVideoImage = 15; //技能视频预览图
+	string PreviewVideo = 16; //预览视频
+	string VideoSubtitile = 17; //预览视频字幕
+	int32 NeedAwakeID = 18; //解锁需求天赋点
+	repeated int32 SkillAttributeType = 19; //技能属性类型
+	repeated string SkillAttributeFormula = 20; //技能属性值表达式
+	repeated int32 SkillAttributeShow = 21; //升级展示属性类型
+}
+
+//SpecialAction.csv
+message SpecialActionConfig
+{
+	int32 AcitonID = 1; //ActionID
+	int32 UnitID = 2; //英雄ID
+	repeated int32 UnitSkinsID = 3; //英雄皮肤ID
+	string ActionName = 4; //动作名字
+	string ActionIcon = 5; //动作图标
+	string AnimStateName = 6; //状态机名称
+	int32 WaitTime = 7; //等待时间
+	int32 LoopTime = 8; //循环时间
+	int32 PlayTime = 9; //播放时间
+	int32 ActionInterectiveType = 10; //动作交互类型
+	repeated int32 ChangItemID = 11; //转化道具
+	repeated int32 ChangedQuantity = 12; //转化数量
+	repeated int32 AcceptUnitID = 13; //可交互英雄
+	repeated int32 AcceptActionID = 14; //被交互者使用动作
+	repeated string InterectiveNodeName = 15; //交互脚本名称
+	int32 ActionCD = 16; //动作CD
+	int32 IsDefault = 17; //默认存在
+}
+
+//SplitPackInfo.csv
+message SplitPackInfoConfig
+{
+	int32 ID = 1; //ID
+	string Tag = 2; //分包Tag
+	int32 MultiLanID = 3; //多语言ID
+	int32 Necessary = 4; //必要性标记
+	int32 DefaultOrder = 5; //默认排序
+	int32 LowOrder = 6; //低端机排序
+	int32 MidOrder = 7; //中端机排序
+	int32 HighOrder = 8; //高端机排序
+	int32 AutoDownLoad = 9; //自动下载
+}
+
+//Stage.csv
+message StageConfig
+{
+	int32 ID = 1; //ID
+	string SceneName = 2; //场景名称
+	string MapBattleConfigName = 3; //每个地图单独战斗配置名称
+	string CustomBattleConfigName = 4; //模式战斗配置名称
+	string HeroKillBattleConfigName = 5; //英雄击杀播报配置名称
+	string GridMeshName = 6; //网格配置名称
+	string ScenePointName = 7; //场景点位名称
+	string WaterEffectName = 8; //水花特效
+	int32 WaterOffsetY = 9; //水花特效的偏移
+	int32 HeroInitLevel = 10; //英雄初始等级
+	int32 HeroInitGold = 11; //英雄初始金币
+	int32 RobatHeroInitGold = 12; //机器人英雄初始金币
+	repeated string SceneBGM = 13; //背景音乐名称
+	repeated int32 SceneBgmFMODPoolIds = 14; //FMOD背景音乐id
+	repeated string ExtraTimeAudioEffect = 15; //加时赛背景音乐名称
+	repeated int32 ExtraTimeAudioEffectFMODPoolIds = 16; //FMOD加时赛背景音乐id
+	repeated string ExtraTimeBGM = 17; //加时赛背景音乐名称
+	repeated int32 ExtraTimeBgmFMODPoolIds = 18; //FMOD加时赛背景音乐id
+	int32 SceneBGMVolume = 19; //背景音乐音量
+	string StageSkillConfigABPath = 20; //关卡技能配置AB包名称
+	string StageEffectABPath = 21; //关卡特效AB包名称
+	string StageSoundABPath = 22; //关卡音效AB包名称
+	string StageFMODSoundABPaths = 23; //关卡FMOD音效AB包名称(多个路径用|线分割)
+	int32 StageLogicWindWall = 24; //关卡逻辑风墙持续时间
+	repeated int32 StagePosition = 25; //关卡位置
+	string StageCGVideoName = 26; //开场CG动画名字
+	int32 StageCGDuration = 27; //CG播放时长
+	string StageSplitAB = 28; //分包检查
+	string DesName = 29; //描述名字
+	string BlueTowerIcon = 30; //蓝方塔图标
+	string RedTowerIcon = 31; //红方塔图标
+	string TyrantIcon = 32; //暴君图标
+	string DarknessTyrantIcon = 33; //黑暗暴君图标
+	string StormDragonKingIcon = 34; //风暴龙王图标
+	string SmallDominatorIcon = 35; //小主宰图标
+	string BigDominatorIcon = 36; //大主宰图标
+	string BlueTowerName = 37; //蓝方塔名字
+	string RedTowerName = 38; //红方塔名字
+	string PioneerName = 39; //先锋名字
+	string TyrantName = 40; //暴君名字
+	string DarknessTyrantName = 41; //黑暗暴君名字
+	string StormDragonKingName = 42; //风暴龙王名字
+	string SmallDominatorName = 43; //小主宰名字
+	string BigDominatorName = 44; //大主宰名字
+	string GMTyrant = 45; //暴君(GM)
+	string GMDominator = 46; //主宰(GM)
+	string BlueTowerHpSliderNameCamp1 = 47; //蓝方塔血条背景名称(阵营1)
+	string RedTowerHpSliderNameCamp1 = 48; //红方塔血条背景名称(阵营1)
+	string BlueTowerHpSliderNameCamp2 = 49; //蓝方塔血条背景名称(阵营2)
+	string RedTowerHpSliderNameCamp2 = 50; //红方塔血条背景名称(阵营2)
+	int32 HighlandDistance = 51; //高地范围(码)
+	repeated int32 SellEquipConditions = 52; //原价出售装备条件
+	string TimelineImgName = 53; //开始镜头IP图片名字
+	string TimelineGameTypeName = 54; //开始镜头游戏模式名字
+	string TimelineGameRuleName = 55; //开始镜头游戏规则内容
+	repeated int32 TimelineGameCampRuleNames = 56; //开始镜头游戏规则阵营内容
+	string TimelinePosName = 57; //开始镜头地图名字
+	int32 PlayerShadowHeight = 58; //结束表演镜头阴影位置
+	int32 CombatRatingBattleFactor = 59; //结算评分战斗系数
+	int32 CombatRatingModeFactor = 60; //结算评分模式系数
+	repeated int32 CombatRatingEvent = 61; //结算评分事件
+	repeated int32 CombatRatingEventFactors = 62; //结算评分事件系数
+	string StartTimelinePath = 63; //开始Timeline表演perfab路径
+	string EndTimelinePath = 64; //結束Timeline表演perfab路径
+	string VideoPath = 65; //需要预加载的视频路径
+}
+
+//StageGuide.csv
+message StageGuideConfig
+{
+	int32 ID = 1; //引导ID
+	int32 IsOpen = 2; //是否开启
+	int32 GuideType = 3; //类型
+	int32 Language = 4; //名称
+	string Icon = 5; //图标
+	int32 Score = 6; //积分奖励
+	string DirName = 7; //配置文件夹路径名称
+	int32 ModeID = 8; //模式ID
+	int32 GameType = 9; //游戏模式
+	repeated int32 UnitIDs = 10; //双方初始角色
+	repeated int32 Camps = 11; //初始角色阵营
+	repeated int32 AILevel = 12; //电脑等级
+	int32 MainPlayerIdx = 13; //
+}
+
+//StageGuideRewards.csv
+message StageGuideRewardsConfig
+{
+	int32 ID = 1; //ID
+	int32 ScoreNumber = 2; //积分要求
+	repeated RewardConfig Rewards = 3; //奖励
+}
+
+//SummonerSkill.csv
+message SummonerSkillConfig
+{
+	int32 ID = 1; //ID
+	int32 JLevel = 2; //解锁等级
+	int32 Hero = 3; //关联英雄
+	int32 NeedItemID = 4; //需求道具ID
+	int32 NeedTalentID = 5; //需求天赋ID
+	int32 GoToID = 6; //UIGoToID
+	string GetWayDesc = 7; //获取途径文本
+}
+
+//SummonerSkillMode.csv
+message SummonerSkillModeConfig
+{
+	int32 ID = 1; //ID
+	repeated int32 NormalSummonerSkill = 2; //可选择的通用召唤师技能ID
+	repeated int32 SpecialSummonerSkill = 3; //专属召唤师技能ID
+}
+
+//SurpriseBox.csv
+message SurpriseBoxConfig
+{
+	int32 ID = 1; //id
+	repeated int32 Quality1 = 2; //灰色品质
+	repeated int32 Quality2 = 3; //绿色品质
+	repeated int32 Quality3 = 4; //蓝色品质
+	repeated int32 Quality4 = 5; //紫色品质
+	repeated int32 Quality5 = 6; //橙色品质
+	repeated int32 Quality6 = 7; //红色品质
+}
+
+//SurpriseBoxTime.csv
+message SurpriseBoxTimeConfig
+{
+	int32 ID = 1; //效果ID
+	string StartTime1 = 2; //开始时间1
+	string EndTime1 = 3; //结束时间1
+	int32 BoxID1 = 4; //宝箱ID1
+	string StartTime2 = 5; //开始时间2
+	string EndTime2 = 6; //结束时间2
+	int32 GroupID2 = 7; //宝箱ID2
+	string StartTime3 = 8; //开始时间3
+	string EndTime3 = 9; //结束时间3
+	int32 GroupID3 = 10; //宝箱ID3
+	string StartTime4 = 11; //开始时间4
+	string EndTime4 = 12; //结束时间4
+	int32 GroupID4 = 13; //宝箱ID4
+}
+
+//Task.csv
+message TaskConfig
+{
+	int32 ID = 1; //任务ID
+	int32 TaskType = 2; //任务类型
+	int32 TriggerType = 3; //任务触发类型
+	repeated int32 TaskConditions = 4; //任务条件
+	repeated int32 TaskConditionsInGame = 5; //任务条件(成就局内弹出用)
+	int32 Init = 6; //是否设置初始值
+	int32 IsStateTask = 7; //是否为状态类任务
+	repeated int32 TaskParams = 8; //任务参数
+	repeated int32 TaskParamsInGame = 9; //任务参数(成就局内弹出用)
+	repeated int32 Systems = 10; //功能限定池
+	int32 HighLevelHero = 11; //高等级英雄等级
+	int32 LowLevelHero = 12; //低等级英雄等级
+	int32 RandomHeroNumber = 13; //随机英雄数量
+	repeated int32 RandomGameTypePool = 14; //游戏模式随机池
+	int32 RandomGameTypeNumber = 15; //随机模式数量
+	int32 RandomMainTagNumber = 16; //随机职业个数
+	int32 RandomComicNumber = 17; //随机ip个数
+	int32 RewardID = 18; //奖励Id
+	string TaskDesc1 = 19; //描述1
+	string TaskDesc2 = 20; //描述2
+	int32 ActivityID = 21; //活动ID
+	int32 UIGoToID = 22; //跳转界面
+}
+
+//UIGoTo.csv
+message UIGoToConfig
+{
+	int32 ID = 1; //ID
+	string GoToGameUIID = 2; //跳转界面
+	int32 GoToParam = 3; //跳转参数
+	int32 GoToParam2 = 4; //跳转参数2
+	string GoToName = 5; //名字
+	string GoToIcon = 6; //图标
+}
+
+//goods.csv
+message GoodsConfig
+{
+	int32 ID = 1; //ID 非必要不能改
+	int32 GoodsGroupId = 2; //线性推送组id
+	int32 SortType = 3; //排序
+	int32 ItemID = 4; //道具id
+	int32 Num = 5; //单份数量
+	int32 CostMoneyType = 6; //出售货币道具id
+	int32 Price = 7; //原始单价
+	int32 Discount = 8; //折扣单价
+	int32 CashGoodsID = 9; //直购ID
+	string DiscountPower = 10; //折扣度
+	RewardConfig AdditionalCost = 11; //新增消耗道具
+	string PushShelfTime = 12; //自动上架时间
+	string DiscountTime = 13; //限时折扣开启时间
+	int32 DiscountContinue = 14; //限时折扣持续时长（小时）
+	string LimitOpenTime = 15; //限时出售开启时间
+	int32 ContinueTime = 16; //限时出售持续时间小时
+	int32 LimitGroup = 17; //个人限购分组
+	int32 LimitType = 18; //个人限购方式
+	int32 LimitNumber = 19; //个人限购数量
+	int32 EveryBuyLimit = 20; //每次购买数量限制
+	repeated int32 Require = 21; //购买限制条件
+	repeated int32 RequireParm = 22; //购买限制条件参数
+	int32 GetWay = 23; //获取途径
+	int32 UIGoToID = 24; //跳转界面
+	int32 LabelID = 25; //前往按钮多语言ID
+}
+
+//robotName.csv
+message RobotNameConfig
+{
+	int32 ID = 1; //ID
+	string Name = 2; //機器人名字
+}
+
+//TaskCondition.csv
+message TaskConditionConfig
+{
+	int32 ID = 1; //任务条件ID
+	string Processor = 2; //处理器
+	string ValueType = 3; //数值类型
+}
+
+//TaskRegister.csv
+message TaskRegisterConfig
+{
+	int32 ID = 1; //ID
+	repeated int32 ParamsTypes = 2; //附属条件类型
+	int32 NeedClientDot = 3; //是否需要客户端打点处理(1需要)
+	string TaskPassProcessor = 4; //任务处理器
+}
+
+//Timer.csv
+message TimerConfig
+{
+	int32 ID = 1; //ID
+	string Time = 2; //跨天刷新时间点 在线
+	repeated int32 FuncID = 3; //功能ID 仅此功能使用
+	int32 NewDayHour = 4; //跨天刷新时间点（整点） 离线
+	int32 IsWeek = 5; //是否为周更 周一几点
+	int32 IsMonth = 6; //是否为月更 1号几点
+	int32 SystemId = 7; //系统id
+}
+
+//Title.csv
+message TitleConfig
+{
+	int32 ID = 1; //id
+	int32 TitleType = 2; //称号类型
+	int32 TitleLevel = 3; //称号等级
+	string Des = 4; //称号描述
+	string Content = 5; //称号名称
+	repeated int32 Color = 6; //文字颜色[R|G|B]
+	int32 UIGoTo = 7; //获取途径(ID)
+	string GetDescription = 8; //获取途径描述文本（废弃）
+	string TitleBG = 9; //称号底板
+	int32 IsShow = 10; //未获得时是否显示
+}
+
+//TransferPos.csv
+message TransferPosConfig
+{
+	int32 ID = 1; //ID
+	int32 Type = 2; //类型
+	repeated int32 Position = 3; //传送点
+	int32 SceneId = 4; //场景Id
+	int32 Range = 5; //传送点范围
+}
+
+//TriggerGift.csv
+message TriggerGiftConfig
+{
+	int32 Condition = 1; //弹出条件
+	int32 GiftId = 2; //弹出礼包id
+}
+
+//TriggerGiftCondition.csv
+message TriggerGiftConditionConfig
+{
+	int32 ID = 1; //条件枚举
+	int32 ConditionType = 2; //条件类型
+	repeated int32 Params = 3; //参数
+	int32 Priority = 4; //优先级
+}
+
+//TriggerGiftGoods.csv
+message TriggerGiftGoodsConfig
+{
+	int32 ID = 1; //ID
+	int32 Time = 2; //可购买时间（秒）
+	int32 GoodsCount = 3; //物品数量
+	int32 Condition = 4; //随机物品条件
+	repeated int32 Goods = 5; //物品池
+}
+
+//UISystem.csv
+message UISystemConfig
+{
+	int32 ID = 1; //ID
+	int32 ModuleId = 2; //模块id
+	string LvUnLockShowName = 3; //功能名字
+	int32 Type = 4; //系统解锁类型
+	int32 JLevel = 5; //解锁需要账号总奖杯数
+	int32 UnlockPlayerLevel = 6; //荣誉之路领取解锁
+	int32 UnlockTask = 7; //解锁任务
+	int32 IsShow = 8; //未解锁入口是否显示
+	string Icon = 9; //图标
+	string Toast = 10; //功能能未开启提示
+	string Des = 11; //系统描述
+	int32 IsShowLock = 12; //是否展示解锁界面
+	int32 Param = 13; //参数
+	int32 IsWaitMatchIn = 14; //队伍中是否可以进入
+}
+
+//UISystemFriendly.csv
+message UISystemFriendlyConfig
+{
+	string ID = 1; //ID
+	repeated int32 TipSubTitle = 2; //UI规则副标题
+	repeated int32 TipContentList = 3; //UI规则内容
+}
+
+//UISystemFriendlyDesc.csv
+message UISystemFriendlyDescConfig
+{
+	int32 ID = 1; //ID
+	string Content = 2; //文字内容
+}
+
+//Unit.csv
+message UnitConfig
+{
+	int32 ID = 1; //ID
+	string Name = 2; //名字
+	int32 CombatType = 3; //攻击类型（决定装备收益）
+	int32 Gender = 4; //性别
+	int32 LODSourceType = 5; //LOD资源来源类型
+	string ActorSkillConfigABPath = 6; //角色技能配置AB包路径
+	string ActorHighPrefabABPath = 7; //高模角色预制AB包资源路径
+	string ActorPrefabABPath = 8; //角色预制AB包资源路径
+	repeated string ActorSubPrefabABPaths = 9; //角色附属预制AB包资源路径
+	repeated string SpecialActionModelName = 10; //角色低模特殊动作对应模型名(actionName|modelName)
+	string ActorEffectABPath = 11; //角色特效AB包路径
+	repeated string ActorOtherEffectABPath = 12; //高模角色特效AB包路径
+	string ActorSoundABPath = 13; //角色音效AB包路径
+	string FMODActorSoundABPath = 14; //FMOD插件启用时角色音效AB包路径
+	string BigSkillCGModelABPath = 15; //角色大招CG模型AB包路径
+	string BigSkillEffect = 16; //角色大招CG特效AB包路径
+	string BigSkillABPath = 17; //角色大招演示AB包路径
+	repeated int32 SubUnitIDs = 18; //附属单位ID
+	int32 SubUnitIsNotFriendly = 19; //附属单位是否不和主单位一个阵营
+	string ReviveEffectName = 20; //复活特效名称
+	string DeadEffectName = 21; //死亡特效名称
+	int32 DeadAudioID = 22; //死亡音效ID（对应音效表）
+	int32 ReviveAudioID = 23; //复活音效ID（对应音效表）
+	int32 EnergyRecoverAudioId = 24; //回弹音效
+	string HeadIconName = 25; //头像图标名称
+	repeated string BackCityState = 26; //专属回城脚本
+	repeated int32 NormalSkills = 27; //普攻技能
+	int32 PassiveSkill = 28; //被动技能
+	int32 Skill1 = 29; //技能1
+	int32 Skill2 = 30; //技能2
+	int32 Skill3 = 31; //技能3
+	int32 Skill4 = 32; //技能4
+	repeated int32 SpecialSkills = 33; //特殊技能
+	int32 UltimateSkillButtonID = 34; //大招技能ID
+	string SkillSuits = 35; //英雄技能预览配置
+	string SkillGroup = 36; //技能组图标
+	int32 ActorRenderType = 37; //单位表现类型
+	int32 FieldOfViewRadius = 38; //探草视野半径
+	int32 FowRadius = 39; //迷雾视野半径
+	int32 CollideGrassStrength = 40; //身体碰撞草丛强度
+	int32 GrassYOffset = 41; //草丛下压强度
+	int32 DeadViewDelayTime = 42; //视野死亡之后的停留时间
+	int32 TargetLockEffectRadius = 43; //目标锁定特效半径
+	int32 EffectDynamicScale = 44; //动态特效大小缩放（万分比）
+	string ShortName = 45; //名字
+	int32 BodyViewRadius = 46; //表现身体的半径
+	int32 BodyRadius = 47; //位移寻路体积半径
+	int32 BodyCollideRadius = 48; //逻辑体积判定-伤害计算
+	int32 NormalSwitchType = 49; //普攻的切换类型
+	int32 MaxFollowTime = 50; //最长追击时间(目前小兵AI使用，单位ms)
+	int32 FollowNearestDistance = 51; //最小追击距离（目前小兵AI使用，单位码）
+	int32 AttributeID = 52; //默认属性的ID
+	repeated int32 SkillRecommendRules = 53; //技能推荐规则
+	int32 DestoryTime = 54; //死亡后尸体清理等待时间
+	int32 DeathAddResouresRadius = 55; //死亡增加资源半径
+	int32 TurnSpeedMin = 56; //旋转速度最小
+	int32 TurnSpeedMax = 57; //旋转速度最大
+	int32 IdleToMoveBlendChangeSpeed = 58; //Idle到移动混合改变速度
+	int32 WalkToRunChangeNeedSpeed = 59; //Walk切换到Run动作需要的速度
+	int32 WalkToRunChangeSpeedAdd = 60; //Walk到Run改变速度增加值
+	int32 WalkToRunChangeSpeedReduce = 61; //Walk到Rund改变速度减少值
+	int32 PlayRandomActType = 62; //动作随机类型
+	int32 RandomActCount = 63; //动作数量
+	int32 FirstRandomTime = 64; //首次随机时间
+	int32 RandomTime = 65; //随机时间
+	float ActorModelScale = 66; //角色模型大小
+	int32 HpSliderType = 67; //角色血条类型
+	int32 DeadType = 68; //死亡类型
+	int32 FallUnit = 69; //下降单位1:100
+	repeated string CommonScripts = 70; //启用通用功能
+	int32 IsNeedHidaActorInCreate = 71; //是否创建时影藏角色
+	int32 MPLackEnergyAudioID = 72; //能量缺失播放音效ID1
+	int32 MPLackEnergyTwoAudioID = 73; //能量缺失播放音效ID2
+	string MPLackEnergyEffectName = 74; //能量缺失特效名
+	string HPHittedEffectName = 75; //血条受击特效名
+	int32 DamageEfficiency = 76; //吃鸡模式补给箱攻击效率
+	int32 BSSearchRecordRange = 77; //荒野乱斗搜索记录范围(单位码)
+	float BattleNumberOffsetY = 78; //受击跳字偏移
+}
+
+//UnitAttribute.csv
+message UnitAttributeConfig
+{
+	int32 ID = 1; //ID
+	int32 EnergyType = 2; //能量类型
+	int32 EnergyNumType = 3; //能量格子数量
+	int32 EnergyMax = 4; //能量最大值
+	int32 EnergySpeed = 5; //能量恢复速度
+	int32 ExtraEnergy = 6; //初始额外能量
+	int32 ExtraEnergyMax = 7; //额外能量上限
+	int32 PhysicalAtk = 8; //物理攻击
+	int32 MaxHP = 9; //血量最大值
+	int32 MoveSpeed = 10; //移速
+	int32 Crit = 11; //暴击概率
+	int32 CritRatio = 12; //暴击伤害率
+	int32 PhysicalVampire = 13; //物理吸血
+	int32 CDDecrease = 14; //冷却缩减
+	int32 Tenacity = 15; //韧性
+	int32 Block = 16; //伤害格挡
+	int32 ReviveTimeDecrease = 17; //复活时间缩减
+	int32 HealingReceived = 18; //受到治疗效果
+	int32 HealingDone = 19; //造成治疗效果
+}
+
+//UnitDynamicAttr.csv
+message UnitDynamicAttrConfig
+{
+	int32 ID = 1; //ID
+	int32 DynamicAttrID = 2; //动态属性ID
+	repeated int32 TimeRange = 3; //生效时间段
+	int32 AttributeID = 4; //属性ID
+	int32 AddExp = 5; //加经验
+	int32 AddMoney = 6; //加金币
+}
+
+//UnitMapIcon.csv
+message UnitMapIconConfig
+{
+	int32 ID = 1; //ID
+	repeated string DefaultIcon = 2; //默认图标Icon
+	repeated string LongZhuIcon = 3; //龙珠MobaIcon
+	repeated string MuYeIcon = 4; //木叶MobaIcon
+	int32 IconVisible = 5; //头像是否显示
+	int32 IsNeedSyncDir = 6; //头像是否与方向同步
+	string TimeColor = 7; //小地图倒计时字体颜色
+}
+
+//UnitSubCount.csv
+message UnitSubCountConfig
+{
+	string ID = 1; //Prefab的名字
+	int32 AvatarCacheCount = 2; //AvatarCache的数量
+}
+
+//UnlockShow.csv
+message UnlockShowConfig
+{
+	int32 ID = 1; //ID
+	int32 Level = 2; //等级
+	string UnlockSysName = 3; //解锁功能名字
+	string Icon = 4; //图标
+	string Goto1 = 5; //跳转参数
+}
+
+//ViolationCourtDeath.csv
+message ViolationCourtDeathConfig
+{
+	int32 ID = 1; //ID
+	int32 DeathCnt = 2; //送死次数
+	int32 DeductSocre = 3; //扣分基础
+	int32 ReportWeight = 4; //举报权重
+}
+
+//ViolationHangup.csv
+message ViolationHangupConfig
+{
+	int32 ID = 1; //ID
+	int32 HangUpPro = 2; //挂机时长比例（万分比）
+	int32 DeductSocre = 3; //扣分基础
+	int32 ReportWeight = 4; //举报权重
+}
+
+//ViolationNegative.csv
+message ViolationNegativeConfig
+{
+	int32 ID = 1; //ID
+	int32 NegativeCnt = 2; //消极次数
+	int32 DeductSocre = 3; //扣分基础
+	int32 ReportWeight = 4; //举报权重
+}
+
+//ViolationPenalty.csv
+message ViolationPenaltyConfig
+{
+	int32 ID = 1; //ID
+	int32 GameType = 2; //游戏类型
+	int32 GameMode = 3; //游戏模式
+	int32 ViolationType = 4; //违规类型
+	repeated int32 CreditScoreDeduct = 5; //信誉分扣除
+	repeated int32 AccountBan = 6; //封号天数
+	repeated int32 MessageBan = 7; //禁言时长
+	repeated int32 MatchBan = 8; //禁赛时长（分钟）
+	int32 ResetTime = 9; //违规重置时间（天）
+	repeated int32 KDA = 10; //KDA
+	repeated int32 AITimeSum = 11; //AI操控时长
+	repeated int32 DeathTime = 12; //死亡次数
+	repeated int32 Damage = 13; //伤害量
+}
+
+//ViolationSpeech.csv
+message ViolationSpeechConfig
+{
+	int32 ID = 1; //ID
+	int32 MinCnt = 2; //最低次数
+	int32 DeductSocre = 3; //扣分基础
+	int32 IsProhibition = 4; //是否禁言(1是禁言)
+	int32 ProhibitionTime = 5; //禁言时长（秒）
+	int32 ReportWeight = 6; //举报权重
+}
+
+//WarmBattleScore.csv
+message WarmBattleScoreConfig
+{
+	int32 ID = 1; //自增Id无意义
+	int32 Step = 2; //阶段
+	int32 Condition = 3; //条件类型
+	float Param = 4; //参数
+	repeated int32 ChangeScore = 5; //加减分（匹配、排位、龙珠）
+}
+
+//WorkProficiencyLevel.csv
+message WorkProficiencyLevelConfig
+{
+	int32 ID = 1; //ID
+	int32 Level = 2; //等级
+	int32 Percentage = 3; //经验值
+	int32 UnlockFunction = 4; //解锁功能
+	string DisplayInformation = 5; //展示信息
+	repeated RewardConfig Reward = 6; //等级奖励
+}
+
+//WorldActorEffect.csv
+message WorldActorEffectConfig
+{
+	int32 ID = 1; //玩家状态枚举对应ID
+	string EffectPath = 2; //特效路径
+	string EffectName = 3; //特效名称
+	repeated int32 PositionOffset = 4; //与Root点的偏移量
+}
+
+//const.csv
+message ConstConfig
+{
+	int32 ID = 1; //ID
+	int32 Param1 = 2; //参数1
+	float Param2 = 3; //参数2
+	string Param3 = 4; //参数3
+	repeated int32 Param4 = 5; //参数4
+	repeated string Param5 = 6; //参数5
+}
+
+//paymentServerAddr.csv
+message PaymentServerAddrConfig
+{
+	int32 ID = 1; //区服id
+	string PaymentAddress = 2; //充值服务器地址
+	string ServerName = 3; //服务器名称
+}
+

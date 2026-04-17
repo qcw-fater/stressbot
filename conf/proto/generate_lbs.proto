@@ -1,0 +1,96 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+
+import "lbs.proto";
+import "player.proto";
+
+// Lbs 最强国服荣誉玩家数据
+message HighestBaseData {
+	PlayerBase baseInfo 		= 1; 	// 玩家基础信息
+	int32 score   				= 2;	// 荣誉积分
+}
+
+// Lbs数据详情
+message LbsScoreDetails {
+	LbsData curLbsData 				= 1;	// 当前LBS数据
+	repeated LbsData nextLbsList 	= 2;	// 距离前面排行榜的差值数据
+}
+
+// 请求最强国服服玩家
+message LbsRequestHighestPlayersC2S
+{
+	int32 heroId 	= 1;	// 英雄ID
+	int32 dateTime 	= 2;	// 日期：20250728，为0则默认表示当前
+	int32 jobId 	= 3;	// 职业ID
+}
+
+// 请求最强国服服玩家
+message LbsRequestHighestPlayersS2C
+{
+	int32 						heroId 			= 1;	// 英雄ID
+	int32 						dateTime 		= 2;	// 日期：20250728，为0则默认表示当前
+	repeated HighestBaseData 	highestPlayers 	= 3;	// 最强国服成员列表
+	repeated int32				historyDateList	= 4;	// 历史日期列表
+	int32 						jobId 			= 5;	// 职业ID
+}
+//玩家定位
+message LbsPositioningC2S
+{
+	int32 lbsId = 1;//玩家定位Id
+}
+//玩家定位
+message LbsPositioningS2C
+{
+}
+//使用称号
+message LbsUseTitleC2S
+{
+	int32 	heroId 		= 1;	// 英雄Id
+	int32 	lbsId		= 2;	// LbsId
+	int32 	jobId 		= 3;	// 职业Id
+	int32 	index 		= 4;	// 称号索引
+	bool 	isUse		= 5;	// 是否使用 true:使用 false:取消
+}
+//使用称号
+message LbsUseTitleS2C
+{
+	repeated LbsTitleData 	lbsTitle = 1; // Lbs称号列表
+	repeated int32 			titles	 = 2; // 普通称号列表
+}
+//查看英雄积分详情
+message LbsLookHeroScoreDetailsC2S
+{
+	int32 heroId 	= 1;	// 英雄Id
+	int32 jobId 	= 2;	// 职业Id
+}
+//查看英雄积分详情
+message LbsLookHeroScoreDetailsS2C
+{
+	LbsScoreDetails scoreDetails = 1; // 积分详情
+}
+//获取称号
+message LbsNotifyGetTitleS2C
+{
+	repeated LbsTitleData titleData = 1;	// 称号数据
+}
+//请求英雄Lbs下一级目标
+message LbsRequestHeroesNextTargetC2S
+{
+	repeated int32 heroes = 1; // 请求英雄列表
+}
+//请求英雄Lbs下一级目标
+message LbsRequestHeroesNextTargetS2C
+{
+	map<int32, LbsScoreDetails> nextTargetData = 1; // 英雄Lbs下一级目标 key:heroId, value:LbsScoreDetails
+}
+
+//请求排位英雄Lbs下一级目标
+message LbsRequestHeroNextTargetC2S
+{
+}
+//请求排位英雄Lbs下一级目标
+message LbsRequestHeroNextTargetS2C
+{
+	LbsData   nextLbsData = 1; // 下一级LBS数据
+}

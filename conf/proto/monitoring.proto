@@ -1,0 +1,107 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+enum MonitorType
+{
+    MT_UNKNOWN     = 0;
+}
+
+// 按大小分配的内存块统计信息
+message  MemBySize
+{
+     uint32 Size    =   1;  // 当前内存块的最大字节大小
+     uint64 Mallocs =   2;  // 分配累计计数
+     uint64 Frees   =   3;  // 释放内存的累计计数
+}
+
+//runtime采集数据
+message RuntimeMemStatsData
+{
+    uint64 Alloc                    = 1;    // 已分配的堆内存的字节数
+    uint64 TotalAlloc               = 2;    // 堆内存分配的累积字节数，当对象被释放时，它不会减少
+    uint64 Sys                      = 3;    // 占用操作系统的内存总字节数
+    uint64 Lookups                  = 4;    // 被runtime监视的指针数
+    uint64 Mallocs                  = 5;    // 分配的堆对象的累积计数（活动对象的数量为：Mallocs-Frees)
+    uint64 Frees                    = 6;    // 被释放的堆对象的累积计数
+    uint64 HeapAlloc                = 7;    // 已分配堆对象的字节数
+    uint64 HeapSys                  = 8;    // 表示从操作系统获取的堆内存字节数
+    uint64 HeapIdle                 = 9;    // 表示申请了的空闲的(未使用的)spans中的字节数
+    uint64 HeapInuse                = 10;   // 正在使用中的堆内存字节数
+    uint64 HeapReleased             = 11;   // 返还到系统的物理内存的字节数（返还给操作系统且尚未被堆重新获取的的堆内存字节数）
+    uint64 HeapObjects              = 12;   // 分配的堆对象的数量（与HeapAlloc一样，随着分配而增加，随着清理和释放而减少）
+    uint64 StackInuse               = 13;   // 正在使用中的栈内存字节数
+    uint64 StackSys                 = 14;   // 系统分配作为运行栈的内存字节数
+    uint64 BuckHashSys              = 15;   // 分析桶哈希表的内存字节数
+    uint64 GCSys                    = 16;   // 垃圾回收标记元数据中使用的内存字节数
+    uint64 OtherSys                 = 17;   // GO语言系统占用的额外空间字节数
+    uint64 NextGC                   = 18;   // 下一个GC周期的扫描目标堆内存的大小
+    uint64 LastGC                   = 19;   // 最后一次垃圾收集完成的时间,以1970年(UNIX时间戳)以来的纳秒为单位
+    uint64 PauseTotalNs             = 20;   // 自程序启动以来GC停止暂停中的累积纳秒数
+    uint32 NumGC                    = 21;   // 垃圾回收调用的次数
+    uint32 NumForcedGC              = 22;   // 强制调用垃圾回收的次数
+    double GCCPUFraction            = 23;   // 自程序启动以来GC使用的CPU时间的百分比
+    uint64 PauseDurationNs          = 24;   // 每次采集，GC消耗的时间（纳秒）
+    uint64 PauseCount               = 25;   // 每次采集GC的次数
+    repeated MemBySize BySize       = 26;   // 按大小分配的内存统计信息 61个
+}
+
+
+// 计数类型
+message MetricsCounter
+{
+    int64 count = 1;    //计数
+}
+
+// 即时测量值
+message MetricsGauge
+{
+    int64 gauge = 1;    //值
+}
+
+// 直方图 用来统计一组数据的统计学分布情况
+message MetricsHistogram
+{
+    int64   count       = 1;    //计数
+    int64   min         = 2;    //最小值
+    int64   max         = 3;    //最大值
+    string  mean        = 4;    //平均值
+    int64   sum         = 5;    //总量
+    string  stddev      = 6;    //方差
+    string  median      = 7;    //中位数
+    string  percent75   = 8;    //75百分位的度量值
+    string  percent85   = 9;    //85百分位的度量值
+    string  percent95   = 10;   //95百分位的度量值
+    string  percent99   = 11;   //99百分位的度量值
+}
+
+// 用于测量一组事件发生的速度 比如：web服务的平均处理性能(条/秒)
+message MetricsMeter
+{
+    int64   count       = 1;    //计数
+    string  minRate_1   = 2;    //1钟的速率
+    string  minRate_5   = 3;    //5钟的速率
+    string  minRate_15  = 4;    //15钟的速率
+    string  meanRate    = 5;    //服务启动后处理请求的总量与程序运行时间(秒）的比值
+}
+
+// Histogram和Meter的结合体
+message MetricsTimer
+{
+    int64   count       = 1;    //计数
+    int64   min         = 2;    //最小值
+    int64   max         = 3;    //最大值
+    string  mean        = 4;    //平均值
+    int64   sum         = 5;    //总量
+    string  stddev      = 6;    //方差
+    string  median      = 7;    //中位数
+    string  percent75   = 8;    //75百分位的度量值
+    string  percent85   = 9;    //85百分位的度量值
+    string  percent95   = 10;   //95百分位的度量值
+    string  percent99   = 11;   //99百分位的度量值
+    string  minRate_1   = 12;   //1钟的速率
+    string  minRate_5   = 13;   //5钟的速率
+    string  minRate_15  = 14;   //15钟的速率
+    string  meanRate    = 15;   //服务启动后处理请求的总量与程序运行时间(秒）的比值
+}

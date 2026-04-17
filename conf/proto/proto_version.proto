@@ -1,0 +1,11 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+//协议版本号
+enum ProtoVersion
+{
+    InvalidVersion  = 0;             // 占位
+    VersionCode     = 49;            // 协议版本号（新增协议，修改协议数据结构自增）
+}

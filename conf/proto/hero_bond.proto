@@ -1,0 +1,36 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+import "enum_battle.proto";
+
+
+// HeroBondGroup 表示一个英雄羁绊组
+message HeroBondGroup {
+	string 			id 			= 1;	// 羁绊组id
+	int32 			owner 		= 2;    // 羁绊组拥有者
+	repeated int32 	heroes 		= 3;    // 羁绊组成员列表
+	bool 			isActive 	= 4;    // 是否激活
+}
+
+// HeroIncludedBondInfo 英雄被包含的羁绊信息
+message HeroIncludedBondInfo  {
+	int32 	ownerHeroId 		= 1;	// 羁绊拥有者英雄id
+	string 	groupId     		= 2;	// 羁绊组id
+}
+
+// HeroBondConfig 英雄羁绊配置
+message HeroBondConfig {
+	int32 							ownerHeroId			= 1; // 所属英雄id
+	repeated int32 					heroes 				= 2; // 羁绊英雄集合
+	repeated HeroBondAttributeConf  levelAttr 			= 3; // 等级属性加成
+	repeated HeroBondAttributeConf  awakeLevelAttr 		= 4; // 觉醒等级属性加成
+}
+
+// HeroBondAttribute 羁绊属性
+message HeroBondAttributeConf {
+	int32 				level 		= 1; 	// 激活所需的等级
+	EAttribute 			attrType 	= 2;	// 属性类型
+	int32 				value 		= 3;	// 属性值
+}

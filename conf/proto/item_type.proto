@@ -1,0 +1,109 @@
+syntax             = "proto3"; //[proto2|proto3]
+
+option  go_package = ".;pb";
+package Game;
+
+// 道具父类型
+enum ItemType {
+    IT_Invalid   = 0;
+    IT_Money     = 1;  // 货币
+    IT_Item      = 2;  // 道具
+    IT_Gift      = 3;  // 礼包
+    IT_Hero      = 4;  // 英雄
+    IT_Player    = 6;  // 玩家数据
+    IT_MonthCard = 7;  // 月卡
+    IT_Approvals = 15; // 英雄认可度道具
+    IT_SDC_Item  = 16; // 搜打撤道具
+}
+
+// 道具子类型
+enum ItemSubType {
+    IST_Show             = 0; // 展示用品
+    IST_General          = 1; // 一般杂物
+    IST_Awake            = 2; // 英雄觉醒道具
+    IST_Addition         = 3; // 加成类道具卡
+    IST_SuperTalent      = 4; // 英雄天赋激活道具(废弃）
+    IST_RenameCard       = 5; // 改名卡
+    IST_LotteryPoolReset = 6; // 卡池重置
+}
+
+// 礼包子类型
+enum GiftSubType {
+    GST_Normal      = 0; // 展示用品
+    GST_ShopBox     = 1; // 商店宝箱（自动开启）
+    GST_SelectGift  = 2; // 自选礼包
+    GST_SurpriseBox = 3; // 惊喜宝箱
+    GST_AutoOpenBox = 4; // 自动开启宝箱
+    GST_Random      = 5; // 随机礼包
+}
+
+// 道具使用类型
+enum ItemUseType {
+    IUT_Invalid          = 0;
+    IUT_Reward           = 1; // 使用获得奖励(使用参数1，走drop配置）
+    IUT_Rename           = 2; // 改名卡
+    IUT_LotteryPoolReset = 3; // 卡池重置
+}
+
+// 玩家数据子类型
+enum PlayerDataSubType {
+    PST_Invalid               = 0;
+    PST_Icon                  = 1;  // 头像
+    PST_Iframe                = 2;  // 头像框
+    PST_Background            = 3;  // 背景
+    PST_Title                 = 4;  // 称号
+    PST_Expression            = 5;  // 表情
+    PST_BattlePass            = 6;  // 解锁进阶战令道具
+    PST_BattlePassExp         = 7;  // 战令经验
+    PST_HeroAction            = 8;  // 英雄动作
+    PST_HeroTrialBp           = 9;  // 英雄试炼付费bp
+    PST_BattleNoticeBoardSkin = 10; // 战斗播报板皮肤
+    PST_FirstReward           = 11; // 首充奖励
+}
+
+// 英雄数据子类型
+enum HeroDataSubType {
+    HST_Invalid  = 0;
+    HST_Hero     = 1; // 英雄
+    HST_Skin     = 2; // 英雄皮肤
+    HST_HeroChip = 3; // 英雄碎片
+}
+
+// 搜打撤道具主类型（对应 Item.csv SubType 字段）
+// 注意：礼包使用现有 IT_Gift(3) 类型处理，不属于 IT_SDC_Item，故不在此枚举中定义
+enum SDCItemSubType {
+    SDC_ST_Invalid    = 0; // 无效
+    SDC_ST_Amplifier  = 1; // 增幅器
+    SDC_ST_Armor      = 2; // 护甲
+    SDC_ST_Backpack   = 3; // 背包
+    SDC_ST_Skill      = 4; // 技能
+    SDC_ST_Chip       = 5; // 芯片
+    SDC_ST_Medicine   = 6; // 药品
+    SDC_ST_Collection = 7; // 藏品
+    SDC_ST_Key        = 8; // 钥匙
+}
+
+// 增幅器二级子类型（sdcType=SDC_ST_Amplifier 时 sdcSubType 的有效值）
+// 决定装配到哪个增幅器槽（slotType 4/5/6）
+enum SDCAmplifierSubType {
+    SDC_AMPL_INVALID  = 0; // 无效
+    SDC_AMPL_NORMAL   = 1; // 普攻增幅器 → 普攻槽(slotType=4)
+    SDC_AMPL_SKILL    = 2; // 技能增幅器 → 技能槽(slotType=5)
+    SDC_AMPL_ULTIMATE = 3; // 大招增幅器 → 大招槽(slotType=6)
+}
+
+// 护甲/芯片二级子类型（sdcType=SDC_ST_Armor 或 SDC_ST_Chip 时 sdcSubType 的有效值）
+// 护甲：决定防御属性方向；芯片：用于同类型装配数量上限校验
+enum SDCArmorChipSubType {
+    SDC_AC_INVALID  = 0; // 无效
+    SDC_AC_ATTACK   = 1; // 进攻型
+    SDC_AC_DEFENSE  = 2; // 防守型
+    SDC_AC_FUNCTION = 3; // 功能型
+}
+
+// 药品二级子类型（sdcType=SDC_ST_Medicine 时 sdcSubType 的有效值）
+enum SDCMedicineSubType {
+    SDC_MED_INVALID = 0; // 无效
+    SDC_MED_HP      = 1; // 血量药品（恢复血量）
+    SDC_MED_ARMOR   = 2; // 护甲药品（修复护甲耐久度）
+}

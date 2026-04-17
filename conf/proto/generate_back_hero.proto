@@ -1,0 +1,20 @@
+syntax             = "proto3";
+option  go_package = ".;pb";
+package Game;
+
+message PlayerBackHero {
+    bool              flag      = 1; // 是否拥有领取英雄资格
+    map<int32, int64> getList   = 2; // 已领取英雄列表 英雄ID-领取时间
+    map<int32, bool>  oldHeroId = 3; // moda 时期代已拥有英雄列表 英雄ID-是否拥有
+}
+
+// 领取英雄
+message BackHeroGetHeroC2S {
+    repeated int32 HeroId = 1; // 英雄ID
+}
+
+// 领取英雄
+message BackHeroGetHeroS2C {
+    repeated int32    HeroId  = 1; // 英雄ID
+    map<int32, int64> getList = 2; // 已领取英雄列表 英雄ID-领取时间
+}

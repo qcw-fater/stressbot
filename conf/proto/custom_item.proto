@@ -1,0 +1,50 @@
+syntax = "proto3";  //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+import "common.proto";
+
+message ItemInfo {
+    int64 guid       = 1;  // 道具guid
+    int32 id         = 2;  // 配置id
+    int64 createTime = 3;  // 道具获得时间
+    int32 number     = 4;  // 个数
+    int64 outTime    = 5;  // 过期时间
+    int64 beginTime  = 6;  // 开始时间 配置为空，永久生效；配置具体时间，只能到时间后才能生效和使用
+    int64 updateTime = 7;  // 更新时间（重复获得和创建时更新）
+}
+
+message Item {
+    int32 id     = 1;  // 配置id
+    int32 number = 2;  // 个数
+}
+
+message Equip {
+    int64 guid                       = 1;  // 道具guid
+    int32 id                         = 2;  // 配置id
+    int32 exp                        = 3;  // 经验
+    map<int32, int32> mainAttr       = 4;  // 主属性
+    map<int32, int32> AdditionalAttr = 5;  // 附属性
+    int32 passiveEffect              = 6;  // 被动效果
+    int32 HeroId                     = 7;  // 穿戴的英雄 <=0:未穿戴
+}
+
+//SelectPack.csv
+message SelectPackCfg
+{
+    int32 ID = 1; //礼包ID
+    string Name = 2; //礼包名称
+    int32 Type = 3; //礼包类型
+    repeated RewardConfig ItemContains = 4; //礼包物品
+    int32 CanSelectNum = 5; //可选奖励数量
+}
+
+message SelectItemInfo {
+    ItemInfo ItemInfo = 1; // 道具基础信息
+    SelectPackCfg SelectInfo = 2; // 自选道具配置信息
+}
+
+// 保底次数
+message guaranteedCount {
+    map<int32,int32> count = 1;
+}

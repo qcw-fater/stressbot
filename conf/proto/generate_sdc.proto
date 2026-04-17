@@ -1,0 +1,174 @@
+syntax             = "proto3";
+option  go_package = ".;pb";
+package Game;
+
+import "custom_sdc.proto";
+
+// ==================== 战备系统协议 ====================
+
+// 请求战备数据
+message SdcGetPrepareDataC2S {}
+
+// 战备数据响应
+message SdcGetPrepareDataS2C {
+    SDCPrepareData data     = 1; // 战备数据
+    int32 errorCode         = 2; // 错误码
+}
+
+// 装配道具请求
+message SdcEquipItemC2S {
+    int64 itemGuid = 1; // 道具GUID
+    int32 slotType = 2; // 目标槽位类型
+}
+
+// 装配道具响应
+message SdcEquipItemS2C {
+    SDCEquipSlot slot               = 1; // 装配后的槽位信息
+    int32 totalValue                = 2; // 更新后的总价值
+    SDCHeroTalentAwakeInfo heroInfo = 3; // 更新后的英雄天赋觉醒（装配影响加成时有值）
+    int32 errorCode                 = 4; // 错误码
+}
+
+// 卸下道具请求
+message SdcUnequipItemC2S {
+    int32 slotType = 1; // 槽位类型
+}
+
+// 卸下道具响应
+message SdcUnequipItemS2C {
+    int32 slotType                           = 1; // 槽位类型
+    SDCWarehouseItem item                    = 2; // 卸下的道具
+    int32 totalValue                         = 3; // 更新后的总价值
+    repeated SDCWarehouseItem relocatedItems = 4; // 归位仓库的藏品列表
+    SDCHeroTalentAwakeInfo heroInfo          = 5; // 更新后的英雄天赋觉醒（卸下影响加成时有值）
+    int32 errorCode                          = 6; // 错误码
+}
+
+// 移动道具请求
+message SdcMoveItemC2S {
+    int64 itemGuid     = 1; // 道具GUID
+    int32 fromPackType = 2; // 来源背包类型（0=仓库）
+    int32 toPackType   = 3; // 目标背包类型（0=仓库）
+}
+
+// 移动道具响应
+message SdcMoveItemS2C {
+    SDCPackSlot fromPack         = 1; // 来源背包（fromPackType=0时为nil）
+    SDCPackSlot toPack           = 2; // 目标背包（toPackType=0时为nil）
+    int32 totalValue             = 3; // 更新后的装配区域总价值
+    int32 errorCode              = 4; // 错误码
+    SDCWarehouseData warehouseData = 5; // 仓库数据（涉及仓库操作时有值）
+}
+
+// 出售道具请求
+message SdcSellItemC2S {
+    int64 itemGuid = 1; // 道具GUID
+    int32 fromType = 2; // 来源类型（0=仓库 1=装配槽位 2=背包）
+    int32 fromSlot = 3; // 来源槽位/背包类型
+}
+
+// 出售道具响应
+message SdcSellItemS2C {
+    int64 itemGuid   = 1; // 道具GUID
+    int32 sellValue  = 2; // 出售获得数量
+    int32 moneyType  = 3; // 出售货币类型
+    int32 totalValue = 4; // 更新后的装配区域总价值
+    int32 errorCode  = 5; // 错误码
+}
+
+// 批量出售请求
+message SdcBatchSellC2S {
+    repeated int64 itemGuids = 1; // 道具GUID列表
+}
+
+// 单种货币的出售结果
+message SdcSellCurrencyResult {
+    int32 moneyType  = 1; // 货币类型
+    int32 totalValue = 2; // 获得数量
+}
+
+// 批量出售响应
+message SdcBatchSellS2C {
+    repeated int64 soldGuids                 = 1; // 成功出售的道具GUID列表
+    repeated SdcSellCurrencyResult currencyResults = 2; // 各货币类型获得明细
+    int32 errorCode                          = 3; // 错误码
+}
+
+// ==================== 仓库系统协议 ====================
+
+// 请求仓库数据
+message SdcGetWarehouseDataC2S {}
+
+// 仓库数据响应
+message SdcGetWarehouseDataS2C {
+    SDCWarehouseData data = 1; // 仓库数据
+    int32 errorCode       = 2; // 错误码
+}
+
+// ==================== 赛季系统协议 ====================
+
+// 请求赛季数据
+message SdcGetSeasonDataC2S {}
+
+// 赛季数据响应
+message SdcGetSeasonDataS2C {
+    SDCSeasonData data = 1; // 赛季数据
+    int32 errorCode    = 2; // 错误码
+}
+
+// 领取赛季奖励请求
+message SdcSeasonRewardC2S {
+    int32 tier = 1; // 段位
+}
+
+// 领取赛季奖励响应
+message SdcSeasonRewardS2C {
+    int32 tier                       = 1; // 段位
+    repeated SDCWarehouseItem rewards = 2; // 奖励道具
+    int32 errorCode                  = 3; // 错误码
+}
+
+// ==================== 成长系统协议 ====================
+
+// 请求成长数据
+message SdcGetGrowthDataC2S {}
+
+// 成长数据响应
+message SdcGetGrowthDataS2C {
+    SDCGrowthData data = 1; // 成长数据
+    int32 errorCode    = 2; // 错误码
+}
+
+// 成长升级请求
+message SdcGrowthUpgradeC2S {
+    int32 upgradeType = 1; // 升级类型（1-仓库 2-增幅器背包 3-药品背包）
+}
+
+// 成长升级响应
+message SdcGrowthUpgradeS2C {
+    int32 upgradeType = 1; // 升级类型
+    int32 newLevel    = 2; // 新等级
+    int32 newSlots    = 3; // 新格子数
+    int32 errorCode   = 4; // 错误码
+}
+
+// ==================== 藏品系统协议 ====================
+
+// 请求藏品数据
+message SdcGetCollectionDataC2S {}
+
+// 藏品数据响应
+message SdcGetCollectionDataS2C {
+    SDCCollectionData data = 1; // 藏品数据
+    int32 errorCode        = 2; // 错误码
+}
+
+// ==================== 队伍系统协议 ====================
+
+// 设置补齐队友选项请求
+message SdcFillTeammateC2S {
+    bool fillTeammate = 1; // 是否开启补齐队友
+}
+
+// 设置补齐队友选项响应
+message SdcFillTeammateS2C {}

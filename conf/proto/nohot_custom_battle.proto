@@ -1,0 +1,438 @@
+syntax             = "proto3"; //[proto2|proto3]
+
+option  go_package = ".;pb";
+package Game;
+
+// 导入枚举
+import "enum_battle.proto";
+
+// 局内快捷发言数据
+message battleConvenientChat {
+    int32 quickChat = 1; // 快捷发言次数
+    int32 sticker   = 2; // 表情使用次数
+}
+
+// 玩家结算信息
+message PlayerBattleStatistics {
+    string                        name             = 1;  // 玩家名字
+    int32                         playerId         = 2;  // 玩家ID
+    int32                         fightIndex       = 3;  // 战斗内玩家索引(客户端索引）
+    int32                         serverFightIndex = 4;  // 战斗内玩家索引(服务器索引）
+    int64                         teamId           = 5;  // 队伍ID
+    CampType                      camp             = 6;  // 所属阵营
+    repeated HeroBattleStatistics HeroStatistics   = 7;  // 英雄统计数据（如果bo3时，为所有回合的总计）
+    bool                          mvp              = 8;  // 是否MVP
+    int32                         teamMemberNum    = 9;  // 队伍内人数
+    int32                         rank             = 10; // 排名
+    BattleResultType              result           = 11; // 结算结果
+    int32                         hookTime         = 12; // 挂机时长(秒)
+    int32                         score            = 13; // 局内表现评分
+    int32                         minGriding       = 14; // 队伍最低段位
+    repeated int32                battleTitles     = 15; // 战斗内称号
+    JoinTeamWay                   joinWay          = 16; // 加入方式
+    BattleLadderInfo              battleLadderBase = 17; // 战斗内玩家排位简约数据
+    int32                         addBraveScore    = 18; // 队友违规加勇者积分次数  可能有多个人违规
+}
+
+// 战斗内玩家排位简约数据(战斗前数据)
+message BattleLadderInfo {
+    int32 ladderLevel         = 1; // 段位等级
+    int32 starNum             = 2; // 星星数量
+    int32 season              = 3; // 赛季
+    int32 recreationScore     = 4; // 娱乐赛积分
+    int32 recreationLevel     = 5; // 娱乐赛等级
+    int64 titleValidityPeriod = 6; // 排位赛称号有效期
+}
+
+message HeroBattleStatistics {
+    int32                    heroId           = 1;  // 英雄id
+    int32                    skinId           = 2;  // 皮肤id
+    int32                    killNum          = 3;  // 击杀数
+    int32                    deadNum          = 4;  // 死亡数
+    int32                    damage           = 5;  // 伤害量
+    int32                    cure             = 6;  // 治疗量
+    int32                    cupNumber        = 7;  // 英雄杯数
+    int32                    level            = 8;  // 英雄等级
+    repeated skillStatistics skillData        = 9;  // 技能统计数据
+    int32                    takeDamage       = 10; // 承受伤害
+    int32                    assistNumber     = 11; // 助攻数
+    repeated BehaviorInfo    behaviorData     = 12; // 行为数据
+    int32                    restoreHealth    = 13; // 恢复生命
+    int32                    selfRevert       = 14; // 回复(自己给自己产生的治疗)
+    int32                    TakeCure         = 15; // 治疗（别人对自己产生的治疗）
+    int32                    MakeCure         = 16; // 产生治疗，对其他人造成回血
+    repeated Bo3BehaviorInfo bo3BehaviorData  = 17; // bo3行为数据
+    int32                    takeShieldDamage = 18; // 承受护盾伤害，自身收到的护盾伤害
+}
+
+message Bo3BehaviorInfo {
+    repeated BehaviorInfo behaviorData = 1; // 行为数据
+}
+
+// 技能统计数据
+message skillStatistics {
+    int32 id            = 1; // 技能ID
+    int32 useDragCount  = 2; // 拖拽技能使用次数
+    int32 useClickCount = 3; // 点击技能使用次数
+    int32 hitDragCount  = 4; // 拖拽技能命中次数
+    int32 hitClickCount = 5; // 点击技能命中次数
+    int32 damage        = 6; // 技能造成的伤害
+    int32 cure          = 7; // 技能产生的总治疗量（包含回复和治疗）
+    int32 revert        = 8; // 回复（技能对自己产生的治疗）
+    int32 cureOther     = 9; // 治疗（对别人产生的治疗）
+}
+
+// 战斗标记（用于举报）
+message ReportStatisticsData {}
+
+// 快照数据
+message SnapshotSync {
+    KillSuperMonsterDetails superMonster         = 1; // 超级野怪击杀详情
+    GuardTowerDetails       guardTower           = 2; // 防御塔摧毁详情
+    repeated BattleSnapshot snapshot             = 3; // 玩家快照
+    ReportStatisticsData    ReportStatisticsData = 4; // 战斗标记用于举报
+}
+
+message DynamicInfo {
+    int32 DynamicInfoId = 1; // id
+    int32 num           = 2; // 次数
+}
+
+// 战斗内行为统计
+message BehaviorInfo {
+    int32 behaviorId = 1; // 行为id
+    int32 count      = 2; // 触发次数
+}
+
+// 龙珠相关结算信息
+message DragonBattleStatistics {
+    repeated int32 KillCountWithDragonBall     = 1;  // 击杀带龙珠玩家数(记录的是颗数)
+    repeated int32 AssistCountWithDragonBall   = 2;  // 助攻击杀带龙珠玩家数（颗数 )
+    int32          TotalDeliverDragonBallCount = 3;  // 总交付龙珠总数
+    int32          TotalStealDragonBallCount   = 4;  // 总偷取龙珠总数
+    int32          TotalGainCapsuleCount       = 5;  // 拾取胶囊总数
+    int32          TotalGainChestCount         = 6;  // 拾取补给箱总数
+    int32          DefensiveKillCount          = 7;  // 在基地范围内，基地有龙珠时，击杀敌方单位数目
+    int32          DefensiveAssistCount        = 8;  // 在基地范围内，基地有龙珠时，助攻击杀敌方单位数目
+    repeated int32 Scores                      = 9;  // 每次己方基地龙珠变化时积分
+    bool           killBattlePlayer            = 10; // 是否是杀死比赛选手
+    int32          DragonBattleScore           = 11; // 玩家龙珠积分(客户端不用传 主要服务器使用)
+    int32          TotalPickDragonBallCount    = 12; // 总拾取龙珠个数
+    int32          TotalStealCount             = 13; // 总偷取龙珠次数
+    int32          TotalDeliverDragonBallTimes = 14; // 交付龙珠次数
+}
+
+// 战斗任务
+message BattleTaskInfo {
+    int32 taskId = 1; // 任务id
+    int32 value  = 2; // 任务值
+}
+
+// 木叶天赋信息
+message MuyeTalentRecordInfo {
+    int32 confId   = 1; // 配置id
+    int32 talentId = 2; // 天赋id
+}
+
+// 玩家战绩
+message PlayerStandings {
+    int64                     battleId              = 1; // 战斗ID
+    GameModel                 model                 = 2; // 玩法模式
+    GameType                  gType                 = 3; // 玩法类型
+    int32                     battleModeId          = 4; // 匹配类型
+    int64                     beginTime             = 5; // 比赛开始时间
+    int64                     endTime               = 6; // 比赛结束时间
+    repeated FighterStandings fighterList           = 7; // 战斗单位列表
+    int32                     recreationScoreChange = 8; // 娱乐赛积分变化值
+}
+
+// 战斗单位战绩
+message FighterStandings {
+    CampType                      camp             = 1; // 阵营
+    int32                         rank             = 2; // 排名
+    string                        name             = 3; // 名字
+    int32                         playerId         = 4; // 玩家id
+    int32                         fighterIndex     = 5; // 玩家战斗内唯一id
+    repeated HeroFighterStandings heroList         = 6; // 英雄列表
+    bool                          Mvp              = 7; // 是否MVP
+    BattleLadderInfo              playerLadderInfo = 8; // 玩家段位相关数据，战斗前数据
+}
+
+// 英雄战绩
+message HeroFighterStandings {
+    int32 heroId         = 1; // 英雄id
+    int32 cupNumber      = 2; // 奖杯数
+    int32 skinId         = 3; // 皮肤id
+    int32 level          = 4; // 英雄等级
+    int32 changeCupNum   = 5; // 变化数
+    int32 addPureEssence = 6; // 增加的专精
+    int32 lbsId          = 7; // lbsId
+    int32 lbsRank        = 8; // lbsRank
+}
+
+// 玩家动态信息
+message PlayerDynamicInfo {}
+
+// 战斗服到战斗服检测服的消息
+message BattleMsgToBattleCheck {
+    int64  battleId       = 1; // battle战斗id
+    int64  battleTime     = 2; // battle结束时间
+    string version        = 3; // 战斗版本号
+    int32  battleServerId = 4; // 战斗服务id
+    bool   noReturn       = 5; // 不返回(需要返回的才算检测的  默认false是不返回)
+    string md5            = 6; // 最多的md5结果
+}
+
+// 校验服到战斗服的消息
+message CheckMsgToBattle {
+    int64  battleId = 1; // 房间ID
+    string md5      = 2; // md5
+}
+
+// 投降统计
+message CapitulateData {
+    int32          surrenderSponsor = 1; // 投降发起者
+    int64          surrenderTime    = 2; // 发起投降的时间
+    int32          maxSurrenderNum  = 3; // 当次投票最大人数（多少人参与）
+    int32          surrenderNum     = 4; // 投降人数（认输）
+    int32          voteNum          = 5; // 表决人数（认输+拒绝）
+    repeated int32 surrenderPlayers = 6; // 投票投降的玩家列表
+    repeated int32 refusePlayers    = 7; // 投票拒绝的玩家列表
+    int32          capitulateCount  = 8; // 本场战斗第几次投降
+    bool           isCapitulate     = 9; // 是否投降成功（true:人数投降，false:投降失败）
+}
+
+// 战斗中玩家ping和fps统计 dmp日志也在调用
+message BattlePingOrFps {
+    int32           ping                = 1;  // 平均ping值
+    int32           fps                 = 2;  // 平均fps值
+    int32           stuck_count1        = 3;  // 卡顿1 低于TargetFps 1/6 的次数
+    int32           stuck_count2        = 4;  // 卡顿2 低于TargetFps 1/3 的次数
+    int32           stuck_count3        = 5;  // 卡顿3 低于TargetFps 1/2 的次数
+    int32           ping_count_30       = 6;  // 0-30 ping的次数
+    int32           ping_count_60       = 7;  // 31-60 ping的次数
+    int32           ping_count_90       = 8;  // 61-90 ping的次数
+    int32           ping_count_120      = 9;  // 91-120 ping的次数
+    int32           ping_count_460      = 10; // 121-460 ping的次数
+    int32           ping100_count_total = 11; // 上述ping100以上次数求和
+    int32           ping_count_total    = 12; // ping的总次数
+    int32           original_width      = 13; // 分辨率宽
+    int32           original_height     = 14; // 分辨率高
+    int32           CPU                 = 15; // CPU个数
+    int32           GPU                 = 16; // GPU个数
+    int32           memory              = 17; // 内存
+    int32           CPU_frequency       = 18; // CPU外频
+    int32           targetFPS           = 19; // 目标帧数
+    int32           quality             = 20; // 画面品质
+    int32           resolution          = 21; // 分辨率档位
+    string          deviceModel         = 22; // 机型设备
+    repeated string cip                 = 23; // udp 地址
+    string          battle_area         = 24; // 战斗服所在区域
+    string          osVersion           = 25; // 系统版本
+    string          sip                 = 26; // 战斗服IP
+}
+
+// 战斗经济详情
+message EconomyDetails {
+    int32 lastHitEconomy       = 1;  // 补刀经济
+    int32 killEconomy          = 2;  // 击杀英雄经济
+    int32 assistEconomy        = 3;  // 助攻经济
+    int32 salaryEconomy        = 4;  // 自然增长经济（工资）
+    int32 equipEconomy         = 5;  // 装备经济
+    int32 soldierLineEconomy_1 = 6;  // 兵线经济(发育路）
+    int32 soldierLineEconomy_2 = 7;  // 兵线经济（中路）
+    int32 soldierLineEconomy_3 = 8;  // 兵线经济（对抗路）
+    int32 jungleBySelfEconomy  = 9;  // 我方野区经济
+    int32 jungleByEnemyEconomy = 10; // 敌方野区经济
+    int32 jungleByRiverway     = 11; // 河道野区经济
+    int32 KillTowerEconom      = 12; // 推搭经济
+}
+
+// 伤害详情
+message OutDamageDetails {
+    int32 totalDamage                 = 1;  // 总伤害
+    int32 normalSkillDamage           = 2;  // 普攻伤害
+    int32 normalSkillCritDamage       = 3;  // 普攻暴击伤害
+    int32 skillDamage                 = 4;  // 技能伤害
+    int32 skillCritDamage             = 5;  // 技能暴击伤害
+    int32 equipDamage                 = 6;  // 装备伤害
+    int32 equipCritDamage             = 7;  // 装备暴击伤害
+    int32 heroDamage                  = 8;  // 召唤师技能伤害
+    int32 totalDamageToHero           = 9;  // 总伤害_对英雄
+    int32 normalSkillDamageToHero     = 10; // 普攻伤害_对英雄
+    int32 normalSkillCritDamageToHero = 11; // 普攻暴击伤害_对英雄
+    int32 skillDamageToHero           = 12; // 技能伤害_对英雄
+    int32 skillCritDamageToHero       = 13; // 技能暴击伤害_对英雄
+    int32 equipDamageToHero           = 14; // 装备伤害_对英雄
+    int32 equipCritDamageToHero       = 15; // 装备暴击伤害_对英雄
+    int32 heroDamageToHero            = 16; // 召唤师技能伤害_对英雄
+}
+
+// 治疗详情
+message CureDetails {
+    int32 totalCure           = 1; // 总治疗量
+    int32 skillCure           = 2; // 技能治疗量
+    int32 heroSkillCure       = 3; // 召唤师技能治疗量
+    int32 equipCure           = 4; // 装备治疗量
+    int32 totalCureToHero     = 5; // 总治疗量_对英雄
+    int32 skillCureToHero     = 6; // 技能治疗量_对英雄
+    int32 heroSkillCureToHero = 7; // 召唤师技能治疗量_对英雄
+    int32 equipCureToHero     = 8; // 装备治疗量_对英雄
+}
+
+// 承伤详情
+message HurtDamageDetails {
+    int32 totalHurtDamage       = 1; // 受到的总伤害
+    int32 magicDamage           = 2; // 魔法伤害-总值
+    int32 physicsDamage         = 3; // 物理伤害-总值
+    int32 realDamage            = 4; // 真实伤害-总值
+    int32 magicDamageToHero     = 5; // 魔法伤害(伤害来源--英雄）
+    int32 physicsDamageToHero   = 6; // 物理伤害(伤害来源--英雄）
+    int32 realDamageToHero      = 7; // 真实伤害(伤害来源--英雄）
+    int32 totalHurtDamageToHero = 8; // 受到的总伤害--英雄
+}
+
+// 控制详情
+message ControlDetails {
+    int32 controlCount   = 1; // 控制次数（一个技能控制N个人，记录为N次控制）
+    int32 controlTime    = 2; // 控制总时长
+    int32 unControlCount = 3; // 被控制次数
+    int32 unControlTime  = 4; // 被控制的总时长
+}
+
+// 挂机行为
+message OnHookBehavior {
+    int32 onHookTime  = 1; // 总挂机时长
+    int32 onHookCount = 2; // 挂机次数（1分钟及以上无断线、无操作（挂机），死亡时间除外）
+}
+
+// 技能使用详情
+message CastSkillDetails {
+    int32             NormalSkillDamage = 1;  // 普攻伤害
+    map<int32, int32> CastSkill         = 2;  // 施放技能次数 Key:SkillId Value:Count
+    map<int32, int32> CastSkillToHitTarget =
+        3;                                    // 施放技能命中目标次数（释放技能，只要命中单位都算一次） Key:SkillId Value:Count
+    map<int32, int32> CastSkillToHitHero = 4; // 施放技能命中英雄次数 Key:SkillId Value:Count
+    map<int32, int32> SkillDamage        = 5; // 技能伤害
+    map<int32, int32> SkillCure          = 6; // 技能治疗
+}
+
+// 野怪击杀详情
+message KillMonsterDetails {
+    int32             KillMonsterCount = 1; // 击杀野怪总数
+    map<int32, int32> KillMonster      = 2; // 击杀各个野怪次数（包含大小龙，暴君等） Key:野怪Id    Value:次数
+}
+
+// 大小龙，暴君击杀详情
+message KillSuperMonsterDetails {
+    repeated int32 killTyrantTime          = 1; // 击杀布雍的时间点（毫秒）
+    repeated int32 killDarknessTyrantTime  = 2; // 击杀小巨猿的时间点（毫秒）
+    repeated int32 killSmallDominatorTime  = 3; // 击杀小骷髅机器人的时间点（毫秒）
+    repeated int32 killBigDominatorTime    = 4; // 击杀大骷髅机器人的时间点（毫秒）
+    repeated int32 killStormDragonKingTime = 5; // 击杀大巨猿的时间点（毫秒）
+    repeated int32 killMidDominatorTime    = 6; // 击杀中骷髅机器人时间点（毫秒）
+}
+
+// 防御塔详情
+message GuardTowerDetails {
+    map<int32, int32> guardTowerByDestroyTime    = 1; // 各防御塔被摧毁的时间
+    map<int32, int32> guardTowerByBearDamage     = 2; // 各防御塔承受的总伤害
+    map<int32, int32> guardTowerByBearDamageHero = 3; // 各防御塔承受英雄的伤害
+}
+
+// 龙珠阵营统计
+message DragonBattleCampStatistics {
+    repeated int32 getCapsuleCount = 1; // 拾取胶囊【胶囊id_a,胶囊id_b,胶囊id_c】
+    repeated int32 getCapsuleTime  = 2; // 拾取胶囊时间【胶囊id_a拾取时间,胶囊id_b拾取时间,胶囊id_c拾取时间】（毫秒）
+    repeated int32 getChestsCount  = 3; // 拾取补给箱 【宝箱_a,宝箱_b,宝箱_c】
+    repeated int32 getChestsTime   = 4; // 拾取补给箱  【宝箱_a拾取时间,宝箱_b拾取时间,宝箱_c拾取时间】（毫秒）
+    int32          rank            = 5; // 龙珠总排名
+    int32          ball            = 6; // 获得的龙珠数
+}
+
+// 战斗结算快照数据集
+message BattleSnapshot {
+    int32               fightIndex            = 1;  // 战斗内玩家索引
+    int32               level                 = 2;  // 英雄等级
+    int32               exp                   = 3;  // 局内经验，统计当前获取的经验总值
+
+    int32               killNum               = 4;  // 击杀数
+    int32               deadNum               = 5;  // 死亡数
+    int32               scoreDeadNum          = 6;  // 死亡数(用于计算分数)
+    int32               assistNum             = 7;  // 助攻数
+
+    int32               money                 = 8;  // 当前金币
+    int32               totalMoney            = 9;  // 累计获得金币
+    int32               useMoney              = 10; // 累计消耗金币
+
+    repeated int32      equip                 = 11; // 当前出装
+
+    repeated int32      equipBuy              = 12; // 局内装备的购买（按顺序）
+    repeated int32      equipSell             = 13; // 局内装备的出售（按顺序）
+
+    int32               killTowerNum          = 14; // 推塔数
+    int32               actTowerDamage        = 15; // 对塔伤害
+
+    int32               getRedBufferCount     = 16; // 获取红BUFF次数
+    int32               getBlueBufferCount    = 17; // 获取蓝BUFF次数
+    int32               lastHitNum            = 18; // 击杀小兵个数
+
+    int32               hookTime              = 19; // 掉线时长
+    int32               outTimes              = 20; // 掉线次数
+
+    EconomyDetails      economy               = 21; // 对局经济详情
+    OutDamageDetails    outDamageData         = 22; // 伤害输出详情
+    HurtDamageDetails   hurtDamageData        = 23; // 承伤详情
+    CureDetails         cureData              = 24; // 治疗详情
+    ControlDetails      controlData           = 25; // 控制详情
+    OnHookBehavior      onHook                = 26; // 挂机行为
+    CastSkillDetails    skillData             = 27; // 释放技能详情
+    KillMonsterDetails  killMonster           = 28; // 击杀野怪详情
+    repeated PickInfo   gainChest             = 29; // 胶囊拾取详情
+    repeated PickInfo   supplyChest           = 30; // 胶囊拾取详情
+    int32               serverIndex           = 31; // 服务器内使用的单位索引
+    int32               deadByTowerTimes      = 32; // 累计被防御塔击或基地击杀次数
+    int32               deadByDogFaceTimes    = 33; // 累计被兵线击杀次数
+    int32               killByEnemyTowerTimes = 34; // 在敌方塔范围内击杀敌方次数
+    repeated PickInfo   gainFairyBean         = 35; // 仙豆拾取详情
+    repeated hurtDetail hurtDetailData        = 36; // 死亡伤害统计
+    int32               killStreakHeroBounty  = 37; // 连续击杀英雄的赏金
+}
+
+// 死亡伤害统计
+message hurtDetail {
+    int32 total    = 1; // 总伤害量
+    int32 physical = 2; // 物理
+    int32 magical  = 3; // 法术
+    int32 real     = 4; // 真实伤害
+    int32 notHero  = 5; // 非英雄
+}
+
+// 战斗快照数据
+message BattleSnapshotMsgC2S {
+    SnapshotSync    SnapshotData  = 1;
+    BattlePingOrFps pingData      = 2; // 延迟和帧率数据
+    int32           snapshotId    = 3; // 快照id
+    int32           doubleChannel = 4; // 双通道是否开启，0-关闭，1-开启
+}
+
+// 拾取详情
+message PickInfo {
+    int32 id   = 1; // 胶囊id
+    int32 time = 2; // 拾取时间
+}
+
+message PlayerBattleResult {
+    GameModel                     model         = 1;  // 玩法模式
+    GameType                      gType         = 2;  // 玩法类型
+    int32                         modeId        = 3;  // 地图Id
+    int32                         playerId      = 4;  // 玩家Id
+    string                        playerName    = 5;  // 玩家名字
+    int32                         teamMemberNum = 6;  // 队伍内人数
+    bool                          isWin         = 7;  // 是否胜利
+    bool                          isMvp         = 8;  // 是否MVP
+    repeated HeroBattleStatistics heroStats     = 9;  // 英雄战斗统计数据
+    int32                         joinWay       = 10; // 加入方式
+    int32                         rank          = 11; // 战斗排名
+	int32                      	  camp          = 12; // 玩家所属阵营
+}

@@ -1,0 +1,102 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+import "enum_battle.proto";
+import "player.proto";
+
+enum CreditEvent {
+    CreditEvent_None       			= 0; // 正常对决
+    CreditEvent_Select_Err 			= 1; // 异常开局
+    CreditEvent_Hook       			= 2; // 挂机
+    CreditEvent_Negative   			= 3; // 消极比赛
+    CreditEvent_Name       			= 4; // 昵称违规
+    CreditEvent_Cheat      			= 5; // 作弊
+    CreditEvent_Chat       			= 6; // 不当言论
+    CreditEvent_Report_Success 		= 7; // 举报成功
+    CreditEvent_Like_Two 			= 8; // 收到两名以上组队玩家点赞
+	CreditEvent_Match_No_Prepare 	= 9; // 匹配成功时未准备
+}
+
+
+//违规处罚类型
+enum CreditProcessType {
+  p_Sub_Morality_Score = 0; //信誉分扣除
+  p_Seal_Account =1; //封号
+  p_Seal_Chat =2; //禁言
+  p_Seal_Fight =3; //禁言
+}
+
+message CreditRecord {
+    int32       score         = 1; // 当前积分
+    int64       time          = 2; // 时间
+    CreditEvent event         = 3; // 事件
+    int64       endTime       = 4; // 结束时间
+    int32       changeScore   = 5; // 变化积分
+}
+
+// 异常开局
+message creditInfo {
+    int32 abnormalCount = 1; // 异常次数
+    int64 endTime       = 2; // 结束时间
+    int32 dayAddCount   = 3; // 每日增加次数
+}
+
+message creditTimesDb {
+  map<int32, int64> data = 1; // 数据map
+//  map<int32, int64> badChalege = 2; // 消极比赛
+}
+
+message creditDb {
+  map<int32, int32> countMap = 1; // 信誉分增长记录map  CreditEvent做key
+  map<int32, creditTimesDb>resetTimeMap = 2; // 违规次数重置的时间戳
+  map<int32, creditTimesDb>creditTimesMap = 3; // 违规次数map记录  CreditEvent做key
+//  creditTimesDb resetTimeMap = 2; // 违规次数重置的时间戳
+//  creditTimesDb creditTimesMap = 3; // 违规次数map记录  CreditEvent做key
+}
+
+
+message AddCreditRecordNew {
+  int64 NowTimes = 1;  // 次数
+  bool IsSubScore=2; // 是否扣分
+  int32 SubScore=3;// 扣的分
+  CreditEvent TypeId=4; // 类型
+  bool Fight =5;// 禁赛
+  int32 FightTime=6;// 禁赛时间
+}
+
+//战斗违规记录
+message  creditBattleRecord {
+  int64 battleId = 1; // 战斗id
+  repeated CreditEvent bigType = 2;  // 违规大类型
+  GameModel gameModel = 3; // 游戏模式
+  bool auto = 4; // 是否自动检测的  不然就是手动
+  int64 timestamp = 5;// 记录时间戳
+  map<int32,AddCreditRecordNew> penalty = 6;// 处罚数据
+  GameType gType = 7; // 游戏类型
+}
+
+//离线处理的手动举报违规
+message creditLoginProcessDb {
+  int64 battleId = 1; // 战斗id
+  repeated int32 CreditTypeList = 2; // 违规枚举列表
+  int32 playerId = 3; // 举报人id
+  int32 tarPlayerId = 4;// 被举报人id
+  int64 StartTime = 5; // 举报时间
+  GameModel model = 6; // 游戏模式
+  int64 battleEndTime = 7; // 战斗结束时间
+  GameType gType = 8; // 游戏类型
+}
+
+message creditNotifyData {
+//  int32 playerId = 1; // 违规玩家id
+//  int32 moralityScore = 2; // 违规前的信誉分
+  PlayerBase base = 1;
+  map<int32,AddCreditRecordNew> penalty = 6;// 处罚数据  违规类型：当前违规次数
+}
+
+//登录时返回的数据
+message creditLoginData {
+  map<int32,int32> countMap = 1; // 信誉分每天增长次数  按类型分
+}

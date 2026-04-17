@@ -1,0 +1,67 @@
+syntax = "proto3";  //[proto2|proto3]
+
+option go_package = ".;pb";
+import "enum.proto";
+package Game;
+
+// 拍卖物品db数据
+message AuctionItemDB {
+    int64 uuid         = 1;  // 物品唯一id
+    int32 itemId       = 2;  // 物品id
+    int32 startPrice   = 3;  // 起拍价
+    int64 startTime    = 4;  // 上架开始时间
+    int32 sellPlayerId = 5;  // 上架人id
+}
+
+message AuctionItemClient {
+    AuctionItemDB data        = 1;  // 物品唯一id
+    TradingGoodsStatus status = 2;  // 状态
+    int64 endTime             = 3;  // 状态结束时间
+    int32 num                 = 4;  // 道具数量
+    int32 minPrice            = 5;  // 最低价
+}
+
+message TradingBase {
+    map<int64, AuctionItemDB> upShelfList = 1;  // 上架商品
+    int64 downShelfCd                     = 2;  // 下架cd
+}
+
+// 参考价格List
+message MarketReferencePriceList {
+    repeated MarketReferencePrice marketReferencePriceList = 1;
+}
+message MarketReferencePrice {
+    int32 itemId   = 1;  // 物品id
+    int32 num      = 2;  // 物品数量
+    int32 bidPrice = 3;  // 竞拍价 --成功价格
+}
+
+// 交易日志
+message TradingLog {
+    int64 uuid        = 1;  // 物品唯一id
+    int32 itemId      = 2;  // 物品id
+    int64 time        = 3;  // 交易时间
+    int32 price       = 4;  // 交易价格
+    tradeLogType type = 5;  // 售出还是购买  1售出 2购买
+    int32 sellPrice   = 6;  // 出售价格(扣除手续费)
+    //    ItemInfo info     = 7;  // 道具详细信息
+}
+
+// 交易物品列表请求参数
+message TradingGoodsListParam {
+    int32 tabType           = 1;  // tab类型
+    int32 itemId            = 2;  // 道具Id
+    tradeGoodsSortType sort = 3;  // 排序方式
+    bool isSellStatus       = 4;  // 是否售卖期商品
+}
+
+message TradingFocusGoods {
+    AuctionItemClient item = 1;  // 道具详细数据
+    bool invalid           = 2;  // 是否失效
+}
+
+message TradingLoginData {
+    map<int64, AuctionItemClient> upShelfMap = 1;  // 上架商品Key:itemUid
+    map<int32, int32> incomes                = 2;  // 收入
+    int64 downShelfCd                        = 3;  // 下架cd
+}

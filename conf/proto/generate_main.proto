@@ -1,0 +1,670 @@
+syntax             = "proto3";
+option  go_package = ".;pb";
+package Game;
+
+// 导入枚举
+import "enum.proto";
+import "enum_battle.proto";
+import "player.proto";
+import "nohot_custom_battle.proto";
+import "server.proto";
+import "custom_login.proto";
+import "common.proto";
+import "custom_hero.proto";
+import "generate_login.proto";
+import "NotHotfix.proto";
+import "custom_notify.proto";
+import "custom_daily_win.proto";
+import "custom_credit.proto";
+import "lbs.proto";
+// 心跳
+message MainServerTimeC2S {
+    int32 playerId = 1; // 玩家id
+}
+// 心跳
+message MainServerTimeS2C {
+    int64 timestamp = 1; // 服务器时间戳
+    int32 year      = 2; // 服务器年份
+    int32 month     = 3; // 服务器月份
+    int32 day       = 4; // 服务器日期
+    int32 hour      = 5; // 服务器小时数
+    int32 minute    = 6; // 服务器分钟数
+    int32 second    = 7; // 服务器秒数
+    int32 timezone  = 8; // 服务器时区
+}
+
+// 通知客户端踢人
+message MainPlayerKickS2C {
+    // int32 reason = 1; //原因 0:顶号 1:踢人通知 2:数据异常 3:gm踢人
+    KickPlayerReason reason = 1;
+}
+
+// 玩家详细数据
+message MainCharacterInfoC2S {}
+
+// 设置战斗面板属性
+message MainBattleSettingC2S {}
+// 战斗设置面板
+message MainBattleSettingS2C {
+    BattleOperationSetting settingData = 1; // 设置数据
+}
+// 战斗设置面板
+message MainSetBattleSettingC2S {
+    repeated BattleOperationSettingData settingData = 1; // 设置数据
+}
+// 战斗设置面板
+message MainSetBattleSettingS2C {
+    repeated BattleOperationSettingData settingData = 1; // 设置数据
+}
+// 进入训练模式
+message MainEnterTrainingC2S {
+    int32 heroId       = 1; // 使用角色
+    int32 skillId      = 2; // 使用技能
+    int32 target_hero  = 3; // target_hero: 对方英雄
+    int32 target_skill = 4; // target_skill：对方技能
+    int64 awake        = 5; //    awake：觉醒数据
+    int32 step         = 6; // 当前步骤
+}
+// 退出训练模式
+message MainExitTrainingC2S {
+    int32 heroId       = 1; // 使用角色
+    int32 skillId      = 2; // 使用技能
+    int32 target_hero  = 3; // target_hero: 对方英雄
+    int32 target_skill = 4; // target_skill：对方技能
+    int64 awake        = 5; //    awake：觉醒数据
+    int32 exitType     = 6; //  退出方式  （0：中途退出，1：战斗结束）
+    int32 time         = 7; //  战斗时长 单位：秒
+}
+
+// 通知客户端返回大厅
+message MainBackLobbyS2C {
+    BL_REASON      Reason          = 1; // 返回大厅原因
+    GameModel      model           = 2; // 游戏模式
+    GameType       gType           = 3; // 游戏类型
+    int32          battleModeId    = 4; // 当前匹配的模式
+    repeated int32 playerIdList    = 5; // 异常玩家id列表
+    int64          notReadyEndTime = 6; // 匹配惩罚结束时间
+    int32          notReadyCnt     = 7; // 匹配未准备次数
+}
+
+message MoneyInfo {
+    int32 moneyId    = 1; // 货币id
+    int64 moneyValue = 2; // 货币当前值
+}
+
+message AttributeKeyValue {
+    AttrType attrId    = 1;
+    int64    attrValue = 2;
+}
+
+// 玩家属性更新
+message MainUpdateAttrS2C {
+    repeated AttributeKeyValue updateAttr = 1;
+}
+// 新玩家登录选择英雄
+message MainNewPlayerChooseHeroC2S {
+    int32 bookID = 1; // 漫画书ID
+    int32 heroID = 2; // 英雄ID
+}
+// 新玩家登录选择英雄
+message MainNewPlayerChooseHeroS2C {
+    int32 heroID = 1; // 英雄ID
+    int32 unitID = 2; // 皮肤ID
+}
+
+// 修改头像
+message MainChangeIconC2S {
+    int32 icon = 1;
+}
+// 修改头像
+message MainChangeIconS2C {
+    int32 icon = 1;
+}
+// 修改头像框
+message MainChangeIframeC2S {
+    int32 iFrame = 1;
+}
+// 修改头像框
+message MainChangeIframeS2C {
+    int32 iFrame = 1;
+}
+// 修改性别
+message MainChangeSexC2S {
+    PlayerSex sex = 1;
+}
+// 修改性别
+message MainChangeSexS2C {
+    PlayerSex sex = 1;
+}
+// 战绩
+message MainStandingsListC2S {
+    int32 playerId = 1;
+}
+// 战绩
+message MainStandingsListS2C {
+    repeated PlayerStandings standingsList = 1;
+    int32                    playerId      = 2;
+    int32                    privacyStatus = 3; // 0-开 1-关
+}
+// 请求玩家统计数据
+message MainStatisticsInfoC2S {
+    int32 playerId = 1;
+}
+// 请求玩家统计数据
+message MainStatisticsInfoS2C {
+    StatisticsRecord statistics = 1; // 玩家统计数据
+}
+
+// 客户端读条完毕,请求加载玩家详细数据
+message MainLoadOkC2S {
+    // 易盾反外挂透传数据
+    string      appId   = 1;
+    string      appKey  = 2;
+    string      mraData = 3;
+    bool        isCheck = 4;
+    PhoneOsType osType  = 5; // 设备系统类型
+}
+
+message ValueUpdate {
+    UpdateType updateType  = 1; // 更新类型
+    string     value       = 2; // 更新值
+    int32      exParameter = 3; // 额外参数
+}
+
+// 线上玩家数据改变
+message MainValueUpdateS2C {
+    int32                playerId        = 1; // 更新id
+    repeated ValueUpdate ValueUpdateList = 2; // 更新数据
+    repeated int32       playerIds       = 3; // 更新id列表
+}
+
+// 玩家状态改变
+message MainStateUpdateS2C {
+    PlayerStatus status = 1;
+}
+
+message StatisticsUpdate {
+    PlayerStatisticsType updateType = 1; // 更新类型
+    int32                value      = 2; // 更新值
+}
+
+// 玩家统计数据更新
+message MainUpdateStatisticsS2C {
+    int32            playerId   = 1; // 更新id
+    StatisticsRecord statistics = 2; // 玩家统计数据
+}
+
+// http返回消息里面的公告数据
+message NoticeDataS2C {
+    repeated NoticeInfo noticeList = 1;
+}
+
+// 角色新手引导完成
+message MainFinishNewbieGuideC2S {}
+// 角色新手引导完成
+message MainFinishNewbieGuideS2C {}
+// 获取其他玩家基础数据
+message MainGetPlayerBaseC2S {
+    int32 playerId = 1;
+}
+// 获取其他玩家基础数据
+message MainGetPlayerBaseS2C {
+    PlayerBase playerBase = 1;
+}
+// 服务器下发gm系统开放数据
+message MainNoticeSystemOpenS2C {
+    repeated FuncList FuncList = 1; // 功能限制列表
+}
+// 服务器下发gm系统开放数据
+message MainNoticeHeroOpenS2C {
+    repeated HeroFormList HeroGmState = 1; // 英雄禁用和临停状态
+}
+// 服务器下发玩家所有资源数据
+message MainPlayerAllDataS2C {
+    LoginPlayerDataS2C playerData = 1; // 玩家数据
+}
+// 新手引导
+message MainPlayerNewbieGuildC2S {
+    repeated int32 steps = 1; // 引导步骤
+}
+// 新手引导
+message MainPlayerNewbieGuildS2C {
+    repeated int32 steps = 1; // 引导步骤
+}
+// 领取等级奖励
+message MainGetLevelRewardC2S {
+    int32 Id = 1; // 奖励Id
+}
+// 领取等级奖励
+message MainGetLevelRewardS2C {
+    int32               Id         = 1; // 奖励Id
+    repeated ShowReward rewardList = 2; // 奖励道具
+}
+
+// 新的一天
+message MainNewDayS2C {
+    int64 NextRefreshTime = 1; // 下次刷新时间
+    int64 nowTimestamp = 2; // 当前时间戳
+}
+
+// 战斗画面设置面板
+message MainBattleFrameSettingC2S {
+    int32 dpi                 = 1;  // 分辨率：低、中、高、超高
+    int32 frameRate           = 2;  // 帧率：低、中、高
+    int32 MSAA                = 3;  // 抗锯齿：低、中、高
+    int32 SceneQuality        = 4;  // 战斗场景质量：低、中、高、超高
+    int32 roleQuality         = 5;  // 战斗角色质量：低、中、高
+    int64 battleId            = 6;  // 是否战斗中
+    int32 AutoNormalAttack    = 7;  // 自动普攻
+    int32 AutoChaseDistance   = 8;  // 自动追击距离
+    int32 lensHeight          = 9;  // 镜头高低
+    int32 FullShow            = 10; // 非全屏演出
+    int32 EquipSite           = 11; // 局内出装位置
+    int32 PreciseNormalAttack = 12; // 精确普攻
+    float LensSensitivity     = 13; // 镜头灵敏度
+    float SkillSensitivity    = 14; // 技能轮盘灵敏度
+    int32 AttackPriority      = 15; // 优先选择规则
+    int32 SkillSite           = 16; // 技能轮盘呼出位置
+    int32 PictureSettings     = 17; // 画面设置
+}
+// 战斗画面设置面板
+message MainBattleFrameSettingS2C {}
+
+// 玩家战斗延迟数据
+message MainBattleDelayC2S {
+    repeated BattleDelay battleDelayList = 1; // 战斗区域延迟
+}
+// 玩家战斗延迟数据
+message MainBattleDelayS2C {}
+
+// 玩家个人主页信息
+message MainGetPlayerDetailInfoC2S {
+    int32 playerId = 1; // 玩家id
+}
+// 玩家个人主页信息
+message MainGetPlayerDetailInfoS2C {
+    PlayerInfo               playerInfo    = 1; // 玩家info
+    repeated PlayerStandings standingsList = 2; // 战绩
+    map<int32, HeroInfo>     heroDataMap   = 3; // 英雄数据
+}
+
+// 设置玩家擅长英雄
+message MainSetPlayerGoodAtHeroC2S {
+    repeated int32 GoodAtHeroList = 1; // 擅长英雄
+}
+// 设置玩家擅长英雄
+message MainSetPlayerGoodAtHeroS2C {
+    repeated int32 GoodAtHeroList = 1; // 擅长英雄
+}
+
+// 玩家设置隐私权限
+message MainSetPlayerPrivacyC2S {
+    repeated PlayerPrivacySet PlayerPrivacySetList = 1;
+}
+// 玩家设置隐私权限
+message MainSetPlayerPrivacyS2C {
+    repeated PlayerPrivacySet PlayerPrivacySetList = 1;
+}
+
+// 玩家获取动态信息
+message MainGetPlayerDynamicInfoC2S {
+    int32 playerId = 1; // 玩家id
+}
+
+// 玩家获取动态信息
+message MainGetPlayerDynamicInfoS2C {
+    int32                      playerId              = 1; // 玩家id
+    repeated PlayerDynamicInfo PlayerDynamicInfoList = 2; // 玩家动态信息
+    int32                      privacyStatus         = 3; // 0-开 1-关
+}
+
+// 设置签名
+message MainGetPlayerSetSignC2S {
+    string sign = 1; // 签名
+}
+// 设置签名
+message MainGetPlayerSetSignS2C {
+    string sign = 1; // 签名
+}
+
+// 完成试炼场景
+message MainFinishTrialSceneC2S {
+    int32 sceneId = 1; // 场景Id
+}
+// 完成试炼场景
+message MainFinishTrialSceneS2C {
+    int32 sceneId = 1; // 场景Id
+}
+// 选择初始moba属性
+message MainSelectMobaLevelC2S {
+    PlayerMobaLevel lv = 1; // moba级别
+}
+
+// 选择初始英雄
+message MainSelectInitHeroC2S {
+    int32 heroId = 1;
+}
+// 选择初始英雄
+message MainSelectInitHeroS2C {
+    int32 heroId = 1;
+}
+// 客户端缓存请求
+message MainClientSaveC2S {
+    string clientData = 1;
+}
+// 客户端缓存请求
+message MainClientSaveS2C {
+    string clientData = 1;
+}
+
+// 客户端日志事件上报
+message MainLogEventC2S {}
+
+// 玩家市场分析日志通知客户端有新的事件
+message MainMarketAnalysisS2C {
+    market_analysis_log_type eventId = 1;
+}
+// 道具加成效果更新
+message MainUpdataAdditionInfoS2C {
+    map<int32, int32> additionMap = 1; // 道具加成效果，key：效果类型（paramId） value:天数or次数
+}
+
+// 设置布局数据
+message MainSetLayoutDataC2S {
+    int32          planIndex = 1; // 方案下标
+    LayoutPlanInfo PlanData  = 2;
+}
+// 设置布局数据
+message MainSetLayoutDataS2C {
+    int32          planIndex = 1; // 方案下标
+    LayoutPlanInfo PlanData  = 2;
+}
+// 获取布局方案
+message MainGetLayoutDataC2S {}
+// 获取布局方案
+message MainGetLayoutDataS2C {
+    PlayerLayoutPlan LayoutPlanData = 1;
+}
+
+// 英雄使用方案
+message MainHeroUseLayoutDataC2S {
+    map<int32, int32> heroSelectIndex  = 1; // key：heroId value：方案下标
+    int32             allHeroPlanIndex = 2; // 所有英雄使用的方案
+}
+// 英雄使用方案
+message MainHeroUseLayoutDataS2C {
+    map<int32, int32> heroSelectIndex  = 1; // key：heroId value：方案下标
+    int32             allHeroPlanIndex = 2; // 所有英雄使用的方案
+}
+
+// 修改方案名称
+message MainSetLayoutNameC2S {
+    string planName  = 1; // 方案名称
+    int32  planIndex = 2; // 方案下标
+}
+// 修改方案名称
+message MainSetLayoutNameS2C {
+    string planName  = 1; // 方案名称
+    int32  planIndex = 2; // 方案下标
+}
+// 修改称号
+message MainChangeTitleC2S {
+    int32 id    = 1; // 称号id
+    int32 index = 2; // 称号index
+}
+// 修改称号
+message MainChangeTitleS2C {
+    repeated int32        titles    = 1; // 普通称号列表
+    repeated LbsTitleData lbsTitles = 2; // LBS称号列表称号
+}
+
+// 举报
+message MainReportC2S {
+    int64             battleId         = 1; // 战斗id
+    int32             playerId         = 2; // 玩家的Id
+    int32             tarPlayerIndex   = 3; // 举报的玩家index
+    string            desc             = 4; // 举报描述
+    map<int32, int32> reportReasonMap  = 6; // 举报选项map  key：一级原因（举报的枚举 ReportReasonType） value：二级原因
+    int32             gameBattleModeId = 7; // 战斗id
+    GameModel         modelType        = 8; // 游戏类型
+}
+
+// 举报
+message MainReportS2C {
+    int64             battleId        = 1; // 战斗id
+    int32             playerId        = 2; // 玩家的Id
+    int32             tarPlayerIndex  = 3; // 举报的玩家index
+    string            desc            = 4; // 举报描述
+    map<int32, int32> reportReasonMap = 6; // 举报选项map  key：一级原因（举报的枚举 ReportReasonType） value：二级原因
+}
+
+// 申诉
+message MainAppealC2S {
+    int64 uuid = 1; // 申诉uid
+}
+// 申诉
+message MainAppealS2C {
+    int64 uuid = 1; // 申诉uid
+}
+
+// 品德分推送
+message MainMoralityScoreS2C {
+    int32 moralityScore = 1; // 品德分
+    int32 dayAddCount   = 2; // 每日增加次数
+}
+
+// 更新屏幕列表
+message MainUpdateScreenS2C {
+    EventScreen eventScreen = 1; // 屏幕
+}
+// 删除屏幕列表
+message MainDeleteScreenS2C {
+    int64 id = 1; // 要删除的屏幕id
+}
+// 更新赛事入口
+message MainUpdateEntranceS2C {
+    Entrance entrance = 1; // 赛事入口
+}
+// 易盾检测结果消息回复
+message MainYidunCheckS2C {
+    string data = 1; // 易盾check返回的数据
+}
+
+// 修改昵称
+message MainRenameC2S {
+    string nickname = 1;
+    int64  ItemGuid = 2;
+    int32  ItemNum  = 3;
+}
+// 修改昵称
+message MainRenameS2C {
+    string nickname       = 1;
+    int32  FreeRenameNum  = 2;
+    int64  LastRenameTime = 3;
+}
+// 进入录制状态
+message MainEnterRecordingC2S {}
+// 退出录制状态
+message MainExitRecordingC2S {}
+// 挂机不给奖励
+message MainHangupWithoutRewardS2C {}
+// 选择初始moba属性
+message MainSelectMobaLevelS2C {}
+// 完成moba引导
+message MainFinishedMobaGuildC2S {}
+// 完成moba引导
+message MainFinishedMobaGuildS2C {}
+// 完成龙珠引导
+message MainFinishedLadderDragonGuildC2S {}
+// 完成龙珠引导
+message MainFinishedLadderDragonGuildS2C {}
+// 战斗结束
+message MainGameOverC2S {
+    BattleGameOver operation = 1; // 选择方式
+}
+// 战斗结束
+message MainGameOverS2C {
+    BattleGameOver operation = 1; // 选择方式
+}
+// 主界面展示英雄更换
+message MainChangeHeroC2S {
+    int32 heroId = 1; // 英雄id
+    int32 skinId = 2; // 皮肤id
+}
+// 主界面展示英雄更换
+message MainChangeHeroS2C {
+    int32 heroId = 1; // 英雄id
+    int32 skinId = 2; // 皮肤id
+}
+// 个性化-修改背景图
+message MainChangeBackgroundC2S {
+    int32 id = 1; // 背景图id
+}
+// 个性化-修改背景图
+message MainChangeBackgroundS2C {
+    int32 id = 1; // 背景图id
+}
+// 获取玩家个性化数据
+message MainGetPlayerIndividuationC2S {
+    IndividuationType iType = 1; // 个性化类型
+}
+// 获取玩家个性化数据
+message MainGetPlayerIndividuationS2C {
+    IndividuationType       iType = 1; // 个性化类型
+    CustomIndividuationList list  = 2; // 个性化列表
+}
+// 获取游戏模式列表
+message MainGetGameModeListC2S {}
+// 获取游戏模式列表
+message MainGetGameModeListS2C {
+    map<int32, BattleGameMode> gameModeMap = 1; // 游戏模式列表 key为gameModelId
+}
+// 更新玩家的个性化数据
+message MainUpdateIndividuationS2C {
+    IndividuationType       iType = 1; // 个性化类型
+    CustomIndividuationList list  = 2; // 个性化列表
+}
+// 获取每日胜场宝箱奖励
+message MainGetDailyWinBoxRewardC2S {
+    repeated int32 ids = 1; // 需要领取的胜场宝箱列表
+}
+// 获取每日胜场宝箱奖励
+message MainGetDailyWinBoxRewardS2C {
+    DailyWinBoxInfo info = 1; // 胜场宝箱信息
+}
+// 更新每日胜场次数
+message MainUpdateDailyWinCountS2C {
+    DailyWinBoxInfo info = 1; // 胜场宝箱信息
+}
+// 修改展示英雄
+message MainChangeShowHeroC2S {
+    int32 heroId = 1; // 英雄id
+    int32 skinId = 2; // 皮肤Id
+}
+// 修改展示英雄
+message MainChangeShowHeroS2C {
+    int32 heroId = 1; // 英雄id
+    int32 skinId = 2; // 皮肤Id
+}
+// 修改表情展示英雄
+message MainChangeExpressShowHeroC2S {
+    int32 heroId = 1; // 英雄id
+}
+// 修改表情展示英雄
+message MainChangeExpressShowHeroS2C {
+    int32 heroId = 1; // 英雄id
+}
+// 查看信誉分记录
+message MainGetCreditRecordC2S {
+}
+// 查看信誉分记录
+message MainGetCreditRecordS2C {
+    repeated CreditRecord creditRecordList = 1; // 信誉分记录
+}
+// 完成新手引导任务
+message MainPlayerNewbieTaskC2S {
+}
+// 完成新手引导任务
+message MainPlayerNewbieTaskS2C {
+    int32 stepId = 1;
+}
+// 检查网络延迟
+message MainCheckNetworkDelayC2S {
+}
+// 检查网络延迟
+message MainCheckNetworkDelayS2C {
+}
+// 修改英雄动作管理指定英雄
+message MainChangeActionHeroC2S {
+    int32 heroSkinId = 1; // 英雄皮肤Id
+}
+// 修改英雄动作管理指定英雄
+message MainChangeActionHeroS2C {
+    int32 heroSkinId = 1; // 英雄皮肤Id
+}
+// 修改战斗播放板皮肤
+message MainChangeBattleNoticeBoardSkinC2S {
+    int32 skinId = 1; // 皮肤Id
+}
+// 修改战斗播放板皮肤
+message MainChangeBattleNoticeBoardSkinS2C {
+    int32 skinId = 1; // 皮肤Id
+}
+// 关注英雄
+message MainAttentionHeroC2S {
+    int32 heroId      = 1; // 英雄Id
+    bool  isAttention = 2; // 是否关注
+}
+// 关注英雄
+message MainAttentionHeroS2C {
+}
+// gameBattleRule模式刷新
+message MainRefreshGameBattleModeS2C {
+}
+// 设置战斗中显示的称号
+message MainSetInBattleTitleC2S {
+    BattleTitle inBattleTitle = 1; // 战斗中显示的称号
+}
+// 设置战斗中显示的称号
+message MainSetInBattleTitleS2C {
+    BattleTitle inBattleTitle = 1; // 战斗中显示的称号
+}
+// 设置显示的职业
+message MainSetShowJobsC2S {
+    repeated int32 jobs = 1;
+}
+// 设置显示的职业
+message MainSetShowJobsS2C {
+    repeated int32 jobs = 1;
+}
+// 交换称号位置
+message MainSwapTitleC2S {
+}
+// 交换称号位置
+message MainSwapTitleS2C {
+    repeated int32        titles    = 1; // 普通称号列表
+    repeated LbsTitleData lbsTitles = 2; // LBS称号列表称号
+}
+// 完成细分教学引导
+message MainStageGuideFinishC2S {
+    repeated int32 stageGuideIds = 1; // 完成细分教学引导Id
+}
+// 完成细分教学引导
+message MainStageGuideFinishS2C {
+    repeated int32 stageGuideIds = 1; // 完成细分教学引导Id
+}
+// 获取细分教学引导奖励
+message MainGetStageGuideRewardC2S {
+    repeated int32 stageGuideRewardIds = 1; // 获取细分教学引导奖励Id
+}
+// 获取细分教学引导奖励
+message MainGetStageGuideRewardS2C {
+    repeated int32 stageGuideRewardIds = 1; // 获取细分教学引导奖励Id
+}
+// 分享奖励
+message MainShareGetRewardC2S {
+}
+// 分享奖励
+message MainShareGetRewardS2C {
+    ShareInfoDB shareInfo = 1; // 分享奖励数据
+}

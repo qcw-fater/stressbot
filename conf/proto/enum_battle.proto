@@ -1,0 +1,237 @@
+syntax             = "proto3"; //[proto2|proto3]
+
+option  go_package = ".;pb";
+package Game;
+
+// 阵营枚举
+enum CampType {
+    CtInvalid = 0;  // 无效
+    CtCamp0   = 1;  // 阵营0 moba->红方
+    CtCamp1   = 2;  // 阵营1 moba->蓝方
+    CtCamp2   = 3;  // 阵营2 moba->怪物
+    CtCamp3   = 4;  // 阵营3
+    CtCamp4   = 5;  // 阵营4
+    CtCamp5   = 6;  // 阵营5
+    CtCamp6   = 7;  // 阵营6
+    CtCamp7   = 8;  // 阵营7
+    CtCamp8   = 9;  // 阵营8
+    CtCamp9   = 10; // 阵营9
+    JUDGE     = 11; // 裁判阵营
+}
+
+enum JudgeIndex {
+    JI_Invalid = 0;
+    JI_Value   = 10; // 裁判index起始值
+}
+// 阵营枚举标志 用于处理视野等多阵营选择
+enum CampTypeMask {
+    CtmInvalid = 0;    // 无效
+    CtmCamp0   = 2;    // 阵营0 moba->红方
+    CtmCamp1   = 4;    // 阵营1 moba->蓝方
+    CtmCamp2   = 8;    // 阵营2 moba->怪物
+    CtmCamp3   = 16;   // 阵营3
+    CtmCamp4   = 32;   // 阵营4
+    CtmCamp5   = 64;   // 阵营5
+    CtmCamp6   = 128;  // 阵营6
+    CtmCamp7   = 256;  // 阵营7
+    CtmCamp8   = 512;  // 阵营8
+    CtmCamp9   = 1024; // 阵营9
+    CtmCamp10  = 2048; // 阵营10
+    CtmCamp11  = 4096; // 阵营11
+    CtmAll     = -1;   // 全部
+}
+
+// 战斗指令
+enum BattleSyncCmd {
+    BSC_NORMAL                 = 0;  // 占位
+    USE_OBJECT_SKILL           = 1;  // 使用对象技能
+    USE_DIRECTION_SKILL        = 2;  // 使用方向技能
+    USE_POSITION_SKILL         = 3;  // 使用指定坐标技能
+    BASE_ATTACK                = 4;  // 普攻
+    MOVE                       = 5;  // 移动
+    BUY_EQUIP                  = 6;  // 买装备
+    SELL_EQUIP                 = 7;  // 卖装备
+    LEARN_SKILL                = 8;  // 升级技能
+    OLD_KEY_FRAME_DATA         = 9;  // 临时指令
+    GM_COMMAND                 = 10; // GM指令
+    SYNC_SKILL_STATUS          = 11; // 同步技能状态
+    SELECT_USE_EQUIP           = 12; // 选择使用那件主动装备
+    BATTLE_SETTING             = 13; // 战斗设置
+    SELECT_EQUIP_INDEX         = 14; // 选则英雄装备设置下标
+    EMISSION_SIGNAL            = 15; // 发送信号
+    ENTER_NORMAL_ATK_STATE     = 16; // 进入普攻状态
+    CHOOSE_LOOT                = 17; // 衍生玩法-抽卡
+    CHOOSE_TALENT              = 18; // 衍生玩法-选择天赋
+    SET_LOCK_TARGET            = 19; // 锁定目标
+    SHORTCUT_SPEECH            = 20; // 快捷聊天
+    EXPRESSION                 = 21; // 表情
+    TITLE                      = 22; // 称号
+    RandomRelax                = 23; // 互动
+    PLAYER_OFFLINE             = 24; // 掉线
+    RefreshPreEquipQueue       = 25; // 刷新预购装备队列
+    SKILL_BUTTON_STATE         = 26; // 技能按键状态
+    PLAYER_POINT_CHOOSE        = 27; // 英雄出生点选择
+    MARINEFORD_WAR_SELECT_DRAW = 28; // 顶上战争玩家选择是否平局
+    HERO_TALK                  = 29; // 英雄交流
+    LFE_ITEM_CTL               = 30; // 搜打撤物品操作
+    LFE_CHEST_CTL              = 31; // 搜打撤宝箱操作
+    CMD_MAX                    = 32; // 最大指令
+}
+
+// 任务参数组枚举
+enum GroupDetailParamsType {
+    GPT_INVALID      = 0;   // 无效
+    GPT_Hero         = 1;   // 英雄id
+    GPT_Image        = 2;   // 形象id
+    GPT_Skill        = 3;   // 技能id
+    GPT_Buff         = 4;   // buffId
+    GPT_Area         = 5;   // 区域id
+    GPT_Group        = 6;   // 组id
+    GPT_Skin         = 7;   // 皮肤id
+    GPT_RankLevel    = 8;   // RankLevel id
+    GPT_Occupation   = 9;   // 职业 id
+    GPT_NumberOfTime = 10;  // 纯数字
+    GPT_Item         = 11;  // 道具id
+    GPT_Prop         = 12;  // 局内装备id
+    GPT_GameType     = 13;  // 游戏模式id组   同样读取GroupDetail中的数据
+    GPT_Action       = 14;  // 动作id        Customized.xlsx
+    GPT_Attribute    = 15;  // 属性id        Attribute.xlsx
+    GPT_Stage        = 16;  // 局内地图id    Stage.xlsx
+    GPT_Unit         = 17;  // Unitid     怪物id来这里    Unit.xlsx
+    GPT_EventType    = 18;  // 事件类型
+    GPT_EMOJI        = 19;  // 表情类型
+    GPT_Times        = 100; // 次数  动态可变参数，显示的分母      客户端局内将忽略该数据
+}
+
+// 任务参数枚举
+enum ConfigIdDetailType {
+    CDT_INVALID         = 0;   // 无效
+    CDT_Hero            = 1;   // 英雄id
+    CDT_Figure          = 2;   // 形象id
+    CDT_Skill           = 3;   // 技能id
+    CDT_Buff            = 4;   // buff id
+    CDT_Area            = 5;   // 区域id
+    CDT_Group           = 6;   // 组id
+    CDT_Skin            = 7;   // 皮肤id
+    CDT_RankLevel       = 8;   // RankLevel id
+    CDT_Occupation      = 9;   // 职业id
+    CDT_NumberOfTime    = 10;  // 纯数字
+    CDT_Item            = 11;  // 道具id
+    CDT_Prop            = 12;  // 局内道具id
+    CDT_GameType        = 13;  // 游戏模式id组   同样读取GroupDetail中的数据
+    CDT_Action          = 14;  // 动作id        Customized.xlsx
+    CDT_Attribute       = 15;  // 属性id        Attribute.xlsx
+    CDT_Stage           = 16;  // 局内地图id    Stage.xlsx
+    CDT_Unit            = 17;  // Unitid     怪物id来这里    Unit.xls
+    CDT_Hero_ne         = 18;  // 英雄id 不等于
+    CDT_Figure_ne       = 19;  // 形象id 不等于
+    CDT_Skill_ne        = 20;  // 技能id 不等于
+    CDT_Buff_ne         = 21;  // buff id 不等于
+    CDT_Area_ne         = 22;  // 区域id 不等于
+    CDT_Group_ne        = 23;  // 组id 不等于
+    CDT_Skin_ne         = 24;  // 皮肤id 不等于
+    CDT_RankLevel_ne    = 25;  // RankLevel id 不等于
+    CDT_Occupation_ne   = 26;  // 职业id 不等于
+    CDT_Item_ne         = 27;  // 道具id 不等于
+    CDT_Prop_ne         = 28;  // 局内道具id 不等于
+    CDT_GameType_ne     = 29;  // 游戏模式id组   同样读取GroupDetail中的数据 不等于
+    CDT_Action_ne       = 30;  // 动作id        Customized.xlsx 不等于
+    CDT_Attribute_ne    = 31;  // 属性id        Attribute.xlsx 不等于
+    CDT_Stage_ne        = 32;  // 局内地图id    Stage.xlsx 不等于
+    CDT_Unit_ne         = 33;  // Unitid     怪物id来这里    Unit.xlsx 不等于
+    CDT_NumberOfTime_ne = 34;  // 纯数字 不等于
+    CDT_NumberOfTime_gt = 35;  // 纯数字 大于
+    CDT_NumberOfTime_lt = 36;  // 小于
+    CDT_NumberOfTime_ge = 37;  // 大于等于
+    CDT_NumberOfTime_le = 38;  // 小于等于
+    CDT_taskId          = 39;  // 任务id
+    CDT_taskId_ne       = 40;  // 任务id 不等于
+    CDT_Store           = 41;  // 商店Id
+    CDT_EventType       = 42;  // 事件类型
+    CDT_Quality         = 43;  // 品质id
+    CDT_DynamicInfoId   = 44;  // X杀类型，对应于DynamicInfo表中的ID
+    CDT_ComicID         = 45;  // 漫画IP类型ID，对应于 HandBook表中ID
+    CDT_ItemType        = 46;  // 道具类型
+    CDT_Pay_ConfigID    = 47;  // pay表的configId
+    CDT_Times           = 100; // 次数  动态可变参数，显示的分母      客户端局内将忽略该数据
+}
+
+// 游戏模式
+enum GameModel {
+    GM_INVALID     = 0; // 无
+    GM_NORMAL      = 1; // 休闲玩法
+    GM_LADDER      = 2; // 排位赛
+    GM_CUSTOM      = 3; // 自定义房间
+    GM_TRAINING    = 4; // 训练模式
+    GM_RECREATION  = 5; // 娱乐模式
+    GM_BattleGuide = 6; // 战斗引导
+    GM_ACTIVITY    = 7; // 活动赛
+    GM_HAZARD_OPS  = 8; // 危险行动（搜打撤）
+}
+
+// 玩法类型
+enum GameType {
+    GT_Invalid                 = 0;   // 无
+    GT_BRAWL_STARS             = 1;   // 3v3卷轴争夺战
+    GT_DUEL_ONE                = 2;   // 单人吃鸡
+    GT_DUEL_TWO                = 3;   // 双人吃鸡
+    GT_BUDOKAI                 = 4;   // 武道会
+    GT_3V3_ATHLETICS           = 5;   // 3v3积分争夺
+    GT_3V3_INFINITE_CITY       = 6;   // 3v3无限城
+    GT_3V3_JUJUTSU_KAISEN      = 7;   // 3v3咒术高专交流会
+    GT_TAKE_POSITION           = 8;   // 3V3夺点
+    GT_MARINEFORD_WAR          = 9;   // 3V3顶上战争
+    GT_INFINITE_TRAIN          = 10;  // 1v4无限列车模式
+    GT_ANNIHILATION            = 11;  // 3v3歼灭战争
+    GT_GREAT_SHINOBI_WAR       = 12;  // 3v3忍界大战
+    GT_HUNTER_NUMBER_PLATE_ONE = 13;  // 猎人数号码牌_单人
+    GT_HUNTER_NUMBER_PLATE_TWO = 14;  // 猎人数号码牌_双人
+    GT_DRAGONBALL_BATTLE       = 15;  // 3v3龙珠争夺
+    GT_GOLD_BOX                = 16;  // 金库模式
+    GT_HAZARD_OPS              = 17;  // 危险行动（搜打撤模式）
+    GT_MAX                     = 18;  // 有效游戏类型最大值
+
+    GT_AI_TRAINING             = 100; // AI单机训练模式
+    GT_GUIDANCE_DRAGON_BALL    = 200; // 引导模式-龙珠
+    GT_GUIDANCE_ONE_PIECE      = 201; // 引导模式-海贼
+    GT_GUIDANCE_NARUTO         = 202; // 引导模式-火影
+}
+
+// 战斗结果类型
+enum BattleResultType {
+    BRT_INVALID = 0; // 无
+    BRT_WIN     = 1; // 胜利
+    BRT_LOSE    = 2; // 失败
+    BRT_DRAW    = 3; // 平局
+}
+
+enum EAttribute {
+    MIN_INDEX          = 0;  // 最小索引
+    PhysicalAtk        = 1;  // 物理攻击
+    MaxHP              = 2;  // 血量最大值
+    MoveSpeed          = 3;  // 移速
+    Crit               = 4;  // 暴击概率
+    CritRatio          = 5;  // 暴击伤害
+    PhysicalVampire    = 6;  // 物理吸血
+    CDDecrease         = 7;  // 冷却缩减
+    Tenacity           = 8;  // 韧性
+    Block              = 9;  // 伤害格挡
+    ReviveTimeDecrease = 10; // 复活时间缩减
+    EnergyMax          = 11; // 最大能量值
+    EnergySpeed        = 12; // 每秒恢复多少值
+    Energy             = 13; // 当前能量值
+    EnergyNum          = 14; // 能量格子数量
+    EnergyType         = 15; // 能量类型
+    ChargeSpeed        = 16; // 蓄力速度
+    HealingReceived    = 17; // 受到治疗效果
+    HealingDone        = 18; // 造成治疗效果
+    GreyHP             = 19; // 灰血层比列
+    MAX_INDEX          = 20; // 最大索引
+}
+
+// 加入队伍方式
+enum JoinTeamWay {
+    JTW_Normal        = 0; // 普通方式
+    JTW_ConveneCreate = 1; // 通过招募创建队伍
+    JTW_ConveneJoin   = 2; // 通过招募加入队伍
+}

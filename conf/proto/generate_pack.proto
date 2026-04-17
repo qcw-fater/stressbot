@@ -1,0 +1,112 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+import "custom_item.proto";
+import "common.proto";
+import "enum.proto";
+
+//服务器下发角色背包数据
+message PackDataS2C
+{
+    repeated ItemInfo itemData = 1; // 玩家背包数据
+}
+//服务器下发角色背包数据更新
+message PackUpdateS2C
+{
+    repeated ItemInfo items = 1; // 更新的道具数据
+}
+//服务器下发增加道具
+message PackAddItemS2C
+{
+    repeated ItemInfo addItems = 1; // 更新的道具数据
+}
+//服务器下发删除道具
+message PackDelItemS2C
+{
+    repeated ItemInfo delItems = 1; // 更新的道具数据
+}
+//奖励提示框
+message PackRewardTipsS2C
+{
+    repeated ShowReward         showRewards     = 1; // 更新的道具数据
+    RewardReason                reason          = 2; // 奖励原因
+    int32                       tipsType        = 3; // 奖励tips提示类型  RewardTipsType | RewardTipsType
+    repeated SurpriseBoxReward  surpriseBox     = 4; // 惊喜宝箱列表(优先播放惊喜宝箱)
+}
+//道具使用
+message PackUseItemC2S
+{
+    int64 itemGuid = 1; // 使用道具Guid
+    int32 itemNum = 2; // 使用道具数量
+    string params = 3; // 参数（改名时为新名字）
+}
+//道具使用
+message PackUseItemS2C
+{
+    int32 itemId = 1; // 使用道具Guid
+    int32 itemNum = 2; // 使用道具数量
+}
+//道具出售
+message PackSellItemC2S
+{
+    int64 itemGuid = 1; // 使用道具Guid
+    int32 itemNum = 2; // 使用道具数量
+}
+//道具出售
+message PackSellItemS2C
+{
+}
+//兑换消息
+message PackExchangeC2S
+{
+    int32 targetItemId = 1;  // 目标道具id
+    int32 number = 2;  // 兑换个数
+    int32 exchangeType = 3;  // 兑换方式
+}
+//兑换消息
+message PackExchangeS2C
+{
+    int32 targetItemId = 1;  // 目标道具id
+    int32 number = 2;  // 兑换个数
+    int32 exchangeType = 3;  // 兑换方式
+}
+//获取自选礼包的详细信息
+message PackGetSelectPackInfoC2S
+{
+    repeated int32 itemList = 1; // 道具配置ID, 如果在商店中，只需发送配置ID
+    repeated int64 itemGuidList = 2; // 背包道具Guid
+}
+
+//获取自选礼包的详细信息
+message PackGetSelectPackInfoS2C
+{
+    repeated SelectItemInfo itemInfoList = 1;
+}
+//使用自选礼包
+message PackUseSelectGiftItemC2S
+{
+    int64 Guid = 1; // 使用道具Guid
+    int32 itemNum = 2; // 使用道具数量
+    repeated int32 selectIndex = 3; // 选择的礼包道具索引
+}
+//使用自选礼包
+message PackUseSelectGiftItemS2C
+{
+    int64 Guid = 1; // 使用道具Guid
+    int32 itemNum = 2; // 使用道具数量
+}
+//客户端通知服务器道具失效
+message PackItemTimeOutC2S
+{
+    repeated  int64 itemGuids = 1; // 失效的道具
+}
+//客户端通知服务器道具失效
+message PackItemTimeOutS2C
+{
+    repeated  int64 itemGuids = 1; // 失效的道具
+}
+//惊喜宝箱奖励推送
+message PackSurpriseBoxRewardS2C
+{
+    repeated SurpriseBoxReward  surpriseBox = 1; //惊喜宝箱列表
+}

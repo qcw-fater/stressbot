@@ -1,0 +1,1217 @@
+syntax             = "proto3"; //[proto2|proto3]
+
+option  go_package = ".;pb";
+package Game;
+
+enum LoginType {
+    LT_default       = 0; // 正常登录
+    LT_reconnect     = 1; // 重连
+    LT_changeConnect = 2; // 更换logic
+}
+
+// 玩家状态
+enum PlayerStatus {
+    PS_Invalid       = 0; // 默认无效
+    PS_OffLine       = 1; // 离线
+    PS_OnLine        = 2; // 在线
+    PS_Team          = 3; // 组队
+    PS_Matching      = 4; // 匹配中
+    PS_MatchSucceed  = 5; // 匹配成功
+    PS_Fighting      = 6; // 游戏中
+    PS_Settlementing = 7; // 结算中
+    PS_Custom        = 8; // 自定义房间中
+    PS_Recording     = 9; // 录像中
+}
+
+// 玩家个性化类型
+enum IndividuationType {
+    Individuation_Invalid               = 0; // 默认无效值
+    Individuation_Icon                  = 1; // 头像
+    Individuation_Iframe                = 2; // 玩家头像框
+    Individuation_Background            = 3; // 背景
+    Individuation_Title                 = 4; // 称号
+    Individuation_Expression            = 5; // 表情
+    Individuation_HeroAction            = 6; // 英雄动作
+    Individuation_BattleNoticeBoardSkin = 7; // 战斗播报板皮肤
+    Individuation_Max                   = 8; // 自定义最大
+}
+
+// GM事件类型定义
+enum GMEventType {
+    Invalid                   = 0;  // 默认无效值
+    UpdateMainPlayer          = 1;  // 更新玩家信息
+    AddHero                   = 2;  // 添加英雄
+    DelHero                   = 3;  // 删除英雄
+    AddItem                   = 4;  // 添加道具
+    AddHeroPro                = 5;  // 添加英雄进度
+    Root                      = 6;  // 超级账户，获取所有资源
+    Drop                      = 7;  // 开启掉落宝箱
+    ADDActiveNum              = 8;  // 添加活跃度
+    UnlockAllTask             = 9;  // 解锁全部任务
+    AddLadderLevel            = 10; // 设置段位
+    AddBraveScore             = 11; // 设置勇者积分
+    AddLadderStar             = 12; // 设置星星
+    AddHeroProficiency        = 13; // 英雄熟练度
+    BattlePassExp             = 14; // 战令经验
+    Inscription               = 15; // 解锁所有铭文资源
+    AddMail                   = 16; // 添加邮件
+    AddRobot                  = 17; // 添加机器人
+    AddMarquee                = 18; // 添加跑马灯
+    AddRelationValue          = 19; // 添加亲密度
+    AddGuildMoney             = 20; // 增加战队资金
+    AddGuildActive            = 21; // 增加战队活跃度
+    AddGuildRank              = 22; // 增加战队段位
+    AddShelvesMaxCnt          = 23; // 拍卖系统增加上架
+    AddBuildExp               = 24; // 添加建筑经验
+    CleanMatch                = 25; // 清理match错误信息
+    AddImgProgress            = 26; // 增加合影集进度
+    SkillAwake                = 27; // 觉醒所有技能
+    BattleGm                  = 28; // 局内GM面板
+    ChangeUnitId              = 29; // 改变玩家场景UnitId
+    AddAllCollection          = 30; // 添加所有藏品
+    ResetHeroAwake            = 31; // 还原英雄觉醒
+    SetHeroStarLevel          = 32; // 指定英雄升至指定星级
+    SetAllHeroMaxStarLevel    = 33; // 一键满星
+    SetRoomHero               = 34; // 在选择英雄阶段设置阵营和英雄
+    RefreshSysShop            = 35; // 刷新游商商店
+    CompleteTask              = 36; // 完成局内任务
+    SetCurrRank               = 37; // 设置当前rank
+    RefreshObject             = 38; // 刷新场景对象
+    AddAllAction              = 39; // 添加全部动作
+    Roll                      = 40; // 自定义房间打乱
+    AddBuildConjunctionDegree = 41; // 添加建筑契合度
+    ActivationDailyOperate    = 42; // 奖励池操作
+    TriggerTest               = 43; // 触发任务
+    CreateNBox                = 44; // 生成x个日常宝箱
+    ResetBoxReset             = 45; // 重置刷新日常宝箱次数
+    ResetNewPlayerTasks       = 46; // 重置新手任务
+    FinishNewPlayerTasks      = 47; // 完成新手任务
+    AddDragonScore            = 48; // 添加龙珠积分
+    EndWarm                   = 49; // 结束温暖局
+    CompletePlayerTask        = 50; // 完成玩家任务
+    SceneTransfer             = 51; // 场景传送
+    FinishAllNewUserGuide     = 52; // 完成所有新手引导
+    GetBattlePassFinishTask   = 53; // 获取战令可以领奖的任务
+    ClearGuidance             = 54; // 清除引导
+    GuildRankWeekReset        = 55; // 战队排行榜周结算
+    GuildRankSeasonReset      = 56; // 战队排行榜周赛季结算
+    SetMoralityScore          = 57; // 品德分
+    GetAllSkin                = 58; // 全皮肤
+    GuildRankActive           = 59; // 增加战队活跃度
+    FinishFirstPayTask        = 60; // 测试，完成首次充值任务
+    AddBattleStatisticsRecord = 61; // 添加一局战斗记录计数
+    SetBattleDelayList        = 62; // 设置战斗区域延迟
+    Rename                    = 63; // 改名
+    ChangeHDBStep             = 64; // 改变直购顺序
+    AddDailyWinCount          = 65; // 增加每日胜场次数
+    SendCommonReward          = 66; // 发送通用奖励
+    AddBattlePureEssence      = 67; // 增加英雄专精点（模拟战斗真实增加）
+    AddPureEssence            = 68; // 增加英雄专精点（直接加点）
+    ResetPureEssenceLimit     = 69; // 重置每日专精点上限
+    HeroRoot                  = 70; // 英雄，满觉醒满级
+    RoomForceHero             = 71; // 自定义房间强制指定机器人英雄id
+    LbsPositioning            = 72; // Lbs定位
+    ResetLbsPositioningTime   = 73; // 重置Lbs定位时间
+    AddHeroLbsScore           = 74; // 增加英雄Lbs积分
+    LbsExecuteSettlement      = 75; // Lbs开始结算
+    ClearAllLbsTitles         = 76; // 清除玩家所有Lbs称号
+    ResetRenameTime           = 77; // 重置改名时间
+    DropSub                   = 78; // 子掉落
+    TestFirstPay              = 79; // 首次充值测试
+    TestPay                   = 80; // 充值测试
+    LotteryDrop               = 81; // 抽卡测试
+    SurpriseBox               = 82; // 惊喜宝箱测试
+    CreateGuild               = 83; // 创建战队
+    ChangeCreditScore         = 84; // 改变信誉分
+    AddRecreationScore        = 85; // 增加娱乐赛积分
+}
+
+// 排行榜类型
+enum RankType {
+    RT_Invalid         = 0;  // 无
+    RT_Player_Cup      = 1;  // 玩家等级排行榜
+    RT_Ladder          = 2;  // 天梯(排位)排行榜
+    RT_Hero_Cup        = 3;  // 英雄排行榜
+    RT_Hero_Lbs        = 4;  // 英雄LBS排行榜
+    RT_Achievement     = 5;  // 成就积分排行榜
+    RT_GuildActive     = 6;  // 战队活跃值排行榜
+    RT_GuildCup        = 7;  // 战队总奖杯排行榜
+    RT_RecreationScore = 8;  // 娱乐赛积分排行榜
+    RT_RecreationGame  = 9;  // 娱乐赛玩法排行榜
+    RT_Job_Lbs         = 10; // Lbs职业排行榜
+    RT_Max             = 11; // 玩家排行榜最大值
+}
+
+// 邀请组队操作指令
+enum InviteTeamPro {
+    ITP_INVALID = 0; // 默认值
+    ITP_JOIN    = 1; // 加入
+    ITP_REFUSE  = 2; // 拒绝
+    ITP_WAIT    = 3; // 稍等
+}
+
+// 最大匹配人数
+enum MaxMatchPlayer {
+    NUM_INVALID = 0;  // 默认无效值
+    NUM_1V1     = 2;  // 最大匹配2人
+    NUM_3V3     = 6;  // 最大匹配6人
+    NUM_5V5     = 10; // 最大匹配10人
+}
+
+// 组队操作指令
+enum TeamActPro {
+    TAP_INVALID                     = 0;  // 无效指令
+    TAP_CREATE                      = 1;  // 创建队伍
+    TAP_LEAVE                       = 2;  // 离开队伍
+    TAP_CHECK_JOIN                  = 3;  // 判断是否能加入队伍
+    TAP_JOIN                        = 4;  // 加入队伍
+    TAP_PREPARE                     = 5;  // 队伍准备
+    TAP_KICK_OUT                    = 6;  // 队伍踢人
+    TAP_START_MATCH                 = 7;  // 开始匹配
+    TAP_CANCEL_MATCH                = 8;  // 取消匹配
+    TAP_BACK_TEAM                   = 9;  // 结算返回
+    TAP_LOGOUT                      = 10; // 玩家掉线
+    TAP_PLAYER_ONLINE               = 11; // 玩家上线
+    TAP_TEAM_RECONNECTION           = 12; // 队伍重连检测
+    TAP_REQUEST_BATTLE_INFO         = 13; // 玩家请求战斗数据
+    TAP_SET_BATTLE_SETTING          = 14; // 设置战斗面板数据
+    TAP_TEAM_CHAT                   = 15; // 队伍聊天
+    TAP_CHECK_LEAVE                 = 16; // 检测是否能够离开队伍
+    TAP_UPDATE_PLAYER_BASE          = 17; // 更新玩家数据
+    TAP_UPDATE_BATTLE_DELAY         = 18; // 更新战斗服延迟数据
+    TAP_CHANGE_GAME_TYPE            = 19; // 更换游戏玩法
+    TAP_CHANGE_HERO                 = 20; // 更换英雄
+    TAP_WANT_HERO_LIST              = 21; // 想玩英雄
+    TAP_UPDATE_MORALITY_SCORE       = 22; // 更新玩家信誉分
+    TAP_CONVENE                     = 23; // 队伍发起招募
+    TAP_EQUIPMENT_TALENT            = 24; // 装备天赋/潜能
+    TAP_PREPARE_HINT                = 25; // 准备提示
+    TAP_UPDATE_MATCH_BLACK          = 26; // 更新匹配黑名单
+    TAP_HERO_UPDATE_DATA            = 27; // 同步更新英雄数据
+    TAP_PLAYER_UPDATE_DATA          = 28; // 同步更新玩家数据
+    TAP_NOT_READY_ENDTIME           = 29; // 未准备惩罚结束时间
+    TAP_BATTLE_ACTIVITY_DATA        = 30; // 更新活动赛数据
+    TAP_BATTLE_ACTIVITY_SELECT_STEP = 31; // 活动赛队长选择阶段
+    TAP_SDC_FILL_TEAMMATE           = 45; // 搜打撤补齐队友状态变更
+}
+
+// 匹配操作指令
+enum MatchActPro {
+    MAP_INVALID                          = 0;  // 无效指令
+    MAP_START                            = 1;  // 开始匹配
+    MAP_CANCEL                           = 2;  // 取消匹配
+    MAP_PREPARE                          = 3;  // 确认准备
+    MAP_SELECT_HERO                      = 4;  // 选择英雄
+    MAP_SELECT_SKILL                     = 5;  // 选择技能
+    MAP_LOCK_HERO                        = 6;  // 锁定英雄
+    MAP_SELECT_INSCRIPTION               = 7;  // 选择铭文页
+    MAP_LEAVE_ROOM                       = 8;  // 离开房间服务器
+    MAP_RECONNECTION                     = 9;  // 重新连接
+    MAP_CHECK_RECONNECTION               = 10; // 重新连接检测
+    MAP_LOGOUT                           = 11; // 玩家掉线
+    MAP_KICK_OUT                         = 12; // 自定义房间，踢出玩家
+    MAP_JOIN                             = 13; // 自定义房间，玩家加入房间
+    MAP_START_ROOM                       = 14; // 自定义房间，开始游戏
+    MAP_TRANSPOSITION_AGREE              = 15; // 自定义房间，同意交换位置
+    MAP_QUIT                             = 16; // 自定义房间，退出
+    MAP_CREATE_CUSTOM_ROOM               = 17; // 自定义房间，创建房间指令
+    MAP_TRANSPOSITION                    = 18; // 自定义房间，交换位置请求
+    MAP_ADD_ROBOT                        = 19; // 自定义房间，添加机器人
+    MAP_CHAT                             = 20; // 房间内聊天
+    MAP_PRAISE                           = 21; // 房间点赞
+    MAP_CUSTOM_EQUIP                     = 22; // 装备设置
+    MAP_CHECK_CUSTOM_LEAVE               = 23; // 检测能否离开房间
+    MAP_CHECK_CUSTOM_JOIN                = 24; // 检测能否加入房间
+    MAP_TRANSPOSITION_REFUSE             = 25; // 自定义房间，拒绝交换位置
+    MAP_HONG_ON_START                    = 26; // 自定义房间挂起
+    MAP_HONG_ON_OVER                     = 27; // 自定义房间结束挂起
+    MAP_BAN_HERO                         = 28; // ban英雄
+    MAP_WANT_BAN_HERO                    = 29; // 想ban英雄
+    MAP_PRIMARY_HERO                     = 30; // 预选英雄
+    MAP_WANT_ROAD                        = 31; // 预选分路
+    MAP_SEND_RECORD                      = 32; // 发送战绩
+    MAP_REQ_EXCHANGE                     = 33; // 请求交换
+    MAP_REQ_GRAB                         = 34; // 请求帮抢
+    MAP_REQ_BAN                          = 35; // 请求禁用
+    MAP_AGREE_EXCHANGE                   = 36; // 同意交换
+    MAP_GRAB                             = 37; // 帮抢
+    MAP_CANCEL_GRAB                      = 38; // 取消帮抢
+    MAP_ROOM_CHAT                        = 39; // 房间内聊天
+    MAP_SQUADS_UNREASONABLE              = 40; // 阵容不合理选择
+    MAP_REFUSED_EXCHANGE                 = 41; // 拒绝交换英雄
+    MAP_CANCEL_EXCHANGE                  = 42; // 取消交换英雄
+    MAP_HERO_ACTION                      = 43; // 更新英雄定制数据
+    MAP_SELECT_SKIN                      = 44; // 选择皮肤
+    MAP_SWITCH_MODE                      = 45; // 自定义房间，切换房间模式
+    MAP_BATTLE_RESULT_AGAIN              = 46; // 向房间服务器请求战斗结果
+    MAP_BATTLE_SURE_RESULT               = 47; // 通知房间服务器玩家收到结算消息
+    MAP_GM_SET_ROOM_HERO                 = 48; // gm在选择英雄阶段设置阵营和英雄
+    MAP_ROOM_TIME                        = 49; // room超时询问battle战斗是否任然存在
+    MAP_ROLL                             = 50; // 自定义房间打乱
+    MAP_HERO_RANDOM                      = 51; // 随机英雄
+    MAP_GM_STOP_ALL_AI_BATTLE            = 52; // 停止战斗AllAI的战斗
+    MAP_HERO_UNLOCK                      = 53; // 玩家局内解锁英雄
+    MAP_HERO_BACK_CUSTOM_ROOM            = 54; // 战斗结束返回自定义房间
+    MAP_CANCEL_LOCK_HERO                 = 55; // 取消锁定英雄
+    MAP_CUSTOM_ROOM_BACK_END_GRAY        = 56; // 自定义房间战斗结束返回房间,结束置灰状态
+    MAP_CUSTOM_ROOM_CHANGE_HERO          = 57; // 自定义房间更换英雄
+    MAP_CUSTOM_ROOM_CHANGE_GAME_TYPE     = 58; // 自定义房间更换游戏玩法
+    MAP_CUSTOM_ROOM_CHANGE_GAME_MODE_ID  = 59; // 自定义房间更换游戏模式Id
+    MAP_CUSTOM_ROOM_CHANGE_READY_STATE   = 60; // 自定义房间改变准备状态
+    MAP_EQUIPMENT_TALENT                 = 61; // 选择英雄阶段装备潜能
+    MAP_ROOM_AFFIX                       = 62; // 自定义房间选择词缀
+    MAP_CUSTOM_ROOM_FORCE_SELECT_HERO_ID = 63; // 自定义房间强制选择英雄Id
+    MAP_CUSTOM_ROOM_PREPARE_HINT         = 64; // 准备提示
+    MAP_ROBOT_SELECT_HERO                = 65; // 自定义房间房主给机器人选择英雄
+    MAP_SEND_STANDINGS                   = 66; // 房间内发送战绩
+    MAP_HERO_UPDATE_DATA                 = 67; // 同步更新英雄数据
+    MAP_PLAYER_UPDATE_DATA               = 68; // 同步更新玩家数据
+}
+
+// 房间服务器操作指令
+enum RoomActPro {
+    RAP_INVALID = 0; // 无效指令
+    RAP_CREATE  = 1; // 创建房间指令
+}
+
+// 匹配服房间状态
+enum RoomStatus {
+    RS_Init           = 0;  // 初始状态
+    RS_StartMatching  = 1;  // 匹配中
+    RS_MatchSucceeded = 2;  // 匹配成功
+    RS_WaitPrepare    = 3;  // 等待准备
+    RS_BanHero        = 4;  // 禁用英雄
+    RS_SelectHero     = 5;  // 选择英雄
+    RS_Loading        = 6;  // 战斗加载中
+    RS_Fighting       = 7;  // 战斗中
+    RS_FightOver      = 8;  // 战斗结束
+    RS_PrepareTeam    = 9;  // 自定义房间组队中
+    RS_Adjust         = 10; // 最后调整阶段
+}
+
+// 队伍状态
+enum TeamStatus {
+    TS_TeamInit       = 0; // 组队中
+    TS_JoinMatchQueue = 1; // 加入匹配队列
+    TS_Matched        = 2; // 匹配成功
+    TS_Gaming         = 3; // 游戏中
+    TS_Destroyed      = 4; // 销毁
+}
+
+// 战场房间状态
+enum BattleStatus {
+    BS_Init       = 0; // 初始
+    BS_Loading    = 1; // 加载
+    BS_Fighting   = 2; // 开始战斗
+    BS_Settlement = 3; // 结算
+}
+
+// 返回大厅原因
+enum BL_REASON {
+    BL_INVALID          = 0;  // 占位111
+    UNUSUAL_RESULT      = 1;  // 异常结算,全部为AI
+    UNUSUAL_MATCH       = 2;  // 表示匹配异常
+    NO_PREPARE          = 3;  // 标识未准备被踢
+    PREPARE_TIMEOUT     = 4;  // 已准备因有玩家未准备
+    UNUSUAL_CRC_FAILED  = 5;  // CRC校验失败
+    TEAM_KICK           = 6;  // 队长踢人
+    INITIATIVE_BACK     = 7;  // 主动返回大厅
+    SERVER_UNUSUAL      = 8;  // 服务器异常
+    SETTLE_TIMEOUT      = 9;  // 玩家停留在战斗结算界面过长，房间销毁，回到大厅
+    INIT_STATE          = 10; // 自定义房间初始状态到达最大时长,在初始状态停留过长
+    MAX_TIMEOUT         = 11; // 房间最大时长
+    MD5_UNUSUAL_RESULT  = 12; // MD5异常结算,需要仲裁
+    PLAYER_REPETITION   = 13; // 房间内存在相同的玩家，房间无效，直接解散
+    NOT_FIND_BATTLE     = 14; // 房间到达最大时长，战斗服务器，战斗未找到
+    BATTLE_CREATE_FAIL  = 15; // 等待战斗服反馈创建房间超时
+    RANDOM_HERO_ERR     = 16; // 未随机到英雄，战斗异常，所有玩家返回大厅
+    GET_BATTLE_ERROR    = 17; // 未找到战斗服务器
+    SELECT_HERO_ERROR   = 18; // 有玩家没有选择英雄,可能没有英雄选择
+    QUIT_LOOK           = 19; // 裁判位退出观战
+    SELECT_HERO_REPEAT  = 20; // 有玩家预选了相同的英雄
+    SELECT_HERO_TIMEOUT = 21; // 有玩家选择英雄超时,未选择英雄
+}
+
+// 战斗结算原因
+enum BE_REASON {
+    BE_INVALID                    = 0; // 占位
+    BE_NORMAL                     = 1; // 正常结算
+    BE_UNUSUAL_CRC                = 2; // CRC异常, 终止战斗
+    BE_UNUSUAL_ALL_AI             = 3; // 房间没人, 解散
+    BE_UNUSUAL_SETTLEMENT_TIMEOUT = 4; // 结算超时
+    BE_CAPITULATE                 = 5; // 投降认输
+    BE_EXIT                       = 6; // 退出本局
+    BE_ALL_CAPITULATE             = 7; // 全投降认输
+    BE_RESULT_ABNORMAL            = 8; // 战斗结果异常
+}
+
+// 加入队伍错误码
+enum JoinTeamCode {
+    JTC_Succeed          = 0;  // 成功加入
+    JTC_NotFindTeam      = 1;  // 队伍没找到
+    JTC_TeamFull         = 2;  // 队伍人数已满
+    JTC_TeamFighting     = 3;  // 队伍已经开始战斗
+    JTC_ExistInTeam      = 4;  // 已经在队伍中
+    JTC_NotMatchVersion  = 5;  // 加入队伍SVN版本号不匹配
+    JTC_InviterNotExist  = 6;  // 邀请人不在队伍中
+    JTC_GapIsTooBig      = 7;  // 段位差距太大
+    JTC_GuildDifferent   = 8;  // 不是同一战队
+    JTC_ConfErr          = 9;  // 配置错误
+    JTC_MatchIng         = 10; // 队伍匹配中
+    JTC_GameTypeNotMatch = 11; // 游戏类型不匹配
+}
+
+// 战斗设置类型
+enum BattleSettingType {
+    BST_INVALID                 = 0; // 占位
+    BST_AutoNormalSkill         = 1; // 自动普攻
+    BST_SelectTargetType        = 2; // 索敌类型
+    BST_NormalSkillSearchIsNear = 3; // 普攻搜寻最近单位
+}
+
+// 战斗结束
+enum BattleGameOver {
+    BGO_BackLobby = 0; // 返回大厅
+    BGO_BackTeam  = 1; // 返回队伍
+    BGO_BackRoom  = 2; // 返回自定义房间
+}
+
+// 任务状态
+enum TaskState {
+    TS_Invalid = 0; // 无效状态
+    TS_Doing   = 1; // 任务进行中
+    TS_Finish  = 2; // 任务结束,可领奖
+    TS_Over    = 3; // 任务完成，已领奖
+}
+
+// 属性类型
+enum AttrType {
+    AT_NORMAL                    = 0;  // 占位
+    AT_Gold                      = 1;  // 纪念币
+    AT_Diamond                   = 2;  // 意志结晶
+    AT_Coupons                   = 3;  // 跃之星  付费点券
+    AT_BattlePass                = 4;  // 战令货币
+    AT_BurningCoin               = 5;  // 英雄升级货币
+    AT_Epigraph                  = 6;  // 皮肤币
+    AT_SysShopCoin               = 7;  // 觉醒道具兑换币
+    AT_LMD_Coupons               = 8;  // 跃之星 免费点券
+    AT_TalentFragment            = 9;  // 天赋碎片
+    AT_LimitedCoupon             = 10; // 限时阅览券
+    AT_AdvancedCoupon            = 14; // 高级阅览券
+    AT_Battle_Pass_Week_Vitality = 15; //
+    AT_Season_Score              = 16; //
+    AT_Level                     = 20; // 玩家当前英雄奖杯数之和（随英雄奖杯数变化而变化）
+    AT_MaxLevel                  = 21; // 玩家最高英雄奖杯数之和（历史之最，不会下降）
+    AT_GuildCoin                 = 23; //
+    AT_Integral                  = 24; //
+    AT_ActivityBox               = 25; //
+    AT_HeroDirectCommon          = 26; //
+    AT_HeroDirectSenior          = 27; //
+    AT_WantHeroAlmighty          = 28; //
+    AT_Fan_Score                 = 31; //
+    AT_Coupon                    = 32; // 阅览劵
+    AT_Standard_Coin             = 33; // 特典币
+    AT_Daily_PureEssence_Max     = 34; // 每日专精点获取最大值
+    AT_Newbie_Guide              = 35; // 新手引导局的次数
+    AT_Achievement               = 36; // 玩家成就值
+    AT_DailyTaskScore            = 37; // 日常任务积分
+    AT_DailyTaskRewardMask       = 38; // 日常任务奖励领取掩码
+    AT_Voucher                   = 22; // 代金券
+}
+
+// 属性值取值范围
+enum ValueDefine {
+    VD_Min_Number = 0;
+    VD_Max_Int32  = 2100000000;
+}
+
+enum HeroTaskType {
+    HTT_NORMAL      = 0;
+    HTT_task        = 1; // 任务类型
+    HTT_achievement = 2; // 成就类型
+}
+
+// N代表次数 X代表固定ID
+enum ConditionType {
+    CT_NORMAL = 0;
+}
+
+// 事件类型
+enum EventType {
+    ET_NORMAL      = 0;
+    ET_LEVEL_UP    = 1; // 升级事件
+    ET_FIGHTING    = 2; // 战斗事件
+    ET_CONSUMPTION = 3; // 消费事件
+}
+
+// 玩家任务类型
+enum PlayerTaskType {
+    PTT_NORMAL               = 0;
+    PTT_DAILY                = 1;  // 每日任务
+    PTT_WEEK                 = 2;  // 每周任务
+    PTT_BattlePassFixed      = 3;  // 战令固定任务
+    PTT_BattlePassRandom     = 4;  // 战令随机任务
+    PTT_Activity             = 5;  // 活动类型任务
+    PTT_Achievement          = 6;  // 成就类型任务
+    PTT_ActivityBox          = 7;  // 活动带积分任务
+    PTT_Activity_Daily       = 8;  // 活动每日类型任务
+    PTT_AdventureGift        = 9;  // 奇遇礼包任务
+    PTT_RecreationSeasonTask = 10; // 娱乐赛季类型任务
+    PTT_BattlePassHeroTask   = 11; // 战令英雄限时任务
+    PTT_MAX                  = 12; // 最大类型
+}
+
+// 玩家统计字段
+enum PlayerStatisticsType {
+    PST_NORMAL              = 0;
+    PST_QualifyingCount     = 1;  // 排位对战场次
+    PST_MatchingCount       = 2;  // 匹配场次
+    PST_GloryValley         = 3;  // 荣耀峡谷场次
+    PST_NarutoBattlefield   = 4;  // 木叶战场场次
+    PST_HeroCount           = 5;  // 拥有英雄数
+    PST_SkinCount           = 6;  // 拥有皮肤数量
+    PST_BraveScore          = 7;  // 勇者积分
+    PST_CurrMaxLadder       = 8;  // 当前赛季最高段位
+    PST_WinContinuous       = 9;  // 排位连胜
+    PST_LoseContinuous      = 10; // 排位连败
+    PST_Praise              = 11; // 点赞个数
+    PST_NormalWinContinuous = 12; // 匹配连胜
+    PST_WinCnt              = 13; // 排位净胜常数
+    PST_MaxWinContinuous    = 14; // 当前赛季最高连胜
+    PST_CollectionsCount    = 15; // 藏品数量
+}
+
+// 商品限购数据
+enum GoodsLimitType {
+    GLT_NORMAL  = 0;
+    GLT_FOREVER = 1; // 永久限购
+    GLT_DAY     = 2; // 每日限购
+    GLT_WEEK    = 3; // 每周限购
+    GLT_MONTH   = 4; // 每月限购
+    GLT_SEASON  = 5; // 赛季限购
+}
+
+// 定时器事件id
+enum TimerEvent {
+    TE_NORMAL                = 0;
+    TE_SHOP_LIMIT_DAY        = 1;  // 商店每日限购刷新
+    TE_SHOP_LIMIT_WEEK       = 2;  // 商店每周限购刷新
+    TE_TASK_DAY              = 3;  // 每日任务
+    TE_DAY_VITALITY          = 4;  // 每日活跃
+    TE_TASK_WEEK             = 5;  // 每周任务
+    TE_WEEK_VITALITY         = 6;  // 每周活跃
+    TE_TASK_GROWTH           = 7;  // 成长任务
+    TE_SIGN                  = 8;  // 7日签到
+    TE_SIGN_STATE            = 9;  // 7日签到状态刷新
+    TE_WEEk_BATTLE_REWARD    = 10; // 每周获取战斗奖励的上限
+    TE_BATTLE_PASS_WEEK      = 13; // 战令活动跨周
+    TE_GET_FRIEND_MAIL_LIMIT = 14; // 领取好友赠送限制
+}
+
+// 定时器系统id
+enum TimerSystemId {
+    TSI_NORMAL      = 0;
+    TSI_BATTLE_PASS = 1;
+}
+
+// 商品类型
+enum GoodsType {
+    GT__NORMAL    = 0;
+    GT_ITEM       = 1; // 道具
+    GT_HERO       = 2; // 英雄
+    GT_HEAD_FRAME = 3; // 头像框
+}
+
+// 聊天类型
+enum ChatType {
+    CT_System    = 0; // 系统消息（目前占位）
+    CT_World     = 1; // 全服聊天
+    CT_Personal  = 2; // 私聊(包括好友与陌生人)
+    CT_Fight     = 3; // 组队招募
+    CT_WarTeam   = 4; // 战队招募
+    CT_WarTeamIn = 5; // 战队内部聊天
+    CT_Team      = 6; // 组队内聊天
+    CT_Room      = 7; // 房间内聊天
+    CT_Guild     = 8; // 战队聊天
+}
+
+// 聊天内容类型
+enum ContentType {
+    CTT_NORMAL          = 0;
+    CTT_System_Maintain = 1; // 维护
+    CTT_System_Prompt   = 2; // 提示
+    CTT_Bubble          = 3; // 气泡
+}
+
+// 好友属性
+enum FriendAttr {
+    FA_NORMAL   = 0;
+    FA_FRIEND   = 1; // 好友
+    FA_NOT_TEAM = 2; // 不想同队
+    FA_SHIELD   = 3; // 屏蔽
+}
+
+// 用于好友更新类型
+enum UpdateType {
+    FUT_NORMAL      = 0;  // 占位
+    FUT_level       = 1;  // 好友等级
+    FUT_state       = 2;  // 好友状态
+    FUT_name        = 3;  // 好友姓名
+    FUT_icon        = 4;  // 头像
+    FUT_iFrame      = 5;  // 头像框
+    FUT_Title       = 6;  // 称号
+    FUT_sign        = 7;  // 玩家签名
+    FUT_ladderLevel = 8;  // 段位等级
+    FUT_starNum     = 9;  // 段位星星
+    FUT_BattleId    = 10; // 正在进行的战斗Id
+    FUT_Privacy     = 11; // 玩家隐私权限
+    FUT_LbsTitle    = 12; // LBS称号变更
+    FUT_Achievement = 13; // 成就值变更
+    FUT_LadderTitle = 14; // 排位称号变更
+    FUT_LbsId       = 15; // LBSId变更
+    FUT_Guild       = 16; // 战队信息变更（战队名  职位更改）
+    FUT_UpvoteNum   = 17; // 点赞数变更
+}
+
+// 战斗服务器到房间服务器指令
+enum BattleToRoomAct {
+    BTRA_NORMAL             = 0;
+    BTRA_Loading            = 1; // 战斗加载
+    BTRA_Begin              = 2; // 战斗开始
+    BTRA_End                = 3; // 战斗结束
+    BTRA_RECONNECTION_CHECK = 4; // 战斗重连检测
+    BTRA_EXIT               = 5; // 退出战斗
+    BTRA_ROOM_DESTRUCTION   = 6; // 房间销毁
+    BTRA_ROOM_TIMEOUT_CHECK = 7; // 房间服务器超时检测
+    BTRA_LOOK_EXIT          = 8; // 裁判位退出
+    BTRA_MIDWAY_RESULT      = 9; // 战斗中途结算
+}
+
+// 玩家离线奖励缓存块
+enum OfflineRewardCache {
+    ORC_NORMAL        = 0;
+    ORC_battle_reward = 1; // 离线战斗奖励
+    ORC_common_reward = 2; // 离线奖励
+}
+
+// 局内聊天类型
+enum BattleChatType {
+    BCT_Normal = 0;
+    BCT_System = 1; // 局内战斗系统消息（仅客户端使用）
+    BCT_Camp   = 2; // 同阵营聊天
+    BCT_All    = 3; // 所有人聊天
+}
+
+// 邮件类型
+enum MailType {
+    MT_Normal     = 0;
+    MT_FRIEND     = 1;   // 好友邮件
+    MT_SYSTEM     = 2;   // 系统邮件
+    MT_SYSTEM_GM  = 3;   // Gm邮件
+    MT_REPORT     = 4;   // 举报邮件
+    MT_MAIL_MAX   = 5;
+
+    MT_RecallMail = 101; // 撤回邮件
+}
+
+// 邮件阅读状态
+enum MailState {
+    MailNormal   = 0;
+    MailUnRead   = 1; // 未读未领取
+    MailRead     = 2; // 已读
+    MailReceived = 3; // 已读已领取
+}
+
+// Gm邮件发送类型
+enum GMMailSendType {
+    GMMST_Normal = 0;
+    GMMST_Direct = 1; // 直接发送
+    GMMST_Timer  = 2; // 定时发送
+    GMMST_Cycle  = 3; // 周期发送
+    GMMST_Auto   = 4; // 自动发送
+}
+
+// 次数限制类型
+enum CountLimitType {
+    CLT_Normal         = 0;
+    CLT_FriendGive     = 1; // 好友赠送金币次数限制
+    CLT_GetFriendMail  = 2; // 领取好友邮件次数限制
+    CLT_RelationLover  = 3; // 恋人数量
+    CLT_RelationFriend = 4; // 挚友数量
+    CLT_FriendGot      = 5; // 领取金币次数
+}
+
+// 链接类型
+enum LinkType {
+    LT_Normal        = 0;
+    LT_GotoGameUI    = 1; // 游戏内功能跳转
+    LT_GotoHttp      = 2; // 游戏内url跳转
+    LT_GotoSystemUrl = 3; // 系统内url跳转
+}
+
+// 好友关系类型
+enum FriendRelationType {
+    FRT_Normal = 0;
+    FRT_LOVER  = 1; // 恋人
+    FRT_Friend = 2; // 挚友
+}
+
+// 亲密关系请求类型
+enum RelationRequestType {
+    RRT_ADD    = 0; // 添加请求
+    RRT_REMOVE = 1; // 删除请求
+}
+
+enum GuildActPro {
+    GAT_Normal  = 0;
+    GAT_Offline = 1; // 玩家离线
+    GAT_Online  = 2; // 玩家上线
+    GAT_Forward = 3; // 转发指令
+}
+
+// 战队职位
+enum GuildPositionType {
+    GPT_Leader = 0; // 会长
+    GPT_Led    = 1; // 小队长
+    GPT_Member = 2; // 队员
+}
+
+enum GiftCodeType {
+    GCT_Normal  = 0;
+    GCT_General = 1; // 普通礼包码
+    GCT_Public  = 2; // 通用礼包码
+}
+
+// 红包类型
+enum RedEnvelopeType {
+    RET_HERO      = 0; // 英雄
+    RET_COUPON    = 1; // 点券
+    RET_SKIN      = 2; // 皮肤
+    RET_DIAMOND   = 3; // 钻石
+    RET_HERO_CHIP = 4; // 英雄碎片
+    RET_SKIN_CHIP = 5; // 皮肤碎片
+}
+
+// 捐赠类型
+enum DonationType {
+    DT_NORMAL = 0; // 普通捐赠
+    DT_COUPON = 1; // 点券捐赠
+}
+
+// 战队升级类型
+enum LevelUpType {
+    LT_NORMAL = 0; // 普通升级
+    LT_COUPON = 1; // 点券升级
+}
+
+// 战队日志id
+enum GuildEventId {
+    GEI_NORMAL            = 0;  // 无
+    GEI_ADD_HERO          = 1;  // 成员获得英雄
+    GEI_ADD_GUILD         = 2;  // 成员加入（成员变化信息）
+    GEI_LEAVE_GUILD       = 3;  // 成员离开（成员变化信息）
+    GEI_KICK_OUT          = 4;  // 成员被踢出（成员变化信息）
+    GEI_CHANGE_STATUS     = 5;  // 成员身份变化（成员变化信息）
+    GEI_ARRIVE_ACHIEVE    = 6;  // 达成成就
+    GEI_CHANGE_GUILD_NAME = 7;  // 战队改名
+    GEI_CHANGE_GUILD_ICON = 8;  // 战队修改图标
+    GEI_Add_SKIN          = 9;  // 成员获得皮肤
+    GEI_SET_IPS           = 10; // 更改IP
+    GEI_CHANGE_NOTICE     = 11; // 更改公告
+}
+// 运营活动类型
+enum ActivityType {
+    AT_NORMAL_0      = 0;
+    AT_MANY_PICTURES = 1; // 多图片活动
+    AT_PICTURE       = 2; // 单图片活动
+    //  AT_TASK      = 3; // 任务
+    //  AT_OLD_ACCOUNT      = 4; // 旧号回归
+    //  AT_CBT      = 5; // CB毕业
+    //  AT_PAY_BACK      = 6; // 充值返利
+    //  AT_DAY_TASK_BOX_TYPE      = 7; // 持续X天，每天解锁新任务,带进度宝箱（新人集训）
+    //  AT_FIRST_PAYMENT      = 8; // 首次充值
+    //  AT_TOTAL_PAYMENT     = 9; // 累计充值
+    //  AT_ SIGN_IN_NEW_TYPE     = 9; // 新签到（英雄试炼签到）
+    //  AT_DAILY_TASK_TYPE      = 9; // 累计充值
+    //  AT_TOTAL_PAYMENT     = 9; // 每日任务（英雄试炼任务）
+}
+// 运营活动时间类型
+enum ActivityTimeType {
+    ATT_NORMAL          = 0;
+    ATT_ABSOLUTE_TIME   = 1; // 绝对时间
+    ATT_OPEN_SERVE_TIME = 2; // 开服时间
+    ATT_REGISTER_TIME   = 3; // 注册时间
+}
+
+// 抽卡类型
+enum LotteryType {
+    LOT_NORMAL = 0;
+    LOT_SINGLE = 1; // 单抽类型
+    LOT_MORE   = 2; // 多抽类型
+}
+
+// 抽卡消耗类型
+enum LotteryConsumeType {
+    LCT_ILLEGAL = 0;
+    LCT_Free    = 1; // 免费
+    LCT_REPLACE = 2; // 抽卡代替
+    LCT_NORMAL  = 3; // 正常模式
+}
+
+// 竞拍类型
+enum AuctionType {
+    ACT_NORMAL   = 0;
+    ACT_ITEM     = 1; // 道具
+    ACT_EXHIBIT  = 2; // 展品
+    ACT_MATERIAL = 3; // 材料
+}
+
+// 竞拍小类型
+enum AuctionSubType {
+    ACST_NORMAL         = 0;
+    ACST_WHITE_MATERIAL = 1; // 白材料
+    ACST_GREEN_MATERIAL = 2; // 绿材料
+}
+
+enum MapEffectType {
+    MET_NORMAL      = 0;
+    MET_YIELD_VALUE = 1; // 增加产量
+    MET_UNLOCK_AREA = 2; // 解锁区域
+}
+
+// JLevel经验来源 （目前没有使用）
+enum JLevelSource {
+    JLS_NORMAL = 0;
+}
+
+enum SystemOpenId {
+    SOI_NORMAL                 = 0;
+
+    SOI_FIRST_REWARD           = 10000; // 首充
+    SOI_PACK                   = 10200; // 背包
+    SOI_DAY_TASK               = 10300; // 任务
+    SOI_HERO                   = 10400; //  角色-主界面
+    SOI_BATTLE_PASS            = 10500; // 战令-主界面
+    SOI_LOTTERY_LUCKY_DRAW     = 10600; // 抽卡 刊物-主界面
+    SOI_SHOP                   = 10700; // 商城-主界面
+    SOI_PRIVILEGE              = 10704; // 特权卡
+    SOI_LADDER                 = 10800; // 排位
+    SOI_ATHLETICS              = 10900; // 休闲对战
+    SOI_RANK                   = 11000; // 排行榜-主界面
+    SOI_TEAM_RECRUIT           = 11100; // 车队
+    SOI_ACHIEVEMENT            = 11200; // 成就-主界面
+    SOI_MAIN_QUESTIONNAIRE     = 11300; // 主界面-问卷
+    SOI_HERO_ACTION            = 11400; // 定制动作
+    SOI_EMAIL                  = 11500; // 邮件
+    SOI_FRIEND                 = 11600; // 好友
+    SOI_PLAYER_INFO            = 11700; //  个人信息
+    SOI_COVER                  = 11800; //  看板娘背景切换-主界面
+    SOI_ACTIVITY               = 11900; // 活动
+    SOI_SETTING                = 12200; // 杂项
+    SOI_MANY_PROJECT_OPEN_ROOM = 12400; // 杂项-开房间
+    SOI_CHAT                   = 12500; // 聊天频道主界面
+    SOI_CHAT_GUILD             = 12504; // 战队聊天频道
+    SOI_GUILD                  = 12700; // 战队
+    SOI_DAILY_WIN_BOX          = 12800; // 每日胜场宝箱
+    SOI_WATCH_BATTLE           = 12900; // 观战
+    SOI_ADVENTURE_GIFT         = 13100; // 奇遇礼包
+    SOI_BACK_HERO              = 13200; // 旧账号回归领取角色
+    SOI_MONTH_SIGN             = 13300; // 月签到
+    SOI_SDC                    = 13301; // 搜打撤
+}
+
+enum SKinType {
+    ST_PERMANENT = 0; // 永久皮肤
+    ST_TEMP      = 1; // 试用皮肤
+}
+
+enum HeroSkillBufferType {
+    HSBT_NORMAL               = 0;
+    HSBT_WORK_ITEM_ID_PERCENT = 1; // 挂机物品Id概率加成  万分比
+    HSBT_WORK_ITEM_ID_COUNT   = 2; // 挂机物品id基数加成 万分比
+    HSBT_WORK_BUILD_BASE_EXP  = 3; // 毅之华基数加成 万分比
+    HSBT_WORK_EVENTS_PERCENT  = 4; // 指定事件星概率加成 万分比
+}
+
+// 地理位置 id //如果在国内 区域就可以分为 东北 华中 华南 等 //在海外同理
+enum Geographic {
+    AREA_0   = 0; // 区域0 通用 （不分区域时使用）
+    AREA_1   = 1; // 区域1
+    AREA_2   = 2; // 区域1
+    AREA_3   = 3; // 区域1
+    AREA_4   = 4; // 区域1
+    AREA_5   = 5; // 区域1
+    AREA_6   = 6; // 区域1
+    AREA_7   = 7; // 区域1
+    AREA_MAX = 8; // 最大区域
+}
+
+enum RoomMode {
+    INVALID = 0; // 无效模式
+    NORMAL  = 1; // 普通模式
+    DRAFT   = 2; // 征召模式
+}
+
+enum CycleType {
+    CT_USUAL  = 0; // 常态
+    CT_DAY    = 1; // 日更
+    CT_WEEK   = 2; // 周更
+    CT_MONTH  = 3; // 月更
+    CT_SEASON = 4; // 赛季
+    CT_NPC    = 5; // 跟随NPC更新
+}
+
+enum RequireType {
+    RT_INVALID = 0; // 无效
+    RT_J_Level = 1; // J-Level
+    RT_UnitId  = 2; // 主城形象
+}
+
+// 战斗服务器到房间服务器指令
+enum TeamToRoomAct {
+    TTRA_NORMAL        = 0; // 无效
+    TTRA_PLAYER_LOGOUT = 1; // 玩家离线
+}
+
+// 踢人原因
+enum KickPlayerReason {
+    KPR_OTHER_LOGIN        = 0;  // 顶号
+    KPR_FORCE_KICK         = 1;  // 强制踢人通知（服务器关服）
+    KPR_ERR_DATA           = 2;  // 数据异常
+    KPR_GM_KICK            = 3;  // GM踢人（黑名单）
+    KPR_FLOW_LIMITING      = 4;  // 消息频率超限流阈值
+    KPR_SERVER_RELOAD      = 5;  // 服务器更新，需要重新登陆
+    KPR_CLIENT_UPDATE      = 6;  // 通知客户端更新
+    KPR_SERVER_MAINTENANCE = 7;  // 服务器维护中（gm踢出所有玩家）
+    KPR_RISK_MONITORING    = 8;  // 风控系统封号踢人（速绿中断，若有周题清聪整客服人员）
+    KPR_CLIENT_HOT_UPDATE  = 9;  // 客户端资源更新，请重新登录
+    KPR_SERVER_HOT_UPDATE  = 10; // 服务器热更新，请重新登录
+}
+
+// 服务器状态
+enum ServerState {
+    SS_INITIALIZING = 0; // 初始化中
+    SS_NORMAL       = 1; // 正常状态
+    SS_STOPPING     = 2; // 停服中
+}
+
+// 服务器在线状态
+enum ServerOnlineState {
+    SOS_OFFLINE = 0; // 离线
+    SOS_ONLINE  = 1; // 在线
+}
+
+enum HeroOwnState {
+    HS_INVALID   = 0; //
+    HS_LIMIT     = 1; // 限免
+    HS_PERMANENT = 2; // 永久
+    HS_FIXED     = 3; // 固定
+    HS_TRIAL     = 4; // 体验卡
+}
+
+enum SceneEventConditionType {
+    SECT_INVALID    = 0; //
+    SECT_OWNER_ITEM = 1; // 拥有指定道具
+}
+
+enum SceneEventEffectType {
+    SEET_INVALID     = 0; //
+    SEET_REWARD_ITEM = 1; // 获得指定道具
+}
+
+enum RewardReason {
+    RRT_INVALID             = 0;  // 无效
+    RRT_ReasonNewPlayerTask = 67; // 新手任务
+}
+//  奖励tips提示类型
+enum RewardTipsType {
+    RTT_INVALID          = 0; // 无效
+    RTT_DIALOG           = 1; // 奖励窗口
+    RTT_TEXT_MSG         = 2; // 文字tip
+    RTT_TRADING_OFFSHELF = 3; // 交易行下架
+}
+
+enum LoginResult {
+    LR_Success            = 0; // 成功
+    LR_Forbidden          = 1; // 禁号
+    LR_WaitRetry          = 2; // 重试
+    LR_LoginFailedLocked  = 3; // 系统繁忙，请稍后再试
+    LR_LoginFailedOnline  = 4; // 账号已在其他地方登录
+    LR_LoginFailedUnknown = 5; // 登录失败，请重试
+    LR_AccountMultiLogin  = 6; // 顶号
+}
+
+// 战斗难度
+enum BattleDifficulty {
+    BD_INVALID = 0;
+    BD_EASY    = 1; // 简单
+    BD_NORMAL  = 2; // 一般
+    BD_HARD    = 3; // 困难
+}
+
+// 玩家隐私类型
+enum PlayerPrivacyType {
+    PPT_INVALID      = 0;
+    PPT_GOOD_AT_HERO = 1; // 擅长英雄
+    PPT_DYNAMIC_INFO = 2; // 动态信息
+    PPT_STANDINGS    = 3; // 历史战绩
+    PPT_WATCH_BATTLE = 4; // 允许观战
+}
+
+enum DynamicInfoConditionType {
+    DCT_INVALID     = 0;
+    DCT_LEGENDARY   = 1; // 超神
+    DCT_FIVE_KILLS  = 2; // 五杀
+    DCT_FOUR_KILLS  = 3; // 四杀
+    DCT_THREE_KILLS = 4; // 三杀
+}
+
+enum PlayerMobaLevel {
+    PML_INVALID = 0; // 未选择
+    PML_GOD     = 1; // 大神
+    PML_ROOKIE  = 2; // 菜鸟
+}
+
+// 日志埋点 消息类型
+enum action_log_type {
+    ACT_INVALID                 = 0;  // 未选择
+    ACT_SelectHead              = 1;  // 选择男女头像
+    ACT_DialogueAfterCreateRole = 2;  // 创角后对话
+    ACT_Guide                   = 3;  // 引导 新手引导过程中事件的完成情况
+    ACT_Interactive             = 4;  // 交互 新手引导过程中事件的完成情况
+    ACT_ChooseHero              = 5;  // 新手选择英雄
+    ACT_EnterGuideScene         = 6;  // 进入漫画关卡 2选1英雄选择完成后漫画关卡进入
+    ACT_GuideSceneTask          = 7;  // 漫画关卡3个任务
+    ACT_IsMaster                = 8;  // 新手 or 老手
+    ACT_BattleGuide             = 9;  // 新手 战斗引导
+    ACT_MainCityScreen          = 11; // 主城大屏幕点击情况
+    ACT_MainCityRank            = 12; // 打开主城排行榜
+    ACT_ViewDeathCount          = 13; // 死亡伤害统计(玩家查看死亡统计时记录)
+    ACT_JoinTraining            = 14; // 进入训练营
+    ACT_ViewTrial               = 15; // 进入试炼
+}
+
+enum market_analysis_log_type {
+    MAT_INVALID           = 0;
+    // UnlockHero 累计解锁5个角色
+    MAT_UnlockHero        = 1;
+    // UnlockSkill 累计解锁2次技能
+    MAT_UnlockSkill       = 2;
+    // PlayerLevel11 人物等级到达11级
+    MAT_PlayerLevel       = 3;
+    // PlayerApplyFriend 累计申请好友5次
+    MAT_PlayerApplyFriend = 4;
+    // PlayerBattleGift 累计获取3个赛事礼品
+    MAT_PlayerBattleGift  = 5;
+    // PlayerShare1 累计分享1次
+    MAT_PlayerShare       = 6;
+    // PlayerTotalHours 累计在线时长1小时
+    MAT_PlayerTotalHours  = 7;
+    // 首日内抢龙珠玩法达到2次
+    MAT_Dragonball_2      = 8;
+    // 首日内moba玩法达到6次
+    MAT_moba_6            = 9;
+    // 打开商店两次
+    MAT_purchase_click2   = 10;
+    // 首次购买月卡
+    MAT_mooncard_1st      = 11;
+    // 累计充值达到6人民币等值
+    MAT_totalpurchase_6   = 12;
+    // 累计充值达到98人民币等值
+    MAT_totalpurchase_98  = 13;
+    // 首次购买皮肤（各种等级皮肤都可）
+    MAT_skinbuy_1st       = 14;
+}
+
+enum ShareType {
+    ST_DAILY      = 0; // 每日分享
+    ST_FIRST_HERO = 1; // 首次分享英雄
+    ST_FIRST_SKIN = 2; // 首次分享皮肤
+    ST_WEEKLY     = 4; // 每周分享
+}
+
+// 道具加成效果
+enum ItemAdditionType {
+    IAT_INVALID     = 0; //
+    IAT_PROFICIENCY = 1; // 战斗结束积分加成
+}
+
+enum dmpAiType {
+    DAT_INVALID      = 0;    //
+    DAT_WARM         = 1;    // 1-温暖局（保玩家胜率体验的AI局）
+    DAT_NOVICE       = 2;    // 2-新手引导局（新手阶段的AI剧本局）
+    DAT_COMPENSATION = 3;    // 3-补偿局
+}
+enum tradeGoodsSortType {
+    TGST_PRICE_ASC      = 0; // 价格 低->高
+    TGST_PRICE_DESC     = 1; // 价格 高 ->低
+    TGST_QUALITY_ASC    = 2; // 品质 低->高
+    TGST_QUALITY_DESC   = 3; // 品质 高 ->低
+    TGST_DOWN_TIME_ASC  = 4; // 下架时间 低->高
+    TGST_DOWN_TIME_DESC = 5; // 下架时间 高 ->低
+    TGST_MAX            = 6;
+}
+enum tradeLogType {
+    sell = 0;
+    buy  = 1;
+}
+
+enum AppearanceType {
+    APT_INVALID  = 0; //
+    APT_original = 1; // 原创装备
+    APT_comic    = 2; // 漫画cos装扮
+    APT_image    = 3; // 形象
+}
+
+// 举报原因枚举
+enum ReportReasonType {
+    RRET_INVALID     = 0;
+    RRET_CHEAT       = 1; // 作弊
+    RRET_COURT_DEATH = 2; // 送人头
+    RRET_SPEECH      = 3; // 言论
+    RRET_NEGATIVE    = 4; // 消极
+    RRET_HangUp      = 5; // 挂机
+    RRET_OTHER       = 6; // 其他
+}
+
+// 举报二级原因枚举
+enum ReportReasonSecondaryType {
+    RREST_INVALID     = 0; // 通用
+    RREST_TRANSPARENT = 1; // 透图
+    RREST_CATON       = 2; // 卡顿
+    RREST_DAMAGE      = 3; // 伤害加成
+    RREST_CD          = 4; // CD
+    RREST_OTHER       = 5; // 其他
+}
+
+enum TradingGoodsStatus {
+    invalid  = 0;
+    CalmDown = 1; // 冷静期
+    Show     = 2; // 展示期
+    Sell     = 3; // 售卖期
+    Expire   = 4; // 过期
+}
+
+// 充值订单状态
+enum PayState {
+    PS_INVALID = 0; // 订单初始状态，收到订单未处理
+    PS_FINISH  = 1; //  订单已经处理
+}
+
+enum GuildIconPartType {
+    GIP_INVALID = 0;
+    GIP_Bottom  = 1; // 底板
+    GIP_Icon    = 2; // 图案
+    GIP_Frame   = 3; // 装饰
+    GIP_MAX     = 4;
+}
+
+// 道具在交易行归属页签
+enum TradingUITableType {
+    TUT_All      = 0;        // 全部
+    TUT_hat      = 1;        // 发型
+    TUT_Jacket   = 2;        // 上衣
+    TUT_Trousers = 3;        // 裤子
+    TUT_Socks    = 4;        // 袜子
+    TUT_Shoes    = 5;        // 鞋子
+    TUT_Ggk      = 6;        // 刮刮卡
+}
+enum MailParamsType {
+    MPT_Raw             = 0; // 原生字符串
+    MPT_LanguageId      = 1; // 多语言Id
+    MPT_LanguageIdArray = 2; // 多语言Id数组 id1,id2,id3
+    MPT_ItemNumber      = 3; // 动态数组A类型 id,数量;id,数量;id,数量;id,数量;id,数量;id,数量;
+}
+
+// 队伍预选匹配类型
+enum TeamReserveMatchType {
+    TRMT_INVALID = 0; // 无预选设定
+    TRMT_HERO    = 1; // 英雄预选，先判断英雄，然后判断分路（分路走英雄的主分路
+    TRMT_ROUTE   = 2; // 分路预选，判断分路（分路走玩家自己选择的分路）
+}
+
+enum SettingOperateType {
+    ST_SingleHero = 0; // 单英雄
+    ST_AllHero    = 1; // 全英雄通用
+    ST_Global     = 2; // 全局
+}
+
+enum PhoneOsType {
+    PT_INVALID = 0; // 无
+    ST_ANDROID = 1; // 安卓
+    ST_IOS     = 2; // 苹果
+}
+
+enum ItemTimeType {
+    ITT_INVALID = 0; // 无
+    ITT_SELL    = 1; // 出售时间
+    ITT_USE     = 2; // 使用时间
+    ITT_LIVE    = 3; // 生命周期时间
+}
+
+// 商店刷新类型
+enum ShopRefreshType {
+    SRT_INVALID = 0; // 无
+    SRT_Day     = 1; // 每日刷新
+    SRT_Week    = 2; // 每周刷新
+    SRT_Month   = 3; // 每月刷新
+}
+
+// 荒野战斗结算类型
+enum BrawlBattleResultType {
+    BBRT_Invalid     = 0; // 正常结束
+    BBRT_DUEL_Midway = 1; // 中途结算（吃鸡模式）
+}
+
+// 玩家游戏状态
+enum PlayerGameStatus {
+    PGS_Invalid = 0; // 无效
+    PGS_Game    = 1; // 游戏中
+    PGS_Settled = 2; // 已经结算
+}
+
+// 排位赛征召类型
+enum LadderDraftType {
+    LDT_Invalid  = 0; // 自由选择英雄模式
+    LDT_Pick     = 1; // pick模式
+    LDT_Ban_Pick = 2; // banPick模式
+    LDT_Max      = 3; // 最大值
+}
+
+// 英雄cv检测条件
+enum HeroCvUnLockConditionType {
+    HCT_Default  = 0; // 默认解锁
+    HCT_HaveHero = 1; // 当前拥有x英雄
+    HCT_HaveItem = 2; // 当前拥有x道具
+    HCT_HaveIndividuationId = 3; // 有指定动作id
+}
+
+enum GuildRouteStepType {
+    Prepare = 0; // 准备阶段
+    Now     = 1; // 进行阶段
+    Reward  = 2; // 结束领奖阶段
+    Unknow  = 3; // 未开启
+}
+
+// 战队玩法对应客户端的id 增加需通知客户端
+enum GuildGamePlayType {
+    empty = 0;    // 占位
+    Route = 1601; // 伟大航路
+}
+
+// 月卡终身卡类型枚举
+enum MonthCardPrivilegeType {
+    M_empty        = 0; // 占位
+    M_Month_Card   = 1; // 月卡
+    M_Forever_Card = 2; // 终身卡
+}
+
+// 月卡终身卡特权
+enum MonthCardPrivilegeConditionType {
+    MC_empty               = 0; // 占位
+    MC_Luck_Scroll_Num     = 2; // 每日惊喜卷轴的数量*1
+    MC_Luck_Scroll_Quality = 3; // 惊喜卷轴的最低品质提升为蓝色
+    MC_Lottery_Num         = 4; // 刊物抽卡的单抽（十连抽不管）免费抽取1次
+    MC_Comic_Task_Num      = 5; // 漫迷历程任务刷新次数增加2次
+    MC_Select_Reset_Cd     = 8; // 自选重置无CD
+}

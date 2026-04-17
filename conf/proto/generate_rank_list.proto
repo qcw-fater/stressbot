@@ -1,0 +1,48 @@
+syntax            = "proto3";
+option go_package = ".;pb";
+package Game;
+import "enum.proto";
+import "player.proto";
+import "lbs.proto";
+
+// 排行榜数据
+message RankInfo {
+    PlayerBase  playerBase              = 1;  // 玩家数据
+    int32       score                   = 2;  // 分数
+}
+// 排行榜点赞详情
+message UpvoteInfo {
+	RankType            rankType            = 1;  // 点赞排行榜类型
+	int32				playerId           	= 2;  // 玩家id
+	int32 				heroId        		= 3;  // 英雄id
+	int32 				lbsId         		= 4;  // LbsId
+	map<int32,bool>  	upvotePlayerIdList  = 5;  // 点赞玩家id列表
+}
+// 排行榜
+message RankListGetC2S {
+    RankType rankType   = 1;  // 排行榜类型
+    bool isGlobal       = 2;  // 是否全局排行（全区全服）
+    int32 heroId        = 3;  // 英雄id
+    int32 lbsId         = 4;  // LbsId
+	int32 jobId         = 5;  // 职业id
+}
+// 排行榜
+message RankListGetS2C {
+    repeated RankInfo   rankInfoList        = 1;  // 排行榜数据
+    RankType            rankType            = 2;  // 排行榜类型
+    int32               selfRank            = 3;  // 我在排行榜内的排名,0：未上榜
+    int32               heroId              = 4;  // 英雄id
+	LbsData				nextLbsData			= 5;  // 下一级Lbs数据
+	UpvoteInfo			upvote				= 6;  // 点赞数据
+	int32 				jobId         		= 7;  // 职业id
+}
+//排行榜点赞
+message RankListUpvoteC2S
+{
+	UpvoteInfo			upvote				= 1;  // 点赞数据
+}
+//排行榜点赞
+message RankListUpvoteS2C
+{
+	UpvoteInfo			upvote				= 1;  // 点赞数据
+}

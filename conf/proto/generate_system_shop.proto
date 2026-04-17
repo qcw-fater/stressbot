@@ -1,0 +1,113 @@
+syntax             = "proto3";
+option  go_package = ".;pb";
+package Game;
+import "custom_system_shop.proto";
+import "common.proto";
+
+// 商品数据
+message BuyGoodsData {
+    int32 shopId           = 1; // 商店id
+    int32 goodsId          = 2; // 商品id
+    int32 buyNumber        = 3; // 购买数量
+    int32 costNumber       = 4; // 消耗货币数量，（客户端预估消耗值）
+    bool  isAdditionalCost = 5; // 是否为替补货币购买
+    int32 groupId          = 6; // 商品组id
+    bool  isContinueBuy    = 7; // 是否继续购买下一个商品
+}
+
+// 购买商品返回数据
+message RespGoodsInfo {
+    int32 shopId    = 1; // 商店id
+    int32 goodsId   = 2; // 商品id
+    int32 buyNumber = 3; // 购买数量
+    int32 errorCode = 4; // 错误码
+}
+
+// Shop.csv
+message ShopConf {
+    int32          ID          = 1;  // 商店ID
+    int32          ShopNumber  = 2;  //  商店一级页签显示个数
+    int32          ShopType    = 3;  // 商店样式
+    int32          SystemId    = 4;  // 关联系统id
+    int32          ShopName    = 5;  // 商店一级页签名字
+    int32          SubShopName = 6;  // 子商店名字
+    repeated int32 GoodsList   = 7;  // 商品列表list
+    repeated int32 TopId       = 8;  // top条显示资源
+    int32          Cycle       = 9;  // 更新周期
+    int32          IsShow      = 10; // 是否显示
+}
+
+// 玩家商品数据
+message SystemShopDataS2C {
+    repeated GoodsInfo      goodsList = 1; // 所有的商品数据（配置）
+    repeated ShopConf       shopData  = 2; // 商店数据
+    repeated GoodsGroupConf groupData = 3; // 商店组数据
+}
+
+// 商店对应的组id
+message shopGroup {
+    map<int32, int32> GroupsId = 1; // key:商店id value:玩家当前使用商品组id(Shop表格，GoodsList字段下标)
+    map<int32, int32> discount = 2; // key:商店id value:玩家折扣力度（万分比）
+}
+
+// 玩家商店限购数据
+message SystemShopLimitDataS2C {
+    map<uint32, goodsLimitInfo> allLimitData  = 1; // 购买商品信息
+    shopGroup                   shopGroupData = 2; // 商店对应的组id
+}
+
+// 玩家商城限购数据
+message goodsLimitInfo {
+    int32 groupId       = 1; // 分组id
+    int32 limitType     = 2; // 限购类型
+    int32 limitBuyCount = 3; // 已经购买次数
+    int32 shopId        = 4; // 商店id
+}
+
+// 打开商店
+message SystemShopOpenC2S {}
+// 打开商店
+message SystemShopOpenS2C {}
+
+// 商店宝箱奖励
+message ShopBoxRewardS2C {
+    repeated ShowReward rewardList = 1; // 奖励道具
+}
+
+// 购买商品
+message SystemShopBuyC2S {
+    repeated BuyGoodsData goodsList = 1; // 购买商品数据
+}
+
+// 购买商品
+message SystemShopBuyS2C {
+    map<int32, RespGoodsInfo>   buyGoodsData = 1; // 购买商品数据
+    map<uint32, goodsLimitInfo> allLimitData = 2; // 限购商品信息
+}
+
+message SystemShopBoxRewardS2C {}
+
+// 请求刷新玩家折扣
+message SystemShopRefreshDiscountC2S {
+    int32 shopId = 1; // 玩家商店
+}
+
+// 请求刷新玩家折扣
+message SystemShopRefreshDiscountS2C {
+    int32 shopId   = 1; // 玩家商店
+    int32 Discount = 2; // 折扣  （万分比），数值向下取整
+}
+
+// 代金券购买直购商品
+message SystemShopVoucherBuyC2S {
+    string cashGoodsId = 1; // 代金券商品id
+    int32  buyNumber   = 2; // 购买数量
+    int32  costNumber  = 3; // 消耗货币数量，（客户端预估消耗值）
+}
+
+// 代金券购买直购商品
+message SystemShopVoucherBuyS2C {
+    string cashGoodsId = 1; // 代金券商品id
+    int32  buyNumber   = 2; // 购买数量
+    int32  costNumber  = 3; // 消耗货币数量，（客户端预估消耗值）
+}

@@ -1,0 +1,89 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option  go_package = ".;pb";
+package Game;
+import "enum.proto";
+
+// 任务触发类型
+enum TaskTriggerType {
+    TT_Invalid                                  = 0;  // 无效
+    TT_Login                                    = 1;  // 登录
+    TT_BattleSettlement                         = 2;  // 战斗结算
+    TT_MoneyCost                                = 3;  // 货币消耗
+    TT_MoneyAdd                                 = 4;  // 货币增加
+    TT_ItemCost                                 = 5;  // 物品消耗
+    TT_ItemAdd                                  = 6;  // 物品增加
+    TT_GetHero                                  = 7;  // 获得指定英雄
+    TT_GetHeroSkin                              = 8;  // 获得皮肤
+    TT_HeroLevelUp                              = 9;  // 英雄升级
+    TT_HeroAwake                                = 10; // 英雄觉醒
+    TT_HeroActiveTalent                         = 11; // 英雄激活天赋
+    TT_HeroEquipTalent                          = 12; // 英雄装备天赋
+    TT_HeroActiveSuperTalent                    = 13; // （废弃）
+    TT_HeroEquipSuperTalent                     = 14; // （废弃）
+    TT_LadderLevel                              = 15; // 段位变更
+    TT_HeroAddCup                               = 16; // 英雄杯数提升
+    TT_TotalHeroLevelUp                         = 17; // 总英雄等级提升
+    TT_OpenSurpriseBox                          = 18; // 惊喜宝箱开启次数
+    TT_HeroFromDesignatedSource                 = 19; // 从指定渠道获取英雄
+    TT_Lottery                                  = 20; // 抽卡
+    TT_LotteryMinimumGuarantee                  = 21; // 抽卡保底
+    TT_CumulativeOnlineDuration                 = 22; // 累计在线时长
+    TT_ObtainHeadIcon                           = 23; // 获取头像
+    TT_ObtainFrame                              = 24; // 获取头像框
+    TT_ObtainTitle                              = 25; // 获取称号
+    TT_AddFriend                                = 26; // 添加好友
+    TT_Chat                                     = 27; // 聊天
+    TT_ByRecruitingCreateTeam                   = 28; // 通过招募创建队伍并完成战斗
+    TT_ByRecruitingJoinTeam                     = 29; // 通过招募加入队伍并完成战斗
+    TT_WithFriendCompleteBattles                = 30; // 与好友完成战斗
+    TT_UpvoteOnTheBattle                        = 31; // 战斗结算点赞
+    TT_HeroAllCup                               = 32; // 总奖杯数达到x
+    TT_LotteryPool                              = 33; // 在X奖池抽奖
+    TT_RemainMoneyLessThan                      = 34; // 剩余x货币小于y
+    TT_LotteryFloorLessThan                     = 35; // 距离保底的抽数小于N
+    TT_HeroOneCup                               = 36; // x英雄奖杯数达到x
+    TT_ShopBuy                                  = 37; // 商店购买事件
+    TT_AchievementComplete                      = 38; // 成就完成
+    TT_BattlePassLevelUp                        = 39; // 战令等级提升
+    TT_TotalPayAmount                           = 40; // 累计充值
+    TT_HeroReachCupWithCount                    = 41; // X个英雄达到Y杯
+    TT_BattleSettlementEx_SpecifiedComic        = 42; // 战斗结算扩展-排位赛中队友全为{漫画ID}角色
+    TT_BattleSettlementEx_SpecifiedOpponentHero = 43; // 战斗结算扩展-对手为{英雄ID}
+    TT_BattleSettlementEx_MinimumScore          = 44; // 战斗结算扩展-战斗评分数最低
+}
+
+// 任务数据
+message TaskInfo {
+    int32          taskId              = 1;  // 任务ID (配置Id)
+    int64          dynamicTaskId       = 2;  // 任务ID (唯一Id)
+    TaskState      taskState           = 3;  // 任务状态 0:进行中  1:完成未领奖  2：完成已领奖
+    int32          progress            = 4;  // 任务进度
+    int64          lastCompleteTime    = 5;  // 完成时间
+    repeated int32 randomHeroes        = 6;  // 随机英雄(动态条件)
+    repeated int32 randomGameType      = 7;  // 随机游戏类型(动态条件)
+    repeated int32 designatedGameModel = 8;  // 指定游戏模式(动态条件)
+    repeated int32 randomMainTag       = 9;  // 随机职业(动态条件)
+    repeated int32 randomComic         = 10; // 随机ip(动态条件)
+}
+
+// 玩家任务
+message PlayerTaskInfo {
+    repeated TaskInfo taskList = 1; // 任务列表
+}
+
+// 刷新玩家任务
+message PlayerTaskRefresh {
+    int32          playerId       = 1; // 刷新玩家Id
+    PlayerTaskType playerTaskType = 2; // 任务类型
+}
+
+// 服务器内部数据
+message PlayerAchievementModel {
+    map<int32, int32>           ipAchievementReward = 1; // key:ip, value:已经领取到的宝箱等级
+    map<int32, dynamicTaskList> achievement2Task    = 2; // "map<成就id, 任务uuidList >"
+    map<int32, int64>           finishId            = 3; // 已经完成的成就配置表id key：成就id， value: 领奖时间
+    string                      confMd5 = 4; // 玩家当前的配置文件MD5，不一致时会在登录遍历成就表，登录时候赋值
+}
+
+message dynamicTaskList { repeated int64 UUIDList = 1; }

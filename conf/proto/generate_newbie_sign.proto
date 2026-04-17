@@ -1,0 +1,15 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+
+//领取新手签到奖励
+message NewbieSignGetRewardC2S
+{
+    int32 day = 1; // 领取奖励天数
+}
+//领取新手签到奖励
+message NewbieSignGetRewardS2C
+{
+    int32 day = 1; // 领取奖励天数
+    int32 rewardFlag = 2; // 奖励标记（位标记）    
+}

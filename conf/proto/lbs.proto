@@ -1,0 +1,68 @@
+syntax             = "proto3"; //[proto2|proto3]
+
+option  go_package = ".;pb";
+package Game;
+
+// Lbs数据
+message LbsData {
+    int32 lbsId  = 1; // LbsId
+    int32 score  = 2; // 荣誉积分
+    int32 rank   = 3; // 排名
+    int32 heroId = 4; // 英雄Id
+    int32 jobId  = 5; // 职业Id
+}
+
+// Lbs动态系数
+message LbsDynamicValue {
+    int32 score                        = 1; // 荣誉积分
+    int32 ladderPerformanceBattlePower = 2; // 排位赛表现战力
+    int32 activityCoefficient          = 3; // 当前活跃系数
+    int64 lastUpdateTime               = 4; // 最后更新时间
+    int32 attenuationCount             = 5; // 衰减次数
+}
+
+// Lbs 称号数据
+message LbsTitleData {
+    int32 lbsId      = 1; // LbsId
+    int32 heroId     = 2; // 英雄Id
+    int32 rank       = 3; // 排行
+    bool  isUse      = 4; // 是否使用
+    int64 getTime    = 5; // 获取时间
+    int64 expireTime = 6; // 失效时间
+	int32 jobId      = 7; // 职业Id
+}
+
+// 英雄Lbs各标段历史数据
+message HeroLbsStats {
+    int32 times     = 1; // 获得次数
+    int64 firstTime = 2; // 首次获得时间
+}
+
+// 英雄Lbs历史数据
+message HeroLbsHistoryStats {
+    LbsData               highestHonor = 1; // 最高荣誉 积分为历史最高（当前值高于则更新历史值） 排名跟着结算走
+    repeated HeroLbsStats stats        = 2; // 各标段历史数据 0国服最强 1省级 2区级 3县级
+}
+
+// Lbs 最强国服荣誉数据
+message LbsHighestBaseData {
+    int32 lbsId    = 1; // Lbs定位Id
+    int32 playerId = 2; // 玩家Id
+    int32 score    = 3; // 荣誉积分
+}
+
+// Lbs 最强国服玩家列表
+message LbsHighestPlayers {
+    int32                       dateTime       = 1; // 日期：20250728，为0则默认表示当前
+    repeated LbsHighestBaseData highestPlayers = 2; // 最强国服玩家列表
+}
+
+// 英雄最高荣誉数据
+message LbsHeroHighestData {
+    map<int32, LbsHighestPlayers> heroHighestData = 1; // 英雄最高荣誉数据 key: heroId value: 当前英雄最强国服玩家列表
+}
+
+// 最强国服数据
+message LbsHighestList {
+    map<int32, LbsHeroHighestData> historyList = 1; // 最强国服历史数据 key:日期（20250101） value: 最强国服数据
+}

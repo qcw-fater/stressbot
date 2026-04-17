@@ -1,0 +1,204 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option  go_package = ".;pb";
+package Game;
+
+import "enum.proto";
+import "player.proto";
+
+// GM事件
+message GMEvent {
+    GMEventType    type   = 1; // 事件类型
+    Player         player = 2; // 玩家信息
+    string         reason = 3; // 附加描述
+    repeated int32 param  = 4; // 参数
+    string         extra  = 5; // 额外参数
+}
+
+message RewardConfig {
+    int32 ItemId = 1;
+    int32 Number = 2;
+}
+
+// 抽奖给客户端展示的
+message ShowReward {
+    RewardConfig          Reward          = 1; // 转换之前的奖励Id
+    bool                  IsConvertReward = 2; // 是否转换
+    repeated RewardConfig ConvertReward   = 3; // 转换之后的奖励
+    int64                 Uuid            = 4; // 道具uuid
+}
+
+message DropItemConfig {
+    int32 Probability = 1; // 概率
+    int32 ItemID      = 2;
+    int32 MinNum      = 3;
+    int32 MaxNum      = 4;
+}
+
+// 惊喜宝箱奖励配置
+message SurpriseBoxReward {
+    repeated ShowReward reward        = 1; // 奖励
+    int32               quality       = 2; // 品质
+    int32               randQuality   = 3; // 随机品质
+    int32               surpriseBoxId = 4; // 惊喜宝箱Id
+}
+
+// 玩家离线战斗奖励
+message PlayerOfflineBattleReward {
+    repeated RewardConfig rewardList  = 1; // 战斗奖励数据
+    int64                 battleId    = 2; // 战斗id
+    int32                 BattleType  = 3; //
+    int32                 BattleModel = 4; //
+}
+
+message WhiteIpList {
+    string         ip      = 1; // ip
+    string         remark  = 2; // remakr
+    repeated int32 lsids   = 3; // serverID
+    int64          addTime = 4; // 添加记录时间
+}
+
+message WhiteAccountList {
+    string         account = 1; // account
+    string         cause   = 2; // cause
+    repeated int32 lsids   = 3; // serverID
+    int64          addTime = 4; // 添加记录时间
+}
+
+message Link {
+    LinkType linkType      = 1; // 链接类型
+    string   linkText      = 2; // 链接按钮文本
+    string   linkHttp      = 3; // 链接(外链）
+    int32    systemId      = 4; // 系统跳转id（内链）
+    string   multiLinkText = 5; // 多语言按钮文本
+}
+
+message BlackList {
+    int32  id          = 1; // 黑名单id
+    string name        = 2; // 玩家名
+    int64  freezeTime  = 3; // 开始时间
+    int64  closureTime = 4; // 冻结时间
+    int64  overTime    = 5; // 结束时间
+    string cause       = 6; // 冻结原因
+}
+
+// 征召步骤
+message DraftStep {
+    int64          durationTime = 1;
+    int32          act          = 2; // 1.ban英雄  2.选英雄  3.调整
+    repeated int32 indexList    = 3; // 玩家索引
+}
+
+message SilenceList {
+    int32             id          = 1; // 禁言id
+    string            name        = 2; // 玩家名
+    int64             silenceTime = 3; // 开始时间
+    int64             closureTime = 4; // 禁言时间
+    int64             overTime    = 5; // 结束时间
+    string            cause       = 6; // 禁言原因
+    repeated ChatType chatType    = 7; // 聊天类型
+}
+
+message PlayerReward {
+    int32                 playerId   = 1; // 玩家Id
+    repeated RewardConfig rewardList = 2; // 奖励数据
+    int32                 reasonId   = 3; // 理由
+    bool                  show       = 4;
+    string                subReason  = 5; // 二级原因
+}
+
+// 压测脚本使用,自定义序列号
+message CustomMessage {
+    string format = 1;
+    string data   = 2;
+}
+
+// 功能管理
+message FuncList {
+    int32 funcId = 1; // 功能id
+    int32 jLevel = 2; // 解锁等级
+    bool  isShow = 3; // 未开启是否可见（true可见，false不可见）
+    bool  isOpen = 4; // 是否临时关闭（true临时关闭，false不管  使用UISystem配置）
+}
+
+// nsq服务器内部消息
+message NsqInnerMsg {
+    int32  serverId = 1; // 需要处理的服务器id
+    uint32 act      = 2; // 动作 //需要转 uint8
+    bytes  data     = 3; // 消息数据
+}
+
+enum RuleType {
+    rt_invalid       = 0; // 无效
+    rt_entertainment = 1; // 娱乐赛
+    rt_match         = 2; // 匹配赛
+}
+
+message SuperAffixValue {
+    repeated int32 values = 1; // 词缀id数组
+}
+
+// 游戏模式数据
+message BattleGameMode {
+    int32                        modeId          = 1;  // 当前模式id
+    int64                        nextRefreshTime = 2;  // 下一次刷新时间
+    int32                        cfgIndex        = 3;  // 配置索引
+    int32                        cfgId           = 4;  // 配置表id
+    int32                        affix           = 5;  // 词缀
+    int32                        periodId        = 6;  // 周期id
+    RuleType                     ruleType        = 7;  // 游戏类型（娱乐赛，匹配赛）
+    int32                        Order           = 8;  // 玩法排序
+    int32                        InterfaceType   = 9;  // 样式类型
+    int32                        CombinationId   = 10; // CombinationId
+    string                       CombinationName = 11; // 关联玩法名字
+    int32                        length          = 12; // 玩法地图池Id长度
+    int64                        startTime       = 13; // 开始时间
+    int32                        days            = 14; // 预告持续天数
+    int64                        PreviewTimes    = 15; // 预告时间
+    repeated RuleTimeInfo        superAffixTime  = 16; // 词缀风暴时间配置
+    repeated RuleTimeInfo        DailyOpenTime   = 17; // 每日开启时间
+    int32                        nextModeId      = 18; // 下次模式id
+    int32                        RefreshText     = 19; // 玩法刷新提示类型
+    map<string, SuperAffixValue> superAffix      = 21; // 词缀风暴
+}
+
+message RuleTimeInfo {
+    int32 StartHour   = 1; // 开始小时时间
+    int32 StartMinute = 2; // 开始分钟时间
+    int32 EndHour     = 3; // 结束小时时间
+    int32 EndMinute   = 4; // 结束分钟时间
+}
+
+// gm修改任务状态或进度信息
+message GMModifyTask {
+    string dynId    = 1; // 任务唯一id
+    bool   complete = 2; // 是否修改为完成
+    int32  progress = 3; // 修改的进度
+}
+
+// gm修改存储战斗模式
+message GMBattleMode {
+    int32 cfgId = 4; // 配置表id
+    bool  open  = 5; // 是否开启
+}
+
+// 新手引导开关
+message GMNewGuildSwitch {
+    bool status = 1; // 是否开启
+}
+
+// 活动赛招募通用数据
+message ActivityBattleRecruitData {
+    int32 id   = 1; // 本期id
+    int32 step = 2; // 阶段
+}
+
+
+//  GM 更新验证结果
+message GMUpdateResult {
+    int32  CfgId     = 1; //   `json:"cfgId"`
+    bool   Success   = 2; //   `json:"success"`
+    int32  ErrCode   = 3; //   `json:"errCode"`
+    string ErrMsg    = 4; //   `json:"errMsg"`
+    int64  Timestamp = 5; //   `json:"timestamp"`
+}

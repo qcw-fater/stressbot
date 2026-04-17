@@ -1,0 +1,12 @@
+syntax            = "proto3";
+option go_package = ".;pb";
+package Game;
+
+// 推送观战房间帧数据
+message NothotobPutRoomFrameS2C {
+    repeated bytes frames = 1;  // 帧数据
+}
+//战斗结束
+message NothotobBattleEndS2C
+{
+}

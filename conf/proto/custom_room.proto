@@ -1,0 +1,70 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+import "player.proto";
+import "enum.proto";
+import "enum_battle.proto";
+
+// 匹配服到战斗服的消息
+message MatchMsgToBattle
+{
+    int64                    battleId            = 1;    // 房间ID
+    GameModel                model               = 2;    // 游戏模式
+    GameType                 gType               = 3;    // 玩法类型
+    int32                    modeId              = 4;    // 匹配类型
+    repeated PlayerGameInfo  players             = 5;    // 玩家信息
+    int64                    randSeed            = 6;    // 随机种子
+    string                   battleVersion       = 7;    // 战斗版本号
+    string                   clientVersion       = 8;    // 客户端版本号
+}
+
+// 房间服务器到战斗服的消息
+message RoomMsgToBattle
+{
+    int64                    battleId            = 1;    // 房间ID
+    GameModel                model               = 2;    // 游戏模式
+    GameType                 gType               = 3;    // 玩法类型
+    int32                    battleModeId        = 4;    // 匹配类型
+    repeated PlayerGameInfo  players             = 5;    // 玩家信息
+    int64                    randSeed            = 6;    // 随机种子
+    int32                    roomServerId        = 7;    // 房间服务器id
+    int64                    teamId              = 8;    // 队伍id
+    int64                    roomId              = 9;    // 房间服务器id
+    int32                    playerId            = 10;    // 玩家id
+    MatchActPro              actPro              = 11;   // 指令
+    uint32                   index               = 12;   // 消息index
+    int32                    TmId                = 13;   // 组队服务器id
+    string                   battleVersion       = 14;   // 战斗版本号
+    string                   clientVersion       = 15;   // 客户端版本号
+    int64                    session             = 16;   // 校验码
+    int32                    maxPlayerGameCnt    = 17;   // 最大玩家游戏次数
+    int64                    roomUUID            = 18;   // 房间的uuid
+    LadderDraftType          draftType           = 19;   // 排位赛征召类型
+    repeated int32           affix               = 20;   // 词缀
+}
+
+// 房间服到组队服消息
+message RoomMsgToTeam {
+    int64  teamId     = 1;    // 队伍Id
+    int64  roomId     = 2;    // 房间Id
+    int32  rsId       = 3;    // 房间服务器Id
+    uint32 cmd        = 4;    // cmd
+    uint32 act        = 5;    // act
+    uint32 error      = 6;    // 错误码
+    bytes  data       = 7;    // 序列化消息
+    int32  playerId   = 8;    // 执行操作的玩家
+}
+
+// 房间服到组队服消息
+message RoomMsgToLogic {
+    int32  lsId         = 1;    // 逻辑服务器id
+    int64  roomId       = 2;    // 房间id
+    int32  rsId         = 3;    // 房间服务器id
+    uint32 cmd          = 4;    // cmd
+    uint32 act          = 5;    // act
+    uint32 err          = 6;    // 错误码
+    bytes  data         = 7;    // 序列化消息
+    int32  playerId     = 8;    // 执行操作的玩家
+    uint32 index        = 9;    // index
+}

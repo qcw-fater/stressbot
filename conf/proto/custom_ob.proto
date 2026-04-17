@@ -1,0 +1,102 @@
+syntax = "proto3";  //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+// 导入枚举
+import "player.proto";
+import "enum_battle.proto";
+
+message ObBattlePlayer {
+    PlayerBase base = 1;  // 玩家基础数据
+    CampType camp   = 2;  // 阵营
+    bool IsRobot    = 3;  // 是否为机器人
+    int32 index     = 4;  // 房间内的唯一编号
+    int32 ladder    = 5;  // 段位
+}
+
+// 用作列表展示
+message ObBattleInfoBase {
+    int64 battleId                  = 1;  // 房间ID
+    GameModel model                 = 2;  // 玩法类型
+    GameType gType                  = 3;  // 玩法类型
+    int32 battleModeId              = 4;  // 匹配类型
+    repeated PlayerGameInfo players = 5;  // 玩家信息
+    int64 randSeed                  = 6;  // 随机种子
+    int64 beginTimestamp            = 7;  // 开始时间
+    int32 avgLadder                 = 8;  // 平均段位
+    int32 battleServerId            = 9;  // 战斗服务器地址
+    int32 avgStar                   = 10; // 平均星级
+    int32 matchFlag                 = 11; // 匹配标识 0普通 1新手 2温暖
+    int32 hazardOpsDifficultyLevel  = 12; // 搜打撤难度等级
+}
+
+message ObBattleInfo {
+    ObBattleInfoBase base = 1;  // 基础数据
+    int32 playerCount     = 2;  // 观看人数
+}
+
+// 用于客户端展示
+message ObPlayerInfoClient {
+    CampType camp      = 1;   // 阵营
+    int32 selectHeroId = 2;   // 选择的英雄
+    string name        = 3;   // 玩家姓名
+    int32 icon         = 4;   // 头像
+    int32 iFrame       = 5;   // 头像框
+    int32 showLevel    = 6;   // 玩家总等级
+    int32 ladderLevel  = 7;   // 5v5段位等级
+    int32 starNum      = 8;   // 5v5星星数量
+    int32 DragonScore  = 9;   // 龙珠积分
+    int32 playerId     = 10;  // 玩家ID
+}
+
+// 用于客户端展示
+message ObBattleBaseClient {
+    int64 battleId                      = 1;  // 房间ID
+    GameModel model                     = 2;  // 游戏模式
+    GameType gType                      = 3;  // 玩法类型
+    int32 battleModeId                  = 4;  // 匹配类型
+    repeated ObPlayerInfoClient players = 5;  // 玩家信息
+    int64 randSeed                      = 6;  // 随机种子
+    int64 beginTimestamp                = 7;  // 开始时间
+    int32 avgLadder                     = 8;  // 平均段位
+    int32 battleServerId                = 9;  // 战斗服务器地址
+    int32 avgStar                       = 10;  // 平均星级
+}
+// 用于客户端展示
+message ObBattleClient {
+    ObBattleBaseClient base = 1;  // 基础数据
+    int32 playerCount       = 2;  // 观看人数
+}
+
+message CommonRpcRequest {
+    int32 srcSid         = 1;  // 来源服务器Id
+    int32 targetSid      = 2;  // 目标服务器Id
+    int64 srcObjectId    = 3;  // 来源对象Id
+    int64 targetObjectId = 4;  // 目标对象Id
+    int32 cmd            = 5;
+    int32 act            = 6;
+    int32 index          = 7;
+    bytes data           = 8;
+    int32 errorId        = 9;
+}
+
+message BattleFrameData {
+    repeated bytes frames = 1;
+}
+
+message BulletInfo {
+    int64 timestamp   = 1;  // 发送时间
+    string content    = 2;  // 内容
+    string senderName = 3;  // 发送者名字
+    int32 senderId    = 4;  // 发送者Id
+    int64 battleId    = 5;  // 战斗Id
+}
+message BulletInfoMap {
+    map<int32, BulletInfo> mp = 1;  // key:senderId
+}
+
+message FriendBattleInfo {
+    ObBattleClient base = 1;
+    int32 friendId      = 2;
+}

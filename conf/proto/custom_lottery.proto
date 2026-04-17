@@ -1,0 +1,95 @@
+syntax             = "proto3"; //[proto2|proto3]
+
+option  go_package = ".;pb";
+package Game;
+
+// 限购道具
+message ScratchCardShowItem {
+    int32 ItemId      = 1; // 道具名字
+    int32 subLimitNum = 2; // 剩余获取的限购道具
+    int32 LimitNum    = 3; // 限购数量
+    bool  isLimit     = 4; // 是否限购
+}
+
+// 刮刮卡
+message ScratchCardInfo {
+    int32                        lotteryPoolId    = 1; // 卡池id
+    int32                        allDrawCnt       = 2; // 道具类型的刮卡总次数
+    int32                        dailySupLimitNum = 3; // 剩余道具类型的每日刮限刮的次数数
+    repeated ScratchCardShowItem showItemList     = 4; // 展示道具
+    int64                        startTime        = 5; // 开始时间
+    int64                        endTime          = 6; // 结束时间
+}
+
+// 刮卡db数据  //按类型分
+message ScratchCardDB {
+    int32               allDrawCnt           = 1; // 刮卡总次数
+    int32               dailySupLimitNum     = 2; // 每日刮限刮的次数
+    repeated int32      drawGuaranteeCntList = 3; // 抽卡保底次数列表  // 保底1 保底2 ....
+    repeated LotteryLog lotteryLogList       = 4; // 抽卡日志
+}
+
+message LotteryInfo {
+    int32          lotteryPoolId      = 1;  // 抽卡卡池id
+    int32          drawCnt            = 2;  // 抽卡次数
+    int64          SingleFreeDrawTime = 3;  // 下次单抽免费时间
+    int64          MoreFreeDrawTime   = 4;  // 下次多抽免费时间
+    int64          StartDate          = 5;  // 开始时间
+    int64          EndDate            = 6;  // 结束时间
+    repeated int32 OptionalHeroId     = 7;  // 自选英雄id
+    int32          OptionalGetCnt     = 8;  // 领取次数
+    int32          Special1           = 9;  // 保底1抽卡次数
+    int32          Special2           = 10; // 保底2抽卡次数
+    int64          SelectUpCD         = 11; // 自选upCd
+    int32          SelectUpId         = 12; // 自选upID
+    int32          dayCount           = 13; // 每日抽卡次数
+    int32          freeCnt            = 14; // 免费抽卡次数
+    int32          PoolGroup          = 15; // 卡池组id
+}
+
+// 抽卡db数据  //按池分的
+message LotteryDB {
+    int32 drawCnt                = 1; // 抽卡次数
+    int64 lastSingleFreeDrawTime = 2; // 上次单抽免费时间
+    int64 lastMoreFreeDrawTime   = 3; // 上次多抽免费时间
+    int32 getHeroCnt             = 4; // 领取英雄次数
+    int32 selectUpHero           = 5; // 选择的up角色
+    int64 selectUpHeroCD         = 6; // 选择的up角色冷却时长
+    int32 dayCount               = 7; // 今日抽卡次数
+    int32 freeCnt                = 8; // 免费抽卡次数
+}
+
+// 同组日志
+message LotteryGroupDB {
+    int32               PoolGroup            = 1; // 同组的id
+    repeated int32      drawGuaranteeCntList = 2; // 抽卡保底次数列表  // 保底1 保底2 ....
+    repeated LotteryLog lotteryLogList       = 3; // 抽卡日志
+}
+
+// 抽卡日志
+message LotteryLog {
+    int32 itemId = 1; // 抽卡的道具id
+    int32 num    = 2; // 抽卡数量
+    int64 time   = 3; // 抽卡时间
+}
+
+// 战队抽卡公告
+message GuildLotteryNotice {
+    string guildName  = 1; // 社团name
+    string playerName = 2; // 玩家name
+    int32  itemID     = 3; // 道具id
+    int32  itemCnt    = 4; // 道具数量
+}
+
+// 公会抽卡次数记录
+message DayGuildLotteryCntInfo {
+    int32                              cnt        = 1; // 抽卡次数
+    repeated GuildLotteryCntRewardInfo rewardList = 2; // 宝箱
+    int64                              endTime    = 3; // 结束时间戳
+}
+
+// 乐园祭抽卡奖励
+message GuildLotteryCntRewardInfo {
+    int32 id           = 1; // 奖励id
+    int32 rewardStatus = 2; // 奖励状态  0暂时无法领取  1 可以领取  2领取过了
+}

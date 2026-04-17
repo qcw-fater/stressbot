@@ -1,0 +1,157 @@
+syntax            = "proto3";
+option go_package = ".;pb";
+package Game;
+import "custom_trading.proto";
+import "enum.proto";
+// 拍卖上架
+message TradingAuctionPushShelfC2S {
+    int64 itemUid  = 1;  // 物品id
+    int32 bidPrice = 2;  // 竞拍价
+}
+// 拍卖上架
+message TradingAuctionPushShelfS2C {
+    AuctionItemClient auctionItem = 1;
+}
+
+// 查看拍卖页面数据
+message TradingAuctionGetC2S {
+    int32 reqPage               = 1;  // 请求页
+    TradingGoodsListParam param = 2;
+}
+
+// 查看拍卖页面数据
+message TradingAuctionGetS2C {
+    int32 reqPage                              = 1;  // 请求页
+    repeated AuctionItemClient auctionItemList = 2;  // 商品数据
+    TradingGoodsListParam param                = 3;
+    int32 totalPage                            = 4;  // 总页数
+}
+
+// 查看上架页面数据
+message TradingAuctionShelfC2S {
+}
+// 查看上架页面数据
+message TradingAuctionShelfS2C {
+    repeated AuctionItemClient auctionItemList = 1;  // 商品数据
+}
+
+// 拍卖下架
+message TradingAuctionOffShelfC2S {
+    int64 uuid = 1;  // 物品唯一id
+}
+// 拍卖下架
+message TradingAuctionOffShelfS2C {
+    int64 uuid        = 1;  // 物品唯一id
+    int64 downShelfCd = 2;  // 下架cd
+}
+
+// 关注物品
+message TradingFocusGoodsC2S {
+    int64 itemUid = 1;
+}
+// 关注物品
+message TradingFocusGoodsS2C {
+    TradingFocusGoods goods = 1;
+}
+// 清除当前关注中已失效的商品
+message TradingClearInvalidFocusGoodsC2S {
+}
+// 清除当前关注中已失效的商品
+message TradingClearInvalidFocusGoodsS2C {
+    repeated TradingFocusGoods list = 1;  // 商品信息
+}
+// 领取交易收入
+message TradingReceiveIncomeC2S {
+}
+// 领取交易收入
+message TradingReceiveIncomeS2C {
+}
+// 取消关注物品
+message TradingCancelFocusGoodsC2S {
+    int64 uuid = 1;  // 物品唯一id
+}
+// 取消关注物品
+message TradingCancelFocusGoodsS2C {
+    int64 uuid = 1;  // 物品唯一id
+}
+// 通知商品售出
+message TradingGoodsSaledS2C {
+    int64 uuid                = 1;  // 物品唯一id
+    map<int32, int32> incomes = 2;  // 所有收入
+}
+
+// 查看拍卖日志
+message TradingAuctionLogC2S {
+    tradeLogType type = 1;
+}
+// 查看拍卖日志
+message TradingAuctionLogS2C {
+    repeated TradingLog tradingLogList = 1;
+    tradeLogType type                  = 2;
+}
+
+// 竞拍
+message TradingAuctionBidC2S {
+    int64 uuid   = 1;  // 物品唯一id
+    int32 itemId = 2;
+    int32 num    = 3;
+    int32 price  = 4;
+}
+// 竞拍
+message TradingAuctionBidS2C {
+    int64 uuid                = 1;  // 物品唯一id
+    TradingGoodsStatus status = 2;  // 状态
+    int64 endTime             = 3;  // 状态结束时间
+    int32 itemId              = 4;
+    int32 num                 = 5;
+    int32 price               = 6;
+}
+
+// 查看关注物品
+message TradingAuctionFocusC2S {
+}
+// 查看关注物品
+message TradingAuctionFocusS2C {
+    repeated TradingFocusGoods list = 1;  // 商品信息
+}
+
+//// 查找拍卖数据
+// message TradingAuctionFindC2S {
+//     int32 reqPage = 1;  // 请求页  //后面如果有指定跳转页面
+//     string name   = 2;  // 物品名称
+// }
+//// 查找拍卖数据
+// message TradingAuctionFindS2C {
+//     int32 currPage                         = 1;  // 当前页
+//     int32 totalPage                        = 2;  // 当前页
+//     int32 totalCnt                         = 3;  // 总数
+//     repeated AuctionItemDB auctionItemList = 4;  // 商品数据
+// }
+
+//// 拍卖市场价格
+// message TradingAuctionMarketPriceC2S {
+//     int32 itemID = 1;  // 道具id
+// }
+//// 拍卖市场价格
+// message TradingAuctionMarketPriceS2C {
+//     repeated MarketReferencePrice priceList = 1;  // 市场价格
+// }
+//
+//// 请求更新当物品信息
+// message TradingAuctionReqItemC2S {
+//     int64 uuid = 1;  // 物品唯一id
+// }
+//// 请求更新当物品信息
+// message TradingAuctionReqItemS2C {
+//     AuctionItemDB auctionItem = 1;  // 商品信息
+// }
+//
+//// 推送更新当物品信息
+// message TradingAuctionPushItemS2C {
+//     AuctionItemDB auctionItem = 1;  // 商品信息
+// }
+//
+//// 推送更新上架上限
+// message TradingAuctionShelvesMaxS2C {
+//     int32 shelvesMaxCnt = 1;  // 最大上限
+// }

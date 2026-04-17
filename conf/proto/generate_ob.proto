@@ -1,0 +1,120 @@
+syntax            = "proto3";
+option go_package = ".;pb";
+package Game;
+
+import "custom_ob.proto";
+
+// 观战列表
+message ObBattleListC2S {
+    int32 battleModeId = 1;
+}
+// 观战列表
+message ObBattleListS2C {
+    repeated ObBattleClient list = 1;
+    int32 battleModeId           = 2;
+}
+
+// 请求观战房间地址
+message ObRoomAddressC2S {
+    int64 battleId     = 1;  // 房间ID
+    int32 battleModeId = 2;
+}
+// 请求观战房间地址
+message ObRoomAddressS2C {
+    int64 battleId     = 1;  // 房间ID
+    int32 battleModeId = 2;  // 战斗模式
+    int64 session      = 3;  // 进入观战服务器session
+    string address     = 4;  // 观战服务器地址
+    int32 sid          = 5;  // 观战服务器Id
+}
+
+////加载观战房间初始数据
+// message ObLoadRoomInitDataC2S
+//{
+//
+// }
+//
+////加载观战房间初始数据
+// message ObLoadRoomInitDataS2C
+//{
+//     int64                    battleId             = 1;   //房间ID
+//     GameType                 gType               = 2;    //玩法类型
+//     int32                    battleModeId         = 3;    //匹配类型
+//     repeated PlayerGameInfo  players             = 4;    //玩家信息
+//
+// }
+
+// 加载观战房间初始数据
+message ObEnterRoomC2S {
+    int32 playerId = 1;
+    int64 battleId = 2;  // 房间ID
+    int64 session  = 3;  // 进入观战服务器session
+}
+// 加载观战房间初始数据
+message ObEnterRoomS2C {
+    //    ObBattleInfoBase base = 1;
+}
+
+// 推送观战房间帧数据
+message ObPutRoomFrameDataS2C {
+    repeated bytes frames = 1;  // 帧数据
+}
+
+// 发送弹幕聊天
+message ObSendBulletChatC2S {
+    string msg      = 1;  // 聊天信息
+    int64 timestamp = 2;  // 时间戳
+}
+// 发送弹幕聊天
+message ObSendBulletChatS2C {
+    string msg      = 1;  // 聊天信息
+    int64 timestamp = 2;  // 时间戳
+}
+
+// 开始加载
+message ObBeginLoadingS2C {
+    int32 maxFrame        = 1;  // 最大帧索引
+    ObBattleInfoBase data = 2;
+}
+// 心跳
+message ObPlayerTimeC2S {
+}
+// 心跳  字节流 little-endian | int64 |
+message ObPlayerTimeS2C {
+}
+
+// 开始同步弹幕聊天
+message ObBeginSyncBulletChatC2S {
+    int64 beginTimestamp = 1;  // 弹幕同步起始时间
+}
+// 同步弹幕聊天（房间弹幕列表）
+message ObSyncBulletChatListS2C {
+    repeated BulletInfoMap list = 1;  // 房间弹幕列表
+    int64 beginTimestamp        = 2;  // 弹幕同步起始时间
+}
+// 请求好友战斗详细信息
+message ObFriendBattleListC2S {
+}
+// 请求好友战斗详细信息
+message ObFriendBattleListS2C {
+    repeated FriendBattleInfo infos = 1;
+}
+// 请求好友观战房间地址
+message ObFriendRoomAddressC2S {
+    int64 battleId = 1;  // 房间ID
+    int32 friendId = 2;  // 好友Id
+}
+// 请求好友观战房间地址
+message ObFriendRoomAddressS2C {
+    int64 battleId = 1;  // 房间ID
+    int32 friendId = 2;  // 好友Id
+    int64 session  = 3;  // 进入观战服务器session
+    string address = 4;  // 观战服务器地址
+    int32 sid      = 5;  // 观战服务器Id
+}
+// 请求好友观战房间地址
+message ObFriendRoomC2S {
+}
+// 请求好友观战房间地址
+message ObFriendRoomS2C {
+}

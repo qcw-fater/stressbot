@@ -1,0 +1,62 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+import "player.proto";
+import "enum.proto";
+import "enum_battle.proto";
+
+// db好友数据
+message FriendDbInfo {
+    int32 friendId          = 1;        // 好友id
+    int64 createTime        = 2;        // 创建时间
+    FriendAttr friendAttr   = 3;        // 好友属性 1.好友 2.不想同队 3.屏蔽
+}
+
+// 好友详细信息
+message FriendDetailInfo {
+    PlayerBase      playerBase      = 1;        // 玩家基础数据
+    TimeRecord      timeRecord      = 2;        // 时间记录
+    FriendDbInfo    friendDbInfo    = 3;        // 好友db数据
+    PlayerStatus    state           = 4;        // 玩家状态
+    GameModel       teamType        = 5;        // 组队状态下队伍模式
+}
+
+// 最近玩家的信息
+message RecentPlayer {
+    PlayerBase playerBase           = 1;           // 玩家基础数据
+    PlayerStatus    state           = 2;           // 玩家状态
+    bool isEnemy                    = 3;           // 是否敌方
+    int64 battleEndTime             = 4;           // 战斗结束时间
+}
+
+
+// 黑名单详细信息
+message BlackDetailInfo {
+    PlayerBase playerBase = 1;      // 玩家基础数据
+    FriendAttr friendAttr = 2;      // 好友属性 1.好友  2.不想同队  3.屏蔽
+    PlayerStatus    state = 3;      // 玩家状态
+    TimeRecord TimeRecord = 4;      // 时间记录
+}
+
+// 玩家好友专属信息
+message PlayerFriendInfo {
+    PlayerBase playerBase = 1;      // 玩家基础数据
+    PlayerStatus    state = 2;      // 玩家状态
+}
+
+//好友请求
+message FriendRequest
+{
+    int32 friendId  = 1; // 好友id（申请者）
+    int64 time      = 2; // 时间
+}
+
+message matchBlack {
+  int32 playerId = 1;// 玩家id
+  string name = 2; // 玩家名称
+  int64 time = 3; // 添加时间
+  bool isRobot = 4 ; // 是否为机器人
+  int64 battleId = 5; // 战斗id
+  int32 index = 6; // 战斗单位index
+}

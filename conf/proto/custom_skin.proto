@@ -1,0 +1,15 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+
+import "enum.proto";
+
+
+message HeroSkin
+{
+    int32       skinId    = 1;
+    int64       endTime   = 2;  //体验结束时间
+    SKinType    type      = 3;  //皮肤类型
+    int64       gainTime  = 4; // 获得时间
+}
+

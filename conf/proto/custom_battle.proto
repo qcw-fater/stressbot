@@ -1,0 +1,46 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+//导入枚举
+import "enum_battle.proto";
+import "enum.proto";
+
+//战斗服到房间服的消息
+message BattleMsgToRoom {
+    int64                       roomId          = 1;    // 房间ID
+    GameModel                    model          = 2;    // 玩法模式
+    GameType                    gType           = 3;    // 玩法类型
+    int32                       modeId          = 4;    // 匹配类型
+    BattleToRoomAct             actPro          = 5;    // 指令类型
+    bytes                       data            = 6;    // 消息内容
+    uint32                      index           = 7;    // index
+    uint32                      error           = 8;    // 错误码
+    int32                       playerId        = 9;    // 玩家id
+    uint32                      msgIndex        = 10;   // 消息index
+}
+
+//战斗结算通知管理器
+message BattleMsgToTeam {
+    int64                       teamId          = 1;    //队伍ID
+    int64                       roomId          = 2;    //房间ID
+    uint32                      act             = 3;    //act
+    uint32                      index           = 4;    //index
+    uint32                      error           = 5;    //错误码
+    bytes                       data            = 6;    //序列化消息
+}
+
+// 玩家战斗信息
+message PlayerBattleInfo {
+    GameModel   model               = 1; // 游戏模式
+    GameType    gType               = 2; // 玩法类型
+    int32       battleModeId        = 3; // 匹配类型
+    int64       roomId              = 4; // 房间ID
+    int64       teamId              = 5; // 队伍ID
+    int32       rsId                = 6; // 房间服Id
+    int32       tsId                = 7; // 队伍服Id
+    int32       isInterruptBattle   = 8; // 战斗是否中断（用于可以中途退出的战斗）
+    int64       battleEndTime       = 9; // 战斗结束时间
+    bytes       secretKey           = 10;// 秘钥
+}

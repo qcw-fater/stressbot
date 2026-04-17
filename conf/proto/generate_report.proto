@@ -1,0 +1,39 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+import "enum_battle.proto";
+import "custom_credit.proto";
+
+//举报
+message ReportReportC2S
+{
+  int64  battleId       = 1; // 战斗id
+  int32  playerId       = 2; // 玩家的Id
+  int32  tarPlayerIndex = 3; // 举报的玩家index
+  string desc           = 4; // 举报描述
+  repeated int32 reportReasonMap = 6; // 举报选项map  key：一级原因（举报的枚举 ReportReasonType） value：二级原因
+}
+
+//举报
+message ReportReportS2C
+{
+  int64  battleId       = 1; // 战斗id
+  int32  playerId       = 2; // 被举报玩家的Id
+  map<int32,AddCreditRecordNew> penalty = 6;// 处罚数据 如果是自动检测成功的 就会返回
+}
+
+//品德分推送
+message ReportMoralityScoreS2C
+{
+  int32 moralityScore = 1; // 品德分
+  map<int32,int32> addMap= 2; // 各类型增长map  key就是CreditEvent枚举
+}
+
+//有人违规通知
+message ReportCreditNotifyS2C
+{
+  int64 battleId = 1; // 战斗id
+  repeated  creditNotifyData data = 2; // 本场战斗违规玩家
+  int64 battleEndTime = 3; // 战斗结束时间戳
+  GameModel model = 4; // 比赛类型
+}

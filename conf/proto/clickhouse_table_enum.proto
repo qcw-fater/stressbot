@@ -1,0 +1,94 @@
+syntax             = "proto3"; //[proto2|proto3]
+
+option  go_package = ".;pb";
+package Game;
+
+// 队伍操作类型
+enum TeamOperateStatus {
+    TEAM_INVALID        = 0;
+    TEAM_PREPARE        = 1; // 准备
+    TEAM_KICK_OUT       = 2; // 踢人
+    TEAM_CHANGE_HERO    = 3; // 更换英雄
+    TEAM_CHANGE_TYPE    = 4; // 切换游戏玩法
+    TEAM_LOGIN          = 5; // 登录
+    TEAM_LOGOUT         = 6; // 登出
+    TEAM_RECONNECT      = 7; // 重连
+    TEAM_BACK_TEAM      = 8; // 返回队伍
+    TEAM_CONVENE        = 9; // 招募
+    TEAM_Prepare_Hint   = 10; // 准备提示
+}
+
+// 自定义房间操作类型
+enum CustomRoomOperateStatus {
+    ROOM_INVALID                = 0;
+    ROOM_REQUEST_TRANSPOSITION  = 1; // 请求交换位置
+    ROOM_AGREE_TRANSPOSITION    = 2; // 同意交换位置
+    ROOM_REFUSE_TRANSPOSITION   = 3; // 拒绝交换位置
+    ROOM_ADD_ROBOT              = 4; // 添加机器人
+    ROOM_KICK_OUT               = 5; // 踢人
+    ROOM_QUIT                   = 6; // 退出
+    ROOM_JOIN                   = 7; // 加入
+    ROOM_START                  = 8; // 开始游戏
+    ROOM_BACK                   = 9; // 返回自定义房间
+    ROOM_CHANGE_HERO            = 10; // 更换英雄
+    ROOM_CHANGE_GAME_MODE       = 11; // 更换游戏模式Id
+    ROOM_CHANGE_READY_STATE     = 12; // 改变准备状态
+    ROOM_SELECT_AFFIX           = 13; // 选择词缀
+    ROOM_PREPARE_HINT           = 14; // 准备提示
+    ROOM_SELECT_ROBOT_HERO      = 15; // 选择机器人英雄
+    ROOM_ROLL                   = 16; // 房间打乱
+    ROOM_SWITCH_ROOM_MODE       = 17; // 切换房间模式
+    ROOM_BACK_END_GRAY          = 18; // 返回自定义房间,结束置灰
+}
+
+// 帮抢操作类型
+enum SelectHelpStatus {
+    SELECT_INVALID        = 0;
+    SELECT_HELP_REQUEST   = 1; // 请求帮抢
+    SELECT_HELP_GRAB      = 2; // 帮抢
+    SELECT_HELP_CANCEL    = 3; // 取消帮抢
+}
+
+// 逻辑服玩家main操作类型
+enum PlayerLogicMainStatus {
+    PLAYER_INVALID                            = 0;
+    PLAYER_LOGIN_GET_DATA                     = 1;  // 推送玩家数据
+    PLAYER_BATTLE_SETTING                     = 2;  // 获取战斗面板属性
+    PLAYER_SET_BATTLE_SETTING                 = 3;  // 设置战斗面板属性
+    PLAYER_ENTER_TRAINING                     = 4;  // 进入训练模式
+    PLAYER_EXIT_TRAINING                      = 5;  // 退出训练模式
+    PLAYER_CHANGE_ICON                        = 6;  // 修改头像
+    PLAYER_CHANGE_IFRAME                      = 7;  // 修改头像框
+    PLAYER_CHANGE_MAIN_HERO                   = 8;  // 修改主界面展示英雄
+    PLAYER_CHANGE_BACKGROUND                  = 9;  // 修改主界面背景图
+    PLAYER_GET_STATISTICS                     = 10; // 请求玩家统计数据
+    PLAYER_GET_STANDINGS                      = 11; // 请求玩家战绩
+    PLAYER_FINISH_NEWBIE_GUILD_STEP           = 12; // 完成新手引导步骤
+    PLAYER_FINISH_NEWBIE_GUILD_TASK           = 13; // 完成新手引导任务
+    PLAYER_DETAIL_INFO                        = 14; // 查看玩家个人主页
+    PLAYER_GOOD_AT_HERO                       = 15; // 玩家设置擅长英雄
+    PLAYER_SET_PLAYER_PRIVACY                 = 16; // 玩家设置隐私权限
+    PLAYER_SET_SIGN                           = 17; // 设置签名
+    PLAYER_SET_LAYOUT                         = 18; // 设置布局数据
+    PLAYER_GET_LAYOUT                         = 19; // 获取布局方案
+    PLAYER_HERO_USE_LAYOUT                    = 20; // 英雄使用方案
+    PLAYER_SET_LAYOUT_NAME                    = 21; // 修改方案名称
+    PLAYER_ENTER_RECORDING                    = 22; // 设置录制状态
+    PLAYER_EXIT_RECORDING                     = 23; // 退出录制状态
+    PLAYER_GAME_OVER                          = 24; // 战斗结束
+    PLAYER_GET_INDIVIDUATION                  = 25; // 获取玩家个性化数据
+    PLAYER_GET_GAME_MODE_LIST                 = 26; // 获取游戏类型列表
+    PLAYER_CHANGE_SHOW_HERO                   = 27; // 修改展示英雄
+    PLAYER_CHANGE_EXPRESS_SHOW_HERO           = 28; // 修改表情英雄展示英雄
+    PLAYER_CHANGE_TITLE                       = 29; // 修改称号
+    PLAYER_GET_CREDIT_RECORD                  = 30; // 查看信誉分记录
+    PLAYER_CHANGE_ACTION_HERO                 = 31; // 修改英雄动作管理指定英雄
+    PLAYER_CHANGE_BATTLE_NOTICE_BOARD_SKIN    = 32; // 修改战斗播放板皮肤
+    PLAYER_ATTENTION_HERO                     = 33; // 关注英雄
+    PLAYER_SET_IN_BATTLE_TITLE                = 34; // 设置局内称号
+    PLAYER_SET_SHOW_JOBS                      = 35; // 设置展示职业
+    PLAYER_SWAP_TITLE                         = 36; // 交换称号位置
+    PLAYER_FINISH_STAGE_GUIDE                 = 37; // 完成细分教学引导
+    PLAYER_GET_STAGE_GUIDE_REWARD             = 38; // 获取细分教学引导奖励
+    PLAYER_SHARE_GET_REWARD                   = 39; // 分享领奖
+}

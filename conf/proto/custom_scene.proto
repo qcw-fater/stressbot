@@ -1,0 +1,172 @@
+syntax = "proto3";  //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+import "enum_scene.proto";
+import "NotHotfix.proto";
+
+message Position2 {
+    float x = 1;
+    float z = 2;
+}
+
+// 位置(标量)
+message Position3 {
+    float x = 1;
+    float y = 2;
+    float z = 3;
+}
+
+// 位置(矢量)
+message Location {
+    Position3 position  = 1;  // 位置
+    Position3 direction = 2;  // 方向
+}
+
+// 逻辑服务器->redis<-场景服务器
+message LogicPushScene {
+    int32 playerId            = 1;  // 玩家信息
+    int32 sceneCfgId          = 2;  // 场景配置Id
+    string session            = 3;  // session校验
+    int32 ssId                = 4;  // 场景服务器Id
+    PlayerSceneSub sub        = 5;  // 订阅信息
+    PlayerShowInfo show       = 6;  // 显示信息
+    int32 lId                 = 7;  // logic服务器Id
+    int32 isInteractiveActive = 8;  // 动作设置
+    int64 teamId              = 9;  // 队伍Id
+}
+
+// 场景订阅信息
+message PlayerSceneSub {
+    map<int32, int32> friendMap = 1;  // 好友列表
+}
+
+// 玩家在场景中需要显示的数据
+message PlayerShowInfo {
+    int32 level                                = 1;  // 玩家等级
+    string name                                = 2;  // 玩家名字
+    int32 unitId                               = 3;  // unit 配置表Id
+    map<int32, AppearanceComponent> appearance = 4;  // 装扮 key:槽位 value:部件id
+    PlayerSex sex                              = 5;  // 性别
+    int32 effectsId                            = 6;  // 主城特效Id
+    int32 titleId                              = 7;  // 称号Id
+    map<int32, AppearanceComponent>    firstPlayerAppearance = 8;//玩家第一次穿着身上
+}
+
+// 数据库存档结构
+message PlayerSceneDB {
+    int32 sceneCfgId  = 1;  // 场景配置Id
+    Location location = 2;  // 位置+朝向
+    int32 ssid        = 3;  // 场景服Id
+    int32 sceneGid    = 4;  // 场景gid
+}
+
+// 同步给其他玩家的信息
+message Character {
+    int32 playerId          = 1;  // 玩家信息
+    PlayerShowInfo showInfo = 2;  // 玩家显示基础数据
+    MoveSync moveInfo       = 3;  // 移动信息
+    ActionSync actionInfo   = 4;  // 动作同步信息
+}
+
+// 移动信息
+message MoveSync {
+    int64 timestamp    = 1;  // 时间戳 毫秒
+    Location location  = 2;  // 位置+方向
+    MoverStatus status = 3;  // 空闲/移动中
+}
+
+// 动作同步信息
+message ActionSync {
+    int32 actionId            = 1;  // 动作id
+    ActionStatus status       = 2;  // 动作状态
+    int64 nextTimeSec         = 3;  // 时间戳 秒 (下一次使用时间)
+    int32 responsePlayerId    = 4;  // 响应id
+    int32 initiatePlayerId    = 5;  // 是否是互动发起者
+    int32 isInteractiveActive = 6;  // 0互动 1不互动
+}
+
+enum ScenePointType {
+    WPT_Normal    = 0;
+    WPT_Pad1      = 1;  // 填充占位
+    WPT_Pad2      = 2;  // 填充占位
+    WPT_Pad3      = 3;  // 填充占位
+    WPT_Pad4      = 4;  // 填充占位
+    WPT_Pad5      = 5;  // 填充占位
+    WPT_Pad6      = 6;  // 填充占位
+    WPT_Pad7      = 7;  // 填充占位
+    WPT_BornPoint = 8;  // 出生点
+}
+
+enum TriggerType {
+    WPTT_Normal    = 0;
+    WPTT_BornPoint = 1;   // 出生点
+    WPTT_Trigger   = 2;   // 触发器
+    WPTT_Pad1      = 3;   // 填充占位
+    WPTT_Pad2      = 4;   // 填充占位
+    WPTT_Pad3      = 5;   // 填充占位
+    WPTT_Pad4      = 6;   // 填充占位
+    WPTT_Pad5      = 7;   // 填充占位
+    WPTT_Pad6      = 8;   // 填充占位
+    WPTT_Pad7      = 9;   // 填充占位
+    WPTT_Pad8      = 10;  // 填充占位
+    WPTT_Pad9      = 11;  // 填充占位
+    WPTT_Pad10     = 12;  // 填充占位
+    WPTT_Pad11     = 13;  // 填充占位
+    WPTT_Pad12     = 14;  // 填充占位
+    WPTT_Pad13     = 15;  // 填充占位
+    WPTT_Transport = 16;  // 传送
+}
+
+message ScenePointData {
+    string ID                         = 1;
+    TriggerType WorldTriggerType      = 2;
+    repeated Position3 TriggerPosList = 3;
+    repeated float TriggerAngleList   = 4;
+    bool IsPermanent                  = 5;
+    int32 MissionID                   = 6;  // 关联定时刷新任务Id
+}
+
+// 操作同步
+message OperationSyncData {
+    int32 playerId        = 1;  // 玩家Id
+    MoveSync data         = 2;
+    bytes moveAct         = 3;  // 二进制操作指令
+    ActionSync actionData = 4;  // 动作协议
+}
+
+message WorldSceneObject {
+    string Id         = 1;  // object Id
+    int64 refreshTime = 2;  // 刷新时间
+    int64 endTime     = 3;  // 结束时间
+    Location pos      = 4;  // 位置信息
+    int32 version     = 5;  // 数据版本
+    int32 eventPosId  = 6;  // 事件点Id
+}
+
+// 场景动态刷新任务
+message RefreshTask {
+    int32 Id              = 1;  // 任务Id
+    int64 beginTime       = 2;  // 开始时间
+    int64 endTime         = 3;  // 结束时间
+    int64 nextRefreshTime = 4;  // 下次刷新时间
+    int32 version         = 5;  // 数据版本
+    int32 serverId        = 6;  // 刷新的服务器Id
+}
+
+// 场景服到逻辑服消息
+message SceneMsgToLogicMgr {
+    int32 playerId = 1;  // 玩家ID
+    int32 sceneId  = 2;  // 所在的场景服Id
+    uint32 cmd     = 3;  // cmd
+    uint32 act     = 4;  // act
+    uint32 index   = 5;  // index
+    uint32 err     = 6;  // 错误码
+    bytes data     = 7;  // 消息数据
+}
+message NotifySceneChangeTeamId {
+    int32 playerId    = 1;  // 玩家Id
+    int64 teamId      = 2;  // 队伍Id
+    int32 sceneConfId = 3;  // 场景配置Id
+}

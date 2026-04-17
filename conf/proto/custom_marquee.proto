@@ -1,0 +1,23 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+message Marquee
+{
+    int64 uuid = 1;  //跑马灯唯一Id
+    string typeId = 2; //频道 1.基础跑马灯 2.晋级跑马灯 3.聊天
+    int32 flag = 3; //标签    1.系统 2.维护
+    int32 status = 4; //状态  1.发布中 2.待发布 3.已发布 4.撤销
+    string content = 5;  //内容
+    int32 confId = 6;  //跑马灯关联配置表Id
+    int32 priority = 7;  //优先级
+    int64 pid = 8;  //玩家触发的跑马灯,玩家Id
+    int32 times = 9;  //播放次数(服务器使用)
+    int32 interval = 10;  //播放间隔
+    int64 start = 11;  //首次播放时间
+    string serverList = 12; //是指定区服id
+    string channelList = 13; //是指定渠道
+    string multiContent = 14;   // 多语言内容
+}
+

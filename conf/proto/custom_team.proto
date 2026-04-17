@@ -1,0 +1,131 @@
+syntax = "proto3"; //[proto2|proto3]
+option go_package = ".;pb";
+
+package Game;
+
+import "enum.proto";
+import "enum_battle.proto";
+import "player.proto";
+import "match.proto";
+import "common.proto";
+
+
+//目标队伍信息
+message TargetTeamInfo {
+    int64                       teamId         = 1;     //队伍Id
+    GameModel 					model          = 2;     //游戏模式
+    GameType 					gType          = 3;     //游戏类型
+    int32     					modeId         = 4;     //匹配类型
+    InviteTeamPro               operation      = 5;     //操作指令
+    int32                       inviter        = 6;     //邀请者
+    int32                       tsId           = 7;     //队伍服务器Id
+    int64                       roomId         = 8;     //房间Id
+    int32                       rsId           = 9;     //房间服务器Id
+    ActivityBattleRecruitData activityBattleData = 13; // 活动赛数据
+}
+
+//队伍成员
+message TeamMemberData {
+    int32                       index           = 1;     // 位置
+    bool                        isPrepare       = 2;     // 是否准备
+    int64                       waitJoinTime    = 3;     // 等待加入的时间
+    PlayerGameInfo              gameInfo        = 4;     // 玩家数据
+    int32                       playerId        = 5;     // 玩家id
+    string                      battleVersion   = 6;     // 战斗版本号
+    string                      clientVersion   = 7;     // 客户端版本号
+    bool                        offline         = 8;     // 是否离线
+    repeated  BattleDelay       battleAreaList  = 9;     // 玩家战斗区域延迟信息
+}
+
+message teamRoomInfo {
+    int64                       id                      = 1;           //队伍ID
+    int32                       headerId                = 2;           //队长ID
+    GameModel 					model                   = 3;           //游戏模式
+    GameType                    gType                   = 4;           //游戏类型
+    int32                       modeId                  = 5;           //匹配类型
+    repeated TeamMemberData     Members                 = 6;           //队伍成员信息
+    TeamStatus                  status                  = 7;           // 队伍状态
+    bool                        fill_teammate           = 8;           // 搜打撤：是否开启补齐队友（仅 GM_HAZARD_OPS 模式使用）
+}
+
+//队伍管理器到逻辑服消息
+message TeamMgrToLogic {
+    int32                       playerId    = 1; //玩家Id
+    uint32                      cmd         = 2; //cmd
+    uint32                      act         = 3; //act
+    uint32                      index       = 4; //index
+    uint32                      err         = 5; //错误码
+    bytes                       data        = 6; //序列化消息
+    int32                       tsId        = 7; //队伍管理器Id
+    int64                       roomId      = 8; //房间Id
+    int32                       rsId        = 9; //房间服务器Id
+}
+
+//队伍管理器到匹配服的消息
+message TeamMsgToMatch {
+    GameModel 					model          = 1;     //游戏模式
+    GameType 					gType          = 2;     //游戏类型
+    int32     					modeId         = 3;     //匹配类型
+    int64                       teamId         = 4;     //队伍ID
+    int32                       tsId           = 5;     //队伍管理器ID
+    MatchActPro                 act            = 6;     //操作指令
+    string                      version        = 7;     //版本号
+    uint32                      msgIndex       = 8;     //客户端消息标记
+    repeated playerMatchInfo    members        = 9;     //队伍成员
+    int32                       playerId       = 10;    //执行操作的玩家
+    int32                       playerNums     = 11;    //队伍数量
+    repeated  string            battleAreaList = 12;    //战斗区域列表
+    int64                       matchUUID      = 13;    // 当前匹配唯一标识
+}
+
+//队伍管理器到匹配服的消息
+message TeamMsgToRoom {
+    int32                       playerId            = 1;     // 执行操作的玩家
+    int64                       roomId              = 2;     // 房间Id
+    int64                       teamId              = 3;     // 队伍Id
+    int32                       tsId                = 4;     // 队伍服务器Id
+    TeamToRoomAct               act                 = 5;     // 操作指令
+    string                      version             = 6;     // 版本号
+    int32                       lsId                = 7;     // 逻辑服务器id
+    bytes                       data                = 8;     // 序列化消息
+    repeated int32              offlinePlayerList   = 9;     // 玩家列表
+    MatchTeamData               matchData           = 10;    // 补偿局和温暖局数据
+}
+
+//存入池子的队伍数据
+message TeamData {
+    int64  teamId = 1;  //队伍id
+    double rankValue = 2;//队伍rank分
+    int64  matchTime = 3; //开始匹配时间
+    int32  bigLadderLevel = 5; //队伍大的段位
+    string version = 6;//版本号
+    repeated playerMatchInfo mList = 7;//玩家数据
+    bool   isRobot = 8 ; //是否是机器人
+    int32 gameBattleModeId = 10; //modeId
+    repeated BattleDelay TeamBattleDelayList= 11;//队伍战斗区域延迟
+    bool fill_teammate = 12; // 搜打撤：是否开启补齐队友（仅 GM_HAZARD_OPS 模式使用）
+}
+
+// 队伍招募事件
+enum RecruitEventType {
+	EventTypeRecruit 	= 0; // 发起招募
+	EventTypeFull 		= 1; // 人数已满
+	EventTypeDissolve 	= 2; // 队伍解散
+	EventTypeMatch    	= 3; // 开始匹配
+}
+
+// 队伍招募数据
+message TeamRecruitData {
+	int64     			teamId       	= 1; // 队伍id
+	GameModel 			model        	= 2; // 游戏模式
+	GameType  			gType        	= 3; // 游戏类型
+	int32     			minRankLevel 	= 4; // 段位下限
+	int32     			maxRankLevel 	= 5; // 段位上限
+	int32     			limitCupNum  	= 6; // 限制杯数(0为不限）
+	RecruitEventType 	eventType 		= 7; // 队伍招募事件
+	int32				tsId			= 8; // 队伍管理器Id
+  ActivityBattleRecruitData activityBattleData = 13; // 活动赛数据
+}
+
+
+

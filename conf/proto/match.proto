@@ -1,0 +1,48 @@
+syntax             = "proto3"; //[proto2|proto3]
+
+option  go_package = ".;pb";
+package Game;
+import "player.proto";
+import "enum.proto";
+
+// 玩家匹配数据
+message MatchPlayerInfo {
+    int32                playerId        = 1; // 玩家id
+    bool                 isRobot         = 2; // 是否机器人
+    PlayerGameInfo       gameInfo        = 3; // 玩家数据
+    repeated BattleDelay battleDelayList = 4; // 战斗区域延迟
+}
+
+// 战斗区域延迟
+message MatchBattleDelay {
+    string battleArea = 1; // 战斗区域
+    int32  delayTime  = 2; // 平均延迟时间(毫秒)
+}
+
+// 存入池子的队伍数据
+message MatchTeamData {
+    int64                     teamId               = 1;  // 队伍id
+    int64                     startMatchTime       = 2;  // 开始匹配时间
+    string                    battleVersion        = 3;  // 战斗版本号
+    string                    clientVersion        = 4;  // 客户端版本号
+    int32                     modeId               = 5;  // 游戏模式Id
+    repeated MatchPlayerInfo  teamMembers          = 6;  // 玩家数据
+    bool                      isRobot              = 7;  // 是否是机器人
+    repeated MatchBattleDelay teamBattleDelayList  = 8;  // 队伍战斗区域延迟
+    bool                      isMatchSucceeded     = 9;  // 是否匹配成功
+    int32                     matchRuleId          = 10; // 匹配规则id
+    int64                     addRobotMatchTime    = 11; // 匹配填充机器人最小时间
+    int64                     addRobotMatchTimeMax = 12; // 匹配填充机器人最大时间
+    int64                     matchUuid            = 13; // 匹配Uuid
+    int32                     tsId                 = 14; // 队伍服务器ID
+    LadderDraftType           draftType            = 15; // 是否征召模式
+    MatchBattleStats          teamBattleStats      = 16; // 队伍的战斗统计数据
+    int32                     cupAnchor            = 17; // 杯数锚点Id
+    int32                     ladderAnchor         = 18; // 段位锚点Id
+    int32                     matchFlag            = 19; // 匹配标志 0正常 1补偿局 2温暖局
+    map<int32, bool>          black                = 20; // 队伍内的黑名单列表
+    repeated int32            heroes               = 21; // 队伍内的英雄列表
+    int32                     levelAnchor          = 22; // 娱乐赛专精平均等级锚点Id
+    int32                     scoreAnchor          = 23; // 娱乐赛专精平均积分
+    repeated int32            excludeModeIds       = 24; // 队伍内所有玩家上一把打过的地图ID列表
+}

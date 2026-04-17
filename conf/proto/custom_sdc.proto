@@ -1,0 +1,272 @@
+syntax = "proto3";  //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+// ==================== 枚举定义 ====================
+
+// 收益评级
+enum SDCRating {
+    SDC_RATING_INVALID = 0; // 无效
+    SDC_RATING_D       = 1; // D级
+    SDC_RATING_C       = 2; // C级
+    SDC_RATING_B       = 3; // B级
+    SDC_RATING_A       = 4; // A级
+    SDC_RATING_S       = 5; // S级
+}
+
+// 装配槽位类型
+enum SDCSlotType {
+    SDC_SLOT_TYPE_UNKNOWN            = 0; // 未知
+    SDC_SLOT_TYPE_ARMOR              = 1; // 护甲槽
+    SDC_SLOT_TYPE_SKILL              = 2; // 技能槽
+    SDC_SLOT_TYPE_BACKPACK           = 3; // 背包槽
+    SDC_SLOT_TYPE_NORMAL_AMPLIFIER   = 4; // 普攻增幅器槽
+    SDC_SLOT_TYPE_SKILL_AMPLIFIER    = 5; // 技能增幅器槽
+    SDC_SLOT_TYPE_ULTIMATE_AMPLIFIER = 6; // 大招增幅器槽
+    SDC_SLOT_TYPE_CHIP1              = 7; // 芯片槽1
+    SDC_SLOT_TYPE_CHIP2              = 8; // 芯片槽2
+    SDC_SLOT_TYPE_CHIP3              = 9; // 芯片槽3
+}
+
+// 背包类型
+enum SDCPackType {
+    SDC_PACK_TYPE_UNKNOWN    = 0; // 未知
+    SDC_PACK_TYPE_AMPLIFIER  = 1; // 增幅器背包
+    SDC_PACK_TYPE_MEDICINE   = 2; // 药品背包
+    SDC_PACK_TYPE_SAFE_BOX   = 3; // 安全箱
+    SDC_PACK_TYPE_KEY_CHAIN  = 4; // 钥匙链
+    SDC_PACK_TYPE_COLLECTION = 5; // 藏品背包
+}
+
+// 道具子类型
+enum SDCItemType {
+    SDC_ITEM_TYPE_UNKNOWN    = 0; // 未知
+    SDC_ITEM_TYPE_WEAPON     = 1; // 武器
+    SDC_ITEM_TYPE_ARMOR      = 2; // 护甲
+    SDC_ITEM_TYPE_CHIP       = 3; // 芯片
+    SDC_ITEM_TYPE_AMPLIFIER  = 4; // 增幅器
+    SDC_ITEM_TYPE_COLLECTION = 5; // 藏品
+    SDC_ITEM_TYPE_MEDICINE   = 6; // 药品
+    SDC_ITEM_TYPE_MATERIAL   = 7; // 材料
+    SDC_ITEM_TYPE_KEY        = 8; // 钥匙
+}
+
+
+// ==================== 基础数据结构 ====================
+
+// 搜打撤道具扩展信息（附加在ItemInfo上使用）
+// 护甲说明：护甲耐久度只能通过使用护甲药（sdcType=6, sdcSubType=2的药品）进行修复，自然不回复
+message SDCItemExtInfo {
+    SDCItemType sdcType  = 1; // 搜打撤道具分类（对应SDCItemType枚举）
+    int32 sdcSubType     = 2; // 搜打撤子类型
+    int32 durability     = 3; // 耐久度/使用次数（初始值来自SDC_Item配置，局内消耗后减少；归零则道具消失）
+    int32 maxDurability  = 4; // 最大耐久度/使用次数上限
+    int32 capacity       = 5; // 背包容量(仅背包类型)
+    int32 value          = 6; // 价值
+}
+
+// 装配槽位信息
+message SDCEquipSlot {
+    SDCSlotType slotType = 1; // 槽位类型
+    int64 itemGuid       = 2; // 装配的道具GUID
+    int32 itemId         = 3; // 装配的道具配置ID
+    SDCItemExtInfo ext   = 4; // 道具扩展信息
+}
+
+// 仓库道具信息
+message SDCWarehouseItem {
+    int64 guid          = 1; // 道具GUID
+    int32 itemId        = 2; // 道具配置ID
+    int32 number        = 3; // 数量
+    SDCItemExtInfo ext  = 4; // 搜打撤扩展信息
+}
+
+// 背包格子信息
+message SDCPackSlot {
+    SDCPackType packType          = 1; // 背包类型
+    int32 maxSlots              = 2; // 最大格子数
+    repeated SDCWarehouseItem items = 3; // 背包内道具列表（含完整道具信息）
+    int32 totalValue            = 4; // 背包内道具总价值
+}
+
+// SDC道具对英雄天赋/觉醒的加成数据（仅记录SDC道具带来的增量，不含英雄基础值）
+// 仅对当前英雄未激活的槽位/节点生效，服务端在装配/卸下/切换英雄时重新计算
+// 天赋限制：SDC道具只激活大天赋（TalentType=2，EquipTalent索引1/3/5），不激活小天赋
+// 客户端展示：EquipTalent[i]!=0则正常展示（玩家自身）；为0但extraEquipTalents[i]!=0则高亮展示SDC加成
+message SDCHeroTalentAwakeInfo {
+    int32 heroId                     = 1; // 英雄ID（切换英雄时需重新计算）
+    repeated int32 extraAwakeIds     = 2; // SDC额外激活的觉醒节点configId列表
+                                           // 服务端从ActivateAwakeId沿NextId链推算N步（N=所有装配道具觉醒加成之和）
+    repeated int32 extraEquipTalents = 3; // SDC额外激活的大天赋状态（长度固定=6，与EquipTalent同格式）
+                                           // 仅索引1/3/5可非零，值=talentConf[i].TalentEffectList[0]
+                                           // 0=该槽无SDC加成（玩家已自行激活 或 SDC道具未覆盖该槽）
+}
+
+// ==================== Redis存储用结构 ====================
+
+// 装配槽位列表（用于Redis存储）
+message SDCEquipSlotList {
+    repeated SDCEquipSlot slots = 1; // 槽位列表
+}
+
+// 背包槽位列表（用于Redis存储）
+message SDCPackSlotList {
+    repeated SDCPackSlot packs = 1; // 背包列表
+}
+
+// ==================== 业务数据结构 ====================
+
+// 战备数据
+message SDCPrepareData {
+    repeated SDCEquipSlot equipSlots      = 1; // 装配槽位列表
+    repeated SDCPackSlot packSlots        = 2; // 背包槽位列表（含完整道具信息）
+    int32 totalValue                      = 3; // 装配区域总价值
+    int32 heroId                          = 4; // 当前选择英雄ID
+    SDCHeroTalentAwakeInfo heroInfo       = 5; // SDC道具天赋/觉醒加成（仅增量，基础值由客户端从英雄系统获取）
+    bool fillTeammate                     = 6; // 是否开启补齐队友（持久化选项，界面回显用）
+    int32 skinId                          = 7; // 当前选择皮肤ID
+    int32 modeId                          = 8; // 默认地图ID（来自SDCParameter ID=13）
+}
+
+// 仓库数据
+message SDCWarehouseData {
+    repeated SDCWarehouseItem items = 1; // 仓库道具列表
+    int32 maxSlots                  = 2; // 仓库最大格子数
+    int32 usedSlots                 = 3; // 已使用格子数
+    int32 totalValue                = 4; // 仓库总价值
+}
+
+// ==================== 商店数据 ====================
+
+// 商店商品信息
+message SDCGoodsInfo {
+    int32 id            = 1;  // 商品ID
+    int32 itemId        = 2;  // 道具ID
+    int32 num           = 3;  // 单份数量
+    int32 costMoneyType = 4;  // 货币类型
+    int32 price         = 5;  // 原始价格
+    int32 discountPrice = 6;  // 折扣价格
+    int32 discount      = 7;  // 折扣度
+    int32 limitType     = 8;  // 限购类型
+    int32 limitNum      = 9;  // 限购数量
+    int32 boughtNum     = 10; // 已购买数量
+}
+
+// 商店数据
+message SDCShopData {
+    int32 shopId                = 1; // 商店ID
+    repeated SDCGoodsInfo goods = 2; // 商品列表
+    int32 refreshTime           = 3; // 刷新时间
+}
+
+// ==================== 赛季数据 ====================
+
+// 赛季数据
+message SDCSeasonData {
+    int32 seasonId               = 1;  // 赛季ID
+    int32 tier                   = 2;  // 段位
+    int32 tierStar               = 3;  // 段位星数
+    int32 seasonCoin             = 4;  // 赛季币
+    int32 totalGames             = 5;  // 总场次
+    int32 winGames               = 6;  // 胜场
+    int32 totalKills             = 7;  // 总击杀玩家数（含人机玩家）
+    int32 totalLootValue         = 8;  // 赛季累计收益总价值
+    repeated int32 rewardedTiers = 9;  // 已领取奖励的段位列表
+    int32 totalMonsterKills      = 10; // 总击杀怪物数
+}
+
+// ==================== 任务数据 ====================
+
+// 任务信息
+message SDCTaskInfo {
+    int32 taskId   = 1; // 任务ID
+    int32 progress = 2; // 当前进度
+    int32 target   = 3; // 目标进度
+    int32 status   = 4; // 状态 (0-进行中 1-已完成 2-已领取)
+}
+
+// 任务数据
+message SDCTaskData {
+    repeated SDCTaskInfo tasks = 1; // 任务列表
+    int32 refreshTime          = 2; // 刷新时间
+}
+
+// ==================== 成长数据 ====================
+
+// 成长数据
+message SDCGrowthData {
+    int32 warehouseLevel      = 1; // 仓库等级
+    int32 warehouseSlots      = 2; // 仓库格子数
+    int32 amplifierPackLevel  = 3; // 增幅器背包等级
+    int32 amplifierPackSlots  = 4; // 增幅器背包格子数
+    int32 medicinePackLevel   = 5; // 药品背包等级
+    int32 medicinePackSlots   = 6; // 药品背包格子数
+    int32 safeBoxSlots        = 7; // 安全箱格子数
+}
+
+// ==================== 藏品数据 ====================
+
+// 藏品信息
+message SDCCollectionInfo {
+    int64 guid       = 1; // 藏品唯一ID
+    int32 id         = 2; // 藏品配置ID
+    int32 value      = 3; // 价值
+    int64 obtainTime = 4; // 获得时间
+    int32 source     = 5; // 来源 (1-局内带出 2-商店购买 3-其他)
+}
+
+// 藏品数据
+message SDCCollectionData {
+    repeated SDCCollectionInfo collections = 1; // 藏品列表
+    int32 totalValue                       = 2; // 藏品总价值
+}
+
+// ==================== 战斗结算数据 ====================
+
+// 战斗结算数据（用于扩展PlayerBattleEnd）
+message SDCBattleSettleData {
+    int32 result                    = 1;  // 结果 (1-胜利 2-失败 3-正常撤离 4-中途退出)
+    int32 killCount                 = 2;  // 击杀玩家数（含人机玩家）
+    int32 totalValue                = 3;  // 装配总价值（局外带入）
+    int32 lootValue                 = 4;  // 本局带出道具总价值（含安全箱保留的藏品，用于收益评级计算，持久化至赛季数据）
+    repeated int64 lostItemGuids    = 5;  // 丢失的道具GUID列表
+    repeated int64 keptItemGuids    = 6;  // 保留的道具GUID列表
+    repeated SDCPackSlot finalPackSlots = 7;  // 战斗结束时各背包最终状态
+    int32 seasonCoin                = 8;  // 获得赛季币
+    int32 exp                       = 9;  // 获得经验
+    int32 monsterKillCount          = 10; // 击杀怪物数
+    int32 surviveTime               = 11; // 存活时长/撤离用时(秒)
+    int32 rating                    = 12; // 收益评级
+    string ratingText               = 13; // 评价文本
+}
+
+// 战斗结算结果（返回给客户端）
+message SDCBattleResult {
+    int32 result                    = 1;  // 结果
+    int32 killCount                 = 2;  // 击杀玩家数（含人机玩家）
+    repeated int64 lostItemGuids    = 3;  // 丢失的道具GUID列表
+    repeated int64 keptItemGuids    = 4;  // 保留的道具GUID列表
+    int32 seasonCoin                = 5;  // 获得赛季币
+    int32 exp                       = 6;  // 获得经验
+    repeated SDCWarehouseItem rewardItems = 7;  // 获得奖励道具列表
+    int32 monsterKillCount          = 8;  // 击杀怪物数
+    int32 surviveTime               = 9;  // 存活时长/撤离用时(秒)
+    int32 rating                    = 10; // 收益评级
+    string ratingText               = 11; // 评价文本
+}
+
+// ==================== 战备快照 ====================
+
+// 战备快照（用于匹配和战斗服加载）
+message SDCPrepareSnapshot {
+    repeated SDCEquipSlot equipSlots     = 1; // 装配槽位
+    repeated SDCPackSlot packSlots       = 2; // 背包槽位
+    int32 heroId                         = 3; // 英雄ID
+    int32 totalValue                     = 4; // 装配总价值
+    repeated SDCWarehouseItem itemDetails = 5; // 战备内所有道具的完整信息
+    bool fillTeammate                    = 6; // 是否开启补齐队友匹配
+    int32 skinId                         = 7; // 皮肤ID
+    int32 modeId                         = 8; // 默认地图ID（来自SDCParameter ID=13）
+}
+

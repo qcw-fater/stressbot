@@ -1,0 +1,23 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+
+import "custom_adventure_gift.proto";
+
+
+//弹出奇遇礼包
+message AdventureGiftS2C
+{
+    repeated AdventureGiftClientInfo DataList = 1;
+    bool IsAdd = 2;
+}
+
+//购买奇遇礼包
+message AdventureGiftBuyItemC2S
+{
+    int32 id = 1; // 奇遇礼包Id
+}
+//购买奇遇礼包
+message AdventureGiftBuyItemS2C
+{
+}

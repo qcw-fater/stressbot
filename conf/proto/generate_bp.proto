@@ -1,0 +1,151 @@
+syntax            = "proto3";
+option go_package = ".;pb";
+package Game;
+
+enum BattlePassTaskType {
+    BPTT_Normal   = 0; // 普通任务
+    BPTT_Advanced = 1; // 进阶任务
+}
+
+// 玩家战令数据
+message battlePassInfo {
+    int32                          battlePassId    = 1; // 战令id
+    int32                          battlePassLevel = 2; // 战令等级
+    int32                          battlePassExp   = 3; // 战令经验
+    int32                          advance         = 4; // 0:未解锁，1:进阶版战令,2:豪华进阶战令
+    int64                          beginTime       = 5; // 战令开始时间
+    int64                          endTime         = 6; // 战令结束时间
+    int32                          overflowExp     = 7; // 溢出经验
+    int32                          lastLoginDay    = 8; // 最近一次登录在第几天
+    int32                          dayBattleExp    = 9; // 每日战斗获得的经验
+    map<int64, BattlePassTaskType> taskList = 10; // 任务id filed: 任务uuid，value: 0:普通任务，1:进阶任务
+    map<int32, bool>               rewardFlag        = 11; // 已经领取奖励的标识 key:等级
+    map<int32, bool>               advanceRewardFlag = 12; // 进阶已经领取奖励的标识 key:等级
+    map<int64, BattlePassTaskType> dayTask = 13; // 每日任务 filed: 任务uuid，value: 0:普通任务，1:进阶任务
+    int64                          refreshTaskCD = 14; // 刷新任务CD
+    int32                          refreshCount  = 15; // 已经刷新次数
+    map<int64, HeroTaskInfo>       heroTaskList  = 16; // 英雄限时任务 key:任务UUID
+}
+
+//获取战令信息
+message BpGetInfoC2S {}
+//获取战令信息
+message BpGetInfoS2C {
+    map<int32, battlePassInfo> battlePassData = 1; // 战令信息
+}
+//领取战令奖励
+message BpGetRewardC2S {
+    int32 battlePassLevel = 1;
+    bool  highOrder       = 2; // 是否进阶降级的领取
+    bool  easy            = 3; // 一键领取
+    int32 battlePassId    = 4; // 战令id
+}
+//领取战令奖励
+message BpGetRewardS2C {
+    map<int32, bool> commonReward   = 1; // 普通奖励,已经领取奖励的标识 key:等级
+    map<int32, bool> AdvancedReward = 2; // 进阶奖励,已经领取奖励的标识 key:等级
+    int32            battlePassId   = 3; // 战令id
+}
+
+//更新战令活动数据
+message BpBattlePassS2C { map<int32, battlePassInfo> battlePassData = 1; }
+//解锁进阶战令
+message BpUnlockAdvancedC2S {
+    int32 advance      = 1; // 1：普通进阶 2：豪华进阶
+    int32 battlePassId = 2; // 战令id
+}
+//解锁进阶战令
+message BpUnlockAdvancedS2C {
+    int32 advance      = 1; // 1：普通进阶 2：豪华进阶
+    int32 battlePassId = 2; // 战令id
+}
+//战令溢出兑换
+message BpConversionC2S {
+    int32 battlePassId = 1; // 战令id
+}
+//战令溢出兑换
+message BpConversionS2C {
+    int32 battlePassId = 1; // 战令id
+    int32 overflowExp  = 2; // 溢出经验
+}
+
+message BattlePassExpInfo {
+    int32 level        = 1; // 战令等级
+    int32 exp          = 2; // 战令经验
+    int32 Id           = 3; // 战令id
+    int32 overflowExp  = 4; // 溢出经验
+    int32 dayBattleExp = 5; // 每日战斗获得的经验
+}
+//更新战令经验,等级
+message BpUpdateExpS2C {
+    repeated BattlePassExpInfo battlePassExp = 1; // 战令经验
+}
+
+//开始战令活动
+message BpBeginS2C {
+    map<int32, battlePassInfo> battlePassData = 1; // 新开的战令数据，只有增加的数据
+}
+//更新战令活动数据
+message BpUpdateS2C {
+    map<int32, battlePassInfo> battlePassData = 1; // 更新的战令数据，只有更新的数据
+}
+
+//战令结束
+message BpEndS2C {
+    repeated int32 battlePassId = 1; // 战令id
+}
+//刷新战令任务
+message BpRefreshTaskC2S {
+    int64 taskId       = 1; // 刷新任务id
+    int32 battlePassId = 2; // 战令id
+    int32 taskType     = 3; // 任务类型 1每日任务 2赛季基础任务 3赛季进阶任务
+}
+//刷新战令任务
+message BpRefreshTaskS2C {
+    int64 oldTaskId     = 1; // 旧任务id
+    int64 newTaskId     = 2; // 新任务id
+    int32 battlePassId  = 3; // 战令id
+    int32 taskType      = 4; // 任务类型 1每日任务 2赛季任务
+    int64 refreshTaskCD = 5; // 刷新任务CD
+    int32 refreshCount  = 6; // 已经刷新次数
+    bool isAdvanced     = 7; // 是否为进阶任务
+}
+//新玩法领取战令经验
+message BpGetExpGameTypeC2S
+{
+    int32 latticeId = 1; // 格子id
+    bool isFixed = 2; // 是否为固定前x场
+}
+//新玩法领取战令经验
+message BpGetExpGameTypeS2C
+{
+    map<int32, int32> flag = 1; // key: 格子id，value: 上次领取的周期id
+}
+
+message HeroTaskInfo {
+    int64 taskUUID     = 1; // 任务UUID
+    int32 heroId       = 2; // 英雄ID
+    int32 taskId       = 3; // 任务配置ID
+    int64 expireTime   = 4; // 过期时间戳
+}
+
+// 待继承的英雄限时任务数据
+message HeroTaskPendingData {
+    repeated HeroTaskInfo tasks = 1; // 待继承任务列表
+}
+
+message playerNewGameTypeBpExp {
+  map<int32, int32> flag = 1; // key: 格子id，value: 上次领取的周期id
+}
+// 英雄限时任务更新推送
+message BpHeroTaskUpdateS2C
+{
+    int32 battlePassId = 1; // 战令ID
+    repeated HeroTaskInfo heroTaskList = 2; // 新增的英雄限时任务列表
+}
+// 英雄限时任务过期通知
+message BpHeroTaskExpireS2C
+{
+    int32 battlePassId = 1; // 战令ID
+    repeated int64 expiredTaskUUID = 2; // 过期的任务UUID列表
+}

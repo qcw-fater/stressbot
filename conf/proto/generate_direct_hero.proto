@@ -1,0 +1,56 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+
+//获取英雄直购信息
+message DirectHeroGetC2S
+{
+}
+//获取英雄直购信息
+message DirectHeroGetS2C
+{
+}
+//英雄直购
+message DirectHeroDirectBuyC2S
+{
+}
+//英雄直购
+message DirectHeroDirectBuyS2C
+{
+
+}
+//选择英雄
+message DirectHeroChangeHeroC2S
+{
+}
+
+//选择英雄
+message DirectHeroChangeHeroS2C
+{
+}
+//切换new
+message DirectHeroChangeNewC2S
+{
+}
+//切换new
+message DirectHeroChangeNewS2C
+{
+}
+//跳过
+message DirectHeroSkipC2S
+{
+}
+//跳过
+message DirectHeroSkipS2C
+{
+}
+
+//设置为收集状态
+message DirectHeroSetCollectC2S
+{
+}
+
+//设置为收集状态
+message DirectHeroSetCollectS2C
+{
+}

@@ -1,0 +1,20 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+
+
+
+//请求触发礼包数据
+message TriggerGiftDataC2S
+{
+}
+//触发限时礼包
+message TriggerGiftS2C
+{
+  map<int32, TrgGiftGoods> Goods = 1;
+}
+
+message TrgGiftGoods {
+  int32 GoodsId = 1;  //商品id
+  int64 BuyTimeEnd = 2; //最后可购买时间
+}

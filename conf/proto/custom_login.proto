@@ -1,0 +1,24 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+// 玩家登陆
+message AccountOnlineInfo {
+	int32 	playerId 	= 1; // 玩家Id
+	int32 	zoneId 		= 2; // 所在区服
+	string 	session 	= 3; // session
+}
+
+// 玩家分享数据
+message ShareInfoDB {
+    int64  shareTimestamp = 1; // 分享时间戳
+}
+
+
+//玩家账号数据
+message AccountDB {
+  string uuid = 1; // 设备id
+  string account = 2; // 账号id
+  string platform = 3; // 登录传过来的平台id    ios是3000
+}

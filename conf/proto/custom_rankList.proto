@@ -1,0 +1,14 @@
+syntax             = "proto3"; //[proto2|proto3]
+
+option  go_package = ".;pb";
+package Game;
+
+// 排行榜的节点数据
+message RankListNode {
+    int32 id    = 1;                   // id
+    int64 value = 2;                   // 节点数据值
+}
+message NsqClearInfo {
+    repeated int32 playerIs       = 1; // 玩家id列表
+    int32          sourceServerId = 2; // 来源服务器id
+}

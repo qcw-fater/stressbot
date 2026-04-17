@@ -1,0 +1,28 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+
+//用户信息
+message UserInfo
+{
+	string name   = 1;	    //玩家名字
+	string passwd = 2;	    //玩家密码
+	string id     = 3;	    //玩家id
+}
+
+//用户角色信息
+message UserRoleInfo{
+	int32  	playerId      	= 1;	    // 角色id
+	string  name         	= 2;	    // 角色昵称
+	int32   server       	= 3;	    // 角色所在服务器
+	int64   ctime        	= 4;	    // 角色创建时间
+	string  account      	= 5;	    // 账号
+	int64 	lastLoginTime	= 6;		// 最后登录时间
+	string 	city  			= 7; 	 	// 登录城市
+	int32 	count			= 8;		// 登录次数
+	bool    newbieGuide     = 9;        // 新手引导标识
+	int32   selectHeroId   	= 10;       // 首次选择英雄Id
+	string 	channel 		= 11; 		// 渠道
+	int32   cup  			= 12;		// 杯数
+	int32   ladderLevel  	= 13;		// 段位等级
+}

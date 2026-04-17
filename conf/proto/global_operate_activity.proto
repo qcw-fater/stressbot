@@ -1,0 +1,536 @@
+syntax             = "proto3";
+option  go_package = ".;pb";
+package Game;
+
+import "common.proto";    // 运营活动时间类型
+enum OperateActivityTimeType {
+    ATT_INVALID      = 0;
+    ABSOLUTE_TIME    = 1; // 绝对时间
+    OPEN_SERVER_TIME = 2; // 开服时间
+    REGISTER_TIME    = 3; // 注册时间
+}
+
+// 活动模板类型
+enum ActivityTemplateType {
+    ATP_INVALID         = 0;
+    IMAGE_LIST_TYPE     = 1;  // 多图片活动
+    IMAGE_TYPE          = 2;  // 单图片活动
+    TASK_TYPE           = 3;  // 任务(活动任务）
+    REGRESSION_TYPE     = 4;  // 回归
+    GRADUATION_GIFT     = 5;  // 测试毕业礼
+    PAYMENT_REFUND_TYPE = 6;  // 充值返利
+    DAY_TASK_BOX_TYPE   = 7;  // 持续X天，每天解锁新任务,带进度宝箱（新人集训）
+    FIRST_PAYMENT       = 8;  // 首次充值
+    TOTAL_PAYMENT       = 9;  // 累计充值
+    SIGN_IN_NEW_TYPE    = 10; // 新签到（英雄试炼签到）
+    DAILY_TASK_TYPE     = 11; // 每日任务（英雄试炼任务）
+    SHOP_TYPE           = 12; // 活动商店（英雄试炼商店）
+    CHAIN_GIFT          = 13; // 连锁礼包
+    EXCHANGE_SHOP       = 14; // 兑换商店
+    MYSTICAL_SHOP       = 15; // 神秘商店
+
+    SIGN_IN_TYPE        = 20; // 签到（舍弃）
+    CONDITION_TYPE      = 21; // 条件（舍弃）
+    CONSUMPTION_TYPE    = 22; // 消费（舍弃）
+    LOTTERY_TYPE        = 23; // 抽奖（舍弃）
+    SCORE_TYPE          = 25; // 积分（舍弃）
+    RANK_TYPE           = 26; // 排行榜（舍弃）
+}
+
+// 任务刷新类型
+enum TaskRefreshType {
+    TRT_NOT   = 0; // 不刷新
+    TRT_DAY   = 1; // 每日
+    TRT_WEEK  = 2; // 每周
+    TRT_MONTH = 3; // 每月
+}
+
+enum RewardFlag {
+    RF_NOT  = 0; // 无效.无法领奖，条件未达成
+    RF_YES  = 1; // 可以领取奖励
+    RF_OVER = 2; // 奖励已经领取
+}
+
+// 道具（货币）通过结构
+message ItemData {
+    int32 Id  = 1; // 道具（货币）ID
+    int32 Num = 2; // 数量
+}
+
+// 图片信息
+message ActivityImage {
+    string Uid    = 1; // 图片ID
+    string Name   = 2; // 图片名字
+    string Status = 3; // 图片状态
+    string Url    = 4; // 图片下载地址
+}
+
+message OperateLabel {
+    repeated ActivityImage images = 1;
+    string                 name   = 2;
+    int32                  id     = 3;
+}
+
+// 活动信息
+message OperateActivity {
+    int64                     Id                  = 1;  // id
+    repeated int32            Channel             = 2;  // 渠道
+    repeated int32            Servers             = 3;  // 区服
+    OperateActivityTimeType   TimeType            = 4;  // 活动时间类型
+    int64                     StartTime           = 5;  // 活动开始时间
+    int64                     EndTime             = 6;  // 活动结束时间
+    int64                     Duration            = 7;  // 活动持续时间
+    int32                     OpenCupLimit        = 8;  // 账号奖杯大于等于该配置才可见该活动
+    string                    ActivityName        = 9;  // 活动名字
+    string                    ActivityTitle       = 10; // 活动标题
+    string                    ActivityDescription = 11; // 活动描述
+    ActivityImage             BackgroundImgUrl    = 12; // 活动背景图地址
+    ActivityImage             TitleImgUrl         = 13; // 活动标题图地址
+    repeated ActivityTemplate ActivityList        = 14; // 活动模板ID组  value:活动模板列表
+    repeated ScoreTemplate    ScoreSystem         = 15; // 积分系统
+    int32                     Sort                = 16; // 排序值
+    ActivityTemplateType      TemplateType        = 17; // 模板类型
+    int32                     DataSources         = 18; // 数据来源 0无效 1CBT 2OBT
+    int32                     PageID              = 19; // 页签id
+    string                    PageName            = 20; // 页签名称
+    string                    PageIcon            = 21; // 页签图标
+    int32                     PageIndex           = 22; // 页签排序
+    string                    TitleText           = 23; // 活动名称（程序字时使用）
+    string                    Prefab              = 24; // 活动预制体
+    repeated int32            UIGoTo              = 25; // 跳转ID
+    string                    HallButtonName      = 26; // 大厅入口名称
+    string                    HallButtonIcon      = 27; // 大厅入口图片
+    repeated int32            CashID              = 28; // 直购ID
+    repeated Link             link                = 29; // 跳转
+    string                    rule                = 30; // 活动规则
+    int32                     shopId              = 31; // 商店id
+    int32                     goodsId             = 32; // 商品id
+}
+
+message ConditionGroup {
+    repeated Condition PreCondition = 1; // 活动前置条件
+}
+
+// 活动模板数据
+message ActivityTemplate {
+    int64                  Id             = 1;  // 模板ID
+    string                 Name           = 2;  // 模板名称
+    ActivityTemplateType   TemplateType   = 3;  // 模板类型
+
+    SignInTemplate         SignIn         = 4;  // 签到（舍弃）
+    ConditionTemplate      Condition      = 5;  // 条件
+    ConsumptionTemplate    Consumption    = 6;  // 消耗
+    LotteryTemplate        Lottery        = 7;  // 抽奖
+    RankTemplate           Rank           = 8;  // 排行奖励
+    ImageTemplate          Images         = 9;  // 图片活动
+    regressionTemplate     regression     = 10; // 回归
+    graduationGiftTemplate graduationGift = 11; // 测试毕业礼
+    paymentRefundTemplate  paymentRefund  = 12; // 充值返利
+    TaskTemplate           TaskData       = 13; // 任务
+    DayTaskBoxTemplate     BoxTask        = 14; // 进度宝箱任务
+    DailyTaskTemplate      DailyTask      = 15; // 每日刷新任务模版
+    ShopTemplate           Shop           = 16; // 活动商店
+    SignInNewTemplate      NewSignIn      = 17; // 签到
+    ChainGiftTemplate      ChainGift      = 18; // 连锁礼包
+    ExchangeShopTemplate   ExchangeShop   = 19; // 兑换商店
+}
+
+// 兑换商店
+message ExchangeShopTemplate {
+    map<int32, ExchangeShopTemplateConf> data = 1; // 配置map
+}
+
+message ExchangeShopTemplateConf {
+    int32                 id          = 1; // id
+    repeated RewardConfig reward      = 2; // 获得道具
+    repeated RewardConfig cost        = 3; // 消耗道具
+    int32                 limitNumber = 4; // 限购数量
+    int32                 select      = 5; // 是否勾选
+}
+
+// 连锁礼包
+message ChainGiftTemplate {
+    map<int32, ChainGiftTemplateConf> data = 1; // 配置map
+}
+
+message ChainGiftTemplateConf {
+    int32                 id            = 1;  // id
+    int32                 prev          = 2;  // 前置id
+    int32                 cashId        = 3;  // 直购id
+    repeated RewardConfig reward        = 4;  // 内购获得道具
+    repeated RewardConfig cost          = 5;  // 内购消耗道具
+    int32                 limitNumber   = 6;  // 限购数量
+    repeated RewardConfig OriginalPrice = 7;  // 原价
+    string                Tag           = 8;  // 标签
+    string                TitleTag      = 9;  // 标题标签
+    int64                 name          = 10; // 名称
+}
+
+// 图片活动
+message ImageTemplate {
+    string Uid         = 1;  // 图片ID
+    string Name        = 2;  // 图片名字
+    string Status      = 3;  // 图片状态
+    string Url         = 4;  // 图片下载地址
+    int32  SortValue   = 5;  // 排序值
+    int32  UIGotoId    = 6;  // 跳转界面
+    int32  subId       = 7;  // 图片活动id
+    string Desc        = 8;  // 活动描述
+    int32  Visible     = 9;  // 可见条件
+    int32  FuncId      = 10; // 功能id
+    int32  UrlIsInside = 11; // 是否内链 0:外链 1:内链
+    string UrlGoTo     = 12; // 功能id
+}
+
+// 回归奖励
+message regressionTemplate {
+    repeated RegressionRow AllRow = 1; // 所有行数据
+}
+
+message RegressionRow {
+    repeated int32    Condition = 1; // 条件参数
+    int32             Type      = 2; // 条件类型 1:登录天数 2:账号等级
+    repeated ItemData reward    = 3; // 奖励列表
+}
+
+// 测试毕业礼
+message graduationGiftTemplate {
+    repeated graduationGiftRow AllRow = 1; // 所有行数据
+}
+
+message graduationGiftRow {
+    string            text   = 1; // 描述文本
+    repeated ItemData reward = 2; // 奖励列表
+    int32             Trophy = 3; // 要求总杯数
+}
+
+/// 充值返利
+message paymentRefundTemplate {
+    repeated paymentRefundTRow AllRow = 1; // 所有行数据
+}
+
+message paymentRefundTRow {
+    string            PayLevel   = 1; // 充值档位
+    string            RefundRate = 2; // 道具返还比例
+    repeated ItemData reward     = 3; // 奖励列表
+}
+
+// 任务
+message TaskTemplate {
+    repeated int32 taskIdList = 1; // 任务id列表
+}
+
+// 进度宝箱和X天解锁任务
+message DayTaskBoxTemplate {
+    repeated DayTaskSubTemplate       DayInfo = 1; // 配置数据
+    map<int32, DayTaskBoxSubTemplate> BoxCfg  = 2; // key:进度值， value: 奖励数据
+}
+
+// 进度宝箱和X天解锁任务
+message DayTaskSubTemplate {
+    int32             day       = 1; // 第几天
+    map<int32, int32> taskScore = 2; // key:任务id， value: 任务增加的积分值
+}
+
+// 进度宝箱和X天解锁任务
+message DayTaskBoxSubTemplate {
+    bool  nodeType = 1; // true: 关键节点
+    int32 dropId   = 2; // 奖励id
+}
+
+// 每日刷新任务模版
+message DailyTaskTemplate {
+    DailyTaskInfo          DailyPool = 1; // 每日任务随机库
+    repeated DailyTaskInfo OnceTask  = 2; // 一次性任务库
+}
+
+// 每日刷新任务模版
+message DailyTaskInfo {
+    repeated int32 TaskPool = 1; // 一次性任务库
+    string         TaskName = 2; // 任务名称
+    int32          TaskType = 3; // 任务类型
+    int32          Order    = 4; // 页签排序
+}
+
+// 活动商店模版
+message ShopTemplate {
+    repeated int32 Goods  = 1; // 商品id
+    int32          ShopId = 2; // 商店id
+}
+
+// 补签规则
+message RepairSignInRule {
+    repeated ItemData  RSI_Expend    = 1; // 道具消耗补签
+    repeated Condition RSI_Condition = 2; // 条件补签
+}
+
+// 签到奖励
+message SignInReward {
+    repeated ItemData SignInReward = 1; // 签到奖励
+}
+
+// 签到模板数据
+message SignInTemplate {
+    bool                      TriggerCondition          = 1; // 0被动（登陆）触发 1主动（按钮）触发
+    int32                     SignInCount               = 2; // 签到天数
+    int32                     RepairSignInCount         = 3; // 补签次数
+    repeated RepairSignInRule RepairSignIn              = 4; // 补签规则(长度等于补签次数)
+    repeated SignInReward     RewardList                = 5; // 签到奖励(长度等于天数)
+    bool                      IsAutoGetReward           = 6; // 是否自动发放签到奖励 true：自动  false：手动领取
+    int32                     EveryDayRepairSignInCount = 7; // 每日补签次数上限
+}
+
+// 签到模板数据
+message SignInNewTemplate {
+    repeated SignInTemplateSub SigInConf = 1; // 签到配置项数据
+}
+
+message SignInTemplateSub {
+    int32 TriggerCondition   = 1; // 0被动（登陆）触发 1主动（按钮）触发
+    int32 SignInCount        = 2; // 签到天数
+    int32 RewardList         = 3; // 签到奖励(长度等于天数)
+    int32 AdvancedRewardList = 4; // 付费签到奖励
+}
+
+// 条件模板数据
+message ConditionTemplate {
+    repeated Condition data = 1;
+}
+
+// 条件结构(任务配置数据)
+message Condition {
+    int32             Condition     = 1; // 条件类型
+    repeated int32    ParamsList    = 2; // 条件参数
+    string            Description   = 3; // 条件说明
+    repeated ItemData RewardList    = 4; // 奖励列表
+    TaskRefreshType   RefreshType   = 5; // 刷新类型
+    bool              CountWhenOpen = 6; // true：开启时计数 false：未开启也计数
+}
+
+// 商品（消耗）兑换
+message ExchangeGoods {
+    repeated ItemData Goods      = 1; // 商品数据
+    bool              IsLimit    = 2; // 是否限购
+    int32             LimitCount = 3; // 限购次数
+    repeated ItemData Expend     = 4; // 消耗道具信息
+    int32             Discount   = 5; // 折扣
+}
+
+// 消费模板
+message ConsumptionTemplate {
+    repeated ExchangeGoods SellGoods = 1;
+}
+
+// 抽奖
+message Lottery {
+    int32 SingleCost          = 1; // 单抽消耗
+    int32 FirstSingleDiscount = 2; // 单抽首次折扣
+    int32 MultiCount          = 3; // 多抽次数
+    int32 FirstMultiDiscount  = 4; // 多抽首次折扣
+    int32 MultiDiscount       = 5; // 多抽折扣
+}
+
+// 抽奖模板
+message LotteryTemplate {
+    ItemData         TargetGoods     = 1; // 包装道具
+    int32            CostItemId      = 2; // 抽奖消耗道具ID
+    repeated Lottery LotteryList     = 3; // 抽奖列表
+    int32            GuaranteedCount = 4; // 保底次数（共享）
+    ItemData         GuaranteedItem  = 5; // 保底道具
+    int32            RewardPoolId    = 6; // 奖池ID
+}
+
+// 奖池
+message RewardPool {
+    ItemData Reward      = 1;
+    int32    WeightValue = 2;
+}
+// 积分模板
+message ScoreTemplate {
+    ItemData          score  = 1; // 积分道具
+    repeated ItemData Reward = 2; // 对应积分奖励
+}
+
+// 任务数据
+message OperateTaskInfo {
+    int32            taskId = 1;
+    OperateTaskState taskState =
+        2;                 // 任务状态 0:进行中, 1:完成未领奖  2：完成已领奖
+    int32 progress    = 3; // 任务进度
+    int32 completeNum = 4; // 完成次数
+}
+
+// 任务状态
+enum OperateTaskState {
+    OTS_Doing  = 0; // 任务进行中
+    OTS_Finish = 1; // 任务结束,可领奖
+    OTS_Over   = 2; // 任务完成，已经领奖
+}
+
+message Flag {
+    int32 parameter = 1;                             //
+    int32 value     = 2;                             //
+}
+message OperateActivityDB {
+    int64                          ActivityId   = 1; // 活动ID
+    repeated Flag                  flagData     = 2; // 已领取积分信息
+    map<int32, ActivityTemplateDB> ActivityList = 3; // 活动模板ID组  key:模板索引  value：模板数据
+}
+
+message TaskGroup {
+    repeated OperateTaskInfo PreTaskInfos = 1; // 前置任务进度信息
+}
+
+message ActivityTemplateDB {
+    SignInTemplateDB          SignInDB         = 1;
+    ConsumptionTemplateDB     ConsumptionDB    = 2;
+    ConditionTemplateDB       ConditionDB      = 3;
+    RegressionTemplateDB      RegressionDB     = 4;  // 旧号回归(true:回归用户可以领奖)
+    GraduationGiftTemplateDB  GraduationGiftDB = 5;  // 测试毕业礼
+    PaymentRefundTemplateDB   PaymentRefundDB  = 6;  // 充值返利
+    TaskTemplateDB            TaskDB           = 7;  // 任务数据
+    TaskBoxTemplateDB         TaskBoxDB        = 8;  // 进度类型任务数据
+    DailyTaskTemplateDB       DailyTaskDB      = 9;  // 每日任务
+    SignInNewTemplateDB       NewSignInDB      = 10; // 签到
+    ChainGiftNewTemplateDB    ChainGiftDB      = 11; // 连锁礼包购买数据
+    ExchangeShopNewTemplateDB ExchangeShopDB   = 12; // 兑换商店数据
+}
+
+//    旧号回归(true:回归用户可以领奖)
+message RegressionTemplateDB {
+    RewardFlag flag                  = 1; // 旧号回归(0:不能领取1：回归用户可以领奖，2已经领取)
+    int32      payRewardCfgIndex     = 2; // 充值档位索引
+    int32      loginDyRewardCfgIndex = 3; // 登录天数档位索引
+}
+
+// 测试毕业礼
+message GraduationGiftTemplateDB {
+    int32               cupNumber = 1; // 之前测试时玩家等级
+    repeated RewardFlag flag      = 2; // 已经领取奖励的标记 index： 奖励档位
+}
+
+// 充值返利
+message PaymentRefundTemplateDB {
+    int32             paySum          = 1; // 之前测试时充值金额
+    RewardFlag        flag            = 2; // 已经领取奖励的标记 index： 奖励档位
+    map<int32, int32> reward          = 3; // 玩家可以领取的奖励数据
+    int32             currentPayMoney = 4; // 当前活动内充值价值
+}
+
+message TaskBoxTemplateDB {
+    map<int32, taskUUIDList> dayTaskUUID = 1; // key:天数 value: 任务uuid
+    int32                    score       = 2; // 当前积分
+    map<int32, bool>         rewardFlag  = 3; // 已经领取奖励标记
+    int32                    day         = 4; // 活动当前在第几天
+}
+
+// 每日任务
+message DailyTaskTemplateDB {
+    DailyTaskSubDB          DailyTaskList = 1; // 每日任务uuid列表
+    repeated DailyTaskSubDB OnceTaskData  = 2; //  一次性任务数据
+}
+
+// 任务数据
+message DailyTaskSubDB {
+    repeated int64 OnceTaskList = 1; // 任务uuid列表
+    int32          TaskType     = 2; // 任务类型
+}
+
+message taskUUIDList {
+    repeated int64 uuid = 1; // 任务uuid列表
+}
+
+message TaskTemplateDB {
+    repeated int64 taskUUIDList = 1;
+}
+
+message ConsumptionTemplateDB {
+    map<int32, int32> BuyCounts = 1; // 已购买次数
+}
+
+message SignInTemplateDB {
+    int32                    SignedDay           = 1; // 已签到天数
+    int64                    LastSignTimestamp   = 2; // 上次签到时间戳
+    repeated RepairCondition conditions          = 3; // 补签任务进度
+    int32                    RepairCount         = 4; // 补签次数
+    map<int32, bool>         Gots                = 5; // 已领取奖励
+    int32                    EveryDayRepairCount = 6; // 每日已补签次数
+}
+
+message SignInNewTemplateDB {
+    int32            SignedDay         = 1; // 已签到天数
+    int64            LastSignTimestamp = 2; // 上次签到时间戳
+    map<int32, bool> flag              = 3; // 已领取奖励 key: 已经领取的天数
+    bool             advance           = 4; // 是否解锁进阶
+    map<int32, bool> advanceFlag       = 5; // 进阶奖励已领取奖励 key: 已经领取的天数
+}
+
+message RepairCondition {
+    repeated OperateTaskInfo tasks = 1; // 补签任务进度
+}
+
+message ConditionTemplateDB {
+    repeated OperateTaskInfo taskInfo = 1; // 任务进度信息
+}
+
+message Operate {
+    OperateActivityDB detailed = 1; // 活动详细信息
+    OperateActivity   conf     = 2; // 活动配置信息
+    int32             day      = 3; // 开启天数
+}
+
+// 连锁礼包
+message ChainGiftNewTemplateDB {
+    map<int32, int32> buyRecord = 1; // 购买记录 id:次数
+}
+
+message ExchangeShopNewTemplateDB {
+    map<int32, int32> record = 1; // 兑换记录 id:次数
+}
+//////////////////////////////////////////////////////////////////////////排行榜//////////////////////////////////////////////////////////////////////////////////
+// 排行榜模板
+message RankTemplate {
+    string              name           = 1; // 排行榜名字
+    repeated RankReward rewards        = 2; // 奖励列表
+    RankLink            link           = 3; // 跳转入口
+    RankRefreshType     settlementType = 4; // 结算时间
+    int32               settlementHour = 5; // 刷新时间点
+    int32               rankType       = 6; // 排行榜类型
+}
+// 排行奖励
+message RankReward {
+    int32             startRank = 1; // 起始排名
+    int32             endRank   = 2; // 结束排名
+    repeated ItemData reward    = 3; // 奖励
+    ActivityImage     image     = 4; // 排行榜名次（图标）
+    string            text      = 5; // 排行榜名次（文本）
+}
+message RankLink {
+    string name   = 1;               // 入口名称
+    int32  linkId = 2;               // 内链id
+    string url    = 3;               // 外链url
+}
+// 任务刷新类型
+enum RankRefreshType {
+    RRT_NOT   = 0; // 不刷新
+    RRT_DAY   = 1; // 每日
+    RRT_WEEK  = 2; // 每周
+    RRT_MONTH = 3; // 每月
+}
+
+// 活动全局DB数据
+message GlobalOperateDB {
+    map<int32, GlobalTemplateDBList> List = 1; // key:活动天数 value：活动模板列表
+}
+
+// 活动全局模板数据
+message GlobalTemplateDBList {
+    map<int32, GlobalTemplateDB> List =
+        1;                            // 活动模板列表  key：模板索引  value：模板数据
+}
+message GlobalTemplateDB {
+    int64 rankLastCheckTimeStamp = 1; // 排行榜上次检测时间
+    int32 version                = 2; // 更新版本
+    int32 serverId               = 3; // 更新服务器Id
+}
+//////////////////////////////////////////////////////////////////////////排行榜//////////////////////////////////////////////////////////////////////////////////

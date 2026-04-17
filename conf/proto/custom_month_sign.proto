@@ -1,0 +1,31 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+
+// 30天签到数据
+message MonthSignDataDb
+{
+  int64 signDay = 1; // 签到状态位 （第0位=第1天，第29位=第30天）
+  int64 endTimestamp = 2; // 签到结束时间戳
+  int32 retroactiveSignCnt = 3; // 已补签次数
+  int64 totalSignDay = 4; // 累计签到天数领奖状态位（第0位=第1天，第29位=第30天）
+  int32 totalRetroactiveSignCnt = 5; // 可补签次数
+  int32 round = 6; // 当前签到轮数
+  bool todayAddRetroactiveSignCnt = 7; // 今日是否增加可补签次数
+  int32 historySignCnt = 8; // 历史签到次数  不重置
+  int64 startTimestamp = 9; // 签到开启时间戳
+}
+
+// 30天签到数据
+message MonthSignDataClient
+{
+  int64 signDay = 1; // 签到状态位 （第0位=第1天，第29位=第30天）
+  int64 endTimestamp = 2; // 签到结束时间戳
+  int32 retroactiveSignCnt = 3; // 已补签次数
+  int64 totalSignDay = 4; // 累计签到天数领奖状态位（第0位=第1天，第29位=第30天）
+  int32 totalRetroactiveSignCnt = 5; // 可补签次数
+  int32 round = 6; // 当前签到轮数
+  int32 currentDay = 7; // 当前签到第几天  从1开始
+  int32 historySignCnt = 8; // 历史签到次数  不重置
+  int64 startTimestamp = 9; // 签到开启时间戳
+}

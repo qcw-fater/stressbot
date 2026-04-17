@@ -1,0 +1,15 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+import "custom_marquee.proto";
+
+//有新的跑马灯
+message MarqueeAddS2C
+{
+    repeated Marquee marquees = 1; //跑马灯列表
+}
+//删除跑马灯
+message MarqueeDelS2C
+{
+    repeated Marquee marquees = 1; //跑马灯列表
+}

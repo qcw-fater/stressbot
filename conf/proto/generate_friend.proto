@@ -1,0 +1,165 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+import "enum.proto";
+import "custom_friend.proto";
+import "player.proto";
+
+//获取好友操作记录
+message FriendGetRecordC2S
+{
+}
+message FriendGetRecordS2C
+{
+    int32 acceptSwitch = 1;//接受好友信息开关 0开方 1关闭
+}
+
+//设置好友操作记录
+message FriendSetRecordC2S
+{
+    int32 acceptSwitch = 1;//接受好友信息开关 0开方 1关闭
+}
+message FriendSetRecordS2C
+{
+}
+
+//获取好友列表
+message FriendGetListC2S
+{
+}
+message FriendGetListS2C
+{
+    repeated FriendDetailInfo FriendDetailInfoList = 1;//好友详细信息列表
+}
+
+//添加到黑名单
+message FriendAddBlacklistC2S
+{
+    int32 bid = 1; //黑名单玩家id
+    FriendAttr friendAttr = 2; //类型  1不想同队 2.屏蔽
+}
+message FriendAddBlacklistS2C
+{
+}
+
+//获取黑名单
+message FriendGetBlacklistC2S
+{
+}
+message FriendGetBlacklistS2C
+{
+    repeated BlackDetailInfo blackDetailInfoList = 1;//黑名单详细信息列表
+}
+
+//移除黑名单
+message FriendDelBlacklistC2S
+{
+    int32 bid = 1; //黑名单玩家id
+}
+message FriendDelBlacklistS2C
+{
+}
+
+//请求添加好友
+message FriendAddRequestC2S
+{
+    int32 friendId = 1; //好友id
+}
+message FriendAddRequestS2C
+{
+    string friendName = 1;//好友姓名
+}
+
+//获取好友请求列表
+message FriendGetRequestListC2S
+{
+}
+message FriendGetRequestListS2C
+{
+    repeated PlayerBase friendInfoList = 1;//好友列表
+}
+
+//处理好友请求
+message FriendDisposeRequestC2S
+{
+    int32 friendId = 1; //好友id
+    int32 result = 2; //处理结果(1同意 2拒绝)
+    bool  isRefuseAll = 3;//true一键拒绝
+}
+message FriendDisposeRequestS2C
+{
+    FriendDetailInfo friendDetailInfo = 1;//好友信息
+}
+
+//删除好友
+message FriendDelC2S
+{
+    int32 friendId = 1; //好友id
+}
+message FriendDelS2C
+{
+    int32 friendId = 1; //好友id
+}
+
+//查找玩家
+message FriendSearchUserC2S
+{
+    string name = 1;//姓名
+}
+message FriendSearchUserS2C
+{
+    PlayerBase friendBaseInfo = 1;//好友信息
+}
+
+//获取推荐玩家
+message FriendGetRecommendUserC2S
+{
+}
+message FriendGetRecommendUserS2C
+{
+    repeated PlayerBase friendBaseInfoList = 1;//好友列表
+}
+
+//获取最近一起游戏
+message FriendRecentlyMatesC2S
+{
+}
+message FriendRecentlyMatesS2C
+{
+    repeated PlayerFriendInfo friendInfoList = 1;//获取最近伙伴游戏
+}
+
+//添加好友成功推送 //用于客户端添加
+message FriendAddSuccessfulS2C
+{
+    FriendDetailInfo friendDetailInfo = 1;//好友信息
+}
+
+//添加请求推送 //用于客户端显示
+message FriendAddReqS2C
+{
+    PlayerBase  friendBaseInfo = 1;//好友信息
+}
+
+// 附近成员数据
+message NearbyMemberInfo {
+    PlayerBase playerBase = 1;
+    PlayerStatus playerState = 2;
+}
+//获取附近的人
+message FriendGetNearbyC2S
+{
+}
+message FriendGetNearbyS2C
+{
+    repeated NearbyMemberInfo NearbyMemberList = 1;
+}
+//最近一起战斗的玩家信息
+message FriendRecentPlayerListC2S
+{
+}
+//最近一起战斗的玩家信息
+message FriendRecentPlayerListS2C
+{
+	repeated RecentPlayer RecentPlayerList = 1; // 最近一起战斗的玩家信息
+}

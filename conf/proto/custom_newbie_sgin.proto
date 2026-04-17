@@ -1,0 +1,11 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+// 新账号签到活动数据
+message NewbieSignInfo {
+    int32 signDay    = 1; // 签到天数
+    int32 rewardFlag = 2; // 奖励标记（位标记）
+    int64 endTime    = 3; // 结束时间
+}

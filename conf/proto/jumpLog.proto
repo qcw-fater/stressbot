@@ -1,0 +1,79 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+//日志消息
+message LoggerProto
+{
+}
+
+//登陆日志
+message LoginLog
+{
+    int64   Id              = 1;    //日志自增ID
+    int64   WriteTime       = 2;    //日志记录时间
+}
+
+//登出日志
+message LogoutLog
+{
+    int64   Id              = 1;    //日志自增ID
+    int64   WriteTime       = 2;    //日志记录时间
+}
+
+//注册账号
+message RegisterRoleLog
+{
+    int64   Id              = 1;    //日志自增ID
+    int64   WriteTime       = 2;    //日志记录时间
+}
+
+//进入游戏(登陆逻辑服)
+message EnterGameLog
+{
+    int64   Id              = 1;    //日志自增ID
+    int64   WriteTime       = 2;    //日志记录时间
+}
+
+//玩家匹配-加入队列日志
+message MatchJoinQueueLog
+{
+    int64   Id              = 1;    //日志自增ID
+    int64   WriteTime       = 2;    //日志记录时间
+}
+
+//玩家匹配成功日志
+message MatchSucceedLog
+{
+    int64   Id              = 1;    //日志自增ID
+    int64   WriteTime       = 2;    //日志记录时间
+}
+
+//玩家匹配日志
+message MatchLog
+{
+    int64   Id              = 1;    //日志自增ID
+    int64   WriteTime       = 2;    //日志记录时间
+}
+
+//战斗日志
+message BattleLog
+{
+    int64   Id                  = 1;    //日志自增ID
+    int64   WriteTime           = 2;    //日志记录时间
+}
+
+//玩家战斗统计日志
+message FighterStatisticsLog
+{
+    int64               Id              = 1;        //日志自增ID
+    int64               WriteTime       = 2;        //日志记录时间
+}
+
+//玩家战斗日志
+message FighterLog
+{
+    int64               Id                  = 1;    //日志自增ID
+    int64               WriteTime           = 2;    //日志记录时间
+}

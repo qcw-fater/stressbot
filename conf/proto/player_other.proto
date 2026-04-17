@@ -1,0 +1,20 @@
+syntax = "proto3";  //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+import "enum.proto";
+import "custom_friend.proto";
+
+message PlayerSetting {
+    int32 heroId                    = 1;
+    SettingOperateType operateType  = 2;  // 操作类型
+    map<int32, int32> playerSetting = 3;  // 玩家设置数据，目前长度上限32
+}
+
+// 玩家杂项数据
+message playerOtherInfo {
+    repeated PlayerSetting playerSettings   = 1;        // 玩家设置数据
+    int32 dayAddCount                   = 2;        // 信誉分今日日增加次数
+    repeated matchBlack mbList = 3; // 匹配黑名单列表
+}

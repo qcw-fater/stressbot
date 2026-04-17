@@ -1,0 +1,22 @@
+syntax             = "proto3";
+option  go_package = ".;pb";
+package Game;
+
+//后台用  不要删
+//后台用  不要删
+//后台用  不要删
+//后台用  不要删
+//后台用  不要删
+//后台用  不要删
+//后台用  不要删
+// 赛季奖励数据
+message seasonReward {
+    map<int32, int32> RecreationReward = 1; // 娱乐赛赛季奖励
+}
+
+ message Season {
+     int64 Id        = 1; // 赛季ID
+     int64 StartTime = 2; // 开始时间
+     int64 EndTime   = 3; // 结束时间
+ }
+

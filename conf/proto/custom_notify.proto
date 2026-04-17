@@ -1,0 +1,58 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+//导入枚举
+import "enum.proto";
+
+//时间记录
+message NotifyPlayerOnlineState
+{
+	int32         	playerId        = 1;    //玩家ID
+   	PlayerStatus   	state           = 2;    //玩家状态枚举
+}
+
+
+//gm推送给服务器的消息
+message NotifyReport
+{
+	int32           id              = 1;   // 事件id
+	int64         	battleId        = 2;    //战斗id
+	int32         	playerId        = 3;    //举报玩家id
+	string         	playerName        = 4;    //举报玩名字
+	int32         	tPlayerId       = 5;    //被举报玩家id
+	string         	tPlayerName        = 6;    //被举报玩名字
+	bool            isViolation     = 7;    //是否违规
+	int32           subScore        = 8;    //扣分
+	string          ReportReasonList  = 9;//举报原因 ( 一级原因|二级原因,一级原因|二级原因,一级原因|二级原因       key：一级原因（ReportReasonType）   value：ReportReasonSecondaryType)
+	int32           gameBattleModeId  = 10;//游戏配置id
+	int64						reportTime  =11;     //举报时间
+	int32           gagValue    =12;     // 禁言时间 (小时)
+}
+
+
+//gm推送给服务器的消息
+message NotifyReportRankList
+{
+	int32        id     = 1;   // 玩家id
+	repeated  int32 rankType  = 2;//排行榜类型
+	int32       day    = 3;//禁用多少天
+}
+
+//gm推送屏幕
+message EventScreen
+{
+	int64   id              =1;
+	int64   screenType      =2;     // 屏幕类型 目前仅有7块屏幕
+	string  ResourceUrl	    =3;     // 资源地址
+	int64   weight          =4;     // 资源权重
+}
+
+//gm推送赛事入口
+message Entrance
+{
+  string url =1;   // 网址
+	int64 startTime =2; // 开始时间
+	int64 endTime =3;  // 结束时间
+}

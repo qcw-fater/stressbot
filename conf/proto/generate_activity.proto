@@ -1,0 +1,279 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+
+import "custom_task.proto";
+import "custom_activity.proto";
+import "custom_daily_activity.proto";
+import "common.proto";
+
+//玩家每周签到
+message ActivitySignInfoC2S
+{
+}
+//玩家每周签到
+message ActivitySignInfoS2C
+{
+  uint32 WeekSignBitMap = 1;//签到信息 （0：未签到、1：签到未领奖）
+  int32 surplusCount = 2;//剩余补签数
+  int32 usableCount = 3;//可用补签数
+  int32 signCount = 4;//签到次数
+  bool isSign = 5;//当日是否签到
+}
+
+//获取签到信息
+message ActivityGetSignC2S
+{
+}
+
+//获取签到信息
+message ActivityGetSignS2C
+{
+  uint32 WeekSignBitMap = 1;//签到信息 （0：未签到、1：签到未领奖）
+  int32 surplusCount = 2;//剩余补签数
+  int32 usableCount = 3;//可用补签数
+  int32 signCount = 4;//签到次数
+  int64 startTime = 5;//开始时间
+  int64 endTime = 6;//结束时间
+  bool isSign = 7;//当日是否签到
+}
+
+//推送补签次数
+message ActivityUpdateSignS2C
+{
+  int32 surplusCount = 1;//剩余补签数
+  int32 usableCount = 2;//可用补签数
+}
+
+//领取战令奖励
+message ActivityBattlePassGetRewardC2S
+{
+  int32 battlePassLevel = 1;
+  bool  highOrder = 2; // 是否进阶降级的领取
+  bool  easy = 3; // 一键领取
+}
+
+//领取战令奖励
+message ActivityBattlePassGetRewardS2C
+{
+  map<int32, bool>   commonReward = 1;  // 普通奖励,已经领取奖励的标识 key:等级
+  map<int32, bool>   AdvancedReward = 2;  // 进阶奖励,已经领取奖励的标识 key:等级
+}
+
+//更新战令经验,等级
+message ActivityBattlePassUpdateExpS2C
+{
+  int32             battlePassLevel = 1;  // 战令等级
+  int32             battlePassExp = 2;  // 战令经验
+}
+
+
+
+//赛季每周签到
+message ActivityBattlePassSignC2S
+{
+
+}
+
+//赛季每周签到
+message ActivityBattlePassSignS2C
+{
+  int32             battlePassLevel = 1;  // 战令等级
+  int32             battlePassExp = 2;  // 战令经验
+  int32             weekLimitExp = 3;  // 每周已经获得的经验
+}
+
+//购买战令等级
+message ActivityBattlePassBuyLevelC2S
+{
+  int32 buyLevel = 1; // 购买等级
+}
+
+//购买战令等级
+message ActivityBattlePassBuyLevelS2C
+{
+  int32  battlePassLevel = 1;  // 战令等级
+}
+
+//开始战令活动
+message ActivityBattlePassBeginS2C
+{
+  playerBattlePassInfo battlePassData = 1;
+}
+
+//更新战令活动任务
+message ActivityUpdateBattlePassTaskS2C
+{
+  repeated  TaskInfo  taskInfoList = 1;
+}
+//刷新战令活动任务
+message ActivityRefreshBattlePassTaskC2S
+{
+  int32 taskId = 1;
+}
+
+//刷新战令活动任务
+message ActivityRefreshBattlePassTaskS2C
+{
+  int32    oldTaskId = 1; // 刷新前的任务id
+  TaskInfo newTask = 2; // 刷新后的任务
+  int32    refreshCount = 3; // 已刷新次数
+}
+
+//获取日常活动信息
+message ActivityGetDailyActivityC2S
+{
+
+}
+//获取日常活动信息
+message ActivityGetDailyActivityS2C
+{
+  ActivationDaily activationDaily = 1; // 当前奖励池子信息
+}
+
+//刷新日常活动宝箱
+message ActivityDailyRefreshBoxC2S
+{
+  int32 index = 1;// 宝箱列表下标
+}
+//刷新日常活动宝箱
+message ActivityDailyRefreshBoxS2C
+{
+  int32 index = 1;// 宝箱列表下标
+  DailyBox dailyBox = 2;// 宝箱信息
+  int32    RefreshCnt = 3;//刷新次数
+  int32 ItemRefreshCnt = 4;//道具刷新次数
+}
+
+//领取日常活动宝箱
+message ActivityDailyReceiveBoxC2S
+{
+  int32 index = 1;// 宝箱列表下标
+}
+
+//领取日常活动宝箱
+message ActivityDailyReceiveBoxS2C
+{
+  int32 index = 1;// 宝箱列表下标
+  repeated  ShowReward  rewardList = 2;  // 奖励列表
+  repeated DailyBox dailyBoxList = 3;//宝箱列表  // 没有的宝箱为空
+  int64    LastCalculateTime = 4;// 上次计算时间 (宝箱从满到不满会更新的)
+}
+
+//日常宝箱活跃度推送
+message ActivityDailyUpdateBoxS2C
+{
+  repeated DailyBox dailyBoxList = 1;//宝箱列表  // 没有的宝箱为空
+}
+
+//领取战令任务
+message ActivityBattlePassGetTaskRewardC2S
+{
+  int32 teakId = 1; // 任务id
+}
+//领取战令任务
+message ActivityBattlePassGetTaskRewardS2C
+{
+  TaskInfo taskData = 1; // 任务id
+  int32  exp = 2; // 战令当前经验
+  int32  level = 3; // 战令当前等级
+}
+//解锁进阶战令
+message ActivityBattlePassUnlockAdvancedC2S
+{
+  int32 advance = 1; // 1：普通进阶 2：豪华进阶
+//  repeated int32 price   = 2; // 客户端预计价格
+}
+
+//解锁进阶战令
+message ActivityBattlePassUnlockAdvancedS2C
+{
+
+}
+
+
+//分享奖励
+message ActivityShareC2S
+{
+  int32 shareType  = 1;//分享类型  //0全局分享  1英雄首次 2皮肤首次
+  int32 relativeId = 2;//分享关联id
+}
+//分享奖励
+message ActivityShareS2C
+{
+  int32 shareType  = 1;//分享类型  //0全局分享  1英雄首次 2皮肤首次
+  int32 relativeId = 2;//分享关联id
+  int32 shareCnt   = 3;//分享次数
+}
+
+//通知分享信息
+message ActivityShareInfoS2C
+{
+  map<int32, shareCntInfo> ShareInfo              = 1;  // 分享信息 key:分享类型 value:分享次数结构体
+}
+
+//战令多倍池请求更新
+message ActivityBattlePassPowerC2S
+{
+}
+
+//战令多倍池更新消息
+message ActivityBattlePassPowerS2C
+{
+  int32   extraExp          = 1; // 多倍池当前值
+  int32   lastReplyTime     = 2; // 多倍池上次回复时间
+}
+//战令周宝箱领取
+message ActivityBattlePassWeekBoxC2S
+{
+  int32 confId = 1; // 宝箱配置id
+}
+//战令周宝箱领取
+message ActivityBattlePassWeekBoxS2C
+{
+  int32 confId = 1;
+}
+
+//领取每日首胜
+message ActivityGetDailyFirstVictoryC2S
+{
+}
+//领取每日首胜
+message ActivityGetDailyFirstVictoryS2C
+{
+}
+//领取每日首胜推送
+message ActivitySendDailyFirstVictoryS2C
+{
+  int32 DailyFirstVictoryState   = 1; // 每日首胜状态 0 未领取 1可领取 2 已领取
+}
+//更新战令活动数据
+message ActivityUpdateBattlePassS2C
+{
+  playerBattlePassInfo battlePassData = 1;
+}
+//领取众筹奖励
+message ActivityGetCrowdfundingRewardC2S
+{
+}
+//领取众筹奖励
+message ActivityGetCrowdfundingRewardS2C
+{
+}
+//领取返利奖励
+message ActivityGetRebateRewardC2S
+{
+}
+//领取返利奖励
+message ActivityGetRebateRewardS2C
+{
+}
+//战令经验购买
+message ActivityBuyBattlePassExpC2S
+{
+  int32 Level = 1;    // 购买到的等级
+}
+//战令经验购买
+message ActivityBuyBattlePassExpS2C
+{
+}

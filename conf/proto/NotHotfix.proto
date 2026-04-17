@@ -1,0 +1,28 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+message AppearanceComponent {
+  int32 componentId = 1;  // 部件id
+  int32 colorId     = 2;  // 颜色id
+  int64 comicUuId   = 3;  // 装扮的的唯一uid
+}
+
+// 性别
+enum PlayerSex {
+  Unknown = 0;  // 未知
+  Female  = 1;  // 女
+  Male    = 2;  // 男
+}
+
+//客户端日志事件上报
+message ClientLogEventC2S
+{
+  string EventType = 1;
+  string EventName = 2;
+  string EventID = 3;
+  string ActionID = 4;
+  string ActionName = 5;
+  string State = 6;
+}

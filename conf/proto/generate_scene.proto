@@ -1,0 +1,276 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+import "custom_scene.proto";
+import "enum_scene.proto";
+import "NotHotfix.proto";
+
+//心跳
+message ScenePlayerTimeC2S
+{
+}
+//心跳  字节流 little-endian | int64 |
+message ScenePlayerTimeS2C
+{
+
+}
+
+
+//进入场景
+message SceneEnterC2S
+{
+}
+//进入场景
+message SceneEnterS2C
+{
+  int32           sceneCfgId = 1;    //场景配置Id
+  string          sceneServerAddr = 2;    //场景服务器地址 ip "tcp://192.168.1.149:21000",
+  string          sceneSession = 3;    //登录到场景服务器session
+}
+
+
+
+//进入场景服务器验证
+message SceneAuthC2S
+{
+  int32  playerId = 1;
+  string session = 2;
+}
+
+//进入场景服务器验证
+message SceneAuthS2C
+{
+  int32               sceneCfgId = 1;    //场景配置Id
+  Character           object = 2;    //自己的信息
+}
+
+//通知玩家出现
+message SceneAppearS2C
+{
+  repeated Character objects = 1;
+}
+
+//通知玩家消失
+message SceneDisappearS2C
+{
+  repeated int32 playerIds = 1;
+}
+
+//玩家移动同步
+message ScenePlayerMoveC2S
+{
+  MoveSync  data = 1;
+  bytes    moveAct = 2;    //二进制操作指令
+}
+
+//玩家移动同步
+message ScenePlayerMoveS2C
+{
+  MoveSync  data = 1;
+  bytes    moveAct = 2;    //二进制操作指令
+}
+
+//传送
+message SceneTransferC2S
+{
+  string           transfer = 1;  //场景传送点
+  Position3        position = 2;  //当前位置
+}
+//传送
+message SceneTransferS2C
+{
+  string          transfer = 1;    //场景传送点
+  int32           sceneCfgId = 2;    //场景Id
+  bool            changeSceneServer = 3;    //是否需要切换场景服
+}
+
+//踢出玩家
+message SceneKickPlayerS2C
+{
+  KickReason reason = 1;
+}
+
+//更新显示信息
+message SceneUpdateShowInfoS2C
+{
+  int32               playerId = 1;    //玩家Id
+  PlayerShowInfo      showInfo = 2;    //玩家显示基础数据
+}
+
+//切换主城形象
+message SceneChangeUnitIdC2S
+{
+  int32 heroId = 1;
+  int32 unitId = 2; //皮肤ID
+}
+//切换主城形象
+message SceneChangeUnitIdS2C
+{
+  int32 heroId = 1;
+  int32 unitId = 2; //皮肤ID
+  int64 selectUnitIdTime = 3; //上次选择主城形象时间
+}
+
+
+//创建场景对象
+message SceneNewObjectS2C
+{
+  repeated WorldSceneObject list = 1;
+}
+//触发场景事件
+message SceneFinishEventC2S
+{
+  int32 eventPosId = 1; // 事件点Id
+  int32 eventId = 2; // 事件Id
+}
+//触发场景事件
+message SceneFinishEventS2C
+{
+  int32 eventPosId = 1;   // 事件点Id
+  int32 eventId = 2;      // 事件Id
+  int32 eventCount = 3 ;  // 事件触发次数
+}
+
+//玩家发起动作
+message ScenePlayerActionC2S
+{
+  ActionSync data = 1;
+  bytes    act = 2;    //二进制操作指令
+  int32   areaId = 3;   //区域id
+}
+//玩家发起动作
+message ScenePlayerActionS2C
+{
+  ActionSync data = 1;
+  bytes    act = 2;    //二进制操作指令
+  int32   areaId = 3;   //区域id
+}
+
+//响应玩家动作
+message ScenePlayerResponseActionC2S
+{
+  ActionSync data = 1;
+  bytes    act = 2;    //二进制操作指令
+  int32 targetPlayerId = 3;//目标玩家id
+  int32   areaId = 4;   //区域id
+}
+
+//响应玩家动作
+message ScenePlayerResponseActionS2C
+{
+  ActionSync data = 1;
+  bytes    act = 2;    //二进制操作指令
+  int32 targetPlayerId = 3;//目标玩家id
+  int32   areaId = 4;   //区域id
+}
+
+//有玩家响应我
+message ScenePlayerResponseMeS2C
+{
+  int32 responsePlayerId = 1;//响应人id
+  ActionSync responseData = 2; //响应人动作信息
+}
+
+//玩家操作同步
+message ScenePlayerOperationSyncS2C
+{
+  repeated OperationSyncData List = 1;   //批量同步信息
+}
+
+
+//玩家响应nsq的消息
+message NsqScenePlayerAction
+{
+  int32        playerId     = 1;//玩家id
+  int32        actionId     = 2;    //动作id
+  int32        responseUnitId   = 3; //响应者形象id
+  int32        lId              = 4; //logic Id
+  int32        areaId = 5;   //区域id
+}
+
+//设置互动状态
+message ScenePlayerSetActionC2S
+{
+  int32 IsInteractiveActive = 1;// 0互动 1关闭互动
+}
+//设置互动状态
+message ScenePlayerSetActionS2C
+{
+  int32 IsInteractiveActive = 1;// 0互动 1关闭互动
+}
+//场景内传送
+message SceneTransferInnerC2S
+{
+  string    transfer = 1;    //场景传送点
+  MoveSync  data     = 2;
+}
+//场景内传送
+message SceneTransferInnerS2C
+{
+  string    transfer = 1;    //场景传送点
+  MoveSync  data     = 2;
+}
+
+
+
+//设置个人虚拟形象
+message SceneSetAppearanceC2S
+{
+  map<int32,AppearanceComponent> appearance = 1;    // key:槽位 value:部件数据
+}
+
+//设置个人虚拟形象
+message SceneSetAppearanceS2C
+{
+  map<int32,AppearanceComponent> appearance = 1;    // 装扮 key:槽位 value:部件数据
+}
+//主城特效开关
+message SceneEffectsSwitchC2S
+{
+  int32 effectsId = 1; // 主城特效 0 关闭
+}
+//主城特效开关
+message SceneEffectsSwitchS2C
+{
+  int32 effectsId = 1; // 主城特效 0 关闭
+}
+//主城特效id广播
+message SceneEffectsIdS2C
+{
+    int32 playerId   = 1; // 玩家id
+    int32 effectsId  = 2; // 主城特效 0 关闭
+}
+
+//分解cos漫画虚拟形象
+message SceneDecomposeComicC2S
+{
+  repeated int64  comicUuId   = 1;  // 漫画cos的唯一uid
+}
+//分解cos漫画虚拟形象
+message SceneDecomposeComicS2C
+{
+  repeated int64  comicUuId   = 1;  // 漫画cos的唯一uid
+}
+
+//更新场景称号
+message SceneUpdateShowTitleS2C
+{
+  int32  playerId = 1;
+  int32  titleId = 2;
+}
+
+//更新名字
+//更新名字
+message SceneUpdateShowNameC2S
+{
+  int32  playerId = 1;
+  string name = 2;
+}
+
+message SceneUpdateShowNameS2C
+{
+  int32  playerId = 1;
+  string name = 2;
+}

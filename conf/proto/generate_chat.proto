@@ -1,0 +1,75 @@
+syntax            = "proto3";
+option go_package = ".;pb";
+package Game;
+
+import "enum.proto";
+import "enum_battle.proto";
+import "player.proto";
+import "common.proto";
+
+// 战队招募数据
+message RecruitingInfo {
+    int64 guildId        = 1;  // 战队id
+    string guildName     = 2;  // 战队名称
+    int32 peopleCount    = 3;  // 当前人数
+    int32 level          = 4;  // 等级
+    repeated int32 icons = 5;  // 头像
+}
+
+// 队伍召集
+message ConveneInfo {
+    GameModel   model         = 1;   // 游戏模式
+    GameType    gType         = 2;   // 游戏类型
+    int32       modeId        = 3;   // 匹配类型
+    int32       textId        = 4;   // 组队内容id
+    int32       tsId          = 5;   // 队伍服务器id
+    int32       teamCurrCount = 6;   // 队伍当前人数
+    int32       teamMaxCount  = 7;   // 队伍最大人数
+    int64       teamId        = 8;   // 队伍Id
+    int32       channelType   = 9;   // 队伍召集频道类型 1:综合频道 2:战队 3:所有
+    int32       minRankLevel  = 10;  // 段位下限
+    int32       maxRankLevel  = 11;  // 段位上限
+    int32       limitCupNum   = 12;  // 限制杯数(0为不限）
+    ActivityBattleRecruitData activityBattleData = 13; // 活动赛数据
+}
+
+message SceneInfo {
+    int64 sceneGid = 1;
+}
+
+// 聊天数据
+message ChatInfo {
+    ChatType        cType                   = 1;   // 聊天类型
+    int64           sendTime                = 2;   // 发送时间
+    string          content                 = 3;   // 聊天内容
+    bool            isRead                  = 4;   // 消息是否已读（客户端使用）
+    PlayerBase      chatPlayer              = 5;   // 发送消息玩家
+    int32           personalPlayerId        = 6;   // 私聊对象玩家ID（好友or陌生人）
+    ContentType     ctType                  = 7;   // 聊天内容类型
+    ConveneInfo     conveneData             = 8;   // 组队召集数据
+    int64           languageId              = 9;   // 多语言id
+    int32           campChatType            = 10;  // 房间聊天 0：房间内聊天 1：阵营聊天
+	  int32           serverId                = 11;  // 区服id
+    int64           guildId                 = 12; // 战队id
+}
+
+// 聊天信息列表
+message ChatList {
+    repeated ChatInfo chats = 1;  // 聊天信息
+}
+
+// 客户端发送聊天消息
+message ChatSendC2S {
+    ChatInfo chatInfo = 1;  // 聊天消息
+}
+
+// 服务器推送聊天消息
+message ChatPushS2C {
+    repeated ChatInfo chats = 1;  // 聊天消息
+}
+
+// 聊天最后发送时间
+message ChatCDTime {
+    int64 worldLastSendTime = 1;  // 世界聊天最后发言时间
+    int64 sceneLastSendTime = 2;  // 场景聊天最后发言时间
+}

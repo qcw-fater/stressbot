@@ -1,0 +1,83 @@
+syntax = "proto3";  //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+// 导入枚举
+import "enum.proto";
+
+message  storeProductInfo {
+ string store = 1; // 商店类型
+ string id = 2;  // 商品id
+}
+
+// 充值订单数据
+message payInfo {
+  string            purchaseId          = 1;   // 支付唯一ID， 一定要基于此ID进行幂等性检查，以免出现重复发放道具
+  string            userId              = 2;   // 哪位LCX UserID 购买的
+  storeProductInfo  storeProduct        = 3;   // 商品信息
+  string            purchasePayload     = 4;   // 客户端透传参数
+  string            currencyCode        = 5;   // 支付的法币类型
+  double            price               = 6;   // 真实支付的法币数额
+  PayState          state               = 7;   // 订单状态
+  int32             zoneId              = 8;   // 区服id
+}
+
+// 支付客户端透传参数
+message purchasePayloadInfo {
+  int32 payTargetServerType = 1; //充值订单目标环境, 服务器区服id
+  int32 playerId = 2; // 玩家id
+  int32 shopId = 3; // 来源商店ID（法币购买时携带）
+  int32 goodsId = 4; // 商店商品ID（GoodsInfo.ID）
+}
+
+
+// 玩家充值统计
+message playerPayStatistics {
+  map<string,double>            money             = 1; // 充值的钱 key:法币名称 value:累计充值数量
+  int64                         lastDayBuyTime    = 2; // 每日限购上次购买时间
+  int64                         lastWeekBuyTime   = 3; // 每周限购上次购买时间
+  int64                         lastMonthBuyTime  = 4; // 每月限购上次购买时间
+  map<string,int32>             buyCount          = 5; // key:已经购买的商品id,value: 购买次数
+  int64                         totalPayCoupons   = 6; // 累计充值点券
+  firstRewardFlag               firstReward       = 7; // 首次充值奖励标识
+  int32                         totalCouponsValue = 8; // 累计充值价值
+}
+
+message firstRewardFlag {
+  map<int32,int32>   flag       = 1; // key:天数,value: 首冲奖励标识 0 未达成 1首冲奖励未领取 2已领取首冲奖励
+  int32              loginDay   = 2; // 开启首充奖励后的登录天数
+}
+
+// 玩家月卡数据
+message playerPayMonthCard {
+  int32  id                 = 1;  // 月卡id
+  int64  timeOut            = 2;  // 到期时间
+  int64  lastGetRewardTime  = 3;  // 上次领奖时间
+  int64  lastSendExpireTime = 4;  // 上次发放过期邮件时间
+  bool   day7mail           = 5; // 剩余7天的邮件有没有发
+  bool   day3mail           = 6; // 剩余3天的邮件有没有发
+}
+
+// 退款订单商品信息
+message refundsInfo {
+  storeProductInfo  storeProduct        = 1;   // 商品信息
+  int32             count               = 2;   // 数量
+  repeated  string  purchaseIds         = 3;   // 支付唯一ID， 一定要基于此ID进行幂等性检查，以免出现重复发放道具
+}
+
+// 退款订单数据
+message RefundInfo {
+  string                 userId   = 1;   // 哪位LCX UserID 购买的
+  string                 zoneId   = 2;   // 支付的用户所在的区服
+  repeated refundsInfo   refunds  = 3;   // 商品信息
+  int64                  uuid     = 4;
+}
+
+
+// 退款订单数据
+message RpcRefundInfo {
+  RefundInfo       refundData   = 1;   // 退款订单数据
+  repeated string  purchaseIds  = 2;   // 原始订单列表
+  repeated string  payCfgIds    = 3;   // 配置表id列表
+}

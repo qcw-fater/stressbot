@@ -1,0 +1,40 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+// 导入枚举
+import "enum_battle.proto";
+import "enum.proto";
+import "match.proto";
+
+// 匹配服返回队伍服消息
+message MatchMsgToTeam {
+    int64  teamId = 1; // 队伍ID
+    uint32 cmd    = 2; // cmd
+    uint32 act    = 3; // act
+    uint32 error  = 4; // 错误码
+    bytes  data   = 5; // 序列化消息
+    int32  modeId = 6; // 玩法id
+}
+
+// 匹配服到房间服务器 消息数据
+message MatchMsgToRoom {
+    GameModel model                    = 1; // 游戏模式
+    GameType  gType                    = 2; // 游戏类型
+    int32     modeId                   = 3; // 模式Id
+    string    battleVersion            = 4; // 战斗版本
+    string    clientVersion            = 5; // 客户端版本
+    string    battleArea               = 6; // 战斗区域
+    repeated MatchPlayerInfo players   = 7; // 玩家信息
+    LadderDraftType          DraftType = 8; // 是否征召模式
+    int32                    matchFlag = 9; // 0正常 1补偿局 2温暖局
+    int32                    activityStep = 10; // 活动赛阶段
+}
+
+// 匹配状况
+message MatchCondition {
+    int32 MatchId               = 1; // 匹配id
+    int32 MatchSecond           = 2; // 每秒匹配速度
+    int32 MatchLowEfficiencyCnt = 3; // 匹配低效次数
+}

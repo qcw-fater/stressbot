@@ -1,0 +1,30 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+import "custom_collection.proto";
+
+//新藏品道具推送
+message CollectionNewS2C
+{
+    repeated int32 itemId = 1;//道具id
+}
+
+
+
+//玩家藏品信息
+message CollectionInfoC2S
+{
+}
+//玩家藏品信息
+message CollectionInfoS2C
+{
+    repeated CollectionInfo collectionInfoList = 1;//已拥有藏品列表
+}
+
+
+//解锁新增藏品信息推送
+message CollectionAddS2C
+{
+    CollectionInfo collectionInfo = 1;//新增的藏品列表
+}
+

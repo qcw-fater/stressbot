@@ -1,0 +1,39 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+
+import "custom_skin.proto";
+
+
+//使用皮肤
+message SkinBattleUseC2S
+{
+    int32       skinId    = 1;
+}
+//使用皮肤
+message SkinBattleUseS2C
+{
+    int32       skinId    = 1;
+}
+
+
+//解锁
+message SkinNotifyUnlockS2C
+{
+    HeroSkin skin = 1;
+}
+//获取属性加成
+message SkinAttrAddLimitC2S
+{
+}
+//获取属性加成
+message SkinAttrAddLimitS2C
+{
+    map<int32,int32> Limit = 1;
+}
+
+//同步属性加成
+message SkinAttrAddLimitSyncS2C
+{
+    map<int32,int32> Limit = 1;
+}

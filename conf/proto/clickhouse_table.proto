@@ -1,0 +1,1938 @@
+syntax             = "proto3"; //[proto2|proto3]
+
+option  go_package = ".;pb";
+package Game;
+
+import "nohot_custom_battle.proto";
+
+// 道具产耗
+message resource_info {
+    int32 item_id    = 1;
+    int32 after_num  = 2;
+    int32 before_num = 3;
+    int32 change_num = 4;
+}
+
+// 产能消耗字段
+message LogResourceInfo {
+    int32 item_id = 1;
+    int32 after   = 2;
+    int32 before  = 3;
+    int32 diff    = 4;
+}
+
+// 公共字段
+message Common {
+    int32 day         = 1; // 生成记录的日期
+    int32 record_time = 2; // 生成记录的时间
+}
+
+// 角色公共字段
+message RoleCommon {
+    string zone_id   = 1; // 区组id
+    int32  role_id   = 2; // 角色id
+    string role_name = 3; // 角色名称
+    string role_vip  = 4; // 角色VIP
+    string role_pay  = 5; // 角色充值
+}
+
+// LCX公共字段
+message LcxSdkCommon {
+    string app_id         = 1;  // 游戏ID
+    string device_id      = 2;  // 设备号
+    string lcx_id         = 3;  // 账号ID
+    string aff_code       = 4;  // 渠道ID(小包)
+    string device_model   = 5;  // 设备型号
+    string os             = 6;  // 操作系统
+    string store          = 7;  // 商店(大包)
+    string app_version    = 8;  // 游戏包版本号
+    string sdk_version    = 9;  // SDK版本号
+    string carrier        = 10; // 移动运营商
+    string android_id     = 11; // 安卓ID
+    string advertising_id = 12; // 广告ID
+    string idfv           = 13; // 应用开发商标识符
+    string idfa           = 14; // 广告主标识符
+    string country_code   = 15; // 国家或地区代码
+    string network_type   = 16; // 网络类型
+    string locale         = 17; // 设备语言
+    string manufacturer   = 18; // 设备制造商
+    string request_stamp  = 19; // 每次SDK初始化时生成的唯一ID
+}
+
+// 货币存量
+message CurrencyInfo {
+    int64 total_diamond     = 1; // 意志结晶/钻石当前存量
+    int64 total_gold        = 2; // 金币当前存量
+    int64 total_star_money  = 3; // 纪念币当前存量
+    int64 total_gacha_money = 4; // 阅览/抽卡券存量
+}
+
+// 总比赛信息
+message TotalFightInfo {
+    int32 rank_wins       = 1;  //  天梯/排位胜利次数
+    int32 rank_fail       = 2;  //  天梯/排位失败次数
+    int32 budokai_wins    = 3;  //  武道会胜利次数
+    int32 budokai_fail    = 4;  //  武道会失败次数
+    int32 duel_one_wins   = 5;  //  单人乱斗胜利次数
+    int32 duel_one_fail   = 6;  //  单人乱斗失败次数
+    int32 duel_two_wins   = 7;  //  双人乱斗胜利次数
+    int32 duel_two_fail   = 8;  //  双人乱斗失败次数
+    int32 score_wins      = 9;  //  积分争夺胜利次数
+    int32 score_fail      = 10; //  积分争夺失败次数
+    int32 infinity_wins   = 11; //  无限城胜利次数
+    int32 infinity_fail   = 12; //  无限城失败次数
+    int32 dragonball_wins = 13; //  龙珠收集胜利次数
+    int32 dragonball_fail = 14; //  龙珠收集失败次数
+}
+
+// 总比赛信息
+message SeasonFightInfo {
+    int32 season_rank_wins       = 1;  //  天梯/排位胜利次数
+    int32 season_rank_fail       = 2;  //  天梯/排位失败次数
+    int32 season_budokai_wins    = 3;  //  武道会胜利次数
+    int32 season_budokai_fail    = 4;  //  武道会失败次数
+    int32 season_duel_one_wins   = 5;  //  单人乱斗胜利次数
+    int32 season_duel_one_fail   = 6;  //  单人乱斗失败次数
+    int32 season_duel_two_wins   = 7;  //  双人乱斗胜利次数
+    int32 season_duel_two_fail   = 8;  //  双人乱斗失败次数
+    int32 season_score_wins      = 9;  //  积分争夺胜利次数
+    int32 season_score_fail      = 10; //  积分争夺失败次数
+    int32 season_infinity_wins   = 11; //  无限城胜利次数
+    int32 season_infinity_fail   = 12; //  无限城失败次数
+    int32 season_dragonball_wins = 13; //  龙珠收集胜利次数
+    int32 season_dragonball_fail = 14; //  龙珠收集失败次数
+}
+
+// 角色基础快照
+message ch_daily_role_snapshot {
+    // PRIMARY KEY:role_id
+    int64           uuid                = 1;  // 日志ID 必填 Hidden
+    string          writeTime           = 2;  // 日志记录时间必填 DateTime
+    string          version             = 3;  // 版本号必填
+    Common          common              = 4;  // 公共字段
+    RoleCommon      roleCommon          = 5;  // 角色公共字段
+    LcxSdkCommon    sdkCommon           = 6;  // LCX的SDK公共字段
+    int32           guildId             = 7;  // 公会id
+    int32           guild_job           = 8;  // 公会职位
+    int32           total_amount        = 9;  // 角色当前付费水晶存量
+    int32           total_free_amount   = 10; // 角色当前绑定水晶存量
+    CurrencyInfo    currency_info       = 11; // 其他货币存量
+    int32           total_fight_trophy  = 12; // 总奖杯获得
+    int32           total_fight_wins    = 13; // 总胜利次数
+    int32           total_fight_fail    = 14; // 总失败次数
+    int32           total_fight_ranked  = 15; // 最高段位
+    TotalFightInfo  total_fight_info    = 16; // 总比赛信息
+    int32           season_fight_trophy = 17; // 本赛季奖杯获得
+    int32           season_fight_wins   = 18; // 本赛季胜利次数
+    int32           season_fight_fail   = 19; // 本赛季失败次数
+    int32           season_fight_ranked = 20; // 当前段位
+    SeasonFightInfo season_fight_info   = 21; // 本赛季比赛信息
+    int32           continuous_wins     = 22; // 最高连胜
+    int32           thumbs_up           = 23; // 被赞次数
+    int32           total_days          = 24; // 总在线天数
+    string          first_pay_time      = 25; // 角色首次充值时间
+    string          last_pay_time       = 26; // 角色末次充值时间
+    repeated int32  bp_id               = 27; // 拥有战令id
+    repeated int32  bp_level            = 28; // 战令当前等级
+    int32           role_info           = 29; // 角色其他信息
+    int32           total_pay           = 30; // 总充值金额
+    int32           is_ban              = 31; // 封号状态1-活跃，0-封杀
+}
+
+// 角色卡牌快照
+message ch_daily_role_card_snapshot_log {
+    // PRIMARY KEY:role_id,card_id
+    int64          uuid               = 1;  // 日志ID 必填 Hidden
+    int64          writeTime          = 2;  // 日志记录时间必填 DateTime
+    string         version            = 3;  // 版本号必填
+    Common         common             = 4;  // 公共字段
+    RoleCommon     roleCommon         = 5;  // 角色公共字段
+    LcxSdkCommon   sdkCommon          = 6;  // LCX的SDK公共字段
+    int32          card_id            = 7;  // 卡牌id
+    string         card_name          = 8;  // 卡牌名称
+    int32          card_manga         = 9;  // 卡牌所属漫画
+    int32          card_level         = 10; // 卡牌等级
+    repeated int32 card_awake         = 11; // 卡牌觉醒
+    repeated int32 card_talent_slot   = 12; // 卡牌天赋(装备中)
+    int32          card_trophy        = 13; // 卡牌奖杯
+    int32          card_proficiency   = 14; // 卡牌熟练度
+    int32          card_favor         = 15; // 卡牌好感度
+    int32          card_achieve_level = 16; // 卡牌成就等级
+    int32          card_achieve_exp   = 17; // 卡牌成就经验
+    repeated int32 card_skin          = 18; // 卡牌皮肤
+    int32          card_total_nums    = 19; // 卡牌总使用次数
+    int32          card_total_wins    = 20; // 卡牌总胜利次数
+    int32          card_season_nums   = 21; // 本赛季使用次数
+    int32          card_season_wins   = 22; // 本赛季胜利次数
+    int32          card_info          = 23; // 卡牌信息
+}
+
+// 道具快照
+message ch_daily_role_item_snapshot_log {
+    // PRIMARY KEY:role_id,item_id,item_guid
+    int64        uuid       = 1;  // 日志ID 必填 Hidden
+    int64        writeTime  = 2;  // 日志记录时间必填 DateTime
+    string       version    = 3;  // 版本号必填
+    Common       common     = 4;  // 公共字段
+    RoleCommon   roleCommon = 5;  // 角色公共字段
+    LcxSdkCommon sdkCommon  = 6;  // LCX的SDK公共字段
+    int32        item_id    = 7;  // 道具id
+    string       item_name  = 8;  // 道具名称
+    int32        item_nums  = 9;  // 道具数量
+    int64        item_guid  = 10; // 道具guid
+}
+
+// 道具流水
+message ch_resource_change_log {
+    // PRIMARY KEY:role_id,item_type,id,unique_id
+    int64          uuid        = 1;  // 日志ID 必填 Hidden
+    int64          writeTime   = 2;  // 日志记录时间必填 DateTime
+    string         version     = 3;  // 版本号必填
+    Common         common      = 4;  // 公共字段
+    RoleCommon     roleCommon  = 5;  // 角色公共字段
+    LcxSdkCommon   sdkCommon   = 6;  // LCX的SDK公共字段
+    int32          item_type   = 7;  // 道具类型
+    int32          gu_type     = 8;  // 获得或消耗
+    int32          id          = 9;  // 道具id
+    int64          unique_id   = 10; // 道具唯一id
+    int32          nums        = 11; // 道具数量
+    int32          before      = 12; // 改变之前的数量
+    int32          after       = 13; // 改变之后的数量
+    repeated int32 item_detail = 14; // 使用道具类型
+    string         reason      = 15; // 一级原因
+    string         sub_reason  = 16; // 二级原因
+}
+
+// 卡牌升级
+message ch_card_levelUp_log {
+    // PRIMARY KEY:role_id,card_id
+    int64                    uuid         = 1;  // 日志ID 必填 Hidden
+    int64                    writeTime    = 2;  // 日志记录时间必填 DateTime
+    string                   version      = 3;  // 版本号必填
+    Common                   common       = 4;  // 公共字段
+    RoleCommon               roleCommon   = 5;  // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6;  // LCX的SDK公共字段
+    int32                    before       = 7;  // 改变之前的角色等级
+    int32                    after        = 8;  // 改变之后的角色等级
+    int32                    card_id      = 9;  // 英雄id
+    repeated LogResourceInfo resourceInfo = 10; // 道具产耗
+}
+
+// 卡牌觉醒
+message ch_card_awake_log {
+    // PRIMARY KEY:role_id,card_id
+    int64                    uuid         = 1;  // 日志ID 必填 Hidden
+    int64                    writeTime    = 2;  // 日志记录时间必填 DateTime
+    string                   version      = 3;  // 版本号必填
+    Common                   common       = 4;  // 公共字段
+    RoleCommon               roleCommon   = 5;  // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6;  // LCX的SDK公共字段
+    repeated int32           before       = 7;  // 改变之前的觉醒等级
+    repeated int32           after        = 8;  // 改变之后的觉醒等级
+    int32                    card_id      = 9;  // 英雄id
+    repeated LogResourceInfo resourceInfo = 10; // 道具产耗
+}
+
+// 卡牌天赋激活
+message ch_card_talent_log {
+    // PRIMARY KEY:role_id,card_id
+    int64                    uuid         = 1; // 日志ID 必填 Hidden
+    int64                    writeTime    = 2; // 日志记录时间必填 DateTime
+    string                   version      = 3; // 版本号必填
+    Common                   common       = 4; // 公共字段
+    RoleCommon               roleCommon   = 5; // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6; // LCX的SDK公共字段
+    int32                    talentId     = 7; // 天赋Id
+    int32                    card_id      = 8; // 英雄id
+    repeated LogResourceInfo resourceInfo = 9; // 道具产耗
+}
+
+// 好友操作
+message ch_friend_add_log {
+    // PRIMARY KEY:role_id,target_user_id
+    int64        uuid           = 1; // 日志ID 必填 Hidden
+    int64        writeTime      = 2; // 日志记录时间必填 DateTime
+    string       version        = 3; // 版本号必填
+    Common       common         = 4; // 公共字段
+    RoleCommon   roleCommon     = 5; // 角色公共字段
+    LcxSdkCommon sdkCommon      = 6; // LCX的SDK公共字段
+    int32        type           = 7; // 1请求添加好友 2处理好友申请 3删除好友 4拉黑 5删除黑名单
+    int32        target_user_id = 8; // 改变之后的角色等级
+}
+
+// 邮件
+message ch_email_log {
+    // PRIMARY KEY:role_id,cfg_id,mail_guid
+    int64                    uuid             = 1;  // 日志ID 必填 Hidden
+    int64                    writeTime        = 2;  // 日志记录时间必填 DateTime
+    string                   version          = 3;  // 版本号必填
+    Common                   common           = 4;  // 公共字段
+    RoleCommon               roleCommon       = 5;  // 角色公共字段
+    LcxSdkCommon             sdkCommon        = 6;  // LCX的SDK公共字段
+    int32                    mail_operation   = 7;  // 操作类型 1-发送、2-领取、3-删除
+    string                   title            = 8;  // 邮件标题
+    int32                    mail_source      = 9;  // 邮件来源
+    bool                     is_hidden        = 10; // 是否隐藏邮件
+    repeated int64           mail_guid        = 11; // 邮件唯一id列表
+    string                   mail_source_info = 12; // 邮件来源信息
+    int32                    cfg_id           = 13; // 邮件配置id
+    repeated int32           item_id_list     = 14; // 附件内的道具id
+    repeated int32           item_number_list = 15; // 附件内的道具数量
+    repeated LogResourceInfo resourceInfo     = 16; // 道具产耗
+    repeated int32           cfgIds           = 17; // 邮件配置ids
+}
+
+// 商城购买日志
+message ch_player_shop_log {
+    // PRIMARY KEY:role_id,shop_id,goods_id
+    int64                    uuid          = 1;  // 日志ID 必填 Hidden
+    int64                    writeTime     = 2;  // 日志记录时间必填 DateTime
+    string                   version       = 3;  // 版本号必填
+    Common                   common        = 4;  // 公共字段
+    RoleCommon               roleCommon    = 5;  // 角色公共字段
+    LcxSdkCommon             sdkCommon     = 6;  // LCX的SDK公共字段
+    int32                    shop_id       = 7;  //	商店id
+    int32                    shop_type     = 8;  //	商店类型
+    int32                    goods_id      = 9;  //	商品id
+    int32                    buy_count     = 10; //	购买商品次数
+    int32                    buy_nums      = 11; //	购买商品数量
+    int32                    is_discount   = 12; //	商品折扣
+    int32                    limit_type    = 13; //	限购类型
+    int32                    limit_group   = 14; //	限购分组
+    repeated LogResourceInfo resourceInfo  = 15; //	道具产耗
+    string                   cash_goods_id = 16; //	直购商品id
+}
+
+// 玩家抽卡日志
+message ch_player_lottery_lucky_log {
+    // PRIMARY KEY:role_id,gacha_id
+    int64                    uuid            = 1;  // 日志ID 必填 Hidden
+    int64                    writeTime       = 2;  // 日志记录时间 必填 DateTime
+    string                   version         = 3;  // 版本号       必填
+    int32                    playerId        = 4;  // 玩家id
+    Common                   common          = 5;  // 公共字段
+    RoleCommon               roleCommon      = 6;  // 角色公共字段
+    LcxSdkCommon             sdkCommon       = 7;  // LCX的SDK公共字段
+    int32                    count           = 8;  // 抽卡次数
+    repeated int32           cost_id         = 9;  // 消耗道具id
+    repeated int32           cost_number     = 10; // 消耗道具数量
+    repeated int32           add_item_id     = 11; // 产出道具id
+    repeated int32           add_item_number = 12; // 产出道具数量
+    int32                    gacha_id        = 13; // 卡池id
+    repeated LogResourceInfo resourceInfo    = 14; //	道具产耗
+}
+
+// 玩家活动达成日志
+message ch_active_finish_log {
+    // PRIMARY KEY:role_id,active_id
+    int64          uuid         = 1;  // 日志ID 必填 Hidden
+    int64          writeTime    = 2;  // 日志记录时间 必填 DateTime
+    string         version      = 3;  // 版本号       必填
+    int32          playerId     = 4;  // 玩家id
+    Common         common       = 5;  // 公共字段
+    RoleCommon     roleCommon   = 6;  // 角色公共字段
+    LcxSdkCommon   sdkCommon    = 7;  // LCX的SDK公共字段
+    int32          active_id    = 8;  // 活动id
+    string         active_type  = 9;  // new_sign_in-新账号签到领取奖励 bp_reward-BP奖励 trophy-奖杯成就
+    int32          active_index = 10; // 活动档位
+    repeated int32 active_info  = 11; // 活动信息补充
+}
+
+// 玩家活动领奖日志
+message ch_active_reward_log {
+    // PRIMARY KEY:role_id,active_id
+    int64          uuid            = 1;  // 日志ID 必填 Hidden
+    int64          writeTime       = 2;  // 日志记录时间 必填 DateTime
+    string         version         = 3;  // 版本号       必填
+    int32          playerId        = 4;  // 玩家id
+    Common         common          = 5;  // 公共字段
+    RoleCommon     roleCommon      = 6;  // 角色公共字段
+    LcxSdkCommon   sdkCommon       = 7;  // LCX的SDK公共字段
+    int32          active_id       = 8;  // 活动id
+    string         active_type     = 9;  // new_sign_in-新账号签到领取奖励 bp_reward-BP奖励 trophy-奖杯成就
+    repeated int32 active_index    = 10; // 活动档位
+    repeated int32 cost_id         = 11; // 消耗道具id
+    repeated int32 cost_number     = 12; // 消耗道具数量
+    repeated int32 add_item_id     = 13; // 产出道具id
+    repeated int32 add_item_number = 14; // 产出道具数量
+    repeated int32 active_info     = 15; // 活动信息补充
+}
+
+// 玩家登陆日志(HTTP)
+message ch_login_log {
+    // PRIMARY KEY:account
+    int64  uuid          = 1;  // 日志ID 必填 Hidden
+    int64  writeTime     = 2;  // 日志记录时间必填 DateTime
+    string version       = 3;  // 版本号必填
+    string account       = 4;  // 账号
+    int64  lastLoginTime = 5;  // 最后登录时间 TimeStamp
+    string loginIp       = 6;  // 登录IP
+    string ipCity        = 7;  // 登录城市 Hidden
+    string osSystem      = 8;  // 设备系统
+    string deviceBrand   = 9;  // 设备品牌
+    string deviceMemory  = 10; // 设备内存
+    string deviceDpi     = 11; // 分辨率
+    string deviceVersion = 12; // 系统版本号
+    string netType       = 13; // 联网方式
+    string cpuModel      = 14; // cpu型号
+}
+
+// 玩家登出日志
+message ch_logout_log {
+    // PRIMARY KEY:playerId,account,lastLogoutTime
+    int64          uuid           = 1;  // 日志ID 必填 Hidden
+    int64          writeTime      = 2;  // 日志记录时间    必填 DateTime
+    string         version        = 3;  // 版本号       必填
+    int32          playerId       = 4;  // 玩家id
+    string         account        = 5;  // 账号
+    int64          lastLogoutTime = 6;  // 最后登出时间 TimeStamp
+    int32          onlineTime     = 7;  // 在线时长 Seconds
+    int32          lsId           = 8;  // 所在的逻辑服ID
+    string         deviceId       = 9;  // 设备ID
+    string         deviceModel    = 10; // 设备机型
+    int64          createTime     = 11; // 建立时间 TimeStamp
+    int64          lastLogin      = 12; // 最后登陆时间 TimeStamp
+    int32          ladder         = 13; // 段位
+    int32          ladderStar     = 14; // 段位星星
+    int32          dragonScore    = 15; // 龙珠积分
+    repeated int32 attrList       = 16; // 玩家属性
+    int32          bigLadder      = 17; // 玩家大段位
+    string         battleId       = 18; // 战斗id
+    int32          gameModelId    = 19; // 模式id
+    string         teamId         = 20; // 队伍id
+    string         playerState    = 21; // 离线时玩家状态
+    int32          playerLevel    = 22; // 玩家等级
+    int32          normalCount    = 23; // 匹配场次
+    int32          ladderCount    = 24; // 排位场次
+}
+
+// 登录问券数据
+message ch_auth_question_log {
+    // PRIMARY KEY:account,log_type
+    int64        uuid        = 1;  // 日志ID 必填 Hidden
+    int64        writeTime   = 2;  // 日志记录时间    必填 DateTime
+    string       version     = 3;  // 版本号       必填
+    Common       common      = 4;  // 公共字段
+    RoleCommon   roleCommon  = 5;  // 角色公共字段
+    LcxSdkCommon sdkCommon   = 6;  // LCX的SDK公共字段
+    string       account     = 7;  // 账号
+    int32        area_id     = 8;  // 区服id
+    int32        log_type    = 9;  // 日志类型，1开始答题，2答题完成
+    string       question_id = 10; // 问券id
+    bool         finish      = 11; // 完成验证是否成功
+}
+
+// 玩家创角日志
+message ch_registerRole_log {
+    // PRIMARY KEY:playerId,account,name,createTime
+    int64          uuid        = 1;  // 日志ID 必填 Hidden
+    int64          writeTime   = 2;  // 日志记录时间    必填 DateTime
+    string         version     = 3;  // 版本号       必填
+    string         account     = 4;  // 账号
+    int64          createTime  = 5;  // 创建时间 TimeStamp
+    int32          playerId    = 6;  // index:玩家ID
+    string         name        = 7;  // 玩家名字
+    int32          areaId      = 8;  // 区服id
+    int32          headImgId   = 9;  // 初始头像
+    int32          iFrame      = 10; // 初始头像框
+    int32          ladderLevel = 11; // 初始排位段位
+    int32          starNum     = 12; // 初始排位星级
+    int32          currSeason  = 13; // 当前赛季
+    int32          heroId      = 14; // 初始选择英雄
+    repeated int32 attr        = 15; // 玩家属性集
+    string         channel     = 16; // 渠道
+}
+
+// 进入游戏日志
+message ch_enterGame_log {
+    // PRIMARY KEY:playerId,name,createTime,account
+    int64          uuid           = 1;  // 日志ID 必填 Hidden
+    int64          writeTime      = 2;  // 日志记录时间    必填 DateTime
+    string         version        = 3;  // 版本号       必填
+    Common         common         = 4;  // 公共字段
+    RoleCommon     roleCommon     = 5;  // 角色公共字段
+    LcxSdkCommon   sdkCommon      = 6;  // LCX的SDK公共字段
+    string         account        = 7;  // 账号
+    int32          playerId       = 8;  // 玩家ID
+    string         name           = 9;  // 玩家名字
+    int32          lsId           = 10; // 所在的逻辑服ID
+    string         loginIp        = 11; // 登录IP
+    bool           reConnect      = 12; // 是否重连登录
+    string         deviceId       = 13; // 设备ID
+    string         deviceModel    = 14; // 设备机型
+    int64          createTime     = 15; // 建立时间  TimeStamp
+    int64          lastLogoutTime = 16; // 上次登出时间 TimeStamp
+    int32          ladder         = 17; // 段位
+    int32          ladderStar     = 18; // 段位星星
+    repeated int32 attrList       = 19; // 玩家属性集
+    int32          bigLadder      = 20; // 玩家大段位
+    int32          playerLevel    = 21; // 玩家等级
+}
+
+// 赛事举报
+message ch_arena_report_log {
+    // PRIMARY KEY:battle_id,role_id
+    int64          uuid        = 1;  // 日志ID 必填 Hidden
+    int64          writeTime   = 2;  // 日志记录时间    必填 DateTime
+    string         version     = 3;  // 版本号       必填
+    Common         common      = 4;  // 公共字段
+    RoleCommon     roleCommon  = 5;  // 角色公共字段
+    LcxSdkCommon   sdkCommon   = 6;  // LCX的SDK公共字段
+    int32          arena_id    = 7;  // 场景/比赛的ID
+    string         type        = 8;  // 比赛类型
+    string         battle_id   = 9;  // 战斗唯一ID
+    int32          target_id   = 10; // 举报对方id
+    repeated int32 report_type = 11; // 举报类型
+    string         content     = 12; // 举报内容
+}
+
+// 比赛流程日志
+message ch_battle_process_log {
+    // PRIMARY KEY:battle_id,role_id,team_id,room_id
+    int64          uuid                  = 1;  // 日志ID 必填 Hidden
+    int64          writeTime             = 2;  // 日志记录时间    必填 DateTime
+    string         version               = 3;  // 版本号       必填
+    Common         common                = 4;  // 公共字段
+    RoleCommon     roleCommon            = 5;  // 角色公共字段
+    LcxSdkCommon   sdkCommon             = 6;  // LCX的SDK公共字段
+    int32          player_id             = 7;  // 玩家id
+    int32          camp                  = 8;  // 阵营
+    string         battle_id             = 9;  // 战斗id
+    string         team_id               = 10; // 队伍id
+    string         room_id               = 11; // 房间id
+    int32          game_type             = 12; // 游戏类型
+    int32          model_type            = 13; // 模式类型
+    int32          cfg_id                = 14; // 配置id
+    int32          player_index          = 15; // 战斗内玩家index
+    int32          player_ladder_level   = 16; // 玩家段位
+    int32          team_ladder           = 17; // 队伍段位
+    repeated int32 hero_id_list          = 18; // 英雄id
+    repeated int32 skin_id_list          = 19; // 皮肤id
+    int32          log_type              = 20; // 日志类型
+    int32          match_cost            = 21; // 匹配耗时
+    int32          match_type            = 22; // 匹配类型
+    int32          robot_count           = 23; // 房间内机器人数量
+    int32          cancel_player_id      = 24; // 取消匹配玩家id
+    int32          team_hero_cup         = 25; // 队伍内英雄杯数
+    int32          team_normal_win_count = 26; // 队伍休闲连胜次数
+    int32          team_ladder_level     = 27; // 队伍段位
+    int32          team_ladder_win_count = 28; // 队伍排位连胜次数
+    int32          ban_hero_id           = 29; // 禁用英雄id
+    int32          robot_ai_level        = 30; // 机器人AI等级只在开始加载记录
+    string         end_type              = 31; // 结束类型
+    bool           off_line              = 32; // 是否离线
+    int32          match_flag            = 33; // 0正常 1补偿局 2温暖局
+    int32          team_member_num       = 34; // 队伍真实玩家个数
+    int32          room_member_num       = 35; // 房间真实玩家个数
+    int32          player_trophy         = 36; // 玩家奖杯
+    repeated int32 hero_trophy           = 37; // 英雄奖杯
+    repeated int32 hero_level            = 38; // 英雄等级
+    int32          sure_player_id        = 39; // 确认匹配玩家id
+}
+
+// 玩家战斗结算日志
+message ch_battle_end_log {
+    // PRIMARY KEY:battle_id,role_id
+    int64           uuid                  = 1;  // 日志ID 必填 Hidden
+    int64           writeTime             = 2;  // 日志记录时间 必填 DateTime
+    string          version               = 3;  // 版本号       必填
+    Common          common                = 4;  // 公共字段
+    RoleCommon      roleCommon            = 5;  // 角色公共字段
+    LcxSdkCommon    sdkCommon             = 6;  // LCX的SDK公共字段
+    string          battle_id             = 7;  // 战斗ID
+    string          team_id               = 8;  // 队伍id
+    string          room_id               = 9;  // 房间id
+    int32           fighter_index         = 10; // 索引
+    int32           season                = 11; // 当前赛季
+    int32           score                 = 12; // 战斗评分
+    int32           rank                  = 13; // 排名
+    bool            mvp                   = 14; // 是否mvp
+    int32           cfg_id                = 15; // 配置id
+    int32           model_type            = 16; // 模式类型
+    int32           robot_num             = 17; // 机器人个数
+    string          end_type              = 18; // 结算原因
+    repeated int32  card_level            = 19; // 卡牌等级
+    repeated string card_awake            = 20; // 卡牌觉醒
+    repeated string card_talent_slot      = 21; // 卡牌潜能(装备中)
+    repeated string card_super_slot       = 22; // 卡牌天赋(装备中)
+    repeated int32  kill_num              = 23; // 击杀数
+    repeated int32  dead_num              = 24; // 死亡数
+    repeated int32  damage                = 25; // 伤害量(按英雄统计)
+    repeated int32  cure                  = 26; // 治疗量(按英雄统计)
+    repeated int32  hero_id_list          = 27; // 英雄id
+    repeated int32  skin_id_list          = 28; // 皮肤id
+    repeated int32  takeDamage            = 29; // 承受伤害量(按英雄统计)
+    int64           cost_time             = 30; // 战斗时长
+    int32           hook_time             = 31; // 挂机时长
+    int32           speak_count           = 32; // 发言次数
+    int32           emoji_count           = 33; // 表情次数
+    bool            off_line              = 34; // 是否离线
+    int32           camp                  = 35; // 阵营
+    int32           game_type             = 36; // 游戏类型
+    repeated int32  skill_id              = 37; // 技能ID
+    repeated int32  skill_use_drag_count  = 38; // 拖拽技能使用次数
+    repeated int32  skill_use_click_count = 39; // 点击技能使用次数
+    repeated int32  skill_hit_drag_count  = 40; // 拖拽技能命中次数
+    repeated int32  skill_hit_click_count = 41; // 点击技能命中次数
+    int32           match_flag            = 42; // 0正常 1补偿局 2温暖局
+    repeated int32  skill_damage          = 43; // 技能伤害
+    repeated int32  skill_cure            = 44; // 技能治疗
+    repeated int32  self_revert           = 45; // 回复(自己给自己产生的治疗)
+    repeated int32  take_cure             = 46; // 治疗（别人对自己产生的治疗）
+    repeated int32  make_cure             = 47; // 产生治疗，对其他人造成回血
+    repeated int32  skill_self_revert     = 48; // 回复（技能对自己产生的治疗）
+    repeated int32  skill_cure_other      = 49; // 治疗（对别人产生的治疗）
+    int32           player_ladder_level   = 50; // 玩家段位
+    int32           player_trophy         = 51; // 玩家奖杯
+    repeated int32  hero_trophy           = 52; // 英雄奖杯
+    repeated int32  hero_level            = 53; // 英雄等级
+    int32           teammate_num          = 54; // 队友人数
+    repeated int32  assist_num            = 55; // 助攻数
+    repeated int32  ShieldDamage          = 56; // 承受护盾伤害
+}
+
+message CoordinateInfo {
+    int32 x = 1; // x轴
+    int32 y = 2; // y轴
+}
+
+message LogMemberInfo {
+    int32 player_id = 1;
+    int32 index_id  = 2;
+}
+
+// 数量信息
+message LogNumberInfo {
+    int32 camp = 1; // 阵营
+    int32 num  = 2; // 数量
+}
+
+// 玩家段位信息
+message PlayerLadderLevelInfo {
+    int32                player_id     = 1;
+    int32                ladder_level  = 2;
+    repeated HeroCupInfo hero_cup_info = 3;
+}
+
+// 英雄奖励数量
+message HeroCupInfo {
+    int32 hero_id    = 1;
+    int32 cup_number = 2;
+    int32 level      = 3;
+}
+
+// 关卡统计日志
+message ch_customs_pass_log {
+    // PRIMARY KEY:battle_id,model_type,game_type,model_id
+    int64                          uuid                          = 1;  // 日志ID 必填 Hidden
+    int64                          writeTime                     = 2;  // 日志记录时间 必填 DateTime
+    string                         version                       = 3;  // 版本号       必填
+    string                         battle_id                     = 4;  // 战斗id
+    int32                          model_type                    = 5;  // 模式
+    int32                          game_type                     = 6;  // 游戏类型
+    int32                          model_id                      = 7;  // 模式id
+    repeated int32                 affix                         = 8;  // 词缀
+    repeated LogMemberInfo         player_list                   = 9;  // 玩家列表
+    repeated CoordinateInfo        kill_coordinate_list          = 10; // 击杀坐标
+    repeated CoordinateInfo        dead_coordinate_list          = 11; // 死亡坐标
+    repeated CoordinateInfo        destroy_coordinate_list       = 12; // 被破坏的场景物件坐标
+    repeated LogNumberInfo         camp_kill_num                 = 13; // 阵营击杀次数
+    repeated LogNumberInfo         camp_dead_num                 = 14; // 阵营死亡次数
+    repeated int32                 map_grid_list                 = 15; // 格子数据
+    repeated int32                 player_grid_list              = 16; // 玩家格子
+    repeated CoordinateInfo        first_circle_coordinate_list  = 17; // 第一次缩圈玩家坐标
+    repeated CoordinateInfo        second_circle_coordinate_list = 18; // 第二次缩圈玩家坐标
+    int32                          final_circle_time             = 19; // 决赛圈时间
+    repeated LogNumberInfo         revive_num_list               = 20; // 玩家复活次数
+    repeated LogNumberInfo         max_cocoa_num                 = 21; // 阵营携带最大刚果数量
+    repeated LogNumberInfo         max_sky_num                   = 22; // 玩家携带最大空岛贝数量
+    repeated CoordinateInfo        scroll_coordinate_list        = 23; // 拾取卷轴的坐标
+    int32                          win_scroll_num                = 24; // 胜方卷轴数量
+    int32                          lose_scroll_num               = 25; // 败方卷轴数量
+    repeated int32                 martial_arts_time             = 26; // 武道会每局时间
+    int32                          weak_num                      = 27; // 小局总虚弱次数
+    int32                          enter_hero_num                = 28; // 上过场的英雄数
+    int32                          avg_weak_num                  = 29; // 平均虚弱次数
+    repeated int32                 dead_type_list                = 30; // 死亡方式1:退出，2擂台垮塌
+    int32                          fail_dead_num                 = 31; // 失败方英雄死亡次数
+    bool                           extra_time                    = 32; // 是否产生了加时赛
+    int32                          fail_score                    = 33; // 失败方分数
+    repeated int32                 curse_num                     = 34; // 胜方咒符数量和败方咒符数量
+    repeated int32                 curse_burn_num                = 35; // 单次咒符燃烧数量
+    repeated CoordinateInfo        curse_coordinate_num          = 36; // 拾取咒符坐标
+    repeated LogNumberInfo         curse_monster_camp_hurt       = 37; // 阵营对咒灵造成的伤害
+    int32                          curse_monster_damage          = 38; // 咒灵造成的伤害
+    int32                          robot_number                  = 39; // 机器人数量
+    int32                          win_average_scroll_max_value  = 40; // 胜方单局掉落卷轴最大值
+    int32                          lose_average_scroll_max_value = 41; // 败方单局掉落卷轴最大值
+    int32                          win_average_scroll_number     = 42; // 胜方掉落卷轴总次数
+    int32                          lose_average_scroll_number    = 43; // 败方掉落卷轴总次数
+    int32                          win_first_scroll_rate         = 44; // 卷轴胜利方式 1首次集齐全部卷轴，2集齐全部卷轴， 3超时 4平局
+    int32                          average_weak_time             = 45; // 平均虚弱时间
+    int32                          average_push_distance         = 46; // 推进距离
+    bool                           is_second_check_point         = 47; // 是否到达第二个检查点
+    bool                           is_first_check_point          = 48; // 是否到达第一个检查点
+    int32                          push_first_check_point_time   = 49; // 第一个检查点到达时间
+    int32                          push_second_check_point_time  = 50; // 第二个检查点到达时间
+    int32                          ding_shang_win_type           = 51; // 胜利方：1推车 2防守
+    int32                          push_car_death_num            = 52; // 推车方死亡次数
+    int32                          defend_car_death_num          = 53; // 守车方死亡次数
+    int32                          both_in_circle_time           = 54; // 双方有人在圈内的时间（争夺时间）
+    int32                          luffy_back_num                = 55; // 路飞每局后退次数
+    int32                          lie_che_win_type              = 56; // 胜利方：1人类 2boss
+    int32                          boss_average_blood            = 57; // 结束时，boss剩余血量
+    int32                          human_average_time            = 58; // 结束时，人类剩余时间
+    int32                          average_touch_num             = 59; // 击杀触手次数
+    int32                          average_peace_time            = 60; // 每小局平局时长
+    int32                          first_drop_person_win_rate    = 61; // （队伍胜利时，队伍中存在首次掉人情况）次数
+    repeated int32                 first_drop_person_time        = 62; // 首次掉人时间
+    repeated int32                 each_peace_win_person_num     = 63; // 每小局胜利方平局剩余人数
+    int32                          fail_peace_score              = 64; // 整局失败方平局得分
+    bool                           bo3                           = 65; // 是否是bo3
+    int32                          round                         = 66; // bo3时当前回合数
+    repeated PlayerLadderLevelInfo player_ladder_level_list      = 67; // 玩家段位均值
+    int32                          roundTime                     = 68; // 对局时长
+    int32                          win_camp                      = 69; // 获胜阵营	数值
+    int32                          surplus_hp_ratio              = 70; // 胜利方木人（须佐）剩余血量百分比	数值
+    repeated LogNumberInfo         chakra_count                  = 71; // 收集查克拉数量	列表 根据阵营统计
+    repeated LogNumberInfo         ten_tails_take_damage         = 72; // 对十尾分身造成的伤害	列表 十尾分身的子类型为咒灵，根据阵营统计
+    int32                          ten_tails_damage              = 73; // 十尾分身造成的伤害	数值
+    int32                          straight_skill_count          = 74; // 直线技能使用次数
+    int32                          jettisonin_skill_count        = 75; // 抛投技能使用次数
+    int32                          fail_attack_ratio             = 76; // 失败方进度百分比
+    Common                         common                        = 77; // 公共字段
+    RoleCommon                     roleCommon                    = 78; // 角色公共字段
+    LcxSdkCommon                   sdkCommon                     = 79; // LCX的SDK公共字段
+    repeated string                playerTrophyList              = 80; // 玩家奖杯列表
+    repeated int32                 heroIdList                    = 81; // 英雄id列表
+    repeated int32                 heroTrophy                    = 82; // 英雄奖杯
+}
+
+// 玩家激活码日志
+message ch_player_gift_code_log {
+    // PRIMARY KEY:playerId,batch,giftCodeType
+    int64        uuid          = 1;  // 日志ID 必填 Hidden
+    int64        writeTime     = 2;  // 日志记录时间 必填 DateTime
+    string       version       = 3;  // 版本号       必填
+    Common       common        = 4;  // 公共字段
+    RoleCommon   roleCommon    = 5;  // 角色公共字段
+    LcxSdkCommon sdkCommon     = 6;  // LCX的SDK公共字段
+    int32        playerId      = 7;  // 玩家id
+    string       code          = 8;  // 礼包码
+    int32        batch         = 9;  // 批次
+    int32        groupUseCount = 10; // 分组使用次数
+    int32        giftCodeType  = 11; // 礼包码类型
+}
+
+// 客户端日志事件上报
+message ch_player_client_event_log {
+    // PRIMARY KEY:eventType,playerId
+    int64  uuid       = 1;  // 日志ID 必填 Hidden
+    int64  writeTime  = 2;  // 日志记录时间 必填 DateTime
+    string version    = 3;  // 版本号       必填
+    int32  playerId   = 4;  // 玩家id
+    string eventType  = 5;  // 事件类型
+    string eventName  = 6;  // 事件名称
+    string eventID    = 7;  // 事件id
+    string actionID   = 8;  // 动作id
+    string actionName = 9;  // 动作名称
+    string state      = 10; // 状态
+    string account    = 11; // 账号
+    string areaId     = 12; // 区服id
+}
+
+// 玩家战斗延迟数据
+message ch_player_battle_ping_log {
+    // PRIMARY KEY:battle_id,role_id
+    int64        uuid                            = 1;  // 日志ID 必填 Hidden
+    int64        writeTime                       = 2;  // 日志记录时间 必填 DateTime
+    string       version                         = 3;  // 版本号       必填
+    Common       common                          = 4;  // 公共字段
+    RoleCommon   roleCommon                      = 5;  // 角色公共字段
+    LcxSdkCommon sdkCommon                       = 6;  // LCX的SDK公共字段
+    int32        off_line_time                   = 7;  // 掉线时长
+    string       battle_id                       = 8;  // 战斗id
+    int32        valid_recv                      = 9;  // 有效的接收次数
+    int32        recount_count                   = 10; // 重连次数   [skipIdx:set(100)]
+    int32        repackage_count                 = 11; // 补包次数
+    int32        max_send_frame_count            = 12; // 最大发送帧个数
+    int32        max_repackage_frame_count       = 13; // 补帧最大个数
+    int32        send_frame_count                = 14; // 发送帧次数
+    int32        max_frame_diff                  = 15; // 补帧最大帧差
+    int32        ping                            = 16; // 平均PING
+    int32        recv_bytes                      = 17; // 接收包大小 FileSize
+    int32        send_bytes                      = 18; // 发送包大小 FileSize
+    int32        ping_count                      = 19; // ping次数
+    int32        all_ping_count                  = 20; // ping次数 Hidden
+    int32        revc_count                      = 21; // 收包次数
+    int32        send_count                      = 22; // 发包次数
+    int32        ping_count30                    = 23; // ping30的次数
+    int32        ping_count60                    = 24; // ping60的次数
+    int32        ping_count90                    = 25; // ping90的次数
+    int32        ping_count120                   = 26; // ping120的次数
+    int32        ping_count460                   = 27; // ping460的次数
+    int32        ping100_count_total             = 28; // ping460的次数
+    int32        out_times                       = 30; // 掉线次数  [skipIdx:set(100)]
+    int32        on_hook_time                    = 31; // 挂机时长
+    int32        pn_hook_count                   = 32; // 挂机次数
+    string       server_ip                       = 33; // 服务器ip
+    int32        server_id                       = 34; // 服务器id
+    int32        fps                             = 35; // 平均fps值
+    int32        fps_count                       = 36; // 帧率次数
+    int32        stuck_count1                    = 37; // 卡顿1
+    int32        stuck_count2                    = 38; // 卡顿2
+    int32        stuck_count3                    = 39; // 卡顿3
+    int32        quality                         = 40; // 画面品质
+    int32        original_width                  = 41; // 分辨率宽
+    int32        original_height                 = 42; // 分辨率高
+    int32        resolution                      = 43; // 分辨率档位
+    int32        cpu                             = 44; // CPU个数
+    int32        gpu                             = 45; // GPU个数
+    int32        memory                          = 46; // 内存
+    int32        cpu_frequency                   = 47; // CPU外频
+    int32        target_fps                      = 48; // 目标帧数
+    string       client_ip                       = 49; // 玩家ip
+    int64        count                           = 50; // 样本数
+    int32        up_loss_count                   = 51; // 上行丢包数
+    int32        down_loss_count                 = 52; // 下行丢包数
+    int64        up_loss_rate                    = 53; // 上行丢包率
+    int64        down_loss_rate                  = 54; // 下行丢包率
+    int32        quick_frame_count               = 55; // 快速补帧次数
+    int32        frame_diff_count                = 56; // 帧差补帧次数
+    int32        timeout_frame_count             = 57; // 超时补帧次数
+    int32        dynamic_redundancy_count        = 58; // 开启动态冗余次数
+    int32        client_request_redundancy_count = 59; // 客户端申请补包次数
+    int64        max_latency                     = 60; // 最大延迟
+    int64        min_latency                     = 61; // 最小延迟
+    int64        avg_latency                     = 62; // 平均延迟
+    int64        p50_latency                     = 63; // 50分位延迟
+    int64        p75_latency                     = 64; // 75分位延迟
+    int64        p90_latency                     = 65; // 90分位延迟
+    int64        p95_latency                     = 66; // 95分位延迟
+    int64        p99_latency                     = 67; // 99分位延迟
+    int64        max_jitter                      = 68; // 最大抖动
+    int64        ewma_jitter                     = 69; // 加权移动平均抖动
+    int64        std_dev_jitter                  = 70; // 标准偏差
+    int32        game_model_id                   = 71; // 配置id
+    string       battle_area                     = 72; // 战斗区域
+    int32        game_type                       = 73; // 游戏类型
+}
+
+// 服务器数据
+message ch_server_info {
+    int64  uuid                       = 1;  // 日志ID 必填 Hidden
+    int64  writeTime                  = 2;  // 日志记录时间 必填 DateTime
+    Common common                     = 3;  // 公共字段
+    string name                       = 4;  // 服务器名
+    string type                       = 5;  // 服务器类型
+    int64  cpu_percent                = 6;  // 系统cpu使用率
+    int64  sys_load1                  = 7;  // 1min系统负载（放大100倍）
+    int64  sys_load5                  = 8;  // 5min系统负载（放大100倍）
+    int64  sys_load15                 = 9;  // 15min系统负载（放大100倍）
+    int64  net_bytes_sent             = 10; // 网络发送字节数/s
+    int64  net_bytes_recv             = 11; // 网络收到字节数/s
+    int64  net_packets_sent           = 12; // 网络发送包数/s
+    int64  net_packets_recv           = 13; // 网络收到包数/s
+    int64  net_err_in                 = 14; // 网络接收时的错误数/s
+    int64  net_err_out                = 15; // 网络发送时的错误数/s
+    int64  net_drop_in                = 16; // 网络被丢弃的入站数据包数/s
+    int64  net_drop_out               = 17; // 网络丢弃的出站数据包数/s
+    int64  net_fifo_in                = 18; // 网络接收时FIFO缓冲区错误的数/s
+    int64  net_fifo_out               = 19; // 网络发送时FIFO缓冲区错误的数/s
+    int64  disk_user_mb               = 20; // 磁盘已用空间(mb)
+    int64  mem_percent                = 21; // 系统内存使用率
+    int32  process_fd_number          = 22; // 进程使用的文件描述符的数量
+    int32  process_panic_count        = 23; // 进程Panic次数
+    int32  process_server_load        = 24; // 进程当前负载
+    int32  process_connect_num        = 25; // 进程连接数
+    int32  process_go_num             = 26; // 进程协程数量
+    int64  process_cpu_percent        = 27; // 进cpu使用率
+    int64  process_mem_percent        = 28; // 该进程使用的总RAM的百分比
+    int64  process_self_goroutine_num = 29; // 自身创建协程个数
+    int64  process_count              = 30; // 在线人数
+    int64  hits                       = 31; // 连接池中找到空闲连接的次数
+    int64  misses                     = 32; // 连接池中未找到空闲连接的次数
+    int64  timeouts                   = 33; // 等待连接超时发生的次数
+    int64  waitCount                  = 34; // 连接等待发生的次数
+    int64  waitDurationNs             = 35; // 等待连接所花费的总时间（单位：纳秒）
+    int64  totalConns                 = 36; // 连接池中的总连接数
+    int64  idleConns                  = 37; // 连接池中的空闲连接数
+    int64  staleConns                 = 38; // 从连接池中移除的失效（陈旧）连接数
+}
+
+// 玩家登录战斗重连
+message ch_player_login_battle_reconnect_log {
+    // PRIMARY KEY:playerId,roomId,teamId
+    int64        uuid         = 1;  // 日志ID 必填 Hidden
+    int64        writeTime    = 2;  // 日志记录时间 必填 DateTime
+    string       version      = 3;  // 版本号       必填
+    Common       common       = 4;  // 公共字段
+    RoleCommon   roleCommon   = 5;  // 角色公共字段
+    LcxSdkCommon sdkCommon    = 6;  // LCX的SDK公共字段
+    int32        playerId     = 7;  // 玩家id
+    int32        gType        = 8;  // 游戏类型
+    int32        battleModeId = 9;  // 配置id
+    string       roomId       = 10; // 房间id
+    string       teamId       = 11; // 队伍id
+    int32        tmId         = 12; // 队伍服务器id
+    int32        roomServerId = 13; // 房间服务器id
+    int32        errorCode    = 14; // 检测结果
+    string       playerState  = 15; // 玩家状态
+}
+
+// 玩家充值订单
+message ch_pay_log {
+    // PRIMARY KEY:purchaseId,playerId,userId,store,goodsId
+    int64  uuid               = 1;  // 日志ID 必填 Hidden
+    int64  writeTime          = 2;  // 日志记录时间 必填 DateTime
+    string version            = 3;  // 版本号       必填
+    string purchaseId         = 4;  // 充值订单id
+    string userId             = 5;  // lcx账号id
+    string store              = 6;  // 商店类型
+    string goodsId            = 7;  // 商品id
+    string currencyCode       = 8;  // 货币类型
+    int32  price              = 9;  // 价格(已放大1000倍)
+    int32  playerId           = 10; // 玩家id
+    int32  serverType         = 11; // 目标服务器枚举
+    int32  logType            = 12; // 日志类型
+    int32  noticeServerId     = 13; // 订阅发布的服务器id
+    string rpcHttpAddress     = 14; // 通知其他充值服地址
+    int32  rpcHttpId          = 15; // 通知其他充值服Id
+    bool   subscriptionOnLine = 16; // logic收到订阅时玩家是否在线
+    int32  value              = 17; // 本次充值价值
+}
+
+// 玩家退款订单
+message ch_refund_log {
+    // PRIMARY KEY:playerId,userId
+    int64           uuid               = 1;  // 日志ID 必填 Hidden
+    int64           writeTime          = 2;  // 日志记录时间 必填 DateTime
+    string          version            = 3;  // 版本号       必填
+    repeated string purchaseIds        = 4;  // 退款订单id列表
+    repeated string payConfigIds       = 5;  // 订单对应的配置表id
+    int32           playerId           = 6;  // 玩家id
+    int32           logType            = 7;  // 日志类型
+    int32           noticeServerId     = 8;  // 订阅发布的服务器id
+    bool            subscriptionOnLine = 9;  // logic收到订阅时玩家是否在线
+    string          userId             = 10; // lcx账号id
+    int64           refundId           = 11; // 订单id
+    int32           refundNumber       = 12; // 退款点券数量
+    int32           afterNumber        = 13; // 退款后点券数量
+}
+
+// 个性化产出日志
+message ch_customization_log {
+    // PRIMARY KEY:playerId,itemId
+    int64        uuid       = 1;  // 日志ID 必填 Hidden
+    int64        writeTime  = 2;  // 日志记录时间 必填 DateTime
+    string       version    = 3;  // 版本号       必填
+    Common       common     = 4;  // 公共字段
+    RoleCommon   roleCommon = 5;  // 角色公共字段
+    LcxSdkCommon sdkCommon  = 6;  // LCX的SDK公共字段
+    int32        playerId   = 7;  // 玩家id
+    int32        itemId     = 8;  // 道具id
+    int32        itemNumber = 9;  // 道具数量
+    int32        reasonId   = 10; // 来源id
+    string       subReason  = 11; // 子来源
+    int64        timeOut    = 12; // 到期时间
+    int32        faceId     = 13; // 个性化表情id
+}
+
+// 皮肤日志
+message ch_skin_log {
+    // PRIMARY KEY:skin_id,hero_id
+    int64        uuid       = 1;  // 日志ID 必填 Hidden
+    int64        writeTime  = 2;  // 日志记录时间 必填 DateTime
+    string       version    = 3;  // 版本号       必填
+    Common       common     = 4;  // 公共字段
+    RoleCommon   roleCommon = 5;  // 角色公共字段
+    LcxSdkCommon sdkCommon  = 6;  // LCX的SDK公共字段
+    int32        skin_id    = 7;  // 皮肤id
+    int32        hero_id    = 8;  // 英雄id
+    string       reason     = 9;  // 来源id
+    string       sub_reason = 10; // 子来源
+    int64        time_out   = 11; // 到期时间
+}
+
+// 网络层数据
+message ch_network_info_log {
+    int64          uuid                  = 1;  // 日志ID 必填 Hidden
+    int64          writeTime             = 2;  // 日志记录时间 必填 DateTime
+    string         version               = 3;  // 版本号       必填
+    int64          tcpReadCalls          = 4;  // tcp读取调用次数
+    int64          tcpReadFails          = 5;  // tcp读取失败次数
+    int64          tcpReadBytes          = 6;  // tcp读取大小
+    int64          tcpWritevCalls        = 7;  // tcp写入次数
+    int64          tcpWritevBlocks       = 8;  // tcp写入大小
+    int64          tcpWritevFails        = 9;  // tcp写入失败次数
+    int64          tcpWriteNotify        = 10; // tcp写入epoll_ctl个数
+    int64          tcpOnWriteCalls       = 11; // tcpOnWrite调用的次数
+    int64          tcpConnCreateCount    = 12; // tcp连接创建个数
+    int64          tcpConnCloseCount     = 13; // tcp连接关闭个数
+    int64          tcpPostponeWriteOff   = 14; // tcp延迟写关闭次数
+    int64          tcpPostponeWriteOn    = 15; // tcp延迟写次数
+    int64          udpConnectCount       = 16; // udp连接创建个数
+    int64          udpReadCount          = 17; // udp读取次数
+    int64          udpMaxReadMMsgPackets = 18; // udp最大读取消息包数
+    int64          udpAvgReadMMsgPackets = 19; // udp平均读取消息包数
+    int64          udpReadFails          = 20; // udp读取失败次数
+    int64          udpSendCount          = 21; // udp发送次数
+    int64          udpMaxSendMMsgPackets = 22; // udp最大发送消息包数
+    int64          udpAvgSendMMsgPackets = 23; // udp平均发送消息包数
+    int64          udpSendFails          = 24; // udp发送失败次数
+    int64          udpReadRate1          = 25; // udp读取速率
+    int64          udpSendRate1          = 26; // udp发送速率
+    int64          udpUnboundedChSize    = 27; // udp无限缓冲区大小
+    int64          udpUnboundedBuffCount = 28; // udp无限缓冲区缓存大小
+    int64          udpEagainCount        = 29; // udpEAGAIN次数
+    int64          udpMaxReadPacketBytes = 30; // udp最大读取数据包大小
+    int64          udpMaxSendPacketBytes = 31; // udp最大发送数据包大小
+    int64          udpAvgReadPacketBytes = 32; // udp平均读取数据包大小
+    int64          udpAvgSendPacketBytes = 33; // udp平均发送数据包大小
+    int64          udpReadEmptyCount     = 34; // udp读取数据为空的次数
+    int64          udpProcessMsgMaxTime  = 35; // 消息处理最大耗时(微秒)
+    int64          udpProcessMsgAvgTime  = 36; // UDP消息处理平均耗时(微秒)
+    int64          udpProcessMsgTime99PT = 37; // UDP消息处理百分之99耗时(微秒)
+    repeated int32 udpProcessorChanSize  = 38; // udp处理器chan大小
+    int64          epollWait             = 39; // epoll_wait返回的次数
+    int64          epollNoWait           = 40; // msc=0时epoll_wait调用的次数
+    int64          epollEvents           = 41; // epoll事件总数
+    int64          taskAssigned          = 42; // 任务执行次数
+    int32          workPoolRunning       = 43; // 正在运行的工作线程的数量
+    string         serverName            = 44; // 服务器名称
+    string         serverType            = 45; // 服务器类型
+}
+
+// 玩家战斗udp统计
+message ch_player_battle_udp_log {
+    int64        uuid             = 1;  // 日志ID 必填 Hidden
+    int64        writeTime        = 2;  // 日志记录时间 必填 DateTime
+    string       version          = 3;  // 版本号       必填
+    Common       common           = 4;  // 公共字段
+    RoleCommon   roleCommon       = 5;  // 角色公共字段
+    LcxSdkCommon sdkCommon        = 6;  // LCX的SDK公共字段
+    int64        battle_id        = 7;  // 战斗id
+    string       address          = 8;  // 地址
+    int32        net_type         = 9;  // 网络类型
+    int32        recv_count       = 10; // 接收包次数
+    int32        recv_valid_count = 11; // 接收有效包次数
+    int64        create_time      = 12; // 创建时间 TimeStamp
+    int64        destroy_time     = 13; // 销毁时间 TimeStamp
+    int32        pass_time        = 14; // 连接时长 Seconds
+    int32        in_lost_count    = 15; // 接收丢包次数
+    int32        out_lost_count   = 16; // 发送丢包次数
+    int32        ping_count       = 17; // ping次数
+    int32        avg_ping         = 18; // 平均ping
+    int32        min_ping         = 19; // 最小ping
+    int32        max_ping         = 20; // 最大ping
+    int32        ping90_rate      = 21; // 90PT
+    int32        ping95_rate      = 22; // 95PT
+    int32        ping99_rate      = 23; // 99PT
+    int32        ping30           = 24; // ping30次数
+    int32        ping60           = 25; // ping60次数
+    int32        ping90           = 26; // ping90次数
+    int32        ping120          = 27; // ping120次数
+    int32        ping460          = 28; // ping460次数
+    int32        connect_index    = 29; // 连接索引
+    string       server_ip        = 30; // 服务器ip
+    int32        server_id        = 31; // 服务器id
+    string       area_id          = 32; // 服务器区域
+    int32        ping150          = 33; // ping150次数
+    int32        ping180          = 34; // ping180次数
+    int32        ping240          = 35; // ping240次数
+    int32        ping300          = 36; // ping300次数
+    int32        ping400          = 37; // ping400次数
+}
+
+// 新手引导英雄首次选择
+message ch_hero_choose_log {
+    int64        uuid       = 1; // 日志ID 必填 Hidden
+    int64        writeTime  = 2; // 日志记录时间 必填 DateTime
+    string       version    = 3; // 版本号       必填
+    Common       common     = 4; // 公共字段
+    RoleCommon   roleCommon = 5; // 角色公共字段
+    LcxSdkCommon sdkCommon  = 6; // LCX的SDK公共字段
+    int32        heroId     = 7; // 英雄id
+}
+
+message ch_player_battle_area_delay_log {
+    int64  uuid         = 1; // 日志ID 必填 Hidden
+    int64  writeTime    = 2; // 日志记录时间 必填 DateTime
+    string version      = 3; // 版本号       必填
+    string battleArea   = 4; // 战斗区域
+    int32  delayTime    = 5; // 平均延迟
+    int32  maxDelayTime = 6; // 最大延迟
+    int32  minDelayTime = 7; // 最小延迟
+    int32  pingSendCnt  = 8; // ping发送次数
+    int32  pingRecvCnt  = 9; // ping接收次数
+}
+
+// 赛事奖励
+message ch_player_arena_reward_log {
+    int64                      uuid                       = 1;  // 日志ID 必填 Hidden
+    int64                      writeTime                  = 2;  // 日志记录时间 必填 DateTime
+    string                     version                    = 3;  // 版本号       必填
+    Common                     common                     = 4;  // 公共字段
+    RoleCommon                 roleCommon                 = 5;  // 角色公共字段
+    LcxSdkCommon               sdkCommon                  = 6;  // LCX的SDK公共字段
+    int64                      battle_id                  = 7;  // 战斗id
+    int32                      player_ladder_level_charge = 8;  // 玩家段位变化
+    int32                      player_trophy_charge       = 9;  // 玩家奖杯变化
+    repeated HeroCupChargeInfo hero_trophy_charge         = 10; // 英雄奖杯变化
+    int32                      player_precision_charge    = 11; // 专精度变化
+}
+
+// 英雄奖杯变化
+message HeroCupChargeInfo {
+    int32 hero_id    = 1;
+    int32 cup_charge = 2;
+}
+
+// 获得英雄
+message ch_add_hero_log {
+    // PRIMARY KEY:player_id,hero_id
+    int64        uuid       = 1;  // 日志ID 必填 Hidden
+    int64        writeTime  = 2;  // 日志记录时间 必填 DateTime
+    string       version    = 3;  // 版本号       必填
+    Common       common     = 4;  // 公共字段
+    RoleCommon   roleCommon = 5;  // 角色公共字段
+    LcxSdkCommon sdkCommon  = 6;  // LCX的SDK公共字段
+    int32        player_id  = 7;  // 玩家玩家id
+    int32        hero_id    = 8;  // 英雄id
+    string       reason     = 9;  // 来源
+    string       subReason  = 10; // 子来源
+}
+
+// 匹配成功日志
+message ch_match_success_log {
+    int64  uuid           = 1; // 日志ID 必填 Hidden
+    int64  writeTime      = 2; // 日志记录时间 必填 DateTime
+    string version        = 3; // 版本号       必填
+    int32  agent_id       = 4; // agent_id
+    int32  model          = 5; // 模式id
+    int32  game_type      = 6; // 游戏类型
+    string battle_version = 7; // 战斗版本
+    string client_version = 8; // 客户端版本
+    string battle_area    = 9; // 战斗区域
+}
+
+// 匹配因子日志
+message ch_match_factor_log {
+    int64  uuid         = 1;  // 日志ID 必填 Hidden
+    int64  writeTime    = 2;  // 日志记录时间 必填 DateTime
+    string version      = 3;  // 版本号       必填
+    string redis_key    = 4;  // key
+    int32  match_id     = 5;  // 匹配id
+    int32  game_mode    = 6;  // 游戏模式
+    int32  game_type_id = 7;  // 游戏类型id
+    int32  team_num     = 8;  // 队伍数量
+    int64  get_cnt      = 9;  // 获得数量
+    int32  need_get_cnt = 10; // 需要获得数量
+    int32  load_count   = 11; // 加载次数
+    int32  online_count = 12; // 在线人数
+}
+
+// LBS日志：
+// 1.LBS定位
+// 2.LBS积分变动
+// 3.LBS称号获取
+// 4.LBS战力衰减
+message ch_player_lbs_log {
+    // PRIMARY KEY:player_id
+    int64        uuid                  = 1;  // 日志ID 必填 Hidden
+    int64        writeTime             = 2;  // 日志记录时间 必填 DateTime
+    string       version               = 3;  // 版本号       必填
+    Common       common                = 4;  // 公共字段
+    RoleCommon   roleCommon            = 5;  // 角色公共字段
+    LcxSdkCommon sdkCommon             = 6;  // LCX的SDK公共字段
+    int32        player_id             = 7;  // 玩家玩家id
+    int32        lbs_id                = 8;  // 城市id
+    int32        lbs_score             = 9;  // lbs当前积分值
+    int32        lbs_score_change      = 10; // LBS积分变动
+    int32        lbs_title_rank        = 11; // LBS称号排行
+    bool         isUse                 = 12; // 是否使用
+    int64        getTime               = 13; // 获取时间
+    int64        expireTime            = 14; // 失效时间
+    int32        lbs_attenuation_count = 15; // LBS战力衰减次数
+    int32        log_type              = 16; // 日志类型
+    int32        hero_id               = 17; // 英雄id
+}
+
+// 玩家任务日志
+message ch_player_task_log {
+    // PRIMARY KEY:player_id, task_uuid, task_config_id,add_reason_id
+    int64          uuid               = 1;  // 日志ID 必填 Hidden
+    int64          writeTime          = 2;  // 日志记录时间 必填 DateTime
+    string         version            = 3;  // 版本号       必填
+    Common         common             = 4;  // 公共字段
+    RoleCommon     roleCommon         = 5;  // 角色公共字段
+    LcxSdkCommon   sdkCommon          = 6;  // LCX的SDK公共字段
+    int32          player_id          = 7;  // 玩家玩家id
+    int64          task_uuid          = 8;  // 任务uuid
+    int32          task_config_id     = 9;  // 任务配置id
+    int32          task_status        = 10; // 任务状态
+    int32          task_progress      = 11; // 任务进度
+    int32          task_trigger_time  = 12; // 任务触发时机
+    int32          log_type           = 13; // 日志类型
+    repeated int64 add_task_uuid      = 14; // 添加的任务uuid列表
+    repeated int32 add_task_config_id = 15; // 添加的任务配置id列表
+    int32          add_reason_id      = 16; // 添加的任务来源
+    int32          add_sub_reason_id  = 17; // 添加的任务子来源
+    repeated int64 del_task_uuid      = 18; // 删除的任务uuid列表
+}
+
+// 玩家奇遇礼包日志
+message ch_player_adventure_gift_log {
+    // PRIMARY KEY:player_id,adventure_gift_id,type_id
+    int64        uuid              = 1; // 日志ID 必填 Hidden
+    int64        writeTime         = 2; // 日志记录时间 必填 DateTime
+    string       version           = 3; // 版本号       必填
+    Common       common            = 4; // 公共字段
+    RoleCommon   roleCommon        = 5; // 角色公共字段
+    LcxSdkCommon sdkCommon         = 6; // LCX的SDK公共字段
+    int32        player_id         = 7; // 玩家玩家id
+    int32        type_id           = 8; // 类型  1是触发  2是道具购买  3是直购
+    int32        adventure_gift_id = 9; // 奇遇礼包id
+}
+
+// 单局结算日志
+message ch_game_fight_log {
+    // PRIMARY KEY:battle_id,role_id
+    int64                    uuid                = 1;  // 日志ID 必填 Hidden
+    int64                    writeTime           = 2;  // 日志记录时间 必填 DateTime
+    string                   version             = 3;  // 版本号       必填
+    Common                   common              = 4;  // 公共字段
+    RoleCommon               roleCommon          = 5;  // 角色公共字段
+    LcxSdkCommon             sdkCommon           = 6;  // LCX的SDK公共字段
+    string                   battle_id           = 7;  // 战斗ID
+    string                   team_id             = 8;  // 队伍id
+    string                   room_id             = 9;  // 房间id
+    int32                    fighter_index       = 10; // 索引
+    int32                    season              = 11; // 当前赛季
+    int32                    score               = 12; // 战斗评分
+    int32                    rank                = 13; // 排名
+    bool                     mvp                 = 14; // 是否mvp
+    int32                    cfg_id              = 15; // 配置id
+    int32                    model_type          = 16; // 模式类型
+    int32                    robot_num           = 17; // 机器人个数
+    int32                    game_type           = 18; // 游戏类型
+    string                   end_type            = 19; // 结算原因
+    int32                    player_ladder_level = 20; // 玩家段位
+    int32                    player_trophy       = 21; // 玩家奖杯
+    int32                    hero_trophy         = 22; // 英雄奖杯
+    int32                    hero_level          = 23; // 英雄等级
+    int32                    hero_id             = 24; // 英雄id
+    int32                    skin_id             = 25; // 皮肤id
+    int32                    kill_num            = 26; // 击杀数
+    int32                    dead_num            = 27; // 死亡数
+    int32                    damage              = 28; // 伤害量(按英雄统计)
+    int32                    cure                = 29; // 治疗量(按英雄统计)
+    int32                    takeDamage          = 30; // 承受伤害量(按英雄统计)
+    int32                    assistNumber        = 31; // 助攻数
+    repeated skillStatistics skillData           = 32; // 技能统计数据
+    repeated BehaviorInfo    behaviorData        = 33; // 行为数据
+    int32                    restoreHealth       = 34; // 恢复生命
+    int32                    selfRevert          = 35; // 回复(自己给自己产生的治疗)
+    int32                    takeCure            = 36; // 治疗（别人对自己产生的治疗）
+    int32                    makeCure            = 37; // 产生治疗，对其他人造成回血
+    int32                    camp                = 38; // 阵营
+    int32                    game_inning         = 39; // 比赛第N局
+    int32                    take_shield_damage  = 40; // 承受护盾伤害，自身收到的护盾伤害
+}
+
+// 玩家加入或退出战队日志
+message ch_player_flow_guild_log {
+    // PRIMARY KEY:target_user_id,guild_id
+    int64        uuid           = 1;  // 日志ID 必填 Hidden
+    int64        writeTime      = 2;  // 日志记录时间 必填 DateTime
+    string       version        = 3;  // 版本号       必填
+    Common       common         = 4;  // 公共字段
+    RoleCommon   roleCommon     = 5;  // 角色公共字段
+    LcxSdkCommon sdkCommon      = 6;  // LCX的SDK公共字段
+    int64        guild_id       = 7;  // 战队Id
+    string       guild_name     = 8;  // 战队名称
+    int32        guild_level    = 9;  // 战队等级
+    int32        target_user_id = 10; // 玩家id
+    int32        logType        = 11; // 日志类型
+}
+
+// 玩家创建战队日志
+message ch_player_create_guild_log {
+    // PRIMARY KEY:guild_id
+    int64                    uuid         = 1;  // 日志ID 必填 Hidden
+    int64                    writeTime    = 2;  // 日志记录时间 必填 DateTime
+    string                   version      = 3;  // 版本号       必填
+    Common                   common       = 4;  // 公共字段
+    RoleCommon               roleCommon   = 5;  // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6;  // LCX的SDK公共字段
+    int64                    guild_id     = 7;  // 战队Id
+    string                   guild_name   = 8;  // 战队名称
+    int32                    guild_level  = 9;  // 战队等级
+    repeated LogResourceInfo resourceInfo = 10; // 道具产耗
+}
+
+// 2026新增/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// 道具使用
+message ch_player_item_use_log {
+    int64                    uuid         = 1; // 日志ID 必填 Hidden
+    int64                    writeTime    = 2; // 日志记录时间 必填 DateTime
+    string                   version      = 3; // 版本号       必填
+    Common                   common       = 4; // 公共字段
+    RoleCommon               roleCommon   = 5; // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6; // LCX的SDK公共字段
+    repeated LogResourceInfo resourceInfo = 7; // 道具产耗
+}
+
+// 胜场奖励-每日胜场奖励任务
+message ch_player_day_victory_log {
+    // PRIMARY KEY:indexId
+    int64                    uuid         = 1; // 日志ID 必填 Hidden
+    int64                    writeTime    = 2; // 日志记录时间 必填 DateTime
+    string                   version      = 3; // 版本号       必填
+    Common                   common       = 4; // 公共字段
+    RoleCommon               roleCommon   = 5; // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6; // LCX的SDK公共字段
+    repeated int32           indexId      = 7; // 档位 1、3、8场次奖励
+    repeated LogResourceInfo resourceInfo = 8; // 道具产耗
+    repeated int32           indexidArray = 9; // 档位 1、3、8场次奖励
+}
+
+//    领取奖杯奖励
+message ch_player_trophy_reward_log {
+    // PRIMARY KEY:indexId
+    int64                    uuid         = 1; // 日志ID 必填 Hidden
+    int64                    writeTime    = 2; // 日志记录时间 必填 DateTime
+    string                   version      = 3; // 版本号       必填
+    Common                   common       = 4; // 公共字段
+    RoleCommon               roleCommon   = 5; // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6; // LCX的SDK公共字段
+    int32                    indexId      = 7; // 奖杯等级
+    repeated LogResourceInfo resourceInfo = 8; // 道具产耗
+}
+
+// 达成成就奖励
+message ch_player_achievement_reward_log {
+    // PRIMARY KEY:activityType,activityId
+    int64                    uuid         = 1; // 日志ID 必填 Hidden
+    int64                    writeTime    = 2; // 日志记录时间 必填 DateTime
+    string                   version      = 3; // 版本号       必填
+    Common                   common       = 4; // 公共字段
+    RoleCommon               roleCommon   = 5; // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6; // LCX的SDK公共字段
+    int32                    activityType = 7; // 活动类型
+    int32                    activityId   = 8; // 活动id
+    repeated LogResourceInfo resourceInfo = 9; // 道具产耗
+}
+
+// 赛季奖励领取
+message ch_player_season_reward_log {
+    // PRIMARY KEY:indexId,activityType
+    int64                    uuid         = 1; // 日志ID 必填 Hidden
+    int64                    writeTime    = 2; // 日志记录时间 必填 DateTime
+    string                   version      = 3; // 版本号       必填
+    Common                   common       = 4; // 公共字段
+    RoleCommon               roleCommon   = 5; // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6; // LCX的SDK公共字段
+    int32                    activityType = 9; // 活动类型
+    int32                    indexId      = 7; // 奖励档位
+    repeated LogResourceInfo resourceInfo = 8; // 道具产耗
+}
+
+// 赛季任务达成
+message ch_player_season_task_log {
+    // PRIMARY KEY:activityType,cfgId,taskId
+    int64        uuid         = 1; // 日志ID 必填 Hidden
+    int64        writeTime    = 2; // 日志记录时间 必填 DateTime
+    string       version      = 3; // 版本号       必填
+    Common       common       = 4; // 公共字段
+    RoleCommon   roleCommon   = 5; // 角色公共字段
+    LcxSdkCommon sdkCommon    = 6; // LCX的SDK公共字段
+    int32        activityType = 7; // 活动类型
+    int32        cfgId        = 8; // 配置id
+    int32        taskId       = 9; // 任务id
+}
+
+// 新手签到奖励
+message ch_player_new_sign_log {
+    // PRIMARY KEY:activityId,indexId
+    int64                    uuid         = 1;  // 日志ID 必填 Hidden
+    int64                    writeTime    = 2;  // 日志记录时间 必填 DateTime
+    string                   version      = 3;  // 版本号       必填
+    Common                   common       = 4;  // 公共字段
+    RoleCommon               roleCommon   = 5;  // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6;  // LCX的SDK公共字段
+    int32                    activityId   = 7;  // 活动id
+    int32                    indexId      = 8;  // 天数
+    repeated LogResourceInfo resourceInfo = 9;  // 道具产耗
+    repeated int32           indexidArray = 10; // 档位 1、3、8场次奖励
+}
+
+// 活跃奖励
+message ch_player_active_reward_log {
+    // PRIMARY KEY:activityId,indexId
+    int64                    uuid         = 1; // 日志ID 必填 Hidden
+    int64                    writeTime    = 2; // 日志记录时间 必填 DateTime
+    string                   version      = 3; // 版本号       必填
+    Common                   common       = 4; // 公共字段
+    RoleCommon               roleCommon   = 5; // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6; // LCX的SDK公共字段
+    int32                    activityId   = 7; // 活动id
+    int32                    indexId      = 8; // 奖励档位  活跃点10、50、100、150、200
+    repeated LogResourceInfo resourceInfo = 9; // 道具产耗
+}
+
+// 英雄熟练度
+message ch_player_hero_proficiency_log {
+    // PRIMARY KEY:heroId,indexId
+    int64                    uuid         = 1; // 日志ID 必填 Hidden
+    int64                    writeTime    = 2; // 日志记录时间 必填 DateTime
+    string                   version      = 3; // 版本号       必填
+    Common                   common       = 4; // 公共字段
+    RoleCommon               roleCommon   = 5; // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6; // LCX的SDK公共字段
+    int32                    heroId       = 7; // 英雄id
+    int32                    indexId      = 8; // 奖励档位  熟练度60、420.....
+    repeated LogResourceInfo resourceInfo = 9; // 道具产耗
+}
+
+//  漫迷历程通行证进阶
+message ch_player_battle_pass_up_step_log {
+    // PRIMARY KEY:bpId,seasonId,indexId
+    int64                    uuid         = 1;  // 日志ID 必填 Hidden
+    int64                    writeTime    = 2;  // 日志记录时间 必填 DateTime
+    string                   version      = 3;  // 版本号       必填
+    Common                   common       = 4;  // 公共字段
+    RoleCommon               roleCommon   = 5;  // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6;  // LCX的SDK公共字段
+    int32                    bpId         = 7;  // 通行证id
+    int32                    seasonId     = 8;  // 赛季id
+    int32                    indexId      = 9;  // 档位 区分小卡588，大卡1088进阶的那个
+    repeated LogResourceInfo resourceInfo = 10; // 道具产耗
+}
+
+//    漫迷历程通行证进阶奖励
+message ch_player_battle_pass_reward_log {
+    // PRIMARY KEY:bpId,seasonId
+    int64                    uuid         = 1;  // 日志ID 必填 Hidden
+    int64                    writeTime    = 2;  // 日志记录时间 必填 DateTime
+    string                   version      = 3;  // 版本号       必填
+    Common                   common       = 4;  // 公共字段
+    RoleCommon               roleCommon   = 5;  // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6;  // LCX的SDK公共字段
+    int32                    bpId         = 7;  // 通行证id
+    int32                    seasonId     = 8;  // 赛季id
+    repeated int32           bpLevel      = 9;  // 若是一键领取，则使用数组形式，例如{1、2、3、4}
+    repeated LogResourceInfo resourceInfo = 10; // 道具产耗
+}
+
+// 漫迷历程通行证任务
+message ch_player_battle_pass_task_log {
+    // PRIMARY KEY:bpId,seasonId
+    int64                    uuid         = 1;  // 日志ID 必填 Hidden
+    int64                    writeTime    = 2;  // 日志记录时间 必填 DateTime
+    string                   version      = 3;  // 版本号       必填
+    Common                   common       = 4;  // 公共字段
+    RoleCommon               roleCommon   = 5;  // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6;  // LCX的SDK公共字段
+    int32                    bpId         = 7;  // 通行证id
+    int32                    seasonId     = 8;  // 赛季id
+    int32                    taskType     = 9;  // 1-每日，2-赛季
+    int32                    taskId       = 10; // 任务id
+    repeated LogResourceInfo resourceInfo = 11; // 道具产耗
+}
+
+// 点赞奖励
+message ch_player_like_reward_log {
+    // PRIMARY KEY:targetId
+    int64                    uuid         = 1;  // 日志ID 必填 Hidden
+    int64                    writeTime    = 2;  // 日志记录时间 必填 DateTime
+    string                   version      = 3;  // 版本号       必填
+    Common                   common       = 4;  // 公共字段
+    RoleCommon               roleCommon   = 5;  // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6;  // LCX的SDK公共字段
+    int32                    targetId     = 7;  // 对方用户id
+    repeated LogResourceInfo resourceInfo = 11; // 道具产耗
+}
+
+//    通行证任务刷新
+message ch_player_battle_pass_task_refresh_log {
+    // PRIMARY KEY:taskType
+    int64                    uuid         = 1;  // 日志ID 必填 Hidden
+    int64                    writeTime    = 2;  // 日志记录时间 必填 DateTime
+    string                   version      = 3;  // 版本号       必填
+    Common                   common       = 4;  // 公共字段
+    RoleCommon               roleCommon   = 5;  // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6;  // LCX的SDK公共字段
+    int32                    bpId         = 7;  // 通行证id
+    int32                    seasonId     = 8;  // 赛季id
+    int32                    taskType     = 9;  // 1-每日，2-赛季
+    int32                    taskIdAfter  = 10; // 刷新前任务id
+    int32                    taskIdBefore = 11; // 刷新后任务id
+    repeated LogResourceInfo resourceInfo = 12; // 道具产耗
+}
+
+// 七日集训
+message ch_player_active_training_log {
+    // PRIMARY KEY:activityType,activityId
+    int64                    uuid         = 1;  // 日志ID 必填 Hidden
+    int64                    writeTime    = 2;  // 日志记录时间 必填 DateTime
+    string                   version      = 3;  // 版本号       必填
+    Common                   common       = 4;  // 公共字段
+    RoleCommon               roleCommon   = 5;  // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6;  // LCX的SDK公共字段
+    int32                    activityType = 7;  // 活动类型 1.每日 2.积分
+    int32                    activityId   = 8;  // 活动id
+    repeated int32           indexidArray = 9;  // 档位数组
+    repeated LogResourceInfo resourceInfo = 10; // 道具产耗
+}
+
+//    英雄试炼活动领奖
+message ch_player_hero_trial_reward_log {
+    // PRIMARY KEY:activityType,activityId
+    int64                    uuid         = 1;  // 日志ID 必填 Hidden
+    int64                    writeTime    = 2;  // 日志记录时间 必填 DateTime
+    string                   version      = 3;  // 版本号       必填
+    Common                   common       = 4;  // 公共字段
+    RoleCommon               roleCommon   = 5;  // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6;  // LCX的SDK公共字段
+    int32                    activityType = 7;  // 活动类型 1.每日 2.积分
+    int32                    activityId   = 8;  // 活动id
+    repeated int32           indexidArray = 9;  // 档位数组
+    repeated LogResourceInfo resourceInfo = 10; // 道具产耗
+}
+
+//  英雄试炼进阶花费
+message ch_player_hero_trial_advance_reward_log {
+    int64                    uuid         = 1; // 日志ID 必填 Hidden
+    int64                    writeTime    = 2; // 日志记录时间 必填 DateTime
+    string                   version      = 3; // 版本号       必填
+    Common                   common       = 4; // 公共字段
+    RoleCommon               roleCommon   = 5; // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6; // LCX的SDK公共字段
+    repeated LogResourceInfo resourceInfo = 7; // 道具产耗
+}
+
+// 段位变化记录
+message ch_player_ladder_change_log {
+    int64        uuid       = 1;  // 日志ID 必填 Hidden
+    int64        writeTime  = 2;  // 日志记录时间 必填 DateTime
+    string       version    = 3;  // 版本号       必填
+    Common       common     = 4;  // 公共字段
+    RoleCommon   roleCommon = 5;  // 角色公共字段
+    LcxSdkCommon sdkCommon  = 6;  // LCX的SDK公共字段
+    int32        before     = 7;  // 变化之前
+    int32        after      = 8;  // 变化之后
+    int32        beforeStar = 9;  // 变化之前
+    int32        afterStar  = 10; // 变化之后
+}
+
+// 任务领奖
+message ch_player_task_reward_log {
+    int64                    uuid         = 1; // 日志ID 必填 Hidden
+    int64                    writeTime    = 2; // 日志记录时间 必填 DateTime
+    string                   version      = 3; // 版本号       必填
+    Common                   common       = 4; // 公共字段
+    RoleCommon               roleCommon   = 5; // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6; // LCX的SDK公共字段
+    int32                    activityId   = 7; // 任务id
+    repeated int32           taskIdArray  = 8; // 任务配置id数组
+    repeated LogResourceInfo resourceInfo = 9; // 道具产耗
+}
+
+// 背包道具兑换
+message ch_player_pack_item_exchange_log {
+    int64                    uuid         = 1; // 日志ID 必填 Hidden
+    int64                    writeTime    = 2; // 日志记录时间 必填 DateTime
+    string                   version      = 3; // 版本号       必填
+    Common                   common       = 4; // 公共字段
+    RoleCommon               roleCommon   = 5; // 角色公共字段
+    LcxSdkCommon             sdkCommon    = 6; // LCX的SDK公共字段
+    repeated LogResourceInfo resourceInfo = 7; // 道具产耗
+}
+
+// 队伍公共字段
+message TeamCommon {
+    string          teamId              = 1;  // 队伍ID
+    int32           leaderId            = 2;  // 队长ID
+    int32           gType               = 3;  // 游戏类型
+    int32           modeId              = 4;  // 模式Id
+    int32           members             = 5;  // 队伍成员数量
+    string          status              = 6;  // 队伍状态
+}
+
+// 队伍玩家日志
+message ch_team_player_log {
+    // PRIMARY KEY:role_id
+    int64           uuid                = 1;  // 日志ID 必填 Hidden
+    string          writeTime           = 2;  // 日志记录时间必填 DateTime
+    string          version             = 3;  // 版本号
+    Common          common              = 4;  // 公共字段
+    RoleCommon      roleCommon          = 5;  // 角色公共字段
+    LcxSdkCommon    sdkCommon           = 6;  // LCX的SDK公共字段
+    TeamCommon      teamCommon          = 7;  // 队伍公共字段
+    int32           logType             = 8;  // 日志类型
+}
+
+// 队伍玩家聊天日志
+message ch_team_chat_log {
+    int64           uuid                = 1;  // 日志ID 必填 Hidden
+    string          writeTime           = 2;  // 日志记录时间必填 DateTime
+    string          version             = 3;  // 版本号
+    Common          common              = 4;  // 公共字段
+    RoleCommon      roleCommon          = 5;  // 角色公共字段
+    LcxSdkCommon    sdkCommon           = 6;  // LCX的SDK公共字段
+    string          teamId              = 7;  // 队伍ID
+    int32           msgIndex            = 8;  // 玩家发送消息的Index
+    string          data                = 9;  // 消息数据
+}
+
+// 队伍玩家想玩英雄日志
+message ch_want_hero_log {
+    int64             uuid                = 1;  // 日志ID 必填 Hidden
+    string            writeTime           = 2;  // 日志记录时间必填 DateTime
+    string            version             = 3;  // 版本号
+    Common            common              = 4;  // 公共字段
+    RoleCommon        roleCommon          = 5;  // 角色公共字段
+    LcxSdkCommon      sdkCommon           = 6;  // LCX的SDK公共字段
+    string            teamId              = 7;  // 队伍ID
+    repeated int32    heroList            = 8;  // 想玩英雄列表
+}
+
+// 玩家匹配未准备惩罚结束时间日志
+message ch_not_ready_end_time_log {
+    int64           uuid                = 1;  // 日志ID 必填 Hidden
+    string          writeTime           = 2;  // 日志记录时间必填 DateTime
+    string          version             = 3;  // 版本号
+    Common          common              = 4;  // 公共字段
+    RoleCommon      roleCommon          = 5;  // 角色公共字段
+    LcxSdkCommon    sdkCommon           = 6;  // LCX的SDK公共字段
+    int64           notReadyEndTime     = 7;  // 玩家匹配未准备惩罚结束时间
+}
+
+// 自定义房间公共字段
+message CustomRoomCommon {
+    string            roomId              = 1;  // 房间ID
+    int32             leaderId            = 2;  // 队长ID
+    int32             gType               = 3;  // 游戏类型
+    int32             modeId              = 4;  // 模式Id
+    repeated int32    members             = 5;  // 房间成员数量
+    repeated int32    lookers             = 6;  // 观战者ID
+    string            status              = 7;  // 房间状态
+    int32             robotNumber         = 8;  // 机器人数量
+    repeated int32    affix               = 9;  // 词缀
+    int32             matchFlag           = 10; // 匹配标记
+}
+
+// 自定义房间日志
+message ch_custom_room_log {
+    // PRIMARY KEY:role_id
+    int64               uuid                = 1;  // 日志ID 必填 Hidden
+    string              writeTime           = 2;  // 日志记录时间必填 DateTime
+    string              version             = 3;  // 版本号
+    Common              common              = 4;  // 公共字段
+    RoleCommon          roleCommon          = 5;  // 角色公共字段
+    LcxSdkCommon        sdkCommon           = 6;  // LCX的SDK公共字段
+    CustomRoomCommon    roomCommon          = 7;  // 自定义房间公共字段
+    int32               logType             = 8;  // 日志类型
+    repeated int32      heroes              = 9;  // 英雄ID
+    repeated int32      skins               = 10; // 皮肤ID
+    bool                isPrepare           = 11; // 是否准备
+    string              camp                = 12; // 阵营
+}
+
+// 房间战斗内聊天日志
+message ch_room_battle_chat_log {
+    int64           uuid                = 1;  // 日志ID 必填 Hidden
+    string          writeTime           = 2;  // 日志记录时间必填 DateTime
+    string          version             = 3;  // 版本号
+    Common          common              = 4;  // 公共字段
+    RoleCommon      roleCommon          = 5;  // 角色公共字段
+    LcxSdkCommon    sdkCommon           = 6;  // LCX的SDK公共字段
+    string          roomId              = 7;  // 房间ID
+    int32           chatType            = 8;  // 聊天类型
+    string          content             = 9;  // 聊天内容
+    int32           sourceIndex         = 10; // 来源玩家
+    int64           sendTime            = 11; // 发送时间
+}
+
+// 房间玩家离线日志
+message ch_room_player_logout_log {
+    int64           uuid                = 1;  // 日志ID 必填 Hidden
+    string          writeTime           = 2;  // 日志记录时间必填 DateTime
+    string          version             = 3;  // 版本号
+    Common          common              = 4;  // 公共字段
+    RoleCommon      roleCommon          = 5;  // 角色公共字段
+    LcxSdkCommon    sdkCommon           = 6;  // LCX的SDK公共字段
+    string          roomId              = 7;  // 房间ID
+    string          status              = 8;  // 房间当前状态
+}
+
+// 房间聊天日志
+message ch_room_chat_log {
+    int64           uuid                = 1;  // 日志ID 必填 Hidden
+    string          writeTime           = 2;  // 日志记录时间必填 DateTime
+    string          version             = 3;  // 版本号
+    Common          common              = 4;  // 公共字段
+    RoleCommon      roleCommon          = 5;  // 角色公共字段
+    LcxSdkCommon    sdkCommon           = 6;  // LCX的SDK公共字段
+    string          roomId              = 7;  // 房间ID
+    int32           chatType            = 8;  // 聊天类型
+    int64           sendTime            = 9;  // 发送时间
+    string          content             = 10; // 聊天内容
+    int32           contentType         = 11; // 聊天内容类型
+    int32           senderId            = 12; // 发送玩家Id
+    int32           receiverId          = 13; // 接收玩家Id
+    int32           campChatType        = 14; // 房间聊天 0：房间内聊天 1：阵营聊天
+}
+
+// 房间点赞日志
+message ch_room_praise_log {
+    int64           uuid                = 1;  // 日志ID 必填 Hidden
+    string          writeTime           = 2;  // 日志记录时间必填 DateTime
+    string          version             = 3;  // 版本号
+    Common          common              = 4;  // 公共字段
+    RoleCommon      roleCommon          = 5;  // 角色公共字段
+    LcxSdkCommon    sdkCommon           = 6;  // LCX的SDK公共字段
+    string          roomId              = 7;  // 房间ID
+    int64           battleId            = 8;  // 战斗ID
+    int32           gType               = 9;  // 游戏类型
+    int32           modeId              = 10; // 模式Id
+    int32           targetId            = 11; // 目标玩家Id
+}
+
+// 房间帮抢英雄日志
+message ch_room_help_select_log {
+    int64           uuid                = 1;  // 日志ID 必填 Hidden
+    string          writeTime           = 2;  // 日志记录时间必填 DateTime
+    string          version             = 3;  // 版本号
+    Common          common              = 4;  // 公共字段
+    RoleCommon      roleCommon          = 5;  // 角色公共字段
+    LcxSdkCommon    sdkCommon           = 6;  // LCX的SDK公共字段
+    int32           logType             = 7;  // 日志类型
+    string          roomId              = 8;  // 房间ID
+    int32           heroId              = 9;  // 英雄ID
+    int32           skinId              = 10; // 皮肤ID
+    int32           reqIndex            = 11; // 请求玩家房间内的唯一编号
+    int32           grabIndex           = 12; // 帮抢玩家房间内的唯一编号
+}
+
+// 房间内发送战绩日志
+message ch_room_standing_log {
+    int64             uuid                = 1;  // 日志ID 必填 Hidden
+    string            writeTime           = 2;  // 日志记录时间必填 DateTime
+    string            version             = 3;  // 版本号
+    Common            common              = 4;  // 公共字段
+    RoleCommon        roleCommon          = 5;  // 角色公共字段
+    LcxSdkCommon      sdkCommon           = 6;  // LCX的SDK公共字段
+    string            roomId              = 7;  // 房间ID
+    int32             type                = 8;  // 战绩类型
+    repeated int32    para                = 9;  // 战绩参数
+}
+
+// 裁判位退出观战日志
+message ch_room_looker_quit_log {
+    int64           uuid                = 1;  // 日志ID 必填 Hidden
+    string          writeTime           = 2;  // 日志记录时间必填 DateTime
+    string          version             = 3;  // 版本号
+    Common          common              = 4;  // 公共字段
+    RoleCommon      roleCommon          = 5;  // 角色公共字段
+    LcxSdkCommon    sdkCommon           = 6;  // LCX的SDK公共字段
+    string          roomId              = 7;  // 房间ID
+    int32           roomIndex           = 8;  // 房间内的唯一编号
+    int32           gType               = 9;  // 游戏类型
+    int32           modeId              = 10; // 模式Id
+}
+
+// writer组的监控数据
+message WriterGroupStats {
+    int32    groupId               = 1;  // 组ID
+    int32    channelLength         = 2;  // 组通道长度
+    int64    processCount          = 3;  // 处理日志数
+    int64    logError              = 4;  // 错误数
+}
+
+// 行为日志监控日志
+message ch_action_log_metrics_log {
+    int64                        uuid                        = 1;  // 日志ID 必填 Hidden
+    string                       writeTime                   = 2;  // 日志记录时间必填 DateTime
+    string                       version                     = 3;  // 版本号
+    Common                       common                      = 4;  // 公共字段
+    int64                        delayCount                  = 5;  // 延迟次数
+    int64                        delayMin                    = 6;  // 最小延迟
+    int64                        delayMax                    = 7;  // 最大延迟
+    int64                        delayMean                   = 8;  // 平均延迟
+    int64                        delayStddev                 = 9;  // 延迟标准差
+    int64                        delayPercentiles50          = 10; // 延迟50%%百分位数
+    int64                        delayPercentiles75          = 11; // 延迟75%%百分位数
+    int64                        delayPercentiles95          = 12; // 延迟95%%百分位数
+    int64                        delayPercentiles99          = 13; // 延迟99%%百分位数
+    int64                        channelBack                 = 14; // 通道积压
+    int64                        dropped                     = 15; // 丢弃数
+    int64                        error                       = 16; // 错误数
+    int64                        poolHit                     = 17; // 内存池命中
+    int64                        poolMiss                    = 18; // 内存池未命中
+    int64                        fileIOCount                 = 19; // 文件I/O计
+    int64                        batchSizeHistCount          = 20; // 批量次数
+    int64                        batchSizeHistMin            = 21; // 最小批量
+    int64                        batchSizeHistMax            = 22; // 最大批量
+    int64                        batchSizeHistMean           = 23; // 平均批量
+    int64                        batchSizeHistStddev         = 24; // 批量标准差
+    int64                        batchSizeHistPercentiles50  = 25; // 批量50%%百分位数
+    int64                        batchSizeHistPercentiles75  = 26; // 批量75%%百分位数
+    int64                        batchSizeHistPercentiles95  = 27; // 批量95%%百分位数
+    int64                        batchSizeHistPercentiles99  = 28; // 批量99%%百分位数
+    int32                        channelCapacity             = 29; // 通道容量
+    int32                        channelLength               = 30; // 当前通道长度
+    int32                        writerCount                 = 31; // 活跃writer数量
+    repeated WriterGroupStats    writerGroups                = 32; // 每个writer组状态
+    int32                        writerGroupCount            = 33; // writer组数量
+}
+
+// 常用英雄
+message CommonUsedHero {
+    int32    heroId    = 1; // 英雄Id
+    int32    count     = 2; // 次数
+}
+
+// Lbs 称号数据
+message LbsTitleInfo {
+    int32    lbsId         = 1; // LbsId
+    int32    heroId        = 2; // 英雄Id
+    int32    rank          = 3; // 排行
+    bool     isUse         = 4; // 是否使用
+    int64    getTime       = 5; // 获取时间
+    int64    expireTime    = 6; // 失效时间
+    int32    jobId         = 7; // 职业Id
+}
+
+// 逻辑服玩家main行为日志
+message ch_player_logic_main_log {
+    // PRIMARY KEY:role_id
+    int64                      uuid                   = 1;  // 日志ID 必填 Hidden
+    string                     writeTime              = 2;  // 日志记录时间必填 DateTime
+    string                     version                = 3;  // 版本号
+    Common                     common                 = 4;  // 公共字段
+    RoleCommon                 roleCommon             = 5;  // 角色公共字段
+    LcxSdkCommon               sdkCommon              = 6;  // LCX的SDK公共字段
+    int32                      logType                = 7;  // 日志类型
+    string                     name                   = 8;  // 玩家姓名
+    int32                      icon                   = 9;  // 头像
+    int32                      iFrame                 = 10; // 头像框
+    string                     sign                   = 11; // 玩家签名
+    int32                      lbs                    = 12; // 玩家位置信息【当前定位】
+    string                     city                   = 13; // 玩家常驻城市
+    int32                      showLevel              = 14; // 玩家总等级
+    int32                      showVip                = 15; // 会员等级
+    int32                      ladderLevel            = 16; // 段位等级
+    int32                      starNum                = 17; // 星星数量
+    int32                      meSeason               = 18; // 自己所在赛季
+    int32                      currSeason             = 19; // 当前版本
+    bool                       promotion              = 20; // 晋级赛中
+    int32                      braveryScore           = 21; // 勇者积分
+    int32                      unitId                 = 22; // unit 配置表Id
+    repeated int32             titles                 = 23; // 称号id
+    int32                      moralityScore          = 24; // 品德分
+    int32                      freeRenameNum          = 25; // 当前免费重命名次数
+    int64                      lastRenameTime         = 26; // 上次重命名时间
+    repeated int32             wantHeroList           = 27; // 玩家想玩英雄
+    repeated string            privacySetList         = 28; // 隐私(屏蔽base的游戏字段)
+    repeated CommonUsedHero    commonUsedHeroes       = 29; // 常用英雄
+    int32                      showHeroId             = 30; // 个人信息展示页面英雄Id
+    int32                      showHeroSkinId         = 31; // 个人信息展示页面英雄皮肤Id
+    repeated LbsTitleInfo      lbsTitles              = 32; // 当前使用的称号
+    int32                      allAchievementScore    = 33; // 玩家成就积分(玩家成就值+所有漫画成就值)
+    int32                      dayLimitScore          = 34; // 每日通过战斗获得的战斗积分上限
+    int32                      score                  = 35; // 总积分 总积分为各玩法积分之和，各玩法积分减少，总积分跟随减少
+    int32                      level                  = 36; // 等级, 由每个玩法的等级累加得到
+    int64                      firstWinTime           = 37; // 首胜时间戳 秒
+    string                     guildName              = 38; // 战队名称
+    string                     position               = 39; // 战队职位
+    int32                      beUpvoteNum            = 40; // 被点赞数
+    repeated int32             lbsJobScoreList        = 41; // lbs职位积分
+    int32                      normalBattleTitle      = 42; // 战斗局内普通称号id
+    repeated LbsTitleInfo      inBattleLbsTitle       = 43; // 战斗局内Lbs职业和英雄称号
+    repeated int32             showJobs               = 44; // 展示职业
+}
+
+// 匹配黑名单
+message MatchBlackInfo {
+    int32     playerId       = 1;  // 玩家id
+    string    name           = 2;  // 玩家名称
+    int64     addTime        = 3;  // 添加时间
+    bool      isRobot        = 4;  // 是否为机器人
+    int64     battleId       = 5;  // 战斗id
+    int32     battleIndex    = 6;  // 战斗单位index
+}
+
+// 增加匹配黑名单日志
+message ch_add_match_black_log {
+    int64                       uuid              = 1;  // 日志ID 必填 Hidden
+    string                      writeTime         = 2;  // 日志记录时间必填 DateTime
+    string                      version           = 3;  // 版本号
+    Common                      common            = 4;  // 公共字段
+    RoleCommon                  roleCommon        = 5;  // 角色公共字段
+    LcxSdkCommon                sdkCommon         = 6;  // LCX的SDK公共字段
+    repeated  MatchBlackInfo    matchBlackList    = 7;  // 匹配黑名单
+}
+
+// 修改昵称日志
+message ch_rename_log {
+    int64           uuid          = 1;  // 日志ID 必填 Hidden
+    string          writeTime     = 2;  // 日志记录时间必填 DateTime
+    string          version       = 3;  // 版本号
+    Common          common        = 4;  // 公共字段
+    RoleCommon      roleCommon    = 5;  // 角色公共字段
+    LcxSdkCommon    sdkCommon     = 6;  // LCX的SDK公共字段
+    string          oldName       = 7;  // 旧昵称
+    string          newName       = 8;  // 新昵称
+}
+
+// 奖励物品信息
+message RewardInfo {
+    int32    itemId    = 1;  // 奖励物品Id
+    int32    number    = 2;  // 奖励物品数量
+}
+
+// 领取首冲奖励日志
+message ch_first_pay_reward_log {
+    int64                   uuid          = 1;  // 日志ID 必填 Hidden
+    string                  writeTime     = 2;  // 日志记录时间必填 DateTime
+    string                  version       = 3;  // 版本号
+    Common                  common        = 4;  // 公共字段
+    RoleCommon              roleCommon    = 5;  // 角色公共字段
+    LcxSdkCommon            sdkCommon     = 6;  // LCX的SDK公共字段
+    int32                   rewardDay     = 7;  // 领取第X天的奖励
+    int32                   rewardFlag    = 8;  // 首冲奖励标识 0 未达成 1首冲奖励未领取 2 已领取首冲奖励
+    repeated  RewardInfo    rewardList    = 9;  // 奖励物品列表
+}
+
+// 领取月卡每日奖励日志
+message ch_month_card_reward_log {
+    int64                   uuid                    = 1;  // 日志ID 必填 Hidden
+    string                  writeTime               = 2;  // 日志记录时间必填 DateTime
+    string                  version                 = 3;  // 版本号
+    Common                  common                  = 4;  // 公共字段
+    RoleCommon              roleCommon              = 5;  // 角色公共字段
+    LcxSdkCommon            sdkCommon               = 6;  // LCX的SDK公共字段
+    bool                    monthCard               = 7;  // 领取月卡奖励
+    int32                   monthCardId             = 8;  // 月卡Id
+    bool                    foreverCard             = 9;  // 领取终身卡奖励
+    int32                   foreverCardId           = 10; // 终身卡Id
+    int64                   lastGetMonthReward      = 11; // 上次领取月卡每日奖励时间
+    int64                   lastGetForeverReward    = 12; // 上次领取终身卡每日奖励时间
+    repeated  RewardInfo    rewardList              = 13; // 奖励物品列表
+}
+
+// 更新信誉分日志
+message ch_update_morality_log {
+    int64           uuid             = 1;  // 日志ID 必填 Hidden
+    string          writeTime        = 2;  // 日志记录时间必填 DateTime
+    string          version          = 3;  // 版本号
+    Common          common           = 4;  // 公共字段
+    RoleCommon      roleCommon       = 5;  // 角色公共字段
+    LcxSdkCommon    sdkCommon        = 6;  // LCX的SDK公共字段
+    int32           moralityScore    = 7;  // 信誉分
+    int32           changeValue      = 8;  // 变化值
+    string          reason           = 9;  // 变化原因
+}

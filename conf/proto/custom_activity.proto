@@ -1,0 +1,99 @@
+syntax             = "proto3"; //[proto2|proto3]
+
+option  go_package = ".;pb";
+package Game;
+
+import "custom_task.proto";
+import "common.proto";
+
+// 周签到记录
+message WeekSignRecord {
+    uint32 weekSignBitMap  = 1; // 每天签到信息（0：未签到、1：签到未领奖）
+    int32  surplusCount    = 2; // 剩余补签数
+    int32  usableCount     = 3; // 可用补签数
+    int32  signDay         = 4; // 签到天数
+    int64  lastSignTime    = 5; // 上次正常签到时间
+    int64  lastRefreshTime = 6; // 上次刷新时间
+    bool   isSign          = 7; // 当日是否签到
+}
+
+// 战令任务记录
+message BattlePassTaskRecord {
+    map<int32, int32> weekTaskRecord = 1; // 任务完成情况 key:任务id value：完成次数
+}
+
+// 战令任务记录
+message TaskInfoList {
+    repeated TaskInfo TaskList = 1; // 任务列表
+}
+
+// 玩家战令数据
+message playerBattlePassInfo {
+    int32                    battlePassLevel         = 1;  // 战令等级
+    int32                    battlePassExp           = 2;  // 战令经验
+    map<int32, bool>         rewardFlag              = 3;  // 已经领取奖励的标识 key:等级
+    int32                    weekCount               = 4;  // 活动开始后的第几周
+    int32                    advance                 = 5;  // 0:未解锁，1:进阶版战令,2:豪华进阶战令
+    map<int32, TaskInfoList> weekTaskData            = 6;  // 周任务列表 key:周 value：任务列表
+    int64                    beginTime               = 8;  // 战令开始时间
+    int64                    endTime                 = 9;  // 战令结束时间
+    int32                    battlePassSeason        = 12; // 战令赛季
+    repeated TaskInfo        seasonTaskList          = 13; // 赛季任务
+    int32                    continueNum             = 14; // 赛季连续完成次数
+    int32                    lastReplyTime           = 15; // 多倍池上次回复时间
+    int32                    extraExp                = 16; // 多倍池当前值
+    TaskInfoList             dayTask                 = 17; // 每日任务
+    int32                    refresh                 = 18; // 每日任务已经刷新次数
+    map<int32, bool>         weekBox                 = 19; // 周活跃度已经领取的宝箱 key:配置表id value：1
+    int32                    lastFinishSeason        = 20; // 上次完成赛季
+    bool                     isFinishSeason          = 21; // 是否完成过某个赛季
+    int64                    lastDayTaskRefreshTime  = 22; // 战令每日任务上次刷新时间
+    int64                    lastWeekTaskRefreshTime = 23; // 战令周任务上次刷新时间
+    int32                    dmpBattlePassType       = 24; // dmp日志埋点战令类型（普通、进阶、豪华）
+    map<int32, bool>         advanceRewardFlag       = 25; // 进阶已经领取奖励的标识 key:等级
+}
+
+// 玩家活动数据
+message playerActivityInfo {
+    playerBattlePassInfo battlePass = 1; // 战令活动数据
+}
+// 分享次数map
+message shareCntInfo {
+    map<int32, int32> shareCntMap = 1; // 分享 key:对应id 全局配置的是0 value：次数
+}
+
+// ActivityBaseInfo
+message ActivityBaseInfo {
+    int32          ActivityID     = 1;  // 活动ID
+    int32          PageID         = 2;  // 页签ID
+    string         PageName       = 3;  // 页签名称
+    string         PageIcon       = 4;  // 页签图标
+    int32          PageIndex      = 5;  // 页签排序
+    string         Name           = 6;  // 活动名称
+    string         Desc           = 7;  // 活动描述
+    int32          Type           = 8;  // 活动类型
+    int32          Index          = 9;  // 排序
+    int32          TimeType       = 10; // 计时类型
+    string         StartTime      = 11; // 开始时间
+    int32          Time           = 12; // 持续时间
+    int32          TrophyLimit    = 13; // 可见奖杯
+    string         BackGround     = 14; // 活动背景图
+    string         Title          = 15; // 活动标题图片
+    string         TitleText      = 16; // 活动名称（程序字时使用）
+    int32          DataSources    = 17; // 数据来源
+    repeated Link  link           = 18; // 跳转
+    string         HallButtonName = 19; // 大厅入口名称
+    string         HallButtonIcon = 20; // 大厅入口图片
+    repeated int32 CashID         = 21; // 直购ID
+    string         rule           = 22; // 活动规则
+    int32          shopId         = 23; // 商店id
+    int32          goodsId        = 24; // 商品id
+}
+
+// 后台活动配置数据
+message GMActivityInfo {
+    ActivityBaseInfo config    = 1; // 活动表基础配置
+    int64            startTime = 2; // 活动开始时间
+    int64            endTime   = 3; // 活动结束时间  绝对时间才会赋值
+    int64            uid       = 4; // 活动唯一id
+}

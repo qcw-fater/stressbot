@@ -1,0 +1,19 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+
+//  日常
+message ActivationDaily
+{
+  repeated DailyBox dailyBoxList = 1;//宝箱列表  // 没有的宝箱为空
+  int32    RefreshCnt            = 2;//刷新次数
+  int64    LastCalculateTime = 3;// 上次计算时间 (宝箱从满到不满会更新的)
+  int32    ItemRefreshCnt  = 4;//道具刷新次数
+}
+
+// 日常宝箱 (游园宝箱)
+message  DailyBox
+{
+  int32 boxId = 1; //宝箱id  (宝箱0表示为空 没有刷新)
+  // int32 boxActivityScore = 2;//宝箱活跃度
+}

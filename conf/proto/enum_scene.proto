@@ -1,0 +1,40 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+
+enum MoverStatus{
+    MT_IDLE     = 0;            //空闲状态
+    MT_SYNC     = 1;            //同步
+    MT_TRANSFER = 2;            //场景内传送
+    MT_TransferPrepare = 3;     //场景内传送准备阶段(播放特效)
+}
+
+//动作状态
+enum ActionStatus{
+    AT_NONE     = 0;            //动作未播放
+    AT_PLAY     = 1;            //播放
+    AT_WAIT     = 2;            //等待响应再播放
+    AT_WAIT_AND_PLAY     = 3;   //等待响应且还在播放
+}
+
+//踢人原因
+enum KickReason
+{
+    KR_OTHER_LOGIN = 0;    //顶号
+    KR_FORCE_KICK = 1;     //强制踢人通知
+    KR_ERR_DATA = 2;       //数据异常
+    KR_GM_KICK = 3;        //GM踢人
+    KR_FLOW_LIMITING = 4;  //消息频率超限流阈值
+    KR_SERVER_RELOAD = 5;  //服务器更新，需要重新登陆
+}
+
+
+
+enum BeginTimeType
+{
+    BTT_Invalid  = 0;           //无效
+    BTT_OpenServer = 1;         //开服时间
+    BTT_SpecificData = 2;       //具体日期
+}

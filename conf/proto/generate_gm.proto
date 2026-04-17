@@ -1,0 +1,15 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+import "common.proto";
+
+//GM事件指令
+message GmEventC2S
+{
+    GMEvent GM = 1;
+}
+//GM事件指令
+message GmEventS2C
+{
+    GMEvent GM = 1;
+}

@@ -1,0 +1,26 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+// 奇遇礼包信息-客户端用
+message AdventureGiftClientInfo {
+  int32 id                  = 1;  // 礼包Id
+  int64 expireTime          = 2; // 过期时间戳 11位
+}
+
+//奇遇礼包信息-服务端存储
+message AdventureGiftDbInfo {
+  int32 id                  = 1;  // 礼包Id
+  int64 expireTime          = 2; // 过期时间
+  int32 showTimes = 3; // 弹出次数记录
+  int64 intervalTime = 4; // 礼包弹出冷却时间戳
+  int32 groupShowTimes = 5; // 组弹出数量记录
+  bool expireAsync = 6; //  检测到过期 就修改为false
+}
+
+message AdventureGiftTaskDbInfo {
+  repeated int64 taskIds = 1; // 任务Id列表
+  int32 id = 2; // 礼包Id
+  map<int64, int32> taskCompleteNum = 3; // 任务完成次数记录
+}

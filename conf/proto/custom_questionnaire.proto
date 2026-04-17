@@ -1,0 +1,23 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option go_package = ".;pb";
+package Game;
+
+message QuestionnaireGM
+{
+  int32 ID = 1; //ID
+  int32 ConditionType = 2; //触发条件
+  repeated int32 Params = 3; //参数
+  int32 RewardID = 4; //奖励
+  int32 Priority = 5; //优先级
+  int32 MailID = 6; //邮件ID
+  string Tid = 7; //问卷Id
+}
+
+
+// 调查问卷
+message QuestionnaireData {
+    map<int32, bool>  finishedList    = 1; // 已完成问卷   key:tid
+    repeated int32    questionList    = 2; // 进行中的问券
+    int32             doingId         = 3; // 问卷id
+}

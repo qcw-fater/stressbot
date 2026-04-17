@@ -1,0 +1,30 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+import "custom_month_sign.proto";
+
+//领取月签到奖励(包含补签)
+message MonthSignGetRewardC2S
+{
+  int32 day = 1; // 签到第几天  从1开始
+  bool isRetroactive = 2; // 是否为补签
+}
+//领取月签到奖励(包含补签)
+message MonthSignGetRewardS2C
+{
+
+}
+//领取累计签到奖励
+message MonthSignGetTotalRewardC2S
+{
+  int32 day = 1; // 累计签到第几天  -1为领取全部
+}
+//领取累计签到奖励
+message MonthSignGetTotalRewardS2C
+{
+}
+//月签到数据推送
+message MonthSignDataS2C
+{
+  MonthSignDataClient monthSignData = 1; // 月签到数据
+}

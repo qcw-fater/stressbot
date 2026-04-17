@@ -1,0 +1,24 @@
+{
+  "size": 12,
+  "byteOrder": "little",
+  "fields": [
+    { "name": "len",   "type": "uint32", "offset": 0 },
+    { "name": "error", "type": "uint16", "offset": 4 },
+    { "name": "cmd",   "type": "uint8",  "offset": 6 },
+    { "name": "act",   "type": "uint8",  "offset": 7 },
+    { "name": "index", "type": "uint16", "offset": 8 },
+    { "name": "flags", "type": "uint8",  "offset": 10 },
+    { "name": "bcc",   "type": "uint8",  "offset": 11 }
+  ],
+  "routingFields": ["cmd", "act"],
+  "lengthField": "len",
+  "errorField": "error",
+  "flagsField": "flags",
+  "encryptFlag": { "bit": 0, "name": "encrypt" },
+  "compressFlag": { "bit": 1, "name": "compress" },
+  "encrypt": {
+    "type": "xor",
+    "keyField": "bcc",
+    "offset": 0
+  }
+}

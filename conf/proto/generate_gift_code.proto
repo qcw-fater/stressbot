@@ -1,0 +1,13 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+
+//使用礼包码
+message GiftCodeUseC2S
+{
+    string giftCode = 1; // 礼包码
+}
+//使用礼包码
+message GiftCodeUseS2C
+{
+}

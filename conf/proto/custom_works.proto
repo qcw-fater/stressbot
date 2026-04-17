@@ -1,0 +1,76 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+
+// 设定星
+message DisPatchEventMap
+{
+  map<int32, int32>    disPatchEventMap = 1;    //设星id key:id value:状态 0未完成  1完成
+}
+
+//建筑
+message BuildDB
+{
+  int32   buildId = 1;    //建筑Id
+  int32   level = 2;    //等级
+  double  exp = 3;     //经验
+  int32   conjunctionDegree = 4;    //契合度
+  int32   productionStatus = 5;    //生产状态  0.空闲 1.运行中 2.终止 3
+  int64   beginTime = 6;    //生产开始时间
+  repeated int32 heroList = 7;    //生产的英雄
+//  int64   lastYieldTime = 8;    //上次产出时间
+  HeroBufferTypeList buffers = 9;    //英雄附加Buffer
+  map<int32, double>       CommonItemMap = 10;    //普通产出 key:id value:数量 要包含小数
+  map<int32, double>       SpecialItemMap = 11;    //特殊产出 key:id value:数量 要包含小数
+  int32   maxLevel = 12;    //最大解锁等级
+  int64   lastExpYieldTime = 13;    //上次毅之华产出和消耗时间
+  int64   lastCommonOutYieldTime = 14;    //上次产出时间
+  int64   lastSpecialOutYieldTime = 15;    //上次特殊产出时间
+  int64   lastEventOutYieldTime = 16;    //上次产出时间
+  int64   lastHeroOutYieldTime = 17;    //上次英雄特殊产出时间
+  map<int32, double>       HeroOutItemMap = 18;    //英雄产出 key:id value:数量 要包含小数
+  map<int32, double>       HeroOutItemRecordMap = 19;    //英雄产出记录 服务器使用
+}
+
+//
+////存档玩家全局数据
+//message WorksMainDB
+//{
+//  // repeated RewardConfig randomRewards       = 1;  // 随机奖励
+//  //int64            lastRandomTime           = 1;  // 上次随机奖励时间
+//  //    int32            randomCount              = 3;  // 今日已经随机的次数
+//  //    float            accumulativeNumber       = 4;  // 派遣累计的最大奖励个数
+//}
+
+
+// 设定星记录
+message DisPatchEventRecord
+{
+  int32  disPatchEventId = 1; //设定星id
+  int64  productionTime = 2; //产出时间戳 秒
+  int32  state = 3;        // 设定星状态  0未完成  1完成
+}
+
+
+//登录消息结构
+message WorksLogin
+{
+  //WorksMainDB              mainInfo = 1;    //已解锁区域
+  map<int32, BuildDB>       builds = 1;    //建筑信息
+}
+
+message HeroBuffer
+{
+  repeated int32 parameter = 1;         //buffer参数
+}
+
+
+message HeroBufferList
+{
+  repeated  HeroBuffer  list = 1;    //同类型buffer列表
+}
+
+message HeroBufferTypeList
+{
+  map<int32, HeroBufferList> typeMap = 1;  //buffer类型map
+}

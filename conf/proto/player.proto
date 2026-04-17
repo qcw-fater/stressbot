@@ -1,0 +1,457 @@
+syntax             = "proto3"; //[proto2|proto3]
+
+option  go_package = ".;pb";
+package Game;
+
+// 导入枚举
+import "enum.proto";
+import "enum_battle.proto";
+import "custom_ladder.proto";
+import "NotHotfix.proto";
+import "custom_hero.proto";
+import "clickhouse_table.proto";
+import "lbs.proto";
+import "custom_recreation.proto";
+import "custom_activity_battle.proto";
+import "custom_sdc.proto";
+
+// 玩家ID
+message PlayerId {
+    int32 id = 1; // 玩家id
+}
+
+// 玩家隐私权限
+message PlayerPrivacySet {
+    PlayerPrivacyType playerPrivacyType = 1; // 权限类型
+    int32             privacyStatus     = 2; // 0-开 1-关
+}
+
+// 玩家装扮数据
+message PlayerAppearance {
+    map<int32, AppearanceComponent> appearance = 1; // 装扮 key:槽位 value:部件id
+}
+
+// 玩家基础数据
+message PlayerBase {
+    int32                     playerId             = 1;  // 玩家id
+    string                    name                 = 2;  // 玩家姓名
+    int32                     icon                 = 3;  // 头像
+    int32                     iFrame               = 4;  // 头像框
+    string                    sign                 = 5;  // 玩家签名
+    int32                     lbs                  = 6;  // 玩家位置信息【当前定位】
+    string                    city                 = 7;  // 玩家常驻城市
+    int32                     showLevel            = 8;  // 玩家总等级
+    int32                     showVip              = 9;  // 会员等级
+    LadderBase                ladderBase           = 10; // 排位基础信息
+    int32                     unitId               = 11; // unit 配置表Id
+    repeated int32            titles               = 12; // 称号id
+    int32                     moralityScore        = 13; // 品德分
+    int32                     freeRenameNum        = 14; // 当前免费重命名次数
+    int64                     lastRenameTime       = 15; // 上次重命名时间
+    repeated int32            wantHeroList         = 16; // 玩家想玩英雄
+    repeated PlayerPrivacySet PlayerPrivacySetList = 17; // 隐私(屏蔽base的游戏字段)
+    repeated MainUsedHero     mainUsedHeroes       = 18; // 玩家常使用英雄
+    int32                     showHeroId           = 19; // 个人信息展示页面英雄Id
+    int32                     showHeroSkinId       = 20; // 个人信息展示页面英雄皮肤Id
+    repeated LbsTitleData     lbsTitles            = 21; // 当前使用的称号
+    int32                     allAchievementScore  = 22; // 玩家成就积分(玩家成就值+所有漫画成就值)
+    RecreationBase            recreationBase       = 23; // 娱乐赛基础信息
+    string                    guildName            = 24; // 战队名称
+    GuildPositionType         position             = 25; // 战队职位
+    int32                     beUpvoteNum          = 26; // 被点赞数
+    repeated int32            lbsJobScoreList      = 27; // lbs职位积分
+    BattleTitle               inBattleTitle        = 28; // 局内称号
+    repeated int32            showJobs             = 29; // 展示职业
+}
+
+// 玩家主信息
+message Player {
+    int32          id                      = 1;  // 玩家id
+    string         account                 = 2;  // 玩家账号
+    int32          rmb                     = 3;  // 总的充值RMB
+    PlayerStatus   state                   = 4;  // 玩家状态, 仅用作客户端显示使用
+    int32          lsId                    = 5;  // 所在物理服id
+    int32          serverId                = 6;  // 所属服务器ID
+    string         session                 = 7;  // 快速重连session
+    string         ip                      = 8;  // 玩家登录IP
+    string         version                 = 9;  // 客户端当前版本号
+    bool           isNew                   = 10; // 是否是新用户
+    string         platform                = 11; // 客户端登录平台[1000编译器 1500PC包 2000安卓 3000IOS]
+    string         battleVersion           = 12; // 客户端当前战斗版本号
+    string         deviceId                = 13; // 设备uuid
+    string         channel                 = 14; // 渠道
+    int32          lastSelectGameId        = 15; // 最后一次休闲玩法选择的游戏id
+    repeated int32 lastSelectHeroes        = 16; // 最后一次休闲玩法选择的英雄(考虑到武道会这里应该是数组）
+    int32          mainHeroId              = 17; // 主界面英雄id
+    int32          backgroundId            = 18; // 主界面背景id
+    int32          expressionHeroId        = 19; // 个性化表情配置选择的英雄Id
+    repeated int32 lastSelectSkins         = 20; // 最后一次休闲玩法选择的皮肤(考虑到武道会这里应该是数组）
+    int32          lastLadderSelectHero    = 21; // 最后一次排位选择的英雄
+    int32          actionHeroSkinId        = 22; // 个性化动作配置选择的英雄皮肤Id
+    int32          mainSkinId              = 23; // 主界面英雄皮肤id
+    int32          battleNoticeBoardSkinId = 24; // 战斗播报版皮肤id
+}
+
+// 玩家相关数据
+message PlayerInfo {
+    Player           main        = 1; // 主要数据
+    PlayerBase       base        = 2; // 基础数据
+    StatisticsRecord statistics  = 3; // 统计数据
+    RecentVisitors   visitors    = 4; // 最近访客
+    int32            beUpvoteNum = 5; // 被点赞数
+}
+
+// 时间记录
+message TimeRecord {
+    int64 create                 = 1; // 建立时间
+    int64 lastLogin              = 2; // 最后登陆时间
+    int64 lastLogout             = 3; // 最后下线时间
+    int32 totalTime              = 4; // 总的在线时长
+    int32 continueLoginCount     = 5; // 连续登录次数
+    int32 loginDayCount          = 6; // 登录天数
+    int32 totalDays              = 7; // 总在线天数
+    int64 lastLbsPositioningTime = 8; // 最后定位时间
+}
+
+// 玩家常用英雄
+message MainUsedHero {
+    int32 heroId = 1; // 英雄Id
+    int32 count  = 2; // 次数
+}
+
+// 最近访客
+message RecentVisitors {
+    repeated VisitorInfo visitorList = 1; // 访客列表
+}
+
+// 访客信息
+message VisitorInfo {
+    PlayerBase info = 1; // 玩家基础信息
+    int64      time = 2; // 时间戳
+}
+
+// 排位战斗记录
+message LadderBattleRecord {
+    int32 winCount      = 1; // 胜场次数
+    int32 winningStreak = 2; // 连胜场数（超过7天清零）
+    int64 lastWinTime   = 3; // 上把胜利结束时间
+    int32 totalCount    = 4; // 总战斗次数
+}
+
+// 玩家统计的记录
+message StatisticsRecord {
+    int32                       firstSelectHero      = 1;       // 首次选择的英雄
+    int32                       praiseCount          = 2;       // 被点赞的次数
+    int32                       seasonMaxCup         = 3;       // 赛季最高杯数
+    int32                       maxCup               = 4;       // 历史最高杯数
+    int32                       getDailyWinBoxCounts = 5;       // 获取每日宝箱次数
+    map<string, StatisticsInfo> StatisticsData =
+        6;                                                      // 游戏模式统计key:赛季id_模式(model)_游戏类型(gameType),value:赛事统计数据
+    map<int32, LadderBattleRecord> ladderSeasonStats      = 7;  // 赛季战斗统计（按赛季）key:赛季Id value:战斗记录
+    int32                          lastHeroId             = 8;  // 上次战斗使用的英雄
+    repeated int32                 latelyList             = 9;  // 最近使用的英雄id队列，（长度配置）
+    map<int32, int32>              firstGameType          = 10; // 排位赛首次进入游戏类型
+    map<int32, int32>              MainTagsUseCount       = 11; // 职业使用次数（所有玩法,不计算自义定房间）
+    map<int32, int32>              heroWinCount           = 12; // 英雄胜场次数
+    map<int32, LadderBattleRecord> recreationSeasonStats  = 13; // 娱乐赛季战斗统计（按赛季）key:赛季Id value:战斗记录
+    map<int32, bool>               attentionHeroes        = 14; // 关注英雄
+    int64                          notReadyEndTime        = 15; // 玩家匹配未准备结束时间
+    int64                          notReadyCnt            = 16; // 玩家匹配未准备次数
+    repeated int32                 gotStageGuideRewardIds = 17; // 细分教学领取奖励ids
+    repeated int32                 finishStageGuideIds    = 18; // 细分教学引导完成ids
+    map<int32, heroWinInfo>        heroWinData            = 19; // 英雄胜场次数key:英雄id value:英雄连胜数据
+    int32                          lastLadderModeId       = 20; // 上一把排位赛的地图ID
+}
+
+message heroWinInfo {
+    int32 consecutiveWinCount    = 1; // 当前连胜场次
+    int32 maxConsecutiveWinCount = 2; // 最大连胜场次
+}
+
+// 游戏类型下的统计数据
+message StatisticsInfo {
+    map<int32, HeroBattleBaseInfoStats> heroState = 1; // key:英雄id,value： 英雄统计数据
+    int32                               winCount  = 2; // 游戏类型：胜场次数
+    int32                               failCount = 3; // 游戏类型：失败次数
+    int32                               tieCount  = 4; // 游戏类型：平局次数
+    int32                               season    = 5; // 赛季
+    int32                               modelType = 6; // 模式
+    int32                               gameType  = 7; // 游戏类型
+}
+
+// 英雄战斗基础信息统计
+message HeroBattleBaseInfoStats {
+    int32         heroId                 = 1;  // 英雄id
+    int32         winCount               = 2;  // 胜场次数
+    int32         failCount              = 3;  // 失败次数
+    int32         tieCount               = 4;  // 平局次数
+    int32         consecutiveWinCount    = 5;  // 当前连胜次数
+    int32         maxConsecutiveWinCount = 6;  // 最大连胜次数
+    int32         mvpCount               = 7;  // MVP次数
+    int32         totalCount             = 8;  // 总战斗次数
+    int64         totalDamageAmount      = 9;  // 总伤害量
+    int64         totalHealingAmount     = 10; // 总治疗量
+    int32         totalKillNum           = 11; // 总击杀数
+    int32         totalDeathNum          = 12; // 总死亡数
+    bool          lastMvp                = 13; // mvp状态。最后一把的MVP标识
+    repeated bool recentWinningRate      = 14; // 最近10场的英雄的胜负情况
+    int32         totalAssistNum         = 15; // 总助攻次数
+    int64         totalTakeDamage        = 16; // 总承伤量
+    int32         maxDealDamage          = 17; // 最高伤害
+    int32         maxHealingAmount       = 18; // 最高治疗量
+    int32         maxTakeDamage          = 19; // 总承伤量
+    int32         maxKillNum             = 20; // 最高击杀数
+    int32         maxDeathNum            = 21; // 最高死亡数
+    int32         maxAssistNum           = 22; // 最高助攻数
+}
+
+// 玩家匹配数据
+message playerMatchInfo {
+    PlayerBase           base              = 1;  // 玩家基础数据
+    CampType             camp              = 2;  // 阵营
+    bool                 isRobot           = 3;  // 是否为机器人
+    int32                index             = 4;  // 房间内的唯一编号
+    int64                teamId            = 5;  // 队伍Id
+    int64                roomId            = 6;  // 房间Id
+    int64                sessionId         = 7;  // 校验Id
+    int32                matchCostTime     = 8;  // 匹配耗时
+    int32                lsId              = 9;  // 逻辑服Id
+    int32                tsId              = 10; // 队伍服Id
+    int32                rsId              = 11; // 房间服Id
+    repeated BattleDelay battleDelayList   = 12; // 战斗区域延迟
+    int32                robotAiLevel      = 13; // 机器人Ai等级
+    MatchBattleStats     playerBattleStats = 14; // 战斗统计
+    repeated int32       matchBlack        = 15; // 匹配黑名单
+    map<string, int32>   creditTimes       = 16; // 玩家当前违规次数
+    int64                notReadyEndTime   = 17; // 玩家匹配未准备惩罚结束时间
+    ActivityBattleDbInfo activityBattleDbInfo = 18; // 活动赛数据
+}
+
+// 任务数据
+message BattleHeroTaskInfo {
+    int32 HeroId = 1; // heroID
+}
+
+// 玩家的战斗属性
+message playerBattleAttr {
+    map<int32, HeroInfo>   HeroList      = 1; // 英雄属性 key：英雄id value：属性结构体
+    BattleOperationSetting BattleSetting = 2; // 战斗设置
+}
+
+// 好友新密关系
+message FriendRelation {
+    FriendRelationType relationType  = 1; // 关系类型
+    int32              relationValue = 2; // 亲密度
+}
+
+// 游戏类型和模式下场次统计数据
+message GameTypeModelCount {
+    int32 winCount  = 1; // 胜场次数
+    int32 failCount = 2; // 失败次数
+    int32 tieCount  = 3; // 平局次数
+}
+
+// 玩家战斗中使用的角色数据
+message PlayerGameInfo {
+    int32              playerId                = 1;  // 玩家id
+    bool               offline                 = 2;  // 是否离线
+    int32              progress                = 3;  // 加载进度
+    bool               isConfirmHero           = 4;  // 是否确认英雄
+    bool               isPrepare               = 5;  // 是否准备
+    bool               isOut                   = 6;  // 是否退出
+    repeated int32     selectHeroes            = 7;  // 多选英雄
+    repeated int32     selectSkins             = 8;  // 多选皮肤
+    playerMatchInfo    matchData               = 9;  // 玩家匹配相关数据
+    playerBattleAttr   battleAttr              = 10; // 战斗属性
+    PlayerGameStatus   status                  = 11; // 玩家状态
+    bytes              secretKey               = 12; // 密钥
+    int64              punishTime              = 13; // 惩罚时间（排位生效）
+    map<int32, int64>  recentPlayers           = 14; // 最近玩家 key: 玩家ID value: 时间戳
+    string             platform                = 15; // 客户端登录平台[1000编译器 1500PC包 2000安卓 3000IOS]
+    ActionLogCommon    actionLog               = 16; // 日志打点公用字段
+    GameTypeModelCount modelStats              = 17; // 各模式各玩法战斗统计
+    JoinTeamWay        joinWay                 = 18; // 加入方式
+    bool               isLookGray              = 19; // 观战席置灰状态 true:灰色玩家未返回房间
+    map<int32, int32>  firstGameType           = 20; // 排位赛首次进入游戏类型
+    int32              battleNoticeBoardSkinId = 21; // 战斗播报版皮肤id
+    BattleStat         recreationStat          = 22; // 漫斗赛战斗场次统计数据
+    int32              lastLadderModeId        = 23; // 上一把排位赛的地图ID
+    SDCPrepareSnapshot sdcSnapshot             = 100; // 搜打撤战备快照
+}
+
+// 战斗场次统计数据
+message BattleStat {
+    repeated int32 battleCount = 1; // 战斗次数
+}
+
+// 日志打点公用字段
+message ActionLogCommon {
+    RoleCommon   RoleCommon = 1; // 角色公共字段
+    LcxSdkCommon SdkCommon  = 2; // LCX的SDK公共字段
+}
+
+// 战斗操作设置数据
+message BattleOperationSettingData {
+    int32              IsAutoUseNormalSkill    = 1; // 是否自动普攻
+    int32              SelectTargetType        = 2; // 选择目标方式
+    int32              NormalSkillSearchIsNear = 3; // 普攻选择就近单位
+    int32              IsUsePreciseNormalAtk   = 4; // 精确普攻
+    bool               BattleCanOb             = 5; // 战斗是否能被OB
+    int32              IsUseNormalAssist       = 6; // 普攻辅助
+    int32              heroId                  = 7; // 英雄id
+    SettingOperateType operateType             = 8; // 操作类型
+}
+
+// 战斗操作设置
+message BattleOperationSetting {
+    repeated BattleOperationSettingData data = 1;
+}
+
+// 玩家属性数据
+message PlayerAttrInfo {
+    int64 gold                   = 1;  // 玩家金币
+    int64 diamond                = 2;  // 玩家钻石
+    int64 coupons                = 3;  // 玩家点券
+    int64 epigraph               = 4;  // 皮肤币
+    int64 BurningCoin            = 5;  // 英雄升级货币
+    int32 level                  = 6;  // 账号奖杯数
+    int32 maxLevel               = 7;  // 账号最大奖杯数
+    int64 weekExp                = 8;  // 本周获取的经验
+    int64 weekGold               = 9;  // 本周获取的金币
+    int64 weekInscription        = 10; // 本周获取的铭文碎片
+    int32 battlePass             = 11; // 战令货币
+    int32 guildCoin              = 13; // 战队币
+    int64 ImgPower               = 14; // 高级阅览券
+    int64 SysShopCoin            = 15; // 乐园消费卷
+    int64 ActivityBoxScore       = 16; // 日常任务宝箱活跃度
+    int64 HeroDirectCommon       = 17; // 英雄直购普通货币0
+    int64 HeroDirectSenior       = 18; // 英雄直购高级货币
+    int64 BattlePassWeekVitality = 19; // 战令周活跃度
+    int64 HotScratchCard         = 20; // 热力刮刮卡
+    int64 BurnScratchCard        = 21; // 燃意刮刮卡
+    int64 LmdCoupons             = 22; // 游戏内lmd免费点券
+    int64 FanScore               = 23; // 漫迷积分
+    int64 Coupon                 = 24; // 阅览劵
+    int64 StandardCoin           = 25; // 特典币
+    int64 seasonScore            = 26; // 赛季积分
+    int32 dailyPureEssenceMax    = 27; // 每日获取专精点最大值
+    int32 newbieGuide            = 28; // 新手引导局的次数
+    int32 achievement            = 29; // 玩家成就值
+    int32 dailyTaskScore         = 30; // 日常任务积分
+    int32 dailyTaskRewardMask    = 31; // 日常任务奖励领取掩码
+    int32 talentFragment         = 32; // 天赋碎片
+    int32 limitedCoupon          = 33; // 限时阅览券
+    int64 voucher                = 34; // 代金券
+}
+
+// 角色主要数据
+message PlayerMailInfo {
+    int32  playerId = 1; // 玩家id
+    string name     = 2; // 玩家姓名
+    int32  icon     = 3; // 头像
+    int32  iFrame   = 4; // 头像框
+}
+
+// 战斗区域延迟
+message BattleDelay {
+    string BattleArea   = 1; // 战斗区域
+    int32  DelayTime    = 2; // 平均延迟时间(毫秒)
+    int32  MaxDelayTime = 3; // 最大延迟时间(毫秒)
+    int32  MinDelayTime = 4; // 最小延迟时间(毫秒)
+    int32  PingSendCnt  = 5; // ping发送包
+    int32  PingRecvCnt  = 6; // ping接收包
+}
+
+// 匹配战斗区域延迟时间
+message TeamBattleDelayData {
+    int32                playerId        = 1; // 玩家id
+    repeated BattleDelay battleDelayList = 2; // 战斗区域延迟
+}
+
+// 按钮自定义布局信息
+message LayoutInfo {
+    int32 configId  = 1; // id
+    int32 x         = 2;
+    int32 y         = 3;
+    int32 scaleRate = 4; // 缩放
+    int32 alphaRate = 5; // 偏移量
+}
+
+// 布局方案
+message LayoutPlanInfo {
+    string              planName         = 1; // 方案名称
+    repeated LayoutInfo PlayerLayoutData = 2; // 布局数据
+}
+
+// 玩家布局方案
+message PlayerLayoutPlan {
+    map<int32, int32>       HeroSelectMap    = 1; // key：heroId value：方案下标
+    repeated LayoutPlanInfo PlanData         = 2;
+    int32                   allHeroPlanIndex = 3; // 所有英雄使用的方案
+}
+
+// 战斗计数器
+message BattleCounter {
+    map<int32, int32> FirstKilled = 1; // 首杀(1血)数据  key: GType
+    map<int32, int32> NKilled     = 2; // N杀计数  key: GType*1000+DynamicInfoId
+}
+
+// 战斗统计数据
+message BattleStatistics {
+    uint32 winCount = 1; // 胜利场次
+    uint32 count    = 2; // 总场次
+}
+
+// 不同游戏模式下战斗统计数据
+message ModelBattleStatistics {
+    map<int32, BattleStatistics> heroStatistics = 1; // 玩法下英雄统计数据 key:heroId
+}
+
+// 玩家的战斗统计
+message BattleStatisticsInfo {
+    map<int32, ModelBattleStatistics> ModeStatistics = 1; // 玩家玩法下统计数据    key: 玩法（gType）
+}
+
+// 玩家赛季战斗统计
+message playerSeasonBattleStatistics {
+    map<int32, BattleStatisticsInfo> SeasonBattleStatistics = 1; // key:赛季id
+}
+// 个性化
+message Individuation {
+    int32 configId            = 1; // id
+    bool  isHave              = 2; // 是否拥有
+    int64 startExperienceTime = 3; // 开始体验时间
+    int64 endExperienceTime   = 4; // 体验结束时间
+}
+
+// 个性化列表
+message CustomIndividuationList {
+    repeated Individuation individuationList = 1; // 个性化列表
+}
+
+// 匹配战斗统计相关数据
+message MatchBattleStats {
+    int32          heroCup                 = 1;  // 英雄杯数
+    int32          heroLevel               = 2;  // 英雄等级
+    repeated int32 Jobs                    = 3;  // 英雄职业
+    int32          heroNormalWinRate       = 4;  // 英雄休闲模式胜率
+    int32          heroNormalWinCount      = 5;  // 英雄休闲模式胜场
+    int32          heroNormalBattleCount   = 6;  // 英雄休闲模式战斗场次
+    int32          heroNormalWinningStreak = 7;  // 英雄休闲模式连胜场次
+    int32          ladderLevel             = 8;  // 排位赛段位等级
+    int32          ladderStar              = 9;  // 排位赛星级
+    int32          ladderWinRate           = 10; // 排位赛胜率
+    int32          ladderWinCount          = 11; // 排位赛胜场
+    int32          ladderBattleCount       = 12; // 排位赛战斗场次
+    int32          ladderWinningStreak     = 13; // 排位赛连胜场次
+    int32          recreationLevel         = 14; // 娱乐赛模式下等级
+    int32          recreationScore         = 15; // 娱乐赛模式下积分
+//    int32          activityBattleStep      = 16; // 活动赛阶段
+}
+
+// 战斗局内称号
+message BattleTitle {
+    int32        normalTitle  = 1; // 普通称号id
+    LbsTitleData lbsJobTitle  = 2; // Lbs职业称号
+    LbsTitleData lbsHeroTitle = 3; // Lbs英雄称号
+}

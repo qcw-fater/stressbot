@@ -1,0 +1,92 @@
+syntax = "proto3"; //[proto2|proto3]
+
+option  go_package = ".;pb";
+package Game;
+
+import "lbs.proto";
+
+// 英雄具体的数据
+message HeroInfo {
+    int32                      heroId                  = 1;  // 英雄Id
+    bool                       possess                 = 2;  // 是否拥有
+    int32                      level                   = 3;  // 英雄等级 1开始
+    int32                      cupNumber               = 4;  // 英雄奖杯
+    int32                      maxCupNumber            = 5;  // 英雄历史最大奖杯
+    repeated int32             awakeList               = 6;  // 觉醒列表
+    int32                      activateAwakeId         = 7;  // 当前可以觉醒的Id
+    int32                      pureEssence             = 8;  // 英雄专精属性
+    int32                      pureEssenceRewardState  = 9;  // 英雄专精奖励领取状态（位操作）
+    int32                      achievement             = 10; // 成就值
+    int32                      approvals               = 11; // 英雄认可度
+    int32                      approvalsLevel          = 12; // 英雄认可度等级
+    int64                      getApprovalsRewardLevel = 13; // 已领取认可度奖励等级
+    repeated int32             unlockCV                = 14; // 英雄解锁的CV
+    repeated int32             unlockBiography         = 15; // 英雄解锁的传记
+    repeated int32             expressionList          = 16; // 英雄表情列表
+    repeated int32             equipTalent             = 17; // 装备的天赋135小天赋，246大天赋
+    HeroRecord                 heroRecord              = 18; // 英雄战绩
+    LbsDynamicValue            lbsBaseValue            = 19; // Lbs动态系数
+    HeroLbsHistoryStats        lbsStats                = 20; // Lbs历史数据
+    LbsTitleData               heroTitle               = 21; // Lbs称号数据(最高）
+    map<int32, HeroActionList> entryActionMap          = 22; // 入场动作 key: 皮肤Id, value: 动作列表
+    map<int32, HeroActionList> victoryActionMap        = 23; // 胜利动作 key: 皮肤Id, value: 动作列表
+    map<int32, int32>          heroBondAttr            = 24; // 羁绊属性加成 key: EAttribute value: 加成属性值
+    repeated int32             claimCv                 = 25; // 已领取过的cv
+    int32                      skinId                  = 26;  // 当前皮肤id
+
+}
+
+// 赛季记录数据
+message SeasonHeroRecord {
+    int32 count         = 1; // 使用场次
+    int32 victoryCnt    = 2; // 连续胜利场数
+    int32 failCnt       = 3; // 连续失败场数
+    int32 winCount      = 4; // 胜场次数
+    int32 winningStreak = 5; // 连胜场数（超过7天清零）
+    int64 lastWinTime   = 6; // 上把胜利结束时间
+}
+
+// 英雄战绩
+message HeroRecord {
+    SeasonHeroRecord normalRecord            = 1; // 休闲统计
+    LastHeroRecord   lastHeroRecord          = 2; // 上把战绩
+    SeasonHeroRecord ladderRecord            = 3; // 排位赛统计
+    SeasonHeroRecord recreationRecord        = 4; // 娱乐赛统计
+}
+
+// 英雄上把战绩
+message LastHeroRecord {
+    int32 tap       = 1; // 1:超神 2:mvp
+    int32 killNum   = 2; // 击杀数
+    int32 deadNum   = 3; // 死亡数
+    int32 assistNum = 4; // 助攻数
+}
+
+// 英雄管理
+message HeroFormList {
+    int32  heroId                = 1; // 英雄id
+    int32  enabled               = 2; // 是否启用（0禁用，1启用，2测试）
+    bool   enabledComputerSelect = 3; // 是否禁用系统随机自选（true禁随机，false可随机）
+    bool   enabledShare          = 4; // 是否可被共享（true可共享，false禁共享）
+    bool   isOpen                = 5; // 是否临时关闭（true开启，false关闭）
+    int32  HeroType              = 6; // 英雄类型(1战斗类型,2非战斗类型)
+    string HeroName              = 7; // 英雄名字
+    int32  ShowTime              = 8; // 英雄展时间
+    int32  OpenTime              = 9; // 英雄上架时间
+}
+
+message HeroCacheInfo {
+    map<int32, HeroInfo> heroData  = 1; // 英雄数据
+    int64                timestamp = 2; // 缓存时间
+}
+
+message HeroActionList {
+    repeated int32 actionList = 1; // 动作列表
+}
+
+// 英雄任务数据
+message HeroTaskData {
+    int32 heroId  = 1; // 英雄Id
+    int32 heroCup = 2; // 英雄奖杯
+    int32 heroJob = 3; // 英雄职业
+}

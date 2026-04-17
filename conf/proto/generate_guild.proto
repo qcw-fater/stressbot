@@ -1,0 +1,435 @@
+syntax             = "proto3";
+option  go_package = ".;pb";
+package Game;
+
+import "custom_guild.proto";
+import "enum.proto";
+import "player.proto";
+import "generate_chat.proto";
+
+
+// 加入/离开战队日志类型
+enum FlowGuildLogType {
+  JGT_default       = 0; // 占位
+  JGT_normal     = 1; // 直接加入
+  JGT_approve = 2; // 审核加入
+  JGT_exit = 3; // 主动退出
+  JGT_remove = 4; // 被踢
+}
+
+// 创建战队
+message GuildCreateC2S {
+    string name      = 1; // 名字
+    int32  icon      = 2; // 图标
+    string publicity = 3; // 公告
+    int32 cups = 4; // 入社条件杯数
+  bool needApproval = 5; // 是否需要审批
+  bool acceptApply = 6; // 是否接受申请
+
+}
+
+// 创建战队
+message GuildCreateS2C {
+//    GuildBaseInfoDB baseInfo  = 1; // 战队基础信息
+//    GuildMemberDB   mydata    = 2; // 我的工会数据
+//    int32           memberCnt = 4; // 成员数量
+//    GuildBaseSettingDB setting = 5; // 战队设置数据
+//    GuildRouteDb routeDb = 6; // 伟大航路数据
+    GuildLoginInfo data = 1; // 跟登录要的数据一样
+}
+
+// 战队列表
+message GuildListC2S {
+//    int32 page = 1; // 页码（每页N个由服务器配置）
+}
+// 战队列表
+message GuildListS2C {
+    repeated GuildListInfo infos = 1;
+//    int32                  page  = 2; // 页码（每页N个由服务器配置）
+}
+
+// 战队搜索
+message GuildSearchC2S {
+    string name = 1; // 名字
+}
+
+// 战队搜索
+message GuildSearchS2C { repeated GuildListInfo infos = 1; }
+
+// 加入战队
+message GuildJoinC2S {
+    int64      uid        = 1; // 工会uid
+    string     msg        = 2; // 加入信息
+    PlayerBase playerBase = 3; // 玩家基础数据 (服务器传入)
+    int32      playerCup  = 4; // 总杯数  (服务器传入)
+    string     account    = 5; // 账号
+}
+
+// 加入战队
+message GuildJoinS2C {
+    int64           uid       = 1; // 工会uid
+    GuildBaseInfoDB baseInfo  = 2; // 战队基础信息
+    GuildMemberDB   mydata    = 3; // 我的工会数据
+    int32           memberCnt = 4; // 成员数量
+}
+
+// 战队申请审核
+message GuildAuditC2S {
+    int32      joinPlayerId = 1; // 申请加入的玩家Id
+    int32      operate      = 2; // 1：接受 0：拒绝
+    PlayerBase playerBase   = 3; // 玩家基础数据 (服务器传入)
+}
+
+// 战队申请审核
+message GuildAuditS2C {
+    int32 joinPlayerId = 1; // 申请加入的玩家Id
+    int32 operate      = 2; // 1：接受 0：拒绝
+}
+
+// 添加新成员
+message GuildNotifyNewMemberS2C {
+    GuildLoginInfo data = 1;
+    int32 memberId = 2 ; // 成员id
+    PlayerBase    baseData   = 3; // 成员信息
+    int64 guildId = 4; // 战队id
+}
+
+// 通知加入申请
+message GuildNotifyNewApplyS2C { GuildJoinRequest request = 1; }
+
+// 通知删除加入申请
+message GuildNotifyRemoveApplyS2C {
+    int32 removePlayerId = 1; // 删除申请的玩家ID
+}
+
+// 获取申请列表
+message GuildGetApplyListC2S {}
+
+// 获取申请列表
+message GuildGetApplyListS2C { repeated GuildJoinRequest request = 1; }
+
+// 退出战队
+message GuildExitC2S {
+    PlayerBase playerBase = 1; // 客户端不填写，服务器自动填充
+}
+
+// 退出战队
+message GuildExitS2C {
+    int64             guildId      = 1; // 战队ID
+    GuildPositionType positionType = 2; // 退出时玩家职位
+    bool              isDel        = 3; // 是否解散
+    int32             playerId     = 4; // 玩家id
+    int64             lastExitTime = 8;  // 上次退出时间
+    string guildName = 9;  // 战队名
+    int32 cupNums = 10; // 战队奖杯
+}
+
+// 战队成员设置
+message GuildSettingC2S {
+    GuildBaseSettingDB baseSetting = 1; // 基础设置
+}
+// 战队成员设置
+message GuildSettingS2C {
+    GuildBaseSettingDB baseSetting = 1; // 基础设置
+}
+
+// 踢出成员
+message GuildKickC2S {
+    int32      playerId   = 1;
+    PlayerBase opBase     = 2; // 操作者基础信息 客户端不填写，服务器自动填充
+    PlayerBase memberBase = 3; // 成员基础信息  客户端不填写，服务器自动填充
+}
+// 踢出成员
+message GuildKickS2C {
+    int32             playerId     = 1;
+    GuildPositionType positionType = 2; // 退出时玩家职位
+}
+
+// 任命
+message GuildAppointC2S {
+    int32             playerId   = 1; // 玩家ID
+    GuildPositionType position   = 2; // 职位
+    PlayerBase        opBase     = 3; // 操作者基础信息 客户端不填写，服务器自动填充
+    PlayerBase        memberBase = 4; // 成员基础信息  客户端不填写，服务器自动填充
+}
+// 任命
+message GuildAppointS2C {
+    int32             playerId    = 1; // 玩家ID
+    GuildPositionType position    = 2; // 职位
+    GuildPositionType oldPosition = 3; // 旧职位
+}
+
+// 获取成员列表
+message GuildGetMembersListC2S {}
+
+// 获取成员列表
+message GuildGetMembersListS2C {
+    repeated GuildMemberBase members = 1; // 成员信息
+}
+
+// 战队信息更新
+message GuildUpdateNotifyS2C {
+    GuildBaseInfoDB       baseInfo     = 1; // 基础信息
+    GuildStatisticsDB     statistics   = 2; // 统计数据
+    GuildBaseSettingDB    baseSetting  = 3; // 基础设置
+    GuildLastWeekRankInfo lastWeekRank = 4; // 上周排名
+    GuildTimeRecordDB     timeRecord   = 5; // 时间记录
+    GuildRouteDb     routData   = 6; // 伟大航路数据
+}
+
+// 战队成员信息更新
+message GuildMemberUpdateNotifyS2C {
+    int64           uid    = 1;
+    GuildMemberBase member = 2; // 成员信息
+    string guildName = 3; // 战队名称
+}
+
+// 移除成员
+message GuildNotifyKickMemberS2C {
+    int32             playerId     = 1; // 玩家ID
+    GuildPositionType positionType = 2; // 被踢出时玩家职位
+    bool remove = 3; // 是否被踢
+}
+
+// 战队编辑公告
+message GuildEditC2S {
+    string     content    = 1;
+    PlayerBase playerBase = 2; // 玩家基础数据 (服务器传入)
+}
+// 战队编辑公告
+message GuildEditS2C {
+    string content    = 1;
+    string oldContent = 2;
+}
+
+// 战队信息
+message GuildInfoC2S {
+  int64 guildId = 1; // 战队id
+}
+
+// 战队信息
+message GuildInfoS2C {
+    GuildBaseInfoDB       baseInfo     = 1; // 战队基础信息
+    GuildMemberDB         mydata       = 2; // 我的战队数据
+//    map<int32, int32>     ranks        = 3; // 积分榜排名 key:ip value:积分
+    GuildBaseSettingDB    baseSetting  = 4; // 基础设置
+    GuildStatisticsDB     statistics   = 5; // 统计数据
+    int32                 memberCnt    = 6; // 成员数量
+//    GuildLastWeekRankInfo lastWeekRank = 7; // 上周排名
+    GuildTimeRecordDB     timeRecord   = 8; // 时间记录
+    GuildRouteDb          route        = 9; //伟大航路数据
+    repeated GuildMemberBase memberList = 10; // 成员列表数据
+}
+
+//// 加入战队成功
+// message GuildJoinSuccessS2C {
+//     int64 guildId            = 1;  // 战队Id
+//     GuildBaseInfoDB baseInfo = 2;  // 战队基础信息
+//     GuildMemberDB mydata     = 3;  // 我的工会数据
+//     int32 memberCnt          = 4;  // 成员数量
+// }
+
+// 获取红包列表
+message GuildRedEnvelopeGetListC2S {}
+
+// 战队改名
+message GuildChangeNameC2S {
+    string     name       = 1;
+    PlayerBase playerBase = 2; // 玩家基础数据 (服务器传入)
+}
+// 战队改名
+message GuildChangeNameS2C { string name = 1; }
+
+// 获取战队日志列表
+message GuildEventListC2S {}
+// 获取战队日志列表
+message GuildEventListS2C { repeated GuildEventDB eventList = 1; }
+
+// 通知新日志
+message GuildNotifyEventNewS2C { GuildEventDB newEvent = 1; }
+// 战队赛季
+message GuildSetZoneLevelC2S { int32 zoneLevel = 1; }
+// 战队赛季
+message GuildSetZoneLevelS2C { int32 zoneLevel = 1; }
+// 增加战队事件日志
+message GuildAddEventS2C {
+    GuildEventDB addGuildEvent = 1; // 增加事件
+}
+
+// 战队离线聊天记录获取
+message GuildChatListC2S {
+    int64 lastTime = 1; // 上次查看消息时间
+}
+// 战队离线聊天记录获取
+message GuildChatListS2C { repeated ChatInfo chatList = 1; }
+
+// 选择关注漫画
+message GuildSelectIpsC2S {
+    repeated int32 ips        = 1; // 关注漫画
+    PlayerBase     playerBase = 2; // 玩家基础数据 (服务器传入)
+}
+// 选择关注漫画
+message GuildSelectIpsS2C {
+    repeated int32 ips    = 1; // 关注漫画
+    repeated int32 OldIps = 2; // 旧关注漫画
+}
+// 设置图标
+message GuildSetIconC2S {
+    int32 icons      = 1; // 图标
+    PlayerBase     playerBase = 2; // 玩家基础数据 (服务器传入)
+}
+// 设置图标
+message GuildSetIconS2C {
+    int32 icons = 1; // 图标
+}
+
+// 请求战队对战积分排行榜
+message GuildRankProficiencyListGetC2S {
+    int32 ip      = 1;
+    int32 options = 2; // 活跃选项  1.赛季 2本周 3上周
+}
+
+// 请求战队对战积分排行榜
+message GuildRankProficiencyListGetS2C {}
+// 更新战队排行榜
+message GuildRankListS2C {
+    int32                  ip      = 1;
+    repeated GuildRankInfo infos   = 2;
+    int32                  options = 3; // 活跃选项  1.赛季 2本周 3上周
+}
+//领取活跃任务奖励
+message GuildGetActiveRewardC2S
+{
+}
+//领取活跃任务奖励
+message GuildGetActiveRewardS2C
+{
+    ActiveRewardDb data = 1; // 服务器用  客户端不管
+}
+//聊天消息
+message GuildChatC2S
+{
+  ChatInfo chatInfo = 1;  // 聊天消息
+}
+//聊天消息
+message GuildChatS2C
+{
+}
+//请求战队排行榜
+message GuildRankDataC2S
+{
+    RankType typeId = 1; // 排行榜类型
+    int64 guildId = 2; // 战队id  服务器用
+}
+//请求战队排行榜
+message GuildRankDataS2C
+{
+  repeated GuildRankInfo info = 1; // 排行榜数据
+  GuildRankInfo myData = 2; // 自己战队数据
+  RankType typeId = 3; // 排行榜类型
+}
+//成员战队活跃和杯数修改
+message GuildMemberChangeActiveOrCupC2S
+{
+  int32 memberId = 1; // 成员id
+  map<int32, int32> numMap = 2; // 1 杯数： 数量  2
+  int32 activeTypeId = 3; // 活跃值条件
+  map<int32, int32> itemId = 4;// 活跃值道具id+数量
+  bool isRoute = 5; // 活跃值-航海挑战
+  bool vector = 6; // 参与且胜利
+}
+//成员战队活跃和杯数修改
+message GuildMemberChangeActiveOrCupS2C
+{
+}
+//伟大航路排行榜数据
+message GuildRouteRankDataC2S
+{
+}
+//伟大航路排行榜数据
+message GuildRouteRankDataS2C
+{
+  map<int32, GuildRouteRankInfo> data = 1; //贡献榜数据
+}
+//伟大航路领取宝箱
+message GuildRouteRewardC2S
+{
+}
+//伟大航路领取宝箱
+message GuildRouteRewardS2C
+{
+    GuildRouteRewardDb data = 1; //服务器用  不会给客户端赋值返回
+}
+//签到
+message GuildSignC2S
+{
+}
+//签到
+message GuildSignS2C
+{
+}
+//是否消耗伟大航路次数
+message GuildSelectRouteC2S
+{
+  bool select = 1; // 是否消耗
+}
+//是否消耗伟大航路次数
+message GuildSelectRouteS2C
+{
+//  bool select = 1; // 是否消耗
+}
+//请求获取自己的伟大航路数据
+message GuildRouteInfoC2S
+{
+}
+//请求获取自己的伟大航路数据
+message GuildRouteInfoS2C
+{
+  GuildRouteDb data = 1;
+  GuildMemberDB myData = 2;
+}
+//请求修改setting
+message GuildEditInfoC2S
+{
+  map<int32, int32> params = 1; //  1申请    2审批  3入社条件
+}
+//请求修改setting
+message GuildEditInfoS2C
+{
+}
+//跨天重置
+message GuildNewDayC2S
+{
+  int32 memberId = 1;
+  bool week = 2; // 是否跨周消息
+}
+//跨天重置
+message GuildNewDayS2C
+{
+}
+//检测会长登录时间
+message GuildCheckLeaderLoginC2S
+{
+}
+//检测会长登录时间
+message GuildCheckLeaderLoginS2C
+{
+}
+//伟大航路排行榜领取宝箱
+message GuildRouteRankRewardC2S
+{
+}
+//伟大航路排行榜领取宝箱
+message GuildRouteRankRewardS2C
+{
+  GuildRouteRewardDb data = 1; //服务器用  不会给客户端赋值返回
+}
+//成员登录登出通知
+message GuildMemberLoginC2S
+{
+  bool logout = 1; // 是否登出
+}
+//成员登录登出通知
+message GuildMemberLoginS2C
+{
+}

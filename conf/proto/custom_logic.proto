@@ -1,0 +1,95 @@
+syntax            = "proto3";
+option go_package = ".;pb";
+package Game;
+
+//导入枚举
+import "player.proto";
+import "enum.proto";
+import "enum_battle.proto";
+import "custom_team.proto";
+import "custom_hero.proto";
+
+// 逻辑服到队伍管理器消息
+message LogicMsgToTeam {
+    int32          playerId             		= 1;  // 玩家ID
+    PlayerBase     base                 		= 2;  // 玩家数据
+    uint32         msgIndex             		= 3;  // 玩家发送消息的Index
+    GameModel      model                		= 4;  // 游戏模式
+    GameType       gType                		= 5;  // 玩法类型
+    int32          modeId               		= 6;  // 匹配类型
+    string         battleVersion        		= 7;  // 战斗版本
+    string         clientVersion        		= 8;  // 客户端版本
+    TeamActPro     actPro               		= 9;  // 队伍操作指令
+    bytes          data                 		= 10; // 消息数据
+    int64          teamId               		= 11; // 队伍Id
+    bool           isPrepare            		= 12; // 是否准备
+    int32          lsId                 		= 13; // 所在逻辑服Id
+    int32          tsId                 		= 14; // 所在队伍服Id
+    int64          sessionId            		= 15; // 玩家sessionId
+    int32          kickPlayerId         		= 16; // 被踢玩家Id
+    TargetTeamInfo targetTeam           		= 17; // 目标队伍信息
+    PlayerGameInfo gameInfo             		= 18; // 玩家数据
+    int32          cmd                  		= 20; // 消息cmd
+    int32          act                  		= 21; // 消息act
+    repeated int32 selectHeroes         		= 22; // 选择的英雄数组（非武道会模式只填充1号位）
+    repeated int32 selectSkins          		= 23; // 选择的皮肤数组
+    repeated int32 equipTalent      			= 24; // 天赋槽
+    int32          heroId               		= 25; // 英雄Id
+    map<int32, int64> recentPlayers     		= 26; // 最近玩家 key: 玩家ID value: 时间戳
+    bool 		   isConvene					= 27; // 是否招募触发
+    HeroInfo	   heroData						= 28; // 英雄数据
+    repeated  BattleDelay       battleAreaList  = 29; // 玩家战斗区域延迟信息
+    int64 		notReadyEndTime					= 30; // 未准备惩罚结束时间
+    int32 battleActivityStep = 31; // 活动赛选择阶段
+}
+
+//逻辑服到房间服消息
+message LogicMsgToRoom {
+    uint32           	msgIndex          	= 1;  // 玩家发送消息的Index
+    int32            	playerId          	= 2;  // 玩家ID
+    int32            	lsId              	= 3;  // 所在的逻辑服Id
+    MatchActPro      	actPro            	= 4;  // 操作指令
+    int64            	roomId            	= 5;  // 房间id
+    int32            	heroIndex         	= 6;  // 选择的英雄index(武道会)
+    bytes            	data              	= 7;  // 消息数据
+    GameModel        	model             	= 8; // 游戏模式
+    GameType         	gType             	= 9; // 玩法类型
+    int32            	battleModeId      	= 10; // 模式配置Id
+    int32            	targetPlayerId    	= 11; // 目标玩家id
+    RoomChat         	roomChat          	= 12; // 房间聊天消息
+    string           	battleVersion     	= 13; // 玩家当前版本
+    int64            	sessionId         	= 14; // 校验码
+    int32            	targetPlayerIndex 	= 15; // 目标玩家index
+    string           	clientVersion     	= 16; // 客户端版本号
+    repeated int32 		selectHeroes        = 17; // 选择的英雄数组（非武道会模式只填充1号位）
+    repeated int32 		selectSkins         = 18; // 选择的皮肤数组
+    GameType       		changeGameType      = 19; // 玩法类型
+    int32          		changeModeId        = 20; // 模式配置Id
+    repeated int32 		equipTalent     	= 21; // 装备天赋
+    int32          		heroId              = 22; // 英雄Id
+    string         		platform            = 23; // 平台
+    ActionLogCommon  	actionLog         	= 24; // 日志打点common数据
+	HeroInfo	  		heroData			= 25; // 英雄数据
+	PlayerBase    		playerData   		= 26; // 玩家数据
+	PlayerGameInfo 		gameInfo            = 27; // 玩家数据
+}
+
+message RoomChat {
+    BattleChatType chatType    = 1; //聊天类型
+    string         content     = 2; //内容
+    int32          sourceIndex = 3; //来源玩家名字
+    int64          sendTime    = 4; //发送时间
+}
+
+message LogicMsgToGuildMgr
+{
+  int32                       playerId            = 1;    //玩家ID
+  int32                       lsId                = 2;    //所在的逻辑服Id
+  string                      version             = 3;    //玩家当前版本
+  int64                       guildId             = 4;    //战队ID
+  bytes                       data                = 5;    //消息数据
+  repeated string             ext                 = 6;    //额外参数
+  int32                       cmd                 = 7;
+  int32                       act                 = 8;
+  int32                       index               = 9;
+}

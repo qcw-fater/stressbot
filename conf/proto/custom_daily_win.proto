@@ -1,0 +1,17 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+
+// 每日胜场宝箱信息
+message DailyWinBoxInfo
+{
+	int32 			winCount 				= 1; // 当天累计胜利次数
+	int64 			nextResetTime 			= 2; // 下一次重置时间戳
+	repeated int32 	claimedChests 			= 3; // 当前已领取的宝箱id列表
+	// 新增字段用于支持X天累计
+	repeated DailyWinBoxHistory History = 4; // 历史X天的数据
+}
+
+message DailyWinBoxHistory {
+	repeated int32 claimedChests = 1; // 该天已领取的宝箱[1,4,8]
+}
