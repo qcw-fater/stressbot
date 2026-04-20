@@ -9,19 +9,19 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"stressbot/engine"
+	"stressbot/network"
+	"stressbot/protox"
+	"stressbot/script"
+	"stressbot/state"
+	stresslog "stressbot/utils/log"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
-
-	"stressbot/engine"
-	stresslog "stressbot/log"
-	"stressbot/network"
-	"stressbot/protox"
-	"stressbot/script"
-	"stressbot/state"
+	"go.uber.org/zap"
 )
 
 // Robot 单个压测机器人实例。
@@ -144,13 +144,13 @@ func (r *Robot) Start() {
 			r.luaMu.Unlock()
 		}
 
-		stresslog.InfoF("[ROBOT] 启动 id=%d account=%s", r.id, r.account)
+		stresslog.Info("[ROBOT] 启动", zap.Int("id", r.id), zap.String("account", r.account))
 		if err := r.executor.Run(r.ctx); err != nil {
 			if r.ctx.Err() == nil {
-				stresslog.ErrorF("[ROBOT] 流程异常退出 id=%d err=%v", r.id, err)
+				stresslog.Error("[ROBOT] 流程异常退出", zap.Int("id", r.id), zap.Error(err))
 			}
 		}
-		stresslog.InfoF("[ROBOT] 已停止 id=%d account=%s", r.id, r.account)
+		stresslog.Info("[ROBOT] 已停止", zap.Int("id", r.id), zap.String("account", r.account))
 	}()
 }
 
@@ -291,7 +291,7 @@ func (h *robotActionHandler) executeLuaBoolean(scriptName string) bool {
 	}
 
 	if !h.robot.luaPool.HasScript(scriptName) {
-		stresslog.WarnF("[ROBOT] 条件脚本不存在: %s", scriptName)
+		stresslog.Warn("[ROBOT] 条件脚本不存在", zap.String("script", scriptName))
 		return true
 	}
 
@@ -300,7 +300,7 @@ func (h *robotActionHandler) executeLuaBoolean(scriptName string) bool {
 
 	code, err := h.robot.luaPool.RunActionScript(h.robot.L, scriptName)
 	if err != nil {
-		stresslog.WarnF("[ROBOT] 条件脚本执行失败: %s err=%v", scriptName, err)
+		stresslog.Warn("[ROBOT] 条件脚本执行失败", zap.String("script", scriptName), zap.Error(err))
 		return true
 	}
 
@@ -335,7 +335,7 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 
 		cbDef, ok := h.flow.GetCallback(ref.Callback)
 		if !ok {
-			stresslog.WarnF("[ROBOT] 回调定义不存在: %s，跳过监听注册", ref.Callback)
+			stresslog.Warn("[ROBOT] 回调定义不存在，跳过监听注册", zap.String("callback", ref.Callback))
 			continue
 		}
 		groups[server][cmdAct] = h.createListenCallback(cbDef)
@@ -345,7 +345,7 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 	for server, listenMap := range groups {
 		conn := h.resolveListenConn(server)
 		if conn == nil {
-			stresslog.WarnF("[ROBOT] 无连接可注册监听 server=%s", server)
+			stresslog.Warn("[ROBOT] 无连接可注册监听", zap.String("server", server))
 			continue
 		}
 		conn.ListenResponse(listenMap)
@@ -371,7 +371,7 @@ func (h *robotActionHandler) createListenCallback(cbDef *engine.CallbackDef) net
 		// Lua 脚本回调：使用 luaMu 串行化对同一 LState 的访问
 		return func(msg *network.Message) {
 			if h.robot.L == nil || h.robot.luaPool == nil {
-				stresslog.ErrorF("[ROBOT] Lua 运行时未初始化，无法执行回调: %s", cbDef.Script)
+				stresslog.Error("[ROBOT] Lua 运行时未初始化，无法执行回调", zap.String("script", cbDef.Script))
 				return
 			}
 
@@ -391,8 +391,8 @@ func (h *robotActionHandler) createListenCallback(cbDef *engine.CallbackDef) net
 			})
 
 			if err := h.robot.luaPool.RunCallbackScript(h.robot.L, cbDef.Script, msg.Data, cbDef.S2CProto); err != nil {
-				stresslog.ErrorF("[ROBOT] Lua 回调执行失败 id=%d script=%s err=%v",
-					h.robot.id, cbDef.Script, err)
+				stresslog.Error("[ROBOT] Lua 回调执行失败",
+					zap.Int("id", h.robot.id), zap.String("script", cbDef.Script), zap.Error(err))
 			}
 		}
 	}
@@ -409,8 +409,8 @@ func (h *robotActionHandler) createListenCallback(cbDef *engine.CallbackDef) net
 
 		respMsg, err := h.robot.factory.Parse(cbDef.S2CProto, msg.Data)
 		if err != nil {
-			stresslog.ErrorF("[ROBOT] 解析推送消息失败 id=%d proto=%s err=%v",
-				h.robot.id, cbDef.S2CProto, err)
+			stresslog.Error("[ROBOT] 解析推送消息失败",
+				zap.Int("id", h.robot.id), zap.String("proto", cbDef.S2CProto), zap.Error(err))
 			return
 		}
 
@@ -427,8 +427,8 @@ func (h *robotActionHandler) createListenCallback(cbDef *engine.CallbackDef) net
 
 // OnNodeError 节点执行出错回调
 func (h *robotActionHandler) OnNodeError(node *engine.Node, err error) {
-	stresslog.ErrorF("[ROBOT] 节点执行错误 id=%d node=%s type=%s err=%v",
-		h.robot.id, node.ID, node.Type, err)
+	stresslog.Error("[ROBOT] 节点执行错误",
+		zap.Int("id", h.robot.id), zap.String("node", node.ID), zap.String("type", node.Type), zap.Error(err))
 }
 
 // netSenderAdapter NetSender 接口适配器
@@ -457,8 +457,8 @@ func (ns *netSenderAdapter) TCPRequest(service string, cmd, act uint8, headAndBo
 	}
 	// 日志记录消息头 error 字段（用于调试连接关闭问题）
 	if resp.Head != nil {
-		stresslog.DebugF("[ACTION] TCPResponse head: service=%s cmd=%d act=%d headError=%d bodyLen=%d",
-			service, resp.Head.Cmd, resp.Head.Act, resp.Head.Error, len(resp.Data))
+		stresslog.Debug("[ACTION] TCPResponse head",
+			zap.String("service", service), zap.Uint8("cmd", resp.Head.Cmd), zap.Uint8("act", resp.Head.Act), zap.Uint16("headError", resp.Head.Error), zap.Int("bodyLen", len(resp.Data)))
 	}
 	return resp.Data, true
 }
@@ -477,8 +477,8 @@ func (ns *netSenderAdapter) TCPRequestFor(service string, sendCmd, sendAct uint8
 		return nil, false
 	}
 	if resp.Head != nil {
-		stresslog.DebugF("[ACTION] TCPResponse head: service=%s cmd=%d act=%d headError=%d bodyLen=%d",
-			service, resp.Head.Cmd, resp.Head.Act, resp.Head.Error, len(resp.Data))
+		stresslog.Debug("[ACTION] TCPResponse head",
+			zap.String("service", service), zap.Uint8("cmd", resp.Head.Cmd), zap.Uint8("act", resp.Head.Act), zap.Uint16("headError", resp.Head.Error), zap.Int("bodyLen", len(resp.Data)))
 	}
 	return resp.Data, true
 }
@@ -623,7 +623,7 @@ func (ns *netSenderAdapter) RegisterHeartbeat(target, service string, intervalMs
 		conn = ns.robot.client.GetTCPConn(service)
 	}
 	if conn == nil {
-		stresslog.WarnF("[ROBOT] RegisterHeartbeat 连接不存在 target=%s service=%s", target, service)
+		stresslog.Warn("[ROBOT] RegisterHeartbeat 连接不存在", zap.String("target", target), zap.String("service", service))
 		return
 	}
 	conn.RegisterHeartbeat(network.HeartbeatConfig{

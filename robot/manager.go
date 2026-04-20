@@ -3,15 +3,16 @@ package robot
 import (
 	"context"
 	"fmt"
+	"stressbot/engine"
+	"stressbot/network"
+	"stressbot/protox"
+	"stressbot/script"
+	stresslog "stressbot/utils/log"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"stressbot/engine"
-	stresslog "stressbot/log"
-	"stressbot/network"
-	"stressbot/protox"
-	"stressbot/script"
+	"go.uber.org/zap"
 )
 
 // ManagerConfig 机器人管理器配置
@@ -63,7 +64,7 @@ func NewManager(cfg ManagerConfig, flow *engine.TaskFlow, factory *protox.Factor
 
 // StartAll 批量启动机器人，按 ConcurrentNum 限速
 func (m *Manager) StartAll() error {
-	stresslog.InfoF("[MANAGER] 开始创建 %d 个机器人，每秒启动 %d 个", m.cfg.Count, m.cfg.ConcurrentNum)
+	stresslog.Info("[MANAGER] 开始创建机器人", zap.Int("count", m.cfg.Count), zap.Int("concurrent", m.cfg.ConcurrentNum))
 
 	for i := 0; i < m.cfg.Count; i++ {
 		if m.ctx.Err() != nil {
@@ -91,7 +92,7 @@ func (m *Manager) StartAll() error {
 
 		// 限速
 		if m.cfg.ConcurrentNum > 0 && (i+1)%m.cfg.ConcurrentNum == 0 {
-			stresslog.InfoF("[MANAGER] 已启动 %d/%d 个机器人", i+1, m.cfg.Count)
+			stresslog.Info("[MANAGER] 机器人启动进度", zap.Int("started", i+1), zap.Int("total", m.cfg.Count))
 			select {
 			case <-m.ctx.Done():
 				return m.ctx.Err()
@@ -100,7 +101,7 @@ func (m *Manager) StartAll() error {
 		}
 	}
 
-	stresslog.InfoF("[MANAGER] 全部 %d 个机器人已启动", m.cfg.Count)
+	stresslog.Info("[MANAGER] 全部机器人已启动", zap.Int("count", m.cfg.Count))
 	return nil
 }
 
@@ -114,7 +115,7 @@ func (m *Manager) StopAll() {
 		r.Close()
 		m.stopped.Add(1)
 	}
-	stresslog.InfoF("[MANAGER] 全部机器人已停止")
+	stresslog.Info("[MANAGER] 全部机器人已停止")
 }
 
 // GetStats 获取运行统计

@@ -7,11 +7,12 @@ import (
 	"context"
 	"fmt"
 	"net"
-	stresslog "stressbot/log"
 	"sync"
 	"time"
 
 	"github.com/panjf2000/gnet/v2"
+	"go.uber.org/zap"
+	stresslog "stressbot/utils/log"
 )
 
 // connRegistry 管理 gnet 连接与业务层 Connection 的映射。
@@ -116,7 +117,7 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 		msgBuf := make([]byte, totalLen)
 		_, err = gconn.Read(msgBuf)
 		if err != nil {
-			stresslog.ErrorF("[GNET] 读取消息失败: %v", err)
+			stresslog.Error("[GNET] 读取消息失败", zap.Error(err))
 			return gnet.None
 		}
 		// dispatch with decryption
@@ -172,7 +173,7 @@ func (d *Dialer) Start() error {
 		return fmt.Errorf("启动 gnet 客户端失败: %w", err)
 	}
 
-	stresslog.InfoF("[GNET] 客户端引擎已启动")
+	stresslog.Info("[GNET] 客户端引擎已启动")
 	return nil
 }
 
@@ -184,7 +185,7 @@ func (d *Dialer) Stop() error {
 	if err := d.client.Stop(); err != nil {
 		return fmt.Errorf("停止 gnet 客户端失败: %w", err)
 	}
-	stresslog.InfoF("[GNET] 客户端引擎已停止")
+	stresslog.Info("[GNET] 客户端引擎已停止")
 	return nil
 }
 
@@ -205,8 +206,8 @@ func (d *Dialer) DialTCP(ctx context.Context, address string, conn *Connection) 
 
 	d.server.registry.register(gconn, conn)
 
-	stresslog.InfoF("[GNET] TCP 连接已建立 address=%s serviceName=%s robotName=%s",
-		address, conn.serviceName, conn.robotName)
+	stresslog.Info("[GNET] TCP 连接已建立",
+		zap.String("address", address), zap.String("service", conn.serviceName), zap.String("robot", conn.robotName))
 	return gconn, nil
 }
 
@@ -226,7 +227,7 @@ func (d *Dialer) DialUDP(address string, conn *Connection) (gnet.Conn, error) {
 
 	d.server.registry.register(gconn, conn)
 
-	stresslog.InfoF("[GNET] UDP 连接已建立 address=%s robotName=%s", address, conn.robotName)
+	stresslog.Info("[GNET] UDP 连接已建立", zap.String("address", address), zap.String("robot", conn.robotName))
 	return gconn, nil
 }
 

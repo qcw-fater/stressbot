@@ -1,0 +1,416 @@
+{
+  "startNode": "start",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "next": [
+        {
+          "node": "authLogin"
+        },
+        {
+          "node": "logicLogin"
+        },
+        {
+          "node": "gm"
+        },
+        {
+          "node": "setLbs"
+        },
+        {
+          "node": "businessLoop"
+        }
+      ]
+    },
+    {
+      "id": "authLogin",
+      "type": "sequence",
+      "next": [
+        {
+          "node": "RequestZoneList"
+        },
+        {
+          "node": "RequestOutsideNotice"
+        },
+        {
+          "node": "RequestNotice"
+        },
+        {
+          "node": "PostLogin"
+        },
+        {
+          "node": "hasRole"
+        },
+        {
+          "node": "SelectRole"
+        }
+      ]
+    },
+    {
+      "id": "hasRole",
+      "type": "boolean",
+      "action": "CheckRole",
+      "falseBranch": "createNewRole"
+    },
+    {
+      "id": "createNewRole",
+      "type": "sequence",
+      "next": [
+        {
+          "node": "NewRole"
+        }
+      ]
+    },
+    {
+      "id": "logicLogin",
+      "type": "sequence",
+      "next": [
+        {
+          "node": "ConnectLogicTCP"
+        },
+        {
+          "node": "PlayerLogin"
+        },
+        {
+          "node": "RequestPlayerData"
+        },
+        {
+          "node": "ReportBattleDelay"
+        },
+        {
+          "node": "GetActivityList"
+        }
+      ]
+    },
+    {
+      "id": "gm",
+      "type": "sequence",
+      "next": [
+        {
+          "node": "GMAddHero"
+        },
+        {
+          "node": "GMAddItem"
+        },
+        {
+          "node": "GMAddHeroCup"
+        },
+        {
+          "node": "GMFinishAllNewUserGuide"
+        }
+      ]
+    },
+    {
+      "id": "setLbs",
+      "type": "sequence",
+      "next": [
+        {
+          "node": "LbsPositioning"
+        }
+      ]
+    },
+    {
+      "id": "businessLoop",
+      "type": "loop",
+      "loopCount": -1,
+      "next": [
+        {
+          "node": "businessWeight"
+        }
+      ]
+    },
+    {
+      "id": "businessWeight",
+      "type": "weighted",
+      "options": [
+        {
+          "node": "lobbyOperation",
+          "weight": 12
+        },
+        {
+          "node": "lottery",
+          "weight": 10
+        },
+        {
+          "node": "heroCultivate",
+          "weight": 10
+        },
+        {
+          "node": "shop",
+          "weight": 8
+        },
+        {
+          "node": "battlePass",
+          "weight": 8
+        },
+        {
+          "node": "giftCode",
+          "weight": 1
+        },
+        {
+          "node": "mail",
+          "weight": 5
+        },
+        {
+          "node": "friend",
+          "weight": 6
+        },
+        {
+          "node": "normalModel",
+          "weight": 40
+        }
+      ]
+    },
+    {
+      "id": "lobbyOperation",
+      "type": "weighted",
+      "options": [
+        {
+          "node": "ChangeHero",
+          "weight": 5
+        },
+        {
+          "node": "ChangeShowHero",
+          "weight": 5
+        },
+        {
+          "node": "ChangeBackground",
+          "weight": 5
+        },
+        {
+          "node": "ChangeIcon",
+          "weight": 5
+        },
+        {
+          "node": "ChangeIframe",
+          "weight": 5
+        },
+        {
+          "node": "ChangeTitle",
+          "weight": 5
+        },
+        {
+          "node": "ChangeExpressShowHero",
+          "weight": 5
+        },
+        {
+          "node": "NewbieSignGetReward",
+          "weight": 10
+        },
+        {
+          "node": "GetDailyWinBoxReward",
+          "weight": 15
+        },
+        {
+          "node": "GetLevelReward",
+          "weight": 10
+        },
+        {
+          "node": "WorldChat",
+          "weight": 10
+        },
+        {
+          "node": "LookRankingList",
+          "weight": 20
+        }
+      ]
+    },
+    {
+      "id": "lottery",
+      "type": "sequence",
+      "next": [
+        {
+          "node": "LotteryGetInfo"
+        },
+        {
+          "node": "LotterySelectUpHero"
+        },
+        {
+          "node": "LotteryLuckyDraw"
+        },
+        {
+          "node": "LotteryGetLog"
+        }
+      ]
+    },
+    {
+      "id": "heroCultivate",
+      "type": "sequence",
+      "next": [
+        {
+          "node": "HeroLevelUp"
+        },
+        {
+          "node": "HeroAwake"
+        },
+        {
+          "node": "HeroActivateTalent"
+        },
+        {
+          "node": "HeroEquipmentTalent"
+        }
+      ]
+    },
+    {
+      "id": "shop",
+      "type": "sequence",
+      "next": [
+        {
+          "node": "SystemShopOpen"
+        },
+        {
+          "node": "SystemShopBuy"
+        }
+      ]
+    },
+    {
+      "id": "battlePass",
+      "type": "sequence",
+      "next": [
+        {
+          "node": "UnlockAdvanced"
+        },
+        {
+          "node": "GetBattlePassReward"
+        },
+        {
+          "node": "BattlePassConversion"
+        }
+      ]
+    },
+    {
+      "id": "giftCode",
+      "type": "sequence",
+      "next": [
+        {
+          "node": "UseGiftCode"
+        }
+      ]
+    },
+    {
+      "id": "mail",
+      "type": "sequence",
+      "next": [
+        {
+          "node": "GetMailList"
+        },
+        {
+          "node": "GetMailDetailData"
+        },
+        {
+          "node": "ReceiveMailAttachment"
+        },
+        {
+          "node": "DeleteMail"
+        }
+      ]
+    },
+    {
+      "id": "friend",
+      "type": "sequence",
+      "next": [
+        {
+          "node": "GetFriendList"
+        },
+        {
+          "node": "GetRecommendFriend"
+        },
+        {
+          "node": "RequestAddFriend"
+        },
+        {
+          "node": "GetRequestFriendList"
+        },
+        {
+          "node": "DisposeFriendRequest"
+        },
+        {
+          "node": "DelFriend"
+        }
+      ]
+    },
+    {
+      "id": "normalModel",
+      "type": "sequence",
+      "next": [
+        {
+          "node": "RequestGameModeList"
+        },
+        {
+          "node": "CreateNormalTeam"
+        },
+        {
+          "node": "SelectHero"
+        },
+        {
+          "node": "StartMatch"
+        },
+        {
+          "node": "MatchSucceed"
+        },
+        {
+          "node": "ListenStartLoading"
+        },
+        {
+          "node": "startBattle"
+        }
+      ]
+    },
+    {
+      "id": "startBattle",
+      "type": "sequence",
+      "next": [
+        {
+          "node": "ConnectBattleTCP"
+        },
+        {
+          "node": "ConnectBattleUDP"
+        },
+        {
+          "node": "RegisterBattle"
+        },
+        {
+          "node": "loadLoop"
+        },
+        {
+          "node": "BattleLoadOK"
+        },
+        {
+          "node": "StartGame"
+        },
+        {
+          "node": "syncLoop"
+        },
+        {
+          "node": "BattleEnd"
+        },
+        {
+          "node": "BattleReward"
+        },
+        {
+          "node": "GameOver"
+        }
+      ]
+    },
+    {
+      "id": "loadLoop",
+      "type": "loop",
+      "loopCount": 5,
+      "next": [
+        {
+          "node": "LoadProgress"
+        }
+      ]
+    },
+    {
+      "id": "syncLoop",
+      "type": "loop",
+      "loopCount": 100,
+      "next": [
+        {
+          "node": "SyncFrameData"
+        }
+      ]
+    }
+  ]
+}

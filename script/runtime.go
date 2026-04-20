@@ -8,11 +8,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	stresslog "stressbot/log"
 	"strings"
 	"sync"
 
 	lua "github.com/yuin/gopher-lua"
+	"go.uber.org/zap"
+	stresslog "stressbot/utils/log"
 
 	"stressbot/engine"
 	"stressbot/protox"
@@ -132,7 +133,7 @@ func (rp *RuntimePool) PrecompileScripts(dirs []string) error {
 		}
 	}
 
-	stresslog.InfoF("[SCRIPT] 已预编译 %d 个 Lua 脚本", len(rp.precompiled))
+	stresslog.Info("[SCRIPT] 已预编译 Lua 脚本", zap.Int("count", len(rp.precompiled)))
 	return nil
 }
 

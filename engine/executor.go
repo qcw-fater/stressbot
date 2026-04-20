@@ -6,7 +6,9 @@ import (
 	"math/rand"
 	"time"
 
-	stresslog "stressbot/log"
+	stresslog "stressbot/utils/log"
+
+	"go.uber.org/zap"
 )
 
 // DefaultNodeDelayMs 动作/布尔叶节点执行完后的默认延迟（毫秒）。
@@ -142,7 +144,11 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 			return fmt.Errorf("动作执行失败: %s (node=%s): %w", node.Action, node.ID, err)
 		}
 		// 非中断模式，记录错误但继续
-		stresslog.WarnF("[ENGINE] 动作执行失败但继续: action=%s node=%s err=%v", node.Action, node.ID, err)
+		stresslog.Warn("[ENGINE] 动作执行失败但继续",
+			zap.String("action", node.Action),
+			zap.String("node", node.ID),
+			zap.Error(err),
+		)
 		return nil
 	}
 

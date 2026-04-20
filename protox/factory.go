@@ -3,6 +3,7 @@ package protox
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -32,10 +33,14 @@ func (f *Factory) Create(name string) (proto.Message, error) {
 
 // SetField 设置消息字段值。
 // 支持 bool、整数、浮点、字符串、字节切片、枚举、嵌套消息、repeated 字段等类型。
+// fieldName 大小写不敏感，会自动匹配 proto 定义中的字段名。
 func (f *Factory) SetField(msg proto.Message, fieldName string, value any) error {
 	ref := msg.ProtoReflect()
 	desc := ref.Descriptor()
 	field := desc.Fields().ByName(protoreflect.Name(fieldName))
+	if field == nil {
+		field = findFieldCaseInsensitive(desc, fieldName)
+	}
 	if field == nil {
 		return fmt.Errorf("消息 %s 未找到字段 %s", string(desc.FullName()), fieldName)
 	}
@@ -80,10 +85,14 @@ func setRepeatedField(ref protoreflect.Message, field protoreflect.FieldDescript
 // 返回 Go 原生类型（bool、int64、float64、string、[]byte 等）。
 // repeated 字段返回 []any，map 字段返回 map[string]any。
 // 嵌套消息返回 map[string]any（递归展开）。
+// fieldName 大小写不敏感。
 func (f *Factory) GetField(msg proto.Message, fieldName string) (any, error) {
 	ref := msg.ProtoReflect()
 	desc := ref.Descriptor()
 	field := desc.Fields().ByName(protoreflect.Name(fieldName))
+	if field == nil {
+		field = findFieldCaseInsensitive(desc, fieldName)
+	}
 	if field == nil {
 		return nil, fmt.Errorf("消息 %s 未找到字段 %s", string(desc.FullName()), fieldName)
 	}
@@ -118,6 +127,9 @@ func (f *Factory) GetFieldMessage(msg proto.Message, fieldName string) (proto.Me
 func (f *Factory) GetFieldDescriptor(msg proto.Message, fieldName string) (protoreflect.FieldDescriptor, error) {
 	desc := msg.ProtoReflect().Descriptor()
 	field := desc.Fields().ByName(protoreflect.Name(fieldName))
+	if field == nil {
+		field = findFieldCaseInsensitive(desc, fieldName)
+	}
 	if field == nil {
 		return nil, fmt.Errorf("消息 %s 未找到字段 %s", string(desc.FullName()), fieldName)
 	}
@@ -395,4 +407,17 @@ func toFloat64Value(v any) float64 {
 	default:
 		return 0
 	}
+}
+
+// findFieldCaseInsensitive 大小写不敏感查找 proto 字段
+func findFieldCaseInsensitive(desc protoreflect.MessageDescriptor, name string) protoreflect.FieldDescriptor {
+	lower := strings.ToLower(name)
+	fields := desc.Fields()
+	for i := 0; i < fields.Len(); i++ {
+		fd := fields.Get(i)
+		if strings.ToLower(string(fd.Name())) == lower {
+			return fd
+		}
+	}
+	return nil
 }

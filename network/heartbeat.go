@@ -1,7 +1,8 @@
 package network
 
 import (
-	stresslog "stressbot/log"
+	"go.uber.org/zap"
+	stresslog "stressbot/utils/log"
 	"sync/atomic"
 	"time"
 )
@@ -82,7 +83,7 @@ func (c *Connection) runHeartbeat(hb *heartbeatState) {
 			}
 			ok, _ := c.Send(packet)
 			if !ok {
-				stresslog.DebugF("[HEARTBEAT] 发送失败 serviceName=%s", c.serviceName)
+				stresslog.Debug("[HEARTBEAT] 发送失败", zap.String("service", c.serviceName))
 			}
 		}
 	}

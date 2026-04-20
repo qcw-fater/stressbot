@@ -11,8 +11,10 @@ import (
 	"strings"
 
 	"github.com/bufbuild/protocompile"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
+	stresslog "stressbot/utils/log"
 )
 
 // Loader .proto 文件加载器。
@@ -124,5 +126,5 @@ func logLoaded(reg *protoregistry.Files) {
 		count++
 		return true
 	})
-	fmt.Printf("[PROTOX] 已加载 %d 个 proto 文件\n", count)
+	stresslog.Info("[PROTOX] 已加载 proto 文件", zap.Int("count", count))
 }

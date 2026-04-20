@@ -1,12 +1,12 @@
 {
   "bot": {
     "accountPrefix": "bot_",
-    "startNumber": 3,
+    "startNumber": 4,
     "count": 1,
     "concurrentNum": 0
   },
   "auth": {
-    "address": "http://192.168.61.156:20000",
+    "address": "http://192.168.61.161:20000",
     "version": "0.31.49.171222",
     "channel": "mine",
     "platform": "1000"

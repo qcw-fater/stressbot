@@ -1,12 +1,13 @@
 package protox
 
 import (
-	"fmt"
 	"strings"
 	"sync"
 
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
+	stresslog "stressbot/utils/log"
 )
 
 // Registry 消息类型注册表。
@@ -33,7 +34,7 @@ func (r *Registry) indexMessages() {
 		indexFromDescriptor(fd.Messages(), r.messages, string(fd.Package()))
 		return true
 	})
-	fmt.Printf("[PROTOX] 已索引 %d 个消息类型\n", len(r.messages))
+	stresslog.Info("[PROTOX] 已索引消息类型", zap.Int("count", len(r.messages)))
 }
 
 // indexFromDescriptor 递归索引嵌套消息

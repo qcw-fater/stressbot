@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	stresslog "stressbot/log"
-
 	lua "github.com/yuin/gopher-lua"
+	"go.uber.org/zap"
+	stresslog "stressbot/utils/log"
 )
 
 // loadUtilsModule 加载 utils 命名空间模块。
@@ -158,7 +158,7 @@ func utilsLogInfo(L *lua.LState) int {
 	if ctx != nil {
 		prefix = logPrefix(ctx.RobotID, ctx.Account)
 	}
-	stresslog.InfoF("[SCRIPT]%s %s", prefix, L.CheckString(1))
+	stresslog.Info("[SCRIPT] "+prefix, zap.String("msg", L.CheckString(1)))
 	return 0
 }
 
@@ -169,7 +169,7 @@ func utilsLogError(L *lua.LState) int {
 	if ctx != nil {
 		prefix = logPrefix(ctx.RobotID, ctx.Account)
 	}
-	stresslog.ErrorF("[SCRIPT-ERROR]%s %s", prefix, L.CheckString(1))
+	stresslog.Error("[SCRIPT-ERROR] "+prefix, zap.String("msg", L.CheckString(1)))
 	return 0
 }
 

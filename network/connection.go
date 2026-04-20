@@ -5,11 +5,13 @@ package network
 
 import (
 	"context"
-	"fmt"
-	stresslog "stressbot/log"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	stresslog "stressbot/utils/log"
+
+	"go.uber.org/zap"
 )
 
 // ListenCallBack 持久化推送消息的回调函数类型
@@ -56,7 +58,7 @@ func NewConnection(serviceName, robotName string, protocol *Protocol) *Connectio
 		sendFunc:    nil,
 	}
 	conn.ctx, conn.cancel = context.WithCancel(context.Background())
-	stresslog.InfoF("[NETWORK] NewConnection serviceName=%s robotName=%s", serviceName, robotName)
+	stresslog.Debug("[NETWORK] NewConnection", zap.String("service", serviceName), zap.String("robot", robotName))
 	return conn
 }
 
@@ -94,7 +96,7 @@ func (c *Connection) GetSecretKey() []byte {
 // 返回响应消息和发送字节数；超时或连接关闭返回 nil, 0。
 func (c *Connection) RequestResponse(sendData []byte, responseId int) (*Message, int) {
 	if c == nil || atomic.LoadInt32(&c.isClose) == 1 {
-		stresslog.WarnF("[NETWORK] RequestResponse 连接已关闭 serviceName=%s", c.serviceName)
+		stresslog.Warn("[NETWORK] RequestResponse 连接已关闭", zap.String("service", c.serviceName))
 		return nil, 0
 	}
 
@@ -115,7 +117,7 @@ func (c *Connection) RequestResponse(sendData []byte, responseId int) (*Message,
 	// 发送请求
 	ok, n := c.Send(sendData)
 	if !ok {
-		stresslog.ErrorF("[NETWORK] RequestResponse 发送失败 serviceName=%s responseId=%d", c.serviceName, responseId)
+		stresslog.Error("[NETWORK] RequestResponse 发送失败", zap.String("service", c.serviceName), zap.Int("responseId", responseId))
 		return nil, 0
 	}
 
@@ -131,8 +133,8 @@ func (c *Connection) RequestResponse(sendData []byte, responseId int) (*Message,
 	case <-timeout:
 		cmd := responseId >> 8
 		act := responseId & 0xFF
-		stresslog.WarnF("[NETWORK] RequestResponse 等待超时 serviceName=%s cmd=%d act=%d robotName=%s",
-			c.serviceName, cmd, act, c.robotName)
+		stresslog.Warn("[NETWORK] RequestResponse 等待超时",
+			zap.String("service", c.serviceName), zap.Int("cmd", cmd), zap.Int("act", act), zap.String("robot", c.robotName))
 		return nil, 0
 	}
 }
@@ -145,14 +147,14 @@ func (c *Connection) Send(data []byte) (bool, int) {
 		return false, 0
 	}
 	if c.sendFunc == nil {
-		stresslog.WarnF("[NETWORK] Send sendFunc 未注入 serviceName=%s", c.serviceName)
+		stresslog.Warn("[NETWORK] Send sendFunc 未注入", zap.String("service", c.serviceName))
 		return false, 0
 	}
 
 	n := len(data)
 	err := c.sendFunc(data)
 	if err != nil {
-		stresslog.ErrorF("[NETWORK] Send 发送失败 serviceName=%s err=%v", c.serviceName, err)
+		stresslog.Error("[NETWORK] Send 发送失败", zap.String("service", c.serviceName), zap.Error(err))
 		return false, 0
 	}
 	return true, n
@@ -269,7 +271,7 @@ func (c *Connection) onClose() {
 	}
 	c.StopHeartbeat()
 	c.cancel()
-	fmt.Printf("[NETWORK] 连接资源已清理 serviceName=%s robotName=%s\n", c.serviceName, c.robotName)
+	stresslog.Debug("[NETWORK] 连接资源已清理", zap.String("service", c.serviceName), zap.String("robot", c.robotName))
 }
 
 // Close 主动关闭连接（由业务层调用）。
@@ -313,8 +315,8 @@ func (c *Connection) OnReceive(head *HeadDecode, body []byte) {
 		case ch <- resp:
 		default:
 			// 防止通道阻塞（理论上不会发生，ch 容量为 1）
-			stresslog.WarnF("[NETWORK] OnReceive 响应通道已满 cmd=%d act=%d robotName=%s",
-				head.Cmd, head.Act, c.robotName)
+			stresslog.Warn("[NETWORK] OnReceive 响应通道已满",
+				zap.Uint8("cmd", head.Cmd), zap.Uint8("act", head.Act), zap.String("robot", c.robotName))
 		}
 		return
 	}
@@ -327,8 +329,8 @@ func (c *Connection) OnReceive(head *HeadDecode, body []byte) {
 		case c.listenCh <- resp:
 		default:
 			// 监听通道已满，丢弃消息
-			stresslog.WarnF("[NETWORK] OnReceive 监听通道已满 cmd=%d act=%d robotName=%s",
-				head.Cmd, head.Act, c.robotName)
+			stresslog.Warn("[NETWORK] OnReceive 监听通道已满",
+				zap.Uint8("cmd", head.Cmd), zap.Uint8("act", head.Act), zap.String("robot", c.robotName))
 		}
 		return
 	}

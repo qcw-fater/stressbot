@@ -5,6 +5,8 @@ import (
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
+	"go.uber.org/zap"
+	stresslog "stressbot/utils/log"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -404,8 +406,8 @@ func networkWaitListen(L *lua.LState) int {
 	}
 
 	// 超时
-	fmt.Printf("[SCRIPT] wait_listen 超时: service=%s cmd=%d act=%d timeout=%ds\n",
-		service, cmd, act, timeout)
+	stresslog.Warn("[SCRIPT] wait_listen 超时",
+		zap.String("service", service), zap.Int("cmd", int(cmd)), zap.Int("act", int(act)), zap.Int("timeout", timeout))
 	L.Push(lua.LNil)
 	return 1
 }
@@ -624,8 +626,8 @@ func networkRequestWait(L *lua.LState) int {
 	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
 		respMsg, err := ctx.Factory.Parse(s2cProto, respBody)
 		if err != nil {
-			fmt.Printf("[SCRIPT] request_wait 解析失败: proto=%s bodyLen=%d err=%v\n",
-				s2cProto, len(respBody), err)
+			stresslog.Warn("[SCRIPT] request_wait 解析失败",
+				zap.String("proto", s2cProto), zap.Int("bodyLen", len(respBody)), zap.Error(err))
 			L.Push(lua.LNumber(-2))
 			L.Push(lua.LString(err.Error()))
 			return 2

@@ -11,8 +11,10 @@ import (
 	"syscall"
 	"time"
 
+	"go.uber.org/zap"
+	stresslog "stressbot/utils/log"
+
 	"stressbot/engine"
-	stresslog "stressbot/log"
 	"stressbot/network"
 	"stressbot/protox"
 	"stressbot/robot"
@@ -66,21 +68,21 @@ func main() {
 	// 初始化日志
 	stresslog.InitLog("log/stressbot.log", "stressbot", nil, "")
 
-	stresslog.InfoF("[MAIN] 配置已加载: botCount=%d concurrent=%d", cfg.Bot.Count, cfg.Bot.ConcurrentNum)
+	stresslog.Info("[MAIN] 配置已加载", zap.Int("botCount", cfg.Bot.Count), zap.Int("concurrent", cfg.Bot.ConcurrentNum))
 
 	// 加载消息头协议配置
 	protocol, err := loadProtocol(cfg.Header)
 	if err != nil {
-		stresslog.FatalF("加载消息头协议失败: %v", err)
+		stresslog.Fatal("加载消息头协议失败", zap.Error(err))
 	}
 
-	stresslog.InfoF("[MAIN] 消息头协议已加载: %s", protocol)
+	stresslog.Info("[MAIN] 消息头协议已加载", zap.String("protocol", protocol.String()))
 
 	// 加载 .proto 文件
 	loader := protox.NewLoader(cfg.Proto.Dirs, cfg.Proto.Files)
 	files, err := loader.Load()
 	if err != nil {
-		stresslog.FatalF("加载 proto 文件失败: %v", err)
+		stresslog.Fatal("加载 proto 文件失败", zap.Error(err))
 	}
 
 	registry := protox.NewRegistry(files)
@@ -89,11 +91,11 @@ func main() {
 	// 加载流程配置
 	flow, err := loadFlow(cfg.Flow)
 	if err != nil {
-		stresslog.FatalF("加载流程配置失败: %v", err)
+		stresslog.Fatal("加载流程配置失败", zap.Error(err))
 	}
 
-	stresslog.InfoF("[MAIN] 流程配置已加载: startNode=%s, actions=%d, callbacks=%d",
-		flow.StartNode, len(flow.Actions), len(flow.Callbacks))
+	stresslog.Info("[MAIN] 流程配置已加载",
+		zap.String("startNode", flow.StartNode), zap.Int("actions", len(flow.Actions)), zap.Int("callbacks", len(flow.Callbacks)))
 
 	// 解析心跳间隔
 	heartbeatInterval := 5 * time.Second
@@ -106,7 +108,7 @@ func main() {
 	// 启动 gnet 网络引擎
 	dialer := network.NewDialer(protocol, heartbeatInterval)
 	if err := dialer.Start(); err != nil {
-		stresslog.FatalF("启动网络引擎失败: %v", err)
+		stresslog.Fatal("启动网络引擎失败", zap.Error(err))
 	}
 	defer dialer.Stop()
 
@@ -129,15 +131,15 @@ func main() {
 	}
 	luaPool := script.NewRuntimePool(scriptDir)
 	if err := luaPool.PrecompileScripts(cfg.Script.Dirs); err != nil {
-		stresslog.WarnF("[MAIN] Lua 脚本预编译失败（非致命错误）: %v", err)
+		stresslog.Warn("[MAIN] Lua 脚本预编译失败（非致命错误）", zap.Error(err))
 	} else {
-		stresslog.InfoF("[MAIN] Lua 脚本已预编译: %d 个", len(luaPool.ListScripts()))
+		stresslog.Info("[MAIN] Lua 脚本已预编译", zap.Int("count", len(luaPool.ListScripts())))
 	}
 
 	mgr := robot.NewManager(mgrCfg, flow, factory, protocol, dialer, luaPool)
 
 	if err := mgr.StartAll(); err != nil {
-		stresslog.FatalF("启动机器人失败: %v", err)
+		stresslog.Fatal("启动机器人失败", zap.Error(err))
 	}
 
 	// 等待退出信号
@@ -145,9 +147,9 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	<-sigCh
-	stresslog.InfoF("[MAIN] 收到退出信号，正在关闭...")
+	stresslog.Info("[MAIN] 收到退出信号，正在关闭...")
 	mgr.StopAll()
-	stresslog.InfoF("[MAIN] 已退出")
+	stresslog.Info("[MAIN] 已退出")
 }
 
 // loadConfig 加载全局配置

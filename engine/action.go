@@ -6,13 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	stresslog "stressbot/log"
 	"strings"
 	"time"
 
 	"stressbot/protox"
 	"stressbot/state"
+	stresslog "stressbot/utils/log"
 
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -392,7 +393,7 @@ func (ae *ActionExecutor) execTCPSend(def *ActionDef) error {
 	packet, err := ae.buildPacket(def)
 	if err != nil {
 		if errors.Is(err, ErrActionSkip) {
-			stresslog.DebugF("[ACTION] 跳过动作 %s: 必需字段为空", def.C2SProto)
+			stresslog.Debug("[ACTION] 跳过动作: 必需字段为空", zap.String("proto", def.C2SProto))
 			return nil
 		}
 		return err
@@ -401,13 +402,14 @@ func (ae *ActionExecutor) execTCPSend(def *ActionDef) error {
 	ok, n := ae.netSender.TCPSend(def.Service, def.Cmd, def.Act, packet)
 	if !ok {
 		if def.Optional {
-			stresslog.DebugF("[ACTION] 可选 TCP 发送失败（已忽略）: service=%s cmd=%d act=%d", def.Service, def.Cmd, def.Act)
+			stresslog.Debug("[ACTION] 可选 TCP 发送失败（已忽略）", zap.String("service", def.Service), zap.Uint8("cmd", def.Cmd), zap.Uint8("act", def.Act))
 			return nil
 		}
 		return fmt.Errorf("TCP 发送失败: service=%s cmd=%d act=%d", def.Service, def.Cmd, def.Act)
 	}
 
-	stresslog.InfoF("[ACTION] TCPSend 成功: service=%s cmd=%d act=%d bytes=%d", def.Service, def.Cmd, def.Act, n)
+	stresslog.Debug("[ACTION] TCPSend 成功",
+		zap.String("service", def.Service), zap.Uint8("cmd", def.Cmd), zap.Uint8("act", def.Act), zap.Int("bytes", n))
 	return nil
 }
 
@@ -416,7 +418,7 @@ func (ae *ActionExecutor) execTCPRequest(def *ActionDef) error {
 	packet, err := ae.buildPacket(def)
 	if err != nil {
 		if errors.Is(err, ErrActionSkip) {
-			stresslog.DebugF("[ACTION] 跳过动作 %s: 必需字段为空", def.C2SProto)
+			stresslog.Debug("[ACTION] 跳过动作: 必需字段为空", zap.String("proto", def.C2SProto))
 			return nil
 		}
 		return err
@@ -431,7 +433,7 @@ func (ae *ActionExecutor) execTCPRequest(def *ActionDef) error {
 	}
 	if !ok {
 		if def.Optional {
-			stresslog.DebugF("[ACTION] 可选 TCP 请求失败（已忽略）: service=%s cmd=%d act=%d", def.Service, def.Cmd, def.Act)
+			stresslog.Debug("[ACTION] 可选 TCP 请求失败（已忽略）", zap.String("service", def.Service), zap.Uint8("cmd", def.Cmd), zap.Uint8("act", def.Act))
 			return nil
 		}
 		return fmt.Errorf("TCP 请求失败: service=%s cmd=%d act=%d", def.Service, def.Cmd, def.Act)
@@ -441,7 +443,7 @@ func (ae *ActionExecutor) execTCPRequest(def *ActionDef) error {
 		return err
 	}
 
-	stresslog.InfoF("[ACTION] TCPRequest 成功: service=%s cmd=%d act=%d", def.Service, def.Cmd, def.Act)
+	stresslog.Debug("[ACTION] TCPRequest 成功", zap.String("service", def.Service), zap.Uint8("cmd", def.Cmd), zap.Uint8("act", def.Act))
 	return nil
 }
 
@@ -451,7 +453,7 @@ func (ae *ActionExecutor) execHTTPPost(def *ActionDef) error {
 	for _, fb := range def.FormFields {
 		val := ae.resolveFieldValue(&fb)
 		if val == nil && fb.isRequired() {
-			stresslog.DebugF("[ACTION] 跳过 HTTPPost %s: 必需字段 %s 为空", def.Path, fb.Field)
+			stresslog.Debug("[ACTION] 跳过 HTTPPost: 必需字段为空", zap.String("path", def.Path), zap.String("field", fb.Field))
 			return nil
 		}
 		if val == nil {
@@ -463,7 +465,7 @@ func (ae *ActionExecutor) execHTTPPost(def *ActionDef) error {
 	statusCode, body, err := ae.netSender.HTTPPost(def.Path, formData)
 	if err != nil {
 		if def.Optional {
-			stresslog.DebugF("[ACTION] 可选 HTTPPost 失败（已忽略）: %v", err)
+			stresslog.Debug("[ACTION] 可选 HTTPPost 失败（已忽略）", zap.Error(err))
 			return nil
 		}
 		return fmt.Errorf("HTTP POST 失败 path=%s: %w", def.Path, err)
@@ -471,7 +473,7 @@ func (ae *ActionExecutor) execHTTPPost(def *ActionDef) error {
 
 	if statusCode >= 400 {
 		if def.Optional {
-			stresslog.DebugF("[ACTION] 可选 HTTPPost 状态码 %d（已忽略）", statusCode)
+			stresslog.Debug("[ACTION] 可选 HTTPPost 状态码（已忽略）", zap.Int("statusCode", statusCode))
 			return nil
 		}
 		return fmt.Errorf("HTTP POST 返回错误状态码: %d path=%s", statusCode, def.Path)
@@ -486,7 +488,7 @@ func (ae *ActionExecutor) execHTTPPost(def *ActionDef) error {
 		ae.storeResponse(def.Store, fieldMap)
 	}
 
-	stresslog.InfoF("[ACTION] HTTPPost 成功: path=%s status=%d", def.Path, statusCode)
+	stresslog.Debug("[ACTION] HTTPPost 成功", zap.String("path", def.Path), zap.Int("status", statusCode))
 	return nil
 }
 
@@ -500,7 +502,7 @@ func (ae *ActionExecutor) execConnect(def *ActionDef) error {
 	if !ok {
 		return fmt.Errorf("TCP 连接建立失败: service=%s address=%s", def.Service, addr)
 	}
-	stresslog.InfoF("[ACTION] ConnectTCP 成功: service=%s address=%s", def.Service, addr)
+	stresslog.Debug("[ACTION] ConnectTCP 成功", zap.String("service", def.Service), zap.String("address", addr))
 	return nil
 }
 
@@ -514,7 +516,7 @@ func (ae *ActionExecutor) execConnectUDP(def *ActionDef) error {
 	if !ok {
 		return fmt.Errorf("UDP 连接建立失败: address=%s", addr)
 	}
-	stresslog.InfoF("[ACTION] ConnectUDP 成功: address=%s", addr)
+	stresslog.Debug("[ACTION] ConnectUDP 成功", zap.String("address", addr))
 	return nil
 }
 
@@ -530,7 +532,7 @@ func (ae *ActionExecutor) execExchangeKey(def *ActionDef) error {
 	if def.SecretArg != "" {
 		ae.store.Set(def.SecretArg, respBody)
 	}
-	stresslog.InfoF("[ACTION] ExchangeKey 成功: service=%s keyLen=%d", def.Service, len(respBody))
+	stresslog.Debug("[ACTION] ExchangeKey 成功", zap.String("service", def.Service), zap.Int("keyLen", len(respBody)))
 	return nil
 }
 
@@ -543,10 +545,10 @@ func (ae *ActionExecutor) execClose(def *ActionDef) error {
 	switch target {
 	case "udp":
 		ae.netSender.CloseUDP()
-		stresslog.InfoF("[ACTION] Close UDP 成功")
+		stresslog.Debug("[ACTION] Close UDP 成功")
 	case "tcp":
 		ae.netSender.CloseTCP(def.Service)
-		stresslog.InfoF("[ACTION] Close TCP 成功: service=%s", def.Service)
+		stresslog.Debug("[ACTION] Close TCP 成功", zap.String("service", def.Service))
 	default:
 		return fmt.Errorf("未知的关闭目标: %s", target)
 	}
@@ -558,7 +560,7 @@ func (ae *ActionExecutor) execClearState(def *ActionDef) error {
 	for _, key := range def.Keys {
 		ae.store.Delete(key)
 	}
-	stresslog.InfoF("[ACTION] ClearState 成功: keys=%v", def.Keys)
+	stresslog.Debug("[ACTION] ClearState 成功", zap.Strings("keys", def.Keys))
 	return nil
 }
 
@@ -663,8 +665,8 @@ func (ae *ActionExecutor) execRegisterHeartbeat(def *ActionDef) error {
 	}
 
 	ae.netSender.RegisterHeartbeat(target, def.Service, interval, builder)
-	stresslog.InfoF("[ACTION] RegisterHeartbeat: target=%s service=%s interval=%dms cmd=%d act=%d",
-		target, def.Service, interval, cmd, act)
+	stresslog.Info("[ACTION] RegisterHeartbeat",
+		zap.String("target", target), zap.String("service", def.Service), zap.Int("intervalMs", interval), zap.Uint8("cmd", cmd), zap.Uint8("act", act))
 	return nil
 }
 
@@ -762,7 +764,7 @@ func (ae *ActionExecutor) parseAndStoreResponse(def *ActionDef, respBody []byte)
 	}
 
 	fieldMap := ae.factory.GetFieldMap(respMsg)
-	stresslog.DebugF("[ACTION] TCPResponseProto %s: fields=%v bodyLen=%d", def.S2CProto, fieldMap, len(respBody))
+	stresslog.Debug("[ACTION] TCPResponseProto", zap.String("proto", def.S2CProto), zap.Int("bodyLen", len(respBody)))
 
 	ae.storeResponse(def.Store, fieldMap)
 	return nil
@@ -812,14 +814,14 @@ func (ae *ActionExecutor) execWaitListen(def *ActionDef) error {
 			if err := ae.parseAndStoreResponse(def, respBody); err != nil {
 				return err
 			}
-			stresslog.InfoF("[ACTION] WaitListen 成功: service=%s cmd=%d act=%d", def.Service, cmd, act)
+			stresslog.Debug("[ACTION] WaitListen 成功", zap.String("service", def.Service), zap.Uint8("cmd", cmd), zap.Uint8("act", act))
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 
 	if def.Optional {
-		stresslog.WarnF("[ACTION] 可选 WaitListen 超时（已忽略）: service=%s cmd=%d act=%d", def.Service, cmd, act)
+		stresslog.Warn("[ACTION] 可选 WaitListen 超时（已忽略）", zap.String("service", def.Service), zap.Uint8("cmd", cmd), zap.Uint8("act", act))
 		return nil
 	}
 	return fmt.Errorf("WaitListen 超时: service=%s cmd=%d act=%d timeout=%ds",

@@ -8,7 +8,9 @@ import (
 	"compress/gzip"
 	"encoding/binary"
 	"fmt"
-	stresslog "stressbot/log"
+
+	"go.uber.org/zap"
+	stresslog "stressbot/utils/log"
 )
 
 // HeaderFieldDef 消息头字段定义，从 header.json 加载
@@ -376,7 +378,7 @@ func (p *Protocol) DecodePacket(data []byte, secretKey []byte) (*HeadDecode, []b
 	if p.IsCompressed(head.Flags) {
 		decompressed, err := p.DecompressBody(body)
 		if err != nil {
-			stresslog.ErrorF("[PROTOCOL] gzip 解压失败: %v bodyLen=%d", err, len(body))
+			stresslog.Error("[PROTOCOL] gzip 解压失败", zap.Error(err), zap.Int("bodyLen", len(body)))
 			return head, body
 		}
 		body = decompressed
