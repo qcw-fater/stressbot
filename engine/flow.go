@@ -160,8 +160,7 @@ type ActionDef struct {
 	SecretArg  string         `json:"secretArg"`  // exchangeKey 时也把密钥存到 state key
 
 	// Heartbeat 相关字段（registerHeartbeat 模式）
-	IntervalMs int    `json:"intervalMs"` // 心跳间隔（毫秒）
-	BodyScript string `json:"bodyScript"` // 心跳 body 构建 Lua 脚本（可选，返回 bytes）
+	IntervalMs int `json:"intervalMs"` // 心跳间隔（毫秒）
 }
 
 // RawField 二进制字段描述。

@@ -129,15 +129,12 @@ func extractNetArgs(L *lua.LState) (string, uint8, uint8, proto.Message, string)
 	argIdx := 0
 	for i := 1; i <= top; i++ {
 		v := L.Get(i)
-		if _, ok := v.(*lua.LUserData); ok {
-			// 检查是否是 proto.Message
-			if ud, ok := v.(*lua.LUserData); ok {
-				if pm, ok := ud.Value.(proto.Message); ok {
-					msg = pm
-					continue
-				}
+		if ud, ok := v.(*lua.LUserData); ok {
+			if pm, ok := ud.Value.(proto.Message); ok {
+				msg = pm
+				continue
 			}
-			continue // 跳过其他 userdata
+			continue
 		}
 
 		argIdx++
@@ -197,11 +194,7 @@ func networkRequest(L *lua.LState) int {
 			return 2
 		}
 
-		ud := L.NewUserData()
-		ud.Value = respMsg
-		mt := L.NewTable()
-		L.SetField(mt, "__index", L.NewFunction(protoMsgIndex))
-		L.SetMetatable(ud, mt)
+		ud := wrapProtoMessage(L, respMsg)
 
 		L.Push(lua.LNumber(0)) // code = 0 表示成功
 		L.Push(ud)
@@ -382,12 +375,7 @@ func networkWaitListen(L *lua.LState) int {
 					L.Push(lua.LNil)
 					return 1
 				}
-				ud := L.NewUserData()
-				ud.Value = respMsg
-				mt := L.NewTable()
-				L.SetField(mt, "__index", L.NewFunction(protoMsgIndex))
-				L.SetMetatable(ud, mt)
-				L.Push(ud)
+				L.Push(wrapProtoMessage(L, respMsg))
 				return 1
 			}
 			// 无 proto 解析，返回原始字节
@@ -430,11 +418,6 @@ func buildPacket(ctx *ScriptContext, service string, cmd, act uint8, msg proto.M
 		secretKey = ctx.NetSender.GetSecretKey(service)
 	}
 	return ctx.Protocol.BuildPacket(cmd, act, body, secretKey), nil
-}
-
-// buildRawPacket 构建原始报文（使用指定密钥）
-func buildRawPacket(ctx *ScriptContext, cmd, act uint8, body []byte, secretKey []byte) []byte {
-	return ctx.Protocol.BuildPacket(cmd, act, body, secretKey)
 }
 
 // networkCloseTCP network.close_tcp(service) — 关闭指定服务的 TCP 连接
@@ -633,11 +616,7 @@ func networkRequestWait(L *lua.LState) int {
 			return 2
 		}
 
-		ud := L.NewUserData()
-		ud.Value = respMsg
-		mt := L.NewTable()
-		L.SetField(mt, "__index", L.NewFunction(protoMsgIndex))
-		L.SetMetatable(ud, mt)
+		ud := wrapProtoMessage(L, respMsg)
 
 		L.Push(lua.LNumber(0))
 		L.Push(ud)

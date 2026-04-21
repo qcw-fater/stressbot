@@ -20,5 +20,6 @@
     "type": "xor",
     "keyField": "bcc",
     "offset": 0
-  }
+  },
+  "middleware": ["bcc", "xor", "gzip"]
 }

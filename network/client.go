@@ -4,7 +4,6 @@ package network
 
 import (
 	"sync"
-	"time"
 )
 
 // Client 管理压测机器人的所有网络连接。
@@ -28,10 +27,9 @@ func NewClient(name string, protocol *Protocol) *Client {
 }
 
 // Connect 建立到指定服务的 TCP 连接。
-// serviceName：服务名称，用于索引连接；address：远端地址（host:port）。
-// timeout：连接超时时间（当前未使用，gnet 集成后生效）。
-// 如果 serviceName 已存在则返回 false。
-func (c *Client) Connect(serviceName, address string, timeout time.Duration) bool {
+// 仅创建 Connection 对象占位，实际的 gnet 拨号和 sendFunc 注入
+// 由 Robot.ConnectTCP → Dialer.DialTCP 完成。
+func (c *Client) Connect(serviceName string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -41,10 +39,6 @@ func (c *Client) Connect(serviceName, address string, timeout time.Duration) boo
 	}
 
 	conn := NewConnection(serviceName, c.name, c.protocol)
-	// TODO: gnet 集成后在此处执行实际的 TCP 拨号逻辑，并注入 sendFunc
-	// 目前仅创建连接对象占位
-	_ = timeout
-
 	c.TCPConn[serviceName] = conn
 	return true
 }
@@ -52,14 +46,14 @@ func (c *Client) Connect(serviceName, address string, timeout time.Duration) boo
 // ConnectUDP 建立 UDP 连接。
 // address：远端地址（host:port）。
 // 如果 UDP 连接已存在则返回 false。
-func (c *Client) ConnectUDP(address string) bool {
+func (c *Client) ConnectUDP() bool {
 	// 已存在 UDP 连接则拒绝
 	if c.UDPConn != nil {
 		return false
 	}
 
 	conn := NewConnection("udp", c.name, c.protocol)
-	// TODO: gnet 集成后在此处执行实际的 UDP 拨号逻辑，并注入 sendFunc
+	// 实际 gnet UDP 拨号由 Robot.ConnectUDP → Dialer.DialUDP 完成
 	c.UDPConn = conn
 	return true
 }

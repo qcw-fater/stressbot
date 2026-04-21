@@ -95,7 +95,10 @@ func (c *Connection) GetSecretKey() []byte {
 // responseId 为期望响应的 CmdAct 路由键。
 // 返回响应消息和发送字节数；超时或连接关闭返回 nil, 0。
 func (c *Connection) RequestResponse(sendData []byte, responseId int) (*Message, int) {
-	if c == nil || atomic.LoadInt32(&c.isClose) == 1 {
+	if c == nil {
+		return nil, 0
+	}
+	if atomic.LoadInt32(&c.isClose) == 1 {
 		stresslog.Warn("[NETWORK] RequestResponse 连接已关闭", zap.String("service", c.serviceName))
 		return nil, 0
 	}

@@ -6,7 +6,6 @@ package network
 import (
 	"context"
 	"fmt"
-	"net"
 	"sync"
 	"time"
 
@@ -16,7 +15,7 @@ import (
 )
 
 // connRegistry 管理 gnet 连接与业务层 Connection 的映射。
-// gnet OnOpen 时注册，OnClose 时注销。
+// 连接在 DialTCP/DialUDP 时注册，OnClose 时注销。
 type connRegistry struct {
 	mu      sync.RWMutex
 	connMap map[int]*Connection // gnet.Conn Fd -> 业务 Connection
@@ -173,7 +172,7 @@ func (d *Dialer) Start() error {
 		return fmt.Errorf("启动 gnet 客户端失败: %w", err)
 	}
 
-	stresslog.Info("[GNET] 客户端引擎已启动")
+	stresslog.Debug("[GNET] 客户端引擎已启动")
 	return nil
 }
 
@@ -185,7 +184,7 @@ func (d *Dialer) Stop() error {
 	if err := d.client.Stop(); err != nil {
 		return fmt.Errorf("停止 gnet 客户端失败: %w", err)
 	}
-	stresslog.Info("[GNET] 客户端引擎已停止")
+	stresslog.Debug("[GNET] 客户端引擎已停止")
 	return nil
 }
 
@@ -229,12 +228,4 @@ func (d *Dialer) DialUDP(address string, conn *Connection) (gnet.Conn, error) {
 
 	stresslog.Info("[GNET] UDP 连接已建立", zap.String("address", address), zap.String("robot", conn.robotName))
 	return gconn, nil
-}
-
-// RemoteAddr 获取 gnet 连接的远端地址
-func RemoteAddr(gconn gnet.Conn) net.Addr {
-	if gconn == nil {
-		return nil
-	}
-	return gconn.RemoteAddr()
 }

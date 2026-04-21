@@ -70,6 +70,8 @@ func (e *Executor) executeNode(ctx context.Context, node *Node) error {
 		return ctx.Err()
 	}
 
+	stresslog.Debug("[ENGINE] 执行节点", zap.String("id", node.ID), zap.String("type", node.Type))
+
 	switch node.Type {
 	case "start":
 		return e.executeStart(ctx, node)
@@ -90,21 +92,9 @@ func (e *Executor) executeNode(ctx context.Context, node *Node) error {
 	}
 }
 
-// executeStart 起始节点：顺序执行所有 next 节点（与旧 Robot 工具一致）
+// executeStart 起始节点：委托 executeSequence 顺序执行所有 next 节点
 func (e *Executor) executeStart(ctx context.Context, node *Node) error {
-	for _, nn := range node.Next {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		child, ok := e.flow.GetNode(nn.Node)
-		if !ok {
-			return fmt.Errorf("节点不存在: %s", nn.Node)
-		}
-		if err := e.executeNode(ctx, child); err != nil {
-			return err
-		}
-	}
-	return nil
+	return e.executeSequence(ctx, node)
 }
 
 // executeSequence 顺序节点：按顺序依次执行所有 next 节点

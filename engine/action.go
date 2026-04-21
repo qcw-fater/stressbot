@@ -336,7 +336,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 // 支持 "[idx]" 数字索引访问 list。
 func navigatePath(v any, path string) any {
 	current := v
-	for _, key := range splitPath(path) {
+	for _, key := range state.SplitPath(path) {
 		if current == nil {
 			return nil
 		}
@@ -356,27 +356,6 @@ func navigatePath(v any, path string) any {
 		}
 	}
 	return current
-}
-
-// splitPath 将点分路径拆分为键列表
-func splitPath(path string) []string {
-	if path == "" {
-		return nil
-	}
-	result := make([]string, 0, 4)
-	start := 0
-	for i := 0; i < len(path); i++ {
-		if path[i] == '.' {
-			if i > start {
-				result = append(result, path[start:i])
-			}
-			start = i + 1
-		}
-	}
-	if start < len(path) {
-		result = append(result, path[start:])
-	}
-	return result
 }
 
 // resolveAddress 解析 address 配置：支持 "state:key" 取 StateStore，否则按字面量
@@ -665,7 +644,7 @@ func (ae *ActionExecutor) execRegisterHeartbeat(def *ActionDef) error {
 	}
 
 	ae.netSender.RegisterHeartbeat(target, def.Service, interval, builder)
-	stresslog.Info("[ACTION] RegisterHeartbeat",
+	stresslog.Debug("[ACTION] RegisterHeartbeat",
 		zap.String("target", target), zap.String("service", def.Service), zap.Int("intervalMs", interval), zap.Uint8("cmd", cmd), zap.Uint8("act", act))
 	return nil
 }
@@ -716,13 +695,13 @@ func (ae *ActionExecutor) writeRawField(buf *bytes.Buffer, f *RawField) error {
 
 	switch f.Type {
 	case "u8", "i8":
-		return binary.Write(buf, binary.LittleEndian, uint8(toInt64(val)))
+		return binary.Write(buf, binary.LittleEndian, uint8(state.ToInt64(val)))
 	case "u16", "i16", "random_u16":
-		return binary.Write(buf, binary.LittleEndian, uint16(toInt64(val)))
+		return binary.Write(buf, binary.LittleEndian, uint16(state.ToInt64(val)))
 	case "u32", "i32":
-		return binary.Write(buf, binary.LittleEndian, uint32(toInt64(val)))
+		return binary.Write(buf, binary.LittleEndian, uint32(state.ToInt64(val)))
 	case "u64", "i64", "time_ms":
-		return binary.Write(buf, binary.LittleEndian, uint64(toInt64(val)))
+		return binary.Write(buf, binary.LittleEndian, uint64(state.ToInt64(val)))
 	case "bytes":
 		b, _ := val.([]byte)
 		if b == nil {
@@ -988,7 +967,7 @@ func compareValues(a, b any, op string) bool {
 			return true
 		}
 		t := time.Now()
-		nowHour, nowMinute := t.Hour(), t.Minute()
+		nowTotalMin := t.Hour()*60 + t.Minute()
 		for _, it := range list {
 			entry, ok := it.(map[string]any)
 			if !ok {
@@ -998,8 +977,9 @@ func compareValues(a, b any, op string) bool {
 			sm, _ := toFloat64safe(firstNonNil(entry["StartMinute"], entry["startMinute"]))
 			eh, _ := toFloat64safe(firstNonNil(entry["EndHour"], entry["endHour"]))
 			em, _ := toFloat64safe(firstNonNil(entry["EndMinute"], entry["endMinute"]))
-			if nowHour >= int(sh) && nowHour <= int(eh) &&
-				(nowMinute >= int(sm) || nowMinute <= int(em)) {
+			startMin := int(sh)*60 + int(sm)
+			endMin := int(eh)*60 + int(em)
+			if nowTotalMin >= startMin && nowTotalMin <= endMin {
 				return true
 			}
 		}
@@ -1016,7 +996,6 @@ func compareValues(a, b any, op string) bool {
 	}
 }
 
-// toFloat64safe 尝试将 any 值转换为 float64
 // firstNonNil 返回第一个非 nil 的值。
 // 用于在 GetFieldMap 返回的 map 中兼容 proto 字段名大小写差异
 // （如 StartHour 与 startHour）。
@@ -1029,61 +1008,17 @@ func firstNonNil(vals ...any) any {
 	return nil
 }
 
+// toFloat64safe 尝试将 any 值转换为 float64
 func toFloat64safe(v any) (float64, bool) {
 	if v == nil {
 		return 0, false
 	}
-	switch n := v.(type) {
-	case int:
-		return float64(n), true
-	case int32:
-		return float64(n), true
-	case int64:
-		return float64(n), true
-	case uint:
-		return float64(n), true
-	case uint32:
-		return float64(n), true
-	case uint64:
-		return float64(n), true
-	case float64:
-		return n, true
-	case float32:
-		return float64(n), true
+	r := state.ToFloat64(v)
+	switch v.(type) {
+	case int, int32, int64, uint, uint32, uint64, float64, float32:
+		return r, true
 	default:
 		return 0, false
-	}
-}
-
-// toInt64 将 any 转为 int64
-func toInt64(v any) int64 {
-	if v == nil {
-		return 0
-	}
-	switch n := v.(type) {
-	case int:
-		return int64(n)
-	case int32:
-		return int64(n)
-	case int64:
-		return n
-	case uint:
-		return int64(n)
-	case uint32:
-		return int64(n)
-	case uint64:
-		return int64(n)
-	case float64:
-		return int64(n)
-	case float32:
-		return int64(n)
-	case bool:
-		if n {
-			return 1
-		}
-		return 0
-	default:
-		return 0
 	}
 }
 

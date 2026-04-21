@@ -1,8 +1,6 @@
 package script
 
 import (
-	"fmt"
-
 	lua "github.com/yuin/gopher-lua"
 
 	"google.golang.org/protobuf/proto"
@@ -53,7 +51,7 @@ func protoMsgIndex(L *lua.LState) int {
 }
 
 // checkProtoMsg 从栈中获取 proto.Message（跳过 self 参数）
-func checkProtoMsg(L *lua.LState, argIdx int) proto.Message {
+func checkProtoMsg(L *lua.LState) proto.Message {
 	top := L.GetTop()
 	for i := 1; i <= top; i++ {
 		v := L.Get(i)
@@ -65,6 +63,16 @@ func checkProtoMsg(L *lua.LState, argIdx int) proto.Message {
 	}
 	L.RaiseError("expected proto message (userdata)")
 	return nil
+}
+
+// wrapProtoMessage 将 proto.Message 包装为带 __index 元方法的 LUserData。
+func wrapProtoMessage(L *lua.LState, msg proto.Message) *lua.LUserData {
+	ud := L.NewUserData()
+	ud.Value = msg
+	mt := L.NewTable()
+	L.SetField(mt, "__index", L.NewFunction(protoMsgIndex))
+	L.SetMetatable(ud, mt)
+	return ud
 }
 
 // protoCreate proto.create(name) — 创建动态 proto 消息
@@ -82,12 +90,7 @@ func protoCreate(L *lua.LState) int {
 		return 0
 	}
 
-	ud := L.NewUserData()
-	ud.Value = msg
-
-	mt := L.NewTable()
-	L.SetField(mt, "__index", L.NewFunction(protoMsgIndex))
-	L.SetMetatable(ud, mt)
+	ud := wrapProtoMessage(L, msg)
 
 	L.Push(ud)
 	return 1
@@ -102,7 +105,7 @@ func protoSetField(L *lua.LState) int {
 		return 0
 	}
 
-	msg := checkProtoMsg(L, 1)
+	msg := checkProtoMsg(L)
 	if msg == nil {
 		return 0
 	}
@@ -149,7 +152,7 @@ func protoGetField(L *lua.LState) int {
 		return 1
 	}
 
-	msg := checkProtoMsg(L, 1)
+	msg := checkProtoMsg(L)
 	if msg == nil {
 		L.Push(lua.LNil)
 		return 1
@@ -190,7 +193,7 @@ func protoSerialize(L *lua.LState) int {
 		return 1
 	}
 
-	msg := checkProtoMsg(L, 1)
+	msg := checkProtoMsg(L)
 	if msg == nil {
 		L.Push(lua.LNil)
 		return 1
@@ -241,12 +244,7 @@ func protoParse(L *lua.LState) int {
 		return 0
 	}
 
-	ud := L.NewUserData()
-	ud.Value = msg
-
-	mt := L.NewTable()
-	L.SetField(mt, "__index", L.NewFunction(protoMsgIndex))
-	L.SetMetatable(ud, mt)
+	ud := wrapProtoMessage(L, msg)
 
 	L.Push(ud)
 	return 1
@@ -260,7 +258,7 @@ func protoGetFieldMap(L *lua.LState) int {
 		return 1
 	}
 
-	msg := checkProtoMsg(L, 1)
+	msg := checkProtoMsg(L)
 	if msg == nil {
 		L.Push(lua.LNil)
 		return 1
@@ -276,11 +274,6 @@ func protoGetFieldMap(L *lua.LState) int {
 	return 1
 }
 
-// formatProtoError 格式化 proto 错误信息
-func formatProtoError(op string, err error) string {
-	return fmt.Sprintf("proto %s failed: %v", op, err)
-}
-
 // protoIterList proto.iter_list(msg, field) → iterator
 // for idx, item in proto.iter_list(msg, "items") do ... end
 // item 为子 proto 消息（LUserData）。
@@ -290,7 +283,7 @@ func protoIterList(L *lua.LState) int {
 		L.Push(lua.LNil)
 		return 1
 	}
-	msg := checkProtoMsg(L, 1)
+	msg := checkProtoMsg(L)
 	if msg == nil {
 		L.Push(lua.LNil)
 		return 1
@@ -318,12 +311,7 @@ func protoIterList(L *lua.LState) int {
 		L.Push(lua.LNumber(idx))
 		// 嵌套 proto 消息保留为 userdata
 		if pm, ok := item.(proto.Message); ok {
-			ud := L.NewUserData()
-			ud.Value = pm
-			mt := L.NewTable()
-			L.SetField(mt, "__index", L.NewFunction(protoMsgIndex))
-			L.SetMetatable(ud, mt)
-			L.Push(ud)
+			L.Push(wrapProtoMessage(L, pm))
 		} else {
 			L.Push(goValueToLua(L, item))
 		}
@@ -340,7 +328,7 @@ func protoListSize(L *lua.LState) int {
 		L.Push(lua.LNumber(0))
 		return 1
 	}
-	msg := checkProtoMsg(L, 1)
+	msg := checkProtoMsg(L)
 	if msg == nil {
 		L.Push(lua.LNumber(0))
 		return 1
@@ -363,7 +351,7 @@ func protoListGet(L *lua.LState) int {
 		L.Push(lua.LNil)
 		return 1
 	}
-	msg := checkProtoMsg(L, 1)
+	msg := checkProtoMsg(L)
 	if msg == nil {
 		L.Push(lua.LNil)
 		return 1
@@ -395,12 +383,7 @@ func protoListGet(L *lua.LState) int {
 	}
 	item := list[i]
 	if pm, ok := item.(proto.Message); ok {
-		ud := L.NewUserData()
-		ud.Value = pm
-		mt := L.NewTable()
-		L.SetField(mt, "__index", L.NewFunction(protoMsgIndex))
-		L.SetMetatable(ud, mt)
-		L.Push(ud)
+		L.Push(wrapProtoMessage(L, pm))
 	} else {
 		L.Push(goValueToLua(L, item))
 	}

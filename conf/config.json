@@ -23,5 +23,10 @@
     "dirs": ["conf/scripts"]
   },
   "header": "conf/header.json",
-  "flow": "conf/flow.json"
+  "flow": "conf/flow.json",
+  "middleware": {
+    "standard": ["gzip"],
+    "scripts": ["conf/middlewares"],
+    "poolSize": 4
+  }
 }

@@ -13,6 +13,7 @@ import (
 
 	lua "github.com/yuin/gopher-lua"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 	stresslog "stressbot/utils/log"
 
 	"stressbot/engine"
@@ -32,7 +33,6 @@ type ScriptContext struct {
 	Factory   *protox.Factory
 	Protocol  engine.ProtocolEncoder
 	NetSender engine.NetSender
-	Flow      *engine.TaskFlow
 	Ctx       context.Context
 	// LuaMu 是该 Robot 独占 LState 的互斥锁。
 	// 所有后台触发的 Lua 调用（心跳 builder、监听回调等）必须持有此锁，
@@ -281,12 +281,10 @@ func createProtoMessageUserData(L *lua.LState, data []byte, protoName string) *l
 		}
 	}
 
+	if pm, ok := msg.(proto.Message); ok {
+		return wrapProtoMessage(L, pm)
+	}
 	ud := L.NewUserData()
 	ud.Value = msg
-
-	mt := L.NewTable()
-	L.SetField(mt, "__index", L.NewFunction(protoMsgIndex))
-	L.SetMetatable(ud, mt)
-
 	return ud
 }

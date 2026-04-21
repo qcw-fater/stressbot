@@ -3,6 +3,7 @@ package script
 import (
 	"fmt"
 	"strconv"
+	"stressbot/state"
 
 	lua "github.com/yuin/gopher-lua"
 	"google.golang.org/protobuf/proto"
@@ -67,6 +68,14 @@ func robotIndex(L *lua.LState) int {
 		L.Push(L.NewFunction(robotModuleIncrement))
 	case "has":
 		L.Push(L.NewFunction(robotModuleHas))
+	case "clear":
+		L.Push(L.NewFunction(robotModuleClear))
+	case "delete":
+		L.Push(L.NewFunction(robotModuleClear))
+	case "get_path":
+		L.Push(L.NewFunction(robotModuleGetPath))
+	case "keys":
+		L.Push(L.NewFunction(robotModuleKeys))
 	default:
 		L.RaiseError("unknown robot method: %s", method)
 	}
@@ -82,17 +91,10 @@ func robotModuleGet(L *lua.LState) int {
 	}
 
 	key := L.CheckString(1)
-	if L.GetTop() >= 2 {
-		// r:get(key) 形式，第一个参数是 self（由于 : 语法）
-		// 实际上 require("robot").get(key) 才是 1 参数
-		// 但 r:get(key) 时 self 是第一个参数...
-		// 这里需要区分两种调用方式
-	}
 
 	// 统一处理：最后一个字符串参数是 key
 	keyIdx := L.GetTop()
 	if keyIdx > 1 {
-		// 可能是 r:get("key") 形式，跳过 self
 		key = L.CheckString(keyIdx)
 	}
 
@@ -256,7 +258,7 @@ func navigatePath(store interface {
 		return nil
 	}
 	// 解析路径为 segments：例如 "a.b[0].c" => ["a","b","[0]","c"]
-	segments := splitPath(path)
+	segments := state.SplitPath(path)
 	if len(segments) == 0 {
 		return nil
 	}
@@ -294,40 +296,6 @@ func navigatePath(store interface {
 		}
 	}
 	return cur
-}
-
-// splitPath 将 "a.b[0].c" 拆为 ["a","b","[0]","c"]
-func splitPath(path string) []string {
-	var out []string
-	var buf []byte
-	flush := func() {
-		if len(buf) > 0 {
-			out = append(out, string(buf))
-			buf = buf[:0]
-		}
-	}
-	for i := 0; i < len(path); i++ {
-		ch := path[i]
-		switch ch {
-		case '.':
-			flush()
-		case '[':
-			flush()
-			// 读取到 ']'
-			j := i
-			for j < len(path) && path[j] != ']' {
-				j++
-			}
-			if j < len(path) {
-				out = append(out, path[i:j+1])
-				i = j
-			}
-		default:
-			buf = append(buf, ch)
-		}
-	}
-	flush()
-	return out
 }
 
 // extractArgs 从 Lua 栈中提取参数，跳过 LUserData（self）

@@ -36,20 +36,6 @@ func (s *Store) Get(key string) any {
 	return v
 }
 
-// GetBool 获取布尔值，不存在返回 false
-func (s *Store) GetBool(key string) bool {
-	s.mu.RLock()
-	v, ok := s.data[key]
-	s.mu.RUnlock()
-	if !ok {
-		return false
-	}
-	if b, ok := v.(bool); ok {
-		return b
-	}
-	return false
-}
-
 // GetInt 获取整数值，不存在返回 0
 func (s *Store) GetInt(key string) int {
 	s.mu.RLock()
@@ -68,7 +54,7 @@ func (s *Store) GetInt64(key string) int64 {
 	s.mu.RLock()
 	v := s.data[key]
 	s.mu.RUnlock()
-	return toInt64(v)
+	return ToInt64(v)
 }
 
 // GetString 获取字符串值，不存在返回 ""
@@ -83,20 +69,6 @@ func (s *Store) GetString(key string) string {
 		return s
 	}
 	return fmt.Sprintf("%v", v)
-}
-
-// GetBytes 获取字节切片
-func (s *Store) GetBytes(key string) []byte {
-	s.mu.RLock()
-	v := s.data[key]
-	s.mu.RUnlock()
-	if v == nil {
-		return nil
-	}
-	if b, ok := v.([]byte); ok {
-		return b
-	}
-	return nil
 }
 
 // GetList 获取列表（any 切片）
@@ -154,7 +126,7 @@ func (s *Store) Increment(key string) int {
 func (s *Store) IncrementInt64(key string) int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	v := toInt64(s.data[key]) + 1
+	v := ToInt64(s.data[key]) + 1
 	s.data[key] = v
 	return v
 }
@@ -203,8 +175,8 @@ func toInt(v any) int {
 	}
 }
 
-// toInt64 将 any 转换为 int64
-func toInt64(v any) int64 {
+// ToInt64 将 any 转换为 int64（公开版本，供其他包使用）
+func ToInt64(v any) int64 {
 	if v == nil {
 		return 0
 	}
@@ -223,7 +195,74 @@ func toInt64(v any) int64 {
 		return int64(n)
 	case float64:
 		return int64(n)
+	case float32:
+		return int64(n)
+	case bool:
+		if n {
+			return 1
+		}
+		return 0
 	default:
 		return 0
 	}
+}
+
+// ToFloat64 将 any 转换为 float64（公开版本，供其他包使用）
+func ToFloat64(v any) float64 {
+	if v == nil {
+		return 0
+	}
+	switch n := v.(type) {
+	case int:
+		return float64(n)
+	case int32:
+		return float64(n)
+	case int64:
+		return float64(n)
+	case uint:
+		return float64(n)
+	case uint32:
+		return float64(n)
+	case uint64:
+		return float64(n)
+	case float64:
+		return n
+	case float32:
+		return float64(n)
+	default:
+		return 0
+	}
+}
+
+// SplitPath 将 "a.b[0].c" 拆为 ["a","b","[0]","c"]（公开版本，供其他包使用）
+func SplitPath(path string) []string {
+	var out []string
+	var buf []byte
+	flush := func() {
+		if len(buf) > 0 {
+			out = append(out, string(buf))
+			buf = buf[:0]
+		}
+	}
+	for i := 0; i < len(path); i++ {
+		ch := path[i]
+		switch ch {
+		case '.':
+			flush()
+		case '[':
+			flush()
+			j := i + 1
+			for j < len(path) && path[j] != ']' {
+				j++
+			}
+			if j < len(path) {
+				out = append(out, path[i:j+1])
+				i = j
+			}
+		default:
+			buf = append(buf, ch)
+		}
+	}
+	flush()
+	return out
 }

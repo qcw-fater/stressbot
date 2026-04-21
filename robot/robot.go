@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"stressbot/engine"
 	"stressbot/network"
 	"stressbot/protox"
@@ -137,7 +138,6 @@ func (r *Robot) Start() {
 				Factory:   r.factory,
 				Protocol:  r.client.GetProtocol(),
 				NetSender: &netSenderAdapter{robot: r},
-				Flow:      r.executor.GetFlow(),
 				Ctx:       r.ctx,
 				LuaMu:     &r.luaMu,
 			})
@@ -173,7 +173,7 @@ func (r *Robot) Close() {
 
 // ConnectTCP 建立 TCP 连接到指定服务
 func (r *Robot) ConnectTCP(serviceName, address string) bool {
-	ok := r.client.Connect(serviceName, address, 10*time.Second)
+	ok := r.client.Connect(serviceName)
 	if !ok {
 		return false
 	}
@@ -194,7 +194,7 @@ func (r *Robot) ConnectTCP(serviceName, address string) bool {
 
 // ConnectUDP 建立 UDP 连接
 func (r *Robot) ConnectUDP(address string) bool {
-	ok := r.client.ConnectUDP(address)
+	ok := r.client.ConnectUDP()
 	if !ok {
 		return false
 	}
@@ -274,14 +274,16 @@ func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) error
 
 // ExecuteBoolean 执行条件判断。
 // 如果表达式以 "lua:" 前缀开头，使用 Lua 脚本执行；
-// 否则使用简单的内置条件解析。
+// 否则使用内置条件解析，支持格式：
+//   - "state:key" — 检查 state 中 key 是否存在且为 truthy
+//   - "state:key == value" / "state:key != value"
+//   - "state:key > N" / "state:key >= N" / "state:key < N" / "state:key <= N"
 func (h *robotActionHandler) ExecuteBoolean(expression string) bool {
 	if len(expression) > 4 && expression[:4] == "lua:" {
 		return h.executeLuaBoolean(expression[4:])
 	}
 
-	// TODO: 实现内置条件表达式解析（state 比较、数值范围等）
-	return true
+	return evalCondition(expression, h.robot.state)
 }
 
 // executeLuaBoolean 使用 Lua 脚本执行条件判断
@@ -385,7 +387,6 @@ func (h *robotActionHandler) createListenCallback(cbDef *engine.CallbackDef) net
 				Factory:   h.robot.factory,
 				Protocol:  h.robot.client.GetProtocol(),
 				NetSender: &netSenderAdapter{robot: h.robot},
-				Flow:      h.flow,
 				Ctx:       h.robot.ctx,
 				LuaMu:     &h.robot.luaMu,
 			})
@@ -403,7 +404,7 @@ func (h *robotActionHandler) createListenCallback(cbDef *engine.CallbackDef) net
 	}
 
 	return func(msg *network.Message) {
-		if msg.Data == nil || len(msg.Data) == 0 {
+		if len(msg.Data) == 0 {
 			return
 		}
 
@@ -429,6 +430,86 @@ func (h *robotActionHandler) createListenCallback(cbDef *engine.CallbackDef) net
 func (h *robotActionHandler) OnNodeError(node *engine.Node, err error) {
 	stresslog.Error("[ROBOT] 节点执行错误",
 		zap.Int("id", h.robot.id), zap.String("node", node.ID), zap.String("type", node.Type), zap.Error(err))
+}
+
+// evalCondition 解析内置条件表达式。
+// 支持格式:
+//   - "state:key" — truthy 检查
+//   - "state:key == value" / "state:key != value" — 相等比较
+//   - "state:key > N" / "state:key >= N" / "state:key < N" / "state:key <= N" — 数值比较
+func evalCondition(expr string, s *state.Store) bool {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return true
+	}
+
+	// 支持 state:KEY 前缀取值
+	if !strings.HasPrefix(expr, "state:") {
+		return true
+	}
+	rest := expr[6:]
+
+	// 查找运算符
+	for _, op := range []string{">=", "<=", "!=", "==", ">", "<"} {
+		if idx := strings.Index(rest, op); idx > 0 {
+			key := strings.TrimSpace(rest[:idx])
+			rhs := strings.TrimSpace(rest[idx+len(op):])
+			lhs := s.Get(key)
+			if lhs == nil {
+				return false
+			}
+			return compareValues(lhs, rhs, op)
+		}
+	}
+
+	// 无运算符：truthy 检查
+	val := s.Get(rest)
+	if val == nil {
+		return false
+	}
+	switch v := val.(type) {
+	case bool:
+		return v
+	case int:
+		return v != 0
+	case int64:
+		return v != 0
+	case float64:
+		return v != 0
+	case string:
+		return v != ""
+	default:
+		return true
+	}
+}
+
+// compareValues 比较 state 值与右操作数
+func compareValues(lhs any, rhs string, op string) bool {
+	lhsStr := fmt.Sprintf("%v", lhs)
+	if op == "==" {
+		return lhsStr == rhs
+	}
+	if op == "!=" {
+		return lhsStr != rhs
+	}
+
+	// 数值比较
+	lhsNum, err1 := strconv.ParseFloat(lhsStr, 64)
+	rhsNum, err2 := strconv.ParseFloat(rhs, 64)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	switch op {
+	case ">":
+		return lhsNum > rhsNum
+	case ">=":
+		return lhsNum >= rhsNum
+	case "<":
+		return lhsNum < rhsNum
+	case "<=":
+		return lhsNum <= rhsNum
+	}
+	return false
 }
 
 // netSenderAdapter NetSender 接口适配器

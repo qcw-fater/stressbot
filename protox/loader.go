@@ -8,13 +8,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	stresslog "stressbot/utils/log"
 	"strings"
 
 	"github.com/bufbuild/protocompile"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
-	stresslog "stressbot/utils/log"
 )
 
 // Loader .proto 文件加载器。

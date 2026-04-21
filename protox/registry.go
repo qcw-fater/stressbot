@@ -4,10 +4,11 @@ import (
 	"strings"
 	"sync"
 
+	stresslog "stressbot/utils/log"
+
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
-	stresslog "stressbot/utils/log"
 )
 
 // Registry 消息类型注册表。
@@ -68,24 +69,4 @@ func (r *Registry) Lookup(name string) (protoreflect.MessageDescriptor, bool) {
 	defer r.mu.RUnlock()
 	md, ok := r.messages[name]
 	return md, ok
-}
-
-// Files 返回底层文件注册表
-func (r *Registry) Files() *protoregistry.Files {
-	return r.files
-}
-
-// ListMessages 列出所有已注册的消息类型全名
-func (r *Registry) ListMessages() []string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	names := make([]string, 0, len(r.messages))
-	for name, md := range r.messages {
-		// 仅返回全名（包含 . 的）
-		if strings.Contains(name, ".") {
-			names = append(names, string(md.FullName()))
-		}
-	}
-	return names
 }

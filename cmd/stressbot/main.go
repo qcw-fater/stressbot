@@ -52,6 +52,11 @@ type Config struct {
 	Script struct {
 		Dirs []string `json:"dirs"` // Lua 脚本目录列表
 	} `json:"script"`
+	Middleware struct {
+		Standard []string `json:"standard"` // 框架标准中间件（"gzip" 等）
+		Scripts  []string `json:"scripts"`  // Lua 中间件脚本目录
+		PoolSize int      `json:"poolSize"` // Lua 中间件 LState 池大小
+	} `json:"middleware"`
 }
 
 func main() {
@@ -69,6 +74,11 @@ func main() {
 	stresslog.InitLog("log/stressbot.log", "stressbot", nil, "")
 
 	stresslog.Info("[MAIN] 配置已加载", zap.Int("botCount", cfg.Bot.Count), zap.Int("concurrent", cfg.Bot.ConcurrentNum))
+
+	// 注册中间件（在加载协议之前）
+	if err := initMiddleware(cfg); err != nil {
+		stresslog.Fatal("初始化中间件失败", zap.Error(err))
+	}
 
 	// 加载消息头协议配置
 	protocol, err := loadProtocol(cfg.Header)
@@ -218,4 +228,33 @@ func loadFlow(path string) (*engine.TaskFlow, error) {
 	}
 
 	return flow, nil
+}
+
+// initMiddleware 从 Lua 脚本目录加载并注册中间件。
+// 必须在 loadProtocol 之前调用。
+func initMiddleware(cfg *Config) error {
+	// 注册框架标准中间件
+	for _, name := range cfg.Middleware.Standard {
+		if !network.RegisterStandard(name) {
+			stresslog.Warn("[MAIN] 未知的标准中间件", zap.String("name", name))
+		}
+	}
+
+	// 加载 Lua 中间件脚本
+	if len(cfg.Middleware.Scripts) == 0 {
+		return nil
+	}
+
+	pool := network.NewLuaMiddlewarePool(cfg.Middleware.PoolSize)
+	if err := pool.LoadScripts(cfg.Middleware.Scripts); err != nil {
+		return fmt.Errorf("加载 Lua 中间件脚本失败: %w", err)
+	}
+
+	for _, name := range pool.ScriptNames() {
+		factory := network.CreateLuaMiddlewareFactory(pool, name)
+		network.RegisterMiddleware(name, factory)
+		stresslog.Info("[MAIN] 已注册 Lua 中间件", zap.String("name", name))
+	}
+
+	return nil
 }

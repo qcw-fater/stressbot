@@ -31,7 +31,7 @@ import (
 func loadUtilsModule(L *lua.LState) int {
 	mod := L.NewTable()
 
-	L.SetField(mod, "random_int", L.NewFunction(utilsRandomInt))
+	L.SetField(mod, "random_int", L.NewFunction(utilsRandRange))
 	L.SetField(mod, "random_bool", L.NewFunction(utilsRandomBool))
 	L.SetField(mod, "random_string", L.NewFunction(utilsRandomString))
 	L.SetField(mod, "random_pick", L.NewFunction(utilsRandomPick))
@@ -48,18 +48,6 @@ func loadUtilsModule(L *lua.LState) int {
 	L.SetField(mod, "rand_range", L.NewFunction(utilsRandRange))
 
 	L.Push(mod)
-	return 1
-}
-
-// utilsRandomInt utils.random_int(min, max) — 生成随机整数 [min, max]
-func utilsRandomInt(L *lua.LState) int {
-	min := L.CheckInt(1)
-	max := L.CheckInt(2)
-	if min >= max {
-		L.Push(lua.LNumber(min))
-		return 1
-	}
-	L.Push(lua.LNumber(rand.Intn(max-min+1) + min))
 	return 1
 }
 
@@ -175,10 +163,6 @@ func utilsLogError(L *lua.LState) int {
 
 // logPrefix 生成日志前缀
 func logPrefix(id int, account string) string {
-	return logPrefixFormat(id, account)
-}
-
-var logPrefixFormat = func(id int, account string) string {
 	return fmt.Sprintf(" id=%d account=%s", id, account)
 }
 

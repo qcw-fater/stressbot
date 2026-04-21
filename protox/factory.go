@@ -100,42 +100,6 @@ func (f *Factory) GetField(msg proto.Message, fieldName string) (any, error) {
 	return fromFieldValue(field, ref.Get(field)), nil
 }
 
-// GetFieldMessage 获取嵌套消息字段，返回 proto.Message 对象。
-// 用于 Lua 脚本中对嵌套消息进行进一步的字段操作。
-// 如果字段不是消息类型，返回 nil。
-func (f *Factory) GetFieldMessage(msg proto.Message, fieldName string) (proto.Message, error) {
-	ref := msg.ProtoReflect()
-	desc := ref.Descriptor()
-	field := desc.Fields().ByName(protoreflect.Name(fieldName))
-	if field == nil {
-		return nil, fmt.Errorf("消息 %s 未找到字段 %s", string(desc.FullName()), fieldName)
-	}
-
-	if field.Kind() != protoreflect.MessageKind {
-		return nil, nil
-	}
-
-	if !ref.Has(field) {
-		return nil, nil
-	}
-
-	subRef := ref.Get(field).Message()
-	return subRef.Interface(), nil
-}
-
-// GetFieldDescriptor 获取字段描述符
-func (f *Factory) GetFieldDescriptor(msg proto.Message, fieldName string) (protoreflect.FieldDescriptor, error) {
-	desc := msg.ProtoReflect().Descriptor()
-	field := desc.Fields().ByName(protoreflect.Name(fieldName))
-	if field == nil {
-		field = findFieldCaseInsensitive(desc, fieldName)
-	}
-	if field == nil {
-		return nil, fmt.Errorf("消息 %s 未找到字段 %s", string(desc.FullName()), fieldName)
-	}
-	return field, nil
-}
-
 // GetFieldMap 获取消息的所有字段值（map 形式）。
 // 遍历所有字段描述符，包含 proto3 默认值字段（如 int64=0、bool=false、string=""）。
 // 未设置的 message 类型字段和空的 repeated/map 字段会被跳过。
@@ -179,24 +143,6 @@ func (f *Factory) Parse(name string, data []byte) (proto.Message, error) {
 		return nil, fmt.Errorf("反序列化 %s 失败: %w", name, err)
 	}
 	return msg, nil
-}
-
-// ParseFromDescriptor 根据描述符反序列化字节切片
-func (f *Factory) ParseFromDescriptor(md protoreflect.MessageDescriptor, data []byte) (proto.Message, error) {
-	msg := dynamicpb.NewMessage(md)
-	if err := proto.Unmarshal(data, msg); err != nil {
-		return nil, fmt.Errorf("反序列化 %s 失败: %w", string(md.FullName()), err)
-	}
-	return msg, nil
-}
-
-// GetDescriptor 获取消息类型描述符
-func (f *Factory) GetDescriptor(name string) (protoreflect.MessageDescriptor, error) {
-	md, ok := f.registry.Lookup(name)
-	if !ok {
-		return nil, fmt.Errorf("未找到消息类型: %s", name)
-	}
-	return md, nil
 }
 
 // toFieldValue 将 Go 值转换为 protoreflect.Value
