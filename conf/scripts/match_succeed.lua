@@ -7,7 +7,7 @@ local utils = require("utils")
 
 function execute(r)
     -- 轮询监听匹配成功消息，超时 600 秒（10 分钟）
-    local resp = network.wait_listen("logic", 3, 1, "Game.MatchSucceedS2C", 600)
+    local resp = network.wait_listen("logic", {cmd=3, act=1}, "Game.MatchSucceedS2C", 600)
     if not resp then
         utils.log_error("MatchSucceed 超时")
         return 1

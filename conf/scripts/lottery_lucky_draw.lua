@@ -29,6 +29,6 @@ function execute(r)
     proto.set_field(msg, "lotteryPoolId", poolId)
     proto.set_field(msg, "lotteryConsumeType", 1)  -- LCT_NORMAL
 
-    network.send("logic", 23, 1, msg)
+    network.send("logic", {cmd=23, act=1}, msg)
     return 0
 end

@@ -9,7 +9,7 @@ function execute(r)
     robot.set("packageIndex", 0)
 
     -- 轮询监听开始游戏消息，超时 60 秒
-    local resp = network.wait_listen("battle", 4, 10, "Game.BattleStartGameS2C", 60)
+    local resp = network.wait_listen("battle", {cmd=4, act=10}, "Game.BattleStartGameS2C", 60)
     if not resp then
         utils.log_error("WaitStartGame 超时")
         return 1

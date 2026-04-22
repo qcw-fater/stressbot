@@ -22,6 +22,6 @@ function execute(r)
     proto.set_field(msg, "lotteryPoolId", poolId)
     proto.set_field(msg, "heroId", heroId)
 
-    network.send("logic", 23, 12, msg)
+    network.send("logic", {cmd=23, act=12}, msg)
     return 0
 end

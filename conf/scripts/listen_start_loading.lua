@@ -13,7 +13,7 @@ local utils = require("utils")
 
 function execute(r)
     -- 轮询监听开始加载消息，超时 180 秒（3 分钟）
-    local resp = network.wait_listen("logic", 4, 6, "Game.BattleStartLoadingS2C", 180)
+    local resp = network.wait_listen("logic", {cmd=4, act=6}, "Game.BattleStartLoadingS2C", 180)
     if not resp then
         utils.log_error("ListenStartLoading 超时")
         return 1

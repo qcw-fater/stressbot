@@ -24,6 +24,6 @@ function execute(r)
     local msg = proto.create("Game.LotteryGetLogC2S")
     proto.set_field(msg, "lotteryPoolId", poolId)
 
-    network.send("logic", 23, 4, msg)
+    network.send("logic", {cmd=23, act=4}, msg)
     return 0
 end

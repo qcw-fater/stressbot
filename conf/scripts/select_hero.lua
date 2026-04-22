@@ -24,7 +24,7 @@ function execute(r)
     -- 旧工具 SelectSkins 与 SelectHeroes 完全相同（同数组）
     proto.set_field(msg, "selectSkins", picked)
 
-    local code = network.send("logic", 5, 14, msg)
+    local code = network.send("logic", {cmd=5, act=14}, msg)
     if code ~= 0 then
         utils.log_error("SelectHero 发送失败")
     end

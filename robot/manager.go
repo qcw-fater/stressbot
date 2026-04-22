@@ -3,6 +3,7 @@ package robot
 import (
 	"context"
 	"fmt"
+	"stressbot/adapter"
 	"stressbot/engine"
 	"stressbot/network"
 	"stressbot/protox"
@@ -17,54 +18,59 @@ import (
 
 // ManagerConfig 机器人管理器配置
 type ManagerConfig struct {
-	AccountPrefix string // 账号前缀
-	StartNumber   int    // 起始编号
-	Count         int    // 机器人数量
-	ConcurrentNum int    // 每秒启动数量（限速）
-	AuthBaseURL   string // Auth 服务基础 URL
-	Version       string // 客户端版本号
-	Channel       string // 渠道标识
-	Platform      string // 平台标识
+	AccountPrefix       string
+	StartNumber         int
+	Count               int
+	ConcurrentNum       int
+	AuthBaseURL         string
+	AuthExtra           map[string]string
+	Adapter             adapter.Adapter
+	RequestTimeout      time.Duration
+	UDPServices         []string
+	DefaultListenServer string
+	DefaultUDPService   string
 }
 
 // Manager 机器人管理器。
-// 负责批量创建、限速启动、监控和销毁 Robot 实例。
 type Manager struct {
-	cfg      ManagerConfig
-	flow     *engine.TaskFlow
-	factory  *protox.Factory
-	protocol *network.Protocol
-	dialer   *network.Dialer
-	luaPool  *script.RuntimePool
-	robots   []*Robot
-	mu       sync.RWMutex
-	ctx      context.Context
-	cancel   context.CancelFunc
-	started  atomic.Int32 // 已启动数量
-	stopped  atomic.Int32 // 已停止数量
+	cfg     ManagerConfig
+	flow    *engine.TaskFlow
+	factory *protox.Factory
+	dialer  *network.Dialer
+	luaPool *script.RuntimePool
+	robots  []*Robot
+	mu      sync.RWMutex
+	ctx     context.Context
+	cancel  context.CancelFunc
+	started atomic.Int32
+	stopped atomic.Int32
 }
 
 // NewManager 创建机器人管理器
 func NewManager(cfg ManagerConfig, flow *engine.TaskFlow, factory *protox.Factory,
-	protocol *network.Protocol, dialer *network.Dialer, luaPool *script.RuntimePool) *Manager {
+	dialer *network.Dialer, luaPool *script.RuntimePool) *Manager {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
-		cfg:      cfg,
-		flow:     flow,
-		factory:  factory,
-		protocol: protocol,
-		dialer:   dialer,
-		luaPool:  luaPool,
-		robots:   make([]*Robot, 0, cfg.Count),
-		ctx:      ctx,
-		cancel:   cancel,
+		cfg:     cfg,
+		flow:    flow,
+		factory: factory,
+		dialer:  dialer,
+		luaPool: luaPool,
+		robots:  make([]*Robot, 0, cfg.Count),
+		ctx:     ctx,
+		cancel:  cancel,
 	}
 }
 
-// StartAll 批量启动机器人，按 ConcurrentNum 限速
+// StartAll 批量启动机器人
 func (m *Manager) StartAll() error {
 	stresslog.Info("[MANAGER] 开始创建机器人", zap.Int("count", m.cfg.Count), zap.Int("concurrent", m.cfg.ConcurrentNum))
+
+	udpServicesMap := make(map[string]bool, len(m.cfg.UDPServices))
+	for _, svc := range m.cfg.UDPServices {
+		udpServicesMap[svc] = true
+	}
 
 	for i := 0; i < m.cfg.Count; i++ {
 		if m.ctx.Err() != nil {
@@ -74,14 +80,13 @@ func (m *Manager) StartAll() error {
 		id := m.cfg.StartNumber + i
 		account := fmt.Sprintf("%s%d", m.cfg.AccountPrefix, id)
 
-		r := NewRobot(RobotConfig{
+		r := NewRobot(Config{
 			ID:          id,
 			Account:     account,
 			AuthBaseURL: m.cfg.AuthBaseURL,
-			Version:     m.cfg.Version,
-			Channel:     m.cfg.Channel,
-			Platform:    m.cfg.Platform,
-		}, m.flow, m.factory, m.protocol, m.dialer, m.luaPool)
+			AuthExtra:   m.cfg.AuthExtra,
+		}, m.flow, m.factory, m.cfg.Adapter, m.dialer, m.luaPool,
+			m.cfg.RequestTimeout, udpServicesMap, m.cfg.DefaultListenServer, m.cfg.DefaultUDPService)
 
 		m.mu.Lock()
 		m.robots = append(m.robots, r)
@@ -90,7 +95,6 @@ func (m *Manager) StartAll() error {
 		r.Start()
 		m.started.Add(1)
 
-		// 限速
 		if m.cfg.ConcurrentNum > 0 && (i+1)%m.cfg.ConcurrentNum == 0 {
 			stresslog.Info("[MANAGER] 机器人启动进度", zap.Int("started", i+1), zap.Int("total", m.cfg.Count))
 			select {

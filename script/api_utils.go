@@ -3,7 +3,6 @@ package script
 import (
 	"encoding/binary"
 	"encoding/hex"
-	"fmt"
 	"hash/fnv"
 	"math/rand"
 	"strconv"
@@ -11,35 +10,44 @@ import (
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
-	"go.uber.org/zap"
-	stresslog "stressbot/utils/log"
 )
 
 // loadUtilsModule 加载 utils 命名空间模块。
 // Lua 用法：
 //
 //	local utils = require("utils")
-//	utils.random_int(1, 100)      → 随机整数
+//	utils.random_int(n)            → [0, n-1] 随机整数（对齐旧 Robot.RandNumber）
+//	utils.rand_range(min, max)     → [min, max] 随机整数（对齐旧 Robot.RandRangeNumber）
 //	utils.random_bool()            → 随机布尔
 //	utils.random_string(8)         → 随机字母数字串
 //	utils.random_pick(table)       → 从数组随机选一个
 //	utils.random_pick_n(table, 3)  → 从数组随机选 N 个
 //	utils.sleep(1000)              → 毫秒休眠
 //	utils.time_ms()                → 当前时间戳（毫秒）
-//	utils.log_info("message")      → 日志输出
-//	utils.log_error("message")     → 错误日志
+//	utils.fnv_hash(version)        → FNV-1a 哈希
+//	utils.pack_le(fmt, ...)        → 小端二进制打包
+//	utils.weighted_pick(items, weights) → 加权随机
+//	utils.rand_filter(items, count, excludes) → 排除后随机选 N 个
+//	utils.rand_filter_one(items, excludes) → 排除后随机选 1 个
+//
+// 日志功能通过 log 模块使用：
+//
+//	local log = require("log")
+//	log.info("message")
+//	log.warn("message")
+//	log.error("message")
 func loadUtilsModule(L *lua.LState) int {
 	mod := L.NewTable()
 
-	L.SetField(mod, "random_int", L.NewFunction(utilsRandRange))
+	L.SetField(mod, "random_int", L.NewFunction(utilsRandomInt))
 	L.SetField(mod, "random_bool", L.NewFunction(utilsRandomBool))
 	L.SetField(mod, "random_string", L.NewFunction(utilsRandomString))
 	L.SetField(mod, "random_pick", L.NewFunction(utilsRandomPick))
 	L.SetField(mod, "random_pick_n", L.NewFunction(utilsRandomPickN))
 	L.SetField(mod, "sleep", L.NewFunction(utilsSleep))
 	L.SetField(mod, "time_ms", L.NewFunction(utilsTimeMs))
-	L.SetField(mod, "log_info", L.NewFunction(utilsLogInfo))
-	L.SetField(mod, "log_error", L.NewFunction(utilsLogError))
+	L.SetField(mod, "log_info", L.NewFunction(logInfo))
+	L.SetField(mod, "log_error", L.NewFunction(logError))
 	L.SetField(mod, "fnv_hash", L.NewFunction(utilsFnvHash))
 	L.SetField(mod, "pack_le", L.NewFunction(utilsPackLE))
 	L.SetField(mod, "weighted_pick", L.NewFunction(utilsWeightedPick))
@@ -137,33 +145,6 @@ func utilsSleep(L *lua.LState) int {
 func utilsTimeMs(L *lua.LState) int {
 	L.Push(lua.LNumber(time.Now().UnixMilli()))
 	return 1
-}
-
-// utilsLogInfo utils.log_info(message) — 输出信息日志
-func utilsLogInfo(L *lua.LState) int {
-	ctx := GetContext(L)
-	prefix := ""
-	if ctx != nil {
-		prefix = logPrefix(ctx.RobotID, ctx.Account)
-	}
-	stresslog.Info("[SCRIPT] "+prefix, zap.String("msg", L.CheckString(1)))
-	return 0
-}
-
-// utilsLogError utils.log_error(message) — 输出错误日志
-func utilsLogError(L *lua.LState) int {
-	ctx := GetContext(L)
-	prefix := ""
-	if ctx != nil {
-		prefix = logPrefix(ctx.RobotID, ctx.Account)
-	}
-	stresslog.Error("[SCRIPT-ERROR] "+prefix, zap.String("msg", L.CheckString(1)))
-	return 0
-}
-
-// logPrefix 生成日志前缀
-func logPrefix(id int, account string) string {
-	return fmt.Sprintf(" id=%d account=%s", id, account)
 }
 
 // utilsFnvHash utils.fnv_hash(version) — FNV-1a 64位哈希，返回十六进制字符串
@@ -267,19 +248,30 @@ func utilsWeightedPick(L *lua.LState) int {
 	return 2
 }
 
-// utilsRandRange utils.rand_range(min, max) — 对齐旧 Robot.RandRangeNumber
+// utilsRandomInt utils.random_int(n) — 对齐旧 Robot.RandNumber[int]，返回 [0, n-1]
+func utilsRandomInt(L *lua.LState) int {
+	n := L.CheckInt(1)
+	if n <= 1 {
+		L.Push(lua.LNumber(0))
+		return 1
+	}
+	L.Push(lua.LNumber(rand.Intn(n)))
+	return 1
+}
+
+// utilsRandRange utils.rand_range(lo, hi) — 对齐旧 Robot.RandRangeNumber，返回 [lo, hi]
 func utilsRandRange(L *lua.LState) int {
-	min := L.CheckInt(1)
-	max := L.CheckInt(2)
-	if min > max {
-		L.Push(lua.LNumber(min))
+	lo := L.CheckInt(1)
+	hi := L.CheckInt(2)
+	if lo > hi {
+		L.Push(lua.LNumber(lo))
 		return 1
 	}
-	if min == max {
-		L.Push(lua.LNumber(min))
+	if lo == hi {
+		L.Push(lua.LNumber(lo))
 		return 1
 	}
-	L.Push(lua.LNumber(rand.Intn(max-min+1) + min))
+	L.Push(lua.LNumber(rand.Intn(hi-lo+1) + lo))
 	return 1
 }
 

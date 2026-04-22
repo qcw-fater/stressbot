@@ -1,5 +1,5 @@
 // Package script 提供 Lua 脚本运行时，集成 gopher-lua。
-// RuntimePool 管理 LState 池和预编译脚本，ScriptContext 为每个 Robot 绑定执行上下文。
+// RuntimePool 管理 LState 池和预编译脚本，Context 为每个 Robot 绑定执行上下文。
 // Lua API 分为四组命名空间：robot / proto / network / utils。
 package script
 
@@ -11,11 +11,13 @@ import (
 	"strings"
 	"sync"
 
+	stresslog "stressbot/utils/log"
+
 	lua "github.com/yuin/gopher-lua"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
-	stresslog "stressbot/utils/log"
 
+	"stressbot/adapter"
 	"stressbot/engine"
 	"stressbot/protox"
 	"stressbot/state"
@@ -23,39 +25,34 @@ import (
 
 const registryCtxKey = "__stressbot_ctx__"
 
-// ScriptContext Lua 脚本执行上下文。
-// 每次执行 Lua 脚本前绑定到 LState 的 registry 中，
-// 供 robot/proto/network API 函数访问 Robot 状态、网络、proto 工厂等。
-type ScriptContext struct {
+// Context Lua 脚本执行上下文。
+type Context struct {
 	RobotID   int
 	Account   string
 	Store     *state.Store
 	Factory   *protox.Factory
-	Protocol  engine.ProtocolEncoder
+	Adapter   adapter.Adapter
 	NetSender engine.NetSender
 	Ctx       context.Context
-	// LuaMu 是该 Robot 独占 LState 的互斥锁。
-	// 所有后台触发的 Lua 调用（心跳 builder、监听回调等）必须持有此锁，
-	// 避免与主流程或其它后台回调同时操作 LState，引发 require 等内部状态 nil-deref。
-	LuaMu *sync.Mutex
+	LuaMu     *sync.Mutex
 }
 
 // SetContext 将脚本上下文绑定到 LState 的 registry
-func SetContext(L *lua.LState, ctx *ScriptContext) {
+func SetContext(L *lua.LState, ctx *Context) {
 	ud := L.NewUserData()
 	ud.Value = ctx
 	L.SetField(L.Get(lua.RegistryIndex), registryCtxKey, ud)
 }
 
 // GetContext 从 LState 的 registry 获取脚本上下文
-func GetContext(L *lua.LState) *ScriptContext {
+func GetContext(L *lua.LState) *Context {
 	reg := L.Get(lua.RegistryIndex)
 	if reg == lua.LNil {
 		return nil
 	}
 	val := L.GetField(reg, registryCtxKey)
 	if ud, ok := val.(*lua.LUserData); ok {
-		return ud.Value.(*ScriptContext)
+		return ud.Value.(*Context)
 	}
 	return nil
 }
@@ -90,7 +87,7 @@ func (rp *RuntimePool) Acquire() *lua.LState {
 }
 
 // Release 将 LState 归还到池中。
-// 调用前应清除绑定的 ScriptContext。
+// 调用前应清除绑定的 Context。
 func (rp *RuntimePool) Release(L *lua.LState) {
 	// 清除上下文
 	L.SetField(L.Get(lua.RegistryIndex), registryCtxKey, lua.LNil)
@@ -141,7 +138,7 @@ func (rp *RuntimePool) PrecompileScripts(dirs []string) error {
 // Lua 脚本应定义 `function execute(r)` 函数。
 // r 为 robot 对象，返回值为整数错误码（0 表示成功）。
 func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (int, error) {
-	proto, ok := rp.precompiled[scriptName]
+	compiled, ok := rp.precompiled[scriptName]
 	if !ok {
 		return -1, fmt.Errorf("脚本未预编译: %s", scriptName)
 	}
@@ -151,7 +148,7 @@ func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (int, e
 	defer L.SetTop(savedTop)
 
 	// 加载脚本（定义 execute 函数）
-	fn := L.NewFunctionFromProto(proto)
+	fn := L.NewFunctionFromProto(compiled)
 	L.Push(fn)
 	if err := L.PCall(0, 0, nil); err != nil {
 		return -1, fmt.Errorf("加载脚本 %s 失败: %w", scriptName, err)
@@ -186,7 +183,7 @@ func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (int, e
 // Lua 脚本应定义 `function onMessage(r, msg)` 函数。
 // msg 为 proto 消息对象（LUserData）。
 func (rp *RuntimePool) RunCallbackScript(L *lua.LState, scriptName string, msgData []byte, s2cProto string) error {
-	proto, ok := rp.precompiled[scriptName]
+	compiled, ok := rp.precompiled[scriptName]
 	if !ok {
 		return fmt.Errorf("回调脚本未预编译: %s", scriptName)
 	}
@@ -196,7 +193,7 @@ func (rp *RuntimePool) RunCallbackScript(L *lua.LState, scriptName string, msgDa
 	defer L.SetTop(savedTop)
 
 	// 加载脚本
-	fn := L.NewFunctionFromProto(proto)
+	fn := L.NewFunctionFromProto(compiled)
 	L.Push(fn)
 	if err := L.PCall(0, 0, nil); err != nil {
 		return fmt.Errorf("加载回调脚本 %s 失败: %w", scriptName, err)
@@ -250,12 +247,13 @@ func (rp *RuntimePool) ListScripts() []string {
 
 // registerAPIs 注册所有 Lua API 模块到 LState
 func registerAPIs(L *lua.LState) {
-	// 预加载模块（按需加载模式）
 	L.PreloadModule("robot", loadRobotModule)
 	L.PreloadModule("proto", loadProtoModule)
 	L.PreloadModule("network", loadNetworkModule)
 	L.PreloadModule("utils", loadUtilsModule)
+	L.PreloadModule("log", loadLogModule)
 	L.PreloadModule("json", loadJsonModule)
+	L.PreloadModule("adapter", loadAdapterModule)
 }
 
 // createRobotUserData 创建 robot 对象（LUserData + metatable）

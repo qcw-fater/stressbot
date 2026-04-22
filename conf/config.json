@@ -1,32 +1,31 @@
 {
   "bot": {
     "accountPrefix": "bot_",
-    "startNumber": 4,
+    "startNumber": 5,
     "count": 1,
     "concurrentNum": 0
   },
   "auth": {
     "address": "http://192.168.61.161:20000",
-    "version": "0.31.49.171222",
-    "channel": "mine",
-    "platform": "1000"
+    "extra": {
+      "version": "0.31.49.171222",
+      "channel": "mine",
+      "platform": "1000"
+    }
   },
   "network": {
-    "tcpTimeout": "10s",
-    "heartbeatInterval": "5s"
+    "tcpTimeout": "60s",
+    "heartbeatInterval": "5s",
+    "udpServices": ["udp", "battleUDP", "battle_udp", "battleudp"],
+    "defaultListenServer": "logic"
   },
   "proto": {
     "dirs": ["conf/proto"],
     "files": []
   },
+  "adapterScript": "conf/adapter/codec.lua",
+  "flow": "conf/flow.json",
   "script": {
     "dirs": ["conf/scripts"]
-  },
-  "header": "conf/header.json",
-  "flow": "conf/flow.json",
-  "middleware": {
-    "standard": ["gzip"],
-    "scripts": ["conf/middlewares"],
-    "poolSize": 4
   }
 }

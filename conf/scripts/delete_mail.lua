@@ -18,6 +18,6 @@ function execute(r)
     local msg = proto.create("Game.MailDeleteC2S")
     proto.set_field(msg, "gids", {gid})
 
-    local code = network.send("logic", 18, 3, msg)
+    local code = network.send("logic", {cmd=18, act=3}, msg)
     return code
 end

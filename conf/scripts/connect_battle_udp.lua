@@ -63,7 +63,7 @@ function execute(r)
     robot.set("frameCount", 0)
 
     -- 注册 150ms UDP 心跳
-    network.register_heartbeat("udp", "battle", 4, 2, 150, build_udp_heart)
+    network.register_heartbeat("udp", "battle", 150, {cmd=4, act=2}, build_udp_heart)
 
     utils.log_info("战斗服 UDP 连接完成 心跳已注册(150ms)")
     return 0

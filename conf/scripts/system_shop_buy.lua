@@ -29,6 +29,6 @@ function execute(r)
     local msg = proto.create("Game.SystemShopBuyC2S")
     proto.set_field(msg, "goodsList", {buyData})
 
-    network.send("logic", 35, 4, msg)
+    network.send("logic", {cmd=35, act=4}, msg)
     return 0
 end

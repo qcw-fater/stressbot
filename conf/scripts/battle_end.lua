@@ -58,7 +58,7 @@ function execute(r)
     end
 
     -- 使用 request 模式发送（与旧工具 RequestResponse 一致）
-    local code, resp = network.request("battle", 4, 13, msg)
+    local code, resp = network.request("battle", {cmd=4, act=13}, msg)
     if code ~= 0 then
         utils.log_info("BattleEnd 发送结果: code=" .. tostring(code) .. "（可能连接已关闭）")
     else

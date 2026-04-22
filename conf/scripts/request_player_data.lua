@@ -8,7 +8,7 @@ local utils = require("utils")
 function execute(r)
     -- 发送 MainLoadOkC2S (CMD=2, ACT=16)，等待 LoginPlayerDataS2C (CMD=1, ACT=2)
     local msg = proto.create("Game.MainLoadOkC2S")
-    local code, resp = network.request_wait("logic", 2, 16, msg, 1, 2, "Game.LoginPlayerDataS2C")
+    local code, resp = network.request_wait("logic", {cmd=2, act=16}, msg, {cmd=1, act=2}, "Game.LoginPlayerDataS2C")
 
     if code ~= 0 then
         utils.log_error("RequestPlayerData: 请求失败 code=" .. tostring(code) .. " detail=" .. tostring(resp))

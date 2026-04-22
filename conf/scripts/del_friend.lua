@@ -22,6 +22,6 @@ function execute(r)
     local msg = proto.create("Game.FriendDelC2S")
     proto.set_field(msg, "friendId", friendId)
 
-    local code = network.send("logic", 15, 10, msg)
+    local code = network.send("logic", {cmd=15, act=10}, msg)
     return code
 end

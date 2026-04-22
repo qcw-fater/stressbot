@@ -1,10 +1,11 @@
 package network
 
 import (
-	"go.uber.org/zap"
 	stresslog "stressbot/utils/log"
 	"sync/atomic"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // HeartbeatBuilder 心跳包构建函数。
@@ -81,9 +82,13 @@ func (c *Connection) runHeartbeat(hb *heartbeatState) {
 			if packet == nil {
 				continue
 			}
-			ok, _ := c.Send(packet)
+			ok, n := c.Send(packet)
 			if !ok {
-				stresslog.Debug("[HEARTBEAT] 发送失败", zap.String("service", c.serviceName))
+				stresslog.Warn("[HEARTBEAT] 发送失败",
+					zap.String("service", c.serviceName), zap.Int("pktLen", len(packet)))
+			} else {
+				stresslog.Debug("[HEARTBEAT] 已发送",
+					zap.String("service", c.serviceName), zap.Int("pktLen", n))
 			}
 		}
 	}

@@ -9,7 +9,7 @@ function execute(r)
     local msg = proto.create("Game.MainGameOverC2S")
     proto.set_field(msg, "operation", 0)  -- BGO_BackLobby 返回大厅
 
-    local code, resp = network.request("logic", 2, 62, msg, "Game.MainGameOverS2C")
+    local code, resp = network.request("logic", {cmd=2, act=62}, msg, "Game.MainGameOverS2C")
     if code ~= 0 then
         utils.log_error("GameOver 失败: code=" .. tostring(code))
     end

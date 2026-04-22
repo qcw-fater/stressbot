@@ -21,6 +21,6 @@ function execute(r)
     proto.set_field(msg, "friendId", friendId)
     proto.set_field(msg, "result", result)
 
-    local code = network.send("logic", 15, 9, msg)
+    local code = network.send("logic", {cmd=15, act=9}, msg)
     return code
 end

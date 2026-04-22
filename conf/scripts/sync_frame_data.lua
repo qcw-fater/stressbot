@@ -32,7 +32,7 @@ function execute(r)
         .. string.char(1, 2, 3, 4, 5, 6)                       -- dummy data (6 bytes)
 
     -- 通过 UDP 发送（带协议头 CMD=4, ACT=11）
-    local code = network.udp_send_msg(4, 11, frameData)
+    local code = network.udp_send_msg({cmd=4, act=11}, frameData)
 
     -- 每 20 帧打一次日志：真实上限由 conf/flow.json 的 syncLoop.loopCount 控制，
     -- 这里只显示本轮实际已发送帧数（frameCount）与共享包序号（pkgIdx）。

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"stressbot/adapter"
 	"stressbot/protox"
 	"stressbot/state"
 	stresslog "stressbot/utils/log"
@@ -18,64 +19,42 @@ import (
 )
 
 // ErrActionSkip 动作跳过信号。
-// 当必需字段解析为 nil 时（如 stateRandom 从空列表选取）返回此错误，
-// 执行器捕获后视为"静默跳过"而非错误，流程继续执行下一个节点。
 var ErrActionSkip = errors.New("action skipped: required field is nil")
 
 // ActionExecutor 声明式动作执行器。
-// 根据 ActionDef 的 pattern 执行对应操作：构建 C2S proto 消息 → 序列化 → 编码消息头 →
-// 发送 → 接收 S2C 响应 → 解析响应 → 存储 字段到 StateStore。
 type ActionExecutor struct {
 	netSender NetSender       // 网络发送委托
 	store     *state.Store    // Robot 状态存储
 	factory   *protox.Factory // 动态消息工厂
-	protocol  ProtocolEncoder // 消息头编码器
-}
-
-// ProtocolEncoder 消息头编码器接口。
-// 从 network.Protocol 抽取，避免 engine 直接依赖 network 包。
-type ProtocolEncoder interface {
-	EncodeHead(cmd, act uint8, bodyLen uint32, flags uint8) []byte
-	CmdAct(cmd, act uint8) int
-	HeadSize() int
-	BuildPacket(cmd, act uint8, body []byte, secretKey []byte) []byte
-	// BuildPacketWithOffset 支持自定义加密偏移量（UDP 帧同步需要明文头部以便服务端查表找密钥）。
-	BuildPacketWithOffset(cmd, act uint8, body []byte, secretKey []byte, encryptOffset int) []byte
-	// UDPEncryptOffset 返回当前协议 UDP 发送时的加密偏移量（由 header.json 配置，默认 11）。
-	UDPEncryptOffset() int
+	adp       adapter.Adapter // 协议适配器
 }
 
 // NetSender 网络发送委托接口。
-// 将 engine 层与 network 层解耦，Robot 实现此接口注入实际网络操作。
 type NetSender interface {
-	TCPSend(service string, cmd, act uint8, headAndBody []byte) (bool, int)
-	TCPRequest(service string, cmd, act uint8, headAndBody []byte) ([]byte, bool)
-	TCPRequestFor(service string, sendCmd, sendAct uint8, headAndBody []byte, respCmd, respAct uint8) ([]byte, bool)
+	TCPSend(service string, packet []byte) (bool, int)
+	TCPRequest(service string, packet []byte, responseKey string) ([]byte, bool)
 	HTTPPost(path string, formData map[string]string) (statusCode int, body []byte, err error)
 	UDPSend(data []byte) bool
-	UDPSendPacket(cmd, act uint8, body []byte) bool
 	ConnectTCP(service, address string) bool
 	ConnectUDP(address string) bool
 	CloseTCP(service string)
 	CloseUDP()
-	GetListenResp(service string, cmdAct int) []byte
+	GetListenResp(service string, responseKey string) []byte
 	GetSecretKey(service string) []byte
 	SetSecretKey(service string, key []byte)
 	SetUDPSecretKey(key []byte)
 	GetUDPSecretKey() []byte
-	EnsureListener(service string, cmd, act uint8)
-	// RegisterHeartbeat 为指定服务注册心跳。
-	// target: "tcp"（默认）或 "udp"。interval 毫秒，builder 每次返回完整报文（nil 跳过）。
+	EnsureListener(service string, responseKey string)
 	RegisterHeartbeat(target, service string, intervalMs int, builder func() []byte)
 }
 
 // NewActionExecutor 创建声明式动作执行器
-func NewActionExecutor(store *state.Store, sender NetSender, factory *protox.Factory, protocol ProtocolEncoder) *ActionExecutor {
+func NewActionExecutor(store *state.Store, sender NetSender, factory *protox.Factory, adp adapter.Adapter) *ActionExecutor {
 	return &ActionExecutor{
 		netSender: sender,
 		store:     store,
 		factory:   factory,
-		protocol:  protocol,
+		adp:       adp,
 	}
 }
 
@@ -121,28 +100,28 @@ func (ae *ActionExecutor) Execute(def *ActionDef) error {
 	return err
 }
 
-// buildPacket 构建完整的网络报文（消息头 + 消息体）。
-func (ae *ActionExecutor) buildPacket(def *ActionDef) ([]byte, error) {
-	var body []byte
+// computeRespKey 根据 Route 计算响应路由键。
+func (ae *ActionExecutor) computeRespKey(def *ActionDef) string {
+	return ae.adp.ExpectedResponseKey(def.Route)
+}
 
-	if def.C2SProto != "" {
-		msg, err := ae.factory.Create(def.C2SProto)
-		if err != nil {
-			return nil, fmt.Errorf("创建 C2S 消息 %s 失败: %w", def.C2SProto, err)
-		}
-
-		if err := ae.bindFields(msg, def.Bindings); err != nil {
-			return nil, fmt.Errorf("绑定 C2S 字段失败: %w", err)
-		}
-
-		body, err = ae.factory.Serialize(msg)
-		if err != nil {
-			return nil, fmt.Errorf("序列化 C2S 消息失败: %w", err)
-		}
+// buildBody 构建消息体字节（序列化 proto 消息）。
+func (ae *ActionExecutor) buildBody(def *ActionDef) ([]byte, error) {
+	if def.C2SProto == "" {
+		return nil, nil
 	}
-
-	secretKey := ae.netSender.GetSecretKey(def.Service)
-	return ae.protocol.BuildPacket(def.Cmd, def.Act, body, secretKey), nil
+	msg, err := ae.factory.Create(def.C2SProto)
+	if err != nil {
+		return nil, fmt.Errorf("创建 C2S 消息 %s 失败: %w", def.C2SProto, err)
+	}
+	if err := ae.bindFields(msg, def.Bindings); err != nil {
+		return nil, fmt.Errorf("绑定 C2S 字段失败: %w", err)
+	}
+	body, err := ae.factory.Serialize(msg)
+	if err != nil {
+		return nil, fmt.Errorf("序列化 C2S 消息失败: %w", err)
+	}
+	return body, nil
 }
 
 // bindFields 将字段绑定列表应用到 proto 消息。
@@ -156,7 +135,6 @@ func (ae *ActionExecutor) bindFields(msg proto.Message, bindings []FieldBind) er
 		}
 
 		if value == nil {
-			// 非必需字段为 nil 时跳过赋值
 			continue
 		}
 
@@ -176,12 +154,6 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		val = fb.Value
 
 	case "state":
-		if fb.Source == "" {
-			return nil
-		}
-		val = ae.store.Get(fb.Source)
-
-	case "stateRef":
 		if fb.Source == "" {
 			return nil
 		}
@@ -212,7 +184,6 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 			n = 1
 		}
 		picked := pickN(filtered, n)
-		// 若有 Path，对每个元素取嵌套字段
 		if fb.Path != "" {
 			result := make([]any, 0, len(picked))
 			for _, item := range picked {
@@ -241,8 +212,6 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		if len(m) == 0 {
 			return nil
 		}
-		// 收集所有 value，按配置过滤后随机选一个
-		// 对齐旧 Robot 工具 utils.RandSilenceFilterOne(utils.MapValues(map), predicate)
 		values := make([]any, 0, len(m))
 		for _, v := range m {
 			values = append(values, v)
@@ -297,11 +266,11 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		return filtered[rand.Intn(len(filtered))]
 
 	case "randomInt":
-		min, max := fb.Min, fb.Max
-		if min >= max {
-			return min
+		lo, hi := fb.Min, fb.Max
+		if lo >= hi {
+			return lo
 		}
-		return rand.Intn(max-min+1) + min
+		return rand.Intn(hi-lo+1) + lo
 
 	case "randomBool":
 		return rand.Intn(2) == 1
@@ -324,7 +293,6 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		return fb.Value
 	}
 
-	// 如果配置了 Path，按点分路径深入嵌套 map
 	if fb.Path != "" && val != nil {
 		val = navigatePath(val, fb.Path)
 	}
@@ -333,7 +301,6 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 }
 
 // navigatePath 按点分路径从嵌套 map/list 中提取值。
-// 支持 "[idx]" 数字索引访问 list。
 func navigatePath(v any, path string) any {
 	current := v
 	for _, key := range state.SplitPath(path) {
@@ -344,7 +311,6 @@ func navigatePath(v any, path string) any {
 		case map[string]any:
 			current = c[key]
 		case []any:
-			// 索引方式 "0"、"1"
 			var idx int
 			_, err := fmt.Sscanf(key, "%d", &idx)
 			if err != nil || idx < 0 || idx >= len(c) {
@@ -369,7 +335,7 @@ func (ae *ActionExecutor) resolveAddress(addr string) string {
 
 // execTCPSend TCP 发送（不等响应）
 func (ae *ActionExecutor) execTCPSend(def *ActionDef) error {
-	packet, err := ae.buildPacket(def)
+	body, err := ae.buildBody(def)
 	if err != nil {
 		if errors.Is(err, ErrActionSkip) {
 			stresslog.Debug("[ACTION] 跳过动作: 必需字段为空", zap.String("proto", def.C2SProto))
@@ -378,23 +344,31 @@ func (ae *ActionExecutor) execTCPSend(def *ActionDef) error {
 		return err
 	}
 
-	ok, n := ae.netSender.TCPSend(def.Service, def.Cmd, def.Act, packet)
-	if !ok {
-		if def.Optional {
-			stresslog.Debug("[ACTION] 可选 TCP 发送失败（已忽略）", zap.String("service", def.Service), zap.Uint8("cmd", def.Cmd), zap.Uint8("act", def.Act))
-			return nil
-		}
-		return fmt.Errorf("TCP 发送失败: service=%s cmd=%d act=%d", def.Service, def.Cmd, def.Act)
+	secretKey := ae.netSender.GetSecretKey(def.Service)
+	packet := ae.adp.Encode(def.Route, body, secretKey)
+	if packet == nil {
+		return fmt.Errorf("adapter.Encode 返回 nil，检查 codec.lua")
 	}
 
-	stresslog.Debug("[ACTION] TCPSend 成功",
-		zap.String("service", def.Service), zap.Uint8("cmd", def.Cmd), zap.Uint8("act", def.Act), zap.Int("bytes", n))
+	routeKey := ae.adp.ExpectedResponseKey(def.Route)
+	ok, n := ae.netSender.TCPSend(def.Service, packet)
+	if !ok {
+		if def.Optional {
+			stresslog.Debug("[ACTION] 可选 TCP 发送失败（已忽略）", zap.String("service", def.Service), zap.String("route", routeKey))
+			return nil
+		}
+		return fmt.Errorf("TCP 发送失败: service=%s route=%s", def.Service, routeKey)
+	}
+
+	stresslog.Debug("[ACTION] TCPSend",
+		zap.String("service", def.Service), zap.String("route", routeKey),
+		zap.String("c2sProto", def.C2SProto), zap.Int("bodyLen", len(body)), zap.Int("pktLen", n))
 	return nil
 }
 
 // execTCPRequest TCP 请求-响应
 func (ae *ActionExecutor) execTCPRequest(def *ActionDef) error {
-	packet, err := ae.buildPacket(def)
+	body, err := ae.buildBody(def)
 	if err != nil {
 		if errors.Is(err, ErrActionSkip) {
 			stresslog.Debug("[ACTION] 跳过动作: 必需字段为空", zap.String("proto", def.C2SProto))
@@ -403,26 +377,41 @@ func (ae *ActionExecutor) execTCPRequest(def *ActionDef) error {
 		return err
 	}
 
-	var respBody []byte
-	var ok bool
-	if def.RespCmd != 0 || def.RespAct != 0 {
-		respBody, ok = ae.netSender.TCPRequestFor(def.Service, def.Cmd, def.Act, packet, def.RespCmd, def.RespAct)
-	} else {
-		respBody, ok = ae.netSender.TCPRequest(def.Service, def.Cmd, def.Act, packet)
+	routeKey := ae.adp.ExpectedResponseKey(def.Route)
+	stresslog.Debug("[ACTION] TCPRequest 发送",
+		zap.String("service", def.Service), zap.String("route", routeKey),
+		zap.String("c2sProto", def.C2SProto), zap.String("s2cProto", def.S2CProto),
+		zap.Int("bodyLen", len(body)))
+
+	secretKey := ae.netSender.GetSecretKey(def.Service)
+	packet := ae.adp.Encode(def.Route, body, secretKey)
+	if packet == nil {
+		return fmt.Errorf("adapter.Encode 返回 nil，检查 codec.lua")
 	}
+
+	start := time.Now()
+	respKey := ae.computeRespKey(def)
+	respBody, ok := ae.netSender.TCPRequest(def.Service, packet, respKey)
+	elapsed := time.Since(start)
 	if !ok {
 		if def.Optional {
-			stresslog.Debug("[ACTION] 可选 TCP 请求失败（已忽略）", zap.String("service", def.Service), zap.Uint8("cmd", def.Cmd), zap.Uint8("act", def.Act))
+			stresslog.Debug("[ACTION] 可选 TCP 请求失败（已忽略）",
+				zap.String("service", def.Service), zap.String("respKey", respKey),
+				zap.Duration("elapsed", elapsed))
 			return nil
 		}
-		return fmt.Errorf("TCP 请求失败: service=%s cmd=%d act=%d", def.Service, def.Cmd, def.Act)
+		return fmt.Errorf("TCP 请求失败: service=%s route=%s respKey=%s elapsed=%v",
+			def.Service, routeKey, respKey, elapsed)
 	}
 
 	if err := ae.parseAndStoreResponse(def, respBody); err != nil {
 		return err
 	}
 
-	stresslog.Debug("[ACTION] TCPRequest 成功", zap.String("service", def.Service), zap.Uint8("cmd", def.Cmd), zap.Uint8("act", def.Act))
+	stresslog.Debug("[ACTION] TCPRequest 成功",
+		zap.String("service", def.Service), zap.String("route", routeKey),
+		zap.String("respKey", respKey), zap.String("s2cProto", def.S2CProto),
+		zap.Int("respBodyLen", len(respBody)), zap.Duration("elapsed", elapsed))
 	return nil
 }
 
@@ -499,19 +488,32 @@ func (ae *ActionExecutor) execConnectUDP(def *ActionDef) error {
 	return nil
 }
 
-// execExchangeKey 发送 (0,0) 空包获取密钥，并设置到连接
+// execExchangeKey 发送空包获取密钥并设置到连接
 func (ae *ActionExecutor) execExchangeKey(def *ActionDef) error {
-	// 构建空包（无加密）
-	packet := ae.protocol.BuildPacket(0, 0, nil, nil)
-	respBody, ok := ae.netSender.TCPRequest(def.Service, 0, 0, packet)
+	routeKey := ae.adp.ExpectedResponseKey(def.Route)
+	stresslog.Debug("[ACTION] ExchangeKey 发送",
+		zap.String("service", def.Service), zap.String("route", routeKey))
+
+	packet := ae.adp.Encode(def.Route, nil, nil)
+	if packet == nil {
+		return fmt.Errorf("adapter.Encode 返回 nil，检查 codec.lua")
+	}
+
+	start := time.Now()
+	respKey := ae.adp.ExpectedResponseKey(def.Route)
+	respBody, ok := ae.netSender.TCPRequest(def.Service, packet, respKey)
+	elapsed := time.Since(start)
 	if !ok || len(respBody) == 0 {
-		return fmt.Errorf("交换密钥失败: service=%s", def.Service)
+		return fmt.Errorf("交换密钥失败: service=%s route=%s respKey=%s elapsed=%v",
+			def.Service, routeKey, respKey, elapsed)
 	}
 	ae.netSender.SetSecretKey(def.Service, respBody)
 	if def.SecretArg != "" {
 		ae.store.Set(def.SecretArg, respBody)
 	}
-	stresslog.Debug("[ACTION] ExchangeKey 成功", zap.String("service", def.Service), zap.Int("keyLen", len(respBody)))
+	stresslog.Debug("[ACTION] ExchangeKey 成功",
+		zap.String("service", def.Service), zap.String("route", routeKey),
+		zap.Int("keyLen", len(respBody)), zap.Duration("elapsed", elapsed))
 	return nil
 }
 
@@ -562,9 +564,18 @@ func (ae *ActionExecutor) execUDPSendProto(def *ActionDef) error {
 			return fmt.Errorf("序列化 UDP C2S 失败: %w", err)
 		}
 	}
-	if !ae.netSender.UDPSendPacket(def.Cmd, def.Act, body) {
-		return fmt.Errorf("UDP 发送失败: cmd=%d act=%d", def.Cmd, def.Act)
+	routeKey := ae.adp.ExpectedResponseKey(def.Route)
+	udpKey := ae.netSender.GetUDPSecretKey()
+	packet := ae.adp.EncodeUDP(def.Route, body, udpKey)
+	if packet == nil {
+		return fmt.Errorf("adapter.EncodeUDP 返回 nil，检查 codec.lua")
 	}
+	if !ae.netSender.UDPSend(packet) {
+		return fmt.Errorf("UDP 发送失败: route=%s", routeKey)
+	}
+	stresslog.Debug("[ACTION] UDPSendProto",
+		zap.String("route", routeKey), zap.String("c2sProto", def.C2SProto),
+		zap.Int("bodyLen", len(body)), zap.Int("pktLen", len(packet)))
 	return nil
 }
 
@@ -574,9 +585,18 @@ func (ae *ActionExecutor) execUDPSendRaw(def *ActionDef) error {
 	if err != nil {
 		return fmt.Errorf("构建 UDPRaw body 失败: %w", err)
 	}
-	if !ae.netSender.UDPSendPacket(def.Cmd, def.Act, body) {
-		return fmt.Errorf("UDP 发送失败: cmd=%d act=%d", def.Cmd, def.Act)
+	routeKey := ae.adp.ExpectedResponseKey(def.Route)
+	udpKey := ae.netSender.GetUDPSecretKey()
+	packet := ae.adp.EncodeUDP(def.Route, body, udpKey)
+	if packet == nil {
+		return fmt.Errorf("adapter.EncodeUDP 返回 nil，检查 codec.lua")
 	}
+	if !ae.netSender.UDPSend(packet) {
+		return fmt.Errorf("UDP 发送失败: route=%s", routeKey)
+	}
+	stresslog.Debug("[ACTION] UDPSendRaw",
+		zap.String("route", routeKey),
+		zap.Int("bodyLen", len(body)), zap.Int("pktLen", len(packet)))
 	return nil
 }
 
@@ -591,8 +611,6 @@ func (ae *ActionExecutor) execSleep(def *ActionDef) error {
 }
 
 // execRegisterHeartbeat 注册连接心跳。
-// 根据 ActionDef 的 Target/Service/IntervalMs/Cmd/Act/RawBody/C2SProto 构造 builder。
-// 如果需要 Lua 自定义 body，请改用 lua 模式+network.register_heartbeat。
 func (ae *ActionExecutor) execRegisterHeartbeat(def *ActionDef) error {
 	interval := def.IntervalMs
 	if interval <= 0 {
@@ -603,8 +621,7 @@ func (ae *ActionExecutor) execRegisterHeartbeat(def *ActionDef) error {
 		target = "tcp"
 	}
 
-	cmd := def.Cmd
-	act := def.Act
+	route := def.Route
 	rawBody := def.RawBody
 	c2sProto := def.C2SProto
 	bindings := def.Bindings
@@ -630,22 +647,17 @@ func (ae *ActionExecutor) execRegisterHeartbeat(def *ActionDef) error {
 				return nil
 			}
 		}
-		// UDP 发送采用 offset 加密：明文前缀供服务端查密钥表，剩余部分加密
 		if target == "udp" {
-			encOffset := ae.protocol.UDPEncryptOffset()
 			udpKey := ae.netSender.GetUDPSecretKey()
-			if len(body) <= encOffset || len(udpKey) == 0 {
-				return ae.protocol.BuildPacket(cmd, act, body, nil)
-			}
-			return ae.protocol.BuildPacketWithOffset(cmd, act, body, udpKey, encOffset)
+			return ae.adp.EncodeUDP(route, body, udpKey)
 		}
 		secretKey := ae.netSender.GetSecretKey(def.Service)
-		return ae.protocol.BuildPacket(cmd, act, body, secretKey)
+		return ae.adp.Encode(route, body, secretKey)
 	}
 
 	ae.netSender.RegisterHeartbeat(target, def.Service, interval, builder)
 	stresslog.Debug("[ACTION] RegisterHeartbeat",
-		zap.String("target", target), zap.String("service", def.Service), zap.Int("intervalMs", interval), zap.Uint8("cmd", cmd), zap.Uint8("act", act))
+		zap.String("target", target), zap.String("service", def.Service), zap.Int("intervalMs", interval))
 	return nil
 }
 
@@ -683,11 +695,11 @@ func (ae *ActionExecutor) writeRawField(buf *bytes.Buffer, f *RawField) error {
 	case f.Type == "time_ms":
 		val = time.Now().UnixMilli()
 	case f.Type == "random_u16":
-		min, max := f.Min, f.Max
-		if min >= max {
-			val = min
+		lo, hi := f.Min, f.Max
+		if lo >= hi {
+			val = lo
 		} else {
-			val = rand.Intn(max-min+1) + min
+			val = rand.Intn(hi-lo+1) + lo
 		}
 	default:
 		val = f.Value
@@ -775,36 +787,46 @@ func (ae *ActionExecutor) execWaitListen(def *ActionDef) error {
 		timeout = 60
 	}
 
-	cmd := def.Cmd
-	act := def.Act
-	if def.RespCmd != 0 || def.RespAct != 0 {
-		cmd = def.RespCmd
-		act = def.RespAct
-	}
-	cmdAct := ae.protocol.CmdAct(cmd, act)
+	respKey := ae.computeRespKey(def)
+	routeKey := ae.adp.ExpectedResponseKey(def.Route)
+	stresslog.Debug("[ACTION] WaitListen 开始",
+		zap.String("service", def.Service), zap.String("route", routeKey),
+		zap.String("respKey", respKey), zap.String("s2cProto", def.S2CProto),
+		zap.Int("timeoutSec", timeout))
 
-	ae.netSender.EnsureListener(def.Service, cmd, act)
+	ae.netSender.EnsureListener(def.Service, respKey)
 
 	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
+	start := time.Now()
+	pollCount := 0
 
 	for time.Now().Before(deadline) {
-		respBody := ae.netSender.GetListenResp(def.Service, cmdAct)
+		pollCount++
+		respBody := ae.netSender.GetListenResp(def.Service, respKey)
 		if respBody != nil {
 			if err := ae.parseAndStoreResponse(def, respBody); err != nil {
 				return err
 			}
-			stresslog.Debug("[ACTION] WaitListen 成功", zap.String("service", def.Service), zap.Uint8("cmd", cmd), zap.Uint8("act", act))
+			elapsed := time.Since(start)
+			stresslog.Debug("[ACTION] WaitListen 成功",
+				zap.String("service", def.Service), zap.String("route", routeKey),
+				zap.String("respKey", respKey), zap.String("s2cProto", def.S2CProto),
+				zap.Int("respBodyLen", len(respBody)),
+				zap.Int("pollCount", pollCount), zap.Duration("elapsed", elapsed))
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 
+	elapsed := time.Since(start)
 	if def.Optional {
-		stresslog.Warn("[ACTION] 可选 WaitListen 超时（已忽略）", zap.String("service", def.Service), zap.Uint8("cmd", cmd), zap.Uint8("act", act))
+		stresslog.Warn("[ACTION] 可选 WaitListen 超时（已忽略）",
+			zap.String("service", def.Service), zap.String("respKey", respKey),
+			zap.Int("pollCount", pollCount), zap.Duration("elapsed", elapsed))
 		return nil
 	}
-	return fmt.Errorf("WaitListen 超时: service=%s cmd=%d act=%d timeout=%ds",
-		def.Service, cmd, act, timeout)
+	return fmt.Errorf("WaitListen 超时: service=%s route=%s respKey=%s timeout=%ds polls=%d elapsed=%v",
+		def.Service, routeKey, respKey, timeout, pollCount, elapsed)
 }
 
 // applyFilters 按过滤条件筛选列表项
@@ -846,14 +868,10 @@ func (ae *ActionExecutor) matchFilters(item any, filters []FilterDef) bool {
 }
 
 // compareValues 按操作符比较两个值。
-// 注意：对于 proto3 消息，未设置的标量字段（如 int32=0、string=""）在 GetFieldMap
-// 中返回 nil。为了让 "modeId != 0" 这类过滤条件符合语义，当 a 为 nil 且 b 为数字时，
-// 视 a 为数字 0 处理；当 a 为 nil 且 b 为字符串时，视 a 为 ""。
 func compareValues(a, b any, op string) bool {
 	aNum, aIsNum := toFloat64safe(a)
 	bNum, bIsNum := toFloat64safe(b)
 
-	// nil → 对齐 proto3 默认值（scalar 类型），便于 neq/eq 判定
 	if a == nil && bIsNum {
 		aNum, aIsNum = 0, true
 	}
@@ -916,7 +934,6 @@ func compareValues(a, b any, op string) bool {
 		return strings.Contains(aStr, bStr)
 
 	case "in":
-		// b 为列表，a 是否在其中
 		list, ok := b.([]any)
 		if !ok {
 			return false
@@ -929,8 +946,6 @@ func compareValues(a, b any, op string) bool {
 		return false
 
 	case "timeWindow":
-		// a 为 map{startTime,endTime} 或类似，b 为一个时间戳或当前时间
-		// 此处简化：若 b 非数字则用当前 HH*60+MM 分钟数
 		var now int
 		if bIsNum {
 			now = int(bNum)
@@ -947,16 +962,11 @@ func compareValues(a, b any, op string) bool {
 		return float64(now) >= start && float64(now) <= end
 
 	case "dailyTimeWindow":
-		// 对齐旧工具 OnHandleCreateNormalTeam 的 DailyOpenTime 过滤：
-		// a 为 RuleTimeInfo 列表（map 数组，字段: StartHour/StartMinute/EndHour/EndMinute）。
-		// 当 a 为 nil/空列表时，视为"无时间限制"，返回 true（接受该项）。
-		// 否则只要当前时间处于任一窗口内即返回 true。
 		if a == nil {
 			return true
 		}
 		list, ok := a.([]any)
 		if !ok {
-			// 容错：单个窗口对象也接受
 			if single, isMap := a.(map[string]any); isMap {
 				list = []any{single}
 			} else {
@@ -997,8 +1007,6 @@ func compareValues(a, b any, op string) bool {
 }
 
 // firstNonNil 返回第一个非 nil 的值。
-// 用于在 GetFieldMap 返回的 map 中兼容 proto 字段名大小写差异
-// （如 StartHour 与 startHour）。
 func firstNonNil(vals ...any) any {
 	for _, v := range vals {
 		if v != nil {
@@ -1035,10 +1043,9 @@ func deepEqual(a, b any) bool {
 	return fmt.Sprintf("%v", a) == fmt.Sprintf("%v", b)
 }
 
-// pickN 从列表中随机选择 N 个不重复元素（Fisher-Yates）
+// pickN 从列表中随机选择 N 个不重复元素
 func pickN(list []any, n int) []any {
 	if n >= len(list) {
-		// 返回整个列表（可以考虑打乱，但这里保持简单）
 		result := make([]any, len(list))
 		copy(result, list)
 		rand.Shuffle(len(result), func(i, j int) {

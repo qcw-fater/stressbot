@@ -20,6 +20,6 @@ function execute(r)
     proto.set_field(delay2, "PingRecvCnt", 10)
 
     proto.set_field(msg, "battleDelayList", {delay1, delay2})
-    network.send("logic", 2, 29, msg)
+    network.send("logic", {cmd=2, act=29}, msg)
     return 0
 end

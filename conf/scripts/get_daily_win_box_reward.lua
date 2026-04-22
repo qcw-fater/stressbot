@@ -10,6 +10,6 @@ function execute(r)
     local msg = proto.create("Game.MainGetDailyWinBoxRewardC2S")
     proto.set_field(msg, "ids", {selectedId})
 
-    local code = network.send("logic", 2, 66, msg)
+    local code = network.send("logic", {cmd=2, act=66}, msg)
     return code
 end

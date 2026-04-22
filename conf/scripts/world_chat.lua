@@ -11,6 +11,6 @@ function execute(r)
     local msg = proto.create("Game.ChatSendC2S")
     proto.set_field(msg, "chatInfo", chatInfo)
 
-    local code = network.send("logic", 13, 1, msg)
+    local code = network.send("logic", {cmd=13, act=1}, msg)
     return code
 end

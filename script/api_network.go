@@ -2,38 +2,17 @@ package script
 
 import (
 	"fmt"
+	"math"
 	"time"
+
+	stresslog "stressbot/utils/log"
 
 	lua "github.com/yuin/gopher-lua"
 	"go.uber.org/zap"
-	stresslog "stressbot/utils/log"
 
 	"google.golang.org/protobuf/proto"
 )
 
-// 说明：心跳 builder 的并发保护改为使用 ScriptContext.LuaMu
-// （每个 Robot 独占 LState，与主流程/监听回调共享同一把锁）。
-
-// loadNetworkModule 加载 network 命名空间模块。
-// Lua 用法：
-//
-//	local network = require("network")
-//	-- TCP 连接
-//	network.connect_tcp("logic", "127.0.0.1:8080")
-//	-- 密钥交换
-//	network.exchange_key("logic")
-//	-- TCP 请求-响应
-//	local code, resp = network.request("logic", 1, 1, c2s_msg, "LoginPlayerS2C")
-//	-- TCP 发送不等待
-//	network.send("logic", 6, 15, c2s_msg)
-//	-- HTTP POST
-//	local code, body = network.http_post("/login", form_data)
-//	-- UDP 发送
-//	network.udp_send(data)
-//	-- UDP 连接
-//	network.connect_udp("127.0.0.1:9090")
-//	-- 等待监听消息
-//	local resp = network.wait_listen("logic", 3, 1, "MatchSucceedS2C", 600)
 func loadNetworkModule(L *lua.LState) int {
 	mod := L.NewTable()
 
@@ -53,110 +32,145 @@ func loadNetworkModule(L *lua.LState) int {
 	L.SetField(mod, "set_udp_secret_key", L.NewFunction(networkSetUDPSecretKey))
 	L.SetField(mod, "ensure_listener", L.NewFunction(networkEnsureListener))
 	L.SetField(mod, "register_heartbeat", L.NewFunction(networkRegisterHeartbeat))
+	L.SetField(mod, "get_secret_key", L.NewFunction(networkGetSecretKey))
+	L.SetField(mod, "get_udp_secret_key", L.NewFunction(networkGetUDPSecretKey))
 
 	L.Push(mod)
 	return 1
 }
 
-// networkConnectTCP network.connect_tcp(service, address) — 建立 TCP 连接
 func networkConnectTCP(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
 		L.RaiseError("network not available")
 		return 0
 	}
-
 	service := L.CheckString(1)
 	address := L.CheckString(2)
-
 	ok := ctx.NetSender.ConnectTCP(service, address)
 	L.Push(lua.LBool(ok))
 	return 1
 }
 
-// networkConnectUDP network.connect_udp(address) — 建立 UDP 连接
 func networkConnectUDP(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
 		L.RaiseError("network not available")
 		return 0
 	}
-
 	address := L.CheckString(1)
-
 	ok := ctx.NetSender.ConnectUDP(address)
 	L.Push(lua.LBool(ok))
 	return 1
 }
 
-// networkExchangeKey network.exchange_key(service) — 密钥交换
-// 发送空消息（CMD=0, ACT=0）获取通信密钥，并设置到连接上。
+// networkExchangeKey 发送空包获取密钥
 func networkExchangeKey(L *lua.LState) int {
 	ctx := GetContext(L)
-	if ctx == nil || ctx.NetSender == nil || ctx.Protocol == nil {
+	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
 		L.RaiseError("network not available")
 		return 0
 	}
 
 	service := L.CheckString(1)
 
-	// 构建空报文（CMD=0, ACT=0，无加密）
-	packet := ctx.Protocol.BuildPacket(0, 0, nil, nil)
+	// 可选第 2 参数：route（table 或 nil）
+	var goRoute any
+	if L.GetTop() >= 2 {
+		goRoute = luaValueToRoute(L.Get(2))
+	}
 
-	// 发送并等待响应
-	respBody, ok := ctx.NetSender.TCPRequest(service, 0, 0, packet)
+	packet := ctx.Adapter.Encode(goRoute, nil, nil)
+	if packet == nil {
+		L.Push(lua.LBool(false))
+		return 1
+	}
+	respKey := ctx.Adapter.ExpectedResponseKey(goRoute)
+
+	respBody, ok := ctx.NetSender.TCPRequest(service, packet, respKey)
 	if !ok || len(respBody) == 0 {
 		L.Push(lua.LBool(false))
 		return 1
 	}
 
-	// 设置密钥到连接
 	ctx.NetSender.SetSecretKey(service, respBody)
-
 	L.Push(lua.LBool(true))
 	return 1
 }
 
-// extractNetArgs 从 Lua 栈提取网络操作参数。
-// 返回: service, cmd, act, protoMsg, s2cProtoName
-func extractNetArgs(L *lua.LState) (string, uint8, uint8, proto.Message, string) {
-	top := L.GetTop()
-	var service string
-	var cmd, act uint8
-	var msg proto.Message
-	var s2cProto string
-
+// extractNetArgs 从 Lua 栈提取 service + route + msg + s2cProto。
+// 支持两种调用方式（向后兼容）：
+//
+//	新：network.request("logic", {cmd=1, act=1}, c2sMsg, "RespProto")
+//	旧：network.request("logic", 1, 1, c2sMsg, "RespProto")
+func extractNetArgs(L *lua.LState) (service string, route lua.LValue, msg proto.Message, s2cProto string) {
 	argIdx := 0
-	for i := 1; i <= top; i++ {
+	for i := 1; i <= L.GetTop(); i++ {
 		v := L.Get(i)
 		if ud, ok := v.(*lua.LUserData); ok {
 			if pm, ok := ud.Value.(proto.Message); ok {
 				msg = pm
-				continue
 			}
 			continue
 		}
-
 		argIdx++
 		switch argIdx {
 		case 1:
 			service = lua.LVAsString(v)
 		case 2:
-			cmd = uint8(lua.LVAsNumber(v))
-		case 3:
-			act = uint8(lua.LVAsNumber(v))
+			route = v // table 或 nil
 		default:
-			// 第 4+ 个字符串参数为 S2C proto 名称
 			if s2cProto == "" {
 				s2cProto = lua.LVAsString(v)
 			}
 		}
 	}
-
-	return service, cmd, act, msg, s2cProto
+	return
 }
 
-// networkRequest network.request(service, cmd, act, c2s_msg [, s2c_proto]) — TCP 请求-响应
+// buildPacket 构建完整数据包
+func buildPacket(ctx *Context, service string, route lua.LValue, msgData []byte) []byte {
+	secretKey := ctx.NetSender.GetSecretKey(service)
+	goRoute := luaValueToRoute(route)
+	return ctx.Adapter.Encode(goRoute, msgData, secretKey)
+}
+
+// luaValueToRoute 将 Lua table/nil 转换为 Go any
+func luaValueToRoute(v lua.LValue) any {
+	if v == lua.LNil {
+		return nil
+	}
+	if tbl, ok := v.(*lua.LTable); ok {
+		result := make(map[string]any)
+		tbl.ForEach(func(k, val lua.LValue) {
+			key := lua.LVAsString(k)
+			switch v := val.(type) {
+			case lua.LNumber:
+				n := float64(v)
+				if n == math.Trunc(n) {
+					result[key] = int64(n)
+				} else {
+					result[key] = n
+				}
+			case lua.LString:
+				result[key] = string(v)
+			case lua.LBool:
+				result[key] = bool(v)
+			}
+		})
+		return result
+	}
+	return nil
+}
+
+func serializeMsg(ctx *Context, msg proto.Message) ([]byte, error) {
+	if msg == nil || ctx.Factory == nil {
+		return nil, nil
+	}
+	return ctx.Factory.Serialize(msg)
+}
+
+// networkRequest TCP 请求-响应
 func networkRequest(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -164,50 +178,54 @@ func networkRequest(L *lua.LState) int {
 		return 0
 	}
 
-	service, cmd, act, msg, s2cProto := extractNetArgs(L)
+	service, route, msg, s2cProto := extractNetArgs(L)
 	if service == "" {
-		L.RaiseError("network.request requires (service, cmd, act, msg [, s2c_proto])")
+		L.RaiseError("network.request requires (service, route, msg [, s2c_proto])")
 		return 0
 	}
 
-	// 构建发送报文
-	packet, err := buildPacket(ctx, service, cmd, act, msg)
+	msgData, err := serializeMsg(ctx, msg)
 	if err != nil {
-		L.RaiseError("build packet failed: %v", err)
+		L.RaiseError("serialize failed: %v", err)
 		return 0
 	}
 
-	// 发送请求并等待响应
-	respBody, ok := ctx.NetSender.TCPRequest(service, cmd, act, packet)
-	if !ok {
-		L.Push(lua.LNumber(-1)) // code = -1 表示发送失败
+	packet := buildPacket(ctx, service, route, msgData)
+	if packet == nil {
+		L.Push(lua.LNumber(-1))
 		L.Push(lua.LNil)
 		return 2
 	}
 
-	// 解析响应
+	goRoute := luaValueToRoute(route)
+	respKey := ctx.Adapter.ExpectedResponseKey(goRoute)
+
+	respBody, ok := ctx.NetSender.TCPRequest(service, packet, respKey)
+	if !ok {
+		L.Push(lua.LNumber(-1))
+		L.Push(lua.LNil)
+		return 2
+	}
+
 	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
 		respMsg, err := ctx.Factory.Parse(s2cProto, respBody)
 		if err != nil {
-			L.Push(lua.LNumber(-2)) // code = -2 表示解析失败
+			L.Push(lua.LNumber(-2))
 			L.Push(lua.LString(string(respBody)))
 			return 2
 		}
-
 		ud := wrapProtoMessage(L, respMsg)
-
-		L.Push(lua.LNumber(0)) // code = 0 表示成功
+		L.Push(lua.LNumber(0))
 		L.Push(ud)
 		return 2
 	}
 
-	// 没有指定 S2C proto，返回原始字节
 	L.Push(lua.LNumber(0))
 	L.Push(lua.LString(string(respBody)))
 	return 2
 }
 
-// networkSend network.send(service, cmd, act, msg) — TCP 发送（不等响应）
+// networkSend TCP 发送（不等响应）
 func networkSend(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -215,19 +233,25 @@ func networkSend(L *lua.LState) int {
 		return 0
 	}
 
-	service, cmd, act, msg, _ := extractNetArgs(L)
+	service, route, msg, _ := extractNetArgs(L)
 	if service == "" {
-		L.RaiseError("network.send requires (service, cmd, act, msg)")
+		L.RaiseError("network.send requires (service, route, msg)")
 		return 0
 	}
 
-	packet, err := buildPacket(ctx, service, cmd, act, msg)
+	msgData, err := serializeMsg(ctx, msg)
 	if err != nil {
-		L.RaiseError("build packet failed: %v", err)
+		L.RaiseError("serialize failed: %v", err)
 		return 0
 	}
 
-	ok, _ := ctx.NetSender.TCPSend(service, cmd, act, packet)
+	packet := buildPacket(ctx, service, route, msgData)
+	if packet == nil {
+		L.Push(lua.LNumber(-1))
+		return 1
+	}
+
+	ok, _ := ctx.NetSender.TCPSend(service, packet)
 	if ok {
 		L.Push(lua.LNumber(0))
 	} else {
@@ -236,7 +260,6 @@ func networkSend(L *lua.LState) int {
 	return 1
 }
 
-// networkHTTPPost network.http_post(path, form_data) — HTTP POST
 func networkHTTPPost(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -276,7 +299,6 @@ func networkHTTPPost(L *lua.LState) int {
 	return 2
 }
 
-// networkUDPSend network.udp_send(data) — UDP 发送
 func networkUDPSend(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -309,23 +331,35 @@ func networkUDPSend(L *lua.LState) int {
 	return 1
 }
 
-// networkUDPSendMsg network.udp_send_msg(cmd, act, body) — UDP 发送带协议头的报文
+// networkUDPSendMsg UDP 发送带协议头的报文
+// 新签名：network.udp_send_msg(route_table, body)
+// 向后兼容旧签名：network.udp_send_msg(cmd, act, body)
+// networkUDPSendMsg 发送 UDP 消息。
+// 签名：network.udp_send_msg(route, body)
+//
+//	route: 路由 table（如 {cmd=4, act=11}）
+//	body:  消息体字节
 func networkUDPSendMsg(L *lua.LState) int {
 	ctx := GetContext(L)
-	if ctx == nil || ctx.NetSender == nil {
+	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
 		L.RaiseError("network not available")
 		return 0
 	}
 
-	cmd := uint8(L.CheckInt(1))
-	act := uint8(L.CheckInt(2))
-
+	route := L.Get(1)
 	var body []byte
-	if L.GetTop() >= 3 {
-		body = []byte(L.CheckString(3))
+	if L.GetTop() >= 2 {
+		body = []byte(L.CheckString(2))
 	}
 
-	ok := ctx.NetSender.UDPSendPacket(cmd, act, body)
+	goRoute := luaValueToRoute(route)
+	udpKey := ctx.NetSender.GetUDPSecretKey()
+	packet := ctx.Adapter.EncodeUDP(goRoute, body, udpKey)
+	if packet == nil {
+		L.Push(lua.LNumber(-1))
+		return 1
+	}
+	ok := ctx.NetSender.UDPSend(packet)
 	if ok {
 		L.Push(lua.LNumber(0))
 	} else {
@@ -334,40 +368,39 @@ func networkUDPSendMsg(L *lua.LState) int {
 	return 1
 }
 
-// networkWaitListen network.wait_listen(service, cmd, act [, s2c_proto [, timeout_sec]]) — 等待监听消息
-// 轮询 GetListenResp，收到消息后解析并返回 proto 对象。
-// 返回: proto_msg 或 nil
+// networkWaitListen 等待监听消息。
+// 签名：network.wait_listen(service, route [, s2c_proto [, timeout_sec]])
+//
+//	route:       路由 table（如 {cmd=3, act=1}），通过 ExpectedResponseKey 计算响应键
+//	s2c_proto:   响应 proto 全名（可选）
+//	timeout_sec: 超时秒数（默认 60）
 func networkWaitListen(L *lua.LState) int {
 	ctx := GetContext(L)
-	if ctx == nil || ctx.NetSender == nil || ctx.Protocol == nil {
+	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
 		L.RaiseError("network not available")
 		return 0
 	}
 
 	service := L.CheckString(1)
-	cmd := uint8(L.CheckInt(2))
-	act := uint8(L.CheckInt(3))
+	route := luaValueToRoute(L.Get(2))
+	responseKey := ctx.Adapter.ExpectedResponseKey(route)
 
 	var s2cProto string
-	timeout := 60 // 默认 60 秒
+	timeout := 60
 
-	top := L.GetTop()
-	if top >= 4 {
-		s2cProto = L.CheckString(4)
+	if L.GetTop() >= 3 {
+		s2cProto = L.CheckString(3)
 	}
-	if top >= 5 {
-		timeout = L.CheckInt(5)
+	if L.GetTop() >= 4 {
+		timeout = L.CheckInt(4)
 	}
 
-	cmdAct := ctx.Protocol.CmdAct(cmd, act)
-
-	// 确保该 cmd/act 已注册监听（动态注册 battle 等连接的监听器）
-	ctx.NetSender.EnsureListener(service, cmd, act)
+	ctx.NetSender.EnsureListener(service, responseKey)
 
 	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 
 	for time.Now().Before(deadline) {
-		respBody := ctx.NetSender.GetListenResp(service, cmdAct)
+		respBody := ctx.NetSender.GetListenResp(service, responseKey)
 		if respBody != nil {
 			if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
 				respMsg, err := ctx.Factory.Parse(s2cProto, respBody)
@@ -378,49 +411,24 @@ func networkWaitListen(L *lua.LState) int {
 				L.Push(wrapProtoMessage(L, respMsg))
 				return 1
 			}
-			// 无 proto 解析，返回原始字节
 			L.Push(lua.LString(string(respBody)))
 			return 1
 		}
 
-		// 短暂休眠避免 CPU 空转
 		time.Sleep(100 * time.Millisecond)
 
-		// 检查上下文是否已取消
 		if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
 			L.Push(lua.LNil)
 			return 1
 		}
 	}
 
-	// 超时
 	stresslog.Warn("[SCRIPT] wait_listen 超时",
-		zap.String("service", service), zap.Int("cmd", int(cmd)), zap.Int("act", int(act)), zap.Int("timeout", timeout))
+		zap.String("service", service), zap.String("responseKey", responseKey), zap.Int("timeout", timeout))
 	L.Push(lua.LNil)
 	return 1
 }
 
-// buildPacket 构建完整的网络报文（含加密和 BCC 校验）
-// 从指定服务的连接获取加密密钥
-func buildPacket(ctx *ScriptContext, service string, cmd, act uint8, msg proto.Message) ([]byte, error) {
-	var body []byte
-	var err error
-
-	if msg != nil && ctx.Factory != nil {
-		body, err = ctx.Factory.Serialize(msg)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	var secretKey []byte
-	if ctx.NetSender != nil && service != "" {
-		secretKey = ctx.NetSender.GetSecretKey(service)
-	}
-	return ctx.Protocol.BuildPacket(cmd, act, body, secretKey), nil
-}
-
-// networkCloseTCP network.close_tcp(service) — 关闭指定服务的 TCP 连接
 func networkCloseTCP(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -431,7 +439,6 @@ func networkCloseTCP(L *lua.LState) int {
 	return 0
 }
 
-// networkCloseUDP network.close_udp() — 关闭 UDP 连接
 func networkCloseUDP(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -441,7 +448,6 @@ func networkCloseUDP(L *lua.LState) int {
 	return 0
 }
 
-// networkSetSecretKey network.set_secret_key(service, key_bytes) — 设置 TCP 连接的加密密钥
 func networkSetSecretKey(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -453,7 +459,6 @@ func networkSetSecretKey(L *lua.LState) int {
 	return 0
 }
 
-// networkSetUDPSecretKey network.set_udp_secret_key(key_bytes) — 设置 UDP 连接的加密密钥
 func networkSetUDPSecretKey(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -464,64 +469,110 @@ func networkSetUDPSecretKey(L *lua.LState) int {
 	return 0
 }
 
-// networkEnsureListener network.ensure_listener(service, cmd, act) — 为 cmd/act 注册监听器占位
+func networkGetSecretKey(L *lua.LState) int {
+	ctx := GetContext(L)
+	if ctx == nil || ctx.NetSender == nil {
+		L.Push(lua.LNil)
+		return 1
+	}
+	service := L.CheckString(1)
+	key := ctx.NetSender.GetSecretKey(service)
+	if key == nil {
+		L.Push(lua.LNil)
+	} else {
+		L.Push(lua.LString(string(key)))
+	}
+	return 1
+}
+
+func networkGetUDPSecretKey(L *lua.LState) int {
+	ctx := GetContext(L)
+	if ctx == nil || ctx.NetSender == nil {
+		L.Push(lua.LNil)
+		return 1
+	}
+	key := ctx.NetSender.GetUDPSecretKey()
+	if key == nil {
+		L.Push(lua.LNil)
+	} else {
+		L.Push(lua.LString(string(key)))
+	}
+	return 1
+}
+
+// networkEnsureListener 为 responseKey 注册监听器占位
 func networkEnsureListener(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
 		return 0
 	}
 	service := L.CheckString(1)
-	cmd := uint8(L.CheckInt(2))
-	act := uint8(L.CheckInt(3))
-	ctx.NetSender.EnsureListener(service, cmd, act)
+	// 支持旧格式 (cmd, act) 和新格式 (responseKey)
+	v2 := L.Get(2)
+	if _, isNum := v2.(lua.LNumber); isNum {
+		cmd := int(lua.LVAsNumber(v2))
+		act := L.CheckInt(3)
+		responseKey := fmt.Sprintf("%d:%d", cmd, act)
+		ctx.NetSender.EnsureListener(service, responseKey)
+	} else {
+		responseKey := lua.LVAsString(v2)
+		ctx.NetSender.EnsureListener(service, responseKey)
+	}
 	return 0
 }
 
-// heartbeatLuaMu 保护 LState 并发调用
-// 注：gopher-lua 的 LState 不是并发安全的，必须串行调用。
-// 每次心跳触发时加锁，通过临时 LState 或主 LState 调用 builder。
-// 这里选择：将 builder 函数存储在主 LState 的 registry 中，每次加锁取出并调用。
-
-// networkRegisterHeartbeat network.register_heartbeat(target, service, cmd, act, interval_ms, builder_func)
-// target: "tcp"/"udp"；builder_func 返回 body 字符串（bytes）。
-// 每次心跳触发时调用 builder_func 取最新 body。
+// networkRegisterHeartbeat 注册心跳
+// 新签名：network.register_heartbeat(target, service, interval_ms, route_table, builder_func)
+// 向后兼容旧签名：network.register_heartbeat(target, service, cmd, act, interval_ms, builder_func)
+// networkRegisterHeartbeat 注册心跳。
+// 签名：network.register_heartbeat(target, service, interval_ms, route, builder)
+//
+//	target:     "tcp" 或 "udp"
+//	service:    服务名
+//	interval_ms: 心跳间隔毫秒
+//	route:      路由 table（如 {cmd=2, act=1}）
+//	builder:    心跳体构建函数（可选）
 func networkRegisterHeartbeat(L *lua.LState) int {
 	ctx := GetContext(L)
-	if ctx == nil || ctx.NetSender == nil || ctx.Protocol == nil {
+	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
 		L.RaiseError("network not available")
 		return 0
 	}
 
 	target := L.CheckString(1)
 	service := L.CheckString(2)
-	cmd := uint8(L.CheckInt(3))
-	act := uint8(L.CheckInt(4))
-	intervalMs := L.CheckInt(5)
 
+	var goRoute any
+	var intervalMs int
 	var builderFn *lua.LFunction
-	if L.GetTop() >= 6 {
-		v := L.Get(6)
-		if fn, ok := v.(*lua.LFunction); ok {
-			builderFn = fn
+
+	v3 := L.Get(3)
+	if fn, ok := v3.(*lua.LFunction); ok {
+		builderFn = fn
+	} else {
+		intervalMs = int(lua.LVAsNumber(v3))
+		goRoute = luaValueToRoute(L.Get(4))
+		if L.GetTop() >= 5 {
+			if fn, ok := L.Get(5).(*lua.LFunction); ok {
+				builderFn = fn
+			}
 		}
 	}
 
-	// 将 builder 函数存入 registry，防止被 GC
-	hbRegKey := fmt.Sprintf("__hb_%s_%s_%d_%d__", target, service, cmd, act)
+	hbRegKey := fmt.Sprintf("__hb_%s_%s_%d__", target, service, time.Now().UnixNano())
 	if builderFn != nil {
 		L.SetField(L.Get(lua.RegistryIndex), hbRegKey, builderFn)
 	}
 
-	// 心跳在独立 goroutine 中触发，但 LState 非并发安全，
-	// 必须与同一 Robot 的主流程、监听回调共享同一把锁（ScriptContext.LuaMu）。
-	// 此处在注册阶段快照该锁，心跳触发时按需加锁。
 	luaMu := ctx.LuaMu
+	adp := ctx.Adapter
 	builder := func() []byte {
 		if luaMu != nil {
 			luaMu.Lock()
 			defer luaMu.Unlock()
 		}
 
+		var body []byte
 		if builderFn != nil {
 			savedTop := L.GetTop()
 			defer L.SetTop(savedTop)
@@ -530,82 +581,84 @@ func networkRegisterHeartbeat(L *lua.LState) int {
 				return nil
 			}
 			ret := L.Get(-1)
-			body := []byte(lua.LVAsString(ret))
-			// UDP：采用 offset 加密；TCP：整包加密
-			if target == "udp" {
-				encOffset := ctx.Protocol.UDPEncryptOffset()
-				udpKey := ctx.NetSender.GetUDPSecretKey()
-				if len(body) <= encOffset || len(udpKey) == 0 {
-					return ctx.Protocol.BuildPacket(cmd, act, body, nil)
-				}
-				return ctx.Protocol.BuildPacketWithOffset(cmd, act, body, udpKey, encOffset)
-			}
-			secretKey := ctx.NetSender.GetSecretKey(service)
-			return ctx.Protocol.BuildPacket(cmd, act, body, secretKey)
+			body = []byte(lua.LVAsString(ret))
 		}
 
-		// 无 builder_func，发空包
 		if target == "udp" {
-			return ctx.Protocol.BuildPacket(cmd, act, nil, nil)
+			udpKey := ctx.NetSender.GetUDPSecretKey()
+			return adp.EncodeUDP(goRoute, body, udpKey)
 		}
 		secretKey := ctx.NetSender.GetSecretKey(service)
-		return ctx.Protocol.BuildPacket(cmd, act, nil, secretKey)
+		return adp.Encode(goRoute, body, secretKey)
 	}
 
 	ctx.NetSender.RegisterHeartbeat(target, service, intervalMs, builder)
 	return 0
 }
 
-// networkRequestWait network.request_wait(service, sendCmd, sendAct, msg, respCmd, respAct [, s2c_proto])
-// 发送请求并等待指定 cmd/act 的响应（响应可以与请求的 cmd/act 不同）。
-// 用于 MainLoadOk(CMD=2,ACT=16) 等待 LoginPlayerDataS2C(CMD=1,ACT=2) 等跨 CMD 场景。
-// 返回: code, resp (与 network.request 相同)
+// networkRequestWait 发送请求并等待指定响应路由。
+// 签名：network.request_wait(service, send_route, msg, resp_route, s2c_proto)
+//
+//	send_route: 发送路由 table（如 {cmd=2, act=16}）
+//	resp_route: 期望的响应路由 table（如 {cmd=1, act=2}），nil 时使用 send_route
+//	s2c_proto:  响应 proto 全名
 func networkRequestWait(L *lua.LState) int {
 	ctx := GetContext(L)
-	if ctx == nil || ctx.NetSender == nil || ctx.Protocol == nil {
+	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
 		L.RaiseError("network not available")
 		return 0
 	}
 
 	service := L.CheckString(1)
-	sendCmd := uint8(L.CheckInt(2))
-	sendAct := uint8(L.CheckInt(3))
-	respCmd := uint8(L.CheckInt(5))
-	respAct := uint8(L.CheckInt(6))
+	sendRoute := luaValueToRoute(L.Get(2))
 
-	// 提取 proto msg（第 4 个参数，可能是 userdata）
 	var msg proto.Message
-	for i := 1; i <= L.GetTop(); i++ {
+	var respRouteLua lua.LValue
+	var s2cProto string
+
+	for i := 3; i <= L.GetTop(); i++ {
 		v := L.Get(i)
 		if ud, ok := v.(*lua.LUserData); ok {
 			if pm, ok := ud.Value.(proto.Message); ok {
 				msg = pm
-				break
 			}
+			continue
+		}
+		if tbl, ok := v.(*lua.LTable); ok && respRouteLua == nil {
+			respRouteLua = tbl
+			continue
+		}
+		if s2cProto == "" {
+			s2cProto = lua.LVAsString(v)
 		}
 	}
 
-	var s2cProto string
-	if L.GetTop() >= 7 {
-		s2cProto = L.CheckString(7)
-	}
-
-	// 构建发送报文
-	packet, err := buildPacket(ctx, service, sendCmd, sendAct, msg)
+	msgData, err := serializeMsg(ctx, msg)
 	if err != nil {
-		L.RaiseError("build packet failed: %v", err)
+		L.RaiseError("serialize failed: %v", err)
 		return 0
 	}
 
-	// 发送并等待指定响应
-	respBody, ok := ctx.NetSender.TCPRequestFor(service, sendCmd, sendAct, packet, respCmd, respAct)
+	secretKey := ctx.NetSender.GetSecretKey(service)
+	packet := ctx.Adapter.Encode(sendRoute, msgData, secretKey)
+	if packet == nil {
+		L.Push(lua.LNumber(-1))
+		L.Push(lua.LNil)
+		return 2
+	}
+
+	respRouteGo := luaValueToRoute(respRouteLua)
+	if respRouteGo == nil {
+		respRouteGo = sendRoute
+	}
+	respKey := ctx.Adapter.ExpectedResponseKey(respRouteGo)
+	respBody, ok := ctx.NetSender.TCPRequest(service, packet, respKey)
 	if !ok {
 		L.Push(lua.LNumber(-1))
 		L.Push(lua.LNil)
 		return 2
 	}
 
-	// 解析响应
 	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
 		respMsg, err := ctx.Factory.Parse(s2cProto, respBody)
 		if err != nil {
@@ -615,9 +668,7 @@ func networkRequestWait(L *lua.LState) int {
 			L.Push(lua.LString(err.Error()))
 			return 2
 		}
-
 		ud := wrapProtoMessage(L, respMsg)
-
 		L.Push(lua.LNumber(0))
 		L.Push(ud)
 		return 2
@@ -626,4 +677,87 @@ func networkRequestWait(L *lua.LState) int {
 	L.Push(lua.LNumber(0))
 	L.Push(lua.LString(string(respBody)))
 	return 2
+}
+
+// loadAdapterModule 暴露适配器编解码给 Lua 业务脚本。
+func loadAdapterModule(L *lua.LState) int {
+	mod := L.NewTable()
+	L.SetField(mod, "encode", L.NewFunction(adapterEncode))
+	L.SetField(mod, "encode_udp", L.NewFunction(adapterEncodeUDP))
+	L.SetField(mod, "decode", L.NewFunction(adapterDecode))
+	L.SetField(mod, "expected_response_key", L.NewFunction(adapterExpectedResponseKey))
+	L.Push(mod)
+	return 1
+}
+
+func adapterEncode(L *lua.LState) int {
+	ctx := GetContext(L)
+	if ctx == nil || ctx.Adapter == nil {
+		L.Push(lua.LNil)
+		return 1
+	}
+	route := luaValueToRoute(L.Get(1))
+	body := []byte(L.CheckString(2))
+	var key []byte
+	if L.GetTop() >= 3 {
+		key = []byte(L.CheckString(3))
+	}
+	result := ctx.Adapter.Encode(route, body, key)
+	if result == nil {
+		L.Push(lua.LNil)
+	} else {
+		L.Push(lua.LString(string(result)))
+	}
+	return 1
+}
+
+func adapterEncodeUDP(L *lua.LState) int {
+	ctx := GetContext(L)
+	if ctx == nil || ctx.Adapter == nil {
+		L.Push(lua.LNil)
+		return 1
+	}
+	route := luaValueToRoute(L.Get(1))
+	body := []byte(L.CheckString(2))
+	var key []byte
+	if L.GetTop() >= 3 {
+		key = []byte(L.CheckString(3))
+	}
+	result := ctx.Adapter.EncodeUDP(route, body, key)
+	if result == nil {
+		L.Push(lua.LNil)
+	} else {
+		L.Push(lua.LString(string(result)))
+	}
+	return 1
+}
+
+func adapterDecode(L *lua.LState) int {
+	ctx := GetContext(L)
+	if ctx == nil || ctx.Adapter == nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LNil)
+		return 2
+	}
+	data := []byte(L.CheckString(1))
+	var key []byte
+	if L.GetTop() >= 2 {
+		key = []byte(L.CheckString(2))
+	}
+	responseKey, body, _ := ctx.Adapter.Decode(data, key)
+	L.Push(lua.LString(responseKey))
+	L.Push(lua.LString(string(body)))
+	return 2
+}
+
+func adapterExpectedResponseKey(L *lua.LState) int {
+	ctx := GetContext(L)
+	if ctx == nil || ctx.Adapter == nil {
+		L.Push(lua.LString(""))
+		return 1
+	}
+	route := luaValueToRoute(L.Get(1))
+	key := ctx.Adapter.ExpectedResponseKey(route)
+	L.Push(lua.LString(key))
+	return 1
 }

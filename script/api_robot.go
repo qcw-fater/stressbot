@@ -23,27 +23,27 @@ func loadRobotModule(L *lua.LState) int {
 	mod := L.NewTable()
 
 	// robot.get(key) — 获取状态值
-	L.SetField(mod, "get", L.NewFunction(robotModuleGet))
+	L.SetField(mod, "get", L.NewFunction(robotGet))
 	// robot.set(key, value) — 设置状态值
-	L.SetField(mod, "set", L.NewFunction(robotModuleSet))
+	L.SetField(mod, "set", L.NewFunction(robotSet))
 	// robot.get_id() — 获取机器人编号
-	L.SetField(mod, "get_id", L.NewFunction(robotModuleGetID))
+	L.SetField(mod, "get_id", L.NewFunction(robotGetID))
 	// robot.get_account() — 获取账号名
-	L.SetField(mod, "get_account", L.NewFunction(robotModuleGetAccount))
+	L.SetField(mod, "get_account", L.NewFunction(robotGetAccount))
 	// robot.get_context() — 检查 context 是否已取消
-	L.SetField(mod, "get_context", L.NewFunction(robotModuleGetContext))
+	L.SetField(mod, "get_context", L.NewFunction(robotGetContext))
 	// robot.increment(key) — 原子递增
-	L.SetField(mod, "increment", L.NewFunction(robotModuleIncrement))
+	L.SetField(mod, "increment", L.NewFunction(robotIncrement))
 	// robot.has(key) — 检查 key 是否存在
-	L.SetField(mod, "has", L.NewFunction(robotModuleHas))
+	L.SetField(mod, "has", L.NewFunction(robotHas))
 	// robot.clear(key?) — 删除单个 key（无参时清空全部）
-	L.SetField(mod, "clear", L.NewFunction(robotModuleClear))
+	L.SetField(mod, "clear", L.NewFunction(robotClear))
 	// robot.delete(key) — 删除单个 key
-	L.SetField(mod, "delete", L.NewFunction(robotModuleClear))
+	L.SetField(mod, "delete", L.NewFunction(robotClear))
 	// robot.get_path("a.b[0].c") — 按路径读取嵌套值
-	L.SetField(mod, "get_path", L.NewFunction(robotModuleGetPath))
+	L.SetField(mod, "get_path", L.NewFunction(robotGetPath))
 	// robot.keys() — 返回所有 key 列表
-	L.SetField(mod, "keys", L.NewFunction(robotModuleKeys))
+	L.SetField(mod, "keys", L.NewFunction(robotKeys))
 
 	L.Push(mod)
 	return 1
@@ -55,56 +55,52 @@ func robotIndex(L *lua.LState) int {
 	method := L.CheckString(2)
 	switch method {
 	case "get":
-		L.Push(L.NewFunction(robotModuleGet))
+		L.Push(L.NewFunction(robotGet))
 	case "set":
-		L.Push(L.NewFunction(robotModuleSet))
+		L.Push(L.NewFunction(robotSet))
 	case "get_id":
-		L.Push(L.NewFunction(robotModuleGetID))
+		L.Push(L.NewFunction(robotGetID))
 	case "get_account":
-		L.Push(L.NewFunction(robotModuleGetAccount))
+		L.Push(L.NewFunction(robotGetAccount))
 	case "get_context":
-		L.Push(L.NewFunction(robotModuleGetContext))
+		L.Push(L.NewFunction(robotGetContext))
 	case "increment":
-		L.Push(L.NewFunction(robotModuleIncrement))
+		L.Push(L.NewFunction(robotIncrement))
 	case "has":
-		L.Push(L.NewFunction(robotModuleHas))
+		L.Push(L.NewFunction(robotHas))
 	case "clear":
-		L.Push(L.NewFunction(robotModuleClear))
+		L.Push(L.NewFunction(robotClear))
 	case "delete":
-		L.Push(L.NewFunction(robotModuleClear))
+		L.Push(L.NewFunction(robotClear))
 	case "get_path":
-		L.Push(L.NewFunction(robotModuleGetPath))
+		L.Push(L.NewFunction(robotGetPath))
 	case "keys":
-		L.Push(L.NewFunction(robotModuleKeys))
+		L.Push(L.NewFunction(robotKeys))
 	default:
 		L.RaiseError("unknown robot method: %s", method)
 	}
 	return 1
 }
 
-// robotModuleGet robot.get(key) — 获取状态值
-func robotModuleGet(L *lua.LState) int {
+// robotGet robot.get(key) — 获取状态值
+func robotGet(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.Store == nil {
 		L.Push(lua.LNil)
 		return 1
 	}
 
-	key := L.CheckString(1)
-
-	// 统一处理：最后一个字符串参数是 key
+	// 支持 r:get("key")（self 为 arg1）和 robot.get("key") 两种调用
 	keyIdx := L.GetTop()
-	if keyIdx > 1 {
-		key = L.CheckString(keyIdx)
-	}
+	key := L.CheckString(keyIdx)
 
 	val := ctx.Store.Get(key)
 	L.Push(goValueToLua(L, val))
 	return 1
 }
 
-// robotModuleSet robot.set(key, value) — 设置状态值
-func robotModuleSet(L *lua.LState) int {
+// robotSet robot.set(key, value) — 设置状态值
+func robotSet(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.Store == nil {
 		return 0
@@ -124,8 +120,8 @@ func robotModuleSet(L *lua.LState) int {
 	return 0
 }
 
-// robotModuleGetID robot.get_id() — 获取机器人编号
-func robotModuleGetID(L *lua.LState) int {
+// robotGetID robot.get_id() — 获取机器人编号
+func robotGetID(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil {
 		L.Push(lua.LNumber(0))
@@ -135,8 +131,8 @@ func robotModuleGetID(L *lua.LState) int {
 	return 1
 }
 
-// robotModuleGetAccount robot.get_account() — 获取账号名
-func robotModuleGetAccount(L *lua.LState) int {
+// robotGetAccount robot.get_account() — 获取账号名
+func robotGetAccount(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil {
 		L.Push(lua.LString(""))
@@ -146,8 +142,8 @@ func robotModuleGetAccount(L *lua.LState) int {
 	return 1
 }
 
-// robotModuleGetContext robot.get_context() — 检查 context 是否已取消
-func robotModuleGetContext(L *lua.LState) int {
+// robotGetContext robot.get_context() — 检查 context 是否已取消
+func robotGetContext(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.Ctx == nil {
 		L.Push(lua.LBool(false))
@@ -157,8 +153,8 @@ func robotModuleGetContext(L *lua.LState) int {
 	return 1
 }
 
-// robotModuleIncrement robot.increment(key) — 原子递增
-func robotModuleIncrement(L *lua.LState) int {
+// robotIncrement robot.increment(key) — 原子递增
+func robotIncrement(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.Store == nil {
 		L.Push(lua.LNumber(0))
@@ -178,8 +174,8 @@ func robotModuleIncrement(L *lua.LState) int {
 	return 1
 }
 
-// robotModuleHas robot.has(key) — 检查 key 是否存在
-func robotModuleHas(L *lua.LState) int {
+// robotHas robot.has(key) — 检查 key 是否存在
+func robotHas(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.Store == nil {
 		L.Push(lua.LBool(false))
@@ -198,8 +194,8 @@ func robotModuleHas(L *lua.LState) int {
 	return 1
 }
 
-// robotModuleClear robot.clear(key?) — 删除指定 key 或清空全部
-func robotModuleClear(L *lua.LState) int {
+// robotClear robot.clear(key?) — 删除指定 key 或清空全部
+func robotClear(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.Store == nil {
 		return 0
@@ -214,8 +210,8 @@ func robotModuleClear(L *lua.LState) int {
 	return 0
 }
 
-// robotModuleKeys robot.keys() — 返回所有 key 列表
-func robotModuleKeys(L *lua.LState) int {
+// robotKeys robot.keys() — 返回所有 key 列表
+func robotKeys(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.Store == nil {
 		tb := L.NewTable()
@@ -231,8 +227,8 @@ func robotModuleKeys(L *lua.LState) int {
 	return 1
 }
 
-// robotModuleGetPath robot.get_path("a.b[0].c") — 按路径读取嵌套值
-func robotModuleGetPath(L *lua.LState) int {
+// robotGetPath robot.get_path("a.b[0].c") — 按路径读取嵌套值
+func robotGetPath(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.Store == nil {
 		L.Push(lua.LNil)

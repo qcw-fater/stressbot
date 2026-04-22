@@ -15,7 +15,7 @@ function execute(r)
     local msg = proto.create("Game.BattleLoadProgressC2S")
     proto.set_field(msg, "progress", progress)
 
-    local code = network.send("battle", 4, 7, msg)
+    local code = network.send("battle", {cmd=4, act=7}, msg)
     utils.log_info("LoadProgress: " .. progress .. "% code=" .. tostring(code))
 
     -- 模拟加载间隔

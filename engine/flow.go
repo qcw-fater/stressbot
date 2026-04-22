@@ -113,9 +113,9 @@ type NextNode struct {
 
 // ListenRef 监听回调引用，定义在节点上。
 // 当节点执行时（通常是连接节点），注册对应的推送监听。
+// Route 为不透明路由，运行时通过 adapter.ExpectedResponseKey(route) 计算实际响应键。
 type ListenRef struct {
-	Cmd      uint8  `json:"cmd"`      // CMD 路由
-	Act      uint8  `json:"act"`      // ACT 路由
+	Route    any    `json:"route"`    // 不透明路由（与 ActionDef.Route 格式一致）
 	Server   string `json:"server"`   // 服务名（如 "logic"）
 	Callback string `json:"callback"` // 回调定义名称（引用 callbacks 表）
 }
@@ -123,13 +123,12 @@ type ListenRef struct {
 // ActionDef 动作定义。
 // Pattern 决定执行方式：
 //   - tcpSend:      TCP 发送（不等响应）
-//   - tcpRequest:   TCP 请求-响应（默认响应 cmd/act 与发送相同）
-//     若指定 RespCmd/RespAct 则等待跨 cmd/act 响应
-//   - httpPost:     HTTP POST 请求（form 或 JSON，取决于 BodyType）
+//   - tcpRequest:   TCP 请求-响应
+//   - httpPost:     HTTP POST 请求
 //   - lua:          Lua 脚本执行
 //   - connect:      TCP 连接建立
 //   - connectUDP:   UDP 连接建立
-//   - exchangeKey:  发送 (0,0) 空包获取密钥并设置到连接
+//   - exchangeKey:  发送空包获取密钥并设置到连接
 //   - close:        关闭连接（Target=tcp/udp，默认 tcp，配合 Service 使用）
 //   - clearState:   清除 StateStore 中的多个 key
 //   - udpSendProto: UDP 发送 proto 消息
@@ -139,10 +138,7 @@ type ListenRef struct {
 type ActionDef struct {
 	Pattern    string         `json:"pattern"`    // 动作模式
 	Service    string         `json:"service"`    // 目标服务名
-	Cmd        uint8          `json:"cmd"`        // CMD 路由
-	Act        uint8          `json:"act"`        // ACT 路由
-	RespCmd    uint8          `json:"respCmd"`    // 期望响应 CMD（可选，默认同 Cmd）
-	RespAct    uint8          `json:"respAct"`    // 期望响应 ACT（可选，默认同 Act）
+	Route      any            `json:"route"`      // 不透明路由，原样传给 adapter.Encode
 	Path       string         `json:"path"`       // HTTP 路径（httpPost 模式）
 	Script     string         `json:"script"`     // Lua 脚本路径（lua 模式）
 	Address    string         `json:"address"`    // 连接地址（connect 模式），可用 state:key 形式
@@ -152,7 +148,7 @@ type ActionDef struct {
 	Bindings   []FieldBind    `json:"bindings"`   // C2S 字段绑定
 	Store      []StoreMapping `json:"store"`      // S2C 响应字段 -> 状态存储映射
 	Timeout    int            `json:"timeout"`    // 超时秒数（waitListen 模式）
-	Target     string         `json:"target"`     // close 模式目标: "tcp" 或 "udp"
+	Target     string         `json:"target"`     // close 模式目标: tcp 或 udp
 	Keys       []string       `json:"keys"`       // clearState 要清除的 key 列表
 	RawBody    []RawField     `json:"rawBody"`    // udpSendRaw 二进制字段描述
 	Delay      int            `json:"delay"`      // 动作执行后延迟（毫秒）

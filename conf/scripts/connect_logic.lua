@@ -20,7 +20,7 @@ function execute(r)
     end
 
     -- 注册 5 秒心跳（Logic: cmd=2 MAIN, act=1 SERVER_TIME_CS，空 body）
-    network.register_heartbeat("tcp", "logic", 2, 1, 5000, function()
+    network.register_heartbeat("tcp", "logic", 5000, {cmd=2, act=1}, function()
         return ""
     end)
 

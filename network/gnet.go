@@ -1,6 +1,3 @@
-// Package network 提供基于 gnet 的高性能网络层。
-// gnet.go 实现 gnet 事件循环集成，管理 TCP/UDP 连接的生命周期、
-// 消息帧拆包、心跳发送。通过 connRegistry 将 gnet 连接与业务层 Connection 绑定。
 package network
 
 import (
@@ -9,16 +6,18 @@ import (
 	"sync"
 	"time"
 
+	stresslog "stressbot/utils/log"
+
 	"github.com/panjf2000/gnet/v2"
 	"go.uber.org/zap"
-	stresslog "stressbot/utils/log"
+
+	"stressbot/adapter"
 )
 
 // connRegistry 管理 gnet 连接与业务层 Connection 的映射。
-// 连接在 DialTCP/DialUDP 时注册，OnClose 时注销。
 type connRegistry struct {
 	mu      sync.RWMutex
-	connMap map[int]*Connection // gnet.Conn Fd -> 业务 Connection
+	connMap map[int]*Connection
 }
 
 func newConnRegistry() *connRegistry {
@@ -46,20 +45,19 @@ func (r *connRegistry) get(gconn gnet.Conn) *Connection {
 }
 
 // EventServer gnet 事件处理器。
-// 负责连接管理、消息帧拆包、心跳发送。
 type EventServer struct {
 	gnet.BuiltinEventEngine
 
 	registry     *connRegistry
-	protocol     *Protocol
-	tickInterval time.Duration // 心跳间隔
+	adp          adapter.Adapter
+	tickInterval time.Duration
 }
 
 // NewEventServer 创建 gnet 事件处理器
-func NewEventServer(protocol *Protocol, heartbeatInterval time.Duration) *EventServer {
+func NewEventServer(adp adapter.Adapter, heartbeatInterval time.Duration) *EventServer {
 	return &EventServer{
 		registry:     newConnRegistry(),
-		protocol:     protocol,
+		adp:          adp,
 		tickInterval: heartbeatInterval,
 	}
 }
@@ -70,7 +68,6 @@ func (es *EventServer) OnOpen(gconn gnet.Conn) ([]byte, gnet.Action) {
 }
 
 // OnClose gnet 连接关闭回调。
-// 触发业务层 Connection 的 onClose 清理。
 func (es *EventServer) OnClose(gconn gnet.Conn, err error) gnet.Action {
 	conn := es.registry.get(gconn)
 	if conn != nil {
@@ -81,77 +78,69 @@ func (es *EventServer) OnClose(gconn gnet.Conn, err error) gnet.Action {
 }
 
 // OnTraffic gnet 收到数据回调。
-// 按消息头格式拆包，将完整消息分发到业务层 Connection.OnReceive。
+// 使用 adapter 接口的纯 Go 方法做帧分割，Lua 仅在 Decode 时调用。
 func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
-	headSize := es.protocol.HeadSize()
+	headSize := es.adp.HeaderSize()
+
+	conn := es.registry.get(gconn)
 
 	for {
-		// 检查缓冲区中可用字节数
 		available := gconn.InboundBuffered()
 		if available < headSize {
 			return gnet.None
 		}
 
-		// 预览消息头（不消费缓冲区）
 		headBuf, err := gconn.Peek(headSize)
 		if err != nil || len(headBuf) < headSize {
 			return gnet.None
 		}
 
-		// 解码消息头获取消息体长度
-		head := es.protocol.DecodeHead(headBuf)
-		if head == nil {
-			// 协议解析失败，丢弃一个字节尝试恢复
-			gconn.Discard(1)
-			continue
+		bodyLen := es.adp.BodyLength(headBuf)
+		if bodyLen < 0 {
+			if conn != nil {
+				stresslog.Warn("[NETWORK] 协议头非法，关闭连接",
+					zap.String("service", conn.ServiceName()))
+			}
+			return gnet.Close
 		}
 
-		// 检查是否有完整的消息（头 + 体）
-		totalLen := headSize + int(head.Len)
+		totalLen := headSize + bodyLen
 		if available < totalLen {
 			return gnet.None
 		}
 
-		// 消费完整消息
 		msgBuf := make([]byte, totalLen)
-		_, err = gconn.Read(msgBuf)
-		if err != nil {
+		if _, err = gconn.Read(msgBuf); err != nil {
 			stresslog.Error("[GNET] 读取消息失败", zap.Error(err))
 			return gnet.None
 		}
-		// dispatch with decryption
-		conn := es.registry.get(gconn)
+
 		if conn != nil {
 			secretKey := conn.GetSecretKey()
-			decHead, decBody := es.protocol.DecodePacket(msgBuf, secretKey)
-			if decHead != nil {
-				conn.OnReceive(decHead, decBody)
+			responseKey, body, headerErr := es.adp.Decode(msgBuf, secretKey)
+			if responseKey != "" {
+				conn.OnReceive(responseKey, body, headerErr)
 			}
 		}
 	}
 }
 
 // OnTick gnet 定时回调。
-// 心跳现在由每个连接独立的 RegisterHeartbeat 管理（per-connection 配置），
-// 这里不再做全局广播。仍保留 Ticker 以便 gnet 事件循环活跃。
 func (es *EventServer) OnTick() (delay time.Duration, action gnet.Action) {
 	return es.tickInterval, gnet.None
 }
 
-// Dialer 管理 gnet 客户端，提供 TCP/UDP 拨号能力。
-// 所有出站连接共享同一个 gnet 客户端实例。
+// Dialer 管理 gnet 客户端。
 type Dialer struct {
-	client   *gnet.Client
-	server   *EventServer
-	protocol *Protocol
+	client *gnet.Client
+	server *EventServer
 }
 
-// NewDialer 创建拨号器（gnet 客户端模式）
-func NewDialer(protocol *Protocol, heartbeatInterval time.Duration) *Dialer {
-	server := NewEventServer(protocol, heartbeatInterval)
+// NewDialer 创建拨号器
+func NewDialer(adp adapter.Adapter, heartbeatInterval time.Duration) *Dialer {
+	server := NewEventServer(adp, heartbeatInterval)
 	return &Dialer{
-		server:   server,
-		protocol: protocol,
+		server: server,
 	}
 }
 
@@ -189,7 +178,6 @@ func (d *Dialer) Stop() error {
 }
 
 // DialTCP 建立 TCP 连接并绑定业务层 Connection。
-// address 格式为 host:port。conn 为预创建的业务层 Connection。
 func (d *Dialer) DialTCP(ctx context.Context, address string, conn *Connection) (gnet.Conn, error) {
 	gconn, err := d.client.Dial("tcp", address)
 	if err != nil {

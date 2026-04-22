@@ -23,7 +23,7 @@ function execute(r)
     local msg = proto.create("Game.GmEventC2S")
     proto.set_field(msg, "GM", gm)
 
-    local code = network.send("logic", 9, 1, msg)
+    local code = network.send("logic", {cmd=9, act=1}, msg)
     if code ~= 0 then
         utils.log_error("GMAddHero 发送失败")
     else

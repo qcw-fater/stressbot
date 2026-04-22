@@ -24,7 +24,7 @@ function execute(r)
         proto.set_field(msg, "battleId", battleId)
         proto.set_field(msg, "sessionId", battleSession)
 
-        local code, resp = network.request("battle", 4, 1, msg, "Game.BattleRegisterS2C")
+        local code, resp = network.request("battle", {cmd=4, act=1}, msg, "Game.BattleRegisterS2C")
         if code == 0 then
             utils.log_info("RegisterBattle 成功: index=" .. tostring(fighterIndex)
                 .. " battleId=" .. tostring(battleId))
