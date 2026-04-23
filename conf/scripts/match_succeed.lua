@@ -3,13 +3,13 @@
 local network = require("network")
 local robot = require("robot")
 local proto = require("proto")
-local utils = require("utils")
+local log = require("log")
 
 function execute(r)
     -- 轮询监听匹配成功消息，超时 600 秒（10 分钟）
     local resp = network.wait_listen("logic", {cmd=3, act=1}, "Game.MatchSucceedS2C", 600)
     if not resp then
-        utils.log_error("MatchSucceed 超时")
+        log.error("MatchSucceed 超时")
         return 1
     end
 
@@ -41,10 +41,11 @@ function execute(r)
     end)
 
     if ok then
-        utils.log_info("匹配成功: battleSession=" .. tostring(robot.get("battleSession"))
+        log.info("匹配成功: battleSession=" .. tostring(robot.get("battleSession"))
             .. " battleArea=" .. tostring(robot.get("battleArea")))
     else
-        utils.log_error("MatchSucceed 解析失败: " .. tostring(err))
+        log.error("MatchSucceed 解析失败: " .. tostring(err))
+        return 1
     end
 
     return 0

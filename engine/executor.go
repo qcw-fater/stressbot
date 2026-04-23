@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"time"
@@ -11,40 +12,45 @@ import (
 	"go.uber.org/zap"
 )
 
-// DefaultNodeDelayMs 动作/布尔叶节点执行完后的默认延迟（毫秒）。
-// 与旧 Robot 工具保持一致（Robot/agent/execute.go DefaultDelayMs = 1000），
-// 用于控制压测节点的节奏。节点可通过 delayMs 字段覆盖：
-//   - delayMs > 0: 使用配置值
-//   - delayMs == 0: 使用 DefaultNodeDelayMs
-//   - delayMs < 0: 禁用延迟
-const DefaultNodeDelayMs = 1000
+// DefaultEngineDelayMs 引擎兜底的节点间延迟，TaskFlow.DefaultDelayMs 为 0 时使用。
+const DefaultEngineDelayMs = 1000
 
-// Executor 流程执行器。
-// 遍历 TaskFlow 中的节点图，根据节点类型执行对应逻辑。
-// 每个 Robot 拥有独立的 Executor 实例。
+// errBreak 和 errContinue 是循环控制的内部信号，不是真正的错误。
+// 它们通过 Go 的 error 传播机制在节点树中向上冒泡，
+// 直到被最近的 executeLoop 捕获并消费，不会传播到 loop 之外。
+var (
+	errBreak    = errors.New("break")
+	errContinue = errors.New("continue")
+)
+
+// Executor 流程执行器，每个 Robot 持有一个独立实例。
 type Executor struct {
-	flow    *TaskFlow
-	handler ActionHandler // 动作执行委托
+	flow           *TaskFlow
+	handler        ActionHandler
+	defaultDelayMs int    // 解析自 flow.DefaultDelayMs，初始化后只读
+	caller         string // 调用方标识，用于日志追踪
 }
 
 // ActionHandler 动作执行委托接口。
 // 由调用方（Robot）实现，负责具体的网络请求、Lua 脚本执行等。
 type ActionHandler interface {
-	// ExecuteAction 执行声明式动作
 	ExecuteAction(actionDef *ActionDef) error
-	// ExecuteBoolean 执行条件判断
 	ExecuteBoolean(expression string) bool
-	// RegisterListen 注册持久化监听
 	RegisterListen(refs []ListenRef) error
-	// OnNodeError 节点执行出错时的回调
-	OnNodeError(node *Node, err error)
 }
 
-// NewExecutor 创建流程执行器
-func NewExecutor(flow *TaskFlow, handler ActionHandler) *Executor {
+// NewExecutor 创建流程执行器。
+// caller 用于日志中标识调用方（如机器人账号），便于追踪问题。
+func NewExecutor(flow *TaskFlow, handler ActionHandler, caller string) *Executor {
+	delayMs := flow.DefaultDelayMs
+	if delayMs < 0 {
+		delayMs = DefaultEngineDelayMs
+	}
 	return &Executor{
-		flow:    flow,
-		handler: handler,
+		flow:           flow,
+		handler:        handler,
+		defaultDelayMs: delayMs,
+		caller:         caller,
 	}
 }
 
@@ -53,28 +59,33 @@ func (e *Executor) GetFlow() *TaskFlow {
 	return e.flow
 }
 
-// Run 从起始节点开始执行流程。
+// Run 从 main 节点开始执行流程（类比编程语言的 main 函数入口）。
 // 阻塞直到流程结束或 context 取消。
 func (e *Executor) Run(ctx context.Context) error {
-	startNode, ok := e.flow.GetNode(e.flow.StartNode)
-	if !ok {
-		return fmt.Errorf("起始节点不存在: %s", e.flow.StartNode)
+	stresslog.Info("[ENGINE] 开始执行流程", zap.String("caller", e.caller))
+	err := e.executeNode(ctx, "main")
+	if err != nil {
+		stresslog.Error("[ENGINE] 流程异常退出", zap.String("caller", e.caller), zap.Error(err))
+	} else {
+		stresslog.Info("[ENGINE] 流程正常结束", zap.String("caller", e.caller))
 	}
-
-	return e.executeNode(ctx, startNode)
+	return err
 }
 
-// executeNode 执行单个节点
-func (e *Executor) executeNode(ctx context.Context, node *Node) error {
+// executeNode 执行单个节点（按 nodeID 查找）。
+func (e *Executor) executeNode(ctx context.Context, nodeID string) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 
-	stresslog.Debug("[ENGINE] 执行节点", zap.String("id", node.ID), zap.String("type", node.Type))
+	node, ok := e.flow.Nodes[nodeID]
+	if !ok {
+		return fmt.Errorf("节点不存在: %s (caller=%s)", nodeID, e.caller)
+	}
+
+	stresslog.Info("[ENGINE] 执行节点", zap.String("caller", e.caller), zap.String("node", nodeID), zap.String("type", node.Type))
 
 	switch node.Type {
-	case "start":
-		return e.executeStart(ctx, node)
 	case "sequence":
 		return e.executeSequence(ctx, node)
 	case "action":
@@ -87,35 +98,68 @@ func (e *Executor) executeNode(ctx context.Context, node *Node) error {
 		return e.executeWeighted(ctx, node)
 	case "wait":
 		return e.executeWait(ctx, node)
+	case "break":
+		return errBreak
+	case "continue":
+		return errContinue
 	default:
-		return fmt.Errorf("未知节点类型: %s (node=%s)", node.Type, node.ID)
+		return fmt.Errorf("未知节点类型: %s (node=%s, caller=%s)", node.Type, nodeID, e.caller)
 	}
 }
 
-// executeStart 起始节点：委托 executeSequence 顺序执行所有 next 节点
-func (e *Executor) executeStart(ctx context.Context, node *Node) error {
-	return e.executeSequence(ctx, node)
-}
-
-// executeSequence 顺序节点：按顺序依次执行所有 next 节点
+// executeSequence 顺序节点：按顺序依次执行所有子节点。
+// 透传所有错误和信号（含 errBreak / errContinue）。
 func (e *Executor) executeSequence(ctx context.Context, node *Node) error {
-	for _, nn := range node.Next {
+	for _, childID := range node.Next {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		child, ok := e.flow.GetNode(nn.Node)
-		if !ok {
-			return fmt.Errorf("节点不存在: %s", nn.Node)
-		}
-		if err := e.executeNode(ctx, child); err != nil {
+		if err := e.executeNode(ctx, childID); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// executeLoop 循环节点：循环执行单个 body 节点。
+// 支持次数控制、前置条件、后置条件、break/continue 信号捕获。
+func (e *Executor) executeLoop(ctx context.Context, node *Node) error {
+	for i := 0; node.LoopCount <= 0 || i < node.LoopCount; i++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		// 前置条件检查（对应 Go: for condition { }）
+		if node.Condition != "" {
+			if !e.handler.ExecuteBoolean(node.Condition) {
+				break
+			}
+		}
+
+		// 执行循环体（单个节点）
+		err := e.executeNode(ctx, node.Body)
+
+		if errors.Is(err, errBreak) {
+			break
+		}
+		if errors.Is(err, errContinue) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+
+		// 后置条件检查（对应 Go: do { } while !breakCondition）
+		if node.BreakCondition != "" {
+			if e.handler.ExecuteBoolean(node.BreakCondition) {
+				break
+			}
+		}
+	}
+	return nil
+}
+
 // executeAction 动作节点：执行指定 action。
-// 先执行动作（创建连接），再注册监听回调。
 func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 	if node.Action == "" {
 		return nil
@@ -123,82 +167,40 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 
 	actionDef, ok := e.flow.GetAction(node.Action)
 	if !ok {
-		return fmt.Errorf("动作不存在: %s (node=%s)", node.Action, node.ID)
+		return fmt.Errorf("动作不存在: %s", node.Action)
 	}
 
-	// 执行动作
 	err := e.handler.ExecuteAction(actionDef)
 	if err != nil {
-		e.handler.OnNodeError(node, err)
+		stresslog.Error("[ENGINE] 动作执行失败",
+			zap.String("caller", e.caller), zap.String("action", node.Action), zap.Error(err))
 		if node.BreakOff {
-			return fmt.Errorf("动作执行失败: %s (node=%s): %w", node.Action, node.ID, err)
+			return fmt.Errorf("动作执行失败 [%s]: %w", node.Action, err)
 		}
-		// 非中断模式，记录错误但继续
-		stresslog.Warn("[ENGINE] 动作执行失败但继续",
-			zap.String("action", node.Action),
-			zap.String("node", node.ID),
-			zap.Error(err),
-		)
 		return nil
 	}
 
-	// 如果节点有监听回调，在动作执行后注册（连接已在动作中创建）
+	// 注册监听回调（连接已在动作中创建）
 	if len(node.ListenCallbacks) > 0 {
 		if err := e.handler.RegisterListen(node.ListenCallbacks); err != nil {
-			return fmt.Errorf("注册监听失败: %w", err)
+			stresslog.Error("[ENGINE] 注册监听失败",
+				zap.String("caller", e.caller), zap.Error(err))
+			if node.BreakOff {
+				return fmt.Errorf("注册监听失败: %w", err)
+			}
 		}
 	}
 
-	// 节点级默认延迟（对齐旧 Robot 工具 delaySleep）
-	nodeDelay(ctx, node)
+	stresslog.Debug("[ENGINE] 执行动作", zap.String("caller", e.caller), zap.String("action", node.Action), zap.Int("listens", len(node.ListenCallbacks)))
+	e.nodeDelay(ctx, node)
 	return nil
 }
 
-// nodeDelay 执行节点级默认延迟（1 秒，与旧 Robot 工具一致）。
-// - node.DelayMs > 0: 使用配置值
-// - node.DelayMs == 0: 使用 DefaultNodeDelayMs
-// - node.DelayMs < 0: 禁用延迟
-func nodeDelay(ctx context.Context, node *Node) {
-	ms := node.DelayMs
-	if ms < 0 {
-		return
-	}
-	if ms == 0 {
-		ms = DefaultNodeDelayMs
-	}
-	select {
-	case <-ctx.Done():
-	case <-time.After(time.Duration(ms) * time.Millisecond):
-	}
-}
-
-// executeLoop 循环节点：重复执行 next 节点
-func (e *Executor) executeLoop(ctx context.Context, node *Node) error {
-	count := node.LoopCount
-	for i := 0; count < 0 || i < count; i++ {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if err := e.executeNextList(ctx, node.Next); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// executeBoolean 条件分支节点
-// 兼容两种写法：
-//   - 新式: { condition: "lua:xxx.lua", trueNext: "...", falseNext: "..." }
-//   - 旧式: { action: "actionName"/"lua:xxx.lua", trueBranch: "...", falseBranch: "..." }
+// executeBoolean 条件分支节点。
 func (e *Executor) executeBoolean(ctx context.Context, node *Node) error {
-	expr := node.Condition
-	if expr == "" {
-		expr = node.Action
-	}
-	result := e.handler.ExecuteBoolean(expr)
+	result := e.handler.ExecuteBoolean(node.Condition)
 
-	// 节点级默认延迟（对齐旧 Robot 工具 delaySleep）
-	nodeDelay(ctx, node)
+	e.nodeDelay(ctx, node)
 
 	var targetID string
 	if result {
@@ -211,22 +213,18 @@ func (e *Executor) executeBoolean(ctx context.Context, node *Node) error {
 		return nil
 	}
 
-	child, ok := e.flow.GetNode(targetID)
-	if !ok {
-		return fmt.Errorf("条件分支目标节点不存在: %s", targetID)
-	}
-	return e.executeNode(ctx, child)
+	return e.executeNode(ctx, targetID)
 }
 
-// executeWeighted 加权随机节点：按权重随机选择一个 next 节点执行
+// executeWeighted 加权随机节点：按权重随机选择一个 option 执行。
 func (e *Executor) executeWeighted(ctx context.Context, node *Node) error {
-	if len(node.Next) == 0 {
+	if len(node.Options) == 0 {
 		return nil
 	}
 
 	total := 0
-	for _, nn := range node.Next {
-		total += nn.Weight
+	for _, opt := range node.Options {
+		total += opt.Weight
 	}
 	if total == 0 {
 		return nil
@@ -234,74 +232,42 @@ func (e *Executor) executeWeighted(ctx context.Context, node *Node) error {
 
 	r := rand.Intn(total)
 	cumulative := 0
-	for _, nn := range node.Next {
-		cumulative += nn.Weight
+	for _, opt := range node.Options {
+		cumulative += opt.Weight
 		if r < cumulative {
-			child, ok := e.flow.GetNode(nn.Node)
-			if !ok {
-				return fmt.Errorf("加权节点不存在: %s", nn.Node)
-			}
-			return e.executeNode(ctx, child)
+			return e.executeNode(ctx, opt.Node)
 		}
 	}
 
-	// 不会到达，但保险起见
-	last := node.Next[len(node.Next)-1]
-	child, ok := e.flow.GetNode(last.Node)
-	if !ok {
-		return fmt.Errorf("加权节点不存在: %s", last.Node)
-	}
-	return e.executeNode(ctx, child)
+	return e.executeNode(ctx, node.Options[len(node.Options)-1].Node)
 }
 
-// executeWait 等待节点：暂停指定时间
+// executeWait 等待节点：暂停指定时间。
 func (e *Executor) executeWait(ctx context.Context, node *Node) error {
-	d := time.Duration(node.WaitSeconds * float64(time.Second))
-	if d <= 0 {
+	if node.WaitMs <= 0 {
 		return nil
 	}
 
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-time.After(d):
+	case <-time.After(time.Duration(node.WaitMs) * time.Millisecond):
 		return nil
 	}
 }
 
-// executeNextList 执行 next 节点列表（并行）
-func (e *Executor) executeNextList(ctx context.Context, nextList []NextNode) error {
-	if len(nextList) == 0 {
-		return nil
+// nodeDelay 执行节点级延迟，仅在 action 和 boolean 节点执行完后调用。
+// 延迟值优先级：node.DelayMs > e.defaultDelayMs
+func (e *Executor) nodeDelay(ctx context.Context, node *Node) {
+	ms := node.DelayMs
+	if ms == 0 {
+		ms = e.defaultDelayMs
 	}
-	if len(nextList) == 1 {
-		child, ok := e.flow.GetNode(nextList[0].Node)
-		if !ok {
-			return fmt.Errorf("节点不存在: %s", nextList[0].Node)
-		}
-		return e.executeNode(ctx, child)
+	if ms < 0 {
+		return
 	}
-
-	// 多个 next 并行执行
-	errCh := make(chan error, len(nextList))
-	for _, nn := range nextList {
-		nn := nn
-		go func() {
-			child, ok := e.flow.GetNode(nn.Node)
-			if !ok {
-				errCh <- fmt.Errorf("节点不存在: %s", nn.Node)
-				return
-			}
-			errCh <- e.executeNode(ctx, child)
-		}()
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Duration(ms) * time.Millisecond):
 	}
-
-	// 等待所有完成，返回第一个错误
-	var firstErr error
-	for i := 0; i < len(nextList); i++ {
-		if err := <-errCh; err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	return firstErr
 }

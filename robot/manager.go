@@ -18,17 +18,16 @@ import (
 
 // ManagerConfig 机器人管理器配置
 type ManagerConfig struct {
-	AccountPrefix       string
-	StartNumber         int
-	Count               int
-	ConcurrentNum       int
-	AuthBaseURL         string
-	AuthExtra           map[string]string
-	Adapter             adapter.Adapter
-	RequestTimeout      time.Duration
-	UDPServices         []string
-	DefaultListenServer string
-	DefaultUDPService   string
+	AccountPrefix  string
+	StartNumber    int
+	Count          int
+	ConcurrentNum  int
+	AuthBaseURL    string
+	AuthExtra      map[string]string
+	Adapter        adapter.Adapter
+	RequestTimeout time.Duration
+	UDPServices    []string
+	MainService    string
 }
 
 // Manager 机器人管理器。
@@ -86,7 +85,7 @@ func (m *Manager) StartAll() error {
 			AuthBaseURL: m.cfg.AuthBaseURL,
 			AuthExtra:   m.cfg.AuthExtra,
 		}, m.flow, m.factory, m.cfg.Adapter, m.dialer, m.luaPool,
-			m.cfg.RequestTimeout, udpServicesMap, m.cfg.DefaultListenServer, m.cfg.DefaultUDPService)
+			m.cfg.RequestTimeout, udpServicesMap, m.cfg.MainService)
 
 		m.mu.Lock()
 		m.robots = append(m.robots, r)

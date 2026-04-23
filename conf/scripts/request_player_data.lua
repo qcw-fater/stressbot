@@ -3,7 +3,7 @@
 local network = require("network")
 local robot = require("robot")
 local proto = require("proto")
-local utils = require("utils")
+local log = require("log")
 
 function execute(r)
     -- 发送 MainLoadOkC2S (CMD=2, ACT=16)，等待 LoginPlayerDataS2C (CMD=1, ACT=2)
@@ -11,12 +11,12 @@ function execute(r)
     local code, resp = network.request_wait("logic", {cmd=2, act=16}, msg, {cmd=1, act=2}, "Game.LoginPlayerDataS2C")
 
     if code ~= 0 then
-        utils.log_error("RequestPlayerData: 请求失败 code=" .. tostring(code) .. " detail=" .. tostring(resp))
+        log.error("RequestPlayerData: 请求失败 code=" .. tostring(code) .. " detail=" .. tostring(resp))
         return 1
     end
 
     if not resp then
-        utils.log_error("RequestPlayerData: 响应为空")
+        log.error("RequestPlayerData: 响应为空")
         return 1
     end
 
@@ -45,6 +45,6 @@ function execute(r)
     end
     robot.set("heroIdList", heroIds)
 
-    utils.log_info("RequestPlayerData: 已存储 " .. #heroIds .. " 个英雄ID")
+    log.info("RequestPlayerData: 已存储 " .. #heroIds .. " 个英雄ID")
     return 0
 end

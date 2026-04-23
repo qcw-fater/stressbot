@@ -34,16 +34,16 @@ type NetSender interface {
 	TCPSend(service string, packet []byte) (bool, int)
 	TCPRequest(service string, packet []byte, responseKey string) ([]byte, bool)
 	HTTPPost(path string, formData map[string]string) (statusCode int, body []byte, err error)
-	UDPSend(data []byte) bool
+	UDPSend(service string, data []byte) bool
 	ConnectTCP(service, address string) bool
-	ConnectUDP(address string) bool
+	ConnectUDP(service, address string) bool
 	CloseTCP(service string)
-	CloseUDP()
+	CloseUDP(service string)
 	GetListenResp(service string, responseKey string) []byte
 	GetSecretKey(service string) []byte
 	SetSecretKey(service string, key []byte)
-	SetUDPSecretKey(key []byte)
-	GetUDPSecretKey() []byte
+	SetUDPSecretKey(service string, key []byte)
+	GetUDPSecretKey(service string) []byte
 	EnsureListener(service string, responseKey string)
 	RegisterHeartbeat(target, service string, intervalMs int, builder func() []byte)
 }
@@ -72,7 +72,7 @@ func (ae *ActionExecutor) Execute(def *ActionDef) error {
 		err = ae.execConnect(def)
 	case "connectUDP":
 		err = ae.execConnectUDP(def)
-	case "waitListen", "listenWait":
+	case "waitListen":
 		err = ae.execWaitListen(def)
 	case "exchangeKey":
 		err = ae.execExchangeKey(def)
@@ -84,8 +84,6 @@ func (ae *ActionExecutor) Execute(def *ActionDef) error {
 		err = ae.execUDPSendProto(def)
 	case "udpSendRaw":
 		err = ae.execUDPSendRaw(def)
-	case "sleep":
-		err = ae.execSleep(def)
 	case "setState":
 		err = ae.execSetState(def)
 	case "registerHeartbeat":
@@ -94,9 +92,6 @@ func (ae *ActionExecutor) Execute(def *ActionDef) error {
 		return fmt.Errorf("未知的动作模式: %s", def.Pattern)
 	}
 
-	if err == nil && def.Delay > 0 {
-		time.Sleep(time.Duration(def.Delay) * time.Millisecond)
-	}
 	return err
 }
 
@@ -134,7 +129,11 @@ func (ae *ActionExecutor) bindFields(msg proto.Message, bindings []FieldBind) er
 			return ErrActionSkip
 		}
 
-		if value == nil {
+		if fb.StoreAs != "" && value != nil {
+			ae.store.Set(fb.StoreAs, value)
+		}
+
+		if value == nil || fb.Field == "" {
 			continue
 		}
 
@@ -158,6 +157,13 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 			return nil
 		}
 		val = ae.store.Get(fb.Source)
+
+	case "stateFirst":
+		list := ae.store.GetList(fb.Source)
+		if len(list) == 0 {
+			return nil
+		}
+		val = list[0]
 
 	case "stateRandom":
 		list := ae.store.GetList(fb.Source)
@@ -228,7 +234,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		if len(fb.Values) == 0 {
 			return nil
 		}
-		return fb.Values[rand.Intn(len(fb.Values))]
+		val = fb.Values[rand.Intn(len(fb.Values))]
 
 	case "randomPickN":
 		if len(fb.Values) == 0 {
@@ -239,6 +245,32 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 			n = 1
 		}
 		return pickN(fb.Values, n)
+
+	case "randomPickMap":
+		if len(fb.Values) == 0 || fb.KeySource == "" {
+			return nil
+		}
+		keyVal := ae.store.Get(fb.KeySource)
+		if keyVal == nil {
+			return nil
+		}
+		keyStr := fmt.Sprintf("%v", keyVal)
+		for _, entry := range fb.Values {
+			m, ok := entry.(map[string]any)
+			if !ok {
+				continue
+			}
+			k, _ := m["key"]
+			if fmt.Sprintf("%v", k) != keyStr {
+				continue
+			}
+			items, ok := m["values"].([]any)
+			if !ok || len(items) == 0 {
+				return nil
+			}
+			return items[rand.Intn(len(items))]
+		}
+		return nil
 
 	case "randomExclude":
 		var pool []any
@@ -263,7 +295,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		if len(filtered) == 0 {
 			return nil
 		}
-		return filtered[rand.Intn(len(filtered))]
+		val = filtered[rand.Intn(len(filtered))]
 
 	case "randomInt":
 		lo, hi := fb.Min, fb.Max
@@ -275,33 +307,91 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 	case "randomBool":
 		return rand.Intn(2) == 1
 
-	case "randomString":
-		length := fb.Length
-		if length <= 0 {
-			length = 8
+			case "randomString":
+			length := fb.Length
+			if length <= 0 {
+				length = 8
+			}
+			charset := fb.Charset
+			if charset == "" {
+				charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+			}
+			return randomStringCharset(length, charset)
+
+		case "listSize":
+			return len(ae.store.GetList(fb.Source))
+
+		case "nested":
+			if fb.Message == "" {
+				return nil
+			}
+			subMsg, err := ae.factory.Create(fb.Message)
+			if err != nil {
+				stresslog.Error("[ACTION] nested", zap.String("message", fb.Message), zap.Error(err))
+				return nil
+			}
+			if err := ae.bindFields(subMsg, fb.Bindings); err != nil {
+				stresslog.Error("[ACTION] nested bind", zap.String("message", fb.Message), zap.Error(err))
+				return nil
+			}
+			if fb.Wrap {
+				return []any{subMsg}
+			}
+			return subMsg
+
+		case "nestedList":
+			if len(fb.Items) == 0 {
+				return nil
+			}
+			result := make([]any, 0, len(fb.Items))
+			for _, item := range fb.Items {
+				if item.Message == "" {
+					continue
+				}
+				subMsg, err := ae.factory.Create(item.Message)
+				if err != nil {
+					stresslog.Error("[ACTION] nestedList", zap.String("message", item.Message), zap.Error(err))
+					continue
+				}
+				if err := ae.bindFields(subMsg, item.Bindings); err != nil {
+					stresslog.Error("[ACTION] nestedList bind", zap.String("message", item.Message), zap.Error(err))
+					continue
+				}
+				result = append(result, subMsg)
+			}
+			return result
+
+		default:
+			return fb.Value
 		}
-		charset := fb.Charset
-		if charset == "" {
-			charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+		if fb.Path != "" && val != nil {
+			val = navigatePath(val, fb.Path)
 		}
-		return randomStringCharset(length, charset)
 
-	case "listSize":
-		return len(ae.store.GetList(fb.Source))
+		if fb.Wrap && val != nil {
+			return []any{val}
+		}
 
-	default:
-		return fb.Value
+		return val
 	}
-
-	if fb.Path != "" && val != nil {
-		val = navigatePath(val, fb.Path)
-	}
-
-	return val
-}
 
 // navigatePath 按点分路径从嵌套 map/list 中提取值。
+// 支持用 | 分隔多条候选路径，按顺序尝试，返回第一个非 nil 的值。
 func navigatePath(v any, path string) any {
+	if strings.Contains(path, "|") {
+		for _, alt := range strings.Split(path, "|") {
+			result := navigateSinglePath(v, alt)
+			if result != nil {
+				return result
+			}
+		}
+		return nil
+	}
+	return navigateSinglePath(v, path)
+}
+
+func navigateSinglePath(v any, path string) any {
 	current := v
 	for _, key := range state.SplitPath(path) {
 		if current == nil {
@@ -478,13 +568,13 @@ func (ae *ActionExecutor) execConnect(def *ActionDef) error {
 func (ae *ActionExecutor) execConnectUDP(def *ActionDef) error {
 	addr := ae.resolveAddress(def.Address)
 	if addr == "" {
-		return fmt.Errorf("UDP 连接地址为空")
+		return fmt.Errorf("UDP 连接地址为空: service=%s", def.Service)
 	}
-	ok := ae.netSender.ConnectUDP(addr)
+	ok := ae.netSender.ConnectUDP(def.Service, addr)
 	if !ok {
-		return fmt.Errorf("UDP 连接建立失败: address=%s", addr)
+		return fmt.Errorf("UDP 连接建立失败: service=%s address=%s", def.Service, addr)
 	}
-	stresslog.Debug("[ACTION] ConnectUDP 成功", zap.String("address", addr))
+	stresslog.Debug("[ACTION] ConnectUDP 成功", zap.String("service", def.Service), zap.String("address", addr))
 	return nil
 }
 
@@ -525,7 +615,7 @@ func (ae *ActionExecutor) execClose(def *ActionDef) error {
 	}
 	switch target {
 	case "udp":
-		ae.netSender.CloseUDP()
+		ae.netSender.CloseUDP(def.Service)
 		stresslog.Debug("[ACTION] Close UDP 成功")
 	case "tcp":
 		ae.netSender.CloseTCP(def.Service)
@@ -565,12 +655,12 @@ func (ae *ActionExecutor) execUDPSendProto(def *ActionDef) error {
 		}
 	}
 	routeKey := ae.adp.ExpectedResponseKey(def.Route)
-	udpKey := ae.netSender.GetUDPSecretKey()
+	udpKey := ae.netSender.GetUDPSecretKey(def.Service)
 	packet := ae.adp.EncodeUDP(def.Route, body, udpKey)
 	if packet == nil {
 		return fmt.Errorf("adapter.EncodeUDP 返回 nil，检查 codec.lua")
 	}
-	if !ae.netSender.UDPSend(packet) {
+	if !ae.netSender.UDPSend(def.Service, packet) {
 		return fmt.Errorf("UDP 发送失败: route=%s", routeKey)
 	}
 	stresslog.Debug("[ACTION] UDPSendProto",
@@ -586,27 +676,17 @@ func (ae *ActionExecutor) execUDPSendRaw(def *ActionDef) error {
 		return fmt.Errorf("构建 UDPRaw body 失败: %w", err)
 	}
 	routeKey := ae.adp.ExpectedResponseKey(def.Route)
-	udpKey := ae.netSender.GetUDPSecretKey()
+	udpKey := ae.netSender.GetUDPSecretKey(def.Service)
 	packet := ae.adp.EncodeUDP(def.Route, body, udpKey)
 	if packet == nil {
 		return fmt.Errorf("adapter.EncodeUDP 返回 nil，检查 codec.lua")
 	}
-	if !ae.netSender.UDPSend(packet) {
+	if !ae.netSender.UDPSend(def.Service, packet) {
 		return fmt.Errorf("UDP 发送失败: route=%s", routeKey)
 	}
 	stresslog.Debug("[ACTION] UDPSendRaw",
 		zap.String("route", routeKey),
 		zap.Int("bodyLen", len(body)), zap.Int("pktLen", len(packet)))
-	return nil
-}
-
-// execSleep 暂停指定毫秒
-func (ae *ActionExecutor) execSleep(def *ActionDef) error {
-	d := def.Delay
-	if d <= 0 {
-		return nil
-	}
-	time.Sleep(time.Duration(d) * time.Millisecond)
 	return nil
 }
 
@@ -648,7 +728,7 @@ func (ae *ActionExecutor) execRegisterHeartbeat(def *ActionDef) error {
 			}
 		}
 		if target == "udp" {
-			udpKey := ae.netSender.GetUDPSecretKey()
+			udpKey := ae.netSender.GetUDPSecretKey(def.Service)
 			return ae.adp.EncodeUDP(route, body, udpKey)
 		}
 		secretKey := ae.netSender.GetSecretKey(def.Service)

@@ -4,6 +4,7 @@ local network = require("network")
 local robot = require("robot")
 local json = require("json")
 local utils = require("utils")
+local log = require("log")
 
 function execute(r)
     local account = robot.get("account")
@@ -22,25 +23,25 @@ function execute(r)
     })
 
     if code < 0 then
-        utils.log_error("PostLogin HTTP 请求失败: code=" .. tostring(code))
+        log.error("PostLogin HTTP 请求失败: code=" .. tostring(code))
         return 1
     end
 
     local ok, resp = pcall(json.decode, body)
     if not ok or not resp then
-        utils.log_error("PostLogin JSON 解析失败: " .. tostring(body))
+        log.error("PostLogin JSON 解析失败: " .. tostring(body))
         return 1
     end
 
     -- 检查错误码（error=0 表示成功）
     if resp.error and resp.error ~= 0 then
-        utils.log_error("PostLogin 失败: error=" .. tostring(resp.error))
+        log.error("PostLogin 失败: error=" .. tostring(resp.error))
         return 1
     end
 
     -- 提取 session
     if not resp.session or resp.session == "" then
-        utils.log_error("PostLogin 响应缺少 session")
+        log.error("PostLogin 响应缺少 session")
         return 1
     end
     robot.set("session", resp.session)
@@ -53,7 +54,7 @@ function execute(r)
     local roles = resp.roles or {}
     robot.set("roles", roles)
 
-    utils.log_info("PostLogin 成功: session=" .. tostring(resp.session)
+    log.info("PostLogin 成功: session=" .. tostring(resp.session)
         .. " zoneId=" .. tostring(zoneId)
         .. " 角色数=" .. tostring(#roles))
 

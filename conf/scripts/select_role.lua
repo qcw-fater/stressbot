@@ -4,7 +4,7 @@
 local network = require("network")
 local robot = require("robot")
 local json = require("json")
-local utils = require("utils")
+local log = require("log")
 
 function execute(r)
     local account  = robot.get("account")
@@ -28,7 +28,7 @@ function execute(r)
     end
 
     if not playerId then
-        utils.log_error("SelectRole: 无可用角色")
+        log.error("SelectRole: 无可用角色")
         return 1
     end
 
@@ -42,18 +42,18 @@ function execute(r)
     })
 
     if code < 0 then
-        utils.log_error("SelectRole HTTP 请求失败: code=" .. tostring(code))
+        log.error("SelectRole HTTP 请求失败: code=" .. tostring(code))
         return 1
     end
 
     local ok, resp = pcall(json.decode, body)
     if not ok or not resp then
-        utils.log_error("SelectRole JSON 解析失败")
+        log.error("SelectRole JSON 解析失败")
         return 1
     end
 
     if resp.error and resp.error ~= 0 then
-        utils.log_error("SelectRole 失败: error=" .. tostring(resp.error))
+        log.error("SelectRole 失败: error=" .. tostring(resp.error))
         return 1
     end
 
@@ -66,10 +66,10 @@ function execute(r)
     if resp.ip and resp.port then
         local logicAddress = resp.ip .. ":" .. tostring(resp.port)
         robot.set("logicAddress", logicAddress)
-        utils.log_info("SelectRole 成功: playerId=" .. tostring(playerId)
+        log.info("SelectRole 成功: playerId=" .. tostring(playerId)
             .. " logicAddress=" .. logicAddress)
     else
-        utils.log_info("SelectRole 成功: playerId=" .. tostring(playerId)
+        log.info("SelectRole 成功: playerId=" .. tostring(playerId)
             .. " (无逻辑服地址)")
     end
 

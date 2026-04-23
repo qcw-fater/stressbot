@@ -280,7 +280,7 @@ func (c *Connection) Close() {
 }
 
 // OnReceive 收到网络消息时的分发入口。
-func (c *Connection) OnReceive(responseKey string, body []byte, headerErr uint16) {
+func (c *Connection) OnReceive(responseKey string, body []byte, headerErr uint64) {
 	if atomic.LoadInt32(&c.isClose) == 1 {
 		return
 	}
@@ -288,7 +288,7 @@ func (c *Connection) OnReceive(responseKey string, body []byte, headerErr uint16
 		stresslog.Warn("[NETWORK] 服务端协议头错误码非零",
 			zap.String("service", c.serviceName),
 			zap.String("key", responseKey),
-			zap.Uint16("headerErr", headerErr))
+			zap.Uint64("headerErr", headerErr))
 	}
 
 	stresslog.Debug("[NETWORK] OnReceive",

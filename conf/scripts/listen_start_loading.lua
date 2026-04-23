@@ -9,13 +9,13 @@
 local network = require("network")
 local robot = require("robot")
 local proto = require("proto")
-local utils = require("utils")
+local log = require("log")
 
 function execute(r)
     -- 轮询监听开始加载消息，超时 180 秒（3 分钟）
     local resp = network.wait_listen("logic", {cmd=4, act=6}, "Game.BattleStartLoadingS2C", 180)
     if not resp then
-        utils.log_error("ListenStartLoading 超时")
+        log.error("ListenStartLoading 超时")
         return 1
     end
 
@@ -98,12 +98,13 @@ function execute(r)
     end
 
     if ok then
-        utils.log_info("开始加载: battleAddress=" .. tostring(robot.get("battleAddress"))
+        log.info("开始加载: battleAddress=" .. tostring(robot.get("battleAddress"))
             .. " fighterIndex=" .. tostring(robot.get("fighterIndex"))
             .. " battleId=" .. tostring(robot.get("battleId"))
             .. " battleSession=" .. tostring(robot.get("battleSession")))
     else
-        utils.log_error("ListenStartLoading 解析失败: " .. tostring(err))
+        log.error("ListenStartLoading 解析失败: " .. tostring(err))
+        return 1
     end
 
     return 0

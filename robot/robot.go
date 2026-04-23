@@ -7,13 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"stressbot/adapter"
-	"stressbot/engine"
-	"stressbot/network"
-	"stressbot/protox"
-	"stressbot/script"
-	"stressbot/state"
-	stresslog "stressbot/utils/log"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,6 +14,14 @@ import (
 
 	lua "github.com/yuin/gopher-lua"
 	"go.uber.org/zap"
+
+	"stressbot/adapter"
+	"stressbot/engine"
+	"stressbot/network"
+	"stressbot/protox"
+	"stressbot/script"
+	"stressbot/state"
+	stresslog "stressbot/utils/log"
 )
 
 // Robot 单个压测机器人实例。
@@ -42,8 +43,7 @@ type Robot struct {
 	luaMu               sync.Mutex
 	adp                 adapter.Adapter
 	udpServices         map[string]bool
-	defaultListenServer string
-	defaultUDPService   string
+	mainService         string // 主连接服务名，仅用于断开检测（断开时停止机器人）
 }
 
 // Config 单个机器人的配置
@@ -57,7 +57,7 @@ type Config struct {
 // NewRobot 创建机器人实例。
 func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 	adp adapter.Adapter, dialer *network.Dialer, luaPool *script.RuntimePool,
-	requestTimeout time.Duration, udpServices map[string]bool, defaultListenServer, defaultUDPService string) *Robot {
+	requestTimeout time.Duration, udpServices map[string]bool, mainService string) *Robot {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -75,8 +75,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		httpClient:          &http.Client{Timeout: 10 * time.Second},
 		adp:                 adp,
 		udpServices:         udpServices,
-		defaultListenServer: defaultListenServer,
-		defaultUDPService:   defaultUDPService,
+		mainService: mainService,
 	}
 
 	if luaPool != nil {
@@ -89,7 +88,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		r.state.Set(k, v)
 	}
 
-	r.executor = engine.NewExecutor(flow, &robotActionHandler{robot: r, flow: flow})
+	r.executor = engine.NewExecutor(flow, &robotActionHandler{robot: r, flow: flow}, r.account)
 
 	return r
 }
@@ -169,7 +168,7 @@ func (r *Robot) ConnectTCP(serviceName, address string) bool {
 	}
 
 	conn.SetOnDisconnect(func() {
-		if serviceName == r.defaultListenServer {
+		if serviceName == r.mainService {
 			stresslog.Warn("[ROBOT] 主连接意外断开，停止机器人",
 				zap.Int("id", r.id), zap.String("account", r.account), zap.String("service", serviceName))
 			r.Stop()
@@ -223,9 +222,6 @@ func (r *Robot) CloseUDP(service string) {
 func (r *Robot) resolveListenConnByName(name string) *network.Connection {
 	if r.udpServices[name] {
 		return r.client.GetUDPConn(name)
-	}
-	if name == "" {
-		name = r.defaultListenServer
 	}
 	return r.client.GetTCPConn(name)
 }
@@ -313,7 +309,8 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 	for _, ref := range refs {
 		server := ref.Server
 		if server == "" {
-			server = h.robot.defaultListenServer
+			stresslog.Warn("[ROBOT] 监听引用缺少 server 字段")
+			continue
 		}
 		if _, ok := groups[server]; !ok {
 			groups[server] = make(map[string]network.ListenCallBack)
@@ -349,9 +346,6 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 func (h *robotActionHandler) resolveListenConn(server string) *network.Connection {
 	if h.robot.udpServices[server] {
 		return h.robot.client.GetUDPConn(server)
-	}
-	if server == "" {
-		server = h.robot.defaultListenServer
 	}
 	return h.robot.client.GetTCPConn(server)
 }
@@ -410,12 +404,6 @@ func (h *robotActionHandler) createListenCallback(cbDef *engine.CallbackDef) net
 			}
 		}
 	}
-}
-
-// OnNodeError 节点执行出错回调
-func (h *robotActionHandler) OnNodeError(node *engine.Node, err error) {
-	stresslog.Error("[ROBOT] 节点执行错误",
-		zap.Int("id", h.robot.id), zap.String("node", node.ID), zap.String("type", node.Type), zap.Error(err))
 }
 
 func evalCondition(expr string, s *state.Store) bool {
@@ -549,8 +537,8 @@ func (ns *netSenderAdapter) HTTPPost(path string, formData map[string]string) (i
 	return resp.StatusCode, body, nil
 }
 
-func (ns *netSenderAdapter) UDPSend(data []byte) bool {
-	conn := ns.robot.client.GetUDPConn(ns.robot.defaultUDPService)
+func (ns *netSenderAdapter) UDPSend(service string, data []byte) bool {
+	conn := ns.robot.client.GetUDPConn(service)
 	if conn == nil {
 		return false
 	}
@@ -562,8 +550,8 @@ func (ns *netSenderAdapter) ConnectTCP(service, address string) bool {
 	return ns.robot.ConnectTCP(service, address)
 }
 
-func (ns *netSenderAdapter) ConnectUDP(address string) bool {
-	return ns.robot.ConnectUDP(ns.robot.defaultUDPService, address)
+func (ns *netSenderAdapter) ConnectUDP(service, address string) bool {
+	return ns.robot.ConnectUDP(service, address)
 }
 
 func (ns *netSenderAdapter) GetListenResp(service string, responseKey string) []byte {
@@ -605,19 +593,19 @@ func (ns *netSenderAdapter) CloseTCP(service string) {
 	ns.robot.CloseTCP(service)
 }
 
-func (ns *netSenderAdapter) CloseUDP() {
-	ns.robot.CloseUDP(ns.robot.defaultUDPService)
+func (ns *netSenderAdapter) CloseUDP(service string) {
+	ns.robot.CloseUDP(service)
 }
 
-func (ns *netSenderAdapter) SetUDPSecretKey(key []byte) {
-	conn := ns.robot.client.GetUDPConn(ns.robot.defaultUDPService)
+func (ns *netSenderAdapter) SetUDPSecretKey(service string, key []byte) {
+	conn := ns.robot.client.GetUDPConn(service)
 	if conn != nil {
 		conn.SetSecretKey(key)
 	}
 }
 
-func (ns *netSenderAdapter) GetUDPSecretKey() []byte {
-	conn := ns.robot.client.GetUDPConn(ns.robot.defaultUDPService)
+func (ns *netSenderAdapter) GetUDPSecretKey(service string) []byte {
+	conn := ns.robot.client.GetUDPConn(service)
 	if conn == nil {
 		return nil
 	}
@@ -629,7 +617,7 @@ func (ns *netSenderAdapter) RegisterHeartbeat(target, service string, intervalMs
 	if ns.robot.udpServices[target] {
 		conn = ns.robot.client.GetUDPConn(target)
 	} else if target == "udp" {
-		conn = ns.robot.client.GetUDPConn(ns.robot.defaultUDPService)
+		conn = ns.robot.client.GetUDPConn(service)
 	} else {
 		conn = ns.robot.client.GetTCPConn(service)
 	}

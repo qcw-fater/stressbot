@@ -2,6 +2,7 @@
 local network = require("network")
 local robot = require("robot")
 local utils = require("utils")
+local log = require("log")
 
 local udp_seq = 0
 
@@ -39,20 +40,20 @@ end
 function execute(r)
     local battleAddress = robot.get("battleAddress")
     if not battleAddress or battleAddress == "" then
-        utils.log_error("ConnectBattleUDP: 无战斗服地址")
+        log.error("ConnectBattleUDP: 无战斗服地址")
         return 1
     end
 
-    local ok = network.connect_udp(battleAddress)
+    local ok = network.connect_udp("udp", battleAddress)
     if not ok then
-        utils.log_error("ConnectBattleUDP 连接失败: " .. battleAddress)
+        log.error("ConnectBattleUDP 连接失败: " .. battleAddress)
         return 1
     end
 
     -- 设置 UDP 密钥（从 listen_start_loading 保存）
     local key = robot.get("battleSecretKey")
     if key then
-        network.set_udp_secret_key(key)
+        network.set_udp_secret_key("udp", key)
     end
 
     -- 新一轮战斗开始：复位包序号（对齐旧工具 ClearBattleInfo → packetIndex=0）
@@ -65,6 +66,6 @@ function execute(r)
     -- 注册 150ms UDP 心跳
     network.register_heartbeat("udp", "battle", 150, {cmd=4, act=2}, build_udp_heart)
 
-    utils.log_info("战斗服 UDP 连接完成 心跳已注册(150ms)")
+    log.info("战斗服 UDP 连接完成 心跳已注册(150ms)")
     return 0
 end

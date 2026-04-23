@@ -3,7 +3,7 @@
 local network = require("network")
 local robot = require("robot")
 local proto = require("proto")
-local utils = require("utils")
+local log = require("log")
 
 function execute(r)
     local msg = proto.create("Game.BattleEndC2S")
@@ -60,10 +60,10 @@ function execute(r)
     -- 使用 request 模式发送（与旧工具 RequestResponse 一致）
     local code, resp = network.request("battle", {cmd=4, act=13}, msg)
     if code ~= 0 then
-        utils.log_info("BattleEnd 发送结果: code=" .. tostring(code) .. "（可能连接已关闭）")
-    else
-        utils.log_info("BattleEnd 已发送")
+        log.error("BattleEnd 发送失败: code=" .. tostring(code))
+        return 1
     end
+    log.info("BattleEnd 已发送")
 
     return 0
 end

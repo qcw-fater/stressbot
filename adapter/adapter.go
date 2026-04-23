@@ -35,10 +35,10 @@ type Adapter interface {
 	// Decode 将完整数据包解码为路由键、消息体和协议头错误码。
 	// responseKey 是字符串路由键，用于请求-响应匹配和监听分发。
 	// 格式由适配器决定，典型格式："{cmd}:{act}"，如 "3:1"。
-	// headerErr 为协议头中的错误码字段（无该字段的协议返回 0）。
+	// headerErr 为协议头中的错误码，Lua decode() 必须返回数字，Go 用 uint64 接收。
 	// 非零时 Connection.OnReceive 记录告警，仍继续路由（让请求正常完成）。
 	// TCP 和 UDP 使用同一 Decode（接收侧无偏移问题）。
-	Decode(data []byte, secretKey []byte) (responseKey string, body []byte, headerErr uint16)
+	Decode(data []byte, secretKey []byte) (responseKey string, body []byte, headerErr uint64)
 
 	// ExpectedResponseKey 从发送路由计算期望的响应路由键。
 	// 用于 TCPRequest 等待响应时注册临时通道。

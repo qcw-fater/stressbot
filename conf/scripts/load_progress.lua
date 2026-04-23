@@ -3,6 +3,7 @@ local network = require("network")
 local robot = require("robot")
 local proto = require("proto")
 local utils = require("utils")
+local log = require("log")
 
 function execute(r)
     local progress = robot.get("loadProgress") or 0
@@ -16,7 +17,11 @@ function execute(r)
     proto.set_field(msg, "progress", progress)
 
     local code = network.send("battle", {cmd=4, act=7}, msg)
-    utils.log_info("LoadProgress: " .. progress .. "% code=" .. tostring(code))
+    if code ~= 0 then
+        log.warn("LoadProgress 发送失败: code=" .. tostring(code))
+    else
+        log.info("LoadProgress: " .. progress .. "%")
+    end
 
     -- 模拟加载间隔
     utils.sleep(500)

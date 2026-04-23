@@ -170,6 +170,8 @@ func toInt(v any) int {
 		return int(n)
 	case float64:
 		return int(n)
+	case float32:
+		return int(n)
 	default:
 		return 0
 	}

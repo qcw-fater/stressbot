@@ -58,8 +58,9 @@ func networkConnectUDP(L *lua.LState) int {
 		L.RaiseError("network not available")
 		return 0
 	}
-	address := L.CheckString(1)
-	ok := ctx.NetSender.ConnectUDP(address)
+	service := L.CheckString(1)
+	address := L.CheckString(2)
+	ok := ctx.NetSender.ConnectUDP(service, address)
 	L.Push(lua.LBool(ok))
 	return 1
 }
@@ -306,8 +307,9 @@ func networkUDPSend(L *lua.LState) int {
 		return 0
 	}
 
+	service := L.CheckString(1)
 	var data []byte
-	for i := 1; i <= L.GetTop(); i++ {
+	for i := 2; i <= L.GetTop(); i++ {
 		v := L.Get(i)
 		if _, ok := v.(*lua.LUserData); ok {
 			continue
@@ -318,11 +320,11 @@ func networkUDPSend(L *lua.LState) int {
 	}
 
 	if data == nil {
-		L.RaiseError("network.udp_send requires (data)")
+		L.RaiseError("network.udp_send requires (service, data)")
 		return 0
 	}
 
-	ok := ctx.NetSender.UDPSend(data)
+	ok := ctx.NetSender.UDPSend(service, data)
 	if ok {
 		L.Push(lua.LNumber(0))
 	} else {
@@ -331,11 +333,8 @@ func networkUDPSend(L *lua.LState) int {
 	return 1
 }
 
-// networkUDPSendMsg UDP 发送带协议头的报文
-// 新签名：network.udp_send_msg(route_table, body)
-// 向后兼容旧签名：network.udp_send_msg(cmd, act, body)
 // networkUDPSendMsg 发送 UDP 消息。
-// 签名：network.udp_send_msg(route, body)
+// 签名：network.udp_send_msg(service, route, body)
 //
 //	route: 路由 table（如 {cmd=4, act=11}）
 //	body:  消息体字节
@@ -346,20 +345,20 @@ func networkUDPSendMsg(L *lua.LState) int {
 		return 0
 	}
 
-	route := L.Get(1)
+	route := L.Get(2)
 	var body []byte
-	if L.GetTop() >= 2 {
-		body = []byte(L.CheckString(2))
+	if L.GetTop() >= 3 {
+		body = []byte(L.CheckString(3))
 	}
 
 	goRoute := luaValueToRoute(route)
-	udpKey := ctx.NetSender.GetUDPSecretKey()
+	udpKey := ctx.NetSender.GetUDPSecretKey(L.CheckString(1))
 	packet := ctx.Adapter.EncodeUDP(goRoute, body, udpKey)
 	if packet == nil {
 		L.Push(lua.LNumber(-1))
 		return 1
 	}
-	ok := ctx.NetSender.UDPSend(packet)
+	ok := ctx.NetSender.UDPSend(L.CheckString(1), packet)
 	if ok {
 		L.Push(lua.LNumber(0))
 	} else {
@@ -444,7 +443,8 @@ func networkCloseUDP(L *lua.LState) int {
 	if ctx == nil || ctx.NetSender == nil {
 		return 0
 	}
-	ctx.NetSender.CloseUDP()
+	service := L.CheckString(1)
+	ctx.NetSender.CloseUDP(service)
 	return 0
 }
 
@@ -464,8 +464,9 @@ func networkSetUDPSecretKey(L *lua.LState) int {
 	if ctx == nil || ctx.NetSender == nil {
 		return 0
 	}
-	key := []byte(L.CheckString(1))
-	ctx.NetSender.SetUDPSecretKey(key)
+	service := L.CheckString(1)
+	key := []byte(L.CheckString(2))
+	ctx.NetSender.SetUDPSecretKey(service, key)
 	return 0
 }
 
@@ -491,7 +492,8 @@ func networkGetUDPSecretKey(L *lua.LState) int {
 		L.Push(lua.LNil)
 		return 1
 	}
-	key := ctx.NetSender.GetUDPSecretKey()
+	service := L.CheckString(1)
+	key := ctx.NetSender.GetUDPSecretKey(service)
 	if key == nil {
 		L.Push(lua.LNil)
 	} else {
@@ -521,11 +523,9 @@ func networkEnsureListener(L *lua.LState) int {
 	return 0
 }
 
-// networkRegisterHeartbeat 注册心跳
-// 新签名：network.register_heartbeat(target, service, interval_ms, route_table, builder_func)
-// 向后兼容旧签名：network.register_heartbeat(target, service, cmd, act, interval_ms, builder_func)
 // networkRegisterHeartbeat 注册心跳。
 // 签名：network.register_heartbeat(target, service, interval_ms, route, builder)
+//	   或：network.register_heartbeat(target, service, builder, route)
 //
 //	target:     "tcp" 或 "udp"
 //	service:    服务名
@@ -585,7 +585,7 @@ func networkRegisterHeartbeat(L *lua.LState) int {
 		}
 
 		if target == "udp" {
-			udpKey := ctx.NetSender.GetUDPSecretKey()
+			udpKey := ctx.NetSender.GetUDPSecretKey(service)
 			return adp.EncodeUDP(goRoute, body, udpKey)
 		}
 		secretKey := ctx.NetSender.GetSecretKey(service)

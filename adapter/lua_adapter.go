@@ -3,10 +3,12 @@ package adapter
 import (
 	"fmt"
 	"runtime"
+	"time"
+
+	stresslog "stressbot/utils/log"
 
 	lua "github.com/yuin/gopher-lua"
 	"go.uber.org/zap"
-	stresslog "stressbot/utils/log"
 )
 
 // LuaAdapter 通过 gopher-lua LState 池调用适配器脚本实现 Adapter 接口。
@@ -50,6 +52,8 @@ func NewLuaAdapter(poolSize int, scriptPath string) (*LuaAdapter, error) {
 	for i := 0; i < poolSize; i++ {
 		L := adp.newLState()
 		if err := adp.initLState(L); err != nil {
+			// 清理已创建的 LState 避免资源泄漏
+			adp.closeAll()
 			return nil, fmt.Errorf("初始化 LState[%d] 失败: %w", i, err)
 		}
 		adp.states <- L
@@ -57,6 +61,10 @@ func NewLuaAdapter(poolSize int, scriptPath string) (*LuaAdapter, error) {
 
 	// Step 3: 初始化时获取元信息并缓存到 Go 字段
 	L := adp.acquire()
+	if L == nil {
+		adp.closeAll()
+		return nil, fmt.Errorf("获取 LState 超时")
+	}
 	defer adp.release(L)
 
 	if err := adp.cacheMetaInfo(L); err != nil {
@@ -142,6 +150,9 @@ func (a *LuaAdapter) BodyLength(headerData []byte) int {
 // Encode 调用 Lua encode(route, body, secret_key) 函数，用于 TCP 包编码。
 func (a *LuaAdapter) Encode(route any, body []byte, secretKey []byte) []byte {
 	L := a.acquire()
+	if L == nil {
+		return nil
+	}
 	defer a.release(L)
 
 	reg := L.Get(lua.RegistryIndex)
@@ -170,8 +181,11 @@ func (a *LuaAdapter) Encode(route any, body []byte, secretKey []byte) []byte {
 }
 
 // Decode 调用 Lua decode(data, secret_key) 函数，返回 responseKey + body + headerErr。
-func (a *LuaAdapter) Decode(data []byte, secretKey []byte) (string, []byte, uint16) {
+func (a *LuaAdapter) Decode(data []byte, secretKey []byte) (string, []byte, uint64) {
 	L := a.acquire()
+	if L == nil {
+		return "", nil, 0
+	}
 	defer a.release(L)
 
 	reg := L.Get(lua.RegistryIndex)
@@ -189,7 +203,7 @@ func (a *LuaAdapter) Decode(data []byte, secretKey []byte) (string, []byte, uint
 		return "", nil, 0
 	}
 
-	headerErr := uint16(lua.LVAsNumber(L.Get(-1)))
+	headerErr := uint64(lua.LVAsNumber(L.Get(-1)))
 	body := []byte(lua.LVAsString(L.Get(-2)))
 	responseKey := lua.LVAsString(L.Get(-3))
 	L.Pop(3)
@@ -199,6 +213,9 @@ func (a *LuaAdapter) Decode(data []byte, secretKey []byte) (string, []byte, uint
 // EncodeUDP 调用 Lua encode_udp(route, body, secret_key) 函数，用于 UDP 包编码。
 func (a *LuaAdapter) EncodeUDP(route any, body []byte, secretKey []byte) []byte {
 	L := a.acquire()
+	if L == nil {
+		return nil
+	}
 	defer a.release(L)
 
 	reg := L.Get(lua.RegistryIndex)
@@ -226,6 +243,9 @@ func (a *LuaAdapter) EncodeUDP(route any, body []byte, secretKey []byte) []byte 
 // ExpectedResponseKey 调用 Lua expected_response_key(route) 函数。
 func (a *LuaAdapter) ExpectedResponseKey(route any) string {
 	L := a.acquire()
+	if L == nil {
+		return ""
+	}
 	defer a.release(L)
 
 	reg := L.Get(lua.RegistryIndex)
@@ -243,8 +263,28 @@ func (a *LuaAdapter) ExpectedResponseKey(route any) string {
 	return key
 }
 
-// acquire 从池中获取 LState（阻塞等待）
-func (a *LuaAdapter) acquire() *lua.LState { return <-a.states }
+// acquire 从池中获取 LState，超时 30 秒后返回错误。
+func (a *LuaAdapter) acquire() *lua.LState {
+	select {
+	case L := <-a.states:
+		return L
+	case <-time.After(30 * time.Second):
+		stresslog.Error("[ADAPTER] acquire LState 超时（池耗尽）")
+		return nil
+	}
+}
 
 // release 将 LState 归还到池中
 func (a *LuaAdapter) release(L *lua.LState) { a.states <- L }
+
+// closeAll 清理池中所有 LState（初始化失败时调用）
+func (a *LuaAdapter) closeAll() {
+	for {
+		select {
+		case L := <-a.states:
+			L.Close()
+		default:
+			return
+		}
+	}
+}

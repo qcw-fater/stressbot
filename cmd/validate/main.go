@@ -35,57 +35,87 @@ func main() {
 		fmt.Printf("解析失败: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("startNode=%s\nnodes=%d\nactions=%d\ncallbacks=%d\n",
-		flow.StartNode, len(flow.Nodes), len(flow.Actions), len(flow.Callbacks))
+	fmt.Printf("defaultDelayMs=%d\nnodes=%d\nactions=%d\ncallbacks=%d\n",
+		flow.DefaultDelayMs, len(flow.Nodes), len(flow.Actions), len(flow.Callbacks))
 
 	issues := 0
 
-	// 1. 起始节点
-	if _, ok := flow.Nodes[flow.StartNode]; !ok {
-		fmt.Printf("[ERROR] 起始节点不存在: %s\n", flow.StartNode)
+	// 1. main 入口节点
+	if _, ok := flow.Nodes["main"]; !ok {
+		fmt.Printf("[ERROR] 入口节点不存在: main\n")
 		issues++
 	}
 
 	// 2. 逐节点校验
+	validTypes := map[string]bool{
+		"sequence": true, "action": true, "loop": true, "boolean": true,
+		"weighted": true, "wait": true, "break": true, "continue": true,
+	}
+
 	for id, n := range flow.Nodes {
 		// 未知类型
-		validTypes := map[string]bool{"start": true, "sequence": true, "action": true, "loop": true, "boolean": true, "weighted": true, "wait": true}
 		if !validTypes[n.Type] {
 			fmt.Printf("[ERROR] 未知节点类型: %s type=%s\n", id, n.Type)
 			issues++
 		}
 
-		// next 引用
-		for _, nn := range n.Next {
-			if _, ok := flow.Nodes[nn.Node]; !ok {
-				fmt.Printf("[ERROR] 缺失节点引用: %s -> %s\n", id, nn.Node)
-				issues++
+		// sequence: next 引用
+		if n.Type == "sequence" {
+			for _, childID := range n.Next {
+				if _, ok := flow.Nodes[childID]; !ok {
+					fmt.Printf("[ERROR] 缺失节点引用: %s -> %s\n", id, childID)
+					issues++
+				}
+			}
+			if len(n.Next) == 0 {
+				fmt.Printf("[WARN] sequence 节点无子节点: %s\n", id)
 			}
 		}
 
-		// boolean 分支
-		if n.TrueNext != "" {
-			if _, ok := flow.Nodes[n.TrueNext]; !ok {
-				fmt.Printf("[ERROR] 缺失 trueNext: %s -> %s\n", id, n.TrueNext)
+		// loop: body 引用
+		if n.Type == "loop" {
+			if n.Body == "" {
+				fmt.Printf("[ERROR] loop 节点缺少 body: %s\n", id)
+				issues++
+			} else if _, ok := flow.Nodes[n.Body]; !ok {
+				fmt.Printf("[ERROR] 缺失 body 引用: %s -> %s\n", id, n.Body)
 				issues++
 			}
+			if n.LoopCount == 0 {
+				fmt.Printf("[WARN] loop 节点 loopCount=0 将不执行: %s\n", id)
+			}
+			// condition / breakCondition 中的 lua 脚本
+			checkLuaCondition(id, "condition", n.Condition, scriptDir, &issues)
+			checkLuaCondition(id, "breakCondition", n.BreakCondition, scriptDir, &issues)
 		}
-		if n.FalseNext != "" {
-			if _, ok := flow.Nodes[n.FalseNext]; !ok {
-				fmt.Printf("[ERROR] 缺失 falseNext: %s -> %s\n", id, n.FalseNext)
-				issues++
+
+		// boolean: condition + trueNext/falseNext
+		if n.Type == "boolean" {
+			if n.Condition == "" {
+				fmt.Printf("[WARN] boolean 节点缺少 condition: %s\n", id)
+			}
+			checkLuaCondition(id, "condition", n.Condition, scriptDir, &issues)
+			if n.TrueNext != "" {
+				if _, ok := flow.Nodes[n.TrueNext]; !ok {
+					fmt.Printf("[ERROR] 缺失 trueNext: %s -> %s\n", id, n.TrueNext)
+					issues++
+				}
+			}
+			if n.FalseNext != "" {
+				if _, ok := flow.Nodes[n.FalseNext]; !ok {
+					fmt.Printf("[ERROR] 缺失 falseNext: %s -> %s\n", id, n.FalseNext)
+					issues++
+				}
 			}
 		}
 
-		// action 引用
+		// action: action 引用 + listenCallbacks
 		if n.Type == "action" && n.Action != "" {
 			if _, ok := flow.Actions[n.Action]; !ok {
 				fmt.Printf("[ERROR] 缺失 action: %s -> %s\n", id, n.Action)
 				issues++
 			}
 		}
-
-		// listenCallbacks 引用
 		for _, lc := range n.ListenCallbacks {
 			if lc.Callback == "" {
 				continue
@@ -96,38 +126,27 @@ func main() {
 			}
 		}
 
-		// weighted 节点权重校验
+		// weighted: options
 		if n.Type == "weighted" {
-			if len(n.Next) == 0 {
-				fmt.Printf("[WARN] weighted 节点无子节点: %s\n", id)
+			if len(n.Options) == 0 {
+				fmt.Printf("[WARN] weighted 节点无选项: %s\n", id)
 			}
 			totalWeight := 0
-			for _, nn := range n.Next {
-				totalWeight += nn.Weight
+			for _, opt := range n.Options {
+				totalWeight += opt.Weight
+				if _, ok := flow.Nodes[opt.Node]; !ok {
+					fmt.Printf("[ERROR] 缺失 weighted 选项节点: %s -> %s\n", id, opt.Node)
+					issues++
+				}
 			}
-			if totalWeight == 0 && len(n.Next) > 0 {
+			if totalWeight == 0 && len(n.Options) > 0 {
 				fmt.Printf("[WARN] weighted 节点所有权重为 0: %s\n", id)
 			}
 		}
 
-		// loop 节点校验
-		if n.Type == "loop" {
-			if n.LoopCount == 0 {
-				fmt.Printf("[WARN] loop 节点 loopCount=0 将不执行: %s\n", id)
-			}
-			if len(n.Next) == 0 {
-				fmt.Printf("[WARN] loop 节点无子节点: %s\n", id)
-			}
-		}
-
-		// wait 节点校验
-		if n.Type == "wait" && n.WaitSeconds <= 0 {
-			fmt.Printf("[WARN] wait 节点等待时间无效: %s waitSeconds=%.1f\n", id, n.WaitSeconds)
-		}
-
-		// boolean 节点条件校验
-		if n.Type == "boolean" && n.Condition == "" && n.Action == "" {
-			fmt.Printf("[WARN] boolean 节点缺少 condition: %s\n", id)
+		// wait: waitMs
+		if n.Type == "wait" && n.WaitMs <= 0 {
+			fmt.Printf("[WARN] wait 节点等待时间无效: %s waitMs=%d\n", id, n.WaitMs)
 		}
 	}
 
@@ -153,23 +172,7 @@ func main() {
 		}
 	}
 
-	// 5. boolean 条件中的 Lua 脚本存在性
-	for id, n := range flow.Nodes {
-		cond := n.Condition
-		if cond == "" && n.Type == "boolean" {
-			cond = n.Action
-		}
-		if strings.HasPrefix(cond, "lua:") {
-			scriptName := cond[4:]
-			scriptPath := filepath.Join(scriptDir, scriptName)
-			if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
-				fmt.Printf("[ERROR] 条件脚本不存在: node=%s script=%s\n", id, scriptPath)
-				issues++
-			}
-		}
-	}
-
-	// 6. 孤立节点检测
+	// 5. 孤立节点检测
 	reachable := make(map[string]bool)
 	var visit func(string)
 	visit = func(nodeID string) {
@@ -181,8 +184,11 @@ func main() {
 		if !ok {
 			return
 		}
-		for _, nn := range n.Next {
-			visit(nn.Node)
+		for _, childID := range n.Next {
+			visit(childID)
+		}
+		if n.Body != "" {
+			visit(n.Body)
 		}
 		if n.TrueNext != "" {
 			visit(n.TrueNext)
@@ -190,15 +196,18 @@ func main() {
 		if n.FalseNext != "" {
 			visit(n.FalseNext)
 		}
+		for _, opt := range n.Options {
+			visit(opt.Node)
+		}
 	}
-	visit(flow.StartNode)
+	visit("main")
 	for id := range flow.Nodes {
 		if !reachable[id] {
 			fmt.Printf("[WARN] 孤立节点（不可达）: %s type=%s\n", id, flow.Nodes[id].Type)
 		}
 	}
 
-	// 7. 未使用的 action/callback
+	// 6. 未使用的 action/callback
 	usedActions := make(map[string]bool)
 	usedCallbacks := make(map[string]bool)
 	for _, n := range flow.Nodes {
@@ -227,5 +236,16 @@ func main() {
 	} else {
 		fmt.Printf("validate FAILED: %d error(s)\n", issues)
 		os.Exit(1)
+	}
+}
+
+func checkLuaCondition(nodeID, field, value, scriptDir string, issues *int) {
+	if strings.HasPrefix(value, "lua:") {
+		scriptName := value[4:]
+		scriptPath := filepath.Join(scriptDir, scriptName)
+		if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
+			fmt.Printf("[ERROR] 条件脚本不存在: node=%s %s=%s\n", nodeID, field, scriptPath)
+			*issues++
+		}
 	}
 }

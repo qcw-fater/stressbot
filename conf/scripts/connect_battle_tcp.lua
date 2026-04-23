@@ -2,6 +2,7 @@
 local network = require("network")
 local robot = require("robot")
 local utils = require("utils")
+local log = require("log")
 
 -- 构造 Battle TCP 心跳 body（19 字节）：
 --   PacketIndex u16 | BattleId i64 | FighterIndex u8 | Session i64
@@ -24,27 +25,27 @@ end
 function execute(r)
     local battleAddress = robot.get("battleAddress")
     if not battleAddress or battleAddress == "" then
-        utils.log_error("ConnectBattleTCP: 无战斗服地址")
+        log.error("ConnectBattleTCP: 无战斗服地址")
         return 1
     end
 
-    utils.log_info("连接战斗服 TCP: " .. battleAddress)
+    log.info("连接战斗服 TCP: " .. battleAddress)
 
     local ok = network.connect_tcp("battle", battleAddress)
     if not ok then
-        utils.log_error("连接战斗服 TCP 失败: " .. battleAddress)
+        log.error("连接战斗服 TCP 失败: " .. battleAddress)
         return 1
     end
 
     ok = network.exchange_key("battle")
     if not ok then
-        utils.log_error("战斗服密钥交换失败")
+        log.error("战斗服密钥交换失败")
         return 1
     end
 
     -- 注册 10 秒心跳（Battle: cmd=4 BATTLE, act=2 PING_CS）
     network.register_heartbeat("tcp", "battle", 10000, {cmd=4, act=2}, build_battle_tcp_heart)
 
-    utils.log_info("战斗服 TCP 连接成功 心跳已注册(10s)")
+    log.info("战斗服 TCP 连接成功 心跳已注册(10s)")
     return 0
 end

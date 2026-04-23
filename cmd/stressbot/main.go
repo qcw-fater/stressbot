@@ -37,12 +37,11 @@ type Config struct {
 	} `json:"auth"`
 
 	Network struct {
-		TCPTimeout          string   `json:"tcpTimeout"`
-		HeartbeatInterval   string   `json:"heartbeatInterval"`
-		UDPServices         []string `json:"udpServices"`
-		DefaultListenServer string   `json:"defaultListenServer"`
-		DefaultUDPService   string   `json:"defaultUDPService"`
-		AdapterPoolSize     int      `json:"adapterPoolSize"`
+		TCPTimeout        string   `json:"tcpTimeout"`
+		HeartbeatInterval string   `json:"heartbeatInterval"`
+		UDPServices       []string `json:"udpServices"`
+		MainService       string   `json:"mainService"`
+		AdapterPoolSize   int      `json:"adapterPoolSize"`
 	} `json:"network"`
 
 	Proto struct {
@@ -94,7 +93,7 @@ func main() {
 	}
 
 	stresslog.Info("[MAIN] 流程配置已加载",
-		zap.String("startNode", flow.StartNode), zap.Int("actions", len(flow.Actions)), zap.Int("callbacks", len(flow.Callbacks)))
+		zap.Int("nodes", len(flow.Nodes)), zap.Int("actions", len(flow.Actions)), zap.Int("callbacks", len(flow.Callbacks)))
 
 	// 解析心跳间隔
 	heartbeatInterval := 5 * time.Second
@@ -132,17 +131,16 @@ func main() {
 	}
 
 	mgrCfg := robot.ManagerConfig{
-		AccountPrefix:       cfg.Bot.AccountPrefix,
-		StartNumber:         cfg.Bot.StartNumber,
-		Count:               cfg.Bot.Count,
-		ConcurrentNum:       cfg.Bot.ConcurrentNum,
-		AuthBaseURL:         cfg.Auth.Address,
-		AuthExtra:           cfg.Auth.Extra,
-		Adapter:             adp,
-		RequestTimeout:      tcpTimeout,
-		UDPServices:         cfg.Network.UDPServices,
-		DefaultListenServer: cfg.Network.DefaultListenServer,
-		DefaultUDPService:   cfg.Network.DefaultUDPService,
+		AccountPrefix:  cfg.Bot.AccountPrefix,
+		StartNumber:    cfg.Bot.StartNumber,
+		Count:          cfg.Bot.Count,
+		ConcurrentNum:  cfg.Bot.ConcurrentNum,
+		AuthBaseURL:    cfg.Auth.Address,
+		AuthExtra:      cfg.Auth.Extra,
+		Adapter:        adp,
+		RequestTimeout: tcpTimeout,
+		UDPServices:    cfg.Network.UDPServices,
+		MainService:    cfg.Network.MainService,
 	}
 
 	mgr := robot.NewManager(mgrCfg, flow, factory, dialer, luaPool)
@@ -193,13 +191,10 @@ func loadConfig(path string) (*Config, error) {
 		cfg.Script.Dirs = []string{"conf/scripts"}
 	}
 	if len(cfg.Network.UDPServices) == 0 {
-		cfg.Network.UDPServices = []string{"udp", "battleUDP", "battle_udp", "battleudp"}
+		cfg.Network.UDPServices = []string{"udp"}
 	}
-	if cfg.Network.DefaultListenServer == "" {
-		cfg.Network.DefaultListenServer = "logic"
-	}
-	if cfg.Network.DefaultUDPService == "" && len(cfg.Network.UDPServices) > 0 {
-		cfg.Network.DefaultUDPService = cfg.Network.UDPServices[0]
+	if cfg.Network.MainService == "" {
+		cfg.Network.MainService = "logic"
 	}
 
 	return cfg, nil

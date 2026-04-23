@@ -5,6 +5,7 @@ local network = require("network")
 local robot = require("robot")
 local proto = require("proto")
 local utils = require("utils")
+local log = require("log")
 
 function execute(r)
     local fighterIndex = robot.get("fighterIndex")
@@ -12,7 +13,7 @@ function execute(r)
     local battleSession = robot.get("battleSession") or 0
 
     if not fighterIndex then
-        utils.log_error("RegisterBattle: 缺少 fighterIndex")
+        log.error("RegisterBattle: 缺少 fighterIndex")
         return 1
     end
 
@@ -26,18 +27,18 @@ function execute(r)
 
         local code, resp = network.request("battle", {cmd=4, act=1}, msg, "Game.BattleRegisterS2C")
         if code == 0 then
-            utils.log_info("RegisterBattle 成功: index=" .. tostring(fighterIndex)
+            log.info("RegisterBattle 成功: index=" .. tostring(fighterIndex)
                 .. " battleId=" .. tostring(battleId))
             return 0
         end
 
-        utils.log_info("RegisterBattle 第 " .. attempt .. " 次尝试失败: code=" .. tostring(code))
+        log.info("RegisterBattle 第 " .. attempt .. " 次尝试失败: code=" .. tostring(code))
         if attempt < maxRetry then
-            utils.log_info("等待 2 秒后重试...")
+            log.info("等待 2 秒后重试...")
             utils.sleep(2000)
         end
     end
 
-    utils.log_error("RegisterBattle 最终失败: 已重试 " .. maxRetry .. " 次")
+    log.error("RegisterBattle 最终失败: 已重试 " .. maxRetry .. " 次")
     return 1
 end

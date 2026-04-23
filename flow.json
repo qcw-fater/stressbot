@@ -405,7 +405,7 @@
     {
       "id": "syncLoop",
       "type": "loop",
-      "loopCount": 100,
+      "loopCount": 30,
       "next": [
         {
           "node": "SyncFrameData"

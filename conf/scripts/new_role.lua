@@ -4,7 +4,7 @@
 local network = require("network")
 local robot = require("robot")
 local json = require("json")
-local utils = require("utils")
+local log = require("log")
 
 function execute(r)
     local account = robot.get("account")
@@ -26,18 +26,18 @@ function execute(r)
     })
 
     if code < 0 then
-        utils.log_error("NewRole HTTP 请求失败: code=" .. tostring(code))
+        log.error("NewRole HTTP 请求失败: code=" .. tostring(code))
         return 1
     end
 
     local ok, resp = pcall(json.decode, body)
     if not ok or not resp then
-        utils.log_error("NewRole JSON 解析失败")
+        log.error("NewRole JSON 解析失败")
         return 1
     end
 
     if resp.error and resp.error ~= 0 then
-        utils.log_error("NewRole 失败: error=" .. tostring(resp.error))
+        log.error("NewRole 失败: error=" .. tostring(resp.error))
         return 1
     end
 
@@ -50,13 +50,13 @@ function execute(r)
             local roles = robot.get("roles") or {}
             table.insert(roles, resp.role)
             robot.set("roles", roles)
-            utils.log_info("NewRole 成功: playerId=" .. tostring(playerId))
+            log.info("NewRole 成功: playerId=" .. tostring(playerId))
         else
-            utils.log_error("NewRole 响应中缺少 playerId")
+            log.error("NewRole 响应中缺少 playerId")
             return 1
         end
     else
-        utils.log_error("NewRole 响应缺少 role 字段")
+        log.error("NewRole 响应缺少 role 字段")
         return 1
     end
 

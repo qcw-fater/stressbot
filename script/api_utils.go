@@ -46,8 +46,6 @@ func loadUtilsModule(L *lua.LState) int {
 	L.SetField(mod, "random_pick_n", L.NewFunction(utilsRandomPickN))
 	L.SetField(mod, "sleep", L.NewFunction(utilsSleep))
 	L.SetField(mod, "time_ms", L.NewFunction(utilsTimeMs))
-	L.SetField(mod, "log_info", L.NewFunction(logInfo))
-	L.SetField(mod, "log_error", L.NewFunction(logError))
 	L.SetField(mod, "fnv_hash", L.NewFunction(utilsFnvHash))
 	L.SetField(mod, "pack_le", L.NewFunction(utilsPackLE))
 	L.SetField(mod, "weighted_pick", L.NewFunction(utilsWeightedPick))
