@@ -1,4 +1,4 @@
-package engine
+﻿package engine
 
 import (
 	"bytes"
@@ -18,7 +18,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// ErrActionSkip 动作跳过信号。
+// ErrActionSkip 动作跳过信号：必填字段为空时触发。
 var ErrActionSkip = errors.New("action skipped: required field is nil")
 
 // ActionExecutor 声明式动作执行器。
@@ -34,18 +34,21 @@ type NetSender interface {
 	TCPSend(service string, packet []byte) (bool, int)
 	TCPRequest(service string, packet []byte, responseKey string) ([]byte, bool)
 	HTTPPost(path string, formData map[string]string) (statusCode int, body []byte, err error)
-	UDPSend(service string, data []byte) bool
+	UDPSend(service string, data []byte) (bool, int)
 	ConnectTCP(service, address string) bool
 	ConnectUDP(service, address string) bool
 	CloseTCP(service string)
 	CloseUDP(service string)
-	GetListenResp(service string, responseKey string) []byte
-	GetSecretKey(service string) []byte
-	SetSecretKey(service string, key []byte)
+	GetTCPListenResp(service string, responseKey string) []byte
+	GetUDPListenResp(service string, responseKey string) []byte
+	GetTCPSecretKey(service string) []byte
+	SetTCPSecretKey(service string, key []byte)
 	SetUDPSecretKey(service string, key []byte)
 	GetUDPSecretKey(service string) []byte
-	EnsureListener(service string, responseKey string)
-	RegisterHeartbeat(target, service string, intervalMs int, builder func() []byte)
+	EnsureTCPListener(service string, responseKey string)
+	EnsureUDPListener(service string, responseKey string)
+	RegisterTCPHeartbeat(service string, intervalMs int, builder func() []byte)
+	RegisterUDPHeartbeat(service string, intervalMs int, builder func() []byte)
 }
 
 // NewActionExecutor 创建声明式动作执行器
@@ -62,32 +65,26 @@ func NewActionExecutor(store *state.Store, sender NetSender, factory *protox.Fac
 func (ae *ActionExecutor) Execute(def *ActionDef) error {
 	var err error
 	switch def.Pattern {
-	case "tcpSend":
+	case PatternTCPSend:
 		err = ae.execTCPSend(def)
-	case "tcpRequest":
+	case PatternTCPRequest:
 		err = ae.execTCPRequest(def)
-	case "httpPost":
-		err = ae.execHTTPPost(def)
-	case "connect":
+	case PatternConnect:
 		err = ae.execConnect(def)
-	case "connectUDP":
+	case PatternConnectUDP:
 		err = ae.execConnectUDP(def)
-	case "waitListen":
+	case PatternWaitListen:
 		err = ae.execWaitListen(def)
-	case "exchangeKey":
+	case PatternExchangeKey:
 		err = ae.execExchangeKey(def)
-	case "close":
+	case PatternClose:
 		err = ae.execClose(def)
-	case "clearState":
+	case PatternClearState:
 		err = ae.execClearState(def)
-	case "udpSendProto":
+	case PatternUDPSendProto:
 		err = ae.execUDPSendProto(def)
-	case "udpSendRaw":
-		err = ae.execUDPSendRaw(def)
-	case "setState":
+	case PatternSetState:
 		err = ae.execSetState(def)
-	case "registerHeartbeat":
-		err = ae.execRegisterHeartbeat(def)
 	default:
 		return fmt.Errorf("未知的动作模式: %s", def.Pattern)
 	}
@@ -125,8 +122,16 @@ func (ae *ActionExecutor) bindFields(msg proto.Message, bindings []FieldBind) er
 		fb := &bindings[i]
 		value := ae.resolveFieldValue(fb)
 
-		if value == nil && fb.isRequired() {
-			return ErrActionSkip
+		if value == nil {
+			if fb.Required {
+				return fmt.Errorf("必需字段 %q 为空 (type=%s, source=%s)", fb.Field, fb.Type, fb.Source)
+			}
+			if !fb.Optional && isImplicitRequired(fb.Type) {
+				stresslog.Warn("[ACTION] 跳过动作: 必需字段为空",
+					zap.String("field", fb.Field), zap.String("type", fb.Type),
+					zap.String("source", fb.Source))
+				return ErrActionSkip
+			}
 		}
 
 		if fb.StoreAs != "" && value != nil {
@@ -288,7 +293,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		}
 		filtered := make([]any, 0, len(pool))
 		for _, it := range pool {
-			if !deepEqual(it, exclude) {
+			if !state.DeepEqual(it, exclude) {
 				filtered = append(filtered, it)
 			}
 		}
@@ -307,74 +312,74 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 	case "randomBool":
 		return rand.Intn(2) == 1
 
-			case "randomString":
-			length := fb.Length
-			if length <= 0 {
-				length = 8
-			}
-			charset := fb.Charset
-			if charset == "" {
-				charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-			}
-			return randomStringCharset(length, charset)
+	case "randomString":
+		length := fb.Length
+		if length <= 0 {
+			length = 8
+		}
+		charset := fb.Charset
+		if charset == "" {
+			charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+		}
+		return randomStringCharset(length, charset)
 
-		case "listSize":
-			return len(ae.store.GetList(fb.Source))
+	case "listSize":
+		return len(ae.store.GetList(fb.Source))
 
-		case "nested":
-			if fb.Message == "" {
-				return nil
+	case "nested":
+		if fb.Message == "" {
+			return nil
+		}
+		subMsg, err := ae.factory.Create(fb.Message)
+		if err != nil {
+			stresslog.Error("[ACTION] nested", zap.String("message", fb.Message), zap.Error(err))
+			return nil
+		}
+		if err := ae.bindFields(subMsg, fb.Bindings); err != nil {
+			stresslog.Error("[ACTION] nested bind", zap.String("message", fb.Message), zap.Error(err))
+			return nil
+		}
+		if fb.Wrap {
+			return []any{subMsg}
+		}
+		return subMsg
+
+	case "nestedList":
+		if len(fb.Items) == 0 {
+			return nil
+		}
+		result := make([]any, 0, len(fb.Items))
+		for _, item := range fb.Items {
+			if item.Message == "" {
+				continue
 			}
-			subMsg, err := ae.factory.Create(fb.Message)
+			subMsg, err := ae.factory.Create(item.Message)
 			if err != nil {
-				stresslog.Error("[ACTION] nested", zap.String("message", fb.Message), zap.Error(err))
-				return nil
+				stresslog.Error("[ACTION] nestedList", zap.String("message", item.Message), zap.Error(err))
+				continue
 			}
-			if err := ae.bindFields(subMsg, fb.Bindings); err != nil {
-				stresslog.Error("[ACTION] nested bind", zap.String("message", fb.Message), zap.Error(err))
-				return nil
+			if err := ae.bindFields(subMsg, item.Bindings); err != nil {
+				stresslog.Error("[ACTION] nestedList bind", zap.String("message", item.Message), zap.Error(err))
+				continue
 			}
-			if fb.Wrap {
-				return []any{subMsg}
-			}
-			return subMsg
-
-		case "nestedList":
-			if len(fb.Items) == 0 {
-				return nil
-			}
-			result := make([]any, 0, len(fb.Items))
-			for _, item := range fb.Items {
-				if item.Message == "" {
-					continue
-				}
-				subMsg, err := ae.factory.Create(item.Message)
-				if err != nil {
-					stresslog.Error("[ACTION] nestedList", zap.String("message", item.Message), zap.Error(err))
-					continue
-				}
-				if err := ae.bindFields(subMsg, item.Bindings); err != nil {
-					stresslog.Error("[ACTION] nestedList bind", zap.String("message", item.Message), zap.Error(err))
-					continue
-				}
-				result = append(result, subMsg)
-			}
-			return result
-
-		default:
-			return fb.Value
+			result = append(result, subMsg)
 		}
+		return result
 
-		if fb.Path != "" && val != nil {
-			val = navigatePath(val, fb.Path)
-		}
-
-		if fb.Wrap && val != nil {
-			return []any{val}
-		}
-
-		return val
+	default:
+		return fb.Value
 	}
+
+	if fb.Path != "" && val != nil {
+		val = navigatePath(val, fb.Path)
+	}
+
+	if fb.Wrap && val != nil {
+		return []any{val}
+	}
+
+	return val
+}
 
 // navigatePath 按点分路径从嵌套 map/list 中提取值。
 // 支持用 | 分隔多条候选路径，按顺序尝试，返回第一个非 nil 的值。
@@ -391,6 +396,7 @@ func navigatePath(v any, path string) any {
 	return navigateSinglePath(v, path)
 }
 
+// navigateSinglePath 从嵌套结构中按单段路径提取值。
 func navigateSinglePath(v any, path string) any {
 	current := v
 	for _, key := range state.SplitPath(path) {
@@ -401,8 +407,9 @@ func navigateSinglePath(v any, path string) any {
 		case map[string]any:
 			current = c[key]
 		case []any:
+			idxStr := strings.Trim(key, "[]")
 			var idx int
-			_, err := fmt.Sscanf(key, "%d", &idx)
+			_, err := fmt.Sscanf(idxStr, "%d", &idx)
 			if err != nil || idx < 0 || idx >= len(c) {
 				return nil
 			}
@@ -428,16 +435,15 @@ func (ae *ActionExecutor) execTCPSend(def *ActionDef) error {
 	body, err := ae.buildBody(def)
 	if err != nil {
 		if errors.Is(err, ErrActionSkip) {
-			stresslog.Debug("[ACTION] 跳过动作: 必需字段为空", zap.String("proto", def.C2SProto))
 			return nil
 		}
 		return err
 	}
 
-	secretKey := ae.netSender.GetSecretKey(def.Service)
-	packet := ae.adp.Encode(def.Route, body, secretKey)
+	secretKey := ae.netSender.GetTCPSecretKey(def.Service)
+	packet := ae.adp.EncodeTCP(def.Route, body, secretKey)
 	if packet == nil {
-		return fmt.Errorf("adapter.Encode 返回 nil，检查 codec.lua")
+		return fmt.Errorf("adapter.EncodeTCP 返回 nil，检查 codec.lua")
 	}
 
 	routeKey := ae.adp.ExpectedResponseKey(def.Route)
@@ -461,7 +467,6 @@ func (ae *ActionExecutor) execTCPRequest(def *ActionDef) error {
 	body, err := ae.buildBody(def)
 	if err != nil {
 		if errors.Is(err, ErrActionSkip) {
-			stresslog.Debug("[ACTION] 跳过动作: 必需字段为空", zap.String("proto", def.C2SProto))
 			return nil
 		}
 		return err
@@ -473,10 +478,10 @@ func (ae *ActionExecutor) execTCPRequest(def *ActionDef) error {
 		zap.String("c2sProto", def.C2SProto), zap.String("s2cProto", def.S2CProto),
 		zap.Int("bodyLen", len(body)))
 
-	secretKey := ae.netSender.GetSecretKey(def.Service)
-	packet := ae.adp.Encode(def.Route, body, secretKey)
+	secretKey := ae.netSender.GetTCPSecretKey(def.Service)
+	packet := ae.adp.EncodeTCP(def.Route, body, secretKey)
 	if packet == nil {
-		return fmt.Errorf("adapter.Encode 返回 nil，检查 codec.lua")
+		return fmt.Errorf("adapter.EncodeTCP 返回 nil，检查 codec.lua")
 	}
 
 	start := time.Now()
@@ -502,51 +507,6 @@ func (ae *ActionExecutor) execTCPRequest(def *ActionDef) error {
 		zap.String("service", def.Service), zap.String("route", routeKey),
 		zap.String("respKey", respKey), zap.String("s2cProto", def.S2CProto),
 		zap.Int("respBodyLen", len(respBody)), zap.Duration("elapsed", elapsed))
-	return nil
-}
-
-// execHTTPPost HTTP POST 请求
-func (ae *ActionExecutor) execHTTPPost(def *ActionDef) error {
-	formData := make(map[string]string)
-	for _, fb := range def.FormFields {
-		val := ae.resolveFieldValue(&fb)
-		if val == nil && fb.isRequired() {
-			stresslog.Debug("[ACTION] 跳过 HTTPPost: 必需字段为空", zap.String("path", def.Path), zap.String("field", fb.Field))
-			return nil
-		}
-		if val == nil {
-			continue
-		}
-		formData[fb.Field] = fmt.Sprintf("%v", val)
-	}
-
-	statusCode, body, err := ae.netSender.HTTPPost(def.Path, formData)
-	if err != nil {
-		if def.Optional {
-			stresslog.Debug("[ACTION] 可选 HTTPPost 失败（已忽略）", zap.Error(err))
-			return nil
-		}
-		return fmt.Errorf("HTTP POST 失败 path=%s: %w", def.Path, err)
-	}
-
-	if statusCode >= 400 {
-		if def.Optional {
-			stresslog.Debug("[ACTION] 可选 HTTPPost 状态码（已忽略）", zap.Int("statusCode", statusCode))
-			return nil
-		}
-		return fmt.Errorf("HTTP POST 返回错误状态码: %d path=%s", statusCode, def.Path)
-	}
-
-	if def.S2CProto != "" && len(body) > 0 && len(def.Store) > 0 {
-		respMsg, err := ae.factory.Parse(def.S2CProto, body)
-		if err != nil {
-			return fmt.Errorf("解析 HTTP 响应 %s 失败: %w", def.S2CProto, err)
-		}
-		fieldMap := ae.factory.GetFieldMap(respMsg)
-		ae.storeResponse(def.Store, fieldMap)
-	}
-
-	stresslog.Debug("[ACTION] HTTPPost 成功", zap.String("path", def.Path), zap.Int("status", statusCode))
 	return nil
 }
 
@@ -584,9 +544,9 @@ func (ae *ActionExecutor) execExchangeKey(def *ActionDef) error {
 	stresslog.Debug("[ACTION] ExchangeKey 发送",
 		zap.String("service", def.Service), zap.String("route", routeKey))
 
-	packet := ae.adp.Encode(def.Route, nil, nil)
+	packet := ae.adp.EncodeTCP(def.Route, nil, nil)
 	if packet == nil {
-		return fmt.Errorf("adapter.Encode 返回 nil，检查 codec.lua")
+		return fmt.Errorf("adapter.EncodeTCP 返回 nil，检查 codec.lua")
 	}
 
 	start := time.Now()
@@ -597,7 +557,7 @@ func (ae *ActionExecutor) execExchangeKey(def *ActionDef) error {
 		return fmt.Errorf("交换密钥失败: service=%s route=%s respKey=%s elapsed=%v",
 			def.Service, routeKey, respKey, elapsed)
 	}
-	ae.netSender.SetSecretKey(def.Service, respBody)
+	ae.netSender.SetTCPSecretKey(def.Service, respBody)
 	if def.SecretArg != "" {
 		ae.store.Set(def.SecretArg, respBody)
 	}
@@ -616,10 +576,10 @@ func (ae *ActionExecutor) execClose(def *ActionDef) error {
 	switch target {
 	case "udp":
 		ae.netSender.CloseUDP(def.Service)
-		stresslog.Debug("[ACTION] Close UDP 成功")
+		stresslog.Debug("[ACTION] CloseTCP UDP 成功")
 	case "tcp":
 		ae.netSender.CloseTCP(def.Service)
-		stresslog.Debug("[ACTION] Close TCP 成功", zap.String("service", def.Service))
+		stresslog.Debug("[ACTION] CloseTCP TCP 成功", zap.String("service", def.Service))
 	default:
 		return fmt.Errorf("未知的关闭目标: %s", target)
 	}
@@ -660,84 +620,13 @@ func (ae *ActionExecutor) execUDPSendProto(def *ActionDef) error {
 	if packet == nil {
 		return fmt.Errorf("adapter.EncodeUDP 返回 nil，检查 codec.lua")
 	}
-	if !ae.netSender.UDPSend(def.Service, packet) {
+	ok, n := ae.netSender.UDPSend(def.Service, packet)
+	if !ok {
 		return fmt.Errorf("UDP 发送失败: route=%s", routeKey)
 	}
 	stresslog.Debug("[ACTION] UDPSendProto",
 		zap.String("route", routeKey), zap.String("c2sProto", def.C2SProto),
-		zap.Int("bodyLen", len(body)), zap.Int("pktLen", len(packet)))
-	return nil
-}
-
-// execUDPSendRaw UDP 发送自定义二进制
-func (ae *ActionExecutor) execUDPSendRaw(def *ActionDef) error {
-	body, err := ae.buildRawBody(def.RawBody)
-	if err != nil {
-		return fmt.Errorf("构建 UDPRaw body 失败: %w", err)
-	}
-	routeKey := ae.adp.ExpectedResponseKey(def.Route)
-	udpKey := ae.netSender.GetUDPSecretKey(def.Service)
-	packet := ae.adp.EncodeUDP(def.Route, body, udpKey)
-	if packet == nil {
-		return fmt.Errorf("adapter.EncodeUDP 返回 nil，检查 codec.lua")
-	}
-	if !ae.netSender.UDPSend(def.Service, packet) {
-		return fmt.Errorf("UDP 发送失败: route=%s", routeKey)
-	}
-	stresslog.Debug("[ACTION] UDPSendRaw",
-		zap.String("route", routeKey),
-		zap.Int("bodyLen", len(body)), zap.Int("pktLen", len(packet)))
-	return nil
-}
-
-// execRegisterHeartbeat 注册连接心跳。
-func (ae *ActionExecutor) execRegisterHeartbeat(def *ActionDef) error {
-	interval := def.IntervalMs
-	if interval <= 0 {
-		return fmt.Errorf("registerHeartbeat intervalMs 必须 > 0")
-	}
-	target := def.Target
-	if target == "" {
-		target = "tcp"
-	}
-
-	route := def.Route
-	rawBody := def.RawBody
-	c2sProto := def.C2SProto
-	bindings := def.Bindings
-
-	builder := func() []byte {
-		var body []byte
-		var err error
-		if len(rawBody) > 0 {
-			body, err = ae.buildRawBody(rawBody)
-			if err != nil {
-				return nil
-			}
-		} else if c2sProto != "" {
-			msg, err := ae.factory.Create(c2sProto)
-			if err != nil {
-				return nil
-			}
-			if err := ae.bindFields(msg, bindings); err != nil {
-				return nil
-			}
-			body, err = ae.factory.Serialize(msg)
-			if err != nil {
-				return nil
-			}
-		}
-		if target == "udp" {
-			udpKey := ae.netSender.GetUDPSecretKey(def.Service)
-			return ae.adp.EncodeUDP(route, body, udpKey)
-		}
-		secretKey := ae.netSender.GetSecretKey(def.Service)
-		return ae.adp.Encode(route, body, secretKey)
-	}
-
-	ae.netSender.RegisterHeartbeat(target, def.Service, interval, builder)
-	stresslog.Debug("[ACTION] RegisterHeartbeat",
-		zap.String("target", target), zap.String("service", def.Service), zap.Int("intervalMs", interval))
+		zap.Int("bodyLen", len(body)), zap.Int("pktLen", n))
 	return nil
 }
 
@@ -765,6 +654,7 @@ func (ae *ActionExecutor) buildRawBody(fields []RawField) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// writeRawField 写入原始二进制字段到 buffer。
 func (ae *ActionExecutor) writeRawField(buf *bytes.Buffer, f *RawField) error {
 	var val any
 	switch {
@@ -843,6 +733,14 @@ func (ae *ActionExecutor) parseAndStoreResponse(def *ActionDef, respBody []byte)
 
 // storeResponse 将响应字段存储到 StateStore
 func (ae *ActionExecutor) storeResponse(mappings []StoreMapping, fieldMap map[string]any) {
+	keys := make([]string, 0, len(fieldMap))
+	for k := range fieldMap {
+		keys = append(keys, k)
+	}
+	stresslog.Debug("[ACTION] storeResponse 字段映射",
+		zap.Strings("availableKeys", keys),
+		zap.Int("mappingCount", len(mappings)))
+
 	for _, m := range mappings {
 		if m.Field == "" {
 			if m.Path != "" {
@@ -851,13 +749,33 @@ func (ae *ActionExecutor) storeResponse(mappings []StoreMapping, fieldMap map[st
 			} else {
 				ae.store.Set(m.Setter, fieldMap)
 			}
-		} else if val, ok := fieldMap[m.Field]; ok {
-			if m.Path != "" && val != nil {
+		} else if val := lookupFieldMap(fieldMap, m.Field); val != nil {
+			if m.Path != "" {
 				val = navigatePath(val, m.Path)
 			}
 			ae.store.Set(m.Setter, val)
+			stresslog.Debug("[ACTION] storeResponse 存储",
+				zap.String("field", m.Field), zap.String("setter", m.Setter),
+				zap.String("type", fmt.Sprintf("%T", val)))
+		} else {
+			stresslog.Debug("[ACTION] storeResponse 字段未找到",
+				zap.String("field", m.Field), zap.String("setter", m.Setter))
 		}
 	}
+}
+
+// lookupFieldMap 从 fieldMap 中查找字段值，先精确匹配再忽略大小写。
+func lookupFieldMap(fieldMap map[string]any, field string) any {
+	if v, ok := fieldMap[field]; ok {
+		return v
+	}
+	lower := strings.ToLower(field)
+	for k, v := range fieldMap {
+		if strings.ToLower(k) == lower {
+			return v
+		}
+	}
+	return nil
 }
 
 // execWaitListen 等待监听消息（轮询模式）
@@ -874,7 +792,7 @@ func (ae *ActionExecutor) execWaitListen(def *ActionDef) error {
 		zap.String("respKey", respKey), zap.String("s2cProto", def.S2CProto),
 		zap.Int("timeoutSec", timeout))
 
-	ae.netSender.EnsureListener(def.Service, respKey)
+	ae.netSender.EnsureTCPListener(def.Service, respKey)
 
 	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 	start := time.Now()
@@ -882,7 +800,7 @@ func (ae *ActionExecutor) execWaitListen(def *ActionDef) error {
 
 	for time.Now().Before(deadline) {
 		pollCount++
-		respBody := ae.netSender.GetListenResp(def.Service, respKey)
+		respBody := ae.netSender.GetTCPListenResp(def.Service, respKey)
 		if respBody != nil {
 			if err := ae.parseAndStoreResponse(def, respBody); err != nil {
 				return err
@@ -940,187 +858,11 @@ func (ae *ActionExecutor) matchFilters(item any, filters []FilterDef) bool {
 			targetVal = f.Value
 		}
 
-		if !compareValues(fieldVal, targetVal, f.Op) {
+		if !state.CompareValues(fieldVal, targetVal, f.Op) {
 			return false
 		}
 	}
 	return true
-}
-
-// compareValues 按操作符比较两个值。
-func compareValues(a, b any, op string) bool {
-	aNum, aIsNum := toFloat64safe(a)
-	bNum, bIsNum := toFloat64safe(b)
-
-	if a == nil && bIsNum {
-		aNum, aIsNum = 0, true
-	}
-	if b == nil && aIsNum {
-		bNum, bIsNum = 0, true
-	}
-
-	switch op {
-	case "eq", "==", "":
-		if aIsNum && bIsNum {
-			return aNum == bNum
-		}
-		if a == nil && b == nil {
-			return true
-		}
-		if a == nil || b == nil {
-			return false
-		}
-		return fmt.Sprintf("%v", a) == fmt.Sprintf("%v", b)
-
-	case "neq", "!=":
-		if aIsNum && bIsNum {
-			return aNum != bNum
-		}
-		if a == nil && b == nil {
-			return false
-		}
-		if a == nil || b == nil {
-			return true
-		}
-		return fmt.Sprintf("%v", a) != fmt.Sprintf("%v", b)
-
-	case "gt", ">":
-		if aIsNum && bIsNum {
-			return aNum > bNum
-		}
-		return false
-
-	case "gte", ">=":
-		if aIsNum && bIsNum {
-			return aNum >= bNum
-		}
-		return false
-
-	case "lt", "<":
-		if aIsNum && bIsNum {
-			return aNum < bNum
-		}
-		return false
-
-	case "lte", "<=":
-		if aIsNum && bIsNum {
-			return aNum <= bNum
-		}
-		return false
-
-	case "contains":
-		aStr := fmt.Sprintf("%v", a)
-		bStr := fmt.Sprintf("%v", b)
-		return strings.Contains(aStr, bStr)
-
-	case "in":
-		list, ok := b.([]any)
-		if !ok {
-			return false
-		}
-		for _, it := range list {
-			if deepEqual(a, it) {
-				return true
-			}
-		}
-		return false
-
-	case "timeWindow":
-		var now int
-		if bIsNum {
-			now = int(bNum)
-		} else {
-			t := time.Now()
-			now = t.Hour()*60 + t.Minute()
-		}
-		m, ok := a.(map[string]any)
-		if !ok {
-			return true
-		}
-		start, _ := toFloat64safe(m["startTime"])
-		end, _ := toFloat64safe(m["endTime"])
-		return float64(now) >= start && float64(now) <= end
-
-	case "dailyTimeWindow":
-		if a == nil {
-			return true
-		}
-		list, ok := a.([]any)
-		if !ok {
-			if single, isMap := a.(map[string]any); isMap {
-				list = []any{single}
-			} else {
-				return true
-			}
-		}
-		if len(list) == 0 {
-			return true
-		}
-		t := time.Now()
-		nowTotalMin := t.Hour()*60 + t.Minute()
-		for _, it := range list {
-			entry, ok := it.(map[string]any)
-			if !ok {
-				continue
-			}
-			sh, _ := toFloat64safe(firstNonNil(entry["StartHour"], entry["startHour"]))
-			sm, _ := toFloat64safe(firstNonNil(entry["StartMinute"], entry["startMinute"]))
-			eh, _ := toFloat64safe(firstNonNil(entry["EndHour"], entry["endHour"]))
-			em, _ := toFloat64safe(firstNonNil(entry["EndMinute"], entry["endMinute"]))
-			startMin := int(sh)*60 + int(sm)
-			endMin := int(eh)*60 + int(em)
-			if nowTotalMin >= startMin && nowTotalMin <= endMin {
-				return true
-			}
-		}
-		return false
-
-	case "notNil":
-		return a != nil
-
-	case "isNil":
-		return a == nil
-
-	default:
-		return false
-	}
-}
-
-// firstNonNil 返回第一个非 nil 的值。
-func firstNonNil(vals ...any) any {
-	for _, v := range vals {
-		if v != nil {
-			return v
-		}
-	}
-	return nil
-}
-
-// toFloat64safe 尝试将 any 值转换为 float64
-func toFloat64safe(v any) (float64, bool) {
-	if v == nil {
-		return 0, false
-	}
-	r := state.ToFloat64(v)
-	switch v.(type) {
-	case int, int32, int64, uint, uint32, uint64, float64, float32:
-		return r, true
-	default:
-		return 0, false
-	}
-}
-
-// deepEqual 简单的深度相等判断
-func deepEqual(a, b any) bool {
-	if a == nil || b == nil {
-		return a == nil && b == nil
-	}
-	aNum, aOk := toFloat64safe(a)
-	bNum, bOk := toFloat64safe(b)
-	if aOk && bOk {
-		return aNum == bNum
-	}
-	return fmt.Sprintf("%v", a) == fmt.Sprintf("%v", b)
 }
 
 // pickN 从列表中随机选择 N 个不重复元素

@@ -44,6 +44,6 @@ function execute(r)
     proto.set_field(msg, "index", {randIndex})
     proto.set_field(msg, "talentIndex", {talentIndex})
 
-    network.send("logic", {cmd=6, act=6}, msg)
+    network.tcp_send("logic", {cmd=6, act=6}, msg)
     return 0
 end

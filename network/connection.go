@@ -18,6 +18,7 @@ type ListenCallBack func(message *Message)
 type Connection struct {
 	serviceName string
 	robotName   string
+tisUDP       bool
 	secretKey   []byte
 
 	responseMap      map[string]chan *Message  // responseKey → 临时响应通道
@@ -285,7 +286,7 @@ func (c *Connection) OnReceive(responseKey string, body []byte, headerErr uint64
 		return
 	}
 	if headerErr != 0 {
-		stresslog.Warn("[NETWORK] 服务端协议头错误码非零",
+		stresslog.Error("[NETWORK] 服务端协议头错误码非零",
 			zap.String("service", c.serviceName),
 			zap.String("key", responseKey),
 			zap.Uint64("headerErr", headerErr))

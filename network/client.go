@@ -24,8 +24,8 @@ func NewClient(name string, requestTimeout time.Duration) *Client {
 	}
 }
 
-// Connect 建立到指定服务的 TCP 连接占位。
-func (c *Client) Connect(serviceName string) bool {
+// ConnectTCP 建立到指定服务的 TCP 连接占位。
+func (c *Client) ConnectTCP(serviceName string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -66,8 +66,8 @@ func (c *Client) GetUDPConn(serviceName string) *Connection {
 	return c.UDPConn[serviceName]
 }
 
-// Close 关闭指定服务的 TCP 连接并从连接池中移除。
-func (c *Client) Close(serviceName string) {
+// CloseTCP 关闭指定服务的 TCP 连接并从连接池中移除。
+func (c *Client) CloseTCP(serviceName string) {
 	c.mu.Lock()
 	conn, ok := c.TCPConn[serviceName]
 	if !ok {

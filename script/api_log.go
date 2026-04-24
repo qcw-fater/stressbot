@@ -2,10 +2,10 @@ package script
 
 import (
 	"fmt"
+	stresslog "stressbot/utils/log"
 
 	lua "github.com/yuin/gopher-lua"
 	"go.uber.org/zap"
-	stresslog "stressbot/utils/log"
 )
 
 // loadLogModule 加载 log 命名空间模块。

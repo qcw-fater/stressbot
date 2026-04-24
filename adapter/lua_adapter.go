@@ -91,8 +91,8 @@ func (a *LuaAdapter) initLState(L *lua.LState) error {
 	}
 
 	fnNames := []string{
-		"header_size", "body_length_info", "encode", "encode_udp",
-		"decode", "expected_response_key",
+		"header_size", "body_length_info", "encode_tcp", "encode_udp",
+		"decode_tcp", "decode_udp", "expected_response_key",
 	}
 	reg := L.Get(lua.RegistryIndex)
 	for _, name := range fnNames {
@@ -147,8 +147,18 @@ func (a *LuaAdapter) BodyLength(headerData []byte) int {
 	return ReadBodyLength(headerData, a.bodyLenInfo, a.headerSize)
 }
 
-// Encode 调用 Lua encode(route, body, secret_key) 函数，用于 TCP 包编码。
-func (a *LuaAdapter) Encode(route any, body []byte, secretKey []byte) []byte {
+// EncodeTCP 调用 Lua encode_tcp(route, body, secret_key) 编码 TCP 数据包。
+func (a *LuaAdapter) EncodeTCP(route any, body []byte, secretKey []byte) []byte {
+	return a.encode("__adapter_encode_tcp", route, body, secretKey)
+}
+
+// EncodeUDP 调用 Lua encode_udp(route, body, secret_key) 编码 UDP 数据包。
+func (a *LuaAdapter) EncodeUDP(route any, body []byte, secretKey []byte) []byte {
+	return a.encode("__adapter_encode_udp", route, body, secretKey)
+}
+
+// encode 通用编码实现，调用指定 Lua 函数。
+func (a *LuaAdapter) encode(fnName string, route any, body []byte, secretKey []byte) []byte {
 	L := a.acquire()
 	if L == nil {
 		return nil
@@ -156,7 +166,7 @@ func (a *LuaAdapter) Encode(route any, body []byte, secretKey []byte) []byte {
 	defer a.release(L)
 
 	reg := L.Get(lua.RegistryIndex)
-	fn := L.GetField(reg, "__adapter_encode")
+	fn := L.GetField(reg, fnName)
 
 	routeVal := RouteToLuaValue(L, route)
 
@@ -171,7 +181,7 @@ func (a *LuaAdapter) Encode(route any, body []byte, secretKey []byte) []byte {
 	}
 
 	if err := L.CallByParam(lua.P{Fn: fn, NRet: 1, Protect: true}, routeVal, bodyVal, keyVal); err != nil {
-		stresslog.Error("[ADAPTER] encode() 调用失败", zap.Error(err))
+		stresslog.Error("[ADAPTER] encode 调用失败", zap.String("fn", fnName), zap.Error(err))
 		return nil
 	}
 
@@ -180,8 +190,18 @@ func (a *LuaAdapter) Encode(route any, body []byte, secretKey []byte) []byte {
 	return result
 }
 
-// Decode 调用 Lua decode(data, secret_key) 函数，返回 responseKey + body + headerErr。
-func (a *LuaAdapter) Decode(data []byte, secretKey []byte) (string, []byte, uint64) {
+// DecodeTCP 调用 Lua decode_tcp(data, secret_key) 解码 TCP 数据包。
+func (a *LuaAdapter) DecodeTCP(data []byte, secretKey []byte) (string, []byte, uint64) {
+	return a.decode("__adapter_decode_tcp", data, secretKey)
+}
+
+// DecodeUDP 调用 Lua decode_udp(data, secret_key) 解码 UDP 数据包。
+func (a *LuaAdapter) DecodeUDP(data []byte, secretKey []byte) (string, []byte, uint64) {
+	return a.decode("__adapter_decode_udp", data, secretKey)
+}
+
+// decode 通用解码实现，调用指定 Lua 函数。
+func (a *LuaAdapter) decode(fnName string, data []byte, secretKey []byte) (string, []byte, uint64) {
 	L := a.acquire()
 	if L == nil {
 		return "", nil, 0
@@ -189,7 +209,7 @@ func (a *LuaAdapter) Decode(data []byte, secretKey []byte) (string, []byte, uint
 	defer a.release(L)
 
 	reg := L.Get(lua.RegistryIndex)
-	fn := L.GetField(reg, "__adapter_decode")
+	fn := L.GetField(reg, fnName)
 
 	dataVal := lua.LString(string(data))
 
@@ -199,7 +219,7 @@ func (a *LuaAdapter) Decode(data []byte, secretKey []byte) (string, []byte, uint
 	}
 
 	if err := L.CallByParam(lua.P{Fn: fn, NRet: 3, Protect: true}, dataVal, keyVal); err != nil {
-		stresslog.Error("[ADAPTER] decode() 调用失败", zap.Error(err))
+		stresslog.Error("[ADAPTER] decode 调用失败", zap.String("fn", fnName), zap.Error(err))
 		return "", nil, 0
 	}
 
@@ -208,36 +228,6 @@ func (a *LuaAdapter) Decode(data []byte, secretKey []byte) (string, []byte, uint
 	responseKey := lua.LVAsString(L.Get(-3))
 	L.Pop(3)
 	return responseKey, body, headerErr
-}
-
-// EncodeUDP 调用 Lua encode_udp(route, body, secret_key) 函数，用于 UDP 包编码。
-func (a *LuaAdapter) EncodeUDP(route any, body []byte, secretKey []byte) []byte {
-	L := a.acquire()
-	if L == nil {
-		return nil
-	}
-	defer a.release(L)
-
-	reg := L.Get(lua.RegistryIndex)
-	fn := L.GetField(reg, "__adapter_encode_udp")
-
-	routeVal := RouteToLuaValue(L, route)
-	var bodyVal lua.LValue = lua.LNil
-	if len(body) > 0 {
-		bodyVal = lua.LString(string(body))
-	}
-	var keyVal lua.LValue = lua.LNil
-	if len(secretKey) > 0 {
-		keyVal = lua.LString(string(secretKey))
-	}
-
-	if err := L.CallByParam(lua.P{Fn: fn, NRet: 1, Protect: true}, routeVal, bodyVal, keyVal); err != nil {
-		stresslog.Error("[ADAPTER] encode_udp() 调用失败", zap.Error(err))
-		return nil
-	}
-	result := []byte(lua.LVAsString(L.Get(-1)))
-	L.Pop(1)
-	return result
 }
 
 // ExpectedResponseKey 调用 Lua expected_response_key(route) 函数。

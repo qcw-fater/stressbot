@@ -117,7 +117,14 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 
 		if conn != nil {
 			secretKey := conn.GetSecretKey()
-			responseKey, body, headerErr := es.adp.Decode(msgBuf, secretKey)
+			var responseKey string
+			var body []byte
+			var headerErr uint64
+			if gconn.RemoteAddr().Network() == "udp" {
+				responseKey, body, headerErr = es.adp.DecodeUDP(msgBuf, secretKey)
+			} else {
+				responseKey, body, headerErr = es.adp.DecodeTCP(msgBuf, secretKey)
+			}
 			if responseKey != "" {
 				conn.OnReceive(responseKey, body, headerErr)
 			}

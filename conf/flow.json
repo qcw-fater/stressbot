@@ -31,24 +31,24 @@
       "action": "ConnectLogicTCP",
       "breakOff": true,
       "listenCallbacks": [
-        {"route": {"cmd": 3, "act": 1}, "server": "logic", "callback": "matchPoll"},
-        {"route": {"cmd": 5, "act": 20}, "server": "logic", "callback": "teamStartMatch"},
-        {"route": {"cmd": 4, "act": 6}, "server": "logic", "callback": "loadingPoll"},
-        {"route": {"cmd": 4, "act": 72}, "server": "logic", "callback": "rewardPoll"},
-        {"route": {"cmd": 2, "act": 18}, "server": "logic", "callback": "stateUpdate"},
-        {"route": {"cmd": 6, "act": 1}, "server": "logic", "callback": "heroUpdate"},
-        {"route": {"cmd": 35, "act": 2}, "server": "logic", "callback": "shopDataUpdate"},
-        {"route": {"cmd": 5, "act": 3}, "server": "logic", "callback": "teamUpdateInfo"},
-        {"route": {"cmd": 5, "act": 6}, "server": "logic", "callback": "teamNotifyInvite"},
-        {"route": {"cmd": 5, "act": 10}, "server": "logic", "callback": "teamJoin"},
-        {"route": {"cmd": 21, "act": 15}, "server": "logic", "callback": "guildJoin"},
-        {"route": {"cmd": 21, "act": 16}, "server": "logic", "callback": "guildKickMember"},
-        {"route": {"cmd": 21, "act": 14}, "server": "logic", "callback": "guildMemberUpdate"},
-        {"route": {"cmd": 21, "act": 13}, "server": "logic", "callback": "guildUpdate"},
-        {"route": {"cmd": 3, "act": 5}, "server": "logic", "callback": "customRoomStart"},
-        {"route": {"cmd": 14, "act": 10}, "server": "logic", "callback": "roomUpdateData"},
-        {"route": {"cmd": 14, "act": 23}, "server": "logic", "callback": "roomUpdateStatus"},
-        {"route": {"cmd": 1, "act": 2}, "server": "logic", "callback": null}
+        {"route": {"cmd": 3, "act": 1}, "server": "tcp:logic", "callback": "matchPoll"},
+        {"route": {"cmd": 5, "act": 20}, "server": "tcp:logic", "callback": "teamStartMatch"},
+        {"route": {"cmd": 4, "act": 6}, "server": "tcp:logic", "callback": "loadingPoll"},
+        {"route": {"cmd": 4, "act": 72}, "server": "tcp:logic", "callback": "rewardPoll"},
+        {"route": {"cmd": 2, "act": 18}, "server": "tcp:logic", "callback": "stateUpdate"},
+        {"route": {"cmd": 6, "act": 1}, "server": "tcp:logic", "callback": "heroUpdate"},
+        {"route": {"cmd": 35, "act": 2}, "server": "tcp:logic", "callback": "shopDataUpdate"},
+        {"route": {"cmd": 5, "act": 3}, "server": "tcp:logic", "callback": "teamUpdateInfo"},
+        {"route": {"cmd": 5, "act": 6}, "server": "tcp:logic", "callback": "teamNotifyInvite"},
+        {"route": {"cmd": 5, "act": 10}, "server": "tcp:logic", "callback": "teamJoin"},
+        {"route": {"cmd": 21, "act": 15}, "server": "tcp:logic", "callback": "guildJoin"},
+        {"route": {"cmd": 21, "act": 16}, "server": "tcp:logic", "callback": "guildKickMember"},
+        {"route": {"cmd": 21, "act": 14}, "server": "tcp:logic", "callback": "guildMemberUpdate"},
+        {"route": {"cmd": 21, "act": 13}, "server": "tcp:logic", "callback": "guildUpdate"},
+        {"route": {"cmd": 3, "act": 5}, "server": "tcp:logic", "callback": "customRoomStart"},
+        {"route": {"cmd": 14, "act": 10}, "server": "tcp:logic", "callback": "roomUpdateData"},
+        {"route": {"cmd": 14, "act": 23}, "server": "tcp:logic", "callback": "roomUpdateStatus"},
+        {"route": {"cmd": 1, "act": 2}, "server": "tcp:logic", "callback": null}
       ]
     },
     "PlayerLogin": { "type": "action", "action": "PlayerLogin", "breakOff": true },
@@ -111,20 +111,20 @@
       "type": "action",
       "action": "ConnectBattleTCP",
       "listenCallbacks": [
-        {"route": {"cmd": 4, "act": 10}, "server": "battle", "callback": null}
+        {"route": {"cmd": 4, "act": 10}, "server": "tcp:battle", "callback": null}
       ]
     },
     "ConnectBattleUDP": {
       "type": "action",
       "action": "ConnectBattleUDP",
       "listenCallbacks": [
-        {"route": {"cmd": 4, "act": 11}, "server": "udp", "callback": "frameData"}
+        {"route": {"cmd": 4, "act": 11}, "server": "udp:battle", "callback": "frameData"}
       ]
     },
     "RegisterBattle": { "type": "action", "action": "RegisterBattle" },
     "loadLoop": {
       "type": "loop",
-      "loopCount": 5,
+      "loopCount": -1,
       "body": "LoadProgress"
     },
     "LoadProgress": { "type": "action", "action": "LoadProgress" },
@@ -141,12 +141,9 @@
     "BattleReward": { "type": "action", "action": "BattleReward" },
     "GameOver": { "type": "action", "action": "GameOver" },
     "CleanupBattle": {
-      "type": "sequence",
-      "next": ["CloseBattleUDP", "CloseBattleTCP", "ClearBattleState"]
+      "type": "action",
+      "action": "ClearBattleState"
     },
-    "CloseBattleUDP": { "type": "action", "action": "CloseBattleUDP" },
-    "CloseBattleTCP": { "type": "action", "action": "CloseBattleTCP" },
-    "ClearBattleState": { "type": "action", "action": "ClearBattleState" },
 
     "lobbyOperation": {
       "type": "weighted",
@@ -521,16 +518,6 @@
         {"field": "operation", "type": "fixed", "value": 0}
       ]
     },
-    "CloseBattleUDP": {
-      "pattern": "close",
-      "target": "udp",
-      "service": "udp"
-    },
-    "CloseBattleTCP": {
-      "pattern": "close",
-      "target": "tcp",
-      "service": "battle"
-    },
     "ClearBattleState": {
       "pattern": "clearState",
       "keys": ["battleId", "battleAddress", "battleSecretKey", "battleSession", "fighterIndex", "fighterListData", "packageIndex", "battleAck"]
@@ -691,7 +678,7 @@
       "bindings": [
         {"field": "lotteryType", "type": "fixed", "value": 2},
         {"field": "lotteryPoolId", "type": "stateRandom", "source": "lotteryInfoList", "path": "lotteryPoolId", "filters": [{"path": "lotteryPoolId", "op": "neq", "value": 101}]},
-        {"field": "lotteryConsumeType", "type": "fixed", "value": 1}
+        {"field": "lotteryConsumeType", "type": "fixed", "value": 3}
       ]
     },
     "LotteryGetLog": {

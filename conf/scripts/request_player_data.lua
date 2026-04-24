@@ -1,19 +1,16 @@
 -- request_player_data.lua: 发送 MainLoadOK(CMD=2,ACT=16) 并等待 LoginPlayerDataS2C(CMD=1,ACT=2)
--- 使用 request_wait 实现跨 CMD 的请求-响应模式
 local network = require("network")
 local robot = require("robot")
 local proto = require("proto")
 local log = require("log")
 
 function execute(r)
-    -- 发送 MainLoadOkC2S (CMD=2, ACT=16)，等待 LoginPlayerDataS2C (CMD=1, ACT=2)
+    -- 发送 MainLoadOkC2S (CMD=2, ACT=16)
     local msg = proto.create("Game.MainLoadOkC2S")
-    local code, resp = network.request_wait("logic", {cmd=2, act=16}, msg, {cmd=1, act=2}, "Game.LoginPlayerDataS2C")
+    network.tcp_send("logic", {cmd=2, act=16}, msg)
 
-    if code ~= 0 then
-        log.error("RequestPlayerData: 请求失败 code=" .. tostring(code) .. " detail=" .. tostring(resp))
-        return 1
-    end
+    -- 等待 LoginPlayerDataS2C (CMD=1, ACT=2)
+    local resp = network.wait_listen("logic", {cmd=1, act=2}, "Game.LoginPlayerDataS2C", 30)
 
     if not resp then
         log.error("RequestPlayerData: 响应为空")

@@ -8,19 +8,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
-	"sync"
-
-	stresslog "stressbot/utils/log"
-
-	lua "github.com/yuin/gopher-lua"
-	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
-
 	"stressbot/adapter"
 	"stressbot/engine"
 	"stressbot/protox"
 	"stressbot/state"
+	stresslog "stressbot/utils/log"
+	"strings"
+	"sync"
+
+	lua "github.com/yuin/gopher-lua"
+	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 )
 
 const registryCtxKey = "__stressbot_ctx__"

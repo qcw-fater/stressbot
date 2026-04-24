@@ -152,7 +152,7 @@ func main() {
 
 	// 3. action 定义校验（Lua 脚本存在性）
 	for name, action := range flow.Actions {
-		if action.Pattern == "lua" && action.Script != "" {
+		if action.Pattern == engine.PatternLua && action.Script != "" {
 			scriptPath := filepath.Join(scriptDir, action.Script)
 			if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
 				fmt.Printf("[ERROR] Lua 脚本不存在: action=%s script=%s\n", name, scriptPath)

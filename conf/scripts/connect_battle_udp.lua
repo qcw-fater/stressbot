@@ -44,7 +44,7 @@ function execute(r)
         return 1
     end
 
-    local ok = network.connect_udp("udp", battleAddress)
+    local ok = network.connect_udp("battle", battleAddress)
     if not ok then
         log.error("ConnectBattleUDP 连接失败: " .. battleAddress)
         return 1
@@ -53,7 +53,7 @@ function execute(r)
     -- 设置 UDP 密钥（从 listen_start_loading 保存）
     local key = robot.get("battleSecretKey")
     if key then
-        network.set_udp_secret_key("udp", key)
+        network.set_udp_secret_key("battle", key)
     end
 
     -- 新一轮战斗开始：复位包序号（对齐旧工具 ClearBattleInfo → packetIndex=0）
@@ -64,7 +64,7 @@ function execute(r)
     robot.set("frameCount", 0)
 
     -- 注册 150ms UDP 心跳
-    network.register_heartbeat("udp", "battle", 150, {cmd=4, act=2}, build_udp_heart)
+    network.register_udp_heartbeat("battle", 150, {cmd=4, act=2}, build_udp_heart)
 
     log.info("战斗服 UDP 连接完成 心跳已注册(150ms)")
     return 0

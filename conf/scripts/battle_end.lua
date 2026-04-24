@@ -65,5 +65,9 @@ function execute(r)
     end
     log.info("BattleEnd 已发送")
 
+    -- 关闭连接
+    network.close_udp("battle")
+    network.close_tcp("battle")
+
     return 0
 end

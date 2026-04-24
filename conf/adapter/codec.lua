@@ -221,8 +221,8 @@ local function _do_encode(route, body, secret_key, encrypt_offset)
     return header .. data
 end
 
--- encode(route, body, secret_key) → 完整 TCP 数据包字节
-function encode(route, body, secret_key)
+-- encode_tcp(route, body, secret_key) → 完整 TCP 数据包字节
+function encode_tcp(route, body, secret_key)
     return _do_encode(route, body, secret_key, 0)
 end
 
@@ -231,9 +231,9 @@ function encode_udp(route, body, secret_key)
     return _do_encode(route, body, secret_key, UDP_ENC_OFFSET)
 end
 
--- decode(data, secret_key) → (responseKey string, body string, headerErr number)
+-- decode_tcp(data, secret_key) → (responseKey string, body string, headerErr number)
 -- 处理顺序：解密 → GZIP 解压（与编码顺序相反）
-function decode(data, secret_key)
+function decode_tcp(data, secret_key)
     if #data < HEADER_SIZE then return "", "", 0 end
 
     local header_err = read_uint16_le(data, 4)
@@ -263,6 +263,10 @@ function decode(data, secret_key)
     local response_key = math.floor(cmd) .. ":" .. math.floor(act)
     return response_key, body, header_err
 end
+
+-- decode_udp(data, secret_key) → (responseKey string, body string, headerErr number)
+-- 当前与 decode_tcp 逻辑一致，预留 UDP 专用解码扩展点。
+decode_udp = decode_tcp
 
 -- expected_response_key(route) → string
 function expected_response_key(route)

@@ -29,6 +29,7 @@ type Config struct {
 		StartNumber   int    `json:"startNumber"`
 		Count         int    `json:"count"`
 		ConcurrentNum int    `json:"concurrentNum"`
+		MainService   string `json:"mainService"`
 	} `json:"bot"`
 
 	Auth struct {
@@ -36,12 +37,15 @@ type Config struct {
 		Extra   map[string]string `json:"extra"`
 	} `json:"auth"`
 
+	Adapter struct {
+		Script   string `json:"script"`
+		PoolSize int    `json:"poolSize"`
+	} `json:"adapter"`
+
 	Network struct {
-		TCPTimeout        string   `json:"tcpTimeout"`
-		HeartbeatInterval string   `json:"heartbeatInterval"`
-		UDPServices       []string `json:"udpServices"`
-		MainService       string   `json:"mainService"`
-		AdapterPoolSize   int      `json:"adapterPoolSize"`
+		HeartbeatInterval string `json:"heartbeatInterval"`
+		TCPTimeout        string `json:"tcpTimeout"`
+		HTTPTimeout       string `json:"httpTimeout"`
 	} `json:"network"`
 
 	Proto struct {
@@ -49,9 +53,8 @@ type Config struct {
 		Files []string `json:"files"`
 	} `json:"proto"`
 
-	AdapterScript string `json:"adapterScript"`
-	Flow          string `json:"flow"`
-	Script        struct {
+	Flow   string `json:"flow"`
+	Script struct {
 		Dirs []string `json:"dirs"`
 	} `json:"script"`
 }
@@ -98,7 +101,9 @@ func main() {
 	// 解析心跳间隔
 	heartbeatInterval := 5 * time.Second
 	if cfg.Network.HeartbeatInterval != "" {
-		if d, err := time.ParseDuration(cfg.Network.HeartbeatInterval); err == nil {
+		if d, err := time.ParseDuration(cfg.Network.HeartbeatInterval); err != nil {
+			stresslog.Fatal("解析心跳间隔失败", zap.Error(err))
+		} else {
 			heartbeatInterval = d
 		}
 	}
@@ -106,8 +111,20 @@ func main() {
 	// 解析 TCP 超时
 	tcpTimeout := 60 * time.Second
 	if cfg.Network.TCPTimeout != "" {
-		if d, err := time.ParseDuration(cfg.Network.TCPTimeout); err == nil {
+		if d, err := time.ParseDuration(cfg.Network.TCPTimeout); err != nil {
+			stresslog.Fatal("解析 TCP 超时失败", zap.Error(err))
+		} else {
 			tcpTimeout = d
+		}
+	}
+
+	// 解析 HTTP 超时
+	httpTimeout := 10 * time.Second
+	if cfg.Network.HTTPTimeout != "" {
+		if d, err := time.ParseDuration(cfg.Network.HTTPTimeout); err != nil {
+			stresslog.Fatal("解析 HTTP 超时失败", zap.Error(err))
+		} else {
+			httpTimeout = d
 		}
 	}
 
@@ -139,8 +156,8 @@ func main() {
 		AuthExtra:      cfg.Auth.Extra,
 		Adapter:        adp,
 		RequestTimeout: tcpTimeout,
-		UDPServices:    cfg.Network.UDPServices,
-		MainService:    cfg.Network.MainService,
+		MainService:    cfg.Bot.MainService,
+		HTTPTimeout:    httpTimeout,
 	}
 
 	mgr := robot.NewManager(mgrCfg, flow, factory, dialer, luaPool)
@@ -178,8 +195,11 @@ func loadConfig(path string) (*Config, error) {
 	if cfg.Bot.AccountPrefix == "" {
 		cfg.Bot.AccountPrefix = "bot_"
 	}
-	if cfg.AdapterScript == "" {
-		cfg.AdapterScript = "conf/adapter/codec.lua"
+	if cfg.Bot.MainService == "" {
+		cfg.Bot.MainService = "logic"
+	}
+	if cfg.Adapter.Script == "" {
+		cfg.Adapter.Script = "conf/adapter/codec.lua"
 	}
 	if cfg.Flow == "" {
 		cfg.Flow = "conf/flow.json"
@@ -190,23 +210,16 @@ func loadConfig(path string) (*Config, error) {
 	if len(cfg.Script.Dirs) == 0 {
 		cfg.Script.Dirs = []string{"conf/scripts"}
 	}
-	if len(cfg.Network.UDPServices) == 0 {
-		cfg.Network.UDPServices = []string{"udp"}
-	}
-	if cfg.Network.MainService == "" {
-		cfg.Network.MainService = "logic"
-	}
 
 	return cfg, nil
 }
 
 func loadAdapter(cfg *Config) (*adapter.LuaAdapter, error) {
-	scriptPath := cfg.AdapterScript
-	poolSize := cfg.Network.AdapterPoolSize
+	poolSize := cfg.Adapter.PoolSize
 	if poolSize <= 0 {
 		poolSize = runtime.NumCPU()
 	}
-	return adapter.NewLuaAdapter(poolSize, scriptPath)
+	return adapter.NewLuaAdapter(poolSize, cfg.Adapter.Script)
 }
 
 func loadFlow(path string) (*engine.TaskFlow, error) {

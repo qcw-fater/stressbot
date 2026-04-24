@@ -39,6 +39,6 @@ function execute(r)
     proto.set_field(msg, "heroId", heroId)
     proto.set_field(msg, "index", talentIndex)
 
-    network.send("logic", {cmd=6, act=5}, msg)
+    network.tcp_send("logic", {cmd=6, act=5}, msg)
     return 0
 end

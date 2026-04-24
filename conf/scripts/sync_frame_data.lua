@@ -33,7 +33,7 @@ function execute(r)
         .. string.char(1, 2, 3, 4, 5, 6)                       -- dummy data (6 bytes)
 
     -- 通过 UDP 发送（带协议头 CMD=4, ACT=11）
-    local code = network.udp_send_msg("udp", {cmd=4, act=11}, frameData)
+    local code = network.udp_send_msg("battle", {cmd=4, act=11}, frameData)
     if code and code ~= 0 then
         log.warn("SyncFrame 发送失败: code=" .. tostring(code))
     end

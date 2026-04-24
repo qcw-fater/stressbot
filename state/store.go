@@ -5,7 +5,9 @@ package state
 
 import (
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 )
 
 // Store 泛型状态存储。
@@ -267,4 +269,181 @@ func SplitPath(path string) []string {
 	}
 	flush()
 	return out
+}
+
+// ToFloat64Safe 尝试将 any 值转换为 float64。
+// 第二个返回值指示原始值是否为数字类型。
+func ToFloat64Safe(v any) (float64, bool) {
+	if v == nil {
+		return 0, false
+	}
+	r := ToFloat64(v)
+	switch v.(type) {
+	case int, int32, int64, uint, uint32, uint64, float64, float32:
+		return r, true
+	default:
+		return 0, false
+	}
+}
+
+// CompareValues 按操作符比较两个值。
+// 支持：eq/==, neq/!=, gt/>, gte/>=, lt/<, lte/<=, contains, in, timeWindow
+func CompareValues(a, b any, op string) bool {
+	aNum, aIsNum := ToFloat64Safe(a)
+	bNum, bIsNum := ToFloat64Safe(b)
+
+	if a == nil && bIsNum {
+		aNum, aIsNum = 0, true
+	}
+	if b == nil && aIsNum {
+		bNum, bIsNum = 0, true
+	}
+
+	switch op {
+	case "eq", "==", "":
+		if aIsNum && bIsNum {
+			return aNum == bNum
+		}
+		if a == nil && b == nil {
+			return true
+		}
+		if a == nil || b == nil {
+			return false
+		}
+		return fmt.Sprintf("%v", a) == fmt.Sprintf("%v", b)
+
+	case "neq", "!=":
+		if aIsNum && bIsNum {
+			return aNum != bNum
+		}
+		if a == nil && b == nil {
+			return false
+		}
+		if a == nil || b == nil {
+			return true
+		}
+		return fmt.Sprintf("%v", a) != fmt.Sprintf("%v", b)
+
+	case "gt", ">":
+		if aIsNum && bIsNum {
+			return aNum > bNum
+		}
+		return false
+
+	case "gte", ">=":
+		if aIsNum && bIsNum {
+			return aNum >= bNum
+		}
+		return false
+
+	case "lt", "<":
+		if aIsNum && bIsNum {
+			return aNum < bNum
+		}
+		return false
+
+	case "lte", "<=":
+		if aIsNum && bIsNum {
+			return aNum <= bNum
+		}
+		return false
+
+	case "contains":
+		aStr := fmt.Sprintf("%v", a)
+		bStr := fmt.Sprintf("%v", b)
+		return strings.Contains(aStr, bStr)
+
+	case "in":
+		list, ok := b.([]any)
+		if !ok {
+			return false
+		}
+		for _, it := range list {
+			if DeepEqual(a, it) {
+				return true
+			}
+		}
+		return false
+
+	case "timeWindow":
+		var now int
+		if bIsNum {
+			now = int(bNum)
+		} else {
+			t := time.Now()
+			now = t.Hour()*60 + t.Minute()
+		}
+		m, ok := a.(map[string]any)
+		if !ok {
+			return true
+		}
+		start, _ := ToFloat64Safe(m["startTime"])
+		end, _ := ToFloat64Safe(m["endTime"])
+		return float64(now) >= start && float64(now) <= end
+
+	case "dailyTimeWindow":
+		if a == nil {
+			return true
+		}
+		items, ok := a.([]any)
+		if !ok {
+			if single, isMap := a.(map[string]any); isMap {
+				items = []any{single}
+			} else {
+				return true
+			}
+		}
+		if len(items) == 0 {
+			return true
+		}
+		t := time.Now()
+		nowMin := t.Hour()*60 + t.Minute()
+		for _, it := range items {
+			entry, ok := it.(map[string]any)
+			if !ok {
+				continue
+			}
+			sh, _ := ToFloat64Safe(firstNonNil(entry["StartHour"], entry["startHour"]))
+			sm, _ := ToFloat64Safe(firstNonNil(entry["StartMinute"], entry["startMinute"]))
+			eh, _ := ToFloat64Safe(firstNonNil(entry["EndHour"], entry["endHour"]))
+			em, _ := ToFloat64Safe(firstNonNil(entry["EndMinute"], entry["endMinute"]))
+			startMin := int(sh)*60 + int(sm)
+			endMin := int(eh)*60 + int(em)
+			if nowMin >= startMin && nowMin <= endMin {
+				return true
+			}
+		}
+		return false
+
+	case "notNil":
+		return a != nil
+
+	case "isNil":
+		return a == nil
+	}
+
+	return false
+}
+
+// firstNonNil 返回第一个非 nil 的值。
+func firstNonNil(vals ...any) any {
+	for _, v := range vals {
+		if v != nil {
+			return v
+		}
+	}
+	return nil
+}
+
+// DeepEqual 简单的深度相等判断。
+func DeepEqual(a, b any) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	aNum, aOk := ToFloat64Safe(a)
+	bNum, bOk := ToFloat64Safe(b)
+	if aOk && bOk {
+		return aNum == bNum
+	}
+	return fmt.Sprintf("%v", a) == fmt.Sprintf("%v", b)
 }

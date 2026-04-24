@@ -26,8 +26,8 @@ type ManagerConfig struct {
 	AuthExtra      map[string]string
 	Adapter        adapter.Adapter
 	RequestTimeout time.Duration
-	UDPServices    []string
 	MainService    string
+	HTTPTimeout    time.Duration
 }
 
 // Manager 机器人管理器。
@@ -66,11 +66,6 @@ func NewManager(cfg ManagerConfig, flow *engine.TaskFlow, factory *protox.Factor
 func (m *Manager) StartAll() error {
 	stresslog.Info("[MANAGER] 开始创建机器人", zap.Int("count", m.cfg.Count), zap.Int("concurrent", m.cfg.ConcurrentNum))
 
-	udpServicesMap := make(map[string]bool, len(m.cfg.UDPServices))
-	for _, svc := range m.cfg.UDPServices {
-		udpServicesMap[svc] = true
-	}
-
 	for i := 0; i < m.cfg.Count; i++ {
 		if m.ctx.Err() != nil {
 			return m.ctx.Err()
@@ -85,7 +80,7 @@ func (m *Manager) StartAll() error {
 			AuthBaseURL: m.cfg.AuthBaseURL,
 			AuthExtra:   m.cfg.AuthExtra,
 		}, m.flow, m.factory, m.cfg.Adapter, m.dialer, m.luaPool,
-			m.cfg.RequestTimeout, udpServicesMap, m.cfg.MainService)
+			m.cfg.RequestTimeout, m.cfg.MainService)
 
 		m.mu.Lock()
 		m.robots = append(m.robots, r)
@@ -108,14 +103,19 @@ func (m *Manager) StartAll() error {
 	return nil
 }
 
-// StopAll 停止所有机器人
+// StopAll 停止所有机器人并等待执行 goroutine 结束。
 func (m *Manager) StopAll() {
 	m.cancel()
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	robots := make([]*Robot, len(m.robots))
+	copy(robots, m.robots)
+	m.mu.RUnlock()
 
-	for _, r := range m.robots {
+	for _, r := range robots {
 		r.Close()
+	}
+	for _, r := range robots {
+		r.Wait()
 		m.stopped.Add(1)
 	}
 	stresslog.Info("[MANAGER] 全部机器人已停止")

@@ -16,7 +16,7 @@ function execute(r)
     local msg = proto.create("Game.BattleLoadProgressC2S")
     proto.set_field(msg, "progress", progress)
 
-    local code = network.send("battle", {cmd=4, act=7}, msg)
+    local code = network.tcp_send("battle", {cmd=4, act=7}, msg)
     if code ~= 0 then
         log.warn("LoadProgress 发送失败: code=" .. tostring(code))
     else

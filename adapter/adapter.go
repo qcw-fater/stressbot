@@ -20,25 +20,27 @@ type Adapter interface {
 
 	// ─── 编解码（Lua 调用）──────────────────────────────────────────────
 
-	// Encode 将路由信息+消息体编码为完整 TCP 数据包（含消息头）。
+	// EncodeTCP 将路由信息+消息体编码为完整 TCP 数据包（含消息头）。
 	// route 为不透明类型，由 flow.json 中声明，原样传给 Lua。
 	// secretKey 为连接加密密钥，nil 表示不加密。
 	// route 为 nil 时，适配器应视为"无路由请求"（如密钥交换 cmd=0,act=0）。
-	Encode(route any, body []byte, secretKey []byte) []byte
+	EncodeTCP(route any, body []byte, secretKey []byte) []byte
 
 	// EncodeUDP 将路由信息+消息体编码为 UDP 数据包。
-	// 与 Encode 的区别：内部应用 UDP 加密偏移量（前 N 字节保持明文，
+	// 与 EncodeTCP 的区别：内部应用 UDP 加密偏移量（前 N 字节保持明文，
 	// 供服务端通过明文头部查找密钥表）。偏移值由 codec.lua 内部定义，Go 层无需知晓。
-	// route 为 nil 时行为同 Encode。
+	// route 为 nil 时行为同 EncodeTCP。
 	EncodeUDP(route any, body []byte, secretKey []byte) []byte
 
-	// Decode 将完整数据包解码为路由键、消息体和协议头错误码。
+	// DecodeTCP 将 TCP 数据包解码为路由键、消息体和协议头错误码。
 	// responseKey 是字符串路由键，用于请求-响应匹配和监听分发。
 	// 格式由适配器决定，典型格式："{cmd}:{act}"，如 "3:1"。
-	// headerErr 为协议头中的错误码，Lua decode() 必须返回数字，Go 用 uint64 接收。
-	// 非零时 Connection.OnReceive 记录告警，仍继续路由（让请求正常完成）。
-	// TCP 和 UDP 使用同一 Decode（接收侧无偏移问题）。
-	Decode(data []byte, secretKey []byte) (responseKey string, body []byte, headerErr uint64)
+	// headerErr 为协议头中的错误码，非零时记录告警，仍继续路由。
+	DecodeTCP(data []byte, secretKey []byte) (responseKey string, body []byte, headerErr uint64)
+
+	// DecodeUDP 将 UDP 数据包解码为路由键、消息体和协议头错误码。
+	// 与 DecodeTCP 分离，允许适配器对 TCP/UDP 使用不同的解码策略。
+	DecodeUDP(data []byte, secretKey []byte) (responseKey string, body []byte, headerErr uint64)
 
 	// ExpectedResponseKey 从发送路由计算期望的响应路由键。
 	// 用于 TCPRequest 等待响应时注册临时通道。

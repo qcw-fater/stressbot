@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"hash/fnv"
+	"math"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -159,7 +160,7 @@ func utilsFnvHash(L *lua.LState) int {
 }
 
 // utilsPackLE utils.pack_le(format, values...) — 小端二进制打包
-// format 字符: "u16"=uint16, "i32"=int32, "i64"=int64, "u8"=uint8, "u64"=uint64
+// format 字符: u8/i8, u16/i16, u32/i32, u64/i64, f32, f64
 // i64/u64 支持字符串形式的大数字（超过 2^53 的 snowflake ID）
 // 返回: 二进制字符串
 func utilsPackLE(L *lua.LState) int {
@@ -174,25 +175,48 @@ func utilsPackLE(L *lua.LState) int {
 		case "u8":
 			n := lua.LVAsNumber(v)
 			buf = append(buf, byte(n))
+		case "i8":
+			n := lua.LVAsNumber(v)
+			buf = append(buf, byte(int8(n)))
 		case "u16":
 			n := lua.LVAsNumber(v)
 			b := make([]byte, 2)
 			binary.LittleEndian.PutUint16(b, uint16(n))
+			buf = append(buf, b...)
+		case "i16":
+			n := lua.LVAsNumber(v)
+			b := make([]byte, 2)
+			binary.LittleEndian.PutUint16(b, uint16(int16(n)))
+			buf = append(buf, b...)
+		case "u32":
+			n := lua.LVAsNumber(v)
+			b := make([]byte, 4)
+			binary.LittleEndian.PutUint32(b, uint32(n))
 			buf = append(buf, b...)
 		case "i32":
 			n := lua.LVAsNumber(v)
 			b := make([]byte, 4)
 			binary.LittleEndian.PutUint32(b, uint32(int32(n)))
 			buf = append(buf, b...)
+		case "u64":
+			n := parseUint64(v)
+			b := make([]byte, 8)
+			binary.LittleEndian.PutUint64(b, n)
+			buf = append(buf, b...)
 		case "i64":
 			n := parseInt64(v)
 			b := make([]byte, 8)
 			binary.LittleEndian.PutUint64(b, uint64(n))
 			buf = append(buf, b...)
-		case "u64":
-			n := parseUint64(v)
+		case "f32":
+			n := float32(lua.LVAsNumber(v))
+			b := make([]byte, 4)
+			binary.LittleEndian.PutUint32(b, math.Float32bits(n))
+			buf = append(buf, b...)
+		case "f64":
+			n := float64(lua.LVAsNumber(v))
 			b := make([]byte, 8)
-			binary.LittleEndian.PutUint64(b, n)
+			binary.LittleEndian.PutUint64(b, math.Float64bits(n))
 			buf = append(buf, b...)
 		default:
 			L.RaiseError("unknown pack format: %s", format)

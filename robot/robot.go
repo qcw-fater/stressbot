@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,24 +25,24 @@ import (
 
 // Robot 单个压测机器人实例。
 type Robot struct {
-	id                  int
-	account             string
-	state               *state.Store
-	client              *network.Client
-	factory             *protox.Factory
-	executor            *engine.Executor
-	luaPool             *script.RuntimePool
-	L                   *lua.LState
-	ctx                 context.Context
-	cancel              context.CancelFunc
-	running             atomic.Bool
-	dialer              *network.Dialer
-	authBaseURL         string
-	httpClient          *http.Client
-	luaMu               sync.Mutex
-	adp                 adapter.Adapter
-	udpServices         map[string]bool
-	mainService         string // 主连接服务名，仅用于断开检测（断开时停止机器人）
+	id          int
+	account     string
+	state       *state.Store
+	client      *network.Client
+	factory     *protox.Factory
+	executor    *engine.Executor
+	luaPool     *script.RuntimePool
+	L           *lua.LState
+	ctx         context.Context
+	cancel      context.CancelFunc
+	running     atomic.Bool
+	dialer      *network.Dialer
+	authBaseURL string
+	httpClient  *http.Client
+	luaMu       sync.Mutex
+	adp         adapter.Adapter
+	mainService string // 主连接服务名，仅用于断开检测（断开时停止机器人）
+	done        chan struct{} // 执行 goroutine 结束信号
 }
 
 // Config 单个机器人的配置
@@ -52,30 +51,31 @@ type Config struct {
 	Account     string
 	AuthBaseURL string
 	AuthExtra   map[string]string
+	HTTPTimeout time.Duration
 }
 
 // NewRobot 创建机器人实例。
 func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 	adp adapter.Adapter, dialer *network.Dialer, luaPool *script.RuntimePool,
-	requestTimeout time.Duration, udpServices map[string]bool, mainService string) *Robot {
+	requestTimeout time.Duration, mainService string) *Robot {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	r := &Robot{
-		id:                  cfg.ID,
-		account:             cfg.Account,
-		state:               state.NewStore(),
-		client:              network.NewClient(cfg.Account, requestTimeout),
-		factory:             factory,
-		luaPool:             luaPool,
-		ctx:                 ctx,
-		cancel:              cancel,
-		dialer:              dialer,
-		authBaseURL:         cfg.AuthBaseURL,
-		httpClient:          &http.Client{Timeout: 10 * time.Second},
-		adp:                 adp,
-		udpServices:         udpServices,
+		id:          cfg.ID,
+		account:     cfg.Account,
+		state:       state.NewStore(),
+		client:      network.NewClient(cfg.Account, requestTimeout),
+		factory:     factory,
+		luaPool:     luaPool,
+		ctx:         ctx,
+		cancel:      cancel,
+		dialer:      dialer,
+		authBaseURL: cfg.AuthBaseURL,
+		httpClient:  &http.Client{Timeout: cfg.HTTPTimeout},
+		adp:         adp,
 		mainService: mainService,
+		done:        make(chan struct{}),
 	}
 
 	if luaPool != nil {
@@ -93,10 +93,15 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 	return r
 }
 
+// GetID 返回机器人 ID。
 func (r *Robot) GetID() int                  { return r.id }
+// GetAccount 返回机器人账号名。
 func (r *Robot) GetAccount() string          { return r.account }
+// GetState 返回机器人状态存储。
 func (r *Robot) GetState() *state.Store      { return r.state }
+// GetClient 返回网络客户端。
 func (r *Robot) GetClient() *network.Client  { return r.client }
+// GetFactory 返回 proto 消息工厂。
 func (r *Robot) GetFactory() *protox.Factory { return r.factory }
 
 // Start 启动机器人
@@ -107,6 +112,7 @@ func (r *Robot) Start() {
 
 	go func() {
 		defer r.running.Store(false)
+		defer close(r.done)
 
 		if r.L != nil {
 			r.luaMu.Lock()
@@ -138,6 +144,11 @@ func (r *Robot) Stop() {
 	r.cancel()
 }
 
+// Wait 等待机器人执行 goroutine 结束。
+func (r *Robot) Wait() {
+	<-r.done
+}
+
 // Close 释放机器人资源
 func (r *Robot) Close() {
 	r.Stop()
@@ -151,7 +162,7 @@ func (r *Robot) Close() {
 
 // ConnectTCP 建立 TCP 连接
 func (r *Robot) ConnectTCP(serviceName, address string) bool {
-	ok := r.client.Connect(serviceName)
+	ok := r.client.ConnectTCP(serviceName)
 	if !ok {
 		return false
 	}
@@ -163,7 +174,7 @@ func (r *Robot) ConnectTCP(serviceName, address string) bool {
 
 	_, err := r.dialer.DialTCP(r.ctx, address, conn)
 	if err != nil {
-		r.client.Close(serviceName)
+		r.client.CloseTCP(serviceName)
 		return false
 	}
 
@@ -210,20 +221,12 @@ func (r *Robot) ConnectUDP(serviceName, address string) bool {
 
 // CloseTCP 关闭指定服务的 TCP 连接
 func (r *Robot) CloseTCP(service string) {
-	r.client.Close(service)
+	r.client.CloseTCP(service)
 }
 
 // CloseUDP 关闭指定服务的 UDP 连接
 func (r *Robot) CloseUDP(service string) {
 	r.client.CloseUDP(service)
-}
-
-// resolveListenConnByName 按服务名解析连接，区分 UDP / TCP。
-func (r *Robot) resolveListenConnByName(name string) *network.Connection {
-	if r.udpServices[name] {
-		return r.client.GetUDPConn(name)
-	}
-	return r.client.GetTCPConn(name)
 }
 
 // robotActionHandler Robot 对 ActionHandler 接口的实现
@@ -234,7 +237,7 @@ type robotActionHandler struct {
 
 // ExecuteAction 执行动作
 func (h *robotActionHandler) ExecuteAction(actionDef *engine.ActionDef) error {
-	if actionDef.Pattern == "lua" {
+	if actionDef.Pattern == engine.PatternLua {
 		return h.executeLuaAction(actionDef)
 	}
 
@@ -247,13 +250,14 @@ func (h *robotActionHandler) ExecuteAction(actionDef *engine.ActionDef) error {
 	return ae.Execute(actionDef)
 }
 
+// ExecuteAction 执行 lua 脚本动作
 func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) error {
 	if h.robot.L == nil || h.robot.luaPool == nil {
-		return fmt.Errorf("Lua 运行时未初始化")
+		return fmt.Errorf("lua 运行时未初始化")
 	}
 
 	if actionDef.Script == "" {
-		return fmt.Errorf("Lua 动作缺少 script 配置")
+		return fmt.Errorf("lua 动作缺少 script 配置")
 	}
 
 	h.robot.luaMu.Lock()
@@ -261,11 +265,11 @@ func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) error
 
 	code, err := h.robot.luaPool.RunActionScript(h.robot.L, actionDef.Script)
 	if err != nil {
-		return fmt.Errorf("执行 Lua 脚本 %s 失败: %w", actionDef.Script, err)
+		return fmt.Errorf("执行 lua 脚本 %s 失败: %w", actionDef.Script, err)
 	}
 
 	if code != 0 {
-		return fmt.Errorf("Lua 脚本 %s 返回错误码: %d", actionDef.Script, code)
+		return fmt.Errorf("lua 脚本 %s 返回错误码: %d", actionDef.Script, code)
 	}
 
 	return nil
@@ -280,14 +284,18 @@ func (h *robotActionHandler) ExecuteBoolean(expression string) bool {
 	return evalCondition(expression, h.robot.state)
 }
 
+// executeLuaBoolean 执行 Lua 脚本条件判断，返回脚本执行结果。
 func (h *robotActionHandler) executeLuaBoolean(scriptName string) bool {
 	if h.robot.L == nil || h.robot.luaPool == nil {
-		return true
+		stresslog.Error("[ROBOT] Lua 运行时未初始化，条件判断默认拒绝",
+			zap.String("script", scriptName))
+		return false
 	}
 
 	if !h.robot.luaPool.HasScript(scriptName) {
-		stresslog.Warn("[ROBOT] 条件脚本不存在", zap.String("script", scriptName))
-		return true
+		stresslog.Error("[ROBOT] 条件脚本不存在，条件判断默认拒绝",
+			zap.String("script", scriptName))
+		return false
 	}
 
 	h.robot.luaMu.Lock()
@@ -295,8 +303,9 @@ func (h *robotActionHandler) executeLuaBoolean(scriptName string) bool {
 
 	code, err := h.robot.luaPool.RunActionScript(h.robot.L, scriptName)
 	if err != nil {
-		stresslog.Warn("[ROBOT] 条件脚本执行失败", zap.String("script", scriptName), zap.Error(err))
-		return true
+		stresslog.Error("[ROBOT] 条件脚本执行失败，条件判断默认拒绝",
+			zap.String("script", scriptName), zap.Error(err))
+		return false
 	}
 
 	return code == 0
@@ -304,22 +313,26 @@ func (h *robotActionHandler) executeLuaBoolean(scriptName string) bool {
 
 // RegisterListen 注册持久化监听
 func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
-	groups := make(map[string]map[string]network.ListenCallBack)
+	type connKey struct {
+		proto   string
+		service string
+	}
+	groups := make(map[connKey]map[string]network.ListenCallBack)
 
 	for _, ref := range refs {
-		server := ref.Server
-		if server == "" {
-			stresslog.Warn("[ROBOT] 监听引用缺少 server 字段")
+		proto, service, ok := parseServer(ref.Server)
+		if !ok {
 			continue
 		}
-		if _, ok := groups[server]; !ok {
-			groups[server] = make(map[string]network.ListenCallBack)
+		key := connKey{proto: proto, service: service}
+		if _, ok := groups[key]; !ok {
+			groups[key] = make(map[string]network.ListenCallBack)
 		}
 
 		respKey := h.robot.adp.ExpectedResponseKey(ref.Route)
 
 		if ref.Callback == "" {
-			groups[server][respKey] = nil
+			groups[key][respKey] = nil
 			continue
 		}
 
@@ -328,13 +341,19 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 			stresslog.Warn("[ROBOT] 回调定义不存在", zap.String("callback", ref.Callback))
 			continue
 		}
-		groups[server][respKey] = h.createListenCallback(cbDef)
+		groups[key][respKey] = h.createListenCallback(cbDef)
 	}
 
-	for server, listenMap := range groups {
-		conn := h.resolveListenConn(server)
+	for key, listenMap := range groups {
+		var conn *network.Connection
+		switch key.proto {
+		case "udp":
+			conn = h.robot.client.GetUDPConn(key.service)
+		case "tcp":
+			conn = h.robot.client.GetTCPConn(key.service)
+		}
 		if conn == nil {
-			stresslog.Warn("[ROBOT] 无连接可注册监听", zap.String("server", server))
+			stresslog.Warn("[ROBOT] 无连接可注册监听", zap.String("proto", key.proto), zap.String("service", key.service))
 			continue
 		}
 		conn.ListenResponse(listenMap)
@@ -343,13 +362,21 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 	return nil
 }
 
-func (h *robotActionHandler) resolveListenConn(server string) *network.Connection {
-	if h.robot.udpServices[server] {
-		return h.robot.client.GetUDPConn(server)
+// parseServer 解析 "tcp:logic" 或 "udp:udp" 格式的 server 字段。
+func parseServer(server string) (proto, service string, ok bool) {
+	if server == "" {
+		stresslog.Warn("[ROBOT] 监听引用缺少 server 字段")
+		return "", "", false
 	}
-	return h.robot.client.GetTCPConn(server)
+	parts := strings.SplitN(server, ":", 2)
+	if len(parts) != 2 || (parts[0] != "tcp" && parts[0] != "udp") {
+		stresslog.Error("[ROBOT] server 字段格式错误，需为 tcp:xxx 或 udp:xxx", zap.String("server", server))
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }
 
+// createListenCallback 根据回调定义创建监听回调函数。
 func (h *robotActionHandler) createListenCallback(cbDef *engine.CallbackDef) network.ListenCallBack {
 	if cbDef.Script != "" {
 		return func(msg *network.Message) {
@@ -406,6 +433,7 @@ func (h *robotActionHandler) createListenCallback(cbDef *engine.CallbackDef) net
 	}
 }
 
+// evalCondition 求值 state: 前缀的条件表达式。
 func evalCondition(expr string, s *state.Store) bool {
 	expr = strings.TrimSpace(expr)
 	if expr == "" {
@@ -413,7 +441,9 @@ func evalCondition(expr string, s *state.Store) bool {
 	}
 
 	if !strings.HasPrefix(expr, "state:") {
-		return true
+		stresslog.Error("[ROBOT] 条件表达式格式错误，仅支持 state: 前缀",
+			zap.String("expr", expr))
+		return false
 	}
 	rest := expr[6:]
 
@@ -425,7 +455,7 @@ func evalCondition(expr string, s *state.Store) bool {
 			if lhs == nil {
 				return false
 			}
-			return compareValues(lhs, rhs, op)
+			return state.CompareValues(lhs, rhs, op)
 		}
 	}
 
@@ -449,38 +479,12 @@ func evalCondition(expr string, s *state.Store) bool {
 	}
 }
 
-func compareValues(lhs any, rhs string, op string) bool {
-	lhsStr := fmt.Sprintf("%v", lhs)
-	if op == "==" {
-		return lhsStr == rhs
-	}
-	if op == "!=" {
-		return lhsStr != rhs
-	}
-
-	lhsNum, err1 := strconv.ParseFloat(lhsStr, 64)
-	rhsNum, err2 := strconv.ParseFloat(rhs, 64)
-	if err1 != nil || err2 != nil {
-		return false
-	}
-	switch op {
-	case ">":
-		return lhsNum > rhsNum
-	case ">=":
-		return lhsNum >= rhsNum
-	case "<":
-		return lhsNum < rhsNum
-	case "<=":
-		return lhsNum <= rhsNum
-	}
-	return false
-}
-
 // netSenderAdapter NetSender 接口适配器
 type netSenderAdapter struct {
 	robot *Robot
 }
 
+// TCPSend 通过 TCP 发送数据包。
 func (ns *netSenderAdapter) TCPSend(service string, packet []byte) (bool, int) {
 	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
@@ -489,6 +493,7 @@ func (ns *netSenderAdapter) TCPSend(service string, packet []byte) (bool, int) {
 	return conn.Send(packet)
 }
 
+// TCPRequest 发送 TCP 请求并等待响应。
 func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, responseKey string) ([]byte, bool) {
 	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
@@ -506,10 +511,11 @@ func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, responseKe
 	return resp.Data, true
 }
 
+// HTTPPost 发送 HTTP POST 表单请求。
 func (ns *netSenderAdapter) HTTPPost(path string, formData map[string]string) (int, []byte, error) {
 	baseURL := ns.robot.authBaseURL
 	if baseURL == "" {
-		return 0, nil, fmt.Errorf("Auth 服务地址未配置")
+		return 0, nil, fmt.Errorf("目标服务地址未配置")
 	}
 
 	fullURL := baseURL
@@ -537,25 +543,28 @@ func (ns *netSenderAdapter) HTTPPost(path string, formData map[string]string) (i
 	return resp.StatusCode, body, nil
 }
 
-func (ns *netSenderAdapter) UDPSend(service string, data []byte) bool {
+// UDPSend 通过 UDP 发送数据包。
+func (ns *netSenderAdapter) UDPSend(service string, data []byte) (bool, int) {
 	conn := ns.robot.client.GetUDPConn(service)
 	if conn == nil {
-		return false
+		return false, 0
 	}
-	ok, _ := conn.Send(data)
-	return ok
+	return conn.Send(data)
 }
 
+// ConnectTCP 通过适配器建立 TCP 连接。
 func (ns *netSenderAdapter) ConnectTCP(service, address string) bool {
 	return ns.robot.ConnectTCP(service, address)
 }
 
+// ConnectUDP 通过适配器建立 UDP 连接。
 func (ns *netSenderAdapter) ConnectUDP(service, address string) bool {
 	return ns.robot.ConnectUDP(service, address)
 }
 
-func (ns *netSenderAdapter) GetListenResp(service string, responseKey string) []byte {
-	conn := ns.robot.resolveListenConnByName(service)
+// GetTCPListenResp 获取 TCP 连接的监听响应数据。
+func (ns *netSenderAdapter) GetTCPListenResp(service string, responseKey string) []byte {
+	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
 		return nil
 	}
@@ -566,7 +575,21 @@ func (ns *netSenderAdapter) GetListenResp(service string, responseKey string) []
 	return msg.Data
 }
 
-func (ns *netSenderAdapter) GetSecretKey(service string) []byte {
+// GetUDPListenResp 获取 UDP 连接的监听响应数据。
+func (ns *netSenderAdapter) GetUDPListenResp(service string, responseKey string) []byte {
+	conn := ns.robot.client.GetUDPConn(service)
+	if conn == nil {
+		return nil
+	}
+	msg := conn.GetListenResp(responseKey)
+	if msg == nil {
+		return nil
+	}
+	return msg.Data
+}
+
+// GetTCPSecretKey 获取 TCP 连接的加密密钥。
+func (ns *netSenderAdapter) GetTCPSecretKey(service string) []byte {
 	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
 		return nil
@@ -574,29 +597,43 @@ func (ns *netSenderAdapter) GetSecretKey(service string) []byte {
 	return conn.GetSecretKey()
 }
 
-func (ns *netSenderAdapter) SetSecretKey(service string, key []byte) {
+// SetTCPSecretKey 设置 TCP 连接的加密密钥。
+func (ns *netSenderAdapter) SetTCPSecretKey(service string, key []byte) {
 	conn := ns.robot.client.GetTCPConn(service)
 	if conn != nil {
 		conn.SetSecretKey(key)
 	}
 }
 
-func (ns *netSenderAdapter) EnsureListener(service string, responseKey string) {
-	conn := ns.robot.resolveListenConnByName(service)
+// EnsureTCPListener 为 TCP 连接注册监听器占位。
+func (ns *netSenderAdapter) EnsureTCPListener(service string, responseKey string) {
+	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
 		return
 	}
 	conn.AddListener(responseKey, nil)
 }
 
+// EnsureUDPListener 为 UDP 连接注册监听器占位。
+func (ns *netSenderAdapter) EnsureUDPListener(service string, responseKey string) {
+	conn := ns.robot.client.GetUDPConn(service)
+	if conn == nil {
+		return
+	}
+	conn.AddListener(responseKey, nil)
+}
+
+// CloseTCP 关闭 TCP 连接。
 func (ns *netSenderAdapter) CloseTCP(service string) {
 	ns.robot.CloseTCP(service)
 }
 
+// CloseUDP 关闭 UDP 连接。
 func (ns *netSenderAdapter) CloseUDP(service string) {
 	ns.robot.CloseUDP(service)
 }
 
+// SetUDPSecretKey 设置 UDP 连接的加密密钥。
 func (ns *netSenderAdapter) SetUDPSecretKey(service string, key []byte) {
 	conn := ns.robot.client.GetUDPConn(service)
 	if conn != nil {
@@ -604,6 +641,7 @@ func (ns *netSenderAdapter) SetUDPSecretKey(service string, key []byte) {
 	}
 }
 
+// GetUDPSecretKey 获取 UDP 连接的加密密钥。
 func (ns *netSenderAdapter) GetUDPSecretKey(service string) []byte {
 	conn := ns.robot.client.GetUDPConn(service)
 	if conn == nil {
@@ -612,17 +650,24 @@ func (ns *netSenderAdapter) GetUDPSecretKey(service string) []byte {
 	return conn.GetSecretKey()
 }
 
-func (ns *netSenderAdapter) RegisterHeartbeat(target, service string, intervalMs int, builder func() []byte) {
-	var conn *network.Connection
-	if ns.robot.udpServices[target] {
-		conn = ns.robot.client.GetUDPConn(target)
-	} else if target == "udp" {
-		conn = ns.robot.client.GetUDPConn(service)
-	} else {
-		conn = ns.robot.client.GetTCPConn(service)
-	}
+// RegisterTCPHeartbeat 注册 TCP 心跳。
+func (ns *netSenderAdapter) RegisterTCPHeartbeat(service string, intervalMs int, builder func() []byte) {
+	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
-		stresslog.Warn("[ROBOT] RegisterHeartbeat 连接不存在", zap.String("target", target), zap.String("service", service))
+		stresslog.Warn("[ROBOT] RegisterTCPHeartbeat 连接不存在", zap.String("service", service))
+		return
+	}
+	conn.RegisterHeartbeat(network.HeartbeatConfig{
+		Interval: time.Duration(intervalMs) * time.Millisecond,
+		Builder:  builder,
+	})
+}
+
+// RegisterUDPHeartbeat 注册 UDP 心跳。
+func (ns *netSenderAdapter) RegisterUDPHeartbeat(service string, intervalMs int, builder func() []byte) {
+	conn := ns.robot.client.GetUDPConn(service)
+	if conn == nil {
+		stresslog.Warn("[ROBOT] RegisterUDPHeartbeat 连接不存在", zap.String("service", service))
 		return
 	}
 	conn.RegisterHeartbeat(network.HeartbeatConfig{
