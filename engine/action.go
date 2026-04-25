@@ -1,8 +1,6 @@
 ﻿package engine
 
 import (
-	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -367,7 +365,9 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		return result
 
 	default:
-		return fb.Value
+		stresslog.Warn("[ACTION] 未知 binding type，按 fixed 处理",
+			zap.String("type", fb.Type), zap.String("field", fb.Field))
+		val = fb.Value
 	}
 
 	if fb.Path != "" && val != nil {
@@ -576,7 +576,7 @@ func (ae *ActionExecutor) execClose(def *ActionDef) error {
 	switch target {
 	case "udp":
 		ae.netSender.CloseUDP(def.Service)
-		stresslog.Debug("[ACTION] CloseTCP UDP 成功")
+		stresslog.Debug("[ACTION] CloseUDP 成功", zap.String("service", def.Service))
 	case "tcp":
 		ae.netSender.CloseTCP(def.Service)
 		stresslog.Debug("[ACTION] CloseTCP TCP 成功", zap.String("service", def.Service))
@@ -635,73 +635,12 @@ func (ae *ActionExecutor) execSetState(def *ActionDef) error {
 	for i := range def.Bindings {
 		fb := &def.Bindings[i]
 		val := ae.resolveFieldValue(fb)
-		if val == nil && fb.isRequired() {
+		if val == nil {
 			continue
 		}
 		ae.store.Set(fb.Field, val)
 	}
 	return nil
-}
-
-// buildRawBody 构建二进制 body
-func (ae *ActionExecutor) buildRawBody(fields []RawField) ([]byte, error) {
-	buf := new(bytes.Buffer)
-	for _, f := range fields {
-		if err := ae.writeRawField(buf, &f); err != nil {
-			return nil, err
-		}
-	}
-	return buf.Bytes(), nil
-}
-
-// writeRawField 写入原始二进制字段到 buffer。
-func (ae *ActionExecutor) writeRawField(buf *bytes.Buffer, f *RawField) error {
-	var val any
-	switch {
-	case f.Counter != "":
-		val = ae.store.IncrementInt64(f.Counter)
-	case f.Source != "":
-		val = ae.store.Get(f.Source)
-	case f.Type == "time_ms":
-		val = time.Now().UnixMilli()
-	case f.Type == "random_u16":
-		lo, hi := f.Min, f.Max
-		if lo >= hi {
-			val = lo
-		} else {
-			val = rand.Intn(hi-lo+1) + lo
-		}
-	default:
-		val = f.Value
-	}
-
-	switch f.Type {
-	case "u8", "i8":
-		return binary.Write(buf, binary.LittleEndian, uint8(state.ToInt64(val)))
-	case "u16", "i16", "random_u16":
-		return binary.Write(buf, binary.LittleEndian, uint16(state.ToInt64(val)))
-	case "u32", "i32":
-		return binary.Write(buf, binary.LittleEndian, uint32(state.ToInt64(val)))
-	case "u64", "i64", "time_ms":
-		return binary.Write(buf, binary.LittleEndian, uint64(state.ToInt64(val)))
-	case "bytes":
-		b, _ := val.([]byte)
-		if b == nil {
-			if s, ok := val.(string); ok {
-				b = []byte(s)
-			}
-		}
-		if f.Length > 0 && len(b) < f.Length {
-			pad := make([]byte, f.Length-len(b))
-			b = append(b, pad...)
-		} else if f.Length > 0 && len(b) > f.Length {
-			b = b[:f.Length]
-		}
-		_, err := buf.Write(b)
-		return err
-	default:
-		return fmt.Errorf("未知的 RawField 类型: %s", f.Type)
-	}
 }
 
 // parseAndStoreResponse 解析 S2C 响应消息并存储字段
@@ -733,13 +672,8 @@ func (ae *ActionExecutor) parseAndStoreResponse(def *ActionDef, respBody []byte)
 
 // storeResponse 将响应字段存储到 StateStore
 func (ae *ActionExecutor) storeResponse(mappings []StoreMapping, fieldMap map[string]any) {
-	keys := make([]string, 0, len(fieldMap))
-	for k := range fieldMap {
-		keys = append(keys, k)
-	}
-	stresslog.Debug("[ACTION] storeResponse 字段映射",
-		zap.Strings("availableKeys", keys),
-		zap.Int("mappingCount", len(mappings)))
+	stresslog.Debug("[ACTION] storeResponse",
+		zap.Int("mappingCount", len(mappings)), zap.Int("fieldCount", len(fieldMap)))
 
 	for _, m := range mappings {
 		if m.Field == "" {
@@ -784,6 +718,10 @@ func (ae *ActionExecutor) execWaitListen(def *ActionDef) error {
 	if timeout <= 0 {
 		timeout = 60
 	}
+	pollMs := def.PollMs
+	if pollMs <= 0 {
+		pollMs = 100
+	}
 
 	respKey := ae.computeRespKey(def)
 	routeKey := ae.adp.ExpectedResponseKey(def.Route)
@@ -813,7 +751,7 @@ func (ae *ActionExecutor) execWaitListen(def *ActionDef) error {
 				zap.Int("pollCount", pollCount), zap.Duration("elapsed", elapsed))
 			return nil
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(time.Duration(pollMs) * time.Millisecond)
 	}
 
 	elapsed := time.Since(start)

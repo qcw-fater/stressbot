@@ -39,7 +39,7 @@ func loadRobotModule(L *lua.LState) int {
 	// robot.clear(key?) — 删除单个 key（无参时清空全部）
 	L.SetField(mod, "clear", L.NewFunction(robotClear))
 	// robot.delete(key) — 删除单个 key
-	L.SetField(mod, "delete", L.NewFunction(robotClear))
+	L.SetField(mod, "delete", L.NewFunction(robotDelete))
 	// robot.get_path("a.b[0].c") — 按路径读取嵌套值
 	L.SetField(mod, "get_path", L.NewFunction(robotGetPath))
 	// robot.keys() — 返回所有 key 列表
@@ -203,6 +203,22 @@ func robotClear(L *lua.LState) int {
 	args := extractArgs(L, L.GetTop())
 	if len(args) == 0 {
 		ctx.Store.Clear()
+		return 0
+	}
+	key := lua.LVAsString(args[0])
+	ctx.Store.Delete(key)
+	return 0
+}
+
+// robotDelete robot.delete(key) — 删除单个 key（必须传 key）
+func robotDelete(L *lua.LState) int {
+	ctx := GetContext(L)
+	if ctx == nil || ctx.Store == nil {
+		return 0
+	}
+	args := extractArgs(L, L.GetTop())
+	if len(args) == 0 {
+		L.RaiseError("robot.delete requires (key)")
 		return 0
 	}
 	key := lua.LVAsString(args[0])

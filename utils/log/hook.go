@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 var webHookUrl = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send"
@@ -51,7 +52,7 @@ func postQYWXMsg(data string) {
 	bytes, _ := json.Marshal(msg)
 	req, _ := http.NewRequest("POST", webHookUrl+"?key="+token+"&debug=1", strings.NewReader(string(bytes)))
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := (&http.Client{}).Do(req)
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
 	if err != nil {
 		return
 	}

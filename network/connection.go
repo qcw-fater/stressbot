@@ -18,7 +18,6 @@ type ListenCallBack func(message *Message)
 type Connection struct {
 	serviceName string
 	robotName   string
-tisUDP       bool
 	secretKey   []byte
 
 	responseMap      map[string]chan *Message  // responseKey → 临时响应通道
@@ -63,7 +62,9 @@ func (c *Connection) ServiceName() string { return c.serviceName }
 // SetOnDisconnect 设置连接意外断开回调。
 // 仅在非主动 Close 导致的断开时触发（如服务端关闭连接、网络异常）。
 func (c *Connection) SetOnDisconnect(fn func()) {
+	c.mu.Lock()
 	c.onDisconnect = fn
+	c.mu.Unlock()
 }
 
 // SetSecretKey 设置通信加密密钥。
@@ -74,19 +75,27 @@ func (c *Connection) SetSecretKey(key []byte) {
 	if len(key) == 0 {
 		return
 	}
+	c.mu.Lock()
 	if c.secretKey == nil || len(c.secretKey) != len(key) {
 		c.secretKey = make([]byte, len(key))
 	}
 	copy(c.secretKey, key)
+	c.mu.Unlock()
 }
 
 // GetSecretKey 获取通信加密密钥的副本。
 func (c *Connection) GetSecretKey() []byte {
-	if c == nil || c.secretKey == nil {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	if c.secretKey == nil {
+		c.mu.Unlock()
 		return nil
 	}
 	key := make([]byte, len(c.secretKey))
 	copy(key, c.secretKey)
+	c.mu.Unlock()
 	return key
 }
 
@@ -259,9 +268,9 @@ func (c *Connection) onClose() {
 	c.StopHeartbeat()
 	c.cancel()
 
-	// 仅非主动关闭时触发断开回调
+	// 仅非主动关闭时触发断开回调（异步执行，避免阻塞 gnet 事件循环）
 	if atomic.LoadInt32(&c.intentionalClose) == 0 && c.onDisconnect != nil {
-		c.onDisconnect()
+		go c.onDisconnect()
 	}
 
 	stresslog.Debug("[NETWORK] 连接资源已清理", zap.String("service", c.serviceName), zap.String("robot", c.robotName))

@@ -100,25 +100,11 @@ type ActionDef struct {
 	Bindings  []FieldBind    `json:"bindings"`  // C2S 字段绑定
 	Store     []StoreMapping `json:"store"`     // S2C 响应字段 -> 状态存储映射
 	Timeout   int            `json:"timeout"`   // 超时秒数（waitListen 模式）
+	PollMs    int            `json:"pollMs"`    // 轮询间隔毫秒（waitListen 模式，默认 100）
 	Target    string         `json:"target"`    // close 模式目标: tcp 或 udp
 	Keys      []string       `json:"keys"`      // clearState 要清除的 key 列表
-	RawBody   []RawField     `json:"rawBody"`   // udpSendRaw 二进制字段描述
 	Optional  bool           `json:"optional"`  // 可选动作：依赖缺失时静默跳过
 	SecretArg string         `json:"secretArg"` // exchangeKey 时也把密钥存到 state key
-}
-
-// RawField 二进制字段描述。
-// 用于 udpSendRaw 构建自定义二进制消息体（如 UDPHeartData、UDPFrameData）。
-// Type 取值: u8/u16/u32/u64/i8/i16/i32/i64/bytes/time_ms/random_u16
-type RawField struct {
-	Name    string `json:"name"`    // 字段名（仅日志用）
-	Type    string `json:"type"`    // 类型
-	Value   any    `json:"value"`   // 固定值
-	Source  string `json:"source"`  // 从 StateStore 读取
-	Counter string `json:"counter"` // 从 StateStore 自增读取
-	Min     int    `json:"min"`     // random_u16 最小值
-	Max     int    `json:"max"`     // random_u16 最大值
-	Length  int    `json:"length"`  // bytes 固定长度（未指定时按 Value/Source 长度）
 }
 
 // FieldBind C2S 字段绑定定义。

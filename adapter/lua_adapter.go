@@ -264,10 +264,22 @@ func (a *LuaAdapter) acquire() *lua.LState {
 	}
 }
 
-// release 将 LState 归还到池中
-func (a *LuaAdapter) release(L *lua.LState) { a.states <- L }
+// release 将 LState 归还到池中（非阻塞，池满时关闭 LState 防止泄漏）
+func (a *LuaAdapter) release(L *lua.LState) {
+	select {
+	case a.states <- L:
+	default:
+		stresslog.Warn("[ADAPTER] release LState 池已满，关闭溢出 LState")
+		L.Close()
+	}
+}
 
-// closeAll 清理池中所有 LState（初始化失败时调用）
+// Close 关闭适配器，释放所有 LState 资源。
+func (a *LuaAdapter) Close() {
+	a.closeAll()
+}
+
+// closeAll 清理池中所有 LState
 func (a *LuaAdapter) closeAll() {
 	for {
 		select {

@@ -12,9 +12,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// DefaultEngineDelayMs 引擎兜底的节点间延迟，TaskFlow.DefaultDelayMs 为 0 时使用。
-const DefaultEngineDelayMs = 1000
-
 // errBreak 和 errContinue 是循环控制的内部信号，不是真正的错误。
 // 它们通过 Go 的 error 传播机制在节点树中向上冒泡，
 // 直到被最近的 executeLoop 捕获并消费，不会传播到 loop 之外。
@@ -42,14 +39,10 @@ type ActionHandler interface {
 // NewExecutor 创建流程执行器。
 // caller 用于日志中标识调用方（如机器人账号），便于追踪问题。
 func NewExecutor(flow *TaskFlow, handler ActionHandler, caller string) *Executor {
-	delayMs := flow.DefaultDelayMs
-	if delayMs < 0 {
-		delayMs = DefaultEngineDelayMs
-	}
 	return &Executor{
 		flow:           flow,
 		handler:        handler,
-		defaultDelayMs: delayMs,
+		defaultDelayMs: flow.DefaultDelayMs,
 		caller:         caller,
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -33,6 +34,7 @@ type Robot struct {
 	executor    *engine.Executor
 	luaPool     *script.RuntimePool
 	L           *lua.LState
+	actionExec  *engine.ActionExecutor
 	ctx         context.Context
 	cancel      context.CancelFunc
 	running     atomic.Bool
@@ -88,6 +90,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		r.state.Set(k, v)
 	}
 
+	r.actionExec = engine.NewActionExecutor(r.state, &netSenderAdapter{robot: r}, r.factory, r.adp)
 	r.executor = engine.NewExecutor(flow, &robotActionHandler{robot: r, flow: flow}, r.account)
 
 	return r
@@ -149,9 +152,11 @@ func (r *Robot) Wait() {
 	<-r.done
 }
 
-// Close 释放机器人资源
+// Close 停止机器人并释放资源。
+// 会等待执行 goroutine 退出后再释放 LState，避免 use-after-free。
 func (r *Robot) Close() {
 	r.Stop()
+	r.Wait()
 	r.client.CloseAll()
 	if r.L != nil && r.luaPool != nil {
 		r.luaPool.Release(r.L)
@@ -450,11 +455,12 @@ func evalCondition(expr string, s *state.Store) bool {
 	for _, op := range []string{">=", "<=", "!=", "==", ">", "<"} {
 		if idx := strings.Index(rest, op); idx > 0 {
 			key := strings.TrimSpace(rest[:idx])
-			rhs := strings.TrimSpace(rest[idx+len(op):])
+			rhsStr := strings.TrimSpace(rest[idx+len(op):])
 			lhs := s.Get(key)
 			if lhs == nil {
 				return false
 			}
+			rhs := parseRHS(rhsStr)
 			return state.CompareValues(lhs, rhs, op)
 		}
 	}
@@ -477,6 +483,17 @@ func evalCondition(expr string, s *state.Store) bool {
 	default:
 		return true
 	}
+}
+
+// parseRHS 尝试将条件右值解析为数值类型，保留字符串回退。
+func parseRHS(s string) any {
+	if v, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return v
+	}
+	if v, err := strconv.ParseFloat(s, 64); err == nil {
+		return v
+	}
+	return s
 }
 
 // netSenderAdapter NetSender 接口适配器

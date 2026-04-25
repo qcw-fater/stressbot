@@ -131,11 +131,19 @@ func utilsRandomPickN(L *lua.LState) int {
 	return 1
 }
 
-// utilsSleep utils.sleep(ms) — 休眠指定毫秒数
+// utilsSleep utils.sleep(ms) — 休眠指定毫秒数（响应 context 取消）
 func utilsSleep(L *lua.LState) int {
 	ms := L.CheckInt(1)
 	if ms > 0 {
-		time.Sleep(time.Duration(ms) * time.Millisecond)
+		ctx := GetContext(L)
+		if ctx != nil && ctx.Ctx != nil {
+			select {
+			case <-time.After(time.Duration(ms) * time.Millisecond):
+			case <-ctx.Ctx.Done():
+			}
+		} else {
+			time.Sleep(time.Duration(ms) * time.Millisecond)
+		}
 	}
 	return 0
 }

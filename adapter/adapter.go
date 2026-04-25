@@ -45,4 +45,7 @@ type Adapter interface {
 	// ExpectedResponseKey 从发送路由计算期望的响应路由键。
 	// 用于 TCPRequest 等待响应时注册临时通道。
 	ExpectedResponseKey(route any) string
+
+	// Close 释放适配器持有的资源（如 LState 池）。
+	Close()
 }

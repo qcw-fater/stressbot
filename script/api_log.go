@@ -31,46 +31,17 @@ func logPrefix(id int, account string) string {
 	return fmt.Sprintf(" id=%d account=%s", id, account)
 }
 
-// logDebug log.debug(message)
-func logDebug(L *lua.LState) int {
+// logAtLevel 通用日志函数，避免 4 个函数的重复代码。
+func logAtLevel(L *lua.LState, logFn func(string, ...zap.Field)) {
 	ctx := GetContext(L)
 	prefix := ""
 	if ctx != nil {
 		prefix = logPrefix(ctx.RobotID, ctx.Account)
 	}
-	stresslog.Debug("[SCRIPT]"+prefix, zap.String("msg", L.CheckString(1)))
-	return 0
+	logFn("[SCRIPT]"+prefix, zap.String("msg", L.CheckString(1)))
 }
 
-// logInfo log.info(message)
-func logInfo(L *lua.LState) int {
-	ctx := GetContext(L)
-	prefix := ""
-	if ctx != nil {
-		prefix = logPrefix(ctx.RobotID, ctx.Account)
-	}
-	stresslog.Info("[SCRIPT]"+prefix, zap.String("msg", L.CheckString(1)))
-	return 0
-}
-
-// logWarn log.warn(message)
-func logWarn(L *lua.LState) int {
-	ctx := GetContext(L)
-	prefix := ""
-	if ctx != nil {
-		prefix = logPrefix(ctx.RobotID, ctx.Account)
-	}
-	stresslog.Warn("[SCRIPT]"+prefix, zap.String("msg", L.CheckString(1)))
-	return 0
-}
-
-// logError log.error(message)
-func logError(L *lua.LState) int {
-	ctx := GetContext(L)
-	prefix := ""
-	if ctx != nil {
-		prefix = logPrefix(ctx.RobotID, ctx.Account)
-	}
-	stresslog.Error("[SCRIPT]"+prefix, zap.String("msg", L.CheckString(1)))
-	return 0
-}
+func logDebug(L *lua.LState) int { logAtLevel(L, stresslog.Debug); return 0 }
+func logInfo(L *lua.LState) int  { logAtLevel(L, stresslog.Info); return 0 }
+func logWarn(L *lua.LState) int  { logAtLevel(L, stresslog.Warn); return 0 }
+func logError(L *lua.LState) int { logAtLevel(L, stresslog.Error); return 0 }

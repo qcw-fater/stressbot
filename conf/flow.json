@@ -125,9 +125,10 @@
     "loadLoop": {
       "type": "loop",
       "loopCount": -1,
+      "breakCondition": "state:loadProgress>=100",
       "body": "LoadProgress"
     },
-    "LoadProgress": { "type": "action", "action": "LoadProgress" },
+    "LoadProgress": { "type": "action", "action": "LoadProgress", "delayMs": -1 },
     "BattleLoadOK": { "type": "action", "action": "BattleLoadOK" },
     "ResetLoadState": { "type": "action", "action": "ResetLoadState" },
     "StartGame": { "type": "action", "action": "StartGame" },
@@ -136,7 +137,7 @@
       "loopCount": 30,
       "body": "SyncFrameData"
     },
-    "SyncFrameData": { "type": "action", "action": "SyncFrameData" },
+    "SyncFrameData": { "type": "action", "action": "SyncFrameData", "delayMs": -1 },
     "BattleEnd": { "type": "action", "action": "BattleEnd" },
     "BattleReward": { "type": "action", "action": "BattleReward" },
     "GameOver": { "type": "action", "action": "GameOver" },

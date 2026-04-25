@@ -113,9 +113,6 @@ func (m *Manager) StopAll() {
 
 	for _, r := range robots {
 		r.Close()
-	}
-	for _, r := range robots {
-		r.Wait()
 		m.stopped.Add(1)
 	}
 	stresslog.Info("[MANAGER] 全部机器人已停止")

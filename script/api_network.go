@@ -422,11 +422,12 @@ func networkUDPSendMsg(L *lua.LState) int {
 }
 
 // networkWaitListen 等待监听消息。
-// 签名：network.wait_listen(service, route [, s2c_proto [, timeout_sec]])
+// 签名：network.wait_listen(service, route [, s2c_proto [, timeout_sec [, poll_ms]]])
 //
 //	route:       路由 table（如 {cmd=3, act=1}），通过 ExpectedResponseKey 计算响应键
 //	s2c_proto:   响应 proto 全名（可选）
 //	timeout_sec: 超时秒数（默认 60）
+//	poll_ms:     轮询间隔毫秒（默认 100）
 func networkWaitListen(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
@@ -440,12 +441,19 @@ func networkWaitListen(L *lua.LState) int {
 
 	var s2cProto string
 	timeout := 60
+	pollMs := 100
 
 	if L.GetTop() >= 3 {
 		s2cProto = L.CheckString(3)
 	}
 	if L.GetTop() >= 4 {
 		timeout = L.CheckInt(4)
+	}
+	if L.GetTop() >= 5 {
+		pollMs = L.CheckInt(5)
+	}
+	if pollMs <= 0 {
+		pollMs = 100
 	}
 
 	ctx.NetSender.EnsureTCPListener(service, responseKey)
@@ -465,7 +473,7 @@ func networkWaitListen(L *lua.LState) int {
 			break
 		}
 
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(time.Duration(pollMs) * time.Millisecond)
 
 		if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
 			break
@@ -621,82 +629,33 @@ func networkEnsureListener(L *lua.LState) int {
 	return 0
 }
 
+// heartbeatProto 用于区分 TCP/UDP 心跳的编码方式
+type heartbeatProto int
+
+const (
+	hbProtoTCP heartbeatProto = iota
+	hbProtoUDP
+)
+
 // networkRegisterTCPHeartbeat 注册 TCP 心跳。
 // 签名：network.register_heartbeat_tcp(service, interval_ms, route, builder)
 //
 //	   或：network.register_heartbeat_tcp(service, builder, route)
-//
-//	service:     TCP 连接名（如 "logic"、"battle"）
-//	interval_ms: 心跳间隔毫秒
-//	route:       路由 table（如 {cmd=2, act=1}）
-//	builder:     心跳体构建函数（可选）
 func networkRegisterTCPHeartbeat(L *lua.LState) int {
-	ctx := GetContext(L)
-	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
-		L.RaiseError("network not available")
-		return 0
-	}
-
-	service := L.CheckString(1)
-
-	var goRoute any
-	var intervalMs int
-	var builderFn *lua.LFunction
-
-	v2 := L.Get(2)
-	if fn, ok := v2.(*lua.LFunction); ok {
-		builderFn = fn
-	} else {
-		intervalMs = int(lua.LVAsNumber(v2))
-		goRoute = luaValueToRoute(L.Get(3))
-		if L.GetTop() >= 4 {
-			if fn, ok := L.Get(4).(*lua.LFunction); ok {
-				builderFn = fn
-			}
-		}
-	}
-
-	hbRegKey := fmt.Sprintf("__hb_tcp_%s__", service)
-	if builderFn != nil {
-		L.SetField(L.Get(lua.RegistryIndex), hbRegKey, builderFn)
-	}
-
-	luaMu := ctx.LuaMu
-	adp := ctx.Adapter
-	builder := func() []byte {
-		var body []byte
-		if builderFn != nil && luaMu != nil {
-			luaMu.Lock()
-			savedTop := L.GetTop()
-			if err := L.CallByParam(lua.P{Fn: builderFn, NRet: 1, Protect: true}); err != nil {
-				L.SetTop(savedTop)
-				luaMu.Unlock()
-				return nil
-			}
-			ret := L.Get(-1)
-			body = []byte(lua.LVAsString(ret))
-			L.SetTop(savedTop)
-			luaMu.Unlock()
-		}
-
-		secretKey := ctx.NetSender.GetTCPSecretKey(service)
-		return adp.EncodeTCP(goRoute, body, secretKey)
-	}
-
-	ctx.NetSender.RegisterTCPHeartbeat(service, intervalMs, builder)
-	return 0
+	return registerHeartbeat(L, hbProtoTCP)
 }
 
 // networkRegisterUDPHeartbeat 注册 UDP 心跳。
 // 签名：network.register_heartbeat_udp(service, interval_ms, route, builder)
 //
 //	   或：network.register_heartbeat_udp(service, builder, route)
-//
-//	service:     UDP 连接名（如 "battle"）
-//	interval_ms: 心跳间隔毫秒
-//	route:       路由 table（如 {cmd=4, act=2}）
-//	builder:     心跳体构建函数（可选）
 func networkRegisterUDPHeartbeat(L *lua.LState) int {
+	return registerHeartbeat(L, hbProtoUDP)
+}
+
+// registerHeartbeat 心跳注册的共享实现。
+// 解析参数、构建 builder 闭包、调用对应的注册方法。
+func registerHeartbeat(L *lua.LState, proto heartbeatProto) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
 		L.RaiseError("network not available")
@@ -704,6 +663,10 @@ func networkRegisterUDPHeartbeat(L *lua.LState) int {
 	}
 
 	service := L.CheckString(1)
+	protoName := "tcp"
+	if proto == hbProtoUDP {
+		protoName = "udp"
+	}
 
 	var goRoute any
 	var intervalMs int
@@ -722,7 +685,11 @@ func networkRegisterUDPHeartbeat(L *lua.LState) int {
 		}
 	}
 
-	hbRegKey := fmt.Sprintf("__hb_udp_%s__", service)
+	if intervalMs <= 0 {
+		intervalMs = 3000
+	}
+
+	hbRegKey := fmt.Sprintf("__hb_%s_%s__", protoName, service)
 	if builderFn != nil {
 		L.SetField(L.Get(lua.RegistryIndex), hbRegKey, builderFn)
 	}
@@ -737,8 +704,8 @@ func networkRegisterUDPHeartbeat(L *lua.LState) int {
 			if err := L.CallByParam(lua.P{Fn: builderFn, NRet: 1, Protect: true}); err != nil {
 				L.SetTop(savedTop)
 				luaMu.Unlock()
-				stresslog.Warn("[SCRIPT] UDP 心跳 builder Lua 调用失败",
-					zap.String("service", service), zap.Error(err))
+				stresslog.Warn("[SCRIPT] 心跳 builder Lua 调用失败",
+					zap.String("proto", protoName), zap.String("service", service), zap.Error(err))
 				return nil
 			}
 			ret := L.Get(-1)
@@ -747,11 +714,19 @@ func networkRegisterUDPHeartbeat(L *lua.LState) int {
 			luaMu.Unlock()
 		}
 
-		udpKey := ctx.NetSender.GetUDPSecretKey(service)
-		return adp.EncodeUDP(goRoute, body, udpKey)
+		if proto == hbProtoUDP {
+			secretKey := ctx.NetSender.GetUDPSecretKey(service)
+			return adp.EncodeUDP(goRoute, body, secretKey)
+		}
+		secretKey := ctx.NetSender.GetTCPSecretKey(service)
+		return adp.EncodeTCP(goRoute, body, secretKey)
 	}
 
-	ctx.NetSender.RegisterUDPHeartbeat(service, intervalMs, builder)
+	if proto == hbProtoUDP {
+		ctx.NetSender.RegisterUDPHeartbeat(service, intervalMs, builder)
+	} else {
+		ctx.NetSender.RegisterTCPHeartbeat(service, intervalMs, builder)
+	}
 	return 0
 }
 
@@ -831,7 +806,7 @@ func adapterEncodeUDP(L *lua.LState) int {
 //	data: 加密数据字节串
 //	key:  解密密钥（可选）
 //
-// 返回：response_key(string), body(string)
+// 返回：response_key(string), body(string), header_err(number)
 func adapterDecodeTCP(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.Adapter == nil {
@@ -844,10 +819,11 @@ func adapterDecodeTCP(L *lua.LState) int {
 	if L.GetTop() >= 2 {
 		key = []byte(L.CheckString(2))
 	}
-	responseKey, body, _ := ctx.Adapter.DecodeTCP(data, key)
+	responseKey, body, headerErr := ctx.Adapter.DecodeTCP(data, key)
 	L.Push(lua.LString(responseKey))
 	L.Push(lua.LString(string(body)))
-	return 2
+	L.Push(lua.LNumber(headerErr))
+	return 3
 }
 
 // adapterDecodeUDP 解码 UDP 数据包：从加密数据中提取 responseKey 和消息体。
@@ -856,7 +832,7 @@ func adapterDecodeTCP(L *lua.LState) int {
 //	data: 加密数据字节串
 //	key:  解密密钥（可选）
 //
-// 返回：response_key(string), body(string)
+// 返回：response_key(string), body(string), header_err(number)
 func adapterDecodeUDP(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.Adapter == nil {
@@ -869,10 +845,11 @@ func adapterDecodeUDP(L *lua.LState) int {
 	if L.GetTop() >= 2 {
 		key = []byte(L.CheckString(2))
 	}
-	responseKey, body, _ := ctx.Adapter.DecodeUDP(data, key)
+	responseKey, body, headerErr := ctx.Adapter.DecodeUDP(data, key)
 	L.Push(lua.LString(responseKey))
 	L.Push(lua.LString(string(body)))
-	return 2
+	L.Push(lua.LNumber(headerErr))
+	return 3
 }
 
 // adapterExpectedResponseKey 根据路由计算期望的响应路由键。

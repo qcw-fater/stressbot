@@ -44,7 +44,7 @@ func GetLocalIP() string {
 	}
 	for _, address := range addr {
 		// 检查ip地址判断是否回环地址
-		if inet, ok := address.(*net.IPNet); ok && !inet.IP.IsLoopback() && inet.IP.IsLinkLocalMulticast() && inet.IP.IsLinkLocalUnicast() {
+		if inet, ok := address.(*net.IPNet); ok && !inet.IP.IsLoopback() && inet.IP.To4() != nil {
 			if inet.IP.To4() != nil {
 				return inet.IP.String()
 			}

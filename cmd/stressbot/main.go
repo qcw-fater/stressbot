@@ -172,6 +172,7 @@ func main() {
 	<-sigCh
 	stresslog.Info("[MAIN] 收到退出信号，正在关闭...")
 	mgr.StopAll()
+	adp.Close()
 	stresslog.Info("[MAIN] 已退出")
 }
 
