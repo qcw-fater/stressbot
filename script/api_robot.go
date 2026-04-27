@@ -410,6 +410,11 @@ func luaToGoValue(v lua.LValue) any {
 					arr[idx] = luaToGoValue(val)
 				}
 			})
+			for i := range arr {
+				if arr[i] == nil {
+					arr[i] = ""
+				}
+			}
 			return arr
 		}
 

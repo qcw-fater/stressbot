@@ -1,6 +1,7 @@
 ﻿package engine
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -25,6 +26,7 @@ type ActionExecutor struct {
 	store     *state.Store    // Robot 状态存储
 	factory   *protox.Factory // 动态消息工厂
 	adp       adapter.Adapter // 协议适配器
+	ctx       context.Context // 用于长轮询中检测取消
 }
 
 // NetSender 网络发送委托接口。
@@ -50,12 +52,13 @@ type NetSender interface {
 }
 
 // NewActionExecutor 创建声明式动作执行器
-func NewActionExecutor(store *state.Store, sender NetSender, factory *protox.Factory, adp adapter.Adapter) *ActionExecutor {
+func NewActionExecutor(store *state.Store, sender NetSender, factory *protox.Factory, adp adapter.Adapter, ctx context.Context) *ActionExecutor {
 	return &ActionExecutor{
 		netSender: sender,
 		store:     store,
 		factory:   factory,
 		adp:       adp,
+		ctx:       ctx,
 	}
 }
 
@@ -737,6 +740,9 @@ func (ae *ActionExecutor) execWaitListen(def *ActionDef) error {
 	pollCount := 0
 
 	for time.Now().Before(deadline) {
+		if ae.ctx != nil && ae.ctx.Err() != nil {
+			return ae.ctx.Err()
+		}
 		pollCount++
 		respBody := ae.netSender.GetTCPListenResp(def.Service, respKey)
 		if respBody != nil {

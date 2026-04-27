@@ -23,6 +23,7 @@ type HeartbeatConfig struct {
 type heartbeatState struct {
 	cfg     HeartbeatConfig
 	stop    chan struct{}
+	done    chan struct{} // goroutine 退出时关闭，供 StopHeartbeat 等待
 	running int32
 }
 
@@ -42,6 +43,7 @@ func (c *Connection) RegisterHeartbeat(cfg HeartbeatConfig) {
 	state := &heartbeatState{
 		cfg:  cfg,
 		stop: make(chan struct{}),
+		done: make(chan struct{}),
 	}
 	c.heartbeatMu.Lock()
 	c.heartbeat = state
@@ -51,7 +53,7 @@ func (c *Connection) RegisterHeartbeat(cfg HeartbeatConfig) {
 	go c.runHeartbeat(state)
 }
 
-// StopHeartbeat 停止当前心跳
+// StopHeartbeat 停止当前心跳并等待 goroutine 退出。
 func (c *Connection) StopHeartbeat() {
 	c.heartbeatMu.Lock()
 	hb := c.heartbeat
@@ -60,11 +62,13 @@ func (c *Connection) StopHeartbeat() {
 
 	if hb != nil && atomic.CompareAndSwapInt32(&hb.running, 1, 0) {
 		close(hb.stop)
+		<-hb.done // 等待 goroutine 退出
 	}
 }
 
 // runHeartbeat 心跳发送循环
 func (c *Connection) runHeartbeat(hb *heartbeatState) {
+	defer close(hb.done)
 	ticker := time.NewTicker(hb.cfg.Interval)
 	defer ticker.Stop()
 

@@ -2,7 +2,6 @@ package protox
 
 import (
 	"strings"
-	"sync"
 
 	stresslog "stressbot/utils/log"
 
@@ -13,8 +12,8 @@ import (
 
 // Registry 消息类型注册表。
 // 从 protoregistry.Files 构建按消息全名索引的快速查找表。
+// 构建后 messages 只读，无需加锁。
 type Registry struct {
-	mu       sync.RWMutex
 	files    *protoregistry.Files
 	messages map[string]protoreflect.MessageDescriptor // fullName -> descriptor
 }
@@ -65,8 +64,6 @@ func indexFromDescriptor(msgs protoreflect.MessageDescriptors, result map[string
 // Lookup 查找消息类型描述符
 // name 可以是全名（如 "login.PlayerLoginC2S"）或短名（如 "PlayerLoginC2S"）
 func (r *Registry) Lookup(name string) (protoreflect.MessageDescriptor, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
 	md, ok := r.messages[name]
 	return md, ok
 }

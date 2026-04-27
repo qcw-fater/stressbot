@@ -4,12 +4,23 @@ import (
 	"fmt"
 	"math"
 	stresslog "stressbot/utils/log"
+	"sync"
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 )
+
+// withReleasedMu 临时释放 mu，执行 fn 后重新获取。
+// 通过 defer 保证即使 fn panic 也能重新获取 mu，防止锁状态不一致。
+func withReleasedMu(mu *sync.Mutex, fn func()) {
+	if mu != nil {
+		mu.Unlock()
+		defer mu.Lock()
+	}
+	fn()
+}
 
 // loadNetworkModule 加载 network 命名空间模块。
 func loadNetworkModule(L *lua.LState) int {
@@ -227,14 +238,11 @@ func networkRequest(L *lua.LState) int {
 	respKey := ctx.Adapter.ExpectedResponseKey(goRoute)
 
 	// 释放 luaMu，避免 TCPRequest 阻塞期间阻塞心跳 builder
-	if ctx.LuaMu != nil {
-		ctx.LuaMu.Unlock()
-	}
-	respBody, ok := ctx.NetSender.TCPRequest(service, packet, respKey)
-	// 重新获取 luaMu，后续操作需要 Lua 状态
-	if ctx.LuaMu != nil {
-		ctx.LuaMu.Lock()
-	}
+	var respBody []byte
+	var ok bool
+	withReleasedMu(ctx.LuaMu, func() {
+		respBody, ok = ctx.NetSender.TCPRequest(service, packet, respKey)
+	})
 
 	if !ok {
 		L.Push(lua.LNumber(-1))
@@ -458,44 +466,30 @@ func networkWaitListen(L *lua.LState) int {
 
 	ctx.NetSender.EnsureTCPListener(service, responseKey)
 
-	// 轮询期间释放 luaMu，允许心跳 builder 运行
-	if ctx.LuaMu != nil {
-		ctx.LuaMu.Unlock()
-	}
-
 	var respBody []byte
-	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
-	timedOut := false
+	var timedOut bool
 
-	for time.Now().Before(deadline) {
-		respBody = ctx.NetSender.GetTCPListenResp(service, responseKey)
-		if respBody != nil {
-			break
-		}
-
-		time.Sleep(time.Duration(pollMs) * time.Millisecond)
-
-		if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-			break
-		}
-	}
-
-	if respBody == nil {
-		if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-			if ctx.LuaMu != nil {
-				ctx.LuaMu.Lock()
+	withReleasedMu(ctx.LuaMu, func() {
+		deadline := time.Now().Add(time.Duration(timeout) * time.Second)
+		for time.Now().Before(deadline) {
+			respBody = ctx.NetSender.GetTCPListenResp(service, responseKey)
+			if respBody != nil {
+				return
 			}
-			L.Push(lua.LNil)
-			return 1
+			time.Sleep(time.Duration(pollMs) * time.Millisecond)
+			if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
+				return
+			}
 		}
-		timedOut = true
-	}
+		if respBody == nil {
+			timedOut = true
+		}
+	})
 
-	// 重新获取 luaMu，后续操作需要 Lua 状态
-	if ctx.LuaMu != nil {
-		ctx.LuaMu.Lock()
+	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
+		L.Push(lua.LNil)
+		return 1
 	}
-
 	if timedOut {
 		stresslog.Warn("[SCRIPT] wait_listen 超时",
 			zap.String("service", service), zap.String("responseKey", responseKey), zap.Int("timeout", timeout))
@@ -640,7 +634,7 @@ const (
 // networkRegisterTCPHeartbeat 注册 TCP 心跳。
 // 签名：network.register_heartbeat_tcp(service, interval_ms, route, builder)
 //
-//	   或：network.register_heartbeat_tcp(service, builder, route)
+//	或：network.register_heartbeat_tcp(service, builder, route)
 func networkRegisterTCPHeartbeat(L *lua.LState) int {
 	return registerHeartbeat(L, hbProtoTCP)
 }
@@ -648,7 +642,7 @@ func networkRegisterTCPHeartbeat(L *lua.LState) int {
 // networkRegisterUDPHeartbeat 注册 UDP 心跳。
 // 签名：network.register_heartbeat_udp(service, interval_ms, route, builder)
 //
-//	   或：network.register_heartbeat_udp(service, builder, route)
+//	或：network.register_heartbeat_udp(service, builder, route)
 func networkRegisterUDPHeartbeat(L *lua.LState) int {
 	return registerHeartbeat(L, hbProtoUDP)
 }
@@ -697,6 +691,9 @@ func registerHeartbeat(L *lua.LState, proto heartbeatProto) int {
 	luaMu := ctx.LuaMu
 	adp := ctx.Adapter
 	builder := func() []byte {
+		if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
+			return nil
+		}
 		var body []byte
 		if builderFn != nil && luaMu != nil {
 			luaMu.Lock()

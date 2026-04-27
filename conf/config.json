@@ -1,8 +1,8 @@
 {
   "bot": {
     "accountPrefix": "bot_",
-    "startNumber": 16,
-    "count": 1,
+    "startNumber": 20,
+    "count": 10,
     "concurrentNum": 0,
     "mainService": "logic"
   },
@@ -29,5 +29,18 @@
   "flow": "conf/flow.json",
   "script": {
     "dirs": ["conf/scripts"]
+  },
+  "log": {
+    "path": "log/stressbot.log",
+    "level": "info",
+    "printConsole": true,
+    "maxSize": 500,
+    "maxBackups": 3,
+    "maxAge": 7,
+    "compress": true
+  },
+  "pprof": {
+    "enabled": true,
+    "port": 6060
   }
 }

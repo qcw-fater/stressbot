@@ -90,7 +90,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		r.state.Set(k, v)
 	}
 
-	r.actionExec = engine.NewActionExecutor(r.state, &netSenderAdapter{robot: r}, r.factory, r.adp)
+	r.actionExec = engine.NewActionExecutor(r.state, &netSenderAdapter{robot: r}, r.factory, r.adp, r.ctx)
 	r.executor = engine.NewExecutor(flow, &robotActionHandler{robot: r, flow: flow}, r.account)
 
 	return r
@@ -246,13 +246,7 @@ func (h *robotActionHandler) ExecuteAction(actionDef *engine.ActionDef) error {
 		return h.executeLuaAction(actionDef)
 	}
 
-	ae := engine.NewActionExecutor(
-		h.robot.state,
-		&netSenderAdapter{robot: h.robot},
-		h.robot.factory,
-		h.robot.adp,
-	)
-	return ae.Execute(actionDef)
+	return h.robot.actionExec.Execute(actionDef)
 }
 
 // ExecuteAction 执行 lua 脚本动作

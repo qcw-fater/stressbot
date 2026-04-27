@@ -282,11 +282,13 @@ func (c *Connection) Close() {
 		return
 	}
 	atomic.StoreInt32(&c.intentionalClose, 1)
+	atomic.StoreInt32(&c.isClose, 1)
 	c.StopHeartbeat()
 	if c.closeFunc != nil {
 		_ = c.closeFunc()
 	}
-	c.onClose()
+	c.cancel()
+	stresslog.Debug("[NETWORK] 连接资源已清理", zap.String("service", c.serviceName), zap.String("robot", c.robotName))
 }
 
 // OnReceive 收到网络消息时的分发入口。

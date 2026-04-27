@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"runtime"
@@ -57,6 +59,19 @@ type Config struct {
 	Script struct {
 		Dirs []string `json:"dirs"`
 	} `json:"script"`
+	Log struct {
+		Path         string `json:"path"`
+		Level        string `json:"level"`
+		PrintConsole bool   `json:"printConsole"`
+		MaxSize      int    `json:"maxSize"`
+		MaxBackups   int    `json:"maxBackups"`
+		MaxAge       int    `json:"maxAge"`
+		Compress     bool   `json:"compress"`
+	} `json:"log"`
+	Pprof struct {
+		Enabled bool `json:"enabled"`
+		Port    int  `json:"port"`
+	} `json:"pprof"`
 }
 
 func main() {
@@ -69,8 +84,35 @@ func main() {
 		os.Exit(1)
 	}
 
-	stresslog.InitLog("log/stressbot.log", "stressbot", nil, "")
+	logPath := cfg.Log.Path
+	if logPath == "" {
+		logPath = "log/stressbot.log"
+	}
+	logConf := &stresslog.Config{
+		PrintConsole: cfg.Log.PrintConsole,
+		LogLevel:     cfg.Log.Level,
+		MaxSize:      cfg.Log.MaxSize,
+		MaxBackups:   cfg.Log.MaxBackups,
+		MaxAge:       cfg.Log.MaxAge,
+		Compress:     cfg.Log.Compress,
+	}
+	stresslog.InitLog(logPath, "stressbot", logConf, "")
 	stresslog.Info("[MAIN] 配置已加载", zap.Int("botCount", cfg.Bot.Count), zap.Int("concurrent", cfg.Bot.ConcurrentNum))
+
+	// 启动 pprof
+	if cfg.Pprof.Enabled {
+		pprofPort := cfg.Pprof.Port
+		if pprofPort == 0 {
+			pprofPort = 6060
+		}
+		addr := fmt.Sprintf(":%d", pprofPort)
+		go func() {
+			if err := http.ListenAndServe(addr, nil); err != nil {
+				stresslog.Warn("[MAIN] pprof 服务启动失败", zap.String("addr", addr), zap.Error(err))
+			}
+		}()
+		stresslog.Info("[MAIN] pprof 已启动", zap.String("addr", addr))
+	}
 
 	// 加载协议适配器
 	adp, err := loadAdapter(cfg)
