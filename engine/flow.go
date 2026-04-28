@@ -90,6 +90,7 @@ const (
 // ActionDef 动作定义。
 // Pattern 决定执行方式（取值见 Pattern 常量）。
 type ActionDef struct {
+	Name      string         `json:"-"`          // 运行时回填（actions map 的 key），不参与序列化
 	Pattern   string         `json:"pattern"`   // 动作模式
 	Service   string         `json:"service"`   // 目标服务名
 	Route     any            `json:"route"`     // 不透明路由，原样传给 adapter.EncodeTCP

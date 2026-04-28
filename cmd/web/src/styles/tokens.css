@@ -1,0 +1,145 @@
+/*
+ * 设计 token：颜色 / 间距 / 阴影 / 节点尺寸
+ *
+ * 节点配色采用 Ant Design 5 调色板的主色阶。
+ * action 用 magenta（洋红）与 sequence 蓝明显错开，避免视觉混淆。
+ *
+ * 详见 docs/design-web-editor.md §5.2
+ */
+
+:root {
+  /* === 节点主色 === */
+  --node-sequence: #1677ff; /* 蓝色 */
+  --node-sequence-bg: #e6f4ff;
+  --node-sequence-border-active: #003eb3;
+
+  --node-action: #595959; /* 中性灰黑（用最多，不抢戏） */
+  --node-action-bg: #ededed; /* 淡灰，跟其他节点的浅色背景一致而非纯白 */
+  --node-action-border-active: #1f1f1f;
+
+  --node-loop: #52c41a; /* 绿色 */
+  --node-loop-bg: #f6ffed;
+  --node-loop-border-active: #237804;
+
+  --node-boolean: #faad14; /* 金黄（比纯黄更易读） */
+  --node-boolean-bg: #fffbe6;
+  --node-boolean-border-active: #ad6800;
+
+  --node-weighted: #722ed1; /* 紫色 */
+  --node-weighted-bg: #f9f0ff;
+  --node-weighted-border-active: #391085;
+
+  --node-wait: #f5222d; /* 红色 */
+  --node-wait-bg: #fff1f0;
+  --node-wait-border-active: #a8071a;
+
+  --node-break: #fa8c16; /* 橙色 */
+  --node-break-bg: #fff7e6;
+  --node-break-border-active: #ad4e00;
+
+  --node-continue: #13c2c2; /* 青色 */
+  --node-continue-bg: #e6fffb;
+  --node-continue-border-active: #006d75;
+
+  --node-callback: #595959; /* CallbackCard：与 action 同灰黑，因为 listen 也属于动作辅助 */
+  --node-callback-bg: #ededed;
+  --node-callback-border-active: #1f1f1f;
+
+  /* === 边颜色 === */
+  --edge-seq: #8c8c8c;
+  --edge-true: #52c41a;
+  --edge-false: #ff4d4f;
+  --edge-weight: #722ed1;
+  --edge-loop-body: var(--node-loop);
+  --edge-listen: #8c8c8c;
+
+  /* === 选中色 === */
+  --edge-selected: #1677ff;
+  --node-selected-glow: rgba(22, 119, 255, 0.45);
+
+  /* === 文本与背景 === */
+  --text-primary: rgba(0, 0, 0, 0.88);
+  --text-secondary: rgba(0, 0, 0, 0.65);
+  --text-tertiary: rgba(0, 0, 0, 0.45);
+  --bg-canvas: #fafafa;
+  --bg-panel: #ffffff;
+
+  /* === 间距 === */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+
+  /* === 阴影 === */
+  --shadow-node: 0 2px 6px rgba(0, 0, 0, 0.08);
+  --shadow-node-hover: 0 4px 12px rgba(0, 0, 0, 0.16);
+
+  /* === 节点尺寸 === */
+  --node-radius: 8px;
+  --node-min-width: 160px;
+  --node-padding: 8px 10px;
+  --node-padding-compact: 4px 8px;
+}
+
+/* === 暗色主题：通过 [data-theme="dark"] 覆盖 token === */
+:root[data-theme='dark'] {
+  /* 节点主色（保留色相，背景换深色） */
+  --node-sequence: #4096ff;
+  --node-sequence-bg: #112545;
+  --node-sequence-border-active: #69b1ff;
+
+  --node-action: #d9d9d9;
+  --node-action-bg: #2a2a2a;
+  --node-action-border-active: #ffffff;
+
+  --node-loop: #95de64;
+  --node-loop-bg: #1c2e15;
+  --node-loop-border-active: #b7eb8f;
+
+  --node-boolean: #ffc53d;
+  --node-boolean-bg: #3a2c10;
+  --node-boolean-border-active: #ffd666;
+
+  --node-weighted: #b37feb;
+  --node-weighted-bg: #271845;
+  --node-weighted-border-active: #d3adf7;
+
+  --node-wait: #ff7875;
+  --node-wait-bg: #401414;
+  --node-wait-border-active: #ffa39e;
+
+  --node-break: #ffa940;
+  --node-break-bg: #3d2710;
+  --node-break-border-active: #ffc069;
+
+  --node-continue: #5cdbd3;
+  --node-continue-bg: #112d2c;
+  --node-continue-border-active: #87e8de;
+
+  --node-callback: #d9d9d9;
+  --node-callback-bg: #2a2a2a;
+  --node-callback-border-active: #ffffff;
+
+  /* 边颜色（在深色背景上需要更亮） */
+  --edge-seq: #8c8c8c;
+  --edge-true: #95de64;
+  --edge-false: #ff7875;
+  --edge-weight: #b37feb;
+  --edge-loop-body: #95de64;
+  --edge-listen: #8c8c8c;
+
+  --edge-selected: #4096ff;
+  --node-selected-glow: rgba(64, 150, 255, 0.55);
+
+  /* 文本与背景 */
+  --text-primary: rgba(255, 255, 255, 0.92);
+  --text-secondary: rgba(255, 255, 255, 0.72);
+  --text-tertiary: rgba(255, 255, 255, 0.5);
+  --bg-canvas: #141414;
+  --bg-panel: #1f1f1f;
+
+  /* 阴影：深色背景下用更深一点 */
+  --shadow-node: 0 2px 6px rgba(0, 0, 0, 0.45);
+  --shadow-node-hover: 0 4px 12px rgba(0, 0, 0, 0.6);
+}

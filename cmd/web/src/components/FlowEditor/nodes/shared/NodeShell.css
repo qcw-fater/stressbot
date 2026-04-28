@@ -1,0 +1,468 @@
+/* === 通用外壳 === */
+.node-shell {
+  position: relative;
+  background: var(--bg-panel);
+  border: 1.5px solid;
+  border-radius: var(--node-radius);
+  padding: var(--node-padding);
+  box-shadow: var(--shadow-node);
+  font-size: 12px;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, transform 0.1s ease, border-width 0.1s ease;
+}
+
+.node-shell:hover {
+  box-shadow: var(--shadow-node-hover);
+}
+
+/* 选中态：粗描边 + 节点同色外发光（每种类型在下方覆盖），比 hover 显著增强 */
+.node-shell.selected {
+  border-width: 2.5px;
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.1), var(--shadow-node-hover);
+}
+
+/* 各类型选中发光颜色：用 currentColor 不方便，直接覆盖每种 */
+.node-sequence.selected {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-sequence) 45%, transparent), var(--shadow-node-hover);
+}
+.node-action.selected {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-action) 35%, transparent), var(--shadow-node-hover);
+}
+.node-loop.selected {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-loop) 45%, transparent), var(--shadow-node-hover);
+}
+.node-boolean.selected {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-boolean) 45%, transparent), var(--shadow-node-hover);
+}
+.node-weighted.selected {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-weighted) 45%, transparent), var(--shadow-node-hover);
+}
+.node-wait.selected {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-wait) 45%, transparent), var(--shadow-node-hover);
+}
+.node-break.selected {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-break) 45%, transparent), var(--shadow-node-hover);
+}
+.node-continue.selected {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-continue) 45%, transparent), var(--shadow-node-hover);
+}
+
+/* hover 某 callback 时，与之相关的 action 节点高亮 */
+.node-shell.highlight-by-callback {
+  box-shadow: 0 0 0 2px var(--edge-listen), var(--shadow-node-hover);
+}
+
+/* 校验问题：has-error / has-warning 在节点边框上叠加红/橙描边作为视觉提示 */
+.node-shell.has-error {
+  border-color: #ff4d4f !important;
+  box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.25), var(--shadow-node);
+}
+.node-shell.has-warning {
+  border-color: #faad14 !important;
+  box-shadow: 0 0 0 2px rgba(250, 173, 20, 0.25), var(--shadow-node);
+}
+
+/* 节点右上角的小型 issue 徽章（! 红色错误 / ? 橙色警告） */
+.node-issue-badge {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  border: 1.5px solid var(--bg-panel);
+  z-index: 2;
+  cursor: help;
+  pointer-events: auto;
+}
+.node-issue-badge[data-severity='error'] {
+  background: #ff4d4f;
+}
+.node-issue-badge[data-severity='warning'] {
+  background: #faad14;
+}
+
+/* 选中边时相连的两端节点高亮：用边颜色（即起点节点色）发光 —— 由父级 react-flow__node 的 data-edge-color 注入 */
+.node-shell.edge-highlight {
+  box-shadow: 0 0 0 2px var(--edge-highlight-color, var(--edge-selected)), var(--shadow-node-hover);
+}
+
+/* === 节点头部 === */
+.node-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.node-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.node-title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-primary);
+}
+
+.node-subtitle {
+  font-weight: 400;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-left: 4px;
+}
+
+.node-body {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  word-break: break-word;
+  margin-top: 4px;
+}
+
+/* 节点描述（注释）：紧贴标题下方，斜体+次要色+单行省略，鼠标悬停看 title 弹出全文 */
+.node-description {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-style: italic;
+  line-height: 1.3;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* === 各类型颜色（边框 + 浅色背景） === */
+.node-sequence {
+  border-color: var(--node-sequence);
+  background: var(--node-sequence-bg);
+}
+.node-sequence .node-title {
+  color: var(--node-sequence-border-active);
+}
+
+.node-action {
+  border-color: var(--node-action);
+  background: var(--node-action-bg);
+}
+.node-action .node-title {
+  color: var(--node-action-border-active);
+}
+
+.node-loop {
+  border-color: var(--node-loop);
+  background: var(--node-loop-bg);
+}
+.node-loop .node-title {
+  color: var(--node-loop-border-active);
+}
+
+.node-boolean {
+  border-color: var(--node-boolean);
+  background: var(--node-boolean-bg);
+}
+.node-boolean .node-title {
+  color: var(--node-boolean-border-active);
+}
+
+.node-weighted {
+  border-color: var(--node-weighted);
+  background: var(--node-weighted-bg);
+}
+.node-weighted .node-title {
+  color: var(--node-weighted-border-active);
+}
+
+.node-wait {
+  border-color: var(--node-wait);
+  background: var(--node-wait-bg);
+}
+.node-wait .node-title {
+  color: var(--node-wait-border-active);
+}
+
+.node-break {
+  border-color: var(--node-break);
+  background: var(--node-break-bg);
+}
+.node-break .node-title {
+  color: var(--node-break-border-active);
+}
+
+.node-continue {
+  border-color: var(--node-continue);
+  background: var(--node-continue-bg);
+}
+.node-continue .node-title {
+  color: var(--node-continue-border-active);
+}
+
+/* === 形状：通过 clip-path 与 border-radius 实现 === */
+
+/* loop：胶囊形（强调"循环"语义） */
+.node-shell.shape-pill {
+  border-radius: 999px;
+  padding: 6px 16px;
+}
+
+/* boolean：真菱形——外层正方形旋转 45°，内部反向旋转保持水平阅读 */
+.node-shell.shape-diamond {
+  width: 130px;
+  height: 130px;
+  transform: rotate(45deg);
+  border-radius: 6px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.node-shell.shape-diamond > .node-header,
+.node-shell.shape-diamond > .node-body {
+  transform: rotate(-45deg);
+  text-align: center;
+  width: 90px; /* 内容宽度受菱形内切矩形限制（约 sqrt(2)/2 * 130 ≈ 92px） */
+}
+.node-shell.shape-diamond > .node-header {
+  margin-bottom: 2px;
+}
+.node-shell.shape-diamond .node-title {
+  text-align: center;
+  width: 100%;
+}
+
+/* weighted：六边形（CSS clip-path） */
+.node-shell.shape-hex {
+  clip-path: polygon(8% 0, 92% 0, 100% 50%, 92% 100%, 8% 100%, 0 50%);
+  padding: 10px 22px;
+  border-radius: 4px;
+}
+
+/* wait：圆形（小） */
+.node-shell.shape-circle {
+  border-radius: 50%;
+  width: 100px;
+  height: 100px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 8px;
+}
+
+/* break / continue：标签形（小） */
+.node-shell.shape-tag {
+  border-radius: 14px;
+  padding: 4px 14px;
+  font-weight: 600;
+  text-align: center;
+  min-width: 0;
+}
+
+/* === Handle 默认样式（颜色随父级节点类型自动切换） === */
+.react-flow__handle {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: var(--edge-seq);
+}
+.react-flow__node-sequence .react-flow__handle {
+  background: var(--node-sequence);
+}
+.react-flow__node-action .react-flow__handle {
+  background: var(--node-action);
+}
+.react-flow__node-loop .react-flow__handle {
+  background: var(--node-loop);
+}
+.react-flow__node-boolean .react-flow__handle {
+  background: var(--node-boolean);
+}
+.react-flow__node-weighted .react-flow__handle {
+  background: var(--node-weighted);
+}
+.react-flow__node-wait .react-flow__handle {
+  background: var(--node-wait);
+}
+.react-flow__node-break .react-flow__handle {
+  background: var(--node-break);
+}
+.react-flow__node-continue .react-flow__handle {
+  background: var(--node-continue);
+}
+.react-flow__node-callbackCard .react-flow__handle {
+  background: var(--node-callback);
+}
+/* 个别节点用 inline style 覆盖（如 boolean true 走绿、false 走红、action 的 listen 走灰），优先级 OK */
+
+/* === 行内徽章 === */
+.pattern-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  font-size: 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-secondary);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  font-weight: 500;
+  font-family: monospace;
+}
+
+/* pattern 徽章按语义分组着色：
+ *   send  (tcpSend / tcpRequest / udpSendProto)  → 蓝
+ *   conn  (connect / connectUDP / exchangeKey / close) → 青
+ *   wait  (waitListen)                           → 橙
+ *   lua   (lua 脚本)                             → 紫
+ *   state (clearState / setState)                → 绿
+ *   silent / declarative / lua（callback kind 同 badge）
+ */
+.pattern-badge[data-pattern='tcpSend'],
+.pattern-badge[data-pattern='tcpRequest'],
+.pattern-badge[data-pattern='udpSendProto'] {
+  background: var(--node-sequence-bg);
+  color: var(--node-sequence-border-active);
+  border-color: var(--node-sequence);
+}
+.pattern-badge[data-pattern='connect'],
+.pattern-badge[data-pattern='connectUDP'],
+.pattern-badge[data-pattern='exchangeKey'],
+.pattern-badge[data-pattern='close'] {
+  background: var(--node-continue-bg);
+  color: var(--node-continue-border-active);
+  border-color: var(--node-continue);
+}
+.pattern-badge[data-pattern='waitListen'] {
+  background: var(--node-break-bg);
+  color: var(--node-break-border-active);
+  border-color: var(--node-break);
+}
+.pattern-badge[data-pattern='lua'] {
+  background: var(--node-weighted-bg);
+  color: var(--node-weighted-border-active);
+  border-color: var(--node-weighted);
+}
+.pattern-badge[data-pattern='clearState'],
+.pattern-badge[data-pattern='setState'] {
+  background: var(--node-loop-bg);
+  color: var(--node-loop-border-active);
+  border-color: var(--node-loop);
+}
+/* CallbackCard 的 kind 也复用 pattern-badge：silent 灰 / declarative 蓝 / lua 紫 */
+.pattern-badge[data-pattern='silent'] {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text-tertiary);
+  border-color: rgba(0, 0, 0, 0.16);
+}
+.pattern-badge[data-pattern='declarative'] {
+  background: var(--node-sequence-bg);
+  color: var(--node-sequence-border-active);
+  border-color: var(--node-sequence);
+}
+
+.listen-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
+  font-size: 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-secondary);
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  font-weight: 500;
+}
+
+.breakoff-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 5px;
+  font-size: 10px;
+  border-radius: 8px;
+  background: var(--node-wait-bg);
+  color: var(--node-wait-border-active);
+  border: 1px solid var(--node-wait);
+  font-weight: 500;
+}
+
+/* === 通用行容器：固定 22px 行高，让每一行精确对齐右侧 handle === */
+.row-list {
+  display: flex;
+  flex-direction: column;
+  /* 关键：删除子项的额外 margin/padding；行高由 .row-item 强制固定 */
+  margin: 0;
+}
+.row-item {
+  height: 22px;
+  line-height: 22px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 0;
+  margin: 0;
+}
+/* 序号列：用 tabular-nums 等宽 + 固定 22px 宽，1/10/100 都不会让后面的 name 错位 */
+.row-index {
+  flex: 0 0 22px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  text-align: right;
+  font-family: ui-monospace, 'JetBrains Mono', Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+.row-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+.row-tail {
+  flex: 0 0 auto;
+  text-align: right;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* "+" 占位行：sequence / weighted 末尾的拖线续接占位，颜色更弱 */
+.row-item-add {
+  opacity: 0.7;
+}
+
+/* "+" handle：与正式 handle 区分，使用虚线圆圈，提示用户这是"未连接"槽 */
+.react-flow__handle.handle-add {
+  background: var(--bg-panel);
+  border-style: dashed;
+  border-width: 1.5px;
+  width: 10px;
+  height: 10px;
+}
+
+/* === 权重条形图 === */
+.weight-bar {
+  flex: 1;
+  height: 5px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.weight-bar-fill {
+  height: 100%;
+  background: var(--node-weighted);
+  border-radius: 3px;
+}

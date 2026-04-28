@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"runtime"
@@ -18,6 +16,7 @@ import (
 
 	"stressbot/adapter"
 	"stressbot/engine"
+	"stressbot/monitor"
 	"stressbot/network"
 	"stressbot/protox"
 	"stressbot/robot"
@@ -68,10 +67,7 @@ type Config struct {
 		MaxAge       int    `json:"maxAge"`
 		Compress     bool   `json:"compress"`
 	} `json:"log"`
-	Pprof struct {
-		Enabled bool `json:"enabled"`
-		Port    int  `json:"port"`
-	} `json:"pprof"`
+	Monitor monitor.CollectorConfig `json:"monitor"`
 }
 
 func main() {
@@ -99,21 +95,6 @@ func main() {
 	stresslog.InitLog(logPath, "stressbot", logConf, "")
 	stresslog.Info("[MAIN] 配置已加载", zap.Int("botCount", cfg.Bot.Count), zap.Int("concurrent", cfg.Bot.ConcurrentNum))
 
-	// 启动 pprof
-	if cfg.Pprof.Enabled {
-		pprofPort := cfg.Pprof.Port
-		if pprofPort == 0 {
-			pprofPort = 6060
-		}
-		addr := fmt.Sprintf(":%d", pprofPort)
-		go func() {
-			if err := http.ListenAndServe(addr, nil); err != nil {
-				stresslog.Warn("[MAIN] pprof 服务启动失败", zap.String("addr", addr), zap.Error(err))
-			}
-		}()
-		stresslog.Info("[MAIN] pprof 已启动", zap.String("addr", addr))
-	}
-
 	// 加载协议适配器
 	adp, err := loadAdapter(cfg)
 	if err != nil {
@@ -139,6 +120,20 @@ func main() {
 
 	stresslog.Info("[MAIN] 流程配置已加载",
 		zap.Int("nodes", len(flow.Nodes)), zap.Int("actions", len(flow.Actions)), zap.Int("callbacks", len(flow.Callbacks)))
+
+	// 回填 ActionDef.Name（用于监控指标标识）
+	for name, action := range flow.Actions {
+		action.Name = name
+	}
+
+	// 初始化监控
+	monitor.Init(cfg.Monitor)
+	if cfg.Monitor.Enabled {
+		stresslog.Info("[MAIN] 监控已启用",
+			zap.String("reportInterval", cfg.Monitor.ReportInterval),
+			zap.Bool("httpEnabled", cfg.Monitor.HTTPEnabled),
+			zap.Int("apdexT", cfg.Monitor.ApdexT))
+	}
 
 	// 解析心跳间隔
 	heartbeatInterval := 5 * time.Second
@@ -208,12 +203,48 @@ func main() {
 		stresslog.Fatal("启动机器人失败", zap.Error(err))
 	}
 
+	// 启动监控 Reporter 和 HTTP
+	var reporter *monitor.Reporter
+	if cfg.Monitor.Enabled {
+		interval := 5 * time.Second
+		if cfg.Monitor.ReportInterval != "" {
+			if d, err := time.ParseDuration(cfg.Monitor.ReportInterval); err == nil && d > 0 {
+				interval = d
+			}
+		}
+		reporter = monitor.NewReporter(monitor.Global(), interval)
+		reporter.Start()
+
+		if cfg.Monitor.HTTPEnabled {
+			monitor.RegisterHandlers(monitor.Global())
+			monitor.StartHTTPServer(cfg.Monitor.HTTPPort)
+		}
+	}
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	<-sigCh
 	stresslog.Info("[MAIN] 收到退出信号，正在关闭...")
+
+	if reporter != nil {
+		reporter.Stop()
+	}
+
 	mgr.StopAll()
+
+	if cfg.Monitor.Enabled {
+		csvPath := cfg.Monitor.CsvPath
+		if csvPath == "" {
+			csvPath = "log/metrics.csv"
+		}
+		if err := monitor.ExportCSV(monitor.Global(), csvPath); err != nil {
+			stresslog.Error("[MONITOR] CSV 导出失败", zap.Error(err))
+		} else {
+			stresslog.Info("[MONITOR] CSV 已导出", zap.String("path", csvPath))
+		}
+	}
+
 	adp.Close()
 	stresslog.Info("[MAIN] 已退出")
 }

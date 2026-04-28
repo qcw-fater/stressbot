@@ -1,0 +1,90 @@
+/* CallbackCard：与 action 节点同色系（淡灰），但边框用虚线以区分"被动监听"语义。 */
+.callback-card {
+  position: relative;
+  background: var(--node-callback-bg);
+  border: 1.5px dashed var(--node-callback);
+  border-radius: var(--node-radius);
+  padding: var(--node-padding);
+  min-width: 130px;
+  font-size: 11px;
+  box-shadow: var(--shadow-node);
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, transform 0.1s ease;
+}
+
+.callback-card:hover {
+  box-shadow: var(--shadow-node-hover);
+}
+
+.callback-card.selected {
+  border-width: 2.5px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-callback) 35%, transparent), var(--shadow-node-hover);
+}
+
+/* 标题独占第一行（同 ActionNode：第一行只显示 ID） */
+.callback-card-title-row {
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+}
+
+/* 元信息（kind + 引用计数）位于第二行 */
+.callback-card-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.card-title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.card-kind {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-secondary);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  font-family: monospace;
+}
+
+.card-ref {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  background: rgba(0, 0, 0, 0.04);
+  padding: 0 5px;
+  border-radius: 8px;
+}
+
+.card-ref.orphan {
+  color: #fa8c16;
+  background: #fff7e6;
+}
+
+/* kind 颜色微调：silent 偏灰、declarative 蓝、lua 紫（与 action 节点的 lua pattern 标签一致） */
+.card-kind.kind-tag-silent {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text-tertiary);
+}
+.card-kind.kind-tag-declarative {
+  background: var(--node-sequence-bg);
+  color: var(--node-sequence-border-active);
+  border-color: color-mix(in srgb, var(--node-sequence) 35%, transparent);
+}
+.card-kind.kind-tag-lua {
+  background: var(--node-weighted-bg);
+  color: var(--node-weighted-border-active);
+  border-color: color-mix(in srgb, var(--node-weighted) 35%, transparent);
+}
+
+/* silent 形态略微弱化（透明度，保留实线边框） */
+.callback-card.kind-silent {
+  opacity: 0.78;
+}

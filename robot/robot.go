@@ -2,6 +2,7 @@ package robot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 
 	"stressbot/adapter"
 	"stressbot/engine"
+	"stressbot/monitor"
 	"stressbot/network"
 	"stressbot/protox"
 	"stressbot/script"
@@ -133,10 +135,17 @@ func (r *Robot) Start() {
 		}
 
 		stresslog.Info("[ROBOT] 启动", zap.Int("id", r.id), zap.String("account", r.account))
+		monitor.Global().RobotStarted()
+		monitor.Global().RobotRunning()
 		if err := r.executor.Run(r.ctx); err != nil {
 			if r.ctx.Err() == nil {
 				stresslog.Error("[ROBOT] 流程异常退出", zap.Int("id", r.id), zap.Error(err))
+				monitor.Global().RobotErrored()
+			} else {
+				monitor.Global().RobotStopped()
 			}
+		} else {
+			monitor.Global().RobotStopped()
 		}
 		stresslog.Info("[ROBOT] 已停止", zap.Int("id", r.id), zap.String("account", r.account))
 	}()
@@ -180,10 +189,14 @@ func (r *Robot) ConnectTCP(serviceName, address string) bool {
 	_, err := r.dialer.DialTCP(r.ctx, address, conn)
 	if err != nil {
 		r.client.CloseTCP(serviceName)
+		monitor.Global().ConnFailed()
 		return false
 	}
 
+	monitor.Global().ConnEstablished()
+
 	conn.SetOnDisconnect(func() {
+		monitor.Global().ConnDropped()
 		if serviceName == r.mainService {
 			stresslog.Warn("[ROBOT] 主连接意外断开，停止机器人",
 				zap.Int("id", r.id), zap.String("account", r.account), zap.String("service", serviceName))
@@ -213,10 +226,14 @@ func (r *Robot) ConnectUDP(serviceName, address string) bool {
 	_, err := r.dialer.DialUDP(address, conn)
 	if err != nil {
 		r.client.CloseUDP(serviceName)
+		monitor.Global().ConnFailed()
 		return false
 	}
 
+	monitor.Global().ConnEstablished()
+
 	conn.SetOnDisconnect(func() {
+		monitor.Global().ConnDropped()
 		stresslog.Debug("[ROBOT] UDP 连接断开",
 			zap.Int("id", r.id), zap.String("account", r.account), zap.String("service", serviceName))
 	})
@@ -242,11 +259,44 @@ type robotActionHandler struct {
 
 // ExecuteAction 执行动作
 func (h *robotActionHandler) ExecuteAction(actionDef *engine.ActionDef) error {
-	if actionDef.Pattern == engine.PatternLua {
-		return h.executeLuaAction(actionDef)
+	if mc := monitor.Global(); mc != nil && actionDef.Name != "" {
+		mc.RecordActionStart(actionDef.Name)
 	}
 
-	return h.robot.actionExec.Execute(actionDef)
+	start := time.Now()
+	var sendBytes, recvBytes int
+	var err error
+
+	if actionDef.Pattern == engine.PatternLua {
+		err = h.executeLuaAction(actionDef)
+	} else {
+		sendBytes, recvBytes, err = h.robot.actionExec.Execute(actionDef)
+	}
+
+	if mc := monitor.Global(); mc != nil && actionDef.Name != "" {
+		result := classifyResult(err)
+		errMsg := ""
+		if err != nil {
+			errMsg = err.Error()
+		}
+		mc.RecordAction(actionDef.Name, result, time.Since(start), sendBytes, recvBytes, errMsg)
+	}
+
+	return err
+}
+
+// classifyResult 将 error 映射为 monitor ActionResult。
+func classifyResult(err error) monitor.ActionResult {
+	if err == nil {
+		return monitor.ResultSuccess
+	}
+	if errors.Is(err, engine.ErrActionSkip) {
+		return monitor.ResultSkipped
+	}
+	if errors.Is(err, engine.ErrTimeout) {
+		return monitor.ResultTimeout
+	}
+	return monitor.ResultFailure
 }
 
 // ExecuteAction 执行 lua 脚本动作
@@ -340,7 +390,7 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 			stresslog.Warn("[ROBOT] 回调定义不存在", zap.String("callback", ref.Callback))
 			continue
 		}
-		groups[key][respKey] = h.createListenCallback(cbDef)
+		groups[key][respKey] = h.createListenCallback(ref.Callback, cbDef)
 	}
 
 	for key, listenMap := range groups {
@@ -376,9 +426,10 @@ func parseServer(server string) (proto, service string, ok bool) {
 }
 
 // createListenCallback 根据回调定义创建监听回调函数。
-func (h *robotActionHandler) createListenCallback(cbDef *engine.CallbackDef) network.ListenCallBack {
+func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.CallbackDef) network.ListenCallBack {
 	if cbDef.Script != "" {
 		return func(msg *network.Message) {
+			monitor.Global().RecordCallback(cbName)
 			if h.robot.L == nil || h.robot.luaPool == nil {
 				stresslog.Error("[ROBOT] Lua 运行时未初始化", zap.String("script", cbDef.Script))
 				return
@@ -410,6 +461,7 @@ func (h *robotActionHandler) createListenCallback(cbDef *engine.CallbackDef) net
 	}
 
 	return func(msg *network.Message) {
+		monitor.Global().RecordCallback(cbName)
 		if len(msg.Data) == 0 {
 			return
 		}

@@ -1,0 +1,174 @@
+/* 侧边栏总体：分为 toolbar / 节点区（固定高度）/ 模板区（占据剩余高度，内部滚动） */
+.palette-root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden; /* 整体不滚动，只有模板列表内部滚动 */
+}
+
+.palette-toolbar {
+  flex-shrink: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color, #f0f0f0);
+  display: flex;
+  gap: 6px;
+}
+
+.palette-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.palette-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+/* 节点类型：固定高度区，4×2 grid */
+.palette-nodes {
+  flex-shrink: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color, #f0f0f0);
+}
+
+.palette-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.palette-grid-item {
+  padding: 6px 4px;
+  background: var(--bg-panel);
+  border: 1.5px solid;
+  border-radius: 5px;
+  cursor: grab;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  user-select: none;
+  transition: background 0.1s;
+}
+.palette-grid-item:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+.palette-grid-item:active {
+  cursor: grabbing;
+  transform: scale(0.97);
+}
+
+/* 模板区：flex:1 占据剩余高度，内部分两段（Action / Callback），各自独立滚动；
+ *           两个 section 平分剩余高度，title + 搜索框固定，仅卡片列表区滚动。 */
+.palette-templates {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.palette-section {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color, #f0f0f0);
+}
+.palette-section:last-child {
+  border-bottom: none;
+}
+.palette-section-toolbar {
+  flex-shrink: 0;
+  margin-bottom: 4px;
+}
+.palette-section-header {
+  flex-shrink: 0;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.palette-template-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 模板卡：与画布节点视觉风格一致（边框 + 浅背景 + 标题） */
+.tpl-card {
+  background: var(--bg-panel);
+  border: 1.5px solid;
+  border-radius: 6px;
+  padding: 5px 8px;
+  cursor: grab;
+  user-select: none;
+  transition: box-shadow 0.1s, transform 0.1s;
+}
+.tpl-card:hover {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+.tpl-card:active {
+  cursor: grabbing;
+  transform: scale(0.98);
+}
+
+.tpl-card-action {
+  border-color: var(--node-action);
+  background: var(--node-action-bg);
+}
+.tpl-card-callback {
+  border-color: var(--node-callback);
+  background: var(--node-callback-bg);
+  border-style: dashed;
+}
+
+.tpl-card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tpl-card-meta {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+/* 右键菜单 */
+.palette-context-menu {
+  position: absolute;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color, #d9d9d9);
+  border-radius: 4px;
+  box-shadow: 0 6px 16px 0 rgba(0, 0, 0, 0.18);
+  padding: 4px;
+  z-index: 1000;
+  min-width: 130px;
+}
+.palette-context-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+.palette-context-item:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+:root[data-theme='dark'] .palette-context-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.palette-context-danger {
+  color: #ff4d4f;
+}

@@ -2,7 +2,7 @@
   "bot": {
     "accountPrefix": "bot_",
     "startNumber": 20,
-    "count": 10,
+    "count": 1,
     "concurrentNum": 0,
     "mainService": "logic"
   },
@@ -39,8 +39,12 @@
     "maxAge": 7,
     "compress": true
   },
-  "pprof": {
+  "monitor": {
     "enabled": true,
-    "port": 6060
+    "reportInterval": "5s",
+    "httpEnabled": true,
+    "httpPort": 6060,
+    "csvPath": "log/metrics.csv",
+    "apdexT": 100
   }
 }

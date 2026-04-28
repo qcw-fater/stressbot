@@ -1,0 +1,206 @@
+/**
+ * 声明式动作主表单：根据 pattern 动态显示对应字段。
+ */
+
+import { Button, Form, Input, InputNumber, Select, Space, Switch } from 'antd';
+import { useState } from 'react';
+import type { ActionDef, ActionPattern } from '@/types/action';
+import { useEditorStore } from '../../store/editorStore';
+import { ProtoBrowser } from '../../proto/ProtoBrowser';
+import { RouteEditor } from '../../callbacks/RouteEditor';
+import { BindingsTable } from './BindingsTable';
+import { StoreTable } from './StoreTable';
+
+export interface DeclarativeFormProps {
+  action: ActionDef;
+  onChange: (a: ActionDef) => void;
+}
+
+export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
+  const { pattern } = action;
+  const setActivePanel = useEditorStore((s) => s.setActivePanel);
+  const set = (partial: Partial<ActionDef>) => onChange({ ...action, ...partial });
+
+  // 用 ProtoBrowser 选 c2sProto / s2cProto
+  const [protoTarget, setProtoTarget] = useState<'c2s' | 's2c' | null>(null);
+  const openProtoFor = (target: 'c2s' | 's2c') => {
+    setProtoTarget(target);
+    setActivePanel({ kind: 'protoBrowser' });
+  };
+
+  const showService = patternHas(pattern, ['service']);
+  const showRoute = patternHas(pattern, ['route']);
+  const showAddress = patternHas(pattern, ['address']);
+  const showC2S = patternHas(pattern, ['c2sProto']);
+  const showS2C = patternHas(pattern, ['s2cProto']);
+  const showBindings = patternHas(pattern, ['bindings']);
+  const showStore = patternHas(pattern, ['store']);
+  const showTimeout = pattern === 'waitListen';
+  const showTarget = pattern === 'close';
+  const showKeys = pattern === 'clearState';
+  const showSecretArg = pattern === 'exchangeKey';
+  const showOptional = pattern === 'waitListen';
+
+  return (
+    <Form layout="vertical">
+      {showService && (
+        <Form.Item label="service（目标服务名）">
+          <Input
+            value={action.service ?? ''}
+            onChange={(e) => set({ service: e.target.value })}
+            placeholder="如 logic / battle / login"
+          />
+        </Form.Item>
+      )}
+
+      {showRoute && (
+        <Form.Item label="route（不透明路由结构）">
+          <RouteEditor value={action.route} onChange={(v) => set({ route: v })} />
+          <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
+            JSON 直接写；引擎透传给 adapter.codec。
+          </div>
+        </Form.Item>
+      )}
+
+      {showAddress && (
+        <Form.Item label="address（地址，支持 state:key）">
+          <Input
+            value={action.address ?? ''}
+            onChange={(e) => set({ address: e.target.value })}
+            placeholder="如 192.168.1.1:8080 或 state:battleAddr"
+          />
+        </Form.Item>
+      )}
+
+      {showC2S && (
+        <Form.Item label="c2sProto（C2S 消息全名）">
+          <Space.Compact style={{ width: '100%' }}>
+            <Input
+              value={action.c2sProto ?? ''}
+              onChange={(e) => set({ c2sProto: e.target.value })}
+              placeholder="如 Game.LoginPlayerC2S"
+            />
+            <Button onClick={() => openProtoFor('c2s')}>浏览</Button>
+          </Space.Compact>
+        </Form.Item>
+      )}
+
+      {showS2C && (
+        <Form.Item label="s2cProto（S2C 响应全名）">
+          <Space.Compact style={{ width: '100%' }}>
+            <Input
+              value={action.s2cProto ?? ''}
+              onChange={(e) => set({ s2cProto: e.target.value })}
+              placeholder="如 Game.LoginPlayerS2C"
+            />
+            <Button onClick={() => openProtoFor('s2c')}>浏览</Button>
+          </Space.Compact>
+        </Form.Item>
+      )}
+
+      {showBindings && (
+        <Form.Item label="bindings（C2S 字段绑定）">
+          <BindingsTable
+            messageFullName={action.c2sProto}
+            value={action.bindings}
+            onChange={(v) => set({ bindings: v })}
+          />
+        </Form.Item>
+      )}
+
+      {showStore && (
+        <Form.Item label="store（S2C → state 映射）">
+          <StoreTable s2cProto={action.s2cProto} value={action.store} onChange={(v) => set({ store: v })} />
+        </Form.Item>
+      )}
+
+      {showTimeout && (
+        <Form.Item label="超时（秒）">
+          <Space>
+            <InputNumber
+              min={0}
+              value={action.timeout}
+              onChange={(v) => set({ timeout: (v as number) ?? undefined })}
+              addonAfter="s"
+            />
+            <span>轮询间隔</span>
+            <InputNumber
+              min={0}
+              value={action.pollMs}
+              onChange={(v) => set({ pollMs: (v as number) ?? undefined })}
+              addonAfter="ms"
+            />
+          </Space>
+        </Form.Item>
+      )}
+
+      {showTarget && (
+        <Form.Item label="target（关闭哪种连接）">
+          <Select
+            value={action.target}
+            onChange={(v) => set({ target: v })}
+            options={[
+              { value: 'tcp', label: 'tcp' },
+              { value: 'udp', label: 'udp' },
+            ]}
+            style={{ width: 200 }}
+            allowClear
+          />
+        </Form.Item>
+      )}
+
+      {showKeys && (
+        <Form.Item label="keys（要清除的 state key 列表）">
+          <Select
+            mode="tags"
+            value={action.keys ?? []}
+            onChange={(v) => set({ keys: v })}
+            placeholder="输入 state key，回车确认"
+            style={{ width: '100%' }}
+          />
+        </Form.Item>
+      )}
+
+      {showSecretArg && (
+        <Form.Item label="secretArg（密钥写入 state 的 key）">
+          <Input
+            value={action.secretArg ?? ''}
+            onChange={(e) => set({ secretArg: e.target.value })}
+          />
+        </Form.Item>
+      )}
+
+      {showOptional && (
+        <Form.Item label="optional（依赖缺失时静默跳过）">
+          <Switch checked={!!action.optional} onChange={(v) => set({ optional: v })} />
+        </Form.Item>
+      )}
+
+      <ProtoBrowser
+        onSelect={(fullName) => {
+          if (protoTarget === 'c2s') set({ c2sProto: fullName });
+          else if (protoTarget === 's2c') set({ s2cProto: fullName });
+          setProtoTarget(null);
+        }}
+      />
+    </Form>
+  );
+}
+
+function patternHas(pattern: ActionPattern, fields: Array<keyof ActionDef>): boolean {
+  const map: Partial<Record<ActionPattern, Array<keyof ActionDef>>> = {
+    tcpSend: ['service', 'route', 'c2sProto', 'bindings'],
+    tcpRequest: ['service', 'route', 'c2sProto', 's2cProto', 'bindings', 'store'],
+    udpSendProto: ['service', 'route', 'c2sProto', 'bindings'],
+    waitListen: ['service', 'route', 's2cProto', 'store'],
+    connect: ['service', 'address'],
+    connectUDP: ['service', 'address'],
+    exchangeKey: ['service', 'route'],
+    close: ['service'],
+    clearState: [],
+    setState: ['bindings'],
+    lua: [],
+  };
+  const allowed = map[pattern] ?? [];
+  return fields.some((f) => allowed.includes(f));
+}
