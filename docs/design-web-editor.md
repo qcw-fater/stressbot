@@ -1631,6 +1631,118 @@ npm install -D @types/dagre vitest @vitest/ui \
 
 ---
 
-> 本设计文档随实现迭代演进。**最近一次对齐：2026-04-28**，主要更新：目录结构（双 Store 拆分 + library/adapter/styles 新增）、§4.2 视图扩展元数据收敛、§5.4 MetricsBadge 行为、§6.2 还原快照按钮、§8.6 server 改 Input + BackrefList 可编辑、§8.7 RouteEditor 单 JSON 模式、§8.9 CallbackLibrary 并入 NodePalette、§8.10 高亮逻辑（按 `nodesByCallback` 精确高亮）、§9.1 Vite 中间件加载、§9.3 ProtoBrowser 平铺列表、§10.1 debounce 300ms + beforeunload flush + 双 Store 分工、§10.3 ValidationReport 路径与必填校验、§13 FlowEditorProps 收敛。
+> 本设计文档随实现迭代演进。**最近一次对齐：2026-04-30**，主要更新：补充 §20 分布式集成（HomeShell + 4 Drawer + MonitorDock + Lua LSP），编辑器从单页编辑模式扩展为完整压测控制台。
 >
 > 任何与实际代码偏离之处以代码为准；新增重大设计偏离时在对应章节顶部追加"已变更：日期 + 摘要"补丁说明，避免推翻全章。
+
+---
+
+## 20. 分布式集成（HomeShell — 单页压测控制台）
+
+> **变更说明（2026-04-30）**：依据用户反馈"将所有功能集成到单页"，FlowEditor 不再是裸编辑器，而是被嵌入到 `HomeShellInner`（`pages/EditorPage.tsx`）这个统一页面中，画布上方接 `RuntimeBar`，下方接 `MonitorDock`，左右各种 Drawer 通过按钮触发。原 §11/§12 中的"占位接口"在此章节落地。
+>
+> 与 stressbot Admin（默认 `:8080`）的交互见 `docs/api-monitor.md`，本章节只讲前端如何编排。
+
+### 20.1 架构层次
+
+```
+HomeShellInner (pages/EditorPage.tsx)
+├── RuntimeBar (components/runtime/RuntimeBar.tsx)        ─── topbarExtra 注入到 FlowEditor 顶栏
+├── FlowEditor (readOnly = mode != 'edit')
+│   └── NodeShell + MetricsBadge ← metricsProvider (派生自 latestStress)
+├── MonitorDock (6 Tabs · 可拖拽折叠)
+└── Drawers
+    ├── ResourcesDrawer  proto/lua 资源
+    ├── HistoryDrawer    list / detail / compare
+    ├── AgentsDrawer     节点状态 + 单点升级
+    └── BinariesDrawer   二进制 + 滚动升级
+```
+
+### 20.2 RuntimeMode 状态机（`services/runtimeStore.ts`）
+
+| Mode | 触发 | 行为 |
+|---|---|---|
+| `edit` | 默认；`stopTask` 完成 N 秒后 | FlowEditor 完全可编辑；仅轮询 agents/system（10s）显示集群容量 |
+| `viewActive` | 进入页面发现已有 active 任务且用户选"查看运行中" | FlowEditor readOnly；高频轮询 task/metrics（5s） |
+| `running` | 当前会话刚 `startTask` 成功 | 同上；`ownedTaskId` 标记为本会话所有 |
+| `finalReport` | 任务终态（stopped/failed） | 停止轮询；保留最后一份 snapshot；提示用户进 history 或新建任务 |
+
+`pollingPolicy(mode)` 集中决定是否启用 task / stress / system / agents 四组轮询及间隔。
+
+### 20.3 任务生命周期（`services/taskActions.ts`）
+
+```
+edit ──[startTask]──> running ─轮询task─> task.state=stopped/failed
+                                        └──> finalReport ──[新建任务]──> edit
+
+         viewActive (其他客户端启动) ──同上
+```
+
+- **startTask**：`flowStore.exportFlow()` → 校验通过 → 收集 `resourcesStore` 的 proto/lua → `tasksApi.createTask` (multipart) → `tasksApi.startTask` → 切到 `running`。其中容量校验在前端先估算一次（`agents.maxBots` 求和），后端最终决定。
+- **stopTask**：`tasksApi.stopTask`；轮询持续直到 stopped。
+- **attachToActive**：`tasksApi.getTask + getHistoryConfig`（如果是 owner）→ `flowStore.loadFromTaskFlow`。本地未保存的草稿先 stash 到 LocalStorage，离开 viewActive 时可一键还原。
+
+### 20.4 节点级监控（T4）
+
+`metricsBinding.buildNodeMetricsMap(snapshot, flow)` 把 `StressSnapshot.actions[]` 按以下规则映射到节点 ID：
+
+- 名字以 `callback:` 开头 → 虚拟节点 ID `__cb__<name>`（CallbackCard 监听）
+- 其它 → 凡是 `flow.nodes[i].action == metric.name` 的节点都映射；多个节点共享同一 action 时全部命中
+
+`makeMetricsProvider(map)` 包装为 `(nodeId) => ActionMetric | undefined` 注入 `useMetricsStore.setProvider`，所有 NodeShell 自动消费：
+
+- 左下角 `executing` 角标（脉动）
+- 节点边框按 Apdex 染色（excellent 绿 / good 浅绿 / fair 黄 / poor 橙 / danger 红，5 级）
+- 底部 metrics 槽显示 `exec N · p99 12ms · A 0.92 · err 3`（带 Tooltip 详情）
+
+校验红线优先级 > Apdex 染色，避免覆盖。
+
+### 20.5 监控面板 MonitorDock（T5）
+
+`components/monitoring/MonitorDock.tsx` — 底部停靠面板，6 个 Tab：
+
+| Tab | 内容 | 数据源 |
+|---|---|---|
+| 大盘 | 4 张状态卡（机器人/连接/带宽/集群） | latestStress + latestSystem |
+| 动作 | 每个 ActionMetric 一行（名/exec/sample/成功率/Apdex/QPS/延迟分布/p99/错误） | latestStress.actions |
+| 错误 | 跨动作错误聚合，按 count 倒排 | latestStress.actions[].errors |
+| 趋势 | 4 张 echarts 折线（机器人/QPS/CPU/带宽） | runtimeStore.{stressHistory, systemHistory} 滑窗 60 点 |
+| per-Agent | 每 Agent 加权 apdex/成功率/CPU/MEM/Goroutine | metricsApi.getPerAgentMetrics + getPerAgentSystem（按需拉） |
+| 系统 | 集群拓扑 + CPU/MEM/NET/Goroutine 详情 | latestSystem + agents |
+
+可拖拽顶部把手调整高度（160~80vh），落点持久化到 LocalStorage；编辑态自动折叠成 32px 条，运行态自动展开。
+
+### 20.6 跨模块 Drawer（T6）
+
+| Drawer | 关键能力 |
+|---|---|
+| ResourcesDrawer | 上传 / 删除 / 清空 / 默认基线导入；写入 IndexedDB；`protoStore.reload()` 触发提示 |
+| HistoryDrawer | list（搜索/收藏/分页） / detail（备注/标签/趋势/动作汇总/克隆/下载归档） / compare（2~5 个并排比较） |
+| AgentsDrawer | 表格（状态/任务/CPU%/MEM%/心跳） · 单点升级（按平台过滤受控 Modal） · 离线删除 |
+| BinariesDrawer | 上传（文件/版本/OS/Arch/force） · 列表 · 滚动升级 + Progress 条（每 3s 轮询，可取消） |
+
+错误处理统一过 `services/errorHandler.ts`：通用错误 message.error；`TASK_CONFLICT` 走 Modal.confirm 让用户选择"查看运行中"或"留在编辑态"。
+
+### 20.7 Lua IntelliSense（T8）
+
+- **luaApiSpec.ts**：7 个模块（robot/network/proto/utils/json/log/adapter）× 53 个函数的结构化 API；维护原则是"stressbot/script/api_*.go 改了 → 这里同步改"
+- **luaProviders.ts**：在 LuaForm onMount 时给 Monaco 注册 completion / hover / signature 三个 provider；防重入（registered 全局标志）
+- **luaSyntaxWorker.ts**：Web Worker 跑 luaparse；`mode='action'` 校验 `function execute(r)`，`mode='callback'` 校验 `function onMessage(r, msg)`；返回 SyntaxIssue[] 写回 Monaco markers（红/黄波浪线）
+- **luaSyntaxClient.ts**：单例 Worker 客户端，去抖（LuaForm 中 400ms）+ 请求覆盖
+
+LuaForm 顶部 Alert 同时显示错误数 + 警告数 + 前 5 条详情；Worker 失败时退化为旧字符串包含校验，不让面板完全没提示。
+
+### 20.8 共享设计原则
+
+1. **Mode 驱动 UI**：所有"什么时候能编辑 / 什么时候轮询 / 什么时候默认展开"全部由 `runtimeStore.mode` 决定，避免散在组件里
+2. **Provider Bridge**：`metricsProvider`、`MetricsProvider`、`registerTaskConflictHandler` 都用回调注入，让 services 层不依赖任何 UI 组件
+3. **轮询与展现分离**：HomeShell 集中创建 4 个 `usePolling`，写入 runtimeStore；Drawer/Tab 仅消费 store，便于 mock / 离线测试
+4. **资源优先级**：Proto/Lua 加载顺序 `IndexedDB > /conf > 编译时 fallback`；用户上传文件后 `protoStore.reload()` 立即生效
+5. **草稿保护**：进 viewActive 前自动 stash localStorage；finalReport / 用户主动"恢复编辑稿"按钮一键还原
+
+### 20.9 测试覆盖（截至本次提交）
+
+- 22（codec / refsCheck / refsGraph）
+- 17（metricsBinding：节点映射 / 多节点共享 action / callback 卡片 / Apdex 边界）
+- 19（luaApiSpec 元数据完整性 11 + luaEntryCheck 8）
+- **合计 58 个用例，全部通过**；`npm run build` 通过（主 bundle 3.5MB / luaSyntaxWorker chunk 27KB 独立）

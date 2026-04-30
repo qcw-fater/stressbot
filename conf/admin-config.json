@@ -1,0 +1,42 @@
+{
+  "listenAddr": ":8080",
+  "publicUrl": "http://localhost:8080",
+  "staticDir": "cmd/web/dist",
+  "dataDir": "data",
+
+  "agentRegistry": {
+    "unhealthyAfter": "30s",
+    "offlineAfter": "60s"
+  },
+
+  "task": {
+    "maxFlowSizeMB": 10,
+    "maxBinarySizeMB": 200,
+    "deadlineDefault": "1h"
+  },
+
+  "upgrade": {
+    "rolloutDelay": "5s",
+    "perAgentTimeout": "5m"
+  },
+
+  "history": {
+    "enabled": false,
+    "samplerInterval": "10s",
+    "retentionDays": 90,
+    "pruneRunAt": "03:00",
+    "mysql": {
+      "dsn": "admin:password@tcp(192.168.8.219:3306)/jump-test?parseTime=true&loc=Local",
+      "maxOpenConns": 10,
+      "maxIdleConns": 5,
+      "connMaxLifetime": "1h"
+    }
+  },
+
+  "log": {
+    "level": "info",
+    "path": "log/admin.log",
+    "maxSizeMB": 100,
+    "maxBackups": 10
+  }
+}

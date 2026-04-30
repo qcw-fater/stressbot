@@ -1,0 +1,94 @@
+package admin
+
+import (
+	"context"
+	"encoding/json"
+	"sync"
+	"time"
+)
+
+// Sampler 运行期定时采集时序数据。
+type Sampler struct {
+	interval   time.Duration
+	aggregator *MetricsAggregator
+	history    *HistoryStore
+	registry   *AgentRegistry
+
+	mu      sync.Mutex
+	current *samplerJob
+}
+
+type samplerJob struct {
+	taskID    string
+	startedAt time.Time
+	cancel    context.CancelFunc
+}
+
+func NewSampler(interval time.Duration, agg *MetricsAggregator, hist *HistoryStore, reg *AgentRegistry) *Sampler {
+	return &Sampler{
+		interval:   interval,
+		aggregator: agg,
+		history:    hist,
+		registry:   reg,
+	}
+}
+
+func (s *Sampler) Start(taskID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.current != nil {
+		return ErrTaskConflict.WithMessage("sampler already running")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s.current = &samplerJob{
+		taskID:    taskID,
+		startedAt: time.Now(),
+		cancel:    cancel,
+	}
+	go s.loop(ctx, taskID, s.current.startedAt)
+	return nil
+}
+
+func (s *Sampler) Stop(taskID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.current != nil && s.current.taskID == taskID {
+		s.current.cancel()
+		s.current = nil
+	}
+}
+
+func (s *Sampler) loop(ctx context.Context, taskID string, startedAt time.Time) {
+	ticker := time.NewTicker(s.interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case t := <-ticker.C:
+			elapsed := int(t.Sub(startedAt).Seconds())
+
+			// 压测快照
+			stress := s.aggregator.AggregateStress(taskID)
+			if stressJSON, err := json.Marshal(stress); err == nil {
+				_ = s.history.AppendTimeseries(taskID, TimeseriesPoint{
+					TaskID: taskID, SampledAt: t, ElapsedSec: elapsed,
+					DataType: "stress", Snapshot: stressJSON,
+				})
+			}
+
+			// 系统快照
+			sys := s.aggregator.AggregateSystem()
+			if sysJSON, err := json.Marshal(sys); err == nil {
+				_ = s.history.AppendTimeseries(taskID, TimeseriesPoint{
+					TaskID: taskID, SampledAt: t, ElapsedSec: elapsed,
+					DataType: "system", Snapshot: sysJSON,
+				})
+			}
+		}
+	}
+}

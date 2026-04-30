@@ -7,10 +7,10 @@ import (
 
 // SystemSnapshot 系统资源快照。
 type SystemSnapshot struct {
-	Goroutines  int    `json:"goroutines"`
-	MemAllocMB  float64 `json:"memAllocMB"`
-	MemSysMB    float64 `json:"memSysMB"`
-	GCCount     uint32  `json:"gcCount"`
+	Goroutines int     `json:"goroutines"`
+	MemAllocMB float64 `json:"memAllocMB"`
+	MemSysMB   float64 `json:"memSysMB"`
+	GCCount    uint32  `json:"gcCount"`
 }
 
 // ConnectionSnapshot 连接指标快照。
@@ -30,22 +30,30 @@ type BandwidthSnapshot struct {
 
 // ActionSnapshot per-action 完整快照（只读，用于 JSON/CSV/控制台）。
 type ActionSnapshot struct {
-	Name          string            `json:"name"`
-	SampleCount   int64             `json:"sampleCount"`
-	SuccessCount  int64             `json:"successCount"`
-	FailureCount  int64             `json:"failureCount"`
-	TimeoutCount  int64             `json:"timeoutCount"`
-	SkippedCount  int64             `json:"skippedCount"`
-	Executing     int64             `json:"executing"`
-	SuccessRate   float64           `json:"successRate"`
-	AvgSendBytes  float64           `json:"avgSendBytes"`
-	AvgRecvBytes  float64           `json:"avgRecvBytes"`
-	Apdex         float64           `json:"apdex"`
-	Latency       HistogramSnapshot `json:"latency"`
-	TimeoutAvgMs  float64           `json:"timeoutAvgMs"` // 超时样本平均等待时间
-	AvgQPS        float64           `json:"avgQps"`
-	PeriodQPS     float64           `json:"periodQps"`
-	Errors        []ErrorEntry      `json:"errors,omitempty"`
+	Name         string            `json:"name"`
+	SampleCount  int64             `json:"sampleCount"`
+	SuccessCount int64             `json:"successCount"`
+	FailureCount int64             `json:"failureCount"`
+	TimeoutCount int64             `json:"timeoutCount"`
+	SkippedCount int64             `json:"skippedCount"`
+	Executing    int64             `json:"executing"`
+	SuccessRate  float64           `json:"successRate"`
+	AvgSendBytes float64           `json:"avgSendBytes"`
+	AvgRecvBytes float64           `json:"avgRecvBytes"`
+	Apdex        float64           `json:"apdex"`
+	Latency      HistogramSnapshot `json:"latency"`
+	TimeoutAvgMs float64           `json:"timeoutAvgMs"`
+	AvgQPS       float64           `json:"avgQps"`
+	PeriodQPS    float64           `json:"periodQps"`
+	Errors       []ErrorEntry      `json:"errors,omitempty"`
+
+	// 跨节点聚合所需原始数据（omitempty 向后兼容单机模式）
+	LatencySumNs        int64   `json:"latencySumNs,omitempty"`
+	LatencyBucketCounts []int64 `json:"latencyBucketCounts,omitempty"`
+	ApdexSatisfied      int64   `json:"apdexSatisfied,omitempty"`
+	ApdexTolerating     int64   `json:"apdexTolerating,omitempty"`
+	TotalSendBytes      int64   `json:"totalSendBytes,omitempty"`
+	TotalRecvBytes      int64   `json:"totalRecvBytes,omitempty"`
 }
 
 // RobotSnapshot 机器人状态快照。
@@ -58,16 +66,16 @@ type RobotSnapshot struct {
 
 // CollectorSnapshot 全局快照。
 type CollectorSnapshot struct {
-	Timestamp    time.Time         `json:"timestamp"`
-	Uptime       time.Duration     `json:"uptime"`
-	UptimeSec    float64           `json:"uptimeSeconds"`
-	TotalActions int64             `json:"totalActions"`
-	ApdexT       int               `json:"apdexT"`
-	System       SystemSnapshot    `json:"system"`
-	Robots       RobotSnapshot     `json:"robots"`
+	Timestamp    time.Time          `json:"timestamp"`
+	Uptime       time.Duration      `json:"uptime"`
+	UptimeSec    float64            `json:"uptimeSeconds"`
+	TotalActions int64              `json:"totalActions"`
+	ApdexT       int                `json:"apdexT"`
+	System       SystemSnapshot     `json:"system"`
+	Robots       RobotSnapshot      `json:"robots"`
 	Connections  ConnectionSnapshot `json:"connections"`
 	Bandwidth    BandwidthSnapshot  `json:"bandwidth"`
-	Actions      []ActionSnapshot  `json:"actions"`
+	Actions      []ActionSnapshot   `json:"actions"`
 }
 
 // Snapshot 生成当前全局快照。
@@ -157,9 +165,11 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 		}
 
 		var avgSend, avgRecv float64
+		totalSendBytes := am.sendBytes.Load()
+		totalRecvBytes := am.recvBytes.Load()
 		if succ > 0 {
-			avgSend = float64(am.sendBytes.Load()) / float64(succ)
-			avgRecv = float64(am.recvBytes.Load()) / float64(succ)
+			avgSend = float64(totalSendBytes) / float64(succ)
+			avgRecv = float64(totalRecvBytes) / float64(succ)
 		}
 
 		latSnap := am.latency.Snapshot()
@@ -183,23 +193,149 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 		}
 
 		snap.Actions = append(snap.Actions, ActionSnapshot{
-			Name:         name,
-			SampleCount:  total,
-			SuccessCount: succ,
-			FailureCount: fail,
-			TimeoutCount: tout,
-			SkippedCount: skip,
-			TimeoutAvgMs: timeoutAvgMs,
-			Executing:    exec,
-			SuccessRate:  successRate,
-			AvgSendBytes: avgSend,
-			AvgRecvBytes: avgRecv,
-			Apdex:        apdex,
-			Latency:      latSnap,
-			AvgQPS:       avgQPS,
-			PeriodQPS:    periodQPS,
-			Errors:       errs,
+			Name:                name,
+			SampleCount:         total,
+			SuccessCount:        succ,
+			FailureCount:        fail,
+			TimeoutCount:        tout,
+			SkippedCount:        skip,
+			TimeoutAvgMs:        timeoutAvgMs,
+			Executing:           exec,
+			SuccessRate:         successRate,
+			AvgSendBytes:        avgSend,
+			AvgRecvBytes:        avgRecv,
+			Apdex:               apdex,
+			Latency:             latSnap,
+			AvgQPS:              avgQPS,
+			PeriodQPS:           periodQPS,
+			Errors:              errs,
+			LatencySumNs:        latSnap.SumNs,
+			LatencyBucketCounts: latSnap.BucketCounts,
+			ApdexSatisfied:      satisfied,
+			ApdexTolerating:     tolerating,
+			TotalSendBytes:      totalSendBytes,
+			TotalRecvBytes:      totalRecvBytes,
 		})
 	}
 	return snap
+}
+
+// MergeSnapshots 合并多个 CollectorSnapshot，用于分布式场景下聚合多 Agent 指标。
+func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
+	if len(snaps) == 0 {
+		return &CollectorSnapshot{}
+	}
+	if len(snaps) == 1 {
+		return snaps[0]
+	}
+
+	merged := &CollectorSnapshot{
+		Timestamp: time.Now(),
+		ApdexT:    snaps[0].ApdexT,
+	}
+
+	var maxUptime float64
+	for _, s := range snaps {
+		merged.TotalActions += s.TotalActions
+		merged.Robots.Started += s.Robots.Started
+		merged.Robots.Running += s.Robots.Running
+		merged.Robots.Stopped += s.Robots.Stopped
+		merged.Robots.Errored += s.Robots.Errored
+		merged.Connections.Established += s.Connections.Established
+		merged.Connections.Failed += s.Connections.Failed
+		merged.Connections.Dropped += s.Connections.Dropped
+		merged.Bandwidth.TotalSendBytes += s.Bandwidth.TotalSendBytes
+		merged.Bandwidth.TotalRecvBytes += s.Bandwidth.TotalRecvBytes
+		if s.UptimeSec > maxUptime {
+			maxUptime = s.UptimeSec
+		}
+	}
+	merged.UptimeSec = maxUptime
+	merged.Uptime = time.Duration(maxUptime * float64(time.Second))
+	if maxUptime > 0 {
+		merged.Bandwidth.SendMBps = float64(merged.Bandwidth.TotalSendBytes) / 1024 / 1024 / maxUptime
+		merged.Bandwidth.RecvMBps = float64(merged.Bandwidth.TotalRecvBytes) / 1024 / 1024 / maxUptime
+	}
+
+	// 按 action name 合并
+	type actionAgg struct {
+		snaps []ActionSnapshot
+	}
+	actionMap := make(map[string]*actionAgg)
+	var order []string
+	for _, s := range snaps {
+		for _, a := range s.Actions {
+			if _, ok := actionMap[a.Name]; !ok {
+				actionMap[a.Name] = &actionAgg{}
+				order = append(order, a.Name)
+			}
+			actionMap[a.Name].snaps = append(actionMap[a.Name].snaps, a)
+		}
+	}
+
+	for _, name := range order {
+		agg := actionMap[name]
+		var ma ActionSnapshot
+		ma.Name = name
+
+		var totalSatisfied, totalTolerating int64
+		for _, a := range agg.snaps {
+			ma.SampleCount += a.SampleCount
+			ma.SuccessCount += a.SuccessCount
+			ma.FailureCount += a.FailureCount
+			ma.TimeoutCount += a.TimeoutCount
+			ma.SkippedCount += a.SkippedCount
+			ma.Executing += a.Executing
+			ma.LatencySumNs += a.LatencySumNs
+			totalSatisfied += a.ApdexSatisfied
+			totalTolerating += a.ApdexTolerating
+			ma.TotalSendBytes += a.TotalSendBytes
+			ma.TotalRecvBytes += a.TotalRecvBytes
+		}
+
+		// 合并延迟直方图
+		latSnaps := make([]HistogramSnapshot, len(agg.snaps))
+		for i, a := range agg.snaps {
+			latSnaps[i] = a.Latency
+		}
+		ma.Latency = MergeHistograms(latSnaps)
+		ma.LatencySumNs = ma.Latency.SumNs
+		ma.LatencyBucketCounts = ma.Latency.BucketCounts
+		ma.ApdexSatisfied = totalSatisfied
+		ma.ApdexTolerating = totalTolerating
+
+		if ma.SampleCount > 0 {
+			ma.SuccessRate = float64(ma.SuccessCount) / float64(ma.SampleCount)
+			ma.Apdex = (float64(totalSatisfied) + float64(totalTolerating)*0.5) / float64(ma.SampleCount)
+		}
+		if ma.SuccessCount > 0 {
+			ma.AvgSendBytes = float64(ma.TotalSendBytes) / float64(ma.SuccessCount)
+			ma.AvgRecvBytes = float64(ma.TotalRecvBytes) / float64(ma.SuccessCount)
+		}
+		if maxUptime > 0 {
+			ma.AvgQPS = float64(ma.SampleCount) / maxUptime
+		}
+		if ma.TimeoutCount > 0 {
+			var totalTimeoutMs int64
+			for _, a := range agg.snaps {
+				totalTimeoutMs += int64(a.TimeoutAvgMs * float64(a.TimeoutCount))
+			}
+			ma.TimeoutAvgMs = float64(totalTimeoutMs) / float64(ma.TimeoutCount)
+		}
+
+		// 合并错误
+		errMap := make(map[string]int64)
+		for _, a := range agg.snaps {
+			for _, e := range a.Errors {
+				errMap[e.Message] += e.Count
+			}
+		}
+		for msg, count := range errMap {
+			ma.Errors = append(ma.Errors, ErrorEntry{Message: msg, Count: count})
+		}
+
+		merged.Actions = append(merged.Actions, ma)
+	}
+
+	return merged
 }

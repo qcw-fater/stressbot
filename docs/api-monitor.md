@@ -1,441 +1,2162 @@
-# 监控指标 HTTP API 文档
+# 前端 API 接口文档
 
-## 概述
+> **文档对象**：负责 stressbot 分布式压测管理后台**前端**的工程师。
+> **目标**：让你不需要阅读后端代码即可独立设计/开发完整的管理界面。
+> **配套文档**：`docs/design-distributed-master.md`（系统架构总览）、`docs/admin-implementation.md`（后端实现细节，可选阅读）。
 
-stressbot 运行时监控系统通过 HTTP 接口对外暴露实时指标数据，供前端仪表盘轮询消费。
+---
 
-- **传输方式**：HTTP 轮询（推荐间隔 = `reportInterval`，默认 5s）
-- **默认端口**：`6060`（与 pprof 共用，可通过 `monitor.httpPort` 配置）
-- **数据格式**：JSON（`/metrics`）或纯文本（`/metrics/summary`）
-- **字符编码**：UTF-8
+## 0. 文档结构索引
 
-## 端点列表
+- §1 系统说明（前端工程师必读，建立心智模型）
+- §2 概念词表
+- §3 通用约定（Base URL、Content-Type、错误码、轮询策略）
+- §4 接口分组与页面映射
+- §5 任务管理 API
+- §6 Agent 管理 API
+- §7 压测指标 API
+- §8 系统指标 API
+- §9 二进制管理与升级 API
+- §10 历史压测记录 API
+- §11 完整 TypeScript 类型定义（可直接复制到前端项目）
+- §12 历史数据与轮询策略
+- §13 推荐页面布局
+- §14 错误处理策略
+- §15 完整响应示例
 
-| 端点 | 方法 | Content-Type | 说明 |
+---
+
+## 0.1 后端对齐项（Backend Alignment）
+
+> ✅ **已全部完成**（2026-04-30）：以下 8 项已按文档约定实现，前端 `services/api.ts` 中的 `adaptList()` 兼容层可以安全移除。
+>
+> 后端额外补充了文档中未列出但前端需要的字段：`Assignment.agentName`、`AgentBrief.cpuPercent/memPercent/numGoroutine`、`ClusterSystemSnapshot.onlineCount/offlineCount/upgradingCount/hotAgentName`。
+> 所有 DELETE 接口已统一为 `204 No Content`。
+
+| 接口 | 状态 | 实际返回 |
+|---|---|---|
+| `GET /api/tasks` | ✅ 已对齐 | `{ total, items: TaskBrief[] }`，支持 `?state=&limit=&offset=` |
+| `POST /api/tasks` | ✅ 已对齐 | `{ id }`（201 Created） |
+| `POST /api/tasks/{id}/stop` | ✅ 已对齐 | `TaskBrief`（202 Accepted） |
+| `GET /api/agents` | ✅ 已对齐 | `{ items: AgentBrief[] }`，含系统指标摘要 |
+| `GET /api/metrics` | ✅ 已对齐 | 直接返回 `CollectorSnapshot`（方案 A） |
+| `GET /api/metrics/agents` | ✅ 已对齐 | `{ items: [{agentId, agentName, snapshot, updatedAt}] }` |
+| `GET /api/system/agents` | ✅ 已对齐 | `{ items: [{agentId, agentName, status, snapshot, updatedAt, isStale}] }` |
+| `GET /api/binaries` | ✅ 已对齐 | `{ items: BinaryMeta[] }` |
+
+**统一约定**：所有列表接口都返回 `{ items, total? }`，不直接返回数组。所有 DELETE 接口返回 `204 No Content`。
+
+---
+
+## 1. 系统说明
+
+### 1.1 系统组成
+
+stressbot 分布式压测系统包含四类角色：
+
+| 角色 | 数量 | 你负责的部分 | 备注 |
 |---|---|---|---|
-| `/metrics` | GET | `application/json` | 完整监控快照（前端主数据源） |
-| `/metrics/summary` | GET | `text/plain; charset=utf-8` | 纯文本摘要（调试/控制台） |
-| `/debug/pprof/` | GET | HTML | Go pprof 性能分析（内置） |
-| `/debug/pprof/profile` | GET | `application/octet-stream` | CPU profile |
-| `/debug/pprof/heap` | GET | `application/octet-stream` | 堆内存 profile |
+| **前端** | 1 个 Web 应用 | ✅ **本文档** | React + Ant Design + Vite |
+| **Admin** | 1 个进程 | ❌ 后端同事开发 | 控制中枢，所有前端 API 都向它请求 |
+| **Agent** | N 个进程，分布在 N 台压测服务器 | ❌ 后端同事开发 | 实际执行压测的"工人"节点 |
+| **被压测的游戏服务器** | N 个 | ❌ 项目外，被测对象 | 你完全不需要关心 |
+
+### 1.2 你与谁通信
+
+```
+┌─────────────────────┐
+│  你的前端代码        │
+└──────────┬──────────┘
+           │ HTTP / JSON
+           │ 仅与 Admin 通信
+           ▼
+┌─────────────────────┐
+│  Admin (:8080)      │ ← 唯一通信对象
+└─────────────────────┘
+```
+
+**前端无需直连 Agent**。Admin 已聚合好所有数据，前端只对 Admin 做 HTTP 请求。
+
+### 1.3 关键概念：聚合 vs 单点
+
+Admin 上的指标接口分为两类：
+
+| 类型 | URL 模式 | 用途 |
+|---|---|---|
+| **聚合接口** | `/api/metrics`、`/api/system` | 整个集群所有 Agent 数据合并后的视图（用于"总览大盘"） |
+| **单点接口** | `/api/metrics/agents`、`/api/metrics/agents/{id}` | 单个 Agent 的视图（用于"节点详情页"） |
+
+> 聚合的语义不是简单平均：QPS 是求和、延迟分位数是合并桶后重新插值、Apdex 是合并 satisfied/tolerating 后重算。这些 Admin 都已处理好，前端拿到的就是正确的合并值。
+
+### 1.4 系统的"动作"概念
+
+**动作（Action）** 是压测系统中最重要的概念，在指标里几乎所有数据都按"动作"维度组织。
+
+- 每个 Action 代表机器人执行的一次行为，例如：登录、创建队伍、选英雄、加载战斗、推帧、结算等
+- Action 的名称由后端配置决定（即 `flow.json` 中 actions 段的 key），前端只是消费方
+- 几种特殊 Action：
+  - `callback:OnXxx`：Action 名以 `callback:` 开头，表示这是服务器主动推送的回调（不是机器人发起的）
+  - Lua 动作：名称无前缀，但 `avgSendBytes` / `avgRecvBytes` 为 0（因为 Lua 自管收发）
+
+**前端展示**：每个动作一行（表格 / 折线图），列出样本数、成功率、QPS、延迟分位数、Apdex 等。这是压测大盘最核心的视图。
+
+### 1.5 任务生命周期（前端建模）
+
+```
+[创建任务] ─→ pending  ─启动─→ starting ─→ running ─停止─→ stopping ─→ stopped (完成态)
+                                  └ 异常 ─→ failed                       └ failed
+```
+
+| 状态 | 含义 | UI 处理建议 |
+|---|---|---|
+| `pending` | 已创建但未启动 | 灰色 chip，显示"启动"按钮 |
+| `starting` | 正在向 Agent 推送任务 | 黄色 chip + spinner |
+| `running` | 正常运行中 | 绿色 chip + 实时指标流 |
+| `stopping` | 收到停止指令，等 Agent 收尾 | 黄色 chip + spinner |
+| `stopped` | 已正常完成 | 灰色 chip，可查看历史报表 |
+| `failed` | 启动失败 / 集群崩溃 | 红色 chip，显示 `errorMsg` |
+
+**重要约束：任务单例**
+
+> **任意时刻全集群最多有 1 个"执行中"任务**（即 `starting` / `running` / `stopping` 状态的任务最多 1 个）。
+>
+> - `pending` 任务可同时存在多个（用户可预创建多个草稿）
+> - 当已有 active 任务时再调用 `POST /api/tasks/{id}/start` → 返回 `409 TASK_CONFLICT`
+> - 错误响应 `details` 字段会带上 `activeTaskId` / `activeName` / `activeState` / `startedAt`
+>
+> **UI 处理**：
+> - 任务列表页置顶显示 active 任务（高亮一栏 banner："当前正在执行：xxx，[查看详情]"）
+> - 启动按钮在已有 active 时禁用，hover tooltip："等当前任务完成后才能启动"
+> - 收到 409 时弹窗："已有任务 [activeName] 正在 [activeState]，请先停止"，按钮 "去查看" → 跳转该任务详情
+
+### 1.6 Agent 生命周期（前端建模）
+
+```
+注册 ─→ idle ──分配任务──→ busy ──任务完成──→ idle
+              └─ unhealthy（30s 心跳缺失）─→ offline（60s 心跳缺失）
+                                              └─→ idle/busy（重新心跳后恢复）
+```
+
+| 状态 | UI 颜色 | 行为 |
+|---|---|---|
+| `idle` | 蓝色圆点 | "空闲" |
+| `busy` | 绿色圆点 | "执行中" 显示当前 taskId |
+| `unhealthy` | 橙色圆点 | "心跳异常" 警告 |
+| `offline` | 红色圆点 | "离线" |
+| `upgrading` | 紫色圆点 | "升级中" |
 
 ---
 
-## GET /metrics
+## 2. 概念词表
 
-返回完整监控快照 JSON。**前端主数据源**，建议轮询间隔 3~5 秒。
+| 术语 | 含义 |
+|---|---|
+| **Admin** | 中央管理服务（你唯一通信对象） |
+| **Agent** | 一台压测服务器上跑的工作节点 |
+| **Bot / Robot** | 一个被模拟的玩家实例 |
+| **Action** | 机器人执行的一次行为（登录、攻击、移动等） |
+| **Apdex** | 性能满意度评分（0~1，越接近 1 越好） |
+| **QPS** | 每秒动作数 |
+| **P50/P90/P95/P99** | 延迟百分位（毫秒）。P99 = 99% 的请求快于此值 |
+| **Latency Bucket** | 后端用于分位数聚合的固定桶，前端不需要直接展示，但响应中可能包含 |
 
-### 请求
+---
 
-无参数。
+## 3. 通用约定
 
-### 响应
+### 3.1 Base URL
 
-**Status**: `200 OK`
+| 环境 | URL |
+|---|---|
+| 开发（vite dev） | `http://localhost:5173`（Vite 自动 proxy `/api` 到 Admin） |
+| 生产 | 由 Admin 直接托管前端，前端打包到 `web/dist`，访问 Admin 同源 |
 
-#### 顶层结构
+vite proxy 配置（参考）：
 
-```json
-{
-  "timestamp": "2026-04-28T10:30:00+08:00",
-  "uptime": 150500000000,
-  "uptimeSeconds": 150.5,
-  "totalActions": 52843,
-  "apdexT": 100,
-  "system": { ... },
-  "robots": { ... },
-  "connections": { ... },
-  "bandwidth": { ... },
-  "actions": [ ... ]
+```typescript
+// web/vite.config.ts
+proxy: {
+  '/api': { target: 'http://localhost:8080', changeOrigin: true },
 }
 ```
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `timestamp` | string (ISO 8601) | 快照生成时间，含时区 |
-| `uptime` | integer (nanoseconds) | 运行时长（Go Duration 纳秒），前端可忽略此字段，用 `uptimeSeconds` |
-| `uptimeSeconds` | float | 运行时长（秒），前端自行格式化为 `HH:MM:SS` |
-| `totalActions` | integer | 全局累计动作执行次数（含 success/failure/timeout，不含 skipped） |
-| `apdexT` | integer | 当前 Apdex T 阈值（毫秒），用于前端解释 apdex 值 |
+### 3.2 通用请求头
 
----
+```
+Content-Type: application/json    // POST/PUT 请求
+Accept:       application/json
+```
 
-#### system — 系统资源
+### 3.3 错误响应统一格式
+
+任何非 2xx 响应都遵循：
 
 ```json
 {
-  "goroutines": 142,
-  "memAllocMB": 45.2,
-  "memSysMB": 78.6,
-  "gcCount": 12
+  "code": "TASK_NOT_FOUND",
+  "message": "task task-01 not found",
+  "details": {}
 }
 ```
 
-| 字段 | 类型 | 说明 |
+**HTTP 状态码语义**：
+
+| 状态 | 触发 |
+|---|---|
+| `200` | 成功（同步操作） |
+| `201` | 创建成功（POST 创建资源） |
+| `202` | 异步接受（已加入处理队列，但还未完成） |
+| `400` | 参数错误（请求体格式、字段缺失、字段值非法） |
+| `404` | 资源不存在 |
+| `409` | 状态冲突（任务已运行、Agent 已升级中等） |
+| `500` | 服务端故障 |
+
+**错误码常量**：
+
+| code | 含义 | 推荐 UI |
 |---|---|---|
-| `goroutines` | integer | 当前 goroutine 数量 |
-| `memAllocMB` | float | 已分配堆内存（MB） |
-| `memSysMB` | float | 从 OS 申请的总内存（MB） |
-| `gcCount` | integer | GC 完成次数 |
+| `TASK_NOT_FOUND` | 任务不存在 | "任务不存在或已删除" |
+| `TASK_INVALID_STATE` | 任务状态不允许此操作 | 显示 message |
+| `TASK_CONFLICT` | **已有 active 任务**（单例约束） | 弹窗"已有任务 [activeName] 在 [activeState]，去查看？"，details 含 activeTaskId |
+| `AGENT_NOT_FOUND` | Agent 不存在 | "节点不存在" |
+| `AGENT_BUSY` | Agent 正忙 | 提示选其他节点 |
+| `AGENT_OFFLINE` | Agent 离线 | "节点离线，无法操作" |
+| `CAPACITY_EXCEEDED` | 集群容量不足 | "总机器人数超过集群最大容量" + details.maxBots |
+| `UPGRADE_IN_PROGRESS` | 已有滚动升级中 | "请等待当前升级完成" |
+| `BINARY_NOT_FOUND` | 二进制版本不存在 | "请先上传该版本" |
+| `HISTORY_NOT_FOUND` | 历史任务不存在 | "记录不存在或已被删除" |
+| `HISTORY_STARRED` | 试图删除收藏的历史任务 | "已收藏，需 force=true" |
+| `INVALID_ARGUMENT` | 参数非法 | 显示 message |
+
+### 3.4 时间格式
+
+所有时间字段为 **RFC3339 字符串**：`2026-04-29T10:30:00.123+08:00`。
+前端用 `dayjs` 或 `date-fns` 解析显示，建议显示本地时区。
+
+### 3.5 数值类型
+
+- 所有 `*Bytes` / `*MB` / `*Ms` 字段为数值
+- 整数字段直接是整数；带小数的字段（如 P99、CPU%）是浮点数
+- 没有特殊的 "null"，缺失数据用零值（如延迟桶无样本时 P99=0）
+
+### 3.6 轮询频率推荐
+
+| 接口 | 推荐间隔 | 触发条件 |
+|---|---|---|
+| `/api/agents` | 5s | 持续 |
+| `/api/system` | 5s | 持续（独立于任务） |
+| `/api/metrics` | 5s | 任务 running 时 |
+| `/api/metrics`（无任务） | 30s | idle 期 |
+| `/api/tasks` | 10s | 任务列表页 |
+| `/api/tasks/{id}` | 5s | 任务详情页 |
+| `/api/agents/upgrade-status` | 2s | 升级页（仅升级期间） |
+
+> Admin 服务端 5s 一次接收 Agent 上报，所以前端 5s 轮询是最理想的。轮询间隔小于 5s 会拿到与上次相同的数据，浪费请求。
 
 ---
 
-#### robots — 机器人状态
+## 4. 接口分组与页面映射
+
+| 页面 | 主要 API | 辅助 API |
+|---|---|---|
+| 首页 / 总览大盘 | `/api/agents`、`/api/system`、`/api/tasks` | — |
+| 任务管理列表 | `/api/tasks` | — |
+| 任务详情（运行中） | `/api/tasks/{id}`、`/api/metrics` | `/api/metrics/agents` |
+| 任务创建表单 | `POST /api/tasks` | `/api/agents`（计算容量） |
+| Agent 列表 | `/api/agents` | `/api/system`（指标摘要） |
+| Agent 详情 | `/api/agents/{id}`、`/api/metrics/agents/{id}`、`/api/system/agents/{id}` | — |
+| 系统资源大盘 | `/api/system`、`/api/system/agents` | — |
+| 二进制管理 | `/api/binaries` | — |
+| 升级管理 | `/api/agents/upgrade-status`、`/api/binaries` | `/api/agents` |
+| **历史压测列表** | `/api/history` | `/api/history/tags` |
+| **历史压测详情** | `/api/history/{id}` | `/api/history/{id}/timeseries`、`/api/history/{id}/agents` |
+| **历史对比** | `/api/history/compare?ids=...` | — |
+
+---
+
+## 5. 任务管理 API
+
+### 5.1 列出任务
+
+```
+GET /api/tasks
+GET /api/tasks?state=running          // 可选过滤
+GET /api/tasks?limit=20&offset=0      // 分页
+```
+
+**响应** `200 OK`：
+
+> ✅ **已对齐**：返回 `{ total, items: TaskBrief[] }`，支持 `?state=&limit=&offset=` 过滤分页。
+
+```typescript
+type TasksListResponse = {
+  total: number;
+  items: TaskBrief[];
+};
+
+type TaskBrief = {
+  id: string;                 // taskID（UUID）
+  name: string;
+  state: TaskState;
+  totalBots: number;          // 集群总机器人数
+  agentCount: number;         // 分配到几个 Agent
+  createdAt: string;          // ISO 8601
+  startedAt?: string;
+  stoppedAt?: string;
+};
+
+type TaskState = 'pending' | 'starting' | 'running' | 'stopping' | 'stopped' | 'failed';
+```
+
+**用途**：任务列表页主数据源。
+
+### 5.2 任务详情
+
+```
+GET /api/tasks/{id}
+```
+
+**响应** `200 OK`：
+
+```typescript
+type TaskDetail = TaskBrief & {
+  config: {
+    robotConfig: {
+      authAddr: string;
+      concurrency: number;
+      timeoutSec: number;
+    };
+    deadline?: string;
+    flowFiles: string[];        // 已上传的配置文件名
+  };
+  assignments: Assignment[];    // 集群分配快照
+  errorMsg?: string;            // state=failed 时
+  reports?: Record<string, TaskCompletionReport>; // agentId → report，task 终态时存在
+};
+
+type Assignment = {
+  taskId: string;
+  agentId: string;
+  agentName: string;            // 冗余便于展示
+  startNumber: number;          // 账号起始
+  totalBots: number;            // 本节点机器人数
+};
+
+type TaskCompletionReport = {
+  agentId: string;
+  taskId: string;
+  result: 'completed' | 'stopped' | 'failed';
+  errorMsg?: string;
+  finishedAt: string;
+};
+```
+
+**用途**：任务详情页，展示任务配置、分配情况、完成报告。
+
+**UI 推荐**：
+- `assignments` 用表格展示：Agent 名 / 账号范围 / 机器人数
+- `errorMsg` 高亮（红色文本块）
+- `reports` 按 result 分类：completed 绿色、stopped 灰色、failed 红色
+
+### 5.3 创建任务
+
+```
+POST /api/tasks
+Content-Type: multipart/form-data
+```
+
+**请求 multipart 字段**：
+
+| 字段 | 类型 | 必需 | 说明 |
+|---|---|---|---|
+| `name` | string | ✅ | 任务名 |
+| `totalBots` | string (int) | ✅ | 集群总机器人数 |
+| `flow.json` | file | ✅ | 流程定义 |
+| `header.json` | file | ❌ | 协议头（不传则用 Admin 默认） |
+| `proto/<filename>` | file | ❌ | 多个 .proto 文件，字段名必须以 `proto/` 前缀 |
+| `scripts/<filename>` | file | ❌ | 多个 .lua 文件，字段名必须以 `scripts/` 前缀 |
+| `robotConfig` | string (JSON) | ✅ | RobotConfig 序列化字符串 |
+| `deadline` | string (RFC3339) | ❌ | 自动停止时间 |
+
+`robotConfig` JSON 示例：
 
 ```json
 {
-  "started": 100,
-  "running": 98,
-  "stopped": 0,
-  "errored": 2
+  "authAddr": "auth.example.com:8001",
+  "concurrency": 50,
+  "timeoutSec": 30
 }
 ```
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `started` | integer | 累计启动数量 |
-| `running` | integer | 当前在线数量 |
-| `stopped` | integer | 正常停止数量 |
-| `errored` | integer | 异常退出数量 |
+**响应** `201 Created`：
 
-恒等关系：`started = running + stopped + errored`
+> ✅ **已对齐**：返回 `{ id }`（201 Created）。
 
----
+```typescript
+type CreateTaskResponse = {
+  id: string;          // 新建的 taskID
+};
+```
 
-#### connections — 连接指标
+**前端示例**：
 
-```json
-{
-  "established": 196,
-  "failed": 4,
-  "dropped": 2
+```typescript
+async function createTask(form: TaskFormState): Promise<string> {
+  const fd = new FormData();
+  fd.append('name', form.name);
+  fd.append('totalBots', String(form.totalBots));
+  fd.append('flow.json', form.flowFile);
+  for (const f of form.protoFiles) fd.append(`proto/${f.name}`, f);
+  for (const f of form.luaFiles)   fd.append(`scripts/${f.name}`, f);
+  fd.append('robotConfig', JSON.stringify(form.robotConfig));
+
+  const res = await fetch('/api/tasks', { method: 'POST', body: fd });
+  const data = await res.json();
+  return data.id;
 }
 ```
 
-| 字段 | 类型 | 说明 |
+**校验失败响应** `400`：
+
+```json
+{ "code": "INVALID_ARGUMENT", "message": "flow.json invalid: missing required action 'Auth'", "details": {} }
+```
+
+### 5.4 启动任务
+
+```
+POST /api/tasks/{id}/start
+```
+
+无请求体。
+
+**响应** `202 Accepted`：
+
+```typescript
+type StartTaskResponse = {
+  taskId: string;
+  assignments: Assignment[];   // 分配方案
+};
+```
+
+任务状态会异步从 `starting` → `running`，前端轮询 `/api/tasks/{id}` 检测状态变化。
+
+**常见错误**：
+
+| 状态 | code | 触发 |
 |---|---|---|
-| `established` | integer | 成功建立的 TCP/UDP 连接总数（每个机器人可能有多条连接） |
-| `failed` | integer | 连接失败次数（DNS 解析失败、拒绝连接等） |
-| `dropped` | integer | 运行中断连次数（服务器主动断开、网络中断等） |
+| `409` | `TASK_INVALID_STATE` | 任务不在 pending |
+| `400` | `CAPACITY_EXCEEDED` | 集群空闲容量不足，details 含 `availableBots` |
+| `400` | `INVALID_ARGUMENT` | 没有可用 Agent |
+
+### 5.5 停止任务
+
+```
+POST /api/tasks/{id}/stop
+```
+
+无请求体。
+
+**响应** `202 Accepted`：返回当前 task 简要信息。
+
+> ✅ **已对齐**：返回 `TaskBrief`（202 Accepted），含最新 state、totalBots、agentCount 等字段。
+
+任务状态变为 `stopping`，最终（< 1min）变为 `stopped`。
+
+### 5.6 删除任务
+
+```
+DELETE /api/tasks/{id}
+```
+
+仅允许 `stopped` / `failed` 状态删除，其他状态返回 `409`。
+
+**响应** `204 No Content`。
+
+### 5.7 下载任务配置（前端无需直接调用）
+
+```
+GET /api/tasks/{id}/config/{path}
+```
+
+由 Agent 内部使用拉取 flow.json / proto / scripts。前端可在任务详情中展示 `flowFiles` 字段，给"下载"按钮直接 a 标签链接到此 URL。
 
 ---
 
-#### bandwidth — 全局带宽
+## 6. Agent 管理 API
 
-```json
-{
-  "totalSendBytes": 5242880,
-  "totalRecvBytes": 10485760,
-  "sendMBps": 0.53,
-  "recvMBps": 1.07
-}
+### 6.1 列出所有 Agent
+
+```
+GET /api/agents
 ```
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `totalSendBytes` | integer | 全局累计发送字节数（仅成功动作） |
-| `totalRecvBytes` | integer | 全局累计接收字节数（仅成功动作） |
-| `sendMBps` | float | 平均发送速率（MB/s），= `totalSendBytes / 1024 / 1024 / uptimeSeconds` |
-| `recvMBps` | float | 平均接收速率（MB/s），= `totalRecvBytes / 1024 / 1024 / uptimeSeconds` |
+**响应** `200 OK`：
+
+> ✅ **已对齐**：返回 `{ items: AgentBrief[] }`，每项含 `cpuPercent`/`memPercent`/`numGoroutine` 系统指标摘要。
+
+```typescript
+type AgentsListResponse = {
+  items: AgentBrief[];
+};
+
+type AgentBrief = {
+  agentId: string;
+  name: string;
+  address: string;          // "http://10.0.0.1:7070"
+  appVersion: string;       // "v1.2.0"
+  maxBots: number;
+  status: AgentStatus;
+  currentTaskId?: string;
+  currentBots: number;      // 当前运行中机器人数
+
+  staticInfo: StaticInfo;
+
+  lastHeartbeatAt: string;
+  stressUpdatedAt?: string;
+  systemUpdatedAt?: string;
+
+  // 系统指标摘要（用于列表页快速预览，不含完整 SystemSnapshot）
+  cpuPercent?: number;
+  memPercent?: number;
+  numGoroutine?: number;
+};
+
+type StaticInfo = {
+  hostname: string;
+  os: 'linux' | 'windows' | 'darwin';
+  arch: 'amd64' | 'arm64';
+  numCpu: number;
+  memTotalMB: number;
+  goVersion: string;
+  kernelVer: string;
+  startedAt: string;
+};
+
+type AgentStatus = 'idle' | 'busy' | 'unhealthy' | 'offline' | 'upgrading';
+```
+
+**用途**：Agent 列表页主数据。
+
+**UI 推荐字段**：
+- 名称 / 状态指示灯（颜色见 §1.6）
+- 地址 / OS / CPU 核数 / 内存
+- 当前 CPU% / Mem% / Goroutine（彩色进度条 / 数值）
+- AppVersion（升级前后变化醒目展示）
+- 当前任务（带链接到任务详情）
+
+### 6.2 Agent 详情
+
+```
+GET /api/agents/{id}
+```
+
+**响应** `200 OK`：
+
+```typescript
+type AgentDetail = AgentBrief & {
+  // 完整系统快照
+  latestSystem?: SystemSnapshot;     // 见 §8 SystemSnapshot 完整结构
+};
+```
+
+> 完整压测快照在 `/api/metrics/agents/{id}`（避免一次性塞太多）。
+
+### 6.3 强制注销 Agent
+
+```
+DELETE /api/agents/{id}
+```
+
+仅允许 `offline` 状态删除（避免误删运行中节点）。
+
+**响应** `204` 或 `409`（状态不允许）。
 
 ---
 
-#### actions[] — 动作指标数组
+## 7. 压测指标 API
 
-按首次出现顺序排列，包含声明式动作、Lua 动作、回调动作（前缀 `callback:`）。
+> 所有压测指标响应共享同一份 schema（`StressSnapshot`），方便复用组件。
 
-```json
-[
-  {
-    "name": "CreateNormalTeam",
-    "sampleCount": 284,
-    "successCount": 280,
-    "failureCount": 4,
-    "timeoutCount": 0,
-    "skippedCount": 0,
-    "executing": 3,
-    "successRate": 0.9859,
-    "avgSendBytes": 45.2,
-    "avgRecvBytes": 1230.5,
-    "apdex": 0.95,
-    "latency": {
-      "count": 280,
-      "minMs": 12.0,
-      "maxMs": 450.6,
-      "avgMs": 45.7,
-      "p50Ms": 38.2,
-      "p90Ms": 78.5,
-      "p95Ms": 120.3,
-      "p99Ms": 450.6
-    },
-    "timeoutAvgMs": 0,
-    "avgQps": 1.89,
-    "periodQps": 0,
-    "errors": [
-      { "msg": "connection reset by peer", "count": 3 },
-      { "msg": "deadline exceeded", "count": 1 }
-    ]
-  }
-]
+### 7.1 集群聚合压测快照（推荐主数据源）
+
+```
+GET /api/metrics
+GET /api/metrics?taskId=task-01    // 可选：指定任务（默认是当前 running 任务）
 ```
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `name` | string | 动作名称（`flow.json` 中 actions 的 key） |
-| `sampleCount` | integer | 有效样本数 = `successCount + failureCount + timeoutCount`（不含 skipped） |
-| `successCount` | integer | 成功次数 |
-| `failureCount` | integer | 失败次数（非超时错误） |
-| `timeoutCount` | integer | 超时次数（TCPRequest/WaitListen 等待响应超时） |
-| `skippedCount` | integer | 跳过次数（必填字段为空，动作未执行） |
-| `executing` | integer | 当前正在执行的机器人数量（实时并发数） |
-| `successRate` | float | 成功率（0~1），= `successCount / sampleCount` |
-| `avgSendBytes` | float | 成功样本平均发送字节数，Lua 动作为 0 |
-| `avgRecvBytes` | float | 成功样本平均接收字节数，Lua 动作为 0 |
-| `apdex` | float | Apdex 性能满意度（0.0~1.0），见下方公式 |
-| `latency` | object | 延迟直方图快照，**仅含成功样本** |
-| `timeoutAvgMs` | float | 超时样本平均等待时间（ms），`timeoutCount=0` 时为 0 |
-| `avgQps` | float | 全程平均 QPS = `sampleCount / uptimeSeconds` |
-| `periodQps` | float | 周期内 QPS（HTTP 端点始终为 0，仅控制台 Reporter 维护） |
-| `errors` | array\|null | 错误分布列表，仅在 `failureCount + timeoutCount > 0` 时出现 |
+**响应** `200 OK`：
 
-**重要语义**：
-- `latency.count` ≤ `sampleCount`（延迟直方图仅记录成功样本）
-- `errors` 字段使用 `omitempty`，无错误时不输出
-- `skippedCount` 不计入 `sampleCount`、`successRate`、`apdex` 的分母
+> ✅ **已对齐**（方案 A）：直接返回 `CollectorSnapshot`。无 active 任务时返回空快照（字段全 0）。
 
-#### errors[] — 错误分布
+```typescript
+type StressSnapshot = {
+  // === 顶层 ===
+  timestamp: string;          // ISO 时间
+  uptimeSeconds: number;      // 任务/集群运行时长
+  totalActions: number;       // 全部动作累计执行次数
+  apdexT: number;             // Apdex T 阈值（毫秒）
 
-```json
-[
-  { "msg": "connection reset by peer", "count": 3 },
-  { "msg": "deadline exceeded", "count": 1 }
-]
+  // === 全局视图 ===
+  robots: RobotsView;         // 机器人状态
+  connections: ConnectionsView;
+  bandwidth: BandwidthView;
+
+  // === 动作明细 ===
+  actions: ActionMetric[];
+
+  // === 集群专属 ===
+  clusterInfo?: ClusterInfo;  // 仅在聚合接口出现
+};
+
+type RobotsView = {
+  started: number;     // 累计启动数
+  running: number;     // 当前在线数
+  stopped: number;     // 正常停止数
+  errored: number;     // 异常退出数
+  // 恒等：started = running + stopped + errored
+};
+
+type ConnectionsView = {
+  established: number; // 累计成功建立连接数
+  failed: number;      // 连接失败数
+  dropped: number;     // 运行中断连数
+};
+
+type BandwidthView = {
+  totalSendBytes: number;
+  totalRecvBytes: number;
+  sendMBps: number;       // = totalSendBytes / uptime
+  recvMBps: number;
+};
+
+type ActionMetric = {
+  name: string;          // 动作名
+  sampleCount: number;   // = success + failure + timeout（不含 skipped）
+  successCount: number;
+  failureCount: number;
+  timeoutCount: number;
+  skippedCount: number;  // 必填字段为空，未发送的次数
+  executing: number;     // 当前正在执行该动作的并发数
+
+  successRate: number;   // 0~1
+  apdex: number;         // 0~1
+  avgQps: number;        // 全程平均 QPS
+
+  avgSendBytes: number;  // 仅成功样本
+  avgRecvBytes: number;
+  timeoutAvgMs: number;  // timeoutCount=0 时为 0
+
+  latency: HistogramView; // 仅成功样本
+
+  errors?: ErrorBucket[]; // 失败/超时时存在
+};
+
+type HistogramView = {
+  count: number;
+  minMs: number;
+  maxMs: number;
+  avgMs: number;
+  p50Ms: number;
+  p90Ms: number;
+  p95Ms: number;
+  p99Ms: number;
+};
+
+type ErrorBucket = {
+  msg: string;       // 错误消息（已截断到 120 字符）
+  count: number;
+};
+
+type ClusterInfo = {
+  agentCount: number;          // 参与统计的 Agent 数
+  agentIds: string[];          // 参与统计的 agentID
+  staleAgentIds: string[];     // 上报数据 > 30s 未更新的 agent，仅参考
+};
 ```
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `msg` | string | 错误消息（截断至 120 字符） |
-| `count` | integer | 该错误出现次数 |
+### 7.2 各 Agent 压测快照（per-agent 列表）
 
----
-
-#### latency — 延迟直方图
-
-```json
-{
-  "count": 280,
-  "minMs": 12.0,
-  "maxMs": 450.6,
-  "avgMs": 45.7,
-  "p50Ms": 38.2,
-  "p90Ms": 78.5,
-  "p95Ms": 120.3,
-  "p99Ms": 450.6
-}
+```
+GET /api/metrics/agents
+GET /api/metrics/agents?taskId=task-01
 ```
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `count` | integer | 采样数（仅成功样本） |
-| `minMs` | float | 最小延迟（ms） |
-| `maxMs` | float | 最大延迟（ms） |
-| `avgMs` | float | 平均延迟（ms） |
-| `p50Ms` | float | 中位数延迟（ms） |
-| `p90Ms` | float | 90 百分位延迟（ms） |
-| `p95Ms` | float | 95 百分位延迟（ms） |
-| `p99Ms` | float | 99 百分位延迟（ms） |
+**响应** `200 OK`：
 
-`count=0` 时所有字段均为 0（零值快照）。
+> ✅ **已对齐**：返回 `{ items: [{agentId, agentName, snapshot, updatedAt}] }`。
 
----
+```typescript
+type PerAgentMetrics = {
+  items: Array<{
+    agentId: string;
+    agentName: string;
+    snapshot: StressSnapshot;   // 与 §7.1 同 schema，无 clusterInfo
+    updatedAt: string;
+  }>;
+};
+```
 
-## GET /metrics/summary
+**用途**：当前任务下每个 Agent 的实时压测视图。可用于"对比表"或"per-agent 折线"。
 
-返回纯文本监控摘要，适合终端查看或快速调试。
+### 7.3 单个 Agent 压测快照
 
-### 响应
+```
+GET /api/metrics/agents/{agentId}
+```
 
-**Status**: `200 OK`
-**Content-Type**: `text/plain; charset=utf-8`
+**响应** `200 OK`：直接是 `StressSnapshot`。
+
+### 7.4 文本摘要（调试用）
+
+```
+GET /api/metrics/summary
+Content-Type: text/plain
+```
+
+返回纯文本：
 
 ```
 uptime: 2m30s
-robots: started=100 running=98 stopped=0 errored=2
-CreateNormalTeam: samples=284 success=280 timeout=0 failure=4 avg=45.7ms p99=450.6ms apdex=0.950 qps=1.89
-SelectHero: samples=280 success=280 timeout=0 failure=0 avg=12.3ms p99=25.1ms apdex=1.000 qps=1.86
+agents: 3 (busy=3, idle=0)
+robots: started=300 running=298 stopped=0 errored=2
+CreateNormalTeam: samples=850 success=842 timeout=0 failure=8 avg=45.7ms p99=450.6ms apdex=0.95 qps=5.7
+SelectHero:       samples=842 success=840 timeout=0 failure=2 avg=12.3ms p99=25.1ms apdex=1.00 qps=5.6
 ```
 
----
+前端可直接渲染 `<pre>` 给运维快速诊断使用。
 
-## 指标计算公式
+### 7.5 指标计算公式（前端只读，了解即可）
 
-### Apdex（性能满意度）
+#### Apdex
 
 ```
 T = apdexT（默认 100ms）
-
-satisfied   = 成功且延迟 < T
-tolerating  = 成功且 T ≤ 延迟 < 4T
-frustrated  = 失败 + 超时 + 成功但延迟 ≥ 4T（隐式，不单独统计）
+satisfied   = 成功且延迟 < T 的样本数
+tolerating  = 成功且 T ≤ 延迟 < 4T 的样本数
+total       = success + failure + timeout
 
 apdex = (satisfied + tolerating × 0.5) / total
-total = successCount + failureCount + timeoutCount（不含 skippedCount）
 ```
 
-| Apdex | 含义 |
-|---|---|
-| 0.94~1.00 | 优秀 |
-| 0.85~0.93 | 良好 |
-| 0.70~0.84 | 一般 |
-| < 0.70 | 需要关注 |
-
-### QPS
-
-| 指标 | 公式 | 说明 |
+| Apdex 范围 | 含义 | UI 颜色 |
 |---|---|---|
-| `avgQps` | `sampleCount / uptimeSeconds` | 全程平均吞吐 |
-| `periodQps` | `(currentSampleCount - prevSampleCount) / periodSeconds` | 最近周期吞吐（仅控制台 Reporter 维护，HTTP 端点始终为 0） |
+| 0.94 ~ 1.00 | 优秀 | 绿色 |
+| 0.85 ~ 0.93 | 良好 | 浅绿 |
+| 0.70 ~ 0.84 | 一般 | 黄色 |
+| 0.50 ~ 0.69 | 较差 | 橙色 |
+| < 0.50 | 危险 | 红色 |
 
-**前端计算 periodQps 的方法**：轮询两次 `/metrics`，用相邻两次的 `sampleCount` 差值除以两次请求的时间差。
+#### 延迟分位数
 
-### 成功率
+P50 / P90 / P95 / P99 由后端基于固定桶直方图插值计算。**集群聚合接口的分位数是合并后重新计算的，不是平均**。前端拿到值直接用即可。
 
-```
-successRate = successCount / sampleCount
-sampleCount = successCount + failureCount + timeoutCount
-```
+#### QPS
 
----
+- `avgQps` = 全程平均 = `sampleCount / uptime`
+- **周期 QPS（瞬时）**：响应里**不存在**此字段，前端自行用相邻两次轮询的差分计算：
 
-## 动作名称命名规则
-
-| 来源 | 名称格式 | 示例 |
-|---|---|---|
-| 声明式动作 | `flow.json` 中 actions 的 key | `CreateNormalTeam` |
-| Lua 动作 | 同上（Lua 脚本由 action 引用） | `BattleEnd` |
-| 推送回调 | `callback:` + callback key | `callback:OnMatchSucceed` |
-
----
-
-## 前端轮询建议
-
-### 轮询间隔
-
-| 阶段 | 间隔 | 说明 |
-|---|---|---|
-| 压测进行中 | 3~5s | 与 `reportInterval` 对齐 |
-| 压测未启动/已结束 | 10~30s | 降低无效请求 |
-
-### 自定义 periodQPS
-
-HTTP 端点的 `periodQps` 始终为 0（服务端无状态）。前端可自行计算：
-
-```javascript
-let prevSampleCounts = {};
-let prevTime = Date.now();
-
-function computePeriodQps(actions) {
-  const now = Date.now();
-  const periodSec = (now - prevTime) / 1000;
-
-  for (const action of actions) {
-    const prev = prevSampleCounts[action.name] || 0;
-    const diff = action.sampleCount - prev;
-    action.periodQps = diff > 0 && periodSec > 0 ? diff / periodSec : 0;
-    prevSampleCounts[action.name] = action.sampleCount;
-  }
-  prevTime = now;
-}
+```typescript
+const periodQps = (curr.sampleCount - prev.sampleCount) / ((currTime - prevTime) / 1000);
 ```
 
-### 零值处理
+参考实现见 §11.3。
 
-| 场景 | 处理方式 |
-|---|---|
-| `latency.count = 0` | 延迟面板显示 "-" 或隐藏 |
-| `avgSendBytes = 0` / `avgRecvBytes = 0` | Lua 动作无字节数，显示 "-" |
-| `errors` 字段不存在 | `omitempty` 序列化，前端应判断 `undefined` |
-| `periodQps = 0` | HTTP 端点始终为 0，前端自行计算或忽略 |
+### 7.6 动作分类与 UI 处理
 
----
-
-## 配置
-
-`conf/config.json` 中的 `monitor` 段控制 HTTP 服务行为：
-
-```json
-{
-  "monitor": {
-    "enabled": true,
-    "reportInterval": "5s",
-    "httpEnabled": true,
-    "httpPort": 6060,
-    "csvPath": "log/metrics.csv",
-    "apdexT": 100
-  }
-}
-```
-
-| 字段 | 类型 | 默认值 | 说明 |
+| 类别 | 名称特征 | 字段差异 | UI 处理 |
 |---|---|---|---|
-| `enabled` | boolean | `false` | 监控总开关，关闭后所有指标采集为零开销 no-op |
-| `reportInterval` | string | `"5s"` | 控制台报告间隔（Go duration 格式） |
-| `httpEnabled` | boolean | `false` | 是否启用 HTTP 指标端点 |
-| `httpPort` | integer | `6060` | HTTP 服务端口，与 pprof 共用 |
-| `csvPath` | string | `"log/metrics.csv"` | 压测结束时 CSV 导出路径 |
-| `apdexT` | integer | `100` | Apdex T 阈值（毫秒） |
-
-`enabled=false` 时即使 `httpEnabled=true` 也不会启动 HTTP 服务。
+| 普通动作 | 任意名 | 完整字段 | 表格 + 详情 |
+| 推送回调 | `callback:OnXxx` | `avgSendBytes=0`、`timeoutCount=0` | 加 "←推送" 标记，单独列出 |
+| Lua 动作 | 任意名 | `avgSendBytes=0`、`avgRecvBytes=0` | 字节列显示 "-" |
 
 ---
 
-## 完整响应示例
+## 8. 系统指标 API
+
+> 系统指标是 Agent 所在物理机的资源数据（CPU、内存、网络、线程等），与压测业务无关。即使任务未运行，Agent 也持续上报。
+
+### 8.1 集群系统聚合
+
+```
+GET /api/system
+```
+
+**响应** `200 OK`：
+
+```typescript
+type ClusterSystemSnapshot = {
+  timestamp: string;
+  agentCount: number;          // 总 Agent 数
+  onlineCount: number;         // 在线（idle/busy/unhealthy）
+  offlineCount: number;
+  upgradingCount: number;
+
+  // 资源汇总
+  totalMemMB: number;          // 集群总内存
+  usedMemMB: number;
+  avgCpuPercent: number;       // 算术平均（非加权）
+  maxCpuPercent: number;       // 最大值
+  totalNetSendKBps: number;    // 网络速率求和
+  totalNetRecvKBps: number;
+  totalGoroutines: number;     // 求和
+  totalThreads: number;
+  totalFds: number;
+
+  // 节点排序信息
+  hotAgentId?: string;         // CPU 最高的节点
+  hotAgentName?: string;
+};
+```
+
+**UI 推荐**：放在系统资源大盘最顶部的"集群总览"卡片。
+
+### 8.2 各 Agent 系统快照
+
+```
+GET /api/system/agents
+```
+
+**响应** `200 OK`：
+
+> ✅ **已对齐**：返回 `{ items: [{agentId, agentName, status, snapshot, updatedAt, isStale}] }`。
+
+```typescript
+type PerAgentSystem = {
+  items: Array<{
+    agentId: string;
+    agentName: string;
+    status: AgentStatus;
+    snapshot: SystemSnapshot;
+    updatedAt: string;
+    isStale: boolean;     // 上报 > 30s 未更新
+  }>;
+};
+```
+
+### 8.3 单个 Agent 系统快照
+
+```
+GET /api/system/agents/{agentId}
+```
+
+**响应** `200 OK`：
+
+```typescript
+type SystemSnapshot = {
+  timestamp: string;
+
+  // === CPU ===
+  cpuPercent: number;          // 整体 CPU% (0~100)
+  cpuPerCore: number[];        // 每个核心的 CPU%
+  loadAvg1: number;            // Linux 1分钟负载，Windows 为 0
+  loadAvg5: number;
+  loadAvg15: number;
+
+  // === 内存 ===
+  memTotalMB: number;
+  memUsedMB: number;
+  memPercent: number;          // 0~100
+  swapUsedMB: number;
+
+  // === Agent 进程 ===
+  processRssMB: number;        // 物理常驻内存
+  processHeapMB: number;       // Go 堆
+  processSysMB: number;        // 进程总占用
+  numGoroutine: number;        // Goroutine 数
+  numThread: number;           // OS 线程数
+  numFd: number;               // 文件描述符（Windows 上可能为 0）
+
+  // === 网络（速率，差分计算）===
+  netSendKBps: number;
+  netRecvKBps: number;
+
+  // === GC ===
+  gcCount: number;
+  gcPauseAvgMs: number;
+};
+```
+
+### 8.4 字段含义详解（前端展示参考）
+
+| 字段 | 推荐展示 | 阈值参考 | 备注 |
+|---|---|---|---|
+| `cpuPercent` | 仪表盘 / 折线 | > 80% 黄、> 95% 红 | 短时高峰可忽略 |
+| `cpuPerCore[]` | 横向 bar chart | — | 长度 = numCpu，可发现核心倾斜 |
+| `loadAvg1/5/15` | 数值 | > numCpu × 1.5 警告 | Windows 隐藏 |
+| `memPercent` | 进度条 | > 85% 警告 | 注意区分 OS 内存与 Go 堆 |
+| `processHeapMB` | 数值 + 折线 | 持续上涨警告 | 内存泄漏诊断 |
+| `numGoroutine` | 数值 + 折线 | 突增警告 | 异常协程泄漏指标 |
+| `numThread` | 数值 | < 200 正常 | 极端情况下可能膨胀 |
+| `netSendKBps`/`netRecvKBps` | 折线 | 与机器网卡上限对比 | 第一次采集为 0（基线初始化） |
+| `gcCount` | 数值 | — | 增量看 GC 频率 |
+| `gcPauseAvgMs` | 数值 | < 5ms 正常 | 长 STW 警告 |
+
+---
+
+## 9. 二进制管理与升级 API
+
+### 9.1 列出二进制版本
+
+```
+GET /api/binaries
+```
+
+**响应** `200 OK`：
+
+> ✅ **已对齐**：返回 `{ items: BinaryMeta[] }`。
+
+```typescript
+type BinariesListResponse = {
+  items: BinaryMeta[];
+};
+
+type BinaryMeta = {
+  version: string;        // "v1.2.0"
+  filename: string;       // "agent-v1.2.0.exe"
+  os: 'windows' | 'linux' | 'darwin';
+  arch: 'amd64' | 'arm64';
+  sha256: string;
+  sizeBytes: number;
+  uploadedAt: string;
+};
+```
+
+### 9.2 上传二进制
+
+```
+POST /api/binaries
+Content-Type: multipart/form-data
+```
+
+**字段**：
+
+| 字段 | 必需 | 说明 |
+|---|---|---|
+| `file` | ✅ | 二进制文件 |
+| `version` | ✅ | 版本号字符串（如 `v1.2.0`） |
+| `os` | ❌ | 默认 `windows` |
+| `arch` | ❌ | 默认 `amd64` |
+| `force` | ❌ | `"true"` 时允许覆盖同版本 |
+
+**响应** `201 Created`：返回 `BinaryMeta`。
+
+**错误**：
+- `400` 文件名非法 / 版本号非法
+- `409` 同版本已存在且未带 `force=true`
+
+**前端示例**：
+
+```typescript
+async function uploadBinary(file: File, version: string, force = false) {
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('version', version);
+  if (force) fd.append('force', 'true');
+  const res = await fetch('/api/binaries', { method: 'POST', body: fd });
+  return await res.json();
+}
+```
+
+### 9.3 下载二进制
+
+```
+GET /api/binaries/{filename}
+```
+
+直接文件流返回，前端可用 `<a download>` 链接，或在二进制管理页提供下载按钮。
+
+### 9.4 删除二进制
+
+```
+DELETE /api/binaries/{filename}
+```
+
+`204 No Content`。
+
+### 9.5 单点升级
+
+```
+POST /api/agents/{agentId}/upgrade
+Content-Type: application/json
+```
+
+**请求体**：
+
+```typescript
+type UpgradeRequest = {
+  version: string;  // 必须已上传到 /api/binaries
+};
+```
+
+**响应** `202 Accepted`：
+
+```typescript
+type UpgradeResponse = {
+  agentId: string;
+  version: string;
+  message: string;  // 例如 "upgrade dispatched"
+};
+```
+
+升级是异步过程：Agent 接到指令后下载 → drain → 退出 → Launcher 替换 → 重启 → 重新注册。完整过程通常 30~60s。
+
+前端**不需要轮询单点升级状态**，只需轮询 `/api/agents/{id}` 看 `appVersion` 是否变化。
+
+### 9.6 滚动升级（所有 Agent）
+
+```
+POST /api/agents/upgrade-all
+Content-Type: application/json
+```
+
+**请求体**：
+
+```typescript
+type UpgradeAllRequest = {
+  version: string;
+};
+```
+
+**响应** `202 Accepted`：
+
+```typescript
+type UpgradeAllResponse = {
+  total: number;     // 总目标数
+  message: string;
+};
+```
+
+前端轮询 §9.7 查看进度。
+
+### 9.7 升级进度
+
+```
+GET /api/agents/upgrade-status
+```
+
+**响应** `200 OK`：
+
+```typescript
+type UpgradeStatus = {
+  inProgress: boolean;
+  version: string;
+  startedAt?: string;
+  total: number;
+  completed: number;
+  failed: number;
+  currentAgentId?: string;       // 正在处理的 agentId
+  perAgent: Record<string, AgentUpgradeState>;  // agentId → state
+};
+
+type AgentUpgradeState = {
+  phase: 'queued' | 'sent' | 'upgrading' | 'success' | 'failed';
+  startedAt?: string;
+  error?: string;
+};
+```
+
+**UI 推荐**：
+- 升级中：进度条 `(completed + failed) / total`
+- 表格按 phase 着色：success 绿、failed 红、upgrading 蓝
+- failed 行展开显示 `error`
+
+### 9.8 取消滚动升级
+
+```
+POST /api/agents/upgrade-cancel
+```
+
+**响应** `200 OK`。
+
+> 已发出的升级指令不可撤回，但后续未开始的 Agent 不再触发。前端应显示提示："已发出的指令仍会执行，剩余 N 台不再升级"。
+
+---
+
+## 10. 历史压测记录 API
+
+> 历史功能存储所有终态（stopped / failed）任务的完整数据到 MySQL，供事后查看报告、版本对比、问题排查使用。
+> 用户可对历史任务打标签（tags）、收藏（star）、加备注（note）。
+
+### 10.1 历史列表
+
+```
+GET /api/history?limit=20&offset=0&state=stopped&tags=v1.2&starred=true
+```
+
+**Query 参数（全部可选）**：
+
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `limit` | int | 每页大小（默认 20，最大 100） |
+| `offset` | int | 偏移量 |
+| `state` | string | 过滤：`stopped` / `failed`（不传则两者都返回） |
+| `startedAfter` | RFC3339 | 起始时间 ≥ |
+| `startedBefore` | RFC3339 | 起始时间 ≤ |
+| `tags` | string（可重复） | 标签过滤（命中**任意一个**即匹配，如 `?tags=a&tags=b`） |
+| `tagsAll` | string（可重复） | 标签过滤（必须**全部匹配**） |
+| `starred` | bool | 仅显示收藏 |
+| `search` | string | 模糊匹配 name + note（自动 LIKE %xxx%） |
+| `orderBy` | string | 排序字段：`started_at desc`（默认）、`duration_sec desc`、`stopped_at desc` |
+
+**响应** `200 OK`：
 
 ```json
 {
-  "timestamp": "2026-04-28T10:30:00.123456789+08:00",
-  "uptime": 150500000000,
+  "total": 38,
+  "items": [
+    {
+      "id": "task-abc",
+      "name": "200v200 压测 v1.2",
+      "state": "stopped",
+      "totalBots": 200,
+      "agentCount": 2,
+      "createdAt": "2026-04-29T09:55:00+08:00",
+      "startedAt": "2026-04-29T10:00:00+08:00",
+      "stoppedAt": "2026-04-29T10:30:00+08:00",
+      "durationSec": 1800,
+      "errorMsg": "",
+      "starred": true,
+      "tags": ["benchmark", "v1.2"],
+      "note": "Hash 冲突修复后回归",
+      "configSummary": {
+        "authAddr": "127.0.0.1:6000",
+        "concurrency": 50,
+        "timeoutSec": 30,
+        "flowSizeKB": 12,
+        "protoCount": 8,
+        "scriptCount": 3
+      }
+    }
+  ]
+}
+```
+
+**UI 推荐**：
+- 列表行展示：name、状态徽章、起止时间、时长、tags（多色 chip）、starred 图标
+- 顶部筛选区：日期范围、状态、标签多选（autocomplete 来源 `/api/history/tags`）、搜索框、收藏过滤
+- 行操作：查看详情 / 编辑标签 / 克隆 / 删除（starred 时隐藏删除）
+- starred 行高亮置顶或加金色边框
+
+### 10.2 全部使用过的标签
+
+```
+GET /api/history/tags
+```
+
+**响应** `200 OK`：
+
+```json
+{
+  "tags": ["benchmark", "v1.0", "v1.1", "v1.2", "before-fix-hash", "stress-2k"]
+}
+```
+
+**UI 推荐**：在列表筛选区的 tag 多选框作 autocomplete 数据源；编辑标签时也用此数据。
+
+### 10.3 历史任务详情
+
+```
+GET /api/history/{id}
+```
+
+**响应** `200 OK`：（在列表项基础上扩展）
+
+```json
+{
+  "id": "task-abc",
+  "name": "200v200 压测 v1.2",
+  "state": "stopped",
+  "totalBots": 200,
+  "agentCount": 2,
+  "createdAt": "2026-04-29T09:55:00+08:00",
+  "startedAt": "2026-04-29T10:00:00+08:00",
+  "stoppedAt": "2026-04-29T10:30:00+08:00",
+  "durationSec": 1800,
+  "errorMsg": "",
+  "starred": true,
+  "tags": ["benchmark", "v1.2"],
+  "note": "Hash 冲突修复后回归",
+  "configSummary": { /* 同列表 */ },
+  "assignments": [
+    { "taskId": "task-abc", "agentId": "agent-1", "startNumber": 0,   "totalBots": 100 },
+    { "taskId": "task-abc", "agentId": "agent-2", "startNumber": 100, "totalBots": 100 }
+  ],
+  "agentReports": [
+    {
+      "agentId": "agent-1",
+      "agentName": "agent-gz-01",
+      "result": "completed",
+      "errorMsg": "",
+      "finishedAt": "2026-04-29T10:30:01+08:00",
+      "finalSnapshot": { /* monitor.CollectorSnapshot 完整结构 */ }
+    }
+  ],
+  "finalSnapshot": { /* 集群聚合的完整 CollectorSnapshot */ },
+  "finalSystem":   { /* 集群聚合的 ClusterSystemSnapshot */ }
+}
+```
+
+**UI 推荐**：
+- 顶部 banner：name、状态、tags、starred、note（可折叠 markdown 显示）+ 编辑按钮
+- 三个 Tab：
+  - **总览**：finalSnapshot 表（同 dashboard 大盘的动作表，但是终态值）
+  - **per-Agent 对比**：表格列出每个 agentReport.finalSnapshot 的关键指标（successRate / P99 / Apdex），可发现异常节点
+  - **趋势图**：拉 `/timeseries` 接口绘制 QPS / P99 / Apdex 等时序曲线
+- 操作按钮：编辑标签 / 克隆为新任务 / 删除 / 下载配置 / 加入对比
+
+### 10.4 更新标签 / 备注 / 收藏
+
+```
+PUT /api/history/{id}
+Content-Type: application/json
+
+{
+  "starred": true,
+  "tags": ["benchmark", "v1.2", "before-fix-xyz"],
+  "note": "## 测试结论\n- P99 从 280ms 降到 120ms"
+}
+```
+
+**所有字段都是可选**（部分更新）：
+
+- `starred`：bool，省略则不修改
+- `tags`：string[]，省略则不修改；传 `[]` 表示清空所有标签
+- `note`：string（最大 8KB，支持 markdown），省略不修改
+
+**响应** `200 OK`，返回更新后的完整 `HistoryDetail`。
+
+**校验规则**：
+- 单个 tag：1~32 字符，只允许字母数字 / 中文 / `-` / `_`
+- 最多 10 个 tags
+- note 最大 8KB
+
+**UI 推荐**：
+- 弹窗或抽屉式编辑表单
+- tags 用 chip 输入框（输入时下拉提示已有 tags）
+- note 用 markdown 编辑器（可选预览模式）
+
+### 10.5 删除历史任务
+
+```
+DELETE /api/history/{id}?force=false
+```
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `force` | `false` | starred=true 时必须传 `?force=true`，否则返回 409 |
+
+**成功响应** `204 No Content`。
+
+**错误**：
+
+| 状态 | code | 说明 |
+|---|---|---|
+| 404 | `HISTORY_NOT_FOUND` | 任务不存在 |
+| 409 | `HISTORY_STARRED` | 该任务为收藏，需 `?force=true` |
+
+**UI 推荐**：
+- 列表行的删除按钮：starred 时显示锁图标提示"取消收藏后才能删除"
+- 详情页的删除按钮：弹二次确认 modal；若 starred，文字"此任务已收藏，确认强制删除？"
+
+### 10.6 时序数据（趋势图）
+
+```
+GET /api/history/{id}/timeseries
+```
+
+**响应** `200 OK`：
+
+```json
+{
+  "taskId": "task-abc",
+  "stress": [
+    {
+      "taskId": "task-abc",
+      "sampledAt": "2026-04-29T10:00:10+08:00",
+      "elapsedSec": 10,
+      "dataType": "stress",
+      "snapshot": { /* ClusterStressSnapshot */ }
+    }
+  ],
+  "system": [
+    {
+      "taskId": "task-abc",
+      "sampledAt": "2026-04-29T10:00:10+08:00",
+      "elapsedSec": 10,
+      "dataType": "system",
+      "snapshot": { /* ClusterSystemSnapshot */ }
+    }
+  ]
+}
+```
+
+> 采样间隔默认 10s（Admin 配置），1 小时任务 ≈ 360 个点 × 2 (stress+system) = 720 个点位。
+
+**UI 推荐**（趋势图）：
+
+- X 轴用 `elapsedSec`（任务相对秒数）或 `sampledAt`（绝对时间）
+- 推荐绘制：
+  - **QPS 趋势**：每个动作一条线（取 actions[] 中前 N 个核心动作）
+  - **P99 趋势**：同上
+  - **成功率趋势**：单条线
+  - **CPU 趋势**：每个 Agent 一条线（取 system 数据 perAgent）
+  - **内存趋势**：同上
+  - **网络收发**：双 Y 轴
+- 用 ECharts / Recharts 等图表库
+
+### 10.7 任务配置归档（下载 / 克隆使用）
+
+```
+GET /api/history/{id}/config
+```
+
+**响应** `200 OK`：（与创建任务的 multipart 内容对齐，但用 JSON 返回）
+
+```json
+{
+  "taskId": "task-abc",
+  "name": "200v200 压测 v1.2",
+  "totalBots": 200,
+  "robotConfig": {
+    "authAddr": "127.0.0.1:6000",
+    "concurrency": 50,
+    "timeoutSec": 30
+  },
+  "flowJson":   { /* 完整 flow.json 内容 */ },
+  "headerJson": { /* 完整 header.json 内容 */ },
+  "protoFiles": {
+    "auth.proto": "<base64>",
+    "battle.proto": "<base64>"
+  },
+  "scripts": {
+    "battle.lua": "<base64>",
+    "heartbeat.lua": "<base64>"
+  }
+}
+```
+
+**UI 推荐**：
+- "下载配置" 按钮：把 flowJson / headerJson 打包成 zip 提供下载（前端可本地实现，或后端额外提供 `?download=zip`）
+- 不需要在浏览器里展示完整 base64，只是用作克隆的中间数据
+
+### 10.8 克隆历史任务
+
+```
+POST /api/history/{id}/clone
+Content-Type: application/json
+
+{
+  "name": "200v200 v1.2 重测"
+}
+```
+
+**Body**（可选）：
+
+- `name`：新任务名（不传则默认 `<原name> (clone)`）
+
+**响应** `201 Created`：
+
+```json
+{ "id": "task-new-uuid" }
+```
+
+> 克隆出的是 **pending 状态**的新任务，不会立即启动。前端可跳转到任务详情页让用户确认参数后再 Start。
+
+**UI 推荐**：
+- 详情页 / 列表行右键菜单："克隆"按钮
+- 克隆成功后跳转 `/tasks/{newId}`（或 toast 提示并提供"立即启动"按钮）
+
+### 10.9 多任务对比
+
+```
+GET /api/history/compare?ids=task-a,task-b,task-c
+```
+
+**Query**：
+
+- `ids`：逗号分隔的任务 ID，**最多 5 个**
+
+**响应** `200 OK`：
+
+```json
+{
+  "tasks": [
+    { /* HistoryDetail of task-a */ },
+    { /* HistoryDetail of task-b */ },
+    { /* HistoryDetail of task-c */ }
+  ],
+  "diff": {
+    "actions": {
+      "CreateNormalTeam": [78.5, 65.2, 60.1],
+      "SelectHero":       [35.2, 32.0, 30.5],
+      "StartBattle":      [120.3, 105.0, 98.0]
+    }
+  }
+}
+```
+
+`diff.actions` 是 **同一个动作在多个任务上的 P99 对比**（按 ids 顺序排列），用于柱状图对比。
+
+**错误**：
+
+| 状态 | code | 说明 |
+|---|---|---|
+| 400 | `BAD_REQUEST` | ids 为空、超过 5 个、或包含不存在的任务 |
+
+**UI 推荐**：
+- 多任务对比页（独立路由 `/history/compare`）
+- 顶部多选任务 chip → 调用接口
+- 卡片对比：每个任务的 finalSnapshot 关键指标（QPS/P99/SuccessRate/Apdex）并排展示
+- 关键动作对比柱状图（基于 `diff.actions`）：X 轴动作名，每个动作三个/N 个柱子代表不同任务
+
+---
+
+## 11. 完整 TypeScript 类型定义
+
+> 复制以下代码到前端项目（`web/src/types/api.ts`），前端开发完整覆盖。
+
+```typescript
+// === 基础枚举 ===
+export type TaskState = 'pending' | 'starting' | 'running' | 'stopping' | 'stopped' | 'failed';
+export type AgentStatus = 'idle' | 'busy' | 'unhealthy' | 'offline' | 'upgrading';
+export type TaskResult = 'completed' | 'stopped' | 'failed';
+export type UpgradePhase = 'queued' | 'sent' | 'upgrading' | 'success' | 'failed';
+export type OS = 'windows' | 'linux' | 'darwin';
+export type Arch = 'amd64' | 'arm64';
+
+// === 通用错误 ===
+export type ApiError = {
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+};
+
+// === Task ===
+export type TaskBrief = {
+  id: string;
+  name: string;
+  state: TaskState;
+  totalBots: number;
+  agentCount: number;
+  createdAt: string;
+  startedAt?: string;
+  stoppedAt?: string;
+};
+
+export type TaskDetail = TaskBrief & {
+  config: TaskConfig;
+  assignments: Assignment[];
+  errorMsg?: string;
+  reports?: Record<string, TaskCompletionReport>;
+};
+
+export type TaskConfig = {
+  robotConfig: RobotConfig;
+  deadline?: string;
+  flowFiles: string[];
+};
+
+export type RobotConfig = {
+  authAddr: string;
+  concurrency: number;
+  timeoutSec: number;
+};
+
+export type Assignment = {
+  taskId: string;
+  agentId: string;
+  agentName: string;
+  startNumber: number;
+  totalBots: number;
+};
+
+export type TaskCompletionReport = {
+  agentId: string;
+  taskId: string;
+  result: TaskResult;
+  errorMsg?: string;
+  finishedAt: string;
+};
+
+export type TasksListResponse = { total: number; items: TaskBrief[] };
+
+// === Agent ===
+export type StaticInfo = {
+  hostname: string;
+  os: OS;
+  arch: Arch;
+  numCpu: number;
+  memTotalMB: number;
+  goVersion: string;
+  kernelVer: string;
+  startedAt: string;
+};
+
+export type AgentBrief = {
+  agentId: string;
+  name: string;
+  address: string;
+  appVersion: string;
+  maxBots: number;
+  status: AgentStatus;
+  currentTaskId?: string;
+  currentBots: number;
+  staticInfo: StaticInfo;
+  lastHeartbeatAt: string;
+  stressUpdatedAt?: string;
+  systemUpdatedAt?: string;
+  cpuPercent?: number;
+  memPercent?: number;
+  numGoroutine?: number;
+};
+
+export type AgentDetail = AgentBrief & {
+  latestSystem?: SystemSnapshot;
+};
+
+export type AgentsListResponse = { items: AgentBrief[] };
+
+// === Stress 指标 ===
+export type StressSnapshot = {
+  timestamp: string;
+  uptimeSeconds: number;
+  totalActions: number;
+  apdexT: number;
+  robots: RobotsView;
+  connections: ConnectionsView;
+  bandwidth: BandwidthView;
+  actions: ActionMetric[];
+  clusterInfo?: ClusterInfo;
+};
+
+export type RobotsView = {
+  started: number;
+  running: number;
+  stopped: number;
+  errored: number;
+};
+
+export type ConnectionsView = {
+  established: number;
+  failed: number;
+  dropped: number;
+};
+
+export type BandwidthView = {
+  totalSendBytes: number;
+  totalRecvBytes: number;
+  sendMBps: number;
+  recvMBps: number;
+};
+
+export type ActionMetric = {
+  name: string;
+  sampleCount: number;
+  successCount: number;
+  failureCount: number;
+  timeoutCount: number;
+  skippedCount: number;
+  executing: number;
+  successRate: number;
+  apdex: number;
+  avgQps: number;
+  avgSendBytes: number;
+  avgRecvBytes: number;
+  timeoutAvgMs: number;
+  latency: HistogramView;
+  errors?: ErrorBucket[];
+};
+
+export type HistogramView = {
+  count: number;
+  minMs: number;
+  maxMs: number;
+  avgMs: number;
+  p50Ms: number;
+  p90Ms: number;
+  p95Ms: number;
+  p99Ms: number;
+};
+
+export type ErrorBucket = {
+  msg: string;
+  count: number;
+};
+
+export type ClusterInfo = {
+  agentCount: number;
+  agentIds: string[];
+  staleAgentIds: string[];
+};
+
+export type PerAgentMetrics = {
+  items: Array<{
+    agentId: string;
+    agentName: string;
+    snapshot: StressSnapshot;
+    updatedAt: string;
+  }>;
+};
+
+// === System 指标 ===
+export type SystemSnapshot = {
+  timestamp: string;
+  cpuPercent: number;
+  cpuPerCore: number[];
+  loadAvg1: number;
+  loadAvg5: number;
+  loadAvg15: number;
+  memTotalMB: number;
+  memUsedMB: number;
+  memPercent: number;
+  swapUsedMB: number;
+  processRssMB: number;
+  processHeapMB: number;
+  processSysMB: number;
+  numGoroutine: number;
+  numThread: number;
+  numFd: number;
+  netSendKBps: number;
+  netRecvKBps: number;
+  gcCount: number;
+  gcPauseAvgMs: number;
+};
+
+export type ClusterSystemSnapshot = {
+  timestamp: string;
+  agentCount: number;
+  onlineCount: number;
+  offlineCount: number;
+  upgradingCount: number;
+  totalMemMB: number;
+  usedMemMB: number;
+  avgCpuPercent: number;
+  maxCpuPercent: number;
+  totalNetSendKBps: number;
+  totalNetRecvKBps: number;
+  totalGoroutines: number;
+  totalThreads: number;
+  totalFds: number;
+  hotAgentId?: string;
+  hotAgentName?: string;
+};
+
+export type PerAgentSystem = {
+  items: Array<{
+    agentId: string;
+    agentName: string;
+    status: AgentStatus;
+    snapshot: SystemSnapshot;
+    updatedAt: string;
+    isStale: boolean;
+  }>;
+};
+
+// === 二进制 / 升级 ===
+export type BinaryMeta = {
+  version: string;
+  filename: string;
+  os: OS;
+  arch: Arch;
+  sha256: string;
+  sizeBytes: number;
+  uploadedAt: string;
+};
+
+export type BinariesListResponse = { items: BinaryMeta[] };
+
+export type UpgradeStatus = {
+  inProgress: boolean;
+  version: string;
+  startedAt?: string;
+  total: number;
+  completed: number;
+  failed: number;
+  currentAgentId?: string;
+  perAgent: Record<string, AgentUpgradeState>;
+};
+
+export type AgentUpgradeState = {
+  phase: UpgradePhase;
+  startedAt?: string;
+  error?: string;
+};
+
+// === 任务单例冲突错误 details ===
+export type TaskConflictDetails = {
+  activeTaskId: string;
+  activeName: string;
+  activeState: TaskState;     // 实际只可能是 starting/running/stopping
+  startedAt: string;
+};
+
+// === History（历史压测）===
+export type ConfigSummary = {
+  authAddr: string;
+  concurrency: number;
+  timeoutSec: number;
+  flowSizeKB: number;
+  protoCount: number;
+  scriptCount: number;
+};
+
+export type HistoryRecord = {
+  id: string;
+  name: string;
+  state: 'stopped' | 'failed';   // 历史只记录终态
+  totalBots: number;
+  agentCount: number;
+  createdAt: string;
+  startedAt?: string;
+  stoppedAt?: string;
+  durationSec: number;
+  errorMsg?: string;
+
+  starred: boolean;
+  tags: string[];
+  note?: string;
+
+  configSummary: ConfigSummary;
+};
+
+export type HistoryListResponse = {
+  total: number;
+  items: HistoryRecord[];
+};
+
+export type HistoryAgentReport = {
+  agentId: string;
+  agentName: string;
+  result: TaskResult;
+  errorMsg?: string;
+  finishedAt: string;
+  finalSnapshot: StressSnapshot;
+};
+
+export type HistoryDetail = HistoryRecord & {
+  assignments: Array<{
+    taskId: string;
+    agentId: string;
+    startNumber: number;
+    totalBots: number;
+  }>;
+  agentReports: HistoryAgentReport[];
+  finalSnapshot: StressSnapshot;
+  finalSystem:   ClusterSystemSnapshot;
+};
+
+export type HistoryFilter = {
+  state?: 'stopped' | 'failed';
+  startedAfter?: string;
+  startedBefore?: string;
+  tags?: string[];        // 任意一个匹配
+  tagsAll?: string[];     // 必须全部匹配
+  starred?: boolean;
+  search?: string;
+  orderBy?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type UpdateHistoryRequest = {
+  starred?: boolean;
+  tags?: string[];
+  note?: string;
+};
+
+export type HistoryTagsResponse = { tags: string[] };
+
+export type TimeseriesPoint = {
+  taskId: string;
+  sampledAt: string;
+  elapsedSec: number;
+  dataType: 'stress' | 'system';
+  snapshot: StressSnapshot | ClusterSystemSnapshot;
+};
+
+export type TimeseriesResponse = {
+  taskId: string;
+  stress: TimeseriesPoint[];
+  system: TimeseriesPoint[];
+};
+
+export type HistoryConfigArchive = {
+  taskId: string;
+  name: string;
+  totalBots: number;
+  robotConfig: { authAddr: string; concurrency: number; timeoutSec: number };
+  flowJson: unknown;
+  headerJson: unknown;
+  protoFiles: Record<string, string>;  // base64
+  scripts:    Record<string, string>;  // base64
+};
+
+export type HistoryCloneRequest = {
+  name?: string;
+};
+
+export type HistoryCompareResponse = {
+  tasks: HistoryDetail[];
+  diff: {
+    actions: Record<string, number[]>;  // actionName -> [taskA_p99, taskB_p99, ...]
+  };
+};
+```
+
+---
+
+## 12. 历史数据与轮询策略
+
+### 11.1 历史快照由前端管理
+
+> Admin **不存储**历史时序数据。每次轮询拿到的都是"当前快照"。前端必须自行维护历史数组用于折线图。
+
+推荐实现（React Hooks 示例）：
+
+```typescript
+import { useEffect, useState, useRef } from 'react';
+
+export function usePolling<T>(
+  fetcher: () => Promise<T>,
+  intervalMs: number,
+  maxHistory = 60
+) {
+  const [latest, setLatest] = useState<T | null>(null);
+  const history = useRef<T[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const data = await fetcher();
+        if (cancelled) return;
+        history.current.push(data);
+        if (history.current.length > maxHistory) {
+          history.current.shift();
+        }
+        setLatest(data);
+      } catch (err) {
+        // 失败不入历史，只记录
+        console.warn('poll failed', err);
+      }
+    };
+    tick();                              // 立即一次
+    const id = setInterval(tick, intervalMs);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [fetcher, intervalMs, maxHistory]);
+
+  return { latest, history: history.current };
+}
+```
+
+### 11.2 折线图数据准备
+
+5s 间隔保留 60 个样本 = 5 分钟历史，足够大盘观察。需要更长时间用户可设置 1min 间隔保留 60 个 = 1 小时。
+
+```typescript
+const { latest, history } = usePolling(
+  () => fetch('/api/system').then(r => r.json()),
+  5000,
+  60
+);
+
+const cpuChartData = history.map(s => ({
+  time: s.timestamp,
+  cpu:  s.avgCpuPercent,
+}));
+```
+
+### 11.3 计算瞬时 QPS
+
+后端不提供瞬时 QPS，前端用相邻两次快照差分：
+
+```typescript
+function computePeriodQps(curr: StressSnapshot, prev: StressSnapshot | null) {
+  if (!prev) return new Map<string, number>();
+  const dt = (Date.parse(curr.timestamp) - Date.parse(prev.timestamp)) / 1000;
+  const result = new Map<string, number>();
+
+  const prevByName = new Map(prev.actions.map(a => [a.name, a.sampleCount]));
+  for (const a of curr.actions) {
+    const prevCount = prevByName.get(a.name) ?? 0;
+    const diff = a.sampleCount - prevCount;
+    result.set(a.name, dt > 0 && diff > 0 ? diff / dt : 0);
+  }
+  return result;
+}
+```
+
+### 11.4 任务结束后的数据处理
+
+任务结束（state=stopped/failed）后，`/api/metrics` 仍然返回该任务的最终快照（直到下一个任务启动）。前端可以据此显示"上次任务报告"：
+
+- 检查 `task.state === 'stopped'` 后停止轮询
+- 保存最后一份 `StressSnapshot` 到 localStorage 或后端（如果有归档接口）
+
+---
+
+## 13. 推荐页面布局
+
+### 12.1 总览首页
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ 集群总览                                                    │
+│ Agent: 3/3 在线   CPU 平均 45%    内存 12.3/64 GB           │
+│ 当前任务: task-01 "200v200 压测"  机器人 298/300            │
+│ 累计动作 52,843   全局 QPS  120/s                            │
+└────────────────────────────────────────────────────────────┘
+┌─────────────┬─────────────┬─────────────┐
+│ CPU 折线    │ 网络折线    │ QPS 折线    │
+└─────────────┴─────────────┴─────────────┘
+┌────────────────────────────────────────────────────────────┐
+│ 动作 Top 5（按 QPS / 失败率）                               │
+└────────────────────────────────────────────────────────────┘
+```
+
+### 12.2 任务详情页
+
+```
+[任务名]  [状态 chip]  [启动/停止按钮]                       
+─────────────────────────────────────────────
+配置概览 | 分配方案表格 | 完成报告（终态显示）
+─────────────────────────────────────────────
+压测大盘:
+  - 全局指标卡片（机器人数、连接、带宽）
+  - 动作明细表（按 §7.1 actions[] 渲染）
+    - 每行可展开看 latency 直方图、errors 列表
+  - 推送回调单独分组
+─────────────────────────────────────────────
+[切换 per-agent 视图] → 用 §7.2 数据
+```
+
+### 12.3 Agent 详情页
+
+```
+[Agent 名]  [状态指示灯]  [当前任务链接]  [升级按钮]        
+─────────────────────────────────────────────
+StaticInfo: hostname / OS / CPU / Mem / kernel / goVersion
+─────────────────────────────────────────────
+系统资源（实时）：
+  - 卡片：CPU%、Mem%、Goroutine、Thread、FD、Network
+  - 折线：CPU、Mem、Net Send/Recv（5min 历史）
+─────────────────────────────────────────────
+压测视角（仅 busy 状态）：
+  - 该 Agent 的动作明细（§7.3）
+─────────────────────────────────────────────
+日志 / 事件（如有）
+```
+
+### 12.4 升级管理页
+
+```
+[版本管理 Tab]
+  二进制列表表格
+  [上传新版本] 按钮 → 弹窗（form：file + version + os + arch）
+
+[滚动升级 Tab]
+  目标版本下拉（基于 §9.1 列表）
+  [开始滚动升级]
+  ─ 升级中显示：
+    - 进度条
+    - 表格：Agent 名 / phase（带颜色）/ 时间 / 错误
+    - [取消] 按钮
+```
+
+### 12.5 历史压测列表页 `/history`
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ 筛选区                                                        │
+│ [日期范围] [状态▾] [标签 multiselect▾] [搜索框] [仅看收藏 ☆] │
+└──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ ☆  [name]                  [tags chips]                       │
+│    state · 时长 · 起止时间                                     │
+│    机器人 200 · Agent 2 · 平均 P99 120ms · Apdex 0.95         │
+│    [查看] [克隆] [编辑标签] [删除]                            │
+└──────────────────────────────────────────────────────────────┘
+分页栏 · 总数 N
+```
+
+> 推荐：starred 任务用金色边框置顶，普通任务按 startedAt desc 排列。
+
+### 12.6 历史压测详情页 `/history/:id`
+
+```
+[name]  [tags chips]  [☆收藏] [编辑] [克隆] [加入对比] [删除]
+─────────────────────────────────────────────────────
+基本信息  起止时间  时长  机器人数  agent 数  errorMsg（若有）
+note（markdown 渲染）
+─────────────────────────────────────────────────────
+[Tab 总览]  [Tab per-Agent]  [Tab 趋势图]
+─────────────────────────────────────────────────────
+总览：finalSnapshot 表（与运行期 dashboard 同样布局）
+per-Agent：表格列出每个 agent 的 successRate / P99 / Apdex（异常节点高亮）
+趋势图：从 /timeseries 拿到的时序点，绘制 QPS / P99 / SuccessRate / CPU / Mem 曲线
+─────────────────────────────────────────────────────
+[配置归档] 折叠面板：展示 ConfigSummary 主要参数 + [下载完整配置] 按钮
+```
+
+### 12.7 历史对比页 `/history/compare`
+
+```
+顶部：选择 2~5 个任务（chip 显示已选）
+─────────────────────────────────────────────
+卡片网格：每个任务一张卡片，并排展示
+  [name + tags] [P99] [Apdex] [QPS] [SuccessRate]
+─────────────────────────────────────────────
+柱状图：动作 P99 横向对比
+  X 轴：动作名（来自 diff.actions key）
+  Y 轴：每个动作 N 个柱子（每任务一柱）
+─────────────────────────────────────────────
+[导出对比报告 PNG / CSV]
+```
+
+---
+
+## 14. 错误处理策略
+
+### 13.1 通用错误拦截
+
+```typescript
+async function api<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
+  if (!res.ok) {
+    const err: ApiError = await res.json().catch(() => ({
+      code: 'NETWORK_ERROR',
+      message: res.statusText,
+    }));
+    throw err;
+  }
+  if (res.status === 204) return undefined as T;
+  return res.json();
+}
+```
+
+### 13.2 全局 Toast 映射
+
+```typescript
+function showApiError(err: ApiError) {
+  const messages: Record<string, string> = {
+    TASK_NOT_FOUND:        '任务不存在或已被删除',
+    TASK_INVALID_STATE:    `任务当前状态不允许此操作（${err.message}）`,
+    TASK_CONFLICT:         (() => {
+      const d = err.details as TaskConflictDetails | undefined;
+      return d
+        ? `已有任务"${d.activeName}"正在 ${d.activeState}，请先停止`
+        : '已有任务在执行';
+    })(),
+    AGENT_BUSY:            'Agent 正忙，请选择其他节点',
+    AGENT_OFFLINE:         'Agent 已离线',
+    CAPACITY_EXCEEDED:     `集群容量不足，最多支持 ${err.details?.maxBots ?? '?'} 个机器人`,
+    UPGRADE_IN_PROGRESS:   '已有滚动升级在进行中',
+    BINARY_NOT_FOUND:      '该版本二进制不存在，请先上传',
+    HISTORY_NOT_FOUND:     '历史记录不存在或已被删除',
+    HISTORY_STARRED:       '已收藏的记录不能删除（请先取消收藏，或使用强制删除）',
+  };
+  message.error(messages[err.code] ?? err.message);
+}
+```
+
+**TASK_CONFLICT 特殊处理**（推荐用 modal 而非 toast）：
+
+```typescript
+import { Modal } from 'antd';
+import { useNavigate } from 'react-router-dom';
+
+function handleTaskConflict(err: ApiError, navigate: ReturnType<typeof useNavigate>) {
+  if (err.code !== 'TASK_CONFLICT') return false;
+  const d = err.details as TaskConflictDetails;
+  Modal.confirm({
+    title: '已有任务在执行',
+    content: `任务"${d.activeName}"当前处于 ${d.activeState} 状态，需先停止才能启动新任务。`,
+    okText: '查看该任务',
+    cancelText: '取消',
+    onOk: () => navigate(`/tasks/${d.activeTaskId}`),
+  });
+  return true;
+}
+```
+
+### 13.3 轮询失败处理
+
+| 场景 | 策略 |
+|---|---|
+| 单次失败 | 静默吞掉（可能是临时网络抖动），下次仍尝试 |
+| 连续失败 ≥ 3 次 | UI 顶部显示"连接 Admin 失败"红色横条 |
+| 恢复成功 | 红条消失，可显示"已恢复" toast 一次 |
+
+```typescript
+let consecutiveFails = 0;
+async function tick() {
+  try {
+    await fetcher();
+    if (consecutiveFails >= 3) toast('已恢复连接');
+    consecutiveFails = 0;
+    setBannerVisible(false);
+  } catch {
+    consecutiveFails++;
+    if (consecutiveFails >= 3) setBannerVisible(true);
+  }
+}
+```
+
+### 13.4 长时间无数据状态
+
+| 场景 | UI |
+|---|---|
+| 任务 running 但 `actions.length === 0` 超过 10s | "正在等待 Agent 上报数据..." |
+| Agent 全部 offline | 大盘空状态 + 引导 "请检查 Agent 服务状态" |
+| 历史折线无数据 | "暂无数据" |
+
+---
+
+## 15. 完整响应示例
+
+### 14.1 GET /api/metrics（集群聚合压测）
+
+```json
+{
+  "timestamp": "2026-04-29T10:30:00.123+08:00",
   "uptimeSeconds": 150.5,
   "totalActions": 52843,
   "apdexT": 100,
-  "system": {
-    "goroutines": 142,
-    "memAllocMB": 45.23,
-    "memSysMB": 78.61,
-    "gcCount": 12
-  },
   "robots": {
-    "started": 100,
-    "running": 98,
+    "started": 300,
+    "running": 298,
     "stopped": 0,
     "errored": 2
   },
   "connections": {
-    "established": 196,
+    "established": 596,
     "failed": 4,
     "dropped": 2
   },
   "bandwidth": {
-    "totalSendBytes": 5242880,
-    "totalRecvBytes": 10485760,
-    "sendMBps": 0.53,
-    "recvMBps": 1.07
+    "totalSendBytes": 15728640,
+    "totalRecvBytes": 31457280,
+    "sendMBps": 1.59,
+    "recvMBps": 3.21
   },
   "actions": [
     {
       "name": "Auth",
-      "sampleCount": 100,
-      "successCount": 98,
-      "failureCount": 2,
+      "sampleCount": 300,
+      "successCount": 296,
+      "failureCount": 4,
       "timeoutCount": 0,
       "skippedCount": 0,
       "executing": 0,
-      "successRate": 0.98,
-      "avgSendBytes": 256.0,
-      "avgRecvBytes": 512.0,
+      "successRate": 0.9867,
       "apdex": 0.99,
+      "avgQps": 1.99,
+      "avgSendBytes": 256,
+      "avgRecvBytes": 512,
+      "timeoutAvgMs": 0,
       "latency": {
-        "count": 98,
+        "count": 296,
         "minMs": 5.2,
         "maxMs": 89.3,
         "avgMs": 15.7,
@@ -444,27 +2165,26 @@ function computePeriodQps(actions) {
         "p95Ms": 55.1,
         "p99Ms": 89.3
       },
-      "timeoutAvgMs": 0,
-      "avgQps": 0.66,
-      "periodQps": 0,
       "errors": [
-        { "msg": "auth server returned 403", "count": 2 }
+        { "msg": "auth server returned 403", "count": 4 }
       ]
     },
     {
       "name": "CreateNormalTeam",
-      "sampleCount": 284,
-      "successCount": 280,
-      "failureCount": 4,
+      "sampleCount": 850,
+      "successCount": 842,
+      "failureCount": 8,
       "timeoutCount": 0,
       "skippedCount": 0,
-      "executing": 3,
-      "successRate": 0.9859,
+      "executing": 9,
+      "successRate": 0.9906,
+      "apdex": 0.95,
+      "avgQps": 5.65,
       "avgSendBytes": 45.2,
       "avgRecvBytes": 1230.5,
-      "apdex": 0.95,
+      "timeoutAvgMs": 0,
       "latency": {
-        "count": 280,
+        "count": 842,
         "minMs": 12.0,
         "maxMs": 450.6,
         "avgMs": 45.7,
@@ -472,37 +2192,150 @@ function computePeriodQps(actions) {
         "p90Ms": 78.5,
         "p95Ms": 120.3,
         "p99Ms": 450.6
-      },
-      "timeoutAvgMs": 0,
-      "avgQps": 1.89,
-      "periodQps": 0
+      }
     },
     {
       "name": "callback:OnMatchSucceed",
-      "sampleCount": 260,
-      "successCount": 260,
+      "sampleCount": 780,
+      "successCount": 780,
       "failureCount": 0,
       "timeoutCount": 0,
       "skippedCount": 0,
       "executing": 0,
       "successRate": 1.0,
+      "apdex": 1.0,
+      "avgQps": 5.18,
       "avgSendBytes": 0,
       "avgRecvBytes": 0,
-      "apdex": 1.0,
+      "timeoutAvgMs": 0,
       "latency": {
         "count": 0,
-        "minMs": 0,
-        "maxMs": 0,
-        "avgMs": 0,
-        "p50Ms": 0,
-        "p90Ms": 0,
-        "p95Ms": 0,
-        "p99Ms": 0
+        "minMs": 0, "maxMs": 0, "avgMs": 0,
+        "p50Ms": 0, "p90Ms": 0, "p95Ms": 0, "p99Ms": 0
+      }
+    }
+  ],
+  "clusterInfo": {
+    "agentCount": 3,
+    "agentIds": ["agent-1", "agent-2", "agent-3"],
+    "staleAgentIds": []
+  }
+}
+```
+
+### 14.2 GET /api/system（集群系统聚合）
+
+```json
+{
+  "timestamp": "2026-04-29T10:30:00+08:00",
+  "agentCount": 3,
+  "onlineCount": 3,
+  "offlineCount": 0,
+  "upgradingCount": 0,
+  "totalMemMB": 98304,
+  "usedMemMB": 12345,
+  "avgCpuPercent": 45.3,
+  "maxCpuPercent": 78.2,
+  "totalNetSendKBps": 2456.3,
+  "totalNetRecvKBps": 4912.7,
+  "totalGoroutines": 1284,
+  "totalThreads": 96,
+  "totalFds": 384,
+  "hotAgentId": "agent-1",
+  "hotAgentName": "agent-gz-01"
+}
+```
+
+### 14.3 GET /api/agents
+
+```json
+{
+  "items": [
+    {
+      "agentId": "agent-1",
+      "name": "agent-gz-01",
+      "address": "http://10.0.0.1:7070",
+      "appVersion": "v1.2.0",
+      "maxBots": 5000,
+      "status": "busy",
+      "currentTaskId": "task-01",
+      "currentBots": 100,
+      "staticInfo": {
+        "hostname": "gz-stress-01",
+        "os": "linux",
+        "arch": "amd64",
+        "numCpu": 16,
+        "memTotalMB": 32768,
+        "goVersion": "go1.23.4",
+        "kernelVer": "5.15.0",
+        "startedAt": "2026-04-29T09:00:00+08:00"
       },
-      "timeoutAvgMs": 0,
-      "avgQps": 1.73,
-      "periodQps": 0
+      "lastHeartbeatAt": "2026-04-29T10:30:00+08:00",
+      "stressUpdatedAt": "2026-04-29T10:29:55+08:00",
+      "systemUpdatedAt": "2026-04-29T10:29:58+08:00",
+      "cpuPercent": 78.2,
+      "memPercent": 65.1,
+      "numGoroutine": 512
     }
   ]
 }
 ```
+
+### 14.4 GET /api/tasks/{id}
+
+```json
+{
+  "id": "task-01",
+  "name": "200v200 压测",
+  "state": "running",
+  "totalBots": 300,
+  "agentCount": 3,
+  "createdAt": "2026-04-29T09:00:00+08:00",
+  "startedAt": "2026-04-29T09:00:05+08:00",
+  "config": {
+    "robotConfig": {
+      "authAddr": "auth.example.com:8001",
+      "concurrency": 50,
+      "timeoutSec": 30
+    },
+    "deadline": "2026-04-29T11:00:00+08:00",
+    "flowFiles": ["flow.json", "proto/c2s.proto", "proto/s2c.proto", "scripts/battle.lua"]
+  },
+  "assignments": [
+    { "taskId": "task-01", "agentId": "agent-1", "agentName": "agent-gz-01", "startNumber": 10000, "totalBots": 100 },
+    { "taskId": "task-01", "agentId": "agent-2", "agentName": "agent-gz-02", "startNumber": 10100, "totalBots": 100 },
+    { "taskId": "task-01", "agentId": "agent-3", "agentName": "agent-gz-03", "startNumber": 10200, "totalBots": 100 }
+  ]
+}
+```
+
+---
+
+## 15. 开发交接清单
+
+完成前端开发后请逐项验证：
+
+- [ ] 任务列表 + 创建（multipart 上传）+ 启动 + 停止 + 删除
+- [ ] 任务详情显示 assignments 和 reports
+- [ ] Agent 列表（含状态指示灯）+ 详情页
+- [ ] 系统资源大盘（集群总览 + per-agent 折线）
+- [ ] 压测大盘（动作明细表 + 折线图 + 错误展示）
+- [ ] 二进制管理（上传 + 下载 + 删除）
+- [ ] 滚动升级（开始 + 进度 + 取消）
+- [ ] 全局错误处理（toast + 顶部红条）
+- [ ] 轮询自动启停（页面切换时）
+- [ ] 折线历史 5 分钟保留 + 自动滑动
+- [ ] 任务结束后停止轮询，显示最终报告
+- [ ] 响应式（桌面 + 平板）
+- [ ] 中文 / 英文双语切换（如需）
+
+---
+
+## 16. 联系点
+
+| 问题类型 | 联系对象 |
+|---|---|
+| 接口字段不清晰 / 缺失 | Admin 后端开发同事 |
+| 数据看起来不对（如 P99 异常） | Admin 后端 + 查 `docs/admin-implementation.md` §4.5 聚合规则 |
+| Agent 上报频率 | 见 `docs/agent-implementation.md` §9 配置 |
+| 升级流程问题 | `docs/design-distributed-master.md` §15 |
