@@ -1,28 +1,37 @@
 /**
- * 顶部工具栏：新建 / 打开 / 保存 / 导入 / 导出 / 预览 / 校验 / 自动布局 / 监听边开关。
+ * 顶部工具栏（编辑器侧）。
+ *
+ * 设计：
+ *   1. 单行布局，左/右两段，左侧编辑器原生功能、右侧通过 `extra` 槽接 RuntimeBar；
+ *   2. 视觉规范：所有按钮统一 size middle、图标 + 短中文；分组用 `Divider type="vertical"`；
+ *   3. 低频项收 Dropdown：文件类（新建/加载/导入/导出）；视图开关（主题/监听边）下放至 RuntimeBar 的"设置"。
+ *
+ * 详见 design-web-editor.md §7（菜单栏布局）。
  */
 
-import { Badge, Button, Space, Switch, Tooltip, Upload, message } from 'antd';
+import { Badge, Button, Divider, Dropdown, Space, Tooltip, App as AntApp } from 'antd';
 import {
   ApiOutlined,
-  BgColorsOutlined,
   CheckCircleOutlined,
   CodeOutlined,
+  DeploymentUnitOutlined,
+  DownOutlined,
   DownloadOutlined,
-  FileOutlined,
+  FileAddOutlined,
+  FileTextOutlined,
   ImportOutlined,
-  LinkOutlined,
   NotificationOutlined,
   RedoOutlined,
   ReloadOutlined,
-  SaveOutlined,
+  ThunderboltOutlined,
   UndoOutlined,
 } from '@ant-design/icons';
-import { useMemo } from 'react';
+import { useMemo, useRef, type ReactNode } from 'react';
 import { validateFlow } from '../validation/refsCheck';
 import { redo, undo } from '../store/undoRedo';
 import { clearDraft } from '../store/persistDraft';
-import type { UploadProps } from 'antd';
+import { useFlowReadOnly } from '../flowReadOnlyContext';
+import type { MenuProps } from 'antd';
 
 import { useShallow } from 'zustand/react/shallow';
 import { useFlowStore } from '../store/flowStore';
@@ -32,19 +41,24 @@ import type { TaskFlow } from '@/types/flow';
 
 export interface ToolbarProps {
   onOpenValidation?: () => void;
+  /** 渲染到工具栏最右侧，用于挂运行控制条 + 跨模块入口 + 设置 */
+  extra?: ReactNode;
 }
 
-export function Toolbar({ onOpenValidation }: ToolbarProps) {
+const SECTION_DIVIDER = (
+  <Divider type="vertical" style={{ margin: '0 6px', height: 22, borderColor: 'rgba(127,127,127,0.18)' }} />
+);
+
+export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
+  const readOnly = useFlowReadOnly();
+  const { message } = AntApp.useApp();
   const loadFromTaskFlow = useFlowStore((s) => s.loadFromTaskFlow);
   const reset = useFlowStore((s) => s.reset);
   const applyAutoLayout = useFlowStore((s) => s.applyAutoLayout);
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
-  const showListenEdges = useEditorStore((s) => s.showListenEdges);
-  const toggleListenEdges = useEditorStore((s) => s.toggleListenEdges);
   const protoStatus = useProtoStore((s) => s.status);
   const protoFileCount = useProtoStore((s) => s.fileCount);
   const callbackCount = useFlowStore((s) => Object.keys(s.callbacks).length);
-  const toggleTheme = useEditorStore((s) => s.toggleTheme);
 
   // 实时校验：错误数量徽章（用浅采样：每次状态变化重新计算）
   const flowSnap = useFlowStore(
@@ -57,7 +71,10 @@ export function Toolbar({ onOpenValidation }: ToolbarProps) {
   );
   const errorCount = useMemo(() => validateFlow(flowSnap).errors.length, [flowSnap]);
 
-  const onImport: UploadProps['beforeUpload'] = async (file) => {
+  // 隐藏的 input[type=file]，由"文件 → 导入"菜单项触发
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImportFile = async (file: File) => {
     try {
       const text = await file.text();
       const parsed = JSON.parse(text) as TaskFlow;
@@ -66,7 +83,6 @@ export function Toolbar({ onOpenValidation }: ToolbarProps) {
     } catch (e) {
       message.error(`导入失败：${(e as Error).message}`);
     }
-    return false; // 阻止 antd 默认上传
   };
 
   const onExport = () => {
@@ -94,6 +110,58 @@ export function Toolbar({ onOpenValidation }: ToolbarProps) {
     }
   };
 
+  const fileMenuItems: MenuProps['items'] = [
+    {
+      key: 'new',
+      icon: <FileAddOutlined />,
+      label: '新建',
+      disabled: readOnly,
+      onClick: () => {
+        clearDraft();
+        reset();
+      },
+    },
+    {
+      key: 'load-default',
+      icon: <ReloadOutlined />,
+      label: '加载 conf/flow.json',
+      disabled: readOnly,
+      onClick: onLoadDefault,
+    },
+    { type: 'divider' as const },
+    {
+      key: 'import',
+      icon: <ImportOutlined />,
+      label: '导入 JSON…',
+      disabled: readOnly,
+      onClick: () => importInputRef.current?.click(),
+    },
+    {
+      key: 'export',
+      icon: <DownloadOutlined />,
+      label: '导出 JSON',
+      onClick: onExport,
+    },
+  ];
+
+  // Proto 徽章状态
+  const protoBadgeStatus =
+    protoStatus === 'ready'
+      ? 'success'
+      : protoStatus === 'loading'
+        ? 'processing'
+        : protoStatus === 'error'
+          ? 'error'
+          : 'default';
+  const protoTip =
+    protoStatus === 'ready'
+      ? `Proto 已加载（${protoFileCount} 文件）`
+      : protoStatus === 'loading'
+        ? '正在加载 Proto…'
+        : protoStatus === 'error'
+          ? 'Proto 加载失败'
+          : 'Proto 未加载';
+
   return (
     <div
       style={{
@@ -104,102 +172,105 @@ export function Toolbar({ onOpenValidation }: ToolbarProps) {
         background: 'var(--bg-panel)',
         borderBottom: '1px solid var(--border-color, rgba(0,0,0,0.06))',
         boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+        gap: 8,
       }}
     >
-      <Space>
-        <strong style={{ fontSize: 16, marginRight: 12 }}>stressbot · 流程编辑器</strong>
-        <Tooltip title="撤销 (Ctrl+Z)">
-          <Button icon={<UndoOutlined />} onClick={() => undo()} />
-        </Tooltip>
-        <Tooltip title="重做 (Ctrl+Shift+Z)">
-          <Button icon={<RedoOutlined />} onClick={() => redo()} />
-        </Tooltip>
-        <Button
-          icon={<FileOutlined />}
-          onClick={() => {
-            clearDraft();
-            reset();
-          }}
-        >
-          新建
-        </Button>
-        <Button icon={<ReloadOutlined />} onClick={onLoadDefault} type="primary">
-          加载 conf/flow.json
-        </Button>
-        <Upload accept="application/json" beforeUpload={onImport} showUploadList={false}>
-          <Button icon={<ImportOutlined />}>导入</Button>
-        </Upload>
-        <Button icon={<DownloadOutlined />} onClick={onExport}>
-          导出
-        </Button>
-        <Button icon={<SaveOutlined />} disabled>
-          保存（待接 API）
-        </Button>
-        <Button icon={<CodeOutlined />} onClick={() => setActivePanel({ kind: 'jsonPreview' })}>
-          JSON 预览
-        </Button>
-        <Tooltip
-          title={
-            protoStatus === 'ready'
-              ? `Proto 已加载（${protoFileCount} 文件）`
-              : protoStatus === 'loading'
-                ? '正在加载 Proto…'
-                : protoStatus === 'error'
-                  ? 'Proto 加载失败'
-                  : 'Proto 未加载'
-          }
-        >
-          <Badge
-            status={
-              protoStatus === 'ready'
-                ? 'success'
-                : protoStatus === 'loading'
-                  ? 'processing'
-                  : protoStatus === 'error'
-                    ? 'error'
-                    : 'default'
-            }
-            offset={[-6, 6]}
-          >
-            <Button icon={<ApiOutlined />} onClick={() => setActivePanel({ kind: 'protoBrowser' })}>
-              Proto
+      <Space size={4} align="center">
+        {/* Logo */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 4 }}>
+          <ThunderboltOutlined style={{ color: '#fa8c16', fontSize: 18 }} />
+          <strong style={{ fontSize: 16, color: 'var(--text-primary)' }}>stressbot</strong>
+        </div>
+
+        {SECTION_DIVIDER}
+
+        {/* 编辑组：撤销 / 重做 */}
+        <Space.Compact>
+          <Tooltip title="撤销 (Ctrl+Z)">
+            <Button icon={<UndoOutlined />} onClick={() => undo()} disabled={readOnly} />
+          </Tooltip>
+          <Tooltip title="重做 (Ctrl+Shift+Z)">
+            <Button icon={<RedoOutlined />} onClick={() => redo()} disabled={readOnly} />
+          </Tooltip>
+        </Space.Compact>
+
+        {SECTION_DIVIDER}
+
+        {/* 文件菜单：新建 / 加载 / 导入 / 导出 */}
+        <Dropdown menu={{ items: fileMenuItems }} trigger={['click']}>
+          <Button icon={<FileTextOutlined />}>
+            文件 <DownOutlined style={{ fontSize: 10 }} />
+          </Button>
+        </Dropdown>
+
+        {SECTION_DIVIDER}
+
+        {/* 视图组：JSON / Proto / 回调 / 校验 */}
+        <Space size={4}>
+          <Tooltip title="预览生成的 flow.json">
+            <Button icon={<CodeOutlined />} onClick={() => setActivePanel({ kind: 'jsonPreview' })}>
+              JSON
             </Button>
-          </Badge>
-        </Tooltip>
-        <Badge count={callbackCount} overflowCount={99} offset={[-4, 6]} color="orange">
+          </Tooltip>
+          <Tooltip title={protoTip}>
+            <Badge status={protoBadgeStatus} offset={[-4, 4]}>
+              <Button icon={<ApiOutlined />} onClick={() => setActivePanel({ kind: 'protoBrowser' })}>
+                Proto
+              </Button>
+            </Badge>
+          </Tooltip>
+          <Tooltip title="管理回调脚本">
+            <Badge count={callbackCount} overflowCount={99} offset={[-4, 4]} color="orange">
+              <Button
+                icon={<NotificationOutlined />}
+                onClick={() => setActivePanel({ kind: 'callbackPanel' })}
+              >
+                回调
+              </Button>
+            </Badge>
+          </Tooltip>
+          <Tooltip title={errorCount > 0 ? `${errorCount} 处校验错误` : '流程结构校验'}>
+            <Badge count={errorCount} overflowCount={99} offset={[-4, 4]}>
+              <Button
+                icon={<CheckCircleOutlined />}
+                onClick={() => onOpenValidation?.()}
+                danger={errorCount > 0}
+              >
+                校验
+              </Button>
+            </Badge>
+          </Tooltip>
+        </Space>
+
+        {SECTION_DIVIDER}
+
+        {/* 自动布局：作用于画布拓扑，归在编辑器侧；"适配器"已挪到 RuntimeBar 与"资源"同组（同属协议/资源准备） */}
+        <Tooltip title="按拓扑自动布局节点">
           <Button
-            icon={<NotificationOutlined />}
-            onClick={() => setActivePanel({ kind: 'callbackPanel' })}
+            icon={<DeploymentUnitOutlined />}
+            onClick={() => applyAutoLayout('LR')}
+            disabled={readOnly}
           >
-            Callbacks
-          </Button>
-        </Badge>
-        <Badge count={errorCount} overflowCount={99} offset={[-4, 6]}>
-          <Button
-            icon={<CheckCircleOutlined />}
-            onClick={() => onOpenValidation?.()}
-            type={errorCount > 0 ? 'default' : 'default'}
-            danger={errorCount > 0}
-          >
-            校验
-          </Button>
-        </Badge>
-        <Button onClick={() => applyAutoLayout('LR')}>自动布局</Button>
-        <Tooltip title="协议适配器（codec.lua）— 通用游戏服务器协议接入">
-          <Button icon={<LinkOutlined />} onClick={() => setActivePanel({ kind: 'codecAdapter' })}>
-            适配器
+            布局
           </Button>
         </Tooltip>
       </Space>
-      <Space>
-        <Tooltip title="切换主题（浅色 / 深色）">
-          <Button icon={<BgColorsOutlined />} onClick={() => toggleTheme()} size="small" />
-        </Tooltip>
-        <Tooltip title="显式监听边（连接 action 与 CallbackCard 的橙色虚线）">
-          <span>监听边</span>
-        </Tooltip>
-        <Switch checked={showListenEdges} onChange={() => toggleListenEdges()} size="small" />
-      </Space>
+
+      {/* 右侧：RuntimeBar（运行控制 + 跨模块入口 + 设置） */}
+      <div style={{ display: 'flex', alignItems: 'center' }}>{extra}</div>
+
+      {/* 隐藏 input：文件菜单"导入"触发 */}
+      <input
+        ref={importInputRef}
+        type="file"
+        accept="application/json,.json"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) handleImportFile(f);
+          e.target.value = '';
+        }}
+      />
     </div>
   );
 }

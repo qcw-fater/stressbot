@@ -7,7 +7,7 @@
 import type { ReactNode } from 'react';
 import { useEditorStore } from '../../store/editorStore';
 import { useFlowStore } from '../../store/flowStore';
-import { MetricsBadge } from './MetricsBadge';
+import { MetricsBadge, useNodeApdexLevel, useNodeMetrics } from './MetricsBadge';
 import './NodeShell.css';
 
 /** 节点视觉形状：决定额外的 className（圆角矩形 / 胶囊 / 菱形 / 六边形 / 圆 / 标签） */
@@ -67,6 +67,12 @@ export function NodeShell({
   const shapeClass = `shape-${shape}`;
   const compactClass = compact ? 'compact' : '';
 
+  // 运行态 Apdex 染色：未注入 metrics 时返回 'unknown'，CSS 不覆盖原配色
+  const apdexLevel = useNodeApdexLevel(nodeId);
+  const apdexClass = apdexLevel !== 'unknown' ? `apdex-${apdexLevel}` : '';
+  const metrics = useNodeMetrics(nodeId);
+  const executing = metrics?.executing ?? 0;
+
   const style: React.CSSProperties = { minWidth };
   if (edgeHighlight && edgeHighlightColor) {
     (style as Record<string, string>)['--edge-highlight-color'] = edgeHighlightColor;
@@ -74,7 +80,7 @@ export function NodeShell({
 
   return (
     <div
-      className={`node-shell node-${nodeType} ${selected ? 'selected' : ''} ${callbackHighlight} ${edgeHighlight} ${shapeClass} ${compactClass} ${issueClass}`}
+      className={`node-shell node-${nodeType} ${selected ? 'selected' : ''} ${callbackHighlight} ${edgeHighlight} ${shapeClass} ${compactClass} ${issueClass} ${apdexClass}`}
       style={style}
     >
       {(errCount > 0 || warnCount > 0) && (
@@ -84,6 +90,14 @@ export function NodeShell({
           data-severity={errCount > 0 ? 'error' : 'warning'}
         >
           {errCount > 0 ? '!' : '?'}
+        </div>
+      )}
+      {executing > 0 && (
+        <div
+          className="node-executing-badge"
+          title={`当前正在执行：${executing} 个机器人`}
+        >
+          {executing}
         </div>
       )}
       <div className="node-header">

@@ -1,0 +1,113 @@
+/**
+ * 压测指标 + 系统指标 API 封装（对应 docs/api-monitor.md §7 / §8）。
+ *
+ * 注意：metrics 接口默认返回当前 active 任务的快照，无需指定 taskId；
+ *      taskId 只在历史回放或多任务并存场景才传，本项目暂不需要。
+ */
+
+import { adaptList, buildQuery, getJson, getText } from './api';
+import type {
+  ClusterSystemSnapshot,
+  PerAgentMetrics,
+  PerAgentMetricsItem,
+  PerAgentSystem,
+  PerAgentSystemItem,
+  StressSnapshot,
+  SystemSnapshot,
+} from '@/types/api';
+
+export interface MetricsParams {
+  taskId?: string;
+}
+
+/** 空快照，作为 `/api/metrics` 在 active=null 时的兜底值。 */
+const EMPTY_STRESS: StressSnapshot = {
+  timestamp: new Date(0).toISOString(),
+  uptimeSeconds: 0,
+  totalActions: 0,
+  apdexT: 0,
+  robots: { started: 0, running: 0, stopped: 0, errored: 0 },
+  connections: { established: 0, failed: 0, dropped: 0 },
+  bandwidth: { totalSendBytes: 0, totalRecvBytes: 0, sendMBps: 0, recvMBps: 0 },
+  actions: [],
+};
+
+// === 压测指标 ===
+
+/**
+ * 后端 `/api/metrics` 返回 `{task, snapshot, agents}`：
+ *   - active=null: snapshot 是空的 CollectorSnapshot
+ *   - active!=null: snapshot 是该任务的 StressSnapshot
+ *
+ * 前端这里统一抽出 snapshot；缺字段时用 EMPTY_STRESS 兜底，避免 UI 空指针。
+ */
+export async function getClusterMetrics(params: MetricsParams = {}): Promise<StressSnapshot> {
+  const resp = await getJson<unknown>(
+    '/metrics' + buildQuery(params as Record<string, unknown>),
+  );
+  if (!resp || typeof resp !== 'object') return EMPTY_STRESS;
+  const wrapper = resp as { snapshot?: StressSnapshot } & Partial<StressSnapshot>;
+  // 直接返回 StressSnapshot 形态时也能透传
+  if (wrapper.snapshot && typeof wrapper.snapshot === 'object') {
+    return mergeSnapshot(wrapper.snapshot);
+  }
+  if (typeof (resp as StressSnapshot).timestamp === 'string') {
+    return mergeSnapshot(resp as StressSnapshot);
+  }
+  return EMPTY_STRESS;
+}
+
+function mergeSnapshot(s: Partial<StressSnapshot>): StressSnapshot {
+  return {
+    ...EMPTY_STRESS,
+    ...s,
+    robots: { ...EMPTY_STRESS.robots, ...(s.robots ?? {}) },
+    connections: { ...EMPTY_STRESS.connections, ...(s.connections ?? {}) },
+    bandwidth: { ...EMPTY_STRESS.bandwidth, ...(s.bandwidth ?? {}) },
+    actions: Array.isArray(s.actions) ? s.actions : [],
+  };
+}
+
+/**
+ * 后端 `/api/metrics/agents` 返回 `[]{agentId, snapshot, updatedAt}`，
+ * 前端包装为 `{items}` 并将 agentName 兜底为 agentId。
+ */
+export async function getPerAgentMetrics(params: MetricsParams = {}): Promise<PerAgentMetrics> {
+  const resp = await getJson<unknown>(
+    '/metrics/agents' + buildQuery(params as Record<string, unknown>),
+  );
+  const arr = adaptList<Partial<PerAgentMetricsItem> & { agentId: string }>(resp).items;
+  return {
+    items: arr.map((it) => ({
+      agentId: it.agentId,
+      agentName: it.agentName ?? it.agentId,
+      snapshot: it.snapshot ?? EMPTY_STRESS,
+      updatedAt: it.updatedAt ?? new Date(0).toISOString(),
+    })),
+  };
+}
+
+export function getAgentMetrics(agentId: string): Promise<StressSnapshot> {
+  return getJson<StressSnapshot>(`/metrics/agents/${encodeURIComponent(agentId)}`);
+}
+
+export function getMetricsSummary(): Promise<string> {
+  return getText('/metrics/summary');
+}
+
+// === 系统指标 ===
+export function getClusterSystem(): Promise<ClusterSystemSnapshot> {
+  return getJson<ClusterSystemSnapshot>('/system');
+}
+
+/**
+ * 后端 `/api/system/agents` 直接返回 `snap.Agents`（数组）；前端包装。
+ */
+export async function getPerAgentSystem(): Promise<PerAgentSystem> {
+  const resp = await getJson<unknown>('/system/agents');
+  return { items: adaptList<PerAgentSystemItem>(resp).items };
+}
+
+export function getAgentSystem(agentId: string): Promise<SystemSnapshot> {
+  return getJson<SystemSnapshot>(`/system/agents/${encodeURIComponent(agentId)}`);
+}

@@ -11,15 +11,19 @@ interface ProtoState {
   error?: string;
   hash?: string;
   fileCount: number;
+  /** 上一次加载使用的源；reload 时复用 */
+  lastSource?: ProtoSource;
   load: (source: ProtoSource) => Promise<void>;
+  /** 用上次的 source 重新加载；首次未加载时无效 */
+  reload: () => Promise<void>;
 }
 
-export const useProtoStore = create<ProtoState>((set) => ({
+export const useProtoStore = create<ProtoState>((set, get) => ({
   status: 'idle',
   fileCount: 0,
   load: async (source) => {
     console.log(`[ProtoStore] 开始加载 proto（source=${source.kind}）`);
-    set({ status: 'loading', error: undefined });
+    set({ status: 'loading', error: undefined, lastSource: source });
     try {
       const result = await loadProtos(source);
       protoRegistry.load(result.root);
@@ -30,5 +34,13 @@ export const useProtoStore = create<ProtoState>((set) => ({
       console.error(`[ProtoStore] 加载失败：${msg}`);
       set({ status: 'error', error: msg });
     }
+  },
+  reload: async () => {
+    const last = get().lastSource;
+    if (!last) {
+      console.warn('[ProtoStore] reload 跳过：尚未首次加载');
+      return;
+    }
+    return get().load(last);
   },
 }));

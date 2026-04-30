@@ -122,7 +122,7 @@ export function TemplateEditorDrawer() {
       }
       width={760}
       onClose={() => setActivePanel({ kind: 'none' })}
-      destroyOnClose
+      destroyOnHidden
       footer={
         <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
           <Button onClick={() => setActivePanel({ kind: 'none' })}>取消</Button>

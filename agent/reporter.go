@@ -1,0 +1,173 @@
+package agent
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"stressbot/monitor"
+	stresslog "stressbot/utils/log"
+	"stressbot/utils"
+
+	"go.uber.org/zap"
+)
+
+// StressReporter 压测指标推送循环。仅任务运行时存在。
+type StressReporter struct {
+	cli      *AdminClient
+	agentID  string
+	taskID   string
+	interval time.Duration
+	src      *monitor.MetricsCollector
+	stopCh   chan struct{}
+	wg       *sync.WaitGroup
+}
+
+// NewStressReporter 创建压测指标上报器。
+func NewStressReporter(cli *AdminClient, agentID, taskID string, interval time.Duration, src *monitor.MetricsCollector, wg *sync.WaitGroup) *StressReporter {
+	return &StressReporter{
+		cli:      cli,
+		agentID:  agentID,
+		taskID:   taskID,
+		interval: interval,
+		src:      src,
+		stopCh:   make(chan struct{}),
+		wg:       wg,
+	}
+}
+
+// Start 启动推送循环（非阻塞）。
+func (r *StressReporter) Start(ctx context.Context) {
+	r.wg.Add(1)
+	utils.GetWorkPool().Go(func() {
+		defer r.wg.Done()
+		r.run(ctx)
+	})
+}
+
+// Stop 停止推送循环。
+func (r *StressReporter) Stop() {
+	close(r.stopCh)
+}
+
+func (r *StressReporter) run(ctx context.Context) {
+	ticker := time.NewTicker(r.interval)
+	defer ticker.Stop()
+
+	var backoff time.Duration
+
+	for {
+		if backoff > 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-r.stopCh:
+				return
+			case <-time.After(backoff):
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				return
+			case <-r.stopCh:
+				return
+			case <-ticker.C:
+			}
+		}
+
+		snap := r.src.Snapshot(nil, 0)
+		report := StressReport{
+			AgentID:    r.agentID,
+			TaskID:     r.taskID,
+			ReportedAt: time.Now(),
+			Snapshot:   snap,
+		}
+		if err := r.cli.PostStress(ctx, report); err != nil {
+			backoff = nextBackoff(backoff, 30*time.Second)
+			stresslog.Warn("[AGENT] 压测指标上报失败",
+				zap.String("taskID", r.taskID),
+				zap.Duration("backoff", backoff),
+				zap.Error(err))
+		} else {
+			backoff = 0
+		}
+	}
+}
+
+// SystemReporter 系统指标推送循环。常驻运行（idle 期间也上报）。
+type SystemReporter struct {
+	cli      *AdminClient
+	agentID  string
+	interval time.Duration
+	src      *SystemMonitor
+	stopCh   chan struct{}
+	wg       *sync.WaitGroup
+}
+
+// NewSystemReporter 创建系统指标上报器。
+func NewSystemReporter(cli *AdminClient, agentID string, interval time.Duration, src *SystemMonitor, wg *sync.WaitGroup) *SystemReporter {
+	return &SystemReporter{
+		cli:      cli,
+		agentID:  agentID,
+		interval: interval,
+		src:      src,
+		stopCh:   make(chan struct{}),
+		wg:       wg,
+	}
+}
+
+// Start 启动推送循环（非阻塞）。
+func (r *SystemReporter) Start(ctx context.Context) {
+	r.wg.Add(1)
+	utils.GetWorkPool().Go(func() {
+		defer r.wg.Done()
+		r.run(ctx)
+	})
+}
+
+// Stop 停止推送循环。
+func (r *SystemReporter) Stop() {
+	close(r.stopCh)
+}
+
+func (r *SystemReporter) run(ctx context.Context) {
+	ticker := time.NewTicker(r.interval)
+	defer ticker.Stop()
+
+	var backoff time.Duration
+
+	for {
+		if backoff > 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-r.stopCh:
+				return
+			case <-time.After(backoff):
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				return
+			case <-r.stopCh:
+				return
+			case <-ticker.C:
+			}
+		}
+
+		snap := r.src.Snapshot()
+		report := SystemReport{
+			AgentID:    r.agentID,
+			ReportedAt: time.Now(),
+			Snapshot:   snap,
+		}
+		if err := r.cli.PostSystem(ctx, report); err != nil {
+			backoff = nextBackoff(backoff, 30*time.Second)
+			stresslog.Warn("[AGENT] 系统指标上报失败",
+				zap.Duration("backoff", backoff),
+				zap.Error(err))
+		} else {
+			backoff = 0
+		}
+	}
+}

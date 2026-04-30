@@ -13,7 +13,8 @@ import { flowToJson } from './flowToJson';
 import { jsonToFlow } from './jsonToFlow';
 import type { TaskFlow } from '@/types/flow';
 
-const flowPath = path.resolve(__dirname, '../../../../../conf/flow.json');
+// web 移到 cmd/web 后，从 codec.test.ts 到仓库根需要 6 层 ..
+const flowPath = path.resolve(__dirname, '../../../../../../conf/flow.json');
 
 describe('codec round-trip', () => {
   const raw = JSON.parse(fs.readFileSync(flowPath, 'utf-8')) as TaskFlow;
@@ -103,7 +104,7 @@ describe('codec round-trip', () => {
       actions: raw.actions,
       callbacks: raw.callbacks,
     });
-    const outPath = path.resolve(__dirname, '../../../../tmp_codec_export.json');
+    const outPath = path.resolve(__dirname, '../../../../../tmp_codec_export.json');
     fs.writeFileSync(outPath, JSON.stringify(exported, null, 2), 'utf-8');
     // 文件能读回
     const reread = JSON.parse(fs.readFileSync(outPath, 'utf-8')) as TaskFlow;

@@ -78,6 +78,8 @@ interface EditorState {
   showGrid: boolean;
   theme: ThemeMode;
   clipboard: Clipboard;
+  /** MonitorDock 是否展开；编辑态默认关，运行态默认开（首次切换由 MonitorDock 内部按 mode 切换） */
+  monitorDockOpen: boolean;
 
   setSelectedNode: (id: string | null) => void;
   setSelectedCallback: (name: string | null) => void;
@@ -91,6 +93,7 @@ interface EditorState {
   setTheme: (t: ThemeMode) => void;
   toggleTheme: () => void;
   setClipboard: (c: Clipboard) => void;
+  setMonitorDockOpen: (v: boolean) => void;
 }
 
 const initialTheme = readInitialTheme();
@@ -108,6 +111,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   showGrid: true,
   theme: initialTheme,
   clipboard: null,
+  monitorDockOpen: false,
 
   setSelectedNode: (id) => set({ selectedNodeId: id }),
   setSelectedCallback: (name) => set({ selectedCallbackName: name }),
@@ -132,4 +136,5 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     get().setTheme(next);
   },
   setClipboard: (c) => set({ clipboard: c }),
+  setMonitorDockOpen: (v) => set({ monitorDockOpen: v }),
 }));

@@ -1,0 +1,78 @@
+/**
+ * 延迟分位数可视化：把 P50/P90/P95/P99 渲染成横向 bar。
+ *
+ * 不是真正的分桶柱状（后端目前没有暴露原始桶数据），仅用 4 个分位点做可视提示。
+ */
+
+import { Tooltip } from 'antd';
+import type { HistogramView } from '@/types/api';
+
+export interface LatencyHistogramProps {
+  hist: HistogramView;
+  /** 横轴最大刻度（用于把 P99 缩放到容器内）。默认按 hist.maxMs 自适应 */
+  maxMs?: number;
+  width?: number;
+}
+
+const P_COLOR: Record<string, string> = {
+  p50: '#52c41a',
+  p90: '#a0d911',
+  p95: '#faad14',
+  p99: '#f5222d',
+};
+
+export function LatencyHistogram({ hist, maxMs, width = 160 }: LatencyHistogramProps) {
+  if (hist.count === 0) {
+    return <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>—</span>;
+  }
+  const max = maxMs ?? Math.max(hist.p99Ms, 1);
+  const points: Array<{ key: keyof HistogramView; label: string; ms: number }> = [
+    { key: 'p50Ms', label: 'p50', ms: hist.p50Ms },
+    { key: 'p90Ms', label: 'p90', ms: hist.p90Ms },
+    { key: 'p95Ms', label: 'p95', ms: hist.p95Ms },
+    { key: 'p99Ms', label: 'p99', ms: hist.p99Ms },
+  ];
+
+  return (
+    <Tooltip
+      title={
+        <div style={{ fontSize: 11 }}>
+          <div>min: {hist.minMs.toFixed(1)}ms · max: {hist.maxMs.toFixed(1)}ms · avg: {hist.avgMs.toFixed(1)}ms</div>
+          {points.map((p) => (
+            <div key={p.label}>
+              {p.label}: {p.ms.toFixed(1)}ms
+            </div>
+          ))}
+        </div>
+      }
+    >
+      <div
+        style={{
+          position: 'relative',
+          width,
+          height: 14,
+          background: 'rgba(0,0,0,0.04)',
+          borderRadius: 4,
+          overflow: 'hidden',
+        }}
+      >
+        {points.map((p) => {
+          const left = Math.min(100, (p.ms / max) * 100);
+          return (
+            <div
+              key={p.label}
+              style={{
+                position: 'absolute',
+                left: `calc(${left}% - 1px)`,
+                top: 0,
+                bottom: 0,
+                width: 2,
+                background: P_COLOR[p.label],
+              }}
+            />
+          );
+        })}
+      </div>
+    </Tooltip>
+  );
+}

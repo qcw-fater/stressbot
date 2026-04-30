@@ -62,6 +62,65 @@
   box-shadow: 0 0 0 2px rgba(250, 173, 20, 0.25), var(--shadow-node);
 }
 
+/* === 运行态 Apdex 染色 ===
+   仅在 HomeShell 注入 metrics（mode=running/viewActive/finalReport）时生效；
+   编辑态没有 ActionMetric → unknown → 不挂 className，原配色保留。
+   优先级低于 has-error / has-warning（用 :not(.has-error):not(.has-warning) 避免覆盖校验红线）。
+*/
+.node-shell.apdex-excellent:not(.has-error):not(.has-warning) {
+  border-color: #52c41a;
+  box-shadow: 0 0 0 2px rgba(82, 196, 26, 0.18), var(--shadow-node);
+}
+.node-shell.apdex-good:not(.has-error):not(.has-warning) {
+  border-color: #a0d911;
+  box-shadow: 0 0 0 2px rgba(160, 217, 17, 0.18), var(--shadow-node);
+}
+.node-shell.apdex-fair:not(.has-error):not(.has-warning) {
+  border-color: #faad14;
+  box-shadow: 0 0 0 2px rgba(250, 173, 20, 0.22), var(--shadow-node);
+}
+.node-shell.apdex-poor:not(.has-error):not(.has-warning) {
+  border-color: #fa8c16;
+  box-shadow: 0 0 0 2px rgba(250, 140, 22, 0.22), var(--shadow-node);
+}
+.node-shell.apdex-danger:not(.has-error):not(.has-warning) {
+  border-color: #f5222d;
+  box-shadow: 0 0 0 2px rgba(245, 34, 45, 0.25), var(--shadow-node);
+}
+
+/* 当前并发徽章：左下角圆形脉动；与右上 issue 徽章不冲突 */
+.node-executing-badge {
+  position: absolute;
+  bottom: -6px;
+  left: -6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--node-action, #1677ff);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--bg-panel);
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.25);
+  z-index: 2;
+  cursor: help;
+  font-variant-numeric: tabular-nums;
+  animation: executing-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes executing-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(22, 119, 255, 0.0);
+  }
+}
+
 /* 节点右上角的小型 issue 徽章（! 红色错误 / ? 橙色警告） */
 .node-issue-badge {
   position: absolute;

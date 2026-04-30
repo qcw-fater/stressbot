@@ -5,8 +5,12 @@ import fs from 'node:fs';
 
 // 把仓库根的 conf/ 通过中间件挂到 /conf/*，使编辑器可直接 fetch '/conf/flow.json'
 // 而无需把 conf/ 复制进 web/public（坚持单一来源原则）。
+//
+// 路径换算：vite.config.ts 位于 cmd/web/，仓库根在 cmd/web/../.. = stressbot/，
+// 所以 confRoot = stressbot/conf。早期版本误写成 '..' 一级，导致 /conf/proto/index.json
+// 实际去读不存在的 cmd/conf 抛 ENOENT，前端收到 500。
 function confMountPlugin(): Plugin {
-  const confRoot = path.resolve(__dirname, '..', 'conf');
+  const confRoot = path.resolve(__dirname, '..', '..', 'conf');
   return {
     name: 'stressbot-conf-mount',
     configureServer(server) {
@@ -22,7 +26,7 @@ function confMountPlugin(): Plugin {
             return;
           } catch (e) {
             res.statusCode = 500;
-            res.end(`failed to list proto: ${(e as Error).message}`);
+            res.end(`failed to list proto (confRoot=${confRoot}): ${(e as Error).message}`);
             return;
           }
         }
@@ -35,7 +39,7 @@ function confMountPlugin(): Plugin {
             return;
           } catch (e) {
             res.statusCode = 500;
-            res.end(`failed to list scripts: ${(e as Error).message}`);
+            res.end(`failed to list scripts (confRoot=${confRoot}): ${(e as Error).message}`);
             return;
           }
         }
@@ -75,8 +79,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // 默认转发到 Admin :8080（docs/admin-implementation.md 默认监听）；
+      // 通过 STRESSBOT_ADMIN 环境变量可覆盖（例如 set STRESSBOT_ADMIN=http://10.0.0.5:8080）
       '/api': {
-        target: 'http://localhost:6060',
+        target: process.env.STRESSBOT_ADMIN ?? 'http://localhost:8080',
         changeOrigin: true,
       },
     },

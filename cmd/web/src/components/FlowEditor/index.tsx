@@ -5,7 +5,7 @@
  * 后续接 onSave / metricsProvider 等 props（Phase 11 收口）。
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { FlowCanvas } from './FlowCanvas';
 import { Toolbar } from './panels/Toolbar';
 import { NodePalette } from './panels/NodePalette';
@@ -19,6 +19,7 @@ import { CodecAdapterDrawer } from './adapter/CodecAdapterDrawer';
 import { startAutoPersist, loadDraft } from './store/persistDraft';
 import { startHistory, undo, redo } from './store/undoRedo';
 import { useMetricsStore, type MetricsProvider } from './nodes/shared/MetricsBadge';
+import { FlowReadOnlyContext } from './flowReadOnlyContext';
 import { App as AntApp } from 'antd';
 import { useFlowStore } from './store/flowStore';
 import { useProtoStore } from './proto/protoStore';
@@ -34,6 +35,10 @@ export interface FlowEditorProps {
   autoLoadDefault?: boolean;
   /** 监控数据提供方：实时返回某节点的运行指标，未提供时不显示监控徽章 */
   metricsProvider?: MetricsProvider;
+  /** 只读模式：viewActive / running / finalReport 时为 true，画布与编辑器均锁定 */
+  readOnly?: boolean;
+  /** 渲染在 Toolbar 最右侧（运行控制条等） */
+  topbarExtra?: ReactNode;
 }
 
 export function FlowEditor(props: FlowEditorProps) {
@@ -50,6 +55,8 @@ function FlowEditorInner({
   initialLayout,
   autoLoadDefault = true,
   metricsProvider,
+  readOnly = false,
+  topbarExtra,
 }: FlowEditorProps) {
   const loadFromTaskFlow = useFlowStore((s) => s.loadFromTaskFlow);
   const loadProtos = useProtoStore((s) => s.load);
@@ -135,29 +142,33 @@ function FlowEditorInner({
   }, [initialFlow, initialLayout, autoLoadDefault, loadFromTaskFlow, notification]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
-      <Toolbar onOpenValidation={() => setValidationOpen(true)} />
-      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-        <div
-          style={{
-            width: 240,
-            borderRight: '1px solid var(--border-color, rgba(0,0,0,0.06))',
-            background: 'var(--bg-panel)',
-          }}
-        >
-          <NodePalette />
+    <FlowReadOnlyContext.Provider value={readOnly}>
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
+        <Toolbar onOpenValidation={() => setValidationOpen(true)} extra={topbarExtra} />
+        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+          <div
+            style={{
+              width: 240,
+              borderRight: '1px solid var(--border-color, rgba(0,0,0,0.06))',
+              background: 'var(--bg-panel)',
+              opacity: readOnly ? 0.5 : 1,
+              pointerEvents: readOnly ? 'none' : 'auto',
+            }}
+          >
+            <NodePalette />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <FlowCanvas />
+          </div>
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <FlowCanvas />
-        </div>
+        <JsonPreviewModal />
+        <NodeEditorDrawer />
+        <ProtoBrowser />
+        <CallbackPanel />
+        <TemplateEditorDrawer />
+        <CodecAdapterDrawer />
+        <ValidationReportDrawer open={validationOpen} onClose={() => setValidationOpen(false)} />
       </div>
-      <JsonPreviewModal />
-      <NodeEditorDrawer />
-      <ProtoBrowser />
-      <CallbackPanel />
-      <TemplateEditorDrawer />
-      <CodecAdapterDrawer />
-      <ValidationReportDrawer open={validationOpen} onClose={() => setValidationOpen(false)} />
-    </div>
+    </FlowReadOnlyContext.Provider>
   );
 }

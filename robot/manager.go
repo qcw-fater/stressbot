@@ -143,3 +143,53 @@ func (m *Manager) Count() int {
 	defer m.mu.RUnlock()
 	return len(m.robots)
 }
+
+// RunConfig 任务运行参数（Agent 模式下由 Admin 下发）。
+type RunConfig struct {
+	StartNumber int
+	TotalBots   int
+	Concurrency int
+}
+
+// RunWithContext 启动机器人并阻塞，直到 ctx 取消或所有机器人退出。
+// 用于 Agent 模式：外部通过 cancel ctx 触发停止。
+func (m *Manager) RunWithContext(ctx context.Context, cfg RunConfig) error {
+	// 覆盖配置
+	if cfg.StartNumber > 0 {
+		m.cfg.StartNumber = cfg.StartNumber
+	}
+	if cfg.TotalBots > 0 {
+		m.cfg.Count = cfg.TotalBots
+	}
+	if cfg.Concurrency > 0 {
+		m.cfg.ConcurrentNum = cfg.Concurrency
+	}
+
+	if err := m.StartAll(); err != nil {
+		return err
+	}
+
+	// 等待 ctx 取消或所有机器人退出
+	done := make(chan struct{})
+	go func() {
+		for {
+			m.mu.RLock()
+			n := len(m.robots)
+			m.mu.RUnlock()
+			_, st := m.GetStats()
+			if int(st) >= n && n > 0 {
+				close(done)
+				return
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		m.StopAll()
+		return ctx.Err()
+	case <-done:
+		return nil
+	}
+}

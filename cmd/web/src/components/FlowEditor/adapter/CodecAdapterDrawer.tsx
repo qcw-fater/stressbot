@@ -180,7 +180,7 @@ export function CodecAdapterDrawer() {
       title="协议适配器（codec.lua）"
       width={760}
       onClose={() => setActivePanel({ kind: 'none' })}
-      destroyOnClose
+      destroyOnHidden
     >
       <Tabs
         defaultActiveKey="upload"

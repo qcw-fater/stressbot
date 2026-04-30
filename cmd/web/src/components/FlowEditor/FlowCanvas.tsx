@@ -30,6 +30,7 @@ import { useFlowStore } from './store/flowStore';
 import { useEditorStore, type Clipboard } from './store/editorStore';
 import { generateNodeId } from './utils/nodeIdGen';
 import { saveActionTemplate, saveCallbackTemplate } from './library/templateStore';
+import { useFlowReadOnly } from './flowReadOnlyContext';
 import type { FlowNode, NodeType } from '@/types/flow';
 import type { ActionDef } from '@/types/action';
 import type { CallbackDef } from '@/types/callback';
@@ -45,6 +46,7 @@ interface ContextMenu {
 }
 
 function FlowCanvasInner() {
+  const readOnly = useFlowReadOnly();
   const rfNodes = useFlowStore((s) => s.rfNodes);
   const rfEdges = useFlowStore((s) => s.rfEdges);
   const onNodesChange = useFlowStore((s) => s.onNodesChange);
@@ -86,6 +88,7 @@ function FlowCanvasInner() {
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
+      if (readOnly) return;
       const flowPos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
 
       // 1. 普通节点类型拖入
@@ -164,7 +167,7 @@ function FlowCanvasInner() {
         console.warn('[FlowCanvas] 解析模板拖入数据失败：', err);
       }
     },
-    [addNode, addAction, addCallback, screenToFlowPosition, setActivePanel, setSelectedNode],
+    [addNode, addAction, addCallback, readOnly, screenToFlowPosition, setActivePanel, setSelectedNode],
   );
 
   // 选中变化 → 计算 edgeHighlightNodeIds + 高亮颜色（取第一条选中边的源节点类型）
@@ -268,6 +271,7 @@ function FlowCanvasInner() {
    */
   const onConnect = useCallback(
     (params: { source: string | null; target: string | null; sourceHandle?: string | null; targetHandle?: string | null }) => {
+      if (readOnly) return;
       if (!params.source || !params.target) return;
       const src = useFlowStore.getState().nodes[params.source];
       if (!src) return;
@@ -316,21 +320,23 @@ function FlowCanvasInner() {
         return;
       }
     },
-    [updateNode],
+    [readOnly, updateNode],
   );
 
   const onNodesDelete = useCallback(
     (deleted: RFNode[]) => {
+      if (readOnly) return;
       for (const n of deleted) deleteRfNode(n);
     },
-    [deleteRfNode],
+    [deleteRfNode, readOnly],
   );
 
   const onEdgesDelete = useCallback(
     (deleted: Edge[]) => {
+      if (readOnly) return;
       for (const e of deleted) deleteRfEdge(e);
     },
-    [deleteRfEdge],
+    [deleteRfEdge, readOnly],
   );
 
   // 关闭右键菜单的全局监听
@@ -576,8 +582,11 @@ function FlowCanvasInner() {
         edges={rfEdges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
+        nodesDraggable={!readOnly}
+        nodesConnectable={!readOnly}
+        edgesFocusable={!readOnly}
+        onNodesChange={readOnly ? undefined : onNodesChange}
+        onEdgesChange={readOnly ? undefined : onEdgesChange}
         onConnect={onConnect}
         onNodesDelete={onNodesDelete}
         onEdgesDelete={onEdgesDelete}
@@ -639,7 +648,7 @@ function FlowCanvasInner() {
             kind: 'pane',
           });
         }}
-        deleteKeyCode={['Delete', 'Backspace']}
+        deleteKeyCode={readOnly ? null : ['Delete', 'Backspace']}
         fitView
         fitViewOptions={{ padding: 0.15, minZoom: 0.2, maxZoom: 1.5 }}
         proOptions={{ hideAttribution: true }}
@@ -655,6 +664,7 @@ function FlowCanvasInner() {
           menu={menu}
           rfNodes={rfNodes}
           clipboard={clipboard}
+          readOnly={readOnly}
           onClose={() => setMenu(null)}
           onCopyNode={(id) => {
             const n = rfNodes.find((x) => x.id === id);
@@ -733,6 +743,7 @@ interface CanvasContextMenuProps {
   menu: ContextMenu;
   rfNodes: RFNode[];
   clipboard: Clipboard;
+  readOnly: boolean;
   onClose: () => void;
   onCopyNode: (id: string) => void;
   onCutNode: (id: string) => void;
@@ -760,6 +771,7 @@ function CanvasContextMenu({
   menu,
   rfNodes,
   clipboard,
+  readOnly,
   onClose,
   onCopyNode,
   onCutNode,
@@ -801,47 +813,51 @@ function CanvasContextMenu({
               onClose();
             }}
           >
-            编辑…
+            {readOnly ? '查看…' : '编辑…'}
           </MenuItem>
-          <MenuItem
-            onClick={() => {
-              onCopyNode(menu.targetId!);
-              onClose();
-            }}
-          >
-            复制 <Hint>Ctrl+C</Hint>
-          </MenuItem>
-          <MenuItem
-            onClick={() => {
-              onCutNode(menu.targetId!);
-              onClose();
-            }}
-          >
-            剪切 <Hint>Ctrl+X</Hint>
-          </MenuItem>
-          {canSaveTemplate && (
-            <MenuItem
-              onClick={() => {
-                onSaveAsTemplate(menu.targetId!);
-                onClose();
-              }}
-            >
-              保存为模板…
-            </MenuItem>
+          {!readOnly && (
+            <>
+              <MenuItem
+                onClick={() => {
+                  onCopyNode(menu.targetId!);
+                  onClose();
+                }}
+              >
+                复制 <Hint>Ctrl+C</Hint>
+              </MenuItem>
+              <MenuItem
+                onClick={() => {
+                  onCutNode(menu.targetId!);
+                  onClose();
+                }}
+              >
+                剪切 <Hint>Ctrl+X</Hint>
+              </MenuItem>
+              {canSaveTemplate && (
+                <MenuItem
+                  onClick={() => {
+                    onSaveAsTemplate(menu.targetId!);
+                    onClose();
+                  }}
+                >
+                  保存为模板…
+                </MenuItem>
+              )}
+              <Divider />
+              <MenuItem
+                danger
+                onClick={() => {
+                  onDeleteNode(menu.targetId!);
+                  onClose();
+                }}
+              >
+                删除 <Hint>Del</Hint>
+              </MenuItem>
+            </>
           )}
-          <Divider />
-          <MenuItem
-            danger
-            onClick={() => {
-              onDeleteNode(menu.targetId!);
-              onClose();
-            }}
-          >
-            删除 <Hint>Del</Hint>
-          </MenuItem>
         </>
       )}
-      {menu.kind === 'edge' && menu.targetId && (
+      {menu.kind === 'edge' && menu.targetId && !readOnly && (
         <MenuItem
           danger
           onClick={() => {
@@ -852,7 +868,7 @@ function CanvasContextMenu({
           删除连线 <Hint>Del</Hint>
         </MenuItem>
       )}
-      {menu.kind === 'pane' && (
+      {menu.kind === 'pane' && !readOnly && (
         <>
           <MenuItem
             disabled={!clipboard}

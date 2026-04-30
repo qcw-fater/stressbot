@@ -1,16 +1,21 @@
 /**
- * Proto 加载器：从 Vite 编译期 glob / Go API / 用户上传三个来源中之一加载 .proto 文件。
+ * Proto 加载器：按优先级从多个来源加载 .proto 文件。
  *
- * 设计文档 §9.1。
+ * 设计文档 §9.1；T2 阶段调整后的 `static` 加载链：
  *
- * 编译期 glob 来源（开发阶段默认）：
+ *   IndexedDB (用户上传) → Vite 中间件 /conf/proto/* → import.meta.glob 兜底
+ *
+ * 这样开发期 / 生产期 / 离线包装期都能拿到 proto；上传后调用 `reloadProtos()` 立即生效。
+ *
+ * 编译期 glob 兜底：
  *   - 通过 `import.meta.glob` 把仓库根 `conf/proto/*.proto` 内联为原始字符串，
  *     避免依赖 dev server 中间件 / HTTP fetch（曾因 SPA fallback、路由顺序导致加载失败）。
  *   - HMR 友好：修改 .proto 文件 vite 会自动重启加载。
- *   - 缺点：所有 proto 文本会打包进 bundle，但生产模式应优先使用 Go API。
+ *   - 缺点：所有 proto 文本会打包进 bundle，但生产模式应优先使用 IDB / Admin。
  */
 
 import * as protobuf from 'protobufjs';
+import { listProto } from '@/services/resourcesStore';
 
 // 关键：路径相对当前文件 (web/src/components/FlowEditor/proto/ProtoLoader.ts) 到 stressbot/conf/proto。
 // 必须是字面量，不能动态拼接（vite 编译期解析）。
@@ -45,10 +50,28 @@ export async function loadProtos(source: ProtoSource): Promise<LoadResult> {
   }
 }
 
-/** A：优先走 vite confMountPlugin 暴露的 /conf/proto/* （开发 + 生产同源）；
- *      失败再退回到 import.meta.glob 编译期内联（任何环境都可用）。 */
+/** A：按 IndexedDB → /conf/proto/* → import.meta.glob 顺序加载。
+ *      任一来源得到非空文件清单即视为成功并返回；其余跳过。 */
 async function loadFromInline(): Promise<LoadResult> {
-  // 1) 走 HTTP（vite.config.ts 中 confMountPlugin 已挂 /conf/* 中间件）：稳定且不打包 .proto 内容到 bundle
+  // 1) IndexedDB：用户在"资源管理"中上传的 proto。优先级最高，离线 / 生产环境都能用。
+  try {
+    const userProtos = await listProto();
+    if (userProtos.length > 0) {
+      const sources: Record<string, string> = {};
+      const files: string[] = [];
+      for (const f of userProtos) {
+        sources[f.name] = f.content;
+        files.push(f.name);
+      }
+      files.sort();
+      console.log(`[ProtoLoader] 通过 IndexedDB 加载（${files.length} 个文件）`);
+      return parseAll(sources, files);
+    }
+  } catch (e) {
+    console.warn(`[ProtoLoader] IndexedDB 读取失败，回退到 /conf/proto/：`, (e as Error).message);
+  }
+
+  // 2) 走 HTTP（vite.config.ts 中 confMountPlugin 已挂 /conf/* 中间件）：稳定且不打包 .proto 内容到 bundle
   try {
     const r = await loadFromHttp('', '/conf/proto/index.json', '/conf/proto/');
     console.log(`[ProtoLoader] 通过 /conf/proto/ 加载成功（${r.files.length} 个文件）`);
@@ -57,7 +80,7 @@ async function loadFromInline(): Promise<LoadResult> {
     console.warn(`[ProtoLoader] /conf/proto/ 加载失败，尝试 import.meta.glob 兜底：`, (e as Error).message);
   }
 
-  // 2) 兜底：编译期 glob 注入
+  // 3) 兜底：编译期 glob 注入
   const sources: Record<string, string> = {};
   const files: string[] = [];
   for (const [path, content] of Object.entries(STATIC_PROTO_FILES)) {
@@ -67,7 +90,7 @@ async function loadFromInline(): Promise<LoadResult> {
   }
   if (files.length === 0) {
     throw new Error(
-      `编译期 import.meta.glob 也没找到 .proto 文件（路径：'../../../../../conf/proto/*.proto'）。请确认 stressbot/conf/proto 下存在 .proto 文件，且 vite server.fs.allow 已包含 '..'。`,
+      `所有 proto 来源均为空：IndexedDB / /conf/proto/ / import.meta.glob('../../../../../conf/proto/*.proto') 均未命中。请确认资源已上传，或 stressbot/conf/proto 下存在 .proto 文件，且 vite server.fs.allow 已包含 '..'。`,
     );
   }
   files.sort();
