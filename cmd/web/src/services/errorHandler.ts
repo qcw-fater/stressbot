@@ -54,6 +54,7 @@ const TOAST_MAP: Record<string, (err: ApiError) => string> = {
   BINARY_NOT_FOUND: () => '该版本二进制不存在，请先上传',
   HISTORY_NOT_FOUND: () => '历史记录不存在或已被删除',
   HISTORY_STARRED: () => '已收藏的记录不能删除（请先取消收藏，或使用强制删除）',
+  HISTORY_DISABLED: () => 'admin 未启用 history 模块（需配置 MySQL），暂无法查看历史记录',
   INVALID_ARGUMENT: (err) => `参数非法：${err.message}`,
   NETWORK_ERROR: () => '网络异常，请检查 Admin 是否可达',
   HTTP_ERROR: (err) => `请求失败（${err.status}）：${err.message}`,

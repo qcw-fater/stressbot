@@ -55,9 +55,6 @@ func (a *MetricsAggregator) AggregateSystem() ClusterSystemSnapshot {
 		}
 		cluster.AgentCount++
 		cluster.OnlineCount++
-		if agent.Status == AgentUpgrading {
-			cluster.UpgradingCount++
-		}
 
 		sys := agent.LatestSystem
 		if sys == nil {
@@ -87,14 +84,14 @@ func (a *MetricsAggregator) AggregateSystem() ClusterSystemSnapshot {
 			totalMemPercent += sys.MemPercent
 		}
 
-		// 网络
-		cluster.NetSendKBps += sys.NetSendKBps
-		cluster.NetRecvKBps += sys.NetRecvKBps
+		// 网络（求和）
+		cluster.TotalNetSendKBps += sys.NetSendKBps
+		cluster.TotalNetRecvKBps += sys.NetRecvKBps
 
-		// 进程
-		cluster.TotalGoroutine += sys.NumGoroutine
-		cluster.TotalThread += sys.NumThread
-		cluster.TotalFD += sys.NumFD
+		// 进程（求和）
+		cluster.TotalGoroutines += sys.NumGoroutine
+		cluster.TotalThreads += sys.NumThread
+		cluster.TotalFDs += sys.NumFD
 
 		// Agent 摘要
 		cluster.Agents = append(cluster.Agents, AgentSystemBrief{
@@ -112,9 +109,6 @@ func (a *MetricsAggregator) AggregateSystem() ClusterSystemSnapshot {
 
 	if totalCPUWeight > 0 {
 		cluster.AvgCPUPercent = weightedCPUSum / totalCPUWeight
-	}
-	if cluster.TotalMemMB > 0 {
-		cluster.AvgMemPercent = float64(cluster.UsedMemMB) / float64(cluster.TotalMemMB) * 100
 	}
 
 	return cluster

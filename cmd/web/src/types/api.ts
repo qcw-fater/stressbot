@@ -6,9 +6,9 @@
 
 // === 基础枚举 ===
 export type TaskState = 'pending' | 'starting' | 'running' | 'stopping' | 'stopped' | 'failed';
-export type AgentStatus = 'idle' | 'busy' | 'unhealthy' | 'offline' | 'upgrading';
+export type AgentStatus = 'idle' | 'busy' | 'unhealthy' | 'offline';
 export type TaskResult = 'completed' | 'stopped' | 'failed';
-export type UpgradePhase = 'queued' | 'sent' | 'upgrading' | 'success' | 'failed';
+// OS / Arch 用于 StaticInfo（Agent 自报），保留仅用于展示，不再参与二进制平台匹配。
 export type OS = 'windows' | 'linux' | 'darwin';
 export type Arch = 'amd64' | 'arm64';
 
@@ -31,10 +31,56 @@ export interface TaskBrief {
   stoppedAt?: string;
 }
 
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+/**
+ * 任务级运行时配置。
+ *
+ * 字段分层：
+ * - 必填（authAddr/concurrency/timeoutSec）：每个任务一定要的核心参数；
+ * - 可选（其余）：留空时由 admin 用合理默认值填充并下发给 agent。
+ *
+ * 协议约定：超时类用 int 秒数（前端表单友好），admin 转 duration 字符串给 agent。
+ */
 export interface RobotConfig {
+  // ── 必填 ──
   authAddr: string;
   concurrency: number;
+  /** TCP/请求超时秒数（兜底）。也兼容旧字段语义。 */
   timeoutSec: number;
+
+  // ── 业务可变（影响每任务的鉴权/连接行为）──
+  /** 账号前缀，用于区分压测批次，默认 "bot_" */
+  accountPrefix?: string;
+  /**
+   * 账号编号起点；admin 在分配时把它作为各 agent cursor 的起点，
+   * 即第 N 个机器人的账号 = `accountPrefix + (startNumber + N)`。
+   * 用法：已有 bot_0~bot_99 时设 100 可避免账号撞车。默认 0。
+   */
+  startNumber?: number;
+  /** 主连接服务名，默认 "logic"；不同游戏命名不同 */
+  mainService?: string;
+  /**
+   * Auth 请求扩展字段（version / channel / platform 等）。
+   * 在 lua 脚本里通过 `robot.get("version")` 取到。
+   * 不配置则 lua 取到 nil 走脚本兜底默认值，可能导致鉴权失败。
+   */
+  authExtra?: Record<string, string>;
+
+  // ── 性能/超时（通常用默认值即可）──
+  /** 心跳间隔秒数，默认 5 */
+  heartbeatSec?: number;
+  /** HTTP 请求超时秒数，默认 10 */
+  httpTimeoutSec?: number;
+  /** Apdex 满意阈值毫秒，默认 100 */
+  apdexT?: number;
+
+  // ── 日志 ──
+  /**
+   * 任务期临时切换 Agent 进程日志等级；省略 = 沿用 Agent 启动配置（通常为 info）。
+   * 任务结束后 Agent 会自动恢复为原等级，不影响后续任务。
+   */
+  logLevel?: LogLevel;
 }
 
 export interface TaskConfig {
@@ -231,7 +277,6 @@ export interface ClusterSystemSnapshot {
   agentCount: number;
   onlineCount: number;
   offlineCount: number;
-  upgradingCount: number;
   totalMemMB: number;
   usedMemMB: number;
   avgCpuPercent: number;
@@ -256,56 +301,6 @@ export interface PerAgentSystemItem {
 
 export interface PerAgentSystem {
   items: PerAgentSystemItem[];
-}
-
-// === 二进制 / 升级 ===
-export interface BinaryMeta {
-  version: string;
-  filename: string;
-  os: OS;
-  arch: Arch;
-  sha256: string;
-  sizeBytes: number;
-  uploadedAt: string;
-}
-
-export interface BinariesListResponse {
-  items: BinaryMeta[];
-}
-
-export interface AgentUpgradeState {
-  phase: UpgradePhase;
-  startedAt?: string;
-  error?: string;
-}
-
-export interface UpgradeStatus {
-  inProgress: boolean;
-  version: string;
-  startedAt?: string;
-  total: number;
-  completed: number;
-  failed: number;
-  currentAgentId?: string;
-  perAgent: Record<string, AgentUpgradeState>;
-}
-
-export interface UpgradeRequest {
-  version: string;
-}
-
-export interface UpgradeResponse {
-  agentId: string;
-  message: string;
-}
-
-export interface UpgradeAllRequest {
-  version: string;
-}
-
-export interface UpgradeAllResponse {
-  total: number;
-  message: string;
 }
 
 // === 任务单例冲突错误 details ===

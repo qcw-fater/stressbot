@@ -22,6 +22,7 @@ type AgentConfig struct {
 	RegisterRetryMaxInterval string `json:"registerRetryMaxInterval"`
 	TaskWorkDir               string `json:"taskWorkDir"`
 	AppVersion                string `json:"appVersion"`
+	AdapterScript             string `json:"adapterScript"`
 }
 
 // ResolvedConfig 解析后的 Agent 配置（所有 Duration 已转换）。
@@ -32,6 +33,7 @@ type ResolvedConfig struct {
 	MaxBots         int
 	AppVersion      string
 	TaskWorkDir     string
+	AdapterScript   string
 
 	StressInterval time.Duration
 	SystemInterval time.Duration
@@ -79,6 +81,11 @@ func (c *AgentConfig) Resolve() (*ResolvedConfig, error) {
 		workDir = os.TempDir()
 	}
 
+	adapterScript := c.AdapterScript
+	if adapterScript == "" {
+		adapterScript = "conf/adapter/codec.lua"
+	}
+
 	return &ResolvedConfig{
 		AdminAddr:       c.AdminAddr,
 		Name:            name,
@@ -86,6 +93,7 @@ func (c *AgentConfig) Resolve() (*ResolvedConfig, error) {
 		MaxBots:         maxBots,
 		AppVersion:      c.AppVersion,
 		TaskWorkDir:     workDir,
+		AdapterScript:   adapterScript,
 		StressInterval:  stress,
 		SystemInterval:  system,
 		HBInterval:      hb,

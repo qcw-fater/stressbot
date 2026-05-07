@@ -1,44 +1,44 @@
 /**
- * Agents 管理 Drawer：列出 Agent，提供删除（仅离线）、查看详情、单点升级。
+ * Agents 管理 Drawer：列出 Agent，提供查看详情、删除（仅离线）、批量停止。
  *
  * 数据源：runtimeStore.agents（已被 HomeShell 轮询填充），10s 内必新鲜，无需独立刷新。
  * 仅"刷新"按钮可手动 refetch。
+ *
+ * 升级流程已废弃：版本更新通过手动重启 Agent 完成。本组件保留的是日常运维操作：
+ *   - 删除 offline Agent（清理注册表）
+ *   - 一键停止当前 active 任务（等价于"批量停止所有 Agent"）
+ *
+ * 由于系统是单 active 任务模型，"停止所有 Agent" ≡ "停止当前任务"；
+ * 没有 active 任务时按钮 disabled。
  */
 
-import { App, Button, Drawer, Empty, List, Modal, Space, Table, Tag, Tooltip } from 'antd';
-import { CloudUploadOutlined, DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
+import { App, Button, Drawer, Empty, Space, Table, Tag, Tooltip } from 'antd';
+import { DeleteOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import dayjs from 'dayjs';
-import { agentsApi, binariesApi, showApiError, useRuntimeStore } from '@/services';
 import { useShallow } from 'zustand/react/shallow';
-import type { AgentBrief, BinaryMeta } from '@/types/api';
+import { agentsApi, showApiError, stopTask, useRuntimeStore } from '@/services';
+import type { AgentBrief } from '@/types/api';
 
 export interface AgentsDrawerProps {
   open: boolean;
   onClose: () => void;
-  /** 主面板想直接打开 BinariesDrawer 时调用（升级二进制管理位于该 Drawer） */
-  onOpenBinaries?: () => void;
 }
 
-export function AgentsDrawer({ open, onClose, onOpenBinaries }: AgentsDrawerProps) {
-  const { agents, setAgents } = useRuntimeStore(
-    useShallow((s) => ({ agents: s.agents, setAgents: s.setAgents })),
+export function AgentsDrawer({ open, onClose }: AgentsDrawerProps) {
+  const { agents, activeTask, setAgents } = useRuntimeStore(
+    useShallow((s) => ({ agents: s.agents, activeTask: s.activeTask, setAgents: s.setAgents })),
   );
   const { message, modal } = App.useApp();
   const [loading, setLoading] = useState(false);
-  const [binaries, setBinaries] = useState<BinaryMeta[]>([]);
-  const [upgradeAgent, setUpgradeAgent] = useState<AgentBrief | null>(null);
+  const [stopping, setStopping] = useState(false);
 
   const refresh = async () => {
     setLoading(true);
     try {
-      const [resp, binsResp] = await Promise.all([
-        agentsApi.listAgents(),
-        binariesApi.listBinaries(),
-      ]);
+      const resp = await agentsApi.listAgents();
       setAgents(resp.items);
-      setBinaries(binsResp.items);
     } catch (err) {
       showApiError(err);
     } finally {
@@ -46,22 +46,42 @@ export function AgentsDrawer({ open, onClose, onOpenBinaries }: AgentsDrawerProp
     }
   };
 
-  const onUpgrade = (a: AgentBrief) => {
-    if (binaries.length === 0) {
-      modal.info({
-        title: '尚无可用二进制',
-        content: '请先在"二进制管理"中上传 stressbot-agent 可执行文件',
-      });
-      return;
-    }
-    setUpgradeAgent(a);
-  };
+  // 没有 active 任务时禁用：单任务模型下没有任务可停。
+  // active 任务存在时（无论是不是本端发起）都允许停止——服务端是唯一权威，会校验。
+  const canStopAll = !!activeTask &&
+    (activeTask.state === 'starting' || activeTask.state === 'running' || activeTask.state === 'stopping');
 
-  const matchedBinaries = upgradeAgent
-    ? binaries.filter(
-        (b) => b.os === upgradeAgent.staticInfo.os && b.arch === upgradeAgent.staticInfo.arch,
-      )
-    : [];
+  const onStopAll = () => {
+    if (!activeTask) return;
+    modal.confirm({
+      title: '停止所有 Agent？',
+      content: (
+        <div>
+          <p>
+            将向所有正在执行 <code>{activeTask.name}</code> 的 Agent 下发停止指令；
+            等待全部进入 <code>stopped</code> 后任务结束。
+          </p>
+          <p style={{ marginBottom: 0, color: 'var(--text-secondary)', fontSize: 12 }}>
+            此操作等价于在顶部点击"停止任务"。
+          </p>
+        </div>
+      ),
+      okType: 'danger',
+      okText: '全部停止',
+      onOk: async () => {
+        setStopping(true);
+        try {
+          await stopTask(activeTask.id);
+          message.success('已下发停止指令，等待 Agent 收尾');
+          refresh();
+        } catch (err) {
+          showApiError(err);
+        } finally {
+          setStopping(false);
+        }
+      },
+    });
+  };
 
   const onDelete = (a: AgentBrief) => {
     if (a.status !== 'offline') {
@@ -108,7 +128,6 @@ export function AgentsDrawer({ open, onClose, onOpenBinaries }: AgentsDrawerProp
           busy: 'processing',
           unhealthy: 'error',
           offline: 'default',
-          upgrading: 'warning',
         };
         return <Tag color={colorMap[v] ?? 'default'}>{v}</Tag>;
       },
@@ -186,35 +205,22 @@ export function AgentsDrawer({ open, onClose, onOpenBinaries }: AgentsDrawerProp
     {
       title: '操作',
       key: 'actions',
-      width: 100,
+      width: 80,
       fixed: 'right',
       render: (_, a) => (
-        <Space size={2}>
-          <Tooltip title="升级">
-            <Button
-              type="text"
-              size="small"
-              icon={<CloudUploadOutlined />}
-              onClick={(e) => {
-                e.stopPropagation();
-                onUpgrade(a);
-              }}
-            />
-          </Tooltip>
-          <Tooltip title={a.status === 'offline' ? '删除' : '只能删除离线 Agent'}>
-            <Button
-              type="text"
-              size="small"
-              danger
-              disabled={a.status !== 'offline'}
-              icon={<DeleteOutlined />}
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(a);
-              }}
-            />
-          </Tooltip>
-        </Space>
+        <Tooltip title={a.status === 'offline' ? '从注册表删除' : '只能删除离线 Agent'}>
+          <Button
+            type="text"
+            size="small"
+            danger
+            disabled={a.status !== 'offline'}
+            icon={<DeleteOutlined />}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(a);
+            }}
+          />
+        </Tooltip>
       ),
     },
   ];
@@ -225,11 +231,18 @@ export function AgentsDrawer({ open, onClose, onOpenBinaries }: AgentsDrawerProp
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span>压测节点 Agents</span>
           <Space>
-            {onOpenBinaries && (
-              <Button size="small" onClick={onOpenBinaries}>
-                二进制管理
+            <Tooltip title={canStopAll ? '一键停止当前正在执行的任务' : '当前没有运行中的任务'}>
+              <Button
+                danger
+                size="small"
+                icon={<StopOutlined />}
+                disabled={!canStopAll}
+                loading={stopping}
+                onClick={onStopAll}
+              >
+                全部停止
               </Button>
-            )}
+            </Tooltip>
             <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={refresh}>
               刷新
             </Button>
@@ -253,54 +266,6 @@ export function AgentsDrawer({ open, onClose, onOpenBinaries }: AgentsDrawerProp
           scroll={{ x: 1100 }}
         />
       )}
-
-      <Modal
-        title={upgradeAgent ? `升级 ${upgradeAgent.name}` : '升级'}
-        open={upgradeAgent !== null}
-        onCancel={() => setUpgradeAgent(null)}
-        footer={null}
-        destroyOnHidden
-      >
-        {matchedBinaries.length === 0 ? (
-          <Empty
-            description={`没有匹配 ${upgradeAgent?.staticInfo.os}/${upgradeAgent?.staticInfo.arch} 的二进制版本`}
-          />
-        ) : (
-          <List
-            size="small"
-            dataSource={matchedBinaries.slice(0, 10)}
-            renderItem={(b) => (
-              <List.Item
-                actions={[
-                  <Button
-                    key="upgrade"
-                    type="primary"
-                    size="small"
-                    onClick={async () => {
-                      if (!upgradeAgent) return;
-                      try {
-                        await agentsApi.upgradeAgent(upgradeAgent.agentId, { version: b.version });
-                        message.success(`升级请求已下发：${b.version}`);
-                        setUpgradeAgent(null);
-                        refresh();
-                      } catch (err) {
-                        showApiError(err);
-                      }
-                    }}
-                  >
-                    选用
-                  </Button>,
-                ]}
-              >
-                <List.Item.Meta
-                  title={<code>{b.version}</code>}
-                  description={`${b.filename} · ${(b.sizeBytes / 1024 / 1024).toFixed(1)} MB · ${dayjs(b.uploadedAt).format('MM-DD HH:mm')}`}
-                />
-              </List.Item>
-            )}
-          />
-        )}
-      </Modal>
     </Drawer>
   );
 }

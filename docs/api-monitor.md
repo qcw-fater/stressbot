@@ -16,13 +16,15 @@
 - §6 Agent 管理 API
 - §7 压测指标 API
 - §8 系统指标 API
-- §9 二进制管理与升级 API
-- §10 历史压测记录 API
-- §11 完整 TypeScript 类型定义（可直接复制到前端项目）
-- §12 历史数据与轮询策略
-- §13 推荐页面布局
-- §14 错误处理策略
-- §15 完整响应示例
+- §9 历史压测记录 API
+- §10 完整 TypeScript 类型定义（可直接复制到前端项目）
+- §11 历史数据与轮询策略
+- §12 推荐页面布局
+- §13 错误处理策略
+- §14 完整响应示例
+
+> ⚠️ **变更说明（2026-05）**：自动升级流程（原 §9.5~§9.8）与二进制管理（原 §9.1~§9.4）已废弃。
+> 升级是低频操作，新版本部署改为 **运维手动重启 Agent 进程**。前端不再提供升级 UI，仅在 Agents 抽屉里提供"全部停止"按钮（等价于停止当前 active 任务）。
 
 ---
 
@@ -30,7 +32,7 @@
 
 > ✅ **已全部完成**（2026-04-30）：以下 8 项已按文档约定实现，前端 `services/api.ts` 中的 `adaptList()` 兼容层可以安全移除。
 >
-> 后端额外补充了文档中未列出但前端需要的字段：`Assignment.agentName`、`AgentBrief.cpuPercent/memPercent/numGoroutine`、`ClusterSystemSnapshot.onlineCount/offlineCount/upgradingCount/hotAgentName`。
+> 后端额外补充了文档中未列出但前端需要的字段：`Assignment.agentName`、`AgentBrief.cpuPercent/memPercent/numGoroutine`、`ClusterSystemSnapshot.onlineCount/offlineCount/hotAgentName`。
 > 所有 DELETE 接口已统一为 `204 No Content`。
 
 | 接口 | 状态 | 实际返回 |
@@ -42,7 +44,6 @@
 | `GET /api/metrics` | ✅ 已对齐 | 直接返回 `CollectorSnapshot`（方案 A） |
 | `GET /api/metrics/agents` | ✅ 已对齐 | `{ items: [{agentId, agentName, snapshot, updatedAt}] }` |
 | `GET /api/system/agents` | ✅ 已对齐 | `{ items: [{agentId, agentName, status, snapshot, updatedAt, isStale}] }` |
-| `GET /api/binaries` | ✅ 已对齐 | `{ items: BinaryMeta[] }` |
 
 **统一约定**：所有列表接口都返回 `{ items, total? }`，不直接返回数组。所有 DELETE 接口返回 `204 No Content`。
 
@@ -143,7 +144,6 @@ Admin 上的指标接口分为两类：
 | `busy` | 绿色圆点 | "执行中" 显示当前 taskId |
 | `unhealthy` | 橙色圆点 | "心跳异常" 警告 |
 | `offline` | 红色圆点 | "离线" |
-| `upgrading` | 紫色圆点 | "升级中" |
 
 ---
 
@@ -208,7 +208,7 @@ Accept:       application/json
 | `202` | 异步接受（已加入处理队列，但还未完成） |
 | `400` | 参数错误（请求体格式、字段缺失、字段值非法） |
 | `404` | 资源不存在 |
-| `409` | 状态冲突（任务已运行、Agent 已升级中等） |
+| `409` | 状态冲突（如已存在 active 任务时再启动新任务） |
 | `500` | 服务端故障 |
 
 **错误码常量**：
@@ -222,8 +222,6 @@ Accept:       application/json
 | `AGENT_BUSY` | Agent 正忙 | 提示选其他节点 |
 | `AGENT_OFFLINE` | Agent 离线 | "节点离线，无法操作" |
 | `CAPACITY_EXCEEDED` | 集群容量不足 | "总机器人数超过集群最大容量" + details.maxBots |
-| `UPGRADE_IN_PROGRESS` | 已有滚动升级中 | "请等待当前升级完成" |
-| `BINARY_NOT_FOUND` | 二进制版本不存在 | "请先上传该版本" |
 | `HISTORY_NOT_FOUND` | 历史任务不存在 | "记录不存在或已被删除" |
 | `HISTORY_STARRED` | 试图删除收藏的历史任务 | "已收藏，需 force=true" |
 | `INVALID_ARGUMENT` | 参数非法 | 显示 message |
@@ -249,7 +247,6 @@ Accept:       application/json
 | `/api/metrics`（无任务） | 30s | idle 期 |
 | `/api/tasks` | 10s | 任务列表页 |
 | `/api/tasks/{id}` | 5s | 任务详情页 |
-| `/api/agents/upgrade-status` | 2s | 升级页（仅升级期间） |
 
 > Admin 服务端 5s 一次接收 Agent 上报，所以前端 5s 轮询是最理想的。轮询间隔小于 5s 会拿到与上次相同的数据，浪费请求。
 
@@ -266,8 +263,6 @@ Accept:       application/json
 | Agent 列表 | `/api/agents` | `/api/system`（指标摘要） |
 | Agent 详情 | `/api/agents/{id}`、`/api/metrics/agents/{id}`、`/api/system/agents/{id}` | — |
 | 系统资源大盘 | `/api/system`、`/api/system/agents` | — |
-| 二进制管理 | `/api/binaries` | — |
-| 升级管理 | `/api/agents/upgrade-status`、`/api/binaries` | `/api/agents` |
 | **历史压测列表** | `/api/history` | `/api/history/tags` |
 | **历史压测详情** | `/api/history/{id}` | `/api/history/{id}/timeseries`、`/api/history/{id}/agents` |
 | **历史对比** | `/api/history/compare?ids=...` | — |
@@ -322,9 +317,21 @@ GET /api/tasks/{id}
 type TaskDetail = TaskBrief & {
   config: {
     robotConfig: {
-      authAddr: string;
-      concurrency: number;
-      timeoutSec: number;
+      // 必填
+      authAddr: string;          // 必须 http:// 或 https:// 开头
+      concurrency: number;       // 每秒新建机器人数
+      timeoutSec: number;        // TCP 请求超时秒数
+      // 业务可变
+      accountPrefix?: string;    // 账号前缀，默认 "bot_"
+      startNumber?: number;      // 账号编号起点，默认 0；账号 = accountPrefix + (startNumber + N)
+      mainService?: string;      // 主连接服务名，默认 "logic"
+      authExtra?: Record<string, string>; // Auth 扩展字段（前端不再预填，由用户手动添加）
+      // 性能/超时
+      heartbeatSec?: number;     // 心跳间隔秒，默认 5
+      httpTimeoutSec?: number;   // HTTP 超时秒，默认 10
+      apdexT?: number;           // Apdex 满意阈值毫秒，默认 100
+      // 日志
+      logLevel?: 'debug' | 'info' | 'warn' | 'error'; // 任务期临时切换 Agent 日志等级
     };
     deadline?: string;
     flowFiles: string[];        // 已上传的配置文件名
@@ -382,11 +389,49 @@ Content-Type: multipart/form-data
 
 ```json
 {
-  "authAddr": "auth.example.com:8001",
+  "authAddr": "http://auth.example.com:20000",
   "concurrency": 50,
-  "timeoutSec": 30
+  "timeoutSec": 60,
+  "accountPrefix": "bot_",
+  "startNumber": 0,
+  "mainService": "logic",
+  "authExtra": {
+    "version": "0.31.49.171222",
+    "channel": "mine",
+    "platform": "1000"
+  },
+  "heartbeatSec": 5,
+  "httpTimeoutSec": 10,
+  "apdexT": 100,
+  "logLevel": "info"
 }
 ```
+
+**字段说明**：
+
+| 字段 | 类型 | 必需 | 默认 | 说明 |
+|---|---|---|---|---|
+| `authAddr` | string | ✅ | — | Auth 服务地址，必须以 `http://` 或 `https://` 开头，否则后端会自动补 `http://` 并打 warning |
+| `concurrency` | int | ✅ | — | 每秒新建机器人数 |
+| `timeoutSec` | int | ✅ | — | TCP 请求超时秒数（兼容旧字段，作为通用兜底） |
+| `accountPrefix` | string | ❌ | `bot_` | 账号前缀，用于区分压测批次 |
+| `startNumber` | int | ❌ | `0` | 账号编号起点；admin 在分配时把它作为各 agent cursor 的起点，最终账号 = `accountPrefix + (startNumber + 全局序号)`。已有 `bot_0~bot_99` 在线时设 `100` 可避免账号撞车 |
+| `mainService` | string | ❌ | `logic` | 主连接对应的服务标识，不同游戏命名不同 |
+| `authExtra` | Record<string,string> | ❌ | `{}` | Auth 请求附带的扩展字段；lua 脚本通过 `robot.get(key)` 读取。**注意**：前端默认空，不再硬编码 version/channel/platform 推荐项，由用户在「高级设置 → 添加字段」中手动添加；不配置则脚本取到 nil 走兜底默认值 |
+| `heartbeatSec` | int | ❌ | `5` | 心跳间隔秒数 |
+| `httpTimeoutSec` | int | ❌ | `10` | HTTP 请求超时秒数（独立于 `timeoutSec`） |
+| `apdexT` | int | ❌ | `100` | Apdex 满意阈值毫秒（动作响应 ≤ T 完全满意；> 4T 不满意） |
+| `logLevel` | enum | ❌ | 沿用 Agent 配置 | `debug`/`info`/`warn`/`error`。任务期临时切换 Agent 进程日志等级，结束后**自动恢复**为 Agent 启动配置中的等级，不影响后续任务。前端「调试模式」会自动装填 `debug` |
+
+**Admin 转发约定**：admin 收到 `RobotConfig` 后，**用合理默认值填充**未指定字段，再转换为 `TaskAssignment` 下发到 Agent：
+- `accountPrefix` 空 → `"bot_"`
+- `startNumber` < 0 → 归 0；admin 在调用 `Assigner.Assign(task, agents, startNumber)` 时把它作为各 agent cursor 的起点（每个 agent 收到的 `Assignment.StartNumber` 在该起点上累加）
+- `mainService` 空 → `"logic"`
+- `heartbeatSec`/`timeoutSec`/`httpTimeoutSec` ≤ 0 → 各自默认 → 转 duration 字符串（`"5s"` / `"60s"` / `"10s"`）
+- `apdexT` ≤ 0 → `100`
+- `authExtra` nil → 空 map
+
+**前端启动时引导**：开发期 `EditorPage` 会从 `/conf/config.json` 读取单机配置同步到 RobotConfig 默认值（仅当用户未改过时），让用户首次打开就拿到与单机一致的连接参数。**例外**：`auth.extra` 不参与同步（用户诉求"完全手动控制"），单机配置里的 `version`/`channel`/`platform` 不会自动出现在 Web 端。
 
 **响应** `201 Created`：
 
@@ -421,6 +466,24 @@ async function createTask(form: TaskFormState): Promise<string> {
 ```json
 { "code": "INVALID_ARGUMENT", "message": "flow.json invalid: missing required action 'Auth'", "details": {} }
 ```
+
+#### 5.3.1 调试模式（前端语义）
+
+**前端语义**：调试模式（`editorStore.debugMode`）是开发/排障态的快速开关，启用后会自动装填一组保守预设：
+
+| 字段 | 调试预设 | 说明 |
+|---|---|---|
+| `totalBots` | `1` | 单机器人，便于追踪单条流程 |
+| `robotConfig.concurrency` | `1` | 串行新建，时序清晰 |
+| `robotConfig.logLevel` | `"debug"` | Agent 任务期切到 debug 等级，打印完整收发包与字段绑定 |
+| `taskName` | `debug · MMDD-HHmm` | 仅在仍为初始默认 `未命名任务` 时改名 |
+| `skipCapacityCheck` | `true` | 跳过容量预检，无在线 Agent 仍可提交（服务端兜底） |
+
+**后端无需新增字段**：调试模式完全在前端表达，提交到后端的依然是标准 `robotConfig` JSON 中的 `logLevel="debug"`。Agent 收到 `TaskAssignment.logLevel` 后调用 `stresslog.SetLogLevel(...)` 临时改写进程日志等级，任务结束（成功 / 失败 / 取消）后会**defer 恢复**为 Agent 启动时的等级，不污染后续任务。
+
+**注意**：
+- 关闭前端调试模式不会回滚 `robotConfig.logLevel`，让用户保留偏好；如需正式压测请手动改回 `info`。
+- `logLevel` 字段对所有任务都可用，不依赖调试模式 —— 你可以单独为某次 200v200 压测开 debug 等级以收集详细日志。
 
 ### 5.4 启动任务
 
@@ -459,7 +522,7 @@ POST /api/tasks/{id}/stop
 
 **响应** `202 Accepted`：返回当前 task 简要信息。
 
-> ✅ **已对齐**：返回 `TaskBrief`（202 Accepted），含最新 state、totalBots、agentCount 等字段。
+> ✅ **已对齐**：返回 `TaskBrief`（202 Accepted），含 state、totalBots、agentCount、startedAt、stoppedAt 等字段。
 
 任务状态变为 `stopping`，最终（< 1min）变为 `stopped`。
 
@@ -479,7 +542,14 @@ DELETE /api/tasks/{id}
 GET /api/tasks/{id}/config/{path}
 ```
 
-由 Agent 内部使用拉取 flow.json / proto / scripts。前端可在任务详情中展示 `flowFiles` 字段，给"下载"按钮直接 a 标签链接到此 URL。
+由 Agent 内部使用拉取配置文件。支持以下路径：
+- `flow.json` — 流程定义
+- `header.json` — 协议头定义（可选）
+- `config.json` — 运行时配置（authAddr、concurrency、timeoutSec、deadline）
+- `proto/<filename>` — proto 文件
+- `scripts/<filename>` — Lua 脚本
+
+前端可在任务详情中展示 `flowFiles` 字段，给"下载"按钮直接 a 标签链接到此 URL。
 
 ---
 
@@ -533,7 +603,7 @@ type StaticInfo = {
   startedAt: string;
 };
 
-type AgentStatus = 'idle' | 'busy' | 'unhealthy' | 'offline' | 'upgrading';
+type AgentStatus = 'idle' | 'busy' | 'unhealthy' | 'offline';
 ```
 
 **用途**：Agent 列表页主数据。
@@ -542,7 +612,7 @@ type AgentStatus = 'idle' | 'busy' | 'unhealthy' | 'offline' | 'upgrading';
 - 名称 / 状态指示灯（颜色见 §1.6）
 - 地址 / OS / CPU 核数 / 内存
 - 当前 CPU% / Mem% / Goroutine（彩色进度条 / 数值）
-- AppVersion（升级前后变化醒目展示）
+- AppVersion（用于核对版本是否一致；新版本由运维手动重启 Agent 部署）
 - 当前任务（带链接到任务详情）
 
 ### 6.2 Agent 详情
@@ -571,6 +641,13 @@ DELETE /api/agents/{id}
 仅允许 `offline` 状态删除（避免误删运行中节点）。
 
 **响应** `204` 或 `409`（状态不允许）。
+
+### 6.4 批量停止（前端语义）
+
+> 系统是单 active 任务模型，"停止所有 Agent" 在功能上 ≡ "停止当前 active 任务"。
+> 因此前端 AgentsDrawer 的「全部停止」按钮直接调 `POST /api/tasks/{activeId}/stop`（见 §5.5），无需新接口。
+>
+> **可选 🔴 后端 TODO（兜底场景）**：当 Admin 与 Agent 状态不一致（如 Admin 误判 task 已结束、但 Agent 仍持有 bot），前端无 active task 可停。此时若有 `POST /api/agents/stop-all`（强制让所有 Agent drain 到 idle）可作为运维兜底。当前优先级低，单任务模型下不会触发。
 
 ---
 
@@ -624,9 +701,15 @@ type ConnectionsView = {
 };
 
 type BandwidthView = {
+  // 全局收发字节数（"网卡级"）。统计点位于 network 层：
+  //   - 出站：connection.Send 成功后累加 len(data)；
+  //   - 入站：gnet.OnTraffic 解出完整帧后累加 totalLen。
+  // 因此心跳、监听推送、所有失败/超时请求、UDP 单向发送都会被计入；
+  // 而 actions[].avgSendBytes / avgRecvBytes 仍是 per-action 维度，仅在 RecordAction
+  // 的 success 路径累加，两者口径不同、互不重复。
   totalSendBytes: number;
   totalRecvBytes: number;
-  sendMBps: number;       // = totalSendBytes / uptime
+  sendMBps: number;       // = totalSendBytes / 1024² / uptimeSec
   recvMBps: number;
 };
 
@@ -790,7 +873,6 @@ type ClusterSystemSnapshot = {
   agentCount: number;          // 总 Agent 数
   onlineCount: number;         // 在线（idle/busy/unhealthy）
   offlineCount: number;
-  upgradingCount: number;
 
   // 资源汇总
   totalMemMB: number;          // 集群总内存
@@ -894,191 +976,12 @@ type SystemSnapshot = {
 
 ---
 
-## 9. 二进制管理与升级 API
-
-### 9.1 列出二进制版本
-
-```
-GET /api/binaries
-```
-
-**响应** `200 OK`：
-
-> ✅ **已对齐**：返回 `{ items: BinaryMeta[] }`。
-
-```typescript
-type BinariesListResponse = {
-  items: BinaryMeta[];
-};
-
-type BinaryMeta = {
-  version: string;        // "v1.2.0"
-  filename: string;       // "agent-v1.2.0.exe"
-  os: 'windows' | 'linux' | 'darwin';
-  arch: 'amd64' | 'arm64';
-  sha256: string;
-  sizeBytes: number;
-  uploadedAt: string;
-};
-```
-
-### 9.2 上传二进制
-
-```
-POST /api/binaries
-Content-Type: multipart/form-data
-```
-
-**字段**：
-
-| 字段 | 必需 | 说明 |
-|---|---|---|
-| `file` | ✅ | 二进制文件 |
-| `version` | ✅ | 版本号字符串（如 `v1.2.0`） |
-| `os` | ❌ | 默认 `windows` |
-| `arch` | ❌ | 默认 `amd64` |
-| `force` | ❌ | `"true"` 时允许覆盖同版本 |
-
-**响应** `201 Created`：返回 `BinaryMeta`。
-
-**错误**：
-- `400` 文件名非法 / 版本号非法
-- `409` 同版本已存在且未带 `force=true`
-
-**前端示例**：
-
-```typescript
-async function uploadBinary(file: File, version: string, force = false) {
-  const fd = new FormData();
-  fd.append('file', file);
-  fd.append('version', version);
-  if (force) fd.append('force', 'true');
-  const res = await fetch('/api/binaries', { method: 'POST', body: fd });
-  return await res.json();
-}
-```
-
-### 9.3 下载二进制
-
-```
-GET /api/binaries/{filename}
-```
-
-直接文件流返回，前端可用 `<a download>` 链接，或在二进制管理页提供下载按钮。
-
-### 9.4 删除二进制
-
-```
-DELETE /api/binaries/{filename}
-```
-
-`204 No Content`。
-
-### 9.5 单点升级
-
-```
-POST /api/agents/{agentId}/upgrade
-Content-Type: application/json
-```
-
-**请求体**：
-
-```typescript
-type UpgradeRequest = {
-  version: string;  // 必须已上传到 /api/binaries
-};
-```
-
-**响应** `202 Accepted`：
-
-```typescript
-type UpgradeResponse = {
-  agentId: string;
-  version: string;
-  message: string;  // 例如 "upgrade dispatched"
-};
-```
-
-升级是异步过程：Agent 接到指令后下载 → drain → 退出 → Launcher 替换 → 重启 → 重新注册。完整过程通常 30~60s。
-
-前端**不需要轮询单点升级状态**，只需轮询 `/api/agents/{id}` 看 `appVersion` 是否变化。
-
-### 9.6 滚动升级（所有 Agent）
-
-```
-POST /api/agents/upgrade-all
-Content-Type: application/json
-```
-
-**请求体**：
-
-```typescript
-type UpgradeAllRequest = {
-  version: string;
-};
-```
-
-**响应** `202 Accepted`：
-
-```typescript
-type UpgradeAllResponse = {
-  total: number;     // 总目标数
-  message: string;
-};
-```
-
-前端轮询 §9.7 查看进度。
-
-### 9.7 升级进度
-
-```
-GET /api/agents/upgrade-status
-```
-
-**响应** `200 OK`：
-
-```typescript
-type UpgradeStatus = {
-  inProgress: boolean;
-  version: string;
-  startedAt?: string;
-  total: number;
-  completed: number;
-  failed: number;
-  currentAgentId?: string;       // 正在处理的 agentId
-  perAgent: Record<string, AgentUpgradeState>;  // agentId → state
-};
-
-type AgentUpgradeState = {
-  phase: 'queued' | 'sent' | 'upgrading' | 'success' | 'failed';
-  startedAt?: string;
-  error?: string;
-};
-```
-
-**UI 推荐**：
-- 升级中：进度条 `(completed + failed) / total`
-- 表格按 phase 着色：success 绿、failed 红、upgrading 蓝
-- failed 行展开显示 `error`
-
-### 9.8 取消滚动升级
-
-```
-POST /api/agents/upgrade-cancel
-```
-
-**响应** `200 OK`。
-
-> 已发出的升级指令不可撤回，但后续未开始的 Agent 不再触发。前端应显示提示："已发出的指令仍会执行，剩余 N 台不再升级"。
-
----
-
-## 10. 历史压测记录 API
+## 9. 历史压测记录 API
 
 > 历史功能存储所有终态（stopped / failed）任务的完整数据到 MySQL，供事后查看报告、版本对比、问题排查使用。
 > 用户可对历史任务打标签（tags）、收藏（star）、加备注（note）。
 
-### 10.1 历史列表
+### 9.1 历史列表
 
 ```
 GET /api/history?limit=20&offset=0&state=stopped&tags=v1.2&starred=true
@@ -1138,7 +1041,7 @@ GET /api/history?limit=20&offset=0&state=stopped&tags=v1.2&starred=true
 - 行操作：查看详情 / 编辑标签 / 克隆 / 删除（starred 时隐藏删除）
 - starred 行高亮置顶或加金色边框
 
-### 10.2 全部使用过的标签
+### 9.2 全部使用过的标签
 
 ```
 GET /api/history/tags
@@ -1154,7 +1057,7 @@ GET /api/history/tags
 
 **UI 推荐**：在列表筛选区的 tag 多选框作 autocomplete 数据源；编辑标签时也用此数据。
 
-### 10.3 历史任务详情
+### 9.3 历史任务详情
 
 ```
 GET /api/history/{id}
@@ -1205,7 +1108,7 @@ GET /api/history/{id}
   - **趋势图**：拉 `/timeseries` 接口绘制 QPS / P99 / Apdex 等时序曲线
 - 操作按钮：编辑标签 / 克隆为新任务 / 删除 / 下载配置 / 加入对比
 
-### 10.4 更新标签 / 备注 / 收藏
+### 9.4 更新标签 / 备注 / 收藏
 
 ```
 PUT /api/history/{id}
@@ -1236,7 +1139,7 @@ Content-Type: application/json
 - tags 用 chip 输入框（输入时下拉提示已有 tags）
 - note 用 markdown 编辑器（可选预览模式）
 
-### 10.5 删除历史任务
+### 9.5 删除历史任务
 
 ```
 DELETE /api/history/{id}?force=false
@@ -1259,7 +1162,7 @@ DELETE /api/history/{id}?force=false
 - 列表行的删除按钮：starred 时显示锁图标提示"取消收藏后才能删除"
 - 详情页的删除按钮：弹二次确认 modal；若 starred，文字"此任务已收藏，确认强制删除？"
 
-### 10.6 时序数据（趋势图）
+### 9.6 时序数据（趋势图）
 
 ```
 GET /api/history/{id}/timeseries
@@ -1305,7 +1208,7 @@ GET /api/history/{id}/timeseries
   - **网络收发**：双 Y 轴
 - 用 ECharts / Recharts 等图表库
 
-### 10.7 任务配置归档（下载 / 克隆使用）
+### 9.7 任务配置归档（下载 / 克隆使用）
 
 ```
 GET /api/history/{id}/config
@@ -1319,9 +1222,17 @@ GET /api/history/{id}/config
   "name": "200v200 压测 v1.2",
   "totalBots": 200,
   "robotConfig": {
-    "authAddr": "127.0.0.1:6000",
+    "authAddr": "http://127.0.0.1:20000",
     "concurrency": 50,
-    "timeoutSec": 30
+    "timeoutSec": 60,
+    "accountPrefix": "bot_",
+    "startNumber": 0,
+    "mainService": "logic",
+    "authExtra": { "version": "1.0.0", "channel": "mine", "platform": "1000" },
+    "heartbeatSec": 5,
+    "httpTimeoutSec": 10,
+    "apdexT": 100,
+    "logLevel": "info"
   },
   "flowJson":   { /* 完整 flow.json 内容 */ },
   "headerJson": { /* 完整 header.json 内容 */ },
@@ -1340,7 +1251,7 @@ GET /api/history/{id}/config
 - "下载配置" 按钮：把 flowJson / headerJson 打包成 zip 提供下载（前端可本地实现，或后端额外提供 `?download=zip`）
 - 不需要在浏览器里展示完整 base64，只是用作克隆的中间数据
 
-### 10.8 克隆历史任务
+### 9.8 克隆历史任务
 
 ```
 POST /api/history/{id}/clone
@@ -1367,7 +1278,7 @@ Content-Type: application/json
 - 详情页 / 列表行右键菜单："克隆"按钮
 - 克隆成功后跳转 `/tasks/{newId}`（或 toast 提示并提供"立即启动"按钮）
 
-### 10.9 多任务对比
+### 9.9 多任务对比
 
 ```
 GET /api/history/compare?ids=task-a,task-b,task-c
@@ -1412,16 +1323,16 @@ GET /api/history/compare?ids=task-a,task-b,task-c
 
 ---
 
-## 11. 完整 TypeScript 类型定义
+## 10. 完整 TypeScript 类型定义
 
 > 复制以下代码到前端项目（`web/src/types/api.ts`），前端开发完整覆盖。
 
 ```typescript
 // === 基础枚举 ===
 export type TaskState = 'pending' | 'starting' | 'running' | 'stopping' | 'stopped' | 'failed';
-export type AgentStatus = 'idle' | 'busy' | 'unhealthy' | 'offline' | 'upgrading';
+export type AgentStatus = 'idle' | 'busy' | 'unhealthy' | 'offline';
 export type TaskResult = 'completed' | 'stopped' | 'failed';
-export type UpgradePhase = 'queued' | 'sent' | 'upgrading' | 'success' | 'failed';
+// OS / Arch 用于 StaticInfo（Agent 自报），保留仅用于展示
 export type OS = 'windows' | 'linux' | 'darwin';
 export type Arch = 'amd64' | 'arm64';
 
@@ -1457,10 +1368,24 @@ export type TaskConfig = {
   flowFiles: string[];
 };
 
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
 export type RobotConfig = {
+  // ── 必填 ──
   authAddr: string;
   concurrency: number;
   timeoutSec: number;
+  // ── 业务可变 ──
+  accountPrefix?: string;                // 默认 "bot_"
+  startNumber?: number;                  // 账号编号起点，默认 0
+  mainService?: string;                  // 默认 "logic"
+  authExtra?: Record<string, string>;    // 前端默认空，由用户手动添加 version/channel/platform 等
+  // ── 性能/超时 ──
+  heartbeatSec?: number;                 // 默认 5
+  httpTimeoutSec?: number;               // 默认 10
+  apdexT?: number;                       // 默认 100
+  // ── 日志 ──
+  logLevel?: LogLevel;
 };
 
 export type Assignment = {
@@ -1628,7 +1553,6 @@ export type ClusterSystemSnapshot = {
   agentCount: number;
   onlineCount: number;
   offlineCount: number;
-  upgradingCount: number;
   totalMemMB: number;
   usedMemMB: number;
   avgCpuPercent: number;
@@ -1651,36 +1575,6 @@ export type PerAgentSystem = {
     updatedAt: string;
     isStale: boolean;
   }>;
-};
-
-// === 二进制 / 升级 ===
-export type BinaryMeta = {
-  version: string;
-  filename: string;
-  os: OS;
-  arch: Arch;
-  sha256: string;
-  sizeBytes: number;
-  uploadedAt: string;
-};
-
-export type BinariesListResponse = { items: BinaryMeta[] };
-
-export type UpgradeStatus = {
-  inProgress: boolean;
-  version: string;
-  startedAt?: string;
-  total: number;
-  completed: number;
-  failed: number;
-  currentAgentId?: string;
-  perAgent: Record<string, AgentUpgradeState>;
-};
-
-export type AgentUpgradeState = {
-  phase: UpgradePhase;
-  startedAt?: string;
-  error?: string;
 };
 
 // === 任务单例冲突错误 details ===
@@ -1785,7 +1679,7 @@ export type HistoryConfigArchive = {
   taskId: string;
   name: string;
   totalBots: number;
-  robotConfig: { authAddr: string; concurrency: number; timeoutSec: number };
+  robotConfig: RobotConfig;
   flowJson: unknown;
   headerJson: unknown;
   protoFiles: Record<string, string>;  // base64
@@ -1806,7 +1700,7 @@ export type HistoryCompareResponse = {
 
 ---
 
-## 12. 历史数据与轮询策略
+## 11. 历史数据与轮询策略
 
 ### 11.1 历史快照由前端管理
 
@@ -1896,7 +1790,7 @@ function computePeriodQps(curr: StressSnapshot, prev: StressSnapshot | null) {
 
 ---
 
-## 13. 推荐页面布局
+## 12. 推荐页面布局
 
 ### 12.1 总览首页
 
@@ -1934,7 +1828,7 @@ function computePeriodQps(curr: StressSnapshot, prev: StressSnapshot | null) {
 ### 12.3 Agent 详情页
 
 ```
-[Agent 名]  [状态指示灯]  [当前任务链接]  [升级按钮]        
+[Agent 名]  [状态指示灯]  [当前任务链接]                    
 ─────────────────────────────────────────────
 StaticInfo: hostname / OS / CPU / Mem / kernel / goVersion
 ─────────────────────────────────────────────
@@ -1948,23 +1842,7 @@ StaticInfo: hostname / OS / CPU / Mem / kernel / goVersion
 日志 / 事件（如有）
 ```
 
-### 12.4 升级管理页
-
-```
-[版本管理 Tab]
-  二进制列表表格
-  [上传新版本] 按钮 → 弹窗（form：file + version + os + arch）
-
-[滚动升级 Tab]
-  目标版本下拉（基于 §9.1 列表）
-  [开始滚动升级]
-  ─ 升级中显示：
-    - 进度条
-    - 表格：Agent 名 / phase（带颜色）/ 时间 / 错误
-    - [取消] 按钮
-```
-
-### 12.5 历史压测列表页 `/history`
+### 12.4 历史压测列表页 `/history`
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -1982,7 +1860,7 @@ StaticInfo: hostname / OS / CPU / Mem / kernel / goVersion
 
 > 推荐：starred 任务用金色边框置顶，普通任务按 startedAt desc 排列。
 
-### 12.6 历史压测详情页 `/history/:id`
+### 12.5 历史压测详情页 `/history/:id`
 
 ```
 [name]  [tags chips]  [☆收藏] [编辑] [克隆] [加入对比] [删除]
@@ -1999,7 +1877,7 @@ per-Agent：表格列出每个 agent 的 successRate / P99 / Apdex（异常节�
 [配置归档] 折叠面板：展示 ConfigSummary 主要参数 + [下载完整配置] 按钮
 ```
 
-### 12.7 历史对比页 `/history/compare`
+### 12.6 历史对比页 `/history/compare`
 
 ```
 顶部：选择 2~5 个任务（chip 显示已选）
@@ -2016,7 +1894,7 @@ per-Agent：表格列出每个 agent 的 successRate / P99 / Apdex（异常节�
 
 ---
 
-## 14. 错误处理策略
+## 13. 错误处理策略
 
 ### 13.1 通用错误拦截
 
@@ -2051,8 +1929,6 @@ function showApiError(err: ApiError) {
     AGENT_BUSY:            'Agent 正忙，请选择其他节点',
     AGENT_OFFLINE:         'Agent 已离线',
     CAPACITY_EXCEEDED:     `集群容量不足，最多支持 ${err.details?.maxBots ?? '?'} 个机器人`,
-    UPGRADE_IN_PROGRESS:   '已有滚动升级在进行中',
-    BINARY_NOT_FOUND:      '该版本二进制不存在，请先上传',
     HISTORY_NOT_FOUND:     '历史记录不存在或已被删除',
     HISTORY_STARRED:       '已收藏的记录不能删除（请先取消收藏，或使用强制删除）',
   };
@@ -2113,7 +1989,7 @@ async function tick() {
 
 ---
 
-## 15. 完整响应示例
+## 14. 完整响应示例
 
 ### 14.1 GET /api/metrics（集群聚合压测）
 
@@ -2231,7 +2107,6 @@ async function tick() {
   "agentCount": 3,
   "onlineCount": 3,
   "offlineCount": 0,
-  "upgradingCount": 0,
   "totalMemMB": 98304,
   "usedMemMB": 12345,
   "avgCpuPercent": 45.3,
@@ -2294,9 +2169,17 @@ async function tick() {
   "startedAt": "2026-04-29T09:00:05+08:00",
   "config": {
     "robotConfig": {
-      "authAddr": "auth.example.com:8001",
+      "authAddr": "http://auth.example.com:20000",
       "concurrency": 50,
-      "timeoutSec": 30
+      "timeoutSec": 60,
+      "accountPrefix": "bot_",
+      "startNumber": 0,
+      "mainService": "logic",
+      "authExtra": { "version": "1.0.0", "channel": "mine", "platform": "1000" },
+      "heartbeatSec": 5,
+      "httpTimeoutSec": 10,
+      "apdexT": 100,
+      "logLevel": "info"
     },
     "deadline": "2026-04-29T11:00:00+08:00",
     "flowFiles": ["flow.json", "proto/c2s.proto", "proto/s2c.proto", "scripts/battle.lua"]
@@ -2320,8 +2203,7 @@ async function tick() {
 - [ ] Agent 列表（含状态指示灯）+ 详情页
 - [ ] 系统资源大盘（集群总览 + per-agent 折线）
 - [ ] 压测大盘（动作明细表 + 折线图 + 错误展示）
-- [ ] 二进制管理（上传 + 下载 + 删除）
-- [ ] 滚动升级（开始 + 进度 + 取消）
+- [ ] AgentsDrawer：列表 + 删除离线 + 全部停止（等价于停止当前 active 任务）
 - [ ] 全局错误处理（toast + 顶部红条）
 - [ ] 轮询自动启停（页面切换时）
 - [ ] 折线历史 5 分钟保留 + 自动滑动
@@ -2338,4 +2220,4 @@ async function tick() {
 | 接口字段不清晰 / 缺失 | Admin 后端开发同事 |
 | 数据看起来不对（如 P99 异常） | Admin 后端 + 查 `docs/admin-implementation.md` §4.5 聚合规则 |
 | Agent 上报频率 | 见 `docs/agent-implementation.md` §9 配置 |
-| 升级流程问题 | `docs/design-distributed-master.md` §15 |
+| 版本部署 / Agent 重启 | 运维手动操作（无自动升级） |

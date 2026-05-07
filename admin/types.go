@@ -56,10 +56,51 @@ type TaskConfig struct {
 	Deadline    *time.Time        `json:"deadline,omitempty"`
 }
 
+// RobotConfig 任务级运行时配置（前端 → admin → agent）。
+//
+// 字段分层语义：
+//   - 必填（authAddr / concurrency / timeoutSec）：每个任务一定要的核心参数；
+//   - 可选（其余）：留空时由 admin 用合理默认值填充，再下发到 agent。
+//
+// 设计取舍：超时类字段统一用 int 秒数（accountPrefix/mainService 等用 string），
+// 让前端表单足够直观；admin 在转换为 TaskAssignment 时把 int 秒 → "Ns" duration 字符串。
 type RobotConfig struct {
+	// ── 必填 ──
 	AuthAddr    string `json:"authAddr"`
 	Concurrency int    `json:"concurrency"`
-	TimeoutSec  int    `json:"timeoutSec"`
+	TimeoutSec  int    `json:"timeoutSec"` // 兼容旧字段：作为 TCPTimeout 兜底
+
+	// ── 业务可变（前端可改，影响每个任务的鉴权/连接行为）──
+
+	// AccountPrefix 账号前缀，用于区分压测批次，留空 = "bot_"。
+	AccountPrefix string `json:"accountPrefix,omitempty"`
+	// StartNumber 账号编号起点；admin 在分配时把它作为各 agent cursor 的起点，
+	// 即第 N 个机器人的账号 = AccountPrefix + (StartNumber + N)。
+	// 用法场景：
+	//   - 已有 bot_0~bot_99 在线时另起任务，可以设 100 避免账号撞车；
+	//   - 不同业务线想用不同账号区段。
+	// 留空（0）= 从 0 开始。
+	StartNumber int `json:"startNumber,omitempty"`
+	// MainService 主连接服务名，留空 = "logic"。
+	MainService string `json:"mainService,omitempty"`
+	// AuthExtra Auth 请求时附带的扩展字段（version/channel/platform 等），
+	// 在 lua 脚本中可通过 robot.get("version") 取到。
+	// 必须配置，否则 lua 取到 nil 兜底默认值，可能导致鉴权失败。
+	AuthExtra map[string]string `json:"authExtra,omitempty"`
+
+	// ── 性能/超时（前端可改，但通常用默认值）──
+
+	HeartbeatSec   int `json:"heartbeatSec,omitempty"`   // 心跳间隔秒，默认 5
+	HTTPTimeoutSec int `json:"httpTimeoutSec,omitempty"` // HTTP 超时秒，默认 10
+	ApdexT         int `json:"apdexT,omitempty"`         // Apdex 满意阈值毫秒，默认 100
+	// 注：reportInterval / monitor 上报频率属于 agent 进程级配置（跨任务），
+	//     不在 RobotConfig 里暴露；如需调整请改 agent-config.json 后重启 agent。
+
+	// ── 日志 ──
+
+	// LogLevel 任务期临时切换 Agent 进程日志等级（debug/info/warn/error）。
+	// 空 = 沿用 Agent 启动配置；任务结束自动恢复。
+	LogLevel string `json:"logLevel,omitempty"`
 }
 
 // ── Assignment ────────────────────────────────────────
@@ -74,20 +115,22 @@ type Assignment struct {
 
 // TaskAssignment Admin → Agent 下发的任务分配。
 type TaskAssignment struct {
-	TaskID       string            `json:"taskId"`
-	TaskName     string            `json:"taskName"`
-	StartNumber  int               `json:"startNumber"`
-	TotalBots    int               `json:"totalBots"`
-	AccountPrefix string           `json:"accountPrefix"`
-	ConcurrentNum int              `json:"concurrentNum"`
-	MainService  string            `json:"mainService"`
-	AuthAddress  string            `json:"authAddress"`
-	AuthExtra    map[string]string `json:"authExtra"`
-	HeartbeatInterval string       `json:"heartbeatInterval"`
-	TCPTimeout   string            `json:"tcpTimeout"`
-	HTTPTimeout  string            `json:"httpTimeout"`
-	ApdexT       int               `json:"apdexT"`
-	ConfigURL    string            `json:"configUrl"`
+	TaskID            string            `json:"taskId"`
+	TaskName          string            `json:"taskName"`
+	StartNumber       int               `json:"startNumber"`
+	TotalBots         int               `json:"totalBots"`
+	AccountPrefix     string            `json:"accountPrefix"`
+	ConcurrentNum     int               `json:"concurrentNum"`
+	MainService       string            `json:"mainService"`
+	AuthAddress       string            `json:"authAddress"`
+	AuthExtra         map[string]string `json:"authExtra"`
+	HeartbeatInterval string            `json:"heartbeatInterval"`
+	TCPTimeout        string            `json:"tcpTimeout"`
+	HTTPTimeout       string            `json:"httpTimeout"`
+	ApdexT            int               `json:"apdexT"`
+	LogLevel          string            `json:"logLevel,omitempty"` // 任务期临时切换 Agent 日志等级；空 = 沿用 Agent 启动配置
+	ConfigURL         string            `json:"configUrl"`
+	ConfigFiles       []string          `json:"configFiles"` // 可下载的配置文件列表，如 ["flow.json", "proto/a.proto"]
 }
 
 // ── Agent ─────────────────────────────────────────────
@@ -99,7 +142,6 @@ const (
 	AgentBusy      AgentStatus = "busy"
 	AgentUnhealthy AgentStatus = "unhealthy"
 	AgentOffline   AgentStatus = "offline"
-	AgentUpgrading AgentStatus = "upgrading"
 )
 
 type AgentNode struct {
@@ -187,41 +229,6 @@ type HeartbeatRequest struct {
 	AppVersion    string `json:"appVersion"`
 }
 
-// ── 二进制 / 升级 ────────────────────────────────────
-
-type BinaryMeta struct {
-	Version    string    `json:"version"`
-	Filename   string    `json:"filename"`
-	OS         string    `json:"os"`
-	Arch       string    `json:"arch"`
-	SHA256     string    `json:"sha256"`
-	SizeBytes  int64     `json:"sizeBytes"`
-	UploadedAt time.Time `json:"uploadedAt"`
-}
-
-type UpgradeRequest struct {
-	URL     string `json:"url"`
-	SHA256  string `json:"sha256"`
-	Version string `json:"version"`
-}
-
-type UpgradeStatus struct {
-	InProgress     bool                         `json:"inProgress"`
-	Version        string                       `json:"version"`
-	StartedAt      time.Time                    `json:"startedAt,omitempty"`
-	Total          int                          `json:"total"`
-	Completed      int                          `json:"completed"`
-	Failed         int                          `json:"failed"`
-	CurrentAgentID string                       `json:"currentAgentId,omitempty"`
-	PerAgent       map[string]AgentUpgradeState `json:"perAgent"`
-}
-
-type AgentUpgradeState struct {
-	Phase     string    `json:"phase"`
-	StartedAt time.Time `json:"startedAt,omitempty"`
-	Error     string    `json:"error,omitempty"`
-}
-
 // ── 系统指标（Agent 上报）─────────────────────────────
 
 type SystemSnapshot struct {
@@ -253,25 +260,28 @@ type SystemSnapshot struct {
 
 // ── 聚合快照 ─────────────────────────────────────────
 
+// ClusterSystemSnapshot 集群系统资源快照（聚合）。
+//
+// 字段命名约定：聚合字段统一带 `total*` 前缀，与单 Agent 上报字段
+// (NumGoroutine / NetSendKBps) 区分；这与 docs/api-monitor.md §8 与
+// 前端 `ClusterSystemSnapshot` 类型保持一致。
 type ClusterSystemSnapshot struct {
-	Timestamp      time.Time          `json:"timestamp"`
-	AgentCount     int                `json:"agentCount"`
-	OnlineCount    int                `json:"onlineCount"`
-	OfflineCount   int                `json:"offlineCount"`
-	UpgradingCount int                `json:"upgradingCount"`
-	AvgCPUPercent  float64            `json:"avgCpuPercent"`
-	MaxCPUPercent  float64            `json:"maxCpuPercent"`
-	HotAgentID     string             `json:"hotAgentId,omitempty"`
-	HotAgentName   string             `json:"hotAgentName,omitempty"`
-	TotalMemMB     uint64             `json:"totalMemMB"`
-	UsedMemMB      uint64             `json:"usedMemMB"`
-	AvgMemPercent  float64            `json:"avgMemPercent"`
-	NetSendKBps    float64            `json:"netSendKBps"`
-	NetRecvKBps    float64            `json:"netRecvKBps"`
-	TotalGoroutine int                `json:"totalGoroutine"`
-	TotalThread    int32              `json:"totalThread"`
-	TotalFD        int32              `json:"totalFd"`
-	Agents         []AgentSystemBrief `json:"agents"`
+	Timestamp        time.Time          `json:"timestamp"`
+	AgentCount       int                `json:"agentCount"`
+	OnlineCount      int                `json:"onlineCount"`
+	OfflineCount     int                `json:"offlineCount"`
+	AvgCPUPercent    float64            `json:"avgCpuPercent"`
+	MaxCPUPercent    float64            `json:"maxCpuPercent"`
+	HotAgentID       string             `json:"hotAgentId,omitempty"`
+	HotAgentName     string             `json:"hotAgentName,omitempty"`
+	TotalMemMB       uint64             `json:"totalMemMB"`
+	UsedMemMB        uint64             `json:"usedMemMB"`
+	TotalNetSendKBps float64            `json:"totalNetSendKBps"`
+	TotalNetRecvKBps float64            `json:"totalNetRecvKBps"`
+	TotalGoroutines  int                `json:"totalGoroutines"`
+	TotalThreads     int32              `json:"totalThreads"`
+	TotalFDs         int32              `json:"totalFds"`
+	Agents           []AgentSystemBrief `json:"agents"`
 }
 
 type AgentSystemBrief struct {
@@ -358,7 +368,12 @@ type UpdateHistoryRequest struct {
 }
 
 type CompareResponse struct {
-	Tasks []HistoryDetail `json:"tasks"`
+	Tasks []HistoryDetail            `json:"tasks"`
+	Diff  CompareDiff                `json:"diff"`
+}
+
+type CompareDiff struct {
+	Actions map[string][]float64 `json:"actions"` // actionName → [taskA_p99, taskB_p99, ...]
 }
 
 // ── 时序采样 ─────────────────────────────────────────

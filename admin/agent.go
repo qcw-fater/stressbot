@@ -77,6 +77,22 @@ func (r *AgentRegistry) Heartbeat(agentID string, req HeartbeatRequest) error {
 
 	node.LastHeartbeatAt = time.Now()
 	node.AppVersion = req.AppVersion
+
+	// 当 agent 切到新任务（含"上一任务结束 → 进入空闲"和"空闲 → 接到新任务"两种场景）时，
+	// 立刻把 LatestStress 清成 nil。否则会出现：
+	//   - 任务 A 结束、agent 心跳把 CurrentTaskID 清成 ""，但 LatestStress 还是 A 的快照；
+	//   - 用户秒启动任务 B，agent 心跳把 CurrentTaskID 改成 taskB；
+	//   - 此刻 agent 还没产生 B 的第一拍 stress（reporter 还没到 tick），
+	//     LatestStress 仍是 A 的；
+	//   - 前端 polling /api/metrics → AggregateStress(taskB) 命中
+	//     `agent.CurrentTaskID == taskB && agent.LatestStress != nil` → 直接返回 A 的快照；
+	//   - 前端节点和动作面板瞬间显示上一次任务的数据，过几秒被新数据覆盖 ⇒ 用户感知"残留"。
+	// 在 CurrentTaskID 变化点统一清理 LatestStress，从源头杜绝跨任务串数据。
+	// LatestSystem 不动，系统指标和具体任务无关。
+	if node.CurrentTaskID != req.CurrentTaskID {
+		node.LatestStress = nil
+		node.StressUpdatedAt = time.Time{}
+	}
 	node.CurrentTaskID = req.CurrentTaskID
 	node.CurrentBots = req.CurrentBots
 
@@ -185,11 +201,6 @@ func (r *AgentRegistry) scanAndMarkStatus() {
 
 	now := time.Now()
 	for _, node := range r.agents {
-		// upgrading 状态不受心跳检测影响
-		if node.Status == AgentUpgrading {
-			continue
-		}
-
 		lag := now.Sub(node.LastHeartbeatAt)
 		var newStatus AgentStatus
 

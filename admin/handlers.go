@@ -53,16 +53,6 @@ func (s *AdminServer) registerRoutes() *http.ServeMux {
 	mux.HandleFunc("GET /api/system/agents", s.handleGetSystemAgents)
 	mux.HandleFunc("GET /api/system/agents/{id}", s.handleGetSystemAgent)
 
-	// ── 前端-二进制/升级 ──
-	mux.HandleFunc("POST /api/binaries", s.handleUploadBinary)
-	mux.HandleFunc("GET /api/binaries", s.handleListBinaries)
-	mux.HandleFunc("GET /api/binaries/{filename}", s.handleDownloadBinary)
-	mux.HandleFunc("DELETE /api/binaries/{filename}", s.handleDeleteBinary)
-	mux.HandleFunc("POST /api/agents/{id}/upgrade", s.handleUpgradeOne)
-	mux.HandleFunc("POST /api/agents/upgrade-all", s.handleUpgradeAll)
-	mux.HandleFunc("GET /api/agents/upgrade-status", s.handleUpgradeStatus)
-	mux.HandleFunc("POST /api/agents/upgrade-cancel", s.handleUpgradeCancel)
-
 	// ── 历史归档 ──
 	mux.HandleFunc("GET /api/history", s.handleListHistory)
 	mux.HandleFunc("GET /api/history/tags", s.handleGetHistoryTags)
@@ -150,11 +140,29 @@ func (s *AdminServer) handleAgentDeregister(w http.ResponseWriter, r *http.Reque
 }
 
 // #8 修复：使用 report.TaskID 和 report.ReportedAt
+//
+// 跨任务串数据防御：当 agent 还没及时把上一个任务的最后一拍 stress 上报到 admin 时，
+// 用户已经发起了新任务、agent 心跳已把 CurrentTaskID 切换。这条"延迟到达的旧报告"
+// 如果直接 UpdateStress，会把刚刚因 CurrentTaskID 切换而被清空的 LatestStress
+// 又写回成上一任务的快照（agent.go Heartbeat 那一道防线就被绕过了）。
+// 这里用 report.TaskID 与 agent 当前 CurrentTaskID 对比，不匹配直接丢弃。
+// agent.CurrentTaskID 为空（idle）时也不接受 stress 上报，没有归属。
 func (s *AdminServer) handleAgentStressReport(w http.ResponseWriter, r *http.Request) {
 	var report StressReport
 	if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
 		writeError(w, ErrInvalidArgument)
 		return
+	}
+	if agent, ok := s.agents.Get(report.AgentID); ok {
+		if agent.CurrentTaskID == "" || (report.TaskID != "" && report.TaskID != agent.CurrentTaskID) {
+			// 旧任务的延迟报告 / agent 已 idle，直接丢弃，避免 LatestStress 被串。
+			stresslog.Debug("丢弃过期 stress 报告",
+				zap.String("agentId", report.AgentID),
+				zap.String("reportTaskId", report.TaskID),
+				zap.String("currentTaskId", agent.CurrentTaskID))
+			writeJSON(w, http.StatusOK, map[string]string{"status": "stale"})
+			return
+		}
 	}
 	reportedAt := report.ReportedAt
 	if reportedAt.IsZero() {
@@ -190,6 +198,7 @@ func (s *AdminServer) handleAgentTaskDone(w http.ResponseWriter, r *http.Request
 	report.AgentID = agentID
 	report.TaskID = taskID
 
+	var needTransition TaskState // 零值表示不需要转换
 	err := s.tasks.Update(taskID, func(t *Task) {
 		if t.Reports == nil {
 			t.Reports = make(map[string]TaskCompletionReport)
@@ -204,15 +213,22 @@ func (s *AdminServer) handleAgentTaskDone(w http.ResponseWriter, r *http.Request
 		// 检查是否全部完成（自然完成: running→stopped，手动停止: stopping→stopped）
 		if len(t.Reports) == len(t.Assignments) {
 			if t.State == TaskRunning {
-				s.tasks.Transition(taskID, TaskRunning, TaskStopped)
+				needTransition = TaskRunning
 			} else if t.State == TaskStopping {
-				s.tasks.Transition(taskID, TaskStopping, TaskStopped)
+				needTransition = TaskStopping
 			}
 		}
 	})
 	if err != nil {
 		writeError(w, err)
 		return
+	}
+
+	// Transition 必须在 Update 外部调用，避免死锁（两者都拿 ts.mu）
+	if needTransition == TaskRunning {
+		s.tasks.Transition(taskID, TaskRunning, TaskStopped)
+	} else if needTransition == TaskStopping {
+		s.tasks.Transition(taskID, TaskStopping, TaskStopped)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -287,9 +303,11 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 				}
 				data, _ := io.ReadAll(f)
 				f.Close()
-				fileName := fh.Filename
-				if strings.HasPrefix(key, "proto/") {
-					fileName = strings.TrimPrefix(key, "proto/") + "/" + fileName
+				var fileName string
+				if strings.HasPrefix(key, "proto/") && key != "proto/" {
+					fileName = strings.TrimPrefix(key, "proto/")
+				} else {
+					fileName = fh.Filename
 				}
 				cfg.ProtoFiles[fileName] = data
 			}
@@ -307,7 +325,13 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 				}
 				data, _ := io.ReadAll(f)
 				f.Close()
-				cfg.LuaScripts[fh.Filename] = data
+				var fileName string
+				if strings.HasPrefix(key, "scripts/") && key != "scripts/" {
+					fileName = strings.TrimPrefix(key, "scripts/")
+				} else {
+					fileName = fh.Filename
+				}
+				cfg.LuaScripts[fileName] = data
 			}
 		}
 	}
@@ -404,13 +428,7 @@ func (s *AdminServer) handleGetTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := map[string]any{
-		"task": task,
-	}
-	if IsActiveState(task.State) {
-		result["snapshot"] = s.aggregator.AggregateStress(id)
-	}
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, task)
 }
 
 // #1 修复：GET /api/tasks/{id}/config/{path...} — 任务配置文件下载（Agent 用）
@@ -440,6 +458,17 @@ func (s *AdminServer) handleGetTaskConfig(w http.ResponseWriter, r *http.Request
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(task.Config.HeaderJSON)
+
+	case "config.json":
+		// Agent 运行时配置（robotConfig + 超时等）
+		configJSON, _ := json.Marshal(map[string]any{
+			"authAddr":    task.Config.RobotConfig.AuthAddr,
+			"concurrency": task.Config.RobotConfig.Concurrency,
+			"timeoutSec":  task.Config.RobotConfig.TimeoutSec,
+			"deadline":    task.Config.Deadline,
+		})
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(configJSON)
 
 	default:
 		// proto 文件或 lua 脚本
@@ -483,7 +512,7 @@ func (s *AdminServer) handleStartTask(w http.ResponseWriter, r *http.Request) {
 
 	// 分配 Agent
 	idleAgents := s.agents.ListByStatus(AgentIdle)
-	assignments, err := s.assigner.Assign(task, idleAgents)
+	assignments, err := s.assigner.Assign(task, idleAgents, task.Config.RobotConfig.StartNumber)
 	if err != nil {
 		s.tasks.Transition(id, TaskStarting, TaskFailed)
 		writeError(w, err)
@@ -515,6 +544,30 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 	var failed []string
 	var succeeded []string
 
+	// 读取任务配置填充 TaskAssignment
+	task, _ := s.tasks.Get(taskID)
+	var rc RobotConfig
+	if task != nil {
+		rc = task.Config.RobotConfig
+	}
+
+	// 构建配置文件清单
+	var configFiles []string
+	if task != nil {
+		if task.Config.FlowJSON != nil {
+			configFiles = append(configFiles, "flow.json")
+		}
+		if task.Config.HeaderJSON != nil {
+			configFiles = append(configFiles, "header.json")
+		}
+		for name := range task.Config.ProtoFiles {
+			configFiles = append(configFiles, "proto/"+name)
+		}
+		for name := range task.Config.LuaScripts {
+			configFiles = append(configFiles, "scripts/"+name)
+		}
+	}
+
 	for _, a := range assignments {
 		agent, ok := s.agents.Get(a.AgentID)
 		if !ok {
@@ -523,11 +576,22 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 		}
 
 		cfg := TaskAssignment{
-			TaskID:      taskID,
-			TaskName:    taskName,
-			StartNumber: a.StartNumber,
-			TotalBots:   a.TotalBots,
-			ConfigURL:   fmt.Sprintf("%s/api/tasks/%s/config", s.cfg.PublicURL, taskID),
+			TaskID:            taskID,
+			TaskName:          taskName,
+			StartNumber:       a.StartNumber,
+			TotalBots:         a.TotalBots,
+			AccountPrefix:     stringOr(rc.AccountPrefix, "bot_"),
+			MainService:       stringOr(rc.MainService, "logic"),
+			AuthAddress:       rc.AuthAddr,
+			AuthExtra:         rc.AuthExtra,
+			ConcurrentNum:     rc.Concurrency,
+			HeartbeatInterval: secsOr(rc.HeartbeatSec, 5),
+			TCPTimeout:        secsOr(rc.TimeoutSec, 60),
+			HTTPTimeout:       secsOr(rc.HTTPTimeoutSec, 10),
+			ApdexT:            intOr(rc.ApdexT, 100),
+			LogLevel:          rc.LogLevel,
+			ConfigURL:         fmt.Sprintf("%s/api/tasks/%s/config", s.cfg.PublicURL, taskID),
+			ConfigFiles:       configFiles,
 		}
 
 		if err := s.dispatcher.AssignTask(agent.Address, cfg); err != nil {
@@ -808,108 +872,6 @@ func (s *AdminServer) handleGetSystemAgent(w http.ResponseWriter, r *http.Reques
 }
 
 // ──────────────────────────────────────────────────
-// 前端-二进制/升级 Handlers
-// ──────────────────────────────────────────────────
-
-func (s *AdminServer) handleUploadBinary(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(200 << 20); err != nil {
-		writeError(w, ErrInvalidArgument.WithMessage("multipart parse error"))
-		return
-	}
-
-	file, _, err := r.FormFile("file")
-	if err != nil {
-		writeError(w, ErrInvalidArgument.WithMessage("file field required"))
-		return
-	}
-	defer file.Close()
-
-	version := r.FormValue("version")
-	osName := r.FormValue("os")
-	arch := r.FormValue("arch")
-	filename := r.FormValue("filename")
-	if filename == "" {
-		filename = fmt.Sprintf("agent-%s.exe", version)
-	}
-
-	force := r.FormValue("force") == "true"
-
-	meta, err := s.binaries.Upload(file, filename, version, osName, arch, force)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, meta)
-}
-
-func (s *AdminServer) handleListBinaries(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"items": s.binaries.List(),
-	})
-}
-
-func (s *AdminServer) handleDownloadBinary(w http.ResponseWriter, r *http.Request) {
-	filename := r.PathValue("filename")
-	reader, err := s.binaries.Open(filename)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	defer reader.Close()
-	w.Header().Set("Content-Type", "application/octet-stream")
-	io.Copy(w, reader)
-}
-
-func (s *AdminServer) handleDeleteBinary(w http.ResponseWriter, r *http.Request) {
-	filename := r.PathValue("filename")
-	if err := s.binaries.Delete(filename); err != nil {
-		writeError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *AdminServer) handleUpgradeOne(w http.ResponseWriter, r *http.Request) {
-	agentID := r.PathValue("id")
-	var input struct {
-		Version string `json:"version"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		writeError(w, ErrInvalidArgument)
-		return
-	}
-	if err := s.upgrader.UpgradeOne(agentID, input.Version); err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "upgrade sent"})
-}
-
-func (s *AdminServer) handleUpgradeAll(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		Version string `json:"version"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		writeError(w, ErrInvalidArgument)
-		return
-	}
-	if err := s.upgrader.UpgradeAll(input.Version); err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "rolling upgrade started"})
-}
-
-func (s *AdminServer) handleUpgradeStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.upgrader.Status())
-}
-
-func (s *AdminServer) handleUpgradeCancel(w http.ResponseWriter, r *http.Request) {
-	s.upgrader.Cancel()
-	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
-}
-
 // parseIntOrDefault 解析查询参数。
 func parseIntOrDefault(s string, def int) int {
 	if s == "" {

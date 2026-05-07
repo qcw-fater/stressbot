@@ -14,8 +14,10 @@
 import { useFlowStore } from '@/components/FlowEditor/store/flowStore';
 import { useProtoStore } from '@/components/FlowEditor/proto/protoStore';
 import { validateFlow } from '@/components/FlowEditor/validation/refsCheck';
+import { useMetricsStore } from '@/components/FlowEditor/nodes/shared/MetricsBadge';
 import * as tasksApi from './tasksApi';
 import { listProto, listScript } from './resourcesStore';
+import { syncFlowScriptsToIdb } from './scriptSync';
 import { useRuntimeStore } from './runtimeStore';
 import { ApiError } from './api';
 import type { RobotConfig, TaskBrief, TaskDetail } from '@/types/api';
@@ -48,7 +50,8 @@ export interface StartTaskOptions {
  *
  * 流程（任意一步失败抛出，runtimeStore 不变更）：
  *   1. flowStore.toTaskFlow() + validateFlow() → 有 error 直接拒绝；
- *   2. listProto / listScript 拉用户上传的资源（IDB 为空也允许，由 Admin 兜底默认）；
+ *   2. syncFlowScriptsToIdb：把 flow 引用、IDB 缺失的脚本从基线拉回 IDB（保护已编辑稿）；
+ *      仍缺失则抛错。listProto / listScript 拉资源；
  *   3. 容量预检：sum(agents.maxBots - currentBots) >= totalBots；
  *   4. POST /api/tasks → 拿 taskId；
  *   5. POST /api/tasks/{id}/start → 拿 assignments；
@@ -77,7 +80,45 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
     );
   }
 
-  // 2. 资源
+  // 校验通过 → 立即清空上次 finalReport 的监控数据。
+  //
+  // 这一步必须在 await tasks API 之前完成，原因：
+  //   - createTask 上传 multipart（含 lua/proto），可能耗时几百 ms 到数秒；
+  //   - 在此期间 UI 仍处于 finalReport，节点上保留着上一次任务的 p99/apdex/边框颜色；
+  //   - 用户点完"开始压测"后会看到"上次的指标"持续展示，直到第一份新 polling 回来才更新；
+  //   - 早清不晚清：极端情况下 createTask 失败回滚，用户也只丢一份"已经看完的最终报告"，
+  //     与"开始压测"语义不冲突，可接受。
+  //
+  // 同时同步清掉 useMetricsStore.provider —— 这一步必须显式做：
+  //   - latestStress=null 后 EditorPage 的 useMemo 重算 metricsProvider=undefined；
+  //   - 但把 undefined 推到 useMetricsStore 是在 useLayoutEffect 里，仍要等下一次 commit；
+  //   - 而 React 组件 re-render 在 zustand set() 之后还要排队，至少 1 个 microtask；
+  //   - 直接同步把 provider 设成 undefined 后，所有 NodeShell/MetricsBadge 立刻失去依据，
+  //     下一次重渲染就不会再看到上次任务的 p99/apdex/边框残留。
+  useRuntimeStore.getState().clearMonitorData();
+  useMetricsStore.getState().setProvider(undefined);
+
+  // 2. 资源同步与收集
+  //   - proto：直接用 IDB 中用户上传的（缺失由 Admin 兜底默认 conf/proto/）；
+  //   - scripts："IDB 即事实源"模型：
+  //       a) 先把 flow 引用、IDB 还没有的脚本从默认基线拉回 IDB（保护已编辑稿不覆盖）；
+  //       b) 然后**全量上传 IDB**作为 multipart payload —— 因为 lua 内部 require()/dofile()
+  //          是动态调用，无法静态分析，全量上传是最稳的方案（lua 文件通常 < 几 KB，开销极小）；
+  //       c) sync.missing > 0 = 既不在 IDB 也不在 conf/scripts/，启动会失败 → 提前抛错。
+  //   用户如需精简 IDB 中的历史脚本，可去「资源管理」手动清理。
+  const sync = await syncFlowScriptsToIdb(flowJson);
+  if (sync.missing.length > 0) {
+    throw new ApiError(
+      {
+        code: 'INVALID_ARGUMENT',
+        message:
+          `缺少 lua 脚本：${sync.missing.join(', ')}。` +
+          `请在「资源管理」上传，或确认开发期 conf/scripts/ 目录下存在该文件。`,
+        details: { missingScripts: sync.missing },
+      },
+      400,
+    );
+  }
   const [protos, scripts] = await Promise.all([listProto(), listScript()]);
 
   // 3. 容量预检
@@ -122,7 +163,7 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
   const created = await tasksApi.createTask(fd);
   await tasksApi.startTask(created.id);
 
-  // 6. 同步运行态
+  // 6. 同步运行态。clearMonitorData 已经在校验后立刻调过了（开头），这里不必再清。
   const runtime = useRuntimeStore.getState();
   runtime.setOwnedTaskId(created.id);
   runtime.setMode('running');
@@ -199,9 +240,16 @@ export async function attachToActive(taskId: string): Promise<void> {
 
   if (remoteFlow) {
     flowState.loadFromTaskFlow(remoteFlow);
+    // attach 到远端任务时也尝试同步脚本到 IDB（保护已存在的编辑稿不覆盖）。
+    // 这样用户后续切回 edit 模式接续修改时不会因为缺脚本而失败。
+    void syncFlowScriptsToIdb(remoteFlow);
   }
 
   const runtime = useRuntimeStore.getState();
+  // 同 startTask：在切换 mode 前清掉残留监控数据，避免上一次的 finalReport 数据闪一下；
+  // useMetricsStore.provider 也必须同步清掉，否则节点会保留上次任务 1~2 帧的 p99/apdex/边框。
+  runtime.clearMonitorData();
+  useMetricsStore.getState().setProvider(undefined);
   runtime.setActiveTask(detail);
   // 本端没主导这个任务（任意客户端发起）→ 走 viewActive
   if (runtime.ownedTaskId !== taskId) {
@@ -211,8 +259,8 @@ export async function attachToActive(taskId: string): Promise<void> {
     runtime.setMode('running');
   }
 
-  // 资源同步：把 detail.config.flowFiles 中的 proto/lua 顺带拉回 IDB？
-  // 留给后续：本次不动，避免覆盖用户自己上传的资源。
+  // proto 资源同步：留给后续，proto 是按 messageType 名引用的，无法从 flow 静态推断
+  // 应该带哪些 .proto 文件；用户需主动到「资源管理」上传。
   void useProtoStore.getState();
 }
 
@@ -241,3 +289,4 @@ export function hasStashedDraft(): boolean {
     return false;
   }
 }
+

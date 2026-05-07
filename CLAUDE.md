@@ -28,16 +28,16 @@ stressbot 是一个可配置化通用游戏服务器压测工具，用 Go 编写
 
 ```bash
 # 编译
-go build -o stressbot.exe ./cmd/stressbot
+go build -o stressbot.exe ./cmd/agent
 
 # 校验 flow.json（每次修改 flow.json 后务必执行）
 go run ./cmd/validate conf/flow.json
 
-# 启动压测
-go run ./cmd/stressbot -config conf/config.json
+# 启动压测（单机模式，agent.enabled 默认 false）
+go run ./cmd/agent -config conf/config.json
 
 # 指定配置文件路径
-go run ./cmd/stressbot -config path/to/config.json
+go run ./cmd/agent -config path/to/config.json
 ```
 
 ## 架构

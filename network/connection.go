@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"stressbot/monitor"
 	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"
@@ -35,7 +36,8 @@ type Connection struct {
 	closeFunc        func() error
 	heartbeat        *heartbeatState
 	heartbeatMu      sync.Mutex
-	onDisconnect     func() // 连接意外断开时回调（非主动 Close 触发）
+	onDisconnect     func() // 连接"意外"断开时回调（非主动 Close 触发，业务用于停 robot 等）
+	onClosed         func() // 连接关闭时**总是**触发的回调（主动/被动都触发，监控用）
 }
 
 // NewConnection 创建新的网络连接。
@@ -64,6 +66,16 @@ func (c *Connection) ServiceName() string { return c.serviceName }
 func (c *Connection) SetOnDisconnect(fn func()) {
 	c.mu.Lock()
 	c.onDisconnect = fn
+	c.mu.Unlock()
+}
+
+// SetOnClosed 设置连接关闭回调，**主动/被动关闭都会触发**。
+// 主要用于监控计数（每开 +1 / 每关 -1），与业务 onDisconnect 区分：
+//   - onDisconnect 只在意外断开触发，业务用来决定是否要停 robot；
+//   - onClosed 总是触发，用来对账连接生命周期。
+func (c *Connection) SetOnClosed(fn func()) {
+	c.mu.Lock()
+	c.onClosed = fn
 	c.mu.Unlock()
 }
 
@@ -170,6 +182,10 @@ func (c *Connection) Send(data []byte) (bool, int) {
 		stresslog.Error("[NETWORK] Send 发送失败", zap.String("service", c.serviceName), zap.Error(err))
 		return false, 0
 	}
+	// 全局带宽统计：所有真实出站字节都计入（含心跳、监听重发、UDP 单向发送等），
+	// 这样 monitor.CollectorSnapshot.Bandwidth 能反映"网卡级"出口流量，
+	// 而不是只统计 RecordAction success 路径里的成对字节（那条路径漏了心跳/超时/lua 等）。
+	monitor.Global().AddBandwidth(int64(n), 0)
 	return true, n
 }
 
@@ -268,26 +284,41 @@ func (c *Connection) onClose() {
 	c.StopHeartbeat()
 	c.cancel()
 
-	// 仅非主动关闭时触发断开回调（异步执行，避免阻塞 gnet 事件循环）
+	// 业务"意外断开"回调：仅非主动关闭时触发（用于 robot 主连接断开 → 停 robot）
 	if atomic.LoadInt32(&c.intentionalClose) == 0 && c.onDisconnect != nil {
 		go c.onDisconnect()
+	}
+	// 监控"关闭"回调：主动/被动均触发；与 ConnEstablished 配对，保证 active = open - close 准确
+	if c.onClosed != nil {
+		go c.onClosed()
 	}
 
 	stresslog.Debug("[NETWORK] 连接资源已清理", zap.String("service", c.serviceName), zap.String("robot", c.robotName))
 }
 
 // Close 主动关闭连接。
+//
+// **注意**：本函数会同步把 isClose 置 1。这意味着稍后 gnet 在底层 socket
+// 真正断开时回调 `onClose()`，会被 `CompareAndSwapInt32(&c.isClose, 0, 1)` 吞掉，
+// 因此 `onClosed` 监控回调必须在这里**主动**触发一次（与被动断开路径里的
+// `onClose()` 配对，保证 ConnEstablished/ConnDropped 计数对齐）。
+//
+// 对应地，`onDisconnect`（业务"意外断开"回调）这里**不**触发 —— 主动 Close 不算意外。
 func (c *Connection) Close() {
-	if c == nil || atomic.LoadInt32(&c.isClose) == 1 {
+	if c == nil || !atomic.CompareAndSwapInt32(&c.isClose, 0, 1) {
 		return
 	}
 	atomic.StoreInt32(&c.intentionalClose, 1)
-	atomic.StoreInt32(&c.isClose, 1)
 	c.StopHeartbeat()
 	if c.closeFunc != nil {
 		_ = c.closeFunc()
 	}
 	c.cancel()
+	// 监控关闭回调：与 onClose() 中的 onClosed 等价语义（主动/被动都触发一次）。
+	// CAS 保证整个 Close 全程仅一条路径触发 onClosed，不会重复 -1。
+	if c.onClosed != nil {
+		go c.onClosed()
+	}
 	stresslog.Debug("[NETWORK] 连接资源已清理", zap.String("service", c.serviceName), zap.String("robot", c.robotName))
 }
 

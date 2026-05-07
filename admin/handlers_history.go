@@ -11,7 +11,6 @@ import (
 // 历史归档 Handlers
 // ──────────────────────────────────────────────────
 
-// #7 修复：补全 startedAfter/startedBefore/tagsAll 查询参数
 func (s *AdminServer) handleListHistory(w http.ResponseWriter, r *http.Request) {
 	if s.history == nil {
 		writeError(w, ErrHistoryDisabled)
@@ -62,7 +61,6 @@ func (s *AdminServer) handleGetHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, detail)
 }
 
-// #3 修复：GET /api/history/{id}/agents — 各 Agent 完成报告
 func (s *AdminServer) handleGetHistoryAgents(w http.ResponseWriter, r *http.Request) {
 	if s.history == nil {
 		writeError(w, ErrHistoryDisabled)
@@ -90,7 +88,36 @@ func (s *AdminServer) handleGetHistoryConfig(w http.ResponseWriter, r *http.Requ
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, cfg)
+
+	// 查询任务元信息补充到响应
+	meta, _ := s.history.Get(id)
+	name := ""
+	var totalBots int
+	if meta != nil {
+		name = meta.Name
+		totalBots = meta.TotalBots
+	}
+
+	// 前端期望 scripts 而非 luaScripts
+	scripts := make(map[string]string)
+	for k, v := range cfg.LuaScripts {
+		scripts[k] = string(v)
+	}
+	protoFiles := make(map[string]string)
+	for k, v := range cfg.ProtoFiles {
+		protoFiles[k] = string(v)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"taskId":      id,
+		"name":        name,
+		"totalBots":   totalBots,
+		"robotConfig": cfg.RobotConfig,
+		"flowJson":    cfg.FlowJSON,
+		"headerJson":  cfg.HeaderJSON,
+		"protoFiles":  protoFiles,
+		"scripts":     scripts,
+	})
 }
 
 func (s *AdminServer) handleGetHistoryTimeseries(w http.ResponseWriter, r *http.Request) {
@@ -142,7 +169,14 @@ func (s *AdminServer) handleUpdateHistory(w http.ResponseWriter, r *http.Request
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+
+	// 返回更新后的 HistoryDetail
+	detail, err := s.history.Get(id)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
 }
 
 func (s *AdminServer) handleDeleteHistory(w http.ResponseWriter, r *http.Request) {
@@ -158,10 +192,9 @@ func (s *AdminServer) handleDeleteHistory(w http.ResponseWriter, r *http.Request
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	w.WriteHeader(http.StatusNoContent)
 }
 
-// #5 修复：clone 创建新任务，而非只返回配置
 func (s *AdminServer) handleCloneHistory(w http.ResponseWriter, r *http.Request) {
 	if s.history == nil {
 		writeError(w, ErrHistoryDisabled)
@@ -169,6 +202,13 @@ func (s *AdminServer) handleCloneHistory(w http.ResponseWriter, r *http.Request)
 	}
 
 	id := r.PathValue("id")
+
+	// 解析可选的 name 覆盖
+	var body struct {
+		Name string `json:"name"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+
 	cfg, err := s.history.GetConfig(id)
 	if err != nil {
 		writeError(w, err)
@@ -187,9 +227,14 @@ func (s *AdminServer) handleCloneHistory(w http.ResponseWriter, r *http.Request)
 		origName = id[:8]
 	}
 
+	cloneName := origName + " (clone)"
+	if body.Name != "" {
+		cloneName = body.Name
+	}
+
 	newTask := &Task{
 		ID:        generateID(),
-		Name:      origName + " (clone)",
+		Name:      cloneName,
 		State:     TaskPending,
 		TotalBots: totalBots,
 		Config:    *cfg,
@@ -203,7 +248,6 @@ func (s *AdminServer) handleCloneHistory(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusCreated, map[string]string{"id": newTask.ID})
 }
 
-// #6 修复：compare 添加 ids>5 上限校验
 func (s *AdminServer) handleCompareHistory(w http.ResponseWriter, r *http.Request) {
 	if s.history == nil {
 		writeError(w, ErrHistoryDisabled)
@@ -235,5 +279,13 @@ func (s *AdminServer) handleCompareHistory(w http.ResponseWriter, r *http.Reques
 		tasks = append(tasks, *detail)
 	}
 
-	writeJSON(w, http.StatusOK, CompareResponse{Tasks: tasks})
+	// 计算每个动作在多个任务间的 P99 对比
+	diff := CompareDiff{Actions: make(map[string][]float64)}
+	for _, t := range tasks {
+		for _, a := range t.FinalSnapshot.Actions {
+			diff.Actions[a.Name] = append(diff.Actions[a.Name], a.Latency.P99Ms)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, CompareResponse{Tasks: tasks, Diff: diff})
 }

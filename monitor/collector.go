@@ -52,6 +52,7 @@ type CollectorConfig struct {
 type MetricsCollector struct {
 	enabled   bool
 	cfg       CollectorConfig
+	cfgMu     sync.RWMutex // 仅保护 cfg.ApdexT 的运行期读写，详见 SetApdexT
 	startTime time.Time
 
 	actions sync.Map // string → *actionMetrics
@@ -77,6 +78,16 @@ type MetricsCollector struct {
 var global *MetricsCollector
 
 // Init 初始化全局单例。
+//
+// **重要**：进程生命周期内只应在启动时调用一次。
+// 如果运行期再次调用，会**新建一个 collector 替换 global**，导致：
+//   - 已经持有 `monitor.Global()` 旧引用的组件（如 agent.StressReporter）
+//     看到的还是空 collector；
+//   - 业务路径里的 `monitor.Global().RecordXxx(...)` 写到新 collector，
+//     reporter 永远拿不到数据。
+//
+// 任务级需要调整 ApdexT 时，请使用 `(*MetricsCollector).SetApdexT(t)`，
+// 不要再调 `Init`。
 func Init(cfg CollectorConfig) {
 	global = &MetricsCollector{
 		enabled:   cfg.Enabled,
@@ -99,6 +110,38 @@ func Global() *MetricsCollector {
 	return global
 }
 
+// Reset 重置所有计数器，用于新任务开始前清零。
+func (c *MetricsCollector) Reset() {
+	c.startTime = time.Now()
+	c.actions.Clear()
+	c.names = c.names[:0]
+	c.robotsStarted.Store(0)
+	c.robotsRunning.Store(0)
+	c.robotsStopped.Store(0)
+	c.robotsErrored.Store(0)
+	c.totalActions.Store(0)
+	c.connEstablished.Store(0)
+	c.connFailed.Store(0)
+	c.connDropped.Store(0)
+	c.totalSendBytes.Store(0)
+	c.totalRecvBytes.Store(0)
+}
+
+// SetApdexT 任务级调整 Apdex T 值（毫秒），用于不同任务约束不同响应预期。
+// ≤0 视为不修改（保留当前值）。
+//
+// 设计取舍：cfg 是结构体值，多字段并发更新需要锁；ApdexT 是热路径
+// `RecordAction` 里读取的唯一动态字段，独立用 mutex 保护成本最低，
+// 同时避免给整个 cfg 加锁影响其他读路径。
+func (c *MetricsCollector) SetApdexT(t int) {
+	if t <= 0 {
+		return
+	}
+	c.cfgMu.Lock()
+	c.cfg.ApdexT = t
+	c.cfgMu.Unlock()
+}
+
 // RecordActionStart 记录动作开始执行（递增 executing 计数）。
 func (c *MetricsCollector) RecordActionStart(name string) {
 	if !c.enabled {
@@ -106,6 +149,23 @@ func (c *MetricsCollector) RecordActionStart(name string) {
 	}
 	am := c.getOrCreateAction(name)
 	am.executing.Add(1)
+}
+
+// AddBandwidth 累计全局收发字节数。由 network 层在每次实际收发后调用，
+// 这样心跳、监听推送、所有失败/超时的请求、UDP 单向发送都能被计入"全局带宽"，
+// 而不是只统计 RecordAction success 路径里的成对收发字节。
+//
+// 调用方约定：send / recv 任一为 0 表示该方向无字节增量（不要传负数）。
+func (c *MetricsCollector) AddBandwidth(send, recv int64) {
+	if c == nil || !c.enabled {
+		return
+	}
+	if send > 0 {
+		c.totalSendBytes.Add(send)
+	}
+	if recv > 0 {
+		c.totalRecvBytes.Add(recv)
+	}
 }
 
 // RecordAction 记录一次动作执行结果（热路径，纯原子操作）。
@@ -123,16 +183,19 @@ func (c *MetricsCollector) RecordAction(name string, result ActionResult, durati
 	case ResultSuccess:
 		am.successCount.Add(1)
 		am.latency.Record(duration)
+		// per-action 字节统计仍保留（用于 ActionsTab 的 ↑avg / ↓avg 列）；
+		// 全局带宽（totalSendBytes / totalRecvBytes）由 network 层的 AddBandwidth 统一统计，
+		// 这里**不再累加**，避免与 network 层的统计双计。
 		if sendBytes > 0 {
 			am.sendBytes.Add(int64(sendBytes))
-			c.totalSendBytes.Add(int64(sendBytes))
 		}
 		if recvBytes > 0 {
 			am.recvBytes.Add(int64(recvBytes))
-			c.totalRecvBytes.Add(int64(recvBytes))
 		}
 		// Apdex 分类
+		c.cfgMu.RLock()
 		T := int64(c.cfg.ApdexT)
+		c.cfgMu.RUnlock()
 		ms := duration.Milliseconds()
 		switch {
 		case ms < T:

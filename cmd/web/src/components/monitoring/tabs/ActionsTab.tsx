@@ -1,86 +1,212 @@
 /**
- * 动作明细表：每条 ActionMetric 一行，按 sampleCount 倒排。
+ * 动作明细表（v5）。
+ *
+ * 列设计原则：
+ *   - 关键计数（成 / 败 / 超 / 跳 / avgSend / avgRecv / timeoutAvgMs）**全部独立列**，
+ *     用户要直接对比这些字段，塞在动作名下方小字里不够直观；
+ *   - 动作名列收紧到 200px，留出横向空间给数值列；
+ *   - 所有数值列、动作名、QPS 等都加 `sorter`；
+ *   - 延迟分布 avg / p50 / p95 / p99 / max 五列单独可排序；
+ *   - 延迟列表头统一加 `(ms)` 后缀，单元格保持纯数字（避免每格重复单位拖宽列）；
+ *   - 移除"成功率"列：成功 / 失败 / 超时已按计数独立展示，比例可口算或在 Apdex 中体现，
+ *     去掉冗余列让横向空间留给延迟分布；
+ *   - 顶部加"仅展示动作"开关，过滤掉 callback:* 行（监听/推送），
+ *     适用于关心业务请求耗时、不关心异步推送的场景。
+ *   - 表格 horizontal scroll：列多了不会挤压，宽度可控。
  */
 
-import { Empty, Input, Space, Table, Tag } from 'antd';
+import { Empty, Input, Space, Switch, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useMemo, useState } from 'react';
 import { useRuntimeStore } from '@/services';
 import type { ActionMetric } from '@/types/api';
 import { ApdexCell } from '../shared/ApdexCell';
-import { LatencyHistogram } from '../shared/LatencyHistogram';
+import { fmtBytes, fmtMs, NUMERIC_STYLE } from '../shared/formats';
 
 export function ActionsTab() {
   const latestStress = useRuntimeStore((s) => s.latestStress);
   const [search, setSearch] = useState('');
+  const [actionsOnly, setActionsOnly] = useState(false);
 
   const dataSource = useMemo(() => {
     if (!latestStress) return [];
-    const rows = latestStress.actions;
-    if (!search) return rows;
-    const lo = search.toLowerCase();
-    return rows.filter((a) => a.name.toLowerCase().includes(lo));
-  }, [latestStress, search]);
+    let rows = latestStress.actions ?? [];
+    if (actionsOnly) {
+      // callback:<name> 是 listen / 推送回调，actionsOnly 时过滤掉
+      rows = rows.filter((a) => !a.name.startsWith('callback:'));
+    }
+    if (search) {
+      const lo = search.toLowerCase();
+      rows = rows.filter((a) => a.name.toLowerCase().includes(lo));
+    }
+    return rows;
+  }, [latestStress, search, actionsOnly]);
 
   const columns: ColumnsType<ActionMetric> = [
     {
-      title: '动作名',
+      title: '动作',
       dataIndex: 'name',
       key: 'name',
+      width: 200,
+      fixed: 'left',
+      ellipsis: true,
+      sorter: (a, b) => a.name.localeCompare(b.name),
       render: (v: string) => {
-        if (v.startsWith('callback:')) {
-          return (
-            <span>
-              <Tag color="orange">推送</Tag>
-              <code>{v.slice('callback:'.length)}</code>
-            </span>
-          );
-        }
-        return <code>{v}</code>;
+        const isCallback = v.startsWith('callback:');
+        const display = isCallback ? v.slice('callback:'.length) : v;
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {isCallback && <Tag color="orange" style={{ marginInlineEnd: 0 }}>推送</Tag>}
+            <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={display}>
+              {display}
+            </code>
+          </div>
+        );
       },
     },
-    { title: '并发', dataIndex: 'executing', key: 'executing', width: 70, sorter: (a, b) => a.executing - b.executing },
-    { title: '样本', dataIndex: 'sampleCount', key: 'sampleCount', width: 80, sorter: (a, b) => a.sampleCount - b.sampleCount, defaultSortOrder: 'descend' },
     {
-      title: '成功率',
-      dataIndex: 'successRate',
-      key: 'successRate',
-      width: 90,
+      title: '并发',
+      dataIndex: 'executing',
+      key: 'executing',
+      width: 64,
+      sorter: (a, b) => a.executing - b.executing,
+      render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span>,
+    },
+    {
+      title: '样本',
+      dataIndex: 'sampleCount',
+      key: 'sampleCount',
+      width: 70,
+      sorter: (a, b) => a.sampleCount - b.sampleCount,
+      defaultSortOrder: 'descend',
+      render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span>,
+    },
+    // ── 计数：独立列 ───────────────────────
+    {
+      title: '成功',
+      dataIndex: 'successCount',
+      key: 'successCount',
+      width: 70,
+      sorter: (a, b) => a.successCount - b.successCount,
+      render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: '#52c41a' }}>{v}</span>,
+    },
+    {
+      title: '失败',
+      dataIndex: 'failureCount',
+      key: 'failureCount',
+      width: 70,
+      sorter: (a, b) => a.failureCount - b.failureCount,
       render: (v: number) => (
-        <span style={{ color: v >= 0.99 ? '#52c41a' : v >= 0.9 ? '#faad14' : '#f5222d', fontVariantNumeric: 'tabular-nums' }}>
-          {(v * 100).toFixed(1)}%
-        </span>
+        <span style={{ ...NUMERIC_STYLE, color: v > 0 ? '#f5222d' : 'var(--text-tertiary)' }}>{v}</span>
       ),
-      sorter: (a, b) => a.successRate - b.successRate,
+    },
+    {
+      title: '超时',
+      dataIndex: 'timeoutCount',
+      key: 'timeoutCount',
+      width: 70,
+      sorter: (a, b) => a.timeoutCount - b.timeoutCount,
+      render: (v: number) => (
+        <span style={{ ...NUMERIC_STYLE, color: v > 0 ? '#fa8c16' : 'var(--text-tertiary)' }}>{v}</span>
+      ),
+    },
+    {
+      title: '跳过',
+      dataIndex: 'skippedCount',
+      key: 'skippedCount',
+      width: 70,
+      sorter: (a, b) => a.skippedCount - b.skippedCount,
+      render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: 'var(--text-tertiary)' }}>{v}</span>,
     },
     {
       title: 'Apdex',
       dataIndex: 'apdex',
       key: 'apdex',
-      width: 90,
-      render: (v: number) => <ApdexCell value={v} />,
-      sorter: (a, b) => a.apdex - b.apdex,
-    },
-    { title: 'QPS', dataIndex: 'avgQps', key: 'avgQps', width: 80, render: (v: number) => v.toFixed(1) },
-    {
-      title: '延迟分布',
-      key: 'latency',
-      width: 200,
-      render: (_, r) => <LatencyHistogram hist={r.latency} />,
-    },
-    {
-      title: 'p99',
-      key: 'p99',
       width: 80,
-      render: (_, r) => (r.latency.count > 0 ? `${r.latency.p99Ms.toFixed(0)}ms` : '—'),
+      sorter: (a, b) => a.apdex - b.apdex,
+      render: (v: number) => <ApdexCell value={v} />,
+    },
+    {
+      title: 'QPS',
+      dataIndex: 'avgQps',
+      key: 'avgQps',
+      width: 78,
+      sorter: (a, b) => a.avgQps - b.avgQps,
+      render: (v: number) => <span style={NUMERIC_STYLE}>{v.toFixed(1)}</span>,
+    },
+    // ── 字节数：独立列 ───────────────────────
+    {
+      title: '↑avg',
+      dataIndex: 'avgSendBytes',
+      key: 'avgSendBytes',
+      width: 78,
+      sorter: (a, b) => a.avgSendBytes - b.avgSendBytes,
+      render: (v: number) => <span style={NUMERIC_STYLE}>{fmtBytes(v)}</span>,
+    },
+    {
+      title: '↓avg',
+      dataIndex: 'avgRecvBytes',
+      key: 'avgRecvBytes',
+      width: 78,
+      sorter: (a, b) => a.avgRecvBytes - b.avgRecvBytes,
+      render: (v: number) => <span style={NUMERIC_STYLE}>{fmtBytes(v)}</span>,
+    },
+    // ── 延迟分布：独立列，表头统一标 (ms)，单元格只显示数字 ───────────────
+    {
+      title: 'avg(ms)',
+      key: 'avgMs',
+      width: 76,
+      sorter: (a, b) => a.latency.avgMs - b.latency.avgMs,
+      render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.avgMs)}</span>,
+    },
+    {
+      title: 'p50(ms)',
+      key: 'p50Ms',
+      width: 76,
+      sorter: (a, b) => a.latency.p50Ms - b.latency.p50Ms,
+      render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.p50Ms)}</span>,
+    },
+    {
+      title: 'p95(ms)',
+      key: 'p95Ms',
+      width: 76,
+      sorter: (a, b) => a.latency.p95Ms - b.latency.p95Ms,
+      render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.p95Ms)}</span>,
+    },
+    {
+      title: 'p99(ms)',
+      key: 'p99Ms',
+      width: 76,
       sorter: (a, b) => a.latency.p99Ms - b.latency.p99Ms,
+      render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.p99Ms)}</span>,
+    },
+    {
+      title: 'max(ms)',
+      key: 'maxMs',
+      width: 76,
+      sorter: (a, b) => a.latency.maxMs - b.latency.maxMs,
+      render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.maxMs)}</span>,
+    },
+    {
+      title: '超均(ms)',
+      dataIndex: 'timeoutAvgMs',
+      key: 'timeoutAvgMs',
+      width: 84,
+      sorter: (a, b) => a.timeoutAvgMs - b.timeoutAvgMs,
+      render: (v: number) => <span style={NUMERIC_STYLE}>{fmtMs(v)}</span>,
     },
     {
       title: '错误',
       key: 'errors',
-      width: 80,
+      width: 70,
+      fixed: 'right',
+      sorter: (a, b) => (a.errors?.length ?? 0) - (b.errors?.length ?? 0),
       render: (_, r) =>
-        r.errors && r.errors.length > 0 ? <Tag color="error">{r.errors.length}</Tag> : <span style={{ color: 'var(--text-tertiary)' }}>—</span>,
+        r.errors && r.errors.length > 0 ? (
+          <Tag color="error" style={{ marginInlineEnd: 0 }}>{r.errors.length}</Tag>
+        ) : (
+          <span style={{ color: 'var(--text-tertiary)' }}>—</span>
+        ),
     },
   ];
 
@@ -90,40 +216,40 @@ export function ActionsTab() {
 
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
-      <Input.Search
-        placeholder="按动作名搜索"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        allowClear
-        style={{ maxWidth: 320 }}
-      />
+      <Space size={12}>
+        <Input.Search
+          placeholder="按动作名搜索"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          allowClear
+          style={{ width: 320 }}
+        />
+        <Space size={6}>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>仅展示动作（隐藏推送）</span>
+          <Switch checked={actionsOnly} onChange={setActionsOnly} size="small" />
+        </Space>
+        <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+          共 {dataSource.length} 条
+        </span>
+      </Space>
       <Table<ActionMetric>
         rowKey="name"
         size="small"
         dataSource={dataSource}
         columns={columns}
         pagination={false}
-        scroll={{ y: 'calc(70vh - 200px)' }}
+        scroll={{ x: 'max-content', y: 'calc(70vh - 220px)' }}
         expandable={{
+          rowExpandable: (r) => !!r.errors && r.errors.length > 0,
           expandedRowRender: (r) => (
             <div style={{ fontSize: 12 }}>
-              <div>
-                成功 {r.successCount} · 失败 {r.failureCount} · 超时 {r.timeoutCount} · 跳过 {r.skippedCount}
-              </div>
-              <div style={{ marginTop: 4 }}>
-                avgSend {r.avgSendBytes}B · avgRecv {r.avgRecvBytes}B · timeoutAvgMs {r.timeoutAvgMs}
-              </div>
-              {r.errors && r.errors.length > 0 && (
-                <div style={{ marginTop: 6 }}>
-                  <strong>错误：</strong>
-                  {r.errors.map((e) => (
-                    <div key={e.msg}>
-                      <Tag color="error">×{e.count}</Tag>
-                      {e.msg}
-                    </div>
-                  ))}
+              <strong>错误明细：</strong>
+              {r.errors!.map((e) => (
+                <div key={e.msg} style={{ marginTop: 2 }}>
+                  <Tag color="error">×{e.count}</Tag>
+                  {e.msg}
                 </div>
-              )}
+              ))}
             </div>
           ),
         }}

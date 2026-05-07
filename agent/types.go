@@ -11,10 +11,8 @@ import (
 type AgentStatus string
 
 const (
-	StatusIdle      AgentStatus = "idle"
-	StatusBusy      AgentStatus = "busy"
-	StatusDraining  AgentStatus = "draining"  // 正在 drain，不接受新任务
-	StatusUpgrading AgentStatus = "upgrading"
+	StatusIdle AgentStatus = "idle"
+	StatusBusy AgentStatus = "busy"
 )
 
 // TaskResult 任务完成结果。
@@ -92,45 +90,25 @@ type DeregisterRequest struct {
 
 // TaskAssignment 任务下发（Admin Push 到 Agent）。
 type TaskAssignment struct {
-	TaskID      string `json:"taskId"`
-	Name        string `json:"name"`
-	TotalBots   int    `json:"totalBots"`
-	StartNumber int    `json:"startNumber"`
-
-	// 配置拉取
-	ConfigBase string         `json:"configBase"` // 基础 URL
-	ConfigFiles []ConfigFileRef `json:"configFiles"`
-
-	// 机器人参数
-	RobotConfig RobotConfig `json:"robotConfig"`
-
-	// 截止时间（可选，超时自动停止）
-	Deadline *time.Time `json:"deadline,omitempty"`
-}
-
-// ConfigFileRef 配置文件引用。
-type ConfigFileRef struct {
-	Path   string `json:"path"`   // 相对路径，如 "flow.json"、"proto/c2s.proto"
-	URL    string `json:"url"`    // 完整下载 URL
-	SHA256 string `json:"sha256"` // 校验哈希（空表示不校验）
-}
-
-// RobotConfig 机器人运行参数。
-type RobotConfig struct {
-	AccountPrefix string            `json:"accountPrefix"`
-	AuthAddr      string            `json:"authAddr"`
-	AuthExtra     map[string]string `json:"authExtra"`
-	MainService   string            `json:"mainService"`
-	Concurrency   int               `json:"concurrency"`
-	TimeoutSec    int               `json:"timeoutSec"`
-	ApdexT        int               `json:"apdexT"`
-}
-
-// UpgradeRequest 升级请求（Admin Push 到 Agent）。
-type UpgradeRequest struct {
-	URL     string `json:"url"`     // 新版本下载地址
-	SHA256  string `json:"sha256"`  // SHA256 校验
-	Version string `json:"version"` // 新版本号
+	TaskID            string            `json:"taskId"`
+	TaskName          string            `json:"taskName"`
+	StartNumber       int               `json:"startNumber"`
+	TotalBots         int               `json:"totalBots"`
+	AccountPrefix     string            `json:"accountPrefix"`
+	ConcurrentNum     int               `json:"concurrentNum"`
+	MainService       string            `json:"mainService"`
+	AuthAddress       string            `json:"authAddress"`
+	AuthExtra         map[string]string `json:"authExtra"`
+	HeartbeatInterval string            `json:"heartbeatInterval"`
+	TCPTimeout        string            `json:"tcpTimeout"`
+	HTTPTimeout       string            `json:"httpTimeout"`
+	ApdexT            int               `json:"apdexT"`
+	// LogLevel 可选值 debug/info/warn/error。
+	// 任务执行期间临时切换 Agent 进程日志等级，结束后自动恢复。
+	// 空字符串 = 沿用 Agent 启动时 agent-config.json 中的等级。
+	LogLevel    string   `json:"logLevel,omitempty"`
+	ConfigURL   string   `json:"configUrl"`
+	ConfigFiles []string `json:"configFiles"`
 }
 
 // AgentStatusResponse Agent 状态查询响应。

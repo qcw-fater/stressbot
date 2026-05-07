@@ -17,7 +17,8 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { historyApi, showApiError } from '@/services';
+import { ApiError, historyApi, showApiError } from '@/services';
+import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import type { HistoryRecord } from '@/types/api';
 import { HistoryDetailView } from './HistoryDetailView';
 import { HistoryCompareView } from './HistoryCompareView';
@@ -49,7 +50,13 @@ export function HistoryDrawer({ open, onClose }: HistoryDrawerProps) {
       });
       setItems(resp.items);
       setTotal(resp.total);
+      // 列表能拉到 → admin 启用了 history，更新探测状态（启动期可能未及时回写）
+      useEditorStore.getState().setHistoryEnabled(true);
     } catch (err) {
+      // HISTORY_DISABLED：把状态写回 editorStore，下次按钮直接禁用，不再重复弹错
+      if (err instanceof ApiError && err.code === 'HISTORY_DISABLED') {
+        useEditorStore.getState().setHistoryEnabled(false);
+      }
       showApiError(err);
     } finally {
       setLoading(false);
@@ -159,14 +166,18 @@ export function HistoryDrawer({ open, onClose }: HistoryDrawerProps) {
         title: '标签',
         dataIndex: 'tags',
         key: 'tags',
-        render: (tags: string[]) => (
-          <Space size={4} wrap>
-            {tags.map((t) => (
-              <Tag key={t}>{t}</Tag>
-            ))}
-            {tags.length === 0 && <span style={{ color: 'var(--text-tertiary)' }}>—</span>}
-          </Space>
-        ),
+        render: (tags: string[] | null | undefined) => {
+          // tags 可能是 null（早期归档没字段）/ undefined / [] —— 统一兜底
+          const list = tags ?? [];
+          return (
+            <Space size={4} wrap>
+              {list.map((t) => (
+                <Tag key={t}>{t}</Tag>
+              ))}
+              {list.length === 0 && <span style={{ color: 'var(--text-tertiary)' }}>—</span>}
+            </Space>
+          );
+        },
       },
       {
         title: '',

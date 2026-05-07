@@ -1654,8 +1654,7 @@ HomeShellInner (pages/EditorPage.tsx)
 └── Drawers
     ├── ResourcesDrawer  proto/lua 资源
     ├── HistoryDrawer    list / detail / compare
-    ├── AgentsDrawer     节点状态 + 单点升级
-    └── BinariesDrawer   二进制 + 滚动升级
+    └── AgentsDrawer     节点状态 + 全部停止（无升级；版本部署改为运维手动重启 Agent）
 ```
 
 ### 20.2 RuntimeMode 状态机（`services/runtimeStore.ts`）
@@ -1718,8 +1717,7 @@ edit ──[startTask]──> running ─轮询task─> task.state=stopped/faile
 |---|---|
 | ResourcesDrawer | 上传 / 删除 / 清空 / 默认基线导入；写入 IndexedDB；`protoStore.reload()` 触发提示 |
 | HistoryDrawer | list（搜索/收藏/分页） / detail（备注/标签/趋势/动作汇总/克隆/下载归档） / compare（2~5 个并排比较） |
-| AgentsDrawer | 表格（状态/任务/CPU%/MEM%/心跳） · 单点升级（按平台过滤受控 Modal） · 离线删除 |
-| BinariesDrawer | 上传（文件/版本/OS/Arch/force） · 列表 · 滚动升级 + Progress 条（每 3s 轮询，可取消） |
+| AgentsDrawer | 表格（状态/任务/CPU%/MEM%/心跳） · 「全部停止」按钮（等价于停止当前 active 任务） · 离线删除 |
 
 错误处理统一过 `services/errorHandler.ts`：通用错误 message.error；`TASK_CONFLICT` 走 Modal.confirm 让用户选择"查看运行中"或"留在编辑态"。
 

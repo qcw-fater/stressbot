@@ -11,7 +11,11 @@ func NewAssigner() *Assigner {
 }
 
 // Assign 将任务分配给可用 Agent。
-func (a *Assigner) Assign(task *Task, agents []*AgentNode) ([]Assignment, error) {
+//
+// startNumber 为账号编号起点（来自 task.Config.RobotConfig.StartNumber）。
+// 各 agent 的 Assignment.StartNumber 在该起点上累加，最终账号 =
+// AccountPrefix + (startNumber + 全局序号)。
+func (a *Assigner) Assign(task *Task, agents []*AgentNode, startNumber int) ([]Assignment, error) {
 	// 过滤可用 Agent
 	var available []*AgentNode
 	for _, ag := range agents {
@@ -36,16 +40,19 @@ func (a *Assigner) Assign(task *Task, agents []*AgentNode) ([]Assignment, error)
 		})
 	}
 
-	return a.uniformAssign(task, available), nil
+	if startNumber < 0 {
+		startNumber = 0 // 防御：负数没有业务意义，强制归 0
+	}
+	return a.uniformAssign(task, available, startNumber), nil
 }
 
-func (a *Assigner) uniformAssign(task *Task, agents []*AgentNode) []Assignment {
+func (a *Assigner) uniformAssign(task *Task, agents []*AgentNode, startNumber int) []Assignment {
 	n := len(agents)
 	base := task.TotalBots / n
 	rem := task.TotalBots % n
 
 	out := make([]Assignment, 0, n)
-	cursor := 0
+	cursor := startNumber
 
 	for i, agent := range agents {
 		bots := base

@@ -18,7 +18,6 @@ func (a *Agent) startHTTPServer() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/agent/v1/task", a.handleTaskAssign)
 	mux.HandleFunc("/agent/v1/stop", a.handleStop)
-	mux.HandleFunc("/agent/v1/upgrade", a.handleUpgrade)
 	mux.HandleFunc("/agent/v1/version", a.handleVersion)
 	mux.HandleFunc("/agent/v1/status", a.handleStatus)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -68,7 +67,7 @@ func (a *Agent) handleTaskAssign(w http.ResponseWriter, r *http.Request) {
 
 	stresslog.Info("[AGENT] 收到任务下发",
 		zap.String("taskID", task.TaskID),
-		zap.String("name", task.Name),
+		zap.String("name", task.TaskName),
 		zap.Int("totalBots", task.TotalBots),
 		zap.Int("startNumber", task.StartNumber))
 
@@ -93,36 +92,6 @@ func (a *Agent) handleStop(w http.ResponseWriter, _ *http.Request) {
 		a.taskCancel()
 	}
 	w.WriteHeader(http.StatusOK)
-}
-
-func (a *Agent) handleUpgrade(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req UpgradeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	a.mu.Lock()
-	if a.status == StatusUpgrading {
-		a.mu.Unlock()
-		http.Error(w, "upgrade already in progress", http.StatusConflict)
-		return
-	}
-	a.status = StatusUpgrading
-	a.mu.Unlock()
-
-	stresslog.Info("[AGENT] 收到升级命令",
-		zap.String("version", req.Version),
-		zap.String("url", req.URL))
-
-	w.WriteHeader(http.StatusAccepted)
-
-	utils.GetWorkPool().Go(func() { a.handleUpgradeAsync(req) })
 }
 
 func (a *Agent) handleVersion(w http.ResponseWriter, _ *http.Request) {

@@ -45,12 +45,10 @@ var (
 	ErrAgentBusy        = NewError("AGENT_BUSY", http.StatusConflict)
 	ErrAgentOffline     = NewError("AGENT_OFFLINE", http.StatusConflict)
 	ErrCapacityExceeded = NewError("CAPACITY_EXCEEDED", http.StatusBadRequest)
-	ErrUpgradeInProgress = NewError("UPGRADE_IN_PROGRESS", http.StatusConflict)
-	ErrBinaryNotFound   = NewError("BINARY_NOT_FOUND", http.StatusNotFound)
 	ErrInvalidArgument  = NewError("INVALID_ARGUMENT", http.StatusBadRequest)
 	ErrHistoryDisabled  = NewError("HISTORY_DISABLED", http.StatusServiceUnavailable)
 	ErrHistoryNotFound  = NewError("HISTORY_NOT_FOUND", http.StatusNotFound)
-	ErrStarredProtected = NewError("STARRED_PROTECTED", http.StatusConflict)
+	ErrStarredProtected = NewError("HISTORY_STARRED", http.StatusConflict)
 )
 
 // writeJSON 向 response writer 写入 JSON。

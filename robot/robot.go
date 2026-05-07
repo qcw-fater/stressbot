@@ -195,8 +195,12 @@ func (r *Robot) ConnectTCP(serviceName, address string) bool {
 
 	monitor.Global().ConnEstablished()
 
-	conn.SetOnDisconnect(func() {
+	// onClosed：主动/被动关闭都触发，仅用于监控 -1（与 ConnEstablished 配对，保证当前连接数准确）
+	conn.SetOnClosed(func() {
 		monitor.Global().ConnDropped()
+	})
+	// onDisconnect：仅意外断开触发，用于"主连接挂了就停 robot"业务判定
+	conn.SetOnDisconnect(func() {
 		if serviceName == r.mainService {
 			stresslog.Warn("[ROBOT] 主连接意外断开，停止机器人",
 				zap.Int("id", r.id), zap.String("account", r.account), zap.String("service", serviceName))
@@ -232,8 +236,10 @@ func (r *Robot) ConnectUDP(serviceName, address string) bool {
 
 	monitor.Global().ConnEstablished()
 
-	conn.SetOnDisconnect(func() {
+	conn.SetOnClosed(func() {
 		monitor.Global().ConnDropped()
+	})
+	conn.SetOnDisconnect(func() {
 		stresslog.Debug("[ROBOT] UDP 连接断开",
 			zap.Int("id", r.id), zap.String("account", r.account), zap.String("service", serviceName))
 	})
@@ -575,11 +581,26 @@ func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, responseKe
 }
 
 // HTTPPost 发送 HTTP POST 表单请求。
+//
+// baseURL 容错：
+//   - 单机 conf/config.json 通常配 "http://host:port"，scheme 完整；
+//   - Web Admin 启动时用户在 RobotConfig.authAddr 里有时只填 "host:port"，会让
+//     net/http 报 "unsupported protocol scheme"，错误被 lua 兜底变成 -1，最后业务
+//     脚本 `if code < 0 then return 1` 报"错误码 1"，根因被吞掉很难诊断。
+//   - 这里自动补 "http://" 前缀（仅当既没有 http:// 也没有 https:// 时），并把
+//     底层错误用 stresslog.Warn 显式打出来，方便用户立刻看到 baseURL 配置问题。
 func (ns *netSenderAdapter) HTTPPost(path string, formData map[string]string) (int, []byte, error) {
-	baseURL := ns.robot.authBaseURL
+	baseURL := strings.TrimSpace(ns.robot.authBaseURL)
 	if baseURL == "" {
-		return 0, nil, fmt.Errorf("目标服务地址未配置")
+		return 0, nil, fmt.Errorf("目标服务地址未配置（auth.address / RobotConfig.authAddr 为空）")
 	}
+	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
+		stresslog.Warn("[HTTP] auth 地址缺少 scheme，自动补 http://",
+			zap.String("origin", baseURL),
+			zap.String("fixed", "http://"+baseURL))
+		baseURL = "http://" + baseURL
+	}
+	baseURL = strings.TrimRight(baseURL, "/")
 
 	fullURL := baseURL
 	if !strings.HasPrefix(path, "/") {
@@ -594,6 +615,9 @@ func (ns *netSenderAdapter) HTTPPost(path string, formData map[string]string) (i
 
 	resp, err := ns.robot.httpClient.PostForm(fullURL, values)
 	if err != nil {
+		stresslog.Warn("[HTTP] POST 失败",
+			zap.String("url", fullURL),
+			zap.Error(err))
 		return 0, nil, fmt.Errorf("HTTP POST 请求失败: %w", err)
 	}
 	defer resp.Body.Close()

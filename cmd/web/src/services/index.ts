@@ -10,7 +10,6 @@ export * as tasksApi from './tasksApi';
 export * as agentsApi from './agentsApi';
 export * as metricsApi from './metricsApi';
 export * as historyApi from './historyApi';
-export * as binariesApi from './binariesApi';
 
 export { usePolling } from './usePolling';
 export type { UsePollingOptions } from './usePolling';
@@ -37,6 +36,12 @@ export type { TaskConflictHandler } from './errorHandler';
 
 export * as resourcesStore from './resourcesStore';
 export type { ResourceFile } from './resourcesStore';
+
+export {
+  collectFlowScriptNames,
+  syncFlowScriptsToIdb,
+} from './scriptSync';
+export type { ScriptSyncResult } from './scriptSync';
 
 export {
   startTask,

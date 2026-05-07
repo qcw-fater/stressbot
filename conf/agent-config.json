@@ -1,9 +1,9 @@
 {
   "bot": {
     "accountPrefix": "bot_",
-    "startNumber": 20,
-    "count": 1,
-    "concurrentNum": 0,
+    "startNumber": 1,
+    "count": 0,
+    "concurrentNum": 50,
     "mainService": "logic"
   },
   "auth": {
@@ -31,7 +31,7 @@
     "dirs": ["conf/scripts"]
   },
   "log": {
-    "path": "log/stressbot.log",
+    "path": "log/agent.log",
     "level": "info",
     "printConsole": true,
     "maxSize": 500,
@@ -42,12 +42,18 @@
   "monitor": {
     "enabled": true,
     "reportInterval": "5s",
-    "httpEnabled": true,
-    "httpPort": 6060,
-    "csvPath": "log/metrics.csv",
     "apdexT": 100
   },
   "agent": {
-    "enabled": false
+    "enabled": true,
+    "adminAddr": "http://192.168.61.161:8080",
+    "name": "",
+    "listenAddr": ":7070",
+    "maxBots": 5000,
+    "stressInterval": "5s",
+    "systemInterval": "5s",
+    "heartbeatInterval": "10s",
+    "registerRetryMaxInterval": "60s",
+    "taskWorkDir": ""
   }
 }

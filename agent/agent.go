@@ -299,6 +299,17 @@ func (a *Agent) executeTask(ctx context.Context, task *TaskAssignment) {
 
 	result, errMsg := runner.Run(taskCtx)
 
+	if result == TaskFailed {
+		stresslog.Error("[AGENT] 任务执行失败",
+			zap.String("taskID", task.TaskID),
+			zap.String("error", errMsg))
+	} else if errMsg != "" {
+		stresslog.Warn("[AGENT] 任务完成但有错误",
+			zap.String("taskID", task.TaskID),
+			zap.String("result", string(result)),
+			zap.String("error", errMsg))
+	}
+
 	// 停止 StressReporter
 	a.stressReporter.Stop()
 

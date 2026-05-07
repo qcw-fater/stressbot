@@ -106,12 +106,15 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 		recvMBps = float64(totalRecv) / 1024 / 1024 / uptimeSec
 	}
 
+	c.cfgMu.RLock()
+	apdexT := c.cfg.ApdexT
+	c.cfgMu.RUnlock()
 	snap := &CollectorSnapshot{
 		Timestamp:    time.Now(),
 		Uptime:       uptime,
 		UptimeSec:    uptimeSec,
 		TotalActions: c.totalActions.Load(),
-		ApdexT:       c.cfg.ApdexT,
+		ApdexT:       apdexT,
 		System:       sys,
 		Robots: RobotSnapshot{
 			Started: c.robotsStarted.Load(),

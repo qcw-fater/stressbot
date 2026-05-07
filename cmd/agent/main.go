@@ -10,17 +10,17 @@ import (
 	"syscall"
 	"time"
 
-	stresslog "stressbot/utils/log"
-
-	"go.uber.org/zap"
-
 	"stressbot/adapter"
 	"stressbot/agent"
 	"stressbot/engine"
 	"stressbot/monitor"
 	"stressbot/network"
 	"stressbot/protox"
+	"stressbot/robot"
 	"stressbot/script"
+	stresslog "stressbot/utils/log"
+
+	"go.uber.org/zap"
 )
 
 // Version 编译时注入：-ldflags "-X main.Version=v1.0.0"
@@ -114,13 +114,14 @@ func main() {
 	}
 }
 
+// ── Agent 模式 ──────────────────────────────────────────
+
 func runAgentMode(cfg *Config) {
 	resolved, err := cfg.Agent.Resolve()
 	if err != nil {
 		stresslog.Fatal("Agent 配置校验失败", zap.Error(err))
 	}
 
-	// 初始化监控
 	monitor.Init(monitor.CollectorConfig{
 		Enabled:        true,
 		ApdexT:         cfg.Monitor.ApdexT,
@@ -132,13 +133,12 @@ func runAgentMode(cfg *Config) {
 		stresslog.Fatal("创建 Agent 失败", zap.Error(err))
 	}
 
-	// 检查是否是升级后的首次启动
-	a.MarkSuccess()
-
 	if err := a.Run(); err != nil {
 		stresslog.Fatal("Agent 运行失败", zap.Error(err))
 	}
 }
+
+// ── 单机模式 ──────────────────────────────────────────────
 
 func runStandalone(cfg *Config) {
 	// 加载协议适配器
@@ -156,7 +156,7 @@ func runStandalone(cfg *Config) {
 	}
 
 	registry := protox.NewRegistry(files)
-	_ = protox.NewFactory(registry) // TODO: standalone 模式完整集成时使用
+	factory := protox.NewFactory(registry)
 
 	// 加载流程配置
 	flow, err := loadFlow(cfg.Flow)
@@ -208,11 +208,24 @@ func runStandalone(cfg *Config) {
 		stresslog.Info("[MAIN] Lua 脚本已预编译", zap.Int("count", len(luaPool.ListScripts())))
 	}
 
-	mgrCfg := robotManagerConfig(cfg, tcpTimeout, httpTimeout)
+	mgrCfg := robot.ManagerConfig{
+		AccountPrefix:  cfg.Bot.AccountPrefix,
+		StartNumber:    cfg.Bot.StartNumber,
+		Count:          cfg.Bot.Count,
+		ConcurrentNum:  cfg.Bot.ConcurrentNum,
+		AuthBaseURL:    cfg.Auth.Address,
+		AuthExtra:      cfg.Auth.Extra,
+		Adapter:        adp,
+		RequestTimeout: tcpTimeout,
+		MainService:    cfg.Bot.MainService,
+		HTTPTimeout:    httpTimeout,
+	}
 
-	// 创建 Manager（注意：这里用 robot 包，需要 import）
-	// 为了避免循环引用，standalone 模式保持使用现有的 robot.Manager
-	_ = mgrCfg // TODO: 复用 robot/manager.go
+	mgr := robot.NewManager(mgrCfg, flow, factory, dialer, luaPool)
+
+	if err := mgr.StartAll(); err != nil {
+		stresslog.Fatal("启动机器人失败", zap.Error(err))
+	}
 
 	// 启动监控 Reporter 和 HTTP
 	var reporter *monitor.Reporter
@@ -242,6 +255,8 @@ func runStandalone(cfg *Config) {
 		reporter.Stop()
 	}
 
+	mgr.StopAll()
+
 	if cfg.Monitor.Enabled {
 		csvPath := cfg.Monitor.CsvPath
 		if csvPath == "" {
@@ -258,39 +273,7 @@ func runStandalone(cfg *Config) {
 	stresslog.Info("[MAIN] 已退出")
 }
 
-func robotManagerConfig(cfg *Config, tcpTimeout, httpTimeout time.Duration) struct {
-	AccountPrefix  string
-	StartNumber    int
-	Count          int
-	ConcurrentNum  int
-	AuthBaseURL    string
-	AuthExtra      map[string]string
-	RequestTimeout time.Duration
-	MainService    string
-	HTTPTimeout    time.Duration
-} {
-	return struct {
-		AccountPrefix  string
-		StartNumber    int
-		Count          int
-		ConcurrentNum  int
-		AuthBaseURL    string
-		AuthExtra      map[string]string
-		RequestTimeout time.Duration
-		MainService    string
-		HTTPTimeout    time.Duration
-	}{
-		AccountPrefix:  cfg.Bot.AccountPrefix,
-		StartNumber:    cfg.Bot.StartNumber,
-		Count:          cfg.Bot.Count,
-		ConcurrentNum:  cfg.Bot.ConcurrentNum,
-		AuthBaseURL:    cfg.Auth.Address,
-		AuthExtra:      cfg.Auth.Extra,
-		RequestTimeout: tcpTimeout,
-		MainService:    cfg.Bot.MainService,
-		HTTPTimeout:    httpTimeout,
-	}
-}
+// ── 通用工具 ──────────────────────────────────────────────
 
 func loadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)

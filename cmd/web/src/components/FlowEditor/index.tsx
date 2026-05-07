@@ -5,7 +5,7 @@
  * 后续接 onSave / metricsProvider 等 props（Phase 11 收口）。
  */
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { FlowCanvas } from './FlowCanvas';
 import { Toolbar } from './panels/Toolbar';
 import { NodePalette } from './panels/NodePalette';
@@ -23,6 +23,7 @@ import { FlowReadOnlyContext } from './flowReadOnlyContext';
 import { App as AntApp } from 'antd';
 import { useFlowStore } from './store/flowStore';
 import { useProtoStore } from './proto/protoStore';
+import { syncFlowScriptsToIdb } from '@/services/scriptSync';
 import type { TaskFlow } from '@/types/flow';
 import type { FlowLayout } from '@/types/editor';
 
@@ -64,7 +65,13 @@ function FlowEditorInner({
   const [validationOpen, setValidationOpen] = useState(false);
   const { notification } = AntApp.useApp();
 
-  useEffect(() => {
+  // 同步推送 metricsProvider 到全局 useMetricsStore：必须用 useLayoutEffect 而非 useEffect。
+  //   - useEffect 在 paint 之后异步执行；启动新任务时 EditorPage 会先把 latestStress 清成 null，
+  //     useMemo 重算 metricsProvider=undefined，但浏览器还是会先按"旧 provider"画一帧
+  //     节点上的 p99/apdex/边框，下一拍才被清掉 → 用户看到的"残留" 1~2 帧。
+  //   - useLayoutEffect 在 commit 后、paint 前同步执行，setProvider(undefined) 立即生效，
+  //     paint 时所有 NodeShell/MetricsBadge 拿到的都是新值，不会出现残留闪烁。
+  useLayoutEffect(() => {
     setMetricsProvider(metricsProvider);
     return () => setMetricsProvider(undefined);
   }, [metricsProvider, setMetricsProvider]);
@@ -131,7 +138,11 @@ function FlowEditorInner({
         const res = await fetch('/conf/flow.json');
         if (!res.ok) return;
         const flow = (await res.json()) as TaskFlow;
-        if (!cancelled) loadFromTaskFlow(flow);
+        if (cancelled) return;
+        loadFromTaskFlow(flow);
+        // 把默认 flow 引用的 lua 自动复制到 IDB，方便用户后续编辑保留
+        // （IDB 已有则不覆盖；拉不到的不报错，留给用户手动处理）
+        void syncFlowScriptsToIdb(flow);
       } catch {
         // 静默：未挂载 conf/ 时不报错
       }
@@ -146,17 +157,21 @@ function FlowEditorInner({
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
         <Toolbar onOpenValidation={() => setValidationOpen(true)} extra={topbarExtra} />
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-          <div
-            style={{
-              width: 240,
-              borderRight: '1px solid var(--border-color, rgba(0,0,0,0.06))',
-              background: 'var(--bg-panel)',
-              opacity: readOnly ? 0.5 : 1,
-              pointerEvents: readOnly ? 'none' : 'auto',
-            }}
-          >
-            <NodePalette />
-          </div>
+          {/* 只读模式（运行 / 查看 / finalReport）下完全隐藏 NodePalette：
+              这些模式下不能拖入新节点，画布也是只读，留着只是"灰底占位"
+              意义不大；隐藏后画布占满宽度，监控信息更易读。
+              切回 edit 模式时自动重新挂载，无状态丢失。 */}
+          {!readOnly && (
+            <div
+              style={{
+                width: 240,
+                borderRight: '1px solid var(--border-color, rgba(0,0,0,0.06))',
+                background: 'var(--bg-panel)',
+              }}
+            >
+              <NodePalette />
+            </div>
+          )}
           <div style={{ flex: 1, minWidth: 0 }}>
             <FlowCanvas />
           </div>

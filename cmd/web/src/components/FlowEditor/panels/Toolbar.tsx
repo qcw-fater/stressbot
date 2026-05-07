@@ -37,6 +37,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useFlowStore } from '../store/flowStore';
 import { useEditorStore } from '../store/editorStore';
 import { useProtoStore } from '../proto/protoStore';
+import { syncFlowScriptsToIdb } from '@/services/scriptSync';
 import type { TaskFlow } from '@/types/flow';
 
 export interface ToolbarProps {
@@ -80,6 +81,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
       const parsed = JSON.parse(text) as TaskFlow;
       loadFromTaskFlow(parsed);
       message.success(`已加载 ${file.name}`);
+      void syncScriptsAfterLoad(parsed, '导入');
     } catch (e) {
       message.error(`导入失败：${(e as Error).message}`);
     }
@@ -105,8 +107,37 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
       const flow = (await res.json()) as TaskFlow;
       loadFromTaskFlow(flow);
       message.success('已加载 conf/flow.json');
+      void syncScriptsAfterLoad(flow, '加载');
     } catch (e) {
       message.error(`加载失败：${(e as Error).message}`);
+    }
+  };
+
+  /**
+   * 加载/导入 flow 后自动把引用的 lua 脚本同步到 IDB。
+   * - 静默 skipped（已在 IDB），只对 added / missing 给提示；
+   * - missing 用 warning（不阻塞，用户也许稍后会手敲）；
+   * - added 用 info（解释清楚为什么 IDB 突然多出几个文件）；
+   * - 任何异常都吞掉，不影响加载主流程。
+   */
+  const syncScriptsAfterLoad = async (flow: TaskFlow, action: '导入' | '加载') => {
+    try {
+      const { added, missing } = await syncFlowScriptsToIdb(flow);
+      if (added.length > 0) {
+        message.info(
+          `${action}流程时自动复制 ${added.length} 个 lua 脚本到本地：${added.join(', ')}`,
+          5,
+        );
+      }
+      if (missing.length > 0) {
+        message.warning(
+          `${missing.length} 个被引用的 lua 脚本不存在于 conf/scripts/，` +
+            `启动任务前请到「资源管理」上传或在动作里手写：${missing.join(', ')}`,
+          8,
+        );
+      }
+    } catch {
+      // 同步失败不阻塞主流程
     }
   };
 

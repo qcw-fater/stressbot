@@ -9,24 +9,29 @@
  * 模式切换：
  *   - edit：显示集群在线/可用容量；启动按钮高亮；
  *   - running / viewActive：显示任务名 + state 徽章；停止按钮（仅 owned 强提示，viewActive 也可点但服务端会拒）；
- *   - finalReport：banner + 查看历史 / 恢复编辑稿 / 新建任务。
+ *   - finalReport：banner + 「返回编辑」（主操作）+ 「恢复编辑稿」（仅有 stash 时显示）。
+ *     - 「返回编辑」detachFromActive() → mode='edit'，画布与最后一份监控快照原样保留；
+ *     - 「恢复编辑稿」仅在 attachToActive 路径写过 stash 时才出现，避免空按钮误导；
+ *     - 「查看历史」「新建」不在这里显示——前者与右侧"历史"按钮重复且 HISTORY_DISABLED
+ *       时会报错，后者属于低频清空操作，可在 edit 模式下走通用流程。
  */
 
 import {
   ApiOutlined,
   BgColorsOutlined,
   BranchesOutlined,
-  CloudUploadOutlined,
+  BugOutlined,
+  CheckCircleOutlined,
   DatabaseOutlined,
+  EditOutlined,
   HistoryOutlined,
   LinkOutlined,
   PlayCircleOutlined,
-  ReloadOutlined,
   SettingOutlined,
   StopOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
-import { App as AntApp, Badge, Button, Divider, Popover, Space, Switch, Tag, Tooltip, Typography } from 'antd';
+import { App as AntApp, Badge, Button, Divider, Popover, Segmented, Space, Switch, Tag, Tooltip, Typography } from 'antd';
 import { useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import {
@@ -44,7 +49,6 @@ export interface RuntimeBarProps {
   onOpenResources?: () => void;
   onOpenHistory?: () => void;
   onOpenAgents?: () => void;
-  onOpenBinaries?: () => void;
 }
 
 const SECTION_DIVIDER = (
@@ -64,7 +68,6 @@ export function RuntimeBar({
   onOpenResources,
   onOpenHistory,
   onOpenAgents,
-  onOpenBinaries,
 }: RuntimeBarProps) {
   const { modal } = AntApp.useApp();
 
@@ -75,7 +78,6 @@ export function RuntimeBar({
     agents,
     connectionLost,
     detachFromActive,
-    reset,
   } = useRuntimeStore(
     useShallow((s) => ({
       mode: s.mode,
@@ -84,18 +86,20 @@ export function RuntimeBar({
       agents: s.agents,
       connectionLost: s.connectionLost,
       detachFromActive: s.detachFromActive,
-      reset: s.reset,
     })),
   );
 
   // 设置 Popover 用到的 UI 状态 + 打开协议适配器面板的 setter
-  const { theme, setTheme, showListenEdges, toggleListenEdges, setActivePanel } = useEditorStore(
+  const { theme, setTheme, showListenEdges, toggleListenEdges, setActivePanel, debugMode, setDebugMode, historyEnabled } = useEditorStore(
     useShallow((s) => ({
       theme: s.theme,
       setTheme: s.setTheme,
       showListenEdges: s.showListenEdges,
       toggleListenEdges: s.toggleListenEdges,
       setActivePanel: s.setActivePanel,
+      debugMode: s.debugMode,
+      setDebugMode: s.setDebugMode,
+      historyEnabled: s.historyEnabled,
     })),
   );
 
@@ -127,22 +131,21 @@ export function RuntimeBar({
     });
   };
 
-  const handleNewTask = () => {
-    modal.confirm({
-      title: '新建任务？',
-      content: '当前画布与运行态数据将被清空，是否继续？',
-      onOk: () => reset(),
-    });
-  };
-
   const handleRestore = () => {
     if (restoreStashedDraft()) {
       detachFromActive();
     }
   };
 
+  // 「返回编辑」：纯状态机切换，不动画布也不动监控数据。
+  // 适用场景：自己启动的任务结束后想接着改流程；attach 别人的任务结束后不需要恢复 stash。
+  // 与 reset() 的区别：reset 会清空画布、表单与监控；这里只负责退出"只读 + 监控"。
+  const handleBackToEdit = () => {
+    detachFromActive();
+  };
+
   const settingsContent = (
-    <Space direction="vertical" size={10} style={{ minWidth: 220 }}>
+    <Space direction="vertical" size={10} style={{ minWidth: 240 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <Space size={6}>
           <BgColorsOutlined style={{ color: 'var(--text-secondary)' }} />
@@ -165,6 +168,52 @@ export function RuntimeBar({
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
         action 与 CallbackCard 之间的虚线
       </Typography.Text>
+      {/* 运行模式：测试 ↔ 调试 二选一。
+          - 测试（默认）：用户填写的完整配置 + 启用容量预检 + 默认日志级别；
+          - 调试：自动装填 1 个机器人/并发 1 + 跳过容量预检 + log=debug。
+          颜色与 RuntimeBar 状态徽章 / TaskStartModal 中的提示一致：
+          调试=紫色（BugOutlined），测试=蓝色（CheckCircleOutlined）。 */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <Space size={6}>
+          {debugMode ? (
+            <BugOutlined style={{ color: '#9254de' }} />
+          ) : (
+            <CheckCircleOutlined style={{ color: '#1677ff' }} />
+          )}
+          <span>运行模式</span>
+        </Space>
+        <Segmented
+          size="small"
+          block
+          value={debugMode ? 'debug' : 'test'}
+          onChange={(v) => setDebugMode(v === 'debug')}
+          options={[
+            {
+              label: (
+                <span style={{ color: !debugMode ? '#1677ff' : undefined, fontWeight: !debugMode ? 600 : undefined }}>
+                  <CheckCircleOutlined style={{ marginRight: 4 }} />
+                  测试
+                </span>
+              ),
+              value: 'test',
+            },
+            {
+              label: (
+                <span style={{ color: debugMode ? '#9254de' : undefined, fontWeight: debugMode ? 600 : undefined }}>
+                  <BugOutlined style={{ marginRight: 4 }} />
+                  调试
+                </span>
+              ),
+              value: 'debug',
+            },
+          ]}
+        />
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          {debugMode
+            ? '调试：自动装填 1 个机器人 / 并发 1，跳过容量预检，日志级别 debug'
+            : '测试：使用你填写的完整配置，启用容量预检与默认日志级别'}
+        </Typography.Text>
+      </div>
     </Space>
   );
 
@@ -182,6 +231,29 @@ export function RuntimeBar({
           >
             集群 {onlineAgents}/{safeAgents.length} · 可用 {availableBots}
           </Tag>
+        </Tooltip>
+      )}
+      {/* 模式标识：测试 vs 调试 互斥
+          - debugMode=true  → 紫色"调试"标签：装填小数据 + 跳过容量预检 + log=debug；
+          - debugMode=false → 蓝色"测试"标签（默认）：保留用户填写的全量配置，按容量预检与日志级别。
+          颜色与 设置 Popover / TaskStartModal 中保持一致，让用户一眼看到当前是哪种模式。 */}
+      {mode === 'edit' && (
+        <Tooltip
+          title={
+            debugMode
+              ? '调试模式：启动跳过容量预检 + 自动装填 1 个机器人 / 并发 1 + 日志级别 debug。点击"设置"可切换到测试模式'
+              : '测试模式：使用你填写的完整配置，启用容量预检与默认日志级别。点击"设置"可切换到调试模式'
+          }
+        >
+          {debugMode ? (
+            <Tag icon={<BugOutlined />} color="purple" style={{ margin: 0 }}>
+              调试
+            </Tag>
+          ) : (
+            <Tag icon={<CheckCircleOutlined />} color="blue" style={{ margin: 0 }}>
+              测试
+            </Tag>
+          )}
         </Tooltip>
       )}
       {(mode === 'running' || mode === 'viewActive') && activeTask && (
@@ -234,23 +306,18 @@ export function RuntimeBar({
         </Tooltip>
       )}
       {mode === 'finalReport' && (
-        <Space.Compact>
-          <Tooltip title="查看本次任务的归档详情">
-            <Button icon={<HistoryOutlined />} onClick={onOpenHistory}>
-              查看历史
+        <Space size={4}>
+          <Tooltip title="退出监控状态，画布与最后一份监控数据保留，可继续修改流程">
+            <Button type="primary" icon={<EditOutlined />} onClick={handleBackToEdit}>
+              返回编辑
             </Button>
           </Tooltip>
-          <Tooltip title={hasStashedDraft() ? '从 LocalStorage 还原进入运行前的本地稿' : '没有暂存的本地稿'}>
-            <Button disabled={!hasStashedDraft()} onClick={handleRestore}>
-              恢复编辑稿
-            </Button>
-          </Tooltip>
-          <Tooltip title="清空当前画布与运行态">
-            <Button icon={<ReloadOutlined />} onClick={handleNewTask}>
-              新建
-            </Button>
-          </Tooltip>
-        </Space.Compact>
+          {hasStashedDraft() && (
+            <Tooltip title="从 LocalStorage 还原「查看运行中」之前缓存的本地稿">
+              <Button onClick={handleRestore}>恢复编辑稿</Button>
+            </Tooltip>
+          )}
+        </Space>
       )}
 
       {SECTION_DIVIDER}
@@ -272,22 +339,29 @@ export function RuntimeBar({
             资源
           </Button>
         </Tooltip>
-        <Tooltip title="历史压测记录">
-          <Button icon={<HistoryOutlined />} onClick={onOpenHistory}>
+        <Tooltip
+          title={
+            historyEnabled === false
+              ? '历史压测记录（admin 未启用 history 模块，请配置 MySQL）'
+              : '历史压测记录'
+          }
+        >
+          {/* 历史模块需要 admin 配 MySQL；未启用时禁用按钮，避免点完才弹 HISTORY_DISABLED。
+              historyEnabled === null 表示尚未探测完，不主动禁用，避免冷启动期间整列灰着。 */}
+          <Button
+            icon={<HistoryOutlined />}
+            onClick={onOpenHistory}
+            disabled={historyEnabled === false}
+          >
             历史
           </Button>
         </Tooltip>
-        <Tooltip title="Agent 节点管理">
+        <Tooltip title="Agent 节点管理 / 批量停止">
           <Badge count={unhealthyCount} size="small" offset={[-4, 4]}>
             <Button icon={<ApiOutlined />} onClick={onOpenAgents}>
               节点
             </Button>
           </Badge>
-        </Tooltip>
-        <Tooltip title="二进制 / 升级管理">
-          <Button icon={<CloudUploadOutlined />} onClick={onOpenBinaries}>
-            升级
-          </Button>
         </Tooltip>
       </Space>
 

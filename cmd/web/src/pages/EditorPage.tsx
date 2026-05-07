@@ -18,6 +18,7 @@ import {
   ApiError,
   agentsApi,
   buildNodeMetricsMap,
+  historyApi,
   makeMetricsProvider,
   metricsApi,
   pollingPolicy,
@@ -29,16 +30,16 @@ import {
   useRuntimeStore,
   usePolling,
 } from '@/services';
+import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { FlowEditor } from '@/components/FlowEditor';
 import { useFlowStore } from '@/components/FlowEditor/store/flowStore';
 import { ResourcesDrawer } from '@/components/modules/ResourcesDrawer';
 import { AgentsDrawer } from '@/components/modules/AgentsDrawer';
-import { BinariesDrawer } from '@/components/modules/BinariesDrawer';
 import { HistoryDrawer } from '@/components/modules/history/HistoryDrawer';
 import { ActiveTaskGuardModal } from '@/components/runtime/ActiveTaskGuardModal';
 import { RuntimeBar } from '@/components/runtime/RuntimeBar';
 import { MonitorDock } from '@/components/monitoring/MonitorDock';
-import type { TaskBrief } from '@/types/api';
+import type { RobotConfig, TaskBrief } from '@/types/api';
 
 export function EditorPage() {
   return (
@@ -87,7 +88,6 @@ function HomeShellInner() {
   const [resourcesOpen, setResourcesOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(false);
-  const [binariesOpen, setBinariesOpen] = useState(false);
   const [guardTask, setGuardTask] = useState<TaskBrief | null>(null);
   const [booting, setBooting] = useState(true);
   const policy = useMemo(() => pollingPolicy(mode), [mode]);
@@ -108,12 +108,35 @@ function HomeShellInner() {
     return () => registerTaskConflictHandler(null);
   }, []);
 
-  // 启动检测：是否已有 active 任务
+  // 启动检测：是否已有 active 任务 + 同步默认 RobotConfig。
+  //
+  // RobotConfig 引导：从 /conf/config.json 读取单机配置作为默认值。
+  //   - 仅在用户当前字段仍是开箱占位时才覆盖（避免覆盖用户手改）；
+  //   - 失败静默：未挂载 conf/ 时维持开箱默认；
+  //   - 这一步必须放在 startTask 之前，否则前端默认值（authAddr 是 127.0.0.1、
+  //     authExtra 是 {} 等）会被下发到 agent，导致 lua 脚本鉴权失败。
   useEffect(() => {
     if (bootRef.current) return;
     bootRef.current = true;
     (async () => {
       try {
+        // 1. 同步 RobotConfig（不阻塞 listTasks）
+        void syncDefaultRobotConfigFromConf();
+        // 2. 探测 history 模块是否启用：admin 未配 MySQL 时 listHistory 会返回 HISTORY_DISABLED。
+        //    用 limit=1 最小开销探测一次，结果写到 editorStore.historyEnabled，
+        //    RuntimeBar/HistoryDrawer 据此决定按钮是否禁用，避免用户点了才弹错。
+        void historyApi
+          .listHistory({ limit: 1 })
+          .then(() => useEditorStore.getState().setHistoryEnabled(true))
+          .catch((err) => {
+            if (err instanceof ApiError && err.code === 'HISTORY_DISABLED') {
+              useEditorStore.getState().setHistoryEnabled(false);
+            } else {
+              // 其它错误（404/500/网络）也按"不可用"处理，但不影响主流程
+              useEditorStore.getState().setHistoryEnabled(false);
+            }
+          });
+        // 3. 检测远端 active 任务
         const list = await tasksApi.listTasks();
         const active = list.items.find((t) =>
           t.state === 'starting' || t.state === 'running' || t.state === 'stopping',
@@ -219,7 +242,6 @@ function HomeShellInner() {
               onOpenResources={() => setResourcesOpen(true)}
               onOpenHistory={() => setHistoryOpen(true)}
               onOpenAgents={() => setAgentsOpen(true)}
-              onOpenBinaries={() => setBinariesOpen(true)}
             />
           }
         />
@@ -227,15 +249,7 @@ function HomeShellInner() {
       <MonitorDock />
       <ResourcesDrawer open={resourcesOpen} onClose={() => setResourcesOpen(false)} />
       <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} />
-      <AgentsDrawer
-        open={agentsOpen}
-        onClose={() => setAgentsOpen(false)}
-        onOpenBinaries={() => {
-          setAgentsOpen(false);
-          setBinariesOpen(true);
-        }}
-      />
-      <BinariesDrawer open={binariesOpen} onClose={() => setBinariesOpen(false)} />
+      <AgentsDrawer open={agentsOpen} onClose={() => setAgentsOpen(false)} />
       <ActiveTaskGuardModal
         open={guardTask !== null}
         task={guardTask}
@@ -244,4 +258,115 @@ function HomeShellInner() {
       />
     </div>
   );
+}
+
+/**
+ * 从 /conf/config.json 读取单机配置作为前端 RobotConfig 默认值的引导。
+ *
+ * 字段映射（仅在用户当前值还是占位默认时才覆盖）：
+ *   conf/config.json                     → RobotConfig
+ *   ─────────────────────────────────────────────────────
+ *   auth.address                         → authAddr
+ *   bot.accountPrefix                    → accountPrefix
+ *   bot.startNumber                      → startNumber
+ *   bot.mainService                      → mainService
+ *   bot.concurrentNum                    → concurrency
+ *   network.heartbeatInterval ("5s")     → heartbeatSec
+ *   network.tcpTimeout ("60s")           → timeoutSec
+ *   network.httpTimeout ("10s")          → httpTimeoutSec
+ *   monitor.apdexT                       → apdexT
+ *
+ * **不同步** auth.extra：
+ *   该字段是 Auth 请求的扩展键值集合（version/channel/platform 等），
+ *   单机模式下确实需要，但 Web 模式下用户的诉求是"完全手动控制"——
+ *   单机配置里写什么是单机部署的事，Web 端不应该把它当默认值悄悄填上去。
+ *   如有需要用户自行在"高级设置 → 添加字段"里加。
+ *
+ * 失败静默：未挂载 conf/ 时维持开箱默认。
+ */
+async function syncDefaultRobotConfigFromConf(): Promise<void> {
+  // 这些是 runtimeStore 中开箱默认值；用户改过就不会等于这些值。
+  const PLACEHOLDERS = {
+    authAddr: 'http://127.0.0.1:20000',
+    accountPrefix: 'bot_',
+    startNumber: 0,
+    mainService: 'logic',
+    concurrency: 50,
+    timeoutSec: 60,
+    heartbeatSec: 5,
+    httpTimeoutSec: 10,
+    apdexT: 100,
+  } as const;
+
+  try {
+    const r = await fetch('/conf/config.json');
+    if (!r.ok) return;
+    const cfg = (await r.json()) as {
+      auth?: { address?: string };
+      bot?: { accountPrefix?: string; startNumber?: number; mainService?: string; concurrentNum?: number };
+      network?: { heartbeatInterval?: string; tcpTimeout?: string; httpTimeout?: string };
+      monitor?: { apdexT?: number };
+    };
+
+    const cur = useRuntimeStore.getState().robotConfig;
+    const patch: Partial<RobotConfig> = {};
+
+    // 字符串：cur 等于占位时才填入
+    const addr = cfg.auth?.address?.trim();
+    if (addr && cur.authAddr.trim() === PLACEHOLDERS.authAddr) patch.authAddr = addr;
+
+    const ap = cfg.bot?.accountPrefix?.trim();
+    if (ap && (cur.accountPrefix ?? '') === PLACEHOLDERS.accountPrefix) patch.accountPrefix = ap;
+
+    const ms = cfg.bot?.mainService?.trim();
+    if (ms && (cur.mainService ?? '') === PLACEHOLDERS.mainService) patch.mainService = ms;
+
+    // 注意：auth.extra 不同步（用户诉求"完全手动控制"，详见上方文档注释）。
+
+    // int：cur 等于占位时才填入
+    if (typeof cfg.bot?.startNumber === 'number' && (cur.startNumber ?? 0) === PLACEHOLDERS.startNumber) {
+      patch.startNumber = cfg.bot.startNumber;
+    }
+    if (typeof cfg.bot?.concurrentNum === 'number' && cur.concurrency === PLACEHOLDERS.concurrency) {
+      patch.concurrency = cfg.bot.concurrentNum;
+    }
+    const tcpSec = parseDurationSeconds(cfg.network?.tcpTimeout);
+    if (tcpSec && cur.timeoutSec === PLACEHOLDERS.timeoutSec) patch.timeoutSec = tcpSec;
+
+    const hbSec = parseDurationSeconds(cfg.network?.heartbeatInterval);
+    if (hbSec && (cur.heartbeatSec ?? 0) === PLACEHOLDERS.heartbeatSec) patch.heartbeatSec = hbSec;
+
+    const httpSec = parseDurationSeconds(cfg.network?.httpTimeout);
+    if (httpSec && (cur.httpTimeoutSec ?? 0) === PLACEHOLDERS.httpTimeoutSec) patch.httpTimeoutSec = httpSec;
+
+    if (typeof cfg.monitor?.apdexT === 'number' && (cur.apdexT ?? 0) === PLACEHOLDERS.apdexT) {
+      patch.apdexT = cfg.monitor.apdexT;
+    }
+
+    if (Object.keys(patch).length > 0) {
+      useRuntimeStore.getState().setRobotConfig(patch);
+    }
+  } catch {
+    // 静默：开发期可能没挂 conf，生产期 admin 会自己提供默认值
+  }
+}
+
+/** 把 Go duration 字符串（"5s" / "100ms" / "1m"）粗略转秒，失败/0/<1s 返回 0 */
+function parseDurationSeconds(s: string | undefined): number {
+  if (!s) return 0;
+  const m = /^(\d+(?:\.\d+)?)(ms|s|m|h)$/.exec(s.trim());
+  if (!m) return 0;
+  const n = parseFloat(m[1]);
+  switch (m[2]) {
+    case 'ms':
+      return Math.round(n / 1000);
+    case 's':
+      return Math.round(n);
+    case 'm':
+      return Math.round(n * 60);
+    case 'h':
+      return Math.round(n * 3600);
+    default:
+      return 0;
+  }
 }

@@ -6,8 +6,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
+
+func normalizeAddr(addr string) string {
+	addr = strings.TrimPrefix(addr, "http://")
+	addr = strings.TrimPrefix(addr, "https://")
+	return addr
+}
 
 // AgentDispatcher Admin → Agent HTTP 通信。
 type AgentDispatcher struct {
@@ -30,11 +37,6 @@ func (d *AgentDispatcher) Stop(addr, taskID string) error {
 	return d.post(addr, "/agent/v1/stop", map[string]string{"taskId": taskID}, 2)
 }
 
-// Upgrade 向 Agent 发送升级命令。
-func (d *AgentDispatcher) Upgrade(addr string, req UpgradeRequest) error {
-	return d.post(addr, "/agent/v1/upgrade", req, 2)
-}
-
 // Version 查询 Agent 版本。
 func (d *AgentDispatcher) Version(addr string) (string, error) {
 	resp, err := d.get(addr, "/agent/v1/version")
@@ -53,7 +55,7 @@ func (d *AgentDispatcher) Version(addr string) (string, error) {
 
 func (d *AgentDispatcher) post(addr, path string, body any, retries int) error {
 	backoff := 1 * time.Second
-	url := fmt.Sprintf("http://%s%s", addr, path)
+	url := fmt.Sprintf("http://%s%s", normalizeAddr(addr), path)
 
 	for i := 0; i <= retries; i++ {
 		var bodyReader io.Reader
@@ -103,6 +105,6 @@ func (d *AgentDispatcher) post(addr, path string, body any, retries int) error {
 }
 
 func (d *AgentDispatcher) get(addr, path string) (*http.Response, error) {
-	url := fmt.Sprintf("http://%s%s", addr, path)
+	url := fmt.Sprintf("http://%s%s", normalizeAddr(addr), path)
 	return d.httpClient.Get(url)
 }

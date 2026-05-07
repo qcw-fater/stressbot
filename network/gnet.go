@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"stressbot/monitor"
 	stresslog "stressbot/utils/log"
 
 	"github.com/panjf2000/gnet/v2"
@@ -114,6 +115,10 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 			stresslog.Error("[GNET] 读取消息失败", zap.Error(err))
 			return gnet.None
 		}
+		// 全局带宽统计：所有真实入站字节都计入（含心跳应答、监听推送、未匹配响应等）。
+		// 与 connection.Send 的出站统计配对，monitor 拿到的是"网卡级"双向流量，
+		// 不再因为只算 RecordAction success 路径而严重低估甚至显示 0。
+		monitor.Global().AddBandwidth(0, int64(totalLen))
 
 		if conn != nil {
 			secretKey := conn.GetSecretKey()

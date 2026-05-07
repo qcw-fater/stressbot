@@ -1,18 +1,12 @@
 /**
- * Agent 管理 + 升级 API 封装（对应 docs/api-monitor.md §6 / §9）。
+ * Agent 管理 API 封装（对应 docs/api-monitor.md §6）。
+ *
+ * 升级相关接口已废弃：版本更新通过手动重启 Agent 完成，无需前端介入。
+ * 仅保留：列表 / 详情 / 强制注销（仅 offline）。
  */
 
-import { adaptList, del, getJson, postJson } from './api';
-import type {
-  AgentBrief,
-  AgentDetail,
-  AgentsListResponse,
-  UpgradeAllRequest,
-  UpgradeAllResponse,
-  UpgradeRequest,
-  UpgradeResponse,
-  UpgradeStatus,
-} from '@/types/api';
+import { adaptList, del, getJson } from './api';
+import type { AgentBrief, AgentDetail, AgentsListResponse } from '@/types/api';
 
 /**
  * 后端目前直接返回 `[]AgentBrief`，前端包装为 `{items}`。
@@ -28,20 +22,4 @@ export function getAgent(id: string): Promise<AgentDetail> {
 
 export function deleteAgent(id: string): Promise<void> {
   return del<void>(`/agents/${encodeURIComponent(id)}`);
-}
-
-export function upgradeAgent(id: string, req: UpgradeRequest): Promise<UpgradeResponse> {
-  return postJson<UpgradeResponse>(`/agents/${encodeURIComponent(id)}/upgrade`, req);
-}
-
-export function upgradeAll(req: UpgradeAllRequest): Promise<UpgradeAllResponse> {
-  return postJson<UpgradeAllResponse>('/agents/upgrade-all', req);
-}
-
-export function getUpgradeStatus(): Promise<UpgradeStatus> {
-  return getJson<UpgradeStatus>('/agents/upgrade-status');
-}
-
-export function cancelUpgrade(): Promise<void> {
-  return postJson<void>('/agents/upgrade-cancel');
 }

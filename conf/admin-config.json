@@ -21,12 +21,12 @@
   },
 
   "history": {
-    "enabled": false,
+    "enabled": true,
     "samplerInterval": "10s",
     "retentionDays": 90,
     "pruneRunAt": "03:00",
     "mysql": {
-      "dsn": "admin:password@tcp(192.168.8.219:3306)/jump-test?parseTime=true&loc=Local",
+      "dsn": "root:123456@tcp(192.168.8.219:3306)/jump-test?parseTime=true&loc=Local",
       "maxOpenConns": 10,
       "maxIdleConns": 5,
       "connMaxLifetime": "1h"

@@ -16,7 +16,6 @@ type Config struct {
 
 	AgentRegistry RegistryConfig `json:"agentRegistry"`
 	Task          TaskSection    `json:"task"`
-	Upgrade       UpgradeConfig  `json:"upgrade"`
 	History       HistoryConfig  `json:"history"`
 	Log           LogConfig      `json:"log"`
 }
@@ -28,13 +27,7 @@ type RegistryConfig struct {
 
 type TaskSection struct {
 	MaxFlowSizeMB   int    `json:"maxFlowSizeMB"`
-	MaxBinarySizeMB int    `json:"maxBinarySizeMB"`
 	DeadlineDefault string `json:"deadlineDefault"`
-}
-
-type UpgradeConfig struct {
-	RolloutDelay    string `json:"rolloutDelay"`
-	PerAgentTimeout string `json:"perAgentTimeout"`
 }
 
 type HistoryConfig struct {
@@ -71,12 +64,7 @@ func DefaultConfig() Config {
 		},
 		Task: TaskSection{
 			MaxFlowSizeMB:   10,
-			MaxBinarySizeMB: 200,
 			DeadlineDefault: "1h",
-		},
-		Upgrade: UpgradeConfig{
-			RolloutDelay:    "5s",
-			PerAgentTimeout: "5m",
 		},
 		History: HistoryConfig{
 			Enabled:         true,
@@ -121,7 +109,7 @@ func validateConfig(cfg *Config) error {
 		return fmt.Errorf("listenAddr is required")
 	}
 	if cfg.PublicURL == "" {
-		return fmt.Errorf("publicUrl is required (used to build binary download URLs for agents)")
+		return fmt.Errorf("publicUrl is required")
 	}
 	if _, err := time.ParseDuration(cfg.AgentRegistry.UnhealthyAfter); cfg.AgentRegistry.UnhealthyAfter != "" && err != nil {
 		return fmt.Errorf("invalid agentRegistry.unhealthyAfter: %w", err)

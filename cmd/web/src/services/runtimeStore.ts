@@ -8,10 +8,16 @@
  * - T1 阶段不实现 startTask / attachToActive 内部细节（依赖 flowStore + IDB），留给 T3。
  *   先把状态机骨架与 setter 都做好，让 T2 资源管理能复用 mode 判定（idle 才允许编辑资源）。
  *
+ * 持久化（partialize）：仅缓存"启动表单字段"到 localStorage：
+ *   taskName / totalBots / robotConfig / deadline。
+ * 运行态字段（mode / activeTask / latestStress / agents / history / connectionLost）
+ * **不持久化**：刷新页面应当重新查询 admin 拿到最新真实状态，而不是恢复旧 mode。
+ *
  * 单一事实源：plan §2 / §4。
  */
 
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import type {
   AgentBrief,
   ClusterSystemSnapshot,
@@ -68,16 +74,44 @@ export interface RuntimeState {
 
   /** 任务结束钩子：mode 切到 finalReport，停止后续历史写入 */
   onTaskFinished: () => void;
-  /** 离开终态 / 取消 viewActive，回到 edit；保留最后一份快照 */
+  /**
+   * 清空所有监控数据（latestStress/latestSystem/stressHistory/systemHistory）。
+   * 用于"启动新任务"前清掉上一次的残留 —— 否则 mode=running 切换瞬间，UI 已经
+   * 在渲染上一次 finalReport 留下的 latestStress（如动作面板/连接数），
+   * 直到下一拍 polling 回包才覆盖，会出现"短暂展示上次数据"的视觉残留。
+   */
+  clearMonitorData: () => void;
+  /**
+   * 返回编辑（finalReport / viewActive → edit）。
+   *
+   * 仅切状态机 + 清掉与"具体任务"绑定的 activeTask / ownedTaskId，
+   * **不动**画布（flowStore）、表单缓存与最后一份监控快照：
+   *   - 自己启动的任务结束后想接着改流程：画布即原始内容；
+   *   - 只读监控期间想退出查看模式：画布会保留远端 attach 时拉到的 flow（用户可继续基于它编辑）；
+   *   - 监控数据保留是为了让 MonitorDock 仍能查看末次值（edit 模式下默认折叠）。
+   * 如需彻底清空请用 `reset()`（"新建任务"按钮）。
+   */
   detachFromActive: () => void;
   /** 完整重置（新建任务） */
   reset: () => void;
 }
 
+// 仅作占位，EditorPage 启动时会尝试从 /conf/config.json 同步真实值覆盖。
+//
+// authAddr 必须包含 scheme（http:// 或 https://），否则 net/http 会报
+// "unsupported protocol scheme"，被 lua 兜底变成 -1，上层报"错误码 1"很难诊断。
 const DEFAULT_ROBOT_CONFIG: RobotConfig = {
-  authAddr: '127.0.0.1:6000',
+  authAddr: 'http://127.0.0.1:20000',
   concurrency: 50,
-  timeoutSec: 30,
+  timeoutSec: 60,
+  accountPrefix: 'bot_',
+  startNumber: 0,
+  mainService: 'logic',
+  authExtra: {},
+  heartbeatSec: 5,
+  httpTimeoutSec: 10,
+  apdexT: 100,
+  logLevel: 'info',
 };
 
 const initialState = {
@@ -102,47 +136,129 @@ function pushWithLimit<T>(arr: T[], item: T, limit = HISTORY_WINDOW): T[] {
   return next;
 }
 
-export const useRuntimeStore = create<RuntimeState>((set) => ({
-  ...initialState,
+export const useRuntimeStore = create<RuntimeState>()(
+  persist(
+    (set) => ({
+      ...initialState,
 
-  setMode: (m) => set({ mode: m }),
-  setActiveTask: (task) => set({ activeTask: task }),
-  setOwnedTaskId: (id) => set({ ownedTaskId: id }),
+      setMode: (m) => set({ mode: m }),
+      setActiveTask: (task) => set({ activeTask: task }),
+      setOwnedTaskId: (id) => set({ ownedTaskId: id }),
 
-  setTaskName: (v) => set({ taskName: v }),
-  setTotalBots: (v) => set({ totalBots: v }),
-  setRobotConfig: (v) => set((s) => ({ robotConfig: { ...s.robotConfig, ...v } })),
-  setDeadline: (v) => set({ deadline: v }),
+      setTaskName: (v) => set({ taskName: v }),
+      setTotalBots: (v) => set({ totalBots: v }),
+      setRobotConfig: (v) =>
+        set((s) => ({ robotConfig: { ...s.robotConfig, ...v } })),
+      setDeadline: (v) => set({ deadline: v }),
 
-  pushStress: (snap) =>
-    set((s) => ({
-      latestStress: snap,
-      stressHistory: pushWithLimit(s.stressHistory, snap),
-    })),
-  pushSystem: (snap) =>
-    set((s) => ({
-      latestSystem: snap,
-      systemHistory: pushWithLimit(s.systemHistory, snap),
-    })),
-  setAgents: (items) => set({ agents: items }),
-  setConnectionLost: (lost) => set({ connectionLost: lost }),
+      // pushStress 双重守门：
+      //
+      // 1. 模式守门：只在 running / viewActive 写入（finalReport / edit 下静默丢弃）。
+      //    polling 本身在这两种模式下也是 disabled，这里只是兜底竞态。
+      //
+      // 2. **空快照守门**：任务结束的瞬间 admin 会立刻清空 activeID（admin/task.go:166），
+      //    handleGetMetrics 看到 active==nil 直接返回 `&CollectorSnapshot{}`（零值，actions=null）。
+      //    而前端 mode 还要等下一次 task polling 才切到 finalReport，期间 pushStress 仍允许写入。
+      //    如果直接接受这份空快照，会把"最后一份真实数据"覆盖成空 → 用户看到动作面板在
+      //    任务一结束就瞬间变空。识别空快照后 return {}，可以保留最后的有效快照供 finalReport 展示。
+      //
+      //    判定规则：uptimeSeconds=0 且 actions 为空 ⇒ 后端零值响应。运行中第一拍若刚好都是 0
+      //    会被一并丢弃，但下一拍很快就会有数，对最终展示无影响。
+      pushStress: (snap) =>
+        set((s) => {
+          if (s.mode !== 'running' && s.mode !== 'viewActive') return {};
+          const isEmpty = (!snap.actions || snap.actions.length === 0)
+            && (!snap.uptimeSeconds || snap.uptimeSeconds <= 0);
+          if (isEmpty) return {};
+          return {
+            latestStress: snap,
+            stressHistory: pushWithLimit(s.stressHistory, snap),
+          };
+        }),
+      pushSystem: (snap) =>
+        set((s) => {
+          // edit 模式 polling 是开的（10s 拉一次集群系统），不能拒绝；
+          // 仅 finalReport 期间拒，避免覆盖最后一份。
+          if (s.mode === 'finalReport') return {};
+          return {
+            latestSystem: snap,
+            systemHistory: pushWithLimit(s.systemHistory, snap),
+          };
+        }),
+      setAgents: (items) => set({ agents: items }),
+      setConnectionLost: (lost) => set({ connectionLost: lost }),
 
-  onTaskFinished: () =>
-    set({
-      mode: 'finalReport',
-      // 保留 latestStress / latestSystem / history 给最终报告使用
+      onTaskFinished: () =>
+        set({
+          mode: 'finalReport',
+          // 保留 latestStress / latestSystem / history 给最终报告使用
+        }),
+
+      // clearMonitorData 只清"任务级监控数据"，**不动 agents 列表**：
+      //   - agents 是集群在线/容量状态，独立于某次任务的 stress 数据，下一拍 polling
+      //     才能拉回来。如果在这里清掉，TaskStartModal 在 await createTask 的几百毫秒里
+      //     会误判 onlineAgents===0 → 闪现"没有在线的 Agent"红色 Alert，体验非常差。
+      //   - latestSystem 同理：edit 模式下 polling 在跑，清掉只会让大盘瞬间归零。
+      //     不过 latestSystem 与"上次任务"语义上有些粘连（系统快照确实在上次任务期间采的），
+      //     当前选择保守清掉，等下一拍 system polling 补；如果发现也有闪烁问题再调整。
+      clearMonitorData: () =>
+        set({
+          latestStress: null,
+          latestSystem: null,
+          stressHistory: [],
+          systemHistory: [],
+        }),
+
+      detachFromActive: () =>
+        set({
+          mode: 'edit',
+          activeTask: null,
+          ownedTaskId: null,
+          // 保留 latestStress / latestSystem / history：edit 模式 MonitorDock 默认折叠，
+          // 用户主动展开仍可看到末次快照，需要彻底清掉请走 reset()。
+        }),
+
+      reset: () =>
+        set({ ...initialState, robotConfig: { ...DEFAULT_ROBOT_CONFIG } }),
     }),
-
-  detachFromActive: () =>
-    set({
-      mode: 'edit',
-      activeTask: null,
-      ownedTaskId: null,
-      // 保留 latestStress / latestSystem 让 finalReport 还能展示最后值
-    }),
-
-  reset: () => set({ ...initialState, robotConfig: { ...DEFAULT_ROBOT_CONFIG } }),
-}));
+    {
+      name: 'stressbot:runtime-form',
+      storage: createJSONStorage(() => localStorage),
+      // v2：authExtra 改为"完全手动控制"，旧版本曾从 conf/config.json 自动同步进来，
+      //     migrate 中清掉一次，避免刷新后仍然看到 version/channel/platform。
+      version: 2,
+      // 只缓存"启动表单"四个字段；运行态（mode/activeTask/agents 等）每次刷新都从 admin 重拉。
+      partialize: (s) => ({
+        taskName: s.taskName,
+        totalBots: s.totalBots,
+        robotConfig: s.robotConfig,
+        deadline: s.deadline,
+      }),
+      migrate: (persisted, version) => {
+        const p = (persisted ?? {}) as Partial<RuntimeState>;
+        // v1 → v2：清掉历史上自动同步进来的 authExtra（让它回到空对象，由用户手动添加）。
+        if (version < 2 && p.robotConfig) {
+          p.robotConfig = { ...p.robotConfig, authExtra: {} };
+        }
+        return p;
+      },
+      // 反序列化后与新版 DEFAULT_ROBOT_CONFIG 合并：
+      //   - 老版本 localStorage 里没有的新字段（如 authExtra/heartbeatSec）会自动补全；
+      //   - 用户已设置的字段不会被覆盖。
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<RuntimeState>;
+        return {
+          ...current,
+          ...p,
+          robotConfig: {
+            ...DEFAULT_ROBOT_CONFIG,
+            ...(p.robotConfig ?? {}),
+          },
+        };
+      },
+    },
+  ),
+);
 
 /** 便捷：按当前 mode 派生轮询参数（HomeShell 使用） */
 export function pollingPolicy(

@@ -23,6 +23,8 @@ export type ActivePanel =
 export type ThemeMode = 'light' | 'dark';
 
 const THEME_STORAGE_KEY = 'stressbot:theme';
+const DEBUG_MODE_STORAGE_KEY = 'stressbot:debugMode';
+const TASK_FORM_ADV_STORAGE_KEY = 'stressbot:taskForm:advancedExpanded';
 
 function readInitialTheme(): ThemeMode {
   try {
@@ -35,6 +37,22 @@ function readInitialTheme(): ThemeMode {
     return 'dark';
   }
   return 'light';
+}
+
+function readInitialDebugMode(): boolean {
+  try {
+    return localStorage.getItem(DEBUG_MODE_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function readInitialTaskFormAdvancedExpanded(): boolean {
+  try {
+    return localStorage.getItem(TASK_FORM_ADV_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
 }
 
 function applyThemeAttr(t: ThemeMode) {
@@ -80,6 +98,27 @@ interface EditorState {
   clipboard: Clipboard;
   /** MonitorDock 是否展开；编辑态默认关，运行态默认开（首次切换由 MonitorDock 内部按 mode 切换） */
   monitorDockOpen: boolean;
+  /**
+   * 调试模式：开启后启动表单一键装填为最小压测配置（1 个机器人 / 并发 1），
+   * 同时 startTask 走 skipCapacityCheck=true，便于本地快速验证流程。
+   * 持久化到 localStorage，刷新页面保留。
+   */
+  debugMode: boolean;
+  /**
+   * 启动任务弹窗中"高级设置"折叠面板的展开状态，持久化到 localStorage。
+   * 这样用户上次手动展开了，下次刷新打开弹窗仍是展开的，避免"看上去字段没缓存"的错觉
+   * （实际上字段值缓存在 runtimeStore.persist 里，但折叠时看不到）。
+   */
+  taskFormAdvancedExpanded: boolean;
+
+  /**
+   * 后端 history 模块是否启用：
+   *   - null：尚未探测（启动时探测）；
+   *   - true：listHistory() 调用成功；
+   *   - false：返回 HISTORY_DISABLED（admin 未配置 MySQL）。
+   * UI 据此 disable "历史" 按钮，避免点了之后才弹错。
+   */
+  historyEnabled: boolean | null;
 
   setSelectedNode: (id: string | null) => void;
   setSelectedCallback: (name: string | null) => void;
@@ -94,6 +133,9 @@ interface EditorState {
   toggleTheme: () => void;
   setClipboard: (c: Clipboard) => void;
   setMonitorDockOpen: (v: boolean) => void;
+  setDebugMode: (v: boolean) => void;
+  setTaskFormAdvancedExpanded: (v: boolean) => void;
+  setHistoryEnabled: (v: boolean | null) => void;
 }
 
 const initialTheme = readInitialTheme();
@@ -112,6 +154,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   theme: initialTheme,
   clipboard: null,
   monitorDockOpen: false,
+  debugMode: readInitialDebugMode(),
+  taskFormAdvancedExpanded: readInitialTaskFormAdvancedExpanded(),
+  historyEnabled: null,
 
   setSelectedNode: (id) => set({ selectedNodeId: id }),
   setSelectedCallback: (name) => set({ selectedCallbackName: name }),
@@ -137,4 +182,21 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   setClipboard: (c) => set({ clipboard: c }),
   setMonitorDockOpen: (v) => set({ monitorDockOpen: v }),
+  setDebugMode: (v) => {
+    try {
+      localStorage.setItem(DEBUG_MODE_STORAGE_KEY, v ? '1' : '0');
+    } catch {
+      // localStorage 不可用时只切换运行时
+    }
+    set({ debugMode: v });
+  },
+  setTaskFormAdvancedExpanded: (v) => {
+    try {
+      localStorage.setItem(TASK_FORM_ADV_STORAGE_KEY, v ? '1' : '0');
+    } catch {
+      // localStorage 不可用时只切换运行时
+    }
+    set({ taskFormAdvancedExpanded: v });
+  },
+  setHistoryEnabled: (v) => set({ historyEnabled: v }),
 }));

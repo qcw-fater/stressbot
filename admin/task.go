@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -168,7 +169,11 @@ func (ts *TaskStore) Transition(id string, from, to TaskState) (*Task, error) {
 			ts.activeID = ""
 		}
 		if ts.onTerminal != nil {
-			taskCopy := *t
+			// 深拷贝避免异步归档的 data race
+			var taskCopy Task
+			if data, err := json.Marshal(t); err == nil {
+				json.Unmarshal(data, &taskCopy)
+			}
 			go ts.onTerminal(&taskCopy)
 		}
 	}
