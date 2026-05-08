@@ -684,6 +684,14 @@ ActionEditor 是整个编辑器中信息密度最高、动态性最强的部分�
 - **导出**：当前编辑内容下载为 `.lua` 文件，便于落地到 `conf/scripts/`。
 - **API 提示**（Monaco snippets）：内置 `robot.* / network.* / proto.* / utils.* / json.* / log.*` 的 completion 数据（来自 `flow-config` SKILL 中的 API 速查表）。
 - **本期 Lint**：仅做匹配 `function execute(r)` / `function onMessage(r, msg)` 的存在性检查。
+- **Lua 脚本返回值约定（v2 起）**：
+  - **action 脚本**（`pattern: "lua"`）：`return code [, send_bytes, recv_bytes]`。`code` 仍是 0=成功；
+    `send/recv` 由 lua API 多返回值给出（如 `network.tcp_send` 第 2 个返回值、`network.request`
+    第 3、4 个返回值）。引擎层 `RunActionScript` 透传给 `monitor.RecordAction`，使 ActionsTab
+    的 ↑avg / ↓avg 字节列对 lua 动作也能反映真实流量（旧的"全部 0"已修复）。
+  - **boolean 脚本**（`condition: "lua:xxx.lua"` / loop `breakCondition`）：必须 `return true / false`。
+    返回 number / nil / 其它类型直接报错（v2 起不再兼容 v1 的 0/1 约定）。
+  - **callback 脚本**（`script: "listen_xxx.lua"`）：`onMessage(r, msg)` 仍无返回值约定。
 
 ### 7.7 ListenRefsTable（action 节点的 listenCallbacks 编辑器）
 
@@ -891,15 +899,16 @@ script: [listen_frame_data.lua  ▾ 已存在 / + 新建]
 
 关键差异（与 ActionEditor 的 LuaForm 区分）：
 
-| 维度 | action 的 lua | callback 的 lua |
-|---|---|---|
-| 入口函数 | `function execute(r)` | `function onMessage(r, msg)` |
-| 返回值语义 | 0 = 成功，非 0 = 失败 | 无返回值（约定不读） |
-| 入参 | 仅 robot | robot + msg（proto userdata 或 binary string） |
-| 模板（新建时） | `execute_template.lua` | `on_message_template.lua` |
-| Lint 检查 | 必须存在 `function execute(r)` | 必须存在 `function onMessage(r, msg)` |
+| 维度 | action 的 lua | boolean 的 lua（条件 / loop breakCondition） | callback 的 lua |
+|---|---|---|---|
+| 入口函数 | `function execute(r)` | `function execute(r)` | `function onMessage(r, msg)` |
+| 返回值语义 | `return code [, send, recv]`（0=成功；后两个由 lua API 多返回值累加） | `return true / false`（其它类型直接报错） | 无返回值（约定不读） |
+| 入参 | 仅 robot | 仅 robot | robot + msg（proto userdata 或 binary string） |
+| 模板（新建时） | `execute_template.lua`（含 `_send/_recv` 累加示例） | `boolean_template.lua`（`return false`） | `on_message_template.lua` |
+| Lint 检查 | 必须存在 `function execute(r)` | 必须存在 `function execute(r)` | 必须存在 `function onMessage(r, msg)` |
+| 引擎入口 | `script.RuntimePool.RunActionScript` | `script.RuntimePool.RunBooleanScript` | `script.RuntimePool.RunCallbackScript` |
 
-`LuaForm` 组件要支持 `mode: 'action' | 'callback'` 入参，按 mode 切换：模板内容、Monaco snippet、Lint 规则。
+`LuaForm` 组件支持 `mode: 'action' | 'boolean' | 'callback'` 入参，按 mode 切换：模板内容、Monaco snippet、Lint 规则、签名提示文本。`ConditionInput`（boolean / loop 节点编辑器）传 `mode='boolean'`，编辑 action 节点时传 `'action'`。
 
 > 注意：callback 的 `script` 在**没有** `s2cProto` 时，引擎会把原始二进制以 string 形式注入 `msg`（见 `listen_frame_data.lua` 的 `string.byte(msg, 13)` 用法）。因此 lua 形态可以**不**配对 `s2cProto`；CallbackEditor 在 lua 形态下不强制 proto 选择。
 

@@ -12,9 +12,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// errBreak 和 errContinue 是循环控制的内部信号，不是真正的错误。
-// 它们通过 Go 的 error 传播机制在节点树中向上冒泡，
-// 直到被最近的 executeLoop 捕获并消费，不会传播到 loop 之外。
+// errBreak / errContinue 是循环控制的内部信号，通过 error 冒泡直到被 executeLoop 捕获。
 var (
 	errBreak    = errors.New("break")
 	errContinue = errors.New("continue")
@@ -55,12 +53,12 @@ func (e *Executor) GetFlow() *TaskFlow {
 // Run 从 main 节点开始执行流程（类比编程语言的 main 函数入口）。
 // 阻塞直到流程结束或 context 取消。
 func (e *Executor) Run(ctx context.Context) error {
-	stresslog.Info("[ENGINE] 开始执行流程", zap.String("caller", e.caller))
+	stresslog.Debug("[ENGINE] 开始执行流程", zap.String("caller", e.caller))
 	err := e.executeNode(ctx, "main")
 	if err != nil {
 		stresslog.Error("[ENGINE] 流程异常退出", zap.String("caller", e.caller), zap.Error(err))
 	} else {
-		stresslog.Info("[ENGINE] 流程正常结束", zap.String("caller", e.caller))
+		stresslog.Debug("[ENGINE] 流程正常结束", zap.String("caller", e.caller))
 	}
 	return err
 }
@@ -76,7 +74,7 @@ func (e *Executor) executeNode(ctx context.Context, nodeID string) error {
 		return fmt.Errorf("节点不存在: %s (caller=%s)", nodeID, e.caller)
 	}
 
-	stresslog.Info("[ENGINE] 执行节点", zap.String("caller", e.caller), zap.String("node", nodeID), zap.String("type", node.Type))
+	stresslog.Debug("[ENGINE] 执行节点", zap.String("caller", e.caller), zap.String("node", nodeID), zap.String("type", node.Type))
 
 	switch node.Type {
 	case "sequence":

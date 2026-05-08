@@ -8,6 +8,10 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	stresslog "stressbot/utils/log"
+
+	"go.uber.org/zap"
 )
 
 func normalizeAddr(addr string) string {
@@ -80,6 +84,10 @@ func (d *AgentDispatcher) post(addr, path string, body any, retries int) error {
 			if i == retries {
 				return fmt.Errorf("after %d retries: %w", retries, err)
 			}
+			stresslog.Warn("[DISPATCHER] POST 失败，将重试",
+				zap.String("url", url),
+				zap.Int("attempt", i+1),
+				zap.Error(err))
 			time.Sleep(backoff)
 			backoff = backoff * 2
 			if backoff > 10*time.Second {
@@ -95,6 +103,10 @@ func (d *AgentDispatcher) post(addr, path string, body any, retries int) error {
 		if i == retries {
 			return fmt.Errorf("agent returned status %d", resp.StatusCode)
 		}
+		stresslog.Warn("[DISPATCHER] POST 失败，将重试",
+			zap.String("url", url),
+			zap.Int("attempt", i+1),
+			zap.Int("status", resp.StatusCode))
 		time.Sleep(backoff)
 		backoff = backoff * 2
 		if backoff > 10*time.Second {

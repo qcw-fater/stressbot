@@ -26,7 +26,7 @@ function execute(r)
     local battleAddress = robot.get("battleAddress")
     if not battleAddress or battleAddress == "" then
         log.error("ConnectBattleTCP: 无战斗服地址")
-        return 1
+        return 1, 0, 0
     end
 
     log.info("连接战斗服 TCP: " .. battleAddress)
@@ -34,18 +34,18 @@ function execute(r)
     local ok = network.connect_tcp("battle", battleAddress)
     if not ok then
         log.error("连接战斗服 TCP 失败: " .. battleAddress)
-        return 1
+        return 1, 0, 0
     end
 
-    ok = network.exchange_key("battle")
-    if not ok then
+    local okExch, sent, recv = network.exchange_key("battle")
+    if not okExch then
         log.error("战斗服密钥交换失败")
-        return 1
+        return 1, sent, recv
     end
 
     -- 注册 10 秒心跳（Battle: cmd=4 BATTLE, act=2 PING_CS）
     network.register_tcp_heartbeat("battle", 10000, {cmd=4, act=2}, build_battle_tcp_heart)
 
     log.info("战斗服 TCP 连接成功 心跳已注册(10s)")
-    return 0
+    return 0, sent, recv
 end

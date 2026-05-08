@@ -21,7 +21,7 @@ import { useMemo, useState } from 'react';
 import { useRuntimeStore } from '@/services';
 import type { ActionMetric } from '@/types/api';
 import { ApdexCell } from '../shared/ApdexCell';
-import { fmtBytes, fmtMs, NUMERIC_STYLE } from '../shared/formats';
+import { fmtBytesPlain, fmtMs, NUMERIC_STYLE } from '../shared/formats';
 
 export function ActionsTab() {
   const latestStress = useRuntimeStore((s) => s.latestStress);
@@ -134,22 +134,22 @@ export function ActionsTab() {
       sorter: (a, b) => a.avgQps - b.avgQps,
       render: (v: number) => <span style={NUMERIC_STYLE}>{v.toFixed(1)}</span>,
     },
-    // ── 字节数：独立列 ───────────────────────
+    // ── 字节数：独立列，表头统一标 (B)，单元格只显示纯整数（避免 16B / 1.2KB 单位混排） ────
     {
-      title: '↑avg',
+      title: '↑avg(B)',
       dataIndex: 'avgSendBytes',
       key: 'avgSendBytes',
-      width: 78,
+      width: 86,
       sorter: (a, b) => a.avgSendBytes - b.avgSendBytes,
-      render: (v: number) => <span style={NUMERIC_STYLE}>{fmtBytes(v)}</span>,
+      render: (v: number) => <span style={NUMERIC_STYLE}>{fmtBytesPlain(v)}</span>,
     },
     {
-      title: '↓avg',
+      title: '↓avg(B)',
       dataIndex: 'avgRecvBytes',
       key: 'avgRecvBytes',
-      width: 78,
+      width: 86,
       sorter: (a, b) => a.avgRecvBytes - b.avgRecvBytes,
-      render: (v: number) => <span style={NUMERIC_STYLE}>{fmtBytes(v)}</span>,
+      render: (v: number) => <span style={NUMERIC_STYLE}>{fmtBytesPlain(v)}</span>,
     },
     // ── 延迟分布：独立列，表头统一标 (ms)，单元格只显示数字 ───────────────
     {

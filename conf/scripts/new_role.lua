@@ -16,7 +16,7 @@ function execute(r)
     local heroIds = {142, 143, 148}
     local heroId = heroIds[math.random(#heroIds)]
 
-    local code, body = network.http_post("/newRole", {
+    local code, body, sent, recv = network.http_post("/newRole", {
         account = account,
         heroId  = tostring(heroId),
         session = session,
@@ -27,18 +27,18 @@ function execute(r)
 
     if code < 0 then
         log.error("NewRole HTTP 请求失败: code=" .. tostring(code))
-        return 1
+        return 1, sent, recv
     end
 
     local ok, resp = pcall(json.decode, body)
     if not ok or not resp then
         log.error("NewRole JSON 解析失败")
-        return 1
+        return 1, sent, recv
     end
 
     if resp.error and resp.error ~= 0 then
         log.error("NewRole 失败: error=" .. tostring(resp.error))
-        return 1
+        return 1, sent, recv
     end
 
     -- 提取角色信息
@@ -53,12 +53,12 @@ function execute(r)
             log.info("NewRole 成功: playerId=" .. tostring(playerId))
         else
             log.error("NewRole 响应中缺少 playerId")
-            return 1
+            return 1, sent, recv
         end
     else
         log.error("NewRole 响应缺少 role 字段")
-        return 1
+        return 1, sent, recv
     end
 
-    return 0
+    return 0, sent, recv
 end

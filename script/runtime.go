@@ -133,48 +133,107 @@ func (rp *RuntimePool) PrecompileScripts(dirs []string) error {
 }
 
 // RunActionScript 执行动作脚本。
-// Lua 脚本应定义 `function execute(r)` 函数。
-// r 为 robot 对象，返回值为整数错误码（0 表示成功）。
-func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (int, error) {
+//
+// Lua 脚本应定义 `function execute(r)` 函数，统一返回约定（按位置可省略后两个）：
+//
+//	return code             -- 仅 code，send/recv 视为 0（旧脚本兼容）
+//	return code, send       -- 只有发送字节
+//	return code, send, recv -- 完整三元组（推荐）
+//
+// code 仍为整数错误码（0=成功，非 0=失败）。send/recv 是本次 action 在
+// lua 内部累计的"线缆字节数"（含 header / 加密后的真实包长，由 lua API 返回值给出），
+// 调用方应当把它们透传给 monitor.RecordAction，从而和声明式动作走同一条 per-action
+// 字节统计路径，使 ActionsTab 的 ↑avg / ↓avg 列对 lua 动作也能反映真实流量。
+func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (code, send, recv int, err error) {
 	compiled, ok := rp.precompiled[scriptName]
 	if !ok {
-		return -1, fmt.Errorf("脚本未预编译: %s", scriptName)
+		return -1, 0, 0, fmt.Errorf("脚本未预编译: %s", scriptName)
 	}
 
-	// 保存栈顶，确保退出时恢复（防止栈泄漏）
 	savedTop := L.GetTop()
 	defer L.SetTop(savedTop)
 
-	// 加载脚本（定义 execute 函数）
+	fn := L.NewFunctionFromProto(compiled)
+	L.Push(fn)
+	if err = L.PCall(0, 0, nil); err != nil {
+		return -1, 0, 0, fmt.Errorf("加载脚本 %s 失败: %w", scriptName, err)
+	}
+
+	executeFn := L.GetGlobal("execute")
+	if executeFn == lua.LNil {
+		return -1, 0, 0, fmt.Errorf("脚本 %s 未定义 execute 函数", scriptName)
+	}
+
+	// NRet=3 总是申请 3 个返回值占位；脚本只 return 1~2 个时，Lua 会用 nil 补齐。
+	robotUD := createRobotUserData(L)
+	if err = L.CallByParam(lua.P{Fn: executeFn, NRet: 3, Protect: true}, robotUD); err != nil {
+		return -1, 0, 0, fmt.Errorf("执行脚本 %s 失败: %w", scriptName, err)
+	}
+
+	// L.Get(savedTop+1..savedTop+3) 依次是 code / send / recv（缺省为 nil → 0）
+	if L.GetTop() >= savedTop+1 {
+		code = int(lua.LVAsNumber(L.Get(savedTop + 1)))
+	}
+	if L.GetTop() >= savedTop+2 {
+		if n := int(lua.LVAsNumber(L.Get(savedTop + 2))); n > 0 {
+			send = n
+		}
+	}
+	if L.GetTop() >= savedTop+3 {
+		if n := int(lua.LVAsNumber(L.Get(savedTop + 3))); n > 0 {
+			recv = n
+		}
+	}
+
+	L.SetGlobal("execute", lua.LNil)
+	return code, send, recv, nil
+}
+
+// RunBooleanScript 执行布尔判断脚本（条件节点 / loop breakCondition）。
+//
+// Lua 脚本应定义 `function execute(r)` 函数，**必须** return 一个 boolean：
+//
+//	return true   -- 条件成立
+//	return false  -- 条件不成立
+//
+// 返回 number / nil / 其他类型一律视作错误（不再兼容旧版 0/1 约定）：
+// 调用方收到 error 后会判定条件为 false 并打 error 日志，引导脚本作者修正。
+func (rp *RuntimePool) RunBooleanScript(L *lua.LState, scriptName string) (bool, error) {
+	compiled, ok := rp.precompiled[scriptName]
+	if !ok {
+		return false, fmt.Errorf("脚本未预编译: %s", scriptName)
+	}
+
+	savedTop := L.GetTop()
+	defer L.SetTop(savedTop)
+
 	fn := L.NewFunctionFromProto(compiled)
 	L.Push(fn)
 	if err := L.PCall(0, 0, nil); err != nil {
-		return -1, fmt.Errorf("加载脚本 %s 失败: %w", scriptName, err)
+		return false, fmt.Errorf("加载脚本 %s 失败: %w", scriptName, err)
 	}
 
-	// 获取 execute 函数
 	executeFn := L.GetGlobal("execute")
 	if executeFn == lua.LNil {
-		return -1, fmt.Errorf("脚本 %s 未定义 execute 函数", scriptName)
+		return false, fmt.Errorf("脚本 %s 未定义 execute 函数", scriptName)
 	}
 
-	// 创建 robot 对象并调用
 	robotUD := createRobotUserData(L)
 	if err := L.CallByParam(lua.P{Fn: executeFn, NRet: 1, Protect: true}, robotUD); err != nil {
-		return -1, fmt.Errorf("执行脚本 %s 失败: %w", scriptName, err)
+		return false, fmt.Errorf("执行脚本 %s 失败: %w", scriptName, err)
 	}
 
-	// 获取返回值
-	code := 0
-	if L.GetTop() > savedTop {
-		ret := L.Get(-1)
-		code = int(lua.LVAsNumber(ret))
+	defer L.SetGlobal("execute", lua.LNil)
+
+	if L.GetTop() <= savedTop {
+		return false, fmt.Errorf("布尔脚本 %s 未返回值，必须 return true/false", scriptName)
 	}
-
-	// 清理全局中的 execute 函数，避免下次执行冲突
-	L.SetGlobal("execute", lua.LNil)
-
-	return code, nil
+	ret := L.Get(-1)
+	b, ok := ret.(lua.LBool)
+	if !ok {
+		return false, fmt.Errorf("布尔脚本 %s 必须 return true/false，实际类型 %s", scriptName, ret.Type().String())
+	}
+	return bool(b), nil
 }
 
 // RunCallbackScript 执行回调脚本。

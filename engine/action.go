@@ -385,8 +385,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 	return val
 }
 
-// navigatePath 按点分路径从嵌套 map/list 中提取值。
-// 支持用 | 分隔多条候选路径，按顺序尝试，返回第一个非 nil 的值。
+// navigatePath 按点分路径从嵌套 map/list 中提取值，支持 | 分隔多候选路径。
 func navigatePath(v any, path string) any {
 	if strings.Contains(path, "|") {
 		for _, alt := range strings.Split(path, "|") {
@@ -583,7 +582,7 @@ func (ae *ActionExecutor) execClose(def *ActionDef) error {
 		stresslog.Debug("[ACTION] CloseUDP 成功", zap.String("service", def.Service))
 	case "tcp":
 		ae.netSender.CloseTCP(def.Service)
-		stresslog.Debug("[ACTION] CloseTCP TCP 成功", zap.String("service", def.Service))
+		stresslog.Debug("[ACTION] CloseTCP 成功", zap.String("service", def.Service))
 	default:
 		return fmt.Errorf("未知的关闭目标: %s", target)
 	}

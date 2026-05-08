@@ -7,16 +7,16 @@ local log = require("log")
 
 function execute(r)
     -- 轮询监听匹配成功消息，超时 600 秒（10 分钟）
-    local resp = network.wait_listen("logic", {cmd=3, act=1}, "Game.MatchSucceedS2C", 600)
+    local resp, recv = network.wait_listen("logic", {cmd=3, act=1}, "Game.MatchSucceedS2C", 600)
     if not resp then
         log.error("MatchSucceed 超时")
-        return 1
+        return 1, 0, recv
     end
 
     local ok, err = pcall(function()
         local fieldMap = proto.get_field_map(resp)
 
-        -- 从 actorList 中找到自己的 PlayerGameInfo，提取 matchData.sessionId（校验ID）
+        -- 从 actorList 中找到自己的 PlayerGameInfo，提取 matchData.sessionId（校验ID）和 index
         local myPlayerId = tonumber(robot.get("roleId"))
         local actorList = fieldMap.actorList
         if actorList and myPlayerId then
@@ -45,8 +45,8 @@ function execute(r)
             .. " battleArea=" .. tostring(robot.get("battleArea")))
     else
         log.error("MatchSucceed 解析失败: " .. tostring(err))
-        return 1
+        return 1, 0, recv
     end
 
-    return 0
+    return 0, 0, recv
 end

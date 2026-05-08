@@ -637,6 +637,8 @@ func (a *MetricsAggregator) AggregateSystem() ClusterSystemSnapshot {
 
 **关键禁忌**：**绝不**简单平均 P99（数学错误）。必须重建合并直方图后插值。
 
+> ⚠️ **已废弃**：自动升级流程已废弃，升级改为运维手动重启 Agent 进程。设计文档保留供参考。
+
 ### 4.6 BinaryStore
 
 ```go
@@ -1114,6 +1116,8 @@ func (s *Sampler) loop(ctx context.Context, taskID string, startedAt time.Time) 
 | `GET` | `/api/system/agents` | 各 Agent 系统快照 |
 | `GET` | `/api/system/agents/{id}` | 指定 Agent 系统快照 |
 
+> ⚠️ **已废弃**：自动升级流程已废弃，升级改为运维手动重启 Agent 进程。设计文档保留供参考。
+
 #### 二进制 / 升级
 
 | 方法 | 路径 | 说明 |
@@ -1498,7 +1502,7 @@ type Error struct {
 | 7 | `admin/assignment.go` + `agent_dispatcher.go`：分配 + 推送任务 | 0.75 天 |
 | 8 | `admin/handlers.go`（前端写入）：CreateTask / Start / Stop | 0.75 天 |
 | 9 | `admin/binary.go`：BinaryStore + multipart 上传 + 下载 | 0.75 天 |
-| 10 | `admin/upgrade.go`：UpgradeOrchestrator + 滚动 | 1 天 |
+| 10 | `admin/upgrade.go`：UpgradeOrchestrator + 滚动 | 1 天 | ⚠️ **已废弃**：自动升级流程已废弃，升级改为运维手动重启 Agent 进程 |
 | 11 | `admin/admin.go`：AdminServer 总装 + 路由 + 静态资源托管 | 0.5 天 |
 | 12 | `cmd/admin/main.go`：入口 + 信号处理 + graceful shutdown | 0.25 天 |
 | 13 | `admin/history.go` + `history_schema.go`：MySQL 表 + CRUD + 标签筛选 | 1 天 |
@@ -1535,7 +1539,7 @@ type Error struct {
 - [ ] 任务创建 → 启动（多 Agent）→ 运行 → 停止 → 完成 全流程正常
 - [ ] 任务持久化：创建后重启 Admin，未启动任务可恢复（pending）；运行中任务恢复为 failed 且 errorMsg 明确
 - [ ] 二进制上传 / 下载（含 SHA256 校验）正常
-- [ ] 滚动升级：3 个 mock Agent，全部成功升级；模拟 1 个失败，最终状态 Failed=1 Completed=2
+- [ ] 滚动升级：3 个 mock Agent，全部成功升级；模拟 1 个失败，最终状态 Failed=1 Completed=2 — ⚠️ **已废弃**：自动升级流程已废弃，升级改为运维手动重启 Agent 进程
 - [ ] 聚合指标：3 个 Agent 各跑 100 机器人，`/api/metrics` 显示 success=300、P99 合理（不是平均值）
 
 ### 12.2 任务单例

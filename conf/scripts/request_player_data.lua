@@ -7,14 +7,14 @@ local log = require("log")
 function execute(r)
     -- 发送 MainLoadOkC2S (CMD=2, ACT=16)
     local msg = proto.create("Game.MainLoadOkC2S")
-    network.tcp_send("logic", {cmd=2, act=16}, msg)
+    local _, sent = network.tcp_send("logic", {cmd=2, act=16}, msg)
 
     -- 等待 LoginPlayerDataS2C (CMD=1, ACT=2)
-    local resp = network.wait_listen("logic", {cmd=1, act=2}, "Game.LoginPlayerDataS2C", 30)
+    local resp, recv = network.wait_listen("logic", {cmd=1, act=2}, "Game.LoginPlayerDataS2C", 30)
 
     if not resp then
         log.error("RequestPlayerData: 响应为空")
-        return 1
+        return 1, sent, recv
     end
 
     -- 存储完整玩家数据
@@ -43,5 +43,5 @@ function execute(r)
     robot.set("heroIdList", heroIds)
 
     log.info("RequestPlayerData: 已存储 " .. #heroIds .. " 个英雄ID")
-    return 0
+    return 0, sent, recv
 end

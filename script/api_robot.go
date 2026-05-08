@@ -71,7 +71,7 @@ func robotIndex(L *lua.LState) int {
 	case "clear":
 		L.Push(L.NewFunction(robotClear))
 	case "delete":
-		L.Push(L.NewFunction(robotClear))
+		L.Push(L.NewFunction(robotDelete))
 	case "get_path":
 		L.Push(L.NewFunction(robotGetPath))
 	case "keys":

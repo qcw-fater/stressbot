@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { historyApi, showApiError } from '@/services';
 import type { ActionMetric, HistoryDetail, TimeseriesPoint, StressSnapshot } from '@/types/api';
 import { ApdexCell } from '@/components/monitoring/shared/ApdexCell';
-import { fmtBytes, fmtMs, NUMERIC_STYLE } from '@/components/monitoring/shared/formats';
+import { fmtBytesPlain, fmtMs, NUMERIC_STYLE } from '@/components/monitoring/shared/formats';
 
 export interface HistoryDetailViewProps {
   id: string;
@@ -222,20 +222,20 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
         render: (v: number) => <span style={NUMERIC_STYLE}>{v.toFixed(1)}</span>,
       },
       {
-        title: '↑avg',
+        title: '↑avg(B)',
         dataIndex: 'avgSendBytes',
         key: 'avgSendBytes',
-        width: 78,
+        width: 86,
         sorter: (a, b) => a.avgSendBytes - b.avgSendBytes,
-        render: (v: number) => <span style={NUMERIC_STYLE}>{fmtBytes(v)}</span>,
+        render: (v: number) => <span style={NUMERIC_STYLE}>{fmtBytesPlain(v)}</span>,
       },
       {
-        title: '↓avg',
+        title: '↓avg(B)',
         dataIndex: 'avgRecvBytes',
         key: 'avgRecvBytes',
-        width: 78,
+        width: 86,
         sorter: (a, b) => a.avgRecvBytes - b.avgRecvBytes,
-        render: (v: number) => <span style={NUMERIC_STYLE}>{fmtBytes(v)}</span>,
+        render: (v: number) => <span style={NUMERIC_STYLE}>{fmtBytesPlain(v)}</span>,
       },
       {
         title: 'avg(ms)',

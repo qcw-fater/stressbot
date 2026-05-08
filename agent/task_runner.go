@@ -18,6 +18,7 @@ import (
 	"stressbot/protox"
 	"stressbot/robot"
 	"stressbot/script"
+	"stressbot/utils"
 	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"
@@ -145,9 +146,9 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 	r.collector.SetApdexT(r.assignment.ApdexT)
 
 	// 7. 解析超时参数
-	hbInterval := parseDurationDefault(r.assignment.HeartbeatInterval, 5*time.Second)
-	tcpTimeout := parseDurationDefault(r.assignment.TCPTimeout, 60*time.Second)
-	httpTimeout := parseDurationDefault(r.assignment.HTTPTimeout, 10*time.Second)
+	hbInterval := utils.ParseDurationDefault(r.assignment.HeartbeatInterval, 5*time.Second)
+	tcpTimeout := utils.ParseDurationDefault(r.assignment.TCPTimeout, 60*time.Second)
+	httpTimeout := utils.ParseDurationDefault(r.assignment.HTTPTimeout, 10*time.Second)
 
 	// 8. 启动 gnet 网络引擎
 	dialer := network.NewDialer(adp, hbInterval)
@@ -257,15 +258,4 @@ func loadTaskFlow(path string) (*engine.TaskFlow, error) {
 	}
 
 	return flow, nil
-}
-
-func parseDurationDefault(s string, fallback time.Duration) time.Duration {
-	if s == "" {
-		return fallback
-	}
-	d, err := time.ParseDuration(s)
-	if err != nil || d <= 0 {
-		return fallback
-	}
-	return d
 }

@@ -2,7 +2,8 @@
  * Lua 语法分析 Web Worker。
  *
  * 主线程发送 `{ type: 'parse', code, mode }`：
- *   - mode='action'   : 期望存在 `function execute(r) ... end`
+ *   - mode='action'   : 期望存在 `function execute(r) ... end`（return code[, send, recv]）
+ *   - mode='boolean'  : 期望存在 `function execute(r) ... end`（return true / false，签名同 action）
  *   - mode='callback' : 期望存在 `function onMessage(r, msg) ... end`
  *   - mode='free'     : 不做入口签名校验
  *
@@ -11,7 +12,7 @@
 
 import luaparse from 'luaparse';
 
-export type LuaCheckMode = 'action' | 'callback' | 'free';
+export type LuaCheckMode = 'action' | 'boolean' | 'callback' | 'free';
 
 export interface SyntaxIssue {
   line: number;
@@ -62,7 +63,11 @@ self.onmessage = (e: MessageEvent<ParseRequest>) => {
   }
 
   if (ast && mode !== 'free') {
-    const expected = mode === 'action' ? { name: 'execute', params: 1 } : { name: 'onMessage', params: 2 };
+    // action / boolean 共用 execute(r) 签名；callback 用 onMessage(r, msg)
+    const expected =
+      mode === 'callback'
+        ? { name: 'onMessage', params: 2 }
+        : { name: 'execute', params: 1 };
     const found = findEntryFunction(ast, expected.name);
     if (!found) {
       issues.push({
@@ -72,7 +77,7 @@ self.onmessage = (e: MessageEvent<ParseRequest>) => {
         endColumn: 1,
         severity: 'error',
         message: `脚本必须定义入口函数：function ${expected.name}(${
-          mode === 'action' ? 'r' : 'r, msg'
+          mode === 'callback' ? 'r, msg' : 'r'
         }) ... end`,
         source: 'entry',
       });

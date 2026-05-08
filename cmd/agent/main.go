@@ -18,6 +18,7 @@ import (
 	"stressbot/protox"
 	"stressbot/robot"
 	"stressbot/script"
+	"stressbot/utils"
 	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"
@@ -185,9 +186,9 @@ func runStandalone(cfg *Config) {
 	}
 
 	// 解析超时
-	heartbeatInterval := parseDurationDefault(cfg.Network.HeartbeatInterval, 5*time.Second)
-	tcpTimeout := parseDurationDefault(cfg.Network.TCPTimeout, 60*time.Second)
-	httpTimeout := parseDurationDefault(cfg.Network.HTTPTimeout, 10*time.Second)
+	heartbeatInterval := utils.ParseDurationDefault(cfg.Network.HeartbeatInterval, 5*time.Second)
+	tcpTimeout := utils.ParseDurationDefault(cfg.Network.TCPTimeout, 60*time.Second)
+	httpTimeout := utils.ParseDurationDefault(cfg.Network.HTTPTimeout, 10*time.Second)
 
 	// 启动 gnet 网络引擎
 	dialer := network.NewDialer(adp, heartbeatInterval)
@@ -337,15 +338,4 @@ func loadFlow(path string) (*engine.TaskFlow, error) {
 	}
 
 	return flow, nil
-}
-
-func parseDurationDefault(s string, fallback time.Duration) time.Duration {
-	if s == "" {
-		return fallback
-	}
-	d, err := time.ParseDuration(s)
-	if err != nil || d <= 0 {
-		return fallback
-	}
-	return d
 }

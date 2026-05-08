@@ -90,6 +90,11 @@ func networkConnectUDP(L *lua.LState) int {
 //
 //	service: TCP 连接名
 //	route:   可选路由 table（如 {cmd=1, act=1}），nil 时使用默认交换路由
+//
+// 返回：ok(boolean), sent(number), recv(number)
+//
+//	sent = len(packet)（wire 长度，含 header 与加密）
+//	recv = len(respBody)（解密、去 header 后的密钥体长度）
 func networkExchangeKey(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
@@ -108,19 +113,25 @@ func networkExchangeKey(L *lua.LState) int {
 	packet := ctx.Adapter.EncodeTCP(goRoute, nil, nil)
 	if packet == nil {
 		L.Push(lua.LBool(false))
-		return 1
+		L.Push(lua.LNumber(0))
+		L.Push(lua.LNumber(0))
+		return 3
 	}
 	respKey := ctx.Adapter.ExpectedResponseKey(goRoute)
 
 	respBody, ok := ctx.NetSender.TCPRequest(service, packet, respKey)
 	if !ok || len(respBody) == 0 {
 		L.Push(lua.LBool(false))
-		return 1
+		L.Push(lua.LNumber(len(packet)))
+		L.Push(lua.LNumber(0))
+		return 3
 	}
 
 	ctx.NetSender.SetTCPSecretKey(service, respBody)
 	L.Push(lua.LBool(true))
-	return 1
+	L.Push(lua.LNumber(len(packet)))
+	L.Push(lua.LNumber(len(respBody)))
+	return 3
 }
 
 // extractNetArgs 从 Lua 栈提取 service + route + msg + s2cProto。
@@ -203,11 +214,12 @@ func serializeMsg(ctx *Context, msg proto.Message) ([]byte, error) {
 //	msg:       C2S proto 消息（由 proto.create 创建）
 //	s2c_proto: 响应 proto 全名（可选，提供时解析为结构化消息）
 //
-// 返回：code(number), data(string|userdata)
+// 返回：code(number), data(string|userdata|nil), sent(number), recv(number)
 //
 //	code=0:  成功，data 为解析后的消息或原始字节
-//	code=-1: 请求失败
+//	code=-1: 请求失败（sent 仍可能 > 0：包已发出但未收到响应）
 //	code=-2: 解析失败，data 为原始字节
+//	sent / recv：line-byte 口径（与声明式动作一致），sent=len(packet)、recv=len(respBody)。
 func networkRequest(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -231,11 +243,14 @@ func networkRequest(L *lua.LState) int {
 	if packet == nil {
 		L.Push(lua.LNumber(-1))
 		L.Push(lua.LNil)
-		return 2
+		L.Push(lua.LNumber(0))
+		L.Push(lua.LNumber(0))
+		return 4
 	}
 
 	goRoute := luaValueToRoute(route)
 	respKey := ctx.Adapter.ExpectedResponseKey(goRoute)
+	pktLen := len(packet)
 
 	// 释放 luaMu，避免 TCPRequest 阻塞期间阻塞心跳 builder
 	var respBody []byte
@@ -247,7 +262,9 @@ func networkRequest(L *lua.LState) int {
 	if !ok {
 		L.Push(lua.LNumber(-1))
 		L.Push(lua.LNil)
-		return 2
+		L.Push(lua.LNumber(pktLen))
+		L.Push(lua.LNumber(0))
+		return 4
 	}
 
 	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
@@ -255,17 +272,23 @@ func networkRequest(L *lua.LState) int {
 		if err != nil {
 			L.Push(lua.LNumber(-2))
 			L.Push(lua.LString(string(respBody)))
-			return 2
+			L.Push(lua.LNumber(pktLen))
+			L.Push(lua.LNumber(len(respBody)))
+			return 4
 		}
 		ud := wrapProtoMessage(L, respMsg)
 		L.Push(lua.LNumber(0))
 		L.Push(ud)
-		return 2
+		L.Push(lua.LNumber(pktLen))
+		L.Push(lua.LNumber(len(respBody)))
+		return 4
 	}
 
 	L.Push(lua.LNumber(0))
 	L.Push(lua.LString(string(respBody)))
-	return 2
+	L.Push(lua.LNumber(pktLen))
+	L.Push(lua.LNumber(len(respBody)))
+	return 4
 }
 
 // networkHTTPPost 发送 HTTP POST 表单请求。
@@ -274,7 +297,10 @@ func networkRequest(L *lua.LState) int {
 //	path:      请求路径（如 "/api/login"）
 //	form_data: 表单数据 table（如 {key="value"}）
 //
-// 返回：status_code(number), body(string)
+// 返回：status_code(number), body(string), sent(number), recv(number)
+//
+//	sent / recv 为应用层近似估算：sent ≈ form 编码后长度；recv = len(body)。
+//	HTTP 协议头不计入（与声明式 action 不走该路径，仅作 lua action 内部带宽参考）。
 func networkHTTPPost(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -302,16 +328,26 @@ func networkHTTPPost(L *lua.LState) int {
 		return 0
 	}
 
+	// 粗略 sent 估算：表单字段 key=value 串拼接长度
+	sent := 0
+	for k, v := range formData {
+		sent += len(k) + 1 + len(v) + 1 // k=v&
+	}
+
 	statusCode, body, err := ctx.NetSender.HTTPPost(path, formData)
 	if err != nil {
 		L.Push(lua.LNumber(-1))
 		L.Push(lua.LString(err.Error()))
-		return 2
+		L.Push(lua.LNumber(sent))
+		L.Push(lua.LNumber(0))
+		return 4
 	}
 
 	L.Push(lua.LNumber(statusCode))
 	L.Push(lua.LString(string(body)))
-	return 2
+	L.Push(lua.LNumber(sent))
+	L.Push(lua.LNumber(len(body)))
+	return 4
 }
 
 // networkTCPSend TCP 发送（不等响应）。
@@ -320,7 +356,10 @@ func networkHTTPPost(L *lua.LState) int {
 //	route: 路由 table（如 {cmd=6, act=5}）
 //	msg:   C2S proto 消息（由 proto.create 创建）
 //
-// 返回：code(number) 0=成功, -1=失败
+// 返回：code(number), sent(number)
+//
+//	code=0 成功，-1 失败；sent = NetSender.TCPSend 实际写入字节数（wire 长度）。
+//	失败时 sent 仍按 len(packet) 给出（已编码的请求体长度，便于上层做带宽统计）。
 func networkTCPSend(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -343,16 +382,19 @@ func networkTCPSend(L *lua.LState) int {
 	packet := buildPacket(ctx, service, route, msgData)
 	if packet == nil {
 		L.Push(lua.LNumber(-1))
-		return 1
+		L.Push(lua.LNumber(0))
+		return 2
 	}
 
-	ok, _ := ctx.NetSender.TCPSend(service, packet)
+	ok, n := ctx.NetSender.TCPSend(service, packet)
 	if ok {
 		L.Push(lua.LNumber(0))
+		L.Push(lua.LNumber(n))
 	} else {
 		L.Push(lua.LNumber(-1))
+		L.Push(lua.LNumber(len(packet)))
 	}
-	return 1
+	return 2
 }
 
 // networkUDPSend 发送原始 UDP 数据（不做编码）。
@@ -361,7 +403,7 @@ func networkTCPSend(L *lua.LState) int {
 //	service: UDP 连接名
 //	data:    原始字节串
 //
-// 返回：code(number) 0=成功, -1=失败
+// 返回：code(number), sent(number)
 func networkUDPSend(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -386,13 +428,15 @@ func networkUDPSend(L *lua.LState) int {
 		return 0
 	}
 
-	ok, _ := ctx.NetSender.UDPSend(service, data)
+	ok, n := ctx.NetSender.UDPSend(service, data)
 	if ok {
 		L.Push(lua.LNumber(0))
+		L.Push(lua.LNumber(n))
 	} else {
 		L.Push(lua.LNumber(-1))
+		L.Push(lua.LNumber(len(data)))
 	}
-	return 1
+	return 2
 }
 
 // networkUDPSendMsg 发送 UDP 消息。
@@ -400,6 +444,8 @@ func networkUDPSend(L *lua.LState) int {
 //
 //	route: 路由 table（如 {cmd=4, act=11}）
 //	body:  消息体字节
+//
+// 返回：code(number), sent(number)
 func networkUDPSendMsg(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
@@ -407,6 +453,7 @@ func networkUDPSendMsg(L *lua.LState) int {
 		return 0
 	}
 
+	service := L.CheckString(1)
 	route := L.Get(2)
 	var body []byte
 	if L.GetTop() >= 3 {
@@ -414,19 +461,22 @@ func networkUDPSendMsg(L *lua.LState) int {
 	}
 
 	goRoute := luaValueToRoute(route)
-	udpKey := ctx.NetSender.GetUDPSecretKey(L.CheckString(1))
+	udpKey := ctx.NetSender.GetUDPSecretKey(service)
 	packet := ctx.Adapter.EncodeUDP(goRoute, body, udpKey)
 	if packet == nil {
 		L.Push(lua.LNumber(-1))
-		return 1
+		L.Push(lua.LNumber(0))
+		return 2
 	}
-	ok, _ := ctx.NetSender.UDPSend(L.CheckString(1), packet)
+	ok, n := ctx.NetSender.UDPSend(service, packet)
 	if ok {
 		L.Push(lua.LNumber(0))
+		L.Push(lua.LNumber(n))
 	} else {
 		L.Push(lua.LNumber(-1))
+		L.Push(lua.LNumber(len(packet)))
 	}
-	return 1
+	return 2
 }
 
 // networkWaitListen 等待监听消息。
@@ -436,6 +486,10 @@ func networkUDPSendMsg(L *lua.LState) int {
 //	s2c_proto:   响应 proto 全名（可选）
 //	timeout_sec: 超时秒数（默认 60）
 //	poll_ms:     轮询间隔毫秒（默认 100）
+//
+// 返回：data(string|userdata|nil), recv(number)
+//
+//	超时 / 取消时 data=nil、recv=0；解析失败时 data=nil、recv=len(respBody)。
 func networkWaitListen(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
@@ -488,27 +542,32 @@ func networkWaitListen(L *lua.LState) int {
 
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
 		L.Push(lua.LNil)
-		return 1
+		L.Push(lua.LNumber(0))
+		return 2
 	}
 	if timedOut {
 		stresslog.Warn("[SCRIPT] wait_listen 超时",
 			zap.String("service", service), zap.String("responseKey", responseKey), zap.Int("timeout", timeout))
 		L.Push(lua.LNil)
-		return 1
+		L.Push(lua.LNumber(0))
+		return 2
 	}
 
 	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
 		respMsg, err := ctx.Factory.Parse(s2cProto, respBody)
 		if err != nil {
 			L.Push(lua.LNil)
-			return 1
+			L.Push(lua.LNumber(len(respBody)))
+			return 2
 		}
 		L.Push(wrapProtoMessage(L, respMsg))
-		return 1
+		L.Push(lua.LNumber(len(respBody)))
+		return 2
 	}
 
 	L.Push(lua.LString(string(respBody)))
-	return 1
+	L.Push(lua.LNumber(len(respBody)))
+	return 2
 }
 
 // networkCloseTCP 关闭 TCP 连接。

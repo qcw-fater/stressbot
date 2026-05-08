@@ -29,10 +29,10 @@ function execute(r)
 
     if not playerId then
         log.error("SelectRole: 无可用角色")
-        return 1
+        return 1, 0, 0
     end
 
-    local code, body = network.http_post("/useRole", {
+    local code, body, sent, recv = network.http_post("/useRole", {
         account  = account,
         id       = tostring(playerId),
         session  = session,
@@ -43,18 +43,18 @@ function execute(r)
 
     if code < 0 then
         log.error("SelectRole HTTP 请求失败: code=" .. tostring(code))
-        return 1
+        return 1, sent, recv
     end
 
     local ok, resp = pcall(json.decode, body)
     if not ok or not resp then
         log.error("SelectRole JSON 解析失败")
-        return 1
+        return 1, sent, recv
     end
 
     if resp.error and resp.error ~= 0 then
         log.error("SelectRole 失败: error=" .. tostring(resp.error))
-        return 1
+        return 1, sent, recv
     end
 
     -- 更新 logicSession
@@ -73,5 +73,5 @@ function execute(r)
             .. " (无逻辑服地址)")
     end
 
-    return 0
+    return 0, sent, recv
 end

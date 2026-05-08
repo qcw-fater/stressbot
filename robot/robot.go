@@ -274,7 +274,7 @@ func (h *robotActionHandler) ExecuteAction(actionDef *engine.ActionDef) error {
 	var err error
 
 	if actionDef.Pattern == engine.PatternLua {
-		err = h.executeLuaAction(actionDef)
+		sendBytes, recvBytes, err = h.executeLuaAction(actionDef)
 	} else {
 		sendBytes, recvBytes, err = h.robot.actionExec.Execute(actionDef)
 	}
@@ -305,29 +305,29 @@ func classifyResult(err error) monitor.ActionResult {
 	return monitor.ResultFailure
 }
 
-// ExecuteAction 执行 lua 脚本动作
-func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) error {
+// executeLuaAction 执行 lua 脚本动作，返回 (sendBytes, recvBytes, err)。
+func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int, int, error) {
 	if h.robot.L == nil || h.robot.luaPool == nil {
-		return fmt.Errorf("lua 运行时未初始化")
+		return 0, 0, fmt.Errorf("lua 运行时未初始化")
 	}
 
 	if actionDef.Script == "" {
-		return fmt.Errorf("lua 动作缺少 script 配置")
+		return 0, 0, fmt.Errorf("lua 动作缺少 script 配置")
 	}
 
 	h.robot.luaMu.Lock()
 	defer h.robot.luaMu.Unlock()
 
-	code, err := h.robot.luaPool.RunActionScript(h.robot.L, actionDef.Script)
+	code, send, recv, err := h.robot.luaPool.RunActionScript(h.robot.L, actionDef.Script)
 	if err != nil {
-		return fmt.Errorf("执行 lua 脚本 %s 失败: %w", actionDef.Script, err)
+		return 0, 0, fmt.Errorf("执行 lua 脚本 %s 失败: %w", actionDef.Script, err)
 	}
 
 	if code != 0 {
-		return fmt.Errorf("lua 脚本 %s 返回错误码: %d", actionDef.Script, code)
+		return send, recv, fmt.Errorf("lua 脚本 %s 返回错误码: %d", actionDef.Script, code)
 	}
 
-	return nil
+	return send, recv, nil
 }
 
 // ExecuteBoolean 执行条件判断
@@ -339,7 +339,7 @@ func (h *robotActionHandler) ExecuteBoolean(expression string) bool {
 	return evalCondition(expression, h.robot.state)
 }
 
-// executeLuaBoolean 执行 Lua 脚本条件判断，返回脚本执行结果。
+// executeLuaBoolean 执行 Lua 条件脚本，脚本必须 return true/false。
 func (h *robotActionHandler) executeLuaBoolean(scriptName string) bool {
 	if h.robot.L == nil || h.robot.luaPool == nil {
 		stresslog.Error("[ROBOT] Lua 运行时未初始化，条件判断默认拒绝",
@@ -356,14 +356,14 @@ func (h *robotActionHandler) executeLuaBoolean(scriptName string) bool {
 	h.robot.luaMu.Lock()
 	defer h.robot.luaMu.Unlock()
 
-	code, err := h.robot.luaPool.RunActionScript(h.robot.L, scriptName)
+	result, err := h.robot.luaPool.RunBooleanScript(h.robot.L, scriptName)
 	if err != nil {
 		stresslog.Error("[ROBOT] 条件脚本执行失败，条件判断默认拒绝",
 			zap.String("script", scriptName), zap.Error(err))
 		return false
 	}
 
-	return code == 0
+	return result
 }
 
 // RegisterListen 注册持久化监听
@@ -498,7 +498,7 @@ func evalCondition(expr string, s *state.Store) bool {
 	}
 
 	if !strings.HasPrefix(expr, "state:") {
-		stresslog.Error("[ROBOT] 条件表达式格式错误，仅支持 state: 前缀",
+		stresslog.Warn("[ROBOT] 条件表达式格式错误，仅支持 state: 前缀",
 			zap.String("expr", expr))
 		return false
 	}
@@ -580,15 +580,7 @@ func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, responseKe
 	return resp.Data, true
 }
 
-// HTTPPost 发送 HTTP POST 表单请求。
-//
-// baseURL 容错：
-//   - 单机 conf/config.json 通常配 "http://host:port"，scheme 完整；
-//   - Web Admin 启动时用户在 RobotConfig.authAddr 里有时只填 "host:port"，会让
-//     net/http 报 "unsupported protocol scheme"，错误被 lua 兜底变成 -1，最后业务
-//     脚本 `if code < 0 then return 1` 报"错误码 1"，根因被吞掉很难诊断。
-//   - 这里自动补 "http://" 前缀（仅当既没有 http:// 也没有 https:// 时），并把
-//     底层错误用 stresslog.Warn 显式打出来，方便用户立刻看到 baseURL 配置问题。
+// HTTPPost 发送 HTTP POST 表单请求，自动补全 scheme。
 func (ns *netSenderAdapter) HTTPPost(path string, formData map[string]string) (int, []byte, error) {
 	baseURL := strings.TrimSpace(ns.robot.authBaseURL)
 	if baseURL == "" {

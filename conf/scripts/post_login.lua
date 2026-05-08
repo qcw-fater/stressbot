@@ -15,7 +15,7 @@ function execute(r)
     -- 预计算 battleVersion（FNV-1a 哈希）
     robot.set("battleVersion", utils.fnv_hash(version))
 
-    local code, body = network.http_post("/login", {
+    local code, body, sent, recv = network.http_post("/login", {
         account  = account,
         version  = version,
         channel  = channel,
@@ -24,25 +24,25 @@ function execute(r)
 
     if code < 0 then
         log.error("PostLogin HTTP 请求失败: code=" .. tostring(code))
-        return 1
+        return 1, sent, recv
     end
 
     local ok, resp = pcall(json.decode, body)
     if not ok or not resp then
         log.error("PostLogin JSON 解析失败: " .. tostring(body))
-        return 1
+        return 1, sent, recv
     end
 
     -- 检查错误码（error=0 表示成功）
     if resp.error and resp.error ~= 0 then
         log.error("PostLogin 失败: error=" .. tostring(resp.error))
-        return 1
+        return 1, sent, recv
     end
 
     -- 提取 session
     if not resp.session or resp.session == "" then
         log.error("PostLogin 响应缺少 session")
-        return 1
+        return 1, sent, recv
     end
     robot.set("session", resp.session)
 
@@ -58,5 +58,5 @@ function execute(r)
         .. " zoneId=" .. tostring(zoneId)
         .. " 角色数=" .. tostring(#roles))
 
-    return 0
+    return 0, sent, recv
 end

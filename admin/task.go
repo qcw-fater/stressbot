@@ -152,6 +152,10 @@ func (ts *TaskStore) Transition(id string, from, to TaskState) (*Task, error) {
 	}
 
 	t.State = to
+	stresslog.Info("[TASK] 状态转换",
+		zap.String("taskId", id),
+		zap.String("from", string(from)),
+		zap.String("to", string(to)))
 	now := time.Now()
 
 	switch to {

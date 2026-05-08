@@ -2,14 +2,15 @@
  * 条件表达式输入框：三模式（lua: / state: / plain）。
  *
  * 设计文档 §6.5：condition 字段在 boolean / loop 节点中复用，
- *   - "lua:check.lua"        → 调 Lua 脚本求值（执行 execute(r)；return 0 = true，非 0 = false）
+ *   - "lua:check.lua"        → 调 Lua 脚本求值（入口 execute(r) 必须 return true / false）
  *   - "state:foo"            → 读 state 中布尔值
  *   - "state:foo > 5"        → 表达式（保留扩展，引擎当前未实现）
  *
- * lua 模式下旁边的「编辑」按钮会弹出 LuaForm（与动作节点同款 Monaco 编辑器），
- * 让用户可以直接编写脚本内容并存到 IDB；启动任务时 taskActions.collectScripts
- * 会把所有 IDB 脚本随 multipart 一并上传，避免新建 condition 脚本后忘了创建文件
- * 而触发引擎侧"脚本未预编译"错误。
+ * lua 模式下旁边的「编辑」按钮会弹出 LuaForm（mode='boolean'），
+ * 给条件脚本提供与动作脚本同款的 Monaco 体验，但模板默认 `return false`，
+ * 避免与 action 脚本的 `return code, send, recv` 三元约定混淆。
+ * 内容会存到 IDB，启动任务时 taskActions.collectScripts 一并上传，避免
+ * "脚本未预编译" 错误。
  */
 
 import { Button, Input, Modal, Radio } from 'antd';
@@ -60,8 +61,8 @@ export function ConditionInput({ value, onChange, placeholder }: ConditionInputP
       lua: (
         <>
           <b>lua:</b> 调用 <code>conf/scripts/</code> 下的脚本求值。
-          入口 <code>function execute(r)</code>，<code>return 0</code> 表示 <b>true</b>，
-          非 0（含异常）= <b>false</b>。点旁边的 <b>编辑</b> 按钮可在 Monaco 里直接写脚本，
+          入口 <code>function execute(r)</code>，必须 <code>return true / false</code>
+          （返回其它类型直接报错）。点旁边的 <b>编辑</b> 按钮可在 Monaco 里直接写脚本，
           内容会存到本地 IDB，启动任务时随 multipart 一并提交。
         </>
       ),
@@ -116,8 +117,8 @@ export function ConditionInput({ value, onChange, placeholder }: ConditionInputP
         {tip}
       </div>
 
-      {/* lua 脚本编辑 Modal：直接复用 LuaForm（mode='action'），
-          因为 condition lua 与 action lua 入口签名一致：function execute(r) return 0/非 0。 */}
+      {/* lua 脚本编辑 Modal：复用 LuaForm 但用 mode='boolean'，
+          这样模板和签名提示都对应 return true / false，避免误用 action 的三元返回。 */}
       <Modal
         open={editorOpen}
         title={
@@ -135,7 +136,7 @@ export function ConditionInput({ value, onChange, placeholder }: ConditionInputP
         destroyOnHidden
       >
         <LuaForm
-          mode="action"
+          mode="boolean"
           script={tail}
           onChangeScript={(s) => setTail(s)}
         />

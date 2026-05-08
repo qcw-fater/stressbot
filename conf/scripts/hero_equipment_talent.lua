@@ -6,7 +6,7 @@ local proto = require("proto")
 function execute(r)
     local heroIds = robot.get("heroIdList")
     if not heroIds or type(heroIds) ~= "table" or #heroIds == 0 then
-        return 0
+        return 0, 0, 0
     end
 
     local heroId = heroIds[math.random(#heroIds)]
@@ -30,7 +30,7 @@ function execute(r)
     end
 
     if nextIndex <= 0 then
-        return 0
+        return 0, 0, 0
     end
 
     -- 计算 randIndex: random(1, nextIndex) 向下取偶数
@@ -44,6 +44,6 @@ function execute(r)
     proto.set_field(msg, "index", {randIndex})
     proto.set_field(msg, "talentIndex", {talentIndex})
 
-    network.tcp_send("logic", {cmd=6, act=6}, msg)
-    return 0
+    local _, sent = network.tcp_send("logic", {cmd=6, act=6}, msg)
+    return 0, sent, 0
 end

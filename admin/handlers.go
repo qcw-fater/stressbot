@@ -74,9 +74,7 @@ func (s *AdminServer) registerRoutes() *http.ServeMux {
 	return mux
 }
 
-// ──────────────────────────────────────────────────
-// Agent 上行 Handlers
-// ──────────────────────────────────────────────────
+// ── Agent 上行 ──
 
 func (s *AdminServer) handleAgentRegister(w http.ResponseWriter, r *http.Request) {
 	var req RegisterRequest
@@ -139,14 +137,7 @@ func (s *AdminServer) handleAgentDeregister(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// #8 修复：使用 report.TaskID 和 report.ReportedAt
-//
-// 跨任务串数据防御：当 agent 还没及时把上一个任务的最后一拍 stress 上报到 admin 时，
-// 用户已经发起了新任务、agent 心跳已把 CurrentTaskID 切换。这条"延迟到达的旧报告"
-// 如果直接 UpdateStress，会把刚刚因 CurrentTaskID 切换而被清空的 LatestStress
-// 又写回成上一任务的快照（agent.go Heartbeat 那一道防线就被绕过了）。
-// 这里用 report.TaskID 与 agent 当前 CurrentTaskID 对比，不匹配直接丢弃。
-// agent.CurrentTaskID 为空（idle）时也不接受 stress 上报，没有归属。
+// handleAgentStressReport 丢弃过期 stress 报告，避免跨任务串数据。
 func (s *AdminServer) handleAgentStressReport(w http.ResponseWriter, r *http.Request) {
 	var report StressReport
 	if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
@@ -250,11 +241,9 @@ func (s *AdminServer) handleAgentPendingTask(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-// ──────────────────────────────────────────────────
-// 前端-任务 Handlers
-// ──────────────────────────────────────────────────
+// ── 前端-任务 ──
 
-// #4 修复：POST /api/tasks 使用 multipart/form-data 上传
+// handleCreateTask multipart/form-data 创建任务。
 func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		writeError(w, ErrInvalidArgument.WithMessage("multipart parse error"))
@@ -431,7 +420,7 @@ func (s *AdminServer) handleGetTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, task)
 }
 
-// #1 修复：GET /api/tasks/{id}/config/{path...} — 任务配置文件下载（Agent 用）
+// handleGetTaskConfig 任务配置文件下载（Agent 用）。
 func (s *AdminServer) handleGetTaskConfig(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	path := r.PathValue("path")
@@ -690,9 +679,7 @@ func (s *AdminServer) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ──────────────────────────────────────────────────
-// 前端-Agent Handlers
-// ──────────────────────────────────────────────────
+// ── 前端-Agent ──
 
 func (s *AdminServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	agents := s.agents.List()
@@ -759,9 +746,7 @@ func (s *AdminServer) handleDeleteAgent(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ──────────────────────────────────────────────────
-// 前端-指标 Handlers
-// ──────────────────────────────────────────────────
+// ── 前端-指标 ──
 
 func (s *AdminServer) handleGetMetrics(w http.ResponseWriter, r *http.Request) {
 	active := s.tasks.ActiveTask()
@@ -773,7 +758,7 @@ func (s *AdminServer) handleGetMetrics(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, snap)
 }
 
-// #2 修复：GET /api/metrics/summary — 文本摘要
+// handleGetMetricsSummary 文本摘要。
 func (s *AdminServer) handleGetMetricsSummary(w http.ResponseWriter, r *http.Request) {
 	active := s.tasks.ActiveTask()
 	if active == nil {
@@ -871,8 +856,8 @@ func (s *AdminServer) handleGetSystemAgent(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, agent.LatestSystem)
 }
 
-// ──────────────────────────────────────────────────
-// parseIntOrDefault 解析查询参数。
+// ── 工具函数 ──
+
 func parseIntOrDefault(s string, def int) int {
 	if s == "" {
 		return def
@@ -884,7 +869,6 @@ func parseIntOrDefault(s string, def int) int {
 	return n
 }
 
-// parseBoolOrDefault 解析布尔查询参数。
 func parseBoolOrDefault(s string, def bool) bool {
 	if s == "" {
 		return def
@@ -896,7 +880,6 @@ func parseBoolOrDefault(s string, def bool) bool {
 	return b
 }
 
-// parseTimeOrDefault 解析 RFC3339 时间查询参数。
 func parseTimeOrDefault(s string, def time.Time) time.Time {
 	if s == "" {
 		return def
@@ -908,7 +891,6 @@ func parseTimeOrDefault(s string, def time.Time) time.Time {
 	return t
 }
 
-// parseTagsFromQuery 从查询参数中解析 tags（支持多个 ?tags=a&tags=b）。
 func parseTagsFromQuery(r *http.Request, key string) []string {
 	var tags []string
 	for _, t := range r.URL.Query()[key] {

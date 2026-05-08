@@ -255,7 +255,7 @@ func luaZlibCompress(L *lua.LState) int {
         L.Push(lua.LString(err.Error()))
         return 2
     }
-    w.CloseTCP()
+    w.Close()
     L.Push(lua.LString(buf.String()))
     return 1
 }
@@ -268,7 +268,7 @@ func luaZlibDecompress(L *lua.LState) int {
         L.Push(lua.LString(err.Error()))
         return 2
     }
-    defer r.CloseTCP()
+    defer r.Close()
     out, err := io.ReadAll(r)
     if err != nil {
         L.Push(lua.LNil)
@@ -321,7 +321,7 @@ func NewLuaAdapter(poolSize int, scriptPath string) (*LuaAdapter, error) {
     
     // Step 1: 编译脚本
     tmpL := lua.NewState()
-    defer tmpL.CloseTCP()
+    defer tmpL.Close()
     fn, err := tmpL.LoadFile(scriptPath)
     if err != nil {
         return nil, fmt.Errorf("编译适配器脚本 %s 失败: %w", scriptPath, err)
@@ -936,7 +936,7 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
             // 避免损坏帧反复触发无效解析（gconn.Discard(1) 可能死循环）。
             stresslog.Warn("[NETWORK] 协议头非法，关闭连接",
                 zap.String("service", conn.ServiceName()))
-            return gnet.CloseTCP
+            return gnet.Close
         }
         
         totalLen := headSize + bodyLen

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"stressbot/monitor"
+	"stressbot/utils"
 	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"
@@ -23,8 +24,8 @@ type AgentRegistry struct {
 }
 
 func NewAgentRegistry(cfg RegistryConfig, onChange func(string, AgentStatus, AgentStatus)) *AgentRegistry {
-	unhealthy := parseDurationDefault(cfg.UnhealthyAfter, 30*time.Second)
-	offline := parseDurationDefault(cfg.OfflineAfter, 60*time.Second)
+	unhealthy := utils.ParseDurationDefault(cfg.UnhealthyAfter, 30*time.Second)
+	offline := utils.ParseDurationDefault(cfg.OfflineAfter, 60*time.Second)
 
 	return &AgentRegistry{
 		agents:             make(map[string]*AgentNode),
@@ -107,7 +108,7 @@ func (r *AgentRegistry) Heartbeat(agentID string, req HeartbeatRequest) error {
 		if r.onChange != nil {
 			r.onChange(agentID, from, node.Status)
 		}
-		stresslog.Info("agent 心跳恢复",
+		stresslog.Warn("agent 心跳恢复",
 			zap.String("agentId", agentID),
 			zap.String("status", string(node.Status)))
 	}
@@ -230,15 +231,4 @@ func (r *AgentRegistry) scanAndMarkStatus() {
 			zap.String("to", string(newStatus)),
 			zap.Duration("lag", lag))
 	}
-}
-
-func parseDurationDefault(s string, def time.Duration) time.Duration {
-	if s == "" {
-		return def
-	}
-	d, err := time.ParseDuration(s)
-	if err != nil {
-		return def
-	}
-	return d
 }

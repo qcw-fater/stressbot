@@ -58,13 +58,6 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 	s.assigner = NewAssigner()
 
 	// 6. HistoryStore（可选）
-	//
-	// 启动期一定要"显式"打日志说明 history 模块状态，否则运维只能从启动总日志里
-	// 那一笔 zap.Bool("history", false) 推断，极易忽略；前端按"历史"按钮才弹
-	// HISTORY_DISABLED 时也会一头雾水。三个分支都要可观察：
-	//   - enabled=true 且成功 → NewHistoryStore 内部已打 Info "HistoryStore 已连接 MySQL"；
-	//   - enabled=true 但失败 → return err，admin 启动失败（fail-fast）；
-	//   - enabled=false → 这里 Warn 一笔，提示如何启用。
 	if cfg.History.Enabled {
 		history, err := NewHistoryStore(cfg.History)
 		if err != nil {
@@ -73,16 +66,16 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 		s.history = history
 
 		sampler := NewSampler(
-			parseDurationDefault(cfg.History.SamplerInterval, 10*time.Second),
+			utils.ParseDurationDefault(cfg.History.SamplerInterval, 10*time.Second),
 			s.aggregator, s.history, s.agents,
 		)
 		s.sampler = sampler
 	} else {
-		stresslog.Warn("[ADMIN] history 模块未启用：所有 /api/history* 接口将返回 HISTORY_DISABLED；" +
+		stresslog.Info("[ADMIN] history 模块未启用：所有 /api/history* 接口将返回 HISTORY_DISABLED；" +
 			"如需启用，请在 config.json 设置 history.enabled=true 且填写 history.mysql.dsn")
 	}
 
-	// 9. 终态回调
+	// 7. 终态回调
 	s.tasks.SetOnTerminal(s.onTaskTerminal)
 
 	return s, nil
@@ -157,13 +150,7 @@ func (s *AdminServer) onTaskTerminal(task *Task) {
 	}
 	taskID := task.ID
 	utils.GetWorkPool().Go(func() {
-		// finalStress 来源优先级：
-		//   1. task.Reports[*].FinalSnapshot —— agent 终止时主动上报，确定且完整；
-		//   2. aggregator.AggregateStress(taskID) —— 兜底，但任务终止后 agent 心跳通常已把
-		//      CurrentTaskID 清成空字符串，AggregateStress 会过滤掉所有 agent 返回空快照，
-		//      所以这里只用作历史路径（Reports 缺失时的次优选择）。
-		// 不切换到 aggregator 主路径的原因：测试时归档常拿到空 actions / 0 connections，
-		// 用户在历史详情里只看到一片空白，体验非常差。
+		// 优先用 agent 终止报告聚合，兜底用心跳聚合
 		finalStress := buildFinalStressFromReports(task)
 		if finalStress == nil || len(finalStress.Actions) == 0 {
 			finalStress = s.aggregator.AggregateStress(taskID)
@@ -177,17 +164,14 @@ func (s *AdminServer) onTaskTerminal(task *Task) {
 	})
 }
 
-// buildFinalStressFromReports 从已落地的 agent 终止报告聚合最终压测快照。
-// 终止报告由 agent 在停 robot 之后主动 POST 给 admin（POST /api/internal/agents/:id/tasks/:tid/report），
-// 此时 task 的所有 agent 都已经把自己的 CollectorSnapshot 序列化进 report.FinalSnapshot，
-// 不依赖 agent 心跳里的 CurrentTaskID，是终态最可信的来源。
+// buildFinalStressFromReports 从 agent 终止报告聚合最终快照（优先于心跳聚合）。
 func buildFinalStressFromReports(task *Task) *monitor.CollectorSnapshot {
 	if task == nil || len(task.Reports) == 0 {
 		return nil
 	}
 	snaps := make([]*monitor.CollectorSnapshot, 0, len(task.Reports))
 	for _, r := range task.Reports {
-		// FinalSnapshot 是值类型，零值（Uptime=0 且 Actions=nil）也算"agent 没采到任何数据"，
+		// 过滤零值快照
 		// 这种条目并入 MergeSnapshots 没意义，过滤掉。
 		if r.FinalSnapshot.UptimeSec == 0 && len(r.FinalSnapshot.Actions) == 0 {
 			continue

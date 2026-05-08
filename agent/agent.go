@@ -270,7 +270,7 @@ func (a *Agent) executeTask(ctx context.Context, task *TaskAssignment) {
 	a.status = StatusBusy
 	a.mu.Unlock()
 
-	// 确保任务结束时清理
+	// 任务结束时清理状态
 	defer func() {
 		a.mu.Lock()
 		a.currentTask = nil

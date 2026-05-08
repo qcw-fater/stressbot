@@ -300,9 +300,9 @@ type TaskConfig struct {
     ApdexT            int               `json:"apdexT"`
 
     FlowJSON          json.RawMessage   `json:"flowJson"`
-    AdapterLua        string            `json:"adapterLua"`
-    ProtoFiles        map[string]string `json:"protoFiles"`
-    LuaScripts        map[string]string `json:"luaScripts"`
+    HeaderJSON        json.RawMessage   `json:"headerJson,omitempty"`
+    ProtoFiles        map[string][]byte `json:"protoFiles,omitempty"`
+    LuaScripts        map[string][]byte `json:"luaScripts,omitempty"`
 }
 ```
 
@@ -1085,9 +1085,9 @@ func main() {
             Name:              cfg.Agent.Name,
             ListenAddr:        cfg.Agent.ListenAddr,
             MaxBots:           cfg.Agent.MaxBots,
-            StressInterval:    parseDur(cfg.Agent.StressInterval, 5*time.Second),
-            SystemInterval:    parseDur(cfg.Agent.SystemInterval, 5*time.Second),
-            HeartbeatInterval: parseDur(cfg.Agent.HeartbeatInterval, 10*time.Second),
+            StressInterval:    utils.ParseDurationDefault(cfg.Agent.StressInterval, 5*time.Second),
+            SystemInterval:    utils.ParseDurationDefault(cfg.Agent.SystemInterval, 5*time.Second),
+            HeartbeatInterval: utils.ParseDurationDefault(cfg.Agent.HeartbeatInterval, 10*time.Second),
         })
         a.Run()  // 阻塞直到退出信号
     } else {
@@ -1138,6 +1138,8 @@ func main() {
 ---
 
 ## 15. 热更新与滚动升级
+
+> ⚠️ **已废弃**：自动升级流程已废弃，升级改为运维手动重启 Agent 进程。设计文档保留供参考。
 
 ### 15.1 设计目标
 
@@ -1794,6 +1796,8 @@ Admin 直接托管前端构建产物，无需单独 Nginx：
 20. 压测指标 stale 标记
 
 ### Phase 6：热更新与滚动升级（约 1.5 天）
+
+> ⚠️ **已废弃**：自动升级流程已废弃，升级改为运维手动重启 Agent 进程。设计文档保留供参考。
 
 21. `cmd/launcher/main.go` — Launcher 独立小二进制（spawn / wait / 文件替换 / 回滚），编译产物 `agent-launcher.exe`
 22. `agent/upgrader.go` — Agent 进程端升级处理（下载、校验、drain、写 `.upgrade.pending`、`os.Exit(99)`）

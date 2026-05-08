@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	stresslog "stressbot/utils/log"
+
+	"go.uber.org/zap"
 )
 
 func taskFilePath(dataDir, taskID string) string {
@@ -57,10 +61,12 @@ func loadTaskFiles(dataDir string) ([]*Task, error) {
 		}
 		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
 		if err != nil {
+			stresslog.Warn("[ADMIN] 跳过无法读取的任务文件", zap.String("file", e.Name()), zap.Error(err))
 			continue
 		}
 		var task Task
 		if err := json.Unmarshal(data, &task); err != nil {
+			stresslog.Warn("[ADMIN] 跳过损坏的任务文件", zap.String("file", e.Name()), zap.Error(err))
 			continue
 		}
 		tasks = append(tasks, &task)

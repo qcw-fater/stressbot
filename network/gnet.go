@@ -98,10 +98,13 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 
 		bodyLen := es.adp.BodyLength(headBuf)
 		if bodyLen < 0 {
+			serviceName := ""
 			if conn != nil {
-				stresslog.Warn("[NETWORK] 协议头非法，关闭连接",
-					zap.String("service", conn.ServiceName()))
+				serviceName = conn.ServiceName()
 			}
+			stresslog.Warn("[NETWORK] 协议头非法，关闭连接",
+				zap.String("service", serviceName),
+		)
 			return gnet.Close
 		}
 
@@ -205,7 +208,7 @@ func (d *Dialer) DialTCP(ctx context.Context, address string, conn *Connection) 
 
 	d.server.registry.register(gconn, conn)
 
-	stresslog.Info("[GNET] TCP 连接已建立",
+	stresslog.Debug("[GNET] TCP 连接已建立",
 		zap.String("address", address), zap.String("service", conn.serviceName), zap.String("robot", conn.robotName))
 	return gconn, nil
 }
@@ -226,6 +229,6 @@ func (d *Dialer) DialUDP(address string, conn *Connection) (gnet.Conn, error) {
 
 	d.server.registry.register(gconn, conn)
 
-	stresslog.Info("[GNET] UDP 连接已建立", zap.String("address", address), zap.String("robot", conn.robotName))
+	stresslog.Debug("[GNET] UDP 连接已建立", zap.String("address", address), zap.String("robot", conn.robotName))
 	return gconn, nil
 }

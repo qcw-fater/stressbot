@@ -105,7 +105,9 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
   //       b) 然后**全量上传 IDB**作为 multipart payload —— 因为 lua 内部 require()/dofile()
   //          是动态调用，无法静态分析，全量上传是最稳的方案（lua 文件通常 < 几 KB，开销极小）；
   //       c) sync.missing > 0 = 既不在 IDB 也不在 conf/scripts/，启动会失败 → 提前抛错。
-  //   用户如需精简 IDB 中的历史脚本，可去「资源管理」手动清理。
+  //   用户如需精简 IDB 中的历史脚本，可去「资源管理」手动清理；
+  //   引擎对 lua 返回值的契约升级时（如 v1→v2 三元组），由 resourcesStore.SCRIPT_BASELINE_VERSION
+  //   触发一次性 clear scriptStore，本步骤会自动把所有引用到的脚本从 conf/scripts/ 拉新版。
   const sync = await syncFlowScriptsToIdb(flowJson);
   if (sync.missing.length > 0) {
     throw new ApiError(

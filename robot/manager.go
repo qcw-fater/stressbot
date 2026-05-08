@@ -115,10 +115,6 @@ func (m *Manager) StopAll() {
 		r.Close()
 		m.stopped.Add(1)
 	}
-	// 等待所有 Robot 执行 goroutine 退出，避免进程退出时仍在写日志或发包
-	for _, r := range robots {
-		r.Wait()
-	}
 	stresslog.Info("[MANAGER] 全部机器人已停止")
 }
 

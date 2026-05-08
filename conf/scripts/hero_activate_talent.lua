@@ -6,7 +6,7 @@ local proto = require("proto")
 function execute(r)
     local heroIds = robot.get("heroIdList")
     if not heroIds or type(heroIds) ~= "table" or #heroIds == 0 then
-        return 0
+        return 0, 0, 0
     end
 
     local heroId = heroIds[math.random(#heroIds)]
@@ -32,13 +32,13 @@ function execute(r)
 
     -- 没有可激活的天赋位，跳过
     if talentIndex < 0 then
-        return 0
+        return 0, 0, 0
     end
 
     local msg = proto.create("Game.HeroActivateTalentC2S")
     proto.set_field(msg, "heroId", heroId)
     proto.set_field(msg, "index", talentIndex)
 
-    network.tcp_send("logic", {cmd=6, act=5}, msg)
-    return 0
+    local _, sent = network.tcp_send("logic", {cmd=6, act=5}, msg)
+    return 0, sent, 0
 end

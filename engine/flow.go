@@ -4,7 +4,7 @@
 package engine
 
 // TaskFlow 流程图定义。
-// 由一组 Node 组成的有向图，从 startNode 开始串行执行。
+// 由一组 Node 组成的有向图，从 "main" 节点开始串行执行。
 // nodes 使用 JSON object（key = 节点 ID），无需自定义反序列化。
 type TaskFlow struct {
 	DefaultDelayMs int                     `json:"defaultDelayMs"` // 全局节点间默认延迟（毫秒）。0=引擎默认(1000ms)，<0=禁用

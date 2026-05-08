@@ -5,16 +5,18 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	stresslog "stressbot/utils/log"
 )
 
 // ActionResult 动作执行结果类型。
 type ActionResult int
 
 const (
-	ResultSuccess  ActionResult = iota // 执行成功
-	ResultFailure                      // 执行失败（非超时）
-	ResultTimeout                      // 超时（TCPRequest/WaitListen 无响应）
-	ResultSkipped                      // 跳过（必填字段为空，ErrActionSkip）
+	ResultSuccess ActionResult = iota // 执行成功
+	ResultFailure                     // 执行失败（非超时）
+	ResultTimeout                     // 超时（TCPRequest/WaitListen 无响应）
+	ResultSkipped                     // 跳过（必填字段为空，ErrActionSkip）
 )
 
 // actionMetrics per-action 指标，全部原子操作。
@@ -22,9 +24,9 @@ type actionMetrics struct {
 	successCount    atomic.Int64
 	failureCount    atomic.Int64
 	timeoutCount    atomic.Int64
-	timeoutTotalMs  atomic.Int64          // 超时样本总延迟（毫秒），用于算 avg
+	timeoutTotalMs  atomic.Int64 // 超时样本总延迟（毫秒），用于算 avg
 	skippedCount    atomic.Int64
-	executing       atomic.Int64          // 当前正在执行的机器人数量
+	executing       atomic.Int64 // 当前正在执行的机器人数量
 	latency         *LatencyHistogram
 	sendBytes       atomic.Int64
 	recvBytes       atomic.Int64
@@ -77,17 +79,7 @@ type MetricsCollector struct {
 
 var global *MetricsCollector
 
-// Init 初始化全局单例。
-//
-// **重要**：进程生命周期内只应在启动时调用一次。
-// 如果运行期再次调用，会**新建一个 collector 替换 global**，导致：
-//   - 已经持有 `monitor.Global()` 旧引用的组件（如 agent.StressReporter）
-//     看到的还是空 collector；
-//   - 业务路径里的 `monitor.Global().RecordXxx(...)` 写到新 collector，
-//     reporter 永远拿不到数据。
-//
-// 任务级需要调整 ApdexT 时，请使用 `(*MetricsCollector).SetApdexT(t)`，
-// 不要再调 `Init`。
+// Init 初始化全局单例。进程生命周期内只调用一次，任务级调整 ApdexT 用 SetApdexT。
 func Init(cfg CollectorConfig) {
 	global = &MetricsCollector{
 		enabled:   cfg.Enabled,
@@ -112,6 +104,7 @@ func Global() *MetricsCollector {
 
 // Reset 重置所有计数器，用于新任务开始前清零。
 func (c *MetricsCollector) Reset() {
+	stresslog.Info("[MONITOR] 指标收集器已重置")
 	c.startTime = time.Now()
 	c.actions.Clear()
 	c.names = c.names[:0]
@@ -127,12 +120,7 @@ func (c *MetricsCollector) Reset() {
 	c.totalRecvBytes.Store(0)
 }
 
-// SetApdexT 任务级调整 Apdex T 值（毫秒），用于不同任务约束不同响应预期。
-// ≤0 视为不修改（保留当前值）。
-//
-// 设计取舍：cfg 是结构体值，多字段并发更新需要锁；ApdexT 是热路径
-// `RecordAction` 里读取的唯一动态字段，独立用 mutex 保护成本最低，
-// 同时避免给整个 cfg 加锁影响其他读路径。
+// SetApdexT 任务级调整 Apdex T 值（毫秒），≤0 不修改。
 func (c *MetricsCollector) SetApdexT(t int) {
 	if t <= 0 {
 		return
@@ -151,11 +139,7 @@ func (c *MetricsCollector) RecordActionStart(name string) {
 	am.executing.Add(1)
 }
 
-// AddBandwidth 累计全局收发字节数。由 network 层在每次实际收发后调用，
-// 这样心跳、监听推送、所有失败/超时的请求、UDP 单向发送都能被计入"全局带宽"，
-// 而不是只统计 RecordAction success 路径里的成对收发字节。
-//
-// 调用方约定：send / recv 任一为 0 表示该方向无字节增量（不要传负数）。
+// AddBandwidth 累计全局收发字节数（由 network 层调用，含心跳/监听等全部流量）。
 func (c *MetricsCollector) AddBandwidth(send, recv int64) {
 	if c == nil || !c.enabled {
 		return
@@ -169,8 +153,6 @@ func (c *MetricsCollector) AddBandwidth(send, recv int64) {
 }
 
 // RecordAction 记录一次动作执行结果（热路径，纯原子操作）。
-// sendBytes / recvBytes 传 0 表示不统计（Lua 动作等无法获取字节数）。
-// errMsg 传空字符串表示不记录错误详情。
 func (c *MetricsCollector) RecordAction(name string, result ActionResult, duration time.Duration, sendBytes, recvBytes int, errMsg string) {
 	if !c.enabled {
 		return
@@ -236,8 +218,16 @@ func (c *MetricsCollector) recordError(am *actionMetrics, errMsg string) {
 }
 
 // RobotStarted / RobotRunning / RobotStopped / RobotErrored 机器人生命周期钩子。
-func (c *MetricsCollector) RobotStarted() { if c.enabled { c.robotsStarted.Add(1) } }
-func (c *MetricsCollector) RobotRunning() { if c.enabled { c.robotsRunning.Add(1) } }
+func (c *MetricsCollector) RobotStarted() {
+	if c.enabled {
+		c.robotsStarted.Add(1)
+	}
+}
+func (c *MetricsCollector) RobotRunning() {
+	if c.enabled {
+		c.robotsRunning.Add(1)
+	}
+}
 func (c *MetricsCollector) RobotStopped() {
 	if c.enabled {
 		c.robotsRunning.Add(-1)
@@ -252,9 +242,21 @@ func (c *MetricsCollector) RobotErrored() {
 }
 
 // 连接生命周期钩子。
-func (c *MetricsCollector) ConnEstablished() { if c.enabled { c.connEstablished.Add(1) } }
-func (c *MetricsCollector) ConnFailed()      { if c.enabled { c.connFailed.Add(1) } }
-func (c *MetricsCollector) ConnDropped()     { if c.enabled { c.connDropped.Add(1) } }
+func (c *MetricsCollector) ConnEstablished() {
+	if c.enabled {
+		c.connEstablished.Add(1)
+	}
+}
+func (c *MetricsCollector) ConnFailed() {
+	if c.enabled {
+		c.connFailed.Add(1)
+	}
+}
+func (c *MetricsCollector) ConnDropped() {
+	if c.enabled {
+		c.connDropped.Add(1)
+	}
+}
 
 // RecordCallback 记录一次推送回调触发（仅计数，无延迟）。
 func (c *MetricsCollector) RecordCallback(name string) {

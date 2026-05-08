@@ -1,11 +1,14 @@
 /**
- * Lua 脚本编辑器（mode='action' / 'callback' 双用）。
+ * Lua 脚本编辑器（mode='action' / 'callback' / 'boolean' 三用）。
  *
  * - 选择脚本文件（从 /conf/scripts/index.json 列出）
  * - Monaco 全功能 Lua 编辑
  * - 入口签名：
- *   action 模式   : function execute(r) ... return 0/non-zero end
+ *   action  模式 : function execute(r) ... return code, send_bytes, recv_bytes end
+ *                  return 0 表示成功；send/recv 可省略，由 lua API 第 3、4 个返回值给出，
+ *                  会归到 ActionsTab 的 ↑avg / ↓avg per-action 字节统计中。
  *   callback 模式 : function onMessage(r, msg) ... end
+ *   boolean 模式 : function execute(r) ... return true/false end（条件节点 / loop breakCondition 用）
  *
  * 持久化：
  *   - 加载脚本时优先读 IDB（用户编辑过的版本），IDB 没有再 fetch /conf/scripts/<name> 兜底；
@@ -26,7 +29,7 @@ import { registerLuaProviders } from '../../lua/luaProviders';
 import { checkLuaSyntax, type SyntaxIssue } from '../../lua/luaSyntaxClient';
 import { addScript, getScript } from '@/services/resourcesStore';
 
-export type LuaMode = 'action' | 'callback';
+export type LuaMode = 'action' | 'callback' | 'boolean';
 
 export interface LuaFormProps {
   mode: LuaMode;
@@ -42,7 +45,13 @@ local robot = require('robot')
 
 function execute(r)
   -- TODO: 业务逻辑
-  return 0   -- 0 = 成功，非 0 = 失败
+  -- 累计本 action 内所有 lua API 调用的发/收字节，最终透传给 monitor 做 per-action 统计
+  local _send, _recv = 0, 0
+  -- 示例：
+  -- local code, _, sent, recv = network.request('logic', {cmd=1, act=2}, msg, 'Game.SomeS2C')
+  -- _send, _recv = _send + sent, _recv + recv
+  -- if code ~= 0 then return 1, _send, _recv end
+  return 0, _send, _recv  -- 第 1 个为错误码（0=成功），后两个为 wire 字节数
 end
 `,
   callback: `-- listen_xxx.lua
@@ -52,6 +61,15 @@ function onMessage(r, msg)
   -- 有 s2cProto 时 msg 为 proto userdata，否则为原始二进制 string
   if msg == nil then return end
   -- TODO: 写 state
+end
+`,
+  boolean: `-- condition_xxx.lua
+local robot = require('robot')
+
+function execute(r)
+  -- TODO: 判断条件
+  -- 必须 return true 或 false（boolean 节点 / loop breakCondition 用）
+  return false
 end
 `,
 };
@@ -156,7 +174,8 @@ export function LuaForm({ mode, script, onChangeScript }: LuaFormProps) {
     URL.revokeObjectURL(url);
   };
 
-  const expectedSig = mode === 'action' ? 'function execute(r)' : 'function onMessage(r, msg)';
+  const expectedSig =
+    mode === 'callback' ? 'function onMessage(r, msg)' : 'function execute(r)';
   const errorCount = issues.filter((i) => i.severity === 'error').length;
   const warnCount = issues.filter((i) => i.severity === 'warning').length;
   // 用 worker 校验失败时（worker 启动异常）退化为旧的字符串包含检查，避免完全没提示
@@ -244,7 +263,9 @@ export function LuaForm({ mode, script, onChangeScript }: LuaFormProps) {
         <Button icon={<CloudDownloadOutlined />} size="small" onClick={onDownload}>
           下载当前内容
         </Button>
-        <Tag color={mode === 'action' ? 'blue' : 'orange'}>{mode}</Tag>
+        <Tag color={mode === 'action' ? 'blue' : mode === 'boolean' ? 'purple' : 'orange'}>
+          {mode}
+        </Tag>
         {script && hasLocalDraft && (
           <Tag color="green" style={{ marginInlineEnd: 0 }}>
             已保存到本地
@@ -256,6 +277,17 @@ export function LuaForm({ mode, script, onChangeScript }: LuaFormProps) {
         message={
           <span>
             入口签名：<code>{expectedSig}</code>
+            {mode === 'action' && (
+              <>
+                ；<code>return code, send, recv</code>
+                （0=成功；send/recv 由 lua API 第 3、4 个返回值给出）
+              </>
+            )}
+            {mode === 'boolean' && (
+              <>
+                ；<code>return true / false</code>（返回其它类型直接报错）
+              </>
+            )}
             {mode === 'callback' && (
               <>
                 ；<code>msg</code> 在无 s2cProto 时为原始二进制 string

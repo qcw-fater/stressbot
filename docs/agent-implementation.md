@@ -106,9 +106,9 @@ func runAgentMode(cfg *Config) {
         Name:              cfg.Agent.Name,
         ListenAddr:        cfg.Agent.ListenAddr,
         MaxBots:           cfg.Agent.MaxBots,
-        StressInterval:    parseDur(cfg.Agent.StressInterval, 5*time.Second),
-        SystemInterval:    parseDur(cfg.Agent.SystemInterval, 5*time.Second),
-        HeartbeatInterval: parseDur(cfg.Agent.HeartbeatInterval, 10*time.Second),
+        StressInterval:    utils.ParseDurationDefault(cfg.Agent.StressInterval, 5*time.Second),
+        SystemInterval:    utils.ParseDurationDefault(cfg.Agent.SystemInterval, 5*time.Second),
+        HeartbeatInterval: utils.ParseDurationDefault(cfg.Agent.HeartbeatInterval, 10*time.Second),
         AppVersion:        Version, // 编译时注入：-ldflags "-X main.Version=..."
     })
     if err != nil { log.Fatal(err) }
@@ -364,6 +364,8 @@ func (r *TaskRunner) Cleanup() error {
 ```
 
 ### 4.5 Upgrader
+
+> ⚠️ **已废弃**：自动升级流程已废弃，升级改为运维手动重启 Agent 进程。设计文档保留供参考。
 
 ```go
 // agent/upgrader.go
@@ -762,6 +764,8 @@ type RunConfig struct {
 
 ## 8. 升级流程详细步骤
 
+> ⚠️ **已废弃**：自动升级流程已废弃，升级改为运维手动重启 Agent 进程。设计文档保留供参考。
+
 ```
 [Admin] POST /agent/v1/upgrade {url, sha256, version}
    │
@@ -858,6 +862,8 @@ type RunConfig struct {
 
 ### 10.3 升级失败
 
+> ⚠️ **已废弃**：自动升级流程已废弃，升级改为运维手动重启 Agent 进程。设计文档保留供参考。
+
 | 场景 | 处理 |
 |---|---|
 | 下载失败 / SHA256 不匹配 | 不退出，记录失败到日志，下次升级请求重试 |
@@ -907,7 +913,7 @@ type RunConfig struct {
 - [ ] **finalSnapshot 时序正确性**：所有 robot goroutine 退出后才采样，确保最后一批 OnComplete 已写入
 - [ ] **finalSnapshot 上报重试**：模拟 Admin 短暂不可达，Agent 持续重试至上报成功；连续失败 30 分钟内不接受新任务
 - [ ] 收到 stop 命令后 1 分钟内 drain 完成
-- [ ] 收到 upgrade 命令后能完整跑通：下载 → 校验 → drain → 退出 99 → Launcher 替换 → 新版本注册
+- [ ] 收到 upgrade 命令后能完整跑通：下载 → 校验 → drain → 退出 99 → Launcher 替换 → 新版本注册 — ⚠️ **已废弃**：自动升级流程已废弃，升级改为运维手动重启 Agent 进程
 - [ ] 单元测试通过率 100%
 - [ ] 跨平台采集（Windows / Linux）所有 SystemSnapshot 字段无 nil pointer / panic
 - [ ] 与 Admin 联调：能完整完成 1 → N → 1 的任务生命周期

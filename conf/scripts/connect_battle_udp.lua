@@ -1,4 +1,6 @@
 -- connect_battle_udp.lua: 连接战斗服 UDP + 设置 UDP 密钥 + 注册 150ms 心跳
+-- 仅做连接 / 配置 / 注册心跳，无主动收发，所以 send/recv = 0（心跳字节由后台 goroutine
+-- 通过 network 层全局带宽统计）。
 local network = require("network")
 local robot = require("robot")
 local utils = require("utils")
@@ -6,9 +8,7 @@ local log = require("log")
 
 local udp_seq = 0
 
--- 构造 UDP 心跳 body（39 字节）：
---   PacketIndex u16 | BattleId i64 | FighterIndex u8 | Session i64
---   Ack i32 | Rtt u16 | ClientTicks u64 | Seq u32 | LossCount u16 | Fps u8 | TargetFps u8
+-- 构造 UDP 心跳 body（39 字节）
 local function build_udp_heart()
     local battleId = robot.get("battleId") or 0
     local fighterIndex = robot.get("fighterIndex") or 0
@@ -41,13 +41,13 @@ function execute(r)
     local battleAddress = robot.get("battleAddress")
     if not battleAddress or battleAddress == "" then
         log.error("ConnectBattleUDP: 无战斗服地址")
-        return 1
+        return 1, 0, 0
     end
 
     local ok = network.connect_udp("battle", battleAddress)
     if not ok then
         log.error("ConnectBattleUDP 连接失败: " .. battleAddress)
-        return 1
+        return 1, 0, 0
     end
 
     -- 设置 UDP 密钥（从 listen_start_loading 保存）
@@ -57,7 +57,6 @@ function execute(r)
     end
 
     -- 新一轮战斗开始：复位包序号（对齐旧工具 ClearBattleInfo → packetIndex=0）
-    -- packageIndex 由 UDP 心跳、UDP 帧同步、TCP 战斗心跳共享；frameCount 仅用于本轮同步计数。
     udp_seq = 0
     robot.set("packageIndex", 0)
     robot.set("battleAck", 0)
@@ -67,5 +66,5 @@ function execute(r)
     network.register_udp_heartbeat("battle", 150, {cmd=4, act=2}, build_udp_heart)
 
     log.info("战斗服 UDP 连接完成 心跳已注册(150ms)")
-    return 0
+    return 0, 0, 0
 end

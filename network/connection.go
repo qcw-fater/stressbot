@@ -69,10 +69,7 @@ func (c *Connection) SetOnDisconnect(fn func()) {
 	c.mu.Unlock()
 }
 
-// SetOnClosed 设置连接关闭回调，**主动/被动关闭都会触发**。
-// 主要用于监控计数（每开 +1 / 每关 -1），与业务 onDisconnect 区分：
-//   - onDisconnect 只在意外断开触发，业务用来决定是否要停 robot；
-//   - onClosed 总是触发，用来对账连接生命周期。
+// SetOnClosed 设置连接关闭回调（主动/被动均触发，用于监控计数）。
 func (c *Connection) SetOnClosed(fn func()) {
 	c.mu.Lock()
 	c.onClosed = fn
@@ -182,9 +179,7 @@ func (c *Connection) Send(data []byte) (bool, int) {
 		stresslog.Error("[NETWORK] Send 发送失败", zap.String("service", c.serviceName), zap.Error(err))
 		return false, 0
 	}
-	// 全局带宽统计：所有真实出站字节都计入（含心跳、监听重发、UDP 单向发送等），
-	// 这样 monitor.CollectorSnapshot.Bandwidth 能反映"网卡级"出口流量，
-	// 而不是只统计 RecordAction success 路径里的成对字节（那条路径漏了心跳/超时/lua 等）。
+	// 全局带宽统计
 	monitor.Global().AddBandwidth(int64(n), 0)
 	return true, n
 }
@@ -296,14 +291,7 @@ func (c *Connection) onClose() {
 	stresslog.Debug("[NETWORK] 连接资源已清理", zap.String("service", c.serviceName), zap.String("robot", c.robotName))
 }
 
-// Close 主动关闭连接。
-//
-// **注意**：本函数会同步把 isClose 置 1。这意味着稍后 gnet 在底层 socket
-// 真正断开时回调 `onClose()`，会被 `CompareAndSwapInt32(&c.isClose, 0, 1)` 吞掉，
-// 因此 `onClosed` 监控回调必须在这里**主动**触发一次（与被动断开路径里的
-// `onClose()` 配对，保证 ConnEstablished/ConnDropped 计数对齐）。
-//
-// 对应地，`onDisconnect`（业务"意外断开"回调）这里**不**触发 —— 主动 Close 不算意外。
+// Close 主动关闭连接。触发 onClosed 但不触发 onDisconnect（主动关闭不算意外断开）。
 func (c *Connection) Close() {
 	if c == nil || !atomic.CompareAndSwapInt32(&c.isClose, 0, 1) {
 		return
@@ -314,15 +302,14 @@ func (c *Connection) Close() {
 		_ = c.closeFunc()
 	}
 	c.cancel()
-	// 监控关闭回调：与 onClose() 中的 onClosed 等价语义（主动/被动都触发一次）。
-	// CAS 保证整个 Close 全程仅一条路径触发 onClosed，不会重复 -1。
+	// CAS 保证 onClosed 只触发一次
 	if c.onClosed != nil {
 		go c.onClosed()
 	}
 	stresslog.Debug("[NETWORK] 连接资源已清理", zap.String("service", c.serviceName), zap.String("robot", c.robotName))
 }
 
-// OnReceive 收到网络消息时的分发入口。
+// OnReceive 收到网络消息时分发到 request-response 通道或持久监听回调。
 func (c *Connection) OnReceive(responseKey string, body []byte, headerErr uint64) {
 	if atomic.LoadInt32(&c.isClose) == 1 {
 		return
