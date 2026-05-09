@@ -158,7 +158,6 @@ const (
     AgentBusy      AgentStatus = "busy"
     AgentUnhealthy AgentStatus = "unhealthy" // 心跳超 30s 未到
     AgentOffline   AgentStatus = "offline"   // 心跳超 60s 未到
-    AgentUpgrading AgentStatus = "upgrading" // 升级期间临时状态
 )
 ```
 
@@ -341,11 +340,14 @@ type AdminServer struct {
     dispatcher   *AgentDispatcher
     assigner     *Assigner
 
+    logsProxyClient *http.Client // Agent 日志代理（5s 超时）
+
     history      *HistoryStore  // 可选，cfg.History.Enabled=false 时为 nil
     sampler      *Sampler       // 同上
 
     httpSrv      *http.Server
     stopCh       chan struct{}
+    wg           sync.WaitGroup
 }
 
 func New(cfg Config) (*AdminServer, error)
@@ -1116,6 +1118,17 @@ func (s *Sampler) loop(ctx context.Context, taskID string, startedAt time.Time) 
 | `GET` | `/api/system/agents` | 各 Agent 系统快照 |
 | `GET` | `/api/system/agents/{id}` | 指定 Agent 系统快照 |
 
+#### 日志
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/api/logs/admin` | Admin 本地 Ring buffer 日志查询（`?afterSeq=N&limit=M`） |
+| `GET` | `/api/logs/agents/{id}` | 代理转发：从指定 Agent 的 Ring buffer 查询日志 |
+| `GET` | `/api/logs/admin/files` | 列出 Admin 本地日志文件 |
+| `GET` | `/api/logs/admin/files/{name}` | 下载 Admin 指定日志文件 |
+| `GET` | `/api/logs/agents/{id}/files` | 代理转发：列出指定 Agent 的日志文件 |
+| `GET` | `/api/logs/agents/{id}/files/{name}` | 代理转发：下载指定 Agent 的日志文件 |
+
 > ⚠️ **已废弃**：自动升级流程已废弃，升级改为运维手动重启 Agent 进程。设计文档保留供参考。
 
 #### 二进制 / 升级
@@ -1136,6 +1149,19 @@ func (s *Sampler) loop(ctx context.Context, taskID string, startedAt time.Time) 
 ```go
 mux.Handle("/", http.FileServer(http.Dir(cfg.StaticDir)))  // web/dist
 ```
+
+#### 日志 handler 说明
+
+| Handler | 功能 |
+|---|---|
+| `handleGetAdminLogs` | 从 `logview.GetRingBuffer()` 查询 Admin 本地日志。支持 `afterSeq`（游标）和 `limit` 参数，返回 `logview.QueryResult`。Ring buffer 未启用时返回空结果 |
+| `handleGetAgentLogs` | 代理转发：验证 Agent 存在且非 offline，然后向 `http://{agent.Address}/agent/v1/logs` 发起 GET 请求，将响应透传给前端 |
+| `handleListAdminLogFiles` | 根据当前日志文件路径（`stresslog.GetLogFilePath()`）扫描同目录下同前缀的所有日志文件，返回 `[]LogFileInfo`（含 `name`、`size`、`modTime`） |
+| `handleDownloadAdminLogFile` | 校验文件名不含路径分隔符或 `..`，以 `text/plain` 附件形式通过 `http.ServeContent` 返回指定日志文件 |
+| `handleListAgentLogFiles` | 代理转发：向 `http://{agent.Address}/agent/v1/logs/files` 发起 GET 请求，透传文件列表 |
+| `handleDownloadAgentLogFile` | 代理转发：向 `http://{agent.Address}/agent/v1/logs/files/{name}` 发起 GET 请求，透传文件内容（含 Content-Disposition header） |
+
+Agent 日志代理使用 `logsProxyClient`（`http.Client{Timeout: 5s}`），超时或不可达时返回 `AGENT_OFFLINE` 错误。文件下载代理使用独立的 60s 超时 client，以支持大文件传输。
 
 ### 5.2 Agent 上行 API
 
@@ -1374,12 +1400,7 @@ stopping ─所有 agent done─→ stopped
   },
   "task": {
     "maxFlowSizeMB": 10,
-    "maxBinarySizeMB": 200,
     "deadlineDefault": "1h"
-  },
-  "upgrade": {
-    "rolloutDelay": "5s",
-    "perAgentTimeout": "5m"
   },
   "history": {
     "enabled": true,
@@ -1411,8 +1432,6 @@ stopping ─所有 agent done─→ stopped
 | `agentRegistry.unhealthyAfter` | `30s` | 心跳超时阈值 1 |
 | `agentRegistry.offlineAfter` | `60s` | 心跳超时阈值 2 |
 | `task.maxFlowSizeMB` | `10` | flow.json 上传上限 |
-| `upgrade.rolloutDelay` | `5s` | 滚动升级两个 Agent 间隔 |
-| `upgrade.perAgentTimeout` | `5m` | 单 Agent 升级超时 |
 | `history.enabled` | `true` | 历史归档总开关；`false` 时跳过所有 MySQL 调用 |
 | `history.mysql.dsn` | — | MySQL DSN（go-sql-driver/mysql 格式） |
 | `history.mysql.maxOpenConns` | `10` | 连接池最大连接数 |
@@ -1460,14 +1479,16 @@ data/binaries/
 // admin/errors.go
 var (
     ErrTaskNotFound       = NewError("TASK_NOT_FOUND", 404)
+    ErrTaskConflict       = NewError("TASK_CONFLICT", 409)       // 任务单例约束
     ErrTaskInvalidState   = NewError("TASK_INVALID_STATE", 409)
     ErrAgentNotFound      = NewError("AGENT_NOT_FOUND", 404)
     ErrAgentBusy          = NewError("AGENT_BUSY", 409)
     ErrAgentOffline       = NewError("AGENT_OFFLINE", 409)
     ErrCapacityExceeded   = NewError("CAPACITY_EXCEEDED", 400)
-    ErrUpgradeInProgress  = NewError("UPGRADE_IN_PROGRESS", 409)
-    ErrBinaryNotFound     = NewError("BINARY_NOT_FOUND", 404)
     ErrInvalidArgument    = NewError("INVALID_ARGUMENT", 400)
+    ErrHistoryDisabled    = NewError("HISTORY_DISABLED", 503)    // 历史模块未启用
+    ErrHistoryNotFound    = NewError("HISTORY_NOT_FOUND", 404)
+    ErrStarredProtected   = NewError("HISTORY_STARRED", 409)     // 阻止删除已标星记录
 )
 
 type Error struct {
@@ -1576,7 +1597,7 @@ type Error struct {
 
 ### 13.2 Admin 假定 Agent 提供
 
-1. 监听 `/agent/v1/{task,stop,upgrade,version,status,healthz}` 全部端点
+1. 监听 `/agent/v1/{task,stop,version,status,logs,logs/files,logs/files/,healthz}` 全部端点
 2. 任务下发后异步执行，202 Accepted 立即返回
 3. 升级请求接受后通过 `/api/agent/{id}/task/{tid}/done` 上报中断（result=stopped）
 

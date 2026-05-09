@@ -280,12 +280,12 @@ export function LuaForm({ mode, script, onChangeScript }: LuaFormProps) {
             {mode === 'action' && (
               <>
                 ；<code>return code, send, recv</code>
-                （0=成功；send/recv 由 lua API 第 3、4 个返回值给出）
+                （错误码，发送字节数，接收字节数）
               </>
             )}
             {mode === 'boolean' && (
               <>
-                ；<code>return true / false</code>（返回其它类型直接报错）
+                ；<code>return true / false</code>
               </>
             )}
             {mode === 'callback' && (
@@ -327,6 +327,7 @@ export function LuaForm({ mode, script, onChangeScript }: LuaFormProps) {
         options={{
           minimap: { enabled: false },
           fontSize: 12,
+          fontFamily: "'JetBrains Mono', Consolas, Menlo, 'Courier New', monospace",
           scrollBeyondLastLine: false,
           readOnly: false,
           quickSuggestions: { other: true, comments: false, strings: false },

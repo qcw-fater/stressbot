@@ -53,7 +53,7 @@ type Node struct {
 	// ── wait 专用 ─────────────────────────────────────────────────
 	WaitMs int `json:"waitMs"` // 等待时长（毫秒）
 
-	// ── 通用（action / boolean 节点有效）────────────────────────────
+	// ── 通用（action 节点有效）────────────────────────────
 	DelayMs int `json:"delayMs"` // > 0: 使用此值；= 0: 使用 TaskFlow.DefaultDelayMs；< 0: 禁用延迟
 }
 

@@ -216,8 +216,7 @@ function CallbackTemplateBody({
               <Alert
                 type="info"
                 showIcon
-                message="静默消费"
-                description="收到推送即丢弃。导出为 {} 空对象。若需写 state 或处理 binary，请切换到 declarative / lua。"
+                message="静默消费：收到推送后不执行任何逻辑，静默处理。"
               />
             ),
           },
@@ -226,6 +225,12 @@ function CallbackTemplateBody({
             label: 'declarative',
             children: (
               <div>
+                <Alert
+                  type="info"
+                  showIcon
+                  message="声明式回调：指定 s2cProto + store 映射，自动解析推送消息并存入 state。"
+                  style={{ marginBottom: 12 }}
+                />
                 <div style={{ marginBottom: 12 }}>
                   <span style={{ marginRight: 8, color: 'var(--text-secondary)' }}>s2cProto:</span>
                   <Space.Compact style={{ width: '70%' }}>

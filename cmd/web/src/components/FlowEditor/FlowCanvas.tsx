@@ -68,8 +68,24 @@ function FlowCanvasInner() {
   const setClipboard = useEditorStore((s) => s.setClipboard);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, setCenter } = useReactFlow();
   const [menu, setMenu] = useState<ContextMenu | null>(null);
+
+  // 加载/新建流程后定位到 main 入口节点
+  const needsFitView = useFlowStore((s) => s.needsFitView);
+  const rfNodeIds = useFlowStore((s) => s.rfNodes.map((n) => n.id).join(','));
+  useEffect(() => {
+    if (needsFitView && rfNodeIds.length > 0) {
+      const mainPos = useFlowStore.getState().layout.nodePositions['main'];
+      if (mainPos) {
+        const timer = setTimeout(() => {
+          setCenter(mainPos.x, mainPos.y, { zoom: 1, duration: 300 });
+          useFlowStore.setState({ needsFitView: false });
+        }, 300);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [needsFitView, rfNodeIds, setCenter]);
 
   // dropEffect 必须与拖出端的 effectAllowed 兼容：
   //   - 普通节点类型：effectAllowed='move'  → dropEffect='move'

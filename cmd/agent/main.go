@@ -13,6 +13,7 @@ import (
 	"stressbot/adapter"
 	"stressbot/agent"
 	"stressbot/engine"
+	"stressbot/logview"
 	"stressbot/monitor"
 	"stressbot/network"
 	"stressbot/protox"
@@ -103,6 +104,8 @@ func main() {
 		Compress:     cfg.Log.Compress,
 	}
 	stresslog.InitLog(logPath, "stressbot", logConf, "")
+	newLogger := logview.AttachRingBuffer(stresslog.GetLogger(), 50000)
+		stresslog.ReplaceLogger(newLogger)
 
 	if cfg.Agent.Enabled {
 		stresslog.Info("[MAIN] Agent 模式启动", zap.String("adminAddr", cfg.Agent.AdminAddr))

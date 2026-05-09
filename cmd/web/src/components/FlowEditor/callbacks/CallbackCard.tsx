@@ -47,6 +47,11 @@ export function CallbackCard({ data, selected }: NodeProps) {
           </span>
         )}
       </div>
+      {callback.description && (
+        <div className="card-description" title={callback.description}>
+          {callback.description}
+        </div>
+      )}
     </div>
   );
 }

@@ -526,7 +526,7 @@ function MetricsBadge({ nodeId }: { nodeId: string }) {
 
 **E. 保存**
 1. 收集 store 的 nodes/edges/actions/callbacks → 反序列化为 `TaskFlow`。
-2. ajv 校验 + 引用合法性检查（§10.3）。
+2. ajv 校验 + 引用合法性检查（§10.4）。
 3. **打开 JsonPreviewModal**，展示完整 JSON。
 4. 用户确认 → 触发 `onSave(flowJson)` 回调（本期写 LocalStorage + 触发 download 选项）。
 
@@ -1159,6 +1159,56 @@ stores:
   - protoCache:      { hash, rootJson }
 ```
 
+### 10.3 流程库 — FlowManagerModal（IndexedDB 流程持久化）
+
+> **新增（2026-05-09）**：Toolbar 中「流程管理」按钮唤起 `FlowManagerModal`，提供用户级的"本地流程库"，支持保存/打开/覆盖/删除多份完整流程草稿。
+
+**存储架构**：
+
+```
+db:   stressbot-flows-manager       (idb-keyval createStore)
+store: data                          (单 object store，key = ManagedFlow.id)
+```
+
+**ManagedFlow 数据模型**（定义于 `store/flowManagerStore.ts`）：
+
+```ts
+export interface ManagedFlow {
+  id: string;          // nanoid() 自动生成；覆盖时传入已有 id
+  name: string;        // 用户可读名称（如 "200v200 v1.2"）
+  flow: TaskFlow;      // 完整业务数据（nodes/actions/callbacks）
+  layout: FlowLayout;  // 画布布局（nodePositions/showListenEdges）
+  updatedAt: number;   // Date.now()，列表按此倒序
+}
+```
+
+**操作**：
+
+| 操作 | 实现 | 说明 |
+|---|---|---|
+| 另存为新流程 | `saveFlow(name, flow, layout)` | 不传 `existingId` 时自动 `nanoid()` 生成新 ID |
+| 覆盖已有流程 | `saveFlow(name, flow, layout, existingId)` | 传入已有记录 ID，更新 flow/layout/updatedAt |
+| 打开流程 | `getFlow(id)` → `loadFromTaskFlow(flow, layout)` | 替换当前画布，关闭 modal |
+| 删除流程 | `deleteFlow(id)` | 不可恢复，Popconfirm 二次确认 |
+| 列出全部流程 | `listFlows()` | 返回按 `updatedAt` 倒序的数组 |
+
+**UI 布局**（`FlowManagerModal`）：
+
+```
+┌─ 本地流程管理 (IndexedDB) ──────────────────────────────────────┐
+│  [输入流程名称保存当前草稿...]  [另存为新流程]                     │
+├──────────────────────────────────────────────────────────────────┤
+│  流程名称            │ 更新时间              │ 操作              │
+│  200v200 v1.2        │ 2026-05-09 14:30:00  │ [打开] [覆盖] [×] │
+│  未命名流程 0508      │ 2026-05-08 10:00:00  │ [打开] [覆盖] [×] │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+设计要点：
+- **与 LocalStorage 编辑稿互补**：`persistDraft` 存的是"当前工作草稿"（自动保存），FlowManagerModal 存的是"命名快照"（手动保存），两者互不干扰。
+- **打开流程会替换当前草稿**：覆盖前不做二次确认（草稿已由 `persistDraft` 自动保存到 LocalStorage，可通过刷新恢复）。
+- **覆盖操作有 Popconfirm**：提示"用当前草稿覆盖 xxx？"，防止误触。
+
 操作面板：
 
 - **保存动作到库**：从 ActionEditor 触发，输入名称/标签 → 写入 `actionLibrary`。
@@ -1166,7 +1216,7 @@ stores:
 - **从库选择**：右侧 `ActionLibrary` / `CallbackLibrary` 面板支持搜索 / 标签筛选 / 拖入。
 - **导入/导出**：分别导出为 `actions-library.json` 和 `callbacks-library.json`；导入合并去重。
 
-### 10.3 导出 / 校验
+### 10.4 导出 / 校验
 
 导出流程：
 
@@ -1212,7 +1262,7 @@ stores:
 - `wait`：`waitMs > 0`
 - `action.listenCallbacks[].server`：必填非空字符串（手输容易漏）
 
-### 10.4 导入
+### 10.5 导入
 
 ```
 [导入按钮]
@@ -1225,7 +1275,7 @@ stores:
 6. 替换 store（询问是否覆盖当前编辑稿）
 ```
 
-### 10.5 兼容性
+### 10.6 兼容性
 
 第一版仅支持 `redesign-flow-nodes.md` 描述的新格式。导入时若检测到旧格式（如 `nodes` 是数组、`next: [{node, weight}]`），给出明确提示并指引用户先用 Go 端工具迁移（后续可在前端加 codemod）。
 
@@ -1640,7 +1690,7 @@ npm install -D @types/dagre vitest @vitest/ui \
 
 ---
 
-> 本设计文档随实现迭代演进。**最近一次对齐：2026-04-30**，主要更新：补充 §20 分布式集成（HomeShell + 4 Drawer + MonitorDock + Lua LSP），编辑器从单页编辑模式扩展为完整压测控制台。
+> 本设计文档随实现迭代演进。**最近一次对齐：2026-05-09**，主要更新：补充 §10.3 FlowManagerModal 流程库、§20.3a TaskStartModal 调试模式、§20.3b ActiveTaskGuardModal、§20.8 scriptSync 脚本同步服务、§20.9 resourcesStore 双 DB 资源管理、HistoryDrawer → HistoryModal 重命名；§20 分布式集成从单页编辑模式扩展为完整压测控制台。
 >
 > 任何与实际代码偏离之处以代码为准；新增重大设计偏离时在对应章节顶部追加"已变更：日期 + 摘要"补丁说明，避免推翻全章。
 
@@ -1662,7 +1712,7 @@ HomeShellInner (pages/EditorPage.tsx)
 ├── MonitorDock (6 Tabs · 可拖拽折叠)
 └── Drawers
     ├── ResourcesDrawer  proto/lua 资源
-    ├── HistoryDrawer    list / detail / compare
+    ├── HistoryModal     list / detail / compare（Modal 形态，原 HistoryDrawer 已重构为 Modal）
     └── AgentsDrawer     节点状态 + 全部停止（无升级；版本部署改为运维手动重启 Agent）
 ```
 
@@ -1689,6 +1739,55 @@ edit ──[startTask]──> running ─轮询task─> task.state=stopped/faile
 - **startTask**：`flowStore.exportFlow()` → 校验通过 → 收集 `resourcesStore` 的 proto/lua → `tasksApi.createTask` (multipart) → `tasksApi.startTask` → 切到 `running`。其中容量校验在前端先估算一次（`agents.maxBots` 求和），后端最终决定。
 - **stopTask**：`tasksApi.stopTask`；轮询持续直到 stopped。
 - **attachToActive**：`tasksApi.getTask + getHistoryConfig`（如果是 owner）→ `flowStore.loadFromTaskFlow`。本地未保存的草稿先 stash 到 LocalStorage，离开 viewActive 时可一键还原。
+
+### 20.3a 启动任务弹窗 — TaskStartModal（两阶段参数复核 + 调试模式）
+
+> **新增（2026-05-09）**：`components/runtime/TaskStartModal.tsx` — 启动压测任务的确认弹窗，采用"参数复核 → 提交"两阶段 UX，确保用户在提交前看清所有关键参数。
+
+**两阶段 UX**：
+
+1. **复核阶段**（弹窗打开）：展示任务名、机器人数、Auth 地址、并发数、资源清单（proto/lua 文件数量）、容量预检结果。
+2. **提交阶段**（点击启动）：调用 `services.startTask`；成功后回调关闭 modal，失败由 `showApiError` 接住并展示。
+
+**调试模式**（`editorStore.debugMode`）：
+
+弹窗顶部提供 **测试 ↔ 调试** 二选一 `Segmented` 控制，持久化到 `localStorage`（`stressbot:debugMode`）：
+
+| 维度 | 测试模式（默认，蓝色） | 调试模式（紫色） |
+|---|---|---|
+| totalBots / concurrency | 用户填写 | 自动装填 `1` / `1` |
+| logLevel | 用户选择（默认 info） | 自动装填 `debug` |
+| skipCapacityCheck | `false`（容量不足阻塞启动） | `true`（跳过容量预检，让服务端兜底） |
+| 任务名 | 用户填写 | 如果当前为占位名则自动填 `debug · MMDD-HHmm` |
+| 适用场景 | 正式压测 | 本地快速验证流程是否跑通 |
+
+- 模式切换**不回滚**已填数值（保留用户偏好），仅在首次切入调试时主动装填一次（`useRef` 哨兵防重复装填）。
+- 0 个在线 Agent 时无论哪种模式都**禁用启动按钮**（前端最低门槛）。
+
+**Auth 扩展字段编辑器**（`AuthExtraEditor`）：
+
+高级设置折叠面板中的 `robotConfig.authExtra`（`Record<string, string>`）提供可视化键值对编辑，而非原始 JSON 文本框。lua 脚本通过 `robot.get(key)` 读取；常用字段如 `version` / `channel` / `platform`。
+
+**资源同步**：
+
+弹窗打开时自动执行 `syncFlowScriptsToIdb`（详见 §20.8），把 flow 引用但 IDB 缺失的脚本从默认基线拉回。同步完成后展示 proto/lua 文件数量，以及缺失脚本数（缺失时禁止启动）。
+
+### 20.3b 活动任务守卫 — ActiveTaskGuardModal
+
+> **新增（2026-05-09）**：`components/runtime/ActiveTaskGuardModal.tsx` — 页面加载时检测到已有 active 任务的引导弹窗。
+
+**触发时机**：`HomeShellInner` 启动时（boot 阶段）调用 `tasksApi.listTasks()`，若发现 `state ∈ {starting, running, stopping}` 的任务，设置 `guardTask` state 触发弹窗。
+
+**用户选择**：
+
+| 选项 | 行为 |
+|---|---|
+| 「查看运行中」 | 调用 `attachToActive(taskId)`；runtimeStore mode → `viewActive`；本地草稿 stash 到 LocalStorage；画布替换为该任务的 flow 并锁定为只读 |
+| 「继续编辑」 | 关闭弹窗，留在 `edit` 模式；**启动按钮禁用**（RuntimeBar 显示 tooltip 提示"集群已有任务在执行"） |
+
+关闭弹窗（点 X / mask）等价于"继续编辑"。
+
+弹窗中展示任务详情：任务名、任务 ID、状态（彩色 Tag）、机器人数 + Agent 分布数、启动时间。
 
 ### 20.4 节点级监控（T4）
 
@@ -1725,7 +1824,7 @@ edit ──[startTask]──> running ─轮询task─> task.state=stopped/faile
 | Drawer | 关键能力 |
 |---|---|
 | ResourcesDrawer | 上传 / 删除 / 清空 / 默认基线导入；写入 IndexedDB；`protoStore.reload()` 触发提示 |
-| HistoryDrawer | list（搜索/收藏/分页） / detail（备注/标签/趋势/动作汇总/克隆/下载归档） / compare（2~5 个并排比较） |
+| HistoryModal | list（搜索/收藏/分页） / detail（备注/标签/趋势/动作汇总/克隆/下载归档） / compare（2~5 个并排比较）；原 HistoryDrawer 已重构为 Modal 形态（`components/modules/history/HistoryModal.tsx`） |
 | AgentsDrawer | 表格（状态/任务/CPU%/MEM%/心跳） · 「全部停止」按钮（等价于停止当前 active 任务） · 离线删除 |
 
 错误处理统一过 `services/errorHandler.ts`：通用错误 message.error；`TASK_CONFLICT` 走 Modal.confirm 让用户选择"查看运行中"或"留在编辑态"。
@@ -1739,7 +1838,88 @@ edit ──[startTask]──> running ─轮询task─> task.state=stopped/faile
 
 LuaForm 顶部 Alert 同时显示错误数 + 警告数 + 前 5 条详情；Worker 失败时退化为旧字符串包含校验，不让面板完全没提示。
 
-### 20.8 共享设计原则
+### 20.8 脚本同步服务 — scriptSync（`services/scriptSync.ts`）
+
+> **新增（2026-05-09）**：自动把 flow 引用的 Lua 脚本与 IndexedDB 同步，保证启动任务时所有被引用脚本都存在。
+
+**设计目标**：
+
+- **单一事实源**：`flow → 引用的脚本`是唯一来源，IDB 只是用户编辑稿/本地副本。
+- **保护用户编辑稿**：IDB 中已存在的脚本**永不覆盖**（即使内容与基线不同）。
+- **兜底拉取**：IDB 中没有的脚本从 `/conf/scripts/<name>` 拉取默认基线（开发期由 Vite `confMountPlugin` 提供）。
+
+**调用时机**：
+
+| 调用点 | 说明 |
+|---|---|
+| Toolbar 导入 JSON / 加载 conf/flow.json 后 | 自动把"引用了但 IDB 没有"的脚本从基线拉回 |
+| EditorPage 初始化默认 flow 后 | 同上 |
+| TaskStartModal 弹窗打开时 | 最后一道兜底；若仍有缺失则禁止启动 |
+
+**脚本名扫描范围**（`collectFlowScriptNames`）：
+
+| 来源字段 | 说明 |
+|---|---|
+| `actions[].script` | 动作节点 lua 模式 |
+| `callbacks[].script` | listen 回调 lua 模式 |
+| `nodes[].condition`（`lua:` 前缀） | boolean / loop 前置条件 |
+| `nodes[].breakCondition`（`lua:` 前缀） | loop 后置条件 |
+
+仅扫静态字段；脚本内部的 `require('xxx')` / `dofile()` 是动态的，无法静态分析，由用户在资源管理中手动上传。
+
+**返回结果**（`ScriptSyncResult`）：
+
+```ts
+interface ScriptSyncResult {
+  added: string[];    // 本次从基线拉回并写入 IDB 的脚本名
+  skipped: string[];  // IDB 已有，未做任何操作（保护用户编辑稿）
+  missing: string[];  // 基线也拉不到的脚本名（启动会失败）
+}
+```
+
+### 20.9 IndexedDB 资源管理 — resourcesStore（`services/resourcesStore.ts`）
+
+> **新增（2026-05-09）**：管理用户上传的 proto / lua 资源文件，采用双 DB 架构。
+
+**双 DB 架构**：
+
+由于 `idb-keyval` 的限制（每个 DB 只能挂一个 object store，不会触发 version upgrade 加 store），proto 和 lua 各使用一个独立数据库：
+
+| 数据库 | Object Store | 内容 |
+|---|---|---|
+| `stressbot-resources-proto` | `data` | 用户上传的 .proto 文件 |
+| `stressbot-resources-scripts` | `data` | 用户上传/编辑的 .lua 脚本 |
+
+**ResourceFile 数据模型**：
+
+```ts
+export interface ResourceFile {
+  name: string;        // 文件名（作为 IDB key）
+  content: string;     // utf-8 文本内容（非 ArrayBuffer，方便 Monaco 直接使用）
+  size: number;        // 字节长度
+  uploadedAt: string;  // ISO 时间戳
+}
+```
+
+**Lua 脚本基线版本自动清除机制**：
+
+当引擎对 Lua 脚本返回值的契约发生不向后兼容的破坏性变更时（例如 v1 → v2 切换为三元组返回），需 bump `SCRIPT_BASELINE_VERSION` 常量。浏览器加载时比对 LocalStorage 中保存的版本号：
+
+- 不匹配 → 一次性清空 `stressbot-resources-scripts` 中所有数据（用户编辑稿与基线副本一并丢弃）
+- 写入新版本号到 LocalStorage，避免重复清空
+- 下次进入 LuaForm 或启动任务时，由 `scriptSync` 的"IDB miss → fetch /conf/scripts/<name>"路径自动拉新版基线
+
+设计取舍：清空策略会丢失用户编辑过的本地稿，但 IDB 本身不是云端存储，换取"基线升级零手工操作"的体验。
+
+**变更订阅**（`subscribe` 模式）：
+
+暴露 `subscribe(fn)` 给 React 组件订阅"资源变更"事件（配合 `useSyncExternalStore`）。所有写操作（`addProto` / `removeProto` / `addScript` / `removeScript` 等）完成后触发 `notify()`，订阅方自动重算。
+
+**Legacy 迁移**（v0 → v1）：
+
+v0 版本使用同一 `stressbot-resources` DB 同时挂 proto / scripts 两个 store，触发 IDB "One of the specified object stores was not found" 错误。模块加载时自动检测旧 DB，把 proto 数据搬入新 DB，然后删除旧 DB。迁移失败静默（旧 DB 不存在 / 已损坏都按"无需迁移"处理）。
+
+### 20.10 共享设计原则
 
 1. **Mode 驱动 UI**：所有"什么时候能编辑 / 什么时候轮询 / 什么时候默认展开"全部由 `runtimeStore.mode` 决定，避免散在组件里
 2. **Provider Bridge**：`metricsProvider`、`MetricsProvider`、`registerTaskConflictHandler` 都用回调注入，让 services 层不依赖任何 UI 组件
@@ -1747,7 +1927,7 @@ LuaForm 顶部 Alert 同时显示错误数 + 警告数 + 前 5 条详情；Worke
 4. **资源优先级**：Proto/Lua 加载顺序 `IndexedDB > /conf > 编译时 fallback`；用户上传文件后 `protoStore.reload()` 立即生效
 5. **草稿保护**：进 viewActive 前自动 stash localStorage；finalReport / 用户主动"恢复编辑稿"按钮一键还原
 
-### 20.9 测试覆盖（截至本次提交）
+### 20.11 测试覆盖（截至本次提交）
 
 - 22（codec / refsCheck / refsGraph）
 - 17（metricsBinding：节点映射 / 多节点共享 action / callback 卡片 / Apdex 边界）

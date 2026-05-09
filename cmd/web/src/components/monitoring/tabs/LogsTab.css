@@ -1,0 +1,11 @@
+/* 修复 find-widget 中按钮错位的问题：将按钮恢复为 content-box，抵消全局 border-box 影响 */
+.logs-tab-editor .monaco-editor .find-widget .button {
+  box-sizing: content-box !important;
+}
+
+/* 完全隐藏 Monaco 的自定义 tooltip 解决闪烁问题，我们将在 React 代码中注入原生的 title 属性 */
+.monaco-editor .workbench-hover-container,
+.monaco-editor .monaco-hover,
+.workbench-hover-container {
+  display: none !important;
+}

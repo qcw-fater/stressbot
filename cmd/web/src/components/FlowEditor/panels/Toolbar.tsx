@@ -19,6 +19,7 @@ import {
   DownloadOutlined,
   FileAddOutlined,
   FileTextOutlined,
+  FolderOpenOutlined,
   ImportOutlined,
   NotificationOutlined,
   RedoOutlined,
@@ -26,7 +27,7 @@ import {
   ThunderboltOutlined,
   UndoOutlined,
 } from '@ant-design/icons';
-import { useMemo, useRef, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { validateFlow } from '../validation/refsCheck';
 import { redo, undo } from '../store/undoRedo';
 import { clearDraft } from '../store/persistDraft';
@@ -38,6 +39,7 @@ import { useFlowStore } from '../store/flowStore';
 import { useEditorStore } from '../store/editorStore';
 import { useProtoStore } from '../proto/protoStore';
 import { syncFlowScriptsToIdb } from '@/services/scriptSync';
+import { FlowManagerModal } from './FlowManagerModal';
 import type { TaskFlow } from '@/types/flow';
 
 export interface ToolbarProps {
@@ -61,6 +63,8 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
   const protoFileCount = useProtoStore((s) => s.fileCount);
   const callbackCount = useFlowStore((s) => Object.keys(s.callbacks).length);
 
+  const [flowManagerOpen, setFlowManagerOpen] = useState(false);
+
   // 实时校验：错误数量徽章（用浅采样：每次状态变化重新计算）
   const flowSnap = useFlowStore(
     useShallow((s) => ({
@@ -70,7 +74,9 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
       defaultDelayMs: s.defaultDelayMs,
     })),
   );
-  const errorCount = useMemo(() => validateFlow(flowSnap).errors.length, [flowSnap]);
+  const validation = useMemo(() => validateFlow(flowSnap), [flowSnap]);
+  const errorCount = validation.errors.length;
+  const warnCount = validation.warnings.length;
 
   // 隐藏的 input[type=file]，由"文件 → 导入"菜单项触发
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -233,6 +239,9 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
             文件 <DownOutlined style={{ fontSize: 10 }} />
           </Button>
         </Dropdown>
+        <Button icon={<FolderOpenOutlined />} onClick={() => setFlowManagerOpen(true)}>
+          流程管理
+        </Button>
 
         {SECTION_DIVIDER}
 
@@ -260,8 +269,8 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
               </Button>
             </Badge>
           </Tooltip>
-          <Tooltip title={errorCount > 0 ? `${errorCount} 处校验错误` : '流程结构校验'}>
-            <Badge count={errorCount} overflowCount={99} offset={[-4, 4]}>
+          <Tooltip title={errorCount > 0 ? `${errorCount} 处错误` : warnCount > 0 ? `${warnCount} 处警告` : '校验通过'}>
+            <Badge count={errorCount > 0 ? errorCount : warnCount} overflowCount={99} offset={[-4, 4]} color={errorCount > 0 ? undefined : 'orange'}>
               <Button
                 icon={<CheckCircleOutlined />}
                 onClick={() => onOpenValidation?.()}
@@ -302,6 +311,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
           e.target.value = '';
         }}
       />
+      <FlowManagerModal open={flowManagerOpen} onClose={() => setFlowManagerOpen(false)} />
     </div>
   );
 }

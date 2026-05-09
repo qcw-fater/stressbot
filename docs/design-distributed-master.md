@@ -229,13 +229,13 @@ const { data: system } = useSWR('/api/system', fetcher, {
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | `POST` | `/api/agent/register` | Agent 注册（name、address、maxBots、staticInfo） |
-| `POST` | `/api/agent/heartbeat` | 心跳 + 当前 status |
+| `POST` | `/api/agent/{id}/heartbeat` | 心跳 + 当前 status |
+| `POST` | `/api/agent/{id}/deregister` | Agent 注销（best-effort） |
 | `POST` | `/api/agent/stress` | 推送压测指标（CollectorSnapshot），仅任务运行时 |
 | `POST` | `/api/agent/system` | 推送系统指标（SystemSnapshot），始终上报（含空闲时） |
-| `GET` | `/api/agent/task` | 轮询拉取当前任务分配（Push 失败时的恢复手段） |
-| `GET` | `/api/agent/config/{taskId}` | 拉取配置包（flow.json + proto + scripts） |
-| `POST` | `/api/agent/task/{id}/done` | 报告任务正常完成 |
-| `POST` | `/api/agent/task/{id}/failed` | 报告任务失败（含错误信息） |
+| `GET` | `/api/agent/{id}/pending-task` | 轮询拉取当前任务分配（Push 失败时的恢复手段） |
+| `GET` | `/api/tasks/{id}/config/{path...}` | 拉取配置包（flow.json + proto + scripts） |
+| `POST` | `/api/agent/{id}/task/{tid}/done` | 报告任务正常完成 |
 
 ### 5.3 Agent 控制端点（Admin 主动 Push）
 
@@ -243,9 +243,14 @@ Agent 在 `listenAddr` 启动轻量 HTTP 服务器接受 Admin 命令。与 Agen
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| `POST` | `/task/assign` | 接收任务分配 |
-| `POST` | `/task/stop` | 停止当前任务 |
-| `GET` | `/health` | 健康检查 |
+| `POST` | `/agent/v1/task` | 接收任务分配 |
+| `POST` | `/agent/v1/stop` | 停止当前任务 |
+| `GET` | `/agent/v1/version` | 查询 Agent 版本 |
+| `GET` | `/agent/v1/status` | 查询 Agent 状态 |
+| `GET` | `/agent/v1/logs` | 查询 Agent 日志（ring buffer） |
+| `GET` | `/agent/v1/logs/files` | 列出日志文件 |
+| `GET` | `/agent/v1/logs/files/{name}` | 下载日志文件 |
+| `GET` | `/healthz` | 健康检查 |
 
 ---
 
@@ -257,22 +262,25 @@ Agent 在 `listenAddr` 启动轻量 HTTP 服务器接受 Admin 命令。与 Agen
 type Task struct {
     ID          string       `json:"id"`
     Name        string       `json:"name"`
-    Status      TaskStatus   `json:"status"`
+    State       TaskState    `json:"state"`
     TotalBots   int          `json:"totalBots"`
-    Config      *TaskConfig  `json:"config,omitempty"`
+    Config      TaskConfig   `json:"config"`
     Assignments []Assignment `json:"assignments,omitempty"`
+    Reports     map[string]TaskCompletionReport `json:"reports,omitempty"`
     CreatedAt   time.Time    `json:"createdAt"`
     StartedAt   *time.Time   `json:"startedAt,omitempty"`
     StoppedAt   *time.Time   `json:"stoppedAt,omitempty"`
+    ErrorMsg    string       `json:"errorMsg,omitempty"`
 }
 
-type TaskStatus string
+type TaskState string
 const (
-    TaskPending  TaskStatus = "pending"
-    TaskRunning  TaskStatus = "running"
-    TaskStopping TaskStatus = "stopping"
-    TaskStopped  TaskStatus = "stopped"
-    TaskFailed   TaskStatus = "failed"
+    TaskPending  TaskState = "pending"
+    TaskStarting TaskState = "starting"
+    TaskRunning  TaskState = "running"
+    TaskStopping TaskState = "stopping"
+    TaskStopped  TaskState = "stopped"
+    TaskFailed   TaskState = "failed"
 )
 ```
 
@@ -288,21 +296,26 @@ running → failed（Agent 主动报告 /task/{id}/failed）
 
 ```go
 type TaskConfig struct {
-    AccountPrefix     string            `json:"accountPrefix"`
-    StartNumber       int               `json:"startNumber"`
-    MainService       string            `json:"mainService"`
-    ConcurrentNum     int               `json:"concurrentNum"`
-    AuthAddress       string            `json:"authAddress"`
-    AuthExtra         map[string]string `json:"authExtra"`
-    HeartbeatInterval string            `json:"heartbeatInterval"`
-    TCPTimeout        string            `json:"tcpTimeout"`
-    HTTPTimeout       string            `json:"httpTimeout"`
-    ApdexT            int               `json:"apdexT"`
+    FlowJSON    json.RawMessage   `json:"flowJson"`
+    ProtoFiles  map[string][]byte `json:"protoFiles,omitempty"`
+    LuaScripts  map[string][]byte `json:"luaScripts,omitempty"`
+    HeaderJSON  json.RawMessage   `json:"headerJson,omitempty"`
+    RobotConfig RobotConfig       `json:"robotConfig"`
+    Deadline    *time.Time        `json:"deadline,omitempty"`
+}
 
-    FlowJSON          json.RawMessage   `json:"flowJson"`
-    HeaderJSON        json.RawMessage   `json:"headerJson,omitempty"`
-    ProtoFiles        map[string][]byte `json:"protoFiles,omitempty"`
-    LuaScripts        map[string][]byte `json:"luaScripts,omitempty"`
+type RobotConfig struct {
+    AuthAddr       string            `json:"authAddr,omitempty"`
+    Concurrency    int               `json:"concurrency,omitempty"`
+    TimeoutSec     int               `json:"timeoutSec,omitempty"`
+    AccountPrefix  string            `json:"accountPrefix,omitempty"`
+    StartNumber    int               `json:"startNumber,omitempty"`
+    MainService    string            `json:"mainService,omitempty"`
+    AuthExtra      map[string]string `json:"authExtra,omitempty"`
+    HeartbeatSec   int               `json:"heartbeatSec,omitempty"`
+    HTTPTimeoutSec int               `json:"httpTimeoutSec,omitempty"`
+    ApdexT         int               `json:"apdexT,omitempty"`
+    LogLevel       string            `json:"logLevel,omitempty"`
 }
 ```
 
@@ -310,16 +323,24 @@ type TaskConfig struct {
 
 ```go
 type AgentNode struct {
-    ID            string         `json:"id"`
-    Name          string         `json:"name"`
-    Address       string         `json:"address"`
-    Status        AgentStatus    `json:"status"`
-    MaxBots       int            `json:"maxBots"`
-    CurrentTaskID string         `json:"currentTaskId,omitempty"`
-    LastHeartbeat time.Time      `json:"lastHeartbeat"`
-    StaticInfo    *StaticInfo    `json:"staticInfo,omitempty"`    // 启动时一次性上报
-    LatestSystem  *SystemSnapshot `json:"latestSystem,omitempty"` // 最新系统指标快照
-    RegisteredAt  time.Time      `json:"registeredAt"`
+    ID             string        `json:"agentId"`
+    Name           string        `json:"name"`
+    Address        string        `json:"address"`
+    AppVersion     string        `json:"appVersion"`
+    MaxBots        int           `json:"maxBots"`
+    StressInterval string        `json:"stressInterval"`
+    SystemInterval string        `json:"systemInterval"`
+    StaticInfo     StaticInfo    `json:"staticInfo"`
+
+    Status          AgentStatus   `json:"status"`
+    LastHeartbeatAt time.Time     `json:"lastHeartbeatAt"`
+    CurrentTaskID   string        `json:"currentTaskId,omitempty"`
+    CurrentBots     int           `json:"currentBots"`
+
+    LatestStress    *monitor.CollectorSnapshot `json:"-"`
+    LatestSystem    *SystemSnapshot            `json:"-"`
+    StressUpdatedAt time.Time                  `json:"stressUpdatedAt,omitempty"`
+    SystemUpdatedAt time.Time                  `json:"systemUpdatedAt,omitempty"`
 }
 
 type AgentStatus string
@@ -332,14 +353,14 @@ const (
 
 // StaticInfo Agent 启动时一次性上报，不变
 type StaticInfo struct {
-    Hostname    string `json:"hostname"`
-    OS          string `json:"os"`
-    Arch        string `json:"arch"`
-    NumCPU      int    `json:"numCPU"`
-    TotalMemMB  int64  `json:"totalMemMB"`
-    BootTime    int64  `json:"bootTime"`     // unix timestamp
-    GoVersion   string `json:"goVersion"`
-    AppVersion  string `json:"appVersion"`   // stressbot 版本
+    Hostname   string    `json:"hostname"`
+    OS         string    `json:"os"`
+    Arch       string    `json:"arch"`
+    NumCPU     int       `json:"numCpu"`
+    MemTotalMB uint64    `json:"memTotalMB"`
+    GoVersion  string    `json:"goVersion"`
+    KernelVer  string    `json:"kernelVer"`
+    StartedAt  time.Time `json:"startedAt"`
 }
 ```
 
@@ -347,16 +368,18 @@ type StaticInfo struct {
 
 ```go
 type Assignment struct {
+    TaskID      string `json:"taskId"`
     AgentID     string `json:"agentId"`
+    AgentName   string `json:"agentName"`
     StartNumber int    `json:"startNumber"`
-    Count       int    `json:"count"`
+    TotalBots   int    `json:"totalBots"`
 }
 
 type TaskAssignment struct {
     TaskID            string            `json:"taskId"`
     TaskName          string            `json:"taskName"`
     StartNumber       int               `json:"startNumber"`
-    Count             int               `json:"count"`
+    TotalBots         int               `json:"totalBots"`
     AccountPrefix     string            `json:"accountPrefix"`
     ConcurrentNum     int               `json:"concurrentNum"`
     MainService       string            `json:"mainService"`
@@ -366,7 +389,9 @@ type TaskAssignment struct {
     TCPTimeout        string            `json:"tcpTimeout"`
     HTTPTimeout       string            `json:"httpTimeout"`
     ApdexT            int               `json:"apdexT"`
+    LogLevel          string            `json:"logLevel,omitempty"`
     ConfigURL         string            `json:"configUrl"`
+    ConfigFiles       []string          `json:"configFiles"`
 }
 ```
 
@@ -443,17 +468,30 @@ func MergeHistograms(snaps []HistogramSnapshot) HistogramSnapshot {
 
 ### 7.3 压测聚合响应格式
 
-`GET /api/metrics` 响应：
+`GET /api/metrics` 响应：直接返回聚合后的 `CollectorSnapshot`，结构同单机模式：
 
 ```json
 {
-  "task": { "id": "abc123", "status": "running", "uptimeSeconds": 125.4 },
-  "robots": { "started": 1000, "running": 987, "stopped": 13, "errored": 0 },
+  "timestamp": "2026-05-09T10:00:00+08:00",
+  "uptime": "2m5.4s",
+  "uptimeSeconds": 125.4,
   "totalActions": 584920,
-  "actions": [ /* 同单机 CollectorSnapshot.actions 格式 */ ],
-  "agents": [
-    { "id": "a1", "status": "busy", "robotsRunning": 334, "lastReportAt": "..." },
-    { "id": "a2", "status": "busy", "robotsRunning": 333, "lastReportAt": "..." }
+  "apdexT": 100,
+  "system": { "goroutines": 1284, "memAllocMB": 512.3, "memSysMB": 768.1, "gcCount": 42 },
+  "robots": { "started": 1000, "running": 987, "stopped": 13, "errored": 0 },
+  "connections": { "established": 1000, "failed": 2, "dropped": 0 },
+  "bandwidth": { "totalSendBytes": 5242880, "totalRecvBytes": 10485760, "sendMBps": 2.5, "recvMBps": 5.0 },
+  "actions": [
+    {
+      "name": "Login",
+      "sampleCount": 1000,
+      "successCount": 998,
+      "failureCount": 2,
+      "successRate": 0.998,
+      "apdex": 0.95,
+      "latency": { "count": 998, "minMs": 1.2, "maxMs": 150.3, "avgMs": 5.4, "p50Ms": 3.2, "p90Ms": 8.1, "p95Ms": 12.5, "p99Ms": 45.2 },
+      "errors": []
+    }
   ]
 }
 ```
@@ -504,25 +542,24 @@ type SystemSnapshot struct {
     LoadAvg15  float64   `json:"loadAvg15,omitempty"`
 
     // 内存（单位：MB）
-    MemTotalMB    int64   `json:"memTotalMB"`
-    MemUsedMB     int64   `json:"memUsedMB"`
+    MemTotalMB    uint64  `json:"memTotalMB"`
+    MemUsedMB     uint64  `json:"memUsedMB"`
     MemPercent    float64 `json:"memPercent"`
-    ProcessRSSMB  int64   `json:"processRssMB"`
-    ProcessHeapMB float64 `json:"processHeapMB"`
-    ProcessSysMB  float64 `json:"processSysMB"`
+    SwapUsedMB    uint64  `json:"swapUsedMB,omitempty"`
+    ProcessRssMB  uint64  `json:"processRssMB"`
+    ProcessHeapMB uint64  `json:"processHeapMB"`
+    ProcessSysMB  uint64  `json:"processSysMB"`
 
     // 进程 / 运行时
-    NumGoroutine int     `json:"numGoroutine"`
-    NumThread    int     `json:"numThread"`
-    NumFD        int     `json:"numFd,omitempty"`
-    GCCount      uint32  `json:"gcCount"`
+    NumGoroutine int    `json:"numGoroutine"`
+    NumThread    int32  `json:"numThread"`
+    NumFD        int32  `json:"numFd,omitempty"`
+    GCCount      uint32 `json:"gcCount"`
     GCPauseAvgMs float64 `json:"gcPauseAvgMs,omitempty"`
 
-    // 网络（系统级，所有网卡聚合）
-    NetSendTotalMB float64 `json:"netSendTotalMB"`
-    NetRecvTotalMB float64 `json:"netRecvTotalMB"`
-    NetSendKBps    float64 `json:"netSendKBps"`
-    NetRecvKBps    float64 `json:"netRecvKBps"`
+    // 网络（系统级，所有网卡聚合，速率差分计算）
+    NetSendKBps float64 `json:"netSendKBps"`
+    NetRecvKBps float64 `json:"netRecvKBps"`
 }
 ```
 
@@ -617,8 +654,6 @@ func (s *SystemMonitor) collect() {
     // 网络（速率 = 累计差值 / 时间差）
     if io, err := net.IOCounters(false); err == nil && len(io) > 0 {
         sent, recv := io[0].BytesSent, io[0].BytesRecv
-        snap.NetSendTotalMB = float64(sent) / 1024 / 1024
-        snap.NetRecvTotalMB = float64(recv) / 1024 / 1024
         if !s.prevTime.IsZero() {
             dt := time.Since(s.prevTime).Seconds()
             snap.NetSendKBps = float64(sent-s.prevNetSent) / 1024 / dt
@@ -646,15 +681,17 @@ Agent 用两个独立端点分别推送两类报文：
 ```go
 // POST /api/agent/stress（仅任务运行时）
 type StressReport struct {
-    AgentID  string                     `json:"agentId"`
-    TaskID   string                     `json:"taskId"`
-    Snapshot *monitor.CollectorSnapshot `json:"snapshot"`
+    AgentID    string                    `json:"agentId"`
+    TaskID     string                    `json:"taskId"`
+    ReportedAt time.Time                 `json:"reportedAt"`
+    Snapshot   monitor.CollectorSnapshot `json:"snapshot"`
 }
 
 // POST /api/agent/system（始终上报）
 type SystemReport struct {
-    AgentID  string          `json:"agentId"`
-    Snapshot *SystemSnapshot `json:"snapshot"`
+    AgentID    string         `json:"agentId"`
+    ReportedAt time.Time      `json:"reportedAt"`
+    Snapshot   SystemSnapshot `json:"snapshot"`
 }
 ```
 
@@ -665,28 +702,30 @@ type SystemReport struct {
 `GET /api/system` 响应：
 
 ```go
-type ClusterSystem struct {
-    Timestamp     time.Time   `json:"timestamp"`
-    AgentCount    int         `json:"agentCount"`        // 在线 Agent 数
+type ClusterSystemSnapshot struct {
+    Timestamp        time.Time          `json:"timestamp"`
+    AgentCount       int                `json:"agentCount"`
+    OnlineCount      int                `json:"onlineCount"`
+    OfflineCount     int                `json:"offlineCount"`
 
     // CPU 聚合
-    AvgCPUPercent float64     `json:"avgCpuPercent"`     // 加权平均（按核数）
-    MaxCPUPercent float64     `json:"maxCpuPercent"`     // 最高的那台
-    HotAgentID    string      `json:"hotAgentId,omitempty"` // CPU 最高的 Agent ID
+    AvgCPUPercent    float64            `json:"avgCpuPercent"`     // 加权平均（按核数）
+    MaxCPUPercent    float64            `json:"maxCpuPercent"`     // 最高的那台
+    HotAgentID       string             `json:"hotAgentId,omitempty"` // CPU 最高的 Agent ID
+    HotAgentName     string             `json:"hotAgentName,omitempty"`
 
     // 内存聚合（求和）
-    TotalMemMB    int64       `json:"totalMemMB"`
-    UsedMemMB     int64       `json:"usedMemMB"`
-    AvgMemPercent float64     `json:"avgMemPercent"`
+    TotalMemMB       uint64             `json:"totalMemMB"`
+    UsedMemMB        uint64             `json:"usedMemMB"`
 
     // 网络聚合（求和）
-    NetSendKBps   float64     `json:"netSendKBps"`
-    NetRecvKBps   float64     `json:"netRecvKBps"`
+    TotalNetSendKBps float64            `json:"totalNetSendKBps"`
+    TotalNetRecvKBps float64            `json:"totalNetRecvKBps"`
 
     // 进程聚合（求和）
-    TotalGoroutine int        `json:"totalGoroutine"`
-    TotalThread    int        `json:"totalThread"`
-    TotalFD        int        `json:"totalFD"`
+    TotalGoroutines  int                `json:"totalGoroutines"`
+    TotalThreads     int32              `json:"totalThreads"`
+    TotalFDs         int32              `json:"totalFds"`
 
     // per-agent 简要信息
     Agents []AgentSystemBrief `json:"agents"`
@@ -731,11 +770,11 @@ type AgentSystemBrief struct {
    → Admin:
      a. 过滤 status=idle 的 Agent，确认总容量 >= totalBots
      b. 均匀切分账号范围，创建 Assignment 列表
-     c. 向各 Agent 推送 TaskAssignment（POST /task/assign）
+     c. 向各 Agent 推送 TaskAssignment（POST /agent/v1/task）
      d. status=running，记录 startedAt
 
 3. Agent 执行
-   a. 收到分配后 GET /api/agent/config/{taskId} 拉取配置包
+   a. 收到分配后 GET /api/tasks/{id}/config/{path...} 拉取配置包
    b. 写入临时目录 /tmp/stressbot-task-{id}/conf/
    c. 加载 adapter、proto、flow、scripts（复用现有函数）
    d. 创建 robot.Manager（assigned startNumber/count）→ StartAll
@@ -826,11 +865,11 @@ type AgentConfig struct {
 | 循环 | 间隔 | 功能 |
 |---|---|---|
 | **系统采集循环** | 5s | SystemMonitor 后台 goroutine，更新本地 `latest` 快照 |
-| **心跳循环** | 10s | POST `/api/agent/heartbeat`，确认存活 + 当前 status |
+| **心跳循环** | 10s | POST `/api/agent/{id}/heartbeat`，确认存活 + 当前 status |
 | **系统上报循环** | 5s | POST `/api/agent/system`（SystemSnapshot），始终运行，含空闲时 |
 | **压测上报循环** | 5s | POST `/api/agent/stress`（CollectorSnapshot），仅任务运行时启动，任务停止时退出 |
-| **任务轮询循环** | 5s | GET `/api/agent/task`，兜底感知新任务（Push 失败时恢复） |
-| **HTTP 服务器** | — | 监听 `/task/assign`、`/task/stop`、`/health`，接受 Admin Push |
+| **任务轮询循环** | 5s | GET `/api/agent/{id}/pending-task`，兜底感知新任务（Push 失败时恢复） |
+| **HTTP 服务器** | — | 监听 `/agent/v1/task`、`/agent/v1/stop`、`/healthz`，接受 Admin Push |
 
 ### 上报循环示例
 
@@ -979,14 +1018,22 @@ func (s *AdminServer) registerRoutes() {
     s.mux.HandleFunc("GET /api/system/agents/{id}", s.handleGetAgentSystem)
 
     // Agent 上报 API
-    s.mux.HandleFunc("POST /api/agent/register",         s.handleAgentRegister)
-    s.mux.HandleFunc("POST /api/agent/heartbeat",        s.handleAgentHeartbeat)
-    s.mux.HandleFunc("POST /api/agent/stress",           s.handleAgentStressReport)
-    s.mux.HandleFunc("POST /api/agent/system",           s.handleAgentSystemReport)
-    s.mux.HandleFunc("GET /api/agent/task",              s.handleAgentGetTask)
-    s.mux.HandleFunc("GET /api/agent/config/{taskId}",   s.handleAgentGetConfig)
-    s.mux.HandleFunc("POST /api/agent/task/{id}/done",   s.handleAgentTaskDone)
-    s.mux.HandleFunc("POST /api/agent/task/{id}/failed", s.handleAgentTaskFailed)
+    s.mux.HandleFunc("POST /api/agent/register",              s.handleAgentRegister)
+    s.mux.HandleFunc("POST /api/agent/{id}/heartbeat",        s.handleAgentHeartbeat)
+    s.mux.HandleFunc("POST /api/agent/{id}/deregister",       s.handleAgentDeregister)
+    s.mux.HandleFunc("POST /api/agent/stress",                s.handleAgentStressReport)
+    s.mux.HandleFunc("POST /api/agent/system",                s.handleAgentSystemReport)
+    s.mux.HandleFunc("POST /api/agent/{id}/task/{tid}/done",  s.handleAgentTaskDone)
+    s.mux.HandleFunc("GET /api/agent/{id}/pending-task",      s.handleAgentPendingTask)
+    s.mux.HandleFunc("GET /api/tasks/{id}/config/{path...}",  s.handleGetTaskConfig)
+
+    // 日志查看 API
+    s.mux.HandleFunc("GET /api/logs/admin",                        s.handleGetAdminLogs)
+    s.mux.HandleFunc("GET /api/logs/agents/{id}",                  s.handleGetAgentLogs)
+    s.mux.HandleFunc("GET /api/logs/admin/files",                  s.handleListAdminLogFiles)
+    s.mux.HandleFunc("GET /api/logs/admin/files/{name}",           s.handleDownloadAdminLogFile)
+    s.mux.HandleFunc("GET /api/logs/agents/{id}/files",            s.handleListAgentLogFiles)
+    s.mux.HandleFunc("GET /api/logs/agents/{id}/files/{name}",     s.handleDownloadAgentLogFile)
 
     // 静态文件
     if s.cfg.StaticDir != "" {

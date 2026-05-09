@@ -40,10 +40,13 @@ interface FlowState {
   // ── 派生：节点级校验问题（按节点 ID 分组，仅含 location.kind === 'node' 的 issue） ────────
   issuesByNodeId: Record<string, ValidationIssue[]>;
 
+  // ── UI 信号：加载/重置后需要 fitView ────────
+  needsFitView: boolean;
+
   // ── 加载 / 替换 ────────
   loadFromTaskFlow: (flow: TaskFlow, layout?: FlowLayout) => void;
   /** 清空，回到空白编辑稿 */
-  reset: () => void;
+  reset: (center?: { x: number; y: number }) => void;
 
   // ── 导出 ────────
   toTaskFlow: () => TaskFlow;
@@ -94,6 +97,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
   callbackRefCount: {},
   nodesByCallback: {},
   issuesByNodeId: {},
+  needsFitView: false,
 
   loadFromTaskFlow: (flow, layout) => {
     const { rfNodes, rfEdges, callbackRefCount, nodesByCallback } = jsonToFlow(flow);
@@ -115,6 +119,21 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       }
     }
     const positioned = rfNodes.map((n) => ({ ...n, position: positions[n.id] ?? { x: 0, y: 0 } }));
+    // 计算节点级校验
+    const report = validateFlow(flow);
+    const issuesByNodeId: Record<string, ValidationIssue[]> = {};
+    for (const it of [...report.errors, ...report.warnings]) {
+      if (it.location?.kind === 'node') {
+        (issuesByNodeId[it.location.id] ??= []).push(it);
+      }
+      if (it.location?.kind === 'action') {
+        for (const [id, n] of Object.entries(flow.nodes)) {
+          if (n.type === 'action' && n.action === it.location.id) {
+            (issuesByNodeId[id] ??= []).push(it);
+          }
+        }
+      }
+    }
     set({
       defaultDelayMs: flow.defaultDelayMs,
       nodes: flow.nodes,
@@ -124,6 +143,8 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       rfEdges,
       callbackRefCount,
       nodesByCallback,
+      issuesByNodeId,
+      needsFitView: true,
       layout: layout ?? {
         ...emptyFlowLayout(),
         nodePositions: Object.fromEntries(
@@ -133,19 +154,25 @@ export const useFlowStore = create<FlowState>((set, get) => ({
     });
   },
 
-  reset: () => {
+  reset: (center?: { x: number; y: number }) => {
+    const pos = center ?? { x: 300, y: 300 };
     set({
       defaultDelayMs: 1000,
-      nodes: {},
+      nodes: { main: { type: 'sequence', next: [], description: '入口节点' } },
       actions: {},
       callbacks: {},
       rfNodes: [],
       rfEdges: [],
-      layout: emptyFlowLayout(),
+      layout: {
+        ...emptyFlowLayout(),
+        nodePositions: { main: pos },
+      },
       callbackRefCount: {},
       nodesByCallback: {},
       issuesByNodeId: {},
+      needsFitView: true,
     });
+    get().syncDerived();
   },
 
   toTaskFlow: () => {

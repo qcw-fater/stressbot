@@ -191,8 +191,6 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 func (e *Executor) executeBoolean(ctx context.Context, node *Node) error {
 	result := e.handler.ExecuteBoolean(node.Condition)
 
-	e.nodeDelay(ctx, node)
-
 	var targetID string
 	if result {
 		targetID = node.TrueNext
@@ -247,7 +245,7 @@ func (e *Executor) executeWait(ctx context.Context, node *Node) error {
 	}
 }
 
-// nodeDelay 执行节点级延迟，仅在 action 和 boolean 节点执行完后调用。
+// nodeDelay 执行节点级延迟，仅在 action 节点执行完后调用。
 // 延迟值优先级：node.DelayMs > e.defaultDelayMs
 func (e *Executor) nodeDelay(ctx context.Context, node *Node) {
 	ms := node.DelayMs

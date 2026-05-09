@@ -97,7 +97,7 @@
   height: 18px;
   padding: 0 5px;
   border-radius: 9px;
-  background: var(--node-action, #1677ff);
+  background: #4f46e5;
   color: #fff;
   font-size: 10px;
   font-weight: 700;
@@ -105,7 +105,7 @@
   align-items: center;
   justify-content: center;
   border: 1.5px solid var(--bg-panel);
-  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.25);
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.25);
   z-index: 2;
   cursor: help;
   font-variant-numeric: tabular-nums;
@@ -114,10 +114,10 @@
 
 @keyframes executing-pulse {
   0%, 100% {
-    box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.25);
+    box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.25);
   }
   50% {
-    box-shadow: 0 0 0 4px rgba(22, 119, 255, 0.0);
+    box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.0);
   }
 }
 

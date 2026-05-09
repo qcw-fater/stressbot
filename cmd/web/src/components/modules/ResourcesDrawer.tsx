@@ -10,7 +10,7 @@
  * - 删除 / 清空操作走 antd Modal.confirm 二次确认，避免误清空。
  */
 
-import { DeleteOutlined, ImportOutlined, InboxOutlined } from '@ant-design/icons';
+import { DeleteOutlined, ImportOutlined, InboxOutlined, EditOutlined } from '@ant-design/icons';
 import {
   Alert,
   Button,
@@ -29,6 +29,8 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadProps } from 'antd';
 import { useEffect, useState } from 'react';
+import Editor from '@monaco-editor/react';
+import { useEditorStore } from '../FlowEditor/store/editorStore';
 import { useProtoStore } from '../FlowEditor/proto/protoStore';
 import {
   addProtos,
@@ -92,6 +94,12 @@ function ResourceTable({ kind }: ResourceTableProps) {
   const [items, setItems] = useState<ResourceFile[]>([]);
   const [loading, setLoading] = useState(false);
   const reloadProtos = useProtoStore((s) => s.reload);
+  const theme = useEditorStore((s) => s.theme);
+
+  // 编辑器状态
+  const [editFile, setEditFile] = useState<ResourceFile | null>(null);
+  const [editContent, setEditContent] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -199,6 +207,25 @@ function ResourceTable({ kind }: ResourceTableProps) {
     }
   };
 
+  const handleSaveEdit = async () => {
+    if (!editFile) return;
+    setSaving(true);
+    try {
+      if (kind === 'proto') {
+        await addProtos([{ name: editFile.name, content: editContent }]);
+        await reloadProtos();
+      } else {
+        await addScripts([{ name: editFile.name, content: editContent }]);
+      }
+      message.success(`${editFile.name} 已保存`);
+      setEditFile(null);
+    } catch (e) {
+      message.error(`保存失败：${(e as Error).message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const columns: ColumnsType<ResourceFile> = [
     {
       title: '文件名',
@@ -220,22 +247,35 @@ function ResourceTable({ kind }: ResourceTableProps) {
       width: 180,
       render: (v: string) => new Date(v).toLocaleString(),
     },
-    {
-      title: '',
-      key: 'op',
-      width: 60,
-      render: (_, record) => (
-        <Tooltip title="删除">
-          <Button
-            type="text"
-            size="small"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => handleRemove(record.name)}
-          />
-        </Tooltip>
-      ),
-    },
+      {
+        title: '操作',
+        key: 'op',
+        width: 100,
+        render: (_, record) => (
+          <Space size={4}>
+            <Tooltip title="查看 / 编辑">
+              <Button
+                type="text"
+                size="small"
+                icon={<EditOutlined />}
+                onClick={() => {
+                  setEditFile(record);
+                  setEditContent(record.content);
+                }}
+              />
+            </Tooltip>
+            <Tooltip title="删除">
+              <Button
+                type="text"
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => handleRemove(record.name)}
+              />
+            </Tooltip>
+          </Space>
+        ),
+      },
   ];
 
   return (
@@ -282,6 +322,31 @@ function ResourceTable({ kind }: ResourceTableProps) {
           scroll={{ y: 'calc(100vh - 360px)' }}
         />
       )}
+
+      <Modal
+        title={`编辑 ${editFile?.name}`}
+        open={!!editFile}
+        onCancel={() => setEditFile(null)}
+        width={900}
+        destroyOnClose
+        maskClosable={false}
+        footer={[
+          <Button key="cancel" onClick={() => setEditFile(null)}>取消</Button>,
+          <Button key="save" type="primary" loading={saving} onClick={handleSaveEdit}>保存</Button>,
+        ]}
+      >
+        <div style={{ height: '60vh', border: '1px solid var(--border-color)' }}>
+          {editFile && (
+            <Editor
+              language={kind === 'proto' ? 'proto' : 'lua'}
+              theme={theme === 'dark' ? 'vs-dark' : 'light'}
+              value={editContent}
+              onChange={(val) => setEditContent(val ?? '')}
+              options={{ minimap: { enabled: false }, fontSize: 13, wordWrap: 'on' }}
+            />
+          )}
+        </div>
+      </Modal>
     </Flex>
   );
 }

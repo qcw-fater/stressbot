@@ -17,6 +17,7 @@
 
 import { create } from 'zustand';
 import { Tooltip } from 'antd';
+import { WarningOutlined } from '@ant-design/icons';
 import type { ActionMetric } from '@/types/api';
 import { classifyApdex, type ApdexLevel } from '@/services/metricsBinding';
 
@@ -72,30 +73,26 @@ export function MetricsBadge({ nodeId }: MetricsBadgeProps) {
       style={{
         display: 'flex',
         flexWrap: 'wrap',
-        gap: 6,
-        marginTop: 6,
-        paddingTop: 4,
-        borderTop: '1px dashed rgba(0,0,0,0.08)',
-        fontSize: 10,
-        fontVariantNumeric: 'tabular-nums',
-        color: 'var(--text-tertiary)',
+        gap: 4,
+        marginTop: 8,
+        paddingTop: 6,
+        borderTop: '1px dashed var(--border-color)',
       }}
     >
-      {m.executing > 0 && (
-        <Tooltip title={`当前并发执行：${m.executing}`}>
-          <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>exec {m.executing}</span>
-        </Tooltip>
-      )}
       {showP99 && (
-        <Tooltip title={`avg ${m.latency.avgMs.toFixed(1)} · p95 ${m.latency.p95Ms.toFixed(1)} · p99 ${m.latency.p99Ms.toFixed(1)} (ms)`}>
-          <span>p99 {formatMs(m.latency.p99Ms)}</span>
+        <Tooltip title={`avg ${m.latency.avgMs.toFixed(1)} · p95 ${m.latency.p95Ms.toFixed(1)} · p99 ${m.latency.p99Ms.toFixed(1)} · max ${m.latency.maxMs.toFixed(1)} (ms)`}>
+          <span className="pattern-badge" style={{ color: '#13c2c2', borderColor: '#13c2c2', background: '#13c2c215' }}>
+            p99 {formatMs(m.latency.p99Ms)}
+          </span>
         </Tooltip>
       )}
       {apdexLevel !== 'unknown' && (
         <Tooltip
-          title={`Apdex ${m.apdex.toFixed(3)} · 成功率 ${(m.successRate * 100).toFixed(1)}% · 平均 QPS ${m.avgQps.toFixed(1)}`}
+          title={`Apdex ${m.apdex.toFixed(3)} · 成功率 ${(m.successRate * 100).toFixed(1)}% · 平均 QPS ${m.avgQps.toFixed(1)} · 样本数 ${m.sampleCount}`}
         >
-          <span style={{ color: apdexColor, fontWeight: 600 }}>A {m.apdex.toFixed(2)}</span>
+          <span className="pattern-badge" style={{ color: apdexColor, borderColor: apdexColor, background: `${apdexColor}15` }}>
+            Apdex {m.apdex.toFixed(2)}
+          </span>
         </Tooltip>
       )}
       {showErrors && topErr && (
@@ -115,7 +112,9 @@ export function MetricsBadge({ nodeId }: MetricsBadgeProps) {
             </div>
           }
         >
-          <span style={{ color: '#f5222d' }}>err {topErr.count}</span>
+          <span className="pattern-badge" style={{ color: '#f5222d', borderColor: '#f5222d', background: '#fff1f0' }}>
+            <WarningOutlined style={{ marginRight: 4 }} /> {topErr.count}
+          </span>
         </Tooltip>
       )}
     </div>

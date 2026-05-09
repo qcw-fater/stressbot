@@ -35,10 +35,13 @@ import { FlowEditor } from '@/components/FlowEditor';
 import { useFlowStore } from '@/components/FlowEditor/store/flowStore';
 import { ResourcesDrawer } from '@/components/modules/ResourcesDrawer';
 import { AgentsDrawer } from '@/components/modules/AgentsDrawer';
-import { HistoryDrawer } from '@/components/modules/history/HistoryDrawer';
+import { HistoryModal } from '@/components/modules/history/HistoryModal';
 import { ActiveTaskGuardModal } from '@/components/runtime/ActiveTaskGuardModal';
 import { RuntimeBar } from '@/components/runtime/RuntimeBar';
 import { MonitorDock } from '@/components/monitoring/MonitorDock';
+import { SystemTab } from '@/components/monitoring/tabs/SystemTab';
+import { LogsTab } from '@/components/monitoring/tabs/LogsTab';
+import { Modal } from 'antd';
 import type { RobotConfig, TaskBrief } from '@/types/api';
 
 export function EditorPage() {
@@ -88,6 +91,8 @@ function HomeShellInner() {
   const [resourcesOpen, setResourcesOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(false);
+  const [systemOpen, setSystemOpen] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(false);
   const [guardTask, setGuardTask] = useState<TaskBrief | null>(null);
   const [booting, setBooting] = useState(true);
   const policy = useMemo(() => pollingPolicy(mode), [mode]);
@@ -242,14 +247,38 @@ function HomeShellInner() {
               onOpenResources={() => setResourcesOpen(true)}
               onOpenHistory={() => setHistoryOpen(true)}
               onOpenAgents={() => setAgentsOpen(true)}
+              onOpenSystem={() => setSystemOpen(true)}
+              onOpenLogs={() => setLogsOpen(true)}
             />
           }
         />
       </div>
       <MonitorDock />
       <ResourcesDrawer open={resourcesOpen} onClose={() => setResourcesOpen(false)} />
-      <HistoryDrawer open={historyOpen} onClose={() => setHistoryOpen(false)} />
+      <HistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} />
       <AgentsDrawer open={agentsOpen} onClose={() => setAgentsOpen(false)} />
+      <Modal
+        title="系统状态"
+        open={systemOpen}
+        onCancel={() => setSystemOpen(false)}
+        footer={null}
+        width={1000}
+        destroyOnClose
+        styles={{ body: { height: '80vh', overflow: 'auto', padding: 0 } }}
+      >
+        <SystemTab />
+      </Modal>
+      <Modal
+        title="运行日志"
+        open={logsOpen}
+        onCancel={() => setLogsOpen(false)}
+        footer={null}
+        width={1200}
+        destroyOnClose
+        styles={{ body: { height: '80vh', overflow: 'hidden', padding: '12px' } }}
+      >
+        <LogsTab />
+      </Modal>
       <ActiveTaskGuardModal
         open={guardTask !== null}
         task={guardTask}

@@ -219,7 +219,8 @@ monitor/
 | `engine/flow.go` | `ActionDef` 新增 `Name string \`json:"-"\`` |
 | `engine/action.go` | 新增 `ErrTimeout`；`Execute` 改为返回 `(sendBytes, recvBytes int, err error)`；网络型 `exec*` 改签名 |
 | `robot/robot.go` | `ExecuteAction` 统一包裹 `RecordActionStart` + 计时 + `RecordAction`（含 Lua 分支）；`ConnectTCP`/`ConnectUDP` 记录连接事件；`Start`/`Close` 生命周期 |
-| `cmd/stressbot/main.go` | monitor 配置解析、Name 回填、Reporter 启停、HTTP 注册、CSV 导出 |
+| `cmd/agent/main.go` | monitor 配置解析、Name 回填、Reporter 启停、HTTP 注册、CSV 导出 |
+| `cmd/admin/main.go` | Admin 端聚合 Agent 上报的指标，对外提供 HTTP JSON API |
 | `conf/config.json` | 新增 `monitor` 配置段 |
 
 不修改：`ActionHandler` 接口、`NetSender` 接口、`Executor`、`network/` 包、`state/` 包。

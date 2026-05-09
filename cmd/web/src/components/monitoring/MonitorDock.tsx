@@ -18,7 +18,6 @@ import { ActionsTab } from './tabs/ActionsTab';
 import { ErrorsTab } from './tabs/ErrorsTab';
 import { TrendsTab } from './tabs/TrendsTab';
 import { PerAgentTab } from './tabs/PerAgentTab';
-import { SystemTab } from './tabs/SystemTab';
 
 const MIN_H = 160;
 const MAX_H_RATIO = 0.8;
@@ -66,6 +65,8 @@ export function MonitorDock() {
     [height],
   );
 
+  if (mode === 'edit') return null;
+
   if (!dockOpen) {
     return (
       <div
@@ -84,7 +85,7 @@ export function MonitorDock() {
           展开监控
         </Button>
         <span style={{ color: 'var(--text-tertiary)' }}>
-          {mode === 'edit' ? '当前为编辑态，启动任务后此处显示实时数据' : '点击展开实时监控'}
+          点击展开实时监控
         </span>
         <Button type="text" size="small" icon={<CaretUpOutlined />} onClick={() => setDockOpen(true)} />
       </div>
@@ -137,7 +138,6 @@ export function MonitorDock() {
           { key: 'errors', label: '错误', children: <div style={{ overflow: 'auto', height: height - 64 }}><ErrorsTab /></div> },
           { key: 'trends', label: '趋势', children: <div style={{ overflow: 'auto', height: height - 64 }}><TrendsTab /></div> },
           { key: 'per-agent', label: 'per-Agent', children: <div style={{ overflow: 'auto', height: height - 64 }}><PerAgentTab /></div> },
-          { key: 'system', label: '系统', children: <div style={{ overflow: 'auto', height: height - 64 }}><SystemTab /></div> },
         ]}
       />
     </div>

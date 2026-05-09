@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"stressbot/logview"
 	"stressbot/monitor"
 	"stressbot/utils"
 
@@ -64,6 +68,14 @@ func (s *AdminServer) registerRoutes() *http.ServeMux {
 	mux.HandleFunc("GET /api/history/{id}/timeseries", s.handleGetHistoryTimeseries)
 	mux.HandleFunc("POST /api/history/{id}/clone", s.handleCloneHistory)
 	mux.HandleFunc("GET /api/history/compare", s.handleCompareHistory)
+
+	// ── 日志 ──
+	mux.HandleFunc("GET /api/logs/admin", s.handleGetAdminLogs)
+	mux.HandleFunc("GET /api/logs/agents/{id}", s.handleGetAgentLogs)
+	mux.HandleFunc("GET /api/logs/admin/files", s.handleListAdminLogFiles)
+	mux.HandleFunc("GET /api/logs/admin/files/{name}", s.handleDownloadAdminLogFile)
+	mux.HandleFunc("GET /api/logs/agents/{id}/files", s.handleListAgentLogFiles)
+	mux.HandleFunc("GET /api/logs/agents/{id}/files/{name}", s.handleDownloadAgentLogFile)
 
 	// ── 静态资源 ──
 	if s.cfg.StaticDir != "" {
@@ -900,4 +912,195 @@ func parseTagsFromQuery(r *http.Request, key string) []string {
 		}
 	}
 	return tags
+}
+
+// ── 日志 ──
+
+func (s *AdminServer) handleGetAdminLogs(w http.ResponseWriter, r *http.Request) {
+	rb := logview.GetRingBuffer()
+	if rb == nil {
+		writeJSON(w, http.StatusOK, logview.QueryResult{})
+		return
+	}
+	params := parseLogQueryParams(r)
+	result := rb.Query(params)
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *AdminServer) handleGetAgentLogs(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("id")
+	agent, ok := s.agents.Get(agentID)
+	if !ok {
+		writeError(w, ErrAgentNotFound)
+		return
+	}
+	if agent.Status == AgentOffline {
+		writeError(w, ErrAgentOffline.WithMessage("agent is offline, logs unavailable"))
+		return
+	}
+
+	url := fmt.Sprintf("http://%s/agent/v1/logs?%s", normalizeAddr(agent.Address), r.URL.RawQuery)
+	proxyReq, err := http.NewRequestWithContext(r.Context(), "GET", url, nil)
+	if err != nil {
+		writeError(w, ErrInvalidArgument.WithMessage("invalid proxy request"))
+		return
+	}
+
+	resp, err := s.logsProxyClient.Do(proxyReq)
+	if err != nil {
+		writeError(w, ErrAgentOffline.WithMessage("agent unreachable: "+err.Error()))
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+// LogFileInfo 日志文件信息。
+type LogFileInfo struct {
+	Name    string `json:"name"`
+	Size    int64  `json:"size"`
+	ModTime string `json:"modTime"`
+}
+
+func (s *AdminServer) handleListAdminLogFiles(w http.ResponseWriter, r *http.Request) {
+	files, err := listLogFiles(stresslog.GetLogFilePath())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, files)
+}
+
+func (s *AdminServer) handleDownloadAdminLogFile(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") || name == ".." {
+		writeError(w, ErrInvalidArgument.WithMessage("invalid file name"))
+		return
+	}
+	dir := filepath.Dir(stresslog.GetLogFilePath())
+	serveLogFile(w, r, dir, name)
+}
+
+func (s *AdminServer) handleListAgentLogFiles(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("id")
+	agent, ok := s.agents.Get(agentID)
+	if !ok {
+		writeError(w, ErrAgentNotFound)
+		return
+	}
+	if agent.Status == AgentOffline {
+		writeError(w, ErrAgentOffline)
+		return
+	}
+
+	url := fmt.Sprintf("http://%s/agent/v1/logs/files", normalizeAddr(agent.Address))
+	proxyReq, err := http.NewRequestWithContext(r.Context(), "GET", url, nil)
+	if err != nil {
+		writeError(w, ErrInvalidArgument.WithMessage("invalid proxy request"))
+		return
+	}
+
+	resp, err := s.logsProxyClient.Do(proxyReq)
+	if err != nil {
+		writeError(w, ErrAgentOffline.WithMessage("agent unreachable: "+err.Error()))
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+func (s *AdminServer) handleDownloadAgentLogFile(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("id")
+	agent, ok := s.agents.Get(agentID)
+	if !ok {
+		writeError(w, ErrAgentNotFound)
+		return
+	}
+	if agent.Status == AgentOffline {
+		writeError(w, ErrAgentOffline)
+		return
+	}
+
+	name := r.PathValue("name")
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") || name == ".." {
+		writeError(w, ErrInvalidArgument.WithMessage("invalid file name"))
+		return
+	}
+
+	url := fmt.Sprintf("http://%s/agent/v1/logs/files/%s", normalizeAddr(agent.Address), url.PathEscape(name))
+	proxyReq, err := http.NewRequestWithContext(r.Context(), "GET", url, nil)
+	if err != nil {
+		writeError(w, ErrInvalidArgument.WithMessage("invalid proxy request"))
+		return
+	}
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(proxyReq)
+	if err != nil {
+		writeError(w, ErrAgentOffline.WithMessage("agent unreachable: "+err.Error()))
+		return
+	}
+	defer resp.Body.Close()
+
+	for k, vv := range resp.Header {
+		for _, v := range vv {
+			w.Header().Add(k, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+func listLogFiles(logPath string) ([]LogFileInfo, error) {
+	dir := filepath.Dir(logPath)
+	base := filepath.Base(logPath)
+	prefix := strings.TrimSuffix(base, filepath.Ext(base))
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("read log dir: %w", err)
+	}
+
+	var files []LogFileInfo
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, LogFileInfo{
+			Name:    e.Name(),
+			Size:    info.Size(),
+			ModTime: info.ModTime().Format("2006-01-02 15:04:05"),
+		})
+	}
+	return files, nil
+}
+
+func serveLogFile(w http.ResponseWriter, r *http.Request, dir, name string) {
+	path := filepath.Join(dir, name)
+	f, err := os.Open(path)
+	if err != nil {
+		http.Error(w, "log file not found", http.StatusNotFound)
+		return
+	}
+	defer f.Close()
+
+	stat, err := f.Stat()
+	if err != nil {
+		http.Error(w, "stat failed", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, name))
+	http.ServeContent(w, r, name, stat.ModTime(), f)
 }

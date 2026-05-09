@@ -1,10 +1,11 @@
 /**
- * 条件表达式输入框：三模式（lua: / state: / plain）。
+ * 条件表达式输入框：双模式（lua: / state:）。
  *
- * 设计文档 §6.5：condition 字段在 boolean / loop 节点中复用，
+ * condition 字段在 boolean / loop 节点中复用，
  *   - "lua:check.lua"        → 调 Lua 脚本求值（入口 execute(r) 必须 return true / false）
- *   - "state:foo"            → 读 state 中布尔值
- *   - "state:foo > 5"        → 表达式（保留扩展，引擎当前未实现）
+ *   - "foo"                  → 读 state 中布尔值（state: 前缀自动添加）
+ *   - "foo > 5"              → 表达式比较（支持 >= <= != == > <）
+ *   - "a && b || !c"         → 复合条件（支持 && || ! 和括号）
  *
  * lua 模式下旁边的「编辑」按钮会弹出 LuaForm（mode='boolean'），
  * 给条件脚本提供与动作脚本同款的 Monaco 体验，但模板默认 `return false`，
@@ -25,10 +26,9 @@ export interface ConditionInputProps {
 }
 
 export function ConditionInput({ value, onChange, placeholder }: ConditionInputProps) {
-  const mode = useMemo<'lua' | 'state' | 'plain'>(() => {
+  const mode = useMemo<'lua' | 'state'>(() => {
     if (value?.startsWith('lua:')) return 'lua';
-    if (value?.startsWith('state:')) return 'state';
-    return 'plain';
+    return 'state';
   }, [value]);
 
   const tail = value
@@ -36,12 +36,12 @@ export function ConditionInput({ value, onChange, placeholder }: ConditionInputP
       ? value.slice(4)
       : value.startsWith('state:')
         ? value.slice(6)
-        : value
+        : ''
     : '';
 
   const [editorOpen, setEditorOpen] = useState(false);
 
-  const setMode = (next: 'lua' | 'state' | 'plain') => {
+  const setMode = (next: 'lua' | 'state') => {
     if (next === mode) return;
     let prefix = '';
     if (next === 'lua') prefix = 'lua:';
@@ -68,13 +68,10 @@ export function ConditionInput({ value, onChange, placeholder }: ConditionInputP
       ),
       state: (
         <>
-          <b>state:</b> 读 state 中布尔字段（同名 key 直接取值）。
-          示例：<code>state:matchSuccess</code>；保留扩展形式 <code>state:hp &gt; 0</code>（引擎暂未实现，谨慎使用）。
-        </>
-      ),
-      plain: (
-        <>
-          <b>原文</b>：不附加前缀，原样写入。仅适合自定义引擎或临时占位（不会被引擎识别为 lua/state）。
+          <b>state:</b> 前缀由系统自动添加，直接写表达式即可。
+          读布尔字段：<code>matchSuccess</code>；比较：<code>hp &gt; 0</code>；
+          复合条件 <code>&amp;&amp;</code> <code>||</code> <code>!</code> 和括号：
+          <code>hp &gt; 0 &amp;&amp; (alive || isAdmin)</code>
         </>
       ),
     } as const
@@ -87,12 +84,11 @@ export function ConditionInput({ value, onChange, placeholder }: ConditionInputP
         <Radio.Group value={mode} onChange={(e) => setMode(e.target.value)} buttonStyle="solid">
           <Radio.Button value="lua">lua:</Radio.Button>
           <Radio.Button value="state">state:</Radio.Button>
-          <Radio.Button value="plain">原文</Radio.Button>
         </Radio.Group>
         <Input
           value={tail}
           onChange={(e) => setTail(e.target.value)}
-          placeholder={placeholder ?? (mode === 'lua' ? '脚本文件名（如 check_role.lua）' : 'state 表达式')}
+          placeholder={placeholder ?? (mode === 'lua' ? '脚本文件名（如 check_role.lua）' : '如 hp > 0 && alive')}
           style={{ flex: 1 }}
         />
         {mode === 'lua' && (

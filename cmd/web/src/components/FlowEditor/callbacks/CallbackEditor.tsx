@@ -1,7 +1,7 @@
 /**
  * CallbackEditor 模态框：编辑单个 CallbackDef，三态切换。
  *
- *   silent       : 空对象 {}，收到推送即丢弃
+ *   silent       : 空对象 {}，收到推送后静默处理
  *   declarative  : s2cProto + store
  *   lua          : script（可选 s2cProto）
  *
@@ -106,6 +106,14 @@ export function CallbackEditor() {
         <SaveTemplateButton kind="callback" name={callbackName} data={callback} />
       </Space>
 
+      <Input.TextArea
+        value={callback.description ?? ''}
+        onChange={(e) => updateCallback(callbackName, { description: e.target.value })}
+        placeholder="可选注释，显示在回调卡片上，不参与运行时逻辑"
+        autoSize={{ minRows: 1, maxRows: 3 }}
+        style={{ marginBottom: 12 }}
+      />
+
       <Tabs
         activeKey={selectedKind}
         onChange={(k) => switchKind(k as CallbackKind)}
@@ -117,8 +125,7 @@ export function CallbackEditor() {
               <Alert
                 type="info"
                 showIcon
-                message="静默消费"
-                description="收到推送即丢弃。导出为 {} 空对象。若需写 state 或处理 binary，请切换到 declarative / lua。"
+                message="静默消费：收到推送后不执行任何逻辑，静默处理。"
               />
             ),
           },
@@ -126,11 +133,18 @@ export function CallbackEditor() {
             key: 'declarative',
             label: 'declarative',
             children: (
-              <DeclarativeCallbackBody
-                value={callback}
-                onChange={(v) => updateCallback(callbackName, v)}
-                onOpenProto={() => setProtoOpen(true)}
-              />
+              <>
+                <Alert
+                  type="info"
+                  showIcon
+                  message="声明式回调：指定 s2cProto + store 映射，自动解析推送消息并存入 state。"
+                />
+                <DeclarativeCallbackBody
+                  value={callback}
+                  onChange={(v) => updateCallback(callbackName, v)}
+                  onOpenProto={() => setProtoOpen(true)}
+                />
+              </>
             ),
           },
           {

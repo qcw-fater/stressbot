@@ -207,7 +207,7 @@ export function NodeEditorDrawer() {
         </Form.Item>
         <Form.Item
           label="描述"
-          help="人类可读的注释；显示在节点卡片上，导出到 flow.json 但不参与运行时逻辑"
+          help="可选注释，显示在节点卡片上，不参与运行时逻辑"
         >
           <Input.TextArea
             value={node.description ?? ''}

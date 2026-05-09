@@ -2,11 +2,11 @@
  * pattern 选择器：11 种 pattern 的下拉，附带说明 tooltip。
  */
 
-import { Select, Tag, Tooltip } from 'antd';
+import { Select, Tooltip } from 'antd';
 import type { ActionPattern } from '@/types/action';
 import { ALL_ACTION_PATTERNS } from '@/types/action';
 
-const PATTERN_DESC: Record<ActionPattern, string> = {
+export const PATTERN_DESC: Record<ActionPattern, string> = {
   tcpSend: '通过 TCP 发送 C2S 消息（无应答）',
   tcpRequest: '通过 TCP 发送 C2S 消息并等待 S2C 应答',
   lua: '执行一段 Lua 脚本（function execute(r)）',
@@ -35,7 +35,7 @@ export function PatternSelector({ value, onChange }: PatternSelectorProps) {
         value: p,
         label: (
           <Tooltip title={PATTERN_DESC[p]} placement="right">
-            <Tag style={{ margin: 0 }}>{p}</Tag>
+            <span className="pattern-badge" data-pattern={p} style={{ margin: 0, height: 20, lineHeight: '18px' }}>{p}</span>
           </Tooltip>
         ),
       }))}

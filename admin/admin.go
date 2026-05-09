@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -28,11 +29,14 @@ type AdminServer struct {
 	dispatcher *AgentDispatcher
 	assigner   *Assigner
 
+	logsProxyClient *http.Client // Agent 日志代理（5s 超时）
+
 	history *HistoryStore // 可选
 	sampler *Sampler      // 可选
 
 	httpSrv *http.Server
 	stopCh  chan struct{}
+	wg      sync.WaitGroup
 }
 
 func NewAdminServer(cfg Config) (*AdminServer, error) {
@@ -54,10 +58,13 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 	// 4. AgentDispatcher
 	s.dispatcher = NewAgentDispatcher()
 
-	// 5. Assigner
+	// 5. Logs proxy client
+	s.logsProxyClient = &http.Client{Timeout: 5 * time.Second}
+
+	// 6. Assigner
 	s.assigner = NewAssigner()
 
-	// 6. HistoryStore（可选）
+	// 7. HistoryStore（可选）
 	if cfg.History.Enabled {
 		history, err := NewHistoryStore(cfg.History)
 		if err != nil {
@@ -75,7 +82,7 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 			"如需启用，请在 config.json 设置 history.enabled=true 且填写 history.mysql.dsn")
 	}
 
-	// 7. 终态回调
+	// 8. 终态回调
 	s.tasks.SetOnTerminal(s.onTaskTerminal)
 
 	return s, nil

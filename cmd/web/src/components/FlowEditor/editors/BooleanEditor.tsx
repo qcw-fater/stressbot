@@ -1,10 +1,9 @@
 /**
- * boolean 节点编辑器：condition / trueNext / falseNext / delayMs。
+ * boolean 节点编辑器：condition / trueNext / falseNext。
  */
 
 import { Form } from 'antd';
 import { ConditionInput } from './shared/ConditionInput';
-import { DelayInput } from './shared/DelayInput';
 import { NodeIdSelect } from './shared/NodeIdSelect';
 import { useFlowStore } from '../store/flowStore';
 
@@ -22,7 +21,6 @@ export function BooleanEditor({ nodeId }: BooleanEditorProps) {
         <ConditionInput
           value={node.condition}
           onChange={(v) => updateNode(nodeId, { condition: v })}
-          placeholder="如 lua:check_role.lua 或 state:hasRole"
         />
       </Form.Item>
       <Form.Item label="true 分支">
@@ -39,12 +37,6 @@ export function BooleanEditor({ nodeId }: BooleanEditorProps) {
           onChange={(v) => updateNode(nodeId, { falseNext: v })}
           excludeId={nodeId}
           placeholder="留空 = 不跳转"
-        />
-      </Form.Item>
-      <Form.Item label="节点延迟 delayMs">
-        <DelayInput
-          value={node.delayMs}
-          onChange={(v) => updateNode(nodeId, { delayMs: v })}
         />
       </Form.Item>
     </Form>

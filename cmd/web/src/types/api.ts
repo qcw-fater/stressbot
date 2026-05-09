@@ -1,7 +1,7 @@
 /**
  * 与 Admin（默认 :8080）交互的全量 TS 类型定义。
  *
- * 单一事实源：docs/api-monitor.md §11；本文件结构与该文档保持完全一致，新增字段两边同步。
+ * 单一事实源：docs/api-monitor.md §12；本文件结构与该文档保持完全一致，新增字段两边同步。
  */
 
 // === 基础枚举 ===
@@ -421,4 +421,32 @@ export interface HistoryCompareResponse {
   diff: {
     actions: Record<string, number[]>;
   };
+}
+
+// === Logs ===
+
+export interface LogField {
+  key: string;
+  value: string;
+}
+
+export interface LogEntry {
+  level: string;
+  time: string;
+  caller?: string;
+  message: string;
+  service?: string;
+  fields?: LogField[];
+}
+
+export interface LogQueryResult {
+  entries: LogEntry[];
+  hasMore: boolean;
+  nextSeq: number;
+}
+
+export interface LogFileInfo {
+  name: string;
+  size: number;
+  modTime: string;
 }

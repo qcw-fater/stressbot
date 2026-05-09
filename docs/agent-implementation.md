@@ -438,9 +438,12 @@ func (u *Upgrader) download(url, dst string) error {
 |---|---|---|---|---|
 | `POST` | `/agent/v1/task` | `TaskAssignment` JSON | `202 Accepted` 或 `409 Conflict` | Admin 推送任务 |
 | `POST` | `/agent/v1/stop` | 空 | `200` | Admin 停止当前任务 |
-| `POST` | `/agent/v1/upgrade` | `UpgradeRequest` JSON | `202 Accepted` | 触发升级 |
+| `POST` | `/agent/v1/upgrade` | `UpgradeRequest` JSON | `202 Accepted` | ~~触发升级~~ **未注册（已废弃）** |
 | `GET`  | `/agent/v1/version` | — | `{"version":"v1.2.0"}` | 查询版本 |
 | `GET`  | `/agent/v1/status` | — | `AgentStatus` JSON | 调试用 |
+| `GET`  | `/agent/v1/logs` | — | `QueryResult` JSON | Ring buffer 日志查询（`?afterSeq=N&limit=M`） |
+| `GET`  | `/agent/v1/logs/files` | — | `[]LogFileInfo` JSON | 列出本地日志文件 |
+| `GET`  | `/agent/v1/logs/files/{name}` | — | `text/plain` 附件 | 下载指定日志文件 |
 | `GET`  | `/healthz` | — | `200 OK` | 探活 |
 | `GET`  | `/debug/pprof/...` | — | pprof | 仅 debug 模式 |
 
@@ -451,9 +454,12 @@ func (a *Agent) startHTTPServer() error {
     mux := http.NewServeMux()
     mux.HandleFunc("/agent/v1/task", a.handleTaskAssign)
     mux.HandleFunc("/agent/v1/stop", a.handleStop)
-    mux.HandleFunc("/agent/v1/upgrade", a.handleUpgrade)
+    // "/agent/v1/upgrade" 未注册（已废弃）
     mux.HandleFunc("/agent/v1/version", a.handleVersion)
     mux.HandleFunc("/agent/v1/status", a.handleStatus)
+    mux.HandleFunc("/agent/v1/logs", a.handleLogs)
+    mux.HandleFunc("/agent/v1/logs/files", a.handleListLogFiles)
+    mux.HandleFunc("/agent/v1/logs/files/", a.handleDownloadLogFile)
     mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
         w.WriteHeader(200)
     })
@@ -472,6 +478,16 @@ func (a *Agent) startHTTPServer() error {
     return nil
 }
 ```
+
+**日志 handler 说明**：
+
+| Handler | 功能 |
+|---|---|
+| `handleLogs` | 从 `logview.GetRingBuffer()` 查询日志。支持 `afterSeq`（游标）和 `limit`（默认 200，上限 500）参数，返回 `logview.QueryResult`（含 `entries`、`hasMore`、`nextSeq`）。Ring buffer 未启用时返回 503 |
+| `handleListLogFiles` | 根据当前日志文件路径（`stresslog.GetLogFilePath()`）扫描同目录下同前缀的所有日志文件，返回 `[]LogFileInfo`（含 `name`、`size`、`modTime`） |
+| `handleDownloadLogFile` | 从 URL 提取文件名，校验不含路径分隔符或 `..`，然后通过 `http.ServeContent` 以 `text/plain` 附件形式返回日志文件内容 |
+
+底层 Ring buffer（`logview.RingBuffer`）通过 zap `captureCore` 挂接到全局 logger，所有经过 zap 输出的日志都会被 O(1) 追加到固定大小环形缓冲区。查询时按递增序列号（`seq`）做游标分页，前端可增量拉取。
 
 ### 4.7 AdminClient（与 Admin 通信）
 
@@ -807,10 +823,62 @@ type RunConfig struct {
 - 老版本重新注册 Admin（旧 AppVersion）
 - Admin 看到版本号没变，标记升级失败，停止滚动升级
 
-## 9. 配置文件 config.json（agent 段）
+## 9. 配置文件 config.json 完整参考
+
+`Config` 结构定义在 `cmd/agent/main.go`，由 `loadConfig()` 反序列化并填充默认值。配置文件为标准 JSON 格式，顶级字段按功能分区。
+
+### 9.1 完整示例
 
 ```json
 {
+  "bot": {
+    "accountPrefix": "bot_",
+    "startNumber": 1,
+    "count": 100,
+    "concurrentNum": 10,
+    "mainService": "logic"
+  },
+  "auth": {
+    "address": "http://127.0.0.1:8001",
+    "extra": {
+      "gameId": "1",
+      "channelId": "1001"
+    }
+  },
+  "adapter": {
+    "script": "conf/adapter/codec.lua",
+    "poolSize": 4
+  },
+  "network": {
+    "heartbeatInterval": "5s",
+    "tcpTimeout": "60s",
+    "httpTimeout": "10s"
+  },
+  "proto": {
+    "dirs": ["conf/proto"],
+    "files": []
+  },
+  "flow": "conf/flow.json",
+  "script": {
+    "dirs": ["conf/scripts"]
+  },
+  "log": {
+    "path": "log/stressbot.log",
+    "level": "info",
+    "printConsole": false,
+    "maxSize": 100,
+    "maxBackups": 5,
+    "maxAge": 30,
+    "compress": false
+  },
+  "monitor": {
+    "enabled": true,
+    "reportInterval": "5s",
+    "httpEnabled": false,
+    "httpPort": 6060,
+    "csvPath": "log/metrics.csv",
+    "apdexT": 100
+  },
   "agent": {
     "enabled": false,
     "adminAddr": "http://192.168.1.100:8080",
@@ -821,22 +889,109 @@ type RunConfig struct {
     "systemInterval": "5s",
     "heartbeatInterval": "10s",
     "registerRetryMaxInterval": "30s",
-    "taskWorkDir": "",          // 空 = os.TempDir()
-    "appVersion": ""            // 空 = 编译时注入的 Version
+    "taskWorkDir": "",
+    "appVersion": "",
+    "adapterScript": "conf/adapter/codec.lua"
   }
 }
 ```
 
-| 字段 | 类型 | 默认 | 说明 |
+### 9.2 bot 段 — 机器人生成参数
+
+| 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `enabled` | bool | `false` | Agent 模式总开关 |
-| `adminAddr` | string | — | Admin HTTP 地址（含 schema） |
-| `name` | string | hostname | Agent 显示名（前端列表用） |
-| `listenAddr` | string | `:7070` | 接收 Admin 推送的监听地址 |
-| `maxBots` | int | `5000` | 本节点支持的最大机器人数（用于 Admin 分配） |
-| `stressInterval` | string | `5s` | 压测指标上报间隔 |
-| `systemInterval` | string | `5s` | 系统指标上报间隔 |
-| `heartbeatInterval` | string | `10s` | 心跳间隔 |
+| `accountPrefix` | string | `"bot_"` | 账号名前缀，与 `startNumber` 拼接生成账号名（如 `bot_1`、`bot_2`） |
+| `startNumber` | int | `1` | 账号起始编号（从该数字开始递增） |
+| `count` | int | `1` | 创建的机器人总数 |
+| `concurrentNum` | int | — | 并发启动数，限制同时启动的机器人数（令牌桶限速） |
+| `mainService` | string | `"logic"` | 主服务名，机器人通过 Auth 获取该服务的连接地址后建立 TCP 长连接 |
+
+### 9.3 auth 段 — 认证服务
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `address` | string | — | Auth 服务 HTTP 地址（含 schema，如 `http://127.0.0.1:8001`），机器人通过该地址登录并获取游戏服务器连接信息 |
+| `extra` | map[string]string | — | 登录请求附加参数，随 Auth 登录请求一起发送的键值对（如 `gameId`、`channelId` 等业务参数） |
+
+### 9.4 adapter 段 — 协议适配器
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `script` | string | `"conf/adapter/codec.lua"` | 协议编解码 Lua 脚本路径，负责消息头的编码/解码逻辑（magic 字节、XOR、GZIP、加密等） |
+| `poolSize` | int | `runtime.NumCPU()` | Lua 适配器池大小，即同时执行编解码的 Lua 状态机数量。默认取 CPU 核数，设为 0 或负值时也使用 CPU 核数 |
+
+### 9.5 network 段 — 网络参数
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `heartbeatInterval` | string | `"5s"` | 心跳发送间隔，支持 Go duration 格式（如 `"3s"`、`"5000ms"`），由 `utils.ParseDurationDefault` 解析 |
+| `tcpTimeout` | string | `"60s"` | TCP 请求超时时间，等待服务器响应的最大时长，超时后标记动作失败并触发 `ResultTimeout` |
+| `httpTimeout` | string | `"10s"` | HTTP 请求超时时间，用于 Auth 登录等 HTTP 调用 |
+
+### 9.6 proto 段 — Protobuf 文件
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `dirs` | []string | `["conf/proto"]` | .proto 文件搜索目录列表，`protox.Loader` 递归扫描这些目录 |
+| `files` | []string | — | 额外指定的 .proto 文件路径列表（不通过目录扫描，直接加载） |
+
+### 9.7 flow 段 — 流程配置
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `flow` | string | `"conf/flow.json"` | 流程配置文件路径，定义压测节点 DAG（`TaskFlow`）、动作定义（`ActionDef`）和回调（`Callback`）。JSON 文件，结构由 `engine.TaskFlow` 反序列化 |
+
+### 9.8 script 段 — Lua 脚本
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `dirs` | []string | `["conf/scripts"]` | Lua 脚本目录列表。`script.RuntimePool` 在这些目录中预编译脚本，每个机器人获取独立的 `LState` 执行环境 |
+
+### 9.9 log 段 — 日志配置
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `path` | string | `"log/stressbot.log"` | 日志文件输出路径 |
+| `level` | string | `"info"` | 日志级别：`"debug"` / `"info"` / `"warn"` / `"error"` |
+| `printConsole` | bool | `false` | 是否同时输出到控制台（stderr） |
+| `maxSize` | int | — | 单个日志文件最大大小（MB），超过后自动轮转 |
+| `maxBackups` | int | — | 保留的旧日志文件最大数量 |
+| `maxAge` | int | — | 旧日志文件保留天数 |
+| `compress` | bool | `false` | 是否压缩轮转后的旧日志文件（gzip） |
+
+> 底层使用 `utils/log` 包初始化，参数透传给 lumberjack 日志轮转库。日志初始化后还会通过 `logview.AttachRingBuffer` 挂接环形缓冲区（容量 50000 条），供 Agent HTTP `/agent/v1/logs` 接口查询。
+
+### 9.10 monitor 段 — 监控指标
+
+`CollectorConfig` 定义在 `monitor/collector.go`，控制指标采集与输出行为。
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `enabled` | bool | `false` | 监控总开关。`false` 时所有采集方法为 no-op，压测核心路径零开销 |
+| `reportInterval` | string | `"5s"` | 指标上报间隔，支持 Go duration 格式。单机模式下控制 `Reporter` 输出频率，Agent 模式下控制 `StressReporter` 上报频率 |
+| `httpEnabled` | bool | `false` | 是否启动监控 HTTP 端点（`/metrics` 等），单机模式专用 |
+| `httpPort` | int | `6060` | 监控 HTTP 服务监听端口 |
+| `csvPath` | string | `"log/metrics.csv"` | 进程退出时导出的 CSV 指标文件路径 |
+| `apdexT` | int | `100` | Apdex T 值（毫秒）。响应时间 < T 为满意、< 4T 为容忍、>= 4T 为沮丧。可通过 `SetApdexT()` 在任务级别动态调整 |
+
+### 9.11 agent 段 — Agent 模式配置
+
+`AgentConfig` 定义在 `agent/config.go`，通过 `Resolve()` 方法解析为 `ResolvedConfig`（Duration 已转换、默认值已填充、参数已校验）。
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `enabled` | bool | `false` | Agent 模式总开关。`false` 时运行单机模式（行为与旧版完全一致），`true` 时注册到 Admin 等待任务下发 |
+| `adminAddr` | string | — (**必填**) | Admin HTTP 地址（含 schema，如 `"http://192.168.1.100:8080"`）。Agent 模式下为必填项，校验失败直接退出 |
+| `name` | string | hostname | Agent 显示名（用于 Admin 前端列表展示），为空时自动取 `os.Hostname()` |
+| `listenAddr` | string | `":7070"` | 接收 Admin 推送的监听地址（Agent HTTP Server），Admin 通过此地址下发任务/停止/升级命令 |
+| `maxBots` | int | `5000` | 本节点支持的最大机器人数（用于 Admin 任务分配决策），≤0 时使用默认值 |
+| `stressInterval` | string | `"5s"` | 压测指标上报间隔（Agent 模式专用），支持 Go duration 格式 |
+| `systemInterval` | string | `"5s"` | 系统指标上报间隔（Agent 模式专用），CPU/内存/网络/GC 采集频率 |
+| `heartbeatInterval` | string | `"10s"` | 心跳间隔（Agent → Admin），必须 < 25s（Admin unhealthy 阈值通常为 30s），校验失败直接退出 |
+| `registerRetryMaxInterval` | string | `"60s"` | 注册重试退避上限，指数退避（1s→2s→4s→...）不超过此值，永不放弃 |
+| `taskWorkDir` | string | `os.TempDir()` | 任务配置文件临时目录，为空时使用系统临时目录。每次任务创建子目录 `stressbot-task-{taskID}/`，任务结束后删除 |
+| `appVersion` | string | 编译时注入的 `Version` | 应用版本号，注册时上报给 Admin。为空时使用 `-ldflags "-X main.Version=..."` 注入的值 |
+| `adapterScript` | string | `"conf/adapter/codec.lua"` | Agent 模式下使用的协议编解码 Lua 脚本路径（任务级覆盖时使用默认值兜底） |
 
 ## 10. 错误处理与重试策略
 

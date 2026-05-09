@@ -8,7 +8,7 @@
  * 由 NodeEditorDrawer 在 node.type === 'action' 时调用。
  */
 
-import { Alert, Collapse, Form, Input, Space, Switch, Tag } from 'antd';
+import { Alert, Collapse, Form, Input, Space, Switch } from 'antd';
 import { useMemo } from 'react';
 import { useFlowStore } from '../../store/flowStore';
 import { PatternSelector } from './PatternSelector';
@@ -81,7 +81,6 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
         <Form.Item label="pattern">
           <Space>
             <PatternSelector value={effectiveAction.pattern} onChange={onPatternChange} />
-            <Tag color="blue">{effectiveAction.pattern}</Tag>
             <SaveTemplateButton kind="action" name={actionName || nodeId} data={effectiveAction} />
           </Space>
         </Form.Item>

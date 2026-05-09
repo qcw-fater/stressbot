@@ -17,6 +17,7 @@ export interface CallbackDef {
   s2cProto?: string;
   store?: StoreMapping[];
   script?: string;
+  description?: string;
 }
 
 export type CallbackKind = 'silent' | 'declarative' | 'lua';

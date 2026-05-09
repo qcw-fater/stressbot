@@ -10,6 +10,7 @@ export * as tasksApi from './tasksApi';
 export * as agentsApi from './agentsApi';
 export * as metricsApi from './metricsApi';
 export * as historyApi from './historyApi';
+export * as logsApi from './logsApi';
 
 export { usePolling } from './usePolling';
 export type { UsePollingOptions } from './usePolling';

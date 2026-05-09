@@ -17,11 +17,12 @@
 - §7 压测指标 API
 - §8 系统指标 API
 - §9 历史压测记录 API
-- §10 完整 TypeScript 类型定义（可直接复制到前端项目）
-- §11 历史数据与轮询策略
-- §12 推荐页面布局
-- §13 错误处理策略
-- §14 完整响应示例
+- §10 日志查看器 API
+- §11 完整 TypeScript 类型定义（可直接复制到前端项目）
+- §12 历史数据与轮询策略
+- §13 推荐页面布局
+- §14 错误处理策略
+- §15 完整响应示例
 
 > ⚠️ **变更说明（2026-05）**：自动升级流程（原 §9.5~§9.8）与二进制管理（原 §9.1~§9.4）已废弃。
 > 升级是低频操作，新版本部署改为 **运维手动重启 Agent 进程**。前端不再提供升级 UI，仅在 Agents 抽屉里提供"全部停止"按钮（等价于停止当前 active 任务）。
@@ -269,6 +270,7 @@ Accept:       application/json
 | **历史压测列表** | `/api/history` | `/api/history/tags` |
 | **历史压测详情** | `/api/history/{id}` | `/api/history/{id}/timeseries`、`/api/history/{id}/agents` |
 | **历史对比** | `/api/history/compare?ids=...` | — |
+| **日志查看器** | `/api/logs/admin`、`/api/logs/agents/{id}` | `/api/logs/admin/files`、`/api/logs/agents/{id}/files` |
 
 ---
 
@@ -846,7 +848,7 @@ P50 / P90 / P95 / P99 由后端基于固定桶直方图插值计算。**集群�
 const periodQps = (curr.sampleCount - prev.sampleCount) / ((currTime - prevTime) / 1000);
 ```
 
-参考实现见 §11.3。
+参考实现见 §13.3。
 
 ### 7.6 动作分类与 UI 处理
 
@@ -1333,9 +1335,256 @@ GET /api/history/compare?ids=task-a,task-b,task-c
 
 ---
 
-## 10. 完整 TypeScript 类型定义
+## 10. 日志查看器 API
+
+> 日志查看器为运维和开发人员提供实时日志流浏览、历史日志文件下载能力。
+> Admin 和 Agent 各自维护一个内存环形缓冲区（RingBuffer），通过游标（seq）实现增量拉取；
+> 磁盘日志文件支持列表和下载，方便下载完整日志后离线排查。
+
+### 10.1 架构概述
+
+```
+┌──────────┐    GET /api/logs/admin          ┌──────────┐
+│          │ ──────────────────────────────→  │          │
+│  前端    │    GET /api/logs/admin/files     │  Admin   │
+│          │ ──────────────────────────────→  │  :8080   │
+│          │                                   │          │
+│          │    GET /api/logs/agents/{id}      │          │  代理转发
+│          │ ──────────────────────────────→  │          │ ────→ Agent /agent/v1/logs
+│          │    GET /api/logs/agents/{id}/files│          │ ────→ Agent /agent/v1/logs/files
+│          │ ──────────────────────────────→  │          │
+└──────────┘                                   └──────────┘
+```
+
+**关键设计**：
+- **前端不直连 Agent**：所有日志请求统一发到 Admin，Agent 日志由 Admin 代理转发。
+- **环形缓冲区**：固定大小，先进先出（Admin 5000 条，Agent 50000 条）；通过 `afterSeq` 游标实现增量拉取，避免重复。
+- **磁盘日志**：与环形缓冲区独立，用于完整日志归档；文件列表按当前日志文件名前缀过滤（含轮转文件）。
+
+### 10.2 查询 Admin 环形缓冲区日志
+
+```
+GET /api/logs/admin?afterSeq=0&limit=200
+```
+
+**Query 参数（全部可选）**：
+
+| 参数 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `afterSeq` | uint64 | `0` | 游标：仅返回 seq > afterSeq 的条目。首次传 `0` 表示从头拉取，后续传上次返回的 `nextSeq` |
+| `limit` | int | `200` | 单次最大返回条数，范围 1~500，超出自动修正为 200 |
+
+**响应** `200 OK`：
+
+```typescript
+type LogQueryResult = {
+  entries: LogEntry[];   // 日志条目数组（可能为空数组）
+  hasMore: boolean;      // 是否还有更多条目未返回（true 时应立即用 nextSeq 再次请求）
+  nextSeq: number;       // 下次请求使用的游标值（最后一条的 seq；无数据时为 0）
+};
+
+type LogEntry = {
+  level: string;         // 日志等级："debug" / "info" / "warn" / "error"
+  time: string;          // ISO 8601 时间戳（如 "2026-05-09T10:30:00.123+08:00"）
+  caller?: string;       // 调用位置（如 "network/connection.go:142"），仅在日志配置开启 caller 时存在
+  message: string;       // 日志消息文本
+  service?: string;      // 服务标识（如 "logic"），仅特定日志携带
+  fields?: LogField[];   // 结构化字段列表（zap 字段的键值对序列化结果）
+};
+
+type LogField = {
+  key: string;           // 字段名（如 "agentId"、"error"）
+  value: string;         // 字段值（字符串化后的值）
+};
+```
+
+**特殊响应**：
+- Admin 环形缓冲区未启用时，返回 `{ entries: [], hasMore: false, nextSeq: 0 }`（仍为 200 OK）。
+
+**增量拉取示例**：
+
+```typescript
+let nextSeq = 0;
+
+async function pollAdminLogs() {
+  const res = await fetch(`/api/logs/admin?afterSeq=${nextSeq}&limit=200`);
+  const data: LogQueryResult = await res.json();
+  // 处理 data.entries ...
+  nextSeq = data.nextSeq;
+  if (data.hasMore) {
+    // 立即再次拉取，直到 hasMore=false
+    return pollAdminLogs();
+  }
+}
+```
+
+**推荐轮询间隔**：1~3 秒。
+
+### 10.3 查询 Agent 环形缓冲区日志（代理转发）
+
+```
+GET /api/logs/agents/{id}?afterSeq=0&limit=200
+```
+
+**路径参数**：
+
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `id` | string | Agent ID |
+
+**Query 参数**：与 §10.2 完全相同（`afterSeq`、`limit`），Admin 透传到 Agent 的 `GET /agent/v1/logs`。
+
+**响应** `200 OK`：与 §10.2 相同的 `LogQueryResult` 结构。
+
+**错误响应**：
+
+| 状态 | code | 说明 |
+|---|---|---|
+| 404 | `AGENT_NOT_FOUND` | Agent ID 不存在 |
+| 503 | `AGENT_OFFLINE` | Agent 离线或不可达（message 含具体原因） |
+
+**说明**：Admin 将此请求代理到 `http://{agentAddress}/agent/v1/logs?{原始query}`，透传 Agent 的 JSON 响应和状态码。
+
+### 10.4 列出 Admin 日志文件
+
+```
+GET /api/logs/admin/files
+```
+
+**响应** `200 OK`：
+
+```typescript
+type LogFileInfo = {
+  name: string;     // 文件名（如 "stressbot.log"、"stressbot.log.2026-05-08"）
+  size: number;     // 文件大小（字节）
+  modTime: string;  // 最后修改时间（格式 "2026-05-09 10:30:00"）
+};
+
+// 响应为 LogFileInfo[]
+type ListLogFilesResponse = LogFileInfo[];
+```
+
+**说明**：
+- 返回与当前 Admin 日志文件同目录、同文件名前缀的所有文件（含轮转文件）。
+- 无文件时返回空数组 `[]`。
+
+### 10.5 下载 Admin 日志文件
+
+```
+GET /api/logs/admin/files/{name}
+```
+
+**路径参数**：
+
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `name` | string | 文件名（从 §10.4 获取） |
+
+**响应** `200 OK`：
+
+```
+Content-Type: text/plain; charset=utf-8
+Content-Disposition: attachment; filename="<name>"
+```
+
+响应体为日志文件原始内容（支持 Range 请求和 Last-Modified 缓存）。
+
+**错误响应**：
+
+| 状态 | code | 说明 |
+|---|---|---|
+| 400 | `INVALID_ARGUMENT` | 文件名非法（包含 `/`、`\` 或等于 `..`） |
+| 404 | — | 文件不存在 |
+
+### 10.6 列出 Agent 日志文件（代理转发）
+
+```
+GET /api/logs/agents/{id}/files
+```
+
+**路径参数**：
+
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `id` | string | Agent ID |
+
+**响应** `200 OK`：与 §10.4 相同的 `LogFileInfo[]` 结构。
+
+**错误响应**：
+
+| 状态 | code | 说明 |
+|---|---|---|
+| 404 | `AGENT_NOT_FOUND` | Agent ID 不存在 |
+| 503 | `AGENT_OFFLINE` | Agent 离线或不可达 |
+
+**说明**：Admin 代理转发到 `GET http://{agentAddress}/agent/v1/logs/files`。
+
+### 10.7 下载 Agent 日志文件（代理转发）
+
+```
+GET /api/logs/agents/{id}/files/{name}
+```
+
+**路径参数**：
+
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `id` | string | Agent ID |
+| `name` | string | 文件名（从 §10.6 获取） |
+
+**响应** `200 OK`：与 §10.5 相同（`text/plain` + `Content-Disposition` 下载）。
+
+**错误响应**：
+
+| 状态 | code | 说明 |
+|---|---|---|
+| 400 | `INVALID_ARGUMENT` | 文件名非法（包含 `/`、`\` 或等于 `..`） |
+| 404 | `AGENT_NOT_FOUND` | Agent ID 不存在 |
+| 503 | `AGENT_OFFLINE` | Agent 离线或不可达 |
+
+**说明**：Admin 代理转发到 `GET http://{agentAddress}/agent/v1/logs/files/{name}`，透传 Agent 的响应头和响应体。
+
+### 10.8 接口汇总
+
+| 接口 | 方法 | 路径 | 数据来源 | 说明 |
+|---|---|---|---|---|
+| Admin 日志流 | GET | `/api/logs/admin` | Admin 内存 RingBuffer | 增量游标拉取 |
+| Agent 日志流 | GET | `/api/logs/agents/{id}` | Agent RingBuffer（代理） | 透传 query |
+| Admin 文件列表 | GET | `/api/logs/admin/files` | Admin 磁盘 | 按前缀过滤 |
+| Admin 文件下载 | GET | `/api/logs/admin/files/{name}` | Admin 磁盘 | 支持 Range |
+| Agent 文件列表 | GET | `/api/logs/agents/{id}/files` | Agent 磁盘（代理） | 透传响应 |
+| Agent 文件下载 | GET | `/api/logs/agents/{id}/files/{name}` | Agent 磁盘（代理） | 透传响应 |
+
+### 10.9 UI 推荐
+
+**日志面板（LogsTab）**：
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ [Admin 日志 ▾] [Agent: agent-gz-01 ▾]  [暂停] [清屏] [下载]  │
+├──────────────────────────────────────────────────────────────┤
+│ 🔍 [过滤关键字] [等级: 全部 ▾]                                │
+├──────────────────────────────────────────────────────────────┤
+│ 10:30:00.123 INFO  [network] 连接建立 agentId=agent-1        │
+│ 10:30:00.456 WARN  [engine]   超时 action=Auth dur=850ms     │
+│ 10:30:01.789 ERROR [robot]    登录失败 botId=bot_42 err=...  │
+│ ...                                                          │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**推荐实现**：
+- **数据源切换**：下拉选择 Admin 或指定 Agent，切换时重置游标为 0。
+- **增量拉取**：每 1~3 秒用 `nextSeq` 轮询，`hasMore=true` 时立即追加请求。
+- **前端过滤**：按关键字、等级在客户端过滤（环形缓冲区不做服务端过滤）。
+- **暂停/恢复**：暂停时停止轮询但保持游标；恢复后从上次游标继续拉取（可能丢失暂停期间的旧日志，因为环形缓冲区会覆盖）。
+- **文件下载**：「下载」按钮先调 `/files` 获取列表，单文件直接用 `/files/{name}` 下载；多文件时弹窗选择。
+
+---
+
+## 12. 完整 TypeScript 类型定义
 
 > 复制以下代码到前端项目（`web/src/types/api.ts`），前端开发完整覆盖。
+> 本文件结构与文档保持完全一致，新增字段两边同步。
 
 ```typescript
 // === 基础枚举 ===
@@ -1706,13 +1955,41 @@ export type HistoryCompareResponse = {
     actions: Record<string, number[]>;  // actionName -> [taskA_p99, taskB_p99, ...]
   };
 };
+
+// === Logs（日志查看器）===
+
+export type LogField = {
+  key: string;
+  value: string;
+};
+
+export type LogEntry = {
+  level: string;         // "debug" | "info" | "warn" | "error"
+  time: string;          // ISO 8601
+  caller?: string;
+  message: string;
+  service?: string;
+  fields?: LogField[];
+};
+
+export type LogQueryResult = {
+  entries: LogEntry[];
+  hasMore: boolean;
+  nextSeq: number;
+};
+
+export type LogFileInfo = {
+  name: string;
+  size: number;          // bytes
+  modTime: string;       // "2026-05-09 10:30:00"
+};
 ```
 
 ---
 
-## 11. 历史数据与轮询策略
+## 13. 历史数据与轮询策略
 
-### 11.1 历史快照由前端管理
+### 13.1 历史快照由前端管理
 
 > Admin **不存储**历史时序数据。每次轮询拿到的都是"当前快照"。前端必须自行维护历史数组用于折线图。
 
@@ -1754,7 +2031,7 @@ export function usePolling<T>(
 }
 ```
 
-### 11.2 折线图数据准备
+### 13.2 折线图数据准备
 
 5s 间隔保留 60 个样本 = 5 分钟历史，足够大盘观察。需要更长时间用户可设置 1min 间隔保留 60 个 = 1 小时。
 
@@ -1771,7 +2048,7 @@ const cpuChartData = history.map(s => ({
 }));
 ```
 
-### 11.3 计算瞬时 QPS
+### 13.3 计算瞬时 QPS
 
 后端不提供瞬时 QPS，前端用相邻两次快照差分：
 
@@ -1791,7 +2068,7 @@ function computePeriodQps(curr: StressSnapshot, prev: StressSnapshot | null) {
 }
 ```
 
-### 11.4 任务结束后的数据处理
+### 13.4 任务结束后的数据处理
 
 任务结束（state=stopped/failed）后，`/api/metrics` 仍然返回该任务的最终快照（直到下一个任务启动）。前端可以据此显示"上次任务报告"：
 
@@ -1800,9 +2077,9 @@ function computePeriodQps(curr: StressSnapshot, prev: StressSnapshot | null) {
 
 ---
 
-## 12. 推荐页面布局
+## 14. 推荐页面布局
 
-### 12.1 总览首页
+### 14.1 总览首页
 
 ```
 ┌────────────────────────────────────────────────────────────┐
@@ -1819,7 +2096,7 @@ function computePeriodQps(curr: StressSnapshot, prev: StressSnapshot | null) {
 └────────────────────────────────────────────────────────────┘
 ```
 
-### 12.2 任务详情页
+### 14.2 任务详情页
 
 ```
 [任务名]  [状态 chip]  [启动/停止按钮]                       
@@ -1835,7 +2112,7 @@ function computePeriodQps(curr: StressSnapshot, prev: StressSnapshot | null) {
 [切换 per-agent 视图] → 用 §7.2 数据
 ```
 
-### 12.3 Agent 详情页
+### 14.3 Agent 详情页
 
 ```
 [Agent 名]  [状态指示灯]  [当前任务链接]                    
@@ -1852,7 +2129,7 @@ StaticInfo: hostname / OS / CPU / Mem / kernel / goVersion
 日志 / 事件（如有）
 ```
 
-### 12.4 历史压测列表页 `/history`
+### 14.4 历史压测列表页 `/history`
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -1870,7 +2147,7 @@ StaticInfo: hostname / OS / CPU / Mem / kernel / goVersion
 
 > 推荐：starred 任务用金色边框置顶，普通任务按 startedAt desc 排列。
 
-### 12.5 历史压测详情页 `/history/:id`
+### 14.5 历史压测详情页 `/history/:id`
 
 ```
 [name]  [tags chips]  [☆收藏] [编辑] [克隆] [加入对比] [删除]
@@ -1887,7 +2164,7 @@ per-Agent：表格列出每个 agent 的 successRate / P99 / Apdex（异常节�
 [配置归档] 折叠面板：展示 ConfigSummary 主要参数 + [下载完整配置] 按钮
 ```
 
-### 12.6 历史对比页 `/history/compare`
+### 14.6 历史对比页 `/history/compare`
 
 ```
 顶部：选择 2~5 个任务（chip 显示已选）
@@ -1904,9 +2181,9 @@ per-Agent：表格列出每个 agent 的 successRate / P99 / Apdex（异常节�
 
 ---
 
-## 13. 错误处理策略
+## 15. 错误处理策略
 
-### 13.1 通用错误拦截
+### 15.1 通用错误拦截
 
 ```typescript
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
@@ -1923,7 +2200,7 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 }
 ```
 
-### 13.2 全局 Toast 映射
+### 15.2 全局 Toast 映射
 
 ```typescript
 function showApiError(err: ApiError) {
@@ -1966,7 +2243,7 @@ function handleTaskConflict(err: ApiError, navigate: ReturnType<typeof useNaviga
 }
 ```
 
-### 13.3 轮询失败处理
+### 15.3 轮询失败处理
 
 | 场景 | 策略 |
 |---|---|
@@ -1989,7 +2266,7 @@ async function tick() {
 }
 ```
 
-### 13.4 长时间无数据状态
+### 15.4 长时间无数据状态
 
 | 场景 | UI |
 |---|---|
@@ -1999,9 +2276,9 @@ async function tick() {
 
 ---
 
-## 14. 完整响应示例
+## 16. 完整响应示例
 
-### 14.1 GET /api/metrics（集群聚合压测）
+### 16.1 GET /api/metrics（集群聚合压测）
 
 ```json
 {
@@ -2109,7 +2386,7 @@ async function tick() {
 }
 ```
 
-### 14.2 GET /api/system（集群系统聚合）
+### 16.2 GET /api/system（集群系统聚合）
 
 ```json
 {
@@ -2131,7 +2408,7 @@ async function tick() {
 }
 ```
 
-### 14.3 GET /api/agents
+### 16.3 GET /api/agents
 
 ```json
 {
@@ -2166,7 +2443,7 @@ async function tick() {
 }
 ```
 
-### 14.4 GET /api/tasks/{id}
+### 16.4 GET /api/tasks/{id}
 
 ```json
 {
@@ -2204,7 +2481,7 @@ async function tick() {
 
 ---
 
-## 15. 开发交接清单
+## 17. 开发交接清单
 
 完成前端开发后请逐项验证：
 
@@ -2223,7 +2500,7 @@ async function tick() {
 
 ---
 
-## 16. 联系点
+## 18. 联系点
 
 | 问题类型 | 联系对象 |
 |---|---|

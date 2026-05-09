@@ -135,6 +135,7 @@ function cleanCallback(c: CallbackDef): CallbackDef {
   if (c.s2cProto) out.s2cProto = c.s2cProto;
   if (c.store?.length) out.store = c.store.map(cleanStoreMapping);
   if (c.script) out.script = c.script;
+  if (c.description?.trim()) out.description = c.description.trim();
   return out;
 }
 

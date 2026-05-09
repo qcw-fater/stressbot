@@ -491,6 +491,8 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.C
 }
 
 // evalCondition 求值 state: 前缀的条件表达式。
+// 支持复合条件：&&、||、!、括号嵌套。
+// 示例：state:hp > 0 && (state:alive || state:isAdmin)
 func evalCondition(expr string, s *state.Store) bool {
 	expr = strings.TrimSpace(expr)
 	if expr == "" {
@@ -502,41 +504,8 @@ func evalCondition(expr string, s *state.Store) bool {
 			zap.String("expr", expr))
 		return false
 	}
-	rest := expr[6:]
-
-	for _, op := range []string{">=", "<=", "!=", "==", ">", "<"} {
-		if idx := strings.Index(rest, op); idx > 0 {
-			key := strings.TrimSpace(rest[:idx])
-			rhsStr := strings.TrimSpace(rest[idx+len(op):])
-			lhs := s.Get(key)
-			if lhs == nil {
-				return false
-			}
-			rhs := parseRHS(rhsStr)
-			return state.CompareValues(lhs, rhs, op)
-		}
-	}
-
-	val := s.Get(rest)
-	if val == nil {
-		return false
-	}
-	switch v := val.(type) {
-	case bool:
-		return v
-	case int:
-		return v != 0
-	case int64:
-		return v != 0
-	case float64:
-		return v != 0
-	case string:
-		return v != ""
-	default:
-		return true
-	}
+	return parseExpr(expr[6:], s)
 }
-
 // parseRHS 尝试将条件右值解析为数值类型，保留字符串回退。
 func parseRHS(s string) any {
 	if v, err := strconv.ParseInt(s, 10, 64); err == nil {

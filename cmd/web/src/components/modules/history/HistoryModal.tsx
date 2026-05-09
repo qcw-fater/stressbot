@@ -6,7 +6,7 @@
  * - detail 视图可：编辑备注/标签/收藏，下载完整配置归档，删除（强制），克隆为新任务。
  */
 
-import { App, Button, Drawer, Empty, Input, Space, Spin, Switch, Table, Tag, Tooltip } from 'antd';
+import { App, Button, Modal, Empty, Input, Space, Spin, Switch, Table, Tag, Tooltip } from 'antd';
 import {
   ArrowLeftOutlined,
   DeleteOutlined,
@@ -23,14 +23,14 @@ import type { HistoryRecord } from '@/types/api';
 import { HistoryDetailView } from './HistoryDetailView';
 import { HistoryCompareView } from './HistoryCompareView';
 
-export interface HistoryDrawerProps {
+export interface HistoryModalProps {
   open: boolean;
   onClose: () => void;
 }
 
 type View = { kind: 'list' } | { kind: 'detail'; id: string } | { kind: 'compare'; ids: string[] };
 
-export function HistoryDrawer({ open, onClose }: HistoryDrawerProps) {
+export function HistoryModal({ open, onClose }: HistoryModalProps) {
   const { message, modal } = App.useApp();
   const [view, setView] = useState<View>({ kind: 'list' });
   const [items, setItems] = useState<HistoryRecord[]>([]);
@@ -201,7 +201,8 @@ export function HistoryDrawer({ open, onClose }: HistoryDrawerProps) {
   );
 
   return (
-    <Drawer
+    <Modal
+      width="95vw"
       title={
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {view.kind !== 'list' && (
@@ -224,9 +225,10 @@ export function HistoryDrawer({ open, onClose }: HistoryDrawerProps) {
         </div>
       }
       open={open}
-      onClose={onClose}
-      width={view.kind === 'compare' ? 1100 : 920}
-      destroyOnHidden
+      onCancel={onClose}
+      destroyOnClose
+      footer={null}
+      styles={{ body: { height: '85vh', overflowY: 'auto' } }}
     >
       {view.kind === 'list' && (
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -281,7 +283,7 @@ export function HistoryDrawer({ open, onClose }: HistoryDrawerProps) {
         <HistoryDetailView id={view.id} onChange={refresh} />
       )}
       {view.kind === 'compare' && <HistoryCompareView ids={view.ids} />}
-    </Drawer>
+    </Modal>
   );
 }
 

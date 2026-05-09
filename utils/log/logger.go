@@ -19,6 +19,9 @@ var loglevel zap.AtomicLevel
 
 var defaultConf *Config
 
+// logFilePath 记录 InitLog 传入的日志文件路径，供日志下载 endpoint 使用。
+var logFilePath string
+
 // Config 日志配置的结构体
 type Config struct {
 	PrintConsole bool   `yaml:"printConsole"` // 是否控制台输出
@@ -62,6 +65,7 @@ func callerEncoder(caller zapcore.EntryCaller, enc zapcore.PrimitiveArrayEncoder
 
 // InitLog 初始化日志 logger
 func InitLog(logPath, serviceName string, conf *Config, buildLogLevel string) {
+	logFilePath = logPath
 	// 如果配置为空，则使用默认配置
 	if conf == nil {
 		conf = defaultConfig()
@@ -126,6 +130,17 @@ func InitLog(logPath, serviceName string, conf *Config, buildLogLevel string) {
 
 func GetLogger() *zap.Logger {
 	return logger
+}
+
+// GetLogFilePath 返回 InitLog 配置的日志文件路径。
+func GetLogFilePath() string {
+	return logFilePath
+}
+
+// ReplaceLogger 替换内部 logger 实例（供 logview.AttachRingBuffer 后同步）。
+func ReplaceLogger(l *zap.Logger) {
+	logger = l
+	sugarLogger = l.Sugar()
 }
 
 func GetLoggerWriter(filename string) io.Writer {

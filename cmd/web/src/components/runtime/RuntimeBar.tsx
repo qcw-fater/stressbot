@@ -30,6 +30,8 @@ import {
   SettingOutlined,
   StopOutlined,
   ThunderboltOutlined,
+  DashboardOutlined,
+  AlignLeftOutlined,
 } from '@ant-design/icons';
 import { App as AntApp, Badge, Button, Divider, Popover, Segmented, Space, Switch, Tag, Tooltip, Typography } from 'antd';
 import { useState } from 'react';
@@ -49,6 +51,8 @@ export interface RuntimeBarProps {
   onOpenResources?: () => void;
   onOpenHistory?: () => void;
   onOpenAgents?: () => void;
+  onOpenSystem?: () => void;
+  onOpenLogs?: () => void;
 }
 
 const SECTION_DIVIDER = (
@@ -68,6 +72,8 @@ export function RuntimeBar({
   onOpenResources,
   onOpenHistory,
   onOpenAgents,
+  onOpenSystem,
+  onOpenLogs,
 }: RuntimeBarProps) {
   const { modal } = AntApp.useApp();
 
@@ -325,6 +331,16 @@ export function RuntimeBar({
       {/* === 跨模块入口组（统一图标 + 文字） === */}
       {/* 适配器在最左：与"资源"同属协议/资源准备类（codec.lua 也是 lua 脚本），仅 edit 态可打开 */}
       <Space size={4}>
+        <Tooltip title="系统状态：查看服务器与各节点硬件级指标">
+          <Button icon={<DashboardOutlined />} onClick={onOpenSystem}>
+            系统
+          </Button>
+        </Tooltip>
+        <Tooltip title="运行日志：查看 Admin 与节点输出的文本日志">
+          <Button icon={<AlignLeftOutlined />} onClick={onOpenLogs}>
+            日志
+          </Button>
+        </Tooltip>
         <Tooltip title="协议适配器（codec.lua）— 通用游戏服务器协议接入">
           <Button
             icon={<LinkOutlined />}

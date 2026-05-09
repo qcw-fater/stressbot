@@ -5,8 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
+	"stressbot/logview"
 	stresslog "stressbot/utils/log"
 	"stressbot/utils"
 
@@ -20,6 +25,9 @@ func (a *Agent) startHTTPServer() error {
 	mux.HandleFunc("/agent/v1/stop", a.handleStop)
 	mux.HandleFunc("/agent/v1/version", a.handleVersion)
 	mux.HandleFunc("/agent/v1/status", a.handleStatus)
+	mux.HandleFunc("/agent/v1/logs", a.handleLogs)
+	mux.HandleFunc("/agent/v1/logs/files", a.handleListLogFiles)
+	mux.HandleFunc("/agent/v1/logs/files/", a.handleDownloadLogFile)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -118,6 +126,41 @@ func (a *Agent) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	json.NewEncoder(w).Encode(status)
 }
 
+func (a *Agent) handleLogs(w http.ResponseWriter, r *http.Request) {
+	rb := logview.GetRingBuffer()
+	if rb == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": "log ring buffer not enabled"})
+		return
+	}
+
+	q := r.URL.Query()
+	limit := parseIntOrDefault(q.Get("limit"), 200)
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+
+	result := rb.Query(logview.QueryParams{
+		AfterSeq: logview.ParseUint64OrDefault(q.Get("afterSeq"), 0),
+		Limit:    limit,
+	})
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	json.NewEncoder(w).Encode(result)
+}
+
+func parseIntOrDefault(s string, def int) int {
+	if s == "" {
+		return def
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return def
+	}
+	return n
+}
+
 func (a *Agent) shutdownHTTPServer(ctx context.Context) {
 	if a.httpSrv == nil {
 		return
@@ -136,4 +179,83 @@ func writeJSONError(w http.ResponseWriter, code int, format string, args ...inte
 		Code:    fmt.Sprintf("STATUS_%d", code),
 		Message: fmt.Sprintf(format, args...),
 	})
+}
+
+func (a *Agent) handleListLogFiles(w http.ResponseWriter, r *http.Request) {
+	logPath := stresslog.GetLogFilePath()
+	if logPath == "" {
+		writeJSONError(w, http.StatusServiceUnavailable, "log file not configured")
+		return
+	}
+
+	dir := filepath.Dir(logPath)
+	base := filepath.Base(logPath)
+	prefix := strings.TrimSuffix(base, filepath.Ext(base))
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "read log dir: %v", err)
+		return
+	}
+
+	type fileInfo struct {
+		Name    string `json:"name"`
+		Size    int64  `json:"size"`
+		ModTime string `json:"modTime"`
+	}
+
+	var files []fileInfo
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, fileInfo{
+			Name:    e.Name(),
+			Size:    info.Size(),
+			ModTime: info.ModTime().Format("2006-01-02 15:04:05"),
+		})
+	}
+	if files == nil {
+		files = []fileInfo{}
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	json.NewEncoder(w).Encode(files)
+}
+
+func (a *Agent) handleDownloadLogFile(w http.ResponseWriter, r *http.Request) {
+	logPath := stresslog.GetLogFilePath()
+	if logPath == "" {
+		writeJSONError(w, http.StatusServiceUnavailable, "log file not configured")
+		return
+	}
+
+	// 提取文件名：/agent/v1/logs/files/{name}
+	name := strings.TrimPrefix(r.URL.Path, "/agent/v1/logs/files/")
+	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "\\") || name == ".." {
+		writeJSONError(w, http.StatusBadRequest, "invalid file name")
+		return
+	}
+
+	path := filepath.Join(filepath.Dir(logPath), name)
+	f, err := os.Open(path)
+	if err != nil {
+		http.Error(w, "log file not found", http.StatusNotFound)
+		return
+	}
+	defer f.Close()
+
+	stat, err := f.Stat()
+	if err != nil {
+		http.Error(w, "stat failed", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, name))
+	http.ServeContent(w, r, name, stat.ModTime(), f)
 }

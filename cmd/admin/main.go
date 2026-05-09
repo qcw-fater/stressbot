@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"stressbot/admin"
-
+	"stressbot/logview"
 	stresslog "stressbot/utils/log"
 )
 
@@ -30,6 +30,8 @@ func main() {
 		Compress:     true,
 	}
 	stresslog.InitLog(cfg.Log.Path, "admin", logConf, "")
+	newLogger := logview.AttachRingBuffer(stresslog.GetLogger(), 5000)
+	stresslog.ReplaceLogger(newLogger)
 
 	srv, err := admin.NewAdminServer(*cfg)
 	if err != nil {
