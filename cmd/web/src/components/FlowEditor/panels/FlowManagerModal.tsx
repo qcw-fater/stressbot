@@ -2,7 +2,7 @@
  * 流程管理面板 (IndexedDB)
  */
 
-import { Button, Input, Modal, Space, Table, message, Popconfirm } from 'antd';
+import { App as AntApp, Button, Input, Modal, Space, Table, Popconfirm } from 'antd';
 import { DeleteOutlined, FolderOpenOutlined, SaveOutlined, SyncOutlined } from '@ant-design/icons';
 import { useEffect, useState } from 'react';
 import type { ColumnsType } from 'antd/es/table';
@@ -16,6 +16,7 @@ export interface FlowManagerModalProps {
 }
 
 export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
+  const { message } = AntApp.useApp();
   const [flows, setFlows] = useState<ManagedFlow[]>([]);
   const [loading, setLoading] = useState(false);
   const [saveName, setSaveName] = useState('');

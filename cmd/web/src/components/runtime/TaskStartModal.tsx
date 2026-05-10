@@ -9,7 +9,7 @@
  * 运行模式（editorStore.debugMode）：测试 ↔ 调试 互斥，顶部 Segmented 控制，持久化到 localStorage。
  *   - 测试（debugMode=false，默认，蓝色）：使用用户填写的全量配置 + 容量预检 + 默认日志级别；
  *   - 调试（debugMode=true，紫色）：自动装填 totalBots=1 / concurrency=1 / logLevel=debug，
- *     启动时 skipCapacityCheck=true（容量不足不再阻塞，让服务端兜底）；
+ *     后端 debugMode=true 时单 Agent 分配 + 历史自动标记 "debug"；
  *   - 0 个在线 Agent 时无论哪种模式都 disable 启动按钮（前端最低门槛）；
  *   - 模式切换不回滚已填数值（保留用户偏好）。
  *
@@ -54,8 +54,6 @@ export interface TaskStartModalProps {
   /** 启动成功后的回调（拿到 taskId） */
   onStarted?: (taskId: string) => void;
 }
-
-const DEBUG_TASK_NAME_PLACEHOLDERS = new Set(['', '未命名任务']);
 
 /** 调试模式装填一次性使用的预设值。统一在此声明便于后续调整。 */
 const DEBUG_PRESET = {
@@ -152,31 +150,38 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
     };
   }, [open]);
 
-  // 弹窗打开瞬间若已经处于调试模式，主动装填一次（用户上次留下的值可能是 100/50）。
-  // 用 ref 防止依赖项波动重复装填。
+  // 弹窗打开时自动生成任务名 + 调试模式装填预设值。
   const filledRef = useRef(false);
   useEffect(() => {
     if (!open) {
       filledRef.current = false;
       return;
     }
+    // 自动生成任务名
+    const prefix = debugMode ? 'debug' : 'test';
+    setTaskName(`${prefix}-${dayjs().format('MMDD-HHmm')}`);
+    // 调试模式装填预设值
     if (debugMode && !filledRef.current) {
-      applyDebugPreset();
+      setTotalBots(DEBUG_PRESET.totalBots);
+      setRobotConfig({
+        concurrency: DEBUG_PRESET.concurrency,
+        logLevel: DEBUG_PRESET.logLevel,
+      });
       filledRef.current = true;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, debugMode]);
+  }, [open]);
 
-  const availableBots = useMemo(() => {
+  const totalCapacity = useMemo(() => {
     return (agents ?? [])
-      .filter((a) => a.status === 'idle' || a.status === 'busy')
-      .reduce((sum, a) => sum + Math.max(0, a.maxBots - a.currentBots), 0);
+      .filter((a) => a.status !== 'offline')
+      .reduce((sum, a) => sum + a.maxBots, 0);
   }, [agents]);
 
   const onlineAgents = (agents ?? []).filter((a) => a.status !== 'offline').length;
 
   // 调试模式下不再硬性禁止超容量；普通模式按容量预检。
-  const capacityWarn = !debugMode && totalBots > availableBots;
+  const capacityWarn = !debugMode && totalBots > totalCapacity;
   const noAgentBlock = onlineAgents === 0; // 无 Agent 在线连调试也跑不起来，仍禁用启动
 
   // authAddr 必须带 scheme，否则后端 net/http 会报 "unsupported protocol scheme"，
@@ -187,21 +192,17 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
     !authAddrTrim.startsWith('http://') &&
     !authAddrTrim.startsWith('https://');
 
-  function applyDebugPreset() {
-    setTotalBots(DEBUG_PRESET.totalBots);
-    setRobotConfig({
-      concurrency: DEBUG_PRESET.concurrency,
-      logLevel: DEBUG_PRESET.logLevel,
-    });
-    if (DEBUG_TASK_NAME_PLACEHOLDERS.has(taskName.trim())) {
-      setTaskName(`debug · ${dayjs().format('MMDD-HHmm')}`);
-    }
-  }
-
   function onToggleDebug(v: boolean) {
     setDebugMode(v);
+    // 切换模式时刷新任务名
+    const prefix = v ? 'debug' : 'test';
+    setTaskName(`${prefix}-${dayjs().format('MMDD-HHmm')}`);
     if (v) {
-      applyDebugPreset();
+      setTotalBots(DEBUG_PRESET.totalBots);
+      setRobotConfig({
+        concurrency: DEBUG_PRESET.concurrency,
+        logLevel: DEBUG_PRESET.logLevel,
+      });
       filledRef.current = true;
     }
   }
@@ -212,9 +213,8 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
       const id = await startTask({
         name: taskName,
         totalBots,
-        robotConfig,
+        robotConfig: { ...robotConfig, debugMode },
         deadline: deadline ?? undefined,
-        skipCapacityCheck: debugMode,
       });
       onStarted?.(id);
       onClose();
@@ -266,7 +266,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
     >
       {/* 模式选择条：测试 ↔ 调试 二选一 Segmented，颜色与 title tag / RuntimeBar 设置面板完全一致。
           - 测试（默认，蓝色）：使用用户填写的全量配置 + 容量预检 + 默认日志；
-          - 调试（紫色）：自动装填 1 机器人 / 并发 1 / 跳过容量预检 / 日志=debug。
+          - 调试（紫色）：自动装填 1 机器人 / 并发 1 / 日志=debug / 单 Agent 分配。
           切换调试 → 测试 不会回滚已填值（保留用户偏好），与原 Switch 行为一致。 */}
       <div
         style={{
@@ -276,21 +276,21 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
           gap: 12,
           padding: '8px 12px',
           marginBottom: 12,
-          background: debugMode ? 'rgba(146, 84, 222, 0.08)' : 'rgba(22, 119, 255, 0.06)',
-          border: `1px solid ${debugMode ? 'rgba(146,84,222,0.45)' : 'rgba(22,119,255,0.30)'}`,
+          background: debugMode ? 'color-mix(in srgb, var(--color-purple) 8%, transparent)' : 'color-mix(in srgb, var(--color-blue) 6%, transparent)',
+          border: `1px solid ${debugMode ? 'color-mix(in srgb, var(--color-purple) 45%, transparent)' : 'color-mix(in srgb, var(--color-blue) 30%, transparent)'}`,
           borderRadius: 6,
         }}
       >
         <Space size={8} style={{ flex: 1, minWidth: 0 }}>
           {debugMode ? (
-            <BugOutlined style={{ color: '#9254de' }} />
+            <BugOutlined style={{ color: 'var(--color-purple)' }} />
           ) : (
-            <CheckCircleOutlined style={{ color: '#1677ff' }} />
+            <CheckCircleOutlined style={{ color: 'var(--color-blue)' }} />
           )}
           <span style={{ fontWeight: 500 }}>{debugMode ? '调试模式' : '测试模式'}</span>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             {debugMode
-              ? '一键装填 1 个机器人 / 并发 1 / 日志 debug / 跳过容量预检'
+              ? '一键装填 1 个机器人 / 并发 1 / 日志 debug / 单 Agent 分配'
               : '使用你填写的完整配置，启用容量预检与默认日志级别'}
           </Typography.Text>
         </Space>
@@ -302,7 +302,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
             options={[
               {
                 label: (
-                  <span style={{ color: !debugMode ? '#1677ff' : undefined, fontWeight: !debugMode ? 600 : undefined }}>
+                  <span style={{ color: !debugMode ? 'var(--color-blue)' : undefined, fontWeight: !debugMode ? 600 : undefined }}>
                     <CheckCircleOutlined style={{ marginRight: 4 }} />
                     测试
                   </span>
@@ -311,7 +311,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
               },
               {
                 label: (
-                  <span style={{ color: debugMode ? '#9254de' : undefined, fontWeight: debugMode ? 600 : undefined }}>
+                  <span style={{ color: debugMode ? 'var(--color-purple)' : undefined, fontWeight: debugMode ? 600 : undefined }}>
                     <BugOutlined style={{ marginRight: 4 }} />
                     调试
                   </span>
@@ -336,10 +336,10 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
                 <Tag color="purple" style={{ marginRight: 6 }}>
                   调试
                 </Tag>
-                建议保持 1；当前剩余容量约 {availableBots}
+                建议保持 1；集群总容量 {totalCapacity}
               </span>
             ) : (
-              `集群剩余容量约 ${availableBots}`
+              `集群总容量 ${totalCapacity}`
             )
           }
         >
@@ -573,8 +573,8 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
           type="warning"
           showIcon
           style={{ marginTop: 12 }}
-          message={`集群剩余容量 ${availableBots}，本次申请 ${totalBots}`}
-          description="请减少机器人数，或先停止其他任务释放节点；或开启「调试模式」跳过容量预检。"
+          message={`集群总容量 ${totalCapacity}，本次申请 ${totalBots}`}
+          description="请减少机器人数，或增加 Agent 节点。"
         />
       )}
 

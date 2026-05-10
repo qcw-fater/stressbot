@@ -11,18 +11,17 @@
  *   boolean 模式 : function execute(r) ... return true/false end（条件节点 / loop breakCondition 用）
  *
  * 持久化：
- *   - 加载脚本时优先读 IDB（用户编辑过的版本），IDB 没有再 fetch /conf/scripts/<name> 兜底；
- *   - onChange 时 600ms debounce 写回 IDB（resourcesStore.scripts），
- *     启动任务时 taskActions.collectScripts 会自动一并提交；
+ *   - 加载脚本时优先读 IDB（用户保存过的版本），IDB 没有再 fetch /conf/scripts/<name> 兜底；
+ *   - 需手动保存（Ctrl+S 或「保存到本地」按钮），脚本名不能为空；
  *   - "导入本地"按钮也会立即写入 IDB；
- *   - 即使没主动到「资源管理」上传过，编辑器里的修改也不会丢。
+ *   - 启动任务时 taskActions.collectScripts 会自动一并提交。
  */
 
-import { Alert, Button, Select, Space, Tag, Upload, message } from 'antd';
-import { CloudDownloadOutlined, ImportOutlined } from '@ant-design/icons';
+import { Alert, App as AntApp, Button, Select, Space, Tag, Upload } from 'antd';
+import { CloudDownloadOutlined, ImportOutlined, SaveOutlined } from '@ant-design/icons';
 import Editor, { type Monaco } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { UploadProps } from 'antd';
 import { useEditorStore } from '../../store/editorStore';
 import { registerLuaProviders } from '../../lua/luaProviders';
@@ -36,6 +35,8 @@ export interface LuaFormProps {
   /** 当前脚本路径（如 "post_login.lua"） */
   script?: string;
   onChangeScript: (path: string) => void;
+  /** 外部监听 dirty 状态变化（用于关闭前确认） */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 const TEMPLATE: Record<LuaMode, string> = {
@@ -74,21 +75,28 @@ end
 `,
 };
 
-export function LuaForm({ mode, script, onChangeScript }: LuaFormProps) {
+export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaFormProps) {
+  const { message } = AntApp.useApp();
   const [files, setFiles] = useState<string[]>([]);
   const [content, setContent] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [issues, setIssues] = useState<SyntaxIssue[]>([]);
-  /** 本地是否已有该脚本的修改稿（IDB 命中），仅用于状态条提示 */
   const [hasLocalDraft, setHasLocalDraft] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const themeMode = useEditorStore((s) => s.theme);
   const monacoTheme = themeMode === 'dark' ? 'vs-dark' : 'light';
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
   const lintDebounceRef = useRef<number | null>(null);
-  const persistDebounceRef = useRef<number | null>(null);
-  /** 当前脚本是否完成首次加载，避免初始 setContent 触发回写 */
+  /** 加载完成后的初始内容，用于 dirty 判断 */
+  const initialContentRef = useRef<string>('');
+  /** 当前脚本是否完成首次加载，避免初始 setContent 触发 dirty */
   const loadedScriptRef = useRef<string | null>(null);
+
+  // 通知外层 dirty 状态变化
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   // 拉取脚本列表
   useEffect(() => {
@@ -107,8 +115,11 @@ export function LuaForm({ mode, script, onChangeScript }: LuaFormProps) {
   // 拉取选中脚本内容：IDB 优先 → fetch /conf/scripts/ 兜底
   useEffect(() => {
     if (!script) {
-      setContent(TEMPLATE[mode]);
+      const tpl = TEMPLATE[mode];
+      setContent(tpl);
       setHasLocalDraft(false);
+      setDirty(false);
+      initialContentRef.current = tpl;
       loadedScriptRef.current = null;
       return;
     }
@@ -122,22 +133,37 @@ export function LuaForm({ mode, script, onChangeScript }: LuaFormProps) {
         if (idb) {
           setContent(idb.content);
           setHasLocalDraft(true);
+          setDirty(false);
+          initialContentRef.current = idb.content;
           loadedScriptRef.current = script;
           setLoading(false);
           return;
         }
         const r = await fetch('/conf/scripts/' + script);
         if (cancel) return;
-        const text = r.ok ? await r.text() : null;
+        let text: string | null = null;
+        if (r.ok) {
+          const body = await r.text();
+          const lower = body.slice(0, 200).toLowerCase();
+          if (!lower.includes('<!doctype') && !lower.includes('<html')) {
+            text = body;
+          }
+        }
         if (cancel) return;
-        setContent(text ?? TEMPLATE[mode]);
+        const final = text ?? TEMPLATE[mode];
+        setContent(final);
         setHasLocalDraft(false);
+        setDirty(false);
+        initialContentRef.current = final;
         loadedScriptRef.current = script;
         setLoading(false);
       } catch {
         if (!cancel) {
-          setContent(TEMPLATE[mode]);
+          const tpl = TEMPLATE[mode];
+          setContent(tpl);
           setHasLocalDraft(false);
+          setDirty(false);
+          initialContentRef.current = tpl;
           loadedScriptRef.current = script;
           setLoading(false);
         }
@@ -148,6 +174,23 @@ export function LuaForm({ mode, script, onChangeScript }: LuaFormProps) {
     };
   }, [script, mode]);
 
+  const handleSave = useCallback(async () => {
+    const name = script?.trim();
+    if (!name) {
+      message.warning('请先填写脚本文件名');
+      return;
+    }
+    try {
+      await addScript(name, content);
+      setHasLocalDraft(true);
+      setDirty(false);
+      initialContentRef.current = content;
+      message.success('已保存到本地');
+    } catch (e) {
+      message.error(`保存失败：${(e as Error).message}`);
+    }
+  }, [script, content]);
+
   const onImport: UploadProps['beforeUpload'] = async (file) => {
     const text = await file.text();
     setContent(text);
@@ -156,6 +199,8 @@ export function LuaForm({ mode, script, onChangeScript }: LuaFormProps) {
     try {
       await addScript(file.name, text);
       setHasLocalDraft(true);
+      setDirty(false);
+      initialContentRef.current = text;
       message.success(`已导入 ${file.name}（已自动保存到本地，启动任务时一并提交）`);
     } catch (e) {
       message.warning(`已导入 ${file.name}，但本地保存失败：${(e as Error).message}`);
@@ -178,7 +223,6 @@ export function LuaForm({ mode, script, onChangeScript }: LuaFormProps) {
     mode === 'callback' ? 'function onMessage(r, msg)' : 'function execute(r)';
   const errorCount = issues.filter((i) => i.severity === 'error').length;
   const warnCount = issues.filter((i) => i.severity === 'warning').length;
-  // 用 worker 校验失败时（worker 启动异常）退化为旧的字符串包含检查，避免完全没提示
   const lintFallbackWarn = issues.length === 0 && !content.includes(expectedSig);
   const lintWarn = errorCount > 0 || warnCount > 0 || lintFallbackWarn;
 
@@ -218,28 +262,14 @@ export function LuaForm({ mode, script, onChangeScript }: LuaFormProps) {
     };
   }, [content, mode]);
 
-  // 内容变化 → 防抖写回 IDB（仅在已选择脚本文件且首次加载完成后）
-  useEffect(() => {
-    if (!script) return;
-    // 首次加载（loadedScriptRef 与 script 还未对齐）不要回写
-    if (loadedScriptRef.current !== script) return;
-    if (persistDebounceRef.current) window.clearTimeout(persistDebounceRef.current);
-    persistDebounceRef.current = window.setTimeout(() => {
-      void addScript(script, content)
-        .then(() => setHasLocalDraft(true))
-        .catch(() => {
-          // 静默：localStorage / IDB 异常不应阻塞编辑
-        });
-    }, 600);
-    return () => {
-      if (persistDebounceRef.current) window.clearTimeout(persistDebounceRef.current);
-    };
-  }, [script, content]);
-
   const handleEditorMount = (ed: editor.IStandaloneCodeEditor, mon: Monaco) => {
     editorRef.current = ed;
     monacoRef.current = mon;
     registerLuaProviders(mon);
+    // Ctrl+S 保存
+    ed.addCommand(mon.KeyMod.CtrlCmd | mon.KeyCode.KeyS, () => {
+      handleSave();
+    });
   };
 
   return (
@@ -263,10 +293,24 @@ export function LuaForm({ mode, script, onChangeScript }: LuaFormProps) {
         <Button icon={<CloudDownloadOutlined />} size="small" onClick={onDownload}>
           下载当前内容
         </Button>
+        <Button
+          icon={<SaveOutlined />}
+          size="small"
+          type="primary"
+          disabled={!script?.trim()}
+          onClick={handleSave}
+        >
+          保存到本地
+        </Button>
         <Tag color={mode === 'action' ? 'blue' : mode === 'boolean' ? 'purple' : 'orange'}>
           {mode}
         </Tag>
-        {script && hasLocalDraft && (
+        {dirty && (
+          <Tag color="warning" style={{ marginInlineEnd: 0 }}>
+            未保存
+          </Tag>
+        )}
+        {!dirty && hasLocalDraft && script && (
           <Tag color="green" style={{ marginInlineEnd: 0 }}>
             已保存到本地
           </Tag>
@@ -294,12 +338,12 @@ export function LuaForm({ mode, script, onChangeScript }: LuaFormProps) {
               </>
             )}
             {errorCount > 0 && (
-              <span style={{ marginLeft: 12, color: '#f5222d' }}>
+              <span style={{ marginLeft: 12, color: 'var(--color-error)' }}>
                 · {errorCount} 个语法错误
               </span>
             )}
             {warnCount > 0 && (
-              <span style={{ marginLeft: 8, color: '#faad14' }}>· {warnCount} 个警告</span>
+              <span style={{ marginLeft: 8, color: 'var(--color-warning)' }}>· {warnCount} 个警告</span>
             )}
           </span>
         }
@@ -334,13 +378,19 @@ export function LuaForm({ mode, script, onChangeScript }: LuaFormProps) {
           parameterHints: { enabled: true, cycle: true },
           suggestOnTriggerCharacters: true,
         }}
-        onChange={(v) => setContent(v ?? '')}
+        onChange={(v) => {
+          const next = v ?? '';
+          setContent(next);
+          if (loadedScriptRef.current === script) {
+            setDirty(next !== initialContentRef.current);
+          }
+        }}
         onMount={handleEditorMount}
       />
       {/* 抹除 lintWarn 未使用警告（仅作为兜底状态） */}
       <span style={{ display: 'none' }}>{lintWarn ? '1' : '0'}</span>
       <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 6 }}>
-        ⓘ 修改会自动保存到浏览器本地（IndexedDB），启动任务时随 multipart 一并提交给 Admin；
+        按 Ctrl+S 或点击「保存到本地」按钮手动保存到浏览器本地（IndexedDB），启动任务时随 multipart 一并提交给 Admin；
         如果想同步到仓库 conf/scripts/，请用"下载当前内容"导出后再 commit。
       </div>
     </div>

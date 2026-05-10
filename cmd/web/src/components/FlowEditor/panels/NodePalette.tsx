@@ -8,7 +8,7 @@
  * 模板项可拖入画布：拖入时同时插入 ActionDef/CallbackDef 到 flow 并建立对应节点。
  */
 
-import { Button, Empty, Input, Upload, message } from 'antd';
+import { App as AntApp, Button, Empty, Input, Upload } from 'antd';
 import { DownloadOutlined, ImportOutlined } from '@ant-design/icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { UploadProps } from 'antd';
@@ -57,6 +57,7 @@ interface ContextMenuState {
 }
 
 export function NodePalette() {
+  const { message } = AntApp.useApp();
   const onDragStart = (e: React.DragEvent, type: NodeType | 'callback') => {
     if (type === 'callback') {
       // callback 不是 FlowNode；走独立的 dataTransfer key，由 FlowCanvas onDrop 识别后创建空 silent callback

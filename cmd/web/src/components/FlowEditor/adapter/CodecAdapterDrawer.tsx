@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Drawer, Space, Tabs, Upload, message } from 'antd';
+import { Alert, App as AntApp, Button, Drawer, Space, Tabs, Upload } from 'antd';
 import { InboxOutlined, UploadOutlined } from '@ant-design/icons';
 import Editor from '@monaco-editor/react';
 import type { UploadProps } from 'antd';
@@ -115,6 +115,7 @@ end
 `;
 
 export function CodecAdapterDrawer() {
+  const { message } = AntApp.useApp();
   const activePanel = useEditorStore((s) => s.activePanel);
   const themeMode = useEditorStore((s) => s.theme);
   const monacoTheme = themeMode === 'dark' ? 'vs-dark' : 'light';

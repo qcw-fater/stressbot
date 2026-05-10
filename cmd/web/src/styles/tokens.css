@@ -75,6 +75,25 @@
   --shadow-node: 0 2px 6px rgba(0, 0, 0, 0.08);
   --shadow-node-hover: 0 4px 12px rgba(0, 0, 0, 0.16);
 
+  /* badge/card/divider 通用背景 */
+  --badge-bg: rgba(0, 0, 0, 0.05);
+  --badge-border: rgba(0, 0, 0, 0.12);
+  --divider-bg: rgba(0, 0, 0, 0.06);
+  --hover-bg: rgba(0, 0, 0, 0.06);
+  --track-bg: rgba(0, 0, 0, 0.06);
+
+  /* === 语义色（用于 UI 文字高亮，非图表数据色） === */
+  --color-success: #52c41a;
+  --color-error: #f5222d;
+  --color-warning: #faad14;
+  --color-blue: #1677ff;
+  --color-purple: #9254de;
+  --color-orange: #fa8c16;
+
+  /* === 边选中态加深色（用于 selected 变体） === */
+  --edge-true-deep: #237804;
+  --edge-false-deep: #a8071a;
+
   /* === 节点尺寸 === */
   --node-radius: 8px;
   --node-min-width: 160px;
@@ -142,4 +161,23 @@
   /* 阴影：深色背景下用更深一点 */
   --shadow-node: 0 2px 6px rgba(0, 0, 0, 0.45);
   --shadow-node-hover: 0 4px 12px rgba(0, 0, 0, 0.6);
+
+  /* 深色主题下 badge/card 背景：黑色半透明 → 白色半透明 */
+  --badge-bg: rgba(255, 255, 255, 0.08);
+  --badge-border: rgba(255, 255, 255, 0.15);
+  --divider-bg: rgba(255, 255, 255, 0.08);
+  --hover-bg: rgba(255, 255, 255, 0.08);
+  --track-bg: rgba(255, 255, 255, 0.08);
+
+  /* 语义色：深色背景上提亮 */
+  --color-success: #95de64;
+  --color-error: #ff7875;
+  --color-warning: #ffc069;
+  --color-blue: #4096ff;
+  --color-purple: #b37feb;
+  --color-orange: #ffa940;
+
+  /* 边选中态加深色 */
+  --edge-true-deep: #b7eb8f;
+  --edge-false-deep: #ffa39e;
 }

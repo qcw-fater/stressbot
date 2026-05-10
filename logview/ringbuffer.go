@@ -169,13 +169,12 @@ func fieldsToFields(fields []zapcore.Field) []Field {
 		return nil
 	}
 	out := make([]Field, 0, len(fields))
-	enc := zapcore.NewMapObjectEncoder()
 	for _, f := range fields {
+		enc := zapcore.NewMapObjectEncoder()
 		f.AddTo(enc)
 		for k, v := range enc.Fields {
 			out = append(out, Field{Key: k, Value: fmt.Sprintf("%v", v)})
 		}
-		enc.Fields = make(map[string]interface{}, 1)
 	}
 	return out
 }

@@ -4,7 +4,7 @@
  * 双击主画布上的节点 → editorStore.activePanel.kind = 'nodeEdit' → 此抽屉打开。
  */
 
-import { Button, Drawer, Form, Input, Popconfirm, Space, Tag, message } from 'antd';
+import { App as AntApp, Button, Drawer, Form, Input, Popconfirm, Space, Tag } from 'antd';
 import { UndoOutlined } from '@ant-design/icons';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useEditorStore } from '../store/editorStore';
@@ -20,6 +20,7 @@ import type { FlowNode } from '@/types/flow';
 import type { ActionDef } from '@/types/action';
 
 export function NodeEditorDrawer() {
+  const { message } = AntApp.useApp();
   const activePanel = useEditorStore((s) => s.activePanel);
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
 

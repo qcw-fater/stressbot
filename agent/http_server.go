@@ -82,7 +82,11 @@ func (a *Agent) handleTaskAssign(w http.ResponseWriter, r *http.Request) {
 	// 返回 202 Accepted，异步执行
 	w.WriteHeader(http.StatusAccepted)
 
-	utils.GetWorkPool().Go(func() { a.executeTask(a.ctx, &task) })
+	utils.GetWorkPool().Go(func() {
+		a.wg.Add(1)
+		defer a.wg.Done()
+		a.executeTask(a.ctx, &task)
+	})
 }
 
 func (a *Agent) handleStop(w http.ResponseWriter, _ *http.Request) {

@@ -13,6 +13,7 @@
 import { DeleteOutlined, ImportOutlined, InboxOutlined, EditOutlined } from '@ant-design/icons';
 import {
   Alert,
+  App as AntApp,
   Button,
   Drawer,
   Empty,
@@ -24,7 +25,6 @@ import {
   Tooltip,
   Typography,
   Upload,
-  message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadProps } from 'antd';
@@ -52,7 +52,7 @@ export interface ResourcesDrawerProps {
 
 export function ResourcesDrawer({ open, onClose }: ResourcesDrawerProps) {
   return (
-    <Drawer title="资源管理" open={open} onClose={onClose} width={760} destroyOnHidden={false}>
+    <Drawer title="资源管理" open={open} onClose={onClose} width={760} maskClosable={false} destroyOnHidden={false}>
       <Alert
         type="info"
         showIcon
@@ -91,6 +91,7 @@ const KIND_BASE_URL: Record<ResourceTableProps['kind'], { index: string; file: s
 };
 
 function ResourceTable({ kind }: ResourceTableProps) {
+  const { modal, message } = AntApp.useApp();
   const [items, setItems] = useState<ResourceFile[]>([]);
   const [loading, setLoading] = useState(false);
   const reloadProtos = useProtoStore((s) => s.reload);
@@ -142,7 +143,7 @@ function ResourceTable({ kind }: ResourceTableProps) {
   };
 
   const handleRemove = (name: string) => {
-    Modal.confirm({
+    modal.confirm({
       title: '删除资源',
       content: `确认删除 ${name}？`,
       okType: 'danger',
@@ -159,7 +160,7 @@ function ResourceTable({ kind }: ResourceTableProps) {
   };
 
   const handleClearAll = () => {
-    Modal.confirm({
+    modal.confirm({
       title: `清空所有 ${KIND_LABEL[kind]}？`,
       content: `将删除 ${items.length} 个文件，此操作不可撤销。`,
       okType: 'danger',

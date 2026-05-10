@@ -6,10 +6,12 @@
  *   lua          : script（可选 s2cProto）
  *
  * 切换形态时弹确认；切回 30 秒内的形态自动恢复字段（避免误清）。
+ * 还原按钮可恢复到打开时的快照；关闭时 lua 有未保存改动会弹确认。
  */
 
-import { Alert, Button, Input, Modal, Space, Tabs, Tag } from 'antd';
-import { useEffect, useState } from 'react';
+import { Alert, App as AntApp, Button, Input, Modal, Popconfirm, Space, Tabs, Tag } from 'antd';
+import { UndoOutlined } from '@ant-design/icons';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CallbackDef } from '@/types/callback';
 import { classifyCallback, type CallbackKind } from '@/types/callback';
 import { useEditorStore } from '../store/editorStore';
@@ -22,6 +24,7 @@ import { SaveTemplateButton } from '../library/SaveTemplateButton';
 import { callbackKindTagColor } from './callbackKindStyle';
 
 export function CallbackEditor() {
+  const { message: messageApi, modal } = AntApp.useApp();
   const activePanel = useEditorStore((s) => s.activePanel);
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
   const callbackName = activePanel.kind === 'callbackEdit' ? activePanel.callbackName : null;
@@ -33,6 +36,7 @@ export function CallbackEditor() {
 
   const [draftName, setDraftName] = useState(callbackName ?? '');
   const [protoOpen, setProtoOpen] = useState(false);
+  const [luaDirty, setLuaDirty] = useState(false);
   // 形态切换时把当前字段缓存进 stash，便于切回恢复
   const [stash, setStash] = useState<Record<CallbackKind, CallbackDef>>({
     silent: {},
@@ -44,11 +48,34 @@ export function CallbackEditor() {
   // 不再被 callback 的字段形态反向干扰（避免 declarative 形态下 s2cProto='' + store=[] 又被判回 silent）。
   const [selectedKind, setSelectedKind] = useState<CallbackKind>(() => classifyCallback(callback));
 
+  // === 还原快照 ===
+  const snapshotRef = useRef<{ name: string; def: CallbackDef } | null>(null);
+
   useEffect(() => {
     setDraftName(callbackName ?? '');
-    if (callbackName) setSelectedKind(classifyCallback(callback));
+    setLuaDirty(false);
+    if (callbackName && callback) {
+      setSelectedKind(classifyCallback(callback));
+      snapshotRef.current = { name: callbackName, def: JSON.parse(JSON.stringify(callback)) };
+    } else {
+      snapshotRef.current = null;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [callbackName]);
+
+  // dirty 判断：当前 callback 与快照不一致
+  const cbDirty = useMemo(() => {
+    if (!snapshotRef.current || !callback) return false;
+    return JSON.stringify(callback) !== JSON.stringify(snapshotRef.current.def);
+  }, [callback]);
+
+  const onRevert = () => {
+    const s = snapshotRef.current;
+    if (!s) return;
+    replaceCallback(callbackName!, JSON.parse(JSON.stringify(s.def)));
+    setSelectedKind(classifyCallback(s.def));
+    messageApi.success('已还原本次打开后的所有修改');
+  };
 
   if (!callbackName || !callback) {
     return null;
@@ -79,6 +106,20 @@ export function CallbackEditor() {
     setActivePanel({ kind: 'callbackEdit', callbackName: draftName });
   };
 
+  const handleClose = () => {
+    if (luaDirty) {
+      modal.confirm({
+        title: '脚本有未保存的改动',
+        content: '关闭后未保存的内容将丢失，是否继续？',
+        okText: '不保存',
+        cancelText: '取消',
+        onOk: () => setActivePanel({ kind: 'none' }),
+      });
+    } else {
+      setActivePanel({ kind: 'none' });
+    }
+  };
+
   return (
     <Modal
       open
@@ -88,9 +129,20 @@ export function CallbackEditor() {
           <span>编辑 callback</span>
         </Space>
       }
-      onCancel={() => setActivePanel({ kind: 'none' })}
+      onCancel={handleClose}
       footer={[
-        <Button key="close" onClick={() => setActivePanel({ kind: 'none' })}>
+        <Popconfirm
+          key="revert"
+          title="还原本次修改"
+          description="将该 callback 恢复到本次打开编辑面板时的状态。"
+          onConfirm={onRevert}
+          disabled={!cbDirty}
+        >
+          <Button icon={<UndoOutlined />} disabled={!cbDirty}>
+            还原修改
+          </Button>
+        </Popconfirm>,
+        <Button key="close" onClick={handleClose}>
           关闭
         </Button>,
       ]}
@@ -155,13 +207,14 @@ export function CallbackEditor() {
                 mode="callback"
                 script={callback.script}
                 onChangeScript={(s) => updateCallback(callbackName, { script: s })}
+                onDirtyChange={setLuaDirty}
               />
             ),
           },
         ]}
       />
 
-      <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid rgba(0,0,0,0.06)' }}>
+      <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--divider-bg)' }}>
         <BackrefList callbackName={callbackName} />
       </div>
 
@@ -207,4 +260,3 @@ function DeclarativeCallbackBody({
     </div>
   );
 }
-

@@ -2,7 +2,7 @@
  * JSON 预览模态框：Monaco 只读展示，可复制。
  */
 
-import { Modal, Button, Tooltip, message } from 'antd';
+import { App as AntApp, Modal, Button, Tooltip } from 'antd';
 import { CopyOutlined } from '@ant-design/icons';
 import Editor from '@monaco-editor/react';
 import { useShallow } from 'zustand/react/shallow';
@@ -10,6 +10,7 @@ import { useFlowStore } from '../store/flowStore';
 import { useEditorStore } from '../store/editorStore';
 
 export function JsonPreviewModal() {
+  const { message } = AntApp.useApp();
   const activePanel = useEditorStore((s) => s.activePanel);
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
   const flow = useFlowStore(

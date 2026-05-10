@@ -54,14 +54,14 @@ export function SystemTab() {
             value={latestSystem.avgCpuPercent}
             precision={1}
             suffix="%"
-            valueStyle={{ color: latestSystem.avgCpuPercent > 80 ? '#f5222d' : undefined }}
+            valueStyle={{ color: latestSystem.avgCpuPercent > 80 ? 'var(--color-error)' : undefined }}
           />
           <Statistic
             title="最高 CPU%"
             value={latestSystem.maxCpuPercent}
             precision={1}
             suffix="%"
-            valueStyle={{ color: latestSystem.maxCpuPercent > 90 ? '#f5222d' : latestSystem.maxCpuPercent > 70 ? '#faad14' : undefined }}
+            valueStyle={{ color: latestSystem.maxCpuPercent > 90 ? 'var(--color-error)' : latestSystem.maxCpuPercent > 70 ? 'var(--color-warning)' : undefined }}
           />
           {latestSystem.hotAgentName && (
             <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>

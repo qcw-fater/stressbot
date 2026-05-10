@@ -55,7 +55,7 @@
   transition: background 0.1s;
 }
 .palette-grid-item:hover {
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--hover-bg);
 }
 .palette-grid-item:active {
   cursor: grabbing;

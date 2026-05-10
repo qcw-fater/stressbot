@@ -2,7 +2,7 @@
  * "加入模板库"按钮：弹简易表单，把当前 action/callback 存入 IndexedDB。
  */
 
-import { Button, Form, Input, Modal, message } from 'antd';
+import { App as AntApp, Button, Form, Input, Modal } from 'antd';
 import { StarOutlined } from '@ant-design/icons';
 import { useState } from 'react';
 import type { ActionDef } from '@/types/action';
@@ -22,6 +22,7 @@ interface CallbackProps {
 }
 
 export function SaveTemplateButton(props: ActionProps | CallbackProps) {
+  const { message } = AntApp.useApp();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(props.name);
   const [desc, setDesc] = useState('');

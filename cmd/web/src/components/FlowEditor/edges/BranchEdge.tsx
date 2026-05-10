@@ -21,7 +21,7 @@ export function BranchEdge({
   const branch = (data as { branch?: 'true' | 'false' } | undefined)?.branch;
   const isTrue = branch === 'true';
   const color = isTrue ? 'var(--edge-true)' : 'var(--edge-false)';
-  const deep = isTrue ? '#237804' : '#a8071a';
+  const deep = isTrue ? 'var(--edge-true-deep)' : 'var(--edge-false-deep)';
   const style = buildEdgeStyle({
     width: 1.6,
     dash: '6 3',

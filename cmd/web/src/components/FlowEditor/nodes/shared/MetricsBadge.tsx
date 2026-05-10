@@ -45,11 +45,11 @@ export function useNodeApdexLevel(nodeId: string): ApdexLevel {
 }
 
 const APDEX_COLOR: Record<ApdexLevel, string> = {
-  excellent: '#52c41a',
+  excellent: 'var(--color-success)',
   good: '#a0d911',
-  fair: '#faad14',
-  poor: '#fa8c16',
-  danger: '#f5222d',
+  fair: 'var(--color-warning)',
+  poor: 'var(--color-orange)',
+  danger: 'var(--color-error)',
   unknown: 'var(--text-tertiary)',
 };
 
@@ -81,7 +81,7 @@ export function MetricsBadge({ nodeId }: MetricsBadgeProps) {
     >
       {showP99 && (
         <Tooltip title={`avg ${m.latency.avgMs.toFixed(1)} · p95 ${m.latency.p95Ms.toFixed(1)} · p99 ${m.latency.p99Ms.toFixed(1)} · max ${m.latency.maxMs.toFixed(1)} (ms)`}>
-          <span className="pattern-badge" style={{ color: '#13c2c2', borderColor: '#13c2c2', background: '#13c2c215' }}>
+          <span className="pattern-badge" style={{ color: 'var(--node-continue)', borderColor: 'var(--node-continue)', background: 'color-mix(in srgb, var(--node-continue) 12%, transparent)' }}>
             p99 {formatMs(m.latency.p99Ms)}
           </span>
         </Tooltip>
@@ -90,7 +90,7 @@ export function MetricsBadge({ nodeId }: MetricsBadgeProps) {
         <Tooltip
           title={`Apdex ${m.apdex.toFixed(3)} · 成功率 ${(m.successRate * 100).toFixed(1)}% · 平均 QPS ${m.avgQps.toFixed(1)} · 样本数 ${m.sampleCount}`}
         >
-          <span className="pattern-badge" style={{ color: apdexColor, borderColor: apdexColor, background: `${apdexColor}15` }}>
+          <span className="pattern-badge" style={{ color: apdexColor, borderColor: apdexColor, background: `color-mix(in srgb, ${apdexColor} 12%, transparent)` }}>
             Apdex {m.apdex.toFixed(2)}
           </span>
         </Tooltip>
@@ -101,7 +101,7 @@ export function MetricsBadge({ nodeId }: MetricsBadgeProps) {
             <div style={{ maxWidth: 300 }}>
               {m.errors!.slice(0, 6).map((e) => (
                 <div key={e.msg} style={{ fontSize: 11 }}>
-                  <span style={{ color: '#ff7875' }}>×{e.count}</span> {e.msg}
+                  <span style={{ color: 'var(--color-error)' }}>×{e.count}</span> {e.msg}
                 </div>
               ))}
               {m.errors!.length > 6 && (
@@ -112,7 +112,7 @@ export function MetricsBadge({ nodeId }: MetricsBadgeProps) {
             </div>
           }
         >
-          <span className="pattern-badge" style={{ color: '#f5222d', borderColor: '#f5222d', background: '#fff1f0' }}>
+          <span className="pattern-badge" style={{ color: 'var(--color-error)', borderColor: 'var(--color-error)', background: 'color-mix(in srgb, var(--color-error) 12%, transparent)' }}>
             <WarningOutlined style={{ marginRight: 4 }} /> {topErr.count}
           </span>
         </Tooltip>

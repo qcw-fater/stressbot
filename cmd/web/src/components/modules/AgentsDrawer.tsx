@@ -158,7 +158,7 @@ export function AgentsDrawer({ open, onClose }: AgentsDrawerProps) {
       width: 80,
       render: (v: number | undefined) =>
         v === undefined ? '—' : (
-          <span style={{ color: v > 80 ? '#f5222d' : v > 60 ? '#faad14' : undefined }}>
+          <span style={{ color: v > 80 ? 'var(--color-error)' : v > 60 ? 'var(--color-warning)' : undefined }}>
             {v.toFixed(1)}%
           </span>
         ),
@@ -251,6 +251,7 @@ export function AgentsDrawer({ open, onClose }: AgentsDrawerProps) {
       }
       open={open}
       onClose={onClose}
+      maskClosable={false}
       width={1100}
       destroyOnHidden
     >

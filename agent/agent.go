@@ -27,6 +27,7 @@ type Agent struct {
 	cfg     *ResolvedConfig
 	started time.Time
 	ctx     context.Context
+	cancel  context.CancelFunc
 
 	sysmon    *SystemMonitor
 	collector *monitor.MetricsCollector
@@ -95,8 +96,8 @@ func (a *Agent) Run() error {
 
 	// 3. 注册到 Admin（永不放弃）
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	a.ctx = ctx
+	a.cancel = cancel
 
 	if err := a.registerWithRetry(ctx); err != nil {
 		a.shutdownHTTPServer(ctx)
@@ -253,7 +254,11 @@ func (a *Agent) taskPollLoop(ctx context.Context) {
 			}
 			if task != nil {
 				stresslog.Info("[AGENT] 轮询到任务", zap.String("taskID", task.TaskID))
-				go a.executeTask(ctx, task)
+				a.wg.Add(1)
+				go func() {
+					defer a.wg.Done()
+					a.executeTask(ctx, task)
+				}()
 			}
 		}
 	}
@@ -319,7 +324,10 @@ func (a *Agent) executeTask(ctx context.Context, task *TaskAssignment) {
 	// 采集 finalSnapshot
 	finalSnap := a.collector.Snapshot(nil, 0)
 
-	// 上报任务完成（最多重试 30 分钟）
+	// 上报任务完成（最多重试 30 分钟，但 Agent 退出时终止）
+	reportCtx, reportCancel := context.WithTimeout(a.ctx, 30*time.Minute)
+	defer reportCancel()
+
 	report := TaskCompletionReport{
 		AgentID:       a.id,
 		TaskID:        task.TaskID,
@@ -328,9 +336,6 @@ func (a *Agent) executeTask(ctx context.Context, task *TaskAssignment) {
 		FinishedAt:    time.Now(),
 		FinalSnapshot: finalSnap,
 	}
-
-	reportCtx, reportCancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	defer reportCancel()
 
 	if err := RetryWithBackoff(reportCtx, func() error {
 		return a.httpCli.ReportTaskDone(reportCtx, report)
@@ -352,33 +357,44 @@ func (a *Agent) executeTask(ctx context.Context, task *TaskAssignment) {
 func (a *Agent) shutdown() error {
 	stresslog.Info("[AGENT] 正在关闭...")
 
-	// 取消当前任务
+	// 1. 取消全局 ctx → 所有监听 ctx.Done() 的 goroutine 退出
+	a.cancel()
+
+	// 2. 停止 SystemReporter
+	if a.sysReporter != nil {
+		a.sysReporter.Stop()
+	}
+
+	// 3. 取消当前任务（触发 TaskRunner 退出）
 	a.mu.Lock()
 	if a.taskCancel != nil {
 		a.taskCancel()
 	}
 	a.mu.Unlock()
 
-	// 注销（best-effort）
+	// 4. 注销（best-effort）
 	deregCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	a.httpCli.Deregister(deregCtx)
 
-	// 关闭 HTTP 服务器
+	// 5. 关闭 HTTP 服务器
 	a.shutdownHTTPServer(context.Background())
 
-	// 等待所有 goroutine 退出
+	// 6. 等待所有 wg-tracked goroutine 退出
 	done := make(chan struct{})
-	utils.GetWorkPool().Go(func() {
+	go func() {
 		a.wg.Wait()
 		close(done)
-	})
+	}()
 
 	select {
 	case <-done:
 	case <-time.After(30 * time.Second):
 		stresslog.Warn("[AGENT] 等待 goroutine 退出超时")
 	}
+
+	// 7. 关闭 work pool
+	utils.GetWorkPool().Shutdown()
 
 	stresslog.Info("[AGENT] 已退出")
 	return nil

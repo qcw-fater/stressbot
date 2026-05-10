@@ -104,7 +104,7 @@ func main() {
 		Compress:     cfg.Log.Compress,
 	}
 	stresslog.InitLog(logPath, "stressbot", logConf, "")
-	newLogger := logview.AttachRingBuffer(stresslog.GetLogger(), 50000)
+	newLogger := logview.AttachRingBuffer(stresslog.GetLogger(), 50000, zap.String("SR", "stressbot"))
 		stresslog.ReplaceLogger(newLogger)
 
 	if cfg.Agent.Enabled {
@@ -274,6 +274,7 @@ func runStandalone(cfg *Config) {
 	}
 
 	adp.Close()
+	utils.GetWorkPool().Shutdown()
 	stresslog.Info("[MAIN] 已退出")
 }
 

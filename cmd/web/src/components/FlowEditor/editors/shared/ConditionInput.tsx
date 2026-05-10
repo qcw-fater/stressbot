@@ -10,11 +10,10 @@
  * lua 模式下旁边的「编辑」按钮会弹出 LuaForm（mode='boolean'），
  * 给条件脚本提供与动作脚本同款的 Monaco 体验，但模板默认 `return false`，
  * 避免与 action 脚本的 `return code, send, recv` 三元约定混淆。
- * 内容会存到 IDB，启动任务时 taskActions.collectScripts 一并上传，避免
- * "脚本未预编译" 错误。
+ * 关闭弹窗时若有未保存改动会弹确认。
  */
 
-import { Button, Input, Modal, Radio } from 'antd';
+import { App as AntApp, Button, Input, Modal, Radio } from 'antd';
 import { EditOutlined } from '@ant-design/icons';
 import { useMemo, useState } from 'react';
 import { LuaForm } from '../ActionEditor/LuaForm';
@@ -26,6 +25,7 @@ export interface ConditionInputProps {
 }
 
 export function ConditionInput({ value, onChange, placeholder }: ConditionInputProps) {
+  const { modal } = AntApp.useApp();
   const mode = useMemo<'lua' | 'state'>(() => {
     if (value?.startsWith('lua:')) return 'lua';
     return 'state';
@@ -40,13 +40,15 @@ export function ConditionInput({ value, onChange, placeholder }: ConditionInputP
     : '';
 
   const [editorOpen, setEditorOpen] = useState(false);
+  const [luaDirty, setLuaDirty] = useState(false);
 
   const setMode = (next: 'lua' | 'state') => {
     if (next === mode) return;
-    let prefix = '';
-    if (next === 'lua') prefix = 'lua:';
-    else if (next === 'state') prefix = 'state:';
-    onChange?.(prefix + tail);
+    if (next === 'lua') {
+      onChange?.('lua:');
+    } else {
+      onChange?.('state:');
+    }
   };
 
   const setTail = (t: string) => {
@@ -56,6 +58,23 @@ export function ConditionInput({ value, onChange, placeholder }: ConditionInputP
     onChange?.(prefix + t);
   };
 
+  const closeEditor = () => {
+    if (luaDirty) {
+      modal.confirm({
+        title: '脚本有未保存的改动',
+        content: '关闭后未保存的内容将丢失，是否继续？',
+        okText: '不保存',
+        cancelText: '取消',
+        onOk: () => {
+          setEditorOpen(false);
+          setLuaDirty(false);
+        },
+      });
+    } else {
+      setEditorOpen(false);
+    }
+  };
+
   const tip = (
     {
       lua: (
@@ -63,7 +82,7 @@ export function ConditionInput({ value, onChange, placeholder }: ConditionInputP
           <b>lua:</b> 调用 <code>conf/scripts/</code> 下的脚本求值。
           入口 <code>function execute(r)</code>，必须 <code>return true / false</code>
           （返回其它类型直接报错）。点旁边的 <b>编辑</b> 按钮可在 Monaco 里直接写脚本，
-          内容会存到本地 IDB，启动任务时随 multipart 一并提交。
+          按 Ctrl+S 保存到本地。
         </>
       ),
       state: (
@@ -113,8 +132,7 @@ export function ConditionInput({ value, onChange, placeholder }: ConditionInputP
         {tip}
       </div>
 
-      {/* lua 脚本编辑 Modal：复用 LuaForm 但用 mode='boolean'，
-          这样模板和签名提示都对应 return true / false，避免误用 action 的三元返回。 */}
+      {/* lua 脚本编辑 Modal */}
       <Modal
         open={editorOpen}
         title={
@@ -122,9 +140,9 @@ export function ConditionInput({ value, onChange, placeholder }: ConditionInputP
             编辑条件脚本 <code style={{ color: 'var(--text-secondary)' }}>{tail || '(未命名)'}</code>
           </span>
         }
-        onCancel={() => setEditorOpen(false)}
+        onCancel={closeEditor}
         footer={[
-          <Button key="ok" type="primary" onClick={() => setEditorOpen(false)}>
+          <Button key="close" onClick={closeEditor}>
             完成
           </Button>,
         ]}
@@ -135,6 +153,7 @@ export function ConditionInput({ value, onChange, placeholder }: ConditionInputP
           mode="boolean"
           script={tail}
           onChangeScript={(s) => setTail(s)}
+          onDirtyChange={setLuaDirty}
         />
       </Modal>
     </div>

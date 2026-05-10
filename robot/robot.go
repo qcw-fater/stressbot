@@ -162,11 +162,23 @@ func (r *Robot) Wait() {
 }
 
 // Close 停止机器人并释放资源。
-// 会等待执行 goroutine 退出后再释放 LState，避免 use-after-free。
+// 先 Stop 取消 ctx，再同时关闭连接（释放阻塞中的 RequestResponse）并等待执行退出。
 func (r *Robot) Close() {
 	r.Stop()
-	r.Wait()
+	// 并行关闭连接和等待执行：关闭连接可以解除 RequestResponse 的阻塞，
+	// 避免 Wait() 死锁（executor 阻塞在网络 I/O 上时，仅靠 cancel ctx 无法唤醒）。
+	var waitDone chan struct{}
+	if r.done != nil {
+		waitDone = make(chan struct{})
+		go func() {
+			r.Wait()
+			close(waitDone)
+		}()
+	}
 	r.client.CloseAll()
+	if waitDone != nil {
+		<-waitDone
+	}
 	if r.L != nil && r.luaPool != nil {
 		r.luaPool.Release(r.L)
 		r.L = nil

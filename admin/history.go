@@ -120,7 +120,11 @@ func (h *HistoryStore) Archive(task *Task, finalStress *monitor.CollectorSnapsho
 		durationSec = int(task.StoppedAt.Sub(*task.StartedAt).Seconds())
 	}
 	agentCount := len(task.Assignments)
-	tagsJSON, _ := json.Marshal(task.Config.RobotConfig)
+	var tags []string
+	if task.Config.RobotConfig.DebugMode {
+		tags = append(tags, "debug")
+	}
+	tagsJSON, _ := json.Marshal(tags)
 	if tagsJSON == nil {
 		tagsJSON = []byte("[]")
 	}
@@ -137,7 +141,7 @@ func (h *HistoryStore) Archive(task *Task, finalStress *monitor.CollectorSnapsho
 	`,
 		task.ID, task.Name, string(task.State), task.TotalBots, agentCount,
 		task.CreatedAt, task.StartedAt, task.StoppedAt, durationSec, task.ErrorMsg,
-		"[]", summaryJSON,
+		tagsJSON, summaryJSON,
 	)
 	if err != nil {
 		return fmt.Errorf("insert task_history: %w", err)

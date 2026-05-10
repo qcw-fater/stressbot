@@ -49,28 +49,29 @@
   font-size: 10px;
   padding: 0 5px;
   border-radius: 8px;
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--badge-bg);
   color: var(--text-secondary);
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--badge-border);
   font-family: monospace;
 }
 
 .card-ref {
   font-size: 10px;
   color: var(--text-tertiary);
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--badge-bg);
   padding: 0 5px;
   border-radius: 8px;
 }
 
 .card-ref.orphan {
   color: #fa8c16;
-  background: #fff7e6;
+  background: var(--badge-bg);
+  border: 1px solid color-mix(in srgb, #fa8c16 30%, transparent);
 }
 
 /* kind 颜色微调：silent 偏灰、declarative 蓝、lua 紫（与 action 节点的 lua pattern 标签一致） */
 .card-kind.kind-tag-silent {
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--badge-bg);
   color: var(--text-tertiary);
 }
 .card-kind.kind-tag-declarative {

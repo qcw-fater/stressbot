@@ -7,7 +7,7 @@
  *   - 双击列表项 → 打开 CallbackEditor
  */
 
-import { Badge, Button, Drawer, Input, List, Popconfirm, Space, Tag, message } from 'antd';
+import { App as AntApp, Badge, Button, Drawer, Input, List, Popconfirm, Space, Tag } from 'antd';
 import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import { useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
@@ -19,6 +19,7 @@ import { buildRefsGraph } from './refsGraph';
 import { callbackKindTagColor } from './callbackKindStyle';
 
 export function CallbackPanel() {
+  const { message } = AntApp.useApp();
   const activePanel = useEditorStore((s) => s.activePanel);
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
   const setHoveredCallback = useEditorStore((s) => s.setHoveredCallback);
@@ -115,7 +116,7 @@ export function CallbackPanel() {
                       message.success(`已删除 ${name}`);
                     }}
                   >
-                    <a style={{ color: '#ff4d4f' }}>
+                    <a style={{ color: 'var(--color-error)' }}>
                       <DeleteOutlined />
                     </a>
                   </Popconfirm>,

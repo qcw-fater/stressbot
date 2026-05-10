@@ -1,12 +1,12 @@
 /**
- * 日志查看标签页（v6）— Monaco 只读编辑器模式。
+ * 日志查看标签页（v12）— Monaco 只读编辑器模式。
  *
- * 体验类似 VSCode 只读文本编辑器：
- *   - 光标、键盘导航（Home/End/Ctrl+Home/End、上下左右）
- *   - Ctrl+F 内置搜索（高亮、上/下一个、大小写/正则/全词匹配）
- *   - 级别着色（自定义 stressbot-log language）
- *   - 最新日志在底部，自动滚底
- *   - 前端过滤（level + 文本搜索）
+ * 核心设计：
+ *   - 组件常驻（Modal 不再 destroyOnClose），关闭时仅暂停轮询
+ *   - 滚动/光标/entries 全部在内存中保留，关闭再打开无需重新加载
+ *   - 轮询由 open prop 控制：关闭=暂停，打开=恢复
+ *   - 增量追加用 model.applyEdits，不触碰滚动
+ *   - 全量替换时 saveViewState / restoreViewState 保护滚动和光标
  */
 
 import Editor, { type Monaco } from '@monaco-editor/react';
@@ -23,32 +23,39 @@ import './LogsTab.css';
 const MAX_ENTRIES_ADMIN = 5000;
 const MAX_ENTRIES_AGENT = 50000;
 
-/** 预格式化的日志条目：到达时一次性格式化，后续过滤/拼接只操作 text。 */
+const STATE_KEY = 'stressbot.logsTab';
+
+interface SavedState {
+  target: string;
+  level: string;
+  filterText: string;
+  polling: boolean;
+}
+
+function loadState(): SavedState | null {
+  try {
+    const raw = localStorage.getItem(STATE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function saveState(s: SavedState) {
+  try { localStorage.setItem(STATE_KEY, JSON.stringify(s)); } catch {}
+}
+
 interface FormattedEntry {
   level: string;
   message: string;
   text: string;
 }
 
-/**
- * 将后端 RFC3339Nano 时间字符串（如 2026-05-08T16:46:50.356608+08:00）
- * 格式化为与后端控制台一致的风格：2026/05/08 16:46:50.356608+0800
- *
- * dayjs 只支持毫秒精度，微秒部分需要从原始字符串中提取。
- */
 function formatTimestamp(raw: string): string {
-  // raw: "2026-05-08T16:46:50.356608+08:00" 或 "2026-05-08T16:46:50.356608Z"
   const d = dayjs(raw);
   const base = d.format('YYYY/MM/DD HH:mm:ss');
-
-  // 提取小数秒部分（最多 6 位 = 微秒）
   const fracMatch = raw.match(/\.(\d{1,6})/);
   const frac = fracMatch ? fracMatch[1].padEnd(6, '0') : '000000';
-
-  // 提取时区偏移：+08:00 → +0800, -05:00 → -0500, Z → +0000
   const tzMatch = raw.match(/([+-])(\d{2}):(\d{2})$/);
   const tz = tzMatch ? `${tzMatch[1]}${tzMatch[2]}${tzMatch[3]}` : '+0000';
-
   return `${base}.${frac}${tz}`;
 }
 
@@ -58,36 +65,56 @@ function formatEntry(e: LogEntry): string {
   const fields = e.fields?.length
     ? `  ${JSON.stringify(Object.fromEntries(e.fields.map((f) => [f.key, f.value])))}`
     : '';
-  // level 固定 7 字符宽（含尾部空格），caller 对齐同一列
   return `${ts}  ${level}${e.caller || ''}  ${e.service || ''}  ${e.message}${fields}`;
 }
 
-export function LogsTab() {
+function isEditorAtBottom(ed: editor.IStandaloneCodeEditor): boolean {
+  const scrollTop = ed.getScrollTop();
+  const scrollHeight = ed.getScrollHeight();
+  const layoutHeight = ed.getLayoutInfo().height;
+  return scrollHeight - scrollTop - layoutHeight < 30;
+}
+
+export function LogsTab({ open }: { open: boolean }) {
   const agents = useRuntimeStore((s) => s.agents);
   const themeMode = useEditorStore((s) => s.theme);
   const monacoTheme = getLogTheme(themeMode === 'dark');
 
-  const [target, setTarget] = useState<string>('admin');
-  const [level, setLevel] = useState<string>('');
-  const [filterText, setFilterText] = useState<string>('');
-  const [filterVal, setFilterVal] = useState<string>('');
+  const saved = useMemo(() => loadState(), []);
+
+  const [target, setTarget] = useState(saved?.target ?? 'admin');
+  const [level, setLevel] = useState(saved?.level ?? '');
+  const [filterText, setFilterText] = useState(saved?.filterText ?? '');
+  const [filterVal, setFilterVal] = useState(saved?.filterText ?? '');
   const [pollingInterval, setPollingInterval] = useState(3000);
 
   const maxEntries = target === 'admin' ? MAX_ENTRIES_ADMIN : MAX_ENTRIES_AGENT;
 
   const [entries, setEntries] = useState<FormattedEntry[]>([]);
-
-  const autoScrollRef = useRef(true);
-  const [polling, setPolling] = useState(true);
-  const lineCountRef = useRef(0);
+  const [polling, setPolling] = useState(saved?.polling ?? true);
   const lineCountElRef = useRef<HTMLSpanElement>(null);
 
   const nextSeqRef = useRef<number>(0);
-  const isFilterChangedRef = useRef<boolean>(false);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
   const languageRegistered = useRef(false);
-  const fullTextRef = useRef<string>('');
+
+  const prevTextRef = useRef('');
+
+  // === 保存设置 ===
+  const stateRef = useRef({ target, level, filterText, polling });
+  stateRef.current = { target, level, filterText, polling };
+  useEffect(() => () => {
+    saveState(stateRef.current);
+  }, []);
+
+  // === Modal 重新可见时刷新 Monaco 布局 ===
+  useEffect(() => {
+    if (open) {
+      const ed = editorRef.current;
+      if (ed) requestAnimationFrame(() => ed.layout());
+    }
+  }, [open]);
 
   // === 日志文件下载 ===
   const [fileModalOpen, setFileModalOpen] = useState(false);
@@ -120,39 +147,37 @@ export function LogsTab() {
   const handleTargetChange = (val: string) => {
     setTarget(val);
     setEntries([]);
+    prevTextRef.current = '';
     nextSeqRef.current = 0;
-    isFilterChangedRef.current = true;
-    // 切换 target 后立即触发一次拉取，不用等 3s 轮询周期
-    setPolling(false);
-    requestAnimationFrame(() => setPolling(true));
   };
   const handleLevelChange = (val: string) => {
     setLevel(val);
-    isFilterChangedRef.current = true;
+    prevTextRef.current = '';
   };
   const handleFilter = (val: string) => {
     setFilterText(val);
-    isFilterChangedRef.current = true;
+    prevTextRef.current = '';
   };
   const clearLogs = () => {
     setEntries([]);
+    prevTextRef.current = '';
     nextSeqRef.current = 0;
-    editorRef.current?.setValue('');
-    lineCountRef.current = 0;
+    const ed = editorRef.current;
+    if (ed) {
+      const model = ed.getModel();
+      if (model) model.setValue('');
+    }
     if (lineCountElRef.current) lineCountElRef.current.textContent = '0 行';
   };
 
   // === Polling ===
+  // enabled = open && polling：弹窗关闭时暂停，打开时恢复
+  // 首次挂载时 open=true 且 polling=true → 立即拉取第一批（500 条）
+  // hasMore 时 100ms 追赶，直到追平后切回 3000ms 常规轮询
   const fetchLogs = useCallback(async () => {
     const currentFilter = { target, level, filterText };
-    let afterSeq = nextSeqRef.current;
-    if (isFilterChangedRef.current) {
-      afterSeq = 0;
-      isFilterChangedRef.current = false;
-    }
-
+    const afterSeq = nextSeqRef.current;
     const params = { afterSeq, limit: 500 };
-
     let res;
     if (target === 'admin') {
       res = await logsApi.getAdminLogs(params);
@@ -165,12 +190,11 @@ export function LogsTab() {
   usePolling({
     fetcher: fetchLogs,
     intervalMs: pollingInterval,
-    enabled: polling,
+    enabled: open && polling,
     onSuccess: ({ res, filter, isReset }) => {
       if (filter.target !== target || filter.level !== level || filter.filterText !== filterText) {
         return;
       }
-
       if (res.entries && res.entries.length > 0) {
         setEntries((prev) => {
           let newList = isReset ? [] : prev;
@@ -190,83 +214,98 @@ export function LogsTab() {
         setEntries([]);
         nextSeqRef.current = 0;
       }
-
-      // 追赶轮询：有积压时缩短间隔快速追平
       setPollingInterval(res.hasMore ? 100 : 3000);
     },
     onError: () => {},
   });
 
-  // === 过滤 & 拼接（只 join，不 formatEntry） ===
+  // === 过滤统计 ===
   const filteredCount = useRef(0);
   const totalCount = useRef(0);
-  const fullText = useMemo(() => {
+
+  useMemo(() => {
     let list = entries;
-    if (level) {
-      list = list.filter((e) => e.level === level);
-    }
+    if (level) list = list.filter((e) => e.level === level);
     if (filterText) {
       const lower = filterText.toLowerCase();
       list = list.filter((e) => e.message.toLowerCase().includes(lower));
     }
     filteredCount.current = list.length;
     totalCount.current = entries.length;
-    return list.map((e) => e.text).join('\n');
+    return null;
   }, [entries, level, filterText]);
-  fullTextRef.current = fullText;
 
   // === 同步文本到 Monaco ===
-  const isInitialRef = useRef(true);
-
   useEffect(() => {
     const ed = editorRef.current;
     if (!ed) return;
-
     const model = ed.getModel();
     if (!model) return;
 
-    if (isInitialRef.current) {
-      model.setValue(fullText);
-      isInitialRef.current = false;
-      // 初始加载后滚到底部
-      requestAnimationFrame(() => {
-        const lineCount = ed.getModel()?.getLineCount() ?? 0;
-        ed.revealLine(lineCount);
-      });
-    } else {
-      // 增量追加：只在文本变长时追加
-      const oldText = model.getValue();
-      const newPart = fullText.startsWith(oldText + '\n')
-        ? fullText.slice(oldText.length + 1)
-        : null;
+    let list = entries;
+    if (level) list = list.filter((e) => e.level === level);
+    if (filterText) {
+      const lower = filterText.toLowerCase();
+      list = list.filter((e) => e.message.toLowerCase().includes(lower));
+    }
+    const text = list.map((e) => e.text).join('\n');
 
-      if (newPart !== null && oldText.length > 0) {
-        // 增量追加
-        const lineCount = model.getLineCount();
-        const lastLineLength = model.getLineMaxColumn(lineCount);
-        ed.executeEdits('log-append', [{
-          range: new monacoRef.current!.Range(lineCount, lastLineLength, lineCount, lastLineLength),
-          text: '\n' + newPart,
-        }]);
-      } else {
-        // 全量替换（过滤条件变化等）
-        model.setValue(fullText);
-      }
+    if (text === prevTextRef.current) return;
+
+    // ── 首次加载 ──
+    if (!prevTextRef.current) {
+      model.setValue(text);
+      prevTextRef.current = text;
+
+      const lc = model.getLineCount();
+      if (lineCountElRef.current) lineCountElRef.current.textContent = `${lc} 行`;
+      // 首次加载直接滚到底部展示最新日志
+      requestAnimationFrame(() => ed.revealLine(lc));
+      return;
     }
 
-    const lc = ed.getModel()?.getLineCount() ?? 0;
-    lineCountRef.current = lc;
+    // 在修改前捕获状态
+    const wasAtBottom = isEditorAtBottom(ed);
+    const savedVS = ed.saveViewState();
+
+    // ── 尝试增量追加 ──
+    const prev = prevTextRef.current;
+    if (text.length > prev.length && text.startsWith(prev + '\n') && monacoRef.current) {
+      const newPart = text.slice(prev.length + 1);
+      const lastLine = model.getLineCount();
+      const lastCol = model.getLineMaxColumn(lastLine);
+      model.applyEdits([{
+        range: new monacoRef.current.Range(lastLine, lastCol, lastLine, lastCol),
+        text: '\n' + newPart,
+      }]);
+      prevTextRef.current = text;
+
+      const lc = model.getLineCount();
+      if (lineCountElRef.current) lineCountElRef.current.textContent = `${lc} 行`;
+
+      if (wasAtBottom) {
+        ed.revealLine(lc);
+      } else if (savedVS) {
+        ed.restoreViewState(savedVS);
+      }
+      return;
+    }
+
+    // ── 全量替换 ──
+    model.setValue(text);
+    prevTextRef.current = text;
+
+    const lc = model.getLineCount();
     if (lineCountElRef.current) lineCountElRef.current.textContent = `${lc} 行`;
 
-    if (autoScrollRef.current) {
-      requestAnimationFrame(() => {
-        const lc = ed.getModel()?.getLineCount() ?? 0;
-        ed.revealLine(lc);
-      });
+    if (wasAtBottom) {
+      ed.revealLine(lc);
+    } else if (savedVS) {
+      ed.restoreViewState(savedVS);
     }
-  }, [fullText]);
+  }, [entries, level, filterText]);
 
-  // === Monaco beforeMount：注册自定义 language 和主题（必须在 Editor 渲染前） ===
+  // === Monaco beforeMount ===
   const handleBeforeMount = (mon: Monaco) => {
     monacoRef.current = mon;
     if (!languageRegistered.current) {
@@ -278,34 +317,9 @@ export function LogsTab() {
   // === Monaco onMount ===
   const handleEditorMount = (ed: editor.IStandaloneCodeEditor) => {
     editorRef.current = ed;
-
-    // Monaco 异步加载：可能在 fullText 已有数据后才 mount，
-    // 此时 isInitialRef 仍为 true，手动触发一次同步。
-    if (isInitialRef.current && fullTextRef.current) {
-      const model = ed.getModel();
-      if (model) {
-        model.setValue(fullTextRef.current);
-        isInitialRef.current = false;
-        const lc = model.getLineCount();
-        lineCountRef.current = lc;
-        if (lineCountElRef.current) lineCountElRef.current.textContent = `${lc} 行`;
-        requestAnimationFrame(() => ed.revealLine(lc));
-      }
-    }
-
-    // 监听滚动，判断用户是否手动上滚（用 ref 避免 setState 触发 re-render 干扰 find widget）
-    ed.onDidScrollChange(() => {
-      const scrollTop = ed.getScrollTop();
-      const scrollHeight = ed.getScrollHeight();
-      const layoutHeight = ed.getLayoutInfo().height;
-      autoScrollRef.current = scrollHeight - scrollTop - layoutHeight < 30;
-    });
   };
 
-  // === Find Widget 中文提示（自绘浮层，避免 Monaco 自带 tooltip 闪烁 + 浏览器原生 title 黑/白主题不可控） ===
-  // Monaco 自带 hover 弹层在 Ant Design 容器内会出现死循环闪烁（已在 LogsTab.css 中用
-  // display:none 屏蔽掉），这里在 body 上自绘一个跟随主题的小浮层做中文提示。
-  // 通过 aria-label（Monaco 自动写在 .button 上的英文标签）匹配到对应按钮。
+  // === Find Widget 中文提示 ===
   useEffect(() => {
     const ARIA_TO_ZH: Record<string, string> = {
       'Previous Match': '上一个匹配 (Shift+Enter)',
@@ -370,11 +384,9 @@ export function LogsTab() {
         tip.textContent = label;
         tip.style.opacity = '1';
         const r = t.getBoundingClientRect();
-        // 先显示再测量，确保 tip 尺寸正确
         const tr = tip.getBoundingClientRect();
         let left = r.left + r.width / 2 - tr.width / 2;
         let top = r.top - tr.height - 6;
-        // 视口边界保护
         left = Math.max(4, Math.min(left, window.innerWidth - tr.width - 4));
         if (top < 4) top = r.bottom + 6;
         tip.style.left = `${left}px`;
@@ -383,7 +395,7 @@ export function LogsTab() {
     };
 
     const onOut = (e: MouseEvent) => {
-      const t = (e.target as HTMLElement | null)?.closest?.('.find-widget [aria-label]');
+      const t = (e.target as HTMLElement | HTMLElement | null)?.closest?.('.find-widget [aria-label]');
       if (!t) return;
       if (showTimer) { window.clearTimeout(showTimer); showTimer = null; }
       hideTimer = window.setTimeout(() => { tip.style.opacity = '0'; }, 80);
@@ -401,7 +413,7 @@ export function LogsTab() {
     };
   }, [themeMode]);
 
-  // === Memoize editor options：稳定引用，避免每次 re-render 触发 Monaco updateOptions 干扰 find widget ===
+  // === Editor options ===
   const editorOptions = useMemo<editor.IStandaloneEditorConstructionOptions>(() => ({
     readOnly: true,
     minimap: { enabled: false },
@@ -466,12 +478,11 @@ export function LogsTab() {
         </span>
       </Space>
 
-      {/* Monaco Editor — 重置 font/line-height 避免继承 Ant Design Modal 的样式干扰 find widget */}
+      {/* Monaco Editor */}
       <div className="logs-tab-editor" style={{ flex: 1, minHeight: 0, position: 'relative', fontSize: '13px', lineHeight: 'normal' }}>
         <Editor
           language="stressbot-log"
           theme={monacoTheme}
-          value=""
           beforeMount={handleBeforeMount}
           onMount={handleEditorMount}
           options={editorOptions}

@@ -72,7 +72,8 @@ type RobotConfig struct {
 	HTTPTimeoutSec int `json:"httpTimeoutSec,omitempty"`
 	ApdexT         int `json:"apdexT,omitempty"`
 
-	LogLevel string `json:"logLevel,omitempty"`
+	DebugMode bool   `json:"debugMode,omitempty"`
+	LogLevel  string `json:"logLevel,omitempty"`
 }
 
 // ── Assignment ────────────────────────────────────────

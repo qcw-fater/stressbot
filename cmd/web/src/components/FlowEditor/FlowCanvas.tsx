@@ -23,7 +23,7 @@ import {
   type OnSelectionChangeParams,
 } from '@xyflow/react';
 
-import { message } from 'antd';
+import { App as AntApp } from 'antd';
 import { nodeTypes } from './nodes/registry';
 import { edgeTypes } from './edges/registry';
 import { useFlowStore } from './store/flowStore';
@@ -46,6 +46,7 @@ interface ContextMenu {
 }
 
 function FlowCanvasInner() {
+  const { message } = AntApp.useApp();
   const readOnly = useFlowReadOnly();
   const rfNodes = useFlowStore((s) => s.rfNodes);
   const rfEdges = useFlowStore((s) => s.rfEdges);
@@ -941,7 +942,7 @@ function MenuItem({
         padding: '6px 12px',
         cursor: disabled ? 'not-allowed' : 'pointer',
         borderRadius: 3,
-        color: disabled ? 'var(--text-tertiary)' : danger ? '#ff4d4f' : 'inherit',
+        color: disabled ? 'var(--text-tertiary)' : danger ? 'var(--color-error)' : 'inherit',
         fontSize: 13,
         display: 'flex',
         justifyContent: 'space-between',
@@ -949,7 +950,7 @@ function MenuItem({
         gap: 12,
       }}
       onMouseEnter={(e) => {
-        if (!disabled) e.currentTarget.style.background = 'rgba(0,0,0,0.06)';
+        if (!disabled) e.currentTarget.style.background = 'var(--hover-bg)';
       }}
       onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
     >
@@ -973,7 +974,7 @@ function SubmenuLabel({ children }: { children: React.ReactNode }) {
 }
 
 function Divider() {
-  return <div style={{ height: 1, background: 'rgba(0,0,0,0.06)', margin: '4px 0' }} />;
+  return <div style={{ height: 1, background: 'var(--divider-bg)', margin: '4px 0' }} />;
 }
 
 export function FlowCanvas() {

@@ -88,7 +88,7 @@ export function ActionsTab() {
       key: 'successCount',
       width: 70,
       sorter: (a, b) => a.successCount - b.successCount,
-      render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: '#52c41a' }}>{v}</span>,
+      render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: 'var(--color-success)' }}>{v}</span>,
     },
     {
       title: '失败',
@@ -97,7 +97,7 @@ export function ActionsTab() {
       width: 70,
       sorter: (a, b) => a.failureCount - b.failureCount,
       render: (v: number) => (
-        <span style={{ ...NUMERIC_STYLE, color: v > 0 ? '#f5222d' : 'var(--text-tertiary)' }}>{v}</span>
+        <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-error)' : 'var(--text-tertiary)' }}>{v}</span>
       ),
     },
     {
@@ -107,7 +107,7 @@ export function ActionsTab() {
       width: 70,
       sorter: (a, b) => a.timeoutCount - b.timeoutCount,
       render: (v: number) => (
-        <span style={{ ...NUMERIC_STYLE, color: v > 0 ? '#fa8c16' : 'var(--text-tertiary)' }}>{v}</span>
+        <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-orange)' : 'var(--text-tertiary)' }}>{v}</span>
       ),
     },
     {

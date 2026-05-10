@@ -73,7 +73,7 @@ export function ValidationReportDrawer({ open, onClose }: ValidationReportDrawer
           }
         >
           <List.Item.Meta
-            avatar={severity === 'error' ? <CloseCircleFilled style={{ color: '#ff4d4f' }} /> : severity === 'warning' ? <ExclamationCircleFilled style={{ color: '#faad14' }} /> : <InfoCircleFilled style={{ color: '#1677ff' }} />}
+            avatar={severity === 'error' ? <CloseCircleFilled style={{ color: 'var(--color-error)' }} /> : severity === 'warning' ? <ExclamationCircleFilled style={{ color: 'var(--color-warning)' }} /> : <InfoCircleFilled style={{ color: 'var(--color-blue)' }} />}
             title={
               <Space>
                 <Tag>{it.code}</Tag>

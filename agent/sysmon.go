@@ -68,10 +68,10 @@ func (m *SystemMonitor) Snapshot() SystemSnapshot {
 }
 
 // Start 启动后台采集循环（非阻塞）。
-func (m *SystemMonitor) Start(stopCh <-chan struct{}) {
+func (m *SystemMonitor) Start(_ <-chan struct{}) {
 	// 首次采集（建立基线，CPU/网络第一次无差分值）
 	m.collect()
-	utils.GetWorkPool().Go(func() { m.loop(stopCh) })
+	utils.GetWorkPool().Go(func() { m.loop(utils.GetWorkPool().StopChan()) })
 }
 
 func (m *SystemMonitor) loop(stopCh <-chan struct{}) {

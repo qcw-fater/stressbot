@@ -175,7 +175,7 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
         key: 'successCount',
         width: 70,
         sorter: (a, b) => a.successCount - b.successCount,
-        render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: '#52c41a' }}>{v}</span>,
+        render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: 'var(--color-success)' }}>{v}</span>,
       },
       {
         title: '失败',
@@ -184,7 +184,7 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
         width: 70,
         sorter: (a, b) => a.failureCount - b.failureCount,
         render: (v: number) => (
-          <span style={{ ...NUMERIC_STYLE, color: v > 0 ? '#f5222d' : 'var(--text-tertiary)' }}>{v}</span>
+          <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-error)' : 'var(--text-tertiary)' }}>{v}</span>
         ),
       },
       {
@@ -194,7 +194,7 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
         width: 70,
         sorter: (a, b) => a.timeoutCount - b.timeoutCount,
         render: (v: number) => (
-          <span style={{ ...NUMERIC_STYLE, color: v > 0 ? '#fa8c16' : 'var(--text-tertiary)' }}>{v}</span>
+          <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-orange)' : 'var(--text-tertiary)' }}>{v}</span>
         ),
       },
       {
@@ -332,7 +332,7 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
           </Descriptions.Item>
           {detail.errorMsg && (
             <Descriptions.Item label="错误信息" span={2}>
-              <pre style={{ margin: 0, color: '#f5222d', fontSize: 11 }}>{detail.errorMsg}</pre>
+              <pre style={{ margin: 0, color: 'var(--color-error)', fontSize: 11 }}>{detail.errorMsg}</pre>
             </Descriptions.Item>
           )}
         </Descriptions>

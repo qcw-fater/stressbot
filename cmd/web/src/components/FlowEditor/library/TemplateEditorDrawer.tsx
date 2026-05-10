@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Alert, Button, Drawer, Input, Space, Tabs, Tag, message } from 'antd';
+import { Alert, App as AntApp, Button, Drawer, Input, Space, Tabs, Tag } from 'antd';
 import { useShallow } from 'zustand/react/shallow';
 import { useEditorStore } from '../store/editorStore';
 import { PatternSelector } from '../editors/ActionEditor/PatternSelector';
@@ -32,6 +32,7 @@ import type { CallbackDef } from '@/types/callback';
 import { classifyCallback, type CallbackKind } from '@/types/callback';
 
 export function TemplateEditorDrawer() {
+  const { message } = AntApp.useApp();
   const { activePanel, setActivePanel } = useEditorStore(
     useShallow((s) => ({ activePanel: s.activePanel, setActivePanel: s.setActivePanel })),
   );

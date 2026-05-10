@@ -155,7 +155,7 @@ export function ProtoBrowser({ open: openProp, onClose, onSelect, filter }: Prot
                   </thead>
                   <tbody>
                     {detail.fields.map((f) => (
-                      <tr key={f.number} style={{ borderTop: '1px solid rgba(0,0,0,0.04)' }}>
+                      <tr key={f.number} style={{ borderTop: '1px solid var(--divider-bg)' }}>
                         <td style={{ color: 'var(--text-tertiary)' }}>{f.number}</td>
                         <td><code>{f.name}</code></td>
                         <td>{f.kind === 'map' ? `map<${f.mapKey}, ${f.mapValue}>` : f.type}</td>

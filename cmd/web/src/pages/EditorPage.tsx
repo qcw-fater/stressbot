@@ -261,6 +261,7 @@ function HomeShellInner() {
         title="系统状态"
         open={systemOpen}
         onCancel={() => setSystemOpen(false)}
+        maskClosable={false}
         footer={null}
         width={1000}
         destroyOnClose
@@ -272,12 +273,12 @@ function HomeShellInner() {
         title="运行日志"
         open={logsOpen}
         onCancel={() => setLogsOpen(false)}
+        maskClosable={false}
         footer={null}
         width={1200}
-        destroyOnClose
         styles={{ body: { height: '80vh', overflow: 'hidden', padding: '12px' } }}
       >
-        <LogsTab />
+        <LogsTab open={logsOpen} />
       </Modal>
       <ActiveTaskGuardModal
         open={guardTask !== null}

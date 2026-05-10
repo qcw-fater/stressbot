@@ -265,7 +265,7 @@ export function BindingTypeForm({ binding, onChange, depth = 0, renderChildren }
         <Space direction="vertical" style={{ width: '100%' }}>
           <Tag color="purple">每个 item = {`{ message + bindings }`}</Tag>
           {(binding.items ?? []).map((sub, i) => (
-            <div key={i} style={{ border: '1px dashed rgba(0,0,0,0.1)', padding: 8, borderRadius: 4 }}>
+            <div key={i} style={{ border: '1px dashed var(--divider-bg)', padding: 8, borderRadius: 4 }}>
               <Space style={{ marginBottom: 6 }}>
                 <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>item #{i + 1}</span>
                 <Input
@@ -281,7 +281,7 @@ export function BindingTypeForm({ binding, onChange, depth = 0, renderChildren }
                 />
                 <a
                   onClick={() => set({ items: (binding.items ?? []).filter((_, j) => j !== i) })}
-                  style={{ color: '#ff4d4f' }}
+                  style={{ color: 'var(--color-error)' }}
                 >
                   删除 item
                 </a>
@@ -308,7 +308,7 @@ export function BindingTypeForm({ binding, onChange, depth = 0, renderChildren }
         </Space>
       );
     default:
-      return <span style={{ color: '#ff4d4f' }}>未知 binding type: {t}</span>;
+      return <span style={{ color: 'var(--color-error)' }}>未知 binding type: {t}</span>;
   }
 }
 

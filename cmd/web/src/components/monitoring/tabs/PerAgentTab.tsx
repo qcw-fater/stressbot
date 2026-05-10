@@ -121,7 +121,7 @@ export function PerAgentTab() {
       key: 'cpuPercent',
       width: 90,
       render: (v: number) => (
-        <span style={{ color: v > 80 ? '#f5222d' : undefined, fontVariantNumeric: 'tabular-nums' }}>{v.toFixed(1)}%</span>
+        <span style={{ color: v > 80 ? 'var(--color-error)' : undefined, fontVariantNumeric: 'tabular-nums' }}>{v.toFixed(1)}%</span>
       ),
       sorter: (a, b) => a.cpuPercent - b.cpuPercent,
       defaultSortOrder: 'descend',
@@ -132,7 +132,7 @@ export function PerAgentTab() {
       key: 'memPercent',
       width: 90,
       render: (v: number) => (
-        <span style={{ color: v > 90 ? '#f5222d' : undefined, fontVariantNumeric: 'tabular-nums' }}>{v.toFixed(1)}%</span>
+        <span style={{ color: v > 90 ? 'var(--color-error)' : undefined, fontVariantNumeric: 'tabular-nums' }}>{v.toFixed(1)}%</span>
       ),
     },
     { title: 'Goroutine', dataIndex: 'numGoroutine', key: 'numGoroutine', width: 100 },

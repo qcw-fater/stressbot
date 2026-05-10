@@ -75,7 +75,7 @@ export function BindingsTable({ messageFullName, value, onChange, depth = 0 }: B
   }));
 
   return (
-    <div style={{ paddingLeft: depth > 0 ? 16 : 0, borderLeft: depth > 0 ? '2px solid rgba(0,0,0,0.06)' : 'none' }}>
+    <div style={{ paddingLeft: depth > 0 ? 16 : 0, borderLeft: depth > 0 ? '2px solid var(--divider-bg)' : 'none' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <strong>bindings ({list.length})</strong>
         <Button
@@ -171,7 +171,7 @@ function BindingRow({
           placeholder="(可选 state key)"
           value={binding.storeAs ?? ''}
           onChange={(e) => set({ storeAs: e.target.value || undefined })}
-          style={{ width: 160, padding: 2, border: '1px solid #d9d9d9', borderRadius: 2 }}
+          style={{ width: 160, padding: 2, border: '1px solid var(--badge-border)', borderRadius: 2 }}
         />
       </Space>
     </Space>

@@ -215,7 +215,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
       <Space size={4} align="center">
         {/* Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 4 }}>
-          <ThunderboltOutlined style={{ color: '#fa8c16', fontSize: 18 }} />
+          <ThunderboltOutlined style={{ color: 'var(--color-orange)', fontSize: 18 }} />
           <strong style={{ fontSize: 16, color: 'var(--text-primary)' }}>stressbot</strong>
         </div>
 

@@ -8,6 +8,8 @@ import (
 	"stressbot/admin"
 	"stressbot/logview"
 	stresslog "stressbot/utils/log"
+
+	"go.uber.org/zap"
 )
 
 func main() {
@@ -30,7 +32,7 @@ func main() {
 		Compress:     true,
 	}
 	stresslog.InitLog(cfg.Log.Path, "admin", logConf, "")
-	newLogger := logview.AttachRingBuffer(stresslog.GetLogger(), 5000)
+	newLogger := logview.AttachRingBuffer(stresslog.GetLogger(), 5000, zap.String("SR", "admin"))
 	stresslog.ReplaceLogger(newLogger)
 
 	srv, err := admin.NewAdminServer(*cfg)

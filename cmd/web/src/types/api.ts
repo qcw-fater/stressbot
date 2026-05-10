@@ -81,6 +81,8 @@ export interface RobotConfig {
    * 任务结束后 Agent 会自动恢复为原等级，不影响后续任务。
    */
   logLevel?: LogLevel;
+  /** 调试模式：单 agent 分配 + 历史自动标记 "debug" */
+  debugMode?: boolean;
 }
 
 export interface TaskConfig {

@@ -15,10 +15,10 @@ export interface LatencyHistogramProps {
 }
 
 const P_COLOR: Record<string, string> = {
-  p50: '#52c41a',
+  p50: 'var(--color-success)',
   p90: '#a0d911',
-  p95: '#faad14',
-  p99: '#f5222d',
+  p95: 'var(--color-warning)',
+  p99: 'var(--color-error)',
 };
 
 export function LatencyHistogram({ hist, maxMs, width = 160 }: LatencyHistogramProps) {
@@ -51,7 +51,7 @@ export function LatencyHistogram({ hist, maxMs, width = 160 }: LatencyHistogramP
           position: 'relative',
           width,
           height: 14,
-          background: 'rgba(0,0,0,0.04)',
+          background: 'var(--track-bg)',
           borderRadius: 4,
           overflow: 'hidden',
         }}

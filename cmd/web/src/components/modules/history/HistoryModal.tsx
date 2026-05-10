@@ -113,7 +113,7 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
           <Button
             type="text"
             size="small"
-            icon={r.starred ? <StarFilled style={{ color: '#faad14' }} /> : <StarOutlined />}
+            icon={r.starred ? <StarFilled style={{ color: 'var(--color-warning)' }} /> : <StarOutlined />}
             onClick={(e) => {
               e.stopPropagation();
               onToggleStar(r);
@@ -226,6 +226,7 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
       }
       open={open}
       onCancel={onClose}
+      maskClosable={false}
       destroyOnClose
       footer={null}
       styles={{ body: { height: '85vh', overflowY: 'auto' } }}

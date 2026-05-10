@@ -83,7 +83,7 @@ export function DashboardTab() {
             value={sys?.avgCpuPercent ?? 0}
             precision={1}
             suffix="%"
-            valueStyle={{ color: (sys?.avgCpuPercent ?? 0) > 80 ? '#f5222d' : undefined }}
+            valueStyle={{ color: (sys?.avgCpuPercent ?? 0) > 80 ? 'var(--color-error)' : undefined }}
           />
           <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
             在线 Agent {safeAgents.filter((a) => a.status !== 'offline').length}/{safeAgents.length}

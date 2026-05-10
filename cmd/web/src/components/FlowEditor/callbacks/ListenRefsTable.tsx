@@ -4,7 +4,7 @@
  * 设计文档 §8.6：route + server + callback 三列 + 形态徽章 + 排序删除 + 批量入口。
  */
 
-import { Button, Input, Modal, Select, Space, Table, Tag, Tooltip, message } from 'antd';
+import { App as AntApp, Button, Input, Modal, Select, Space, Table, Tag, Tooltip } from 'antd';
 import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { useState } from 'react';
 import type { ListenRef } from '@/types/flow';
@@ -20,6 +20,7 @@ export interface ListenRefsTableProps {
 }
 
 export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
+  const { message } = AntApp.useApp();
   const node = useFlowStore((s) => s.nodes[nodeId]);
   const callbacks = useFlowStore((s) => s.callbacks);
   const updateNode = useFlowStore((s) => s.updateNode);

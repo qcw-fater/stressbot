@@ -7,7 +7,7 @@
  *   - 设置（主题切换 / 监听边显示）收纳到 Popover，避免顶栏挤太多控件。
  *
  * 模式切换：
- *   - edit：显示集群在线/可用容量；启动按钮高亮；
+ *   - edit：显示集群在线/总容量；启动按钮高亮；
  *   - running / viewActive：显示任务名 + state 徽章；停止按钮（仅 owned 强提示，viewActive 也可点但服务端会拒）；
  *   - finalReport：banner + 「返回编辑」（主操作）+ 「恢复编辑稿」（仅有 stash 时显示）。
  *     - 「返回编辑」detachFromActive() → mode='edit'，画布与最后一份监控快照原样保留；
@@ -56,7 +56,7 @@ export interface RuntimeBarProps {
 }
 
 const SECTION_DIVIDER = (
-  <Divider type="vertical" style={{ margin: '0 6px', height: 22, borderColor: 'rgba(127,127,127,0.18)' }} />
+  <Divider type="vertical" style={{ margin: '0 6px', height: 22, borderColor: 'var(--divider-bg)' }} />
 );
 
 const STATE_COLOR: Record<TaskBrief['state'], string> = {
@@ -115,9 +115,9 @@ export function RuntimeBar({
   const safeAgents = agents ?? [];
   const onlineAgents = safeAgents.filter((a) => a.status !== 'offline').length;
   const unhealthyCount = safeAgents.filter((a) => a.status === 'unhealthy').length;
-  const availableBots = safeAgents
-    .filter((a) => a.status === 'idle' || a.status === 'busy')
-    .reduce((sum, a) => sum + Math.max(0, a.maxBots - a.currentBots), 0);
+  const totalCapacity = safeAgents
+    .filter((a) => a.status !== 'offline')
+    .reduce((sum, a) => sum + a.maxBots, 0);
 
   const handleStop = (task: TaskBrief) => {
     modal.confirm({
@@ -182,9 +182,9 @@ export function RuntimeBar({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <Space size={6}>
           {debugMode ? (
-            <BugOutlined style={{ color: '#9254de' }} />
+            <BugOutlined style={{ color: 'var(--color-purple)' }} />
           ) : (
-            <CheckCircleOutlined style={{ color: '#1677ff' }} />
+            <CheckCircleOutlined style={{ color: 'var(--color-blue)' }} />
           )}
           <span>运行模式</span>
         </Space>
@@ -196,7 +196,7 @@ export function RuntimeBar({
           options={[
             {
               label: (
-                <span style={{ color: !debugMode ? '#1677ff' : undefined, fontWeight: !debugMode ? 600 : undefined }}>
+                <span style={{ color: !debugMode ? 'var(--color-blue)' : undefined, fontWeight: !debugMode ? 600 : undefined }}>
                   <CheckCircleOutlined style={{ marginRight: 4 }} />
                   测试
                 </span>
@@ -205,7 +205,7 @@ export function RuntimeBar({
             },
             {
               label: (
-                <span style={{ color: debugMode ? '#9254de' : undefined, fontWeight: debugMode ? 600 : undefined }}>
+                <span style={{ color: debugMode ? 'var(--color-purple)' : undefined, fontWeight: debugMode ? 600 : undefined }}>
                   <BugOutlined style={{ marginRight: 4 }} />
                   调试
                 </span>
@@ -229,13 +229,13 @@ export function RuntimeBar({
 
       {/* === 状态徽章组 === */}
       {mode === 'edit' && (
-        <Tooltip title={`在线 Agent ${onlineAgents}/${safeAgents.length} · 可用容量 ${availableBots}`}>
+        <Tooltip title={`在线 Agent ${onlineAgents} · 总容量 ${totalCapacity}`}>
           <Tag
             icon={<ThunderboltOutlined />}
             color={onlineAgents > 0 ? 'green' : 'default'}
             style={{ margin: 0 }}
           >
-            集群 {onlineAgents}/{safeAgents.length} · 可用 {availableBots}
+            在线 {onlineAgents} · 总容量 {totalCapacity}
           </Tag>
         </Tooltip>
       )}
