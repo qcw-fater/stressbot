@@ -16,7 +16,7 @@ const NODE_COLOR_MAP: Record<string, { main: string; deep: string }> = {
   wait: { main: 'var(--node-wait)', deep: 'var(--node-wait-border-active)' },
   break: { main: 'var(--node-break)', deep: 'var(--node-break-border-active)' },
   continue: { main: 'var(--node-continue)', deep: 'var(--node-continue-border-active)' },
-  callbackCard: { main: 'var(--node-callback)', deep: 'var(--node-callback-border-active)' },
+  listenCard: { main: 'var(--node-listen)', deep: 'var(--node-listen-border-active)' },
 };
 
 /** 取节点类型对应的边主色（默认态） */

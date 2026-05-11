@@ -1329,7 +1329,7 @@ export const apiClient = {
 
 `api/mock.ts` 提供 `mockClient`，内置：
 
-- 一个 `flow.json` 样本（即 `conf/flow.json` 的简化版）
+- 一个 `flow.json` 样本（即 `conf/flow/flow.json` 的简化版）
 - 一份 proto 列表（解析自打包内的几个示例 .proto）
 - 一组动作模板（PlayerLogin, StartMatch, ConnectBattleTCP）
 
@@ -1375,11 +1375,11 @@ export function useNodeMetrics(nodeId: string): NodeMetrics | undefined {
 ```tsx
 // components/FlowEditor/index.tsx
 export interface FlowEditorProps {
-  /** 初始 flow.json，未传时按 autoLoadDefault 决定是否从 /conf/flow.json fetch */
+  /** 初始 flow.json，未传时按 autoLoadDefault 决定是否从 /conf/flow/flow.json fetch */
   initialFlow?: TaskFlow;
   /** 初始 layout.json */
   initialLayout?: FlowLayout;
-  /** 自动加载 conf/flow.json（开发模式默认 true） */
+  /** 自动加载 conf/flow/flow.json（开发模式默认 true） */
   autoLoadDefault?: boolean;
   /** 监控数据提供方：实时返回某节点的运行指标，未提供时不显示监控徽章 */
   metricsProvider?: MetricsProvider;
@@ -1389,7 +1389,7 @@ export interface FlowEditorProps {
 ### 13.1 使用示例
 
 ```tsx
-// 最简使用：开发期由 Vite 中间件吐出 conf/flow.json 与 conf/proto/
+// 最简使用：开发期由 Vite 中间件吐出 conf/flow/flow.json 与 conf/proto/
 <FlowEditor />
 
 // 嵌入更大的 IDE 布局并接外部监控
@@ -1461,7 +1461,7 @@ export interface FlowEditorProps {
 - ProtoFieldPicker（联动）
 - StoreTable（与 callback 子系统共用）
 - 嵌套 binding（nested / nestedList）
-- ✅ 产出：能完整复刻 `conf/flow.json` 中的 `PlayerLogin`、`SelectHero`、`ReportBattleDelay`（含 nestedList）。
+- ✅ 产出：能完整复刻 `conf/flow/flow.json` 中的 `PlayerLogin`、`SelectHero`、`ReportBattleDelay`（含 nestedList）。
 
 ### Phase 6：ActionEditor —— 脚本式（~1 天）
 
@@ -1482,7 +1482,7 @@ export interface FlowEditorProps {
 - ListenRefsTable（`+ 新建` / `→ 跳转` / 形态徽章）
 - BackrefList（callback → action 反向引用）
 - refsGraph + 双向悬停高亮（CallbackPanel ↔ FlowCanvas）
-- ✅ 产出：能完整复刻现网 `conf/flow.json` 中的全部 12 条 callbacks（含 silent 占位 + `stateUpdate` declarative + `frameData` lua）。
+- ✅ 产出：能完整复刻现网 `conf/flow/flow.json` 中的全部 12 条 callbacks（含 silent 占位 + `stateUpdate` declarative + `frameData` lua）。
 
 ### Phase 8：模板库（动作 + 回调）（~2 天）
 
@@ -1516,8 +1516,8 @@ export interface FlowEditorProps {
 
 ### Phase 12：完整业务流复刻（~2 天）
 
-- 用编辑器从零搭一遍 `conf/flow.json`（登录 → 业务循环 → 战斗 + 全部 callbacks）
-- 与现有 `conf/flow.json` 做 diff，对齐到字段级别（含 callbacks map）
+- 用编辑器从零搭一遍 `conf/flow/flow.json`（登录 → 业务循环 → 战斗 + 全部 callbacks）
+- 与现有 `conf/flow/flow.json` 做 diff，对齐到字段级别（含 callbacks map）
 - 跑 `go run ./cmd/validate <导出文件>` 必须通过
 - ✅ 产出：编辑器导出文件可被引擎直接消费跑通现网压测流程，含 stateUpdate / frameData 等全部 callback 行为。
 
@@ -1542,7 +1542,7 @@ export interface FlowEditorProps {
 4. **冒烟测试**：
    - 启动 `npm run dev`
    - 新建 → 编辑 → 保存 → 导出 → 关闭 → 重启 → 导入 → 验证图同构
-5. **回归用例**：导入 `conf/flow.json` → 不报错 → 导出后 `go run ./cmd/validate <out>` 通过。
+5. **回归用例**：导入 `conf/flow/flow.json` → 不报错 → 导出后 `go run ./cmd/validate <out>` 通过。
 6. **可访问性**：键盘导航全部交互可达。
 
 ---
@@ -1852,7 +1852,7 @@ LuaForm 顶部 Alert 同时显示错误数 + 警告数 + 前 5 条详情；Worke
 
 | 调用点 | 说明 |
 |---|---|
-| Toolbar 导入 JSON / 加载 conf/flow.json 后 | 自动把"引用了但 IDB 没有"的脚本从基线拉回 |
+| Toolbar 导入 JSON / 加载 conf/flow/flow.json 后 | 自动把"引用了但 IDB 没有"的脚本从基线拉回 |
 | EditorPage 初始化默认 flow 后 | 同上 |
 | TaskStartModal 弹窗打开时 | 最后一道兜底；若仍有缺失则禁止启动 |
 

@@ -1,0 +1,89 @@
+/* FloatingWindow — 浮动窗口通用样式 */
+
+.floating-window {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.12));
+  border-radius: 8px;
+  box-shadow: var(--shadow-node-hover, 0 4px 12px rgba(0, 0, 0, 0.16));
+  overflow: hidden;
+}
+
+.floating-window-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.06));
+  cursor: grab;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.floating-window-titlebar:active {
+  cursor: grabbing;
+}
+
+.floating-window-title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.floating-window-extra {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.floating-window-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-tertiary, rgba(0, 0, 0, 0.45));
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.floating-window-close:hover {
+  background: var(--border-color, rgba(0, 0, 0, 0.06));
+  color: var(--text-primary);
+}
+
+.floating-window-body {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+}
+
+.floating-window-footer {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-color, rgba(0, 0, 0, 0.06));
+}
+
+/* react-rnd resize handles */
+.floating-window > .rnd-resize-handle {
+  visibility: hidden;
+}
+
+.floating-window:hover > .rnd-resize-handle {
+  visibility: visible;
+}

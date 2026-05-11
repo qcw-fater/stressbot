@@ -1,5 +1,5 @@
 /**
- * action → CallbackCard 监听边：灰色虚线（与 action/callback 同灰）。
+ * action → ListenCard 监听边：灰色虚线（与 action/listen 同灰）。
  *
  * 受 editorStore.showListenEdges 开关控制：关闭时不渲染。
  * 选中时加粗变深灰。

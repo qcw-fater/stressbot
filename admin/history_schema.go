@@ -78,7 +78,6 @@ const ddlTaskConfigArchive = `
 CREATE TABLE IF NOT EXISTS task_config_archive (
     task_id         VARCHAR(32)  NOT NULL PRIMARY KEY,
     flow_json       MEDIUMBLOB   NULL,
-    header_json     MEDIUMTEXT   NULL,
     proto_files     MEDIUMBLOB   NULL,
     lua_scripts     MEDIUMBLOB   NULL,
     robot_config    JSON         NULL,

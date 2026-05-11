@@ -6,14 +6,16 @@ import (
 	"sync"
 	"time"
 
+	"stressbot/adapter"
 	"stressbot/monitor"
 	stresslog "stressbot/utils/log"
 
 	"github.com/panjf2000/gnet/v2"
 	"go.uber.org/zap"
-
-	"stressbot/adapter"
 )
+
+// maxBodyLen 单个包体最大允许长度（16MB），防止畸形/恶意包导致 OOM。
+const maxBodyLen = 16 * 1024 * 1024
 
 // connRegistry 管理 gnet 连接与业务层 Connection 的映射。
 type connRegistry struct {
@@ -97,14 +99,14 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 		}
 
 		bodyLen := es.adp.BodyLength(headBuf)
-		if bodyLen < 0 {
+		if bodyLen < 0 || bodyLen > maxBodyLen {
 			serviceName := ""
 			if conn != nil {
 				serviceName = conn.ServiceName()
 			}
-			stresslog.Warn("[NETWORK] 协议头非法，关闭连接",
+			stresslog.Warn("[NETWORK] 协议头非法或包体过长，关闭连接",
 				zap.String("service", serviceName),
-		)
+				zap.Int("bodyLen", bodyLen))
 			return gnet.Close
 		}
 

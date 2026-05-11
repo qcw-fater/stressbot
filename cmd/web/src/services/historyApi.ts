@@ -52,7 +52,7 @@ export function cloneHistory(
 
 export function compareHistory(ids: string[]): Promise<HistoryCompareResponse> {
   if (ids.length === 0 || ids.length > 5) {
-    return Promise.reject(new Error('ids 数量必须在 1~5 之间'));
+    return Promise.reject(new Error('对比记录数量必须在 1~5 之间'));
   }
   return getJson<HistoryCompareResponse>(
     '/history/compare' + buildQuery({ ids: ids.join(',') }),

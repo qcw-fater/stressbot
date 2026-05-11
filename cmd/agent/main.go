@@ -307,7 +307,7 @@ func loadConfig(path string) (*Config, error) {
 		cfg.Adapter.Script = "conf/adapter/codec.lua"
 	}
 	if cfg.Flow == "" {
-		cfg.Flow = "conf/flow.json"
+		cfg.Flow = "conf/flow/flow.json"
 	}
 	if len(cfg.Proto.Dirs) == 0 {
 		cfg.Proto.Dirs = []string{"conf/proto"}

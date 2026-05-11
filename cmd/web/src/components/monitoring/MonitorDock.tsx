@@ -137,7 +137,7 @@ export function MonitorDock() {
           { key: 'actions', label: '动作', children: <div style={{ overflow: 'auto', height: height - 64 }}><ActionsTab /></div> },
           { key: 'errors', label: '错误', children: <div style={{ overflow: 'auto', height: height - 64 }}><ErrorsTab /></div> },
           { key: 'trends', label: '趋势', children: <div style={{ overflow: 'auto', height: height - 64 }}><TrendsTab /></div> },
-          { key: 'per-agent', label: 'per-Agent', children: <div style={{ overflow: 'auto', height: height - 64 }}><PerAgentTab /></div> },
+          { key: 'per-agent', label: '按节点', children: <div style={{ overflow: 'auto', height: height - 64 }}><PerAgentTab /></div> },
         ]}
       />
     </div>

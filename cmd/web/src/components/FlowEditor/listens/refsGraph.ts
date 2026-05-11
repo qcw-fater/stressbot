@@ -2,9 +2,9 @@
  * 监听 ↔ 回调引用图。
  *
  * 设计文档 §8.8：
- *   - 反查：callback name → 哪些 (nodeId, refIndex) 注册了它
- *   - 重复注册检测：同一 (server, routeKey) 在不同 action 中绑了不同 callback
- *   - 孤儿 callback：引用计数为 0
+ *   - 反查：listen name → 哪些 (nodeId, refIndex) 注册了它
+ *   - 重复注册检测：同一 (server, routeKey) 在不同 action 中绑了不同 listen
+ *   - 孤儿 listen：引用计数为 0
  */
 
 import type { ListenRef, TaskFlow } from '@/types/flow';
@@ -24,22 +24,22 @@ export interface DuplicateGroup {
 export interface RefsGraph {
   /** node id → 该 action 注册的所有 ListenRef */
   nodeToRefs: Map<string, ListenRef[]>;
-  /** callback name → 反向引用列表 */
-  callbackToRefs: Map<string, RefRecord[]>;
-  /** 重复注册（同一 server+routeKey 被多个 action 绑了不同 callback） */
+  /** listen name → 反向引用列表 */
+  listenToRefs: Map<string, RefRecord[]>;
+  /** 重复注册（同一 server+routeKey 被多个 action 绑了不同 listen） */
   duplicateRegisters: DuplicateGroup[];
-  /** 引用计数（callback name → count） */
+  /** 引用计数（listen name → count） */
   refCount: Map<string, number>;
-  /** 引用了不存在 callback 的悬空记录 */
+  /** 引用了不存在 listen 的悬空记录 */
   danglingRefs: RefRecord[];
 }
 
 export function buildRefsGraph(flow: TaskFlow): RefsGraph {
   const nodeToRefs = new Map<string, ListenRef[]>();
-  const callbackToRefs = new Map<string, RefRecord[]>();
+  const listenToRefs = new Map<string, RefRecord[]>();
   const refCount = new Map<string, number>();
   const danglingRefs: RefRecord[] = [];
-  // (server, routeKey) → [(nodeId, callback)]
+  // (server, routeKey) → [(nodeId, listen)]
   const grouping = new Map<string, Array<{ nodeId: string; cb: string | null }>>();
 
   for (const [nodeId, node] of Object.entries(flow.nodes)) {
@@ -49,11 +49,11 @@ export function buildRefsGraph(flow: TaskFlow): RefsGraph {
     refs.forEach((ref, i) => {
       const rec: RefRecord = { nodeId, refIndex: i, ref };
       if (ref.callback != null) {
-        const list = callbackToRefs.get(ref.callback) ?? [];
+        const list = listenToRefs.get(ref.callback) ?? [];
         list.push(rec);
-        callbackToRefs.set(ref.callback, list);
+        listenToRefs.set(ref.callback, list);
         refCount.set(ref.callback, (refCount.get(ref.callback) ?? 0) + 1);
-        if (!(ref.callback in flow.callbacks)) {
+        if (!(ref.callback in flow.listens)) {
           danglingRefs.push(rec);
         }
       }
@@ -65,7 +65,7 @@ export function buildRefsGraph(flow: TaskFlow): RefsGraph {
     });
   }
 
-  // 重复注册：同一 server+route 被多个 action 注册了不同 callback
+  // 重复注册：同一 server+route 被多个 action 注册了不同 listen
   const duplicateRegisters: DuplicateGroup[] = [];
   for (const [key, group] of grouping) {
     if (group.length <= 1) continue;
@@ -77,7 +77,7 @@ export function buildRefsGraph(flow: TaskFlow): RefsGraph {
     }
   }
 
-  return { nodeToRefs, callbackToRefs, duplicateRegisters, refCount, danglingRefs };
+  return { nodeToRefs, listenToRefs, duplicateRegisters, refCount, danglingRefs };
 }
 
 /**

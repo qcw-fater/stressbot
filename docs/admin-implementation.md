@@ -103,7 +103,6 @@ type TaskConfig struct {
     FlowJSON     json.RawMessage      `json:"flowJson"`       // 任务流程（直接保存原始 JSON）
     ProtoFiles   map[string][]byte    `json:"protoFiles"`     // 文件名 → 内容（base64 自动）
     LuaScripts   map[string][]byte    `json:"luaScripts"`     // 文件名 → 内容
-    HeaderJSON   json.RawMessage      `json:"headerJson"`     // 协议头配置
     RobotConfig  RobotConfig          `json:"robotConfig"`
     Deadline     *time.Time           `json:"deadline,omitempty"`
 }
@@ -889,7 +888,6 @@ CREATE TABLE IF NOT EXISTS task_config_archive (
     flow_json       MEDIUMTEXT    NOT NULL,
     proto_files     JSON          NULL,
     scripts         JSON          NULL,
-    header_json     TEXT          NULL,
     robot_config    JSON          NOT NULL,
     PRIMARY KEY (task_id),
     CONSTRAINT fk_config_task FOREIGN KEY (task_id) REFERENCES task_history(id) ON DELETE CASCADE
@@ -1210,7 +1208,6 @@ multipart 字段：
 | `flow.json` | file | 必需 |
 | `proto/*` | file（可多个） | 字段名前缀 `proto/` |
 | `scripts/*` | file | 字段名前缀 `scripts/` |
-| `header.json` | file | 可选 |
 | `robotConfig` | string (JSON) | RobotConfig 序列化 |
 | `deadline` | string (RFC3339) | 可选 |
 

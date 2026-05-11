@@ -5,9 +5,10 @@
  */
 
 import type { ActionDef } from '@/types/action';
-import type { CallbackDef } from '@/types/callback';
+import type { ListenDef } from '@/types/listen';
 import type { FlowLayout } from '@/types/editor';
-import type { FlowNode, TaskFlow } from '@/types/flow';
+import type { FlowNode } from '@/types/flow';
+import type { FlowJson } from '../codec/flowToJson';
 import { useFlowStore } from './flowStore';
 
 const KEY_FLOW = 'stressbot-editor-draft-flow-v1';
@@ -17,7 +18,7 @@ interface Draft {
   defaultDelayMs: number;
   nodes: Record<string, FlowNode>;
   actions: Record<string, ActionDef>;
-  callbacks: Record<string, CallbackDef>;
+  callbacks: Record<string, ListenDef>;
   savedAt: number;
 }
 
@@ -31,7 +32,7 @@ function flushNow(): void {
       defaultDelayMs: s.defaultDelayMs,
       nodes: s.nodes,
       actions: s.actions,
-      callbacks: s.callbacks,
+      callbacks: s.listens,
       savedAt: Date.now(),
     };
     localStorage.setItem(KEY_FLOW, JSON.stringify(draft));
@@ -66,7 +67,7 @@ export function startAutoPersist(): () => void {
   };
 }
 
-export function loadDraft(): { flow: TaskFlow; layout: FlowLayout; savedAt: number } | null {
+export function loadDraft(): { flow: FlowJson; layout: FlowLayout; savedAt: number } | null {
   try {
     const flowStr = localStorage.getItem(KEY_FLOW);
     if (!flowStr) return null;

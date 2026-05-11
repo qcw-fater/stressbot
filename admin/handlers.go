@@ -47,6 +47,8 @@ func (s *AdminServer) registerRoutes() *http.ServeMux {
 	mux.HandleFunc("GET /api/agents", s.handleListAgents)
 	mux.HandleFunc("GET /api/agents/{id}", s.handleGetAgent)
 	mux.HandleFunc("DELETE /api/agents/{id}", s.handleDeleteAgent)
+	mux.HandleFunc("POST /api/agents/{id}/shutdown", s.handleShutdownAgent)
+	mux.HandleFunc("POST /api/agents/shutdown-all", s.handleShutdownAllAgents)
 
 	// ── 前端-指标 ──
 	mux.HandleFunc("GET /api/metrics", s.handleGetMetrics)
@@ -286,13 +288,6 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	flowFile.Close()
 	cfg.FlowJSON = json.RawMessage(flowData)
 
-	// header.json（可选）
-	if headerFile, _, err := r.FormFile("header.json"); err == nil {
-		headerData, _ := io.ReadAll(headerFile)
-		headerFile.Close()
-		cfg.HeaderJSON = json.RawMessage(headerData)
-	}
-
 	// proto 文件
 	cfg.ProtoFiles = make(map[string][]byte)
 	for key, files := range r.MultipartForm.File {
@@ -335,6 +330,13 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 				cfg.LuaScripts[fileName] = data
 			}
 		}
+	}
+
+	// 协议适配器（adapter/codec.lua，可选）
+	if adapterFile, _, err := r.FormFile("adapter/codec.lua"); err == nil {
+		adapterData, _ := io.ReadAll(adapterFile)
+		adapterFile.Close()
+		cfg.AdapterScript = adapterData
 	}
 
 	// robotConfig（JSON string）
@@ -444,21 +446,13 @@ func (s *AdminServer) handleGetTaskConfig(w http.ResponseWriter, r *http.Request
 	}
 
 	switch path {
-	case "flow.json":
+	case "flow/flow.json":
 		if task.Config.FlowJSON == nil {
 			http.NotFound(w, r)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(task.Config.FlowJSON)
-
-	case "header.json":
-		if task.Config.HeaderJSON == nil {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(task.Config.HeaderJSON)
 
 	case "config.json":
 		// Agent 运行时配置（robotConfig + 超时等）
@@ -470,6 +464,14 @@ func (s *AdminServer) handleGetTaskConfig(w http.ResponseWriter, r *http.Request
 		})
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(configJSON)
+
+	case "adapter/codec.lua":
+		if task.Config.AdapterScript == nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write(task.Config.AdapterScript)
 
 	default:
 		// proto 文件或 lua 脚本
@@ -556,16 +558,16 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 	var configFiles []string
 	if task != nil {
 		if task.Config.FlowJSON != nil {
-			configFiles = append(configFiles, "flow.json")
-		}
-		if task.Config.HeaderJSON != nil {
-			configFiles = append(configFiles, "header.json")
+			configFiles = append(configFiles, "flow/flow.json")
 		}
 		for name := range task.Config.ProtoFiles {
 			configFiles = append(configFiles, "proto/"+name)
 		}
 		for name := range task.Config.LuaScripts {
 			configFiles = append(configFiles, "scripts/"+name)
+		}
+	if task.Config.AdapterScript != nil {
+			configFiles = append(configFiles, "adapter/codec.lua")
 		}
 	}
 
@@ -756,6 +758,46 @@ func (s *AdminServer) handleDeleteAgent(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *AdminServer) handleShutdownAgent(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	agent, ok := s.agents.Get(id)
+	if !ok {
+		writeError(w, ErrAgentNotFound)
+		return
+	}
+	if agent.Status == AgentOffline {
+		writeError(w, ErrAgentOffline.WithMessage("agent is offline, cannot send shutdown"))
+		return
+	}
+	if err := s.dispatcher.Shutdown(agent.Address); err != nil {
+		stresslog.Warn("关闭命令发送失败", zap.String("agentId", id), zap.Error(err))
+		writeError(w, ErrAgentOffline.WithMessage("agent unreachable: "+err.Error()))
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "shutdown_sent"})
+}
+
+func (s *AdminServer) handleShutdownAllAgents(w http.ResponseWriter, _ *http.Request) {
+	all := s.agents.List()
+	var succeeded, failed []string
+	for _, a := range all {
+		if a.Status == AgentOffline {
+			continue
+		}
+		if err := s.dispatcher.Shutdown(a.Address); err != nil {
+			failed = append(failed, a.ID)
+			stresslog.Warn("关闭命令发送失败", zap.String("agentId", a.ID), zap.Error(err))
+		} else {
+			succeeded = append(succeeded, a.ID)
+		}
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"status":    "shutdown_sent",
+		"succeeded": succeeded,
+		"failed":    failed,
+	})
 }
 
 // ── 前端-指标 ──

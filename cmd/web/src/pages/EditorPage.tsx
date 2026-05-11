@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { App as AntApp, Spin } from 'antd';
+
 import { useShallow } from 'zustand/react/shallow';
 import {
   ApiError,
@@ -34,14 +35,14 @@ import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { FlowEditor } from '@/components/FlowEditor';
 import { useFlowStore } from '@/components/FlowEditor/store/flowStore';
 import { ResourcesDrawer } from '@/components/modules/ResourcesDrawer';
-import { AgentsDrawer } from '@/components/modules/AgentsDrawer';
+import { AgentsPanel } from '@/components/modules/AgentsPanel';
 import { HistoryModal } from '@/components/modules/history/HistoryModal';
 import { ActiveTaskGuardModal } from '@/components/runtime/ActiveTaskGuardModal';
 import { RuntimeBar } from '@/components/runtime/RuntimeBar';
 import { MonitorDock } from '@/components/monitoring/MonitorDock';
 import { SystemTab } from '@/components/monitoring/tabs/SystemTab';
 import { LogsTab } from '@/components/monitoring/tabs/LogsTab';
-import { Modal } from 'antd';
+import { FloatingWindow } from '@/components/FlowEditor/panels/FloatingWindow';
 import type { RobotConfig, TaskBrief } from '@/types/api';
 
 export function EditorPage() {
@@ -77,10 +78,10 @@ function HomeShellInner() {
       })),
     );
 
-  // 业务侧 flow（节点 / actions / callbacks）+ 最新 stress snapshot → nodeId → ActionMetric
+  // 业务侧 flow（节点 / actions / listens）+ 最新 stress snapshot → nodeId → ActionMetric
   // 这里订阅整个 flowStore 字段会触发频繁 re-render；用 useShallow 压平，仅在数据真变时触发。
   const flowSlice = useFlowStore(
-    useShallow((s) => ({ nodes: s.nodes, callbacks: s.callbacks })),
+    useShallow((s) => ({ nodes: s.nodes, listens: s.listens })),
   );
   const metricsProvider = useMemo(() => {
     if (mode === 'edit') return undefined;
@@ -228,7 +229,7 @@ function HomeShellInner() {
     // 这里包一层占位 div 形成 nest 模式，避免 "tip only work in nest or fullscreen" 警告。
     return (
       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Spin size="large" tip="正在连接 Admin...">
+        <Spin size="large" tip="正在连接服务器...">
           <div style={{ width: 120, height: 80 }} />
         </Spin>
       </div>
@@ -256,30 +257,27 @@ function HomeShellInner() {
       <MonitorDock />
       <ResourcesDrawer open={resourcesOpen} onClose={() => setResourcesOpen(false)} />
       <HistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} />
-      <AgentsDrawer open={agentsOpen} onClose={() => setAgentsOpen(false)} />
-      <Modal
+      <AgentsPanel open={agentsOpen} onClose={() => setAgentsOpen(false)} />
+      <FloatingWindow
+        windowId="systemStatus"
         title="系统状态"
+        defaultSize={{ width: 680, height: 400 }}
+        minSize={{ width: 520, height: 320 }}
         open={systemOpen}
-        onCancel={() => setSystemOpen(false)}
-        maskClosable={false}
-        footer={null}
-        width={1000}
-        destroyOnClose
-        styles={{ body: { height: '80vh', overflow: 'auto', padding: 0 } }}
+        onClose={() => setSystemOpen(false)}
       >
         <SystemTab />
-      </Modal>
-      <Modal
+      </FloatingWindow>
+      <FloatingWindow
+        windowId="logs"
         title="运行日志"
+        defaultSize={{ width: 1000, height: 600 }}
+        minSize={{ width: 600, height: 400 }}
         open={logsOpen}
-        onCancel={() => setLogsOpen(false)}
-        maskClosable={false}
-        footer={null}
-        width={1200}
-        styles={{ body: { height: '80vh', overflow: 'hidden', padding: '12px' } }}
+        onClose={() => setLogsOpen(false)}
       >
         <LogsTab open={logsOpen} />
-      </Modal>
+      </FloatingWindow>
       <ActiveTaskGuardModal
         open={guardTask !== null}
         task={guardTask}

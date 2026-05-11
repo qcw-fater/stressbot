@@ -25,6 +25,7 @@ type Connection struct {
 	listenResp       map[string]ListenCallBack // responseKey → 持久回调
 	listenMsg        map[string]*Message       // responseKey → 缓存消息（轮询）
 	listenCh         chan *Message
+	listenDone       chan struct{} // listenLoop 退出时关闭，用于 Close 时等待回调完成
 	mu               sync.Mutex
 	ctx              context.Context
 	cancel           context.CancelFunc
@@ -197,6 +198,7 @@ func (c *Connection) AddListener(responseKey string, cb ListenCallBack) {
 
 	if needStart {
 		if atomic.CompareAndSwapInt32(&c.listenRunning, 0, 1) {
+			c.listenDone = make(chan struct{})
 			go c.listenLoop()
 		}
 	}
@@ -204,6 +206,11 @@ func (c *Connection) AddListener(responseKey string, cb ListenCallBack) {
 
 func (c *Connection) listenLoop() {
 	defer atomic.StoreInt32(&c.listenRunning, 0)
+	defer func() {
+		if c.listenDone != nil {
+			close(c.listenDone)
+		}
+	}()
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -221,6 +228,17 @@ func (c *Connection) listenLoop() {
 	}
 }
 
+// WaitListenDone 等待 listenLoop 退出（即所有已分发的回调执行完毕）。
+// 必须在 Close/CloseAll 之后调用，此时 ctx 已取消，listenLoop 会尽快退出。
+func (c *Connection) WaitListenDone() {
+	if c == nil {
+		return
+	}
+	if c.listenDone != nil {
+		<-c.listenDone
+	}
+}
+
 // ListenResponse 注册持久化推送消息监听。
 func (c *Connection) ListenResponse(listenRespMap map[string]ListenCallBack) {
 	if c == nil || atomic.LoadInt32(&c.isClose) == 1 {
@@ -234,6 +252,7 @@ func (c *Connection) ListenResponse(listenRespMap map[string]ListenCallBack) {
 	c.mu.Unlock()
 
 	if atomic.CompareAndSwapInt32(&c.listenRunning, 0, 1) {
+		c.listenDone = make(chan struct{})
 		go c.listenLoop()
 	}
 }
@@ -330,12 +349,13 @@ func (c *Connection) OnReceive(responseKey string, body []byte, headerErr uint64
 	c.mu.Lock()
 	ch, exists := c.responseMap[responseKey]
 	if exists {
-		c.mu.Unlock()
+		// 在锁内发送，防止 RequestResponse 的 defer 在 unlock 和 send 之间 close(ch) 导致 panic。
 		select {
 		case ch <- resp:
 		default:
 			stresslog.Warn("[NETWORK] OnReceive 响应通道已满", zap.String("key", responseKey))
 		}
+		c.mu.Unlock()
 		return
 	}
 

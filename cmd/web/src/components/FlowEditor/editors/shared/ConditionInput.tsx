@@ -81,7 +81,7 @@ export function ConditionInput({ value, onChange, placeholder }: ConditionInputP
         <>
           <b>lua:</b> 调用 <code>conf/scripts/</code> 下的脚本求值。
           入口 <code>function execute(r)</code>，必须 <code>return true / false</code>
-          （返回其它类型直接报错）。点旁边的 <b>编辑</b> 按钮可在 Monaco 里直接写脚本，
+          （返回其它类型直接报错）。点旁边的 <b>编辑</b> 按钮可在编辑器里直接写脚本，
           按 Ctrl+S 保存到本地。
         </>
       ),
@@ -115,7 +115,7 @@ export function ConditionInput({ value, onChange, placeholder }: ConditionInputP
             icon={<EditOutlined />}
             onClick={() => setEditorOpen(true)}
             disabled={!tail.trim()}
-            title={!tail.trim() ? '先填写脚本文件名再编辑' : '在 Monaco 里编辑该脚本内容'}
+            title={!tail.trim() ? '先填写脚本文件名再编辑' : '在编辑器里编辑该脚本内容'}
           >
             编辑
           </Button>

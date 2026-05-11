@@ -1,33 +1,38 @@
 /**
  * Proto 浏览器：左侧平铺 message 列表 → 右侧字段表 → 选中插入。
  *
- * 入口：ActionEditor / CallbackEditor 中点击"浏览"按钮，
- * 或 Toolbar → JSON 预览旁的 [Proto] 按钮。
+ * 两种模式：
+ *   - 独立模式（不传 open/onClose/onSelect）：由 activePanel 控制，渲染为 FloatingWindow
+ *   - 选择器模式（传 open/onClose/onSelect）：嵌入编辑器中临时选消息，渲染为 Modal
  */
 
-import { Drawer, Empty, Input, List, Typography } from 'antd';
+import { Button, Empty, Input, List, Modal, Typography } from 'antd';
 import { useMemo, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
+import { useFloatingWindowStore } from '../store/floatingWindowStore';
 import { protoRegistry } from './ProtoRegistry';
 import { useProtoStore } from './protoStore';
+import { FloatingWindow } from '../panels/FloatingWindow';
 import type { ProtoMessage } from '@/types/proto';
 
 export interface ProtoBrowserProps {
-  /** 受控显示，未提供时由 editorStore.activePanel.kind === 'protoBrowser' 决定 */
+  /** 受控显示（选择器模式）；省略则用独立模式（FloatingWindow） */
   open?: boolean;
   onClose?: () => void;
   /** 选中消息后的回调 */
   onSelect?: (fullName: string) => void;
-  /** 过滤前缀（如 "Game.LoginPlayerC2S" 只显示 C2S 消息） */
+  /** 过滤前缀 */
   filter?: (m: ProtoMessage) => boolean;
 }
 
 export function ProtoBrowser({ open: openProp, onClose, onSelect, filter }: ProtoBrowserProps) {
-  const activePanel = useEditorStore((s) => s.activePanel);
-  const setActivePanel = useEditorStore((s) => s.setActivePanel);
-  const open = openProp ?? activePanel.kind === 'protoBrowser';
+  const isPickerMode = openProp !== undefined;
+  const activePanel = useEditorStore((s) => s.activePanel.protoBrowser);
+  const closePanel = useEditorStore((s) => s.closePanel);
+  const open = openProp ?? activePanel?.kind === 'protoBrowser';
+  // Modal 始终高于所有浮动窗口
+  const topZ = useFloatingWindowStore((s) => s._nextZ + 1);
 
-  // 订阅 proto 加载状态：load 完成后会驱动下面的 useMemo 重新计算 message 列表
   const protoStatus = useProtoStore((s) => s.status);
   const protoHash = useProtoStore((s) => s.hash);
 
@@ -45,24 +50,17 @@ export function ProtoBrowser({ open: openProp, onClose, onSelect, filter }: Prot
       );
     }
     return list;
-    // protoHash 变化代表实际 proto 数据更新，也作为依赖以触发重算
   }, [search, filter, protoStatus, protoHash]);
 
   const detail = selected ? protoRegistry.lookupMessage(selected) : undefined;
 
   const handleClose = () => {
     onClose?.();
-    if (!onClose) setActivePanel({ kind: 'none' });
+    if (!onClose) closePanel('protoBrowser');
   };
 
-  return (
-    <Drawer
-      title="Proto 浏览器"
-      open={open}
-      onClose={handleClose}
-      width={720}
-      mask={false}
-    >
+  const content = (
+    <>
       <Input.Search
         placeholder="搜索 message 名（如 LoginPlayerC2S）"
         value={search}
@@ -81,7 +79,7 @@ export function ProtoBrowser({ open: openProp, onClose, onSelect, filter }: Prot
           }
         />
       ) : (
-        <div style={{ display: 'flex', gap: 12, height: 'calc(100vh - 180px)' }}>
+        <div style={{ display: 'flex', gap: 12, height: 'calc(100% - 48px)', minHeight: 300 }}>
           <div
             style={{
               width: '40%',
@@ -164,29 +162,55 @@ export function ProtoBrowser({ open: openProp, onClose, onSelect, filter }: Prot
                     ))}
                   </tbody>
                 </table>
-                <div style={{ marginTop: 16 }}>
-                  <button
-                    style={{
-                      padding: '6px 12px',
-                      background: 'var(--node-action)',
-                      color: '#fff',
-                      border: 'none',
-                      borderRadius: 4,
-                      cursor: 'pointer',
-                    }}
-                    onClick={() => {
-                      onSelect?.(detail.fullName);
-                      handleClose();
-                    }}
-                  >
-                    选择此消息
-                  </button>
-                </div>
+                {isPickerMode && (
+                  <div style={{ marginTop: 16 }}>
+                    <Button
+                      type="primary"
+                      onClick={() => {
+                        onSelect?.(detail.fullName);
+                        handleClose();
+                      }}
+                    >
+                      选择此消息
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
           </div>
         </div>
       )}
-    </Drawer>
+    </>
+  );
+
+  // 选择器模式：保持为 Modal（嵌入编辑器中的临时子对话框）
+  if (isPickerMode) {
+    return (
+      <Modal
+        title="Proto 浏览器"
+        open={open}
+        onCancel={handleClose}
+        footer={null}
+        width={880}
+        zIndex={topZ}
+        styles={{ body: { maxHeight: 'calc(100vh - 200px)', overflow: 'auto' } }}
+      >
+        {content}
+      </Modal>
+    );
+  }
+
+  // 独立模式：FloatingWindow
+  return (
+    <FloatingWindow
+      windowId="protoBrowser"
+      title="Proto 浏览器"
+      defaultSize={{ width: 780, height: 540 }}
+      minSize={{ width: 500, height: 350 }}
+      open={open}
+      onClose={handleClose}
+    >
+      {content}
+    </FloatingWindow>
   );
 }

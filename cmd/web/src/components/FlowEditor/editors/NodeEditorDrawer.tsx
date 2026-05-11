@@ -1,10 +1,10 @@
 /**
- * 节点编辑抽屉：根据 node.type 路由到具体 Editor。
+ * 节点编辑浮动窗口：根据 node.type 路由到具体 Editor。
  *
- * 双击主画布上的节点 → editorStore.activePanel.kind = 'nodeEdit' → 此抽屉打开。
+ * 双击主画布上的节点 → editorStore.activePanel.kind = 'nodeEdit' → 此窗口打开。
  */
 
-import { App as AntApp, Button, Drawer, Form, Input, Popconfirm, Space, Tag } from 'antd';
+import { App as AntApp, Button, Form, Input, Popconfirm, Space, Tag } from 'antd';
 import { UndoOutlined } from '@ant-design/icons';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useEditorStore } from '../store/editorStore';
@@ -16,15 +16,17 @@ import { BooleanEditor } from './BooleanEditor';
 import { WeightedEditor } from './WeightedEditor';
 import { WaitEditor } from './WaitEditor';
 import { ActionEditor } from './ActionEditor';
+import { FloatingWindow } from '../panels/FloatingWindow';
 import type { FlowNode } from '@/types/flow';
 import type { ActionDef } from '@/types/action';
 
 export function NodeEditorDrawer() {
   const { message } = AntApp.useApp();
-  const activePanel = useEditorStore((s) => s.activePanel);
+  const activePanel = useEditorStore((s) => s.activePanel.nodeEdit);
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
+  const closePanel = useEditorStore((s) => s.closePanel);
 
-  const nodeId = activePanel.kind === 'nodeEdit' ? activePanel.nodeId : null;
+  const nodeId = activePanel?.kind === 'nodeEdit' ? activePanel.nodeId : null;
   const node = useFlowStore((s) => (nodeId ? s.nodes[nodeId] : undefined));
   const renameNode = useFlowStore((s) => s.renameNode);
   const removeNode = useFlowStore((s) => s.removeNode);
@@ -37,8 +39,6 @@ export function NodeEditorDrawer() {
   }, [nodeId]);
 
   // === 打开快照：用于"还原本次修改" ===
-  // 在 nodeId 改变时（即面板切换到新节点时）记录 node + 关联 action 的深拷贝。
-  // 之后用户的所有编辑都会改变 flowStore 中的实际数据；点还原 → 用快照覆盖回去。
   const snapshot = useRef<{
     nodeId: string;
     node: FlowNode;
@@ -67,7 +67,6 @@ export function NodeEditorDrawer() {
     };
   }, [nodeId]);
 
-  // 是否允许还原：当前数据与快照不一致时才显示按钮可点击
   const action = useFlowStore((s) =>
     snapshot.current?.actionName ? s.actions[snapshot.current.actionName] : undefined,
   );
@@ -90,11 +89,10 @@ export function NodeEditorDrawer() {
     message.success('已还原本次打开后的所有修改');
   };
 
-  if (!nodeId || !node) {
-    return <Drawer open={false} onClose={() => setActivePanel({ kind: 'none' })} />;
-  }
+  const open = !!nodeId && !!node;
 
   const editor = (() => {
+    if (!nodeId || !node) return null;
     switch (node.type) {
       case 'sequence':
         return <SequenceEditor nodeId={nodeId} />;
@@ -123,34 +121,38 @@ export function NodeEditorDrawer() {
   const onApplyRename = () => {
     if (draftId === nodeId) return;
     if (!isValidNodeId(draftId)) {
-      message.error('节点 ID 不合法（不可为空、不含空白、不以 __ 开头）');
+      message.error('节点名称不合法（不可为空、不含空白、不以 __ 开头）');
       return;
     }
     if (useFlowStore.getState().nodes[draftId]) {
-      message.error('节点 ID 已存在');
+      message.error('节点名称已存在');
       return;
     }
     renameNode(nodeId, draftId);
     message.success('已重命名，所有引用同步更新');
-    // 选中切换到新 ID
     setActivePanel({ kind: 'nodeEdit', nodeId: draftId });
   };
 
-  // action 节点（含完整 ActionEditor）需要更宽的抽屉，避免 BindingsTable 横向拥挤
-  const drawerWidth = node.type === 'action' ? 800 : 520;
+  const titleNode = node;
+  const drawerWidth = titleNode?.type === 'action' ? 720 : 520;
 
   return (
-    <Drawer
+    <FloatingWindow
+      windowId="nodeEdit"
       title={
-        <Space>
-          <Tag color="blue">{node.type}</Tag>
-          <span>编辑节点</span>
-        </Space>
+        titleNode ? (
+          <Space>
+            <Tag color="blue">{titleNode.type}</Tag>
+            <span>编辑节点 {nodeId}</span>
+          </Space>
+        ) : (
+          '编辑节点'
+        )
       }
-      open
-      onClose={() => setActivePanel({ kind: 'none' })}
-      width={drawerWidth}
-      mask={false}
+      defaultSize={{ width: drawerWidth, height: 560 }}
+      minSize={{ width: 400, height: 350 }}
+      open={open}
+      onClose={() => closePanel('nodeEdit')}
       extra={
         <Space size={6}>
           <Popconfirm
@@ -165,19 +167,18 @@ export function NodeEditorDrawer() {
               disabled={!dirty}
               title={dirty ? '还原本次打开后的所有修改' : '尚未修改任何内容'}
             >
-              还原修改
+              还原
             </Button>
           </Popconfirm>
           <Popconfirm
             title="确认删除"
             description="删除节点将同步移除所有指向它的引用（next / body / trueNext 等）。"
             onConfirm={() => {
-              removeNode(nodeId);
-              // 同时清理引用此 ID 的字段
+              removeNode(nodeId!);
               const flow = useFlowStore.getState();
               for (const [id, n] of Object.entries(flow.nodes)) {
                 const partial: Partial<typeof n> = {};
-                if (n.next?.includes(nodeId)) partial.next = n.next.filter((x) => x !== nodeId);
+                if (n.next?.includes(nodeId!)) partial.next = n.next.filter((x) => x !== nodeId);
                 if (n.body === nodeId) partial.body = '';
                 if (n.trueNext === nodeId) partial.trueNext = '';
                 if (n.falseNext === nodeId) partial.falseNext = '';
@@ -186,19 +187,19 @@ export function NodeEditorDrawer() {
                 }
                 if (Object.keys(partial).length > 0) flow.updateNode(id, partial);
               }
-              setActivePanel({ kind: 'none' });
+              setActivePanel(null);
               message.success(`已删除节点 ${nodeId}`);
             }}
           >
             <Button danger size="small">
-              删除节点
+              删除
             </Button>
           </Popconfirm>
         </Space>
       }
     >
       <Form layout="vertical">
-        <Form.Item label="节点 ID" help="重命名会同步更新所有引用">
+        <Form.Item label="节点名称">
           <Space.Compact style={{ width: '100%' }}>
             <Input value={draftId} onChange={(e) => setDraftId(e.target.value)} />
             <Button onClick={onApplyRename} disabled={draftId === nodeId}>
@@ -206,21 +207,18 @@ export function NodeEditorDrawer() {
             </Button>
           </Space.Compact>
         </Form.Item>
-        <Form.Item
-          label="描述"
-          help="可选注释，显示在节点卡片上，不参与运行时逻辑"
-        >
+        <Form.Item label="描述">
           <Input.TextArea
-            value={node.description ?? ''}
+            value={node?.description ?? ''}
             onChange={(e) =>
-              useFlowStore.getState().updateNode(nodeId, { description: e.target.value })
+              nodeId && useFlowStore.getState().updateNode(nodeId, { description: e.target.value })
             }
-            placeholder="可选，比如：开始战斗匹配 / 玩家心跳轮询"
+            placeholder="可选注释，显示在节点面板上"
             autoSize={{ minRows: 1, maxRows: 3 }}
           />
         </Form.Item>
       </Form>
       <div style={{ marginTop: 8 }}>{editor}</div>
-    </Drawer>
+    </FloatingWindow>
   );
 }

@@ -35,7 +35,7 @@ export function getTask(id: string): Promise<TaskDetail> {
  *   - `name`, `totalBots`, `robotConfig`(JSON)
  *   - `flow.json` 文件
  *   - `proto/<filename>` / `scripts/<filename>` 多个文件
- *   - 可选 `header.json`, `deadline`
+ *   - 可选 `deadline`
  *
  * 后端实际返回完整 task 对象，前端在此提取 id 适配为 `{id}`。
  */

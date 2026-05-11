@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -141,6 +142,16 @@ func (a *Agent) Run() error {
 	return a.shutdown()
 }
 
+// triggerStop 关闭 stopCh 触发 Agent 主循环退出。
+func (a *Agent) triggerStop() {
+	select {
+	case <-a.stopCh:
+		// 已关闭
+	default:
+		close(a.stopCh)
+	}
+}
+
 // ID 返回 Agent 唯一标识。
 func (a *Agent) ID() string {
 	return a.id
@@ -182,10 +193,11 @@ func (a *Agent) registerWithRetry(ctx context.Context) error {
 	}, a.cfg.RegisterRetryMax, 0, "register")
 }
 
-// heartbeatLoop 心跳循环（10s 一次）。
+// heartbeatLoop 心跳循环。成功时用 HBInterval，失败时用 HBFailInterval（更快重试）。
 func (a *Agent) heartbeatLoop(ctx context.Context) {
-	ticker := time.NewTicker(a.cfg.HBInterval)
-	defer ticker.Stop()
+	interval := a.cfg.HBInterval
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
 
 	var consecutiveFailures int
 	for {
@@ -194,7 +206,7 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 			return
 		case <-a.stopCh:
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			a.mu.Lock()
 			status := a.status
 			taskID := ""
@@ -215,15 +227,59 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 			}
 
 			if err := a.httpCli.Heartbeat(ctx, req); err != nil {
+				// Admin 返回 404：Agent 未注册（Admin 可能重启了），触发重新注册
+				if errors.Is(err, errNotRegistered) {
+					stresslog.Warn("[AGENT] Admin 报告未注册，尝试重新注册")
+					if regErr := a.registerWithRetry(ctx); regErr != nil {
+						stresslog.Error("[AGENT] 重新注册失败，退出", zap.Error(regErr))
+						a.triggerStop()
+						return
+					}
+					stresslog.Info("[AGENT] 重新注册成功，继续心跳")
+					consecutiveFailures = 0
+					interval = a.cfg.HBInterval
+					timer.Reset(interval)
+					continue
+				}
+
 				consecutiveFailures++
+
+				// 任务运行中 + Admin 断联 → 立即退出
+				if a.cfg.TaskRunAdminLostExit && status == StatusBusy {
+					stresslog.Error("[AGENT] 任务运行中与 Admin 断联，立即退出",
+						zap.String("taskID", taskID),
+						zap.Int("failures", consecutiveFailures),
+						zap.Error(err))
+					a.triggerStop()
+					return
+				}
+
 				if consecutiveFailures <= 3 {
 					stresslog.Warn("[AGENT] 心跳失败", zap.Int("consecutive", consecutiveFailures), zap.Error(err))
 				} else {
 					stresslog.Error("[AGENT] 心跳连续失败", zap.Int("consecutive", consecutiveFailures), zap.Error(err))
 				}
+
+				// 达到最大失败次数 → 自行退出
+				if a.cfg.MaxHeartbeatFailures > 0 && consecutiveFailures >= a.cfg.MaxHeartbeatFailures {
+					stresslog.Error("[AGENT] 心跳连续失败达到上限，视为 Admin 不可恢复，自行退出",
+						zap.Int("failures", consecutiveFailures),
+						zap.Int("maxFailures", a.cfg.MaxHeartbeatFailures))
+					a.triggerStop()
+					return
+				}
+
+				// 失败时使用更短的重试间隔
+				interval = a.cfg.HBFailInterval
 			} else {
+				if consecutiveFailures > 0 {
+					stresslog.Info("[AGENT] 心跳恢复", zap.Int("previousFailures", consecutiveFailures))
+				}
 				consecutiveFailures = 0
+				interval = a.cfg.HBInterval
 			}
+
+			timer.Reset(interval)
 		}
 	}
 }

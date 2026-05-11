@@ -1,17 +1,17 @@
 /**
- * 模板编辑器（独立 Drawer）：直接编辑 IndexedDB 中的模板本体（不触碰 flow.actions/callbacks）。
+ * 模板编辑器（独立 Drawer）：直接编辑 IndexedDB 中的模板本体（不触碰 flow.actions/listens）。
  *
  * 触发：在 NodePalette 中双击模板，或右键菜单选择「编辑模板」。
  *
  * 视觉与画布节点的编辑面板保持一致：
  *   - action 模板：PatternSelector + DeclarativeForm / LuaForm
- *   - callback 模板：Tabs(silent / declarative / lua)
+ *   - listen 模板：Tabs(silent / declarative / lua)
  *
- * 保存：updateActionTemplate / updateCallbackTemplate，写回 IndexedDB 并广播 template-change。
+ * 保存：updateActionTemplate / updateListenTemplate，写回 IndexedDB 并广播 template-change。
  */
 
 import { useEffect, useState } from 'react';
-import { Alert, App as AntApp, Button, Drawer, Input, Space, Tabs, Tag } from 'antd';
+import { Alert, App as AntApp, Button, Input, Space, Tabs, Tag } from 'antd';
 import { useShallow } from 'zustand/react/shallow';
 import { useEditorStore } from '../store/editorStore';
 import { PatternSelector } from '../editors/ActionEditor/PatternSelector';
@@ -21,42 +21,43 @@ import { StoreTable } from '../editors/ActionEditor/StoreTable';
 import { ProtoBrowser } from '../proto/ProtoBrowser';
 import {
   getActionTemplate,
-  getCallbackTemplate,
+  getListenTemplate,
   updateActionTemplate,
-  updateCallbackTemplate,
+  updateListenTemplate,
   type ActionTemplate,
-  type CallbackTemplate,
+  type ListenTemplate,
 } from './templateStore';
 import type { ActionDef, ActionPattern } from '@/types/action';
-import type { CallbackDef } from '@/types/callback';
-import { classifyCallback, type CallbackKind } from '@/types/callback';
+import type { ListenDef } from '@/types/listen';
+import { classifyListen, type ListenKind } from '@/types/listen';
+import { FloatingWindow } from '../panels/FloatingWindow';
 
 export function TemplateEditorDrawer() {
   const { message } = AntApp.useApp();
-  const { activePanel, setActivePanel } = useEditorStore(
-    useShallow((s) => ({ activePanel: s.activePanel, setActivePanel: s.setActivePanel })),
+  const { activePanel, closePanel } = useEditorStore(
+    useShallow((s) => ({ activePanel: s.activePanel.templateEdit, closePanel: s.closePanel })),
   );
-  const open = activePanel.kind === 'templateEdit';
+  const open = activePanel?.kind === 'templateEdit';
   const templateKind = open ? activePanel.templateKind : null;
   const templateId = open ? activePanel.templateId : null;
 
-  const [tpl, setTpl] = useState<ActionTemplate | CallbackTemplate | null>(null);
+  const [tpl, setTpl] = useState<ActionTemplate | ListenTemplate | null>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [actionDef, setActionDef] = useState<ActionDef | null>(null);
-  const [callbackDef, setCallbackDef] = useState<CallbackDef | null>(null);
-  const [callbackKind, setCallbackKind] = useState<CallbackKind>('silent');
+  const [listenDef, setListenDef] = useState<ListenDef | null>(null);
+  const [listenKind, setListenKind] = useState<ListenKind>('silent');
 
   useEffect(() => {
     if (!open || !templateKind || !templateId) {
       setTpl(null);
       return;
     }
-    const fetcher = templateKind === 'action' ? getActionTemplate : getCallbackTemplate;
+    const fetcher = templateKind === 'action' ? getActionTemplate : getListenTemplate;
     void fetcher(templateId).then((t) => {
       if (!t) {
         message.error('模板不存在或已被删除');
-        setActivePanel({ kind: 'none' });
+        closePanel('templateEdit');
         return;
       }
       setTpl(t);
@@ -65,21 +66,21 @@ export function TemplateEditorDrawer() {
       if (templateKind === 'action') {
         setActionDef((t as ActionTemplate).data);
       } else {
-        const cb = (t as CallbackTemplate).data;
-        setCallbackDef(cb);
-        setCallbackKind(classifyCallback(cb));
+        const cb = (t as ListenTemplate).data;
+        setListenDef(cb);
+        setListenKind(classifyListen(cb));
       }
     });
-  }, [open, templateKind, templateId, setActivePanel]);
+  }, [open, templateKind, templateId, closePanel]);
 
-  const onSwitchCallbackKind = (next: CallbackKind) => {
-    if (next === callbackKind) return;
-    let restored: CallbackDef;
+  const onSwitchListenKind = (next: ListenKind) => {
+    if (next === listenKind) return;
+    let restored: ListenDef;
     if (next === 'silent') restored = {};
     else if (next === 'declarative') restored = { s2cProto: '', store: [] };
     else restored = { script: '' };
-    setCallbackDef(restored);
-    setCallbackKind(next);
+    setListenDef(restored);
+    setListenKind(next);
   };
 
   const onSave = async () => {
@@ -93,27 +94,28 @@ export function TemplateEditorDrawer() {
         pattern: actionDef.pattern,
         data: actionDef,
       });
-    } else if (templateKind === 'callback' && callbackDef) {
-      await updateCallbackTemplate({
-        ...(tpl as CallbackTemplate),
+    } else if (templateKind === 'listen' && listenDef) {
+      await updateListenTemplate({
+        ...(tpl as ListenTemplate),
         name: trimName,
         description: description.trim() || undefined,
-        kind: callbackKind,
-        data: callbackDef,
+        kind: listenKind,
+        data: listenDef,
       });
     }
     message.success('已保存');
-    setActivePanel({ kind: 'none' });
+    closePanel('templateEdit');
   };
 
   return (
-    <Drawer
+    <FloatingWindow
+      windowId="templateEdit"
       open={open}
       title={
         tpl ? (
           <Space>
             <Tag color={templateKind === 'action' ? 'magenta' : 'blue'}>
-              {templateKind === 'action' ? 'action 模板' : 'callback 模板'}
+              {templateKind === 'action' ? 'action 模板' : 'listen 模板'}
             </Tag>
             <span>{tpl.name}</span>
           </Space>
@@ -121,12 +123,12 @@ export function TemplateEditorDrawer() {
           '模板编辑器'
         )
       }
-      width={760}
-      onClose={() => setActivePanel({ kind: 'none' })}
-      destroyOnHidden
+      defaultSize={{ width: 720, height: 560 }}
+      minSize={{ width: 400, height: 350 }}
+      onClose={() => closePanel('templateEdit')}
       footer={
         <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-          <Button onClick={() => setActivePanel({ kind: 'none' })}>取消</Button>
+          <Button onClick={() => closePanel('templateEdit')}>取消</Button>
           <Button type="primary" onClick={onSave} disabled={!tpl}>
             保存
           </Button>
@@ -139,7 +141,7 @@ export function TemplateEditorDrawer() {
             type="info"
             showIcon
             message="模板编辑"
-            description="此处修改的是模板本身（IndexedDB），保存后只对今后从模板创建的节点生效；当前流程已使用的副本不受影响。"
+            description="此处修改的是模板本身，保存后只对今后从模板创建的节点生效；当前流程已使用的副本不受影响。"
           />
           <div>
             <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>名称</div>
@@ -154,17 +156,17 @@ export function TemplateEditorDrawer() {
             <ActionTemplateBody def={actionDef} onChange={setActionDef} />
           )}
 
-          {templateKind === 'callback' && callbackDef && (
-            <CallbackTemplateBody
-              def={callbackDef}
-              kind={callbackKind}
-              onChangeDef={setCallbackDef}
-              onChangeKind={onSwitchCallbackKind}
+          {templateKind === 'listen' && listenDef && (
+            <ListenTemplateBody
+              def={listenDef}
+              kind={listenKind}
+              onChangeDef={setListenDef}
+              onChangeKind={onSwitchListenKind}
             />
           )}
         </div>
       )}
-    </Drawer>
+    </FloatingWindow>
   );
 }
 
@@ -192,23 +194,23 @@ function ActionTemplateBody({ def, onChange }: { def: ActionDef; onChange: (d: A
   );
 }
 
-function CallbackTemplateBody({
+function ListenTemplateBody({
   def,
   kind,
   onChangeDef,
   onChangeKind,
 }: {
-  def: CallbackDef;
-  kind: CallbackKind;
-  onChangeDef: (d: CallbackDef) => void;
-  onChangeKind: (k: CallbackKind) => void;
+  def: ListenDef;
+  kind: ListenKind;
+  onChangeDef: (d: ListenDef) => void;
+  onChangeKind: (k: ListenKind) => void;
 }) {
   const [protoOpen, setProtoOpen] = useState(false);
   return (
     <div>
       <Tabs
         activeKey={kind}
-        onChange={(k) => onChangeKind(k as CallbackKind)}
+        onChange={(k) => onChangeKind(k as ListenKind)}
         items={[
           {
             key: 'silent',
@@ -256,7 +258,7 @@ function CallbackTemplateBody({
             label: 'lua',
             children: (
               <LuaForm
-                mode="callback"
+                mode="listen"
                 script={def.script}
                 onChangeScript={(s) => onChangeDef({ ...def, script: s })}
               />

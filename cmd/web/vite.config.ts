@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import fs from 'node:fs';
 
-// 把仓库根的 conf/ 通过中间件挂到 /conf/*，使编辑器可直接 fetch '/conf/flow.json'
+// 把仓库根的 conf/ 通过中间件挂到 /conf/*，使编辑器可直接 fetch '/conf/flow/flow.json'
 // 而无需把 conf/ 复制进 web/public（坚持单一来源原则）。
 //
 // 路径换算：vite.config.ts 位于 cmd/web/，仓库根在 cmd/web/../.. = stressbot/，

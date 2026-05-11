@@ -2,7 +2,7 @@
  * StoreMapping 列表编辑器（S2C 字段 → state key）。
  *
  * 复用：ActionEditor（tcpRequest/waitListen 的 store）
- *      CallbackEditor（declarative 形态的 store）
+ *      ListenEditor（declarative 形态的 store）
  */
 
 import { Button, Input, Space, Table, Tooltip } from 'antd';

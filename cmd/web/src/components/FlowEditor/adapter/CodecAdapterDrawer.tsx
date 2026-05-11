@@ -1,21 +1,17 @@
 /**
  * 协议适配器（codec.lua）管理面板。
  *
- * 后端上传接口（POST /api/adapter/codec.lua）尚未实现，
- * 当前仅做本地预览 + 在 LocalStorage 暂存（key=`stressbot:codec.lua`）。
- * 后端就绪后只需把"上传"按钮改为真正的 POST 即可。
- *
- * 同时给出 codec.lua 必须实现的接口清单（说明文档）。
+ * codec.lua 存储在 IDB（与 proto/scripts 同模型），启动任务时自动上传。
+ * 打开面板时从 IDB 读取，IDB 没有则从基线 `/conf/adapter/codec.lua` 拉取。
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, App as AntApp, Button, Drawer, Space, Tabs, Upload } from 'antd';
 import { InboxOutlined, UploadOutlined } from '@ant-design/icons';
 import Editor from '@monaco-editor/react';
 import type { UploadProps } from 'antd';
 import { useEditorStore } from '../store/editorStore';
-
-const STORAGE_KEY = 'stressbot:codec.lua';
+import { getAdapterScript, setAdapterScript, clearAdapterScript } from '@/services/resourcesStore';
 
 const REQUIRED_FUNCTIONS: Array<{
   name: string;
@@ -26,13 +22,13 @@ const REQUIRED_FUNCTIONS: Array<{
   {
     name: 'header_size',
     signature: 'header_size() -> integer',
-    desc: '返回协议头固定字节数。Go 初始化时调用一次并缓存。',
+    desc: '返回协议头固定字节数。初始化时调用一次并缓存。',
     category: 'meta',
   },
   {
     name: 'body_length_info',
     signature: 'body_length_info() -> { offset, field_type, includes_header }',
-    desc: '描述如何从 header 字节中解析 body 长度。Go 在热路径使用此元信息原生解析（不再调用 Lua）。',
+    desc: '描述如何从协议头字节中解析消息体长度。引擎使用此元信息进行高效解析（不再调用脚本）。',
     category: 'meta',
   },
   {
@@ -116,103 +112,129 @@ end
 
 export function CodecAdapterDrawer() {
   const { message } = AntApp.useApp();
-  const activePanel = useEditorStore((s) => s.activePanel);
+  const activePanel = useEditorStore((s) => s.activePanel.codecAdapter);
   const themeMode = useEditorStore((s) => s.theme);
   const monacoTheme = themeMode === 'dark' ? 'vs-dark' : 'light';
-  const setActivePanel = useEditorStore((s) => s.setActivePanel);
-  const open = activePanel.kind === 'codecAdapter';
+  const closePanel = useEditorStore((s) => s.closePanel);
+  const open = activePanel?.kind === 'codecAdapter';
 
   const [content, setContent] = useState('');
-  const [filename, setFilename] = useState<string | null>(null);
+  const [source, setSource] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
-    if (open) {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      setContent(saved ?? '');
-      setFilename(saved ? '已暂存的 codec.lua' : null);
-    }
+    if (!open) return;
+    setLoadError(false);
+    getAdapterScript().then((file) => {
+      if (file) {
+        setContent(file.content);
+        setSource('已保存');
+      } else {
+        // 从基线拉取
+        fetch('/conf/adapter/codec.lua')
+          .then((r) => (r.ok ? r.text() : null))
+          .then((text) => {
+            if (text) {
+              setContent(text);
+              setSource('默认模板');
+              setAdapterScript(text, true);
+            } else {
+              setContent('');
+              setSource(null);
+              setLoadError(true);
+            }
+          })
+          .catch(() => {
+            setContent('');
+            setSource(null);
+            setLoadError(true);
+          });
+      }
+    });
   }, [open]);
 
   const onUpload: UploadProps['beforeUpload'] = async (file) => {
     const text = await file.text();
     setContent(text);
-    setFilename(file.name);
-    localStorage.setItem(STORAGE_KEY, text);
-    message.success(`已加载并暂存（LocalStorage）：${file.name}`);
-    return false; // 拦截真正上传
+    setSource(file.name);
+    setLoadError(false);
+    await setAdapterScript(text);
+    message.success(`已加载并保存：${file.name}`);
+    return false;
   };
 
   const onUseTemplate = () => {
     setContent(TEMPLATE_LUA);
-    setFilename('模板（未保存）');
-    message.info('已载入模板，可在右侧编辑后再保存');
+    setSource('模板（未保存）');
+    setLoadError(false);
+    message.info('已载入模板，编辑后点击保存');
   };
 
-  const onClear = () => {
-    localStorage.removeItem(STORAGE_KEY);
-    setContent('');
-    setFilename(null);
-    message.success('已清空暂存');
-  };
-
-  const onSaveLocal = () => {
+  const onSave = async () => {
     if (!content.trim()) {
       message.warning('内容为空');
       return;
     }
-    localStorage.setItem(STORAGE_KEY, content);
-    message.success('已保存到 LocalStorage（后端接口就绪后将自动上传）');
+    await setAdapterScript(content);
+    setSource('已保存');
+    setLoadError(false);
+    message.success('已保存到浏览器存储，启动任务时会自动上传');
   };
 
-  const interfaceList = useMemo(() => {
-    const groups: Record<string, typeof REQUIRED_FUNCTIONS> = {
-      meta: [],
-      encode: [],
-      decode: [],
-      route: [],
-    };
-    for (const f of REQUIRED_FUNCTIONS) groups[f.category].push(f);
-    return groups;
-  }, []);
+  const onClear = async () => {
+    await clearAdapterScript();
+    setContent('');
+    setSource(null);
+    setLoadError(true);
+    message.success('已清空');
+  };
 
   return (
     <Drawer
       open={open}
-      title="协议适配器（codec.lua）"
+      title="协议适配器"
       width={760}
-      onClose={() => setActivePanel({ kind: 'none' })}
+      onClose={() => closePanel('codecAdapter')}
       destroyOnHidden
     >
       <Tabs
-        defaultActiveKey="upload"
+        defaultActiveKey="edit"
         items={[
           {
-            key: 'upload',
-            label: '上传 / 编辑',
+            key: 'edit',
+            label: '编辑',
             children: (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <Alert
                   type="info"
                   showIcon
-                  message="后端上传接口尚未实现"
-                  description="当前文件仅暂存在浏览器 LocalStorage（key: stressbot:codec.lua），后端 API 就绪后会自动同步到服务端 conf/adapter/codec.lua。请放心编辑与暂存。"
+                  message="协议适配器随任务下发"
+                  description="编辑后点保存。启动任务时会自动上传到服务端，无需手动部署。"
                 />
+                {loadError && (
+                  <Alert
+                    type="error"
+                    showIcon
+                    message="未找到协议适配器"
+                    description="未找到适配器文件且默认模板不可用。请导入文件或载入空模板后保存。"
+                  />
+                )}
                 <Space>
                   <Upload accept=".lua,text/plain" beforeUpload={onUpload} showUploadList={false}>
-                    <Button icon={<UploadOutlined />}>选择 .lua 文件</Button>
+                    <Button icon={<UploadOutlined />}>导入 .lua 文件</Button>
                   </Upload>
                   <Button onClick={onUseTemplate} icon={<InboxOutlined />}>
                     载入空模板
                   </Button>
-                  <Button onClick={onSaveLocal} type="primary">
-                    保存到 LocalStorage
+                  <Button onClick={onSave} type="primary">
+                    保存
                   </Button>
                   <Button onClick={onClear} danger>
                     清空
                   </Button>
                 </Space>
                 <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-                  {filename ? `当前：${filename}` : '尚未加载文件'}
+                  {source ? `来源：${source}` : '尚未加载文件'}
                 </div>
                 <Editor
                   height="55vh"
@@ -238,13 +260,13 @@ export function CodecAdapterDrawer() {
                   type="warning"
                   showIcon
                   message="必须实现以下 7 个全局函数"
-                  description="codec.lua 是 stressbot 与游戏服务器协议解耦的关键。所有 message header 解析、加解密、路由匹配都由你来实现。Go 引擎只调用以下接口，不感知具体协议格式。"
+                  description="协议适配器是消息解析的核心。所有协议头解析、加解密、路由匹配都由你来实现。引擎只调用以下接口，不感知具体协议格式。"
                   style={{ marginBottom: 16 }}
                 />
-                <SpecBlock title="1. 元信息（初始化时调用一次，结果缓存到 Go）" items={interfaceList.meta} />
-                <SpecBlock title="2. 编码（每条出向消息调用）" items={interfaceList.encode} />
-                <SpecBlock title="3. 解码（每条入向消息调用）" items={interfaceList.decode} />
-                <SpecBlock title="4. 路由匹配（请求-响应配对）" items={interfaceList.route} />
+                <SpecBlock title="1. 元信息（初始化时调用一次，结果缓存）" items={REQUIRED_FUNCTIONS.filter((f) => f.category === 'meta')} />
+                <SpecBlock title="2. 编码（每条出向消息调用）" items={REQUIRED_FUNCTIONS.filter((f) => f.category === 'encode')} />
+                <SpecBlock title="3. 解码（每条入向消息调用）" items={REQUIRED_FUNCTIONS.filter((f) => f.category === 'decode')} />
+                <SpecBlock title="4. 路由匹配（请求-响应配对）" items={REQUIRED_FUNCTIONS.filter((f) => f.category === 'route')} />
                 <Alert
                   type="info"
                   showIcon
@@ -252,9 +274,9 @@ export function CodecAdapterDrawer() {
                   message="运行时约束"
                   description={
                     <ul style={{ margin: 0, paddingLeft: 20 }}>
-                      <li>运行时为 gopher-lua（Lua 5.1），不支持 string.pack / string.unpack。</li>
-                      <li>BodyLength 解析在 gnet 热路径中执行，必须由 Go 通过 body_length_info 元信息原生处理。</li>
-                      <li>每个 Robot 持有独占的 LState，函数内禁止共享可变全局状态。</li>
+                      <li>运行时为 Lua 5.1，不支持 string.pack / string.unpack。</li>
+                      <li>消息体长度解析在热路径中执行，必须通过 body_length_info 元信息配置。</li>
+                      <li>每个机器人持有独立的运行环境，函数内禁止共享可变全局状态。</li>
                     </ul>
                   }
                 />

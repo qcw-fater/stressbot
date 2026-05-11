@@ -1,28 +1,29 @@
 /**
- * JSON 预览模态框：Monaco 只读展示，可复制。
+ * JSON 预览浮动窗口：Monaco 只读展示，可复制。
  */
 
-import { App as AntApp, Modal, Button, Tooltip } from 'antd';
+import { App as AntApp, Button, Tooltip } from 'antd';
 import { CopyOutlined } from '@ant-design/icons';
 import Editor from '@monaco-editor/react';
 import { useShallow } from 'zustand/react/shallow';
 import { useFlowStore } from '../store/flowStore';
 import { useEditorStore } from '../store/editorStore';
+import { FloatingWindow } from '../panels/FloatingWindow';
 
 export function JsonPreviewModal() {
   const { message } = AntApp.useApp();
-  const activePanel = useEditorStore((s) => s.activePanel);
-  const setActivePanel = useEditorStore((s) => s.setActivePanel);
+  const activePanel = useEditorStore((s) => s.activePanel.jsonPreview);
+  const closePanel = useEditorStore((s) => s.closePanel);
   const flow = useFlowStore(
     useShallow((s) => ({
       defaultDelayMs: s.defaultDelayMs,
       nodes: s.nodes,
       actions: s.actions,
-      callbacks: s.callbacks,
+      listens: s.listens,
     })),
   );
 
-  const open = activePanel.kind === 'jsonPreview';
+  const open = activePanel?.kind === 'jsonPreview';
   const json = JSON.stringify(useFlowStore.getState().toTaskFlow(), null, 2);
   const themeMode = useEditorStore((s) => s.theme);
   const monacoTheme = themeMode === 'dark' ? 'vs-dark' : 'light';
@@ -43,19 +44,23 @@ export function JsonPreviewModal() {
   };
 
   return (
-    <Modal
+    <FloatingWindow
+      windowId="jsonPreview"
       title="flow.json 预览"
       open={open}
-      onCancel={() => setActivePanel({ kind: 'none' })}
-      width={900}
-      footer={[
-        <Button key="download" type="primary" onClick={onDownload}>
-          下载 flow.json
-        </Button>,
-        <Button key="close" onClick={() => setActivePanel({ kind: 'none' })}>
-          关闭
-        </Button>,
-      ]}
+      onClose={() => closePanel('jsonPreview')}
+      defaultSize={{ width: 800, height: 560 }}
+      minSize={{ width: 500, height: 350 }}
+      footer={
+        <>
+          <Button type="primary" onClick={onDownload}>
+            下载 flow.json
+          </Button>
+          <Button onClick={() => closePanel('jsonPreview')}>
+            关闭
+          </Button>
+        </>
+      }
     >
       <div
         style={{
@@ -69,7 +74,7 @@ export function JsonPreviewModal() {
       >
         <span>
           节点 {Object.keys(flow.nodes).length} · 动作 {Object.keys(flow.actions).length} · 回调{' '}
-          {Object.keys(flow.callbacks).length}
+          {Object.keys(flow.listens).length}
         </span>
         <Tooltip title="复制到剪贴板">
           <Button
@@ -93,6 +98,6 @@ export function JsonPreviewModal() {
           scrollBeyondLastLine: false,
         }}
       />
-    </Modal>
+    </FloatingWindow>
   );
 }

@@ -41,9 +41,9 @@
   --node-continue-bg: #e6fffb;
   --node-continue-border-active: #006d75;
 
-  --node-callback: #595959; /* CallbackCard：与 action 同灰黑，因为 listen 也属于动作辅助 */
-  --node-callback-bg: #ededed;
-  --node-callback-border-active: #1f1f1f;
+  --node-listen: #595959; /* ListenCard：与 action 同灰黑，因为 listen 也属于动作辅助 */
+  --node-listen-bg: #ededed;
+  --node-listen-border-active: #1f1f1f;
 
   /* === 边颜色 === */
   --edge-seq: #8c8c8c;
@@ -63,6 +63,8 @@
   --text-tertiary: rgba(0, 0, 0, 0.45);
   --bg-canvas: #fafafa;
   --bg-panel: #ffffff;
+  --bg-elevated: #ffffff;
+  --border-color: rgba(0, 0, 0, 0.1);
 
   /* === 间距 === */
   --space-xs: 4px;
@@ -81,6 +83,17 @@
   --divider-bg: rgba(0, 0, 0, 0.06);
   --hover-bg: rgba(0, 0, 0, 0.06);
   --track-bg: rgba(0, 0, 0, 0.06);
+
+  /* === 玻璃拟态（Glassmorphism） === */
+  --glass-bg: rgba(255, 255, 255, 0.55);
+  --glass-bg-hover: rgba(255, 255, 255, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.35);
+  --glass-blur: 16px;
+  --glass-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+  --glass-shadow-hover: 0 8px 28px rgba(0, 0, 0, 0.1);
+
+  /* === 状态指示灯 === */
+  --dot-glow: 0 0 6px 1px currentColor;
 
   /* === 语义色（用于 UI 文字高亮，非图表数据色） === */
   --color-success: #52c41a;
@@ -136,9 +149,9 @@
   --node-continue-bg: #112d2c;
   --node-continue-border-active: #87e8de;
 
-  --node-callback: #d9d9d9;
-  --node-callback-bg: #2a2a2a;
-  --node-callback-border-active: #ffffff;
+  --node-listen: #d9d9d9;
+  --node-listen-bg: #2a2a2a;
+  --node-listen-border-active: #ffffff;
 
   /* 边颜色（在深色背景上需要更亮） */
   --edge-seq: #8c8c8c;
@@ -157,10 +170,23 @@
   --text-tertiary: rgba(255, 255, 255, 0.5);
   --bg-canvas: #141414;
   --bg-panel: #1f1f1f;
+  --bg-elevated: #262626;
+  --border-color: rgba(255, 255, 255, 0.1);
 
   /* 阴影：深色背景下用更深一点 */
   --shadow-node: 0 2px 6px rgba(0, 0, 0, 0.45);
   --shadow-node-hover: 0 4px 12px rgba(0, 0, 0, 0.6);
+
+  /* 玻璃拟态 */
+  --glass-bg: rgba(255, 255, 255, 0.06);
+  --glass-bg-hover: rgba(255, 255, 255, 0.1);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-blur: 16px;
+  --glass-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  --glass-shadow-hover: 0 8px 28px rgba(0, 0, 0, 0.45);
+
+  /* 状态指示灯 */
+  --dot-glow: 0 0 8px 2px currentColor;
 
   /* 深色主题下 badge/card 背景：黑色半透明 → 白色半透明 */
   --badge-bg: rgba(255, 255, 255, 0.08);

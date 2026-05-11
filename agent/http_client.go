@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 )
+
+// errNotRegistered Admin 返回 404 时表示 Agent 未注册（可能 Admin 重启了）。
+var errNotRegistered = errors.New("agent not registered on admin")
 
 // AdminClient 与 Admin 服务器通信的 HTTP 客户端。
 type AdminClient struct {
@@ -78,6 +82,9 @@ func (c *AdminClient) Heartbeat(ctx context.Context, req HeartbeatRequest) error
 
 	if resp.StatusCode != 200 {
 		respBody, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode == http.StatusNotFound {
+			return errNotRegistered
+		}
 		return fmt.Errorf("heartbeat failed: status=%d body=%s", resp.StatusCode, string(respBody))
 	}
 	return nil

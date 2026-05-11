@@ -69,7 +69,7 @@ export function ProtoFieldPicker({
   );
 }
 
-/** Proto 字段类型 → Ant Tag 颜色（注意：与 callback kind 颜色无关，命名特意区分以免混淆）。 */
+/** Proto 字段类型 → Ant Tag 颜色（注意：与 listen kind 颜色无关，命名特意区分以免混淆）。 */
 function protoFieldKindColor(k: string): string {
   switch (k) {
     case 'scalar':

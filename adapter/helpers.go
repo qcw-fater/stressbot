@@ -119,7 +119,7 @@ func RouteToLuaValue(L *lua.LState, route any) lua.LValue {
 	}
 }
 
-// LoadBitModule 注册 bit 模块到 LState（从 middleware_lua.go 迁移）。
+// LoadBitModule 注册 bit 模块到 LState。
 // Lua 5.1 不支持位运算符，通过此模块提供位运算原语。
 func LoadBitModule(L *lua.LState) int {
 	mod := L.NewTable()

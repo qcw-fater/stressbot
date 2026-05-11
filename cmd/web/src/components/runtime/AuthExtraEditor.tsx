@@ -125,7 +125,7 @@ export function AuthExtraEditor({
     <div>
       {rows.length === 0 && (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          尚未配置任何字段；lua 脚本里 robot.get(key) 将返回 nil。
+          尚未配置任何字段；脚本中读取该字段将返回空值。
         </Typography.Text>
       )}
 

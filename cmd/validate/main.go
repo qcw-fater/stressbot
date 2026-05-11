@@ -3,7 +3,7 @@
 //
 //	go run ./cmd/validate [--check-lua] [--check-proto] [--proto-dir dir] [flow.json路径] [scripts目录]
 //
-// 默认 flow.json 路径: conf/flow.json
+// 默认 flow.json 路径: conf/flow/flow.json
 // 默认 scripts 目录: conf/scripts
 package main
 
@@ -30,7 +30,7 @@ func main() {
 
 	// 位置参数：flag.Parse 后 flag.Args() 返回非 flag 参数
 	args := flag.Args()
-	flowPath := "conf/flow.json"
+	flowPath := "conf/flow/flow.json"
 	scriptDir := "conf/scripts"
 	if len(args) >= 1 {
 		flowPath = args[0]

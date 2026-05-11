@@ -95,7 +95,7 @@ func (c *Client) CloseUDP(serviceName string) bool {
 	return true
 }
 
-// CloseAll 关闭所有连接。
+// CloseAll 关闭所有连接，并等待所有监听循环退出（确保回调不再使用 Robot 资源）。
 func (c *Client) CloseAll() {
 	c.mu.Lock()
 	tcpConns := c.TCPConn
@@ -109,5 +109,13 @@ func (c *Client) CloseAll() {
 	}
 	for _, conn := range udpConns {
 		conn.Close()
+	}
+	// 等待所有 listenLoop 退出。回调在 listenLoop 内同步执行，
+	// loop 退出后不会有任何回调仍在使用 Robot 的 LState。
+	for _, conn := range tcpConns {
+		conn.WaitListenDone()
+	}
+	for _, conn := range udpConns {
+		conn.WaitListenDone()
 	}
 }

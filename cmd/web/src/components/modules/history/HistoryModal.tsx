@@ -129,7 +129,7 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
           <div>
             <div style={{ fontWeight: 500 }}>{v}</div>
             <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
-              <code>{r.id.slice(0, 8)}</code> · {r.totalBots} bots × {r.agentCount} agents
+              <code>{r.id.slice(0, 8)}</code> · {r.totalBots} 个机器人，{r.agentCount} 个节点
             </div>
           </div>
         ),

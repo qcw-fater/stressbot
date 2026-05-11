@@ -1,84 +1,110 @@
 /**
- * "加入模板库"按钮：弹简易表单，把当前 action/callback 存入 IndexedDB。
+ * "加入模板库"按钮：一键保存当前 action/listen 到 IndexedDB。
+ *
+ * 模板名默认取 action/listen 名。
+ * 同名模板已存在时弹出确认框，确认后覆盖更新。
  */
 
-import { App as AntApp, Button, Form, Input, Modal } from 'antd';
+import { App as AntApp, Button, Tooltip } from 'antd';
 import { StarOutlined } from '@ant-design/icons';
-import { useState } from 'react';
 import type { ActionDef } from '@/types/action';
-import type { CallbackDef } from '@/types/callback';
-import { classifyCallback } from '@/types/callback';
-import { saveActionTemplate, saveCallbackTemplate } from './templateStore';
+import type { ListenDef } from '@/types/listen';
+import { classifyListen } from '@/types/listen';
+import {
+  findActionTemplateByName,
+  findListenTemplateByName,
+  saveActionTemplate,
+  saveListenTemplate,
+  updateActionTemplate,
+  updateListenTemplate,
+} from './templateStore';
 
 interface ActionProps {
   kind: 'action';
   name: string;
   data: ActionDef;
+  description?: string;
 }
-interface CallbackProps {
-  kind: 'callback';
+interface ListenProps {
+  kind: 'listen';
   name: string;
-  data: CallbackDef;
+  data: ListenDef;
+  description?: string;
 }
 
-export function SaveTemplateButton(props: ActionProps | CallbackProps) {
-  const { message } = AntApp.useApp();
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState(props.name);
-  const [desc, setDesc] = useState('');
+export function SaveTemplateButton(props: ActionProps | ListenProps) {
+  const { message, modal } = AntApp.useApp();
 
   const onSave = async () => {
-    if (!name) {
-      message.error('请输入模板名');
+    if (!props.name) {
+      message.warning('请先填写名称');
       return;
     }
-    if (props.kind === 'action') {
-      await saveActionTemplate({
-        name,
-        description: desc || undefined,
-        pattern: props.data.pattern,
-        data: props.data,
+
+    const existing =
+      props.kind === 'action'
+        ? await findActionTemplateByName(props.name)
+        : await findListenTemplateByName(props.name);
+
+    const doSave = async () => {
+      if (props.kind === 'action') {
+        if (existing) {
+          await updateActionTemplate({
+            ...existing,
+            description: props.description,
+            pattern: props.data.pattern,
+            data: props.data,
+          });
+        } else {
+          await saveActionTemplate({
+            name: props.name,
+            description: props.description,
+            pattern: props.data.pattern,
+            data: props.data,
+          });
+        }
+      } else {
+        if (existing) {
+          await updateListenTemplate({
+            ...existing,
+            description: props.description,
+            kind: classifyListen(props.data),
+            data: props.data,
+          });
+        } else {
+          await saveListenTemplate({
+            name: props.name,
+            description: props.description,
+            kind: classifyListen(props.data),
+            data: props.data,
+          });
+        }
+      }
+      message.success(`已保存模板 "${props.name}"`);
+    };
+
+    if (existing) {
+      modal.confirm({
+        title: '模板已存在',
+        content: `模板 "${props.name}" 已存在，是否覆盖？`,
+        okText: '覆盖',
+        cancelText: '取消',
+        onOk: doSave,
       });
     } else {
-      await saveCallbackTemplate({
-        name,
-        description: desc || undefined,
-        kind: classifyCallback(props.data),
-        data: props.data,
-      });
+      await doSave();
     }
-    message.success(`已保存模板 "${name}"`);
-    setOpen(false);
   };
 
   return (
-    <>
+    <Tooltip title="一键保存到模板库">
       <Button
         size="small"
         icon={<StarOutlined />}
-        onClick={() => {
-          setName(props.name);
-          setOpen(true);
-        }}
+        onClick={onSave}
       >
         加入模板库
       </Button>
-      <Modal
-        open={open}
-        title="保存到模板库"
-        onCancel={() => setOpen(false)}
-        onOk={onSave}
-        okText="保存"
-      >
-        <Form layout="vertical">
-          <Form.Item label="模板名" required>
-            <Input value={name} onChange={(e) => setName(e.target.value)} />
-          </Form.Item>
-          <Form.Item label="描述（可选）">
-            <Input.TextArea rows={2} value={desc} onChange={(e) => setDesc(e.target.value)} />
-          </Form.Item>
-        </Form>
-      </Modal>
-    </>
+    </Tooltip>
   );
 }

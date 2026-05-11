@@ -86,7 +86,7 @@ export function DashboardTab() {
             valueStyle={{ color: (sys?.avgCpuPercent ?? 0) > 80 ? 'var(--color-error)' : undefined }}
           />
           <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
-            在线 Agent {safeAgents.filter((a) => a.status !== 'offline').length}/{safeAgents.length}
+            在线节点 {safeAgents.filter((a) => a.status !== 'offline').length}/{safeAgents.length}
             {sys?.hotAgentName && (
               <span style={{ marginLeft: 6 }}>
                 · 热点 <code>{sys.hotAgentName}</code>

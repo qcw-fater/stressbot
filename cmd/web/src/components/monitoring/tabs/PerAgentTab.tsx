@@ -88,7 +88,7 @@ export function PerAgentTab() {
 
   const columns: ColumnsType<AgentRow> = [
     {
-      title: 'Agent',
+      title: '节点',
       key: 'name',
       render: (_, r) => (
         <Space size={4}>
@@ -135,7 +135,7 @@ export function PerAgentTab() {
         <span style={{ color: v > 90 ? 'var(--color-error)' : undefined, fontVariantNumeric: 'tabular-nums' }}>{v.toFixed(1)}%</span>
       ),
     },
-    { title: 'Goroutine', dataIndex: 'numGoroutine', key: 'numGoroutine', width: 100 },
+    { title: '协程数', dataIndex: 'numGoroutine', key: 'numGoroutine', width: 100 },
   ];
 
   return (
@@ -148,7 +148,7 @@ export function PerAgentTab() {
       {loading && rows.length === 0 ? (
         <Spin />
       ) : rows.length === 0 ? (
-        <Empty description="暂无 Agent 数据" />
+        <Empty description="暂无节点数据" />
       ) : (
         <Table<AgentRow>
           rowKey="agentId"

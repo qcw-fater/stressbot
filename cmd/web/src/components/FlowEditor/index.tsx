@@ -12,7 +12,7 @@ import { NodePalette } from './panels/NodePalette';
 import { JsonPreviewModal } from './preview/JsonPreviewModal';
 import { NodeEditorDrawer } from './editors/NodeEditorDrawer';
 import { ProtoBrowser } from './proto/ProtoBrowser';
-import { CallbackPanel } from './callbacks/CallbackPanel';
+import { ListenPanel } from './listens/ListenPanel';
 import { ValidationReportDrawer } from './validation/ValidationReport';
 import { TemplateEditorDrawer } from './library/TemplateEditorDrawer';
 import { CodecAdapterDrawer } from './adapter/CodecAdapterDrawer';
@@ -24,15 +24,15 @@ import { App as AntApp } from 'antd';
 import { useFlowStore } from './store/flowStore';
 import { useProtoStore } from './proto/protoStore';
 import { syncFlowScriptsToIdb } from '@/services/scriptSync';
-import type { TaskFlow } from '@/types/flow';
+import type { FlowJson } from './codec/flowToJson';
 import type { FlowLayout } from '@/types/editor';
 
 export interface FlowEditorProps {
-  /** 初始 flow.json，未传时按 autoLoadDefault 决定是否从 /conf/flow.json fetch */
-  initialFlow?: TaskFlow;
+  /** 初始 flow.json，未传时按 autoLoadDefault 决定是否从 /conf/flow/flow.json fetch */
+  initialFlow?: FlowJson;
   /** 初始 layout.json */
   initialLayout?: FlowLayout;
-  /** 自动加载 conf/flow.json（开发模式默认 true） */
+  /** 自动加载 conf/flow/flow.json（开发模式默认 true） */
   autoLoadDefault?: boolean;
   /** 监控数据提供方：实时返回某节点的运行指标，未提供时不显示监控徽章 */
   metricsProvider?: MetricsProvider;
@@ -135,9 +135,9 @@ function FlowEditorInner({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/conf/flow.json');
+        const res = await fetch('/conf/flow/flow.json');
         if (!res.ok) return;
-        const flow = (await res.json()) as TaskFlow;
+        const flow = (await res.json()) as FlowJson;
         if (cancelled) return;
         loadFromTaskFlow(flow);
         // 把默认 flow 引用的 lua 自动复制到 IDB，方便用户后续编辑保留
@@ -154,7 +154,7 @@ function FlowEditorInner({
 
   return (
     <FlowReadOnlyContext.Provider value={readOnly}>
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', position: 'relative' }}>
         <Toolbar onOpenValidation={() => setValidationOpen(true)} extra={topbarExtra} />
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           {/* 只读模式（运行 / 查看 / finalReport）下完全隐藏 NodePalette：
@@ -179,7 +179,7 @@ function FlowEditorInner({
         <JsonPreviewModal />
         <NodeEditorDrawer />
         <ProtoBrowser />
-        <CallbackPanel />
+        <ListenPanel />
         <TemplateEditorDrawer />
         <CodecAdapterDrawer />
         <ValidationReportDrawer open={validationOpen} onClose={() => setValidationOpen(false)} />

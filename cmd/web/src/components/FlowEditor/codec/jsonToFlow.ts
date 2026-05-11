@@ -12,23 +12,33 @@
  */
 
 import type { Edge, Node as RFNode } from '@xyflow/react';
-import type { FlowNode, ListenRef, TaskFlow, WeightedOption } from '@/types/flow';
+import type { FlowNode, ListenRef, WeightedOption } from '@/types/flow';
+import type { ListenDef } from '@/types/listen';
+import type { ActionDef } from '@/types/action';
+
+/** flow.json 原始格式（JSON 键名为 callbacks） */
+export interface FlowJsonInput {
+  defaultDelayMs: number;
+  nodes: Record<string, FlowNode>;
+  actions: Record<string, ActionDef>;
+  callbacks: Record<string, ListenDef>;
+}
 
 export interface ConvertResult {
   rfNodes: RFNode[];
   rfEdges: Edge[];
-  /** callback name → 引用计数（来自所有 action 的 listenCallbacks） */
-  callbackRefCount: Record<string, number>;
-  /** callback name → 注册它的 action 节点 ID 列表（用于反向悬停高亮） */
-  nodesByCallback: Record<string, string[]>;
+  /** listen name → 引用计数（来自所有 action 的 listenCallbacks） */
+  listenRefCount: Record<string, number>;
+  /** listen name → 注册它的 action 节点 ID 列表（用于反向悬停高亮） */
+  nodesByListen: Record<string, string[]>;
 }
 
-/** 把 TaskFlow 转换为 React Flow 节点 / 边数组（位置由后续 dagre 计算） */
-export function jsonToFlow(flow: TaskFlow): ConvertResult {
+/** 把 flow.json 转换为 React Flow 节点 / 边数组（位置由后续 dagre 计算） */
+export function jsonToFlow(flow: FlowJsonInput): ConvertResult {
   const rfNodes: RFNode[] = [];
   const rfEdges: Edge[] = [];
-  const callbackRefCount: Record<string, number> = {};
-  const nodesByCallback: Record<string, string[]> = {};
+  const listenRefCount: Record<string, number> = {};
+  const nodesByListen: Record<string, string[]> = {};
 
   // 1. 主 DAG 节点
   for (const [id, node] of Object.entries(flow.nodes)) {
@@ -44,17 +54,17 @@ export function jsonToFlow(flow: TaskFlow): ConvertResult {
     });
   }
 
-  // 2. CallbackCard 节点（事件区，独立节点类型 'callbackCard'）
-  // 在事件区按 callback 名字母序竖排
+  // 2. ListenCard 节点（事件区，独立节点类型 'listenCard'）
+  // 在事件区按 listen 名字母序竖排
   let cardIdx = 0;
   for (const [cbName, cb] of Object.entries(flow.callbacks)) {
     rfNodes.push({
       id: `__cb__${cbName}`,
-      type: 'callbackCard',
+      type: 'listenCard',
       position: { x: 0, y: 0 },
       data: {
-        callbackName: cbName,
-        callback: cb,
+        listenName: cbName,
+        listen: cb,
         index: cardIdx++,
       },
     });
@@ -68,21 +78,21 @@ export function jsonToFlow(flow: TaskFlow): ConvertResult {
     }
     rfEdges.push(...edges);
 
-    // 同时统计 callback 引用计数 + 反向索引（节点 → callback）
+    // 同时统计 listen 引用计数 + 反向索引（节点 → listen）
     if (node.type === 'action' && node.listenCallbacks) {
       for (const ref of node.listenCallbacks) {
         if (ref.callback != null) {
-          callbackRefCount[ref.callback] = (callbackRefCount[ref.callback] ?? 0) + 1;
-          (nodesByCallback[ref.callback] ??= []).push(id);
+          listenRefCount[ref.callback] = (listenRefCount[ref.callback] ?? 0) + 1;
+          (nodesByListen[ref.callback] ??= []).push(id);
         }
       }
     }
   }
 
-  return { rfNodes, rfEdges, callbackRefCount, nodesByCallback };
+  return { rfNodes, rfEdges, listenRefCount, nodesByListen };
 }
 
-function emitEdgesFor(id: string, node: FlowNode, flow: TaskFlow): Edge[] {
+function emitEdgesFor(id: string, node: FlowNode, flow: FlowJsonInput): Edge[] {
   switch (node.type) {
     case 'sequence':
       return emitSequenceEdges(id, node.next ?? []);
@@ -127,7 +137,7 @@ function emitWeightedEdges(id: string, options: WeightedOption[]): Edge[] {
   );
 }
 
-function emitListenEdges(id: string, refs: ListenRef[], flow: TaskFlow): Edge[] {
+function emitListenEdges(id: string, refs: ListenRef[], flow: FlowJsonInput): Edge[] {
   const out: Edge[] = [];
   refs.forEach((ref, i) => {
     if (ref.callback == null) return; // null = 静默丢弃，不画边

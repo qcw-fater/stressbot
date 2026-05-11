@@ -8,7 +8,7 @@ import type { TaskFlow } from '@/types/flow';
 
 describe('validateFlow', () => {
   it('NO_MAIN：缺少 main 节点报错', () => {
-    const flow: TaskFlow = { defaultDelayMs: 1000, nodes: {}, actions: {}, callbacks: {} };
+    const flow: TaskFlow = { defaultDelayMs: 1000, nodes: {}, actions: {}, listens: {} };
     const r = validateFlow(flow);
     expect(r.errors.find((e) => e.code === 'NO_MAIN')).toBeTruthy();
   });
@@ -18,7 +18,7 @@ describe('validateFlow', () => {
       defaultDelayMs: 1000,
       nodes: { main: { type: 'sequence', next: ['ghost'] } },
       actions: {},
-      callbacks: {},
+      listens: {},
     };
     const r = validateFlow(flow);
     expect(r.errors.find((e) => e.code === 'NODE_REF_NOT_FOUND')).toBeTruthy();
@@ -29,7 +29,7 @@ describe('validateFlow', () => {
       defaultDelayMs: 1000,
       nodes: { main: { type: 'loop' } },
       actions: {},
-      callbacks: {},
+      listens: {},
     };
     const r = validateFlow(flow);
     expect(r.errors.find((e) => e.code === 'LOOP_BODY_MISSING')).toBeTruthy();
@@ -40,7 +40,7 @@ describe('validateFlow', () => {
       defaultDelayMs: 1000,
       nodes: { main: { type: 'boolean', trueNext: 'x' }, x: { type: 'sequence' } },
       actions: {},
-      callbacks: {},
+      listens: {},
     };
     const r = validateFlow(flow);
     expect(r.errors.find((e) => e.code === 'BOOLEAN_NO_CONDITION')).toBeTruthy();
@@ -54,7 +54,7 @@ describe('validateFlow', () => {
         x: { type: 'sequence' },
       },
       actions: {},
-      callbacks: {},
+      listens: {},
     };
     const r = validateFlow(flow);
     expect(r.errors.find((e) => e.code === 'WEIGHTED_ALL_ZERO')).toBeTruthy();
@@ -65,7 +65,7 @@ describe('validateFlow', () => {
       defaultDelayMs: 1000,
       nodes: { main: { type: 'action', action: 'NotExist' } },
       actions: {},
-      callbacks: {},
+      listens: {},
     };
     const r = validateFlow(flow);
     expect(r.errors.find((e) => e.code === 'ACTION_REF_NOT_FOUND')).toBeTruthy();
@@ -82,7 +82,7 @@ describe('validateFlow', () => {
         },
       },
       actions: { A1: { pattern: 'tcpSend', service: 'x' } },
-      callbacks: {},
+      listens: {},
     };
     const r = validateFlow(flow);
     expect(r.errors.find((e) => e.code === 'LISTEN_CB_NOT_FOUND')).toBeTruthy();
@@ -93,10 +93,10 @@ describe('validateFlow', () => {
       defaultDelayMs: 1000,
       nodes: { main: { type: 'sequence' } },
       actions: {},
-      callbacks: { orphan: {} },
+      listens: { orphan: {} },
     };
     const r = validateFlow(flow);
-    expect(r.warnings.find((e) => e.code === 'CALLBACK_ORPHAN')).toBeTruthy();
+    expect(r.warnings.find((e) => e.code === 'LISTEN_ORPHAN')).toBeTruthy();
   });
 
   it('LUA_NO_SCRIPT：pattern=lua 但没有 script', () => {
@@ -104,10 +104,40 @@ describe('validateFlow', () => {
       defaultDelayMs: 1000,
       nodes: { main: { type: 'action', action: 'A1' } },
       actions: { A1: { pattern: 'lua' } },
-      callbacks: {},
+      listens: {},
     };
     const r = validateFlow(flow);
     expect(r.errors.find((e) => e.code === 'LUA_NO_SCRIPT')).toBeTruthy();
+  });
+
+  it('ACTION_ORPHAN：未被任何节点引用的 action 报 warning 而非 error', () => {
+    const flow: TaskFlow = {
+      defaultDelayMs: 1000,
+      nodes: { main: { type: 'sequence' } },
+      actions: { orphan: { pattern: 'lua' } },
+      listens: {},
+    };
+    const r = validateFlow(flow);
+    // orphaned action 不应触发 LUA_NO_SCRIPT error，只报 ACTION_ORPHAN warning
+    expect(r.errors.find((e) => e.code === 'LUA_NO_SCRIPT')).toBeFalsy();
+    expect(r.warnings.find((e) => e.code === 'ACTION_ORPHAN')).toBeTruthy();
+  });
+
+  it('CALLBACK_LUA_NO_SCRIPT：lua callback 缺少 script', () => {
+    const flow: TaskFlow = {
+      defaultDelayMs: 1000,
+      nodes: {
+        main: {
+          type: 'action',
+          action: 'A1',
+          listenCallbacks: [{ route: { cmd: 1, act: 1 }, server: 'tcp:x', callback: 'cb1' }],
+        },
+      },
+      actions: { A1: { pattern: 'tcpSend', service: 'x' } },
+      listens: { cb1: { script: '' } },
+    };
+    const r = validateFlow(flow);
+    expect(r.errors.find((e) => e.code === 'LISTEN_LUA_NO_SCRIPT')).toBeTruthy();
   });
 
   it('完整最小合法 flow 0 错误', () => {
@@ -118,7 +148,7 @@ describe('validateFlow', () => {
         act1: { type: 'action', action: 'A1' },
       },
       actions: { A1: { pattern: 'tcpSend', service: 'logic', c2sProto: 'X.Foo' } },
-      callbacks: {},
+      listens: {},
     };
     const r = validateFlow(flow);
     expect(r.errors.length).toBe(0);

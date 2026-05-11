@@ -114,7 +114,6 @@ func (s *AdminServer) handleGetHistoryConfig(w http.ResponseWriter, r *http.Requ
 		"totalBots":   totalBots,
 		"robotConfig": cfg.RobotConfig,
 		"flowJson":    cfg.FlowJSON,
-		"headerJson":  cfg.HeaderJSON,
 		"protoFiles":  protoFiles,
 		"scripts":     scripts,
 	})

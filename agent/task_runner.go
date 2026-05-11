@@ -102,9 +102,13 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 		return TaskFailed, "无配置文件可下载（configUrl 或 configFiles 为空）"
 	}
 
-	// 3. 加载协议适配器（使用 Agent 本地的 codec.lua）
+	// 3. 加载协议适配器（优先使用任务下发的 codec.lua，回退到 Agent 本地配置）
+	adapterScript := filepath.Join(confDir, "adapter", "codec.lua")
+	if _, err := os.Stat(adapterScript); err != nil {
+		adapterScript = r.cfg.AdapterScript
+	}
 	poolSize := runtime.NumCPU()
-	adp, err := adapter.NewLuaAdapter(poolSize, r.cfg.AdapterScript)
+	adp, err := adapter.NewLuaAdapter(poolSize, adapterScript)
 	if err != nil {
 		return TaskFailed, fmt.Sprintf("加载适配器失败: %v", err)
 	}
@@ -121,7 +125,7 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 	factory := protox.NewFactory(registry)
 
 	// 5. 加载流程配置
-	flow, err := loadTaskFlow(filepath.Join(confDir, "flow.json"))
+	flow, err := loadTaskFlow(filepath.Join(confDir, "flow", "flow.json"))
 	if err != nil {
 		return TaskFailed, fmt.Sprintf("加载流程配置失败: %v", err)
 	}

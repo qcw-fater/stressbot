@@ -384,7 +384,6 @@ Content-Type: multipart/form-data
 | `name` | string | ✅ | 任务名 |
 | `totalBots` | string (int) | ✅ | 集群总机器人数 |
 | `flow.json` | file | ✅ | 流程定义 |
-| `header.json` | file | ❌ | 协议头（不传则用 Admin 默认） |
 | `proto/<filename>` | file | ❌ | 多个 .proto 文件，字段名必须以 `proto/` 前缀 |
 | `scripts/<filename>` | file | ❌ | 多个 .lua 文件，字段名必须以 `scripts/` 前缀 |
 | `robotConfig` | string (JSON) | ✅ | RobotConfig 序列化字符串 |
@@ -549,7 +548,6 @@ GET /api/tasks/{id}/config/{path}
 
 由 Agent 内部使用拉取配置文件。支持以下路径：
 - `flow.json` — 流程定义
-- `header.json` — 协议头定义（可选）
 - `config.json` — 运行时配置（authAddr、concurrency、timeoutSec、deadline）
 - `proto/<filename>` — proto 文件
 - `scripts/<filename>` — Lua 脚本
@@ -1247,7 +1245,6 @@ GET /api/history/{id}/config
     "logLevel": "info"
   },
   "flowJson":   { /* 完整 flow.json 内容 */ },
-  "headerJson": { /* 完整 header.json 内容 */ },
   "protoFiles": {
     "auth.proto": "<base64>",
     "battle.proto": "<base64>"
@@ -1260,7 +1257,7 @@ GET /api/history/{id}/config
 ```
 
 **UI 推荐**：
-- "下载配置" 按钮：把 flowJson / headerJson 打包成 zip 提供下载（前端可本地实现，或后端额外提供 `?download=zip`）
+- "下载配置" 按钮：把 flowJson 打包成 zip 提供下载（前端可本地实现，或后端额外提供 `?download=zip`）
 - 不需要在浏览器里展示完整 base64，只是用作克隆的中间数据
 
 ### 9.8 克隆历史任务
@@ -1940,7 +1937,6 @@ export type HistoryConfigArchive = {
   totalBots: number;
   robotConfig: RobotConfig;
   flowJson: unknown;
-  headerJson: unknown;
   protoFiles: Record<string, string>;  // base64
   scripts:    Record<string, string>;  // base64
 };

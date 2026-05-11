@@ -23,6 +23,7 @@ func (a *Agent) startHTTPServer() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/agent/v1/task", a.handleTaskAssign)
 	mux.HandleFunc("/agent/v1/stop", a.handleStop)
+	mux.HandleFunc("/agent/v1/shutdown", a.handleShutdown)
 	mux.HandleFunc("/agent/v1/version", a.handleVersion)
 	mux.HandleFunc("/agent/v1/status", a.handleStatus)
 	mux.HandleFunc("/agent/v1/logs", a.handleLogs)
@@ -104,6 +105,22 @@ func (a *Agent) handleStop(w http.ResponseWriter, _ *http.Request) {
 		a.taskCancel()
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func (a *Agent) handleShutdown(w http.ResponseWriter, _ *http.Request) {
+	stresslog.Info("[AGENT] 收到远程关闭命令")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{"status": "shutting_down"})
+
+	// select 防止重复 close panic
+	utils.GetWorkPool().Go(func() {
+		select {
+		case <-a.stopCh:
+		default:
+			close(a.stopCh)
+		}
+	})
 }
 
 func (a *Agent) handleVersion(w http.ResponseWriter, _ *http.Request) {

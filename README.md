@@ -4,7 +4,7 @@
 所有消息发送/接收、字段填充、随机化、心跳、回调、条件跳转都通过 **JSON 流程配置 + 声明式动作** 表达，
 少量难以通用的行为通过 **Lua 脚本** 实现。
 
-一套 `conf/flow.json + conf/scripts/*.lua` 即可驱动任意带类似协议头的游戏服务器压测。
+一套 `conf/flow/flow.json + conf/scripts/*.lua` 即可驱动任意带类似协议头的游戏服务器压测。
 
 ---
 
@@ -12,18 +12,19 @@
 
 ```
 stressbot/
-├── cmd/stressbot/        主程序入口
-├── cmd/validate/         flow.json 校验器（go run ./cmd/validate conf/flow.json）
+├── cmd/agent/            主程序入口
+├── cmd/validate/         flow.json 校验器（go run ./cmd/validate conf/flow/flow.json）
 ├── adapter/              协议适配器接口 + Lua 桥接（消息编解码、帧分割）
 ├── engine/               流程执行引擎（节点图遍历、动作模式、字段绑定）
-├── network/              TCP/UDP 连接、心跳、消息协议（基于 gnet）
+├── network/              TCP/UDP 连接、心跳（基于 gnet）
 ├── robot/                机器人实例、Manager
 ├── protox/               动态 protobuf 加载与反射
 ├── script/               Lua 运行时池、network/robot/utils/proto/json/log 模块
 ├── state/                线程安全的键值状态存储
 └── conf/
     ├── config.json       运行配置（机器人数、并发、Auth、网络）
-    ├── flow.json         流程图与动作（声明式）
+    ├── flow/
+    │   └── flow.json     流程图与动作（声明式）
     ├── adapter/
     │   └── codec.lua     协议适配器脚本（消息头编解码）
     ├── proto/            .proto 文件（动态加载）
@@ -37,10 +38,10 @@ stressbot/
 ```bash
 # 1. 准备 conf/config.json（见示例）
 # 2. 验证流程配置
-go run ./cmd/validate conf/flow.json
+go run ./cmd/validate conf/flow/flow.json
 
 # 3. 启动压测
-go run ./cmd/stressbot -config conf/config.json
+go run ./cmd/agent -config conf/config.json
 ```
 
 ---
@@ -344,7 +345,7 @@ end)
 | `network.adapterPoolSize` | 适配器 Lua 池大小（默认 CPU 核数）                  |
 | `proto.dirs` / `proto.files` | .proto 文件目录和路径                           |
 | `adapterScript`           | 协议适配器脚本路径（默认 `conf/adapter/codec.lua`） |
-| `flow`                    | 流程配置路径（默认 `conf/flow.json`）               |
+| `flow`                    | 流程配置路径（默认 `conf/flow/flow.json`）          |
 | `script.dirs`             | Lua 脚本目录                                       |
 
 ---
@@ -459,6 +460,6 @@ end)
 - 日志级别与输出路径由 `conf/config.json` 配置。
 - Lua 脚本异常会被 `pcall` 捕获，不会导致整个机器人崩溃。
 - 任何 `tcpRequest`/`waitListen` 都可用 `optional: true` 避免非致命错误终止业务循环。
-- `go run ./cmd/validate conf/flow.json` 每次改完 flow.json 后务必执行。
+- `go run ./cmd/validate conf/flow/flow.json` 每次改完 flow.json 后务必执行。
 - `mainService` 配置的连接断开时自动停止该机器人（防止僵尸连接）。
 - UDP 支持多服务（如 `"udp"`），通过 `udpServices` 配置。

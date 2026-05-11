@@ -134,7 +134,7 @@ func (h *HistoryStore) Archive(task *Task, finalStress *monitor.CollectorSnapsho
 		INSERT INTO task_history (id, name, state, total_bots, agent_count,
 			created_at, started_at, stopped_at, duration_sec, error_msg,
 			starred, tags, note, config_summary)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, '', ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, '', ?)
 		ON DUPLICATE KEY UPDATE
 			state=VALUES(state), stopped_at=VALUES(stopped_at),
 			duration_sec=VALUES(duration_sec), error_msg=VALUES(error_msg)
@@ -163,7 +163,7 @@ func (h *HistoryStore) Archive(task *Task, finalStress *monitor.CollectorSnapsho
 		snapJSON, _ := json.Marshal(report.FinalSnapshot)
 		_, err = tx.Exec(`
 			INSERT INTO task_report (task_id, agent_id, agent_name, result, error_msg, finished_at, final_snapshot)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?)
 		`, task.ID, agentID, "", string(report.Result), report.ErrorMsg, report.FinishedAt, snapJSON)
 		if err != nil {
 			return fmt.Errorf("insert task_report: %w", err)
@@ -184,15 +184,14 @@ func (h *HistoryStore) Archive(task *Task, finalStress *monitor.CollectorSnapsho
 
 	// 5. task_config_archive
 	flowJSON := task.Config.FlowJSON
-	headerJSON := task.Config.HeaderJSON
 	protoFilesJSON, _ := json.Marshal(task.Config.ProtoFiles)
 	luaScriptsJSON, _ := json.Marshal(task.Config.LuaScripts)
 	robotCfgJSON, _ := json.Marshal(task.Config.RobotConfig)
 	_, err = tx.Exec(`
-		INSERT INTO task_config_archive (task_id, flow_json, header_json, proto_files, lua_scripts, robot_config)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO task_config_archive (task_id, flow_json, proto_files, lua_scripts, robot_config)
+		VALUES (?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE flow_json=VALUES(flow_json)
-	`, task.ID, flowJSON, headerJSON, protoFilesJSON, luaScriptsJSON, robotCfgJSON)
+	`, task.ID, flowJSON, protoFilesJSON, luaScriptsJSON, robotCfgJSON)
 	if err != nil {
 		return fmt.Errorf("insert task_config_archive: %w", err)
 	}
@@ -354,12 +353,12 @@ func (h *HistoryStore) GetConfig(id string) (*TaskConfig, error) {
 	}
 
 	var cfg TaskConfig
-	var flowJSON, headerJSON, protoJSON, luaJSON, robotJSON []byte
+	var flowJSON, protoJSON, luaJSON, robotJSON []byte
 
 	err := h.db.QueryRow(`
-		SELECT flow_json, header_json, proto_files, lua_scripts, robot_config
+		SELECT flow_json, proto_files, lua_scripts, robot_config
 		FROM task_config_archive WHERE task_id = ?
-	`, id).Scan(&flowJSON, &headerJSON, &protoJSON, &luaJSON, &robotJSON)
+	`, id).Scan(&flowJSON, &protoJSON, &luaJSON, &robotJSON)
 	if err == sql.ErrNoRows {
 		return nil, ErrHistoryNotFound
 	}
@@ -368,7 +367,6 @@ func (h *HistoryStore) GetConfig(id string) (*TaskConfig, error) {
 	}
 
 	cfg.FlowJSON = json.RawMessage(flowJSON)
-	cfg.HeaderJSON = json.RawMessage(headerJSON)
 	_ = json.Unmarshal(protoJSON, &cfg.ProtoFiles)
 	_ = json.Unmarshal(luaJSON, &cfg.LuaScripts)
 	_ = json.Unmarshal(robotJSON, &cfg.RobotConfig)

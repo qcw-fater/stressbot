@@ -1,6 +1,6 @@
 import { createStore, del, get, keys, set } from 'idb-keyval';
 import { nanoid } from 'nanoid';
-import type { TaskFlow } from '@/types/flow';
+import type { FlowJson } from '../codec/flowToJson';
 import type { FlowLayout } from '@/types/editor';
 
 const FLOW_MANAGER_DB = 'stressbot-flows-manager';
@@ -9,12 +9,12 @@ const store = createStore(FLOW_MANAGER_DB, 'data');
 export interface ManagedFlow {
   id: string;
   name: string;
-  flow: TaskFlow;
+  flow: FlowJson;
   layout: FlowLayout;
   updatedAt: number;
 }
 
-export async function saveFlow(name: string, flow: TaskFlow, layout: FlowLayout, existingId?: string): Promise<ManagedFlow> {
+export async function saveFlow(name: string, flow: FlowJson, layout: FlowLayout, existingId?: string): Promise<ManagedFlow> {
   const id = existingId || nanoid();
   const entry: ManagedFlow = {
     id,

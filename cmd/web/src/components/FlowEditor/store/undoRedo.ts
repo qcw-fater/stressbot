@@ -6,7 +6,7 @@
  */
 
 import type { ActionDef } from '@/types/action';
-import type { CallbackDef } from '@/types/callback';
+import type { ListenDef } from '@/types/listen';
 import type { FlowNode } from '@/types/flow';
 import { useFlowStore } from './flowStore';
 
@@ -14,7 +14,7 @@ interface Snapshot {
   defaultDelayMs: number;
   nodes: Record<string, FlowNode>;
   actions: Record<string, ActionDef>;
-  callbacks: Record<string, CallbackDef>;
+  listens: Record<string, ListenDef>;
 }
 
 const past: Snapshot[] = [];
@@ -29,7 +29,7 @@ export function startHistory(): () => void {
   const unsub = useFlowStore.subscribe((s) => {
     if (suppress) return;
     const same =
-      s.nodes === prev.nodes && s.actions === prev.actions && s.callbacks === prev.callbacks && s.defaultDelayMs === prev.defaultDelayMs;
+      s.nodes === prev.nodes && s.actions === prev.actions && s.listens === prev.listens && s.defaultDelayMs === prev.defaultDelayMs;
     if (same) return;
     past.push(prev);
     if (past.length > MAX_HISTORY) past.shift();
@@ -41,7 +41,7 @@ export function startHistory(): () => void {
 
 function snapshotNow(): Snapshot {
   const s = useFlowStore.getState();
-  return { defaultDelayMs: s.defaultDelayMs, nodes: s.nodes, actions: s.actions, callbacks: s.callbacks };
+  return { defaultDelayMs: s.defaultDelayMs, nodes: s.nodes, actions: s.actions, listens: s.listens };
 }
 
 function applySnapshot(snap: Snapshot) {
@@ -51,7 +51,7 @@ function applySnapshot(snap: Snapshot) {
       defaultDelayMs: snap.defaultDelayMs,
       nodes: snap.nodes,
       actions: snap.actions,
-      callbacks: snap.callbacks,
+      listens: snap.listens,
     },
     false,
   );

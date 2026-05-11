@@ -8,7 +8,7 @@
  *   - 同时保护用户已经编辑过的本地稿不被默认基线覆盖。
  *
  * 三个调用点：
- *   1. Toolbar 导入 JSON / 加载 conf/flow.json 后 → 自动把"引用了但 IDB 没有"的脚本
+ *   1. Toolbar 导入 JSON / 加载 conf/flow/flow.json 后 → 自动把"引用了但 IDB 没有"的脚本
  *      从 `/conf/scripts/<name>` 拉回来写 IDB（开发期由 Vite confMountPlugin 提供）；
  *   2. EditorPage 初始化默认 flow 后 → 同上；
  *   3. taskActions.startTask 提交前 → 最后一道兜底；这一步如果还有缺失文件就抛
@@ -21,7 +21,7 @@
  */
 
 import { addScript, getScript } from './resourcesStore';
-import type { TaskFlow } from '@/types/flow';
+import type { FlowJson } from '@/components/FlowEditor/codec/flowToJson';
 
 export interface ScriptSyncResult {
   /** 这次同步真正写入 IDB 的脚本名（之前 IDB 没有，从基线拉回的） */
@@ -44,7 +44,7 @@ export interface ScriptSyncResult {
  *   - 脚本内部的 `require('xxx')` / `dofile()` 是动态的，无法静态分析 → 由用户在
  *     「资源管理」中手动上传，或写在主脚本里 inline。
  */
-export function collectFlowScriptNames(flow: TaskFlow): string[] {
+export function collectFlowScriptNames(flow: FlowJson): string[] {
   const set = new Set<string>();
   for (const a of Object.values(flow.actions ?? {})) {
     if (a?.script) set.add(a.script);
@@ -84,7 +84,7 @@ function parseLuaCondition(raw: string | undefined): string | null {
  * @param baseUrl   基线脚本目录 URL，默认 `/conf/scripts/`（开发期由 Vite 中间件提供）
  */
 export async function syncFlowScriptsToIdb(
-  flow: TaskFlow,
+  flow: FlowJson,
   baseUrl = '/conf/scripts/',
 ): Promise<ScriptSyncResult> {
   const names = collectFlowScriptNames(flow);
@@ -106,7 +106,7 @@ export async function syncFlowScriptsToIdb(
           return;
         }
         const text = await r.text();
-        await addScript(name, text);
+        await addScript(name, text, true);
         added.push(name);
       } catch {
         missing.push(name);

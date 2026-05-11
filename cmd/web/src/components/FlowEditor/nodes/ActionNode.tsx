@@ -1,8 +1,8 @@
 /**
- * action 节点：左入 + 右出（专用于监听 callback）。
+ * action 节点：左入 + 右出（专用于监听 listen）。
  *
  * action 自身在父 sequence 内顺序执行，没有 next 字段，因此右侧 handle 仅承担"注册监听"语义：
- *   - 拖线到 callbackCard → 追加 listenCallbacks
+ *   - 拖线到 listenCard → 追加 listenCallbacks
  *   - 拖线到普通节点不会建立任何业务关系（onConnect 中无视）
  *
  * 极简化布局：
@@ -12,9 +12,11 @@
  */
 
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Tooltip } from 'antd';
 import { NodeShell } from './shared/NodeShell';
 import type { FlowNode } from '@/types/flow';
 import type { ActionDef } from '@/types/action';
+import { PATTERN_DESC } from '../editors/ActionEditor/PatternSelector';
 
 interface NodeData {
   nodeId: string;
@@ -39,11 +41,21 @@ export function ActionNode({ id, data, selected }: NodeProps) {
         description={node.description}
       >
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
-          <span className="pattern-badge" data-pattern={pattern}>
-            {pattern}
-          </span>
-          {node.breakOff && <span className="breakoff-badge">breakOff</span>}
-          {listens > 0 && <span className="listen-badge">listen {listens}</span>}
+          <Tooltip title={PATTERN_DESC[pattern] ?? pattern}>
+            <span className="pattern-badge" data-pattern={pattern}>
+              {pattern}
+            </span>
+          </Tooltip>
+          {node.breakOff && (
+            <Tooltip title="出错时中断上层循环">
+              <span className="breakoff-badge">breakOff</span>
+            </Tooltip>
+          )}
+          {listens > 0 && (
+            <Tooltip title={`注册了 ${listens} 个 listen 监听`}>
+              <span className="listen-badge">listen {listens}</span>
+            </Tooltip>
+          )}
         </div>
       </NodeShell>
       <Handle type="source" position={Position.Right} id="listen" />

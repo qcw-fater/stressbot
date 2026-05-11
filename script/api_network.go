@@ -755,21 +755,25 @@ func registerHeartbeat(L *lua.LState, proto heartbeatProto) int {
 		}
 		var body []byte
 		if builderFn != nil && luaMu != nil {
-			luaMu.Lock()
-			savedTop := L.GetTop()
-			if err := L.CallByParam(lua.P{Fn: builderFn, NRet: 1, Protect: true}); err != nil {
+			// 用立即执行函数 + defer 保证 luaMu 即使在 panic 时也能释放，
+			// 避免死锁 Robot 主流程或其他回调。
+			func() {
+				luaMu.Lock()
+				defer luaMu.Unlock()
+				savedTop := L.GetTop()
+				if err := L.CallByParam(lua.P{Fn: builderFn, NRet: 1, Protect: true}); err != nil {
+					L.SetTop(savedTop)
+					stresslog.Warn("[SCRIPT] 心跳 builder Lua 调用失败",
+						zap.String("proto", protoName), zap.String("service", service), zap.Error(err))
+					return
+				}
+				ret := L.Get(-1)
+				body = []byte(lua.LVAsString(ret))
 				L.SetTop(savedTop)
-				luaMu.Unlock()
-				stresslog.Warn("[SCRIPT] 心跳 builder Lua 调用失败",
-					zap.String("proto", protoName), zap.String("service", service), zap.Error(err))
-				return nil
-			}
-			ret := L.Get(-1)
-			body = []byte(lua.LVAsString(ret))
-			L.SetTop(savedTop)
-			luaMu.Unlock()
+			}()
 		}
 
+		// adapter 编码在 luaMu 之外执行（adapter 有独立的 Lua 池，不依赖 Robot LState）
 		if proto == hbProtoUDP {
 			secretKey := ctx.NetSender.GetUDPSecretKey(service)
 			return adp.EncodeUDP(goRoute, body, secretKey)

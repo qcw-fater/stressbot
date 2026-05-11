@@ -44,10 +44,14 @@ export interface ResourceFile {
   content: string;
   size: number;
   uploadedAt: string;
+  fromBaseline?: boolean;
 }
+
+const ADAPTER_DB = 'stressbot-resources-adapter';
 
 const protoStore = createStore(PROTO_DB, 'data');
 const scriptStore = createStore(SCRIPT_DB, 'data');
+const adapterStore = createStore(ADAPTER_DB, 'data');
 
 // 模块加载时异步触发迁移；失败静默（旧 DB 不存在 / 已损坏都按"无需迁移"处理）。
 void migrateLegacyResources();
@@ -56,24 +60,25 @@ void migrateScriptBaseline();
 
 // === Proto ===
 
-export async function addProto(name: string, content: string): Promise<ResourceFile> {
+export async function addProto(name: string, content: string, fromBaseline = false): Promise<ResourceFile> {
   const file: ResourceFile = {
     name,
     content,
     size: byteLength(content),
     uploadedAt: new Date().toISOString(),
+    fromBaseline,
   };
   await set(name, file, protoStore);
   notify();
   return file;
 }
 
-export async function addProtos(files: Array<{ name: string; content: string }>): Promise<void> {
+export async function addProtos(files: Array<{ name: string; content: string }>, fromBaseline = false): Promise<void> {
   if (files.length === 0) return;
   const now = new Date().toISOString();
   const entries: Array<[string, ResourceFile]> = files.map(({ name, content }) => [
     name,
-    { name, content, size: byteLength(content), uploadedAt: now },
+    { name, content, size: byteLength(content), uploadedAt: now, fromBaseline },
   ]);
   await setMany(entries, protoStore);
   notify();
@@ -106,24 +111,25 @@ export async function clearProto(): Promise<void> {
 
 // === Script (Lua) ===
 
-export async function addScript(name: string, content: string): Promise<ResourceFile> {
+export async function addScript(name: string, content: string, fromBaseline = false): Promise<ResourceFile> {
   const file: ResourceFile = {
     name,
     content,
     size: byteLength(content),
     uploadedAt: new Date().toISOString(),
+    fromBaseline,
   };
   await set(name, file, scriptStore);
   notify();
   return file;
 }
 
-export async function addScripts(files: Array<{ name: string; content: string }>): Promise<void> {
+export async function addScripts(files: Array<{ name: string; content: string }>, fromBaseline = false): Promise<void> {
   if (files.length === 0) return;
   const now = new Date().toISOString();
   const entries: Array<[string, ResourceFile]> = files.map(({ name, content }) => [
     name,
-    { name, content, size: byteLength(content), uploadedAt: now },
+    { name, content, size: byteLength(content), uploadedAt: now, fromBaseline },
   ]);
   await setMany(entries, scriptStore);
   notify();
@@ -152,6 +158,118 @@ export async function removeScript(name: string): Promise<void> {
 export async function clearScript(): Promise<void> {
   await clear(scriptStore);
   notify();
+}
+
+// === Adapter (codec.lua) ===
+
+const CODEC_LUA_KEY = 'codec.lua';
+const CODEC_BASELINE_URL = '/conf/adapter/codec.lua';
+
+export async function getAdapterScript(): Promise<ResourceFile | undefined> {
+  return get<ResourceFile>(CODEC_LUA_KEY, adapterStore);
+}
+
+export async function setAdapterScript(content: string, fromBaseline = false): Promise<ResourceFile> {
+  const file: ResourceFile = {
+    name: CODEC_LUA_KEY,
+    content,
+    size: byteLength(content),
+    uploadedAt: new Date().toISOString(),
+    fromBaseline,
+  };
+  await set(CODEC_LUA_KEY, file, adapterStore);
+  notify();
+  return file;
+}
+
+export async function clearAdapterScript(): Promise<void> {
+  await clear(adapterStore);
+  notify();
+}
+
+/**
+ * 确保 IDB 中有 codec.lua：有则保留，没有则从基线 `/conf/adapter/codec.lua` 拉取。
+ * 返回最终的文件内容（无论来源）。
+ */
+export async function ensureAdapterScript(): Promise<string | null> {
+  const existing = await getAdapterScript();
+  if (existing) return existing.content;
+  try {
+    const resp = await fetch(CODEC_BASELINE_URL);
+    if (!resp.ok) return null;
+    const text = await resp.text();
+    await setAdapterScript(text, true);
+    return text;
+  } catch {
+    return null;
+  }
+}
+
+// === 统一基线同步 ===
+
+interface SyncResult {
+  added: number;
+  updated: number;
+}
+
+async function syncFilesFromBaseline(
+  store: ReturnType<typeof createStore>,
+  indexUrl: string,
+  fileUrlPrefix: string,
+): Promise<SyncResult> {
+  let added = 0;
+  let updated = 0;
+
+  const resp = await fetch(indexUrl);
+  if (!resp.ok) return { added, updated };
+  const names: string[] = await resp.json();
+
+  for (const name of names) {
+    const existing = await get<ResourceFile>(name, store);
+    if (existing && !existing.fromBaseline) continue;
+
+    const fileResp = await fetch(fileUrlPrefix + encodeURIComponent(name));
+    if (!fileResp.ok) continue;
+    const content = await fileResp.text();
+
+    const file: ResourceFile = {
+      name,
+      content,
+      size: byteLength(content),
+      uploadedAt: new Date().toISOString(),
+      fromBaseline: true,
+    };
+    await set(name, file, store);
+
+    if (existing) updated++;
+    else added++;
+  }
+
+  if (added > 0 || updated > 0) notify();
+  return { added, updated };
+}
+
+export async function syncProtoFromBaseline(): Promise<SyncResult> {
+  return syncFilesFromBaseline(protoStore, '/conf/proto/index.json', '/conf/proto/');
+}
+
+export async function syncScriptFromBaseline(): Promise<SyncResult> {
+  return syncFilesFromBaseline(scriptStore, '/conf/scripts/index.json', '/conf/scripts/');
+}
+
+export async function syncAdapterFromBaseline(): Promise<string | null> {
+  const existing = await getAdapterScript();
+  if (existing && !existing.fromBaseline) return existing.content;
+
+  try {
+    const resp = await fetch(CODEC_BASELINE_URL);
+    if (!resp.ok) return existing?.content ?? null;
+    const text = await resp.text();
+    await setAdapterScript(text, true);
+    return text;
+  } catch {
+    return existing?.content ?? null;
+  }
 }
 
 // === 变更订阅 ===

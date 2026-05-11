@@ -8,13 +8,13 @@
  * 由 NodeEditorDrawer 在 node.type === 'action' 时调用。
  */
 
-import { Alert, Collapse, Form, Input, Space, Switch } from 'antd';
+import { Alert, Collapse, Form, Space, Switch } from 'antd';
 import { useMemo } from 'react';
 import { useFlowStore } from '../../store/flowStore';
 import { PatternSelector } from './PatternSelector';
 import { DeclarativeForm } from './DeclarativeForm';
 import { LuaForm } from './LuaForm';
-import { ListenRefsTable } from '../../callbacks/ListenRefsTable';
+import { ListenRefsTable } from '../../listens/ListenRefsTable';
 import { DelayInput } from '../shared/DelayInput';
 import { SaveTemplateButton } from '../../library/SaveTemplateButton';
 import type { ActionDef, ActionPattern } from '@/types/action';
@@ -29,7 +29,6 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
   const updateNode = useFlowStore((s) => s.updateNode);
   const addAction = useFlowStore((s) => s.addAction);
   const updateAction = useFlowStore((s) => s.updateAction);
-  const renameAction = useFlowStore((s) => s.renameAction);
 
   const actionName = node?.action ?? '';
   const action = actions[actionName];
@@ -41,17 +40,6 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
   }, [action]);
 
   if (!node) return null;
-
-  const onActionNameChange = (newName: string) => {
-    if (!newName) return;
-    if (action) {
-      // 已有 ActionDef → 重命名
-      renameAction(actionName, newName);
-    } else {
-      // 仅是 node 字段引用变更
-      updateNode(nodeId, { action: newName });
-    }
-  };
 
   const onActionDefChange = (next: ActionDef) => {
     if (action) {
@@ -71,17 +59,10 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
   return (
     <div>
       <Form layout="vertical" style={{ marginBottom: 8 }}>
-        <Form.Item label="action 名（actions 表 key）">
-          <Input
-            value={actionName}
-            onChange={(e) => onActionNameChange(e.target.value)}
-            placeholder="如 PlayerLogin"
-          />
-        </Form.Item>
         <Form.Item label="pattern">
           <Space>
             <PatternSelector value={effectiveAction.pattern} onChange={onPatternChange} />
-            <SaveTemplateButton kind="action" name={actionName || nodeId} data={effectiveAction} />
+            <SaveTemplateButton kind="action" name={actionName} data={effectiveAction} description={node.description} />
           </Space>
         </Form.Item>
       </Form>

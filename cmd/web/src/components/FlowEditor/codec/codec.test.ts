@@ -1,6 +1,6 @@
 /**
  * codec 圆周等价测试：
- *   1. 读取 conf/flow.json
+ *   1. 读取 conf/flow/flow.json
  *   2. flowToJson(原数据) → 导出
  *   3. 字段集与节点/动作/回调数量必须一致
  *   4. 嵌套结构（bindings、listenCallbacks、store）在导出时仍存在
@@ -11,20 +11,21 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { flowToJson } from './flowToJson';
 import { jsonToFlow } from './jsonToFlow';
-import type { TaskFlow } from '@/types/flow';
+import type { FlowJsonInput } from './jsonToFlow';
+import type { FlowJson } from './flowToJson';
 
 // web 移到 cmd/web 后，从 codec.test.ts 到仓库根需要 6 层 ..
-const flowPath = path.resolve(__dirname, '../../../../../../conf/flow.json');
+const flowPath = path.resolve(__dirname, '../../../../../../conf/flow/flow.json');
 
 describe('codec round-trip', () => {
-  const raw = JSON.parse(fs.readFileSync(flowPath, 'utf-8')) as TaskFlow;
+  const raw = JSON.parse(fs.readFileSync(flowPath, 'utf-8')) as FlowJsonInput;
 
   it('节点 / 动作 / 回调数量与原文件一致', () => {
     const exported = flowToJson({
       defaultDelayMs: raw.defaultDelayMs,
       nodes: raw.nodes,
       actions: raw.actions,
-      callbacks: raw.callbacks,
+      listens: raw.callbacks,
     });
     expect(Object.keys(exported.nodes).length).toBe(Object.keys(raw.nodes).length);
     expect(Object.keys(exported.actions).length).toBe(Object.keys(raw.actions).length);
@@ -33,11 +34,11 @@ describe('codec round-trip', () => {
   });
 
   it('jsonToFlow 生成的 React Flow 节点数 = nodes + callbacks', () => {
-    const { rfNodes, callbackRefCount } = jsonToFlow(raw);
+    const { rfNodes, listenRefCount } = jsonToFlow(raw);
     const expected = Object.keys(raw.nodes).length + Object.keys(raw.callbacks).length;
     expect(rfNodes.length).toBe(expected);
     // 至少有一些 callback 是被引用的
-    expect(Object.keys(callbackRefCount).length).toBeGreaterThan(0);
+    expect(Object.keys(listenRefCount).length).toBeGreaterThan(0);
   });
 
   it('jsonToFlow 生成的边能覆盖所有 sequence next / boolean trueNext / weighted options', () => {
@@ -63,7 +64,7 @@ describe('codec round-trip', () => {
       defaultDelayMs: raw.defaultDelayMs,
       nodes: raw.nodes,
       actions: raw.actions,
-      callbacks: raw.callbacks,
+      listens: raw.callbacks,
     });
     let count = 0;
     for (const node of Object.values(exported.nodes)) {
@@ -81,7 +82,7 @@ describe('codec round-trip', () => {
       defaultDelayMs: raw.defaultDelayMs,
       nodes: raw.nodes,
       actions: raw.actions,
-      callbacks: raw.callbacks,
+      listens: raw.callbacks,
     });
 
     let bindingsRaw = 0;
@@ -102,12 +103,12 @@ describe('codec round-trip', () => {
       defaultDelayMs: raw.defaultDelayMs,
       nodes: raw.nodes,
       actions: raw.actions,
-      callbacks: raw.callbacks,
+      listens: raw.callbacks,
     });
     const outPath = path.resolve(__dirname, '../../../../../tmp_codec_export.json');
     fs.writeFileSync(outPath, JSON.stringify(exported, null, 2), 'utf-8');
     // 文件能读回
-    const reread = JSON.parse(fs.readFileSync(outPath, 'utf-8')) as TaskFlow;
+    const reread = JSON.parse(fs.readFileSync(outPath, 'utf-8')) as FlowJson;
     expect(Object.keys(reread.nodes).length).toBe(Object.keys(raw.nodes).length);
   });
 });

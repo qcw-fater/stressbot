@@ -46,7 +46,7 @@ conf/adapter/codec.lua → LuaAdapter → Connection.OnReceive(responseKey strin
 ### 2.3 包依赖图（新增 adapter/ 包）
 
 ```
-cmd/stressbot  →  robot/  →  engine/  →  state/
+cmd/agent  →  robot/  →  engine/  →  state/
                           →  protox/
                           →  adapter/  ←  (gopher-lua only)
                →  network/ →  adapter/
@@ -1601,7 +1601,7 @@ func loadAdapterModule(L *lua.LState) int {
 
 ---
 
-## 8. Phase 6：改造 `cmd/stressbot/main.go`
+## 8. Phase 6：改造 `cmd/agent/main.go`
 
 ### 8.1 Config 结构变更
 
@@ -2030,7 +2030,7 @@ end
     "files": []
   },
   "adapterScript": "conf/adapter/codec.lua",
-  "flow": "conf/flow.json",
+  "flow": "conf/flow/flow.json",
   "script": {
     "dirs": ["conf/scripts"]
   }
@@ -2039,7 +2039,7 @@ end
 
 **删除字段**：`header`、`middleware`（`adapterScript` 替代；`proto` 字段和 `conf/proto/` 目录保持不变）。
 
-### 10.2 `conf/flow.json` 迁移
+### 10.2 `conf/flow/flow.json` 迁移
 
 **Action 节点：`cmd/act` → `route`**
 
@@ -2146,11 +2146,11 @@ Phase 9 (删除旧文件) — 确认编译通过后执行
 go build ./...
 
 # Step 2: 配置校验
-go run ./cmd/validate conf/flow.json
+go run ./cmd/validate conf/flow/flow.json
 
 # Step 3: 运行测试（完成 Phase 6-9 后）
 rm -f log/stressbot.log
-go run ./cmd/stressbot -config conf/config.json
+go run ./cmd/agent -config conf/config.json
 # 运行 2~5 分钟
 
 # Step 4: 日志审查

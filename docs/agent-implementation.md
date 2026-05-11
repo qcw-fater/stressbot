@@ -726,7 +726,7 @@ Content-Type: application/json
    - 写入 workDir/conf/{path}
    - 校验 SHA256（不匹配则整体失败，上报 result=failed）
 5. 加载 protox：protox.NewLoader(workDir/conf/proto)
-6. 解析 flow.json：engine.LoadFlow(workDir/conf/flow.json)
+6. 解析 flow.json：engine.LoadFlow(workDir/conf/flow/flow.json)
 7. 创建 robot.Manager，注入：
    - StartNumber = TaskAssignment.StartNumber
    - TotalBots   = TaskAssignment.TotalBots
@@ -858,7 +858,7 @@ type RunConfig struct {
     "dirs": ["conf/proto"],
     "files": []
   },
-  "flow": "conf/flow.json",
+  "flow": "conf/flow/flow.json",
   "script": {
     "dirs": ["conf/scripts"]
   },
@@ -939,7 +939,7 @@ type RunConfig struct {
 
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `flow` | string | `"conf/flow.json"` | 流程配置文件路径，定义压测节点 DAG（`TaskFlow`）、动作定义（`ActionDef`）和回调（`Callback`）。JSON 文件，结构由 `engine.TaskFlow` 反序列化 |
+| `flow` | string | `"conf/flow/flow.json"` | 流程配置文件路径，定义压测节点 DAG（`TaskFlow`）、动作定义（`ActionDef`）和回调（`Callback`）。JSON 文件，结构由 `engine.TaskFlow` 反序列化 |
 
 ### 9.8 script 段 — Lua 脚本
 

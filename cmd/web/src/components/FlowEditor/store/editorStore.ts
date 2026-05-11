@@ -7,18 +7,21 @@
 import { create } from 'zustand';
 import type { FlowNode } from '@/types/flow';
 import type { ActionDef } from '@/types/action';
-import type { CallbackDef } from '@/types/callback';
+import type { ListenDef } from '@/types/listen';
+import { useFloatingWindowStore } from './floatingWindowStore';
 
 export type ActivePanel =
-  | { kind: 'none' }
   | { kind: 'nodeEdit'; nodeId: string }
   | { kind: 'actionEdit'; actionName: string }
-  | { kind: 'callbackEdit'; callbackName: string }
+  | { kind: 'listenEdit'; listenName: string }
   | { kind: 'protoBrowser' }
-  | { kind: 'callbackPanel' }
+  | { kind: 'listenPanel' }
   | { kind: 'jsonPreview' }
-  | { kind: 'templateEdit'; templateKind: 'action' | 'callback'; templateId: string }
+  | { kind: 'templateEdit'; templateKind: 'action' | 'listen'; templateId: string }
   | { kind: 'codecAdapter' };
+
+/** 每个面板 kind 独立存储，互不干扰 */
+export type ActivePanels = Partial<Record<ActivePanel['kind'], ActivePanel>>;
 
 export type ThemeMode = 'light' | 'dark';
 
@@ -63,8 +66,8 @@ function applyThemeAttr(t: ThemeMode) {
 
 /**
  * 剪贴板内容：
- *   - 节点（含其引用的 action / 监听的 callback 完整数据，方便跨流程粘贴）
- *   - 单个 callback 卡片
+ *   - 节点（含其引用的 action / 监听的 listen 完整数据，方便跨流程粘贴）
+ *   - 单个 listen 卡片
  */
 export type Clipboard =
   | null
@@ -73,23 +76,23 @@ export type Clipboard =
       nodeId: string;
       node: FlowNode;
       action?: { name: string; def: ActionDef };
-      callbacks?: Array<{ name: string; def: CallbackDef }>;
+      listens?: Array<{ name: string; def: ListenDef }>;
     }
   | {
-      kind: 'callback';
-      callbackName: string;
-      callback: CallbackDef;
+      kind: 'listen';
+      listenName: string;
+      listen: ListenDef;
     };
 
 interface EditorState {
   selectedNodeId: string | null;
-  selectedCallbackName: string | null;
-  hoveredCallback: string | null;
+  selectedListenName: string | null;
+  hoveredListen: string | null;
   /** 当前选中的边相关的节点 ID 集合（用于高亮显示） */
   edgeHighlightNodeIds: string[];
   /** 选中边发光颜色（CSS 颜色 / var()），通过 .edge-highlight 子节点的 inline style 注入 */
   edgeHighlightColor: string | null;
-  activePanel: ActivePanel;
+  activePanel: ActivePanels;
 
   showListenEdges: boolean;
   showMinimap: boolean;
@@ -121,11 +124,12 @@ interface EditorState {
   historyEnabled: boolean | null;
 
   setSelectedNode: (id: string | null) => void;
-  setSelectedCallback: (name: string | null) => void;
-  setHoveredCallback: (name: string | null) => void;
+  setSelectedListen: (name: string | null) => void;
+  setHoveredListen: (name: string | null) => void;
   setEdgeHighlightNodes: (ids: string[]) => void;
   setEdgeHighlightColor: (color: string | null) => void;
-  setActivePanel: (p: ActivePanel) => void;
+  setActivePanel: (p: ActivePanel | null) => void;
+  closePanel: (kind: ActivePanel['kind']) => void;
   toggleListenEdges: () => void;
   setShowMinimap: (v: boolean) => void;
   setShowGrid: (v: boolean) => void;
@@ -143,11 +147,11 @@ applyThemeAttr(initialTheme);
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   selectedNodeId: null,
-  selectedCallbackName: null,
-  hoveredCallback: null,
+  selectedListenName: null,
+  hoveredListen: null,
   edgeHighlightNodeIds: [],
   edgeHighlightColor: null,
-  activePanel: { kind: 'none' },
+  activePanel: {},
   showListenEdges: true,
   showMinimap: true,
   showGrid: true,
@@ -159,11 +163,29 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   historyEnabled: null,
 
   setSelectedNode: (id) => set({ selectedNodeId: id }),
-  setSelectedCallback: (name) => set({ selectedCallbackName: name }),
-  setHoveredCallback: (name) => set({ hoveredCallback: name }),
+  setSelectedListen: (name) => set({ selectedListenName: name }),
+  setHoveredListen: (name) => set({ hoveredListen: name }),
   setEdgeHighlightNodes: (ids) => set({ edgeHighlightNodeIds: ids }),
   setEdgeHighlightColor: (color) => set({ edgeHighlightColor: color }),
-  setActivePanel: (p) => set({ activePanel: p }),
+  setActivePanel: (p) => {
+    const fws = useFloatingWindowStore.getState();
+    if (p === null) {
+      // 关闭所有面板
+      fws.closeAllWindows();
+      set({ activePanel: {} });
+    } else {
+      fws.openWindow(p.kind, DEFAULT_SIZES[p.kind] ?? { width: 640, height: 500 });
+      set((s) => ({ activePanel: { ...s.activePanel, [p.kind]: p } }));
+    }
+  },
+  closePanel: (kind) => {
+    const fws = useFloatingWindowStore.getState();
+    fws.closeWindow(kind);
+    set((s) => {
+      const { [kind]: _, ...rest } = s.activePanel;
+      return { activePanel: rest };
+    });
+  },
   toggleListenEdges: () => set((s) => ({ showListenEdges: !s.showListenEdges })),
   setShowMinimap: (v) => set({ showMinimap: v }),
   setShowGrid: (v) => set({ showGrid: v }),
@@ -200,3 +222,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   setHistoryEnabled: (v) => set({ historyEnabled: v }),
 }));
+
+/** 各面板类型的默认窗口尺寸 */
+const DEFAULT_SIZES: Record<string, { width: number; height: number }> = {
+  nodeEdit: { width: 640, height: 500 },
+  listenEdit: { width: 680, height: 520 },
+  protoBrowser: { width: 780, height: 540 },
+  listenPanel: { width: 440, height: 560 },
+  jsonPreview: { width: 800, height: 560 },
+  templateEdit: { width: 680, height: 520 },
+  codecAdapter: { width: 720, height: 500 },
+};

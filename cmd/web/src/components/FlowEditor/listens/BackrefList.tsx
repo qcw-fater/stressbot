@@ -1,9 +1,9 @@
 /**
- * BackrefList：列出引用某 callback 的所有 (action 节点, server, route)。
+ * BackrefList：列出引用某 listen 的所有 (action 节点, server, route)。
  *
- * 与 ListenRefsTable 不同：BackrefList 站在 callback 视角，
+ * 与 ListenRefsTable 不同：BackrefList 站在 listen 视角，
  * 列出"哪些 action 节点的哪条 ListenRef 引用了我"，并允许就地修改它的 server / route。
- * 这样用户在 listen 节点（CallbackCard）上直接编辑监听路由，无需回到 action 节点。
+ * 这样用户在 listen 节点（ListenCard）上直接编辑监听路由，无需回到 action 节点。
  */
 
 import { Button, Input, List, Space, Tooltip, Typography } from 'antd';
@@ -17,15 +17,15 @@ import { RouteEditor } from './RouteEditor';
 import { monoCellStyle } from '../styles/inlineStyles';
 
 export interface BackrefListProps {
-  callbackName: string;
+  listenName: string;
 }
 
-export function BackrefList({ callbackName }: BackrefListProps) {
+export function BackrefList({ listenName }: BackrefListProps) {
   const flow = useFlowStore(
     useShallow((s) => ({
       nodes: s.nodes,
       actions: s.actions,
-      callbacks: s.callbacks,
+      listens: s.listens,
       defaultDelayMs: s.defaultDelayMs,
     })),
   );
@@ -34,12 +34,12 @@ export function BackrefList({ callbackName }: BackrefListProps) {
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
 
   const graph = useMemo(() => buildRefsGraph(flow), [flow]);
-  const refs = graph.callbackToRefs.get(callbackName) ?? [];
+  const refs = graph.listenToRefs.get(listenName) ?? [];
 
   if (refs.length === 0) {
     return (
       <div style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>
-        当前 callback 未被任何 action 注册（孤儿）。
+        当前 listen 未被任何 action 注册（孤儿）。
       </div>
     );
   }

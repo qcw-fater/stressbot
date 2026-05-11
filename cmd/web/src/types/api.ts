@@ -409,7 +409,6 @@ export interface HistoryConfigArchive {
   totalBots: number;
   robotConfig: RobotConfig;
   flowJson: unknown;
-  headerJson: unknown;
   protoFiles: Record<string, string>;
   scripts: Record<string, string>;
 }

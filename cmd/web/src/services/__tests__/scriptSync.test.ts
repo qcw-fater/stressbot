@@ -5,7 +5,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { TaskFlow } from '@/types/flow';
+import type { FlowJson } from '@/components/FlowEditor/codec/flowToJson';
 
 // ---- mock ----
 const idb = new Map<string, { name: string; content: string }>();
@@ -37,12 +37,12 @@ afterEach(() => {
 function buildFlow(opts: {
   actions?: Record<string, { script?: string }>;
   callbacks?: Record<string, { script?: string }>;
-}): TaskFlow {
+}): FlowJson {
   return {
     defaultDelayMs: 1000,
     nodes: {},
-    actions: (opts.actions ?? {}) as TaskFlow['actions'],
-    callbacks: (opts.callbacks ?? {}) as TaskFlow['callbacks'],
+    actions: (opts.actions ?? {}) as FlowJson['actions'],
+    callbacks: (opts.callbacks ?? {}) as FlowJson['callbacks'],
   };
 }
 
@@ -69,7 +69,7 @@ describe('collectFlowScriptNames', () => {
   });
 
   it('容忍 actions / callbacks 为 undefined（旧数据兼容）', () => {
-    const flow = { defaultDelayMs: 1000, nodes: {} } as unknown as TaskFlow;
+    const flow = { defaultDelayMs: 1000, nodes: {} } as unknown as FlowJson;
     expect(collectFlowScriptNames(flow)).toEqual([]);
   });
 });

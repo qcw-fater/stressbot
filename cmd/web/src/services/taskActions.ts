@@ -16,18 +16,18 @@ import { useProtoStore } from '@/components/FlowEditor/proto/protoStore';
 import { validateFlow } from '@/components/FlowEditor/validation/refsCheck';
 import { useMetricsStore } from '@/components/FlowEditor/nodes/shared/MetricsBadge';
 import * as tasksApi from './tasksApi';
-import { listProto, listScript } from './resourcesStore';
+import { listProto, listScript, syncProtoFromBaseline, syncScriptFromBaseline, syncAdapterFromBaseline } from './resourcesStore';
 import { syncFlowScriptsToIdb } from './scriptSync';
 import { useRuntimeStore } from './runtimeStore';
 import { ApiError } from './api';
 import type { RobotConfig, TaskBrief, TaskDetail } from '@/types/api';
 import type { FlowLayout } from '@/types/editor';
-import type { TaskFlow } from '@/types/flow';
+import type { FlowJson } from '@/components/FlowEditor/codec/flowToJson';
 
 const DRAFT_STASH_KEY = 'stressbot:flow:stash';
 
 interface StashedDraft {
-  flow: TaskFlow;
+  flow: FlowJson;
   layout: FlowLayout;
   savedAt: number;
 }
@@ -65,14 +65,14 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
   const report = validateFlow({
     nodes: flowState.nodes,
     actions: flowState.actions,
-    callbacks: flowState.callbacks,
+    listens: flowState.listens,
     defaultDelayMs: flowState.defaultDelayMs,
   });
   if (report.errors.length > 0) {
     throw new ApiError(
       {
         code: 'INVALID_ARGUMENT',
-        message: `flow.json 校验未通过：${report.errors.length} 项错误，请打开「校验」面板查看详情`,
+        message: `流程校验未通过：${report.errors.length} 项错误，请打开「校验」面板查看详情`,
       },
       400,
     );
@@ -97,23 +97,33 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
   useMetricsStore.getState().setProvider(undefined);
 
   // 2. 资源同步与收集
-  //   - proto：直接用 IDB 中用户上传的（缺失由 Admin 兜底默认 conf/proto/）；
-  //   - scripts："IDB 即事实源"模型：
-  //       a) 先把 flow 引用、IDB 还没有的脚本从默认基线拉回 IDB（保护已编辑稿不覆盖）；
-  //       b) 然后**全量上传 IDB**作为 multipart payload —— 因为 lua 内部 require()/dofile()
-  //          是动态调用，无法静态分析，全量上传是最稳的方案（lua 文件通常 < 几 KB，开销极小）；
-  //       c) sync.missing > 0 = 既不在 IDB 也不在 conf/scripts/，启动会失败 → 提前抛错。
-  //   用户如需精简 IDB 中的历史脚本，可去「资源管理」手动清理；
-  //   引擎对 lua 返回值的契约升级时（如 v1→v2 三元组），由 resourcesStore.SCRIPT_BASELINE_VERSION
-  //   触发一次性 clear scriptStore，本步骤会自动把所有引用到的脚本从 conf/scripts/ 拉新版。
+  //   - 先全量基线同步（三种资源并行），按 fromBaseline 优先级：
+  //       IDB 无 → 写入 fromBaseline:true；IDB 有 + fromBaseline:true → 用最新基线覆盖；
+  //       IDB 有 + fromBaseline:false → 跳过（用户编辑过）
+  //   - 再做 flow 引用的脚本缺失检测（IDB 已有最新基线）
+  //   - 最后收集 IDB 内容作为 multipart payload
+  const [, , adapterContent] = await Promise.all([
+    syncProtoFromBaseline(),
+    syncScriptFromBaseline(),
+    syncAdapterFromBaseline(),
+  ]);
+  if (!adapterContent) {
+    throw new ApiError(
+      {
+        code: 'INVALID_ARGUMENT',
+        message: '缺少协议适配器。请在「协议适配器」面板导入或载入模板。',
+      },
+      400,
+    );
+  }
   const sync = await syncFlowScriptsToIdb(flowJson);
   if (sync.missing.length > 0) {
     throw new ApiError(
       {
         code: 'INVALID_ARGUMENT',
         message:
-          `缺少 lua 脚本：${sync.missing.join(', ')}。` +
-          `请在「资源管理」上传，或确认开发期 conf/scripts/ 目录下存在该文件。`,
+          `缺少脚本：${sync.missing.join(', ')}。` +
+          `请在「资源管理」上传，或在动作编辑器中直接编写。`,
         details: { missingScripts: sync.missing },
       },
       400,
@@ -126,7 +136,7 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
     const agents = useRuntimeStore.getState().agents ?? [];
     if (agents.length === 0) {
       throw new ApiError(
-        { code: 'INVALID_ARGUMENT', message: '当前没有可用的 Agent，请先确认 Agent 已注册' },
+        { code: 'INVALID_ARGUMENT', message: '当前没有可用的节点，请先确认节点已注册' },
         400,
       );
     }
@@ -157,6 +167,9 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
   }
   for (const f of scripts) {
     fd.append(`scripts/${f.name}`, new Blob([f.content], { type: 'text/plain' }), f.name);
+  }
+  if (adapterContent) {
+    fd.append('adapter/codec.lua', new Blob([adapterContent], { type: 'text/plain' }), 'codec.lua');
   }
 
   // 5. 提交
@@ -228,11 +241,11 @@ export async function attachToActive(taskId: string): Promise<void> {
   }
 
   // 拉远端 flow.json
-  let remoteFlow: TaskFlow | null = null;
+  let remoteFlow: FlowJson | null = null;
   try {
     const res = await fetch(tasksApi.taskConfigUrl(taskId, 'flow.json'));
     if (res.ok) {
-      remoteFlow = (await res.json()) as TaskFlow;
+      remoteFlow = (await res.json()) as FlowJson;
     }
   } catch {
     // 不阻塞：detail 已成功，画布保持本地稿

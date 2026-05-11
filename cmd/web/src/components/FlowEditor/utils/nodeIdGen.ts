@@ -20,6 +20,6 @@ export function generateNodeId(type: NodeType, taken: Set<string>): string {
 export function isValidNodeId(id: string): boolean {
   if (!id) return false;
   if (/\s/.test(id)) return false;
-  if (id.startsWith('__')) return false; // 保留内部前缀（如 __cb__ 用于 CallbackCard）
+  if (id.startsWith('__')) return false; // 保留内部前缀（如 __cb__ 用于 ListenCard）
   return true;
 }

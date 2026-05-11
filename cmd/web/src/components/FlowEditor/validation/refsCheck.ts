@@ -7,7 +7,7 @@
 import type { TaskFlow } from '@/types/flow';
 import type { ActionDef } from '@/types/action';
 import { protoRegistry } from '../proto/ProtoRegistry';
-import { buildRefsGraph } from '../callbacks/refsGraph';
+import { buildRefsGraph } from '../listens/refsGraph';
 
 export type Severity = 'error' | 'warning' | 'info';
 
@@ -15,8 +15,8 @@ export interface ValidationIssue {
   severity: Severity;
   code: string;
   message: string;
-  /** 用于 UI 跳转：node id / action 名 / callback 名 */
-  location?: { kind: 'node' | 'action' | 'callback'; id: string };
+  /** 用于 UI 跳转：node id / action 名 / listen 名 */
+  location?: { kind: 'node' | 'action' | 'listen'; id: string };
 }
 
 export interface ValidationReport {
@@ -34,7 +34,7 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
   const issues: ValidationIssue[] = [];
   const nodes = flow.nodes ?? {};
   const actions = flow.actions ?? {};
-  const callbacks = flow.callbacks ?? {};
+  const callbacks = flow.listens ?? {};
 
   // 必须有 main 节点（设计 §13 R1）
   if (!nodes.main) {
@@ -168,29 +168,54 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
     }
   }
 
-  // R5–R10：actions 校验
+  // R5–R10：actions 校验（仅校验被节点引用的 action）
+  const referencedActions = new Set<string>();
+  for (const node of Object.values(nodes)) {
+    if (node.type === 'action' && node.action) {
+      referencedActions.add(node.action);
+    }
+  }
   for (const [name, def] of Object.entries(actions)) {
-    issues.push(...checkAction(name, def));
+    if (referencedActions.has(name)) {
+      issues.push(...checkAction(name, def));
+    } else {
+      // 孤儿 action：无节点引用 → 降级为 warning（可能是正在编辑 / 删节点后残留）
+      issues.push({
+        severity: 'warning',
+        code: 'ACTION_ORPHAN',
+        message: `action "${name}" 未被任何节点引用`,
+        location: { kind: 'action', id: name },
+      });
+    }
   }
 
-  // R11–R13：callbacks 校验 + ref graph 校验
+  // R11–R13：listens 校验 + ref graph 校验
   const graph = buildRefsGraph(flow);
   for (const [name, cb] of Object.entries(callbacks)) {
+    // lua callback 必须有 script
+    if (cb.script !== undefined && !cb.script?.trim()) {
+      issues.push({
+        severity: 'error',
+        code: 'LISTEN_LUA_NO_SCRIPT',
+        message: `listen "${name}" 是 lua 模式但缺少 script`,
+        location: { kind: 'listen', id: name },
+      });
+    }
     if (cb.s2cProto && protoRegistry.isLoaded() && !protoRegistry.lookupMessage(cb.s2cProto)) {
       issues.push({
         severity: 'error',
-        code: 'CALLBACK_S2C_NOT_FOUND',
-        message: `callback "${name}" 的 s2cProto "${cb.s2cProto}" 在 proto 中不存在`,
-        location: { kind: 'callback', id: name },
+        code: 'LISTEN_S2C_NOT_FOUND',
+        message: `listen "${name}" 的 s2cProto "${cb.s2cProto}" 在 proto 中不存在`,
+        location: { kind: 'listen', id: name },
       });
     }
     const refCount = graph.refCount.get(name) ?? 0;
     if (refCount === 0) {
       issues.push({
         severity: 'warning',
-        code: 'CALLBACK_ORPHAN',
-        message: `callback "${name}" 未被任何 action 引用（孤儿）`,
-        location: { kind: 'callback', id: name },
+        code: 'LISTEN_ORPHAN',
+        message: `listen "${name}" 未被任何 action 引用（孤儿）`,
+        location: { kind: 'listen', id: name },
       });
     }
   }
@@ -199,7 +224,7 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
     issues.push({
       severity: 'error',
       code: 'LISTEN_CB_NOT_FOUND',
-      message: `节点 "${dr.nodeId}" listenCallbacks[${dr.refIndex}] 引用了不存在的 callback "${dr.ref.callback}"`,
+      message: `节点 "${dr.nodeId}" listenCallbacks[${dr.refIndex}] 引用了不存在的 listen "${dr.ref.callback}"`,
       location: { kind: 'node', id: dr.nodeId },
     });
   }

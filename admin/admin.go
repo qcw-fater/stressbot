@@ -133,6 +133,8 @@ func (s *AdminServer) Run() error {
 // Shutdown 优雅关闭。
 func (s *AdminServer) Shutdown(ctx context.Context) error {
 	if s.httpSrv != nil {
+		// 先禁用 keep-alive，让空闲连接自行关闭，减少 Windows 上 Closesocket 竞争窗口
+		s.httpSrv.SetKeepAlivesEnabled(false)
 		shutdownCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		s.httpSrv.Shutdown(shutdownCtx)

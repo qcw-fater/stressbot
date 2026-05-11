@@ -266,7 +266,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
     >
       {/* 模式选择条：测试 ↔ 调试 二选一 Segmented，颜色与 title tag / RuntimeBar 设置面板完全一致。
           - 测试（默认，蓝色）：使用用户填写的全量配置 + 容量预检 + 默认日志；
-          - 调试（紫色）：自动装填 1 机器人 / 并发 1 / 日志=debug / 单 Agent 分配。
+          - 调试（紫色）：自动装填 1 机器人 / 并发 1 / 详细日志 / 单节点分配。
           切换调试 → 测试 不会回滚已填值（保留用户偏好），与原 Switch 行为一致。 */}
       <div
         style={{
@@ -290,7 +290,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
           <span style={{ fontWeight: 500 }}>{debugMode ? '调试模式' : '测试模式'}</span>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             {debugMode
-              ? '一键装填 1 个机器人 / 并发 1 / 日志 debug / 单 Agent 分配'
+              ? '自动装填 1 个机器人 / 并发 1 / 详细日志 / 单节点分配'
               : '使用你填写的完整配置，启用容量预检与默认日志级别'}
           </Typography.Text>
         </Space>
@@ -357,8 +357,8 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
           validateStatus={authAddrInvalid ? 'error' : undefined}
           help={
             authAddrInvalid
-              ? '必须以 http:// 或 https:// 开头，否则脚本调用 http_post 会失败（错误码 1）'
-              : '与单机 conf/config.json 中 auth.address 一致；启动时会下发到 Agent'
+              ? '必须以 http:// 或 https:// 开头，否则脚本中的 HTTP 请求会失败（错误码 1）'
+              : '启动时会下发到各节点'
           }
         >
           <Input
@@ -401,15 +401,15 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
             children: (
               <Form layout="vertical">
                 <Form.Item
-                  label="Auth 扩展字段（authExtra）"
-                  extra="lua 脚本通过 robot.get(key) 读取；不配置则取 nil。常用 version/channel/platform"
+                  label="Auth 扩展字段"
+                  extra="脚本中可通过 robot.get(key) 读取；不配置则返回空值。常用 version/channel/platform"
                 >
                   <AuthExtraEditor
                     value={robotConfig.authExtra}
                     onChange={(v) => setRobotConfig({ authExtra: v })}
                   />
                 </Form.Item>
-                <Form.Item label="账号前缀（accountPrefix）" extra="如 bot_/qa_，默认 bot_">
+                <Form.Item label="账号前缀" extra="如 bot_/qa_，默认 bot_">
                   <Input
                     value={robotConfig.accountPrefix ?? ''}
                     onChange={(e) => setRobotConfig({ accountPrefix: e.target.value })}
@@ -417,7 +417,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
                   />
                 </Form.Item>
                 <Form.Item
-                  label="账号编号起点（startNumber）"
+                  label="账号编号起点"
                   extra={`默认 0；账号格式 ${robotConfig.accountPrefix || 'bot_'}<startNumber + N>。已有 bot_0~bot_99 在线时可设 100 避免撞车。`}
                 >
                   <InputNumber
@@ -428,7 +428,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
                     style={{ width: '100%' }}
                   />
                 </Form.Item>
-                <Form.Item label="主连接服务名（mainService）" extra="主连接对应的服务标识，默认 logic">
+                <Form.Item label="主连接服务名" extra="主连接对应的服务标识，默认 logic">
                   <Input
                     value={robotConfig.mainService ?? ''}
                     onChange={(e) => setRobotConfig({ mainService: e.target.value })}
@@ -477,7 +477,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
                 <Form.Item
                   label={
                     <Space size={6}>
-                      <span>Agent 日志等级</span>
+                      <span>节点日志等级</span>
                       {robotConfig.logLevel === 'debug' && (
                         <Tag color="purple" style={{ margin: 0 }}>
                           debug
@@ -488,7 +488,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
                   extra={
                     robotConfig.logLevel === 'debug'
                       ? '将打印全部收发包与字段绑定，量大；任务结束后自动恢复原等级。'
-                      : '任务期临时切换 Agent 进程日志等级，结束后自动恢复。'
+                      : '任务期临时切换节点进程日志等级，结束后自动恢复。'
                   }
                 >
                   <Select<LogLevel>
@@ -529,7 +529,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
         <Descriptions.Item label="Lua 脚本">
           <Tooltip
             title={
-              `flow 引用 ${refScriptCount} 个；本地 IDB 共 ${scripts.length} 个（含历史）；` +
+              `flow 引用 ${refScriptCount} 个；本地共 ${scripts.length} 个（含历史）；` +
               `缺失 ${missingScripts.length} 个`
             }
           >
@@ -547,7 +547,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
 
       {protos.length === 0 && (
         <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
-          未上传的 proto 由 Admin 兜底默认值；如需自定义请到「资源管理」上传。
+          未上传的协议文件由服务器提供默认值；如需自定义请到「资源管理」上传。
         </Typography.Text>
       )}
 
@@ -574,7 +574,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
           showIcon
           style={{ marginTop: 12 }}
           message={`集群总容量 ${totalCapacity}，本次申请 ${totalBots}`}
-          description="请减少机器人数，或增加 Agent 节点。"
+          description="请减少机器人数，或增加压测节点。"
         />
       )}
 
@@ -584,8 +584,8 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
           showIcon
           icon={<ThunderboltOutlined />}
           style={{ marginTop: 12 }}
-          message="没有在线的 Agent"
-          description="请确认至少有一台 stressbot-agent 已经成功注册到 Admin。"
+          message="没有在线的节点"
+          description="请确认至少有一台节点程序已经成功注册。"
         />
       )}
     </Modal>

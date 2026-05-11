@@ -54,12 +54,12 @@ export function AgentsDrawer({ open, onClose }: AgentsDrawerProps) {
   const onStopAll = () => {
     if (!activeTask) return;
     modal.confirm({
-      title: '停止所有 Agent？',
+      title: '停止所有节点？',
       content: (
         <div>
           <p>
-            将向所有正在执行 <code>{activeTask.name}</code> 的 Agent 下发停止指令；
-            等待全部进入 <code>stopped</code> 后任务结束。
+            将向所有正在执行 <code>{activeTask.name}</code> 的节点下发停止指令；
+            等待全部完成后任务结束。
           </p>
           <p style={{ marginBottom: 0, color: 'var(--text-secondary)', fontSize: 12 }}>
             此操作等价于在顶部点击"停止任务"。
@@ -72,7 +72,7 @@ export function AgentsDrawer({ open, onClose }: AgentsDrawerProps) {
         setStopping(true);
         try {
           await stopTask(activeTask.id);
-          message.success('已下发停止指令，等待 Agent 收尾');
+          message.success('已下发停止指令，等待节点收尾');
           refresh();
         } catch (err) {
           showApiError(err);
@@ -85,12 +85,12 @@ export function AgentsDrawer({ open, onClose }: AgentsDrawerProps) {
 
   const onDelete = (a: AgentBrief) => {
     if (a.status !== 'offline') {
-      message.warning('只能删除离线 Agent');
+      message.warning('只能删除离线节点');
       return;
     }
     modal.confirm({
       title: `从注册表删除 ${a.name}？`,
-      content: `agentId: ${a.agentId}`,
+      content: `标识: ${a.agentId.slice(0, 12)}`,
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
@@ -129,7 +129,8 @@ export function AgentsDrawer({ open, onClose }: AgentsDrawerProps) {
           unhealthy: 'error',
           offline: 'default',
         };
-        return <Tag color={colorMap[v] ?? 'default'}>{v}</Tag>;
+        const labelMap: Record<string, string> = { idle: '空闲', busy: '执行中', unhealthy: '异常', offline: '离线' };
+        return <Tag color={colorMap[v] ?? 'default'}>{labelMap[v] ?? v}</Tag>;
       },
     },
     {
@@ -180,7 +181,7 @@ export function AgentsDrawer({ open, onClose }: AgentsDrawerProps) {
             <div style={{ fontSize: 11 }}>
               <div>OS: {a.staticInfo.os}/{a.staticInfo.arch}</div>
               <div>CPU: {a.staticInfo.numCpu} cores · MEM: {(a.staticInfo.memTotalMB / 1024).toFixed(1)} GB</div>
-              <div>Go: {a.staticInfo.goVersion}</div>
+              <div>运行时: {a.staticInfo.goVersion}</div>
               <div>Kernel: {a.staticInfo.kernelVer}</div>
               <div>启动: {dayjs(a.staticInfo.startedAt).format('MM-DD HH:mm')}</div>
             </div>
@@ -208,7 +209,7 @@ export function AgentsDrawer({ open, onClose }: AgentsDrawerProps) {
       width: 80,
       fixed: 'right',
       render: (_, a) => (
-        <Tooltip title={a.status === 'offline' ? '从注册表删除' : '只能删除离线 Agent'}>
+        <Tooltip title={a.status === 'offline' ? '从注册表删除' : '只能删除离线节点'}>
           <Button
             type="text"
             size="small"
@@ -229,7 +230,7 @@ export function AgentsDrawer({ open, onClose }: AgentsDrawerProps) {
     <Drawer
       title={
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span>压测节点 Agents</span>
+          <span>压测节点</span>
           <Space>
             <Tooltip title={canStopAll ? '一键停止当前正在执行的任务' : '当前没有运行中的任务'}>
               <Button
@@ -256,7 +257,7 @@ export function AgentsDrawer({ open, onClose }: AgentsDrawerProps) {
       destroyOnHidden
     >
       {(agents ?? []).length === 0 ? (
-        <Empty description="暂无 Agent，请先在节点上启动 stressbot-agent" />
+        <Empty description="暂无节点，请先在目标机器上启动节点程序" />
       ) : (
         <Table<AgentBrief>
           rowKey="agentId"

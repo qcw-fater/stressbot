@@ -1,0 +1,169 @@
+/* ══════════════════════════════════════════════════════════════
+   SystemTab — Circle Dashboard Layout
+   ══════════════════════════════════════════════════════════════ */
+
+.system-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+/* ── 仪表盘区域 ── */
+
+.system-tab__dashboard {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  padding: 20px 24px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  box-shadow: var(--glass-shadow);
+  position: relative;
+  overflow: hidden;
+}
+
+.system-tab__dashboard::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, var(--color-blue), var(--color-purple));
+  border-radius: 14px 0 0 14px;
+}
+
+/* ── Circle Gauges ── */
+
+.system-tab__gauges {
+  display: flex;
+  gap: 28px;
+  flex-shrink: 0;
+}
+
+.system-tab__gauge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.system-tab__gauge-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.system-tab__gauge-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.system-tab__gauge-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.system-tab__gauge-sub {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  line-height: 1;
+}
+
+.system-tab__gauge-extra {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+/* ── 摘要信息 ── */
+
+.system-tab__summary {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.system-tab__summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  gap: 12px;
+}
+
+.system-tab__summary-label {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  min-width: 56px;
+}
+
+.system-tab__summary-value {
+  color: var(--text-primary);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* ── 进程统计条 ── */
+
+.system-tab__process-row {
+  display: flex;
+  align-items: center;
+  padding: 14px 24px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  box-shadow: var(--glass-shadow);
+  position: relative;
+  overflow: hidden;
+}
+
+.system-tab__process-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, var(--color-purple), var(--color-success));
+  border-radius: 12px 0 0 12px;
+}
+
+.system-tab__process-stat {
+  flex: 1;
+  text-align: center;
+}
+
+.system-tab__process-stat .ant-statistic-title {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  font-weight: 600;
+}
+
+.system-tab__divider-sm {
+  width: 1px;
+  align-self: stretch;
+  margin: 6px 0;
+  background: var(--glass-border);
+  flex-shrink: 0;
+}

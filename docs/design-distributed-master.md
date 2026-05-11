@@ -299,7 +299,6 @@ type TaskConfig struct {
     FlowJSON    json.RawMessage   `json:"flowJson"`
     ProtoFiles  map[string][]byte `json:"protoFiles,omitempty"`
     LuaScripts  map[string][]byte `json:"luaScripts,omitempty"`
-    HeaderJSON  json.RawMessage   `json:"headerJson,omitempty"`
     RobotConfig RobotConfig       `json:"robotConfig"`
     Deadline    *time.Time        `json:"deadline,omitempty"`
 }

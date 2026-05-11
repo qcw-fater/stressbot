@@ -33,7 +33,7 @@ import {
   DashboardOutlined,
   AlignLeftOutlined,
 } from '@ant-design/icons';
-import { App as AntApp, Badge, Button, Divider, Popover, Segmented, Space, Switch, Tag, Tooltip, Typography } from 'antd';
+import { App as AntApp, Button, Divider, Popover, Segmented, Space, Switch, Tag, Tooltip, Typography } from 'antd';
 import { useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import {
@@ -114,7 +114,6 @@ export function RuntimeBar({
 
   const safeAgents = agents ?? [];
   const onlineAgents = safeAgents.filter((a) => a.status !== 'offline').length;
-  const unhealthyCount = safeAgents.filter((a) => a.status === 'unhealthy').length;
   const totalCapacity = safeAgents
     .filter((a) => a.status !== 'offline')
     .reduce((sum, a) => sum + a.maxBots, 0);
@@ -122,7 +121,7 @@ export function RuntimeBar({
   const handleStop = (task: TaskBrief) => {
     modal.confirm({
       title: '停止任务？',
-      content: `任务 "${task.name}" 将进入 stopping 状态，等待所有 Agent 停止后转为 stopped。`,
+      content: `任务 "${task.name}" 将进入停止中状态，等待所有节点完成后转为已停止`,
       okType: 'danger',
       onOk: async () => {
         setStopping(true);
@@ -172,7 +171,7 @@ export function RuntimeBar({
         <Switch checked={showListenEdges} onChange={() => toggleListenEdges()} size="small" />
       </div>
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-        action 与 CallbackCard 之间的虚线
+        动作节点与监听之间的虚线
       </Typography.Text>
       {/* 运行模式：测试 ↔ 调试 二选一。
           - 测试（默认）：用户填写的完整配置 + 启用容量预检 + 默认日志级别；
@@ -225,11 +224,11 @@ export function RuntimeBar({
 
   return (
     <Space size={4} align="center">
-      {connectionLost && <Tag color="error">Admin 连接异常</Tag>}
+      {connectionLost && <Tag color="error">服务器连接异常</Tag>}
 
       {/* === 状态徽章组 === */}
       {mode === 'edit' && (
-        <Tooltip title={`在线 Agent ${onlineAgents} · 总容量 ${totalCapacity}`}>
+        <Tooltip title={`在线节点 ${onlineAgents} · 总容量 ${totalCapacity}`}>
           <Tag
             icon={<ThunderboltOutlined />}
             color={onlineAgents > 0 ? 'green' : 'default'}
@@ -282,7 +281,7 @@ export function RuntimeBar({
 
       {/* === 主操作组 === */}
       {mode === 'edit' && (
-        <Tooltip title={onlineAgents === 0 ? '没有在线的 Agent，无法启动' : ''}>
+        <Tooltip title={onlineAgents === 0 ? '没有在线的节点，无法启动' : ''}>
           <Button
             type="primary"
             icon={<PlayCircleOutlined />}
@@ -319,7 +318,7 @@ export function RuntimeBar({
             </Button>
           </Tooltip>
           {hasStashedDraft() && (
-            <Tooltip title="从 LocalStorage 还原「查看运行中」之前缓存的本地稿">
+            <Tooltip title="从本地存储还原「查看运行中」之前缓存的本地稿">
               <Button onClick={handleRestore}>恢复编辑稿</Button>
             </Tooltip>
           )}
@@ -336,7 +335,7 @@ export function RuntimeBar({
             系统
           </Button>
         </Tooltip>
-        <Tooltip title="运行日志：查看 Admin 与节点输出的文本日志">
+        <Tooltip title="运行日志：查看服务器与节点输出的文本日志">
           <Button icon={<AlignLeftOutlined />} onClick={onOpenLogs}>
             日志
           </Button>
@@ -358,7 +357,7 @@ export function RuntimeBar({
         <Tooltip
           title={
             historyEnabled === false
-              ? '历史压测记录（admin 未启用 history 模块，请配置 MySQL）'
+              ? '历史压测记录（历史记录功能未启用，请联系管理员）'
               : '历史压测记录'
           }
         >
@@ -372,12 +371,10 @@ export function RuntimeBar({
             历史
           </Button>
         </Tooltip>
-        <Tooltip title="Agent 节点管理 / 批量停止">
-          <Badge count={unhealthyCount} size="small" offset={[-4, 4]}>
-            <Button icon={<ApiOutlined />} onClick={onOpenAgents}>
-              节点
-            </Button>
-          </Badge>
+        <Tooltip title="节点管理">
+          <Button icon={<ApiOutlined />} onClick={onOpenAgents}>
+            节点
+          </Button>
         </Tooltip>
       </Space>
 

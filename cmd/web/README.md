@@ -35,7 +35,7 @@ npm run test         # Vitest 单元测试（22 个，覆盖 codec / refsGraph /
 
 启动后编辑器默认从同仓库 `conf/` 加载：
 
-- `conf/flow.json` —— 流程定义（开发环境通过 Vite 中间件挂载到 `/conf/flow.json`）
+- `conf/flow/flow.json` —— 流程定义（开发环境通过 Vite 中间件挂载到 `/conf/flow/flow.json`）
 - `conf/proto/*.proto` —— 消息定义；启动时全量解析后供 ActionEditor 字段补全
 - `conf/scripts/*.lua` —— Lua 脚本
 
@@ -75,7 +75,7 @@ src/
 
 ## codec 圆周等价性
 
-`flowToJson(jsonToFlow(flow))` 必须保持业务字段语义不变。`src/components/FlowEditor/codec/codec.test.ts` 用真实的 `conf/flow.json`（89 节点 / 70 动作 / 18 回调）做 round-trip：
+`flowToJson(jsonToFlow(flow))` 必须保持业务字段语义不变。`src/components/FlowEditor/codec/codec.test.ts` 用真实的 `conf/flow/flow.json`（89 节点 / 70 动作 / 18 回调）做 round-trip：
 
 ```bash
 npm run test -- codec.test
@@ -94,7 +94,7 @@ go run ./cmd/validate <导出的 json>
 import { FlowEditor } from './components/FlowEditor';
 
 <FlowEditor
-  initialFlow={taskFlow}        // 可选；不传则尝试从 LocalStorage / /conf/flow.json 恢复
+  initialFlow={taskFlow}        // 可选；不传则尝试从 LocalStorage / /conf/flow/flow.json 恢复
   initialLayout={layoutJson}    // 可选；视觉位置元数据
   autoLoadDefault={false}       // 关闭自动 fetch
   onSave={(flow, layout) => fetch('/api/flow', { method: 'POST', body: JSON.stringify({flow, layout}) })}

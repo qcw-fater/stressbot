@@ -18,11 +18,17 @@ type AgentConfig struct {
 	StressInterval string `json:"stressInterval"`
 	SystemInterval string `json:"systemInterval"`
 	HBInterval     string `json:"heartbeatInterval"`
+	HBFailInterval string `json:"heartbeatFailInterval"` // 心跳失败时的重试间隔，默认与 heartbeatInterval 相同
 
 	RegisterRetryMaxInterval string `json:"registerRetryMaxInterval"`
-	TaskWorkDir               string `json:"taskWorkDir"`
-	AppVersion                string `json:"appVersion"`
-	AdapterScript             string `json:"adapterScript"`
+
+	// Admin 断连退出策略
+	MaxHeartbeatFailures int  `json:"maxHeartbeatFailures"`       // 连续心跳失败次数阈值，达到后自行退出。0=永不退出
+	TaskRunAdminLostExit bool `json:"taskRunAdminLostExit"` // 任务运行中与 Admin 断联时立即退出
+
+	TaskWorkDir   string `json:"taskWorkDir"`
+	AppVersion    string `json:"appVersion"`
+	AdapterScript string `json:"adapterScript"`
 }
 
 // ResolvedConfig 解析后的 Agent 配置（所有 Duration 已转换）。
@@ -38,7 +44,12 @@ type ResolvedConfig struct {
 	StressInterval time.Duration
 	SystemInterval time.Duration
 	HBInterval     time.Duration
+	HBFailInterval time.Duration // 心跳失败时的重试间隔
 	RegisterRetryMax time.Duration
+
+	// Admin 断连退出策略
+	MaxHeartbeatFailures int
+	TaskRunAdminLostExit bool
 }
 
 // Resolve 将原始 AgentConfig 解析为 ResolvedConfig，填充默认值并校验。
@@ -69,6 +80,7 @@ func (c *AgentConfig) Resolve() (*ResolvedConfig, error) {
 	stress := parseDuration(c.StressInterval, 5*time.Second)
 	system := parseDuration(c.SystemInterval, 5*time.Second)
 	hb := parseDuration(c.HBInterval, 10*time.Second)
+	hbFail := parseDuration(c.HBFailInterval, hb) // 默认与正常心跳间隔相同
 	retryMax := parseDuration(c.RegisterRetryMaxInterval, 60*time.Second)
 
 	// 心跳间隔必须远小于 Admin 的 unhealthy 阈值（通常 30s）
@@ -94,10 +106,13 @@ func (c *AgentConfig) Resolve() (*ResolvedConfig, error) {
 		AppVersion:      c.AppVersion,
 		TaskWorkDir:     workDir,
 		AdapterScript:   adapterScript,
-		StressInterval:  stress,
-		SystemInterval:  system,
-		HBInterval:      hb,
-		RegisterRetryMax: retryMax,
+		StressInterval:       stress,
+		SystemInterval:       system,
+		HBInterval:           hb,
+		HBFailInterval:       hbFail,
+		RegisterRetryMax:     retryMax,
+		MaxHeartbeatFailures: c.MaxHeartbeatFailures,
+		TaskRunAdminLostExit: c.TaskRunAdminLostExit,
 	}, nil
 }
 

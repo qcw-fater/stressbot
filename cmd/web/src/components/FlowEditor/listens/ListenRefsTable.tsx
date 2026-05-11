@@ -1,18 +1,18 @@
 /**
  * action.listenCallbacks 表格编辑器。
  *
- * 设计文档 §8.6：route + server + callback 三列 + 形态徽章 + 排序删除 + 批量入口。
+ * 设计文档 §8.6：route + server + listen 三列 + 形态徽章 + 排序删除 + 批量入口。
  */
 
 import { App as AntApp, Button, Input, Modal, Select, Space, Table, Tag, Tooltip } from 'antd';
 import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { useState } from 'react';
 import type { ListenRef } from '@/types/flow';
-import { classifyCallback } from '@/types/callback';
+import { classifyListen } from '@/types/listen';
 import { useFlowStore } from '../store/flowStore';
 import { useEditorStore } from '../store/editorStore';
 import { RouteEditor } from './RouteEditor';
-import { callbackKindTagColor } from './callbackKindStyle';
+import { listenKindTagColor } from './listenKindStyle';
 import { monoCellStyle } from '../styles/inlineStyles';
 
 export interface ListenRefsTableProps {
@@ -22,9 +22,9 @@ export interface ListenRefsTableProps {
 export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
   const { message } = AntApp.useApp();
   const node = useFlowStore((s) => s.nodes[nodeId]);
-  const callbacks = useFlowStore((s) => s.callbacks);
+  const listens = useFlowStore((s) => s.listens);
   const updateNode = useFlowStore((s) => s.updateNode);
-  const addCallback = useFlowStore((s) => s.addCallback);
+  const addListen = useFlowStore((s) => s.addListen);
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
 
   const [pasteOpen, setPasteOpen] = useState(false);
@@ -34,22 +34,22 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
   const refs = node.listenCallbacks ?? [];
   const set = (next: ListenRef[]) => updateNode(nodeId, { listenCallbacks: next });
 
-  // callback 候选下拉：null + 现有 callback + "新建..."
-  const callbackOptions = [
+  // listen 候选下拉：null + 现有 listen + "新建..."
+  const listenOptions = [
     { value: '__null__', label: '(null) — 静默丢弃' },
-    ...Object.keys(callbacks)
+    ...Object.keys(listens)
       .sort()
       .map((n) => ({
         value: n,
         label: (
           <span>
-            <code>{n}</code> <Tag color={callbackKindTagColor[classifyCallback(callbacks[n])]}>{classifyCallback(callbacks[n])}</Tag>
+            <code>{n}</code> <Tag color={listenKindTagColor[classifyListen(listens[n])]}>{classifyListen(listens[n])}</Tag>
           </span>
         ) as React.ReactNode,
       })),
   ];
 
-  const onCallbackChange = (i: number, v: string | undefined) => {
+  const onListenChange = (i: number, v: string | undefined) => {
     const arr = [...refs];
     if (v === '__null__' || !v) {
       arr[i] = { ...arr[i], callback: null };
@@ -59,13 +59,13 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
     set(arr);
   };
 
-  const onCreateCallback = (i: number) => {
+  const onCreateListen = (i: number) => {
     let n = 1;
-    while (callbacks[`callback_${n}`]) n++;
-    const name = `callback_${n}`;
-    addCallback(name, {});
-    onCallbackChange(i, name);
-    setActivePanel({ kind: 'callbackEdit', callbackName: name });
+    while (listens[`listen_${n}`]) n++;
+    const name = `listen_${n}`;
+    addListen(name, {});
+    onListenChange(i, name);
+    setActivePanel({ kind: 'listenEdit', listenName: name });
   };
 
   const onApplyPaste = () => {
@@ -146,27 +146,27 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
             ),
           },
           {
-            title: 'callback',
+            title: 'listen',
             dataIndex: 'callback',
             render: (_, r) => {
               const cur = r.callback ?? '__null__';
-              const cb = r.callback ? callbacks[r.callback] : undefined;
+              const listen = r.callback ? listens[r.callback] : undefined;
               return (
                 <Space.Compact style={{ width: '100%' }}>
                   <Select
                     value={cur}
-                    onChange={(v) => onCallbackChange(r._i, v)}
-                    options={callbackOptions}
+                    onChange={(v) => onListenChange(r._i, v)}
+                    options={listenOptions}
                     style={{ flex: 1 }}
                     showSearch
                     optionFilterProp="value"
                   />
-                  {r.callback && cb && (
-                    <Tooltip title="跳转到 CallbackEditor">
+                  {r.callback && listen && (
+                    <Tooltip title="跳转到 ListenEditor">
                       <Button
                         size="small"
                         onClick={() =>
-                          setActivePanel({ kind: 'callbackEdit', callbackName: r.callback! })
+                          setActivePanel({ kind: 'listenEdit', listenName: r.callback! })
                         }
                       >
                         →
@@ -174,7 +174,7 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
                     </Tooltip>
                   )}
                   <Tooltip title="新建并绑定">
-                    <Button size="small" onClick={() => onCreateCallback(r._i)}>
+                    <Button size="small" onClick={() => onCreateListen(r._i)}>
                       +
                     </Button>
                   </Tooltip>

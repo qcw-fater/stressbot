@@ -82,11 +82,21 @@ export function LogsTab({ open }: { open: boolean }) {
 
   const saved = useMemo(() => loadState(), []);
 
-  const [target, setTarget] = useState(saved?.target ?? 'admin');
+  const [target, setTarget] = useState('admin');
   const [level, setLevel] = useState(saved?.level ?? '');
   const [filterText, setFilterText] = useState(saved?.filterText ?? '');
   const [filterVal, setFilterVal] = useState(saved?.filterText ?? '');
   const [pollingInterval, setPollingInterval] = useState(3000);
+
+  // agents 加载后尝试恢复保存的 target（agentId 须在当前列表中才有效）
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current || !saved?.target || saved.target === 'admin') return;
+    if ((agents ?? []).some((a) => a.agentId === saved.target)) {
+      restoredRef.current = true;
+      setTarget(saved.target);
+    }
+  }, [agents, saved?.target]);
 
   const maxEntries = target === 'admin' ? MAX_ENTRIES_ADMIN : MAX_ENTRIES_AGENT;
 
@@ -100,6 +110,8 @@ export function LogsTab({ open }: { open: boolean }) {
   const languageRegistered = useRef(false);
 
   const prevTextRef = useRef('');
+  // 用户主动滚动到底部标记，避免 layout/isEditorAtBottom 误判
+  const userAtBottomRef = useRef(true);
 
   // === 保存设置 ===
   const stateRef = useRef({ target, level, filterText, polling });
@@ -108,7 +120,7 @@ export function LogsTab({ open }: { open: boolean }) {
     saveState(stateRef.current);
   }, []);
 
-  // === Modal 重新可见时刷新 Monaco 布局 ===
+  // === 窗口重新可见时刷新 Monaco 布局 ===
   useEffect(() => {
     if (open) {
       const ed = editorRef.current;
@@ -235,6 +247,8 @@ export function LogsTab({ open }: { open: boolean }) {
     return null;
   }, [entries, level, filterText]);
 
+  const [editorReady, setEditorReady] = useState(false);
+
   // === 同步文本到 Monaco ===
   useEffect(() => {
     const ed = editorRef.current;
@@ -264,9 +278,18 @@ export function LogsTab({ open }: { open: boolean }) {
       return;
     }
 
-    // 在修改前捕获状态
-    const wasAtBottom = isEditorAtBottom(ed);
+    // 在修改前捕获滚动位置
     const savedVS = ed.saveViewState();
+    const shouldFollow = userAtBottomRef.current;
+    // 文本更新后恢复滚动：如果用户之前在底部则跟随新内容，否则保持原位
+    const restoreScroll = () => {
+      if (shouldFollow) {
+        const lc = model.getLineCount();
+        ed.revealLine(lc);
+      } else if (savedVS) {
+        ed.restoreViewState(savedVS);
+      }
+    };
 
     // ── 尝试增量追加 ──
     const prev = prevTextRef.current;
@@ -283,11 +306,7 @@ export function LogsTab({ open }: { open: boolean }) {
       const lc = model.getLineCount();
       if (lineCountElRef.current) lineCountElRef.current.textContent = `${lc} 行`;
 
-      if (wasAtBottom) {
-        ed.revealLine(lc);
-      } else if (savedVS) {
-        ed.restoreViewState(savedVS);
-      }
+      restoreScroll();
       return;
     }
 
@@ -298,12 +317,8 @@ export function LogsTab({ open }: { open: boolean }) {
     const lc = model.getLineCount();
     if (lineCountElRef.current) lineCountElRef.current.textContent = `${lc} 行`;
 
-    if (wasAtBottom) {
-      ed.revealLine(lc);
-    } else if (savedVS) {
-      ed.restoreViewState(savedVS);
-    }
-  }, [entries, level, filterText]);
+    restoreScroll();
+  }, [entries, level, filterText, editorReady]);
 
   // === Monaco beforeMount ===
   const handleBeforeMount = (mon: Monaco) => {
@@ -317,6 +332,15 @@ export function LogsTab({ open }: { open: boolean }) {
   // === Monaco onMount ===
   const handleEditorMount = (ed: editor.IStandaloneCodeEditor) => {
     editorRef.current = ed;
+    setEditorReady(true);
+    // 监听用户滚动，仅在内容足够多时更新 userAtBottomRef
+    ed.onDidScrollChange(() => {
+      const sh = ed.getScrollHeight();
+      const lh = ed.getLayoutInfo().height;
+      // 内容不足以滚动时不更新（避免空编辑器污染）
+      if (sh <= lh + 30) return;
+      userAtBottomRef.current = isEditorAtBottom(ed);
+    });
   };
 
   // === Find Widget 中文提示 ===
@@ -447,8 +471,8 @@ export function LogsTab({ open }: { open: boolean }) {
           onChange={handleTargetChange}
           style={{ width: 180 }}
           options={[
-            { value: 'admin', label: 'Admin (Master)' },
-            ...agents.map((a) => ({ value: a.agentId, label: `Agent: ${a.name}` })),
+            { value: 'admin', label: '服务器' },
+            ...agents.map((a) => ({ value: a.agentId, label: `节点: ${a.name}` })),
           ]}
         />
         <Select

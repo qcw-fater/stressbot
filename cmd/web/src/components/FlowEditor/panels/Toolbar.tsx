@@ -40,7 +40,8 @@ import { useEditorStore } from '../store/editorStore';
 import { useProtoStore } from '../proto/protoStore';
 import { syncFlowScriptsToIdb } from '@/services/scriptSync';
 import { FlowManagerModal } from './FlowManagerModal';
-import type { TaskFlow } from '@/types/flow';
+import { exportAllTemplates, importTemplates, type TemplateBundle } from '../library/templateStore';
+import type { FlowJson } from '../codec/flowToJson';
 
 export interface ToolbarProps {
   onOpenValidation?: () => void;
@@ -61,7 +62,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
   const protoStatus = useProtoStore((s) => s.status);
   const protoFileCount = useProtoStore((s) => s.fileCount);
-  const callbackCount = useFlowStore((s) => Object.keys(s.callbacks).length);
+  const listenCount = useFlowStore((s) => Object.keys(s.listens).length);
 
   const [flowManagerOpen, setFlowManagerOpen] = useState(false);
 
@@ -70,7 +71,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
     useShallow((s) => ({
       nodes: s.nodes,
       actions: s.actions,
-      callbacks: s.callbacks,
+      listens: s.listens,
       defaultDelayMs: s.defaultDelayMs,
     })),
   );
@@ -80,11 +81,12 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
 
   // 隐藏的 input[type=file]，由"文件 → 导入"菜单项触发
   const importInputRef = useRef<HTMLInputElement>(null);
+  const templateImportRef = useRef<HTMLInputElement>(null);
 
   const handleImportFile = async (file: File) => {
     try {
       const text = await file.text();
-      const parsed = JSON.parse(text) as TaskFlow;
+      const parsed = JSON.parse(text) as FlowJson;
       loadFromTaskFlow(parsed);
       message.success(`已加载 ${file.name}`);
       void syncScriptsAfterLoad(parsed, '导入');
@@ -106,13 +108,37 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
     URL.revokeObjectURL(url);
   };
 
+  const onExportTemplates = async () => {
+    const bundle = await exportAllTemplates();
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'stressbot-templates.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const onImportTemplates = async (file: File) => {
+    try {
+      const bundle = JSON.parse(await file.text()) as TemplateBundle;
+      const r = await importTemplates(bundle);
+      message.success(`导入模板：${r.actions} action + ${r.listens} listen`);
+    } catch (e) {
+      message.error(`导入模板失败：${(e as Error).message}`);
+    }
+    return false;
+  };
+
   const onLoadDefault = async () => {
     try {
-      const res = await fetch('/conf/flow.json');
+      const res = await fetch('/conf/flow/flow.json');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const flow = (await res.json()) as TaskFlow;
+      const flow = (await res.json()) as FlowJson;
       loadFromTaskFlow(flow);
-      message.success('已加载 conf/flow.json');
+      message.success('已加载 conf/flow/flow.json');
       void syncScriptsAfterLoad(flow, '加载');
     } catch (e) {
       message.error(`加载失败：${(e as Error).message}`);
@@ -126,7 +152,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
    * - added 用 info（解释清楚为什么 IDB 突然多出几个文件）；
    * - 任何异常都吞掉，不影响加载主流程。
    */
-  const syncScriptsAfterLoad = async (flow: TaskFlow, action: '导入' | '加载') => {
+  const syncScriptsAfterLoad = async (flow: FlowJson, action: '导入' | '加载') => {
     try {
       const { added, missing } = await syncFlowScriptsToIdb(flow);
       if (added.length > 0) {
@@ -161,7 +187,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
     {
       key: 'load-default',
       icon: <ReloadOutlined />,
-      label: '加载 conf/flow.json',
+      label: '加载 conf/flow/flow.json',
       disabled: readOnly,
       onClick: onLoadDefault,
     },
@@ -169,15 +195,28 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
     {
       key: 'import',
       icon: <ImportOutlined />,
-      label: '导入 JSON…',
+      label: '导入流程 JSON…',
       disabled: readOnly,
       onClick: () => importInputRef.current?.click(),
     },
     {
       key: 'export',
       icon: <DownloadOutlined />,
-      label: '导出 JSON',
+      label: '导出流程 JSON',
       onClick: onExport,
+    },
+    { type: 'divider' as const },
+    {
+      key: 'import-templates',
+      icon: <ImportOutlined />,
+      label: '导入模板库…',
+      onClick: () => templateImportRef.current?.click(),
+    },
+    {
+      key: 'export-templates',
+      icon: <DownloadOutlined />,
+      label: '导出模板库',
+      onClick: onExportTemplates,
     },
   ];
 
@@ -260,10 +299,10 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
             </Badge>
           </Tooltip>
           <Tooltip title="管理回调脚本">
-            <Badge count={callbackCount} overflowCount={99} offset={[-4, 4]} color="orange">
+            <Badge count={listenCount} overflowCount={99} offset={[-4, 4]} color="orange">
               <Button
                 icon={<NotificationOutlined />}
-                onClick={() => setActivePanel({ kind: 'callbackPanel' })}
+                onClick={() => setActivePanel({ kind: 'listenPanel' })}
               >
                 回调
               </Button>
@@ -299,7 +338,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
       {/* 右侧：RuntimeBar（运行控制 + 跨模块入口 + 设置） */}
       <div style={{ display: 'flex', alignItems: 'center' }}>{extra}</div>
 
-      {/* 隐藏 input：文件菜单"导入"触发 */}
+      {/* 隐藏 input：文件菜单"导入流程"触发 */}
       <input
         ref={importInputRef}
         type="file"
@@ -308,6 +347,18 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) handleImportFile(f);
+          e.target.value = '';
+        }}
+      />
+      {/* 隐藏 input：文件菜单"导入模板库"触发 */}
+      <input
+        ref={templateImportRef}
+        type="file"
+        accept="application/json,.json"
+        style={{ display: 'none' }}
+        onChange={async (e) => {
+          const f = e.target.files?.[0];
+          if (f) await onImportTemplates(f);
           e.target.value = '';
         }}
       />

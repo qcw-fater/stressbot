@@ -12,7 +12,7 @@
 
 import luaparse from 'luaparse';
 
-export type LuaCheckMode = 'action' | 'boolean' | 'callback' | 'free';
+export type LuaCheckMode = 'action' | 'boolean' | 'listen' | 'free';
 
 export interface SyntaxIssue {
   line: number;
@@ -63,9 +63,9 @@ self.onmessage = (e: MessageEvent<ParseRequest>) => {
   }
 
   if (ast && mode !== 'free') {
-    // action / boolean 共用 execute(r) 签名；callback 用 onMessage(r, msg)
+    // action / boolean 共用 execute(r) 签名；listen 用 onMessage(r, msg)
     const expected =
-      mode === 'callback'
+      mode === 'listen'
         ? { name: 'onMessage', params: 2 }
         : { name: 'execute', params: 1 };
     const found = findEntryFunction(ast, expected.name);
@@ -77,7 +77,7 @@ self.onmessage = (e: MessageEvent<ParseRequest>) => {
         endColumn: 1,
         severity: 'error',
         message: `脚本必须定义入口函数：function ${expected.name}(${
-          mode === 'callback' ? 'r, msg' : 'r'
+          mode === 'listen' ? 'r, msg' : 'r'
         }) ... end`,
         source: 'entry',
       });

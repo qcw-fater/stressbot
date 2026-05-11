@@ -51,7 +51,7 @@ describe('buildNodeMetricsMap', () => {
         n1: { type: 'action', action: 'CreateTeam' },
         n2: { type: 'action', action: 'SelectHero' },
       },
-      callbacks: {},
+      listens: {},
     };
     const snap = snapshot([action('CreateTeam'), action('SelectHero')]);
     const map = buildNodeMetricsMap(snap, flow);
@@ -66,7 +66,7 @@ describe('buildNodeMetricsMap', () => {
         n1: { type: 'action', action: 'SendHeartbeat' },
         n2: { type: 'action', action: 'SendHeartbeat' },
       },
-      callbacks: {},
+      listens: {},
     };
     const m = action('SendHeartbeat');
     const map = buildNodeMetricsMap(snapshot([m]), flow);
@@ -77,7 +77,7 @@ describe('buildNodeMetricsMap', () => {
   it('callback 用 callback:<name> 命名匹配，nodeId 用 __cb__<name>', () => {
     const flow: FlowSlice = {
       nodes: {},
-      callbacks: { OnBattleStart: { s2cProto: 'BattleStartS2C' } },
+      listens: { OnBattleStart: { s2cProto: 'BattleStartS2C' } },
     };
     const snap = snapshot([action('callback:OnBattleStart')]);
     const map = buildNodeMetricsMap(snap, flow);
@@ -85,14 +85,14 @@ describe('buildNodeMetricsMap', () => {
   });
 
   it('snapshot 缺失或没有匹配 action 时返回空 Map', () => {
-    const flow: FlowSlice = { nodes: { n1: { type: 'action', action: 'X' } }, callbacks: {} };
+    const flow: FlowSlice = { nodes: { n1: { type: 'action', action: 'X' } }, listens: {} };
     expect(buildNodeMetricsMap(undefined, flow).size).toBe(0);
     expect(buildNodeMetricsMap(snapshot([]), flow).size).toBe(0);
     expect(buildNodeMetricsMap(snapshot([action('Y')]), flow).size).toBe(0);
   });
 
   it('makeMetricsProvider 按 nodeId 返回 ActionMetric', () => {
-    const flow: FlowSlice = { nodes: { n1: { type: 'action', action: 'A' } }, callbacks: {} };
+    const flow: FlowSlice = { nodes: { n1: { type: 'action', action: 'A' } }, listens: {} };
     const map = buildNodeMetricsMap(snapshot([action('A', { executing: 7 })]), flow);
     const provider = makeMetricsProvider(map);
     expect(provider('n1')?.executing).toBe(7);

@@ -1,5 +1,5 @@
 /**
- * Lua 脚本编辑器（mode='action' / 'callback' / 'boolean' 三用）。
+ * Lua 脚本编辑器（mode='action' / 'listen' / 'boolean' 三用）。
  *
  * - 选择脚本文件（从 /conf/scripts/index.json 列出）
  * - Monaco 全功能 Lua 编辑
@@ -7,7 +7,7 @@
  *   action  模式 : function execute(r) ... return code, send_bytes, recv_bytes end
  *                  return 0 表示成功；send/recv 可省略，由 lua API 第 3、4 个返回值给出，
  *                  会归到 ActionsTab 的 ↑avg / ↓avg per-action 字节统计中。
- *   callback 模式 : function onMessage(r, msg) ... end
+ *   listen 模式 : function onMessage(r, msg) ... end
  *   boolean 模式 : function execute(r) ... return true/false end（条件节点 / loop breakCondition 用）
  *
  * 持久化：
@@ -17,7 +17,7 @@
  *   - 启动任务时 taskActions.collectScripts 会自动一并提交。
  */
 
-import { Alert, App as AntApp, Button, Select, Space, Tag, Upload } from 'antd';
+import { Alert, AutoComplete, App as AntApp, Button, Space, Tag, Upload } from 'antd';
 import { CloudDownloadOutlined, ImportOutlined, SaveOutlined } from '@ant-design/icons';
 import Editor, { type Monaco } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
@@ -28,7 +28,7 @@ import { registerLuaProviders } from '../../lua/luaProviders';
 import { checkLuaSyntax, type SyntaxIssue } from '../../lua/luaSyntaxClient';
 import { addScript, getScript } from '@/services/resourcesStore';
 
-export type LuaMode = 'action' | 'callback' | 'boolean';
+export type LuaMode = 'action' | 'listen' | 'boolean';
 
 export interface LuaFormProps {
   mode: LuaMode;
@@ -55,7 +55,7 @@ function execute(r)
   return 0, _send, _recv  -- 第 1 个为错误码（0=成功），后两个为 wire 字节数
 end
 `,
-  callback: `-- listen_xxx.lua
+  listen: `-- listen_xxx.lua
 local robot = require('robot')
 
 function onMessage(r, msg)
@@ -220,7 +220,7 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
   };
 
   const expectedSig =
-    mode === 'callback' ? 'function onMessage(r, msg)' : 'function execute(r)';
+    mode === 'listen' ? 'function onMessage(r, msg)' : 'function execute(r)';
   const errorCount = issues.filter((i) => i.severity === 'error').length;
   const warnCount = issues.filter((i) => i.severity === 'warning').length;
   const lintFallbackWarn = issues.length === 0 && !content.includes(expectedSig);
@@ -276,14 +276,16 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
     <div>
       <Space style={{ marginBottom: 8 }} wrap>
         <span>脚本文件：</span>
-        <Select
-          showSearch
-          allowClear
+        <AutoComplete
           style={{ width: 280 }}
           value={script}
-          onChange={(v) => onChangeScript(v ?? '')}
+          onChange={(v) => onChangeScript(v)}
           options={files.map((f) => ({ value: f, label: f }))}
-          placeholder="选择 conf/scripts/ 下的 .lua 文件"
+          placeholder="输入新文件名或选择已有脚本"
+          allowClear
+          filterOption={(input, option) =>
+            (option?.value as string)?.toLowerCase().includes(input.toLowerCase()) ?? false
+          }
         />
         <Upload accept=".lua" beforeUpload={onImport} showUploadList={false}>
           <Button icon={<ImportOutlined />} size="small">
@@ -332,9 +334,9 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
                 ；<code>return true / false</code>
               </>
             )}
-            {mode === 'callback' && (
+            {mode === 'listen' && (
               <>
-                ；<code>msg</code> 在无 s2cProto 时为原始二进制 string
+                ；未指定响应消息类型时，<code>msg</code> 为原始二进制数据
               </>
             )}
             {errorCount > 0 && (
@@ -390,8 +392,7 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
       {/* 抹除 lintWarn 未使用警告（仅作为兜底状态） */}
       <span style={{ display: 'none' }}>{lintWarn ? '1' : '0'}</span>
       <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 6 }}>
-        按 Ctrl+S 或点击「保存到本地」按钮手动保存到浏览器本地（IndexedDB），启动任务时随 multipart 一并提交给 Admin；
-        如果想同步到仓库 conf/scripts/，请用"下载当前内容"导出后再 commit。
+        编辑后点击「保存到本地」或按 Ctrl+S 保存。启动任务时会随流程一起提交。如需同步到代码仓库，请用「下载当前内容」导出。
       </div>
     </div>
   );

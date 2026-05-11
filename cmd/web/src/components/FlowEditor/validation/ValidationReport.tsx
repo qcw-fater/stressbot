@@ -1,14 +1,15 @@
 /**
- * 校验报告抽屉：列出 errors / warnings / infos，点击跳转到对应节点 / action / callback。
+ * 校验报告浮动窗口：列出 errors / warnings / infos，点击跳转到对应节点 / action / listen。
  */
 
-import { Alert, Badge, Button, Drawer, Empty, List, Space, Tabs, Tag } from 'antd';
+import { Alert, Badge, Button, Empty, List, Space, Tabs, Tag } from 'antd';
 import { CloseCircleFilled, ExclamationCircleFilled, InfoCircleFilled, ReloadOutlined } from '@ant-design/icons';
 import { useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useFlowStore } from '../store/flowStore';
 import { useEditorStore } from '../store/editorStore';
 import { validateFlow, type ValidationIssue } from './refsCheck';
+import { FloatingWindow } from '../panels/FloatingWindow';
 
 export interface ValidationReportDrawerProps {
   open: boolean;
@@ -21,7 +22,7 @@ export function ValidationReportDrawer({ open, onClose }: ValidationReportDrawer
       defaultDelayMs: s.defaultDelayMs,
       nodes: s.nodes,
       actions: s.actions,
-      callbacks: s.callbacks,
+      listens: s.listens,
     })),
   );
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
@@ -31,15 +32,13 @@ export function ValidationReportDrawer({ open, onClose }: ValidationReportDrawer
 
   const goto = (issue: ValidationIssue) => {
     if (!issue.location) return;
-    // 先关闭校验抽屉，避免与 NodeEditorDrawer / CallbackEditor 视觉重叠
-    onClose();
     if (issue.location.kind === 'node') {
       setSelectedNode(issue.location.id);
       setActivePanel({ kind: 'nodeEdit', nodeId: issue.location.id });
       return;
     }
-    if (issue.location.kind === 'callback') {
-      setActivePanel({ kind: 'callbackEdit', callbackName: issue.location.id });
+    if (issue.location.kind === 'listen') {
+      setActivePanel({ kind: 'listenEdit', listenName: issue.location.id });
       return;
     }
     if (issue.location.kind === 'action') {
@@ -88,7 +87,8 @@ export function ValidationReportDrawer({ open, onClose }: ValidationReportDrawer
   );
 
   return (
-    <Drawer
+    <FloatingWindow
+      windowId="validationReport"
       title={
         <Space>
           <span>校验报告</span>
@@ -99,8 +99,8 @@ export function ValidationReportDrawer({ open, onClose }: ValidationReportDrawer
       }
       open={open}
       onClose={onClose}
-      width={620}
-      mask={false}
+      defaultSize={{ width: 580, height: 460 }}
+      minSize={{ width: 400, height: 300 }}
       extra={
         <Button icon={<ReloadOutlined />} size="small" onClick={() => 0}>
           已实时刷新
@@ -136,6 +136,6 @@ export function ValidationReportDrawer({ open, onClose }: ValidationReportDrawer
           ]}
         />
       )}
-    </Drawer>
+    </FloatingWindow>
   );
 }

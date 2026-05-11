@@ -1,7 +1,7 @@
 /**
  * Zustand 核心 store：维护 TaskFlow 业务数据 + React Flow 视觉状态。
  *
- * 设计文档 §10.1：业务数据（nodes/actions/callbacks）与视觉状态（rfNodes/rfEdges/positions）
+ * 设计文档 §10.1：业务数据（nodes/actions/listens）与视觉状态（rfNodes/rfEdges/positions）
  * 同 store 中维护，但导出 flow.json 时只取业务部分。
  */
 
@@ -10,13 +10,13 @@ import { applyEdgeChanges, applyNodeChanges } from '@xyflow/react';
 import type { Edge, EdgeChange, Node as RFNode, NodeChange } from '@xyflow/react';
 
 import type { ActionDef } from '@/types/action';
-import type { CallbackDef } from '@/types/callback';
+import type { ListenDef } from '@/types/listen';
 import type { FlowNode, TaskFlow } from '@/types/flow';
 import type { FlowLayout } from '@/types/editor';
 import { emptyFlowLayout } from '@/types/editor';
 import { dagreLayout } from '../codec/dagreLayout';
 import { jsonToFlow } from '../codec/jsonToFlow';
-import { flowToJson } from '../codec/flowToJson';
+import { flowToJson, type FlowJson } from '../codec/flowToJson';
 import { validateFlow, type ValidationIssue } from '../validation/refsCheck';
 
 interface FlowState {
@@ -24,18 +24,18 @@ interface FlowState {
   defaultDelayMs: number;
   nodes: Record<string, FlowNode>;
   actions: Record<string, ActionDef>;
-  callbacks: Record<string, CallbackDef>;
+  listens: Record<string, ListenDef>;
 
   // ── React Flow 视觉状态 ────────
   rfNodes: RFNode[];
   rfEdges: Edge[];
   layout: FlowLayout;
 
-  // ── 派生：callback 引用计数 ────────
-  callbackRefCount: Record<string, number>;
+  // ── 派生：listen 引用计数 ────────
+  listenRefCount: Record<string, number>;
 
-  // ── 派生：每个 callback 被哪些 action 节点注册（用于反向悬停高亮） ────────
-  nodesByCallback: Record<string, string[]>;
+  // ── 派生：每个 listen 被哪些 action 节点注册（用于反向悬停高亮） ────────
+  nodesByListen: Record<string, string[]>;
 
   // ── 派生：节点级校验问题（按节点 ID 分组，仅含 location.kind === 'node' 的 issue） ────────
   issuesByNodeId: Record<string, ValidationIssue[]>;
@@ -44,12 +44,12 @@ interface FlowState {
   needsFitView: boolean;
 
   // ── 加载 / 替换 ────────
-  loadFromTaskFlow: (flow: TaskFlow, layout?: FlowLayout) => void;
+  loadFromTaskFlow: (flow: FlowJson, layout?: FlowLayout) => void;
   /** 清空，回到空白编辑稿 */
   reset: (center?: { x: number; y: number }) => void;
 
   // ── 导出 ────────
-  toTaskFlow: () => TaskFlow;
+  toTaskFlow: () => FlowJson;
 
   // ── React Flow 事件代理 ────────
   onNodesChange: (changes: NodeChange[]) => void;
@@ -75,14 +75,14 @@ interface FlowState {
   renameAction: (oldName: string, newName: string) => void;
 
   // ── 回调 CRUD ────────
-  addCallback: (name: string, def: CallbackDef) => void;
-  updateCallback: (name: string, partial: Partial<CallbackDef>) => void;
-  /** 完全替换 callback（用于 silent/decl/lua 形态切换：partial merge 会保留旧字段导致 kind 判错） */
-  replaceCallback: (name: string, def: CallbackDef) => void;
-  removeCallback: (name: string) => void;
-  renameCallback: (oldName: string, newName: string) => void;
+  addListen: (name: string, def: ListenDef) => void;
+  updateListen: (name: string, partial: Partial<ListenDef>) => void;
+  /** 完全替换 listen（用于 silent/decl/lua 形态切换：partial merge 会保留旧字段导致 kind 判错） */
+  replaceListen: (name: string, def: ListenDef) => void;
+  removeListen: (name: string) => void;
+  renameListen: (oldName: string, newName: string) => void;
 
-  /** 触发派生数据重算（rfNodes/rfEdges/callbackRefCount） */
+  /** 触发派生数据重算（rfNodes/rfEdges/listenRefCount） */
   syncDerived: () => void;
 }
 
@@ -90,17 +90,22 @@ export const useFlowStore = create<FlowState>((set, get) => ({
   defaultDelayMs: 1000,
   nodes: {},
   actions: {},
-  callbacks: {},
+  listens: {},
   rfNodes: [],
   rfEdges: [],
   layout: emptyFlowLayout(),
-  callbackRefCount: {},
-  nodesByCallback: {},
+  listenRefCount: {},
+  nodesByListen: {},
   issuesByNodeId: {},
   needsFitView: false,
 
   loadFromTaskFlow: (flow, layout) => {
-    const { rfNodes, rfEdges, callbackRefCount, nodesByCallback } = jsonToFlow(flow);
+    const { rfNodes, rfEdges, listenRefCount, nodesByListen } = jsonToFlow({
+      defaultDelayMs: flow.defaultDelayMs,
+      nodes: flow.nodes,
+      actions: flow.actions,
+      callbacks: flow.callbacks,
+    });
     let positions: Record<string, { x: number; y: number }>;
     if (layout?.nodePositions && Object.keys(layout.nodePositions).length > 0) {
       positions = Object.fromEntries(
@@ -108,11 +113,11 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       );
     } else {
       positions = dagreLayout(rfNodes, rfEdges, { direction: 'LR' });
-      // 给 CallbackCard 一个事件区独立排布（画布右侧竖排）
+      // 给 ListenCard 一个事件区独立排布（画布右侧竖排）
       const cardX = computeCardX(positions);
       let cardY = 0;
       for (const n of rfNodes) {
-        if (n.type === 'callbackCard') {
+        if (n.type === 'listenCard') {
           positions[n.id] = { x: cardX, y: cardY };
           cardY += 90;
         }
@@ -120,7 +125,13 @@ export const useFlowStore = create<FlowState>((set, get) => ({
     }
     const positioned = rfNodes.map((n) => ({ ...n, position: positions[n.id] ?? { x: 0, y: 0 } }));
     // 计算节点级校验
-    const report = validateFlow(flow);
+    const flowForValidation: TaskFlow = {
+      defaultDelayMs: flow.defaultDelayMs,
+      nodes: flow.nodes,
+      actions: flow.actions,
+      listens: flow.callbacks,
+    };
+    const report = validateFlow(flowForValidation);
     const issuesByNodeId: Record<string, ValidationIssue[]> = {};
     for (const it of [...report.errors, ...report.warnings]) {
       if (it.location?.kind === 'node') {
@@ -138,11 +149,11 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       defaultDelayMs: flow.defaultDelayMs,
       nodes: flow.nodes,
       actions: flow.actions,
-      callbacks: flow.callbacks,
+      listens: flow.callbacks,
       rfNodes: positioned,
       rfEdges,
-      callbackRefCount,
-      nodesByCallback,
+      listenRefCount,
+      nodesByListen,
       issuesByNodeId,
       needsFitView: true,
       layout: layout ?? {
@@ -160,15 +171,15 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       defaultDelayMs: 1000,
       nodes: { main: { type: 'sequence', next: [], description: '入口节点' } },
       actions: {},
-      callbacks: {},
+      listens: {},
       rfNodes: [],
       rfEdges: [],
       layout: {
         ...emptyFlowLayout(),
         nodePositions: { main: pos },
       },
-      callbackRefCount: {},
-      nodesByCallback: {},
+      listenRefCount: {},
+      nodesByListen: {},
       issuesByNodeId: {},
       needsFitView: true,
     });
@@ -181,7 +192,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       defaultDelayMs: s.defaultDelayMs,
       nodes: s.nodes,
       actions: s.actions,
-      callbacks: s.callbacks,
+      listens: s.listens,
     });
   },
 
@@ -209,7 +220,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       const cardX = computeCardX(positions);
       let cardY = 0;
       for (const n of s.rfNodes) {
-        if (n.type === 'callbackCard') {
+        if (n.type === 'listenCard') {
           positions[n.id] = { x: cardX, y: cardY };
           cardY += 90;
         }
@@ -249,9 +260,21 @@ export const useFlowStore = create<FlowState>((set, get) => ({
 
   removeNode: (id) => {
     set((s) => {
+      const removed = s.nodes[id];
       const nodes = { ...s.nodes };
       delete nodes[id];
-      return { nodes };
+      // 清理孤儿 action：如果删除的节点是 action 节点，且没有其他节点引用同一个 action，则一并删除
+      let actions = s.actions;
+      if (removed?.type === 'action' && removed.action) {
+        const stillReferenced = Object.values(nodes).some(
+          (n) => n.type === 'action' && n.action === removed.action,
+        );
+        if (!stillReferenced) {
+          actions = { ...s.actions };
+          delete actions[removed.action];
+        }
+      }
+      return { nodes, actions };
     });
     get().syncDerived();
   },
@@ -322,40 +345,40 @@ export const useFlowStore = create<FlowState>((set, get) => ({
     get().syncDerived();
   },
 
-  addCallback: (name, def) => {
-    set((s) => ({ callbacks: { ...s.callbacks, [name]: def } }));
+  addListen: (name, def) => {
+    set((s) => ({ listens: { ...s.listens, [name]: def } }));
     get().syncDerived();
   },
-  updateCallback: (name, partial) => {
+  updateListen: (name, partial) => {
     set((s) => {
-      const cur = s.callbacks[name];
+      const cur = s.listens[name];
       if (!cur) return {};
-      return { callbacks: { ...s.callbacks, [name]: { ...cur, ...partial } } };
+      return { listens: { ...s.listens, [name]: { ...cur, ...partial } } };
     });
     get().syncDerived();
   },
-  replaceCallback: (name, def) => {
+  replaceListen: (name, def) => {
     set((s) => {
-      if (!s.callbacks[name]) return {};
-      return { callbacks: { ...s.callbacks, [name]: def } };
+      if (!s.listens[name]) return {};
+      return { listens: { ...s.listens, [name]: def } };
     });
     get().syncDerived();
   },
-  removeCallback: (name) => {
+  removeListen: (name) => {
     set((s) => {
-      const callbacks = { ...s.callbacks };
-      delete callbacks[name];
-      return { callbacks };
+      const listens = { ...s.listens };
+      delete listens[name];
+      return { listens };
     });
     get().syncDerived();
   },
-  renameCallback: (oldName, newName) => {
+  renameListen: (oldName, newName) => {
     if (oldName === newName) return;
     set((s) => {
-      if (!(oldName in s.callbacks) || newName in s.callbacks) return {};
-      const callbacks: Record<string, CallbackDef> = {};
-      for (const [k, v] of Object.entries(s.callbacks)) {
-        callbacks[k === oldName ? newName : k] = v;
+      if (!(oldName in s.listens) || newName in s.listens) return {};
+      const listens: Record<string, ListenDef> = {};
+      for (const [k, v] of Object.entries(s.listens)) {
+        listens[k === oldName ? newName : k] = v;
       }
       // 同步所有 listenCallbacks 中的引用
       const nodes: Record<string, FlowNode> = {};
@@ -371,20 +394,19 @@ export const useFlowStore = create<FlowState>((set, get) => ({
           nodes[k] = v;
         }
       }
-      return { callbacks, nodes };
+      return { listens, nodes };
     });
     get().syncDerived();
   },
 
   syncDerived: () => {
     const s = get();
-    const flow: TaskFlow = {
+    const { rfNodes, rfEdges, listenRefCount, nodesByListen } = jsonToFlow({
       defaultDelayMs: s.defaultDelayMs,
       nodes: s.nodes,
       actions: s.actions,
-      callbacks: s.callbacks,
-    };
-    const { rfNodes, rfEdges, callbackRefCount, nodesByCallback } = jsonToFlow(flow);
+      callbacks: s.listens,
+    });
     // 保留已有位置（避免拖动后被覆盖）
     const positions = s.layout.nodePositions;
     const positioned = rfNodes.map((n) => {
@@ -398,7 +420,13 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       };
     });
     // 实时校验：把节点级 issue 按节点 ID 分组，供 NodeShell 显示徽章
-    const report = validateFlow(flow);
+    const flowForValidation: TaskFlow = {
+      defaultDelayMs: s.defaultDelayMs,
+      nodes: s.nodes,
+      actions: s.actions,
+      listens: s.listens,
+    };
+    const report = validateFlow(flowForValidation);
     const issuesByNodeId: Record<string, ValidationIssue[]> = {};
     for (const it of [...report.errors, ...report.warnings]) {
       if (it.location?.kind === 'node') {
@@ -413,12 +441,12 @@ export const useFlowStore = create<FlowState>((set, get) => ({
         }
       }
     }
-    set({ rfNodes: positioned, rfEdges, callbackRefCount, nodesByCallback, issuesByNodeId });
+    set({ rfNodes: positioned, rfEdges, listenRefCount, nodesByListen, issuesByNodeId });
   },
 }));
 
 /**
- * 计算 CallbackCard 的 X 坐标：取主区最右节点 +距离。
+ * 计算 ListenCard 的 X 坐标：取主区最右节点 +距离。
  */
 function computeCardX(positions: Record<string, { x: number; y: number }>): number {
   let maxX = 0;

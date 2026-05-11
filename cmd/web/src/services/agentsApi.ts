@@ -5,7 +5,7 @@
  * 仅保留：列表 / 详情 / 强制注销（仅 offline）。
  */
 
-import { adaptList, del, getJson } from './api';
+import { adaptList, del, getJson, postJson } from './api';
 import type { AgentBrief, AgentDetail, AgentsListResponse } from '@/types/api';
 
 /**
@@ -22,4 +22,12 @@ export function getAgent(id: string): Promise<AgentDetail> {
 
 export function deleteAgent(id: string): Promise<void> {
   return del<void>(`/agents/${encodeURIComponent(id)}`);
+}
+
+export function shutdownAgent(id: string): Promise<void> {
+  return postJson<void>(`/agents/${encodeURIComponent(id)}/shutdown`, {});
+}
+
+export async function shutdownAllAgents(): Promise<{ succeeded: string[]; failed: string[] }> {
+  return postJson<{ succeeded: string[]; failed: string[] }>('/agents/shutdown-all', {});
 }

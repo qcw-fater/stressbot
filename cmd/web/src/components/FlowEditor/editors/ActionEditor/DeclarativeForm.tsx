@@ -5,9 +5,8 @@
 import { Button, Form, Input, InputNumber, Select, Space, Switch } from 'antd';
 import { useState } from 'react';
 import type { ActionDef, ActionPattern } from '@/types/action';
-import { useEditorStore } from '../../store/editorStore';
 import { ProtoBrowser } from '../../proto/ProtoBrowser';
-import { RouteEditor } from '../../callbacks/RouteEditor';
+import { RouteEditor } from '../../listens/RouteEditor';
 import { BindingsTable } from './BindingsTable';
 import { StoreTable } from './StoreTable';
 
@@ -18,15 +17,10 @@ export interface DeclarativeFormProps {
 
 export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
   const { pattern } = action;
-  const setActivePanel = useEditorStore((s) => s.setActivePanel);
   const set = (partial: Partial<ActionDef>) => onChange({ ...action, ...partial });
 
-  // 用 ProtoBrowser 选 c2sProto / s2cProto
+  // 用 ProtoBrowser 选 c2sProto / s2cProto（受控模式，不触碰 activePanel）
   const [protoTarget, setProtoTarget] = useState<'c2s' | 's2c' | null>(null);
-  const openProtoFor = (target: 'c2s' | 's2c') => {
-    setProtoTarget(target);
-    setActivePanel({ kind: 'protoBrowser' });
-  };
 
   const showService = patternHas(pattern, ['service']);
   const showRoute = patternHas(pattern, ['route']);
@@ -80,7 +74,7 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
               onChange={(e) => set({ c2sProto: e.target.value })}
               placeholder="如 Game.LoginPlayerC2S"
             />
-            <Button onClick={() => openProtoFor('c2s')}>浏览</Button>
+            <Button onClick={() => setProtoTarget('c2s')}>浏览</Button>
           </Space.Compact>
         </Form.Item>
       )}
@@ -93,7 +87,7 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
               onChange={(e) => set({ s2cProto: e.target.value })}
               placeholder="如 Game.LoginPlayerS2C"
             />
-            <Button onClick={() => openProtoFor('s2c')}>浏览</Button>
+            <Button onClick={() => setProtoTarget('s2c')}>浏览</Button>
           </Space.Compact>
         </Form.Item>
       )}
@@ -177,6 +171,8 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
       )}
 
       <ProtoBrowser
+        open={protoTarget !== null}
+        onClose={() => setProtoTarget(null)}
         onSelect={(fullName) => {
           if (protoTarget === 'c2s') set({ c2sProto: fullName });
           else if (protoTarget === 's2c') set({ s2cProto: fullName });

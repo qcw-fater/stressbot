@@ -41,6 +41,11 @@ func (d *AgentDispatcher) Stop(addr, taskID string) error {
 	return d.post(addr, "/agent/v1/stop", map[string]string{"taskId": taskID}, 2)
 }
 
+// Shutdown 向 Agent 发送关闭命令（终止进程）。
+func (d *AgentDispatcher) Shutdown(addr string) error {
+	return d.post(addr, "/agent/v1/shutdown", nil, 1)
+}
+
 // Version 查询 Agent 版本。
 func (d *AgentDispatcher) Version(addr string) (string, error) {
 	resp, err := d.get(addr, "/agent/v1/version")

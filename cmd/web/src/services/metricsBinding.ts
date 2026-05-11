@@ -13,19 +13,19 @@
  */
 
 import type { ActionMetric, StressSnapshot } from '@/types/api';
-import type { CallbackDef } from '@/types/callback';
+import type { ListenDef } from '@/types/listen';
 import type { FlowNode } from '@/types/flow';
 
 /** Flow 中需要的部分（避免直接依赖整个 flowStore，便于单测） */
 export interface FlowSlice {
   nodes: Record<string, FlowNode>;
-  callbacks: Record<string, CallbackDef>;
+  listens: Record<string, ListenDef>;
 }
 
 /** 节点上的指标快照（直接传给 MetricsBadge / 节点边框染色） */
 export type NodeMetricsMap = Map<string, ActionMetric>;
 
-const CALLBACK_PREFIX = 'callback:';
+const LISTEN_PREFIX = 'callback:';
 const CB_NODE_PREFIX = '__cb__';
 
 /**
@@ -52,9 +52,9 @@ export function buildNodeMetricsMap(
     if (m) result.set(nodeId, m);
   }
 
-  // callback 卡片
-  for (const cbName of Object.keys(flow.callbacks)) {
-    const m = byName.get(CALLBACK_PREFIX + cbName);
+  // listen 卡片
+  for (const cbName of Object.keys(flow.listens)) {
+    const m = byName.get(LISTEN_PREFIX + cbName);
     if (m) result.set(CB_NODE_PREFIX + cbName, m);
   }
 

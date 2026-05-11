@@ -13,7 +13,7 @@ import { WeightedNode } from './WeightedNode';
 import { WaitNode } from './WaitNode';
 import { BreakNode } from './BreakNode';
 import { ContinueNode } from './ContinueNode';
-import { CallbackCard } from '../callbacks/CallbackCard';
+import { ListenCard } from '../listens/ListenCard';
 
 export const nodeTypes: NodeTypes = {
   sequence: SequenceNode,
@@ -24,5 +24,5 @@ export const nodeTypes: NodeTypes = {
   wait: WaitNode,
   break: BreakNode,
   continue: ContinueNode,
-  callbackCard: CallbackCard,
+  listenCard: ListenCard,
 };

@@ -5,22 +5,30 @@
  */
 
 import type { ActionDef, FieldBind, FilterDef, StoreMapping } from '@/types/action';
-import type { CallbackDef } from '@/types/callback';
-import type { FlowNode, ListenRef, TaskFlow, WeightedOption } from '@/types/flow';
+import type { ListenDef } from '@/types/listen';
+import type { FlowNode, ListenRef, WeightedOption } from '@/types/flow';
 
 export interface ExportInput {
   defaultDelayMs: number;
   nodes: Record<string, FlowNode>;
   actions: Record<string, ActionDef>;
-  callbacks: Record<string, CallbackDef>;
+  listens: Record<string, ListenDef>;
 }
 
-export function flowToJson(input: ExportInput): TaskFlow {
+/** flow.json 格式（JSON 键名为 callbacks，与 Go 端一致） */
+export interface FlowJson {
+  defaultDelayMs: number;
+  nodes: Record<string, FlowNode>;
+  actions: Record<string, ActionDef>;
+  callbacks: Record<string, ListenDef>;
+}
+
+export function flowToJson(input: ExportInput): FlowJson {
   return {
     defaultDelayMs: input.defaultDelayMs,
     nodes: mapValues(input.nodes, cleanNode),
     actions: mapValues(input.actions, cleanAction),
-    callbacks: mapValues(input.callbacks, cleanCallback),
+    callbacks: mapValues(input.listens, cleanListen),
   };
 }
 
@@ -130,8 +138,8 @@ function cleanStoreMapping(s: StoreMapping): StoreMapping {
   return out;
 }
 
-function cleanCallback(c: CallbackDef): CallbackDef {
-  const out: CallbackDef = {};
+function cleanListen(c: ListenDef): ListenDef {
+  const out: ListenDef = {};
   if (c.s2cProto) out.s2cProto = c.s2cProto;
   if (c.store?.length) out.store = c.store.map(cleanStoreMapping);
   if (c.script) out.script = c.script;

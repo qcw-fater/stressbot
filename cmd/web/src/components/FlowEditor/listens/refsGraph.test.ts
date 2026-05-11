@@ -31,7 +31,7 @@ const baseFlow: TaskFlow = {
     A1: { pattern: 'tcpSend', service: 'logic' },
     A2: { pattern: 'tcpSend', service: 'logic' },
   },
-  callbacks: {
+  listens: {
     cbA: {},
     cbB: { script: 'x.lua' },
     cbOrphan: {}, // 没有 action 引用 → 孤儿
@@ -39,11 +39,11 @@ const baseFlow: TaskFlow = {
 };
 
 describe('refsGraph', () => {
-  it('callbackToRefs 反查正确', () => {
+  it('listenToRefs 反查正确', () => {
     const g = buildRefsGraph(baseFlow);
-    expect(g.callbackToRefs.get('cbA')?.length).toBe(1);
-    expect(g.callbackToRefs.get('cbA')?.[0].nodeId).toBe('act1');
-    expect(g.callbackToRefs.get('cbB')?.[0].nodeId).toBe('act2');
+    expect(g.listenToRefs.get('cbA')?.length).toBe(1);
+    expect(g.listenToRefs.get('cbA')?.[0].nodeId).toBe('act1');
+    expect(g.listenToRefs.get('cbB')?.[0].nodeId).toBe('act2');
   });
 
   it('refCount 计数正确（cbA=1, cbB=1, ghost=1, cbOrphan 缺席）', () => {
@@ -59,7 +59,7 @@ describe('refsGraph', () => {
     expect(g.danglingRefs[0].ref.callback).toBe('ghost');
   });
 
-  it('duplicateRegisters 检测同 server+route 不同 callback', () => {
+  it('duplicateRegisters 检测同 server+route 不同 listen', () => {
     const g = buildRefsGraph(baseFlow);
     expect(g.duplicateRegisters.length).toBe(1);
     const dup = g.duplicateRegisters[0];

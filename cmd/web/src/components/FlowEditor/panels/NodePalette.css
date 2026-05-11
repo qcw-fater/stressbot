@@ -62,7 +62,7 @@
   transform: scale(0.97);
 }
 
-/* 模板区：flex:1 占据剩余高度，内部分两段（Action / Callback），各自独立滚动；
+/* 模板区：flex:1 占据剩余高度，内部分两段（Action / Listen），各自独立滚动；
  *           两个 section 平分剩余高度，title + 搜索框固定，仅卡片列表区滚动。 */
 .palette-templates {
   flex: 1;
@@ -103,6 +103,11 @@
   gap: 4px;
 }
 
+/* Listen 节点在调色板中用虚线边框（与画布行为一致） */
+.palette-grid-item-listen {
+  border-style: dashed;
+}
+
 /* 模板卡：与画布节点视觉风格一致（边框 + 浅背景 + 标题） */
 .tpl-card {
   background: var(--bg-panel);
@@ -125,9 +130,9 @@
   border-color: var(--node-action);
   background: var(--node-action-bg);
 }
-.tpl-card-callback {
-  border-color: var(--node-callback);
-  background: var(--node-callback-bg);
+.tpl-card-listen {
+  border-color: var(--node-listen);
+  background: var(--node-listen-bg);
   border-style: dashed;
 }
 

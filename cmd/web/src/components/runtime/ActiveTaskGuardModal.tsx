@@ -53,14 +53,14 @@ export function ActiveTaskGuardModal({ open, task, onClose, onAttached }: Active
               <Tag color={STATE_COLOR[task.state]}>{task.state}</Tag>
             </Descriptions.Item>
             <Descriptions.Item label="机器人数">
-              {task.totalBots} 个，分布在 {task.agentCount} 个 Agent
+              {task.totalBots} 个，分布在 {task.agentCount} 个节点
             </Descriptions.Item>
             <Descriptions.Item label="启动时间">
               {task.startedAt ? new Date(task.startedAt).toLocaleString() : '—'}
             </Descriptions.Item>
           </Descriptions>
           <p style={{ marginTop: 12, fontSize: 13, color: 'var(--text-secondary)' }}>
-            选择「查看运行中」会用该任务的 flow 替换当前画布并锁定为只读，本地编辑稿会自动暂存；
+            选择「查看运行中」会用该任务的流程替换当前画布并锁定为只读，本地编辑稿会自动暂存；
             选择「继续编辑」可继续修改本地稿，但启动按钮在该任务结束前禁用。
           </p>
         </>

@@ -28,6 +28,26 @@ const TYPE_GROUPS: { label: string; types: BindingType[] }[] = [
   { label: '嵌套', types: ['nested', 'nestedList'] },
 ];
 
+const BINDING_TYPE_DESC: Record<BindingType, string> = {
+  fixed: '固定值，直接填入 value 字段',
+  state: '从 state 中取出 key 对应的单个值',
+  stateFirst: '取 state list 的第一个元素',
+  stateRandom: '从 state list 中随机取一个元素',
+  stateRandomN: '从 state list 中随机取 N 个元素（返回列表）',
+  stateMapKey: '从 state map 中随机取一个 key',
+  stateMapValue: '从 state map 中随机取一个 value',
+  listSize: '取 state list 的长度',
+  randomPick: '从 choices 列表中随机选一个',
+  randomPickN: '从 choices 列表中随机选 N 个（返回列表）',
+  randomPickMap: '从 map 的 value 列表中随机选一个',
+  randomInt: '随机整数，范围 [min, max]',
+  randomBool: '随机布尔值，可设 true 概率',
+  randomString: '随机字符串，指定长度和字符集',
+  randomExclude: '从 choices 中排除 exclude 后随机选一个',
+  nested: '嵌套消息（对象），内含子 bindings',
+  nestedList: '嵌套 repeated 消息（列表），内含子 bindings + count',
+};
+
 const TYPE_OPTIONS = TYPE_GROUPS.map((g) => ({
   label: g.label,
   options: g.types.map((t) => ({ value: t, label: t })),
@@ -118,7 +138,17 @@ function BindingRow({
         <Select
           value={binding.type}
           onChange={(v) => set({ type: v as BindingType })}
-          options={TYPE_OPTIONS}
+          options={TYPE_OPTIONS.map((g) => ({
+            label: g.label,
+            options: g.options.map((o) => ({
+              value: o.value,
+              label: (
+                <Tooltip title={BINDING_TYPE_DESC[o.value]} placement="right">
+                  <span>{o.label}</span>
+                </Tooltip>
+              ),
+            })),
+          }))}
           style={{ width: 180 }}
         />
       </Space>

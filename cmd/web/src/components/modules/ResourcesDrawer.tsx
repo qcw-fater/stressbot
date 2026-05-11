@@ -5,12 +5,11 @@
  * - 两个 Tab：proto / scripts；每 Tab 复用同一个表格 + 上传/删除/清空操作；
  * - 上传 proto / lua 完成后调用 `useProtoStore.reload()`（仅 proto 影响 ProtoBrowser），
  *   让 ProtoBrowser / ActionEditor 立即看到最新内容；
- * - "从默认基线导入"：通过 vite confMountPlugin 暴露的 /conf/proto/ 与 /conf/scripts/ 一键拉取，
- *   方便首次进入编辑态时快速搭建一份本地副本（生产期 Admin 同源也能工作）；
+ * - 基线同步在任务启动时自动执行（fromBaseline 标记控制更新策略），无需手动导入；
  * - 删除 / 清空操作走 antd Modal.confirm 二次确认，避免误清空。
  */
 
-import { DeleteOutlined, ImportOutlined, InboxOutlined, EditOutlined } from '@ant-design/icons';
+import { DeleteOutlined, InboxOutlined, EditOutlined } from '@ant-design/icons';
 import {
   Alert,
   App as AntApp,
@@ -57,8 +56,8 @@ export function ResourcesDrawer({ open, onClose }: ResourcesDrawerProps) {
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message="proto / lua 资源持久化在浏览器 IndexedDB"
-        description="启动压测任务时这些文件会随 flow.json 一起上传到 Admin。同一浏览器、同源页面共享。清空浏览器存储会丢失。"
+        message="协议文件与脚本资源管理"
+        description="启动压测任务时这些文件会随流程配置一起提交。同一浏览器共享。清空浏览器存储会丢失。"
       />
       <Tabs
         defaultActiveKey="proto"
@@ -83,11 +82,6 @@ const KIND_LABEL: Record<ResourceTableProps['kind'], string> = {
 const KIND_EXT: Record<ResourceTableProps['kind'], string[]> = {
   proto: ['.proto'],
   lua: ['.lua'],
-};
-
-const KIND_BASE_URL: Record<ResourceTableProps['kind'], { index: string; file: string }> = {
-  proto: { index: '/conf/proto/index.json', file: '/conf/proto/' },
-  lua: { index: '/conf/scripts/index.json', file: '/conf/scripts/' },
 };
 
 function ResourceTable({ kind }: ResourceTableProps) {
@@ -176,38 +170,6 @@ function ResourceTable({ kind }: ResourceTableProps) {
     });
   };
 
-  const handleImportFromBaseline = async () => {
-    setLoading(true);
-    try {
-      const { index, file } = KIND_BASE_URL[kind];
-      const r = await fetch(index);
-      if (!r.ok) {
-        throw new Error(`无法访问 ${index}（HTTP ${r.status}），仅在 dev / Admin 同源下可用`);
-      }
-      const names = (await r.json()) as string[];
-      const fetched: Array<{ name: string; content: string }> = [];
-      await Promise.all(
-        names.map(async (name) => {
-          const fr = await fetch(file + name);
-          if (!fr.ok) throw new Error(`下载 ${name} 失败：HTTP ${fr.status}`);
-          const text = await fr.text();
-          fetched.push({ name, content: text });
-        }),
-      );
-      if (kind === 'proto') {
-        await addProtos(fetched);
-        await reloadProtos();
-      } else {
-        await addScripts(fetched);
-      }
-      message.success(`从默认基线导入 ${fetched.length} 个 ${KIND_LABEL[kind]} 文件`);
-    } catch (e) {
-      message.error(`导入失败：${(e as Error).message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleSaveEdit = async () => {
     if (!editFile) return;
     setSaving(true);
@@ -292,11 +254,6 @@ function ResourceTable({ kind }: ResourceTableProps) {
             上传 {KIND_LABEL[kind]} 文件
           </Button>
         </Upload>
-        <Tooltip title={`从开发期挂载的 ${kind === 'proto' ? '/conf/proto/' : '/conf/scripts/'} 一键复制到本地存储`}>
-          <Button icon={<ImportOutlined />} onClick={handleImportFromBaseline} loading={loading}>
-            从默认基线导入
-          </Button>
-        </Tooltip>
         <Button danger disabled={items.length === 0} onClick={handleClearAll}>
           清空
         </Button>
@@ -308,7 +265,7 @@ function ResourceTable({ kind }: ResourceTableProps) {
         <Empty
           description={
             <span>
-              暂无 {KIND_LABEL[kind]} 文件。点击上方"上传"或"从默认基线导入"开始。
+              暂无 {KIND_LABEL[kind]} 文件。点击上方"上传"开始，或启动任务时自动从基线同步。
             </span>
           }
         />

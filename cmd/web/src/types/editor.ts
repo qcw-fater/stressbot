@@ -12,8 +12,8 @@ export interface NodeLayoutMeta {
  * flow.json 之外的视觉副产物，独立存档为 flow.layout.json。
  * 详见设计文档 §10.3。
  *
- * 注意：CallbackCard 节点的位置也存在 nodePositions 中（key 为 `__cb__<name>`），
- * 不再单独维护 callbackPositions 字段。
+ * 注意：ListenCard 节点的位置也存在 nodePositions 中（key 为 `__cb__<name>`），
+ * 不再单独维护 listenPositions 字段。
  */
 export interface FlowLayout {
   nodePositions: Record<string, NodeLayoutMeta>;

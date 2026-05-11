@@ -138,7 +138,7 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
 
   return (
     <Modal
-      title="本地流程管理 (IndexedDB)"
+      title="本地流程管理"
       open={open}
       onCancel={onClose}
       footer={null}

@@ -26,7 +26,7 @@
     "dirs": ["conf/proto"],
     "files": []
   },
-  "flow": "conf/flow.json",
+  "flow": "conf/flow/flow.json",
   "script": {
     "dirs": ["conf/scripts"]
   },

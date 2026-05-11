@@ -29,12 +29,12 @@ import { edgeTypes } from './edges/registry';
 import { useFlowStore } from './store/flowStore';
 import { useEditorStore, type Clipboard } from './store/editorStore';
 import { generateNodeId } from './utils/nodeIdGen';
-import { saveActionTemplate, saveCallbackTemplate } from './library/templateStore';
+import { saveActionTemplate, saveListenTemplate } from './library/templateStore';
 import { useFlowReadOnly } from './flowReadOnlyContext';
 import type { FlowNode, NodeType } from '@/types/flow';
 import type { ActionDef } from '@/types/action';
-import type { CallbackDef } from '@/types/callback';
-import { classifyCallback } from '@/types/callback';
+import type { ListenDef } from '@/types/listen';
+import { classifyListen } from '@/types/listen';
 
 interface ContextMenu {
   x: number;
@@ -54,9 +54,9 @@ function FlowCanvasInner() {
   const onEdgesChange = useFlowStore((s) => s.onEdgesChange);
   const addNode = useFlowStore((s) => s.addNode);
   const addAction = useFlowStore((s) => s.addAction);
-  const addCallback = useFlowStore((s) => s.addCallback);
+  const addListen = useFlowStore((s) => s.addListen);
   const removeNode = useFlowStore((s) => s.removeNode);
-  const removeCallback = useFlowStore((s) => s.removeCallback);
+  const removeListen = useFlowStore((s) => s.removeListen);
   const updateNode = useFlowStore((s) => s.updateNode);
 
   const setSelectedNode = useEditorStore((s) => s.setSelectedNode);
@@ -90,7 +90,7 @@ function FlowCanvasInner() {
 
   // dropEffect 必须与拖出端的 effectAllowed 兼容：
   //   - 普通节点类型：effectAllowed='move'  → dropEffect='move'
-  //   - 模板（action/callback）：effectAllowed='copy'  → dropEffect='copy'
+  //   - 模板（action/listen）：effectAllowed='copy'  → dropEffect='copy'
   // 两者不匹配会导致浏览器静默吞掉 drop 事件，看上去就是"拖入无效"。
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -124,29 +124,29 @@ function FlowCanvasInner() {
         return;
       }
 
-      // 1b. callback 拖入：创建空 silent callback + CallbackCard，并打开编辑面板
-      if (e.dataTransfer.getData('application/stressbot-new-callback')) {
+      // 1b. listen 拖入：创建空 silent listen + ListenCard，并打开编辑面板
+      if (e.dataTransfer.getData('application/stressbot-new-listen')) {
         const state = useFlowStore.getState();
-        let cbName = 'callback';
+        let listenName = 'listen';
         let i = 1;
-        while (state.callbacks[cbName]) cbName = `callback_${i++}`;
-        addCallback(cbName, {});
-        const cardId = `__cb__${cbName}`;
+        while (state.listens[listenName]) listenName = `listen_${i++}`;
+        addListen(listenName, {});
+        const cardId = `__cb__${listenName}`;
         const layout = useFlowStore.getState().layout;
         layout.nodePositions[cardId] = { x: flowPos.x, y: flowPos.y };
         useFlowStore.setState((s) => ({
           rfNodes: s.rfNodes.map((n) => (n.id === cardId ? { ...n, position: flowPos } : n)),
         }));
-        setActivePanel({ kind: 'callbackEdit', callbackName: cbName });
+        setActivePanel({ kind: 'listenEdit', listenName });
         return;
       }
 
-      // 2. 模板拖入（action / callback）
+      // 2. 模板拖入（action / listen）
       const tplRaw = e.dataTransfer.getData('application/stressbot-template');
       if (!tplRaw) return;
       try {
         const { kind, template } = JSON.parse(tplRaw) as {
-          kind: 'action' | 'callback';
+          kind: 'action' | 'listen';
           template: { name: string; data: unknown };
         };
         if (kind === 'action') {
@@ -166,14 +166,14 @@ function FlowCanvasInner() {
             rfNodes: s.rfNodes.map((n) => (n.id === nodeId ? { ...n, position: flowPos } : n)),
           }));
           setSelectedNode(nodeId);
-        } else if (kind === 'callback') {
+        } else if (kind === 'listen') {
           const state = useFlowStore.getState();
-          let cbName = template.name;
+          let listenName = template.name;
           let i = 1;
-          while (state.callbacks[cbName]) cbName = `${template.name}_${i++}`;
-          addCallback(cbName, template.data as CallbackDef);
-          // CallbackCard 自动由 jsonToFlow 创建；位置覆盖到鼠标落点
-          const cardId = `__cb__${cbName}`;
+          while (state.listens[listenName]) listenName = `${template.name}_${i++}`;
+          addListen(listenName, template.data as ListenDef);
+          // ListenCard 自动由 jsonToFlow 创建；位置覆盖到鼠标落点
+          const cardId = `__cb__${listenName}`;
           const layout = useFlowStore.getState().layout;
           layout.nodePositions[cardId] = { x: flowPos.x, y: flowPos.y };
           useFlowStore.setState((s) => ({
@@ -184,7 +184,7 @@ function FlowCanvasInner() {
         console.warn('[FlowCanvas] 解析模板拖入数据失败：', err);
       }
     },
-    [addNode, addAction, addCallback, readOnly, screenToFlowPosition, setActivePanel, setSelectedNode],
+    [addNode, addAction, addListen, readOnly, screenToFlowPosition, setActivePanel, setSelectedNode],
   );
 
   // 选中变化 → 计算 edgeHighlightNodeIds + 高亮颜色（取第一条选中边的源节点类型）
@@ -217,17 +217,17 @@ function FlowCanvasInner() {
     [setEdgeHighlightNodes, setEdgeHighlightColor],
   );
 
-  /** 删除一个 React Flow node：根据类型决定是删 flow node 还是 callback */
+  /** 删除一个 React Flow node：根据类型决定是删 flow node 还是 listen */
   const deleteRfNode = useCallback(
     (n: RFNode) => {
-      if (n.type === 'callbackCard') {
-        const cbName = (n.data as { callbackName?: string }).callbackName;
-        if (cbName) removeCallback(cbName);
+      if (n.type === 'listenCard') {
+        const listenName = (n.data as { listenName?: string }).listenName;
+        if (listenName) removeListen(listenName);
       } else {
         removeNode(n.id);
       }
     },
-    [removeNode, removeCallback],
+    [removeNode, removeListen],
   );
 
   /** 删除一条边：把 source 节点中对 target 的引用清除（保持业务图与视觉同步） */
@@ -260,11 +260,11 @@ function FlowCanvasInner() {
       } else if (src.type === 'wait' && handleId === 'out') {
         // wait 没有显式 next 字段（顺序由 sequence 控制），无需处理
       } else if (handleId === 'listen') {
-        // action → callback：从 listenCallbacks 中移除指向 e.target 的引用
+        // action → listen：从 listenCallbacks 中移除指向 e.target 的引用
         if (src.type === 'action' && src.listenCallbacks) {
-          const cbName = e.target.replace(/^__cb__/, '');
+          const listenName = e.target.replace(/^__cb__/, '');
           updateNode(e.source, {
-            listenCallbacks: src.listenCallbacks.filter((r) => r.callback !== cbName),
+            listenCallbacks: src.listenCallbacks.filter((r) => r.callback !== listenName),
           });
         }
       }
@@ -282,7 +282,7 @@ function FlowCanvasInner() {
    *   boolean   · true/false → trueNext / falseNext = target
    *   weighted  · opt-N      → options[N].node = target
    *   weighted  · opt-add    → options.push({ node: target, weight: 1 })
-   *   action    · listen     → listenCallbacks.push({ callback })，target 必须是 callbackCard
+   *   action    · listen     → listenCallbacks.push({ callback })，target 必须是 listenCard
    *
    * 注：业务图通过 syncDerived 重算 rfEdges，所以这里不要直接 setEdges。
    */
@@ -293,9 +293,9 @@ function FlowCanvasInner() {
       const src = useFlowStore.getState().nodes[params.source];
       if (!src) return;
       const handle = params.sourceHandle ?? '';
-      const targetIsCallbackCard = params.target.startsWith('__cb__');
-      const targetCbName = targetIsCallbackCard ? params.target.slice('__cb__'.length) : null;
-      const targetNodeId = !targetIsCallbackCard ? params.target : null;
+      const targetIsListenCard = params.target.startsWith('__cb__');
+      const targetListenName = targetIsListenCard ? params.target.slice('__cb__'.length) : null;
+      const targetNodeId = !targetIsListenCard ? params.target : null;
 
       if (src.type === 'sequence') {
         const next = (src.next ?? []).slice();
@@ -328,10 +328,10 @@ function FlowCanvasInner() {
         updateNode(params.source, { options });
         return;
       }
-      if (src.type === 'action' && handle === 'listen' && targetCbName) {
+      if (src.type === 'action' && handle === 'listen' && targetListenName) {
         const list = (src.listenCallbacks ?? []).slice();
-        if (!list.some((r) => r.callback === targetCbName)) {
-          list.push({ route: null, server: '', callback: targetCbName });
+        if (!list.some((r) => r.callback === targetListenName)) {
+          list.push({ route: null, server: '', callback: targetListenName });
         }
         updateNode(params.source, { listenCallbacks: list });
         return;
@@ -363,17 +363,17 @@ function FlowCanvasInner() {
     return () => window.removeEventListener('click', onClick);
   }, []);
 
-  /** 把一个 React Flow node（含相关 action / callback）打包到剪贴板 */
+  /** 把一个 React Flow node（含相关 action / listen）打包到剪贴板 */
   const copyRfNode = useCallback(
     (n: RFNode): Clipboard => {
       const flow = useFlowStore.getState();
-      if (n.type === 'callbackCard') {
-        const cbName = (n.data as { callbackName?: string }).callbackName;
-        if (!cbName || !flow.callbacks[cbName]) return null;
+      if (n.type === 'listenCard') {
+        const listenName = (n.data as { listenName?: string }).listenName;
+        if (!listenName || !flow.listens[listenName]) return null;
         return {
-          kind: 'callback',
-          callbackName: cbName,
-          callback: JSON.parse(JSON.stringify(flow.callbacks[cbName])),
+          kind: 'listen',
+          listenName,
+          listen: JSON.parse(JSON.stringify(flow.listens[listenName])),
         };
       }
       const node = flow.nodes[n.id];
@@ -382,13 +382,13 @@ function FlowCanvasInner() {
         node.type === 'action' && node.action && flow.actions[node.action]
           ? { name: node.action, def: JSON.parse(JSON.stringify(flow.actions[node.action])) as ActionDef }
           : undefined;
-      // listenCallbacks 涉及的 callback 一并复制（跨流程粘贴时不丢引用）
-      const callbacks: Array<{ name: string; def: CallbackDef }> = [];
+      // listenCallbacks 涉及的 listen 一并复制（跨流程粘贴时不丢引用）
+      const listens: Array<{ name: string; def: ListenDef }> = [];
       if (node.type === 'action' && node.listenCallbacks) {
         for (const r of node.listenCallbacks) {
           if (!r.callback) continue;
-          const cb = flow.callbacks[r.callback];
-          if (cb) callbacks.push({ name: r.callback, def: JSON.parse(JSON.stringify(cb)) });
+          const listenDef = flow.listens[r.callback];
+          if (listenDef) listens.push({ name: r.callback, def: JSON.parse(JSON.stringify(listenDef)) });
         }
       }
       return {
@@ -396,7 +396,7 @@ function FlowCanvasInner() {
         nodeId: n.id,
         node: JSON.parse(JSON.stringify(node)),
         action,
-        callbacks: callbacks.length > 0 ? callbacks : undefined,
+        listens: listens.length > 0 ? listens : undefined,
       };
     },
     [],
@@ -413,8 +413,8 @@ function FlowCanvasInner() {
     while (map[name]) name = `${base}_${i++}`;
     return name;
   };
-  const uniqueCallbackName = (base: string) => {
-    const map = useFlowStore.getState().callbacks;
+  const uniqueListenName = (base: string) => {
+    const map = useFlowStore.getState().listens;
     let name = base;
     let i = 1;
     while (map[name]) name = `${base}_${i++}`;
@@ -430,18 +430,18 @@ function FlowCanvasInner() {
       }
       if (clipboard.kind === 'node') {
         const node: FlowNode = JSON.parse(JSON.stringify(clipboard.node));
-        // 重新分配 action / callback 名（避免覆盖已有）
+        // 重新分配 action / listen 名（避免覆盖已有）
         if (node.type === 'action' && clipboard.action) {
           const newAct = uniqueActionName(clipboard.action.name);
           addAction(newAct, clipboard.action.def);
           node.action = newAct;
         }
-        if (node.type === 'action' && node.listenCallbacks && clipboard.callbacks) {
+        if (node.type === 'action' && node.listenCallbacks && clipboard.listens) {
           const renameMap: Record<string, string> = {};
-          for (const c of clipboard.callbacks) {
-            const newCb = uniqueCallbackName(c.name);
-            addCallback(newCb, c.def);
-            renameMap[c.name] = newCb;
+          for (const c of clipboard.listens) {
+            const newListen = uniqueListenName(c.name);
+            addListen(newListen, c.def);
+            renameMap[c.name] = newListen;
           }
           node.listenCallbacks = node.listenCallbacks.map((r) => ({
             ...r,
@@ -457,40 +457,40 @@ function FlowCanvasInner() {
         }));
         setSelectedNode(newId);
         message.success(`已粘贴节点 ${newId}`);
-      } else if (clipboard.kind === 'callback') {
-        const newName = uniqueCallbackName(clipboard.callbackName);
-        addCallback(newName, JSON.parse(JSON.stringify(clipboard.callback)));
+      } else if (clipboard.kind === 'listen') {
+        const newName = uniqueListenName(clipboard.listenName);
+        addListen(newName, JSON.parse(JSON.stringify(clipboard.listen)));
         const cardId = `__cb__${newName}`;
         const layout = useFlowStore.getState().layout;
         layout.nodePositions[cardId] = { x: flowX, y: flowY };
         useFlowStore.setState((s) => ({
           rfNodes: s.rfNodes.map((n) => (n.id === cardId ? { ...n, position: { x: flowX, y: flowY } } : n)),
         }));
-        message.success(`已粘贴 callback ${newName}`);
+        message.success(`已粘贴 listen ${newName}`);
       }
     },
-    [addAction, addCallback, addNode, clipboard, setSelectedNode],
+    [addAction, addListen, addNode, clipboard, setSelectedNode],
   );
 
   /** 把节点保存为模板（写入 IndexedDB） */
   const saveNodeAsTemplate = useCallback(async (n: RFNode) => {
     const flow = useFlowStore.getState();
-    if (n.type === 'callbackCard') {
-      const cbName = (n.data as { callbackName?: string }).callbackName;
-      if (!cbName) return;
-      const cb = flow.callbacks[cbName];
-      if (!cb) return;
-      await saveCallbackTemplate({
-        name: cbName,
-        kind: classifyCallback(cb),
-        data: cb,
+    if (n.type === 'listenCard') {
+      const listenName = (n.data as { listenName?: string }).listenName;
+      if (!listenName) return;
+      const listenDef = flow.listens[listenName];
+      if (!listenDef) return;
+      await saveListenTemplate({
+        name: listenName,
+        kind: classifyListen(listenDef),
+        data: listenDef,
       });
-      message.success(`callback ${cbName} 已保存为模板`);
+      message.success(`listen ${listenName} 已保存为模板`);
       return;
     }
     const node = flow.nodes[n.id];
     if (!node || node.type !== 'action' || !node.action) {
-      message.warning('仅 action 节点 / callback 卡片可保存为模板');
+      message.warning('仅 action 节点 / listen 卡片可保存为模板');
       return;
     }
     const def = flow.actions[node.action];
@@ -508,7 +508,9 @@ function FlowCanvasInner() {
   // 记录最近一次鼠标在画布内的客户端坐标，Ctrl+V 粘贴时作为落点
   const lastMousePosRef = useRef<{ x: number; y: number } | null>(null);
 
-  // 全局快捷键：Ctrl/Cmd+C 复制 / Ctrl/Cmd+X 剪切 / Ctrl/Cmd+V 粘贴
+  // 全局快捷键：
+  //   F1~F9 在鼠标位置新建节点 / listen 卡片
+  //   Ctrl/Cmd+C 复制 / Ctrl/Cmd+X 剪切 / Ctrl/Cmd+V 粘贴
   // 关键约束：
   //   - 在 input/textarea/contentEditable 中触发时让浏览器原生处理（不抢复制粘贴）
   //   - 用户当前选中了文本时让出（getSelection().toString()）
@@ -521,12 +523,52 @@ function FlowCanvasInner() {
       return wrapperRef.current?.contains(ae as Node) ?? false;
     };
     const handler = (e: KeyboardEvent) => {
-      const mod = e.ctrlKey || e.metaKey;
-      if (!mod) return;
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
-      if ((window.getSelection()?.toString().length ?? 0) > 0) return;
       if (!inCanvas()) return;
+
+      // F1~F9 快捷新建节点（无需修饰键）
+      const fKey = /^F(\d)$/i.exec(e.key);
+      if (fKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const idx = parseInt(fKey[1], 10);
+        if (idx >= 1 && idx <= 9) {
+          const last = lastMousePosRef.current;
+          if (!last) return;
+          e.preventDefault();
+          const flowPos = screenToFlowPosition({ x: last.x, y: last.y });
+          if (idx <= 8) {
+            const q = QUICK_NODE_TYPES[idx - 1];
+            const taken = new Set(Object.keys(useFlowStore.getState().nodes));
+            const id = generateNodeId(q.type, taken);
+            addNode(id, { type: q.type });
+            const layout = useFlowStore.getState().layout;
+            layout.nodePositions[id] = { x: flowPos.x, y: flowPos.y };
+            useFlowStore.setState((s) => ({
+              rfNodes: s.rfNodes.map((n) => (n.id === id ? { ...n, position: flowPos } : n)),
+            }));
+            setSelectedNode(id);
+          } else {
+            // F9 = Listen
+            const state = useFlowStore.getState();
+            let listenName = 'listen';
+            let i = 1;
+            while (state.listens[listenName]) listenName = `listen_${i++}`;
+            addListen(listenName, {});
+            const cardId = `__cb__${listenName}`;
+            const layout = useFlowStore.getState().layout;
+            layout.nodePositions[cardId] = { x: flowPos.x, y: flowPos.y };
+            useFlowStore.setState((s) => ({
+              rfNodes: s.rfNodes.map((n) => (n.id === cardId ? { ...n, position: flowPos } : n)),
+            }));
+            setActivePanel({ kind: 'listenEdit', listenName });
+          }
+          return;
+        }
+      }
+
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+      if ((window.getSelection()?.toString().length ?? 0) > 0) return;
 
       const key = e.key.toLowerCase();
       if (key === 'c') {
@@ -574,7 +616,7 @@ function FlowCanvasInner() {
       wait: '--node-wait',
       break: '--node-break',
       continue: '--node-continue',
-      callbackCard: '--node-callback',
+      listenCard: '--node-listen',
     };
     const cssVar = tokenMap[n.type ?? 'sequence'];
     if (!cssVar) return '#999';
@@ -612,10 +654,10 @@ function FlowCanvasInner() {
           setSelectedNode(n.id);
         }}
         onNodeDoubleClick={(_, n) => {
-          if (n.type === 'callbackCard') {
-            const cbName = (n.data as { callbackName?: string }).callbackName;
-            if (cbName) {
-              setActivePanel({ kind: 'callbackEdit', callbackName: cbName });
+          if (n.type === 'listenCard') {
+            const listenName = (n.data as { listenName?: string }).listenName;
+            if (listenName) {
+              setActivePanel({ kind: 'listenEdit', listenName });
             }
             return;
           }
@@ -623,7 +665,6 @@ function FlowCanvasInner() {
         }}
         onPaneClick={() => {
           setSelectedNode(null);
-          setActivePanel({ kind: 'none' });
           setMenu(null);
         }}
         onNodeContextMenu={(e, n) => {
@@ -710,9 +751,9 @@ function FlowCanvasInner() {
           onEditNode={(id) => {
             const n = rfNodes.find((x) => x.id === id);
             if (!n) return;
-            if (n.type === 'callbackCard') {
-              const cbName = (n.data as { callbackName?: string }).callbackName;
-              if (cbName) setActivePanel({ kind: 'callbackEdit', callbackName: cbName });
+            if (n.type === 'listenCard') {
+              const listenName = (n.data as { listenName?: string }).listenName;
+              if (listenName) setActivePanel({ kind: 'listenEdit', listenName });
             } else {
               setActivePanel({ kind: 'nodeEdit', nodeId: id });
             }
@@ -728,19 +769,19 @@ function FlowCanvasInner() {
             }));
             setSelectedNode(id);
           }}
-          onAddCallback={(fx, fy) => {
+          onAddListen={(fx, fy) => {
             const state = useFlowStore.getState();
-            let cbName = 'callback';
+            let listenName = 'listen';
             let i = 1;
-            while (state.callbacks[cbName]) cbName = `callback_${i++}`;
-            addCallback(cbName, {});
-            const cardId = `__cb__${cbName}`;
+            while (state.listens[listenName]) listenName = `listen_${i++}`;
+            addListen(listenName, {});
+            const cardId = `__cb__${listenName}`;
             const layout = useFlowStore.getState().layout;
             layout.nodePositions[cardId] = { x: fx, y: fy };
             useFlowStore.setState((s) => ({
               rfNodes: s.rfNodes.map((n) => (n.id === cardId ? { ...n, position: { x: fx, y: fy } } : n)),
             }));
-            setActivePanel({ kind: 'callbackEdit', callbackName: cbName });
+            setActivePanel({ kind: 'listenEdit', listenName });
           }}
           onDeleteNode={(id) => {
             const n = rfNodes.find((x) => x.id === id);
@@ -768,20 +809,20 @@ interface CanvasContextMenuProps {
   onSaveAsTemplate: (id: string) => void;
   onEditNode: (id: string) => void;
   onAddNode: (type: NodeType, flowX: number, flowY: number) => void;
-  onAddCallback: (flowX: number, flowY: number) => void;
+  onAddListen: (flowX: number, flowY: number) => void;
   onDeleteNode: (id: string) => void;
   onDeleteEdge: (id: string) => void;
 }
 
 const QUICK_NODE_TYPES: Array<{ type: NodeType; label: string }> = [
   { type: 'sequence', label: 'Sequence' },
-  { type: 'action', label: 'Action' },
   { type: 'loop', label: 'Loop' },
   { type: 'boolean', label: 'Boolean' },
   { type: 'weighted', label: 'Weighted' },
   { type: 'wait', label: 'Wait' },
   { type: 'break', label: 'Break' },
   { type: 'continue', label: 'Continue' },
+  { type: 'action', label: 'Action' },
 ];
 
 function CanvasContextMenu({
@@ -796,14 +837,14 @@ function CanvasContextMenu({
   onSaveAsTemplate,
   onEditNode,
   onAddNode,
-  onAddCallback,
+  onAddListen,
   onDeleteNode,
   onDeleteEdge,
 }: CanvasContextMenuProps) {
   const node = menu.kind === 'node' && menu.targetId ? rfNodes.find((n) => n.id === menu.targetId) : null;
-  const isCallbackCard = node?.type === 'callbackCard';
+  const isListenCard = node?.type === 'listenCard';
   const isAction = node?.type === 'action';
-  const canSaveTemplate = isAction || isCallbackCard;
+  const canSaveTemplate = isAction || isListenCard;
 
   return (
     <div
@@ -899,7 +940,7 @@ function CanvasContextMenu({
           </MenuItem>
           <Divider />
           <SubmenuLabel>新建节点</SubmenuLabel>
-          {QUICK_NODE_TYPES.map((q) => (
+          {QUICK_NODE_TYPES.map((q, i) => (
             <MenuItem
               key={q.type}
               onClick={() => {
@@ -907,16 +948,16 @@ function CanvasContextMenu({
                 onClose();
               }}
             >
-              {q.label}
+              {q.label} <Hint>F{i + 1}</Hint>
             </MenuItem>
           ))}
           <MenuItem
             onClick={() => {
-              onAddCallback(menu.flowX, menu.flowY);
+              onAddListen(menu.flowX, menu.flowY);
               onClose();
             }}
           >
-            Callback
+            Listen <Hint>F9</Hint>
           </MenuItem>
         </>
       )}

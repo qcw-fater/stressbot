@@ -779,15 +779,15 @@ executeLoop()
 
 更新 flow.json 校验工具，同步识别新节点类型集（`sequence/action/loop/boolean/weighted/wait/break/continue`）和新字段格式（`next []string`、`body string`、`options`、`waitMs`）。
 
-### Phase 6：重写 conf/flow.json
+### Phase 6：重写 conf/flow/flow.json
 
-按新格式重新编写 `conf/flow.json`，覆盖完整的压测流程（登录 → 业务循环 → 战斗）。多步骤循环体统一改为 `loop { body → sequence }` 结构。
+按新格式重新编写 `conf/flow/flow.json`，覆盖完整的压测流程（登录 → 业务循环 → 战斗）。多步骤循环体统一改为 `loop { body → sequence }` 结构。
 
 ### Phase 7：验证
 
 按 CLAUDE.md 验证流程：
 - `go build ./...` 无报错
-- `go run ./cmd/validate conf/flow.json` 通过
+- `go run ./cmd/validate conf/flow/flow.json` 通过
 - 运行 2~5 分钟，`BattleEnd` 计数 ≥ 2，无 error/warn 日志
 
 ---

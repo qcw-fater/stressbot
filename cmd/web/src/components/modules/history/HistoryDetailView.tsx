@@ -322,13 +322,13 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
             {detail.state === 'failed' ? <Tag color="error">失败</Tag> : <Tag color="success">完成</Tag>}
           </Descriptions.Item>
           <Descriptions.Item label="机器人">
-            {detail.totalBots} bots × {detail.agentCount} agents
+            {detail.totalBots} 个机器人，{detail.agentCount} 个节点
           </Descriptions.Item>
           <Descriptions.Item label="时长">{Math.floor(detail.durationSec / 60)} 分 {detail.durationSec % 60} 秒</Descriptions.Item>
           <Descriptions.Item label="开始">{detail.startedAt ? dayjs(detail.startedAt).format('YYYY-MM-DD HH:mm:ss') : '—'}</Descriptions.Item>
           <Descriptions.Item label="结束">{detail.stoppedAt ? dayjs(detail.stoppedAt).format('YYYY-MM-DD HH:mm:ss') : '—'}</Descriptions.Item>
           <Descriptions.Item label="配置摘要" span={2}>
-            authAddr=<code>{detail.configSummary.authAddr}</code> · concurrency={detail.configSummary.concurrency} · timeout={detail.configSummary.timeoutSec}s · flow={detail.configSummary.flowSizeKB}KB · proto×{detail.configSummary.protoCount} · script×{detail.configSummary.scriptCount}
+            地址=<code>{detail.configSummary.authAddr}</code> · 并发={detail.configSummary.concurrency} · 超时={detail.configSummary.timeoutSec}s · 流程={detail.configSummary.flowSizeKB}KB · 协议文件×{detail.configSummary.protoCount} · 脚本×{detail.configSummary.scriptCount}
           </Descriptions.Item>
           {detail.errorMsg && (
             <Descriptions.Item label="错误信息" span={2}>
