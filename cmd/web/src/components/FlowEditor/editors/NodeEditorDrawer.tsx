@@ -128,6 +128,7 @@ export function NodeEditorDrawer() {
       message.error('节点名称已存在');
       return;
     }
+    if (!nodeId) return;
     renameNode(nodeId, draftId);
     message.success('已重命名，所有引用同步更新');
     setActivePanel({ kind: 'nodeEdit', nodeId: draftId });

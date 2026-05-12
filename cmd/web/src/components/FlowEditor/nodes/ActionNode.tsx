@@ -41,7 +41,7 @@ export function ActionNode({ id, data, selected }: NodeProps) {
         description={node.description}
       >
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
-          <Tooltip title={PATTERN_DESC[pattern] ?? pattern}>
+          <Tooltip title={(PATTERN_DESC as any)[pattern] ?? pattern}>
             <span className="pattern-badge" data-pattern={pattern}>
               {pattern}
             </span>

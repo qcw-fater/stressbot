@@ -5,13 +5,14 @@
  * 支持递归（nested / nestedList 通过 renderChildren 回调）。
  */
 
-import { Button, Collapse, Space, Switch, Tag, Tooltip } from 'antd';
-import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import { Button, Collapse, Input, Select, Space, Switch, Tag, Tooltip } from 'antd';
+import { ArrowUpOutlined, ArrowDownOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import type { CollapseProps } from 'antd';
-import type { BindingType, FieldBind } from '@/types/action';
-import { Select } from 'antd';
+import type { BindingType, ConditionDef, FieldBind } from '@/types/action';
+import { useState } from 'react';
 import { ProtoFieldPicker } from './ProtoFieldPicker';
 import { BindingTypeForm } from './BindingTypeForm';
+import { BindingPreview } from './BindingPreview';
 
 export interface BindingsTableProps {
   /** 当前绑定列表所属的 message 全名（用于字段下拉） */
@@ -57,6 +58,13 @@ export function BindingsTable({ messageFullName, value, onChange, depth = 0 }: B
   const list = value ?? [];
   const set = (next: FieldBind[]) => onChange?.(next);
 
+  const moveItem = (from: number, to: number) => {
+    if (to < 0 || to >= list.length) return;
+    const arr = [...list];
+    [arr[from], arr[to]] = [arr[to], arr[from]];
+    set(arr);
+  };
+
   const items: CollapseProps['items'] = list.map((b, i) => ({
     key: String(i),
     label: (
@@ -67,18 +75,30 @@ export function BindingsTable({ messageFullName, value, onChange, depth = 0 }: B
         {b.optional && <Tag color="default">optional</Tag>}
         {b.wrap && <Tag color="purple">wrap</Tag>}
         {b.storeAs && <Tag color="green">→ {b.storeAs}</Tag>}
+	        {b.condition && <Tag color="orange">condition</Tag>}
       </Space>
     ),
     extra: (
-      <Button
-        size="small"
-        danger
-        icon={<DeleteOutlined />}
-        onClick={(e) => {
-          e.stopPropagation();
-          set(list.filter((_, j) => j !== i));
-        }}
-      />
+      <Space size={2} onClick={(e) => e.stopPropagation()}>
+        <Button
+          size="small"
+          icon={<ArrowUpOutlined />}
+          disabled={i === 0}
+          onClick={() => moveItem(i, i - 1)}
+        />
+        <Button
+          size="small"
+          icon={<ArrowDownOutlined />}
+          disabled={i === list.length - 1}
+          onClick={() => moveItem(i, i + 1)}
+        />
+        <Button
+          size="small"
+          danger
+          icon={<DeleteOutlined />}
+          onClick={() => set(list.filter((_, j) => j !== i))}
+        />
+      </Space>
     ),
     children: (
       <BindingRow
@@ -123,6 +143,7 @@ function BindingRow({
   onChange: (b: FieldBind) => void;
 }) {
   const set = (partial: Partial<FieldBind>) => onChange({ ...binding, ...partial });
+  const [showPreview, setShowPreview] = useState(false);
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="middle">
       <Space wrap style={{ width: '100%' }}>
@@ -197,12 +218,81 @@ function BindingRow({
           </Space>
         </Tooltip>
         <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>storeAs:</span>
-        <input
-          placeholder="(可选 state key)"
+        <Input
+          placeholder="state key"
           value={binding.storeAs ?? ''}
           onChange={(e) => set({ storeAs: e.target.value || undefined })}
-          style={{ width: 160, padding: 2, border: '1px solid var(--badge-border)', borderRadius: 2 }}
+          size="small"
+          style={{ width: 150 }}
         />
+      </Space>
+      <ConditionEditor value={binding.condition} onChange={(c) => set({ condition: c })} />
+      <div style={{ borderTop: '1px dashed var(--divider-bg)', paddingTop: 6 }}>
+        <a onClick={() => setShowPreview(!showPreview)} style={{ fontSize: 11 }}>
+          {showPreview ? '隐藏预览' : '显示预览'}
+        </a>
+        {showPreview && <BindingPreview binding={binding} messageFullName={messageFullName} />}
+      </div>
+    </Space>
+  );
+}
+
+const CONDITION_OPS = ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'in', 'notNil', 'isNil'] as const;
+
+function ConditionEditor({ value, onChange }: { value?: ConditionDef; onChange: (c?: ConditionDef) => void }) {
+  if (!value) {
+    return (
+      <a onClick={() => onChange({ source: '', op: 'eq' })} style={{ fontSize: 11 }}>
+        + 添加条件
+      </a>
+    );
+  }
+
+  const update = (patch: Partial<ConditionDef>) => onChange({ ...value, ...patch });
+  const noRhs = value.op === 'notNil' || value.op === 'isNil';
+
+  return (
+    <Space direction="vertical" style={{ width: '100%' }} size={4}>
+      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>条件（不满足时跳过本绑定）</span>
+      <Space wrap size={4}>
+        <Input
+          placeholder="source (state key)"
+          value={value.source}
+          onChange={(e) => update({ source: e.target.value })}
+          style={{ width: 140 }}
+          size="small"
+        />
+        <Input
+          placeholder="path（可选）"
+          value={value.path ?? ''}
+          onChange={(e) => update({ path: e.target.value || undefined })}
+          style={{ width: 100 }}
+          size="small"
+        />
+        <Select
+          value={value.op || 'eq'}
+          onChange={(v) => update({ op: v })}
+          options={CONDITION_OPS.map((o) => ({ value: o, label: o }))}
+          style={{ width: 90 }}
+          size="small"
+        />
+        {!noRhs && (
+          <Input
+            placeholder="value"
+            value={value.valueSource ?? (value.value !== undefined ? String(value.value) : '')}
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (!raw) return update({ value: undefined, valueSource: undefined });
+              try { update({ value: JSON.parse(raw), valueSource: undefined }); }
+              catch { update({ value: raw, valueSource: undefined }); }
+            }}
+            style={{ width: 120 }}
+            size="small"
+          />
+        )}
+        <a onClick={() => onChange(undefined)} style={{ color: 'var(--color-error)', fontSize: 11 }}>
+          删除条件
+        </a>
       </Space>
     </Space>
   );

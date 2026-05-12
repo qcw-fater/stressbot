@@ -1,12 +1,10 @@
 /**
- * 资源管理 Drawer：管理用户上传到 IndexedDB 的 proto / lua 文件。
+ * 资源管理 Drawer：管理用户上传到 IndexedDB 的 proto / lua / adapter 文件。
  *
  * 设计要点：
- * - 两个 Tab：proto / scripts；每 Tab 复用同一个表格 + 上传/删除/清空操作；
- * - 上传 proto / lua 完成后调用 `useProtoStore.reload()`（仅 proto 影响 ProtoBrowser），
- *   让 ProtoBrowser / ActionEditor 立即看到最新内容；
- * - 基线同步在任务启动时自动执行（fromBaseline 标记控制更新策略），无需手动导入；
- * - 删除 / 清空操作走 antd Modal.confirm 二次确认，避免误清空。
+ * - 三个 Tab：proto / lua / adapter；前两者复用 ResourceTable，adapter 内嵌 Monaco 编辑器；
+ * - 顶部显示未处理的基线同步冲突 Alert + "处理差异"按钮，打开 BaselineSyncModal；
+ * - 基线同步在打开编辑器或启动任务时自动执行（内容对比驱动），无需手动导入。
  */
 
 import { DeleteOutlined, InboxOutlined, EditOutlined } from '@ant-design/icons';
@@ -29,6 +27,7 @@ import type { ColumnsType } from 'antd/es/table';
 import type { UploadProps } from 'antd';
 import { useEffect, useState } from 'react';
 import Editor from '@monaco-editor/react';
+import { useShallow } from 'zustand/react/shallow';
 import { useEditorStore } from '../FlowEditor/store/editorStore';
 import { useProtoStore } from '../FlowEditor/proto/protoStore';
 import {
@@ -42,7 +41,12 @@ import {
   removeScript,
   subscribe,
   type ResourceFile,
+  getAdapterScript,
+  setAdapterScript,
+  clearAdapterScript,
+  validateAdapter,
 } from '@/services/resourcesStore';
+import { BaselineSyncModal } from './BaselineSyncModal';
 
 export interface ResourcesDrawerProps {
   open: boolean;
@@ -50,25 +54,289 @@ export interface ResourcesDrawerProps {
 }
 
 export function ResourcesDrawer({ open, onClose }: ResourcesDrawerProps) {
+  const { pendingSyncResult, setPendingSyncResult } = useEditorStore(
+    useShallow((s) => ({
+      pendingSyncResult: s.pendingSyncResult,
+      setPendingSyncResult: s.setPendingSyncResult,
+    })),
+  );
+  const [syncModalOpen, setSyncModalOpen] = useState(false);
+
+  const hasConflicts = pendingSyncResult != null && (pendingSyncResult.conflicts.length > 0 || pendingSyncResult.removed.length > 0);
+
   return (
-    <Drawer title="资源管理" open={open} onClose={onClose} width={760} maskClosable={false} destroyOnHidden={false}>
-      <Alert
-        type="info"
-        showIcon
-        style={{ marginBottom: 12 }}
-        message="协议文件与脚本资源管理"
-        description="启动压测任务时这些文件会随流程配置一起提交。同一浏览器共享。清空浏览器存储会丢失。"
-      />
-      <Tabs
-        defaultActiveKey="proto"
-        items={[
-          { key: 'proto', label: 'Proto 文件 (.proto)', children: <ResourceTable kind="proto" /> },
-          { key: 'lua', label: 'Lua 脚本 (.lua)', children: <ResourceTable kind="lua" /> },
-        ]}
-      />
-    </Drawer>
+    <>
+      <Drawer title="资源管理" open={open} onClose={onClose} width={760} maskClosable={false} destroyOnHidden={false} styles={{ body: { paddingBottom: 8 } }}>
+        {hasConflicts && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="远端资源有变更"
+            description={
+              <Space>
+                <span>{pendingSyncResult.conflicts.length + pendingSyncResult.removed.length} 处差异待处理</span>
+                <Button size="small" type="primary" onClick={() => setSyncModalOpen(true)}>
+                  处理差异
+                </Button>
+              </Space>
+            }
+          />
+        )}
+        <Tabs
+          defaultActiveKey="proto"
+          items={[
+            { key: 'proto', label: 'Proto', children: <ResourceTable kind="proto" /> },
+            { key: 'lua', label: 'Lua', children: <ResourceTable kind="lua" /> },
+            { key: 'adapter', label: '适配器', children: <AdapterTab /> },
+          ]}
+        />
+      </Drawer>
+
+      {pendingSyncResult && (
+        <BaselineSyncModal
+          open={syncModalOpen}
+          result={pendingSyncResult}
+          onClose={() => {
+            setSyncModalOpen(false);
+          }}
+          onResolved={() => {
+            setPendingSyncResult(null);
+          }}
+        />
+      )}
+    </>
   );
 }
+
+/* ─── Adapter Tab — 内嵌编辑器，复用 CodecAdapterDrawer 逻辑 ─── */
+
+const ADAPTER_TEMPLATE = `-- conf/adapter/codec.lua
+-- 通用协议适配器模板。请按照下面的接口要求实现具体逻辑。
+
+-- ─── 元信息（Go 初始化时调用一次） ────────────────────────────────
+function header_size()
+    return 12  -- TODO: 你的协议头字节数
+end
+
+function body_length_info()
+    return {
+        offset          = 0,           -- header 中 body 长度字段的起始字节
+        field_type      = "uint32_le", -- "uint16_le" / "uint16_be" / "uint32_le" / "uint32_be"
+        includes_header = false,       -- 长度字段是否包含 header 自身
+    }
+end
+
+-- ─── 编码 ─────────────────────────────────────────────────────────
+function encode_tcp(route, body, secret_key)
+    return body
+end
+
+function encode_udp(route, body, secret_key)
+    return body
+end
+
+-- ─── 解码 ─────────────────────────────────────────────────────────
+function decode_tcp(data, secret_key)
+    return "0:0", "", 0
+end
+
+function decode_udp(data, secret_key)
+    return "0:0", "", 0
+end
+
+-- ─── 路由匹配 ─────────────────────────────────────────────────────
+function expected_response_key(route)
+    return ""
+end
+`;
+
+function AdapterTab() {
+  const { message } = AntApp.useApp();
+  const theme = useEditorStore((s) => s.theme);
+  const monacoTheme = theme === 'dark' ? 'vs-dark' : 'light';
+
+  const [content, setContent] = useState('');
+  const [source, setSource] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (loaded) return;
+    setLoaded(true);
+    setLoadError(false);
+    getAdapterScript().then((file) => {
+      if (file) {
+        setContent(file.content);
+        setSource('已保存');
+      } else {
+        fetch('/conf/adapter/codec.lua')
+          .then((r) => (r.ok ? r.text() : null))
+          .then((text) => {
+            if (text) {
+              setContent(text);
+              setSource('默认模板');
+              void setAdapterScript(text);
+            } else {
+              setContent('');
+              setSource(null);
+              setLoadError(true);
+            }
+          })
+          .catch(() => {
+            setContent('');
+            setSource(null);
+            setLoadError(true);
+          });
+      }
+    });
+  }, [loaded]);
+
+  const onUpload: UploadProps['beforeUpload'] = async (file) => {
+    const text = await file.text();
+    setContent(text);
+    setSource(file.name);
+    setLoadError(false);
+    await setAdapterScript(text);
+    message.success(`已加载并保存：${file.name}`);
+    return false;
+  };
+
+  const onUseTemplate = () => {
+    setContent(ADAPTER_TEMPLATE);
+    setSource('模板（未保存）');
+    setLoadError(false);
+    message.info('已载入模板，编辑后点击保存');
+  };
+
+  const onSave = async () => {
+    if (!content.trim()) {
+      message.warning('内容为空');
+      return;
+    }
+    await setAdapterScript(content);
+    setSource('已保存');
+    setLoadError(false);
+    const missing = await validateAdapter();
+    useEditorStore.getState().setAdapterMissing(missing);
+    if (missing.length > 0) {
+      message.warning(`已保存，但缺少 ${missing.length} 个必需函数：${missing.join(', ')}`);
+    } else {
+      message.success('已保存，启动任务时会自动上传');
+    }
+  };
+
+  const onClear = async () => {
+    await clearAdapterScript();
+    setContent('');
+    setSource(null);
+    setLoadError(true);
+    const missing = await validateAdapter();
+    useEditorStore.getState().setAdapterMissing(missing);
+    message.success('已清空');
+  };
+
+  return (
+    <Tabs
+      size="small"
+      defaultActiveKey="edit"
+      items={[
+        {
+          key: 'edit',
+          label: '编辑',
+          children: (
+            <Flex vertical gap={8}>
+              <Alert type="info" showIcon message="协议适配器随任务下发" description="编辑后点保存。启动任务时会自动上传到服务端，无需手动部署。" />
+              {loadError && (
+                <Alert type="error" showIcon message="未找到协议适配器" description="未找到适配器文件且默认模板不可用。请导入文件或载入空模板后保存。" />
+              )}
+              <Space size={4} wrap>
+                <Upload accept=".lua,text/plain" beforeUpload={onUpload} showUploadList={false}>
+                  <Button icon={<InboxOutlined />} size="small">导入 .lua</Button>
+                </Upload>
+                <Button onClick={onUseTemplate} size="small">载入模板</Button>
+                <Button onClick={onSave} type="primary" size="small">保存</Button>
+                <Button onClick={onClear} danger size="small">清空</Button>
+                <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{source ?? '尚未加载'}</span>
+              </Space>
+              <div style={{ height: 'calc(100vh - 360px)', border: '1px solid var(--border-color, rgba(0,0,0,0.06))' }}>
+                <Editor
+                  language="lua"
+                  theme={monacoTheme}
+                  value={content}
+                  onChange={(v) => setContent(v ?? '')}
+                  options={{
+                    fontSize: 12,
+                    minimap: { enabled: false },
+                    scrollBeyondLastLine: false,
+                  }}
+                />
+              </div>
+            </Flex>
+          ),
+        },
+        {
+          key: 'spec',
+          label: '接口规范',
+          children: (
+            <div style={{ fontSize: 12, lineHeight: 1.6 }}>
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 12 }}
+                description="必须实现以下 7 个全局函数。引擎只调用这些接口，不感知具体协议格式。"
+              />
+              <SpecBlock title="1. 元信息（初始化时调用一次，结果缓存）" items={ADAPTER_SPEC.filter((f) => f.category === 'meta')} />
+              <SpecBlock title="2. 编码（每条出向消息调用）" items={ADAPTER_SPEC.filter((f) => f.category === 'encode')} />
+              <SpecBlock title="3. 解码（每条入向消息调用）" items={ADAPTER_SPEC.filter((f) => f.category === 'decode')} />
+              <SpecBlock title="4. 路由匹配（请求-响应配对）" items={ADAPTER_SPEC.filter((f) => f.category === 'route')} />
+              <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 12 }}>
+                运行时约束：Lua 5.1（不支持 string.pack/unpack）；消息体长度须通过 body_length_info 配置；每个机器人独立运行环境，禁止共享可变全局状态。
+              </Typography.Text>
+            </div>
+          ),
+        },
+      ]}
+    />
+  );
+}
+
+const ADAPTER_SPEC: Array<{ name: string; signature: string; desc: string; category: string }> = [
+  { name: 'header_size', signature: 'header_size() -> integer', desc: '返回协议头固定字节数。初始化时调用一次并缓存。', category: 'meta' },
+  { name: 'body_length_info', signature: 'body_length_info() -> { offset, field_type, includes_header }', desc: '描述如何从协议头字节中解析消息体长度。引擎使用此元信息进行高效解析。', category: 'meta' },
+  { name: 'encode_tcp', signature: 'encode_tcp(route, body, secret_key) -> string', desc: 'TCP 编码：根据 route + body + secret_key 拼装完整数据包（含 header）。', category: 'encode' },
+  { name: 'encode_udp', signature: 'encode_udp(route, body, secret_key) -> string', desc: 'UDP 编码：与 encode_tcp 类似，但前 N 字节保持明文。', category: 'encode' },
+  { name: 'decode_tcp', signature: 'decode_tcp(data, secret_key) -> response_key, body, header_err', desc: 'TCP 解码：返回路由键、消息体、协议头错误码。', category: 'decode' },
+  { name: 'decode_udp', signature: 'decode_udp(data, secret_key) -> response_key, body, header_err', desc: 'UDP 解码：与 decode_tcp 分离，允许对 UDP 使用不同策略。', category: 'decode' },
+  { name: 'expected_response_key', signature: 'expected_response_key(route) -> string', desc: '从发送 route 计算期望的响应路由键，用于请求-响应匹配。', category: 'route' },
+];
+
+function SpecBlock({ title, items }: { title: string; items: Array<{ name: string; signature: string; desc: string }> }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontWeight: 600, marginBottom: 6 }}>{title}</div>
+      {items.map((it) => (
+        <div
+          key={it.name}
+          style={{
+            background: 'var(--bg-canvas)',
+            borderLeft: '3px solid var(--node-action)',
+            padding: '8px 10px',
+            marginBottom: 6,
+            borderRadius: 4,
+          }}
+        >
+          <div style={{ fontFamily: 'monospace', color: 'var(--node-action-border-active)', fontWeight: 600 }}>
+            {it.signature}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>{it.desc}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ─── Proto / Lua 通用表格 ─── */
 
 interface ResourceTableProps {
   kind: 'proto' | 'lua';
@@ -77,6 +345,11 @@ interface ResourceTableProps {
 const KIND_LABEL: Record<ResourceTableProps['kind'], string> = {
   proto: 'Proto',
   lua: 'Lua',
+};
+
+const KIND_DESC: Record<ResourceTableProps['kind'], string> = {
+  proto: 'Proto 文件：定义消息结构与序列化格式，启动任务时随流程配置一起提交。',
+  lua: 'Lua 脚本：实现复杂业务逻辑，被流程节点中的 lua 动作引用。',
 };
 
 const KIND_EXT: Record<ResourceTableProps['kind'], string[]> = {
@@ -91,7 +364,6 @@ function ResourceTable({ kind }: ResourceTableProps) {
   const reloadProtos = useProtoStore((s) => s.reload);
   const theme = useEditorStore((s) => s.theme);
 
-  // 编辑器状态
   const [editFile, setEditFile] = useState<ResourceFile | null>(null);
   const [editContent, setEditContent] = useState('');
   const [saving, setSaving] = useState(false);
@@ -108,13 +380,8 @@ function ResourceTable({ kind }: ResourceTableProps) {
 
   useEffect(() => {
     load();
-    const unsub = subscribe(() => {
-      load();
-    });
-    return () => {
-      unsub();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const unsub = subscribe(() => load());
+    return () => unsub();
   }, [kind]);
 
   const handleUpload: UploadProps['customRequest'] = async ({ file, onSuccess, onError }) => {
@@ -130,8 +397,7 @@ function ResourceTable({ kind }: ResourceTableProps) {
       message.success(`${f.name} 已上传`);
       onSuccess?.({}, new XMLHttpRequest());
     } catch (e) {
-      const msg = (e as Error).message;
-      message.error(`上传失败：${msg}`);
+      message.error(`上传失败：${(e as Error).message}`);
       onError?.(e as Error);
     }
   };
@@ -210,39 +476,42 @@ function ResourceTable({ kind }: ResourceTableProps) {
       width: 180,
       render: (v: string) => new Date(v).toLocaleString(),
     },
-      {
-        title: '操作',
-        key: 'op',
-        width: 100,
-        render: (_, record) => (
-          <Space size={4}>
-            <Tooltip title="查看 / 编辑">
-              <Button
-                type="text"
-                size="small"
-                icon={<EditOutlined />}
-                onClick={() => {
-                  setEditFile(record);
-                  setEditContent(record.content);
-                }}
-              />
-            </Tooltip>
-            <Tooltip title="删除">
-              <Button
-                type="text"
-                size="small"
-                danger
-                icon={<DeleteOutlined />}
-                onClick={() => handleRemove(record.name)}
-              />
-            </Tooltip>
-          </Space>
-        ),
-      },
+    {
+      title: '操作',
+      key: 'op',
+      width: 100,
+      render: (_, record) => (
+        <Space size={4}>
+          <Tooltip title="查看 / 编辑">
+            <Button
+              type="text"
+              size="small"
+              icon={<EditOutlined />}
+              onClick={() => {
+                setEditFile(record);
+                setEditContent(record.content);
+              }}
+            />
+          </Tooltip>
+          <Tooltip title="删除">
+            <Button
+              type="text"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => handleRemove(record.name)}
+            />
+          </Tooltip>
+        </Space>
+      ),
+    },
   ];
 
   return (
     <Flex vertical gap={12}>
+      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+        {KIND_DESC[kind]}
+      </Typography.Text>
       <Space wrap>
         <Upload
           accept={KIND_EXT[kind].join(',')}
@@ -277,7 +546,7 @@ function ResourceTable({ kind }: ResourceTableProps) {
           columns={columns}
           size="small"
           pagination={false}
-          scroll={{ y: 'calc(100vh - 360px)' }}
+          scroll={{ y: 'calc(100vh - 280px)' }}
         />
       )}
 
@@ -286,7 +555,7 @@ function ResourceTable({ kind }: ResourceTableProps) {
         open={!!editFile}
         onCancel={() => setEditFile(null)}
         width={900}
-        destroyOnClose
+        destroyOnHidden
         maskClosable={false}
         footer={[
           <Button key="cancel" onClick={() => setEditFile(null)}>取消</Button>,

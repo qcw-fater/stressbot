@@ -29,14 +29,56 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
   const showS2C = patternHas(pattern, ['s2cProto']);
   const showBindings = patternHas(pattern, ['bindings']);
   const showStore = patternHas(pattern, ['store']);
-  const showTimeout = pattern === 'waitListen';
-  const showTarget = pattern === 'close';
+  const showTimeout = pattern === 'tcpListen' || pattern === 'udpListen' || pattern === 'tcpRequest' || pattern === 'udpRequest';
+  const showPollMs = pattern === 'tcpListen' || pattern === 'udpListen';
   const showKeys = pattern === 'clearState';
-  const showSecretArg = pattern === 'exchangeKey';
-  const showOptional = pattern === 'waitListen';
+  const showOptional = ['tcpSend', 'tcpRequest', 'udpSend', 'udpRequest', 'tcpListen', 'udpListen', 'httpRequest'].includes(pattern);
+  const showURL = pattern === 'httpRequest';
+  const showMethod = pattern === 'httpRequest';
+  const showContentType = pattern === 'httpRequest';
 
   return (
     <Form layout="vertical">
+      {showURL && (
+        <Form.Item label="URL（请求地址，支持 state:key）">
+          <Input
+            value={action.url ?? ''}
+            onChange={(e) => set({ url: e.target.value })}
+            placeholder="如 http://192.168.1.1:8080/api/login 或 state:loginUrl"
+          />
+        </Form.Item>
+      )}
+
+      {showMethod && (
+        <Form.Item label="Method（HTTP 方法）">
+          <Select
+            value={action.method || 'POST'}
+            onChange={(v) => set({ method: v })}
+            options={[
+              { value: 'GET', label: 'GET' },
+              { value: 'POST', label: 'POST' },
+              { value: 'PUT', label: 'PUT' },
+              { value: 'DELETE', label: 'DELETE' },
+            ]}
+            style={{ width: 200 }}
+          />
+        </Form.Item>
+      )}
+
+      {showContentType && (
+        <Form.Item label="ContentType（请求体格式）">
+          <Select
+            value={action.contentType || 'json'}
+            onChange={(v) => set({ contentType: v })}
+            options={[
+              { value: 'json', label: 'application/json' },
+              { value: 'form', label: 'application/x-www-form-urlencoded' },
+            ]}
+            style={{ width: 260 }}
+          />
+        </Form.Item>
+      )}
+
       {showService && (
         <Form.Item label="service（目标服务名）">
           <Input
@@ -93,9 +135,9 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
       )}
 
       {showBindings && (
-        <Form.Item label="bindings（C2S 字段绑定）">
+        <Form.Item label={pattern === 'httpRequest' ? 'bindings（请求体字段）' : pattern === 'setState' ? 'bindings（State 写入绑定）' : 'bindings（C2S 字段绑定）'}>
           <BindingsTable
-            messageFullName={action.c2sProto}
+            messageFullName={pattern === 'httpRequest' ? undefined : action.c2sProto}
             value={action.bindings}
             onChange={(v) => set({ bindings: v })}
           />
@@ -103,8 +145,8 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
       )}
 
       {showStore && (
-        <Form.Item label="store（S2C → state 映射）">
-          <StoreTable s2cProto={action.s2cProto} value={action.store} onChange={(v) => set({ store: v })} />
+        <Form.Item label={pattern === 'httpRequest' ? 'store（JSON 响应 → state 映射）' : 'store（S2C → state 映射）'}>
+          <StoreTable s2cProto={pattern === 'httpRequest' ? undefined : action.s2cProto} value={action.store} onChange={(v) => set({ store: v })} />
         </Form.Item>
       )}
 
@@ -113,33 +155,24 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
           <Space>
             <InputNumber
               min={0}
+              placeholder={pattern === 'tcpRequest' || pattern === 'udpRequest' ? '10' : '60'}
               value={action.timeout}
               onChange={(v) => set({ timeout: (v as number) ?? undefined })}
               addonAfter="s"
             />
-            <span>轮询间隔</span>
-            <InputNumber
-              min={0}
-              value={action.pollMs}
-              onChange={(v) => set({ pollMs: (v as number) ?? undefined })}
-              addonAfter="ms"
-            />
+            {showPollMs && (
+              <>
+                <span>轮询间隔</span>
+                <InputNumber
+                  min={0}
+                  placeholder="100"
+                  value={action.pollMs}
+                  onChange={(v) => set({ pollMs: (v as number) ?? undefined })}
+                  addonAfter="ms"
+                />
+              </>
+            )}
           </Space>
-        </Form.Item>
-      )}
-
-      {showTarget && (
-        <Form.Item label="target（关闭哪种连接）">
-          <Select
-            value={action.target}
-            onChange={(v) => set({ target: v })}
-            options={[
-              { value: 'tcp', label: 'tcp' },
-              { value: 'udp', label: 'udp' },
-            ]}
-            style={{ width: 200 }}
-            allowClear
-          />
         </Form.Item>
       )}
 
@@ -151,15 +184,6 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
             onChange={(v) => set({ keys: v })}
             placeholder="输入 state key，回车确认"
             style={{ width: '100%' }}
-          />
-        </Form.Item>
-      )}
-
-      {showSecretArg && (
-        <Form.Item label="secretArg（密钥写入 state 的 key）">
-          <Input
-            value={action.secretArg ?? ''}
-            onChange={(e) => set({ secretArg: e.target.value })}
           />
         </Form.Item>
       )}
@@ -187,12 +211,15 @@ function patternHas(pattern: ActionPattern, fields: Array<keyof ActionDef>): boo
   const map: Partial<Record<ActionPattern, Array<keyof ActionDef>>> = {
     tcpSend: ['service', 'route', 'c2sProto', 'bindings'],
     tcpRequest: ['service', 'route', 'c2sProto', 's2cProto', 'bindings', 'store'],
-    udpSendProto: ['service', 'route', 'c2sProto', 'bindings'],
-    waitListen: ['service', 'route', 's2cProto', 'store'],
-    connect: ['service', 'address'],
-    connectUDP: ['service', 'address'],
-    exchangeKey: ['service', 'route'],
-    close: ['service'],
+    tcpConnect: ['service', 'address'],
+    tcpClose: ['service'],
+    tcpListen: ['service', 'route', 's2cProto', 'store'],
+    udpSend: ['service', 'route', 'c2sProto', 'bindings'],
+    udpRequest: ['service', 'route', 'c2sProto', 's2cProto', 'bindings', 'store'],
+    udpConnect: ['service', 'address'],
+    udpClose: ['service'],
+    udpListen: ['service', 'route', 's2cProto', 'store'],
+    httpRequest: ['bindings', 'store'],
     clearState: [],
     setState: ['bindings'],
     lua: [],

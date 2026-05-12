@@ -1,23 +1,13 @@
 /**
  * Lua 脚本与 IndexedDB 的"按 flow 同步"工具。
  *
- * 设计目标（用户语义）：
- *   - 「flow → 引用的脚本」是单一事实源，IDB 只是用户编辑稿/本地副本；
- *   - 用户**不需要**关心脚本是从哪里来的（手写 / 导入 / 默认基线）—— 启动任务时所有
- *     被引用到的脚本都必须存在；
- *   - 同时保护用户已经编辑过的本地稿不被默认基线覆盖。
+ * 设计目标：
+ *   - 扫描 flow 中引用的脚本名，将 IDB 中缺失的从基线 `/conf/scripts/<name>` 拉回；
+ *   - **不覆盖** IDB 中已存在的脚本（保护用户编辑稿）；
+ *   - 基线更新检测由 `syncResourcesFromBaseline` 负责，此模块仅做 gap-fill。
  *
- * 三个调用点：
- *   1. Toolbar 导入 JSON / 加载 conf/flow/flow.json 后 → 自动把"引用了但 IDB 没有"的脚本
- *      从 `/conf/scripts/<name>` 拉回来写 IDB（开发期由 Vite confMountPlugin 提供）；
- *   2. EditorPage 初始化默认 flow 后 → 同上；
- *   3. taskActions.startTask 提交前 → 最后一道兜底；这一步如果还有缺失文件就抛
- *      ApiError，避免 Agent 端报"脚本未预编译"。
- *
- * 不做的事：
- *   - **不覆盖** IDB 中已经存在的脚本（保护用户编辑稿，即使内容与基线不同）；
- *   - 不动 proto：proto 是按 messageType 名字引用的，flow 没声明依赖哪些 .proto 文件，
- *     无法静态推断；proto 仍由「资源管理」入口手动管理。
+ * 调用点：
+ *   - FlowEditor 初始化、Toolbar 加载、TaskStartModal 打开、startTask 提交前。
  */
 
 import { addScript, getScript } from './resourcesStore';
@@ -106,7 +96,7 @@ export async function syncFlowScriptsToIdb(
           return;
         }
         const text = await r.text();
-        await addScript(name, text, true);
+        await addScript(name, text);
         added.push(name);
       } catch {
         missing.push(name);

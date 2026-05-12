@@ -58,7 +58,7 @@ function execute(r)
     end
 
     -- 使用 request 模式发送（与旧工具 RequestResponse 一致）
-    local code, _, sent, recv = network.request("battle", {cmd=4, act=13}, msg)
+    local code, _, sent, recv = network.tcp_request("battle", {cmd=4, act=13}, msg)
     if code ~= 0 then
         log.error("BattleEnd 发送失败: code=" .. tostring(code))
         return 1, sent, recv

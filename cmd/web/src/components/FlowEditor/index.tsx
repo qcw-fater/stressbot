@@ -15,7 +15,6 @@ import { ProtoBrowser } from './proto/ProtoBrowser';
 import { ListenPanel } from './listens/ListenPanel';
 import { ValidationReportDrawer } from './validation/ValidationReport';
 import { TemplateEditorDrawer } from './library/TemplateEditorDrawer';
-import { CodecAdapterDrawer } from './adapter/CodecAdapterDrawer';
 import { startAutoPersist, loadDraft } from './store/persistDraft';
 import { startHistory, undo, redo } from './store/undoRedo';
 import { useMetricsStore, type MetricsProvider } from './nodes/shared/MetricsBadge';
@@ -23,7 +22,8 @@ import { FlowReadOnlyContext } from './flowReadOnlyContext';
 import { App as AntApp } from 'antd';
 import { useFlowStore } from './store/flowStore';
 import { useProtoStore } from './proto/protoStore';
-import { syncFlowScriptsToIdb } from '@/services/scriptSync';
+import { syncResourcesFromBaseline, validateAdapter } from '@/services/resourcesStore';
+import { useEditorStore } from './store/editorStore';
 import type { FlowJson } from './codec/flowToJson';
 import type { FlowLayout } from '@/types/editor';
 
@@ -81,6 +81,40 @@ function FlowEditorInner({
     console.log('[FlowEditor] 触发 proto 加载…');
     void loadProtos({ kind: 'static' });
   }, [loadProtos]);
+
+  // 基线资源同步：mount 时无条件触发，自动新增 / 冲突写入 editorStore
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const sync = await syncResourcesFromBaseline();
+        if (!cancelled) {
+          if (sync.conflicts.length > 0 || sync.removed.length > 0) {
+            useEditorStore.getState().setPendingSyncResult(sync);
+          }
+          if (sync.added.length > 0) {
+            notification.info({
+              message: '基线同步',
+              description: `自动新增 ${sync.added.length} 个资源文件`,
+              duration: 3,
+            });
+          }
+        }
+      } catch {
+        // 基线不可用时不阻塞编辑器
+      }
+      // 适配器校验
+      try {
+        const missing = await validateAdapter();
+        if (!cancelled) {
+          useEditorStore.getState().setAdapterMissing(missing);
+        }
+      } catch {
+        // 静默
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     // 启动持久化 + Undo/Redo 历史栈
@@ -140,9 +174,6 @@ function FlowEditorInner({
         const flow = (await res.json()) as FlowJson;
         if (cancelled) return;
         loadFromTaskFlow(flow);
-        // 把默认 flow 引用的 lua 自动复制到 IDB，方便用户后续编辑保留
-        // （IDB 已有则不覆盖；拉不到的不报错，留给用户手动处理）
-        void syncFlowScriptsToIdb(flow);
       } catch {
         // 静默：未挂载 conf/ 时不报错
       }
@@ -181,7 +212,6 @@ function FlowEditorInner({
         <ProtoBrowser />
         <ListenPanel />
         <TemplateEditorDrawer />
-        <CodecAdapterDrawer />
         <ValidationReportDrawer open={validationOpen} onClose={() => setValidationOpen(false)} />
       </div>
     </FlowReadOnlyContext.Provider>

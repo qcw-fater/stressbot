@@ -1,4 +1,4 @@
--- listen_start_loading.lua: 等待战斗开始加载（waitListen CMD=4, ACT=6）
+-- listen_start_loading.lua: 等待战斗开始加载（tcp_listen CMD=4, ACT=6）
 -- 从 BattleStartLoadingS2C 提取战斗服地址、fighterIndex、battleId、secretKey
 -- 与旧 Robot 工具 SetLoadingInfo 逻辑一致：
 --   battleId = 顶层 BattleId
@@ -12,8 +12,8 @@ local proto = require("proto")
 local log = require("log")
 
 function execute(r)
-    -- 轮询监听开始加载消息，超时 180 秒（3 分钟）
-    local resp, recv = network.wait_listen("logic", {cmd=4, act=6}, "Game.BattleStartLoadingS2C", 180)
+    -- 轮询监听开始加载消息，超时 180 秒（3 分钟），轮询 500 毫秒
+    local resp, recv = network.tcp_listen("logic", {cmd=4, act=6}, "Game.BattleStartLoadingS2C", 180, 500)
     if not resp then
         log.error("ListenStartLoading 超时")
         return 1, 0, recv

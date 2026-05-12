@@ -37,14 +37,13 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
  * 任务级运行时配置。
  *
  * 字段分层：
- * - 必填（authAddr/concurrency/timeoutSec）：每个任务一定要的核心参数；
+ * - 必填（concurrency/timeoutSec）：每个任务一定要的核心参数；
  * - 可选（其余）：留空时由 admin 用合理默认值填充并下发给 agent。
  *
  * 协议约定：超时类用 int 秒数（前端表单友好），admin 转 duration 字符串给 agent。
  */
 export interface RobotConfig {
   // ── 必填 ──
-  authAddr: string;
   concurrency: number;
   /** TCP/请求超时秒数（兜底）。也兼容旧字段语义。 */
   timeoutSec: number;
@@ -61,11 +60,11 @@ export interface RobotConfig {
   /** 主连接服务名，默认 "logic"；不同游戏命名不同 */
   mainService?: string;
   /**
-   * Auth 请求扩展字段（version / channel / platform 等）。
+   * State 扩展字段（version / channel / platform 等）。
    * 在 lua 脚本里通过 `robot.get("version")` 取到。
    * 不配置则 lua 取到 nil 走脚本兜底默认值，可能导致鉴权失败。
    */
-  authExtra?: Record<string, string>;
+  stateExtra?: Record<string, string>;
 
   // ── 性能/超时（通常用默认值即可）──
   /** 心跳间隔秒数，默认 5 */
@@ -83,6 +82,23 @@ export interface RobotConfig {
   logLevel?: LogLevel;
   /** 调试模式：单 agent 分配 + 历史自动标记 "debug" */
   debugMode?: boolean;
+  /** 渐进式加压配置，不配时一次性创建全部机器人 */
+  rampUp?: RampUpConfig;
+}
+
+/** 渐进式加压阶段配置。 */
+export interface RampUpStage {
+  /** 本阶段新增 bot 数（增量值），各阶段之和必须等于 totalBots */
+  count: number;
+  /** 覆盖全局并发数，0 或空则用全局值 */
+  concurrency?: number;
+  /** 阶段间等待秒数，最后阶段可不填 */
+  holdSec?: number;
+}
+
+/** 渐进式加压配置。 */
+export interface RampUpConfig {
+  stages: RampUpStage[];
 }
 
 export interface TaskConfig {
@@ -315,7 +331,6 @@ export interface TaskConflictDetails {
 
 // === History ===
 export interface ConfigSummary {
-  authAddr: string;
   concurrency: number;
   timeoutSec: number;
   flowSizeKB: number;

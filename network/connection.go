@@ -110,7 +110,7 @@ func (c *Connection) GetSecretKey() []byte {
 }
 
 // RequestResponse 发送请求并同步等待响应。
-func (c *Connection) RequestResponse(sendData []byte, responseKey string) (*Message, int) {
+func (c *Connection) RequestResponse(sendData []byte, responseKey string, timeoutOverride ...time.Duration) (*Message, int) {
 	if c == nil {
 		return nil, 0
 	}
@@ -140,7 +140,11 @@ func (c *Connection) RequestResponse(sendData []byte, responseKey string) (*Mess
 	}
 
 	start := time.Now()
-	timeout := time.After(c.requestTimeout)
+	timeout := c.requestTimeout
+	if len(timeoutOverride) > 0 && timeoutOverride[0] > 0 {
+		timeout = timeoutOverride[0]
+	}
+	timeoutTimer := time.After(timeout)
 	select {
 	case <-c.ctx.Done():
 		elapsed := time.Since(start)
@@ -154,12 +158,12 @@ func (c *Connection) RequestResponse(sendData []byte, responseKey string) (*Mess
 			zap.String("service", c.serviceName), zap.String("responseKey", responseKey),
 			zap.Int("bodyLen", len(resp.Data)), zap.Duration("elapsed", elapsed))
 		return resp, n
-	case <-timeout:
+	case <-timeoutTimer:
 		elapsed := time.Since(start)
 		stresslog.Warn("[NETWORK] RequestResponse 等待超时",
 			zap.String("service", c.serviceName), zap.String("responseKey", responseKey),
 			zap.String("robot", c.robotName), zap.Duration("elapsed", elapsed),
-			zap.Duration("timeout", c.requestTimeout))
+			zap.Duration("timeout", timeout))
 		return nil, 0
 	}
 }

@@ -22,6 +22,7 @@
 
 import {
   Alert,
+  Button,
   Collapse,
   DatePicker,
   Descriptions,
@@ -32,18 +33,20 @@ import {
   Segmented,
   Select,
   Space,
+  Switch,
+  Table,
   Tag,
   Tooltip,
   Typography,
 } from 'antd';
-import type { LogLevel } from '@/types/api';
+import type { LogLevel, RampUpStage } from '@/types/api';
 import { AuthExtraEditor } from './AuthExtraEditor';
-import { BugOutlined, CheckCircleOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { BugOutlined, CheckCircleOutlined, DeleteOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useShallow } from 'zustand/react/shallow';
 import { showApiError, startTask, useRuntimeStore } from '@/services';
-import { listProto, listScript, type ResourceFile } from '@/services/resourcesStore';
+import { listProto, listScript, syncResourcesFromBaseline, type ResourceFile } from '@/services/resourcesStore';
 import { syncFlowScriptsToIdb, collectFlowScriptNames } from '@/services/scriptSync';
 import { useFlowStore } from '@/components/FlowEditor/store/flowStore';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
@@ -122,10 +125,12 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
   const [missingScripts, setMissingScripts] = useState<string[]>([]);
   /** 资源同步进行中，给 UI 一个轻量 loading 态 */
   const [syncing, setSyncing] = useState(false);
+  /** 渐进式加压开关 */
+  const [rampUpEnabled, setRampUpEnabled] = useState(false);
+  /** 渐进式阶段列表 */
+  const [rampUpStages, setRampUpStages] = useState<RampUpStage[]>([{ count: 0 }]);
 
-  // 弹窗打开 → 先把 flow 引用、IDB 缺失的脚本从默认基线拉回 IDB（保护已编辑稿不覆盖），
-  // 再 listProto / listScript 取最终 IDB 全集，让"Lua 脚本"行展示的数字与 startTask
-  // 实际会上传的 multipart 内容完全一致，避免用户看到"6 个"实际上传却是"7 个"的错觉。
+  // 弹窗打开 → 基线资源全量对比 + flow 引用脚本 gap-fill + 收集 IDB 全集
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -134,13 +139,20 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
       try {
         const flow = useFlowStore.getState().toTaskFlow();
         const refNames = collectFlowScriptNames(flow);
-        const sync = await syncFlowScriptsToIdb(flow);
+        // flow 引用脚本 gap-fill
+        const scriptSync = await syncFlowScriptsToIdb(flow);
+        // 全量基线对比
+        const baselineSync = await syncResourcesFromBaseline();
+        // 收集 IDB 全集
         const [p, s] = await Promise.all([listProto(), listScript()]);
         if (cancelled) return;
         setProtos(p);
         setScripts(s);
         setRefScriptCount(refNames.length);
-        setMissingScripts(sync.missing);
+        setMissingScripts(scriptSync.missing);
+        if (baselineSync.conflicts.length > 0 || baselineSync.removed.length > 0) {
+          useEditorStore.getState().setPendingSyncResult(baselineSync);
+        }
       } finally {
         if (!cancelled) setSyncing(false);
       }
@@ -184,13 +196,12 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
   const capacityWarn = !debugMode && totalBots > totalCapacity;
   const noAgentBlock = onlineAgents === 0; // 无 Agent 在线连调试也跑不起来，仍禁用启动
 
-  // authAddr 必须带 scheme，否则后端 net/http 会报 "unsupported protocol scheme"，
-  // 被 lua 兜底变成 -1，业务脚本看到的就是"错误码 1"，根因被吞掉。
-  const authAddrTrim = robotConfig.authAddr.trim();
-  const authAddrInvalid =
-    authAddrTrim !== '' &&
-    !authAddrTrim.startsWith('http://') &&
-    !authAddrTrim.startsWith('https://');
+  // 渐进式加压：阶段 count 之和
+  const rampUpSum = useMemo(
+    () => rampUpStages.reduce((s, st) => s + (st.count || 0), 0),
+    [rampUpStages],
+  );
+  const rampUpValid = !rampUpEnabled || (rampUpStages.length > 0 && rampUpSum === totalBots && rampUpStages.every((st) => st.count > 0));
 
   function onToggleDebug(v: boolean) {
     setDebugMode(v);
@@ -203,6 +214,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
         concurrency: DEBUG_PRESET.concurrency,
         logLevel: DEBUG_PRESET.logLevel,
       });
+      setRampUpEnabled(false);
       filledRef.current = true;
     }
   }
@@ -213,7 +225,11 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
       const id = await startTask({
         name: taskName,
         totalBots,
-        robotConfig: { ...robotConfig, debugMode },
+        robotConfig: {
+          ...robotConfig,
+          debugMode,
+          rampUp: rampUpEnabled ? { stages: rampUpStages } : undefined,
+        },
         deadline: deadline ?? undefined,
       });
       onStarted?.(id);
@@ -255,10 +271,9 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
           noAgentBlock ||
           missingScripts.length > 0 ||
           syncing ||
-          authAddrInvalid ||
-          !authAddrTrim ||
           !taskName.trim() ||
-          totalBots <= 0,
+          totalBots <= 0 ||
+          !rampUpValid,
         danger: debugMode ? false : undefined,
       }}
       width={620}
@@ -351,23 +366,6 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
             style={{ width: '100%' }}
           />
         </Form.Item>
-        <Form.Item
-          label="Auth 地址"
-          required
-          validateStatus={authAddrInvalid ? 'error' : undefined}
-          help={
-            authAddrInvalid
-              ? '必须以 http:// 或 https:// 开头，否则脚本中的 HTTP 请求会失败（错误码 1）'
-              : '启动时会下发到各节点'
-          }
-        >
-          <Input
-            value={robotConfig.authAddr}
-            onChange={(e) => setRobotConfig({ authAddr: e.target.value })}
-            placeholder="例：http://auth.example.com:20000"
-            status={authAddrInvalid ? 'error' : undefined}
-          />
-        </Form.Item>
         <Form.Item label="并发（每秒新建机器人数）">
           <InputNumber
             min={1}
@@ -376,6 +374,146 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
             onChange={(v) => setRobotConfig({ concurrency: typeof v === 'number' ? v : 1 })}
             style={{ width: '100%' }}
           />
+        </Form.Item>
+        <Form.Item
+          label={
+            <Space size={6}>
+              <span>渐进式加压</span>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                分阶段创建机器人，观察逐步增加负载时服务器性能变化
+              </Typography.Text>
+            </Space>
+          }
+        >
+          <Space direction="vertical" style={{ width: '100%' }} size={8}>
+            <Space size={8}>
+              <Switch
+                checked={rampUpEnabled}
+                onChange={(checked) => {
+                  setRampUpEnabled(checked);
+                  if (checked && rampUpStages.length === 0) {
+                    setRampUpStages([{ count: 0 }]);
+                  }
+                }}
+                disabled={debugMode}
+              />
+              {debugMode && (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  调试模式不支持渐进式加压
+                </Typography.Text>
+              )}
+            </Space>
+            {rampUpEnabled && !debugMode && (
+              <>
+                <Table<RampUpStage & { _idx: number }>
+                  size="small"
+                  pagination={false}
+                  dataSource={rampUpStages.map((s, i) => ({ ...s, _idx: i }))}
+                  rowKey="_idx"
+                  columns={[
+                    {
+                      title: '阶段',
+                      width: 48,
+                      render: (_, __, i) => `#${i + 1}`,
+                    },
+                    {
+                      title: '新增机器人数',
+                      dataIndex: 'count',
+                      width: 120,
+                      render: (v: number, _, i) => (
+                        <InputNumber
+                          size="small"
+                          min={1}
+                          max={totalBots}
+                          value={v || undefined}
+                          placeholder="数量"
+                          onChange={(n) => {
+                            const next = [...rampUpStages];
+                            next[i] = { ...next[i], count: typeof n === 'number' ? n : 0 };
+                            setRampUpStages(next);
+                          }}
+                          style={{ width: '100%' }}
+                        />
+                      ),
+                    },
+                    {
+                      title: '并发覆盖',
+                      dataIndex: 'concurrency',
+                      width: 100,
+                      render: (v: number | undefined, _, i) => (
+                        <InputNumber
+                          size="small"
+                          min={0}
+                          max={1000}
+                          value={v}
+                          placeholder="默认"
+                          onChange={(n) => {
+                            const next = [...rampUpStages];
+                            next[i] = { ...next[i], concurrency: typeof n === 'number' ? n : undefined };
+                            setRampUpStages(next);
+                          }}
+                          style={{ width: '100%' }}
+                        />
+                      ),
+                    },
+                    {
+                      title: '保持秒数',
+                      dataIndex: 'holdSec',
+                      width: 100,
+                      render: (v: number | undefined, _, i) => (
+                        <InputNumber
+                          size="small"
+                          min={0}
+                          max={3600}
+                          value={v}
+                          placeholder="0"
+                          onChange={(n) => {
+                            const next = [...rampUpStages];
+                            next[i] = { ...next[i], holdSec: typeof n === 'number' ? n : undefined };
+                            setRampUpStages(next);
+                          }}
+                          style={{ width: '100%' }}
+                        />
+                      ),
+                    },
+                    {
+                      title: '',
+                      width: 36,
+                      render: (_, __, i) =>
+                        rampUpStages.length > 1 ? (
+                          <Button
+                            type="text"
+                            size="small"
+                            danger
+                            icon={<DeleteOutlined />}
+                            onClick={() => {
+                              setRampUpStages(rampUpStages.filter((_, idx) => idx !== i));
+                            }}
+                          />
+                        ) : null,
+                    },
+                  ]}
+                />
+                <Space size={8} style={{ width: '100%', justifyContent: 'space-between' }}>
+                  <Button
+                    size="small"
+                    type="dashed"
+                    icon={<PlusOutlined />}
+                    onClick={() => setRampUpStages([...rampUpStages, { count: 0 }])}
+                  >
+                    添加阶段
+                  </Button>
+                  <Typography.Text
+                    type={rampUpSum === totalBots ? 'success' : 'warning'}
+                    style={{ fontSize: 12 }}
+                  >
+                    合计 {rampUpSum} / {totalBots}
+                    {rampUpSum !== totalBots && totalBots > 0 && '（需等于总机器人数）'}
+                  </Typography.Text>
+                </Space>
+              </>
+            )}
+          </Space>
         </Form.Item>
       </Form>
 
@@ -394,19 +532,19 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
               <Space size={6}>
                 <span>高级设置</span>
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  Auth 扩展字段 / 主服务 / 超时 / 日志 / 自动停止
+                  State 扩展字段 / 主服务 / 超时 / 日志 / 自动停止
                 </Typography.Text>
               </Space>
             ),
             children: (
               <Form layout="vertical">
                 <Form.Item
-                  label="Auth 扩展字段"
+                  label="State 扩展字段"
                   extra="脚本中可通过 robot.get(key) 读取；不配置则返回空值。常用 version/channel/platform"
                 >
                   <AuthExtraEditor
-                    value={robotConfig.authExtra}
-                    onChange={(v) => setRobotConfig({ authExtra: v })}
+                    value={robotConfig.stateExtra}
+                    onChange={(v) => setRobotConfig({ stateExtra: v })}
                   />
                 </Form.Item>
                 <Form.Item label="账号前缀" extra="如 bot_/qa_，默认 bot_">

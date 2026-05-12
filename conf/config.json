@@ -6,13 +6,11 @@
     "concurrentNum": 0,
     "mainService": "logic"
   },
-  "auth": {
-    "address": "http://192.168.61.161:20000",
-    "extra": {
-      "version": "0.31.49.171222",
-      "channel": "mine",
-      "platform": "1000"
-    }
+  "stateExtra": {
+    "authAddr": "http://192.168.61.161:20000",
+    "version": "0.31.49.171222",
+    "channel": "mine",
+    "platform": "1000"
   },
   "adapter": {
     "script": "conf/adapter/codec.lua"

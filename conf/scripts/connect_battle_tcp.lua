@@ -37,11 +37,13 @@ function execute(r)
         return 1, 0, 0
     end
 
-    local okExch, sent, recv = network.exchange_key("battle")
-    if not okExch then
+    -- 发送空包获取密钥并设置到连接
+    local code, keyBody, sent, recv = network.tcp_request("battle")
+    if code ~= 0 or not keyBody or #keyBody == 0 then
         log.error("战斗服密钥交换失败")
         return 1, sent, recv
     end
+    network.set_tcp_secret_key("battle", keyBody)
 
     -- 注册 10 秒心跳（Battle: cmd=4 BATTLE, act=2 PING_CS）
     network.register_tcp_heartbeat("battle", 10000, {cmd=4, act=2}, build_battle_tcp_heart)

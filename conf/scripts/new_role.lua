@@ -16,7 +16,8 @@ function execute(r)
     local heroIds = {142, 143, 148}
     local heroId = heroIds[math.random(#heroIds)]
 
-    local code, body, sent, recv = network.http_post("/newRole", {
+    local authAddr = robot.get("authAddr") or ""
+    local code, body, sent, recv = network.http_request(authAddr .. "/newRole", "POST", "form", {
         account = account,
         heroId  = tostring(heroId),
         session = session,

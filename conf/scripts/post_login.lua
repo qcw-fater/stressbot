@@ -15,7 +15,8 @@ function execute(r)
     -- 预计算 battleVersion（FNV-1a 哈希）
     robot.set("battleVersion", utils.fnv_hash(version))
 
-    local code, body, sent, recv = network.http_post("/login", {
+    local authAddr = robot.get("authAddr") or ""
+    local code, body, sent, recv = network.http_request(authAddr .. "/login", "POST", "form", {
         account  = account,
         version  = version,
         channel  = channel,

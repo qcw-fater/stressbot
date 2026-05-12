@@ -29,6 +29,7 @@ import { edgeTypes } from './edges/registry';
 import { useFlowStore } from './store/flowStore';
 import { useEditorStore, type Clipboard } from './store/editorStore';
 import { generateNodeId } from './utils/nodeIdGen';
+import { nanoid } from 'nanoid';
 import { saveActionTemplate, saveListenTemplate } from './library/templateStore';
 import { useFlowReadOnly } from './flowReadOnlyContext';
 import type { FlowNode, NodeType } from '@/types/flow';
@@ -549,10 +550,7 @@ function FlowCanvasInner() {
             setSelectedNode(id);
           } else {
             // F9 = Listen
-            const state = useFlowStore.getState();
-            let listenName = 'listen';
-            let i = 1;
-            while (state.listens[listenName]) listenName = `listen_${i++}`;
+            const listenName = `listen_${nanoid(6)}`;
             addListen(listenName, {});
             const cardId = `__cb__${listenName}`;
             const layout = useFlowStore.getState().layout;
@@ -560,7 +558,6 @@ function FlowCanvasInner() {
             useFlowStore.setState((s) => ({
               rfNodes: s.rfNodes.map((n) => (n.id === cardId ? { ...n, position: flowPos } : n)),
             }));
-            setActivePanel({ kind: 'listenEdit', listenName });
           }
           return;
         }
@@ -770,10 +767,7 @@ function FlowCanvasInner() {
             setSelectedNode(id);
           }}
           onAddListen={(fx, fy) => {
-            const state = useFlowStore.getState();
-            let listenName = 'listen';
-            let i = 1;
-            while (state.listens[listenName]) listenName = `listen_${i++}`;
+            const listenName = `listen_${nanoid(6)}`;
             addListen(listenName, {});
             const cardId = `__cb__${listenName}`;
             const layout = useFlowStore.getState().layout;
@@ -781,7 +775,6 @@ function FlowCanvasInner() {
             useFlowStore.setState((s) => ({
               rfNodes: s.rfNodes.map((n) => (n.id === cardId ? { ...n, position: { x: fx, y: fy } } : n)),
             }));
-            setActivePanel({ kind: 'listenEdit', listenName });
           }}
           onDeleteNode={(id) => {
             const n = rfNodes.find((x) => x.id === id);

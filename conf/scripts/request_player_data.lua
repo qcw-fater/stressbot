@@ -9,8 +9,8 @@ function execute(r)
     local msg = proto.create("Game.MainLoadOkC2S")
     local _, sent = network.tcp_send("logic", {cmd=2, act=16}, msg)
 
-    -- 等待 LoginPlayerDataS2C (CMD=1, ACT=2)
-    local resp, recv = network.wait_listen("logic", {cmd=1, act=2}, "Game.LoginPlayerDataS2C", 30)
+    -- 等待 LoginPlayerDataS2C (CMD=1, ACT=2)，轮询 200 毫秒
+    local resp, recv = network.tcp_listen("logic", {cmd=1, act=2}, "Game.LoginPlayerDataS2C", 30, 200)
 
     if not resp then
         log.error("RequestPlayerData: 响应为空")

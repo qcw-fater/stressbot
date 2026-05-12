@@ -32,7 +32,8 @@ function execute(r)
         return 1, 0, 0
     end
 
-    local code, body, sent, recv = network.http_post("/useRole", {
+    local authAddr = robot.get("authAddr") or ""
+    local code, body, sent, recv = network.http_request(authAddr .. "/useRole", "POST", "form", {
         account  = account,
         id       = tostring(playerId),
         session  = session,

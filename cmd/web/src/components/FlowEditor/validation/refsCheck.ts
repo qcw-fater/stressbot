@@ -2,10 +2,12 @@
  * 引用 / 业务校验（设计文档 §13）。
  *
  * 输出 ValidationIssue[]，每个 issue 含 severity / code / message / location。
+ * 覆盖原 cmd/validate 的全部校验（Lua 语法检查除外）。
  */
 
 import type { TaskFlow } from '@/types/flow';
-import type { ActionDef } from '@/types/action';
+import type { ActionDef, BindingType, FieldBind, FilterDef } from '@/types/action';
+import { ALL_ACTION_PATTERNS, ALL_BINDING_TYPES } from '@/types/action';
 import { protoRegistry } from '../proto/ProtoRegistry';
 import { buildRefsGraph } from '../listens/refsGraph';
 
@@ -26,9 +28,25 @@ export interface ValidationReport {
   total: number;
 }
 
-const PATTERNS_REQUIRE_C2S = ['tcpSend', 'tcpRequest', 'udpSendProto'];
-const PATTERNS_REQUIRE_S2C = ['tcpRequest', 'waitListen'];
-const PATTERNS_REQUIRE_SERVICE = ['tcpSend', 'tcpRequest', 'udpSendProto', 'connect', 'connectUDP', 'exchangeKey', 'close', 'waitListen'];
+// ── pattern 必填字段映射 ──────────────────────────────────────
+
+const PATTERNS_REQUIRE_SERVICE = ['tcpSend', 'tcpRequest', 'tcpConnect', 'tcpClose', 'tcpListen', 'udpSend', 'udpRequest', 'udpConnect', 'udpClose', 'udpListen'];
+const PATTERNS_REQUIRE_ROUTE = ['tcpSend', 'tcpRequest', 'tcpListen', 'udpSend', 'udpRequest', 'udpListen'];
+const PATTERNS_REQUIRE_ADDRESS = ['tcpConnect', 'udpConnect'];
+const PATTERNS_REQUIRE_C2S = ['tcpSend', 'udpSend'];
+const PATTERNS_REQUIRE_S2C = ['tcpRequest', 'udpRequest'];
+
+const VALID_NODE_TYPES = new Set(['sequence', 'action', 'loop', 'boolean', 'weighted', 'wait', 'break', 'continue']);
+
+const VALID_FILTER_OPS = new Set([
+  '', '==', '!=', '>', '>=', '<', '<=',
+  'eq', 'neq', 'gt', 'gte', 'lt', 'lte',
+  'contains', 'in', 'timeWindow', 'dailyTimeWindow', 'notNil', 'isNil',
+]);
+
+const VALID_BINDING_TYPE_SET = new Set<string>(ALL_BINDING_TYPES);
+
+// ── 主入口 ──────────────────────────────────────────────────
 
 export function validateFlow(flow: TaskFlow): ValidationReport {
   const issues: ValidationIssue[] = [];
@@ -36,34 +54,39 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
   const actions = flow.actions ?? {};
   const callbacks = flow.listens ?? {};
 
-  // 必须有 main 节点（设计 §13 R1）
+  // R1：必须有 main 节点
   if (!nodes.main) {
-    issues.push({
-      severity: 'error',
-      code: 'NO_MAIN',
-      message: '缺少入口节点 "main"',
-    });
+    issues.push({ severity: 'error', code: 'NO_MAIN', message: '缺少入口节点 "main"' });
   }
 
-  // R2/R3/R4：节点引用合法性
+  // R2/R3/R4：节点引用合法性 + 类型校验
   for (const [id, node] of Object.entries(nodes)) {
     const ref = (target: string | undefined, field: string) => {
       if (!target) return;
       if (!nodes[target]) {
         issues.push({
-          severity: 'error',
-          code: 'NODE_REF_NOT_FOUND',
+          severity: 'error', code: 'NODE_REF_NOT_FOUND',
           message: `节点 "${id}" 的 ${field} 指向不存在的 "${target}"`,
           location: { kind: 'node', id },
         });
       }
     };
+
+    // 节点类型校验
+    if (!VALID_NODE_TYPES.has(node.type)) {
+      issues.push({
+        severity: 'error', code: 'NODE_UNKNOWN_TYPE',
+        message: `节点 "${id}" 的类型 "${node.type}" 不合法`,
+        location: { kind: 'node', id },
+      });
+      continue;
+    }
+
     if (node.type === 'sequence') {
       (node.next ?? []).forEach((t, i) => ref(t, `next[${i}]`));
       if (!node.next || node.next.length === 0) {
         issues.push({
-          severity: 'warning',
-          code: 'EMPTY_SEQUENCE',
+          severity: 'warning', code: 'EMPTY_SEQUENCE',
           message: `sequence 节点 "${id}" 的 next 为空`,
           location: { kind: 'node', id },
         });
@@ -72,20 +95,17 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
       ref(node.body, 'body');
       if (!node.body) {
         issues.push({
-          severity: 'error',
-          code: 'LOOP_BODY_MISSING',
+          severity: 'error', code: 'LOOP_BODY_MISSING',
           message: `loop 节点 "${id}" 缺少 body`,
           location: { kind: 'node', id },
         });
       }
-      // loopCount 与 condition 至少一个：否则没有终止条件，会无限循环
       const hasCount = typeof node.loopCount === 'number' && node.loopCount > 0;
       const hasCond = !!node.condition?.trim();
       const hasBreak = !!node.breakCondition?.trim();
       if (!hasCount && !hasCond && !hasBreak) {
         issues.push({
-          severity: 'warning',
-          code: 'LOOP_NO_TERMINATION',
+          severity: 'warning', code: 'LOOP_NO_TERMINATION',
           message: `loop 节点 "${id}" 既无 loopCount 也无 condition / breakCondition，将无限循环`,
           location: { kind: 'node', id },
         });
@@ -93,16 +113,14 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
     } else if (node.type === 'boolean') {
       if (!node.condition?.trim()) {
         issues.push({
-          severity: 'error',
-          code: 'BOOLEAN_NO_CONDITION',
+          severity: 'error', code: 'BOOLEAN_NO_CONDITION',
           message: `boolean 节点 "${id}" 缺少 condition`,
           location: { kind: 'node', id },
         });
       }
       if (!node.trueNext && !node.falseNext) {
         issues.push({
-          severity: 'error',
-          code: 'BOOLEAN_NO_BRANCH',
+          severity: 'error', code: 'BOOLEAN_NO_BRANCH',
           message: `boolean 节点 "${id}" 必须至少配置 trueNext 或 falseNext`,
           location: { kind: 'node', id },
         });
@@ -112,8 +130,7 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
     } else if (node.type === 'wait') {
       if (typeof node.waitMs !== 'number' || node.waitMs <= 0) {
         issues.push({
-          severity: 'error',
-          code: 'WAIT_NO_MS',
+          severity: 'error', code: 'WAIT_NO_MS',
           message: `wait 节点 "${id}" 缺少有效的 waitMs（必须为正整数）`,
           location: { kind: 'node', id },
         });
@@ -122,8 +139,7 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
       const opts = node.options ?? [];
       if (opts.length === 0) {
         issues.push({
-          severity: 'error',
-          code: 'WEIGHTED_NO_OPTIONS',
+          severity: 'error', code: 'WEIGHTED_NO_OPTIONS',
           message: `weighted 节点 "${id}" 缺少 options`,
           location: { kind: 'node', id },
         });
@@ -131,8 +147,7 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
       const total = opts.reduce((s, o) => s + Math.max(0, o.weight), 0);
       if (total <= 0 && opts.length > 0) {
         issues.push({
-          severity: 'error',
-          code: 'WEIGHTED_ALL_ZERO',
+          severity: 'error', code: 'WEIGHTED_ALL_ZERO',
           message: `weighted 节点 "${id}" 所有权重和为 0`,
           location: { kind: 'node', id },
         });
@@ -141,34 +156,53 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
     } else if (node.type === 'action') {
       if (!node.action) {
         issues.push({
-          severity: 'error',
-          code: 'ACTION_REF_EMPTY',
+          severity: 'error', code: 'ACTION_REF_EMPTY',
           message: `action 节点 "${id}" 未指定 action 名`,
           location: { kind: 'node', id },
         });
       } else if (!actions[node.action]) {
         issues.push({
-          severity: 'error',
-          code: 'ACTION_REF_NOT_FOUND',
+          severity: 'error', code: 'ACTION_REF_NOT_FOUND',
           message: `action 节点 "${id}" 引用了不存在的 action "${node.action}"`,
           location: { kind: 'node', id },
         });
       }
-      // 监听项 server 必填（callback 可为 null 表示静默丢弃）
+      // ListenRef 校验
       (node.listenCallbacks ?? []).forEach((r, i) => {
         if (!r.server?.trim()) {
           issues.push({
-            severity: 'error',
-            code: 'LISTEN_NO_SERVER',
-            message: `action 节点 "${id}" listenCallbacks[${i}] 缺少 server（如 tcp:logic / udp:battle）`,
+            severity: 'error', code: 'LISTEN_NO_SERVER',
+            message: `action 节点 "${id}" listenCallbacks[${i}] 缺少 server`,
             location: { kind: 'node', id },
           });
+        } else {
+          const s = r.server.trim();
+          const hasPrefix = s.startsWith('tcp:') || s.startsWith('udp:');
+          if (!hasPrefix) {
+            issues.push({
+              severity: 'error', code: 'LISTEN_SERVER_FORMAT',
+              message: `action 节点 "${id}" listenCallbacks[${i}] server 格式错误（应为 tcp:<name> 或 udp:<name>）`,
+              location: { kind: 'node', id },
+            });
+          } else {
+            const parts = s.split(':');
+            if (parts.length < 2 || !parts[1]) {
+              issues.push({
+                severity: 'error', code: 'LISTEN_SERVER_FORMAT',
+                message: `action 节点 "${id}" listenCallbacks[${i}] server 缺少服务名`,
+                location: { kind: 'node', id },
+              });
+            }
+          }
         }
       });
     }
   }
 
-  // R5–R10：actions 校验（仅校验被节点引用的 action）
+  // 孤立节点检测
+  issues.push(...detectOrphanNodes(nodes));
+
+  // R5–R10：actions 校验
   const referencedActions = new Set<string>();
   for (const node of Object.values(nodes)) {
     if (node.type === 'action' && node.action) {
@@ -179,10 +213,8 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
     if (referencedActions.has(name)) {
       issues.push(...checkAction(name, def));
     } else {
-      // 孤儿 action：无节点引用 → 降级为 warning（可能是正在编辑 / 删节点后残留）
       issues.push({
-        severity: 'warning',
-        code: 'ACTION_ORPHAN',
+        severity: 'warning', code: 'ACTION_ORPHAN',
         message: `action "${name}" 未被任何节点引用`,
         location: { kind: 'action', id: name },
       });
@@ -192,19 +224,16 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
   // R11–R13：listens 校验 + ref graph 校验
   const graph = buildRefsGraph(flow);
   for (const [name, cb] of Object.entries(callbacks)) {
-    // lua callback 必须有 script
     if (cb.script !== undefined && !cb.script?.trim()) {
       issues.push({
-        severity: 'error',
-        code: 'LISTEN_LUA_NO_SCRIPT',
+        severity: 'error', code: 'LISTEN_LUA_NO_SCRIPT',
         message: `listen "${name}" 是 lua 模式但缺少 script`,
         location: { kind: 'listen', id: name },
       });
     }
     if (cb.s2cProto && protoRegistry.isLoaded() && !protoRegistry.lookupMessage(cb.s2cProto)) {
       issues.push({
-        severity: 'error',
-        code: 'LISTEN_S2C_NOT_FOUND',
+        severity: 'error', code: 'LISTEN_S2C_NOT_FOUND',
         message: `listen "${name}" 的 s2cProto "${cb.s2cProto}" 在 proto 中不存在`,
         location: { kind: 'listen', id: name },
       });
@@ -212,27 +241,22 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
     const refCount = graph.refCount.get(name) ?? 0;
     if (refCount === 0) {
       issues.push({
-        severity: 'warning',
-        code: 'LISTEN_ORPHAN',
+        severity: 'warning', code: 'LISTEN_ORPHAN',
         message: `listen "${name}" 未被任何 action 引用（孤儿）`,
         location: { kind: 'listen', id: name },
       });
     }
   }
-  // R14：listenCallbacks 中引用了不存在的 callback
   for (const dr of graph.danglingRefs) {
     issues.push({
-      severity: 'error',
-      code: 'LISTEN_CB_NOT_FOUND',
+      severity: 'error', code: 'LISTEN_CB_NOT_FOUND',
       message: `节点 "${dr.nodeId}" listenCallbacks[${dr.refIndex}] 引用了不存在的 listen "${dr.ref.callback}"`,
       location: { kind: 'node', id: dr.nodeId },
     });
   }
-  // R15：相同 server+route 被多个 action 注册了不同 callback
   for (const dup of graph.duplicateRegisters) {
     issues.push({
-      severity: 'warning',
-      code: 'DUPLICATE_REGISTER',
+      severity: 'warning', code: 'DUPLICATE_REGISTER',
       message: `${dup.server} ${dup.routeKey} 被多次注册：${dup.refs.map((r) => `${r.nodeId}→${r.cb ?? 'null'}`).join(', ')}`,
     });
   }
@@ -240,87 +264,252 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
   return categorize(issues);
 }
 
+// ── Action 校验 ─────────────────────────────────────────────
+
 function checkAction(name: string, def: ActionDef): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const loc = { kind: 'action' as const, id: name };
-  // pattern 必填
+
   if (!def.pattern) {
     issues.push({ severity: 'error', code: 'ACTION_NO_PATTERN', message: `action "${name}" 缺少 pattern`, location: loc });
     return issues;
   }
-  // service 必填
-  if (PATTERNS_REQUIRE_SERVICE.includes(def.pattern) && !def.service) {
-    issues.push({
-      severity: 'error',
-      code: 'ACTION_NO_SERVICE',
-      message: `action "${name}" (pattern=${def.pattern}) 缺少 service`,
-      location: loc,
-    });
+
+  // pattern 合法性
+  if (!(ALL_ACTION_PATTERNS as readonly string[]).includes(def.pattern)) {
+    issues.push({ severity: 'error', code: 'ACTION_UNKNOWN_PATTERN', message: `action "${name}" 的 pattern "${def.pattern}" 不合法`, location: loc });
+    return issues;
   }
-  // c2s/s2c proto 必填
-  if (PATTERNS_REQUIRE_C2S.includes(def.pattern) && !def.c2sProto) {
-    issues.push({
-      severity: 'error',
-      code: 'ACTION_NO_C2S',
-      message: `action "${name}" (pattern=${def.pattern}) 缺少 c2sProto`,
-      location: loc,
-    });
+
+  const p = def.pattern;
+
+  // service
+  if (PATTERNS_REQUIRE_SERVICE.includes(p) && !def.service) {
+    issues.push({ severity: 'error', code: 'ACTION_NO_SERVICE', message: `action "${name}" (pattern=${p}) 缺少 service`, location: loc });
   }
-  if (PATTERNS_REQUIRE_S2C.includes(def.pattern) && !def.s2cProto) {
-    issues.push({
-      severity: 'error',
-      code: 'ACTION_NO_S2C',
-      message: `action "${name}" (pattern=${def.pattern}) 缺少 s2cProto`,
-      location: loc,
-    });
+  // route
+  if (PATTERNS_REQUIRE_ROUTE.includes(p) && def.route == null) {
+    issues.push({ severity: 'error', code: 'ACTION_NO_ROUTE', message: `action "${name}" (pattern=${p}) 缺少 route`, location: loc });
   }
+  // address
+  if (PATTERNS_REQUIRE_ADDRESS.includes(p) && !def.address) {
+    issues.push({ severity: 'error', code: 'ACTION_NO_ADDRESS', message: `action "${name}" (pattern=${p}) 缺少 address`, location: loc });
+  }
+  // c2s/s2c proto
+  if (PATTERNS_REQUIRE_C2S.includes(p) && !def.c2sProto) {
+    issues.push({ severity: 'error', code: 'ACTION_NO_C2S', message: `action "${name}" (pattern=${p}) 缺少 c2sProto`, location: loc });
+  }
+  if (PATTERNS_REQUIRE_S2C.includes(p) && !def.s2cProto) {
+    issues.push({ severity: 'error', code: 'ACTION_NO_S2C', message: `action "${name}" (pattern=${p}) 缺少 s2cProto`, location: loc });
+  }
+  // lua script
+  if (p === 'lua' && !def.script) {
+    issues.push({ severity: 'error', code: 'LUA_NO_SCRIPT', message: `action "${name}" pattern=lua 缺少 script`, location: loc });
+  }
+  // clearState keys
+  if (p === 'clearState' && (!def.keys || def.keys.length === 0)) {
+    issues.push({ severity: 'error', code: 'ACTION_NO_KEYS', message: `action "${name}" pattern=clearState 缺少 keys`, location: loc });
+  }
+  // httpRequest url
+  if (p === 'httpRequest' && !def.url) {
+    issues.push({ severity: 'error', code: 'ACTION_NO_URL', message: `action "${name}" pattern=httpRequest 缺少 url`, location: loc });
+  }
+
   // proto 真实存在校验
   if (protoRegistry.isLoaded()) {
     if (def.c2sProto && !protoRegistry.lookupMessage(def.c2sProto)) {
-      issues.push({
-        severity: 'error',
-        code: 'C2S_PROTO_NOT_FOUND',
-        message: `action "${name}" 的 c2sProto "${def.c2sProto}" 在 proto 中不存在`,
-        location: loc,
-      });
+      issues.push({ severity: 'error', code: 'C2S_PROTO_NOT_FOUND', message: `action "${name}" 的 c2sProto "${def.c2sProto}" 在 proto 中不存在`, location: loc });
     }
     if (def.s2cProto && !protoRegistry.lookupMessage(def.s2cProto)) {
-      issues.push({
-        severity: 'error',
-        code: 'S2C_PROTO_NOT_FOUND',
-        message: `action "${name}" 的 s2cProto "${def.s2cProto}" 在 proto 中不存在`,
-        location: loc,
-      });
+      issues.push({ severity: 'error', code: 'S2C_PROTO_NOT_FOUND', message: `action "${name}" 的 s2cProto "${def.s2cProto}" 在 proto 中不存在`, location: loc });
     }
-    // 字段绑定的 field 是否存在
     if (def.c2sProto && def.bindings) {
       const msg = protoRegistry.lookupMessage(def.c2sProto);
       if (msg) {
         const fieldSet = new Set(msg.fields.map((f) => f.name));
         for (const b of def.bindings) {
           if (b.field && !fieldSet.has(b.field)) {
-            issues.push({
-              severity: 'warning',
-              code: 'BINDING_FIELD_NOT_FOUND',
-              message: `action "${name}" bindings 中字段 "${b.field}" 不存在于 ${def.c2sProto}`,
-              location: loc,
-            });
+            issues.push({ severity: 'warning', code: 'BINDING_FIELD_NOT_FOUND', message: `action "${name}" bindings 中字段 "${b.field}" 不存在于 ${def.c2sProto}`, location: loc });
           }
         }
       }
     }
   }
-  // lua 必须有 script
-  if (def.pattern === 'lua' && !def.script) {
-    issues.push({
-      severity: 'error',
-      code: 'LUA_NO_SCRIPT',
-      message: `action "${name}" pattern=lua 缺少 script`,
-      location: loc,
-    });
+
+  // binding 递归校验
+  if (def.bindings) {
+    issues.push(...checkBindings(`action "${name}"`, def.bindings, loc));
+  }
+
+  return issues;
+}
+
+// ── Binding 递归校验 ────────────────────────────────────────
+
+function checkBindings(prefix: string, bindings: FieldBind[], loc: { kind: 'action'; id: string }): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  for (let i = 0; i < bindings.length; i++) {
+    const b = bindings[i];
+    const label = `${prefix}.bindings[${i}]`;
+    const t = b.type ?? '';
+
+    // field + storeAs 都空（nested/nestedList 除外）
+    if (!b.field && !b.storeAs && t !== 'nested' && t !== 'nestedList') {
+      issues.push({ severity: 'warning', code: 'BINDING_NO_FIELD', message: `${label} 缺少 field 和 storeAs`, location: loc });
+    }
+
+    // binding type 合法性
+    if (t && !VALID_BINDING_TYPE_SET.has(t)) {
+      issues.push({ severity: 'error', code: 'BINDING_UNKNOWN_TYPE', message: `${label} 未知的 binding type "${t}"`, location: loc });
+      continue;
+    }
+
+    // 按 type 检查必填字段
+    switch (t as BindingType | '') {
+      case '':
+      case 'fixed':
+        break;
+      case 'state':
+      case 'stateFirst':
+      case 'stateRandom':
+      case 'stateMapKey':
+      case 'stateMapValue':
+      case 'listSize':
+        if (!b.source) {
+          issues.push({ severity: 'error', code: 'BINDING_NO_SOURCE', message: `${label} type=${t} 缺少 source`, location: loc });
+        }
+        break;
+      case 'stateRandomN':
+        if (!b.source) {
+          issues.push({ severity: 'error', code: 'BINDING_NO_SOURCE', message: `${label} type=stateRandomN 缺少 source`, location: loc });
+        }
+        if (!b.count || b.count <= 0) {
+          issues.push({ severity: 'error', code: 'BINDING_NO_COUNT', message: `${label} type=stateRandomN count 必须 > 0`, location: loc });
+        }
+        break;
+      case 'randomPick':
+      case 'randomPickN':
+        if (!b.values || b.values.length === 0) {
+          issues.push({ severity: 'error', code: 'BINDING_NO_VALUES', message: `${label} type=${t} 缺少 values`, location: loc });
+        }
+        if (t === 'randomPickN' && (!b.count || b.count <= 0)) {
+          issues.push({ severity: 'error', code: 'BINDING_NO_COUNT', message: `${label} type=randomPickN count 必须 > 0`, location: loc });
+        }
+        break;
+      case 'randomPickMap':
+        if (!b.values || b.values.length === 0) {
+          issues.push({ severity: 'error', code: 'BINDING_NO_VALUES', message: `${label} type=randomPickMap 缺少 values`, location: loc });
+        }
+        if (!b.keySource) {
+          issues.push({ severity: 'error', code: 'BINDING_NO_KEY_SOURCE', message: `${label} type=randomPickMap 缺少 keySource`, location: loc });
+        }
+        break;
+      case 'randomExclude':
+        if ((!b.values || b.values.length === 0) && !b.source) {
+          issues.push({ severity: 'error', code: 'BINDING_NO_EXCLUDE_SOURCE', message: `${label} type=randomExclude 缺少 values 和 source`, location: loc });
+        }
+        break;
+      case 'randomInt':
+        if (b.min != null && b.max != null && b.min >= b.max) {
+          issues.push({ severity: 'warning', code: 'BINDING_INVALID_RANGE', message: `${label} type=randomInt min >= max`, location: loc });
+        }
+        break;
+      case 'randomBool':
+        break;
+      case 'randomString':
+        if (!b.length || b.length <= 0) {
+          issues.push({ severity: 'error', code: 'BINDING_INVALID_LENGTH', message: `${label} type=randomString length 必须 > 0`, location: loc });
+        }
+        break;
+      case 'nested':
+        if (!b.message) {
+          issues.push({ severity: 'error', code: 'BINDING_NO_MESSAGE', message: `${label} type=nested 缺少 message`, location: loc });
+        } else if (protoRegistry.isLoaded() && !protoRegistry.lookupMessage(b.message)) {
+          issues.push({ severity: 'error', code: 'BINDING_MSG_NOT_FOUND', message: `${label} type=nested message "${b.message}" 在 proto 中不存在`, location: loc });
+        }
+        if (!b.bindings || b.bindings.length === 0) {
+          issues.push({ severity: 'warning', code: 'BINDING_EMPTY_NESTED', message: `${label} type=nested bindings 为空`, location: loc });
+        }
+        if (b.bindings) {
+          issues.push(...checkBindings(label, b.bindings, loc));
+        }
+        break;
+      case 'nestedList':
+        if (!b.items || b.items.length === 0) {
+          issues.push({ severity: 'error', code: 'BINDING_NO_ITEMS', message: `${label} type=nestedList 缺少 items`, location: loc });
+        } else {
+          for (let j = 0; j < b.items.length; j++) {
+            const item = b.items[j];
+            const itemLabel = `${label}.items[${j}]`;
+            if (!item.message) {
+              issues.push({ severity: 'error', code: 'BINDING_NO_MESSAGE', message: `${itemLabel} 缺少 message`, location: loc });
+            } else if (protoRegistry.isLoaded() && !protoRegistry.lookupMessage(item.message)) {
+              issues.push({ severity: 'error', code: 'BINDING_MSG_NOT_FOUND', message: `${itemLabel} message "${item.message}" 在 proto 中不存在`, location: loc });
+            }
+            if (item.bindings) {
+              issues.push(...checkBindings(itemLabel, item.bindings, loc));
+            }
+          }
+        }
+        break;
+    }
+
+    // filter op 校验
+    if (b.filters) {
+      issues.push(...checkFilters(label, b.filters, loc));
+    }
+  }
+
+  return issues;
+}
+
+// ── Filter op 校验 ──────────────────────────────────────────
+
+function checkFilters(prefix: string, filters: FilterDef[], loc: { kind: 'action'; id: string }): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (let i = 0; i < filters.length; i++) {
+    const f = filters[i];
+    if (f.op && !VALID_FILTER_OPS.has(f.op)) {
+      issues.push({ severity: 'error', code: 'FILTER_UNKNOWN_OP', message: `${prefix}.filters[${i}] 未知的 op "${f.op}"`, location: loc });
+    }
   }
   return issues;
 }
+
+// ── 孤立节点检测 ─────────────────────────────────────────────
+
+function detectOrphanNodes(nodes: Record<string, { type: string; next?: string[]; body?: string; trueNext?: string; falseNext?: string; options?: Array<{ node: string }> }>): ValidationIssue[] {
+  const reachable = new Set<string>();
+
+  const visit = (id: string) => {
+    if (reachable.has(id)) return;
+    const node = nodes[id];
+    if (!node) return;
+    reachable.add(id);
+    (node.next ?? []).forEach(visit);
+    if (node.body) visit(node.body);
+    if (node.trueNext) visit(node.trueNext);
+    if (node.falseNext) visit(node.falseNext);
+    (node.options ?? []).forEach((o) => visit(o.node));
+  };
+
+  visit('main');
+
+  const issues: ValidationIssue[] = [];
+  for (const id of Object.keys(nodes)) {
+    if (!reachable.has(id)) {
+      issues.push({
+        severity: 'warning', code: 'NODE_ORPHAN',
+        message: `节点 "${id}" 不可达（从 main 出发无法到达）`,
+        location: { kind: 'node', id },
+      });
+    }
+  }
+  return issues;
+}
+
+// ── 工具 ─────────────────────────────────────────────────────
 
 function categorize(issues: ValidationIssue[]): ValidationReport {
   const errors = issues.filter((i) => i.severity === 'error');

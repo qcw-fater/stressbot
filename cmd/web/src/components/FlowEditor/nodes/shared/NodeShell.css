@@ -380,32 +380,50 @@
 }
 
 /* pattern 徽章按语义分组着色：
- *   send  (tcpSend / tcpRequest / udpSendProto)  → 蓝
- *   conn  (connect / connectUDP / exchangeKey / close) → 青
- *   wait  (waitListen)                           → 橙
- *   lua   (lua 脚本)                             → 紫
- *   state (clearState / setState)                → 绿
+ *   send     (tcpSend / udpSend)                 → 蓝
+ *   request  (tcpRequest / udpRequest)           → 紫
+ *   conn     (tcpConnect / udpConnect)           → 绿
+ *   close    (tcpClose / udpClose)               → 红
+ *   listen   (tcpListen / udpListen)             → 橙
+ *   http     (httpRequest)                       → 青（teal）
+ *   state    (clearState / setState)             → 绿
+ *   lua      (lua 脚本)                          → 紫
  *   silent / declarative / lua（callback kind 同 badge）
  */
 .pattern-badge[data-pattern='tcpSend'],
-.pattern-badge[data-pattern='tcpRequest'],
-.pattern-badge[data-pattern='udpSendProto'] {
+.pattern-badge[data-pattern='udpSend'] {
   background: var(--node-sequence-bg);
   color: var(--node-sequence-border-active);
   border-color: var(--node-sequence);
 }
-.pattern-badge[data-pattern='connect'],
-.pattern-badge[data-pattern='connectUDP'],
-.pattern-badge[data-pattern='exchangeKey'],
-.pattern-badge[data-pattern='close'] {
-  background: var(--node-continue-bg);
-  color: var(--node-continue-border-active);
-  border-color: var(--node-continue);
+.pattern-badge[data-pattern='tcpRequest'],
+.pattern-badge[data-pattern='udpRequest'] {
+  background: var(--node-weighted-bg);
+  color: var(--node-weighted-border-active);
+  border-color: var(--node-weighted);
 }
-.pattern-badge[data-pattern='waitListen'] {
+.pattern-badge[data-pattern='tcpConnect'],
+.pattern-badge[data-pattern='udpConnect'] {
+  background: var(--node-loop-bg);
+  color: var(--node-loop-border-active);
+  border-color: var(--node-loop);
+}
+.pattern-badge[data-pattern='tcpClose'],
+.pattern-badge[data-pattern='udpClose'] {
+  background: var(--node-wait-bg);
+  color: var(--node-wait-border-active);
+  border-color: var(--node-wait);
+}
+.pattern-badge[data-pattern='tcpListen'],
+.pattern-badge[data-pattern='udpListen'] {
   background: var(--node-break-bg);
   color: var(--node-break-border-active);
   border-color: var(--node-break);
+}
+.pattern-badge[data-pattern='httpRequest'] {
+  background: var(--node-weighted-bg);
+  color: var(--node-weighted-border-active);
+  border-color: var(--node-weighted);
 }
 .pattern-badge[data-pattern='lua'] {
   background: var(--node-weighted-bg);

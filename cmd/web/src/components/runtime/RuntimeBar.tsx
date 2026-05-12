@@ -25,7 +25,7 @@ import {
   DatabaseOutlined,
   EditOutlined,
   HistoryOutlined,
-  LinkOutlined,
+
   PlayCircleOutlined,
   SettingOutlined,
   StopOutlined,
@@ -33,7 +33,7 @@ import {
   DashboardOutlined,
   AlignLeftOutlined,
 } from '@ant-design/icons';
-import { App as AntApp, Button, Divider, Popover, Segmented, Space, Switch, Tag, Tooltip, Typography } from 'antd';
+import { App as AntApp, Badge, Button, Divider, Popover, Segmented, Space, Switch, Tag, Tooltip, Typography } from 'antd';
 import { useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import {
@@ -96,16 +96,17 @@ export function RuntimeBar({
   );
 
   // 设置 Popover 用到的 UI 状态 + 打开协议适配器面板的 setter
-  const { theme, setTheme, showListenEdges, toggleListenEdges, setActivePanel, debugMode, setDebugMode, historyEnabled } = useEditorStore(
+  const { theme, setTheme, showListenEdges, toggleListenEdges, debugMode, setDebugMode, historyEnabled, pendingSyncResult, adapterMissing } = useEditorStore(
     useShallow((s) => ({
       theme: s.theme,
       setTheme: s.setTheme,
       showListenEdges: s.showListenEdges,
       toggleListenEdges: s.toggleListenEdges,
-      setActivePanel: s.setActivePanel,
       debugMode: s.debugMode,
       setDebugMode: s.setDebugMode,
       historyEnabled: s.historyEnabled,
+      pendingSyncResult: s.pendingSyncResult,
+      adapterMissing: s.adapterMissing,
     })),
   );
 
@@ -328,7 +329,6 @@ export function RuntimeBar({
       {SECTION_DIVIDER}
 
       {/* === 跨模块入口组（统一图标 + 文字） === */}
-      {/* 适配器在最左：与"资源"同属协议/资源准备类（codec.lua 也是 lua 脚本），仅 edit 态可打开 */}
       <Space size={4}>
         <Tooltip title="系统状态：查看服务器与各节点硬件级指标">
           <Button icon={<DashboardOutlined />} onClick={onOpenSystem}>
@@ -340,19 +340,23 @@ export function RuntimeBar({
             日志
           </Button>
         </Tooltip>
-        <Tooltip title="协议适配器（codec.lua）— 通用游戏服务器协议接入">
-          <Button
-            icon={<LinkOutlined />}
-            onClick={() => setActivePanel({ kind: 'codecAdapter' })}
-            disabled={mode !== 'edit'}
+        <Tooltip title={adapterMissing && adapterMissing.length > 0 ? `适配器缺少 ${adapterMissing.length} 个必需函数` : '资源管理（proto / lua / 适配器）'}>
+          <Badge
+            count={
+              adapterMissing && adapterMissing.length > 0
+                ? adapterMissing.length
+                : pendingSyncResult
+                  ? pendingSyncResult.conflicts.length + pendingSyncResult.removed.length
+                  : 0
+            }
+            overflowCount={99}
+            offset={[-4, 4]}
+            color={adapterMissing && adapterMissing.length > 0 ? undefined : 'orange'}
           >
-            适配器
-          </Button>
-        </Tooltip>
-        <Tooltip title="资源管理（proto / lua 文件）">
-          <Button icon={<DatabaseOutlined />} onClick={onOpenResources}>
-            资源
-          </Button>
+            <Button icon={<DatabaseOutlined />} onClick={onOpenResources}>
+              资源
+            </Button>
+          </Badge>
         </Tooltip>
         <Tooltip
           title={

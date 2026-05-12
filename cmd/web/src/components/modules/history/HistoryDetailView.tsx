@@ -328,7 +328,7 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
           <Descriptions.Item label="开始">{detail.startedAt ? dayjs(detail.startedAt).format('YYYY-MM-DD HH:mm:ss') : '—'}</Descriptions.Item>
           <Descriptions.Item label="结束">{detail.stoppedAt ? dayjs(detail.stoppedAt).format('YYYY-MM-DD HH:mm:ss') : '—'}</Descriptions.Item>
           <Descriptions.Item label="配置摘要" span={2}>
-            地址=<code>{detail.configSummary.authAddr}</code> · 并发={detail.configSummary.concurrency} · 超时={detail.configSummary.timeoutSec}s · 流程={detail.configSummary.flowSizeKB}KB · 协议文件×{detail.configSummary.protoCount} · 脚本×{detail.configSummary.scriptCount}
+            并发={detail.configSummary.concurrency} · 超时={detail.configSummary.timeoutSec}s · 流程={detail.configSummary.flowSizeKB}KB · 协议文件×{detail.configSummary.protoCount} · 脚本×{detail.configSummary.scriptCount}
           </Descriptions.Item>
           {detail.errorMsg && (
             <Descriptions.Item label="错误信息" span={2}>

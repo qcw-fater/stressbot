@@ -23,7 +23,7 @@ type Adapter interface {
 	// EncodeTCP 将路由信息+消息体编码为完整 TCP 数据包（含消息头）。
 	// route 为不透明类型，由 flow.json 中声明，原样传给 Lua。
 	// secretKey 为连接加密密钥，nil 表示不加密。
-	// route 为 nil 时，适配器应视为"无路由请求"（如密钥交换 cmd=0,act=0）。
+	// route 为 nil 时，适配器应视为"无路由请求"（如密钥交换）。
 	EncodeTCP(route any, body []byte, secretKey []byte) []byte
 
 	// EncodeUDP 将路由信息+消息体编码为 UDP 数据包。

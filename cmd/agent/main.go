@@ -38,10 +38,7 @@ type Config struct {
 		MainService   string `json:"mainService"`
 	} `json:"bot"`
 
-	Auth struct {
-		Address string            `json:"address"`
-		Extra   map[string]string `json:"extra"`
-	} `json:"auth"`
+	StateExtra map[string]string `json:"stateExtra"`
 
 	Adapter struct {
 		Script   string `json:"script"`
@@ -105,7 +102,7 @@ func main() {
 	}
 	stresslog.InitLog(logPath, "stressbot", logConf, "")
 	newLogger := logview.AttachRingBuffer(stresslog.GetLogger(), 50000, zap.String("SR", "stressbot"))
-		stresslog.ReplaceLogger(newLogger)
+	stresslog.ReplaceLogger(newLogger)
 
 	if cfg.Agent.Enabled {
 		stresslog.Info("[MAIN] Agent 模式启动", zap.String("adminAddr", cfg.Agent.AdminAddr))
@@ -217,8 +214,7 @@ func runStandalone(cfg *Config) {
 		StartNumber:    cfg.Bot.StartNumber,
 		Count:          cfg.Bot.Count,
 		ConcurrentNum:  cfg.Bot.ConcurrentNum,
-		AuthBaseURL:    cfg.Auth.Address,
-		AuthExtra:      cfg.Auth.Extra,
+		StateExtra:     cfg.StateExtra,
 		Adapter:        adp,
 		RequestTimeout: tcpTimeout,
 		MainService:    cfg.Bot.MainService,
@@ -301,7 +297,7 @@ func loadConfig(path string) (*Config, error) {
 		cfg.Bot.AccountPrefix = "bot_"
 	}
 	if cfg.Bot.MainService == "" {
-		cfg.Bot.MainService = "logic"
+		return nil, fmt.Errorf("bot.mainService is required")
 	}
 	if cfg.Adapter.Script == "" {
 		cfg.Adapter.Script = "conf/adapter/codec.lua"

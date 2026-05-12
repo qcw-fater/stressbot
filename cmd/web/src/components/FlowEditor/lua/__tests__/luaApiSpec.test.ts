@@ -65,7 +65,7 @@ describe('renderSignature / renderDoc', () => {
   });
 
   it('renderSignature 多参数用逗号分隔', () => {
-    const fn = getLuaFunction('network', 'request')!;
+    const fn = getLuaFunction('network', 'tcp_request')!;
     expect(renderSignature(fn)).toBe('(service, route, msg, [s2c_proto])');
   });
 
@@ -103,11 +103,19 @@ describe('coverage：所有 stressbot 已暴露的核心 Lua API 都被记录', 
       'connect_udp',
       'close_tcp',
       'close_udp',
-      'request',
+      'tcp_request',
+      'udp_request',
       'tcp_send',
       'udp_send',
-      'http_post',
-      'wait_listen',
+      'http_request',
+      'tcp_listen',
+      'udp_listen',
+      'set_tcp_secret_key',
+      'set_udp_secret_key',
+      'get_tcp_secret_key',
+      'get_udp_secret_key',
+      'ensure_tcp_listener',
+      'ensure_udp_listener',
       'register_tcp_heartbeat',
       'register_udp_heartbeat',
     ]) {

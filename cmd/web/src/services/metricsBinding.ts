@@ -77,3 +77,20 @@ export function classifyApdex(apdex: number | undefined): ApdexLevel {
   if (apdex >= 0.5) return 'poor';
   return 'danger';
 }
+
+/** 加权计算一组动作的聚合 Apdex 和成功率 */
+export function computeWeightedMetrics(actions: ActionMetric[]) {
+  let totalSamples = 0;
+  let weightedApdex = 0;
+  let weightedSuccess = 0;
+  for (const a of actions) {
+    totalSamples += a.sampleCount;
+    weightedApdex += a.apdex * a.sampleCount;
+    weightedSuccess += a.successRate * a.sampleCount;
+  }
+  return {
+    totalSamples,
+    apdex: totalSamples > 0 ? weightedApdex / totalSamples : 0,
+    successRate: totalSamples > 0 ? weightedSuccess / totalSamples : 0,
+  };
+}

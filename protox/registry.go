@@ -62,7 +62,7 @@ func indexFromDescriptor(msgs protoreflect.MessageDescriptors, result map[string
 }
 
 // Lookup 查找消息类型描述符
-// name 可以是全名（如 "login.PlayerLoginC2S"）或短名（如 "PlayerLoginC2S"）
+// name 可以是全名（如 "example.RequestC2S"）或短名（如 "PlayerLoginC2S"）
 func (r *Registry) Lookup(name string) (protoreflect.MessageDescriptor, bool) {
 	md, ok := r.messages[name]
 	return md, ok

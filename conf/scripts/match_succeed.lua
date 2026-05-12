@@ -1,4 +1,4 @@
--- match_succeed.lua: 等待匹配成功（waitListen CMD=3, ACT=1）
+-- match_succeed.lua: 等待匹配成功（tcp_listen CMD=3, ACT=1）
 -- 从 MatchSucceedS2C 的 actorList 中提取自己的 battleSession（校验ID）
 local network = require("network")
 local robot = require("robot")
@@ -6,8 +6,8 @@ local proto = require("proto")
 local log = require("log")
 
 function execute(r)
-    -- 轮询监听匹配成功消息，超时 600 秒（10 分钟）
-    local resp, recv = network.wait_listen("logic", {cmd=3, act=1}, "Game.MatchSucceedS2C", 600)
+    -- 轮询监听匹配成功消息，超时 600 秒（10 分钟），轮询 1 秒
+    local resp, recv = network.tcp_listen("logic", {cmd=3, act=1}, "Game.MatchSucceedS2C", 600, 1000)
     if not resp then
         log.error("MatchSucceed 超时")
         return 1, 0, recv

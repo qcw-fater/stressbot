@@ -23,13 +23,15 @@ import (
 //	utils.random_string(8)         → 随机字母数字串
 //	utils.random_pick(table)       → 从数组随机选一个
 //	utils.random_pick_n(table, 3)  → 从数组随机选 N 个
-//	utils.sleep(1000)              → 毫秒休眠
-//	utils.time_ms()                → 当前时间戳（毫秒）
-//	utils.fnv_hash(version)        → FNV-1a 哈希
-//	utils.pack_le(fmt, ...)        → 小端二进制打包
 //	utils.weighted_pick(items, weights) → 加权随机
 //	utils.rand_filter(items, count, excludes) → 排除后随机选 N 个
 //	utils.rand_filter_one(items, excludes) → 排除后随机选 1 个
+//	utils.shuffle(arr)             → 原地随机打乱数组
+//	utils.pack_le(fmt, ...)        → 小端二进制打包
+//	utils.unpack_le(data, fmt, ...) → 小端二进制解包
+//	utils.sleep(1000)              → 毫秒休眠
+//	utils.time_ms()                → 当前时间戳（毫秒）
+//	utils.fnv_hash(version)        → FNV-1a 哈希
 //
 // 日志功能通过 log 模块使用：
 //
@@ -40,21 +42,57 @@ import (
 func loadUtilsModule(L *lua.LState) int {
 	mod := L.NewTable()
 
+	// 随机
 	L.SetField(mod, "random_int", L.NewFunction(utilsRandomInt))
+	L.SetField(mod, "rand_range", L.NewFunction(utilsRandRange))
 	L.SetField(mod, "random_bool", L.NewFunction(utilsRandomBool))
 	L.SetField(mod, "random_string", L.NewFunction(utilsRandomString))
 	L.SetField(mod, "random_pick", L.NewFunction(utilsRandomPick))
 	L.SetField(mod, "random_pick_n", L.NewFunction(utilsRandomPickN))
-	L.SetField(mod, "sleep", L.NewFunction(utilsSleep))
-	L.SetField(mod, "time_ms", L.NewFunction(utilsTimeMs))
-	L.SetField(mod, "fnv_hash", L.NewFunction(utilsFnvHash))
-	L.SetField(mod, "pack_le", L.NewFunction(utilsPackLE))
 	L.SetField(mod, "weighted_pick", L.NewFunction(utilsWeightedPick))
 	L.SetField(mod, "rand_filter", L.NewFunction(utilsRandFilter))
 	L.SetField(mod, "rand_filter_one", L.NewFunction(utilsRandFilterOne))
-	L.SetField(mod, "rand_range", L.NewFunction(utilsRandRange))
+	L.SetField(mod, "shuffle", L.NewFunction(utilsShuffle))
+	// 二进制
+	L.SetField(mod, "pack_le", L.NewFunction(utilsPackLE))
+	L.SetField(mod, "unpack_le", L.NewFunction(utilsUnpackLE))
+	// 通用工具
+	L.SetField(mod, "sleep", L.NewFunction(utilsSleep))
+	L.SetField(mod, "time_ms", L.NewFunction(utilsTimeMs))
+	L.SetField(mod, "fnv_hash", L.NewFunction(utilsFnvHash))
 
 	L.Push(mod)
+	return 1
+}
+
+// ---------------------------------------------------------------------------
+// 随机
+// ---------------------------------------------------------------------------
+
+// utilsRandomInt utils.random_int(n) — 对齐旧 Robot.RandNumber[int]，返回 [0, n-1]
+func utilsRandomInt(L *lua.LState) int {
+	n := L.CheckInt(1)
+	if n <= 1 {
+		L.Push(lua.LNumber(0))
+		return 1
+	}
+	L.Push(lua.LNumber(rand.Intn(n)))
+	return 1
+}
+
+// utilsRandRange utils.rand_range(lo, hi) — 对齐旧 Robot.RandRangeNumber，返回 [lo, hi]
+func utilsRandRange(L *lua.LState) int {
+	lo := L.CheckInt(1)
+	hi := L.CheckInt(2)
+	if lo > hi {
+		L.Push(lua.LNumber(lo))
+		return 1
+	}
+	if lo == hi {
+		L.Push(lua.LNumber(lo))
+		return 1
+	}
+	L.Push(lua.LNumber(rand.Intn(hi-lo+1) + lo))
 	return 1
 }
 
@@ -131,114 +169,6 @@ func utilsRandomPickN(L *lua.LState) int {
 	return 1
 }
 
-// utilsSleep utils.sleep(ms) — 休眠指定毫秒数（响应 context 取消）。
-// 休眠期间释放 luaMu，避免阻塞心跳 builder 和监听回调。
-func utilsSleep(L *lua.LState) int {
-	ms := L.CheckInt(1)
-	if ms > 0 {
-		ctx := GetContext(L)
-		if ctx != nil && ctx.Ctx != nil {
-			withReleasedMu(ctx.LuaMu, func() {
-				select {
-				case <-time.After(time.Duration(ms) * time.Millisecond):
-				case <-ctx.Ctx.Done():
-				}
-			})
-		} else {
-			time.Sleep(time.Duration(ms) * time.Millisecond)
-		}
-	}
-	return 0
-}
-
-// utilsTimeMs utils.time_ms() — 获取当前时间戳（毫秒）
-func utilsTimeMs(L *lua.LState) int {
-	L.Push(lua.LNumber(time.Now().UnixMilli()))
-	return 1
-}
-
-// utilsFnvHash utils.fnv_hash(version) — FNV-1a 64位哈希，返回十六进制字符串
-// 与旧 Robot 的 versionHashFNV 函数行为一致
-func utilsFnvHash(L *lua.LState) int {
-	version := strings.TrimSpace(L.CheckString(1))
-	version = strings.TrimPrefix(version, "v")
-	version = strings.TrimPrefix(version, "V")
-	norm := strings.ToLower(version)
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(norm))
-	L.Push(lua.LString(hex.EncodeToString(h.Sum(nil))))
-	return 1
-}
-
-// utilsPackLE utils.pack_le(format, values...) — 小端二进制打包
-// format 字符: u8/i8, u16/i16, u32/i32, u64/i64, f32, f64
-// i64/u64 支持字符串形式的大数字（超过 2^53 的 snowflake ID）
-// 返回: 二进制字符串
-func utilsPackLE(L *lua.LState) int {
-	format := L.CheckString(1)
-
-	buf := make([]byte, 0, 64)
-
-	for i := 2; i <= L.GetTop(); i++ {
-		v := L.Get(i)
-
-		switch format {
-		case "u8":
-			n := lua.LVAsNumber(v)
-			buf = append(buf, byte(n))
-		case "i8":
-			n := lua.LVAsNumber(v)
-			buf = append(buf, byte(int8(n)))
-		case "u16":
-			n := lua.LVAsNumber(v)
-			b := make([]byte, 2)
-			binary.LittleEndian.PutUint16(b, uint16(n))
-			buf = append(buf, b...)
-		case "i16":
-			n := lua.LVAsNumber(v)
-			b := make([]byte, 2)
-			binary.LittleEndian.PutUint16(b, uint16(int16(n)))
-			buf = append(buf, b...)
-		case "u32":
-			n := lua.LVAsNumber(v)
-			b := make([]byte, 4)
-			binary.LittleEndian.PutUint32(b, uint32(n))
-			buf = append(buf, b...)
-		case "i32":
-			n := lua.LVAsNumber(v)
-			b := make([]byte, 4)
-			binary.LittleEndian.PutUint32(b, uint32(int32(n)))
-			buf = append(buf, b...)
-		case "u64":
-			n := parseUint64(v)
-			b := make([]byte, 8)
-			binary.LittleEndian.PutUint64(b, n)
-			buf = append(buf, b...)
-		case "i64":
-			n := parseInt64(v)
-			b := make([]byte, 8)
-			binary.LittleEndian.PutUint64(b, uint64(n))
-			buf = append(buf, b...)
-		case "f32":
-			n := float32(lua.LVAsNumber(v))
-			b := make([]byte, 4)
-			binary.LittleEndian.PutUint32(b, math.Float32bits(n))
-			buf = append(buf, b...)
-		case "f64":
-			n := float64(lua.LVAsNumber(v))
-			b := make([]byte, 8)
-			binary.LittleEndian.PutUint64(b, math.Float64bits(n))
-			buf = append(buf, b...)
-		default:
-			L.RaiseError("unknown pack format: %s", format)
-			return 0
-		}
-	}
-
-	L.Push(lua.LString(string(buf)))
-	return 1
-}
-
 // utilsWeightedPick utils.weighted_pick(items, weights) — 带权随机选一个元素
 // items: 数组；weights: 数组（长度需相同）。返回选中的元素及索引。
 func utilsWeightedPick(L *lua.LState) int {
@@ -279,33 +209,6 @@ func utilsWeightedPick(L *lua.LState) int {
 	L.Push(items.RawGetInt(n))
 	L.Push(lua.LNumber(n))
 	return 2
-}
-
-// utilsRandomInt utils.random_int(n) — 对齐旧 Robot.RandNumber[int]，返回 [0, n-1]
-func utilsRandomInt(L *lua.LState) int {
-	n := L.CheckInt(1)
-	if n <= 1 {
-		L.Push(lua.LNumber(0))
-		return 1
-	}
-	L.Push(lua.LNumber(rand.Intn(n)))
-	return 1
-}
-
-// utilsRandRange utils.rand_range(lo, hi) — 对齐旧 Robot.RandRangeNumber，返回 [lo, hi]
-func utilsRandRange(L *lua.LState) int {
-	lo := L.CheckInt(1)
-	hi := L.CheckInt(2)
-	if lo > hi {
-		L.Push(lua.LNumber(lo))
-		return 1
-	}
-	if lo == hi {
-		L.Push(lua.LNumber(lo))
-		return 1
-	}
-	L.Push(lua.LNumber(rand.Intn(hi-lo+1) + lo))
-	return 1
 }
 
 // utilsRandFilterOne utils.rand_filter_one(items, excludes) — 对齐 RandSilenceFilterOne
@@ -377,6 +280,243 @@ func utilsRandFilter(L *lua.LState) int {
 	L.Push(result)
 	return 1
 }
+
+// utilsShuffle utils.shuffle(arr) — 原地随机打乱数组，返回自身。
+func utilsShuffle(L *lua.LState) int {
+	tb := L.CheckTable(1)
+	n := tb.Len()
+	for i := n; i > 1; i-- {
+		j := rand.Intn(i) + 1
+		vi := tb.RawGetInt(i)
+		vj := tb.RawGetInt(j)
+		tb.RawSetInt(i, vj)
+		tb.RawSetInt(j, vi)
+	}
+	L.Push(tb)
+	return 1
+}
+
+// ---------------------------------------------------------------------------
+// 二进制
+// ---------------------------------------------------------------------------
+
+// utilsPackLE utils.pack_le(format, values...) — 小端二进制打包
+// format 字符: u8/i8, u16/i16, u32/i32, u64/i64, f32, f64
+// i64/u64 支持字符串形式的大数字（超过 2^53 的 snowflake ID）
+// 返回: 二进制字符串
+func utilsPackLE(L *lua.LState) int {
+	format := L.CheckString(1)
+
+	buf := make([]byte, 0, 64)
+
+	for i := 2; i <= L.GetTop(); i++ {
+		v := L.Get(i)
+
+		switch format {
+		case "u8":
+			n := lua.LVAsNumber(v)
+			buf = append(buf, byte(n))
+		case "i8":
+			n := lua.LVAsNumber(v)
+			buf = append(buf, byte(int8(n)))
+		case "u16":
+			n := lua.LVAsNumber(v)
+			b := make([]byte, 2)
+			binary.LittleEndian.PutUint16(b, uint16(n))
+			buf = append(buf, b...)
+		case "i16":
+			n := lua.LVAsNumber(v)
+			b := make([]byte, 2)
+			binary.LittleEndian.PutUint16(b, uint16(int16(n)))
+			buf = append(buf, b...)
+		case "u32":
+			n := lua.LVAsNumber(v)
+			b := make([]byte, 4)
+			binary.LittleEndian.PutUint32(b, uint32(n))
+			buf = append(buf, b...)
+		case "i32":
+			n := lua.LVAsNumber(v)
+			b := make([]byte, 4)
+			binary.LittleEndian.PutUint32(b, uint32(int32(n)))
+			buf = append(buf, b...)
+		case "u64":
+			n := parseUint64(v)
+			b := make([]byte, 8)
+			binary.LittleEndian.PutUint64(b, n)
+			buf = append(buf, b...)
+		case "i64":
+			n := parseInt64(v)
+			b := make([]byte, 8)
+			binary.LittleEndian.PutUint64(b, uint64(n))
+			buf = append(buf, b...)
+		case "f32":
+			n := float32(lua.LVAsNumber(v))
+			b := make([]byte, 4)
+			binary.LittleEndian.PutUint32(b, math.Float32bits(n))
+			buf = append(buf, b...)
+		case "f64":
+			n := float64(lua.LVAsNumber(v))
+			b := make([]byte, 8)
+			binary.LittleEndian.PutUint64(b, math.Float64bits(n))
+			buf = append(buf, b...)
+		default:
+			L.RaiseError("unknown pack format: %s", format)
+			return 0
+		}
+	}
+
+	L.Push(lua.LString(string(buf)))
+	return 1
+}
+
+// utilsUnpackLE utils.unpack_le(data, fmt1, fmt2, ...) — 小端二进制解包
+// data: 二进制字符串（pack_le 的产物）
+// fmt1..fmtN: 每个字段的格式（u8/i8/u16/i16/u32/i32/u64/i64/f32/f64）
+// 返回: 按格式顺序返回各字段值；i64/u64 超过 2^53 的返回字符串
+func utilsUnpackLE(L *lua.LState) int {
+	data := []byte(L.CheckString(1))
+
+	offset := 0
+	for i := 2; i <= L.GetTop(); i++ {
+		format := L.CheckString(i)
+		switch format {
+		case "u8":
+			if offset+1 > len(data) {
+				L.RaiseError("unpack_le: 数据不足 (u8 at offset %d)", offset)
+				return 0
+			}
+			L.Push(lua.LNumber(data[offset]))
+			offset++
+		case "i8":
+			if offset+1 > len(data) {
+				L.RaiseError("unpack_le: 数据不足 (i8 at offset %d)", offset)
+				return 0
+			}
+			L.Push(lua.LNumber(int8(data[offset])))
+			offset++
+		case "u16":
+			if offset+2 > len(data) {
+				L.RaiseError("unpack_le: 数据不足 (u16 at offset %d)", offset)
+				return 0
+			}
+			L.Push(lua.LNumber(binary.LittleEndian.Uint16(data[offset:])))
+			offset += 2
+		case "i16":
+			if offset+2 > len(data) {
+				L.RaiseError("unpack_le: 数据不足 (i16 at offset %d)", offset)
+				return 0
+			}
+			L.Push(lua.LNumber(int16(binary.LittleEndian.Uint16(data[offset:]))))
+			offset += 2
+		case "u32":
+			if offset+4 > len(data) {
+				L.RaiseError("unpack_le: 数据不足 (u32 at offset %d)", offset)
+				return 0
+			}
+			L.Push(lua.LNumber(binary.LittleEndian.Uint32(data[offset:])))
+			offset += 4
+		case "i32":
+			if offset+4 > len(data) {
+				L.RaiseError("unpack_le: 数据不足 (i32 at offset %d)", offset)
+				return 0
+			}
+			L.Push(lua.LNumber(int32(binary.LittleEndian.Uint32(data[offset:]))))
+			offset += 4
+		case "u64":
+			if offset+8 > len(data) {
+				L.RaiseError("unpack_le: 数据不足 (u64 at offset %d)", offset)
+				return 0
+			}
+			v := binary.LittleEndian.Uint64(data[offset:])
+			if v > uint64(1<<53) {
+				L.Push(lua.LString(strconv.FormatUint(v, 10)))
+			} else {
+				L.Push(lua.LNumber(v))
+			}
+			offset += 8
+		case "i64":
+			if offset+8 > len(data) {
+				L.RaiseError("unpack_le: 数据不足 (i64 at offset %d)", offset)
+				return 0
+			}
+			v := int64(binary.LittleEndian.Uint64(data[offset:]))
+			if v > 1<<53 || v < -(1<<53) {
+				L.Push(lua.LString(strconv.FormatInt(v, 10)))
+			} else {
+				L.Push(lua.LNumber(v))
+			}
+			offset += 8
+		case "f32":
+			if offset+4 > len(data) {
+				L.RaiseError("unpack_le: 数据不足 (f32 at offset %d)", offset)
+				return 0
+			}
+			bits := binary.LittleEndian.Uint32(data[offset:])
+			L.Push(lua.LNumber(math.Float32frombits(bits)))
+			offset += 4
+		case "f64":
+			if offset+8 > len(data) {
+				L.RaiseError("unpack_le: 数据不足 (f64 at offset %d)", offset)
+				return 0
+			}
+			bits := binary.LittleEndian.Uint64(data[offset:])
+			L.Push(lua.LNumber(math.Float64frombits(bits)))
+			offset += 8
+		default:
+			L.RaiseError("unknown unpack format: %s", format)
+			return 0
+		}
+	}
+
+	return L.GetTop() - 1
+}
+
+// ---------------------------------------------------------------------------
+// 通用工具
+// ---------------------------------------------------------------------------
+
+// utilsSleep utils.sleep(ms) — 休眠指定毫秒数（响应 context 取消）。
+// 休眠期间释放 luaMu，避免阻塞心跳 builder 和监听回调。
+func utilsSleep(L *lua.LState) int {
+	ms := L.CheckInt(1)
+	if ms > 0 {
+		ctx := GetContext(L)
+		if ctx != nil && ctx.Ctx != nil {
+			withReleasedMu(ctx.LuaMu, func() {
+				select {
+				case <-time.After(time.Duration(ms) * time.Millisecond):
+				case <-ctx.Ctx.Done():
+				}
+			})
+		} else {
+			time.Sleep(time.Duration(ms) * time.Millisecond)
+		}
+	}
+	return 0
+}
+
+// utilsTimeMs utils.time_ms() — 获取当前时间戳（毫秒）
+func utilsTimeMs(L *lua.LState) int {
+	L.Push(lua.LNumber(time.Now().UnixMilli()))
+	return 1
+}
+
+// utilsFnvHash utils.fnv_hash(version) — FNV-1a 64位哈希，返回十六进制字符串
+// 与旧 Robot 的 versionHashFNV 函数行为一致
+func utilsFnvHash(L *lua.LState) int {
+	version := strings.TrimSpace(L.CheckString(1))
+	version = strings.TrimPrefix(version, "v")
+	version = strings.TrimPrefix(version, "V")
+	norm := strings.ToLower(version)
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(norm))
+	L.Push(lua.LString(hex.EncodeToString(h.Sum(nil))))
+	return 1
+}
+
+// ---------------------------------------------------------------------------
+// 内部辅助
+// ---------------------------------------------------------------------------
 
 // luaValKey 将 Lua 值转为可比较的字符串 key
 func luaValKey(v lua.LValue) string {

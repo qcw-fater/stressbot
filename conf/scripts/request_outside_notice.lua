@@ -5,7 +5,8 @@ local robot = require("robot")
 function execute(r)
     local account = robot.get("account")
     local channel = robot.get("platform") or "1000"
-    local _, _, sent, recv = network.http_post("/outsideNotice", {
+    local authAddr = robot.get("authAddr") or ""
+    local _, _, sent, recv = network.http_request(authAddr .. "/outsideNotice", "POST", "form", {
         account = account,
         channel = channel
     })

@@ -25,6 +25,7 @@ export {
   buildNodeMetricsMap,
   makeMetricsProvider,
   classifyApdex,
+  computeWeightedMetrics,
 } from './metricsBinding';
 export type { ApdexLevel, FlowSlice, NodeMetricsMap } from './metricsBinding';
 

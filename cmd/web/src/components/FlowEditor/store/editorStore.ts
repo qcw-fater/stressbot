@@ -123,6 +123,14 @@ interface EditorState {
    */
   historyEnabled: boolean | null;
 
+  /** 基线同步冲突结果（未处理时非 null），用于资源按钮 badge 和 ResourcesDrawer 处理差异入口 */
+  pendingSyncResult: import('@/services/resourcesStore').BaselineSyncResult | null;
+  setPendingSyncResult: (r: import('@/services/resourcesStore').BaselineSyncResult | null) => void;
+
+  /** 适配器缺失的必需函数列表；null=未检查，空数组=全部实现 */
+  adapterMissing: string[] | null;
+  setAdapterMissing: (v: string[] | null) => void;
+
   setSelectedNode: (id: string | null) => void;
   setSelectedListen: (name: string | null) => void;
   setHoveredListen: (name: string | null) => void;
@@ -161,6 +169,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   debugMode: readInitialDebugMode(),
   taskFormAdvancedExpanded: readInitialTaskFormAdvancedExpanded(),
   historyEnabled: null,
+  pendingSyncResult: null,
+  setPendingSyncResult: (r) => set({ pendingSyncResult: r }),
+  adapterMissing: null,
+  setAdapterMissing: (v) => set({ adapterMissing: v }),
 
   setSelectedNode: (id) => set({ selectedNodeId: id }),
   setSelectedListen: (name) => set({ selectedListenName: name }),

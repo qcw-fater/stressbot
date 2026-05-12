@@ -55,11 +55,11 @@ export function ListenCard({ data, selected }: NodeProps) {
         </Tooltip>
         {refCount > 0 ? (
           <Tooltip title={`被 ${refCount} 个 action 引用`}>
-            <span className="card-ref">×{refCount}</span>
+            <span className="card-ref">ref {refCount}</span>
           </Tooltip>
         ) : (
           <Tooltip title="未被任何 action 引用">
-            <span className="card-ref orphan">!0</span>
+            <span className="card-ref orphan">ref 0</span>
           </Tooltip>
         )}
       </div>

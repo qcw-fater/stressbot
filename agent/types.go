@@ -40,10 +40,10 @@ type RegisterRequest struct {
 
 // RegisterResponse 注册响应。
 type RegisterResponse struct {
-	AgentID         string `json:"agentId"`
-	HeartbeatTTL    string `json:"heartbeatTtl"`
-	StressEndpoint  string `json:"stressEndpoint"`
-	SystemEndpoint  string `json:"systemEndpoint"`
+	AgentID        string `json:"agentId"`
+	HeartbeatTTL   string `json:"heartbeatTtl"`
+	StressEndpoint string `json:"stressEndpoint"`
+	SystemEndpoint string `json:"systemEndpoint"`
 }
 
 // HeartbeatRequest 心跳请求。
@@ -58,9 +58,9 @@ type HeartbeatRequest struct {
 
 // StressReport 压测指标上报。
 type StressReport struct {
-	AgentID    string                    `json:"agentId"`
-	TaskID     string                    `json:"taskId"`
-	ReportedAt time.Time                 `json:"reportedAt"`
+	AgentID    string                     `json:"agentId"`
+	TaskID     string                     `json:"taskId"`
+	ReportedAt time.Time                  `json:"reportedAt"`
 	Snapshot   *monitor.CollectorSnapshot `json:"snapshot"`
 }
 
@@ -73,11 +73,11 @@ type SystemReport struct {
 
 // TaskCompletionReport 任务完成报告。
 type TaskCompletionReport struct {
-	AgentID       string                    `json:"agentId"`
-	TaskID        string                    `json:"taskId"`
-	Result        TaskResult                `json:"result"`
-	ErrorMsg      string                    `json:"errorMsg,omitempty"`
-	FinishedAt    time.Time                 `json:"finishedAt"`
+	AgentID       string                     `json:"agentId"`
+	TaskID        string                     `json:"taskId"`
+	Result        TaskResult                 `json:"result"`
+	ErrorMsg      string                     `json:"errorMsg,omitempty"`
+	FinishedAt    time.Time                  `json:"finishedAt"`
 	FinalSnapshot *monitor.CollectorSnapshot `json:"finalSnapshot"`
 }
 
@@ -97,8 +97,7 @@ type TaskAssignment struct {
 	AccountPrefix     string            `json:"accountPrefix"`
 	ConcurrentNum     int               `json:"concurrentNum"`
 	MainService       string            `json:"mainService"`
-	AuthAddress       string            `json:"authAddress"`
-	AuthExtra         map[string]string `json:"authExtra"`
+	StateExtra        map[string]string `json:"stateExtra"`
 	HeartbeatInterval string            `json:"heartbeatInterval"`
 	TCPTimeout        string            `json:"tcpTimeout"`
 	HTTPTimeout       string            `json:"httpTimeout"`
@@ -106,9 +105,22 @@ type TaskAssignment struct {
 	// LogLevel 可选值 debug/info/warn/error。
 	// 任务执行期间临时切换 Agent 进程日志等级，结束后自动恢复。
 	// 空字符串 = 沿用 Agent 启动时 agent-config.json 中的等级。
-	LogLevel    string   `json:"logLevel,omitempty"`
-	ConfigURL   string   `json:"configUrl"`
-	ConfigFiles []string `json:"configFiles"`
+	LogLevel    string        `json:"logLevel,omitempty"`
+	ConfigURL   string        `json:"configUrl"`
+	ConfigFiles []string      `json:"configFiles"`
+	RampUp      *RampUpConfig `json:"rampUp,omitempty"`
+}
+
+// RampUpConfig 渐进式加压配置。
+type RampUpConfig struct {
+	Stages []RampUpStage `json:"stages"`
+}
+
+// RampUpStage 单个加压阶段。
+type RampUpStage struct {
+	Count       int `json:"count"`
+	Concurrency int `json:"concurrency,omitempty"`
+	HoldSec     int `json:"holdSec,omitempty"`
 }
 
 // AgentStatusResponse Agent 状态查询响应。

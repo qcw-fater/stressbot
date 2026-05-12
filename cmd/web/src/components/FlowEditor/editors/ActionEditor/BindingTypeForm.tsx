@@ -153,22 +153,7 @@ export function BindingTypeForm({ binding, onChange, depth = 0, renderChildren }
         </Space>
       );
     case 'randomPickMap':
-      return (
-        <Space>
-          <Input
-            placeholder="keySource (state map key)"
-            value={binding.keySource ?? ''}
-            onChange={(e) => set({ keySource: e.target.value })}
-            style={{ width: 240 }}
-          />
-          <InputNumber
-            min={1}
-            placeholder="count"
-            value={binding.count}
-            onChange={(v) => set({ count: (v as number) ?? undefined })}
-          />
-        </Space>
-      );
+      return <PickMapValuesField binding={binding} set={set} />;
     case 'randomInt':
       return (
         <Space>
@@ -360,21 +345,105 @@ function ValuesField({
 }
 
 function FiltersField({ binding, set }: { binding: FieldBind; set: (p: Partial<FieldBind>) => void }) {
-  const text = JSON.stringify(binding.filters ?? []);
+  const filters = binding.filters ?? [];
+  const ops = ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'in', 'timeWindow', 'dailyTimeWindow', 'notNil', 'isNil'] as const;
+
+  const updateFilter = (i: number, patch: Record<string, unknown>) => {
+    const arr = [...filters];
+    arr[i] = { ...arr[i], ...patch };
+    set({ filters: arr });
+  };
+
+  const addFilter = () => set({ filters: [...filters, { path: '', op: 'eq', value: '' }] });
+  const removeFilter = (i: number) => set({ filters: filters.filter((_, j) => j !== i) });
+
   return (
-    <Input
-      placeholder='filters (JSON 数组，如 [{"path":"id","op":"neq","value":0}])'
-      value={text === '[]' ? '' : text}
-      onChange={(e) => {
-        const raw = e.target.value;
-        if (!raw) return set({ filters: undefined });
-        try {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) set({ filters: parsed });
-        } catch {
-          // 输入中
-        }
-      }}
-    />
+    <Space direction="vertical" style={{ width: '100%' }} size={4}>
+      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>filters</span>
+      {filters.map((f, i) => (
+        <Space key={i} wrap size={4}>
+          <Input
+            placeholder="path"
+            value={f.path ?? ''}
+            onChange={(e) => updateFilter(i, { path: e.target.value })}
+            style={{ width: 120 }}
+            size="small"
+          />
+          <Select
+            value={f.op || 'eq'}
+            onChange={(v) => updateFilter(i, { op: v })}
+            options={ops.map((o) => ({ value: o, label: o }))}
+            style={{ width: 100 }}
+            size="small"
+          />
+          {!['notNil', 'isNil'].includes(f.op) && (
+            <Input
+              placeholder="value / source"
+              value={typeof f.value === 'undefined' ? (f.source ?? '') : String(f.value)}
+              onChange={(e) => {
+                const raw = e.target.value;
+                try { updateFilter(i, { value: JSON.parse(raw) }); }
+                catch { updateFilter(i, { value: raw }); }
+              }}
+              style={{ width: 120 }}
+              size="small"
+            />
+          )}
+          <a onClick={() => removeFilter(i)} style={{ color: 'var(--color-error)', fontSize: 11 }}>删除</a>
+        </Space>
+      ))}
+      <a onClick={addFilter} style={{ fontSize: 11 }}>+ 添加 filter</a>
+    </Space>
+  );
+}
+
+/** randomPickMap 结构化编辑器：keySource + [{key, values}] */
+function PickMapValuesField({ binding, set }: { binding: FieldBind; set: (p: Partial<FieldBind>) => void }) {
+  const entries: Array<{ key: string; values: unknown[] }> = (binding.values ?? []) as Array<{ key: string; values: unknown[] }>;
+
+  const updateEntry = (i: number, patch: Record<string, unknown>) => {
+    const arr = [...entries];
+    arr[i] = { ...arr[i], ...patch };
+    set({ values: arr });
+  };
+
+  const addEntry = () => set({ values: [...entries, { key: '', values: [] }] });
+  const removeEntry = (i: number) => set({ values: entries.filter((_, j) => j !== i) });
+
+  return (
+    <Space direction="vertical" style={{ width: '100%' }} size={6}>
+      <Input
+        placeholder="keySource (state 中 map 的 key)"
+        value={binding.keySource ?? ''}
+        onChange={(e) => set({ keySource: e.target.value })}
+        style={{ width: '100%' }}
+      />
+      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>映射表 (key → values[])</span>
+      {entries.map((entry, i) => (
+        <Space key={i} wrap size={4} style={{ width: '100%' }}>
+          <Input
+            placeholder="key"
+            value={entry.key ?? ''}
+            onChange={(e) => updateEntry(i, { key: e.target.value })}
+            style={{ width: 100 }}
+            size="small"
+          />
+          <Input
+            placeholder="values (JSON 数组)"
+            value={JSON.stringify(entry.values ?? [])}
+            onChange={(e) => {
+              try {
+                const parsed = JSON.parse(e.target.value);
+                if (Array.isArray(parsed)) updateEntry(i, { values: parsed });
+              } catch { /* 输入中 */ }
+            }}
+            style={{ width: 200 }}
+            size="small"
+          />
+          <a onClick={() => removeEntry(i)} style={{ color: 'var(--color-error)', fontSize: 11 }}>删除</a>
+        </Space>
+      ))}
+      <a onClick={addEntry} style={{ fontSize: 11 }}>+ 添加映射</a>
+    </Space>
   );
 }

@@ -1,7 +1,7 @@
 /**
- * AuthExtra 编辑器：可视化编辑 Record<string, string>。
+ * StateExtra 编辑器：可视化编辑 Record<string, string>。
  *
- * 用途：RobotConfig.authExtra 是 Auth 请求时附带的扩展字段（version/channel/platform 等），
+ * 用途：RobotConfig.stateExtra 是 State 扩展字段（version/channel/platform 等），
  * 不同游戏字段集差别极大，因此默认不预填任何字段，由用户通过"添加字段"按钮自行配置；
  * suggestedKeys 仅供调用方按需注入推荐 tag（默认空数组）。
  *

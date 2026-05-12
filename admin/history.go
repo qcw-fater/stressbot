@@ -19,17 +19,17 @@ import (
 
 // allowedOrderBy 白名单，防止 SQL 注入。
 var allowedOrderBy = map[string]bool{
-	"created_at DESC":          true,
-	"created_at ASC":           true,
-	"started_at DESC":          true,
-	"started_at ASC":           true,
-	"duration_sec DESC":        true,
-	"duration_sec ASC":         true,
-	"total_bots DESC":          true,
-	"total_bots ASC":           true,
-	"state":                    true,
-	"name ASC":                 true,
-	"name DESC":                true,
+	"created_at DESC":   true,
+	"created_at ASC":    true,
+	"started_at DESC":   true,
+	"started_at ASC":    true,
+	"duration_sec DESC": true,
+	"duration_sec ASC":  true,
+	"total_bots DESC":   true,
+	"total_bots ASC":    true,
+	"state":             true,
+	"name ASC":          true,
+	"name DESC":         true,
 }
 
 // HistoryStore MySQL 历史归档存储。
@@ -661,7 +661,6 @@ func buildListWhere(f HistoryFilter) (string, []any) {
 
 func buildConfigSummary(task *Task) ConfigSummary {
 	s := ConfigSummary{
-		AuthAddr:    task.Config.RobotConfig.AuthAddr,
 		Concurrency: task.Config.RobotConfig.Concurrency,
 		TimeoutSec:  task.Config.RobotConfig.TimeoutSec,
 	}

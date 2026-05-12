@@ -27,7 +27,7 @@ function execute(r)
         proto.set_field(msg, "battleId", battleId)
         proto.set_field(msg, "sessionId", battleSession)
 
-        local code, _, sent, recv = network.request("battle", {cmd=4, act=1}, msg, "Game.BattleRegisterS2C")
+        local code, _, sent, recv = network.tcp_request("battle", {cmd=4, act=1}, msg, "Game.BattleRegisterS2C")
         _send = _send + sent
         _recv = _recv + recv
         if code == 0 then

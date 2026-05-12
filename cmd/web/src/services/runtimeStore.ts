@@ -97,17 +97,13 @@ export interface RuntimeState {
 }
 
 // 仅作占位，EditorPage 启动时会尝试从 /conf/config.json 同步真实值覆盖。
-//
-// authAddr 必须包含 scheme（http:// 或 https://），否则 net/http 会报
-// "unsupported protocol scheme"，被 lua 兜底变成 -1，上层报"错误码 1"很难诊断。
 const DEFAULT_ROBOT_CONFIG: RobotConfig = {
-  authAddr: 'http://127.0.0.1:20000',
   concurrency: 50,
   timeoutSec: 60,
   accountPrefix: 'bot_',
   startNumber: 0,
   mainService: 'logic',
-  authExtra: {},
+  stateExtra: {},
   heartbeatSec: 5,
   httpTimeoutSec: 10,
   apdexT: 100,
@@ -224,9 +220,8 @@ export const useRuntimeStore = create<RuntimeState>()(
     {
       name: 'stressbot:runtime-form',
       storage: createJSONStorage(() => localStorage),
-      // v2：authExtra 改为"完全手动控制"，旧版本曾从 conf/config.json 自动同步进来，
-      //     migrate 中清掉一次，避免刷新后仍然看到 version/channel/platform。
-      version: 2,
+      // v3：authExtra → stateExtra，authAddr 已从 RobotConfig 中移除。
+      version: 3,
       // 只缓存"启动表单"四个字段；运行态（mode/activeTask/agents 等）每次刷新都从 admin 重拉。
       partialize: (s) => ({
         taskName: s.taskName,
@@ -236,14 +231,15 @@ export const useRuntimeStore = create<RuntimeState>()(
       }),
       migrate: (persisted, version) => {
         const p = (persisted ?? {}) as Partial<RuntimeState>;
-        // v1 → v2：清掉历史上自动同步进来的 authExtra（让它回到空对象，由用户手动添加）。
-        if (version < 2 && p.robotConfig) {
-          p.robotConfig = { ...p.robotConfig, authExtra: {} };
+        // v2 → v3：authExtra → stateExtra，移除 authAddr。
+        if (version < 3 && p.robotConfig) {
+          const { authAddr: _, authExtra, ...rest } = p.robotConfig as any;
+          p.robotConfig = { ...rest, stateExtra: authExtra ?? {} };
         }
         return p;
       },
       // 反序列化后与新版 DEFAULT_ROBOT_CONFIG 合并：
-      //   - 老版本 localStorage 里没有的新字段（如 authExtra/heartbeatSec）会自动补全；
+      //   - 老版本 localStorage 里没有的新字段会自动补全；
       //   - 用户已设置的字段不会被覆盖。
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<RuntimeState>;

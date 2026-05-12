@@ -5,30 +5,14 @@
  */
 
 export type ActionPattern =
-  | 'tcpSend'
-  | 'tcpRequest'
-  | 'lua'
-  | 'connect'
-  | 'connectUDP'
-  | 'exchangeKey'
-  | 'close'
-  | 'clearState'
-  | 'udpSendProto'
-  | 'waitListen'
-  | 'setState';
+  | 'tcpSend' | 'tcpRequest' | 'tcpConnect' | 'tcpClose' | 'tcpListen'
+  | 'udpSend' | 'udpRequest' | 'udpConnect' | 'udpClose' | 'udpListen'
+  | 'httpRequest' | 'setState' | 'clearState' | 'lua';
 
 export const ALL_ACTION_PATTERNS: ActionPattern[] = [
-  'tcpSend',
-  'tcpRequest',
-  'lua',
-  'connect',
-  'connectUDP',
-  'exchangeKey',
-  'close',
-  'clearState',
-  'udpSendProto',
-  'waitListen',
-  'setState',
+  'tcpSend', 'tcpRequest', 'tcpConnect', 'tcpClose', 'tcpListen',
+  'udpSend', 'udpRequest', 'udpConnect', 'udpClose', 'udpListen',
+  'httpRequest', 'setState', 'clearState', 'lua',
 ];
 
 /**
@@ -81,6 +65,14 @@ export interface FilterDef {
   source?: string;
 }
 
+export interface ConditionDef {
+  source: string;
+  path?: string;
+  op: string;
+  value?: unknown;
+  valueSource?: string;
+}
+
 export interface FieldBind {
   field?: string;
   type: BindingType;
@@ -103,6 +95,7 @@ export interface FieldBind {
   storeAs?: string;
   keySource?: string;
   items?: FieldBind[];
+  condition?: ConditionDef;
 }
 
 export interface StoreMapping {
@@ -123,8 +116,9 @@ export interface ActionDef {
   store?: StoreMapping[];
   timeout?: number;
   pollMs?: number;
-  target?: string; // close: tcp / udp
+  url?: string;           // httpRequest: 请求 URL
+  method?: 'POST' | 'GET'; // httpRequest: HTTP 方法
+  contentType?: 'json' | 'form'; // httpRequest: Content-Type
   keys?: string[]; // clearState
   optional?: boolean;
-  secretArg?: string;
 }

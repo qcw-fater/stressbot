@@ -1,7 +1,9 @@
 package robot
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -41,11 +43,10 @@ type Robot struct {
 	cancel      context.CancelFunc
 	running     atomic.Bool
 	dialer      *network.Dialer
-	authBaseURL string
 	httpClient  *http.Client
 	luaMu       sync.Mutex
 	adp         adapter.Adapter
-	mainService string // 主连接服务名，仅用于断开检测（断开时停止机器人）
+	mainService string        // 主连接服务名，仅用于断开检测（断开时停止机器人）
 	done        chan struct{} // 执行 goroutine 结束信号
 }
 
@@ -53,8 +54,7 @@ type Robot struct {
 type Config struct {
 	ID          int
 	Account     string
-	AuthBaseURL string
-	AuthExtra   map[string]string
+	StateExtra  map[string]string
 	HTTPTimeout time.Duration
 }
 
@@ -75,7 +75,6 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		ctx:         ctx,
 		cancel:      cancel,
 		dialer:      dialer,
-		authBaseURL: cfg.AuthBaseURL,
 		httpClient:  &http.Client{Timeout: cfg.HTTPTimeout},
 		adp:         adp,
 		mainService: mainService,
@@ -88,7 +87,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 
 	r.state.Set("id", cfg.ID)
 	r.state.Set("account", cfg.Account)
-	for k, v := range cfg.AuthExtra {
+	for k, v := range cfg.StateExtra {
 		r.state.Set(k, v)
 	}
 
@@ -99,13 +98,17 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 }
 
 // GetID 返回机器人 ID。
-func (r *Robot) GetID() int                  { return r.id }
+func (r *Robot) GetID() int { return r.id }
+
 // GetAccount 返回机器人账号名。
-func (r *Robot) GetAccount() string          { return r.account }
+func (r *Robot) GetAccount() string { return r.account }
+
 // GetState 返回机器人状态存储。
-func (r *Robot) GetState() *state.Store      { return r.state }
+func (r *Robot) GetState() *state.Store { return r.state }
+
 // GetClient 返回网络客户端。
-func (r *Robot) GetClient() *network.Client  { return r.client }
+func (r *Robot) GetClient() *network.Client { return r.client }
+
 // GetFactory 返回 proto 消息工厂。
 func (r *Robot) GetFactory() *protox.Factory { return r.factory }
 
@@ -518,6 +521,7 @@ func evalCondition(expr string, s *state.Store) bool {
 	}
 	return parseExpr(expr[6:], s)
 }
+
 // parseRHS 尝试将条件右值解析为数值类型，保留字符串回退。
 func parseRHS(s string) any {
 	if v, err := strconv.ParseInt(s, 10, 64); err == nil {
@@ -544,14 +548,14 @@ func (ns *netSenderAdapter) TCPSend(service string, packet []byte) (bool, int) {
 }
 
 // TCPRequest 发送 TCP 请求并等待响应。
-func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, responseKey string) ([]byte, bool) {
+func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, responseKey string, timeout ...time.Duration) ([]byte, bool) {
 	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
 		stresslog.Warn("[ACTION] TCPRequest 连接不存在",
 			zap.String("service", service), zap.String("responseKey", responseKey))
 		return nil, false
 	}
-	resp, _ := conn.RequestResponse(packet, responseKey)
+	resp, _ := conn.RequestResponse(packet, responseKey, timeout...)
 	if resp == nil {
 		return nil, false
 	}
@@ -561,46 +565,63 @@ func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, responseKe
 	return resp.Data, true
 }
 
-// HTTPPost 发送 HTTP POST 表单请求，自动补全 scheme。
-func (ns *netSenderAdapter) HTTPPost(path string, formData map[string]string) (int, []byte, error) {
-	baseURL := strings.TrimSpace(ns.robot.authBaseURL)
-	if baseURL == "" {
-		return 0, nil, fmt.Errorf("目标服务地址未配置（auth.address / RobotConfig.authAddr 为空）")
+// HTTPRequest 发送 HTTP 请求。
+func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body []byte) (int, []byte, error) {
+	if reqURL == "" {
+		return 0, nil, fmt.Errorf("HTTP 请求 URL 为空")
 	}
-	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
-		stresslog.Warn("[HTTP] auth 地址缺少 scheme，自动补 http://",
-			zap.String("origin", baseURL),
-			zap.String("fixed", "http://"+baseURL))
-		baseURL = "http://" + baseURL
-	}
-	baseURL = strings.TrimRight(baseURL, "/")
-
-	fullURL := baseURL
-	if !strings.HasPrefix(path, "/") {
-		fullURL += "/"
-	}
-	fullURL += path
-
-	values := make(url.Values)
-	for k, v := range formData {
-		values.Set(k, v)
+	if !strings.HasPrefix(reqURL, "http://") && !strings.HasPrefix(reqURL, "https://") {
+		return 0, nil, fmt.Errorf("HTTP 请求 URL 必须以 http:// 或 https:// 开头: %s", reqURL)
 	}
 
-	resp, err := ns.robot.httpClient.PostForm(fullURL, values)
+	var req *http.Request
+	var err error
+
+	if len(body) > 0 {
+		switch contentType {
+		case "json":
+			req, err = http.NewRequest(method, reqURL, bytes.NewReader(body))
+			if err != nil {
+				return 0, nil, fmt.Errorf("创建 HTTP 请求失败: %w", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+		case "form":
+			values := make(url.Values)
+			if err := json.Unmarshal(body, &values); err == nil {
+				req, err = http.NewRequest(method, reqURL, strings.NewReader(values.Encode()))
+			} else {
+				req, err = http.NewRequest(method, reqURL, strings.NewReader(string(body)))
+			}
+			if err != nil {
+				return 0, nil, fmt.Errorf("创建 HTTP 请求失败: %w", err)
+			}
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		default:
+			req, err = http.NewRequest(method, reqURL, bytes.NewReader(body))
+			if err != nil {
+				return 0, nil, fmt.Errorf("创建 HTTP 请求失败: %w", err)
+			}
+		}
+	} else {
+		req, err = http.NewRequest(method, reqURL, nil)
+		if err != nil {
+			return 0, nil, fmt.Errorf("创建 HTTP 请求失败: %w", err)
+		}
+	}
+
+	resp, err := ns.robot.httpClient.Do(req)
 	if err != nil {
-		stresslog.Warn("[HTTP] POST 失败",
-			zap.String("url", fullURL),
-			zap.Error(err))
-		return 0, nil, fmt.Errorf("HTTP POST 请求失败: %w", err)
+		stresslog.Warn("[HTTP] 请求失败", zap.String("url", reqURL), zap.Error(err))
+		return 0, nil, fmt.Errorf("HTTP 请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return resp.StatusCode, nil, fmt.Errorf("读取响应体失败: %w", err)
 	}
 
-	return resp.StatusCode, body, nil
+	return resp.StatusCode, respBody, nil
 }
 
 // UDPSend 通过 UDP 发送数据包。

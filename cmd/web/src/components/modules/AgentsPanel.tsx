@@ -7,11 +7,12 @@
 
 import { App as AntApp, Button, Empty, Progress, Space, Tooltip } from 'antd';
 import { DeleteOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { agentsApi, showApiError, useRuntimeStore } from '@/services';
+import { agentsApi, computeWeightedMetrics, metricsApi, showApiError, useRuntimeStore } from '@/services';
 import { FloatingWindow } from '@/components/FlowEditor/panels/FloatingWindow';
-import type { AgentBrief, AgentStatus } from '@/types/api';
+import { ApdexCell } from '@/components/monitoring/shared/ApdexCell';
+import type { AgentBrief, AgentStatus, PerAgentMetricsItem } from '@/types/api';
 import './AgentsPanel.css';
 
 const STATUS_ORDER: Record<AgentStatus, number> = { unhealthy: 0, busy: 1, idle: 2, offline: 3 };
@@ -63,18 +64,33 @@ export function AgentsPanel({ open, onClose }: AgentsPanelProps) {
   const { message, modal } = AntApp.useApp();
   const [loading, setLoading] = useState(false);
   const [shuttingDown, setShuttingDown] = useState(false);
+  const [perAgentMetrics, setPerAgentMetrics] = useState<PerAgentMetricsItem[]>([]);
 
   const refresh = async () => {
     setLoading(true);
     try {
-      const resp = await agentsApi.listAgents();
-      setAgents(resp.items);
+      const [agentResp, perAgentResp] = await Promise.all([
+        agentsApi.listAgents(),
+        metricsApi.getPerAgentMetrics().catch(() => ({ items: [] as PerAgentMetricsItem[] })),
+      ]);
+      setAgents(agentResp.items);
+      setPerAgentMetrics(perAgentResp.items);
     } catch (err) {
       showApiError(err);
     } finally {
       setLoading(false);
     }
   };
+
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+
+  useEffect(() => {
+    if (!open) return;
+    refreshRef.current();
+    const timer = setInterval(() => refreshRef.current(), 5000);
+    return () => clearInterval(timer);
+  }, [open]);
 
   const onShutdownAll = () => {
     modal.confirm({
@@ -139,6 +155,7 @@ export function AgentsPanel({ open, onClose }: AgentsPanelProps) {
   const safeAgents = agents ?? [];
   const onlineCount = safeAgents.filter((a) => a.status !== 'offline').length;
   const hasOnline = onlineCount > 0;
+  const perAgentMap = new Map(perAgentMetrics.map((it) => [it.agentId, it]));
 
   const sorted = [...safeAgents].sort((a, b) => {
     const oa = STATUS_ORDER[a.status] ?? 9;
@@ -186,6 +203,7 @@ export function AgentsPanel({ open, onClose }: AgentsPanelProps) {
             <AgentMetricCard
               key={a.agentId}
               agent={a}
+              stressMetrics={perAgentMap.get(a.agentId)}
               onShutdown={onShutdownOne}
               onDelete={onDelete}
             />
@@ -198,10 +216,12 @@ export function AgentsPanel({ open, onClose }: AgentsPanelProps) {
 
 function AgentMetricCard({
   agent,
+  stressMetrics,
   onShutdown,
   onDelete,
 }: {
   agent: AgentBrief;
+  stressMetrics?: PerAgentMetricsItem;
   onShutdown: (a: AgentBrief) => void;
   onDelete: (a: AgentBrief) => void;
 }) {
@@ -210,6 +230,15 @@ function AgentMetricCard({
   const cpu = agent.cpuPercent;
   const mem = agent.memPercent;
   const uptime = formatUptime(agent.staticInfo.startedAt);
+
+  const stressActions = stressMetrics?.snapshot?.actions ?? [];
+  const { totalSamples: stressSamples, apdex: stressApdex, successRate: stressSuccess } = computeWeightedMetrics(stressActions);
+  const stressTotalActions = stressMetrics?.snapshot?.totalActions ?? 0;
+  const hasStressData = stressSamples > 0;
+
+  const successColor = !hasStressData ? 'var(--text-tertiary)'
+    : stressSuccess >= 0.95 ? 'var(--color-success)'
+    : stressSuccess >= 0.8 ? 'var(--color-warning)' : 'var(--color-error)';
 
   const handleDelete = () => {
     if (!isOffline) {
@@ -322,6 +351,24 @@ function AgentMetricCard({
               <span className="agent-card__info-label">协程</span>
               <span className="agent-card__info-value">
                 {agent.numGoroutine ?? '—'}
+              </span>
+            </div>
+            <div className="agent-card__info-row">
+              <span className="agent-card__info-label">累计动作</span>
+              <span className="agent-card__info-value">
+                {hasStressData ? stressTotalActions.toLocaleString() : '—'}
+              </span>
+            </div>
+            <div className="agent-card__info-row">
+              <span className="agent-card__info-label">成功率</span>
+              <span className="agent-card__info-value" style={{ color: successColor }}>
+                {hasStressData ? `${(stressSuccess * 100).toFixed(1)}%` : '—'}
+              </span>
+            </div>
+            <div className="agent-card__info-row">
+              <span className="agent-card__info-label">Apdex</span>
+              <span className="agent-card__info-value">
+                {hasStressData ? <ApdexCell value={stressApdex} /> : '—'}
               </span>
             </div>
           </div>

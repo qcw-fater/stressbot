@@ -16,18 +16,30 @@ import (
 	"go.uber.org/zap"
 )
 
+// RampUpConfig 渐进式加压配置。
+type RampUpConfig struct {
+	Stages []RampUpStage
+}
+
+// RampUpStage 单个加压阶段。
+type RampUpStage struct {
+	Count       int // 本阶段新增 bot 数
+	Concurrency int // 覆盖全局并发数，0 则用全局值
+	HoldSec     int // 阶段间等待秒数
+}
+
 // ManagerConfig 机器人管理器配置
 type ManagerConfig struct {
 	AccountPrefix  string
 	StartNumber    int
 	Count          int
 	ConcurrentNum  int
-	AuthBaseURL    string
-	AuthExtra      map[string]string
+	StateExtra     map[string]string
 	Adapter        adapter.Adapter
 	RequestTimeout time.Duration
 	MainService    string
 	HTTPTimeout    time.Duration
+	RampUp         *RampUpConfig
 }
 
 // Manager 机器人管理器。
@@ -62,23 +74,20 @@ func NewManager(cfg ManagerConfig, flow *engine.TaskFlow, factory *protox.Factor
 	}
 }
 
-// StartAll 批量启动机器人
-func (m *Manager) StartAll() error {
-	stresslog.Info("[MANAGER] 开始创建机器人", zap.Int("count", m.cfg.Count), zap.Int("concurrent", m.cfg.ConcurrentNum))
-
-	for i := 0; i < m.cfg.Count; i++ {
+// startBatch 创建 [fromIndex, fromIndex+count) 的 bot，使用 conc 做批量限速。
+func (m *Manager) startBatch(fromIndex, count, conc int) error {
+	for i := 0; i < count; i++ {
 		if m.ctx.Err() != nil {
 			return m.ctx.Err()
 		}
 
-		id := m.cfg.StartNumber + i
+		id := m.cfg.StartNumber + fromIndex + i
 		account := fmt.Sprintf("%s%d", m.cfg.AccountPrefix, id)
 
 		r := NewRobot(Config{
-			ID:          id,
-			Account:     account,
-			AuthBaseURL: m.cfg.AuthBaseURL,
-			AuthExtra:   m.cfg.AuthExtra,
+			ID:         id,
+			Account:    account,
+			StateExtra: m.cfg.StateExtra,
 		}, m.flow, m.factory, m.cfg.Adapter, m.dialer, m.luaPool,
 			m.cfg.RequestTimeout, m.cfg.MainService)
 
@@ -89,8 +98,10 @@ func (m *Manager) StartAll() error {
 		r.Start()
 		m.started.Add(1)
 
-		if m.cfg.ConcurrentNum > 0 && (i+1)%m.cfg.ConcurrentNum == 0 {
-			stresslog.Info("[MANAGER] 机器人启动进度", zap.Int("started", i+1), zap.Int("total", m.cfg.Count))
+		if conc > 0 && (i+1)%conc == 0 {
+			stresslog.Info("[MANAGER] 批量进度",
+				zap.Int("batchCreated", i+1),
+				zap.Int("batchTotal", count))
 			select {
 			case <-m.ctx.Done():
 				return m.ctx.Err()
@@ -98,8 +109,73 @@ func (m *Manager) StartAll() error {
 			}
 		}
 	}
+	return nil
+}
+
+// StartAll 一次性创建全部机器人。
+func (m *Manager) StartAll() error {
+	stresslog.Info("[MANAGER] 开始创建机器人",
+		zap.Int("count", m.cfg.Count),
+		zap.Int("concurrent", m.cfg.ConcurrentNum))
+
+	if err := m.startBatch(0, m.cfg.Count, m.cfg.ConcurrentNum); err != nil {
+		return err
+	}
 
 	stresslog.Info("[MANAGER] 全部机器人已启动", zap.Int("count", m.cfg.Count))
+	return nil
+}
+
+// StartWithRampUp 分阶段创建机器人。
+func (m *Manager) StartWithRampUp() error {
+	stages := m.cfg.RampUp.Stages
+	total := 0
+	for _, s := range stages {
+		total += s.Count
+	}
+
+	stresslog.Info("[MANAGER] 开始渐进式加压",
+		zap.Int("stages", len(stages)),
+		zap.Int("totalBots", total),
+		zap.Int("defaultConcurrent", m.cfg.ConcurrentNum))
+
+	offset := 0
+	for i, stage := range stages {
+		conc := m.cfg.ConcurrentNum
+		if stage.Concurrency > 0 {
+			conc = stage.Concurrency
+		}
+
+		stresslog.Info("[MANAGER] 启动阶段",
+			zap.Int("stage", i+1),
+			zap.Int("count", stage.Count),
+			zap.Int("concurrency", conc),
+			zap.Int("holdSec", stage.HoldSec))
+
+		if err := m.startBatch(offset, stage.Count, conc); err != nil {
+			return err
+		}
+		offset += stage.Count
+
+		stresslog.Info("[MANAGER] 阶段完成",
+			zap.Int("stage", i+1),
+			zap.Int("running", offset))
+
+		// 阶段间等待（最后一个阶段不等）
+		if i < len(stages)-1 && stage.HoldSec > 0 {
+			stresslog.Info("[MANAGER] 阶段保持",
+				zap.Int("stage", i+1),
+				zap.Int("holdSec", stage.HoldSec),
+				zap.Int("running", offset))
+			select {
+			case <-m.ctx.Done():
+				return m.ctx.Err()
+			case <-time.After(time.Duration(stage.HoldSec) * time.Second):
+			}
+		}
+	}
+
+	stresslog.Info("[MANAGER] 渐进式加压完成，全部机器人已启动", zap.Int("count", offset))
 	return nil
 }
 
@@ -116,76 +192,4 @@ func (m *Manager) StopAll() {
 		m.stopped.Add(1)
 	}
 	stresslog.Info("[MANAGER] 全部机器人已停止")
-}
-
-// GetStats 获取运行统计
-func (m *Manager) GetStats() (started, stopped int) {
-	return int(m.started.Load()), int(m.stopped.Load())
-}
-
-// GetRobot 获取指定索引的机器人
-func (m *Manager) GetRobot(index int) *Robot {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if index < 0 || index >= len(m.robots) {
-		return nil
-	}
-	return m.robots[index]
-}
-
-// Count 返回已创建的机器人数量
-func (m *Manager) Count() int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return len(m.robots)
-}
-
-// RunConfig 任务运行参数（Agent 模式下由 Admin 下发）。
-type RunConfig struct {
-	StartNumber int
-	TotalBots   int
-	Concurrency int
-}
-
-// RunWithContext 启动机器人并阻塞，直到 ctx 取消或所有机器人退出。
-// 用于 Agent 模式：外部通过 cancel ctx 触发停止。
-func (m *Manager) RunWithContext(ctx context.Context, cfg RunConfig) error {
-	// 覆盖配置
-	if cfg.StartNumber > 0 {
-		m.cfg.StartNumber = cfg.StartNumber
-	}
-	if cfg.TotalBots > 0 {
-		m.cfg.Count = cfg.TotalBots
-	}
-	if cfg.Concurrency > 0 {
-		m.cfg.ConcurrentNum = cfg.Concurrency
-	}
-
-	if err := m.StartAll(); err != nil {
-		return err
-	}
-
-	// 等待 ctx 取消或所有机器人退出
-	done := make(chan struct{})
-	go func() {
-		for {
-			m.mu.RLock()
-			n := len(m.robots)
-			m.mu.RUnlock()
-			_, st := m.GetStats()
-			if int(st) >= n && n > 0 {
-				close(done)
-				return
-			}
-			time.Sleep(500 * time.Millisecond)
-		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		m.StopAll()
-		return ctx.Err()
-	case <-done:
-		return nil
-	}
 }

@@ -9,7 +9,8 @@ function execute(r)
     local account = robot.get("account")
     local version = robot.get("version") or "1.0.0"
     local channel = robot.get("platform") or "1000"
-    local code, body, sent, recv = network.http_post("/zoneList", {
+    local authAddr = robot.get("authAddr") or ""
+    local code, body, sent, recv = network.http_request(authAddr .. "/zoneList", "POST", "form", {
         account = account,
         version = version,
         channel = channel

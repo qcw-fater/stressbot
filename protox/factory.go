@@ -22,7 +22,7 @@ func NewFactory(registry *Registry) *Factory {
 }
 
 // Create 创建指定名称的动态消息。
-// name 可以是全名（如 "login.PlayerLoginC2S"）或短名（如 "PlayerLoginC2S"）。
+// name 可以是全名（如 "example.RequestC2S"）或短名（如 "PlayerLoginC2S"）。
 func (f *Factory) Create(name string) (proto.Message, error) {
 	md, ok := f.registry.Lookup(name)
 	if !ok {

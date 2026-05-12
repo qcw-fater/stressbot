@@ -1,27 +1,121 @@
 /**
- * 底部停靠的监控面板。
+ * 底部停靠监控面板（统一单面板）。
  *
- * 行为：
- *   - 编辑态：默认折叠成一条带，仅显示"展开监控"按钮
- *   - 运行/查看/finalReport：默认展开，6 个 Tab：大盘 / 动作 / 错误 / 趋势 / per-Agent / 系统
+ * 合并原 4 个 Tab（大盘/动作/错误/趋势）为一张面板：
+ *   - 顶部：指标区 + CPU% / QPS 迷你趋势图，横向约各占 1/3 宽度
+ *   - 底部：完整动作表（含可展开错误明细 + 搜索/过滤）
  *   - 高度可通过顶部拖把手调整（160px ~ 80vh）
- *   - 折叠态/展开态由 editorStore.monitorDockOpen 持久化
  */
 
-import { Button, Tabs } from 'antd';
-import { CaretDownOutlined, CaretUpOutlined, LineChartOutlined } from '@ant-design/icons';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useRuntimeStore } from '@/services';
+import { Button, Input, Progress, Space, Switch, Table, Tag } from 'antd';
+import { CaretDownOutlined, CaretUpOutlined, LineChartOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
+import type { ColumnsType } from 'antd/es/table';
+import ReactECharts from 'echarts-for-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
+import { useRuntimeStore, classifyApdex } from '@/services';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
-import { DashboardTab } from './tabs/DashboardTab';
-import { ActionsTab } from './tabs/ActionsTab';
-import { ErrorsTab } from './tabs/ErrorsTab';
-import { TrendsTab } from './tabs/TrendsTab';
-import { PerAgentTab } from './tabs/PerAgentTab';
+import { ApdexCell } from './shared/ApdexCell';
+import { fmtBytesPlain, fmtMs, NUMERIC_STYLE } from './shared/formats';
+import type { ActionMetric } from '@/types/api';
+import './MonitorDock.css';
 
 const MIN_H = 160;
 const MAX_H_RATIO = 0.8;
 const DEFAULT_H = 360;
+
+/* ── helpers ── */
+
+function fmtBandwidth(mbps: number) {
+  const v = Number.isFinite(mbps) ? mbps : 0;
+  if (v < 1) return { value: v * 1024, suffix: 'KB/s', precision: 1 };
+  return { value: v, suffix: 'MB/s', precision: 2 };
+}
+
+function successColor(rate: number): string {
+  if (rate >= 0.95) return 'var(--color-success)';
+  if (rate >= 0.8) return 'var(--color-warning)';
+  return 'var(--color-error)';
+}
+
+const APDEX_COLOR: Record<string, string> = {
+  excellent: 'var(--color-success)',
+  good: '#bae637',
+  fair: 'var(--color-warning)',
+  poor: 'var(--color-orange, #fa8c16)',
+  danger: 'var(--color-error)',
+  unknown: 'var(--text-tertiary)',
+};
+
+function sparkOption(series: Array<{ name: string; data: number[]; color: string }>) {
+  const len = series[0]?.data.length ?? 0;
+  const x = Array.from({ length: len }, (_, i) => i);
+  return {
+    grid: { left: 28, right: 4, top: 4, bottom: 14 },
+    xAxis: { type: 'category', data: x, show: false },
+    yAxis: { type: 'value', axisLabel: { fontSize: 8, color: 'var(--text-tertiary)' }, splitLine: { lineStyle: { color: 'var(--glass-border)' } } },
+    tooltip: { trigger: 'axis', textStyle: { fontSize: 10 } },
+    series: series.map((s) => ({
+      name: s.name,
+      type: 'line',
+      smooth: true,
+      symbol: 'none',
+      data: s.data,
+      itemStyle: { color: s.color },
+      areaStyle: { opacity: 0.12 },
+      lineStyle: { width: 1.5 },
+    })),
+  };
+}
+
+/* ── 动作表列定义 ── */
+
+const ACTION_COLUMNS: ColumnsType<ActionMetric> = [
+  {
+    title: '动作',
+    dataIndex: 'name',
+    key: 'name',
+    width: 180,
+    fixed: 'left',
+    ellipsis: true,
+    sorter: (a, b) => a.name.localeCompare(b.name),
+    render: (v: string) => {
+      const isCb = v.startsWith('callback:');
+      const display = isCb ? v.slice('callback:'.length) : v;
+      return (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          {isCb && <Tag color="orange" style={{ marginInlineEnd: 0 }}>推送</Tag>}
+          <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={display}>
+            {display}
+          </code>
+        </div>
+      );
+    },
+  },
+  { title: '并发', dataIndex: 'executing', key: 'executing', width: 56, sorter: (a, b) => a.executing - b.executing, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
+  { title: '样本', dataIndex: 'sampleCount', key: 'sampleCount', width: 64, sorter: (a, b) => a.sampleCount - b.sampleCount, defaultSortOrder: 'descend' as const, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
+  { title: '成功', dataIndex: 'successCount', key: 'successCount', width: 64, sorter: (a, b) => a.successCount - b.successCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: 'var(--color-success)' }}>{v}</span> },
+  { title: '失败', dataIndex: 'failureCount', key: 'failureCount', width: 64, sorter: (a, b) => a.failureCount - b.failureCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-error)' : 'var(--text-tertiary)' }}>{v}</span> },
+  { title: '超时', dataIndex: 'timeoutCount', key: 'timeoutCount', width: 64, sorter: (a, b) => a.timeoutCount - b.timeoutCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-orange)' : 'var(--text-tertiary)' }}>{v}</span> },
+  { title: '跳过', dataIndex: 'skippedCount', key: 'skippedCount', width: 56, sorter: (a, b) => a.skippedCount - b.skippedCount, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
+  { title: 'Apdex', dataIndex: 'apdex', key: 'apdex', width: 72, sorter: (a, b) => a.apdex - b.apdex, render: (v: number) => <ApdexCell value={v} /> },
+  { title: 'QPS', dataIndex: 'avgQps', key: 'avgQps', width: 64, sorter: (a, b) => a.avgQps - b.avgQps, render: (v: number) => <span style={NUMERIC_STYLE}>{v.toFixed(1)}</span> },
+  { title: '↑avg(B)', dataIndex: 'avgSendBytes', key: 'avgSendBytes', width: 74, sorter: (a, b) => a.avgSendBytes - b.avgSendBytes, render: (v: number) => <span style={NUMERIC_STYLE}>{fmtBytesPlain(v)}</span> },
+  { title: '↓avg(B)', dataIndex: 'avgRecvBytes', key: 'avgRecvBytes', width: 74, sorter: (a, b) => a.avgRecvBytes - b.avgRecvBytes, render: (v: number) => <span style={NUMERIC_STYLE}>{fmtBytesPlain(v)}</span> },
+  { title: 'avg(ms)', key: 'avgMs', width: 68, sorter: (a, b) => a.latency.avgMs - b.latency.avgMs, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.avgMs)}</span> },
+  { title: 'p50(ms)', key: 'p50Ms', width: 68, sorter: (a, b) => a.latency.p50Ms - b.latency.p50Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.p50Ms)}</span> },
+  { title: 'p95(ms)', key: 'p95Ms', width: 68, sorter: (a, b) => a.latency.p95Ms - b.latency.p95Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.p95Ms)}</span> },
+  { title: 'p99(ms)', key: 'p99Ms', width: 68, sorter: (a, b) => a.latency.p99Ms - b.latency.p99Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.p99Ms)}</span> },
+  { title: 'max(ms)', key: 'maxMs', width: 68, sorter: (a, b) => a.latency.maxMs - b.latency.maxMs, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.maxMs)}</span> },
+  { title: '超均(ms)', dataIndex: 'timeoutAvgMs', key: 'timeoutAvgMs', width: 74, sorter: (a, b) => a.timeoutAvgMs - b.timeoutAvgMs, render: (v: number) => <span style={NUMERIC_STYLE}>{fmtMs(v)}</span> },
+  {
+    title: '错误', key: 'errors', width: 56, fixed: 'right',
+    sorter: (a, b) => (a.errors?.length ?? 0) - (b.errors?.length ?? 0),
+    render: (_, r) => r.errors?.length ? <Tag color="error" style={{ marginInlineEnd: 0 }}>{r.errors.length}</Tag> : <span style={{ color: 'var(--text-tertiary)' }}>—</span>,
+  },
+];
+
+/* ══════════════════════════════════════════════════════════════ */
 
 export function MonitorDock() {
   const mode = useRuntimeStore((s) => s.mode);
@@ -32,9 +126,9 @@ export function MonitorDock() {
     return saved >= MIN_H ? saved : DEFAULT_H;
   });
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
-  const [activeKey, setActiveKey] = useState('dashboard');
+  const [tableScrollY, setTableScrollY] = useState(200);
 
-  // 自动按模式切换默认开关：编辑→关；运行→开；不强制覆盖用户已设置
+  // auto toggle: edit→closed; running→open
   const lastModeRef = useRef(mode);
   useEffect(() => {
     if (lastModeRef.current === mode) return;
@@ -42,6 +136,21 @@ export function MonitorDock() {
     if (mode === 'edit') setDockOpen(false);
     lastModeRef.current = mode;
   }, [mode, setDockOpen]);
+
+  // compute table scroll height when dock height changes
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!dockOpen || !bodyRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const h = entry.contentRect.height;
+        // top section 180px, toolbar ~28px, gaps ~14px
+        setTableScrollY(Math.max(80, h - 222));
+      }
+    });
+    observer.observe(bodyRef.current);
+    return () => observer.disconnect();
+  }, [dockOpen]);
 
   const onDragStart = useCallback(
     (e: React.MouseEvent) => {
@@ -69,77 +178,252 @@ export function MonitorDock() {
 
   if (!dockOpen) {
     return (
-      <div
-        style={{
-          height: 32,
-          borderTop: '1px solid var(--border-color)',
-          background: 'var(--bg-panel)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 12px',
-          fontSize: 12,
-        }}
-      >
+      <div className="monitor-dock__collapsed">
         <Button type="text" size="small" icon={<LineChartOutlined />} onClick={() => setDockOpen(true)}>
           展开监控
         </Button>
-        <span style={{ color: 'var(--text-tertiary)' }}>
-          点击展开实时监控
-        </span>
+        <span style={{ color: 'var(--text-tertiary)' }}>点击展开实时监控</span>
         <Button type="text" size="small" icon={<CaretUpOutlined />} onClick={() => setDockOpen(true)} />
       </div>
     );
   }
 
   return (
-    <div
-      style={{
-        height,
-        borderTop: '1px solid var(--border-color)',
-        background: 'var(--bg-panel)',
-        display: 'flex',
-        flexDirection: 'column',
-        position: 'relative',
-      }}
-    >
-      <div
-        onMouseDown={onDragStart}
-        title="拖动调整高度"
-        style={{
-          position: 'absolute',
-          top: -4,
-          left: 0,
-          right: 0,
-          height: 8,
-          cursor: 'row-resize',
-          background: 'transparent',
-          zIndex: 10,
-        }}
-      />
-      <Tabs
-        size="small"
-        activeKey={activeKey}
-        onChange={setActiveKey}
-        style={{ flex: 1, minHeight: 0, padding: '0 12px' }}
-        tabBarStyle={{ marginBottom: 4 }}
-        tabBarExtraContent={
-          <Button
-            type="text"
-            size="small"
-            icon={<CaretDownOutlined />}
-            onClick={() => setDockOpen(false)}
-            title="折叠监控"
-          />
-        }
-        items={[
-          { key: 'dashboard', label: '大盘', children: <div style={{ overflow: 'auto', height: height - 64 }}><DashboardTab /></div> },
-          { key: 'actions', label: '动作', children: <div style={{ overflow: 'auto', height: height - 64 }}><ActionsTab /></div> },
-          { key: 'errors', label: '错误', children: <div style={{ overflow: 'auto', height: height - 64 }}><ErrorsTab /></div> },
-          { key: 'trends', label: '趋势', children: <div style={{ overflow: 'auto', height: height - 64 }}><TrendsTab /></div> },
-          { key: 'per-agent', label: '按节点', children: <div style={{ overflow: 'auto', height: height - 64 }}><PerAgentTab /></div> },
-        ]}
-      />
+    <div className="monitor-dock" style={{ height }}>
+      <div className="monitor-dock__handle" onMouseDown={onDragStart} title="拖动调整高度" />
+      <div className="monitor-dock__body" ref={bodyRef}>
+        <TopSection />
+        <ActionsSection tableScrollY={tableScrollY} />
+      </div>
+      <div style={{ position: 'absolute', top: 6, right: 12 }}>
+        <Button type="text" size="small" icon={<CaretDownOutlined />} onClick={() => setDockOpen(false)} title="折叠监控" />
+      </div>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────
+   顶部指标 + 趋势图
+   ────────────────────────────────────────────────── */
+
+function TopSection() {
+  const { latestStress, latestSystem, systemHistory, stressHistory } = useRuntimeStore(
+    useShallow((s) => ({
+      latestStress: s.latestStress,
+      latestSystem: s.latestSystem,
+      systemHistory: s.systemHistory,
+      stressHistory: s.stressHistory,
+    })),
+  );
+
+  // 迷你趋势图
+  const cpuOption = useMemo(() => {
+    if (systemHistory.length < 2) return null;
+    return sparkOption([{ name: 'CPU%', data: systemHistory.map((s) => s.avgCpuPercent), color: '#fa8c16' }]);
+  }, [systemHistory]);
+
+  const qpsOption = useMemo(() => {
+    if (stressHistory.length < 2) return null;
+    const totalQps = stressHistory.map((s) => s.actions.reduce((sum, a) => sum + a.avgQps, 0));
+    return sparkOption([{ name: 'QPS', data: totalQps, color: '#1677ff' }]);
+  }, [stressHistory]);
+
+  if (!latestStress) {
+    return (
+      <div className="monitor-dock__top">
+        <div className="monitor-dock__metrics" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>暂无压测数据；启动任务后实时显示</span>
+        </div>
+        <div className="monitor-dock__charts">
+          <div className="monitor-dock__chart-card monitor-dock__chart-card--cpu">
+            <div className="monitor-dock__chart-title">CPU%</div>
+            <div style={{ color: 'var(--text-tertiary)', fontSize: 10, textAlign: 'center', paddingTop: 20 }}>等待数据…</div>
+          </div>
+          <div className="monitor-dock__chart-card monitor-dock__chart-card--qps">
+            <div className="monitor-dock__chart-title">QPS</div>
+            <div style={{ color: 'var(--text-tertiary)', fontSize: 10, textAlign: 'center', paddingTop: 20 }}>等待数据…</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const r = latestStress.robots;
+  const c = latestStress.connections;
+  const b = latestStress.bandwidth;
+  const sys = latestSystem;
+  const actions = latestStress.actions;
+
+  const activeConns = Math.max(0, c.established - c.dropped);
+  const send = fmtBandwidth(b.sendMBps ?? 0);
+  const recv = fmtBandwidth(b.recvMBps ?? 0);
+  const robotPercent = r.started > 0 ? Math.round((r.running / r.started) * 100) : 0;
+
+  // 加权集群 apdex / 成功率
+  let totalSamples = 0, wApdex = 0, wSuccess = 0;
+  for (const a of actions) {
+    totalSamples += a.sampleCount;
+    wApdex += a.apdex * a.sampleCount;
+    wSuccess += a.successRate * a.sampleCount;
+  }
+  const clusterApdex = totalSamples > 0 ? wApdex / totalSamples : 0;
+  const clusterSuccess = totalSamples > 0 ? wSuccess / totalSamples : 0;
+  const apdexLevel = classifyApdex(clusterApdex);
+
+  return (
+    <div className="monitor-dock__top">
+      {/* 指标区 (全新设计) */}
+      <div className="md-metrics-panel">
+        {/* 核心指标 (Hero) */}
+        <div className="md-hero-row">
+          <div className="md-hero-box">
+            <div className="md-hero-title">Apdex 指数</div>
+            <div className="md-hero-value" style={{ color: APDEX_COLOR[apdexLevel] }}>{clusterApdex.toFixed(3)}</div>
+          </div>
+          <div className="md-hero-divider" />
+          <div className="md-hero-box">
+            <div className="md-hero-title">全局成功率</div>
+            <div className="md-hero-value" style={{ color: successColor(clusterSuccess) }}>{(clusterSuccess * 100).toFixed(1)}%</div>
+          </div>
+        </div>
+
+        {/* 负载进度条 (Load) */}
+        <div className="md-load-row">
+          <div className="md-load-header">
+            <span className="md-load-title">机器人并发负载</span>
+            <span className="md-load-stats">
+              <span className="md-load-running">{r.running}</span>
+              <span className="md-load-started">/ {r.started}</span>
+            </span>
+          </div>
+          <div className="md-load-progress">
+            <Progress percent={robotPercent} strokeColor="var(--color-success)" showInfo={false} strokeWidth={4} />
+          </div>
+          {(r.stopped > 0 || r.errored > 0) && (
+            <div className="md-load-chips">
+              {r.stopped > 0 && <span className="md-chip md-chip-stopped">停 {r.stopped}</span>}
+              {r.errored > 0 && <span className="md-chip md-chip-errored">错 {r.errored}</span>}
+            </div>
+          )}
+        </div>
+
+        {/* 数据网格 (Grid) */}
+        <div className="md-grid-row">
+          <div className="md-grid-item">
+            <span className="md-grid-label">活跃连接</span>
+            <span className="md-grid-value">{activeConns}</span>
+          </div>
+          <div className="md-grid-item">
+            <span className="md-grid-label">集群 CPU</span>
+            <span className="md-grid-value">{sys?.avgCpuPercent.toFixed(0)}%</span>
+          </div>
+          <div className="md-grid-item">
+            <span className="md-grid-label">运行时长</span>
+            <span className="md-grid-value">{(latestStress.uptimeSeconds / 60).toFixed(1)}m</span>
+          </div>
+          <div className="md-grid-item">
+            <span className="md-grid-label">执行动作</span>
+            <span className="md-grid-value">{latestStress.totalActions.toLocaleString()}</span>
+          </div>
+          <div className="md-grid-item">
+            <span className="md-grid-label"><ArrowUpOutlined /> 带宽</span>
+            <span className="md-grid-value">{send.value.toFixed(1)}{send.suffix}</span>
+          </div>
+          <div className="md-grid-item">
+            <span className="md-grid-label"><ArrowDownOutlined /> 带宽</span>
+            <span className="md-grid-value">{recv.value.toFixed(1)}{recv.suffix}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* 趋势图 */}
+      <div className="monitor-dock__charts">
+        <div className="monitor-dock__chart-card monitor-dock__chart-card--cpu">
+          <div className="monitor-dock__chart-title">CPU%</div>
+          {cpuOption ? (
+            <ReactECharts option={cpuOption} style={{ height: 'calc(100% - 16px)' }} notMerge lazyUpdate />
+          ) : (
+            <div style={{ color: 'var(--text-tertiary)', fontSize: 10, textAlign: 'center', paddingTop: 12 }}>等待数据…</div>
+          )}
+        </div>
+        <div className="monitor-dock__chart-card monitor-dock__chart-card--qps">
+          <div className="monitor-dock__chart-title">QPS</div>
+          {qpsOption ? (
+            <ReactECharts option={qpsOption} style={{ height: 'calc(100% - 16px)' }} notMerge lazyUpdate />
+          ) : (
+            <div style={{ color: 'var(--text-tertiary)', fontSize: 10, textAlign: 'center', paddingTop: 12 }}>等待数据…</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────
+   动作表（含搜索 + 过滤 + 可展开错误）
+   ────────────────────────────────────────────────── */
+
+function ActionsSection({ tableScrollY }: { tableScrollY: number }) {
+  const latestStress = useRuntimeStore((s) => s.latestStress);
+  const [search, setSearch] = useState('');
+  const [actionsOnly, setActionsOnly] = useState(false);
+
+  const dataSource = useMemo(() => {
+    if (!latestStress) return [];
+    let rows = latestStress.actions ?? [];
+    if (actionsOnly) rows = rows.filter((a) => !a.name.startsWith('callback:'));
+    if (search) {
+      const lo = search.toLowerCase();
+      rows = rows.filter((a) => a.name.toLowerCase().includes(lo));
+    }
+    return rows;
+  }, [latestStress, search, actionsOnly]);
+
+  if (!latestStress) return null;
+
+  return (
+    <div className="monitor-dock__actions">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexShrink: 0 }}>
+        <Input.Search
+          placeholder="按动作名搜索"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          allowClear
+          style={{ width: 260 }}
+          size="small"
+        />
+        <Space size={4}>
+          <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>仅动作</span>
+          <Switch checked={actionsOnly} onChange={setActionsOnly} size="small" />
+        </Space>
+        <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+          {dataSource.length} 条
+        </span>
+      </div>
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <Table<ActionMetric>
+          rowKey="name"
+          size="small"
+          dataSource={dataSource}
+          columns={ACTION_COLUMNS}
+          pagination={false}
+          scroll={{ x: 'max-content', y: tableScrollY }}
+          expandable={{
+            rowExpandable: (r) => !!r.errors && r.errors.length > 0,
+            expandedRowRender: (r) => (
+              <div style={{ fontSize: 12 }}>
+                <strong>错误明细：</strong>
+                {r.errors!.map((e) => (
+                  <div key={e.msg} style={{ marginTop: 2 }}>
+                    <Tag color="error">×{e.count}</Tag>
+                    {e.msg}
+                  </div>
+                ))}
+              </div>
+            ),
+          }}
+        />
+      </div>
     </div>
   );
 }

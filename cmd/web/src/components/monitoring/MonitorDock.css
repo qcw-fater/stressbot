@@ -1,0 +1,268 @@
+/* ══════════════════════════════════════════════════════════════
+   MonitorDock — 统一单面板布局
+   ══════════════════════════════════════════════════════════════ */
+
+.monitor-dock {
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-panel);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* ── 拖把手 ── */
+
+.monitor-dock__handle {
+  position: absolute;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: row-resize;
+  z-index: 10;
+}
+
+/* ── 折叠条 ── */
+
+.monitor-dock__collapsed {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  font-size: 12px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-panel);
+}
+
+/* ── 主体 ── */
+
+.monitor-dock__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 8px 12px 6px;
+  gap: 6px;
+}
+
+/* ── 顶部 glass 卡（指标 + 趋势图） ── */
+
+.monitor-dock__top {
+  flex-shrink: 0;
+  /* 顶栏三等分：指标 1/3 | CPU 图 1/3 | QPS 图 1/3（外层 1fr + 2fr，内层图表区再 1fr 1fr） */
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 8px;
+  height: 180px;
+}
+
+/* ==========================================================================
+   全新设计的指标区面板
+   ========================================================================== */
+.md-metrics-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  box-shadow: var(--glass-shadow);
+  position: relative;
+  overflow: hidden;
+  padding: 8px 12px 8px 14px;
+  gap: 8px;
+}
+
+.md-metrics-panel::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: linear-gradient(180deg, var(--color-blue), var(--color-purple));
+}
+
+/* 核心指标 (Hero) */
+.md-hero-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  background: var(--fill-quaternary, rgba(0, 0, 0, 0.02));
+  border-radius: 8px;
+  padding: 4px 0;
+  border: 1px solid var(--border-color-split, rgba(0,0,0,0.04));
+  flex-shrink: 0;
+}
+.md-hero-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+}
+.md-hero-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--border-color-split, rgba(0,0,0,0.06));
+}
+.md-hero-title {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}
+.md-hero-value {
+  font-size: 20px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+/* 负载进度条 (Load) */
+.md-load-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.md-load-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+.md-load-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.md-load-stats {
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.md-load-running {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.md-load-started {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-left: 2px;
+}
+.md-load-progress .ant-progress-line { margin-bottom: 0; }
+.md-load-progress .ant-progress-inner { border-radius: 2px; background: var(--fill-quaternary); }
+.md-load-progress .ant-progress-bg { border-radius: 2px; }
+
+.md-load-chips {
+  display: flex;
+  gap: 4px;
+  margin-top: 1px;
+}
+.md-chip {
+  font-size: 9px;
+  padding: 0 4px;
+  border-radius: 4px;
+  line-height: 14px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.md-chip-stopped { color: var(--text-tertiary); background: var(--fill-quaternary); }
+.md-chip-errored { color: var(--color-error); background: color-mix(in srgb, var(--color-error) 10%, transparent); }
+
+/* 数据网格 (Grid) */
+.md-grid-row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  column-gap: 16px;
+  row-gap: 4px;
+  margin-top: auto;
+}
+.md-grid-item {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px;
+  overflow: hidden;
+}
+.md-grid-label {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+.md-grid-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── 趋势图区域 ── */
+
+.monitor-dock__charts {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.monitor-dock__chart-card {
+  min-width: 0;
+  min-height: 0;
+  padding: 6px 8px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  box-shadow: var(--glass-shadow);
+  position: relative;
+  overflow: hidden;
+}
+
+.monitor-dock__chart-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 8px 0 0 8px;
+}
+
+.monitor-dock__chart-card--cpu::before {
+  background: linear-gradient(180deg, var(--color-warning), var(--color-error));
+}
+
+.monitor-dock__chart-card--qps::before {
+  background: linear-gradient(180deg, var(--color-blue), #69b1ff);
+}
+
+.monitor-dock__chart-title {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+
+/* ── 动作表区域 ── */
+
+.monitor-dock__actions {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}

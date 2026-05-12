@@ -119,8 +119,8 @@ function HomeShellInner() {
   // RobotConfig 引导：从 /conf/config.json 读取单机配置作为默认值。
   //   - 仅在用户当前字段仍是开箱占位时才覆盖（避免覆盖用户手改）；
   //   - 失败静默：未挂载 conf/ 时维持开箱默认；
-  //   - 这一步必须放在 startTask 之前，否则前端默认值（authAddr 是 127.0.0.1、
-  //     authExtra 是 {} 等）会被下发到 agent，导致 lua 脚本鉴权失败。
+  //   - 这一步必须放在 startTask 之前，否则前端默认值（
+  //     stateExtra 是 {} 等）会被下发到 agent，导致 lua 脚本鉴权失败。
   useEffect(() => {
     if (bootRef.current) return;
     bootRef.current = true;
@@ -294,7 +294,6 @@ function HomeShellInner() {
  * 字段映射（仅在用户当前值还是占位默认时才覆盖）：
  *   conf/config.json                     → RobotConfig
  *   ─────────────────────────────────────────────────────
- *   auth.address                         → authAddr
  *   bot.accountPrefix                    → accountPrefix
  *   bot.startNumber                      → startNumber
  *   bot.mainService                      → mainService
@@ -304,8 +303,8 @@ function HomeShellInner() {
  *   network.httpTimeout ("10s")          → httpTimeoutSec
  *   monitor.apdexT                       → apdexT
  *
- * **不同步** auth.extra：
- *   该字段是 Auth 请求的扩展键值集合（version/channel/platform 等），
+ * **不同步** stateExtra：
+ *   该字段是 State 扩展键值集合（version/channel/platform 等），
  *   单机模式下确实需要，但 Web 模式下用户的诉求是"完全手动控制"——
  *   单机配置里写什么是单机部署的事，Web 端不应该把它当默认值悄悄填上去。
  *   如有需要用户自行在"高级设置 → 添加字段"里加。
@@ -315,7 +314,6 @@ function HomeShellInner() {
 async function syncDefaultRobotConfigFromConf(): Promise<void> {
   // 这些是 runtimeStore 中开箱默认值；用户改过就不会等于这些值。
   const PLACEHOLDERS = {
-    authAddr: 'http://127.0.0.1:20000',
     accountPrefix: 'bot_',
     startNumber: 0,
     mainService: 'logic',
@@ -330,7 +328,6 @@ async function syncDefaultRobotConfigFromConf(): Promise<void> {
     const r = await fetch('/conf/config.json');
     if (!r.ok) return;
     const cfg = (await r.json()) as {
-      auth?: { address?: string };
       bot?: { accountPrefix?: string; startNumber?: number; mainService?: string; concurrentNum?: number };
       network?: { heartbeatInterval?: string; tcpTimeout?: string; httpTimeout?: string };
       monitor?: { apdexT?: number };
@@ -340,16 +337,13 @@ async function syncDefaultRobotConfigFromConf(): Promise<void> {
     const patch: Partial<RobotConfig> = {};
 
     // 字符串：cur 等于占位时才填入
-    const addr = cfg.auth?.address?.trim();
-    if (addr && cur.authAddr.trim() === PLACEHOLDERS.authAddr) patch.authAddr = addr;
-
     const ap = cfg.bot?.accountPrefix?.trim();
     if (ap && (cur.accountPrefix ?? '') === PLACEHOLDERS.accountPrefix) patch.accountPrefix = ap;
 
     const ms = cfg.bot?.mainService?.trim();
     if (ms && (cur.mainService ?? '') === PLACEHOLDERS.mainService) patch.mainService = ms;
 
-    // 注意：auth.extra 不同步（用户诉求"完全手动控制"，详见上方文档注释）。
+    // 注意：stateExtra 不同步（用户诉求"完全手动控制"，详见上方文档注释）。
 
     // int：cur 等于占位时才填入
     if (typeof cfg.bot?.startNumber === 'number' && (cur.startNumber ?? 0) === PLACEHOLDERS.startNumber) {

@@ -16,7 +16,7 @@ import { useProtoStore } from '@/components/FlowEditor/proto/protoStore';
 import { validateFlow } from '@/components/FlowEditor/validation/refsCheck';
 import { useMetricsStore } from '@/components/FlowEditor/nodes/shared/MetricsBadge';
 import * as tasksApi from './tasksApi';
-import { listProto, listScript, syncProtoFromBaseline, syncScriptFromBaseline, syncAdapterFromBaseline } from './resourcesStore';
+import { listProto, listScript, getAdapterScript } from './resourcesStore';
 import { syncFlowScriptsToIdb } from './scriptSync';
 import { useRuntimeStore } from './runtimeStore';
 import { ApiError } from './api';
@@ -96,26 +96,10 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
   useRuntimeStore.getState().clearMonitorData();
   useMetricsStore.getState().setProvider(undefined);
 
-  // 2. 资源同步与收集
-  //   - 先全量基线同步（三种资源并行），按 fromBaseline 优先级：
-  //       IDB 无 → 写入 fromBaseline:true；IDB 有 + fromBaseline:true → 用最新基线覆盖；
-  //       IDB 有 + fromBaseline:false → 跳过（用户编辑过）
-  //   - 再做 flow 引用的脚本缺失检测（IDB 已有最新基线）
-  //   - 最后收集 IDB 内容作为 multipart payload
-  const [, , adapterContent] = await Promise.all([
-    syncProtoFromBaseline(),
-    syncScriptFromBaseline(),
-    syncAdapterFromBaseline(),
-  ]);
-  if (!adapterContent) {
-    throw new ApiError(
-      {
-        code: 'INVALID_ARGUMENT',
-        message: '缺少协议适配器。请在「协议适配器」面板导入或载入模板。',
-      },
-      400,
-    );
-  }
+  // 2. 资源收集
+  //   - flow 引用脚本缺失检测（基线同步已在 TaskStartModal useEffect 中完成）
+  //   - 收集 IDB 内容作为 multipart payload
+  //   - 确保 adapter 存在
   const sync = await syncFlowScriptsToIdb(flowJson);
   if (sync.missing.length > 0) {
     throw new ApiError(
@@ -129,7 +113,17 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
       400,
     );
   }
-  const [protos, scripts] = await Promise.all([listProto(), listScript()]);
+  const [protos, scripts, adapterRes] = await Promise.all([listProto(), listScript(), getAdapterScript()]);
+  const adapterContent = adapterRes?.content ?? null;
+  if (!adapterContent) {
+    throw new ApiError(
+      {
+        code: 'INVALID_ARGUMENT',
+        message: '缺少协议适配器。请在「协议适配器」面板导入或载入模板。',
+      },
+      400,
+    );
+  }
 
   // 3. 容量预检
   {

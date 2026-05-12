@@ -10,11 +10,15 @@ import (
 // Lua 用法：
 //
 //	local proto = require("proto")
-//	local msg = proto.create("login.PlayerLoginC2S")
+//	local msg = proto.create("example.RequestC2S")
 //	proto.set_field(msg, "PlayerId", 10001)
 //	local playerId = proto.get_field(msg, "PlayerId")
 //	local bytes = proto.serialize(msg)
-//	local parsed = proto.parse("login.PlayerLoginS2C", bytes)
+//	local parsed = proto.parse("example.ResponseS2C", bytes)
+//	local fields = proto.get_field_map(msg)
+//	for i, item in proto.iter_list(msg, "items") do ... end
+//	local n = proto.list_size(msg, "items")
+//	local item = proto.list_get(msg, "items", 1)
 func loadProtoModule(L *lua.LState) int {
 	mod := L.NewTable()
 

@@ -173,29 +173,40 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 		accountPrefix = "bot_"
 	}
 	mainService := r.assignment.MainService
-	if mainService == "" {
-		mainService = "logic"
-	}
 
 	mgrCfg := robot.ManagerConfig{
 		AccountPrefix:  accountPrefix,
 		StartNumber:    r.assignment.StartNumber,
 		Count:          r.assignment.TotalBots,
 		ConcurrentNum:  r.assignment.ConcurrentNum,
-		AuthBaseURL:    r.assignment.AuthAddress,
-		AuthExtra:      r.assignment.AuthExtra,
+		StateExtra:     r.assignment.StateExtra,
 		Adapter:        adp,
 		RequestTimeout: tcpTimeout,
 		MainService:    mainService,
 		HTTPTimeout:    httpTimeout,
 	}
+	if r.assignment.RampUp != nil && len(r.assignment.RampUp.Stages) > 0 {
+		mgrCfg.RampUp = &robot.RampUpConfig{}
+		for _, s := range r.assignment.RampUp.Stages {
+			mgrCfg.RampUp.Stages = append(mgrCfg.RampUp.Stages, robot.RampUpStage{
+				Count:       s.Count,
+				Concurrency: s.Concurrency,
+				HoldSec:     s.HoldSec,
+			})
+		}
+	}
 	mgr := robot.NewManager(mgrCfg, flow, factory, dialer, luaPool)
 
 	// 11. 启动机器人
-	if err := mgr.StartAll(); err != nil {
-		return TaskFailed, fmt.Sprintf("启动机器人失败: %v", err)
+	var startErr error
+	if mgrCfg.RampUp != nil {
+		startErr = mgr.StartWithRampUp()
+	} else {
+		startErr = mgr.StartAll()
 	}
-
+	if startErr != nil {
+		return TaskFailed, fmt.Sprintf("启动机器人失败: %v", startErr)
+	}
 	stresslog.Info("[TASK] 任务执行中",
 		zap.String("taskID", taskID),
 		zap.Int("totalBots", r.assignment.TotalBots),

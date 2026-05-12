@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -102,15 +103,15 @@ func (s *AdminServer) handleAgentRegister(w http.ResponseWriter, r *http.Request
 	}
 
 	node := &AgentNode{
-		ID:             req.AgentID,
-		Name:           req.Name,
-		Address:        req.Address,
-		AppVersion:     req.AppVersion,
-		MaxBots:        req.MaxBots,
-		StressInterval: req.StressInterval,
-		SystemInterval: req.SystemInterval,
-		StaticInfo:     req.StaticInfo,
-		Status:         AgentIdle,
+		ID:              req.AgentID,
+		Name:            req.Name,
+		Address:         req.Address,
+		AppVersion:      req.AppVersion,
+		MaxBots:         req.MaxBots,
+		StressInterval:  req.StressInterval,
+		SystemInterval:  req.SystemInterval,
+		StaticInfo:      req.StaticInfo,
+		Status:          AgentIdle,
 		LastHeartbeatAt: time.Now(),
 	}
 	if err := s.agents.Register(node); err != nil {
@@ -344,6 +345,30 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal([]byte(rc), &cfg.RobotConfig)
 	}
 
+	// 校验 rampUp 配置
+	if cfg.RobotConfig.RampUp != nil {
+		if len(cfg.RobotConfig.RampUp.Stages) == 0 {
+			writeError(w, ErrInvalidArgument.WithMessage("rampUp.stages must not be empty"))
+			return
+		}
+		sum := 0
+		for _, s := range cfg.RobotConfig.RampUp.Stages {
+			if s.Count <= 0 {
+				writeError(w, ErrInvalidArgument.WithMessage("rampUp.stage.count must be positive"))
+				return
+			}
+			if s.HoldSec < 0 {
+				writeError(w, ErrInvalidArgument.WithMessage("rampUp.stage.holdSec must be >= 0"))
+				return
+			}
+			sum += s.Count
+		}
+		if sum != totalBots {
+			writeError(w, ErrInvalidArgument.WithMessage(fmt.Sprintf("rampUp stages count sum (%d) must equal totalBots (%d)", sum, totalBots)))
+			return
+		}
+	}
+
 	// deadline（可选）
 	if dl := r.FormValue("deadline"); dl != "" {
 		if t, err := time.Parse(time.RFC3339, dl); err == nil {
@@ -457,7 +482,6 @@ func (s *AdminServer) handleGetTaskConfig(w http.ResponseWriter, r *http.Request
 	case "config.json":
 		// Agent 运行时配置（robotConfig + 超时等）
 		configJSON, _ := json.Marshal(map[string]any{
-			"authAddr":    task.Config.RobotConfig.AuthAddr,
 			"concurrency": task.Config.RobotConfig.Concurrency,
 			"timeoutSec":  task.Config.RobotConfig.TimeoutSec,
 			"deadline":    task.Config.Deadline,
@@ -566,7 +590,7 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 		for name := range task.Config.LuaScripts {
 			configFiles = append(configFiles, "scripts/"+name)
 		}
-	if task.Config.AdapterScript != nil {
+		if task.Config.AdapterScript != nil {
 			configFiles = append(configFiles, "adapter/codec.lua")
 		}
 	}
@@ -584,9 +608,8 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 			StartNumber:       a.StartNumber,
 			TotalBots:         a.TotalBots,
 			AccountPrefix:     stringOr(rc.AccountPrefix, "bot_"),
-			MainService:       stringOr(rc.MainService, "logic"),
-			AuthAddress:       rc.AuthAddr,
-			AuthExtra:         rc.AuthExtra,
+			MainService:       rc.MainService,
+			StateExtra:        rc.StateExtra,
 			ConcurrentNum:     rc.Concurrency,
 			HeartbeatInterval: secsOr(rc.HeartbeatSec, 5),
 			TCPTimeout:        secsOr(rc.TimeoutSec, 60),
@@ -595,6 +618,7 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 			LogLevel:          rc.LogLevel,
 			ConfigURL:         fmt.Sprintf("%s/api/tasks/%s/config", s.cfg.PublicURL, taskID),
 			ConfigFiles:       configFiles,
+			RampUp:            scaleRampUp(rc.RampUp, task.TotalBots, a.TotalBots),
 		}
 
 		if err := s.dispatcher.AssignTask(agent.Address, cfg); err != nil {
@@ -701,16 +725,16 @@ func (s *AdminServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	items := make([]map[string]any, 0, len(agents))
 	for _, a := range agents {
 		brief := map[string]any{
-			"agentId":          a.ID,
-			"name":             a.Name,
-			"address":          a.Address,
-			"appVersion":       a.AppVersion,
-			"maxBots":          a.MaxBots,
-			"status":           a.Status,
-			"currentTaskId":    a.CurrentTaskID,
-			"currentBots":      a.CurrentBots,
-			"staticInfo":       a.StaticInfo,
-			"lastHeartbeatAt":  a.LastHeartbeatAt,
+			"agentId":         a.ID,
+			"name":            a.Name,
+			"address":         a.Address,
+			"appVersion":      a.AppVersion,
+			"maxBots":         a.MaxBots,
+			"status":          a.Status,
+			"currentTaskId":   a.CurrentTaskID,
+			"currentBots":     a.CurrentBots,
+			"staticInfo":      a.StaticInfo,
+			"lastHeartbeatAt": a.LastHeartbeatAt,
 		}
 		if !a.StressUpdatedAt.IsZero() {
 			brief["stressUpdatedAt"] = a.StressUpdatedAt
@@ -1145,4 +1169,32 @@ func serveLogFile(w http.ResponseWriter, r *http.Request, dir, name string) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, name))
 	http.ServeContent(w, r, name, stat.ModTime(), f)
+}
+
+// scaleRampUp 按比例缩放各 stage 的 count（分布式模式下每个 Agent 分到的 bot 数不同）。
+func scaleRampUp(cfg *RampUpConfig, totalBots, assignedBots int) *RampUpConfig {
+	if cfg == nil || totalBots == 0 || assignedBots == totalBots {
+		return cfg
+	}
+	ratio := float64(assignedBots) / float64(totalBots)
+	scaled := &RampUpConfig{}
+	remaining := assignedBots
+	for i, s := range cfg.Stages {
+		var c int
+		if i == len(cfg.Stages)-1 {
+			c = remaining
+		} else {
+			c = int(math.Round(float64(s.Count) * ratio))
+			if c < 1 {
+				c = 1
+			}
+			remaining -= c
+		}
+		scaled.Stages = append(scaled.Stages, RampUpStage{
+			Count:       c,
+			Concurrency: s.Concurrency,
+			HoldSec:     s.HoldSec,
+		})
+	}
+	return scaled
 }

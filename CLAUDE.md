@@ -30,15 +30,14 @@ stressbot 是一个可配置化通用游戏服务器压测工具，用 Go 编写
 # 编译
 go build -o stressbot.exe ./cmd/agent
 
-# 校验 flow.json（每次修改 flow.json 后务必执行）
-go run ./cmd/validate conf/flow/flow.json
-
 # 启动压测（单机模式，agent.enabled 默认 false）
 go run ./cmd/agent -config conf/config.json
 
 # 指定配置文件路径
 go run ./cmd/agent -config path/to/config.json
 ```
+
+**flow.json 校验**已集成到前端编辑器中（实时校验，画布节点上显示错误标记）。每次修改 flow.json 后在前端编辑器中打开查看校验报告即可。
 
 ## 架构
 
@@ -80,7 +79,7 @@ go run ./cmd/agent -config path/to/config.json
 每次对代码进行修改后，必须按以下步骤验证功能正确性，重复迭代直到通过：
 
 1. **编译检查**：`go build ./...` 确保无编译错误
-2. **配置校验**：`go run ./cmd/validate conf/flow/flow.json` 确保 flow.json 结构合法
+2. **配置校验**：在前端编辑器中打开 flow.json，查看校验报告（工具栏"校验"按钮），确保无错误
 3. **运行测试**：删除旧日志 `rm -f log/stressbot.log`，然后启动 `go run ./cmd/agent -config conf/config.json`，运行 2~5 分钟
 4. **日志审查**：
    - 检查错误：`grep -i "error\|warn\|失败" log/stressbot.log | grep -v "headError"` 应无输出

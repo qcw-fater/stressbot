@@ -1,19 +1,16 @@
 /**
- * 用户上传的 proto / lua 资源管理（IndexedDB）。
+ * 用户上传的 proto / lua / adapter 资源管理（IndexedDB）。
  *
  * 设计要点：
  * - 不直接依赖 idb 库，使用 idb-keyval 提供的 createStore + key-value API；
  * - **每个 DB 只能挂一个 object store**（idb-keyval 不会触发 version upgrade 加 store），
- *   因此 proto / lua 各用一个独立 DB（与 library/templateStore.ts 保持一致）；
+ *   因此 proto / lua / adapter 各用一个独立 DB（与 library/templateStore.ts 保持一致）；
  * - 文件内容以 utf-8 字符串存储（proto / lua 都是文本），不存 ArrayBuffer，
  *   方便 JSON.stringify 调试与 Monaco 直接拿到 string；
  * - 资源版本号 hash 在 ProtoLoader 端基于内容拼接计算，store 不维护；
  * - 暴露 `subscribe` 给 React 组件订阅"资源变更"事件，配合 useSyncExternalStore。
  *
- * 历史：v0 用同一 `stressbot-resources` DB 同时挂 proto / scripts 两个 store，
- * 触发了 IDB "One of the specified object stores was not found" —— scripts store
- * 永远没有被 onupgradeneeded 真正创建。本文件 init 时会做一次轻量迁移把旧 DB
- * 的 proto 数据搬入新 DB，再删掉旧 DB。
+ * 基线同步：所有资源统一通过内容对比与基线同步，变更时由 UI 组件展示冲突面板供用户确认。
  */
 
 import { clear, createStore, del, get, keys, set, setMany } from 'idb-keyval';
@@ -22,29 +19,11 @@ const PROTO_DB = 'stressbot-resources-proto';
 const SCRIPT_DB = 'stressbot-resources-scripts';
 const LEGACY_DB = 'stressbot-resources';
 
-/**
- * Lua 脚本基线 schema 版本号。
- *
- * 引擎对 Lua 脚本返回值的契约**升级**时（不向后兼容的破坏性变更）必须 bump 此常量，
- * 例如：v1 → v2 切换为 `return code, send, recv` 三元组、boolean 脚本强制 `return true/false`。
- *
- * 浏览器首次加载 / 刷新时会比对 LocalStorage 中保存的版本号：
- *   - 不匹配 → 一次性清空 lua scriptStore（IDB 中所有用户脚本副本失效）
- *   - 用户下次进入 LuaForm 时，由"IDB miss → fetch /conf/scripts/<name>"路径自动拉新版基线
- *   - 然后写入 LocalStorage 标记新版本，避免重复清空
- *
- * 设计取舍：清空策略会丢失"用户编辑过但未导入到 flow 的本地稿"，但这种数据在用户视角下
- * 本就是临时缓存（IDB 不是云端），换取"基线升级零手工操作"的体验。
- */
-const SCRIPT_BASELINE_VERSION = 'v2-bytes-return-2026-05-08';
-const SCRIPT_BASELINE_VERSION_KEY = 'stressbot.scriptBaselineVersion';
-
 export interface ResourceFile {
   name: string;
   content: string;
   size: number;
   uploadedAt: string;
-  fromBaseline?: boolean;
 }
 
 const ADAPTER_DB = 'stressbot-resources-adapter';
@@ -55,30 +34,27 @@ const adapterStore = createStore(ADAPTER_DB, 'data');
 
 // 模块加载时异步触发迁移；失败静默（旧 DB 不存在 / 已损坏都按"无需迁移"处理）。
 void migrateLegacyResources();
-// Lua 脚本基线 schema 失效检测；不阻塞模块加载，失败静默。
-void migrateScriptBaseline();
 
 // === Proto ===
 
-export async function addProto(name: string, content: string, fromBaseline = false): Promise<ResourceFile> {
+export async function addProto(name: string, content: string): Promise<ResourceFile> {
   const file: ResourceFile = {
     name,
     content,
     size: byteLength(content),
     uploadedAt: new Date().toISOString(),
-    fromBaseline,
   };
   await set(name, file, protoStore);
   notify();
   return file;
 }
 
-export async function addProtos(files: Array<{ name: string; content: string }>, fromBaseline = false): Promise<void> {
+export async function addProtos(files: Array<{ name: string; content: string }>): Promise<void> {
   if (files.length === 0) return;
   const now = new Date().toISOString();
   const entries: Array<[string, ResourceFile]> = files.map(({ name, content }) => [
     name,
-    { name, content, size: byteLength(content), uploadedAt: now, fromBaseline },
+    { name, content, size: byteLength(content), uploadedAt: now },
   ]);
   await setMany(entries, protoStore);
   notify();
@@ -111,25 +87,24 @@ export async function clearProto(): Promise<void> {
 
 // === Script (Lua) ===
 
-export async function addScript(name: string, content: string, fromBaseline = false): Promise<ResourceFile> {
+export async function addScript(name: string, content: string): Promise<ResourceFile> {
   const file: ResourceFile = {
     name,
     content,
     size: byteLength(content),
     uploadedAt: new Date().toISOString(),
-    fromBaseline,
   };
   await set(name, file, scriptStore);
   notify();
   return file;
 }
 
-export async function addScripts(files: Array<{ name: string; content: string }>, fromBaseline = false): Promise<void> {
+export async function addScripts(files: Array<{ name: string; content: string }>): Promise<void> {
   if (files.length === 0) return;
   const now = new Date().toISOString();
   const entries: Array<[string, ResourceFile]> = files.map(({ name, content }) => [
     name,
-    { name, content, size: byteLength(content), uploadedAt: now, fromBaseline },
+    { name, content, size: byteLength(content), uploadedAt: now },
   ]);
   await setMany(entries, scriptStore);
   notify();
@@ -169,13 +144,12 @@ export async function getAdapterScript(): Promise<ResourceFile | undefined> {
   return get<ResourceFile>(CODEC_LUA_KEY, adapterStore);
 }
 
-export async function setAdapterScript(content: string, fromBaseline = false): Promise<ResourceFile> {
+export async function setAdapterScript(content: string): Promise<ResourceFile> {
   const file: ResourceFile = {
     name: CODEC_LUA_KEY,
     content,
     size: byteLength(content),
     uploadedAt: new Date().toISOString(),
-    fromBaseline,
   };
   await set(CODEC_LUA_KEY, file, adapterStore);
   notify();
@@ -185,6 +159,31 @@ export async function setAdapterScript(content: string, fromBaseline = false): P
 export async function clearAdapterScript(): Promise<void> {
   await clear(adapterStore);
   notify();
+}
+
+const REQUIRED_ADAPTER_FUNCTIONS = [
+  'header_size',
+  'body_length_info',
+  'encode_tcp',
+  'encode_udp',
+  'decode_tcp',
+  'decode_udp',
+  'expected_response_key',
+];
+
+/** 检查适配器是否实现了所有必需函数，返回缺失的函数名列表 */
+export async function validateAdapter(): Promise<string[]> {
+  const file = await getAdapterScript();
+  if (!file || !file.content.trim()) return REQUIRED_ADAPTER_FUNCTIONS;
+  return REQUIRED_ADAPTER_FUNCTIONS.filter((fn) => {
+    const content = file.content;
+    return content.includes(`function ${fn}(`) || new RegExp(`\\b${fn}\\s*=`).test(content);
+  }).length === 0
+    ? []
+    : REQUIRED_ADAPTER_FUNCTIONS.filter((fn) => {
+        const content = file.content;
+        return !content.includes(`function ${fn}(`) && !new RegExp(`\\b${fn}\\s*=`).test(content);
+      });
 }
 
 /**
@@ -198,7 +197,7 @@ export async function ensureAdapterScript(): Promise<string | null> {
     const resp = await fetch(CODEC_BASELINE_URL);
     if (!resp.ok) return null;
     const text = await resp.text();
-    await setAdapterScript(text, true);
+    await setAdapterScript(text);
     return text;
   } catch {
     return null;
@@ -207,69 +206,229 @@ export async function ensureAdapterScript(): Promise<string | null> {
 
 // === 统一基线同步 ===
 
-interface SyncResult {
-  added: number;
-  updated: number;
+export type ResourceType = 'proto' | 'script' | 'adapter';
+
+export interface SyncDiff {
+  type: ResourceType;
+  name: string;
+  localContent: string;
+  baselineContent: string;
 }
 
-async function syncFilesFromBaseline(
-  store: ReturnType<typeof createStore>,
-  indexUrl: string,
-  fileUrlPrefix: string,
-): Promise<SyncResult> {
-  let added = 0;
-  let updated = 0;
+export interface BaselineSyncResult {
+  /** 基线有、IDB 没有 → 已自动写入 IDB */
+  added: Array<{ type: ResourceType; name: string }>;
+  /** 基线有、IDB 有、内容相同 */
+  unchanged: Array<{ type: ResourceType; name: string }>;
+  /** 基线有、IDB 有、内容不同 → 需要用户确认 */
+  conflicts: SyncDiff[];
+  /** 基线没有、IDB 有 → 需要用户确认 */
+  removed: SyncDiff[];
+}
 
-  const resp = await fetch(indexUrl);
-  if (!resp.ok) return { added, updated };
-  const names: string[] = await resp.json();
+export interface ConflictDecision {
+  type: ResourceType;
+  name: string;
+  /** true = 保留本地版本，false = 采用基线版本（对 removed = false 则删除本地） */
+  keepLocal: boolean;
+}
 
-  for (const name of names) {
-    const existing = await get<ResourceFile>(name, store);
-    if (existing && !existing.fromBaseline) continue;
+/**
+ * 统一基线同步：对比 IDB 与服务端基线，自动新增，冲突/删除返回给调用方处理。
+ *
+ * 算法：
+ * 1. 并行 fetch proto/scripts index + adapter
+ * 2. 对每个基线文件与 IDB 内容对比
+ * 3. 新增 → 自动写入 IDB
+ * 4. 内容不同 / 基线已删除 → 返回 conflicts/removed
+ */
+export async function syncResourcesFromBaseline(): Promise<BaselineSyncResult> {
+  const result: BaselineSyncResult = {
+    added: [],
+    unchanged: [],
+    conflicts: [],
+    removed: [],
+  };
 
-    const fileResp = await fetch(fileUrlPrefix + encodeURIComponent(name));
-    if (!fileResp.ok) continue;
-    const content = await fileResp.text();
+  // 并行拉取三个基线索引
+  const [protoIndex, scriptIndex, adapterText] = await Promise.all([
+    fetchIndex('/conf/proto/index.json'),
+    fetchIndex('/conf/scripts/index.json'),
+    fetchFileText(CODEC_BASELINE_URL),
+  ]);
 
-    const file: ResourceFile = {
-      name,
-      content,
-      size: byteLength(content),
-      uploadedAt: new Date().toISOString(),
-      fromBaseline: true,
-    };
-    await set(name, file, store);
+  // --- Proto ---
+  await syncFileGroup(protoIndex, 'proto', protoStore, '/conf/proto/', result);
 
-    if (existing) updated++;
-    else added++;
+  // --- Scripts ---
+  await syncFileGroup(scriptIndex, 'script', scriptStore, '/conf/scripts/', result);
+
+  // --- Adapter ---
+  const existingAdapter = await getAdapterScript();
+  if (adapterText !== null) {
+    if (!existingAdapter) {
+      await setAdapterScript(adapterText);
+      result.added.push({ type: 'adapter', name: CODEC_LUA_KEY });
+    } else if (existingAdapter.content === adapterText) {
+      result.unchanged.push({ type: 'adapter', name: CODEC_LUA_KEY });
+    } else {
+      result.conflicts.push({
+        type: 'adapter',
+        name: CODEC_LUA_KEY,
+        localContent: existingAdapter.content,
+        baselineContent: adapterText,
+      });
+    }
+  } else if (existingAdapter) {
+    result.removed.push({
+      type: 'adapter',
+      name: CODEC_LUA_KEY,
+      localContent: existingAdapter.content,
+      baselineContent: '',
+    });
   }
 
-  if (added > 0 || updated > 0) notify();
-  return { added, updated };
+  return result;
 }
 
-export async function syncProtoFromBaseline(): Promise<SyncResult> {
-  return syncFilesFromBaseline(protoStore, '/conf/proto/index.json', '/conf/proto/');
+/**
+ * 应用用户的冲突解决决策。
+ */
+export async function applyConflictResolution(decisions: ConflictDecision[]): Promise<void> {
+  let changed = false;
+  for (const d of decisions) {
+    if (d.keepLocal) continue; // 保留本地，不需要操作
+
+    if (d.type === 'adapter') {
+      // adapter removed + keepLocal=false → 删除
+      const baselineText = await fetchFileText(CODEC_BASELINE_URL);
+      if (baselineText !== null) {
+        await setAdapterScript(baselineText);
+      } else {
+        await clear(adapterStore);
+      }
+    } else if (d.type === 'proto') {
+      const baseline = await fetchFileText(`/conf/proto/${encodeURIComponent(d.name)}`);
+      if (baseline !== null) {
+        await addProto(d.name, baseline);
+      } else {
+        await del(d.name, protoStore);
+      }
+    } else {
+      const baseline = await fetchFileText(`/conf/scripts/${encodeURIComponent(d.name)}`);
+      if (baseline !== null) {
+        await addScript(d.name, baseline);
+      } else {
+        await del(d.name, scriptStore);
+      }
+    }
+    changed = true;
+  }
+  if (changed) notify();
 }
 
-export async function syncScriptFromBaseline(): Promise<SyncResult> {
-  return syncFilesFromBaseline(scriptStore, '/conf/scripts/index.json', '/conf/scripts/');
-}
+// --- 内部辅助 ---
 
-export async function syncAdapterFromBaseline(): Promise<string | null> {
-  const existing = await getAdapterScript();
-  if (existing && !existing.fromBaseline) return existing.content;
-
+async function fetchIndex(url: string): Promise<string[]> {
   try {
-    const resp = await fetch(CODEC_BASELINE_URL);
-    if (!resp.ok) return existing?.content ?? null;
-    const text = await resp.text();
-    await setAdapterScript(text, true);
-    return text;
+    const resp = await fetch(url);
+    if (!resp.ok) return [];
+    return (await resp.json()) as string[];
   } catch {
-    return existing?.content ?? null;
+    return [];
   }
+}
+
+async function fetchFileText(url: string): Promise<string | null> {
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    return await resp.text();
+  } catch {
+    return null;
+  }
+}
+
+async function syncFileGroup(
+  baselineNames: string[],
+  type: ResourceType,
+  store: ReturnType<typeof createStore>,
+  urlPrefix: string,
+  result: BaselineSyncResult,
+): Promise<void> {
+  // 收集 IDB 中已有的所有 key
+  const idbKeys = new Set(
+    ((await keys(store)) as IDBValidKey[]).map(String),
+  );
+  const baselineSet = new Set(baselineNames);
+
+  // 基线有 → 对比
+  const toFetch: string[] = [];
+  for (const name of baselineNames) {
+    const existing = await get<ResourceFile>(name, store);
+    if (!existing) {
+      toFetch.push(name); // IDB 没有，后面批量 fetch 再写入
+    } else if (existing.content === '') {
+      // 无法区分"内容就是空"和"元数据损坏"，fetch 基线对比
+      toFetch.push(name);
+    } else {
+      // 需要基线内容来对比
+      toFetch.push(name);
+    }
+  }
+
+  // 批量 fetch 基线内容
+  const baselineContents = new Map<string, string>();
+  await Promise.all(
+    toFetch.map(async (name) => {
+      const text = await fetchFileText(urlPrefix + encodeURIComponent(name));
+      if (text !== null) baselineContents.set(name, text);
+    }),
+  );
+
+  for (const name of baselineNames) {
+    const baseline = baselineContents.get(name);
+    if (baseline === undefined) continue; // fetch 失败，跳过
+
+    const existing = await get<ResourceFile>(name, store);
+    if (!existing) {
+      // 新增 → 自动写入
+      const file: ResourceFile = {
+        name,
+        content: baseline,
+        size: byteLength(baseline),
+        uploadedAt: new Date().toISOString(),
+      };
+      await set(name, file, store);
+      result.added.push({ type, name });
+    } else if (existing.content === baseline) {
+      result.unchanged.push({ type, name });
+    } else {
+      result.conflicts.push({
+        type,
+        name,
+        localContent: existing.content,
+        baselineContent: baseline,
+      });
+    }
+  }
+
+  // 基线没有、IDB 有 → removed
+  for (const key of idbKeys) {
+    if (!baselineSet.has(key)) {
+      const existing = await get<ResourceFile>(key, store);
+      if (existing) {
+        result.removed.push({
+          type,
+          name: key,
+          localContent: existing.content,
+          baselineContent: '',
+        });
+      }
+    }
+  }
+
+  if (result.added.length > 0) notify();
 }
 
 // === 变更订阅 ===
@@ -388,33 +547,4 @@ function isResourceFile(v: unknown): v is ResourceFile {
   if (!v || typeof v !== 'object') return false;
   const o = v as Record<string, unknown>;
   return typeof o.name === 'string' && typeof o.content === 'string';
-}
-
-// === Lua 脚本基线 schema 失效迁移 ===
-
-/**
- * 当 SCRIPT_BASELINE_VERSION 与 LocalStorage 中保存的版本号不一致时：
- *   1. 清空 lua scriptStore 中所有副本（用户编辑稿与基线副本一并丢弃）；
- *   2. 写入新版本号；
- *   3. 触发 notify 让订阅 LuaForm 的"IDB miss → fetch /conf/scripts/<name>"路径生效。
- *
- * 不阻塞主流程，失败静默；浏览器无 LocalStorage（如老旧内核）时直接当作版本一致跳过。
- */
-async function migrateScriptBaseline(): Promise<void> {
-  if (typeof localStorage === 'undefined') return;
-  try {
-    const saved = localStorage.getItem(SCRIPT_BASELINE_VERSION_KEY);
-    if (saved === SCRIPT_BASELINE_VERSION) return;
-    await clear(scriptStore);
-    localStorage.setItem(SCRIPT_BASELINE_VERSION_KEY, SCRIPT_BASELINE_VERSION);
-    notify();
-    if (typeof console !== 'undefined') {
-      console.info(
-        `[resourcesStore] Lua 脚本基线已升级到 ${SCRIPT_BASELINE_VERSION}，` +
-          `本地缓存已清空，下次进入编辑器或启动任务时会自动从 /conf/scripts/ 拉新版。`,
-      );
-    }
-  } catch {
-    // 静默：用户禁用 IDB / LocalStorage，下次进入 LuaForm 走默认 fetch 路径
-  }
 }

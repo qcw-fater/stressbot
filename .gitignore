@@ -26,3 +26,13 @@ pkg/mod/
 bin/
 tmp/
 dist/
+
+# 日志和数据
+log/
+data/
+bugs/
+
+# AI
+.claude/
+.cursor/
+.learnings/

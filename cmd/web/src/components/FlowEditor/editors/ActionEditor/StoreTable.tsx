@@ -1,7 +1,7 @@
 /**
  * StoreMapping 列表编辑器（S2C 字段 → state key）。
  *
- * 复用：ActionEditor（tcpRequest/waitListen 的 store）
+ * 复用：ActionEditor（tcpRequest/udpRequest/tcpListen/udpListen 的 store）
  *      ListenEditor（declarative 形态的 store）
  */
 

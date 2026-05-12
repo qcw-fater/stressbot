@@ -34,17 +34,17 @@ const (
 )
 
 type Task struct {
-	ID          string                       `json:"id"`
-	Name        string                       `json:"name"`
-	State       TaskState                    `json:"state"`
-	TotalBots   int                          `json:"totalBots"`
-	Config      TaskConfig                   `json:"config"`
-	Assignments []Assignment                 `json:"assignments,omitempty"`
+	ID          string                          `json:"id"`
+	Name        string                          `json:"name"`
+	State       TaskState                       `json:"state"`
+	TotalBots   int                             `json:"totalBots"`
+	Config      TaskConfig                      `json:"config"`
+	Assignments []Assignment                    `json:"assignments,omitempty"`
 	Reports     map[string]TaskCompletionReport `json:"reports,omitempty"`
-	CreatedAt   time.Time                    `json:"createdAt"`
-	StartedAt   *time.Time                   `json:"startedAt,omitempty"`
-	StoppedAt   *time.Time                   `json:"stoppedAt,omitempty"`
-	ErrorMsg    string                       `json:"errorMsg,omitempty"`
+	CreatedAt   time.Time                       `json:"createdAt"`
+	StartedAt   *time.Time                      `json:"startedAt,omitempty"`
+	StoppedAt   *time.Time                      `json:"stoppedAt,omitempty"`
+	ErrorMsg    string                          `json:"errorMsg,omitempty"`
 }
 
 type TaskConfig struct {
@@ -59,21 +59,33 @@ type TaskConfig struct {
 // RobotConfig 任务级运行时配置（前端 → admin → agent）。
 // 超时字段统一用 int 秒数，admin 转为 "Ns" duration 字符串下发。
 type RobotConfig struct {
-	AuthAddr    string `json:"authAddr"`
-	Concurrency int    `json:"concurrency"`
-	TimeoutSec  int    `json:"timeoutSec"`
+	Concurrency int `json:"concurrency"`
+	TimeoutSec  int `json:"timeoutSec"`
 
 	AccountPrefix string            `json:"accountPrefix,omitempty"`
 	StartNumber   int               `json:"startNumber,omitempty"`
 	MainService   string            `json:"mainService,omitempty"`
-	AuthExtra     map[string]string `json:"authExtra,omitempty"`
+	StateExtra    map[string]string `json:"stateExtra,omitempty"`
 
 	HeartbeatSec   int `json:"heartbeatSec,omitempty"`
 	HTTPTimeoutSec int `json:"httpTimeoutSec,omitempty"`
 	ApdexT         int `json:"apdexT,omitempty"`
 
-	DebugMode bool   `json:"debugMode,omitempty"`
-	LogLevel  string `json:"logLevel,omitempty"`
+	DebugMode bool          `json:"debugMode,omitempty"`
+	LogLevel  string        `json:"logLevel,omitempty"`
+	RampUp    *RampUpConfig `json:"rampUp,omitempty"`
+}
+
+// RampUpConfig 渐进式加压配置。
+type RampUpConfig struct {
+	Stages []RampUpStage `json:"stages"`
+}
+
+// RampUpStage 单个加压阶段。
+type RampUpStage struct {
+	Count       int `json:"count"`                 // 本阶段新增 bot 数（增量值）
+	Concurrency int `json:"concurrency,omitempty"` // 覆盖全局并发数，0 或空则用全局值
+	HoldSec     int `json:"holdSec,omitempty"`     // 阶段间等待秒数
 }
 
 // ── Assignment ────────────────────────────────────────
@@ -95,8 +107,7 @@ type TaskAssignment struct {
 	AccountPrefix     string            `json:"accountPrefix"`
 	ConcurrentNum     int               `json:"concurrentNum"`
 	MainService       string            `json:"mainService"`
-	AuthAddress       string            `json:"authAddress"`
-	AuthExtra         map[string]string `json:"authExtra"`
+	StateExtra        map[string]string `json:"stateExtra"`
 	HeartbeatInterval string            `json:"heartbeatInterval"`
 	TCPTimeout        string            `json:"tcpTimeout"`
 	HTTPTimeout       string            `json:"httpTimeout"`
@@ -104,6 +115,7 @@ type TaskAssignment struct {
 	LogLevel          string            `json:"logLevel,omitempty"`
 	ConfigURL         string            `json:"configUrl"`
 	ConfigFiles       []string          `json:"configFiles"`
+	RampUp            *RampUpConfig     `json:"rampUp,omitempty"`
 }
 
 // ── Agent ─────────────────────────────────────────────
@@ -118,24 +130,24 @@ const (
 )
 
 type AgentNode struct {
-	ID             string        `json:"agentId"`
-	Name           string        `json:"name"`
-	Address        string        `json:"address"`
-	AppVersion     string        `json:"appVersion"`
-	MaxBots        int           `json:"maxBots"`
-	StressInterval string        `json:"stressInterval"`
-	SystemInterval string        `json:"systemInterval"`
-	StaticInfo     StaticInfo    `json:"staticInfo"`
+	ID             string     `json:"agentId"`
+	Name           string     `json:"name"`
+	Address        string     `json:"address"`
+	AppVersion     string     `json:"appVersion"`
+	MaxBots        int        `json:"maxBots"`
+	StressInterval string     `json:"stressInterval"`
+	SystemInterval string     `json:"systemInterval"`
+	StaticInfo     StaticInfo `json:"staticInfo"`
 
-	Status         AgentStatus   `json:"status"`
-	LastHeartbeatAt time.Time    `json:"lastHeartbeatAt"`
-	CurrentTaskID  string        `json:"currentTaskId,omitempty"`
-	CurrentBots    int           `json:"currentBots"`
+	Status          AgentStatus `json:"status"`
+	LastHeartbeatAt time.Time   `json:"lastHeartbeatAt"`
+	CurrentTaskID   string      `json:"currentTaskId,omitempty"`
+	CurrentBots     int         `json:"currentBots"`
 
-	LatestStress     *monitor.CollectorSnapshot `json:"-"`
-	LatestSystem     *SystemSnapshot            `json:"-"`
-	StressUpdatedAt  time.Time                  `json:"stressUpdatedAt,omitempty"`
-	SystemUpdatedAt  time.Time                  `json:"systemUpdatedAt,omitempty"`
+	LatestStress    *monitor.CollectorSnapshot `json:"-"`
+	LatestSystem    *SystemSnapshot            `json:"-"`
+	StressUpdatedAt time.Time                  `json:"stressUpdatedAt,omitempty"`
+	SystemUpdatedAt time.Time                  `json:"systemUpdatedAt,omitempty"`
 }
 
 type StaticInfo struct {
@@ -221,10 +233,10 @@ type SystemSnapshot struct {
 	ProcessHeapMB uint64  `json:"processHeapMB"`
 	ProcessSysMB  uint64  `json:"processSysMB"`
 
-	NumGoroutine int    `json:"numGoroutine"`
-	NumThread    int32  `json:"numThread"`
-	NumFD        int32  `json:"numFd,omitempty"`
-	GCCount      uint32 `json:"gcCount"`
+	NumGoroutine int     `json:"numGoroutine"`
+	NumThread    int32   `json:"numThread"`
+	NumFD        int32   `json:"numFd,omitempty"`
+	GCCount      uint32  `json:"gcCount"`
 	GCPauseAvgMs float64 `json:"gcPauseAvgMs,omitempty"`
 
 	NetSendKBps float64 `json:"netSendKBps"`
@@ -268,16 +280,16 @@ type AgentSystemBrief struct {
 // ── 历史归档 ─────────────────────────────────────────
 
 type HistoryRecord struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	State       TaskState `json:"state"`
-	TotalBots   int       `json:"totalBots"`
-	AgentCount  int       `json:"agentCount"`
-	CreatedAt   time.Time `json:"createdAt"`
+	ID          string     `json:"id"`
+	Name        string     `json:"name"`
+	State       TaskState  `json:"state"`
+	TotalBots   int        `json:"totalBots"`
+	AgentCount  int        `json:"agentCount"`
+	CreatedAt   time.Time  `json:"createdAt"`
 	StartedAt   *time.Time `json:"startedAt,omitempty"`
 	StoppedAt   *time.Time `json:"stoppedAt,omitempty"`
-	DurationSec int       `json:"durationSec"`
-	ErrorMsg    string    `json:"errorMsg,omitempty"`
+	DurationSec int        `json:"durationSec"`
+	ErrorMsg    string     `json:"errorMsg,omitempty"`
 
 	Starred bool     `json:"starred"`
 	Tags    []string `json:"tags"`
@@ -287,12 +299,11 @@ type HistoryRecord struct {
 }
 
 type ConfigSummary struct {
-	AuthAddr    string `json:"authAddr"`
-	Concurrency int    `json:"concurrency"`
-	TimeoutSec  int    `json:"timeoutSec"`
-	FlowSizeKB  int    `json:"flowSizeKB"`
-	ProtoCount  int    `json:"protoCount"`
-	ScriptCount int    `json:"scriptCount"`
+	Concurrency int `json:"concurrency"`
+	TimeoutSec  int `json:"timeoutSec"`
+	FlowSizeKB  int `json:"flowSizeKB"`
+	ProtoCount  int `json:"protoCount"`
+	ScriptCount int `json:"scriptCount"`
 }
 
 type HistoryDetail struct {
@@ -337,8 +348,8 @@ type UpdateHistoryRequest struct {
 }
 
 type CompareResponse struct {
-	Tasks []HistoryDetail            `json:"tasks"`
-	Diff  CompareDiff                `json:"diff"`
+	Tasks []HistoryDetail `json:"tasks"`
+	Diff  CompareDiff     `json:"diff"`
 }
 
 type CompareDiff struct {

@@ -13,15 +13,15 @@ function execute(r)
         return 1, 0, 0
     end
 
-    -- exchange_key 在 wire 层有真实收发：sent/recv 由 lua API 返回
-    local okExch, sent, recv = network.exchange_key("logic")
-    if not okExch then
+    -- 发送空包获取密钥并设置到连接
+    local code, keyBody, sent, recv = network.tcp_request("logic", nil)
+    if code ~= 0 or not keyBody or #keyBody == 0 then
         log.error("逻辑服密钥交换失败")
         return 1, sent, recv
     end
+    network.set_tcp_secret_key("logic", keyBody)
 
     -- 注册 5 秒心跳（Logic: cmd=2 MAIN, act=1 SERVER_TIME_CS，空 body）
-    -- 心跳由后台 goroutine 触发，字节由 network 层全局带宽统计，不计入本 action
     network.register_tcp_heartbeat("logic", 5000, {cmd=2, act=1}, function()
         return ""
     end)
