@@ -3,6 +3,7 @@
  */
 
 import { Button, Form, Input, InputNumber, Select, Space, Switch } from 'antd';
+import { ApiOutlined } from '@ant-design/icons';
 import { useState } from 'react';
 import type { ActionDef, ActionPattern } from '@/types/action';
 import { ProtoBrowser } from '../../proto/ProtoBrowser';
@@ -116,7 +117,7 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
               onChange={(e) => set({ c2sProto: e.target.value })}
               placeholder="如 Game.LoginPlayerC2S"
             />
-            <Button onClick={() => setProtoTarget('c2s')}>浏览</Button>
+            <Button icon={<ApiOutlined />} onClick={() => setProtoTarget('c2s')} />
           </Space.Compact>
         </Form.Item>
       )}
@@ -129,7 +130,7 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
               onChange={(e) => set({ s2cProto: e.target.value })}
               placeholder="如 Game.LoginPlayerS2C"
             />
-            <Button onClick={() => setProtoTarget('s2c')}>浏览</Button>
+            <Button icon={<ApiOutlined />} onClick={() => setProtoTarget('s2c')} />
           </Space.Compact>
         </Form.Item>
       )}
@@ -195,6 +196,7 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
       )}
 
       <ProtoBrowser
+        windowId="protoPicker_action"
         open={protoTarget !== null}
         onClose={() => setProtoTarget(null)}
         onSelect={(fullName) => {

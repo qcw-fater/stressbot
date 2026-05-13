@@ -5,6 +5,7 @@
  */
 
 import type { ReactNode } from 'react';
+import { Tooltip } from 'antd';
 import { useEditorStore } from '../../store/editorStore';
 import { useFlowStore } from '../../store/flowStore';
 import { MetricsBadge, useNodeApdexLevel, useNodeMetrics } from './MetricsBadge';
@@ -84,21 +85,28 @@ export function NodeShell({
       style={style}
     >
       {(errCount > 0 || warnCount > 0) && (
-        <div
-          className="node-issue-badge"
-          title={(issues ?? []).map((i) => `[${i.severity}] ${i.message}`).join('\n')}
-          data-severity={errCount > 0 ? 'error' : 'warning'}
+        <Tooltip
+          title={
+            <div style={{ whiteSpace: 'pre-wrap' }}>
+              {(issues ?? []).map((i) => `[${i.severity}] ${i.message}`).join('\n')}
+            </div>
+          }
+          placement="top"
         >
-          {errCount > 0 ? '!' : '?'}
-        </div>
+          <div
+            className="node-issue-badge"
+            data-severity={errCount > 0 ? 'error' : 'warning'}
+          >
+            {errCount > 0 ? '!' : '?'}
+          </div>
+        </Tooltip>
       )}
       {executing > 0 && (
-        <div
-          className="node-executing-badge"
-          title={`当前正在执行：${executing} 个机器人`}
-        >
-          {executing}
-        </div>
+        <Tooltip title={`当前正在执行：${executing} 个机器人`} placement="top">
+          <div className="node-executing-badge">
+            {executing}
+          </div>
+        </Tooltip>
       )}
       <div className="node-header">
         <span className="node-title">{title}</span>

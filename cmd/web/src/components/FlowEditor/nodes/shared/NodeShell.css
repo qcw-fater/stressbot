@@ -54,12 +54,12 @@
 
 /* 校验问题：has-error / has-warning 在节点边框上叠加红/橙描边作为视觉提示 */
 .node-shell.has-error {
-  border-color: #ff4d4f !important;
-  box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.25), var(--shadow-node);
+  border-color: var(--color-error) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-error) 25%, transparent), var(--shadow-node);
 }
 .node-shell.has-warning {
-  border-color: #faad14 !important;
-  box-shadow: 0 0 0 2px rgba(250, 173, 20, 0.25), var(--shadow-node);
+  border-color: var(--color-warning) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-warning) 25%, transparent), var(--shadow-node);
 }
 
 /* === 运行态 Apdex 染色 ===
@@ -141,10 +141,10 @@
   pointer-events: auto;
 }
 .node-issue-badge[data-severity='error'] {
-  background: #ff4d4f;
+  background: var(--color-error);
 }
 .node-issue-badge[data-severity='warning'] {
-  background: #faad14;
+  background: var(--color-warning);
 }
 
 /* 选中边时相连的两端节点高亮：用边颜色（即起点节点色）发光 —— 由父级 react-flow__node 的 data-edge-color 注入 */
@@ -398,9 +398,9 @@
 }
 .pattern-badge[data-pattern='tcpRequest'],
 .pattern-badge[data-pattern='udpRequest'] {
-  background: var(--node-weighted-bg);
-  color: var(--node-weighted-border-active);
-  border-color: var(--node-weighted);
+  background: var(--node-boolean-bg);
+  color: var(--node-boolean-border-active);
+  border-color: var(--node-boolean);
 }
 .pattern-badge[data-pattern='tcpConnect'],
 .pattern-badge[data-pattern='udpConnect'] {
@@ -421,9 +421,9 @@
   border-color: var(--node-break);
 }
 .pattern-badge[data-pattern='httpRequest'] {
-  background: var(--node-weighted-bg);
-  color: var(--node-weighted-border-active);
-  border-color: var(--node-weighted);
+  background: var(--node-boolean-bg);
+  color: var(--node-boolean-border-active);
+  border-color: var(--node-boolean);
 }
 .pattern-badge[data-pattern='lua'] {
   background: var(--node-weighted-bg);
@@ -432,9 +432,9 @@
 }
 .pattern-badge[data-pattern='clearState'],
 .pattern-badge[data-pattern='setState'] {
-  background: var(--node-loop-bg);
-  color: var(--node-loop-border-active);
-  border-color: var(--node-loop);
+  background: var(--node-continue-bg);
+  color: var(--node-continue-border-active);
+  border-color: var(--node-continue);
 }
 /* ListenCard 的 kind 也复用 pattern-badge：silent 灰 / declarative 蓝 / lua 紫 */
 .pattern-badge[data-pattern='silent'] {

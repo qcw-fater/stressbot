@@ -7,6 +7,7 @@
 
 import { CloseOutlined } from '@ant-design/icons';
 import { Rnd } from 'react-rnd';
+import { useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { useFloatingWindowStore } from '../store/floatingWindowStore';
 import './FloatingWindow.css';
@@ -59,11 +60,18 @@ export function FloatingWindow({
     openWindow(windowId, defaultSize, defaultPosition);
   }
 
+  // 当 open 变为 true 时，确保窗口获得焦点（置于顶层）
+  useEffect(() => {
+    if (open) {
+      focusWindow(windowId);
+    }
+  }, [open, windowId, focusWindow]);
+
   // 关闭时不卸载子组件，用 CSS 隐藏 + 禁用交互
   // 保证 Monaco 等有状态组件不会丢失滚动/数据
   if (!windowState) {
     // 窗口从未打开过，不渲染
-    return open ? null : null;
+    return null;
   }
 
   const hidden = !open;
@@ -77,7 +85,11 @@ export function FloatingWindow({
       bounds="body"
       dragHandleClassName={DRAG_HANDLE_CLASS}
       style={{ zIndex: windowState.zIndex, display: hidden ? 'none' : undefined }}
-      onDragStart={() => focusWindow(windowId)}
+      onDragStart={(e) => {
+        focusWindow(windowId);
+        // 如果有嵌套的浮动窗口，阻止事件冒泡，防止父窗口抢夺焦点
+        if (e && e.stopPropagation) e.stopPropagation();
+      }}
       onDragStop={(_e, d) => updatePosition(windowId, { x: d.x, y: d.y })}
       onResizeStop={(_e, _dir, _ref, _delta, pos) => {
         updateSize(windowId, {
@@ -86,7 +98,10 @@ export function FloatingWindow({
         });
         updatePosition(windowId, pos);
       }}
-      onMouseDown={() => focusWindow(windowId)}
+      onMouseDown={(e) => {
+        focusWindow(windowId);
+        if (e && e.stopPropagation) e.stopPropagation();
+      }}
     >
       <div className="floating-window">
         <div className={`floating-window-titlebar ${DRAG_HANDLE_CLASS}`}>

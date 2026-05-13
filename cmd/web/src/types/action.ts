@@ -16,7 +16,7 @@ export const ALL_ACTION_PATTERNS: ActionPattern[] = [
 ];
 
 /**
- * 字段绑定类型（17 种）。
+ * 字段绑定类型（15 种）。
  * 详见设计文档 §6.6 / Go 端 FieldBind 注释。
  */
 export type BindingType =
@@ -34,9 +34,7 @@ export type BindingType =
   | 'randomBool'
   | 'randomString'
   | 'randomExclude'
-  | 'listSize'
-  | 'nested'
-  | 'nestedList';
+  | 'listSize';
 
 export const ALL_BINDING_TYPES: BindingType[] = [
   'fixed',
@@ -54,8 +52,6 @@ export const ALL_BINDING_TYPES: BindingType[] = [
   'randomString',
   'randomExclude',
   'listSize',
-  'nested',
-  'nestedList',
 ];
 
 export interface FilterDef {
@@ -90,17 +86,13 @@ export interface FieldBind {
   excludeSource?: string;
   optional?: boolean;
   wrap?: boolean;
-  message?: string;
-  bindings?: FieldBind[];
   storeAs?: string;
   keySource?: string;
-  items?: FieldBind[];
   condition?: ConditionDef;
 }
 
 export interface StoreMapping {
   field?: string;
-  path?: string;
   setter: string;
 }
 

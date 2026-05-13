@@ -19,8 +19,9 @@ import { startAutoPersist, loadDraft } from './store/persistDraft';
 import { startHistory, undo, redo } from './store/undoRedo';
 import { useMetricsStore, type MetricsProvider } from './nodes/shared/MetricsBadge';
 import { FlowReadOnlyContext } from './flowReadOnlyContext';
-import { App as AntApp } from 'antd';
+import { App as AntApp, ConfigProvider } from 'antd';
 import { useFlowStore } from './store/flowStore';
+import { useFloatingWindowStore } from './store/floatingWindowStore';
 import { useProtoStore } from './proto/protoStore';
 import { syncResourcesFromBaseline, validateAdapter } from '@/services/resourcesStore';
 import { useEditorStore } from './store/editorStore';
@@ -43,11 +44,14 @@ export interface FlowEditorProps {
 }
 
 export function FlowEditor(props: FlowEditorProps) {
-  // 用 antd <App> 包一层，让内部能用 App.useApp() 拿到主题感知的 message/notification/Modal
+  // antd 弹出层 zIndex 始终高于所有 FloatingWindow（动态跟踪）
+  const nextZ = useFloatingWindowStore((s) => s._nextZ);
   return (
-    <AntApp style={{ height: '100%', width: '100%' }}>
-      <FlowEditorInner {...props} />
-    </AntApp>
+    <ConfigProvider theme={{ token: { zIndexPopup: nextZ + 100 } }}>
+      <AntApp style={{ height: '100%', width: '100%' }}>
+        <FlowEditorInner {...props} />
+      </AntApp>
+    </ConfigProvider>
   );
 }
 

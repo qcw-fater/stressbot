@@ -22,12 +22,19 @@ const future: Snapshot[] = [];
 const MAX_HISTORY = 50;
 
 let suppress = false;
+let prev: Snapshot | null = null;
+
+function snapshotNow(): Snapshot {
+  const s = useFlowStore.getState();
+  return { defaultDelayMs: s.defaultDelayMs, nodes: s.nodes, actions: s.actions, listens: s.listens };
+}
 
 /** 启动监听：每次业务字段变化压入 past。 */
 export function startHistory(): () => void {
-  let prev = snapshotNow();
+  prev = snapshotNow();
   const unsub = useFlowStore.subscribe((s) => {
     if (suppress) return;
+    if (!prev) return;
     const same =
       s.nodes === prev.nodes && s.actions === prev.actions && s.listens === prev.listens && s.defaultDelayMs === prev.defaultDelayMs;
     if (same) return;
@@ -37,11 +44,6 @@ export function startHistory(): () => void {
     prev = snapshotNow();
   });
   return unsub;
-}
-
-function snapshotNow(): Snapshot {
-  const s = useFlowStore.getState();
-  return { defaultDelayMs: s.defaultDelayMs, nodes: s.nodes, actions: s.actions, listens: s.listens };
 }
 
 function applySnapshot(snap: Snapshot) {
@@ -56,6 +58,9 @@ function applySnapshot(snap: Snapshot) {
     false,
   );
   useFlowStore.getState().syncDerived();
+  // 必须在关闭 suppress 之前同步 prev，否则后续任何 store 变化
+  // 都会用过期的 prev 生成一条多余的 history 条目，导致撤销行为错乱
+  prev = snapshotNow();
   suppress = false;
 }
 

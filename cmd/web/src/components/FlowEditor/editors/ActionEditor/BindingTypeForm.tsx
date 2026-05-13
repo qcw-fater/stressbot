@@ -21,26 +21,80 @@
  *   nestedList    : items[] (递归 message + bindings)
  */
 
-import { Input, InputNumber, Select, Space, Tag } from 'antd';
-import type { BindingType, FieldBind } from '@/types/action';
+import { Input, InputNumber, Select, Space } from 'antd';
+import { useMemo } from 'react';
+import type { FieldBind } from '@/types/action';
+import { useFlowStore } from '../../store/flowStore';
+import { useRuntimeStore } from '@/services/runtimeStore';
+import { ProtoPathInput } from './ProtoPathInput';
+import { StateKeyInput } from './StateKeyInput';
+import { collectStateKeys, resolveProtoForStateKey } from './stateRegistry';
 
 export interface BindingTypeFormProps {
   binding: FieldBind;
+  /** 当前 action 的全部 bindings，用于收集 storeAs */
+  currentBindings?: FieldBind[];
   onChange: (b: FieldBind) => void;
-  /** 嵌套深度（用于显式着色 / 防止过深） */
-  depth?: number;
-  /** 递归回调：渲染子绑定列表（nested / nestedList 调用） */
-  renderChildren?: (
-    bindings: FieldBind[],
-    onChildren: (next: FieldBind[]) => void,
-    parentMessage: string | undefined,
-    depth: number,
-  ) => React.ReactNode;
 }
 
-export function BindingTypeForm({ binding, onChange, depth = 0, renderChildren }: BindingTypeFormProps) {
+const LABEL: React.CSSProperties = { fontSize: 12, color: 'var(--text-tertiary)', flexShrink: 0 };
+
+/** source + path 两行布局 */
+function SourcePathRows({
+  binding,
+  currentBindings,
+  set,
+  sourceProto,
+  showPath,
+}: {
+  binding: FieldBind;
+  currentBindings?: FieldBind[];
+  set: (p: Partial<FieldBind>) => void;
+  sourceProto: string | undefined;
+  showPath: boolean;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={LABEL}>source</span>
+        <StateKeyInput
+          value={binding.source}
+          onChange={(v) => set({ source: v || undefined })}
+          currentBindings={currentBindings}
+          placeholder="state key"
+          style={{ flex: 1 }}
+        />
+      </div>
+      {showPath && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={LABEL}>path</span>
+          <ProtoPathInput
+            messageFullName={sourceProto}
+            value={binding.path}
+            onChange={(v) => set({ path: v || undefined })}
+            placeholder="可选，从 state 值中取子字段"
+            style={{ flex: 1 }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function BindingTypeForm({ binding, currentBindings, onChange }: BindingTypeFormProps) {
   const t = binding.type;
   const set = (partial: Partial<FieldBind>) => onChange({ ...binding, ...partial });
+
+  const actions = useFlowStore((s) => s.actions);
+  const listens = useFlowStore((s) => s.listens);
+  const stateExtra = useRuntimeStore((s) => s.robotConfig.stateExtra);
+
+  // 直接计算 sourceProto（不用 useEffect，避免 currentBindings 引用不稳定导致死循环）
+  const sourceProto = useMemo(() => {
+    if (!binding.source) return undefined;
+    const keys = collectStateKeys(actions, listens, stateExtra, currentBindings, undefined);
+    return resolveProtoForStateKey(keys, binding.source);
+  }, [binding.source, actions, listens, stateExtra, currentBindings]);
 
   switch (t) {
     case 'fixed':
@@ -48,101 +102,49 @@ export function BindingTypeForm({ binding, onChange, depth = 0, renderChildren }
     case 'state':
     case 'stateFirst':
       return (
-        <Space style={{ width: '100%' }}>
-          <Input
-            placeholder="source (state key)"
-            value={binding.source ?? ''}
-            onChange={(e) => set({ source: e.target.value })}
-            style={{ width: 220 }}
-          />
-          <Input
-            placeholder="path（可选，如 heroList[].id）"
-            value={binding.path ?? ''}
-            onChange={(e) => set({ path: e.target.value })}
-            style={{ width: 240 }}
-          />
-        </Space>
+        <SourcePathRows binding={binding} currentBindings={currentBindings} set={set} sourceProto={sourceProto} showPath />
       );
     case 'stateRandom':
       return (
-        <Space direction="vertical" style={{ width: '100%' }}>
-          <Space>
-            <Input
-              placeholder="source (state key)"
-              value={binding.source ?? ''}
-              onChange={(e) => set({ source: e.target.value })}
-              style={{ width: 220 }}
-            />
-            <Input
-              placeholder="path（可选）"
-              value={binding.path ?? ''}
-              onChange={(e) => set({ path: e.target.value })}
-              style={{ width: 200 }}
-            />
-          </Space>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
+          <SourcePathRows binding={binding} currentBindings={currentBindings} set={set} sourceProto={sourceProto} showPath />
           <FiltersField binding={binding} set={set} />
-        </Space>
+        </div>
       );
     case 'stateRandomN':
       return (
-        <Space>
-          <Input
-            placeholder="source (state key)"
-            value={binding.source ?? ''}
-            onChange={(e) => set({ source: e.target.value })}
-            style={{ width: 200 }}
-          />
-          <InputNumber
-            min={1}
-            placeholder="count"
-            value={binding.count}
-            onChange={(v) => set({ count: (v as number) ?? undefined })}
-          />
-          <Input
-            placeholder="path（可选）"
-            value={binding.path ?? ''}
-            onChange={(e) => set({ path: e.target.value })}
-            style={{ width: 180 }}
-          />
-        </Space>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
+          <SourcePathRows binding={binding} currentBindings={currentBindings} set={set} sourceProto={sourceProto} showPath />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={LABEL}>count</span>
+            <InputNumber
+              min={1}
+              placeholder="随机取几个"
+              value={binding.count}
+              onChange={(v) => set({ count: (v as number) ?? undefined })}
+            />
+          </div>
+        </div>
       );
     case 'stateMapKey':
       return (
-        <Space direction="vertical" style={{ width: '100%' }}>
-          <Input
-            placeholder="source (state map key)"
-            value={binding.source ?? ''}
-            onChange={(e) => set({ source: e.target.value })}
-            style={{ width: 220 }}
-          />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
+          <SourcePathRows binding={binding} currentBindings={currentBindings} set={set} sourceProto={sourceProto} showPath={false} />
           <FiltersField binding={binding} set={set} />
-        </Space>
+        </div>
       );
     case 'stateMapValue':
       return (
-        <Space direction="vertical" style={{ width: '100%' }}>
-          <Space>
-            <Input
-              placeholder="source (state map key)"
-              value={binding.source ?? ''}
-              onChange={(e) => set({ source: e.target.value })}
-              style={{ width: 220 }}
-            />
-            <Input
-              placeholder="path（取嵌套字段）"
-              value={binding.path ?? ''}
-              onChange={(e) => set({ path: e.target.value })}
-              style={{ width: 200 }}
-            />
-          </Space>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
+          <SourcePathRows binding={binding} currentBindings={currentBindings} set={set} sourceProto={sourceProto} showPath />
           <FiltersField binding={binding} set={set} />
-        </Space>
+        </div>
       );
     case 'randomPick':
       return <ValuesField binding={binding} set={set} />;
     case 'randomPickN':
       return (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
           <ValuesField binding={binding} set={set} />
           <InputNumber
             min={1}
@@ -150,10 +152,10 @@ export function BindingTypeForm({ binding, onChange, depth = 0, renderChildren }
             value={binding.count}
             onChange={(v) => set({ count: (v as number) ?? undefined })}
           />
-        </Space>
+        </div>
       );
     case 'randomPickMap':
-      return <PickMapValuesField binding={binding} set={set} />;
+      return <PickMapValuesField binding={binding} currentBindings={currentBindings} set={set} />;
     case 'randomInt':
       return (
         <Space>
@@ -201,96 +203,42 @@ export function BindingTypeForm({ binding, onChange, depth = 0, renderChildren }
       );
     case 'randomExclude':
       return (
-        <Space direction="vertical" style={{ width: '100%' }}>
-          <Space>
-            <Input
-              placeholder="source (state list)"
-              value={binding.source ?? ''}
-              onChange={(e) => set({ source: e.target.value })}
-              style={{ width: 200 }}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={LABEL}>source</span>
+            <StateKeyInput
+              value={binding.source}
+              onChange={(v) => set({ source: v || undefined })}
+              currentBindings={currentBindings}
+              placeholder="state list"
+              style={{ flex: 1 }}
             />
-            <Input
-              placeholder="excludeSource (state list)"
-              value={binding.excludeSource ?? ''}
-              onChange={(e) => set({ excludeSource: e.target.value })}
-              style={{ width: 240 }}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={LABEL}>exclude</span>
+            <StateKeyInput
+              value={binding.excludeSource}
+              onChange={(v) => set({ excludeSource: v || undefined })}
+              currentBindings={currentBindings}
+              placeholder="排除列表 (state key)"
+              style={{ flex: 1 }}
             />
-          </Space>
+          </div>
           <ValuesField binding={binding} set={set} />
-        </Space>
+        </div>
       );
     case 'listSize':
       return (
-        <Input
-          placeholder="source (state list key)"
-          value={binding.source ?? ''}
-          onChange={(e) => set({ source: e.target.value })}
-          style={{ width: 280 }}
-        />
-      );
-    case 'nested':
-      return (
-        <Space direction="vertical" style={{ width: '100%' }}>
-          <Input
-            placeholder="子消息 proto 全名（如 Game.HeroData）"
-            value={binding.message ?? ''}
-            onChange={(e) => set({ message: e.target.value })}
-            style={{ width: '100%' }}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={LABEL}>source</span>
+          <StateKeyInput
+            value={binding.source}
+            onChange={(v) => set({ source: v || undefined })}
+            currentBindings={currentBindings}
+            placeholder="state list key"
+            style={{ flex: 1 }}
           />
-          {renderChildren?.(
-            binding.bindings ?? [],
-            (next) => set({ bindings: next }),
-            binding.message,
-            depth + 1,
-          )}
-        </Space>
-      );
-    case 'nestedList':
-      return (
-        <Space direction="vertical" style={{ width: '100%' }}>
-          <Tag color="purple">每个 item = {`{ message + bindings }`}</Tag>
-          {(binding.items ?? []).map((sub, i) => (
-            <div key={i} style={{ border: '1px dashed var(--divider-bg)', padding: 8, borderRadius: 4 }}>
-              <Space style={{ marginBottom: 6 }}>
-                <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>item #{i + 1}</span>
-                <Input
-                  size="small"
-                  placeholder="子消息 proto 全名"
-                  value={sub.message ?? ''}
-                  onChange={(e) => {
-                    const arr = [...(binding.items ?? [])];
-                    arr[i] = { ...arr[i], message: e.target.value };
-                    set({ items: arr });
-                  }}
-                  style={{ width: 240 }}
-                />
-                <a
-                  onClick={() => set({ items: (binding.items ?? []).filter((_, j) => j !== i) })}
-                  style={{ color: 'var(--color-error)' }}
-                >
-                  删除 item
-                </a>
-              </Space>
-              {renderChildren?.(
-                sub.bindings ?? [],
-                (next) => {
-                  const arr = [...(binding.items ?? [])];
-                  arr[i] = { ...arr[i], bindings: next };
-                  set({ items: arr });
-                },
-                sub.message,
-                depth + 1,
-              )}
-            </div>
-          ))}
-          <a
-            onClick={() =>
-              set({ items: [...(binding.items ?? []), { type: 'nested' as BindingType, message: '', bindings: [] }] })
-            }
-          >
-            + 添加 item
-          </a>
-        </Space>
+        </div>
       );
     default:
       return <span style={{ color: 'var(--color-error)' }}>未知 binding type: {t}</span>;
@@ -305,7 +253,6 @@ function FixedValueInput({ value, onChange }: { value: unknown; onChange: (v: un
       value={text}
       onChange={(e) => {
         const raw = e.target.value;
-        // 尝试 JSON 解析
         try {
           if (raw === '') return onChange('');
           const parsed = JSON.parse(raw);
@@ -363,10 +310,10 @@ function FiltersField({ binding, set }: { binding: FieldBind; set: (p: Partial<F
       {filters.map((f, i) => (
         <Space key={i} wrap size={4}>
           <Input
-            placeholder="path"
+            placeholder="path（可选，如 items[0].id）"
             value={f.path ?? ''}
             onChange={(e) => updateFilter(i, { path: e.target.value })}
-            style={{ width: 120 }}
+            style={{ width: 220 }}
             size="small"
           />
           <Select
@@ -378,12 +325,12 @@ function FiltersField({ binding, set }: { binding: FieldBind; set: (p: Partial<F
           />
           {!['notNil', 'isNil'].includes(f.op) && (
             <Input
-              placeholder="value / source"
+              placeholder="value"
               value={typeof f.value === 'undefined' ? (f.source ?? '') : String(f.value)}
               onChange={(e) => {
                 const raw = e.target.value;
-                try { updateFilter(i, { value: JSON.parse(raw) }); }
-                catch { updateFilter(i, { value: raw }); }
+                try { updateFilter(i, { value: JSON.parse(raw), source: undefined }); }
+                catch { updateFilter(i, { value: raw, source: undefined }); }
               }}
               style={{ width: 120 }}
               size="small"
@@ -398,7 +345,7 @@ function FiltersField({ binding, set }: { binding: FieldBind; set: (p: Partial<F
 }
 
 /** randomPickMap 结构化编辑器：keySource + [{key, values}] */
-function PickMapValuesField({ binding, set }: { binding: FieldBind; set: (p: Partial<FieldBind>) => void }) {
+function PickMapValuesField({ binding, currentBindings, set }: { binding: FieldBind; currentBindings?: FieldBind[]; set: (p: Partial<FieldBind>) => void }) {
   const entries: Array<{ key: string; values: unknown[] }> = (binding.values ?? []) as Array<{ key: string; values: unknown[] }>;
 
   const updateEntry = (i: number, patch: Record<string, unknown>) => {
@@ -411,13 +358,17 @@ function PickMapValuesField({ binding, set }: { binding: FieldBind; set: (p: Par
   const removeEntry = (i: number) => set({ values: entries.filter((_, j) => j !== i) });
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size={6}>
-      <Input
-        placeholder="keySource (state 中 map 的 key)"
-        value={binding.keySource ?? ''}
-        onChange={(e) => set({ keySource: e.target.value })}
-        style={{ width: '100%' }}
-      />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={LABEL}>keySource</span>
+        <StateKeyInput
+          value={binding.keySource}
+          onChange={(v) => set({ keySource: v || undefined })}
+          currentBindings={currentBindings}
+          placeholder="state 中 map 的 key"
+          style={{ flex: 1 }}
+        />
+      </div>
       <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>映射表 (key → values[])</span>
       {entries.map((entry, i) => (
         <Space key={i} wrap size={4} style={{ width: '100%' }}>
@@ -444,6 +395,6 @@ function PickMapValuesField({ binding, set }: { binding: FieldBind; set: (p: Par
         </Space>
       ))}
       <a onClick={addEntry} style={{ fontSize: 11 }}>+ 添加映射</a>
-    </Space>
+    </div>
   );
 }

@@ -316,13 +316,6 @@ func networkUDPRequest(L *lua.LState) int {
 	if L.GetTop() >= 5 {
 		timeout = L.CheckInt(5)
 	}
-	pollMs := engine.DefaultPollMs
-	if L.GetTop() >= 6 {
-		pollMs = L.CheckInt(6)
-	}
-	if pollMs <= 0 {
-		pollMs = engine.DefaultPollMs
-	}
 
 	goRoute := luaValueToRoute(route)
 	respKey := ctx.Adapter.ExpectedResponseKey(goRoute)
@@ -336,36 +329,15 @@ func networkUDPRequest(L *lua.LState) int {
 		return 4
 	}
 
-	ctx.NetSender.EnsureUDPListener(service, respKey)
-
-	ok, _ := ctx.NetSender.UDPSend(service, packet)
-	if !ok {
-		L.Push(lua.LNumber(-1))
-		L.Push(lua.LNil)
-		L.Push(lua.LNumber(len(packet)))
-		L.Push(lua.LNumber(0))
-		return 4
-	}
-
 	pktLen := len(packet)
 	var respBody []byte
-	var timedOut bool
+	var ok bool
 
 	withReleasedMu(ctx.LuaMu, func() {
-		deadline := time.Now().Add(time.Duration(timeout) * time.Second)
-		for time.Now().Before(deadline) {
-			respBody = ctx.NetSender.GetUDPListenResp(service, respKey)
-			if respBody != nil {
-				return
-			}
-			time.Sleep(time.Duration(pollMs) * time.Millisecond)
-			if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-				return
-			}
-		}
-		if respBody == nil {
-			timedOut = true
-		}
+		respBody, ok = ctx.NetSender.UDPRequest(
+			service, packet, respKey,
+			time.Duration(timeout)*time.Second,
+		)
 	})
 
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
@@ -375,7 +347,7 @@ func networkUDPRequest(L *lua.LState) int {
 		L.Push(lua.LNumber(0))
 		return 4
 	}
-	if timedOut {
+	if !ok {
 		L.Push(lua.LNumber(-1))
 		L.Push(lua.LNil)
 		L.Push(lua.LNumber(pktLen))

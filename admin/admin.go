@@ -50,7 +50,7 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 	s.tasks = tasks
 
 	// 2. AgentRegistry
-	s.agents = NewAgentRegistry(cfg.AgentRegistry, nil)
+	s.agents = NewAgentRegistry(cfg.AgentRegistry, s.onAgentStatusChange)
 
 	// 3. MetricsAggregator
 	s.aggregator = NewMetricsAggregator(s.agents)
@@ -192,6 +192,63 @@ func buildFinalStressFromReports(task *Task) *monitor.CollectorSnapshot {
 		return nil
 	}
 	return monitor.MergeSnapshots(snaps)
+}
+
+func (s *AdminServer) onAgentStatusChange(agentID string, from, to AgentStatus) {
+	if to != AgentOffline {
+		return
+	}
+
+	task := s.tasks.ActiveTask()
+	if task == nil {
+		return
+	}
+
+	isAssigned := false
+	for _, a := range task.Assignments {
+		if a.AgentID == agentID {
+			isAssigned = true
+			break
+		}
+	}
+	if !isAssigned {
+		return
+	}
+
+	var needTransition TaskState
+	err := s.tasks.Update(task.ID, func(t *Task) {
+		if t.Reports != nil {
+			if _, ok := t.Reports[agentID]; ok {
+				return // 已经报告过
+			}
+		} else {
+			t.Reports = make(map[string]TaskCompletionReport)
+		}
+
+		t.Reports[agentID] = TaskCompletionReport{
+			AgentID:    agentID,
+			TaskID:     task.ID,
+			Result:     ResultFailed,
+			ErrorMsg:   "agent offline unexpectedly",
+			FinishedAt: time.Now(),
+		}
+
+		if len(t.Reports) == len(t.Assignments) {
+			if t.State == TaskRunning {
+				needTransition = TaskRunning
+			} else if t.State == TaskStopping {
+				needTransition = TaskStopping
+			}
+		}
+	})
+
+	if err == nil {
+		if needTransition == TaskRunning {
+			s.tasks.Transition(task.ID, TaskRunning, TaskStopped)
+		} else if needTransition == TaskStopping {
+			s.tasks.Transition(task.ID, TaskStopping, TaskStopped)
+		}
+	}
 }
 
 func generateID() string {

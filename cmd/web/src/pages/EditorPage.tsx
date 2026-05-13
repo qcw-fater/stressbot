@@ -47,7 +47,7 @@ import type { RobotConfig, TaskBrief } from '@/types/api';
 
 export function EditorPage() {
   return (
-    <AntApp style={{ width: '100vw', height: '100vh' }}>
+    <AntApp style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
       <HomeShellInner />
     </AntApp>
   );

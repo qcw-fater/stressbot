@@ -6,16 +6,18 @@
  *   - 选择器模式（传 open/onClose/onSelect）：嵌入编辑器中临时选消息，渲染为 Modal
  */
 
-import { Button, Empty, Input, List, Modal, Typography } from 'antd';
+import { Button, Empty, Input, List, Typography } from 'antd';
 import { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useEditorStore } from '../store/editorStore';
-import { useFloatingWindowStore } from '../store/floatingWindowStore';
 import { protoRegistry } from './ProtoRegistry';
 import { useProtoStore } from './protoStore';
 import { FloatingWindow } from '../panels/FloatingWindow';
 import type { ProtoMessage } from '@/types/proto';
 
 export interface ProtoBrowserProps {
+  /** 窗口 ID，用于区分多个实例（默认 protoBrowser） */
+  windowId?: string;
   /** 受控显示（选择器模式）；省略则用独立模式（FloatingWindow） */
   open?: boolean;
   onClose?: () => void;
@@ -25,13 +27,13 @@ export interface ProtoBrowserProps {
   filter?: (m: ProtoMessage) => boolean;
 }
 
-export function ProtoBrowser({ open: openProp, onClose, onSelect, filter }: ProtoBrowserProps) {
+export function ProtoBrowser({ windowId: customWindowId, open: openProp, onClose, onSelect, filter }: ProtoBrowserProps) {
   const isPickerMode = openProp !== undefined;
   const activePanel = useEditorStore((s) => s.activePanel.protoBrowser);
   const closePanel = useEditorStore((s) => s.closePanel);
   const open = openProp ?? activePanel?.kind === 'protoBrowser';
-  // Modal 始终高于所有浮动窗口
-  const topZ = useFloatingWindowStore((s) => s._nextZ + 1);
+
+  const windowId = customWindowId ?? (isPickerMode ? "protoPicker" : "protoBrowser");
 
   const protoStatus = useProtoStore((s) => s.status);
   const protoHash = useProtoStore((s) => s.hash);
@@ -183,28 +185,10 @@ export function ProtoBrowser({ open: openProp, onClose, onSelect, filter }: Prot
     </>
   );
 
-  // 选择器模式：保持为 Modal（嵌入编辑器中的临时子对话框）
-  if (isPickerMode) {
-    return (
-      <Modal
-        title="Proto 浏览器"
-        open={open}
-        onCancel={handleClose}
-        footer={null}
-        width={880}
-        zIndex={topZ}
-        styles={{ body: { maxHeight: 'calc(100vh - 200px)', overflow: 'auto' } }}
-      >
-        {content}
-      </Modal>
-    );
-  }
-
-  // 独立模式：FloatingWindow
-  return (
+  const windowNode = (
     <FloatingWindow
-      windowId="protoBrowser"
-      title="Proto 浏览器"
+      windowId={windowId}
+      title={isPickerMode ? "Proto 选择器" : "Proto 浏览器"}
       defaultSize={{ width: 780, height: 540 }}
       minSize={{ width: 500, height: 350 }}
       open={open}
@@ -213,4 +197,12 @@ export function ProtoBrowser({ open: openProp, onClose, onSelect, filter }: Prot
       {content}
     </FloatingWindow>
   );
+
+  // 选择器模式：使用 createPortal 挂载到 body，避免被 Drawer 等容器裁切
+  if (isPickerMode) {
+    return createPortal(windowNode, document.body);
+  }
+
+  // 独立模式：直接渲染
+  return windowNode;
 }

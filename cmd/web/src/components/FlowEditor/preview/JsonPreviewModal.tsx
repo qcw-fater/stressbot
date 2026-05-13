@@ -64,40 +64,52 @@ export function JsonPreviewModal() {
     >
       <div
         style={{
-          fontSize: 11,
-          color: 'var(--text-tertiary)',
-          marginBottom: 8,
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
+          flexDirection: 'column',
+          height: '100%',
+          minHeight: 0,
         }}
       >
-        <span>
-          节点 {Object.keys(flow.nodes).length} · 动作 {Object.keys(flow.actions).length} · 回调{' '}
-          {Object.keys(flow.listens).length}
-        </span>
-        <Tooltip title="复制到剪贴板">
-          <Button
-            type="text"
-            size="small"
-            icon={<CopyOutlined />}
-            onClick={onCopy}
-            aria-label="复制 JSON"
+        <div
+          style={{
+            fontSize: 11,
+            color: 'var(--text-tertiary)',
+            marginBottom: 8,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexShrink: 0,
+          }}
+        >
+          <span>
+            节点 {Object.keys(flow.nodes).length} · 动作 {Object.keys(flow.actions).length} · 回调{' '}
+            {Object.keys(flow.listens).length}
+          </span>
+          <Tooltip title="复制到剪贴板">
+            <Button
+              type="text"
+              size="small"
+              icon={<CopyOutlined />}
+              onClick={onCopy}
+              aria-label="复制 JSON"
+            />
+          </Tooltip>
+        </div>
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <Editor
+            height="100%"
+            language="json"
+            theme={monacoTheme}
+            value={json}
+            options={{
+              readOnly: true,
+              minimap: { enabled: false },
+              fontSize: 12,
+              scrollBeyondLastLine: false,
+            }}
           />
-        </Tooltip>
+        </div>
       </div>
-      <Editor
-        height="60vh"
-        language="json"
-        theme={monacoTheme}
-        value={json}
-        options={{
-          readOnly: true,
-          minimap: { enabled: false },
-          fontSize: 12,
-          scrollBeyondLastLine: false,
-        }}
-      />
     </FloatingWindow>
   );
 }

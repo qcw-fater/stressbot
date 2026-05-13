@@ -565,6 +565,24 @@ func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, responseKe
 	return resp.Data, true
 }
 
+// UDPRequest 发送 UDP 请求并等待响应，与 TCPRequest 同样使用 channel 阻塞等待。
+func (ns *netSenderAdapter) UDPRequest(service string, packet []byte, responseKey string, timeout ...time.Duration) ([]byte, bool) {
+	conn := ns.robot.client.GetUDPConn(service)
+	if conn == nil {
+		stresslog.Warn("[ACTION] UDPRequest 连接不存在",
+			zap.String("service", service), zap.String("responseKey", responseKey))
+		return nil, false
+	}
+	resp, _ := conn.RequestResponse(packet, responseKey, timeout...)
+	if resp == nil {
+		return nil, false
+	}
+	stresslog.Debug("[ACTION] UDPResponse",
+		zap.String("service", service), zap.String("responseKey", responseKey),
+		zap.Int("bodyLen", len(resp.Data)))
+	return resp.Data, true
+}
+
 // HTTPRequest 发送 HTTP 请求。
 func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body []byte) (int, []byte, error) {
 	if reqURL == "" {

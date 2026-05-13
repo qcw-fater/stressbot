@@ -297,30 +297,14 @@
       "route": {"cmd": 2, "act": 29},
       "c2sProto": "Game.MainBattleDelayC2S",
       "bindings": [
-        {
-          "field": "battleDelayList",
-          "type": "nestedList",
-          "items": [
-            {
-              "message": "Game.BattleDelay",
-              "bindings": [
-                {"field": "BattleArea", "type": "fixed", "value": "ap.hongkong"},
-                {"field": "DelayTime", "type": "randomInt", "min": 30, "max": 100},
-                {"field": "PingSendCnt", "type": "fixed", "value": 10},
-                {"field": "PingRecvCnt", "type": "fixed", "value": 10}
-              ]
-            },
-            {
-              "message": "Game.BattleDelay",
-              "bindings": [
-                {"field": "BattleArea", "type": "fixed", "value": "ap.taibei"},
-                {"field": "DelayTime", "type": "randomInt", "min": 30, "max": 100},
-                {"field": "PingSendCnt", "type": "fixed", "value": 10},
-                {"field": "PingRecvCnt", "type": "fixed", "value": 10}
-              ]
-            }
-          ]
-        }
+        {"field": "battleDelayList[0].BattleArea", "type": "fixed", "value": "ap.hongkong"},
+        {"field": "battleDelayList[0].DelayTime", "type": "randomInt", "min": 30, "max": 100},
+        {"field": "battleDelayList[0].PingSendCnt", "type": "fixed", "value": 10},
+        {"field": "battleDelayList[0].PingRecvCnt", "type": "fixed", "value": 10},
+        {"field": "battleDelayList[1].BattleArea", "type": "fixed", "value": "ap.taibei"},
+        {"field": "battleDelayList[1].DelayTime", "type": "randomInt", "min": 30, "max": 100},
+        {"field": "battleDelayList[1].PingSendCnt", "type": "fixed", "value": 10},
+        {"field": "battleDelayList[1].PingRecvCnt", "type": "fixed", "value": 10}
       ]
     },
     "GetActivityList": {
@@ -336,15 +320,8 @@
       "route": {"cmd": 9, "act": 1},
       "c2sProto": "Game.GmEventC2S",
       "bindings": [
-        {
-          "field": "GM",
-          "type": "nested",
-          "message": "Game.GMEvent",
-          "bindings": [
-            {"field": "type", "type": "fixed", "value": 4},
-            {"field": "param", "type": "fixed", "value": [109,5,110,5,113,5,118,5,122,5,123,5,124,5,125,5,130,5,138,5,140,5,142,5,143,5,148,5,150,5,153,5,156,5,158,5,159,5,160,5]}
-          ]
-        }
+        {"field": "GM.type", "type": "fixed", "value": 4},
+        {"field": "GM.param", "type": "fixed", "value": [109,5,110,5,113,5,118,5,122,5,123,5,124,5,125,5,130,5,138,5,140,5,142,5,143,5,148,5,150,5,153,5,156,5,158,5,159,5,160,5]}
       ]
     },
     "GMAddItem": {
@@ -353,15 +330,8 @@
       "route": {"cmd": 9, "act": 1},
       "c2sProto": "Game.GmEventC2S",
       "bindings": [
-        {
-          "field": "GM",
-          "type": "nested",
-          "message": "Game.GMEvent",
-          "bindings": [
-            {"field": "type", "type": "fixed", "value": 4},
-            {"field": "param", "type": "fixed", "value": [1,2147483647,2,2147483647,5,2147483647,6,2147483647,7,2147483647,8,2147483647,10,2147483647,14,2147483647,32,2147483647,33,2147483647,7200001,1,7200002,1,7200003,1,7200004,1,7300001,1,7300003,1,7300004,1,7300005,1,7300006,1,7090001,1,7090002,1,7090005,1,7110001,1,7110002,1,7110003,1,7110004,1,7110005,1,7110006,1,7110007,1,7110008,1,7110009,1,7120001,1,7120002,1,7120003,1,7120004,1,7120005,1,7040001,100000]}
-          ]
-        }
+        {"field": "GM.type", "type": "fixed", "value": 4},
+        {"field": "GM.param", "type": "fixed", "value": [1,2147483647,2,2147483647,5,2147483647,6,2147483647,7,2147483647,8,2147483647,10,2147483647,14,2147483647,32,2147483647,33,2147483647,7200001,1,7200002,1,7200003,1,7200004,1,7300001,1,7300003,1,7300004,1,7300005,1,7300006,1,7090001,1,7090002,1,7090005,1,7110001,1,7110002,1,7110003,1,7110004,1,7110005,1,7110006,1,7110007,1,7110008,1,7110009,1,7120001,1,7120002,1,7120003,1,7120004,1,7120005,1,7040001,100000]}
       ]
     },
     "GMAddHeroCup": {
@@ -370,15 +340,8 @@
       "route": {"cmd": 9, "act": 1},
       "c2sProto": "Game.GmEventC2S",
       "bindings": [
-        {
-          "field": "GM",
-          "type": "nested",
-          "message": "Game.GMEvent",
-          "bindings": [
-            {"field": "type", "type": "fixed", "value": 13},
-            {"field": "param", "type": "fixed", "value": [109, 1000]}
-          ]
-        }
+        {"field": "GM.type", "type": "fixed", "value": 13},
+        {"field": "GM.param", "type": "fixed", "value": [109, 1000]}
       ]
     },
     "GMFinishAllNewUserGuide": {
@@ -387,14 +350,7 @@
       "route": {"cmd": 9, "act": 1},
       "c2sProto": "Game.GmEventC2S",
       "bindings": [
-        {
-          "field": "GM",
-          "type": "nested",
-          "message": "Game.GMEvent",
-          "bindings": [
-            {"field": "type", "type": "fixed", "value": 52}
-          ]
-        }
+        {"field": "GM.type", "type": "fixed", "value": 52}
       ]
     },
     "LbsPositioning": {
@@ -624,16 +580,9 @@
       "route": {"cmd": 13, "act": 1},
       "c2sProto": "Game.ChatSendC2S",
       "bindings": [
-        {
-          "field": "chatInfo",
-          "type": "nested",
-          "message": "Game.ChatInfo",
-          "bindings": [
-            {"field": "cType", "type": "fixed", "value": 1},
-            {"field": "content", "type": "fixed", "value": "hello"},
-            {"field": "ctType", "type": "fixed", "value": 1}
-          ]
-        }
+        {"field": "chatInfo.cType", "type": "fixed", "value": 1},
+        {"field": "chatInfo.content", "type": "fixed", "value": "hello"},
+        {"field": "chatInfo.ctType", "type": "fixed", "value": 1}
       ]
     },
     "LookRankingList": {
@@ -733,18 +682,10 @@
       "c2sProto": "Game.SystemShopBuyC2S",
       "bindings": [
         {"type": "randomPick", "values": [[201005,10],[201006,50],[201008,50],[201009,150],[201049,150],[201050,300],[201051,1000],[201052,250],[201053,130]], "storeAs": "_shopPick"},
-        {
-          "field": "goodsList",
-          "type": "nested",
-          "message": "Game.BuyGoodsData",
-          "wrap": true,
-          "bindings": [
-            {"field": "shopId", "type": "fixed", "value": 1},
-            {"field": "goodsId", "type": "state", "source": "_shopPick", "path": "[0]"},
-            {"field": "buyNumber", "type": "fixed", "value": 1},
-            {"field": "costNumber", "type": "state", "source": "_shopPick", "path": "[1]"}
-          ]
-        }
+        {"field": "goodsList[0].shopId", "type": "fixed", "value": 1},
+        {"field": "goodsList[0].goodsId", "type": "state", "source": "_shopPick", "path": "[0]"},
+        {"field": "goodsList[0].buyNumber", "type": "fixed", "value": 1},
+        {"field": "goodsList[0].costNumber", "type": "state", "source": "_shopPick", "path": "[1]"}
       ]
     },
     "UnlockAdvanced": {

@@ -10,7 +10,8 @@ import { ArrowUpOutlined, ArrowDownOutlined, DeleteOutlined, PlusOutlined } from
 import type { CollapseProps } from 'antd';
 import type { BindingType, ConditionDef, FieldBind } from '@/types/action';
 import { useState } from 'react';
-import { ProtoFieldPicker } from './ProtoFieldPicker';
+import { ProtoPathInput } from './ProtoPathInput';
+import { StateKeyInput } from './StateKeyInput';
 import { BindingTypeForm } from './BindingTypeForm';
 import { BindingPreview } from './BindingPreview';
 
@@ -19,14 +20,12 @@ export interface BindingsTableProps {
   messageFullName?: string;
   value?: FieldBind[];
   onChange?: (v: FieldBind[]) => void;
-  depth?: number;
 }
 
 const TYPE_GROUPS: { label: string; types: BindingType[] }[] = [
   { label: '固定值', types: ['fixed'] },
   { label: 'state 取值', types: ['state', 'stateFirst', 'stateRandom', 'stateRandomN', 'stateMapKey', 'stateMapValue', 'listSize'] },
   { label: '随机', types: ['randomPick', 'randomPickN', 'randomPickMap', 'randomInt', 'randomBool', 'randomString', 'randomExclude'] },
-  { label: '嵌套', types: ['nested', 'nestedList'] },
 ];
 
 const BINDING_TYPE_DESC: Record<BindingType, string> = {
@@ -45,8 +44,6 @@ const BINDING_TYPE_DESC: Record<BindingType, string> = {
   randomBool: '随机布尔值，可设 true 概率',
   randomString: '随机字符串，指定长度和字符集',
   randomExclude: '从 choices 中排除 exclude 后随机选一个',
-  nested: '嵌套消息（对象），内含子 bindings',
-  nestedList: '嵌套 repeated 消息（列表），内含子 bindings + count',
 };
 
 const TYPE_OPTIONS = TYPE_GROUPS.map((g) => ({
@@ -54,7 +51,7 @@ const TYPE_OPTIONS = TYPE_GROUPS.map((g) => ({
   options: g.types.map((t) => ({ value: t, label: t })),
 }));
 
-export function BindingsTable({ messageFullName, value, onChange, depth = 0 }: BindingsTableProps) {
+export function BindingsTable({ messageFullName, value, onChange }: BindingsTableProps) {
   const list = value ?? [];
   const set = (next: FieldBind[]) => onChange?.(next);
 
@@ -103,8 +100,8 @@ export function BindingsTable({ messageFullName, value, onChange, depth = 0 }: B
     children: (
       <BindingRow
         binding={b}
+        allBindings={list}
         messageFullName={messageFullName}
-        depth={depth}
         onChange={(next) => {
           const arr = [...list];
           arr[i] = next;
@@ -115,7 +112,7 @@ export function BindingsTable({ messageFullName, value, onChange, depth = 0 }: B
   }));
 
   return (
-    <div style={{ paddingLeft: depth > 0 ? 16 : 0, borderLeft: depth > 0 ? '2px solid var(--divider-bg)' : 'none' }}>
+    <div style={{ paddingLeft: 0 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <strong>bindings ({list.length})</strong>
         <Button
@@ -133,13 +130,13 @@ export function BindingsTable({ messageFullName, value, onChange, depth = 0 }: B
 
 function BindingRow({
   binding,
+  allBindings,
   messageFullName,
-  depth,
   onChange,
 }: {
   binding: FieldBind;
+  allBindings: FieldBind[];
   messageFullName?: string;
-  depth: number;
   onChange: (b: FieldBind) => void;
 }) {
   const set = (partial: Partial<FieldBind>) => onChange({ ...binding, ...partial });
@@ -148,11 +145,12 @@ function BindingRow({
     <Space direction="vertical" style={{ width: '100%' }} size="middle">
       <Space wrap style={{ width: '100%' }}>
         <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>field</span>
-        <div style={{ width: 220 }}>
-          <ProtoFieldPicker
+        <div style={{ width: 320 }}>
+          <ProtoPathInput
             messageFullName={messageFullName}
             value={binding.field}
             onChange={(v) => set({ field: v || undefined })}
+            placeholder="填写或选择字段 (如 a.b[0])"
           />
         </div>
         <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>type</span>
@@ -175,16 +173,8 @@ function BindingRow({
       </Space>
       <BindingTypeForm
         binding={binding}
+        currentBindings={allBindings}
         onChange={onChange}
-        depth={depth}
-        renderChildren={(children, onChildren, parentMsg, childDepth) => (
-          <BindingsTable
-            messageFullName={parentMsg}
-            value={children}
-            onChange={onChildren}
-            depth={childDepth}
-          />
-        )}
       />
       <Space wrap>
         <Tooltip title="缺失时报错（隐式必需的类型默认 true，可通过 optional 反转）">
@@ -239,7 +229,11 @@ function BindingRow({
 
 const CONDITION_OPS = ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'in', 'notNil', 'isNil'] as const;
 
+const COND_LABEL: React.CSSProperties = { fontSize: 12, color: 'var(--text-tertiary)' };
+
 function ConditionEditor({ value, onChange }: { value?: ConditionDef; onChange: (c?: ConditionDef) => void }) {
+  const [condProto, setCondProto] = useState<string | undefined>(undefined);
+
   if (!value) {
     return (
       <a onClick={() => onChange({ source: '', op: 'eq' })} style={{ fontSize: 11 }}>
@@ -252,22 +246,26 @@ function ConditionEditor({ value, onChange }: { value?: ConditionDef; onChange: 
   const noRhs = value.op === 'notNil' || value.op === 'isNil';
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size={4}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
       <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>条件（不满足时跳过本绑定）</span>
-      <Space wrap size={4}>
-        <Input
-          placeholder="source (state key)"
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={COND_LABEL}>source</span>
+        <StateKeyInput
           value={value.source}
-          onChange={(e) => update({ source: e.target.value })}
-          style={{ width: 140 }}
-          size="small"
+          onChange={(v) => update({ source: v })}
+          onProtoResolved={setCondProto}
+          placeholder="state key"
+          style={{ flex: 1 }}
         />
-        <Input
-          placeholder="path（可选）"
-          value={value.path ?? ''}
-          onChange={(e) => update({ path: e.target.value || undefined })}
-          style={{ width: 100 }}
-          size="small"
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={COND_LABEL}>path</span>
+        <ProtoPathInput
+          messageFullName={condProto}
+          value={value.path}
+          onChange={(v) => update({ path: v || undefined })}
+          placeholder="可选"
+          style={{ flex: 1 }}
         />
         <Select
           value={value.op || 'eq'}
@@ -290,10 +288,10 @@ function ConditionEditor({ value, onChange }: { value?: ConditionDef; onChange: 
             size="small"
           />
         )}
-        <a onClick={() => onChange(undefined)} style={{ color: 'var(--color-error)', fontSize: 11 }}>
+        <a onClick={() => onChange(undefined)} style={{ color: 'var(--color-error)', fontSize: 11, flexShrink: 0 }}>
           删除条件
         </a>
-      </Space>
-    </Space>
+      </div>
+    </div>
   );
 }

@@ -14,6 +14,7 @@ import { useEditorStore } from '../store/editorStore';
 import { RouteEditor } from './RouteEditor';
 import { listenKindTagColor } from './listenKindStyle';
 import { monoCellStyle } from '../styles/inlineStyles';
+import { useFloatingWindowStore } from '../store/floatingWindowStore';
 
 export interface ListenRefsTableProps {
   nodeId: string;
@@ -21,6 +22,7 @@ export interface ListenRefsTableProps {
 
 export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
   const { message } = AntApp.useApp();
+  const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
   const node = useFlowStore((s) => s.nodes[nodeId]);
   const listens = useFlowStore((s) => s.listens);
   const updateNode = useFlowStore((s) => s.updateNode);
@@ -225,6 +227,7 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
         onCancel={() => setPasteOpen(false)}
         onOk={onApplyPaste}
         okText="追加"
+        styles={{ mask: { zIndex: popupZ }, wrapper: { zIndex: popupZ + 1 } }}
       >
         <p style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
           粘贴 <code>ListenRef[]</code> JSON 数组。每个对象需包含 <code>route</code>、<code>server</code>、

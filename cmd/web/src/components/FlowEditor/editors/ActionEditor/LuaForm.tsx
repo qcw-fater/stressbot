@@ -18,7 +18,7 @@
  */
 
 import { Alert, AutoComplete, App as AntApp, Button, Space, Tag, Upload } from 'antd';
-import { CloudDownloadOutlined, ImportOutlined, SaveOutlined } from '@ant-design/icons';
+import { CloudDownloadOutlined, ImportOutlined, SaveOutlined, UndoOutlined } from '@ant-design/icons';
 import Editor, { type Monaco } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -26,6 +26,7 @@ import type { UploadProps } from 'antd';
 import { useEditorStore } from '../../store/editorStore';
 import { registerLuaProviders } from '../../lua/luaProviders';
 import { checkLuaSyntax, type SyntaxIssue } from '../../lua/luaSyntaxClient';
+import { LuaApiPopover } from '../../lua/LuaApiPopover';
 import { addScript, getScript } from '@/services/resourcesStore';
 
 export type LuaMode = 'action' | 'listen' | 'boolean';
@@ -191,6 +192,9 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
     }
   }, [script, content]);
 
+  const handleSaveRef = useRef(handleSave);
+  handleSaveRef.current = handleSave;
+
   const onImport: UploadProps['beforeUpload'] = async (file) => {
     const text = await file.text();
     setContent(text);
@@ -266,58 +270,76 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
     editorRef.current = ed;
     monacoRef.current = mon;
     registerLuaProviders(mon);
-    // Ctrl+S 保存
+    // Ctrl+S 保存（通过 ref 调用最新 handleSave，避免闭包捕获过期的 script/content）
     ed.addCommand(mon.KeyMod.CtrlCmd | mon.KeyCode.KeyS, () => {
-      handleSave();
+      handleSaveRef.current();
     });
   };
 
   return (
     <div>
-      <Space style={{ marginBottom: 8 }} wrap>
-        <span>脚本文件：</span>
-        <AutoComplete
-          style={{ width: 280 }}
-          value={script}
-          onChange={(v) => onChangeScript(v)}
-          options={files.map((f) => ({ value: f, label: f }))}
-          placeholder="输入新文件名或选择已有脚本"
-          allowClear
-          filterOption={(input, option) =>
-            (option?.value as string)?.toLowerCase().includes(input.toLowerCase()) ?? false
-          }
-        />
-        <Upload accept=".lua" beforeUpload={onImport} showUploadList={false}>
-          <Button icon={<ImportOutlined />} size="small">
-            导入本地
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
+        <Space size={8} wrap>
+          <span>脚本文件：</span>
+          <AutoComplete
+            style={{ width: 280 }}
+            value={script}
+            onChange={(v) => onChangeScript(v)}
+            options={files.map((f) => ({ value: f, label: f }))}
+            placeholder="输入新文件名或选择已有脚本"
+            allowClear
+            filterOption={(input, option) =>
+              (option?.value as string)?.toLowerCase().includes(input.toLowerCase()) ?? false
+            }
+          />
+          <Upload accept=".lua" beforeUpload={onImport} showUploadList={false}>
+            <Button icon={<ImportOutlined />} size="small">
+              导入
+            </Button>
+          </Upload>
+          <Button icon={<CloudDownloadOutlined />} size="small" onClick={onDownload}>
+            下载
           </Button>
-        </Upload>
-        <Button icon={<CloudDownloadOutlined />} size="small" onClick={onDownload}>
-          下载当前内容
-        </Button>
-        <Button
-          icon={<SaveOutlined />}
-          size="small"
-          type="primary"
-          disabled={!script?.trim()}
-          onClick={handleSave}
-        >
-          保存到本地
-        </Button>
-        <Tag color={mode === 'action' ? 'blue' : mode === 'boolean' ? 'purple' : 'orange'}>
-          {mode}
-        </Tag>
-        {dirty && (
-          <Tag color="warning" style={{ marginInlineEnd: 0 }}>
-            未保存
+          <Button
+            icon={<SaveOutlined />}
+            size="small"
+            type="primary"
+            disabled={!script?.trim()}
+            onClick={handleSave}
+          >
+            保存
+          </Button>
+          <Tag color={mode === 'action' ? 'geekblue' : mode === 'boolean' ? 'gold' : 'orange'}>
+            {mode}
           </Tag>
-        )}
-        {!dirty && hasLocalDraft && script && (
-          <Tag color="green" style={{ marginInlineEnd: 0 }}>
-            已保存到本地
-          </Tag>
-        )}
-      </Space>
+          {dirty && (
+            <Tag color="warning" style={{ marginInlineEnd: 0 }}>
+              未保存
+            </Tag>
+          )}
+          {!dirty && hasLocalDraft && script && (
+            <Tag color="green" style={{ marginInlineEnd: 0 }}>
+              已保存
+            </Tag>
+          )}
+        </Space>
+        <span style={{ flex: 1 }} />
+        <Space size={8}>
+          {dirty && (
+            <Button
+              icon={<UndoOutlined />}
+              size="small"
+              onClick={() => {
+                setContent(initialContentRef.current);
+                setDirty(false);
+              }}
+            >
+              还原
+            </Button>
+          )}
+          <LuaApiPopover />
+        </Space>
+      </div>
       <Alert
         type={errorCount > 0 ? 'error' : warnCount > 0 || lintFallbackWarn ? 'warning' : 'info'}
         message={
@@ -376,6 +398,7 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
           fontFamily: "'JetBrains Mono', Consolas, Menlo, 'Courier New', monospace",
           scrollBeyondLastLine: false,
           readOnly: false,
+          fixedOverflowWidgets: true,
           quickSuggestions: { other: true, comments: false, strings: false },
           parameterHints: { enabled: true, cycle: true },
           suggestOnTriggerCharacters: true,

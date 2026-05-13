@@ -47,6 +47,7 @@ type NetSender interface {
 	TCPRequest(service string, packet []byte, responseKey string, timeout ...time.Duration) ([]byte, bool)
 	HTTPRequest(url, method, contentType string, body []byte) (statusCode int, respBody []byte, err error)
 	UDPSend(service string, data []byte) (bool, int)
+	UDPRequest(service string, packet []byte, responseKey string, timeout ...time.Duration) ([]byte, bool)
 	ConnectTCP(service, address string) bool
 	ConnectUDP(service, address string) bool
 	CloseTCP(service string)
@@ -348,46 +349,6 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 	case "listSize":
 		return len(ae.store.GetList(fb.Source))
 
-	case "nested":
-		if fb.Message == "" {
-			return nil
-		}
-		subMsg, err := ae.factory.Create(fb.Message)
-		if err != nil {
-			stresslog.Error("[ACTION] nested", zap.String("message", fb.Message), zap.Error(err))
-			return nil
-		}
-		if err := ae.bindFields(subMsg, fb.Bindings); err != nil {
-			stresslog.Error("[ACTION] nested bind", zap.String("message", fb.Message), zap.Error(err))
-			return nil
-		}
-		if fb.Wrap {
-			return []any{subMsg}
-		}
-		return subMsg
-
-	case "nestedList":
-		if len(fb.Items) == 0 {
-			return nil
-		}
-		result := make([]any, 0, len(fb.Items))
-		for _, item := range fb.Items {
-			if item.Message == "" {
-				continue
-			}
-			subMsg, err := ae.factory.Create(item.Message)
-			if err != nil {
-				stresslog.Error("[ACTION] nestedList", zap.String("message", item.Message), zap.Error(err))
-				continue
-			}
-			if err := ae.bindFields(subMsg, item.Bindings); err != nil {
-				stresslog.Error("[ACTION] nestedList bind", zap.String("message", item.Message), zap.Error(err))
-				continue
-			}
-			result = append(result, subMsg)
-		}
-		return result
-
 	default:
 		stresslog.Warn("[ACTION] 未知 binding type，按 fixed 处理",
 			zap.String("type", fb.Type), zap.String("field", fb.Field))
@@ -664,49 +625,33 @@ func (ae *ActionExecutor) execUDPRequest(def *ActionDef) (int, int, error) {
 		return 0, 0, fmt.Errorf("adapter.EncodeUDP 返回 nil，检查 codec.lua")
 	}
 
-	ae.netSender.EnsureUDPListener(def.Service, respKey)
-
-	ok, _ := ae.netSender.UDPSend(def.Service, packet)
+	start := time.Now()
+	var reqTimeout []time.Duration
+	if def.Timeout > 0 {
+		reqTimeout = append(reqTimeout, time.Duration(def.Timeout)*time.Second)
+	}
+	respBody, ok := ae.netSender.UDPRequest(def.Service, packet, respKey, reqTimeout...)
+	elapsed := time.Since(start)
 	if !ok {
 		if def.Optional {
-			stresslog.Debug("[ACTION] 可选 UDP 发送失败（已忽略）", zap.String("service", def.Service), zap.String("route", routeKey))
+			stresslog.Debug("[ACTION] 可选 UDPRequest 失败（已忽略）",
+				zap.String("service", def.Service), zap.String("respKey", respKey),
+				zap.Duration("elapsed", elapsed))
 			return 0, 0, nil
 		}
-		return 0, 0, fmt.Errorf("UDP 发送失败: service=%s route=%s", def.Service, routeKey)
+		return len(packet), 0, fmt.Errorf("UDPRequest 失败: service=%s route=%s respKey=%s elapsed=%v",
+			def.Service, routeKey, respKey, elapsed)
 	}
 
-	timeout := def.Timeout
-	if timeout <= 0 {
-		timeout = DefaultRequestTimeoutSec
-	}
-	pollMs := def.PollMs
-	if pollMs <= 0 {
-		pollMs = DefaultPollMs
+	if err := ae.parseAndStoreResponse(def, respBody); err != nil {
+		return len(packet), 0, err
 	}
 
-	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
-	for time.Now().Before(deadline) {
-		if ae.ctx != nil && ae.ctx.Err() != nil {
-			return len(packet), 0, ae.ctx.Err()
-		}
-		respBody := ae.netSender.GetUDPListenResp(def.Service, respKey)
-		if respBody != nil {
-			if err := ae.parseAndStoreResponse(def, respBody); err != nil {
-				return len(packet), 0, err
-			}
-			stresslog.Debug("[ACTION] UDPRequest 成功",
-				zap.String("service", def.Service), zap.String("route", routeKey),
-				zap.Int("respBodyLen", len(respBody)))
-			return len(packet), len(respBody), nil
-		}
-		time.Sleep(time.Duration(pollMs) * time.Millisecond)
-	}
-
-	if def.Optional {
-		stresslog.Debug("[ACTION] 可选 UDPRequest 超时（已忽略）", zap.String("service", def.Service))
-		return len(packet), 0, nil
-	}
-	return len(packet), 0, fmt.Errorf("UDPRequest 超时: service=%s route=%s timeout=%ds", def.Service, routeKey, timeout)
+	stresslog.Debug("[ACTION] UDPRequest 成功",
+		zap.String("service", def.Service), zap.String("route", routeKey),
+		zap.String("respKey", respKey), zap.String("s2cProto", def.S2CProto),
+		zap.Int("respBodyLen", len(respBody)), zap.Duration("elapsed", elapsed))
+	return len(packet), len(respBody), nil
 }
 
 // execUDPListen 等待 UDP 监听消息（轮询模式）
@@ -883,23 +828,18 @@ func (ae *ActionExecutor) storeResponse(mappings []StoreMapping, fieldMap map[st
 
 	for _, m := range mappings {
 		if m.Field == "" {
-			if m.Path != "" {
-				var rootVal any = fieldMap
-				ae.store.Set(m.Setter, navigatePath(rootVal, m.Path))
-			} else {
-				ae.store.Set(m.Setter, fieldMap)
-			}
-		} else if val := lookupFieldMap(fieldMap, m.Field); val != nil {
-			if m.Path != "" {
-				val = navigatePath(val, m.Path)
-			}
-			ae.store.Set(m.Setter, val)
-			stresslog.Debug("[ACTION] storeResponse 存储",
-				zap.String("field", m.Field), zap.String("setter", m.Setter),
-				zap.String("type", fmt.Sprintf("%T", val)))
+			ae.store.Set(m.Setter, fieldMap)
 		} else {
-			stresslog.Debug("[ACTION] storeResponse 字段未找到",
-				zap.String("field", m.Field), zap.String("setter", m.Setter))
+			val := navigatePath(fieldMap, m.Field)
+			if val != nil {
+				ae.store.Set(m.Setter, val)
+				stresslog.Debug("[ACTION] storeResponse 存储",
+					zap.String("field", m.Field), zap.String("setter", m.Setter),
+					zap.String("type", fmt.Sprintf("%T", val)))
+			} else {
+				stresslog.Debug("[ACTION] storeResponse 字段未找到",
+					zap.String("field", m.Field), zap.String("setter", m.Setter))
+			}
 		}
 	}
 }

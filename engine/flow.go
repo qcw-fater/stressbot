@@ -129,8 +129,6 @@ type ActionDef struct {
 //   - randomString:  随机字符串（Length + Charset 字段）
 //   - randomExclude: 从 Values 或 state list 中随机选一个，且排除 ExcludeSource
 //   - listSize:      返回 state 列表长度（int）
-//   - nested:        嵌套消息（Message 指定 proto 全名，Bindings 填充子字段）
-//   - nestedList:    repeated 嵌套消息（Items 数组，每项含 Message + Bindings）
 //
 // Path 支持用 | 分隔多条候选路径，按顺序尝试，返回第一个非 nil 的值。
 // 例如 "mailUid|gid" 会先尝试 mailUid，不存在则取 gid。
@@ -142,11 +140,11 @@ type ActionDef struct {
 //
 // Wrap 为 true 时，将单个值包装为 []any{val}，用于 repeated 字段赋单个元素的场景。
 type FieldBind struct {
-	Field         string        `json:"field"`         // 目标 proto 字段名（如 "itemId"、"model"）
-	Type          string        `json:"type"`          // 绑定类型：fixed / state / stateFirst / stateRandom / stateRandomN / stateMapKey / stateMapValue / randomPick / randomPickMap / randomExclude / randomInt / randomString / nested / nestedList
+	Field         string        `json:"field"`         // 目标 proto 字段名（支持嵌套如 "heroList[0].heroId"）
+	Type          string        `json:"type"`          // 绑定类型：fixed / state / stateFirst / stateRandom / stateRandomN / stateMapKey / stateMapValue / randomPick / randomPickMap / randomExclude / randomInt / randomString / listSize
 	Value         any           `json:"value"`         // fixed: 固定值
 	Source        string        `json:"source"`        // 数据来源 state key（state/stateFirst/stateRandom/stateRandomN/stateMapKey/stateMapValue/randomPick/randomExclude 使用）
-	Path          string        `json:"path"`          // 从 state 值中导航取子字段（如 "items[].itemId"）
+	Path          string        `json:"path"`          // 从 state 值中导航取子字段（如 "items[0].itemId"）
 	Values        []any         `json:"values"`        // randomPick/randomPickN/randomPickMap/randomExclude: 候选值列表
 	Required      bool          `json:"required"`      // true = 字段缺失时动作报错（不再静默跳过）
 	Filters       []FilterDef   `json:"filters"`       // stateMapValue/stateMapKey: 过滤条件列表
@@ -158,11 +156,8 @@ type FieldBind struct {
 	ExcludeSource string        `json:"excludeSource"` // randomExclude: 从 state 读取排除列表
 	Optional      bool          `json:"optional"`      // true = 即使 isRequired() 的类型也允许字段为空（跳过该字段）
 	Wrap          bool          `json:"wrap"`          // true = 赋值给 repeated 字段时将单值包装为 [val]
-	Message       string        `json:"message"`       // nested/nestedList: 子消息 proto 全名
-	Bindings      []FieldBind   `json:"bindings"`      // nested: 子消息的字段绑定列表
 	StoreAs       string        `json:"storeAs"`       // 将解析结果存入 state 的 key（中间变量，供后续 binding 通过 source 引用）
 	KeySource     string        `json:"keySource"`     // randomPickMap: 从 state 读取 map 的 key 列表
-	Items         []FieldBind   `json:"items"`         // nestedList: 多个嵌套消息规格（每个用 message + bindings）
 	Condition     *ConditionDef `json:"condition"`     // 可选条件：不满足时跳过本绑定
 }
 
@@ -207,8 +202,7 @@ type ConditionDef struct {
 
 // StoreMapping S2C 响应字段 -> StateStore 映射。
 type StoreMapping struct {
-	Field  string `json:"field"`  // S2C 响应中的字段名（空字符串表示存储整个 fieldMap）
-	Path   string `json:"path"`   // 从字段值中导航取子字段（如 "items[].itemId"）
+	Field  string `json:"field"`  // S2C 响应中的字段名（支持嵌套如 "heroList[0].heroId"，空字符串表示存储整个 fieldMap）
 	Setter string `json:"setter"` // 写入 StateStore 的 key
 }
 

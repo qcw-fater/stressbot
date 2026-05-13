@@ -326,10 +326,34 @@ function checkAction(name: string, def: ActionDef): ValidationIssue[] {
     if (def.c2sProto && def.bindings) {
       const msg = protoRegistry.lookupMessage(def.c2sProto);
       if (msg) {
-        const fieldSet = new Set(msg.fields.map((f) => f.name));
+        // Build a set of all possible paths (up to a reasonable depth) for validation
+        const validPaths = new Set<string>();
+        const buildPaths = (msgName: string, prefix: string, depth: number) => {
+          if (depth > 3) return;
+          const m = protoRegistry.lookupMessage(msgName);
+          if (!m) return;
+          for (const f of m.fields) {
+            const nodeName = f.repeated ? `${f.name}[0]` : f.name;
+            const currentPath = prefix ? `${prefix}.${nodeName}` : nodeName;
+            validPaths.add(currentPath);
+            // Also allow the base name without array index for repeated fields
+            if (f.repeated) {
+              validPaths.add(prefix ? `${prefix}.${f.name}` : f.name);
+            }
+            if (f.kind === 'message' && f.messageName) {
+              buildPaths(f.messageName, currentPath, depth + 1);
+            }
+          }
+        };
+        buildPaths(def.c2sProto, '', 0);
+
         for (const b of def.bindings) {
-          if (b.field && !fieldSet.has(b.field)) {
-            issues.push({ severity: 'warning', code: 'BINDING_FIELD_NOT_FOUND', message: `action "${name}" bindings 中字段 "${b.field}" 不存在于 ${def.c2sProto}`, location: loc });
+          if (b.field) {
+            // Normalize the field path for checking (replace [1], [2] etc with [0])
+            const normalizedField = b.field.replace(/\[\d+\]/g, '[0]');
+            if (!validPaths.has(normalizedField)) {
+              issues.push({ severity: 'warning', code: 'BINDING_FIELD_NOT_FOUND', message: `action "${name}" bindings 中字段 "${b.field}" 不存在于 ${def.c2sProto} 或其嵌套结构中`, location: loc });
+            }
           }
         }
       }
@@ -354,8 +378,8 @@ function checkBindings(prefix: string, bindings: FieldBind[], loc: { kind: 'acti
     const label = `${prefix}.bindings[${i}]`;
     const t = b.type ?? '';
 
-    // field + storeAs 都空（nested/nestedList 除外）
-    if (!b.field && !b.storeAs && t !== 'nested' && t !== 'nestedList') {
+    // field + storeAs 都空
+    if (!b.field && !b.storeAs) {
       issues.push({ severity: 'warning', code: 'BINDING_NO_FIELD', message: `${label} 缺少 field 和 storeAs`, location: loc });
     }
 
@@ -420,37 +444,6 @@ function checkBindings(prefix: string, bindings: FieldBind[], loc: { kind: 'acti
       case 'randomString':
         if (!b.length || b.length <= 0) {
           issues.push({ severity: 'error', code: 'BINDING_INVALID_LENGTH', message: `${label} type=randomString length 必须 > 0`, location: loc });
-        }
-        break;
-      case 'nested':
-        if (!b.message) {
-          issues.push({ severity: 'error', code: 'BINDING_NO_MESSAGE', message: `${label} type=nested 缺少 message`, location: loc });
-        } else if (protoRegistry.isLoaded() && !protoRegistry.lookupMessage(b.message)) {
-          issues.push({ severity: 'error', code: 'BINDING_MSG_NOT_FOUND', message: `${label} type=nested message "${b.message}" 在 proto 中不存在`, location: loc });
-        }
-        if (!b.bindings || b.bindings.length === 0) {
-          issues.push({ severity: 'warning', code: 'BINDING_EMPTY_NESTED', message: `${label} type=nested bindings 为空`, location: loc });
-        }
-        if (b.bindings) {
-          issues.push(...checkBindings(label, b.bindings, loc));
-        }
-        break;
-      case 'nestedList':
-        if (!b.items || b.items.length === 0) {
-          issues.push({ severity: 'error', code: 'BINDING_NO_ITEMS', message: `${label} type=nestedList 缺少 items`, location: loc });
-        } else {
-          for (let j = 0; j < b.items.length; j++) {
-            const item = b.items[j];
-            const itemLabel = `${label}.items[${j}]`;
-            if (!item.message) {
-              issues.push({ severity: 'error', code: 'BINDING_NO_MESSAGE', message: `${itemLabel} 缺少 message`, location: loc });
-            } else if (protoRegistry.isLoaded() && !protoRegistry.lookupMessage(item.message)) {
-              issues.push({ severity: 'error', code: 'BINDING_MSG_NOT_FOUND', message: `${itemLabel} message "${item.message}" 在 proto 中不存在`, location: loc });
-            }
-            if (item.bindings) {
-              issues.push(...checkBindings(itemLabel, item.bindings, loc));
-            }
-          }
         }
         break;
     }

@@ -33,10 +33,62 @@ func (f *Factory) Create(name string) (proto.Message, error) {
 
 // SetField 设置消息字段值。
 // 支持 bool、整数、浮点、字符串、字节切片、枚举、嵌套消息、repeated 字段等类型。
-// fieldName 大小写不敏感，会自动匹配 proto 定义中的字段名。
-func (f *Factory) SetField(msg proto.Message, fieldName string, value any) error {
-	ref := msg.ProtoReflect()
+// fieldName 支持点分路径和数组索引（如 "heroData.heroList[0].heroId"）。
+func (f *Factory) SetField(msg proto.Message, fieldPath string, value any) error {
+	parts := splitPath(fieldPath)
+	if len(parts) == 0 {
+		return fmt.Errorf("fieldPath 为空")
+	}
+	return f.setNestedField(msg.ProtoReflect(), parts, value)
+}
+
+// splitPath 将 "a.b[0].c" 拆分为 ["a", "b", "[0]", "c"]
+func splitPath(path string) []string {
+	var out []string
+	var buf []byte
+	flush := func() {
+		if len(buf) > 0 {
+			out = append(out, string(buf))
+			buf = buf[:0]
+		}
+	}
+	for i := 0; i < len(path); i++ {
+		ch := path[i]
+		switch ch {
+		case '.':
+			flush()
+		case '[':
+			flush()
+			j := i + 1
+			for j < len(path) && path[j] != ']' {
+				j++
+			}
+			if j < len(path) {
+				out = append(out, path[i:j+1])
+				i = j
+			} else {
+				buf = append(buf, ch)
+			}
+		default:
+			buf = append(buf, ch)
+		}
+	}
+	flush()
+	return out
+}
+
+func (f *Factory) setNestedField(ref protoreflect.Message, parts []string, value any) error {
 	desc := ref.Descriptor()
+	part := parts[0]
+
+	// 处理数组索引
+	fieldName := part
+	idx := -1
+	if strings.HasPrefix(part, "[") && strings.HasSuffix(part, "]") {
+		return fmt.Errorf("路径不能以数组索引开头: %s", part)
+	}
+
+	// 查找字段
 	field := desc.Fields().ByName(protoreflect.Name(fieldName))
 	if field == nil {
 		field = findFieldCaseInsensitive(desc, fieldName)
@@ -45,18 +97,68 @@ func (f *Factory) SetField(msg proto.Message, fieldName string, value any) error
 		return fmt.Errorf("消息 %s 未找到字段 %s", string(desc.FullName()), fieldName)
 	}
 
-	// 处理 repeated 字段（列表）
-	if field.IsList() {
-		return setRepeatedField(ref, field, value)
+	// 如果是最后一部分，直接赋值
+	if len(parts) == 1 {
+		if field.IsList() {
+			return setRepeatedField(ref, field, value)
+		}
+		val, err := toFieldValue(field, value)
+		if err != nil {
+			return err
+		}
+		ref.Set(field, val)
+		return nil
 	}
 
-	val, err := toFieldValue(field, value)
-	if err != nil {
-		return err
+	// 如果不是最后一部分，检查下一部分是否是数组索引
+	nextPart := parts[1]
+	if strings.HasPrefix(nextPart, "[") && strings.HasSuffix(nextPart, "]") {
+		if !field.IsList() {
+			return fmt.Errorf("字段 %s 不是 repeated，但路径包含数组索引 %s", fieldName, nextPart)
+		}
+		idxStr := nextPart[1 : len(nextPart)-1]
+		if idxStr != "" {
+			fmt.Sscanf(idxStr, "%d", &idx)
+		} else {
+			idx = 0
+		}
+
+		list := ref.Mutable(field).List()
+		for list.Len() <= idx {
+			list.Append(list.NewElement())
+		}
+		elem := list.Get(idx)
+
+		if len(parts) == 2 {
+			val, err := toFieldValue(field, value)
+			if err != nil {
+				return err
+			}
+			list.Set(idx, val)
+			return nil
+		}
+
+		if field.Kind() == protoreflect.MessageKind {
+			msg := elem.Message()
+			if err := f.setNestedField(msg, parts[2:], value); err != nil {
+				return err
+			}
+			list.Set(idx, protoreflect.ValueOfMessage(msg))
+			return nil
+		}
+		return fmt.Errorf("字段 %s 不是 message 类型，无法嵌套", fieldName)
 	}
 
-	ref.Set(field, val)
-	return nil
+	// 下一部分不是数组索引，说明是普通的 message 嵌套
+	if field.Kind() == protoreflect.MessageKind && !field.IsList() && !field.IsMap() {
+		msg := ref.Mutable(field).Message()
+		if err := f.setNestedField(msg, parts[1:], value); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	return fmt.Errorf("字段 %s 不是 message 类型，无法嵌套", fieldName)
 }
 
 // setRepeatedField 设置 repeated 字段值。
@@ -85,19 +187,67 @@ func setRepeatedField(ref protoreflect.Message, field protoreflect.FieldDescript
 // 返回 Go 原生类型（bool、int64、float64、string、[]byte 等）。
 // repeated 字段返回 []any，map 字段返回 map[string]any。
 // 嵌套消息返回 map[string]any（递归展开）。
-// fieldName 大小写不敏感。
-func (f *Factory) GetField(msg proto.Message, fieldName string) (any, error) {
-	ref := msg.ProtoReflect()
-	desc := ref.Descriptor()
-	field := desc.Fields().ByName(protoreflect.Name(fieldName))
-	if field == nil {
-		field = findFieldCaseInsensitive(desc, fieldName)
+// fieldName 支持点分路径和数组索引。
+func (f *Factory) GetField(msg proto.Message, fieldPath string) (any, error) {
+	parts := splitPath(fieldPath)
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("fieldPath 为空")
 	}
-	if field == nil {
-		return nil, fmt.Errorf("消息 %s 未找到字段 %s", string(desc.FullName()), fieldName)
+	return f.getNestedField(msg.ProtoReflect(), parts)
+}
+
+func (f *Factory) getNestedField(ref protoreflect.Message, parts []string) (any, error) {
+	desc := ref.Descriptor()
+	part := parts[0]
+
+	if strings.HasPrefix(part, "[") && strings.HasSuffix(part, "]") {
+		return nil, fmt.Errorf("路径不能以数组索引开头: %s", part)
 	}
 
-	return fromFieldValue(field, ref.Get(field)), nil
+	field := desc.Fields().ByName(protoreflect.Name(part))
+	if field == nil {
+		field = findFieldCaseInsensitive(desc, part)
+	}
+	if field == nil {
+		return nil, fmt.Errorf("消息 %s 未找到字段 %s", string(desc.FullName()), part)
+	}
+
+	if len(parts) == 1 {
+		return fromFieldValue(field, ref.Get(field)), nil
+	}
+
+	nextPart := parts[1]
+	if strings.HasPrefix(nextPart, "[") && strings.HasSuffix(nextPart, "]") {
+		if !field.IsList() {
+			return nil, fmt.Errorf("字段 %s 不是 repeated，但路径包含数组索引 %s", part, nextPart)
+		}
+		idxStr := nextPart[1 : len(nextPart)-1]
+		idx := 0
+		if idxStr != "" {
+			fmt.Sscanf(idxStr, "%d", &idx)
+		}
+
+		list := ref.Get(field).List()
+		if idx < 0 || idx >= list.Len() {
+			return nil, fmt.Errorf("数组索引越界: %s", nextPart)
+		}
+		elem := list.Get(idx)
+
+		if len(parts) == 2 {
+			return fromScalarValue(field, elem), nil
+		}
+
+		if field.Kind() == protoreflect.MessageKind {
+			return f.getNestedField(elem.Message(), parts[2:])
+		}
+		return nil, fmt.Errorf("字段 %s 不是 message 类型，无法嵌套", part)
+	}
+
+	if field.Kind() == protoreflect.MessageKind && !field.IsList() && !field.IsMap() {
+		return f.getNestedField(ref.Get(field).Message(), parts[1:])
+	}
+
+	return nil, fmt.Errorf("字段 %s 不是 message 类型，无法嵌套", part)
 }
 
 // GetFieldMap 获取消息的所有字段值（map 形式）。

@@ -304,7 +304,7 @@ function FlowCanvasInner() {
           if (targetNodeId) next.push(targetNodeId);
         } else if (handle.startsWith('seq-')) {
           const idx = Number(handle.slice(4));
-          if (Number.isFinite(idx) && targetNodeId) next[idx] = targetNodeId;
+          if (Number.isFinite(idx) && targetNodeId) next.splice(idx, 0, targetNodeId);
         }
         updateNode(params.source, { next });
         return;
@@ -324,7 +324,7 @@ function FlowCanvasInner() {
           if (targetNodeId) options.push({ node: targetNodeId, weight: 1 });
         } else if (handle.startsWith('opt-')) {
           const idx = Number(handle.slice(4));
-          if (Number.isFinite(idx) && targetNodeId) options[idx] = { ...options[idx], node: targetNodeId };
+          if (Number.isFinite(idx) && targetNodeId) options.splice(idx, 0, { node: targetNodeId, weight: 1 });
         }
         updateNode(params.source, { options });
         return;

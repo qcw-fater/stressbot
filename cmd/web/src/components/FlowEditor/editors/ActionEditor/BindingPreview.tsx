@@ -69,11 +69,6 @@ function simulateBinding(fb: FieldBind): PreviewResult {
     case 'randomExclude':
       return { kind: 'placeholder', display: `从 ${JSON.stringify(fb.values ?? [])} 排除 state["${fb.excludeSource}"] 后随机` };
 
-    case 'nested':
-      return { kind: 'placeholder', display: `嵌套消息 ${fb.message ?? '?'} (${fb.bindings?.length ?? 0} 个子绑定)` };
-    case 'nestedList':
-      return { kind: 'placeholder', display: `嵌套列表 (${fb.items?.length ?? 0} 个 item)` };
-
     default:
       return { kind: 'error', message: `未知 type: ${fb.type}` };
   }
@@ -107,6 +102,10 @@ function genSampleString(len: number): string {
 
 function checkTypeCompat(fb: FieldBind, messageFullName?: string): string | null {
   if (!messageFullName || !fb.field) return null;
+  // field might be a path like a.b[0].c, so we only check the last part if we can't resolve the full path
+  // For simplicity, we just skip type checking for nested paths in the preview
+  if (fb.field.includes('.') || fb.field.includes('[')) return null;
+
   const field = protoRegistry.resolveField(messageFullName, fb.field);
   if (!field) return null;
   const ft = field.type;

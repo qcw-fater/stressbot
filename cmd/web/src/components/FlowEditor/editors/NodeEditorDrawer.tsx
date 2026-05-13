@@ -17,7 +17,18 @@ import { WeightedEditor } from './WeightedEditor';
 import { WaitEditor } from './WaitEditor';
 import { ActionEditor } from './ActionEditor';
 import { FloatingWindow } from '../panels/FloatingWindow';
-import type { FlowNode } from '@/types/flow';
+import type { FlowNode, NodeType } from '@/types/flow';
+
+const nodeTypeTagColor: Record<NodeType, string> = {
+  sequence: 'blue',
+  action: 'geekblue',
+  loop: 'green',
+  boolean: 'gold',
+  weighted: 'purple',
+  wait: 'red',
+  break: 'orange',
+  continue: 'cyan',
+};
 import type { ActionDef } from '@/types/action';
 
 export function NodeEditorDrawer() {
@@ -143,7 +154,7 @@ export function NodeEditorDrawer() {
       title={
         titleNode ? (
           <Space>
-            <Tag color="blue">{titleNode.type}</Tag>
+            <Tag color={nodeTypeTagColor[titleNode.type]}>{titleNode.type}</Tag>
             <span>编辑节点 {nodeId}</span>
           </Space>
         ) : (

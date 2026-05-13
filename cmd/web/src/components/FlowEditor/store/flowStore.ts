@@ -291,7 +291,14 @@ export const useFlowStore = create<FlowState>((set, get) => ({
           nodes[k] = renameRefsInNode(v, oldId, newId);
         }
       }
-      return { nodes };
+      // 同步更新布局位置表的 key，避免新 ID 节点掉到 (0,0)
+      const layout = { ...s.layout };
+      if (layout.nodePositions[oldId]) {
+        layout.nodePositions = { ...layout.nodePositions };
+        layout.nodePositions[newId] = layout.nodePositions[oldId];
+        delete layout.nodePositions[oldId];
+      }
+      return { nodes, layout };
     });
     get().syncDerived();
   },

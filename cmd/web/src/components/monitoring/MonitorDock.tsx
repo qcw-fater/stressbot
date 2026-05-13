@@ -32,6 +32,12 @@ function fmtBandwidth(mbps: number) {
   return { value: v, suffix: 'MB/s', precision: 2 };
 }
 
+function gaugeColor(v: number): string {
+  if (v > 80) return 'var(--color-error)';
+  if (v > 60) return 'var(--color-warning)';
+  return 'var(--color-blue)';
+}
+
 function successColor(rate: number): string {
   if (rate >= 0.95) return 'var(--color-success)';
   if (rate >= 0.8) return 'var(--color-warning)';
@@ -47,14 +53,20 @@ const APDEX_COLOR: Record<string, string> = {
   unknown: 'var(--text-tertiary)',
 };
 
-function sparkOption(series: Array<{ name: string; data: number[]; color: string }>) {
+function sparkOption(series: Array<{ name: string; data: number[]; color: string }>, dark: boolean) {
   const len = series[0]?.data.length ?? 0;
   const x = Array.from({ length: len }, (_, i) => i);
   return {
     grid: { left: 28, right: 4, top: 4, bottom: 14 },
     xAxis: { type: 'category', data: x, show: false },
-    yAxis: { type: 'value', axisLabel: { fontSize: 8, color: 'var(--text-tertiary)' }, splitLine: { lineStyle: { color: 'var(--glass-border)' } } },
-    tooltip: { trigger: 'axis', textStyle: { fontSize: 10 } },
+    yAxis: { type: 'value', axisLabel: { fontSize: 8, color: dark ? '#888' : '#aaa' }, splitLine: { lineStyle: { color: dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' } } },
+    tooltip: {
+      trigger: 'axis',
+      textStyle: { fontSize: 10, color: dark ? '#e0e0e0' : '#333' },
+      backgroundColor: dark ? '#2a2a2a' : '#fff',
+      borderColor: dark ? '#444' : '#ddd',
+      valueFormatter: (v: number) => v?.toFixed(2) ?? '—',
+    },
     series: series.map((s) => ({
       name: s.name,
       type: 'line',
@@ -126,7 +138,6 @@ export function MonitorDock() {
     return saved >= MIN_H ? saved : DEFAULT_H;
   });
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
-  const [tableScrollY, setTableScrollY] = useState(200);
 
   // auto toggle: edit→closed; running→open
   const lastModeRef = useRef(mode);
@@ -136,21 +147,6 @@ export function MonitorDock() {
     if (mode === 'edit') setDockOpen(false);
     lastModeRef.current = mode;
   }, [mode, setDockOpen]);
-
-  // compute table scroll height when dock height changes
-  const bodyRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!dockOpen || !bodyRef.current) return;
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const h = entry.contentRect.height;
-        // top section 180px, toolbar ~28px, gaps ~14px
-        setTableScrollY(Math.max(80, h - 222));
-      }
-    });
-    observer.observe(bodyRef.current);
-    return () => observer.disconnect();
-  }, [dockOpen]);
 
   const onDragStart = useCallback(
     (e: React.MouseEvent) => {
@@ -191,9 +187,9 @@ export function MonitorDock() {
   return (
     <div className="monitor-dock" style={{ height }}>
       <div className="monitor-dock__handle" onMouseDown={onDragStart} title="拖动调整高度" />
-      <div className="monitor-dock__body" ref={bodyRef}>
+      <div className="monitor-dock__body">
         <TopSection />
-        <ActionsSection tableScrollY={tableScrollY} />
+        <ActionsSection />
       </div>
       <div style={{ position: 'absolute', top: 6, right: 12 }}>
         <Button type="text" size="small" icon={<CaretDownOutlined />} onClick={() => setDockOpen(false)} title="折叠监控" />
@@ -207,25 +203,28 @@ export function MonitorDock() {
    ────────────────────────────────────────────────── */
 
 function TopSection() {
-  const { latestStress, latestSystem, systemHistory, stressHistory } = useRuntimeStore(
+  const { latestStress, latestSystem, systemHistory, stressHistory, agents } = useRuntimeStore(
     useShallow((s) => ({
       latestStress: s.latestStress,
       latestSystem: s.latestSystem,
       systemHistory: s.systemHistory,
       stressHistory: s.stressHistory,
+      agents: s.agents,
     })),
   );
+  const theme = useEditorStore((s) => s.theme);
+  const dark = theme === 'dark';
 
   // 迷你趋势图
   const cpuOption = useMemo(() => {
     if (systemHistory.length < 2) return null;
-    return sparkOption([{ name: 'CPU%', data: systemHistory.map((s) => s.avgCpuPercent), color: '#fa8c16' }]);
+    return sparkOption([{ name: 'CPU%', data: systemHistory.map((s) => s.avgCpuPercent), color: '#fa8c16' }], dark);
   }, [systemHistory]);
 
   const qpsOption = useMemo(() => {
     if (stressHistory.length < 2) return null;
     const totalQps = stressHistory.map((s) => s.actions.reduce((sum, a) => sum + a.avgQps, 0));
-    return sparkOption([{ name: 'QPS', data: totalQps, color: '#1677ff' }]);
+    return sparkOption([{ name: 'QPS', data: totalQps, color: '#1677ff' }], dark);
   }, [stressHistory]);
 
   if (!latestStress) {
@@ -272,28 +271,34 @@ function TopSection() {
 
   return (
     <div className="monitor-dock__top">
-      {/* 指标区 (全新设计) */}
+      {/* 指标区 */}
       <div className="md-metrics-panel">
-        {/* 核心指标 (Hero) */}
+        {/* 核心指标 Hero：机器人 + 连接 */}
         <div className="md-hero-row">
           <div className="md-hero-box">
-            <div className="md-hero-title">Apdex 指数</div>
-            <div className="md-hero-value" style={{ color: APDEX_COLOR[apdexLevel] }}>{clusterApdex.toFixed(3)}</div>
+            <div className="md-hero-title">机器人</div>
+            <div className="md-hero-value" style={{ color: 'var(--color-success)' }}>{r.running}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-secondary)' }}> / {r.started}</span></div>
           </div>
           <div className="md-hero-divider" />
           <div className="md-hero-box">
-            <div className="md-hero-title">全局成功率</div>
-            <div className="md-hero-value" style={{ color: successColor(clusterSuccess) }}>{(clusterSuccess * 100).toFixed(1)}%</div>
+            <div className="md-hero-title">活跃连接</div>
+            <div className="md-hero-value" style={{ color: 'var(--color-blue)' }}>{activeConns}</div>
+          </div>
+          <div className="md-hero-divider" />
+          <div className="md-hero-box">
+            <div className="md-hero-title">QPS</div>
+            <div className="md-hero-value" style={{ color: 'var(--color-purple)' }}>
+              {actions.reduce((sum, a) => sum + a.avgQps, 0).toFixed(1)}
+            </div>
           </div>
         </div>
 
-        {/* 负载进度条 (Load) */}
+        {/* 负载进度条 */}
         <div className="md-load-row">
           <div className="md-load-header">
-            <span className="md-load-title">机器人并发负载</span>
+            <span className="md-load-title">负载 {r.running}/{r.started}</span>
             <span className="md-load-stats">
-              <span className="md-load-running">{r.running}</span>
-              <span className="md-load-started">/ {r.started}</span>
+              <span className="md-load-running">{robotPercent}%</span>
             </span>
           </div>
           <div className="md-load-progress">
@@ -307,31 +312,37 @@ function TopSection() {
           )}
         </div>
 
-        {/* 数据网格 (Grid) */}
+        {/* 数据网格 */}
         <div className="md-grid-row">
           <div className="md-grid-item">
-            <span className="md-grid-label">活跃连接</span>
-            <span className="md-grid-value">{activeConns}</span>
+            <span className="md-grid-label">↑ 发送</span>
+            <span className="md-grid-value">{send.value.toFixed(send.precision)} {send.suffix}</span>
           </div>
           <div className="md-grid-item">
-            <span className="md-grid-label">集群 CPU</span>
-            <span className="md-grid-value">{sys?.avgCpuPercent.toFixed(0)}%</span>
+            <span className="md-grid-label">↓ 接收</span>
+            <span className="md-grid-value">{recv.value.toFixed(recv.precision)} {recv.suffix}</span>
           </div>
           <div className="md-grid-item">
-            <span className="md-grid-label">运行时长</span>
-            <span className="md-grid-value">{(latestStress.uptimeSeconds / 60).toFixed(1)}m</span>
+            <span className="md-grid-label">CPU</span>
+            <span className="md-grid-value" style={{ color: gaugeColor(sys?.avgCpuPercent ?? 0) }}>
+              {sys?.avgCpuPercent.toFixed(0)}%
+            </span>
           </div>
           <div className="md-grid-item">
-            <span className="md-grid-label">执行动作</span>
+            <span className="md-grid-label">节点</span>
+            <span className="md-grid-value">
+              {(agents ?? []).filter((a) => a.status !== 'offline').length}/{(agents ?? []).length}
+            </span>
+          </div>
+          <div className="md-grid-item">
+            <span className="md-grid-label">成功率</span>
+            <span className="md-grid-value" style={{ color: successColor(clusterSuccess) }}>
+              {(clusterSuccess * 100).toFixed(1)}%
+            </span>
+          </div>
+          <div className="md-grid-item">
+            <span className="md-grid-label">动作</span>
             <span className="md-grid-value">{latestStress.totalActions.toLocaleString()}</span>
-          </div>
-          <div className="md-grid-item">
-            <span className="md-grid-label"><ArrowUpOutlined /> 带宽</span>
-            <span className="md-grid-value">{send.value.toFixed(1)}{send.suffix}</span>
-          </div>
-          <div className="md-grid-item">
-            <span className="md-grid-label"><ArrowDownOutlined /> 带宽</span>
-            <span className="md-grid-value">{recv.value.toFixed(1)}{recv.suffix}</span>
           </div>
         </div>
       </div>
@@ -363,10 +374,31 @@ function TopSection() {
    动作表（含搜索 + 过滤 + 可展开错误）
    ────────────────────────────────────────────────── */
 
-function ActionsSection({ tableScrollY }: { tableScrollY: number }) {
+function ActionsSection() {
   const latestStress = useRuntimeStore((s) => s.latestStress);
   const [search, setSearch] = useState('');
   const [actionsOnly, setActionsOnly] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [scrollY, setScrollY] = useState(200);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const measure = () => {
+      const containerH = el.clientHeight;
+      // 找到 Ant Table 的 thead，量实际高度
+      const thead = el.querySelector('.ant-table-thead');
+      const headerH = thead?.getBoundingClientRect().height ?? 37;
+      setScrollY(Math.max(60, containerH - headerH - 4));
+    };
+    // 首次 + 每次 resize 重算
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    // MutationObserver 监听 table DOM 变化（表头首次渲染）
+    const mo = new MutationObserver(measure);
+    mo.observe(el, { childList: true, subtree: true });
+    return () => { ro.disconnect(); mo.disconnect(); };
+  }, []);
 
   const dataSource = useMemo(() => {
     if (!latestStress) return [];
@@ -400,14 +432,14 @@ function ActionsSection({ tableScrollY }: { tableScrollY: number }) {
           {dataSource.length} 条
         </span>
       </div>
-      <div style={{ flex: 1, minHeight: 0 }}>
+      <div ref={containerRef} style={{ flex: 1, minHeight: 0 }}>
         <Table<ActionMetric>
           rowKey="name"
           size="small"
           dataSource={dataSource}
           columns={ACTION_COLUMNS}
           pagination={false}
-          scroll={{ x: 'max-content', y: tableScrollY }}
+          scroll={{ x: 'max-content', y: scrollY }}
           expandable={{
             rowExpandable: (r) => !!r.errors && r.errors.length > 0,
             expandedRowRender: (r) => (
