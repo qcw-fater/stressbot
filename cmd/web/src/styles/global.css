@@ -23,6 +23,23 @@ body,
   flex-direction: column;
 }
 
+/* Monaco find-widget 按钮修复：全局 border-box 导致按钮错位，恢复为 content-box */
+.monaco-editor .find-widget .button {
+  box-sizing: content-box !important;
+}
+
+/*
+ * Monaco hover 容器全局隐藏，防止 find-widget 按钮 tooltip 闪烁死循环。
+ * 根因：.workbench-hover-container 覆盖按钮 → mouseout → 隐藏 → mouseover → 显示 → 死循环。
+ * pointer-events: none 无效（Monaco 会重建容器），只有 display: none 能彻底断开触发链。
+ * 替代方案：自绘中文 tooltip（见 useMonacoFindTooltip hook）。
+ */
+.monaco-editor .workbench-hover-container,
+.monaco-editor .monaco-hover,
+.workbench-hover-container {
+  display: none !important;
+}
+
 /* React Flow 容器自适应 */
 .react-flow {
   background: var(--bg-canvas);

@@ -31,6 +31,7 @@ import {
   useRuntimeStore,
   usePolling,
 } from '@/services';
+import { useMonacoFindTooltip } from '@/services/monacoTooltip';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { FlowEditor } from '@/components/FlowEditor';
 import { useFlowStore } from '@/components/FlowEditor/store/flowStore';
@@ -61,6 +62,10 @@ function HomeShellInner() {
     setMessageApi({ message: antApp.message, modal: antApp.modal });
     return () => setMessageApi(null);
   }, [antApp.message, antApp.modal]);
+
+  // 全局 Monaco find-widget 中文 tooltip（替代被 display:none 隐藏的原生 hover）
+  const themeMode = useEditorStore((s) => s.theme);
+  useMonacoFindTooltip(themeMode);
 
   const { mode, activeTask, ownedTaskId, latestStress, onTaskFinished, setActiveTask, setAgents, pushStress, pushSystem, setConnectionLost } =
     useRuntimeStore(

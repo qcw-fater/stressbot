@@ -658,6 +658,8 @@ function FlowCanvasInner() {
             }
             return;
           }
+          // break/continue 节点无可编辑字段，双击不打开编辑面板
+          if (n.type === 'break' || n.type === 'continue') return;
           setActivePanel({ kind: 'nodeEdit', nodeId: n.id });
         }}
         onPaneClick={() => {

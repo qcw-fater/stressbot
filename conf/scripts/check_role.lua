@@ -6,7 +6,9 @@ local robot = require("robot")
 function execute(r)
     local roles = robot.get("roles")
     if roles ~= nil and type(roles) == "table" and #roles > 0 then
+        robot.set("isNewRole",false)
         return true
     end
+    robot.set("isNewRole",true)
     return false
 end

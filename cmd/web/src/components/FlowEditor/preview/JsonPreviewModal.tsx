@@ -106,6 +106,7 @@ export function JsonPreviewModal() {
               minimap: { enabled: false },
               fontSize: 12,
               scrollBeyondLastLine: false,
+              fixedOverflowWidgets: true,
             }}
           />
         </div>

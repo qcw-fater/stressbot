@@ -117,13 +117,6 @@ export function NodeEditorDrawer() {
         return <WaitEditor nodeId={nodeId} />;
       case 'action':
         return <ActionEditor nodeId={nodeId} />;
-      case 'break':
-      case 'continue':
-        return (
-          <div style={{ color: 'var(--text-secondary)' }}>
-            该节点类型无可编辑字段。仅作为控制流终止信号。
-          </div>
-        );
       default:
         return null;
     }
@@ -187,18 +180,6 @@ export function NodeEditorDrawer() {
             description="删除节点将同步移除所有指向它的引用（next / body / trueNext 等）。"
             onConfirm={() => {
               removeNode(nodeId!);
-              const flow = useFlowStore.getState();
-              for (const [id, n] of Object.entries(flow.nodes)) {
-                const partial: Partial<typeof n> = {};
-                if (n.next?.includes(nodeId!)) partial.next = n.next.filter((x) => x !== nodeId);
-                if (n.body === nodeId) partial.body = '';
-                if (n.trueNext === nodeId) partial.trueNext = '';
-                if (n.falseNext === nodeId) partial.falseNext = '';
-                if (n.options?.some((o) => o.node === nodeId)) {
-                  partial.options = n.options.filter((o) => o.node !== nodeId);
-                }
-                if (Object.keys(partial).length > 0) flow.updateNode(id, partial);
-              }
               setActivePanel(null);
               message.success(`已删除节点 ${nodeId}`);
             }}

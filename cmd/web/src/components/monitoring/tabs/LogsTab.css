@@ -1,11 +1,1 @@
-/* 修复 find-widget 中按钮错位的问题：将按钮恢复为 content-box，抵消全局 border-box 影响 */
-.logs-tab-editor .monaco-editor .find-widget .button {
-  box-sizing: content-box !important;
-}
-
-/* 完全隐藏 LogsTab 内 Monaco 的自定义 tooltip 解决闪烁问题，React 代码中注入原生的 title 属性 */
-.logs-tab-editor .monaco-editor .workbench-hover-container,
-.logs-tab-editor .monaco-editor .monaco-hover,
-.logs-tab-editor .workbench-hover-container {
-  display: none !important;
-}
+/* LogsTab 专属样式 — Monaco find-widget / hover 修复已提升到 global.css */

@@ -274,6 +274,20 @@ export const useFlowStore = create<FlowState>((set, get) => ({
           delete actions[removed.action];
         }
       }
+      // 清理其他节点中对被删节点的引用（next/body/trueNext/falseNext/options）
+      for (const [nid, n] of Object.entries(nodes)) {
+        const partial: Partial<FlowNode> = {};
+        if (n.next?.includes(id)) partial.next = n.next.filter((x) => x !== id);
+        if (n.body === id) partial.body = '';
+        if (n.trueNext === id) partial.trueNext = '';
+        if (n.falseNext === id) partial.falseNext = '';
+        if (n.options?.some((o) => o.node === id)) {
+          partial.options = n.options.filter((o) => o.node !== id);
+        }
+        if (Object.keys(partial).length > 0) {
+          nodes[nid] = { ...n, ...partial };
+        }
+      }
       return { nodes, actions };
     });
     get().syncDerived();
