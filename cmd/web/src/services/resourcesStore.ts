@@ -449,6 +449,33 @@ function byteLength(s: string): number {
   return new Blob([s]).size;
 }
 
+// === 基线回写 ===
+
+/**
+ * 将 IDB 中所有资源推送到后端磁盘基线，使下次 sync 不会误报冲突。
+ * 在 conflict resolution 完成后、或 editor mount 发现已有资源时调用。
+ */
+export async function pushResourcesToBaseline(): Promise<void> {
+  try {
+    const [protos, scripts, adapter] = await Promise.all([listProto(), listScript(), getAdapterScript()]);
+    const fd = new FormData();
+
+    for (const p of protos) {
+      fd.append(`proto/${p.name}`, new Blob([p.content]), p.name);
+    }
+    for (const s of scripts) {
+      fd.append(`scripts/${s.name}`, new Blob([s.content]), s.name);
+    }
+    if (adapter) {
+      fd.append('adapter/codec.lua', new Blob([adapter.content]), 'codec.lua');
+    }
+
+    await fetch('/api/resources/baseline', { method: 'POST', body: fd });
+  } catch {
+    // 静默：基线不可用时不阻塞编辑器
+  }
+}
+
 // === Legacy 迁移：v0 同 DB 双 store → v1 双 DB 单 store ===
 
 /**

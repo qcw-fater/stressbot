@@ -7,10 +7,12 @@
 
 import { Button, Modal, Radio, Space, Tag, Typography } from 'antd';
 import { DiffEditor } from '@monaco-editor/react';
+import type { editor } from 'monaco-editor';
 import type { BaselineSyncResult, ConflictDecision, ResourceType, SyncDiff } from '@/services/resourcesStore';
-import { applyConflictResolution } from '@/services/resourcesStore';
-import { useState } from 'react';
+import { applyConflictResolution, pushResourcesToBaseline } from '@/services/resourcesStore';
+import { useRef, useState } from 'react';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
+import { saveSkippedConflict, hashContent } from '@/components/FlowEditor/skippedConflicts';
 
 export interface BaselineSyncModalProps {
   open: boolean;
@@ -30,6 +32,7 @@ export function BaselineSyncModal({ open, result, onClose, onResolved }: Baselin
   const themeMode = useEditorStore((s) => s.theme);
   const [decisions, setDecisions] = useState<Record<string, boolean>>({});
   const [applying, setApplying] = useState(false);
+  const editorsRef = useRef<editor.IDiffEditor[]>([]);
 
   const conflicts = result.conflicts;
   const removed = result.removed;
@@ -56,6 +59,17 @@ export function BaselineSyncModal({ open, result, onClose, onResolved }: Baselin
     setDecisions(next);
   }
 
+  // 先释放 DiffEditor 内部 model 引用，避免 Monaco dispose 竞态
+  function releaseEditors() {
+    for (const e of editorsRef.current) {
+      try {
+        e.getModifiedEditor()?.setModel(null);
+        e.getOriginalEditor()?.setModel(null);
+      } catch { /* ignore */ }
+    }
+    editorsRef.current = [];
+  }
+
   async function handleApply() {
     setApplying(true);
     try {
@@ -64,19 +78,36 @@ export function BaselineSyncModal({ open, result, onClose, onResolved }: Baselin
         name: item.name,
         keepLocal: getDecision(item),
       }));
+      // 保留本地的项目记录跳过，下次同步不再重复提示
+      for (const item of allItems) {
+        if (getDecision(item)) {
+          const isRemoved = removed.includes(item);
+          const key = isRemoved
+            ? `${item.type}:${item.name}:__removed__`
+            : `${item.type}:${item.name}:${hashContent(item.baselineContent)}`;
+          saveSkippedConflict(key);
+        }
+      }
       await applyConflictResolution(decArray);
-      onResolved?.();
+      await pushResourcesToBaseline();
+      releaseEditors();
       onClose();
+      onResolved?.();
     } finally {
       setApplying(false);
     }
+  }
+
+  function handleCancel() {
+    releaseEditors();
+    onClose();
   }
 
   return (
     <Modal
       title="远端资源变更"
       open={open}
-      onCancel={onClose}
+      onCancel={handleCancel}
       width={860}
       footer={
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -89,14 +120,14 @@ export function BaselineSyncModal({ open, result, onClose, onResolved }: Baselin
             </Button>
           </Space>
           <Space>
-            <Button onClick={onClose}>取消</Button>
+            <Button onClick={handleCancel}>取消</Button>
             <Button type="primary" loading={applying} onClick={handleApply}>
               应用选择
             </Button>
           </Space>
         </div>
       }
-      destroyOnHidden
+      destroyOnHidden={false}
     >
       <Typography.Paragraph type="secondary" style={{ marginBottom: 16 }}>
         远端资源有变更，请逐个确认保留本地版本还是采用远端版本。
@@ -135,6 +166,7 @@ export function BaselineSyncModal({ open, result, onClose, onResolved }: Baselin
                 modified={item.baselineContent}
                 language={item.type === 'proto' ? 'protobuf' : 'lua'}
                 theme={themeMode === 'dark' ? 'vs-dark' : 'light'}
+                onMount={(editor) => { editorsRef.current.push(editor); }}
                 options={{
                   readOnly: true,
                   renderSideBySide: true,
@@ -143,6 +175,7 @@ export function BaselineSyncModal({ open, result, onClose, onResolved }: Baselin
                   folding: false,
                   lineNumbers: 'on',
                   renderOverviewRuler: true,
+                  fixedOverflowWidgets: true,
                 }}
               />
             )}

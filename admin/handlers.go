@@ -35,6 +35,9 @@ func (s *AdminServer) registerRoutes() *http.ServeMux {
 	mux.HandleFunc("POST /api/agent/{id}/task/{tid}/done", s.handleAgentTaskDone)
 	mux.HandleFunc("GET /api/agent/{id}/pending-task", s.handleAgentPendingTask)
 
+	// ── 前端-资源基线 ──
+	mux.HandleFunc("POST /api/resources/baseline", s.handleUpdateBaseline)
+
 	// ── 前端-任务 ──
 	mux.HandleFunc("POST /api/tasks", s.handleCreateTask)
 	mux.HandleFunc("GET /api/tasks", s.handleListTasks)
@@ -375,6 +378,9 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 			cfg.Deadline = &t
 		}
 	}
+
+	// 将上传的资源写入磁盘基线，使前端下次同步时 IDB 与基线一致
+	s.writeBaselineFiles(&cfg, flowData)
 
 	task := &Task{
 		ID:        generateID(),
@@ -1169,6 +1175,118 @@ func serveLogFile(w http.ResponseWriter, r *http.Request, dir, name string) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, name))
 	http.ServeContent(w, r, name, stat.ModTime(), f)
+}
+
+// handleUpdateBaseline 前端主动推送 IDB 资源到磁盘基线。
+// 接受 multipart/form-data（proto/scripts/adapter），写入 conf/ 目录。
+func (s *AdminServer) handleUpdateBaseline(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(16 << 20); err != nil {
+		writeError(w, ErrInvalidArgument.WithMessage("multipart parse error"))
+		return
+	}
+
+	// proto 文件
+	for key, files := range r.MultipartForm.File {
+		if !strings.HasPrefix(key, "proto/") && key != "proto" {
+			continue
+		}
+		for _, fh := range files {
+			f, err := fh.Open()
+			if err != nil {
+				continue
+			}
+			data, _ := io.ReadAll(f)
+			f.Close()
+			var fileName string
+			if strings.HasPrefix(key, "proto/") && key != "proto/" {
+				fileName = strings.TrimPrefix(key, "proto/")
+			} else {
+				fileName = fh.Filename
+			}
+			if err := safeWriteFile("conf/proto", fileName, data); err != nil {
+				stresslog.Warn("基线更新 proto 失败",
+					zap.String("name", fileName),
+					zap.Error(err))
+			}
+		}
+	}
+
+	// lua 脚本
+	for key, files := range r.MultipartForm.File {
+		if !strings.HasPrefix(key, "scripts/") && key != "scripts" {
+			continue
+		}
+		for _, fh := range files {
+			f, err := fh.Open()
+			if err != nil {
+				continue
+			}
+			data, _ := io.ReadAll(f)
+			f.Close()
+			var fileName string
+			if strings.HasPrefix(key, "scripts/") && key != "scripts/" {
+				fileName = strings.TrimPrefix(key, "scripts/")
+			} else {
+				fileName = fh.Filename
+			}
+			if err := safeWriteFile("conf/scripts", fileName, data); err != nil {
+				stresslog.Warn("基线更新脚本失败",
+					zap.String("name", fileName),
+					zap.Error(err))
+			}
+		}
+	}
+
+	// adapter
+	if adapterFile, _, err := r.FormFile("adapter/codec.lua"); err == nil {
+		adapterData, _ := io.ReadAll(adapterFile)
+		adapterFile.Close()
+		if err := safeWriteFile("conf/adapter", "codec.lua", adapterData); err != nil {
+			stresslog.Warn("基线更新适配器失败", zap.Error(err))
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// writeBaselineFiles 将上传的 flow/proto/scripts/adapter 写入磁盘基线目录，
+// 使前端下次同步时 IDB 与基线一致，不再误报冲突。
+func (s *AdminServer) writeBaselineFiles(cfg *TaskConfig, flowData []byte) {
+	if err := safeWriteFile("conf/flow", "flow.json", flowData); err != nil {
+		stresslog.Warn("写入基线 flow.json 失败", zap.Error(err))
+	}
+	for name, data := range cfg.ProtoFiles {
+		if err := safeWriteFile("conf/proto", name, data); err != nil {
+			stresslog.Warn("写入基线 proto 失败",
+				zap.String("name", name),
+				zap.Error(err))
+		}
+	}
+	for name, data := range cfg.LuaScripts {
+		if err := safeWriteFile("conf/scripts", name, data); err != nil {
+			stresslog.Warn("写入基线脚本失败",
+				zap.String("name", name),
+				zap.Error(err))
+		}
+	}
+	if cfg.AdapterScript != nil {
+		if err := safeWriteFile("conf/adapter", "codec.lua", cfg.AdapterScript); err != nil {
+			stresslog.Warn("写入基线适配器失败",
+				zap.Error(err))
+		}
+	}
+}
+
+// safeWriteFile 将 data 写入 dir/name，自动创建目录，防止路径穿越。
+func safeWriteFile(dir, name string, data []byte) error {
+	name = filepath.Base(name)
+	if name == "." || name == ".." {
+		return fmt.Errorf("invalid file name: %s", name)
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+	return os.WriteFile(filepath.Join(dir, name), data, 0644)
 }
 
 // scaleRampUp 按比例缩放各 stage 的 count（分布式模式下每个 Agent 分到的 bot 数不同）。

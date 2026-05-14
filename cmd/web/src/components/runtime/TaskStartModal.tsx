@@ -46,10 +46,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useShallow } from 'zustand/react/shallow';
 import { showApiError, startTask, useRuntimeStore } from '@/services';
-import { listProto, listScript, syncResourcesFromBaseline, type ResourceFile } from '@/services/resourcesStore';
+import { listProto, listScript, syncResourcesFromBaseline, pushResourcesToBaseline, type ResourceFile } from '@/services/resourcesStore';
 import { syncFlowScriptsToIdb, collectFlowScriptNames } from '@/services/scriptSync';
 import { useFlowStore } from '@/components/FlowEditor/store/flowStore';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
+import { hashContent, loadSkippedConflicts } from '@/components/FlowEditor/skippedConflicts';
 
 export interface TaskStartModalProps {
   open: boolean;
@@ -151,7 +152,22 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
         setRefScriptCount(refNames.length);
         setMissingScripts(scriptSync.missing);
         if (baselineSync.conflicts.length > 0 || baselineSync.removed.length > 0) {
-          useEditorStore.getState().setPendingSyncResult(baselineSync);
+          const skipped = loadSkippedConflicts();
+          const newConflicts = baselineSync.conflicts.filter(
+            (c) => !skipped.has(`${c.type}:${c.name}:${hashContent(c.baselineContent)}`),
+          );
+          const newRemoved = baselineSync.removed.filter(
+            (r) => !skipped.has(`${r.type}:${r.name}:__removed__`),
+          );
+          if (newConflicts.length > 0 || newRemoved.length > 0) {
+            useEditorStore.getState().setPendingSyncResult({
+              ...baselineSync,
+              conflicts: newConflicts,
+              removed: newRemoved,
+            });
+          } else {
+            void pushResourcesToBaseline();
+          }
         }
       } finally {
         if (!cancelled) setSyncing(false);
