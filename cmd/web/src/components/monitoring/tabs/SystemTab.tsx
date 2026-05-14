@@ -53,7 +53,6 @@ export function SystemTab() {
               type="circle"
               percent={latestSystem.avgCpuPercent}
               size={140}
-              strokeWidth={10}
               strokeColor={gaugeColor(latestSystem.avgCpuPercent)}
               format={(p) => (
                 <div className="system-tab__gauge-center">
@@ -75,7 +74,6 @@ export function SystemTab() {
               type="circle"
               percent={memPercent}
               size={140}
-              strokeWidth={10}
               strokeColor={gaugeColor(memPercent)}
               format={() => (
                 <div className="system-tab__gauge-center">

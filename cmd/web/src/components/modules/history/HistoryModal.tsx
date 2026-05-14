@@ -227,7 +227,7 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
       open={open}
       onCancel={onClose}
       maskClosable={false}
-      destroyOnClose
+      destroyOnHidden
       footer={null}
       styles={{ body: { height: '85vh', overflowY: 'auto' } }}
     >

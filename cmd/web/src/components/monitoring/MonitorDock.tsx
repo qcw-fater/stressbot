@@ -302,7 +302,7 @@ function TopSection() {
             </span>
           </div>
           <div className="md-load-progress">
-            <Progress percent={robotPercent} strokeColor="var(--color-success)" showInfo={false} strokeWidth={4} />
+            <Progress percent={robotPercent} strokeColor="var(--color-success)" showInfo={false} size={4} />
           </div>
           {(r.stopped > 0 || r.errored > 0) && (
             <div className="md-load-chips">

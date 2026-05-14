@@ -104,7 +104,7 @@ export function DashboardTab() {
               <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-secondary)' }}> / {r.started}</span>
             </div>
             <div className="dashboard-tab__progress-wrap">
-              <Progress percent={robotPercent} strokeColor="var(--color-success)" showInfo={false} strokeWidth={4} />
+              <Progress percent={robotPercent} strokeColor="var(--color-success)" showInfo={false} size={4} />
             </div>
             <div className="dashboard-tab__chips">
               {r.stopped > 0 && <span className="dashboard-tab__chip dashboard-tab__chip--stopped">stop {r.stopped}</span>}
@@ -152,7 +152,6 @@ export function DashboardTab() {
                 type="circle"
                 percent={sys?.avgCpuPercent ?? 0}
                 size={52}
-                strokeWidth={5}
                 strokeColor={gaugeColor(sys?.avgCpuPercent ?? 0)}
                 format={(p) => (
                   <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums' }}>

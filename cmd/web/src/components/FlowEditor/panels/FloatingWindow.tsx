@@ -55,17 +55,19 @@ export function FloatingWindow({
   const updatePosition = useFloatingWindowStore((s) => s.updatePosition);
   const updateSize = useFloatingWindowStore((s) => s.updateSize);
 
-  // 首次渲染时注册窗口
-  if (open && !windowState) {
-    openWindow(windowId, defaultSize, defaultPosition);
-  }
+  // 首次渲染时注册窗口（必须在 effect 中，不能在渲染期调用 set）
+  useEffect(() => {
+    if (open && !windowState) {
+      openWindow(windowId, defaultSize, defaultPosition);
+    }
+  }, [open, windowState, windowId, openWindow, defaultSize, defaultPosition]);
 
   // 当 open 变为 true 时，确保窗口获得焦点（置于顶层）
   useEffect(() => {
-    if (open) {
+    if (open && windowState) {
       focusWindow(windowId);
     }
-  }, [open, windowId, focusWindow]);
+  }, [open, windowId, focusWindow, windowState]);
 
   // 关闭时不卸载子组件，用 CSS 隐藏 + 禁用交互
   // 保证 Monaco 等有状态组件不会丢失滚动/数据

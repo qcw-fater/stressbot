@@ -237,7 +237,7 @@ export async function attachToActive(taskId: string): Promise<void> {
   // 拉远端 flow.json
   let remoteFlow: FlowJson | null = null;
   try {
-    const res = await fetch(tasksApi.taskConfigUrl(taskId, 'flow.json'));
+    const res = await fetch(tasksApi.taskConfigUrl(taskId, 'flow/flow.json'));
     if (res.ok) {
       remoteFlow = (await res.json()) as FlowJson;
     }

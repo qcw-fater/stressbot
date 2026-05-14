@@ -134,7 +134,7 @@ func (h *HistoryStore) Archive(task *Task, finalStress *monitor.CollectorSnapsho
 		INSERT INTO task_history (id, name, state, total_bots, agent_count,
 			created_at, started_at, stopped_at, duration_sec, error_msg,
 			starred, tags, note, config_summary)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, '', ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, '', ?)
 		ON DUPLICATE KEY UPDATE
 			state=VALUES(state), stopped_at=VALUES(stopped_at),
 			duration_sec=VALUES(duration_sec), error_msg=VALUES(error_msg)
@@ -163,7 +163,7 @@ func (h *HistoryStore) Archive(task *Task, finalStress *monitor.CollectorSnapsho
 		snapJSON, _ := json.Marshal(report.FinalSnapshot)
 		_, err = tx.Exec(`
 			INSERT INTO task_report (task_id, agent_id, agent_name, result, error_msg, finished_at, final_snapshot)
-			VALUES (?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
 		`, task.ID, agentID, "", string(report.Result), report.ErrorMsg, report.FinishedAt, snapJSON)
 		if err != nil {
 			return fmt.Errorf("insert task_report: %w", err)

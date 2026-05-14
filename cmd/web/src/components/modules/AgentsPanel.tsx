@@ -301,7 +301,6 @@ function AgentMetricCard({
               type="circle"
               percent={cpu ?? 0}
               size={100}
-              strokeWidth={8}
               strokeColor={gaugeColor(cpu)}
               format={(p) => (
                 <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -316,7 +315,6 @@ function AgentMetricCard({
               type="circle"
               percent={mem ?? 0}
               size={100}
-              strokeWidth={8}
               strokeColor={gaugeColor(mem)}
               format={(p) => (
                 <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>

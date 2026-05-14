@@ -269,6 +269,7 @@ function AdapterTab() {
                     fontSize: 12,
                     minimap: { enabled: false },
                     scrollBeyondLastLine: false,
+                    fixedOverflowWidgets: true,
                   }}
                 />
               </div>
@@ -569,7 +570,7 @@ function ResourceTable({ kind }: ResourceTableProps) {
               theme={theme === 'dark' ? 'vs-dark' : 'light'}
               value={editContent}
               onChange={(val) => setEditContent(val ?? '')}
-              options={{ minimap: { enabled: false }, fontSize: 13, wordWrap: 'on' }}
+              options={{ minimap: { enabled: false }, fontSize: 13, wordWrap: 'on', fixedOverflowWidgets: true }}
             />
           )}
         </div>
