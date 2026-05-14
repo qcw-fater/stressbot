@@ -42,7 +42,7 @@ function cleanNode(n: FlowNode): FlowNode {
       break;
     case 'action':
       if (n.action) out.action = n.action;
-      if (n.breakOff) out.breakOff = true;
+      if (n.errorStrategy && n.errorStrategy !== 'ignore') out.errorStrategy = n.errorStrategy;
       if (n.listenCallbacks?.length) out.listenCallbacks = n.listenCallbacks.map(cleanListenRef);
       if (typeof n.delayMs === 'number' && n.delayMs !== 0) out.delayMs = n.delayMs;
       break;

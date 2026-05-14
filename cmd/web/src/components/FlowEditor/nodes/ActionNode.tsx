@@ -46,9 +46,9 @@ export function ActionNode({ id, data, selected }: NodeProps) {
               {pattern}
             </span>
           </Tooltip>
-          {node.breakOff && (
-            <Tooltip title="出错时中断上层循环">
-              <span className="breakoff-badge">breakOff</span>
+          {node.errorStrategy === 'abort' && (
+            <Tooltip title="出错时中断流程">
+              <span className="breakoff-badge">abort</span>
             </Tooltip>
           )}
           {listens > 0 && (

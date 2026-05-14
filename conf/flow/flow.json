@@ -3,235 +3,707 @@
   "nodes": {
     "main": {
       "type": "sequence",
-      "next": ["authLogin", "logicLogin", "gmCommands", "setLbs", "businessLoop"]
+      "next": [
+        "authLogin",
+        "logicLogin",
+        "checkNewRole",
+        "businessLoop"
+      ]
     },
-
     "authLogin": {
       "type": "sequence",
-      "next": ["RequestZoneList", "RequestOutsideNotice", "RequestNotice", "PostLogin", "hasRole", "SelectRole"]
+      "next": [
+        "RequestZoneList",
+        "RequestOutsideNotice",
+        "RequestNotice",
+        "PostLogin",
+        "hasRole",
+        "SelectRole"
+      ]
     },
-    "RequestZoneList": { "type": "action", "action": "RequestZoneList", "breakOff": true },
-    "RequestOutsideNotice": { "type": "action", "action": "RequestOutsideNotice" },
-    "RequestNotice": { "type": "action", "action": "RequestNotice" },
-    "PostLogin": { "type": "action", "action": "PostLogin", "breakOff": true },
+    "RequestZoneList": {
+      "type": "action",
+      "action": "RequestZoneList",
+      "errorStrategy": "abort"
+    },
+    "RequestOutsideNotice": {
+      "type": "action",
+      "action": "RequestOutsideNotice"
+    },
+    "RequestNotice": {
+      "type": "action",
+      "action": "RequestNotice"
+    },
+    "PostLogin": {
+      "type": "action",
+      "action": "PostLogin",
+      "errorStrategy": "abort"
+    },
     "hasRole": {
       "type": "boolean",
       "condition": "lua:check_role.lua",
       "falseNext": "createNewRole"
     },
-    "createNewRole": { "type": "action", "action": "NewRole", "breakOff": true },
-    "SelectRole": { "type": "action", "action": "SelectRole", "breakOff": true },
-
+    "createNewRole": {
+      "type": "action",
+      "action": "NewRole",
+      "errorStrategy": "abort"
+    },
+    "SelectRole": {
+      "type": "action",
+      "action": "SelectRole",
+      "errorStrategy": "abort"
+    },
     "logicLogin": {
       "type": "sequence",
-      "next": ["ConnectLogicTCP", "PlayerLogin", "RequestPlayerData", "ReportBattleDelay", "GetActivityList"]
+      "next": [
+        "ConnectLogicTCP",
+        "PlayerLogin",
+        "RequestPlayerData",
+        "ReportBattleDelay"
+      ]
     },
     "ConnectLogicTCP": {
       "type": "action",
       "action": "ConnectLogicTCP",
-      "breakOff": true,
+      "errorStrategy": "abort",
       "listenCallbacks": [
-        {"route": {"cmd": 3, "act": 1}, "server": "tcp:logic", "callback": "matchPoll"},
-        {"route": {"cmd": 5, "act": 20}, "server": "tcp:logic", "callback": "teamStartMatch"},
-        {"route": {"cmd": 4, "act": 6}, "server": "tcp:logic", "callback": "loadingPoll"},
-        {"route": {"cmd": 4, "act": 72}, "server": "tcp:logic", "callback": "rewardPoll"},
-        {"route": {"cmd": 2, "act": 18}, "server": "tcp:logic", "callback": "stateUpdate"},
-        {"route": {"cmd": 6, "act": 1}, "server": "tcp:logic", "callback": "heroUpdate"},
-        {"route": {"cmd": 35, "act": 2}, "server": "tcp:logic", "callback": "shopDataUpdate"},
-        {"route": {"cmd": 5, "act": 3}, "server": "tcp:logic", "callback": "teamUpdateInfo"},
-        {"route": {"cmd": 5, "act": 6}, "server": "tcp:logic", "callback": "teamNotifyInvite"},
-        {"route": {"cmd": 5, "act": 10}, "server": "tcp:logic", "callback": "teamJoin"},
-        {"route": {"cmd": 21, "act": 15}, "server": "tcp:logic", "callback": "guildJoin"},
-        {"route": {"cmd": 21, "act": 16}, "server": "tcp:logic", "callback": "guildKickMember"},
-        {"route": {"cmd": 21, "act": 14}, "server": "tcp:logic", "callback": "guildMemberUpdate"},
-        {"route": {"cmd": 21, "act": 13}, "server": "tcp:logic", "callback": "guildUpdate"},
-        {"route": {"cmd": 3, "act": 5}, "server": "tcp:logic", "callback": "customRoomStart"},
-        {"route": {"cmd": 14, "act": 10}, "server": "tcp:logic", "callback": "roomUpdateData"},
-        {"route": {"cmd": 14, "act": 23}, "server": "tcp:logic", "callback": "roomUpdateStatus"},
-        {"route": {"cmd": 1, "act": 2}, "server": "tcp:logic", "callback": null}
+        {
+          "route": {
+            "cmd": 3,
+            "act": 1
+          },
+          "server": "tcp:logic",
+          "callback": "matchPoll"
+        },
+        {
+          "route": {
+            "cmd": 5,
+            "act": 20
+          },
+          "server": "tcp:logic",
+          "callback": "teamStartMatch"
+        },
+        {
+          "route": {
+            "cmd": 4,
+            "act": 6
+          },
+          "server": "tcp:logic",
+          "callback": "loadingPoll"
+        },
+        {
+          "route": {
+            "cmd": 4,
+            "act": 72
+          },
+          "server": "tcp:logic",
+          "callback": "rewardPoll"
+        },
+        {
+          "route": {
+            "cmd": 2,
+            "act": 18
+          },
+          "server": "tcp:logic",
+          "callback": "stateUpdate"
+        },
+        {
+          "route": {
+            "cmd": 6,
+            "act": 1
+          },
+          "server": "tcp:logic",
+          "callback": "heroUpdate"
+        },
+        {
+          "route": {
+            "cmd": 35,
+            "act": 2
+          },
+          "server": "tcp:logic",
+          "callback": "shopDataUpdate"
+        },
+        {
+          "route": {
+            "cmd": 5,
+            "act": 3
+          },
+          "server": "tcp:logic",
+          "callback": "teamUpdateInfo"
+        },
+        {
+          "route": {
+            "cmd": 5,
+            "act": 6
+          },
+          "server": "tcp:logic",
+          "callback": "teamNotifyInvite"
+        },
+        {
+          "route": {
+            "cmd": 5,
+            "act": 10
+          },
+          "server": "tcp:logic",
+          "callback": "teamJoin"
+        },
+        {
+          "route": {
+            "cmd": 21,
+            "act": 15
+          },
+          "server": "tcp:logic",
+          "callback": "guildJoin"
+        },
+        {
+          "route": {
+            "cmd": 21,
+            "act": 16
+          },
+          "server": "tcp:logic",
+          "callback": "guildKickMember"
+        },
+        {
+          "route": {
+            "cmd": 21,
+            "act": 14
+          },
+          "server": "tcp:logic",
+          "callback": "guildMemberUpdate"
+        },
+        {
+          "route": {
+            "cmd": 21,
+            "act": 13
+          },
+          "server": "tcp:logic",
+          "callback": "guildUpdate"
+        },
+        {
+          "route": {
+            "cmd": 3,
+            "act": 5
+          },
+          "server": "tcp:logic",
+          "callback": "customRoomStart"
+        },
+        {
+          "route": {
+            "cmd": 14,
+            "act": 10
+          },
+          "server": "tcp:logic",
+          "callback": "roomUpdateData"
+        },
+        {
+          "route": {
+            "cmd": 14,
+            "act": 23
+          },
+          "server": "tcp:logic",
+          "callback": "roomUpdateStatus"
+        },
+        {
+          "route": {
+            "cmd": 1,
+            "act": 2
+          },
+          "server": "tcp:logic",
+          "callback": null
+        }
       ]
     },
-    "PlayerLogin": { "type": "action", "action": "PlayerLogin", "breakOff": true },
-    "RequestPlayerData": { "type": "action", "action": "RequestPlayerData" },
-    "ReportBattleDelay": { "type": "action", "action": "ReportBattleDelay" },
-    "GetActivityList": { "type": "action", "action": "GetActivityList" },
-
+    "PlayerLogin": {
+      "type": "action",
+      "action": "PlayerLogin",
+      "errorStrategy": "abort"
+    },
+    "RequestPlayerData": {
+      "type": "action",
+      "action": "RequestPlayerData"
+    },
+    "ReportBattleDelay": {
+      "type": "action",
+      "action": "ReportBattleDelay"
+    },
+    "GetActivityList": {
+      "type": "action",
+      "action": "GetActivityList"
+    },
     "gmCommands": {
       "type": "sequence",
-      "next": ["GMAddHero", "GMAddItem", "GMAddHeroCup", "GMFinishAllNewUserGuide"]
+      "next": [
+        "GMAddHero",
+        "GMAddItem",
+        "GMAddHeroCup",
+        "GMFinishAllNewUserGuide"
+      ]
     },
-    "GMAddHero": { "type": "action", "action": "GMAddHero" },
-    "GMAddItem": { "type": "action", "action": "GMAddItem" },
-    "GMAddHeroCup": { "type": "action", "action": "GMAddHeroCup" },
-    "GMFinishAllNewUserGuide": { "type": "action", "action": "GMFinishAllNewUserGuide" },
-
-    "setLbs": {
-      "type": "sequence",
-      "next": ["LbsPositioning"]
+    "GMAddHero": {
+      "type": "action",
+      "action": "GMAddHero"
     },
-    "LbsPositioning": { "type": "action", "action": "LbsPositioning" },
-
+    "GMAddItem": {
+      "type": "action",
+      "action": "GMAddItem"
+    },
+    "GMAddHeroCup": {
+      "type": "action",
+      "action": "GMAddHeroCup"
+    },
+    "GMFinishAllNewUserGuide": {
+      "type": "action",
+      "action": "GMFinishAllNewUserGuide"
+    },
+    "LbsPositioning": {
+      "type": "action",
+      "action": "LbsPositioning"
+    },
     "businessLoop": {
       "type": "loop",
-      "loopCount": -1,
-      "body": "businessWeight"
+      "body": "businessWeight",
+      "loopCount": -1
     },
-
     "businessWeight": {
       "type": "weighted",
       "options": [
-        {"node": "normalModel", "weight": 40},
-        {"node": "lobbyOperation", "weight": 12},
-        {"node": "lottery", "weight": 10},
-        {"node": "heroCultivate", "weight": 10},
-        {"node": "shop", "weight": 8},
-        {"node": "battlePass", "weight": 8},
-        {"node": "friend", "weight": 6},
-        {"node": "mail", "weight": 5},
-        {"node": "giftCode", "weight": 1}
+        {
+          "node": "normalModel",
+          "weight": 40
+        },
+        {
+          "node": "lobbyOperation",
+          "weight": 12
+        },
+        {
+          "node": "lottery",
+          "weight": 10
+        },
+        {
+          "node": "heroCultivate",
+          "weight": 10
+        },
+        {
+          "node": "shop",
+          "weight": 8
+        },
+        {
+          "node": "battlePass",
+          "weight": 8
+        },
+        {
+          "node": "friend",
+          "weight": 6
+        },
+        {
+          "node": "mail",
+          "weight": 5
+        },
+        {
+          "node": "giftCode",
+          "weight": 1
+        }
       ]
     },
-
     "normalModel": {
       "type": "sequence",
-      "next": ["RequestGameModeList", "CreateNormalTeam", "SelectHero", "StartMatch", "MatchSucceed", "ListenStartLoading", "startBattle"]
+      "next": [
+        "RequestGameModeList",
+        "CreateNormalTeam",
+        "SelectHero",
+        "StartMatch",
+        "MatchSucceed",
+        "ListenStartLoading",
+        "startBattle"
+      ]
     },
-    "RequestGameModeList": { "type": "action", "action": "RequestGameModeList" },
-    "CreateNormalTeam": { "type": "action", "action": "CreateNormalTeam" },
-    "SelectHero": { "type": "action", "action": "SelectHero" },
-    "StartMatch": { "type": "action", "action": "StartMatch" },
-    "MatchSucceed": { "type": "action", "action": "MatchSucceed" },
-    "ListenStartLoading": { "type": "action", "action": "ListenStartLoading" },
-
+    "RequestGameModeList": {
+      "type": "action",
+      "action": "RequestGameModeList"
+    },
+    "CreateNormalTeam": {
+      "type": "action",
+      "action": "CreateNormalTeam"
+    },
+    "SelectHero": {
+      "type": "action",
+      "action": "SelectHero"
+    },
+    "StartMatch": {
+      "type": "action",
+      "action": "StartMatch"
+    },
+    "MatchSucceed": {
+      "type": "action",
+      "action": "MatchSucceed"
+    },
+    "ListenStartLoading": {
+      "type": "action",
+      "action": "ListenStartLoading"
+    },
     "startBattle": {
       "type": "sequence",
-      "next": ["ConnectBattleTCP", "ConnectBattleUDP", "RegisterBattle", "loadLoop", "BattleLoadOK", "ResetLoadState", "StartGame", "syncLoop", "BattleEnd", "BattleReward", "GameOver", "CleanupBattle"]
+      "next": [
+        "ConnectBattleTCP",
+        "ConnectBattleUDP",
+        "RegisterBattle",
+        "loadLoop",
+        "BattleLoadOK",
+        "ResetLoadState",
+        "StartGame",
+        "syncLoop",
+        "BattleEnd",
+        "BattleReward",
+        "GameOver",
+        "CleanupBattle"
+      ]
     },
     "ConnectBattleTCP": {
       "type": "action",
       "action": "ConnectBattleTCP",
       "listenCallbacks": [
-        {"route": {"cmd": 4, "act": 10}, "server": "tcp:battle", "callback": null}
+        {
+          "route": {
+            "cmd": 4,
+            "act": 10
+          },
+          "server": "tcp:battle",
+          "callback": null
+        }
       ]
     },
     "ConnectBattleUDP": {
       "type": "action",
       "action": "ConnectBattleUDP",
       "listenCallbacks": [
-        {"route": {"cmd": 4, "act": 11}, "server": "udp:battle", "callback": "frameData"}
+        {
+          "route": {
+            "cmd": 4,
+            "act": 11
+          },
+          "server": "udp:battle",
+          "callback": "frameData"
+        }
       ]
     },
-    "RegisterBattle": { "type": "action", "action": "RegisterBattle" },
+    "RegisterBattle": {
+      "type": "action",
+      "action": "RegisterBattle"
+    },
     "loadLoop": {
       "type": "loop",
+      "body": "LoadProgress",
       "loopCount": -1,
-      "breakCondition": "state:loadProgress>=100",
-      "body": "LoadProgress"
+      "breakCondition": "state:loadProgress>=100"
     },
-    "LoadProgress": { "type": "action", "action": "LoadProgress", "delayMs": -1 },
-    "BattleLoadOK": { "type": "action", "action": "BattleLoadOK" },
-    "ResetLoadState": { "type": "action", "action": "ResetLoadState" },
-    "StartGame": { "type": "action", "action": "StartGame" },
+    "LoadProgress": {
+      "type": "action",
+      "action": "LoadProgress",
+      "delayMs": -1
+    },
+    "BattleLoadOK": {
+      "type": "action",
+      "action": "BattleLoadOK"
+    },
+    "ResetLoadState": {
+      "type": "action",
+      "action": "ResetLoadState"
+    },
+    "StartGame": {
+      "type": "action",
+      "action": "StartGame"
+    },
     "syncLoop": {
       "type": "loop",
-      "loopCount": 30,
-      "body": "SyncFrameData"
+      "body": "SyncFrameData",
+      "loopCount": 30
     },
-    "SyncFrameData": { "type": "action", "action": "SyncFrameData", "delayMs": -1 },
-    "BattleEnd": { "type": "action", "action": "BattleEnd" },
-    "BattleReward": { "type": "action", "action": "BattleReward" },
-    "GameOver": { "type": "action", "action": "GameOver" },
+    "SyncFrameData": {
+      "type": "action",
+      "action": "SyncFrameData",
+      "delayMs": -1
+    },
+    "BattleEnd": {
+      "type": "action",
+      "action": "BattleEnd"
+    },
+    "BattleReward": {
+      "type": "action",
+      "action": "BattleReward"
+    },
+    "GameOver": {
+      "type": "action",
+      "action": "GameOver"
+    },
     "CleanupBattle": {
       "type": "action",
       "action": "ClearBattleState"
     },
-
     "lobbyOperation": {
       "type": "weighted",
       "options": [
-        {"node": "ChangeHero", "weight": 5},
-        {"node": "ChangeShowHero", "weight": 5},
-        {"node": "ChangeBackground", "weight": 5},
-        {"node": "ChangeIcon", "weight": 5},
-        {"node": "ChangeIframe", "weight": 5},
-        {"node": "ChangeTitle", "weight": 5},
-        {"node": "ChangeExpressShowHero", "weight": 5},
-        {"node": "NewbieSignGetReward", "weight": 10},
-        {"node": "GetDailyWinBoxReward", "weight": 15},
-        {"node": "GetLevelReward", "weight": 10},
-        {"node": "WorldChat", "weight": 10},
-        {"node": "LookRankingList", "weight": 20}
+        {
+          "node": "ChangeHero",
+          "weight": 5
+        },
+        {
+          "node": "ChangeShowHero",
+          "weight": 5
+        },
+        {
+          "node": "ChangeBackground",
+          "weight": 5
+        },
+        {
+          "node": "ChangeIcon",
+          "weight": 5
+        },
+        {
+          "node": "ChangeIframe",
+          "weight": 5
+        },
+        {
+          "node": "ChangeTitle",
+          "weight": 5
+        },
+        {
+          "node": "ChangeExpressShowHero",
+          "weight": 5
+        },
+        {
+          "node": "NewbieSignGetReward",
+          "weight": 10
+        },
+        {
+          "node": "GetDailyWinBoxReward",
+          "weight": 15
+        },
+        {
+          "node": "GetLevelReward",
+          "weight": 10
+        },
+        {
+          "node": "WorldChat",
+          "weight": 10
+        },
+        {
+          "node": "LookRankingList",
+          "weight": 20
+        }
       ]
     },
-    "ChangeHero": { "type": "action", "action": "ChangeHero" },
-    "ChangeShowHero": { "type": "action", "action": "ChangeShowHero" },
-    "ChangeBackground": { "type": "action", "action": "ChangeBackground" },
-    "ChangeIcon": { "type": "action", "action": "ChangeIcon" },
-    "ChangeIframe": { "type": "action", "action": "ChangeIframe" },
-    "ChangeTitle": { "type": "action", "action": "ChangeTitle" },
-    "ChangeExpressShowHero": { "type": "action", "action": "ChangeExpressShowHero" },
-    "NewbieSignGetReward": { "type": "action", "action": "NewbieSignGetReward" },
-    "GetDailyWinBoxReward": { "type": "action", "action": "GetDailyWinBoxReward" },
-    "GetLevelReward": { "type": "action", "action": "GetLevelReward" },
-    "WorldChat": { "type": "action", "action": "WorldChat" },
-    "LookRankingList": { "type": "action", "action": "LookRankingList" },
-
+    "ChangeHero": {
+      "type": "action",
+      "action": "ChangeHero"
+    },
+    "ChangeShowHero": {
+      "type": "action",
+      "action": "ChangeShowHero"
+    },
+    "ChangeBackground": {
+      "type": "action",
+      "action": "ChangeBackground"
+    },
+    "ChangeIcon": {
+      "type": "action",
+      "action": "ChangeIcon"
+    },
+    "ChangeIframe": {
+      "type": "action",
+      "action": "ChangeIframe"
+    },
+    "ChangeTitle": {
+      "type": "action",
+      "action": "ChangeTitle"
+    },
+    "ChangeExpressShowHero": {
+      "type": "action",
+      "action": "ChangeExpressShowHero"
+    },
+    "NewbieSignGetReward": {
+      "type": "action",
+      "action": "NewbieSignGetReward"
+    },
+    "GetDailyWinBoxReward": {
+      "type": "action",
+      "action": "GetDailyWinBoxReward"
+    },
+    "GetLevelReward": {
+      "type": "action",
+      "action": "GetLevelReward"
+    },
+    "WorldChat": {
+      "type": "action",
+      "action": "WorldChat"
+    },
+    "LookRankingList": {
+      "type": "action",
+      "action": "LookRankingList"
+    },
     "lottery": {
       "type": "sequence",
-      "next": ["LotteryGetInfo", "LotterySelectUpHero", "LotteryLuckyDraw", "LotteryGetLog"]
+      "next": [
+        "LotteryGetInfo",
+        "LotterySelectUpHero",
+        "LotteryLuckyDraw",
+        "LotteryGetLog"
+      ]
     },
-    "LotteryGetInfo": { "type": "action", "action": "LotteryGetInfo" },
-    "LotterySelectUpHero": { "type": "action", "action": "LotterySelectUpHero" },
-    "LotteryLuckyDraw": { "type": "action", "action": "LotteryLuckyDraw" },
-    "LotteryGetLog": { "type": "action", "action": "LotteryGetLog" },
-
+    "LotteryGetInfo": {
+      "type": "action",
+      "action": "LotteryGetInfo"
+    },
+    "LotterySelectUpHero": {
+      "type": "action",
+      "action": "LotterySelectUpHero"
+    },
+    "LotteryLuckyDraw": {
+      "type": "action",
+      "action": "LotteryLuckyDraw"
+    },
+    "LotteryGetLog": {
+      "type": "action",
+      "action": "LotteryGetLog"
+    },
     "heroCultivate": {
       "type": "sequence",
-      "next": ["HeroLevelUp", "HeroAwake", "HeroActivateTalent", "HeroEquipmentTalent"]
+      "next": [
+        "HeroLevelUp",
+        "HeroAwake",
+        "HeroActivateTalent",
+        "HeroEquipmentTalent"
+      ]
     },
-    "HeroLevelUp": { "type": "action", "action": "HeroLevelUp" },
-    "HeroAwake": { "type": "action", "action": "HeroAwake" },
-    "HeroActivateTalent": { "type": "action", "action": "HeroActivateTalent" },
-    "HeroEquipmentTalent": { "type": "action", "action": "HeroEquipmentTalent" },
-
+    "HeroLevelUp": {
+      "type": "action",
+      "action": "HeroLevelUp"
+    },
+    "HeroAwake": {
+      "type": "action",
+      "action": "HeroAwake"
+    },
+    "HeroActivateTalent": {
+      "type": "action",
+      "action": "HeroActivateTalent"
+    },
+    "HeroEquipmentTalent": {
+      "type": "action",
+      "action": "HeroEquipmentTalent"
+    },
     "shop": {
       "type": "sequence",
-      "next": ["SystemShopOpen", "SystemShopBuy"]
+      "next": [
+        "SystemShopOpen",
+        "SystemShopBuy"
+      ]
     },
-    "SystemShopOpen": { "type": "action", "action": "SystemShopOpen" },
-    "SystemShopBuy": { "type": "action", "action": "SystemShopBuy" },
-
+    "SystemShopOpen": {
+      "type": "action",
+      "action": "SystemShopOpen"
+    },
+    "SystemShopBuy": {
+      "type": "action",
+      "action": "SystemShopBuy"
+    },
     "battlePass": {
       "type": "sequence",
-      "next": ["UnlockAdvanced", "GetBattlePassReward", "BattlePassConversion"]
+      "next": [
+        "UnlockAdvanced",
+        "GetBattlePassReward",
+        "BattlePassConversion"
+      ]
     },
-    "UnlockAdvanced": { "type": "action", "action": "UnlockAdvanced" },
-    "GetBattlePassReward": { "type": "action", "action": "GetBattlePassReward" },
-    "BattlePassConversion": { "type": "action", "action": "BattlePassConversion" },
-
-    "giftCode": { "type": "action", "action": "UseGiftCode" },
-
+    "UnlockAdvanced": {
+      "type": "action",
+      "action": "UnlockAdvanced"
+    },
+    "GetBattlePassReward": {
+      "type": "action",
+      "action": "GetBattlePassReward"
+    },
+    "BattlePassConversion": {
+      "type": "action",
+      "action": "BattlePassConversion"
+    },
+    "giftCode": {
+      "type": "action",
+      "action": "UseGiftCode"
+    },
     "mail": {
       "type": "sequence",
-      "next": ["GetMailList", "GetMailDetailData", "ReceiveMailAttachment", "DeleteMail"]
+      "next": [
+        "GetMailList",
+        "GetMailDetailData",
+        "ReceiveMailAttachment",
+        "DeleteMail"
+      ]
     },
-    "GetMailList": { "type": "action", "action": "GetMailList" },
-    "GetMailDetailData": { "type": "action", "action": "GetMailDetailData" },
-    "ReceiveMailAttachment": { "type": "action", "action": "ReceiveMailAttachment" },
-    "DeleteMail": { "type": "action", "action": "DeleteMail" },
-
+    "GetMailList": {
+      "type": "action",
+      "action": "GetMailList"
+    },
+    "GetMailDetailData": {
+      "type": "action",
+      "action": "GetMailDetailData"
+    },
+    "ReceiveMailAttachment": {
+      "type": "action",
+      "action": "ReceiveMailAttachment"
+    },
+    "DeleteMail": {
+      "type": "action",
+      "action": "DeleteMail"
+    },
     "friend": {
       "type": "sequence",
-      "next": ["GetFriendList", "GetRecommendFriend", "RequestAddFriend", "GetRequestFriendList", "DisposeFriendRequest", "DelFriend"]
+      "next": [
+        "GetFriendList",
+        "GetRecommendFriend",
+        "RequestAddFriend",
+        "GetRequestFriendList",
+        "DisposeFriendRequest",
+        "DelFriend"
+      ]
     },
-    "GetFriendList": { "type": "action", "action": "GetFriendList" },
-    "GetRecommendFriend": { "type": "action", "action": "GetRecommendFriend" },
-    "RequestAddFriend": { "type": "action", "action": "RequestAddFriend" },
-    "GetRequestFriendList": { "type": "action", "action": "GetRequestFriendList" },
-    "DisposeFriendRequest": { "type": "action", "action": "DisposeFriendRequest" },
-    "DelFriend": { "type": "action", "action": "DelFriend" }
+    "GetFriendList": {
+      "type": "action",
+      "action": "GetFriendList"
+    },
+    "GetRecommendFriend": {
+      "type": "action",
+      "action": "GetRecommendFriend"
+    },
+    "RequestAddFriend": {
+      "type": "action",
+      "action": "RequestAddFriend"
+    },
+    "GetRequestFriendList": {
+      "type": "action",
+      "action": "GetRequestFriendList"
+    },
+    "DisposeFriendRequest": {
+      "type": "action",
+      "action": "DisposeFriendRequest"
+    },
+    "DelFriend": {
+      "type": "action",
+      "action": "DelFriend"
+    },
+    "checkNewRole": {
+      "type": "boolean",
+      "condition": "state:isNewRole == true",
+      "trueNext": "initNewRole",
+      "falseNext": "GetActivityList"
+    },
+    "initNewRole": {
+      "type": "sequence",
+      "next": [
+        "gmCommands",
+        "LbsPositioning"
+      ]
+    }
   },
-
   "actions": {
     "RequestZoneList": {
       "pattern": "lua",
@@ -276,141 +748,418 @@
     "PlayerLogin": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 1, "act": 1},
+      "route": {
+        "cmd": 1,
+        "act": 1
+      },
       "c2sProto": "Game.LoginPlayerC2S",
       "s2cProto": "Game.LoginPlayerS2C",
       "bindings": [
-        {"field": "playerId", "type": "state", "source": "roleId"},
-        {"field": "session", "type": "state", "source": "session"},
-        {"field": "version", "type": "state", "source": "version"},
-        {"field": "battleVersion", "type": "state", "source": "battleVersion"},
-        {"field": "account", "type": "state", "source": "account"},
-        {"field": "zoneId", "type": "state", "source": "zoneId"}
+        {
+          "type": "state",
+          "field": "playerId",
+          "source": "roleId"
+        },
+        {
+          "type": "state",
+          "field": "session",
+          "source": "session"
+        },
+        {
+          "type": "state",
+          "field": "version",
+          "source": "version"
+        },
+        {
+          "type": "state",
+          "field": "battleVersion",
+          "source": "battleVersion"
+        },
+        {
+          "type": "state",
+          "field": "account",
+          "source": "account"
+        },
+        {
+          "type": "state",
+          "field": "zoneId",
+          "source": "zoneId"
+        }
       ],
       "store": [
-        {"setter": "loginResp"}
+        {
+          "setter": "loginResp"
+        }
       ]
     },
     "ReportBattleDelay": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 2, "act": 29},
+      "route": {
+        "cmd": 2,
+        "act": 29
+      },
       "c2sProto": "Game.MainBattleDelayC2S",
       "bindings": [
-        {"field": "battleDelayList[0].BattleArea", "type": "fixed", "value": "ap.hongkong"},
-        {"field": "battleDelayList[0].DelayTime", "type": "randomInt", "min": 30, "max": 100},
-        {"field": "battleDelayList[0].PingSendCnt", "type": "fixed", "value": 10},
-        {"field": "battleDelayList[0].PingRecvCnt", "type": "fixed", "value": 10},
-        {"field": "battleDelayList[1].BattleArea", "type": "fixed", "value": "ap.taibei"},
-        {"field": "battleDelayList[1].DelayTime", "type": "randomInt", "min": 30, "max": 100},
-        {"field": "battleDelayList[1].PingSendCnt", "type": "fixed", "value": 10},
-        {"field": "battleDelayList[1].PingRecvCnt", "type": "fixed", "value": 10}
+        {
+          "type": "fixed",
+          "field": "battleDelayList[0].BattleArea",
+          "value": "ap.hongkong"
+        },
+        {
+          "type": "randomInt",
+          "field": "battleDelayList[0].DelayTime",
+          "min": 30,
+          "max": 100
+        },
+        {
+          "type": "fixed",
+          "field": "battleDelayList[0].PingSendCnt",
+          "value": 10
+        },
+        {
+          "type": "fixed",
+          "field": "battleDelayList[0].PingRecvCnt",
+          "value": 10
+        },
+        {
+          "type": "fixed",
+          "field": "battleDelayList[1].BattleArea",
+          "value": "ap.taibei"
+        },
+        {
+          "type": "randomInt",
+          "field": "battleDelayList[1].DelayTime",
+          "min": 30,
+          "max": 100
+        },
+        {
+          "type": "fixed",
+          "field": "battleDelayList[1].PingSendCnt",
+          "value": 10
+        },
+        {
+          "type": "fixed",
+          "field": "battleDelayList[1].PingRecvCnt",
+          "value": 10
+        }
       ]
     },
     "GetActivityList": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 22, "act": 1},
+      "route": {
+        "cmd": 22,
+        "act": 1
+      },
       "c2sProto": "Game.OperateGetListC2S",
       "s2cProto": "Game.OperateGetListS2C"
     },
     "GMAddHero": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 9, "act": 1},
+      "route": {
+        "cmd": 9,
+        "act": 1
+      },
       "c2sProto": "Game.GmEventC2S",
       "bindings": [
-        {"field": "GM.type", "type": "fixed", "value": 4},
-        {"field": "GM.param", "type": "fixed", "value": [109,5,110,5,113,5,118,5,122,5,123,5,124,5,125,5,130,5,138,5,140,5,142,5,143,5,148,5,150,5,153,5,156,5,158,5,159,5,160,5]}
+        {
+          "type": "fixed",
+          "field": "GM.type",
+          "value": 4
+        },
+        {
+          "type": "fixed",
+          "field": "GM.param",
+          "value": [
+            109,
+            5,
+            110,
+            5,
+            113,
+            5,
+            118,
+            5,
+            122,
+            5,
+            123,
+            5,
+            124,
+            5,
+            125,
+            5,
+            130,
+            5,
+            138,
+            5,
+            140,
+            5,
+            142,
+            5,
+            143,
+            5,
+            148,
+            5,
+            150,
+            5,
+            153,
+            5,
+            156,
+            5,
+            158,
+            5,
+            159,
+            5,
+            160,
+            5
+          ]
+        }
       ]
     },
     "GMAddItem": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 9, "act": 1},
+      "route": {
+        "cmd": 9,
+        "act": 1
+      },
       "c2sProto": "Game.GmEventC2S",
       "bindings": [
-        {"field": "GM.type", "type": "fixed", "value": 4},
-        {"field": "GM.param", "type": "fixed", "value": [1,2147483647,2,2147483647,5,2147483647,6,2147483647,7,2147483647,8,2147483647,10,2147483647,14,2147483647,32,2147483647,33,2147483647,7200001,1,7200002,1,7200003,1,7200004,1,7300001,1,7300003,1,7300004,1,7300005,1,7300006,1,7090001,1,7090002,1,7090005,1,7110001,1,7110002,1,7110003,1,7110004,1,7110005,1,7110006,1,7110007,1,7110008,1,7110009,1,7120001,1,7120002,1,7120003,1,7120004,1,7120005,1,7040001,100000]}
+        {
+          "type": "fixed",
+          "field": "GM.type",
+          "value": 4
+        },
+        {
+          "type": "fixed",
+          "field": "GM.param",
+          "value": [
+            1,
+            2147483647,
+            2,
+            2147483647,
+            5,
+            2147483647,
+            6,
+            2147483647,
+            7,
+            2147483647,
+            8,
+            2147483647,
+            10,
+            2147483647,
+            14,
+            2147483647,
+            32,
+            2147483647,
+            33,
+            2147483647,
+            7200001,
+            1,
+            7200002,
+            1,
+            7200003,
+            1,
+            7200004,
+            1,
+            7300001,
+            1,
+            7300003,
+            1,
+            7300004,
+            1,
+            7300005,
+            1,
+            7300006,
+            1,
+            7090001,
+            1,
+            7090002,
+            1,
+            7090005,
+            1,
+            7110001,
+            1,
+            7110002,
+            1,
+            7110003,
+            1,
+            7110004,
+            1,
+            7110005,
+            1,
+            7110006,
+            1,
+            7110007,
+            1,
+            7110008,
+            1,
+            7110009,
+            1,
+            7120001,
+            1,
+            7120002,
+            1,
+            7120003,
+            1,
+            7120004,
+            1,
+            7120005,
+            1,
+            7040001,
+            100000
+          ]
+        }
       ]
     },
     "GMAddHeroCup": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 9, "act": 1},
+      "route": {
+        "cmd": 9,
+        "act": 1
+      },
       "c2sProto": "Game.GmEventC2S",
       "bindings": [
-        {"field": "GM.type", "type": "fixed", "value": 13},
-        {"field": "GM.param", "type": "fixed", "value": [109, 1000]}
+        {
+          "type": "fixed",
+          "field": "GM.type",
+          "value": 13
+        },
+        {
+          "type": "fixed",
+          "field": "GM.param",
+          "value": [
+            109,
+            1000
+          ]
+        }
       ]
     },
     "GMFinishAllNewUserGuide": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 9, "act": 1},
+      "route": {
+        "cmd": 9,
+        "act": 1
+      },
       "c2sProto": "Game.GmEventC2S",
       "bindings": [
-        {"field": "GM.type", "type": "fixed", "value": 52}
+        {
+          "type": "fixed",
+          "field": "GM.type",
+          "value": 52
+        }
       ]
     },
     "LbsPositioning": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 40, "act": 2},
+      "route": {
+        "cmd": 40,
+        "act": 2
+      },
       "c2sProto": "Game.LbsPositioningC2S",
       "bindings": [
-        {"field": "lbsId", "type": "fixed", "value": 1}
+        {
+          "type": "fixed",
+          "field": "lbsId",
+          "value": 1
+        }
       ]
     },
     "RequestGameModeList": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 2, "act": 64},
+      "route": {
+        "cmd": 2,
+        "act": 64
+      },
       "c2sProto": "Game.MainGetGameModeListC2S",
       "s2cProto": "Game.MainGetGameModeListS2C",
       "store": [
-        {"field": "gameModeMap", "setter": "gameModeMap"}
+        {
+          "setter": "gameModeMap",
+          "field": "gameModeMap"
+        }
       ]
     },
     "CreateNormalTeam": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 5, "act": 1},
+      "route": {
+        "cmd": 5,
+        "act": 1
+      },
       "c2sProto": "Game.TeamCreateC2S",
       "s2cProto": "Game.TeamCreateS2C",
       "bindings": [
-        {"field": "model", "type": "fixed", "value": 5},
         {
-          "field": "gameModelId",
+          "type": "fixed",
+          "field": "model",
+          "value": 5
+        },
+        {
           "type": "stateMapValue",
+          "field": "gameModelId",
           "source": "gameModeMap",
           "path": "modeId",
           "required": true,
           "filters": [
-            {"path": "modeId", "op": "neq", "value": 0},
-            {"path": "DailyOpenTime", "op": "dailyTimeWindow"}
+            {
+              "op": "neq",
+              "path": "modeId",
+              "value": 0
+            },
+            {
+              "op": "dailyTimeWindow",
+              "path": "DailyOpenTime"
+            }
           ]
         }
       ],
       "store": [
-        {"field": "teamId", "setter": "teamId"}
+        {
+          "setter": "teamId",
+          "field": "teamId"
+        }
       ]
     },
     "SelectHero": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 5, "act": 14},
+      "route": {
+        "cmd": 5,
+        "act": 14
+      },
       "c2sProto": "Game.TeamChangeHeroC2S",
       "bindings": [
-        {"type": "stateRandomN", "source": "heroIdList", "count": 3, "storeAs": "currentHeroIds"},
-        {"field": "selectHeroes", "type": "state", "source": "currentHeroIds"},
-        {"field": "selectSkins", "type": "state", "source": "currentHeroIds"}
+        {
+          "type": "stateRandomN",
+          "source": "heroIdList",
+          "count": 3,
+          "storeAs": "currentHeroIds"
+        },
+        {
+          "type": "state",
+          "field": "selectHeroes",
+          "source": "currentHeroIds"
+        },
+        {
+          "type": "state",
+          "field": "selectSkins",
+          "source": "currentHeroIds"
+        }
       ]
     },
     "StartMatch": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 5, "act": 20},
+      "route": {
+        "cmd": 5,
+        "act": 20
+      },
       "c2sProto": "Game.TeamStartMatchC2S"
     },
     "MatchSucceed": {
@@ -432,20 +1181,34 @@
     "BattleLoadOK": {
       "pattern": "tcpSend",
       "service": "battle",
-      "route": {"cmd": 4, "act": 9},
+      "route": {
+        "cmd": 4,
+        "act": 9
+      },
       "c2sProto": "Game.BattleLoadOkC2S"
     },
     "ResetLoadState": {
       "pattern": "setState",
       "bindings": [
-        {"field": "loadProgress", "type": "fixed", "value": 0},
-        {"field": "packageIndex", "type": "fixed", "value": 0}
+        {
+          "type": "fixed",
+          "field": "loadProgress",
+          "value": 0
+        },
+        {
+          "type": "fixed",
+          "field": "packageIndex",
+          "value": 0
+        }
       ]
     },
     "StartGame": {
       "pattern": "tcpListen",
       "service": "battle",
-      "route": {"cmd": 4, "act": 10},
+      "route": {
+        "cmd": 4,
+        "act": 10
+      },
       "s2cProto": "Game.BattleStartGameS2C",
       "timeout": 60
     },
@@ -460,7 +1223,10 @@
     "BattleReward": {
       "pattern": "tcpListen",
       "service": "logic",
-      "route": {"cmd": 4, "act": 72},
+      "route": {
+        "cmd": 4,
+        "act": 72
+      },
       "s2cProto": "Game.BattleRewardS2C",
       "timeout": 60,
       "optional": true
@@ -468,196 +1234,454 @@
     "GameOver": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 2, "act": 62},
+      "route": {
+        "cmd": 2,
+        "act": 62
+      },
       "c2sProto": "Game.MainGameOverC2S",
       "s2cProto": "Game.MainGameOverS2C",
       "bindings": [
-        {"field": "operation", "type": "fixed", "value": 0}
+        {
+          "type": "fixed",
+          "field": "operation",
+          "value": 0
+        }
       ]
     },
     "ClearBattleState": {
       "pattern": "clearState",
-      "keys": ["battleId", "battleAddress", "battleSecretKey", "battleSession", "fighterIndex", "fighterListData", "packageIndex", "battleAck"]
+      "keys": [
+        "battleId",
+        "battleAddress",
+        "battleSecretKey",
+        "battleSession",
+        "fighterIndex",
+        "fighterListData",
+        "packageIndex",
+        "battleAck"
+      ]
     },
     "ChangeHero": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 2, "act": 11},
+      "route": {
+        "cmd": 2,
+        "act": 11
+      },
       "c2sProto": "Game.MainChangeHeroC2S",
       "bindings": [
-        {"field": "heroId", "type": "stateRandom", "source": "heroIdList"},
-        {"field": "skinId", "type": "fixed", "value": 0}
+        {
+          "type": "stateRandom",
+          "field": "heroId",
+          "source": "heroIdList"
+        },
+        {
+          "type": "fixed",
+          "field": "skinId",
+          "value": 0
+        }
       ]
     },
     "ChangeShowHero": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 2, "act": 68},
+      "route": {
+        "cmd": 2,
+        "act": 68
+      },
       "c2sProto": "Game.MainChangeShowHeroC2S",
       "bindings": [
-        {"field": "heroId", "type": "stateRandom", "source": "heroIdList"},
-        {"field": "skinId", "type": "fixed", "value": 0}
+        {
+          "type": "stateRandom",
+          "field": "heroId",
+          "source": "heroIdList"
+        },
+        {
+          "type": "fixed",
+          "field": "skinId",
+          "value": 0
+        }
       ]
     },
     "ChangeBackground": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 2, "act": 14},
+      "route": {
+        "cmd": 2,
+        "act": 14
+      },
       "c2sProto": "Game.MainChangeBackgroundC2S",
       "bindings": [
-        {"field": "id", "type": "randomPick", "values": [7120001, 7120002, 7120003, 7120004, 7120005]}
+        {
+          "type": "randomPick",
+          "field": "id",
+          "values": [
+            7120001,
+            7120002,
+            7120003,
+            7120004,
+            7120005
+          ]
+        }
       ]
     },
     "ChangeIcon": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 2, "act": 12},
+      "route": {
+        "cmd": 2,
+        "act": 12
+      },
       "c2sProto": "Game.MainChangeIconC2S",
       "bindings": [
-        {"field": "icon", "type": "randomPick", "values": [7200001, 7200002, 7200003, 7200004]}
+        {
+          "type": "randomPick",
+          "field": "icon",
+          "values": [
+            7200001,
+            7200002,
+            7200003,
+            7200004
+          ]
+        }
       ]
     },
     "ChangeIframe": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 2, "act": 13},
+      "route": {
+        "cmd": 2,
+        "act": 13
+      },
       "c2sProto": "Game.MainChangeIframeC2S",
       "bindings": [
-        {"field": "iFrame", "type": "randomPick", "values": [7300001, 7300003, 7300004, 7300005, 7300006]}
+        {
+          "type": "randomPick",
+          "field": "iFrame",
+          "values": [
+            7300001,
+            7300003,
+            7300004,
+            7300005,
+            7300006
+          ]
+        }
       ]
     },
     "ChangeTitle": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 2, "act": 49},
+      "route": {
+        "cmd": 2,
+        "act": 49
+      },
       "c2sProto": "Game.MainChangeTitleC2S",
       "bindings": [
-        {"field": "id", "type": "randomPick", "values": [7090001, 7090002, 7090005]},
-        {"field": "index", "type": "fixed", "value": 0}
+        {
+          "type": "randomPick",
+          "field": "id",
+          "values": [
+            7090001,
+            7090002,
+            7090005
+          ]
+        },
+        {
+          "type": "fixed",
+          "field": "index",
+          "value": 0
+        }
       ]
     },
     "ChangeExpressShowHero": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 2, "act": 69},
+      "route": {
+        "cmd": 2,
+        "act": 69
+      },
       "c2sProto": "Game.MainChangeExpressShowHeroC2S",
       "bindings": [
-        {"field": "heroId", "type": "stateRandom", "source": "heroIdList"}
+        {
+          "type": "stateRandom",
+          "field": "heroId",
+          "source": "heroIdList"
+        }
       ]
     },
     "NewbieSignGetReward": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 39, "act": 1},
+      "route": {
+        "cmd": 39,
+        "act": 1
+      },
       "c2sProto": "Game.NewbieSignGetRewardC2S",
       "s2cProto": "Game.NewbieSignGetRewardS2C",
       "bindings": [
-        {"field": "day", "type": "randomInt", "min": 1, "max": 7}
+        {
+          "type": "randomInt",
+          "field": "day",
+          "min": 1,
+          "max": 7
+        }
       ]
     },
     "GetDailyWinBoxReward": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 2, "act": 66},
+      "route": {
+        "cmd": 2,
+        "act": 66
+      },
       "c2sProto": "Game.MainGetDailyWinBoxRewardC2S",
       "bindings": [
-        {"field": "ids", "type": "randomPick", "values": [1, 4, 8], "wrap": true}
+        {
+          "type": "randomPick",
+          "field": "ids",
+          "values": [
+            1,
+            4,
+            8
+          ],
+          "wrap": true
+        }
       ]
     },
     "GetLevelReward": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 2, "act": 26},
+      "route": {
+        "cmd": 2,
+        "act": 26
+      },
       "c2sProto": "Game.MainGetLevelRewardC2S",
       "s2cProto": "Game.MainGetLevelRewardS2C",
       "bindings": [
-        {"field": "id", "type": "randomInt", "min": 1, "max": 73}
+        {
+          "type": "randomInt",
+          "field": "Id",
+          "min": 1,
+          "max": 73
+        }
       ]
     },
     "WorldChat": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 13, "act": 1},
+      "route": {
+        "cmd": 13,
+        "act": 1
+      },
       "c2sProto": "Game.ChatSendC2S",
       "bindings": [
-        {"field": "chatInfo.cType", "type": "fixed", "value": 1},
-        {"field": "chatInfo.content", "type": "fixed", "value": "hello"},
-        {"field": "chatInfo.ctType", "type": "fixed", "value": 1}
+        {
+          "type": "fixed",
+          "field": "chatInfo.cType",
+          "value": 1
+        },
+        {
+          "type": "fixed",
+          "field": "chatInfo.content",
+          "value": "hello"
+        },
+        {
+          "type": "fixed",
+          "field": "chatInfo.ctType",
+          "value": 1
+        }
       ]
     },
     "LookRankingList": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 17, "act": 1},
+      "route": {
+        "cmd": 17,
+        "act": 1
+      },
       "c2sProto": "Game.RankListGetC2S",
       "s2cProto": "Game.RankListGetS2C",
       "bindings": [
-        {"field": "rankType", "type": "randomInt", "min": 1, "max": 3},
-        {"field": "heroId", "type": "stateRandom", "source": "heroIdList"}
+        {
+          "type": "randomInt",
+          "field": "rankType",
+          "min": 1,
+          "max": 3
+        },
+        {
+          "type": "stateRandom",
+          "field": "heroId",
+          "source": "heroIdList"
+        }
       ]
     },
     "LotteryGetInfo": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 23, "act": 2},
+      "route": {
+        "cmd": 23,
+        "act": 2
+      },
       "c2sProto": "Game.LotteryGetInfoC2S",
       "s2cProto": "Game.LotteryGetInfoS2C",
       "store": [
-        {"field": "lotteryInfoList", "setter": "lotteryInfoList"}
+        {
+          "setter": "lotteryInfoList",
+          "field": "lotteryInfoList"
+        }
       ]
     },
     "LotterySelectUpHero": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 23, "act": 12},
+      "route": {
+        "cmd": 23,
+        "act": 12
+      },
       "c2sProto": "Game.LotterySelectUpHeroC2S",
       "bindings": [
-        {"type": "randomInt", "min": 1, "max": 2, "storeAs": "_poolId"},
-        {"field": "lotteryPoolId", "type": "state", "source": "_poolId"},
-        {"field": "heroId", "type": "randomPickMap", "keySource": "_poolId", "values": [
-          {"key": 1, "values": [123, 113, 153, 109, 158, 130, 142, 140, 138, 150, 148, 160, 143, 118, 124, 156]},
-          {"key": 2, "values": [159, 134, 125, 127, 122, 110]}
-        ]}
+        {
+          "type": "randomInt",
+          "min": 1,
+          "max": 2,
+          "storeAs": "_poolId"
+        },
+        {
+          "type": "state",
+          "field": "lotteryPoolId",
+          "source": "_poolId"
+        },
+        {
+          "type": "randomPickMap",
+          "field": "heroId",
+          "values": [
+            {
+              "key": 1,
+              "values": [
+                123,
+                113,
+                153,
+                109,
+                158,
+                130,
+                142,
+                140,
+                138,
+                150,
+                148,
+                160,
+                143,
+                118,
+                124,
+                156
+              ]
+            },
+            {
+              "key": 2,
+              "values": [
+                159,
+                134,
+                125,
+                127,
+                122,
+                110
+              ]
+            }
+          ],
+          "keySource": "_poolId"
+        }
       ]
     },
     "LotteryLuckyDraw": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 23, "act": 1},
+      "route": {
+        "cmd": 23,
+        "act": 1
+      },
       "c2sProto": "Game.LotteryLuckyDrawC2S",
       "bindings": [
-        {"field": "lotteryType", "type": "fixed", "value": 2},
-        {"field": "lotteryPoolId", "type": "stateRandom", "source": "lotteryInfoList", "path": "lotteryPoolId", "filters": [{"path": "lotteryPoolId", "op": "neq", "value": 101}]},
-        {"field": "lotteryConsumeType", "type": "fixed", "value": 3}
+        {
+          "type": "fixed",
+          "field": "lotteryType",
+          "value": 2
+        },
+        {
+          "type": "stateRandom",
+          "field": "lotteryPoolId",
+          "source": "lotteryInfoList",
+          "path": "lotteryPoolId",
+          "filters": [
+            {
+              "op": "neq",
+              "path": "lotteryPoolId",
+              "value": 101
+            }
+          ]
+        },
+        {
+          "type": "fixed",
+          "field": "lotteryConsumeType",
+          "value": 3
+        }
       ]
     },
     "LotteryGetLog": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 23, "act": 4},
+      "route": {
+        "cmd": 23,
+        "act": 4
+      },
       "c2sProto": "Game.LotteryGetLogC2S",
       "bindings": [
-        {"field": "lotteryPoolId", "type": "stateRandom", "source": "lotteryInfoList", "path": "lotteryPoolId", "filters": [{"path": "lotteryPoolId", "op": "neq", "value": 101}]}
+        {
+          "type": "stateRandom",
+          "field": "lotteryPoolId",
+          "source": "lotteryInfoList",
+          "path": "lotteryPoolId",
+          "filters": [
+            {
+              "op": "neq",
+              "path": "lotteryPoolId",
+              "value": 101
+            }
+          ]
+        }
       ]
     },
     "HeroLevelUp": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 6, "act": 3},
+      "route": {
+        "cmd": 6,
+        "act": 3
+      },
       "c2sProto": "Game.HeroUpLevelC2S",
       "s2cProto": "Game.HeroUpLevelS2C",
       "bindings": [
-        {"field": "heroId", "type": "stateRandom", "source": "heroIdList"}
+        {
+          "type": "stateRandom",
+          "field": "heroId",
+          "source": "heroIdList"
+        }
       ]
     },
     "HeroAwake": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 6, "act": 4},
+      "route": {
+        "cmd": 6,
+        "act": 4
+      },
       "c2sProto": "Game.HeroAwakeC2S",
       "s2cProto": "Game.HeroAwakeS2C",
       "bindings": [
-        {"field": "heroId", "type": "stateRandom", "source": "heroIdList"}
+        {
+          "type": "stateRandom",
+          "field": "heroId",
+          "source": "heroIdList"
+        }
       ]
     },
     "HeroActivateTalent": {
@@ -671,163 +1695,339 @@
     "SystemShopOpen": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 35, "act": 1},
+      "route": {
+        "cmd": 35,
+        "act": 1
+      },
       "c2sProto": "Game.SystemShopOpenC2S",
       "s2cProto": "Game.SystemShopOpenS2C"
     },
     "SystemShopBuy": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 35, "act": 4},
+      "route": {
+        "cmd": 35,
+        "act": 4
+      },
       "c2sProto": "Game.SystemShopBuyC2S",
       "bindings": [
-        {"type": "randomPick", "values": [[201005,10],[201006,50],[201008,50],[201009,150],[201049,150],[201050,300],[201051,1000],[201052,250],[201053,130]], "storeAs": "_shopPick"},
-        {"field": "goodsList[0].shopId", "type": "fixed", "value": 1},
-        {"field": "goodsList[0].goodsId", "type": "state", "source": "_shopPick", "path": "[0]"},
-        {"field": "goodsList[0].buyNumber", "type": "fixed", "value": 1},
-        {"field": "goodsList[0].costNumber", "type": "state", "source": "_shopPick", "path": "[1]"}
+        {
+          "type": "randomPick",
+          "values": [
+            [
+              201005,
+              10
+            ],
+            [
+              201006,
+              50
+            ],
+            [
+              201008,
+              50
+            ],
+            [
+              201009,
+              150
+            ],
+            [
+              201049,
+              150
+            ],
+            [
+              201050,
+              300
+            ],
+            [
+              201051,
+              1000
+            ],
+            [
+              201052,
+              250
+            ],
+            [
+              201053,
+              130
+            ]
+          ],
+          "storeAs": "_shopPick"
+        },
+        {
+          "type": "fixed",
+          "field": "goodsList[0].shopId",
+          "value": 1
+        },
+        {
+          "type": "state",
+          "field": "goodsList[0].goodsId",
+          "source": "_shopPick",
+          "path": "[0]"
+        },
+        {
+          "type": "fixed",
+          "field": "goodsList[0].buyNumber",
+          "value": 1
+        },
+        {
+          "type": "state",
+          "field": "goodsList[0].costNumber",
+          "source": "_shopPick",
+          "path": "[1]"
+        }
       ]
     },
     "UnlockAdvanced": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 38, "act": 5},
+      "route": {
+        "cmd": 38,
+        "act": 5
+      },
       "c2sProto": "Game.BpUnlockAdvancedC2S",
       "s2cProto": "Game.BpUnlockAdvancedS2C",
       "bindings": [
-        {"field": "advance", "type": "randomInt", "min": 1, "max": 2},
-        {"field": "battlePassId", "type": "fixed", "value": 1}
+        {
+          "type": "randomInt",
+          "field": "advance",
+          "min": 1,
+          "max": 2
+        },
+        {
+          "type": "fixed",
+          "field": "battlePassId",
+          "value": 1
+        }
       ]
     },
     "GetBattlePassReward": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 38, "act": 2},
+      "route": {
+        "cmd": 38,
+        "act": 2
+      },
       "c2sProto": "Game.BpGetRewardC2S",
       "s2cProto": "Game.BpGetRewardS2C",
       "bindings": [
-        {"field": "battlePassId", "type": "fixed", "value": 1}
+        {
+          "type": "fixed",
+          "field": "battlePassId",
+          "value": 1
+        }
       ]
     },
     "BattlePassConversion": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 38, "act": 6},
+      "route": {
+        "cmd": 38,
+        "act": 6
+      },
       "c2sProto": "Game.BpConversionC2S",
       "s2cProto": "Game.BpConversionS2C",
       "bindings": [
-        {"field": "battlePassId", "type": "fixed", "value": 1}
+        {
+          "type": "fixed",
+          "field": "battlePassId",
+          "value": 1
+        }
       ]
     },
     "UseGiftCode": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 20, "act": 1},
+      "route": {
+        "cmd": 20,
+        "act": 1
+      },
       "c2sProto": "Game.GiftCodeUseC2S",
       "s2cProto": "Game.GiftCodeUseS2C",
       "bindings": [
-        {"field": "giftCode", "type": "fixed", "value": "JUMP"}
+        {
+          "type": "fixed",
+          "field": "giftCode",
+          "value": "JUMP"
+        }
       ]
     },
     "GetMailList": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 18, "act": 1},
+      "route": {
+        "cmd": 18,
+        "act": 1
+      },
       "c2sProto": "Game.MailGetListC2S",
       "s2cProto": "Game.MailGetListS2C",
       "store": [
-        {"field": "mails", "setter": "mailList"}
+        {
+          "setter": "mailList",
+          "field": "mails"
+        }
       ]
     },
     "GetMailDetailData": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 18, "act": 2},
+      "route": {
+        "cmd": 18,
+        "act": 2
+      },
       "c2sProto": "Game.MailGetDetailDataC2S",
       "s2cProto": "Game.MailGetDetailDataS2C",
       "bindings": [
-        {"field": "gid", "type": "stateFirst", "source": "mailList", "path": "mailUid|gid"}
+        {
+          "type": "stateFirst",
+          "field": "gid",
+          "source": "mailList",
+          "path": "mailUid|gid"
+        }
       ]
     },
     "ReceiveMailAttachment": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 18, "act": 4},
+      "route": {
+        "cmd": 18,
+        "act": 4
+      },
       "c2sProto": "Game.MailReceiveAttachmentC2S",
       "s2cProto": "Game.MailReceiveAttachmentS2C",
       "bindings": [
-        {"field": "gids", "type": "stateFirst", "source": "mailList", "path": "mailUid|gid", "wrap": true}
+        {
+          "type": "stateFirst",
+          "field": "gids",
+          "source": "mailList",
+          "path": "mailUid|gid",
+          "wrap": true
+        }
       ]
     },
     "DeleteMail": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 18, "act": 3},
+      "route": {
+        "cmd": 18,
+        "act": 3
+      },
       "c2sProto": "Game.MailDeleteC2S",
       "bindings": [
-        {"field": "gids", "type": "stateFirst", "source": "mailList", "path": "mailUid|gid", "wrap": true}
+        {
+          "type": "stateFirst",
+          "field": "gids",
+          "source": "mailList",
+          "path": "mailUid|gid",
+          "wrap": true
+        }
       ]
     },
     "GetFriendList": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 15, "act": 3},
+      "route": {
+        "cmd": 15,
+        "act": 3
+      },
       "c2sProto": "Game.FriendGetListC2S",
       "s2cProto": "Game.FriendGetListS2C",
       "store": [
-        {"field": "friendDetailInfoList", "setter": "friendDetailList"}
+        {
+          "setter": "friendDetailList",
+          "field": "friendDetailInfoList"
+        }
       ]
     },
     "GetRecommendFriend": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 15, "act": 12},
+      "route": {
+        "cmd": 15,
+        "act": 12
+      },
       "c2sProto": "Game.FriendGetRecommendUserC2S",
       "s2cProto": "Game.FriendGetRecommendUserS2C",
       "store": [
-        {"field": "friendBaseInfoList", "setter": "recommendFriendList"}
+        {
+          "setter": "recommendFriendList",
+          "field": "friendBaseInfoList"
+        }
       ]
     },
     "RequestAddFriend": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 15, "act": 7},
+      "route": {
+        "cmd": 15,
+        "act": 7
+      },
       "c2sProto": "Game.FriendAddRequestC2S",
       "bindings": [
-        {"field": "friendId", "type": "stateFirst", "source": "recommendFriendList", "path": "playerId"}
+        {
+          "type": "stateFirst",
+          "field": "friendId",
+          "source": "recommendFriendList",
+          "path": "playerId"
+        }
       ]
     },
     "GetRequestFriendList": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": {"cmd": 15, "act": 8},
+      "route": {
+        "cmd": 15,
+        "act": 8
+      },
       "c2sProto": "Game.FriendGetRequestListC2S",
       "s2cProto": "Game.FriendGetRequestListS2C",
       "store": [
-        {"field": "friendInfoList", "setter": "requestFriendList"}
+        {
+          "setter": "requestFriendList",
+          "field": "friendInfoList"
+        }
       ]
     },
     "DisposeFriendRequest": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 15, "act": 9},
+      "route": {
+        "cmd": 15,
+        "act": 9
+      },
       "c2sProto": "Game.FriendDisposeRequestC2S",
       "bindings": [
-        {"field": "friendId", "type": "stateFirst", "source": "requestFriendList", "path": "playerId"},
-        {"field": "result", "type": "randomInt", "min": 0, "max": 1}
+        {
+          "type": "stateFirst",
+          "field": "friendId",
+          "source": "requestFriendList",
+          "path": "playerId"
+        },
+        {
+          "type": "randomInt",
+          "field": "result",
+          "min": 0,
+          "max": 1
+        }
       ]
     },
     "DelFriend": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": {"cmd": 15, "act": 10},
+      "route": {
+        "cmd": 15,
+        "act": 10
+      },
       "c2sProto": "Game.FriendDelC2S",
       "bindings": [
-        {"field": "friendId", "type": "stateRandom", "source": "friendDetailList", "path": "playerId|playerBase.playerId|base.playerId"}
+        {
+          "type": "stateRandom",
+          "field": "friendId",
+          "source": "friendDetailList",
+          "path": "playerId|playerBase.playerId|base.playerId"
+        }
       ]
     }
   },
-
   "callbacks": {
     "matchPoll": {},
     "teamStartMatch": {},
@@ -836,7 +2036,10 @@
     "stateUpdate": {
       "s2cProto": "Game.MainStateUpdateS2C",
       "store": [
-        {"field": "status", "setter": "playerStatus"}
+        {
+          "setter": "playerStatus",
+          "field": "status"
+        }
       ]
     },
     "heroUpdate": {},

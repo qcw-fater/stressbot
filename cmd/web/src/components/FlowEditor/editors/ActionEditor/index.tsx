@@ -8,7 +8,7 @@
  * 由 NodeEditorDrawer 在 node.type === 'action' 时调用。
  */
 
-import { Alert, App as AntApp, AutoComplete, Button, Collapse, Form, Input, Modal, Space, Switch } from 'antd';
+import { Alert, App as AntApp, AutoComplete, Button, Collapse, Form, Input, Modal, Select, Space, Switch } from 'antd';
 import { EditOutlined } from '@ant-design/icons';
 import { useMemo, useState, useEffect } from 'react';
 import { useFlowStore } from '../../store/flowStore';
@@ -157,13 +157,17 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
         items={[
           {
             key: 'node',
-            label: '节点级字段（breakOff / delayMs）',
+            label: '节点级字段（errorStrategy / delayMs）',
             children: (
               <Form layout="vertical">
-                <Form.Item label="breakOff（动作失败时是否中断流程）">
-                  <Switch
-                    checked={!!node.breakOff}
-                    onChange={(v) => updateNode(nodeId, { breakOff: v })}
+                <Form.Item label="错误处理策略（动作失败时）">
+                  <Select
+                    value={node.errorStrategy || 'ignore'}
+                    onChange={(v) => updateNode(nodeId, { errorStrategy: v === 'ignore' ? undefined : v })}
+                    options={[
+                      { value: 'ignore', label: '忽略（打日志，继续执行）' },
+                      { value: 'abort', label: '中断（中止当前流程）' },
+                    ]}
                   />
                 </Form.Item>
                 <Form.Item label="节点延迟 delayMs">

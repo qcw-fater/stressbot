@@ -44,7 +44,7 @@ type Node struct {
 
 	// ── action 专用 ─────────────────────────────────────────────
 	Action          string      `json:"action"`          // 引用 actions 表中的动作名称
-	BreakOff        bool        `json:"breakOff"`        // true = 动作失败时中断整个流程
+	ErrorStrategy   string      `json:"errorStrategy"`   // "abort" = 动作失败时中断整个流程；空/"ignore" = 忽略继续
 	ListenCallbacks []ListenRef `json:"listenCallbacks"` // 动作执行后注册的持久化推送监听
 
 	// ── weighted 专用 ─────────────────────────────────────────────

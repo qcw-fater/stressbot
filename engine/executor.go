@@ -165,7 +165,7 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 	if err != nil {
 		stresslog.Error("[ENGINE] 动作执行失败",
 			zap.String("caller", e.caller), zap.String("action", node.Action), zap.Error(err))
-		if node.BreakOff {
+		if node.ErrorStrategy == "abort" {
 			return fmt.Errorf("动作执行失败 [%s]: %w", node.Action, err)
 		}
 		return nil
@@ -176,7 +176,7 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 		if err := e.handler.RegisterListen(node.ListenCallbacks); err != nil {
 			stresslog.Error("[ENGINE] 注册监听失败",
 				zap.String("caller", e.caller), zap.Error(err))
-			if node.BreakOff {
+			if node.ErrorStrategy == "abort" {
 				return fmt.Errorf("注册监听失败: %w", err)
 			}
 		}

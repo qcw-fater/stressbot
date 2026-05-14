@@ -41,6 +41,13 @@ export function jsonToFlow(flow: FlowJsonInput): ConvertResult {
   const nodesByListen: Record<string, string[]> = {};
 
   // 1. 主 DAG 节点
+  // 兼容旧 breakOff → errorStrategy
+  for (const node of Object.values(flow.nodes) as Record<string, unknown>[]) {
+    if ((node as Record<string, unknown>).breakOff && !(node as Record<string, unknown>).errorStrategy) {
+      (node as Record<string, unknown>).errorStrategy = 'abort';
+    }
+    delete (node as Record<string, unknown>).breakOff;
+  }
   for (const [id, node] of Object.entries(flow.nodes)) {
     rfNodes.push({
       id,
