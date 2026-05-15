@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"strings"
 	"time"
@@ -44,16 +45,16 @@ type ActionExecutor struct {
 // NetSender 网络发送委托接口。
 type NetSender interface {
 	TCPSend(service string, packet []byte) (bool, int)
-	TCPRequest(service string, packet []byte, responseKey string, timeout ...time.Duration) ([]byte, bool)
+	TCPRequest(service string, packet []byte, responseKey string, timeout ...time.Duration) (body []byte, headerErr uint64, ok bool)
 	HTTPRequest(url, method, contentType string, body []byte) (statusCode int, respBody []byte, err error)
 	UDPSend(service string, data []byte) (bool, int)
-	UDPRequest(service string, packet []byte, responseKey string, timeout ...time.Duration) ([]byte, bool)
+	UDPRequest(service string, packet []byte, responseKey string, timeout ...time.Duration) (body []byte, headerErr uint64, ok bool)
 	ConnectTCP(service, address string) bool
 	ConnectUDP(service, address string) bool
 	CloseTCP(service string)
 	CloseUDP(service string)
-	GetTCPListenResp(service string, responseKey string) []byte
-	GetUDPListenResp(service string, responseKey string) []byte
+	GetTCPListenResp(service string, responseKey string) ([]byte, uint64)
+	GetUDPListenResp(service string, responseKey string) ([]byte, uint64)
 	GetTCPSecretKey(service string) []byte
 	SetTCPSecretKey(service string, key []byte)
 	SetUDPSecretKey(service string, key []byte)
@@ -332,6 +333,19 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		}
 		return rand.Intn(hi-lo+1) + lo
 
+	case "randomFloat":
+		lo, hi := float64(fb.Min), float64(fb.Max)
+		if lo >= hi {
+			return lo
+		}
+		prec := fb.Precision
+		if prec <= 0 {
+			prec = 2
+		}
+		v := lo + rand.Float64()*(hi-lo)
+		scale := math.Pow10(prec)
+		return math.Round(v*scale) / scale
+
 	case "randomBool":
 		return rand.Intn(2) == 1
 
@@ -474,7 +488,7 @@ func (ae *ActionExecutor) execTCPRequest(def *ActionDef) (int, int, error) {
 	if def.Timeout > 0 {
 		reqTimeout = append(reqTimeout, time.Duration(def.Timeout)*time.Second)
 	}
-	respBody, ok := ae.netSender.TCPRequest(def.Service, packet, respKey, reqTimeout...)
+	respBody, headerErr, ok := ae.netSender.TCPRequest(def.Service, packet, respKey, reqTimeout...)
 	elapsed := time.Since(start)
 	if !ok {
 		if def.Optional {
@@ -485,6 +499,13 @@ func (ae *ActionExecutor) execTCPRequest(def *ActionDef) (int, int, error) {
 		}
 		return len(packet), 0, fmt.Errorf("TCP 请求失败: service=%s route=%s respKey=%s elapsed=%v",
 			def.Service, routeKey, respKey, elapsed)
+	}
+
+	if headerErr != 0 {
+		if err := ae.parseAndStoreResponse(def, respBody); err != nil {
+			return len(packet), 0, err
+		}
+		return len(packet), len(respBody), fmt.Errorf("服务端错误码 %d: service=%s route=%s", headerErr, def.Service, routeKey)
 	}
 
 	if err := ae.parseAndStoreResponse(def, respBody); err != nil {
@@ -630,7 +651,7 @@ func (ae *ActionExecutor) execUDPRequest(def *ActionDef) (int, int, error) {
 	if def.Timeout > 0 {
 		reqTimeout = append(reqTimeout, time.Duration(def.Timeout)*time.Second)
 	}
-	respBody, ok := ae.netSender.UDPRequest(def.Service, packet, respKey, reqTimeout...)
+	respBody, headerErr, ok := ae.netSender.UDPRequest(def.Service, packet, respKey, reqTimeout...)
 	elapsed := time.Since(start)
 	if !ok {
 		if def.Optional {
@@ -641,6 +662,13 @@ func (ae *ActionExecutor) execUDPRequest(def *ActionDef) (int, int, error) {
 		}
 		return len(packet), 0, fmt.Errorf("UDPRequest 失败: service=%s route=%s respKey=%s elapsed=%v",
 			def.Service, routeKey, respKey, elapsed)
+	}
+
+	if headerErr != 0 {
+		if err := ae.parseAndStoreResponse(def, respBody); err != nil {
+			return len(packet), 0, err
+		}
+		return len(packet), len(respBody), fmt.Errorf("服务端错误码 %d: service=%s route=%s", headerErr, def.Service, routeKey)
 	}
 
 	if err := ae.parseAndStoreResponse(def, respBody); err != nil {
@@ -683,8 +711,12 @@ func (ae *ActionExecutor) execUDPListen(def *ActionDef) (int, error) {
 			return 0, ae.ctx.Err()
 		}
 		pollCount++
-		respBody := ae.netSender.GetUDPListenResp(def.Service, respKey)
+		respBody, headerErr := ae.netSender.GetUDPListenResp(def.Service, respKey)
 		if respBody != nil {
+			if headerErr != 0 {
+				ae.parseAndStoreResponse(def, respBody)
+				return 0, fmt.Errorf("服务端错误码 %d: service=%s route=%s", headerErr, def.Service, routeKey)
+			}
 			if err := ae.parseAndStoreResponse(def, respBody); err != nil {
 				return 0, err
 			}
@@ -887,8 +919,12 @@ func (ae *ActionExecutor) execTCPListen(def *ActionDef) (int, error) {
 			return 0, ae.ctx.Err()
 		}
 		pollCount++
-		respBody := ae.netSender.GetTCPListenResp(def.Service, respKey)
+		respBody, headerErr := ae.netSender.GetTCPListenResp(def.Service, respKey)
 		if respBody != nil {
+			if headerErr != 0 {
+				ae.parseAndStoreResponse(def, respBody)
+				return 0, fmt.Errorf("服务端错误码 %d: service=%s route=%s", headerErr, def.Service, routeKey)
+			}
 			if err := ae.parseAndStoreResponse(def, respBody); err != nil {
 				return 0, err
 			}

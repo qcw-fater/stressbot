@@ -348,7 +348,7 @@ func (c *Connection) OnReceive(responseKey string, body []byte, headerErr uint64
 		zap.String("service", c.serviceName), zap.String("responseKey", responseKey),
 		zap.Int("bodyLen", len(body)))
 
-	resp := NewMessage(responseKey, body)
+	resp := NewMessage(responseKey, body, headerErr)
 
 	c.mu.Lock()
 	ch, exists := c.responseMap[responseKey]

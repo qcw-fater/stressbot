@@ -548,39 +548,39 @@ func (ns *netSenderAdapter) TCPSend(service string, packet []byte) (bool, int) {
 }
 
 // TCPRequest 发送 TCP 请求并等待响应。
-func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, responseKey string, timeout ...time.Duration) ([]byte, bool) {
+func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, responseKey string, timeout ...time.Duration) ([]byte, uint64, bool) {
 	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
 		stresslog.Warn("[ACTION] TCPRequest 连接不存在",
 			zap.String("service", service), zap.String("responseKey", responseKey))
-		return nil, false
+		return nil, 0, false
 	}
 	resp, _ := conn.RequestResponse(packet, responseKey, timeout...)
 	if resp == nil {
-		return nil, false
+		return nil, 0, false
 	}
 	stresslog.Debug("[ACTION] TCPResponse",
 		zap.String("service", service), zap.String("responseKey", responseKey),
-		zap.Int("bodyLen", len(resp.Data)))
-	return resp.Data, true
+		zap.Int("bodyLen", len(resp.Data)), zap.Uint64("headerErr", resp.HeaderErr))
+	return resp.Data, resp.HeaderErr, true
 }
 
 // UDPRequest 发送 UDP 请求并等待响应，与 TCPRequest 同样使用 channel 阻塞等待。
-func (ns *netSenderAdapter) UDPRequest(service string, packet []byte, responseKey string, timeout ...time.Duration) ([]byte, bool) {
+func (ns *netSenderAdapter) UDPRequest(service string, packet []byte, responseKey string, timeout ...time.Duration) ([]byte, uint64, bool) {
 	conn := ns.robot.client.GetUDPConn(service)
 	if conn == nil {
 		stresslog.Warn("[ACTION] UDPRequest 连接不存在",
 			zap.String("service", service), zap.String("responseKey", responseKey))
-		return nil, false
+		return nil, 0, false
 	}
 	resp, _ := conn.RequestResponse(packet, responseKey, timeout...)
 	if resp == nil {
-		return nil, false
+		return nil, 0, false
 	}
 	stresslog.Debug("[ACTION] UDPResponse",
 		zap.String("service", service), zap.String("responseKey", responseKey),
-		zap.Int("bodyLen", len(resp.Data)))
-	return resp.Data, true
+		zap.Int("bodyLen", len(resp.Data)), zap.Uint64("headerErr", resp.HeaderErr))
+	return resp.Data, resp.HeaderErr, true
 }
 
 // HTTPRequest 发送 HTTP 请求。
@@ -662,29 +662,29 @@ func (ns *netSenderAdapter) ConnectUDP(service, address string) bool {
 }
 
 // GetTCPListenResp 获取 TCP 连接的监听响应数据。
-func (ns *netSenderAdapter) GetTCPListenResp(service string, responseKey string) []byte {
+func (ns *netSenderAdapter) GetTCPListenResp(service string, responseKey string) ([]byte, uint64) {
 	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
-		return nil
+		return nil, 0
 	}
 	msg := conn.GetListenResp(responseKey)
 	if msg == nil {
-		return nil
+		return nil, 0
 	}
-	return msg.Data
+	return msg.Data, msg.HeaderErr
 }
 
 // GetUDPListenResp 获取 UDP 连接的监听响应数据。
-func (ns *netSenderAdapter) GetUDPListenResp(service string, responseKey string) []byte {
+func (ns *netSenderAdapter) GetUDPListenResp(service string, responseKey string) ([]byte, uint64) {
 	conn := ns.robot.client.GetUDPConn(service)
 	if conn == nil {
-		return nil
+		return nil, 0
 	}
 	msg := conn.GetListenResp(responseKey)
 	if msg == nil {
-		return nil
+		return nil, 0
 	}
-	return msg.Data
+	return msg.Data, msg.HeaderErr
 }
 
 // GetTCPSecretKey 获取 TCP 连接的加密密钥。

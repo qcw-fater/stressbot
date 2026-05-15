@@ -256,8 +256,9 @@ func networkTCPRequest(L *lua.LState) int {
 
 	var respBody []byte
 	var ok bool
+	var headerErr uint64
 	withReleasedMu(ctx.LuaMu, func() {
-		respBody, ok = ctx.NetSender.TCPRequest(service, packet, respKey)
+		respBody, headerErr, ok = ctx.NetSender.TCPRequest(service, packet, respKey)
 	})
 
 	if !ok {
@@ -265,6 +266,13 @@ func networkTCPRequest(L *lua.LState) int {
 		L.Push(lua.LNil)
 		L.Push(lua.LNumber(pktLen))
 		L.Push(lua.LNumber(0))
+		return 4
+	}
+	if headerErr != 0 {
+		L.Push(lua.LNumber(headerErr))
+		L.Push(lua.LString(string(respBody)))
+		L.Push(lua.LNumber(pktLen))
+		L.Push(lua.LNumber(len(respBody)))
 		return 4
 	}
 
@@ -332,9 +340,10 @@ func networkUDPRequest(L *lua.LState) int {
 	pktLen := len(packet)
 	var respBody []byte
 	var ok bool
+	var headerErr uint64
 
 	withReleasedMu(ctx.LuaMu, func() {
-		respBody, ok = ctx.NetSender.UDPRequest(
+		respBody, headerErr, ok = ctx.NetSender.UDPRequest(
 			service, packet, respKey,
 			time.Duration(timeout)*time.Second,
 		)
@@ -352,6 +361,13 @@ func networkUDPRequest(L *lua.LState) int {
 		L.Push(lua.LNil)
 		L.Push(lua.LNumber(pktLen))
 		L.Push(lua.LNumber(0))
+		return 4
+	}
+	if headerErr != 0 {
+		L.Push(lua.LNumber(headerErr))
+		L.Push(lua.LString(string(respBody)))
+		L.Push(lua.LNumber(pktLen))
+		L.Push(lua.LNumber(len(respBody)))
 		return 4
 	}
 
@@ -580,11 +596,12 @@ func networkTCPListen(L *lua.LState) int {
 
 	var respBody []byte
 	var timedOut bool
+	var headerErr uint64
 
 	withReleasedMu(ctx.LuaMu, func() {
 		deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 		for time.Now().Before(deadline) {
-			respBody = ctx.NetSender.GetTCPListenResp(service, responseKey)
+			respBody, headerErr = ctx.NetSender.GetTCPListenResp(service, responseKey)
 			if respBody != nil {
 				return
 			}
@@ -608,6 +625,11 @@ func networkTCPListen(L *lua.LState) int {
 			zap.String("service", service), zap.String("responseKey", responseKey), zap.Int("timeout", timeout))
 		L.Push(lua.LNil)
 		L.Push(lua.LNumber(0))
+		return 2
+	}
+	if headerErr != 0 {
+		L.Push(lua.LString(string(respBody)))
+		L.Push(lua.LNumber(len(respBody)))
 		return 2
 	}
 
@@ -664,11 +686,12 @@ func networkUDPListen(L *lua.LState) int {
 
 	var respBody []byte
 	var timedOut bool
+	var headerErr uint64
 
 	withReleasedMu(ctx.LuaMu, func() {
 		deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 		for time.Now().Before(deadline) {
-			respBody = ctx.NetSender.GetUDPListenResp(service, responseKey)
+			respBody, headerErr = ctx.NetSender.GetUDPListenResp(service, responseKey)
 			if respBody != nil {
 				return
 			}
@@ -692,6 +715,11 @@ func networkUDPListen(L *lua.LState) int {
 			zap.String("service", service), zap.String("responseKey", responseKey), zap.Int("timeout", timeout))
 		L.Push(lua.LNil)
 		L.Push(lua.LNumber(0))
+		return 2
+	}
+	if headerErr != 0 {
+		L.Push(lua.LString(string(respBody)))
+		L.Push(lua.LNumber(len(respBody)))
 		return 2
 	}
 
