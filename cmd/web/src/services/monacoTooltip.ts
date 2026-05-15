@@ -2,7 +2,7 @@
  * 全局 Monaco find-widget 中文 tooltip。
  *
  * 背景：全局 CSS 用 `display: none` 隐藏了 Monaco 的 `.workbench-hover-container`，
- * 以防止 find-widget 按钮的 tooltip 闪烁死循环。副作用是原生 hover 提示也消失了。
+ * 以防止 find-widget 按钮的 tooltip 闪烁死循环。`.monaco-hover`（代码 hover 提示）不受影响。
  * 此模块在 document 级别监听 find-widget 按钮的 mouseover/mouseout，自绘中文 tooltip。
  *
  * 用法：在顶层组件调用 `useMonacoFindTooltip(themeMode)`。

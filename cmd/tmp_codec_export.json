@@ -6,7 +6,8 @@
       "next": [
         "authLogin",
         "logicLogin",
-        "checkNewRole",
+        "gmCommands",
+        "setLbs",
         "businessLoop"
       ]
     },
@@ -24,7 +25,7 @@
     "RequestZoneList": {
       "type": "action",
       "action": "RequestZoneList",
-      "errorStrategy": "abort"
+      "breakOff": true
     },
     "RequestOutsideNotice": {
       "type": "action",
@@ -37,7 +38,7 @@
     "PostLogin": {
       "type": "action",
       "action": "PostLogin",
-      "errorStrategy": "abort"
+      "breakOff": true
     },
     "hasRole": {
       "type": "boolean",
@@ -47,12 +48,12 @@
     "createNewRole": {
       "type": "action",
       "action": "NewRole",
-      "errorStrategy": "abort"
+      "breakOff": true
     },
     "SelectRole": {
       "type": "action",
       "action": "SelectRole",
-      "errorStrategy": "abort"
+      "breakOff": true
     },
     "logicLogin": {
       "type": "sequence",
@@ -60,13 +61,14 @@
         "ConnectLogicTCP",
         "PlayerLogin",
         "RequestPlayerData",
-        "ReportBattleDelay"
+        "ReportBattleDelay",
+        "GetActivityList"
       ]
     },
     "ConnectLogicTCP": {
       "type": "action",
       "action": "ConnectLogicTCP",
-      "errorStrategy": "abort",
+      "breakOff": true,
       "listenCallbacks": [
         {
           "route": {
@@ -217,7 +219,7 @@
     "PlayerLogin": {
       "type": "action",
       "action": "PlayerLogin",
-      "errorStrategy": "abort"
+      "breakOff": true
     },
     "RequestPlayerData": {
       "type": "action",
@@ -255,6 +257,12 @@
     "GMFinishAllNewUserGuide": {
       "type": "action",
       "action": "GMFinishAllNewUserGuide"
+    },
+    "setLbs": {
+      "type": "sequence",
+      "next": [
+        "LbsPositioning"
+      ]
     },
     "LbsPositioning": {
       "type": "action",
@@ -689,25 +697,6 @@
     "DelFriend": {
       "type": "action",
       "action": "DelFriend"
-    },
-    "checkNewRole": {
-      "type": "boolean",
-      "condition": "state:isNewRole == true",
-      "trueNext": "initNewRole",
-      "falseNext": "GetActivityList"
-    },
-    "initNewRole": {
-      "type": "sequence",
-      "next": [
-        "gmCommands",
-        "unlockBasicFunctions",
-        "LbsPositioning"
-      ]
-    },
-    "unlockBasicFunctions": {
-      "type": "action",
-      "description": "解锁排位等基础功能",
-      "action": "action_Hp_apo"
     }
   },
   "actions": {
@@ -1466,7 +1455,7 @@
       "bindings": [
         {
           "type": "randomInt",
-          "field": "Id",
+          "field": "id",
           "min": 1,
           "max": 73
         }
@@ -2032,10 +2021,6 @@
           "path": "playerId|playerBase.playerId|base.playerId"
         }
       ]
-    },
-    "action_Hp_apo": {
-      "pattern": "lua",
-      "script": "unlock_basic_functions.lua"
     }
   },
   "callbacks": {

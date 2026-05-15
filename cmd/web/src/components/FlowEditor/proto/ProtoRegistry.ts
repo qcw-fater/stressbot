@@ -22,7 +22,8 @@ export class ProtoRegistry {
     this.enums.clear();
     walk(root, (ns) => {
       if (ns instanceof protobuf.Type) {
-        this.messages.set(ns.fullName.replace(/^\./, ''), this.toMessage(ns));
+        const msg = this.toMessage(ns);
+        this.messages.set(msg.fullName, msg);
       } else if (ns instanceof protobuf.Enum) {
         this.enums.set(ns.fullName.replace(/^\./, ''), this.toEnum(ns));
       }
@@ -64,6 +65,7 @@ export class ProtoRegistry {
       shortName: t.name,
       file: (t as unknown as { filename?: string }).filename,
       fields: Object.values(t.fields).map((f) => this.toField(f)),
+      comment: t.comment || undefined,
     };
   }
 
@@ -84,6 +86,7 @@ export class ProtoRegistry {
       mapValue: f instanceof protobuf.MapField ? f.type : undefined,
       enumName: f.resolvedType instanceof protobuf.Enum ? f.resolvedType.fullName.replace(/^\./, '') : undefined,
       messageName: f.resolvedType instanceof protobuf.Type ? f.resolvedType.fullName.replace(/^\./, '') : undefined,
+      comment: f.comment || undefined,
     };
   }
 

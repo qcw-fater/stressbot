@@ -23,6 +23,7 @@ import { LuaForm } from '../editors/ActionEditor/LuaForm';
 import { BackrefList } from './BackrefList';
 import { SaveTemplateButton } from '../library/SaveTemplateButton';
 import { listenKindTagColor } from './listenKindStyle';
+import { fetchBaselineScriptIndex } from '@/services/baselineApi';
 import { FloatingWindow } from '../panels/FloatingWindow';
 
 export function ListenEditor() {
@@ -72,11 +73,8 @@ export function ListenEditor() {
   // 拉取脚本列表（给 lua 模式的 AutoComplete 用）
   useEffect(() => {
     let cancel = false;
-    fetch('/conf/scripts/index.json')
-      .then((r) => (r.ok ? r.json() : []))
-      .then((list: string[]) => {
-        if (!cancel) setFiles(list);
-      })
+    fetchBaselineScriptIndex()
+      .then((list) => { if (!cancel) setFiles(list); })
       .catch(() => undefined);
     return () => { cancel = true; };
   }, []);

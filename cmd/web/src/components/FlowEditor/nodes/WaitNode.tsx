@@ -11,10 +11,18 @@ interface NodeData {
   node: FlowNode;
 }
 
+function fmtVal(ms: number | undefined): string {
+  if (ms == null || !Number.isFinite(ms)) return '?';
+  return ms.toLocaleString();
+}
+
 export function WaitNode({ id, data, selected }: NodeProps) {
   const { node } = data as unknown as NodeData;
-  const ms = node.waitMs ?? 0;
-  const seconds = (ms / 1000).toFixed(ms % 1000 === 0 ? 0 : 2);
+  const hasRandom = typeof node.waitMin === 'number' || typeof node.waitMax === 'number';
+
+  const label = hasRandom
+    ? `${fmtVal(node.waitMin)}~${fmtVal(node.waitMax)}ms`
+    : `${fmtVal(node.waitMs)}ms`;
 
   return (
     <>
@@ -27,7 +35,9 @@ export function WaitNode({ id, data, selected }: NodeProps) {
         selected={selected}
         description={node.description}
       >
-        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--node-wait-border-active)' }}>{seconds}s</div>
+        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--node-wait-border-active)' }}>
+          {label}
+        </div>
       </NodeShell>
       <Handle type="source" position={Position.Right} id="out" />
     </>

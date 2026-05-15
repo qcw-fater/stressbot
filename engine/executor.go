@@ -115,7 +115,12 @@ func (e *Executor) executeSequence(ctx context.Context, node *Node) error {
 // executeLoop 循环节点：循环执行单个 body 节点。
 // 支持次数控制、前置条件、后置条件、break/continue 信号捕获。
 func (e *Executor) executeLoop(ctx context.Context, node *Node) error {
-	for i := 0; node.LoopCount <= 0 || i < node.LoopCount; i++ {
+	if node.LoopCount == 0 {
+		stresslog.Warn("[ENGINE] loop 节点 loopCount=0，跳过循环体")
+		return nil
+	}
+
+	for i := 0; node.LoopCount < 0 || i < node.LoopCount; i++ {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -213,16 +218,27 @@ func (e *Executor) executeWeighted(ctx context.Context, node *Node) error {
 
 	total := 0
 	for _, opt := range node.Options {
-		total += opt.Weight
+		w := opt.Weight
+		if w < 0 {
+			stresslog.Warn("[ENGINE] weighted 选项权重为负，视为 0",
+				zap.String("node", opt.Node), zap.Int("weight", w))
+			w = 0
+		}
+		total += w
 	}
-	if total == 0 {
+	if total <= 0 {
+		stresslog.Warn("[ENGINE] weighted 所有选项权重之和 ≤ 0，跳过")
 		return nil
 	}
 
 	r := rand.Intn(total)
 	cumulative := 0
 	for _, opt := range node.Options {
-		cumulative += opt.Weight
+		w := opt.Weight
+		if w < 0 {
+			w = 0
+		}
+		cumulative += w
 		if r < cumulative {
 			return e.executeNode(ctx, opt.Node)
 		}
@@ -231,16 +247,35 @@ func (e *Executor) executeWeighted(ctx context.Context, node *Node) error {
 	return e.executeNode(ctx, node.Options[len(node.Options)-1].Node)
 }
 
-// executeWait 等待节点：暂停指定时间。
+// executeWait 等待节点：暂停指定时间。支持固定和随机两种模式。
 func (e *Executor) executeWait(ctx context.Context, node *Node) error {
-	if node.WaitMs <= 0 {
+	var ms int
+
+	if node.WaitMin > 0 && node.WaitMax > 0 {
+		if node.WaitMin >= node.WaitMax {
+			stresslog.Warn("[ENGINE] wait 节点 waitMin >= waitMax，使用 waitMin",
+				zap.Int("waitMin", node.WaitMin), zap.Int("waitMax", node.WaitMax))
+			ms = node.WaitMin
+		} else {
+			ms = rand.Intn(node.WaitMax-node.WaitMin+1) + node.WaitMin
+		}
+	} else if node.WaitMin > 0 || node.WaitMax > 0 {
+		stresslog.Warn("[ENGINE] wait 节点 waitMin/waitMax 必须同时 > 0",
+			zap.Int("waitMin", node.WaitMin), zap.Int("waitMax", node.WaitMax))
+		return nil
+	} else if node.WaitMs > 0 {
+		ms = node.WaitMs
+	} else {
+		if node.WaitMs < 0 {
+			stresslog.Warn("[ENGINE] wait 节点 waitMs < 0，跳过", zap.Int("waitMs", node.WaitMs))
+		}
 		return nil
 	}
 
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-time.After(time.Duration(node.WaitMs) * time.Millisecond):
+	case <-time.After(time.Duration(ms) * time.Millisecond):
 		return nil
 	}
 }

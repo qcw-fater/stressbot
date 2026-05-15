@@ -10,6 +10,7 @@ import { ProtoBrowser } from '../../proto/ProtoBrowser';
 import { RouteEditor } from '../../listens/RouteEditor';
 import { BindingsTable } from './BindingsTable';
 import { StoreTable } from './StoreTable';
+import { protoRegistry } from '../../proto/ProtoRegistry';
 
 export interface DeclarativeFormProps {
   action: ActionDef;
@@ -119,6 +120,7 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
             />
             <Button icon={<ApiOutlined />} onClick={() => setProtoTarget('c2s')} />
           </Space.Compact>
+          <ProtoHint fullName={action.c2sProto} />
         </Form.Item>
       )}
 
@@ -132,6 +134,7 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
             />
             <Button icon={<ApiOutlined />} onClick={() => setProtoTarget('s2c')} />
           </Space.Compact>
+          <ProtoHint fullName={action.s2cProto} />
         </Form.Item>
       )}
 
@@ -228,4 +231,15 @@ function patternHas(pattern: ActionPattern, fields: Array<keyof ActionDef>): boo
   };
   const allowed = map[pattern] ?? [];
   return fields.some((f) => allowed.includes(f));
+}
+
+function ProtoHint({ fullName }: { fullName?: string }) {
+  if (!fullName || !protoRegistry.isLoaded()) return null;
+  const msg = protoRegistry.lookupMessage(fullName);
+  if (!msg?.comment) return null;
+  return (
+    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
+      {msg.comment}
+    </div>
+  );
 }

@@ -9,7 +9,7 @@ import { Button, Modal, Radio, Space, Tag, Typography } from 'antd';
 import { DiffEditor } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 import type { BaselineSyncResult, ConflictDecision, ResourceType, SyncDiff } from '@/services/resourcesStore';
-import { applyConflictResolution, pushResourcesToBaseline } from '@/services/resourcesStore';
+import { applyConflictResolution } from '@/services/resourcesStore';
 import { useRef, useState } from 'react';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { saveSkippedConflict, hashContent } from '@/components/FlowEditor/skippedConflicts';
@@ -89,7 +89,6 @@ export function BaselineSyncModal({ open, result, onClose, onResolved }: Baselin
         }
       }
       await applyConflictResolution(decArray);
-      await pushResourcesToBaseline();
       releaseEditors();
       onClose();
       onResolved?.();

@@ -10,6 +10,7 @@
  */
 
 import type { ApiErrorBody } from '@/types/api';
+import { API_PREFIX } from './env';
 
 /**
  * `ApiError` 是所有非 2xx 响应的统一异常类型。
@@ -31,8 +32,7 @@ export class ApiError extends Error {
   }
 }
 
-/** 默认 API 前缀；vite dev server 会代理到 Admin :8080，生产由 Admin 同源托管。 */
-const API_PREFIX = '/api';
+/** API 前缀；vite dev server 会代理到 Admin :8080，生产由 Admin 同源托管。 */
 
 /** 内部统一入口：所有方法走它。 */
 async function request<T>(method: string, path: string, init?: RequestInit): Promise<T> {

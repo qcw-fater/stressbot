@@ -42,6 +42,44 @@ func (f *Factory) SetField(msg proto.Message, fieldPath string, value any) error
 	return f.setNestedField(msg.ProtoReflect(), parts, value)
 }
 
+// SetFieldsFromMap 批量设置消息字段。
+// 遍历 map[string]any 的每个键值对，调用 SetField。
+// 对 message 类型的字段，若值为 map[string]any 则自动创建子消息并递归填充。
+func (f *Factory) SetFieldsFromMap(msg proto.Message, fields map[string]any) error {
+	ref := msg.ProtoReflect()
+	desc := ref.Descriptor()
+
+	for key, value := range fields {
+		fd := desc.Fields().ByName(protoreflect.Name(key))
+		if fd == nil {
+			fd = findFieldCaseInsensitive(desc, key)
+		}
+		if fd == nil {
+			return fmt.Errorf("消息 %s 未找到字段 %s", string(desc.FullName()), key)
+		}
+
+		// 嵌套 message 且值为 map：自动创建子消息并递归
+		if fd.Kind() == protoreflect.MessageKind && !fd.IsMap() && !fd.IsList() {
+			if subMap, ok := value.(map[string]any); ok {
+				subMsg, err := f.Create(string(fd.Message().FullName()))
+				if err != nil {
+					return fmt.Errorf("自动创建子消息 %s 失败: %w", string(fd.Message().FullName()), err)
+				}
+				if err := f.SetFieldsFromMap(subMsg, subMap); err != nil {
+					return err
+				}
+				ref.Set(fd, protoreflect.ValueOfMessage(subMsg.ProtoReflect()))
+				continue
+			}
+		}
+
+		if err := f.SetField(msg, key, value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // splitPath 将 "a.b[0].c" 拆分为 ["a", "b", "[0]", "c"]
 func splitPath(path string) []string {
 	var out []string

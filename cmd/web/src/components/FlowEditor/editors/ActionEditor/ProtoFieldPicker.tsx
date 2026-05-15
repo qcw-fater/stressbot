@@ -46,12 +46,17 @@ export function ProtoFieldPicker({
   const options = fields.map((f) => ({
     value: f.name,
     label: (
-      <span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
         <code>{f.name}</code>
-        <Tag style={{ marginLeft: 6 }} color={protoFieldKindColor(f.kind)}>
+        <Tag style={{ marginLeft: 0 }} color={protoFieldKindColor(f.kind)}>
           {f.repeated ? '[]' : ''}
           {f.kind === 'map' ? `map<${f.mapKey},${f.mapValue}>` : f.type}
         </Tag>
+        {f.comment && (
+          <span style={{ fontSize: 10, color: 'var(--text-quaternary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {f.comment}
+          </span>
+        )}
       </span>
     ),
   }));

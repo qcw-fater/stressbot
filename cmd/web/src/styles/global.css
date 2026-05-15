@@ -29,13 +29,11 @@ body,
 }
 
 /*
- * Monaco hover 容器全局隐藏，防止 find-widget 按钮 tooltip 闪烁死循环。
- * 根因：.workbench-hover-container 覆盖按钮 → mouseout → 隐藏 → mouseover → 显示 → 死循环。
- * pointer-events: none 无效（Monaco 会重建容器），只有 display: none 能彻底断开触发链。
- * 替代方案：自绘中文 tooltip（见 useMonacoFindTooltip hook）。
+ * Monaco find-widget 按钮 tooltip 用 .workbench-hover-container，会覆盖按钮导致闪烁死循环。
+ * 只隐藏该容器；.monaco-hover 是 registerHoverProvider（Lua 代码提示等）用的，不能隐藏。
+ * 替代方案：find-widget 按钮的自绘中文 tooltip（见 useMonacoFindTooltip hook）。
  */
 .monaco-editor .workbench-hover-container,
-.monaco-editor .monaco-hover,
 .workbench-hover-container {
   display: none !important;
 }

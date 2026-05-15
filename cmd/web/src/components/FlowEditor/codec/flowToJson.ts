@@ -62,7 +62,9 @@ function cleanNode(n: FlowNode): FlowNode {
       if (n.options?.length) out.options = n.options.map((o): WeightedOption => ({ node: o.node, weight: o.weight }));
       break;
     case 'wait':
-      if (typeof n.waitMs === 'number') out.waitMs = n.waitMs;
+      if (typeof n.waitMs === 'number' && n.waitMs !== 0) out.waitMs = n.waitMs;
+      if (typeof n.waitMin === 'number') out.waitMin = n.waitMin;
+      if (typeof n.waitMax === 'number') out.waitMax = n.waitMax;
       break;
     case 'break':
     case 'continue':

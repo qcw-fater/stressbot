@@ -234,9 +234,17 @@ export function ConditionInput({ value, onChange, placeholder }: ConditionInputP
           ref={inputRef as never}
           value={tail}
           onChange={(e) => setTail(e.target.value)}
+          onBlur={() => {
+            if (mode === 'lua' && tail.trim() && !tail.trim().endsWith('.lua')) {
+              setTail(tail.trim() + '.lua');
+            }
+          }}
           placeholder={placeholder ?? (mode === 'lua' ? '脚本文件名（如 check_role.lua）' : '如 hp > 0 && alive')}
           style={{ flex: 1 }}
         />
+        {mode === 'lua' && tail?.trim() && !tail.trim().endsWith('.lua') && (
+          <Tag color="purple">.lua</Tag>
+        )}
         {mode === 'lua' && (
           <Button
             icon={<EditOutlined />}

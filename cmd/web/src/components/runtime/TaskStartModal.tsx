@@ -46,7 +46,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useShallow } from 'zustand/react/shallow';
 import { showApiError, startTask, useRuntimeStore } from '@/services';
-import { listProto, listScript, syncResourcesFromBaseline, pushResourcesToBaseline, type ResourceFile } from '@/services/resourcesStore';
+import { listProto, listScript, syncResourcesFromBaseline, type ResourceFile } from '@/services/resourcesStore';
 import { syncFlowScriptsToIdb, collectFlowScriptNames } from '@/services/scriptSync';
 import { useFlowStore } from '@/components/FlowEditor/store/flowStore';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
@@ -165,8 +165,6 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
               conflicts: newConflicts,
               removed: newRemoved,
             });
-          } else {
-            void pushResourcesToBaseline();
           }
         }
       } finally {

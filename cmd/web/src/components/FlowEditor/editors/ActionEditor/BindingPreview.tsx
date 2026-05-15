@@ -1,18 +1,16 @@
 /**
- * Binding 预览：模拟 binding 运行时产出，无需后端参与。
+ * Binding 值模拟：根据 binding 类型生成预览值，无需后端参与。
  */
 
 import type { ConditionDef, FieldBind } from '@/types/action';
-import { protoRegistry } from '../../proto/ProtoRegistry';
 
-type PreviewResult =
+export type PreviewResult =
   | { kind: 'skipped'; reason: string }
   | { kind: 'concrete'; display: string }
   | { kind: 'placeholder'; display: string }
   | { kind: 'error'; message: string };
 
-function simulateBinding(fb: FieldBind): PreviewResult {
-  // 条件检查
+export function simulateBinding(fb: FieldBind): PreviewResult {
   if (fb.condition) {
     const cond = conditionSummary(fb.condition);
     return { kind: 'placeholder', display: `条件: ${cond}` };
@@ -57,6 +55,13 @@ function simulateBinding(fb: FieldBind): PreviewResult {
       const sample = Math.floor(Math.random() * (max - min + 1)) + min;
       return { kind: 'concrete', display: `${sample}  ← [${min}, ${max}]` };
     }
+    case 'randomFloat': {
+      const min = fb.min ?? 0;
+      const max = fb.max ?? 1;
+      const prec = fb.precision ?? 2;
+      const sample = Number((Math.random() * (max - min) + min).toFixed(prec));
+      return { kind: 'concrete', display: `${sample}  ← [${min}, ${max}] 精度=${prec}` };
+    }
     case 'randomBool': {
       const sample = Math.random() < 0.5;
       return { kind: 'concrete', display: `${sample}` };
@@ -98,51 +103,4 @@ function genSampleString(len: number): string {
   let s = '';
   for (let i = 0; i < Math.min(len, 16); i++) s += chars[Math.floor(Math.random() * chars.length)];
   return len > 16 ? s + '...' : s;
-}
-
-function checkTypeCompat(fb: FieldBind, messageFullName?: string): string | null {
-  if (!messageFullName || !fb.field) return null;
-  // field might be a path like a.b[0].c, so we only check the last part if we can't resolve the full path
-  // For simplicity, we just skip type checking for nested paths in the preview
-  if (fb.field.includes('.') || fb.field.includes('[')) return null;
-
-  const field = protoRegistry.resolveField(messageFullName, fb.field);
-  if (!field) return null;
-  const ft = field.type;
-  const isNum = /^(int|uint|float|double|fixed|sfixed)/.test(ft);
-  const isStr = ft === 'string' || ft === 'bytes';
-  if (isNum && fb.type === 'randomString') return `字段类型 ${ft}，binding 产出 string`;
-  if (isStr && (fb.type === 'randomInt' || fb.type === 'randomBool')) return `字段类型 ${ft}，binding 产出 number/bool`;
-  return null;
-}
-
-export interface BindingPreviewProps {
-  binding: FieldBind;
-  messageFullName?: string;
-}
-
-export function BindingPreview({ binding, messageFullName }: BindingPreviewProps) {
-  const result = simulateBinding(binding);
-  const warn = checkTypeCompat(binding, messageFullName);
-
-  const colorMap: Record<string, string> = {
-    concrete: 'var(--color-success)',
-    placeholder: 'var(--text-tertiary)',
-    error: 'var(--color-error)',
-    skipped: 'var(--text-tertiary)',
-  };
-
-  return (
-    <div style={{ fontSize: 11, lineHeight: 1.6 }}>
-      <span style={{ color: 'var(--text-tertiary)' }}>预览: </span>
-      <span style={{ color: colorMap[result.kind] }}>
-        {result.kind === 'error' ? result.message : result.kind === 'skipped' ? result.reason : result.display}
-      </span>
-      {warn && (
-        <div style={{ color: 'var(--color-error)', marginTop: 2 }}>
-          ⚠ {warn}
-        </div>
-      )}
-    </div>
-  );
 }

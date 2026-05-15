@@ -28,6 +28,7 @@ import { registerLuaProviders } from '../../lua/luaProviders';
 import { checkLuaSyntax, type SyntaxIssue } from '../../lua/luaSyntaxClient';
 import { LuaApiPopover } from '../../lua/LuaApiPopover';
 import { addScript, getScript } from '@/services/resourcesStore';
+import { fetchBaselineScriptIndex, fetchBaselineScript } from '@/services/baselineApi';
 
 export type LuaMode = 'action' | 'listen' | 'boolean';
 
@@ -76,6 +77,12 @@ end
 `,
 };
 
+function ensureLuaSuffix(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return '';
+  return trimmed.endsWith('.lua') ? trimmed : `${trimmed}.lua`;
+}
+
 export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaFormProps) {
   const { message } = AntApp.useApp();
   const [files, setFiles] = useState<string[]>([]);
@@ -102,18 +109,15 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
   // 拉取脚本列表
   useEffect(() => {
     let cancel = false;
-    fetch('/conf/scripts/index.json')
-      .then((r) => (r.ok ? r.json() : []))
-      .then((list: string[]) => {
-        if (!cancel) setFiles(list);
-      })
+    fetchBaselineScriptIndex()
+      .then((list) => { if (!cancel) setFiles(list); })
       .catch(() => undefined);
     return () => {
       cancel = true;
     };
   }, []);
 
-  // 拉取选中脚本内容：IDB 优先 → fetch /conf/scripts/ 兜底
+  // 拉取选中脚本内容：IDB 优先 → baselineApi 兜底
   useEffect(() => {
     if (!script) {
       const tpl = TEMPLATE[mode];
@@ -140,11 +144,10 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
           setLoading(false);
           return;
         }
-        const r = await fetch('/conf/scripts/' + script);
+        const body = await fetchBaselineScript(script);
         if (cancel) return;
         let text: string | null = null;
-        if (r.ok) {
-          const body = await r.text();
+        if (body) {
           const lower = body.slice(0, 200).toLowerCase();
           if (!lower.includes('<!doctype') && !lower.includes('<html')) {
             text = body;
@@ -176,11 +179,13 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
   }, [script, mode]);
 
   const handleSave = useCallback(async () => {
-    const name = script?.trim();
-    if (!name) {
+    const raw = script?.trim();
+    if (!raw) {
       message.warning('请先填写脚本文件名');
       return;
     }
+    const name = ensureLuaSuffix(raw);
+    if (name !== script) onChangeScript(name);
     try {
       await addScript(name, content);
       setHasLocalDraft(true);
@@ -213,7 +218,7 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
   };
 
   const onDownload = () => {
-    const name = script || `${mode}_template.lua`;
+    const name = ensureLuaSuffix(script || `${mode}_template`);
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -292,6 +297,9 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
               (option?.value as string)?.toLowerCase().includes(input.toLowerCase()) ?? false
             }
           />
+          {script?.trim() && !script.trim().endsWith('.lua') && (
+            <Tag color="purple">.lua</Tag>
+          )}
           <Upload accept=".lua" beforeUpload={onImport} showUploadList={false}>
             <Button icon={<ImportOutlined />} size="small">
               导入
@@ -399,7 +407,7 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
           scrollBeyondLastLine: false,
           readOnly: false,
           fixedOverflowWidgets: true,
-          quickSuggestions: { other: true, comments: false, strings: false },
+          quickSuggestions: { other: true, comments: false, strings: true },
           parameterHints: { enabled: true, cycle: true },
           suggestOnTriggerCharacters: true,
         }}

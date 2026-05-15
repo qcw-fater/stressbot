@@ -14,6 +14,7 @@
  */
 
 import { clear, createStore, del, get, keys, set, setMany } from 'idb-keyval';
+import { API_PREFIX, BASELINE_PREFIX } from './env';
 
 const PROTO_DB = 'stressbot-resources-proto';
 const SCRIPT_DB = 'stressbot-resources-scripts';
@@ -138,7 +139,7 @@ export async function clearScript(): Promise<void> {
 // === Adapter (codec.lua) ===
 
 const CODEC_LUA_KEY = 'codec.lua';
-const CODEC_BASELINE_URL = '/conf/adapter/codec.lua';
+const CODEC_BASELINE_URL = `${BASELINE_PREFIX}/adapter/codec.lua`;
 
 export async function getAdapterScript(): Promise<ResourceFile | undefined> {
   return get<ResourceFile>(CODEC_LUA_KEY, adapterStore);
@@ -163,7 +164,7 @@ export async function clearAdapterScript(): Promise<void> {
 
 const REQUIRED_ADAPTER_FUNCTIONS = [
   'header_size',
-  'body_length_info',
+  'body_length',
   'encode_tcp',
   'encode_udp',
   'decode_tcp',
@@ -205,6 +206,31 @@ export async function ensureAdapterScript(): Promise<string | null> {
 }
 
 // === 统一基线同步 ===
+
+const LAST_BASELINE_KEY = 'stressbot:baseline:lastIndex';
+
+interface LastBaselineIndex {
+  proto: string[];
+  script: string[];
+  adapter: boolean;
+}
+
+function loadLastBaseline(): LastBaselineIndex | null {
+  try {
+    const raw = localStorage.getItem(LAST_BASELINE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveLastBaseline(index: LastBaselineIndex): void {
+  try {
+    localStorage.setItem(LAST_BASELINE_KEY, JSON.stringify(index));
+  } catch {
+    // localStorage 不可用，静默
+  }
+}
 
 export type ResourceType = 'proto' | 'script' | 'adapter';
 
@@ -252,16 +278,22 @@ export async function syncResourcesFromBaseline(): Promise<BaselineSyncResult> {
 
   // 并行拉取三个基线索引
   const [protoIndex, scriptIndex, adapterText] = await Promise.all([
-    fetchIndex('/conf/proto/index.json'),
-    fetchIndex('/conf/scripts/index.json'),
+    fetchIndex(`${BASELINE_PREFIX}/proto/index.json`),
+    fetchIndex(`${BASELINE_PREFIX}/scripts/index.json`),
     fetchFileText(CODEC_BASELINE_URL),
   ]);
 
+  // 加载上次基线快照，用于区分"本地新建"和"远端已删除"
+  const lastBaseline = loadLastBaseline();
+  const lastProtoSet = new Set(lastBaseline?.proto ?? []);
+  const lastScriptSet = new Set(lastBaseline?.script ?? []);
+  const hadAdapter = lastBaseline?.adapter ?? false;
+
   // --- Proto ---
-  await syncFileGroup(protoIndex, 'proto', protoStore, '/conf/proto/', result);
+  await syncFileGroup(protoIndex, 'proto', protoStore, `${BASELINE_PREFIX}/proto/`, result, lastProtoSet);
 
   // --- Scripts ---
-  await syncFileGroup(scriptIndex, 'script', scriptStore, '/conf/scripts/', result);
+  await syncFileGroup(scriptIndex, 'script', scriptStore, `${BASELINE_PREFIX}/scripts/`, result, lastScriptSet);
 
   // --- Adapter ---
   const existingAdapter = await getAdapterScript();
@@ -279,7 +311,8 @@ export async function syncResourcesFromBaseline(): Promise<BaselineSyncResult> {
         baselineContent: adapterText,
       });
     }
-  } else if (existingAdapter) {
+  } else if (existingAdapter && hadAdapter) {
+    // 仅当上次快照中 adapter 存在时才算"远端已删除"
     result.removed.push({
       type: 'adapter',
       name: CODEC_LUA_KEY,
@@ -287,6 +320,13 @@ export async function syncResourcesFromBaseline(): Promise<BaselineSyncResult> {
       baselineContent: '',
     });
   }
+
+  // 同步完成后保存当前基线快照
+  saveLastBaseline({
+    proto: protoIndex,
+    script: scriptIndex,
+    adapter: adapterText !== null,
+  });
 
   return result;
 }
@@ -308,14 +348,14 @@ export async function applyConflictResolution(decisions: ConflictDecision[]): Pr
         await clear(adapterStore);
       }
     } else if (d.type === 'proto') {
-      const baseline = await fetchFileText(`/conf/proto/${encodeURIComponent(d.name)}`);
+      const baseline = await fetchFileText(`${BASELINE_PREFIX}/proto/${encodeURIComponent(d.name)}`);
       if (baseline !== null) {
         await addProto(d.name, baseline);
       } else {
         await del(d.name, protoStore);
       }
     } else {
-      const baseline = await fetchFileText(`/conf/scripts/${encodeURIComponent(d.name)}`);
+      const baseline = await fetchFileText(`${BASELINE_PREFIX}/scripts/${encodeURIComponent(d.name)}`);
       if (baseline !== null) {
         await addScript(d.name, baseline);
       } else {
@@ -355,6 +395,7 @@ async function syncFileGroup(
   store: ReturnType<typeof createStore>,
   urlPrefix: string,
   result: BaselineSyncResult,
+  lastBaselineNames: Set<string>,
 ): Promise<void> {
   // 收集 IDB 中已有的所有 key
   const idbKeys = new Set(
@@ -413,9 +454,10 @@ async function syncFileGroup(
     }
   }
 
-  // 基线没有、IDB 有 → removed
+  // 基线没有、IDB 有、且上次基线快照中存在 → 远端已删除（真冲突）
+  // 基线没有、IDB 有、但上次快照中也不存在 → 本地新建，不算冲突
   for (const key of idbKeys) {
-    if (!baselineSet.has(key)) {
+    if (!baselineSet.has(key) && lastBaselineNames.has(key)) {
       const existing = await get<ResourceFile>(key, store);
       if (existing) {
         result.removed.push({
@@ -452,8 +494,8 @@ function byteLength(s: string): number {
 // === 基线回写 ===
 
 /**
- * 将 IDB 中所有资源推送到后端磁盘基线，使下次 sync 不会误报冲突。
- * 在 conflict resolution 完成后、或 editor mount 发现已有资源时调用。
+ * 将 IDB 中所有资源推送到后端磁盘基线（svn commit）。
+ * 仅在启动任务时由后端 writeBaselineFiles 调用；前端不主动调用。
  */
 export async function pushResourcesToBaseline(): Promise<void> {
   try {
@@ -470,7 +512,7 @@ export async function pushResourcesToBaseline(): Promise<void> {
       fd.append('adapter/codec.lua', new Blob([adapter.content]), 'codec.lua');
     }
 
-    await fetch('/api/resources/baseline', { method: 'POST', body: fd });
+    await fetch(`${API_PREFIX}/resources/baseline`, { method: 'POST', body: fd });
   } catch {
     // 静默：基线不可用时不阻塞编辑器
   }

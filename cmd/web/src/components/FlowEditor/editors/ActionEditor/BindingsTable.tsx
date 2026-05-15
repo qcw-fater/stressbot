@@ -9,11 +9,12 @@ import { Button, Collapse, Input, Select, Space, Switch, Tag, Tooltip } from 'an
 import { ArrowUpOutlined, ArrowDownOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import type { CollapseProps } from 'antd';
 import type { BindingType, ConditionDef, FieldBind } from '@/types/action';
+import type { ProtoField } from '@/types/proto';
 import { useState } from 'react';
 import { ProtoPathInput } from './ProtoPathInput';
 import { StateKeyInput } from './StateKeyInput';
 import { BindingTypeForm } from './BindingTypeForm';
-import { BindingPreview } from './BindingPreview';
+import { protoRegistry } from '../../proto/ProtoRegistry';
 
 export interface BindingsTableProps {
   /** 当前绑定列表所属的 message 全名（用于字段下拉） */
@@ -25,7 +26,7 @@ export interface BindingsTableProps {
 const TYPE_GROUPS: { label: string; types: BindingType[] }[] = [
   { label: '固定值', types: ['fixed'] },
   { label: 'state 取值', types: ['state', 'stateFirst', 'stateRandom', 'stateRandomN', 'stateMapKey', 'stateMapValue', 'listSize'] },
-  { label: '随机', types: ['randomPick', 'randomPickN', 'randomPickMap', 'randomInt', 'randomBool', 'randomString', 'randomExclude'] },
+  { label: '随机', types: ['randomPick', 'randomPickN', 'randomPickMap', 'randomInt', 'randomFloat', 'randomBool', 'randomString', 'randomExclude'] },
 ];
 
 const BINDING_TYPE_DESC: Record<BindingType, string> = {
@@ -37,13 +38,14 @@ const BINDING_TYPE_DESC: Record<BindingType, string> = {
   stateMapKey: '从 state map 中随机取一个 key',
   stateMapValue: '从 state map 中随机取一个 value',
   listSize: '取 state list 的长度',
-  randomPick: '从 choices 列表中随机选一个',
-  randomPickN: '从 choices 列表中随机选 N 个（返回列表）',
-  randomPickMap: '从 map 的 value 列表中随机选一个',
+  randomPick: '从 values 列表中随机选一个',
+  randomPickN: '从 values 列表中随机选 N 个（返回列表）',
+  randomPickMap: '按 keySource 查表，从匹配的 values 中随机选一个',
   randomInt: '随机整数，范围 [min, max]',
-  randomBool: '随机布尔值，可设 true 概率',
-  randomString: '随机字符串，指定长度和字符集',
-  randomExclude: '从 choices 中排除 exclude 后随机选一个',
+  randomFloat: '随机浮点数，范围 [min, max]，可设精度',
+  randomBool: '随机布尔值',
+  randomString: '随机字符串，指定长度',
+  randomExclude: '从 values 中排除指定 state key 后随机选一个',
 };
 
 const TYPE_OPTIONS = TYPE_GROUPS.map((g) => ({
@@ -62,17 +64,29 @@ export function BindingsTable({ messageFullName, value, onChange }: BindingsTabl
     set(arr);
   };
 
-  const items: CollapseProps['items'] = list.map((b, i) => ({
+  const items: CollapseProps['items'] = list.map((b, i) => {
+    const fieldComment = messageFullName && b.field
+      ? resolveFieldPath(messageFullName, b.field)?.comment
+      : undefined;
+    return {
     key: String(i),
     label: (
       <Space>
-        <code>{b.field || '(未指定字段)'}</code>
-        <Tag color="blue">{b.type}</Tag>
-        {b.required && <Tag color="red">required</Tag>}
-        {b.optional && <Tag color="default">optional</Tag>}
-        {b.wrap && <Tag color="purple">wrap</Tag>}
-        {b.storeAs && <Tag color="green">→ {b.storeAs}</Tag>}
-	        {b.condition && <Tag color="orange">condition</Tag>}
+        {fieldComment ? (
+          <Tooltip title={fieldComment} mouseEnterDelay={0.4}>
+            <code>{b.field || '(未指定字段)'}</code>
+          </Tooltip>
+        ) : (
+          <code>{b.field || '(未指定字段)'}</code>
+        )}
+        <Tooltip title={BINDING_TYPE_DESC[b.type]} mouseEnterDelay={0.4}>
+          <Tag color="blue">{b.type}</Tag>
+        </Tooltip>
+        {b.required && <Tooltip title="缺失时报错" mouseEnterDelay={0.4}><Tag color="red">required</Tag></Tooltip>}
+        {b.optional && <Tooltip title="缺失时跳过" mouseEnterDelay={0.4}><Tag color="default">optional</Tag></Tooltip>}
+        {b.wrap && <Tooltip title="单值包成 [v]" mouseEnterDelay={0.4}><Tag color="purple">wrap</Tag></Tooltip>}
+        {b.storeAs && <Tooltip title={`存入 state：${b.storeAs}`} mouseEnterDelay={0.4}><Tag color="green">→ {b.storeAs}</Tag></Tooltip>}
+        {b.condition && <Tooltip title="有条件绑定" mouseEnterDelay={0.4}><Tag color="orange">condition</Tag></Tooltip>}
       </Space>
     ),
     extra: (
@@ -109,7 +123,7 @@ export function BindingsTable({ messageFullName, value, onChange }: BindingsTabl
         }}
       />
     ),
-  }));
+  }});
 
   return (
     <div style={{ paddingLeft: 0 }}>
@@ -140,7 +154,6 @@ function BindingRow({
   onChange: (b: FieldBind) => void;
 }) {
   const set = (partial: Partial<FieldBind>) => onChange({ ...binding, ...partial });
-  const [showPreview, setShowPreview] = useState(false);
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="middle">
       <Space wrap style={{ width: '100%' }}>
@@ -217,17 +230,23 @@ function BindingRow({
         />
       </Space>
       <ConditionEditor value={binding.condition} onChange={(c) => set({ condition: c })} />
-      <div style={{ borderTop: '1px dashed var(--divider-bg)', paddingTop: 6 }}>
-        <a onClick={() => setShowPreview(!showPreview)} style={{ fontSize: 11 }}>
-          {showPreview ? '隐藏预览' : '显示预览'}
-        </a>
-        {showPreview && <BindingPreview binding={binding} messageFullName={messageFullName} />}
-      </div>
     </Space>
   );
 }
 
 const CONDITION_OPS = ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'in', 'notNil', 'isNil'] as const;
+const CONDITION_OP_META: Record<string, { label: string; desc: string }> = {
+  eq:       { label: '= 等于',       desc: '字段值等于指定值' },
+  neq:      { label: '≠ 不等于',     desc: '字段值不等于指定值' },
+  gt:       { label: '> 大于',       desc: '字段值大于指定值' },
+  gte:      { label: '≥ 大于等于',   desc: '字段值大于或等于指定值' },
+  lt:       { label: '< 小于',       desc: '字段值小于指定值' },
+  lte:      { label: '≤ 小于等于',   desc: '字段值小于或等于指定值' },
+  contains: { label: '包含',         desc: '字符串包含指定子串' },
+  in:       { label: '在列表中',     desc: '字段值在指定列表中' },
+  notNil:   { label: '不为空',       desc: '无需填 value' },
+  isNil:    { label: '为空',         desc: '无需填 value' },
+};
 
 const COND_LABEL: React.CSSProperties = { fontSize: 12, color: 'var(--text-tertiary)' };
 
@@ -236,9 +255,11 @@ function ConditionEditor({ value, onChange }: { value?: ConditionDef; onChange: 
 
   if (!value) {
     return (
-      <a onClick={() => onChange({ source: '', op: 'eq' })} style={{ fontSize: 11 }}>
-        + 添加条件
-      </a>
+      <Tooltip title="运行时先检查条件，不满足则跳过此 binding" mouseEnterDelay={0.4}>
+        <a onClick={() => onChange({ source: '', op: 'eq' })} style={{ fontSize: 11 }}>
+          + 添加条件
+        </a>
+      </Tooltip>
     );
   }
 
@@ -247,7 +268,9 @@ function ConditionEditor({ value, onChange }: { value?: ConditionDef; onChange: 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
-      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>条件（不满足时跳过本绑定）</span>
+      <Tooltip title="运行时先检查条件，不满足则跳过此 binding" mouseEnterDelay={0.4}>
+        <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>条件（不满足时跳过本绑定）</span>
+      </Tooltip>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={COND_LABEL}>source</span>
         <StateKeyInput
@@ -270,7 +293,15 @@ function ConditionEditor({ value, onChange }: { value?: ConditionDef; onChange: 
         <Select
           value={value.op || 'eq'}
           onChange={(v) => update({ op: v })}
-          options={CONDITION_OPS.map((o) => ({ value: o, label: o }))}
+          options={CONDITION_OPS.map((o) => ({ value: o, label: CONDITION_OP_META[o]?.label ?? o, title: '' }))}
+          optionRender={(opt) => {
+            const m = CONDITION_OP_META[opt.value as string];
+            return (
+              <Tooltip title={m?.desc} mouseEnterDelay={0.3} placement="right">
+                <div>{opt.label}</div>
+              </Tooltip>
+            );
+          }}
           style={{ width: 90 }}
           size="small"
         />
@@ -294,4 +325,21 @@ function ConditionEditor({ value, onChange }: { value?: ConditionDef; onChange: 
       </div>
     </div>
   );
+}
+
+function resolveFieldPath(messageFullName: string, path: string): ProtoField | undefined {
+  const segments = path
+    .split(/[\.\[]/)
+    .map(s => s.replace(/\]$/, ''))
+    .filter(s => s && !/^\d+$/.test(s));
+  let currentMsg = messageFullName;
+  let field: ProtoField | undefined;
+  for (const seg of segments) {
+    field = protoRegistry.resolveField(currentMsg, seg);
+    if (!field) return undefined;
+    if (field.messageName) {
+      currentMsg = field.messageName;
+    }
+  }
+  return field;
 }

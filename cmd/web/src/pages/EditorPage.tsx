@@ -45,6 +45,7 @@ import { SystemTab } from '@/components/monitoring/tabs/SystemTab';
 import { LogsTab } from '@/components/monitoring/tabs/LogsTab';
 import { FloatingWindow } from '@/components/FlowEditor/panels/FloatingWindow';
 import type { RobotConfig, TaskBrief } from '@/types/api';
+import { fetchBaselineConfig } from '@/services/baselineApi';
 
 export function EditorPage() {
   return (
@@ -330,13 +331,12 @@ async function syncDefaultRobotConfigFromConf(): Promise<void> {
   } as const;
 
   try {
-    const r = await fetch('/conf/config.json');
-    if (!r.ok) return;
-    const cfg = (await r.json()) as {
+    const cfg = await fetchBaselineConfig<{
       bot?: { accountPrefix?: string; startNumber?: number; mainService?: string; concurrentNum?: number };
       network?: { heartbeatInterval?: string; tcpTimeout?: string; httpTimeout?: string };
       monitor?: { apdexT?: number };
-    };
+    }>();
+    if (!cfg) return;
 
     const cur = useRuntimeStore.getState().robotConfig;
     const patch: Partial<RobotConfig> = {};

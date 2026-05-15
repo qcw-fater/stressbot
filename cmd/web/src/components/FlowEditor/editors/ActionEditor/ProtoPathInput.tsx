@@ -51,9 +51,14 @@ export function ProtoPathInput({
         return {
           value: f.name,
           label: (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: '100%' }}>
               <span>{f.name}{f.repeated ? '[]' : ''}</span>
               <span style={{ fontSize: 10, color: 'var(--text-terti)' }}>{typeLabel}</span>
+              {f.comment && (
+                <span style={{ fontSize: 10, color: 'var(--text-quaternary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  — {f.comment}
+                </span>
+              )}
             </span>
           ),
           isLeaf: !isMsg || !children || children.length === 0,

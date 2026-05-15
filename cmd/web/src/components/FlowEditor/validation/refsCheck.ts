@@ -57,12 +57,25 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
   // R1：必须有 main 节点
   if (!nodes.main) {
     issues.push({ severity: 'error', code: 'NO_MAIN', message: '缺少入口节点 "main"' });
+  } else if (nodes.main.type !== 'sequence') {
+    issues.push({ severity: 'warning', code: 'MAIN_NOT_SEQUENCE', message: `main 节点类型应为 sequence（当前为 ${nodes.main.type}）`, location: { kind: 'node', id: 'main' } });
   }
+
+  // 预计算 loop body 子图（break/continue 位置检测用）
+  const loopBodyNodes = collectLoopBodyNodes(nodes);
 
   // R2/R3/R4：节点引用合法性 + 类型校验
   for (const [id, node] of Object.entries(nodes)) {
     const ref = (target: string | undefined, field: string) => {
       if (!target) return;
+      if (target === id) {
+        issues.push({
+          severity: 'error', code: 'NODE_SELF_REF',
+          message: `节点 "${id}" 的 ${field} 指向自身（会导致无限循环）`,
+          location: { kind: 'node', id },
+        });
+        return;
+      }
       if (!nodes[target]) {
         issues.push({
           severity: 'error', code: 'NODE_REF_NOT_FOUND',
@@ -100,10 +113,17 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
           location: { kind: 'node', id },
         });
       }
+      if (node.loopCount === 0) {
+        issues.push({
+          severity: 'warning', code: 'LOOP_COUNT_ZERO',
+          message: `loop 节点 "${id}" loopCount=0 无意义（不会执行循环体）`,
+          location: { kind: 'node', id },
+        });
+      }
       const hasCount = typeof node.loopCount === 'number' && node.loopCount > 0;
       const hasCond = !!node.condition?.trim();
       const hasBreak = !!node.breakCondition?.trim();
-      if (!hasCount && !hasCond && !hasBreak) {
+      if (!hasCount && !hasCond && !hasBreak && node.loopCount !== 0) {
         issues.push({
           severity: 'warning', code: 'LOOP_NO_TERMINATION',
           message: `loop 节点 "${id}" 既无 loopCount 也无 condition / breakCondition，将无限循环`,
@@ -128,10 +148,40 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
       ref(node.trueNext, 'trueNext');
       ref(node.falseNext, 'falseNext');
     } else if (node.type === 'wait') {
-      if (typeof node.waitMs !== 'number' || node.waitMs <= 0) {
+      const hasRandom = typeof node.waitMin === 'number' || typeof node.waitMax === 'number';
+      if (hasRandom) {
+        if (typeof node.waitMin !== 'number' || typeof node.waitMax !== 'number') {
+          issues.push({
+            severity: 'error', code: 'WAIT_RANDOM_INCOMPLETE',
+            message: `wait 节点 "${id}" 随机模式需要同时设置 waitMin 和 waitMax`,
+            location: { kind: 'node', id },
+          });
+        } else {
+          if (node.waitMin <= 0 || node.waitMax <= 0) {
+            issues.push({
+              severity: 'error', code: 'WAIT_RANDOM_NON_POSITIVE',
+              message: `wait 节点 "${id}" waitMin/waitMax 必须 > 0`,
+              location: { kind: 'node', id },
+            });
+          }
+          if (node.waitMin >= node.waitMax) {
+            issues.push({
+              severity: 'error', code: 'WAIT_RANDOM_MIN_GE_MAX',
+              message: `wait 节点 "${id}" waitMin 必须 < waitMax`,
+              location: { kind: 'node', id },
+            });
+          }
+        }
+      } else if (typeof node.waitMs !== 'number' || node.waitMs === 0) {
         issues.push({
-          severity: 'error', code: 'WAIT_NO_MS',
-          message: `wait 节点 "${id}" 缺少有效的 waitMs（必须为正整数）`,
+          severity: 'warning', code: 'WAIT_NO_MS',
+          message: `wait 节点 "${id}" 缺少有效的等待时长（将直接跳过）`,
+          location: { kind: 'node', id },
+        });
+      } else if (node.waitMs < 0) {
+        issues.push({
+          severity: 'error', code: 'WAIT_NEGATIVE_MS',
+          message: `wait 节点 "${id}" waitMs 不能为负数`,
           location: { kind: 'node', id },
         });
       }
@@ -145,6 +195,21 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
         });
       }
       const total = opts.reduce((s, o) => s + Math.max(0, o.weight), 0);
+      opts.forEach((o, i) => {
+        if (o.weight < 0) {
+          issues.push({
+            severity: 'error', code: 'WEIGHTED_NEGATIVE_WEIGHT',
+            message: `weighted 节点 "${id}" options[${i}] 权重不能为负数`,
+            location: { kind: 'node', id },
+          });
+        } else if (o.weight === 0) {
+          issues.push({
+            severity: 'warning', code: 'WEIGHTED_ZERO_WEIGHT',
+            message: `weighted 节点 "${id}" options[${i}] 权重为 0（不会被选中）`,
+            location: { kind: 'node', id },
+          });
+        }
+      });
       if (total <= 0 && opts.length > 0) {
         issues.push({
           severity: 'error', code: 'WEIGHTED_ALL_ZERO',
@@ -153,7 +218,23 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
         });
       }
       opts.forEach((o, i) => ref(o.node, `options[${i}].node`));
+    } else if (node.type === 'break' || node.type === 'continue') {
+      if (!loopBodyNodes.has(id)) {
+        issues.push({
+          severity: 'error', code: 'BREAK_CONTINUE_OUTSIDE_LOOP',
+          message: `${node.type} 节点 "${id}" 不在任何 loop 内，运行时将导致错误`,
+          location: { kind: 'node', id },
+        });
+      }
     } else if (node.type === 'action') {
+      // errorStrategy 值校验
+      if (node.errorStrategy && node.errorStrategy !== 'ignore' && node.errorStrategy !== 'abort') {
+        issues.push({
+          severity: 'warning', code: 'INVALID_ERROR_STRATEGY',
+          message: `action 节点 "${id}" 的 errorStrategy "${node.errorStrategy}" 不合法（应为 ignore 或 abort）`,
+          location: { kind: 'node', id },
+        });
+      }
       if (!node.action) {
         issues.push({
           severity: 'error', code: 'ACTION_REF_EMPTY',
@@ -314,6 +395,10 @@ function checkAction(name: string, def: ActionDef): ValidationIssue[] {
   if (p === 'httpRequest' && !def.url) {
     issues.push({ severity: 'error', code: 'ACTION_NO_URL', message: `action "${name}" pattern=httpRequest 缺少 url`, location: loc });
   }
+  // setState with no bindings is a no-op
+  if (p === 'setState' && (!def.bindings || def.bindings.length === 0)) {
+    issues.push({ severity: 'warning', code: 'SETSTATE_NO_BINDINGS', message: `action "${name}" pattern=setState 缺少 bindings（无实际效果）`, location: loc });
+  }
 
   // proto 真实存在校验
   if (protoRegistry.isLoaded()) {
@@ -439,6 +524,11 @@ function checkBindings(prefix: string, bindings: FieldBind[], loc: { kind: 'acti
           issues.push({ severity: 'warning', code: 'BINDING_INVALID_RANGE', message: `${label} type=randomInt min >= max`, location: loc });
         }
         break;
+      case 'randomFloat':
+        if (b.min != null && b.max != null && b.min >= b.max) {
+          issues.push({ severity: 'warning', code: 'BINDING_INVALID_RANGE', message: `${label} type=randomFloat min >= max`, location: loc });
+        }
+        break;
       case 'randomBool':
         break;
       case 'randomString':
@@ -500,6 +590,32 @@ function detectOrphanNodes(nodes: Record<string, { type: string; next?: string[]
     }
   }
   return issues;
+}
+
+// ── break/continue 位置检测 ──────────────────────────────────
+
+type NodeLike = { type: string; next?: string[]; body?: string; trueNext?: string; falseNext?: string; options?: Array<{ node: string }> };
+
+/** 收集所有 loop body 子图中的节点 ID */
+function collectLoopBodyNodes(nodes: Record<string, NodeLike>): Set<string> {
+  const inLoop = new Set<string>();
+  const visit = (id: string) => {
+    if (inLoop.has(id)) return;
+    const node = nodes[id];
+    if (!node) return;
+    inLoop.add(id);
+    (node.next ?? []).forEach(visit);
+    if (node.body) visit(node.body);
+    if (node.trueNext) visit(node.trueNext);
+    if (node.falseNext) visit(node.falseNext);
+    (node.options ?? []).forEach((o) => visit(o.node));
+  };
+  for (const node of Object.values(nodes)) {
+    if (node.type === 'loop' && node.body) {
+      visit(node.body);
+    }
+  }
+  return inLoop;
 }
 
 // ── 工具 ─────────────────────────────────────────────────────

@@ -17,7 +17,7 @@ import { validateFlow } from '@/components/FlowEditor/validation/refsCheck';
 import { useMetricsStore } from '@/components/FlowEditor/nodes/shared/MetricsBadge';
 import * as tasksApi from './tasksApi';
 import { listProto, listScript, getAdapterScript } from './resourcesStore';
-import { syncFlowScriptsToIdb } from './scriptSync';
+import { syncFlowScriptsToIdb, collectFlowScriptNames, collectFlowProtoNames } from './scriptSync';
 import { useRuntimeStore } from './runtimeStore';
 import { ApiError } from './api';
 import type { RobotConfig, TaskBrief, TaskDetail } from '@/types/api';
@@ -114,6 +114,10 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
     );
   }
   const [protos, scripts, adapterRes] = await Promise.all([listProto(), listScript(), getAdapterScript()]);
+
+  // 只提交 flow 引用到的脚本；proto 文件无法从 message 全名静态映射到文件名，全量提交
+  const scriptNames = new Set(collectFlowScriptNames(flowJson));
+  const usedScripts = scripts.filter((s) => scriptNames.has(s.name));
   const adapterContent = adapterRes?.content ?? null;
   if (!adapterContent) {
     throw new ApiError(
@@ -159,7 +163,7 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
   for (const f of protos) {
     fd.append(`proto/${f.name}`, new Blob([f.content], { type: 'text/plain' }), f.name);
   }
-  for (const f of scripts) {
+  for (const f of usedScripts) {
     fd.append(`scripts/${f.name}`, new Blob([f.content], { type: 'text/plain' }), f.name);
   }
   if (adapterContent) {

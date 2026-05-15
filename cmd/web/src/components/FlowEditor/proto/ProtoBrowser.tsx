@@ -136,30 +136,65 @@ export function ProtoBrowser({ windowId: customWindowId, open: openProp, onClose
               }}
             />
           </div>
-          <div style={{ flex: 1, overflow: 'auto' }}>
+          <div style={{ flex: 1, overflow: 'auto', padding: '0 4px' }}>
             {!detail ? (
               <Empty description="选择左侧 message 查看字段" />
             ) : (
               <div>
-                <Typography.Title level={5} style={{ marginTop: 0 }}>
-                  {detail.fullName}
-                </Typography.Title>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 2 }}>
+                  <Typography.Title level={5} style={{ margin: 0 }}>
+                    {detail.fullName}
+                  </Typography.Title>
+                  <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                    {detail.fields.length} 个字段
+                  </Typography.Text>
+                </div>
+                {detail.comment && (
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>{detail.comment}</div>
+                )}
                 <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                  <colgroup>
+                    <col style={{ width: 32 }} />
+                    <col style={{ width: '30%' }} />
+                    <col style={{ width: '30%' }} />
+                    <col />
+                  </colgroup>
                   <thead>
                     <tr style={{ textAlign: 'left', color: 'var(--text-tertiary)' }}>
-                      <th style={{ width: 40 }}>#</th>
+                      <th>#</th>
                       <th>字段名</th>
                       <th>类型</th>
-                      <th style={{ width: 80 }}>repeated</th>
+                      <th>注释</th>
                     </tr>
                   </thead>
                   <tbody>
                     {detail.fields.map((f) => (
                       <tr key={f.number} style={{ borderTop: '1px solid var(--divider-bg)' }}>
-                        <td style={{ color: 'var(--text-tertiary)' }}>{f.number}</td>
-                        <td><code>{f.name}</code></td>
-                        <td>{f.kind === 'map' ? `map<${f.mapKey}, ${f.mapValue}>` : f.type}</td>
-                        <td>{f.repeated ? '✓' : ''}</td>
+                        <td style={{ color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums' }}>{f.number}</td>
+                        <td><code style={{ fontSize: 12 }}>{f.name}</code></td>
+                        <td>
+                          <code style={{ fontSize: 12 }}>
+                            {f.kind === 'map' ? `map<${f.mapKey}, ${f.mapValue}>` : f.type}
+                          </code>
+                          {f.repeated && (
+                            <span style={{
+                              marginLeft: 4, fontSize: 10, color: 'var(--color-primary, #1677ff)',
+                              background: 'var(--node-selected-bg, rgba(22,119,255,0.08))',
+                              padding: '0 4px', borderRadius: 3,
+                            }}>repeated</span>
+                          )}
+                          {f.optional && !f.repeated && (
+                            <span style={{
+                              marginLeft: 4, fontSize: 10, color: 'var(--text-tertiary)',
+                              background: 'var(--fill-quaternary, rgba(0,0,0,0.02))',
+                              padding: '0 4px', borderRadius: 3,
+                            }}>optional</span>
+                          )}
+                        </td>
+                        <td style={{
+                          color: 'var(--text-secondary)',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }} title={f.comment}>{f.comment ?? ''}</td>
                       </tr>
                     ))}
                   </tbody>

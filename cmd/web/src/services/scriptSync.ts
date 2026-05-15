@@ -11,6 +11,7 @@
  */
 
 import { addScript, getScript } from './resourcesStore';
+import { BASELINE_PREFIX } from './env';
 import type { FlowJson } from '@/components/FlowEditor/codec/flowToJson';
 
 export interface ScriptSyncResult {
@@ -75,7 +76,7 @@ function parseLuaCondition(raw: string | undefined): string | null {
  */
 export async function syncFlowScriptsToIdb(
   flow: FlowJson,
-  baseUrl = '/conf/scripts/',
+  baseUrl = `${BASELINE_PREFIX}/scripts/`,
 ): Promise<ScriptSyncResult> {
   const names = collectFlowScriptNames(flow);
   const added: string[] = [];
@@ -108,4 +109,20 @@ export async function syncFlowScriptsToIdb(
   skipped.sort();
   missing.sort();
   return { added, skipped, missing };
+}
+
+/**
+ * 收集 flow 中引用的所有 proto 全名。
+ * 覆盖 actions[].c2sProto / s2cProto 和 callbacks[].s2cProto。
+ */
+export function collectFlowProtoNames(flow: FlowJson): Set<string> {
+  const set = new Set<string>();
+  for (const a of Object.values(flow.actions ?? {})) {
+    if (a?.c2sProto) set.add(a.c2sProto);
+    if (a?.s2cProto) set.add(a.s2cProto);
+  }
+  for (const c of Object.values(flow.callbacks ?? {})) {
+    if (c?.s2cProto) set.add(c.s2cProto);
+  }
+  return set;
 }

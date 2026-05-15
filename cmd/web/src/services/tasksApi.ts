@@ -3,6 +3,7 @@
  */
 
 import { adaptList, buildQuery, del, getJson, postJson, postMultipart } from './api';
+import { API_PREFIX } from './env';
 import type {
   CreateTaskResponse,
   StartTaskResponse,
@@ -68,5 +69,5 @@ export function deleteTask(id: string): Promise<void> {
 
 /** 任务配置文件下载链接（用于 a 标签 href，无需走 fetch） */
 export function taskConfigUrl(id: string, path: string): string {
-  return `/api/tasks/${encodeURIComponent(id)}/config/${path}`;
+  return `${API_PREFIX}/tasks/${encodeURIComponent(id)}/config/${path}`;
 }

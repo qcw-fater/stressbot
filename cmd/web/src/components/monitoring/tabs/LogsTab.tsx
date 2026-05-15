@@ -14,6 +14,7 @@ import type { editor } from 'monaco-editor';
 import { Button, Input, Modal, Select, Space, Switch, Table } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { logsApi, usePolling, useRuntimeStore } from '@/services';
+import { API_PREFIX } from '@/services/env';
 import type { LogEntry, LogFileInfo } from '@/types/api';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import dayjs from 'dayjs';
@@ -150,8 +151,8 @@ export function LogsTab({ open }: { open: boolean }) {
 
   const downloadFile = (name: string) => {
     const url = target === 'admin'
-      ? `/api/logs/admin/files/${encodeURIComponent(name)}`
-      : `/api/logs/agents/${encodeURIComponent(target)}/files/${encodeURIComponent(name)}`;
+      ? `${API_PREFIX}/logs/admin/files/${encodeURIComponent(name)}`
+      : `${API_PREFIX}/logs/agents/${encodeURIComponent(target)}/files/${encodeURIComponent(name)}`;
     window.open(url, '_blank');
   };
 

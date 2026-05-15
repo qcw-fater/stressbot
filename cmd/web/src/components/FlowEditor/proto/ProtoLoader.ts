@@ -16,6 +16,8 @@
 
 import * as protobuf from 'protobufjs';
 import { listProto } from '@/services/resourcesStore';
+import { API_PREFIX } from '@/services/env';
+import { fetchBaselineProtoIndex, fetchBaselineProtoContent } from '@/services/baselineApi';
 
 // 关键：路径相对当前文件 (web/src/components/FlowEditor/proto/ProtoLoader.ts) 到 stressbot/conf/proto。
 // 必须是字面量，不能动态拼接（vite 编译期解析）。
@@ -44,7 +46,7 @@ export async function loadProtos(source: ProtoSource): Promise<LoadResult> {
     case 'static':
       return loadFromInline();
     case 'api':
-      return loadFromHttp(source.baseUrl, '/api/proto/files', '/api/proto/file/');
+      return loadFromHttp(source.baseUrl, `${API_PREFIX}/proto/files`, `${API_PREFIX}/proto/file/`);
     case 'files':
       return loadFromFiles(source.files);
   }
@@ -71,10 +73,10 @@ async function loadFromInline(): Promise<LoadResult> {
     console.warn(`[ProtoLoader] IndexedDB 读取失败，回退到 /conf/proto/：`, (e as Error).message);
   }
 
-  // 2) 走 HTTP（vite.config.ts 中 confMountPlugin 已挂 /conf/* 中间件）：稳定且不打包 .proto 内容到 bundle
+  // 2) 走 baselineApi（Admin 服务器或 Vite 代理提供）
   try {
-    const r = await loadFromHttp('', '/conf/proto/index.json', '/conf/proto/');
-    console.log(`[ProtoLoader] 通过 /conf/proto/ 加载成功（${r.files.length} 个文件）`);
+    const r = await loadFromBaselineApi();
+    console.log(`[ProtoLoader] 通过 baselineApi 加载成功（${r.files.length} 个文件）`);
     return r;
   } catch (e) {
     console.warn(`[ProtoLoader] /conf/proto/ 加载失败，尝试 import.meta.glob 兜底：`, (e as Error).message);
@@ -95,6 +97,20 @@ async function loadFromInline(): Promise<LoadResult> {
   }
   files.sort();
   console.log(`[ProtoLoader] 通过 import.meta.glob 加载（${files.length} 个文件）`);
+  return parseAll(sources, files);
+}
+
+async function loadFromBaselineApi(): Promise<LoadResult> {
+  const files = await fetchBaselineProtoIndex();
+  if (files.length === 0) throw new Error('proto index 为空');
+  const sources: Record<string, string> = {};
+  await Promise.all(
+    files.map(async (name) => {
+      const content = await fetchBaselineProtoContent(name);
+      if (content === null) throw new Error(`加载 ${name} 失败`);
+      sources[name] = content;
+    }),
+  );
   return parseAll(sources, files);
 }
 
@@ -162,7 +178,7 @@ async function parseAll(
     callback(new Error('not found: ' + filename));
   };
 
-  type LoadOpts = { keepCase?: boolean; alternateCommentMode?: boolean };
+  type LoadOpts = { keepCase?: boolean; alternateCommentMode?: boolean; preferTrailingComment?: boolean };
   type LoadFn = (
     filename: string | string[],
     options?: LoadOpts,
@@ -171,9 +187,11 @@ async function parseAll(
   const load = (root.load as unknown) as LoadFn;
   const errors: string[] = [];
 
+  const parseOpts = { keepCase: true, alternateCommentMode: true, preferTrailingComment: true };
+
   // 第一阶段：root.load 整体加载（按 import 依赖图自动排序）
   await new Promise<void>((resolve) => {
-    load.call(root, fileList, { keepCase: true }, (err) => {
+    load.call(root, fileList, parseOpts, (err) => {
       if (err) {
         // 不致命：root.load 遇错会中止，下方逐文件兜底 parse 仍可能补齐
         errors.push(`load 阶段：${err.message}`);
@@ -187,7 +205,7 @@ async function parseAll(
   let registeredAfterLoad = countMessages(root);
   for (const name of fileList) {
     try {
-      protobuf.parse(sources[name], root, { keepCase: true });
+      protobuf.parse(sources[name], root, parseOpts);
     } catch (e) {
       const msg = (e as Error).message;
       if (msg.includes('duplicate name')) continue;

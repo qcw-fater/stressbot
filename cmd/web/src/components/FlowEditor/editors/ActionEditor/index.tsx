@@ -8,8 +8,8 @@
  * 由 NodeEditorDrawer 在 node.type === 'action' 时调用。
  */
 
-import { Alert, App as AntApp, AutoComplete, Button, Collapse, Form, Input, Modal, Select, Space, Switch } from 'antd';
-import { EditOutlined } from '@ant-design/icons';
+import { Alert, App as AntApp, AutoComplete, Button, Collapse, Form, Input, Modal, Select, Space, Switch, Tag } from 'antd';
+import { EditOutlined, EyeOutlined } from '@ant-design/icons';
 import { useMemo, useState, useEffect } from 'react';
 import { useFlowStore } from '../../store/flowStore';
 import { useFloatingWindowStore } from '../../store/floatingWindowStore';
@@ -19,7 +19,9 @@ import { LuaForm } from './LuaForm';
 import { ListenRefsTable } from '../../listens/ListenRefsTable';
 import { DelayInput } from '../shared/DelayInput';
 import { SaveTemplateButton } from '../../library/SaveTemplateButton';
+import { ActionPreview } from './ActionPreview';
 import type { ActionDef, ActionPattern } from '@/types/action';
+import { fetchBaselineScriptIndex } from '@/services/baselineApi';
 
 export interface ActionEditorProps {
   nodeId: string;
@@ -35,6 +37,7 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
   const updateAction = useFlowStore((s) => s.updateAction);
 
   const [editorOpen, setEditorOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [luaDirty, setLuaDirty] = useState(false);
   const [files, setFiles] = useState<string[]>([]);
 
@@ -50,11 +53,8 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
   // 拉取脚本列表（给 lua 模式的 AutoComplete 用）
   useEffect(() => {
     let cancel = false;
-    fetch('/conf/scripts/index.json')
-      .then((r) => (r.ok ? r.json() : []))
-      .then((list: string[]) => {
-        if (!cancel) setFiles(list);
-      })
+    fetchBaselineScriptIndex()
+      .then((list) => { if (!cancel) setFiles(list); })
       .catch(() => undefined);
     return () => { cancel = true; };
   }, []);
@@ -102,6 +102,16 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
           <Space>
             <PatternSelector value={effectiveAction.pattern} onChange={onPatternChange} />
             <SaveTemplateButton kind="action" name={actionName} data={effectiveAction} description={node.description} />
+            {PREVIEWABLE_PATTERNS.includes(effectiveAction.pattern) && (
+              <Button
+                size="small"
+                icon={<EyeOutlined />}
+                disabled={!effectiveAction.c2sProto && !effectiveAction.s2cProto && effectiveAction.pattern !== 'setState'}
+                onClick={() => setPreviewOpen(true)}
+              >
+                预览
+              </Button>
+            )}
           </Space>
         </Form.Item>
       </Form>
@@ -127,6 +137,12 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
               style={{ flex: 1 }}
               value={effectiveAction.script ?? ''}
               onChange={(v) => onActionDefChange({ ...effectiveAction, script: v })}
+              onBlur={() => {
+                const cur = effectiveAction.script?.trim() ?? '';
+                if (cur && !cur.endsWith('.lua')) {
+                  onActionDefChange({ ...effectiveAction, script: cur + '.lua' });
+                }
+              }}
               options={files.map((f) => ({ value: f, label: f }))}
               placeholder="输入新文件名或选择已有脚本"
               allowClear
@@ -134,6 +150,9 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
                 (option?.value as string)?.toLowerCase().includes(input.toLowerCase()) ?? false
               }
             />
+            {effectiveAction.script?.trim() && !effectiveAction.script.trim().endsWith('.lua') && (
+              <Tag color="purple">.lua</Tag>
+            )}
             <Button
               icon={<EditOutlined />}
               onClick={() => setEditorOpen(true)}
@@ -212,6 +231,32 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
         />
         </div>
       </Modal>
+
+      {/* 消息预览 Modal */}
+      <Modal
+        open={previewOpen}
+        title={
+          <span>
+            消息预览 <code style={{ color: 'var(--text-secondary)' }}>{actionName || '(未命名)'}</code>
+          </span>
+        }
+        onCancel={() => setPreviewOpen(false)}
+        footer={[
+          <Button key="close" onClick={() => setPreviewOpen(false)}>
+            关闭
+          </Button>,
+        ]}
+        width={800}
+        destroyOnHidden
+        styles={{ mask: { zIndex: popupZ }, wrapper: { zIndex: popupZ + 1 } }}
+      >
+        <ActionPreview action={effectiveAction} />
+      </Modal>
     </div>
   );
 }
+
+const PREVIEWABLE_PATTERNS: ActionPattern[] = [
+  'tcpSend', 'tcpRequest', 'udpSend', 'udpRequest',
+  'httpRequest', 'setState', 'tcpListen', 'udpListen',
+];

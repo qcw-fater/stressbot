@@ -51,7 +51,9 @@ type Node struct {
 	Options []WeightedOption `json:"options"` // 加权选项列表
 
 	// ── wait 专用 ─────────────────────────────────────────────────
-	WaitMs int `json:"waitMs"` // 等待时长（毫秒）
+	WaitMs  int `json:"waitMs"`  // 固定等待时长（毫秒）；仅当 WaitMin/WaitMax 都 ≤ 0 时生效
+	WaitMin int `json:"waitMin"` // 随机等待最小值（毫秒，含）；与 WaitMax 配合使用
+	WaitMax int `json:"waitMax"` // 随机等待最大值（毫秒，含）；WaitMin/WaitMax 同时 > 0 时随机模式优先
 
 	// ── 通用（action 节点有效）────────────────────────────
 	DelayMs int `json:"delayMs"` // > 0: 使用此值；= 0: 使用 TaskFlow.DefaultDelayMs；< 0: 禁用延迟
@@ -141,15 +143,16 @@ type ActionDef struct {
 // Wrap 为 true 时，将单个值包装为 []any{val}，用于 repeated 字段赋单个元素的场景。
 type FieldBind struct {
 	Field         string        `json:"field"`         // 目标 proto 字段名（支持嵌套如 "heroList[0].heroId"）
-	Type          string        `json:"type"`          // 绑定类型：fixed / state / stateFirst / stateRandom / stateRandomN / stateMapKey / stateMapValue / randomPick / randomPickMap / randomExclude / randomInt / randomString / listSize
+	Type          string        `json:"type"`          // 绑定类型：fixed / state / stateFirst / stateRandom / stateRandomN / stateMapKey / stateMapValue / randomPick / randomPickMap / randomExclude / randomInt / randomFloat / randomString / listSize
 	Value         any           `json:"value"`         // fixed: 固定值
 	Source        string        `json:"source"`        // 数据来源 state key（state/stateFirst/stateRandom/stateRandomN/stateMapKey/stateMapValue/randomPick/randomExclude 使用）
 	Path          string        `json:"path"`          // 从 state 值中导航取子字段（如 "items[0].itemId"）
 	Values        []any         `json:"values"`        // randomPick/randomPickN/randomPickMap/randomExclude: 候选值列表
 	Required      bool          `json:"required"`      // true = 字段缺失时动作报错（不再静默跳过）
 	Filters       []FilterDef   `json:"filters"`       // stateMapValue/stateMapKey: 过滤条件列表
-	Min           int           `json:"min"`           // randomInt: 最小值（含）
-	Max           int           `json:"max"`           // randomInt: 最大值（含）
+	Min           int           `json:"min"`           // randomInt/randomFloat: 最小值（含）
+	Max           int           `json:"max"`           // randomInt/randomFloat: 最大值（含）
+	Precision     int           `json:"precision"`     // randomFloat: 小数位数（默认 2）
 	Length        int           `json:"length"`        // randomString: 字符串长度
 	Count         int           `json:"count"`         // stateRandomN/randomPickN: 选取数量
 	Charset       string        `json:"charset"`       // randomString: 字符集（alpha/numeric/alphanum）

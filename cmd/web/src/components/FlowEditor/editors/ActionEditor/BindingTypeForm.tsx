@@ -21,7 +21,7 @@
  *   nestedList    : items[] (递归 message + bindings)
  */
 
-import { Input, InputNumber, Select, Space } from 'antd';
+import { Input, InputNumber, Select, Space, Tooltip } from 'antd';
 import { useMemo } from 'react';
 import type { FieldBind } from '@/types/action';
 import { useFlowStore } from '../../store/flowStore';
@@ -108,7 +108,7 @@ export function BindingTypeForm({ binding, currentBindings, onChange }: BindingT
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
           <SourcePathRows binding={binding} currentBindings={currentBindings} set={set} sourceProto={sourceProto} showPath />
-          <FiltersField binding={binding} set={set} />
+          <FiltersField binding={binding} set={set} sourceProto={sourceProto} />
         </div>
       );
     case 'stateRandomN':
@@ -124,20 +124,21 @@ export function BindingTypeForm({ binding, currentBindings, onChange }: BindingT
               onChange={(v) => set({ count: (v as number) ?? undefined })}
             />
           </div>
+          <FiltersField binding={binding} set={set} sourceProto={sourceProto} />
         </div>
       );
     case 'stateMapKey':
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
           <SourcePathRows binding={binding} currentBindings={currentBindings} set={set} sourceProto={sourceProto} showPath={false} />
-          <FiltersField binding={binding} set={set} />
+          <FiltersField binding={binding} set={set} sourceProto={sourceProto} />
         </div>
       );
     case 'stateMapValue':
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
           <SourcePathRows binding={binding} currentBindings={currentBindings} set={set} sourceProto={sourceProto} showPath />
-          <FiltersField binding={binding} set={set} />
+          <FiltersField binding={binding} set={set} sourceProto={sourceProto} />
         </div>
       );
     case 'randomPick':
@@ -171,6 +172,33 @@ export function BindingTypeForm({ binding, currentBindings, onChange }: BindingT
             value={binding.max}
             onChange={(v) => set({ max: (v as number) ?? undefined })}
             style={{ width: 120 }}
+          />
+        </Space>
+      );
+    case 'randomFloat':
+      return (
+        <Space>
+          <InputNumber
+            placeholder="min"
+            value={binding.min}
+            onChange={(v) => set({ min: (v as number) ?? undefined })}
+            style={{ width: 120 }}
+          />
+          <span>~</span>
+          <InputNumber
+            placeholder="max"
+            value={binding.max}
+            onChange={(v) => set({ max: (v as number) ?? undefined })}
+            style={{ width: 120 }}
+          />
+          <span style={LABEL}>精度</span>
+          <InputNumber
+            min={1}
+            max={10}
+            placeholder="2"
+            value={binding.precision}
+            onChange={(v) => set({ precision: (v as number) ?? undefined })}
+            style={{ width: 80 }}
           />
         </Space>
       );
@@ -291,9 +319,23 @@ function ValuesField({
   );
 }
 
-function FiltersField({ binding, set }: { binding: FieldBind; set: (p: Partial<FieldBind>) => void }) {
+function FiltersField({ binding, set, sourceProto }: { binding: FieldBind; set: (p: Partial<FieldBind>) => void; sourceProto?: string }) {
   const filters = binding.filters ?? [];
   const ops = ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'in', 'timeWindow', 'dailyTimeWindow', 'notNil', 'isNil'] as const;
+  const OP_META: Record<string, { label: string; desc: string }> = {
+    eq:              { label: '= 等于',       desc: '字段值等于指定值' },
+    neq:             { label: '≠ 不等于',     desc: '字段值不等于指定值' },
+    gt:              { label: '> 大于',       desc: '字段值大于指定值' },
+    gte:             { label: '≥ 大于等于',   desc: '字段值大于或等于指定值' },
+    lt:              { label: '< 小于',       desc: '字段值小于指定值' },
+    lte:             { label: '≤ 小于等于',   desc: '字段值小于或等于指定值' },
+    contains:        { label: '包含',         desc: '字符串包含指定子串' },
+    in:              { label: '在列表中',     desc: '字段值在指定列表中' },
+    timeWindow:      { label: '时间窗口',     desc: 'value 填 {startTime:540, endTime:1080}，即 9:00~18:00' },
+    dailyTimeWindow: { label: '每日时间窗口', desc: 'value 填 [{StartHour:9,StartMinute:0,EndHour:18,EndMinute:0}]' },
+    notNil:          { label: '不为空',       desc: '无需填 value' },
+    isNil:           { label: '为空',         desc: '无需填 value' },
+  };
 
   const updateFilter = (i: number, patch: Record<string, unknown>) => {
     const arr = [...filters];
@@ -304,22 +346,42 @@ function FiltersField({ binding, set }: { binding: FieldBind; set: (p: Partial<F
   const addFilter = () => set({ filters: [...filters, { path: '', op: 'eq', value: '' }] });
   const removeFilter = (i: number) => set({ filters: filters.filter((_, j) => j !== i) });
 
+  const filterTip = "从 state 列表中先按条件筛选，再从结果中随机取值";
+
+  if (!filters.length) {
+    return (
+      <Tooltip title={filterTip} mouseEnterDelay={0.4}>
+        <a onClick={addFilter} style={{ fontSize: 11 }}>+ 添加 filter</a>
+      </Tooltip>
+    );
+  }
+
   return (
     <Space direction="vertical" style={{ width: '100%' }} size={4}>
-      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>filters</span>
+      <Tooltip title={filterTip} mouseEnterDelay={0.4}>
+        <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>filters（列表过滤条件）</span>
+      </Tooltip>
       {filters.map((f, i) => (
         <Space key={i} wrap size={4}>
-          <Input
-            placeholder="path（可选，如 items[0].id）"
+          <ProtoPathInput
+            messageFullName={sourceProto}
             value={f.path ?? ''}
-            onChange={(e) => updateFilter(i, { path: e.target.value })}
+            onChange={(v) => updateFilter(i, { path: v })}
+            placeholder="path（可选）"
             style={{ width: 220 }}
-            size="small"
           />
           <Select
             value={f.op || 'eq'}
             onChange={(v) => updateFilter(i, { op: v })}
-            options={ops.map((o) => ({ value: o, label: o }))}
+            options={ops.map((o) => ({ value: o, label: OP_META[o]?.label ?? o, title: '' }))}
+            optionRender={(opt) => {
+              const m = OP_META[opt.value as string];
+              return (
+                <Tooltip title={m?.desc} mouseEnterDelay={0.3} placement="right">
+                  <div>{opt.label}</div>
+                </Tooltip>
+              );
+            }}
             style={{ width: 100 }}
             size="small"
           />
@@ -339,7 +401,7 @@ function FiltersField({ binding, set }: { binding: FieldBind; set: (p: Partial<F
           <a onClick={() => removeFilter(i)} style={{ color: 'var(--color-error)', fontSize: 11 }}>删除</a>
         </Space>
       ))}
-      <a onClick={addFilter} style={{ fontSize: 11 }}>+ 添加 filter</a>
+      <a onClick={addFilter} style={{ fontSize: 11 }}>+ 继续添加</a>
     </Space>
   );
 }

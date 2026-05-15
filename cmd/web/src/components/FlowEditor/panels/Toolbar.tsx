@@ -39,6 +39,7 @@ import { useFlowStore } from '../store/flowStore';
 import { useEditorStore } from '../store/editorStore';
 import { useProtoStore } from '../proto/protoStore';
 import { syncFlowScriptsToIdb } from '@/services/scriptSync';
+import { fetchBaselineFlow } from '@/services/baselineApi';
 import { syncResourcesFromBaseline } from '@/services/resourcesStore';
 import { FlowManagerModal } from './FlowManagerModal';
 import { exportAllTemplates, importTemplates, type TemplateBundle } from '../library/templateStore';
@@ -135,9 +136,8 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
 
   const onLoadDefault = async () => {
     try {
-      const res = await fetch('/conf/flow/flow.json');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const flow = (await res.json()) as FlowJson;
+      const flow = await fetchBaselineFlow<FlowJson>();
+      if (!flow) throw new Error('flow.json 不存在');
       loadFromTaskFlow(flow);
       message.success('已加载 conf/flow/flow.json');
       void syncScriptsAfterLoad(flow, '加载');

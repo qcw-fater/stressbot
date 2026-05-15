@@ -23,7 +23,8 @@ import { App as AntApp, ConfigProvider } from 'antd';
 import { useFlowStore } from './store/flowStore';
 import { useFloatingWindowStore } from './store/floatingWindowStore';
 import { useProtoStore } from './proto/protoStore';
-import { syncResourcesFromBaseline, validateAdapter, pushResourcesToBaseline } from '@/services/resourcesStore';
+import { syncResourcesFromBaseline, validateAdapter } from '@/services/resourcesStore';
+import { fetchBaselineFlow } from '@/services/baselineApi';
 import { useEditorStore } from './store/editorStore';
 import type { FlowJson } from './codec/flowToJson';
 import type { FlowLayout } from '@/types/editor';
@@ -108,9 +109,6 @@ function FlowEditorInner({
               conflicts: newConflicts,
               removed: newRemoved,
             });
-          } else if (sync.conflicts.length > 0 || sync.removed.length > 0) {
-            // 冲突全部被自动跳过 → IDB 为准，回写磁盘基线使其一致
-            void pushResourcesToBaseline();
           }
           if (sync.added.length > 0) {
             notification.info({
@@ -189,10 +187,8 @@ function FlowEditorInner({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/conf/flow/flow.json');
-        if (!res.ok) return;
-        const flow = (await res.json()) as FlowJson;
-        if (cancelled) return;
+        const flow = await fetchBaselineFlow<FlowJson>();
+        if (!flow || cancelled) return;
         loadFromTaskFlow(flow);
       } catch {
         // 静默：未挂载 conf/ 时不报错

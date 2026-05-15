@@ -16,6 +16,7 @@ export interface ProtoField {
   mapValue?: string;
   enumName?: string;
   messageName?: string;
+  comment?: string;
 }
 
 export interface ProtoMessage {
@@ -24,6 +25,7 @@ export interface ProtoMessage {
   file?: string;
   fields: ProtoField[];
   nestedMessages?: ProtoMessage[];
+  comment?: string;
 }
 
 export interface ProtoEnum {

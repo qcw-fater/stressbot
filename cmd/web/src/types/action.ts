@@ -31,6 +31,7 @@ export type BindingType =
   | 'randomPickN'
   | 'randomPickMap'
   | 'randomInt'
+  | 'randomFloat'
   | 'randomBool'
   | 'randomString'
   | 'randomExclude'
@@ -48,6 +49,7 @@ export const ALL_BINDING_TYPES: BindingType[] = [
   'randomPickN',
   'randomPickMap',
   'randomInt',
+  'randomFloat',
   'randomBool',
   'randomString',
   'randomExclude',
@@ -80,6 +82,7 @@ export interface FieldBind {
   filters?: FilterDef[];
   min?: number;
   max?: number;
+  precision?: number;
   length?: number;
   count?: number;
   charset?: string;
