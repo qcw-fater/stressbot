@@ -34,7 +34,7 @@ function header_size()
     return HEADER_SIZE
 end
 
-function body_length_info()
+function body_length()
     return {
         offset          = 0,           -- header[0:4] 是 uint32_le body 长度
         field_type      = "uint32_le",

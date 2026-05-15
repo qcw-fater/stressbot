@@ -28,8 +28,8 @@ import (
 // Version 编译时注入：-ldflags "-X main.Version=v1.0.0"
 var Version = "dev"
 
-// Config 全局配置结构
-type Config struct {
+// StandaloneConfig 单机模式专用配置。
+type StandaloneConfig struct {
 	Bot struct {
 		AccountPrefix string `json:"accountPrefix"`
 		StartNumber   int    `json:"startNumber"`
@@ -61,7 +61,11 @@ type Config struct {
 	Script struct {
 		Dirs []string `json:"dirs"`
 	} `json:"script"`
+}
 
+// Config 全局配置结构。
+// Log 和 Monitor 两种模式共享；Standalone 仅单机模式；Agent 仅 Agent 模式。
+type Config struct {
 	Log struct {
 		Path         string `json:"path"`
 		Level        string `json:"level"`
@@ -73,6 +77,8 @@ type Config struct {
 	} `json:"log"`
 
 	Monitor monitor.CollectorConfig `json:"monitor"`
+
+	Standalone *StandaloneConfig `json:"standalone"`
 
 	Agent agent.AgentConfig `json:"agent"`
 }
@@ -108,9 +114,15 @@ func main() {
 		stresslog.Info("[MAIN] Agent 模式启动", zap.String("adminAddr", cfg.Agent.AdminAddr))
 		runAgentMode(cfg)
 	} else {
+		botCount := 0
+		conc := 0
+		if cfg.Standalone != nil {
+			botCount = cfg.Standalone.Bot.Count
+			conc = cfg.Standalone.Bot.ConcurrentNum
+		}
 		stresslog.Info("[MAIN] 单机模式启动",
-			zap.Int("botCount", cfg.Bot.Count),
-			zap.Int("concurrent", cfg.Bot.ConcurrentNum))
+			zap.Int("botCount", botCount),
+			zap.Int("concurrent", conc))
 		runStandalone(cfg)
 	}
 }
@@ -142,15 +154,17 @@ func runAgentMode(cfg *Config) {
 // ── 单机模式 ──────────────────────────────────────────────
 
 func runStandalone(cfg *Config) {
+	s := cfg.Standalone
+
 	// 加载协议适配器
-	adp, err := loadAdapter(cfg)
+	adp, err := loadAdapter(s)
 	if err != nil {
 		stresslog.Fatal("加载适配器失败", zap.Error(err))
 	}
 	stresslog.Info("[MAIN] 适配器已初始化", zap.Int("headerSize", adp.HeaderSize()))
 
 	// 加载 .proto 文件
-	loader := protox.NewLoader(cfg.Proto.Dirs, cfg.Proto.Files)
+	loader := protox.NewLoader(s.Proto.Dirs, s.Proto.Files)
 	files, err := loader.Load()
 	if err != nil {
 		stresslog.Fatal("加载 proto 文件失败", zap.Error(err))
@@ -160,7 +174,7 @@ func runStandalone(cfg *Config) {
 	factory := protox.NewFactory(registry)
 
 	// 加载流程配置
-	flow, err := loadFlow(cfg.Flow)
+	flow, err := loadFlow(s.Flow)
 	if err != nil {
 		stresslog.Fatal("加载流程配置失败", zap.Error(err))
 	}
@@ -186,9 +200,9 @@ func runStandalone(cfg *Config) {
 	}
 
 	// 解析超时
-	heartbeatInterval := utils.ParseDurationDefault(cfg.Network.HeartbeatInterval, 5*time.Second)
-	tcpTimeout := utils.ParseDurationDefault(cfg.Network.TCPTimeout, 60*time.Second)
-	httpTimeout := utils.ParseDurationDefault(cfg.Network.HTTPTimeout, 10*time.Second)
+	heartbeatInterval := utils.ParseDurationDefault(s.Network.HeartbeatInterval, 5*time.Second, "network.heartbeatInterval")
+	tcpTimeout := utils.ParseDurationDefault(s.Network.TCPTimeout, 60*time.Second, "network.tcpTimeout")
+	httpTimeout := utils.ParseDurationDefault(s.Network.HTTPTimeout, 10*time.Second, "network.httpTimeout")
 
 	// 启动 gnet 网络引擎
 	dialer := network.NewDialer(adp, heartbeatInterval)
@@ -199,25 +213,25 @@ func runStandalone(cfg *Config) {
 
 	// 初始化 Lua 运行时池
 	scriptDir := "conf/scripts"
-	if len(cfg.Script.Dirs) > 0 {
-		scriptDir = cfg.Script.Dirs[0]
+	if len(s.Script.Dirs) > 0 {
+		scriptDir = s.Script.Dirs[0]
 	}
 	luaPool := script.NewRuntimePool(scriptDir)
-	if err := luaPool.PrecompileScripts(cfg.Script.Dirs); err != nil {
+	if err := luaPool.PrecompileScripts(s.Script.Dirs); err != nil {
 		stresslog.Warn("[MAIN] Lua 脚本预编译失败（非致命错误）", zap.Error(err))
 	} else {
 		stresslog.Info("[MAIN] Lua 脚本已预编译", zap.Int("count", len(luaPool.ListScripts())))
 	}
 
 	mgrCfg := robot.ManagerConfig{
-		AccountPrefix:  cfg.Bot.AccountPrefix,
-		StartNumber:    cfg.Bot.StartNumber,
-		Count:          cfg.Bot.Count,
-		ConcurrentNum:  cfg.Bot.ConcurrentNum,
-		StateExtra:     cfg.StateExtra,
+		AccountPrefix:  s.Bot.AccountPrefix,
+		StartNumber:    s.Bot.StartNumber,
+		Count:          s.Bot.Count,
+		ConcurrentNum:  s.Bot.ConcurrentNum,
+		StateExtra:     s.StateExtra,
 		Adapter:        adp,
 		RequestTimeout: tcpTimeout,
-		MainService:    cfg.Bot.MainService,
+		MainService:    s.Bot.MainService,
 		HTTPTimeout:    httpTimeout,
 	}
 
@@ -261,6 +275,7 @@ func runStandalone(cfg *Config) {
 		csvPath := cfg.Monitor.CsvPath
 		if csvPath == "" {
 			csvPath = "log/metrics.csv"
+			stresslog.Warn("[CONFIG] monitor.csvPath 为空，使用默认值", zap.String("default", csvPath))
 		}
 		if err := monitor.ExportCSV(monitor.Global(), csvPath); err != nil {
 			stresslog.Error("[MONITOR] CSV 导出失败", zap.Error(err))
@@ -287,43 +302,56 @@ func loadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("解析配置文件失败: %w", err)
 	}
 
-	if cfg.Bot.StartNumber == 0 {
-		cfg.Bot.StartNumber = 1
-	}
-	if cfg.Bot.Count == 0 {
-		cfg.Bot.Count = 1
-	}
-	if cfg.Bot.AccountPrefix == "" {
-		cfg.Bot.AccountPrefix = "bot_"
-	}
-	if cfg.Bot.MainService == "" {
-		return nil, fmt.Errorf("bot.mainService is required")
-	}
-	if cfg.Adapter.Script == "" {
-		cfg.Adapter.Script = "conf/adapter/codec.lua"
-	}
-	if cfg.Flow == "" {
-		cfg.Flow = "conf/flow/flow.json"
-	}
-	if len(cfg.Proto.Dirs) == 0 {
-		cfg.Proto.Dirs = []string{"conf/proto"}
-	}
-	if len(cfg.Script.Dirs) == 0 {
-		cfg.Script.Dirs = []string{"conf/scripts"}
-	}
+	// Agent 模式公共默认值
 	if cfg.Agent.AppVersion == "" {
 		cfg.Agent.AppVersion = Version
+	}
+
+	if cfg.Agent.Enabled {
+		// Agent 模式：仅校验 Agent 段（adminAddr 在 Resolve() 中校验）
+	} else {
+		// 单机模式：校验并填充 Standalone 段
+		if cfg.Standalone == nil {
+			cfg.Standalone = &StandaloneConfig{}
+		}
+		s := cfg.Standalone
+
+		if s.Bot.StartNumber == 0 {
+			s.Bot.StartNumber = 1
+		}
+		if s.Bot.Count == 0 {
+			s.Bot.Count = 1
+		}
+		if s.Bot.AccountPrefix == "" {
+			s.Bot.AccountPrefix = "bot_"
+		}
+		if s.Bot.MainService == "" {
+			return nil, fmt.Errorf("standalone.bot.mainService is required")
+		}
+		if s.Adapter.Script == "" {
+			s.Adapter.Script = "conf/adapter/codec.lua"
+		}
+		if s.Flow == "" {
+			s.Flow = "conf/flow/flow.json"
+		}
+		if len(s.Proto.Dirs) == 0 {
+			s.Proto.Dirs = []string{"conf/proto"}
+		}
+		if len(s.Script.Dirs) == 0 {
+			s.Script.Dirs = []string{"conf/scripts"}
+		}
 	}
 
 	return cfg, nil
 }
 
-func loadAdapter(cfg *Config) (*adapter.LuaAdapter, error) {
-	poolSize := cfg.Adapter.PoolSize
+func loadAdapter(s *StandaloneConfig) (*adapter.LuaAdapter, error) {
+	poolSize := s.Adapter.PoolSize
 	if poolSize <= 0 {
 		poolSize = runtime.NumCPU()
+		stresslog.Warn("[CONFIG] standalone.adapter.poolSize 非法，使用默认值", zap.Int("default", poolSize))
 	}
-	return adapter.NewLuaAdapter(poolSize, cfg.Adapter.Script)
+	return adapter.NewLuaAdapter(poolSize, s.Adapter.Script)
 }
 
 func loadFlow(path string) (*engine.TaskFlow, error) {

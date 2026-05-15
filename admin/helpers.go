@@ -5,25 +5,52 @@ import (
 	"strconv"
 
 	"stressbot/logview"
+
+	stresslog "stressbot/utils/log"
+
+	"go.uber.org/zap"
 )
 
-func stringOr(v, fallback string) string {
+func stringOr(v, fallback string, label ...string) string {
 	if v == "" {
+		tag := "unknown"
+		if len(label) > 0 {
+			tag = label[0]
+		}
+		stresslog.Warn("[CONFIG] 配置为空，使用默认值",
+			zap.String("key", tag),
+			zap.String("default", fallback))
 		return fallback
 	}
 	return v
 }
 
-func intOr(v, fallback int) int {
+func intOr(v, fallback int, label ...string) int {
 	if v <= 0 {
+		tag := "unknown"
+		if len(label) > 0 {
+			tag = label[0]
+		}
+		stresslog.Warn("[CONFIG] 配置非法，使用默认值",
+			zap.String("key", tag),
+			zap.Int("value", v),
+			zap.Int("default", fallback))
 		return fallback
 	}
 	return v
 }
 
 // secsOr int 秒数 → Go duration 字符串（"5s"）。
-func secsOr(v, fallback int) string {
+func secsOr(v, fallback int, label ...string) string {
 	if v <= 0 {
+		tag := "unknown"
+		if len(label) > 0 {
+			tag = label[0]
+		}
+		stresslog.Warn("[CONFIG] 配置非法，使用默认值",
+			zap.String("key", tag),
+			zap.Int("value", v),
+			zap.Int("default", fallback))
 		v = fallback
 	}
 	return strconv.Itoa(v) + "s"

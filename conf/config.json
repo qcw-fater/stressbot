@@ -1,33 +1,4 @@
 {
-  "bot": {
-    "accountPrefix": "bot_",
-    "startNumber": 20,
-    "count": 1,
-    "concurrentNum": 0,
-    "mainService": "logic"
-  },
-  "stateExtra": {
-    "authAddr": "http://192.168.61.161:20000",
-    "version": "0.31.49.171222",
-    "channel": "mine",
-    "platform": "1000"
-  },
-  "adapter": {
-    "script": "conf/adapter/codec.lua"
-  },
-  "network": {
-    "heartbeatInterval": "5s",
-    "tcpTimeout": "60s",
-    "httpTimeout": "10s"
-  },
-  "proto": {
-    "dirs": ["conf/proto"],
-    "files": []
-  },
-  "flow": "conf/flow/flow.json",
-  "script": {
-    "dirs": ["conf/scripts"]
-  },
   "log": {
     "path": "log/stressbot.log",
     "level": "info",
@@ -44,6 +15,37 @@
     "httpPort": 6060,
     "csvPath": "log/metrics.csv",
     "apdexT": 100
+  },
+  "standalone": {
+    "bot": {
+      "accountPrefix": "bot_",
+      "startNumber": 20,
+      "count": 1,
+      "concurrentNum": 0,
+      "mainService": "logic"
+    },
+    "stateExtra": {
+      "authAddr": "http://192.168.61.161:20000",
+      "version": "0.31.49.171222",
+      "channel": "mine",
+      "platform": "1000"
+    },
+    "adapter": {
+      "script": "conf/adapter/codec.lua"
+    },
+    "network": {
+      "heartbeatInterval": "5s",
+      "tcpTimeout": "60s",
+      "httpTimeout": "10s"
+    },
+    "proto": {
+      "dirs": ["conf/proto"],
+      "files": []
+    },
+    "flow": "conf/flow/flow.json",
+    "script": {
+      "dirs": ["conf/scripts"]
+    }
   },
   "agent": {
     "enabled": false

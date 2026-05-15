@@ -24,8 +24,8 @@ type AgentRegistry struct {
 }
 
 func NewAgentRegistry(cfg RegistryConfig, onChange func(string, AgentStatus, AgentStatus)) *AgentRegistry {
-	unhealthy := utils.ParseDurationDefault(cfg.UnhealthyAfter, 30*time.Second)
-	offline := utils.ParseDurationDefault(cfg.OfflineAfter, 60*time.Second)
+	unhealthy := utils.ParseDurationDefault(cfg.UnhealthyAfter, 30*time.Second, "agentRegistry.unhealthyAfter")
+	offline := utils.ParseDurationDefault(cfg.OfflineAfter, 60*time.Second, "agentRegistry.offlineAfter")
 
 	return &AgentRegistry{
 		agents:             make(map[string]*AgentNode),

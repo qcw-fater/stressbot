@@ -26,8 +26,9 @@ type RegistryConfig struct {
 }
 
 type TaskSection struct {
-	MaxFlowSizeMB   int    `json:"maxFlowSizeMB"`
-	DeadlineDefault string `json:"deadlineDefault"`
+	MaxFlowSizeMB      int    `json:"maxFlowSizeMB"`
+	MaxMultipartSizeMB int    `json:"maxMultipartSizeMB"`
+	DeadlineDefault    string `json:"deadlineDefault"`
 }
 
 type HistoryConfig struct {
@@ -63,8 +64,9 @@ func DefaultConfig() Config {
 			OfflineAfter:   "60s",
 		},
 		Task: TaskSection{
-			MaxFlowSizeMB:   10,
-			DeadlineDefault: "1h",
+			MaxFlowSizeMB:      10,
+			MaxMultipartSizeMB: 32,
+			DeadlineDefault:    "1h",
 		},
 		History: HistoryConfig{
 			Enabled:         true,

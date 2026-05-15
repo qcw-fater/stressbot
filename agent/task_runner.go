@@ -150,9 +150,9 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 	r.collector.SetApdexT(r.assignment.ApdexT)
 
 	// 7. 解析超时参数
-	hbInterval := utils.ParseDurationDefault(r.assignment.HeartbeatInterval, 5*time.Second)
-	tcpTimeout := utils.ParseDurationDefault(r.assignment.TCPTimeout, 60*time.Second)
-	httpTimeout := utils.ParseDurationDefault(r.assignment.HTTPTimeout, 10*time.Second)
+	hbInterval := utils.ParseDurationDefault(r.assignment.HeartbeatInterval, 5*time.Second, "heartbeatInterval")
+	tcpTimeout := utils.ParseDurationDefault(r.assignment.TCPTimeout, 60*time.Second, "tcpTimeout")
+	httpTimeout := utils.ParseDurationDefault(r.assignment.HTTPTimeout, 10*time.Second, "httpTimeout")
 
 	// 8. 启动 gnet 网络引擎
 	dialer := network.NewDialer(adp, hbInterval)

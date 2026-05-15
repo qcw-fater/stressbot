@@ -49,7 +49,7 @@ func (c *AdminClient) Register(ctx context.Context, req RegisterRequest) (*Regis
 		return nil, fmt.Errorf("marshal register request: %w", err)
 	}
 
-	resp, err := c.doPost(ctx, "/api/agent/register", body)
+	resp, err := c.doPost(ctx, "/sbot/agent/register", body)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (c *AdminClient) Heartbeat(ctx context.Context, req HeartbeatRequest) error
 		return fmt.Errorf("marshal heartbeat: %w", err)
 	}
 
-	resp, err := c.doPost(ctx, "/api/agent/"+c.agentID+"/heartbeat", body)
+	resp, err := c.doPost(ctx, "/sbot/agent/"+c.agentID+"/heartbeat", body)
 	if err != nil {
 		return err
 	}
@@ -97,7 +97,7 @@ func (c *AdminClient) PostStress(ctx context.Context, report StressReport) error
 		return fmt.Errorf("marshal stress report: %w", err)
 	}
 
-	resp, err := c.doPost(ctx, "/api/agent/stress", body)
+	resp, err := c.doPost(ctx, "/sbot/agent/stress", body)
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func (c *AdminClient) PostSystem(ctx context.Context, report SystemReport) error
 		return fmt.Errorf("marshal system report: %w", err)
 	}
 
-	resp, err := c.doPost(ctx, "/api/agent/system", body)
+	resp, err := c.doPost(ctx, "/sbot/agent/system", body)
 	if err != nil {
 		return err
 	}
@@ -132,7 +132,7 @@ func (c *AdminClient) PostSystem(ctx context.Context, report SystemReport) error
 
 // FetchPendingTask 拉取待执行任务（回退通道）。
 func (c *AdminClient) FetchPendingTask(ctx context.Context) (*TaskAssignment, error) {
-	url := c.base + "/api/agent/" + c.agentID + "/pending-task"
+	url := c.base + "/sbot/agent/" + c.agentID + "/pending-task"
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -167,7 +167,7 @@ func (c *AdminClient) ReportTaskDone(ctx context.Context, report TaskCompletionR
 		return fmt.Errorf("marshal task done: %w", err)
 	}
 
-	url := fmt.Sprintf("/api/agent/%s/task/%s/done", c.agentID, report.TaskID)
+	url := fmt.Sprintf("/sbot/agent/%s/task/%s/done", c.agentID, report.TaskID)
 	resp, err := c.doPost(ctx, url, body)
 	if err != nil {
 		return err
@@ -184,7 +184,7 @@ func (c *AdminClient) ReportTaskDone(ctx context.Context, report TaskCompletionR
 // Deregister 注销（best-effort，不重试）。
 func (c *AdminClient) Deregister(ctx context.Context) error {
 	body, _ := json.Marshal(DeregisterRequest{AgentID: c.agentID})
-	url := "/api/agent/" + c.agentID + "/deregister"
+	url := "/sbot/agent/" + c.agentID + "/deregister"
 
 	resp, err := c.doPost(ctx, url, body)
 	if err != nil {

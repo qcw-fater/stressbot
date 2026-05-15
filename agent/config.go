@@ -5,6 +5,10 @@ import (
 	"os"
 	"runtime"
 	"time"
+
+	stresslog "stressbot/utils/log"
+
+	"go.uber.org/zap"
 )
 
 // AgentConfig Agent 配置。
@@ -65,23 +69,26 @@ func (c *AgentConfig) Resolve() (*ResolvedConfig, error) {
 			hostname = "unknown"
 		}
 		name = hostname
+		stresslog.Warn("[CONFIG] agent.name 为空，使用主机名", zap.String("default", name))
 	}
 
 	listen := c.ListenAddr
 	if listen == "" {
 		listen = ":7070"
+		stresslog.Warn("[CONFIG] agent.listenAddr 为空，使用默认值", zap.String("default", listen))
 	}
 
 	maxBots := c.MaxBots
 	if maxBots <= 0 {
 		maxBots = 5000
+		stresslog.Warn("[CONFIG] agent.maxBots 非法，使用默认值", zap.Int("default", maxBots))
 	}
 
-	stress := parseDuration(c.StressInterval, 5*time.Second)
-	system := parseDuration(c.SystemInterval, 5*time.Second)
-	hb := parseDuration(c.HBInterval, 10*time.Second)
-	hbFail := parseDuration(c.HBFailInterval, hb) // 默认与正常心跳间隔相同
-	retryMax := parseDuration(c.RegisterRetryMaxInterval, 60*time.Second)
+	stress := parseDuration(c.StressInterval, 5*time.Second, "agent.stressInterval")
+	system := parseDuration(c.SystemInterval, 5*time.Second, "agent.systemInterval")
+	hb := parseDuration(c.HBInterval, 10*time.Second, "agent.heartbeatInterval")
+	hbFail := parseDuration(c.HBFailInterval, hb, "agent.heartbeatFailInterval")
+	retryMax := parseDuration(c.RegisterRetryMaxInterval, 60*time.Second, "agent.registerRetryMaxInterval")
 
 	// 心跳间隔必须远小于 Admin 的 unhealthy 阈值（通常 30s）
 	if hb >= 25*time.Second {
@@ -91,11 +98,13 @@ func (c *AgentConfig) Resolve() (*ResolvedConfig, error) {
 	workDir := c.TaskWorkDir
 	if workDir == "" {
 		workDir = os.TempDir()
+		stresslog.Warn("[CONFIG] agent.taskWorkDir 为空，使用系统临时目录", zap.String("default", workDir))
 	}
 
 	adapterScript := c.AdapterScript
 	if adapterScript == "" {
 		adapterScript = "conf/adapter/codec.lua"
+		stresslog.Warn("[CONFIG] agent.adapterScript 为空，使用默认值", zap.String("default", adapterScript))
 	}
 
 	return &ResolvedConfig{
@@ -135,12 +144,20 @@ func CollectStaticInfo() StaticInfo {
 	}
 }
 
-func parseDuration(s string, fallback time.Duration) time.Duration {
+func parseDuration(s string, fallback time.Duration, label string) time.Duration {
 	if s == "" {
+		stresslog.Warn("[CONFIG] 配置为空，使用默认值",
+			zap.String("key", label),
+			zap.String("default", fallback.String()))
 		return fallback
 	}
 	d, err := time.ParseDuration(s)
 	if err != nil || d <= 0 {
+		stresslog.Warn("[CONFIG] 配置非法，使用默认值",
+			zap.String("key", label),
+			zap.String("value", s),
+			zap.String("default", fallback.String()),
+			zap.NamedError("parseError", err))
 		return fallback
 	}
 	return d

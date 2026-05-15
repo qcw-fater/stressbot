@@ -73,7 +73,7 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 		s.history = history
 
 		sampler := NewSampler(
-			utils.ParseDurationDefault(cfg.History.SamplerInterval, 10*time.Second),
+			utils.ParseDurationDefault(cfg.History.SamplerInterval, 10*time.Second, "history.samplerInterval"),
 			s.aggregator, s.history, s.agents,
 		)
 		s.sampler = sampler

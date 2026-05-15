@@ -9,7 +9,7 @@ import (
 )
 
 // BodyLengthInfo 消息体长度字段元信息。
-// 初始化时从 Lua 适配器脚本的 body_length_info() 函数获取并缓存。
+// 初始化时从 Lua 适配器脚本的 body_length() 函数获取并缓存。
 type BodyLengthInfo struct {
 	Offset         int    // header 中 body length 字段的字节偏移
 	FieldType      string // 字段类型："uint32_le"/"uint16_le"/"uint32_be"/"uint16_be"

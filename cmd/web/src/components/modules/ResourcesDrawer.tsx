@@ -47,6 +47,7 @@ import {
   validateAdapter,
 } from '@/services/resourcesStore';
 import { BaselineSyncModal } from './BaselineSyncModal';
+import { fetchBaselineAdapter } from '@/services/baselineApi';
 
 export interface ResourcesDrawerProps {
   open: boolean;
@@ -119,7 +120,7 @@ function header_size()
     return 12  -- TODO: 你的协议头字节数
 end
 
-function body_length_info()
+function body_length()
     return {
         offset          = 0,           -- header 中 body 长度字段的起始字节
         field_type      = "uint32_le", -- "uint16_le" / "uint16_be" / "uint32_le" / "uint32_be"
@@ -170,9 +171,7 @@ function AdapterTab() {
         setContent(file.content);
         setSource('已保存');
       } else {
-        fetch('/conf/adapter/codec.lua')
-          .then((r) => (r.ok ? r.text() : null))
-          .then((text) => {
+        fetchBaselineAdapter().then((text) => {
             if (text) {
               setContent(text);
               setSource('默认模板');
@@ -292,7 +291,7 @@ function AdapterTab() {
               <SpecBlock title="3. 解码（每条入向消息调用）" items={ADAPTER_SPEC.filter((f) => f.category === 'decode')} />
               <SpecBlock title="4. 路由匹配（请求-响应配对）" items={ADAPTER_SPEC.filter((f) => f.category === 'route')} />
               <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 12 }}>
-                运行时约束：Lua 5.1（不支持 string.pack/unpack）；消息体长度须通过 body_length_info 配置；每个机器人独立运行环境，禁止共享可变全局状态。
+                运行时约束：Lua 5.1（不支持 string.pack/unpack）；消息体长度须通过 body_length 配置；每个机器人独立运行环境，禁止共享可变全局状态。
               </Typography.Text>
             </div>
           ),
@@ -304,7 +303,7 @@ function AdapterTab() {
 
 const ADAPTER_SPEC: Array<{ name: string; signature: string; desc: string; category: string }> = [
   { name: 'header_size', signature: 'header_size() -> integer', desc: '返回协议头固定字节数。初始化时调用一次并缓存。', category: 'meta' },
-  { name: 'body_length_info', signature: 'body_length_info() -> { offset, field_type, includes_header }', desc: '描述如何从协议头字节中解析消息体长度。引擎使用此元信息进行高效解析。', category: 'meta' },
+  { name: 'body_length', signature: 'body_length() -> { offset, field_type, includes_header }', desc: '描述如何从协议头字节中解析消息体长度。引擎使用此元信息进行高效解析。', category: 'meta' },
   { name: 'encode_tcp', signature: 'encode_tcp(route, body, secret_key) -> string', desc: 'TCP 编码：根据 route + body + secret_key 拼装完整数据包（含 header）。', category: 'encode' },
   { name: 'encode_udp', signature: 'encode_udp(route, body, secret_key) -> string', desc: 'UDP 编码：与 encode_tcp 类似，但前 N 字节保持明文。', category: 'encode' },
   { name: 'decode_tcp', signature: 'decode_tcp(data, secret_key) -> response_key, body, header_err', desc: 'TCP 解码：返回路由键、消息体、协议头错误码。', category: 'decode' },

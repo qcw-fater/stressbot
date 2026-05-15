@@ -122,7 +122,7 @@ import (
 )
 
 // BodyLengthInfo 消息体长度字段元信息。
-// 初始化时从 Lua 适配器脚本的 body_length_info() 函数获取并缓存。
+// 初始化时从 Lua 适配器脚本的 body_length() 函数获取并缓存。
 type BodyLengthInfo struct {
     Offset         int    // header 中 body length 字段的字节偏移
     FieldType      string // 字段类型："uint32_le"/"uint16_le"/"uint32_be"/"uint16_be"
@@ -372,7 +372,7 @@ func (a *LuaAdapter) initLState(L *lua.LState) error {
     // 从全局变量缓存到 registry，避免每次从全局表查找
     // encode_udp：UDP 包编码（内部应用偏移量，Go 层不感知具体偏移值）
     fnNames := []string{
-        "header_size", "body_length_info", "encode", "encode_udp",
+        "header_size", "body_length", "encode", "encode_udp",
         "decode", "expected_response_key",
     }
     reg := L.Get(lua.RegistryIndex)
@@ -401,15 +401,15 @@ func (a *LuaAdapter) cacheMetaInfo(L *lua.LState) error {
     a.headerSize = int(lua.LVAsNumber(L.Get(-1)))
     L.Pop(1)
     
-    // body_length_info() → table { offset, field_type, includes_header }
-    fn = L.GetField(reg, "__adapter_body_length_info")
+    // body_length() → table { offset, field_type, includes_header }
+    fn = L.GetField(reg, "__adapter_body_length")
     if err := L.CallByParam(lua.P{Fn: fn, NRet: 1, Protect: true}); err != nil {
-        return fmt.Errorf("调用 body_length_info() 失败: %w", err)
+        return fmt.Errorf("调用 body_length() 失败: %w", err)
     }
     tbl, ok := L.Get(-1).(*lua.LTable)
     L.Pop(1)
     if !ok {
-        return fmt.Errorf("body_length_info() 必须返回 table")
+        return fmt.Errorf("body_length() 必须返回 table")
     }
     a.bodyLenInfo = BodyLengthInfo{
         Offset:         int(lua.LVAsNumber(tbl.RawGetString("offset"))),
@@ -1751,7 +1751,7 @@ function header_size()
 end
 
 -- 供 Go 层原生实现 BodyLength（gnet 热路径，零 Lua 调用）
-function body_length_info()
+function body_length()
     return {
         offset          = 0,           -- header[0:4] 是 uint32_le 总长
         field_type      = "uint32_le",
@@ -1993,7 +1993,7 @@ local decode_chain   = { step_xor_decode }
 
 function header_size()      return HEADER_SIZE end
 -- udp_encrypt_offset() 不对外暴露，Go 层不再调用；偏移由 encode_udp() 内部处理
-function body_length_info()
+function body_length()
     return { offset=0, field_type="uint32_le", includes_header=false }
 end
 -- encode / decode / expected_response_key 按新头格式实现

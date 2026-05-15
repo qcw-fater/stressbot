@@ -12,6 +12,7 @@
   "task": {
     "maxFlowSizeMB": 10,
     "maxBinarySizeMB": 200,
+    "maxMultipartSizeMB": 32,
     "deadlineDefault": "1h"
   },
 

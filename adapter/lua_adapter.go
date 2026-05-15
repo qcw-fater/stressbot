@@ -91,7 +91,7 @@ func (a *LuaAdapter) initLState(L *lua.LState) error {
 	}
 
 	fnNames := []string{
-		"header_size", "body_length_info", "encode_tcp", "encode_udp",
+		"header_size", "body_length", "encode_tcp", "encode_udp",
 		"decode_tcp", "decode_udp", "expected_response_key",
 	}
 	reg := L.Get(lua.RegistryIndex)
@@ -118,15 +118,15 @@ func (a *LuaAdapter) cacheMetaInfo(L *lua.LState) error {
 	a.headerSize = int(lua.LVAsNumber(L.Get(-1)))
 	L.Pop(1)
 
-	// body_length_info() → table { offset, field_type, includes_header }
-	fn = L.GetField(reg, "__adapter_body_length_info")
+	// body_length() → table { offset, field_type, includes_header }
+	fn = L.GetField(reg, "__adapter_body_length")
 	if err := L.CallByParam(lua.P{Fn: fn, NRet: 1, Protect: true}); err != nil {
-		return fmt.Errorf("调用 body_length_info() 失败: %w", err)
+		return fmt.Errorf("调用 body_length() 失败: %w", err)
 	}
 	tbl, ok := L.Get(-1).(*lua.LTable)
 	L.Pop(1)
 	if !ok {
-		return fmt.Errorf("body_length_info() 必须返回 table")
+		return fmt.Errorf("body_length() 必须返回 table")
 	}
 	a.bodyLenInfo = BodyLengthInfo{
 		Offset:         int(lua.LVAsNumber(tbl.RawGetString("offset"))),

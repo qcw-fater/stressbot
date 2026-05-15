@@ -27,61 +27,70 @@ func (s *AdminServer) registerRoutes() *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// ── Agent 上行 ──
-	mux.HandleFunc("POST /api/agent/register", s.handleAgentRegister)
-	mux.HandleFunc("POST /api/agent/{id}/heartbeat", s.handleAgentHeartbeat)
-	mux.HandleFunc("POST /api/agent/{id}/deregister", s.handleAgentDeregister)
-	mux.HandleFunc("POST /api/agent/stress", s.handleAgentStressReport)
-	mux.HandleFunc("POST /api/agent/system", s.handleAgentSystemReport)
-	mux.HandleFunc("POST /api/agent/{id}/task/{tid}/done", s.handleAgentTaskDone)
-	mux.HandleFunc("GET /api/agent/{id}/pending-task", s.handleAgentPendingTask)
+	mux.HandleFunc("POST /sbot/agent/register", s.handleAgentRegister)
+	mux.HandleFunc("POST /sbot/agent/{id}/heartbeat", s.handleAgentHeartbeat)
+	mux.HandleFunc("POST /sbot/agent/{id}/deregister", s.handleAgentDeregister)
+	mux.HandleFunc("POST /sbot/agent/stress", s.handleAgentStressReport)
+	mux.HandleFunc("POST /sbot/agent/system", s.handleAgentSystemReport)
+	mux.HandleFunc("POST /sbot/agent/{id}/task/{tid}/done", s.handleAgentTaskDone)
+	mux.HandleFunc("GET /sbot/agent/{id}/pending-task", s.handleAgentPendingTask)
 
 	// ── 前端-资源基线 ──
-	mux.HandleFunc("POST /api/resources/baseline", s.handleUpdateBaseline)
+	mux.HandleFunc("POST /sbot/resources/baseline", s.handleUpdateBaseline)
 
 	// ── 前端-任务 ──
-	mux.HandleFunc("POST /api/tasks", s.handleCreateTask)
-	mux.HandleFunc("GET /api/tasks", s.handleListTasks)
-	mux.HandleFunc("GET /api/tasks/{id}", s.handleGetTask)
-	mux.HandleFunc("GET /api/tasks/{id}/config/{path...}", s.handleGetTaskConfig)
-	mux.HandleFunc("POST /api/tasks/{id}/start", s.handleStartTask)
-	mux.HandleFunc("POST /api/tasks/{id}/stop", s.handleStopTask)
-	mux.HandleFunc("DELETE /api/tasks/{id}", s.handleDeleteTask)
+	mux.HandleFunc("POST /sbot/tasks", s.handleCreateTask)
+	mux.HandleFunc("GET /sbot/tasks", s.handleListTasks)
+	mux.HandleFunc("GET /sbot/tasks/{id}", s.handleGetTask)
+	mux.HandleFunc("GET /sbot/tasks/{id}/config/{path...}", s.handleGetTaskConfig)
+	mux.HandleFunc("POST /sbot/tasks/{id}/start", s.handleStartTask)
+	mux.HandleFunc("POST /sbot/tasks/{id}/stop", s.handleStopTask)
+	mux.HandleFunc("DELETE /sbot/tasks/{id}", s.handleDeleteTask)
 
 	// ── 前端-Agent ──
-	mux.HandleFunc("GET /api/agents", s.handleListAgents)
-	mux.HandleFunc("GET /api/agents/{id}", s.handleGetAgent)
-	mux.HandleFunc("DELETE /api/agents/{id}", s.handleDeleteAgent)
-	mux.HandleFunc("POST /api/agents/{id}/shutdown", s.handleShutdownAgent)
-	mux.HandleFunc("POST /api/agents/shutdown-all", s.handleShutdownAllAgents)
+	mux.HandleFunc("GET /sbot/agents", s.handleListAgents)
+	mux.HandleFunc("GET /sbot/agents/{id}", s.handleGetAgent)
+	mux.HandleFunc("DELETE /sbot/agents/{id}", s.handleDeleteAgent)
+	mux.HandleFunc("POST /sbot/agents/{id}/shutdown", s.handleShutdownAgent)
+	mux.HandleFunc("POST /sbot/agents/shutdown-all", s.handleShutdownAllAgents)
 
 	// ── 前端-指标 ──
-	mux.HandleFunc("GET /api/metrics", s.handleGetMetrics)
-	mux.HandleFunc("GET /api/metrics/summary", s.handleGetMetricsSummary)
-	mux.HandleFunc("GET /api/metrics/agents", s.handleGetAgentMetrics)
-	mux.HandleFunc("GET /api/metrics/agents/{id}", s.handleGetSingleAgentMetrics)
-	mux.HandleFunc("GET /api/system", s.handleGetSystem)
-	mux.HandleFunc("GET /api/system/agents", s.handleGetSystemAgents)
-	mux.HandleFunc("GET /api/system/agents/{id}", s.handleGetSystemAgent)
+	mux.HandleFunc("GET /sbot/metrics", s.handleGetMetrics)
+	mux.HandleFunc("GET /sbot/metrics/summary", s.handleGetMetricsSummary)
+	mux.HandleFunc("GET /sbot/metrics/agents", s.handleGetAgentMetrics)
+	mux.HandleFunc("GET /sbot/metrics/agents/{id}", s.handleGetSingleAgentMetrics)
+	mux.HandleFunc("GET /sbot/system", s.handleGetSystem)
+	mux.HandleFunc("GET /sbot/system/agents", s.handleGetSystemAgents)
+	mux.HandleFunc("GET /sbot/system/agents/{id}", s.handleGetSystemAgent)
 
 	// ── 历史归档 ──
-	mux.HandleFunc("GET /api/history", s.handleListHistory)
-	mux.HandleFunc("GET /api/history/tags", s.handleGetHistoryTags)
-	mux.HandleFunc("GET /api/history/{id}", s.handleGetHistory)
-	mux.HandleFunc("PUT /api/history/{id}", s.handleUpdateHistory)
-	mux.HandleFunc("DELETE /api/history/{id}", s.handleDeleteHistory)
-	mux.HandleFunc("GET /api/history/{id}/agents", s.handleGetHistoryAgents)
-	mux.HandleFunc("GET /api/history/{id}/config", s.handleGetHistoryConfig)
-	mux.HandleFunc("GET /api/history/{id}/timeseries", s.handleGetHistoryTimeseries)
-	mux.HandleFunc("POST /api/history/{id}/clone", s.handleCloneHistory)
-	mux.HandleFunc("GET /api/history/compare", s.handleCompareHistory)
+	mux.HandleFunc("GET /sbot/history", s.handleListHistory)
+	mux.HandleFunc("GET /sbot/history/tags", s.handleGetHistoryTags)
+	mux.HandleFunc("GET /sbot/history/{id}", s.handleGetHistory)
+	mux.HandleFunc("PUT /sbot/history/{id}", s.handleUpdateHistory)
+	mux.HandleFunc("DELETE /sbot/history/{id}", s.handleDeleteHistory)
+	mux.HandleFunc("GET /sbot/history/{id}/agents", s.handleGetHistoryAgents)
+	mux.HandleFunc("GET /sbot/history/{id}/config", s.handleGetHistoryConfig)
+	mux.HandleFunc("GET /sbot/history/{id}/timeseries", s.handleGetHistoryTimeseries)
+	mux.HandleFunc("POST /sbot/history/{id}/clone", s.handleCloneHistory)
+	mux.HandleFunc("GET /sbot/history/compare", s.handleCompareHistory)
 
 	// ── 日志 ──
-	mux.HandleFunc("GET /api/logs/admin", s.handleGetAdminLogs)
-	mux.HandleFunc("GET /api/logs/agents/{id}", s.handleGetAgentLogs)
-	mux.HandleFunc("GET /api/logs/admin/files", s.handleListAdminLogFiles)
-	mux.HandleFunc("GET /api/logs/admin/files/{name}", s.handleDownloadAdminLogFile)
-	mux.HandleFunc("GET /api/logs/agents/{id}/files", s.handleListAgentLogFiles)
-	mux.HandleFunc("GET /api/logs/agents/{id}/files/{name}", s.handleDownloadAgentLogFile)
+	mux.HandleFunc("GET /sbot/logs/admin", s.handleGetAdminLogs)
+	mux.HandleFunc("GET /sbot/logs/agents/{id}", s.handleGetAgentLogs)
+	mux.HandleFunc("GET /sbot/logs/admin/files", s.handleListAdminLogFiles)
+	mux.HandleFunc("GET /sbot/logs/admin/files/{name}", s.handleDownloadAdminLogFile)
+	mux.HandleFunc("GET /sbot/logs/agents/{id}/files", s.handleListAgentLogFiles)
+	mux.HandleFunc("GET /sbot/logs/agents/{id}/files/{name}", s.handleDownloadAgentLogFile)
+
+	// ── 基线资源读取 ──
+	mux.HandleFunc("GET /sbot/baseline/proto/index.json", s.handleBaselineProtoIndex)
+	mux.HandleFunc("GET /sbot/baseline/proto/{name}", s.handleBaselineProtoFile)
+	mux.HandleFunc("GET /sbot/baseline/scripts/index.json", s.handleBaselineScriptIndex)
+	mux.HandleFunc("GET /sbot/baseline/scripts/{name}", s.handleBaselineScriptFile)
+	mux.HandleFunc("GET /sbot/baseline/adapter/codec.lua", s.handleBaselineAdapter)
+	mux.HandleFunc("GET /sbot/baseline/flow/flow.json", s.handleBaselineFlow)
+	mux.HandleFunc("GET /sbot/baseline/config.json", s.handleBaselineConfig)
 
 	// ── 静态资源 ──
 	if s.cfg.StaticDir != "" {
@@ -125,8 +134,8 @@ func (s *AdminServer) handleAgentRegister(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, RegisterResponse{
 		AgentID:        req.AgentID,
 		HeartbeatTTL:   s.cfg.AgentRegistry.UnhealthyAfter,
-		StressEndpoint: "/api/agent/stress",
-		SystemEndpoint: "/api/agent/system",
+		StressEndpoint: "/sbot/agent/stress",
+		SystemEndpoint: "/sbot/agent/system",
 	})
 }
 
@@ -263,7 +272,12 @@ func (s *AdminServer) handleAgentPendingTask(w http.ResponseWriter, r *http.Requ
 
 // handleCreateTask multipart/form-data 创建任务。
 func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
+	maxMultipart := s.cfg.Task.MaxMultipartSizeMB
+	if maxMultipart <= 0 {
+		stresslog.Warn("[ADMIN] task.maxMultipartSizeMB 未配置或非法，使用默认值 32 MB")
+		maxMultipart = 32
+	}
+	if err := r.ParseMultipartForm(int64(maxMultipart) << 20); err != nil {
 		writeError(w, ErrInvalidArgument.WithMessage("multipart parse error"))
 		return
 	}
@@ -613,16 +627,16 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 			TaskName:          taskName,
 			StartNumber:       a.StartNumber,
 			TotalBots:         a.TotalBots,
-			AccountPrefix:     stringOr(rc.AccountPrefix, "bot_"),
+			AccountPrefix:     stringOr(rc.AccountPrefix, "bot_", "robotConfig.accountPrefix"),
 			MainService:       rc.MainService,
 			StateExtra:        rc.StateExtra,
 			ConcurrentNum:     rc.Concurrency,
-			HeartbeatInterval: secsOr(rc.HeartbeatSec, 5),
-			TCPTimeout:        secsOr(rc.TimeoutSec, 60),
-			HTTPTimeout:       secsOr(rc.HTTPTimeoutSec, 10),
-			ApdexT:            intOr(rc.ApdexT, 100),
+			HeartbeatInterval: secsOr(rc.HeartbeatSec, 5, "robotConfig.heartbeatSec"),
+			TCPTimeout:        secsOr(rc.TimeoutSec, 60, "robotConfig.timeoutSec"),
+			HTTPTimeout:       secsOr(rc.HTTPTimeoutSec, 10, "robotConfig.httpTimeoutSec"),
+			ApdexT:            intOr(rc.ApdexT, 100, "robotConfig.apdexT"),
 			LogLevel:          rc.LogLevel,
-			ConfigURL:         fmt.Sprintf("%s/api/tasks/%s/config", s.cfg.PublicURL, taskID),
+			ConfigURL:         fmt.Sprintf("%s/sbot/tasks/%s/config", s.cfg.PublicURL, taskID),
 			ConfigFiles:       configFiles,
 			RampUp:            scaleRampUp(rc.RampUp, task.TotalBots, a.TotalBots),
 		}
@@ -1180,7 +1194,12 @@ func serveLogFile(w http.ResponseWriter, r *http.Request, dir, name string) {
 // handleUpdateBaseline 前端主动推送 IDB 资源到磁盘基线。
 // 接受 multipart/form-data（proto/scripts/adapter），写入 conf/ 目录。
 func (s *AdminServer) handleUpdateBaseline(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(16 << 20); err != nil {
+	maxMultipart := s.cfg.Task.MaxMultipartSizeMB
+	if maxMultipart <= 0 {
+		stresslog.Warn("[ADMIN] task.maxMultipartSizeMB 未配置或非法，使用默认值 32 MB")
+		maxMultipart = 32
+	}
+	if err := r.ParseMultipartForm(int64(maxMultipart) << 20); err != nil {
 		writeError(w, ErrInvalidArgument.WithMessage("multipart parse error"))
 		return
 	}
@@ -1287,6 +1306,77 @@ func safeWriteFile(dir, name string, data []byte) error {
 		return fmt.Errorf("mkdir: %w", err)
 	}
 	return os.WriteFile(filepath.Join(dir, name), data, 0644)
+}
+
+// ── 基线资源读取 ──
+
+func (s *AdminServer) handleBaselineProtoIndex(w http.ResponseWriter, r *http.Request) {
+	files, err := listDirFiles("conf/proto", ".proto")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, files)
+}
+
+func (s *AdminServer) handleBaselineProtoFile(w http.ResponseWriter, r *http.Request) {
+	serveBaselineFile(w, r, "conf/proto", "name")
+}
+
+func (s *AdminServer) handleBaselineScriptIndex(w http.ResponseWriter, r *http.Request) {
+	files, err := listDirFiles("conf/scripts", ".lua")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, files)
+}
+
+func (s *AdminServer) handleBaselineScriptFile(w http.ResponseWriter, r *http.Request) {
+	serveBaselineFile(w, r, "conf/scripts", "name")
+}
+
+func (s *AdminServer) handleBaselineAdapter(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "conf/adapter/codec.lua")
+}
+
+func (s *AdminServer) handleBaselineFlow(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "conf/flow/flow.json")
+}
+
+func (s *AdminServer) handleBaselineConfig(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "conf/config.json")
+}
+
+// listDirFiles 列出 dir 中后缀为 ext 的文件名（不含路径）。
+func listDirFiles(dir, ext string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("读取目录 %s 失败: %w", dir, err)
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ext) {
+			names = append(names, e.Name())
+		}
+	}
+	return names, nil
+}
+
+// serveBaselineFile 从 dir 目录提供指定文件，用 pathValue(key) 取文件名。
+func serveBaselineFile(w http.ResponseWriter, r *http.Request, dir, key string) {
+	name := r.PathValue(key)
+	if name == "" {
+		http.Error(w, "missing file name", http.StatusBadRequest)
+		return
+	}
+	// 防止路径穿越
+	name = filepath.Base(name)
+	if name == "." || name == ".." {
+		http.Error(w, "invalid file name", http.StatusBadRequest)
+		return
+	}
+	http.ServeFile(w, r, filepath.Join(dir, name))
 }
 
 // scaleRampUp 按比例缩放各 stage 的 count（分布式模式下每个 Agent 分到的 bot 数不同）。
