@@ -2,7 +2,7 @@
  * 历史记录详情：摘要 + 配置归档下载 + 备注/标签编辑 + 时序回放折线 + 最终动作汇总。
  */
 
-import { App, Button, Card, Col, Descriptions, Empty, Input, Row, Space, Spin, Switch, Table, Tag } from 'antd';
+import { App, Button, Card, Col, Descriptions, Empty, Input, Row, Space, Spin, Switch, Table, Tag, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { CopyOutlined, DownloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -153,9 +153,11 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
           return (
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               {isCallback && <Tag color="orange" style={{ marginInlineEnd: 0 }}>推送</Tag>}
-              <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={display}>
-                {display}
-              </code>
+              <Tooltip title={display} mouseEnterDelay={0.4}>
+                <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {display}
+                </code>
+              </Tooltip>
             </div>
           );
         },

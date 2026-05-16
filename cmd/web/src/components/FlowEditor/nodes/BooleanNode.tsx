@@ -3,6 +3,7 @@
  */
 
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Tooltip } from 'antd';
 import { NodeShell } from './shared/NodeShell';
 import type { FlowNode } from '@/types/flow';
 
@@ -31,9 +32,11 @@ export function BooleanNode({ id, data, selected }: NodeProps) {
         description={node.description}
       >
         {node.condition ? (
-          <div title={node.condition} style={{ fontFamily: 'monospace', fontSize: 10 }}>
-            {trim(node.condition, 32)}
-          </div>
+          <Tooltip title={node.condition} mouseEnterDelay={0.4}>
+            <div style={{ fontFamily: 'monospace', fontSize: 10 }}>
+              {trim(node.condition, 32)}
+            </div>
+          </Tooltip>
         ) : (
           <em style={{ color: 'var(--text-tertiary)' }}>未配置</em>
         )}

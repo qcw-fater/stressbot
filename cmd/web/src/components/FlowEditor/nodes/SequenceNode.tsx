@@ -5,6 +5,7 @@
  */
 
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Tooltip } from 'antd';
 import { NodeShell } from './shared/NodeShell';
 import type { FlowNode } from '@/types/flow';
 
@@ -40,12 +41,14 @@ export function SequenceNode({ id, data, selected }: NodeProps) {
             </div>
           ))}
           {/* "+" 占位行：始终渲染，与 add handle 对齐，便于拖线续接 */}
-          <div className="row-item row-item-add" title="从右侧虚线 handle 拖线到目标节点 → 追加 next">
-            <span className="row-index">+</span>
-            <span className="row-name" style={{ color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
-              拖线续接…
-            </span>
-          </div>
+          <Tooltip title="从右侧虚线 handle 拖线到目标节点 → 追加 next" mouseEnterDelay={0.4}>
+            <div className="row-item row-item-add">
+              <span className="row-index">+</span>
+              <span className="row-name" style={{ color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
+                拖线续接…
+              </span>
+            </div>
+          </Tooltip>
         </div>
       </NodeShell>
       {next.map((_, i) => (
@@ -58,14 +61,15 @@ export function SequenceNode({ id, data, selected }: NodeProps) {
         />
       ))}
       {/* "+" handle：拖线到目标节点 → 追加 next */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="seq-add"
-        className="handle-add"
-        style={{ top: HEADER_OFFSET + next.length * ROW_HEIGHT }}
-        title="拖线到目标节点 → 追加 next"
-      />
+      <Tooltip title="拖线到目标节点 → 追加 next" mouseEnterDelay={0.4}>
+        <Handle
+          type="source"
+          position={Position.Right}
+          id="seq-add"
+          className="handle-add"
+          style={{ top: HEADER_OFFSET + next.length * ROW_HEIGHT }}
+        />
+      </Tooltip>
     </>
   );
 }

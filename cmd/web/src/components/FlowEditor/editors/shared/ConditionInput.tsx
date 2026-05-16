@@ -11,7 +11,7 @@
  *   - 下方预览条：已识别的 state key 高亮为彩色标签
  */
 
-import { App as AntApp, Button, Input, Modal, Popover, Radio, Space, Tag } from 'antd';
+import { App as AntApp, Button, Input, Modal, Popover, Radio, Space, Tag, Tooltip } from 'antd';
 import { EditOutlined, SearchOutlined } from '@ant-design/icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { LuaForm } from '../ActionEditor/LuaForm';
@@ -264,9 +264,11 @@ export function ConditionInput({ value, onChange, placeholder }: ConditionInputP
             content={browseContent}
             overlayStyle={{ zIndex: popupZ }}
           >
-            <Button icon={<SearchOutlined />} title="浏览已有 state key 并插入到表达式">
-              浏览
-            </Button>
+            <Tooltip title="浏览已有 state key 并插入到表达式">
+              <Button icon={<SearchOutlined />}>
+                浏览
+              </Button>
+            </Tooltip>
           </Popover>
         )}
       </div>

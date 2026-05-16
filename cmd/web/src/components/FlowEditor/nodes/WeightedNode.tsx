@@ -4,6 +4,7 @@
  */
 
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Tooltip } from 'antd';
 import { NodeShell } from './shared/NodeShell';
 import type { FlowNode } from '@/types/flow';
 
@@ -37,9 +38,9 @@ export function WeightedNode({ id, data, selected }: NodeProps) {
             const ratio = total > 0 ? o.weight / total : 0;
             return (
               <div className="row-item" key={i}>
-                <span className="row-name" title={o.node}>
-                  {o.node}
-                </span>
+                <Tooltip title={o.node} mouseEnterDelay={0.4}>
+                  <span className="row-name">{o.node}</span>
+                </Tooltip>
                 <div className="weight-bar">
                   <div className="weight-bar-fill" style={{ width: `${ratio * 100}%` }} />
                 </div>
@@ -47,11 +48,13 @@ export function WeightedNode({ id, data, selected }: NodeProps) {
               </div>
             );
           })}
-          <div className="row-item row-item-add" title="从右侧虚线 handle 拖线到目标节点 → 追加 option（默认权重 1）">
-            <span className="row-name" style={{ color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
-              + 拖线续接…
-            </span>
-          </div>
+          <Tooltip title="从右侧虚线 handle 拖线到目标节点 → 追加 option（默认权重 1）" mouseEnterDelay={0.4}>
+            <div className="row-item row-item-add">
+              <span className="row-name" style={{ color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
+                + 拖线续接…
+              </span>
+            </div>
+          </Tooltip>
         </div>
       </NodeShell>
       {options.map((_, i) => (
@@ -63,14 +66,15 @@ export function WeightedNode({ id, data, selected }: NodeProps) {
           style={{ top: HEADER_OFFSET + i * ROW_HEIGHT }}
         />
       ))}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="opt-add"
-        className="handle-add"
-        style={{ top: HEADER_OFFSET + options.length * ROW_HEIGHT }}
-        title="拖线到目标节点 → 追加 option（默认权重 1）"
-      />
+      <Tooltip title="拖线到目标节点 → 追加 option（默认权重 1）" mouseEnterDelay={0.4}>
+        <Handle
+          type="source"
+          position={Position.Right}
+          id="opt-add"
+          className="handle-add"
+          style={{ top: HEADER_OFFSET + options.length * ROW_HEIGHT }}
+        />
+      </Tooltip>
     </>
   );
 }

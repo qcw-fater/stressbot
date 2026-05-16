@@ -38,9 +38,11 @@ export function ListenCard({ data, selected }: NodeProps) {
     >
       <Handle type="target" position={Position.Left} id="in" style={{ background: 'var(--edge-listen)' }} />
       <div className="listen-card-title-row">
-        <span className="card-title" title={listenName}>
-          {listenName}
-        </span>
+        <Tooltip title={listenName} mouseEnterDelay={0.4}>
+          <span className="card-title">
+            {listenName}
+          </span>
+        </Tooltip>
       </div>
       {listen.description && (
         <div className="card-description">

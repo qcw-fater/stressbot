@@ -15,7 +15,7 @@
  *   - 表格 horizontal scroll：列多了不会挤压，宽度可控。
  */
 
-import { Empty, Input, Space, Switch, Table, Tag } from 'antd';
+import { Empty, Input, Space, Switch, Table, Tag, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useMemo, useState } from 'react';
 import { useRuntimeStore } from '@/services';
@@ -57,9 +57,11 @@ export function ActionsTab() {
         return (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             {isCallback && <Tag color="orange" style={{ marginInlineEnd: 0 }}>推送</Tag>}
-            <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={display}>
-              {display}
-            </code>
+            <Tooltip title={display} mouseEnterDelay={0.4}>
+              <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {display}
+              </code>
+            </Tooltip>
           </div>
         );
       },

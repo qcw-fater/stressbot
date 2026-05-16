@@ -7,11 +7,11 @@
  *   - 高度可通过顶部拖把手调整（160px ~ 80vh）
  */
 
-import { Button, Input, Progress, Space, Switch, Table, Tag } from 'antd';
+import { Button, Input, Progress, Space, Switch, Table, Tag, Tooltip } from 'antd';
 import { CaretDownOutlined, CaretUpOutlined, LineChartOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import ReactECharts from 'echarts-for-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useRuntimeStore, classifyApdex } from '@/services';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
@@ -97,9 +97,11 @@ const ACTION_COLUMNS: ColumnsType<ActionMetric> = [
       return (
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           {isCb && <Tag color="orange" style={{ marginInlineEnd: 0 }}>推送</Tag>}
-          <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={display}>
-            {display}
-          </code>
+          <Tooltip title={display} mouseEnterDelay={0.4}>
+            <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {display}
+            </code>
+          </Tooltip>
         </div>
       );
     },
@@ -137,6 +139,7 @@ export function MonitorDock() {
     const saved = Number(localStorage.getItem('stressbot.monitorDock.h'));
     return saved >= MIN_H ? saved : DEFAULT_H;
   });
+  const [topCollapsed, setTopCollapsed] = useState(false);
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
 
   // auto toggle: edit→closed; running→open
@@ -186,13 +189,20 @@ export function MonitorDock() {
 
   return (
     <div className="monitor-dock" style={{ height }}>
-      <div className="monitor-dock__handle" onMouseDown={onDragStart} title="拖动调整高度" />
+      <Tooltip title="拖动调整高度">
+        <div className="monitor-dock__handle" onMouseDown={onDragStart} />
+      </Tooltip>
       <div className="monitor-dock__body">
-        <TopSection />
-        <ActionsSection />
+        {!topCollapsed && <TopSection />}
+        <ActionsSection dockHeight={height} topCollapsed={topCollapsed} />
       </div>
-      <div style={{ position: 'absolute', top: 6, right: 12 }}>
-        <Button type="text" size="small" icon={<CaretDownOutlined />} onClick={() => setDockOpen(false)} title="折叠监控" />
+      <div style={{ position: 'absolute', top: 6, right: 12, display: 'flex', gap: 2, alignItems: 'center' }}>
+        <Tooltip title={topCollapsed ? '展开指标和趋势图' : '收起指标和趋势图'}>
+          <Button type="text" size="small" icon={<LineChartOutlined />} onClick={() => setTopCollapsed(v => !v)} style={{ opacity: topCollapsed ? 0.5 : 1 }} />
+        </Tooltip>
+        <Tooltip title="折叠监控">
+          <Button type="text" size="small" icon={<CaretDownOutlined />} onClick={() => setDockOpen(false)} />
+        </Tooltip>
       </div>
     </div>
   );
@@ -374,31 +384,22 @@ function TopSection() {
    动作表（含搜索 + 过滤 + 可展开错误）
    ────────────────────────────────────────────────── */
 
-function ActionsSection() {
+function ActionsSection({ dockHeight, topCollapsed }: { dockHeight: number; topCollapsed: boolean }) {
   const latestStress = useRuntimeStore((s) => s.latestStress);
   const [search, setSearch] = useState('');
   const [actionsOnly, setActionsOnly] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollY, setScrollY] = useState(200);
 
-  useEffect(() => {
+  // dockHeight 或 topCollapsed 变化时同步重算 scrollY
+  useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const measure = () => {
-      const containerH = el.clientHeight;
-      // 找到 Ant Table 的 thead，量实际高度
-      const thead = el.querySelector('.ant-table-thead');
-      const headerH = thead?.getBoundingClientRect().height ?? 37;
-      setScrollY(Math.max(60, containerH - headerH - 4));
-    };
-    // 首次 + 每次 resize 重算
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    // MutationObserver 监听 table DOM 变化（表头首次渲染）
-    const mo = new MutationObserver(measure);
-    mo.observe(el, { childList: true, subtree: true });
-    return () => { ro.disconnect(); mo.disconnect(); };
-  }, []);
+    const containerH = el.clientHeight;
+    const thead = el.querySelector('.ant-table-thead');
+    const headerH = thead?.getBoundingClientRect().height ?? 37;
+    setScrollY(Math.max(60, containerH - headerH - 2));
+  }, [dockHeight, topCollapsed]);
 
   const dataSource = useMemo(() => {
     if (!latestStress) return [];

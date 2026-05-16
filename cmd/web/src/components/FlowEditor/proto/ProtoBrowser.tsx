@@ -6,7 +6,7 @@
  *   - 选择器模式（传 open/onClose/onSelect）：嵌入编辑器中临时选消息，渲染为 Modal
  */
 
-import { Button, Empty, Input, List, Typography } from 'antd';
+import { Button, Empty, Input, List, Tooltip, Typography } from 'antd';
 import { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useEditorStore } from '../store/editorStore';
@@ -194,7 +194,13 @@ export function ProtoBrowser({ windowId: customWindowId, open: openProp, onClose
                         <td style={{
                           color: 'var(--text-secondary)',
                           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                        }} title={f.comment}>{f.comment ?? ''}</td>
+                        }}>
+                          {f.comment ? (
+                            <Tooltip title={f.comment} mouseEnterDelay={0.4}>
+                              <span>{f.comment}</span>
+                            </Tooltip>
+                          ) : ''}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

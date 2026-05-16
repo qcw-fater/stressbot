@@ -8,7 +8,7 @@
  * 模板项可拖入画布：拖入时同时插入 ActionDef/ListenDef 到 flow 并建立对应节点。
  */
 
-import { App as AntApp, Empty, Input } from 'antd';
+import { App as AntApp, Empty, Input, Tooltip } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NodeType } from '@/types/flow';
 import {
@@ -174,16 +174,16 @@ export function NodePalette() {
         <div className="palette-section-title">节点类型</div>
         <div className="palette-grid">
           {PALETTE.map((m) => (
-            <div
-              key={m.type}
-              draggable
-              onDragStart={(e) => onDragStart(e, m.type)}
-              className={`palette-grid-item${m.type === 'listen' ? ' palette-grid-item-listen' : ''}`}
-              style={{ borderColor: m.color, color: m.color }}
-              title={`拖入画布创建 ${m.label} 节点`}
-            >
-              {m.label}
-            </div>
+            <Tooltip key={m.type} title={`拖入画布创建 ${m.label} 节点`} mouseEnterDelay={0.4}>
+              <div
+                draggable
+                onDragStart={(e) => onDragStart(e, m.type)}
+                className={`palette-grid-item${m.type === 'listen' ? ' palette-grid-item-listen' : ''}`}
+                style={{ borderColor: m.color, color: m.color }}
+              >
+                {m.label}
+              </div>
+            </Tooltip>
           ))}
         </div>
       </div>
@@ -208,22 +208,22 @@ export function NodePalette() {
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span style={{ fontSize: 11 }}>暂无</span>} />
             ) : (
               filteredActions.map((t) => (
-                <div
-                  key={t.id}
-                  className="tpl-card tpl-card-action"
-                  draggable
-                  onDragStart={(e) => onTemplateDragStart(e, 'action', t)}
-                  onContextMenu={(e) => onTemplateContextMenu(e, 'action', t)}
-                  onDoubleClick={() => onEditAction(t)}
-                  title={t.description ?? `${t.name} · ${t.pattern}（双击编辑 / 右键菜单 / 拖入画布）`}
-                >
-                  <div className="tpl-card-title">{t.name}</div>
-                <div className="tpl-card-meta">
-                  <span className="pattern-badge" data-pattern={t.pattern}>
-                    {t.pattern}
-                  </span>
+                <Tooltip key={t.id} title={t.description ?? `${t.name} · ${t.pattern}（双击编辑 / 右键菜单 / 拖入画布）`} mouseEnterDelay={0.4}>
+                  <div
+                    className="tpl-card tpl-card-action"
+                    draggable
+                    onDragStart={(e) => onTemplateDragStart(e, 'action', t)}
+                    onContextMenu={(e) => onTemplateContextMenu(e, 'action', t)}
+                    onDoubleClick={() => onEditAction(t)}
+                  >
+                    <div className="tpl-card-title">{t.name}</div>
+                  <div className="tpl-card-meta">
+                    <span className="pattern-badge" data-pattern={t.pattern}>
+                      {t.pattern}
+                    </span>
+                  </div>
                 </div>
-              </div>
+              </Tooltip>
             ))
           )}
         </div>
@@ -249,22 +249,22 @@ export function NodePalette() {
               filteredListens.map((t) => {
                 const kind = t.kind || classifyListen(t.data);
                 return (
-                  <div
-                    key={t.id}
-                    className="tpl-card tpl-card-listen"
-                    draggable
-                    onDragStart={(e) => onTemplateDragStart(e, 'listen', t)}
-                    onContextMenu={(e) => onTemplateContextMenu(e, 'listen', t)}
-                    onDoubleClick={() => onEditListen(t)}
-                    title={t.description ?? `${t.name} · ${kind}（双击编辑 / 右键菜单 / 拖入画布）`}
-                  >
-                    <div className="tpl-card-title">{t.name}</div>
-                    <div className="tpl-card-meta">
-                      <span className="pattern-badge" data-pattern={kind}>
-                        {kind}
-                      </span>
+                  <Tooltip key={t.id} title={t.description ?? `${t.name} · ${kind}（双击编辑 / 右键菜单 / 拖入画布）`} mouseEnterDelay={0.4}>
+                    <div
+                      className="tpl-card tpl-card-listen"
+                      draggable
+                      onDragStart={(e) => onTemplateDragStart(e, 'listen', t)}
+                      onContextMenu={(e) => onTemplateContextMenu(e, 'listen', t)}
+                      onDoubleClick={() => onEditListen(t)}
+                    >
+                      <div className="tpl-card-title">{t.name}</div>
+                      <div className="tpl-card-meta">
+                        <span className="pattern-badge" data-pattern={kind}>
+                          {kind}
+                        </span>
+                      </div>
                     </div>
-                  </div>
+                  </Tooltip>
                 );
               })
             )}

@@ -267,7 +267,7 @@ export function RuntimeBar({
           <Tag color={STATE_COLOR[activeTask.state]} style={{ margin: 0 }}>
             {activeTask.state}
           </Tag>
-          <Typography.Text style={{ maxWidth: 160 }} ellipsis title={activeTask.name}>
+          <Typography.Text style={{ maxWidth: 160 }} ellipsis={{ tooltip: activeTask.name }}>
             {activeTask.name}
           </Typography.Text>
         </Space>
