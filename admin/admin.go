@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -103,6 +104,9 @@ func (s *AdminServer) Run() error {
 		s.history.StartPruneLoop(ctx)
 	}
 
+	// 启动 deadline 看门狗
+	s.startDeadlineWatchdog(ctx)
+
 	// 注册路由
 	mux := s.registerRoutes()
 	s.httpSrv = &http.Server{
@@ -118,13 +122,13 @@ func (s *AdminServer) Run() error {
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	go func() {
+	utils.GetWorkPool().Go(func() {
 		<-sigCh
 		stresslog.Info("收到退出信号，开始关闭...")
 		s.Shutdown(context.Background())
-	}()
+	})
 
-	if err := s.httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := s.httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("http server: %w", err)
 	}
 	return nil
@@ -162,7 +166,7 @@ func (s *AdminServer) onTaskTerminal(task *Task) {
 		// 优先用 agent 终止报告聚合，兜底用心跳聚合
 		finalStress := buildFinalStressFromReports(task)
 		if finalStress == nil || len(finalStress.Actions) == 0 {
-			finalStress = s.aggregator.AggregateStress(taskID)
+			finalStress = s.aggregator.AggregateStress(taskID).Snapshot
 		}
 		finalSys := s.aggregator.AggregateSystem()
 		if err := s.history.Archive(task, finalStress, finalSys); err != nil {
@@ -181,11 +185,10 @@ func buildFinalStressFromReports(task *Task) *monitor.CollectorSnapshot {
 	snaps := make([]*monitor.CollectorSnapshot, 0, len(task.Reports))
 	for _, r := range task.Reports {
 		// 过滤零值快照
-		// 这种条目并入 MergeSnapshots 没意义，过滤掉。
 		if r.FinalSnapshot.UptimeSec == 0 && len(r.FinalSnapshot.Actions) == 0 {
 			continue
 		}
-		snap := r.FinalSnapshot // 复制一份避免外部修改原 map
+		snap := r.FinalSnapshot
 		snaps = append(snaps, &snap)
 	}
 	if len(snaps) == 0 {
@@ -195,19 +198,18 @@ func buildFinalStressFromReports(task *Task) *monitor.CollectorSnapshot {
 }
 
 func (s *AdminServer) onAgentStatusChange(agentID string, from, to AgentStatus) {
-	if to != AgentOffline {
-		return
-	}
-
 	task := s.tasks.ActiveTask()
 	if task == nil {
 		return
 	}
 
+	// 检查是否是活跃任务的分配节点
 	isAssigned := false
+	var agentName string
 	for _, a := range task.Assignments {
 		if a.AgentID == agentID {
 			isAssigned = true
+			agentName = a.AgentName
 			break
 		}
 	}
@@ -215,44 +217,226 @@ func (s *AdminServer) onAgentStatusChange(agentID string, from, to AgentStatus) 
 		return
 	}
 
-	var needTransition TaskState
-	err := s.tasks.Update(task.ID, func(t *Task) {
-		if t.Reports != nil {
-			if _, ok := t.Reports[agentID]; ok {
-				return // 已经报告过
+	// 节点恢复（offline → idle/busy）：记录 reconnected 事件
+	if from == AgentOffline && (to == AgentIdle || to == AgentBusy) {
+		s.tasks.Update(task.ID, func(t *Task) {
+			t.AgentEvents = append(t.AgentEvents, AgentEvent{
+				AgentID:   agentID,
+				AgentName: agentName,
+				Type:      "reconnected",
+				Timestamp: time.Now(),
+			})
+		})
+		stresslog.Info("[ADMIN] 分配节点恢复",
+			zap.String("taskId", task.ID),
+			zap.String("agentId", agentID),
+			zap.String("agentName", agentName))
+		return
+	}
+
+	// 节点离线：记录事件
+	if to != AgentOffline {
+		return
+	}
+
+	s.tasks.Update(task.ID, func(t *Task) {
+		t.AgentEvents = append(t.AgentEvents, AgentEvent{
+			AgentID:   agentID,
+			AgentName: agentName,
+			Type:      "offline",
+			Timestamp: time.Now(),
+			Detail:    "心跳超时",
+		})
+	})
+
+	stresslog.Warn("[ADMIN] 分配节点离线",
+		zap.String("taskId", task.ID),
+		zap.String("agentId", agentID),
+		zap.String("agentName", agentName))
+
+	// 任务正在 stopping 时节点离线 → 立刻合成 report
+	if task.State == TaskStopping {
+		s.tasks.Update(task.ID, func(t *Task) {
+			if t.Reports == nil {
+				t.Reports = make(map[string]TaskCompletionReport)
 			}
-		} else {
+			if _, exists := t.Reports[agentID]; !exists {
+				t.Reports[agentID] = TaskCompletionReport{
+					AgentID:    agentID,
+					TaskID:     task.ID,
+					Result:     ResultFailed,
+					ErrorMsg:   "节点离线",
+					FinishedAt: time.Now(),
+				}
+			}
+		})
+		task, _ = s.tasks.Get(task.ID)
+		if len(task.Reports) == len(task.Assignments) {
+			s.tasks.Transition(task.ID, TaskStopping, TaskStopped)
+		}
+		return
+	}
+
+	// 任务 running 时节点离线 → 检查是否所有分配节点都已离线
+	anyOnline := false
+	for _, a := range task.Assignments {
+		node, ok := s.agents.Get(a.AgentID)
+		if ok && node.Status != AgentOffline {
+			anyOnline = true
+			break
+		}
+	}
+	if !anyOnline {
+		stresslog.Error("[ADMIN] 所有分配节点已离线，自动停止任务",
+			zap.String("taskId", task.ID))
+		s.autoStopTask(task.ID, "所有节点已离线")
+	}
+}
+
+// synthesizeOfflineReports 为已离线且未上报的分配节点合成 stopped report。
+// 返回 true 表示所有分配节点都已有 report（可以立刻转 stopped）。
+func (s *AdminServer) synthesizeOfflineReports(taskID string) bool {
+	if _, ok := s.tasks.Get(taskID); !ok {
+		return false
+	}
+	allReported := true
+	s.tasks.Update(taskID, func(t *Task) {
+		if t.Reports == nil {
 			t.Reports = make(map[string]TaskCompletionReport)
 		}
-
-		t.Reports[agentID] = TaskCompletionReport{
-			AgentID:    agentID,
-			TaskID:     task.ID,
-			Result:     ResultFailed,
-			ErrorMsg:   "agent offline unexpectedly",
-			FinishedAt: time.Now(),
+		for _, a := range t.Assignments {
+			if _, exists := t.Reports[a.AgentID]; exists {
+				continue
+			}
+			node, nodeOk := s.agents.Get(a.AgentID)
+			if !nodeOk || node.Status == AgentOffline {
+				t.Reports[a.AgentID] = TaskCompletionReport{
+					AgentID:    a.AgentID,
+					TaskID:     taskID,
+					Result:     ResultStopped,
+					ErrorMsg:   "节点离线，未上报",
+					FinishedAt: time.Now(),
+				}
+			} else {
+				allReported = false
+			}
 		}
+		if allReported && len(t.Reports) < len(t.Assignments) {
+			allReported = false
+		}
+	})
+	return allReported
+}
 
-		if len(t.Reports) == len(t.Assignments) {
-			if t.State == TaskRunning {
-				needTransition = TaskRunning
-			} else if t.State == TaskStopping {
-				needTransition = TaskStopping
+// startStopTimeout 启动停止超时安全网。
+// 30s 后如果任务仍在 stopping，为剩余未上报节点合成 report 并转 stopped。
+func (s *AdminServer) startStopTimeout(taskID string) {
+	utils.GetWorkPool().Go(func() {
+		time.Sleep(30 * time.Second)
+		task, ok := s.tasks.Get(taskID)
+		if !ok || task.State != TaskStopping {
+			return
+		}
+		stresslog.Warn("[ADMIN] 停止超时，合成未上报节点的 report",
+			zap.String("taskId", taskID),
+			zap.Int("reported", len(task.Reports)),
+			zap.Int("total", len(task.Assignments)))
+		s.tasks.Update(taskID, func(t *Task) {
+			if t.Reports == nil {
+				t.Reports = make(map[string]TaskCompletionReport)
+			}
+			for _, a := range t.Assignments {
+				if _, exists := t.Reports[a.AgentID]; !exists {
+					t.Reports[a.AgentID] = TaskCompletionReport{
+						AgentID:    a.AgentID,
+						TaskID:     taskID,
+						Result:     ResultStopped,
+						ErrorMsg:   "停止超时，节点未响应",
+						FinishedAt: time.Now(),
+					}
+				}
+			}
+		})
+		s.tasks.Transition(taskID, TaskStopping, TaskStopped)
+	})
+}
+
+// autoStopTask 自动停止任务（deadline 超时或全部节点离线）。
+func (s *AdminServer) autoStopTask(taskID string, reason string) {
+	task, ok := s.tasks.Get(taskID)
+	if !ok || !IsActiveState(task.State) {
+		return
+	}
+
+	if task.State == TaskRunning {
+		if _, err := s.tasks.Transition(taskID, TaskRunning, TaskStopping); err != nil {
+			stresslog.Error("[ADMIN] 自动停止任务状态转换失败", zap.Error(err))
+			return
+		}
+	}
+
+	task, _ = s.tasks.Get(taskID)
+	for _, a := range task.Assignments {
+		node, ok := s.agents.Get(a.AgentID)
+		if ok && node.Status != AgentOffline {
+			if err := s.dispatcher.Stop(node.Address, taskID); err != nil {
+				stresslog.Warn("[ADMIN] 停止节点任务失败",
+					zap.String("agentId", a.AgentID), zap.Error(err))
+			}
+		}
+	}
+
+	s.tasks.Update(taskID, func(t *Task) {
+		if t.Reports == nil {
+			t.Reports = make(map[string]TaskCompletionReport)
+		}
+		for _, a := range t.Assignments {
+			if _, ok := t.Reports[a.AgentID]; !ok {
+				t.Reports[a.AgentID] = TaskCompletionReport{
+					AgentID:    a.AgentID,
+					TaskID:     taskID,
+					Result:     ResultFailed,
+					ErrorMsg:   reason,
+					FinishedAt: time.Now(),
+				}
 			}
 		}
 	})
 
-	if err == nil {
-		if needTransition == TaskRunning {
-			s.tasks.Transition(task.ID, TaskRunning, TaskStopped)
-		} else if needTransition == TaskStopping {
-			s.tasks.Transition(task.ID, TaskStopping, TaskStopped)
-		}
-	}
+	s.tasks.Transition(taskID, TaskStopping, TaskFailed)
 }
 
 func generateID() string {
 	b := make([]byte, 16)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// startDeadlineWatchdog 定期检查活跃任务是否超时。
+func (s *AdminServer) startDeadlineWatchdog(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
+	utils.GetWorkPool().GoWithStop(func(stopCh <-chan struct{}) {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-stopCh:
+				return
+			case <-ticker.C:
+				func() {
+					task := s.tasks.ActiveTask()
+					if task == nil || task.State != TaskRunning {
+						return
+					}
+					if task.Config.Deadline != nil && time.Now().After(*task.Config.Deadline) {
+						stresslog.Info("[ADMIN] 任务超时，自动停止",
+							zap.String("taskId", task.ID),
+							zap.Time("deadline", *task.Config.Deadline))
+						s.autoStopTask(task.ID, "任务超时")
+					}
+				}()
+			}
+		}
+	})
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	stresslog "stressbot/utils/log"
+	"stressbot/utils"
 
 	"go.uber.org/zap"
 )
@@ -24,6 +25,9 @@ type TaskStore struct {
 
 	// 终态回调（用于触发归档）
 	onTerminal func(task *Task)
+
+	// Admin 重启时恢复的活跃任务 ID（SetOnTerminal 后触发归档）
+	recoveredIDs []string
 }
 
 func NewTaskStore(dataDir string) (*TaskStore, error) {
@@ -39,6 +43,7 @@ func NewTaskStore(dataDir string) (*TaskStore, error) {
 	}
 
 	now := time.Now()
+	var recoveredIDs []string
 	for _, t := range tasks {
 		if IsActiveState(t.State) {
 			// 活跃任务在 Admin 重启后重置为 failed
@@ -48,16 +53,27 @@ func NewTaskStore(dataDir string) (*TaskStore, error) {
 			t.State = TaskFailed
 			t.ErrorMsg = "admin restart, task lost"
 			t.StoppedAt = &now
+			recoveredIDs = append(recoveredIDs, t.ID)
 		}
 		ts.tasks[t.ID] = t
 	}
 
+	// 记录需要归档的恢复任务（SetOnTerminal 后触发）
+	ts.recoveredIDs = recoveredIDs
+
 	return ts, nil
 }
 
-// SetOnTerminal 设置终态回调。
+// SetOnTerminal 设置终态回调，并触发 Admin 重启后恢复任务的归档。
 func (ts *TaskStore) SetOnTerminal(fn func(task *Task)) {
 	ts.onTerminal = fn
+	// 触发恢复任务的归档
+	for _, id := range ts.recoveredIDs {
+		if t, ok := ts.tasks[id]; ok {
+			ts.onTerminal(t)
+		}
+	}
+	ts.recoveredIDs = nil
 }
 
 // Create 创建任务。
@@ -178,7 +194,8 @@ func (ts *TaskStore) Transition(id string, from, to TaskState) (*Task, error) {
 			if data, err := json.Marshal(t); err == nil {
 				json.Unmarshal(data, &taskCopy)
 			}
-			go ts.onTerminal(&taskCopy)
+			taskRef := &taskCopy
+			utils.GetWorkPool().Go(func() { ts.onTerminal(taskRef) })
 		}
 	}
 

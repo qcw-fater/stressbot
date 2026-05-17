@@ -104,6 +104,12 @@ func (s *AdminServer) registerRoutes() *http.ServeMux {
 // ── Agent 上行 ──
 
 func (s *AdminServer) handleAgentRegister(w http.ResponseWriter, r *http.Request) {
+	// 任务进行中时拒绝新节点注册
+	if s.tasks.HasActive() {
+		writeError(w, ErrTaskConflict.WithMessage("任务进行中，不允许新节点注册"))
+		return
+	}
+
 	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, ErrInvalidArgument.WithMessage("invalid json"))
@@ -389,6 +395,14 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	// deadline（可选）
 	if dl := r.FormValue("deadline"); dl != "" {
 		if t, err := time.Parse(time.RFC3339, dl); err == nil {
+			cfg.Deadline = &t
+		}
+	}
+
+	// deadline 未指定时使用默认值
+	if cfg.Deadline == nil && s.cfg.Task.DeadlineDefault != "" {
+		if d, err := time.ParseDuration(s.cfg.Task.DeadlineDefault); err == nil && d > 0 {
+			t := time.Now().Add(d)
 			cfg.Deadline = &t
 		}
 	}
@@ -705,6 +719,7 @@ func (s *AdminServer) handleStopTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 向在线节点发送 stop
 	for _, a := range task.Assignments {
 		agent, ok := s.agents.Get(a.AgentID)
 		if !ok || agent.Status == AgentOffline {
@@ -715,6 +730,17 @@ func (s *AdminServer) handleStopTask(w http.ResponseWriter, r *http.Request) {
 				zap.String("agentId", a.AgentID),
 				zap.Error(err))
 		}
+	}
+
+	// 立刻为已离线且未上报的节点合成 stopped report（Admin 已知它们不可能再上报了）
+	allReported := s.synthesizeOfflineReports(id)
+
+	// 如果全部节点都已有 report（例如所有节点早已离线），直接转 stopped
+	if allReported {
+		s.tasks.Transition(id, TaskStopping, TaskStopped)
+	} else {
+		// 安全网：30s 后如果还在 stopping（在线节点未响应），强制完成
+		s.startStopTimeout(id)
 	}
 
 	updated, _ := s.tasks.Get(id)
@@ -852,8 +878,8 @@ func (s *AdminServer) handleGetMetrics(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, &monitor.CollectorSnapshot{})
 		return
 	}
-	snap := s.aggregator.AggregateStress(active.ID)
-	writeJSON(w, http.StatusOK, snap)
+	agg := s.aggregator.AggregateStress(active.ID)
+	writeJSON(w, http.StatusOK, agg)
 }
 
 // handleGetMetricsSummary 文本摘要。
@@ -864,12 +890,12 @@ func (s *AdminServer) handleGetMetricsSummary(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	snap := s.aggregator.AggregateStress(active.ID)
+	agg := s.aggregator.AggregateStress(active.ID)
 	var b strings.Builder
 	fmt.Fprintf(&b, "Task: %s (%s)\n", active.Name, active.ID)
-	fmt.Fprintf(&b, "Total Actions: %d\n", snap.TotalActions)
-	if len(snap.Actions) > 0 {
-		for _, a := range snap.Actions {
+	fmt.Fprintf(&b, "Total Actions: %d\n", agg.Snapshot.TotalActions)
+	if len(agg.Snapshot.Actions) > 0 {
+		for _, a := range agg.Snapshot.Actions {
 			fmt.Fprintf(&b, "  %s: count=%d success=%.1f%% p50=%.1fms p99=%.1fms\n",
 				a.Name, a.SampleCount, a.SuccessRate*100, a.Latency.P50Ms, a.Latency.P99Ms)
 		}

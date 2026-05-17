@@ -83,6 +83,7 @@ export function RuntimeBar({
     ownedTaskId,
     agents,
     connectionLost,
+    agentEvents,
     detachFromActive,
   } = useRuntimeStore(
     useShallow((s) => ({
@@ -91,6 +92,7 @@ export function RuntimeBar({
       ownedTaskId: s.ownedTaskId,
       agents: s.agents,
       connectionLost: s.connectionLost,
+      agentEvents: s.agentEvents,
       detachFromActive: s.detachFromActive,
     })),
   );
@@ -270,6 +272,22 @@ export function RuntimeBar({
           <Typography.Text style={{ maxWidth: 160 }} ellipsis={{ tooltip: activeTask.name }}>
             {activeTask.name}
           </Typography.Text>
+          {agentEvents.some((e) => e.type === 'offline') && (() => {
+            const offlineIds = new Set(
+              agentEvents.filter((e) => e.type === 'offline').map((e) => e.agentId),
+            );
+            const reconnectedIds = new Set(
+              agentEvents.filter((e) => e.type === 'reconnected').map((e) => e.agentId),
+            );
+            const stillOffline = [...offlineIds].filter((id) => !reconnectedIds.has(id));
+            return stillOffline.length > 0 ? (
+              <Tooltip title={`节点 ${stillOffline.join('、')} 已离线`}>
+                <Tag color="warning" style={{ margin: 0 }}>
+                  {stillOffline.length} 节点离线
+                </Tag>
+              </Tooltip>
+            ) : null;
+          })()}
         </Space>
       )}
       {mode === 'finalReport' && (

@@ -27,8 +27,9 @@ type AgentConfig struct {
 	RegisterRetryMaxInterval string `json:"registerRetryMaxInterval"`
 
 	// Admin 断连退出策略
-	MaxHeartbeatFailures int  `json:"maxHeartbeatFailures"`       // 连续心跳失败次数阈值，达到后自行退出。0=永不退出
-	TaskRunAdminLostExit bool `json:"taskRunAdminLostExit"` // 任务运行中与 Admin 断联时立即退出
+	MaxHeartbeatFailures int  `json:"maxHeartbeatFailures"`       // 连续心跳失败次数阈值，达到后停止任务。0=永不停止
+	TaskRunAdminLostExit bool `json:"taskRunAdminLostExit"` // 任务运行中与 Admin 断联时停止当前任务
+	ReconnectEnabled     bool `json:"reconnectEnabled"`           // Admin 断联后是否保持进程重连。false=停止后退出进程 // 任务运行中与 Admin 断联时立即退出
 
 	TaskWorkDir   string `json:"taskWorkDir"`
 	AppVersion    string `json:"appVersion"`
@@ -54,6 +55,7 @@ type ResolvedConfig struct {
 	// Admin 断连退出策略
 	MaxHeartbeatFailures int
 	TaskRunAdminLostExit bool
+	ReconnectEnabled     bool
 }
 
 // Resolve 将原始 AgentConfig 解析为 ResolvedConfig，填充默认值并校验。

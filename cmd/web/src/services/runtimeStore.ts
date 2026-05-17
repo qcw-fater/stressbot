@@ -20,6 +20,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type {
   AgentBrief,
+  AgentEvent,
   ClusterSystemSnapshot,
   RobotConfig,
   StressSnapshot,
@@ -57,6 +58,9 @@ export interface RuntimeState {
   /** 连接 Admin 失败 banner（usePolling 触发） */
   connectionLost: boolean;
 
+  /** 任务期间 Agent 事件（离线/重连/注销） */
+  agentEvents: AgentEvent[];
+
   // === 状态机 / 数据 setter ===
   setMode: (m: RuntimeMode) => void;
   setActiveTask: (task: TaskBrief | null) => void;
@@ -71,6 +75,8 @@ export interface RuntimeState {
   pushSystem: (snap: ClusterSystemSnapshot) => void;
   setAgents: (items: AgentBrief[]) => void;
   setConnectionLost: (lost: boolean) => void;
+  setAgentEvents: (events: AgentEvent[]) => void;
+  appendAgentEvents: (events: AgentEvent[]) => void;
 
   /** 任务结束钩子：mode 切到 finalReport，停止后续历史写入 */
   onTaskFinished: () => void;
@@ -124,6 +130,7 @@ const initialState = {
   stressHistory: [] as StressSnapshot[],
   systemHistory: [] as ClusterSystemSnapshot[],
   connectionLost: false,
+  agentEvents: [] as AgentEvent[],
 };
 
 function pushWithLimit<T>(arr: T[], item: T, limit = HISTORY_WINDOW): T[] {
@@ -183,6 +190,18 @@ export const useRuntimeStore = create<RuntimeState>()(
         }),
       setAgents: (items) => set({ agents: items }),
       setConnectionLost: (lost) => set({ connectionLost: lost }),
+      setAgentEvents: (events) => set({ agentEvents: events }),
+      appendAgentEvents: (events) =>
+        set((s) => {
+          if (!events.length) return {};
+          // 按 timestamp 去重，避免 polling 重复推入
+          const existing = new Set(s.agentEvents.map((e) => `${e.agentId}:${e.type}:${e.timestamp}`));
+          const newEvents = events.filter(
+            (e) => !existing.has(`${e.agentId}:${e.type}:${e.timestamp}`),
+          );
+          if (!newEvents.length) return {};
+          return { agentEvents: [...s.agentEvents, ...newEvents] };
+        }),
 
       onTaskFinished: () =>
         set({
@@ -203,6 +222,7 @@ export const useRuntimeStore = create<RuntimeState>()(
           latestSystem: null,
           stressHistory: [],
           systemHistory: [],
+          agentEvents: [],
         }),
 
       detachFromActive: () =>

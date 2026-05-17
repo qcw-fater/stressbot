@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"sync"
 	"time"
+
+	"stressbot/utils"
 )
 
 // Sampler 运行期定时采集时序数据。
@@ -47,7 +49,7 @@ func (s *Sampler) Start(taskID string) error {
 		startedAt: time.Now(),
 		cancel:    cancel,
 	}
-	go s.loop(ctx, taskID, s.current.startedAt)
+	utils.GetWorkPool().GoWithStop(func(stopCh <-chan struct{}) { s.loop(ctx, taskID, s.current.startedAt, stopCh) })
 	return nil
 }
 
@@ -61,7 +63,7 @@ func (s *Sampler) Stop(taskID string) {
 	}
 }
 
-func (s *Sampler) loop(ctx context.Context, taskID string, startedAt time.Time) {
+func (s *Sampler) loop(ctx context.Context, taskID string, startedAt time.Time, stopCh <-chan struct{}) {
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
 
@@ -69,10 +71,11 @@ func (s *Sampler) loop(ctx context.Context, taskID string, startedAt time.Time) 
 		select {
 		case <-ctx.Done():
 			return
+		case <-stopCh:
+			return
 		case t := <-ticker.C:
 			elapsed := int(t.Sub(startedAt).Seconds())
 
-			// 压测快照
 			stress := s.aggregator.AggregateStress(taskID)
 			if stressJSON, err := json.Marshal(stress); err == nil {
 				_ = s.history.AppendTimeseries(taskID, TimeseriesPoint{
@@ -81,7 +84,6 @@ func (s *Sampler) loop(ctx context.Context, taskID string, startedAt time.Time) 
 				})
 			}
 
-			// 系统快照
 			sys := s.aggregator.AggregateSystem()
 			if sysJSON, err := json.Marshal(sys); err == nil {
 				_ = s.history.AppendTimeseries(taskID, TimeseriesPoint{

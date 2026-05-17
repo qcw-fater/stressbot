@@ -11,6 +11,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 
 	"stressbot/monitor"
+	"stressbot/utils"
 
 	stresslog "stressbot/utils/log"
 
@@ -196,6 +197,17 @@ func (h *HistoryStore) Archive(task *Task, finalStress *monitor.CollectorSnapsho
 		return fmt.Errorf("insert task_config_archive: %w", err)
 	}
 
+	// 6. task_agent_events
+	for _, evt := range task.AgentEvents {
+		_, err = tx.Exec(`
+			INSERT INTO task_agent_events (task_id, agent_id, agent_name, event_type, timestamp, detail)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, task.ID, evt.AgentID, evt.AgentName, evt.Type, evt.Timestamp, evt.Detail)
+		if err != nil {
+			return fmt.Errorf("insert task_agent_events: %w", err)
+		}
+	}
+
 	return tx.Commit()
 }
 
@@ -342,6 +354,22 @@ func (h *HistoryStore) Get(id string) (*HistoryDetail, error) {
 	_ = h.db.QueryRow(`SELECT final_stress, final_system FROM task_aggregated WHERE task_id = ?`, id).Scan(&stressBytes, &sysBytes)
 	_ = json.Unmarshal(stressBytes, &r.FinalSnapshot)
 	_ = json.Unmarshal(sysBytes, &r.FinalSystem)
+
+	// agent events
+	rows3, err := h.db.Query(`SELECT agent_id, agent_name, event_type, timestamp, detail FROM task_agent_events WHERE task_id = ? ORDER BY timestamp`, id)
+	if err == nil {
+		defer rows3.Close()
+		for rows3.Next() {
+			var evt AgentEvent
+			var detail sql.NullString
+			if err := rows3.Scan(&evt.AgentID, &evt.AgentName, &evt.Type, &evt.Timestamp, &detail); err == nil {
+				if detail.Valid {
+					evt.Detail = detail.String
+				}
+				r.AgentEvents = append(r.AgentEvents, evt)
+			}
+		}
+	}
 
 	return &r, nil
 }
@@ -577,8 +605,7 @@ func (h *HistoryStore) StartPruneLoop(ctx context.Context) {
 	}
 	ctx, h.cancel = context.WithCancel(ctx)
 
-	go func() {
-		// 首次立即执行一次
+	utils.GetWorkPool().GoWithStop(func(stopCh <-chan struct{}) {
 		if _, err := h.PruneExpired(time.Now()); err != nil {
 			stresslog.Error("历史清理失败", zap.Error(err))
 		}
@@ -590,13 +617,15 @@ func (h *HistoryStore) StartPruneLoop(ctx context.Context) {
 			select {
 			case <-ctx.Done():
 				return
+			case <-stopCh:
+				return
 			case <-ticker.C:
 				if _, err := h.PruneExpired(time.Now()); err != nil {
 					stresslog.Error("历史清理失败", zap.Error(err))
 				}
 			}
 		}
-	}()
+	})
 }
 
 // Close 关闭数据库连接。

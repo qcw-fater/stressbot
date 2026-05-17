@@ -68,7 +68,7 @@ function HomeShellInner() {
   const themeMode = useEditorStore((s) => s.theme);
   useMonacoFindTooltip(themeMode);
 
-  const { mode, activeTask, ownedTaskId, latestStress, onTaskFinished, setActiveTask, setAgents, pushStress, pushSystem, setConnectionLost } =
+  const { mode, activeTask, ownedTaskId, latestStress, onTaskFinished, setActiveTask, setAgents, pushStress, pushSystem, setConnectionLost, appendAgentEvents } =
     useRuntimeStore(
       useShallow((s) => ({
         mode: s.mode,
@@ -81,6 +81,7 @@ function HomeShellInner() {
         pushStress: s.pushStress,
         pushSystem: s.pushSystem,
         setConnectionLost: s.setConnectionLost,
+        appendAgentEvents: s.appendAgentEvents,
       })),
     );
 
@@ -181,6 +182,9 @@ function HomeShellInner() {
     enabled: policy.pollActiveTask && !!taskId,
     onSuccess: (detail) => {
       setActiveTask(detail);
+      if (detail.agentEvents?.length) {
+        appendAgentEvents(detail.agentEvents);
+      }
       if (detail.state === 'stopped' || detail.state === 'failed') {
         onTaskFinished();
       }
@@ -198,7 +202,7 @@ function HomeShellInner() {
     fetcher: stressFetcher,
     intervalMs: policy.intervalMs,
     enabled: policy.pollStress,
-    onSuccess: (snap) => pushStress(snap),
+    onSuccess: (agg) => pushStress(agg.snapshot),
     onConnectionLost: () => setConnectionLost(true),
     onConnectionRestored: () => setConnectionLost(false),
   });

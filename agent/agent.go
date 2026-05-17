@@ -244,14 +244,28 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 
 				consecutiveFailures++
 
-				// 任务运行中 + Admin 断联 → 立即退出
+				// 任务运行中 + Admin 断联 → 停止任务（不退进程）
 				if a.cfg.TaskRunAdminLostExit && status == StatusBusy {
-					stresslog.Error("[AGENT] 任务运行中与 Admin 断联，立即退出",
+					stresslog.Error("[AGENT] 任务运行中与 Admin 断联，停止当前任务",
 						zap.String("taskID", taskID),
 						zap.Int("failures", consecutiveFailures),
 						zap.Error(err))
-					a.triggerStop()
-					return
+					a.mu.Lock()
+					if a.taskCancel != nil {
+						a.taskCancel()
+					}
+					a.mu.Unlock()
+					// 检查是否需要退出进程
+					if !a.cfg.ReconnectEnabled {
+						stresslog.Info("[AGENT] 未配置重连，退出进程")
+						a.triggerStop()
+						return
+					}
+					// 心跳循环继续，等 Admin 恢复后自动重注册
+					consecutiveFailures = 0
+					interval = a.cfg.HBFailInterval
+					timer.Reset(interval)
+					continue
 				}
 
 				if consecutiveFailures <= 3 {
@@ -260,9 +274,9 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 					stresslog.Error("[AGENT] 心跳连续失败", zap.Int("consecutive", consecutiveFailures), zap.Error(err))
 				}
 
-				// 达到最大失败次数 → 自行退出
+				// 达到最大失败次数 → 停止任务（不退进程）
 				if a.cfg.MaxHeartbeatFailures > 0 && consecutiveFailures >= a.cfg.MaxHeartbeatFailures {
-					stresslog.Error("[AGENT] 心跳连续失败达到上限，视为 Admin 不可恢复，自行退出",
+					stresslog.Error("[AGENT] 心跳连续失败达到上限，视为 Admin 不可恢复，停止当前任务",
 						zap.Int("failures", consecutiveFailures),
 						zap.Int("maxFailures", a.cfg.MaxHeartbeatFailures))
 					a.triggerStop()
@@ -311,10 +325,10 @@ func (a *Agent) taskPollLoop(ctx context.Context) {
 			if task != nil {
 				stresslog.Info("[AGENT] 轮询到任务", zap.String("taskID", task.TaskID))
 				a.wg.Add(1)
-				go func() {
+				utils.GetWorkPool().Go(func() {
 					defer a.wg.Done()
 					a.executeTask(ctx, task)
-				}()
+				})
 			}
 		}
 	}
@@ -381,7 +395,7 @@ func (a *Agent) executeTask(ctx context.Context, task *TaskAssignment) {
 	finalSnap := a.collector.Snapshot(nil, 0)
 
 	// 上报任务完成（最多重试 30 分钟，但 Agent 退出时终止）
-	reportCtx, reportCancel := context.WithTimeout(a.ctx, 30*time.Minute)
+	reportCtx, reportCancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer reportCancel()
 
 	report := TaskCompletionReport{
@@ -413,35 +427,40 @@ func (a *Agent) executeTask(ctx context.Context, task *TaskAssignment) {
 func (a *Agent) shutdown() error {
 	stresslog.Info("[AGENT] 正在关闭...")
 
-	// 1. 取消全局 ctx → 所有监听 ctx.Done() 的 goroutine 退出
-	a.cancel()
-
-	// 2. 停止 SystemReporter
-	if a.sysReporter != nil {
-		a.sysReporter.Stop()
-	}
-
-	// 3. 取消当前任务（触发 TaskRunner 退出）
+	// 1. 先停止当前任务（确保报告能发出 — reportCtx 已改为 context.Background）
 	a.mu.Lock()
 	if a.taskCancel != nil {
 		a.taskCancel()
 	}
 	a.mu.Unlock()
 
-	// 4. 注销（best-effort）
+	// 2. 停止 StressReporter
+	if a.stressReporter != nil {
+		a.stressReporter.Stop()
+	}
+
+	// 3. 停止 SystemReporter
+	if a.sysReporter != nil {
+		a.sysReporter.Stop()
+	}
+
+	// 4. 取消全局 ctx → 所有监听 ctx.Done() 的 goroutine 退出
+	a.cancel()
+
+	// 5. 注销（best-effort）
 	deregCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	a.httpCli.Deregister(deregCtx)
 
-	// 5. 关闭 HTTP 服务器
+	// 6. 关闭 HTTP 服务器
 	a.shutdownHTTPServer(context.Background())
 
-	// 6. 等待所有 wg-tracked goroutine 退出
+	// 7. 等待所有 wg-tracked goroutine 退出
 	done := make(chan struct{})
-	go func() {
+	utils.GetWorkPool().Go(func() {
 		a.wg.Wait()
 		close(done)
-	}()
+	})
 
 	select {
 	case <-done:
@@ -449,7 +468,7 @@ func (a *Agent) shutdown() error {
 		stresslog.Warn("[AGENT] 等待 goroutine 退出超时")
 	}
 
-	// 7. 关闭 work pool
+	// 8. 关闭 work pool
 	utils.GetWorkPool().Shutdown()
 
 	stresslog.Info("[AGENT] 已退出")

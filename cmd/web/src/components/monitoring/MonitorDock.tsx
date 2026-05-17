@@ -7,8 +7,8 @@
  *   - 高度可通过顶部拖把手调整（160px ~ 80vh）
  */
 
-import { Button, Input, Progress, Space, Switch, Table, Tag, Tooltip } from 'antd';
-import { CaretDownOutlined, CaretUpOutlined, LineChartOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
+import { Alert, Button, Input, Progress, Space, Switch, Table, Tag, Tooltip } from 'antd';
+import { CaretDownOutlined, CaretUpOutlined, LineChartOutlined, ArrowUpOutlined, ArrowDownOutlined, WarningOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import ReactECharts from 'echarts-for-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -129,6 +129,49 @@ const ACTION_COLUMNS: ColumnsType<ActionMetric> = [
   },
 ];
 
+/* ── Agent 离线告警横幅 ── */
+
+function AgentOfflineAlert() {
+  const agentEvents = useRuntimeStore((s) => s.agentEvents);
+  const agents = useRuntimeStore((s) => s.agents);
+  const [dismissedKeys, setDismissedKeys] = useState<Set<string>>(new Set());
+
+  // 取最近未关闭的 offline 事件
+  const offlineAlerts = useMemo(() => {
+    const onlineIds = new Set(agents.filter((a) => a.status !== 'offline').map((a) => a.agentId));
+    return agentEvents
+      .filter((e) => e.type === 'offline' && !dismissedKeys.has(e.agentId + e.timestamp))
+      .filter((e) => !onlineIds.has(e.agentId)) // 已恢复的不显示
+      .slice(-3); // 最多显示 3 条
+  }, [agentEvents, agents, dismissedKeys]);
+
+  if (offlineAlerts.length === 0) return null;
+
+  const onlineCount = agents.filter((a) => a.status !== 'offline').length;
+  const totalCount = agents.length;
+
+  return (
+    <Alert
+      type="warning"
+      showIcon
+      icon={<WarningOutlined />}
+      message={
+        <span style={{ fontSize: 12 }}>
+          节点 {offlineAlerts.map((e) => `"${e.agentName || e.agentId}"`).join('、')} 已离线，
+          任务继续运行中（{onlineCount}/{totalCount} 在线）
+        </span>
+      }
+      closable
+      onClose={() => {
+        const keys = new Set(dismissedKeys);
+        offlineAlerts.forEach((e) => keys.add(e.agentId + e.timestamp));
+        setDismissedKeys(keys);
+      }}
+      style={{ marginBottom: 4, padding: '4px 12px', borderRadius: 6, fontSize: 12 }}
+    />
+  );
+}
+
 /* ══════════════════════════════════════════════════════════════ */
 
 export function MonitorDock() {
@@ -193,6 +236,7 @@ export function MonitorDock() {
         <div className="monitor-dock__handle" onMouseDown={onDragStart} />
       </Tooltip>
       <div className="monitor-dock__body">
+        <AgentOfflineAlert />
         {!topCollapsed && <TopSection />}
         <ActionsSection dockHeight={height} topCollapsed={topCollapsed} />
       </div>
@@ -264,6 +308,8 @@ function TopSection() {
   const actions = latestStress.actions;
 
   const activeConns = Math.max(0, c.established - c.dropped);
+  const onlineAgents = (agents ?? []).filter((a) => a.status !== 'offline').length;
+  const totalAgents = (agents ?? []).length;
   const send = fmtBandwidth(b.sendMBps ?? 0);
   const recv = fmtBandwidth(b.recvMBps ?? 0);
   const robotPercent = r.started > 0 ? Math.round((r.running / r.started) * 100) : 0;
@@ -340,8 +386,13 @@ function TopSection() {
           </div>
           <div className="md-grid-item">
             <span className="md-grid-label">节点</span>
-            <span className="md-grid-value">
-              {(agents ?? []).filter((a) => a.status !== 'offline').length}/{(agents ?? []).length}
+            <span
+              className="md-grid-value"
+              style={
+                onlineAgents < totalAgents ? { color: 'var(--color-warning)' } : undefined
+              }
+            >
+              {onlineAgents}/{totalAgents}
             </span>
           </div>
           <div className="md-grid-item">

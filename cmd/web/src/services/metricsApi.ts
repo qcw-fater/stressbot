@@ -12,6 +12,7 @@ import type {
   PerAgentMetricsItem,
   PerAgentSystem,
   PerAgentSystemItem,
+  StressAggregate,
   StressSnapshot,
   SystemSnapshot,
 } from '@/types/api';
@@ -32,29 +33,44 @@ const EMPTY_STRESS: StressSnapshot = {
   actions: [],
 };
 
+const EMPTY_AGGREGATE: StressAggregate = {
+  snapshot: EMPTY_STRESS,
+  reportingAgents: 0,
+  totalAgents: 0,
+};
+
 // === 压测指标 ===
 
 /**
- * 后端 `/api/metrics` 返回 `{task, snapshot, agents}`：
+ * 后端 `/api/metrics` 返回 `{snapshot, reportingAgents, totalAgents}`：
  *   - active=null: snapshot 是空的 CollectorSnapshot
  *   - active!=null: snapshot 是该任务的 StressSnapshot
  *
- * 前端这里统一抽出 snapshot；缺字段时用 EMPTY_STRESS 兜底，避免 UI 空指针。
+ * 前端这里统一抽出完整聚合结果；缺字段时用空值兜底，避免 UI 空指针。
  */
-export async function getClusterMetrics(params: MetricsParams = {}): Promise<StressSnapshot> {
+export async function getClusterMetrics(params: MetricsParams = {}): Promise<StressAggregate> {
   const resp = await getJson<unknown>(
     '/metrics' + buildQuery(params as Record<string, unknown>),
   );
-  if (!resp || typeof resp !== 'object') return EMPTY_STRESS;
-  const wrapper = resp as { snapshot?: StressSnapshot } & Partial<StressSnapshot>;
-  // 直接返回 StressSnapshot 形态时也能透传
+  if (!resp || typeof resp !== 'object') return EMPTY_AGGREGATE;
+  const wrapper = resp as Partial<StressAggregate> & { snapshot?: StressSnapshot } & Partial<StressSnapshot>;
+  // 新格式：{snapshot, reportingAgents, totalAgents}
   if (wrapper.snapshot && typeof wrapper.snapshot === 'object') {
-    return mergeSnapshot(wrapper.snapshot);
+    return {
+      snapshot: mergeSnapshot(wrapper.snapshot),
+      reportingAgents: wrapper.reportingAgents ?? 0,
+      totalAgents: wrapper.totalAgents ?? 0,
+    };
   }
+  // 旧格式兼容：直接返回 StressSnapshot
   if (typeof (resp as StressSnapshot).timestamp === 'string') {
-    return mergeSnapshot(resp as StressSnapshot);
+    return {
+      snapshot: mergeSnapshot(resp as StressSnapshot),
+      reportingAgents: 0,
+      totalAgents: 0,
+    };
   }
-  return EMPTY_STRESS;
+  return EMPTY_AGGREGATE;
 }
 
 function mergeSnapshot(s: Partial<StressSnapshot>): StressSnapshot {

@@ -85,6 +85,20 @@ CREATE TABLE IF NOT EXISTS task_config_archive (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `
 
+const ddlTaskAgentEvents = `
+CREATE TABLE IF NOT EXISTS task_agent_events (
+    id              BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    task_id         VARCHAR(32)  NOT NULL,
+    agent_id        VARCHAR(64)  NOT NULL,
+    agent_name      VARCHAR(255) NOT NULL DEFAULT '',
+    event_type      VARCHAR(32)  NOT NULL,
+    timestamp       DATETIME(3)  NOT NULL,
+    detail          TEXT,
+    INDEX idx_task (task_id),
+    FOREIGN KEY (task_id) REFERENCES task_history(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+`
+
 var allDDL = []string{
 	ddlTaskHistory,
 	ddlTaskAssignment,
@@ -92,4 +106,5 @@ var allDDL = []string{
 	ddlTaskAggregated,
 	ddlTaskTimeseries,
 	ddlTaskConfigArchive,
+	ddlTaskAgentEvents,
 }

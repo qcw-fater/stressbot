@@ -184,6 +184,11 @@ func (p *WorkPool) Go(task func()) {
 	_ = p.submit(func(_ <-chan struct{}) { task() })
 }
 
+// GoWithStop 提交带停止通知的任务并忽略错误
+func (p *WorkPool) GoWithStop(task func(stopCh <-chan struct{})) {
+	_ = p.submit(task)
+}
+
 // Shutdown 优雅关闭协程池，等待所有任务完成或超时
 func (p *WorkPool) Shutdown() {
 	if !p.stopped.CompareAndSwap(false, true) {

@@ -1,6 +1,7 @@
 package network
 
 import (
+	"stressbot/utils"
 	stresslog "stressbot/utils/log"
 	"sync/atomic"
 	"time"
@@ -50,7 +51,7 @@ func (c *Connection) RegisterHeartbeat(cfg HeartbeatConfig) {
 	c.heartbeatMu.Unlock()
 
 	atomic.StoreInt32(&state.running, 1)
-	go c.runHeartbeat(state)
+	utils.GetWorkPool().GoWithStop(func(stopCh <-chan struct{}) { c.runHeartbeat(state, stopCh) })
 }
 
 // StopHeartbeat 停止当前心跳并等待 goroutine 退出。
@@ -67,7 +68,7 @@ func (c *Connection) StopHeartbeat() {
 }
 
 // runHeartbeat 心跳发送循环
-func (c *Connection) runHeartbeat(hb *heartbeatState) {
+func (c *Connection) runHeartbeat(hb *heartbeatState, stopCh <-chan struct{}) {
 	defer close(hb.done)
 	ticker := time.NewTicker(hb.cfg.Interval)
 	defer ticker.Stop()
@@ -77,6 +78,8 @@ func (c *Connection) runHeartbeat(hb *heartbeatState) {
 		case <-c.ctx.Done():
 			return
 		case <-hb.stop:
+			return
+		case <-stopCh:
 			return
 		case <-ticker.C:
 			if atomic.LoadInt32(&c.isClose) == 1 {

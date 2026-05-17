@@ -120,11 +120,19 @@ func (r *AgentRegistry) Deregister(agentID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.agents[agentID]; !ok {
+	node, ok := r.agents[agentID]
+	if !ok {
 		return ErrAgentNotFound
 	}
+
+	// 如果 Agent 正在执行任务，先触发 onChange 回调记录事件
+	if node.CurrentTaskID != "" && r.onChange != nil {
+		r.onChange(agentID, node.Status, AgentOffline)
+	}
+
 	delete(r.agents, agentID)
-	stresslog.Info("agent 注销", zap.String("agentId", agentID))
+	stresslog.Info("agent 注销", zap.String("agentId", agentID),
+		zap.String("currentTaskId", node.CurrentTaskID))
 	return nil
 }
 
@@ -183,17 +191,19 @@ func (r *AgentRegistry) UpdateSystem(agentID string, snap *SystemSnapshot, at ti
 // StartHealthChecker 启动心跳超时检测协程。
 func (r *AgentRegistry) StartHealthChecker(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
-	go func() {
+	utils.GetWorkPool().GoWithStop(func(stopCh <-chan struct{}) {
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
+			case <-stopCh:
+				return
 			case <-ticker.C:
 				r.scanAndMarkStatus()
 			}
 		}
-	}()
+	})
 }
 
 func (r *AgentRegistry) scanAndMarkStatus() {

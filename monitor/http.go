@@ -7,6 +7,7 @@ import (
 	_ "net/http/pprof"
 	"time"
 
+	"stressbot/utils"
 	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"
@@ -39,12 +40,12 @@ func RegisterHandlers(c *MetricsCollector) {
 // StartHTTPServer 启动 HTTP 服务（非阻塞）。
 func StartHTTPServer(port int) {
 	addr := fmt.Sprintf(":%d", port)
-	go func() {
+	utils.GetWorkPool().Go(func() {
 		stresslog.Info("[MONITOR] HTTP 指标服务启动", zap.String("addr", addr),
 			zap.String("metrics", "http://localhost"+addr+"/metrics"),
 			zap.String("pprof", "http://localhost"+addr+"/debug/pprof/"))
 		if err := http.ListenAndServe(addr, nil); err != nil {
 			stresslog.Error("[MONITOR] HTTP 服务异常退出", zap.Error(err))
 		}
-	}()
+	})
 }

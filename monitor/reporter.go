@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"time"
+
+	"stressbot/utils"
 )
 
 // Reporter 定时向控制台输出指标摘要。
@@ -28,25 +30,25 @@ func NewReporter(c *MetricsCollector, interval time.Duration) *Reporter {
 // Start 启动定时报告。
 func (r *Reporter) Start() {
 	r.prevTime = time.Now()
-	go r.loop()
+	utils.GetWorkPool().GoWithStop(func(poolStop <-chan struct{}) {
+		ticker := time.NewTicker(r.interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				r.report()
+			case <-r.stopCh:
+				return
+			case <-poolStop:
+				return
+			}
+		}
+	})
 }
 
 // Stop 停止报告。
 func (r *Reporter) Stop() {
 	close(r.stopCh)
-}
-
-func (r *Reporter) loop() {
-	ticker := time.NewTicker(r.interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			r.report()
-		case <-r.stopCh:
-			return
-		}
-	}
 }
 
 func (r *Reporter) report() {

@@ -41,6 +41,7 @@ type Task struct {
 	Config      TaskConfig                      `json:"config"`
 	Assignments []Assignment                    `json:"assignments,omitempty"`
 	Reports     map[string]TaskCompletionReport `json:"reports,omitempty"`
+	AgentEvents []AgentEvent                    `json:"agentEvents,omitempty"`
 	CreatedAt   time.Time                       `json:"createdAt"`
 	StartedAt   *time.Time                      `json:"startedAt,omitempty"`
 	StoppedAt   *time.Time                      `json:"stoppedAt,omitempty"`
@@ -89,6 +90,15 @@ type RampUpStage struct {
 }
 
 // ── Assignment ────────────────────────────────────────
+
+// AgentEvent 记录任务期间 Agent 节点的状态变化事件（离线、重连等）。
+type AgentEvent struct {
+	AgentID    string    `json:"agentId"`
+	AgentName  string    `json:"agentName"`
+	Type       string    `json:"type"`              // "offline" | "reconnected" | "deregistered"
+	Timestamp  time.Time `json:"timestamp"`
+	Detail     string    `json:"detail,omitempty"`
+}
 
 type Assignment struct {
 	TaskID      string `json:"taskId"`
@@ -310,6 +320,7 @@ type HistoryDetail struct {
 	HistoryRecord
 	Assignments   []Assignment              `json:"assignments"`
 	AgentReports  []HistoryAgentReport      `json:"agentReports"`
+	AgentEvents   []AgentEvent              `json:"agentEvents,omitempty"`
 	FinalSnapshot monitor.CollectorSnapshot `json:"finalSnapshot"`
 	FinalSystem   ClusterSystemSnapshot     `json:"finalSystem"`
 }

@@ -128,6 +128,7 @@ export interface TaskDetail extends TaskBrief {
   assignments: Assignment[];
   errorMsg?: string;
   reports?: Record<string, TaskCompletionReport>;
+  agentEvents?: AgentEvent[];
 }
 
 export interface TasksListResponse {
@@ -145,6 +146,16 @@ export interface StartTaskResponse {
 }
 
 // === Agent ===
+
+export interface AgentEvent {
+  agentId: string;
+  agentName: string;
+  /** "offline" | "reconnected" | "deregistered" */
+  type: string;
+  timestamp: string;
+  detail?: string;
+}
+
 export interface StaticInfo {
   hostname: string;
   os: OS;
@@ -241,6 +252,12 @@ export interface ClusterInfo {
   agentCount: number;
   agentIds: string[];
   staleAgentIds: string[];
+}
+
+export interface StressAggregate {
+  snapshot: StressSnapshot;
+  reportingAgents: number;
+  totalAgents: number;
 }
 
 export interface StressSnapshot {
@@ -373,10 +390,12 @@ export interface HistoryDetail extends HistoryRecord {
   assignments: Array<{
     taskId: string;
     agentId: string;
+    agentName?: string;
     startNumber: number;
     totalBots: number;
   }>;
   agentReports: HistoryAgentReport[];
+  agentEvents?: AgentEvent[];
   finalSnapshot: StressSnapshot;
   finalSystem: ClusterSystemSnapshot;
 }

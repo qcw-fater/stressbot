@@ -15,11 +15,19 @@ func NewMetricsAggregator(registry *AgentRegistry) *MetricsAggregator {
 	return &MetricsAggregator{registry: registry}
 }
 
+// StressAggregate 压测聚合结果（含覆盖率）。
+type StressAggregate struct {
+	Snapshot        *monitor.CollectorSnapshot `json:"snapshot"`
+	ReportingAgents int                        `json:"reportingAgents"`
+	TotalAgents     int                        `json:"totalAgents"`
+}
+
 // AggregateStress 聚合指定任务的压测指标。
-func (a *MetricsAggregator) AggregateStress(taskID string) *monitor.CollectorSnapshot {
+func (a *MetricsAggregator) AggregateStress(taskID string) *StressAggregate {
 	agents := a.registry.List()
 
 	var snaps []*monitor.CollectorSnapshot
+	totalAgents := 0
 	for _, agent := range agents {
 		if agent.Status == AgentOffline {
 			continue
@@ -27,13 +35,18 @@ func (a *MetricsAggregator) AggregateStress(taskID string) *monitor.CollectorSna
 		if agent.CurrentTaskID != taskID {
 			continue
 		}
+		totalAgents++
 		if agent.LatestStress == nil {
 			continue
 		}
 		snaps = append(snaps, agent.LatestStress)
 	}
 
-	return monitor.MergeSnapshots(snaps)
+	return &StressAggregate{
+		Snapshot:        monitor.MergeSnapshots(snaps),
+		ReportingAgents: len(snaps),
+		TotalAgents:     totalAgents,
+	}
 }
 
 // AggregateSystem 聚合集群系统指标。
