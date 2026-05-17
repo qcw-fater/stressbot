@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,6 +24,7 @@ import (
 	"stressbot/protox"
 	"stressbot/script"
 	"stressbot/state"
+	"stressbot/utils"
 	stresslog "stressbot/utils/log"
 )
 
@@ -118,7 +118,7 @@ func (r *Robot) Start() {
 		return
 	}
 
-	go func() {
+	utils.GetWorkPool().GoWithStop(func(stopCh <-chan struct{}) {
 		defer r.running.Store(false)
 		defer close(r.done)
 
@@ -140,18 +140,31 @@ func (r *Robot) Start() {
 		stresslog.Info("[ROBOT] 启动", zap.Int("id", r.id), zap.String("account", r.account))
 		monitor.Global().RobotStarted()
 		monitor.Global().RobotRunning()
-		if err := r.executor.Run(r.ctx); err != nil {
-			if r.ctx.Err() == nil {
-				stresslog.Error("[ROBOT] 流程异常退出", zap.Int("id", r.id), zap.Error(err))
-				monitor.Global().RobotErrored()
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			if err := r.executor.Run(r.ctx); err != nil {
+				if r.ctx.Err() == nil {
+					stresslog.Error("[ROBOT] 流程异常退出", zap.Int("id", r.id), zap.Error(err))
+					monitor.Global().RobotErrored()
+				} else {
+					monitor.Global().RobotStopped()
+				}
 			} else {
 				monitor.Global().RobotStopped()
 			}
-		} else {
-			monitor.Global().RobotStopped()
+		}()
+
+		select {
+		case <-done:
+		case <-stopCh:
+			r.cancel()
+			<-done
 		}
+
 		stresslog.Info("[ROBOT] 已停止", zap.Int("id", r.id), zap.String("account", r.account))
-	}()
+	})
 }
 
 // Stop 停止机器人
@@ -173,10 +186,10 @@ func (r *Robot) Close() {
 	var waitDone chan struct{}
 	if r.done != nil {
 		waitDone = make(chan struct{})
-		go func() {
+		utils.GetWorkPool().Go(func() {
 			r.Wait()
 			close(waitDone)
-		}()
+		})
 	}
 	r.client.CloseAll()
 	if waitDone != nil {
@@ -351,7 +364,7 @@ func (h *robotActionHandler) ExecuteBoolean(expression string) bool {
 		return h.executeLuaBoolean(expression[4:])
 	}
 
-	return evalCondition(expression, h.robot.state)
+	return engine.EvalCondition(expression, h.robot.state)
 }
 
 // executeLuaBoolean 执行 Lua 条件脚本，脚本必须 return true/false。
@@ -503,34 +516,6 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.C
 			}
 		}
 	}
-}
-
-// evalCondition 求值 state: 前缀的条件表达式。
-// 支持复合条件：&&、||、!、括号嵌套。
-// 示例：state:hp > 0 && (state:alive || state:isAdmin)
-func evalCondition(expr string, s *state.Store) bool {
-	expr = strings.TrimSpace(expr)
-	if expr == "" {
-		return true
-	}
-
-	if !strings.HasPrefix(expr, "state:") {
-		stresslog.Warn("[ROBOT] 条件表达式格式错误，仅支持 state: 前缀",
-			zap.String("expr", expr))
-		return false
-	}
-	return parseExpr(expr[6:], s)
-}
-
-// parseRHS 尝试将条件右值解析为数值类型，保留字符串回退。
-func parseRHS(s string) any {
-	if v, err := strconv.ParseInt(s, 10, 64); err == nil {
-		return v
-	}
-	if v, err := strconv.ParseFloat(s, 64); err == nil {
-		return v
-	}
-	return s
 }
 
 // netSenderAdapter NetSender 接口适配器

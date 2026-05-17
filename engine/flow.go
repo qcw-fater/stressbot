@@ -161,7 +161,7 @@ type FieldBind struct {
 	Wrap          bool          `json:"wrap"`          // true = 赋值给 repeated 字段时将单值包装为 [val]
 	StoreAs       string        `json:"storeAs"`       // 将解析结果存入 state 的 key（中间变量，供后续 binding 通过 source 引用）
 	KeySource     string        `json:"keySource"`     // randomPickMap: 从 state 读取 map 的 key 列表
-	Condition     *ConditionDef `json:"condition"`     // 可选条件：不满足时跳过本绑定
+	Condition     string        `json:"condition"`     // 可选条件表达式：不满足时跳过本绑定（state: 或 lua: 前缀）
 }
 
 // isRequired 判断字段绑定是否为必需（缺失时触发动作跳过或报错）。
@@ -188,19 +188,6 @@ type FilterDef struct {
 	Op     string `json:"op"`     // 比较运算符（==, !=, >, <, >=, <=）
 	Value  any    `json:"value"`  // 比较目标值（固定值）
 	Source string `json:"source"` // 比较目标值（从 state 读取的 key）
-}
-
-// ConditionDef 条件绑定定义。当条件不满足时，该 FieldBind 整体跳过。
-// Op 复用 state.CompareValues 支持的操作符：
-//
-//	eq/==, neq/!=, gt/>, gte/>=, lt/<, lte/<=, contains, in,
-//	notNil（左值非 nil）, isNil（左值为 nil）
-type ConditionDef struct {
-	Source      string `json:"source"`      // state key（必填）
-	Path        string `json:"path"`        // 可选导航（支持 | 候选路径）
-	Op          string `json:"op"`          // 比较操作符（默认 eq）
-	Value       any    `json:"value"`       // 固定右操作数
-	ValueSource string `json:"valueSource"` // 或从 state 读取右操作数
 }
 
 // StoreMapping S2C 响应字段 -> StateStore 映射。

@@ -988,20 +988,12 @@ func (ae *ActionExecutor) matchFilters(item any, filters []FilterDef) bool {
 	return true
 }
 
-// evaluateCondition 评估条件绑定。返回 true 表示条件满足（或无条件）。
-func (ae *ActionExecutor) evaluateCondition(cond *ConditionDef) bool {
-	if cond == nil {
+// evaluateCondition 评估条件表达式（仅 state: 前缀）。返回 true 表示条件满足（或无条件）。
+func (ae *ActionExecutor) evaluateCondition(cond string) bool {
+	if cond == "" {
 		return true
 	}
-	lhs := ae.store.Get(cond.Source)
-	if cond.Path != "" {
-		lhs = navigatePath(lhs, cond.Path)
-	}
-	var rhs any = cond.Value
-	if cond.ValueSource != "" {
-		rhs = ae.store.Get(cond.ValueSource)
-	}
-	return state.CompareValues(lhs, rhs, cond.Op)
+	return EvalCondition(cond, ae.store)
 }
 
 // pickN 从列表中随机选择 N 个不重复元素
