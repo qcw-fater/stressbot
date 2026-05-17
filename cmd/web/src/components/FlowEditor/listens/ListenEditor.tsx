@@ -9,8 +9,8 @@
  * 还原按钮可恢复到打开时的快照；关闭时 lua 有未保存改动会弹确认。
  */
 
-import { Alert, App as AntApp, AutoComplete, Button, Input, Modal, Popconfirm, Space, Tabs, Tag } from 'antd';
-import { UndoOutlined, ApiOutlined, EditOutlined } from '@ant-design/icons';
+import { Alert, App as AntApp, Button, Input, Popconfirm, Space, Tabs, Tag } from 'antd';
+import { UndoOutlined, ApiOutlined } from '@ant-design/icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ListenDef } from '@/types/listen';
 import { classifyListen, type ListenKind } from '@/types/listen';
@@ -19,15 +19,14 @@ import { useFlowStore } from '../store/flowStore';
 import { useFloatingWindowStore } from '../store/floatingWindowStore';
 import { ProtoBrowser } from '../proto/ProtoBrowser';
 import { StoreTable } from '../editors/ActionEditor/StoreTable';
-import { LuaForm } from '../editors/ActionEditor/LuaForm';
+import { LuaScriptField } from '../editors/shared/LuaScriptField';
 import { BackrefList } from './BackrefList';
 import { SaveTemplateButton } from '../library/SaveTemplateButton';
 import { listenKindTagColor } from './listenKindStyle';
-import { fetchBaselineScriptIndex } from '@/services/baselineApi';
 import { FloatingWindow } from '../panels/FloatingWindow';
 
 export function ListenEditor() {
-  const { message: messageApi, modal } = AntApp.useApp();
+  const { message: messageApi } = AntApp.useApp();
   const activePanel = useEditorStore((s) => s.activePanel.listenEdit);
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
   const closePanel = useEditorStore((s) => s.closePanel);
@@ -40,9 +39,6 @@ export function ListenEditor() {
 
   const [draftName, setDraftName] = useState(listenName ?? '');
   const [protoOpen, setProtoOpen] = useState(false);
-  const [luaDirty, setLuaDirty] = useState(false);
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [files, setFiles] = useState<string[]>([]);
   const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
   // 形态切换时把当前字段缓存进 stash，便于切回恢复
   const [stash, setStash] = useState<Record<ListenKind, ListenDef>>({
@@ -60,7 +56,6 @@ export function ListenEditor() {
 
   useEffect(() => {
     setDraftName(listenName ?? '');
-    setLuaDirty(false);
     if (listenName && listen) {
       setSelectedKind(classifyListen(listen));
       snapshotRef.current = { name: listenName, def: JSON.parse(JSON.stringify(listen)) };
@@ -69,15 +64,6 @@ export function ListenEditor() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listenName]);
-
-  // 拉取脚本列表（给 lua 模式的 AutoComplete 用）
-  useEffect(() => {
-    let cancel = false;
-    fetchBaselineScriptIndex()
-      .then((list) => { if (!cancel) setFiles(list); })
-      .catch(() => undefined);
-    return () => { cancel = true; };
-  }, []);
 
   // dirty 判断：当前 listen 与快照不一致
   const listenDirty = useMemo(() => {
@@ -159,7 +145,10 @@ export function ListenEditor() {
     >
       <Space style={{ width: '100%', marginBottom: 12, justifyContent: 'space-between' }}>
         <Space.Compact style={{ width: 360 }}>
-          <Input addonBefore="名称" value={draftName} onChange={(e) => setDraftName(e.target.value)} />
+        <Space.Compact style={{ width: 360 }}>
+          <span style={{ display: 'flex', alignItems: 'center', padding: '0 11px', background: 'var(--container-bg)', border: '1px solid var(--border-color)', borderRadius: '6px 0 0 6px', fontSize: 14, whiteSpace: 'nowrap' }}>名称</span>
+          <Input style={{ flex: 1 }} value={draftName} onChange={(e) => setDraftName(e.target.value)} />
+        </Space.Compact>
           <Button onClick={onApplyRename} disabled={draftName === listenName || !draftName}>
             重命名
           </Button>
@@ -212,35 +201,11 @@ export function ListenEditor() {
             key: 'lua',
             label: 'lua',
             children: (
-              <>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-                  <span style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>脚本文件：</span>
-                  <AutoComplete
-                    style={{ flex: 1 }}
-                    value={listen.script ?? ''}
-                    onChange={(v) => updateListen(listenName, { script: v })}
-                    options={files.map((f) => ({ value: f, label: f }))}
-                    placeholder="输入新文件名或选择已有脚本"
-                    allowClear
-                    filterOption={(input, option) =>
-                      (option?.value as string)?.toLowerCase().includes(input.toLowerCase()) ?? false
-                    }
-                  />
-                  <Button
-                    icon={<EditOutlined />}
-                    onClick={() => setEditorOpen(true)}
-                    disabled={!listen.script?.trim()}
-                    title={!listen.script?.trim() ? '先填写脚本文件名再编辑' : '在编辑器里编辑该脚本内容'}
-                  >
-                    编辑
-                  </Button>
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
-                  入口 <code>function onMessage(r, msg)</code>，
-                  未指定响应消息类型时 <code>msg</code> 为原始二进制数据。
-                  点旁边的「编辑」按钮可在编辑器里直接写脚本，按 Ctrl+S 保存到本地。
-                </div>
-              </>
+              <LuaScriptField
+                mode="listen"
+                value={listen.script}
+                onChange={(s) => updateListen(listenName, { script: s })}
+              />
             ),
           },
         ]}
@@ -259,65 +224,6 @@ export function ListenEditor() {
           setProtoOpen(false);
         }}
       />
-
-      {/* Lua 脚本编辑 Modal */}
-      <Modal
-        open={editorOpen}
-        title={
-          <span>
-            编辑监听脚本 <code style={{ color: 'var(--text-secondary)' }}>{listen.script || '(未命名)'}</code>
-          </span>
-        }
-        onCancel={() => {
-          if (luaDirty) {
-            modal.confirm({
-              title: '脚本有未保存的改动',
-              content: '关闭后未保存的内容将丢失，是否继续？',
-              okText: '不保存',
-              cancelText: '取消',
-              onOk: () => {
-                setEditorOpen(false);
-                setLuaDirty(false);
-              },
-            });
-          } else {
-            setEditorOpen(false);
-          }
-        }}
-        footer={[
-          <Button key="close" onClick={() => {
-            if (luaDirty) {
-              modal.confirm({
-                title: '脚本有未保存的改动',
-                content: '关闭后未保存的内容将丢失，是否继续？',
-                okText: '不保存',
-                cancelText: '取消',
-                onOk: () => {
-                  setEditorOpen(false);
-                  setLuaDirty(false);
-                },
-              });
-            } else {
-              setEditorOpen(false);
-            }
-          }}>
-            完成
-          </Button>,
-        ]}
-        width={900}
-        destroyOnHidden
-        focusTriggerAfterClose={false}
-        styles={{ mask: { zIndex: popupZ }, wrapper: { zIndex: popupZ + 1 } }}
-      >
-        <div onKeyDown={(e) => e.stopPropagation()}>
-        <LuaForm
-          mode="listen"
-          script={listen.script}
-          onChangeScript={(s) => updateListen(listenName, { script: s })}
-          onDirtyChange={setLuaDirty}
-        />
-        </div>
-      </Modal>
     </FloatingWindow>
   );
 }

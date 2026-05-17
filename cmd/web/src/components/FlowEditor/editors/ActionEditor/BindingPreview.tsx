@@ -2,7 +2,7 @@
  * Binding 值模拟：根据 binding 类型生成预览值，无需后端参与。
  */
 
-import type { ConditionDef, FieldBind } from '@/types/action';
+import type { FieldBind } from '@/types/action';
 
 export type PreviewResult =
   | { kind: 'skipped'; reason: string }
@@ -12,8 +12,7 @@ export type PreviewResult =
 
 export function simulateBinding(fb: FieldBind): PreviewResult {
   if (fb.condition) {
-    const cond = conditionSummary(fb.condition);
-    return { kind: 'placeholder', display: `条件: ${cond}` };
+    return { kind: 'placeholder', display: `条件: ${fb.condition}` };
   }
 
   switch (fb.type) {
@@ -88,14 +87,6 @@ function fmtState(source?: string, path?: string): string {
 function fmtFilters(filters?: { path?: string; op: string }[]): string {
   if (!filters?.length) return '';
   return ` (filter: ${filters.map((f) => `${f.path || '.'} ${f.op}`).join(', ')})`;
-}
-
-function conditionSummary(c: ConditionDef): string {
-  const lhs = c.path ? `state["${c.source}"].${c.path}` : `state["${c.source}"]`;
-  if (c.op === 'notNil') return `${lhs} != nil`;
-  if (c.op === 'isNil') return `${lhs} == nil`;
-  const rhs = c.valueSource ? `state["${c.valueSource}"]` : JSON.stringify(c.value);
-  return `${lhs} ${c.op} ${rhs}`;
 }
 
 function genSampleString(len: number): string {

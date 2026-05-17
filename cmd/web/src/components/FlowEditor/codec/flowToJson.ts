@@ -4,7 +4,7 @@
  * 与 jsonToFlow 互逆。剪除空字段（避免与 Go 端 JSON 解码语义冲突）。
  */
 
-import type { ActionDef, ConditionDef, FieldBind, FilterDef, StoreMapping } from '@/types/action';
+import type { ActionDef, FieldBind, FilterDef, StoreMapping } from '@/types/action';
 import type { ListenDef } from '@/types/listen';
 import type { FlowNode, ListenRef, WeightedOption } from '@/types/flow';
 
@@ -123,7 +123,7 @@ function cleanFieldBind(b: FieldBind): FieldBind {
   if (b.storeAs) out.storeAs = b.storeAs;
   if (b.keySource) out.keySource = b.keySource;
   // if (b.items?.length) out.items = b.items.map(cleanFieldBind);
-  if (b.condition) out.condition = cleanCondition(b.condition);
+  if (b.condition) out.condition = b.condition;
   return out;
 }
 
@@ -132,14 +132,6 @@ function cleanFilter(f: FilterDef): FilterDef {
   if (f.path) out.path = f.path;
   if (f.value !== undefined) out.value = f.value;
   if (f.source) out.source = f.source;
-  return out;
-}
-
-function cleanCondition(c: ConditionDef): ConditionDef {
-  const out: ConditionDef = { source: c.source, op: c.op || 'eq' };
-  if (c.path) out.path = c.path;
-  if (c.value !== undefined) out.value = c.value;
-  if (c.valueSource) out.valueSource = c.valueSource;
   return out;
 }
 

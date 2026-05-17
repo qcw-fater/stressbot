@@ -157,23 +157,29 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
       {showTimeout && (
         <Form.Item label="超时（秒）">
           <Space>
-            <InputNumber
-              min={0}
-              placeholder={pattern === 'tcpRequest' || pattern === 'udpRequest' ? '10' : '60'}
-              value={action.timeout}
-              onChange={(v) => set({ timeout: (v as number) ?? undefined })}
-              addonAfter="s"
-            />
+            <Space.Compact>
+              <InputNumber
+                min={0}
+                placeholder={pattern === 'tcpRequest' || pattern === 'udpRequest' ? '10' : '60'}
+                value={action.timeout}
+                onChange={(v) => set({ timeout: (v as number) ?? undefined })}
+                style={{ width: 120 }}
+              />
+              <span style={{ display: 'flex', alignItems: 'center', padding: '0 8px', background: 'var(--container-bg)', border: '1px solid var(--border-color)', borderRadius: '0 6px 6px 0', fontSize: 13 }}>s</span>
+            </Space.Compact>
             {showPollMs && (
               <>
                 <span>轮询间隔</span>
-                <InputNumber
-                  min={0}
-                  placeholder="100"
-                  value={action.pollMs}
-                  onChange={(v) => set({ pollMs: (v as number) ?? undefined })}
-                  addonAfter="ms"
-                />
+                <Space.Compact>
+                  <InputNumber
+                    min={0}
+                    placeholder="100"
+                    value={action.pollMs}
+                    onChange={(v) => set({ pollMs: (v as number) ?? undefined })}
+                    style={{ width: 120 }}
+                  />
+                  <span style={{ display: 'flex', alignItems: 'center', padding: '0 8px', background: 'var(--container-bg)', border: '1px solid var(--border-color)', borderRadius: '0 6px 6px 0', fontSize: 13 }}>ms</span>
+                </Space.Compact>
               </>
             )}
           </Space>

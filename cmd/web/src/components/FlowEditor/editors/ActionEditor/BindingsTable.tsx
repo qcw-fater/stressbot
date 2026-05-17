@@ -8,13 +8,13 @@
 import { Button, Collapse, Input, Select, Space, Switch, Tag, Tooltip } from 'antd';
 import { ArrowUpOutlined, ArrowDownOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import type { CollapseProps } from 'antd';
-import type { BindingType, ConditionDef, FieldBind } from '@/types/action';
+import type { BindingType, FieldBind } from '@/types/action';
 import type { ProtoField } from '@/types/proto';
-import { useState } from 'react';
 import { ProtoPathInput } from './ProtoPathInput';
 import { StateKeyInput } from './StateKeyInput';
 import { BindingTypeForm } from './BindingTypeForm';
 import { protoRegistry } from '../../proto/ProtoRegistry';
+import { StateExprInput } from '../shared/StateExprInput';
 
 export interface BindingsTableProps {
   /** 当前绑定列表所属的 message 全名（用于字段下拉） */
@@ -229,101 +229,30 @@ function BindingRow({
           style={{ width: 150 }}
         />
       </Space>
-      <ConditionEditor value={binding.condition} onChange={(c) => set({ condition: c })} />
-    </Space>
-  );
-}
-
-const CONDITION_OPS = ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'in', 'notNil', 'isNil'] as const;
-const CONDITION_OP_META: Record<string, { label: string; desc: string }> = {
-  eq:       { label: '= 等于',       desc: '字段值等于指定值' },
-  neq:      { label: '≠ 不等于',     desc: '字段值不等于指定值' },
-  gt:       { label: '> 大于',       desc: '字段值大于指定值' },
-  gte:      { label: '≥ 大于等于',   desc: '字段值大于或等于指定值' },
-  lt:       { label: '< 小于',       desc: '字段值小于指定值' },
-  lte:      { label: '≤ 小于等于',   desc: '字段值小于或等于指定值' },
-  contains: { label: '包含',         desc: '字符串包含指定子串' },
-  in:       { label: '在列表中',     desc: '字段值在指定列表中' },
-  notNil:   { label: '不为空',       desc: '无需填 value' },
-  isNil:    { label: '为空',         desc: '无需填 value' },
-};
-
-const COND_LABEL: React.CSSProperties = { fontSize: 12, color: 'var(--text-tertiary)' };
-
-function ConditionEditor({ value, onChange }: { value?: ConditionDef; onChange: (c?: ConditionDef) => void }) {
-  const [condProto, setCondProto] = useState<string | undefined>(undefined);
-
-  if (!value) {
-    return (
-      <Tooltip title="运行时先检查条件，不满足则跳过此 binding" mouseEnterDelay={0.4}>
-        <a onClick={() => onChange({ source: '', op: 'eq' })} style={{ fontSize: 11 }}>
-          + 添加条件
-        </a>
-      </Tooltip>
-    );
-  }
-
-  const update = (patch: Partial<ConditionDef>) => onChange({ ...value, ...patch });
-  const noRhs = value.op === 'notNil' || value.op === 'isNil';
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
-      <Tooltip title="运行时先检查条件，不满足则跳过此 binding" mouseEnterDelay={0.4}>
-        <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>条件（不满足时跳过本绑定）</span>
-      </Tooltip>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={COND_LABEL}>source</span>
-        <StateKeyInput
-          value={value.source}
-          onChange={(v) => update({ source: v })}
-          onProtoResolved={setCondProto}
-          placeholder="state key"
-          style={{ flex: 1 }}
-        />
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={COND_LABEL}>path</span>
-        <ProtoPathInput
-          messageFullName={condProto}
-          value={value.path}
-          onChange={(v) => update({ path: v || undefined })}
-          placeholder="可选"
-          style={{ flex: 1 }}
-        />
-        <Select
-          value={value.op || 'eq'}
-          onChange={(v) => update({ op: v })}
-          options={CONDITION_OPS.map((o) => ({ value: o, label: CONDITION_OP_META[o]?.label ?? o, title: '' }))}
-          optionRender={(opt) => {
-            const m = CONDITION_OP_META[opt.value as string];
-            return (
-              <Tooltip title={m?.desc} mouseEnterDelay={0.3} placement="right">
-                <div>{opt.label}</div>
-              </Tooltip>
-            );
-          }}
-          style={{ width: 90 }}
-          size="small"
-        />
-        {!noRhs && (
-          <Input
-            placeholder="value"
-            value={value.valueSource ?? (value.value !== undefined ? String(value.value) : '')}
-            onChange={(e) => {
-              const raw = e.target.value;
-              if (!raw) return update({ value: undefined, valueSource: undefined });
-              try { update({ value: JSON.parse(raw), valueSource: undefined }); }
-              catch { update({ value: raw, valueSource: undefined }); }
-            }}
-            style={{ width: 120 }}
-            size="small"
+      {binding.condition ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Tooltip title="运行时先检查条件，不满足则跳过此 binding" mouseEnterDelay={0.4}>
+              <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>条件（不满足时跳过本绑定）</span>
+            </Tooltip>
+            <a onClick={() => set({ condition: undefined })} style={{ color: 'var(--color-error)', fontSize: 11 }}>
+              删除条件
+            </a>
+          </div>
+          <StateExprInput
+            value={binding.condition}
+            onChange={(v) => set({ condition: v || undefined })}
+            placeholder="满足条件时才应用此绑定"
           />
-        )}
-        <a onClick={() => onChange(undefined)} style={{ color: 'var(--color-error)', fontSize: 11, flexShrink: 0 }}>
-          删除条件
-        </a>
-      </div>
-    </div>
+        </div>
+      ) : (
+        <Tooltip title="运行时先检查条件，不满足则跳过此 binding" mouseEnterDelay={0.4}>
+          <a onClick={() => set({ condition: 'state:' })} style={{ fontSize: 11 }}>
+            + 添加条件
+          </a>
+        </Tooltip>
+      )}
+    </Space>
   );
 }
 

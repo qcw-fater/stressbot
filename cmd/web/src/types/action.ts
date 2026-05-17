@@ -63,14 +63,6 @@ export interface FilterDef {
   source?: string;
 }
 
-export interface ConditionDef {
-  source: string;
-  path?: string;
-  op: string;
-  value?: unknown;
-  valueSource?: string;
-}
-
 export interface FieldBind {
   field?: string;
   type: BindingType;
@@ -91,7 +83,7 @@ export interface FieldBind {
   wrap?: boolean;
   storeAs?: string;
   keySource?: string;
-  condition?: ConditionDef;
+  condition?: string;
 }
 
 export interface StoreMapping {

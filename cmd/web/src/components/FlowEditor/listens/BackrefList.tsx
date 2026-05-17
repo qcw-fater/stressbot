@@ -100,13 +100,13 @@ export function BackrefList({ listenName }: BackrefListProps) {
             </Tooltip>
           </div>
           <Space.Compact style={{ width: '100%', marginBottom: 4 }}>
+            <span style={{ display: 'flex', alignItems: 'center', padding: '0 11px', background: 'var(--container-bg)', border: '1px solid var(--border-color)', borderRadius: '6px 0 0 6px', fontSize: 12, whiteSpace: 'nowrap' }}>server</span>
             <Input
               size="small"
-              addonBefore="server"
               value={r.ref.server}
               onChange={(e) => updateRefField(r.nodeId, r.refIndex, { server: e.target.value })}
               placeholder="如 tcp:logic"
-              style={monoCellStyle}
+              style={{ ...monoCellStyle, flex: 1 }}
             />
           </Space.Compact>
           <Space.Compact style={{ width: '100%' }}>
