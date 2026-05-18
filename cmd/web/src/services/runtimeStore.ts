@@ -61,6 +61,12 @@ export interface RuntimeState {
   /** 任务期间 Agent 事件（离线/重连/注销） */
   agentEvents: AgentEvent[];
 
+  /** 节点健康指标（来自 StressAggregate） */
+  reportingAgents: number;
+  totalAgents: number;
+  offlineAgents: number;
+  assignedAgents: number;
+
   // === 状态机 / 数据 setter ===
   setMode: (m: RuntimeMode) => void;
   setActiveTask: (task: TaskBrief | null) => void;
@@ -77,6 +83,7 @@ export interface RuntimeState {
   setConnectionLost: (lost: boolean) => void;
   setAgentEvents: (events: AgentEvent[]) => void;
   appendAgentEvents: (events: AgentEvent[]) => void;
+  setAgentHealth: (reporting: number, total: number, offline: number, assigned: number) => void;
 
   /** 任务结束钩子：mode 切到 finalReport，停止后续历史写入 */
   onTaskFinished: () => void;
@@ -131,6 +138,10 @@ const initialState = {
   systemHistory: [] as ClusterSystemSnapshot[],
   connectionLost: false,
   agentEvents: [] as AgentEvent[],
+  reportingAgents: 0,
+  totalAgents: 0,
+  offlineAgents: 0,
+  assignedAgents: 0,
 };
 
 function pushWithLimit<T>(arr: T[], item: T, limit = HISTORY_WINDOW): T[] {
@@ -190,6 +201,8 @@ export const useRuntimeStore = create<RuntimeState>()(
         }),
       setAgents: (items) => set({ agents: items }),
       setConnectionLost: (lost) => set({ connectionLost: lost }),
+      setAgentHealth: (reporting, total, offline, assigned) =>
+        set({ reportingAgents: reporting, totalAgents: total, offlineAgents: offline, assignedAgents: assigned }),
       setAgentEvents: (events) => set({ agentEvents: events }),
       appendAgentEvents: (events) =>
         set((s) => {
@@ -223,6 +236,10 @@ export const useRuntimeStore = create<RuntimeState>()(
           stressHistory: [],
           systemHistory: [],
           agentEvents: [],
+          reportingAgents: 0,
+          totalAgents: 0,
+          offlineAgents: 0,
+          assignedAgents: 0,
         }),
 
       detachFromActive: () =>

@@ -6,7 +6,7 @@
  * - detail 视图可：编辑备注/标签/收藏，下载完整配置归档，删除（强制），克隆为新任务。
  */
 
-import { App, Button, Checkbox, Empty, Input, Pagination, Space, Spin, Switch, Tooltip } from 'antd';
+import { App, Button, Checkbox, Empty, Input, Pagination, Spin, Switch, Tooltip } from 'antd';
 import {
   ArrowLeftOutlined,
   DeleteOutlined,
@@ -14,8 +14,8 @@ import {
   StarOutlined,
   SwapOutlined,
 } from '@ant-design/icons';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import dayjs from 'dayjs';
-import { useCallback, useEffect, useState } from 'react';
 import { ApiError, historyApi, showApiError } from '@/services';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { FloatingWindow } from '@/components/FlowEditor/panels/FloatingWindow';
@@ -114,18 +114,45 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
     });
   };
 
+  const selectedRecords = useMemo(
+    () => items.filter((r) => selectedIds.includes(r.id)),
+    [items, selectedIds],
+  );
+
+  const onBatchDelete = useCallback(() => {
+    const starredCount = selectedRecords.filter((r) => r.starred).length;
+    modal.confirm({
+      title: `确认批量删除 ${selectedIds.length} 条记录？`,
+      content: starredCount > 0 ? `其中 ${starredCount} 条已收藏，将强制删除` : '此操作不可恢复',
+      okText: '删除',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await Promise.all(selectedRecords.map((r) => historyApi.deleteHistory(r.id, r.starred)));
+          message.success(`已删除 ${selectedIds.length} 条记录`);
+          setSelectedIds([]);
+          refresh();
+        } catch (err) {
+          showApiError(err);
+          refresh();
+        }
+      },
+    });
+  }, [modal, message, refresh, selectedRecords, selectedIds]);
+
   const paged = items.slice((page - 1) * pageSize, page * pageSize);
 
-  const isList = view.kind === 'list';
+  const titleLabel =
+    view.kind === 'list' ? '历史压测记录' : view.kind === 'detail' ? '记录详情' : '对比记录';
 
   const titleContent = (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+    <div className="hp-titlebar">
       {view.kind !== 'list' && (
-        <Button size="small" icon={<ArrowLeftOutlined />} onClick={() => setView({ kind: 'list' })}>
+        <Button size="small" type="text" icon={<ArrowLeftOutlined />} onClick={() => setView({ kind: 'list' })}>
           返回
         </Button>
       )}
-      <span>历史记录</span>
+      <span className="hp-titlebar__text">{titleLabel}</span>
     </div>
   );
 
@@ -133,48 +160,62 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
     <FloatingWindow
       windowId="history"
       title={titleContent}
-      defaultSize={{ width: 900, height: 640 }}
-      minSize={{ width: 600, height: 400 }}
+      defaultSize={{ width: 960, height: 680 }}
+      minSize={{ width: 520, height: 380 }}
       open={open}
       onClose={onClose}
       extra={
         view.kind === 'list' && total > 0 ? (
-          <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-            共 {total} 条
-          </span>
+          <span className="hp-titlebar__count">共 {total} 条</span>
         ) : undefined
       }
     >
       {view.kind === 'list' && (
-        <>
-          <div className="hp-list-toolbar">
+        <div className="hp-shell hp-shell--list">
+          <header className="hp-list-toolbar">
             <Input.Search
-              placeholder="按名称 / 标签 / 备注搜索"
+              className="hp-list-toolbar__search"
+              placeholder="名称、标签或备注"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onSearch={refresh}
               allowClear
-              style={{ width: 320 }}
             />
-            <Space size={4}>
-              <span style={{ fontSize: 12 }}>仅收藏</span>
-              <Switch checked={starredOnly} onChange={setStarredOnly} size="small" />
-            </Space>
-            <Button
-              icon={<SwapOutlined />}
-              disabled={selectedIds.length < 2 || selectedIds.length > 5}
-              onClick={() => setView({ kind: 'compare', ids: selectedIds })}
-            >
-              对比 ({selectedIds.length})
-            </Button>
-          </div>
+            <div className="hp-list-toolbar__filters">
+              <label className="hp-filter-toggle">
+                <span>仅收藏</span>
+                <Switch checked={starredOnly} onChange={setStarredOnly} size="small" />
+              </label>
+              <Button
+                type="primary"
+                ghost
+                icon={<SwapOutlined />}
+                disabled={selectedIds.length < 2 || selectedIds.length > 5}
+                onClick={() => setView({ kind: 'compare', ids: selectedIds })}
+              >
+                对比 {selectedIds.length > 0 ? `(${selectedIds.length})` : ''}
+              </Button>
+              <Button
+                danger
+                icon={<DeleteOutlined />}
+                disabled={selectedIds.length === 0}
+                onClick={onBatchDelete}
+              >
+                删除 {selectedIds.length > 0 ? `(${selectedIds.length})` : ''}
+              </Button>
+            </div>
+          </header>
 
-          {loading && items.length === 0 ? (
-            <Spin style={{ marginTop: 40 }} />
-          ) : items.length === 0 ? (
-            <Empty description="暂无历史记录" style={{ marginTop: 40 }} />
-          ) : (
-            <>
+          <div className="hp-list-scroll">
+            {loading && items.length === 0 ? (
+              <div className="hp-list-state">
+                <Spin />
+              </div>
+            ) : items.length === 0 ? (
+              <div className="hp-list-state">
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无压测归档，完成任务后将出现在此处" />
+              </div>
+            ) : (
               <div className="hp-list">
                 {paged.map((r) => (
                   <HistoryCard
@@ -188,24 +229,33 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
                   />
                 ))}
               </div>
-              {total > pageSize && (
-                <div className="hp-list-pagination">
-                  <Pagination
-                    size="small"
-                    current={page}
-                    pageSize={pageSize}
-                    total={items.length}
-                    onChange={setPage}
-                    showSizeChanger={false}
-                  />
-                </div>
-              )}
-            </>
+            )}
+          </div>
+
+          {items.length > pageSize && (
+            <footer className="hp-list-pagination">
+              <Pagination
+                size="small"
+                current={page}
+                pageSize={pageSize}
+                total={items.length}
+                onChange={setPage}
+                showSizeChanger={false}
+              />
+            </footer>
           )}
-        </>
+        </div>
       )}
-      {view.kind === 'detail' && <HistoryDetailView id={view.id} onChange={refresh} />}
-      {view.kind === 'compare' && <HistoryCompareView ids={view.ids} />}
+      {view.kind === 'detail' && (
+        <div className="hp-shell hp-shell--detail">
+          <HistoryDetailView id={view.id} onChange={refresh} />
+        </div>
+      )}
+      {view.kind === 'compare' && (
+        <div className="hp-shell hp-shell--compare">
+          <HistoryCompareView ids={view.ids} />
+        </div>
+      )}
     </FloatingWindow>
   );
 }
@@ -232,8 +282,16 @@ function HistoryCard({
 
   return (
     <div
-      className={`hp-glass hp-card${selected ? ' hp-card--selected' : ''}`}
+      className={`hp-card hp-card--list${selected ? ' hp-card--selected' : ''}${failed ? ' hp-card--failed' : ''}`}
       onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
     >
       <Checkbox
         className="hp-card__checkbox"
@@ -241,55 +299,73 @@ function HistoryCard({
         onClick={(e) => onSelect(r.id, e as unknown as React.MouseEvent)}
       />
 
-      <div className="hp-card__row1">
-        <div className="hp-card__name">{r.name}</div>
-        <div className="hp-card__actions">
-          <span
-            className="hp-status-dot"
-            style={{ background: failed ? 'var(--color-error)' : 'var(--color-success)' }}
-          />
-          <span style={{ fontSize: 12, color: failed ? 'var(--color-error)' : 'var(--color-success)', fontWeight: 500 }}>
-            {failed ? '失败' : '完成'}
+      <div className="hp-card__main">
+        <div className="hp-card__row1">
+          <div className="hp-card__title-block">
+            <div className="hp-card__name" title={r.name}>
+              {r.name}
+            </div>
+            <span className={`hp-card__status hp-card__status--${failed ? 'bad' : 'ok'}`}>
+              <span className="hp-status-dot" />
+              {failed ? '失败' : '完成'}
+            </span>
+          </div>
+          <div className="hp-card__actions">
+            <Tooltip title={r.starred ? '取消收藏' : '收藏'}>
+              <Button
+                type="text"
+                size="small"
+                className="hp-card__icon-btn"
+                icon={r.starred ? <StarFilled style={{ color: 'var(--color-warning)' }} /> : <StarOutlined />}
+                onClick={(e) => onStar(r, e)}
+              />
+            </Tooltip>
+            <Tooltip title="删除">
+              <Button
+                type="text"
+                size="small"
+                className="hp-card__icon-btn"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={(e) => onDelete(r, e)}
+              />
+            </Tooltip>
+          </div>
+        </div>
+
+        <div className="hp-card__metrics" aria-hidden>
+          <span className="hp-metric" title="记录 ID">
+            <span className="hp-metric__k">ID</span>
+            <code className="hp-metric__v">{r.id.slice(0, 8)}</code>
           </span>
-          <Tooltip title={r.starred ? '取消收藏' : '收藏'}>
-            <Button
-              type="text"
-              size="small"
-              icon={r.starred ? <StarFilled style={{ color: 'var(--color-warning)' }} /> : <StarOutlined />}
-              onClick={(e) => onStar(r, e)}
-            />
-          </Tooltip>
-          <Tooltip title="删除">
-            <Button
-              type="text"
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
-              onClick={(e) => onDelete(r, e)}
-            />
-          </Tooltip>
+          <span className="hp-metric">
+            <span className="hp-metric__k">时长</span>
+            <span className="hp-metric__v">{formatDuration(r.durationSec)}</span>
+          </span>
+          <span className="hp-metric">
+            <span className="hp-metric__k">机器人</span>
+            <span className="hp-metric__v">{r.totalBots}</span>
+          </span>
+          <span className="hp-metric">
+            <span className="hp-metric__k">节点</span>
+            <span className="hp-metric__v">{r.agentCount}</span>
+          </span>
+          <span className="hp-metric hp-metric--wide">
+            <span className="hp-metric__k">开始</span>
+            <span className="hp-metric__v">{r.startedAt ? dayjs(r.startedAt).format('MM-DD HH:mm') : '—'}</span>
+          </span>
         </div>
-      </div>
 
-      <div className="hp-card__row2">
-        <span><code>{r.id.slice(0, 8)}</code></span>
-        <span className="hp-card__sep">·</span>
-        <span>{formatDuration(r.durationSec)}</span>
-        <span className="hp-card__sep">·</span>
-        <span>{r.totalBots} 机器人</span>
-        <span className="hp-card__sep">·</span>
-        <span>{r.agentCount} 节点</span>
-        <span className="hp-card__sep">·</span>
-        <span>{r.startedAt ? dayjs(r.startedAt).format('MM-DD HH:mm') : '—'}</span>
+        {tags.length > 0 && (
+          <div className="hp-card__tags">
+            {tags.map((t) => (
+              <span key={t} className="hp-tag-pill">
+                {t}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
-
-      {tags.length > 0 && (
-        <div className="hp-card__tags">
-          {tags.map((t) => (
-            <span key={t} className="hp-chip">{t}</span>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

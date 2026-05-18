@@ -272,18 +272,30 @@ export function RuntimeBar({
           <Typography.Text style={{ maxWidth: 160 }} ellipsis={{ tooltip: activeTask.name }}>
             {activeTask.name}
           </Typography.Text>
-          {agentEvents.some((e) => e.type === 'offline') && (() => {
+          {agentEvents.some((e) => e.type === 'offline' || e.type === 'restarted') && (() => {
             const offlineIds = new Set(
               agentEvents.filter((e) => e.type === 'offline').map((e) => e.agentId),
+            );
+            const restartedIds = new Set(
+              agentEvents.filter((e) => e.type === 'restarted').map((e) => e.agentId),
             );
             const reconnectedIds = new Set(
               agentEvents.filter((e) => e.type === 'reconnected').map((e) => e.agentId),
             );
             const stillOffline = [...offlineIds].filter((id) => !reconnectedIds.has(id));
-            return stillOffline.length > 0 ? (
-              <Tooltip title={`节点 ${stillOffline.join('、')} 已离线`}>
+            const restartedOnly = [...restartedIds].filter((id) => !stillOffline.includes(id));
+            const problems = [...stillOffline, ...restartedOnly];
+            return problems.length > 0 ? (
+              <Tooltip
+                title={
+                  <>
+                    {stillOffline.length > 0 && <div>离线节点：{stillOffline.join('、')}</div>}
+                    {restartedOnly.length > 0 && <div>重启丢任务：{restartedOnly.join('、')}</div>}
+                  </>
+                }
+              >
                 <Tag color="warning" style={{ margin: 0 }}>
-                  {stillOffline.length} 节点离线
+                  {problems.length} 节点异常
                 </Tag>
               </Tooltip>
             ) : null;

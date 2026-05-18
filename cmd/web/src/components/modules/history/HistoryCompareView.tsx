@@ -16,6 +16,16 @@ import type { HistoryDetail } from '@/types/api';
 import { ApdexCell } from '@/components/monitoring/shared/ApdexCell';
 import './HistoryPanel.css';
 
+function useViewportHeight(): number {
+  const [h, setH] = useState(() => (typeof window !== 'undefined' ? window.innerHeight : 720));
+  useEffect(() => {
+    const onResize = () => setH(window.innerHeight);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return h;
+}
+
 export interface HistoryCompareViewProps {
   ids: string[];
 }
@@ -58,6 +68,11 @@ function bestWorst(
 export function HistoryCompareView({ ids }: HistoryCompareViewProps) {
   const [data, setData] = useState<HistoryDetail[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const viewportH = useViewportHeight();
+  const tableScrollY = useMemo(
+    () => Math.min(440, Math.max(200, viewportH - 320)),
+    [viewportH],
+  );
 
   useEffect(() => {
     setLoading(true);
@@ -192,7 +207,7 @@ export function HistoryCompareView({ ids }: HistoryCompareViewProps) {
           dataSource={rows}
           columns={columns}
           pagination={{ pageSize: 50, showSizeChanger: false }}
-          scroll={{ x: 220 + data.length * 180, y: 480 }}
+          scroll={{ x: 220 + data.length * 180, y: tableScrollY }}
         />
       </div>
     </div>

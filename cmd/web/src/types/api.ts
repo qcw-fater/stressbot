@@ -150,7 +150,7 @@ export interface StartTaskResponse {
 export interface AgentEvent {
   agentId: string;
   agentName: string;
-  /** "offline" | "reconnected" | "deregistered" */
+  /** "offline" | "reconnected" | "deregistered" | "restarted" */
   type: string;
   timestamp: string;
   detail?: string;

@@ -136,12 +136,16 @@ function AgentOfflineAlert() {
   const agents = useRuntimeStore((s) => s.agents);
   const [dismissedKeys, setDismissedKeys] = useState<Set<string>>(new Set());
 
-  // 取最近未关闭的 offline 事件
+  // 取最近未关闭的 offline / restarted 事件
   const offlineAlerts = useMemo(() => {
     const onlineIds = new Set(agents.filter((a) => a.status !== 'offline').map((a) => a.agentId));
     return agentEvents
-      .filter((e) => e.type === 'offline' && !dismissedKeys.has(e.agentId + e.timestamp))
-      .filter((e) => !onlineIds.has(e.agentId)) // 已恢复的不显示
+      .filter(
+        (e) =>
+          (e.type === 'offline' || e.type === 'restarted') &&
+          !dismissedKeys.has(e.agentId + e.timestamp + e.type),
+      )
+      .filter((e) => e.type === 'restarted' || !onlineIds.has(e.agentId)) // offline 已恢复的不显示；restarted 是永久事件
       .slice(-3); // 最多显示 3 条
   }, [agentEvents, agents, dismissedKeys]);
 
@@ -157,14 +161,17 @@ function AgentOfflineAlert() {
       icon={<WarningOutlined />}
       message={
         <span style={{ fontSize: 12 }}>
-          节点 {offlineAlerts.map((e) => `"${e.agentName || e.agentId}"`).join('、')} 已离线，
-          任务继续运行中（{onlineCount}/{totalCount} 在线）
+          节点{' '}
+          {offlineAlerts
+            .map((e) => `"${e.agentName || e.agentId}"(${e.type === 'restarted' ? '重启' : '离线'})`)
+            .join('、')}{' '}
+          异常，任务继续运行中（{onlineCount}/{totalCount} 在线）
         </span>
       }
       closable
       onClose={() => {
         const keys = new Set(dismissedKeys);
-        offlineAlerts.forEach((e) => keys.add(e.agentId + e.timestamp));
+        offlineAlerts.forEach((e) => keys.add(e.agentId + e.timestamp + e.type));
         setDismissedKeys(keys);
       }}
       style={{ marginBottom: 4, padding: '4px 12px', borderRadius: 6, fontSize: 12 }}

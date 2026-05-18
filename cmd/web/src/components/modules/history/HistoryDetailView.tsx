@@ -1,10 +1,10 @@
 /**
- * 历史记录详情：紧凑头部 + 全宽动作表（主角）+ 底部信息条。
+ * 历史记录详情：紧凑头部 + 全宽趋势 + 全宽动作表 + 底部信息条。
  */
 
 import { App, Button, Empty, Input, Space, Spin, Switch, Table, Tag, Timeline, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { CopyOutlined, DownloadOutlined } from '@ant-design/icons';
+import { CopyOutlined, DownloadOutlined, FileTextOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import ReactECharts from 'echarts-for-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -12,6 +12,8 @@ import { historyApi, showApiError } from '@/services';
 import type { ActionMetric, HistoryDetail, TimeseriesPoint, StressSnapshot } from '@/types/api';
 import { ApdexCell } from '@/components/monitoring/shared/ApdexCell';
 import { fmtBytesPlain, fmtMs, NUMERIC_STYLE } from '@/components/monitoring/shared/formats';
+import { useReportCapture } from './report/useReportCapture';
+import './HistoryPanel.css';
 
 export interface HistoryDetailViewProps {
   id: string;
@@ -27,6 +29,7 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
   const [tags, setTags] = useState<string[]>([]);
   const [actionSearch, setActionSearch] = useState('');
   const [actionsOnly, setActionsOnly] = useState(false);
+  const generateReport = useReportCapture(detail, timeseries);
 
   useEffect(() => {
     setLoading(true);
@@ -189,6 +192,9 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
             }}>
               {failed ? '失败' : '完成'}
             </span>
+            <Tooltip title="生成压测报告（在新标签页打开，可保存为 PDF）">
+              <Button size="small" type="primary" ghost icon={<FileTextOutlined />} onClick={generateReport}>报告</Button>
+            </Tooltip>
             <Tooltip title="下载完整配置归档 JSON">
               <Button size="small" icon={<DownloadOutlined />} onClick={downloadConfig}>下载</Button>
             </Tooltip>
@@ -269,11 +275,33 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
             style={{ marginTop: 8 }}
             items={detail.agentEvents!.map((evt, i) => ({
               key: i,
-              color: evt.type === 'offline' ? 'red' : evt.type === 'reconnected' ? 'green' : 'gray',
+              color:
+                evt.type === 'offline' || evt.type === 'restarted'
+                  ? 'red'
+                  : evt.type === 'reconnected'
+                  ? 'green'
+                  : 'gray',
               children: (
                 <span style={{ fontSize: 12 }}>
-                  <Tag color={evt.type === 'offline' ? 'error' : evt.type === 'reconnected' ? 'success' : 'default'} style={{ marginInlineEnd: 4 }}>
-                    {evt.type === 'offline' ? '离线' : evt.type === 'reconnected' ? '恢复' : '注销'}
+                  <Tag
+                    color={
+                      evt.type === 'offline'
+                        ? 'error'
+                        : evt.type === 'restarted'
+                        ? 'warning'
+                        : evt.type === 'reconnected'
+                        ? 'success'
+                        : 'default'
+                    }
+                    style={{ marginInlineEnd: 4 }}
+                  >
+                    {evt.type === 'offline'
+                      ? '离线'
+                      : evt.type === 'restarted'
+                      ? '重启丢任务'
+                      : evt.type === 'reconnected'
+                      ? '恢复'
+                      : '注销'}
                   </Tag>
                   <strong>{evt.agentName || evt.agentId}</strong>
                   <span style={{ color: 'var(--text-tertiary)', marginLeft: 8 }}>
