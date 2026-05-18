@@ -107,11 +107,10 @@ func (s *AdminServer) Run() error {
 	// 启动 deadline 看门狗
 	s.startDeadlineWatchdog(ctx)
 
-	// 注册路由
-	mux := s.registerRoutes()
+	// 注册路由（已包裹 recover 中间件）
 	s.httpSrv = &http.Server{
 		Addr:    s.cfg.ListenAddr,
-		Handler: mux,
+		Handler: s.registerRoutes(),
 	}
 
 	stresslog.Info("admin 启动",
@@ -217,6 +216,43 @@ func (s *AdminServer) onAgentStatusChange(agentID string, from, to AgentStatus) 
 		return
 	}
 
+	// 已分配节点重新注册（busy → idle / unhealthy → idle 等异常路径）：
+	// 视为 Agent 进程重启，任务在该节点上已丢失（用户需求 §2.3：重连后是新连接，不再补档）。
+	// 立即为该 Agent 合成 failed report，避免任务因等待"永远不会到来的"完成上报而卡死。
+	if (from == AgentBusy || from == AgentUnhealthy) && to == AgentIdle {
+		s.tasks.Update(task.ID, func(t *Task) {
+			t.AgentEvents = append(t.AgentEvents, AgentEvent{
+				AgentID:   agentID,
+				AgentName: agentName,
+				Type:      "restarted",
+				Timestamp: time.Now(),
+				Detail:    "Agent 重新注册，已分配任务在该节点丢失",
+			})
+			if t.Reports == nil {
+				t.Reports = make(map[string]TaskCompletionReport)
+			}
+			if _, exists := t.Reports[agentID]; !exists {
+				t.Reports[agentID] = TaskCompletionReport{
+					AgentID:    agentID,
+					TaskID:     t.ID,
+					Result:     ResultFailed,
+					ErrorMsg:   "Agent 重新注册，任务已丢失",
+					FinishedAt: time.Now(),
+				}
+			}
+		})
+		stresslog.Warn("[ADMIN] 分配节点重新注册，任务在该节点已丢失",
+			zap.String("taskId", task.ID),
+			zap.String("agentId", agentID),
+			zap.String("agentName", agentName),
+			zap.String("from", string(from)))
+
+		// 检查是否所有分配节点都已"失效"（offline 或已合成 report），
+		// 是则触发 autoStopTask；否则任务继续。
+		s.checkAndStopIfAllLost(task.ID)
+		return
+	}
+
 	// 节点恢复（offline → idle/busy）：记录 reconnected 事件
 	if from == AgentOffline && (to == AgentIdle || to == AgentBusy) {
 		s.tasks.Update(task.ID, func(t *Task) {
@@ -272,25 +308,15 @@ func (s *AdminServer) onAgentStatusChange(agentID string, from, to AgentStatus) 
 		})
 		task, _ = s.tasks.Get(task.ID)
 		if len(task.Reports) == len(task.Assignments) {
-			s.tasks.Transition(task.ID, TaskStopping, TaskStopped)
+			if _, err := s.tasks.Transition(task.ID, TaskStopping, TaskStopped); err != nil {
+				stresslog.Warn("[ADMIN] 状态转换失败", zap.String("taskId", task.ID), zap.Error(err))
+			}
 		}
 		return
 	}
 
-	// 任务 running 时节点离线 → 检查是否所有分配节点都已离线
-	anyOnline := false
-	for _, a := range task.Assignments {
-		node, ok := s.agents.Get(a.AgentID)
-		if ok && node.Status != AgentOffline {
-			anyOnline = true
-			break
-		}
-	}
-	if !anyOnline {
-		stresslog.Error("[ADMIN] 所有分配节点已离线，自动停止任务",
-			zap.String("taskId", task.ID))
-		s.autoStopTask(task.ID, "所有节点已离线")
-	}
+	// 任务 running 时节点离线 → 检查是否所有分配节点都已失效（offline 或已合成 report）
+	s.checkAndStopIfAllLost(task.ID)
 }
 
 // synthesizeOfflineReports 为已离线且未上报的分配节点合成 stopped report。
@@ -357,11 +383,40 @@ func (s *AdminServer) startStopTimeout(taskID string) {
 				}
 			}
 		})
-		s.tasks.Transition(taskID, TaskStopping, TaskStopped)
+		if _, err := s.tasks.Transition(taskID, TaskStopping, TaskStopped); err != nil {
+			stresslog.Warn("[ADMIN] 状态转换失败", zap.String("taskId", taskID), zap.Error(err))
+		}
 	})
 }
 
-// autoStopTask 自动停止任务（deadline 超时或全部节点离线）。
+// checkAndStopIfAllLost 检查任务的所有分配节点是否都已 offline 或已合成 report。
+// 是 → 调用 autoStopTask 收尾；否则不动作。
+//
+// 用户需求 §3.2：单节点丢失不停止任务，全部节点丢失才停止。
+func (s *AdminServer) checkAndStopIfAllLost(taskID string) {
+	task, ok := s.tasks.Get(taskID)
+	if !ok || !IsActiveState(task.State) {
+		return
+	}
+	anyAlive := false
+	for _, a := range task.Assignments {
+		if _, hasReport := task.Reports[a.AgentID]; hasReport {
+			continue // 已合成 report 视为该槽位失效
+		}
+		node, nodeOk := s.agents.Get(a.AgentID)
+		if nodeOk && node.Status != AgentOffline && node.CurrentTaskID == taskID {
+			anyAlive = true
+			break
+		}
+	}
+	if !anyAlive {
+		stresslog.Error("[ADMIN] 所有分配节点已失效（offline 或 restarted），自动停止任务",
+			zap.String("taskId", taskID))
+		s.autoStopTask(taskID, "所有分配节点已失效")
+	}
+}
+
+// autoStopTask 自动停止任务（deadline 超时或全部节点失效）。
 func (s *AdminServer) autoStopTask(taskID string, reason string) {
 	task, ok := s.tasks.Get(taskID)
 	if !ok || !IsActiveState(task.State) {
@@ -403,7 +458,9 @@ func (s *AdminServer) autoStopTask(taskID string, reason string) {
 		}
 	})
 
-	s.tasks.Transition(taskID, TaskStopping, TaskFailed)
+	if _, err := s.tasks.Transition(taskID, TaskStopping, TaskFailed); err != nil {
+		stresslog.Warn("[ADMIN] 状态转换失败", zap.String("taskId", taskID), zap.Error(err))
+	}
 }
 
 func generateID() string {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"stressbot/monitor"
+	"stressbot/utils"
 	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"
@@ -203,7 +204,7 @@ func (c *Connection) AddListener(responseKey string, cb ListenCallBack) {
 	if needStart {
 		if atomic.CompareAndSwapInt32(&c.listenRunning, 0, 1) {
 			c.listenDone = make(chan struct{})
-			go c.listenLoop()
+			utils.GetWorkPool().Go(c.listenLoop)
 		}
 	}
 }
@@ -257,7 +258,7 @@ func (c *Connection) ListenResponse(listenRespMap map[string]ListenCallBack) {
 
 	if atomic.CompareAndSwapInt32(&c.listenRunning, 0, 1) {
 		c.listenDone = make(chan struct{})
-		go c.listenLoop()
+		utils.GetWorkPool().Go(c.listenLoop)
 	}
 }
 

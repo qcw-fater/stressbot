@@ -20,6 +20,8 @@ type StressAggregate struct {
 	Snapshot        *monitor.CollectorSnapshot `json:"snapshot"`
 	ReportingAgents int                        `json:"reportingAgents"`
 	TotalAgents     int                        `json:"totalAgents"`
+	OfflineAgents   int                        `json:"offlineAgents"`
+	AssignedAgents  int                        `json:"assignedAgents"`
 }
 
 // AggregateStress 聚合指定任务的压测指标。
@@ -28,11 +30,15 @@ func (a *MetricsAggregator) AggregateStress(taskID string) *StressAggregate {
 
 	var snaps []*monitor.CollectorSnapshot
 	totalAgents := 0
+	assignedAgents := 0
+	offlineAgents := 0
 	for _, agent := range agents {
-		if agent.Status == AgentOffline {
+		if agent.CurrentTaskID != taskID {
 			continue
 		}
-		if agent.CurrentTaskID != taskID {
+		assignedAgents++
+		if agent.Status == AgentOffline {
+			offlineAgents++
 			continue
 		}
 		totalAgents++
@@ -46,6 +52,8 @@ func (a *MetricsAggregator) AggregateStress(taskID string) *StressAggregate {
 		Snapshot:        monitor.MergeSnapshots(snaps),
 		ReportingAgents: len(snaps),
 		TotalAgents:     totalAgents,
+		OfflineAgents:   offlineAgents,
+		AssignedAgents:  assignedAgents,
 	}
 }
 

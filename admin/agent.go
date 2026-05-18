@@ -21,11 +21,13 @@ type AgentRegistry struct {
 
 	unhealthyThreshold time.Duration
 	offlineThreshold   time.Duration
+	purgeThreshold     time.Duration
 }
 
 func NewAgentRegistry(cfg RegistryConfig, onChange func(string, AgentStatus, AgentStatus)) *AgentRegistry {
 	unhealthy := utils.ParseDurationDefault(cfg.UnhealthyAfter, 30*time.Second, "agentRegistry.unhealthyAfter")
 	offline := utils.ParseDurationDefault(cfg.OfflineAfter, 60*time.Second, "agentRegistry.offlineAfter")
+	purge := utils.ParseDurationDefault(cfg.PurgeAfter, 24*time.Hour, "agentRegistry.purgeAfter")
 
 	return &AgentRegistry{
 		agents:             make(map[string]*AgentNode),
@@ -33,36 +35,47 @@ func NewAgentRegistry(cfg RegistryConfig, onChange func(string, AgentStatus, Age
 		onChange:           onChange,
 		unhealthyThreshold: unhealthy,
 		offlineThreshold:   offline,
+		purgeThreshold:     purge,
 	}
 }
 
 // Register 注册 Agent。
+//
+// Agent 进程重启后会用同一 ID 重新发起注册：
+//   - 旧 entry（无论 idle/busy/unhealthy/offline）一律覆盖为新的 idle 节点；
+//   - 旧节点关联的运行任务由调度层通过 onAgentStatusChange + 心跳超时安全网处理，
+//     不在注册路径上做"任务恢复"。
+//
+// 设计依据（用户需求 §2.3 + §5）：Agent 进程重启 == 全新连接，
+// 不补档；任务调度侧统一通过事件流处理。
 func (r *AgentRegistry) Register(node *AgentNode) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	existing, exists := r.agents[node.ID]
-	if exists {
-		// 同名 offline 可覆盖
-		if existing.Status != AgentOffline {
-			return ErrAgentBusy.WithMessage("agent already registered and not offline")
-		}
-	}
-
 	from := AgentStatus("")
 	if exists {
 		from = existing.Status
 	}
 	r.agents[node.ID] = node
 
-	if r.onChange != nil && exists && from != node.Status {
+	// 状态变化时触发 onChange（含 busy → idle 路径：Agent 重启把原本 busy 的槽位释放）
+	if exists && r.onChange != nil && from != node.Status {
 		r.onChange(node.ID, from, node.Status)
 	}
 
-	stresslog.Info("agent 注册",
-		zap.String("agentId", node.ID),
-		zap.String("name", node.Name),
-		zap.String("address", node.Address))
+	if exists {
+		stresslog.Warn("agent 重新注册",
+			zap.String("agentId", node.ID),
+			zap.String("name", node.Name),
+			zap.String("address", node.Address),
+			zap.String("previousStatus", string(from)))
+	} else {
+		stresslog.Info("agent 注册",
+			zap.String("agentId", node.ID),
+			zap.String("name", node.Name),
+			zap.String("address", node.Address))
+	}
 	return nil
 }
 
@@ -75,9 +88,6 @@ func (r *AgentRegistry) Heartbeat(agentID string, req HeartbeatRequest) error {
 	if !ok {
 		return ErrAgentNotFound
 	}
-
-	node.LastHeartbeatAt = time.Now()
-	node.AppVersion = req.AppVersion
 
 	// 当 agent 切到新任务（含"上一任务结束 → 进入空闲"和"空闲 → 接到新任务"两种场景）时，
 	// 立刻把 LatestStress 清成 nil。否则会出现：
@@ -97,22 +107,48 @@ func (r *AgentRegistry) Heartbeat(agentID string, req HeartbeatRequest) error {
 	node.CurrentTaskID = req.CurrentTaskID
 	node.CurrentBots = req.CurrentBots
 
+	r.touchLocked(node, req.AppVersion)
+	return nil
+}
+
+// Touch 用于"任何 Agent 请求"路径上刷新心跳时间。
+// 用户需求 §6.1：把所有 Agent 主动请求都视为 keepalive，
+// 避免心跳本身丢包但其他请求成功时被误判离线。
+// 不修改 CurrentTaskID / CurrentBots（那些必须由心跳的语义性字段更新）。
+func (r *AgentRegistry) Touch(agentID, appVersion string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	node, ok := r.agents[agentID]
+	if !ok {
+		return
+	}
+	r.touchLocked(node, appVersion)
+}
+
+// touchLocked 更新心跳时间、appVersion，并处理 unhealthy/offline → 在线 的恢复。
+// 调用方必须已持有 r.mu。
+func (r *AgentRegistry) touchLocked(node *AgentNode, appVersion string) {
+	node.LastHeartbeatAt = time.Now()
+	if appVersion != "" {
+		node.AppVersion = appVersion
+	}
+
 	// 心跳恢复：如果之前是 unhealthy/offline，恢复业务状态
 	if node.Status == AgentUnhealthy || node.Status == AgentOffline {
 		from := node.Status
-		if req.CurrentTaskID != "" {
+		if node.CurrentTaskID != "" {
 			node.Status = AgentBusy
 		} else {
 			node.Status = AgentIdle
 		}
 		if r.onChange != nil {
-			r.onChange(agentID, from, node.Status)
+			r.onChange(node.ID, from, node.Status)
 		}
-		stresslog.Warn("agent 心跳恢复",
-			zap.String("agentId", agentID),
-			zap.String("status", string(node.Status)))
+		stresslog.Warn("agent 状态恢复",
+			zap.String("agentId", node.ID),
+			zap.String("from", string(from)),
+			zap.String("to", string(node.Status)))
 	}
-	return nil
 }
 
 // Deregister 注销 Agent。
@@ -225,20 +261,26 @@ func (r *AgentRegistry) scanAndMarkStatus() {
 			continue
 		}
 
-		if node.Status == newStatus {
-			continue
+		if node.Status != newStatus {
+			from := node.Status
+			node.Status = newStatus
+
+			if r.onChange != nil {
+				r.onChange(node.ID, from, newStatus)
+			}
+			stresslog.Warn("agent 状态变更",
+				zap.String("agentId", node.ID),
+				zap.String("from", string(from)),
+				zap.String("to", string(newStatus)),
+				zap.Duration("lag", lag))
 		}
 
-		from := node.Status
-		node.Status = newStatus
-
-		if r.onChange != nil {
-			r.onChange(node.ID, from, newStatus)
+		// Cleanup: purge offline agents with no task that exceeded purge threshold
+		if node.Status == AgentOffline && lag > r.purgeThreshold && node.CurrentTaskID == "" {
+			delete(r.agents, node.ID)
+			stresslog.Info("[ADMIN] offline agent purged",
+				zap.String("agentId", node.ID),
+				zap.Duration("offlineDuration", lag))
 		}
-		stresslog.Warn("agent 状态变更",
-			zap.String("agentId", node.ID),
-			zap.String("from", string(from)),
-			zap.String("to", string(newStatus)),
-			zap.Duration("lag", lag))
 	}
 }

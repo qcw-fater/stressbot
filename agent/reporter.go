@@ -6,25 +6,29 @@ import (
 	"time"
 
 	"stressbot/monitor"
-	stresslog "stressbot/utils/log"
 	"stressbot/utils"
+	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"
 )
 
 // StressReporter 压测指标推送循环。仅任务运行时存在。
+//
+// 生命周期由 executeTask 控制：任务开始时 Start，任务结束 / shutdown 时 Stop。
+// Stop 幂等，重复调用安全。
 type StressReporter struct {
 	cli      *AdminClient
 	agentID  string
 	taskID   string
 	interval time.Duration
 	src      *monitor.MetricsCollector
+
+	stopOnce sync.Once
 	stopCh   chan struct{}
-	wg       *sync.WaitGroup
 }
 
 // NewStressReporter 创建压测指标上报器。
-func NewStressReporter(cli *AdminClient, agentID, taskID string, interval time.Duration, src *monitor.MetricsCollector, wg *sync.WaitGroup) *StressReporter {
+func NewStressReporter(cli *AdminClient, agentID, taskID string, interval time.Duration, src *monitor.MetricsCollector) *StressReporter {
 	return &StressReporter{
 		cli:      cli,
 		agentID:  agentID,
@@ -32,22 +36,21 @@ func NewStressReporter(cli *AdminClient, agentID, taskID string, interval time.D
 		interval: interval,
 		src:      src,
 		stopCh:   make(chan struct{}),
-		wg:       wg,
 	}
 }
 
 // Start 启动推送循环（非阻塞）。
 func (r *StressReporter) Start(ctx context.Context) {
-	r.wg.Add(1)
 	utils.GetWorkPool().Go(func() {
-		defer r.wg.Done()
 		r.run(ctx)
 	})
 }
 
-// Stop 停止推送循环。
+// Stop 停止推送循环（幂等）。
 func (r *StressReporter) Stop() {
-	close(r.stopCh)
+	r.stopOnce.Do(func() {
+		close(r.stopCh)
+	})
 }
 
 func (r *StressReporter) run(ctx context.Context) {
@@ -100,34 +103,34 @@ type SystemReporter struct {
 	agentID  string
 	interval time.Duration
 	src      *SystemMonitor
+
+	stopOnce sync.Once
 	stopCh   chan struct{}
-	wg       *sync.WaitGroup
 }
 
 // NewSystemReporter 创建系统指标上报器。
-func NewSystemReporter(cli *AdminClient, agentID string, interval time.Duration, src *SystemMonitor, wg *sync.WaitGroup) *SystemReporter {
+func NewSystemReporter(cli *AdminClient, agentID string, interval time.Duration, src *SystemMonitor) *SystemReporter {
 	return &SystemReporter{
 		cli:      cli,
 		agentID:  agentID,
 		interval: interval,
 		src:      src,
 		stopCh:   make(chan struct{}),
-		wg:       wg,
 	}
 }
 
 // Start 启动推送循环（非阻塞）。
 func (r *SystemReporter) Start(ctx context.Context) {
-	r.wg.Add(1)
 	utils.GetWorkPool().Go(func() {
-		defer r.wg.Done()
 		r.run(ctx)
 	})
 }
 
-// Stop 停止推送循环。
+// Stop 停止推送循环（幂等）。
 func (r *SystemReporter) Stop() {
-	close(r.stopCh)
+	r.stopOnce.Do(func() {
+		close(r.stopCh)
+	})
 }
 
 func (r *SystemReporter) run(ctx context.Context) {

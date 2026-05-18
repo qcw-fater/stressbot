@@ -7,13 +7,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
 
 	"stressbot/logview"
-	stresslog "stressbot/utils/log"
 	"stressbot/utils"
+	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"
 )
@@ -35,18 +36,34 @@ func (a *Agent) startHTTPServer() error {
 
 	a.httpSrv = &http.Server{
 		Addr:    a.cfg.ListenAddr,
-		Handler: mux,
+		Handler: recoverMiddleware(mux),
 	}
 
-	a.wg.Add(1)
 	utils.GetWorkPool().Go(func() {
-		defer a.wg.Done()
 		stresslog.Info("[AGENT] HTTP 服务已启动", zap.String("addr", a.cfg.ListenAddr))
 		if err := a.httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			stresslog.Error("[AGENT] HTTP 服务异常退出", zap.Error(err))
 		}
 	})
 	return nil
+}
+
+// recoverMiddleware 捕获 handler panic 并写入应用日志，返回标准 500 JSON。
+// 避免依赖 net/http 默认 per-request recover（仅写 stderr 且会断开连接而非返回 500）。
+func recoverMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				stresslog.Error("[AGENT] HTTP handler panic",
+					zap.String("path", r.URL.Path),
+					zap.String("method", r.Method),
+					zap.Any("panic", rec),
+					zap.String("stack", string(debug.Stack())))
+				writeJSONError(w, http.StatusInternalServerError, "internal server error")
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (a *Agent) handleTaskAssign(w http.ResponseWriter, r *http.Request) {
@@ -63,12 +80,13 @@ func (a *Agent) handleTaskAssign(w http.ResponseWriter, r *http.Request) {
 
 	a.mu.Lock()
 	if a.currentTask != nil {
+		taskID := a.currentTask.TaskID
 		a.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
 		json.NewEncoder(w).Encode(map[string]string{
 			"error":          "task already running",
-			"currentTaskId": a.currentTask.TaskID,
+			"currentTaskId": taskID,
 		})
 		return
 	}
@@ -83,9 +101,11 @@ func (a *Agent) handleTaskAssign(w http.ResponseWriter, r *http.Request) {
 	// 返回 202 Accepted，异步执行
 	w.WriteHeader(http.StatusAccepted)
 
+	// 在协程外 Add，避免与 shutdown 的 taskWG.Wait 形成竞态（
+	// "Add 完之前 Wait 已经在 0 上返回"的场景）。
+	a.taskWG.Add(1)
 	utils.GetWorkPool().Go(func() {
-		a.wg.Add(1)
-		defer a.wg.Done()
+		defer a.taskWG.Done()
 		a.executeTask(a.ctx, &task)
 	})
 }
@@ -101,9 +121,7 @@ func (a *Agent) handleStop(w http.ResponseWriter, _ *http.Request) {
 	a.mu.Unlock()
 
 	stresslog.Info("[AGENT] 收到停止命令", zap.String("taskID", taskID))
-	if a.taskCancel != nil {
-		a.taskCancel()
-	}
+	a.cancelCurrentTask("Admin stop command")
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -113,13 +131,9 @@ func (a *Agent) handleShutdown(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]string{"status": "shutting_down"})
 
-	// select 防止重复 close panic
+	// triggerStop 内部用 sync.Once 保护，可安全并发调用
 	utils.GetWorkPool().Go(func() {
-		select {
-		case <-a.stopCh:
-		default:
-			close(a.stopCh)
-		}
+		a.triggerStop()
 	})
 }
 

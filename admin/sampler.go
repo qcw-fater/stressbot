@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"stressbot/utils"
+	stresslog "stressbot/utils/log"
+
+	"go.uber.org/zap"
 )
 
 // Sampler 运行期定时采集时序数据。
@@ -78,18 +81,24 @@ func (s *Sampler) loop(ctx context.Context, taskID string, startedAt time.Time, 
 
 			stress := s.aggregator.AggregateStress(taskID)
 			if stressJSON, err := json.Marshal(stress); err == nil {
-				_ = s.history.AppendTimeseries(taskID, TimeseriesPoint{
+				if err := s.history.AppendTimeseries(taskID, TimeseriesPoint{
 					TaskID: taskID, SampledAt: t, ElapsedSec: elapsed,
 					DataType: "stress", Snapshot: stressJSON,
-				})
+				}); err != nil {
+					stresslog.Warn("[SAMPLER] stress 时序数据写入失败",
+						zap.String("taskId", taskID), zap.Error(err))
+				}
 			}
 
 			sys := s.aggregator.AggregateSystem()
 			if sysJSON, err := json.Marshal(sys); err == nil {
-				_ = s.history.AppendTimeseries(taskID, TimeseriesPoint{
+				if err := s.history.AppendTimeseries(taskID, TimeseriesPoint{
 					TaskID: taskID, SampledAt: t, ElapsedSec: elapsed,
 					DataType: "system", Snapshot: sysJSON,
-				})
+				}); err != nil {
+					stresslog.Warn("[SAMPLER] system 时序数据写入失败",
+						zap.String("taskId", taskID), zap.Error(err))
+				}
 			}
 		}
 	}

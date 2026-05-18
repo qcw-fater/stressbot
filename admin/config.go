@@ -23,6 +23,7 @@ type Config struct {
 type RegistryConfig struct {
 	UnhealthyAfter string `json:"unhealthyAfter"`
 	OfflineAfter   string `json:"offlineAfter"`
+	PurgeAfter     string `json:"purgeAfter"`
 }
 
 type TaskSection struct {
@@ -62,6 +63,7 @@ func DefaultConfig() Config {
 		AgentRegistry: RegistryConfig{
 			UnhealthyAfter: "30s",
 			OfflineAfter:   "60s",
+			PurgeAfter:     "24h",
 		},
 		Task: TaskSection{
 			MaxFlowSizeMB:      10,
@@ -118,6 +120,9 @@ func validateConfig(cfg *Config) error {
 	}
 	if _, err := time.ParseDuration(cfg.AgentRegistry.OfflineAfter); cfg.AgentRegistry.OfflineAfter != "" && err != nil {
 		return fmt.Errorf("invalid agentRegistry.offlineAfter: %w", err)
+	}
+	if _, err := time.ParseDuration(cfg.AgentRegistry.PurgeAfter); cfg.AgentRegistry.PurgeAfter != "" && err != nil {
+		return fmt.Errorf("invalid agentRegistry.purgeAfter: %w", err)
 	}
 	return nil
 }

@@ -142,7 +142,7 @@ func (r *Robot) Start() {
 		monitor.Global().RobotRunning()
 
 		done := make(chan struct{})
-		go func() {
+		utils.GetWorkPool().Go(func() {
 			defer close(done)
 			if err := r.executor.Run(r.ctx); err != nil {
 				if r.ctx.Err() == nil {
@@ -154,7 +154,7 @@ func (r *Robot) Start() {
 			} else {
 				monitor.Global().RobotStopped()
 			}
-		}()
+		})
 
 		select {
 		case <-done:

@@ -21,7 +21,12 @@
     "stressInterval": "5s",
     "systemInterval": "5s",
     "heartbeatInterval": "10s",
-    "registerRetryMaxInterval": "60s",
+    "heartbeatFailInterval": "5s",
+    "requestTimeout": "30s",
+    "reconnectInterval": "5s",
+    "reconnectMaxInterval": "60s",
+    "reconnectMaxRetries": -1,
+    "taskReportTimeout": "30s",
     "taskWorkDir": ""
   }
 }

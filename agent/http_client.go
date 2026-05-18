@@ -15,6 +15,10 @@ import (
 var errNotRegistered = errors.New("agent not registered on admin")
 
 // AdminClient 与 Admin 服务器通信的 HTTP 客户端。
+//
+// 所有请求（注册/心跳/上报/任务完成/拉取任务）共用单一 http.Client，
+// timeout 由调用方通过 ResolvedConfig.RequestTimeout 注入；
+// 调用方 ctx 取消（如 Agent shutdown）能立刻打断阻塞中的请求。
 type AdminClient struct {
 	base    string // "http://admin:8080"
 	agentID string
@@ -22,12 +26,16 @@ type AdminClient struct {
 }
 
 // NewAdminClient 创建 Admin 客户端。
-func NewAdminClient(baseURL, agentID string) *AdminClient {
+// timeout 用于单次 HTTP 请求；ctx 取消优先于 timeout。
+func NewAdminClient(baseURL, agentID string, timeout time.Duration) *AdminClient {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
 	return &AdminClient{
 		base:    baseURL,
 		agentID: agentID,
 		client: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: timeout,
 		},
 	}
 }
@@ -223,30 +231,42 @@ func (c *AdminClient) doPost(ctx context.Context, path string, body []byte) (*ht
 	return c.client.Do(req)
 }
 
-// RetryWithBackoff 对给定操作执行指数退避重试。
-// maxInterval 为退避上限，maxTotal 为总超时（0 = 无限重试）。
-// 返回 nil 表示成功，非 nil 表示最终失败。
-func RetryWithBackoff(ctx context.Context, op func() error, maxInterval, maxTotal time.Duration, desc string) error {
-	var backoff time.Duration
-	deadline := time.Time{}
-	if maxTotal > 0 {
-		deadline = time.Now().Add(maxTotal)
+// RetryWithRetriesAndBackoff 在 RetryWithBackoff 之上额外支持"最大重试次数"。
+//   - maxRetries < 0  ：无限重试（直到 ctx 取消）
+//   - maxRetries == 0 ：当成 1 次（仅尝试一次，不重试）
+//   - maxRetries > 0  ：最多重试 maxRetries 次（即总共最多 maxRetries+1 次尝试）
+//
+// initial / max 控制指数退避区间。返回最后一次失败的错误。
+func RetryWithRetriesAndBackoff(ctx context.Context, op func() error, initial, max time.Duration, maxRetries int, desc string) error {
+	if initial <= 0 {
+		initial = time.Second
 	}
-
+	if max <= 0 {
+		max = 60 * time.Second
+	}
+	backoff := time.Duration(0)
+	attempt := 0
 	for {
 		err := op()
 		if err == nil {
 			return nil
 		}
-
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if !deadline.IsZero() && time.Now().After(deadline) {
-			return fmt.Errorf("%s: 重试超时 (%s): %w", desc, maxTotal, err)
+		// maxRetries: <0 无限；其他比较"已重试次数"
+		if maxRetries >= 0 && attempt >= maxRetries {
+			return fmt.Errorf("%s: 已达最大重试次数 %d: %w", desc, maxRetries, err)
 		}
-
-		backoff = nextBackoff(backoff, maxInterval)
+		attempt++
+		if backoff == 0 {
+			backoff = initial
+		} else {
+			backoff *= 2
+			if backoff > max {
+				backoff = max
+			}
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

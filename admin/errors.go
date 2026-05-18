@@ -48,6 +48,7 @@ var (
 	ErrInvalidArgument  = NewError("INVALID_ARGUMENT", http.StatusBadRequest)
 	ErrHistoryDisabled  = NewError("HISTORY_DISABLED", http.StatusServiceUnavailable)
 	ErrHistoryNotFound  = NewError("HISTORY_NOT_FOUND", http.StatusNotFound)
+	ErrInternal         = NewError("INTERNAL_ERROR", http.StatusInternalServerError)
 	ErrStarredProtected = NewError("HISTORY_STARRED", http.StatusConflict)
 )
 

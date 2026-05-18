@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -16,14 +17,16 @@ import (
 	"stressbot/logview"
 	"stressbot/monitor"
 	"stressbot/utils"
-
 	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"
 )
 
 // registerRoutes 注册所有 HTTP 路由。
-func (s *AdminServer) registerRoutes() *http.ServeMux {
+//
+// 顶层用 recoverMiddleware 包裹，确保 handler panic 不会断开连接，
+// 而是返回标准 500 JSON 并把 stack trace 写入应用日志。
+func (s *AdminServer) registerRoutes() http.Handler {
 	mux := http.NewServeMux()
 
 	// ── Agent 上行 ──
@@ -98,18 +101,38 @@ func (s *AdminServer) registerRoutes() *http.ServeMux {
 		mux.Handle("/", fs)
 	}
 
-	return mux
+	return recoverMiddleware(mux)
+}
+
+// recoverMiddleware 捕获 handler panic 并写入应用日志，返回标准 500 JSON。
+// 避免依赖 net/http 默认 per-request recover（仅写 stderr，且会直接断开连接）。
+func recoverMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				stresslog.Error("[ADMIN] HTTP handler panic",
+					zap.String("path", r.URL.Path),
+					zap.String("method", r.Method),
+					zap.Any("panic", rec),
+					zap.String("stack", string(debug.Stack())))
+				writeError(w, ErrInternal.WithMessage("internal server error"))
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 // ── Agent 上行 ──
 
+// handleAgentRegister 处理 Agent 注册。
+//
+// 用户需求 §5：运行任务期间允许 Agent 注册，因为 Agent 异常重启走重连流程
+// 等同于"新注册"；不允许会导致行为不一致。
+//
+// 用户需求 §2.2：Agent 进程重启的语义就是"丢弃当前任务并重新加入集群"，
+// 因此对已分配槽位的 Agent，注册成功后任务侧仅记录 offline 事件不主动恢复任务，
+// 任务调度逻辑会通过心跳超时安全网正常处理。
 func (s *AdminServer) handleAgentRegister(w http.ResponseWriter, r *http.Request) {
-	// 任务进行中时拒绝新节点注册
-	if s.tasks.HasActive() {
-		writeError(w, ErrTaskConflict.WithMessage("任务进行中，不允许新节点注册"))
-		return
-	}
-
 	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, ErrInvalidArgument.WithMessage("invalid json"))
@@ -171,12 +194,15 @@ func (s *AdminServer) handleAgentDeregister(w http.ResponseWriter, r *http.Reque
 }
 
 // handleAgentStressReport 丢弃过期 stress 报告，避免跨任务串数据。
+//
+// 用户需求 §6.1：任意 Agent 请求都视为 keepalive，刷新 LastHeartbeatAt。
 func (s *AdminServer) handleAgentStressReport(w http.ResponseWriter, r *http.Request) {
 	var report StressReport
 	if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
 		writeError(w, ErrInvalidArgument)
 		return
 	}
+	s.agents.Touch(report.AgentID, "")
 	if agent, ok := s.agents.Get(report.AgentID); ok {
 		if agent.CurrentTaskID == "" || (report.TaskID != "" && report.TaskID != agent.CurrentTaskID) {
 			// 旧任务的延迟报告 / agent 已 idle，直接丢弃，避免 LatestStress 被串。
@@ -202,6 +228,7 @@ func (s *AdminServer) handleAgentSystemReport(w http.ResponseWriter, r *http.Req
 		writeError(w, ErrInvalidArgument)
 		return
 	}
+	s.agents.Touch(report.AgentID, "")
 	reportedAt := report.ReportedAt
 	if reportedAt.IsZero() {
 		reportedAt = time.Now()
@@ -222,17 +249,25 @@ func (s *AdminServer) handleAgentTaskDone(w http.ResponseWriter, r *http.Request
 	report.AgentID = agentID
 	report.TaskID = taskID
 
+	// 用户需求 §6.1：任意 Agent 请求都视为 keepalive。
+	// 同时把 Agent 标记回 idle（任务已结束），这两个操作走 Touch + Heartbeat 路径，
+	// 必须在 tasks.Update 之外完成，避免 agents.mu 与 tasks.mu 的 AB-BA 死锁。
+	s.agents.Touch(agentID, "")
+	if err := s.agents.Heartbeat(agentID, HeartbeatRequest{
+		AgentID: agentID,
+		Status:  "idle",
+	}); err != nil {
+		// Agent 已被 admin 删除等场景，不影响 report 入库
+		stresslog.Warn("[ADMIN] handleAgentTaskDone Heartbeat 失败",
+			zap.String("agentId", agentID), zap.Error(err))
+	}
+
 	var needTransition TaskState // 零值表示不需要转换
 	err := s.tasks.Update(taskID, func(t *Task) {
 		if t.Reports == nil {
 			t.Reports = make(map[string]TaskCompletionReport)
 		}
 		t.Reports[agentID] = report
-
-		s.agents.Heartbeat(agentID, HeartbeatRequest{
-			AgentID: agentID,
-			Status:  "idle",
-		})
 
 		// 检查是否全部完成（自然完成: running→stopped，手动停止: stopping→stopped）
 		if len(t.Reports) == len(t.Assignments) {
@@ -248,11 +283,18 @@ func (s *AdminServer) handleAgentTaskDone(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Transition 必须在 Update 外部调用，避免死锁（两者都拿 ts.mu）
+	// Transition 必须在 Update 外部调用，避免死锁（两者都拿 ts.mu）。
+	// 错误必须检查：状态转换非法属于内部一致性问题，需要日志记录。
 	if needTransition == TaskRunning {
-		s.tasks.Transition(taskID, TaskRunning, TaskStopped)
+		if _, err := s.tasks.Transition(taskID, TaskRunning, TaskStopped); err != nil {
+			stresslog.Warn("[ADMIN] 状态转换失败 running→stopped",
+				zap.String("taskId", taskID), zap.Error(err))
+		}
 	} else if needTransition == TaskStopping {
-		s.tasks.Transition(taskID, TaskStopping, TaskStopped)
+		if _, err := s.tasks.Transition(taskID, TaskStopping, TaskStopped); err != nil {
+			stresslog.Warn("[ADMIN] 状态转换失败 stopping→stopped",
+				zap.String("taskId", taskID), zap.Error(err))
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -265,6 +307,7 @@ func (s *AdminServer) handleAgentPendingTask(w http.ResponseWriter, r *http.Requ
 		writeError(w, ErrAgentNotFound)
 		return
 	}
+	s.agents.Touch(agentID, "")
 	if node.CurrentTaskID == "" {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -575,7 +618,10 @@ func (s *AdminServer) handleStartTask(w http.ResponseWriter, r *http.Request) {
 	idleAgents := s.agents.ListByStatus(AgentIdle)
 	assignments, err := s.assigner.Assign(task, idleAgents, task.Config.RobotConfig.StartNumber)
 	if err != nil {
-		s.tasks.Transition(id, TaskStarting, TaskFailed)
+		if _, terr := s.tasks.Transition(id, TaskStarting, TaskFailed); terr != nil {
+			stresslog.Warn("[ADMIN] 状态转换失败 starting→failed",
+				zap.String("taskId", id), zap.Error(terr))
+		}
 		writeError(w, err)
 		return
 	}
@@ -685,7 +731,10 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 			}
 		}
 
-		s.tasks.Transition(taskID, TaskStarting, TaskFailed)
+		if _, err := s.tasks.Transition(taskID, TaskStarting, TaskFailed); err != nil {
+			stresslog.Warn("[ADMIN] 状态转换失败 starting→failed",
+				zap.String("taskId", taskID), zap.Error(err))
+		}
 		if s.sampler != nil {
 			s.sampler.Stop(taskID)
 		}
@@ -695,7 +744,10 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 		return
 	}
 
-	s.tasks.Transition(taskID, TaskStarting, TaskRunning)
+	if _, err := s.tasks.Transition(taskID, TaskStarting, TaskRunning); err != nil {
+		stresslog.Warn("[ADMIN] 状态转换失败 starting→running",
+			zap.String("taskId", taskID), zap.Error(err))
+	}
 	stresslog.Info("任务启动成功",
 		zap.String("taskId", taskID),
 		zap.Int("agents", len(assignments)))
@@ -737,7 +789,10 @@ func (s *AdminServer) handleStopTask(w http.ResponseWriter, r *http.Request) {
 
 	// 如果全部节点都已有 report（例如所有节点早已离线），直接转 stopped
 	if allReported {
-		s.tasks.Transition(id, TaskStopping, TaskStopped)
+		if _, err := s.tasks.Transition(id, TaskStopping, TaskStopped); err != nil {
+			stresslog.Warn("[ADMIN] 状态转换失败 stopping→stopped",
+				zap.String("taskId", id), zap.Error(err))
+		}
 	} else {
 		// 安全网：30s 后如果还在 stopping（在线节点未响应），强制完成
 		s.startStopTimeout(id)

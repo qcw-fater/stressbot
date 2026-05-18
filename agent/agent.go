@@ -8,21 +8,27 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/shirou/gopsutil/v4/mem"
-	stresslog "stressbot/utils/log"
-	"stressbot/utils"
-
 	"stressbot/monitor"
+	"stressbot/utils"
+	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"
 )
 
 // Agent 是分布式压测系统的执行节点。
 // 启动后向 Admin 注册，等待任务下发，执行压测，上报指标。
+//
+// 运行时不变量：
+//   - 一旦 Agent 进入 shutdown 流程，stopCh 关闭，所有后台循环（心跳/任务/上报）退出；
+//   - 任务执行通过 task wg 单独追踪，确保 shutdown 时能等到任务清理完成；
+//   - 全部业务 goroutine 走 utils.GetWorkPool()，由协程池统一恢复 panic。
 type Agent struct {
 	id      string
 	cfg     *ResolvedConfig
@@ -42,13 +48,22 @@ type Agent struct {
 	taskCancel  context.CancelFunc
 	runner      *TaskRunner
 
+	// 任务执行追踪。executeTask 启动前 Add(1)，结束 Done()；
+	// shutdown 流程会等待 taskWG 归零，确保上报/清理完整完成。
+	taskWG sync.WaitGroup
+
 	// 上报循环
 	sysReporter    *SystemReporter
 	stressReporter *StressReporter
 
 	// 优雅退出
-	stopCh chan struct{}
-	wg     sync.WaitGroup
+	stopCh   chan struct{}
+	stopOnce sync.Once
+
+	// 注册重置版本号：每次重新注册成功后递增。
+	// stressReporter / taskCancel 等"按生命周期"分配的资源都和它绑定，
+	// 避免旧任务的回调到新生命周期里污染状态。
+	regGeneration atomic.Int64
 }
 
 // New 创建 Agent 实例。
@@ -66,7 +81,7 @@ func New(cfg *ResolvedConfig, collector *monitor.MetricsCollector) (*Agent, erro
 		static.MemTotalMB = vm.Total / 1024 / 1024
 	}
 
-	httpCli := NewAdminClient(cfg.AdminAddr, id)
+	httpCli := NewAdminClient(cfg.AdminAddr, id, cfg.RequestTimeout)
 
 	return &Agent{
 		id:        id,
@@ -81,11 +96,26 @@ func New(cfg *ResolvedConfig, collector *monitor.MetricsCollector) (*Agent, erro
 }
 
 // Run 启动 Agent 主循环（阻塞）。
-func (a *Agent) Run() error {
+func (a *Agent) Run() (err error) {
+	// 顶层 recover：兜底防止未捕获的 panic 让进程崩溃，
+	// 同时把 stack trace 写入日志而不只是 stderr。
+	defer func() {
+		if rec := recover(); rec != nil {
+			stresslog.Error("[AGENT] Run panic",
+				zap.Any("panic", rec),
+				zap.String("stack", string(debug.Stack())))
+			err = fmt.Errorf("agent run panic: %v", rec)
+		}
+	}()
+
 	stresslog.Info("[AGENT] 启动中",
 		zap.String("agentID", a.id),
 		zap.String("name", a.cfg.Name),
-		zap.String("adminAddr", a.cfg.AdminAddr))
+		zap.String("adminAddr", a.cfg.AdminAddr),
+		zap.Duration("requestTimeout", a.cfg.RequestTimeout),
+		zap.Duration("reconnectInterval", a.cfg.ReconnectInterval),
+		zap.Duration("reconnectMaxInterval", a.cfg.ReconnectMaxInterval),
+		zap.Int("reconnectMaxRetries", a.cfg.ReconnectMaxRetries))
 
 	// 1. 启动系统监控
 	a.sysmon.Start(a.stopCh)
@@ -95,7 +125,7 @@ func (a *Agent) Run() error {
 		return fmt.Errorf("启动 HTTP 服务失败: %w", err)
 	}
 
-	// 3. 注册到 Admin（永不放弃）
+	// 3. 注册到 Admin（按配置策略重连，可能永不放弃）
 	ctx, cancel := context.WithCancel(context.Background())
 	a.ctx = ctx
 	a.cancel = cancel
@@ -104,22 +134,19 @@ func (a *Agent) Run() error {
 		a.shutdownHTTPServer(ctx)
 		return fmt.Errorf("注册失败: %w", err)
 	}
+	a.regGeneration.Add(1)
 
 	// 4. 启动系统指标上报（常驻）
-	a.sysReporter = NewSystemReporter(a.httpCli, a.id, a.cfg.SystemInterval, a.sysmon, &a.wg)
+	a.sysReporter = NewSystemReporter(a.httpCli, a.id, a.cfg.SystemInterval, a.sysmon)
 	a.sysReporter.Start(ctx)
 
 	// 5. 启动心跳循环
-	a.wg.Add(1)
 	utils.GetWorkPool().Go(func() {
-		defer a.wg.Done()
 		a.heartbeatLoop(ctx)
 	})
 
 	// 6. 启动任务轮询（回退通道）
-	a.wg.Add(1)
 	utils.GetWorkPool().Go(func() {
-		defer a.wg.Done()
 		a.taskPollLoop(ctx)
 	})
 
@@ -142,14 +169,11 @@ func (a *Agent) Run() error {
 	return a.shutdown()
 }
 
-// triggerStop 关闭 stopCh 触发 Agent 主循环退出。
+// triggerStop 关闭 stopCh 触发 Agent 主循环退出。线程安全（sync.Once 保护）。
 func (a *Agent) triggerStop() {
-	select {
-	case <-a.stopCh:
-		// 已关闭
-	default:
+	a.stopOnce.Do(func() {
 		close(a.stopCh)
-	}
+	})
 }
 
 // ID 返回 Agent 唯一标识。
@@ -164,7 +188,25 @@ func (a *Agent) Status() AgentStatus {
 	return a.status
 }
 
-// registerWithRetry 指数退避重试注册，永不放弃。
+// cancelCurrentTask 取消当前正在执行的任务（如果有）。
+// 调用方持锁与否均可，本函数自行处理同步。
+func (a *Agent) cancelCurrentTask(reason string) (taskID string, canceled bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.currentTask == nil || a.taskCancel == nil {
+		return "", false
+	}
+	taskID = a.currentTask.TaskID
+	a.taskCancel()
+	stresslog.Warn("[AGENT] 取消当前任务",
+		zap.String("taskID", taskID),
+		zap.String("reason", reason))
+	return taskID, true
+}
+
+// registerWithRetry 按配置的重连策略重试注册。
+//   - ReconnectMaxRetries < 0  → 持续重连，永不放弃
+//   - ReconnectMaxRetries >= 0 → 最多重试 N 次，超出返回 error 触发 triggerStop
 func (a *Agent) registerWithRetry(ctx context.Context) error {
 	static := a.sysmon.Static()
 	req := RegisterRequest{
@@ -178,9 +220,11 @@ func (a *Agent) registerWithRetry(ctx context.Context) error {
 		StaticInfo:     static,
 	}
 
-	stresslog.Info("[AGENT] 开始注册到 Admin", zap.String("adminAddr", a.cfg.AdminAddr))
+	stresslog.Info("[AGENT] 开始注册到 Admin",
+		zap.String("adminAddr", a.cfg.AdminAddr),
+		zap.Int("maxRetries", a.cfg.ReconnectMaxRetries))
 
-	return RetryWithBackoff(ctx, func() error {
+	return RetryWithRetriesAndBackoff(ctx, func() error {
 		resp, err := a.httpCli.Register(ctx, req)
 		if err != nil {
 			stresslog.Warn("[AGENT] 注册失败，将重试", zap.Error(err))
@@ -190,10 +234,16 @@ func (a *Agent) registerWithRetry(ctx context.Context) error {
 			zap.String("agentID", resp.AgentID),
 			zap.String("heartbeatTTL", resp.HeartbeatTTL))
 		return nil
-	}, a.cfg.RegisterRetryMax, 0, "register")
+	}, a.cfg.ReconnectInterval, a.cfg.ReconnectMaxInterval, a.cfg.ReconnectMaxRetries, "register")
 }
 
-// heartbeatLoop 心跳循环。成功时用 HBInterval，失败时用 HBFailInterval（更快重试）。
+// heartbeatLoop 心跳循环。
+//
+// 行为规则（用户需求 §2 + §6）：
+//   - 心跳成功用 HBInterval；失败用 HBFailInterval（更快重试）
+//   - 任意请求收到 404（errNotRegistered）→ 视为 Admin 重启，立即取消任务并重新注册
+//   - 任意一次心跳失败（含超时），若处于 Busy 立即取消当前任务（避免无观测数据的压测流量）
+//   - 持续失败不退进程（除非重新注册超出 ReconnectMaxRetries）
 func (a *Agent) heartbeatLoop(ctx context.Context) {
 	interval := a.cfg.HBInterval
 	timer := time.NewTimer(interval)
@@ -226,73 +276,56 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 				AppVersion:    a.cfg.AppVersion,
 			}
 
-			if err := a.httpCli.Heartbeat(ctx, req); err != nil {
-				// Admin 返回 404：Agent 未注册（Admin 可能重启了），触发重新注册
-				if errors.Is(err, errNotRegistered) {
-					stresslog.Warn("[AGENT] Admin 报告未注册，尝试重新注册")
-					if regErr := a.registerWithRetry(ctx); regErr != nil {
-						stresslog.Error("[AGENT] 重新注册失败，退出", zap.Error(regErr))
-						a.triggerStop()
-						return
-					}
-					stresslog.Info("[AGENT] 重新注册成功，继续心跳")
-					consecutiveFailures = 0
-					interval = a.cfg.HBInterval
-					timer.Reset(interval)
-					continue
-				}
-
-				consecutiveFailures++
-
-				// 任务运行中 + Admin 断联 → 停止任务（不退进程）
-				if a.cfg.TaskRunAdminLostExit && status == StatusBusy {
-					stresslog.Error("[AGENT] 任务运行中与 Admin 断联，停止当前任务",
-						zap.String("taskID", taskID),
-						zap.Int("failures", consecutiveFailures),
-						zap.Error(err))
-					a.mu.Lock()
-					if a.taskCancel != nil {
-						a.taskCancel()
-					}
-					a.mu.Unlock()
-					// 检查是否需要退出进程
-					if !a.cfg.ReconnectEnabled {
-						stresslog.Info("[AGENT] 未配置重连，退出进程")
-						a.triggerStop()
-						return
-					}
-					// 心跳循环继续，等 Admin 恢复后自动重注册
-					consecutiveFailures = 0
-					interval = a.cfg.HBFailInterval
-					timer.Reset(interval)
-					continue
-				}
-
-				if consecutiveFailures <= 3 {
-					stresslog.Warn("[AGENT] 心跳失败", zap.Int("consecutive", consecutiveFailures), zap.Error(err))
-				} else {
-					stresslog.Error("[AGENT] 心跳连续失败", zap.Int("consecutive", consecutiveFailures), zap.Error(err))
-				}
-
-				// 达到最大失败次数 → 停止任务（不退进程）
-				if a.cfg.MaxHeartbeatFailures > 0 && consecutiveFailures >= a.cfg.MaxHeartbeatFailures {
-					stresslog.Error("[AGENT] 心跳连续失败达到上限，视为 Admin 不可恢复，停止当前任务",
-						zap.Int("failures", consecutiveFailures),
-						zap.Int("maxFailures", a.cfg.MaxHeartbeatFailures))
-					a.triggerStop()
-					return
-				}
-
-				// 失败时使用更短的重试间隔
-				interval = a.cfg.HBFailInterval
-			} else {
+			err := a.httpCli.Heartbeat(ctx, req)
+			if err == nil {
 				if consecutiveFailures > 0 {
 					stresslog.Info("[AGENT] 心跳恢复", zap.Int("previousFailures", consecutiveFailures))
 				}
 				consecutiveFailures = 0
 				interval = a.cfg.HBInterval
+				timer.Reset(interval)
+				continue
 			}
 
+			// Admin 返回 404：Agent 在 Admin 侧不存在（Admin 重启或主动注销），触发重新注册流程
+			if errors.Is(err, errNotRegistered) {
+				// 用户需求 §2.2 / §2.3：运行中任务必须丢弃后再走重连
+				if status == StatusBusy {
+					a.cancelCurrentTask("Admin 报告未注册，可能重启")
+				}
+				stresslog.Warn("[AGENT] Admin 报告未注册，尝试重新注册")
+				if regErr := a.registerWithRetry(ctx); regErr != nil {
+					stresslog.Error("[AGENT] 重新注册失败，退出 Agent", zap.Error(regErr))
+					a.triggerStop()
+					return
+				}
+				stresslog.Info("[AGENT] 重新注册成功，继续心跳")
+				a.regGeneration.Add(1)
+				consecutiveFailures = 0
+				interval = a.cfg.HBInterval
+				timer.Reset(interval)
+				continue
+			}
+
+			consecutiveFailures++
+
+			// 用户需求 §2.2：运行任务时第一次心跳失败立刻取消任务
+			// （Admin 是唯一的指标聚合点，断联后压测流量没有观测价值）
+			if status == StatusBusy && consecutiveFailures == 1 {
+				stresslog.Error("[AGENT] 任务运行中与 Admin 断联，立即取消当前任务",
+					zap.String("taskID", taskID),
+					zap.Error(err))
+				a.cancelCurrentTask("心跳失败 / Admin 断联")
+			} else if consecutiveFailures <= 3 {
+				stresslog.Warn("[AGENT] 心跳失败",
+					zap.Int("consecutive", consecutiveFailures), zap.Error(err))
+			} else {
+				stresslog.Error("[AGENT] 心跳连续失败",
+					zap.Int("consecutive", consecutiveFailures), zap.Error(err))
+			}
+
+			// 失败时使用更短的重试间隔
+			interval = a.cfg.HBFailInterval
 			timer.Reset(interval)
 		}
 	}
@@ -311,11 +344,11 @@ func (a *Agent) taskPollLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			a.mu.Lock()
-			if a.currentTask != nil {
-				a.mu.Unlock()
-				continue // 已有任务，跳过
-			}
+			busy := a.currentTask != nil
 			a.mu.Unlock()
+			if busy {
+				continue
+			}
 
 			task, err := a.httpCli.FetchPendingTask(ctx)
 			if err != nil {
@@ -324,9 +357,9 @@ func (a *Agent) taskPollLoop(ctx context.Context) {
 			}
 			if task != nil {
 				stresslog.Info("[AGENT] 轮询到任务", zap.String("taskID", task.TaskID))
-				a.wg.Add(1)
+				a.taskWG.Add(1)
 				utils.GetWorkPool().Go(func() {
-					defer a.wg.Done()
+					defer a.taskWG.Done()
 					a.executeTask(ctx, task)
 				})
 			}
@@ -335,10 +368,25 @@ func (a *Agent) taskPollLoop(ctx context.Context) {
 }
 
 // executeTask 执行任务（异步）。
-func (a *Agent) executeTask(ctx context.Context, task *TaskAssignment) {
+//
+// 调用方负责 taskWG.Add(1)/Done()，本函数仅负责状态机迁移与 cleanup。
+// 函数 defer 中保护性 recover：任务内 panic 不影响 Agent 主循环。
+func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			stresslog.Error("[AGENT] executeTask panic",
+				zap.String("taskID", task.TaskID),
+				zap.Any("panic", rec),
+				zap.String("stack", string(debug.Stack())))
+		}
+	}()
+
 	a.mu.Lock()
 	if a.currentTask != nil {
 		a.mu.Unlock()
+		stresslog.Warn("[AGENT] 已存在任务，忽略新任务",
+			zap.String("newTaskID", task.TaskID),
+			zap.String("currentTaskID", a.currentTask.TaskID))
 		return
 	}
 	a.currentTask = task
@@ -350,21 +398,27 @@ func (a *Agent) executeTask(ctx context.Context, task *TaskAssignment) {
 		a.mu.Lock()
 		a.currentTask = nil
 		a.taskCancel = nil
+		a.runner = nil
 		a.status = StatusIdle
 		a.mu.Unlock()
 	}()
 
 	// 创建任务 context
-	taskCtx, taskCancel := context.WithCancel(ctx)
+	taskCtx, taskCancel := context.WithCancel(parentCtx)
+	a.mu.Lock()
 	a.taskCancel = taskCancel
+	a.mu.Unlock()
 	defer taskCancel()
 
 	// 创建并启动 StressReporter
-	a.stressReporter = NewStressReporter(
+	stressReporter := NewStressReporter(
 		a.httpCli, a.id, task.TaskID,
-		a.cfg.StressInterval, a.collector, &a.wg,
+		a.cfg.StressInterval, a.collector,
 	)
-	a.stressReporter.Start(taskCtx)
+	a.mu.Lock()
+	a.stressReporter = stressReporter
+	a.mu.Unlock()
+	stressReporter.Start(taskCtx)
 
 	// 创建 TaskRunner 执行
 	runner := NewTaskRunner(task, a.cfg, a.httpCli, a.collector)
@@ -385,17 +439,21 @@ func (a *Agent) executeTask(ctx context.Context, task *TaskAssignment) {
 			zap.String("error", errMsg))
 	}
 
-	// 停止 StressReporter
-	a.stressReporter.Stop()
-
-	// 等一小段时间确保最后的指标已采集
+	// 停止 StressReporter，等一小段时间确保最后的指标已采集
+	stressReporter.Stop()
 	time.Sleep(500 * time.Millisecond)
 
 	// 采集 finalSnapshot
 	finalSnap := a.collector.Snapshot(nil, 0)
 
-	// 上报任务完成（最多重试 30 分钟，但 Agent 退出时终止）
-	reportCtx, reportCancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	// 上报任务完成。
+	//
+	// 用户需求 §2.2：任务运行中 Admin 挂掉 → 取消任务并走重连，相当于"丢弃"任务，
+	// 不要补档。因此这里：
+	//   - 用 context.Background()（脱离已 cancel 的 taskCtx）+ TaskReportTimeout 整体超时
+	//   - 仅做一次性提交，失败后退出（让 Agent 直接进入 Idle 等待新任务，不阻塞重连）
+	//   - 如果上报时 Admin 仍不可达，Admin 也会通过心跳超时自动给该 Agent 合成 offline report
+	reportCtx, reportCancel := context.WithTimeout(context.Background(), a.cfg.TaskReportTimeout)
 	defer reportCancel()
 
 	report := TaskCompletionReport{
@@ -407,10 +465,8 @@ func (a *Agent) executeTask(ctx context.Context, task *TaskAssignment) {
 		FinalSnapshot: finalSnap,
 	}
 
-	if err := RetryWithBackoff(reportCtx, func() error {
-		return a.httpCli.ReportTaskDone(reportCtx, report)
-	}, 60*time.Second, 30*time.Minute, "report-task-done"); err != nil {
-		stresslog.Error("[AGENT] 最终上报失败（已重试 30 分钟）",
+	if err := a.httpCli.ReportTaskDone(reportCtx, report); err != nil {
+		stresslog.Warn("[AGENT] 任务完成上报失败（任务已丢弃，由 Admin 心跳超时自动收尾）",
 			zap.String("taskID", task.TaskID),
 			zap.Error(err))
 	} else {
@@ -424,51 +480,62 @@ func (a *Agent) executeTask(ctx context.Context, task *TaskAssignment) {
 }
 
 // shutdown 优雅关闭。
+//
+// 关闭顺序的设计原则：
+//  1. 先让任务停下（taskCancel）以便上报 finalSnapshot；
+//  2. 等待任务 goroutine 完成上报（taskWG.Wait）；
+//  3. 停止上报循环；
+//  4. cancel 全局 ctx，让常驻 goroutine 退出；
+//  5. 注销（best-effort）→ 关闭 HTTP → 关闭协程池。
 func (a *Agent) shutdown() error {
 	stresslog.Info("[AGENT] 正在关闭...")
 
-	// 1. 先停止当前任务（确保报告能发出 — reportCtx 已改为 context.Background）
+	// 1. 停止当前任务，并等待 executeTask 自然结束（含 finalSnapshot 上报）
+	if taskID, canceled := a.cancelCurrentTask("agent shutdown"); canceled {
+		stresslog.Info("[AGENT] 等待任务完成上报", zap.String("taskID", taskID))
+	}
+
+	// 等待任务结束（上报阶段用 context.Background，不会被 ctx cancel 中断）；
+	// 最长等待 TaskReportTimeout + 5s 余量。
+	waitTaskDone := make(chan struct{})
+	utils.GetWorkPool().Go(func() {
+		a.taskWG.Wait()
+		close(waitTaskDone)
+	})
+	select {
+	case <-waitTaskDone:
+	case <-time.After(a.cfg.TaskReportTimeout + 5*time.Second):
+		stresslog.Warn("[AGENT] 等待任务退出超时，继续关闭流程")
+	}
+
+	// 2. 停止 StressReporter / SystemReporter（StressReporter 通常已被 executeTask 关掉）
 	a.mu.Lock()
-	if a.taskCancel != nil {
-		a.taskCancel()
-	}
+	sr := a.stressReporter
+	sysr := a.sysReporter
 	a.mu.Unlock()
-
-	// 2. 停止 StressReporter
-	if a.stressReporter != nil {
-		a.stressReporter.Stop()
+	if sr != nil {
+		sr.Stop()
+	}
+	if sysr != nil {
+		sysr.Stop()
 	}
 
-	// 3. 停止 SystemReporter
-	if a.sysReporter != nil {
-		a.sysReporter.Stop()
+	// 3. 取消全局 ctx → 心跳/轮询/上报循环退出
+	if a.cancel != nil {
+		a.cancel()
 	}
 
-	// 4. 取消全局 ctx → 所有监听 ctx.Done() 的 goroutine 退出
-	a.cancel()
-
-	// 5. 注销（best-effort）
+	// 4. 注销（best-effort，5s 超时）
 	deregCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	a.httpCli.Deregister(deregCtx)
-
-	// 6. 关闭 HTTP 服务器
-	a.shutdownHTTPServer(context.Background())
-
-	// 7. 等待所有 wg-tracked goroutine 退出
-	done := make(chan struct{})
-	utils.GetWorkPool().Go(func() {
-		a.wg.Wait()
-		close(done)
-	})
-
-	select {
-	case <-done:
-	case <-time.After(30 * time.Second):
-		stresslog.Warn("[AGENT] 等待 goroutine 退出超时")
+	if err := a.httpCli.Deregister(deregCtx); err != nil {
+		stresslog.Warn("[AGENT] 注销失败（best-effort）", zap.Error(err))
 	}
 
-	// 8. 关闭 work pool
+	// 5. 关闭 HTTP 服务器
+	a.shutdownHTTPServer(context.Background())
+
+	// 6. 关闭 work pool（会等待池中所有 goroutine 完成或超时）
 	utils.GetWorkPool().Shutdown()
 
 	stresslog.Info("[AGENT] 已退出")

@@ -100,7 +100,25 @@ func (h *HistoryStore) initSchema() error {
 			return err
 		}
 	}
+	h.dropLegacyForeignKeys()
 	return nil
+}
+
+// dropLegacyForeignKeys 移除旧版本遗留的物理外键约束。
+func (h *HistoryStore) dropLegacyForeignKeys() {
+	type fk struct {
+		table, name string
+	}
+	for _, k := range []fk{
+		{"task_assignment", "task_assignment_ibfk_1"},
+		{"task_report", "task_report_ibfk_1"},
+		{"task_aggregated", "task_aggregated_ibfk_1"},
+		{"task_timeseries", "task_timeseries_ibfk_1"},
+		{"task_config_archive", "task_config_archive_ibfk_1"},
+		{"task_agent_events", "task_agent_events_ibfk_1"},
+	} {
+		_, _ = h.db.Exec(fmt.Sprintf("ALTER TABLE %s DROP FOREIGN KEY %s", k.table, k.name))
+	}
 }
 
 // Archive 将终态任务归档到 MySQL（事务写入 5 张表）。
@@ -552,6 +570,18 @@ func (h *HistoryStore) Delete(id string, force bool) error {
 		}
 	}
 
+	childTables := []string{
+		"task_assignment",
+		"task_report",
+		"task_aggregated",
+		"task_timeseries",
+		"task_config_archive",
+		"task_agent_events",
+	}
+	for _, tbl := range childTables {
+		_, _ = h.db.Exec(fmt.Sprintf(`DELETE FROM %s WHERE task_id = ?`, tbl), id)
+	}
+
 	result, err := h.db.Exec(`DELETE FROM task_history WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete history: %w", err)
@@ -582,6 +612,48 @@ func (h *HistoryStore) PruneExpired(now time.Time) (int, error) {
 	}
 
 	cutoff := now.AddDate(0, 0, -h.cfg.RetentionDays)
+
+	// 先收集要清理的 ID，再逐表删除子表数据，最后删主表
+	rows, err := h.db.Query(`
+		SELECT id FROM task_history
+		WHERE starred = 0 AND stopped_at IS NOT NULL AND stopped_at < ?
+	`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("prune expired: query ids: %w", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("prune expired: scan id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	childTables := []string{
+		"task_assignment",
+		"task_report",
+		"task_aggregated",
+		"task_timeseries",
+		"task_config_archive",
+		"task_agent_events",
+	}
+	placeholders := strings.Repeat("?,", len(ids))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	for _, tbl := range childTables {
+		_, _ = h.db.Exec(fmt.Sprintf(`DELETE FROM %s WHERE task_id IN (%s)`, tbl, placeholders), args...)
+	}
+
 	result, err := h.db.Exec(`
 		DELETE FROM task_history
 		WHERE starred = 0 AND stopped_at IS NOT NULL AND stopped_at < ?

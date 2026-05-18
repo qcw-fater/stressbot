@@ -32,8 +32,7 @@ CREATE TABLE IF NOT EXISTS task_assignment (
     agent_id        VARCHAR(64)  NOT NULL,
     start_number    INT          NOT NULL DEFAULT 0,
     total_bots      INT          NOT NULL DEFAULT 0,
-    INDEX idx_task (task_id),
-    FOREIGN KEY (task_id) REFERENCES task_history(id) ON DELETE CASCADE
+    INDEX idx_task (task_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `
 
@@ -47,8 +46,7 @@ CREATE TABLE IF NOT EXISTS task_report (
     error_msg       TEXT,
     finished_at     DATETIME(3)  NULL,
     final_snapshot  JSON         NULL,
-    INDEX idx_task (task_id),
-    FOREIGN KEY (task_id) REFERENCES task_history(id) ON DELETE CASCADE
+    INDEX idx_task (task_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `
 
@@ -56,8 +54,7 @@ const ddlTaskAggregated = `
 CREATE TABLE IF NOT EXISTS task_aggregated (
     task_id         VARCHAR(32)  NOT NULL PRIMARY KEY,
     final_stress    JSON         NULL,
-    final_system    JSON         NULL,
-    FOREIGN KEY (task_id) REFERENCES task_history(id) ON DELETE CASCADE
+    final_system    JSON         NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `
 
@@ -69,8 +66,7 @@ CREATE TABLE IF NOT EXISTS task_timeseries (
     elapsed_sec     INT          NOT NULL DEFAULT 0,
     data_type       VARCHAR(32)  NOT NULL,
     snapshot        JSON         NOT NULL,
-    INDEX idx_task_type (task_id, data_type, elapsed_sec),
-    FOREIGN KEY (task_id) REFERENCES task_history(id) ON DELETE CASCADE
+    INDEX idx_task_type (task_id, data_type, elapsed_sec)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `
 
@@ -80,8 +76,7 @@ CREATE TABLE IF NOT EXISTS task_config_archive (
     flow_json       MEDIUMBLOB   NULL,
     proto_files     MEDIUMBLOB   NULL,
     lua_scripts     MEDIUMBLOB   NULL,
-    robot_config    JSON         NULL,
-    FOREIGN KEY (task_id) REFERENCES task_history(id) ON DELETE CASCADE
+    robot_config    JSON         NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `
 
@@ -94,8 +89,7 @@ CREATE TABLE IF NOT EXISTS task_agent_events (
     event_type      VARCHAR(32)  NOT NULL,
     timestamp       DATETIME(3)  NOT NULL,
     detail          TEXT,
-    INDEX idx_task (task_id),
-    FOREIGN KEY (task_id) REFERENCES task_history(id) ON DELETE CASCADE
+    INDEX idx_task (task_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `
 
