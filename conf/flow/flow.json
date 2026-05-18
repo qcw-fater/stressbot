@@ -324,7 +324,8 @@
     },
     "CreateNormalTeam": {
       "type": "action",
-      "action": "CreateNormalTeam"
+      "action": "CreateNormalTeam",
+      "errorStrategy": "skip"
     },
     "SelectHero": {
       "type": "action",
@@ -332,15 +333,18 @@
     },
     "StartMatch": {
       "type": "action",
-      "action": "StartMatch"
+      "action": "StartMatch",
+      "errorStrategy": "skip"
     },
     "MatchSucceed": {
       "type": "action",
-      "action": "MatchSucceed"
+      "action": "MatchSucceed",
+      "errorStrategy": "skip"
     },
     "ListenStartLoading": {
       "type": "action",
-      "action": "ListenStartLoading"
+      "action": "ListenStartLoading",
+      "errorStrategy": "skip"
     },
     "startBattle": {
       "type": "sequence",
@@ -362,6 +366,7 @@
     "ConnectBattleTCP": {
       "type": "action",
       "action": "ConnectBattleTCP",
+      "errorStrategy": "skip",
       "listenCallbacks": [
         {
           "route": {
@@ -1160,13 +1165,14 @@
       ]
     },
     "StartMatch": {
-      "pattern": "tcpSend",
+      "pattern": "tcpRequest",
       "service": "logic",
       "route": {
         "cmd": 5,
         "act": 20
       },
-      "c2sProto": "Game.TeamStartMatchC2S"
+      "c2sProto": "Game.TeamStartMatchC2S",
+      "s2cProto": "Game.TeamStartMatchS2C"
     },
     "MatchSucceed": {
       "pattern": "lua",

@@ -44,7 +44,7 @@ type Node struct {
 
 	// ── action 专用 ─────────────────────────────────────────────
 	Action          string      `json:"action"`          // 引用 actions 表中的动作名称
-	ErrorStrategy   string      `json:"errorStrategy"`   // "abort" = 动作失败时中断整个流程；空/"ignore" = 忽略继续
+	ErrorStrategy   string      `json:"errorStrategy"`   // "abort" = 中断整个流程；"skip" = 跳过当前层级；空/"ignore" = 忽略继续
 	ListenCallbacks []ListenRef `json:"listenCallbacks"` // 动作执行后注册的持久化推送监听
 
 	// ── weighted 专用 ─────────────────────────────────────────────
@@ -142,26 +142,26 @@ type ActionDef struct {
 //
 // Wrap 为 true 时，将单个值包装为 []any{val}，用于 repeated 字段赋单个元素的场景。
 type FieldBind struct {
-	Field         string        `json:"field"`         // 目标 proto 字段名（支持嵌套如 "heroList[0].heroId"）
-	Type          string        `json:"type"`          // 绑定类型：fixed / state / stateFirst / stateRandom / stateRandomN / stateMapKey / stateMapValue / randomPick / randomPickMap / randomExclude / randomInt / randomFloat / randomString / listSize
-	Value         any           `json:"value"`         // fixed: 固定值
-	Source        string        `json:"source"`        // 数据来源 state key（state/stateFirst/stateRandom/stateRandomN/stateMapKey/stateMapValue/randomPick/randomExclude 使用）
-	Path          string        `json:"path"`          // 从 state 值中导航取子字段（如 "items[0].itemId"）
-	Values        []any         `json:"values"`        // randomPick/randomPickN/randomPickMap/randomExclude: 候选值列表
-	Required      bool          `json:"required"`      // true = 字段缺失时动作报错（不再静默跳过）
-	Filters       []FilterDef   `json:"filters"`       // stateMapValue/stateMapKey: 过滤条件列表
-	Min           int           `json:"min"`           // randomInt/randomFloat: 最小值（含）
-	Max           int           `json:"max"`           // randomInt/randomFloat: 最大值（含）
-	Precision     int           `json:"precision"`     // randomFloat: 小数位数（默认 2）
-	Length        int           `json:"length"`        // randomString: 字符串长度
-	Count         int           `json:"count"`         // stateRandomN/randomPickN: 选取数量
-	Charset       string        `json:"charset"`       // randomString: 字符集（alpha/numeric/alphanum）
-	ExcludeSource string        `json:"excludeSource"` // randomExclude: 从 state 读取排除列表
-	Optional      bool          `json:"optional"`      // true = 即使 isRequired() 的类型也允许字段为空（跳过该字段）
-	Wrap          bool          `json:"wrap"`          // true = 赋值给 repeated 字段时将单值包装为 [val]
-	StoreAs       string        `json:"storeAs"`       // 将解析结果存入 state 的 key（中间变量，供后续 binding 通过 source 引用）
-	KeySource     string        `json:"keySource"`     // randomPickMap: 从 state 读取 map 的 key 列表
-	Condition     string        `json:"condition"`     // 可选条件表达式：不满足时跳过本绑定（state: 或 lua: 前缀）
+	Field         string      `json:"field"`         // 目标 proto 字段名（支持嵌套如 "heroList[0].heroId"）
+	Type          string      `json:"type"`          // 绑定类型：fixed / state / stateFirst / stateRandom / stateRandomN / stateMapKey / stateMapValue / randomPick / randomPickMap / randomExclude / randomInt / randomFloat / randomString / listSize
+	Value         any         `json:"value"`         // fixed: 固定值
+	Source        string      `json:"source"`        // 数据来源 state key（state/stateFirst/stateRandom/stateRandomN/stateMapKey/stateMapValue/randomPick/randomExclude 使用）
+	Path          string      `json:"path"`          // 从 state 值中导航取子字段（如 "items[0].itemId"）
+	Values        []any       `json:"values"`        // randomPick/randomPickN/randomPickMap/randomExclude: 候选值列表
+	Required      bool        `json:"required"`      // true = 字段缺失时动作报错（不再静默跳过）
+	Filters       []FilterDef `json:"filters"`       // stateMapValue/stateMapKey: 过滤条件列表
+	Min           int         `json:"min"`           // randomInt/randomFloat: 最小值（含）
+	Max           int         `json:"max"`           // randomInt/randomFloat: 最大值（含）
+	Precision     int         `json:"precision"`     // randomFloat: 小数位数（默认 2）
+	Length        int         `json:"length"`        // randomString: 字符串长度
+	Count         int         `json:"count"`         // stateRandomN/randomPickN: 选取数量
+	Charset       string      `json:"charset"`       // randomString: 字符集（alpha/numeric/alphanum）
+	ExcludeSource string      `json:"excludeSource"` // randomExclude: 从 state 读取排除列表
+	Optional      bool        `json:"optional"`      // true = 即使 isRequired() 的类型也允许字段为空（跳过该字段）
+	Wrap          bool        `json:"wrap"`          // true = 赋值给 repeated 字段时将单值包装为 [val]
+	StoreAs       string      `json:"storeAs"`       // 将解析结果存入 state 的 key（中间变量，供后续 binding 通过 source 引用）
+	KeySource     string      `json:"keySource"`     // randomPickMap: 从 state 读取 map 的 key 列表
+	Condition     string      `json:"condition"`     // 可选条件表达式：不满足时跳过本绑定（state: 或 lua: 前缀）
 }
 
 // isRequired 判断字段绑定是否为必需（缺失时触发动作跳过或报错）。

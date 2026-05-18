@@ -13,9 +13,11 @@ import (
 )
 
 // errBreak / errContinue 是循环控制的内部信号，通过 error 冒泡直到被 executeLoop 捕获。
+// errSkip 是 skip 错误策略的内部信号：跳出当前所在的 sequence/loop，完成当前节点的执行。
 var (
 	errBreak    = errors.New("break")
 	errContinue = errors.New("continue")
+	errSkip     = errors.New("skip")
 )
 
 // Executor 流程执行器，每个 Robot 持有一个独立实例。
@@ -99,13 +101,17 @@ func (e *Executor) executeNode(ctx context.Context, nodeID string) error {
 }
 
 // executeSequence 顺序节点：按顺序依次执行所有子节点。
-// 透传所有错误和信号（含 errBreak / errContinue）。
+// 捕获 errSkip 时跳过剩余子节点（视为本 sequence 正常完成）。
+// 透传其他错误和信号（含 errBreak / errContinue）。
 func (e *Executor) executeSequence(ctx context.Context, node *Node) error {
 	for _, childID := range node.Next {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		if err := e.executeNode(ctx, childID); err != nil {
+			if errors.Is(err, errSkip) {
+				break
+			}
 			return err
 		}
 	}
@@ -135,7 +141,7 @@ func (e *Executor) executeLoop(ctx context.Context, node *Node) error {
 		// 执行循环体（单个节点）
 		err := e.executeNode(ctx, node.Body)
 
-		if errors.Is(err, errBreak) {
+		if errors.Is(err, errBreak) || errors.Is(err, errSkip) {
 			break
 		}
 		if errors.Is(err, errContinue) {
@@ -170,10 +176,14 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 	if err != nil {
 		stresslog.Error("[ENGINE] 动作执行失败",
 			zap.String("caller", e.caller), zap.String("action", node.Action), zap.Error(err))
-		if node.ErrorStrategy == "abort" {
+		switch node.ErrorStrategy {
+		case "abort":
 			return fmt.Errorf("动作执行失败 [%s]: %w", node.Action, err)
+		case "skip":
+			return errSkip
+		default:
+			return nil
 		}
-		return nil
 	}
 
 	// 注册监听回调（连接已在动作中创建）
@@ -181,8 +191,11 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 		if err := e.handler.RegisterListen(node.ListenCallbacks); err != nil {
 			stresslog.Error("[ENGINE] 注册监听失败",
 				zap.String("caller", e.caller), zap.Error(err))
-			if node.ErrorStrategy == "abort" {
+			switch node.ErrorStrategy {
+			case "abort":
 				return fmt.Errorf("注册监听失败: %w", err)
+			case "skip":
+				return errSkip
 			}
 		}
 	}
@@ -207,7 +220,11 @@ func (e *Executor) executeBoolean(ctx context.Context, node *Node) error {
 		return nil
 	}
 
-	return e.executeNode(ctx, targetID)
+	err := e.executeNode(ctx, targetID)
+	if errors.Is(err, errSkip) {
+		return nil
+	}
+	return err
 }
 
 // executeWeighted 加权随机节点：按权重随机选择一个 option 执行。
@@ -240,11 +257,19 @@ func (e *Executor) executeWeighted(ctx context.Context, node *Node) error {
 		}
 		cumulative += w
 		if r < cumulative {
-			return e.executeNode(ctx, opt.Node)
+			err := e.executeNode(ctx, opt.Node)
+			if errors.Is(err, errSkip) {
+				return nil
+			}
+			return err
 		}
 	}
 
-	return e.executeNode(ctx, node.Options[len(node.Options)-1].Node)
+	err := e.executeNode(ctx, node.Options[len(node.Options)-1].Node)
+	if errors.Is(err, errSkip) {
+		return nil
+	}
+	return err
 }
 
 // executeWait 等待节点：暂停指定时间。支持固定和随机两种模式。
