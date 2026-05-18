@@ -33,8 +33,9 @@
   font-weight: 500;
   color: var(--text-primary);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  display: flex;
+  align-items: center;
 }
 
 .floating-window-extra {

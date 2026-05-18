@@ -41,7 +41,7 @@ export interface FlowNode {
 
   // action 专用
   action?: string;
-  errorStrategy?: 'ignore' | 'abort';
+  errorStrategy?: 'ignore' | 'skip' | 'abort';
   listenCallbacks?: ListenRef[];
 
   // weighted 专用

@@ -2,7 +2,7 @@
  * 声明式动作主表单：根据 pattern 动态显示对应字段。
  */
 
-import { Button, Form, Input, InputNumber, Select, Space, Switch } from 'antd';
+import { Button, Form, Input, InputNumber, Select, Space } from 'antd';
 import { ApiOutlined } from '@ant-design/icons';
 import { useState } from 'react';
 import type { ActionDef, ActionPattern } from '@/types/action';
@@ -34,7 +34,6 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
   const showTimeout = pattern === 'tcpListen' || pattern === 'udpListen' || pattern === 'tcpRequest' || pattern === 'udpRequest';
   const showPollMs = pattern === 'tcpListen' || pattern === 'udpListen';
   const showKeys = pattern === 'clearState';
-  const showOptional = ['tcpSend', 'tcpRequest', 'udpSend', 'udpRequest', 'tcpListen', 'udpListen', 'httpRequest'].includes(pattern);
   const showURL = pattern === 'httpRequest';
   const showMethod = pattern === 'httpRequest';
   const showContentType = pattern === 'httpRequest';
@@ -139,19 +138,25 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
       )}
 
       {showBindings && (
-        <Form.Item label={pattern === 'httpRequest' ? 'bindings（请求体字段）' : pattern === 'setState' ? 'bindings（State 写入绑定）' : 'bindings（C2S 字段绑定）'}>
+        <div style={{ marginBottom: 24 }}>
           <BindingsTable
             messageFullName={pattern === 'httpRequest' ? undefined : action.c2sProto}
             value={action.bindings}
             onChange={(v) => set({ bindings: v })}
+            label={pattern === 'httpRequest' ? 'bindings（请求体字段）' : pattern === 'setState' ? 'bindings（State 写入绑定）' : 'bindings（C2S 字段绑定）'}
           />
-        </Form.Item>
+        </div>
       )}
 
       {showStore && (
-        <Form.Item label={pattern === 'httpRequest' ? 'store（JSON 响应 → state 映射）' : 'store（S2C → state 映射）'}>
-          <StoreTable s2cProto={pattern === 'httpRequest' ? undefined : action.s2cProto} value={action.store} onChange={(v) => set({ store: v })} />
-        </Form.Item>
+        <div style={{ marginBottom: 24 }}>
+          <StoreTable
+            s2cProto={pattern === 'httpRequest' ? undefined : action.s2cProto}
+            value={action.store}
+            onChange={(v) => set({ store: v })}
+            label={pattern === 'httpRequest' ? 'store（JSON 响应 → state）' : 'store（S2C → state）'}
+          />
+        </div>
       )}
 
       {showTimeout && (
@@ -195,12 +200,6 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
             placeholder="输入 state key，回车确认"
             style={{ width: '100%' }}
           />
-        </Form.Item>
-      )}
-
-      {showOptional && (
-        <Form.Item label="optional（依赖缺失时静默跳过）">
-          <Switch checked={!!action.optional} onChange={(v) => set({ optional: v })} />
         </Form.Item>
       )}
 

@@ -21,6 +21,8 @@ export interface BindingsTableProps {
   messageFullName?: string;
   value?: FieldBind[];
   onChange?: (v: FieldBind[]) => void;
+  /** 区块标题 */
+  label?: string;
 }
 
 const TYPE_GROUPS: { label: string; types: BindingType[] }[] = [
@@ -53,7 +55,7 @@ const TYPE_OPTIONS = TYPE_GROUPS.map((g) => ({
   options: g.types.map((t) => ({ value: t, label: t })),
 }));
 
-export function BindingsTable({ messageFullName, value, onChange }: BindingsTableProps) {
+export function BindingsTable({ messageFullName, value, onChange, label }: BindingsTableProps) {
   const list = value ?? [];
   const set = (next: FieldBind[]) => onChange?.(next);
 
@@ -128,7 +130,7 @@ export function BindingsTable({ messageFullName, value, onChange }: BindingsTabl
   return (
     <div style={{ paddingLeft: 0 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <strong>bindings ({list.length})</strong>
+        <strong>{label ?? 'bindings'} ({list.length})</strong>
         <Button
           size="small"
           icon={<PlusOutlined />}

@@ -228,10 +228,10 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
       }
     } else if (node.type === 'action') {
       // errorStrategy 值校验
-      if (node.errorStrategy && node.errorStrategy !== 'ignore' && node.errorStrategy !== 'abort') {
+      if (node.errorStrategy && node.errorStrategy !== 'ignore' && node.errorStrategy !== 'skip' && node.errorStrategy !== 'abort') {
         issues.push({
           severity: 'warning', code: 'INVALID_ERROR_STRATEGY',
-          message: `action 节点 "${id}" 的 errorStrategy "${node.errorStrategy}" 不合法（应为 ignore 或 abort）`,
+          message: `action 节点 "${id}" 的 errorStrategy "${node.errorStrategy}" 不合法（应为 ignore、skip 或 abort）`,
           location: { kind: 'node', id },
         });
       }

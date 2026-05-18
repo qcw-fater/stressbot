@@ -7,7 +7,7 @@
 
 import { CloseOutlined } from '@ant-design/icons';
 import { Rnd } from 'react-rnd';
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { useFloatingWindowStore } from '../store/floatingWindowStore';
 import './FloatingWindow.css';
@@ -69,6 +69,28 @@ export function FloatingWindow({
     }
   }, [open, windowId, focusWindow, windowState]);
 
+  // ESC 关闭最顶层窗口
+  const handleEsc = useCallback((e: KeyboardEvent) => {
+    if (e.key !== 'Escape') return;
+    // 只响应自己是最顶层窗口的情况
+    const windows = useFloatingWindowStore.getState().windows;
+    const topEntry = Object.entries(windows).reduce<[string, number] | null>((acc, [id, w]) => {
+      if (!acc || w.zIndex > acc[1]) return [id, w.zIndex];
+      return acc;
+    }, null);
+    if (topEntry && topEntry[0] === windowId && open) {
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+    }
+  }, [windowId, open, onClose]);
+
+  useEffect(() => {
+    if (!open) return;
+    document.addEventListener('keydown', handleEsc, true);
+    return () => document.removeEventListener('keydown', handleEsc, true);
+  }, [handleEsc, open]);
+
   // 关闭时不卸载子组件，用 CSS 隐藏 + 禁用交互
   // 保证 Monaco 等有状态组件不会丢失滚动/数据
   if (!windowState) {
@@ -107,7 +129,7 @@ export function FloatingWindow({
     >
       <div className="floating-window">
         <div className={`floating-window-titlebar ${DRAG_HANDLE_CLASS}`}>
-          <span className="floating-window-title">{title}</span>
+          <div className="floating-window-title">{title}</div>
           {extra && <div className="floating-window-extra">{extra}</div>}
           <button className="floating-window-close" onClick={onClose}>
             <CloseOutlined style={{ fontSize: 12 }} />

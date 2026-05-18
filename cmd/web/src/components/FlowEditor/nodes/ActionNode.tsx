@@ -51,6 +51,11 @@ export function ActionNode({ id, data, selected }: NodeProps) {
               <span className="breakoff-badge">abort</span>
             </Tooltip>
           )}
+          {node.errorStrategy === 'skip' && (
+            <Tooltip title="出错时跳过当前层级">
+              <span className="skip-badge">skip</span>
+            </Tooltip>
+          )}
           {listens > 0 && (
             <Tooltip title={`注册了 ${listens} 个 listen 监听`}>
               <span className="listen-badge">listen {listens}</span>

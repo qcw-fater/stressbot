@@ -8,7 +8,7 @@
  * 由 NodeEditorDrawer 在 node.type === 'action' 时调用。
  */
 
-import { Alert, Button, Collapse, Form, Modal, Select, Space } from 'antd';
+import { Alert, Button, Collapse, Form, Modal, Select, Space, Switch, Tooltip } from 'antd';
 import { EyeOutlined } from '@ant-design/icons';
 import { useMemo, useState } from 'react';
 import { useFlowStore } from '../../store/flowStore';
@@ -113,7 +113,7 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
         items={[
           {
             key: 'node',
-            label: '节点级字段（errorStrategy / delayMs）',
+            label: '节点级字段（errorStrategy / optional / delayMs）',
             children: (
               <Form layout="vertical">
                 <Form.Item label="错误处理策略（动作失败时）">
@@ -121,10 +121,14 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
                     value={node.errorStrategy || 'ignore'}
                     onChange={(v) => updateNode(nodeId, { errorStrategy: v === 'ignore' ? undefined : v })}
                     options={[
-                      { value: 'ignore', label: '忽略（打日志，继续执行）' },
-                      { value: 'abort', label: '中断（中止当前流程）' },
+                      { value: 'ignore', label: 'ignore（忽略当前错误）' },
+                      { value: 'skip', label: 'skip（跳过当前层级）' },
+                      { value: 'abort', label: 'abort（中止当前流程）' },
                     ]}
                   />
+                </Form.Item>
+                <Form.Item label={<Tooltip title="依赖缺失时静默跳过（如 state key 不存在）" mouseEnterDelay={0.4}><span>optional（依赖缺失时静默跳过）</span></Tooltip>}>
+                  <Switch checked={!!effectiveAction.optional} onChange={(v) => onActionDefChange({ ...effectiveAction, optional: v })} />
                 </Form.Item>
                 <Form.Item label="节点延迟 delayMs">
                   <DelayInput value={node.delayMs} onChange={(v) => updateNode(nodeId, { delayMs: v })} />
