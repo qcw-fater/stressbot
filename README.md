@@ -15,7 +15,8 @@ stressbot/
 ├── cmd/
 │   ├── agent/            主程序入口（单机模式 / Agent 模式）
 │   └── web/              前端可视化编辑器（React + Vite）
-├── adapter/              协议适配器接口 + Lua 桥接（消息编解码、帧分割）
+├── adapter/              协议适配器接口 + Lua 桥接（消息编解码、帧分割、错误码映射）
+├── errcode/              统一错误码定义（框架错误码 + Kind 分类）
 ├── admin/                Admin 服务器（分布式调度、历史归档、前端托管）
 ├── agent/                Agent 节点（注册到 Admin、执行下发任务）
 ├── engine/               流程执行引擎（节点图遍历、动作模式、字段绑定）
@@ -255,6 +256,7 @@ Executor 遍历节点图 → 命中 action 节点
 | `randomInt`     | `[min, max]` 随机整数                                                    |
 | `randomBool`    | 随机布尔                                                                 |
 | `randomString`  | 随机字符串（`length`，可选 `charset`）                                    |
+| `randomFloat`   | `[min, max]` 随机浮点数（可选 `precision` 小数位数）                     |
 
 ### 辅助类
 
@@ -350,23 +352,7 @@ Executor 遍历节点图 → 命中 action 节点
 
 ## 心跳
 
-每个 TCP/UDP 连接可独立注册心跳。
-
-### 声明式
-
-```json
-"LogicHeartbeat": {
-  "pattern": "registerHeartbeat",
-  "target": "tcp",
-  "service": "logic",
-  "route": {"cmd": 2, "act": 1},
-  "intervalMs": 5000
-}
-```
-
-支持 `rawBody`（二进制字段描述）或 `c2sProto` + `bindings` 构造消息体。
-
-### Lua
+每个 TCP/UDP 连接可独立注册心跳。通过 Lua API 注册：
 
 ```lua
 local network = require("network")
@@ -407,8 +393,9 @@ end)
 | `EncodeUDP(route, body, key)`     | 编码 UDP 数据包（含 UDP 偏移加密）                         |
 | `DecodeTCP(data, key)`            | 解码 TCP 数据包 → 路由键 + 消息体 + 错误码                 |
 | `DecodeUDP(data, key)`            | 解码 UDP 数据包 → 路由键 + 消息体 + 错误码                 |
-| `ExpectedResponseKey(route)`      | 从发送路由计算期望的响应路由键                              |
+| `ExpectedRouteKey(route)`         | 从发送路由计算期望的响应路由键                              |
 | `Close()`                         | 释放资源（Lua 状态池）                                     |
+| `DescribeError(code)`             | 将服务端错误码映射为可读描述（需 `error.lua`）              |
 
 ## Lua 脚本要求
 
@@ -420,9 +407,9 @@ end)
 | `body_length()`            | 返回 `{offset, field_type, includes_header}` 元信息          |
 | `encode_tcp(route, body, key)` | 编码 TCP 包（含头），返回二进制字符串                    |
 | `encode_udp(route, body, key)` | 编码 UDP 包（含头 + 偏移加密），返回二进制字符串         |
-| `decode_tcp(data, key)`    | 解码 TCP → `{response_key, body, header_err}`               |
-| `decode_udp(data, key)`    | 解码 UDP → `{response_key, body, header_err}`               |
-| `expected_response_key(route)` | 计算期望响应路由键，返回字符串                            |
+| `decode_tcp(data, key)`    | 解码 TCP → `{route_key, body, header_err}`                  |
+| `decode_udp(data, key)`    | 解码 UDP → `{route_key, body, header_err}`                  |
+| `expected_route_key(route)`    | 计算期望响应路由键，返回字符串                            |
 
 `body_length` 说明：
 - `offset`：body 长度字段在 header 中的字节偏移
@@ -481,8 +468,8 @@ end)
 
 | 函数                                                    | 说明                          |
 | ------------------------------------------------------ | ---------------------------- |
-| `ensure_tcp_listener(service, responseKey)`             | 注册 TCP 监听占位             |
-| `ensure_udp_listener(service, responseKey)`             | 注册 UDP 监听占位             |
+| `ensure_tcp_listener(service, routeKey)`             | 注册 TCP 监听占位             |
+| `ensure_udp_listener(service, routeKey)`             | 注册 UDP 监听占位             |
 
 ### 心跳
 
@@ -549,9 +536,9 @@ end)
 | -------------------------------------- | ------------------------------------ |
 | `encode_tcp(route, body [, key])`       | TCP 编码，返回二进制或 nil            |
 | `encode_udp(route, body [, key])`       | UDP 编码，返回二进制或 nil            |
-| `decode_tcp(data [, key])`              | TCP 解码 → responseKey, body, headerErr |
-| `decode_udp(data [, key])`              | UDP 解码 → responseKey, body, headerErr |
-| `expected_response_key(route)`          | 计算期望响应路由键                     |
+| `decode_tcp(data [, key])`              | TCP 解码 → routeKey, body, headerErr |
+| `decode_udp(data [, key])`              | UDP 解码 → routeKey, body, headerErr |
+| `expected_route_key(route)`             | 计算期望响应路由键                     |
 
 ## log（4 函数）
 
@@ -761,6 +748,7 @@ Agent 模式不需要 `standalone` 段 — 运行时参数由 Admin 通过 `Task
 | Proto 文件 | `conf/proto/` | 动态加载，支持全名和短名查找 |
 | Lua 脚本 | `conf/scripts/` | 启动时预编译，通过 `lua:` 引用 |
 | 协议适配器 | `conf/adapter/codec.lua` | 7 个必需函数 |
+| 错误码映射 | `conf/adapter/error.lua` | 可选，提供 `describe_error(code)` 函数 |
 
 ## 资源编辑器（前端 ResourcesDrawer）
 
@@ -945,6 +933,12 @@ gnet `OnTraffic`：peek header → `BodyLength()` 纯 Go 计算 → read frame �
 |------|------|------|
 | POST | `/api/resources/baseline` | 推送资源到基线 |
 
+**错误码：**
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/error-codes` | 查询框架错误码定义 |
+
 ## Agent 节点
 
 ### 生命周期
@@ -988,7 +982,7 @@ Admin (:8080) ← 多 Agent (:7070) → 目标游戏服务器
 
 ### 原子计数器（热路径零锁）
 
-- 成功 / 失败 / 超时 / 跳过 / 执行中 / 字节数 / 错误分布
+- 成功 / 失败 / 超时 / 跳过 / 取消 / 执行中 / 字节数 / 错误分布
 
 ### 延迟直方图
 
@@ -1004,6 +998,29 @@ Admin (:8080) ← 多 Agent (:7070) → 目标游戏服务器
 ## 分布式聚合
 
 `MergeSnapshots`：跨 Agent 计数求和 + 直方图合并 + 百分位重算 + 错误合并。
+
+### 错误码体系
+
+动作执行错误分为两类，用 `Kind` 区分：
+
+| Kind | 范围 | 说明 |
+|------|------|------|
+| `framework` | 1–99 | 工具自身故障（连接/编码/Lua 等） |
+| `server` | ≥ 100 | 服务端返回的 `headerErr` 原值 |
+
+框架错误码（`errcode` 包）按层分段：
+
+| 范围 | 层级 | 包含 |
+|------|------|------|
+| 1–10 | 网络层 | `ConnNotFound` / `ConnClosed` / `SendFailed` / `RecvTimeout` / `ConnDropped` |
+| 11–20 | 协议层 | `EncodeFailed` / `ParseFailed` |
+| 21–30 | 构建层 | `CreateMsg` / `BindField` / `Serialize` |
+| 31–40 | 监听层 | `ListenTimeout` |
+| 41–50 | 配置层 | `AddrEmpty` / `URLEmpty` / `URLScheme` / `UnknownPattern` / `HTTPBuild` / `HTTPReadBody` / `MarshalBody` |
+| 51–60 | Lua 层 | `LuaNotInit` / `LuaNoScript` / `LuaExecFailed` / `LuaExitCode` |
+| 61–70 | 回调层 | `CallbackLua` / `CallbackParse` |
+
+监控错误分布按 `(Kind, Code)` 聚合，不再按消息字符串。前端 `ErrorsTab` 按 `Kind` 分组展示，服务端错误码可通过 `error.lua` 映射为可读描述。
 
 ## 前端监控面板
 
