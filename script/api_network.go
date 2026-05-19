@@ -169,8 +169,8 @@ func networkConnectTCP(L *lua.LState) int {
 	}
 	service := L.CheckString(1)
 	address := L.CheckString(2)
-	ok := ctx.NetSender.ConnectTCP(service, address)
-	L.Push(lua.LBool(ok))
+	err := ctx.NetSender.ConnectTCP(service, address)
+	L.Push(lua.LBool(err == nil))
 	return 1
 }
 
@@ -184,8 +184,8 @@ func networkConnectUDP(L *lua.LState) int {
 	}
 	service := L.CheckString(1)
 	address := L.CheckString(2)
-	ok := ctx.NetSender.ConnectUDP(service, address)
-	L.Push(lua.LBool(ok))
+	err := ctx.NetSender.ConnectUDP(service, address)
+	L.Push(lua.LBool(err == nil))
 	return 1
 }
 
@@ -251,17 +251,17 @@ func networkTCPRequest(L *lua.LState) int {
 	}
 
 	goRoute := luaValueToRoute(route)
-	respKey := ctx.Adapter.ExpectedResponseKey(goRoute)
+	routeKey := ctx.Adapter.ExpectedRouteKey(goRoute)
 	pktLen := len(packet)
 
 	var respBody []byte
-	var ok bool
 	var headerErr uint64
+	var reqErr error
 	withReleasedMu(ctx.LuaMu, func() {
-		respBody, headerErr, ok = ctx.NetSender.TCPRequest(service, packet, respKey)
+		respBody, headerErr, reqErr = ctx.NetSender.TCPRequest(service, packet, routeKey)
 	})
 
-	if !ok {
+	if reqErr != nil {
 		L.Push(lua.LNumber(-1))
 		L.Push(lua.LNil)
 		L.Push(lua.LNumber(pktLen))
@@ -326,7 +326,7 @@ func networkUDPRequest(L *lua.LState) int {
 	}
 
 	goRoute := luaValueToRoute(route)
-	respKey := ctx.Adapter.ExpectedResponseKey(goRoute)
+	routeKey := ctx.Adapter.ExpectedRouteKey(goRoute)
 	udpKey := ctx.NetSender.GetUDPSecretKey(service)
 	packet := ctx.Adapter.EncodeUDP(goRoute, body, udpKey)
 	if packet == nil {
@@ -339,12 +339,12 @@ func networkUDPRequest(L *lua.LState) int {
 
 	pktLen := len(packet)
 	var respBody []byte
-	var ok bool
 	var headerErr uint64
+	var reqErr error
 
 	withReleasedMu(ctx.LuaMu, func() {
-		respBody, headerErr, ok = ctx.NetSender.UDPRequest(
-			service, packet, respKey,
+		respBody, headerErr, reqErr = ctx.NetSender.UDPRequest(
+			service, packet, routeKey,
 			time.Duration(timeout)*time.Second,
 		)
 	})
@@ -356,7 +356,7 @@ func networkUDPRequest(L *lua.LState) int {
 		L.Push(lua.LNumber(0))
 		return 4
 	}
-	if !ok {
+	if reqErr != nil {
 		L.Push(lua.LNumber(-1))
 		L.Push(lua.LNil)
 		L.Push(lua.LNumber(pktLen))
@@ -508,8 +508,8 @@ func networkTCPSend(L *lua.LState) int {
 		return 2
 	}
 
-	ok, n := ctx.NetSender.TCPSend(service, packet)
-	if ok {
+	n, err := ctx.NetSender.TCPSend(service, packet)
+	if err == nil {
 		L.Push(lua.LNumber(0))
 		L.Push(lua.LNumber(n))
 	} else {
@@ -545,8 +545,8 @@ func networkUDPSend(L *lua.LState) int {
 		L.Push(lua.LNumber(0))
 		return 2
 	}
-	ok, n := ctx.NetSender.UDPSend(service, packet)
-	if ok {
+	n, err := ctx.NetSender.UDPSend(service, packet)
+	if err == nil {
 		L.Push(lua.LNumber(0))
 		L.Push(lua.LNumber(n))
 	} else {
@@ -573,7 +573,7 @@ func networkTCPListen(L *lua.LState) int {
 
 	service := L.CheckString(1)
 	route := luaValueToRoute(L.Get(2))
-	responseKey := ctx.Adapter.ExpectedResponseKey(route)
+	routeKey := ctx.Adapter.ExpectedRouteKey(route)
 
 	var s2cProto string
 	timeout := engine.DefaultListenTimeoutSec
@@ -592,7 +592,7 @@ func networkTCPListen(L *lua.LState) int {
 		pollMs = engine.DefaultPollMs
 	}
 
-	ctx.NetSender.EnsureTCPListener(service, responseKey)
+	ctx.NetSender.EnsureTCPListener(service, routeKey)
 
 	var respBody []byte
 	var timedOut bool
@@ -601,7 +601,7 @@ func networkTCPListen(L *lua.LState) int {
 	withReleasedMu(ctx.LuaMu, func() {
 		deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 		for time.Now().Before(deadline) {
-			respBody, headerErr = ctx.NetSender.GetTCPListenResp(service, responseKey)
+			respBody, headerErr = ctx.NetSender.GetTCPListenResp(service, routeKey)
 			if respBody != nil {
 				return
 			}
@@ -622,7 +622,7 @@ func networkTCPListen(L *lua.LState) int {
 	}
 	if timedOut {
 		stresslog.Warn("[SCRIPT] tcp_listen 超时",
-			zap.String("service", service), zap.String("responseKey", responseKey), zap.Int("timeout", timeout))
+			zap.String("service", service), zap.String("routeKey", routeKey), zap.Int("timeout", timeout))
 		L.Push(lua.LNil)
 		L.Push(lua.LNumber(0))
 		return 2
@@ -663,7 +663,7 @@ func networkUDPListen(L *lua.LState) int {
 
 	service := L.CheckString(1)
 	route := luaValueToRoute(L.Get(2))
-	responseKey := ctx.Adapter.ExpectedResponseKey(route)
+	routeKey := ctx.Adapter.ExpectedRouteKey(route)
 
 	var s2cProto string
 	timeout := engine.DefaultListenTimeoutSec
@@ -682,7 +682,7 @@ func networkUDPListen(L *lua.LState) int {
 		pollMs = engine.DefaultPollMs
 	}
 
-	ctx.NetSender.EnsureUDPListener(service, responseKey)
+	ctx.NetSender.EnsureUDPListener(service, routeKey)
 
 	var respBody []byte
 	var timedOut bool
@@ -691,7 +691,7 @@ func networkUDPListen(L *lua.LState) int {
 	withReleasedMu(ctx.LuaMu, func() {
 		deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 		for time.Now().Before(deadline) {
-			respBody, headerErr = ctx.NetSender.GetUDPListenResp(service, responseKey)
+			respBody, headerErr = ctx.NetSender.GetUDPListenResp(service, routeKey)
 			if respBody != nil {
 				return
 			}
@@ -712,7 +712,7 @@ func networkUDPListen(L *lua.LState) int {
 	}
 	if timedOut {
 		stresslog.Warn("[SCRIPT] udp_listen 超时",
-			zap.String("service", service), zap.String("responseKey", responseKey), zap.Int("timeout", timeout))
+			zap.String("service", service), zap.String("routeKey", routeKey), zap.Int("timeout", timeout))
 		L.Push(lua.LNil)
 		L.Push(lua.LNumber(0))
 		return 2
@@ -812,7 +812,7 @@ func networkGetUDPSecretKey(L *lua.LState) int {
 // 监听器占位
 // ---------------------------------------------------------------------------
 
-// networkEnsureTCPListener 为 TCP responseKey 注册监听器占位。
+// networkEnsureTCPListener 为 TCP routeKey 注册监听器占位。
 // 签名：network.ensure_tcp_listener(service, response_key)
 func networkEnsureTCPListener(L *lua.LState) int {
 	ctx := GetContext(L)
@@ -820,12 +820,12 @@ func networkEnsureTCPListener(L *lua.LState) int {
 		return 0
 	}
 	service := L.CheckString(1)
-	responseKey := L.CheckString(2)
-	ctx.NetSender.EnsureTCPListener(service, responseKey)
+	routeKey := L.CheckString(2)
+	ctx.NetSender.EnsureTCPListener(service, routeKey)
 	return 0
 }
 
-// networkEnsureUDPListener 为 UDP responseKey 注册监听器占位。
+// networkEnsureUDPListener 为 UDP routeKey 注册监听器占位。
 // 签名：network.ensure_udp_listener(service, response_key)
 func networkEnsureUDPListener(L *lua.LState) int {
 	ctx := GetContext(L)
@@ -833,8 +833,8 @@ func networkEnsureUDPListener(L *lua.LState) int {
 		return 0
 	}
 	service := L.CheckString(1)
-	responseKey := L.CheckString(2)
-	ctx.NetSender.EnsureUDPListener(service, responseKey)
+	routeKey := L.CheckString(2)
+	ctx.NetSender.EnsureUDPListener(service, routeKey)
 	return 0
 }
 
@@ -842,7 +842,7 @@ func networkEnsureUDPListener(L *lua.LState) int {
 // 心跳
 // ---------------------------------------------------------------------------
 
-// heartbeatProto 用于区分 TCP/UDP 心跳的编码方式
+// heartbeatProto 区分 TCP/UDP 心跳的编码方式。
 type heartbeatProto int
 
 const (
@@ -953,7 +953,7 @@ func loadAdapterModule(L *lua.LState) int {
 	L.SetField(mod, "encode_udp", L.NewFunction(adapterEncodeUDP))
 	L.SetField(mod, "decode_tcp", L.NewFunction(adapterDecodeTCP))
 	L.SetField(mod, "decode_udp", L.NewFunction(adapterDecodeUDP))
-	L.SetField(mod, "expected_response_key", L.NewFunction(adapterExpectedResponseKey))
+	L.SetField(mod, "expected_route_key", L.NewFunction(adapterExpectedRouteKey))
 	L.Push(mod)
 	return 1
 }
@@ -1021,8 +1021,8 @@ func adapterDecodeTCP(L *lua.LState) int {
 	if L.GetTop() >= 2 {
 		key = []byte(L.CheckString(2))
 	}
-	responseKey, body, headerErr := ctx.Adapter.DecodeTCP(data, key)
-	L.Push(lua.LString(responseKey))
+	routeKey, body, headerErr := ctx.Adapter.DecodeTCP(data, key)
+	L.Push(lua.LString(routeKey))
 	L.Push(lua.LString(string(body)))
 	L.Push(lua.LNumber(headerErr))
 	return 3
@@ -1043,24 +1043,24 @@ func adapterDecodeUDP(L *lua.LState) int {
 	if L.GetTop() >= 2 {
 		key = []byte(L.CheckString(2))
 	}
-	responseKey, body, headerErr := ctx.Adapter.DecodeUDP(data, key)
-	L.Push(lua.LString(responseKey))
+	routeKey, body, headerErr := ctx.Adapter.DecodeUDP(data, key)
+	L.Push(lua.LString(routeKey))
 	L.Push(lua.LString(string(body)))
 	L.Push(lua.LNumber(headerErr))
 	return 3
 }
 
-// adapterExpectedResponseKey 根据路由计算期望的响应路由键。
-// 签名：adapter.expected_response_key(route)
+// adapterExpectedRouteKey 根据路由计算期望的响应路由键。
+// 签名：adapter.expected_route_key(route)
 // 返回：response_key(string)
-func adapterExpectedResponseKey(L *lua.LState) int {
+func adapterExpectedRouteKey(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.Adapter == nil {
 		L.Push(lua.LString(""))
 		return 1
 	}
 	route := luaValueToRoute(L.Get(1))
-	key := ctx.Adapter.ExpectedResponseKey(route)
+	key := ctx.Adapter.ExpectedRouteKey(route)
 	L.Push(lua.LString(key))
 	return 1
 }

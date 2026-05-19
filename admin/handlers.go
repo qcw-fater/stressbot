@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"stressbot/errcode"
 	"stressbot/logview"
 	"stressbot/monitor"
 	"stressbot/utils"
@@ -92,8 +93,12 @@ func (s *AdminServer) registerRoutes() http.Handler {
 	mux.HandleFunc("GET /sbot/baseline/scripts/index.json", s.handleBaselineScriptIndex)
 	mux.HandleFunc("GET /sbot/baseline/scripts/{name}", s.handleBaselineScriptFile)
 	mux.HandleFunc("GET /sbot/baseline/adapter/codec.lua", s.handleBaselineAdapter)
+	mux.HandleFunc("GET /sbot/baseline/adapter/error.lua", s.handleBaselineErrorMap)
 	mux.HandleFunc("GET /sbot/baseline/flow/flow.json", s.handleBaselineFlow)
 	mux.HandleFunc("GET /sbot/baseline/config.json", s.handleBaselineConfig)
+
+	// ── 错误码 ──
+	mux.HandleFunc("GET /sbot/api/error-codes", s.handleErrorCodeIndex)
 
 	// ── 静态资源 ──
 	if s.cfg.StaticDir != "" {
@@ -406,6 +411,13 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		cfg.AdapterScript = adapterData
 	}
 
+	// 可选：error.lua
+	if errorMapFile, _, err := r.FormFile("adapter/error.lua"); err == nil {
+		errorMapData, _ := io.ReadAll(errorMapFile)
+		errorMapFile.Close()
+		cfg.ErrorMapScript = errorMapData
+	}
+
 	// robotConfig（JSON string）
 	if rc := r.FormValue("robotConfig"); rc != "" {
 		_ = json.Unmarshal([]byte(rc), &cfg.RobotConfig)
@@ -574,6 +586,14 @@ func (s *AdminServer) handleGetTaskConfig(w http.ResponseWriter, r *http.Request
 		w.Header().Set("Content-Type", "text/plain")
 		w.Write(task.Config.AdapterScript)
 
+	case "adapter/error.lua":
+		if task.Config.ErrorMapScript == nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write(task.Config.ErrorMapScript)
+
 	default:
 		// proto 文件或 lua 脚本
 		if data, found := task.Config.ProtoFiles[path]; found {
@@ -672,6 +692,9 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 		}
 		if task.Config.AdapterScript != nil {
 			configFiles = append(configFiles, "adapter/codec.lua")
+		}
+		if task.Config.ErrorMapScript != nil {
+			configFiles = append(configFiles, "adapter/error.lua")
 		}
 	}
 
@@ -1346,6 +1369,15 @@ func (s *AdminServer) handleUpdateBaseline(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	// 可选：error.lua
+	if errorMapFile, _, err := r.FormFile("adapter/error.lua"); err == nil {
+		errorMapData, _ := io.ReadAll(errorMapFile)
+		errorMapFile.Close()
+		if err := safeWriteFile("conf/adapter", "error.lua", errorMapData); err != nil {
+			stresslog.Warn("基线更新错误映射失败", zap.Error(err))
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -1372,6 +1404,12 @@ func (s *AdminServer) writeBaselineFiles(cfg *TaskConfig, flowData []byte) {
 	if cfg.AdapterScript != nil {
 		if err := safeWriteFile("conf/adapter", "codec.lua", cfg.AdapterScript); err != nil {
 			stresslog.Warn("写入基线适配器失败",
+				zap.Error(err))
+		}
+	}
+	if cfg.ErrorMapScript != nil {
+		if err := safeWriteFile("conf/adapter", "error.lua", cfg.ErrorMapScript); err != nil {
+			stresslog.Warn("写入基线错误映射失败",
 				zap.Error(err))
 		}
 	}
@@ -1419,6 +1457,15 @@ func (s *AdminServer) handleBaselineScriptFile(w http.ResponseWriter, r *http.Re
 
 func (s *AdminServer) handleBaselineAdapter(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "conf/adapter/codec.lua")
+}
+
+func (s *AdminServer) handleBaselineErrorMap(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "conf/adapter/error.lua")
+}
+
+func (s *AdminServer) handleErrorCodeIndex(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(errcode.AllCodes())
 }
 
 func (s *AdminServer) handleBaselineFlow(w http.ResponseWriter, r *http.Request) {

@@ -29,10 +29,14 @@ type Executor struct {
 }
 
 // ActionHandler 动作执行委托接口。
-// 由调用方（Robot）实现，负责具体的网络请求、Lua 脚本执行等。
+// 由 Robot 层实现，负责具体的网络请求、Lua 脚本执行、条件判断和推送监听注册。
 type ActionHandler interface {
+	// ExecuteAction 执行声明式动作或 Lua 脚本，返回 nil 表示成功。
 	ExecuteAction(actionDef *ActionDef) error
+	// ExecuteBoolean 对条件表达式求值，返回 true/false。
+	// 表达式支持 state: 前缀（从 StateStore 比较）和 lua: 前缀（调用 Lua 脚本）。
 	ExecuteBoolean(expression string) bool
+	// RegisterListen 批量注册持久化推送监听，回调在后台触发，不阻塞流程。
 	RegisterListen(refs []ListenRef) error
 }
 
@@ -174,6 +178,10 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 
 	err := e.handler.ExecuteAction(actionDef)
 	if err != nil {
+		// ctx 取消优先：任务级停止不走 errorStrategy
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
 		stresslog.Error("[ENGINE] 动作执行失败",
 			zap.String("caller", e.caller), zap.String("action", node.Action), zap.Error(err))
 		switch node.ErrorStrategy {

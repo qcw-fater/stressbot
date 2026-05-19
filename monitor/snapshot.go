@@ -2,80 +2,84 @@ package monitor
 
 import (
 	"runtime"
+	"slices"
 	"time"
+
+	"stressbot/errcode"
 )
 
 // SystemSnapshot 系统资源快照。
 type SystemSnapshot struct {
-	Goroutines int     `json:"goroutines"`
-	MemAllocMB float64 `json:"memAllocMB"`
-	MemSysMB   float64 `json:"memSysMB"`
-	GCCount    uint32  `json:"gcCount"`
+	Goroutines int     `json:"goroutines"` // 当前 goroutine 数量
+	MemAllocMB float64 `json:"memAllocMB"` // 已分配堆内存（MB）
+	MemSysMB   float64 `json:"memSysMB"`   // 从系统申请的总内存（MB）
+	GCCount    uint32  `json:"gcCount"`    // GC 完成次数
 }
 
 // ConnectionSnapshot 连接指标快照。
 type ConnectionSnapshot struct {
-	Established int64 `json:"established"`
-	Failed      int64 `json:"failed"`
-	Dropped     int64 `json:"dropped"`
+	Established int64 `json:"established"` // 累计成功建立的连接数
+	Failed      int64 `json:"failed"`      // 累计连接建立失败数
+	Dropped     int64 `json:"dropped"`     // 累计连接意外断开数
 }
 
 // BandwidthSnapshot 全局带宽快照。
 type BandwidthSnapshot struct {
-	TotalSendBytes int64   `json:"totalSendBytes"`
-	TotalRecvBytes int64   `json:"totalRecvBytes"`
-	SendMBps       float64 `json:"sendMBps"`
-	RecvMBps       float64 `json:"recvMBps"`
+	TotalSendBytes int64   `json:"totalSendBytes"` // 累计发送字节数
+	TotalRecvBytes int64   `json:"totalRecvBytes"` // 累计接收字节数
+	SendMBps       float64 `json:"sendMBps"`       // 平均发送速率（MB/s）
+	RecvMBps       float64 `json:"recvMBps"`       // 平均接收速率（MB/s）
 }
 
-// ActionSnapshot per-action 完整快照（只读，用于 JSON/CSV/控制台）。
+// ActionSnapshot per-action 完整快照（只读，用于 JSON/CSV/控制台输出）。
 type ActionSnapshot struct {
-	Name         string            `json:"name"`
-	SampleCount  int64             `json:"sampleCount"`
-	SuccessCount int64             `json:"successCount"`
-	FailureCount int64             `json:"failureCount"`
-	TimeoutCount int64             `json:"timeoutCount"`
-	SkippedCount int64             `json:"skippedCount"`
-	Executing    int64             `json:"executing"`
-	SuccessRate  float64           `json:"successRate"`
-	AvgSendBytes float64           `json:"avgSendBytes"`
-	AvgRecvBytes float64           `json:"avgRecvBytes"`
-	Apdex        float64           `json:"apdex"`
-	Latency      HistogramSnapshot `json:"latency"`
-	TimeoutAvgMs float64           `json:"timeoutAvgMs"`
-	AvgQPS       float64           `json:"avgQps"`
-	PeriodQPS    float64           `json:"periodQps"`
-	Errors       []ErrorEntry      `json:"errors,omitempty"`
+	Name          string            `json:"name"`          // 动作名称
+	SampleCount   int64             `json:"sampleCount"`   // 总样本数（成功 + 失败 + 超时）
+	SuccessCount  int64             `json:"successCount"`  // 成功次数
+	FailureCount  int64             `json:"failureCount"`  // 失败次数（非超时）
+	TimeoutCount  int64             `json:"timeoutCount"`  // 超时次数
+	SkippedCount  int64             `json:"skippedCount"`  // 跳过次数
+	CanceledCount int64             `json:"canceledCount"` // 取消次数
+	Executing     int64             `json:"executing"`     // 当前执行中的并发数
+	SuccessRate   float64           `json:"successRate"`   // 成功率（0~1）
+	AvgSendBytes  float64           `json:"avgSendBytes"`  // 平均每次成功的发送字节数
+	AvgRecvBytes  float64           `json:"avgRecvBytes"`  // 平均每次成功的接收字节数
+	Apdex         float64           `json:"apdex"`         // Apdex 评分（0~1）
+	Latency       HistogramSnapshot `json:"latency"`       // 延迟直方图快照
+	TimeoutAvgMs  float64           `json:"timeoutAvgMs"`  // 平均超时延迟（毫秒）
+	AvgQPS        float64           `json:"avgQps"`        // 全周期平均 QPS
+	PeriodQPS     float64           `json:"periodQps"`     // 上次快照到当前的区间 QPS
+	Errors        []ErrorEntry      `json:"errors,omitempty"` // 错误分布（仅失败/超时时有值）
 
-	// 跨节点聚合所需原始数据（omitempty 向后兼容单机模式）
-	LatencySumNs        int64   `json:"latencySumNs,omitempty"`
-	LatencyBucketCounts []int64 `json:"latencyBucketCounts,omitempty"`
-	ApdexSatisfied      int64   `json:"apdexSatisfied,omitempty"`
-	ApdexTolerating     int64   `json:"apdexTolerating,omitempty"`
-	TotalSendBytes      int64   `json:"totalSendBytes,omitempty"`
-	TotalRecvBytes      int64   `json:"totalRecvBytes,omitempty"`
+	// 跨节点聚合所需的原始数据（omitempty 向后兼容单机模式）
+	LatencySumNs        int64   `json:"latencySumNs,omitempty"`        // 延迟总和（纳秒），用于分布式合并
+	LatencyBucketCounts []int64 `json:"latencyBucketCounts,omitempty"` // 延迟直方图桶计数，用于分布式合并
+	ApdexSatisfied      int64   `json:"apdexSatisfied,omitempty"`      // Apdex 满意样本数，用于分布式合并
+	ApdexTolerating     int64   `json:"apdexTolerating,omitempty"`     // Apdex 容忍样本数，用于分布式合并
+	TotalSendBytes      int64   `json:"totalSendBytes,omitempty"`      // 累计发送字节数，用于分布式合并
+	TotalRecvBytes      int64   `json:"totalRecvBytes,omitempty"`      // 累计接收字节数，用于分布式合并
 }
 
 // RobotSnapshot 机器人状态快照。
 type RobotSnapshot struct {
-	Started  int64 `json:"started"`
-	Running  int64 `json:"running"`
-	Stopped  int64 `json:"stopped"`
-	Errored  int64 `json:"errored"`
+	Started  int64 `json:"started"`  // 已启动的机器人总数
+	Running  int64 `json:"running"`  // 当前运行中的机器人数量
+	Stopped  int64 `json:"stopped"`  // 正常停止的机器人数量
+	Errored  int64 `json:"errored"`  // 异常退出的机器人数量
 }
 
-// CollectorSnapshot 全局快照。
+// CollectorSnapshot 全局指标快照，包含系统、机器人、连接、带宽和所有 action 的聚合数据。
 type CollectorSnapshot struct {
-	Timestamp    time.Time          `json:"timestamp"`
-	Uptime       time.Duration      `json:"uptime"`
-	UptimeSec    float64            `json:"uptimeSeconds"`
-	TotalActions int64              `json:"totalActions"`
-	ApdexT       int                `json:"apdexT"`
-	System       SystemSnapshot     `json:"system"`
-	Robots       RobotSnapshot      `json:"robots"`
-	Connections  ConnectionSnapshot `json:"connections"`
-	Bandwidth    BandwidthSnapshot  `json:"bandwidth"`
-	Actions      []ActionSnapshot   `json:"actions"`
+	Timestamp    time.Time          `json:"timestamp"`    // 快照时间
+	Uptime       time.Duration      `json:"uptime"`       // 运行时长
+	UptimeSec    float64            `json:"uptimeSeconds"` // 运行时长（秒）
+	TotalActions int64              `json:"totalActions"`  // 累计动作总数
+	ApdexT       int                `json:"apdexT"`        // 当前 Apdex T 阈值（毫秒）
+	System       SystemSnapshot     `json:"system"`        // 系统资源快照
+	Robots       RobotSnapshot      `json:"robots"`        // 机器人状态快照
+	Connections  ConnectionSnapshot `json:"connections"`   // 连接指标快照
+	Bandwidth    BandwidthSnapshot  `json:"bandwidth"`     // 带宽快照
+	Actions      []ActionSnapshot   `json:"actions"`       // 所有 action 的快照列表
 }
 
 // Snapshot 生成当前全局快照。
@@ -146,6 +150,7 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 		fail := am.failureCount.Load()
 		tout := am.timeoutCount.Load()
 		skip := am.skippedCount.Load()
+		canceled := am.canceledCount.Load()
 		exec := am.executing.Load()
 		total := succ + fail + tout
 
@@ -202,6 +207,7 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 			FailureCount:        fail,
 			TimeoutCount:        tout,
 			SkippedCount:        skip,
+			CanceledCount:       canceled,
 			TimeoutAvgMs:        timeoutAvgMs,
 			Executing:           exec,
 			SuccessRate:         successRate,
@@ -288,6 +294,7 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 			ma.FailureCount += a.FailureCount
 			ma.TimeoutCount += a.TimeoutCount
 			ma.SkippedCount += a.SkippedCount
+			ma.CanceledCount += a.CanceledCount
 			ma.Executing += a.Executing
 			ma.LatencySumNs += a.LatencySumNs
 			totalSatisfied += a.ApdexSatisfied
@@ -326,15 +333,30 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 			ma.TimeoutAvgMs = float64(totalTimeoutMs) / float64(ma.TimeoutCount)
 		}
 
-		// 合并错误
-		errMap := make(map[string]int64)
+		// 合并错误 — 按 (Kind, Code) 聚合，Messages 取并集去重
+		type mergedErrorKey struct{ Kind errcode.Kind; Code uint64 }
+		errMap := make(map[mergedErrorKey]*ErrorEntry)
 		for _, a := range agg.snaps {
 			for _, e := range a.Errors {
-				errMap[e.Message] += e.Count
+				k := mergedErrorKey{Kind: e.Kind, Code: e.Code}
+				if existing, ok := errMap[k]; ok {
+					existing.Count += e.Count
+					for _, m := range e.Messages {
+						if !slices.Contains(existing.Messages, m) {
+							existing.Messages = append(existing.Messages, m)
+						}
+					}
+					if len(existing.Messages) > 5 {
+						existing.Messages = existing.Messages[:5]
+					}
+				} else {
+					cp := e
+					errMap[k] = &cp
+				}
 			}
 		}
-		for msg, count := range errMap {
-			ma.Errors = append(ma.Errors, ErrorEntry{Message: msg, Count: count})
+		for _, e := range errMap {
+			ma.Errors = append(ma.Errors, *e)
 		}
 
 		merged.Actions = append(merged.Actions, ma)

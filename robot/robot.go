@@ -19,6 +19,7 @@ import (
 
 	"stressbot/adapter"
 	"stressbot/engine"
+	"stressbot/errcode"
 	"stressbot/monitor"
 	"stressbot/network"
 	"stressbot/protox"
@@ -29,33 +30,34 @@ import (
 )
 
 // Robot 单个压测机器人实例。
+// 每个 Robot 拥有独立的状态存储、网络客户端、Lua 运行时和流程执行器。
 type Robot struct {
-	id          int
-	account     string
-	state       *state.Store
-	client      *network.Client
-	factory     *protox.Factory
-	executor    *engine.Executor
-	luaPool     *script.RuntimePool
-	L           *lua.LState
-	actionExec  *engine.ActionExecutor
-	ctx         context.Context
-	cancel      context.CancelFunc
-	running     atomic.Bool
-	dialer      *network.Dialer
-	httpClient  *http.Client
-	luaMu       sync.Mutex
-	adp         adapter.Adapter
-	mainService string        // 主连接服务名，仅用于断开检测（断开时停止机器人）
-	done        chan struct{} // 执行 goroutine 结束信号
+	id          int                  // 机器人唯一编号
+	account     string               // 账号名
+	state       *state.Store         // 线程安全的键值状态存储
+	client      *network.Client      // 多服务网络客户端（管理 TCP/UDP 连接池）
+	factory     *protox.Factory      // protobuf 消息工厂（动态创建/解析）
+	executor    *engine.Executor     // 流程图执行器
+	luaPool     *script.RuntimePool  // Lua 运行时池（Robot 持有独占 LState）
+	L           *lua.LState          // 当前 Robot 独占的 Lua 状态（从 luaPool 获取）
+	actionExec  *engine.ActionExecutor // 声明式动作执行器
+	ctx         context.Context      // 机器人生命周期上下文
+	cancel      context.CancelFunc   // 取消函数（Stop 时调用）
+	running     atomic.Bool         // 是否正在运行
+	dialer      *network.Dialer      // 网络拨号器（封装 gnet 事件循环）
+	httpClient  *http.Client         // HTTP 客户端（声明式 HTTP 动作用）
+	luaMu       sync.Mutex          // Lua 访问互斥锁（回调/心跳可能在其他 goroutine 触发）
+	adp         adapter.Adapter      // 协议适配器（编解码 + 帧解析）
+	mainService string              // 主连接服务名，意外断开时停止机器人
+	done        chan struct{}        // 执行 goroutine 结束信号，Close 时等待
 }
 
-// Config 单个机器人的配置
+// Config 单个机器人的配置。
 type Config struct {
-	ID          int
-	Account     string
-	StateExtra  map[string]string
-	HTTPTimeout time.Duration
+	ID          int               // 机器人唯一编号
+	Account     string            // 账号名
+	StateExtra  map[string]string // 初始状态额外键值对
+	HTTPTimeout time.Duration     // HTTP 请求超时
 }
 
 // NewRobot 创建机器人实例。
@@ -285,10 +287,10 @@ func (r *Robot) CloseUDP(service string) {
 	r.client.CloseUDP(service)
 }
 
-// robotActionHandler Robot 对 ActionHandler 接口的实现
+// robotActionHandler 实现 engine.ActionHandler 接口，将流程引擎的动作委托给 Robot 执行。
 type robotActionHandler struct {
-	robot *Robot
-	flow  *engine.TaskFlow
+	robot *Robot           // 关联的机器人实例
+	flow  *engine.TaskFlow // 流程配置（用于查找回调定义）
 }
 
 // ExecuteAction 执行动作
@@ -309,13 +311,12 @@ func (h *robotActionHandler) ExecuteAction(actionDef *engine.ActionDef) error {
 
 	if mc := monitor.Global(); mc != nil && actionDef.Name != "" {
 		result := classifyResult(err)
-		errMsg := ""
-		if err != nil {
-			errMsg = err.Error()
-		}
-		mc.RecordAction(actionDef.Name, result, time.Since(start), sendBytes, recvBytes, errMsg)
+		mc.RecordAction(actionDef.Name, result, time.Since(start), sendBytes, recvBytes, err)
 	}
 
+	if errors.Is(err, engine.ErrFieldNil) {
+		return nil // 字段级 skip：monitor 已记录 ResultSkipped，executor 正常继续
+	}
 	return err
 }
 
@@ -324,7 +325,11 @@ func classifyResult(err error) monitor.ActionResult {
 	if err == nil {
 		return monitor.ResultSuccess
 	}
-	if errors.Is(err, engine.ErrActionSkip) {
+	// 任务取消优先级最高
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return monitor.ResultCanceled
+	}
+	if errors.Is(err, engine.ErrFieldNil) {
 		return monitor.ResultSkipped
 	}
 	if errors.Is(err, engine.ErrTimeout) {
@@ -336,11 +341,11 @@ func classifyResult(err error) monitor.ActionResult {
 // executeLuaAction 执行 lua 脚本动作，返回 (sendBytes, recvBytes, err)。
 func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int, int, error) {
 	if h.robot.L == nil || h.robot.luaPool == nil {
-		return 0, 0, fmt.Errorf("lua 运行时未初始化")
+		return 0, 0, engine.NewActionError(errcode.ErrLuaNotInit, "")
 	}
 
 	if actionDef.Script == "" {
-		return 0, 0, fmt.Errorf("lua 动作缺少 script 配置")
+		return 0, 0, engine.NewActionError(errcode.ErrLuaNoScript, "")
 	}
 
 	h.robot.luaMu.Lock()
@@ -348,11 +353,11 @@ func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int,
 
 	code, send, recv, err := h.robot.luaPool.RunActionScript(h.robot.L, actionDef.Script)
 	if err != nil {
-		return 0, 0, fmt.Errorf("执行 lua 脚本 %s 失败: %w", actionDef.Script, err)
+		return 0, 0, engine.NewActionError(errcode.ErrLuaExecFailed, "script="+actionDef.Script, err)
 	}
 
 	if code != 0 {
-		return send, recv, fmt.Errorf("lua 脚本 %s 返回错误码: %d", actionDef.Script, code)
+		return send, recv, engine.NewActionError(errcode.ErrLuaExitCode, fmt.Sprintf("script=%s code=%d", actionDef.Script, code))
 	}
 
 	return send, recv, nil
@@ -412,10 +417,10 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 			groups[key] = make(map[string]network.ListenCallBack)
 		}
 
-		respKey := h.robot.adp.ExpectedResponseKey(ref.Route)
+		routeKey := h.robot.adp.ExpectedRouteKey(ref.Route)
 
 		if ref.Callback == "" {
-			groups[key][respKey] = nil
+			groups[key][routeKey] = nil
 			continue
 		}
 
@@ -424,7 +429,7 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 			stresslog.Warn("[ROBOT] 回调定义不存在", zap.String("callback", ref.Callback))
 			continue
 		}
-		groups[key][respKey] = h.createListenCallback(ref.Callback, cbDef)
+		groups[key][routeKey] = h.createListenCallback(ref.Callback, cbDef)
 	}
 
 	for key, listenMap := range groups {
@@ -436,7 +441,7 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 			conn = h.robot.client.GetTCPConn(key.service)
 		}
 		if conn == nil {
-			stresslog.Warn("[ROBOT] 无连接可注册监听", zap.String("proto", key.proto), zap.String("service", key.service))
+			stresslog.Debug("[ROBOT] 无连接可注册监听", zap.String("proto", key.proto), zap.String("service", key.service))
 			continue
 		}
 		conn.ListenResponse(listenMap)
@@ -463,9 +468,9 @@ func parseServer(server string) (proto, service string, ok bool) {
 func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.CallbackDef) network.ListenCallBack {
 	if cbDef.Script != "" {
 		return func(msg *network.Message) {
-			monitor.Global().RecordCallback(cbName)
 			if h.robot.L == nil || h.robot.luaPool == nil {
 				stresslog.Error("[ROBOT] Lua 运行时未初始化", zap.String("script", cbDef.Script))
+				monitor.Global().RecordCallbackError(cbName, engine.NewActionError(errcode.ErrCallbackLua, "script="+cbDef.Script))
 				return
 			}
 
@@ -486,7 +491,10 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.C
 			if err := h.robot.luaPool.RunCallbackScript(h.robot.L, cbDef.Script, msg.Data, cbDef.S2CProto); err != nil {
 				stresslog.Error("[ROBOT] Lua 回调执行失败",
 					zap.Int("id", h.robot.id), zap.String("script", cbDef.Script), zap.Error(err))
+				monitor.Global().RecordCallbackError(cbName, engine.NewActionError(errcode.ErrCallbackLua, "script="+cbDef.Script, err))
+				return
 			}
+			monitor.Global().RecordCallbackSuccess(cbName)
 		}
 	}
 
@@ -495,7 +503,6 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.C
 	}
 
 	return func(msg *network.Message) {
-		monitor.Global().RecordCallback(cbName)
 		if len(msg.Data) == 0 {
 			return
 		}
@@ -504,6 +511,7 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.C
 		if err != nil {
 			stresslog.Error("[ROBOT] 解析推送消息失败",
 				zap.Int("id", h.robot.id), zap.String("proto", cbDef.S2CProto), zap.Error(err))
+			monitor.Global().RecordCallbackError(cbName, engine.NewActionError(errcode.ErrCallbackParse, "proto="+cbDef.S2CProto, err))
 			return
 		}
 
@@ -515,66 +523,64 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.C
 				h.robot.state.Set(m.Setter, val)
 			}
 		}
+		monitor.Global().RecordCallbackSuccess(cbName)
 	}
 }
 
-// netSenderAdapter NetSender 接口适配器
+// netSenderAdapter 将 Robot 适配为 engine.NetSender 接口，
+// 桥接流程引擎与网络层（TCP/UDP/HTTP 收发、连接管理、心跳、密钥）。
 type netSenderAdapter struct {
-	robot *Robot
+	robot *Robot // 关联的机器人实例
 }
 
 // TCPSend 通过 TCP 发送数据包。
-func (ns *netSenderAdapter) TCPSend(service string, packet []byte) (bool, int) {
+func (ns *netSenderAdapter) TCPSend(service string, packet []byte) (int, error) {
 	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
-		return false, 0
+		return 0, engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
 	}
 	return conn.Send(packet)
 }
 
 // TCPRequest 发送 TCP 请求并等待响应。
-func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, responseKey string, timeout ...time.Duration) ([]byte, uint64, bool) {
+func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) ([]byte, uint64, error) {
 	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
-		stresslog.Warn("[ACTION] TCPRequest 连接不存在",
-			zap.String("service", service), zap.String("responseKey", responseKey))
-		return nil, 0, false
+		return nil, 0, engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
 	}
-	resp, _ := conn.RequestResponse(packet, responseKey, timeout...)
-	if resp == nil {
-		return nil, 0, false
+	resp, err := conn.RequestResponse(packet, routeKey, timeout...)
+	if err != nil {
+		return nil, 0, err
 	}
 	stresslog.Debug("[ACTION] TCPResponse",
-		zap.String("service", service), zap.String("responseKey", responseKey),
+		zap.String("service", service), zap.String("routeKey", routeKey),
 		zap.Int("bodyLen", len(resp.Data)), zap.Uint64("headerErr", resp.HeaderErr))
-	return resp.Data, resp.HeaderErr, true
+	return resp.Data, resp.HeaderErr, nil
 }
 
 // UDPRequest 发送 UDP 请求并等待响应，与 TCPRequest 同样使用 channel 阻塞等待。
-func (ns *netSenderAdapter) UDPRequest(service string, packet []byte, responseKey string, timeout ...time.Duration) ([]byte, uint64, bool) {
+func (ns *netSenderAdapter) UDPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) ([]byte, uint64, error) {
 	conn := ns.robot.client.GetUDPConn(service)
 	if conn == nil {
-		stresslog.Warn("[ACTION] UDPRequest 连接不存在",
-			zap.String("service", service), zap.String("responseKey", responseKey))
-		return nil, 0, false
+		return nil, 0, engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
 	}
-	resp, _ := conn.RequestResponse(packet, responseKey, timeout...)
-	if resp == nil {
-		return nil, 0, false
+	resp, err := conn.RequestResponse(packet, routeKey, timeout...)
+	if err != nil {
+		return nil, 0, err
 	}
 	stresslog.Debug("[ACTION] UDPResponse",
-		zap.String("service", service), zap.String("responseKey", responseKey),
+		zap.String("service", service), zap.String("routeKey", routeKey),
 		zap.Int("bodyLen", len(resp.Data)), zap.Uint64("headerErr", resp.HeaderErr))
-	return resp.Data, resp.HeaderErr, true
+	return resp.Data, resp.HeaderErr, nil
 }
 
 // HTTPRequest 发送 HTTP 请求。
 func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body []byte) (int, []byte, error) {
 	if reqURL == "" {
-		return 0, nil, fmt.Errorf("HTTP 请求 URL 为空")
+		return 0, nil, engine.NewActionError(errcode.ErrURLEmpty, "")
 	}
 	if !strings.HasPrefix(reqURL, "http://") && !strings.HasPrefix(reqURL, "https://") {
-		return 0, nil, fmt.Errorf("HTTP 请求 URL 必须以 http:// 或 https:// 开头: %s", reqURL)
+		return 0, nil, engine.NewActionError(errcode.ErrURLScheme, "url="+reqURL)
 	}
 
 	var req *http.Request
@@ -585,7 +591,7 @@ func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body
 		case "json":
 			req, err = http.NewRequest(method, reqURL, bytes.NewReader(body))
 			if err != nil {
-				return 0, nil, fmt.Errorf("创建 HTTP 请求失败: %w", err)
+				return 0, nil, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 			}
 			req.Header.Set("Content-Type", "application/json")
 		case "form":
@@ -596,63 +602,71 @@ func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body
 				req, err = http.NewRequest(method, reqURL, strings.NewReader(string(body)))
 			}
 			if err != nil {
-				return 0, nil, fmt.Errorf("创建 HTTP 请求失败: %w", err)
+				return 0, nil, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 			}
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		default:
 			req, err = http.NewRequest(method, reqURL, bytes.NewReader(body))
 			if err != nil {
-				return 0, nil, fmt.Errorf("创建 HTTP 请求失败: %w", err)
+				return 0, nil, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 			}
 		}
 	} else {
 		req, err = http.NewRequest(method, reqURL, nil)
 		if err != nil {
-			return 0, nil, fmt.Errorf("创建 HTTP 请求失败: %w", err)
+			return 0, nil, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 		}
 	}
 
 	resp, err := ns.robot.httpClient.Do(req)
 	if err != nil {
 		stresslog.Warn("[HTTP] 请求失败", zap.String("url", reqURL), zap.Error(err))
-		return 0, nil, fmt.Errorf("HTTP 请求失败: %w", err)
+		return 0, nil, engine.NewActionError(errcode.ErrSendFailed, "url="+reqURL, err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return resp.StatusCode, nil, fmt.Errorf("读取响应体失败: %w", err)
+		return resp.StatusCode, nil, engine.NewActionError(errcode.ErrHTTPReadBody, "url="+reqURL, err)
 	}
 
 	return resp.StatusCode, respBody, nil
 }
 
 // UDPSend 通过 UDP 发送数据包。
-func (ns *netSenderAdapter) UDPSend(service string, data []byte) (bool, int) {
+func (ns *netSenderAdapter) UDPSend(service string, data []byte) (int, error) {
 	conn := ns.robot.client.GetUDPConn(service)
 	if conn == nil {
-		return false, 0
+		return 0, engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
 	}
 	return conn.Send(data)
 }
 
 // ConnectTCP 通过适配器建立 TCP 连接。
-func (ns *netSenderAdapter) ConnectTCP(service, address string) bool {
-	return ns.robot.ConnectTCP(service, address)
+func (ns *netSenderAdapter) ConnectTCP(service, address string) error {
+	ok := ns.robot.ConnectTCP(service, address)
+	if !ok {
+		return engine.NewActionError(errcode.ErrConnClosed, "service="+service+" address="+address)
+	}
+	return nil
 }
 
 // ConnectUDP 通过适配器建立 UDP 连接。
-func (ns *netSenderAdapter) ConnectUDP(service, address string) bool {
-	return ns.robot.ConnectUDP(service, address)
+func (ns *netSenderAdapter) ConnectUDP(service, address string) error {
+	ok := ns.robot.ConnectUDP(service, address)
+	if !ok {
+		return engine.NewActionError(errcode.ErrConnClosed, "service="+service+" address="+address)
+	}
+	return nil
 }
 
 // GetTCPListenResp 获取 TCP 连接的监听响应数据。
-func (ns *netSenderAdapter) GetTCPListenResp(service string, responseKey string) ([]byte, uint64) {
+func (ns *netSenderAdapter) GetTCPListenResp(service string, routeKey string) ([]byte, uint64) {
 	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
 		return nil, 0
 	}
-	msg := conn.GetListenResp(responseKey)
+	msg := conn.GetListenResp(routeKey)
 	if msg == nil {
 		return nil, 0
 	}
@@ -660,12 +674,12 @@ func (ns *netSenderAdapter) GetTCPListenResp(service string, responseKey string)
 }
 
 // GetUDPListenResp 获取 UDP 连接的监听响应数据。
-func (ns *netSenderAdapter) GetUDPListenResp(service string, responseKey string) ([]byte, uint64) {
+func (ns *netSenderAdapter) GetUDPListenResp(service string, routeKey string) ([]byte, uint64) {
 	conn := ns.robot.client.GetUDPConn(service)
 	if conn == nil {
 		return nil, 0
 	}
-	msg := conn.GetListenResp(responseKey)
+	msg := conn.GetListenResp(routeKey)
 	if msg == nil {
 		return nil, 0
 	}
@@ -690,21 +704,21 @@ func (ns *netSenderAdapter) SetTCPSecretKey(service string, key []byte) {
 }
 
 // EnsureTCPListener 为 TCP 连接注册监听器占位。
-func (ns *netSenderAdapter) EnsureTCPListener(service string, responseKey string) {
+func (ns *netSenderAdapter) EnsureTCPListener(service string, routeKey string) {
 	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
 		return
 	}
-	conn.AddListener(responseKey, nil)
+	conn.AddListener(routeKey, nil)
 }
 
 // EnsureUDPListener 为 UDP 连接注册监听器占位。
-func (ns *netSenderAdapter) EnsureUDPListener(service string, responseKey string) {
+func (ns *netSenderAdapter) EnsureUDPListener(service string, routeKey string) {
 	conn := ns.robot.client.GetUDPConn(service)
 	if conn == nil {
 		return
 	}
-	conn.AddListener(responseKey, nil)
+	conn.AddListener(routeKey, nil)
 }
 
 // CloseTCP 关闭 TCP 连接。

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"syscall"
@@ -31,35 +32,55 @@ var Version = "dev"
 
 // StandaloneConfig 单机模式专用配置。
 type StandaloneConfig struct {
+	// Bot 机器人批量参数。
 	Bot struct {
+		// AccountPrefix 账号名前缀。
 		AccountPrefix string `json:"accountPrefix"`
-		StartNumber   int    `json:"startNumber"`
-		Count         int    `json:"count"`
-		ConcurrentNum int    `json:"concurrentNum"`
-		MainService   string `json:"mainService"`
+		// StartNumber 起始编号。
+		StartNumber int `json:"startNumber"`
+		// Count 机器人总数。
+		Count int `json:"count"`
+		// ConcurrentNum 并发启动数。
+		ConcurrentNum int `json:"concurrentNum"`
+		// MainService 主服务名（TCP 连接标识）。
+		MainService string `json:"mainService"`
 	} `json:"bot"`
 
+	// StateExtra 初始状态额外键值对，注入每个 Robot 的 state。
 	StateExtra map[string]string `json:"stateExtra"`
 
+	// Adapter 协议适配器配置。
 	Adapter struct {
-		Script   string `json:"script"`
-		PoolSize int    `json:"poolSize"`
+		// Script codec.lua 脚本路径。
+		Script string `json:"script"`
+		// PoolSize Lua 协程池大小，0 表示自动。
+		PoolSize int `json:"poolSize"`
 	} `json:"adapter"`
 
+	// Network 网络超时配置。
 	Network struct {
+		// HeartbeatInterval 心跳发送间隔（duration 字符串）。
 		HeartbeatInterval string `json:"heartbeatInterval"`
-		TCPTimeout        string `json:"tcpTimeout"`
-		HTTPTimeout       string `json:"httpTimeout"`
+		// TCPTimeout TCP 请求超时（duration 字符串）。
+		TCPTimeout string `json:"tcpTimeout"`
+		// HTTPTimeout HTTP 请求超时（duration 字符串）。
+		HTTPTimeout string `json:"httpTimeout"`
 	} `json:"network"`
 
+	// Proto protobuf 文件加载配置。
 	Proto struct {
-		Dirs  []string `json:"dirs"`
+		// Dirs proto 文件搜索目录。
+		Dirs []string `json:"dirs"`
+		// Files 额外 proto 文件路径。
 		Files []string `json:"files"`
 	} `json:"proto"`
 
+	// Flow 流程配置文件路径。
 	Flow string `json:"flow"`
 
+	// Script Lua 脚本配置。
 	Script struct {
+		// Dirs Lua 脚本搜索目录。
 		Dirs []string `json:"dirs"`
 	} `json:"script"`
 }
@@ -67,20 +88,31 @@ type StandaloneConfig struct {
 // Config 全局配置结构。
 // Log 和 Monitor 两种模式共享；Standalone 仅单机模式；Agent 仅 Agent 模式。
 type Config struct {
+	// Log 日志配置。
 	Log struct {
-		Path         string `json:"path"`
-		Level        string `json:"level"`
-		PrintConsole bool   `json:"printConsole"`
-		MaxSize      int    `json:"maxSize"`
-		MaxBackups   int    `json:"maxBackups"`
-		MaxAge       int    `json:"maxAge"`
-		Compress     bool   `json:"compress"`
+		// Path 日志文件路径。
+		Path string `json:"path"`
+		// Level 日志等级（debug/info/warn/error）。
+		Level string `json:"level"`
+		// PrintConsole 是否同时输出到控制台。
+		PrintConsole bool `json:"printConsole"`
+		// MaxSize 单个日志文件最大 MB。
+		MaxSize int `json:"maxSize"`
+		// MaxBackups 保留的旧日志文件数。
+		MaxBackups int `json:"maxBackups"`
+		// MaxAge 日志文件最大保留天数。
+		MaxAge int `json:"maxAge"`
+		// Compress 是否压缩旧日志文件。
+		Compress bool `json:"compress"`
 	} `json:"log"`
 
+	// Monitor 指标采集配置。
 	Monitor monitor.CollectorConfig `json:"monitor"`
 
+	// Standalone 单机模式配置，Agent 模式下为 nil。
 	Standalone *StandaloneConfig `json:"standalone"`
 
+	// Agent Agent 模式配置。
 	Agent agent.AgentConfig `json:"agent"`
 }
 
@@ -364,7 +396,12 @@ func loadAdapter(s *StandaloneConfig) (*adapter.LuaAdapter, error) {
 		poolSize = runtime.NumCPU()
 		stresslog.Warn("[CONFIG] standalone.adapter.poolSize 非法，使用默认值", zap.Int("default", poolSize))
 	}
-	return adapter.NewLuaAdapter(poolSize, s.Adapter.Script)
+	// 可选：加载错误码映射
+	errorMapPath := filepath.Join(filepath.Dir(s.Adapter.Script), "error.lua")
+	if _, err := os.Stat(errorMapPath); err != nil {
+		errorMapPath = ""
+	}
+	return adapter.NewLuaAdapter(poolSize, s.Adapter.Script, errorMapPath)
 }
 
 func loadFlow(path string) (*engine.TaskFlow, error) {

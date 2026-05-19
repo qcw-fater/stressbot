@@ -67,7 +67,7 @@ type WeightedOption struct {
 
 // ListenRef 监听回调引用，定义在节点上。
 // 当节点执行时（通常是连接节点），注册对应的推送监听。
-// Route 为不透明路由，运行时通过 adapter.ExpectedResponseKey(route) 计算实际响应键。
+// Route 为不透明路由，运行时通过 adapter.ExpectedRouteKey(route) 计算实际 routeKey。
 type ListenRef struct {
 	Route    any    `json:"route"`    // 不透明路由（与 ActionDef.Route 格式一致）
 	Server   string `json:"server"`   // 连接名，格式：协议:服务名（如 "tcp:logic"、"udp:udp"）
@@ -131,11 +131,6 @@ type ActionDef struct {
 //   - randomString:  随机字符串（Length + Charset 字段）
 //   - randomExclude: 从 Values 或 state list 中随机选一个，且排除 ExcludeSource
 //   - listSize:      返回 state 列表长度（int）
-//
-// Path 支持用 | 分隔多条候选路径，按顺序尝试，返回第一个非 nil 的值。
-// 例如 "mailUid|gid" 会先尝试 mailUid，不存在则取 gid。
-//
-// Wrap 为 true 时，将单个值包装为 []any{val}，用于 repeated 字段赋单个元素的场景。
 //
 // Path 支持用 | 分隔多条候选路径，按顺序尝试，返回第一个非 nil 的值。
 // 例如 "mailUid|gid" 会先尝试 mailUid，不存在则取 gid。

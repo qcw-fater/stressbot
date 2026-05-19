@@ -10,11 +10,11 @@ import (
 
 // Reporter 定时向控制台输出指标摘要。
 type Reporter struct {
-	collector  *MetricsCollector
-	interval   time.Duration
-	prevCounts map[string]int64
-	prevTime   time.Time
-	stopCh     chan struct{}
+	collector  *MetricsCollector   // 指标收集器引用
+	interval   time.Duration       // 报告间隔
+	prevCounts map[string]int64    // 上次快照时各 action 的样本数，用于计算 periodQPS
+	prevTime   time.Time           // 上次报告时间，用于计算区间 QPS
+	stopCh     chan struct{}       // 停止信号通道
 }
 
 // NewReporter 创建定时控制台报告器。
@@ -103,12 +103,23 @@ func (r *Reporter) report() {
 				if !first {
 					fmt.Printf(", ")
 				}
-				fmt.Printf("%s→%s(%d)", a.Name, truncateError(e.Message, 40), e.Count)
+				fmt.Printf("%s→[%s/%d %s]×%d %s", a.Name, e.Kind, e.Code, e.CodeName, e.Count, truncateError(firstMsg(e.Messages), 40))
 				first = false
 			}
 		}
 		fmt.Println()
 	}
+}
+
+func firstMsg(msgs []string) string {
+	if len(msgs) == 0 {
+		return ""
+	}
+	s := msgs[0]
+	if len(msgs) > 1 {
+		s += fmt.Sprintf(" (+%d more)", len(msgs)-1)
+	}
+	return s
 }
 
 func truncateError(s string, maxLen int) string {

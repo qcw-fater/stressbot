@@ -33,19 +33,24 @@ type Adapter interface {
 	EncodeUDP(route any, body []byte, secretKey []byte) []byte
 
 	// DecodeTCP 将 TCP 数据包解码为路由键、消息体和协议头错误码。
-	// responseKey 是字符串路由键，用于请求-响应匹配和监听分发。
+	// routeKey 是字符串路由键，用于请求-响应匹配和监听分发。
 	// 格式由适配器决定，典型格式："{cmd}:{act}"，如 "3:1"。
 	// headerErr 为协议头中的错误码，非零时记录告警，仍继续路由。
-	DecodeTCP(data []byte, secretKey []byte) (responseKey string, body []byte, headerErr uint64)
+	DecodeTCP(data []byte, secretKey []byte) (routeKey string, body []byte, headerErr uint64)
 
 	// DecodeUDP 将 UDP 数据包解码为路由键、消息体和协议头错误码。
 	// 与 DecodeTCP 分离，允许适配器对 TCP/UDP 使用不同的解码策略。
-	DecodeUDP(data []byte, secretKey []byte) (responseKey string, body []byte, headerErr uint64)
+	DecodeUDP(data []byte, secretKey []byte) (routeKey string, body []byte, headerErr uint64)
 
-	// ExpectedResponseKey 从发送路由计算期望的响应路由键。
+	// ExpectedRouteKey 从发送路由计算期望的响应路由键。
 	// 用于 TCPRequest 等待响应时注册临时通道。
-	ExpectedResponseKey(route any) string
+	ExpectedRouteKey(route any) string
 
 	// Close 释放适配器持有的资源（如 LState 池）。
 	Close()
+
+	// DescribeError 将服务端协议头错误码映射为可读描述。
+	// 可选功能：由 error.lua 提供，未加载时返回空字符串。
+	// 结果按 code 永久缓存，运行时不可变。
+	DescribeError(code uint64) string
 }

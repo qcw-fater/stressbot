@@ -107,8 +107,13 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 	if _, err := os.Stat(adapterScript); err != nil {
 		adapterScript = r.cfg.AdapterScript
 	}
+	// 可选：加载错误码映射
+	errorMapScript := filepath.Join(confDir, "adapter", "error.lua")
+	if _, err := os.Stat(errorMapScript); err != nil {
+		errorMapScript = ""
+	}
 	poolSize := runtime.NumCPU()
-	adp, err := adapter.NewLuaAdapter(poolSize, adapterScript)
+	adp, err := adapter.NewLuaAdapter(poolSize, adapterScript, errorMapScript)
 	if err != nil {
 		return TaskFailed, fmt.Sprintf("加载适配器失败: %v", err)
 	}

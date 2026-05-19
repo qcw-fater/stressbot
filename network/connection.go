@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"stressbot/engine"
+	"stressbot/errcode"
 	"stressbot/monitor"
 	"stressbot/utils"
 	stresslog "stressbot/utils/log"
@@ -17,29 +19,30 @@ import (
 type ListenCallBack func(message *Message)
 
 // Connection 业务层网络连接封装。
+// 封装 request-response 匹配、持久化推送监听、心跳和连接生命周期回调。
 type Connection struct {
-	serviceName string
-	robotName   string
-	secretKey   []byte
+	serviceName string          // 所属服务名称（如 "logic"、"battle"）
+	robotName   string          // 所属机器人账号名
+	secretKey   []byte          // 通信加密密钥
 
-	responseMap      map[string]chan *Message  // responseKey → 临时响应通道
-	listenResp       map[string]ListenCallBack // responseKey → 持久回调
-	listenMsg        map[string]*Message       // responseKey → 缓存消息（轮询）
-	listenCh         chan *Message
-	listenDone       chan struct{} // listenLoop 退出时关闭，用于 Close 时等待回调完成
-	mu               sync.Mutex
-	ctx              context.Context
-	cancel           context.CancelFunc
-	isClose          int32
-	intentionalClose int32 // 1 = 由 Close() 主动关闭，不触发断开回调
-	listenRunning    int32
-	requestTimeout   time.Duration
-	sendFunc         func(data []byte) error
-	closeFunc        func() error
-	heartbeat        *heartbeatState
-	heartbeatMu      sync.Mutex
-	onDisconnect     func() // 连接"意外"断开时回调（非主动 Close 触发，业务用于停 robot 等）
-	onClosed         func() // 连接关闭时**总是**触发的回调（主动/被动都触发，监控用）
+	responseMap      map[string]chan *Message  // routeKey → 临时响应通道（RequestResponse 用）
+	listenResp       map[string]ListenCallBack // routeKey → 持久化推送回调
+	listenMsg        map[string]*Message       // routeKey → 缓存消息（轮询模式，回调为 nil 时）
+	listenCh         chan *Message              // 推送消息分发通道
+	listenDone       chan struct{}              // listenLoop 退出信号，用于 Close 时等待回调完成
+	mu               sync.Mutex                 // 保护 responseMap / listenResp / listenMsg / 回调字段
+	ctx              context.Context            // 连接生命周期上下文
+	cancel           context.CancelFunc         // 取消函数，关闭时调用
+	isClose          int32                      // 原子标记：0=活跃，1=已关闭
+	intentionalClose int32                      // 原子标记：1=主动 Close() 触发，不触发 onDisconnect
+	listenRunning    int32                      // 原子标记：listenLoop 是否运行中
+	requestTimeout   time.Duration              // RequestResponse 默认超时
+	sendFunc         func(data []byte) error    // 底层发送函数（由 Dialer 注入）
+	closeFunc        func() error               // 底层关闭函数（由 Dialer 注入）
+	heartbeat        *heartbeatState            // 心跳运行时状态
+	heartbeatMu      sync.Mutex                 // 保护 heartbeat 字段的替换
+	onDisconnect     func()                     // 意外断开回调（非主动 Close 触发，业务用于停 robot）
+	onClosed         func()                     // 关闭回调（主动/被动均触发，监控用，与 ConnEstablished 配对）
 }
 
 // NewConnection 创建新的网络连接。
@@ -111,34 +114,35 @@ func (c *Connection) GetSecretKey() []byte {
 }
 
 // RequestResponse 发送请求并同步等待响应。
-func (c *Connection) RequestResponse(sendData []byte, responseKey string, timeoutOverride ...time.Duration) (*Message, int) {
+func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOverride ...time.Duration) (*Message, error) {
 	if c == nil {
-		return nil, 0
+		return nil, engine.NewActionError(errcode.ErrConnNotFound, "routeKey="+routeKey)
 	}
 	if atomic.LoadInt32(&c.isClose) == 1 {
-		stresslog.Warn("[NETWORK] RequestResponse 连接已关闭", zap.String("service", c.serviceName), zap.String("responseKey", responseKey))
-		return nil, 0
+		stresslog.Warn("[NETWORK] RequestResponse 连接已关闭", zap.String("service", c.serviceName), zap.String("routeKey", routeKey))
+		return nil, engine.NewActionError(errcode.ErrConnClosed, c.serviceName+" routeKey="+routeKey)
 	}
 
 	ch := make(chan *Message, 1)
 	c.mu.Lock()
-	c.responseMap[responseKey] = ch
+	c.responseMap[routeKey] = ch
 	c.mu.Unlock()
 
 	defer func() {
 		c.mu.Lock()
-		delete(c.responseMap, responseKey)
+		delete(c.responseMap, routeKey)
 		c.mu.Unlock()
 		close(ch)
 	}()
 
-	ok, n := c.Send(sendData)
-	if !ok {
+	n, sendErr := c.Send(sendData)
+	if sendErr != nil {
 		stresslog.Error("[NETWORK] RequestResponse 发送失败",
-			zap.String("service", c.serviceName), zap.String("responseKey", responseKey),
+			zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
 			zap.Int("pktLen", len(sendData)))
-		return nil, 0
+		return nil, engine.NewActionError(errcode.ErrSendFailed, c.serviceName+" routeKey="+routeKey, sendErr)
 	}
+	_ = n
 
 	start := time.Now()
 	timeout := c.requestTimeout
@@ -150,54 +154,57 @@ func (c *Connection) RequestResponse(sendData []byte, responseKey string, timeou
 	case <-c.ctx.Done():
 		elapsed := time.Since(start)
 		stresslog.Warn("[NETWORK] RequestResponse 连接已断开",
-			zap.String("service", c.serviceName), zap.String("responseKey", responseKey),
+			zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
 			zap.Duration("elapsed", elapsed))
-		return nil, 0
+		return nil, engine.NewActionError(errcode.ErrConnDropped, c.serviceName+" routeKey="+routeKey)
 	case resp := <-ch:
 		elapsed := time.Since(start)
 		stresslog.Debug("[NETWORK] RequestResponse 收到响应",
-			zap.String("service", c.serviceName), zap.String("responseKey", responseKey),
+			zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
 			zap.Int("bodyLen", len(resp.Data)), zap.Duration("elapsed", elapsed))
-		return resp, n
+		return resp, nil
 	case <-timeoutTimer:
 		elapsed := time.Since(start)
 		stresslog.Warn("[NETWORK] RequestResponse 等待超时",
-			zap.String("service", c.serviceName), zap.String("responseKey", responseKey),
+			zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
 			zap.String("robot", c.robotName), zap.Duration("elapsed", elapsed),
 			zap.Duration("timeout", timeout))
-		return nil, 0
+		return nil, engine.NewTimeoutError(errcode.ErrRecvTimeout, c.serviceName+" routeKey="+routeKey+" timeout="+timeout.String())
 	}
 }
 
 // Send 异步发送数据。
-func (c *Connection) Send(data []byte) (bool, int) {
-	if c == nil || atomic.LoadInt32(&c.isClose) == 1 {
-		return false, 0
+func (c *Connection) Send(data []byte) (int, error) {
+	if c == nil {
+		return 0, engine.NewActionError(errcode.ErrConnNotFound, "")
+	}
+	if atomic.LoadInt32(&c.isClose) == 1 {
+		return 0, engine.NewActionError(errcode.ErrConnClosed, c.serviceName)
 	}
 	if c.sendFunc == nil {
 		stresslog.Warn("[NETWORK] Send sendFunc 未注入", zap.String("service", c.serviceName))
-		return false, 0
+		return 0, engine.NewActionError(errcode.ErrSendFailed, c.serviceName)
 	}
 
 	n := len(data)
 	err := c.sendFunc(data)
 	if err != nil {
 		stresslog.Error("[NETWORK] Send 发送失败", zap.String("service", c.serviceName), zap.Error(err))
-		return false, 0
+		return 0, engine.NewActionError(errcode.ErrSendFailed, c.serviceName)
 	}
 	// 全局带宽统计
 	monitor.Global().AddBandwidth(int64(n), 0)
-	return true, n
+	return n, nil
 }
 
 // AddListener 动态添加单个监听器。
-func (c *Connection) AddListener(responseKey string, cb ListenCallBack) {
+func (c *Connection) AddListener(routeKey string, cb ListenCallBack) {
 	if c == nil || atomic.LoadInt32(&c.isClose) == 1 {
 		return
 	}
 
 	c.mu.Lock()
-	c.listenResp[responseKey] = cb
+	c.listenResp[routeKey] = cb
 	needStart := atomic.LoadInt32(&c.listenRunning) == 0
 	c.mu.Unlock()
 
@@ -264,7 +271,7 @@ func (c *Connection) ListenResponse(listenRespMap map[string]ListenCallBack) {
 
 func (c *Connection) dispatchListen(resp *Message) {
 	c.mu.Lock()
-	cb, exist := c.listenResp[resp.ResponseKey]
+	cb, exist := c.listenResp[resp.RouteKey]
 	c.mu.Unlock()
 
 	if !exist {
@@ -275,22 +282,22 @@ func (c *Connection) dispatchListen(resp *Message) {
 		cb(resp)
 	} else {
 		c.mu.Lock()
-		c.listenMsg[resp.ResponseKey] = resp
+		c.listenMsg[resp.RouteKey] = resp
 		c.mu.Unlock()
 	}
 }
 
 // GetListenResp 轮询获取缓存的监听消息。
-func (c *Connection) GetListenResp(responseKey string) *Message {
+func (c *Connection) GetListenResp(routeKey string) *Message {
 	if c == nil || atomic.LoadInt32(&c.isClose) == 1 {
 		return nil
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	resp, exist := c.listenMsg[responseKey]
+	resp, exist := c.listenMsg[routeKey]
 	if exist && resp != nil {
-		delete(c.listenMsg, responseKey)
+		delete(c.listenMsg, routeKey)
 		return resp
 	}
 	return nil
@@ -331,43 +338,43 @@ func (c *Connection) Close() {
 }
 
 // OnReceive 收到网络消息时分发到 request-response 通道或持久监听回调。
-func (c *Connection) OnReceive(responseKey string, body []byte, headerErr uint64) {
+func (c *Connection) OnReceive(routeKey string, body []byte, headerErr uint64) {
 	if atomic.LoadInt32(&c.isClose) == 1 {
 		return
 	}
 	if headerErr != 0 {
 		stresslog.Error("[NETWORK] 服务端协议头错误码非零",
 			zap.String("service", c.serviceName),
-			zap.String("key", responseKey),
+			zap.String("key", routeKey),
 			zap.Uint64("headerErr", headerErr))
 	}
 
 	stresslog.Debug("[NETWORK] OnReceive",
-		zap.String("service", c.serviceName), zap.String("responseKey", responseKey),
+		zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
 		zap.Int("bodyLen", len(body)))
 
-	resp := NewMessage(responseKey, body, headerErr)
+	resp := NewMessage(routeKey, body, headerErr)
 
 	c.mu.Lock()
-	ch, exists := c.responseMap[responseKey]
+	ch, exists := c.responseMap[routeKey]
 	if exists {
 		// 在锁内发送，防止 RequestResponse 的 defer 在 unlock 和 send 之间 close(ch) 导致 panic。
 		select {
 		case ch <- resp:
 		default:
-			stresslog.Warn("[NETWORK] OnReceive 响应通道已满", zap.String("key", responseKey))
+			stresslog.Warn("[NETWORK] OnReceive 响应通道已满", zap.String("key", routeKey))
 		}
 		c.mu.Unlock()
 		return
 	}
 
-	_, exists = c.listenResp[responseKey]
+	_, exists = c.listenResp[routeKey]
 	if exists {
 		c.mu.Unlock()
 		select {
 		case c.listenCh <- resp:
 		default:
-			stresslog.Warn("[NETWORK] OnReceive 监听通道已满", zap.String("key", responseKey))
+			stresslog.Warn("[NETWORK] OnReceive 监听通道已满", zap.String("key", routeKey))
 		}
 		return
 	}

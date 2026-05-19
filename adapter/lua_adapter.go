@@ -2,7 +2,9 @@ package adapter
 
 import (
 	"fmt"
+	"os"
 	"runtime"
+	"sync"
 	"time"
 
 	stresslog "stressbot/utils/log"
@@ -17,19 +19,24 @@ import (
 //   - headerSize / bodyLenInfo 在初始化时从 Lua 一次性获取并缓存到 Go 字段。
 //   - BodyLength() 基于缓存的元信息在 Go 层原生实现，零 Lua 调用。
 //   - HeaderSize() 直接返回缓存值。
-//   - Encode() / Decode() / EncodeUDP() / ExpectedResponseKey() 从有界 channel 池获取 LState 执行 Lua，完成后归还。
+//   - Encode() / Decode() / EncodeUDP() / ExpectedRouteKey() 从有界 channel 池获取 LState 执行 Lua，完成后归还。
 type LuaAdapter struct {
-	states      chan *lua.LState   // 有界 channel 池（容量 = poolSize）
-	scriptProto *lua.FunctionProto // 预编译的适配器脚本
+	states      chan *lua.LState   // 有界 channel 池，容量 = poolSize
+	scriptProto *lua.FunctionProto // 预编译的适配器脚本字节码
 
-	// 初始化时缓存的元信息（热路径零 Lua 调用）
-	headerSize  int            // 消息头大小，HeaderSize() 直接返回
-	bodyLenInfo BodyLengthInfo // BodyLength() 纯 Go 计算，无需调 Lua
+	// 初始化时从 Lua 缓存的元信息（热路径零 Lua 调用）
+	headerSize  int            // 消息头固定字节数，HeaderSize() 直接返回此值
+	bodyLenInfo BodyLengthInfo // 消息体长度解析元信息，BodyLength() 纯 Go 计算
+
+	// error.lua 错误码映射（可选功能）
+	hasErrorMap    bool     // 是否成功加载了 error.lua
+	errorDescCache sync.Map // uint64 -> string 永久缓存，避免高频 headerErr 反复调用 Lua
 }
 
 // NewLuaAdapter 创建并初始化 Lua 适配器池。
 // scriptPath: codec.lua 路径；poolSize: LState 池大小（建议 = CPU 核心数）。
-func NewLuaAdapter(poolSize int, scriptPath string) (*LuaAdapter, error) {
+// errorMapPath: error.lua 路径（可选，空字符串表示不加载错误码映射）。
+func NewLuaAdapter(poolSize int, scriptPath string, errorMapPath string) (*LuaAdapter, error) {
 	if poolSize <= 0 {
 		poolSize = runtime.NumCPU()
 	}
@@ -71,6 +78,43 @@ func NewLuaAdapter(poolSize int, scriptPath string) (*LuaAdapter, error) {
 		return nil, fmt.Errorf("获取适配器元信息失败: %w", err)
 	}
 
+	// Step 4: 可选 — 加载 error.lua 错误码映射到已创建的 LState 池
+	if errorMapPath != "" {
+		if data, err := os.ReadFile(errorMapPath); err == nil {
+			loaded := true
+			for i := 0; i < poolSize; i++ {
+				LS := adp.acquire()
+				if LS == nil {
+					loaded = false
+					break
+				}
+				if err := LS.DoString(string(data)); err != nil {
+					stresslog.Warn("[ADAPTER] error.lua 加载失败", zap.Error(err))
+					loaded = false
+					adp.release(LS)
+					break
+				}
+				// 缓存 describe_error 函数到 registry
+				fn := LS.GetGlobal("describe_error")
+				if fn == lua.LNil {
+					stresslog.Warn("[ADAPTER] error.lua 缺少 describe_error 函数")
+					loaded = false
+					adp.release(LS)
+					break
+				}
+				reg := LS.Get(lua.RegistryIndex)
+				LS.SetField(reg, "__adapter_describe_error", fn)
+				LS.SetGlobal("describe_error", lua.LNil)
+				adp.release(LS)
+			}
+			if loaded {
+				adp.hasErrorMap = true
+			}
+		} else {
+			stresslog.Warn("[ADAPTER] error.lua 文件读取失败，跳过错误码映射", zap.Error(err))
+		}
+	}
+
 	return adp, nil
 }
 
@@ -92,7 +136,7 @@ func (a *LuaAdapter) initLState(L *lua.LState) error {
 
 	fnNames := []string{
 		"header_size", "body_length", "encode_tcp", "encode_udp",
-		"decode_tcp", "decode_udp", "expected_response_key",
+		"decode_tcp", "decode_udp", "expected_route_key",
 	}
 	reg := L.Get(lua.RegistryIndex)
 	for _, name := range fnNames {
@@ -225,13 +269,13 @@ func (a *LuaAdapter) decode(fnName string, data []byte, secretKey []byte) (strin
 
 	headerErr := uint64(lua.LVAsNumber(L.Get(-1)))
 	body := []byte(lua.LVAsString(L.Get(-2)))
-	responseKey := lua.LVAsString(L.Get(-3))
+	routeKey := lua.LVAsString(L.Get(-3))
 	L.Pop(3)
-	return responseKey, body, headerErr
+	return routeKey, body, headerErr
 }
 
-// ExpectedResponseKey 调用 Lua expected_response_key(route) 函数。
-func (a *LuaAdapter) ExpectedResponseKey(route any) string {
+// ExpectedRouteKey 调用 Lua expected_route_key(route) 函数。
+func (a *LuaAdapter) ExpectedRouteKey(route any) string {
 	L := a.acquire()
 	if L == nil {
 		return ""
@@ -239,12 +283,12 @@ func (a *LuaAdapter) ExpectedResponseKey(route any) string {
 	defer a.release(L)
 
 	reg := L.Get(lua.RegistryIndex)
-	fn := L.GetField(reg, "__adapter_expected_response_key")
+	fn := L.GetField(reg, "__adapter_expected_route_key")
 
 	routeVal := RouteToLuaValue(L, route)
 
 	if err := L.CallByParam(lua.P{Fn: fn, NRet: 1, Protect: true}, routeVal); err != nil {
-		stresslog.Error("[ADAPTER] expected_response_key() 调用失败", zap.Error(err))
+		stresslog.Error("[ADAPTER] expected_route_key() 调用失败", zap.Error(err))
 		return ""
 	}
 
@@ -289,4 +333,39 @@ func (a *LuaAdapter) closeAll() {
 			return
 		}
 	}
+}
+
+// DescribeError 将服务端错误码映射为可读描述。
+// 第一次查询后结果（含空字符串）会被永久缓存。error.lua 运行时不可变，重启才能更新。
+func (a *LuaAdapter) DescribeError(code uint64) string {
+	if !a.hasErrorMap {
+		return ""
+	}
+	if v, ok := a.errorDescCache.Load(code); ok {
+		return v.(string)
+	}
+	desc := a.callDescribeError(code)
+	a.errorDescCache.Store(code, desc) // 即使是 "" 也缓存，避免重复查询
+	return desc
+}
+
+// callDescribeError 从 Lua 池获取 LState，调用 describe_error(code) 获取错误描述。
+func (a *LuaAdapter) callDescribeError(code uint64) string {
+	L := a.acquire()
+	if L == nil {
+		return ""
+	}
+	defer a.release(L)
+
+	reg := L.Get(lua.RegistryIndex)
+	fn := L.GetField(reg, "__adapter_describe_error")
+
+	if err := L.CallByParam(lua.P{Fn: fn, NRet: 1, Protect: true}, lua.LNumber(code)); err != nil {
+		stresslog.Error("[ADAPTER] describe_error() 调用失败", zap.Error(err))
+		return ""
+	}
+
+	desc := lua.LVAsString(L.Get(-1))
+	L.Pop(1)
+	return desc
 }

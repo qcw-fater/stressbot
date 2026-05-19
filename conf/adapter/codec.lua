@@ -268,8 +268,8 @@ end
 -- 当前与 decode_tcp 逻辑一致，预留 UDP 专用解码扩展点。
 decode_udp = decode_tcp
 
--- expected_response_key(route) → string
-function expected_response_key(route)
+-- expected_route_key(route) → string
+function expected_route_key(route)
     if route == nil then
         return "0:0"
     end
