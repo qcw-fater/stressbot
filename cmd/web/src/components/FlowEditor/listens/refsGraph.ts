@@ -83,7 +83,7 @@ export function buildRefsGraph(flow: TaskFlow): RefsGraph {
 /**
  * 把 route 序列化为稳定排序 JSON（伪 routeKey）。
  *
- * 引擎实际通过 adapter.expected_response_key(route) 计算，前端无法运行 Lua adapter，
+ * 引擎实际通过 adapter.expected_route_key(route) 计算，前端无法运行 Lua adapter，
  * 这里用 key 排序后的 JSON 字符串足够覆盖 99% `{cmd, act}` 形态的查重需求。
  */
 export function routeKey(route: unknown): string {

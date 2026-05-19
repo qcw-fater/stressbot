@@ -67,6 +67,22 @@ export function MetricsBadge({ nodeId }: MetricsBadgeProps) {
   const showErrors = (m.errors?.length ?? 0) > 0;
   const topErr = showErrors ? m.errors![0] : undefined;
 
+  // 预构建错误列表，避免 JSX 内联 .map() + 条件渲染触发 React key 警告
+  const errorTooltipContent = showErrors ? (
+    <div style={{ maxWidth: 300 }}>
+      {m.errors!.slice(0, 6).map((e, i) => (
+        <div key={`e${i}`} style={{ fontSize: 11 }}>
+          <span style={{ color: 'var(--color-error)' }}>×{e.count}</span> {e.codeName || `${e.kind}#${e.code}`}
+        </div>
+      ))}
+      {m.errors!.length > 6 && (
+        <div style={{ fontSize: 10, opacity: 0.6, marginTop: 4 }}>
+          …还有 {m.errors!.length - 6} 类错误
+        </div>
+      )}
+    </div>
+  ) : null;
+
   return (
     <div
       className="metrics-slot"
@@ -96,22 +112,7 @@ export function MetricsBadge({ nodeId }: MetricsBadgeProps) {
         </Tooltip>
       )}
       {showErrors && topErr && (
-        <Tooltip
-          title={
-            <div style={{ maxWidth: 300 }}>
-              {m.errors!.slice(0, 6).map((e) => (
-                <div key={e.msg} style={{ fontSize: 11 }}>
-                  <span style={{ color: 'var(--color-error)' }}>×{e.count}</span> {e.msg}
-                </div>
-              ))}
-              {m.errors!.length > 6 && (
-                <div style={{ fontSize: 10, opacity: 0.6, marginTop: 4 }}>
-                  …还有 {m.errors!.length - 6} 类错误
-                </div>
-              )}
-            </div>
-          }
-        >
+        <Tooltip title={errorTooltipContent}>
           <span className="pattern-badge" style={{ color: 'var(--color-error)', borderColor: 'var(--color-error)', background: 'color-mix(in srgb, var(--color-error) 12%, transparent)' }}>
             <WarningOutlined style={{ marginRight: 4 }} /> {topErr.count}
           </span>

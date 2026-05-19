@@ -25,7 +25,8 @@ export function ErrorsTab() {
     for (const a of latestStress.actions) {
       if (!a.errors) continue;
       for (const e of a.errors) {
-        out.push({ key: `${a.name}::${e.msg}`, action: a.name, msg: e.msg, count: e.count });
+        const msg = e.msgs.join('; ');
+        out.push({ key: `${a.name}::${msg}`, action: a.name, msg, count: e.count });
       }
     }
     out.sort((a, b) => b.count - a.count);

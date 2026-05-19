@@ -223,7 +223,7 @@ function ErrorSection({ actions, errorChart }: { actions: ActionMetric[]; errorC
   const allErrors: Array<{ action: string; msg: string; count: number }> = [];
   for (const a of actions) {
     for (const e of a.errors ?? []) {
-      allErrors.push({ action: a.name, msg: e.msg, count: e.count });
+      allErrors.push({ action: a.name, msg: e.msgs.join('; '), count: e.count });
     }
   }
   allErrors.sort((a, b) => b.count - a.count);

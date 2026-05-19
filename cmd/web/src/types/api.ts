@@ -225,8 +225,13 @@ export interface HistogramView {
   p99Ms: number;
 }
 
-export interface ErrorBucket {
-  msg: string;
+export type ErrorKind = 'framework' | 'server';
+
+export interface ErrorEntry {
+  kind: ErrorKind;
+  code: number;
+  codeName: string;
+  msgs: string[];
   count: number;
 }
 
@@ -237,6 +242,7 @@ export interface ActionMetric {
   failureCount: number;
   timeoutCount: number;
   skippedCount: number;
+  canceledCount: number;
   executing: number;
   successRate: number;
   apdex: number;
@@ -245,7 +251,7 @@ export interface ActionMetric {
   avgRecvBytes: number;
   timeoutAvgMs: number;
   latency: HistogramView;
-  errors?: ErrorBucket[];
+  errors?: ErrorEntry[];
 }
 
 export interface ClusterInfo {

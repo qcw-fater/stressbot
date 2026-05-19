@@ -2,7 +2,7 @@
  * 历史记录详情：紧凑头部 + 全宽趋势 + 全宽动作表 + 底部信息条。
  */
 
-import { App, Button, Empty, Input, Space, Spin, Switch, Table, Tag, Timeline, Tooltip } from 'antd';
+import { App, Button, Empty, Input, Popover, Space, Spin, Switch, Table, Tag, Timeline, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { CopyOutlined, DownloadOutlined, FileTextOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { historyApi, showApiError } from '@/services';
 import type { ActionMetric, HistoryDetail, TimeseriesPoint, StressSnapshot } from '@/types/api';
 import { ApdexCell } from '@/components/monitoring/shared/ApdexCell';
-import { fmtBytesPlain, fmtMs, NUMERIC_STYLE } from '@/components/monitoring/shared/formats';
+import { fmtBytes, fmtBytesPlain, fmtMs, NUMERIC_STYLE } from '@/components/monitoring/shared/formats';
 import { useReportCapture } from './report/useReportCapture';
 import './HistoryPanel.css';
 
@@ -144,8 +144,6 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
       { title: '跳过', dataIndex: 'skippedCount', key: 'skippedCount', width: 70, sorter: (a, b) => a.skippedCount - b.skippedCount, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
       { title: 'Apdex', dataIndex: 'apdex', key: 'apdex', width: 80, sorter: (a, b) => a.apdex - b.apdex, render: (v: number) => <ApdexCell value={v} /> },
       { title: 'QPS', dataIndex: 'avgQps', key: 'avgQps', width: 78, sorter: (a, b) => a.avgQps - b.avgQps, render: (v: number) => <span style={NUMERIC_STYLE}>{v.toFixed(1)}</span> },
-      { title: '↑avg(B)', dataIndex: 'avgSendBytes', key: 'avgSendBytes', width: 86, sorter: (a, b) => a.avgSendBytes - b.avgSendBytes, render: (v: number) => <span style={NUMERIC_STYLE}>{fmtBytesPlain(v)}</span> },
-      { title: '↓avg(B)', dataIndex: 'avgRecvBytes', key: 'avgRecvBytes', width: 86, sorter: (a, b) => a.avgRecvBytes - b.avgRecvBytes, render: (v: number) => <span style={NUMERIC_STYLE}>{fmtBytesPlain(v)}</span> },
       { title: 'avg(ms)', key: 'avgMs', width: 76, sorter: (a, b) => a.latency.avgMs - b.latency.avgMs, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.avgMs)}</span> },
       { title: 'p50(ms)', key: 'p50Ms', width: 76, sorter: (a, b) => a.latency.p50Ms - b.latency.p50Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.p50Ms)}</span> },
       { title: 'p95(ms)', key: 'p95Ms', width: 76, sorter: (a, b) => a.latency.p95Ms - b.latency.p95Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.p95Ms)}</span> },
@@ -153,9 +151,45 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
       { title: 'max(ms)', key: 'maxMs', width: 76, sorter: (a, b) => a.latency.maxMs - b.latency.maxMs, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.maxMs)}</span> },
       { title: '超均(ms)', dataIndex: 'timeoutAvgMs', key: 'timeoutAvgMs', width: 84, sorter: (a, b) => a.timeoutAvgMs - b.timeoutAvgMs, render: (v: number) => <span style={NUMERIC_STYLE}>{fmtMs(v)}</span> },
       {
+        title: '流量',
+        key: 'traffic',
+        width: 110,
+        sorter: (a, b) => (a.avgSendBytes + a.avgRecvBytes) - (b.avgSendBytes + b.avgRecvBytes),
+        render: (_, r) => (
+          <span style={{ ...NUMERIC_STYLE, fontSize: 11, whiteSpace: 'nowrap' }}>
+            <span style={{ color: 'var(--text-secondary)' }}>↑</span>{fmtBytes(r.avgSendBytes)}
+            {' '}
+            <span style={{ color: 'var(--text-secondary)' }}>↓</span>{fmtBytes(r.avgRecvBytes)}
+          </span>
+        ),
+      },
+      {
         title: '错误', key: 'errors', width: 70, fixed: 'right',
         sorter: (a, b) => (a.errors?.length ?? 0) - (b.errors?.length ?? 0),
-        render: (_, r) => r.errors && r.errors.length > 0 ? <Tag color="error" style={{ marginInlineEnd: 0 }}>{r.errors.length}</Tag> : <span style={{ color: 'var(--text-tertiary)' }}>—</span>,
+        render: (_, r) => {
+          if (!r.errors?.length) return <span style={{ color: 'var(--text-tertiary)' }}>—</span>;
+          return (
+            <Popover
+              content={
+                <div style={{ maxWidth: 360 }}>
+                  {r.errors.map((e) => (
+                    <div key={`${e.kind}:${e.code}`} style={{ marginTop: 3, fontSize: 11, lineHeight: '16px' }}>
+                      <span style={{ color: 'var(--color-error)', fontWeight: 700, fontSize: 10, fontVariantNumeric: 'tabular-nums', marginRight: 6 }}>×{e.count}</span>
+                      <span style={{ fontWeight: 500 }}>{e.codeName || `${e.kind}#${e.code}`}</span>
+                      {e.msgs.length > 0 && (
+                        <span style={{ color: 'var(--text-tertiary)', marginLeft: 6 }}>{e.msgs.join('; ')}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              }
+              title={<span style={{ fontSize: 12 }}>错误明细</span>}
+              mouseEnterDelay={0.3}
+            >
+              <Tag color="error" style={{ marginInlineEnd: 0, cursor: 'pointer' }}>{r.errors.length}</Tag>
+            </Popover>
+          );
+        },
       },
     ];
     return { dataSource: rows, columns };
@@ -249,20 +283,6 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
             columns={actionTable.columns}
             pagination={false}
             scroll={{ x: 'max-content', y: 400 }}
-            expandable={{
-              rowExpandable: (r) => !!r.errors && r.errors.length > 0,
-              expandedRowRender: (r) => (
-                <div style={{ fontSize: 12 }}>
-                  <strong>错误明细：</strong>
-                  {r.errors!.map((e) => (
-                    <div key={e.msg} style={{ marginTop: 2 }}>
-                      <Tag color="error">×{e.count}</Tag>
-                      {e.msg}
-                    </div>
-                  ))}
-                </div>
-              ),
-            }}
           />
         )}
       </div>

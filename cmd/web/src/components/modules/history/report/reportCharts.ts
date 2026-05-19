@@ -278,7 +278,9 @@ export function buildErrorOption(
   const allErrors: Map<string, number> = new Map();
   for (const a of actions) {
     for (const e of a.errors ?? []) {
-      allErrors.set(e.msg, (allErrors.get(e.msg) ?? 0) + e.count);
+      for (const msg of e.msgs) {
+        allErrors.set(msg, (allErrors.get(msg) ?? 0) + e.count);
+      }
     }
   }
   if (allErrors.size === 0) return null;

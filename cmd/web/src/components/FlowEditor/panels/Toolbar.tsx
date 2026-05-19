@@ -139,7 +139,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
       const flow = await fetchBaselineFlow<FlowJson>();
       if (!flow) throw new Error('flow.json 不存在');
       loadFromTaskFlow(flow);
-      message.success('已加载 conf/flow/flow.json');
+      message.success('已加载基线流程');
       void syncScriptsAfterLoad(flow, '加载');
     } catch (e) {
       message.error(`加载失败：${(e as Error).message}`);
@@ -194,7 +194,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
     {
       key: 'load-default',
       icon: <ReloadOutlined />,
-      label: '加载 conf/flow/flow.json',
+      label: '加载基线流程',
       disabled: readOnly,
       onClick: onLoadDefault,
     },
@@ -305,13 +305,13 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
               </Button>
             </Badge>
           </Tooltip>
-          <Tooltip title="管理回调脚本">
-            <Badge count={listenCount} overflowCount={99} offset={[-4, 4]} color="orange">
+          <Tooltip title="管理监听脚本">
+            <Badge count={listenCount} overflowCount={99} offset={[-4, 4]} color="blue">
               <Button
                 icon={<NotificationOutlined />}
                 onClick={() => setActivePanel({ kind: 'listenPanel' })}
               >
-                回调
+                监听
               </Button>
             </Badge>
           </Tooltip>

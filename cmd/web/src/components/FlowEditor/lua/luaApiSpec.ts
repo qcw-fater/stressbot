@@ -677,7 +677,7 @@ const adapterModule: LuaModule = {
       summary: 'UDP 解码',
     },
     {
-      name: 'expected_response_key',
+      name: 'expected_route_key',
       module: 'adapter',
       params: [{ name: 'route', type: 'table', doc: '路由' }],
       returns: 'string',

@@ -107,6 +107,8 @@ export interface RuntimeState {
   detachFromActive: () => void;
   /** 完整重置（新建任务） */
   reset: () => void;
+  /** 从后端时序数据回补 stressHistory / systemHistory（页面刷新后恢复趋势图） */
+  backfillHistory: (stress: StressSnapshot[], system: ClusterSystemSnapshot[]) => void;
 }
 
 // 仅作占位，EditorPage 启动时会尝试从 /conf/config.json 同步真实值覆盖。
@@ -253,6 +255,18 @@ export const useRuntimeStore = create<RuntimeState>()(
 
       reset: () =>
         set({ ...initialState, robotConfig: { ...DEFAULT_ROBOT_CONFIG } }),
+
+      backfillHistory: (stress, system) =>
+        set((s) => {
+          // 直接用后端权威数据覆盖；polling 新到的点可能与末尾几个点重叠，
+          // 但 pushWithLimit 会自然追加，对趋势图无影响
+          return {
+            stressHistory: stress.slice(-HISTORY_WINDOW),
+            systemHistory: system.slice(-HISTORY_WINDOW),
+            latestStress: s.latestStress ?? stress[stress.length - 1] ?? null,
+            latestSystem: s.latestSystem ?? system[system.length - 1] ?? null,
+          };
+        }),
     }),
     {
       name: 'stressbot:runtime-form',

@@ -24,6 +24,7 @@ import {
   CheckCircleOutlined,
   DatabaseOutlined,
   EditOutlined,
+  FileTextOutlined,
   HistoryOutlined,
 
   PlayCircleOutlined,
@@ -53,6 +54,7 @@ export interface RuntimeBarProps {
   onOpenAgents?: () => void;
   onOpenSystem?: () => void;
   onOpenLogs?: () => void;
+  onOpenNotepad?: () => void;
 }
 
 const SECTION_DIVIDER = (
@@ -74,6 +76,7 @@ export function RuntimeBar({
   onOpenAgents,
   onOpenSystem,
   onOpenLogs,
+  onOpenNotepad,
 }: RuntimeBarProps) {
   const { modal } = AntApp.useApp();
 
@@ -368,6 +371,11 @@ export function RuntimeBar({
         <Tooltip title="运行日志：查看服务器与节点输出的文本日志">
           <Button icon={<AlignLeftOutlined />} onClick={onOpenLogs}>
             日志
+          </Button>
+        </Tooltip>
+        <Tooltip title="记事本：编辑笔记、导入定义文件、快速查找路由">
+          <Button icon={<FileTextOutlined />} onClick={onOpenNotepad}>
+            记事本
           </Button>
         </Tooltip>
         <Tooltip title={adapterMissing && adapterMissing.length > 0 ? `适配器缺少 ${adapterMissing.length} 个必需函数` : '资源管理（proto / lua / 适配器）'}>

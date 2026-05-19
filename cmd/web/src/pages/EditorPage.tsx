@@ -43,6 +43,7 @@ import { RuntimeBar } from '@/components/runtime/RuntimeBar';
 import { MonitorDock } from '@/components/monitoring/MonitorDock';
 import { SystemTab } from '@/components/monitoring/tabs/SystemTab';
 import { LogsTab } from '@/components/monitoring/tabs/LogsTab';
+import { NotepadTab } from '@/components/modules/notepad/NotepadTab';
 import { FloatingWindow } from '@/components/FlowEditor/panels/FloatingWindow';
 import type { RobotConfig, TaskBrief } from '@/types/api';
 import { fetchBaselineConfig } from '@/services/baselineApi';
@@ -101,6 +102,7 @@ function HomeShellInner() {
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [systemOpen, setSystemOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
+  const [notepadOpen, setNotepadOpen] = useState(false);
   const [guardTask, setGuardTask] = useState<TaskBrief | null>(null);
   const [booting, setBooting] = useState(true);
   const policy = useMemo(() => pollingPolicy(mode), [mode]);
@@ -260,6 +262,7 @@ function HomeShellInner() {
               onOpenAgents={() => setAgentsOpen(true)}
               onOpenSystem={() => setSystemOpen(true)}
               onOpenLogs={() => setLogsOpen(true)}
+              onOpenNotepad={() => setNotepadOpen(true)}
             />
           }
         />
@@ -287,6 +290,16 @@ function HomeShellInner() {
         onClose={() => setLogsOpen(false)}
       >
         <LogsTab open={logsOpen} />
+      </FloatingWindow>
+      <FloatingWindow
+        windowId="notepad"
+        title="记事本"
+        defaultSize={{ width: 960, height: 600 }}
+        minSize={{ width: 640, height: 400 }}
+        open={notepadOpen}
+        onClose={() => setNotepadOpen(false)}
+      >
+        <NotepadTab />
       </FloatingWindow>
       <ActiveTaskGuardModal
         open={guardTask !== null}

@@ -16,11 +16,12 @@ import { useProtoStore } from '@/components/FlowEditor/proto/protoStore';
 import { validateFlow } from '@/components/FlowEditor/validation/refsCheck';
 import { useMetricsStore } from '@/components/FlowEditor/nodes/shared/MetricsBadge';
 import * as tasksApi from './tasksApi';
-import { listProto, listScript, getAdapterScript } from './resourcesStore';
-import { syncFlowScriptsToIdb, collectFlowScriptNames, collectFlowProtoNames } from './scriptSync';
+import { listProto, listScript, getAdapterScript, getErrorMapScript } from './resourcesStore';
+import { syncFlowScriptsToIdb, collectFlowScriptNames } from './scriptSync';
 import { useRuntimeStore } from './runtimeStore';
 import { ApiError } from './api';
-import type { RobotConfig, TaskBrief, TaskDetail } from '@/types/api';
+import * as historyApi from './historyApi';
+import type { RobotConfig, StressAggregate, ClusterSystemSnapshot, TaskBrief, TaskDetail } from '@/types/api';
 import type { FlowLayout } from '@/types/editor';
 import type { FlowJson } from '@/components/FlowEditor/codec/flowToJson';
 
@@ -113,7 +114,7 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
       400,
     );
   }
-  const [protos, scripts, adapterRes] = await Promise.all([listProto(), listScript(), getAdapterScript()]);
+  const [protos, scripts, adapterRes, errorMapRes] = await Promise.all([listProto(), listScript(), getAdapterScript(), getErrorMapScript()]);
 
   // 只提交 flow 引用到的脚本；proto 文件无法从 message 全名静态映射到文件名，全量提交
   const scriptNames = new Set(collectFlowScriptNames(flowJson));
@@ -168,6 +169,10 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
   }
   if (adapterContent) {
     fd.append('adapter/codec.lua', new Blob([adapterContent], { type: 'text/plain' }), 'codec.lua');
+  }
+  const errorMapContent = errorMapRes?.content ?? null;
+  if (errorMapContent) {
+    fd.append('adapter/error.lua', new Blob([errorMapContent], { type: 'text/plain' }), 'error.lua');
   }
 
   // 5. 提交
@@ -273,6 +278,18 @@ export async function attachToActive(taskId: string): Promise<void> {
   // proto 资源同步：留给后续，proto 是按 messageType 名引用的，无法从 flow 静态推断
   // 应该带哪些 .proto 文件；用户需主动到「资源管理」上传。
   void useProtoStore.getState();
+
+  // 回补时序历史：刷新页面后趋势图能立即显示已有数据，而非从空开始
+  void historyApi
+    .getHistoryTimeseries(taskId)
+    .then((ts) => {
+      const { backfillHistory } = useRuntimeStore.getState();
+      backfillHistory(
+        ts.stress.map((p) => (p.snapshot as unknown as StressAggregate).snapshot),
+        ts.system.map((p) => p.snapshot as ClusterSystemSnapshot),
+      );
+    })
+    .catch(() => { /* history 未启用或无数据，静默 */ });
 }
 
 /**

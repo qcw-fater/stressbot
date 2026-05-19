@@ -7,7 +7,7 @@
  *   - 高度可通过顶部拖把手调整（160px ~ 80vh）
  */
 
-import { Alert, Button, Input, Progress, Space, Switch, Table, Tag, Tooltip } from 'antd';
+import { Alert, Button, Input, Popover, Progress, Space, Switch, Table, Tag, Tooltip } from 'antd';
 import { CaretDownOutlined, CaretUpOutlined, LineChartOutlined, ArrowUpOutlined, ArrowDownOutlined, WarningOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import ReactECharts from 'echarts-for-react';
@@ -16,7 +16,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useRuntimeStore, classifyApdex } from '@/services';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { ApdexCell } from './shared/ApdexCell';
-import { fmtBytesPlain, fmtMs, NUMERIC_STYLE } from './shared/formats';
+import { fmtBytes, fmtBytesPlain, fmtMs, NUMERIC_STYLE } from './shared/formats';
 import type { ActionMetric } from '@/types/api';
 import './MonitorDock.css';
 
@@ -87,7 +87,7 @@ const ACTION_COLUMNS: ColumnsType<ActionMetric> = [
     title: '动作',
     dataIndex: 'name',
     key: 'name',
-    width: 180,
+    width: 160,
     fixed: 'left',
     ellipsis: true,
     sorter: (a, b) => a.name.localeCompare(b.name),
@@ -106,26 +106,63 @@ const ACTION_COLUMNS: ColumnsType<ActionMetric> = [
       );
     },
   },
-  { title: '并发', dataIndex: 'executing', key: 'executing', width: 56, sorter: (a, b) => a.executing - b.executing, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
-  { title: '样本', dataIndex: 'sampleCount', key: 'sampleCount', width: 64, sorter: (a, b) => a.sampleCount - b.sampleCount, defaultSortOrder: 'descend' as const, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
-  { title: '成功', dataIndex: 'successCount', key: 'successCount', width: 64, sorter: (a, b) => a.successCount - b.successCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: 'var(--color-success)' }}>{v}</span> },
-  { title: '失败', dataIndex: 'failureCount', key: 'failureCount', width: 64, sorter: (a, b) => a.failureCount - b.failureCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-error)' : 'var(--text-tertiary)' }}>{v}</span> },
-  { title: '超时', dataIndex: 'timeoutCount', key: 'timeoutCount', width: 64, sorter: (a, b) => a.timeoutCount - b.timeoutCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-orange)' : 'var(--text-tertiary)' }}>{v}</span> },
-  { title: '跳过', dataIndex: 'skippedCount', key: 'skippedCount', width: 56, sorter: (a, b) => a.skippedCount - b.skippedCount, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
-  { title: 'Apdex', dataIndex: 'apdex', key: 'apdex', width: 72, sorter: (a, b) => a.apdex - b.apdex, render: (v: number) => <ApdexCell value={v} /> },
-  { title: 'QPS', dataIndex: 'avgQps', key: 'avgQps', width: 64, sorter: (a, b) => a.avgQps - b.avgQps, render: (v: number) => <span style={NUMERIC_STYLE}>{v.toFixed(1)}</span> },
-  { title: '↑avg(B)', dataIndex: 'avgSendBytes', key: 'avgSendBytes', width: 74, sorter: (a, b) => a.avgSendBytes - b.avgSendBytes, render: (v: number) => <span style={NUMERIC_STYLE}>{fmtBytesPlain(v)}</span> },
-  { title: '↓avg(B)', dataIndex: 'avgRecvBytes', key: 'avgRecvBytes', width: 74, sorter: (a, b) => a.avgRecvBytes - b.avgRecvBytes, render: (v: number) => <span style={NUMERIC_STYLE}>{fmtBytesPlain(v)}</span> },
-  { title: 'avg(ms)', key: 'avgMs', width: 68, sorter: (a, b) => a.latency.avgMs - b.latency.avgMs, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.avgMs)}</span> },
-  { title: 'p50(ms)', key: 'p50Ms', width: 68, sorter: (a, b) => a.latency.p50Ms - b.latency.p50Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.p50Ms)}</span> },
-  { title: 'p95(ms)', key: 'p95Ms', width: 68, sorter: (a, b) => a.latency.p95Ms - b.latency.p95Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.p95Ms)}</span> },
-  { title: 'p99(ms)', key: 'p99Ms', width: 68, sorter: (a, b) => a.latency.p99Ms - b.latency.p99Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.p99Ms)}</span> },
-  { title: 'max(ms)', key: 'maxMs', width: 68, sorter: (a, b) => a.latency.maxMs - b.latency.maxMs, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.maxMs)}</span> },
-  { title: '超均(ms)', dataIndex: 'timeoutAvgMs', key: 'timeoutAvgMs', width: 74, sorter: (a, b) => a.timeoutAvgMs - b.timeoutAvgMs, render: (v: number) => <span style={NUMERIC_STYLE}>{fmtMs(v)}</span> },
+  { title: '并发', dataIndex: 'executing', key: 'executing', width: 52, sorter: (a, b) => a.executing - b.executing, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
+  { title: 'QPS', dataIndex: 'avgQps', key: 'avgQps', width: 60, sorter: (a, b) => a.avgQps - b.avgQps, render: (v: number) => <span style={NUMERIC_STYLE}>{v.toFixed(1)}</span> },
+  { title: '样本', dataIndex: 'sampleCount', key: 'sampleCount', width: 60, sorter: (a, b) => a.sampleCount - b.sampleCount, defaultSortOrder: 'descend' as const, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
+  { title: '成功', dataIndex: 'successCount', key: 'successCount', width: 60, sorter: (a, b) => a.successCount - b.successCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: 'var(--color-success)' }}>{v}</span> },
+  { title: '失败', dataIndex: 'failureCount', key: 'failureCount', width: 52, sorter: (a, b) => a.failureCount - b.failureCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-error)' : 'var(--text-tertiary)' }}>{v}</span> },
+  { title: '超时', dataIndex: 'timeoutCount', key: 'timeoutCount', width: 52, sorter: (a, b) => a.timeoutCount - b.timeoutCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-orange)' : 'var(--text-tertiary)' }}>{v}</span> },
+  { title: '跳过', dataIndex: 'skippedCount', key: 'skippedCount', width: 52, sorter: (a, b) => a.skippedCount - b.skippedCount, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
+  { title: 'Apdex', dataIndex: 'apdex', key: 'apdex', width: 68, sorter: (a, b) => a.apdex - b.apdex, render: (v: number) => <ApdexCell value={v} /> },
+  { title: 'avg(ms)', key: 'avgMs', width: 64, sorter: (a, b) => a.latency.avgMs - b.latency.avgMs, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.avgMs)}</span> },
+  { title: 'p50(ms)', key: 'p50Ms', width: 64, sorter: (a, b) => a.latency.p50Ms - b.latency.p50Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.p50Ms)}</span> },
+  { title: 'p95(ms)', key: 'p95Ms', width: 64, sorter: (a, b) => a.latency.p95Ms - b.latency.p95Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.p95Ms)}</span> },
+  { title: 'p99(ms)', key: 'p99Ms', width: 64, sorter: (a, b) => a.latency.p99Ms - b.latency.p99Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.p99Ms)}</span> },
+  { title: 'max(ms)', key: 'maxMs', width: 64, sorter: (a, b) => a.latency.maxMs - b.latency.maxMs, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.maxMs)}</span> },
+  { title: '超均(ms)', dataIndex: 'timeoutAvgMs', key: 'timeoutAvgMs', width: 68, sorter: (a, b) => a.timeoutAvgMs - b.timeoutAvgMs, render: (v: number) => <span style={NUMERIC_STYLE}>{fmtMs(v)}</span> },
   {
-    title: '错误', key: 'errors', width: 56, fixed: 'right',
+    title: '流量',
+    key: 'traffic',
+    width: 110,
+    sorter: (a, b) => (a.avgSendBytes + a.avgRecvBytes) - (b.avgSendBytes + b.avgRecvBytes),
+    render: (_, r) => (
+      <span style={{ ...NUMERIC_STYLE, fontSize: 11, whiteSpace: 'nowrap' }}>
+        <span style={{ color: 'var(--text-secondary)' }}>↑</span>{fmtBytes(r.avgSendBytes)}
+        {' '}
+        <span style={{ color: 'var(--text-secondary)' }}>↓</span>{fmtBytes(r.avgRecvBytes)}
+      </span>
+    ),
+  },
+  {
+    title: '错误',
+    key: 'errors',
+    width: 52,
+    fixed: 'right',
     sorter: (a, b) => (a.errors?.length ?? 0) - (b.errors?.length ?? 0),
-    render: (_, r) => r.errors?.length ? <Tag color="error" style={{ marginInlineEnd: 0 }}>{r.errors.length}</Tag> : <span style={{ color: 'var(--text-tertiary)' }}>—</span>,
+    render: (_, r) => {
+      if (!r.errors?.length) return <span style={{ color: 'var(--text-tertiary)' }}>—</span>;
+      return (
+        <Popover
+          content={
+            <div style={{ maxWidth: 360 }}>
+              {r.errors.map((e) => (
+                <div key={`${e.kind}:${e.code}`} style={{ marginTop: 3, fontSize: 11, lineHeight: '16px' }}>
+                  <span style={{ color: 'var(--color-error)', fontWeight: 700, fontSize: 10, fontVariantNumeric: 'tabular-nums', marginRight: 6 }}>×{e.count}</span>
+                  <span style={{ fontWeight: 500 }}>{e.codeName || `${e.kind}#${e.code}`}</span>
+                  {e.msgs.length > 0 && (
+                    <span style={{ color: 'var(--text-tertiary)', marginLeft: 6 }}>{e.msgs.join('; ')}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          }
+          title={<span style={{ fontSize: 12 }}>错误明细</span>}
+          mouseEnterDelay={0.3}
+        >
+          <Tag color="error" style={{ marginInlineEnd: 0, cursor: 'pointer' }}>{r.errors.length}</Tag>
+        </Popover>
+      );
+    },
   },
 ];
 
@@ -245,7 +282,7 @@ export function MonitorDock() {
       <div className="monitor-dock__body">
         <AgentOfflineAlert />
         {!topCollapsed && <TopSection />}
-        <ActionsSection dockHeight={height} topCollapsed={topCollapsed} />
+        <ActionsSection />
       </div>
       <div style={{ position: 'absolute', top: 6, right: 12, display: 'flex', gap: 2, alignItems: 'center' }}>
         <Tooltip title={topCollapsed ? '展开指标和趋势图' : '收起指标和趋势图'}>
@@ -284,7 +321,7 @@ function TopSection() {
 
   const qpsOption = useMemo(() => {
     if (stressHistory.length < 2) return null;
-    const totalQps = stressHistory.map((s) => s.actions.reduce((sum, a) => sum + a.avgQps, 0));
+    const totalQps = stressHistory.map((s) => (s.actions ?? []).reduce((sum, a) => sum + a.avgQps, 0));
     return sparkOption([{ name: 'QPS', data: totalQps, color: '#1677ff' }], dark);
   }, [stressHistory]);
 
@@ -308,11 +345,11 @@ function TopSection() {
     );
   }
 
-  const r = latestStress.robots;
-  const c = latestStress.connections;
-  const b = latestStress.bandwidth;
+  const r = latestStress.robots ?? { started: 0, running: 0, stopped: 0, errored: 0 };
+  const c = latestStress.connections ?? { established: 0, failed: 0, dropped: 0 };
+  const b = latestStress.bandwidth ?? { sendMBps: 0, recvMBps: 0 };
   const sys = latestSystem;
-  const actions = latestStress.actions;
+  const actions = latestStress.actions ?? [];
 
   const activeConns = Math.max(0, c.established - c.dropped);
   const onlineAgents = (agents ?? []).filter((a) => a.status !== 'offline').length;
@@ -442,22 +479,28 @@ function TopSection() {
    动作表（含搜索 + 过滤 + 可展开错误）
    ────────────────────────────────────────────────── */
 
-function ActionsSection({ dockHeight, topCollapsed }: { dockHeight: number; topCollapsed: boolean }) {
+function ActionsSection() {
   const latestStress = useRuntimeStore((s) => s.latestStress);
   const [search, setSearch] = useState('');
   const [actionsOnly, setActionsOnly] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollY, setScrollY] = useState(200);
 
-  // dockHeight 或 topCollapsed 变化时同步重算 scrollY
+  // ResizeObserver 监听容器实际高度变化，无论触发原因（拖拽 / 折叠 / 窗口缩放 / 首次渲染）
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const containerH = el.clientHeight;
-    const thead = el.querySelector('.ant-table-thead');
-    const headerH = thead?.getBoundingClientRect().height ?? 37;
-    setScrollY(Math.max(60, containerH - headerH - 2));
-  }, [dockHeight, topCollapsed]);
+    const update = () => {
+      const containerH = el.clientHeight;
+      const thead = el.querySelector('.ant-table-thead');
+      const headerH = thead?.getBoundingClientRect().height ?? 37;
+      setScrollY(Math.max(60, containerH - headerH - 2));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const dataSource = useMemo(() => {
     if (!latestStress) return [];
@@ -469,8 +512,6 @@ function ActionsSection({ dockHeight, topCollapsed }: { dockHeight: number; topC
     }
     return rows;
   }, [latestStress, search, actionsOnly]);
-
-  if (!latestStress) return null;
 
   return (
     <div className="monitor-dock__actions">
@@ -492,28 +533,20 @@ function ActionsSection({ dockHeight, topCollapsed }: { dockHeight: number; topC
         </span>
       </div>
       <div ref={containerRef} style={{ flex: 1, minHeight: 0 }}>
-        <Table<ActionMetric>
-          rowKey="name"
-          size="small"
-          dataSource={dataSource}
-          columns={ACTION_COLUMNS}
-          pagination={false}
-          scroll={{ x: 'max-content', y: scrollY }}
-          expandable={{
-            rowExpandable: (r) => !!r.errors && r.errors.length > 0,
-            expandedRowRender: (r) => (
-              <div style={{ fontSize: 12 }}>
-                <strong>错误明细：</strong>
-                {r.errors!.map((e) => (
-                  <div key={e.msg} style={{ marginTop: 2 }}>
-                    <Tag color="error">×{e.count}</Tag>
-                    {e.msg}
-                  </div>
-                ))}
-              </div>
-            ),
-          }}
-        />
+        {latestStress ? (
+          <Table<ActionMetric>
+            rowKey="name"
+            size="small"
+            dataSource={dataSource}
+            columns={ACTION_COLUMNS}
+            pagination={false}
+            scroll={{ x: 'max-content', y: scrollY }}
+          />
+        ) : (
+          <div style={{ color: 'var(--text-tertiary)', fontSize: 12, textAlign: 'center', paddingTop: 20 }}>
+            暂无数据
+          </div>
+        )}
       </div>
     </div>
   );

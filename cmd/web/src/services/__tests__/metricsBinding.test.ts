@@ -19,6 +19,7 @@ function action(name: string, overrides: Partial<ActionMetric> = {}): ActionMetr
     failureCount: 5,
     timeoutCount: 0,
     skippedCount: 0,
+    canceledCount: 0,
     executing: 3,
     successRate: 0.95,
     apdex: 0.92,

@@ -158,7 +158,32 @@ export async function setAdapterScript(content: string): Promise<ResourceFile> {
 }
 
 export async function clearAdapterScript(): Promise<void> {
-  await clear(adapterStore);
+  await del(CODEC_LUA_KEY, adapterStore);
+  notify();
+}
+
+// === Adapter (error.lua) ===
+
+const ERROR_LUA_KEY = 'error.lua';
+
+export async function getErrorMapScript(): Promise<ResourceFile | undefined> {
+  return get<ResourceFile>(ERROR_LUA_KEY, adapterStore);
+}
+
+export async function setErrorMapScript(content: string): Promise<ResourceFile> {
+  const file: ResourceFile = {
+    name: ERROR_LUA_KEY,
+    content,
+    size: byteLength(content),
+    uploadedAt: new Date().toISOString(),
+  };
+  await set(ERROR_LUA_KEY, file, adapterStore);
+  notify();
+  return file;
+}
+
+export async function clearErrorMapScript(): Promise<void> {
+  await del(ERROR_LUA_KEY, adapterStore);
   notify();
 }
 
@@ -169,7 +194,7 @@ const REQUIRED_ADAPTER_FUNCTIONS = [
   'encode_udp',
   'decode_tcp',
   'decode_udp',
-  'expected_response_key',
+  'expected_route_key',
 ];
 
 /** 检查适配器是否实现了所有必需函数，返回缺失的函数名列表 */
@@ -499,7 +524,7 @@ function byteLength(s: string): number {
  */
 export async function pushResourcesToBaseline(): Promise<void> {
   try {
-    const [protos, scripts, adapter] = await Promise.all([listProto(), listScript(), getAdapterScript()]);
+    const [protos, scripts, adapter, errorMap] = await Promise.all([listProto(), listScript(), getAdapterScript(), getErrorMapScript()]);
     const fd = new FormData();
 
     for (const p of protos) {
@@ -510,6 +535,9 @@ export async function pushResourcesToBaseline(): Promise<void> {
     }
     if (adapter) {
       fd.append('adapter/codec.lua', new Blob([adapter.content]), 'codec.lua');
+    }
+    if (errorMap) {
+      fd.append('adapter/error.lua', new Blob([errorMap.content]), 'error.lua');
     }
 
     await fetch(`${API_PREFIX}/resources/baseline`, { method: 'POST', body: fd });

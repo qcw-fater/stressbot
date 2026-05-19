@@ -16,6 +16,7 @@ import {
   Empty,
   Flex,
   Modal,
+  Segmented,
   Space,
   Table,
   Tabs,
@@ -25,7 +26,7 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadProps } from 'antd';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import { useShallow } from 'zustand/react/shallow';
 import { useEditorStore } from '../FlowEditor/store/editorStore';
@@ -45,9 +46,12 @@ import {
   setAdapterScript,
   clearAdapterScript,
   validateAdapter,
+  getErrorMapScript,
+  setErrorMapScript,
+  clearErrorMapScript,
 } from '@/services/resourcesStore';
 import { BaselineSyncModal } from './BaselineSyncModal';
-import { fetchBaselineAdapter } from '@/services/baselineApi';
+import { fetchBaselineAdapter, fetchBaselineErrorMap } from '@/services/baselineApi';
 
 export interface ResourcesDrawerProps {
   open: boolean;
@@ -110,45 +114,74 @@ export function ResourcesDrawer({ open, onClose }: ResourcesDrawerProps) {
   );
 }
 
-/* ─── Adapter Tab — 内嵌编辑器，复用 CodecAdapterDrawer 逻辑 ─── */
+/* ─── Adapter Tab — 内嵌编辑器，支持 codec.lua + error.lua 双文件切换 ─── */
+
+type AdapterFileKey = 'codec' | 'error';
+
+const ADAPTER_FILE_LABELS: Record<AdapterFileKey, string> = {
+  codec: 'codec.lua（必需）',
+  error: 'error.lua（可选）',
+};
 
 const ADAPTER_TEMPLATE = `-- conf/adapter/codec.lua
--- 通用协议适配器模板。请按照下面的接口要求实现具体逻辑。
+-- 协议适配器模板。必须实现以下 7 个函数，引擎通过这些接口完成编解码，不感知具体协议格式。
+-- 运行时环境：Lua 5.1，禁止使用 string.pack/unpack。
 
--- ─── 元信息（Go 初始化时调用一次） ────────────────────────────────
+-- ─── 元信息（初始化时调用一次）──────────────────────────────────────
 function header_size()
-    return 12  -- TODO: 你的协议头字节数
+    return 12  -- 协议头固定字节数
 end
 
 function body_length()
     return {
-        offset          = 0,           -- header 中 body 长度字段的起始字节
+        offset          = 0,           -- header 中 body 长度字段的起始字节偏移
         field_type      = "uint32_le", -- "uint16_le" / "uint16_be" / "uint32_le" / "uint32_be"
-        includes_header = false,       -- 长度字段是否包含 header 自身
+        includes_header = false,       -- 长度字段值是否包含 header 自身
     }
 end
 
--- ─── 编码 ─────────────────────────────────────────────────────────
+-- ─── 编码（每条出向消息调用）────────────────────────────────────────
 function encode_tcp(route, body, secret_key)
+    -- route: 不透明路由表（flow.json 中定义），典型 {cmd=3, act=1}
+    -- body:  序列化后的消息体字节
+    -- secret_key: 加密密钥（nil 表示不加密）
+    -- 返回: 完整数据包（header + body）
     return body
 end
 
 function encode_udp(route, body, secret_key)
+    -- 与 encode_tcp 签名相同，UDP 可使用不同的编码策略
     return body
 end
 
--- ─── 解码 ─────────────────────────────────────────────────────────
+-- ─── 解码（每条入向消息调用）────────────────────────────────────────
 function decode_tcp(data, secret_key)
+    -- data: 完整帧数据（已按 body_length 切帧）
+    -- 返回: routeKey (string), body (string), headerErr (number)
     return "0:0", "", 0
 end
 
 function decode_udp(data, secret_key)
+    -- 与 decode_tcp 分离，UDP 可使用不同的解码策略
     return "0:0", "", 0
 end
 
--- ─── 路由匹配 ─────────────────────────────────────────────────────
-function expected_response_key(route)
+-- ─── 路由匹配（请求-响应配对）────────────────────────────────────────
+function expected_route_key(route)
+    -- 从发送 route 计算期望的响应路由键，用于请求-响应匹配
     return ""
+end
+`;
+
+const ERROR_MAP_TEMPLATE = `-- conf/adapter/error.lua
+-- 可选：服务端错误码映射。未提供此文件时，引擎静默忽略，错误码以原始数字展示。
+-- 结果按错误码永久缓存，运行时不可变，需重启才能更新。
+
+function describe_error(code)
+    local errors = {
+        -- [1004] = "金币不足",
+    }
+    return errors[code] or ""
 end
 `;
 
@@ -157,81 +190,124 @@ function AdapterTab() {
   const theme = useEditorStore((s) => s.theme);
   const monacoTheme = theme === 'dark' ? 'vs-dark' : 'light';
 
-  const [content, setContent] = useState('');
-  const [source, setSource] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  const [activeFile, setActiveFile] = useState<AdapterFileKey>('codec');
+  const [contents, setContents] = useState<Record<AdapterFileKey, string>>({ codec: '', error: '' });
+  const [sources, setSources] = useState<Record<AdapterFileKey, string | null>>({ codec: null, error: null });
+  const [loadErrors, setLoadErrors] = useState<Record<AdapterFileKey, boolean>>({ codec: false, error: false });
 
-  useEffect(() => {
-    if (loaded) return;
-    setLoaded(true);
-    setLoadError(false);
-    getAdapterScript().then((file) => {
+  // 加载指定文件的内容
+  const loadFile = async (key: AdapterFileKey) => {
+    setLoadErrors((prev) => ({ ...prev, [key]: false }));
+    if (key === 'codec') {
+      const file = await getAdapterScript();
       if (file) {
-        setContent(file.content);
-        setSource('已保存');
+        setContents((prev) => ({ ...prev, codec: file.content }));
+        setSources((prev) => ({ ...prev, codec: '已保存' }));
       } else {
-        fetchBaselineAdapter().then((text) => {
-            if (text) {
-              setContent(text);
-              setSource('默认模板');
-              void setAdapterScript(text);
-            } else {
-              setContent('');
-              setSource(null);
-              setLoadError(true);
-            }
-          })
-          .catch(() => {
-            setContent('');
-            setSource(null);
-            setLoadError(true);
-          });
+        const text = await fetchBaselineAdapter();
+        if (text) {
+          setContents((prev) => ({ ...prev, codec: text }));
+          setSources((prev) => ({ ...prev, codec: '默认模板' }));
+          void setAdapterScript(text);
+        } else {
+          setContents((prev) => ({ ...prev, codec: '' }));
+          setSources((prev) => ({ ...prev, codec: null }));
+          setLoadErrors((prev) => ({ ...prev, codec: true }));
+        }
       }
-    });
-  }, [loaded]);
+    } else {
+      const file = await getErrorMapScript();
+      if (file) {
+        setContents((prev) => ({ ...prev, error: file.content }));
+        setSources((prev) => ({ ...prev, error: '已保存' }));
+      } else {
+        const text = await fetchBaselineErrorMap();
+        if (text) {
+          setContents((prev) => ({ ...prev, error: text }));
+          setSources((prev) => ({ ...prev, error: '默认模板' }));
+        } else {
+          setContents((prev) => ({ ...prev, error: ERROR_MAP_TEMPLATE }));
+          setSources((prev) => ({ ...prev, error: '模板（未保存）' }));
+        }
+      }
+    }
+  };
+
+  // 切换文件时加载对应内容（未加载过的才请求）
+  const loaded = useRef<Set<AdapterFileKey>>(new Set());
+  const handleFileSwitch = (val: string | number) => {
+    const key = val as AdapterFileKey;
+    setActiveFile(key);
+    if (!loaded.current.has(key)) {
+      loaded.current.add(key);
+      loadFile(key);
+    }
+  };
+
+  // 首次加载 codec
+  useEffect(() => {
+    loaded.current.add('codec');
+    loadFile('codec');
+  }, []);
 
   const onUpload: UploadProps['beforeUpload'] = async (file) => {
     const text = await file.text();
-    setContent(text);
-    setSource(file.name);
-    setLoadError(false);
-    await setAdapterScript(text);
+    setContents((prev) => ({ ...prev, [activeFile]: text }));
+    setSources((prev) => ({ ...prev, [activeFile]: file.name }));
+    setLoadErrors((prev) => ({ ...prev, [activeFile]: false }));
+    if (activeFile === 'codec') {
+      await setAdapterScript(text);
+    } else {
+      await setErrorMapScript(text);
+    }
     message.success(`已加载并保存：${file.name}`);
     return false;
   };
 
   const onUseTemplate = () => {
-    setContent(ADAPTER_TEMPLATE);
-    setSource('模板（未保存）');
-    setLoadError(false);
+    const tmpl = activeFile === 'codec' ? ADAPTER_TEMPLATE : ERROR_MAP_TEMPLATE;
+    setContents((prev) => ({ ...prev, [activeFile]: tmpl }));
+    setSources((prev) => ({ ...prev, [activeFile]: '模板（未保存）' }));
+    setLoadErrors((prev) => ({ ...prev, [activeFile]: false }));
     message.info('已载入模板，编辑后点击保存');
   };
 
   const onSave = async () => {
+    const content = contents[activeFile];
     if (!content.trim()) {
       message.warning('内容为空');
       return;
     }
-    await setAdapterScript(content);
-    setSource('已保存');
-    setLoadError(false);
-    const missing = await validateAdapter();
-    useEditorStore.getState().setAdapterMissing(missing);
-    if (missing.length > 0) {
-      message.warning(`已保存，但缺少 ${missing.length} 个必需函数：${missing.join(', ')}`);
+    if (activeFile === 'codec') {
+      await setAdapterScript(content);
+      setSources((prev) => ({ ...prev, codec: '已保存' }));
+      setLoadErrors((prev) => ({ ...prev, codec: false }));
+      const missing = await validateAdapter();
+      useEditorStore.getState().setAdapterMissing(missing);
+      if (missing.length > 0) {
+        message.warning(`已保存，但缺少 ${missing.length} 个必需函数：${missing.join(', ')}`);
+      } else {
+        message.success('已保存，启动任务时会自动上传');
+      }
     } else {
+      await setErrorMapScript(content);
+      setSources((prev) => ({ ...prev, error: '已保存' }));
+      setLoadErrors((prev) => ({ ...prev, error: false }));
       message.success('已保存，启动任务时会自动上传');
     }
   };
 
   const onClear = async () => {
-    await clearAdapterScript();
-    setContent('');
-    setSource(null);
-    setLoadError(true);
-    const missing = await validateAdapter();
-    useEditorStore.getState().setAdapterMissing(missing);
+    if (activeFile === 'codec') {
+      await clearAdapterScript();
+      const missing = await validateAdapter();
+      useEditorStore.getState().setAdapterMissing(missing);
+    } else {
+      await clearErrorMapScript();
+    }
+    setContents((prev) => ({ ...prev, [activeFile]: '' }));
+    setSources((prev) => ({ ...prev, [activeFile]: null }));
+    setLoadErrors((prev) => ({ ...prev, [activeFile]: true }));
     message.success('已清空');
   };
 
@@ -246,9 +322,21 @@ function AdapterTab() {
           children: (
             <Flex vertical gap={8}>
               <Alert type="info" showIcon message="协议适配器随任务下发" description="编辑后点保存。启动任务时会自动上传到服务端，无需手动部署。" />
-              {loadError && (
+              {loadErrors[activeFile] && (
                 <Alert type="error" showIcon message="未找到协议适配器" description="未找到适配器文件且默认模板不可用。请导入文件或载入空模板后保存。" />
               )}
+              <Flex justify="space-between" align="center">
+                <Segmented
+                  size="small"
+                  value={activeFile}
+                  onChange={handleFileSwitch}
+                  options={[
+                    { value: 'codec', label: ADAPTER_FILE_LABELS.codec },
+                    { value: 'error', label: ADAPTER_FILE_LABELS.error },
+                  ]}
+                />
+                <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{sources[activeFile] ?? '尚未加载'}</span>
+              </Flex>
               <Space size={4} wrap>
                 <Upload accept=".lua,text/plain" beforeUpload={onUpload} showUploadList={false}>
                   <Button icon={<InboxOutlined />} size="small">导入 .lua</Button>
@@ -256,14 +344,13 @@ function AdapterTab() {
                 <Button onClick={onUseTemplate} size="small">载入模板</Button>
                 <Button onClick={onSave} type="primary" size="small">保存</Button>
                 <Button onClick={onClear} danger size="small">清空</Button>
-                <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{source ?? '尚未加载'}</span>
               </Space>
-              <div style={{ height: 'calc(100vh - 360px)', border: '1px solid var(--border-color, rgba(0,0,0,0.06))' }}>
+              <div style={{ height: 'calc(100vh - 400px)', border: '1px solid var(--border-color, rgba(0,0,0,0.06))' }}>
                 <Editor
                   language="lua"
                   theme={monacoTheme}
-                  value={content}
-                  onChange={(v) => setContent(v ?? '')}
+                  value={contents[activeFile]}
+                  onChange={(v) => setContents((prev) => ({ ...prev, [activeFile]: v ?? '' }))}
                   options={{
                     fontSize: 12,
                     minimap: { enabled: false },
@@ -278,20 +365,33 @@ function AdapterTab() {
         {
           key: 'spec',
           label: '接口规范',
-          children: (
+          children: activeFile === 'codec' ? (
             <div style={{ fontSize: 12, lineHeight: 1.6 }}>
               <Alert
                 type="warning"
                 showIcon
                 style={{ marginBottom: 12 }}
-                description="必须实现以下 7 个全局函数。引擎只调用这些接口，不感知具体协议格式。"
+                description="codec.lua 必须实现以下 7 个全局函数。引擎只调用这些接口，不感知具体协议格式。"
               />
-              <SpecBlock title="1. 元信息（初始化时调用一次，结果缓存）" items={ADAPTER_SPEC.filter((f) => f.category === 'meta')} />
-              <SpecBlock title="2. 编码（每条出向消息调用）" items={ADAPTER_SPEC.filter((f) => f.category === 'encode')} />
-              <SpecBlock title="3. 解码（每条入向消息调用）" items={ADAPTER_SPEC.filter((f) => f.category === 'decode')} />
-              <SpecBlock title="4. 路由匹配（请求-响应配对）" items={ADAPTER_SPEC.filter((f) => f.category === 'route')} />
+              <SpecBlock title="1. 元信息（初始化时调用一次，结果缓存）" items={CODEC_SPEC.filter((f) => f.category === 'meta')} />
+              <SpecBlock title="2. 编码（每条出向消息调用）" items={CODEC_SPEC.filter((f) => f.category === 'encode')} />
+              <SpecBlock title="3. 解码（每条入向消息调用）" items={CODEC_SPEC.filter((f) => f.category === 'decode')} />
+              <SpecBlock title="4. 路由匹配（请求-响应配对）" items={CODEC_SPEC.filter((f) => f.category === 'route')} />
               <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 12 }}>
-                运行时约束：Lua 5.1（不支持 string.pack/unpack）；消息体长度须通过 body_length 配置；每个机器人独立运行环境，禁止共享可变全局状态。
+                运行时约束：Lua 5.1（不支持 string.pack/unpack）；帧分割由引擎根据 body_length 配置自动执行，解码函数收到的 data 已是完整帧；每个机器人独立运行环境，禁止共享可变全局状态。
+              </Typography.Text>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, lineHeight: 1.6 }}>
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 12 }}
+                description="error.lua 为可选文件，用于将服务端协议头错误码映射为可读描述。未提供时引擎静默忽略，错误码以原始数字展示。"
+              />
+              <SpecBlock title="错误码映射" items={ERROR_MAP_SPEC} />
+              <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 12 }}>
+                运行时约束：结果按错误码永久缓存，加载后不可变，需重启才能更新。
               </Typography.Text>
             </div>
           ),
@@ -301,14 +401,18 @@ function AdapterTab() {
   );
 }
 
-const ADAPTER_SPEC: Array<{ name: string; signature: string; desc: string; category: string }> = [
-  { name: 'header_size', signature: 'header_size() -> integer', desc: '返回协议头固定字节数。初始化时调用一次并缓存。', category: 'meta' },
-  { name: 'body_length', signature: 'body_length() -> { offset, field_type, includes_header }', desc: '描述如何从协议头字节中解析消息体长度。引擎使用此元信息进行高效解析。', category: 'meta' },
-  { name: 'encode_tcp', signature: 'encode_tcp(route, body, secret_key) -> string', desc: 'TCP 编码：根据 route + body + secret_key 拼装完整数据包（含 header）。', category: 'encode' },
-  { name: 'encode_udp', signature: 'encode_udp(route, body, secret_key) -> string', desc: 'UDP 编码：与 encode_tcp 类似，但前 N 字节保持明文。', category: 'encode' },
-  { name: 'decode_tcp', signature: 'decode_tcp(data, secret_key) -> response_key, body, header_err', desc: 'TCP 解码：返回路由键、消息体、协议头错误码。', category: 'decode' },
-  { name: 'decode_udp', signature: 'decode_udp(data, secret_key) -> response_key, body, header_err', desc: 'UDP 解码：与 decode_tcp 分离，允许对 UDP 使用不同策略。', category: 'decode' },
-  { name: 'expected_response_key', signature: 'expected_response_key(route) -> string', desc: '从发送 route 计算期望的响应路由键，用于请求-响应匹配。', category: 'route' },
+const CODEC_SPEC: Array<{ name: string; signature: string; desc: string; category: string }> = [
+  { name: 'header_size', signature: 'header_size() -> int', desc: '返回协议头固定字节数。初始化时调用一次。', category: 'meta' },
+  { name: 'body_length', signature: 'body_length() -> offset, field_type, includes_header', desc: '描述 body 长度字段在 header 中的位置和类型，引擎据此进行帧分割。', category: 'meta' },
+  { name: 'encode_tcp', signature: 'encode_tcp(route, body, secret_key) -> string', desc: 'TCP 编码：将 route + body + secret_key 编码为完整数据包。route 为 nil 表示无路由请求。', category: 'encode' },
+  { name: 'encode_udp', signature: 'encode_udp(route, body, secret_key) -> string', desc: 'UDP 编码：与 encode_tcp 签名相同，可使用不同的编码策略。', category: 'encode' },
+  { name: 'decode_tcp', signature: 'decode_tcp(data, secret_key) -> routeKey, body, headerErr', desc: 'TCP 解码：从完整帧中解析路由键、消息体和协议头错误码。headerErr 非零时引擎仍继续路由。', category: 'decode' },
+  { name: 'decode_udp', signature: 'decode_udp(data, secret_key) -> routeKey, body, headerErr', desc: 'UDP 解码：与 decode_tcp 分离，可使用不同的解码策略。', category: 'decode' },
+  { name: 'expected_route_key', signature: 'expected_route_key(route) -> string', desc: '从发送 route 计算期望的响应路由键，用于请求-响应匹配。', category: 'route' },
+];
+
+const ERROR_MAP_SPEC: Array<{ name: string; signature: string; desc: string }> = [
+  { name: 'describe_error', signature: 'describe_error(code) -> string', desc: '将协议头错误码映射为可读描述。返回空字符串表示未知错误码。' },
 ];
 
 function SpecBlock({ title, items }: { title: string; items: Array<{ name: string; signature: string; desc: string }> }) {

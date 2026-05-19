@@ -63,3 +63,8 @@ export async function fetchBaselineProtoContent(name: string): Promise<string | 
 export async function fetchBaselineAdapter(): Promise<string | null> {
   return fetchText(`${BASELINE_PREFIX}/adapter/codec.lua`);
 }
+
+/** 获取基线 adapter/error.lua 内容 */
+export async function fetchBaselineErrorMap(): Promise<string | null> {
+  return fetchText(`${BASELINE_PREFIX}/adapter/error.lua`);
+}
