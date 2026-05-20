@@ -26,7 +26,7 @@ export interface ScriptSyncResult {
 /**
  * 扫描 flow 中所有被引用的 lua 脚本名。覆盖：
  *   - actions[].script                       动作节点 lua 模式
- *   - callbacks[].script                     listen 回调 lua 模式
+ *   - listens[].script                     listen 回调 lua 模式
  *   - nodes[].condition (lua: 前缀)          boolean / loop 前置条件
  *   - nodes[].breakCondition (lua: 前缀)     loop 后置条件
  *
@@ -40,7 +40,7 @@ export function collectFlowScriptNames(flow: FlowJson): string[] {
   for (const a of Object.values(flow.actions ?? {})) {
     if (a?.script) set.add(a.script);
   }
-  for (const c of Object.values(flow.callbacks ?? {})) {
+  for (const c of Object.values(flow.listens ?? {})) {
     if (c?.script) set.add(c.script);
   }
   for (const n of Object.values(flow.nodes ?? {})) {
@@ -113,7 +113,7 @@ export async function syncFlowScriptsToIdb(
 
 /**
  * 收集 flow 中引用的所有 proto 全名。
- * 覆盖 actions[].c2sProto / s2cProto 和 callbacks[].s2cProto。
+ * 覆盖 actions[].c2sProto / s2cProto 和 listens[].s2cProto。
  */
 export function collectFlowProtoNames(flow: FlowJson): Set<string> {
   const set = new Set<string>();
@@ -121,7 +121,7 @@ export function collectFlowProtoNames(flow: FlowJson): Set<string> {
     if (a?.c2sProto) set.add(a.c2sProto);
     if (a?.s2cProto) set.add(a.s2cProto);
   }
-  for (const c of Object.values(flow.callbacks ?? {})) {
+  for (const c of Object.values(flow.listens ?? {})) {
     if (c?.s2cProto) set.add(c.s2cProto);
   }
   return set;

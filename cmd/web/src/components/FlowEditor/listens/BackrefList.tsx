@@ -51,17 +51,17 @@ export function BackrefList({ listenName }: BackrefListProps) {
   ) => {
     const node = flow.nodes[nodeId];
     if (!node) return;
-    const list = [...(node.listenCallbacks ?? [])];
+    const list = [...(node.listenRefs ?? [])];
     if (refIndex < 0 || refIndex >= list.length) return;
     list[refIndex] = { ...list[refIndex], ...patch };
-    updateNode(nodeId, { listenCallbacks: list });
+    updateNode(nodeId, { listenRefs: list });
   };
 
   const removeRef = (nodeId: string, refIndex: number) => {
     const node = flow.nodes[nodeId];
     if (!node) return;
-    const list = (node.listenCallbacks ?? []).filter((_, i) => i !== refIndex);
-    updateNode(nodeId, { listenCallbacks: list });
+    const list = (node.listenRefs ?? []).filter((_, i) => i !== refIndex);
+    updateNode(nodeId, { listenRefs: list });
   };
 
   return (
@@ -89,7 +89,7 @@ export function BackrefList({ listenName }: BackrefListProps) {
               第 {r.refIndex + 1} 条
             </span>
             <div style={{ flex: 1 }} />
-            <Tooltip title="从该 action 的 listenCallbacks 中删除这条监听">
+            <Tooltip title="从该 action 的 listenRefs 中删除这条监听">
               <Button
                 size="small"
                 danger

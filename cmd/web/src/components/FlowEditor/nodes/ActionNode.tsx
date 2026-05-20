@@ -2,7 +2,7 @@
  * action 节点：左入 + 右出（专用于监听 listen）。
  *
  * action 自身在父 sequence 内顺序执行，没有 next 字段，因此右侧 handle 仅承担"注册监听"语义：
- *   - 拖线到 listenCard → 追加 listenCallbacks
+ *   - 拖线到 listenCard → 追加 listenRefs
  *   - 拖线到普通节点不会建立任何业务关系（onConnect 中无视）
  *
  * 极简化布局：
@@ -27,7 +27,7 @@ interface NodeData {
 export function ActionNode({ id, data, selected }: NodeProps) {
   const { node, action } = data as unknown as NodeData;
   const pattern = action?.pattern ?? '?';
-  const listens = node.listenCallbacks?.length ?? 0;
+  const listens = node.listenRefs?.length ?? 0;
 
   return (
     <>

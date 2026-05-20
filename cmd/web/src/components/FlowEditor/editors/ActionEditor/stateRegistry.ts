@@ -13,6 +13,7 @@
 import type { ActionDef, FieldBind } from '@/types/action';
 import type { ListenDef } from '@/types/listen';
 import type { FlowNode } from '@/types/flow';
+import type { ProtoField } from '@/types/proto';
 import { protoRegistry } from '../../proto/ProtoRegistry';
 
 export interface StateKeyInfo {
@@ -185,6 +186,66 @@ function resolveFieldProto(
   }
 
   return currentMsg;
+}
+
+/** 格式化 proto 字段为可读类型字符串 */
+function formatFieldType(field: ProtoField): string {
+  if (field.kind === 'map') {
+    const valName = field.messageName
+      ? field.messageName.split('.').pop()!
+      : field.mapValue ?? field.type;
+    return `map<${field.mapKey}, ${valName}>`;
+  }
+  const baseName = field.kind === 'message'
+    ? field.messageName?.split('.').pop() ?? field.type
+    : field.kind === 'enum'
+      ? field.enumName?.split('.').pop() ?? field.type
+      : field.type;
+  return field.repeated ? `${baseName}[]` : baseName;
+}
+
+/** 沿字段路径解析到最后一个字段的类型描述 */
+function resolveFieldTypeInfo(rootProto: string, fieldPath: string): string | undefined {
+  if (!protoRegistry.isLoaded()) return undefined;
+
+  const cleanPath = fieldPath.replace(/\[\d+\]/g, '');
+  const parts = cleanPath.split('.').filter(Boolean);
+  if (parts.length === 0) return undefined;
+
+  let currentMsg = rootProto;
+
+  for (let i = 0; i < parts.length - 1; i++) {
+    const f = protoRegistry.resolveField(currentMsg, parts[i]);
+    if (!f) return undefined;
+    if (f.kind === 'message' && f.messageName) {
+      currentMsg = f.messageName;
+    } else if (f.kind === 'map' && f.messageName) {
+      currentMsg = f.messageName;
+    } else {
+      return undefined;
+    }
+  }
+
+  const last = protoRegistry.resolveField(currentMsg, parts[parts.length - 1]);
+  if (!last) return undefined;
+  return formatFieldType(last);
+}
+
+/**
+ * 解析 state key 的可读类型字符串，用于下拉列表展示。
+ *
+ * - storeField 存在：解析字段路径，显示最终字段类型（如 HeroInfo[]、uint64）
+ * - storeField 为空（存整个消息）：显示消息短名
+ * - 无 s2cProto：undefined
+ */
+export function resolveStateKeyDisplayType(info: StateKeyInfo): string | undefined {
+  if (!info.s2cProto) return undefined;
+
+  if (info.storeField) {
+    return resolveFieldTypeInfo(info.s2cProto, info.storeField);
+  }
+
+  return info.s2cProto.split('.').pop() ?? info.s2cProto;
 }
 
 /**

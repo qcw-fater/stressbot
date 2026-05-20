@@ -46,37 +46,46 @@ function successColor(rate: number): string {
 
 const APDEX_COLOR: Record<string, string> = {
   excellent: 'var(--color-success)',
-  good: '#bae637',
+  good: 'var(--chart-lime)',
   fair: 'var(--color-warning)',
-  poor: 'var(--color-orange, #fa8c16)',
+  poor: 'var(--chart-orange)',
   danger: 'var(--color-error)',
   unknown: 'var(--text-tertiary)',
 };
 
 function sparkOption(series: Array<{ name: string; data: number[]; color: string }>, dark: boolean) {
+  const cs = getComputedStyle(document.documentElement);
+  const resolve = (v: string, fb: string) => {
+    if (!v.startsWith('var(')) return v;
+    const name = v.slice(4, -1);
+    return cs.getPropertyValue(name).trim() || fb;
+  };
   const len = series[0]?.data.length ?? 0;
   const x = Array.from({ length: len }, (_, i) => i);
   return {
     grid: { left: 28, right: 4, top: 4, bottom: 14 },
     xAxis: { type: 'category', data: x, show: false },
-    yAxis: { type: 'value', axisLabel: { fontSize: 8, color: dark ? '#888' : '#aaa' }, splitLine: { lineStyle: { color: dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' } } },
+    yAxis: { type: 'value', axisLabel: { fontSize: 8, color: cs.getPropertyValue('--text-tertiary').trim() || (dark ? '#888' : '#aaa') }, splitLine: { lineStyle: { color: cs.getPropertyValue('--divider-bg').trim() || (dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)') } } },
     tooltip: {
       trigger: 'axis',
-      textStyle: { fontSize: 10, color: dark ? '#e0e0e0' : '#333' },
-      backgroundColor: dark ? '#2a2a2a' : '#fff',
-      borderColor: dark ? '#444' : '#ddd',
+      textStyle: { fontSize: 10, color: cs.getPropertyValue('--text-primary').trim() || (dark ? '#e0e0e0' : '#333') },
+      backgroundColor: cs.getPropertyValue('--bg-panel').trim() || (dark ? '#2a2a2a' : '#fff'),
+      borderColor: cs.getPropertyValue('--border-color').trim() || (dark ? '#444' : '#ddd'),
       valueFormatter: (v: number) => v?.toFixed(2) ?? '—',
     },
-    series: series.map((s) => ({
-      name: s.name,
-      type: 'line',
-      smooth: true,
-      symbol: 'none',
-      data: s.data,
-      itemStyle: { color: s.color },
-      areaStyle: { opacity: 0.12 },
-      lineStyle: { width: 1.5 },
-    })),
+    series: series.map((s) => {
+      const c = resolve(s.color, dark ? '#1677ff' : '#1677ff');
+      return {
+        name: s.name,
+        type: 'line',
+        smooth: true,
+        symbol: 'none',
+        data: s.data,
+        itemStyle: { color: c },
+        lineStyle: { color: c, width: 1.5 },
+        areaStyle: { color: c, opacity: 0.12 },
+      };
+    }),
   };
 }
 
@@ -112,7 +121,6 @@ const ACTION_COLUMNS: ColumnsType<ActionMetric> = [
   { title: '成功', dataIndex: 'successCount', key: 'successCount', width: 60, sorter: (a, b) => a.successCount - b.successCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: 'var(--color-success)' }}>{v}</span> },
   { title: '失败', dataIndex: 'failureCount', key: 'failureCount', width: 52, sorter: (a, b) => a.failureCount - b.failureCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-error)' : 'var(--text-tertiary)' }}>{v}</span> },
   { title: '超时', dataIndex: 'timeoutCount', key: 'timeoutCount', width: 52, sorter: (a, b) => a.timeoutCount - b.timeoutCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-orange)' : 'var(--text-tertiary)' }}>{v}</span> },
-  { title: '跳过', dataIndex: 'skippedCount', key: 'skippedCount', width: 52, sorter: (a, b) => a.skippedCount - b.skippedCount, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
   { title: 'Apdex', dataIndex: 'apdex', key: 'apdex', width: 68, sorter: (a, b) => a.apdex - b.apdex, render: (v: number) => <ApdexCell value={v} /> },
   { title: 'avg(ms)', key: 'avgMs', width: 64, sorter: (a, b) => a.latency.avgMs - b.latency.avgMs, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.avgMs)}</span> },
   { title: 'p50(ms)', key: 'p50Ms', width: 64, sorter: (a, b) => a.latency.p50Ms - b.latency.p50Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.p50Ms)}</span> },
@@ -121,15 +129,15 @@ const ACTION_COLUMNS: ColumnsType<ActionMetric> = [
   { title: 'max(ms)', key: 'maxMs', width: 64, sorter: (a, b) => a.latency.maxMs - b.latency.maxMs, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.maxMs)}</span> },
   { title: '超均(ms)', dataIndex: 'timeoutAvgMs', key: 'timeoutAvgMs', width: 68, sorter: (a, b) => a.timeoutAvgMs - b.timeoutAvgMs, render: (v: number) => <span style={NUMERIC_STYLE}>{fmtMs(v)}</span> },
   {
-    title: '流量',
+    title: '流量(均)',
     key: 'traffic',
     width: 110,
     sorter: (a, b) => (a.avgSendBytes + a.avgRecvBytes) - (b.avgSendBytes + b.avgRecvBytes),
     render: (_, r) => (
       <span style={{ ...NUMERIC_STYLE, fontSize: 11, whiteSpace: 'nowrap' }}>
-        <span style={{ color: 'var(--text-secondary)' }}>↑</span>{fmtBytes(r.avgSendBytes)}
+        <span style={{ color: 'var(--chart-cyan)' }}>↑</span>{fmtBytes(r.avgSendBytes)}
         {' '}
-        <span style={{ color: 'var(--text-secondary)' }}>↓</span>{fmtBytes(r.avgRecvBytes)}
+        <span style={{ color: 'var(--chart-purple)' }}>↓</span>{fmtBytes(r.avgRecvBytes)}
       </span>
     ),
   },
@@ -316,13 +324,13 @@ function TopSection() {
   // 迷你趋势图
   const cpuOption = useMemo(() => {
     if (systemHistory.length < 2) return null;
-    return sparkOption([{ name: 'CPU%', data: systemHistory.map((s) => s.avgCpuPercent), color: '#fa8c16' }], dark);
+    return sparkOption([{ name: 'CPU%', data: systemHistory.map((s) => s.avgCpuPercent), color: 'var(--chart-orange)' }], dark);
   }, [systemHistory]);
 
   const qpsOption = useMemo(() => {
     if (stressHistory.length < 2) return null;
     const totalQps = stressHistory.map((s) => (s.actions ?? []).reduce((sum, a) => sum + a.avgQps, 0));
-    return sparkOption([{ name: 'QPS', data: totalQps, color: '#1677ff' }], dark);
+    return sparkOption([{ name: 'QPS', data: totalQps, color: 'var(--chart-blue)' }], dark);
   }, [stressHistory]);
 
   if (!latestStress) {
@@ -415,11 +423,11 @@ function TopSection() {
         {/* 数据网格 */}
         <div className="md-grid-row">
           <div className="md-grid-item">
-            <span className="md-grid-label">↑ 发送</span>
+            <span className="md-grid-label" style={{ color: 'var(--chart-cyan)' }}>↑ 发送</span>
             <span className="md-grid-value">{send.value.toFixed(send.precision)} {send.suffix}</span>
           </div>
           <div className="md-grid-item">
-            <span className="md-grid-label">↓ 接收</span>
+            <span className="md-grid-label" style={{ color: 'var(--chart-purple)' }}>↓ 接收</span>
             <span className="md-grid-value">{recv.value.toFixed(recv.precision)} {recv.suffix}</span>
           </div>
           <div className="md-grid-item">

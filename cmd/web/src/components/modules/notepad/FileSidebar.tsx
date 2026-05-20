@@ -9,9 +9,10 @@ import {
   ImportOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
-import { App as AntApp, Button, Input, Modal, Popconfirm } from 'antd';
+import { App as AntApp, Button, Input, Modal, Popconfirm, Tooltip } from 'antd';
 import { useCallback, useRef, useState } from 'react';
 import { useNotepadStore, type NotepadFileMeta } from './notepadStore';
+import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
 
 const LANG_ICON: Record<string, { char: string; color: string }> = {
   lua: { char: '🌙', color: '#f5a623' },
@@ -39,6 +40,7 @@ function langIcon(lang: string) {
 
 export function FileSidebar() {
   const { message } = AntApp.useApp();
+  const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
   const files = useNotepadStore((s) => s.files);
   const activeFileId = useNotepadStore((s) => s.activeFileId);
   const searchQuery = useNotepadStore((s) => s.searchQuery);
@@ -177,9 +179,9 @@ export function FileSidebar() {
                   }}
                 />
               ) : (
-                <span className="notepad-file-name" title={f.name}>
-                  {f.name}
-                </span>
+                <Tooltip title={f.name} mouseEnterDelay={0.4}>
+                  <span className="notepad-file-name">{f.name}</span>
+                </Tooltip>
               )}
               {!isRenaming && (
                 <div className="notepad-file-actions">
@@ -258,6 +260,7 @@ export function FileSidebar() {
         cancelText="取消"
         okButtonProps={{ disabled: !createName.trim() }}
         width={360}
+        styles={{ mask: { zIndex: popupZ }, wrapper: { zIndex: popupZ + 1 } }}
       >
         <Input
           placeholder="文件名（含扩展名，如 notes.txt）"

@@ -1014,7 +1014,8 @@ func adapterDecodeTCP(L *lua.LState) int {
 	if ctx == nil || ctx.Adapter == nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LNil)
-		return 2
+			L.Push(lua.LNumber(0))
+			return 3
 	}
 	data := []byte(L.CheckString(1))
 	var key []byte
@@ -1036,7 +1037,8 @@ func adapterDecodeUDP(L *lua.LState) int {
 	if ctx == nil || ctx.Adapter == nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LNil)
-		return 2
+			L.Push(lua.LNumber(0))
+			return 3
 	}
 	data := []byte(L.CheckString(1))
 	var key []byte

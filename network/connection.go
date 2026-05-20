@@ -1,4 +1,4 @@
-package network
+﻿package network
 
 import (
 	"context"
@@ -190,7 +190,7 @@ func (c *Connection) Send(data []byte) (int, error) {
 	err := c.sendFunc(data)
 	if err != nil {
 		stresslog.Error("[NETWORK] Send 发送失败", zap.String("service", c.serviceName), zap.Error(err))
-		return 0, engine.NewActionError(errcode.ErrSendFailed, c.serviceName)
+		return 0, engine.NewActionError(errcode.ErrSendFailed, c.serviceName, err)
 	}
 	// 全局带宽统计
 	monitor.Global().AddBandwidth(int64(n), 0)
@@ -312,9 +312,11 @@ func (c *Connection) onClose() {
 
 	// 业务"意外断开"回调：仅非主动关闭时触发（用于 robot 主连接断开 → 停 robot）
 	if atomic.LoadInt32(&c.intentionalClose) == 0 && c.onDisconnect != nil {
+		c.onDisconnect()
 	}
 	// 监控"关闭"回调：主动/被动均触发；与 ConnEstablished 配对，保证 active = open - close 准确
 	if c.onClosed != nil {
+		c.onClosed()
 	}
 
 	stresslog.Debug("[NETWORK] 连接资源已清理", zap.String("service", c.serviceName), zap.String("robot", c.robotName))
@@ -333,6 +335,7 @@ func (c *Connection) Close() {
 	c.cancel()
 	// CAS 保证 onClosed 只触发一次
 	if c.onClosed != nil {
+		c.onClosed()
 	}
 	stresslog.Debug("[NETWORK] 连接资源已清理", zap.String("service", c.serviceName), zap.String("robot", c.robotName))
 }
@@ -381,3 +384,4 @@ func (c *Connection) OnReceive(routeKey string, body []byte, headerErr uint64) {
 
 	c.mu.Unlock()
 }
+

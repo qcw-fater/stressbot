@@ -109,12 +109,12 @@ func (s *AdminServer) Run() error {
 
 	// 注册路由（已包裹 recover 中间件）
 	s.httpSrv = &http.Server{
-		Addr:    s.cfg.ListenAddr,
+		Addr:    fmt.Sprintf(":%d", s.cfg.Port),
 		Handler: s.registerRoutes(),
 	}
 
 	stresslog.Info("admin 启动",
-		zap.String("addr", s.cfg.ListenAddr),
+		zap.Int("port", s.cfg.Port),
 		zap.Bool("history", s.cfg.History.Enabled))
 
 	// 信号处理
@@ -168,7 +168,7 @@ func (s *AdminServer) onTaskTerminal(task *Task) {
 			finalStress = s.aggregator.AggregateStress(taskID).Snapshot
 		}
 		finalSys := s.aggregator.AggregateSystem()
-		if err := s.history.Archive(task, finalStress, finalSys); err != nil {
+		if err := s.history.Archive(context.Background(), task, finalStress, finalSys); err != nil {
 			stresslog.Error("任务归档失败",
 				zap.String("taskId", taskID),
 				zap.Error(err))

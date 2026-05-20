@@ -195,25 +195,43 @@ func (d *Dialer) Stop() error {
 }
 
 // DialTCP 建立 TCP 连接并绑定业务层 Connection。
+// ctx 用于超时/取消：如果 ctx 在拨号完成前被取消，返回 context 错误。
 func (d *Dialer) DialTCP(ctx context.Context, address string, conn *Connection) (gnet.Conn, error) {
-	gconn, err := d.client.Dial("tcp", address)
-	if err != nil {
-		return nil, fmt.Errorf("TCP 拨号失败 %s: %w", address, err)
+	type dialResult struct {
+		conn gnet.Conn
+		err  error
 	}
+	ch := make(chan dialResult, 1)
+	go func() {
+		gc, e := d.client.Dial("tcp", address)
+		ch <- dialResult{gc, e}
+	}()
 
-	conn.sendFunc = func(data []byte) error {
-		return gconn.AsyncWrite(data, nil)
+	select {
+	case <-ctx.Done():
+		// ctx 取消，拨号可能仍在进行；丢弃结果（gnet 连接会被 GC）
+		return nil, ctx.Err()
+	case res := <-ch:
+		if res.err != nil {
+			return nil, fmt.Errorf("TCP 拨号失败 %s: %w", address, res.err)
+		}
+		gconn := res.conn
+
+		conn.sendFunc = func(data []byte) error {
+			return gconn.AsyncWrite(data, nil)
+		}
+		conn.closeFunc = func() error {
+			return gconn.Close()
+		}
+
+		d.server.registry.register(gconn, conn)
+
+		stresslog.Debug("[GNET] TCP 连接已建立",
+			zap.String("address", address), zap.String("service", conn.serviceName), zap.String("robot", conn.robotName))
+		return gconn, nil
 	}
-	conn.closeFunc = func() error {
-		return gconn.Close()
-	}
-
-	d.server.registry.register(gconn, conn)
-
-	stresslog.Debug("[GNET] TCP 连接已建立",
-		zap.String("address", address), zap.String("service", conn.serviceName), zap.String("robot", conn.robotName))
-	return gconn, nil
 }
+
 
 // DialUDP 建立 UDP 连接并绑定业务层 Connection。
 func (d *Dialer) DialUDP(address string, conn *Connection) (gnet.Conn, error) {

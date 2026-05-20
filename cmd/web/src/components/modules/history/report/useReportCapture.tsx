@@ -16,7 +16,7 @@ export function useReportCapture(
     if (!detail || !timeseries) return;
 
     const actions = detail.finalSnapshot?.actions ?? [];
-    const charts = captureAllCharts(actions, timeseries.stress);
+    const charts = captureAllCharts(actions, timeseries.stress, timeseries.system);
 
     const htmlBody = renderToStaticMarkup(
       <ReportHtml detail={detail} timeseries={timeseries} charts={charts} />,

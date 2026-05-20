@@ -7,8 +7,8 @@
  *   - lua          : `{ script }` （可选 s2cProto）  执行脚本
  *
  * 需要严格区分：
- *   - ListenRef.callback = null            : 不调用 dispatcher
- *   - ListenRef.callback = "x", listens.x = {}  : 经 dispatcher 后 silent 消费
+ *   - ListenRef.listen = null            : 不调用 dispatcher
+ *   - ListenRef.listen = "x", listens.x = {}  : 经 dispatcher 后 silent 消费
  */
 
 import type { StoreMapping } from './action';

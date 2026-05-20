@@ -44,7 +44,7 @@ export function ActiveTaskGuardModal({ open, task, onClose, onAttached }: Active
     >
       {task && (
         <>
-          <Descriptions size="small" column={1} bordered>
+          <Descriptions size="small" column={1}>
             <Descriptions.Item label="任务名">{task.name}</Descriptions.Item>
             <Descriptions.Item label="任务 ID">
               <code>{task.id}</code>

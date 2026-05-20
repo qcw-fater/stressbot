@@ -225,7 +225,7 @@ func (a *LuaAdapter) encode(fnName string, route any, body []byte, secretKey []b
 	}
 
 	if err := L.CallByParam(lua.P{Fn: fn, NRet: 1, Protect: true}, routeVal, bodyVal, keyVal); err != nil {
-		stresslog.Error("[ADAPTER] encode 调用失败", zap.String("fn", fnName), zap.Error(err))
+		stresslog.Error("[ADAPTER] encode 调用失败", zap.String("fn", fnName), zap.Any("route", route), zap.Error(err))
 		return nil
 	}
 
@@ -263,7 +263,7 @@ func (a *LuaAdapter) decode(fnName string, data []byte, secretKey []byte) (strin
 	}
 
 	if err := L.CallByParam(lua.P{Fn: fn, NRet: 3, Protect: true}, dataVal, keyVal); err != nil {
-		stresslog.Error("[ADAPTER] decode 调用失败", zap.String("fn", fnName), zap.Error(err))
+		stresslog.Error("[ADAPTER] decode 调用失败", zap.String("fn", fnName), zap.Int("dataLen", len(data)), zap.Error(err))
 		return "", nil, 0
 	}
 
@@ -288,7 +288,7 @@ func (a *LuaAdapter) ExpectedRouteKey(route any) string {
 	routeVal := RouteToLuaValue(L, route)
 
 	if err := L.CallByParam(lua.P{Fn: fn, NRet: 1, Protect: true}, routeVal); err != nil {
-		stresslog.Error("[ADAPTER] expected_route_key() 调用失败", zap.Error(err))
+		stresslog.Error("[ADAPTER] expected_route_key() 调用失败", zap.Any("route", route), zap.Error(err))
 		return ""
 	}
 

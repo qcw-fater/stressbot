@@ -29,7 +29,7 @@ func ExportCSV(c *MetricsCollector, path string) error {
 	defer w.Flush()
 
 	header := []string{
-		"接口名", "样本数", "成功次数", "超时次数", "错误次数", "跳过次数",
+		"接口名", "样本数", "成功次数", "超时次数", "错误次数",
 		"成功率", "平均响应(ms)", "最小响应(ms)", "最大响应(ms)",
 		"P50(ms)", "P90(ms)", "P95(ms)", "P99(ms)",
 		"Apdex", "平均发送字节", "平均接收字节",
@@ -45,7 +45,6 @@ func ExportCSV(c *MetricsCollector, path string) error {
 			fmt.Sprintf("%d", a.SuccessCount),
 			fmt.Sprintf("%d", a.TimeoutCount),
 			fmt.Sprintf("%d", a.FailureCount),
-			fmt.Sprintf("%d", a.SkippedCount),
 			fmt.Sprintf("%.4f", a.SuccessRate),
 			fmt.Sprintf("%.2f", a.Latency.AvgMs),
 			fmt.Sprintf("%.2f", a.Latency.MinMs),

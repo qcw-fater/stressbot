@@ -14,22 +14,45 @@ import { useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useRuntimeStore } from '@/services';
 
-function lineOption(title: string, x: string[], series: Array<{ name: string; data: number[]; color?: string }>) {
+const cssVar = (v: string, fallback: string) =>
+  getComputedStyle(document.documentElement).getPropertyValue(v).trim() || fallback;
+
+const COLORS = {
+  green: () => cssVar('--chart-green', '#52c41a'),
+  red: () => cssVar('--chart-red', '#ff4d4f'),
+  blue: () => cssVar('--chart-blue', '#1677ff'),
+  orange: () => cssVar('--chart-orange', '#fa8c16'),
+  cyan: () => cssVar('--chart-cyan', '#13c2c2'),
+  purple: () => cssVar('--chart-purple', '#722ed1'),
+};
+
+const textColor = () => cssVar('--text-primary', '#333');
+const splitColor = () => cssVar('--border-color', '#e8e8e8');
+const tipBg = () => cssVar('--bg-elevated', '#fff');
+const tipBorder = () => cssVar('--border-color', '#e8e8e8');
+
+function lineOption(title: string, x: string[], series: Array<{ name: string; data: number[]; color: string }>) {
   return {
-    title: { text: title, left: 0, top: 0, textStyle: { fontSize: 12, fontWeight: 600 } },
-    tooltip: { trigger: 'axis' },
-    legend: { right: 0, top: 0, textStyle: { fontSize: 11 } },
+    title: { text: title, left: 0, top: 0, textStyle: { fontSize: 12, fontWeight: 600, color: textColor() } },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: tipBg(),
+      borderColor: tipBorder(),
+      textStyle: { color: textColor(), fontSize: 11 },
+    },
+    legend: { right: 0, top: 0, textStyle: { fontSize: 11, color: textColor() } },
     grid: { left: 36, right: 12, top: 28, bottom: 24 },
-    xAxis: { type: 'category', data: x, axisLabel: { fontSize: 10, hideOverlap: true } },
-    yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
+    xAxis: { type: 'category', data: x, axisLabel: { fontSize: 10, color: textColor(), hideOverlap: true }, splitLine: { lineStyle: { color: splitColor() } } },
+    yAxis: { type: 'value', axisLabel: { fontSize: 10, color: textColor() }, splitLine: { lineStyle: { color: splitColor() } } },
     series: series.map((s) => ({
       name: s.name,
       type: 'line',
       smooth: true,
       symbol: 'none',
       data: s.data,
-      itemStyle: s.color ? { color: s.color } : undefined,
-      areaStyle: { opacity: 0.08 },
+      itemStyle: { color: s.color },
+      lineStyle: { color: s.color },
+      areaStyle: { color: s.color, opacity: 0.08 },
     })),
   };
 }
@@ -43,8 +66,8 @@ export function TrendsTab() {
     if (stressHistory.length === 0) return null;
     const x = stressHistory.map((s) => new Date(s.timestamp).toLocaleTimeString());
     return lineOption('机器人状态', x, [
-      { name: 'running', data: stressHistory.map((s) => s.robots.running), color: '#52c41a' },
-      { name: 'errored', data: stressHistory.map((s) => s.robots.errored), color: '#f5222d' },
+      { name: 'running', data: stressHistory.map((s) => s.robots.running), color: COLORS.green() },
+      { name: 'errored', data: stressHistory.map((s) => s.robots.errored), color: COLORS.red() },
     ]);
   }, [stressHistory]);
 
@@ -52,23 +75,23 @@ export function TrendsTab() {
     if (stressHistory.length === 0) return null;
     const x = stressHistory.map((s) => new Date(s.timestamp).toLocaleTimeString());
     const totalQps = stressHistory.map((s) => s.actions.reduce((sum, a) => sum + a.avgQps, 0));
-    return lineOption('集群 QPS', x, [{ name: 'qps', data: totalQps, color: '#1677ff' }]);
+    return lineOption('集群 QPS', x, [{ name: 'qps', data: totalQps, color: COLORS.blue() }]);
   }, [stressHistory]);
 
   const cpuOption = useMemo(() => {
     if (systemHistory.length === 0) return null;
     const x = systemHistory.map((s) => new Date(s.timestamp).toLocaleTimeString());
     return lineOption('平均 CPU%', x, [
-      { name: 'avg cpu', data: systemHistory.map((s) => s.avgCpuPercent), color: '#fa8c16' },
+      { name: 'avg cpu', data: systemHistory.map((s) => s.avgCpuPercent), color: COLORS.orange() },
     ]);
   }, [systemHistory]);
 
   const bwOption = useMemo(() => {
     if (stressHistory.length === 0) return null;
     const x = stressHistory.map((s) => new Date(s.timestamp).toLocaleTimeString());
-    return lineOption('带宽 MB/s', x, [
-      { name: '↑ send', data: stressHistory.map((s) => +s.bandwidth.sendMBps.toFixed(2)), color: '#13c2c2' },
-      { name: '↓ recv', data: stressHistory.map((s) => +s.bandwidth.recvMBps.toFixed(2)), color: '#722ed1' },
+    return lineOption('带宽 KB/s', x, [
+      { name: '↑ send', data: stressHistory.map((s) => +(s.bandwidth.sendMBps * 1024).toFixed(2)), color: COLORS.cyan() },
+      { name: '↓ recv', data: stressHistory.map((s) => +(s.bandwidth.recvMBps * 1024).toFixed(2)), color: COLORS.purple() },
     ]);
   }, [stressHistory]);
 

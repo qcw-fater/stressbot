@@ -7,11 +7,6 @@ import (
 	"stressbot/errcode"
 )
 
-// ErrFieldNil 表示必需字段为空时的跳过信号。
-// 与 executor 层的 errSkip 区分：ErrFieldNil 用于 bindFields 中字段缺失的场景，
-// errSkip 用于 errorStrategy=skip 时跳出当前 sequence/loop。
-var ErrFieldNil = errors.New("action skipped: required field is nil")
-
 // ErrTimeout 表示动作超时。
 // 被 NewTimeoutError 包装后，通过 errors.Is(err, ErrTimeout) 识别。
 var ErrTimeout = errors.New("action timeout")

@@ -674,7 +674,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
         ]}
       />
 
-      <Descriptions size="small" column={2} bordered style={{ marginTop: 8 }}>
+      <Descriptions size="small" column={2} style={{ marginTop: 8 }}>
         <Descriptions.Item label="Proto 文件">
           {protos.length === 0 ? <Tag color="default">无</Tag> : <Tag color="blue">{protos.length} 个</Tag>}
         </Descriptions.Item>

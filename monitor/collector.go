@@ -17,7 +17,6 @@ const (
 	ResultSuccess  ActionResult = iota // 执行成功
 	ResultFailure                      // 执行失败（非超时）
 	ResultTimeout                      // 超时（TCPRequest/WaitListen 无响应）
-	ResultSkipped                      // 跳过（必填字段为空，ErrActionSkip）
 	ResultCanceled                     // ctx 取消（任务停止/连接断开）
 )
 
@@ -38,9 +37,9 @@ type errKey struct {
 
 // errorBucket 错误桶，原子计数 + 环形缓冲最近 3 条 Detail。
 type errorBucket struct {
-	count   atomic.Int64      // 累计出现次数
-	msgRing [3]atomic.Value   // 环形缓冲，存最近 3 条 Detail 字符串
-	ringIdx atomic.Uint32     // 环形缓冲写入位置（递增取模）
+	count   atomic.Int64    // 累计出现次数
+	msgRing [3]atomic.Value // 环形缓冲，存最近 3 条 Detail 字符串
+	ringIdx atomic.Uint32   // 环形缓冲写入位置（递增取模）
 }
 
 func (b *errorBucket) record(detail string) {
@@ -67,9 +66,9 @@ func (b *errorBucket) snapshot() (count int64, msgs []string) {
 // CodedError 带错误码的错误接口。monitor 包定义此接口以避免循环依赖 engine 包。
 type CodedError interface {
 	error
-	ErrorKind() errcode.Kind  // 返回错误分类（framework / server）
-	ErrorCode() uint64        // 返回错误码
-	ErrorDetail() string      // 返回错误详情（用于环形缓冲存储）
+	ErrorKind() errcode.Kind // 返回错误分类（framework / server）
+	ErrorCode() uint64       // 返回错误码
+	ErrorDetail() string     // 返回错误详情（用于环形缓冲存储）
 }
 
 // actionMetrics per-action 指标，全部使用原子操作保证无锁热路径安全。
@@ -78,7 +77,6 @@ type actionMetrics struct {
 	failureCount    atomic.Int64      // 失败次数（非超时）
 	timeoutCount    atomic.Int64      // 超时次数
 	timeoutTotalMs  atomic.Int64      // 超时样本累计延迟（毫秒），用于计算平均超时延迟
-	skippedCount    atomic.Int64      // 跳过次数（必填字段为空）
 	canceledCount   atomic.Int64      // 取消次数（ctx 取消）
 	executing       atomic.Int64      // 当前正在执行中的并发数
 	latency         *LatencyHistogram // 延迟直方图（仅成功样本）
@@ -95,25 +93,23 @@ func newActionMetrics() *actionMetrics {
 
 // CollectorConfig 监控配置。
 type CollectorConfig struct {
-	Enabled        bool   `json:"enabled"`        // 是否启用监控
-	ReportInterval string `json:"reportInterval"` // 控制台报告间隔（如 "10s"）
-	HTTPEnabled    bool   `json:"httpEnabled"`    // 是否启用 HTTP JSON 端点
-	HTTPPort       int    `json:"httpPort"`       // HTTP 端口（默认 6060）
-	CsvPath        string `json:"csvPath"`        // CSV 输出路径（默认 log/metrics.csv）
-	ApdexT         int    `json:"apdexT"`         // Apdex T 阈值（毫秒），默认 100
+	Enabled     bool `json:"enabled"`     // 是否启用监控
+	HTTPEnabled bool `json:"httpEnabled"` // 是否启用 HTTP JSON 端点
+	HTTPPort    int  `json:"httpPort"`    // HTTP 端口号
+	ApdexT      int  `json:"apdexT"`      // Apdex T 阈值（毫秒），默认 100
 }
 
 // MetricsCollector 全局指标收集器（单例）。
 // enabled=false 时所有方法均为 no-op，压测核心路径零开销。
 type MetricsCollector struct {
-	enabled   bool             // 是否启用
-	cfg       CollectorConfig  // 运行期配置副本
-	cfgMu     sync.RWMutex     // 保护 cfg.ApdexT 的运行期读写（任务级可调）
-	startTime time.Time        // 收集器启动时间
+	enabled   bool            // 是否启用
+	cfg       CollectorConfig // 运行期配置副本
+	cfgMu     sync.RWMutex    // 保护 cfg.ApdexT 的运行期读写（任务级可调）
+	startTime time.Time       // 收集器启动时间
 
-	actions sync.Map     // string → *actionMetrics，按 action 名称索引
-	namesMu sync.Mutex   // 保护 names 切片的追加
-	names   []string     // 按首次出现顺序排列的 action 名称，保证输出稳定
+	actions sync.Map   // string → *actionMetrics，按 action 名称索引
+	namesMu sync.Mutex // 保护 names 切片的追加
+	names   []string   // 按首次出现顺序排列的 action 名称，保证输出稳定
 
 	robotsStarted atomic.Int64 // 已启动的机器人总数
 	robotsRunning atomic.Int64 // 当前运行中的机器人数量
@@ -140,12 +136,6 @@ func Init(cfg CollectorConfig) {
 	}
 	if global.cfg.ApdexT <= 0 {
 		global.cfg.ApdexT = 100
-	}
-	if global.cfg.HTTPPort <= 0 {
-		global.cfg.HTTPPort = 6060
-	}
-	if global.cfg.CsvPath == "" {
-		global.cfg.CsvPath = "log/metrics.csv"
 	}
 }
 
@@ -245,8 +235,6 @@ func (c *MetricsCollector) RecordAction(name string, result ActionResult, durati
 	case ResultTimeout:
 		am.timeoutCount.Add(1)
 		am.timeoutTotalMs.Add(duration.Milliseconds())
-	case ResultSkipped:
-		am.skippedCount.Add(1)
 	case ResultCanceled:
 		am.canceledCount.Add(1)
 	}

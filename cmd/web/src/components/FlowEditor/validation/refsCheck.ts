@@ -249,11 +249,11 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
         });
       }
       // ListenRef 校验
-      (node.listenCallbacks ?? []).forEach((r, i) => {
+      (node.listenRefs ?? []).forEach((r, i) => {
         if (!r.server?.trim()) {
           issues.push({
             severity: 'error', code: 'LISTEN_NO_SERVER',
-            message: `action 节点 "${id}" listenCallbacks[${i}] 缺少 server`,
+            message: `action 节点 "${id}" listenRefs[${i}] 缺少 server`,
             location: { kind: 'node', id },
           });
         } else {
@@ -262,7 +262,7 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
           if (!hasPrefix) {
             issues.push({
               severity: 'error', code: 'LISTEN_SERVER_FORMAT',
-              message: `action 节点 "${id}" listenCallbacks[${i}] server 格式错误（应为 tcp:<name> 或 udp:<name>）`,
+              message: `action 节点 "${id}" listenRefs[${i}] server 格式错误（应为 tcp:<name> 或 udp:<name>）`,
               location: { kind: 'node', id },
             });
           } else {
@@ -270,7 +270,7 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
             if (parts.length < 2 || !parts[1]) {
               issues.push({
                 severity: 'error', code: 'LISTEN_SERVER_FORMAT',
-                message: `action 节点 "${id}" listenCallbacks[${i}] server 缺少服务名`,
+                message: `action 节点 "${id}" listenRefs[${i}] server 缺少服务名`,
                 location: { kind: 'node', id },
               });
             }
@@ -331,7 +331,7 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
   for (const dr of graph.danglingRefs) {
     issues.push({
       severity: 'error', code: 'LISTEN_CB_NOT_FOUND',
-      message: `节点 "${dr.nodeId}" listenCallbacks[${dr.refIndex}] 引用了不存在的 listen "${dr.ref.callback}"`,
+      message: `节点 "${dr.nodeId}" listenRefs[${dr.refIndex}] 引用了不存在的 listen "${dr.ref.listen}"`,
       location: { kind: 'node', id: dr.nodeId },
     });
   }

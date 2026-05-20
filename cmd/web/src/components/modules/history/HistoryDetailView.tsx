@@ -9,9 +9,10 @@ import dayjs from 'dayjs';
 import ReactECharts from 'echarts-for-react';
 import { useEffect, useMemo, useState } from 'react';
 import { historyApi, showApiError } from '@/services';
-import type { ActionMetric, HistoryDetail, TimeseriesPoint, StressSnapshot } from '@/types/api';
+import type { ActionMetric, ClusterSystemSnapshot, HistoryDetail, TimeseriesPoint, StressAggregate, StressSnapshot } from '@/types/api';
 import { ApdexCell } from '@/components/monitoring/shared/ApdexCell';
 import { fmtBytes, fmtBytesPlain, fmtMs, NUMERIC_STYLE } from '@/components/monitoring/shared/formats';
+import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { useReportCapture } from './report/useReportCapture';
 import './HistoryPanel.css';
 
@@ -78,39 +79,76 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
     }
   };
 
-  const trendsOption = useMemo(() => {
+  const theme = useEditorStore((s) => s.theme);
+  const { qpsOption, apdexOption, cpuOption, bwOption } = useMemo(() => {
     const stressTs = timeseries?.stress ?? [];
-    if (stressTs.length === 0) return null;
-    const x = stressTs.map((p) => `${p.elapsedSec}s`);
-    const qpsData = stressTs.map((p) => {
-      const snap = (p.snapshot ?? {}) as Partial<StressSnapshot>;
-      return (snap.actions ?? []).reduce((sum, a) => sum + a.avgQps, 0);
-    });
-    const apdexData = stressTs.map((p) => {
-      const snap = (p.snapshot ?? {}) as Partial<StressSnapshot>;
-      let total = 0, w = 0;
-      for (const a of snap.actions ?? []) {
-        total += a.apdex * a.sampleCount;
-        w += a.sampleCount;
+    const systemTs = timeseries?.system ?? [];
+    const hasStress = stressTs.length > 0;
+
+    const stressX = stressTs.map((p) => `${p.elapsedSec}s`);
+    const systemX = systemTs.map((p) => `${p.elapsedSec}s`);
+
+    const unwrap = (p: TimeseriesPoint) =>
+      ((p.snapshot as unknown as StressAggregate)?.snapshot ?? {}) as Partial<StressSnapshot>;
+
+    const qps: number[] = [];
+    const apdex: number[] = [];
+    const sendKBps: number[] = [];
+    const recvKBps: number[] = [];
+
+    if (hasStress) {
+      for (const p of stressTs) {
+        const snap = unwrap(p);
+        qps.push(+((snap.actions ?? []).reduce((s, a) => s + a.avgQps, 0)).toFixed(2));
+        let t = 0, w = 0;
+        for (const a of snap.actions ?? []) { t += a.apdex * a.sampleCount; w += a.sampleCount; }
+        apdex.push(w > 0 ? +(t / w).toFixed(2) : 0);
+        sendKBps.push(+((snap.bandwidth?.sendMBps ?? 0) * 1024).toFixed(2));
+        recvKBps.push(+((snap.bandwidth?.recvMBps ?? 0) * 1024).toFixed(2));
       }
-      return w > 0 ? +(total / w).toFixed(3) : 0;
-    });
-    return {
-      title: { text: '运行趋势', textStyle: { fontSize: 12, fontWeight: 600 } },
-      tooltip: { trigger: 'axis' },
-      legend: { right: 0, textStyle: { fontSize: 11 } },
-      grid: { left: 40, right: 40, top: 30, bottom: 24 },
-      xAxis: { type: 'category', data: x, axisLabel: { fontSize: 10, hideOverlap: true } },
-      yAxis: [
-        { type: 'value', name: 'QPS', axisLabel: { fontSize: 10 } },
-        { type: 'value', name: 'Apdex', max: 1, min: 0, axisLabel: { fontSize: 10 } },
-      ],
-      series: [
-        { name: 'QPS', type: 'line', smooth: true, symbol: 'none', data: qpsData, itemStyle: { color: '#1677ff' } },
-        { name: 'Apdex', type: 'line', smooth: true, symbol: 'none', data: apdexData, yAxisIndex: 1, itemStyle: { color: '#52c41a' } },
-      ],
+    }
+
+    const cpu = systemTs.map((p) => +((p.snapshot as ClusterSystemSnapshot).avgCpuPercent).toFixed(2));
+
+    const isDark = theme === 'dark';
+    const root = document.documentElement;
+    const css = (v: string, fb: string) => getComputedStyle(root).getPropertyValue(v).trim() || fb;
+    const axisLine = isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.15)';
+    const labelClr = isDark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)';
+    const splitClr = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+    const tipBg = isDark ? 'rgba(20,20,28,0.92)' : 'rgba(255,255,255,0.96)';
+    const tipBorder = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.09)';
+    const tipText = isDark ? '#e0e0e0' : '#333';
+
+    const tooltip = {
+      trigger: 'axis' as const,
+      backgroundColor: tipBg,
+      borderColor: tipBorder,
+      textStyle: { color: tipText, fontSize: 11 },
     };
-  }, [timeseries]);
+
+    const line = (series: Array<{ name: string; data: number[]; color: string }>, x: string[], yMax?: number) => ({
+      tooltip,
+      legend: { right: 0, top: 0, textStyle: { fontSize: 11, color: labelClr } },
+      grid: { left: 36, right: 8, top: 24, bottom: 24 },
+      xAxis: { type: 'category', data: x, axisLabel: { fontSize: 10, color: labelClr }, axisLine: { lineStyle: { color: axisLine } } },
+      yAxis: { type: 'value', max: yMax, axisLabel: { fontSize: 10, color: labelClr }, splitLine: { lineStyle: { color: splitClr } } },
+      series: series.map((s) => ({
+        name: s.name, type: 'line', smooth: true, symbol: 'none', data: s.data,
+        areaStyle: { opacity: 0.08 }, itemStyle: { color: s.color },
+      })),
+    });
+
+    return {
+      qpsOption: hasStress ? line([{ name: 'QPS', data: qps, color: css('--chart-blue', '#1677ff') }], stressX) : null,
+      apdexOption: hasStress ? line([{ name: 'Apdex', data: apdex, color: css('--chart-green', '#52c41a') }], stressX, 1) : null,
+      cpuOption: systemTs.length > 0 ? line([{ name: 'CPU%', data: cpu, color: css('--chart-orange', '#fa8c16') }], systemX) : null,
+      bwOption: hasStress ? line([
+        { name: '↑ 发送', data: sendKBps, color: css('--chart-cyan', '#13c2c2') },
+        { name: '↓ 接收', data: recvKBps, color: css('--chart-purple', '#722ed1') },
+      ], stressX) : null,
+    };
+  }, [timeseries, theme]);
 
   const actionTable = useMemo(() => {
     const finalSnap = (detail?.finalSnapshot ?? {}) as Partial<StressSnapshot>;
@@ -141,7 +179,6 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
       { title: '成功', dataIndex: 'successCount', key: 'successCount', width: 70, sorter: (a, b) => a.successCount - b.successCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: 'var(--color-success)' }}>{v}</span> },
       { title: '失败', dataIndex: 'failureCount', key: 'failureCount', width: 70, sorter: (a, b) => a.failureCount - b.failureCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-error)' : 'var(--text-tertiary)' }}>{v}</span> },
       { title: '超时', dataIndex: 'timeoutCount', key: 'timeoutCount', width: 70, sorter: (a, b) => a.timeoutCount - b.timeoutCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-orange)' : 'var(--text-tertiary)' }}>{v}</span> },
-      { title: '跳过', dataIndex: 'skippedCount', key: 'skippedCount', width: 70, sorter: (a, b) => a.skippedCount - b.skippedCount, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
       { title: 'Apdex', dataIndex: 'apdex', key: 'apdex', width: 80, sorter: (a, b) => a.apdex - b.apdex, render: (v: number) => <ApdexCell value={v} /> },
       { title: 'QPS', dataIndex: 'avgQps', key: 'avgQps', width: 78, sorter: (a, b) => a.avgQps - b.avgQps, render: (v: number) => <span style={NUMERIC_STYLE}>{v.toFixed(1)}</span> },
       { title: 'avg(ms)', key: 'avgMs', width: 76, sorter: (a, b) => a.latency.avgMs - b.latency.avgMs, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.avgMs)}</span> },
@@ -151,15 +188,15 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
       { title: 'max(ms)', key: 'maxMs', width: 76, sorter: (a, b) => a.latency.maxMs - b.latency.maxMs, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.maxMs)}</span> },
       { title: '超均(ms)', dataIndex: 'timeoutAvgMs', key: 'timeoutAvgMs', width: 84, sorter: (a, b) => a.timeoutAvgMs - b.timeoutAvgMs, render: (v: number) => <span style={NUMERIC_STYLE}>{fmtMs(v)}</span> },
       {
-        title: '流量',
+        title: '流量(均)',
         key: 'traffic',
         width: 110,
         sorter: (a, b) => (a.avgSendBytes + a.avgRecvBytes) - (b.avgSendBytes + b.avgRecvBytes),
         render: (_, r) => (
           <span style={{ ...NUMERIC_STYLE, fontSize: 11, whiteSpace: 'nowrap' }}>
-            <span style={{ color: 'var(--text-secondary)' }}>↑</span>{fmtBytes(r.avgSendBytes)}
+            <span style={{ color: 'var(--chart-cyan)' }}>↑</span>{fmtBytes(r.avgSendBytes)}
             {' '}
-            <span style={{ color: 'var(--text-secondary)' }}>↓</span>{fmtBytes(r.avgRecvBytes)}
+            <span style={{ color: 'var(--chart-purple)' }}>↓</span>{fmtBytes(r.avgRecvBytes)}
           </span>
         ),
       },
@@ -244,11 +281,33 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
         )}
       </div>
 
-      {/* ── 运行趋势 — 全宽 ── */}
-      {trendsOption && (
-        <div className="hp-glass hp-glass-thin hp-trends-card">
-          <div className="hp-section-title">运行趋势</div>
-          <ReactECharts option={trendsOption} style={{ height: 220 }} notMerge lazyUpdate />
+      {/* ── 运行趋势 — 2×2 网格 ── */}
+      {(qpsOption || cpuOption) && (
+        <div className="hp-trends-grid">
+          {qpsOption && (
+            <div className="hp-glass hp-glass-thin hp-trends-card">
+              <div className="hp-section-title">QPS</div>
+              <ReactECharts option={qpsOption} style={{ height: 180 }} notMerge lazyUpdate />
+            </div>
+          )}
+          {apdexOption && (
+            <div className="hp-glass hp-glass-thin hp-trends-card">
+              <div className="hp-section-title">Apdex</div>
+              <ReactECharts option={apdexOption} style={{ height: 180 }} notMerge lazyUpdate />
+            </div>
+          )}
+          {cpuOption && (
+            <div className="hp-glass hp-glass-thin hp-trends-card">
+              <div className="hp-section-title">CPU</div>
+              <ReactECharts option={cpuOption} style={{ height: 180 }} notMerge lazyUpdate />
+            </div>
+          )}
+          {bwOption && (
+            <div className="hp-glass hp-glass-thin hp-trends-card">
+              <div className="hp-section-title">带宽 (KB/s)</div>
+              <ReactECharts option={bwOption} style={{ height: 180 }} notMerge lazyUpdate />
+            </div>
+          )}
         </div>
       )}
 

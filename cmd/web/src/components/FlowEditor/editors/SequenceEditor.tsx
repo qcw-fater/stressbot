@@ -35,7 +35,6 @@ export function SequenceEditor({ nodeId }: SequenceEditorProps) {
         dataSource={next.map((id, i) => ({ id, i }))}
         rowKey={(r) => `${r.i}-${r.id}`}
         size="small"
-        bordered
         locale={{ emptyText: '尚无子节点，点击"添加"' }}
         renderItem={(item) => (
           <List.Item>

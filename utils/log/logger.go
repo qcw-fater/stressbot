@@ -24,14 +24,14 @@ var logFilePath string
 
 // Config 日志配置的结构体
 type Config struct {
-	PrintConsole bool   `yaml:"printConsole"` // 是否控制台输出
-	LogLevel     string `yaml:"logLevel"`     // 日志等级[debug, info, warn, error]
-	MaxSize      int    `yaml:"maxSize"`      // 日志文件大小，超过则切割，单位M
-	MaxBackups   int    `yaml:"maxBackups"`   // 日志文件最大保留个数
-	MaxAge       int    `yaml:"maxAge"`       // 日志文件最大保存天数
-	LocalTime    bool   `yaml:"localTime"`    // 是否使用服务器本地时间
-	Compress     bool   `yaml:"compress"`     // 日志是否压缩
-	WeChatToken  string `yaml:"weChatToken"`  // 企微Hook密钥
+	PrintConsole bool   `json:"printConsole" yaml:"printConsole"` // 是否控制台输出
+	LogLevel     string `json:"level" yaml:"logLevel"`            // 日志等级[debug, info, warn, error]
+	MaxSize      int    `json:"maxSize" yaml:"maxSize"`            // 日志文件大小，超过则切割，单位M
+	MaxBackups   int    `json:"maxBackups" yaml:"maxBackups"`      // 日志文件最大保留个数
+	MaxAge       int    `json:"maxAge" yaml:"maxAge"`              // 日志文件最大保存天数
+	LocalTime    bool   `json:"localTime" yaml:"localTime"`        // 是否使用服务器本地时间
+	Compress     bool   `json:"compress" yaml:"compress"`          // 日志是否压缩
+	WeChatToken  string `json:"weChatToken" yaml:"weChatToken"`    // 企微Hook密钥
 }
 
 func defaultConfig() *Config {
@@ -66,9 +66,23 @@ func callerEncoder(caller zapcore.EntryCaller, enc zapcore.PrimitiveArrayEncoder
 // InitLog 初始化日志 logger
 func InitLog(logPath, serviceName string, conf *Config, buildLogLevel string) {
 	logFilePath = logPath
-	// 如果配置为空，则使用默认配置
+	// 填充零值默认
 	if conf == nil {
 		conf = defaultConfig()
+	} else {
+		def := defaultConfig()
+		if conf.LogLevel == "" {
+			conf.LogLevel = def.LogLevel
+		}
+		if conf.MaxSize == 0 {
+			conf.MaxSize = def.MaxSize
+		}
+		if conf.MaxBackups == 0 {
+			conf.MaxBackups = def.MaxBackups
+		}
+		if conf.MaxAge == 0 {
+			conf.MaxAge = def.MaxAge
+		}
 	}
 	defaultConf = conf
 	if buildLogLevel != "" {

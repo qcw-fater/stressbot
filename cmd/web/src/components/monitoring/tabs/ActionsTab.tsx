@@ -72,7 +72,6 @@ export function ActionsTab() {
     { title: '成功', dataIndex: 'successCount', key: 'successCount', width: 70, sorter: (a, b) => a.successCount - b.successCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: 'var(--color-success)' }}>{v}</span> },
     { title: '失败', dataIndex: 'failureCount', key: 'failureCount', width: 70, sorter: (a, b) => a.failureCount - b.failureCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-error)' : 'var(--text-tertiary)' }}>{v}</span> },
     { title: '超时', dataIndex: 'timeoutCount', key: 'timeoutCount', width: 70, sorter: (a, b) => a.timeoutCount - b.timeoutCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-orange)' : 'var(--text-tertiary)' }}>{v}</span> },
-    { title: '跳过', dataIndex: 'skippedCount', key: 'skippedCount', width: 70, sorter: (a, b) => a.skippedCount - b.skippedCount, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
     { title: '取消', dataIndex: 'canceledCount', key: 'canceledCount', width: 70, sorter: (a, b) => a.canceledCount - b.canceledCount, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
     { title: 'Apdex', dataIndex: 'apdex', key: 'apdex', width: 80, sorter: (a, b) => a.apdex - b.apdex, render: (v: number) => <ApdexCell value={v} /> },
     { title: 'avg(ms)', key: 'avgMs', width: 76, sorter: (a, b) => a.latency.avgMs - b.latency.avgMs, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.avgMs)}</span> },
@@ -82,15 +81,15 @@ export function ActionsTab() {
     { title: 'max(ms)', key: 'maxMs', width: 76, sorter: (a, b) => a.latency.maxMs - b.latency.maxMs, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.maxMs)}</span> },
     { title: '超均(ms)', dataIndex: 'timeoutAvgMs', key: 'timeoutAvgMs', width: 84, sorter: (a, b) => a.timeoutAvgMs - b.timeoutAvgMs, render: (v: number) => <span style={NUMERIC_STYLE}>{fmtMs(v)}</span> },
     {
-      title: '流量',
+      title: '流量(均)',
       key: 'traffic',
       width: 110,
       sorter: (a, b) => (a.avgSendBytes + a.avgRecvBytes) - (b.avgSendBytes + b.avgRecvBytes),
       render: (_, r) => (
         <span style={{ ...NUMERIC_STYLE, fontSize: 11, whiteSpace: 'nowrap' }}>
-          <span style={{ color: 'var(--text-secondary)' }}>↑</span>{fmtBytes(r.avgSendBytes)}
+          <span style={{ color: 'var(--chart-cyan)' }}>↑</span>{fmtBytes(r.avgSendBytes)}
           {' '}
-          <span style={{ color: 'var(--text-secondary)' }}>↓</span>{fmtBytes(r.avgRecvBytes)}
+          <span style={{ color: 'var(--chart-purple)' }}>↓</span>{fmtBytes(r.avgRecvBytes)}
         </span>
       ),
     },

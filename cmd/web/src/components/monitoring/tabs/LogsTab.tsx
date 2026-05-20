@@ -17,6 +17,7 @@ import { logsApi, usePolling, useRuntimeStore } from '@/services';
 import { API_PREFIX } from '@/services/env';
 import type { LogEntry, LogFileInfo } from '@/types/api';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
+import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
 import dayjs from 'dayjs';
 import { registerLogLanguage, getLogTheme } from './logLanguage';
 import './LogsTab.css';
@@ -80,6 +81,7 @@ export function LogsTab({ open }: { open: boolean }) {
   const agents = useRuntimeStore((s) => s.agents);
   const themeMode = useEditorStore((s) => s.theme);
   const monacoTheme = getLogTheme(themeMode === 'dark');
+  const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
 
   const saved = useMemo(() => loadState(), []);
 
@@ -450,6 +452,7 @@ export function LogsTab({ open }: { open: boolean }) {
         onCancel={() => setFileModalOpen(false)}
         footer={null}
         width={520}
+        styles={{ mask: { zIndex: popupZ }, wrapper: { zIndex: popupZ + 1 } }}
       >
         <Table
           dataSource={fileList}

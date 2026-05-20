@@ -51,8 +51,12 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
     if (action) {
       updateAction(actionName, next);
     } else {
-      // 第一次编辑：补上 ActionDef
-      const name = actionName || nodeId;
+      // 第一次编辑：优先用 description 做 action 名，回退 nodeId
+      const base = (node.description?.trim()) || actionName || nodeId;
+      const map = useFlowStore.getState().actions;
+      let name = base;
+      let i = 1;
+      while (map[name]) name = `${base}_${i++}`;
       addAction(name, next);
       if (!actionName) updateNode(nodeId, { action: name });
     }
@@ -113,7 +117,7 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
         items={[
           {
             key: 'node',
-            label: '节点级字段（errorStrategy / optional / delayMs）',
+            label: '节点级字段（errorStrategy / delayMs）',
             children: (
               <Form layout="vertical">
                 <Form.Item label="错误处理策略（动作失败时）">
@@ -127,9 +131,6 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
                     ]}
                   />
                 </Form.Item>
-                <Form.Item label={<Tooltip title="依赖缺失时静默跳过（如 state key 不存在）" mouseEnterDelay={0.4}><span>optional（依赖缺失时静默跳过）</span></Tooltip>}>
-                  <Switch checked={!!effectiveAction.optional} onChange={(v) => onActionDefChange({ ...effectiveAction, optional: v })} />
-                </Form.Item>
                 <Form.Item label="节点延迟 delayMs">
                   <DelayInput value={node.delayMs} onChange={(v) => updateNode(nodeId, { delayMs: v })} />
                 </Form.Item>
@@ -138,7 +139,7 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
           },
           {
             key: 'listen',
-            label: `监听注册（${node.listenCallbacks?.length ?? 0}）`,
+            label: `监听注册（${node.listenRefs?.length ?? 0}）`,
             children: <ListenRefsTable nodeId={nodeId} />,
           },
         ]}

@@ -8,7 +8,7 @@
  *   loop.body                   → edge[source=id, sourceHandle='body', target=body, type='loopBody']
  *   boolean.trueNext/falseNext  → edge[source=id, sourceHandle='true'/'false', target=*, type='branch']
  *   weighted.options[i]         → edge[source=id, sourceHandle=`opt-${i}`, target=*, type='weight', label=weight]
- *   action.listenCallbacks[i]   → edge[source=id, sourceHandle='listen', target=`__cb__${callback}`, type='listen']（callback=null 不画边）
+ *   action.listenRefs[i]   → edge[source=id, sourceHandle='listen', target=`__cb__${callback}`, type='listen']（callback=null 不画边）
  */
 
 import type { Edge, Node as RFNode } from '@xyflow/react';
@@ -16,18 +16,18 @@ import type { FlowNode, ListenRef, WeightedOption } from '@/types/flow';
 import type { ListenDef } from '@/types/listen';
 import type { ActionDef } from '@/types/action';
 
-/** flow.json 原始格式（JSON 键名为 callbacks） */
+/** flow.json 原始格式 */
 export interface FlowJsonInput {
   defaultDelayMs: number;
   nodes: Record<string, FlowNode>;
   actions: Record<string, ActionDef>;
-  callbacks: Record<string, ListenDef>;
+  listens: Record<string, ListenDef>;
 }
 
 export interface ConvertResult {
   rfNodes: RFNode[];
   rfEdges: Edge[];
-  /** listen name → 引用计数（来自所有 action 的 listenCallbacks） */
+  /** listen name → 引用计数（来自所有 action 的 listenRefs） */
   listenRefCount: Record<string, number>;
   /** listen name → 注册它的 action 节点 ID 列表（用于反向悬停高亮） */
   nodesByListen: Record<string, string[]>;
@@ -64,7 +64,7 @@ export function jsonToFlow(flow: FlowJsonInput): ConvertResult {
   // 2. ListenCard 节点（事件区，独立节点类型 'listenCard'）
   // 在事件区按 listen 名字母序竖排
   let cardIdx = 0;
-  for (const [cbName, cb] of Object.entries(flow.callbacks)) {
+  for (const [cbName, cb] of Object.entries(flow.listens)) {
     rfNodes.push({
       id: `__cb__${cbName}`,
       type: 'listenCard',
@@ -86,11 +86,11 @@ export function jsonToFlow(flow: FlowJsonInput): ConvertResult {
     rfEdges.push(...edges);
 
     // 同时统计 listen 引用计数 + 反向索引（节点 → listen）
-    if (node.type === 'action' && node.listenCallbacks) {
-      for (const ref of node.listenCallbacks) {
-        if (ref.callback != null) {
-          listenRefCount[ref.callback] = (listenRefCount[ref.callback] ?? 0) + 1;
-          (nodesByListen[ref.callback] ??= []).push(id);
+    if (node.type === 'action' && node.listenRefs) {
+      for (const ref of node.listenRefs) {
+        if (ref.listen != null) {
+          listenRefCount[ref.listen] = (listenRefCount[ref.listen] ?? 0) + 1;
+          (nodesByListen[ref.listen] ??= []).push(id);
         }
       }
     }
@@ -104,7 +104,7 @@ function emitEdgesFor(id: string, node: FlowNode, flow: FlowJsonInput): Edge[] {
     case 'sequence':
       return emitSequenceEdges(id, node.next ?? []);
     case 'action':
-      return emitListenEdges(id, node.listenCallbacks ?? [], flow);
+      return emitListenEdges(id, node.listenRefs ?? [], flow);
     case 'loop':
       return node.body ? [makeEdge(`${id}->body->${node.body}`, id, node.body, 'loopBody', 'body')] : [];
     case 'boolean': {
@@ -147,13 +147,13 @@ function emitWeightedEdges(id: string, options: WeightedOption[]): Edge[] {
 function emitListenEdges(id: string, refs: ListenRef[], flow: FlowJsonInput): Edge[] {
   const out: Edge[] = [];
   refs.forEach((ref, i) => {
-    if (ref.callback == null) return; // null = 静默丢弃，不画边
-    if (!(ref.callback in flow.callbacks)) return; // 引用不存在则忽略（校验阶段会报错）
+    if (ref.listen == null) return; // null = 静默丢弃，不画边
+    if (!(ref.listen in flow.listens)) return; // 引用不存在则忽略（校验阶段会报错）
     out.push(
       makeEdge(
-        `${id}->listen[${i}]->${ref.callback}`,
+        `${id}->listen[${i}]->${ref.listen}`,
         id,
-        `__cb__${ref.callback}`,
+        `__cb__${ref.listen}`,
         'listen',
         'listen',
         { route: ref.route, server: ref.server, refIndex: i },

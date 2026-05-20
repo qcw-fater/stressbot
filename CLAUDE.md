@@ -53,13 +53,14 @@ cd cmd/web && npm run build                # → dist/，Admin 静态托管
 - **`robot/`** — `Robot` 是单个压测客户端实例，持有独立的 state、网络连接、Lua 运行时和执行器。`Manager` 负责批量创建（`StartAll`）和渐进加压（`StartWithRampUp`）。`robotActionHandler` 实现 `engine.ActionHandler`，桥接 engine 层与 network 层。`netSenderAdapter` 将 Robot 适配到 `NetSender` 接口。
 - **`network/`** — 基于 gnet 的 TCP/UDP 连接层。`Client` 管理多服务命名连接池（`TCPConn` + `UDPConn`）。`Connection` 处理收发、请求-响应匹配、持久化监听、per-connection 心跳。`Dialer` 封装 gnet 事件循环。
 - **`protox/`** — 动态 protobuf 加载与反射。`Loader` 发现 .proto 文件，`Registry` 编译，`Factory` 按全名在运行时创建/序列化/解析消息。
-- **`script/`** — Lua 运行时池（`gopher-lua`）。每个 Robot 获取独占 `LState`。向 Lua 暴露 7 个模块（`network`、`robot`、`utils`、`proto`、`json`、`log`、`adapter`），共 65 个函数。Lua 访问通过 `luaMu` 互斥锁串行化（回调/心跳可能在其他 goroutine 触发）。
+- **`script/`** — Lua 运行时池（`gopher-lua`）。每个 Robot 获取独占 `LState`。向 Lua 暴露 6 个模块（`network`、`robot`、`utils`、`proto`、`json`、`log`），`adapter` 模块内嵌于 `api_network.go`，共 68 个函数。Lua 访问通过 `luaMu` 互斥锁串行化（回调/心跳可能在其他 goroutine 触发）。
 - **`state/`** — 线程安全的键值状态存储。保存服务器响应字段（通过 `store` 映射），支持 list/map 操作用于随机选取。`CompareValues` 支持 12 种过滤运算符。
-- **`adapter/`** — 协议适配器接口（8 方法）。热路径帧解析纯 Go 实现，编解码通过 Lua 池调用 `codec.lua`。
-- **`admin/`** — Admin 服务器。任务调度（TaskStore 状态机 + 单例约束）、Agent 管理（注册/心跳/健康检查）、指标聚合（MergeSnapshots）、历史归档（MySQL 6 表）、前端静态托管。40+ HTTP API 端点。
+- **`adapter/`** — 协议适配器接口（9 方法，含 `DescribeError` 错误码映射）。热路径帧解析纯 Go 实现，编解码通过 Lua 池调用 `codec.lua`。
+- **`admin/`** — Admin 服务器。任务调度（TaskStore 状态机 + 单例约束）、Agent 管理（注册/心跳/健康检查）、指标聚合（MergeSnapshots）、历史归档（MySQL 6 表）、前端静态托管。45+ HTTP API 端点。
 - **`agent/`** — Agent 节点。注册到 Admin（指数退避）→ 心跳循环 → 任务轮询 → TaskRunner 执行 → 指标上报。
-- **`monitor/`** — 指标采集。原子计数器（热路径零锁）、延迟直方图（16 桶 P50~P99）、Apdex 评分、分布式聚合。导出：Console / HTTP JSON / CSV / pprof。
+- **`monitor/`** — 指标采集。原子计数器（热路径零锁）、延迟直方图（16 桶 P50~P99）、Apdex 评分、分布式聚合。错误按 `(Kind, Code)` 聚合（框架码 1-99 / 服务端码 ≥ 100）。导出：Console / HTTP JSON / CSV / pprof。
 - **`logview/`** — 日志环形缓冲区。O(1) 写入 + cursor 分页查询，供实时日志面板使用。
+- **`errcode/`** — 统一错误码定义。`ErrorCode`（uint64）+ `Kind`（string: `"framework"` / `"server"`）+ 24 个框架错误码常量。`ActionError`（engine/errors.go）携带 `(Kind, Code, Detail)` 三元组，构造函数：`NewActionError`（框架错误）、`NewTimeoutError`（超时）、`NewServerError`（服务端 headerErr）。
 
 **单次动作数据流：**
 1. `Executor` 遍历流程图 → 命中 `action` 节点 → 调用 `ActionHandler.ExecuteAction(actionDef)`
@@ -81,11 +82,11 @@ cd cmd/web && npm run build                # → dist/，Admin 静态托管
 ## 关键约定
 
 - `flow.json` 的 nodes 按 ID 反序列化为 `map[string]*Node`。
-- 15 种 binding type（`fixed`/`state`/`stateFirst`/`stateRandom`/`stateRandomN`/`stateMapKey`/`stateMapValue`/`randomPick`/`randomPickN`/`randomPickMap`/`randomExclude`/`randomInt`/`randomBool`/`randomString`/`listSize`）。`state` 扁平化为原始值。
-- Adapter 接口 8 方法。帧解析（`HeaderSize`/`BodyLength`）纯 Go 缓存，编解码通过 Lua 池。`DecodeTCP` 和 `DecodeUDP` 独立方法。
+- 16 种 binding type（`fixed`/`state`/`stateFirst`/`stateRandom`/`stateRandomN`/`stateMapKey`/`stateMapValue`/`randomPick`/`randomPickN`/`randomPickMap`/`randomExclude`/`randomInt`/`randomFloat`/`randomBool`/`randomString`/`listSize`）。`state` 扁平化为原始值。
+- Adapter 接口 9 方法（含 `DescribeError`）。帧解析（`HeaderSize`/`BodyLength`）纯 Go 缓存，编解码通过 Lua 池。`DecodeTCP` 和 `DecodeUDP` 独立方法。
 - UDP 加密使用偏移量部分加密：前 N 字节（由 `codec.lua` 的 `encrypt.udpOffset` 配置，默认 11）保持明文供服务端查密钥表，剩余部分加密。
 - 默认节点延迟由 `TaskFlow.DefaultDelayMs` 控制。`delayMs: -1` 禁用，`delayMs: 0` 使用 defaultDelayMs。
-- `errorStrategy` 控制动作失败行为：`"abort"` 中断流程，空或 `"ignore"` 继续（替代旧 `breakOff` 字段）。
+- `errorStrategy` 控制动作失败行为：`"abort"` 中断流程，`"skip"` 跳过当前节点继续，空或其他值静默忽略（替代旧 `breakOff` 字段）。
 - 任务状态机：`pending → starting → running → stopping → stopped / failed`。单例约束：同一时刻只能有一个活跃任务。
 - Agent 心跳连续失败 `maxHeartbeatFailures` 次后自动退出（0 = 不退出）。Admin 重启后活跃任务自动重置为 `failed`。
 - 日志和错误信息使用中文（对齐旧工具命名）。

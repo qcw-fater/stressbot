@@ -241,7 +241,6 @@ export interface ActionMetric {
   successCount: number;
   failureCount: number;
   timeoutCount: number;
-  skippedCount: number;
   canceledCount: number;
   executing: number;
   successRate: number;

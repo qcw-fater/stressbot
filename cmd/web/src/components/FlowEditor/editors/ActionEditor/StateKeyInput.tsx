@@ -14,7 +14,7 @@ import type { FieldBind } from '@/types/action';
 import { useFlowStore } from '../../store/flowStore';
 import { useRuntimeStore } from '@/services/runtimeStore';
 import { getScript } from '@/services/resourcesStore';
-import { collectStateKeys, collectUsedScriptNames, resolveProtoForStateKey } from './stateRegistry';
+import { collectStateKeys, collectUsedScriptNames, resolveProtoForStateKey, resolveStateKeyDisplayType } from './stateRegistry';
 
 export interface StateKeyInputProps {
   value?: string;
@@ -110,7 +110,7 @@ export function StateKeyInput({
         </Tag>
         {k.s2cProto && (
           <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
-            ← {k.s2cProto.split('.').pop()}
+            ← {resolveStateKeyDisplayType(k) ?? k.s2cProto.split('.').pop()}
           </span>
         )}
         {k.sourceType !== 'stateExtra' && k.sourceType !== 'storeAs' && (

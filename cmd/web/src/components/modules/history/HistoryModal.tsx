@@ -302,9 +302,9 @@ function HistoryCard({
       <div className="hp-card__main">
         <div className="hp-card__row1">
           <div className="hp-card__title-block">
-            <div className="hp-card__name" title={r.name}>
-              {r.name}
-            </div>
+            <Tooltip title={r.name} mouseEnterDelay={0.4}>
+              <div className="hp-card__name">{r.name}</div>
+            </Tooltip>
             <span className={`hp-card__status hp-card__status--${failed ? 'bad' : 'ok'}`}>
               <span className="hp-status-dot" />
               {failed ? '失败' : '完成'}
@@ -334,10 +334,12 @@ function HistoryCard({
         </div>
 
         <div className="hp-card__metrics" aria-hidden>
-          <span className="hp-metric" title="记录 ID">
-            <span className="hp-metric__k">ID</span>
-            <code className="hp-metric__v">{r.id.slice(0, 8)}</code>
-          </span>
+          <Tooltip title="记录 ID" mouseEnterDelay={0.4}>
+            <span className="hp-metric">
+              <span className="hp-metric__k">ID</span>
+              <code className="hp-metric__v">{r.id.slice(0, 8)}</code>
+            </span>
+          </Tooltip>
           <span className="hp-metric">
             <span className="hp-metric__k">时长</span>
             <span className="hp-metric__v">{formatDuration(r.durationSec)}</span>

@@ -1,19 +1,12 @@
 {
   "log": {
-    "path": "log/stressbot.log",
     "level": "info",
-    "printConsole": true,
-    "maxSize": 500,
-    "maxBackups": 3,
-    "maxAge": 7,
-    "compress": true
+    "printConsole": true
   },
   "monitor": {
     "enabled": true,
-    "reportInterval": "5s",
     "httpEnabled": true,
     "httpPort": 6060,
-    "csvPath": "log/metrics.csv",
     "apdexT": 100
   },
   "standalone": {
@@ -29,22 +22,6 @@
       "version": "0.31.49.171222",
       "channel": "mine",
       "platform": "1000"
-    },
-    "adapter": {
-      "script": "conf/adapter/codec.lua"
-    },
-    "network": {
-      "heartbeatInterval": "5s",
-      "tcpTimeout": "60s",
-      "httpTimeout": "10s"
-    },
-    "proto": {
-      "dirs": ["conf/proto"],
-      "files": []
-    },
-    "flow": "conf/flow/flow.json",
-    "script": {
-      "dirs": ["conf/scripts"]
     }
   },
   "agent": {

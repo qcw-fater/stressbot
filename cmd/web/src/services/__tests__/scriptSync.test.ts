@@ -36,18 +36,18 @@ afterEach(() => {
 
 function buildFlow(opts: {
   actions?: Record<string, { script?: string }>;
-  callbacks?: Record<string, { script?: string }>;
+  listens?: Record<string, { script?: string }>;
 }): FlowJson {
   return {
     defaultDelayMs: 1000,
     nodes: {},
     actions: (opts.actions ?? {}) as FlowJson['actions'],
-    callbacks: (opts.callbacks ?? {}) as FlowJson['callbacks'],
+    listens: (opts.listens ?? {}) as FlowJson['listens'],
   };
 }
 
 describe('collectFlowScriptNames', () => {
-  it('扫描 actions + callbacks 中所有 script 字段并去重排序', () => {
+  it('扫描 actions + listens 中所有 script 字段并去重排序', () => {
     const flow = buildFlow({
       actions: {
         a1: { script: 'foo.lua' },
@@ -55,10 +55,10 @@ describe('collectFlowScriptNames', () => {
         a3: {},
         a4: { script: 'foo.lua' }, // 重复
       },
-      callbacks: {
+      listens: {
         c1: { script: 'cb.lua' },
         c2: {},
-        c3: { script: 'bar.lua' }, // 跨 actions/callbacks 重复
+        c3: { script: 'bar.lua' }, // 跨 actions/listens 重复
       },
     });
     expect(collectFlowScriptNames(flow)).toEqual(['bar.lua', 'cb.lua', 'foo.lua']);
@@ -68,7 +68,7 @@ describe('collectFlowScriptNames', () => {
     expect(collectFlowScriptNames(buildFlow({}))).toEqual([]);
   });
 
-  it('容忍 actions / callbacks 为 undefined（旧数据兼容）', () => {
+  it('容忍 actions / listens 为 undefined（旧数据兼容）', () => {
     const flow = { defaultDelayMs: 1000, nodes: {} } as unknown as FlowJson;
     expect(collectFlowScriptNames(flow)).toEqual([]);
   });
@@ -91,7 +91,7 @@ describe('syncFlowScriptsToIdb', () => {
       ok: true,
       text: async () => '-- baseline content',
     });
-    const flow = buildFlow({ callbacks: { c: { script: 'baseline.lua' } } });
+    const flow = buildFlow({ listens: { c: { script: 'baseline.lua' } } });
 
     const r = await syncFlowScriptsToIdb(flow);
 

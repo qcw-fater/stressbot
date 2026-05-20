@@ -103,6 +103,20 @@
   --color-purple: #9254de;
   --color-orange: #fa8c16;
 
+  /* === 图表数据色（ECharts 系列） === */
+  --chart-green: #52c41a;
+  --chart-red: #f5222d;
+  --chart-blue: #1677ff;
+  --chart-orange: #fa8c16;
+  --chart-cyan: #13c2c2;
+  --chart-purple: #722ed1;
+  --chart-lime: #bae637;
+
+  /* === 节点状态背景色 === */
+  --status-idle-bg: rgba(82, 196, 26, 0.1);
+  --status-busy-bg: rgba(22, 119, 255, 0.1);
+  --status-unhealthy-bg: rgba(245, 34, 45, 0.1);
+
   /* === 边选中态加深色（用于 selected 变体） === */
   --edge-true-deep: #237804;
   --edge-false-deep: #a8071a;
@@ -202,6 +216,20 @@
   --color-blue: #4096ff;
   --color-purple: #b37feb;
   --color-orange: #ffa940;
+
+  /* 图表数据色：深色背景上提亮 */
+  --chart-green: #95de64;
+  --chart-red: #ff7875;
+  --chart-blue: #4096ff;
+  --chart-orange: #ffa940;
+  --chart-cyan: #36cfc9;
+  --chart-purple: #b37feb;
+  --chart-lime: #d3f261;
+
+  /* 节点状态背景色：深色背景上稍提亮 */
+  --status-idle-bg: rgba(149, 222, 100, 0.12);
+  --status-busy-bg: rgba(64, 150, 255, 0.12);
+  --status-unhealthy-bg: rgba(255, 120, 117, 0.12);
 
   /* 边选中态加深色 */
   --edge-true-deep: #b7eb8f;

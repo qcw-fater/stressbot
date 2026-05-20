@@ -104,7 +104,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       defaultDelayMs: flow.defaultDelayMs,
       nodes: flow.nodes,
       actions: flow.actions,
-      callbacks: flow.callbacks,
+      listens: flow.listens,
     });
     let positions: Record<string, { x: number; y: number }>;
     if (layout?.nodePositions && Object.keys(layout.nodePositions).length > 0) {
@@ -129,7 +129,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       defaultDelayMs: flow.defaultDelayMs,
       nodes: flow.nodes,
       actions: flow.actions,
-      listens: flow.callbacks,
+      listens: flow.listens,
     };
     const report = validateFlow(flowForValidation);
     const issuesByNodeId: Record<string, ValidationIssue[]> = {};
@@ -149,7 +149,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       defaultDelayMs: flow.defaultDelayMs,
       nodes: flow.nodes,
       actions: flow.actions,
-      listens: flow.callbacks,
+      listens: flow.listens,
       rfNodes: positioned,
       rfEdges,
       listenRefCount,
@@ -297,6 +297,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
     if (oldId === newId) return;
     set((s) => {
       if (!(oldId in s.nodes) || newId in s.nodes) return {};
+      const oldNode = s.nodes[oldId];
       const nodes: Record<string, FlowNode> = {};
       for (const [k, v] of Object.entries(s.nodes)) {
         if (k === oldId) {
@@ -312,7 +313,17 @@ export const useFlowStore = create<FlowState>((set, get) => ({
         layout.nodePositions[newId] = layout.nodePositions[oldId];
         delete layout.nodePositions[oldId];
       }
-      return { nodes, layout };
+      // action 节点：重命名时同步 action key
+      let actions = s.actions;
+      if (oldNode.type === 'action' && oldNode.action && s.actions[oldNode.action] && !(newId in s.actions)) {
+        const oldAct = oldNode.action;
+        actions = {};
+        for (const [k, v] of Object.entries(s.actions)) {
+          actions[k === oldAct ? newId : k] = v;
+        }
+        nodes[newId] = { ...nodes[newId], action: newId };
+      }
+      return { nodes, actions, layout };
     });
     get().syncDerived();
   },
@@ -401,14 +412,14 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       for (const [k, v] of Object.entries(s.listens)) {
         listens[k === oldName ? newName : k] = v;
       }
-      // 同步所有 listenCallbacks 中的引用
+      // 同步所有 listenRefs 中的引用
       const nodes: Record<string, FlowNode> = {};
       for (const [k, v] of Object.entries(s.nodes)) {
-        if (v.type === 'action' && v.listenCallbacks?.length) {
+        if (v.type === 'action' && v.listenRefs?.length) {
           nodes[k] = {
             ...v,
-            listenCallbacks: v.listenCallbacks.map((r) =>
-              r.callback === oldName ? { ...r, callback: newName } : r,
+            listenRefs: v.listenRefs.map((r) =>
+              r.listen === oldName ? { ...r, listen: newName } : r,
             ),
           };
         } else {
@@ -426,7 +437,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       defaultDelayMs: s.defaultDelayMs,
       nodes: s.nodes,
       actions: s.actions,
-      callbacks: s.listens,
+      listens: s.listens,
     });
     // 保留已有位置（避免拖动后被覆盖）
     const positions = s.layout.nodePositions;

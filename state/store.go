@@ -287,7 +287,7 @@ func ToFloat64Safe(v any) (float64, bool) {
 }
 
 // CompareValues 按操作符比较两个值。
-// 支持：eq/==, neq/!=, gt/>, gte/>=, lt/<, lte/<=, contains, in, timeWindow
+// 支持：eq/==, neq/!=, gt/>, gte/>=, lt/<, lte/<=, contains, in, timeWindow, dailyTimeWindow, notNil, isNil
 func CompareValues(a, b any, op string) bool {
 	aNum, aIsNum := ToFloat64Safe(a)
 	bNum, bIsNum := ToFloat64Safe(b)

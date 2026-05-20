@@ -38,7 +38,7 @@ func (s *AdminServer) handleListHistory(w http.ResponseWriter, r *http.Request) 
 		filter.Starred = &v
 	}
 
-	resp, err := s.history.List(filter)
+	resp, err := s.history.List(r.Context(), filter)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -53,7 +53,7 @@ func (s *AdminServer) handleGetHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := r.PathValue("id")
-	detail, err := s.history.Get(id)
+	detail, err := s.history.Get(r.Context(), id)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -68,7 +68,7 @@ func (s *AdminServer) handleGetHistoryAgents(w http.ResponseWriter, r *http.Requ
 	}
 
 	id := r.PathValue("id")
-	detail, err := s.history.Get(id)
+	detail, err := s.history.Get(r.Context(), id)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -83,14 +83,14 @@ func (s *AdminServer) handleGetHistoryConfig(w http.ResponseWriter, r *http.Requ
 	}
 
 	id := r.PathValue("id")
-	cfg, err := s.history.GetConfig(id)
+	cfg, err := s.history.GetConfig(r.Context(), id)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
 
 	// 查询任务元信息补充到响应
-	meta, _ := s.history.Get(id)
+	meta, _ := s.history.Get(r.Context(), id)
 	name := ""
 	var totalBots int
 	if meta != nil {
@@ -126,7 +126,7 @@ func (s *AdminServer) handleGetHistoryTimeseries(w http.ResponseWriter, r *http.
 	}
 
 	id := r.PathValue("id")
-	resp, err := s.history.GetTimeseries(id)
+	resp, err := s.history.GetTimeseries(r.Context(), id)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -140,7 +140,7 @@ func (s *AdminServer) handleGetHistoryTags(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	tags, err := s.history.AllTags()
+	tags, err := s.history.AllTags(r.Context())
 	if err != nil {
 		writeError(w, err)
 		return
@@ -164,13 +164,13 @@ func (s *AdminServer) handleUpdateHistory(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := s.history.UpdateMeta(id, req); err != nil {
+	if err := s.history.UpdateMeta(r.Context(), id, req); err != nil {
 		writeError(w, err)
 		return
 	}
 
 	// 返回更新后的 HistoryDetail
-	detail, err := s.history.Get(id)
+	detail, err := s.history.Get(r.Context(), id)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 		return
@@ -187,7 +187,7 @@ func (s *AdminServer) handleDeleteHistory(w http.ResponseWriter, r *http.Request
 	id := r.PathValue("id")
 	force := parseBoolOrDefault(r.URL.Query().Get("force"), false)
 
-	if err := s.history.Delete(id, force); err != nil {
+	if err := s.history.Delete(r.Context(), id, force); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -206,9 +206,12 @@ func (s *AdminServer) handleCloneHistory(w http.ResponseWriter, r *http.Request)
 	var body struct {
 		Name string `json:"name"`
 	}
-	json.NewDecoder(r.Body).Decode(&body)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, ErrInvalidArgument.WithMessage("invalid JSON body"))
+		return
+	}
 
-	cfg, err := s.history.GetConfig(id)
+	cfg, err := s.history.GetConfig(r.Context(), id)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -217,7 +220,7 @@ func (s *AdminServer) handleCloneHistory(w http.ResponseWriter, r *http.Request)
 	// 查找原始任务获取名称和 totalBots
 	origName := ""
 	totalBots := 0
-	if orig, err := s.history.Get(id); err == nil {
+	if orig, err := s.history.Get(r.Context(), id); err == nil {
 		origName = orig.Name
 		totalBots = orig.TotalBots
 	}
@@ -270,7 +273,7 @@ func (s *AdminServer) handleCompareHistory(w http.ResponseWriter, r *http.Reques
 
 	var tasks []HistoryDetail
 	for _, id := range ids {
-		detail, err := s.history.Get(strings.TrimSpace(id))
+		detail, err := s.history.Get(r.Context(), strings.TrimSpace(id))
 		if err != nil {
 			writeError(w, err)
 			return

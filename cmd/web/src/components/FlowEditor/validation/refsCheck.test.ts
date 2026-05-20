@@ -59,14 +59,14 @@ describe('validateFlow', () => {
 
   it('LISTEN_SERVER_FORMAT：server 格式错误报错', () => {
     const r = validateFlow(baseFlow({
-      nodes: { main: { type: 'action', action: 'A1', listenCallbacks: [{ server: 'badFormat', callback: null, route: {} }] } },
+      nodes: { main: { type: 'action', action: 'A1', listenRefs: [{ server: 'badFormat', listen: null, route: {} }] } },
     }));
     expect(r.errors.find((e) => e.code === 'LISTEN_SERVER_FORMAT')).toBeTruthy();
   });
 
-  it('LISTEN_CB_NOT_FOUND：listenCallbacks 引用不存在 callback', () => {
+  it('LISTEN_CB_NOT_FOUND：listenRefs 引用不存在 listen', () => {
     const r = validateFlow(baseFlow({
-      nodes: { main: { type: 'action', action: 'A1', listenCallbacks: [{ server: 'tcp:x', callback: 'ghost', route: {} }] } },
+      nodes: { main: { type: 'action', action: 'A1', listenRefs: [{ server: 'tcp:x', listen: 'ghost', route: {} }] } },
     }));
     expect(r.errors.find((e) => e.code === 'LISTEN_CB_NOT_FOUND')).toBeTruthy();
   });
@@ -122,7 +122,7 @@ describe('validateFlow', () => {
 
   it('LISTEN_LUA_NO_SCRIPT：lua callback 缺少 script', () => {
     const r = validateFlow(baseFlow({
-      nodes: { main: { type: 'action', action: 'A1', listenCallbacks: [{ server: 'tcp:x', callback: 'cb1', route: {} }] } },
+      nodes: { main: { type: 'action', action: 'A1', listenRefs: [{ server: 'tcp:x', listen: 'cb1', route: {} }] } },
       actions: { A1: { pattern: 'tcpSend', service: 'x', route: {}, c2sProto: 'X.Foo' } },
       listens: { cb1: { script: '' } },
     }));

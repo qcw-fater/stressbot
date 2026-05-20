@@ -59,7 +59,7 @@ export function NodeShell({
   const warnCount = issues?.filter((i) => i.severity === 'warning').length ?? 0;
   const issueClass = errCount > 0 ? 'has-error' : warnCount > 0 ? 'has-warning' : '';
 
-  // 仅当本节点真的在 listenCallbacks 中注册了 hoveredListen 时高亮，
+  // 仅当本节点真的在 listenRefs 中注册了 hoveredListen 时高亮，
   // 而非 hoveredListen 非空时把所有节点都高亮。
   const isRegisteringHoveredListen = useFlowStore((s) =>
     hoveredListen ? (s.nodesByListen[hoveredListen] ?? []).includes(nodeId) : false,

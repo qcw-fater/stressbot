@@ -107,5 +107,4 @@ export interface ActionDef {
   method?: 'POST' | 'GET'; // httpRequest: HTTP 方法
   contentType?: 'json' | 'form'; // httpRequest: Content-Type
   keys?: string[]; // clearState
-  optional?: boolean;
 }

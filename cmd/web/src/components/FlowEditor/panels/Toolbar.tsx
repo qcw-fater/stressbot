@@ -52,7 +52,7 @@ export interface ToolbarProps {
 }
 
 const SECTION_DIVIDER = (
-  <Divider type="vertical" style={{ margin: '0 6px', height: 22, borderColor: 'rgba(127,127,127,0.18)' }} />
+  <Divider type="vertical" style={{ margin: '0 6px', height: 22, borderColor: 'var(--border-color)' }} />
 );
 
 export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {

@@ -139,7 +139,7 @@ export function BaselineSyncModal({ open, result, onClose, onResolved }: Baselin
         const label = TYPE_LABEL[item.type];
 
         return (
-          <div key={key} style={{ marginBottom: 20, border: '1px solid var(--color-border, #e8e8e8)', borderRadius: 6, padding: 12 }}>
+          <div key={key} style={{ marginBottom: 20, border: '1px solid var(--border-color)', borderRadius: 6, padding: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <Space size={8}>
                 <Tag color={label.color}>{label.text}</Tag>

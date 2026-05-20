@@ -13,17 +13,17 @@ const baseFlow: TaskFlow = {
     act1: {
       type: 'action',
       action: 'A1',
-      listenCallbacks: [
-        { route: { cmd: 1, act: 1 }, server: 'tcp:logic', callback: 'cbA' },
-        { route: { cmd: 2, act: 2 }, server: 'tcp:logic', callback: null },
+      listenRefs: [
+        { route: { cmd: 1, act: 1 }, server: 'tcp:logic', listen: 'cbA' },
+        { route: { cmd: 2, act: 2 }, server: 'tcp:logic', listen: null },
       ],
     },
     act2: {
       type: 'action',
       action: 'A2',
-      listenCallbacks: [
-        { route: { cmd: 1, act: 1 }, server: 'tcp:logic', callback: 'cbB' }, // 与 act1 同 route 不同 cb → 重复注册
-        { route: { cmd: 9, act: 9 }, server: 'tcp:logic', callback: 'ghost' }, // 引用不存在 → 悬空
+      listenRefs: [
+        { route: { cmd: 1, act: 1 }, server: 'tcp:logic', listen: 'cbB' }, // 与 act1 同 route 不同 cb → 重复注册
+        { route: { cmd: 9, act: 9 }, server: 'tcp:logic', listen: 'ghost' }, // 引用不存在 → 悬空
       ],
     },
   },
@@ -56,7 +56,7 @@ describe('refsGraph', () => {
   it('danglingRefs 包含 ghost 引用', () => {
     const g = buildRefsGraph(baseFlow);
     expect(g.danglingRefs.length).toBe(1);
-    expect(g.danglingRefs[0].ref.callback).toBe('ghost');
+    expect(g.danglingRefs[0].ref.listen).toBe('ghost');
   });
 
   it('duplicateRegisters 检测同 server+route 不同 listen', () => {
@@ -67,7 +67,7 @@ describe('refsGraph', () => {
     expect(dup.refs.length).toBe(2);
   });
 
-  it('null callback 不参与 refCount，但仍参与 routeKey 分组', () => {
+  it('null listen 不参与 refCount，但仍参与 routeKey 分组', () => {
     const flow: TaskFlow = {
       ...baseFlow,
       nodes: {
@@ -75,7 +75,7 @@ describe('refsGraph', () => {
         n1: {
           type: 'action',
           action: 'A1',
-          listenCallbacks: [{ route: { cmd: 5, act: 5 }, server: 'udp:battle', callback: null }],
+          listenRefs: [{ route: { cmd: 5, act: 5 }, server: 'udp:battle', listen: null }],
         },
       },
     };

@@ -15,12 +15,12 @@ export interface ExportInput {
   listens: Record<string, ListenDef>;
 }
 
-/** flow.json 格式（JSON 键名为 callbacks，与 Go 端一致） */
+/** flow.json 格式 */
 export interface FlowJson {
   defaultDelayMs: number;
   nodes: Record<string, FlowNode>;
   actions: Record<string, ActionDef>;
-  callbacks: Record<string, ListenDef>;
+  listens: Record<string, ListenDef>;
 }
 
 export function flowToJson(input: ExportInput): FlowJson {
@@ -28,7 +28,7 @@ export function flowToJson(input: ExportInput): FlowJson {
     defaultDelayMs: input.defaultDelayMs,
     nodes: mapValues(input.nodes, cleanNode),
     actions: mapValues(input.actions, cleanAction),
-    callbacks: mapValues(input.listens, cleanListen),
+    listens: mapValues(input.listens, cleanListen),
   };
 }
 
@@ -43,7 +43,7 @@ function cleanNode(n: FlowNode): FlowNode {
     case 'action':
       if (n.action) out.action = n.action;
       if (n.errorStrategy && n.errorStrategy !== 'ignore') out.errorStrategy = n.errorStrategy;
-      if (n.listenCallbacks?.length) out.listenCallbacks = n.listenCallbacks.map(cleanListenRef);
+      if (n.listenRefs?.length) out.listenRefs = n.listenRefs.map(cleanListenRef);
       if (typeof n.delayMs === 'number' && n.delayMs !== 0) out.delayMs = n.delayMs;
       break;
     case 'loop':
@@ -77,7 +77,7 @@ function cleanListenRef(r: ListenRef): ListenRef {
   return {
     route: r.route,
     server: r.server,
-    callback: r.callback,
+    listen: r.listen,
   };
 }
 
@@ -97,7 +97,6 @@ function cleanAction(a: ActionDef): ActionDef {
   if (a.method) out.method = a.method;
   if (a.contentType) out.contentType = a.contentType;
   if (a.keys?.length) out.keys = [...a.keys];
-  if (a.optional) out.optional = true;
   return out;
 }
 

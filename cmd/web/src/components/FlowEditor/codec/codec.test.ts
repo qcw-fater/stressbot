@@ -3,7 +3,7 @@
  *   1. 读取 conf/flow/flow.json
  *   2. flowToJson(原数据) → 导出
  *   3. 字段集与节点/动作/回调数量必须一致
- *   4. 嵌套结构（bindings、listenCallbacks、store）在导出时仍存在
+ *   4. 嵌套结构（bindings、listenRefs、store）在导出时仍存在
  */
 
 import { describe, it, expect } from 'vitest';
@@ -25,17 +25,17 @@ describe('codec round-trip', () => {
       defaultDelayMs: raw.defaultDelayMs,
       nodes: raw.nodes,
       actions: raw.actions,
-      listens: raw.callbacks,
+      listens: raw.listens,
     });
     expect(Object.keys(exported.nodes).length).toBe(Object.keys(raw.nodes).length);
     expect(Object.keys(exported.actions).length).toBe(Object.keys(raw.actions).length);
-    expect(Object.keys(exported.callbacks).length).toBe(Object.keys(raw.callbacks).length);
+    expect(Object.keys(exported.listens).length).toBe(Object.keys(raw.listens).length);
     expect(exported.defaultDelayMs).toBe(raw.defaultDelayMs);
   });
 
-  it('jsonToFlow 生成的 React Flow 节点数 = nodes + callbacks', () => {
+  it('jsonToFlow 生成的 React Flow 节点数 = nodes + listens', () => {
     const { rfNodes, listenRefCount } = jsonToFlow(raw);
-    const expected = Object.keys(raw.nodes).length + Object.keys(raw.callbacks).length;
+    const expected = Object.keys(raw.nodes).length + Object.keys(raw.listens).length;
     expect(rfNodes.length).toBe(expected);
     // 至少有一些 callback 是被引用的
     expect(Object.keys(listenRefCount).length).toBeGreaterThan(0);
@@ -59,30 +59,30 @@ describe('codec round-trip', () => {
     expect(rfEdges.filter((e) => e.type === 'loopBody').length).toBe(expectedLoopBody);
   });
 
-  it('listenCallbacks 在导出时被保留', () => {
+  it('listenRefs 在导出时被保留', () => {
     const exported = flowToJson({
       defaultDelayMs: raw.defaultDelayMs,
       nodes: raw.nodes,
       actions: raw.actions,
-      listens: raw.callbacks,
+      listens: raw.listens,
     });
     let count = 0;
     for (const node of Object.values(exported.nodes)) {
-      if (node.type === 'action' && node.listenCallbacks) count += node.listenCallbacks.length;
+      if (node.type === 'action' && node.listenRefs) count += node.listenRefs.length;
     }
     let countOriginal = 0;
     for (const node of Object.values(raw.nodes)) {
-      if (node.type === 'action' && node.listenCallbacks) countOriginal += node.listenCallbacks.length;
+      if (node.type === 'action' && node.listenRefs) countOriginal += node.listenRefs.length;
     }
     expect(count).toBe(countOriginal);
   });
 
-  it('action.bindings 和 callback.store 在导出时被保留', () => {
+  it('action.bindings 和 listen.store 在导出时被保留', () => {
     const exported = flowToJson({
       defaultDelayMs: raw.defaultDelayMs,
       nodes: raw.nodes,
       actions: raw.actions,
-      listens: raw.callbacks,
+      listens: raw.listens,
     });
 
     let bindingsRaw = 0;
@@ -93,8 +93,8 @@ describe('codec round-trip', () => {
 
     let storeRaw = 0;
     let storeOut = 0;
-    for (const c of Object.values(raw.callbacks)) storeRaw += c.store?.length ?? 0;
-    for (const c of Object.values(exported.callbacks)) storeOut += c.store?.length ?? 0;
+    for (const c of Object.values(raw.listens)) storeRaw += c.store?.length ?? 0;
+    for (const c of Object.values(exported.listens)) storeOut += c.store?.length ?? 0;
     expect(storeOut).toBe(storeRaw);
   });
 
@@ -103,7 +103,7 @@ describe('codec round-trip', () => {
       defaultDelayMs: raw.defaultDelayMs,
       nodes: raw.nodes,
       actions: raw.actions,
-      listens: raw.callbacks,
+      listens: raw.listens,
     });
     const outPath = path.resolve(__dirname, '../../../../../tmp_codec_export.json');
     fs.writeFileSync(outPath, JSON.stringify(exported, null, 2), 'utf-8');

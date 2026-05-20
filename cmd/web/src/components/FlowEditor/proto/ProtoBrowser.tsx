@@ -178,8 +178,8 @@ export function ProtoBrowser({ windowId: customWindowId, open: openProp, onClose
                           </code>
                           {f.repeated && (
                             <span style={{
-                              marginLeft: 4, fontSize: 10, color: 'var(--color-primary, #1677ff)',
-                              background: 'var(--node-selected-bg, rgba(22,119,255,0.08))',
+                              marginLeft: 4, fontSize: 10, color: 'var(--color-primary)',
+                              background: 'var(--node-selected-bg)',
                               padding: '0 4px', borderRadius: 3,
                             }}>repeated</span>
                           )}

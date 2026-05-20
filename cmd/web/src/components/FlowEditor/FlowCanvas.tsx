@@ -261,11 +261,11 @@ function FlowCanvasInner() {
       } else if (src.type === 'wait' && handleId === 'out') {
         // wait 没有显式 next 字段（顺序由 sequence 控制），无需处理
       } else if (handleId === 'listen') {
-        // action → listen：从 listenCallbacks 中移除指向 e.target 的引用
-        if (src.type === 'action' && src.listenCallbacks) {
+        // action → listen：从 listenRefs 中移除指向 e.target 的引用
+        if (src.type === 'action' && src.listenRefs) {
           const listenName = e.target.replace(/^__cb__/, '');
           updateNode(e.source, {
-            listenCallbacks: src.listenCallbacks.filter((r) => r.callback !== listenName),
+            listenRefs: src.listenRefs.filter((r) => r.listen !== listenName),
           });
         }
       }
@@ -283,7 +283,7 @@ function FlowCanvasInner() {
    *   boolean   · true/false → trueNext / falseNext = target
    *   weighted  · opt-N      → options[N].node = target
    *   weighted  · opt-add    → options.push({ node: target, weight: 1 })
-   *   action    · listen     → listenCallbacks.push({ callback })，target 必须是 listenCard
+   *   action    · listen     → listenRefs.push({ listen })，target 必须是 listenCard
    *
    * 注：业务图通过 syncDerived 重算 rfEdges，所以这里不要直接 setEdges。
    */
@@ -330,11 +330,11 @@ function FlowCanvasInner() {
         return;
       }
       if (src.type === 'action' && handle === 'listen' && targetListenName) {
-        const list = (src.listenCallbacks ?? []).slice();
-        if (!list.some((r) => r.callback === targetListenName)) {
-          list.push({ route: null, server: '', callback: targetListenName });
+        const list = (src.listenRefs ?? []).slice();
+        if (!list.some((r) => r.listen === targetListenName)) {
+          list.push({ route: null, server: '', listen: targetListenName });
         }
-        updateNode(params.source, { listenCallbacks: list });
+        updateNode(params.source, { listenRefs: list });
         return;
       }
     },
@@ -383,13 +383,13 @@ function FlowCanvasInner() {
         node.type === 'action' && node.action && flow.actions[node.action]
           ? { name: node.action, def: JSON.parse(JSON.stringify(flow.actions[node.action])) as ActionDef }
           : undefined;
-      // listenCallbacks 涉及的 listen 一并复制（跨流程粘贴时不丢引用）
+      // listenRefs 涉及的 listen 一并复制（跨流程粘贴时不丢引用）
       const listens: Array<{ name: string; def: ListenDef }> = [];
-      if (node.type === 'action' && node.listenCallbacks) {
-        for (const r of node.listenCallbacks) {
-          if (!r.callback) continue;
-          const listenDef = flow.listens[r.callback];
-          if (listenDef) listens.push({ name: r.callback, def: JSON.parse(JSON.stringify(listenDef)) });
+      if (node.type === 'action' && node.listenRefs) {
+        for (const r of node.listenRefs) {
+          if (!r.listen) continue;
+          const listenDef = flow.listens[r.listen];
+          if (listenDef) listens.push({ name: r.listen, def: JSON.parse(JSON.stringify(listenDef)) });
         }
       }
       return {
@@ -437,16 +437,16 @@ function FlowCanvasInner() {
           addAction(newAct, clipboard.action.def);
           node.action = newAct;
         }
-        if (node.type === 'action' && node.listenCallbacks && clipboard.listens) {
+        if (node.type === 'action' && node.listenRefs && clipboard.listens) {
           const renameMap: Record<string, string> = {};
           for (const c of clipboard.listens) {
             const newListen = uniqueListenName(c.name);
             addListen(newListen, c.def);
             renameMap[c.name] = newListen;
           }
-          node.listenCallbacks = node.listenCallbacks.map((r) => ({
+          node.listenRefs = node.listenRefs.map((r) => ({
             ...r,
-            callback: r.callback ? (renameMap[r.callback] ?? r.callback) : r.callback,
+            listen: r.listen ? (renameMap[r.listen] ?? r.listen) : r.listen,
           }));
         }
         const newId = uniqueNodeId(node.type ?? 'sequence');
@@ -550,7 +550,7 @@ function FlowCanvasInner() {
             setSelectedNode(id);
           } else {
             // F9 = Listen
-            const listenName = `listen_${nanoid(6)}`;
+            const listenName = uniqueListenName('listen');
             addListen(listenName, {});
             const cardId = `__cb__${listenName}`;
             const layout = useFlowStore.getState().layout;
@@ -769,7 +769,7 @@ function FlowCanvasInner() {
             setSelectedNode(id);
           }}
           onAddListen={(fx, fy) => {
-            const listenName = `listen_${nanoid(6)}`;
+            const listenName = uniqueListenName('listen');
             addListen(listenName, {});
             const cardId = `__cb__${listenName}`;
             const layout = useFlowStore.getState().layout;
@@ -848,7 +848,7 @@ function CanvasContextMenu({
         left: menu.x,
         top: menu.y,
         background: 'var(--bg-panel)',
-        border: '1px solid var(--border-color, #d9d9d9)',
+        border: '1px solid var(--border-color)',
         borderRadius: 4,
         boxShadow: '0 6px 16px 0 rgba(0,0,0,0.18)',
         padding: 4,

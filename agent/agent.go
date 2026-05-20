@@ -152,7 +152,7 @@ func (a *Agent) Run() (err error) {
 
 	stresslog.Info("[AGENT] 已就绪，等待任务下发",
 		zap.String("agentID", a.id),
-		zap.String("listenAddr", a.cfg.ListenAddr))
+		zap.Int("port", a.cfg.Port))
 
 	// 7. 等待退出信号
 	sigCh := make(chan os.Signal, 1)
@@ -212,7 +212,7 @@ func (a *Agent) registerWithRetry(ctx context.Context) error {
 	req := RegisterRequest{
 		AgentID:        a.id,
 		Name:           a.cfg.Name,
-		Address:        buildAddress(a.cfg.ListenAddr),
+		Address:        buildAddress(a.cfg.Port),
 		AppVersion:     a.cfg.AppVersion,
 		MaxBots:        a.cfg.MaxBots,
 		StressInterval: a.cfg.StressInterval.String(),
@@ -544,16 +544,12 @@ func (a *Agent) shutdown() error {
 
 // buildAddress 根据监听地址构建完整 HTTP 地址。
 // ":7070" → "http://hostname:7070"
-func buildAddress(listenAddr string) string {
+func buildAddress(port int) string {
 	hostname, _ := os.Hostname()
 	if hostname == "" {
 		hostname = "127.0.0.1"
 	}
-	addr := listenAddr
-	if addr[0] == ':' {
-		return "http://" + hostname + addr
-	}
-	return "http://" + addr
+	return fmt.Sprintf("http://%s:%d", hostname, port)
 }
 
 // generateUUID 生成 v4 UUID（不依赖外部库）。

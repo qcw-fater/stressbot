@@ -12,7 +12,7 @@ import { useFloatingWindowStore } from '../../store/floatingWindowStore';
 import { useFlowStore } from '../../store/flowStore';
 import { useRuntimeStore } from '@/services/runtimeStore';
 import { getScript } from '@/services/resourcesStore';
-import { collectStateKeys, collectUsedScriptNames } from '../ActionEditor/stateRegistry';
+import { collectStateKeys, collectUsedScriptNames, resolveStateKeyDisplayType } from '../ActionEditor/stateRegistry';
 import { renderExprWithHighlights } from './conditionExprUtils';
 
 export interface StateExprInputProps {
@@ -149,7 +149,7 @@ export function StateExprInput({ value, onChange, placeholder }: StateExprInputP
           </Tag>
           {k.s2cProto && (
             <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
-              ← {k.s2cProto.split('.').pop()}
+              ← {resolveStateKeyDisplayType(k) ?? k.s2cProto.split('.').pop()}
             </span>
           )}
         </div>

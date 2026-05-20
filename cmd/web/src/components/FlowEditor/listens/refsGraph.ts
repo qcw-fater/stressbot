@@ -44,23 +44,23 @@ export function buildRefsGraph(flow: TaskFlow): RefsGraph {
 
   for (const [nodeId, node] of Object.entries(flow.nodes)) {
     if (node.type !== 'action') continue;
-    const refs = node.listenCallbacks ?? [];
+    const refs = node.listenRefs ?? [];
     if (refs.length > 0) nodeToRefs.set(nodeId, refs);
     refs.forEach((ref, i) => {
       const rec: RefRecord = { nodeId, refIndex: i, ref };
-      if (ref.callback != null) {
-        const list = listenToRefs.get(ref.callback) ?? [];
+      if (ref.listen != null) {
+        const list = listenToRefs.get(ref.listen) ?? [];
         list.push(rec);
-        listenToRefs.set(ref.callback, list);
-        refCount.set(ref.callback, (refCount.get(ref.callback) ?? 0) + 1);
-        if (!(ref.callback in flow.listens)) {
+        listenToRefs.set(ref.listen, list);
+        refCount.set(ref.listen, (refCount.get(ref.listen) ?? 0) + 1);
+        if (!(ref.listen in flow.listens)) {
           danglingRefs.push(rec);
         }
       }
       // 加入分组用于查重
       const key = `${ref.server}|${routeKey(ref.route)}`;
       const arr = grouping.get(key) ?? [];
-      arr.push({ nodeId, cb: ref.callback });
+      arr.push({ nodeId, cb: ref.listen });
       grouping.set(key, arr);
     });
   }

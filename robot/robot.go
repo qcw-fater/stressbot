@@ -1,4 +1,4 @@
-package robot
+﻿package robot
 
 import (
 	"bytes"
@@ -218,6 +218,8 @@ func (r *Robot) ConnectTCP(serviceName, address string) bool {
 
 	_, err := r.dialer.DialTCP(r.ctx, address, conn)
 	if err != nil {
+		stresslog.Warn("[ROBOT] TCP 连接建立失败",
+			zap.Int("id", r.id), zap.String("service", serviceName), zap.String("addr", address), zap.Error(err))
 		r.client.CloseTCP(serviceName)
 		monitor.Global().ConnFailed()
 		return false
@@ -314,9 +316,6 @@ func (h *robotActionHandler) ExecuteAction(actionDef *engine.ActionDef) error {
 		mc.RecordAction(actionDef.Name, result, time.Since(start), sendBytes, recvBytes, err)
 	}
 
-	if errors.Is(err, engine.ErrFieldNil) {
-		return nil // 字段级 skip：monitor 已记录 ResultSkipped，executor 正常继续
-	}
 	return err
 }
 
@@ -328,9 +327,6 @@ func classifyResult(err error) monitor.ActionResult {
 	// 任务取消优先级最高
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return monitor.ResultCanceled
-	}
-	if errors.Is(err, engine.ErrFieldNil) {
-		return monitor.ResultSkipped
 	}
 	if errors.Is(err, engine.ErrTimeout) {
 		return monitor.ResultTimeout
@@ -773,3 +769,4 @@ func (ns *netSenderAdapter) RegisterUDPHeartbeat(service string, intervalMs int,
 		Builder:  builder,
 	})
 }
+

@@ -67,14 +67,14 @@
       "type": "action",
       "action": "ConnectLogicTCP",
       "errorStrategy": "abort",
-      "listenCallbacks": [
+      "listenRefs": [
         {
           "route": {
             "cmd": 3,
             "act": 1
           },
           "server": "tcp:logic",
-          "callback": "matchPoll"
+          "listen": "matchPoll"
         },
         {
           "route": {
@@ -82,7 +82,7 @@
             "act": 20
           },
           "server": "tcp:logic",
-          "callback": "teamStartMatch"
+          "listen": "teamStartMatch"
         },
         {
           "route": {
@@ -90,7 +90,7 @@
             "act": 6
           },
           "server": "tcp:logic",
-          "callback": "loadingPoll"
+          "listen": "loadingPoll"
         },
         {
           "route": {
@@ -98,7 +98,7 @@
             "act": 72
           },
           "server": "tcp:logic",
-          "callback": "rewardPoll"
+          "listen": "rewardPoll"
         },
         {
           "route": {
@@ -106,7 +106,7 @@
             "act": 18
           },
           "server": "tcp:logic",
-          "callback": "stateUpdate"
+          "listen": "stateUpdate"
         },
         {
           "route": {
@@ -114,7 +114,7 @@
             "act": 1
           },
           "server": "tcp:logic",
-          "callback": "heroUpdate"
+          "listen": "heroUpdate"
         },
         {
           "route": {
@@ -122,7 +122,7 @@
             "act": 2
           },
           "server": "tcp:logic",
-          "callback": "shopDataUpdate"
+          "listen": "shopDataUpdate"
         },
         {
           "route": {
@@ -130,7 +130,7 @@
             "act": 3
           },
           "server": "tcp:logic",
-          "callback": "teamUpdateInfo"
+          "listen": "teamUpdateInfo"
         },
         {
           "route": {
@@ -138,7 +138,7 @@
             "act": 6
           },
           "server": "tcp:logic",
-          "callback": "teamNotifyInvite"
+          "listen": "teamNotifyInvite"
         },
         {
           "route": {
@@ -146,7 +146,7 @@
             "act": 10
           },
           "server": "tcp:logic",
-          "callback": "teamJoin"
+          "listen": "teamJoin"
         },
         {
           "route": {
@@ -154,7 +154,7 @@
             "act": 15
           },
           "server": "tcp:logic",
-          "callback": "guildJoin"
+          "listen": "guildJoin"
         },
         {
           "route": {
@@ -162,7 +162,7 @@
             "act": 16
           },
           "server": "tcp:logic",
-          "callback": "guildKickMember"
+          "listen": "guildKickMember"
         },
         {
           "route": {
@@ -170,7 +170,7 @@
             "act": 14
           },
           "server": "tcp:logic",
-          "callback": "guildMemberUpdate"
+          "listen": "guildMemberUpdate"
         },
         {
           "route": {
@@ -178,7 +178,7 @@
             "act": 13
           },
           "server": "tcp:logic",
-          "callback": "guildUpdate"
+          "listen": "guildUpdate"
         },
         {
           "route": {
@@ -186,7 +186,7 @@
             "act": 5
           },
           "server": "tcp:logic",
-          "callback": "customRoomStart"
+          "listen": "customRoomStart"
         },
         {
           "route": {
@@ -194,7 +194,7 @@
             "act": 10
           },
           "server": "tcp:logic",
-          "callback": "roomUpdateData"
+          "listen": "roomUpdateData"
         },
         {
           "route": {
@@ -202,7 +202,7 @@
             "act": 23
           },
           "server": "tcp:logic",
-          "callback": "roomUpdateStatus"
+          "listen": "roomUpdateStatus"
         },
         {
           "route": {
@@ -210,7 +210,7 @@
             "act": 2
           },
           "server": "tcp:logic",
-          "callback": null
+          "listen": null
         }
       ]
     },
@@ -367,28 +367,28 @@
       "type": "action",
       "action": "ConnectBattleTCP",
       "errorStrategy": "skip",
-      "listenCallbacks": [
+      "listenRefs": [
         {
           "route": {
             "cmd": 4,
             "act": 10
           },
           "server": "tcp:battle",
-          "callback": null
+          "listen": null
         }
       ]
     },
     "ConnectBattleUDP": {
       "type": "action",
       "action": "ConnectBattleUDP",
-      "listenCallbacks": [
+      "listenRefs": [
         {
           "route": {
             "cmd": 4,
             "act": 11
           },
           "server": "udp:battle",
-          "callback": "frameData"
+          "listen": "frameData"
         }
       ]
     },
@@ -705,14 +705,14 @@
       "type": "sequence",
       "next": [
         "gmCommands",
-        "unlockBasicFunctions",
+        "unlockBasicFunction",
         "LbsPositioning"
       ]
     },
-    "unlockBasicFunctions": {
+    "unlockBasicFunction": {
       "type": "action",
       "description": "解锁排位等基础功能",
-      "action": "action_Hp_apo"
+      "action": "unlockBasicFunction"
     }
   },
   "actions": {
@@ -1240,8 +1240,7 @@
         "act": 72
       },
       "s2cProto": "Game.BattleRewardS2C",
-      "timeout": 60,
-      "optional": true
+      "timeout": 60
     },
     "GameOver": {
       "pattern": "tcpRequest",
@@ -1893,7 +1892,7 @@
           "type": "stateFirst",
           "field": "gid",
           "source": "mailList",
-          "path": "mailUid|gid"
+          "path": "mailUid"
         }
       ]
     },
@@ -1911,7 +1910,7 @@
           "type": "stateFirst",
           "field": "gids",
           "source": "mailList",
-          "path": "mailUid|gid",
+          "path": "mailUid",
           "wrap": true
         }
       ]
@@ -1929,7 +1928,7 @@
           "type": "stateFirst",
           "field": "gids",
           "source": "mailList",
-          "path": "mailUid|gid",
+          "path": "mailUid",
           "wrap": true
         }
       ]
@@ -1946,7 +1945,7 @@
       "store": [
         {
           "setter": "friendDetailList",
-          "field": "friendDetailInfoList"
+          "field": "FriendDetailInfoList"
         }
       ]
     },
@@ -2035,16 +2034,16 @@
           "type": "stateRandom",
           "field": "friendId",
           "source": "friendDetailList",
-          "path": "playerId|playerBase.playerId|base.playerId"
+          "path": "playerBase.playerId"
         }
       ]
     },
-    "action_Hp_apo": {
+    "unlockBasicFunction": {
       "pattern": "lua",
       "script": "unlock_basic_functions.lua"
     }
   },
-  "callbacks": {
+  "listens": {
     "matchPoll": {},
     "teamStartMatch": {},
     "loadingPoll": {},

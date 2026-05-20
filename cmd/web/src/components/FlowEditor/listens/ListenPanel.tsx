@@ -109,7 +109,7 @@ export function ListenPanel() {
                     title="删除此 listen？"
                     description={
                       refCount > 0
-                        ? `仍被 ${refCount} 个 action 引用，删除后这些 listenCallbacks 会变成悬空引用（导出校验报错）。`
+                        ? `仍被 ${refCount} 个 action 引用，删除后这些 listenRefs 会变成悬空引用（导出校验报错）。`
                         : '此 listen 是孤儿，可安全删除。'
                     }
                     onConfirm={() => {

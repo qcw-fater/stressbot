@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"time"
 
+	"stressbot/errcode"
 	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"
@@ -186,7 +187,7 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 			zap.String("caller", e.caller), zap.String("action", node.Action), zap.Error(err))
 		switch node.ErrorStrategy {
 		case "abort":
-			return fmt.Errorf("动作执行失败 [%s]: %w", node.Action, err)
+				return NewActionError(errcode.ErrExecFailed, "action="+node.Action, err)
 		case "skip":
 			return errSkip
 		default:
@@ -201,7 +202,7 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 				zap.String("caller", e.caller), zap.Error(err))
 			switch node.ErrorStrategy {
 			case "abort":
-				return fmt.Errorf("注册监听失败: %w", err)
+				return NewActionError(errcode.ErrListenRegister, "action="+node.Action, err)
 			case "skip":
 				return errSkip
 			}

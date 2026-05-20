@@ -81,7 +81,7 @@ func (s *Sampler) loop(ctx context.Context, taskID string, startedAt time.Time, 
 
 			stress := s.aggregator.AggregateStress(taskID)
 			if stressJSON, err := json.Marshal(stress); err == nil {
-				if err := s.history.AppendTimeseries(taskID, TimeseriesPoint{
+				if err := s.history.AppendTimeseries(context.Background(), taskID, TimeseriesPoint{
 					TaskID: taskID, SampledAt: t, ElapsedSec: elapsed,
 					DataType: "stress", Snapshot: stressJSON,
 				}); err != nil {
@@ -92,7 +92,7 @@ func (s *Sampler) loop(ctx context.Context, taskID string, startedAt time.Time, 
 
 			sys := s.aggregator.AggregateSystem()
 			if sysJSON, err := json.Marshal(sys); err == nil {
-				if err := s.history.AppendTimeseries(taskID, TimeseriesPoint{
+				if err := s.history.AppendTimeseries(context.Background(), taskID, TimeseriesPoint{
 					TaskID: taskID, SampledAt: t, ElapsedSec: elapsed,
 					DataType: "system", Snapshot: sysJSON,
 				}); err != nil {

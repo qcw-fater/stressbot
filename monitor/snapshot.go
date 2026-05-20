@@ -38,7 +38,6 @@ type ActionSnapshot struct {
 	SuccessCount  int64             `json:"successCount"`  // 成功次数
 	FailureCount  int64             `json:"failureCount"`  // 失败次数（非超时）
 	TimeoutCount  int64             `json:"timeoutCount"`  // 超时次数
-	SkippedCount  int64             `json:"skippedCount"`  // 跳过次数
 	CanceledCount int64             `json:"canceledCount"` // 取消次数
 	Executing     int64             `json:"executing"`     // 当前执行中的并发数
 	SuccessRate   float64           `json:"successRate"`   // 成功率（0~1）
@@ -149,7 +148,6 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 		succ := am.successCount.Load()
 		fail := am.failureCount.Load()
 		tout := am.timeoutCount.Load()
-		skip := am.skippedCount.Load()
 		canceled := am.canceledCount.Load()
 		exec := am.executing.Load()
 		total := succ + fail + tout
@@ -206,7 +204,6 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 			SuccessCount:        succ,
 			FailureCount:        fail,
 			TimeoutCount:        tout,
-			SkippedCount:        skip,
 			CanceledCount:       canceled,
 			TimeoutAvgMs:        timeoutAvgMs,
 			Executing:           exec,
@@ -293,7 +290,6 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 			ma.SuccessCount += a.SuccessCount
 			ma.FailureCount += a.FailureCount
 			ma.TimeoutCount += a.TimeoutCount
-			ma.SkippedCount += a.SkippedCount
 			ma.CanceledCount += a.CanceledCount
 			ma.Executing += a.Executing
 			ma.LatencySumNs += a.LatencySumNs

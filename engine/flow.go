@@ -10,7 +10,7 @@ type TaskFlow struct {
 	DefaultDelayMs int                     `json:"defaultDelayMs"` // 全局节点间默认延迟（毫秒）。0=引擎默认(1000ms)，<0=禁用
 	Nodes          map[string]*Node        `json:"nodes"`          // 节点映射，key 为节点 ID
 	Actions        map[string]*ActionDef   `json:"actions"`        // 动作定义映射
-	Callbacks      map[string]*CallbackDef `json:"callbacks"`      // 回调定义映射
+	Callbacks      map[string]*CallbackDef `json:"listens"`         // 监听定义映射
 }
 
 // Node 流程节点。
@@ -45,7 +45,7 @@ type Node struct {
 	// ── action 专用 ─────────────────────────────────────────────
 	Action          string      `json:"action"`          // 引用 actions 表中的动作名称
 	ErrorStrategy   string      `json:"errorStrategy"`   // "abort" = 中断整个流程；"skip" = 跳过当前层级；空/"ignore" = 忽略继续
-	ListenCallbacks []ListenRef `json:"listenCallbacks"` // 动作执行后注册的持久化推送监听
+	ListenCallbacks []ListenRef `json:"listenRefs"` // 动作执行后注册的持久化推送监听
 
 	// ── weighted 专用 ─────────────────────────────────────────────
 	Options []WeightedOption `json:"options"` // 加权选项列表
@@ -71,7 +71,7 @@ type WeightedOption struct {
 type ListenRef struct {
 	Route    any    `json:"route"`    // 不透明路由（与 ActionDef.Route 格式一致）
 	Server   string `json:"server"`   // 连接名，格式：协议:服务名（如 "tcp:logic"、"udp:udp"）
-	Callback string `json:"callback"` // 回调定义名称（引用 callbacks 表）
+	Callback string `json:"listen"` // 监听定义名称（引用 listens 表）
 }
 
 // 动作模式常量。
@@ -108,7 +108,6 @@ type ActionDef struct {
 	Timeout     int            `json:"timeout"`     // 超时秒数（listen 模式）
 	PollMs      int            `json:"pollMs"`      // 轮询间隔毫秒（listen 模式，默认 100）
 	Keys        []string       `json:"keys"`        // clearState 要清除的 key 列表
-	Optional    bool           `json:"optional"`    // 可选动作：依赖缺失时静默跳过
 	URL         string         `json:"url"`         // HTTP 请求 URL（httpRequest 模式），支持 state: 前缀
 	Method      string         `json:"method"`      // HTTP 方法（httpRequest 模式）：POST(默认) / GET
 	ContentType string         `json:"contentType"` // HTTP 内容类型（httpRequest 模式）：json(默认) / form
@@ -171,7 +170,7 @@ func (fb *FieldBind) isRequired() bool {
 // isImplicitRequired 判断绑定类型是否属于隐式必需（缺失时触发动作跳过）。
 func isImplicitRequired(btype string) bool {
 	switch btype {
-	case "stateFirst", "stateRandom", "stateRandomN", "stateMapKey", "stateMapValue":
+	case "state", "stateFirst", "stateRandom", "stateRandomN", "stateMapKey", "stateMapValue":
 		return true
 	}
 	return false

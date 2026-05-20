@@ -41,8 +41,39 @@ export function ReportHtml({ detail, timeseries, charts }: ReportHtmlProps) {
       {/* Section 2: KPI */}
       <KpiSection actions={actions} sys={sys} conn={conn} wm={wm} totalQps={totalQps} />
 
-      {/* Section 3: 趋势 */}
-      <ChartSection title="运行趋势" image={charts.trend} empty="无时序数据" />
+      {/* Section 3: 趋势 2×2 */}
+      <div className="report-section">
+        <div className="section-title">运行趋势</div>
+        <div className="trends-grid">
+          {charts.qps && (
+            <div className="trends-grid__cell">
+              <div className="trends-grid__label">QPS</div>
+              <img src={charts.qps} alt="QPS" />
+            </div>
+          )}
+          {charts.apdexTrend && (
+            <div className="trends-grid__cell">
+              <div className="trends-grid__label">Apdex</div>
+              <img src={charts.apdexTrend} alt="Apdex" />
+            </div>
+          )}
+          {charts.cpu && (
+            <div className="trends-grid__cell">
+              <div className="trends-grid__label">CPU%</div>
+              <img src={charts.cpu} alt="CPU" />
+            </div>
+          )}
+          {charts.bandwidth && (
+            <div className="trends-grid__cell">
+              <div className="trends-grid__label">带宽 (KB/s)</div>
+              <img src={charts.bandwidth} alt="带宽" />
+            </div>
+          )}
+        </div>
+        {!charts.qps && !charts.apdexTrend && !charts.cpu && !charts.bandwidth && (
+          <div className="chart-empty">无时序数据</div>
+        )}
+      </div>
 
       {/* Section 4: 性能排行 */}
       <ChartSection title="动作性能排行 (p99)" image={charts.ranking} empty="无动作数据" />
@@ -66,7 +97,7 @@ export function ReportHtml({ detail, timeseries, charts }: ReportHtmlProps) {
       </div>
 
       {/* Section 7: Apdex 分布 */}
-      <ChartSection title="Apdex 分布" image={charts.apdex} empty="无动作数据" />
+      <ChartSection title="Apdex 分布" image={charts.apdexBar} empty="无动作数据" />
 
       {/* Section 8: 错误分析 */}
       {charts.errors && (
@@ -183,7 +214,7 @@ function FailureSummaryTable({ actions }: { actions: ActionMetric[] }) {
   if (problemActions.length === 0) {
     return (
       <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 12, color: '#52c41a', fontWeight: 600 }}>
+        <div style={{ fontSize: 12, color: 'var(--color-success)', fontWeight: 600 }}>
           所有动作均无失败或超时
         </div>
       </div>
@@ -220,10 +251,11 @@ function FailureSummaryTable({ actions }: { actions: ActionMetric[] }) {
 }
 
 function ErrorSection({ actions, errorChart }: { actions: ActionMetric[]; errorChart: string }) {
-  const allErrors: Array<{ action: string; msg: string; count: number }> = [];
+  const allErrors: Array<{ action: string; name: string; msg: string; count: number }> = [];
   for (const a of actions) {
     for (const e of a.errors ?? []) {
-      allErrors.push({ action: a.name, msg: e.msgs.join('; '), count: e.count });
+      const name = e.codeName || `${e.kind}#${e.code}`;
+      allErrors.push({ action: a.name, name, msg: e.msgs.join('; '), count: e.count });
     }
   }
   allErrors.sort((a, b) => b.count - a.count);
@@ -239,7 +271,8 @@ function ErrorSection({ actions, errorChart }: { actions: ActionMetric[]; errorC
           <div key={i} className="error-row">
             <span className="error-count">×{e.count}</span>
             <span className="error-action">{e.action}</span>
-            <span className="error-msg">{e.msg}</span>
+            <span className="error-name">{e.name}</span>
+            {e.msg && <span className="error-msg">{e.msg}</span>}
           </div>
         ))}
       </div>
@@ -324,16 +357,20 @@ function DetailTableSection({ actions }: { actions: ActionMetric[] }) {
   return (
     <div className="report-section">
       <div className="section-title">动作详情表</div>
-      <table className="report-table">
+      <table className="report-table report-table--detail">
         <thead>
           <tr>
             <th>动作</th>
             <th className="num">样本</th>
+            <th className="num">失败</th>
+            <th className="num">超时</th>
             <th className="num">Apdex</th>
+            <th className="num">成功率</th>
+            <th className="num">avg</th>
             <th className="num">p50</th>
             <th className="num">p95</th>
             <th className="num">p99</th>
-            <th className="num">成功率</th>
+            <th className="num">max</th>
             <th className="num">QPS</th>
           </tr>
         </thead>
@@ -348,11 +385,15 @@ function DetailTableSection({ actions }: { actions: ActionMetric[] }) {
               <tr key={a.name}>
                 <td><code>{a.name}</code></td>
                 <td className="num">{a.sampleCount.toLocaleString()}</td>
+                <td className={`num${a.failureCount > 0 ? ' c-error' : ''}`}>{a.failureCount}</td>
+                <td className={`num${a.timeoutCount > 0 ? ' c-warning' : ''}`}>{a.timeoutCount}</td>
                 <td className={`num ${apdexColor}`}>{a.apdex.toFixed(3)}</td>
+                <td className="num">{rate}%</td>
+                <td className="num">{fmtMs(a.latency.avgMs)}</td>
                 <td className="num">{fmtMs(a.latency.p50Ms)}</td>
                 <td className="num">{fmtMs(a.latency.p95Ms)}</td>
                 <td className="num">{fmtMs(a.latency.p99Ms)}</td>
-                <td className="num">{rate}%</td>
+                <td className="num">{fmtMs(a.latency.maxMs)}</td>
                 <td className="num">{a.avgQps.toFixed(1)}</td>
               </tr>
             );

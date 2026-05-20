@@ -1,5 +1,5 @@
 /**
- * action.listenCallbacks 表格编辑器。
+ * action.listenRefs 表格编辑器。
  *
  * 设计文档 §8.6：route + server + listen 三列 + 形态徽章 + 排序删除 + 批量入口。
  */
@@ -33,8 +33,8 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
   const [pasteText, setPasteText] = useState('');
 
   if (!node) return null;
-  const refs = node.listenCallbacks ?? [];
-  const set = (next: ListenRef[]) => updateNode(nodeId, { listenCallbacks: next });
+  const refs = node.listenRefs ?? [];
+  const set = (next: ListenRef[]) => updateNode(nodeId, { listenRefs: next });
 
   // listen 候选下拉：null + 现有 listen + "新建..."
   const listenOptions = [
@@ -54,9 +54,9 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
   const onListenChange = (i: number, v: string | undefined) => {
     const arr = [...refs];
     if (v === '__null__' || !v) {
-      arr[i] = { ...arr[i], callback: null };
+      arr[i] = { ...arr[i], listen: null };
     } else {
-      arr[i] = { ...arr[i], callback: v };
+      arr[i] = { ...arr[i], listen: v };
     }
     set(arr);
   };
@@ -77,7 +77,7 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
       // 简单校验
       for (const x of arr) {
         if (typeof x !== 'object' || x == null) throw new Error('每个 item 必须是对象');
-        if (!('server' in x) || !('callback' in x)) throw new Error('每个 item 必须含 server 和 callback');
+        if (!('server' in x) || !('listen' in x)) throw new Error('每个 item 必须含 server 和 listen');
       }
       set([...refs, ...(arr as ListenRef[])]);
       message.success(`已追加 ${arr.length} 条监听`);
@@ -95,7 +95,7 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
           <Button
             size="small"
             icon={<PlusOutlined />}
-            onClick={() => set([...refs, { route: { cmd: 0, act: 0 }, server: '', callback: null }])}
+            onClick={() => set([...refs, { route: { cmd: 0, act: 0 }, server: '', listen: null }])}
           >
             添加
           </Button>
@@ -149,10 +149,10 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
           },
           {
             title: 'listen',
-            dataIndex: 'callback',
+            dataIndex: 'listen',
             render: (_, r) => {
-              const cur = r.callback ?? '__null__';
-              const listen = r.callback ? listens[r.callback] : undefined;
+              const cur = r.listen ?? '__null__';
+              const listen = r.listen ? listens[r.listen] : undefined;
               return (
                 <Space.Compact style={{ width: '100%' }}>
                   <Select
@@ -163,12 +163,12 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
                     showSearch
                     optionFilterProp="value"
                   />
-                  {r.callback && listen && (
+                  {r.listen && listen && (
                     <Tooltip title="跳转到 ListenEditor">
                       <Button
                         size="small"
                         onClick={() =>
-                          setActivePanel({ kind: 'listenEdit', listenName: r.callback! })
+                          setActivePanel({ kind: 'listenEdit', listenName: r.listen! })
                         }
                       >
                         →
@@ -223,7 +223,7 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
 
       <Modal
         open={pasteOpen}
-        title="批量粘贴 listenCallbacks JSON"
+        title="批量粘贴 listenRefs JSON"
         onCancel={() => setPasteOpen(false)}
         onOk={onApplyPaste}
         okText="追加"
@@ -231,13 +231,13 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
       >
         <p style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
           粘贴 <code>ListenRef[]</code> JSON 数组。每个对象需包含 <code>route</code>、<code>server</code>、
-          <code>callback</code>。
+          <code>listen</code>。
         </p>
         <Input.TextArea
           rows={12}
           value={pasteText}
           onChange={(e) => setPasteText(e.target.value)}
-          placeholder={`[\n  {"route":{"cmd":3,"act":1},"server":"tcp:logic","callback":"matchPoll"},\n  {"route":{"cmd":2,"act":18},"server":"tcp:logic","callback":"stateUpdate"}\n]`}
+          placeholder={`[\n  {"route":{"cmd":3,"act":1},"server":"tcp:logic","listen":"matchPoll"},\n  {"route":{"cmd":2,"act":18},"server":"tcp:logic","listen":"stateUpdate"}\n]`}
           style={{ fontFamily: 'monospace' }}
         />
       </Modal>

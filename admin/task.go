@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	stresslog "stressbot/utils/log"
 	"stressbot/utils"
+	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"
 )
@@ -181,7 +181,9 @@ func (ts *TaskStore) Transition(id string, from, to TaskState) (*Task, error) {
 		t.StoppedAt = &now
 	}
 
-	_ = saveTaskFile(ts.dataDir, t)
+	if err := saveTaskFile(ts.dataDir, t); err != nil {
+		stresslog.Warn("[ADMIN] 保存任务文件失败", zap.String("id", id), zap.Error(err))
+	}
 
 	// 终态时清理 activeID 并触发回调
 	if !IsActiveState(to) {

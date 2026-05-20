@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -35,13 +36,13 @@ func (a *Agent) startHTTPServer() error {
 	})
 
 	a.httpSrv = &http.Server{
-		Addr:    a.cfg.ListenAddr,
+		Addr:    fmt.Sprintf(":%d", a.cfg.Port),
 		Handler: recoverMiddleware(mux),
 	}
 
 	utils.GetWorkPool().Go(func() {
-		stresslog.Info("[AGENT] HTTP 服务已启动", zap.String("addr", a.cfg.ListenAddr))
-		if err := a.httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		stresslog.Info("[AGENT] HTTP 服务已启动", zap.Int("port", a.cfg.Port))
+		if err := a.httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			stresslog.Error("[AGENT] HTTP 服务异常退出", zap.Error(err))
 		}
 	})
@@ -85,7 +86,7 @@ func (a *Agent) handleTaskAssign(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
 		json.NewEncoder(w).Encode(map[string]string{
-			"error":          "task already running",
+			"error":         "task already running",
 			"currentTaskId": taskID,
 		})
 		return

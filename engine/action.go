@@ -170,14 +170,11 @@ func (ae *ActionExecutor) bindFields(msg proto.Message, bindings []FieldBind, ac
 		value := ae.resolveFieldValue(fb)
 
 		if value == nil {
-			if fb.Required {
-				return NewActionError(errcode.ErrBindField, "action="+actionName+" field="+fb.Field)
+			if fb.Optional {
+				continue
 			}
-			if !fb.Optional && isImplicitRequired(fb.Type) {
-				stresslog.Warn("[ACTION] 跳过动作: 必需字段为空",
-					zap.String("action", actionName), zap.String("field", fb.Field), zap.String("type", fb.Type),
-					zap.String("source", fb.Source))
-				return ErrFieldNil
+			if fb.Required || isImplicitRequired(fb.Type) {
+				return NewActionError(errcode.ErrBindField, "action="+actionName+" field="+fb.Field)
 			}
 		}
 
@@ -403,22 +400,8 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 	return val
 }
 
-// navigatePath 按点分路径从嵌套 map/list 中提取值，支持 | 分隔多候选路径。
+// navigatePath 按点分路径从嵌套 map/list 中提取值。
 func navigatePath(v any, path string) any {
-	if strings.Contains(path, "|") {
-		for _, alt := range strings.Split(path, "|") {
-			result := navigateSinglePath(v, alt)
-			if result != nil {
-				return result
-			}
-		}
-		return nil
-	}
-	return navigateSinglePath(v, path)
-}
-
-// navigateSinglePath 从嵌套结构中按单段路径提取值。
-func navigateSinglePath(v any, path string) any {
 	current := v
 	for _, key := range state.SplitPath(path) {
 		if current == nil {
@@ -468,10 +451,6 @@ func (ae *ActionExecutor) execTCPSend(def *ActionDef) (int, error) {
 	routeKey := ae.adp.ExpectedRouteKey(def.Route)
 	n, err := ae.netSender.TCPSend(def.Service, packet)
 	if err != nil {
-		if def.Optional {
-			stresslog.Debug("[ACTION] 可选 TCP 发送失败（已忽略）", zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey))
-			return 0, nil
-		}
 		return 0, err
 	}
 
@@ -508,12 +487,6 @@ func (ae *ActionExecutor) execTCPRequest(def *ActionDef) (int, int, error) {
 	respBody, headerErr, err := ae.netSender.TCPRequest(def.Service, packet, routeKey, reqTimeout...)
 	elapsed := time.Since(start)
 	if err != nil {
-		if def.Optional {
-			stresslog.Debug("[ACTION] 可选 TCP 请求失败（已忽略）",
-				zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
-				zap.Duration("elapsed", elapsed))
-			return 0, 0, nil
-		}
 		return len(packet), 0, err
 	}
 
@@ -666,12 +639,6 @@ func (ae *ActionExecutor) execUDPRequest(def *ActionDef) (int, int, error) {
 	respBody, headerErr, err := ae.netSender.UDPRequest(def.Service, packet, routeKey, reqTimeout...)
 	elapsed := time.Since(start)
 	if err != nil {
-		if def.Optional {
-			stresslog.Debug("[ACTION] 可选 UDPRequest 失败（已忽略）",
-				zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
-				zap.Duration("elapsed", elapsed))
-			return 0, 0, nil
-		}
 		return len(packet), 0, err
 	}
 
@@ -750,12 +717,6 @@ func (ae *ActionExecutor) execUDPListen(def *ActionDef) (int, error) {
 	}
 
 	elapsed := time.Since(start)
-	if def.Optional {
-		stresslog.Warn("[ACTION] 可选 UDPListen 超时（已忽略）",
-			zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
-			zap.Int("pollCount", pollCount), zap.Duration("elapsed", elapsed))
-		return 0, nil
-	}
 	return 0, NewTimeoutError(errcode.ErrListenTimeout,
 		"action="+def.Name+" service="+def.Service+" route="+routeKey+
 			fmt.Sprintf(" timeout=%ds polls=%d elapsed=%v", timeout, pollCount, elapsed))
@@ -822,10 +783,6 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, error) {
 	sendLen := len(resolvedURL) + len(body)
 	statusCode, respBody, err := ae.netSender.HTTPRequest(resolvedURL, method, contentType, body)
 	if err != nil {
-		if def.Optional {
-			stresslog.Debug("[ACTION] 可选 HTTP 请求失败（已忽略）", zap.String("action", def.Name), zap.String("url", resolvedURL), zap.Error(err))
-			return 0, 0, nil
-		}
 		return sendLen, 0, err
 	}
 
@@ -964,12 +921,6 @@ func (ae *ActionExecutor) execTCPListen(def *ActionDef) (int, error) {
 	}
 
 	elapsed := time.Since(start)
-	if def.Optional {
-		stresslog.Warn("[ACTION] 可选 TCPListen 超时（已忽略）",
-			zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
-			zap.Int("pollCount", pollCount), zap.Duration("elapsed", elapsed))
-		return 0, nil
-	}
 	return 0, NewTimeoutError(errcode.ErrListenTimeout,
 		"action="+def.Name+" service="+def.Service+" route="+routeKey+
 			fmt.Sprintf(" timeout=%ds polls=%d elapsed=%v", timeout, pollCount, elapsed))

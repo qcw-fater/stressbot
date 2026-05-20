@@ -16,7 +16,7 @@ export interface LatencyHistogramProps {
 
 const P_COLOR: Record<string, string> = {
   p50: 'var(--color-success)',
-  p90: '#a0d911',
+  p90: 'var(--chart-lime)',
   p95: 'var(--color-warning)',
   p99: 'var(--color-error)',
 };

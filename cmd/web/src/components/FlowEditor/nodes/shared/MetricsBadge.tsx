@@ -46,9 +46,9 @@ export function useNodeApdexLevel(nodeId: string): ApdexLevel {
 
 const APDEX_COLOR: Record<ApdexLevel, string> = {
   excellent: 'var(--color-success)',
-  good: '#a0d911',
+  good: 'var(--chart-lime)',
   fair: 'var(--color-warning)',
-  poor: 'var(--color-orange)',
+  poor: 'var(--chart-orange)',
   danger: 'var(--color-error)',
   unknown: 'var(--text-tertiary)',
 };

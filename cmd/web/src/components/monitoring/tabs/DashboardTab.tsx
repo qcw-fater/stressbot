@@ -19,9 +19,9 @@ function fmtBandwidth(mbps: number) {
 
 const APDEX_COLOR: Record<string, string> = {
   excellent: 'var(--color-success)',
-  good: '#bae637',
+  good: 'var(--chart-lime)',
   fair: 'var(--color-warning)',
-  poor: 'var(--color-orange, #fa8c16)',
+  poor: 'var(--chart-orange)',
   danger: 'var(--color-error)',
   unknown: 'var(--text-tertiary)',
 };

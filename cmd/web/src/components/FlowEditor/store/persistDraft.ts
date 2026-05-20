@@ -11,14 +11,14 @@ import type { FlowNode } from '@/types/flow';
 import type { FlowJson } from '../codec/flowToJson';
 import { useFlowStore } from './flowStore';
 
-const KEY_FLOW = 'stressbot-editor-draft-flow-v1';
-const KEY_LAYOUT = 'stressbot-editor-draft-layout-v1';
+const KEY_FLOW = 'stressbot-editor-draft-flow-v2';
+const KEY_LAYOUT = 'stressbot-editor-draft-layout-v2';
 
 interface Draft {
   defaultDelayMs: number;
   nodes: Record<string, FlowNode>;
   actions: Record<string, ActionDef>;
-  callbacks: Record<string, ListenDef>;
+  listens: Record<string, ListenDef>;
   savedAt: number;
 }
 
@@ -32,7 +32,7 @@ function flushNow(): void {
       defaultDelayMs: s.defaultDelayMs,
       nodes: s.nodes,
       actions: s.actions,
-      callbacks: s.listens,
+      listens: s.listens,
       savedAt: Date.now(),
     };
     localStorage.setItem(KEY_FLOW, JSON.stringify(draft));
@@ -79,7 +79,7 @@ export function loadDraft(): { flow: FlowJson; layout: FlowLayout; savedAt: numb
         defaultDelayMs: draft.defaultDelayMs,
         nodes: draft.nodes,
         actions: draft.actions,
-        callbacks: draft.callbacks,
+        listens: draft.listens,
       },
       layout,
       savedAt: draft.savedAt,

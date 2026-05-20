@@ -42,7 +42,7 @@ export interface FlowNode {
   // action 专用
   action?: string;
   errorStrategy?: 'ignore' | 'skip' | 'abort';
-  listenCallbacks?: ListenRef[];
+  listenRefs?: ListenRef[];
 
   // weighted 专用
   options?: WeightedOption[];
@@ -65,12 +65,12 @@ export interface WeightedOption {
  * 监听引用。
  * - route 为不透明结构，最常见 `{cmd, act}`，但允许任意 JSON 形态
  * - server 形如 `tcp:logic` / `udp:battle`
- * - callback 为 listens 表的 key；null = 静默丢弃（连 listen {} 都不调用）
+ * - listen 为 listens 表的 key；null = 静默丢弃（连 listen {} 都不调用）
  */
 export interface ListenRef {
   route: unknown;
   server: string;
-  callback: string | null;
+  listen: string | null;
 }
 
 /** TaskFlow：编辑器主数据模型，1:1 对应 flow.json。 */

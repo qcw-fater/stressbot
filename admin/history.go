@@ -65,14 +65,15 @@ func NewHistoryStore(cfg HistoryConfig) (*HistoryStore, error) {
 	h.prune = 24 * time.Hour
 
 	stresslog.Info("HistoryStore 已连接 MySQL",
-		zap.String("dsn", maskDSN(cfg.MySQL.DSN)),
+		zap.String("addr", fmt.Sprintf("%s:%d", cfg.MySQL.Host, cfg.MySQL.Port)),
+			zap.String("database", cfg.MySQL.Database),
 		zap.Int("retentionDays", cfg.RetentionDays))
 
 	return h, nil
 }
 
 func openDB(cfg MySQLConfig) (*sql.DB, error) {
-	db, err := sql.Open("mysql", cfg.DSN)
+	db, err := sql.Open("mysql", cfg.DSN())
 	if err != nil {
 		return nil, err
 	}
@@ -95,17 +96,18 @@ func openDB(cfg MySQLConfig) (*sql.DB, error) {
 }
 
 func (h *HistoryStore) initSchema() error {
+	ctx := context.Background()
 	for _, ddl := range allDDL {
-		if _, err := h.db.Exec(ddl); err != nil {
+		if _, err := h.db.ExecContext(ctx, ddl); err != nil {
 			return err
 		}
 	}
-	h.dropLegacyForeignKeys()
+	h.dropLegacyForeignKeys(ctx)
 	return nil
 }
 
 // dropLegacyForeignKeys 移除旧版本遗留的物理外键约束。
-func (h *HistoryStore) dropLegacyForeignKeys() {
+func (h *HistoryStore) dropLegacyForeignKeys(ctx context.Context) {
 	type fk struct {
 		table, name string
 	}
@@ -117,17 +119,17 @@ func (h *HistoryStore) dropLegacyForeignKeys() {
 		{"task_config_archive", "task_config_archive_ibfk_1"},
 		{"task_agent_events", "task_agent_events_ibfk_1"},
 	} {
-		_, _ = h.db.Exec(fmt.Sprintf("ALTER TABLE %s DROP FOREIGN KEY %s", k.table, k.name))
+		_, _ = h.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s DROP FOREIGN KEY %s", k.table, k.name))
 	}
 }
 
-// Archive 将终态任务归档到 MySQL（事务写入 5 张表）。
-func (h *HistoryStore) Archive(task *Task, finalStress *monitor.CollectorSnapshot, finalSys ClusterSystemSnapshot) error {
+// Archive 将终态任务归档到 MySQL（事务写入 6 张表）。
+func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *monitor.CollectorSnapshot, finalSys ClusterSystemSnapshot) error {
 	if h.db == nil {
 		return nil
 	}
 
-	tx, err := h.db.BeginTx(context.Background(), nil)
+	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
@@ -230,7 +232,7 @@ func (h *HistoryStore) Archive(task *Task, finalStress *monitor.CollectorSnapsho
 }
 
 // List 分页查询历史记录。
-func (h *HistoryStore) List(filter HistoryFilter) (*HistoryListResponse, error) {
+func (h *HistoryStore) List(ctx context.Context, filter HistoryFilter) (*HistoryListResponse, error) {
 	if h.db == nil {
 		return &HistoryListResponse{Items: []HistoryRecord{}}, nil
 	}
@@ -249,19 +251,17 @@ func (h *HistoryStore) List(filter HistoryFilter) (*HistoryListResponse, error) 
 		offset = 0
 	}
 
-	// count
 	var total int
 	countSQL := "SELECT COUNT(*) FROM task_history" + where
-	if err := h.db.QueryRow(countSQL, args...).Scan(&total); err != nil {
+	if err := h.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("count history: %w", err)
 	}
 
-	// rows
 	querySQL := fmt.Sprintf(
 		"SELECT id, name, state, total_bots, agent_count, created_at, started_at, stopped_at, duration_sec, error_msg, starred, tags, note, config_summary FROM task_history%s ORDER BY %s LIMIT ? OFFSET ?",
 		where, orderBy,
 	)
-	rows, err := h.db.Query(querySQL, append(args, limit, offset)...)
+	rows, err := h.db.QueryContext(ctx, querySQL, append(args, limit, offset)...)
 	if err != nil {
 		return nil, fmt.Errorf("list history: %w", err)
 	}
@@ -302,7 +302,7 @@ func (h *HistoryStore) List(filter HistoryFilter) (*HistoryListResponse, error) 
 }
 
 // Get 查询单条历史详情。
-func (h *HistoryStore) Get(id string) (*HistoryDetail, error) {
+func (h *HistoryStore) Get(ctx context.Context, id string) (*HistoryDetail, error) {
 	if h.db == nil {
 		return nil, ErrHistoryNotFound
 	}
@@ -311,7 +311,7 @@ func (h *HistoryStore) Get(id string) (*HistoryDetail, error) {
 	var tagsBytes, summaryBytes []byte
 	var startedAt, stoppedAt sql.NullTime
 
-	err := h.db.QueryRow(`
+	err := h.db.QueryRowContext(ctx, `
 		SELECT id, name, state, total_bots, agent_count, created_at, started_at, stopped_at,
 			duration_sec, error_msg, starred, tags, note, config_summary
 		FROM task_history WHERE id = ?
@@ -336,64 +336,96 @@ func (h *HistoryStore) Get(id string) (*HistoryDetail, error) {
 	_ = json.Unmarshal(tagsBytes, &r.Tags)
 	_ = json.Unmarshal(summaryBytes, &r.ConfigSummary)
 
-	// assignments
-	rows, err := h.db.Query(`SELECT agent_id, start_number, total_bots FROM task_assignment WHERE task_id = ?`, id)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var a Assignment
-			if err := rows.Scan(&a.AgentID, &a.StartNumber, &a.TotalBots); err == nil {
-				a.TaskID = id
-				r.Assignments = append(r.Assignments, a)
-			}
-		}
-	}
-
-	// reports
-	rows2, err := h.db.Query(`SELECT agent_id, agent_name, result, error_msg, finished_at, final_snapshot FROM task_report WHERE task_id = ?`, id)
-	if err == nil {
-		defer rows2.Close()
-		for rows2.Next() {
-			var rep HistoryAgentReport
-			var finishedAt sql.NullTime
-			var snapBytes []byte
-			if err := rows2.Scan(&rep.AgentID, &rep.AgentName, &rep.Result, &rep.ErrorMsg, &finishedAt, &snapBytes); err == nil {
-				if finishedAt.Valid {
-					rep.FinishedAt = finishedAt.Time
-				}
-				_ = json.Unmarshal(snapBytes, &rep.FinalSnapshot)
-				r.AgentReports = append(r.AgentReports, rep)
-			}
-		}
-	}
-
-	// aggregated
-	var stressBytes, sysBytes []byte
-	_ = h.db.QueryRow(`SELECT final_stress, final_system FROM task_aggregated WHERE task_id = ?`, id).Scan(&stressBytes, &sysBytes)
-	_ = json.Unmarshal(stressBytes, &r.FinalSnapshot)
-	_ = json.Unmarshal(sysBytes, &r.FinalSystem)
-
-	// agent events
-	rows3, err := h.db.Query(`SELECT agent_id, agent_name, event_type, timestamp, detail FROM task_agent_events WHERE task_id = ? ORDER BY timestamp`, id)
-	if err == nil {
-		defer rows3.Close()
-		for rows3.Next() {
-			var evt AgentEvent
-			var detail sql.NullString
-			if err := rows3.Scan(&evt.AgentID, &evt.AgentName, &evt.Type, &evt.Timestamp, &detail); err == nil {
-				if detail.Valid {
-					evt.Detail = detail.String
-				}
-				r.AgentEvents = append(r.AgentEvents, evt)
-			}
-		}
-	}
+	r.Assignments, _ = h.queryAssignments(ctx, id)
+	r.AgentReports, _ = h.queryReports(ctx, id)
+	h.queryAggregated(ctx, id, &r)
+	r.AgentEvents, _ = h.queryAgentEvents(ctx, id)
 
 	return &r, nil
 }
 
+// queryAssignments 查询任务分配记录。
+func (h *HistoryStore) queryAssignments(ctx context.Context, taskID string) ([]Assignment, error) {
+	rows, err := h.db.QueryContext(ctx, `SELECT agent_id, start_number, total_bots FROM task_assignment WHERE task_id = ?`, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("query assignments: %w", err)
+	}
+	defer rows.Close()
+
+	var items []Assignment
+	for rows.Next() {
+		var a Assignment
+		if err := rows.Scan(&a.AgentID, &a.StartNumber, &a.TotalBots); err != nil {
+			return nil, fmt.Errorf("scan assignment: %w", err)
+		}
+		a.TaskID = taskID
+		items = append(items, a)
+	}
+	return items, nil
+}
+
+// queryReports 查询 Agent 上报结果。
+func (h *HistoryStore) queryReports(ctx context.Context, taskID string) ([]HistoryAgentReport, error) {
+	rows, err := h.db.QueryContext(ctx, `SELECT agent_id, agent_name, result, error_msg, finished_at, final_snapshot FROM task_report WHERE task_id = ?`, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("query reports: %w", err)
+	}
+	defer rows.Close()
+
+	var items []HistoryAgentReport
+	for rows.Next() {
+		var rep HistoryAgentReport
+		var finishedAt sql.NullTime
+		var snapBytes []byte
+		if err := rows.Scan(&rep.AgentID, &rep.AgentName, &rep.Result, &rep.ErrorMsg, &finishedAt, &snapBytes); err != nil {
+			return nil, fmt.Errorf("scan report: %w", err)
+		}
+		if finishedAt.Valid {
+			rep.FinishedAt = finishedAt.Time
+		}
+		_ = json.Unmarshal(snapBytes, &rep.FinalSnapshot)
+		items = append(items, rep)
+	}
+	return items, nil
+}
+
+// queryAggregated 查询聚合指标，填入 HistoryDetail。
+func (h *HistoryStore) queryAggregated(ctx context.Context, taskID string, r *HistoryDetail) {
+	var stressBytes, sysBytes []byte
+	err := h.db.QueryRowContext(ctx, `SELECT final_stress, final_system FROM task_aggregated WHERE task_id = ?`, taskID).Scan(&stressBytes, &sysBytes)
+	if err != nil && err != sql.ErrNoRows {
+		stresslog.Warn("[ADMIN] 查询聚合指标失败", zap.String("taskID", taskID), zap.Error(err))
+		return
+	}
+	_ = json.Unmarshal(stressBytes, &r.FinalSnapshot)
+	_ = json.Unmarshal(sysBytes, &r.FinalSystem)
+}
+
+// queryAgentEvents 查询 Agent 事件。
+func (h *HistoryStore) queryAgentEvents(ctx context.Context, taskID string) ([]AgentEvent, error) {
+	rows, err := h.db.QueryContext(ctx, `SELECT agent_id, agent_name, event_type, timestamp, detail FROM task_agent_events WHERE task_id = ? ORDER BY timestamp`, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("query agent events: %w", err)
+	}
+	defer rows.Close()
+
+	var items []AgentEvent
+	for rows.Next() {
+		var evt AgentEvent
+		var detail sql.NullString
+		if err := rows.Scan(&evt.AgentID, &evt.AgentName, &evt.Type, &evt.Timestamp, &detail); err != nil {
+			return nil, fmt.Errorf("scan agent event: %w", err)
+		}
+		if detail.Valid {
+			evt.Detail = detail.String
+		}
+		items = append(items, evt)
+	}
+	return items, nil
+}
+
 // GetConfig 获取历史配置归档。
-func (h *HistoryStore) GetConfig(id string) (*TaskConfig, error) {
+func (h *HistoryStore) GetConfig(ctx context.Context, id string) (*TaskConfig, error) {
 	if h.db == nil {
 		return nil, ErrHistoryNotFound
 	}
@@ -401,7 +433,7 @@ func (h *HistoryStore) GetConfig(id string) (*TaskConfig, error) {
 	var cfg TaskConfig
 	var flowJSON, protoJSON, luaJSON, robotJSON []byte
 
-	err := h.db.QueryRow(`
+	err := h.db.QueryRowContext(ctx, `
 		SELECT flow_json, proto_files, lua_scripts, robot_config
 		FROM task_config_archive WHERE task_id = ?
 	`, id).Scan(&flowJSON, &protoJSON, &luaJSON, &robotJSON)
@@ -421,12 +453,12 @@ func (h *HistoryStore) GetConfig(id string) (*TaskConfig, error) {
 }
 
 // GetTimeseries 查询时序采样数据。
-func (h *HistoryStore) GetTimeseries(id string) (*TimeseriesResponse, error) {
+func (h *HistoryStore) GetTimeseries(ctx context.Context, id string) (*TimeseriesResponse, error) {
 	if h.db == nil {
 		return &TimeseriesResponse{TaskID: id}, nil
 	}
 
-	rows, err := h.db.Query(`
+	rows, err := h.db.QueryContext(ctx, `
 		SELECT sampled_at, elapsed_sec, data_type, snapshot
 		FROM task_timeseries WHERE task_id = ?
 		ORDER BY elapsed_sec
@@ -454,15 +486,14 @@ func (h *HistoryStore) GetTimeseries(id string) (*TimeseriesResponse, error) {
 }
 
 // AllTags 返回所有去重标签。
-func (h *HistoryStore) AllTags() ([]string, error) {
+func (h *HistoryStore) AllTags(ctx context.Context) ([]string, error) {
 	if h.db == nil {
 		return nil, nil
 	}
 
-	rows, err := h.db.Query(`SELECT DISTINCT jt.tag FROM task_history, JSON_TABLE(tags, '$[*]' COLUMNS(tag VARCHAR(255) PATH '$')) AS jt`)
+	rows, err := h.db.QueryContext(ctx, `SELECT DISTINCT jt.tag FROM task_history, JSON_TABLE(tags, '$[*]' COLUMNS(tag VARCHAR(255) PATH '$')) AS jt`)
 	if err != nil {
-		// fallback: scan raw JSON if JSON_TABLE not supported
-		return allTagsFallback(h.db)
+		return allTagsFallback(ctx, h.db)
 	}
 	defer rows.Close()
 
@@ -476,8 +507,8 @@ func (h *HistoryStore) AllTags() ([]string, error) {
 	return tags, nil
 }
 
-func allTagsFallback(db *sql.DB) ([]string, error) {
-	rows, err := db.Query(`SELECT tags FROM task_history WHERE tags IS NOT NULL`)
+func allTagsFallback(ctx context.Context, db *sql.DB) ([]string, error) {
+	rows, err := db.QueryContext(ctx, `SELECT tags FROM task_history WHERE tags IS NOT NULL`)
 	if err != nil {
 		return nil, err
 	}
@@ -505,7 +536,7 @@ func allTagsFallback(db *sql.DB) ([]string, error) {
 }
 
 // UpdateMeta 更新元数据（starred/tags/note）。
-func (h *HistoryStore) UpdateMeta(id string, req UpdateHistoryRequest) error {
+func (h *HistoryStore) UpdateMeta(ctx context.Context, id string, req UpdateHistoryRequest) error {
 	if h.db == nil {
 		return ErrHistoryNotFound
 	}
@@ -536,7 +567,7 @@ func (h *HistoryStore) UpdateMeta(id string, req UpdateHistoryRequest) error {
 	}
 
 	args = append(args, id)
-	result, err := h.db.Exec(
+	result, err := h.db.ExecContext(ctx,
 		fmt.Sprintf("UPDATE task_history SET %s WHERE id = ?", strings.Join(sets, ", ")),
 		args...,
 	)
@@ -551,14 +582,14 @@ func (h *HistoryStore) UpdateMeta(id string, req UpdateHistoryRequest) error {
 }
 
 // Delete 删除历史记录。starred 的需要 force=true。
-func (h *HistoryStore) Delete(id string, force bool) error {
+func (h *HistoryStore) Delete(ctx context.Context, id string, force bool) error {
 	if h.db == nil {
 		return ErrHistoryNotFound
 	}
 
 	if !force {
 		var starred int
-		err := h.db.QueryRow(`SELECT starred FROM task_history WHERE id = ?`, id).Scan(&starred)
+		err := h.db.QueryRowContext(ctx, `SELECT starred FROM task_history WHERE id = ?`, id).Scan(&starred)
 		if err == sql.ErrNoRows {
 			return ErrHistoryNotFound
 		}
@@ -579,10 +610,12 @@ func (h *HistoryStore) Delete(id string, force bool) error {
 		"task_agent_events",
 	}
 	for _, tbl := range childTables {
-		_, _ = h.db.Exec(fmt.Sprintf(`DELETE FROM %s WHERE task_id = ?`, tbl), id)
+		if _, err := h.db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE task_id = ?`, tbl), id); err != nil {
+			stresslog.Warn("[ADMIN] 删除子表数据失败", zap.String("table", tbl), zap.String("id", id), zap.Error(err))
+		}
 	}
 
-	result, err := h.db.Exec(`DELETE FROM task_history WHERE id = ?`, id)
+	result, err := h.db.ExecContext(ctx, `DELETE FROM task_history WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete history: %w", err)
 	}
@@ -594,27 +627,26 @@ func (h *HistoryStore) Delete(id string, force bool) error {
 }
 
 // AppendTimeseries 追加时序采样点。
-func (h *HistoryStore) AppendTimeseries(taskID string, point TimeseriesPoint) error {
+func (h *HistoryStore) AppendTimeseries(ctx context.Context, taskID string, point TimeseriesPoint) error {
 	if h.db == nil {
 		return nil
 	}
-	_, err := h.db.Exec(`
+	_, err := h.db.ExecContext(ctx, `
 		INSERT INTO task_timeseries (task_id, sampled_at, elapsed_sec, data_type, snapshot)
 		VALUES (?, ?, ?, ?, ?)
 	`, taskID, point.SampledAt, point.ElapsedSec, point.DataType, point.Snapshot)
 	return err
 }
 
-// PruneExpired 清理过期记录。
-func (h *HistoryStore) PruneExpired(now time.Time) (int, error) {
+// PruneExpired 清理过期记录。ctx 用于取消进行中的 SQL 操作。
+func (h *HistoryStore) PruneExpired(ctx context.Context, now time.Time) (int, error) {
 	if h.db == nil {
 		return 0, nil
 	}
 
 	cutoff := now.AddDate(0, 0, -h.cfg.RetentionDays)
 
-	// 先收集要清理的 ID，再逐表删除子表数据，最后删主表
-	rows, err := h.db.Query(`
+	rows, err := h.db.QueryContext(ctx, `
 		SELECT id FROM task_history
 		WHERE starred = 0 AND stopped_at IS NOT NULL AND stopped_at < ?
 	`, cutoff)
@@ -636,13 +668,16 @@ func (h *HistoryStore) PruneExpired(now time.Time) (int, error) {
 		return 0, nil
 	}
 
+	// 事务：子表 + 主表原子删除，避免中途失败导致数据不一致
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("prune expired: begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
 	childTables := []string{
-		"task_assignment",
-		"task_report",
-		"task_aggregated",
-		"task_timeseries",
-		"task_config_archive",
-		"task_agent_events",
+		"task_assignment", "task_report", "task_aggregated",
+		"task_timeseries", "task_config_archive", "task_agent_events",
 	}
 	placeholders := strings.Repeat("?,", len(ids))
 	placeholders = placeholders[:len(placeholders)-1]
@@ -651,16 +686,23 @@ func (h *HistoryStore) PruneExpired(now time.Time) (int, error) {
 		args[i] = id
 	}
 	for _, tbl := range childTables {
-		_, _ = h.db.Exec(fmt.Sprintf(`DELETE FROM %s WHERE task_id IN (%s)`, tbl, placeholders), args...)
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE task_id IN (%s)`, tbl, placeholders), args...); err != nil {
+			return 0, fmt.Errorf("prune expired: delete %s: %w", tbl, err)
+		}
 	}
 
-	result, err := h.db.Exec(`
+	result, err := tx.ExecContext(ctx, `
 		DELETE FROM task_history
 		WHERE starred = 0 AND stopped_at IS NOT NULL AND stopped_at < ?
 	`, cutoff)
 	if err != nil {
-		return 0, fmt.Errorf("prune expired: %w", err)
+		return 0, fmt.Errorf("prune expired: delete main: %w", err)
 	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("prune expired: commit: %w", err)
+	}
+
 	n, _ := result.RowsAffected()
 	if n > 0 {
 		stresslog.Info("历史清理完成",
@@ -678,7 +720,7 @@ func (h *HistoryStore) StartPruneLoop(ctx context.Context) {
 	ctx, h.cancel = context.WithCancel(ctx)
 
 	utils.GetWorkPool().GoWithStop(func(stopCh <-chan struct{}) {
-		if _, err := h.PruneExpired(time.Now()); err != nil {
+		if _, err := h.PruneExpired(ctx, time.Now()); err != nil {
 			stresslog.Error("历史清理失败", zap.Error(err))
 		}
 
@@ -692,7 +734,7 @@ func (h *HistoryStore) StartPruneLoop(ctx context.Context) {
 			case <-stopCh:
 				return
 			case <-ticker.C:
-				if _, err := h.PruneExpired(time.Now()); err != nil {
+				if _, err := h.PruneExpired(ctx, time.Now()); err != nil {
 					stresslog.Error("历史清理失败", zap.Error(err))
 				}
 			}
@@ -701,6 +743,8 @@ func (h *HistoryStore) StartPruneLoop(ctx context.Context) {
 }
 
 // Close 关闭数据库连接。
+// cancel 会使 prune goroutine 中进行中的 ExecContext 立即中断，
+// driver 自行关闭连接，避免与 db.Close 并发导致 WSASend SEGV。
 func (h *HistoryStore) Close() error {
 	if h.cancel != nil {
 		h.cancel()
@@ -771,12 +815,4 @@ func buildConfigSummary(task *Task) ConfigSummary {
 	s.ProtoCount = len(task.Config.ProtoFiles)
 	s.ScriptCount = len(task.Config.LuaScripts)
 	return s
-}
-
-func maskDSN(dsn string) string {
-	idx := strings.Index(dsn, "@")
-	if idx > 0 {
-		return "***" + dsn[idx:]
-	}
-	return dsn
 }

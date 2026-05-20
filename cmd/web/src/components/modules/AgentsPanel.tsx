@@ -32,9 +32,9 @@ const STATUS_LABEL: Record<AgentStatus, string> = {
 };
 
 const STATUS_BADGE_BG: Record<AgentStatus, string> = {
-  idle: 'rgba(82, 196, 26, 0.1)',
-  busy: 'rgba(22, 119, 255, 0.1)',
-  unhealthy: 'rgba(245, 34, 45, 0.1)',
+  idle: 'var(--status-idle-bg)',
+  busy: 'var(--status-busy-bg)',
+  unhealthy: 'var(--status-unhealthy-bg)',
   offline: 'var(--badge-bg)',
 };
 

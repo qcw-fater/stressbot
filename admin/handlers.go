@@ -1,4 +1,4 @@
-package admin
+﻿package admin
 
 import (
 	"encoding/json"
@@ -328,7 +328,7 @@ func (s *AdminServer) handleAgentPendingTask(w http.ResponseWriter, r *http.Requ
 func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	maxMultipart := s.cfg.Task.MaxMultipartSizeMB
 	if maxMultipart <= 0 {
-		stresslog.Warn("[ADMIN] task.maxMultipartSizeMB 未配置或非法，使用默认值 32 MB")
+		stresslog.Warn("[ADMIN] task.maxMultipartSizeMB 未配置或非法，使用默认值 32 MB", zap.Int("configured", maxMultipart))
 		maxMultipart = 32
 	}
 	if err := r.ParseMultipartForm(int64(maxMultipart) << 20); err != nil {
@@ -356,8 +356,12 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, ErrInvalidArgument.WithMessage("flow.json file required"))
 		return
 	}
-	flowData, _ := io.ReadAll(flowFile)
+	flowData, err := io.ReadAll(flowFile)
 	flowFile.Close()
+	if err != nil {
+		writeError(w, ErrInvalidArgument.WithMessage("failed to read flow.json"))
+		return
+	}
 	cfg.FlowJSON = json.RawMessage(flowData)
 
 	// proto 文件
@@ -369,8 +373,13 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					continue
 				}
-				data, _ := io.ReadAll(f)
+				data, err := io.ReadAll(f)
 				f.Close()
+				if err != nil {
+					stresslog.Warn("[ADMIN] 读取 proto 文件失败", zap.String("name", fh.Filename), zap.Error(err))
+					f.Close()
+					continue
+				}
 				var fileName string
 				if strings.HasPrefix(key, "proto/") && key != "proto/" {
 					fileName = strings.TrimPrefix(key, "proto/")
@@ -391,8 +400,13 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					continue
 				}
-				data, _ := io.ReadAll(f)
+				data, err := io.ReadAll(f)
 				f.Close()
+				if err != nil {
+					stresslog.Warn("[ADMIN] 读取脚本文件失败", zap.String("name", fh.Filename), zap.Error(err))
+					f.Close()
+					continue
+				}
 				var fileName string
 				if strings.HasPrefix(key, "scripts/") && key != "scripts/" {
 					fileName = strings.TrimPrefix(key, "scripts/")
@@ -406,21 +420,30 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 
 	// 协议适配器（adapter/codec.lua，可选）
 	if adapterFile, _, err := r.FormFile("adapter/codec.lua"); err == nil {
-		adapterData, _ := io.ReadAll(adapterFile)
+		adapterData, err := io.ReadAll(adapterFile)
+		if err != nil {
+			stresslog.Warn("[ADMIN] 读取适配器脚本失败", zap.Error(err))
+		}
 		adapterFile.Close()
 		cfg.AdapterScript = adapterData
 	}
 
 	// 可选：error.lua
 	if errorMapFile, _, err := r.FormFile("adapter/error.lua"); err == nil {
-		errorMapData, _ := io.ReadAll(errorMapFile)
+		errorMapData, err := io.ReadAll(errorMapFile)
+		if err != nil {
+			stresslog.Warn("[ADMIN] 读取 error.lua 失败", zap.Error(err))
+		}
 		errorMapFile.Close()
 		cfg.ErrorMapScript = errorMapData
 	}
 
 	// robotConfig（JSON string）
 	if rc := r.FormValue("robotConfig"); rc != "" {
-		_ = json.Unmarshal([]byte(rc), &cfg.RobotConfig)
+		if err := json.Unmarshal([]byte(rc), &cfg.RobotConfig); err != nil {
+			writeError(w, ErrInvalidArgument.WithMessage("invalid robotConfig JSON"))
+			return
+		}
 	}
 
 	// 校验 rampUp 配置
@@ -1158,7 +1181,7 @@ type LogFileInfo struct {
 func (s *AdminServer) handleListAdminLogFiles(w http.ResponseWriter, r *http.Request) {
 	files, err := listLogFiles(stresslog.GetLogFilePath())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeError(w, ErrInternal.WithMessage(err.Error()))
 		return
 	}
 	writeJSON(w, http.StatusOK, files)
@@ -1279,14 +1302,14 @@ func serveLogFile(w http.ResponseWriter, r *http.Request, dir, name string) {
 	path := filepath.Join(dir, name)
 	f, err := os.Open(path)
 	if err != nil {
-		http.Error(w, "log file not found", http.StatusNotFound)
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "log file not found"})
 		return
 	}
 	defer f.Close()
 
 	stat, err := f.Stat()
 	if err != nil {
-		http.Error(w, "stat failed", http.StatusInternalServerError)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stat failed"})
 		return
 	}
 
@@ -1300,7 +1323,7 @@ func serveLogFile(w http.ResponseWriter, r *http.Request, dir, name string) {
 func (s *AdminServer) handleUpdateBaseline(w http.ResponseWriter, r *http.Request) {
 	maxMultipart := s.cfg.Task.MaxMultipartSizeMB
 	if maxMultipart <= 0 {
-		stresslog.Warn("[ADMIN] task.maxMultipartSizeMB 未配置或非法，使用默认值 32 MB")
+		stresslog.Warn("[ADMIN] task.maxMultipartSizeMB 未配置或非法，使用默认值 32 MB", zap.Int("configured", maxMultipart))
 		maxMultipart = 32
 	}
 	if err := r.ParseMultipartForm(int64(maxMultipart) << 20); err != nil {
@@ -1495,13 +1518,13 @@ func listDirFiles(dir, ext string) ([]string, error) {
 func serveBaselineFile(w http.ResponseWriter, r *http.Request, dir, key string) {
 	name := r.PathValue(key)
 	if name == "" {
-		http.Error(w, "missing file name", http.StatusBadRequest)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing file name"})
 		return
 	}
 	// 防止路径穿越
 	name = filepath.Base(name)
 	if name == "." || name == ".." {
-		http.Error(w, "invalid file name", http.StatusBadRequest)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid file name"})
 		return
 	}
 	http.ServeFile(w, r, filepath.Join(dir, name))
@@ -1534,3 +1557,5 @@ func scaleRampUp(cfg *RampUpConfig, totalBots, assignedBots int) *RampUpConfig {
 	}
 	return scaled
 }
+
+

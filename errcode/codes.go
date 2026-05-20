@@ -29,9 +29,11 @@ const (
 	ErrCreateMsg ErrorCode = 21 // 创建 C2S proto 消息失败
 	ErrBindField ErrorCode = 22 // 必需字段绑定失败（Required=true）
 	ErrSerialize ErrorCode = 23 // C2S 消息序列化失败
+			ErrExecFailed ErrorCode = 24 // 动作执行失败（errorStrategy=abort）
 
 	// 监听层 (31-40)
-	ErrListenTimeout ErrorCode = 31 // TCP/UDP Listen 轮询超时
+		ErrListenTimeout  ErrorCode = 31 // TCP/UDP Listen 轮询超时
+		ErrListenRegister ErrorCode = 32 // 注册持久监听失败
 
 	// 配置层 (41-50)
 	ErrAddrEmpty      ErrorCode = 41 // 连接地址为空
@@ -73,7 +75,9 @@ var codeRegistry = []CodeInfo{
 	{uint64(ErrCreateMsg), "CREATE_MSG", KindFramework},
 	{uint64(ErrBindField), "BIND_FIELD", KindFramework},
 	{uint64(ErrSerialize), "SERIALIZE", KindFramework},
+			{uint64(ErrExecFailed), "EXEC_FAILED", KindFramework},
 	{uint64(ErrListenTimeout), "LISTEN_TIMEOUT", KindFramework},
+			{uint64(ErrListenRegister), "LISTEN_REGISTER", KindFramework},
 	{uint64(ErrAddrEmpty), "ADDR_EMPTY", KindFramework},
 	{uint64(ErrURLEmpty), "URL_EMPTY", KindFramework},
 	{uint64(ErrURLScheme), "URL_SCHEME", KindFramework},

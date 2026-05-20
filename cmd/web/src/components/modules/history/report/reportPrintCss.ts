@@ -157,6 +157,39 @@ body {
   border: 1px dashed #e8e8e8;
 }
 
+/* ── 趋势 2×2 网格 ── */
+.trends-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+.trends-grid__cell {
+  min-width: 0;
+}
+.trends-grid__cell img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+.trends-grid__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #595959;
+  margin-bottom: 4px;
+}
+
+/* ── 动作详情宽表 ── */
+.report-table--detail {
+  font-size: 10px;
+}
+.report-table--detail th {
+  font-size: 9px;
+  padding: 5px 4px;
+}
+.report-table--detail td {
+  padding: 4px;
+}
+
 /* ── 表格 ── */
 .report-table {
   width: 100%;
@@ -245,6 +278,12 @@ body {
   color: #8c8c8c;
   flex-shrink: 0;
   font-size: 10px;
+}
+.error-name {
+  font-weight: 600;
+  color: #333;
+  font-size: 10px;
+  flex-shrink: 0;
 }
 .error-msg {
   color: #595959;

@@ -16,7 +16,6 @@
 
 import * as protobuf from 'protobufjs';
 import { listProto } from '@/services/resourcesStore';
-import { API_PREFIX } from '@/services/env';
 import { fetchBaselineProtoIndex, fetchBaselineProtoContent } from '@/services/baselineApi';
 
 // 关键：路径相对当前文件 (web/src/components/FlowEditor/proto/ProtoLoader.ts) 到 stressbot/conf/proto。
@@ -46,7 +45,7 @@ export async function loadProtos(source: ProtoSource): Promise<LoadResult> {
     case 'static':
       return loadFromInline();
     case 'api':
-      return loadFromHttp(source.baseUrl, `${API_PREFIX}/proto/files`, `${API_PREFIX}/proto/file/`);
+      return loadFromHttp();
     case 'files':
       return loadFromFiles(source.files);
   }
@@ -114,24 +113,14 @@ async function loadFromBaselineApi(): Promise<LoadResult> {
   return parseAll(sources, files);
 }
 
-async function loadFromHttp(
-  baseUrl: string,
-  indexPath: string,
-  filePathPrefix?: string,
-): Promise<LoadResult> {
-  const indexUrl = baseUrl.replace(/\/$/, '') + indexPath;
-  const resp = await fetch(indexUrl);
-  if (!resp.ok) throw new Error(`无法获取 proto 文件列表 (${indexUrl}): HTTP ${resp.status}`);
-  const files = (await resp.json()) as string[];
+async function loadFromHttp(): Promise<LoadResult> {
+  const files = await fetchBaselineProtoIndex();
   const sources: Record<string, string> = {};
   await Promise.all(
     files.map(async (name) => {
-      const url = filePathPrefix
-        ? baseUrl.replace(/\/$/, '') + filePathPrefix + name
-        : baseUrl.replace(/\/$/, '') + '/proto/' + name;
-      const r = await fetch(url);
-      if (!r.ok) throw new Error(`加载 ${name} 失败：HTTP ${r.status}`);
-      sources[name] = await r.text();
+      const content = await fetchBaselineProtoContent(name);
+      if (content === null) throw new Error(`加载 ${name} 失败`);
+      sources[name] = content;
     }),
   );
   return parseAll(sources, files);

@@ -1,7 +1,6 @@
 package script
 
 import (
-	"fmt"
 	stresslog "stressbot/utils/log"
 
 	lua "github.com/yuin/gopher-lua"
@@ -26,19 +25,20 @@ func loadLogModule(L *lua.LState) int {
 	return 1
 }
 
-// logPrefix 生成日志前缀（含机器人 id 和 account）
-func logPrefix(id int, account string) string {
-	return fmt.Sprintf(" id=%d account=%s", id, account)
+// logFields 生成机器人上下文的 zap 结构化字段
+func logFields(ctx *Context) []zap.Field {
+	if ctx == nil {
+		return nil
+	}
+	return []zap.Field{zap.Int("robotID", ctx.RobotID), zap.String("account", ctx.Account)}
 }
 
 // logAtLevel 通用日志函数，避免 4 个函数的重复代码。
 func logAtLevel(L *lua.LState, logFn func(string, ...zap.Field)) {
 	ctx := GetContext(L)
-	prefix := ""
-	if ctx != nil {
-		prefix = logPrefix(ctx.RobotID, ctx.Account)
-	}
-	logFn("[SCRIPT]"+prefix, zap.String("msg", L.CheckString(1)))
+	fields := logFields(ctx)
+	fields = append(fields, zap.String("msg", L.CheckString(1)))
+	logFn("[SCRIPT]", fields...)
 }
 
 func logDebug(L *lua.LState) int { logAtLevel(L, stresslog.Debug); return 0 }
