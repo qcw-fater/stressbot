@@ -10,6 +10,10 @@
     "enabled": true,
     "adminAddr": "http://192.168.61.161:8080",
     "port": 7070,
-    "maxBots": 5000
+    "maxBots": 5000,
+    "hbInterval": "10s",
+    "requestTimeout": "30s",
+    "reconnectMaxRetries": -1,
+    "stressInterval": "5s"
   }
 }

@@ -17,7 +17,7 @@ func stringOr(v, fallback string, label ...string) string {
 		if len(label) > 0 {
 			tag = label[0]
 		}
-		stresslog.Info("[CONFIG] 配置未填写，使用默认值",
+		stresslog.Warn("[CONFIG] 配置未填写，使用默认值",
 			zap.String("key", tag),
 			zap.String("default", fallback))
 		return fallback
@@ -31,7 +31,7 @@ func intOr(v, fallback int, label ...string) int {
 		if len(label) > 0 {
 			tag = label[0]
 		}
-		stresslog.Info("[CONFIG] 配置未填写，使用默认值",
+		stresslog.Warn("[CONFIG] 配置未填写，使用默认值",
 			zap.String("key", tag),
 			zap.Int("default", fallback))
 		return fallback
@@ -46,7 +46,7 @@ func secsOr(v, fallback int, label ...string) string {
 		if len(label) > 0 {
 			tag = label[0]
 		}
-		stresslog.Info("[CONFIG] 配置未填写，使用默认值",
+		stresslog.Warn("[CONFIG] 配置未填写，使用默认值",
 			zap.String("key", tag),
 			zap.Int("default", fallback))
 		v = fallback

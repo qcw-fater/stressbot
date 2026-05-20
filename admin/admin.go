@@ -44,7 +44,7 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 	s := &AdminServer{cfg: cfg, stopCh: make(chan struct{})}
 
 	// 1. TaskStore
-	tasks, err := NewTaskStore(cfg.DataDir)
+	tasks, err := NewTaskStore("data")
 	if err != nil {
 		return nil, fmt.Errorf("init task store: %w", err)
 	}
@@ -74,7 +74,7 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 		s.history = history
 
 		sampler := NewSampler(
-			utils.ParseDurationDefault(cfg.History.SamplerInterval, 10*time.Second, "history.samplerInterval"),
+			10*time.Second,
 			s.aggregator, s.history, s.agents,
 		)
 		s.sampler = sampler

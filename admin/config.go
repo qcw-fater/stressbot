@@ -9,10 +9,8 @@ import (
 
 // Config Admin 服务端配置。
 type Config struct {
-	Port         int            `json:"port"`         // HTTP 监听端口
+	Port         int            `json:"port"`         // HTTP 监听端口（默认 8080）
 	PublicURL    string         `json:"publicUrl"`    // 外部可达 URL（Agent 用来连接 Admin，如 http://192.168.1.100:8080）
-	StaticDir    string         `json:"staticDir"`    // 前端静态文件目录
-	DataDir      string         `json:"dataDir"`      // 运行时数据目录（任务文件等）
 
 	AgentRegistry RegistryConfig `json:"agentRegistry"` // Agent 注册与健康管理
 	Task          TaskSection    `json:"task"`          // 任务相关限制
@@ -29,16 +27,14 @@ type RegistryConfig struct {
 
 // TaskSection 任务相关限制配置。
 type TaskSection struct {
-	MaxMultipartSizeMB int    `json:"maxMultipartSizeMB"` // 任务下发 multipart 请求最大体积（MB）
-	DeadlineDefault    string `json:"deadlineDefault"`    // 任务默认超时时间
+	DeadlineDefault string `json:"deadlineDefault"` // 任务默认超时时间（默认 1h）
 }
 
 // HistoryConfig 历史归档配置。
 type HistoryConfig struct {
-	Enabled         bool        `json:"enabled"`         // 是否启用 MySQL 历史归档
-	MySQL           MySQLConfig `json:"mysql"`           // MySQL 连接配置
-	SamplerInterval string      `json:"samplerInterval"` // 时序采样间隔
-	RetentionDays   int         `json:"retentionDays"`   // 历史数据保留天数
+	Enabled       bool        `json:"enabled"`       // 是否启用 MySQL 历史归档
+	MySQL         MySQLConfig `json:"mysql"`          // MySQL 连接配置
+	RetentionDays int         `json:"retentionDays"`  // 历史数据保留天数（默认 90）
 }
 
 // MySQLConfig MySQL 连接配置。
@@ -74,22 +70,18 @@ type LogConfig struct {
 // DefaultConfig 返回填充了默认值的配置。
 func DefaultConfig() Config {
 	return Config{
-		Port:      8080,
-		StaticDir: "web/dist",
-		DataDir:   "data",
+		Port: 8080,
 		AgentRegistry: RegistryConfig{
 			UnhealthyAfter: "30s",
 			OfflineAfter:   "60s",
 			PurgeAfter:     "24h",
 		},
 		Task: TaskSection{
-			MaxMultipartSizeMB: 32,
-			DeadlineDefault:    "1h",
+			DeadlineDefault: "1h",
 		},
 		History: HistoryConfig{
-			Enabled:         true,
-			SamplerInterval: "10s",
-			RetentionDays:   90,
+			Enabled:       true,
+			RetentionDays: 90,
 			MySQL: MySQLConfig{
 				MaxOpenConns:    10,
 				MaxIdleConns:    5,

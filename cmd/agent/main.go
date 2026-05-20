@@ -49,7 +49,7 @@ type Config struct {
 	Log        *stresslog.Config       `json:"log"`
 	Monitor    monitor.CollectorConfig `json:"monitor"`
 	Standalone *StandaloneConfig       `json:"standalone"`
-	Agent      agent.AgentConfig       `json:"agent"`
+	Agent      agent.Config            `json:"agent"`
 }
 
 func main() {
@@ -232,8 +232,8 @@ func runStandalone(cfg *Config) {
 	mgr.StopAll()
 
 	if cfg.Monitor.Enabled {
-		os.MkdirAll("log/metrics", 0o755)
-		csvPath := fmt.Sprintf("log/metrics/metrics_%s.csv", time.Now().Format("2006_01_02_15_04_05"))
+		os.MkdirAll("metrics", 0o755)
+		csvPath := fmt.Sprintf("metrics/metrics_%s.csv", time.Now().Format("2006_01_02_15_04_05"))
 		if err := monitor.ExportCSV(monitor.Global(), csvPath); err != nil {
 			stresslog.Error("[MONITOR] CSV 导出失败", zap.Error(err))
 		} else {

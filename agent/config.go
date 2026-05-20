@@ -5,16 +5,22 @@ import (
 	"os"
 	"runtime"
 	"time"
+
+	"stressbot/utils"
 )
 
-// AgentConfig Agent 配置（JSON 反序列化形态）。
+// Config Agent 配置（JSON 反序列化形态）。
 // 仅保留用户需要关心的字段，其余内部参数硬编码在 Resolve() 中。
-type AgentConfig struct {
-	Enabled    bool   `json:"enabled"`   // 是否启用 Agent 模式
-	AdminAddr  string `json:"adminAddr"` // Admin 服务器地址（如 http://192.168.1.100:8080）
-	Port       int    `json:"port"`      // 本地 HTTP 监听端口（默认 7070，Admin 通过此端口回调 Agent）
-	MaxBots    int    `json:"maxBots"`   // 单节点最大机器人数量（默认 5000）
-	AppVersion string `json:"-"`         // 编译时注入，不从 JSON 读取
+type Config struct {
+	Enabled             bool   `json:"enabled"`             // 是否启用 Agent 模式
+	AdminAddr           string `json:"adminAddr"`           // Admin 服务器地址（如 http://192.168.1.100:8080）
+	Port                int    `json:"port"`                // 本地 HTTP 监听端口（默认 7070，Admin 通过此端口回调 Agent）
+	MaxBots             int    `json:"maxBots"`             // 单节点最大机器人数量（默认 5000）
+	HBInterval          string `json:"hbInterval"`          // 心跳发送间隔（默认 10s）
+	RequestTimeout      string `json:"requestTimeout"`      // 单次 HTTP 请求超时（默认 30s）
+	ReconnectMaxRetries int    `json:"reconnectMaxRetries"` // 最大重连次数，-1=持续重连（默认 -1）
+	StressInterval      string `json:"stressInterval"`      // 压力指标上报间隔（默认 5s）
+	AppVersion          string `json:"-"`                   // 编译时注入，不从 JSON 读取
 }
 
 // ResolvedConfig Agent 运行期配置（所有参数已解析为最终值）。
@@ -37,8 +43,8 @@ type ResolvedConfig struct {
 	TaskReportTimeout    time.Duration // 任务完成上报总超时
 }
 
-// Resolve 将 AgentConfig 解析为 ResolvedConfig，校验必填项。
-func (c *AgentConfig) Resolve() (*ResolvedConfig, error) {
+// Resolve 将 Config 解析为 ResolvedConfig，校验必填项。
+func (c *Config) Resolve() (*ResolvedConfig, error) {
 	if c.AdminAddr == "" {
 		return nil, fmt.Errorf("agent.adminAddr 不能为空")
 	}
@@ -58,6 +64,10 @@ func (c *AgentConfig) Resolve() (*ResolvedConfig, error) {
 		port = 7070
 	}
 
+	stressInterval := utils.ParseDurationDefault(c.StressInterval, 5*time.Second, "agent.stressInterval")
+	hbInterval := utils.ParseDurationDefault(c.HBInterval, 10*time.Second, "agent.hbInterval")
+	requestTimeout := utils.ParseDurationDefault(c.RequestTimeout, 30*time.Second, "agent.requestTimeout")
+
 	return &ResolvedConfig{
 		AdminAddr:            c.AdminAddr,
 		Name:                 hostname,
@@ -66,16 +76,24 @@ func (c *AgentConfig) Resolve() (*ResolvedConfig, error) {
 		AppVersion:           c.AppVersion,
 		TaskWorkDir:          os.TempDir(),
 		AdapterScript:        "conf/adapter/codec.lua",
-		StressInterval:       5 * time.Second,
-		SystemInterval:       5 * time.Second,
-		HBInterval:           10 * time.Second,
-		HBFailInterval:       10 * time.Second,
-		RequestTimeout:       30 * time.Second,
+		StressInterval:       stressInterval,
+		SystemInterval:       stressInterval, // 系统指标与压力指标同步上报
+		HBInterval:           hbInterval,
+		HBFailInterval:       hbInterval, // 失败重试间隔与心跳间隔一致
+		RequestTimeout:       requestTimeout,
 		ReconnectInterval:    5 * time.Second,
 		ReconnectMaxInterval: 60 * time.Second,
-		ReconnectMaxRetries:  -1,
+		ReconnectMaxRetries:  resolveReconnectRetries(c.ReconnectMaxRetries),
 		TaskReportTimeout:    30 * time.Second,
 	}, nil
+}
+
+// resolveReconnectRetries 处理 reconnectMaxRetries：JSON 零值(0)视为未配置，回退 -1（持续重连）。
+func resolveReconnectRetries(v int) int {
+	if v == 0 {
+		return -1
+	}
+	return v
 }
 
 // CollectStaticInfo 采集本机静态信息。

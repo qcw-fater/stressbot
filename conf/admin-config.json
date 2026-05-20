@@ -1,8 +1,6 @@
 {
   "port": 8080,
   "publicUrl": "http://localhost:8080",
-  "staticDir": "cmd/web/dist",
-  "dataDir": "data",
 
   "agentRegistry": {
     "unhealthyAfter": "30s",
@@ -11,13 +9,11 @@
   },
 
   "task": {
-    "maxMultipartSizeMB": 32,
     "deadlineDefault": "1h"
   },
 
   "history": {
     "enabled": true,
-    "samplerInterval": "10s",
     "retentionDays": 90,
     "mysql": {
       "host": "192.168.8.219",

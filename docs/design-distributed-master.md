@@ -837,7 +837,7 @@ type AgentSystemBrief struct {
 
 ```go
 type Agent struct {
-    cfg        AgentConfig
+    cfg        Config
     agentID    string
     sysmon     *SystemMonitor              // 系统监控采集器
     collector  *monitor.MetricsCollector   // 压测指标采集器
@@ -848,7 +848,7 @@ type Agent struct {
     stopCh      chan struct{}
 }
 
-type AgentConfig struct {
+type Config struct {
     AdminAddr           string        // 如 "http://192.168.1.100:8080"
     Name                string
     ListenAddr          string        // Agent HTTP 监听地址
@@ -1126,7 +1126,7 @@ func main() {
 
     if cfg.Agent.Enabled {
         // Agent 模式：注册到 Admin，等待任务下发
-        a := agent.New(agent.AgentConfig{
+        a := agent.New(agent.Config{
             AdminAddr:         cfg.Agent.AdminAddr,
             Name:              cfg.Agent.Name,
             ListenAddr:        cfg.Agent.ListenAddr,

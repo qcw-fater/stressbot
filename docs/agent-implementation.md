@@ -40,7 +40,7 @@ Agent 进程是 stressbot 的业务主体，分为单机模式和 Agent 模式�
 ```
 agent/
   agent.go         — Agent 主结构、生命周期、注册/心跳
-  config.go        — AgentConfig 解析 + 校验
+  config.go        — Config 解析 + 校验
   sysmon.go        — SystemMonitor：基于 gopsutil 采集
   reporter.go      — StressReporter / SystemReporter 推送循环
   task_runner.go   — 任务执行：拉配置、写临时目录、起 Manager
@@ -101,7 +101,7 @@ func main() {
 }
 
 func runAgentMode(cfg *Config) {
-    a, err := agent.New(agent.AgentConfig{
+    a, err := agent.New(agent.Config{
         AdminAddr:         cfg.Agent.AdminAddr,
         Name:              cfg.Agent.Name,
         ListenAddr:        cfg.Agent.ListenAddr,
@@ -170,7 +170,7 @@ func runAgentMode(cfg *Config) {
 ```go
 // agent/agent.go
 type Agent struct {
-    cfg    AgentConfig
+    cfg    Config
     id     string         // 启动时生成 UUID
     started time.Time
 
@@ -194,7 +194,7 @@ type Agent struct {
     wg     sync.WaitGroup
 }
 
-func New(cfg AgentConfig) (*Agent, error) { /* 校验配置 + 初始化 */ }
+func New(cfg Config) (*Agent, error) { /* 校验配置 + 初始化 */ }
 func (a *Agent) Run() error                { /* 阻塞主循环 */ }
 func (a *Agent) Stop(ctx context.Context) error
 ```
@@ -976,7 +976,7 @@ type RunConfig struct {
 
 ### 9.11 agent 段 — Agent 模式配置
 
-`AgentConfig` 定义在 `agent/config.go`，通过 `Resolve()` 方法解析为 `ResolvedConfig`（Duration 已转换、默认值已填充、参数已校验）。
+`Config` 定义在 `agent/config.go`，通过 `Resolve()` 方法解析为 `ResolvedConfig`（Duration 已转换、默认值已填充、参数已校验）。
 
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|

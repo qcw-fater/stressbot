@@ -9,14 +9,14 @@ import (
 )
 
 // ParseDurationDefault 解析 duration 字符串，空字符串或非法值返回 fallback。
-// 空值（未配置）用 Info 日志；非法值（配置错误）用 Warn 日志。
+// 空值和非法值均用 Warn 日志提醒用户。
 func ParseDurationDefault(s string, fallback time.Duration, label ...string) time.Duration {
 	tag := "duration"
 	if len(label) > 0 {
 		tag = label[0]
 	}
 	if s == "" {
-		stresslog.Info("[CONFIG] 配置未填写，使用默认值",
+		stresslog.Warn("[CONFIG] 配置未填写，使用默认值",
 			zap.String("key", tag),
 			zap.String("default", fallback.String()))
 		return fallback
@@ -31,4 +31,19 @@ func ParseDurationDefault(s string, fallback time.Duration, label ...string) tim
 		return fallback
 	}
 	return d
+}
+
+// ParseIntDefault 返回整数值，零值回退 fallback 并打 Warn 日志。
+func ParseIntDefault(v, fallback int, label ...string) int {
+	tag := "int"
+	if len(label) > 0 {
+		tag = label[0]
+	}
+	if v == 0 {
+		stresslog.Warn("[CONFIG] 配置未填写，使用默认值",
+			zap.String("key", tag),
+			zap.Int("default", fallback))
+		return fallback
+	}
+	return v
 }

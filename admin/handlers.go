@@ -101,10 +101,8 @@ func (s *AdminServer) registerRoutes() http.Handler {
 	mux.HandleFunc("GET /sbot/api/error-codes", s.handleErrorCodeIndex)
 
 	// ── 静态资源 ──
-	if s.cfg.StaticDir != "" {
-		fs := http.FileServer(http.Dir(s.cfg.StaticDir))
-		mux.Handle("/", fs)
-	}
+	fs := http.FileServer(http.Dir("cmd/web/dist"))
+	mux.Handle("/", fs)
 
 	return recoverMiddleware(mux)
 }
@@ -326,12 +324,8 @@ func (s *AdminServer) handleAgentPendingTask(w http.ResponseWriter, r *http.Requ
 
 // handleCreateTask multipart/form-data 创建任务。
 func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
-	maxMultipart := s.cfg.Task.MaxMultipartSizeMB
-	if maxMultipart <= 0 {
-		stresslog.Warn("[ADMIN] task.maxMultipartSizeMB 未配置或非法，使用默认值 32 MB", zap.Int("configured", maxMultipart))
-		maxMultipart = 32
-	}
-	if err := r.ParseMultipartForm(int64(maxMultipart) << 20); err != nil {
+	const maxMultipartMB = 32
+	if err := r.ParseMultipartForm(int64(maxMultipartMB) << 20); err != nil {
 		writeError(w, ErrInvalidArgument.WithMessage("multipart parse error"))
 		return
 	}
@@ -1321,12 +1315,8 @@ func serveLogFile(w http.ResponseWriter, r *http.Request, dir, name string) {
 // handleUpdateBaseline 前端主动推送 IDB 资源到磁盘基线。
 // 接受 multipart/form-data（proto/scripts/adapter），写入 conf/ 目录。
 func (s *AdminServer) handleUpdateBaseline(w http.ResponseWriter, r *http.Request) {
-	maxMultipart := s.cfg.Task.MaxMultipartSizeMB
-	if maxMultipart <= 0 {
-		stresslog.Warn("[ADMIN] task.maxMultipartSizeMB 未配置或非法，使用默认值 32 MB", zap.Int("configured", maxMultipart))
-		maxMultipart = 32
-	}
-	if err := r.ParseMultipartForm(int64(maxMultipart) << 20); err != nil {
+	const maxMultipartMB = 32
+	if err := r.ParseMultipartForm(int64(maxMultipartMB) << 20); err != nil {
 		writeError(w, ErrInvalidArgument.WithMessage("multipart parse error"))
 		return
 	}
