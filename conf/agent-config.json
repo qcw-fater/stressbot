@@ -8,8 +8,8 @@
   },
   "agent": {
     "enabled": true,
-    "adminAddr": "http://192.168.61.161:8080",
-    "port": 7070,
+    "adminAddr": "http://127.0.0.1:7718",
+    "port": 7719,
     "maxBots": 5000,
     "hbInterval": "10s",
     "requestTimeout": "30s",

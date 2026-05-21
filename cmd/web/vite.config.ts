@@ -13,7 +13,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/sbot': {
-        target: process.env.STRESSBOT_ADMIN ?? 'http://localhost:8080',
+        target: process.env.STRESSBOT_ADMIN ?? 'http://localhost:7718',
         changeOrigin: true,
       },
     },

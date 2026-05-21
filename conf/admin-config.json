@@ -1,6 +1,6 @@
 {
-  "port": 8080,
-  "publicUrl": "http://localhost:8080",
+  "port": 7718,
+  "publicUrl": "http://127.0.0.1:7718",
 
   "agentRegistry": {
     "unhealthyAfter": "30s",
@@ -16,11 +16,11 @@
     "enabled": true,
     "retentionDays": 90,
     "mysql": {
-      "host": "192.168.8.219",
+      "host": "127.0.0.1",
       "port": 3306,
       "user": "root",
       "password": "123456",
-      "database": "jump-test",
+      "database": "stressbot",
       "maxOpenConns": 10,
       "maxIdleConns": 5,
       "connMaxLifetime": "1h"

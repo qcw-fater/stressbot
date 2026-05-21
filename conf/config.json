@@ -18,7 +18,7 @@
       "mainService": "logic"
     },
     "stateExtra": {
-      "authAddr": "http://192.168.61.161:20000",
+      "authAddr": "http://127.0.0.1:20000",
       "version": "0.31.49.171222",
       "channel": "mine",
       "platform": "1000"

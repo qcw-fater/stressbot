@@ -9,8 +9,8 @@ import (
 
 // Config Admin 服务端配置。
 type Config struct {
-	Port      int    `json:"port"`      // HTTP 监听端口（默认 8080）
-	PublicURL string `json:"publicUrl"` // 外部可达 URL（Agent 用来连接 Admin，如 http://192.168.1.100:8080）
+	Port      int    `json:"port"`      // HTTP 监听端口（默认 7718）
+	PublicURL string `json:"publicUrl"` // 外部可达 URL（Agent 用来连接 Admin，如 http://192.168.1.100:7718）
 	StaticDir string `json:"staticDir"` // 前端静态文件目录（默认 cmd/web/dist）
 
 	AgentRegistry RegistryConfig `json:"agentRegistry"` // Agent 注册与健康管理
@@ -71,7 +71,7 @@ type LogConfig struct {
 // DefaultConfig 返回填充了默认值的配置。
 func DefaultConfig() Config {
 	return Config{
-		Port:      8080,
+		Port:      7718,
 		StaticDir: "cmd/web/dist",
 		AgentRegistry: RegistryConfig{
 			UnhealthyAfter: "30s",

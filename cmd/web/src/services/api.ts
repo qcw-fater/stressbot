@@ -4,7 +4,7 @@
  * 设计要点：
  * - 所有非 2xx 响应（包括网络错误）一律抛出 `ApiError` 实例，调用方按 `code` 分支处理；
  * - `204 No Content` 返回 `undefined`，调用方按 `Promise<void>` 接住即可；
- * - 不依赖 axios，使用浏览器原生 fetch；浏览器开发期通过 vite proxy 转到 Admin :8080。
+ * - 不依赖 axios，使用浏览器原生 fetch；浏览器开发期通过 vite proxy 转到 Admin :7718。
  *
  * 单一事实源：docs/api-monitor.md §3.3 / §14.13.1。
  */
@@ -32,7 +32,7 @@ export class ApiError extends Error {
   }
 }
 
-/** API 前缀；vite dev server 会代理到 Admin :8080，生产由 Admin 同源托管。 */
+/** API 前缀；vite dev server 会代理到 Admin :7718，生产由 Admin 同源托管。 */
 
 /** 内部统一入口：所有方法走它。 */
 async function request<T>(method: string, path: string, init?: RequestInit): Promise<T> {

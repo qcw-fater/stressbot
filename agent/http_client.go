@@ -20,7 +20,7 @@ var errNotRegistered = errors.New("agent not registered on admin")
 // timeout 由调用方通过 ResolvedConfig.RequestTimeout 注入；
 // 调用方 ctx 取消（如 Agent shutdown）能立刻打断阻塞中的请求。
 type AdminClient struct {
-	base    string // "http://admin:8080"
+	base    string // "http://admin:7718"
 	agentID string
 	client  *http.Client
 }

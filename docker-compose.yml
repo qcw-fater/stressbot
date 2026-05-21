@@ -1,0 +1,29 @@
+services:
+  mysql:
+    image: mysql:latest
+    container_name: stressbot-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: 123456
+      MYSQL_DATABASE: stressbot
+    ports:
+      - "3306:3306"
+    volumes:
+      - D:/docker/volumes/stressbot-mysql:/var/lib/mysql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  nginx:
+    image: nginx:latest
+    container_name: stressbot-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - D:/Gitee/stressbot/stressbot-v0.1.0-windows-amd64/conf/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - D:/Gitee/stressbot/stressbot-v0.1.0-windows-amd64/dist:/opt/stressbot/web/dist:ro
+

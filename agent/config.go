@@ -13,8 +13,8 @@ import (
 // 仅保留用户需要关心的字段，其余内部参数硬编码在 Resolve() 中。
 type Config struct {
 	Enabled             bool   `json:"enabled"`             // 是否启用 Agent 模式
-	AdminAddr           string `json:"adminAddr"`           // Admin 服务器地址（如 http://192.168.1.100:8080）
-	Port                int    `json:"port"`                // 本地 HTTP 监听端口（默认 7070，Admin 通过此端口回调 Agent）
+	AdminAddr           string `json:"adminAddr"`           // Admin 服务器地址（如 http://192.168.1.100:7718）
+	Port                int    `json:"port"`                // 本地 HTTP 监听端口（默认 7719，Admin 通过此端口回调 Agent）
 	MaxBots             int    `json:"maxBots"`             // 单节点最大机器人数量（默认 5000）
 	HBInterval          string `json:"hbInterval"`          // 心跳发送间隔（默认 10s）
 	RequestTimeout      string `json:"requestTimeout"`      // 单次 HTTP 请求超时（默认 30s）
@@ -61,7 +61,7 @@ func (c *Config) Resolve() (*ResolvedConfig, error) {
 
 	port := c.Port
 	if port <= 0 {
-		port = 7070
+		port = 7719
 	}
 
 	stressInterval := utils.ParseDurationDefault(c.StressInterval, 5*time.Second, "agent.stressInterval")
