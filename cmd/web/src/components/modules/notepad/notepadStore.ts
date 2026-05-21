@@ -9,7 +9,7 @@
  * - updateContent 内置 300ms debounce 自动保存。
  */
 
-import { createStore, get, set, del, keys } from 'idb-keyval';
+import { createStore, get, set, del } from 'idb-keyval';
 import { create } from 'zustand';
 import { nanoid } from 'nanoid';
 

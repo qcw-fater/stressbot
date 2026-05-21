@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { historyApi, showApiError } from '@/services';
 import type { ActionMetric, ClusterSystemSnapshot, HistoryDetail, TimeseriesPoint, StressAggregate, StressSnapshot } from '@/types/api';
 import { ApdexCell } from '@/components/monitoring/shared/ApdexCell';
-import { fmtBytes, fmtBytesPlain, fmtMs, NUMERIC_STYLE } from '@/components/monitoring/shared/formats';
+import { fmtBytes, fmtMs, NUMERIC_STYLE } from '@/components/monitoring/shared/formats';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
 import { useReportCapture } from './report/useReportCapture';

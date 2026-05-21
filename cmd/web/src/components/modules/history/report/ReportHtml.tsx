@@ -19,7 +19,7 @@ export interface ReportHtmlProps {
   charts: ChartImages;
 }
 
-export function ReportHtml({ detail, timeseries, charts }: ReportHtmlProps) {
+export function ReportHtml({ detail, charts }: ReportHtmlProps) {
   const actions = detail.finalSnapshot?.actions ?? [];
   const sys = detail.finalSystem;
   const cs = detail.configSummary;

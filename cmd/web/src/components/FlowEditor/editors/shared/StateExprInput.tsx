@@ -5,6 +5,7 @@
  * 提供：文本输入、浏览 state key 插入、表达式高亮预览。
  */
 
+import type { InputRef } from 'antd';
 import { Button, Input, Popover, Tag, Tooltip } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -45,7 +46,7 @@ export function StateExprInput({ value, onChange, placeholder }: StateExprInputP
 
   const [browseOpen, setBrowseOpen] = useState(false);
   const [browseSearch, setBrowseSearch] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<InputRef>(null);
 
   // 收集已知 state keys
   const actions = useFlowStore((s) => s.actions);
@@ -161,7 +162,7 @@ export function StateExprInput({ value, onChange, placeholder }: StateExprInputP
     <div style={{ width: '100%' }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
         <Input
-          ref={inputRef as never}
+          ref={inputRef}
           value={tail}
           onChange={(e) => setTail(e.target.value)}
           placeholder={placeholder ?? '如 hp > 0 && alive'}

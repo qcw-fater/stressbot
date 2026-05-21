@@ -8,15 +8,15 @@
  */
 
 import { Alert, Button, Input, Popover, Progress, Space, Switch, Table, Tag, Tooltip } from 'antd';
-import { CaretDownOutlined, CaretUpOutlined, LineChartOutlined, ArrowUpOutlined, ArrowDownOutlined, WarningOutlined } from '@ant-design/icons';
+import { CaretDownOutlined, CaretUpOutlined, LineChartOutlined, WarningOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import ReactECharts from 'echarts-for-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { useRuntimeStore, classifyApdex } from '@/services';
+import { useRuntimeStore } from '@/services';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { ApdexCell } from './shared/ApdexCell';
-import { fmtBytes, fmtBytesPlain, fmtMs, NUMERIC_STYLE } from './shared/formats';
+import { fmtBytes, fmtMs, NUMERIC_STYLE } from './shared/formats';
 import type { ActionMetric } from '@/types/api';
 import './MonitorDock.css';
 
@@ -43,15 +43,6 @@ function successColor(rate: number): string {
   if (rate >= 0.8) return 'var(--color-warning)';
   return 'var(--color-error)';
 }
-
-const APDEX_COLOR: Record<string, string> = {
-  excellent: 'var(--color-success)',
-  good: 'var(--chart-lime)',
-  fair: 'var(--color-warning)',
-  poor: 'var(--chart-orange)',
-  danger: 'var(--color-error)',
-  unknown: 'var(--text-tertiary)',
-};
 
 function sparkOption(series: Array<{ name: string; data: number[]; color: string }>, dark: boolean) {
   const cs = getComputedStyle(document.documentElement);
@@ -374,10 +365,7 @@ function TopSection() {
     wApdex += a.apdex * a.sampleCount;
     wSuccess += a.successRate * a.sampleCount;
   }
-  const clusterApdex = totalSamples > 0 ? wApdex / totalSamples : 0;
   const clusterSuccess = totalSamples > 0 ? wSuccess / totalSamples : 0;
-  const apdexLevel = classifyApdex(clusterApdex);
-
   return (
     <div className="monitor-dock__top">
       {/* 指标区 */}

@@ -135,7 +135,7 @@ React 18 / Vite 5 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 每次对代码进行修改后，按以下步骤验证：
 
 1. **编译检查**：`go build ./...` 确保无编译错误
-2. **前端编译**：`cd cmd/web && npx tsc --noEmit` 确保无类型错误
+2. **前端编译**：`cd cmd/web && npx tsc -b` 确保无类型错误
 3. **单元测试**：`cd cmd/web && npm run test`（Vitest）
 4. **配置校验**：在前端编辑器中打开 flow.json，查看校验报告，确保无错误
 5. **运行验证**（涉及后端改动时）：`rm -f log/stressbot.log`，启动 `go run ./cmd/agent -config conf/config.json`，运行 2~5 分钟

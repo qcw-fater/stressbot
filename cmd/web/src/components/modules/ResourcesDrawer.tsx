@@ -60,7 +60,6 @@ export interface ResourcesDrawerProps {
 }
 
 export function ResourcesDrawer({ open, onClose }: ResourcesDrawerProps) {
-  const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
   const { pendingSyncResult, setPendingSyncResult } = useEditorStore(
     useShallow((s) => ({
       pendingSyncResult: s.pendingSyncResult,

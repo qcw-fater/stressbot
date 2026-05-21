@@ -16,7 +16,6 @@ import type { ListenDef } from '@/types/listen';
 import { classifyListen, type ListenKind } from '@/types/listen';
 import { useEditorStore } from '../store/editorStore';
 import { useFlowStore } from '../store/flowStore';
-import { useFloatingWindowStore } from '../store/floatingWindowStore';
 import { ProtoBrowser } from '../proto/ProtoBrowser';
 import { StoreTable } from '../editors/ActionEditor/StoreTable';
 import { LuaScriptField } from '../editors/shared/LuaScriptField';
@@ -39,7 +38,6 @@ export function ListenEditor() {
 
   const [draftName, setDraftName] = useState(listenName ?? '');
   const [protoOpen, setProtoOpen] = useState(false);
-  const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
   // 形态切换时把当前字段缓存进 stash，便于切回恢复
   const [stash, setStash] = useState<Record<ListenKind, ListenDef>>({
     silent: {},

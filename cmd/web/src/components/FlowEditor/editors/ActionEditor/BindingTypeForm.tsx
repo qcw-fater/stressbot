@@ -22,9 +22,9 @@
  */
 
 import { Button, Input, InputNumber, Select, Space, Tag, Tooltip } from 'antd';
-import { DeleteOutlined, PlusOutlined, SwapOutlined } from '@ant-design/icons';
+import { DeleteOutlined, SwapOutlined } from '@ant-design/icons';
 import { useMemo, useState } from 'react';
-import type { FieldBind } from '@/types/action';
+import type { FieldBind, FilterDef } from '@/types/action';
 import { useFlowStore } from '../../store/flowStore';
 import { useRuntimeStore } from '@/services/runtimeStore';
 import { ProtoPathInput } from './ProtoPathInput';
@@ -378,9 +378,9 @@ const STRUCTURED_OPS = new Set(['timeWindow', 'dailyTimeWindow']);
 const LIST_OPS = new Set(['in', 'notIn']);
 
 function FilterRow({ filter, sourceProto, onChange, onRemove }: {
-  filter: Record<string, unknown>;
+  filter: FilterDef;
   sourceProto?: string;
-  onChange: (patch: Record<string, unknown>) => void;
+  onChange: (patch: Partial<FilterDef>) => void;
   onRemove: () => void;
 }) {
   const op = (filter.op as string) || 'eq';

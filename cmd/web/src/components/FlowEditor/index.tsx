@@ -28,7 +28,7 @@ import { fetchBaselineFlow } from '@/services/baselineApi';
 import { useEditorStore } from './store/editorStore';
 import type { FlowJson } from './codec/flowToJson';
 import type { FlowLayout } from '@/types/editor';
-import { hashContent, loadSkippedConflicts, saveSkippedConflict } from './skippedConflicts';
+import { hashContent, loadSkippedConflicts } from './skippedConflicts';
 
 export interface FlowEditorProps {
   /** 初始 flow.json，未传时按 autoLoadDefault 决定是否从 /conf/flow/flow.json fetch */
@@ -49,7 +49,7 @@ export function FlowEditor(props: FlowEditorProps) {
   // antd 弹出层 zIndex 始终高于所有 FloatingWindow（动态跟踪）
   const nextZ = useFloatingWindowStore((s) => s._nextZ);
   return (
-    <ConfigProvider theme={{ token: { zIndexPopup: nextZ + 100 } }}>
+    <ConfigProvider theme={{ token: { zIndexPopup: nextZ + 100 } as never }}>
       <AntApp style={{ height: '100%', width: '100%' }}>
         <FlowEditorInner {...props} />
       </AntApp>

@@ -19,9 +19,9 @@ import { Empty, Input, Popover, Space, Switch, Table, Tag, Tooltip } from 'antd'
 import type { ColumnsType } from 'antd/es/table';
 import { useMemo, useState } from 'react';
 import { useRuntimeStore } from '@/services';
-import type { ActionMetric, ErrorEntry } from '@/types/api';
+import type { ActionMetric } from '@/types/api';
 import { ApdexCell } from '../shared/ApdexCell';
-import { fmtBytes, fmtBytesPlain, fmtMs, NUMERIC_STYLE } from '../shared/formats';
+import { fmtBytes, fmtMs, NUMERIC_STYLE } from '../shared/formats';
 
 export function ActionsTab() {
   const latestStress = useRuntimeStore((s) => s.latestStress);

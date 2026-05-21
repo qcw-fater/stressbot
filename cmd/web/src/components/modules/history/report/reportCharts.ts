@@ -254,7 +254,7 @@ export function buildRankingOption(
         show: true,
         position: 'right',
         fontSize: 10,
-        formatter: (p: { value: number }) => `${p.value.toFixed(0)}ms`,
+        formatter: (p: any) => `${(p.value as number).toFixed(0)}ms`,
       },
     }],
   };
@@ -326,7 +326,7 @@ export function buildSuccessDonutOption(
         fontSize: 16,
         fontWeight: 700,
         fill: '#1a1a1a',
-        textAlign: 'center',
+        textAlign: 'center' as const,
       },
     }, {
       type: 'text',
@@ -336,9 +336,9 @@ export function buildSuccessDonutOption(
         text: '总样本',
         fontSize: 10,
         fill: '#8c8c8c',
-        textAlign: 'center',
+        textAlign: 'center' as const,
       },
-    }] : [],
+    }] as any : [],
   };
 }
 
@@ -423,7 +423,7 @@ export function buildErrorOption(
       label: {
         show: true,
         fontSize: 10,
-        formatter: (p: { name: string; value: number; percent: number }) => {
+        formatter: (p: any) => {
           const name = p.name.length > 20 ? p.name.slice(0, 18) + '…' : p.name;
           return `{cnt|×${p.value}}  {name|${name}}\n{pct|${p.percent}%}`;
         },

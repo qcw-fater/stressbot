@@ -11,7 +11,6 @@ import type { CollapseProps } from 'antd';
 import type { BindingType, FieldBind } from '@/types/action';
 import type { ProtoField } from '@/types/proto';
 import { ProtoPathInput } from './ProtoPathInput';
-import { StateKeyInput } from './StateKeyInput';
 import { BindingTypeForm } from './BindingTypeForm';
 import { protoRegistry } from '../../proto/ProtoRegistry';
 import { StateExprInput } from '../shared/StateExprInput';

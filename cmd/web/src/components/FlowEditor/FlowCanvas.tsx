@@ -30,7 +30,6 @@ import { edgeTypes } from './edges/registry';
 import { useFlowStore } from './store/flowStore';
 import { useEditorStore, type Clipboard } from './store/editorStore';
 import { generateNodeId } from './utils/nodeIdGen';
-import { nanoid } from 'nanoid';
 import { saveActionTemplate, saveListenTemplate } from './library/templateStore';
 import { useFlowReadOnly } from './flowReadOnlyContext';
 import type { FlowNode, NodeType } from '@/types/flow';
