@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"runtime"
 	"stressbot/utils/log"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,7 +43,7 @@ type WorkPool struct {
 	submitted atomic.Int64 // 已提交的任务数
 	completed atomic.Int64 // 已完成的任务数
 	failed    atomic.Int64 // 失败的任务数
-	goId      uint32       // goroutine ID 计数器
+	goID      uint32       // goroutine ID 计数器
 	goCount   atomic.Int32 // 当前运行中的 goroutine 数
 
 	cfg *PoolConfig
@@ -125,7 +124,7 @@ func (p *WorkPool) submit(task func(stopCh <-chan struct{})) error {
 	p.waiting.Add(1)
 	p.submitted.Add(1)
 
-	id := atomic.AddUint32(&p.goId, 1)
+	id := atomic.AddUint32(&p.goID, 1)
 	count := p.goCount.Add(1)
 	caller := p.getCaller()
 
@@ -163,6 +162,7 @@ func (p *WorkPool) submit(task func(stopCh <-chan struct{})) error {
 
 	if err != nil {
 		p.waiting.Add(-1)
+		p.goroutines.Delete(id)
 		log.Error("submit task failed", zap.Error(err))
 		return ErrSubmitFailed
 	}
@@ -242,11 +242,14 @@ func (p *WorkPool) printLeakedGoroutines() {
 
 // getCaller 获取调用者信息
 func (p *WorkPool) getCaller() string {
-	_, file, line, _ := runtime.Caller(3)
-	i := strings.LastIndex(file, "/") + 1
-	i = strings.LastIndex((string)(([]byte(file))[:i-1]), "/") + 1
-
-	return fmt.Sprintf("%s:%d", (string)(([]byte(file))[i:]), line)
+	pcs := make([]uintptr, 1)
+	n := runtime.Callers(4, pcs)
+	if n == 0 {
+		return "?:0"
+	}
+	frames := runtime.CallersFrames(pcs)
+	frame, _ := frames.Next()
+	return fmt.Sprintf("%s:%d", frame.Function, frame.Line)
 }
 
 // === 状态查询方法 ===

@@ -17,6 +17,11 @@ import (
 // maxBodyLen 单个包体最大允许长度（16MB），防止畸形/恶意包导致 OOM。
 const maxBodyLen = 16 * 1024 * 1024
 
+const (
+	gnetReadBufferCap  = 64 * 1024 // gnet 读缓冲区容量
+	gnetWriteBufferCap = 64 * 1024 // gnet 写缓冲区容量
+)
+
 // connRegistry 管理 gnet 连接与业务层 Connection 的映射。
 type connRegistry struct {
 	mu      sync.RWMutex
@@ -55,6 +60,9 @@ type EventServer struct {
 	adp          adapter.Adapter
 	tickInterval time.Duration
 }
+
+// Compile-time assertion: EventServer satisfies gnet.EventHandler.
+var _ gnet.EventHandler = (*EventServer)(nil)
 
 // NewEventServer 创建 gnet 事件处理器
 func NewEventServer(adp adapter.Adapter, heartbeatInterval time.Duration) *EventServer {
@@ -147,6 +155,16 @@ func (es *EventServer) OnTick() (delay time.Duration, action gnet.Action) {
 	return es.tickInterval, gnet.None
 }
 
+// bindConn 将 gnet 连接的发送/关闭函数注入到业务层 Connection。
+func bindConn(gconn gnet.Conn, conn *Connection) {
+	conn.sendFunc = func(data []byte) error {
+		return gconn.AsyncWrite(data, nil)
+	}
+	conn.closeFunc = func() error {
+		return gconn.Close()
+	}
+}
+
 // Dialer 管理 gnet 客户端。
 type Dialer struct {
 	client *gnet.Client
@@ -165,8 +183,8 @@ func NewDialer(adp adapter.Adapter, heartbeatInterval time.Duration) *Dialer {
 func (d *Dialer) Start() error {
 	opts := []gnet.Option{
 		gnet.WithTicker(true),
-		gnet.WithReadBufferCap(64 * 1024),
-		gnet.WithWriteBufferCap(64 * 1024),
+		gnet.WithReadBufferCap(gnetReadBufferCap),
+		gnet.WithWriteBufferCap(gnetWriteBufferCap),
 	}
 	client, err := gnet.NewClient(d.server, opts...)
 	if err != nil {
@@ -209,21 +227,19 @@ func (d *Dialer) DialTCP(ctx context.Context, address string, conn *Connection) 
 
 	select {
 	case <-ctx.Done():
-		// ctx 取消，拨号可能仍在进行；丢弃结果（gnet 连接会被 GC）
+		// ctx 取消，拨号可能已完成，需排空结果并关闭 gnet 连接避免 fd 泄漏
+		go func() {
+			if res := <-ch; res.conn != nil {
+				_ = res.conn.Close()
+			}
+		}()
 		return nil, ctx.Err()
 	case res := <-ch:
 		if res.err != nil {
 			return nil, fmt.Errorf("TCP 拨号失败 %s: %w", address, res.err)
 		}
 		gconn := res.conn
-
-		conn.sendFunc = func(data []byte) error {
-			return gconn.AsyncWrite(data, nil)
-		}
-		conn.closeFunc = func() error {
-			return gconn.Close()
-		}
-
+		bindConn(gconn, conn)
 		d.server.registry.register(gconn, conn)
 
 		stresslog.Debug("[GNET] TCP 连接已建立",
@@ -240,13 +256,7 @@ func (d *Dialer) DialUDP(address string, conn *Connection) (gnet.Conn, error) {
 		return nil, fmt.Errorf("UDP 拨号失败 %s: %w", address, err)
 	}
 
-	conn.sendFunc = func(data []byte) error {
-		return gconn.AsyncWrite(data, nil)
-	}
-	conn.closeFunc = func() error {
-		return gconn.Close()
-	}
-
+	bindConn(gconn, conn)
 	d.server.registry.register(gconn, conn)
 
 	stresslog.Debug("[GNET] UDP 连接已建立", zap.String("address", address), zap.String("robot", conn.robotName))

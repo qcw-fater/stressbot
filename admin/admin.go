@@ -183,12 +183,14 @@ func buildFinalStressFromReports(task *Task) *monitor.CollectorSnapshot {
 	}
 	snaps := make([]*monitor.CollectorSnapshot, 0, len(task.Reports))
 	for _, r := range task.Reports {
-		// 过滤零值快照
+		// 过滤 nil 或零值快照
+		if r.FinalSnapshot == nil {
+			continue
+		}
 		if r.FinalSnapshot.UptimeSec == 0 && len(r.FinalSnapshot.Actions) == 0 {
 			continue
 		}
-		snap := r.FinalSnapshot
-		snaps = append(snaps, &snap)
+		snaps = append(snaps, r.FinalSnapshot)
 	}
 	if len(snaps) == 0 {
 		return nil
@@ -420,6 +422,14 @@ func (s *AdminServer) checkAndStopIfAllLost(taskID string) {
 func (s *AdminServer) autoStopTask(taskID string, reason string) {
 	task, ok := s.tasks.Get(taskID)
 	if !ok || !IsActiveState(task.State) {
+		return
+	}
+
+	if task.State == TaskStarting {
+		// TaskStarting 阶段所有节点失效：直接转 TaskFailed，无需发送停止 RPC
+		if _, err := s.tasks.Transition(taskID, TaskStarting, TaskFailed); err != nil {
+			stresslog.Error("[ADMIN] 自动停止任务状态转换失败", zap.Error(err))
+		}
 		return
 	}
 

@@ -32,38 +32,39 @@ import (
 // Robot 单个压测机器人实例。
 // 每个 Robot 拥有独立的状态存储、网络客户端、Lua 运行时和流程执行器。
 type Robot struct {
-	id          int                  // 机器人唯一编号
-	account     string               // 账号名
-	state       *state.Store         // 线程安全的键值状态存储
-	client      *network.Client      // 多服务网络客户端（管理 TCP/UDP 连接池）
-	factory     *protox.Factory      // protobuf 消息工厂（动态创建/解析）
-	executor    *engine.Executor     // 流程图执行器
-	luaPool     *script.RuntimePool  // Lua 运行时池（Robot 持有独占 LState）
-	L           *lua.LState          // 当前 Robot 独占的 Lua 状态（从 luaPool 获取）
+	id          int                    // 机器人唯一编号
+	account     string                 // 账号名
+	state       *state.Store           // 线程安全的键值状态存储
+	client      *network.Client        // 多服务网络客户端（管理 TCP/UDP 连接池）
+	factory     *protox.Factory        // protobuf 消息工厂（动态创建/解析）
+	executor    *engine.Executor       // 流程图执行器
+	luaPool     *script.RuntimePool    // Lua 运行时池（Robot 持有独占 LState）
+	l           *lua.LState            // 当前 Robot 独占的 Lua 状态（从 luaPool 获取）
 	actionExec  *engine.ActionExecutor // 声明式动作执行器
-	ctx         context.Context      // 机器人生命周期上下文
-	cancel      context.CancelFunc   // 取消函数（Stop 时调用）
-	running     atomic.Bool         // 是否正在运行
-	dialer      *network.Dialer      // 网络拨号器（封装 gnet 事件循环）
-	httpClient  *http.Client         // HTTP 客户端（声明式 HTTP 动作用）
-	luaMu       sync.Mutex          // Lua 访问互斥锁（回调/心跳可能在其他 goroutine 触发）
-	adp         adapter.Adapter      // 协议适配器（编解码 + 帧解析）
-	mainService string              // 主连接服务名，意外断开时停止机器人
-	done        chan struct{}        // 执行 goroutine 结束信号，Close 时等待
+	ctx         context.Context        // 机器人生命周期上下文
+	cancel      context.CancelFunc     // 取消函数（Stop 时调用）
+	running     atomic.Bool            // 是否正在运行
+	dialer      *network.Dialer        // 网络拨号器（封装 gnet 事件循环）
+	httpClient  *http.Client           // HTTP 客户端（声明式 HTTP 动作用）
+	luaMu       sync.Mutex             // Lua 访问互斥锁（回调/心跳可能在其他 goroutine 触发）
+	adp         adapter.Adapter        // 协议适配器（编解码 + 帧解析）
+	mainService string                 // 主连接服务名，意外断开时停止机器人
+	done        chan struct{}          // 执行 goroutine 结束信号，Close 时等待
 }
 
 // Config 单个机器人的配置。
 type Config struct {
-	ID          int               // 机器人唯一编号
-	Account     string            // 账号名
-	StateExtra  map[string]string // 初始状态额外键值对
-	HTTPTimeout time.Duration     // HTTP 请求超时
+	ID             int               // 机器人唯一编号
+	Account        string            // 账号名
+	StateExtra     map[string]string // 初始状态额外键值对
+	HTTPTimeout    time.Duration     // HTTP 请求超时
+	RequestTimeout time.Duration     // 网络请求超时（TCP/UDP RequestResponse）
+	MainService    string            // 主连接服务名，意外断开时停止机器人
 }
 
 // NewRobot 创建机器人实例。
 func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
-	adp adapter.Adapter, dialer *network.Dialer, luaPool *script.RuntimePool,
-	requestTimeout time.Duration, mainService string) *Robot {
+	adp adapter.Adapter, dialer *network.Dialer, luaPool *script.RuntimePool) *Robot {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -71,7 +72,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		id:          cfg.ID,
 		account:     cfg.Account,
 		state:       state.NewStore(),
-		client:      network.NewClient(cfg.Account, requestTimeout),
+		client:      network.NewClient(cfg.Account, cfg.RequestTimeout),
 		factory:     factory,
 		luaPool:     luaPool,
 		ctx:         ctx,
@@ -79,12 +80,12 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		dialer:      dialer,
 		httpClient:  &http.Client{Timeout: cfg.HTTPTimeout},
 		adp:         adp,
-		mainService: mainService,
+		mainService: cfg.MainService,
 		done:        make(chan struct{}),
 	}
 
 	if luaPool != nil {
-		r.L = luaPool.Acquire()
+		r.l = luaPool.Acquire()
 	}
 
 	r.state.Set("id", cfg.ID)
@@ -93,7 +94,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		r.state.Set(k, v)
 	}
 
-	r.actionExec = engine.NewActionExecutor(r.state, &netSenderAdapter{robot: r}, r.factory, r.adp, r.ctx)
+	r.actionExec = engine.NewActionExecutor(r.state, &netSenderAdapter{robot: r}, r.factory, r.adp)
 	r.executor = engine.NewExecutor(flow, &robotActionHandler{robot: r, flow: flow}, r.account)
 
 	return r
@@ -124,9 +125,9 @@ func (r *Robot) Start() {
 		defer r.running.Store(false)
 		defer close(r.done)
 
-		if r.L != nil {
+		if r.l != nil {
 			r.luaMu.Lock()
-			script.SetContext(r.L, &script.Context{
+			script.SetContext(r.l, &script.Context{
 				RobotID:   r.id,
 				Account:   r.account,
 				Store:     r.state,
@@ -197,9 +198,9 @@ func (r *Robot) Close() {
 	if waitDone != nil {
 		<-waitDone
 	}
-	if r.L != nil && r.luaPool != nil {
-		r.luaPool.Release(r.L)
-		r.L = nil
+	if r.l != nil && r.luaPool != nil {
+		r.luaPool.Release(r.l)
+		r.l = nil
 	}
 	r.state.Clear()
 }
@@ -308,7 +309,7 @@ func (h *robotActionHandler) ExecuteAction(actionDef *engine.ActionDef) error {
 	if actionDef.Pattern == engine.PatternLua {
 		sendBytes, recvBytes, err = h.executeLuaAction(actionDef)
 	} else {
-		sendBytes, recvBytes, err = h.robot.actionExec.Execute(actionDef)
+		sendBytes, recvBytes, err = h.robot.actionExec.Execute(h.robot.ctx, actionDef)
 	}
 
 	if mc := monitor.Global(); mc != nil && actionDef.Name != "" {
@@ -336,7 +337,7 @@ func classifyResult(err error) monitor.ActionResult {
 
 // executeLuaAction 执行 lua 脚本动作，返回 (sendBytes, recvBytes, err)。
 func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int, int, error) {
-	if h.robot.L == nil || h.robot.luaPool == nil {
+	if h.robot.l == nil || h.robot.luaPool == nil {
 		return 0, 0, engine.NewActionError(errcode.ErrLuaNotInit, "")
 	}
 
@@ -347,7 +348,7 @@ func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int,
 	h.robot.luaMu.Lock()
 	defer h.robot.luaMu.Unlock()
 
-	code, send, recv, err := h.robot.luaPool.RunActionScript(h.robot.L, actionDef.Script)
+	code, send, recv, err := h.robot.luaPool.RunActionScript(h.robot.l, actionDef.Script)
 	if err != nil {
 		return 0, 0, engine.NewActionError(errcode.ErrLuaExecFailed, "script="+actionDef.Script, err)
 	}
@@ -361,8 +362,8 @@ func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int,
 
 // ExecuteBoolean 执行条件判断
 func (h *robotActionHandler) ExecuteBoolean(expression string) bool {
-	if len(expression) > 4 && expression[:4] == "lua:" {
-		return h.executeLuaBoolean(expression[4:])
+	if strings.HasPrefix(expression, engine.PrefixLua) {
+		return h.executeLuaBoolean(expression[len(engine.PrefixLua):])
 	}
 
 	return engine.EvalCondition(expression, h.robot.state)
@@ -370,7 +371,7 @@ func (h *robotActionHandler) ExecuteBoolean(expression string) bool {
 
 // executeLuaBoolean 执行 Lua 条件脚本，脚本必须 return true/false。
 func (h *robotActionHandler) executeLuaBoolean(scriptName string) bool {
-	if h.robot.L == nil || h.robot.luaPool == nil {
+	if h.robot.l == nil || h.robot.luaPool == nil {
 		stresslog.Error("[ROBOT] Lua 运行时未初始化，条件判断默认拒绝",
 			zap.String("script", scriptName))
 		return false
@@ -385,7 +386,7 @@ func (h *robotActionHandler) executeLuaBoolean(scriptName string) bool {
 	h.robot.luaMu.Lock()
 	defer h.robot.luaMu.Unlock()
 
-	result, err := h.robot.luaPool.RunBooleanScript(h.robot.L, scriptName)
+	result, err := h.robot.luaPool.RunBooleanScript(h.robot.l, scriptName)
 	if err != nil {
 		stresslog.Error("[ROBOT] 条件脚本执行失败，条件判断默认拒绝",
 			zap.String("script", scriptName), zap.Error(err))
@@ -406,6 +407,8 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 	for _, ref := range refs {
 		proto, service, ok := parseServer(ref.Server)
 		if !ok {
+			stresslog.Warn("[ROBOT] 监听引用的 server 解析失败，跳过注册",
+				zap.String("server", ref.Server), zap.String("listen", ref.Listen))
 			continue
 		}
 		key := connKey{proto: proto, service: service}
@@ -415,17 +418,17 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 
 		routeKey := h.robot.adp.ExpectedRouteKey(ref.Route)
 
-		if ref.Callback == "" {
+		if ref.Listen == "" {
 			groups[key][routeKey] = nil
 			continue
 		}
 
-		cbDef, ok := h.flow.GetCallback(ref.Callback)
+		cbDef, ok := h.flow.Listen(ref.Listen)
 		if !ok {
-			stresslog.Warn("[ROBOT] 回调定义不存在", zap.String("callback", ref.Callback))
+			stresslog.Error("[ROBOT] 回调定义不存在", zap.String("listen", ref.Listen))
 			continue
 		}
-		groups[key][routeKey] = h.createListenCallback(ref.Callback, cbDef)
+		groups[key][routeKey] = h.createListenCallback(ref.Listen, cbDef)
 	}
 
 	for key, listenMap := range groups {
@@ -461,10 +464,10 @@ func parseServer(server string) (proto, service string, ok bool) {
 }
 
 // createListenCallback 根据回调定义创建监听回调函数。
-func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.CallbackDef) network.ListenCallBack {
+func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.ListenDef) network.ListenCallBack {
 	if cbDef.Script != "" {
 		return func(msg *network.Message) {
-			if h.robot.L == nil || h.robot.luaPool == nil {
+			if h.robot.l == nil || h.robot.luaPool == nil {
 				stresslog.Error("[ROBOT] Lua 运行时未初始化", zap.String("script", cbDef.Script))
 				monitor.Global().RecordCallbackError(cbName, engine.NewActionError(errcode.ErrCallbackLua, "script="+cbDef.Script))
 				return
@@ -473,7 +476,7 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.C
 			h.robot.luaMu.Lock()
 			defer h.robot.luaMu.Unlock()
 
-			script.SetContext(h.robot.L, &script.Context{
+			script.SetContext(h.robot.l, &script.Context{
 				RobotID:   h.robot.id,
 				Account:   h.robot.account,
 				Store:     h.robot.state,
@@ -484,7 +487,7 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.C
 				LuaMu:     &h.robot.luaMu,
 			})
 
-			if err := h.robot.luaPool.RunCallbackScript(h.robot.L, cbDef.Script, msg.Data, cbDef.S2CProto); err != nil {
+			if err := h.robot.luaPool.RunCallbackScript(h.robot.l, cbDef.Script, msg.Data, cbDef.S2CProto); err != nil {
 				stresslog.Error("[ROBOT] Lua 回调执行失败",
 					zap.Int("id", h.robot.id), zap.String("script", cbDef.Script), zap.Error(err))
 				monitor.Global().RecordCallbackError(cbName, engine.NewActionError(errcode.ErrCallbackLua, "script="+cbDef.Script, err))
@@ -770,3 +773,8 @@ func (ns *netSenderAdapter) RegisterUDPHeartbeat(service string, intervalMs int,
 	})
 }
 
+// 编译时接口断言
+var (
+	_ engine.NetSender     = (*netSenderAdapter)(nil)
+	_ engine.ActionHandler = (*robotActionHandler)(nil)
+)

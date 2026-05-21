@@ -18,28 +18,28 @@ import (
 
 // RampUpConfig 渐进式加压配置。
 type RampUpConfig struct {
-	Stages []RampUpStage
+	Stages []RampUpStage `json:"stages"`
 }
 
 // RampUpStage 单个加压阶段。
 type RampUpStage struct {
-	Count       int // 本阶段新增 bot 数
-	Concurrency int // 覆盖全局并发数，0 则用全局值
-	HoldSec     int // 阶段间等待秒数
+	Count       int `json:"count"`       // 本阶段新增 bot 数
+	Concurrency int `json:"concurrency"` // 覆盖全局并发数，0 则用全局值
+	HoldSec     int `json:"holdSec"`     // 阶段间等待秒数
 }
 
 // ManagerConfig 机器人管理器配置
 type ManagerConfig struct {
-	AccountPrefix  string
-	StartNumber    int
-	Count          int
-	ConcurrentNum  int
-	StateExtra     map[string]string
-	Adapter        adapter.Adapter
-	RequestTimeout time.Duration
-	MainService    string
-	HTTPTimeout    time.Duration
-	RampUp         *RampUpConfig
+	AccountPrefix  string            `json:"accountPrefix"`
+	StartNumber    int               `json:"startNumber"`
+	Count          int               `json:"count"`
+	ConcurrentNum  int               `json:"concurrentNum"`
+	StateExtra     map[string]string `json:"stateExtra"`
+	Adapter        adapter.Adapter   `json:"-"`
+	RequestTimeout time.Duration     `json:"requestTimeout"`
+	MainService    string            `json:"mainService"`
+	HTTPTimeout    time.Duration     `json:"httpTimeout"`
+	RampUp         *RampUpConfig     `json:"rampUp"`
 }
 
 // Manager 机器人管理器。
@@ -85,11 +85,13 @@ func (m *Manager) startBatch(fromIndex, count, conc int) error {
 		account := fmt.Sprintf("%s%d", m.cfg.AccountPrefix, id)
 
 		r := NewRobot(Config{
-			ID:         id,
-			Account:    account,
-			StateExtra: m.cfg.StateExtra,
-		}, m.flow, m.factory, m.cfg.Adapter, m.dialer, m.luaPool,
-			m.cfg.RequestTimeout, m.cfg.MainService)
+			ID:             id,
+			Account:        account,
+			StateExtra:     m.cfg.StateExtra,
+			HTTPTimeout:    m.cfg.HTTPTimeout,
+			RequestTimeout: m.cfg.RequestTimeout,
+			MainService:    m.cfg.MainService,
+		}, m.flow, m.factory, m.cfg.Adapter, m.dialer, m.luaPool)
 
 		m.mu.Lock()
 		m.robots = append(m.robots, r)

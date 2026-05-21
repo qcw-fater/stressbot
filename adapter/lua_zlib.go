@@ -30,7 +30,11 @@ func luaGzipCompress(L *lua.LState) int {
 		L.Push(lua.LString(err.Error()))
 		return 2
 	}
-	w.Close()
+	if err := w.Close(); err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
 	L.Push(lua.LString(buf.String()))
 	return 1
 }

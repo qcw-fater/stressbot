@@ -289,7 +289,7 @@ type StressReport struct {
 	// ReportedAt 上报时间。
 	ReportedAt time.Time `json:"reportedAt"`
 	// Snapshot 压测指标快照。
-	Snapshot monitor.CollectorSnapshot `json:"snapshot"`
+	Snapshot *monitor.CollectorSnapshot `json:"snapshot"`
 }
 
 // SystemReport Agent 上报的系统资源指标。
@@ -315,7 +315,7 @@ type TaskCompletionReport struct {
 	// FinishedAt 完成时间。
 	FinishedAt time.Time `json:"finishedAt"`
 	// FinalSnapshot 最终压测指标快照。
-	FinalSnapshot monitor.CollectorSnapshot `json:"finalSnapshot"`
+	FinalSnapshot *monitor.CollectorSnapshot `json:"finalSnapshot"`
 }
 
 // ── 注册 / 心跳 ──────────────────────────────────────

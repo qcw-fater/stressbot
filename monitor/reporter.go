@@ -3,6 +3,7 @@ package monitor
 import (
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"stressbot/utils"
@@ -15,6 +16,7 @@ type Reporter struct {
 	prevCounts map[string]int64    // 上次快照时各 action 的样本数，用于计算 periodQPS
 	prevTime   time.Time           // 上次报告时间，用于计算区间 QPS
 	stopCh     chan struct{}       // 停止信号通道
+	stopOnce   sync.Once           // 保证 stopCh 只关闭一次
 }
 
 // NewReporter 创建定时控制台报告器。
@@ -48,7 +50,7 @@ func (r *Reporter) Start() {
 
 // Stop 停止报告。
 func (r *Reporter) Stop() {
-	close(r.stopCh)
+	r.stopOnce.Do(func() { close(r.stopCh) })
 }
 
 func (r *Reporter) report() {

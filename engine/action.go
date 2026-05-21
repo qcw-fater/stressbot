@@ -34,7 +34,6 @@ type ActionExecutor struct {
 	store     *state.Store    // Robot 状态存储，保存服务器响应字段和中间变量
 	factory   *protox.Factory // 动态 protobuf 消息工厂，用于创建/序列化/解析 proto 消息
 	adp       adapter.Adapter // 协议适配器，处理消息头编解码和路由键计算
-	ctx       context.Context // 上下文，用于 listen 轮询中检测取消信号
 }
 
 // NetSender 网络发送委托接口。
@@ -94,39 +93,38 @@ type NetSender interface {
 }
 
 // NewActionExecutor 创建声明式动作执行器
-func NewActionExecutor(store *state.Store, sender NetSender, factory *protox.Factory, adp adapter.Adapter, ctx context.Context) *ActionExecutor {
+func NewActionExecutor(store *state.Store, sender NetSender, factory *protox.Factory, adp adapter.Adapter) *ActionExecutor {
 	return &ActionExecutor{
 		netSender: sender,
 		store:     store,
 		factory:   factory,
 		adp:       adp,
-		ctx:       ctx,
 	}
 }
 
 // Execute 执行声明式动作，返回发送/接收字节数和错误。
-func (ae *ActionExecutor) Execute(def *ActionDef) (sendBytes, recvBytes int, err error) {
+func (ae *ActionExecutor) Execute(ctx context.Context, def *ActionDef) (sendBytes, recvBytes int, err error) {
 	switch def.Pattern {
 	case PatternTCPSend:
-		sendBytes, err = ae.execTCPSend(def)
+		sendBytes, err = ae.execSend("tcp", def)
 	case PatternTCPRequest:
-		sendBytes, recvBytes, err = ae.execTCPRequest(def)
+		sendBytes, recvBytes, err = ae.execRequest("tcp", def)
 	case PatternTCPConnect:
 		err = ae.execTCPConnect(def)
 	case PatternTCPClose:
 		err = ae.execTCPClose(def)
 	case PatternTCPListen:
-		recvBytes, err = ae.execTCPListen(def)
+		recvBytes, err = ae.execListen(ctx, "tcp", def)
 	case PatternUDPSend:
-		sendBytes, err = ae.execUDPSend(def)
+		sendBytes, err = ae.execSend("udp", def)
 	case PatternUDPRequest:
-		sendBytes, recvBytes, err = ae.execUDPRequest(def)
+		sendBytes, recvBytes, err = ae.execRequest("udp", def)
 	case PatternUDPConnect:
 		err = ae.execUDPConnect(def)
 	case PatternUDPClose:
 		err = ae.execUDPClose(def)
 	case PatternUDPListen:
-		recvBytes, err = ae.execUDPListen(def)
+		recvBytes, err = ae.execListen(ctx, "udp", def)
 	case PatternHTTPRequest:
 		sendBytes, recvBytes, err = ae.execHTTPRequest(def)
 	case PatternClearState:
@@ -198,23 +196,23 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 	var val any
 
 	switch fb.Type {
-	case "fixed", "":
+	case BindFixed, "":
 		val = fb.Value
 
-	case "state":
+	case BindState:
 		if fb.Source == "" {
 			return nil
 		}
 		val = ae.store.Get(fb.Source)
 
-	case "stateFirst":
+	case BindStateFirst:
 		list := ae.store.GetList(fb.Source)
 		if len(list) == 0 {
 			return nil
 		}
 		val = list[0]
 
-	case "stateRandom":
+	case BindStateRandom:
 		list := ae.store.GetList(fb.Source)
 		if len(list) == 0 {
 			return nil
@@ -225,7 +223,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		}
 		val = filtered[rand.Intn(len(filtered))]
 
-	case "stateRandomN":
+	case BindStateRandomN:
 		list := ae.store.GetList(fb.Source)
 		if len(list) == 0 {
 			return nil
@@ -251,7 +249,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		}
 		return picked
 
-	case "stateMapKey":
+	case BindStateMapKey:
 		m := ae.store.GetMap(fb.Source)
 		if len(m) == 0 {
 			return nil
@@ -262,7 +260,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		}
 		return keys[rand.Intn(len(keys))]
 
-	case "stateMapValue":
+	case BindStateMapValue:
 		m := ae.store.GetMap(fb.Source)
 		if len(m) == 0 {
 			return nil
@@ -279,13 +277,13 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		}
 		val = values[rand.Intn(len(values))]
 
-	case "randomPick":
+	case BindRandomPick:
 		if len(fb.Values) == 0 {
 			return nil
 		}
 		val = fb.Values[rand.Intn(len(fb.Values))]
 
-	case "randomPickN":
+	case BindRandomPickN:
 		if len(fb.Values) == 0 {
 			return nil
 		}
@@ -295,7 +293,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		}
 		return pickN(fb.Values, n)
 
-	case "randomPickMap":
+	case BindRandomPickMap:
 		if len(fb.Values) == 0 || fb.KeySource == "" {
 			return nil
 		}
@@ -321,7 +319,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		}
 		return nil
 
-	case "randomExclude":
+	case BindRandomExclude:
 		var pool []any
 		if len(fb.Values) > 0 {
 			pool = fb.Values
@@ -346,14 +344,14 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		}
 		val = filtered[rand.Intn(len(filtered))]
 
-	case "randomInt":
+	case BindRandomInt:
 		lo, hi := fb.Min, fb.Max
 		if lo >= hi {
 			return lo
 		}
 		return rand.Intn(hi-lo+1) + lo
 
-	case "randomFloat":
+	case BindRandomFloat:
 		lo, hi := float64(fb.Min), float64(fb.Max)
 		if lo >= hi {
 			return lo
@@ -366,10 +364,10 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		scale := math.Pow10(prec)
 		return math.Round(v*scale) / scale
 
-	case "randomBool":
+	case BindRandomBool:
 		return rand.Intn(2) == 1
 
-	case "randomString":
+	case BindRandomString:
 		length := fb.Length
 		if length <= 0 {
 			length = 8
@@ -380,11 +378,11 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		}
 		return randomStringCharset(length, charset)
 
-	case "listSize":
+	case BindListSize:
 		return len(ae.store.GetList(fb.Source))
 
 	default:
-		stresslog.Warn("[ACTION] 未知 binding type，按 fixed 处理",
+		stresslog.Debug("[ACTION] 未知 binding type，按 fixed 处理",
 			zap.String("type", fb.Type), zap.String("field", fb.Field))
 		val = fb.Value
 	}
@@ -427,88 +425,11 @@ func navigatePath(v any, path string) any {
 
 // resolveAddress 解析 address 配置：支持 "state:key" 取 StateStore，否则按字面量
 func (ae *ActionExecutor) resolveAddress(addr string) string {
-	if strings.HasPrefix(addr, "state:") {
-		key := addr[len("state:"):]
+	if strings.HasPrefix(addr, PrefixState) {
+		key := addr[len(PrefixState):]
 		return ae.store.GetString(key)
 	}
 	return addr
-}
-
-// execTCPSend TCP 发送（不等响应）
-func (ae *ActionExecutor) execTCPSend(def *ActionDef) (int, error) {
-	body, err := ae.buildBody(def)
-	if err != nil {
-		return 0, err
-	}
-
-	secretKey := ae.netSender.GetTCPSecretKey(def.Service)
-	packet := ae.adp.EncodeTCP(def.Route, body, secretKey)
-	if packet == nil {
-		routeKey := ae.adp.ExpectedRouteKey(def.Route)
-		return 0, NewActionError(errcode.ErrEncodeFailed, "action="+def.Name+" route="+routeKey)
-	}
-
-	routeKey := ae.adp.ExpectedRouteKey(def.Route)
-	n, err := ae.netSender.TCPSend(def.Service, packet)
-	if err != nil {
-		return 0, err
-	}
-
-	stresslog.Debug("[ACTION] TCPSend",
-		zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
-		zap.String("c2sProto", def.C2SProto), zap.Int("bodyLen", len(body)), zap.Int("pktLen", n))
-	return len(packet), nil
-}
-
-// execTCPRequest TCP 请求-响应
-func (ae *ActionExecutor) execTCPRequest(def *ActionDef) (int, int, error) {
-	body, err := ae.buildBody(def)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	routeKey := ae.adp.ExpectedRouteKey(def.Route)
-	stresslog.Debug("[ACTION] TCPRequest 发送",
-		zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
-		zap.String("c2sProto", def.C2SProto), zap.String("s2cProto", def.S2CProto),
-		zap.Int("bodyLen", len(body)))
-
-	secretKey := ae.netSender.GetTCPSecretKey(def.Service)
-	packet := ae.adp.EncodeTCP(def.Route, body, secretKey)
-	if packet == nil {
-		return 0, 0, NewActionError(errcode.ErrEncodeFailed, "action="+def.Name+" route="+routeKey)
-	}
-
-	start := time.Now()
-	var reqTimeout []time.Duration
-	if def.Timeout > 0 {
-		reqTimeout = append(reqTimeout, time.Duration(def.Timeout)*time.Second)
-	}
-	respBody, headerErr, err := ae.netSender.TCPRequest(def.Service, packet, routeKey, reqTimeout...)
-	elapsed := time.Since(start)
-	if err != nil {
-		return len(packet), 0, err
-	}
-
-	if headerErr != 0 {
-		ae.parseAndStoreResponse(def, respBody)
-		desc := ae.adp.DescribeError(headerErr)
-		detail := "service=" + def.Service + " route=" + routeKey
-		if desc != "" {
-			detail = desc + ": " + detail
-		}
-		return len(packet), len(respBody), NewServerError(headerErr, detail)
-	}
-
-	if err := ae.parseAndStoreResponse(def, respBody); err != nil {
-		return len(packet), 0, err
-	}
-
-	stresslog.Debug("[ACTION] TCPRequest 成功",
-		zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
-		zap.String("s2cProto", def.S2CProto),
-		zap.Int("respBodyLen", len(respBody)), zap.Duration("elapsed", elapsed))
-	return len(packet), len(respBody), nil
 }
 
 // execTCPConnect 建立 TCP 连接
@@ -562,38 +483,6 @@ func (ae *ActionExecutor) execClearState(def *ActionDef) error {
 	return nil
 }
 
-// execUDPSend UDP 发送 proto 消息
-func (ae *ActionExecutor) execUDPSend(def *ActionDef) (int, error) {
-	var body []byte
-	if def.C2SProto != "" {
-		msg, err := ae.factory.Create(def.C2SProto)
-		if err != nil {
-			return 0, NewActionError(errcode.ErrCreateMsg, "proto="+def.C2SProto, err)
-		}
-		if err := ae.bindFields(msg, def.Bindings, def.Name); err != nil {
-			return 0, err
-		}
-		body, err = ae.factory.Serialize(msg)
-		if err != nil {
-			return 0, NewActionError(errcode.ErrSerialize, "action="+def.Name+" proto="+def.C2SProto, err)
-		}
-	}
-	routeKey := ae.adp.ExpectedRouteKey(def.Route)
-	udpKey := ae.netSender.GetUDPSecretKey(def.Service)
-	packet := ae.adp.EncodeUDP(def.Route, body, udpKey)
-	if packet == nil {
-		return 0, NewActionError(errcode.ErrEncodeFailed, "action="+def.Name+" route="+routeKey)
-	}
-	n, err := ae.netSender.UDPSend(def.Service, packet)
-	if err != nil {
-		return 0, err
-	}
-	stresslog.Debug("[ACTION] UDPSend",
-		zap.String("action", def.Name), zap.String("route", routeKey), zap.String("c2sProto", def.C2SProto),
-		zap.Int("bodyLen", len(body)), zap.Int("pktLen", n))
-	return len(packet), nil
-}
-
 // execSetState 从 bindings 设置 StateStore
 func (ae *ActionExecutor) execSetState(def *ActionDef) error {
 	for i := range def.Bindings {
@@ -612,116 +501,6 @@ func (ae *ActionExecutor) execSetState(def *ActionDef) error {
 	return nil
 }
 
-// execUDPRequest UDP 请求-响应
-func (ae *ActionExecutor) execUDPRequest(def *ActionDef) (int, int, error) {
-	body, err := ae.buildBody(def)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	routeKey := ae.adp.ExpectedRouteKey(def.Route)
-	stresslog.Debug("[ACTION] UDPRequest 发送",
-		zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
-		zap.String("c2sProto", def.C2SProto), zap.String("s2cProto", def.S2CProto),
-		zap.Int("bodyLen", len(body)))
-
-	udpKey := ae.netSender.GetUDPSecretKey(def.Service)
-	packet := ae.adp.EncodeUDP(def.Route, body, udpKey)
-	if packet == nil {
-		return 0, 0, NewActionError(errcode.ErrEncodeFailed, "action="+def.Name+" route="+routeKey)
-	}
-
-	start := time.Now()
-	var reqTimeout []time.Duration
-	if def.Timeout > 0 {
-		reqTimeout = append(reqTimeout, time.Duration(def.Timeout)*time.Second)
-	}
-	respBody, headerErr, err := ae.netSender.UDPRequest(def.Service, packet, routeKey, reqTimeout...)
-	elapsed := time.Since(start)
-	if err != nil {
-		return len(packet), 0, err
-	}
-
-	if headerErr != 0 {
-		ae.parseAndStoreResponse(def, respBody)
-		desc := ae.adp.DescribeError(headerErr)
-		detail := "service=" + def.Service + " route=" + routeKey
-		if desc != "" {
-			detail = desc + ": " + detail
-		}
-		return len(packet), len(respBody), NewServerError(headerErr, detail)
-	}
-
-	if err := ae.parseAndStoreResponse(def, respBody); err != nil {
-		return len(packet), 0, err
-	}
-
-	stresslog.Debug("[ACTION] UDPRequest 成功",
-		zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
-		zap.String("s2cProto", def.S2CProto),
-		zap.Int("respBodyLen", len(respBody)), zap.Duration("elapsed", elapsed))
-	return len(packet), len(respBody), nil
-}
-
-// execUDPListen 等待 UDP 监听消息（轮询模式）
-func (ae *ActionExecutor) execUDPListen(def *ActionDef) (int, error) {
-	timeout := def.Timeout
-	if timeout <= 0 {
-		timeout = DefaultListenTimeoutSec
-	}
-	pollMs := def.PollMs
-	if pollMs <= 0 {
-		pollMs = DefaultPollMs
-	}
-
-	routeKey := ae.adp.ExpectedRouteKey(def.Route)
-	stresslog.Debug("[ACTION] UDPListen 开始",
-		zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
-		zap.String("s2cProto", def.S2CProto),
-		zap.Int("timeoutSec", timeout))
-
-	ae.netSender.EnsureUDPListener(def.Service, routeKey)
-
-	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
-	start := time.Now()
-	pollCount := 0
-
-	for time.Now().Before(deadline) {
-		if ae.ctx != nil && ae.ctx.Err() != nil {
-			return 0, ae.ctx.Err()
-		}
-		pollCount++
-		respBody, headerErr := ae.netSender.GetUDPListenResp(def.Service, routeKey)
-		if respBody != nil {
-			if headerErr != 0 {
-				ae.parseAndStoreResponse(def, respBody)
-				desc := ae.adp.DescribeError(headerErr)
-				detail := "service=" + def.Service + " route=" + routeKey
-				if desc != "" {
-					detail = desc + ": " + detail
-				}
-				return 0, NewServerError(headerErr, detail)
-			}
-			if err := ae.parseAndStoreResponse(def, respBody); err != nil {
-				return 0, err
-			}
-			elapsed := time.Since(start)
-			stresslog.Debug("[ACTION] UDPListen 成功",
-				zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
-				zap.String("s2cProto", def.S2CProto),
-				zap.Int("respBodyLen", len(respBody)),
-				zap.Int("pollCount", pollCount), zap.Duration("elapsed", elapsed))
-			return len(respBody), nil
-		}
-		time.Sleep(time.Duration(pollMs) * time.Millisecond)
-	}
-
-	elapsed := time.Since(start)
-	return 0, NewTimeoutError(errcode.ErrListenTimeout,
-		"action="+def.Name+" service="+def.Service+" route="+routeKey+
-			fmt.Sprintf(" timeout=%ds polls=%d elapsed=%v", timeout, pollCount, elapsed))
-}
-
 // execHTTPRequest HTTP 请求
 func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, error) {
 	resolvedURL := ae.resolveAddress(def.URL)
@@ -735,13 +514,13 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, error) {
 	}
 	contentType := def.ContentType
 	if contentType == "" {
-		contentType = "json"
+		contentType = ContentJSON
 	}
 
 	var body []byte
 	if len(def.Bindings) > 0 {
 		switch contentType {
-		case "json":
+		case ContentJSON:
 			bodyMap := make(map[string]any)
 			for i := range def.Bindings {
 				fb := &def.Bindings[i]
@@ -759,7 +538,7 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, error) {
 			if err != nil {
 				return 0, 0, NewActionError(errcode.ErrMarshalBody, "action="+def.Name+" type=json", err)
 			}
-		case "form":
+		case ContentForm:
 			formData := make(map[string]string)
 			for i := range def.Bindings {
 				fb := &def.Bindings[i]
@@ -777,6 +556,9 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, error) {
 			if err != nil {
 				return 0, 0, NewActionError(errcode.ErrMarshalBody, "action="+def.Name+" type=form", err)
 			}
+		default:
+			stresslog.Warn("[ACTION] 未知 contentType，将发送原始字节",
+				zap.String("action", def.Name), zap.String("contentType", contentType))
 		}
 	}
 
@@ -787,7 +569,7 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, error) {
 	}
 
 	if len(def.Store) > 0 && len(respBody) > 0 {
-		if contentType == "json" {
+		if contentType == ContentJSON {
 			var respMap map[string]any
 			if err := json.Unmarshal(respBody, &respMap); err == nil {
 				ae.storeResponse(def.Store, respMap)
@@ -830,6 +612,18 @@ func (ae *ActionExecutor) parseAndStoreResponse(def *ActionDef, respBody []byte)
 	return nil
 }
 
+// handleHeaderError 处理服务端返回的非零 headerErr：解析响应、构造错误描述。
+// 将 4 处重复的 headerErr 处理逻辑统一收敛到此方法。
+func (ae *ActionExecutor) handleHeaderError(def *ActionDef, headerErr uint64, routeKey string, respBody []byte) *ActionError {
+	ae.parseAndStoreResponse(def, respBody)
+	desc := ae.adp.DescribeError(headerErr)
+	detail := "service=" + def.Service + " route=" + routeKey
+	if desc != "" {
+		detail = desc + ": " + detail
+	}
+	return NewServerError(headerErr, detail)
+}
+
 // storeResponse 将响应字段存储到 StateStore
 func (ae *ActionExecutor) storeResponse(mappings []StoreMapping, fieldMap map[string]any) {
 	stresslog.Debug("[ACTION] storeResponse",
@@ -851,79 +645,6 @@ func (ae *ActionExecutor) storeResponse(mappings []StoreMapping, fieldMap map[st
 			}
 		}
 	}
-}
-
-// lookupFieldMap 从 fieldMap 中查找字段值，先精确匹配再忽略大小写。
-func lookupFieldMap(fieldMap map[string]any, field string) any {
-	if v, ok := fieldMap[field]; ok {
-		return v
-	}
-	lower := strings.ToLower(field)
-	for k, v := range fieldMap {
-		if strings.ToLower(k) == lower {
-			return v
-		}
-	}
-	return nil
-}
-
-// execTCPListen 等待 TCP 监听消息（轮询模式）
-func (ae *ActionExecutor) execTCPListen(def *ActionDef) (int, error) {
-	timeout := def.Timeout
-	if timeout <= 0 {
-		timeout = DefaultListenTimeoutSec
-	}
-	pollMs := def.PollMs
-	if pollMs <= 0 {
-		pollMs = DefaultPollMs
-	}
-
-	routeKey := ae.adp.ExpectedRouteKey(def.Route)
-	stresslog.Debug("[ACTION] TCPListen 开始",
-		zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
-		zap.String("s2cProto", def.S2CProto),
-		zap.Int("timeoutSec", timeout))
-
-	ae.netSender.EnsureTCPListener(def.Service, routeKey)
-
-	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
-	start := time.Now()
-	pollCount := 0
-
-	for time.Now().Before(deadline) {
-		if ae.ctx != nil && ae.ctx.Err() != nil {
-			return 0, ae.ctx.Err()
-		}
-		pollCount++
-		respBody, headerErr := ae.netSender.GetTCPListenResp(def.Service, routeKey)
-		if respBody != nil {
-			if headerErr != 0 {
-				ae.parseAndStoreResponse(def, respBody)
-				desc := ae.adp.DescribeError(headerErr)
-				detail := "service=" + def.Service + " route=" + routeKey
-				if desc != "" {
-					detail = desc + ": " + detail
-				}
-				return 0, NewServerError(headerErr, detail)
-			}
-			if err := ae.parseAndStoreResponse(def, respBody); err != nil {
-				return 0, err
-			}
-			elapsed := time.Since(start)
-			stresslog.Debug("[ACTION] TCPListen 成功",
-				zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
-				zap.String("s2cProto", def.S2CProto),
-				zap.Int("respBodyLen", len(respBody)),
-				zap.Int("pollCount", pollCount), zap.Duration("elapsed", elapsed))
-			return len(respBody), nil
-		}
-		time.Sleep(time.Duration(pollMs) * time.Millisecond)
-	}
-
-	elapsed := time.Since(start)
-	return 0, NewTimeoutError(errcode.ErrListenTimeout,
-		"action="+def.Name+" service="+def.Service+" route="+routeKey+
-			fmt.Sprintf(" timeout=%ds polls=%d elapsed=%v", timeout, pollCount, elapsed))
 }
 
 // applyFilters 按过滤条件筛选列表项
@@ -992,6 +713,194 @@ func pickN(list []any, n int) []any {
 		}
 	}
 	return result
+}
+
+// ── 协议策略辅助方法 ─────────────────────────────────────────────────
+
+// protocolSend sends a packet via TCP or UDP, returning send bytes.
+func (ae *ActionExecutor) protocolSend(protocol, service string, packet []byte) (int, error) {
+	if protocol == "udp" {
+		return ae.netSender.UDPSend(service, packet)
+	}
+	return ae.netSender.TCPSend(service, packet)
+}
+
+// protocolEncode encodes a packet via TCP or UDP adapter.
+func (ae *ActionExecutor) protocolEncode(protocol string, route any, body, key []byte) []byte {
+	if protocol == "udp" {
+		return ae.adp.EncodeUDP(route, body, key)
+	}
+	return ae.adp.EncodeTCP(route, body, key)
+}
+
+// protocolSecretKey returns the encryption key for the given protocol.
+func (ae *ActionExecutor) protocolSecretKey(protocol, service string) []byte {
+	if protocol == "udp" {
+		return ae.netSender.GetUDPSecretKey(service)
+	}
+	return ae.netSender.GetTCPSecretKey(service)
+}
+
+// protocolRequest sends a request and waits for response.
+func (ae *ActionExecutor) protocolRequest(protocol, service string, packet []byte, routeKey string, timeout ...time.Duration) (body []byte, headerErr uint64, err error) {
+	if protocol == "udp" {
+		return ae.netSender.UDPRequest(service, packet, routeKey, timeout...)
+	}
+	return ae.netSender.TCPRequest(service, packet, routeKey, timeout...)
+}
+
+// protocolEnsureListener ensures listener is registered.
+func (ae *ActionExecutor) protocolEnsureListener(protocol, service, routeKey string) {
+	if protocol == "udp" {
+		ae.netSender.EnsureUDPListener(service, routeKey)
+	} else {
+		ae.netSender.EnsureTCPListener(service, routeKey)
+	}
+}
+
+// protocolListenResp gets the latest listen response.
+func (ae *ActionExecutor) protocolListenResp(protocol, service, routeKey string) ([]byte, uint64) {
+	if protocol == "udp" {
+		return ae.netSender.GetUDPListenResp(service, routeKey)
+	}
+	return ae.netSender.GetTCPListenResp(service, routeKey)
+}
+
+// ── 统一执行方法 ─────────────────────────────────────────────────────
+
+// execSend sends a message without waiting for response.
+func (ae *ActionExecutor) execSend(protocol string, def *ActionDef) (int, error) {
+	body, err := ae.buildBody(def)
+	if err != nil {
+		return 0, err
+	}
+
+	routeKey := ae.adp.ExpectedRouteKey(def.Route)
+	secretKey := ae.protocolSecretKey(protocol, def.Service)
+	packet := ae.protocolEncode(protocol, def.Route, body, secretKey)
+	if packet == nil {
+		return 0, NewActionError(errcode.ErrEncodeFailed, "action="+def.Name+" route="+routeKey)
+	}
+
+	n, err := ae.protocolSend(protocol, def.Service, packet)
+	if err != nil {
+		return 0, err
+	}
+
+	label := "TCPSend"
+	if protocol == "udp" {
+		label = "UDPSend"
+	}
+	stresslog.Debug("[ACTION] "+label,
+		zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
+		zap.String("c2sProto", def.C2SProto), zap.Int("bodyLen", len(body)), zap.Int("pktLen", n))
+	return len(packet), nil
+}
+
+// execRequest sends a request and waits for response.
+func (ae *ActionExecutor) execRequest(protocol string, def *ActionDef) (int, int, error) {
+	body, err := ae.buildBody(def)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	routeKey := ae.adp.ExpectedRouteKey(def.Route)
+	label := "TCPRequest"
+	if protocol == "udp" {
+		label = "UDPRequest"
+	}
+	stresslog.Debug("[ACTION] "+label+" 发送",
+		zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
+		zap.String("c2sProto", def.C2SProto), zap.String("s2cProto", def.S2CProto),
+		zap.Int("bodyLen", len(body)))
+
+	secretKey := ae.protocolSecretKey(protocol, def.Service)
+	packet := ae.protocolEncode(protocol, def.Route, body, secretKey)
+	if packet == nil {
+		return 0, 0, NewActionError(errcode.ErrEncodeFailed, "action="+def.Name+" route="+routeKey)
+	}
+
+	start := time.Now()
+	var reqTimeout []time.Duration
+	if def.Timeout > 0 {
+		reqTimeout = append(reqTimeout, time.Duration(def.Timeout)*time.Second)
+	}
+	respBody, headerErr, err := ae.protocolRequest(protocol, def.Service, packet, routeKey, reqTimeout...)
+	elapsed := time.Since(start)
+	if err != nil {
+		return len(packet), 0, err
+	}
+
+	if headerErr != 0 {
+		return len(packet), len(respBody), ae.handleHeaderError(def, headerErr, routeKey, respBody)
+	}
+
+	if err := ae.parseAndStoreResponse(def, respBody); err != nil {
+		return len(packet), 0, err
+	}
+
+	stresslog.Debug("[ACTION] "+label+" 成功",
+		zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
+		zap.String("s2cProto", def.S2CProto),
+		zap.Int("respBodyLen", len(respBody)), zap.Duration("elapsed", elapsed))
+	return len(packet), len(respBody), nil
+}
+
+// execListen waits for a listen message (polling mode).
+func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *ActionDef) (int, error) {
+	timeout := def.Timeout
+	if timeout <= 0 {
+		timeout = DefaultListenTimeoutSec
+	}
+	pollMs := def.PollMs
+	if pollMs <= 0 {
+		pollMs = DefaultPollMs
+	}
+
+	routeKey := ae.adp.ExpectedRouteKey(def.Route)
+	label := "TCPListen"
+	if protocol == "udp" {
+		label = "UDPListen"
+	}
+	stresslog.Debug("[ACTION] "+label+" 开始",
+		zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
+		zap.String("s2cProto", def.S2CProto),
+		zap.Int("timeoutSec", timeout))
+
+	ae.protocolEnsureListener(protocol, def.Service, routeKey)
+
+	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
+	start := time.Now()
+	pollCount := 0
+
+	for time.Now().Before(deadline) {
+		if ctx != nil && ctx.Err() != nil {
+			return 0, ctx.Err()
+		}
+		pollCount++
+		respBody, headerErr := ae.protocolListenResp(protocol, def.Service, routeKey)
+		if respBody != nil {
+			if headerErr != 0 {
+				return 0, ae.handleHeaderError(def, headerErr, routeKey, respBody)
+			}
+			if err := ae.parseAndStoreResponse(def, respBody); err != nil {
+				return 0, err
+			}
+			elapsed := time.Since(start)
+			stresslog.Debug("[ACTION] "+label+" 成功",
+				zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
+				zap.String("s2cProto", def.S2CProto),
+				zap.Int("respBodyLen", len(respBody)),
+				zap.Int("pollCount", pollCount), zap.Duration("elapsed", elapsed))
+			return len(respBody), nil
+		}
+		time.Sleep(time.Duration(pollMs) * time.Millisecond)
+	}
+
+	elapsed := time.Since(start)
+	return 0, NewTimeoutError(errcode.ErrListenTimeout,
+		"action="+def.Name+" service="+def.Service+" route="+routeKey+
+			fmt.Sprintf(" timeout=%ds polls=%d elapsed=%v", timeout, pollCount, elapsed))
 }
 
 // randomStringCharset 生成指定字符集的随机字符串

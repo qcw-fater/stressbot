@@ -90,7 +90,7 @@ func (s *AdminServer) handleGetHistoryConfig(w http.ResponseWriter, r *http.Requ
 	}
 
 	// 查询任务元信息补充到响应
-	meta, _ := s.history.Get(r.Context(), id)
+	meta, _ := s.history.Get(r.Context(), id) // Get 返回 (nil, ErrHistoryNotFound) 时后续代码用 nil 检查处理
 	name := ""
 	var totalBots int
 	if meta != nil {

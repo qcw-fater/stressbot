@@ -45,6 +45,8 @@ type Connection struct {
 	onClosed         func()                     // 关闭回调（主动/被动均触发，监控用，与 ConnEstablished 配对）
 }
 
+const listenChSize = 128 // 监听推送消息通道缓冲区大小
+
 // NewConnection 创建新的网络连接。
 func NewConnection(serviceName, robotName string, requestTimeout time.Duration) *Connection {
 	conn := &Connection{
@@ -54,7 +56,7 @@ func NewConnection(serviceName, robotName string, requestTimeout time.Duration) 
 		responseMap:    make(map[string]chan *Message),
 		listenResp:     make(map[string]ListenCallBack),
 		listenMsg:      make(map[string]*Message),
-		listenCh:       make(chan *Message, 128),
+		listenCh:       make(chan *Message, listenChSize),
 		requestTimeout: requestTimeout,
 		sendFunc:       nil,
 	}
@@ -140,7 +142,7 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 		stresslog.Error("[NETWORK] RequestResponse 发送失败",
 			zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
 			zap.Int("pktLen", len(sendData)))
-		return nil, engine.NewActionError(errcode.ErrSendFailed, c.serviceName+" routeKey="+routeKey, sendErr)
+		return nil, sendErr
 	}
 	_ = n
 
@@ -219,8 +221,12 @@ func (c *Connection) AddListener(routeKey string, cb ListenCallBack) {
 func (c *Connection) listenLoop() {
 	defer atomic.StoreInt32(&c.listenRunning, 0)
 	defer func() {
-		if c.listenDone != nil {
-			close(c.listenDone)
+		c.mu.Lock()
+		ch := c.listenDone
+		c.listenDone = nil
+		c.mu.Unlock()
+		if ch != nil {
+			close(ch)
 		}
 	}()
 	for {
@@ -246,8 +252,11 @@ func (c *Connection) WaitListenDone() {
 	if c == nil {
 		return
 	}
-	if c.listenDone != nil {
-		<-c.listenDone
+	c.mu.Lock()
+	ch := c.listenDone
+	c.mu.Unlock()
+	if ch != nil {
+		<-ch
 	}
 }
 
@@ -303,20 +312,32 @@ func (c *Connection) GetListenResp(routeKey string) *Message {
 	return nil
 }
 
+// doClose 执行连接关闭的共享逻辑：CAS 标记 + 停止心跳 + 取消上下文。
+// 调用方负责触发回调。
+func (c *Connection) doClose() {
+	c.StopHeartbeat()
+	c.cancel()
+}
+
 func (c *Connection) onClose() {
 	if !atomic.CompareAndSwapInt32(&c.isClose, 0, 1) {
 		return
 	}
-	c.StopHeartbeat()
-	c.cancel()
+	c.doClose()
+
+	// 在 mu 下读取回调函数指针，避免与 SetOnDisconnect/SetOnClosed 的数据竞争
+	c.mu.Lock()
+	disconnectFn := c.onDisconnect
+	closedFn := c.onClosed
+	c.mu.Unlock()
 
 	// 业务"意外断开"回调：仅非主动关闭时触发（用于 robot 主连接断开 → 停 robot）
-	if atomic.LoadInt32(&c.intentionalClose) == 0 && c.onDisconnect != nil {
-		c.onDisconnect()
+	if atomic.LoadInt32(&c.intentionalClose) == 0 && disconnectFn != nil {
+		disconnectFn()
 	}
 	// 监控"关闭"回调：主动/被动均触发；与 ConnEstablished 配对，保证 active = open - close 准确
-	if c.onClosed != nil {
-		c.onClosed()
+	if closedFn != nil {
+		closedFn()
 	}
 
 	stresslog.Debug("[NETWORK] 连接资源已清理", zap.String("service", c.serviceName), zap.String("robot", c.robotName))
@@ -328,14 +349,16 @@ func (c *Connection) Close() {
 		return
 	}
 	atomic.StoreInt32(&c.intentionalClose, 1)
-	c.StopHeartbeat()
 	if c.closeFunc != nil {
 		_ = c.closeFunc()
 	}
-	c.cancel()
+	c.doClose()
 	// CAS 保证 onClosed 只触发一次
-	if c.onClosed != nil {
-		c.onClosed()
+	c.mu.Lock()
+	closedFn := c.onClosed
+	c.mu.Unlock()
+	if closedFn != nil {
+		closedFn()
 	}
 	stresslog.Debug("[NETWORK] 连接资源已清理", zap.String("service", c.serviceName), zap.String("robot", c.robotName))
 }

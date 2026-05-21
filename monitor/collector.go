@@ -125,18 +125,23 @@ type MetricsCollector struct {
 	totalRecvBytes atomic.Int64 // 全局累计接收字节数
 }
 
-var global *MetricsCollector
+var (
+	global    *MetricsCollector
+	globalOnce sync.Once
+)
 
-// Init 初始化全局单例。进程生命周期内只调用一次，任务级调整 ApdexT 用 SetApdexT。
+// Init 初始化全局单例。sync.Once 保证幂等，多次调用不会重置。
 func Init(cfg CollectorConfig) {
-	global = &MetricsCollector{
-		enabled:   cfg.Enabled,
-		cfg:       cfg,
-		startTime: time.Now(),
-	}
-	if global.cfg.ApdexT <= 0 {
-		global.cfg.ApdexT = 100
-	}
+	globalOnce.Do(func() {
+		global = &MetricsCollector{
+			enabled:   cfg.Enabled,
+			cfg:       cfg,
+			startTime: time.Now(),
+		}
+		if global.cfg.ApdexT <= 0 {
+			global.cfg.ApdexT = 100
+		}
+	})
 }
 
 // Global 返回全局单例。
@@ -149,7 +154,9 @@ func (c *MetricsCollector) Reset() {
 	stresslog.Info("[MONITOR] 指标收集器已重置")
 	c.startTime = time.Now()
 	c.actions.Clear()
+	c.namesMu.Lock()
 	c.names = c.names[:0]
+	c.namesMu.Unlock()
 	c.robotsStarted.Store(0)
 	c.robotsRunning.Store(0)
 	c.robotsStopped.Store(0)

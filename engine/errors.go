@@ -11,6 +11,13 @@ import (
 // 被 NewTimeoutError 包装后，通过 errors.Is(err, ErrTimeout) 识别。
 var ErrTimeout = errors.New("action timeout")
 
+// 流程配置错误哨兵。这些是 flow.json 配置错误，不是运行时动作错误。
+var (
+	ErrNodeNotFound   = fmt.Errorf("节点不存在")
+	ErrUnknownNodeType = fmt.Errorf("未知节点类型")
+	ErrActionNotFound  = fmt.Errorf("动作不存在")
+)
+
 // ActionError 携带错误码与来源类别的结构化错误。
 // (Kind, Code) 二元组唯一标识一类错误：
 //   - 框架错误：Kind=KindFramework, Code=errcode.Err*

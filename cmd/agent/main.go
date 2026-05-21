@@ -159,7 +159,7 @@ func runStandalone(cfg *Config) {
 	stresslog.Info("[MAIN] 流程配置已加载",
 		zap.Int("nodes", len(flow.Nodes)),
 		zap.Int("actions", len(flow.Actions)),
-		zap.Int("callbacks", len(flow.Callbacks)))
+		zap.Int("listens", len(flow.Listens)))
 
 	// 回填 ActionDef.Name
 	for name, action := range flow.Actions {

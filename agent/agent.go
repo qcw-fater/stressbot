@@ -545,7 +545,7 @@ func (a *Agent) shutdown() error {
 // buildAddress 根据监听地址构建完整 HTTP 地址。
 // ":7070" → "http://hostname:7070"
 func buildAddress(port int) string {
-	hostname, _ := os.Hostname()
+	hostname, _ := os.Hostname() // hostname 可选，获取失败不影响功能
 	if hostname == "" {
 		hostname = "127.0.0.1"
 	}

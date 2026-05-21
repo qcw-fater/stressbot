@@ -1,3 +1,5 @@
+// Package engine 提供流程执行引擎。
+// cond_parser.go 实现条件表达式的递归下降解析器，支持 state 比较和 lua: 脚本调用。
 package engine
 
 import (

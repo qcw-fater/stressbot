@@ -7,10 +7,10 @@ package engine
 // 由一组 Node 组成的有向图，从 "main" 节点开始串行执行。
 // nodes 使用 JSON object（key = 节点 ID），无需自定义反序列化。
 type TaskFlow struct {
-	DefaultDelayMs int                     `json:"defaultDelayMs"` // 全局节点间默认延迟（毫秒）。0=引擎默认(1000ms)，<0=禁用
-	Nodes          map[string]*Node        `json:"nodes"`          // 节点映射，key 为节点 ID
-	Actions        map[string]*ActionDef   `json:"actions"`        // 动作定义映射
-	Callbacks      map[string]*CallbackDef `json:"listens"`         // 监听定义映射
+	DefaultDelayMs int                   `json:"defaultDelayMs"` // 全局节点间默认延迟（毫秒）。0=引擎默认(1000ms)，<0=禁用
+	Nodes          map[string]*Node      `json:"nodes"`          // 节点映射，key 为节点 ID
+	Actions        map[string]*ActionDef `json:"actions"`        // 动作定义映射
+	Listens        map[string]*ListenDef `json:"listens"`        // 监听定义映射
 }
 
 // Node 流程节点。
@@ -43,9 +43,9 @@ type Node struct {
 	FalseNext string `json:"falseNext"` // 条件为 false 时跳转的节点 ID（空 = 不跳转）
 
 	// ── action 专用 ─────────────────────────────────────────────
-	Action          string      `json:"action"`          // 引用 actions 表中的动作名称
-	ErrorStrategy   string      `json:"errorStrategy"`   // "abort" = 中断整个流程；"skip" = 跳过当前层级；空/"ignore" = 忽略继续
-	ListenCallbacks []ListenRef `json:"listenRefs"` // 动作执行后注册的持久化推送监听
+	Action        string      `json:"action"`        // 引用 actions 表中的动作名称
+	ErrorStrategy string      `json:"errorStrategy"` // "abort" = 中断整个流程；"skip" = 跳过当前层级；空/"ignore" = 忽略继续
+	ListenRefs    []ListenRef `json:"listenRefs"`    // 动作执行后注册的持久化推送监听引用
 
 	// ── weighted 专用 ─────────────────────────────────────────────
 	Options []WeightedOption `json:"options"` // 加权选项列表
@@ -65,31 +65,81 @@ type WeightedOption struct {
 	Weight int    `json:"weight"` // 权重值
 }
 
-// ListenRef 监听回调引用，定义在节点上。
+// ListenRef 监听引用，定义在节点上。
 // 当节点执行时（通常是连接节点），注册对应的推送监听。
 // Route 为不透明路由，运行时通过 adapter.ExpectedRouteKey(route) 计算实际 routeKey。
 type ListenRef struct {
-	Route    any    `json:"route"`    // 不透明路由（与 ActionDef.Route 格式一致）
-	Server   string `json:"server"`   // 连接名，格式：协议:服务名（如 "tcp:logic"、"udp:udp"）
-	Callback string `json:"listen"` // 监听定义名称（引用 listens 表）
+	Route  any    `json:"route"`  // 不透明路由（与 ActionDef.Route 格式一致）
+	Server string `json:"server"` // 连接名，格式：协议:服务名（如 "tcp:logic"、"udp:udp"）
+	Listen string `json:"listen"` // 监听定义名称（引用 listens 表），空 = 仅轮询不回调
 }
 
 // 动作模式常量。
 const (
-	PatternTCPSend     = "tcpSend"
-	PatternTCPRequest  = "tcpRequest"
-	PatternTCPConnect  = "tcpConnect"
-	PatternTCPClose    = "tcpClose"
-	PatternTCPListen   = "tcpListen"
-	PatternUDPSend     = "udpSend"
-	PatternUDPRequest  = "udpRequest"
-	PatternUDPConnect  = "udpConnect"
-	PatternUDPClose    = "udpClose"
-	PatternUDPListen   = "udpListen"
-	PatternHTTPRequest = "httpRequest"
-	PatternSetState    = "setState"
-	PatternClearState  = "clearState"
-	PatternLua         = "lua"
+	PatternTCPSend     = "tcpSend"     // TCP 单向发送
+	PatternTCPRequest  = "tcpRequest"  // TCP 请求-响应
+	PatternTCPConnect  = "tcpConnect"  // TCP 连接建立
+	PatternTCPClose    = "tcpClose"    // TCP 连接关闭
+	PatternTCPListen   = "tcpListen"   // TCP 持久推送监听
+	PatternUDPSend     = "udpSend"     // UDP 单向发送
+	PatternUDPRequest  = "udpRequest"  // UDP 请求-响应
+	PatternUDPConnect  = "udpConnect"  // UDP 连接建立
+	PatternUDPClose    = "udpClose"    // UDP 连接关闭
+	PatternUDPListen   = "udpListen"   // UDP 持久推送监听
+	PatternHTTPRequest = "httpRequest" // HTTP 请求
+	PatternSetState    = "setState"    // 设置状态变量
+	PatternClearState  = "clearState"  // 清除状态变量
+	PatternLua         = "lua"         // Lua 脚本执行（由 robot 层 ActionHandler 处理）
+)
+
+// 条件表达式前缀
+const (
+	PrefixState = "state:" // 状态存储前缀
+	PrefixLua   = "lua:"   // Lua 脚本前缀
+)
+
+// 节点类型常量
+const (
+	NodeSequence  = "sequence"
+	NodeAction    = "action"
+	NodeLoop      = "loop"
+	NodeBoolean   = "boolean"
+	NodeWeighted  = "weighted"
+	NodeWait      = "wait"
+	NodeBreak     = "break"
+	NodeContinue  = "continue"
+)
+
+// 内容类型常量
+const (
+	ContentJSON = "json"
+	ContentForm = "form"
+)
+
+// 错误策略常量
+const (
+	StrategyAbort = "abort"
+	StrategySkip  = "skip"
+)
+
+// 字段绑定类型常量
+const (
+	BindFixed         = "fixed"
+	BindState         = "state"
+	BindStateFirst    = "stateFirst"
+	BindStateRandom   = "stateRandom"
+	BindStateRandomN  = "stateRandomN"
+	BindStateMapKey   = "stateMapKey"
+	BindStateMapValue = "stateMapValue"
+	BindRandomPick    = "randomPick"
+	BindRandomPickN   = "randomPickN"
+	BindRandomPickMap = "randomPickMap"
+	BindRandomExclude = "randomExclude"
+	BindRandomInt     = "randomInt"
+	BindRandomFloat   = "randomFloat"
+	BindRandomBool    = "randomBool"
+	BindRandomString  = "randomString"
+	BindListSize      = "listSize"
 )
 
 // ActionDef 动作定义。
@@ -170,7 +220,7 @@ func (fb *FieldBind) isRequired() bool {
 // isImplicitRequired 判断绑定类型是否属于隐式必需（缺失时触发动作跳过）。
 func isImplicitRequired(btype string) bool {
 	switch btype {
-	case "state", "stateFirst", "stateRandom", "stateRandomN", "stateMapKey", "stateMapValue":
+	case BindState, BindStateFirst, BindStateRandom, BindStateRandomN, BindStateMapKey, BindStateMapValue:
 		return true
 	}
 	return false
@@ -190,27 +240,27 @@ type StoreMapping struct {
 	Setter string `json:"setter"` // 写入 StateStore 的 key
 }
 
-// CallbackDef 回调定义。
-type CallbackDef struct {
+// ListenDef 回调定义。
+type ListenDef struct {
 	S2CProto string         `json:"s2cProto"` // 解析推送消息的 proto 全名
 	Store    []StoreMapping `json:"store"`    // 响应字段到 StateStore 的映射
 	Script   string         `json:"script"`   // Lua 回调脚本路径
 }
 
-// GetNode 获取指定 ID 的节点
-func (tf *TaskFlow) GetNode(id string) (*Node, bool) {
+// Node 获取指定 ID 的节点
+func (tf *TaskFlow) Node(id string) (*Node, bool) {
 	n, ok := tf.Nodes[id]
 	return n, ok
 }
 
-// GetAction 获取指定名称的动作定义
-func (tf *TaskFlow) GetAction(name string) (*ActionDef, bool) {
+// Action 获取指定名称的动作定义
+func (tf *TaskFlow) Action(name string) (*ActionDef, bool) {
 	a, ok := tf.Actions[name]
 	return a, ok
 }
 
-// GetCallback 获取指定名称的回调定义
-func (tf *TaskFlow) GetCallback(name string) (*CallbackDef, bool) {
-	c, ok := tf.Callbacks[name]
-	return c, ok
+// Listen 获取指定名称的监听定义
+func (tf *TaskFlow) Listen(name string) (*ListenDef, bool) {
+	l, ok := tf.Listens[name]
+	return l, ok
 }

@@ -64,7 +64,7 @@ func (c *AdminClient) Register(ctx context.Context, req RegisterRequest) (*Regis
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(resp.Body) // HTTP 错误响应体，ReadAll 失败不影响错误返回
 		return nil, fmt.Errorf("register failed: status=%d body=%s", resp.StatusCode, string(respBody))
 	}
 
@@ -89,7 +89,7 @@ func (c *AdminClient) Heartbeat(ctx context.Context, req HeartbeatRequest) error
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(resp.Body) // HTTP 错误响应体，ReadAll 失败不影响错误返回
 		if resp.StatusCode == http.StatusNotFound {
 			return errNotRegistered
 		}
@@ -112,7 +112,7 @@ func (c *AdminClient) PostStress(ctx context.Context, report StressReport) error
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 && resp.StatusCode != 202 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(resp.Body) // HTTP 错误响应体，ReadAll 失败不影响错误返回
 		return fmt.Errorf("post stress failed: status=%d body=%s", resp.StatusCode, string(respBody))
 	}
 	return nil
@@ -132,7 +132,7 @@ func (c *AdminClient) PostSystem(ctx context.Context, report SystemReport) error
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 && resp.StatusCode != 202 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(resp.Body) // HTTP 错误响应体，ReadAll 失败不影响错误返回
 		return fmt.Errorf("post system failed: status=%d body=%s", resp.StatusCode, string(respBody))
 	}
 	return nil
@@ -157,7 +157,7 @@ func (c *AdminClient) FetchPendingTask(ctx context.Context) (*TaskAssignment, er
 		return nil, nil // 无任务
 	}
 	if resp.StatusCode != 200 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(resp.Body) // HTTP 错误响应体，ReadAll 失败不影响错误返回
 		return nil, fmt.Errorf("fetch pending task failed: status=%d body=%s", resp.StatusCode, string(respBody))
 	}
 
@@ -183,7 +183,7 @@ func (c *AdminClient) ReportTaskDone(ctx context.Context, report TaskCompletionR
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 && resp.StatusCode != 202 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(resp.Body) // HTTP 错误响应体，ReadAll 失败不影响错误返回
 		return fmt.Errorf("report task done failed: status=%d body=%s", resp.StatusCode, string(respBody))
 	}
 	return nil
@@ -191,7 +191,7 @@ func (c *AdminClient) ReportTaskDone(ctx context.Context, report TaskCompletionR
 
 // Deregister 注销（best-effort，不重试）。
 func (c *AdminClient) Deregister(ctx context.Context) error {
-	body, _ := json.Marshal(DeregisterRequest{AgentID: c.agentID})
+	body, _ := json.Marshal(DeregisterRequest{AgentID: c.agentID}) // 简单 struct 序列化不会失败
 	url := "/sbot/agent/" + c.agentID + "/deregister"
 
 	resp, err := c.doPost(ctx, url, body)

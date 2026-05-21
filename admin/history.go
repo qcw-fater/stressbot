@@ -145,11 +145,11 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 	if task.Config.RobotConfig.DebugMode {
 		tags = append(tags, "debug")
 	}
-	tagsJSON, _ := json.Marshal(tags)
+	tagsJSON, _ := json.Marshal(tags) // []string 序列化不会失败
 	if tagsJSON == nil {
 		tagsJSON = []byte("[]")
 	}
-	summaryJSON, _ := json.Marshal(buildConfigSummary(task))
+	summaryJSON, _ := json.Marshal(buildConfigSummary(task)) // 同上
 
 	_, err = tx.Exec(`
 		INSERT INTO task_history (id, name, state, total_bots, agent_count,
@@ -181,7 +181,7 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 
 	// 3. task_report
 	for agentID, report := range task.Reports {
-		snapJSON, _ := json.Marshal(report.FinalSnapshot)
+		snapJSON, _ := json.Marshal(report.FinalSnapshot) // 同上
 		_, err = tx.Exec(`
 			INSERT INTO task_report (task_id, agent_id, agent_name, result, error_msg, finished_at, final_snapshot)
 			VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -192,8 +192,8 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 	}
 
 	// 4. task_aggregated
-	stressJSON, _ := json.Marshal(finalStress)
-	sysJSON, _ := json.Marshal(finalSys)
+	stressJSON, _ := json.Marshal(finalStress) // 同上
+	sysJSON, _ := json.Marshal(finalSys) // 同上
 	_, err = tx.Exec(`
 		INSERT INTO task_aggregated (task_id, final_stress, final_system)
 		VALUES (?, ?, ?)
@@ -205,9 +205,9 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 
 	// 5. task_config_archive
 	flowJSON := task.Config.FlowJSON
-	protoFilesJSON, _ := json.Marshal(task.Config.ProtoFiles)
-	luaScriptsJSON, _ := json.Marshal(task.Config.LuaScripts)
-	robotCfgJSON, _ := json.Marshal(task.Config.RobotConfig)
+	protoFilesJSON, _ := json.Marshal(task.Config.ProtoFiles) // 同上
+	luaScriptsJSON, _ := json.Marshal(task.Config.LuaScripts) // 同上
+	robotCfgJSON, _ := json.Marshal(task.Config.RobotConfig) // 同上
 	_, err = tx.Exec(`
 		INSERT INTO task_config_archive (task_id, flow_json, proto_files, lua_scripts, robot_config)
 		VALUES (?, ?, ?, ?, ?)
@@ -287,8 +287,8 @@ func (h *HistoryStore) List(ctx context.Context, filter HistoryFilter) (*History
 		if stoppedAt.Valid {
 			r.StoppedAt = &stoppedAt.Time
 		}
-		_ = json.Unmarshal(tagsBytes, &r.Tags)
-		_ = json.Unmarshal(summaryBytes, &r.ConfigSummary)
+		_ = json.Unmarshal(tagsBytes, &r.Tags) // DB 字段可选，缺失时零值可用
+		_ = json.Unmarshal(summaryBytes, &r.ConfigSummary) // 同上
 		if r.Tags == nil {
 			r.Tags = []string{}
 		}
@@ -333,8 +333,8 @@ func (h *HistoryStore) Get(ctx context.Context, id string) (*HistoryDetail, erro
 	if stoppedAt.Valid {
 		r.StoppedAt = &stoppedAt.Time
 	}
-	_ = json.Unmarshal(tagsBytes, &r.Tags)
-	_ = json.Unmarshal(summaryBytes, &r.ConfigSummary)
+	_ = json.Unmarshal(tagsBytes, &r.Tags) // DB 字段可选，缺失时零值可用
+	_ = json.Unmarshal(summaryBytes, &r.ConfigSummary) // 同上
 
 	r.Assignments, _ = h.queryAssignments(ctx, id)
 	r.AgentReports, _ = h.queryReports(ctx, id)
@@ -383,7 +383,7 @@ func (h *HistoryStore) queryReports(ctx context.Context, taskID string) ([]Histo
 		if finishedAt.Valid {
 			rep.FinishedAt = finishedAt.Time
 		}
-		_ = json.Unmarshal(snapBytes, &rep.FinalSnapshot)
+		_ = json.Unmarshal(snapBytes, &rep.FinalSnapshot) // 同上
 		items = append(items, rep)
 	}
 	return items, nil
@@ -397,8 +397,8 @@ func (h *HistoryStore) queryAggregated(ctx context.Context, taskID string, r *Hi
 		stresslog.Warn("[ADMIN] 查询聚合指标失败", zap.String("taskID", taskID), zap.Error(err))
 		return
 	}
-	_ = json.Unmarshal(stressBytes, &r.FinalSnapshot)
-	_ = json.Unmarshal(sysBytes, &r.FinalSystem)
+	_ = json.Unmarshal(stressBytes, &r.FinalSnapshot) // 同上
+	_ = json.Unmarshal(sysBytes, &r.FinalSystem) // 同上
 }
 
 // queryAgentEvents 查询 Agent 事件。
@@ -445,9 +445,9 @@ func (h *HistoryStore) GetConfig(ctx context.Context, id string) (*TaskConfig, e
 	}
 
 	cfg.FlowJSON = json.RawMessage(flowJSON)
-	_ = json.Unmarshal(protoJSON, &cfg.ProtoFiles)
-	_ = json.Unmarshal(luaJSON, &cfg.LuaScripts)
-	_ = json.Unmarshal(robotJSON, &cfg.RobotConfig)
+	_ = json.Unmarshal(protoJSON, &cfg.ProtoFiles) // 同上
+	_ = json.Unmarshal(luaJSON, &cfg.LuaScripts) // 同上
+	_ = json.Unmarshal(robotJSON, &cfg.RobotConfig) // 同上
 
 	return &cfg, nil
 }
@@ -554,7 +554,7 @@ func (h *HistoryStore) UpdateMeta(ctx context.Context, id string, req UpdateHist
 	}
 	if req.Tags != nil {
 		sets = append(sets, "tags = ?")
-		tagsJSON, _ := json.Marshal(req.Tags)
+		tagsJSON, _ := json.Marshal(req.Tags) // []string 序列化不会失败
 		args = append(args, tagsJSON)
 	}
 	if req.Note != nil {
@@ -574,7 +574,7 @@ func (h *HistoryStore) UpdateMeta(ctx context.Context, id string, req UpdateHist
 	if err != nil {
 		return fmt.Errorf("update meta: %w", err)
 	}
-	n, _ := result.RowsAffected()
+	n, _ := result.RowsAffected() // RowsAffected 在 DELETE 后，n=0 时外层已处理
 	if n == 0 {
 		return ErrHistoryNotFound
 	}
@@ -601,6 +601,12 @@ func (h *HistoryStore) Delete(ctx context.Context, id string, force bool) error 
 		}
 	}
 
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
 	childTables := []string{
 		"task_assignment",
 		"task_report",
@@ -610,20 +616,21 @@ func (h *HistoryStore) Delete(ctx context.Context, id string, force bool) error 
 		"task_agent_events",
 	}
 	for _, tbl := range childTables {
-		if _, err := h.db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE task_id = ?`, tbl), id); err != nil {
-			stresslog.Warn("[ADMIN] 删除子表数据失败", zap.String("table", tbl), zap.String("id", id), zap.Error(err))
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE task_id = ?`, tbl), id); err != nil {
+			return fmt.Errorf("delete %s: %w", tbl, err)
 		}
 	}
 
-	result, err := h.db.ExecContext(ctx, `DELETE FROM task_history WHERE id = ?`, id)
+	result, err := tx.ExecContext(ctx, `DELETE FROM task_history WHERE id = ?`, id)
 	if err != nil {
-		return fmt.Errorf("delete history: %w", err)
+		return fmt.Errorf("delete task_history: %w", err)
 	}
-	n, _ := result.RowsAffected()
+	n, _ := result.RowsAffected() // 同上
 	if n == 0 {
 		return ErrHistoryNotFound
 	}
-	return nil
+
+	return tx.Commit()
 }
 
 // AppendTimeseries 追加时序采样点。
@@ -703,7 +710,7 @@ func (h *HistoryStore) PruneExpired(ctx context.Context, now time.Time) (int, er
 		return 0, fmt.Errorf("prune expired: commit: %w", err)
 	}
 
-	n, _ := result.RowsAffected()
+	n, _ := result.RowsAffected() // 同上
 	if n > 0 {
 		stresslog.Info("历史清理完成",
 			zap.Int64("deleted", n),
@@ -788,12 +795,12 @@ func buildListWhere(f HistoryFilter) (string, []any) {
 	}
 	for _, tag := range f.Tags {
 		conds = append(conds, "JSON_CONTAINS(tags, ?)")
-		tagJSON, _ := json.Marshal(tag)
+		tagJSON, _ := json.Marshal(tag) // []string 序列化不会失败
 		args = append(args, string(tagJSON))
 	}
 	for _, tag := range f.TagsAll {
 		conds = append(conds, "JSON_CONTAINS(tags, ?)")
-		tagJSON, _ := json.Marshal(tag)
+		tagJSON, _ := json.Marshal(tag) // []string 序列化不会失败
 		args = append(args, string(tagJSON))
 	}
 

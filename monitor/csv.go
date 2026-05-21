@@ -35,11 +35,11 @@ func ExportCSV(c *MetricsCollector, path string) error {
 		"Apdex", "平均发送字节", "平均接收字节",
 		"平均QPS", "压测时长(s)",
 	}
-	_ = w.Write(header)
+	_ = w.Write(header) // CSV 写入错误不影响主流程
 
 	uptimeSec := snap.UptimeSec
 	for _, a := range snap.Actions {
-		_ = w.Write([]string{
+		_ = w.Write([]string{ // 同上
 			a.Name,
 			fmt.Sprintf("%d", a.SampleCount),
 			fmt.Sprintf("%d", a.SuccessCount),

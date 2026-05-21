@@ -205,11 +205,11 @@ func (r *AgentRegistry) ListByStatus(status AgentStatus) []*AgentNode {
 }
 
 // UpdateStress 更新 Agent 压测指标快照。
-func (r *AgentRegistry) UpdateStress(agentID string, snap monitor.CollectorSnapshot, at time.Time) {
+func (r *AgentRegistry) UpdateStress(agentID string, snap *monitor.CollectorSnapshot, at time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if node, ok := r.agents[agentID]; ok {
-		node.LatestStress = &snap
+		node.LatestStress = snap
 		node.StressUpdatedAt = at
 	}
 }

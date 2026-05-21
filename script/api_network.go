@@ -86,6 +86,15 @@ func loadNetworkModule(L *lua.LState) int {
 // 内部辅助
 // ---------------------------------------------------------------------------
 
+// pushRequestResult 将请求结果压入 Lua 栈，消除重复的 4 行 push 模式。
+func pushRequestResult(L *lua.LState, code int, data lua.LValue, sent, recv int) int {
+	L.Push(lua.LNumber(code))
+	L.Push(data)
+	L.Push(lua.LNumber(sent))
+	L.Push(lua.LNumber(recv))
+	return 4
+}
+
 // extractNetArgs 从 Lua 栈提取 service + route + msg + s2cProto。
 func extractNetArgs(L *lua.LState) (service string, route lua.LValue, msg proto.Message, s2cProto string) {
 	argIdx := 0
@@ -119,32 +128,32 @@ func buildPacket(ctx *Context, service string, route lua.LValue, msgData []byte)
 	return ctx.Adapter.EncodeTCP(goRoute, msgData, secretKey)
 }
 
-// luaValueToRoute 将 Lua table/nil 转换为 Go any
+// luaValueToRoute 将 Lua table/nil/number/string 转换为 Go any。
+// 支持 table 嵌套（递归转换为 map[string]any）。
 func luaValueToRoute(v lua.LValue) any {
-	if v == lua.LNil {
+	switch v := v.(type) {
+	case *lua.LNilType:
 		return nil
-	}
-	if tbl, ok := v.(*lua.LTable); ok {
+	case lua.LNumber:
+		n := float64(v)
+		if n == math.Trunc(n) {
+			return int64(n)
+		}
+		return n
+	case lua.LString:
+		return string(v)
+	case lua.LBool:
+		return bool(v)
+	case *lua.LTable:
 		result := make(map[string]any)
-		tbl.ForEach(func(k, val lua.LValue) {
+		v.ForEach(func(k, val lua.LValue) {
 			key := lua.LVAsString(k)
-			switch v := val.(type) {
-			case lua.LNumber:
-				n := float64(v)
-				if n == math.Trunc(n) {
-					result[key] = int64(n)
-				} else {
-					result[key] = n
-				}
-			case lua.LString:
-				result[key] = string(v)
-			case lua.LBool:
-				result[key] = bool(v)
-			}
+			result[key] = luaValueToRoute(val)
 		})
 		return result
+	default:
+		return nil
 	}
-	return nil
 }
 
 // serializeMsg 序列化 proto 消息为字节。
@@ -243,11 +252,7 @@ func networkTCPRequest(L *lua.LState) int {
 
 	packet := buildPacket(ctx, service, route, msgData)
 	if packet == nil {
-		L.Push(lua.LNumber(-1))
-		L.Push(lua.LNil)
-		L.Push(lua.LNumber(0))
-		L.Push(lua.LNumber(0))
-		return 4
+		return pushRequestResult(L, -1, lua.LNil, 0, 0)
 	}
 
 	goRoute := luaValueToRoute(route)
@@ -262,41 +267,21 @@ func networkTCPRequest(L *lua.LState) int {
 	})
 
 	if reqErr != nil {
-		L.Push(lua.LNumber(-1))
-		L.Push(lua.LNil)
-		L.Push(lua.LNumber(pktLen))
-		L.Push(lua.LNumber(0))
-		return 4
+		return pushRequestResult(L, -1, lua.LNil, pktLen, 0)
 	}
 	if headerErr != 0 {
-		L.Push(lua.LNumber(headerErr))
-		L.Push(lua.LString(string(respBody)))
-		L.Push(lua.LNumber(pktLen))
-		L.Push(lua.LNumber(len(respBody)))
-		return 4
+		return pushRequestResult(L, int(headerErr), lua.LString(string(respBody)), pktLen, len(respBody))
 	}
 
 	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
 		respMsg, err := ctx.Factory.Parse(s2cProto, respBody)
 		if err != nil {
-			L.Push(lua.LNumber(-2))
-			L.Push(lua.LString(string(respBody)))
-			L.Push(lua.LNumber(pktLen))
-			L.Push(lua.LNumber(len(respBody)))
-			return 4
+			return pushRequestResult(L, -2, lua.LString(string(respBody)), pktLen, len(respBody))
 		}
-		L.Push(lua.LNumber(0))
-		L.Push(wrapProtoMessage(L, respMsg))
-		L.Push(lua.LNumber(pktLen))
-		L.Push(lua.LNumber(len(respBody)))
-		return 4
+		return pushRequestResult(L, 0, wrapProtoMessage(L, respMsg), pktLen, len(respBody))
 	}
 
-	L.Push(lua.LNumber(0))
-	L.Push(lua.LString(string(respBody)))
-	L.Push(lua.LNumber(pktLen))
-	L.Push(lua.LNumber(len(respBody)))
-	return 4
+	return pushRequestResult(L, 0, lua.LString(string(respBody)), pktLen, len(respBody))
 }
 
 // networkUDPRequest UDP 请求-响应。
@@ -330,11 +315,7 @@ func networkUDPRequest(L *lua.LState) int {
 	udpKey := ctx.NetSender.GetUDPSecretKey(service)
 	packet := ctx.Adapter.EncodeUDP(goRoute, body, udpKey)
 	if packet == nil {
-		L.Push(lua.LNumber(-1))
-		L.Push(lua.LNil)
-		L.Push(lua.LNumber(0))
-		L.Push(lua.LNumber(0))
-		return 4
+		return pushRequestResult(L, -1, lua.LNil, 0, 0)
 	}
 
 	pktLen := len(packet)
@@ -350,48 +331,24 @@ func networkUDPRequest(L *lua.LState) int {
 	})
 
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-		L.Push(lua.LNumber(-1))
-		L.Push(lua.LNil)
-		L.Push(lua.LNumber(pktLen))
-		L.Push(lua.LNumber(0))
-		return 4
+		return pushRequestResult(L, -1, lua.LNil, pktLen, 0)
 	}
 	if reqErr != nil {
-		L.Push(lua.LNumber(-1))
-		L.Push(lua.LNil)
-		L.Push(lua.LNumber(pktLen))
-		L.Push(lua.LNumber(0))
-		return 4
+		return pushRequestResult(L, -1, lua.LNil, pktLen, 0)
 	}
 	if headerErr != 0 {
-		L.Push(lua.LNumber(headerErr))
-		L.Push(lua.LString(string(respBody)))
-		L.Push(lua.LNumber(pktLen))
-		L.Push(lua.LNumber(len(respBody)))
-		return 4
+		return pushRequestResult(L, int(headerErr), lua.LString(string(respBody)), pktLen, len(respBody))
 	}
 
 	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
 		respMsg, err := ctx.Factory.Parse(s2cProto, respBody)
 		if err != nil {
-			L.Push(lua.LNumber(-2))
-			L.Push(lua.LString(string(respBody)))
-			L.Push(lua.LNumber(pktLen))
-			L.Push(lua.LNumber(len(respBody)))
-			return 4
+			return pushRequestResult(L, -2, lua.LString(string(respBody)), pktLen, len(respBody))
 		}
-		L.Push(lua.LNumber(0))
-		L.Push(wrapProtoMessage(L, respMsg))
-		L.Push(lua.LNumber(pktLen))
-		L.Push(lua.LNumber(len(respBody)))
-		return 4
+		return pushRequestResult(L, 0, wrapProtoMessage(L, respMsg), pktLen, len(respBody))
 	}
 
-	L.Push(lua.LNumber(0))
-	L.Push(lua.LString(string(respBody)))
-	L.Push(lua.LNumber(pktLen))
-	L.Push(lua.LNumber(len(respBody)))
-	return 4
+	return pushRequestResult(L, 0, lua.LString(string(respBody)), pktLen, len(respBody))
 }
 
 // networkHTTPRequest 发送 HTTP 请求。
@@ -564,97 +521,16 @@ func networkUDPSend(L *lua.LState) int {
 // 签名：network.tcp_listen(service, route [, s2c_proto [, timeout_sec [, poll_ms]]])
 //
 // 返回：data(string|userdata|nil), recv(number)
-func networkTCPListen(L *lua.LState) int {
-	ctx := GetContext(L)
-	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
-		L.RaiseError("network not available")
-		return 0
-	}
-
-	service := L.CheckString(1)
-	route := luaValueToRoute(L.Get(2))
-	routeKey := ctx.Adapter.ExpectedRouteKey(route)
-
-	var s2cProto string
-	timeout := engine.DefaultListenTimeoutSec
-	pollMs := engine.DefaultPollMs
-
-	if L.GetTop() >= 3 {
-		s2cProto = L.CheckString(3)
-	}
-	if L.GetTop() >= 4 {
-		timeout = L.CheckInt(4)
-	}
-	if L.GetTop() >= 5 {
-		pollMs = L.CheckInt(5)
-	}
-	if pollMs <= 0 {
-		pollMs = engine.DefaultPollMs
-	}
-
-	ctx.NetSender.EnsureTCPListener(service, routeKey)
-
-	var respBody []byte
-	var timedOut bool
-	var headerErr uint64
-
-	withReleasedMu(ctx.LuaMu, func() {
-		deadline := time.Now().Add(time.Duration(timeout) * time.Second)
-		for time.Now().Before(deadline) {
-			respBody, headerErr = ctx.NetSender.GetTCPListenResp(service, routeKey)
-			if respBody != nil {
-				return
-			}
-			time.Sleep(time.Duration(pollMs) * time.Millisecond)
-			if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-				return
-			}
-		}
-		if respBody == nil {
-			timedOut = true
-		}
-	})
-
-	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-		L.Push(lua.LNil)
-		L.Push(lua.LNumber(0))
-		return 2
-	}
-	if timedOut {
-		stresslog.Warn("[SCRIPT] tcp_listen 超时",
-			zap.String("service", service), zap.String("routeKey", routeKey), zap.Int("timeout", timeout))
-		L.Push(lua.LNil)
-		L.Push(lua.LNumber(0))
-		return 2
-	}
-	if headerErr != 0 {
-		L.Push(lua.LString(string(respBody)))
-		L.Push(lua.LNumber(len(respBody)))
-		return 2
-	}
-
-	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
-		respMsg, err := ctx.Factory.Parse(s2cProto, respBody)
-		if err != nil {
-			L.Push(lua.LNil)
-			L.Push(lua.LNumber(len(respBody)))
-			return 2
-		}
-		L.Push(wrapProtoMessage(L, respMsg))
-		L.Push(lua.LNumber(len(respBody)))
-		return 2
-	}
-
-	L.Push(lua.LString(string(respBody)))
-	L.Push(lua.LNumber(len(respBody)))
-	return 2
-}
+func networkTCPListen(L *lua.LState) int { return networkListen(L, "tcp") }
 
 // networkUDPListen 等待 UDP 监听消息。
 // 签名：network.udp_listen(service, route [, s2c_proto [, timeout_sec [, poll_ms]]])
 //
 // 返回：data(string|userdata|nil), recv(number)
-func networkUDPListen(L *lua.LState) int {
+func networkUDPListen(L *lua.LState) int { return networkListen(L, "udp") }
+
+// networkListen 通用监听实现，通过 protocol 参数区分 TCP/UDP。
+func networkListen(L *lua.LState, protocol string) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
 		L.RaiseError("network not available")
@@ -682,7 +558,11 @@ func networkUDPListen(L *lua.LState) int {
 		pollMs = engine.DefaultPollMs
 	}
 
-	ctx.NetSender.EnsureUDPListener(service, routeKey)
+	if protocol == "tcp" {
+		ctx.NetSender.EnsureTCPListener(service, routeKey)
+	} else {
+		ctx.NetSender.EnsureUDPListener(service, routeKey)
+	}
 
 	var respBody []byte
 	var timedOut bool
@@ -691,7 +571,11 @@ func networkUDPListen(L *lua.LState) int {
 	withReleasedMu(ctx.LuaMu, func() {
 		deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 		for time.Now().Before(deadline) {
-			respBody, headerErr = ctx.NetSender.GetUDPListenResp(service, routeKey)
+			if protocol == "tcp" {
+				respBody, headerErr = ctx.NetSender.GetTCPListenResp(service, routeKey)
+			} else {
+				respBody, headerErr = ctx.NetSender.GetUDPListenResp(service, routeKey)
+			}
 			if respBody != nil {
 				return
 			}
@@ -711,7 +595,7 @@ func networkUDPListen(L *lua.LState) int {
 		return 2
 	}
 	if timedOut {
-		stresslog.Warn("[SCRIPT] udp_listen 超时",
+		stresslog.Debug("[SCRIPT] "+protocol+"_listen 超时",
 			zap.String("service", service), zap.String("routeKey", routeKey), zap.Int("timeout", timeout))
 		L.Push(lua.LNil)
 		L.Push(lua.LNumber(0))
@@ -961,31 +845,15 @@ func loadAdapterModule(L *lua.LState) int {
 // adapterEncodeTCP TCP 编码。
 // 签名：adapter.encode_tcp(route, body [, key])
 // 返回：packet(string|nil)
-func adapterEncodeTCP(L *lua.LState) int {
-	ctx := GetContext(L)
-	if ctx == nil || ctx.Adapter == nil {
-		L.Push(lua.LNil)
-		return 1
-	}
-	route := luaValueToRoute(L.Get(1))
-	body := []byte(L.CheckString(2))
-	var key []byte
-	if L.GetTop() >= 3 {
-		key = []byte(L.CheckString(3))
-	}
-	result := ctx.Adapter.EncodeTCP(route, body, key)
-	if result == nil {
-		L.Push(lua.LNil)
-	} else {
-		L.Push(lua.LString(string(result)))
-	}
-	return 1
-}
+func adapterEncodeTCP(L *lua.LState) int { return adapterEncode(L, "tcp") }
 
 // adapterEncodeUDP UDP 编码。
 // 签名：adapter.encode_udp(route, body [, key])
 // 返回：packet(string|nil)
-func adapterEncodeUDP(L *lua.LState) int {
+func adapterEncodeUDP(L *lua.LState) int { return adapterEncode(L, "udp") }
+
+// adapterEncode 通用编码实现。
+func adapterEncode(L *lua.LState, protocol string) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.Adapter == nil {
 		L.Push(lua.LNil)
@@ -997,7 +865,15 @@ func adapterEncodeUDP(L *lua.LState) int {
 	if L.GetTop() >= 3 {
 		key = []byte(L.CheckString(3))
 	}
-	result := ctx.Adapter.EncodeUDP(route, body, key)
+
+	var result []byte
+	switch protocol {
+	case "tcp":
+		result = ctx.Adapter.EncodeTCP(route, body, key)
+	default:
+		result = ctx.Adapter.EncodeUDP(route, body, key)
+	}
+
 	if result == nil {
 		L.Push(lua.LNil)
 	} else {
@@ -1009,43 +885,38 @@ func adapterEncodeUDP(L *lua.LState) int {
 // adapterDecodeTCP 解码 TCP 数据包。
 // 签名：adapter.decode_tcp(data [, key])
 // 返回：response_key(string), body(string), header_err(number)
-func adapterDecodeTCP(L *lua.LState) int {
-	ctx := GetContext(L)
-	if ctx == nil || ctx.Adapter == nil {
-		L.Push(lua.LNil)
-		L.Push(lua.LNil)
-			L.Push(lua.LNumber(0))
-			return 3
-	}
-	data := []byte(L.CheckString(1))
-	var key []byte
-	if L.GetTop() >= 2 {
-		key = []byte(L.CheckString(2))
-	}
-	routeKey, body, headerErr := ctx.Adapter.DecodeTCP(data, key)
-	L.Push(lua.LString(routeKey))
-	L.Push(lua.LString(string(body)))
-	L.Push(lua.LNumber(headerErr))
-	return 3
-}
+func adapterDecodeTCP(L *lua.LState) int { return adapterDecode(L, "tcp") }
 
 // adapterDecodeUDP 解码 UDP 数据包。
 // 签名：adapter.decode_udp(data [, key])
 // 返回：response_key(string), body(string), header_err(number)
-func adapterDecodeUDP(L *lua.LState) int {
+func adapterDecodeUDP(L *lua.LState) int { return adapterDecode(L, "udp") }
+
+// adapterDecode 通用解码实现。
+func adapterDecode(L *lua.LState, protocol string) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.Adapter == nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LNil)
-			L.Push(lua.LNumber(0))
-			return 3
+		L.Push(lua.LNumber(0))
+		return 3
 	}
 	data := []byte(L.CheckString(1))
 	var key []byte
 	if L.GetTop() >= 2 {
 		key = []byte(L.CheckString(2))
 	}
-	routeKey, body, headerErr := ctx.Adapter.DecodeUDP(data, key)
+
+	var routeKey string
+	var body []byte
+	var headerErr uint64
+	switch protocol {
+	case "tcp":
+		routeKey, body, headerErr = ctx.Adapter.DecodeTCP(data, key)
+	default:
+		routeKey, body, headerErr = ctx.Adapter.DecodeUDP(data, key)
+	}
+
 	L.Push(lua.LString(routeKey))
 	L.Push(lua.LString(string(body)))
 	L.Push(lua.LNumber(headerErr))

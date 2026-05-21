@@ -73,7 +73,7 @@ func (s *Store) GetString(key string) string {
 	return fmt.Sprintf("%v", v)
 }
 
-// GetList 获取列表（any 切片）
+// GetList 获取列表副本（any 切片）。返回副本以防止调用方修改内部状态。
 func (s *Store) GetList(key string) []any {
 	s.mu.RLock()
 	v := s.data[key]
@@ -82,12 +82,14 @@ func (s *Store) GetList(key string) []any {
 		return nil
 	}
 	if list, ok := v.([]any); ok {
-		return list
+		cp := make([]any, len(list))
+		copy(cp, list)
+		return cp
 	}
 	return nil
 }
 
-// GetMap 获取映射
+// GetMap 获取映射副本。返回副本以防止调用方修改内部状态。
 func (s *Store) GetMap(key string) map[string]any {
 	s.mu.RLock()
 	v := s.data[key]
@@ -96,7 +98,11 @@ func (s *Store) GetMap(key string) map[string]any {
 		return nil
 	}
 	if m, ok := v.(map[string]any); ok {
-		return m
+		cp := make(map[string]any, len(m))
+		for k, v := range m {
+			cp[k] = v
+		}
+		return cp
 	}
 	return nil
 }

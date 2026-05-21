@@ -13,6 +13,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// lstateAcquireTimeout 从 Lua 池获取 LState 的超时时间。
+const lstateAcquireTimeout = 30 * time.Second
+
 // LuaAdapter 通过 gopher-lua LState 池调用适配器脚本实现 Adapter 接口。
 //
 // 热路径优化策略：
@@ -32,6 +35,9 @@ type LuaAdapter struct {
 	hasErrorMap    bool     // 是否成功加载了 error.lua
 	errorDescCache sync.Map // uint64 -> string 永久缓存，避免高频 headerErr 反复调用 Lua
 }
+
+// 编译时接口断言
+var _ Adapter = (*LuaAdapter)(nil)
 
 // NewLuaAdapter 创建并初始化 Lua 适配器池。
 // scriptPath: codec.lua 路径；poolSize: LState 池大小（建议 = CPU 核心数）。
@@ -302,7 +308,7 @@ func (a *LuaAdapter) acquire() *lua.LState {
 	select {
 	case L := <-a.states:
 		return L
-	case <-time.After(30 * time.Second):
+	case <-time.After(lstateAcquireTimeout):
 		stresslog.Error("[ADAPTER] acquire LState 超时（池耗尽）")
 		return nil
 	}

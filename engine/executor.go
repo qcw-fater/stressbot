@@ -52,8 +52,8 @@ func NewExecutor(flow *TaskFlow, handler ActionHandler, caller string) *Executor
 	}
 }
 
-// GetFlow 返回流程图定义
-func (e *Executor) GetFlow() *TaskFlow {
+// Flow 返回流程图定义
+func (e *Executor) Flow() *TaskFlow {
 	return e.flow
 }
 
@@ -63,7 +63,7 @@ func (e *Executor) Run(ctx context.Context) error {
 	stresslog.Debug("[ENGINE] 开始执行流程", zap.String("caller", e.caller))
 	err := e.executeNode(ctx, "main")
 	if err != nil {
-		stresslog.Error("[ENGINE] 流程异常退出", zap.String("caller", e.caller), zap.Error(err))
+		stresslog.Warn("[ENGINE] 流程异常退出", zap.String("caller", e.caller), zap.Error(err))
 	} else {
 		stresslog.Debug("[ENGINE] 流程正常结束", zap.String("caller", e.caller))
 	}
@@ -78,30 +78,30 @@ func (e *Executor) executeNode(ctx context.Context, nodeID string) error {
 
 	node, ok := e.flow.Nodes[nodeID]
 	if !ok {
-		return fmt.Errorf("节点不存在: %s (caller=%s)", nodeID, e.caller)
+		return fmt.Errorf("%w: %s (caller=%s)", ErrNodeNotFound, nodeID, e.caller)
 	}
 
 	stresslog.Debug("[ENGINE] 执行节点", zap.String("caller", e.caller), zap.String("node", nodeID), zap.String("type", node.Type))
 
 	switch node.Type {
-	case "sequence":
+	case NodeSequence:
 		return e.executeSequence(ctx, node)
-	case "action":
+	case NodeAction:
 		return e.executeAction(ctx, node)
-	case "loop":
+	case NodeLoop:
 		return e.executeLoop(ctx, node)
-	case "boolean":
+	case NodeBoolean:
 		return e.executeBoolean(ctx, node)
-	case "weighted":
+	case NodeWeighted:
 		return e.executeWeighted(ctx, node)
-	case "wait":
+	case NodeWait:
 		return e.executeWait(ctx, node)
-	case "break":
+	case NodeBreak:
 		return errBreak
-	case "continue":
+	case NodeContinue:
 		return errContinue
 	default:
-		return fmt.Errorf("未知节点类型: %s (node=%s, caller=%s)", node.Type, nodeID, e.caller)
+		return fmt.Errorf("%w: %s (node=%s, caller=%s)", ErrUnknownNodeType, node.Type, nodeID, e.caller)
 	}
 }
 
@@ -127,7 +127,7 @@ func (e *Executor) executeSequence(ctx context.Context, node *Node) error {
 // 支持次数控制、前置条件、后置条件、break/continue 信号捕获。
 func (e *Executor) executeLoop(ctx context.Context, node *Node) error {
 	if node.LoopCount == 0 {
-		stresslog.Warn("[ENGINE] loop 节点 loopCount=0，跳过循环体")
+		stresslog.Debug("[ENGINE] loop 节点 loopCount=0，跳过循环体")
 		return nil
 	}
 
@@ -172,9 +172,9 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 		return nil
 	}
 
-	actionDef, ok := e.flow.GetAction(node.Action)
+	actionDef, ok := e.flow.Action(node.Action)
 	if !ok {
-		return fmt.Errorf("动作不存在: %s", node.Action)
+		return fmt.Errorf("%w: %s", ErrActionNotFound, node.Action)
 	}
 
 	err := e.handler.ExecuteAction(actionDef)
@@ -185,33 +185,38 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 		}
 		stresslog.Error("[ENGINE] 动作执行失败",
 			zap.String("caller", e.caller), zap.String("action", node.Action), zap.Error(err))
-		switch node.ErrorStrategy {
-		case "abort":
-				return NewActionError(errcode.ErrExecFailed, "action="+node.Action, err)
-		case "skip":
-			return errSkip
-		default:
-			return nil
-		}
+		return applyErrorStrategy(node.ErrorStrategy, func() error {
+			return NewActionError(errcode.ErrExecFailed, "action="+node.Action, err)
+		})
 	}
 
-	// 注册监听回调（连接已在动作中创建）
-	if len(node.ListenCallbacks) > 0 {
-		if err := e.handler.RegisterListen(node.ListenCallbacks); err != nil {
+	// 注册监听（连接已在动作中创建）
+	if len(node.ListenRefs) > 0 {
+		if err := e.handler.RegisterListen(node.ListenRefs); err != nil {
 			stresslog.Error("[ENGINE] 注册监听失败",
 				zap.String("caller", e.caller), zap.Error(err))
-			switch node.ErrorStrategy {
-			case "abort":
+			return applyErrorStrategy(node.ErrorStrategy, func() error {
 				return NewActionError(errcode.ErrListenRegister, "action="+node.Action, err)
-			case "skip":
-				return errSkip
-			}
+			})
 		}
 	}
 
-	stresslog.Debug("[ENGINE] 执行动作", zap.String("caller", e.caller), zap.String("action", node.Action), zap.Int("listens", len(node.ListenCallbacks)))
+	stresslog.Debug("[ENGINE] 执行动作", zap.String("caller", e.caller), zap.String("action", node.Action), zap.Int("listens", len(node.ListenRefs)))
 	e.nodeDelay(ctx, node)
 	return nil
+}
+
+// applyErrorStrategy 根据 errorStrategy 配置决定如何处理错误。
+// abortErr 函数在 strategy 为 "abort" 时调用，用于构造带有上下文信息的 ActionError。
+func applyErrorStrategy(strategy string, abortErr func() error) error {
+	switch strategy {
+	case StrategyAbort:
+		return abortErr()
+	case StrategySkip:
+		return errSkip
+	default:
+		return nil
+	}
 }
 
 // executeBoolean 条件分支节点。

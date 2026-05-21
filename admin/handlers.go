@@ -206,16 +206,18 @@ func (s *AdminServer) handleAgentStressReport(w http.ResponseWriter, r *http.Req
 		return
 	}
 	s.agents.Touch(report.AgentID, "")
+	var currentTaskID string
 	if agent, ok := s.agents.Get(report.AgentID); ok {
-		if agent.CurrentTaskID == "" || (report.TaskID != "" && report.TaskID != agent.CurrentTaskID) {
-			// 旧任务的延迟报告 / agent 已 idle，直接丢弃，避免 LatestStress 被串。
-			stresslog.Debug("丢弃过期 stress 报告",
-				zap.String("agentId", report.AgentID),
-				zap.String("reportTaskId", report.TaskID),
-				zap.String("currentTaskId", agent.CurrentTaskID))
-			writeJSON(w, http.StatusOK, map[string]string{"status": "stale"})
-			return
-		}
+		currentTaskID = agent.CurrentTaskID
+	}
+	if currentTaskID == "" || (report.TaskID != "" && report.TaskID != currentTaskID) {
+		// 旧任务的延迟报告 / agent 已 idle，直接丢弃，避免 LatestStress 被串。
+		stresslog.Debug("丢弃过期 stress 报告",
+			zap.String("agentId", report.AgentID),
+			zap.String("reportTaskId", report.TaskID),
+			zap.String("currentTaskId", currentTaskID))
+		writeJSON(w, http.StatusOK, map[string]string{"status": "stale"})
+		return
 	}
 	reportedAt := report.ReportedAt
 	if reportedAt.IsZero() {
@@ -310,13 +312,14 @@ func (s *AdminServer) handleAgentPendingTask(w http.ResponseWriter, r *http.Requ
 		writeError(w, ErrAgentNotFound)
 		return
 	}
+	currentTaskID := node.CurrentTaskID
 	s.agents.Touch(agentID, "")
-	if node.CurrentTaskID == "" {
+	if currentTaskID == "" {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{
-		"taskId": node.CurrentTaskID,
+		"taskId": currentTaskID,
 	})
 }
 
@@ -351,7 +354,7 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	flowData, err := io.ReadAll(flowFile)
-	flowFile.Close()
+	_ = flowFile.Close() // multipart 文件句柄，ReadAll 后关闭即可
 	if err != nil {
 		writeError(w, ErrInvalidArgument.WithMessage("failed to read flow.json"))
 		return
@@ -368,10 +371,9 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				data, err := io.ReadAll(f)
-				f.Close()
+				_ = f.Close() // multipart 文件句柄，ReadAll 后关闭即可
 				if err != nil {
 					stresslog.Warn("[ADMIN] 读取 proto 文件失败", zap.String("name", fh.Filename), zap.Error(err))
-					f.Close()
 					continue
 				}
 				var fileName string
@@ -395,10 +397,9 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				data, err := io.ReadAll(f)
-				f.Close()
+				_ = f.Close() // multipart 文件句柄，ReadAll 后关闭即可
 				if err != nil {
 					stresslog.Warn("[ADMIN] 读取脚本文件失败", zap.String("name", fh.Filename), zap.Error(err))
-					f.Close()
 					continue
 				}
 				var fileName string
@@ -418,7 +419,7 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			stresslog.Warn("[ADMIN] 读取适配器脚本失败", zap.Error(err))
 		}
-		adapterFile.Close()
+		_ = adapterFile.Close() // multipart 文件句柄，ReadAll 后关闭即可
 		cfg.AdapterScript = adapterData
 	}
 
@@ -428,7 +429,7 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			stresslog.Warn("[ADMIN] 读取 error.lua 失败", zap.Error(err))
 		}
-		errorMapFile.Close()
+		_ = errorMapFile.Close() // multipart 文件句柄，ReadAll 后关闭即可
 		cfg.ErrorMapScript = errorMapData
 	}
 
@@ -587,7 +588,8 @@ func (s *AdminServer) handleGetTaskConfig(w http.ResponseWriter, r *http.Request
 
 	case "config.json":
 		// Agent 运行时配置（robotConfig + 超时等）
-		configJSON, _ := json.Marshal(map[string]any{
+		// 内联 JSON，序列化已知类型不会失败
+			configJSON, _ := json.Marshal(map[string]any{
 			"concurrency": task.Config.RobotConfig.Concurrency,
 			"timeoutSec":  task.Config.RobotConfig.TimeoutSec,
 			"deadline":    task.Config.Deadline,
@@ -689,7 +691,7 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 	var succeeded []string
 
 	// 读取任务配置填充 TaskAssignment
-	task, _ := s.tasks.Get(taskID)
+	task, _ := s.tasks.Get(taskID) // Get 返回 (nil, false) 时后续代码用 nil 检查处理
 	var rc RobotConfig
 	if task != nil {
 		rc = task.Config.RobotConfig
@@ -838,7 +840,7 @@ func (s *AdminServer) handleStopTask(w http.ResponseWriter, r *http.Request) {
 		s.startStopTimeout(id)
 	}
 
-	updated, _ := s.tasks.Get(id)
+	updated, _ := s.tasks.Get(id) // 同上
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"id":         id,
 		"name":       updated.Name,
@@ -1162,7 +1164,9 @@ func (s *AdminServer) handleGetAgentLogs(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		io.Copy(io.Discard, resp.Body) // 确保响应体被完全消耗，允许连接复用
+	}
 }
 
 // LogFileInfo 日志文件信息。
@@ -1219,7 +1223,9 @@ func (s *AdminServer) handleListAgentLogFiles(w http.ResponseWriter, r *http.Req
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		io.Copy(io.Discard, resp.Body) // 确保响应体被完全消耗，允许连接复用
+	}
 }
 
 func (s *AdminServer) handleDownloadAgentLogFile(w http.ResponseWriter, r *http.Request) {
@@ -1261,7 +1267,9 @@ func (s *AdminServer) handleDownloadAgentLogFile(w http.ResponseWriter, r *http.
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		io.Copy(io.Discard, resp.Body) // 确保响应体被完全消耗，允许连接复用
+	}
 }
 
 func listLogFiles(logPath string) ([]LogFileInfo, error) {
@@ -1331,8 +1339,12 @@ func (s *AdminServer) handleUpdateBaseline(w http.ResponseWriter, r *http.Reques
 			if err != nil {
 				continue
 			}
-			data, _ := io.ReadAll(f)
-			f.Close()
+			data, err := io.ReadAll(f)
+			_ = f.Close() // multipart 文件句柄，ReadAll 后关闭即可
+			if err != nil {
+				stresslog.Warn("[ADMIN] 读取基线文件失败", zap.String("name", fh.Filename), zap.Error(err))
+				continue
+			}
 			var fileName string
 			if strings.HasPrefix(key, "proto/") && key != "proto/" {
 				fileName = strings.TrimPrefix(key, "proto/")
@@ -1357,8 +1369,12 @@ func (s *AdminServer) handleUpdateBaseline(w http.ResponseWriter, r *http.Reques
 			if err != nil {
 				continue
 			}
-			data, _ := io.ReadAll(f)
-			f.Close()
+			data, err := io.ReadAll(f)
+			_ = f.Close() // multipart 文件句柄，ReadAll 后关闭即可
+			if err != nil {
+				stresslog.Warn("[ADMIN] 读取基线文件失败", zap.String("name", fh.Filename), zap.Error(err))
+				continue
+			}
 			var fileName string
 			if strings.HasPrefix(key, "scripts/") && key != "scripts/" {
 				fileName = strings.TrimPrefix(key, "scripts/")
@@ -1375,18 +1391,22 @@ func (s *AdminServer) handleUpdateBaseline(w http.ResponseWriter, r *http.Reques
 
 	// adapter
 	if adapterFile, _, err := r.FormFile("adapter/codec.lua"); err == nil {
-		adapterData, _ := io.ReadAll(adapterFile)
-		adapterFile.Close()
-		if err := safeWriteFile("conf/adapter", "codec.lua", adapterData); err != nil {
+		adapterData, err := io.ReadAll(adapterFile)
+		_ = adapterFile.Close() // multipart 文件句柄，ReadAll 后关闭即可
+		if err != nil {
+			stresslog.Warn("[ADMIN] 读取基线适配器文件失败", zap.Error(err))
+		} else if err := safeWriteFile("conf/adapter", "codec.lua", adapterData); err != nil {
 			stresslog.Warn("基线更新适配器失败", zap.Error(err))
 		}
 	}
 
 	// 可选：error.lua
 	if errorMapFile, _, err := r.FormFile("adapter/error.lua"); err == nil {
-		errorMapData, _ := io.ReadAll(errorMapFile)
-		errorMapFile.Close()
-		if err := safeWriteFile("conf/adapter", "error.lua", errorMapData); err != nil {
+		errorMapData, err := io.ReadAll(errorMapFile)
+		_ = errorMapFile.Close() // multipart 文件句柄，ReadAll 后关闭即可
+		if err != nil {
+			stresslog.Warn("[ADMIN] 读取基线错误映射文件失败", zap.Error(err))
+		} else if err := safeWriteFile("conf/adapter", "error.lua", errorMapData); err != nil {
 			stresslog.Warn("基线更新错误映射失败", zap.Error(err))
 		}
 	}
@@ -1478,7 +1498,7 @@ func (s *AdminServer) handleBaselineErrorMap(w http.ResponseWriter, r *http.Requ
 
 func (s *AdminServer) handleErrorCodeIndex(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(errcode.AllCodes())
+	_ = json.NewEncoder(w).Encode(errcode.AllCodes()) // 写入 HTTP 响应，错误由 recoverMiddleware 兜底
 }
 
 func (s *AdminServer) handleBaselineFlow(w http.ResponseWriter, r *http.Request) {
