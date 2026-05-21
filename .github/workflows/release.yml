@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: cmd/web/package-lock.json
+
+      - name: Build frontend
+        run: cd cmd/web && npm ci && npm run build
+
+      - name: Build Linux amd64
+        env:
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          mkdir -p build/staging
+          go build -trimpath -ldflags "-X main.Version=${{ github.ref_name }}" -o build/staging/agent ./cmd/agent
+          go build -trimpath -ldflags "-X main.Version=${{ github.ref_name }}" -o build/staging/admin ./cmd/admin
+
+      - name: Build Windows amd64
+        env:
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          mkdir -p build/staging-win
+          go build -trimpath -ldflags "-X main.Version=${{ github.ref_name }}" -o build/staging-win/agent.exe ./cmd/agent
+          go build -trimpath -ldflags "-X main.Version=${{ github.ref_name }}" -o build/staging-win/admin.exe ./cmd/admin
+
+      - name: Package Linux
+        run: |
+          pkgname="stressbot-${{ github.ref_name }}-linux-amd64"
+          mkdir -p "build/$pkgname"
+          cp -r build/staging/* "build/$pkgname/"
+          cp -r conf "build/$pkgname/conf"
+          cp -r cmd/web/dist "build/$pkgname/dist"
+          cp deploy/nginx.conf "build/$pkgname/"
+          tar -czf "build/$pkgname.tar.gz" -C build "$pkgname"
+
+      - name: Package Windows
+        run: |
+          pkgname="stressbot-${{ github.ref_name }}-windows-amd64"
+          mkdir -p "build/$pkgname"
+          cp -r build/staging-win/* "build/$pkgname/"
+          cp -r conf "build/$pkgname/conf"
+          cp -r cmd/web/dist "build/$pkgname/dist"
+          cp deploy/nginx.conf "build/$pkgname/"
+          cd build && zip -r "$pkgname.zip" "$pkgname"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            build/*.tar.gz
+            build/*.zip

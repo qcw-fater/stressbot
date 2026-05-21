@@ -1,4 +1,4 @@
-﻿package admin
+package admin
 
 import (
 	"encoding/json"
@@ -101,7 +101,7 @@ func (s *AdminServer) registerRoutes() http.Handler {
 	mux.HandleFunc("GET /sbot/api/error-codes", s.handleErrorCodeIndex)
 
 	// ── 静态资源 ──
-	fs := http.FileServer(http.Dir("cmd/web/dist"))
+	fs := http.FileServer(http.Dir(s.cfg.StaticDir))
 	mux.Handle("/", fs)
 
 	return recoverMiddleware(mux)
@@ -589,7 +589,7 @@ func (s *AdminServer) handleGetTaskConfig(w http.ResponseWriter, r *http.Request
 	case "config.json":
 		// Agent 运行时配置（robotConfig + 超时等）
 		// 内联 JSON，序列化已知类型不会失败
-			configJSON, _ := json.Marshal(map[string]any{
+		configJSON, _ := json.Marshal(map[string]any{
 			"concurrency": task.Config.RobotConfig.Concurrency,
 			"timeoutSec":  task.Config.RobotConfig.TimeoutSec,
 			"deadline":    task.Config.Deadline,
@@ -1567,5 +1567,3 @@ func scaleRampUp(cfg *RampUpConfig, totalBots, assignedBots int) *RampUpConfig {
 	}
 	return scaled
 }
-
-

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"syscall"
@@ -66,6 +67,14 @@ func main() {
 	configPath := flag.String("config", "conf/config.json", "配置文件路径")
 	flag.Parse()
 
+	// 推导 conf 根目录：config 文件所在目录的绝对路径
+	configAbs, err := filepath.Abs(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "解析配置路径失败: %v\n", err)
+		os.Exit(1)
+	}
+	confDir := filepath.Dir(configAbs)
+
 	cfg, err := loadConfig(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
@@ -96,7 +105,7 @@ func main() {
 		stresslog.Info("[MAIN] 单机模式启动",
 			zap.Int("botCount", botCount),
 			zap.Int("concurrent", conc))
-		runStandalone(cfg)
+		runStandalone(cfg, confDir)
 	}
 }
 
@@ -125,23 +134,23 @@ func runAgentMode(cfg *Config) {
 
 // ── 单机模式 ──────────────────────────────────────────────
 
-func runStandalone(cfg *Config) {
+func runStandalone(cfg *Config, confDir string) {
 	s := cfg.Standalone
 
 	// 加载协议适配器
 	poolSize := runtime.NumCPU()
-	errorMapPath := "conf/adapter/error.lua"
+	errorMapPath := filepath.Join(confDir, "adapter", "error.lua")
 	if _, err := os.Stat(errorMapPath); err != nil {
 		errorMapPath = ""
 	}
-	adp, err := adapter.NewLuaAdapter(poolSize, "conf/adapter/codec.lua", errorMapPath)
+	adp, err := adapter.NewLuaAdapter(poolSize, filepath.Join(confDir, "adapter", "codec.lua"), errorMapPath)
 	if err != nil {
 		stresslog.Fatal("加载适配器失败", zap.Error(err))
 	}
 	stresslog.Info("[MAIN] 适配器已初始化", zap.Int("headerSize", adp.HeaderSize()))
 
 	// 加载 .proto 文件
-	loader := protox.NewLoader([]string{"conf/proto"}, nil)
+	loader := protox.NewLoader([]string{filepath.Join(confDir, "proto")}, nil)
 	files, err := loader.Load()
 	if err != nil {
 		stresslog.Fatal("加载 proto 文件失败", zap.Error(err))
@@ -151,7 +160,7 @@ func runStandalone(cfg *Config) {
 	factory := protox.NewFactory(registry)
 
 	// 加载流程配置
-	flow, err := loadFlow("conf/flow/flow.json")
+	flow, err := loadFlow(filepath.Join(confDir, "flow", "flow.json"))
 	if err != nil {
 		stresslog.Fatal("加载流程配置失败", zap.Error(err))
 	}
@@ -176,8 +185,8 @@ func runStandalone(cfg *Config) {
 	}
 
 	// 初始化 Lua 运行时池
-	luaPool := script.NewRuntimePool("conf/scripts")
-	if err := luaPool.PrecompileScripts([]string{"conf/scripts"}); err != nil {
+	luaPool := script.NewRuntimePool(filepath.Join(confDir, "scripts"))
+	if err := luaPool.PrecompileScripts([]string{filepath.Join(confDir, "scripts")}); err != nil {
 		stresslog.Warn("[MAIN] Lua 脚本预编译失败（非致命错误）", zap.Error(err))
 	} else {
 		stresslog.Info("[MAIN] Lua 脚本已预编译", zap.Int("count", len(luaPool.ListScripts())))

@@ -13,6 +13,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// Version 编译时注入：-ldflags "-X main.Version=v1.0.0"
+var Version = "dev"
+
 func main() {
 	// 进程级顶层 recover：防止任何未捕获的 panic 直接让进程崩溃，
 	// 同时尽量把 stack trace 写入日志而不是仅 stderr。
@@ -48,6 +51,8 @@ func main() {
 	stresslog.InitLog(cfg.Log.Path, "admin", logConf, "")
 	newLogger := logview.AttachRingBuffer(stresslog.GetLogger(), 5000, zap.String("SR", "admin"))
 	stresslog.ReplaceLogger(newLogger)
+
+	stresslog.Info("[MAIN] Admin 服务器启动", zap.String("version", Version))
 
 	srv, err := admin.NewAdminServer(*cfg)
 	if err != nil {
