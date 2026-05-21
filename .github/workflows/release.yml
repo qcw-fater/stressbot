@@ -48,24 +48,18 @@ jobs:
       - name: Package Linux
         run: |
           pkgname="stressbot-${{ github.ref_name }}-linux-amd64"
-          mkdir -p "build/$pkgname"
-          cp -r build/staging/* "build/$pkgname/"
-          cp -r conf/admin-config.json "build/$pkgname/conf/"
-          cp -r conf/agent-config.json "build/$pkgname/conf/"
-          cp -r conf/config.json "build/$pkgname/conf/"
-          cp cmd/web/nginx.conf "build/$pkgname/conf/"
+          mkdir -p "build/$pkgname/conf"
+          cp build/staging/agent build/staging/admin "build/$pkgname/"
+          cp conf/admin-config.json conf/agent-config.json conf/config.json cmd/web/nginx.conf "build/$pkgname/conf/"
           cp -r cmd/web/dist "build/$pkgname/dist"
           tar -czf "build/$pkgname.tar.gz" -C build "$pkgname"
 
       - name: Package Windows
         run: |
           pkgname="stressbot-${{ github.ref_name }}-windows-amd64"
-          mkdir -p "build/$pkgname"
-          cp -r build/staging-win/* "build/$pkgname/"
-          cp -r conf/admin-config.json "build/$pkgname/conf/"
-          cp -r conf/agent-config.json "build/$pkgname/conf/"
-          cp -r conf/config.json "build/$pkgname/conf/"
-          cp cmd/web/nginx.conf "build/$pkgname/conf/"
+          mkdir -p "build/$pkgname/conf"
+          cp build/staging-win/agent.exe build/staging-win/admin.exe "build/$pkgname/"
+          cp conf/admin-config.json conf/agent-config.json conf/config.json cmd/web/nginx.conf "build/$pkgname/conf/"
           cp -r cmd/web/dist "build/$pkgname/dist"
           cd build && zip -r "$pkgname.zip" "$pkgname"
 
