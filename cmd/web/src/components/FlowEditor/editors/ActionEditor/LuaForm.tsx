@@ -1,7 +1,7 @@
 /**
  * Lua 脚本编辑器（mode='action' / 'listen' / 'boolean' 三用）。
  *
- * - 选择脚本文件（从 /conf/scripts/index.json 列出）
+ * - 选择脚本文件（从基线 scripts 索引列出）
  * - Monaco 全功能 Lua 编辑
  * - 入口签名：
  *   action  模式 : function execute(r) ... return code, send_bytes, recv_bytes end
@@ -11,7 +11,7 @@
  *   boolean 模式 : function execute(r) ... return true/false end（条件节点 / loop breakCondition 用）
  *
  * 持久化：
- *   - 加载脚本时优先读 IDB（用户保存过的版本），IDB 没有再 fetch /conf/scripts/<name> 兜底；
+ *   - 加载脚本时优先读 IDB（用户保存过的版本），IDB 没有再从基线 fetch 兜底；
  *   - 需手动保存（Ctrl+S 或「保存到本地」按钮），脚本名不能为空；
  *   - "导入本地"按钮也会立即写入 IDB；
  *   - 启动任务时 taskActions.collectScripts 会自动一并提交。

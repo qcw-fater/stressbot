@@ -2,7 +2,7 @@
  * Lua 脚本与 IndexedDB 的"按 flow 同步"工具。
  *
  * 设计目标：
- *   - 扫描 flow 中引用的脚本名，将 IDB 中缺失的从基线 `/conf/scripts/<name>` 拉回；
+ *   - 扫描 flow 中引用的脚本名，将 IDB 中缺失的从基线 `/sbot/baseline/scripts/<name>` 拉回；
  *   - **不覆盖** IDB 中已存在的脚本（保护用户编辑稿）；
  *   - 基线更新检测由 `syncResourcesFromBaseline` 负责，此模块仅做 gap-fill。
  *
@@ -19,7 +19,7 @@ export interface ScriptSyncResult {
   added: string[];
   /** flow 引用、IDB 已有，本次未做任何操作（保护用户编辑稿） */
   skipped: string[];
-  /** flow 引用、IDB 没有、基线 `/conf/scripts/<name>` 也拉不到 */
+  /** flow 引用、IDB 没有、基线 `/sbot/baseline/scripts/<name>` 也拉不到 */
   missing: string[];
 }
 
@@ -67,12 +67,12 @@ function parseLuaCondition(raw: string | undefined): string | null {
 }
 
 /**
- * 把 flow 引用、但 IDB 里还没有的脚本从默认基线 `/conf/scripts/<name>` 拉回来并写 IDB。
+ * 把 flow 引用、但 IDB 里还没有的脚本从默认基线 `/sbot/baseline/scripts/<name>` 拉回来并写 IDB。
  *
  * 不并发限流：lua 脚本通常 < 几十个、< 几 KB，浏览器一次性 fetch 完全可以承受。
  *
  * @param flow      要扫描的 TaskFlow
- * @param baseUrl   基线脚本目录 URL，默认 `/conf/scripts/`（开发期由 Vite 中间件提供）
+ * @param baseUrl   基线脚本目录 URL，默认 `${BASELINE_PREFIX}/scripts/`（生产经 Nginx 代理到 Admin）
  */
 export async function syncFlowScriptsToIdb(
   flow: FlowJson,

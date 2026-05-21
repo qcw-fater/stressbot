@@ -96,7 +96,7 @@ describe('syncFlowScriptsToIdb', () => {
     const r = await syncFlowScriptsToIdb(flow);
 
     expect(r).toEqual({ added: ['baseline.lua'], skipped: [], missing: [] });
-    expect(fetchMock).toHaveBeenCalledWith('/conf/scripts/baseline.lua');
+    expect(fetchMock).toHaveBeenCalledWith('/sbot/baseline/scripts/baseline.lua');
     expect(idb.get('baseline.lua')?.content).toBe('-- baseline content');
   });
 

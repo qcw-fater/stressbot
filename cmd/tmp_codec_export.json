@@ -705,14 +705,14 @@
       "type": "sequence",
       "next": [
         "gmCommands",
-        "unlockBasicFunctions",
+        "unlockBasicFunction",
         "LbsPositioning"
       ]
     },
-    "unlockBasicFunctions": {
+    "unlockBasicFunction": {
       "type": "action",
       "description": "解锁排位等基础功能",
-      "action": "action_Hp_apo"
+      "action": "unlockBasicFunction"
     }
   },
   "actions": {
@@ -1892,7 +1892,7 @@
           "type": "stateFirst",
           "field": "gid",
           "source": "mailList",
-          "path": "mailUid|gid"
+          "path": "mailUid"
         }
       ]
     },
@@ -1910,7 +1910,7 @@
           "type": "stateFirst",
           "field": "gids",
           "source": "mailList",
-          "path": "mailUid|gid",
+          "path": "mailUid",
           "wrap": true
         }
       ]
@@ -1928,7 +1928,7 @@
           "type": "stateFirst",
           "field": "gids",
           "source": "mailList",
-          "path": "mailUid|gid",
+          "path": "mailUid",
           "wrap": true
         }
       ]
@@ -1945,7 +1945,7 @@
       "store": [
         {
           "setter": "friendDetailList",
-          "field": "friendDetailInfoList"
+          "field": "FriendDetailInfoList"
         }
       ]
     },
@@ -2034,11 +2034,11 @@
           "type": "stateRandom",
           "field": "friendId",
           "source": "friendDetailList",
-          "path": "playerId|playerBase.playerId|base.playerId"
+          "path": "playerBase.playerId"
         }
       ]
     },
-    "action_Hp_apo": {
+    "unlockBasicFunction": {
       "pattern": "lua",
       "script": "unlock_basic_functions.lua"
     }
