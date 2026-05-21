@@ -9,7 +9,7 @@
  */
 
 import { AutoComplete, Space, Tag } from 'antd';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { FieldBind } from '@/types/action';
 import { useFlowStore } from '../../store/flowStore';
 import { useRuntimeStore } from '@/services/runtimeStore';

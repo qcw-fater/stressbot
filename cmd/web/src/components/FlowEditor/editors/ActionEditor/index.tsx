@@ -8,7 +8,7 @@
  * 由 NodeEditorDrawer 在 node.type === 'action' 时调用。
  */
 
-import { Alert, Button, Collapse, Form, Modal, Select, Space, Switch, Tooltip } from 'antd';
+import { Alert, Button, Collapse, Form, Modal, Select, Space } from 'antd';
 import { EyeOutlined } from '@ant-design/icons';
 import { useMemo, useState } from 'react';
 import { useFlowStore } from '../../store/flowStore';

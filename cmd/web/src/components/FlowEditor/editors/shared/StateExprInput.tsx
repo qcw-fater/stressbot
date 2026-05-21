@@ -5,7 +5,7 @@
  * 提供：文本输入、浏览 state key 插入、表达式高亮预览。
  */
 
-import { App as AntApp, Button, Input, Popover, Tag, Tooltip } from 'antd';
+import { Button, Input, Popover, Tag, Tooltip } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFloatingWindowStore } from '../../store/floatingWindowStore';

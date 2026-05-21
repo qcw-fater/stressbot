@@ -21,7 +21,7 @@
  *   nestedList    : items[] (递归 message + bindings)
  */
 
-import { App as AntApp, Button, Input, InputNumber, Select, Space, Tag, Tooltip } from 'antd';
+import { Button, Input, InputNumber, Select, Space, Tag, Tooltip } from 'antd';
 import { DeleteOutlined, PlusOutlined, SwapOutlined } from '@ant-design/icons';
 import { useMemo, useState } from 'react';
 import type { FieldBind } from '@/types/action';
