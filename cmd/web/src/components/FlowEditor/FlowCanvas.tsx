@@ -22,6 +22,7 @@ import {
   type Node as RFNode,
   type OnSelectionChangeParams,
 } from '@xyflow/react';
+import { useShallow } from 'zustand/react/shallow';
 
 import { App as AntApp } from 'antd';
 import { nodeTypes } from './nodes/registry';
@@ -49,8 +50,15 @@ interface ContextMenu {
 function FlowCanvasInner() {
   const { message } = AntApp.useApp();
   const readOnly = useFlowReadOnly();
-  const rfNodes = useFlowStore((s) => s.rfNodes);
-  const rfEdges = useFlowStore((s) => s.rfEdges);
+
+  // flowStore: frequently-changing visual data (grouped for fewer re-subscriptions)
+  const { rfNodes, rfEdges, needsFitView } = useFlowStore(useShallow((s) => ({
+    rfNodes: s.rfNodes,
+    rfEdges: s.rfEdges,
+    needsFitView: s.needsFitView,
+  })));
+
+  // flowStore: stable action refs (never change, individual calls are fine)
   const onNodesChange = useFlowStore((s) => s.onNodesChange);
   const onEdgesChange = useFlowStore((s) => s.onEdgesChange);
   const addNode = useFlowStore((s) => s.addNode);
@@ -60,13 +68,18 @@ function FlowCanvasInner() {
   const removeListen = useFlowStore((s) => s.removeListen);
   const updateNode = useFlowStore((s) => s.updateNode);
 
+  // editorStore: UI flags + clipboard data (grouped)
+  const { showMinimap, showGrid, clipboard } = useEditorStore(useShallow((s) => ({
+    showMinimap: s.showMinimap,
+    showGrid: s.showGrid,
+    clipboard: s.clipboard,
+  })));
+
+  // editorStore: stable action refs
   const setSelectedNode = useEditorStore((s) => s.setSelectedNode);
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
   const setEdgeHighlightNodes = useEditorStore((s) => s.setEdgeHighlightNodes);
   const setEdgeHighlightColor = useEditorStore((s) => s.setEdgeHighlightColor);
-  const showMinimap = useEditorStore((s) => s.showMinimap);
-  const showGrid = useEditorStore((s) => s.showGrid);
-  const clipboard = useEditorStore((s) => s.clipboard);
   const setClipboard = useEditorStore((s) => s.setClipboard);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -74,7 +87,6 @@ function FlowCanvasInner() {
   const [menu, setMenu] = useState<ContextMenu | null>(null);
 
   // 加载/新建流程后定位到 main 入口节点
-  const needsFitView = useFlowStore((s) => s.needsFitView);
   const rfNodeIds = useFlowStore((s) => s.rfNodes.map((n) => n.id).join(','));
   useEffect(() => {
     if (needsFitView && rfNodeIds.length > 0) {

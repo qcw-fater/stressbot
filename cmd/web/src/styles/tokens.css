@@ -102,6 +102,7 @@
   --color-blue: #1677ff;
   --color-purple: #9254de;
   --color-orange: #fa8c16;
+  --color-blue-light: color-mix(in srgb, var(--color-blue) 60%, white);
 
   /* === 图表数据色（ECharts 系列） === */
   --chart-green: #52c41a;
@@ -216,6 +217,7 @@
   --color-blue: #4096ff;
   --color-purple: #b37feb;
   --color-orange: #ffa940;
+  --color-blue-light: color-mix(in srgb, var(--color-blue) 60%, white);
 
   /* 图表数据色：深色背景上提亮 */
   --chart-green: #95de64;

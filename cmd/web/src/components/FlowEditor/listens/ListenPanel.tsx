@@ -20,10 +20,14 @@ import { listenKindTagColor } from './listenKindStyle';
 
 export function ListenPanel() {
   const { message } = AntApp.useApp();
-  const activePanel = useEditorStore((s) => s.activePanel);
-  const setActivePanel = useEditorStore((s) => s.setActivePanel);
-  const closePanel = useEditorStore((s) => s.closePanel);
-  const setHoveredListen = useEditorStore((s) => s.setHoveredListen);
+  const { activePanel, setActivePanel, closePanel, setHoveredListen } = useEditorStore(
+    useShallow((s) => ({
+      activePanel: s.activePanel,
+      setActivePanel: s.setActivePanel,
+      closePanel: s.closePanel,
+      setHoveredListen: s.setHoveredListen,
+    })),
+  );
 
   const flow = useFlowStore(
     useShallow((s) => ({

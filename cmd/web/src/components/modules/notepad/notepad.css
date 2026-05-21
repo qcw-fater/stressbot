@@ -51,20 +51,20 @@
 }
 
 .notepad-file-item--active {
-  background: rgba(59, 130, 246, 0.12);
-  border-left-color: #3b82f6;
+  background: color-mix(in srgb, var(--color-blue) 12%, transparent);
+  border-left-color: var(--color-blue);
 }
 
 .notepad-file-item--active:hover {
-  background: rgba(59, 130, 246, 0.18);
+  background: color-mix(in srgb, var(--color-blue) 18%, transparent);
 }
 
 [data-theme='dark'] .notepad-file-item--active {
-  background: rgba(59, 130, 246, 0.15);
+  background: color-mix(in srgb, var(--color-blue) 15%, transparent);
 }
 
 [data-theme='dark'] .notepad-file-item--active:hover {
-  background: rgba(59, 130, 246, 0.22);
+  background: color-mix(in srgb, var(--color-blue) 22%, transparent);
 }
 
 .notepad-file-icon {

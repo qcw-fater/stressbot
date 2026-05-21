@@ -2,7 +2,7 @@
  * 任务管理 API 封装（对应 docs/api-monitor.md §5）。
  */
 
-import { adaptList, buildQuery, del, getJson, postJson, postMultipart } from './api';
+import { adaptList, buildQuery, getJson, postJson, postMultipart } from './api';
 import { API_PREFIX } from './env';
 import type {
   CreateTaskResponse,
@@ -61,10 +61,6 @@ export function startTask(id: string): Promise<StartTaskResponse> {
  */
 export function stopTask(id: string): Promise<TaskBrief> {
   return postJson<TaskBrief>(`/tasks/${encodeURIComponent(id)}/stop`);
-}
-
-export function deleteTask(id: string): Promise<void> {
-  return del<void>(`/tasks/${encodeURIComponent(id)}`);
 }
 
 /** 任务配置文件下载链接（用于 a 标签 href，无需走 fetch） */

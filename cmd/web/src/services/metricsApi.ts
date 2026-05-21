@@ -5,16 +5,13 @@
  *      taskId 只在历史回放或多任务并存场景才传，本项目暂不需要。
  */
 
-import { adaptList, buildQuery, getJson, getText } from './api';
+import { adaptList, buildQuery, getJson } from './api';
 import type {
   ClusterSystemSnapshot,
   PerAgentMetrics,
   PerAgentMetricsItem,
-  PerAgentSystem,
-  PerAgentSystemItem,
   StressAggregate,
   StressSnapshot,
-  SystemSnapshot,
 } from '@/types/api';
 
 export interface MetricsParams {
@@ -103,27 +100,8 @@ export async function getPerAgentMetrics(params: MetricsParams = {}): Promise<Pe
   };
 }
 
-export function getAgentMetrics(agentId: string): Promise<StressSnapshot> {
-  return getJson<StressSnapshot>(`/metrics/agents/${encodeURIComponent(agentId)}`);
-}
-
-export function getMetricsSummary(): Promise<string> {
-  return getText('/metrics/summary');
-}
-
 // === 系统指标 ===
 export function getClusterSystem(): Promise<ClusterSystemSnapshot> {
   return getJson<ClusterSystemSnapshot>('/system');
 }
 
-/**
- * 后端 `/api/system/agents` 直接返回 `snap.Agents`（数组）；前端包装。
- */
-export async function getPerAgentSystem(): Promise<PerAgentSystem> {
-  const resp = await getJson<unknown>('/system/agents');
-  return { items: adaptList<PerAgentSystemItem>(resp).items };
-}
-
-export function getAgentSystem(agentId: string): Promise<SystemSnapshot> {
-  return getJson<SystemSnapshot>(`/system/agents/${encodeURIComponent(agentId)}`);
-}

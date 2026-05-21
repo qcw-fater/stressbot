@@ -263,7 +263,7 @@ type TaskFlow struct {
     DefaultDelayMs int                     `json:"defaultDelayMs"` // 全局节点间默认延迟（毫秒）。0=引擎默认(1000ms)，<0=禁用
     Nodes          map[string]*Node        `json:"nodes"`          // 节点映射，key 为节点 ID
     Actions        map[string]*ActionDef   `json:"actions"`        // 动作定义映射
-    Callbacks      map[string]*CallbackDef `json:"callbacks"`      // 回调定义映射
+    Listens      map[string]*ListenDef `json:"callbacks"`      // 回调定义映射
 }
 ```
 

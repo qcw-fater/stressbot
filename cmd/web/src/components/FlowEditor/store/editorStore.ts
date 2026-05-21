@@ -153,7 +153,7 @@ interface EditorState {
 const initialTheme = readInitialTheme();
 applyThemeAttr(initialTheme);
 
-export const useEditorStore = create<EditorState>((set, get) => ({
+export const useEditorStore = create<EditorState>()((set, get) => ({
   selectedNodeId: null,
   selectedListenName: null,
   hoveredListen: null,

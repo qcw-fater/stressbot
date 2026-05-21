@@ -86,7 +86,7 @@ interface FlowState {
   syncDerived: () => void;
 }
 
-export const useFlowStore = create<FlowState>((set, get) => ({
+export const useFlowStore = create<FlowState>()((set, get) => ({
   defaultDelayMs: 1000,
   nodes: {},
   actions: {},

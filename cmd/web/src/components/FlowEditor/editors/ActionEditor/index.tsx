@@ -92,7 +92,8 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
       {!action && (
         <Alert
           type="info"
-          message={
+          message="动作尚未创建"
+          description={
             <span>
               actions 表中尚未存在 <code>{actionName || '(空)'}</code>，将在第一次保存字段时自动创建。
             </span>

@@ -29,7 +29,7 @@ interface MetricsState {
   setProvider: (p: MetricsProvider | undefined) => void;
 }
 
-export const useMetricsStore = create<MetricsState>((set) => ({
+export const useMetricsStore = create<MetricsState>()((set) => ({
   setProvider: (p) => set({ provider: p }),
 }));
 

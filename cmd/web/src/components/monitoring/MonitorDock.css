@@ -248,7 +248,7 @@
 }
 
 .monitor-dock__chart-card--qps::before {
-  background: linear-gradient(180deg, var(--color-blue), #69b1ff);
+  background: linear-gradient(180deg, var(--color-blue), var(--color-blue-light));
 }
 
 .monitor-dock__chart-title {

@@ -12,6 +12,7 @@ import type { BaselineSyncResult, ConflictDecision, ResourceType, SyncDiff } fro
 import { applyConflictResolution } from '@/services/resourcesStore';
 import { useRef, useState } from 'react';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
+import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
 import { saveSkippedConflict, hashContent } from '@/components/FlowEditor/skippedConflicts';
 
 export interface BaselineSyncModalProps {
@@ -29,6 +30,7 @@ const TYPE_LABEL: Record<ResourceType, { text: string; color: string }> = {
 };
 
 export function BaselineSyncModal({ open, result, onClose, onResolved }: BaselineSyncModalProps) {
+  const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
   const themeMode = useEditorStore((s) => s.theme);
   const [decisions, setDecisions] = useState<Record<string, boolean>>({});
   const [applying, setApplying] = useState(false);
@@ -108,6 +110,7 @@ export function BaselineSyncModal({ open, result, onClose, onResolved }: Baselin
       open={open}
       onCancel={handleCancel}
       width={860}
+      styles={{ mask: { zIndex: popupZ }, wrapper: { zIndex: popupZ + 1 } }}
       footer={
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Space>

@@ -18,7 +18,7 @@ interface ProtoState {
   reload: () => Promise<void>;
 }
 
-export const useProtoStore = create<ProtoState>((set, get) => ({
+export const useProtoStore = create<ProtoState>()((set, get) => ({
   status: 'idle',
   fileCount: 0,
   load: async (source) => {

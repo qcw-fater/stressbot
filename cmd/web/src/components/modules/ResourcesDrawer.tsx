@@ -30,6 +30,7 @@ import { useEffect, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import { useShallow } from 'zustand/react/shallow';
 import { useEditorStore } from '../FlowEditor/store/editorStore';
+import { useFloatingWindowStore } from '../FlowEditor/store/floatingWindowStore';
 import { useProtoStore } from '../FlowEditor/proto/protoStore';
 import {
   addProtos,
@@ -59,6 +60,7 @@ export interface ResourcesDrawerProps {
 }
 
 export function ResourcesDrawer({ open, onClose }: ResourcesDrawerProps) {
+  const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
   const { pendingSyncResult, setPendingSyncResult } = useEditorStore(
     useShallow((s) => ({
       pendingSyncResult: s.pendingSyncResult,
@@ -369,6 +371,7 @@ function AdapterTab() {
             <div style={{ fontSize: 12, lineHeight: 1.6 }}>
               <Alert
                 type="warning"
+                message="接口规范"
                 showIcon
                 style={{ marginBottom: 12 }}
                 description="codec.lua 必须实现以下 7 个全局函数。引擎只调用这些接口，不感知具体协议格式。"
@@ -467,6 +470,7 @@ function ResourceTable({ kind }: ResourceTableProps) {
   const [loading, setLoading] = useState(false);
   const reloadProtos = useProtoStore((s) => s.reload);
   const theme = useEditorStore((s) => s.theme);
+  const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
 
   const [editFile, setEditFile] = useState<ResourceFile | null>(null);
   const [editContent, setEditContent] = useState('');
@@ -661,6 +665,7 @@ function ResourceTable({ kind }: ResourceTableProps) {
         width={900}
         destroyOnHidden
         maskClosable={false}
+        styles={{ mask: { zIndex: popupZ }, wrapper: { zIndex: popupZ + 1 } }}
         footer={[
           <Button key="cancel" onClick={() => setEditFile(null)}>取消</Button>,
           <Button key="save" type="primary" loading={saving} onClick={handleSaveEdit}>保存</Button>,

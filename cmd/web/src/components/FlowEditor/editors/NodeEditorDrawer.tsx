@@ -4,7 +4,7 @@
  * 双击主画布上的节点 → editorStore.activePanel.kind = 'nodeEdit' → 此窗口打开。
  */
 
-import { App as AntApp, Button, Form, Input, Popconfirm, Space, Tag } from 'antd';
+import { App as AntApp, Button, Form, Input, Popconfirm, Space, Tag, Tooltip } from 'antd';
 import { UndoOutlined } from '@ant-design/icons';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useEditorStore } from '../store/editorStore';
@@ -166,14 +166,15 @@ export function NodeEditorDrawer() {
             onConfirm={onRevert}
             disabled={!dirty}
           >
-            <Button
-              icon={<UndoOutlined />}
-              size="small"
-              disabled={!dirty}
-              title={dirty ? '还原本次打开后的所有修改' : '尚未修改任何内容'}
-            >
-              还原
-            </Button>
+            <Tooltip title={dirty ? '还原本次打开后的所有修改' : '尚未修改任何内容'} mouseEnterDelay={0.4}>
+              <Button
+                icon={<UndoOutlined />}
+                size="small"
+                disabled={!dirty}
+              >
+                还原
+              </Button>
+            </Tooltip>
           </Popconfirm>
           <Popconfirm
             title="确认删除"

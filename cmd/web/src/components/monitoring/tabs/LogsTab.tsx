@@ -379,6 +379,7 @@ export function LogsTab({ open }: { open: boolean }) {
           value={target}
           onChange={handleTargetChange}
           style={{ width: 180 }}
+          popupStyle={{ zIndex: popupZ }}
           options={[
             { value: 'admin', label: '服务器' },
             ...agents.map((a) => ({ value: a.agentId, label: `节点: ${a.name}` })),
@@ -388,6 +389,7 @@ export function LogsTab({ open }: { open: boolean }) {
           value={level}
           onChange={handleLevelChange}
           style={{ width: 100 }}
+          popupStyle={{ zIndex: popupZ }}
           options={[
             { value: '', label: '所有级别' },
             { value: 'debug', label: 'Debug' },

@@ -114,7 +114,7 @@ interface NotepadState {
   flushPendingSave: (id: string) => Promise<void>;
 }
 
-export const useNotepadStore = create<NotepadState>((set, get) => ({
+export const useNotepadStore = create<NotepadState>()((set, get) => ({
   files: [],
   activeFileId: null,
   searchQuery: '',

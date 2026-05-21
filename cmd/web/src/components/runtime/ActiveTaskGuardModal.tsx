@@ -10,6 +10,7 @@
 
 import { Descriptions, Modal, Tag } from 'antd';
 import { attachToActive, showApiError } from '@/services';
+import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
 import type { TaskBrief } from '@/types/api';
 
 export interface ActiveTaskGuardModalProps {
@@ -21,6 +22,7 @@ export interface ActiveTaskGuardModalProps {
 }
 
 export function ActiveTaskGuardModal({ open, task, onClose, onAttached }: ActiveTaskGuardModalProps) {
+  const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
   const handleAttach = async () => {
     if (!task) return;
     try {
@@ -41,6 +43,7 @@ export function ActiveTaskGuardModal({ open, task, onClose, onAttached }: Active
       okText="查看运行中"
       cancelText="继续编辑"
       width={520}
+      styles={{ mask: { zIndex: popupZ }, wrapper: { zIndex: popupZ + 1 } }}
     >
       {task && (
         <>

@@ -10,17 +10,12 @@ import type {
   HistoryDetail,
   HistoryFilter,
   HistoryListResponse,
-  HistoryTagsResponse,
   TimeseriesResponse,
   UpdateHistoryRequest,
 } from '@/types/api';
 
 export function listHistory(filter: HistoryFilter = {}): Promise<HistoryListResponse> {
   return getJson<HistoryListResponse>('/history' + buildQuery(filter as Record<string, unknown>));
-}
-
-export function listHistoryTags(): Promise<HistoryTagsResponse> {
-  return getJson<HistoryTagsResponse>('/history/tags');
 }
 
 export function getHistory(id: string): Promise<HistoryDetail> {

@@ -199,7 +199,7 @@ e:/jump/Server-Jump/stressbot/
 │   │   └── types/
 │   │       ├── flow.ts                         # TaskFlow / FlowNode（含 description）/ ListenRef
 │   │       ├── action.ts                       # ActionDef / FieldBind / FilterDef / StoreMapping
-│   │       ├── callback.ts                     # CallbackDef + classifyCallback（按字段存在性判别）
+│   │       ├── callback.ts                     # ListenDef + classifyCallback（按字段存在性判别）
 │   │       ├── editor.ts                       # NodeLayoutMeta（仅 x/y）/ FlowLayout / emptyFlowLayout
 │   │       └── proto.ts                        # ProtoMessage / ProtoField / ProtoEnum
 │   │
@@ -267,7 +267,7 @@ export interface TaskFlow {
   defaultDelayMs?: number;
   nodes: Record<string, FlowNode>;
   actions: Record<string, ActionDef>;
-  callbacks: Record<string, CallbackDef>;
+  callbacks: Record<string, ListenDef>;
 }
 ```
 
@@ -496,7 +496,7 @@ function MetricsBadge({ nodeId }: { nodeId: string }) {
 │          │                                                 │                 │
 │          │     [MiniMap]    [Controls]   [Background]      │                 │
 ├──────────┴─────────────────────────────────────────────────┴─────────────────┤
-│  Bottom  startNode: main    defaultDelayMs: 1000   Callbacks (12)            │
+│  Bottom  startNode: main    defaultDelayMs: 1000   Listens (12)            │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -723,7 +723,7 @@ action 节点执行 ConnectLogicTCP（含 listenCallbacks）
   ↓
 引擎在该 service 的连接上注册一组持久监听
   ↓
-服务端推送到达 → adapter 解码出 route key → 命中已注册条目 → 触发 CallbackDef
+服务端推送到达 → adapter 解码出 route key → 命中已注册条目 → 触发 ListenDef
   ↓
 按 callback 形态分派：
   - silent {}                             仅消费、不处理（占位放行 register）
@@ -736,7 +736,7 @@ action 节点执行 ConnectLogicTCP（含 listenCallbacks）
 ```ts
 export type CallbackKind = 'silent' | 'declarative' | 'lua';
 
-export function classifyCallback(cb: CallbackDef): CallbackKind {
+export function classifyCallback(cb: ListenDef): CallbackKind {
   // 用"字段存在性"而非"truthy"做判别：用户从 silent 切换到 lua 时
   // script 会被初始化为 ''（空字符串），如果用 truthy 判别就会立即弹回 silent，
   // 在 CallbackEditor 中表现为"切到 lua 后立刻被改回静默"的 bug。
@@ -754,7 +754,7 @@ export function classifyCallback(cb: CallbackDef): CallbackKind {
 
 ```ts
 // types/callback.ts
-export interface CallbackDef {
+export interface ListenDef {
   s2cProto?: string;     // declarative: 解析推送的 proto 全名
   store?: StoreMapping[];// declarative: 字段 → state 映射（与 ActionDef 共用 StoreMapping）
   script?: string;       // lua: 引用脚本库内的 .lua 文件名
@@ -807,10 +807,10 @@ callbacks 是 **全局事件入口**，没有"前置/后置"控制流语义，�
 
 ### 8.4 CallbackPanel — 主编辑面板
 
-右侧抽屉式，从 Toolbar 的 `[Callbacks]` 按钮唤出（也可从 ListenRefsTable 的 `[→ 跳转]` 直接定位）：
+右侧抽屉式，从 Toolbar 的 `[Listens]` 按钮唤出（也可从 ListenRefsTable 的 `[→ 跳转]` 直接定位）：
 
 ```
-┌─ Callbacks (12) ─────────────────────────────┐
+┌─ Listens (12) ─────────────────────────────┐
 │  [+ 新建]   [▣ 从库导入]    [搜索 ____]      │
 ├──────────────────────────────────────────────┤
 │  ▸ matchPoll              [silent]    (1)    │  ← (n) = 被 n 个 action 引用
@@ -995,7 +995,7 @@ export function buildRefsGraph(flow: TaskFlow): RefsGraph;
 
 ```ts
 ActionTemplate   = { id, name, action: ActionDef,    tags?, description?, updatedAt }
-CallbackTemplate = { id, name, callback: CallbackDef, tags?, description?, updatedAt }
+CallbackTemplate = { id, name, callback: ListenDef, tags?, description?, updatedAt }
 ```
 
 新建 callback 的两种入口：
@@ -1154,7 +1154,7 @@ class ProtoRegistry {
 db: stressbot-editor
 stores:
   - actionLibrary:   { id, name, action: ActionDef,    tags?: string[], updatedAt }
-  - callbackLibrary: { id, name, callback: CallbackDef, tags?: string[], updatedAt }
+  - callbackLibrary: { id, name, callback: ListenDef, tags?: string[], updatedAt }
   - luaLibrary:      { name, content, mode: 'action' | 'callback' }   # mode 决定签名/Lint 规则
   - protoCache:      { hash, rootJson }
 ```
@@ -1225,7 +1225,7 @@ export interface ManagedFlow {
   ↓
 1. 序列化 store.nodes -> Record<string, FlowNode>
 2. 序列化 store.actions -> Record<string, ActionDef>
-3. 序列化 store.callbacks -> Record<string, CallbackDef>
+3. 序列化 store.callbacks -> Record<string, ListenDef>
 4. 组装 TaskFlow
 5. ajv 校验 schema
 6. 引用合法性 + 业务校验（refsCheck.ts + refsGraph.ts）
@@ -1618,9 +1618,9 @@ export interface FlowEditorProps {
 | `script` | LuaForm（mode='action'） | lua |
 | `listenCallbacks` | ListenRefsTable（§8.6） | 任意（最常见 connect / connectUDP） |
 
-### 18.3 CallbackDef 字段 → CallbackEditor 控件
+### 18.3 ListenDef 字段 → CallbackEditor 控件
 
-| CallbackDef 字段 | 控件 | 适用形态 |
+| ListenDef 字段 | 控件 | 适用形态 |
 |---|---|---|
 | (形态切换) | CallbackTabs（silent / declarative / lua） | 全部 |
 | `s2cProto` | ProtoBrowser 选择（可空 = 原始 binary） | declarative / lua |

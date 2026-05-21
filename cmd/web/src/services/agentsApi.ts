@@ -6,7 +6,7 @@
  */
 
 import { adaptList, del, getJson, postJson } from './api';
-import type { AgentBrief, AgentDetail, AgentsListResponse } from '@/types/api';
+import type { AgentBrief, AgentsListResponse } from '@/types/api';
 
 /**
  * 后端目前直接返回 `[]AgentBrief`，前端包装为 `{items}`。
@@ -14,10 +14,6 @@ import type { AgentBrief, AgentDetail, AgentsListResponse } from '@/types/api';
 export async function listAgents(): Promise<AgentsListResponse> {
   const resp = await getJson<unknown>('/agents');
   return { items: adaptList<AgentBrief>(resp).items };
-}
-
-export function getAgent(id: string): Promise<AgentDetail> {
-  return getJson<AgentDetail>(`/agents/${encodeURIComponent(id)}`);
 }
 
 export function deleteAgent(id: string): Promise<void> {

@@ -63,8 +63,8 @@ function sparkOption(series: Array<{ name: string; data: number[]; color: string
   const len = series[0]?.data.length ?? 0;
   const x = Array.from({ length: len }, (_, i) => i);
   return {
-    grid: { left: 28, right: 4, top: 4, bottom: 14 },
-    xAxis: { type: 'category', data: x, show: false },
+    grid: { left: 28, right: 2, top: 4, bottom: 4 },
+    xAxis: { type: 'category', data: x, show: false, boundaryGap: false },
     yAxis: { type: 'value', axisLabel: { fontSize: 8, color: cs.getPropertyValue('--text-tertiary').trim() || (dark ? '#888' : '#aaa') }, splitLine: { lineStyle: { color: cs.getPropertyValue('--divider-bg').trim() || (dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)') } } },
     tooltip: {
       trigger: 'axis',
@@ -151,6 +151,7 @@ const ACTION_COLUMNS: ColumnsType<ActionMetric> = [
       if (!r.errors?.length) return <span style={{ color: 'var(--text-tertiary)' }}>—</span>;
       return (
         <Popover
+          overlayStyle={{ zIndex: 1200 }}
           content={
             <div style={{ maxWidth: 360 }}>
               {r.errors.map((e) => (

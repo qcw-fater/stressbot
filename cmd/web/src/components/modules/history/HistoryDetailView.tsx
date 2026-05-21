@@ -13,6 +13,7 @@ import type { ActionMetric, ClusterSystemSnapshot, HistoryDetail, TimeseriesPoin
 import { ApdexCell } from '@/components/monitoring/shared/ApdexCell';
 import { fmtBytes, fmtBytesPlain, fmtMs, NUMERIC_STYLE } from '@/components/monitoring/shared/formats';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
+import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
 import { useReportCapture } from './report/useReportCapture';
 import './HistoryPanel.css';
 
@@ -80,6 +81,7 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
   };
 
   const theme = useEditorStore((s) => s.theme);
+  const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
   const { qpsOption, apdexOption, cpuOption, bwOption } = useMemo(() => {
     const stressTs = timeseries?.stress ?? [];
     const systemTs = timeseries?.system ?? [];
@@ -207,6 +209,7 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
           if (!r.errors?.length) return <span style={{ color: 'var(--text-tertiary)' }}>—</span>;
           return (
             <Popover
+              overlayStyle={{ zIndex: popupZ }}
               content={
                 <div style={{ maxWidth: 360 }}>
                   {r.errors.map((e) => (

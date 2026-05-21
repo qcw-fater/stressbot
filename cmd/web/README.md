@@ -21,7 +21,7 @@ npm run test         # Vitest 单元测试（22 个，覆盖 codec / refsGraph /
 | 主画布 | `FlowCanvas` | 8 种节点（sequence / action / loop / boolean / weighted / wait / break / continue）+ 5 种边 |
 | 节点属性 | 双击节点 → `NodeEditorDrawer` | 控制流节点 5 种独立编辑器 + ActionEditor |
 | ActionEditor | action 节点双击 | 11 pattern × 17 binding type 完整编辑（含 nested 递归） |
-| Callback 子系统 | Toolbar → "Callbacks" | 三态形态（silent / declarative / lua）+ 反向引用 + 重复注册检测 |
+| Callback 子系统 | Toolbar → "Listens" | 三态形态（silent / declarative / lua）+ 反向引用 + 重复注册检测 |
 | 监听注册 | ActionEditor 内嵌 | route + server + callback 三列 + 批量粘贴 JSON |
 | Proto 浏览器 | Toolbar → "Proto" | 启动时全量加载 `conf/proto/`，搜索 message + 字段表 |
 | 模板库 | Toolbar → "模板库" | IndexedDB 存放 action / callback 模板，跨流程复用 |

@@ -11,6 +11,7 @@ import {
 } from '@ant-design/icons';
 import { App as AntApp, Button, Input, Modal, Popconfirm, Tooltip } from 'antd';
 import { useCallback, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useNotepadStore, type NotepadFileMeta } from './notepadStore';
 import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
 
@@ -41,16 +42,24 @@ function langIcon(lang: string) {
 export function FileSidebar() {
   const { message } = AntApp.useApp();
   const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
-  const files = useNotepadStore((s) => s.files);
-  const activeFileId = useNotepadStore((s) => s.activeFileId);
-  const searchQuery = useNotepadStore((s) => s.searchQuery);
-  const selectFile = useNotepadStore((s) => s.selectFile);
-  const createFile = useNotepadStore((s) => s.createFile);
-  const importFiles = useNotepadStore((s) => s.importFiles);
-  const renameFile = useNotepadStore((s) => s.renameFile);
-  const deleteFile = useNotepadStore((s) => s.deleteFile);
-  const setSearchQuery = useNotepadStore((s) => s.setSearchQuery);
-  const flushPendingSave = useNotepadStore((s) => s.flushPendingSave);
+
+  // notepadStore: data fields (change on user interaction)
+  const { files, activeFileId, searchQuery } = useNotepadStore(useShallow((s) => ({
+    files: s.files,
+    activeFileId: s.activeFileId,
+    searchQuery: s.searchQuery,
+  })));
+
+  // notepadStore: action functions (stable refs)
+  const { selectFile, createFile, importFiles, renameFile, deleteFile, setSearchQuery, flushPendingSave } = useNotepadStore(useShallow((s) => ({
+    selectFile: s.selectFile,
+    createFile: s.createFile,
+    importFiles: s.importFiles,
+    renameFile: s.renameFile,
+    deleteFile: s.deleteFile,
+    setSearchQuery: s.setSearchQuery,
+    flushPendingSave: s.flushPendingSave,
+  })));
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState('');
@@ -149,13 +158,14 @@ export function FileSidebar() {
               className={`notepad-file-item${isActive ? ' notepad-file-item--active' : ''}`}
               onClick={() => !isRenaming && handleSelect(f.id)}
             >
-              <span
-                className="notepad-file-icon"
-                style={{ color: icon.color }}
-                title={f.language}
-              >
-                {icon.char}
-              </span>
+              <Tooltip title={f.language} mouseEnterDelay={0.4}>
+                <span
+                  className="notepad-file-icon"
+                  style={{ color: icon.color }}
+                >
+                  {icon.char}
+                </span>
+              </Tooltip>
               {isRenaming ? (
                 <input
                   className="notepad-file-name"
@@ -185,16 +195,17 @@ export function FileSidebar() {
               )}
               {!isRenaming && (
                 <div className="notepad-file-actions">
-                  <button
-                    className="notepad-file-action-btn"
-                    title="重命名"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      startRename(f);
-                    }}
-                  >
-                    <EditOutlined style={{ fontSize: 10 }} />
-                  </button>
+                  <Tooltip title="重命名" mouseEnterDelay={0.4}>
+                    <button
+                      className="notepad-file-action-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startRename(f);
+                      }}
+                    >
+                      <EditOutlined style={{ fontSize: 10 }} />
+                    </button>
+                  </Tooltip>
                   <Popconfirm
                     title="确认删除？"
                     description={`将删除「${f.name}」`}
@@ -207,13 +218,14 @@ export function FileSidebar() {
                     cancelText="取消"
                     okButtonProps={{ danger: true }}
                   >
-                    <button
-                      className="notepad-file-action-btn"
-                      title="删除"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <DeleteOutlined style={{ fontSize: 10 }} />
-                    </button>
+                    <Tooltip title="删除" mouseEnterDelay={0.4}>
+                      <button
+                        className="notepad-file-action-btn"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <DeleteOutlined style={{ fontSize: 10 }} />
+                      </button>
+                    </Tooltip>
                   </Popconfirm>
                 </div>
               )}

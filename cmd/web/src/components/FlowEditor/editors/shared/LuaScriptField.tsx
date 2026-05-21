@@ -7,7 +7,7 @@
  * boolean 模式：入口 execute(r)，返回 true / false
  */
 
-import { App as AntApp, AutoComplete, Button, Modal, Tag } from 'antd';
+import { App as AntApp, AutoComplete, Button, Modal, Tag, Tooltip } from 'antd';
 import { EditOutlined } from '@ant-design/icons';
 import { useEffect, useState } from 'react';
 import type { LuaMode } from '../ActionEditor/LuaForm';
@@ -109,14 +109,15 @@ export function LuaScriptField({ mode, value, onChange, helpText }: LuaScriptFie
         {scriptName.trim() && !scriptName.trim().endsWith('.lua') && (
           <Tag color="purple">.lua</Tag>
         )}
-        <Button
-          icon={<EditOutlined />}
-          onClick={() => setEditorOpen(true)}
-          disabled={!scriptName.trim()}
-          title={!scriptName.trim() ? '先填写脚本文件名再编辑' : '在编辑器里编辑该脚本内容'}
-        >
-          编辑
-        </Button>
+        <Tooltip title={!scriptName.trim() ? '先填写脚本文件名再编辑' : '在编辑器里编辑该脚本内容'} mouseEnterDelay={0.4}>
+          <Button
+            icon={<EditOutlined />}
+            onClick={() => setEditorOpen(true)}
+            disabled={!scriptName.trim()}
+          >
+            编辑
+          </Button>
+        </Tooltip>
       </div>
       <div style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
         {helpText ?? DEFAULT_HELP[mode]}

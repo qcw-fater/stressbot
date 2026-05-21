@@ -50,6 +50,7 @@ import { listProto, listScript, syncResourcesFromBaseline, type ResourceFile } f
 import { syncFlowScriptsToIdb, collectFlowScriptNames } from '@/services/scriptSync';
 import { useFlowStore } from '@/components/FlowEditor/store/flowStore';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
+import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
 import { hashContent, loadSkippedConflicts } from '@/components/FlowEditor/skippedConflicts';
 
 export interface TaskStartModalProps {
@@ -84,6 +85,7 @@ const LOG_LEVEL_OPTIONS: Array<{ value: LogLevel; label: string; desc: string }>
 ];
 
 export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps) {
+  const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
   const {
     taskName,
     totalBots,
@@ -292,6 +294,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
       }}
       width={620}
       destroyOnHidden
+      styles={{ mask: { zIndex: popupZ }, wrapper: { zIndex: popupZ + 1 } }}
     >
       {/* 模式选择条：测试 ↔ 调试 二选一 Segmented，颜色与 title tag / RuntimeBar 设置面板完全一致。
           - 测试（默认，蓝色）：使用用户填写的全量配置 + 容量预检 + 默认日志；

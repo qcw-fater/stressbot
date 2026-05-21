@@ -44,7 +44,7 @@ function centerPosition(idx: number, size: WindowSize): WindowPosition {
   };
 }
 
-export const useFloatingWindowStore = create<FloatingWindowStore>((set, get) => ({
+export const useFloatingWindowStore = create<FloatingWindowStore>()((set, get) => ({
   windows: {},
   _nextZ: 1000,
 

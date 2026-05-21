@@ -14,7 +14,7 @@
  */
 
 import { clear, createStore, del, get, keys, set, setMany } from 'idb-keyval';
-import { API_PREFIX, BASELINE_PREFIX } from './env';
+import { BASELINE_PREFIX } from './env';
 
 const PROTO_DB = 'stressbot-resources-proto';
 const SCRIPT_DB = 'stressbot-resources-scripts';
@@ -210,24 +210,6 @@ export async function validateAdapter(): Promise<string[]> {
         const content = file.content;
         return !content.includes(`function ${fn}(`) && !new RegExp(`\\b${fn}\\s*=`).test(content);
       });
-}
-
-/**
- * 确保 IDB 中有 codec.lua：有则保留，没有则从基线 `/conf/adapter/codec.lua` 拉取。
- * 返回最终的文件内容（无论来源）。
- */
-export async function ensureAdapterScript(): Promise<string | null> {
-  const existing = await getAdapterScript();
-  if (existing) return existing.content;
-  try {
-    const resp = await fetch(CODEC_BASELINE_URL);
-    if (!resp.ok) return null;
-    const text = await resp.text();
-    await setAdapterScript(text);
-    return text;
-  } catch {
-    return null;
-  }
 }
 
 // === 统一基线同步 ===
@@ -517,34 +499,6 @@ function byteLength(s: string): number {
 }
 
 // === 基线回写 ===
-
-/**
- * 将 IDB 中所有资源推送到后端磁盘基线（svn commit）。
- * 仅在启动任务时由后端 writeBaselineFiles 调用；前端不主动调用。
- */
-export async function pushResourcesToBaseline(): Promise<void> {
-  try {
-    const [protos, scripts, adapter, errorMap] = await Promise.all([listProto(), listScript(), getAdapterScript(), getErrorMapScript()]);
-    const fd = new FormData();
-
-    for (const p of protos) {
-      fd.append(`proto/${p.name}`, new Blob([p.content]), p.name);
-    }
-    for (const s of scripts) {
-      fd.append(`scripts/${s.name}`, new Blob([s.content]), s.name);
-    }
-    if (adapter) {
-      fd.append('adapter/codec.lua', new Blob([adapter.content]), 'codec.lua');
-    }
-    if (errorMap) {
-      fd.append('adapter/error.lua', new Blob([errorMap.content]), 'error.lua');
-    }
-
-    await fetch(`${API_PREFIX}/resources/baseline`, { method: 'POST', body: fd });
-  } catch {
-    // 静默：基线不可用时不阻塞编辑器
-  }
-}
 
 // === Legacy 迁移：v0 同 DB 双 store → v1 双 DB 单 store ===
 

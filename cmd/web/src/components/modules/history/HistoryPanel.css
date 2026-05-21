@@ -560,7 +560,7 @@
 }
 
 .hp-trends-card::before {
-  background: linear-gradient(180deg, var(--color-blue), #69b1ff);
+  background: linear-gradient(180deg, var(--color-blue), var(--color-blue-light));
 }
 
 .hp-actions-card {
@@ -591,7 +591,7 @@
 }
 
 .hp-info-card::before {
-  background: linear-gradient(180deg, var(--color-success), #69b1ff);
+  background: linear-gradient(180deg, var(--color-success), var(--color-blue-light));
 }
 
 /* ── 对比视图 ── */

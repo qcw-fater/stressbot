@@ -1139,7 +1139,7 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 **`createListenCallback` 变更（更新 ScriptContext）：**
 
 ```go
-func (h *robotActionHandler) createListenCallback(cbDef *engine.CallbackDef) network.ListenCallBack {
+func (h *robotActionHandler) createListenCallback(cbDef *engine.ListenDef) network.ListenCallBack {
     if cbDef.Script != "" {
         return func(msg *network.Message) {
             h.robot.luaMu.Lock()
