@@ -43,6 +43,9 @@ type StandaloneConfig struct {
 
 	// StateExtra 初始状态额外键值对，注入每个 Robot 的 state。
 	StateExtra map[string]string `json:"stateExtra"`
+
+	// Duration 运行时长（如 "10m"、"1h"），0 = 一直运行直到手动停止。
+	Duration string `json:"duration"`
 }
 
 // Config 全局配置结构。
@@ -51,6 +54,7 @@ type Config struct {
 	Monitor    monitor.CollectorConfig `json:"monitor"`
 	Standalone *StandaloneConfig       `json:"standalone"`
 	Agent      agent.Config            `json:"agent"`
+	Daemon     bool                    `json:"daemon"` // 以守护进程模式运行（仅 Linux）
 }
 
 func main() {
@@ -65,7 +69,14 @@ func main() {
 	}()
 
 	configPath := flag.String("config", "conf/config.json", "配置文件路径")
+	daemonFlag := flag.Bool("d", false, "以守护进程模式运行")
 	flag.Parse()
+
+	// -d 模式：fork 子进程后父进程退出
+	if *daemonFlag {
+		utils.Daemon("-d")
+		return
+	}
 
 	// 推导 conf 根目录：config 文件所在目录的绝对路径
 	configAbs, err := filepath.Abs(*configPath)
@@ -79,6 +90,12 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
 		os.Exit(1)
+	}
+
+	// 配置中启用守护进程且当前不是守护进程子进程
+	if cfg.Daemon && os.Getppid() != 1 {
+		utils.Daemon()
+		return
 	}
 
 	// 初始化日志（路径按模式自动选择）
@@ -192,6 +209,15 @@ func runStandalone(cfg *Config, confDir string) {
 		stresslog.Info("[MAIN] Lua 脚本已预编译", zap.Int("count", len(luaPool.ListScripts())))
 	}
 
+	var duration time.Duration
+	if s.Duration != "" {
+		d, err := time.ParseDuration(s.Duration)
+		if err != nil {
+			stresslog.Fatal("解析 duration 失败", zap.String("duration", s.Duration), zap.Error(err))
+		}
+		duration = d
+	}
+
 	mgrCfg := robot.ManagerConfig{
 		AccountPrefix:  s.Bot.AccountPrefix,
 		StartNumber:    s.Bot.StartNumber,
@@ -202,6 +228,7 @@ func runStandalone(cfg *Config, confDir string) {
 		RequestTimeout: 60 * time.Second,
 		MainService:    s.Bot.MainService,
 		HTTPTimeout:    10 * time.Second,
+		Duration:       duration,
 	}
 
 	dialer := network.NewDialer(adp, 5*time.Second)
@@ -231,8 +258,12 @@ func runStandalone(cfg *Config, confDir string) {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	<-sigCh
-	stresslog.Info("[MAIN] 收到退出信号，正在关闭...")
+	select {
+	case <-sigCh:
+		stresslog.Info("[MAIN] 收到退出信号，正在关闭...")
+	case <-mgr.Done():
+		stresslog.Info("[MAIN] 运行时长已到，正在关闭...")
+	}
 
 	if reporter != nil {
 		reporter.Stop()

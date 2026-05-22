@@ -217,8 +217,11 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 		zap.Int("totalBots", r.assignment.TotalBots),
 		zap.Int("startNumber", r.assignment.StartNumber))
 
-	// 12. 等待 ctx 取消
-	<-ctx.Done()
+	// 12. 等待 ctx 取消或运行时长到期
+	select {
+	case <-ctx.Done():
+	case <-mgr.Done():
+	}
 
 	// 13. 停止所有机器人
 	mgr.StopAll()

@@ -15,5 +15,6 @@
     "requestTimeout": "30s",
     "reconnectMaxRetries": -1,
     "stressInterval": "5s"
-  }
+  },
+  "daemon": false
 }

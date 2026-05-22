@@ -26,5 +26,6 @@
   },
   "agent": {
     "enabled": false
-  }
+  },
+  "daemon": false
 }

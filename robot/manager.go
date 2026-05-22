@@ -40,6 +40,7 @@ type ManagerConfig struct {
 	MainService    string            `json:"mainService"`
 	HTTPTimeout    time.Duration     `json:"httpTimeout"`
 	RampUp         *RampUpConfig     `json:"rampUp"`
+	Duration       time.Duration     `json:"duration"` // 运行时长，0 = 一直运行
 }
 
 // Manager 机器人管理器。
@@ -55,6 +56,8 @@ type Manager struct {
 	cancel  context.CancelFunc
 	started atomic.Int32
 	stopped atomic.Int32
+	doneCh  chan struct{}      // 所有机器人停止后关闭
+	stopOnce sync.Once
 }
 
 // NewManager 创建机器人管理器
@@ -71,6 +74,7 @@ func NewManager(cfg ManagerConfig, flow *engine.TaskFlow, factory *protox.Factor
 		robots:  make([]*Robot, 0, cfg.Count),
 		ctx:     ctx,
 		cancel:  cancel,
+		doneCh:  make(chan struct{}),
 	}
 }
 
@@ -125,6 +129,7 @@ func (m *Manager) StartAll() error {
 	}
 
 	stresslog.Info("[MANAGER] 全部机器人已启动", zap.Int("count", m.cfg.Count))
+	m.startDurationTimer()
 	return nil
 }
 
@@ -178,6 +183,7 @@ func (m *Manager) StartWithRampUp() error {
 	}
 
 	stresslog.Info("[MANAGER] 渐进式加压完成，全部机器人已启动", zap.Int("count", offset))
+	m.startDurationTimer()
 	return nil
 }
 
@@ -193,5 +199,27 @@ func (m *Manager) StopAll() {
 		r.Close()
 		m.stopped.Add(1)
 	}
+	m.stopOnce.Do(func() { close(m.doneCh) })
 	stresslog.Info("[MANAGER] 全部机器人已停止")
+}
+
+// Done 返回一个 channel，所有机器人停止后关闭（定时到期或外部 StopAll 均会触发）。
+func (m *Manager) Done() <-chan struct{} {
+	return m.doneCh
+}
+
+// startDurationTimer 启动运行时长定时器，到期后自动 StopAll。
+func (m *Manager) startDurationTimer() {
+	if m.cfg.Duration <= 0 {
+		return
+	}
+	stresslog.Info("[MANAGER] 定时停止已设定", zap.Duration("duration", m.cfg.Duration))
+	go func() {
+		select {
+		case <-m.doneCh:
+		case <-time.After(m.cfg.Duration):
+			stresslog.Info("[MANAGER] 运行时长已到，自动停止")
+			m.StopAll()
+		}
+	}()
 }
