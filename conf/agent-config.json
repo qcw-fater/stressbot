@@ -9,6 +9,7 @@
   "agent": {
     "enabled": true,
     "adminAddr": "http://127.0.0.1:7718",
+    "publicUrl": "http://127.0.0.1:7719",
     "port": 7719,
     "maxBots": 5000,
     "hbInterval": "10s",

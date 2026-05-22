@@ -14,6 +14,7 @@ import (
 type Config struct {
 	Enabled             bool   `json:"enabled"`             // 是否启用 Agent 模式
 	AdminAddr           string `json:"adminAddr"`           // Admin 服务器地址（如 http://192.168.1.100:7718）
+	PublicURL           string `json:"publicUrl"`           // Agent 对外可达地址（如 http://192.168.1.200:7719），不填自动获取本机 IP
 	Port                int    `json:"port"`                // 本地 HTTP 监听端口（默认 7719，Admin 通过此端口回调 Agent）
 	MaxBots             int    `json:"maxBots"`             // 单节点最大机器人数量（默认 5000）
 	HBInterval          string `json:"hbInterval"`          // 心跳发送间隔（默认 10s）
@@ -27,6 +28,7 @@ type Config struct {
 type ResolvedConfig struct {
 	AdminAddr            string        // Admin 服务器地址
 	Name                 string        // 节点名称（主机名）
+	Address              string        // Agent 对外可达地址（如 http://192.168.1.200:7719）
 	Port                 int           // 本地 HTTP 监听端口
 	MaxBots              int           // 单节点最大机器人数量
 	AppVersion           string        // 应用版本号
@@ -68,9 +70,16 @@ func (c *Config) Resolve() (*ResolvedConfig, error) {
 	hbInterval := utils.ParseDurationDefault(c.HBInterval, 10*time.Second, "agent.hbInterval")
 	requestTimeout := utils.ParseDurationDefault(c.RequestTimeout, 30*time.Second, "agent.requestTimeout")
 
+	// 解析 Agent 对外地址：用户配置优先，否则自动获取本机 IP
+	address := c.PublicURL
+	if address == "" {
+		address = buildAddress(port)
+	}
+
 	return &ResolvedConfig{
 		AdminAddr:            c.AdminAddr,
 		Name:                 hostname,
+		Address:              address,
 		Port:                 port,
 		MaxBots:              maxBots,
 		AppVersion:           c.AppVersion,

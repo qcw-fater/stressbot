@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -212,7 +213,7 @@ func (a *Agent) registerWithRetry(ctx context.Context) error {
 	req := RegisterRequest{
 		AgentID:        a.id,
 		Name:           a.cfg.Name,
-		Address:        buildAddress(a.cfg.Port),
+		Address:        a.cfg.Address,
 		AppVersion:     a.cfg.AppVersion,
 		MaxBots:        a.cfg.MaxBots,
 		StressInterval: a.cfg.StressInterval.String(),
@@ -542,14 +543,22 @@ func (a *Agent) shutdown() error {
 	return nil
 }
 
-// buildAddress 根据监听地址构建完整 HTTP 地址。
-// ":7719" → "http://hostname:7719"
-func buildAddress(port int) string {
-	hostname, _ := os.Hostname() // hostname 可选，获取失败不影响功能
-	if hostname == "" {
-		hostname = "127.0.0.1"
+// getLocalIP 获取本机首选出口 IP（UDP 连接方式，不实际发包）。
+func getLocalIP() string {
+	conn, err := net.DialTimeout("udp4", "8.8.8.8:53", 1*time.Second)
+	if err != nil {
+		return "127.0.0.1"
 	}
-	return fmt.Sprintf("http://%s:%d", hostname, port)
+	defer conn.Close()
+	addr := conn.LocalAddr().(*net.UDPAddr)
+	return addr.IP.String()
+}
+
+// buildAddress 自动获取本机 IP 并构建 HTTP 地址。
+// 用于用户未配置 address 时的回退方案。
+func buildAddress(port int) string {
+	ip := getLocalIP()
+	return fmt.Sprintf("http://%s:%d", ip, port)
 }
 
 // generateUUID 生成 v4 UUID（不依赖外部库）。
