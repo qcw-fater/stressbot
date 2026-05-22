@@ -8,6 +8,7 @@ import (
 	"stressbot/network"
 	"stressbot/protox"
 	"stressbot/script"
+	"stressbot/utils"
 	stresslog "stressbot/utils/log"
 	"sync"
 	"sync/atomic"
@@ -214,12 +215,12 @@ func (m *Manager) startDurationTimer() {
 		return
 	}
 	stresslog.Info("[MANAGER] 定时停止已设定", zap.Duration("duration", m.cfg.Duration))
-	go func() {
+	utils.GetWorkPool().Go(func() {
 		select {
 		case <-m.doneCh:
 		case <-time.After(m.cfg.Duration):
 			stresslog.Info("[MANAGER] 运行时长已到，自动停止")
 			m.StopAll()
 		}
-	}()
+	})
 }

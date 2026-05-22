@@ -190,7 +190,6 @@ func runStandalone(cfg *Config, confDir string) {
 	// 回填 ActionDef.Name
 	for name, action := range flow.Actions {
 		action.Name = name
-		flow.Actions[name] = action
 	}
 
 	// 初始化监控

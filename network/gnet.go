@@ -8,6 +8,7 @@ import (
 
 	"stressbot/adapter"
 	"stressbot/monitor"
+	"stressbot/utils"
 	stresslog "stressbot/utils/log"
 
 	"github.com/panjf2000/gnet/v2"
@@ -220,19 +221,19 @@ func (d *Dialer) DialTCP(ctx context.Context, address string, conn *Connection) 
 		err  error
 	}
 	ch := make(chan dialResult, 1)
-	go func() {
+	utils.GetWorkPool().Go(func() {
 		gc, e := d.client.Dial("tcp", address)
 		ch <- dialResult{gc, e}
-	}()
+	})
 
 	select {
 	case <-ctx.Done():
 		// ctx 取消，拨号可能已完成，需排空结果并关闭 gnet 连接避免 fd 泄漏
-		go func() {
+		utils.GetWorkPool().Go(func() {
 			if res := <-ch; res.conn != nil {
 				_ = res.conn.Close()
 			}
-		}()
+		})
 		return nil, ctx.Err()
 	case res := <-ch:
 		if res.err != nil {

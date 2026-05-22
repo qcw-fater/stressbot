@@ -157,16 +157,28 @@ func (ae *ActionExecutor) buildBody(def *ActionDef) ([]byte, error) {
 }
 
 // bindFields 将字段绑定列表应用到 proto 消息。
+//
+// 每个绑定的处理流程（跳过优先级从高到低）：
+//  1. Condition 检查：condition 表达式求值为 false → 跳过该绑定
+//  2. nil 值处理：resolveFieldValue 返回 nil 时，
+//     - Optional=true → 静默跳过
+//     - Required=true 或隐式必需类型（state/stateFirst/stateRandom 等）→ 返回错误
+//     - 其余情况 → 静默跳过（后续 StoreAs 和 proto 赋值也会跳过）
+//  3. StoreAs 写入：值非 nil 且配置了 StoreAs → 写入 state
+//  4. 空 Field 跳过：Field 为空字符串 → 跳过 proto 赋值（仅 StoreAs 的绑定会走到这里）
+//  5. proto 赋值：调用 Factory.SetField 写入消息字段
 func (ae *ActionExecutor) bindFields(msg proto.Message, bindings []FieldBind, actionName string) error {
 	for i := range bindings {
 		fb := &bindings[i]
 
+		// 1) condition 为 false 时跳过
 		if !ae.evaluateCondition(fb.Condition) {
 			continue
 		}
 
 		value := ae.resolveFieldValue(fb)
 
+		// 2) nil 值：optional 跳过，required 报错
 		if value == nil {
 			if fb.Optional {
 				continue
@@ -176,10 +188,12 @@ func (ae *ActionExecutor) bindFields(msg proto.Message, bindings []FieldBind, ac
 			}
 		}
 
+		// 3) StoreAs：同时写 state（即使 Field 为空也写入）
 		if fb.StoreAs != "" && value != nil {
 			ae.store.Set(fb.StoreAs, value)
 		}
 
+		// 4) 值仍为 nil 或 Field 为空 → 跳过 proto 赋值
 		if value == nil || fb.Field == "" {
 			continue
 		}
@@ -568,10 +582,26 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, error) {
 		return sendLen, 0, err
 	}
 
+	// 非 2xx 状态码视为请求失败
+	if statusCode < 200 || statusCode >= 300 {
+		stresslog.Warn("[ACTION] HTTP 响应非 2xx",
+			zap.String("action", def.Name),
+			zap.String("url", resolvedURL), zap.String("method", method),
+			zap.Int("statusCode", statusCode),
+			zap.Int("respBodyLen", len(respBody)))
+		return sendLen, len(respBody), NewActionError(errcode.ErrHTTPStatus,
+			fmt.Sprintf("action=%s statusCode=%d", def.Name, statusCode))
+	}
+
 	if len(def.Store) > 0 && len(respBody) > 0 {
 		if contentType == ContentJSON {
 			var respMap map[string]any
-			if err := json.Unmarshal(respBody, &respMap); err == nil {
+			if err := json.Unmarshal(respBody, &respMap); err != nil {
+				stresslog.Warn("[ACTION] HTTP 响应 JSON 解析失败",
+					zap.String("action", def.Name),
+					zap.Int("statusCode", statusCode),
+					zap.Error(err))
+			} else {
 				ae.storeResponse(def.Store, respMap)
 			}
 		}

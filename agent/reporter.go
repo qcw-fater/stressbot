@@ -46,10 +46,23 @@ func (r *StressReporter) Start(ctx context.Context) {
 	})
 }
 
-// Stop 停止推送循环（幂等）。
+// Stop 停止推送循环（幂等）。先做一次同步 flush 确保最后一帧指标已推送。
 func (r *StressReporter) Stop() {
 	r.stopOnce.Do(func() {
 		close(r.stopCh)
+		// 同步 flush 最后一帧指标
+		snap := r.src.Snapshot(nil, 0)
+		report := StressReport{
+			AgentID:    r.agentID,
+			TaskID:     r.taskID,
+			ReportedAt: time.Now(),
+			Snapshot:   snap,
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := r.cli.PostStress(ctx, report); err != nil {
+			stresslog.Warn("[AGENT] 最终指标上报失败", zap.Error(err))
+		}
 	})
 }
 

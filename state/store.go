@@ -99,8 +99,8 @@ func (s *Store) GetMap(key string) map[string]any {
 	}
 	if m, ok := v.(map[string]any); ok {
 		cp := make(map[string]any, len(m))
-		for k, v := range m {
-			cp[k] = v
+		for k, mv := range m {
+			cp[k] = mv
 		}
 		return cp
 	}

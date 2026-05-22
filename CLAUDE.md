@@ -52,7 +52,7 @@ cd cmd/web && npm run test                 # Vitest
 - **`agent/` — Agent 节点（8 文件）。注册到 Admin（指数退避）→ 心跳循环 → 任务轮询 → TaskRunner 执行（下载配置 → 加载适配器 → 编译 proto → 构建流程 → Manager → 启动机器人）→ 指标上报 + 系统资源上报。本地 HTTP API（task/stop/shutdown/version/status/logs）。
 - **`monitor/` — 指标采集。原子计数器（热路径零锁：成功/失败/超时/取消/执行中/字节数）、延迟直方图（16 桶 1ms~60s+，P50/P90/P95/P99）、Apdex 评分（阈值 T 可配）、分布式聚合。错误按 `(Kind, Code)` 聚合（框架码 1-99 / 服务端码 ≥ 100），保留最近 3 条详情。导出：Console / HTTP JSON / CSV / pprof。
 - **`logview/` — 日志环形缓冲区。O(1) 写入 + cursor 分页查询，供前端实时日志面板使用。
-- **`errcode/` — 统一错误码。`ErrorCode`（uint64）+ `Kind`（`"framework"` / `"server"`）+ 25 个框架错误码常量（Network 5 / Protocol 2 / Build 4 / Listen 2 / Config 7 / Lua 4 / Callback 2）。`ActionError` 携带 `(Kind, Code, Detail)` 三元组。
+- **`errcode/` — 统一错误码。`ErrorCode`（uint64）+ `Kind`（`"framework"` / `"server"`）+ 27 个框架错误码常量（Network 5 / Protocol 2 / Build 4 / Listen 2 / Config 8 / Lua 4 / Callback 2）。`ActionError` 携带 `(Kind, Code, Detail)` 三元组。
 - **`utils/` — `work_pool.go`（协程池 + recover 防止 panic 扩散）、`duration.go`、`utils/log/`（结构化日志 zap + lumberjack 轮转 + 企业微信 webhook 告警）。
 
 ### 单次动作数据流
@@ -85,13 +85,13 @@ React 18 / Vite 5 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 - **执行**：`action`（引用 actions 表执行动作，或通过 listenRefs 注册持久化推送监听）
 - **循环控制**：`break`（跳出循环）、`continue`（跳过本次）
 
-### 动作 pattern（16 种）
+### 动作 pattern（14 种）
 
 - **请求-响应**：`tcpRequest` / `udpRequest` — channel 一发一收 + 超时
 - **监听**：`tcpListen` / `udpListen` — 轮询等待推送 + 超时 + pollMs
-- **连接管理**：`tcpConnect` / `udpConnect` / `tcpClose` / `udpClose` / `exchangeKey`
+- **连接管理**：`tcpConnect` / `udpConnect` / `tcpClose` / `udpClose`
 - **发送**：`tcpSend` / `udpSend` / `httpRequest`（支持 JSON/form body）
-- **状态与辅助**：`setState` / `clearState` / `registerHeartbeat` / `lua`
+- **状态与辅助**：`setState` / `clearState` / `lua`
 
 ### binding type（17 种）
 

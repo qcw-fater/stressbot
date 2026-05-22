@@ -29,11 +29,11 @@ const (
 	ErrCreateMsg ErrorCode = 21 // 创建 C2S proto 消息失败
 	ErrBindField ErrorCode = 22 // 必需字段绑定失败（Required=true）
 	ErrSerialize ErrorCode = 23 // C2S 消息序列化失败
-			ErrExecFailed ErrorCode = 24 // 动作执行失败（errorStrategy=abort）
+	ErrExecFailed ErrorCode = 24 // 动作执行失败（errorStrategy=abort）
 
 	// 监听层 (31-40)
-		ErrListenTimeout  ErrorCode = 31 // TCP/UDP Listen 轮询超时
-		ErrListenRegister ErrorCode = 32 // 注册持久监听失败
+	ErrListenTimeout  ErrorCode = 31 // TCP/UDP Listen 轮询超时
+	ErrListenRegister ErrorCode = 32 // 注册持久监听失败
 
 	// 配置层 (41-50)
 	ErrAddrEmpty      ErrorCode = 41 // 连接地址为空
@@ -43,6 +43,7 @@ const (
 	ErrHTTPBuild      ErrorCode = 45 // http.NewRequest 失败
 	ErrHTTPReadBody   ErrorCode = 46 // 读取 HTTP 响应体失败
 	ErrMarshalBody    ErrorCode = 47 // JSON/form 请求体序列化失败
+	ErrHTTPStatus     ErrorCode = 48 // HTTP 响应状态码非 2xx
 
 	// Lua 层 (51-60)
 	ErrLuaNotInit    ErrorCode = 51 // Lua 运行时未初始化
@@ -75,9 +76,9 @@ var codeRegistry = []CodeInfo{
 	{uint64(ErrCreateMsg), "CREATE_MSG", KindFramework},
 	{uint64(ErrBindField), "BIND_FIELD", KindFramework},
 	{uint64(ErrSerialize), "SERIALIZE", KindFramework},
-			{uint64(ErrExecFailed), "EXEC_FAILED", KindFramework},
+	{uint64(ErrExecFailed), "EXEC_FAILED", KindFramework},
 	{uint64(ErrListenTimeout), "LISTEN_TIMEOUT", KindFramework},
-			{uint64(ErrListenRegister), "LISTEN_REGISTER", KindFramework},
+	{uint64(ErrListenRegister), "LISTEN_REGISTER", KindFramework},
 	{uint64(ErrAddrEmpty), "ADDR_EMPTY", KindFramework},
 	{uint64(ErrURLEmpty), "URL_EMPTY", KindFramework},
 	{uint64(ErrURLScheme), "URL_SCHEME", KindFramework},
@@ -85,6 +86,7 @@ var codeRegistry = []CodeInfo{
 	{uint64(ErrHTTPBuild), "HTTP_BUILD", KindFramework},
 	{uint64(ErrHTTPReadBody), "HTTP_READ_BODY", KindFramework},
 	{uint64(ErrMarshalBody), "MARSHAL_BODY", KindFramework},
+	{uint64(ErrHTTPStatus), "HTTP_STATUS", KindFramework},
 	{uint64(ErrLuaNotInit), "LUA_NOT_INIT", KindFramework},
 	{uint64(ErrLuaNoScript), "LUA_NO_SCRIPT", KindFramework},
 	{uint64(ErrLuaExecFailed), "LUA_EXEC_FAILED", KindFramework},

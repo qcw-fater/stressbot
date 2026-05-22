@@ -47,7 +47,6 @@ type Agent struct {
 	status      AgentStatus
 	currentTask *TaskAssignment
 	taskCancel  context.CancelFunc
-	runner      *TaskRunner
 
 	// 任务执行追踪。executeTask 启动前 Add(1)，结束 Done()；
 	// shutdown 流程会等待 taskWG 归零，确保上报/清理完整完成。
@@ -399,7 +398,6 @@ func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
 		a.mu.Lock()
 		a.currentTask = nil
 		a.taskCancel = nil
-		a.runner = nil
 		a.status = StatusIdle
 		a.mu.Unlock()
 	}()
@@ -423,9 +421,6 @@ func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
 
 	// 创建 TaskRunner 执行
 	runner := NewTaskRunner(task, a.cfg, a.httpCli, a.collector)
-	a.mu.Lock()
-	a.runner = runner
-	a.mu.Unlock()
 
 	result, errMsg := runner.Run(taskCtx)
 
@@ -440,9 +435,8 @@ func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
 			zap.String("error", errMsg))
 	}
 
-	// 停止 StressReporter，等一小段时间确保最后的指标已采集
+	// 停止 StressReporter（内部会同步 flush 最后一帧指标）
 	stressReporter.Stop()
-	time.Sleep(500 * time.Millisecond)
 
 	// 采集 finalSnapshot
 	finalSnap := a.collector.Snapshot(nil, 0)

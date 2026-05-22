@@ -217,7 +217,8 @@ func (ts *TaskStore) ActiveTaskID() string {
 	return ts.activeID
 }
 
-// ActiveTask 返回当前活跃任务的副本（无则返回 nil）。
+// ActiveTask 返回当前活跃任务的浅拷贝（无则返回 nil）。
+// 注意：返回值中的 slice/map/pointer 字段仍指向内部数据，仅供只读访问。
 func (ts *TaskStore) ActiveTask() *Task {
 	ts.mu.RLock()
 	defer ts.mu.RUnlock()

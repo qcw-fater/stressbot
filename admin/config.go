@@ -22,8 +22,7 @@ type Config struct {
 // RegistryConfig Agent 注册与健康管理配置。
 type RegistryConfig struct {
 	UnhealthyAfter string `json:"unhealthyAfter"` // 心跳超时后标记 unhealthy
-	OfflineAfter   string `json:"offlineAfter"`   // 超过此时间标记 offline
-	PurgeAfter     string `json:"purgeAfter"`     // 离线超过此时间自动清理
+	OfflineAfter   string `json:"offlineAfter"`   // 超过此时间标记 offline 并删除
 }
 
 // HistoryConfig 历史归档配置。
@@ -72,7 +71,6 @@ func DefaultConfig() Config {
 		AgentRegistry: RegistryConfig{
 			UnhealthyAfter: "30s",
 			OfflineAfter:   "60s",
-			PurgeAfter:     "24h",
 		},
 		History: HistoryConfig{
 			Enabled:       true,
@@ -122,9 +120,6 @@ func validateConfig(cfg *Config) error {
 	}
 	if _, err := time.ParseDuration(cfg.AgentRegistry.OfflineAfter); cfg.AgentRegistry.OfflineAfter != "" && err != nil {
 		return fmt.Errorf("invalid agentRegistry.offlineAfter: %w", err)
-	}
-	if _, err := time.ParseDuration(cfg.AgentRegistry.PurgeAfter); cfg.AgentRegistry.PurgeAfter != "" && err != nil {
-		return fmt.Errorf("invalid agentRegistry.purgeAfter: %w", err)
 	}
 	return nil
 }

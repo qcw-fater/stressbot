@@ -4,8 +4,7 @@
 
   "agentRegistry": {
     "unhealthyAfter": "30s",
-    "offlineAfter": "60s",
-    "purgeAfter": "24h"
+    "offlineAfter": "60s"
   },
 
   "history": {

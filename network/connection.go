@@ -319,6 +319,11 @@ func (c *Connection) doClose() {
 	c.cancel()
 }
 
+// onClose gnet 异步触发的关闭回调（OnClose 事件）。
+// 与 Close() 构成双路径：
+//   - Close()：主动关闭，先 CAS 设置 isClose=1，再执行 doClose + 触发 onClosed（不触发 onDisconnect）
+//   - onClose()：被动关闭（gnet OnClose），同样 CAS，执行 doClose + 触发 onDisconnect + onClosed
+// 两者通过 isClose CAS 互斥，保证 doClose 和回调只执行一次。
 func (c *Connection) onClose() {
 	if !atomic.CompareAndSwapInt32(&c.isClose, 0, 1) {
 		return

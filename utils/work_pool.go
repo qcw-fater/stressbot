@@ -36,6 +36,7 @@ type goroutineInfo struct {
 type WorkPool struct {
 	pool       *ants.Pool
 	goroutines sync.Map // uint32 -> goroutineInfo，用于追踪 goroutine
+	wg         sync.WaitGroup
 
 	stopped   atomic.Bool
 	stopCh    chan struct{}
@@ -139,8 +140,10 @@ func (p *WorkPool) submit(task func(stopCh <-chan struct{})) error {
 		zap.Int32("count", count),
 		zap.String("caller", caller))
 
+	p.wg.Add(1)
 	err := p.pool.Submit(func() {
 		defer func() {
+			p.wg.Done()
 			if err := recover(); err != nil {
 				p.failed.Add(1)
 				log.DPanic("goroutine panic",
@@ -207,24 +210,20 @@ func (p *WorkPool) Shutdown() {
 
 	close(p.stopCh)
 
-	deadline := time.After(timeout)
-	timer := time.NewTicker(time.Millisecond)
-	defer timer.Stop()
+	done := make(chan struct{})
+	go func() {
+		p.wg.Wait()
+		close(done)
+	}()
 
-	for {
-		select {
-		case <-deadline:
-			log.Error("shutdown timeout",
-				zap.Int64("remaining", p.waiting.Load()))
-			p.printLeakedGoroutines()
-			return
-		case <-timer.C:
-			if p.waiting.Load() == 0 {
-				p.pool.Release()
-				log.Info("work pool shutdown complete")
-				return
-			}
-		}
+	select {
+	case <-done:
+		p.pool.Release()
+		log.Info("work pool shutdown complete")
+	case <-time.After(timeout):
+		log.Error("shutdown timeout",
+			zap.Int64("remaining", p.waiting.Load()))
+		p.printLeakedGoroutines()
 	}
 }
 

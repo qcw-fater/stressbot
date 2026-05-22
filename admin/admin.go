@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -473,9 +475,14 @@ func (s *AdminServer) autoStopTask(taskID string, reason string) {
 	}
 }
 
+var idCounter uint64
+
 func generateID() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		binary.BigEndian.PutUint64(b, uint64(time.Now().UnixNano()))
+		binary.BigEndian.PutUint64(b[8:], atomic.AddUint64(&idCounter, 1))
+	}
 	return hex.EncodeToString(b)
 }
 

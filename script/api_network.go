@@ -240,8 +240,13 @@ func networkTCPRequest(L *lua.LState) int {
 
 	service, route, msg, s2cProto := extractNetArgs(L)
 	if service == "" {
-		L.RaiseError("network.tcp_request requires (service, route, msg [, s2c_proto])")
+		L.RaiseError("network.tcp_request requires (service, route, msg [, s2c_proto [, timeout_sec]])")
 		return 0
+	}
+
+	timeout := engine.DefaultRequestTimeoutSec
+	if L.GetTop() >= 5 {
+		timeout = L.CheckInt(5)
 	}
 
 	msgData, err := serializeMsg(ctx, msg)
@@ -263,7 +268,8 @@ func networkTCPRequest(L *lua.LState) int {
 	var headerErr uint64
 	var reqErr error
 	withReleasedMu(ctx.LuaMu, func() {
-		respBody, headerErr, reqErr = ctx.NetSender.TCPRequest(service, packet, routeKey)
+		respBody, headerErr, reqErr = ctx.NetSender.TCPRequest(service, packet, routeKey,
+			time.Duration(timeout)*time.Second)
 	})
 
 	if reqErr != nil {
@@ -415,7 +421,12 @@ func networkHTTPRequest(L *lua.LState) int {
 		}
 	}
 
-	statusCode, respBody, err := ctx.NetSender.HTTPRequest(reqURL, method, contentType, reqBody)
+	var statusCode int
+	var respBody []byte
+	var err error
+	withReleasedMu(ctx.LuaMu, func() {
+		statusCode, respBody, err = ctx.NetSender.HTTPRequest(reqURL, method, contentType, reqBody)
+	})
 	if err != nil {
 		L.Push(lua.LNumber(-1))
 		L.Push(lua.LString(err.Error()))
