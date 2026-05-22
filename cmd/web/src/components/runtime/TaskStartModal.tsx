@@ -474,7 +474,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
                       ),
                     },
                     {
-                      title: '保持秒数',
+                      title: '间隔秒数',
                       dataIndex: 'holdSec',
                       width: 100,
                       render: (v: number | undefined, _, i) => (

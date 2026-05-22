@@ -11,7 +11,7 @@
  * T3 阶段先完成数据通路与 mode 切换；MonitorDock / 节点指标染色由 T4/T5 接入。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { App as AntApp, Spin } from 'antd';
 
 import { useShallow } from 'zustand/react/shallow';
@@ -35,18 +35,45 @@ import { useMonacoFindTooltip } from '@/services/monacoTooltip';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { FlowEditor } from '@/components/FlowEditor';
 import { useFlowStore } from '@/components/FlowEditor/store/flowStore';
-import { ResourcesDrawer } from '@/components/modules/ResourcesDrawer';
-import { AgentsPanel } from '@/components/modules/AgentsPanel';
-import { HistoryModal } from '@/components/modules/history/HistoryModal';
-import { ActiveTaskGuardModal } from '@/components/runtime/ActiveTaskGuardModal';
 import { RuntimeBar } from '@/components/runtime/RuntimeBar';
 import { MonitorDock } from '@/components/monitoring/MonitorDock';
-import { SystemTab } from '@/components/monitoring/tabs/SystemTab';
-import { LogsTab } from '@/components/monitoring/tabs/LogsTab';
-import { NotepadTab } from '@/components/modules/notepad/NotepadTab';
 import { FloatingWindow } from '@/components/FlowEditor/panels/FloatingWindow';
+
+const LazyResourcesDrawer = lazy(() =>
+  import('@/components/modules/ResourcesDrawer').then((m) => ({ default: m.ResourcesDrawer })),
+);
+const LazyHistoryModal = lazy(() =>
+  import('@/components/modules/history/HistoryModal').then((m) => ({ default: m.HistoryModal })),
+);
+const LazyAgentsPanel = lazy(() =>
+  import('@/components/modules/AgentsPanel').then((m) => ({ default: m.AgentsPanel })),
+);
+const LazySystemTab = lazy(() =>
+  import('@/components/monitoring/tabs/SystemTab').then((m) => ({ default: m.SystemTab })),
+);
+const LazyLogsTab = lazy(() =>
+  import('@/components/monitoring/tabs/LogsTab').then((m) => ({ default: m.LogsTab })),
+);
+const LazyNotepadTab = lazy(() =>
+  import('@/components/modules/notepad/NotepadTab').then((m) => ({ default: m.NotepadTab })),
+);
+const LazyActiveTaskGuardModal = lazy(() =>
+  import('@/components/runtime/ActiveTaskGuardModal').then((m) => ({
+    default: m.ActiveTaskGuardModal,
+  })),
+);
 import type { RobotConfig, TaskBrief } from '@/types/api';
 import { fetchBaselineConfig } from '@/services/baselineApi';
+
+/** 首次 visible=true 时挂载组件，之后保持挂载（保留组件状态 + 关闭动画） */
+function LazyMount({ visible, children }: { visible: boolean; children: React.ReactNode }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    if (visible) setMounted(true);
+  }, [visible]);
+  if (!mounted) return null;
+  return <>{children}</>;
+}
 
 export function EditorPage() {
   return (
@@ -268,45 +295,73 @@ function HomeShellInner() {
         />
       </div>
       <MonitorDock />
-      <ResourcesDrawer open={resourcesOpen} onClose={() => setResourcesOpen(false)} />
-      <HistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} />
-      <AgentsPanel open={agentsOpen} onClose={() => setAgentsOpen(false)} />
-      <FloatingWindow
-        windowId="systemStatus"
-        title="系统状态"
-        defaultSize={{ width: 680, height: 400 }}
-        minSize={{ width: 520, height: 320 }}
-        open={systemOpen}
-        onClose={() => setSystemOpen(false)}
-      >
-        <SystemTab />
-      </FloatingWindow>
-      <FloatingWindow
-        windowId="logs"
-        title="运行日志"
-        defaultSize={{ width: 1000, height: 600 }}
-        minSize={{ width: 600, height: 400 }}
-        open={logsOpen}
-        onClose={() => setLogsOpen(false)}
-      >
-        <LogsTab open={logsOpen} />
-      </FloatingWindow>
-      <FloatingWindow
-        windowId="notepad"
-        title="记事本"
-        defaultSize={{ width: 960, height: 600 }}
-        minSize={{ width: 640, height: 400 }}
-        open={notepadOpen}
-        onClose={() => setNotepadOpen(false)}
-      >
-        <NotepadTab />
-      </FloatingWindow>
-      <ActiveTaskGuardModal
-        open={guardTask !== null}
-        task={guardTask}
-        onClose={() => setGuardTask(null)}
-        onAttached={() => setGuardTask(null)}
-      />
+      <LazyMount visible={resourcesOpen}>
+        <Suspense fallback={null}>
+          <LazyResourcesDrawer open={resourcesOpen} onClose={() => setResourcesOpen(false)} />
+        </Suspense>
+      </LazyMount>
+      <LazyMount visible={historyOpen}>
+        <Suspense fallback={null}>
+          <LazyHistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} />
+        </Suspense>
+      </LazyMount>
+      <LazyMount visible={agentsOpen}>
+        <Suspense fallback={null}>
+          <LazyAgentsPanel open={agentsOpen} onClose={() => setAgentsOpen(false)} />
+        </Suspense>
+      </LazyMount>
+      <LazyMount visible={systemOpen}>
+        <FloatingWindow
+          windowId="systemStatus"
+          title="系统状态"
+          defaultSize={{ width: 680, height: 400 }}
+          minSize={{ width: 520, height: 320 }}
+          open={systemOpen}
+          onClose={() => setSystemOpen(false)}
+        >
+          <Suspense fallback={<Spin />}>
+            <LazySystemTab />
+          </Suspense>
+        </FloatingWindow>
+      </LazyMount>
+      <LazyMount visible={logsOpen}>
+        <FloatingWindow
+          windowId="logs"
+          title="运行日志"
+          defaultSize={{ width: 1000, height: 600 }}
+          minSize={{ width: 600, height: 400 }}
+          open={logsOpen}
+          onClose={() => setLogsOpen(false)}
+        >
+          <Suspense fallback={<Spin />}>
+            <LazyLogsTab open={logsOpen} />
+          </Suspense>
+        </FloatingWindow>
+      </LazyMount>
+      <LazyMount visible={notepadOpen}>
+        <FloatingWindow
+          windowId="notepad"
+          title="记事本"
+          defaultSize={{ width: 960, height: 600 }}
+          minSize={{ width: 640, height: 400 }}
+          open={notepadOpen}
+          onClose={() => setNotepadOpen(false)}
+        >
+          <Suspense fallback={<Spin />}>
+            <LazyNotepadTab />
+          </Suspense>
+        </FloatingWindow>
+      </LazyMount>
+      <LazyMount visible={guardTask !== null}>
+        <Suspense fallback={null}>
+          <LazyActiveTaskGuardModal
+            open={guardTask !== null}
+            task={guardTask}
+            onClose={() => setGuardTask(null)}
+            onAttached={() => setGuardTask(null)}
+          />
+        </Suspense>
+      </LazyMount>
     </div>
   );
 }

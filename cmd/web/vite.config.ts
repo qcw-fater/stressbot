@@ -25,5 +25,16 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules/')) return;
+          if (id.includes('monaco-editor')) return 'vendor-monaco';
+          if (id.includes('echarts') || id.includes('zrender')) return 'vendor-echarts';
+          if (id.includes('@xyflow')) return 'vendor-flow';
+          if (id.includes('protobufjs')) return 'vendor-protobuf';
+        },
+      },
+    },
   },
 });
