@@ -472,14 +472,6 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// deadline 未指定时使用默认值
-	if cfg.Deadline == nil && s.cfg.Task.DeadlineDefault != "" {
-		if d, err := time.ParseDuration(s.cfg.Task.DeadlineDefault); err == nil && d > 0 {
-			t := time.Now().Add(d)
-			cfg.Deadline = &t
-		}
-	}
-
 	// 将上传的资源写入磁盘基线，使前端下次同步时 IDB 与基线一致
 	s.writeBaselineFiles(&cfg, flowData)
 

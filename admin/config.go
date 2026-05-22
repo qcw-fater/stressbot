@@ -14,9 +14,9 @@ type Config struct {
 	StaticDir string `json:"staticDir"` // 前端静态文件目录（默认 cmd/web/dist）
 
 	AgentRegistry RegistryConfig `json:"agentRegistry"` // Agent 注册与健康管理
-	Task          TaskSection    `json:"task"`          // 任务相关限制
 	History       HistoryConfig  `json:"history"`       // 历史归档
 	Log           LogConfig      `json:"log"`           // 日志
+	Daemon        bool           `json:"daemon"`        // 以守护进程模式运行（仅 Linux）
 }
 
 // RegistryConfig Agent 注册与健康管理配置。
@@ -24,11 +24,6 @@ type RegistryConfig struct {
 	UnhealthyAfter string `json:"unhealthyAfter"` // 心跳超时后标记 unhealthy
 	OfflineAfter   string `json:"offlineAfter"`   // 超过此时间标记 offline
 	PurgeAfter     string `json:"purgeAfter"`     // 离线超过此时间自动清理
-}
-
-// TaskSection 任务相关限制配置。
-type TaskSection struct {
-	DeadlineDefault string `json:"deadlineDefault"` // 任务默认超时时间（默认 1h）
 }
 
 // HistoryConfig 历史归档配置。
@@ -68,6 +63,7 @@ type LogConfig struct {
 	MaxBackups int    `json:"maxBackups"` // 保留的旧日志文件数
 }
 
+
 // DefaultConfig 返回填充了默认值的配置。
 func DefaultConfig() Config {
 	return Config{
@@ -77,9 +73,6 @@ func DefaultConfig() Config {
 			UnhealthyAfter: "30s",
 			OfflineAfter:   "60s",
 			PurgeAfter:     "24h",
-		},
-		Task: TaskSection{
-			DeadlineDefault: "1h",
 		},
 		History: HistoryConfig{
 			Enabled:       true,

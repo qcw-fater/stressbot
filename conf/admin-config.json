@@ -8,10 +8,6 @@
     "purgeAfter": "24h"
   },
 
-  "task": {
-    "deadlineDefault": "1h"
-  },
-
   "history": {
     "enabled": true,
     "retentionDays": 90,
@@ -32,5 +28,6 @@
     "path": "log/admin.log",
     "maxSizeMB": 100,
     "maxBackups": 10
-  }
+  },
+  "daemon": false
 }
