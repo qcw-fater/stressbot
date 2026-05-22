@@ -36,4 +36,6 @@ bugs/
 .claude/
 .cursor/
 .learnings/
-stressbot-*/
+
+# 部署测试
+deploy/

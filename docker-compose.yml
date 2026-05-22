@@ -24,6 +24,6 @@ services:
     ports:
       - "80:80"
     volumes:
-      - D:/Gitee/stressbot/stressbot-v0.1.0-windows-amd64/conf/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - D:/Gitee/stressbot/stressbot-v0.1.0-windows-amd64/dist:/opt/stressbot/web/dist:ro
+      - D:/Gitee/stressbot/deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - D:/Gitee/stressbot/deploy/stressbot-v0.1.0-windows-amd64/dist:/data/stressbot/web/dist:ro
 

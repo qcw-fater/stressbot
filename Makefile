@@ -28,8 +28,8 @@ build: build-linux build-windows
 .PHONY: build-linux
 build-linux: ## 构建 Linux amd64
 	@mkdir -p $(BIN_DIR)
-	GOOS=linux GOARCH=amd64 go build $(GO_FLAGS) -o $(BIN_DIR)/agent ./cmd/agent
-	GOOS=linux GOARCH=amd64 go build $(GO_FLAGS) -o $(BIN_DIR)/admin ./cmd/admin
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(GO_FLAGS) -o $(BIN_DIR)/agent ./cmd/agent
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(GO_FLAGS) -o $(BIN_DIR)/admin ./cmd/admin
 
 .PHONY: build-windows
 build-windows: ## 构建 Windows amd64
