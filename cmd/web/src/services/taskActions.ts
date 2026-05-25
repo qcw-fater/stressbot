@@ -189,6 +189,7 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
     state: 'starting',
     totalBots: opts.totalBots,
     agentCount: 0,
+    activeAgentCount: 0,
     createdAt: new Date().toISOString(),
   });
 

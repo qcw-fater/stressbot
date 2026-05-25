@@ -1,0 +1,17 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+
+// 英雄限时任务信息
+message HeroLimitedTaskInfo {
+    int64 taskUUID   = 1; // 任务UUID
+    int32 heroId     = 2; // 英雄ID
+    int32 taskId     = 3; // 任务配置ID
+    int64 expireTime = 4; // 过期时间戳
+}
+
+// 英雄限时任务存储数据
+message HeroLimitedTaskData {
+    repeated HeroLimitedTaskInfo tasks = 1; // 任务列表
+    int64 lastExpireCheckTime = 2; // 上次过期检测时间戳
+}

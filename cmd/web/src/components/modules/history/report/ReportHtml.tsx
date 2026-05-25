@@ -148,7 +148,7 @@ function CoverSection({ detail, failed, cs }: { detail: HistoryDetail; failed: b
             <br />
           </>
         )}
-        <b>{detail.totalBots}</b> 机器人 · <b>{detail.agentCount}</b> 节点 · 并发 <b>{cs.concurrency}</b> · 超时 <b>{cs.timeoutSec}s</b>
+        <b>{detail.totalBots}</b> 机器人 · <b>{detail.activeAgentCount}/{detail.agentCount}</b> 节点 · 并发 <b>{cs.concurrency}</b> · 超时 <b>{cs.timeoutSec}s</b>
         {' · '}流程 <b>{cs.flowSizeKB}KB</b> · <b>{cs.protoCount}</b> Proto · <b>{cs.scriptCount}</b> 脚本
       </div>
       {detail.errorMsg && (
@@ -366,11 +366,12 @@ function DetailTableSection({ actions }: { actions: ActionMetric[] }) {
             <th className="num">超时</th>
             <th className="num">Apdex</th>
             <th className="num">成功率</th>
-            <th className="num">avg</th>
+            <th className="num">net avg</th>
             <th className="num">p50</th>
             <th className="num">p95</th>
             <th className="num">p99</th>
             <th className="num">max</th>
+            <th className="num">client</th>
             <th className="num">QPS</th>
           </tr>
         </thead>
@@ -381,6 +382,8 @@ function DetailTableSection({ actions }: { actions: ActionMetric[] }) {
               : level === 'fair' ? 'c-warning'
               : 'c-error';
             const rate = a.sampleCount > 0 ? (a.successRate * 100).toFixed(1) : '0';
+            // netSampleCount=0 时延迟列显示 — 避免误把 0ms 当真实数据
+            const hasNet = (a.netSampleCount ?? 0) > 0;
             return (
               <tr key={a.name}>
                 <td><code>{a.name}</code></td>
@@ -389,11 +392,12 @@ function DetailTableSection({ actions }: { actions: ActionMetric[] }) {
                 <td className={`num${a.timeoutCount > 0 ? ' c-warning' : ''}`}>{a.timeoutCount}</td>
                 <td className={`num ${apdexColor}`}>{a.apdex.toFixed(3)}</td>
                 <td className="num">{rate}%</td>
-                <td className="num">{fmtMs(a.latency.avgMs)}</td>
-                <td className="num">{fmtMs(a.latency.p50Ms)}</td>
-                <td className="num">{fmtMs(a.latency.p95Ms)}</td>
-                <td className="num">{fmtMs(a.latency.p99Ms)}</td>
-                <td className="num">{fmtMs(a.latency.maxMs)}</td>
+                <td className="num">{hasNet ? fmtMs(a.latency.avgMs) : '—'}</td>
+                <td className="num">{hasNet ? fmtMs(a.latency.p50Ms) : '—'}</td>
+                <td className="num">{hasNet ? fmtMs(a.latency.p95Ms) : '—'}</td>
+                <td className="num">{hasNet ? fmtMs(a.latency.p99Ms) : '—'}</td>
+                <td className="num">{hasNet ? fmtMs(a.latency.maxMs) : '—'}</td>
+                <td className="num">{fmtMs(a.clientAvgMs ?? 0)}</td>
                 <td className="num">{a.avgQps.toFixed(1)}</td>
               </tr>
             );

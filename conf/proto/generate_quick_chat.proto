@@ -1,0 +1,63 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+
+// 单模式装备列表
+message QuickChatEquipList
+{
+    repeated int32 chatIds = 1; // 已装备的快捷消息ID列表（有序）
+}
+
+//获取快捷消息装备数据
+message QuickChatGetEquipC2S
+{
+}
+//获取快捷消息装备数据
+message QuickChatGetEquipS2C
+{
+    map<int32, QuickChatEquipList> equipMap = 1; // key=ModeType, value=已装备列表
+    int32 skinId = 2; // 当前选中皮肤ID（0=默认皮肤）
+}
+//保存快捷消息装备
+message QuickChatSaveEquipC2S
+{
+    int32 modeType = 1; // 游戏模式ID
+    repeated int32 chatIds = 2; // 装备的快捷消息ID列表（有序）
+}
+//保存快捷消息装备
+message QuickChatSaveEquipS2C
+{
+    int32 modeType = 1; // 回传模式ID
+    repeated int32 chatIds = 2; // 保存成功后的列表
+}
+//恢复默认装备
+message QuickChatResetEquipC2S
+{
+    int32 modeType = 1; // 游戏模式ID
+}
+//恢复默认装备
+message QuickChatResetEquipS2C
+{
+    int32 modeType = 1; // 回传模式ID
+    repeated int32 chatIds = 2; // 恢复后的默认列表
+}
+//获取快捷消息皮肤数据
+message QuickChatGetSkinC2S
+{
+}
+//获取快捷消息皮肤数据
+message QuickChatGetSkinS2C
+{
+    repeated int32 unlockedSkinIds = 1; // 已解锁皮肤ID列表
+    int32 selectedSkinId = 2; // 当前选中皮肤ID
+}
+//选择快捷消息皮肤
+message QuickChatSelectSkinC2S
+{
+    int32 skinId = 1; // 选择的皮肤ID
+}
+//选择快捷消息皮肤
+message QuickChatSelectSkinS2C
+{
+    int32 skinId = 1; // 保存成功后的皮肤ID
+}

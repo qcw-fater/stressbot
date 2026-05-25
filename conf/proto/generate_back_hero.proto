@@ -6,6 +6,7 @@ message PlayerBackHero {
     bool              flag      = 1; // 是否拥有领取英雄资格
     map<int32, int64> getList   = 2; // 已领取英雄列表 英雄ID-领取时间
     map<int32, bool>  oldHeroId = 3; // moda 时期代已拥有英雄列表 英雄ID-是否拥有
+    int32             dayNum    = 4; // 每日领取次数
 }
 
 // 领取英雄
@@ -17,4 +18,9 @@ message BackHeroGetHeroC2S {
 message BackHeroGetHeroS2C {
     repeated int32    HeroId  = 1; // 英雄ID
     map<int32, int64> getList = 2; // 已领取英雄列表 英雄ID-领取时间
+}
+//领取英雄数据
+message BackHeroHeroDataS2C
+{
+    PlayerBackHero data = 1; // 只返回每日领取次数
 }

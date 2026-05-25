@@ -258,6 +258,15 @@ message RoomChangeHeroS2C {
     repeated int32 selectHeroes = 2; // 选择的英雄数组（非武道会模式只填充1号位）
     repeated int32 selectSkins  = 3; // 选择的皮肤数组
 }
+// 切换召唤师技能
+message RoomChangeSummonerSpellC2S {
+    repeated int32 summonerSpell = 1; // 召唤师技能
+}
+// 切换召唤师技能
+message RoomChangeSummonerSpellS2C {
+    int32          playerId       = 1; // 玩家ID
+    repeated int32 summonerSpell  = 2; // 召唤师技能
+}
 // 房间成员准备
 message RoomPrepareC2S {
     bool isPrepare = 1; // 是否准备 true准备, false取消准备

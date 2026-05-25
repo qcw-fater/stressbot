@@ -51,6 +51,9 @@ enum TaskTriggerType {
     TT_BattleSettlementEx_SpecifiedComic        = 42; // 战斗结算扩展-排位赛中队友全为{漫画ID}角色
     TT_BattleSettlementEx_SpecifiedOpponentHero = 43; // 战斗结算扩展-对手为{英雄ID}
     TT_BattleSettlementEx_MinimumScore          = 44; // 战斗结算扩展-战斗评分数最低
+    TT_InviteCount                              = 45; // 好友邀请活动 - X 个受邀者达到 Y 杯
+    TT_InviteRecharge                           = 46; // 好友邀请活动 - 受邀者集合累计充值金额
+    TT_FirstShareActivity                       = 47; // 首次分享活动
 }
 
 // 任务数据
@@ -81,9 +84,26 @@ message PlayerTaskRefresh {
 // 服务器内部数据
 message PlayerAchievementModel {
     map<int32, int32>           ipAchievementReward = 1; // key:ip, value:已经领取到的宝箱等级
-    map<int32, dynamicTaskList> achievement2Task    = 2; // "map<成就id, 任务uuidList >"
     map<int32, int64>           finishId            = 3; // 已经完成的成就配置表id key：成就id， value: 领奖时间
-    string                      confMd5 = 4; // 玩家当前的配置文件MD5，不一致时会在登录遍历成就表，登录时候赋值
 }
 
-message dynamicTaskList { repeated int64 UUIDList = 1; }
+// 成就任务独立进度数据
+message AchievementProgressData {
+    map<int32, AchievementTaskEntry> activeTasks = 1; // 活跃成就任务：achievementId → 进度
+    string confMd5 = 2;                                // 配置MD5
+}
+
+message AchievementTaskEntry {
+    int32              taskId           = 1; // 独立成就=配置TaskID; 复合成就=0
+    int32              progress         = 2; // 独立成就=任务进度; 复合成就=已完成子任务数
+    TaskState          taskState        = 3; // 独立成就=单任务状态; 复合成就=整体完成状态
+    int64              lastCompleteTime = 4; // 完成时间
+    repeated SubTaskProgress subTasks   = 5; // 复合成就子任务列表; 独立成就为空
+}
+
+// 子任务进度数据（复合成就使用）
+message SubTaskProgress {
+    int32     taskId     = 1; // 子任务配置表ID
+    int32     progress   = 2; // 子任务当前进度
+    TaskState taskState  = 3; // 子任务状态
+}

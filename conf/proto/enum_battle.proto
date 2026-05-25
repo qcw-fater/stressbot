@@ -16,7 +16,7 @@ enum CampType {
     CtCamp7   = 8;  // 阵营7
     CtCamp8   = 9;  // 阵营8
     CtCamp9   = 10; // 阵营9
-    JUDGE     = 11; // 裁判阵营
+    JUDGE     = 11; // 裁判阵营 最大值，增加的时候往前增加
 }
 
 enum JudgeIndex {
@@ -75,7 +75,8 @@ enum BattleSyncCmd {
     HERO_TALK                  = 29; // 英雄交流
     LFE_ITEM_CTL               = 30; // 搜打撤物品操作
     LFE_CHEST_CTL              = 31; // 搜打撤宝箱操作
-    CMD_MAX                    = 32; // 最大指令
+    SKIN_BUFF_REGISTER         = 32; // 表现层BUFF注册
+    CMD_MAX                    = 33; // 最大指令
 }
 
 // 任务参数组枚举
@@ -167,6 +168,7 @@ enum GameModel {
     GM_BattleGuide = 6; // 战斗引导
     GM_ACTIVITY    = 7; // 活动赛
     GM_HAZARD_OPS  = 8; // 危险行动（搜打撤）
+    GM_ACTIVITY_SINGLE = 9; // 单模式活动赛
 }
 
 // 玩法类型
@@ -226,7 +228,9 @@ enum EAttribute {
     HealingReceived    = 17; // 受到治疗效果
     HealingDone        = 18; // 造成治疗效果
     GreyHP             = 19; // 灰血层比列
-    MAX_INDEX          = 20; // 最大索引
+    ExtraEnergy        = 20; // 额外能量当前值
+    ExtraEnergyMax     = 21; // 额外能量最大值
+    MAX_INDEX          = 22; // 最大索引
 }
 
 // 加入队伍方式
@@ -234,4 +238,29 @@ enum JoinTeamWay {
     JTW_Normal        = 0; // 普通方式
     JTW_ConveneCreate = 1; // 通过招募创建队伍
     JTW_ConveneJoin   = 2; // 通过招募加入队伍
+}
+
+// 收益评级
+enum SDCRating {
+  SDC_RATING_INVALID = 0; // 无效
+  SDC_RATING_D       = 1; // D级
+  SDC_RATING_C       = 2; // C级
+  SDC_RATING_B       = 3; // B级
+  SDC_RATING_A       = 4; // A级
+  SDC_RATING_S       = 5; // S级
+}
+
+// 装配槽位类型
+enum SDCSlotType {
+  SDC_SLOT_TYPE_UNKNOWN            = 0; // 未知
+  SDC_SLOT_TYPE_ARMOR              = 1; // 护甲槽
+  SDC_SLOT_TYPE_SKILL              = 2; // 技能槽
+  SDC_SLOT_TYPE_BACKPACK           = 3; // 背包槽
+  SDC_SLOT_TYPE_NORMAL_AMPLIFIER   = 4; // 普攻增幅器槽
+  SDC_SLOT_TYPE_SKILL_AMPLIFIER    = 5; // 技能增幅器槽
+  SDC_SLOT_TYPE_ULTIMATE_AMPLIFIER = 6; // 大招增幅器槽
+  SDC_SLOT_TYPE_CHIP1              = 7; // 芯片槽1
+  SDC_SLOT_TYPE_CHIP2              = 8; // 芯片槽2
+  SDC_SLOT_TYPE_CHIP3              = 9; // 芯片槽3
+  SDC_SLOT_TYPE_MAX                = 10; // 最大装配槽位类型枚举值
 }

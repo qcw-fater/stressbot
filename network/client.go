@@ -3,6 +3,9 @@ package network
 import (
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
+	stresslog "stressbot/utils/log"
 )
 
 // Client 管理压测机器人的所有网络连接。
@@ -30,11 +33,13 @@ func (c *Client) ConnectTCP(serviceName string) bool {
 	defer c.mu.Unlock()
 
 	if _, ok := c.tcpConn[serviceName]; ok {
+		stresslog.Debug("[CLIENT] TCP 连接已存在，跳过", zap.String("service", serviceName), zap.String("robot", c.name))
 		return false
 	}
 
 	conn := NewConnection(serviceName, c.name, c.requestTimeout)
 	c.tcpConn[serviceName] = conn
+	stresslog.Debug("[CLIENT] TCP 连接占位已创建", zap.String("service", serviceName), zap.String("robot", c.name))
 	return true
 }
 
@@ -44,11 +49,13 @@ func (c *Client) ConnectUDP(serviceName string) bool {
 	defer c.mu.Unlock()
 
 	if _, ok := c.udpConn[serviceName]; ok {
+		stresslog.Debug("[CLIENT] UDP 连接已存在，跳过", zap.String("service", serviceName), zap.String("robot", c.name))
 		return false
 	}
 
 	conn := NewConnection(serviceName, c.name, c.requestTimeout)
 	c.udpConn[serviceName] = conn
+	stresslog.Debug("[CLIENT] UDP 连接占位已创建", zap.String("service", serviceName), zap.String("robot", c.name))
 	return true
 }
 
@@ -72,6 +79,7 @@ func (c *Client) CloseTCP(serviceName string) {
 	conn, ok := c.tcpConn[serviceName]
 	if !ok {
 		c.mu.Unlock()
+		stresslog.Debug("[CLIENT] TCP 连接不存在，跳过关闭", zap.String("service", serviceName), zap.String("robot", c.name))
 		return
 	}
 	delete(c.tcpConn, serviceName)
@@ -86,6 +94,7 @@ func (c *Client) CloseUDP(serviceName string) {
 	conn, ok := c.udpConn[serviceName]
 	if !ok {
 		c.mu.Unlock()
+		stresslog.Debug("[CLIENT] UDP 连接不存在，跳过关闭", zap.String("service", serviceName), zap.String("robot", c.name))
 		return
 	}
 	delete(c.udpConn, serviceName)
@@ -102,6 +111,9 @@ func (c *Client) CloseAll() {
 	c.tcpConn = make(map[string]*Connection)
 	c.udpConn = make(map[string]*Connection)
 	c.mu.Unlock()
+
+	stresslog.Info("[CLIENT] 关闭所有连接", zap.String("robot", c.name),
+		zap.Int("tcp", len(tcpConns)), zap.Int("udp", len(udpConns)))
 
 	for _, conn := range tcpConns {
 		conn.Close()

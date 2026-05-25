@@ -6,6 +6,118 @@ package Game;
 // 导入枚举
 import "enum_battle.proto";
 
+// ==================== SDC 战斗相关枚举 ====================
+
+// 背包类型
+enum SDCPackType {
+    SDC_PACK_TYPE_UNKNOWN    = 0; // 未知
+    SDC_PACK_TYPE_AMPLIFIER  = 1; // 增幅器背包
+    SDC_PACK_TYPE_MEDICINE   = 2; // 药品背包
+    SDC_PACK_TYPE_SAFE_BOX   = 3; // 安全箱
+    SDC_PACK_TYPE_KEY_CHAIN  = 4; // 钥匙链
+    SDC_PACK_TYPE_COLLECTION = 5; // 藏品背包
+    SDC_PACK_TYPE_MAX        = 6; // 最大背包类型枚举值
+}
+
+// 搜打撤道具类型（对应 Item.csv SubType 字段）
+enum SDCItemType {
+    SDC_ITEM_TYPE_UNKNOWN    = 0; // 未知
+    SDC_ITEM_TYPE_ARMOR      = 1; // 护甲
+    SDC_ITEM_TYPE_CHIP       = 2; // 芯片
+    SDC_ITEM_TYPE_AMPLIFIER  = 3; // 增幅器
+    SDC_ITEM_TYPE_COLLECTION = 4; // 藏品
+    SDC_ITEM_TYPE_MEDICINE   = 5; // 药品
+    SDC_ITEM_TYPE_KEY        = 6; // 钥匙
+    SDC_ITEM_TYPE_BACKPACK   = 7; // 背包
+    SDC_ITEM_TYPE_SKILL      = 8; // 技能
+}
+
+// 道具容器类型
+enum SDCContainerType {
+    SDC_CONTAINER_TYPE_WAREHOUSE  = 0; // 仓库
+    SDC_CONTAINER_TYPE_EQUIP_SLOT = 1; // 装配槽位
+    SDC_CONTAINER_TYPE_PACK       = 2; // 战备背包
+}
+
+// ==================== SDC 战斗相关消息 ====================
+
+// 搜打撤道具扩展信息（附加在ItemInfo上使用）
+// 护甲说明：护甲耐久度只能通过使用护甲药（sdcType=6, sdcSubType=2的药品）进行修复，自然不恢复
+message SDCItemExtInfo {
+    SDCItemType sdcType       = 1; // 搜打撤道具分类（对应SDCItemType枚举）
+    int32       sdcSubType    = 2; // 搜打撤子类型
+    int32       durability    = 3; // 耐久度/使用次数（初始值来自SDC_Item配置，局内消耗后减少；归零则道具消失）
+    int32       maxDurability = 4; // 最大耐久度/使用次数上限
+    int32       capacity      = 5; // 背包容量(仅背包类型)
+    int32       value         = 6; // 价值
+    int32       number        = 7; // 道具堆叠数量
+}
+
+// 仓库道具信息
+message SDCWarehouseItem {
+    int64            guid            = 1; // 道具GUID
+    int32            itemId          = 2; // 道具配置ID
+    SDCItemExtInfo   ext             = 3; // 搜打撤扩展信息（从field 4调整为field 3，原number字段已迁移至SDCItemExtInfo.number）
+    SDCContainerType containerType   = 5; // 所属容器类型
+    int32            containerDetail = 6; // 容器详情（EQUIP_SLOT时=SDCSlotType值，PACK时=SDCPackType值，WAREHOUSE时=0）
+}
+
+// 背包格子信息
+message SDCPackSlot {
+    SDCPackType               packType          = 1; // 背包类型
+    int32                     maxSlots          = 2; // 最大格子数
+    repeated SDCWarehouseItem items             = 3; // 背包内道具列表（含完整道具信息）
+    int32                     totalValue        = 4; // 背包内道具总价值
+    int32                     safeBoxParamId    = 5; // 安全箱配置ID（SDCParameter行ID），0=默认
+    int64                     safeBoxExpireTime = 6; // 过期时间戳（Unix秒），0=永不过期
+}
+
+// 装配槽位信息
+message SDCEquipSlot {
+    SDCSlotType    slotType = 1; // 槽位类型
+    int64          itemGuid = 2; // 装配的道具GUID
+    int32          itemId   = 3; // 装配的道具配置ID
+    SDCItemExtInfo ext      = 4; // 道具扩展信息
+}
+
+// SDC道具对英雄天赋/觉醒的加成数据（仅记录SDC道具带来的增量，不含英雄基础值）
+// 仅对当前英雄未激活的槽位/节点生效，服务端在装配/卸下/切换英雄时重新计算
+// 天赋限制：SDC道具只激活大天赋（TalentType=2，EquipTalent索引1/3/5），不激活小天赋
+// 客户端展示：EquipTalent[i]!=0则正常展示（玩家自身）；为0但extraEquipTalents[i]!=0则高亮展示SDC加成
+message SDCHeroTalentAwakeInfo {
+    int32          heroId            = 1; // 英雄ID（切换英雄时需重新计算）
+    repeated int32 extraAwakeIds     = 2; // SDC额外激活的觉醒节点configId列表
+                                          // 服务端从ActivateAwakeId沿NextId链推算N步（N=所有装配道具觉醒加成之和）
+    repeated int32 extraEquipTalents = 3; // SDC额外激活的大天赋状态（长度固定=6，与EquipTalent同格式）
+                                          // 仅索引1/3/5可非零，值=talentConf[i].TalentEffectList[0]
+                                          // 0=该槽无SDC加成（玩家已自行激活 或 SDC道具未覆盖该槽）
+}
+
+// 战斗结算数据（用于扩展PlayerBattleEnd）
+message SDCBattleSettleData {
+    int32                  result             = 1;  // SDC对局结果 (1-成功撤离 2-撤离失败)
+    int32                  killCount          = 2;  // 击杀玩家数（含人机玩家）
+    int32                  totalValue         = 3;  // 装配总价值（局外带入）
+    int32                  lootValue          = 4;  // 本局带出道具总价值（含安全箱保留的藏品，用于收益评级计算，持久化至赛季数据）
+    repeated int64         lostItemGuids      = 5;  // 丢失的道具GUID列表
+    repeated int64         keptItemGuids      = 6;  // 保留的道具GUID列表
+    repeated SDCPackSlot   finalPackSlots     = 7;  // 战斗结束时各背包最终状态
+    int32                  seasonCoin         = 8;  // 获得赛季币
+    int32                  monsterKillCount   = 9;  // 击杀怪物数
+    int32                  surviveTime        = 10; // 存活时长/撤离用时(秒)
+    int32                  rating             = 11; // 收益评级（对应SDCRating枚举：1=D 2=C 3=B 4=A 5=S，0=无效）
+    int32                  sdcLevel           = 12; // 结算后SDC等级
+    int32                  sdcExp             = 13; // 结算后当前经验
+    int32                  sdcExpMax          = 14; // 当前等级经验上限
+    int32                  sdcExpChange       = 15; // 本局获得经验
+    int32                  assistCount        = 16; // 助攻数（击败敌方时队友协助）
+    int32                  rescueCount        = 17; // 救助数（成功救助队友次数）
+    repeated SDCEquipSlot  finalEquipSlots    = 18; // 战斗结束时装配槽位最终状态（耐久消耗后）
+    SDCHeroTalentAwakeInfo heroInfo           = 19; // 战斗结束时天赋/觉醒加成快照（客户端结算界面展示用）
+    int32                  equipSlotValueDiff = 20; // 槽位价值差（战后FinalEquipSlots价值 - 战前装配槽位价值，负值表示损耗）
+    int32                  netLootValue       = 21; // 本局收益总价值（FinalPackSlots排除钥匙链 + FinalEquipSlots，不含战前带入道具）
+}
+
 // 局内快捷发言数据
 message battleConvenientChat {
     int32 quickChat = 1; // 快捷发言次数
@@ -32,6 +144,12 @@ message PlayerBattleStatistics {
     JoinTeamWay                   joinWay          = 16; // 加入方式
     BattleLadderInfo              battleLadderBase = 17; // 战斗内玩家排位简约数据
     int32                         addBraveScore    = 18; // 队友违规加勇者积分次数  可能有多个人违规
+    SDCBattleSettleData           sdcSettleData    = 19; // SDC战斗结算数据（仅GM_HAZARD_OPS模式）
+    int32                         sdcRetractTime   = 20; // SDC撤离时间（秒），未撤离为0
+    int32                         sdcLootValue     = 21; // SDC本局收益（带出道具总价值）
+    int32                         sdcKillCount     = 22; // SDC击败真实玩家数
+    int32                         sdcAssistCount   = 23; // SDC助攻数
+    int32                         sdcRescueCount   = 24; // SDC救助数
 }
 
 // 战斗内玩家排位简约数据(战斗前数据)
@@ -71,15 +189,20 @@ message Bo3BehaviorInfo {
 
 // 技能统计数据
 message skillStatistics {
-    int32 id            = 1; // 技能ID
-    int32 useDragCount  = 2; // 拖拽技能使用次数
-    int32 useClickCount = 3; // 点击技能使用次数
-    int32 hitDragCount  = 4; // 拖拽技能命中次数
-    int32 hitClickCount = 5; // 点击技能命中次数
-    int32 damage        = 6; // 技能造成的伤害
-    int32 cure          = 7; // 技能产生的总治疗量（包含回复和治疗）
-    int32 revert        = 8; // 回复（技能对自己产生的治疗）
-    int32 cureOther     = 9; // 治疗（对别人产生的治疗）
+    int32 id            = 1;  // 技能ID
+    int32 useDragCount  = 2;  // 拖拽技能使用次数
+    int32 useClickCount = 3;  // 点击技能使用次数
+    int32 hitDragCount  = 4;  // 拖拽技能命中次数
+    int32 hitClickCount = 5;  // 点击技能命中次数
+    int32 damage        = 6;  // 技能造成的伤害
+    int32 cure          = 7;  // 技能产生的总治疗量（包含回复和治疗）
+    int32 revert        = 8;  // 回复（技能对自己产生的治疗）
+    int32 cureOther     = 9;  // 治疗（对别人产生的治疗）
+    int32 custom1       = 10; // 自定义统计1（根据需要定义具体含义，客户端和服务器需保持一致）
+    int32 custom2       = 11; // 自定义统计2（根据需要定义具体含义，客户端和服务器需保持一致）
+    int32 custom3       = 12; // 自定义统计3（根据需要定义具体含义，客户端和服务器需保持一致）
+    int32 custom4       = 13; // 自定义统计4（根据需要定义具体含义，客户端和服务器需保持一致）
+    int32 custom5       = 14; // 自定义统计5（根据需要定义具体含义，客户端和服务器需保持一致）
 }
 
 // 战斗标记（用于举报）
@@ -434,5 +557,5 @@ message PlayerBattleResult {
     repeated HeroBattleStatistics heroStats     = 9;  // 英雄战斗统计数据
     int32                         joinWay       = 10; // 加入方式
     int32                         rank          = 11; // 战斗排名
-	int32                      	  camp          = 12; // 玩家所属阵营
+    int32                         camp          = 12; // 玩家所属阵营
 }

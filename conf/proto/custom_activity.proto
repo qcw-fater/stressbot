@@ -87,7 +87,8 @@ message ActivityBaseInfo {
     repeated int32 CashID         = 21; // 直购ID
     string         rule           = 22; // 活动规则
     int32          shopId         = 23; // 商店id
-    int32          goodsId        = 24; // 商品id
+    int32          GoodsId         = 24; // 商店id
+    GMActivityInfoExtra    position    = 25; //坐标信息
 }
 
 // 后台活动配置数据
@@ -97,3 +98,4 @@ message GMActivityInfo {
     int64            endTime   = 3; // 活动结束时间  绝对时间才会赋值
     int64            uid       = 4; // 活动唯一id
 }
+

@@ -14,6 +14,8 @@ import "custom_hero.proto";
 import "clickhouse_table.proto";
 import "lbs.proto";
 import "custom_activity_battle.proto";
+import "custom_sdc.proto";
+import "custom_activity_battle_single.proto";
 
 // 初始化注册消息(TCP)
 message BattleRegisterC2S {
@@ -99,8 +101,7 @@ message BattleRewardS2C {
     int64                        battleId         = 4; // 战斗id
     BattleLadder                 ladderChange     = 5; // 排位赛结算
     repeated LbsAddScoreDetails  lbsScoreDetails  = 6; // 战斗结算LBS积分详情
-    LbsData                      nextLbsData      = 7; // 下一级LBS数据
-    BattleRecreation             recreationChange = 8; // 娱乐赛结算
+    BattleRecreation             recreationChange = 7; // 娱乐赛结算
 }
 
 // 娱乐赛结算
@@ -153,16 +154,17 @@ message BattleLadder {
 
 // 战斗结算LBS积分详情
 message LbsAddScoreDetails {
-    int32 nowScore                        = 1;  // 当前积分
-    int32 diffScore                       = 2;  // 当前积分和上一场积分的差值
-    int32 addPerformanceBattlePower       = 3;  // 本场增加的排位赛表现战力
-    int32 performanceBattlePowerBaseScore = 4;  // 排位赛表现战力基础分
-    int32 mvpAddScore                     = 5;  // 个人表现
-    int32 gridingCoefficient              = 6;  // 段位加成（放大100倍）
-    int32 consecutiveWinCoefficient       = 7;  // 近期战绩（放大100倍）
-    int32 teamCoefficient                 = 8;  // 组队系数（放大100倍）
-    int32 avgCoefficient                  = 9;  // 平均分系数（放大100倍）
-    int32 heroId                          = 10; // 英雄Id
+    int32       nowScore                        = 1;  // 当前积分
+    int32       diffScore                       = 2;  // 当前积分和上一场积分的差值
+    int32       addPerformanceBattlePower       = 3;  // 本场增加的排位赛表现战力
+    int32       performanceBattlePowerBaseScore = 4;  // 排位赛表现战力基础分
+    int32       mvpAddScore                     = 5;  // 个人表现
+    int32       gridingCoefficient              = 6;  // 段位加成（放大100倍）
+    int32       consecutiveWinCoefficient       = 7;  // 近期战绩（放大100倍）
+    int32       teamCoefficient                 = 8;  // 组队系数（放大100倍）
+    int32       avgCoefficient                  = 9;  // 平均分系数（放大100倍）
+    int32       heroId                          = 10; // 英雄Id
+    LbsData     nextLbsData                     = 11; // 下一级LBS数据
 }
 
 // 英雄奖励
@@ -275,6 +277,7 @@ message Record {
     int32                   matchFlag                 = 16; // 匹配标志 0正常 1补偿局 2温暖局
     repeated PlayerGameInfo lookPlayer                = 17; // 观战席玩家
     int32                   hazardOpsDifficultyLevel  = 18; // 搜打撤难度等级
+    SDCDropData             sdcDropData               = 19; // SDC战场掉落数据（仅GM_HAZARD_OPS模式）
 }
 
 // 开始加载(TCP)
@@ -784,14 +787,14 @@ message BattleAiStartLoadingS2C {
 // 战斗中途结算
 message BattleMidwaySettlementC2S {
     BattleEndC2S   brData           = 1; // 结算数据
-    repeated int32 deadPlayerIdList = 2; // 死亡玩家id列表
-    int32          frameIndex       = 3; // 死亡帧索引
+    int32 settlementPlayerId = 2; // 结算玩家Id
+    int32          frameIndex       = 3; // 结算帧索引
 }
 
 // 战斗中途结算
 message BattleMidwaySettlementS2C {
-    repeated int32 deadPlayerIdList = 1; // 死亡玩家id列表
-    int32          frameIndex       = 2; // 死亡帧索引
+    int32 settlementPlayerId = 1; // 结算玩家Id
+    int32          frameIndex       = 2; // 结算帧索引
 }
 
 // 战斗中途退出
@@ -828,6 +831,7 @@ message PlayerBattleEnd {
     repeated RoundStatistics           bonStatisData    = 15; // 打点数据，bo3模式下所有玩家每回合的战斗数据 index:回合
     int32                              addBraveScore    = 16; // 队友违规给自己的勇者积分
     int32                              battleActivitySteo   = 17; // 活动赛阶段
+    SDCDropData                          sdcDropData          = 18; // SDC战场掉落数据（仅GM_HAZARD_OPS模式回传）
 }
 
 // 服务器结算广播战斗结束消息(BattleTCP)
@@ -853,6 +857,11 @@ message BattleDuelDeadExitC2S {
 }
 // 吃鸡死亡退出观战（已经发过战斗中途退出消息）
 message BattleDuelDeadExitS2C {
+}
+// SDC搜打撤玩家退出（撤离成功/失败后点击退出，已发过中途结算消息）
+message BattleSDCPlayerExitC2S {
+}
+message BattleSDCPlayerExitS2C {
 }
 //活动赛获取数据
 message BattleActivityGetDataC2S
@@ -898,4 +907,43 @@ message BattleActivityBuyFailNumS2C
 message BattleTrainResultC2S
 {
     PlayerBattleResult result = 1; // 训练营结算结果
+}
+//单模式活动赛获取数据
+message BattleActivitySingleGetDataC2S
+{
+}
+//单模式活动赛获取数据
+message BattleActivitySingleGetDataS2C
+{
+    ActivityBattleSingleDbInfo data = 1; //单模式活动赛数据
+}
+//单模式活动赛领奖
+message BattleActivitySingleGetRewardC2S
+{
+    int32 id = 1; //奖励配置id
+}
+//单模式活动赛领奖
+message BattleActivitySingleGetRewardS2C
+{
+}
+//单模式活动赛数据推送
+message BattleActivitySingleDataS2C
+{
+    ActivityBattleSingleDbInfo data = 1; //单模式活动赛数据
+}
+//单模式活动赛购买失败次数
+message BattleActivitySingleBuyFailNumC2S
+{
+}
+//单模式活动赛购买失败次数
+message BattleActivitySingleBuyFailNumS2C
+{
+}
+//SDC搜打撤玩家退出
+message BattleSdcPlayerExitC2S
+{
+}
+//SDC搜打撤玩家退出
+message BattleSdcPlayerExitS2C
+{
 }

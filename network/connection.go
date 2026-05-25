@@ -116,13 +116,17 @@ func (c *Connection) GetSecretKey() []byte {
 }
 
 // RequestResponse 发送请求并同步等待响应。
-func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOverride ...time.Duration) (*Message, error) {
+//
+// 返回值 netLatency 是"Send 完成 → 收到响应（或超时/断连）"的纯网络往返时长，
+// 不含调用方在 Go 侧的 proto 构建 / 加密编码 / 响应解析等客户端开销。
+// 所有结果分支（成功 / 超时 / ctx 取消）均返回有效的 netLatency；发送阶段失败时返回 0。
+func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOverride ...time.Duration) (*Message, time.Duration, error) {
 	if c == nil {
-		return nil, engine.NewActionError(errcode.ErrConnNotFound, "routeKey="+routeKey)
+		return nil, 0, engine.NewActionError(errcode.ErrConnNotFound, "routeKey="+routeKey)
 	}
 	if atomic.LoadInt32(&c.isClose) == 1 {
-		stresslog.Warn("[NETWORK] RequestResponse 连接已关闭", zap.String("service", c.serviceName), zap.String("routeKey", routeKey))
-		return nil, engine.NewActionError(errcode.ErrConnClosed, c.serviceName+" routeKey="+routeKey)
+		stresslog.Warn("[NETWORK] RequestResponse 连接已关闭", zap.String("service", c.serviceName), zap.String("routeKey", routeKey), zap.String("robot", c.robotName))
+		return nil, 0, engine.NewActionError(errcode.ErrConnClosed, c.serviceName+" routeKey="+routeKey)
 	}
 
 	ch := make(chan *Message, 1)
@@ -137,16 +141,19 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 		close(ch)
 	}()
 
+	// netStart 紧贴 Send 之前；后续所有结果分支测量到此为止的 elapsed
+	// 作为该次请求的"纯网络往返时间"上报给 monitor。
+	netStart := time.Now()
 	n, sendErr := c.Send(sendData)
 	if sendErr != nil {
 		stresslog.Error("[NETWORK] RequestResponse 发送失败",
 			zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
+			zap.String("robot", c.robotName),
 			zap.Int("pktLen", len(sendData)))
-		return nil, sendErr
+		return nil, 0, sendErr
 	}
 	_ = n
 
-	start := time.Now()
 	timeout := c.requestTimeout
 	if len(timeoutOverride) > 0 && timeoutOverride[0] > 0 {
 		timeout = timeoutOverride[0]
@@ -154,24 +161,26 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 	timeoutTimer := time.After(timeout)
 	select {
 	case <-c.ctx.Done():
-		elapsed := time.Since(start)
+		elapsed := time.Since(netStart)
 		stresslog.Warn("[NETWORK] RequestResponse 连接已断开",
 			zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
+			zap.String("robot", c.robotName),
 			zap.Duration("elapsed", elapsed))
-		return nil, engine.NewActionError(errcode.ErrConnDropped, c.serviceName+" routeKey="+routeKey)
+		return nil, elapsed, engine.NewActionError(errcode.ErrConnDropped, c.serviceName+" routeKey="+routeKey)
 	case resp := <-ch:
-		elapsed := time.Since(start)
+		elapsed := time.Since(netStart)
 		stresslog.Debug("[NETWORK] RequestResponse 收到响应",
 			zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
+			zap.String("robot", c.robotName),
 			zap.Int("bodyLen", len(resp.Data)), zap.Duration("elapsed", elapsed))
-		return resp, nil
+		return resp, elapsed, nil
 	case <-timeoutTimer:
-		elapsed := time.Since(start)
+		elapsed := time.Since(netStart)
 		stresslog.Warn("[NETWORK] RequestResponse 等待超时",
 			zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
-			zap.String("robot", c.robotName), zap.Duration("elapsed", elapsed),
+			zap.String("robot", c.robotName),
 			zap.Duration("timeout", timeout))
-		return nil, engine.NewTimeoutError(errcode.ErrRecvTimeout, c.serviceName+" routeKey="+routeKey+" timeout="+timeout.String())
+		return nil, elapsed, engine.NewTimeoutError(errcode.ErrRecvTimeout, c.serviceName+" routeKey="+routeKey+" timeout="+timeout.String())
 	}
 }
 
@@ -382,6 +391,7 @@ func (c *Connection) OnReceive(routeKey string, body []byte, headerErr uint64) {
 
 	stresslog.Debug("[NETWORK] OnReceive",
 		zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
+			zap.String("robot", c.robotName),
 		zap.Int("bodyLen", len(body)))
 
 	resp := NewMessage(routeKey, body, headerErr)
@@ -411,5 +421,10 @@ func (c *Connection) OnReceive(routeKey string, body []byte, headerErr uint64) {
 	}
 
 	c.mu.Unlock()
+	stresslog.Debug("[NETWORK] OnReceive 未匹配任何请求或监听",
+		zap.String("service", c.serviceName),
+		zap.String("routeKey", routeKey),
+			zap.String("robot", c.robotName),
+		zap.Int("bodyLen", len(body)))
 }
 

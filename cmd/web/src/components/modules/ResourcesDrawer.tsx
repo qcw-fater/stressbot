@@ -491,21 +491,132 @@ function ResourceTable({ kind }: ResourceTableProps) {
     return () => unsub();
   }, [kind]);
 
-  const handleUpload: UploadProps['customRequest'] = async ({ file, onSuccess, onError }) => {
-    try {
-      const f = file as File;
-      const text = await f.text();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 });
+
+  const handleBatchUpload = async (fileList: FileList) => {
+    const files = Array.from(fileList);
+    if (files.length === 0) return;
+    setUploading(true);
+    setUploadProgress({ current: 0, total: files.length });
+
+    // 阶段 1：读取全部文件，按文件名去重（保留最后一个）
+    const batch = new Map<string, { name: string; content: string }>();
+    let readFail = 0;
+    for (let i = 0; i < files.length; i++) {
+      try {
+        const text = await files[i].text();
+        batch.set(files[i].name, { name: files[i].name, content: text });
+      } catch {
+        readFail++;
+      }
+      setUploadProgress({ current: i + 1, total: files.length });
+    }
+
+    if (batch.size === 0) {
+      setUploading(false);
+      message.error('全部文件读取失败');
+      return;
+    }
+
+    // 阶段 2：检测与已有资源的同名冲突
+    const existing = kind === 'proto' ? await listProto() : await listScript();
+    const existingNames = new Set(existing.map((f) => f.name));
+    const conflicts: string[] = [];
+    const newFiles: { name: string; content: string }[] = [];
+    for (const f of batch.values()) {
+      if (existingNames.has(f.name)) conflicts.push(f.name);
+      else newFiles.push(f);
+    }
+
+    let toWrite: { name: string; content: string }[];
+    let overwritten = 0;
+
+    if (conflicts.length > 0) {
+      // 注意：点击遮罩/ESC 与点击取消按钮效果相同（resolve(false) → 跳过冲突，仅上传新文件），
+      // antd modal.confirm API 无法区分这两种操作。
+      const doOverwrite = await new Promise<boolean>((resolve) => {
+        modal.confirm({
+          title: '发现同名文件',
+          content: (
+            <div>
+              <p>
+                已选 {batch.size} 个文件中有 <b>{conflicts.length}</b> 个与已有资源同名：
+              </p>
+              <div style={{ maxHeight: 120, overflow: 'auto', lineHeight: 1.8, margin: '4px 0' }}>
+                {conflicts.map((name) => (
+                  <div key={name}>
+                    <code>{name}</code>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ),
+          okText: '覆盖全部',
+          okType: 'primary',
+          cancelText: conflicts.length < batch.size ? '仅上传新文件' : '取消',
+          onOk: () => resolve(true),
+          onCancel: () => resolve(false),
+        });
+      });
+
+      if (doOverwrite) {
+        toWrite = Array.from(batch.values());
+        overwritten = conflicts.length;
+      } else {
+        toWrite = newFiles;
+      }
+    } else {
+      toWrite = Array.from(batch.values());
+    }
+
+    // 阶段 3：写入 IndexedDB
+    if (toWrite.length > 0) {
       if (kind === 'proto') {
-        await addProtos([{ name: f.name, content: text }]);
+        await addProtos(toWrite);
         await reloadProtos();
       } else {
-        await addScripts([{ name: f.name, content: text }]);
+        await addScripts(toWrite);
       }
-      message.success(`${f.name} 已上传`);
-      onSuccess?.({}, new XMLHttpRequest());
-    } catch (e) {
-      message.error(`上传失败：${(e as Error).message}`);
-      onError?.(e as Error);
+    }
+
+    setUploading(false);
+
+    // 阶段 4：汇总提示
+    const skipped = conflicts.length - overwritten;
+
+    if (files.length === 1) {
+      if (toWrite.length > 0) {
+        message.success(overwritten > 0 ? `${files[0].name} 已上传（覆盖）` : `${files[0].name} 已上传`);
+      } else {
+        message.info(`已跳过同名文件 ${files[0].name}`);
+      }
+      return;
+    }
+
+    if (toWrite.length === 0 && readFail === 0) {
+      message.info('已跳过全部同名文件');
+      return;
+    }
+
+    const parts: string[] = [];
+    if (toWrite.length > 0) {
+      parts.push(
+        overwritten > 0
+          ? `${toWrite.length} 个已上传（含 ${overwritten} 个覆盖）`
+          : `${toWrite.length} 个已上传`,
+      );
+    }
+    if (skipped > 0) parts.push(`${skipped} 个同名跳过`);
+    if (readFail > 0) parts.push(`${readFail} 个读取失败`);
+
+    if (readFail === 0 && skipped === 0) {
+      message.success(parts[0]);
+    } else if (toWrite.length > 0) {
+      message.warning(parts.join('，'));
+    } else {
+      message.error(parts.join('，'));
     }
   };
 
@@ -620,16 +731,27 @@ function ResourceTable({ kind }: ResourceTableProps) {
         {KIND_DESC[kind]}
       </Typography.Text>
       <Space wrap>
-        <Upload
+        <input
+          ref={fileInputRef}
+          type="file"
           accept={KIND_EXT[kind].join(',')}
           multiple
-          showUploadList={false}
-          customRequest={handleUpload}
+          hidden
+          onChange={(e) => {
+            if (e.target.files?.length) handleBatchUpload(e.target.files);
+            e.target.value = '';
+          }}
+        />
+        <Button
+          type="primary"
+          icon={<InboxOutlined />}
+          loading={uploading}
+          onClick={() => fileInputRef.current?.click()}
         >
-          <Button type="primary" icon={<InboxOutlined />}>
-            上传 {KIND_LABEL[kind]} 文件
-          </Button>
-        </Upload>
+          {uploading
+            ? `上传中 ${uploadProgress.current}/${uploadProgress.total}`
+            : `上传 ${KIND_LABEL[kind]} 文件`}
+        </Button>
         <Button danger disabled={items.length === 0} onClick={handleClearAll}>
           清空
         </Button>

@@ -32,6 +32,10 @@ type TaskRunner struct {
 	collector  *monitor.MetricsCollector
 	httpCli    *http.Client
 	workDir    string
+
+	// OnStageReset 渐进式加压阶段重置回调，由调用方（Agent.executeTask）注入。
+	// 在 resetBots() 完成后调用，用于上报当前阶段指标并重置采集器。
+	OnStageReset func(completedStageIdx int)
 }
 
 // NewTaskRunner 创建任务执行器。
@@ -115,6 +119,7 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 	poolSize := runtime.NumCPU()
 	adp, err := adapter.NewLuaAdapter(poolSize, adapterScript, errorMapScript)
 	if err != nil {
+	stresslog.Error("[TASK] 加载适配器失败", zap.String("taskID", taskID), zap.Error(err))
 		return TaskFailed, fmt.Sprintf("加载适配器失败: %v", err)
 	}
 	defer adp.Close()
@@ -123,6 +128,7 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 	loader := protox.NewLoader([]string{protoDir}, nil)
 	files, err := loader.Load()
 	if err != nil {
+	stresslog.Error("[TASK] 加载 proto 文件失败", zap.String("taskID", taskID), zap.Error(err))
 		return TaskFailed, fmt.Sprintf("加载 proto 文件失败: %v", err)
 	}
 
@@ -132,6 +138,7 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 	// 5. 加载流程配置
 	flow, err := loadTaskFlow(filepath.Join(confDir, "flow", "flow.json"))
 	if err != nil {
+	stresslog.Error("[TASK] 加载流程配置失败", zap.String("taskID", taskID), zap.Error(err))
 		return TaskFailed, fmt.Sprintf("加载流程配置失败: %v", err)
 	}
 
@@ -162,6 +169,7 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 	// 8. 启动 gnet 网络引擎
 	dialer := network.NewDialer(adp, hbInterval)
 	if err := dialer.Start(); err != nil {
+	stresslog.Error("[TASK] 启动网络引擎失败", zap.String("taskID", taskID), zap.Error(err))
 		return TaskFailed, fmt.Sprintf("启动网络引擎失败: %v", err)
 	}
 	defer dialer.Stop()
@@ -197,10 +205,12 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 				Count:       s.Count,
 				Concurrency: s.Concurrency,
 				HoldSec:     s.HoldSec,
+				Reset:       s.Reset,
 			})
 		}
 	}
 	mgr := robot.NewManager(mgrCfg, flow, factory, dialer, luaPool)
+	mgr.OnStageReset = r.OnStageReset
 
 	// 11. 启动机器人
 	var startErr error
@@ -210,6 +220,12 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 		startErr = mgr.StartAll()
 	}
 	if startErr != nil {
+		// 渐进式加压在 ctx cancel 后会从 StartWithRampUp 返回 context.Canceled，
+		// 这是"用户主动停止"而非"失败"，按 TaskStopped 上报，避免历史归档误判为失败。
+		if ctx.Err() == context.Canceled || strings.Contains(startErr.Error(), context.Canceled.Error()) {
+			stresslog.Info("[TASK] 启动阶段被取消", zap.String("taskID", taskID), zap.Error(startErr))
+			return TaskStopped, ""
+		}
 		return TaskFailed, fmt.Sprintf("启动机器人失败: %v", startErr)
 	}
 	stresslog.Info("[TASK] 任务执行中",
@@ -229,6 +245,7 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 	if ctx.Err() == context.Canceled {
 		return TaskStopped, ""
 	}
+stresslog.Info("[TASK] 任务已完成", zap.String("taskID", taskID), zap.Int("totalBots", r.assignment.TotalBots))
 	return TaskCompleted, ""
 }
 

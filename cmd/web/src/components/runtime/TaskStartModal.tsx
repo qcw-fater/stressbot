@@ -92,10 +92,14 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
     robotConfig,
     deadline,
     agents,
+    rampUpEnabled,
+    rampUpStages,
     setTaskName,
     setTotalBots,
     setRobotConfig,
     setDeadline,
+    setRampUpEnabled,
+    setRampUpStages,
   } = useRuntimeStore(
     useShallow((s) => ({
       taskName: s.taskName,
@@ -103,10 +107,14 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
       robotConfig: s.robotConfig,
       deadline: s.deadline,
       agents: s.agents,
+      rampUpEnabled: s.rampUpEnabled,
+      rampUpStages: s.rampUpStages,
       setTaskName: s.setTaskName,
       setTotalBots: s.setTotalBots,
       setRobotConfig: s.setRobotConfig,
       setDeadline: s.setDeadline,
+      setRampUpEnabled: s.setRampUpEnabled,
+      setRampUpStages: s.setRampUpStages,
     })),
   );
 
@@ -128,10 +136,6 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
   const [missingScripts, setMissingScripts] = useState<string[]>([]);
   /** 资源同步进行中，给 UI 一个轻量 loading 态 */
   const [syncing, setSyncing] = useState(false);
-  /** 渐进式加压开关 */
-  const [rampUpEnabled, setRampUpEnabled] = useState(false);
-  /** 渐进式阶段列表 */
-  const [rampUpStages, setRampUpStages] = useState<RampUpStage[]>([{ count: 0 }]);
 
   // 弹窗打开 → 基线资源全量对比 + flow 引用脚本 gap-fill + 收集 IDB 全集
   useEffect(() => {
@@ -208,16 +212,34 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
 
   const onlineAgents = (agents ?? []).filter((a) => a.status !== 'offline').length;
 
-  // 调试模式下不再硬性禁止超容量；普通模式按容量预检。
-  const capacityWarn = !debugMode && totalBots > totalCapacity;
-  const noAgentBlock = onlineAgents === 0; // 无 Agent 在线连调试也跑不起来，仍禁用启动
-
   // 渐进式加压：阶段 count 之和
   const rampUpSum = useMemo(
     () => rampUpStages.reduce((s, st) => s + (st.count || 0), 0),
     [rampUpStages],
   );
-  const rampUpValid = !rampUpEnabled || (rampUpStages.length > 0 && rampUpSum === totalBots && rampUpStages.every((st) => st.count > 0));
+
+  // 渐进式加压：计算峰值并发数（考虑 reset）
+  // reset=true 的阶段开始前会清空已有机器人，所以峰值是各阶段的最大瞬时并发
+  const peakBots = useMemo(() => {
+    if (!rampUpEnabled) return totalBots;
+    let running = 0;
+    let peak = 0;
+    for (const st of rampUpStages) {
+      if (st.reset) {
+        running = 0; // 清空后从零开始
+      }
+      running += st.count || 0;
+      if (running > peak) peak = running;
+    }
+    return peak;
+  }, [rampUpEnabled, rampUpStages, totalBots]);
+
+  // 渐进式加压开启时，totalBots 由阶段累加自动推导，只需检查每阶段 count > 0
+  const rampUpValid = !rampUpEnabled || (rampUpStages.length > 0 && rampUpSum > 0 && rampUpStages.every((st) => st.count > 0));
+
+  // 容量预检：用峰值并发数而非总和，因为 reset 阶段不会叠加
+  const capacityWarn = !debugMode && peakBots > totalCapacity;
+  const noAgentBlock = onlineAgents === 0; // 无 Agent 在线连调试也跑不起来，仍禁用启动
 
   function onToggleDebug(v: boolean) {
     setDebugMode(v);
@@ -240,7 +262,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
     try {
       const id = await startTask({
         name: taskName,
-        totalBots,
+        totalBots: rampUpEnabled ? rampUpSum : totalBots,
         robotConfig: {
           ...robotConfig,
           debugMode,
@@ -288,7 +310,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
           missingScripts.length > 0 ||
           syncing ||
           !taskName.trim() ||
-          totalBots <= 0 ||
+          peakBots <= 0 ||
           !rampUpValid,
         danger: debugMode ? false : undefined,
       }}
@@ -359,30 +381,52 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
         <Form.Item label="任务名" required>
           <Input value={taskName} onChange={(e) => setTaskName(e.target.value)} placeholder="例：200v200 v1.2" />
         </Form.Item>
-        <Form.Item
-          label="集群总机器人数"
-          required
-          extra={
-            debugMode ? (
+        {!rampUpEnabled && (
+          <Form.Item
+            label="集群总机器人数"
+            required
+            extra={
+              debugMode ? (
+                <span>
+                  <Tag color="purple" style={{ marginRight: 6 }}>
+                    调试
+                  </Tag>
+                  建议保持 1；集群总容量 {totalCapacity}
+                </span>
+              ) : (
+                `集群总容量 ${totalCapacity}`
+              )
+            }
+          >
+            <InputNumber
+              min={1}
+              max={100000}
+              value={totalBots}
+              onChange={(v) => setTotalBots(typeof v === 'number' ? v : 0)}
+              style={{ width: '100%' }}
+            />
+          </Form.Item>
+        )}
+        {rampUpEnabled && (
+          <Form.Item
+            label="集群总机器人数"
+            extra={
               <span>
-                <Tag color="purple" style={{ marginRight: 6 }}>
-                  调试
-                </Tag>
-                建议保持 1；集群总容量 {totalCapacity}
+                集群总容量 {totalCapacity}
+                {rampUpStages.some((s) => s.reset) && (
+                  <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
+                    · 峰值并发 {peakBots}
+                  </Typography.Text>
+                )}
               </span>
-            ) : (
-              `集群总容量 ${totalCapacity}`
-            )
-          }
-        >
-          <InputNumber
-            min={1}
-            max={100000}
-            value={totalBots}
-            onChange={(v) => setTotalBots(typeof v === 'number' ? v : 0)}
-            style={{ width: '100%' }}
-          />
-        </Form.Item>
+            }
+          >
+            <Typography.Text strong>{rampUpSum}</Typography.Text>
+            <Typography.Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+              由各阶段机器人数自动累加
+            </Typography.Text>
+          </Form.Item>
+        )}
         <Form.Item label="并发（每秒新建机器人数）">
           <InputNumber
             min={1}
@@ -409,7 +453,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
                 onChange={(checked) => {
                   setRampUpEnabled(checked);
                   if (checked && rampUpStages.length === 0) {
-                    setRampUpStages([{ count: 0 }]);
+                    setRampUpStages([{ count: 0, holdSec: 30 }]);
                   }
                 }}
                 disabled={debugMode}
@@ -441,7 +485,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
                         <InputNumber
                           size="small"
                           min={1}
-                          max={totalBots}
+                          max={totalCapacity}
                           value={v || undefined}
                           placeholder="数量"
                           onChange={(n) => {
@@ -480,10 +524,10 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
                       render: (v: number | undefined, _, i) => (
                         <InputNumber
                           size="small"
-                          min={0}
+                          min={30}
                           max={3600}
                           value={v}
-                          placeholder="0"
+                          placeholder="30"
                           onChange={(n) => {
                             const next = [...rampUpStages];
                             next[i] = { ...next[i], holdSec: typeof n === 'number' ? n : undefined };
@@ -491,6 +535,26 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
                           }}
                           style={{ width: '100%' }}
                         />
+                      ),
+                    },
+                    {
+                      title: '阶段重置',
+                      dataIndex: 'reset',
+                      width: 80,
+                      align: 'center',
+                      render: (v: boolean | undefined, _, i) => (
+                        <Tooltip title={i === 0 ? '第一阶段无需重置' : '开始前清空已有机器人'}>
+                          <Switch
+                            size="small"
+                            disabled={i === 0}
+                            checked={v ?? false}
+                            onChange={(checked) => {
+                              const next = [...rampUpStages];
+                              next[i] = { ...next[i], reset: checked || undefined };
+                              setRampUpStages(next);
+                            }}
+                          />
+                        </Tooltip>
                       ),
                     },
                     {
@@ -516,16 +580,16 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
                     size="small"
                     type="dashed"
                     icon={<PlusOutlined />}
-                    onClick={() => setRampUpStages([...rampUpStages, { count: 0 }])}
+                    onClick={() => setRampUpStages([...rampUpStages, { count: 0, holdSec: 30 }])}
                   >
                     添加阶段
                   </Button>
                   <Typography.Text
-                    type={rampUpSum === totalBots ? 'success' : 'warning'}
+                    type={rampUpSum > 0 ? 'success' : 'warning'}
                     style={{ fontSize: 12 }}
                   >
-                    合计 {rampUpSum} / {totalBots}
-                    {rampUpSum !== totalBots && totalBots > 0 && '（需等于总机器人数）'}
+                    合计 {rampUpSum} 台机器人
+                    {rampUpSum === 0 && '（请填写各阶段机器人数）'}
                   </Typography.Text>
                 </Space>
               </>

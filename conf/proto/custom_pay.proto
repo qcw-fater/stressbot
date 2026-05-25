@@ -32,6 +32,11 @@ message purchasePayloadInfo {
 }
 
 
+// 直购限购类型数据（按限购类型分组）
+message cashGoodsLimitTypeData {
+  map<string, int32> goodsCount = 1; // key:商品id(CashGoods ID) value:已购次数
+}
+
 // 玩家充值统计
 message playerPayStatistics {
   map<string,double>            money             = 1; // 充值的钱 key:法币名称 value:累计充值数量
@@ -42,11 +47,22 @@ message playerPayStatistics {
   int64                         totalPayCoupons   = 6; // 累计充值点券
   firstRewardFlag               firstReward       = 7; // 首次充值奖励标识
   int32                         totalCouponsValue = 8; // 累计充值价值
+  map<int32, cashGoodsLimitTypeData> cashLimitCount = 9; // 直购限购计数 key:限购类型 value:该类型下各商品已购次数
 }
 
+// 首充奖励标识（多档位结构）
+// FEATURE-4050：首充支持多档位呈现解锁梯度
+// 历史字段 flag/loginDay 已 reserved，请勿复用 tag=1/2
 message firstRewardFlag {
-  map<int32,int32>   flag       = 1; // key:天数,value: 首冲奖励标识 0 未达成 1首冲奖励未领取 2已领取首冲奖励
-  int32              loginDay   = 2; // 开启首充奖励后的登录天数
+  reserved 1, 2;
+  reserved "flag", "loginDay";
+  map<int32, gradeFlag> grades = 3; // key:档位ID(FirstPay.csv ID), value:该档位状态
+}
+
+// 单个首充档位的领取状态
+message gradeFlag {
+  int32             startDay = 1; // 该档位已开放到第几天(1-based, 购买当日=1, 跨天累加, 封顶=len(RewardID))
+  map<int32, int32> flag     = 2; // key:天序号(1-based), value: 0未达成 1可领 2已领
 }
 
 // 玩家月卡数据
@@ -80,4 +96,25 @@ message RpcRefundInfo {
   RefundInfo       refundData   = 1;   // 退款订单数据
   repeated string  purchaseIds  = 2;   // 原始订单列表
   repeated string  payCfgIds    = 3;   // 配置表id列表
+}
+
+// 充值补单数据（GM后台 → Logic）
+message GmPayReissueData {
+  // 必填字段（场景A + B）
+  int32  playerId        = 1;  // 玩家ID
+  string purchaseId      = 2;  // 订单唯一ID（幂等性主键）
+  string operatorId      = 3;  // 后台操作人ID（审计）
+  string remark          = 4;  // 补单原因备注（审计）
+
+  // 场景B必填字段（订单不存在时由后台补充）
+  string storeProductId  = 5;  // 商品配置ID（CashGoodsConfig主键）
+  string userId          = 6;  // 第三方账号ID
+  string currencyCode    = 7;  // 法币代码（如USD/CNY）
+  double price           = 8;  // 法币金额
+  string store           = 9;  // 渠道（如google/apple/dena）
+  string purchasePayload = 10; // 透传数据JSON（可选）
+
+  // 元数据
+  int32  scene           = 11; // 1=场景A 2=场景B
+  int64  createTime      = 12; // 后台发起时间戳
 }

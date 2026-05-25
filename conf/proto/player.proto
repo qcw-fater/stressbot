@@ -13,6 +13,7 @@ import "clickhouse_table.proto";
 import "lbs.proto";
 import "custom_recreation.proto";
 import "custom_activity_battle.proto";
+import "custom_activity_battle_single.proto";
 import "custom_sdc.proto";
 
 // 玩家ID
@@ -160,7 +161,7 @@ message StatisticsRecord {
     repeated int32                 gotStageGuideRewardIds = 17; // 细分教学领取奖励ids
     repeated int32                 finishStageGuideIds    = 18; // 细分教学引导完成ids
     map<int32, heroWinInfo>        heroWinData            = 19; // 英雄胜场次数key:英雄id value:英雄连胜数据
-    int32                          lastLadderModeId       = 20; // 上一把排位赛的地图ID
+    int32                          lastLadderModeType     = 20; // 上一把排位赛的模式类型
 }
 
 message heroWinInfo {
@@ -207,24 +208,25 @@ message HeroBattleBaseInfoStats {
 
 // 玩家匹配数据
 message playerMatchInfo {
-    PlayerBase           base              = 1;  // 玩家基础数据
-    CampType             camp              = 2;  // 阵营
-    bool                 isRobot           = 3;  // 是否为机器人
-    int32                index             = 4;  // 房间内的唯一编号
-    int64                teamId            = 5;  // 队伍Id
-    int64                roomId            = 6;  // 房间Id
-    int64                sessionId         = 7;  // 校验Id
-    int32                matchCostTime     = 8;  // 匹配耗时
-    int32                lsId              = 9;  // 逻辑服Id
-    int32                tsId              = 10; // 队伍服Id
-    int32                rsId              = 11; // 房间服Id
-    repeated BattleDelay battleDelayList   = 12; // 战斗区域延迟
-    int32                robotAiLevel      = 13; // 机器人Ai等级
-    MatchBattleStats     playerBattleStats = 14; // 战斗统计
-    repeated int32       matchBlack        = 15; // 匹配黑名单
-    map<string, int32>   creditTimes       = 16; // 玩家当前违规次数
-    int64                notReadyEndTime   = 17; // 玩家匹配未准备惩罚结束时间
+    PlayerBase           base                 = 1;  // 玩家基础数据
+    CampType             camp                 = 2;  // 阵营
+    bool                 isRobot              = 3;  // 是否为机器人
+    int32                index                = 4;  // 房间内的唯一编号
+    int64                teamId               = 5;  // 队伍Id
+    int64                roomId               = 6;  // 房间Id
+    int64                sessionId            = 7;  // 校验Id
+    int32                matchCostTime        = 8;  // 匹配耗时
+    int32                lsId                 = 9;  // 逻辑服Id
+    int32                tsId                 = 10; // 队伍服Id
+    int32                rsId                 = 11; // 房间服Id
+    repeated BattleDelay battleDelayList      = 12; // 战斗区域延迟
+    int32                robotAiLevel         = 13; // 机器人Ai等级
+    MatchBattleStats     playerBattleStats    = 14; // 战斗统计
+    repeated int32       matchBlack           = 15; // 匹配黑名单
+    map<string, int32>   creditTimes          = 16; // 玩家当前违规次数
+    int64                notReadyEndTime      = 17; // 玩家匹配未准备惩罚结束时间
     ActivityBattleDbInfo activityBattleDbInfo = 18; // 活动赛数据
+    ActivityBattleSingleDbInfo activityBattleSingleDbInfo = 19; // 单模式活动赛数据
 }
 
 // 任务数据
@@ -253,29 +255,32 @@ message GameTypeModelCount {
 
 // 玩家战斗中使用的角色数据
 message PlayerGameInfo {
-    int32              playerId                = 1;  // 玩家id
-    bool               offline                 = 2;  // 是否离线
-    int32              progress                = 3;  // 加载进度
-    bool               isConfirmHero           = 4;  // 是否确认英雄
-    bool               isPrepare               = 5;  // 是否准备
-    bool               isOut                   = 6;  // 是否退出
-    repeated int32     selectHeroes            = 7;  // 多选英雄
-    repeated int32     selectSkins             = 8;  // 多选皮肤
-    playerMatchInfo    matchData               = 9;  // 玩家匹配相关数据
-    playerBattleAttr   battleAttr              = 10; // 战斗属性
-    PlayerGameStatus   status                  = 11; // 玩家状态
-    bytes              secretKey               = 12; // 密钥
-    int64              punishTime              = 13; // 惩罚时间（排位生效）
-    map<int32, int64>  recentPlayers           = 14; // 最近玩家 key: 玩家ID value: 时间戳
-    string             platform                = 15; // 客户端登录平台[1000编译器 1500PC包 2000安卓 3000IOS]
-    ActionLogCommon    actionLog               = 16; // 日志打点公用字段
-    GameTypeModelCount modelStats              = 17; // 各模式各玩法战斗统计
-    JoinTeamWay        joinWay                 = 18; // 加入方式
-    bool               isLookGray              = 19; // 观战席置灰状态 true:灰色玩家未返回房间
-    map<int32, int32>  firstGameType           = 20; // 排位赛首次进入游戏类型
-    int32              battleNoticeBoardSkinId = 21; // 战斗播报版皮肤id
-    BattleStat         recreationStat          = 22; // 漫斗赛战斗场次统计数据
-    int32              lastLadderModeId        = 23; // 上一把排位赛的地图ID
+    int32              playerId                = 1;   // 玩家id
+    bool               offline                 = 2;   // 是否离线
+    int32              progress                = 3;   // 加载进度
+    bool               isConfirmHero           = 4;   // 是否确认英雄
+    bool               isPrepare               = 5;   // 是否准备
+    bool               isOut                   = 6;   // 是否退出
+    repeated int32     selectHeroes            = 7;   // 多选英雄
+    repeated int32     selectSkins             = 8;   // 多选皮肤
+    playerMatchInfo    matchData               = 9;   // 玩家匹配相关数据
+    playerBattleAttr   battleAttr              = 10;  // 战斗属性
+    PlayerGameStatus   status                  = 11;  // 玩家状态
+    bytes              secretKey               = 12;  // 密钥
+    int64              punishTime              = 13;  // 惩罚时间（排位生效）
+    map<int32, int64>  recentPlayers           = 14;  // 最近玩家 key: 玩家ID value: 时间戳
+    string             platform                = 15;  // 客户端登录平台[1000编译器 1500PC包 2000安卓 3000IOS]
+    ActionLogCommon    actionLog               = 16;  // 日志打点公用字段
+    GameTypeModelCount modelStats              = 17;  // 各模式各玩法战斗统计
+    JoinTeamWay        joinWay                 = 18;  // 加入方式
+    bool               isLookGray              = 19;  // 观战席置灰状态 true:灰色玩家未返回房间
+    map<int32, int32>  firstGameType           = 20;  // 排位赛首次进入游戏类型
+    int32              battleNoticeBoardSkinId = 21;  // 战斗播报版皮肤id
+    BattleStat         recreationStat          = 22;  // 漫斗赛战斗场次统计数据
+    int32              lastLadderModeType      = 23;  // 上一把排位赛的模式类型
+    repeated int32     summonerSpell           = 24;  // 召唤师技能
+    repeated int32     quickChatIds            = 25;  // 当前模式已装备的快捷消息ID列表
+    int32              quickChatSkinId         = 26;  // 快捷消息皮肤ID
     SDCPrepareSnapshot sdcSnapshot             = 100; // 搜打撤战备快照
 }
 
@@ -319,7 +324,7 @@ message PlayerAttrInfo {
     int64 weekExp                = 8;  // 本周获取的经验
     int64 weekGold               = 9;  // 本周获取的金币
     int64 weekInscription        = 10; // 本周获取的铭文碎片
-    int32 battlePass             = 11; // 战令货币
+    int32 sdcCoin                = 11; // 搜打撤货币
     int32 guildCoin              = 13; // 战队币
     int64 ImgPower               = 14; // 高级阅览券
     int64 SysShopCoin            = 15; // 乐园消费卷
@@ -446,7 +451,7 @@ message MatchBattleStats {
     int32          ladderWinningStreak     = 13; // 排位赛连胜场次
     int32          recreationLevel         = 14; // 娱乐赛模式下等级
     int32          recreationScore         = 15; // 娱乐赛模式下积分
-//    int32          activityBattleStep      = 16; // 活动赛阶段
+    //    int32          activityBattleStep      = 16; // 活动赛阶段
 }
 
 // 战斗局内称号

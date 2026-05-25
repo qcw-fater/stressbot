@@ -59,6 +59,7 @@ enum PlayerDataSubType {
     PST_HeroTrialBp           = 9;  // 英雄试炼付费bp
     PST_BattleNoticeBoardSkin = 10; // 战斗播报板皮肤
     PST_FirstReward           = 11; // 首充奖励
+    PST_QuickChatSkin         = 12; // 快捷消息皮肤
 }
 
 // 英雄数据子类型
@@ -69,21 +70,7 @@ enum HeroDataSubType {
     HST_HeroChip = 3; // 英雄碎片
 }
 
-// 搜打撤道具主类型（对应 Item.csv SubType 字段）
-// 注意：礼包使用现有 IT_Gift(3) 类型处理，不属于 IT_SDC_Item，故不在此枚举中定义
-enum SDCItemSubType {
-    SDC_ST_Invalid    = 0; // 无效
-    SDC_ST_Amplifier  = 1; // 增幅器
-    SDC_ST_Armor      = 2; // 护甲
-    SDC_ST_Backpack   = 3; // 背包
-    SDC_ST_Skill      = 4; // 技能
-    SDC_ST_Chip       = 5; // 芯片
-    SDC_ST_Medicine   = 6; // 药品
-    SDC_ST_Collection = 7; // 藏品
-    SDC_ST_Key        = 8; // 钥匙
-}
-
-// 增幅器二级子类型（sdcType=SDC_ST_Amplifier 时 sdcSubType 的有效值）
+// 增幅器二级子类型（sdcType=SDC_ITEM_TYPE_AMPLIFIER 时 sdcSubType 的有效值）
 // 决定装配到哪个增幅器槽（slotType 4/5/6）
 enum SDCAmplifierSubType {
     SDC_AMPL_INVALID  = 0; // 无效
@@ -92,7 +79,7 @@ enum SDCAmplifierSubType {
     SDC_AMPL_ULTIMATE = 3; // 大招增幅器 → 大招槽(slotType=6)
 }
 
-// 护甲/芯片二级子类型（sdcType=SDC_ST_Armor 或 SDC_ST_Chip 时 sdcSubType 的有效值）
+// 护甲/芯片二级子类型（sdcType=SDC_ITEM_TYPE_ARMOR 或 SDC_ITEM_TYPE_CHIP 时 sdcSubType 的有效值）
 // 护甲：决定防御属性方向；芯片：用于同类型装配数量上限校验
 enum SDCArmorChipSubType {
     SDC_AC_INVALID  = 0; // 无效
@@ -101,9 +88,24 @@ enum SDCArmorChipSubType {
     SDC_AC_FUNCTION = 3; // 功能型
 }
 
-// 药品二级子类型（sdcType=SDC_ST_Medicine 时 sdcSubType 的有效值）
+// 药品二级子类型（sdcType=SDC_ITEM_TYPE_MEDICINE 时 sdcSubType 的有效值）
 enum SDCMedicineSubType {
     SDC_MED_INVALID = 0; // 无效
     SDC_MED_HP      = 1; // 血量药品（恢复血量）
     SDC_MED_ARMOR   = 2; // 护甲药品（修复护甲耐久度）
+}
+
+// 藏品二级子类型（sdcType=SDC_ITEM_TYPE_COLLECTION 时 sdcSubType 的有效值）
+enum SDCCollectionSubType {
+    SDC_COLL_INVALID      = 0; // 无效
+    SDC_COLL_NORMAL       = 1; // 普通藏品
+    SDC_COLL_TALENT_UP    = 2; // 天赋升级藏品
+    SDC_COLL_AWAKEN_UP    = 3; // 觉醒升级藏品
+}
+
+// 钥匙二级子类型（sdcType=SDC_ITEM_TYPE_KEY 时 sdcSubType 的有效值）
+enum SDCKeySubType {
+    SDC_KEY_INVALID  = 0; // 无效
+    SDC_KEY_NORMAL   = 1; // 普通钥匙
+    SDC_KEY_MASTER   = 2; // 万能钥匙（可开启任意宝箱）
 }

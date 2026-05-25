@@ -22,6 +22,7 @@ message TargetTeamInfo {
     int64                       roomId         = 8;     //房间Id
     int32                       rsId           = 9;     //房间服务器Id
     ActivityBattleRecruitData activityBattleData = 13; // 活动赛数据
+    ActivityBattleSingleRecruitData activityBattleSingleData = 14; // 单模式活动赛数据
 }
 
 //队伍成员
@@ -125,6 +126,7 @@ message TeamRecruitData {
 	RecruitEventType 	eventType 		= 7; // 队伍招募事件
 	int32				tsId			= 8; // 队伍管理器Id
   ActivityBattleRecruitData activityBattleData = 13; // 活动赛数据
+  ActivityBattleSingleRecruitData activityBattleSingleData = 14; // 单模式活动赛数据
 }
 
 

@@ -74,11 +74,24 @@ export function ActionsTab() {
     { title: '超时', dataIndex: 'timeoutCount', key: 'timeoutCount', width: 70, sorter: (a, b) => a.timeoutCount - b.timeoutCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-orange)' : 'var(--text-tertiary)' }}>{v}</span> },
     { title: '取消', dataIndex: 'canceledCount', key: 'canceledCount', width: 70, sorter: (a, b) => a.canceledCount - b.canceledCount, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
     { title: 'Apdex', dataIndex: 'apdex', key: 'apdex', width: 80, sorter: (a, b) => a.apdex - b.apdex, render: (v: number) => <ApdexCell value={v} /> },
-    { title: 'avg(ms)', key: 'avgMs', width: 76, sorter: (a, b) => a.latency.avgMs - b.latency.avgMs, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.avgMs)}</span> },
-    { title: 'p50(ms)', key: 'p50Ms', width: 76, sorter: (a, b) => a.latency.p50Ms - b.latency.p50Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.p50Ms)}</span> },
-    { title: 'p95(ms)', key: 'p95Ms', width: 76, sorter: (a, b) => a.latency.p95Ms - b.latency.p95Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.p95Ms)}</span> },
-    { title: 'p99(ms)', key: 'p99Ms', width: 76, sorter: (a, b) => a.latency.p99Ms - b.latency.p99Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.p99Ms)}</span> },
-    { title: 'max(ms)', key: 'maxMs', width: 76, sorter: (a, b) => a.latency.maxMs - b.latency.maxMs, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.maxMs)}</span> },
+    // 延迟列均反映"纯网络往返"耗时（不含客户端构建/解析）。
+    // 当 netSampleCount=0（如纯本地 setState / Lua 内仅做 connect 等）时显示 — 以避免误导。
+    {
+      title: <Tooltip title="纯网络往返平均耗时（毫秒），不含客户端 proto 构建/解析等开销">net avg(ms)</Tooltip>,
+      key: 'avgMs', width: 90,
+      sorter: (a, b) => a.latency.avgMs - b.latency.avgMs,
+      render: (_, r) => <span style={NUMERIC_STYLE}>{r.netSampleCount > 0 ? fmtMs(r.latency.avgMs) : '—'}</span>,
+    },
+    { title: 'p50(ms)', key: 'p50Ms', width: 76, sorter: (a, b) => a.latency.p50Ms - b.latency.p50Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{r.netSampleCount > 0 ? fmtMs(r.latency.p50Ms) : '—'}</span> },
+    { title: 'p95(ms)', key: 'p95Ms', width: 76, sorter: (a, b) => a.latency.p95Ms - b.latency.p95Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{r.netSampleCount > 0 ? fmtMs(r.latency.p95Ms) : '—'}</span> },
+    { title: 'p99(ms)', key: 'p99Ms', width: 76, sorter: (a, b) => a.latency.p99Ms - b.latency.p99Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{r.netSampleCount > 0 ? fmtMs(r.latency.p99Ms) : '—'}</span> },
+    { title: 'max(ms)', key: 'maxMs', width: 76, sorter: (a, b) => a.latency.maxMs - b.latency.maxMs, render: (_, r) => <span style={NUMERIC_STYLE}>{r.netSampleCount > 0 ? fmtMs(r.latency.maxMs) : '—'}</span> },
+    {
+      title: <Tooltip title="客户端构建/序列化/解析平均耗时（毫秒），所有结果分支累计">client(ms)</Tooltip>,
+      dataIndex: 'clientAvgMs', key: 'clientAvgMs', width: 90,
+      sorter: (a, b) => a.clientAvgMs - b.clientAvgMs,
+      render: (v: number) => <span style={NUMERIC_STYLE}>{fmtMs(v)}</span>,
+    },
     { title: '超均(ms)', dataIndex: 'timeoutAvgMs', key: 'timeoutAvgMs', width: 84, sorter: (a, b) => a.timeoutAvgMs - b.timeoutAvgMs, render: (v: number) => <span style={NUMERIC_STYLE}>{fmtMs(v)}</span> },
     {
       title: '流量(均)',

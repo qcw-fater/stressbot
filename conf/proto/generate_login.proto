@@ -32,6 +32,8 @@ import "generate_back_hero.proto";
 import "custom_month_sign.proto";
 import "custom_login.proto";
 import "custom_activity_battle.proto";
+import "custom_activity_battle_single.proto";
+import "custom_hero_limited_task.proto";
 
 // 玩家登陆
 message LoginPlayerC2S {
@@ -98,6 +100,7 @@ message LoginPlayerDataS2C {
     MonthSignDataClient              monthSignData          = 31; // 月签到数据
     ShareInfoDB                      shareInfo              = 32; // 分享数据
     ActivityBattleDbInfo             activityBattleData     = 33; //活动赛数据
+    ActivityBattleSingleDbInfo       activityBattleSingleData = 34; //单模式活动赛数据
 }
 
 // 充值统计数据
@@ -135,6 +138,8 @@ message loginHeroInfo {
 
 // 登录下发任务数据
 message loginTaskInfo {
-    PlayerTaskInfo         taskList        = 1; // 玩家任务数据
-    PlayerAchievementModel achievementInfo = 2; // 成就数据列表
+    PlayerTaskInfo         taskList            = 1; // 玩家任务数据
+    PlayerAchievementModel achievementInfo     = 2; // 成就数据列表
+    AchievementProgressData achievementProgress = 3; // 成就进度数据
+    HeroLimitedTaskData    heroLimitedTaskData = 4; // 英雄限时任务数据（登录补推）
 }

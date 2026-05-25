@@ -31,8 +31,9 @@ message CashGoodsStruct {
 }
 
 // 通知客户端充值成功
+// FEATURE-4050：firstReward 由 map<day,flag> 改为多档位结构 firstRewardFlag
 message PaySucceedS2C {
-    map<int32, int32>  firstReward   = 1; // key:天数,value: 首冲奖励标识 0 未达成 1首冲奖励未领取 2 已领取首冲奖励
+    firstRewardFlag    firstReward   = 1; // 首冲奖励标识(含 grades 多档位状态)
     map<string, int32> payBuyCount   = 2; // 充值购买记录 key:商品id，value: 购买次数
     int32              totalPayMoney = 3; // 累计充值价值
 }
@@ -44,15 +45,16 @@ message PayShopS2C {
     repeated RechargeStruct  RechargeConfigData  = 1;
     repeated CashGoodsStruct CashGoodsConfigData = 2;
 }
-// 领取首冲奖励
+// 领取首冲奖励（FEATURE-4050：扩展为档位+天数二维入口）
 message PayGetFirstRewardC2S {
-    int32 day = 1; // 领取第X天的奖励
+    int32 gradeID = 1; // 档位ID(FirstPay.csv ID)
+    int32 day     = 2; // 领取第X天的奖励(1-based)
 }
 // 领取首冲奖励
 message PayGetFirstRewardS2C {
-    int32 day = 1; // 领取第X天的奖励
-    int32 firstReward =
-        2;         // 首冲奖励标识 0 未达成 1首冲奖励未领取 2 已领取首冲奖励
+    int32 gradeID     = 1; // 档位ID
+    int32 day         = 2; // 第X天
+    int32 firstReward = 3; // 该档位该天的领取标识 0未达成 1可领 2已领
 }
 
 // 领取月卡奖励

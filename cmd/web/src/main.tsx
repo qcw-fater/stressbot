@@ -30,7 +30,11 @@ function ThemedApp() {
   );
 }
 
-const root = createRoot(document.getElementById('root')!);
+const container = document.getElementById('root')!;
+// @ts-expect-error — Vite HMR 复用已有 root
+const root = container._reactRoot ?? createRoot(container);
+// @ts-expect-error
+container._reactRoot = root;
 root.render(
   <StrictMode>
     <ThemedApp />

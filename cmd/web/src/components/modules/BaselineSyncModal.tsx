@@ -2,7 +2,10 @@
  * 基线资源同步冲突解决面板。
  *
  * 当服务端基线资源（proto / lua / adapter）与本地 IDB 内容不同时弹出，
- * 用户通过 Monaco DiffEditor 查看差异并逐个选择保留本地版本或采用远端版本。
+ * 用户通过 Monaco DiffEditor 逐个查看差异并选择保留本地版本或采用远端版本。
+ *
+ * 性能优化：一次只渲染一个 DiffEditor 实例，通过导航切换，
+ * 避免差异项过多时同时创建大量 Monaco 实例导致内存溢出或卡顿。
  */
 
 import { Button, Modal, Radio, Space, Tag, Typography } from 'antd';
@@ -10,7 +13,7 @@ import { DiffEditor } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 import type { BaselineSyncResult, ConflictDecision, ResourceType, SyncDiff } from '@/services/resourcesStore';
 import { applyConflictResolution } from '@/services/resourcesStore';
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
 import { saveSkippedConflict, hashContent } from '@/components/FlowEditor/skippedConflicts';
@@ -34,7 +37,8 @@ export function BaselineSyncModal({ open, result, onClose, onResolved }: Baselin
   const themeMode = useEditorStore((s) => s.theme);
   const [decisions, setDecisions] = useState<Record<string, boolean>>({});
   const [applying, setApplying] = useState(false);
-  const editorsRef = useRef<editor.IDiffEditor[]>([]);
+  const [currentIdx, setCurrentIdx] = useState(0);
+  const editorRef = useRef<editor.IDiffEditor | null>(null);
 
   const conflicts = result.conflicts;
   const removed = result.removed;
@@ -43,55 +47,66 @@ export function BaselineSyncModal({ open, result, onClose, onResolved }: Baselin
   if (!hasConflicts) return null;
 
   const allItems: SyncDiff[] = [...conflicts, ...removed];
-  const decisionKey = (item: SyncDiff) => `${item.type}:${item.name}`;
+  const total = allItems.length;
+  // 确保 currentIdx 在有效范围内
+  const idx = Math.min(currentIdx, total - 1);
+  const item = allItems[idx];
+  const decisionKey = (it: SyncDiff) => `${it.type}:${it.name}`;
 
-  function getDecision(item: SyncDiff): boolean {
-    return decisions[decisionKey(item)] ?? true; // 默认保留本地
+  function getDecision(it: SyncDiff): boolean {
+    return decisions[decisionKey(it)] ?? true; // 默认保留本地
   }
 
-  function setDecision(item: SyncDiff, keepLocal: boolean) {
-    setDecisions((prev) => ({ ...prev, [decisionKey(item)]: keepLocal }));
+  function setDecision(it: SyncDiff, keepLocal: boolean) {
+    setDecisions((prev) => ({ ...prev, [decisionKey(it)]: keepLocal }));
   }
 
   function setAll(keepLocal: boolean) {
     const next: Record<string, boolean> = {};
-    for (const item of allItems) {
-      next[decisionKey(item)] = keepLocal;
+    for (const it of allItems) {
+      next[decisionKey(it)] = keepLocal;
     }
     setDecisions(next);
   }
 
-  // 先释放 DiffEditor 内部 model 引用，避免 Monaco dispose 竞态
-  function releaseEditors() {
-    for (const e of editorsRef.current) {
+  // 统计已选择数量
+  const decidedCount = allItems.filter((it) => decisions[decisionKey(it)] !== undefined).length;
+
+  const handleEditorMount = useCallback((ed: editor.IDiffEditor) => {
+    editorRef.current = ed;
+  }, []);
+
+  // 切换项时清理上一个编辑器模型
+  function navigateTo(newIdx: number) {
+    if (editorRef.current) {
       try {
-        e.getModifiedEditor()?.setModel(null);
-        e.getOriginalEditor()?.setModel(null);
+        editorRef.current.getModifiedEditor()?.setModel(null);
+        editorRef.current.getOriginalEditor()?.setModel(null);
       } catch { /* ignore */ }
+      editorRef.current = null;
     }
-    editorsRef.current = [];
+    setCurrentIdx(newIdx);
   }
 
   async function handleApply() {
     setApplying(true);
     try {
-      const decArray: ConflictDecision[] = allItems.map((item) => ({
-        type: item.type,
-        name: item.name,
-        keepLocal: getDecision(item),
+      const decArray: ConflictDecision[] = allItems.map((it) => ({
+        type: it.type,
+        name: it.name,
+        keepLocal: getDecision(it),
       }));
       // 保留本地的项目记录跳过，下次同步不再重复提示
-      for (const item of allItems) {
-        if (getDecision(item)) {
-          const isRemoved = removed.includes(item);
+      for (const it of allItems) {
+        if (getDecision(it)) {
+          const isRemoved = removed.includes(it);
           const key = isRemoved
-            ? `${item.type}:${item.name}:__removed__`
-            : `${item.type}:${item.name}:${hashContent(item.baselineContent)}`;
+            ? `${it.type}:${it.name}:__removed__`
+            : `${it.type}:${it.name}:${hashContent(it.baselineContent)}`;
           saveSkippedConflict(key);
         }
       }
       await applyConflictResolution(decArray);
-      releaseEditors();
       onClose();
       onResolved?.();
     } finally {
@@ -100,9 +115,12 @@ export function BaselineSyncModal({ open, result, onClose, onResolved }: Baselin
   }
 
   function handleCancel() {
-    releaseEditors();
     onClose();
   }
+
+  const isRemoved = removed.includes(item);
+  const keepLocal = getDecision(item);
+  const label = TYPE_LABEL[item.type];
 
   return (
     <Modal
@@ -131,59 +149,117 @@ export function BaselineSyncModal({ open, result, onClose, onResolved }: Baselin
       }
       destroyOnHidden={false}
     >
-      <Typography.Paragraph type="secondary" style={{ marginBottom: 16 }}>
+      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
         远端资源有变更，请逐个确认保留本地版本还是采用远端版本。
       </Typography.Paragraph>
 
-      {allItems.map((item) => {
-        const key = decisionKey(item);
-        const isRemoved = removed.includes(item);
-        const keepLocal = getDecision(item);
-        const label = TYPE_LABEL[item.type];
+      {/* 导航栏：当前项信息 + 上一个/下一个 */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <Space size={8}>
+          <Tag color={label.color}>{label.text}</Tag>
+          <Typography.Text strong>{item.name}</Typography.Text>
+          {isRemoved && <Tag color="red">远端已删除</Tag>}
+        </Space>
+        <Space size={8}>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {idx + 1} / {total}
+            {decidedCount > 0 && `（已选 ${decidedCount} 项）`}
+          </Typography.Text>
+          <Button
+            size="small"
+            disabled={idx === 0}
+            onClick={() => navigateTo(idx - 1)}
+          >
+            上一个
+          </Button>
+          <Button
+            size="small"
+            disabled={idx === total - 1}
+            onClick={() => navigateTo(idx + 1)}
+          >
+            下一个
+          </Button>
+        </Space>
+      </div>
 
-        return (
-          <div key={key} style={{ marginBottom: 20, border: '1px solid var(--border-color)', borderRadius: 6, padding: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <Space size={8}>
-                <Tag color={label.color}>{label.text}</Tag>
-                <Typography.Text strong>{item.name}</Typography.Text>
-                {isRemoved && <Tag color="red">远端已删除</Tag>}
-              </Space>
-              <Radio.Group
-                value={keepLocal ? 'local' : 'remote'}
-                onChange={(e) => setDecision(item, e.target.value === 'local')}
-                size="small"
-              >
-                <Radio.Button value="local">保留本地</Radio.Button>
-                <Radio.Button value="remote">
-                  {isRemoved ? '删除本地' : '采用远端'}
-                </Radio.Button>
-              </Radio.Group>
-            </div>
+      {/* 当前项的选择 */}
+      <div style={{ marginBottom: 12 }}>
+        <Radio.Group
+          value={keepLocal ? 'local' : 'remote'}
+          onChange={(e) => setDecision(item, e.target.value === 'local')}
+          size="small"
+        >
+          <Radio.Button value="local">保留本地</Radio.Button>
+          <Radio.Button value="remote">
+            {isRemoved ? '删除本地' : '采用远端'}
+          </Radio.Button>
+        </Radio.Group>
+      </div>
 
-            {!isRemoved && (
-              <DiffEditor
-                height={240}
-                original={item.localContent}
-                modified={item.baselineContent}
-                language={item.type === 'proto' ? 'protobuf' : 'lua'}
-                theme={themeMode === 'dark' ? 'vs-dark' : 'light'}
-                onMount={(editor) => { editorsRef.current.push(editor); }}
-                options={{
-                  readOnly: true,
-                  renderSideBySide: true,
-                  minimap: { enabled: false },
-                  scrollBeyondLastLine: false,
-                  folding: false,
-                  lineNumbers: 'on',
-                  renderOverviewRuler: true,
-                  fixedOverflowWidgets: true,
+      {/* DiffEditor：只渲染当前项 */}
+      {!isRemoved ? (
+        <div style={{ border: '1px solid var(--border-color)', borderRadius: 6, overflow: 'hidden' }}>
+          <DiffEditor
+            key={decisionKey(item)}
+            height={360}
+            original={item.localContent}
+            modified={item.baselineContent}
+            language={item.type === 'proto' ? 'protobuf' : 'lua'}
+            theme={themeMode === 'dark' ? 'vs-dark' : 'light'}
+            onMount={handleEditorMount}
+            options={{
+              readOnly: true,
+              renderSideBySide: true,
+              minimap: { enabled: false },
+              scrollBeyondLastLine: false,
+              folding: false,
+              lineNumbers: 'on',
+              renderOverviewRuler: true,
+              fixedOverflowWidgets: true,
+            }}
+          />
+        </div>
+      ) : (
+        <div style={{
+          border: '1px solid var(--border-color)',
+          borderRadius: 6,
+          padding: 24,
+          textAlign: 'center',
+          background: 'var(--bg-elevated)',
+        }}>
+          <Typography.Text type="secondary">该文件已从远端删除</Typography.Text>
+        </div>
+      )}
+
+      {/* 底部快捷导航：已跳转的项用小圆点标记选择状态 */}
+      {total > 1 && (
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
+          {allItems.map((it, i) => {
+            const d = decisions[decisionKey(it)];
+            return (
+              <button
+                key={decisionKey(it)}
+                onClick={() => navigateTo(i)}
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: '50%',
+                  border: i === idx ? '2px solid var(--color-blue)' : '1px solid var(--border-color)',
+                  background: d === undefined
+                    ? 'transparent'
+                    : d
+                      ? 'var(--color-blue)'
+                      : 'var(--color-orange)',
+                  cursor: 'pointer',
+                  padding: 0,
+                  transition: 'all 0.2s',
                 }}
+                title={it.name}
               />
-            )}
-          </div>
-        );
-      })}
+            );
+          })}
+        </div>
+      )}
     </Modal>
   );
 }

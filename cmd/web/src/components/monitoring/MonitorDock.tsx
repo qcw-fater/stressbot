@@ -301,13 +301,23 @@ export function MonitorDock() {
    ────────────────────────────────────────────────── */
 
 function TopSection() {
-  const { latestStress, latestSystem, systemHistory, stressHistory, agents } = useRuntimeStore(
+  const {
+    latestStress,
+    latestSystem,
+    systemHistory,
+    stressHistory,
+    agents,
+    rampUpEnabled,
+    rampUpStages,
+  } = useRuntimeStore(
     useShallow((s) => ({
       latestStress: s.latestStress,
       latestSystem: s.latestSystem,
       systemHistory: s.systemHistory,
       stressHistory: s.stressHistory,
       agents: s.agents,
+      rampUpEnabled: s.rampUpEnabled,
+      rampUpStages: s.rampUpStages,
     })),
   );
   const theme = useEditorStore((s) => s.theme);
@@ -324,6 +334,25 @@ function TopSection() {
     const totalQps = stressHistory.map((s) => (s.actions ?? []).reduce((sum, a) => sum + a.avgQps, 0));
     return sparkOption([{ name: 'QPS', data: totalQps, color: 'var(--chart-blue)' }], dark);
   }, [stressHistory]);
+
+  // 渐进式加压阶段计算（Hooks 必须在条件返回之前调用）
+  const rampUpTotal = rampUpEnabled
+    ? rampUpStages.reduce((sum: number, s) => sum + (s.count || 0), 0)
+    : 0;
+  const rampUpStageInfo = useMemo(() => {
+    if (!rampUpEnabled || rampUpStages.length === 0 || rampUpTotal === 0) return null;
+    const running = latestStress?.robots?.running ?? 0;
+    let cumulative = 0;
+    for (let i = 0; i < rampUpStages.length; i++) {
+      const prev = cumulative;
+      cumulative += rampUpStages[i].count || 0;
+      if (running <= cumulative) {
+        const progress = Math.min(1, Math.max(0, (running - prev) / Math.max(1, rampUpStages[i].count)));
+        return { current: i, progress };
+      }
+    }
+    return { current: rampUpStages.length - 1, progress: 1 };
+  }, [rampUpEnabled, rampUpStages, rampUpTotal, latestStress?.robots?.running]);
 
   if (!latestStress) {
     return (
@@ -366,6 +395,7 @@ function TopSection() {
     wSuccess += a.successRate * a.sampleCount;
   }
   const clusterSuccess = totalSamples > 0 ? wSuccess / totalSamples : 0;
+
   return (
     <div className="monitor-dock__top">
       {/* 指标区 */}
@@ -390,21 +420,36 @@ function TopSection() {
           </div>
         </div>
 
-        {/* 负载进度条 */}
+        {/* 负载 / 渐进式阶段进度 */}
         <div className="md-load-row">
           <div className="md-load-header">
-            <span className="md-load-title">负载 {r.running}/{r.started}</span>
-            <span className="md-load-stats">
-              <span className="md-load-running">{robotPercent}%</span>
-            </span>
+            {rampUpStageInfo ? (
+              <span className="md-load-title">渐进式 阶段 {rampUpStageInfo.current + 1}/{rampUpStages.length}</span>
+            ) : (
+              <span className="md-load-title">负载 {robotPercent}%</span>
+            )}
+            {r.errored > 0 && <span className="md-chip md-chip-errored">错 {r.errored}</span>}
           </div>
-          <div className="md-load-progress">
-            <Progress percent={robotPercent} strokeColor="var(--color-success)" showInfo={false} size={4} />
-          </div>
-          {(r.stopped > 0 || r.errored > 0) && (
-            <div className="md-load-chips">
-              {r.stopped > 0 && <span className="md-chip md-chip-stopped">停 {r.stopped}</span>}
-              {r.errored > 0 && <span className="md-chip md-chip-errored">错 {r.errored}</span>}
+          {rampUpStageInfo ? (
+            <div className="md-stage-bar">
+              {rampUpStages.map((stage: { count: number }, i: number) => {
+                const widthPct = rampUpTotal > 0 ? (stage.count / rampUpTotal) * 100 : 100 / rampUpStages.length;
+                let fill = 0;
+                if (i < rampUpStageInfo.current) fill = 100;
+                else if (i === rampUpStageInfo.current) fill = rampUpStageInfo.progress * 100;
+                return (
+                  <div key={i} className="md-stage-segment" style={{ width: `${widthPct}%` }}>
+                    <div
+                      className={`md-stage-fill${i === rampUpStageInfo.current ? ' md-stage-fill--active' : ''}`}
+                      style={{ width: `${fill}%` }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="md-load-progress">
+              <Progress percent={robotPercent} strokeColor="var(--color-success)" showInfo={false} size={4} />
             </div>
           )}
         </div>

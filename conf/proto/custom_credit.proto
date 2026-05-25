@@ -75,6 +75,7 @@ message  creditBattleRecord {
   int64 timestamp = 5;// 记录时间戳
   map<int32,AddCreditRecordNew> penalty = 6;// 处罚数据
   GameType gType = 7; // 游戏类型
+  int32 heroId = 8; // 英雄id
 }
 
 //离线处理的手动举报违规
@@ -87,6 +88,7 @@ message creditLoginProcessDb {
   GameModel model = 6; // 游戏模式
   int64 battleEndTime = 7; // 战斗结束时间
   GameType gType = 8; // 游戏类型
+  int32 heroId = 9; // 英雄id
 }
 
 message creditNotifyData {

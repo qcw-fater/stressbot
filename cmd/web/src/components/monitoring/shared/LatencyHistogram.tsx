@@ -2,6 +2,10 @@
  * 延迟分位数可视化：把 P50/P90/P95/P99 渲染成横向 bar。
  *
  * 不是真正的分桶柱状（后端目前没有暴露原始桶数据），仅用 4 个分位点做可视提示。
+ *
+ * 注：自 v2 起，hist 中的 ms 值反映"纯网络往返"耗时（不含客户端构建/解析）。
+ * 当 hist.count=0 时，说明该 action 没有真正进入 send→recv 窗口
+ * （例如纯本地 setState、或 lua 内仅做 connect / set_secret_key），显示 —。
  */
 
 import { Tooltip } from 'antd';

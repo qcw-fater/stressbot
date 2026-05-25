@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -40,9 +41,15 @@ func (a *Agent) startHTTPServer() error {
 		Handler: recoverMiddleware(mux),
 	}
 
+	// 先尝试绑定端口，确保端口可用后再启动 goroutine
+	listener, err := net.Listen("tcp", a.httpSrv.Addr)
+	if err != nil {
+		return fmt.Errorf("端口 %d 绑定失败: %w", a.cfg.Port, err)
+	}
+
 	utils.GetWorkPool().Go(func() {
 		stresslog.Info("[AGENT] HTTP 服务已启动", zap.Int("port", a.cfg.Port))
-		if err := a.httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := a.httpSrv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			stresslog.Error("[AGENT] HTTP 服务异常退出", zap.Error(err))
 		}
 	})

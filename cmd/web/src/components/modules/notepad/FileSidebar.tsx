@@ -81,20 +81,47 @@ export function FileSidebar() {
     await selectFile(meta.id);
   }, [createName, createFile, selectFile]);
 
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
+
   const handleImport = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const fileList = e.target.files;
       if (!fileList?.length) return;
-      const items: { name: string; content: string }[] = [];
-      for (let i = 0; i < fileList.length; i++) {
-        const f = fileList[i];
-        const text = await f.text();
-        items.push({ name: f.name, content: text });
-      }
-      await importFiles(items);
-      message.success(`已导入 ${items.length} 个文件`);
-      // reset input
       e.target.value = '';
+
+      const files = Array.from(fileList);
+      setImporting(true);
+      setImportProgress({ current: 0, total: files.length });
+
+      const items: { name: string; content: string }[] = [];
+      let failCount = 0;
+      for (let i = 0; i < files.length; i++) {
+        try {
+          const text = await files[i].text();
+          items.push({ name: files[i].name, content: text });
+        } catch {
+          failCount++;
+        }
+        setImportProgress({ current: i + 1, total: files.length });
+      }
+
+      if (items.length > 0) {
+        await importFiles(items);
+      }
+
+      setImporting(false);
+
+      if (files.length === 1) {
+        if (failCount === 0) message.success(`${files[0].name} 已导入`);
+        else message.error(`导入失败：${files[0].name}`);
+      } else if (failCount === 0) {
+        message.success(`已导入 ${items.length} 个文件`);
+      } else if (items.length > 0) {
+        message.warning(`导入完成：${items.length} 成功，${failCount} 失败`);
+      } else {
+        message.error('全部文件读取失败');
+      }
     },
     [importFiles, message],
   );
@@ -250,9 +277,10 @@ export function FileSidebar() {
           size="small"
           icon={<ImportOutlined />}
           onClick={() => importRef.current?.click()}
+          loading={importing}
           style={{ flex: 1 }}
         >
-          导入
+          {importing ? `导入中 ${importProgress.current}/${importProgress.total}` : '导入'}
         </Button>
         <input
           ref={importRef}

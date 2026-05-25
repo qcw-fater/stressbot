@@ -92,7 +92,7 @@ func (c *Connection) runHeartbeat(hb *heartbeatState, stopCh <-chan struct{}) {
 			n, err := c.Send(packet)
 			if err != nil {
 				stresslog.Warn("[HEARTBEAT] 发送失败",
-					zap.String("service", c.serviceName), zap.Int("pktLen", len(packet)))
+					zap.String("service", c.serviceName), zap.Int("pktLen", len(packet)), zap.Error(err))
 			} else {
 				stresslog.Debug("[HEARTBEAT] 已发送",
 					zap.String("service", c.serviceName), zap.Int("pktLen", n))

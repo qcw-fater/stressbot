@@ -92,7 +92,9 @@ function FlowCanvasInner() {
       const mainPos = useFlowStore.getState().layout.nodePositions['main'];
       if (mainPos) {
         const timer = setTimeout(() => {
-          setCenter(mainPos.x, mainPos.y, { zoom: 1, duration: 300 });
+          if (wrapperRef.current && wrapperRef.current.clientWidth > 0 && wrapperRef.current.clientHeight > 0) {
+            setCenter(mainPos.x, mainPos.y, { zoom: 1, duration: 300 });
+          }
           useFlowStore.setState({ needsFitView: false });
         }, 300);
         return () => clearTimeout(timer);

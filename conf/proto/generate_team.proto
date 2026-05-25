@@ -81,6 +81,8 @@ message TeamNotifyInviteS2C {
     int32      battleModeId = 7; // 匹配类型
     int64      roomId       = 8; // 房间id
     bool       isInvite     = 9; // 是否主动邀请（true:主动发起，false：被邀请人求邀请）
+    ActivityBattleRecruitData activityBattleData = 10; // 活动赛数据
+    ActivityBattleSingleRecruitData activityBattleSingleData = 11; // 单模式活动赛数据
 }
 
 // 通知求邀请目标
@@ -98,6 +100,8 @@ message TeamAcceptC2S {
     GameType      gType        = 6; // 游戏类型
     int32         battleModeId = 7; // 匹配类型
     int64         roomId       = 8; // 房间id
+    ActivityBattleRecruitData activityBattleData = 9; // 活动赛数据
+    ActivityBattleSingleRecruitData activityBattleSingleData = 10; // 单模式活动赛数据
 }
 // 通知邀请人玩家是否同意邀请
 message TeamNotifyAcceptS2C {
@@ -142,6 +146,7 @@ message TeamChangeGameTypeS2C {
     int32    playerId = 1; // 玩家ID
     GameType gType    = 2; // 游戏类型
     int32    modeId   = 3; // 模式Id
+    int32    activityBattleStepId = 4; // 活动赛阶段
 }
 // 切换英雄
 message TeamChangeHeroC2S {
@@ -214,6 +219,7 @@ message TeamConveneJoinC2S {
     int32                     maxRankLevel       = 7;  // 段位上限
     int32                     limitCupNum        = 8;  // 限制杯数(0为不限）
     ActivityBattleRecruitData activityBattleData = 13; // 活动赛数据
+    ActivityBattleSingleRecruitData activityBattleSingleData = 14; // 单模式活动赛数据
 }
 
 // 队伍召集加入

@@ -15,6 +15,8 @@ import (
 	stresslog "stressbot/utils/log"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	lua "github.com/yuin/gopher-lua"
 	"go.uber.org/zap"
@@ -24,6 +26,17 @@ import (
 const registryCtxKey = "__stressbot_ctx__"
 
 // Context Lua 脚本执行上下文。
+//
+// NetLatencyNs / NetSamples 在每次 RunActionScript 入口被原子归零，
+// 脚本内的 api_network 各方法在每次实际产生网络往返时累加对应数值：
+//   - tcp_request / udp_request / http_request：累加一次（成功或失败都计）
+//   - tcp_listen / udp_listen：仅在拿到消息（hit）时累加；超时不计
+//   - tcp_send / udp_send / connect / set_secret_key / register_heartbeat 等
+//     纯客户端 / 不阻塞等响应的 API：不累加
+//
+// 脚本结束后，RunActionScript 把这两个值组装成 engine.ActionTiming 上抛。
+// 使用原子操作而非 mutex：Lua 自身串行（luaMu 已保护），但回调脚本在监听 goroutine 中
+// 也会触碰同一个 Context，原子保证最坏情况下的并发可见性。
 type Context struct {
 	RobotID   int
 	Account   string
@@ -33,6 +46,38 @@ type Context struct {
 	NetSender engine.NetSender
 	Ctx       context.Context
 	LuaMu     *sync.Mutex
+
+	NetLatencyNs atomic.Int64
+	NetSamples   atomic.Int64
+}
+
+// resetTiming 在每次 RunActionScript 开始前清零累加器。
+func (c *Context) resetTiming() {
+	if c == nil {
+		return
+	}
+	c.NetLatencyNs.Store(0)
+	c.NetSamples.Store(0)
+}
+
+// recordNet 累加一次真实的网络往返。供 api_network 调用。
+func (c *Context) recordNet(d time.Duration) {
+	if c == nil || d <= 0 {
+		return
+	}
+	c.NetLatencyNs.Add(d.Nanoseconds())
+	c.NetSamples.Add(1)
+}
+
+// timing 取出当前累加结果，构造 ActionTiming。
+func (c *Context) timing() engine.ActionTiming {
+	if c == nil {
+		return engine.ActionTiming{}
+	}
+	return engine.ActionTiming{
+		NetLatency: time.Duration(c.NetLatencyNs.Load()),
+		SamplesNet: int(c.NetSamples.Load()),
+	}
 }
 
 // SetContext 将脚本上下文绑定到 LState 的 registry
@@ -144,10 +189,23 @@ func (rp *RuntimePool) PrecompileScripts(dirs []string) error {
 // lua 内部累计的"线缆字节数"（含 header / 加密后的真实包长，由 lua API 返回值给出），
 // 调用方应当把它们透传给 monitor.RecordAction，从而和声明式动作走同一条 per-action
 // 字节统计路径，使 ActionsTab 的 ↑avg / ↓avg 列对 lua 动作也能反映真实流量。
-func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (code, send, recv int, err error) {
+//
+// timing 由 Context.NetLatencyNs / NetSamples 累加器汇总（详见 Context 注释）：
+//   - 纯客户端脚本（仅 set_secret_key / connect 等）：SamplesNet=0，不进 latency 直方图
+//   - 含 N 次 request 的脚本：SamplesNet=N，NetLatency 是 N 次累计
+//   - 出错中断的脚本：timing 仍反映已发生的网络调用
+func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (code, send, recv int, timing engine.ActionTiming, err error) {
 	compiled, ok := rp.precompiled[scriptName]
 	if !ok {
-		return -1, 0, 0, fmt.Errorf("脚本未预编译: %s", scriptName)
+		return -1, 0, 0, engine.ActionTiming{}, fmt.Errorf("脚本未预编译: %s", scriptName)
+	}
+
+	// 进入脚本前清零累加器；即使 PCall 报错也要把"已发生"的网络耗时上抛
+	if ctx := GetContext(L); ctx != nil {
+		ctx.resetTiming()
+		defer func() {
+			timing = ctx.timing()
+		}()
 	}
 
 	savedTop := L.GetTop()
@@ -156,18 +214,18 @@ func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (code, 
 	fn := L.NewFunctionFromProto(compiled)
 	L.Push(fn)
 	if err = L.PCall(0, 0, nil); err != nil {
-		return -1, 0, 0, fmt.Errorf("加载脚本 %s 失败: %w", scriptName, err)
+		return -1, 0, 0, engine.ActionTiming{}, fmt.Errorf("加载脚本 %s 失败: %w", scriptName, err)
 	}
 
 	executeFn := L.GetGlobal("execute")
 	if executeFn == lua.LNil {
-		return -1, 0, 0, fmt.Errorf("脚本 %s 未定义 execute 函数", scriptName)
+		return -1, 0, 0, engine.ActionTiming{}, fmt.Errorf("脚本 %s 未定义 execute 函数", scriptName)
 	}
 
 	// NRet=3 总是申请 3 个返回值占位；脚本只 return 1~2 个时，Lua 会用 nil 补齐。
 	robotUD := createRobotUserData(L)
 	if err = L.CallByParam(lua.P{Fn: executeFn, NRet: 3, Protect: true}, robotUD); err != nil {
-		return -1, 0, 0, fmt.Errorf("执行脚本 %s 失败: %w", scriptName, err)
+		return -1, 0, 0, engine.ActionTiming{}, fmt.Errorf("执行脚本 %s 失败: %w", scriptName, err)
 	}
 
 	// L.Get(savedTop+1..savedTop+3) 依次是 code / send / recv（缺省为 nil → 0）
@@ -186,7 +244,7 @@ func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (code, 
 	}
 
 	L.SetGlobal("execute", lua.LNil)
-	return code, send, recv, nil
+	return code, send, recv, engine.ActionTiming{}, nil // timing 由上方 defer 从 ctx 累加器覆盖
 }
 
 // RunBooleanScript 执行布尔判断脚本（条件节点 / loop breakCondition）。

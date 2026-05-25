@@ -192,80 +192,82 @@ enum TeamActPro {
     TAP_NOT_READY_ENDTIME           = 29; // 未准备惩罚结束时间
     TAP_BATTLE_ACTIVITY_DATA        = 30; // 更新活动赛数据
     TAP_BATTLE_ACTIVITY_SELECT_STEP = 31; // 活动赛队长选择阶段
+    TAP_BATTLE_ACTIVITY_SINGLE_DATA = 32; // 更新单模式活动赛数据
     TAP_SDC_FILL_TEAMMATE           = 45; // 搜打撤补齐队友状态变更
 }
 
 // 匹配操作指令
 enum MatchActPro {
-    MAP_INVALID                          = 0;  // 无效指令
-    MAP_START                            = 1;  // 开始匹配
-    MAP_CANCEL                           = 2;  // 取消匹配
-    MAP_PREPARE                          = 3;  // 确认准备
-    MAP_SELECT_HERO                      = 4;  // 选择英雄
-    MAP_SELECT_SKILL                     = 5;  // 选择技能
-    MAP_LOCK_HERO                        = 6;  // 锁定英雄
-    MAP_SELECT_INSCRIPTION               = 7;  // 选择铭文页
-    MAP_LEAVE_ROOM                       = 8;  // 离开房间服务器
-    MAP_RECONNECTION                     = 9;  // 重新连接
-    MAP_CHECK_RECONNECTION               = 10; // 重新连接检测
-    MAP_LOGOUT                           = 11; // 玩家掉线
-    MAP_KICK_OUT                         = 12; // 自定义房间，踢出玩家
-    MAP_JOIN                             = 13; // 自定义房间，玩家加入房间
-    MAP_START_ROOM                       = 14; // 自定义房间，开始游戏
-    MAP_TRANSPOSITION_AGREE              = 15; // 自定义房间，同意交换位置
-    MAP_QUIT                             = 16; // 自定义房间，退出
-    MAP_CREATE_CUSTOM_ROOM               = 17; // 自定义房间，创建房间指令
-    MAP_TRANSPOSITION                    = 18; // 自定义房间，交换位置请求
-    MAP_ADD_ROBOT                        = 19; // 自定义房间，添加机器人
-    MAP_CHAT                             = 20; // 房间内聊天
-    MAP_PRAISE                           = 21; // 房间点赞
-    MAP_CUSTOM_EQUIP                     = 22; // 装备设置
-    MAP_CHECK_CUSTOM_LEAVE               = 23; // 检测能否离开房间
-    MAP_CHECK_CUSTOM_JOIN                = 24; // 检测能否加入房间
-    MAP_TRANSPOSITION_REFUSE             = 25; // 自定义房间，拒绝交换位置
-    MAP_HONG_ON_START                    = 26; // 自定义房间挂起
-    MAP_HONG_ON_OVER                     = 27; // 自定义房间结束挂起
-    MAP_BAN_HERO                         = 28; // ban英雄
-    MAP_WANT_BAN_HERO                    = 29; // 想ban英雄
-    MAP_PRIMARY_HERO                     = 30; // 预选英雄
-    MAP_WANT_ROAD                        = 31; // 预选分路
-    MAP_SEND_RECORD                      = 32; // 发送战绩
-    MAP_REQ_EXCHANGE                     = 33; // 请求交换
-    MAP_REQ_GRAB                         = 34; // 请求帮抢
-    MAP_REQ_BAN                          = 35; // 请求禁用
-    MAP_AGREE_EXCHANGE                   = 36; // 同意交换
-    MAP_GRAB                             = 37; // 帮抢
-    MAP_CANCEL_GRAB                      = 38; // 取消帮抢
-    MAP_ROOM_CHAT                        = 39; // 房间内聊天
-    MAP_SQUADS_UNREASONABLE              = 40; // 阵容不合理选择
-    MAP_REFUSED_EXCHANGE                 = 41; // 拒绝交换英雄
-    MAP_CANCEL_EXCHANGE                  = 42; // 取消交换英雄
-    MAP_HERO_ACTION                      = 43; // 更新英雄定制数据
-    MAP_SELECT_SKIN                      = 44; // 选择皮肤
-    MAP_SWITCH_MODE                      = 45; // 自定义房间，切换房间模式
-    MAP_BATTLE_RESULT_AGAIN              = 46; // 向房间服务器请求战斗结果
-    MAP_BATTLE_SURE_RESULT               = 47; // 通知房间服务器玩家收到结算消息
-    MAP_GM_SET_ROOM_HERO                 = 48; // gm在选择英雄阶段设置阵营和英雄
-    MAP_ROOM_TIME                        = 49; // room超时询问battle战斗是否任然存在
-    MAP_ROLL                             = 50; // 自定义房间打乱
-    MAP_HERO_RANDOM                      = 51; // 随机英雄
-    MAP_GM_STOP_ALL_AI_BATTLE            = 52; // 停止战斗AllAI的战斗
-    MAP_HERO_UNLOCK                      = 53; // 玩家局内解锁英雄
-    MAP_HERO_BACK_CUSTOM_ROOM            = 54; // 战斗结束返回自定义房间
-    MAP_CANCEL_LOCK_HERO                 = 55; // 取消锁定英雄
-    MAP_CUSTOM_ROOM_BACK_END_GRAY        = 56; // 自定义房间战斗结束返回房间,结束置灰状态
-    MAP_CUSTOM_ROOM_CHANGE_HERO          = 57; // 自定义房间更换英雄
-    MAP_CUSTOM_ROOM_CHANGE_GAME_TYPE     = 58; // 自定义房间更换游戏玩法
-    MAP_CUSTOM_ROOM_CHANGE_GAME_MODE_ID  = 59; // 自定义房间更换游戏模式Id
-    MAP_CUSTOM_ROOM_CHANGE_READY_STATE   = 60; // 自定义房间改变准备状态
-    MAP_EQUIPMENT_TALENT                 = 61; // 选择英雄阶段装备潜能
-    MAP_ROOM_AFFIX                       = 62; // 自定义房间选择词缀
-    MAP_CUSTOM_ROOM_FORCE_SELECT_HERO_ID = 63; // 自定义房间强制选择英雄Id
-    MAP_CUSTOM_ROOM_PREPARE_HINT         = 64; // 准备提示
-    MAP_ROBOT_SELECT_HERO                = 65; // 自定义房间房主给机器人选择英雄
-    MAP_SEND_STANDINGS                   = 66; // 房间内发送战绩
-    MAP_HERO_UPDATE_DATA                 = 67; // 同步更新英雄数据
-    MAP_PLAYER_UPDATE_DATA               = 68; // 同步更新玩家数据
+    MAP_INVALID                           = 0;  // 无效指令
+    MAP_START                             = 1;  // 开始匹配
+    MAP_CANCEL                            = 2;  // 取消匹配
+    MAP_PREPARE                           = 3;  // 确认准备
+    MAP_SELECT_HERO                       = 4;  // 选择英雄
+    MAP_SELECT_SKILL                      = 5;  // 选择技能
+    MAP_LOCK_HERO                         = 6;  // 锁定英雄
+    MAP_SELECT_INSCRIPTION                = 7;  // 选择铭文页
+    MAP_LEAVE_ROOM                        = 8;  // 离开房间服务器
+    MAP_RECONNECTION                      = 9;  // 重新连接
+    MAP_CHECK_RECONNECTION                = 10; // 重新连接检测
+    MAP_LOGOUT                            = 11; // 玩家掉线
+    MAP_KICK_OUT                          = 12; // 自定义房间，踢出玩家
+    MAP_JOIN                              = 13; // 自定义房间，玩家加入房间
+    MAP_START_ROOM                        = 14; // 自定义房间，开始游戏
+    MAP_TRANSPOSITION_AGREE               = 15; // 自定义房间，同意交换位置
+    MAP_QUIT                              = 16; // 自定义房间，退出
+    MAP_CREATE_CUSTOM_ROOM                = 17; // 自定义房间，创建房间指令
+    MAP_TRANSPOSITION                     = 18; // 自定义房间，交换位置请求
+    MAP_ADD_ROBOT                         = 19; // 自定义房间，添加机器人
+    MAP_CHAT                              = 20; // 房间内聊天
+    MAP_PRAISE                            = 21; // 房间点赞
+    MAP_CUSTOM_EQUIP                      = 22; // 装备设置
+    MAP_CHECK_CUSTOM_LEAVE                = 23; // 检测能否离开房间
+    MAP_CHECK_CUSTOM_JOIN                 = 24; // 检测能否加入房间
+    MAP_TRANSPOSITION_REFUSE              = 25; // 自定义房间，拒绝交换位置
+    MAP_HONG_ON_START                     = 26; // 自定义房间挂起
+    MAP_HONG_ON_OVER                      = 27; // 自定义房间结束挂起
+    MAP_BAN_HERO                          = 28; // ban英雄
+    MAP_WANT_BAN_HERO                     = 29; // 想ban英雄
+    MAP_PRIMARY_HERO                      = 30; // 预选英雄
+    MAP_WANT_ROAD                         = 31; // 预选分路
+    MAP_SEND_RECORD                       = 32; // 发送战绩
+    MAP_REQ_EXCHANGE                      = 33; // 请求交换
+    MAP_REQ_GRAB                          = 34; // 请求帮抢
+    MAP_REQ_BAN                           = 35; // 请求禁用
+    MAP_AGREE_EXCHANGE                    = 36; // 同意交换
+    MAP_GRAB                              = 37; // 帮抢
+    MAP_CANCEL_GRAB                       = 38; // 取消帮抢
+    MAP_ROOM_CHAT                         = 39; // 房间内聊天
+    MAP_SQUADS_UNREASONABLE               = 40; // 阵容不合理选择
+    MAP_REFUSED_EXCHANGE                  = 41; // 拒绝交换英雄
+    MAP_CANCEL_EXCHANGE                   = 42; // 取消交换英雄
+    MAP_HERO_ACTION                       = 43; // 更新英雄定制数据
+    MAP_SELECT_SKIN                       = 44; // 选择皮肤
+    MAP_SWITCH_MODE                       = 45; // 自定义房间，切换房间模式
+    MAP_BATTLE_RESULT_AGAIN               = 46; // 向房间服务器请求战斗结果
+    MAP_BATTLE_SURE_RESULT                = 47; // 通知房间服务器玩家收到结算消息
+    MAP_GM_SET_ROOM_HERO                  = 48; // gm在选择英雄阶段设置阵营和英雄
+    MAP_ROOM_TIME                         = 49; // room超时询问battle战斗是否任然存在
+    MAP_ROLL                              = 50; // 自定义房间打乱
+    MAP_HERO_RANDOM                       = 51; // 随机英雄
+    MAP_GM_STOP_ALL_AI_BATTLE             = 52; // 停止战斗AllAI的战斗
+    MAP_HERO_UNLOCK                       = 53; // 玩家局内解锁英雄
+    MAP_HERO_BACK_CUSTOM_ROOM             = 54; // 战斗结束返回自定义房间
+    MAP_CANCEL_LOCK_HERO                  = 55; // 取消锁定英雄
+    MAP_CUSTOM_ROOM_BACK_END_GRAY         = 56; // 自定义房间战斗结束返回房间,结束置灰状态
+    MAP_CUSTOM_ROOM_CHANGE_HERO           = 57; // 自定义房间更换英雄
+    MAP_CUSTOM_ROOM_CHANGE_GAME_TYPE      = 58; // 自定义房间更换游戏玩法
+    MAP_CUSTOM_ROOM_CHANGE_GAME_MODE_ID   = 59; // 自定义房间更换游戏模式Id
+    MAP_CUSTOM_ROOM_CHANGE_READY_STATE    = 60; // 自定义房间改变准备状态
+    MAP_CUSTOM_ROOM_CHANGE_SUMMONER_SPELL = 61; // 自定义房间切换召唤师技能
+    MAP_EQUIPMENT_TALENT                  = 62; // 选择英雄阶段装备潜能
+    MAP_ROOM_AFFIX                        = 63; // 自定义房间选择词缀
+    MAP_CUSTOM_ROOM_FORCE_SELECT_HERO_ID  = 64; // 自定义房间强制选择英雄Id
+    MAP_CUSTOM_ROOM_PREPARE_HINT          = 65; // 准备提示
+    MAP_ROBOT_SELECT_HERO                 = 66; // 自定义房间房主给机器人选择英雄
+    MAP_SEND_STANDINGS                    = 67; // 房间内发送战绩
+    MAP_HERO_UPDATE_DATA                  = 68; // 同步更新英雄数据
+    MAP_PLAYER_UPDATE_DATA                = 69; // 同步更新玩家数据
 }
 
 // 房间服务器操作指令
@@ -390,7 +392,7 @@ enum AttrType {
     AT_Gold                      = 1;  // 纪念币
     AT_Diamond                   = 2;  // 意志结晶
     AT_Coupons                   = 3;  // 跃之星  付费点券
-    AT_BattlePass                = 4;  // 战令货币
+    AT_SDCCoin                   = 4;  // 搜打撤货币
     AT_BurningCoin               = 5;  // 英雄升级货币
     AT_Epigraph                  = 6;  // 皮肤币
     AT_SysShopCoin               = 7;  // 觉醒道具兑换币
@@ -457,7 +459,7 @@ enum PlayerTaskType {
     PTT_Activity_Daily       = 8;  // 活动每日类型任务
     PTT_AdventureGift        = 9;  // 奇遇礼包任务
     PTT_RecreationSeasonTask = 10; // 娱乐赛季类型任务
-    PTT_BattlePassHeroTask   = 11; // 战令英雄限时任务
+    PTT_HeroLimitedTask      = 11; // 英雄限时任务
     PTT_MAX                  = 12; // 最大类型
 }
 
@@ -1165,9 +1167,10 @@ enum BrawlBattleResultType {
 
 // 玩家游戏状态
 enum PlayerGameStatus {
-    PGS_Invalid = 0; // 无效
-    PGS_Game    = 1; // 游戏中
-    PGS_Settled = 2; // 已经结算
+    PGS_Invalid       = 0; // 无效
+    PGS_Game          = 1; // 游戏中
+    PGS_Settlementing = 2; // 结算中
+    PGS_Settled       = 3; // 已经结算
 }
 
 // 排位赛征召类型
@@ -1180,9 +1183,9 @@ enum LadderDraftType {
 
 // 英雄cv检测条件
 enum HeroCvUnLockConditionType {
-    HCT_Default  = 0; // 默认解锁
-    HCT_HaveHero = 1; // 当前拥有x英雄
-    HCT_HaveItem = 2; // 当前拥有x道具
+    HCT_Default             = 0; // 默认解锁
+    HCT_HaveHero            = 1; // 当前拥有x英雄
+    HCT_HaveItem            = 2; // 当前拥有x道具
     HCT_HaveIndividuationId = 3; // 有指定动作id
 }
 
@@ -1208,10 +1211,11 @@ enum MonthCardPrivilegeType {
 
 // 月卡终身卡特权
 enum MonthCardPrivilegeConditionType {
-    MC_empty               = 0; // 占位
-    MC_Luck_Scroll_Num     = 2; // 每日惊喜卷轴的数量*1
-    MC_Luck_Scroll_Quality = 3; // 惊喜卷轴的最低品质提升为蓝色
-    MC_Lottery_Num         = 4; // 刊物抽卡的单抽（十连抽不管）免费抽取1次
-    MC_Comic_Task_Num      = 5; // 漫迷历程任务刷新次数增加2次
-    MC_Select_Reset_Cd     = 8; // 自选重置无CD
+    MC_empty                      = 0; // 占位
+    MC_Luck_Scroll_Num            = 2; // 每日惊喜卷轴的数量*1
+    MC_Luck_Scroll_Quality        = 3; // 惊喜卷轴的最低品质提升为蓝色
+    MC_Lottery_Num                = 4; // 刊物抽卡的单抽（十连抽不管）免费抽取1次
+    MC_Comic_Task_Num             = 5; // 漫迷历程任务刷新次数增加2次
+    MC_Select_Reset_Cd            = 8; // 自选重置无CD
+    MC_Month_Sign_Retroactive_Cnt = 9; // 月签到补签次数+N（每轮限一次，先扣特权再扣基础）
 }

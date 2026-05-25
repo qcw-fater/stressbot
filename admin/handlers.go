@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"stressbot/errcode"
@@ -255,27 +256,64 @@ func (s *AdminServer) handleAgentTaskDone(w http.ResponseWriter, r *http.Request
 	report.TaskID = taskID
 
 	// 用户需求 §6.1：任意 Agent 请求都视为 keepalive。
-	// 同时把 Agent 标记回 idle（任务已结束），这两个操作走 Touch + Heartbeat 路径，
-	// 必须在 tasks.Update 之外完成，避免 agents.mu 与 tasks.mu 的 AB-BA 死锁。
+	// 阶段报告（StageIndex > 0）只刷新心跳时间，**不能**清空 CurrentTaskID/LatestStress：
+	// 任务仍在运行，清空会导致：
+	//   1) 聚合器 AggregateStress 因 currentTaskID 不匹配而排除该节点
+	//   2) 后续 stress 报告被 handleAgentStressReport 当成 stale 丢弃
+	//   3) checkAndStopIfAllLost 把节点视为"已失效"误触发自动停止
+	//   4) 若节点恰好处于 unhealthy，touchLocked 会因 CurrentTaskID="" 把 Status 回到 idle，
+	//      进而触发 onAgentStatusChange 的"restarted"合成失败报告，整个任务被错误地标记为完成
 	s.agents.Touch(agentID, "")
-	if err := s.agents.Heartbeat(agentID, HeartbeatRequest{
-		AgentID: agentID,
-		Status:  "idle",
-	}); err != nil {
-		// Agent 已被 admin 删除等场景，不影响 report 入库
-		stresslog.Warn("[ADMIN] handleAgentTaskDone Heartbeat 失败",
-			zap.String("agentId", agentID), zap.Error(err))
+	isFinal := report.StageIndex <= 0
+	if isFinal {
+		// 仅最终报告才把节点 marked back to idle；这两个操作走 Touch + Heartbeat 路径，
+		// 必须在 tasks.Update 之外完成，避免 agents.mu 与 tasks.mu 的 AB-BA 死锁。
+		if err := s.agents.Heartbeat(agentID, HeartbeatRequest{
+			AgentID: agentID,
+			Status:  "idle",
+		}); err != nil {
+			// Agent 已被 admin 删除等场景，不影响 report 入库
+			stresslog.Warn("[ADMIN] handleAgentTaskDone Heartbeat 失败",
+				zap.String("agentId", agentID), zap.Error(err))
+		}
 	}
 
 	var needTransition TaskState // 零值表示不需要转换
 	err := s.tasks.Update(taskID, func(t *Task) {
+		// 阶段完成报告（渐进式加压 reset 阶段）：存入 StageReports，不触发状态转换。
+		// 幂等性：同一 (agentId, stageIndex) 已存在则覆盖（重试场景），不重复 append。
+		if !isFinal {
+			replaced := false
+			for i := range t.StageReports {
+				if t.StageReports[i].AgentID == agentID && t.StageReports[i].StageIndex == report.StageIndex {
+					t.StageReports[i] = report
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				t.StageReports = append(t.StageReports, report)
+			}
+			stresslog.Info("[ADMIN] 收到阶段完成报告",
+				zap.String("taskId", taskID),
+				zap.String("agentId", agentID),
+				zap.Int("stageIndex", report.StageIndex),
+				zap.Bool("dedup", replaced))
+			return
+		}
+
+		// 最终完成报告
 		if t.Reports == nil {
 			t.Reports = make(map[string]TaskCompletionReport)
 		}
 		t.Reports[agentID] = report
 
-		// 检查是否全部完成（自然完成: running→stopped，手动停止: stopping→stopped）
-		if len(t.Reports) == len(t.Assignments) {
+		// 检查是否全部完成：只等实际成功的 Agent
+		expected := len(t.SucceededAgents)
+		if expected == 0 {
+			expected = len(t.Assignments)
+		}
+		if len(t.Reports) == expected {
 			if t.State == TaskRunning {
 				needTransition = TaskRunning
 			} else if t.State == TaskStopping {
@@ -529,8 +567,9 @@ func (s *AdminServer) handleListTasks(w http.ResponseWriter, r *http.Request) {
 			"name":       t.Name,
 			"state":      t.State,
 			"totalBots":  t.TotalBots,
-			"agentCount": len(t.Assignments),
-			"createdAt":  t.CreatedAt,
+			"agentCount":      len(t.Assignments),
+			"activeAgentCount": len(t.SucceededAgents),
+			"createdAt":       t.CreatedAt,
 		}
 		if t.StartedAt != nil {
 			brief["startedAt"] = *t.StartedAt
@@ -679,43 +718,56 @@ func (s *AdminServer) handleStartTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments []Assignment) {
-	var failed []string
-	var succeeded []string
-
 	// 读取任务配置填充 TaskAssignment
-	task, _ := s.tasks.Get(taskID) // Get 返回 (nil, false) 时后续代码用 nil 检查处理
-	var rc RobotConfig
-	if task != nil {
-		rc = task.Config.RobotConfig
+	task, ok := s.tasks.Get(taskID)
+	if !ok || task == nil {
+		// 任务在异步路径里已被删除 / 不存在：把任务标记为 failed 并清理 sampler
+		stresslog.Error("[ADMIN] 任务不存在，取消下发", zap.String("taskId", taskID))
+		if _, err := s.tasks.Transition(taskID, TaskStarting, TaskFailed); err != nil {
+			stresslog.Warn("[ADMIN] 状态转换失败 starting→failed",
+				zap.String("taskId", taskID), zap.Error(err))
+		}
+		if s.sampler != nil {
+			s.sampler.Stop(taskID)
+		}
+		return
 	}
+	rc := task.Config.RobotConfig
+	taskTotalBots := task.TotalBots
 
 	// 构建配置文件清单
 	var configFiles []string
-	if task != nil {
-		if task.Config.FlowJSON != nil {
-			configFiles = append(configFiles, "flow/flow.json")
-		}
-		for name := range task.Config.ProtoFiles {
-			configFiles = append(configFiles, "proto/"+name)
-		}
-		for name := range task.Config.LuaScripts {
-			configFiles = append(configFiles, "scripts/"+name)
-		}
-		if task.Config.AdapterScript != nil {
-			configFiles = append(configFiles, "adapter/codec.lua")
-		}
-		if task.Config.ErrorMapScript != nil {
-			configFiles = append(configFiles, "adapter/error.lua")
-		}
+	if task.Config.FlowJSON != nil {
+		configFiles = append(configFiles, "flow/flow.json")
+	}
+	for name := range task.Config.ProtoFiles {
+		configFiles = append(configFiles, "proto/"+name)
+	}
+	for name := range task.Config.LuaScripts {
+		configFiles = append(configFiles, "scripts/"+name)
+	}
+	if task.Config.AdapterScript != nil {
+		configFiles = append(configFiles, "adapter/codec.lua")
+	}
+	if task.Config.ErrorMapScript != nil {
+		configFiles = append(configFiles, "adapter/error.lua")
 	}
 
+	// 并行下发到所有 Agent：避免单一慢节点（30s 超时 * 3 次重试 ≈ 90s）阻塞其他节点的启动，
+	// 也避免"只有第一个 Agent 收到任务"的视感。每个节点独立成功/失败收敛后再做状态转换。
+	type pushResult struct {
+		agentID string
+		err     error
+		bots    int
+	}
+	resultCh := make(chan pushResult, len(assignments))
 	for _, a := range assignments {
+		a := a // 捕获循环变量
 		agent, ok := s.agents.Get(a.AgentID)
 		if !ok {
-			failed = append(failed, a.AgentID)
+			resultCh <- pushResult{agentID: a.AgentID, err: fmt.Errorf("agent not found")}
 			continue
 		}
-
 		cfg := TaskAssignment{
 			TaskID:            taskID,
 			TaskName:          taskName,
@@ -732,51 +784,68 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 			LogLevel:          rc.LogLevel,
 			ConfigURL:         fmt.Sprintf("%s/sbot/tasks/%s/config", s.cfg.PublicURL, taskID),
 			ConfigFiles:       configFiles,
-			RampUp:            scaleRampUp(rc.RampUp, task.TotalBots, a.TotalBots),
+			RampUp:            scaleRampUp(rc.RampUp, taskTotalBots, a.TotalBots),
 		}
+		addr := agent.Address
+		agentID := a.AgentID
+		bots := a.TotalBots
+		utils.GetWorkPool().Go(func() {
+			err := s.dispatcher.AssignTask(addr, cfg)
+			resultCh <- pushResult{agentID: agentID, err: err, bots: bots}
+		})
+	}
 
-		if err := s.dispatcher.AssignTask(agent.Address, cfg); err != nil {
-			failed = append(failed, a.AgentID)
+	var failed []string
+	var succeeded []string
+	for i := 0; i < len(assignments); i++ {
+		r := <-resultCh
+		if r.err != nil {
+			failed = append(failed, r.agentID)
 			stresslog.Error("推送任务失败",
-				zap.String("agentId", a.AgentID),
-				zap.Error(err))
-		} else {
-			succeeded = append(succeeded, a.AgentID)
-			s.agents.Heartbeat(a.AgentID, HeartbeatRequest{
-				AgentID:       a.AgentID,
-				Status:        "busy",
-				CurrentTaskID: taskID,
-				CurrentBots:   a.TotalBots,
-			})
+				zap.String("agentId", r.agentID),
+				zap.Error(r.err))
+			continue
 		}
+		succeeded = append(succeeded, r.agentID)
+		s.agents.Heartbeat(r.agentID, HeartbeatRequest{
+			AgentID:       r.agentID,
+			Status:        "busy",
+			CurrentTaskID: taskID,
+			CurrentBots:   r.bots,
+		})
 	}
 
 	if len(failed) > 0 {
-		// 向已接受任务的 Agent 发送 stop，回收资源
-		for _, agentID := range succeeded {
-			agent, ok := s.agents.Get(agentID)
-			if !ok || agent.Status == AgentOffline {
-				continue
-			}
-			if err := s.dispatcher.Stop(agent.Address, taskID); err != nil {
-				stresslog.Warn("回收任务失败",
-					zap.String("agentId", agentID),
-					zap.Error(err))
-			}
-		}
-
-		if _, err := s.tasks.Transition(taskID, TaskStarting, TaskFailed); err != nil {
-			stresslog.Warn("[ADMIN] 状态转换失败 starting→failed",
-				zap.String("taskId", taskID), zap.Error(err))
-		}
-		if s.sampler != nil {
-			s.sampler.Stop(taskID)
-		}
-		stresslog.Error("任务启动失败",
+		stresslog.Warn("部分 Agent 推送任务失败",
 			zap.String("taskId", taskID),
-			zap.Strings("failedAgents", failed))
-		return
+			zap.Strings("failedAgents", failed),
+			zap.Strings("succeededAgents", succeeded))
+
+		if len(succeeded) == 0 {
+			// 全部失败 → 标记任务 failed
+			if _, err := s.tasks.Transition(taskID, TaskStarting, TaskFailed); err != nil {
+				stresslog.Warn("[ADMIN] 状态转换失败 starting→failed",
+					zap.String("taskId", taskID), zap.Error(err))
+			}
+			if s.sampler != nil {
+				s.sampler.Stop(taskID)
+			}
+			stresslog.Error("任务启动失败，无 Agent 成功",
+				zap.String("taskId", taskID),
+				zap.Strings("failedAgents", failed))
+			return
+		}
+		// 部分成功 → 继续执行
+		stresslog.Warn("任务将以部分 Agent 继续执行",
+			zap.String("taskId", taskID),
+			zap.Int("expectedAgents", len(assignments)),
+			zap.Int("actualAgents", len(succeeded)))
 	}
+
+	// 记录实际成功的 Agent 列表，用于完成判定
+	s.tasks.Update(taskID, func(t *Task) {
+		t.SucceededAgents = succeeded
+	})
 
 	if _, err := s.tasks.Transition(taskID, TaskStarting, TaskRunning); err != nil {
 		stresslog.Warn("[ADMIN] 状态转换失败 starting→running",
@@ -784,7 +853,7 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 	}
 	stresslog.Info("任务启动成功",
 		zap.String("taskId", taskID),
-		zap.Int("agents", len(assignments)))
+		zap.Int("agents", len(succeeded)))
 }
 
 func (s *AdminServer) handleStopTask(w http.ResponseWriter, r *http.Request) {
@@ -805,18 +874,49 @@ func (s *AdminServer) handleStopTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 向在线节点发送 stop
-	for _, a := range task.Assignments {
-		agent, ok := s.agents.Get(a.AgentID)
-		if !ok || agent.Status == AgentOffline {
-			continue
-		}
-		if err := s.dispatcher.Stop(agent.Address, id); err != nil {
-			stresslog.Warn("停止命令发送失败",
-				zap.String("agentId", a.AgentID),
-				zap.Error(err))
+	// 向实际运行任务的节点发送 stop。
+	// 并行下发：单个 Agent stop RPC 可能因为节点 IO 阻塞而耗时（HTTP 客户端超时 ~30s），
+	// 串行会让"第二个节点"额外等待第一个节点的超时，给用户造成"只对一个 Agent 生效"的错觉。
+	targets := task.SucceededAgents
+	if len(targets) == 0 {
+		targets = make([]string, 0, len(task.Assignments))
+		for _, a := range task.Assignments {
+			targets = append(targets, a.AgentID)
 		}
 	}
+
+	var wg sync.WaitGroup
+	for _, agentID := range targets {
+		agentID := agentID
+		agent, ok := s.agents.Get(agentID)
+		if !ok {
+			stresslog.Warn("停止跳过：节点未找到",
+				zap.String("agentId", agentID))
+			continue
+		}
+		if agent.Status == AgentOffline {
+			stresslog.Warn("停止跳过：节点离线",
+				zap.String("agentId", agentID),
+				zap.String("address", agent.Address))
+			continue
+		}
+		addr := agent.Address
+		wg.Add(1)
+		utils.GetWorkPool().Go(func() {
+			defer wg.Done()
+			if err := s.dispatcher.Stop(addr, id); err != nil {
+				stresslog.Warn("停止命令发送失败",
+					zap.String("agentId", agentID),
+					zap.String("address", addr),
+					zap.Error(err))
+			} else {
+				stresslog.Info("停止命令已发送",
+					zap.String("agentId", agentID),
+					zap.String("address", addr))
+			}
+		})
+	}
+	wg.Wait()
 
 	// 立刻为已离线且未上报的节点合成 stopped report（Admin 已知它们不可能再上报了）
 	allReported := s.synthesizeOfflineReports(id)
@@ -834,12 +934,13 @@ func (s *AdminServer) handleStopTask(w http.ResponseWriter, r *http.Request) {
 
 	updated, _ := s.tasks.Get(id) // 同上
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"id":         id,
-		"name":       updated.Name,
-		"state":      updated.State,
-		"totalBots":  updated.TotalBots,
-		"agentCount": len(updated.Assignments),
-		"createdAt":  updated.CreatedAt,
+		"id":               id,
+		"name":             updated.Name,
+		"state":            updated.State,
+		"totalBots":        updated.TotalBots,
+		"agentCount":       len(updated.Assignments),
+		"activeAgentCount": len(updated.SucceededAgents),
+		"createdAt":        updated.CreatedAt,
 	})
 }
 
@@ -849,6 +950,7 @@ func (s *AdminServer) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+stresslog.Info("[ADMIN] 任务已删除", zap.String("taskID", id))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -916,6 +1018,7 @@ func (s *AdminServer) handleDeleteAgent(w http.ResponseWriter, r *http.Request) 
 		writeError(w, err)
 		return
 	}
+stresslog.Info("[ADMIN] 节点已删除", zap.String("agentID", id), zap.String("agentName", agent.Name))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1533,27 +1636,82 @@ func serveBaselineFile(w http.ResponseWriter, r *http.Request, dir, key string) 
 }
 
 // scaleRampUp 按比例缩放各 stage 的 count（分布式模式下每个 Agent 分到的 bot 数不同）。
+//
+// 关键约束：
+//  1. 缩放后各 stage.Count 之和**严格等于** assignedBots，不能多也不能少；
+//  2. 阶段 count 允许为 0（该 Agent 在此阶段不新增机器人），但严禁负数；
+//  3. Reset / HoldSec / Concurrency 等"语义字段"原样保留，缩放只动 Count。
+//
+// 假设 totalBots=200，两 Agent 各 100（ratio=0.5），stages=[100,150,150]：
+//
+//	old 实现：第二阶段 round(150*0.5)=75，remaining 走到最后 stage 时
+//	         可能因 c<1 强制 1 而出现 remaining 负数 → 末阶段 count 负数。
+//
+// 新实现：先按 floor 分配（不补 1），再把 remainder 按"最大小数余量"分配，
+//
+//	保证 Sum=assignedBots 且每个 c ≥ 0。
 func scaleRampUp(cfg *RampUpConfig, totalBots, assignedBots int) *RampUpConfig {
-	if cfg == nil || totalBots == 0 || assignedBots == totalBots {
+	if cfg == nil {
+		return nil
+	}
+	if totalBots <= 0 || assignedBots == totalBots {
+		// 单 Agent 全量场景：原样下发；assignedBots 与 totalBots 相等也直接返回原配置
 		return cfg
 	}
-	ratio := float64(assignedBots) / float64(totalBots)
-	scaled := &RampUpConfig{}
-	remaining := assignedBots
-	for i, s := range cfg.Stages {
-		var c int
-		if i == len(cfg.Stages)-1 {
-			c = remaining
-		} else {
-			c = int(math.Round(float64(s.Count) * ratio))
-			if c < 1 {
-				c = 1
-			}
-			remaining -= c
+	n := len(cfg.Stages)
+	if n == 0 {
+		return cfg
+	}
+	// assignedBots <= 0：该 Agent 实际未分到 bot，缩放为全 0 阶段
+	if assignedBots <= 0 {
+		scaled := &RampUpConfig{Stages: make([]RampUpStage, 0, n)}
+		for _, s := range cfg.Stages {
+			scaled.Stages = append(scaled.Stages, RampUpStage{
+				Count:       0,
+				Concurrency: s.Concurrency,
+				Reset:       s.Reset,
+				HoldSec:     s.HoldSec,
+			})
 		}
+		return scaled
+	}
+
+	counts := make([]int, n)
+	fracs := make([]float64, n)
+	used := 0
+	for i, s := range cfg.Stages {
+		exact := float64(s.Count) * float64(assignedBots) / float64(totalBots)
+		floor := int(math.Floor(exact))
+		if floor < 0 {
+			floor = 0
+		}
+		counts[i] = floor
+		fracs[i] = exact - float64(floor)
+		used += floor
+	}
+	// 把剩余的 bot 按余量从大到小补到各 stage，确保总和等于 assignedBots
+	remainder := assignedBots - used
+	for k := 0; k < remainder; k++ {
+		bestIdx := -1
+		bestFrac := -1.0
+		for i := 0; i < n; i++ {
+			if fracs[i] > bestFrac {
+				bestFrac = fracs[i]
+				bestIdx = i
+			}
+		}
+		if bestIdx < 0 {
+			break
+		}
+		counts[bestIdx]++
+		fracs[bestIdx] = -1 // 此 stage 余量已用完
+	}
+	scaled := &RampUpConfig{Stages: make([]RampUpStage, 0, n)}
+	for i, s := range cfg.Stages {
 		scaled.Stages = append(scaled.Stages, RampUpStage{
-			Count:       c,
+			Count:       counts[i],
 			Concurrency: s.Concurrency,
+			Reset:       s.Reset,
 			HoldSec:     s.HoldSec,
 		})
 	}

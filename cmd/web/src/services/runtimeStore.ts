@@ -22,6 +22,7 @@ import type {
   AgentBrief,
   AgentEvent,
   ClusterSystemSnapshot,
+  RampUpStage,
   RobotConfig,
   StressSnapshot,
   TaskBrief,
@@ -45,6 +46,8 @@ export interface RuntimeState {
   totalBots: number;
   robotConfig: RobotConfig;
   deadline: string | null;
+  rampUpEnabled: boolean;
+  rampUpStages: RampUpStage[];
 
   /** 实时数据 */
   latestStress: StressSnapshot | null;
@@ -74,6 +77,8 @@ export interface RuntimeState {
 
   setTaskName: (v: string) => void;
   setTotalBots: (v: number) => void;
+  setRampUpEnabled: (v: boolean) => void;
+  setRampUpStages: (v: RampUpStage[]) => void;
   setRobotConfig: (v: Partial<RobotConfig>) => void;
   setDeadline: (v: string | null) => void;
 
@@ -133,6 +138,8 @@ const initialState = {
   totalBots: 100,
   robotConfig: { ...DEFAULT_ROBOT_CONFIG },
   deadline: null as string | null,
+  rampUpEnabled: false,
+  rampUpStages: [{ count: 0, holdSec: 30 }] as RampUpStage[],
   latestStress: null as StressSnapshot | null,
   latestSystem: null as ClusterSystemSnapshot | null,
   agents: [] as AgentBrief[],
@@ -163,6 +170,8 @@ export const useRuntimeStore = create<RuntimeState>()(
 
       setTaskName: (v) => set({ taskName: v }),
       setTotalBots: (v) => set({ totalBots: v }),
+      setRampUpEnabled: (v) => set({ rampUpEnabled: v }),
+      setRampUpStages: (v) => set({ rampUpStages: v }),
       setRobotConfig: (v) =>
         set((s) => ({ robotConfig: { ...s.robotConfig, ...v } })),
       setDeadline: (v) => set({ deadline: v }),
@@ -271,14 +280,15 @@ export const useRuntimeStore = create<RuntimeState>()(
     {
       name: 'stressbot:runtime-form',
       storage: createJSONStorage(() => localStorage),
-      // v3：authExtra → stateExtra，authAddr 已从 RobotConfig 中移除。
-      version: 3,
-      // 只缓存"启动表单"四个字段；运行态（mode/activeTask/agents 等）每次刷新都从 admin 重拉。
+      // v4：新增 rampUpEnabled / rampUpStages 持久化。
+      version: 4,
       partialize: (s) => ({
         taskName: s.taskName,
         totalBots: s.totalBots,
         robotConfig: s.robotConfig,
         deadline: s.deadline,
+        rampUpEnabled: s.rampUpEnabled,
+        rampUpStages: s.rampUpStages,
       }),
       migrate: (persisted, version) => {
         const p = (persisted ?? {}) as Partial<RuntimeState>;

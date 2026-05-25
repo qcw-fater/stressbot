@@ -44,5 +44,5 @@ message MatchTeamData {
     repeated int32            heroes               = 21; // 队伍内的英雄列表
     int32                     levelAnchor          = 22; // 娱乐赛专精平均等级锚点Id
     int32                     scoreAnchor          = 23; // 娱乐赛专精平均积分
-    repeated int32            excludeModeIds       = 24; // 队伍内所有玩家上一把打过的地图ID列表
+    repeated int32            excludeModeTypes     = 24; // 队伍内所有玩家上一把打过的模式类型列表
 }

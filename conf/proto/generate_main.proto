@@ -668,3 +668,10 @@ message MainShareGetRewardC2S {
 message MainShareGetRewardS2C {
     ShareInfoDB shareInfo = 1; // 分享奖励数据
 }
+// 首次分享活动
+message MainFirstShareActivityC2S {
+    int32 parameter = 1; // 分享参数
+}
+// 首次分享活动
+message MainFirstShareActivityS2C {
+}

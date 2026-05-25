@@ -84,6 +84,13 @@ func (es *EventServer) OnClose(gconn gnet.Conn, err error) gnet.Action {
 	conn := es.registry.get(gconn)
 	if conn != nil {
 		es.registry.unregister(gconn)
+		if err != nil {
+			stresslog.Warn("[GNET] 连接异常关闭",
+				zap.String("service", conn.ServiceName()), zap.String("robot", conn.robotName), zap.Error(err))
+		} else {
+			stresslog.Debug("[GNET] 连接正常关闭",
+				zap.String("service", conn.ServiceName()), zap.String("robot", conn.robotName))
+		}
 		conn.onClose()
 	}
 	return gnet.None
@@ -146,9 +153,18 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 			}
 			if routeKey != "" {
 				conn.OnReceive(routeKey, body, headerErr)
-			}
+			} else {
+				stresslog.Warn("[NETWORK] 解码返回空 routeKey，响应被丢弃",
+					zap.String("service", conn.ServiceName()),
+					zap.String("robot", conn.robotName),
+					zap.Int("bodyLen", len(body)))
+		}
+		} else {
+			stresslog.Warn("[NETWORK] 收到消息但连接未注册，消息被丢弃",
+				zap.Int("fd", gconn.Fd()), zap.Int("bodyLen", totalLen))
 		}
 	}
+
 }
 
 // OnTick gnet 定时回调。
@@ -197,7 +213,7 @@ func (d *Dialer) Start() error {
 		return fmt.Errorf("启动 gnet 客户端失败: %w", err)
 	}
 
-	stresslog.Debug("[GNET] 客户端引擎已启动")
+	stresslog.Info("[GNET] 客户端引擎已启动")
 	return nil
 }
 
@@ -209,7 +225,7 @@ func (d *Dialer) Stop() error {
 	if err := d.client.Stop(); err != nil {
 		return fmt.Errorf("停止 gnet 客户端失败: %w", err)
 	}
-	stresslog.Debug("[GNET] 客户端引擎已停止")
+	stresslog.Info("[GNET] 客户端引擎已停止")
 	return nil
 }
 
@@ -243,7 +259,7 @@ func (d *Dialer) DialTCP(ctx context.Context, address string, conn *Connection) 
 		bindConn(gconn, conn)
 		d.server.registry.register(gconn, conn)
 
-		stresslog.Debug("[GNET] TCP 连接已建立",
+		stresslog.Info("[GNET] TCP 连接已建立",
 			zap.String("address", address), zap.String("service", conn.serviceName), zap.String("robot", conn.robotName))
 		return gconn, nil
 	}
@@ -260,6 +276,6 @@ func (d *Dialer) DialUDP(address string, conn *Connection) (gnet.Conn, error) {
 	bindConn(gconn, conn)
 	d.server.registry.register(gconn, conn)
 
-	stresslog.Debug("[GNET] UDP 连接已建立", zap.String("address", address), zap.String("robot", conn.robotName))
+	stresslog.Info("[GNET] UDP 连接已建立", zap.String("address", address), zap.String("robot", conn.robotName))
 	return gconn, nil
 }

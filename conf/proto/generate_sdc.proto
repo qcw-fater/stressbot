@@ -3,6 +3,7 @@ option  go_package = ".;pb";
 package Game;
 
 import "custom_sdc.proto";
+import "nohot_custom_battle.proto";
 
 // ==================== 战备系统协议 ====================
 
@@ -27,6 +28,9 @@ message SdcEquipItemS2C {
     int32 totalValue                = 2; // 更新后的总价值
     SDCHeroTalentAwakeInfo heroInfo = 3; // 更新后的英雄天赋觉醒（装配影响加成时有值）
     int32 errorCode                 = 4; // 错误码
+    SDCWarehouseData warehouseData  = 5; // 仓库数据（道具来自仓库时有值）
+    SDCPackSlot sourcePack          = 6; // 来源背包数据（道具来自背包时有值）
+    SDCPackSlot collectionPack      = 7; // 藏品背包数据（slotType=3时有值）
 }
 
 // 卸下道具请求
@@ -47,17 +51,19 @@ message SdcUnequipItemS2C {
 // 移动道具请求
 message SdcMoveItemC2S {
     int64 itemGuid     = 1; // 道具GUID
-    int32 fromPackType = 2; // 来源背包类型（0=仓库）
+    int32 fromPackType = 2; // 来源背包类型（0=仓库，-1=装配槽位）
     int32 toPackType   = 3; // 目标背包类型（0=仓库）
+    int32 fromSlotType = 4; // 来源装配槽位类型（fromPackType=-1时为SDCSlotType枚举值）
 }
 
 // 移动道具响应
 message SdcMoveItemS2C {
-    SDCPackSlot fromPack         = 1; // 来源背包（fromPackType=0时为nil）
-    SDCPackSlot toPack           = 2; // 目标背包（toPackType=0时为nil）
-    int32 totalValue             = 3; // 更新后的装配区域总价值
-    int32 errorCode              = 4; // 错误码
+    SDCPackSlot fromPack           = 1; // 来源背包（fromPackType=0时为nil）
+    SDCPackSlot toPack             = 2; // 目标背包（toPackType=0时为nil）
+    int32 totalValue               = 3; // 更新后的装配区域总价值
+    int32 errorCode                = 4; // 错误码
     SDCWarehouseData warehouseData = 5; // 仓库数据（涉及仓库操作时有值）
+    SDCEquipSlot unequippedSlot    = 6; // 被清空的装配槽位（从装配槽位移出时有值）
 }
 
 // 出售道具请求
@@ -141,15 +147,13 @@ message SdcGetGrowthDataS2C {
 
 // 成长升级请求
 message SdcGrowthUpgradeC2S {
-    int32 upgradeType = 1; // 升级类型（1-仓库 2-增幅器背包 3-药品背包）
+    SDCGrowthUpgradeType upgradeType = 1; // 升级类型
 }
 
 // 成长升级响应
 message SdcGrowthUpgradeS2C {
-    int32 upgradeType = 1; // 升级类型
-    int32 newLevel    = 2; // 新等级
-    int32 newSlots    = 3; // 新格子数
-    int32 errorCode   = 4; // 错误码
+    SDCGrowthData data = 1; // 升级后的完整成长数据
+    int32 errorCode    = 2; // 错误码
 }
 
 // ==================== 藏品系统协议 ====================
@@ -172,3 +176,101 @@ message SdcFillTeammateC2S {
 
 // 设置补齐队友选项响应
 message SdcFillTeammateS2C {}
+//打开背包请求
+message SdcPackOpenC2S
+{
+}
+//打开背包请求
+message SdcPackOpenS2C
+{
+	SDCPrepareData data = 1; // 战备数据（包含背包信息）
+}
+
+// SDC 道具使用请求
+message SdcPackUseC2S {
+    int64 itemGuid = 1;   // 道具GUID
+    int32 number   = 2;   // 使用数量
+}
+
+// SDC 道具使用响应
+message SdcPackUseS2C {
+    SDCHeroTalentAwakeInfo heroInfo = 1;  // 更新后的天赋觉醒加成信息
+    SDCWarehouseData warehouseData  = 2; // 使用后的仓库数据
+    SDCPackSlot collectionPack      = 3; // 使用后的藏品背包数据
+}
+//获取升级预览列表
+message SdcGetUpgradePreviewC2S
+{
+	int32 moduleType = 1; // 模块类型（ModuleType枚举：1仓库 2战斗背包 3商店 4-7制作台）
+}
+//获取升级预览列表
+message SdcGetUpgradePreviewS2C
+{
+	repeated SDCUpgradePreviewItem previewList = 1; // 预览列表
+	int32 errorCode = 2;
+}
+//获取制作台可制作列表
+message SdcGetCraftListC2S
+{
+	int32 stationType = 1; // 制作台类型（1护甲 2增幅器 3芯片 4消耗品）
+}
+//获取制作台可制作列表
+message SdcGetCraftListS2C
+{
+	repeated SDCCraftableItem craftableItems = 1; // 可制作道具列表
+	repeated SDCCraftSlot craftSlots         = 2; // 制作台状态
+	int32 errorCode = 3;
+}
+//发起制作
+message SdcStartCraftC2S
+{
+	int32 stationType = 1; // 制作台类型
+	int32 itemId      = 2; // 要制作的道具ID
+}
+//发起制作
+message SdcStartCraftS2C
+{
+	SDCCraftSlot craftSlot = 1; // 制作台状态
+	int32 errorCode        = 2;
+}
+//领取制作产物
+message SdcClaimCraftC2S
+{
+	int32 stationType = 1; // 制作台类型
+}
+//领取制作产物
+message SdcClaimCraftS2C
+{
+	SDCWarehouseItem item    = 1; // 领取的道具
+	SDCCraftSlot craftSlot   = 2; // 制作台状态（已清空）
+	int32 errorCode          = 3;
+}
+//仓库道具变更推送（服务器主动推送）
+message SdcWarehouseUpdateS2C
+{
+    repeated SDCWarehouseItem addItems = 1; // 新增的仓库道具列表
+}
+//替换道具请求（背包↔仓库、背包↔装配槽位拖动替换）
+message SdcSwapItemC2S
+{
+    int64 sourceItemGuid  = 1; // 被拖动的道具GUID
+    int32 sourcePackType  = 2; // 来源背包类型（SDCPackType枚举，仓库为0）
+    int32 swapType        = 3; // 替换类型（1=背包→仓库 2=仓库→背包 3=背包→装配槽位）
+    int64 targetItemGuid  = 4; // 目标位置道具GUID（0=空位不替换）
+    int32 targetPackType  = 5; // 目标背包类型（swapType=2时有效）
+    int32 targetSlotIndex = 6; // 目标背包槽位索引（swapType=2时有效，-1=自动分配）
+    int32 targetSlotType  = 7; // 目标装配槽位类型（swapType=3时有效，SDCSlotType枚举，仅4/5/6）
+}
+//替换道具响应
+message SdcSwapItemS2C
+{
+    SDCPackSlot sourcePack           = 1; // 来源背包数据
+    SDCPackSlot targetPack           = 2; // 目标背包数据
+    SDCWarehouseData warehouseData   = 3; // 仓库数据
+    SDCEquipSlot targetSlot          = 4; // 替换后的装配槽位（swapType=3时有值）
+    SDCEquipSlot unequippedSlot      = 5; // 被清空的装配槽位
+    int32 totalValue                 = 6; // 更新后的装配区域总价值
+    int32 errorCode                  = 7; // 错误码
+    SDCHeroTalentAwakeInfo heroInfo  = 8; // 更新后的英雄天赋觉醒
+    SDCPackSlot collectionPack       = 9; // 藏品背包数据
+}

@@ -115,6 +115,51 @@ export function LogsTab({ open }: { open: boolean }) {
   const prevTextRef = useRef('');
   // 用户主动滚动到底部标记，避免 layout/isEditorAtBottom 误判
   const userAtBottomRef = useRef(true);
+  // seekToLatest 期间标记，跳过正常轮询
+  const seekingRef = useRef(false);
+  const [seeking, setSeeking] = useState(false);
+  // 等级/过滤变更后需要全量替换 Monaco 文本，但不清 prevTextRef 以保留增量追加能力
+  const needsFullReplaceRef = useRef(false);
+
+  // === seekToLatest：切换 target 时跳到最新，不逐批渲染 ===
+  const seekToLatest = useCallback(async (tgt: string) => {
+    seekingRef.current = true;
+    setSeeking(true);
+    let afterSeq = 0;
+    let lastEntries: FormattedEntry[] = [];
+    let lastNextSeq = 0;
+
+    try {
+      for (;;) {
+        const res = tgt === 'admin'
+          ? await logsApi.getAdminLogs({ afterSeq, limit: 500 })
+          : await logsApi.getAgentLogs(tgt, { afterSeq, limit: 500 });
+
+        if (res.entries && res.entries.length > 0) {
+          lastEntries = res.entries.map((e: LogEntry) => ({
+            level: (e.level || 'info').toLowerCase(),
+            message: e.message,
+            text: formatEntry(e),
+          }));
+          lastNextSeq = res.nextSeq;
+        }
+
+        if (!res.hasMore) break;
+        // 中间批次丢弃，只推进 cursor
+        afterSeq = res.nextSeq;
+      }
+    } catch {
+      // 网络错误：显示已拿到的最后一批
+    }
+
+    seekingRef.current = false;
+    setSeeking(false);
+    setEntries(lastEntries);
+    nextSeqRef.current = lastNextSeq;
+    prevTextRef.current = '';
+    userAtBottomRef.current = true;
+    setPollingInterval(3000);
+  }, []);
 
   // === 保存设置 ===
   const stateRef = useRef({ target, level, filterText, polling });
@@ -164,14 +209,15 @@ export function LogsTab({ open }: { open: boolean }) {
     setEntries([]);
     prevTextRef.current = '';
     nextSeqRef.current = 0;
+    seekToLatest(val);
   };
   const handleLevelChange = (val: string) => {
     setLevel(val);
-    prevTextRef.current = '';
+    needsFullReplaceRef.current = true;
   };
   const handleFilter = (val: string) => {
     setFilterText(val);
-    prevTextRef.current = '';
+    needsFullReplaceRef.current = true;
   };
   const clearLogs = () => {
     setEntries([]);
@@ -190,26 +236,24 @@ export function LogsTab({ open }: { open: boolean }) {
   // 首次挂载时 open=true 且 polling=true → 立即拉取第一批（500 条）
   // hasMore 时 100ms 追赶，直到追平后切回 3000ms 常规轮询
   const fetchLogs = useCallback(async () => {
-    const currentFilter = { target, level, filterText };
+    const currentTarget = target;
     const afterSeq = nextSeqRef.current;
     const params = { afterSeq, limit: 500 };
     let res;
-    if (target === 'admin') {
+    if (currentTarget === 'admin') {
       res = await logsApi.getAdminLogs(params);
     } else {
-      res = await logsApi.getAgentLogs(target, params);
+      res = await logsApi.getAgentLogs(currentTarget, params);
     }
-    return { res, filter: currentFilter, isReset: afterSeq === 0 };
-  }, [target, level, filterText]);
+    return { res, capturedTarget: currentTarget, isReset: afterSeq === 0 };
+  }, [target]);
 
   usePolling({
     fetcher: fetchLogs,
     intervalMs: pollingInterval,
-    enabled: open && polling,
-    onSuccess: ({ res, filter, isReset }) => {
-      if (filter.target !== target || filter.level !== level || filter.filterText !== filterText) {
-        return;
-      }
+    enabled: open && polling && !seekingRef.current,
+    onSuccess: ({ res, capturedTarget, isReset }) => {
+      if (capturedTarget !== target) return;
       if (res.entries && res.entries.length > 0) {
         setEntries((prev) => {
           let newList = isReset ? [] : prev;
@@ -267,7 +311,22 @@ export function LogsTab({ open }: { open: boolean }) {
     }
     const text = list.map((e) => e.text).join('\n');
 
-    if (text === prevTextRef.current) return;
+    if (text === prevTextRef.current) {
+      needsFullReplaceRef.current = false;
+      return;
+    }
+
+    // ── 等级/过滤变更：全量替换但保持滚动位置 ──
+    if (needsFullReplaceRef.current) {
+      needsFullReplaceRef.current = false;
+      const savedVS = ed.saveViewState();
+      model.setValue(text);
+      prevTextRef.current = text;
+      const lc = model.getLineCount();
+      if (lineCountElRef.current) lineCountElRef.current.textContent = `${lc} 行`;
+      if (savedVS) ed.restoreViewState(savedVS);
+      return;
+    }
 
     // ── 首次加载 ──
     if (!prevTextRef.current) {
@@ -415,6 +474,16 @@ export function LogsTab({ open }: { open: boolean }) {
 
       {/* Monaco Editor */}
       <div className="logs-tab-editor" style={{ flex: 1, minHeight: 0, position: 'relative', fontSize: '13px', lineHeight: 'normal' }}>
+        {seeking && (
+          <div style={{
+            position: 'absolute', inset: 0, zIndex: 10,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'var(--bg-panel)', opacity: 0.7,
+            fontSize: 12, color: 'var(--text-secondary)',
+          }}>
+            加载中...
+          </div>
+        )}
         <Editor
           language="stressbot-log"
           theme={monacoTheme}

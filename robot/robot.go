@@ -180,12 +180,23 @@ func (r *Robot) Wait() {
 	<-r.done
 }
 
+// robotCloseTimeout Robot.Close 总体超时时间。
+// 阻塞点有两处：
+//   1) r.Wait()：等待 executor goroutine 退出（lua 死循环、嵌套调用可能卡死）
+//   2) r.client.CloseAll() 内含 WaitListenDone：等待 listenLoop 退出
+//      （回调里的 lua 脚本等 luaMu 时可能死锁）
+// 任一阻塞超过 robotCloseTimeout 即放弃等待，强制返回让上层推进。
+// 代价：LState 不归还到池、state 不清空（避免与卡死的 goroutine 并发访问），
+// 进程退出时由 OS 回收，轻微资源泄漏可接受。
+const robotCloseTimeout = 10 * time.Second
+
 // Close 停止机器人并释放资源。
-// 先 Stop 取消 ctx，再同时关闭连接（释放阻塞中的 RequestResponse）并等待执行退出。
+// 先 Stop 取消 ctx，再并行关闭连接（释放阻塞中的 RequestResponse）并等待执行退出。
+// 关键修复：r.client.CloseAll() 本身也可能因 listenLoop 回调死锁而长时间阻塞，
+// 必须放进 goroutine 与 r.Wait() 一起在同一个 select 内统一受超时保护。
 func (r *Robot) Close() {
 	r.Stop()
-	// 并行关闭连接和等待执行：关闭连接可以解除 RequestResponse 的阻塞，
-	// 避免 Wait() 死锁（executor 阻塞在网络 I/O 上时，仅靠 cancel ctx 无法唤醒）。
+
 	var waitDone chan struct{}
 	if r.done != nil {
 		waitDone = make(chan struct{})
@@ -194,10 +205,40 @@ func (r *Robot) Close() {
 			close(waitDone)
 		})
 	}
-	r.client.CloseAll()
+	closeDone := make(chan struct{})
+	utils.GetWorkPool().Go(func() {
+		r.client.CloseAll()
+		close(closeDone)
+	})
+
+	timeout := time.NewTimer(robotCloseTimeout)
+	defer timeout.Stop()
+
+	// 等待 waitDone（如有）与 closeDone 双双完成，或整体超时。
+	// 已完成的 channel 置 nil，nil channel 上的接收永远阻塞，自然退出循环。
+	pending := 1
 	if waitDone != nil {
-		<-waitDone
+		pending = 2
 	}
+	for pending > 0 {
+		select {
+		case <-waitDone:
+			waitDone = nil
+			pending--
+		case <-closeDone:
+			closeDone = nil
+			pending--
+		case <-timeout.C:
+			stresslog.Error("[ROBOT] 关闭等待超时，跳过资源归还（可能存在死锁，进程退出时回收）",
+				zap.Int("id", r.id),
+				zap.String("account", r.account),
+				zap.Duration("timeout", robotCloseTimeout),
+				zap.Bool("waitDone", waitDone == nil),
+				zap.Bool("closeDone", closeDone == nil))
+			return
+		}
+	}
+
 	if r.l != nil && r.luaPool != nil {
 		r.luaPool.Release(r.l)
 		r.l = nil
@@ -262,6 +303,9 @@ func (r *Robot) ConnectUDP(serviceName, address string) bool {
 
 	_, err := r.dialer.DialUDP(address, conn)
 	if err != nil {
+		stresslog.Warn("[ROBOT] UDP 拨号失败",
+			zap.Int("id", r.id), zap.String("account", r.account),
+			zap.String("service", serviceName), zap.String("address", address), zap.Error(err))
 		r.client.CloseUDP(serviceName)
 		monitor.Global().ConnFailed()
 		return false
@@ -297,6 +341,12 @@ type robotActionHandler struct {
 }
 
 // ExecuteAction 执行动作
+//
+// 计时拆解原则（参见 plans/latency-net-only-redesign.md）：
+//   - wallClock = time.Since(start)：含 proto 构建 / 序列化 / 反序列化 / state 写入等全部开销。
+//   - timing.NetLatency：纯网络往返（由 ActionExecutor / Lua API 累加）。
+//   - clientCost = wallClock - NetLatency：客户端 CPU 部分，作为独立列 ClientAvgMs 上报。
+//   - clientCost 可能因测量精度抖动出现极小负值，做下界保护。
 func (h *robotActionHandler) ExecuteAction(actionDef *engine.ActionDef) error {
 	if mc := monitor.Global(); mc != nil && actionDef.Name != "" {
 		mc.RecordActionStart(actionDef.Name)
@@ -304,17 +354,25 @@ func (h *robotActionHandler) ExecuteAction(actionDef *engine.ActionDef) error {
 
 	start := time.Now()
 	var sendBytes, recvBytes int
+	var timing engine.ActionTiming
 	var err error
 
 	if actionDef.Pattern == engine.PatternLua {
-		sendBytes, recvBytes, err = h.executeLuaAction(actionDef)
+		sendBytes, recvBytes, timing, err = h.executeLuaAction(actionDef)
 	} else {
-		sendBytes, recvBytes, err = h.robot.actionExec.Execute(h.robot.ctx, actionDef)
+		sendBytes, recvBytes, timing, err = h.robot.actionExec.Execute(h.robot.ctx, actionDef)
 	}
 
 	if mc := monitor.Global(); mc != nil && actionDef.Name != "" {
 		result := classifyResult(err)
-		mc.RecordAction(actionDef.Name, result, time.Since(start), sendBytes, recvBytes, err)
+		wallClock := time.Since(start)
+		clientCost := wallClock - timing.NetLatency
+		if clientCost < 0 {
+			clientCost = 0
+		}
+		mc.RecordAction(actionDef.Name, result,
+			timing.NetLatency, clientCost, timing.SamplesNet,
+			sendBytes, recvBytes, err)
 	}
 
 	return err
@@ -335,29 +393,37 @@ func classifyResult(err error) monitor.ActionResult {
 	return monitor.ResultFailure
 }
 
-// executeLuaAction 执行 lua 脚本动作，返回 (sendBytes, recvBytes, err)。
-func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int, int, error) {
+// executeLuaAction 执行 lua 脚本动作，返回 (sendBytes, recvBytes, timing, err)。
+// timing 由脚本内的网络 API 累加；纯客户端逻辑（如仅 set_secret_key）timing 为零值。
+func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int, int, engine.ActionTiming, error) {
 	if h.robot.l == nil || h.robot.luaPool == nil {
-		return 0, 0, engine.NewActionError(errcode.ErrLuaNotInit, "")
+		stresslog.Error("[ROBOT] Lua 运行时未初始化，无法执行脚本",
+			zap.Int("id", h.robot.id), zap.String("account", h.robot.account), zap.String("script", actionDef.Script))
+		return 0, 0, engine.ActionTiming{}, engine.NewActionError(errcode.ErrLuaNotInit, "")
 	}
 
 	if actionDef.Script == "" {
-		return 0, 0, engine.NewActionError(errcode.ErrLuaNoScript, "")
+		stresslog.Error("[ROBOT] 脚本名为空，无法执行",
+			zap.Int("id", h.robot.id), zap.String("account", h.robot.account), zap.String("action", actionDef.Name))
+		return 0, 0, engine.ActionTiming{}, engine.NewActionError(errcode.ErrLuaNoScript, "")
 	}
 
 	h.robot.luaMu.Lock()
 	defer h.robot.luaMu.Unlock()
 
-	code, send, recv, err := h.robot.luaPool.RunActionScript(h.robot.l, actionDef.Script)
+	// RunActionScript 内部为脚本绑定一个新的 script.Context，
+	// 脚本里的 tcp_request / udp_request / http_request 等会原子累加 NetLatencyNs / NetSamples，
+	// 这里把累加结果作为 timing 上抛给 RecordAction。
+	code, send, recv, timing, err := h.robot.luaPool.RunActionScript(h.robot.l, actionDef.Script)
 	if err != nil {
-		return 0, 0, engine.NewActionError(errcode.ErrLuaExecFailed, "script="+actionDef.Script, err)
+		return 0, 0, timing, engine.NewActionError(errcode.ErrLuaExecFailed, "script="+actionDef.Script, err)
 	}
 
 	if code != 0 {
-		return send, recv, engine.NewActionError(errcode.ErrLuaExitCode, fmt.Sprintf("script=%s code=%d", actionDef.Script, code))
+		return send, recv, timing, engine.NewActionError(errcode.ErrLuaExitCode, fmt.Sprintf("script=%s code=%d", actionDef.Script, code))
 	}
 
-	return send, recv, nil
+	return send, recv, timing, nil
 }
 
 // ExecuteBoolean 执行条件判断
@@ -542,44 +608,49 @@ func (ns *netSenderAdapter) TCPSend(service string, packet []byte) (int, error) 
 }
 
 // TCPRequest 发送 TCP 请求并等待响应。
-func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) ([]byte, uint64, error) {
+// 返回 netLatency 是 Connection.RequestResponse 测量的"Send 完成 → 收到响应"窗口，
+// 不含本函数中的连接查找等微秒级开销。
+func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) ([]byte, uint64, time.Duration, error) {
 	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
-		return nil, 0, engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
+		return nil, 0, 0, engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
 	}
-	resp, err := conn.RequestResponse(packet, routeKey, timeout...)
+	resp, netLatency, err := conn.RequestResponse(packet, routeKey, timeout...)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, netLatency, err
 	}
 	stresslog.Debug("[ACTION] TCPResponse",
 		zap.String("service", service), zap.String("routeKey", routeKey),
 		zap.Int("bodyLen", len(resp.Data)), zap.Uint64("headerErr", resp.HeaderErr))
-	return resp.Data, resp.HeaderErr, nil
+	return resp.Data, resp.HeaderErr, netLatency, nil
 }
 
 // UDPRequest 发送 UDP 请求并等待响应，与 TCPRequest 同样使用 channel 阻塞等待。
-func (ns *netSenderAdapter) UDPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) ([]byte, uint64, error) {
+func (ns *netSenderAdapter) UDPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) ([]byte, uint64, time.Duration, error) {
 	conn := ns.robot.client.GetUDPConn(service)
 	if conn == nil {
-		return nil, 0, engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
+		return nil, 0, 0, engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
 	}
-	resp, err := conn.RequestResponse(packet, routeKey, timeout...)
+	resp, netLatency, err := conn.RequestResponse(packet, routeKey, timeout...)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, netLatency, err
 	}
 	stresslog.Debug("[ACTION] UDPResponse",
 		zap.String("service", service), zap.String("routeKey", routeKey),
 		zap.Int("bodyLen", len(resp.Data)), zap.Uint64("headerErr", resp.HeaderErr))
-	return resp.Data, resp.HeaderErr, nil
+	return resp.Data, resp.HeaderErr, netLatency, nil
 }
 
 // HTTPRequest 发送 HTTP 请求。
-func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body []byte) (int, []byte, error) {
+//
+// 返回 netLatency 覆盖：http.Client.Do 调用 + 读完 response.Body。
+// http.NewRequest 构造、URL 解析等纯客户端开销不计入。
+func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body []byte) (int, []byte, time.Duration, error) {
 	if reqURL == "" {
-		return 0, nil, engine.NewActionError(errcode.ErrURLEmpty, "")
+		return 0, nil, 0, engine.NewActionError(errcode.ErrURLEmpty, "")
 	}
 	if !strings.HasPrefix(reqURL, "http://") && !strings.HasPrefix(reqURL, "https://") {
-		return 0, nil, engine.NewActionError(errcode.ErrURLScheme, "url="+reqURL)
+		return 0, nil, 0, engine.NewActionError(errcode.ErrURLScheme, "url="+reqURL)
 	}
 
 	var req *http.Request
@@ -590,7 +661,7 @@ func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body
 		case "json":
 			req, err = http.NewRequest(method, reqURL, bytes.NewReader(body))
 			if err != nil {
-				return 0, nil, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
+				return 0, nil, 0, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 			}
 			req.Header.Set("Content-Type", "application/json")
 		case "form":
@@ -601,35 +672,38 @@ func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body
 				req, err = http.NewRequest(method, reqURL, strings.NewReader(string(body)))
 			}
 			if err != nil {
-				return 0, nil, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
+				return 0, nil, 0, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 			}
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		default:
 			req, err = http.NewRequest(method, reqURL, bytes.NewReader(body))
 			if err != nil {
-				return 0, nil, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
+				return 0, nil, 0, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 			}
 		}
 	} else {
 		req, err = http.NewRequest(method, reqURL, nil)
 		if err != nil {
-			return 0, nil, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
+			return 0, nil, 0, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 		}
 	}
 
+	netStart := time.Now()
 	resp, err := ns.robot.httpClient.Do(req)
 	if err != nil {
+		netLatency := time.Since(netStart)
 		stresslog.Warn("[HTTP] 请求失败", zap.String("url", reqURL), zap.Error(err))
-		return 0, nil, engine.NewActionError(errcode.ErrSendFailed, "url="+reqURL, err)
+		return 0, nil, netLatency, engine.NewActionError(errcode.ErrSendFailed, "url="+reqURL, err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
+	netLatency := time.Since(netStart)
 	if err != nil {
-		return resp.StatusCode, nil, engine.NewActionError(errcode.ErrHTTPReadBody, "url="+reqURL, err)
+		return resp.StatusCode, nil, netLatency, engine.NewActionError(errcode.ErrHTTPReadBody, "url="+reqURL, err)
 	}
 
-	return resp.StatusCode, respBody, nil
+	return resp.StatusCode, respBody, netLatency, nil
 }
 
 // UDPSend 通过 UDP 发送数据包。

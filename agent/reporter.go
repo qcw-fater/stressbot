@@ -46,6 +46,12 @@ func (r *StressReporter) Start(ctx context.Context) {
 	})
 }
 
+// Snapshot 采集当前指标快照（同步，不停止上报循环）。
+// 用于阶段重置时获取当前阶段的最终指标。
+func (r *StressReporter) Snapshot() *monitor.CollectorSnapshot {
+	return r.src.Snapshot(nil, 0)
+}
+
 // Stop 停止推送循环（幂等）。先做一次同步 flush 确保最后一帧指标已推送。
 func (r *StressReporter) Stop() {
 	r.stopOnce.Do(func() {

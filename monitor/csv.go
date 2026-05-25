@@ -28,9 +28,13 @@ func ExportCSV(c *MetricsCollector, path string) error {
 	w := csv.NewWriter(f)
 	defer w.Flush()
 
+	// 新增"网络样本数 / 客户端开销"两列，对应 latency 拆分后的 monitor 模型。
+	// 网络延迟列保留原名，但语义已改为"纯网络往返"，不再含客户端构建/解析。
 	header := []string{
 		"接口名", "样本数", "成功次数", "超时次数", "错误次数",
-		"成功率", "平均响应(ms)", "最小响应(ms)", "最大响应(ms)",
+		"网络样本数", "成功率",
+		"平均网络往返(ms)", "客户端开销(ms)",
+		"最小网络往返(ms)", "最大网络往返(ms)",
 		"P50(ms)", "P90(ms)", "P95(ms)", "P99(ms)",
 		"Apdex", "平均发送字节", "平均接收字节",
 		"平均QPS", "压测时长(s)",
@@ -45,8 +49,10 @@ func ExportCSV(c *MetricsCollector, path string) error {
 			fmt.Sprintf("%d", a.SuccessCount),
 			fmt.Sprintf("%d", a.TimeoutCount),
 			fmt.Sprintf("%d", a.FailureCount),
+			fmt.Sprintf("%d", a.NetSampleCount),
 			fmt.Sprintf("%.4f", a.SuccessRate),
 			fmt.Sprintf("%.2f", a.Latency.AvgMs),
+			fmt.Sprintf("%.2f", a.ClientAvgMs),
 			fmt.Sprintf("%.2f", a.Latency.MinMs),
 			fmt.Sprintf("%.2f", a.Latency.MaxMs),
 			fmt.Sprintf("%.2f", a.Latency.P50Ms),

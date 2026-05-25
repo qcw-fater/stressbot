@@ -52,6 +52,8 @@ message HeroRecord {
     LastHeroRecord   lastHeroRecord          = 2; // 上把战绩
     SeasonHeroRecord ladderRecord            = 3; // 排位赛统计
     SeasonHeroRecord recreationRecord        = 4; // 娱乐赛统计
+    SeasonHeroRecord activityBattleRecord        = 5; // 活动赛统计
+    SeasonHeroRecord activityBattleSingleRecord        = 6; // 单人活动赛统计
 }
 
 // 英雄上把战绩

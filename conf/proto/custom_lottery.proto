@@ -45,6 +45,7 @@ message LotteryInfo {
     int32          dayCount           = 13; // 每日抽卡次数
     int32          freeCnt            = 14; // 免费抽卡次数
     int32          PoolGroup          = 15; // 卡池组id
+    int32          coverHeroHitCnt    = 16; // 封面角色命中次数
 }
 
 // 抽卡db数据  //按池分的
@@ -57,6 +58,7 @@ message LotteryDB {
     int64 selectUpHeroCD         = 6; // 选择的up角色冷却时长
     int32 dayCount               = 7; // 今日抽卡次数
     int32 freeCnt                = 8; // 免费抽卡次数
+    int32 coverHeroHitCnt        = 9; // 封面角色累计抽中次数
 }
 
 // 同组日志

@@ -24,7 +24,7 @@ message battlePassInfo {
     map<int64, BattlePassTaskType> dayTask = 13; // 每日任务 filed: 任务uuid，value: 0:普通任务，1:进阶任务
     int64                          refreshTaskCD = 14; // 刷新任务CD
     int32                          refreshCount  = 15; // 已经刷新次数
-    map<int64, HeroTaskInfo>       heroTaskList  = 16; // 英雄限时任务 key:任务UUID
+    int32                          payRefreshCount = 16; // 付费刷新次数
 }
 
 //获取战令信息
@@ -122,30 +122,7 @@ message BpGetExpGameTypeS2C
     map<int32, int32> flag = 1; // key: 格子id，value: 上次领取的周期id
 }
 
-message HeroTaskInfo {
-    int64 taskUUID     = 1; // 任务UUID
-    int32 heroId       = 2; // 英雄ID
-    int32 taskId       = 3; // 任务配置ID
-    int64 expireTime   = 4; // 过期时间戳
-}
-
-// 待继承的英雄限时任务数据
-message HeroTaskPendingData {
-    repeated HeroTaskInfo tasks = 1; // 待继承任务列表
-}
-
 message playerNewGameTypeBpExp {
   map<int32, int32> flag = 1; // key: 格子id，value: 上次领取的周期id
 }
-// 英雄限时任务更新推送
-message BpHeroTaskUpdateS2C
-{
-    int32 battlePassId = 1; // 战令ID
-    repeated HeroTaskInfo heroTaskList = 2; // 新增的英雄限时任务列表
-}
-// 英雄限时任务过期通知
-message BpHeroTaskExpireS2C
-{
-    int32 battlePassId = 1; // 战令ID
-    repeated int64 expiredTaskUUID = 2; // 过期的任务UUID列表
-}
+

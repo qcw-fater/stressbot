@@ -18,18 +18,25 @@ message MatchMsgToTeam {
     int32  modeId = 6; // 玩法id
 }
 
+// 匹配队伍追踪信息
+message MatchTeamTraceInfo {
+    int64 teamId    = 1; // 队伍ID
+    int64 matchUuid = 2; // 匹配Uuid
+}
+
 // 匹配服到房间服务器 消息数据
 message MatchMsgToRoom {
-    GameModel model                    = 1; // 游戏模式
-    GameType  gType                    = 2; // 游戏类型
-    int32     modeId                   = 3; // 模式Id
-    string    battleVersion            = 4; // 战斗版本
-    string    clientVersion            = 5; // 客户端版本
-    string    battleArea               = 6; // 战斗区域
-    repeated MatchPlayerInfo players   = 7; // 玩家信息
-    LadderDraftType          DraftType = 8; // 是否征召模式
-    int32                    matchFlag = 9; // 0正常 1补偿局 2温暖局
-    int32                    activityStep = 10; // 活动赛阶段
+    GameModel model                           = 1;  // 游戏模式
+    GameType  gType                           = 2;  // 游戏类型
+    int32     modeId                          = 3;  // 模式Id
+    string    battleVersion                   = 4;  // 战斗版本
+    string    clientVersion                   = 5;  // 客户端版本
+    string    battleArea                      = 6;  // 战斗区域
+    repeated MatchPlayerInfo players          = 7;  // 玩家信息
+    LadderDraftType          DraftType        = 8;  // 是否征召模式
+    int32                    matchFlag        = 9;  // 0正常 1补偿局 2温暖局
+    int32                    activityStep     = 10; // 活动赛阶段
+    repeated MatchTeamTraceInfo teamTraceList = 11; // 队伍匹配追踪信息
 }
 
 // 匹配状况

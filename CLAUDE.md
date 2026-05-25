@@ -50,7 +50,7 @@ cd cmd/web && npm run test                 # Vitest
 - **`adapter/` — 协议适配器接口（9 方法）。热路径帧解析（`HeaderSize`/`BodyLength`）纯 Go 缓存，编解码通过 Lua 池调用 `codec.lua`。
 - **`admin/` — Admin 服务器（16 文件）。任务调度（TaskStore 状态机 + 单例约束 + 持久化）、Agent 管理（注册/心跳/健康检查/unhealthy→offline/离线清理）、指标聚合（MergeSnapshots）、时序采样（Sampler）、历史归档（SQLite 6 表）、任务分配（proportional/debug-single）、Agent RPC 调度、前端静态托管。51 个 HTTP API 端点。
 - **`agent/` — Agent 节点（8 文件）。注册到 Admin（指数退避）→ 心跳循环 → 任务轮询 → TaskRunner 执行（下载配置 → 加载适配器 → 编译 proto → 构建流程 → Manager → 启动机器人）→ 指标上报 + 系统资源上报。本地 HTTP API（task/stop/shutdown/version/status/logs）。
-- **`monitor/` — 指标采集。原子计数器（热路径零锁：成功/失败/超时/取消/执行中/字节数）、延迟直方图（16 桶 1ms~60s+，P50/P90/P95/P99）、Apdex 评分（阈值 T 可配）、分布式聚合。错误按 `(Kind, Code)` 聚合（框架码 1-99 / 服务端码 ≥ 100），保留最近 3 条详情。导出：Console / HTTP JSON / CSV / pprof。
+- **`monitor/` — 指标采集。原子计数器（热路径零锁：成功/失败/超时/取消/执行中/字节数）、延迟直方图（16 桶 1ms~60s+，P50/P90/P95/P99，**仅纯网络往返**，不含客户端构建/解析）、Apdex 评分（阈值 T 可配，分母为 netSampleCount）、客户端开销独立列（`ClientAvgMs`）、分布式聚合。`RecordAction(name, result, netLatency, clientCost, netSamples, send, recv, err)`：netSamples=0 的纯客户端动作不进直方图但 successCount 仍计数。错误按 `(Kind, Code)` 聚合（框架码 1-99 / 服务端码 ≥ 100），保留最近 3 条详情。导出：Console / HTTP JSON / CSV / pprof。
 - **`logview/` — 日志环形缓冲区。O(1) 写入 + cursor 分页查询，供前端实时日志面板使用。
 - **`errcode/` — 统一错误码。`ErrorCode`（uint64）+ `Kind`（`"framework"` / `"server"`）+ 27 个框架错误码常量（Network 5 / Protocol 2 / Build 4 / Listen 2 / Config 8 / Lua 4 / Callback 2）。`ActionError` 携带 `(Kind, Code, Detail)` 三元组。
 - **`utils/` — `work_pool.go`（协程池 + recover 防止 panic 扩散）、`duration.go`、`utils/log/`（结构化日志 zap + lumberjack 轮转 + 企业微信 webhook 告警）。

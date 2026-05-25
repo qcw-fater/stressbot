@@ -26,6 +26,7 @@ export interface TaskBrief {
   state: TaskState;
   totalBots: number;
   agentCount: number;
+  activeAgentCount: number;
   createdAt: string;
   startedAt?: string;
   stoppedAt?: string;
@@ -94,6 +95,8 @@ export interface RampUpStage {
   concurrency?: number;
   /** 阶段间等待秒数，最后阶段可不填 */
   holdSec?: number;
+  /** 开始本阶段前清空所有已有机器人 */
+  reset?: boolean;
 }
 
 /** 渐进式加压配置。 */
@@ -249,6 +252,11 @@ export interface ActionMetric {
   avgSendBytes: number;
   avgRecvBytes: number;
   timeoutAvgMs: number;
+  /** 客户端构建/解析平均耗时（毫秒），所有结果分支累计 */
+  clientAvgMs: number;
+  /** 进入 latency 直方图的样本数（netSamples > 0 且成功）。0 表示该 action 没有真正网络往返，延迟列应显示 — */
+  netSampleCount: number;
+  /** 延迟直方图（仅纯网络往返） */
   latency: HistogramView;
   errors?: ErrorEntry[];
 }
@@ -366,6 +374,7 @@ export interface HistoryRecord {
   state: 'stopped' | 'failed';
   totalBots: number;
   agentCount: number;
+  activeAgentCount: number;
   createdAt: string;
   startedAt?: string;
   stoppedAt?: string;
@@ -375,6 +384,7 @@ export interface HistoryRecord {
   tags: string[];
   note?: string;
   configSummary: ConfigSummary;
+  stageCount?: number;
 }
 
 export interface HistoryListResponse {

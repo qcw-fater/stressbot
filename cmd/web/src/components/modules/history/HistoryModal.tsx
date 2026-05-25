@@ -350,8 +350,14 @@ function HistoryCard({
           </span>
           <span className="hp-metric">
             <span className="hp-metric__k">节点</span>
-            <span className="hp-metric__v">{r.agentCount}</span>
+            <span className="hp-metric__v">{r.activeAgentCount}/{r.agentCount}</span>
           </span>
+          {!!r.stageCount && r.stageCount > 0 && (
+            <span className="hp-metric">
+              <span className="hp-metric__k">阶段</span>
+              <span className="hp-metric__v" style={{ color: 'var(--color-blue)' }}>{r.stageCount} 阶段</span>
+            </span>
+          )}
           <span className="hp-metric hp-metric--wide">
             <span className="hp-metric__k">开始</span>
             <span className="hp-metric__v">{r.startedAt ? dayjs(r.startedAt).format('MM-DD HH:mm') : '—'}</span>

@@ -1,529 +1,626 @@
-# Agent 实施方案
+# Agent 节点技术文档
 
-> **角色定位**：Agent 是分布式压测系统中的**业务执行节点**，负责注册到 Admin、接收任务、驱动机器人压测、采集压测/系统指标、上报 Admin。Agent 进程被 Launcher 守护，通过文件 IPC 协作完成升级。
+> **角色定位**：Agent 是分布式压测系统的**执行节点**，负责注册到 Admin、接收任务、驱动机器人压测、采集压测/系统指标并上报 Admin。
 > **本文档目标读者**：负责 `agent/` 包及 `cmd/agent/` 入口的开发者。
-> **前置阅读**：`docs/design-distributed-master.md` §10 「Agent 设计」、§7 「压测指标聚合」、§8 「Agent 系统监控」、§15 「热更新」。
+> **前置阅读**：`docs/admin-implementation.md`（Admin 端协议契约可双向交叉验证）。
 
 ---
 
 ## 0. 文档约定
 
 - 项目名/Go module：`stressbot`
-- 业务进程二进制：`agent.exe`（Linux：`agent`），来自 `cmd/agent`
+- 业务进程二进制：`stressbot.exe`（Linux：`stressbot`），来自 `cmd/agent`
 - 单机模式：`agent.enabled=false`，行为与改造前完全一致
 - Agent 模式：`agent.enabled=true`，注册到 Admin 等待任务下发
-- **Admin 主文档** = `docs/admin-implementation.md`，所有协议契约可双向交叉验证
+- Admin 主文档：`docs/admin-implementation.md`
 
 ## 1. 模块职责
 
 Agent 进程是 stressbot 的业务主体，分为单机模式和 Agent 模式：
 
-### 单机模式（agent.enabled=false）
+### 1.1 单机模式（agent.enabled=false）
 
-完全保持现有行为：直接加载本地 `flow.json` → 创建 `robot.Manager` → 启动机器人 → 等待 Ctrl+C。
+完全保持现有行为：直接加载本地 `flow.json` -> 创建 `robot.Manager` -> 启动机器人 -> 等待 Ctrl+C 或运行时长到期 -> 导出 CSV -> 退出。
 
-### Agent 模式（agent.enabled=true）
+### 1.2 Agent 模式（agent.enabled=true）
 
 - 启动时仅初始化基础设施（监控、HTTP 服务器、SystemMonitor），**不**创建 `robot.Manager`
 - 向 Admin 发起注册（携带本机静态信息：Hostname、CPU 核数、内存总量、Go 版本、AppVersion、OS/Arch）
-- 启动心跳循环（10s 一次），心跳失败时指数退避重连
-- 启动**系统指标推送循环**（5s 一次，独立于任务）
-- 启动**任务轮询**或被动接受 Admin Push（推 + 拉双通道，详 §3.3）
-- 收到任务下发后：从 Admin 拉取配置 → 写入临时目录 → `robot.Manager.Run` → 启动**压测指标推送循环**
-- 收到停止指令或机器人全部退出后：上报 `done` → 清理临时目录 → 回到 idle
-- 收到升级指令：下载 → 校验 SHA256 → drain → 写 `.upgrade.pending` → `os.Exit(99)`，由 Launcher 完成替换
+- 启动心跳循环（默认 10s 一次），失败时快速重试（同间隔）
+- 启动**系统指标推送循环**（与 StressInterval 同步，默认 5s，独立于任务）
+- 启动**任务轮询**（30s 间隔，回退通道）
+- 收到任务下发后：从 Admin 拉取配置 -> 写入临时目录 -> 启动 TaskRunner 13 步流水线 -> 启动**压测指标推送循环**
+- 收到停止指令或机器人全部退出后：上报 `done` -> 清理临时目录 -> 回到 idle
+- 优雅退出：取消当前任务 -> 等待上报完成 -> 注销（best-effort）-> 关闭 HTTP -> 关闭协程池
 
 ## 2. 包结构与文件清单
 
-### 2.1 新增包
+### 2.1 包文件
 
 ```
 agent/
-  agent.go         — Agent 主结构、生命周期、注册/心跳
-  config.go        — Config 解析 + 校验
-  sysmon.go        — SystemMonitor：基于 gopsutil 采集
-  reporter.go      — StressReporter / SystemReporter 推送循环
-  task_runner.go   — 任务执行：拉配置、写临时目录、起 Manager
-  upgrader.go      — 升级处理：下载、校验、drain、Exit(99)
-  http_server.go   — Agent HTTP 服务（接收 Admin 命令）
-  http_client.go   — 与 Admin 通信的 client（带重试）
-  types.go         — 与 Admin 共享的 DTO（与 admin/types.go 镜像）
-  agent_test.go
-  sysmon_test.go
-  reporter_test.go
+  agent.go         — Agent 主结构、生命周期、注册/心跳/任务轮询/优雅退出 (~595 行)
+  config.go        — Config 解析 + 校验 + 静态信息采集 (~122 行)
+  sysmon.go        — SystemMonitor：基于 gopsutil/v4 采集 (~168 行)
+  reporter.go      — StressReporter / SystemReporter 推送循环 (~196 行)
+  task_runner.go   — 任务执行：拉配置、写临时目录、13 步流水线 (~291 行)
+  http_server.go   — Agent HTTP 服务（接收 Admin 命令 + 日志查询） (~298 行)
+  http_client.go   — 与 Admin 通信的 client（带重试） (~288 行)
+  types.go         — 与 Admin 共享的 DTO（请求/响应/状态/枚举） (~193 行)
 ```
 
 ### 2.2 cmd 入口
 
 ```
 cmd/agent/
-  main.go          — 入口：解析 config → 单机/Agent 分支
-                     （重命名自 cmd/stressbot/main.go）
+  main.go          — 入口：解析 config -> 单机/Agent 分支（含 StandaloneConfig 定义）
 ```
 
-### 2.3 修改文件
+### 2.3 依赖关系
 
-| 文件 | 改动 |
-|---|---|
-| `monitor/snapshot.go` | `ActionSnapshot` 增加 `LatencyBuckets`、`LatencySumNs`、`ApdexSatisfied`、`ApdexTolerating`（用于跨节点聚合） |
-| `monitor/histogram.go` | `LatencyHistogram` 暴露桶计数获取方法 |
-| `monitor/collector.go` | `Snapshot()` 输出新字段 |
-| `robot/manager.go` | `RunWithContext(ctx) error`：阻塞直到所有机器人退出或 ctx 取消 |
-| `conf/config.json` | 新增 `agent` 配置段 |
+Agent 包依赖以下内部包：
 
-### 2.4 不修改
+| 依赖包 | 用途 |
+|--------|------|
+| `monitor` | `MetricsCollector` 指标采集与快照 |
+| `utils` | 协程池 `GetWorkPool()`、`ParseDurationDefault()`、`Daemon()` |
+| `utils/log` | 结构化日志（zap + lumberjack） |
+| `logview` | 环形缓冲区日志查询 |
+| `adapter` | Lua 协议适配器 |
+| `protox` | 动态 protobuf 加载 |
+| `engine` | 流程配置解析 |
+| `network` | gnet 网络引擎 |
+| `robot` | Robot Manager |
+| `script` | Lua 运行时池 |
 
-`engine/`、`network/`、`adapter/`、`protox/`、`script/`、`state/`、`robot/robot.go`（机器人本体不变）。
+外部依赖：
 
-### 2.5 新增依赖
-
-```bash
-go get github.com/shirou/gopsutil/v4
-```
+- `github.com/shirou/gopsutil/v4` — 系统指标采集（CPU/内存/网络/进程/负载）
 
 ## 3. 主流程
 
-### 3.1 进程启动
+### 3.1 进程启动（cmd/agent/main.go）
 
-```go
-// cmd/agent/main.go
-func main() {
-    cfgPath := flag.String("config", "conf/config.json", "")
-    flag.Parse()
-
-    cfg := loadConfig(*cfgPath)
-
-    if cfg.Agent.Enabled {
-        runAgentMode(cfg)
-    } else {
-        runStandalone(cfg) // 现有逻辑
-    }
-}
-
-func runAgentMode(cfg *Config) {
-    a, err := agent.New(agent.Config{
-        AdminAddr:         cfg.Agent.AdminAddr,
-        Name:              cfg.Agent.Name,
-        ListenAddr:        cfg.Agent.ListenAddr,
-        MaxBots:           cfg.Agent.MaxBots,
-        StressInterval:    utils.ParseDurationDefault(cfg.Agent.StressInterval, 5*time.Second),
-        SystemInterval:    utils.ParseDurationDefault(cfg.Agent.SystemInterval, 5*time.Second),
-        HeartbeatInterval: utils.ParseDurationDefault(cfg.Agent.HeartbeatInterval, 10*time.Second),
-        AppVersion:        Version, // 编译时注入：-ldflags "-X main.Version=..."
-    })
-    if err != nil { log.Fatal(err) }
-    if err := a.Run(); err != nil { log.Fatal(err) }
-}
 ```
+main()
+  ├── 解析 -config 参数
+  ├── loadConfig() 反序列化 JSON
+  ├── 初始化日志（Agent 模式用 agent.log，单机用 stressbot.log）
+  ├── AttachRingBuffer（50000 条容量）
+  │
+  ├── if agent.enabled:
+  │     runAgentMode(cfg)
+  │       ├── cfg.Agent.Resolve() 校验配置
+  │       ├── monitor.Init() 创建全局 collector
+  │       ├── agent.New(resolved, collector)
+  │       └── agent.Run() 阻塞
+  │
+  └── else:
+        runStandalone(cfg, confDir)
+          ├── 加载适配器 / proto / flow / Lua 脚本
+          ├── 初始化监控
+          ├── 创建 Manager + StartAll()
+          ├── 等待信号或运行时长到期
+          ├── StopAll() + 导出 CSV
+          └── 关闭适配器 + 协程池
+```
+
+**编译时版本注入**：
+
+```bash
+go build -ldflags "-X main.Version=v1.2.0" -o stressbot.exe ./cmd/agent
+```
+
+`main.Version` 默认值为 `"dev"`，通过 `cfg.Agent.AppVersion` 传递给 Agent。
+
+**守护进程模式**（仅 Linux）：
+
+- 命令行 `-d` 标志或配置 `"daemon": true`
+- 调用 `utils.Daemon()` fork 子进程后父进程退出
 
 ### 3.2 Agent 生命周期主循环
 
 ```
-                Start()
-                  │
-                  ▼
-       ┌──────────────────────┐
-       │  initialize          │
-       │  - SystemMonitor.Start()
-       │  - http server.Listen
-       │  - register loop start
-       │  - system reporter start
-       │  - task command listener
-       └──────────┬───────────┘
-                  ▼
-       ┌──────────────────────┐
-       │  idle                │
-       │  等待任务或升级命令  │
-       └─┬───────────────┬────┘
-         │ 任务下达       │ 升级命令
-         ▼               ▼
-       ┌─────────┐   ┌──────────┐
-       │ running │   │ upgrading│
-       └────┬────┘   └────┬─────┘
-            │             │
-            │ 任务完成    │ os.Exit(99)
-            ▼             ▼
-         返回 idle      Launcher 接管
+                    New()
+                      │
+                      ▼
+              ┌───────────────────────────────────────┐
+              │  Run() 阻塞主循环                       │
+              │                                        │
+              │  1. SystemMonitor.Start()               │
+              │  2. startHTTPServer()  (port 7719)      │
+              │  3. registerWithRetry()  (指数退避)      │
+              │     └── regGeneration++                 │
+              │  4. SystemReporter.Start()  (常驻推送)   │
+              │  5. heartbeatLoop  (协程池)             │
+              │  6. taskPollLoop  (30s 回退通道)         │
+              │  7. 阻塞等待退出信号                     │
+              │     ├── SIGINT / SIGTERM                │
+              │     └── stopCh (远程关闭)                │
+              │  8. shutdown()                          │
+              └────────────────────────────────────────┘
+                      │
+                      ▼
+              ┌───────────────────────────────────────┐
+              │  idle (等待任务)                        │
+              │                                        │
+              │  两种触发方式：                          │
+              │  ├── POST /agent/v1/task  (Admin Push) │
+              │  └── GET pending-task   (30s Poll)     │
+              └───────┬───────────────────────────────┘
+                      │ 任务到达
+                      ▼
+              ┌───────────────────────────────────────┐
+              │  busy (执行任务)                        │
+              │                                        │
+              │  executeTask():                        │
+              │  ├── 创建 StressReporter + Start       │
+              │  ├── NewTaskRunner + Run (13 步)       │
+              │  ├── StressReporter.Stop() (flush)     │
+              │  ├── 采集 finalSnapshot                │
+              │  ├── ReportTaskDone()  (一次性上报)     │
+              │  ├── runner.Cleanup()                  │
+              │  └── 恢复 idle                         │
+              └───────────────────────────────────────┘
+                      │
+                      │ 任务完成
+                      ▼
+                   返回 idle
 ```
 
 ### 3.3 任务下发：Push + Poll 双通道
 
-> 主文档已确定使用双通道。实现：
+- **主通道（Push）**：Admin 通过 `POST http://agent:7719/agent/v1/task` 推送任务，Agent 立即返回 `202 Accepted` 后异步处理
+- **回退通道（Poll）**：Agent 每 30s 调用 `GET /sbot/agent/{id}/pending-task`，处理可能因 Push 失败遗漏的任务
 
-- **主通道（Push）**：Admin 通过 `POST http://agent:7070/agent/v1/task` 推送任务，Agent 立即返回 202 Accepted 后异步处理。
-- **回退通道（Poll）**：Agent 每 30s 调用 `GET /api/agent/{id}/pending-task`，处理可能因 Push 失败遗漏的任务。
+任何一方先收到都先标记 `currentTask`，重复下发时 Agent 返回 `409 Conflict`（含 `currentTaskId`）。
 
-任何一方先收到都先标记 `currentTaskID`，重复下发时 Agent 返回 409 Conflict 即可。
-
-### 3.4 优雅停止 / 升级退出
+### 3.4 退出触发方式
 
 | 触发 | 行为 |
-|---|---|
-| 收到 `POST /agent/v1/stop` | drain 当前任务（停 manager → 等所有机器人退出 → 上报 `done`），保持进程不退出 |
-| 收到 `POST /agent/v1/upgrade` | 下载 + 校验 → drain → 写 `.upgrade.pending` → `os.Exit(99)` |
-| 收到 SIGINT / SIGTERM | drain 当前任务 → 注销（`POST /api/agent/{id}/deregister` best-effort） → 退出 |
+|------|------|
+| 收到 `POST /agent/v1/stop` | 取消当前任务 ctx，等待 drain 完成，保持进程不退出 |
+| 收到 `POST /agent/v1/shutdown` | 触发 `triggerStop()`，走完整 shutdown 流程后进程退出 |
+| 收到 SIGINT / SIGTERM | 走完整 shutdown 流程后进程退出 |
 
 ## 4. 核心组件设计
 
-### 4.1 Agent 主结构
+### 4.1 Agent 主结构（agent/agent.go）
 
 ```go
-// agent/agent.go
 type Agent struct {
-    cfg    Config
-    id     string         // 启动时生成 UUID
-    started time.Time
+    id      string                    // UUID v4（启动时生成，进程全生命周期不变）
+    cfg     *ResolvedConfig           // 已解析的运行期配置
+    started time.Time                 // 启动时间
+    ctx     context.Context           // 全局 context（shutdown 时 cancel）
+    cancel  context.CancelFunc
 
-    sysmon    *SystemMonitor
-    collector *monitor.MetricsCollector // 复用单例
-    httpSrv   *http.Server
-    httpCli   *AdminClient
+    sysmon    *SystemMonitor          // 系统指标采集器
+    collector *monitor.MetricsCollector // 压测指标采集器（全局单例）
+    httpSrv   *http.Server            // 接收 Admin 命令的 HTTP 服务
+    httpCli   *AdminClient            // 与 Admin 通信的客户端
 
-    // 任务状态
+    // 任务状态（mu 保护）
     mu          sync.Mutex
-    currentTask *TaskAssignment
-    taskCancel  context.CancelFunc
-    runner      *TaskRunner
+    status      AgentStatus           // idle | busy
+    currentTask *TaskAssignment       // 当前任务（nil = 空闲）
+    taskCancel  context.CancelFunc    // 取消当前任务
 
-    // 上报循环句柄
-    sysReporter    *SystemReporter // 常驻
-    stressReporter *StressReporter // 仅 task running 时存在
+    // 任务执行追踪
+    taskWG sync.WaitGroup            // executeTask Add(1)/Done()，shutdown 时 Wait
+
+    // 上报循环
+    sysReporter    *SystemReporter    // 常驻（注册后启动）
+    stressReporter *StressReporter    // 仅 task running 时存在
 
     // 优雅退出
-    stopCh chan struct{}
-    wg     sync.WaitGroup
-}
+    stopCh   chan struct{}            // 关闭即触发主循环退出
+    stopOnce sync.Once               // 保证 stopCh 仅关闭一次
 
-func New(cfg Config) (*Agent, error) { /* 校验配置 + 初始化 */ }
-func (a *Agent) Run() error                { /* 阻塞主循环 */ }
-func (a *Agent) Stop(ctx context.Context) error
+    // 注册版本号
+    regGeneration atomic.Int64        // 每次重新注册成功后递增
+}
 ```
 
-### 4.2 SystemMonitor
+**关键方法**：
+
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| `New` | `(cfg *ResolvedConfig, collector *MetricsCollector) (*Agent, error)` | 创建实例：生成 UUID、创建 SystemMonitor、创建 AdminClient |
+| `Run` | `() error` | 阻塞主循环（含顶层 panic recover） |
+| `triggerStop` | `()` | 线程安全地关闭 stopCh（sync.Once 保护） |
+| `ID` | `() string` | 返回 Agent UUID |
+| `Status` | `() AgentStatus` | 返回当前状态（持锁） |
+| `cancelCurrentTask` | `(reason string) (taskID string, canceled bool)` | 取消当前任务（持锁安全） |
+| `registerWithRetry` | `(ctx context.Context) error` | 指数退避注册（ReconnectMaxRetries 控制重试策略） |
+| `heartbeatLoop` | `(ctx context.Context)` | 心跳循环 goroutine |
+| `taskPollLoop` | `(ctx context.Context)` | 30s 任务轮询 goroutine |
+| `executeTask` | `(parentCtx context.Context, task *TaskAssignment)` | 异步执行任务（taskWG 追踪） |
+| `shutdown` | `() error` | 优雅关闭（6 步） |
+
+### 4.2 SystemMonitor（agent/sysmon.go）
 
 ```go
-// agent/sysmon.go
 type SystemMonitor struct {
-    interval time.Duration
+    interval time.Duration            // 采集间隔
+    static   StaticInfo               // 启动时一次性采集
 
-    mu       sync.RWMutex
-    latest   SystemSnapshot     // 最新一次采集结果
-    static   StaticInfo         // 启动时一次性采集
+    mu     sync.RWMutex
+    latest SystemSnapshot             // 最新一次采集结果（Snapshot 只做读锁）
 
-    // 网络速率累计基线
+    // 网络速率差分基线
     prevNetSent uint64
     prevNetRecv uint64
     prevAt      time.Time
+    initialized bool                  // 第一次采集只建基线，第二次起才有速率值
 
-    self *process.Process // gopsutil 进程句柄
+    // 进程句柄
+    pid  int32
+    self *process.Process             // gopsutil 进程句柄
 }
+```
 
+**SystemSnapshot 完整字段定义**：
+
+```go
 type SystemSnapshot struct {
-    Timestamp     time.Time `json:"timestamp"`
+    Timestamp time.Time `json:"timestamp"`
 
-    // CPU
-    CPUPercent    float64   `json:"cpuPercent"`
-    CPUPerCore    []float64 `json:"cpuPerCore"`
-    LoadAvg1      float64   `json:"loadAvg1"`     // Linux only
-    LoadAvg5      float64   `json:"loadAvg5"`
-    LoadAvg15     float64   `json:"loadAvg15"`
+    // CPU（4 字段）
+    CPUPercent float64   `json:"cpuPercent"`    // 总 CPU 使用率（%）
+    CPUPerCore []float64 `json:"cpuPerCore"`    // 每核心使用率
+    LoadAvg1   float64   `json:"loadAvg1"`      // 1 分钟负载均值（Linux only，Windows=0）
+    LoadAvg5   float64   `json:"loadAvg5"`
+    LoadAvg15  float64   `json:"loadAvg15"`
 
-    // 内存
-    MemTotalMB    uint64    `json:"memTotalMB"`
-    MemUsedMB     uint64    `json:"memUsedMB"`
-    MemPercent    float64   `json:"memPercent"`
-    SwapUsedMB    uint64    `json:"swapUsedMB"`
+    // 内存（4 字段）
+    MemTotalMB uint64  `json:"memTotalMB"`      // 物理内存总量
+    MemUsedMB  uint64  `json:"memUsedMB"`       // 已用物理内存
+    MemPercent float64 `json:"memPercent"`      // 内存使用率（%）
+    SwapUsedMB uint64  `json:"swapUsedMB"`      // Swap 已用量
 
-    // 进程
-    ProcessRssMB  uint64    `json:"processRssMB"`
-    ProcessHeapMB uint64    `json:"processHeapMB"`
-    ProcessSysMB  uint64    `json:"processSysMB"`
-    NumGoroutine  int       `json:"numGoroutine"`
-    NumThread     int32     `json:"numThread"`
-    NumFD         int32     `json:"numFd"`
+    // 进程（6 字段）
+    ProcessRssMB  uint64 `json:"processRssMB"`   // 进程 RSS（物理常驻内存）
+    ProcessHeapMB uint64 `json:"processHeapMB"`  // Go 堆分配
+    ProcessSysMB  uint64 `json:"processSysMB"`   // Go 进程总占用
+    NumGoroutine  int    `json:"numGoroutine"`   // Goroutine 数量
+    NumThread     int32  `json:"numThread"`      // OS 线程数
+    NumFD         int32  `json:"numFd"`          // 文件描述符数（Windows 上可能为 0）
 
-    // 网络速率（差分计算）
-    NetSendKBps   float64   `json:"netSendKBps"`
-    NetRecvKBps   float64   `json:"netRecvKBps"`
+    // 网络速率（差分计算，2 字段）
+    NetSendKBps float64 `json:"netSendKBps"`     // 上行速率（KB/s）
+    NetRecvKBps float64 `json:"netRecvKBps"`     // 下行速率（KB/s）
 
-    // GC
-    GCCount       uint32    `json:"gcCount"`
-    GCPauseAvgMs  float64   `json:"gcPauseAvgMs"`
+    // GC（2 字段）
+    GCCount      uint32  `json:"gcCount"`         // GC 总次数
+    GCPauseAvgMs float64 `json:"gcPauseAvgMs"`    // 最近 N 次 GC 平均暂停时间（ms）
 }
+```
 
+**StaticInfo 完整字段定义**：
+
+```go
 type StaticInfo struct {
-    Hostname    string `json:"hostname"`
-    OS          string `json:"os"`           // "linux" / "windows"
-    Arch        string `json:"arch"`         // "amd64"
-    NumCPU      int    `json:"numCpu"`
-    MemTotalMB  uint64 `json:"memTotalMB"`
-    GoVersion   string `json:"goVersion"`
-    KernelVer   string `json:"kernelVer"`    // best-effort
-    StartedAt   time.Time `json:"startedAt"`
+    Hostname   string    `json:"hostname"`       // 主机名
+    OS         string    `json:"os"`             // "linux" / "windows"
+    Arch       string    `json:"arch"`           // "amd64" / "arm64"
+    NumCPU     int       `json:"numCpu"`         // 逻辑 CPU 核数
+    MemTotalMB uint64    `json:"memTotalMB"`     // 物理内存总量（gopsutil 补充）
+    GoVersion  string    `json:"goVersion"`      // Go 运行时版本
+    KernelVer  string    `json:"kernelVer"`      // 内核版本（best-effort）
+    StartedAt  time.Time `json:"startedAt"`      // Agent 启动时间
 }
 ```
 
 **采集实现要点**：
 
-| 字段 | 实现 | 注意 |
-|---|---|---|
+| 字段 | 实现方式 | 注意事项 |
+|------|----------|----------|
 | `CPUPercent` | `cpu.Percent(0, false)` | 第一次返回 0，第二次起准确（gopsutil 内部维护基线） |
 | `CPUPerCore` | `cpu.Percent(0, true)` | 同上 |
 | `LoadAvg*` | `load.Avg()` | Windows 下返回 0，前端可隐藏 |
-| `MemTotalMB` / `MemUsedMB` | `mem.VirtualMemory()` | 单位转 MB |
+| `MemTotalMB` / `MemUsedMB` | `mem.VirtualMemory()` | 单位转换：bytes / 1024 / 1024 |
+| `SwapUsedMB` | `mem.SwapMemory()` | |
 | `ProcessRssMB` | `process.Process.MemoryInfo().RSS` | 物理常驻内存 |
 | `ProcessHeapMB` | `runtime.ReadMemStats().HeapAlloc` | Go 运行时堆 |
 | `ProcessSysMB` | `runtime.ReadMemStats().Sys` | Go 进程总占用（含栈、堆、运行时数据） |
 | `NumGoroutine` | `runtime.NumGoroutine()` | |
 | `NumThread` | `process.NumThreads()` | Windows 上是用户态线程数 |
-| `NumFD` | `process.NumFDs()` | Windows 上 gopsutil 可能返回错误，写 0 即可 |
-| `NetSendKBps` / `NetRecvKBps` | `net.IOCounters(false)[0]` 差分 / 时间差 | 第一次只记录基线，第二次起才有值 |
+| `NumFD` | `process.NumFDs()` | Windows 上 gopsutil 可能返回错误，写 0 |
+| `GCCount` | `runtime.ReadMemStats().NumGC` | |
+| `GCPauseAvgMs` | `runtime.ReadMemStats().PauseNs` | 最近 N 次 GC 暂停时间平均值（最多取最近 256 次） |
+| `NetSendKBps` / `NetRecvKBps` | `net.IOCounters(false)[0]` 差分 / 时间差 | 第一次只记录基线（`initialized=false`），第二次起才有值 |
 
-**调用频率**：每 5s 采集一次，缓存 `latest`，`Snapshot()` 仅做读锁返回。
+**采集频率**：每 `SystemInterval`（默认 5s）采集一次，缓存 `latest`，`Snapshot()` 仅做读锁返回。
 
-### 4.3 StressReporter / SystemReporter
+**启动流程**：`Start(stopCh)` 先做一次同步采集（建基线），然后启动后台 ticker 循环。
+
+### 4.3 StressReporter / SystemReporter（agent/reporter.go）
+
+#### StressReporter
 
 ```go
-// agent/reporter.go
 type StressReporter struct {
-    cli      *AdminClient
-    agentID  string
-    taskID   string
-    interval time.Duration
-    src      *monitor.MetricsCollector
-    done     chan struct{}
-}
+    cli      *AdminClient              // Admin HTTP 客户端
+    agentID  string                    // Agent UUID
+    taskID   string                    // 当前任务 ID
+    interval time.Duration             // 推送间隔（默认 5s）
+    src      *monitor.MetricsCollector // 指标源
 
-func (r *StressReporter) Run(ctx context.Context) {
-    ticker := time.NewTicker(r.interval)
-    defer ticker.Stop()
-    for {
-        select {
-        case <-ctx.Done():
-            return
-        case <-ticker.C:
-            snap := r.src.Snapshot()
-            r.cli.PostStress(ctx, StressReport{
-                AgentID:   r.agentID,
-                TaskID:    r.taskID,
-                ReportedAt: time.Now(),
-                Snapshot:  snap,
-            })
-        }
-    }
+    stopOnce sync.Once                 // 幂等停止
+    stopCh   chan struct{}             // 关闭即停止推送循环
 }
+```
 
+**生命周期**：由 `executeTask` 控制 -- 任务开始时创建并 `Start()`，任务结束时 `Stop()`。
+
+**行为规则**：
+
+- 以 `StressInterval` 为间隔定时推送 `StressReport`（含 `CollectorSnapshot`）
+- `Snapshot()` 方法：同步采集当前指标快照，供阶段重置回调使用
+- `Stop()` 幂等：`sync.Once` 保护，先做一次同步 flush（5s 超时），确保最后一帧指标已推送
+- 推送失败时指数退避（1s -> 2s -> 4s -> ... -> 上限 30s），但 ticker 不停
+
+#### SystemReporter
+
+```go
 type SystemReporter struct {
     cli      *AdminClient
     agentID  string
     interval time.Duration
     src      *SystemMonitor
+
+    stopOnce sync.Once
+    stopCh   chan struct{}
 }
-// Run() 类似，POST /api/agent/system，无 TaskID
 ```
 
-**关键策略**：
-- 非阻塞：上报失败仅记录日志，不阻塞下一次
-- 指数退避：连续失败时退避（1s → 2s → 4s → 上限 30s），但 ticker 不停
-- 任务结束时 StressReporter 立即停止；SystemReporter 始终运行（idle 期间也要上报）
+**生命周期**：常驻运行 -- 注册成功后启动，shutdown 时停止。空闲期间也持续上报。
 
-### 4.4 TaskRunner
+**行为规则**：
+
+- 以 `SystemInterval`（= `StressInterval`）为间隔定时推送 `SystemReport`
+- 推送失败时指数退避（同 StressReporter，上限 30s）
+- `Stop()` 仅关闭 `stopCh`，不做额外 flush
+
+#### 退避算法
 
 ```go
-// agent/task_runner.go
+func nextBackoff(current, max time.Duration) time.Duration {
+    if current == 0 {
+        return time.Second  // 首次退避 1s
+    }
+    next := current * 2     // 指数倍增
+    if next > max {
+        return max           // 不超过上限（30s）
+    }
+    return next
+}
+```
+
+### 4.4 TaskRunner（agent/task_runner.go）
+
+```go
 type TaskRunner struct {
-    assignment TaskAssignment
-    workDir    string
-    mgr        *robot.Manager
+    assignment *TaskAssignment           // 任务配置
+    cfg        *ResolvedConfig           // Agent 运行期配置
+    cli        *AdminClient              // Admin 客户端
+    collector  *monitor.MetricsCollector // 指标采集器
+    httpCli    *http.Client              // 文件下载专用（5min 超时）
+    workDir    string                    // 临时工作目录
 
-    cli        *AdminClient
-    collector  *monitor.MetricsCollector
-}
-
-func (r *TaskRunner) Prepare(ctx context.Context) error {
-    // 1. 创建临时目录 /tmp/stressbot-task-{taskID}/conf/
-    // 2. 拉取 flow.json / proto/ / scripts/（HTTP GET 各 URL）
-    // 3. 校验文件 SHA256（可选）
-    // 4. 加载 protox / 流程 / 监控
-    return nil
-}
-
-func (r *TaskRunner) Run(ctx context.Context) error {
-    cfg := robot.Config{
-        // 转换 assignment.Config → robot.Config
-        StartNumber: r.assignment.StartNumber,
-        TotalBots:   r.assignment.TotalBots,
-        // ...
-    }
-    return r.mgr.RunWithContext(ctx, cfg)
-}
-
-func (r *TaskRunner) Cleanup() error {
-    return os.RemoveAll(r.workDir)
+    // OnStageReset 渐进式加压阶段重置回调，由 executeTask 注入
+    OnStageReset func(completedStageIdx int)
 }
 ```
 
-### 4.5 Upgrader
+#### 13 步流水线详解
 
-> ⚠️ **已废弃**：自动升级流程已废弃，升级改为运维手动重启 Agent 进程。设计文档保留供参考。
+**步骤 0：临时切换日志等级**
+
+如果 `TaskAssignment.LogLevel` 非空（支持 `debug`/`info`/`warn`/`error`），临时切换 Agent 进程的 zap 日志等级。任务结束时（包括异常路径）通过 `defer` 自动恢复原等级。
+
+**步骤 1：创建临时目录**
+
+```
+workDir = {TaskWorkDir}/stressbot-task-{taskID}/
+  conf/
+    proto/       (proto 文件)
+    scripts/     (Lua 脚本)
+    adapter/     (适配器脚本，由配置文件列表中携带)
+    flow/        (flow.json)
+```
+
+`TaskWorkDir` 默认为 `os.TempDir()`。
+
+**步骤 2：从 Admin 下载配置文件**
+
+遍历 `TaskAssignment.ConfigFiles` 列表，拼接 `ConfigURL + "/" + relPath`，逐个 HTTP GET 下载到 `workDir/conf/` 下对应的子目录。任何文件下载失败（HTTP 非 200）即返回 `TaskFailed`。
+
+**步骤 3：加载 Lua 协议适配器**
+
+优先使用任务下发的 `workDir/conf/adapter/codec.lua`；若不存在则回退到 Agent 本地配置的 `cfg.AdapterScript`（默认 `conf/adapter/codec.lua`）。可选加载错误码映射 `error.lua`。池大小默认 `runtime.NumCPU()`。
+
+**步骤 4：加载 .proto 文件**
+
+通过 `protox.NewLoader` 扫描 `workDir/conf/proto/` 目录，编译所有 .proto 文件。
+
+**步骤 5：加载流程配置**
+
+读取 `workDir/conf/flow/flow.json`，反序列化为 `engine.TaskFlow`。回填 `ActionDef.Name`（从 map key 反写）。
+
+**步骤 6：重置 MetricsCollector**
+
+调用 `collector.Reset()` 归零所有计数器，**不**调用 `monitor.Init()`（避免替换全局 collector 导致 Reporter 引用失效）。设置 `ApdexT` 从 `TaskAssignment.ApdexT` 获取。
+
+**步骤 7：解析超时参数**
+
+解析 `HeartbeatInterval`（默认 5s）、`TCPTimeout`（默认 60s）、`HTTPTimeout`（默认 10s）。
+
+**步骤 8：启动 gnet 网络引擎**
+
+创建 `network.NewDialer` 并启动事件循环。
+
+**步骤 9：初始化 Lua 运行时池**
+
+创建 `script.NewRuntimePool`，预编译脚本。预编译失败为非致命错误。
+
+**步骤 10：创建 Robot Manager**
+
+构建 `robot.ManagerConfig`：
 
 ```go
-// agent/upgrader.go
-type Upgrader struct {
-    cli      *AdminClient
-    selfPath string             // os.Executable() 缓存
-    drainer  func(time.Duration) error // 由 Agent 注入：取消 task + 等机器人退出
-}
-
-func (u *Upgrader) Handle(req UpgradeRequest) error {
-    newPath := u.selfPath + ".new"
-
-    // 1. 下载到 .new
-    if err := u.download(req.URL, newPath); err != nil {
-        return fmt.Errorf("download: %w", err)
-    }
-    // 2. SHA256 校验
-    if err := u.verify(newPath, req.SHA256); err != nil {
-        os.Remove(newPath)
-        return fmt.Errorf("verify: %w", err)
-    }
-    // 3. 异步 drain + exit
-    go func() {
-        if err := u.drainer(5 * time.Minute); err != nil {
-            log.Printf("drain timeout: %v", err)
-        }
-        flag := filepath.Join(filepath.Dir(u.selfPath), ".upgrade.pending")
-        os.WriteFile(flag, []byte(req.Version), 0o644)
-        os.Exit(99)
-    }()
-    return nil
-}
-
-// 新版本启动后：注册成功时调用
-func (u *Upgrader) MarkSuccess() {
-    bak := u.selfPath + ".bak"
-    if _, err := os.Stat(bak); err == nil {
-        success := filepath.Join(filepath.Dir(u.selfPath), ".upgrade.success")
-        os.WriteFile(success, nil, 0o644)
-    }
+mgrCfg := robot.ManagerConfig{
+    AccountPrefix:  assignment.AccountPrefix,  // 默认 "bot_"
+    StartNumber:    assignment.StartNumber,
+    Count:          assignment.TotalBots,
+    ConcurrentNum:  assignment.ConcurrentNum,
+    StateExtra:     assignment.StateExtra,      // 额外状态注入
+    Adapter:        adp,
+    RequestTimeout: tcpTimeout,
+    MainService:    assignment.MainService,
+    HTTPTimeout:    httpTimeout,
 }
 ```
 
-**下载策略**：
+如果有 `RampUp` 配置，转换阶段参数并注入 `OnStageReset` 回调。
+
+**步骤 11：启动机器人**
+
+- 有 RampUp 配置：调用 `mgr.StartWithRampUp()`
+- 无 RampUp 配置：调用 `mgr.StartAll()`
+
+**步骤 12：等待完成**
 
 ```go
-func (u *Upgrader) download(url, dst string) error {
-    req, _ := http.NewRequest("GET", url, nil)
-    resp, err := u.cli.Do(req)
-    if err != nil { return err }
-    defer resp.Body.Close()
-    if resp.StatusCode != 200 {
-        return fmt.Errorf("status %d", resp.StatusCode)
-    }
-
-    f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
-    if err != nil { return err }
-    defer f.Close()
-
-    _, err = io.Copy(f, resp.Body)
-    return err
+select {
+case <-ctx.Done():        // 任务被取消（Admin stop / Agent shutdown / 心跳失败）
+case <-mgr.Done():        // 所有机器人退出（含运行时长到期）
 }
 ```
 
-### 4.6 HTTPServer（接收 Admin 命令）
+**步骤 13：停止所有机器人**
 
-监听 `cfg.Agent.ListenAddr`（默认 `:7070`），路由：
+调用 `mgr.StopAll()`，根据 ctx 错误判断结果：
+- `context.Canceled` -> `TaskStopped`
+- 其他 -> `TaskCompleted`
 
-| 方法 | 路径 | Body | 响应 | 说明 |
-|---|---|---|---|---|
-| `POST` | `/agent/v1/task` | `TaskAssignment` JSON | `202 Accepted` 或 `409 Conflict` | Admin 推送任务 |
-| `POST` | `/agent/v1/stop` | 空 | `200` | Admin 停止当前任务 |
-| `POST` | `/agent/v1/upgrade` | `UpgradeRequest` JSON | `202 Accepted` | ~~触发升级~~ **未注册（已废弃）** |
-| `GET`  | `/agent/v1/version` | — | `{"version":"v1.2.0"}` | 查询版本 |
-| `GET`  | `/agent/v1/status` | — | `AgentStatus` JSON | 调试用 |
-| `GET`  | `/agent/v1/logs` | — | `QueryResult` JSON | Ring buffer 日志查询（`?afterSeq=N&limit=M`） |
-| `GET`  | `/agent/v1/logs/files` | — | `[]LogFileInfo` JSON | 列出本地日志文件 |
-| `GET`  | `/agent/v1/logs/files/{name}` | — | `text/plain` 附件 | 下载指定日志文件 |
-| `GET`  | `/healthz` | — | `200 OK` | 探活 |
-| `GET`  | `/debug/pprof/...` | — | pprof | 仅 debug 模式 |
+#### OnStageReset 回调
 
-**实现示例**：
+当 Manager 完成一个 `Reset: true` 的 RampUp 阶段时触发，由 `Agent.executeTask` 注入：
+
+1. 获取当前指标快照：`stressReporter.Snapshot()`
+2. 发送阶段完成报告：`ReportTaskDone(TaskCompletionReport{StageIndex, FinalSnapshot})`
+3. 重置采集器：`collector.Reset()`
+
+#### 任务清理
+
+`Cleanup()` 删除整个临时目录（`os.RemoveAll`），失败仅记录 WARN。
+
+### 4.5 HTTPServer（agent/http_server.go）
+
+监听 `cfg.Port`（默认 7719），所有 handler 被 `recoverMiddleware` 包裹（捕获 panic 返回 500 JSON）。
+
+**完整端点列表**：
+
+| 方法 | 路径 | 请求体 | 响应 | 说明 |
+|------|------|--------|------|------|
+| `POST` | `/agent/v1/task` | `TaskAssignment` JSON | `202 Accepted` 或 `409 Conflict` | Admin 推送任务。忙碌时返回 409（含 `currentTaskId`），否则立即 202 后异步执行 |
+| `POST` | `/agent/v1/stop` | 无 | `200 OK` 或 `409 Conflict` | 取消当前任务。无任务时返回 409 |
+| `POST` | `/agent/v1/shutdown` | 无 | `202 Accepted` | 远程关闭 Agent 进程 |
+| `GET` | `/agent/v1/version` | 无 | `{"version":"v1.2.0"}` | 查询版本号 |
+| `GET` | `/agent/v1/status` | 无 | `AgentStatusResponse` JSON | 状态查询（id/status/taskId/uptime） |
+| `GET` | `/agent/v1/logs` | `?afterSeq=N&limit=M` | `QueryResult` JSON | 环形缓冲区日志查询（limit 默认 200，上限 500）。缓冲区未启用返回 503 |
+| `GET` | `/agent/v1/logs/files` | 无 | `[]LogFileInfo` JSON | 列出本地日志文件（name/size/modTime） |
+| `GET` | `/agent/v1/logs/files/{name}` | 无 | `text/plain` 附件 | 下载指定日志文件（防路径遍历：禁止 `/`、`\`、`..`） |
+| `GET` | `/healthz` | 无 | `200 OK` | 健康检查探活 |
+
+**recoverMiddleware**：
 
 ```go
-func (a *Agent) startHTTPServer() error {
-    mux := http.NewServeMux()
-    mux.HandleFunc("/agent/v1/task", a.handleTaskAssign)
-    mux.HandleFunc("/agent/v1/stop", a.handleStop)
-    // "/agent/v1/upgrade" 未注册（已废弃）
-    mux.HandleFunc("/agent/v1/version", a.handleVersion)
-    mux.HandleFunc("/agent/v1/status", a.handleStatus)
-    mux.HandleFunc("/agent/v1/logs", a.handleLogs)
-    mux.HandleFunc("/agent/v1/logs/files", a.handleListLogFiles)
-    mux.HandleFunc("/agent/v1/logs/files/", a.handleDownloadLogFile)
-    mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-        w.WriteHeader(200)
+func recoverMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        defer func() {
+            if rec := recover(); rec != nil {
+                // 记录 panic + stack trace 到应用日志
+                // 返回标准 500 JSON: {"code":"STATUS_500","message":"internal server error"}
+            }
+        }()
+        next.ServeHTTP(w, r)
     })
-
-    a.httpSrv = &http.Server{
-        Addr:    a.cfg.ListenAddr,
-        Handler: mux,
-    }
-    a.wg.Add(1)
-    go func() {
-        defer a.wg.Done()
-        if err := a.httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-            log.Printf("http server: %v", err)
-        }
-    }()
-    return nil
 }
 ```
 
-**日志 handler 说明**：
+**任务分配流程**：
 
-| Handler | 功能 |
-|---|---|
-| `handleLogs` | 从 `logview.GetRingBuffer()` 查询日志。支持 `afterSeq`（游标）和 `limit`（默认 200，上限 500）参数，返回 `logview.QueryResult`（含 `entries`、`hasMore`、`nextSeq`）。Ring buffer 未启用时返回 503 |
-| `handleListLogFiles` | 根据当前日志文件路径（`stresslog.GetLogFilePath()`）扫描同目录下同前缀的所有日志文件，返回 `[]LogFileInfo`（含 `name`、`size`、`modTime`） |
-| `handleDownloadLogFile` | 从 URL 提取文件名，校验不含路径分隔符或 `..`，然后通过 `http.ServeContent` 以 `text/plain` 附件形式返回日志文件内容 |
+收到 `POST /agent/v1/task` -> 持锁检查 `currentTask` -> 忙碌返回 409 -> 否则立即 202 -> `taskWG.Add(1)` -> 协程池异步执行 `executeTask`。
 
-底层 Ring buffer（`logview.RingBuffer`）通过 zap `captureCore` 挂接到全局 logger，所有经过 zap 输出的日志都会被 O(1) 追加到固定大小环形缓冲区。查询时按递增序列号（`seq`）做游标分页，前端可增量拉取。
+注意 `taskWG.Add(1)` 在协程外调用，避免与 shutdown 的 `taskWG.Wait()` 形成竞态。
 
-### 4.7 AdminClient（与 Admin 通信）
+### 4.6 AdminClient（agent/http_client.go）
 
 ```go
-// agent/http_client.go
 type AdminClient struct {
-    base       string // "http://admin:8080"
-    httpClient *http.Client
-    agentID    string
+    base    string        // "http://admin:7718"
+    agentID string        // Agent UUID（注册时设置）
+    client  *http.Client  // 共享 HTTP 客户端（Timeout 由 ResolvedConfig.RequestTimeout 控制）
 }
-
-func (c *AdminClient) Register(ctx context.Context, req RegisterRequest) (*RegisterResponse, error)
-func (c *AdminClient) Heartbeat(ctx context.Context, req HeartbeatRequest) error
-func (c *AdminClient) PostStress(ctx context.Context, r StressReport) error
-func (c *AdminClient) PostSystem(ctx context.Context, r SystemReport) error
-func (c *AdminClient) FetchPendingTask(ctx context.Context) (*TaskAssignment, error)
-func (c *AdminClient) ReportTaskDone(ctx context.Context, r TaskCompletionReport) error
-func (c *AdminClient) Deregister(ctx context.Context) error
 ```
 
-**重试策略**：所有写入接口（Register、PostStress、PostSystem、ReportTaskDone）使用指数退避（1s/2s/4s/8s/30s）；读取接口（FetchPendingTask）失败直接返回，下次轮询再试。
+#### RPC 方法完整列表
+
+| 方法 | HTTP 方法 | 路径 | 请求体 | 成功响应 | 说明 |
+|------|-----------|------|--------|----------|------|
+| `Register` | POST | `/sbot/agent/register` | `RegisterRequest` | `200 + RegisterResponse` | 注册到 Admin |
+| `Heartbeat` | POST | `/sbot/agent/{id}/heartbeat` | `HeartbeatRequest` | `200` | 心跳。404 返回 `errNotRegistered` |
+| `PostStress` | POST | `/sbot/agent/stress` | `StressReport` | `200/202` | 上报压测指标 |
+| `PostSystem` | POST | `/sbot/agent/system` | `SystemReport` | `200/202` | 上报系统指标 |
+| `FetchPendingTask` | GET | `/sbot/agent/{id}/pending-task` | 无 | `200 + TaskAssignment` 或 `204 No Content` | 拉取待执行任务 |
+| `ReportTaskDone` | POST | `/sbot/agent/{id}/task/{taskId}/done` | `TaskCompletionReport` | `200/202` | 上报任务完成 |
+| `Deregister` | POST | `/sbot/agent/{id}/deregister` | `DeregisterRequest` | `200` | 注销（best-effort） |
+| `DownloadFile` | GET | (任意 URL) | 无 | 文件流 | 通用文件下载到 io.Writer |
+
+#### 设计要点
+
+- 单一共享 `http.Client`，`RequestTimeout`（默认 30s）作为单次请求超时上限
+- 调用方 `ctx` 取消（如 Agent shutdown）能立刻打断阻塞中的请求
+- `errNotRegistered` 哨兵错误：Admin 返回 404 时识别（Admin 重启场景），触发重新注册
+- 所有 POST 请求共用 `doPost()` 辅助方法，统一设置 `Content-Type: application/json`
+
+#### 重试策略
+
+**注册重试**：使用 `RetryWithRetriesAndBackoff`，参数：
+- `initial` = `ReconnectInterval`（默认 5s）
+- `max` = `ReconnectMaxInterval`（默认 60s）
+- `maxRetries` = `ReconnectMaxRetries`（默认 -1 = 永不放弃）
+
+```go
+func RetryWithRetriesAndBackoff(ctx context.Context, op func() error,
+    initial, max time.Duration, maxRetries int, desc string) error
+```
+
+- `maxRetries < 0`：无限重试（直到 ctx 取消）
+- `maxRetries == 0`：当成 1 次（仅尝试一次，不重试）
+- `maxRetries > 0`：最多重试 maxRetries 次
+
+**指标上报重试**：Reporter 内部通过 `nextBackoff()` 实现，失败时指数退避（上限 30s），成功后重置。
+
+**其他操作**：`FetchPendingTask` 失败直接返回，下次轮询再试；`Deregister` 不重试（best-effort）。
 
 ## 5. 协议契约
 
-### 5.1 Agent → Admin
+### 5.1 Agent -> Admin
 
 #### 5.1.1 注册
 
 ```http
-POST /api/agent/register
+POST /sbot/agent/register
 Content-Type: application/json
 
 {
-  "agentId": "uuid-xxx",          // Agent 启动时生成
+  "agentId": "uuid-xxx",
   "name": "agent-gz-01",
-  "address": "http://10.0.0.1:7070",
+  "address": "http://192.168.1.200:7719",
   "appVersion": "v1.2.0",
   "maxBots": 5000,
   "stressInterval": "5s",
@@ -535,7 +632,7 @@ Content-Type: application/json
     "numCpu": 16,
     "memTotalMB": 32768,
     "goVersion": "go1.23.4",
-    "kernelVer": "5.15.0",
+    "kernelVer": "",
     "startedAt": "2026-04-29T10:00:00+08:00"
   }
 }
@@ -547,31 +644,33 @@ Content-Type: application/json
 {
   "agentId": "uuid-xxx",
   "heartbeatTtl": "30s",
-  "stressEndpoint": "/api/agent/stress",
-  "systemEndpoint": "/api/agent/system"
+  "stressEndpoint": "/sbot/agent/stress",
+  "systemEndpoint": "/sbot/agent/system"
 }
 ```
 
 #### 5.1.2 心跳
 
 ```http
-POST /api/agent/{agentId}/heartbeat
+POST /sbot/agent/{agentId}/heartbeat
 Content-Type: application/json
 
 {
   "agentId": "uuid-xxx",
   "timestamp": "2026-04-29T10:30:00+08:00",
-  "status": "idle",            // idle | busy
-  "currentTaskId": "task-01",  // status=busy 时存在
-  "currentBots": 3000,         // 实际启动的机器人数
+  "status": "idle",
+  "currentTaskId": "",
+  "currentBots": 0,
   "appVersion": "v1.2.0"
 }
 ```
 
+响应 `200 OK`。`404` 表示 Agent 在 Admin 侧不存在，触发重新注册。
+
 #### 5.1.3 上报压测指标
 
 ```http
-POST /api/agent/stress
+POST /sbot/agent/stress
 Content-Type: application/json
 
 {
@@ -582,107 +681,108 @@ Content-Type: application/json
 }
 ```
 
-`snapshot` 字段对齐 `docs/api-monitor.md` GET /metrics 响应（带 `LatencyBuckets` / `LatencySumNs` 等聚合所需字段）。
+响应 `200` 或 `202`。
 
 #### 5.1.4 上报系统指标
 
 ```http
-POST /api/agent/system
+POST /sbot/agent/system
 Content-Type: application/json
 
 {
   "agentId": "uuid-xxx",
   "reportedAt": "2026-04-29T10:30:05+08:00",
-  "snapshot": { /* SystemSnapshot */ }
+  "snapshot": { /* SystemSnapshot（17 字段 + Timestamp） */ }
 }
 ```
+
+响应 `200` 或 `202`。
 
 #### 5.1.5 任务完成
 
 ```http
-POST /api/agent/{agentId}/task/{taskId}/done
+POST /sbot/agent/{agentId}/task/{taskId}/done
 Content-Type: application/json
 
 {
   "agentId": "uuid-xxx",
   "taskId": "task-01",
-  "result": "completed",      // completed | stopped | failed
-  "errorMsg": "",             // result=failed 时填
+  "result": "completed",
+  "errorMsg": "",
   "finishedAt": "2026-04-29T10:35:00+08:00",
-  "finalSnapshot": { /* 最后一次完整压测快照 */ }
+  "finalSnapshot": { /* 最后一次完整压测快照 */ },
+  "stageIndex": 0
 }
 ```
 
-**`finalSnapshot` 完整性要求（强约束）**：
+- `result`：`completed` / `stopped` / `failed`
+- `errorMsg`：仅 `result=failed` 时填写
+- `stageIndex`：仅阶段完成报告时填写（OnStageReset 回调使用）
+- `finalSnapshot`：任务结束时的完整指标快照
 
-> Admin 会把这份 finalSnapshot **完整持久化到 MySQL `task_report` 表**，用于历史报告与版本对比。Agent 必须保证：
->
-> 1. 调用 `monitor.Global().Snapshot()` 获取**最新**快照（不要使用缓存）
-> 2. 上报时机：**所有 robot 已完全停止**之后，确保所有 OnComplete 回调都已经写入指标
-> 3. 必须包含完整的 `actions[]`，每个动作的 `latencyBuckets` 数组必须为完整的 17 个桶（即使为零）
-> 4. 必须包含 `connections`、`bandwidth`、`robots` 等所有顶层字段
-> 5. 时间戳 `timestamp` 必须填写实际采样时刻
-> 6. 即使 `result=failed`，也必须尽力提供 finalSnapshot（哪怕是部分指标），用于事后分析
->
-> 实现示例：
->
-> ```go
-> // robot 全部停止后再调用
-> wg.Wait()  // 等所有 robot goroutine 退出
-> snap := monitor.Global().Snapshot()
-> client.ReportTaskDone(ctx, TaskCompletionReport{
->     AgentID: agentID, TaskID: taskID,
->     Result: result, ErrorMsg: errMsg,
->     FinishedAt: time.Now(),
->     FinalSnapshot: snap,
-> })
-> ```
->
-> **重试策略**：上报失败必须以指数退避重试（最多 30 分钟），重试期间不接受新任务。仅在重试彻底失败后才放弃，并 log ERROR + 维持 idle 状态。这是因为 Agent 的 finalSnapshot **是 Admin 历史记录的唯一数据源**，丢失后无法恢复。
+**finalSnapshot 采集流程**：
+
+1. `StressReporter.Stop()` 同步 flush 最后一帧指标（5s 超时）
+2. `collector.Snapshot(nil, 0)` 采集最终快照
+3. 使用 `context.Background()` + `TaskReportTimeout`（30s）上报，脱离已取消的 taskCtx
+4. 上报失败仅记录 WARN（Admin 会通过心跳超时合成 offline report）
 
 #### 5.1.6 拉取待执行任务
 
 ```http
-GET /api/agent/{agentId}/pending-task
+GET /sbot/agent/{agentId}/pending-task
 ```
 
 响应：
 - `200 OK` + `TaskAssignment` JSON：有任务
-- `204 No Content`：当前 idle，无任务
+- `204 No Content`：当前无任务
 
 #### 5.1.7 注销
 
 ```http
-POST /api/agent/{agentId}/deregister
+POST /sbot/agent/{agentId}/deregister
+Content-Type: application/json
+
+{"agentId": "uuid-xxx"}
 ```
 
 best-effort，失败不重试。
 
-### 5.2 Admin → Agent
+### 5.2 Admin -> Agent
 
 #### 5.2.1 任务下发
 
 ```http
-POST http://agent:7070/agent/v1/task
+POST http://agent:7719/agent/v1/task
 Content-Type: application/json
 
 {
   "taskId": "task-01",
-  "name": "200v200 压测",
+  "taskName": "200v200 压测",
   "totalBots": 3000,
   "startNumber": 10000,
-  "configBase": "http://admin:8080/api/tasks/task-01/config",
+  "accountPrefix": "bot_",
+  "concurrentNum": 50,
+  "mainService": "logic",
+  "stateExtra": {"gameId": "1"},
+  "heartbeatInterval": "5s",
+  "tcpTimeout": "60s",
+  "httpTimeout": "10s",
+  "apdexT": 100,
+  "logLevel": "",
+  "configUrl": "http://admin:7718/api/tasks/task-01/config",
   "configFiles": [
-    { "path": "flow.json",            "url": "...", "sha256": "..." },
-    { "path": "proto/c2s.proto",      "url": "...", "sha256": "..." },
-    { "path": "scripts/battle.lua",   "url": "...", "sha256": "..." }
+    "flow.json",
+    "proto/c2s.proto",
+    "scripts/battle.lua",
+    "adapter/codec.lua"
   ],
-  "robotConfig": {
-    "authAddr": "auth.example.com:8001",
-    "concurrency": 50,
-    "timeoutSec": 30
-  },
-  "deadline": "2026-04-29T11:00:00+08:00"
+  "rampUp": {
+    "stages": [
+      {"count": 1000, "concurrency": 20, "holdSec": 60, "reset": false},
+      {"count": 3000, "concurrency": 50, "holdSec": 0, "reset": true}
+    ]
+  }
 }
 ```
 
@@ -693,177 +793,271 @@ Content-Type: application/json
 #### 5.2.2 停止任务
 
 ```http
-POST http://agent:7070/agent/v1/stop
+POST http://agent:7719/agent/v1/stop
 ```
 
-响应 `200 OK`，Agent 异步 drain（保证 < 1 分钟）。
+响应 `200 OK`，Agent 异步取消任务 ctx。无任务运行时返回 `409 Conflict`。
 
-#### 5.2.3 升级
+#### 5.2.3 远程关闭
 
 ```http
-POST http://agent:7070/agent/v1/upgrade
-Content-Type: application/json
-
-{
-  "url": "http://admin:8080/api/binaries/agent-v1.2.0.exe",
-  "sha256": "abc123...",
-  "version": "v1.2.0"
-}
+POST http://agent:7719/agent/v1/shutdown
 ```
 
-响应 `202 Accepted`，Agent 异步处理（下载 → drain → 写标记 → exit 99）。
+响应 `202 Accepted`，Agent 触发完整 shutdown 流程后进程退出。
 
-## 6. 任务执行细节
+## 6. 心跳机制
 
-### 6.1 配置拉取流程
+### 6.1 心跳循环（heartbeatLoop）
 
-```
-1. 收到 TaskAssignment
-2. 创建 workDir = filepath.Join(os.TempDir(), "stressbot-task-"+taskID)
-3. 创建子目录 workDir/conf/、workDir/conf/proto/、workDir/conf/scripts/
-4. 遍历 ConfigFiles：
-   - HTTP GET 每个 URL
-   - 写入 workDir/conf/{path}
-   - 校验 SHA256（不匹配则整体失败，上报 result=failed）
-5. 加载 protox：protox.NewLoader(workDir/conf/proto)
-6. 解析 flow.json：engine.LoadFlow(workDir/conf/flow/flow.json)
-7. 创建 robot.Manager，注入：
-   - StartNumber = TaskAssignment.StartNumber
-   - TotalBots   = TaskAssignment.TotalBots
-   - 其他参数从 RobotConfig 中取
-```
-
-### 6.2 临时目录布局
+独立 goroutine，通过协程池调度。
 
 ```
-/tmp/stressbot-task-{taskID}/
+heartbeatLoop:
+  timer(HBInterval)
+  loop:
+    select:
+    case ctx.Done():   return
+    case stopCh:       return
+    case timer.C:
+      构造 HeartbeatRequest（含当前 status/taskID/bots）
+      err := cli.Heartbeat(ctx, req)
+      if err == nil:
+        重置 consecutiveFailures = 0
+        interval = HBInterval（正常间隔）
+        timer.Reset(interval)
+        continue
+
+      if err == errNotRegistered (404):
+        if busy: cancelCurrentTask("Admin 报告未注册")
+        registerWithRetry()  // 重新注册
+        if 注册失败: triggerStop() + return
+        regGeneration++
+        interval = HBInterval
+        timer.Reset(interval)
+        continue
+
+      consecutiveFailures++
+      if busy && consecutiveFailures == 1:
+        cancelCurrentTask("心跳失败 / Admin 断联")
+      记录日志（前 3 次 WARN，之后 ERROR）
+
+      interval = HBFailInterval（失败重试间隔）
+      timer.Reset(interval)
+```
+
+### 6.2 行为规则
+
+1. **成功时用 HBInterval**（默认 10s），**失败时用 HBFailInterval**（与 HBInterval 一致，即快速重试）
+2. **404 立即重注册**：Admin 返回 404 表示 Agent 在 Admin 侧不存在（Admin 重启或主动注销），立即取消任务并重新注册
+3. **任务运行中第一次心跳失败即取消任务**：Admin 是唯一的指标聚合点，断联后压测流量没有观测价值
+4. **持续失败不退进程**：除非重新注册超出 `ReconnectMaxRetries`
+5. **重新注册成功后递增 `regGeneration`**：避免旧任务的回调到新生命周期里污染状态
+
+### 6.3 心跳请求字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `agentId` | string | Agent UUID |
+| `timestamp` | string | RFC3339 格式时间戳 |
+| `status` | string | `"idle"` 或 `"busy"` |
+| `currentTaskId` | string | status=busy 时为当前任务 ID，否则为空 |
+| `currentBots` | int | 当前实际启动的机器人数 |
+| `appVersion` | string | 应用版本号 |
+
+## 7. 任务执行细节
+
+### 7.1 executeTask 流程
+
+```go
+func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment)
+```
+
+1. **保护性 recover**：任务内 panic 不影响 Agent 主循环
+2. **状态机迁移**：idle -> busy（持锁），结束时 busy -> idle（defer）
+3. **创建任务 context**：`context.WithCancel(parentCtx)`，存入 `a.taskCancel`
+4. **创建 StressReporter**：注入 agentID/taskID/interval/collector，启动推送循环
+5. **创建 TaskRunner**：注入任务配置 + OnStageReset 回调
+6. **Runner.Run(ctx)**：阻塞执行 13 步流水线
+7. **StressReporter.Stop()**：同步 flush 最后一帧指标
+8. **采集 finalSnapshot**：`collector.Snapshot(nil, 0)`
+9. **上报任务完成**：使用 `context.Background()` + 30s 超时（脱离已取消的 taskCtx）
+10. **runner.Cleanup()**：删除临时目录
+
+**上报失败处理**：仅记录 WARN，不阻塞。Admin 会通过心跳超时自动合成 offline report。
+
+**任务互斥**：持锁检查 `currentTask != nil`，已存在任务时忽略新任务。
+
+### 7.2 临时目录布局
+
+```
+{os.TempDir()}/stressbot-task-{taskID}/
   conf/
-    flow.json
+    flow/
+      flow.json
     proto/
       c2s.proto
       s2c.proto
     scripts/
       battle.lua
       heartbeat.lua
+    adapter/
+      codec.lua
+      error.lua        (可选)
 ```
 
-任务结束（done / stopped / failed）后立即删除整个目录。
+任务结束（completed / stopped / failed）后立即删除整个目录。
 
-### 6.3 与 Manager 的交互
+### 7.3 任务结果判断
 
-**Manager 改造（robot/manager.go）**：
+| 条件 | 结果 |
+|------|------|
+| `ctx.Err() == context.Canceled` | `TaskStopped` |
+| 其他（包括 `mgr.Done()` 正常退出） | `TaskCompleted` |
+| 流水线中任何步骤返回错误 | `TaskFailed` + 错误消息 |
+
+### 7.4 渐进式加压（RampUp）支持
+
+`TaskAssignment` 可选包含 `RampUp` 配置：
 
 ```go
-// 新增方法（不破坏现有 RunWithSignal）
-func (m *Manager) RunWithContext(ctx context.Context, cfg RunConfig) error {
-    if err := m.StartAll(cfg); err != nil { return err }
-    select {
-    case <-ctx.Done():
-        m.StopAll()
-    case <-m.allDone(): // 所有机器人退出
-    }
-    return nil
+type RampUpConfig struct {
+    Stages []RampUpStage `json:"stages"`
 }
 
-type RunConfig struct {
-    StartNumber int
-    TotalBots   int
-    Concurrency int
+type RampUpStage struct {
+    Count       int  `json:"count"`                // 本阶段机器人总数
+    Concurrency int  `json:"concurrency,omitempty"` // 并发启动数
+    HoldSec     int  `json:"holdSec,omitempty"`     // 保持时长（秒）
+    Reset       bool `json:"reset,omitempty"`       // 是否重置采集器
 }
 ```
 
-> **注意**：现有 `Manager` 已支持 `startNumber` 和 `totalBots` 切分，需要确认其参数能从外部注入（如有硬编码读取 `config.json`，要重构为函数参数）。
+当 `Reset: true` 的阶段完成时，通过 `OnStageReset` 回调上报阶段指标并重置采集器。
 
-## 7. 系统监控字段（SystemSnapshot）
+## 8. 优雅退出
 
-完整字段表见 §4.2。前端展示时优先显示：CPU%、Mem%、NetSendKBps / NetRecvKBps、NumGoroutine。详见 `docs/api-monitor.md` 第 4 章。
+### 8.1 shutdown() 完整步骤
 
-## 8. 升级流程详细步骤
-
-> ⚠️ **已废弃**：自动升级流程已废弃，升级改为运维手动重启 Agent 进程。设计文档保留供参考。
-
-```
-[Admin] POST /agent/v1/upgrade {url, sha256, version}
-   │
-   ▼
-[Agent] handleUpgrade:
-   1. 立即返回 202 Accepted
-   2. goroutine:
-      a. http GET url → ./agent.exe.new
-      b. SHA256(./agent.exe.new) == sha256 ?
-         - 不匹配 → os.Remove(.new)，记录失败，return
-      c. 调用 a.drainer(5min):
-         - 取消当前任务的 ctx
-         - 等待 robot.Manager 全部退出
-         - 上报 task done (result=stopped) 给 Admin
-      d. 写入 .upgrade.pending（内容 = version 字符串，仅用于日志）
-      e. os.Exit(99)
-
-[Launcher] cmd.Wait() 返回 exit=99
-   ▼
-[Launcher] 检测 .upgrade.pending：
-   1. 备份 agent.exe → agent.exe.bak
-   2. os.Rename(agent.exe.new → agent.exe)
-   3. 删除 .upgrade.pending
-   4. spawn 新 agent.exe
-   ▼
-[新 Agent] 启动，注册 Admin（携带新 AppVersion）
-   ▼
-[新 Agent] 注册成功 → MarkSuccess()：
-   - 检测到 agent.exe.bak 存在 → 写空文件 .upgrade.success
-   ▼
-[Launcher] 检测到 .upgrade.success:
-   - 删除 .upgrade.success
-   - 删除 .bak
-   - 升级完成
+```go
+func (a *Agent) shutdown() error
 ```
 
-**升级失败（新版本注册不上 Admin）**：
-- 60s 后 Launcher 看不到 `.upgrade.success`，自动回滚 `.bak`
-- 老版本重新注册 Admin（旧 AppVersion）
-- Admin 看到版本号没变，标记升级失败，停止滚动升级
+**6 步关闭流程**（设计原则：先停任务 -> 等上报 -> 停常驻 -> 注销 -> 关 HTTP -> 关池）：
 
-## 9. 配置文件 config.json 完整参考
+**步骤 1：停止当前任务 + 等待上报**
 
-`Config` 结构定义在 `cmd/agent/main.go`，由 `loadConfig()` 反序列化并填充默认值。配置文件为标准 JSON 格式，顶级字段按功能分区。
+```
+cancelCurrentTask("agent shutdown")
+taskWG.Wait()  // 最长等待 TaskReportTimeout + 5s
+```
 
-### 9.1 完整示例
+- `cancelCurrentTask` 取消任务的 ctx，触发 TaskRunner 的 `mgr.StopAll()`
+- `taskWG.Wait()` 确保上报完成（executeTask 中上报使用 `context.Background()`，不会被 ctx cancel 中断）
+- 超时保护：`TaskReportTimeout + 5s`（默认 35s）后放弃等待
+
+**步骤 2：停止 Reporter**
+
+```
+stressReporter.Stop()    // 通常已被 executeTask 关掉，此处保护性调用
+sysReporter.Stop()
+```
+
+**步骤 3：取消全局 ctx**
+
+```
+a.cancel()   // 心跳/轮询/上报循环退出
+```
+
+**步骤 4：注销（best-effort）**
+
+```
+Deregister(context.Background(), 5s timeout)
+```
+
+失败仅记录 WARN。
+
+**步骤 5：关闭 HTTP 服务器**
+
+```
+httpSrv.Shutdown(5s timeout)
+```
+
+**步骤 6：关闭协程池**
+
+```
+utils.GetWorkPool().Shutdown()
+```
+
+等待池中所有 goroutine 完成或超时。
+
+### 8.2 触发方式
+
+| 方式 | 触发路径 |
+|------|----------|
+| SIGINT / SIGTERM | `Run()` 的 `sigCh` 分支 -> `shutdown()` |
+| `POST /agent/v1/shutdown` | `handleShutdown` -> `triggerStop()` -> `Run()` 的 `stopCh` 分支 -> `shutdown()` |
+| 注册重试耗尽 | `registerWithRetry` 返回错误 -> `triggerStop()` |
+
+`triggerStop()` 通过 `sync.Once` 保证 `stopCh` 仅关闭一次，可安全并发调用。
+
+## 9. 配置文件完整参考
+
+### 9.1 全局 Config（cmd/agent/main.go）
+
+```go
+type Config struct {
+    Log        *stresslog.Config       `json:"log"`
+    Monitor    monitor.CollectorConfig `json:"monitor"`
+    Standalone *StandaloneConfig       `json:"standalone"`
+    Agent      agent.Config            `json:"agent"`
+    Daemon     bool                    `json:"daemon"` // 守护进程模式（仅 Linux）
+}
+```
+
+### 9.2 agent.Config 完整字段（agent/config.go）
+
+| 字段 | JSON 键 | 类型 | 默认值 | 说明 |
+|------|---------|------|--------|------|
+| `Enabled` | `enabled` | bool | `false` | Agent 模式总开关 |
+| `AdminAddr` | `adminAddr` | string | 无（必填） | Admin HTTP 地址，含 schema（如 `http://192.168.1.100:7718`） |
+| `PublicURL` | `publicUrl` | string | 自动获取 | Agent 对外可达地址（如 `http://192.168.1.200:7719`）。为空时自动获取本机出口 IP |
+| `Port` | `port` | int | `7719` | 本地 HTTP 监听端口 |
+| `MaxBots` | `maxBots` | int | `5000` | 单节点最大机器人数 |
+| `HBInterval` | `hbInterval` | string | `"10s"` | 心跳发送间隔 |
+| `RequestTimeout` | `requestTimeout` | string | `"30s"` | 单次 HTTP 请求超时 |
+| `ReconnectMaxRetries` | `reconnectMaxRetries` | int | `-1`（无限） | 注册重试次数。-1=持续重连，0=视为未配置回退-1 |
+| `StressInterval` | `stressInterval` | string | `"5s"` | 压测指标上报间隔 |
+| `AppVersion` | (不序列化) | string | `"dev"` | 应用版本号，编译时 `-ldflags` 注入 |
+
+### 9.3 ResolvedConfig 派生参数（agent/config.go）
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `AdminAddr` | string | 从 Config 透传 | |
+| `Name` | string | `os.Hostname()` | 节点名称 |
+| `Address` | string | `http://{本机IP}:{port}` | Agent 对外地址 |
+| `Port` | int | `7719` | |
+| `MaxBots` | int | `5000` | |
+| `AppVersion` | string | `"dev"` | |
+| `TaskWorkDir` | string | `os.TempDir()` | 任务临时目录根 |
+| `AdapterScript` | string | `"conf/adapter/codec.lua"` | 默认适配器脚本路径 |
+| `StressInterval` | Duration | `5s` | |
+| `SystemInterval` | Duration | = StressInterval | 与压测指标同步 |
+| `HBInterval` | Duration | `10s` | |
+| `HBFailInterval` | Duration | = HBInterval | 失败重试间隔 |
+| `RequestTimeout` | Duration | `30s` | |
+| `ReconnectInterval` | Duration | `5s` | 注册重连初始间隔 |
+| `ReconnectMaxInterval` | Duration | `60s` | 重连退避上限 |
+| `ReconnectMaxRetries` | int | `-1` | |
+| `TaskReportTimeout` | Duration | `30s` | 任务完成上报总超时 |
+
+### 9.4 配置文件示例
 
 ```json
 {
-  "bot": {
-    "accountPrefix": "bot_",
-    "startNumber": 1,
-    "count": 100,
-    "concurrentNum": 10,
-    "mainService": "logic"
-  },
-  "auth": {
-    "address": "http://127.0.0.1:8001",
-    "extra": {
-      "gameId": "1",
-      "channelId": "1001"
-    }
-  },
-  "adapter": {
-    "script": "conf/adapter/codec.lua",
-    "poolSize": 4
-  },
-  "network": {
-    "heartbeatInterval": "5s",
-    "tcpTimeout": "60s",
-    "httpTimeout": "10s"
-  },
-  "proto": {
-    "dirs": ["conf/proto"],
-    "files": []
-  },
-  "flow": "conf/flow/flow.json",
-  "script": {
-    "dirs": ["conf/scripts"]
-  },
   "log": {
-    "path": "log/stressbot.log",
+    "path": "log/agent.log",
     "level": "info",
     "printConsole": false,
     "maxSize": 100,
@@ -873,221 +1067,393 @@ type RunConfig struct {
   },
   "monitor": {
     "enabled": true,
+    "apdexT": 100
+  },
+  "agent": {
+    "enabled": true,
+    "adminAddr": "http://192.168.1.100:7718",
+    "port": 7719,
+    "maxBots": 5000,
+    "hbInterval": "10s",
+    "stressInterval": "5s"
+  }
+}
+```
+
+### 9.5 单机模式配置示例
+
+```json
+{
+  "log": {
+    "path": "log/stressbot.log",
+    "level": "info"
+  },
+  "monitor": {
+    "enabled": true,
     "reportInterval": "5s",
     "httpEnabled": false,
     "httpPort": 6060,
     "csvPath": "log/metrics.csv",
     "apdexT": 100
   },
+  "standalone": {
+    "bot": {
+      "accountPrefix": "bot_",
+      "startNumber": 1,
+      "count": 100,
+      "concurrentNum": 10,
+      "mainService": "logic"
+    },
+    "duration": "10m"
+  },
   "agent": {
-    "enabled": false,
-    "adminAddr": "http://192.168.1.100:8080",
-    "name": "agent-gz-01",
-    "listenAddr": ":7070",
-    "maxBots": 5000,
-    "stressInterval": "5s",
-    "systemInterval": "5s",
-    "heartbeatInterval": "10s",
-    "registerRetryMaxInterval": "30s",
-    "taskWorkDir": "",
-    "appVersion": "",
-    "adapterScript": "conf/adapter/codec.lua"
+    "enabled": false
   }
 }
 ```
 
-### 9.2 bot 段 — 机器人生成参数
+## 10. 类型定义（agent/types.go）
 
-| 字段 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `accountPrefix` | string | `"bot_"` | 账号名前缀，与 `startNumber` 拼接生成账号名（如 `bot_1`、`bot_2`） |
-| `startNumber` | int | `1` | 账号起始编号（从该数字开始递增） |
-| `count` | int | `1` | 创建的机器人总数 |
-| `concurrentNum` | int | — | 并发启动数，限制同时启动的机器人数（令牌桶限速） |
-| `mainService` | string | `"logic"` | 主服务名，机器人通过 Auth 获取该服务的连接地址后建立 TCP 长连接 |
+### 10.1 状态枚举
 
-### 9.3 auth 段 — 认证服务
+```go
+type AgentStatus string
 
-| 字段 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `address` | string | — | Auth 服务 HTTP 地址（含 schema，如 `http://127.0.0.1:8001`），机器人通过该地址登录并获取游戏服务器连接信息 |
-| `extra` | map[string]string | — | 登录请求附加参数，随 Auth 登录请求一起发送的键值对（如 `gameId`、`channelId` 等业务参数） |
+const (
+    StatusIdle AgentStatus = "idle"
+    StatusBusy AgentStatus = "busy"
+)
+```
 
-### 9.4 adapter 段 — 协议适配器
+### 10.2 任务结果枚举
 
-| 字段 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `script` | string | `"conf/adapter/codec.lua"` | 协议编解码 Lua 脚本路径，负责消息头的编码/解码逻辑（magic 字节、XOR、GZIP、加密等） |
-| `poolSize` | int | `runtime.NumCPU()` | Lua 适配器池大小，即同时执行编解码的 Lua 状态机数量。默认取 CPU 核数，设为 0 或负值时也使用 CPU 核数 |
+```go
+type TaskResult string
 
-### 9.5 network 段 — 网络参数
+const (
+    TaskCompleted TaskResult = "completed"
+    TaskStopped   TaskResult = "stopped"
+    TaskFailed    TaskResult = "failed"
+)
+```
 
-| 字段 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `heartbeatInterval` | string | `"5s"` | 心跳发送间隔，支持 Go duration 格式（如 `"3s"`、`"5000ms"`），由 `utils.ParseDurationDefault` 解析 |
-| `tcpTimeout` | string | `"60s"` | TCP 请求超时时间，等待服务器响应的最大时长，超时后标记动作失败并触发 `ResultTimeout` |
-| `httpTimeout` | string | `"10s"` | HTTP 请求超时时间，用于 Auth 登录等 HTTP 调用 |
+### 10.3 Agent -> Admin 请求类型
 
-### 9.6 proto 段 — Protobuf 文件
+#### RegisterRequest
 
-| 字段 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `dirs` | []string | `["conf/proto"]` | .proto 文件搜索目录列表，`protox.Loader` 递归扫描这些目录 |
-| `files` | []string | — | 额外指定的 .proto 文件路径列表（不通过目录扫描，直接加载） |
+```go
+type RegisterRequest struct {
+    AgentID        string     `json:"agentId"`
+    Name           string     `json:"name"`
+    Address        string     `json:"address"`
+    AppVersion     string     `json:"appVersion"`
+    MaxBots        int        `json:"maxBots"`
+    StressInterval string     `json:"stressInterval"`
+    SystemInterval string     `json:"systemInterval"`
+    StaticInfo     StaticInfo `json:"staticInfo"`
+}
+```
 
-### 9.7 flow 段 — 流程配置
+#### RegisterResponse
 
-| 字段 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `flow` | string | `"conf/flow/flow.json"` | 流程配置文件路径，定义压测节点 DAG（`TaskFlow`）、动作定义（`ActionDef`）和回调（`Callback`）。JSON 文件，结构由 `engine.TaskFlow` 反序列化 |
+```go
+type RegisterResponse struct {
+    AgentID        string `json:"agentId"`
+    HeartbeatTTL   string `json:"heartbeatTtl"`
+    StressEndpoint string `json:"stressEndpoint"`
+    SystemEndpoint string `json:"systemEndpoint"`
+}
+```
 
-### 9.8 script 段 — Lua 脚本
+#### HeartbeatRequest
 
-| 字段 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `dirs` | []string | `["conf/scripts"]` | Lua 脚本目录列表。`script.RuntimePool` 在这些目录中预编译脚本，每个机器人获取独立的 `LState` 执行环境 |
+```go
+type HeartbeatRequest struct {
+    AgentID       string `json:"agentId"`
+    Timestamp     string `json:"timestamp"`
+    Status        string `json:"status"`        // idle | busy
+    CurrentTaskID string `json:"currentTaskId"` // status=busy 时有值
+    CurrentBots   int    `json:"currentBots"`
+    AppVersion    string `json:"appVersion"`
+}
+```
 
-### 9.9 log 段 — 日志配置
+#### StressReport
 
-| 字段 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `path` | string | `"log/stressbot.log"` | 日志文件输出路径 |
-| `level` | string | `"info"` | 日志级别：`"debug"` / `"info"` / `"warn"` / `"error"` |
-| `printConsole` | bool | `false` | 是否同时输出到控制台（stderr） |
-| `maxSize` | int | — | 单个日志文件最大大小（MB），超过后自动轮转 |
-| `maxBackups` | int | — | 保留的旧日志文件最大数量 |
-| `maxAge` | int | — | 旧日志文件保留天数 |
-| `compress` | bool | `false` | 是否压缩轮转后的旧日志文件（gzip） |
+```go
+type StressReport struct {
+    AgentID    string                     `json:"agentId"`
+    TaskID     string                     `json:"taskId"`
+    ReportedAt time.Time                  `json:"reportedAt"`
+    Snapshot   *monitor.CollectorSnapshot `json:"snapshot"`
+}
+```
 
-> 底层使用 `utils/log` 包初始化，参数透传给 lumberjack 日志轮转库。日志初始化后还会通过 `logview.AttachRingBuffer` 挂接环形缓冲区（容量 50000 条），供 Agent HTTP `/agent/v1/logs` 接口查询。
+#### SystemReport
 
-### 9.10 monitor 段 — 监控指标
+```go
+type SystemReport struct {
+    AgentID    string         `json:"agentId"`
+    ReportedAt time.Time      `json:"reportedAt"`
+    Snapshot   SystemSnapshot `json:"snapshot"`
+}
+```
 
-`CollectorConfig` 定义在 `monitor/collector.go`，控制指标采集与输出行为。
+#### TaskCompletionReport
 
-| 字段 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `enabled` | bool | `false` | 监控总开关。`false` 时所有采集方法为 no-op，压测核心路径零开销 |
-| `reportInterval` | string | `"5s"` | 指标上报间隔，支持 Go duration 格式。单机模式下控制 `Reporter` 输出频率，Agent 模式下控制 `StressReporter` 上报频率 |
-| `httpEnabled` | bool | `false` | 是否启动监控 HTTP 端点（`/metrics` 等），单机模式专用 |
-| `httpPort` | int | `6060` | 监控 HTTP 服务监听端口 |
-| `csvPath` | string | `"log/metrics.csv"` | 进程退出时导出的 CSV 指标文件路径 |
-| `apdexT` | int | `100` | Apdex T 值（毫秒）。响应时间 < T 为满意、< 4T 为容忍、>= 4T 为沮丧。可通过 `SetApdexT()` 在任务级别动态调整 |
+```go
+type TaskCompletionReport struct {
+    AgentID       string                     `json:"agentId"`
+    TaskID        string                     `json:"taskId"`
+    Result        TaskResult                 `json:"result"`
+    ErrorMsg      string                     `json:"errorMsg,omitempty"`
+    FinishedAt    time.Time                  `json:"finishedAt"`
+    FinalSnapshot *monitor.CollectorSnapshot `json:"finalSnapshot"`
+    StageIndex    int                        `json:"stageIndex,omitempty"`
+}
+```
 
-### 9.11 agent 段 — Agent 模式配置
+#### DeregisterRequest
 
-`Config` 定义在 `agent/config.go`，通过 `Resolve()` 方法解析为 `ResolvedConfig`（Duration 已转换、默认值已填充、参数已校验）。
+```go
+type DeregisterRequest struct {
+    AgentID string `json:"agentId"`
+}
+```
 
-| 字段 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `enabled` | bool | `false` | Agent 模式总开关。`false` 时运行单机模式（行为与旧版完全一致），`true` 时注册到 Admin 等待任务下发 |
-| `adminAddr` | string | — (**必填**) | Admin HTTP 地址（含 schema，如 `"http://192.168.1.100:8080"`）。Agent 模式下为必填项，校验失败直接退出 |
-| `name` | string | hostname | Agent 显示名（用于 Admin 前端列表展示），为空时自动取 `os.Hostname()` |
-| `listenAddr` | string | `":7070"` | 接收 Admin 推送的监听地址（Agent HTTP Server），Admin 通过此地址下发任务/停止/升级命令 |
-| `maxBots` | int | `5000` | 本节点支持的最大机器人数（用于 Admin 任务分配决策），≤0 时使用默认值 |
-| `stressInterval` | string | `"5s"` | 压测指标上报间隔（Agent 模式专用），支持 Go duration 格式 |
-| `systemInterval` | string | `"5s"` | 系统指标上报间隔（Agent 模式专用），CPU/内存/网络/GC 采集频率 |
-| `heartbeatInterval` | string | `"10s"` | 心跳间隔（Agent → Admin），必须 < 25s（Admin unhealthy 阈值通常为 30s），校验失败直接退出 |
-| `registerRetryMaxInterval` | string | `"60s"` | 注册重试退避上限，指数退避（1s→2s→4s→...）不超过此值，永不放弃 |
-| `taskWorkDir` | string | `os.TempDir()` | 任务配置文件临时目录，为空时使用系统临时目录。每次任务创建子目录 `stressbot-task-{taskID}/`，任务结束后删除 |
-| `appVersion` | string | 编译时注入的 `Version` | 应用版本号，注册时上报给 Admin。为空时使用 `-ldflags "-X main.Version=..."` 注入的值 |
-| `adapterScript` | string | `"conf/adapter/codec.lua"` | Agent 模式下使用的协议编解码 Lua 脚本路径（任务级覆盖时使用默认值兜底） |
+### 10.4 Admin -> Agent 请求类型
 
-## 10. 错误处理与重试策略
+#### TaskAssignment
 
-### 10.1 网络故障
+```go
+type TaskAssignment struct {
+    TaskID            string            `json:"taskId"`
+    TaskName          string            `json:"taskName"`
+    StartNumber       int               `json:"startNumber"`
+    TotalBots         int               `json:"totalBots"`
+    AccountPrefix     string            `json:"accountPrefix"`
+    ConcurrentNum     int               `json:"concurrentNum"`
+    MainService       string            `json:"mainService"`
+    StateExtra        map[string]string `json:"stateExtra"`
+    HeartbeatInterval string            `json:"heartbeatInterval"`
+    TCPTimeout        string            `json:"tcpTimeout"`
+    HTTPTimeout       string            `json:"httpTimeout"`
+    ApdexT            int               `json:"apdexT"`
+    LogLevel          string            `json:"logLevel,omitempty"`
+    ConfigURL         string            `json:"configUrl"`
+    ConfigFiles       []string          `json:"configFiles"`
+    RampUp            *RampUpConfig     `json:"rampUp,omitempty"`
+}
+```
+
+#### RampUpConfig / RampUpStage
+
+```go
+type RampUpConfig struct {
+    Stages []RampUpStage `json:"stages"`
+}
+
+type RampUpStage struct {
+    Count       int  `json:"count"`
+    Concurrency int  `json:"concurrency,omitempty"`
+    HoldSec     int  `json:"holdSec,omitempty"`
+    Reset       bool `json:"reset,omitempty"`
+}
+```
+
+### 10.5 响应类型
+
+#### AgentStatusResponse
+
+```go
+type AgentStatusResponse struct {
+    AgentID       string `json:"agentId"`
+    Status        string `json:"status"`
+    CurrentTaskID string `json:"currentTaskId,omitempty"`
+    AppVersion    string `json:"appVersion"`
+    Uptime        string `json:"uptime"`
+}
+```
+
+#### ErrorResponse
+
+```go
+type ErrorResponse struct {
+    Code    string          `json:"code"`
+    Message string          `json:"message"`
+    Details json.RawMessage `json:"details,omitempty"`
+}
+```
+
+### 10.6 系统监控类型
+
+详见第 4.2 节 `SystemSnapshot` 和 `StaticInfo`。
+
+## 11. 错误处理与重试策略
+
+### 11.1 网络故障
 
 | 操作 | 失败处理 |
-|---|---|
-| 注册失败 | 指数退避（1s→2s→...→60s 上限），永不放弃 |
-| 心跳失败 | 同上，并打印 WARN，连续失败 3 次后输出 ERROR |
-| 上报指标失败 | 指数退避（1s→2s→4s→上限 30s），ticker 不停 |
-| 拉取配置失败 | 立即上报 task done (result=failed)，错误信息含 URL |
-| 上报 task done 失败 | 指数退避（1s→2s→...→60s 上限），**最多重试 30 分钟**，因为 finalSnapshot 是 Admin 历史归档的唯一数据源；重试期间 Agent 维持本地 `state=draining`，不接受新任务 |
+|------|----------|
+| 注册失败 | 指数退避（5s -> 10s -> 20s -> ... -> 60s 上限），默认永不放弃（`ReconnectMaxRetries=-1`） |
+| 心跳失败 | 使用 `HBFailInterval` 快速重试；404 立即重注册；任务运行中首次失败即取消任务 |
+| 上报压测指标失败 | 指数退避（1s -> 2s -> 4s -> ... -> 30s 上限），ticker 不停 |
+| 上报系统指标失败 | 同上 |
+| 拉取配置失败 | 立即返回 `TaskFailed`，错误信息含 URL |
+| 上报 task done 失败 | 一次性上报（30s 超时），失败仅记录 WARN，由 Admin 心跳超时自动收尾 |
+| 注销失败 | best-effort，不重试 |
 
-### 10.2 资源失败
-
-| 场景 | 处理 |
-|---|---|
-| 临时目录创建失败 | 上报 task done (result=failed) |
-| protox 加载失败 | 同上 |
-| flow.json 解析失败 | 同上 |
-| Manager.RunWithContext 返回错误 | 同上 |
-| SystemMonitor 启动失败 | Agent 拒绝启动（致命错误，退出码 1 ） |
-
-### 10.3 升级失败
-
-> ⚠️ **已废弃**：自动升级流程已废弃，升级改为运维手动重启 Agent 进程。设计文档保留供参考。
+### 11.2 资源失败
 
 | 场景 | 处理 |
-|---|---|
-| 下载失败 / SHA256 不匹配 | 不退出，记录失败到日志，下次升级请求重试 |
-| `.upgrade.pending` 写入失败 | 取消升级 |
-| `.upgrade.success` 写入失败 | 不致命，Launcher 60s 后回滚（保险机制）|
+|------|------|
+| 临时目录创建失败 | 返回 `TaskFailed` |
+| 配置文件下载失败 | 返回 `TaskFailed`（错误信息含文件路径和 HTTP 状态码） |
+| proto 加载失败 | 返回 `TaskFailed` |
+| flow.json 解析失败 | 返回 `TaskFailed` |
+| 适配器加载失败 | 返回 `TaskFailed` |
+| 网络引擎启动失败 | 返回 `TaskFailed` |
+| 机器人数启动失败 | 返回 `TaskFailed` |
+| SystemMonitor 创建失败 | Agent 拒绝启动（`agent.New` 返回 error） |
+| Lua 脚本预编译失败 | 非致命错误（仅 WARN），继续执行 |
 
-## 11. 实施分阶段计划
+### 11.3 并发安全
 
-| 阶段 | 内容 | 工时 |
-|---|---|---|
-| Phase 1 | `agent/types.go` + `config.go`：DTO 与配置结构 | 0.25 天 |
-| Phase 2 | `agent/sysmon.go`：SystemMonitor 实现 + gopsutil 引入 + 跨平台测试 | 1 天 |
-| Phase 3 | `agent/http_client.go`：AdminClient + 重试 | 0.5 天 |
-| Phase 4 | `agent/agent.go` 主结构 + 注册 + 心跳循环 | 0.75 天 |
-| Phase 5 | `agent/reporter.go`：StressReporter + SystemReporter | 0.5 天 |
-| Phase 6 | `agent/http_server.go`：Agent 端 HTTP 命令处理 | 0.5 天 |
-| Phase 7 | `agent/task_runner.go`：配置拉取 + Manager 执行 | 1 天 |
-| Phase 8 | `agent/upgrader.go`：升级流程 | 0.5 天 |
-| Phase 9 | `cmd/agent/main.go`：单机/Agent 模式分支，重命名自 `cmd/stressbot/main.go` | 0.25 天 |
-| Phase 10 | `monitor/snapshot.go` 扩展：聚合所需字段 | 0.5 天 |
-| Phase 11 | `robot/manager.go`：`RunWithContext` 改造 | 0.5 天 |
-| Phase 12 | 单元测试（含 mock Admin server） | 1 天 |
-| Phase 13 | 与真实 Admin 联调 | 0.5 天 |
+- `Agent.mu`（`sync.Mutex`）保护 `status`、`currentTask`、`taskCancel`、`stressReporter` 的读写
+- `SystemMonitor.mu`（`sync.RWMutex`）保护 `latest` 快照，`Snapshot()` 只做读锁
+- `stopOnce`（`sync.Once`）保证 `stopCh` 仅关闭一次
+- `taskWG`（`sync.WaitGroup`）追踪 `executeTask` 生命周期，`shutdown` 时 Wait
+- 所有业务 goroutine 通过 `utils.GetWorkPool()` 调度，自带 panic recover
 
-**总计：约 7.75 天**。
+## 12. 日志系统
 
-## 12. 单元测试清单
+### 12.1 日志初始化
 
-| 包 | 测试文件 | 关键测试 |
-|---|---|---|
-| `agent` | `agent_test.go` | TestRegisterRetry、TestHeartbeatStops、TestStateMachine（idle→running→idle）、TestConcurrentTaskRejected |
-| `agent` | `sysmon_test.go` | TestCollectAllFields、TestNetRateBaseline、TestPlatformGoroutineLeak |
-| `agent` | `reporter_test.go` | TestExponentialBackoff、TestSystemReporterAlwaysOn、TestStressReporterStopsOnTaskEnd、**TestFinalSnapshotIntegrity**（确保 17 桶 + 完整字段）、**TestTaskDoneLongRetry**（30 分钟内不放弃） |
-| `agent` | `task_runner_test.go` | TestPullConfig、TestSHA256Mismatch、TestCleanupOnFailure、TestStartNumberHonored |
-| `agent` | `upgrader_test.go` | TestDownloadVerify、TestSHA256Mismatch、TestPendingFlagWritten |
+- Agent 模式：`log/agent.log`，tag `"agent"`
+- 单机模式：`log/stressbot.log`，tag `"stressbot"`
 
-**Mock Admin server**：用 `httptest.NewServer` 模拟 Admin 的 8 个上行接口，记录请求体并断言。
+### 12.2 环形缓冲区
 
-## 13. 验收标准
+通过 `logview.AttachRingBuffer` 挂接到全局 zap logger，容量 50000 条。所有经过 zap 输出的日志都会被 O(1) 追加到环形缓冲区。
 
-- [ ] `go build ./cmd/agent` 在 Windows / Linux 编译通过
-- [ ] 单机模式（`agent.enabled=false`）行为与改造前完全一致：能直接跑 `flow.json`，所有现有验证项通过
-- [ ] Agent 模式启动后能注册到 Admin，心跳 / 系统指标推送稳定
-- [ ] Admin 推送任务后，Agent 能拉取配置并执行，账号范围严格遵守 `startNumber` / `totalBots`
-- [ ] 任务结束后能上报 `done`（result=completed/stopped/failed 三种均能正确判断）
-- [ ] **finalSnapshot 完整性**：上报的 finalSnapshot 包含完整 actions/connections/bandwidth/robots，每个动作的 latencyBuckets 数组长度为 17
-- [ ] **finalSnapshot 时序正确性**：所有 robot goroutine 退出后才采样，确保最后一批 OnComplete 已写入
-- [ ] **finalSnapshot 上报重试**：模拟 Admin 短暂不可达，Agent 持续重试至上报成功；连续失败 30 分钟内不接受新任务
-- [ ] 收到 stop 命令后 1 分钟内 drain 完成
-- [ ] 收到 upgrade 命令后能完整跑通：下载 → 校验 → drain → 退出 99 → Launcher 替换 → 新版本注册 — ⚠️ **已废弃**：自动升级流程已废弃，升级改为运维手动重启 Agent 进程
-- [ ] 单元测试通过率 100%
-- [ ] 跨平台采集（Windows / Linux）所有 SystemSnapshot 字段无 nil pointer / panic
-- [ ] 与 Admin 联调：能完整完成 1 → N → 1 的任务生命周期
+### 12.3 日志查询接口
 
-## 14. 与其他模块的协议契约（强约束）
+`GET /agent/v1/logs` 支持游标分页：
 
-### 14.1 Agent 必须遵守
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `afterSeq` | uint64 | 0 | 游标：从此序列号之后开始查询 |
+| `limit` | int | 200 | 返回条数（上限 500） |
 
-1. 升级时**先**写 `.new` 后写 `.pending`，最后才 `os.Exit(99)`，顺序不可乱
-2. 新版本注册成功后必须写 `.upgrade.success`（一次性）
-3. 不允许使用退出码 `99` 作其他用途
-4. 不能直接读写 `.bak` 文件（Launcher 私有）
+返回 `logview.QueryResult`（含 `entries`、`hasMore`、`nextSeq`）。
 
-### 14.2 Agent 假定 Admin 提供
+### 12.4 日志文件管理
 
-1. `/api/binaries/{filename}` 是公开可下载的（无需 token）
-2. `/api/tasks/{id}/config/*` 是公开可下载的
-3. Admin 注册响应中给出的 `heartbeatTtl` 是 unhealthy 阈值，本 Agent 心跳间隔需小于此值的 1/3
+- `GET /agent/v1/logs/files`：扫描日志目录下同前缀的所有文件
+- `GET /agent/v1/logs/files/{name}`：下载指定日志文件（防路径遍历攻击）
 
-### 14.3 跨模块字段对齐
+## 13. 辅助工具函数
 
-Agent 上报的 `CollectorSnapshot` 必须与 `monitor` 包当前结构完全一致（含新增的 `LatencyBuckets`、`LatencySumNs` 等聚合字段）。任何字段变动需同时修改 Admin Aggregator。
+### 13.1 UUID 生成
+
+```go
+func generateUUID() string
+```
+
+使用 `crypto/rand` 生成 v4 UUID（不依赖外部库）。格式：`xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`。失败时 fallback 为 `{timestamp}-{pid}`。
+
+### 13.2 本机 IP 获取
+
+```go
+func getLocalIP() string
+func buildAddress(port int) string
+```
+
+通过 UDP 连接 `8.8.8.8:53`（不实际发包）获取本机首选出口 IP。失败时回退 `127.0.0.1`。`buildAddress` 拼接为 `http://{ip}:{port}`。
+
+### 13.3 静态信息采集
+
+```go
+func CollectStaticInfo() StaticInfo
+```
+
+采集 hostname、OS、arch、NumCPU、GoVersion、启动时间。`MemTotalMB` 在 `agent.New` 中通过 `gopsutil` 补充。
+
+### 13.4 Duration 解析
+
+使用 `utils.ParseDurationDefault(s, default, name)` 解析 Go duration 格式字符串，解析失败时使用默认值。
+
+## 14. 与计划方案的差异
+
+以下功能在实施计划（`plans/agent-implementation.md`）中设计但**未实现**：
+
+### 14.1 已废弃：热更新/升级
+
+- 计划中的 `agent/upgrader.go` 未创建
+- HTTP 端点 `/agent/v1/upgrade` 未注册
+- `Launcher` 守护进程、`.upgrade.pending` / `.upgrade.success` / `.bak` 文件 IPC 协议均未实现
+- 升级改为运维手动重启 Agent 进程
+
+### 14.2 已废弃：任务完成上报长时间重试
+
+- 计划要求 finalSnapshot 上报失败时以指数退避重试最多 30 分钟，重试期间维持 `state=draining` 不接受新任务
+- 实际实现为**一次性上报**（30s 超时），失败仅记录 WARN。Admin 通过心跳超时合成 offline report 作为兜底
+
+### 14.3 已简化：SHA256 校验
+
+- 计划要求下载配置文件后校验 SHA256
+- `TaskAssignment` 中无 `sha256` 字段，下载后不做校验
+
+### 14.4 配置字段差异
+
+| 计划字段 | 实际实现 | 差异说明 |
+|----------|----------|----------|
+| `agent.name` | 自动取 `os.Hostname()` | 未暴露为配置项，通过 `ResolvedConfig.Name` 自动填充 |
+| `agent.listenAddr` | `agent.port` | 改为仅指定端口，地址自动构建 |
+| `agent.systemInterval` | = `stressInterval` | 独立参数合并，与压测指标同步上报 |
+| `agent.heartbeatFailInterval` | = `hbInterval` | 独立参数合并，失败重试用相同间隔 |
+| `agent.taskWorkDir` | 硬编码 `os.TempDir()` | 未暴露为配置项 |
+| `agent.adapterScript` | 硬编码 `"conf/adapter/codec.lua"` | 未暴露为配置项 |
+
+### 14.5 未实现：多任务并发
+
+- 严格执行单任务约束（`currentTask != nil` 时拒绝新任务）
+- 无任务队列
+
+### 14.6 未实现：持久任务队列
+
+- 任务仅在内存中，Agent 崩溃时丢失最终报告
+- Admin 通过心跳超时合成 offline report 作为兜底
+
+### 14.7 新增功能（计划中未设计）
+
+| 功能 | 说明 |
+|------|------|
+| `POST /agent/v1/shutdown` | 远程关闭 Agent 进程（计划中未列出） |
+| `regGeneration` | 注册版本号，防止旧任务回调污染新生命周期 |
+| `LogLevel` 任务级切换 | 任务执行期间临时切换 Agent 日志等级 |
+| `OnStageReset` 回调 | 渐进式加压阶段重置时上报阶段指标 |
+| `Daemon` 模式 | `-d` 标志或配置 `"daemon": true` 启动守护进程 |
+| `StateExtra` 注入 | 任务下发时注入额外状态键值对到每个 Robot |
+| `error.lua` 可选加载 | 适配器支持可选的错误码映射 Lua 脚本 |
+| `Duration` 运行时长 | 单机模式支持配置运行时长（如 `"10m"`） |
+
+## 15. 与 Admin 的协议契约
+
+### 15.1 Agent 必须遵守
+
+1. 注册请求必须包含完整的 `StaticInfo`
+2. 心跳间隔必须 < Admin 的 `unhealthy` 阈值（通常 30s）
+3. 任务完成后必须上报 `done`（含 `finalSnapshot`）
+4. 同一时刻只能有一个活跃任务
+5. `finalSnapshot` 中的 `CollectorSnapshot` 必须与 `monitor` 包当前结构完全一致
+
+### 15.2 Agent 假定 Admin 提供
+
+1. `/sbot/agent/*` 系列端点可用
+2. 任务配置文件的 URL（`configUrl + "/" + relPath`）公开可下载
+3. Admin 注册响应中给出的 `heartbeatTtl` 是 unhealthy 阈值参考
+
+### 15.3 跨模块字段对齐
+
+Agent 上报的 `CollectorSnapshot` 必须与 `monitor` 包当前结构完全一致（含 `LatencyBuckets`、`LatencySumNs`、`ApdexSatisfied`、`ApdexTolerating` 等聚合字段）。任何字段变动需同时修改 Admin Aggregator。

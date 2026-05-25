@@ -26,6 +26,8 @@ message ShowReward {
     bool                  IsConvertReward = 2; // 是否转换
     repeated RewardConfig ConvertReward   = 3; // 转换之后的奖励
     int64                 Uuid            = 4; // 道具uuid
+    bool                  IsCrit          = 5; // 是否暴击
+    int32                 CritMultiplier  = 6; // 暴击倍率(万分比)
 }
 
 message DropItemConfig {
@@ -138,6 +140,12 @@ message SuperAffixValue {
     repeated int32 values = 1; // 词缀id数组
 }
 
+// 词缀轮次追踪状态（per ModeId）
+message AffixRoundState {
+    repeated int32 drawnAffixes = 1; // 当前轮次已抽取的词缀ID列表
+    int32 lastRoundAffix = 2;        // 上一轮末位词缀ID（用于末位保护）
+}
+
 // 游戏模式数据
 message BattleGameMode {
     int32                        modeId          = 1;  // 当前模式id
@@ -160,6 +168,8 @@ message BattleGameMode {
     int32                        nextModeId      = 18; // 下次模式id
     int32                        RefreshText     = 19; // 玩法刷新提示类型
     map<string, SuperAffixValue> superAffix      = 21; // 词缀风暴
+    map<int32, AffixRoundState>  affixRoundStates = 22; // key:ModeId value:该ModeId的轮次追踪状态
+    map<int32, AffixRoundState>  superAffixRoundStates = 23; // key:ModeId value:词缀风暴轮次追踪状态
 }
 
 message RuleTimeInfo {
@@ -193,6 +203,11 @@ message ActivityBattleRecruitData {
     int32 step = 2; // 阶段
 }
 
+// 单模式活动赛招募数据
+message ActivityBattleSingleRecruitData {
+    int32 id = 1; // 本期配置id
+}
+
 
 //  GM 更新验证结果
 message GMUpdateResult {
@@ -201,4 +216,17 @@ message GMUpdateResult {
     int32  ErrCode   = 3; //   `json:"errCode"`
     string ErrMsg    = 4; //   `json:"errMsg"`
     int64  Timestamp = 5; //   `json:"timestamp"`
+}
+
+
+// 活动额外信息
+message GMActivityInfoExtra {
+    GMActivityInfoPosition pos1 = 1;
+    GMActivityInfoPosition pos2 = 2;
+}
+
+message GMActivityInfoPosition {
+    float offsetX = 1;  // 偏移坐标x
+    float offsetY = 2;  // 偏移坐标y
+    float rotateZ = 4;  // 旋转z
 }

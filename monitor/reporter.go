@@ -72,18 +72,27 @@ func (r *Reporter) report() {
 		return
 	}
 
-	fmt.Printf("[MONITOR] %-22s %4s %4s %4s %7s %7s %5s %4s %5s\n",
-		"动作", "成功", "失败", "超时", "avg", "p95", "apdex", "exec", "qps")
+	// netAvg / netP95 是"纯网络往返"耗时（不含客户端构建/解析），
+	// client 列单独反映客户端 CPU 开销。
+	fmt.Printf("[MONITOR] %-22s %4s %4s %4s %8s %8s %8s %5s %4s %5s\n",
+		"动作", "成功", "失败", "超时", "netAvg", "netP95", "client", "apdex", "exec", "qps")
 
 	var hasErrors bool
 	for _, a := range snap.Actions {
 		if a.SampleCount == 0 && a.Executing == 0 {
 			continue
 		}
-		fmt.Printf("[MONITOR] %-22s %4d %4d %4d %6.0fms %6.0fms %5.2f %4d %5.1f",
+		// netSamples=0 的纯客户端动作 latency 直方图为空，显示 -- 提示用户
+		netAvg := "    --ms"
+		netP95 := "    --ms"
+		if a.NetSampleCount > 0 {
+			netAvg = fmt.Sprintf("%6.0fms", a.Latency.AvgMs)
+			netP95 = fmt.Sprintf("%6.0fms", a.Latency.P95Ms)
+		}
+		fmt.Printf("[MONITOR] %-22s %4d %4d %4d %8s %8s %6.0fms %5.2f %4d %5.1f",
 			a.Name,
 			a.SuccessCount, a.FailureCount, a.TimeoutCount,
-			a.Latency.AvgMs, a.Latency.P95Ms,
+			netAvg, netP95, a.ClientAvgMs,
 			a.Apdex, a.Executing, a.PeriodQPS)
 		if a.TimeoutCount > 0 && a.TimeoutAvgMs > 0 {
 			fmt.Printf(" tout=%.0fms", a.TimeoutAvgMs)

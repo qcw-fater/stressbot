@@ -7,13 +7,17 @@ message MonthSignDataDb
 {
   int64 signDay = 1; // 签到状态位 （第0位=第1天，第29位=第30天）
   int64 endTimestamp = 2; // 签到结束时间戳
-  int32 retroactiveSignCnt = 3; // 已补签次数
+  int32 retroactiveSignCnt = 3; // [Deprecated] 旧已用补签次数（已被 usedBaseRetroactiveSignCnt + usedPrivilegeRetroactiveSignCnt 替代，保留避免 wire 不兼容）
   int64 totalSignDay = 4; // 累计签到天数领奖状态位（第0位=第1天，第29位=第30天）
-  int32 totalRetroactiveSignCnt = 5; // 可补签次数
+  int32 totalRetroactiveSignCnt = 5; // [Deprecated] 旧累计可补签次数（已被 BaseSignCnt + privilegeRetroactiveSignCnt 替代，保留避免 wire 不兼容）
   int32 round = 6; // 当前签到轮数
   bool todayAddRetroactiveSignCnt = 7; // 今日是否增加可补签次数
   int32 historySignCnt = 8; // 历史签到次数  不重置
   int64 startTimestamp = 9; // 签到开启时间戳
+  int32 privilegeRetroactiveSignCnt = 10; // 本轮通过月卡/终身卡特权获得的额外补签次数（每轮重置）
+  bool monthCardAddedRetroactiveSign = 11; // 本轮是否已通过月卡特权增加过补签次数（防重复，每轮重置）
+  int32 usedBaseRetroactiveSignCnt = 12; // 本轮已用基础补签次数（每轮重置）
+  int32 usedPrivilegeRetroactiveSignCnt = 13; // 本轮已用特权补签次数（每轮重置；扣减规则：先扣特权再扣基础）
 }
 
 // 30天签到数据
@@ -21,11 +25,12 @@ message MonthSignDataClient
 {
   int64 signDay = 1; // 签到状态位 （第0位=第1天，第29位=第30天）
   int64 endTimestamp = 2; // 签到结束时间戳
-  int32 retroactiveSignCnt = 3; // 已补签次数
+  int32 retroactiveSignCnt = 3; // 已用补签次数（服务端合并值 = usedBase + usedPrivilege）
   int64 totalSignDay = 4; // 累计签到天数领奖状态位（第0位=第1天，第29位=第30天）
-  int32 totalRetroactiveSignCnt = 5; // 可补签次数
+  int32 totalRetroactiveSignCnt = 5; // 总可补签次数（服务端合并值 = BaseSignCnt + privilegeRetroactiveSignCnt）
   int32 round = 6; // 当前签到轮数
   int32 currentDay = 7; // 当前签到第几天  从1开始
   int32 historySignCnt = 8; // 历史签到次数  不重置
   int64 startTimestamp = 9; // 签到开启时间戳
+  int32 privilegeRetroactiveSignCnt = 10; // 本轮通过月卡特权获得的额外补签次数（客户端按"先扣特权再扣基础"约定计算分项剩余）
 }

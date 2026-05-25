@@ -139,6 +139,8 @@ func (e *Executor) executeLoop(ctx context.Context, node *Node) error {
 		// 前置条件检查（对应 Go: for condition { }）
 		if node.Condition != "" {
 			if !e.handler.ExecuteBoolean(node.Condition) {
+				stresslog.Debug("[ENGINE] loop 前置条件不满足，退出循环",
+					zap.String("caller", e.caller), zap.Int("iteration", i))
 				break
 			}
 		}
@@ -222,6 +224,14 @@ func applyErrorStrategy(strategy string, abortErr func() error) error {
 // executeBoolean 条件分支节点。
 func (e *Executor) executeBoolean(ctx context.Context, node *Node) error {
 	result := e.handler.ExecuteBoolean(node.Condition)
+
+	stresslog.Debug("[ENGINE] boolean 条件判断",
+		zap.String("caller", e.caller), zap.Bool("result", result), zap.String("next", func() string {
+			if result {
+				return node.TrueNext
+			}
+			return node.FalseNext
+		}()))
 
 	var targetID string
 	if result {

@@ -28,6 +28,7 @@ enum ActivityTemplateType {
     CHAIN_GIFT          = 13; // 连锁礼包
     EXCHANGE_SHOP       = 14; // 兑换商店
     MYSTICAL_SHOP       = 15; // 神秘商店
+    INVITE_TYPE         = 16; // 好友邀请活动
 
     SIGN_IN_TYPE        = 20; // 签到（舍弃）
     CONDITION_TYPE      = 21; // 条件（舍弃）
@@ -105,6 +106,7 @@ message OperateActivity {
     string                    rule                = 30; // 活动规则
     int32                     shopId              = 31; // 商店id
     int32                     goodsId             = 32; // 商品id
+    GMActivityInfoExtra       position            = 33; //坐标信息
 }
 
 message ConditionGroup {
@@ -133,6 +135,7 @@ message ActivityTemplate {
     SignInNewTemplate      NewSignIn      = 17; // 签到
     ChainGiftTemplate      ChainGift      = 18; // 连锁礼包
     ExchangeShopTemplate   ExchangeShop   = 19; // 兑换商店
+    InviteTemplate         Invite         = 20; // 好友邀请活动
 }
 
 // 兑换商店
@@ -156,7 +159,7 @@ message ChainGiftTemplate {
 message ChainGiftTemplateConf {
     int32                 id            = 1;  // id
     int32                 prev          = 2;  // 前置id
-    int32                 cashId        = 3;  // 直购id
+    repeated int32        cashId        = 3;  // 直购id
     repeated RewardConfig reward        = 4;  // 内购获得道具
     repeated RewardConfig cost          = 5;  // 内购消耗道具
     int32                 limitNumber   = 6;  // 限购数量
@@ -191,6 +194,22 @@ message RegressionRow {
     repeated int32    Condition = 1; // 条件参数
     int32             Type      = 2; // 条件类型 1:登录天数 2:账号等级
     repeated ItemData reward    = 3; // 奖励列表
+    int32             day       = 4; // 天数
+}
+
+// 旧号回归 - 单个阶段（RewardDay）的展示状态
+enum RegressionStageStatus {
+    RSS_LOCKED    = 0; // 未解锁（day > currentDay）
+    RSS_AVAILABLE = 1; // 可领取
+    RSS_CLAIMED   = 2; // 已领取
+}
+
+// 旧号回归 - 单阶段视图（仅下发客户端使用，不入库）
+message RegressionStageView {
+    int32                  rewardDay = 1; // 阶段编号（创角第几天解锁）
+    RegressionStageStatus  status    = 2; // 阶段状态
+    repeated ItemData      rewards   = 3; // 该阶段合并后的奖励列表（Type1+Type2）
+    int32                  remainDay = 4; // 距解锁剩余天数（已解锁=0）
 }
 
 // 测试毕业礼
@@ -394,13 +413,17 @@ message ActivityTemplateDB {
     SignInNewTemplateDB       NewSignInDB      = 10; // 签到
     ChainGiftNewTemplateDB    ChainGiftDB      = 11; // 连锁礼包购买数据
     ExchangeShopNewTemplateDB ExchangeShopDB   = 12; // 兑换商店数据
+    InviteTemplateDB          InviteDB         = 13; // 好友邀请活动玩家进度
 }
 
 //    旧号回归(true:回归用户可以领奖)
 message RegressionTemplateDB {
-    RewardFlag flag                  = 1; // 旧号回归(0:不能领取1：回归用户可以领奖，2已经领取)
-    int32      payRewardCfgIndex     = 2; // 充值档位索引
-    int32      loginDyRewardCfgIndex = 3; // 登录天数档位索引
+    RewardFlag flag                          = 1; // 旧号回归(0:不能领取1：回归用户可以领奖，2已经领取)
+    int32      payRewardCfgIndex             = 2; // 充值档位索引（保留兼容旧字段，仅 minDay 那组）
+    int32      loginDyRewardCfgIndex         = 3; // 登录天数档位索引（保留兼容旧字段，仅 minDay 那组）
+    map<int32,bool> rewardRecord             = 4; // 领取记录 key=RewardDay value=是否已领
+    int32 currentDay                         = 5; // 当前时间天数
+    repeated RegressionStageView stages      = 6; // 各阶段视图（仅下发使用，落库前需置空）
 }
 
 // 测试毕业礼
@@ -487,6 +510,64 @@ message ChainGiftNewTemplateDB {
 message ExchangeShopNewTemplateDB {
     map<int32, int32> record = 1; // 兑换记录 id:次数
 }
+
+//////////////////////////////////////////////////////////////////////////好友邀请活动//////////////////////////////////////////////////////////////////////////////////
+
+// 好友邀请活动 - 全局配置（单条，对应 InviteActivityConfig.csv）
+message InviteGlobalConf {
+    int32 MaxBindPerCode               = 1; // 每个邀请码最多绑定的受邀者数（如 10）
+    int32 BindRewardMailId             = 2; // 绑定奖励邮件模板ID（默认 78）
+    int32 SettlementMailId             = 3; // 结算补发邮件模板ID（默认 79）
+    repeated RewardConfig FinalReward          = 4; // 终极奖励
+    repeated RewardConfig FirstShareReward     = 5; // 首次分享奖励
+    repeated RewardConfig BindRewardSelf       = 6; // 受邀者绑定后获得的奖励
+    repeated RewardConfig BindRewardInviter    = 7; // 邀请者绑定后获得的奖励（每绑定 1 个）
+}
+
+// 好友邀请活动 - 邀请任务档位配置（多条，对应 InviteActivityTask.csv）
+message InviteTaskConf {
+    int32 TaskId                = 1; // 任务ID
+    int32 TargetCount           = 2; // 需要的受邀者数量（如 1/3/5）
+    int32 TargetCup             = 3; // 受邀者达到的奖杯阈值（0=不限）
+    repeated RewardConfig Reward = 4; // 奖励
+}
+
+// 好友邀请活动 - 充值档位配置（多条，对应 InviteActivityRechargeTask.csv）
+message InviteRechargeTierConf {
+    int32 TierId                = 1; // 档位ID
+    int32 ThresholdAmount       = 2; // 累计充值金额阈值（受邀者集合，绑定后统计）
+    repeated RewardConfig Reward = 3; // 奖励
+}
+
+// 好友邀请活动 - 模板入口（V2 重构：仅保存 taskId 列表，任务数据由 PlayerTask 系统管理）
+message InviteTemplate {
+    InviteGlobalConf       Global             = 1; // 全局配置
+    repeated int32         InviteTaskIdList   = 2; // 邀请任务 ID 列表（指向 Task.csv，TriggerType=45 TT_InviteCount）
+    repeated int32         RechargeTierIdList = 3; // 充值档位任务 ID 列表（指向 Task.csv，TriggerType=46 TT_InviteRecharge）
+}
+
+// 好友邀请活动 - 受邀者绑定信息（玩家持久化数据子结构）
+message InviteeBindInfo {
+    int32 InviteeRoleId = 1; // 受邀者 playerId
+    int64 BindTime      = 2; // 绑定时刻 ts（用于充值"绑定后"判定）
+}
+
+// 好友邀请活动 - 玩家进度持久化（V2 重构：reserved 3/4，新增 11/12 UUIDList）
+message InviteTemplateDB {
+    string InviteCode                   = 1;  // 自己的邀请码（10 位 Base32，4 位活动指纹+6 位 roleId）
+    repeated InviteeBindInfo BoundInvitees    = 2;  // 受邀者列表（最多 MaxBindPerCode）
+    reserved 3, 4;                            // V2 删除：原 InviteTaskClaimedIds / RechargeTierClaimedIds（任务领取状态由 PlayerTask 接管）
+    reserved "InviteTaskClaimedIds", "RechargeTierClaimedIds";
+    int64 RechargeTotalAmount           = 5;  // 受邀者集合累计充值金额（绑定后统计）
+    bool  FinalRewardClaimed            = 6;  // 终极奖励是否已领
+    bool  FirstShareDone                = 7;  // 首次分享是否已完成
+    int32 InviterRoleId                 = 8;  // 自己绑定的邀请者 playerId（0=未绑定）
+    int64 BindTime                      = 9;  // 自己绑定的时刻
+    bool  BindRewardSent                = 10; // 自己的绑定奖励邮件是否已发
+    repeated int64 InviteTaskUUIDList   = 11; // V2 新增：PlayerTask 系统返回的邀请任务 UUID（与 Global.InviteTaskIdList 同序）
+    repeated int64 RechargeTierUUIDList = 12; // V2 新增：充值档位任务 UUID（与 Global.RechargeTierIdList 同序）
+}
+
 //////////////////////////////////////////////////////////////////////////排行榜//////////////////////////////////////////////////////////////////////////////////
 // 排行榜模板
 message RankTemplate {

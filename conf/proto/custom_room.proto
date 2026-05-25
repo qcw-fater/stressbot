@@ -5,6 +5,7 @@ package Game;
 import "player.proto";
 import "enum.proto";
 import "enum_battle.proto";
+import "custom_sdc.proto";
 
 // 匹配服到战斗服的消息
 message MatchMsgToBattle
@@ -42,6 +43,7 @@ message RoomMsgToBattle
     int64                    roomUUID            = 18;   // 房间的uuid
     LadderDraftType          draftType           = 19;   // 排位赛征召类型
     repeated int32           affix               = 20;   // 词缀
+    SDCDropData              sdcDropData          = 21;   // SDC战场掉落数据（仅GM_HAZARD_OPS模式）
 }
 
 // 房间服到组队服消息

@@ -212,3 +212,78 @@ message OperateUpdateConfigS2C
 {
     OperateActivity config = 1; // 活动配置信息
 }
+// 好友邀请-获取自己的邀请码（含申请绑定页主面板）
+message OperateInviteGetCodeC2S
+{
+    int64 activityId = 1; // 活动Id
+}
+// 好友邀请-获取自己的邀请码 应答；详细进度通过 OperateUpdateS2C 推送
+message OperateInviteGetCodeS2C
+{
+    int64 activityId = 1; // 活动Id
+    string inviteCode = 2; // 自己的邀请码（10位 Crockford Base32）
+}
+
+// 好友邀请-提交邀请码绑定
+message OperateInviteBindCodeC2S
+{
+    int64 activityId = 1; // 活动Id
+    string inviteCode = 2; // 输入的 10 位邀请码
+}
+// 好友邀请-提交邀请码绑定 应答
+message OperateInviteBindCodeS2C
+{
+    int64 activityId = 1; // 活动Id
+}
+
+// 好友邀请-领取邀请任务奖励 [V2 已废弃] 改用通用 TaskGetRewardC2S
+message OperateInviteClaimTaskC2S
+{
+    option deprecated = true;
+    int64 activityId = 1; // 活动Id
+    int32 taskId     = 2; // 任务Id（对应 InviteActivityTask.csv 行Id）
+}
+// 好友邀请-领取邀请任务奖励 应答 [V2 已废弃]
+message OperateInviteClaimTaskS2C
+{
+    option deprecated = true;
+    int64 activityId = 1; // 活动Id
+    int32 taskId     = 2; // 任务Id
+}
+
+// 好友邀请-领取充值档位奖励 [V2 已废弃] 改用通用 TaskGetRewardC2S
+message OperateInviteClaimRechargeC2S
+{
+    option deprecated = true;
+    int64 activityId = 1; // 活动Id
+    int32 tierId     = 2; // 充值档位Id（对应 InviteActivityRechargeTask.csv 行Id）
+}
+// 好友邀请-领取充值档位奖励 应答 [V2 已废弃]
+message OperateInviteClaimRechargeS2C
+{
+    option deprecated = true;
+    int64 activityId = 1; // 活动Id
+    int32 tierId     = 2; // 充值档位Id
+}
+
+// 好友邀请-领取终极奖励
+message OperateInviteClaimFinalC2S
+{
+    int64 activityId = 1; // 活动Id
+}
+// 好友邀请-领取终极奖励 应答
+message OperateInviteClaimFinalS2C
+{
+    int64 activityId = 1; // 活动Id
+}
+
+// 好友邀请-上报首次分享
+message OperateInviteFirstShareC2S
+{
+    int64 activityId = 1; // 活动Id
+}
+// 好友邀请-上报首次分享 应答
+message OperateInviteFirstShareS2C
+{
+    int64 activityId = 1; // 活动Id
+}

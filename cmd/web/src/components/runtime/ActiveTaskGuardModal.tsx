@@ -56,7 +56,7 @@ export function ActiveTaskGuardModal({ open, task, onClose, onAttached }: Active
               <Tag color={STATE_COLOR[task.state]}>{task.state}</Tag>
             </Descriptions.Item>
             <Descriptions.Item label="机器人数">
-              {task.totalBots} 个，分布在 {task.agentCount} 个节点
+              {task.totalBots} 个，分布在 {task.activeAgentCount}/{task.agentCount} 个节点
             </Descriptions.Item>
             <Descriptions.Item label="启动时间">
               {task.startedAt ? new Date(task.startedAt).toLocaleString() : '—'}

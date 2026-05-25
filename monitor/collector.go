@@ -79,12 +79,22 @@ type actionMetrics struct {
 	timeoutTotalMs  atomic.Int64      // 超时样本累计延迟（毫秒），用于计算平均超时延迟
 	canceledCount   atomic.Int64      // 取消次数（ctx 取消）
 	executing       atomic.Int64      // 当前正在执行中的并发数
-	latency         *LatencyHistogram // 延迟直方图（仅成功样本）
+	latency         *LatencyHistogram // 延迟直方图：纯网络往返（仅成功且 netSamples > 0）
 	sendBytes       atomic.Int64      // 发送字节数（per-action，用于 ↑avg 列）
 	recvBytes       atomic.Int64      // 接收字节数（per-action，用于 ↓avg 列）
 	apdexSatisfied  atomic.Int64      // Apdex 满意样本：响应时间 < T
 	apdexTolerating atomic.Int64      // Apdex 容忍样本：响应时间 >= T 且 < 4T
 	errors          sync.Map          // errKey → *errorBucket，按 (Kind, Code) 聚合的错误分布
+
+	// 客户端开销与网络样本计数（latency 拆分模型新增字段）：
+	//   - clientCostSum/Count：累计客户端构建/解析开销（纳秒），用于 ClientAvgMs
+	//   - netActionCount：有网络调用的成功 action 计数（每次 +1），与 latency 直方图 entry 数一致。
+	//     注意：Lua 脚本可能单次 action 内多次 request（netSamples > 1），但 netLatency 已合并为一次记录，
+	//     因此 netActionCount 计数的是"action 粒度的有效直方图条目"而非"底层网络调用次数"。
+	// 客户端开销在所有结果分支（含失败/超时）都累加；netActionCount 仅成功且有网络调用时累加。
+	clientCostSum   atomic.Int64
+	clientCostCount atomic.Int64
+	netActionCount  atomic.Int64
 }
 
 func newActionMetrics() *actionMetrics {
@@ -202,7 +212,26 @@ func (c *MetricsCollector) AddBandwidth(send, recv int64) {
 }
 
 // RecordAction 记录一次动作执行结果（热路径，纯原子操作）。
-func (c *MetricsCollector) RecordAction(name string, result ActionResult, duration time.Duration, sendBytes, recvBytes int, err error) {
+//
+// 参数语义：
+//   - netLatency：纯网络往返时间（不含客户端构建/解析开销）。
+//     由 robotActionHandler 从 engine.ActionTiming 拿到，详见 engine.ActionTiming 注释。
+//   - clientCost：客户端构建/序列化/解析开销 = wallClock - netLatency。
+//     用于 ClientAvgMs 列，所有结果分支都累计（包括失败/超时/取消）。
+//   - netSamples：本次贡献的网络调用次数。
+//     声明式 request/listen 命中恒为 1；声明式 send-only/state/listen 超时恒为 0；
+//     lua 可能 ≥1（脚本里多次 request 累加）。仅 netSamples > 0 才进 latency 直方图与 Apdex。
+//
+// 设计要点（参见 plans/latency-net-only-redesign.md §3.4）：
+//   - 纯客户端动作（setState / connect / register_heartbeat 等 lua）netSamples=0，
+//     不进直方图避免污染 P95，但 successCount 仍 +1 保持可见性。
+//   - 失败 / 超时不进 latency 直方图（保持原有语义）。
+//   - timeout 仍记 netLatency 到 timeoutTotalMs，反映服务端 SLA 边界值。
+func (c *MetricsCollector) RecordAction(
+	name string, result ActionResult,
+	netLatency, clientCost time.Duration, netSamples int,
+	sendBytes, recvBytes int, err error,
+) {
 	if !c.enabled {
 		return
 	}
@@ -210,10 +239,30 @@ func (c *MetricsCollector) RecordAction(name string, result ActionResult, durati
 	am := c.getOrCreateAction(name)
 	am.executing.Add(-1)
 
+	// 客户端开销在所有结果分支累计，便于诊断"高延迟是客户端 CPU 还是服务端慢"
+	if clientCost > 0 {
+		am.clientCostSum.Add(clientCost.Nanoseconds())
+		am.clientCostCount.Add(1)
+	}
+
 	switch result {
 	case ResultSuccess:
 		am.successCount.Add(1)
-		am.latency.Record(duration)
+		// 仅当本次确实有网络调用窗口时才进直方图与 Apdex
+		if netSamples > 0 {
+			am.latency.Record(netLatency)
+			am.netActionCount.Add(1)
+			c.cfgMu.RLock()
+			T := int64(c.cfg.ApdexT)
+			c.cfgMu.RUnlock()
+			ms := netLatency.Milliseconds()
+			switch {
+			case ms < T:
+				am.apdexSatisfied.Add(1)
+			case ms < 4*T:
+				am.apdexTolerating.Add(1)
+			}
+		}
 		// per-action 字节统计仍保留（用于 ActionsTab 的 ↑avg / ↓avg 列）；
 		// 全局带宽（totalSendBytes / totalRecvBytes）由 network 层的 AddBandwidth 统一统计，
 		// 这里**不再累加**，避免与 network 层的统计双计。
@@ -223,17 +272,6 @@ func (c *MetricsCollector) RecordAction(name string, result ActionResult, durati
 		if recvBytes > 0 {
 			am.recvBytes.Add(int64(recvBytes))
 		}
-		// Apdex 分类
-		c.cfgMu.RLock()
-		T := int64(c.cfg.ApdexT)
-		c.cfgMu.RUnlock()
-		ms := duration.Milliseconds()
-		switch {
-		case ms < T:
-			am.apdexSatisfied.Add(1)
-		case ms < 4*T:
-			am.apdexTolerating.Add(1)
-		}
 	case ResultFailure:
 		am.failureCount.Add(1)
 		if err != nil {
@@ -241,7 +279,7 @@ func (c *MetricsCollector) RecordAction(name string, result ActionResult, durati
 		}
 	case ResultTimeout:
 		am.timeoutCount.Add(1)
-		am.timeoutTotalMs.Add(duration.Milliseconds())
+		am.timeoutTotalMs.Add(netLatency.Milliseconds())
 	case ResultCanceled:
 		am.canceledCount.Add(1)
 	}

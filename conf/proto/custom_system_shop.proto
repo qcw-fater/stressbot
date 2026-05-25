@@ -36,7 +36,7 @@ message GoodsInfo {
   int32           LabelID             = 28; // 特殊标签多语言ID
   RewardConfig    AdditionalCost      = 29; // 新增消耗道具
   int32           GoodsGroupId        = 30; // 线性推送组id
-  int32           CashGoodsID         = 31; // 直购ID
+  repeated int32           CashGoodsID         = 31; // 直购ID
 }
 
 // 商品组数据

@@ -141,9 +141,14 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 		durationSec = int(task.StoppedAt.Sub(*task.StartedAt).Seconds())
 	}
 	agentCount := len(task.Assignments)
+	activeAgentCount := len(task.SucceededAgents)
 	var tags []string
 	if task.Config.RobotConfig.DebugMode {
 		tags = append(tags, "debug")
+	}
+	stageCount := 0
+	if task.Config.RobotConfig.RampUp != nil {
+		stageCount = len(task.Config.RobotConfig.RampUp.Stages)
 	}
 	tagsJSON, _ := json.Marshal(tags) // []string 序列化不会失败
 	if tagsJSON == nil {
@@ -152,17 +157,19 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 	summaryJSON, _ := json.Marshal(buildConfigSummary(task)) // 同上
 
 	_, err = tx.Exec(`
-		INSERT INTO task_history (id, name, state, total_bots, agent_count,
+		INSERT INTO task_history (id, name, state, total_bots, agent_count, active_agent_count,
 			created_at, started_at, stopped_at, duration_sec, error_msg,
-			starred, tags, note, config_summary)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, '', ?)
+			starred, tags, note, config_summary, stage_count)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, '', ?, ?)
 		ON DUPLICATE KEY UPDATE
 			state=VALUES(state), stopped_at=VALUES(stopped_at),
-			duration_sec=VALUES(duration_sec), error_msg=VALUES(error_msg)
+			duration_sec=VALUES(duration_sec), error_msg=VALUES(error_msg),
+			stage_count=VALUES(stage_count),
+			active_agent_count=VALUES(active_agent_count)
 	`,
-		task.ID, task.Name, string(task.State), task.TotalBots, agentCount,
+		task.ID, task.Name, string(task.State), task.TotalBots, agentCount, activeAgentCount,
 		task.CreatedAt, task.StartedAt, task.StoppedAt, durationSec, task.ErrorMsg,
-		tagsJSON, summaryJSON,
+		tagsJSON, summaryJSON, stageCount,
 	)
 	if err != nil {
 		return fmt.Errorf("insert task_history: %w", err)
@@ -180,14 +187,30 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 	}
 
 	// 3. task_report
+	// 构建节点名称映射，用于填充 task_report 和 task_agent_events 的 agent_name
+	agentNames := make(map[string]string, len(task.Assignments))
+	for _, a := range task.Assignments {
+		agentNames[a.AgentID] = a.AgentName
+	}
 	for agentID, report := range task.Reports {
 		snapJSON, _ := json.Marshal(report.FinalSnapshot) // 同上
 		_, err = tx.Exec(`
-			INSERT INTO task_report (task_id, agent_id, agent_name, result, error_msg, finished_at, final_snapshot)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-		`, task.ID, agentID, "", string(report.Result), report.ErrorMsg, report.FinishedAt, snapJSON)
+			INSERT INTO task_report (task_id, agent_id, agent_name, result, error_msg, finished_at, final_snapshot, stage_index)
+			VALUES (?, ?, ?, ?, ?, ?, ?, -1)
+		`, task.ID, agentID, agentNames[agentID], string(report.Result), report.ErrorMsg, report.FinishedAt, snapJSON)
 		if err != nil {
 			return fmt.Errorf("insert task_report: %w", err)
+		}
+	}
+	// 3b. task_report (阶段完成报告)
+	for _, report := range task.StageReports {
+		snapJSON, _ := json.Marshal(report.FinalSnapshot)
+		_, err = tx.Exec(`
+			INSERT INTO task_report (task_id, agent_id, agent_name, result, error_msg, finished_at, final_snapshot, stage_index)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`, task.ID, report.AgentID, agentNames[report.AgentID], string(report.Result), report.ErrorMsg, report.FinishedAt, snapJSON, report.StageIndex)
+		if err != nil {
+			return fmt.Errorf("insert task_report (stage): %w", err)
 		}
 	}
 
@@ -195,8 +218,8 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 	stressJSON, _ := json.Marshal(finalStress) // 同上
 	sysJSON, _ := json.Marshal(finalSys) // 同上
 	_, err = tx.Exec(`
-		INSERT INTO task_aggregated (task_id, final_stress, final_system)
-		VALUES (?, ?, ?)
+		INSERT INTO task_aggregated (task_id, stage_index, final_stress, final_system)
+		VALUES (?, -1, ?, ?)
 		ON DUPLICATE KEY UPDATE final_stress=VALUES(final_stress), final_system=VALUES(final_system)
 	`, task.ID, stressJSON, sysJSON)
 	if err != nil {
@@ -258,7 +281,7 @@ func (h *HistoryStore) List(ctx context.Context, filter HistoryFilter) (*History
 	}
 
 	querySQL := fmt.Sprintf(
-		"SELECT id, name, state, total_bots, agent_count, created_at, started_at, stopped_at, duration_sec, error_msg, starred, tags, note, config_summary FROM task_history%s ORDER BY %s LIMIT ? OFFSET ?",
+		"SELECT id, name, state, total_bots, agent_count, active_agent_count, created_at, started_at, stopped_at, duration_sec, error_msg, starred, tags, note, config_summary, stage_count FROM task_history%s ORDER BY %s LIMIT ? OFFSET ?",
 		where, orderBy,
 	)
 	rows, err := h.db.QueryContext(ctx, querySQL, append(args, limit, offset)...)
@@ -274,9 +297,9 @@ func (h *HistoryStore) List(ctx context.Context, filter HistoryFilter) (*History
 		var startedAt, stoppedAt sql.NullTime
 
 		if err := rows.Scan(
-			&r.ID, &r.Name, &r.State, &r.TotalBots, &r.AgentCount,
+			&r.ID, &r.Name, &r.State, &r.TotalBots, &r.AgentCount, &r.ActiveAgentCount,
 			&r.CreatedAt, &startedAt, &stoppedAt, &r.DurationSec, &r.ErrorMsg,
-			&r.Starred, &tagsBytes, &r.Note, &summaryBytes,
+			&r.Starred, &tagsBytes, &r.Note, &summaryBytes, &r.StageCount,
 		); err != nil {
 			return nil, fmt.Errorf("scan history: %w", err)
 		}
@@ -312,13 +335,13 @@ func (h *HistoryStore) Get(ctx context.Context, id string) (*HistoryDetail, erro
 	var startedAt, stoppedAt sql.NullTime
 
 	err := h.db.QueryRowContext(ctx, `
-		SELECT id, name, state, total_bots, agent_count, created_at, started_at, stopped_at,
-			duration_sec, error_msg, starred, tags, note, config_summary
+		SELECT id, name, state, total_bots, agent_count, active_agent_count, created_at, started_at, stopped_at,
+			duration_sec, error_msg, starred, tags, note, config_summary, stage_count
 		FROM task_history WHERE id = ?
 	`, id).Scan(
-		&r.ID, &r.Name, &r.State, &r.TotalBots, &r.AgentCount,
+		&r.ID, &r.Name, &r.State, &r.TotalBots, &r.AgentCount, &r.ActiveAgentCount,
 		&r.CreatedAt, &startedAt, &stoppedAt,
-		&r.DurationSec, &r.ErrorMsg, &r.Starred, &tagsBytes, &r.Note, &summaryBytes,
+		&r.DurationSec, &r.ErrorMsg, &r.Starred, &tagsBytes, &r.Note, &summaryBytes, &r.StageCount,
 	)
 	if err == sql.ErrNoRows {
 		return nil, ErrHistoryNotFound

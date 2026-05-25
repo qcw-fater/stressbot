@@ -79,6 +79,7 @@ type TaskCompletionReport struct {
 	ErrorMsg      string                     `json:"errorMsg,omitempty"`
 	FinishedAt    time.Time                  `json:"finishedAt"`
 	FinalSnapshot *monitor.CollectorSnapshot `json:"finalSnapshot"`
+	StageIndex    int                        `json:"stageIndex,omitempty"`
 }
 
 // DeregisterRequest 注销请求（best-effort）。
@@ -118,9 +119,10 @@ type RampUpConfig struct {
 
 // RampUpStage 单个加压阶段。
 type RampUpStage struct {
-	Count       int `json:"count"`
-	Concurrency int `json:"concurrency,omitempty"`
-	HoldSec     int `json:"holdSec,omitempty"`
+	Count       int  `json:"count"`
+	Concurrency int  `json:"concurrency,omitempty"`
+	HoldSec     int  `json:"holdSec,omitempty"`
+	Reset       bool `json:"reset,omitempty"`
 }
 
 // AgentStatusResponse Agent 状态查询响应。

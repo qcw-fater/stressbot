@@ -6,12 +6,14 @@
  */
 
 import { FileTextOutlined } from '@ant-design/icons';
+import { App as AntApp } from 'antd';
 import Editor from '@monaco-editor/react';
 import { useCallback } from 'react';
 import { useNotepadStore } from './notepadStore';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 
 export function FileEditor() {
+  const { message } = AntApp.useApp();
   const theme = useEditorStore((s) => s.theme);
   const monacoTheme = theme === 'dark' ? 'vs-dark' : 'light';
 
@@ -46,21 +48,51 @@ export function FileEditor() {
     async (e: React.DragEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      const droppedFiles = e.dataTransfer.files;
+      const droppedFiles = Array.from(e.dataTransfer.files);
       if (!droppedFiles.length) return;
       const importFiles = useNotepadStore.getState().importFiles;
+
       const items: { name: string; content: string }[] = [];
-      for (let i = 0; i < droppedFiles.length; i++) {
-        const f = droppedFiles[i];
-        if (f.size > 5 * 1024 * 1024) continue; // skip >5MB
-        const text = await f.text();
-        items.push({ name: f.name, content: text });
+      let skipped = 0;
+      let failCount = 0;
+      for (const f of droppedFiles) {
+        if (f.size > 5 * 1024 * 1024) { // 超过 5 MB 跳过，避免拖入大文件卡顿
+          skipped++;
+          continue;
+        }
+        try {
+          const text = await f.text();
+          items.push({ name: f.name, content: text });
+        } catch {
+          failCount++;
+        }
       }
-      if (items.length) {
+
+      if (items.length > 0) {
         await importFiles(items);
       }
+
+      if (droppedFiles.length === 1) {
+        if (items.length === 1) message.success(`${items[0].name} 已导入`);
+        else if (skipped > 0) message.info(`${droppedFiles[0].name} 超过 5 MB，已跳过`);
+        else message.error(`${droppedFiles[0].name} 导入失败`);
+        return;
+      }
+
+      const parts: string[] = [];
+      if (items.length > 0) parts.push(`${items.length} 个已导入`);
+      if (skipped > 0) parts.push(`${skipped} 个超过 5 MB 跳过`);
+      if (failCount > 0) parts.push(`${failCount} 个读取失败`);
+
+      if (failCount === 0 && skipped === 0) {
+        message.success(parts[0]);
+      } else if (items.length > 0) {
+        message.warning(parts.join('，'));
+      } else {
+        message.error(parts.join('，'));
+      }
     },
-    [],
+    [message],
   );
 
   if (!activeFileId || !activeFile) {

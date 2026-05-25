@@ -197,10 +197,12 @@ func (ts *TaskStore) Transition(id string, from, to TaskState) (*Task, error) {
 			ts.activeID = ""
 		}
 		if ts.onTerminal != nil {
-			// 深拷贝避免异步归档的 data race
+		// 深拷贝避免异步归档的 data race
 			var taskCopy Task
 			if data, err := json.Marshal(t); err == nil {
 				json.Unmarshal(data, &taskCopy)
+			} else {
+				stresslog.Warn("[TASK] 深拷贝序列化失败", zap.String("taskID", id), zap.Error(err))
 			}
 			taskRef := &taskCopy
 			utils.GetWorkPool().Go(func() { ts.onTerminal(taskRef) })

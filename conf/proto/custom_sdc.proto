@@ -3,105 +3,10 @@ syntax = "proto3";  //[proto2|proto3]
 option go_package = ".;pb";
 package Game;
 
-// ==================== 枚举定义 ====================
-
-// 收益评级
-enum SDCRating {
-    SDC_RATING_INVALID = 0; // 无效
-    SDC_RATING_D       = 1; // D级
-    SDC_RATING_C       = 2; // C级
-    SDC_RATING_B       = 3; // B级
-    SDC_RATING_A       = 4; // A级
-    SDC_RATING_S       = 5; // S级
-}
-
-// 装配槽位类型
-enum SDCSlotType {
-    SDC_SLOT_TYPE_UNKNOWN            = 0; // 未知
-    SDC_SLOT_TYPE_ARMOR              = 1; // 护甲槽
-    SDC_SLOT_TYPE_SKILL              = 2; // 技能槽
-    SDC_SLOT_TYPE_BACKPACK           = 3; // 背包槽
-    SDC_SLOT_TYPE_NORMAL_AMPLIFIER   = 4; // 普攻增幅器槽
-    SDC_SLOT_TYPE_SKILL_AMPLIFIER    = 5; // 技能增幅器槽
-    SDC_SLOT_TYPE_ULTIMATE_AMPLIFIER = 6; // 大招增幅器槽
-    SDC_SLOT_TYPE_CHIP1              = 7; // 芯片槽1
-    SDC_SLOT_TYPE_CHIP2              = 8; // 芯片槽2
-    SDC_SLOT_TYPE_CHIP3              = 9; // 芯片槽3
-}
-
-// 背包类型
-enum SDCPackType {
-    SDC_PACK_TYPE_UNKNOWN    = 0; // 未知
-    SDC_PACK_TYPE_AMPLIFIER  = 1; // 增幅器背包
-    SDC_PACK_TYPE_MEDICINE   = 2; // 药品背包
-    SDC_PACK_TYPE_SAFE_BOX   = 3; // 安全箱
-    SDC_PACK_TYPE_KEY_CHAIN  = 4; // 钥匙链
-    SDC_PACK_TYPE_COLLECTION = 5; // 藏品背包
-}
-
-// 道具子类型
-enum SDCItemType {
-    SDC_ITEM_TYPE_UNKNOWN    = 0; // 未知
-    SDC_ITEM_TYPE_WEAPON     = 1; // 武器
-    SDC_ITEM_TYPE_ARMOR      = 2; // 护甲
-    SDC_ITEM_TYPE_CHIP       = 3; // 芯片
-    SDC_ITEM_TYPE_AMPLIFIER  = 4; // 增幅器
-    SDC_ITEM_TYPE_COLLECTION = 5; // 藏品
-    SDC_ITEM_TYPE_MEDICINE   = 6; // 药品
-    SDC_ITEM_TYPE_MATERIAL   = 7; // 材料
-    SDC_ITEM_TYPE_KEY        = 8; // 钥匙
-}
-
+import "nohot_custom_battle.proto";
 
 // ==================== 基础数据结构 ====================
 
-// 搜打撤道具扩展信息（附加在ItemInfo上使用）
-// 护甲说明：护甲耐久度只能通过使用护甲药（sdcType=6, sdcSubType=2的药品）进行修复，自然不回复
-message SDCItemExtInfo {
-    SDCItemType sdcType  = 1; // 搜打撤道具分类（对应SDCItemType枚举）
-    int32 sdcSubType     = 2; // 搜打撤子类型
-    int32 durability     = 3; // 耐久度/使用次数（初始值来自SDC_Item配置，局内消耗后减少；归零则道具消失）
-    int32 maxDurability  = 4; // 最大耐久度/使用次数上限
-    int32 capacity       = 5; // 背包容量(仅背包类型)
-    int32 value          = 6; // 价值
-}
-
-// 装配槽位信息
-message SDCEquipSlot {
-    SDCSlotType slotType = 1; // 槽位类型
-    int64 itemGuid       = 2; // 装配的道具GUID
-    int32 itemId         = 3; // 装配的道具配置ID
-    SDCItemExtInfo ext   = 4; // 道具扩展信息
-}
-
-// 仓库道具信息
-message SDCWarehouseItem {
-    int64 guid          = 1; // 道具GUID
-    int32 itemId        = 2; // 道具配置ID
-    int32 number        = 3; // 数量
-    SDCItemExtInfo ext  = 4; // 搜打撤扩展信息
-}
-
-// 背包格子信息
-message SDCPackSlot {
-    SDCPackType packType          = 1; // 背包类型
-    int32 maxSlots              = 2; // 最大格子数
-    repeated SDCWarehouseItem items = 3; // 背包内道具列表（含完整道具信息）
-    int32 totalValue            = 4; // 背包内道具总价值
-}
-
-// SDC道具对英雄天赋/觉醒的加成数据（仅记录SDC道具带来的增量，不含英雄基础值）
-// 仅对当前英雄未激活的槽位/节点生效，服务端在装配/卸下/切换英雄时重新计算
-// 天赋限制：SDC道具只激活大天赋（TalentType=2，EquipTalent索引1/3/5），不激活小天赋
-// 客户端展示：EquipTalent[i]!=0则正常展示（玩家自身）；为0但extraEquipTalents[i]!=0则高亮展示SDC加成
-message SDCHeroTalentAwakeInfo {
-    int32 heroId                     = 1; // 英雄ID（切换英雄时需重新计算）
-    repeated int32 extraAwakeIds     = 2; // SDC额外激活的觉醒节点configId列表
-                                           // 服务端从ActivateAwakeId沿NextId链推算N步（N=所有装配道具觉醒加成之和）
-    repeated int32 extraEquipTalents = 3; // SDC额外激活的大天赋状态（长度固定=6，与EquipTalent同格式）
-                                           // 仅索引1/3/5可非零，值=talentConf[i].TalentEffectList[0]
-                                           // 0=该槽无SDC加成（玩家已自行激活 或 SDC道具未覆盖该槽）
-}
 
 // ==================== Redis存储用结构 ====================
 
@@ -203,6 +108,21 @@ message SDCGrowthData {
     int32 medicinePackLevel   = 5; // 药品背包等级
     int32 medicinePackSlots   = 6; // 药品背包格子数
     int32 safeBoxSlots        = 7; // 安全箱格子数
+    int32 sdcLevel            = 8; // SDC等级
+    int32 sdcExp              = 9; // SDC当前经验
+    // --- 新增字段 ---
+    int32 battlePackLevel     = 10; // 战斗背包等级（统一管理增幅器+药品背包）
+    int32 shopLevel           = 11; // 商店等级
+    // 4个制作台等级
+    int32 craftArmorLevel     = 12; // 护甲制作台等级
+    int32 craftAmplifierLevel = 13; // 增幅器制作台等级
+    int32 craftChipLevel      = 14; // 芯片制作台等级
+    int32 consumableLevel     = 15; // 消耗品制作台等级
+    // 4个制作台当前制作状态
+    SDCCraftSlot craftArmorSlot       = 16; // 护甲制作台当前制作状态
+    SDCCraftSlot craftAmplifierSlot   = 17; // 增幅器制作台当前制作状态
+    SDCCraftSlot craftChipSlot        = 18; // 芯片制作台当前制作状态
+    SDCCraftSlot craftConsumableSlot  = 19; // 消耗品制作台当前制作状态
 }
 
 // ==================== 藏品数据 ====================
@@ -223,23 +143,6 @@ message SDCCollectionData {
 }
 
 // ==================== 战斗结算数据 ====================
-
-// 战斗结算数据（用于扩展PlayerBattleEnd）
-message SDCBattleSettleData {
-    int32 result                    = 1;  // 结果 (1-胜利 2-失败 3-正常撤离 4-中途退出)
-    int32 killCount                 = 2;  // 击杀玩家数（含人机玩家）
-    int32 totalValue                = 3;  // 装配总价值（局外带入）
-    int32 lootValue                 = 4;  // 本局带出道具总价值（含安全箱保留的藏品，用于收益评级计算，持久化至赛季数据）
-    repeated int64 lostItemGuids    = 5;  // 丢失的道具GUID列表
-    repeated int64 keptItemGuids    = 6;  // 保留的道具GUID列表
-    repeated SDCPackSlot finalPackSlots = 7;  // 战斗结束时各背包最终状态
-    int32 seasonCoin                = 8;  // 获得赛季币
-    int32 exp                       = 9;  // 获得经验
-    int32 monsterKillCount          = 10; // 击杀怪物数
-    int32 surviveTime               = 11; // 存活时长/撤离用时(秒)
-    int32 rating                    = 12; // 收益评级
-    string ratingText               = 13; // 评价文本
-}
 
 // 战斗结算结果（返回给客户端）
 message SDCBattleResult {
@@ -268,5 +171,88 @@ message SDCPrepareSnapshot {
     bool fillTeammate                    = 6; // 是否开启补齐队友匹配
     int32 skinId                         = 7; // 皮肤ID
     int32 modeId                         = 8; // 默认地图ID（来自SDCParameter ID=13）
+}
+
+// SDC战场掉落宝箱（含道具实例）
+message SDCDropChest {
+    int32 chestId = 1;                    // 宝箱配置ID（关联SDCChest表）
+    int32 chestType = 2;                  // 宝箱类型（0=默认 1=钥匙 2=QTE 3=任务）
+    repeated SDCWarehouseItem items = 3;  // 宝箱内的道具实例列表（含GUID、ItemId、Ext等）
+}
+
+// SDC区域掉落组
+message SDCDropAreaGroup {
+    int32 areaIndex = 1;                  // 场景区域索引
+    repeated SDCDropChest chests = 2;     // 该区域的宝箱列表
+}
+
+// SDC任务奖励组（第二期实现，第一期返回空列表）
+message SDCDropTaskGroup {
+    string taskGuid = 1;                  // 任务GUID
+    repeated SDCDropChest chests = 2;     // 该任务的奖励宝箱列表
+}
+
+// SDC战场掉落数据（完整）
+message SDCDropData {
+    int32 totalBudget = 1;                // 本局总价值预算
+    repeated SDCDropAreaGroup areaGroups = 2;  // 区域掉落组列表
+    repeated SDCDropTaskGroup taskGroups = 3;  // 任务奖励组列表（第一期为空）
+}
+
+// ====== 成长系统扩展 ======
+
+// 单个制作台的制作状态
+message SDCCraftSlot {
+    int32 craftingItemId   = 1; // 正在制作的道具ID（0=空闲）
+    int64 craftStartTime   = 2; // 制作开始时间戳（秒）
+    int32 craftDuration    = 3; // 制作总耗时（分钟）
+    bool  readyToClaim     = 4; // 是否已可领取
+    repeated int32 randomAffixIds = 5; // 随机词条ID列表（当前版本仅取1个，预留多词条扩展）
+    int64 craftedItemGuid  = 6; // 产出道具GUID（领取时生成）
+}
+
+// 成长升级类型枚举
+enum SDCGrowthUpgradeType {
+    SDC_GROWTH_UPGRADE_TYPE_UNKNOWN     = 0; // 未知
+    SDC_GROWTH_UPGRADE_TYPE_WAREHOUSE   = 1; // 仓库
+    SDC_GROWTH_UPGRADE_TYPE_BATTLE_PACK = 2; // 战斗背包
+    SDC_GROWTH_UPGRADE_TYPE_SHOP        = 3; // 商店
+    SDC_GROWTH_UPGRADE_TYPE_CRAFT_ARMOR = 4; // 护甲制作台
+    SDC_GROWTH_UPGRADE_TYPE_CRAFT_AMP   = 5; // 增幅器制作台
+    SDC_GROWTH_UPGRADE_TYPE_CRAFT_CHIP  = 6; // 芯片制作台
+    SDC_GROWTH_UPGRADE_TYPE_CRAFT_CONS  = 7; // 消耗品制作台
+}
+
+// 升级预览单项
+message SDCUpgradePreviewItem {
+    int32 level          = 1; // 等级
+    repeated string texts = 2; // 该等级的展示文案数组
+}
+
+// 可制作道具信息
+message SDCCraftableItem {
+    int32 itemId                    = 1; // 道具ID
+    bool  unlocked                  = 2; // 是否已解锁
+    string unlockTip                = 3; // 未解锁提示
+    repeated int32 costItemIds      = 4; // 消耗道具ID列表
+    repeated int32 costItemNums     = 5; // 消耗数量列表
+    int32 craftTime                 = 6; // 制作耗时（分钟）
+    repeated int32 randomAffixIds   = 7; // 随机词条ID列表
+}
+
+// ==================== 冻结快照 ====================
+
+// 冻结快照（Phase 2: 战斗态生命周期安全）
+message SDCFrozenSnapshot {
+    int32 playerId = 1;                   // 玩家ID
+    SDCWarehouseData warehouse = 2;       // 仓库完整数据
+    SDCPrepareData prepare = 3;           // 装配 + 背包完整数据
+    SDCCollectionData collection = 4;     // 藏品数据
+    SDCGrowthData growth = 5;             // 成长数据
+    SDCSeasonData season = 6;             // 赛季数据
+    int64 battleId = 7;                   // 关联战斗 ID
+    int64 frozenAt = 8;                   // 冻结时间戳
+    int32 battleEndResult = 9;            // BE_REASON，0=战斗未完成
+    int64 battleResultAt = 10;            // 战斗结果写入时间戳
 }
 

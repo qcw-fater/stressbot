@@ -2,6 +2,7 @@ syntax             = "proto3";
 option  go_package = ".;pb";
 package Game;
 import "custom_task.proto";
+import "custom_hero_limited_task.proto";
 
 // 任务更新消息
 message TaskUpdateS2C {
@@ -36,15 +37,27 @@ message TaskGetDailyRewardS2C {
 
 // 玩家领取成就任务奖励
 message TaskGetAchievementTaskRewardC2S {
-    repeated int32 achievementId = 1; // 成就id
+    repeated int32 achievementIds = 1; // 成就ID列表
 }
 
 // 玩家领取成就任务奖励
 message TaskGetAchievementTaskRewardS2C {
-    map<int32, int64> newAchievementTasks = 1; // 新成就任务列表 key:achievementId value:finishTime
+    int32              errorCode           = 1; // 错误码
+    map<int32, int64>  claimedAchievements = 2; // 成功领取的成就ID→领奖时间
 }
 //推送成就数据
 message TaskGetAchievementS2C
 {
-    PlayerAchievementModel achievementInfo = 1; // 成就数据
+    PlayerAchievementModel  achievementInfo      = 1; // 成就数据（finishId + ipBox）
+    AchievementProgressData achievementProgress  = 2; // 成就任务进度数据
+}
+//英雄限时任务更新推送
+message TaskHeroLimitedTaskUpdateS2C
+{
+    repeated HeroLimitedTaskInfo taskList = 1; // 新增的英雄限时任务列表
+}
+//英雄限时任务删除推送（过期删除+领奖删除复用同一ACT）
+message TaskHeroLimitedTaskExpireS2C
+{
+    repeated int64 removedTaskUUID = 1; // 被删除的任务UUID列表（含过期删除与领奖删除）
 }

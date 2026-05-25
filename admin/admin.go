@@ -334,35 +334,57 @@ func (s *AdminServer) synthesizeOfflineReports(taskID string) bool {
 		if t.Reports == nil {
 			t.Reports = make(map[string]TaskCompletionReport)
 		}
-		for _, a := range t.Assignments {
-			if _, exists := t.Reports[a.AgentID]; exists {
+		targets := t.SucceededAgents
+		if len(targets) == 0 {
+			targets = make([]string, 0, len(t.Assignments))
+			for _, a := range t.Assignments {
+				targets = append(targets, a.AgentID)
+			}
+		}
+		for _, agentID := range targets {
+			if _, exists := t.Reports[agentID]; exists {
 				continue
 			}
-			node, nodeOk := s.agents.Get(a.AgentID)
+			node, nodeOk := s.agents.Get(agentID)
 			if !nodeOk || node.Status == AgentOffline {
-				t.Reports[a.AgentID] = TaskCompletionReport{
-					AgentID:    a.AgentID,
+				t.Reports[agentID] = TaskCompletionReport{
+					AgentID:    agentID,
 					TaskID:     taskID,
 					Result:     ResultStopped,
 					ErrorMsg:   "节点离线，未上报",
 					FinishedAt: time.Now(),
 				}
+			stresslog.Info("[ADMIN] 合成离线节点报告",
+					zap.String("taskID", taskID), zap.String("agentID", agentID),
+					zap.String("reason", func() string {
+						if !nodeOk {
+							return "节点未找到"
+						}
+						return "节点离线"
+					}()))
 			} else {
 				allReported = false
 			}
 		}
-		if allReported && len(t.Reports) < len(t.Assignments) {
+		expected := len(targets)
+		if allReported && len(t.Reports) < expected {
 			allReported = false
 		}
 	})
 	return allReported
 }
 
+// stopWaitTimeout 停止超时安全网时长。
+// 必须 ≥ Agent 端 Manager.closeRobotsTimeout（15s）+ Robot.Close 兜底（10s）
+// + 网络上报延迟，否则 Agent 真实上报到达前 Admin 已合成 fake report 并归档，
+// 导致 Agent 实际指标快照被丢弃。当前设为 60s 提供充足缓冲。
+const stopWaitTimeout = 60 * time.Second
+
 // startStopTimeout 启动停止超时安全网。
-// 30s 后如果任务仍在 stopping，为剩余未上报节点合成 report 并转 stopped。
+// stopWaitTimeout 后如果任务仍在 stopping，为剩余未上报节点合成 report 并转 stopped。
 func (s *AdminServer) startStopTimeout(taskID string) {
 	utils.GetWorkPool().Go(func() {
-		time.Sleep(30 * time.Second)
+		time.Sleep(stopWaitTimeout)
 		task, ok := s.tasks.Get(taskID)
 		if !ok || task.State != TaskStopping {
 			return
@@ -370,15 +392,22 @@ func (s *AdminServer) startStopTimeout(taskID string) {
 		stresslog.Warn("[ADMIN] 停止超时，合成未上报节点的 report",
 			zap.String("taskId", taskID),
 			zap.Int("reported", len(task.Reports)),
-			zap.Int("total", len(task.Assignments)))
+			zap.Int("total", len(task.SucceededAgents)))
 		s.tasks.Update(taskID, func(t *Task) {
 			if t.Reports == nil {
 				t.Reports = make(map[string]TaskCompletionReport)
 			}
-			for _, a := range t.Assignments {
-				if _, exists := t.Reports[a.AgentID]; !exists {
-					t.Reports[a.AgentID] = TaskCompletionReport{
-						AgentID:    a.AgentID,
+			targets := t.SucceededAgents
+			if len(targets) == 0 {
+				targets = make([]string, 0, len(t.Assignments))
+				for _, a := range t.Assignments {
+					targets = append(targets, a.AgentID)
+				}
+			}
+			for _, agentID := range targets {
+				if _, exists := t.Reports[agentID]; !exists {
+					t.Reports[agentID] = TaskCompletionReport{
+						AgentID:    agentID,
 						TaskID:     taskID,
 						Result:     ResultStopped,
 						ErrorMsg:   "停止超时，节点未响应",
@@ -403,11 +432,18 @@ func (s *AdminServer) checkAndStopIfAllLost(taskID string) {
 		return
 	}
 	anyAlive := false
-	for _, a := range task.Assignments {
-		if _, hasReport := task.Reports[a.AgentID]; hasReport {
-			continue // 已合成 report 视为该槽位失效
+	targets := task.SucceededAgents
+	if len(targets) == 0 {
+		targets = make([]string, 0, len(task.Assignments))
+		for _, a := range task.Assignments {
+			targets = append(targets, a.AgentID)
 		}
-		node, nodeOk := s.agents.Get(a.AgentID)
+	}
+	for _, agentID := range targets {
+		if _, hasReport := task.Reports[agentID]; hasReport {
+			continue
+		}
+		node, nodeOk := s.agents.Get(agentID)
 		if nodeOk && node.Status != AgentOffline && node.CurrentTaskID == taskID {
 			anyAlive = true
 			break
@@ -443,12 +479,19 @@ func (s *AdminServer) autoStopTask(taskID string, reason string) {
 	}
 
 	task, _ = s.tasks.Get(taskID)
-	for _, a := range task.Assignments {
-		node, ok := s.agents.Get(a.AgentID)
+	targets := task.SucceededAgents
+	if len(targets) == 0 {
+		targets = make([]string, 0, len(task.Assignments))
+		for _, a := range task.Assignments {
+			targets = append(targets, a.AgentID)
+		}
+	}
+	for _, agentID := range targets {
+		node, ok := s.agents.Get(agentID)
 		if ok && node.Status != AgentOffline {
 			if err := s.dispatcher.Stop(node.Address, taskID); err != nil {
 				stresslog.Warn("[ADMIN] 停止节点任务失败",
-					zap.String("agentId", a.AgentID), zap.Error(err))
+					zap.String("agentId", agentID), zap.Error(err))
 			}
 		}
 	}
@@ -457,10 +500,17 @@ func (s *AdminServer) autoStopTask(taskID string, reason string) {
 		if t.Reports == nil {
 			t.Reports = make(map[string]TaskCompletionReport)
 		}
-		for _, a := range t.Assignments {
-			if _, ok := t.Reports[a.AgentID]; !ok {
-				t.Reports[a.AgentID] = TaskCompletionReport{
-					AgentID:    a.AgentID,
+		targets := t.SucceededAgents
+		if len(targets) == 0 {
+			targets = make([]string, 0, len(t.Assignments))
+			for _, a := range t.Assignments {
+				targets = append(targets, a.AgentID)
+			}
+		}
+		for _, agentID := range targets {
+			if _, ok := t.Reports[agentID]; !ok {
+				t.Reports[agentID] = TaskCompletionReport{
+					AgentID:    agentID,
 					TaskID:     taskID,
 					Result:     ResultFailed,
 					ErrorMsg:   reason,

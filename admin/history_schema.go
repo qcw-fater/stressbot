@@ -1,7 +1,8 @@
 package admin
 
-// MySQL DDL — 历史归档 5+1 张表。
-// Admin 启动时通过 HistoryStore.InitSchema() 自动执行（仅创建不存在的表）。
+// MySQL DDL — 历史归档 7 张表。
+// Admin 启动时通过 HistoryStore.initSchema() 自动执行（仅创建不存在的表）。
+// 已有数据库升级需手动 ALTER TABLE。
 
 const ddlTaskHistory = `
 CREATE TABLE IF NOT EXISTS task_history (
@@ -10,6 +11,7 @@ CREATE TABLE IF NOT EXISTS task_history (
     state           VARCHAR(32)  NOT NULL DEFAULT '',
     total_bots      INT          NOT NULL DEFAULT 0,
     agent_count     INT          NOT NULL DEFAULT 0,
+    active_agent_count INT       NOT NULL DEFAULT 0,
     created_at      DATETIME(3)  NOT NULL,
     started_at      DATETIME(3)  NULL,
     stopped_at      DATETIME(3)  NULL,
@@ -19,9 +21,12 @@ CREATE TABLE IF NOT EXISTS task_history (
     tags            JSON         NULL,
     note            TEXT,
     config_summary  JSON         NULL,
+    stage_count     INT          NOT NULL DEFAULT 0,
     INDEX idx_state (state),
     INDEX idx_created (created_at DESC),
-    INDEX idx_starred (starred)
+    INDEX idx_starred (starred),
+    INDEX idx_started (started_at),
+    INDEX idx_prune (starred, stopped_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `
 
@@ -46,15 +51,18 @@ CREATE TABLE IF NOT EXISTS task_report (
     error_msg       TEXT,
     finished_at     DATETIME(3)  NULL,
     final_snapshot  JSON         NULL,
+    stage_index     INT          NOT NULL DEFAULT -1,
     INDEX idx_task (task_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `
 
 const ddlTaskAggregated = `
 CREATE TABLE IF NOT EXISTS task_aggregated (
-    task_id         VARCHAR(32)  NOT NULL PRIMARY KEY,
+    task_id         VARCHAR(32)  NOT NULL,
+    stage_index     INT          NOT NULL DEFAULT -1,
     final_stress    JSON         NULL,
-    final_system    JSON         NULL
+    final_system    JSON         NULL,
+    PRIMARY KEY (task_id, stage_index)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `
 
@@ -66,6 +74,7 @@ CREATE TABLE IF NOT EXISTS task_timeseries (
     elapsed_sec     INT          NOT NULL DEFAULT 0,
     data_type       VARCHAR(32)  NOT NULL,
     snapshot        JSON         NOT NULL,
+    stage_index     INT          NOT NULL DEFAULT -1,
     INDEX idx_task_type (task_id, data_type, elapsed_sec)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `

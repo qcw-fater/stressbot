@@ -58,8 +58,12 @@ type Task struct {
 	Config TaskConfig `json:"config"`
 	// Assignments Agent 分配方案。
 	Assignments []Assignment `json:"assignments,omitempty"`
-	// Reports Agent 完成报告，key 为 agentID。
+	// SucceededAgents 实际成功接收任务的 Agent ID 列表（部分 Agent 可能推送失败）。
+	SucceededAgents []string `json:"succeededAgents,omitempty"`
+	// Reports Agent 最终完成报告，key 为 agentID。
 	Reports map[string]TaskCompletionReport `json:"reports,omitempty"`
+	// StageReports 渐进式加压阶段完成报告（reset 阶段中间报告）。
+	StageReports []TaskCompletionReport `json:"stageReports,omitempty"`
 	// AgentEvents 任务期间 Agent 状态变化事件。
 	AgentEvents []AgentEvent `json:"agentEvents,omitempty"`
 	// CreatedAt 创建时间。
@@ -136,6 +140,8 @@ type RampUpStage struct {
 	Concurrency int `json:"concurrency,omitempty"`
 	// HoldSec 阶段间等待秒数。
 	HoldSec int `json:"holdSec,omitempty"`
+	// Reset 开始本阶段前清空所有已有机器人。
+	Reset bool `json:"reset,omitempty"`
 }
 
 // ── Assignment ────────────────────────────────────────
@@ -316,6 +322,9 @@ type TaskCompletionReport struct {
 	FinishedAt time.Time `json:"finishedAt"`
 	// FinalSnapshot 最终压测指标快照。
 	FinalSnapshot *monitor.CollectorSnapshot `json:"finalSnapshot"`
+	// StageIndex 阶段索引（渐进式加压阶段重置时使用）。
+	// -1 或零值表示最终报告，>= 0 表示该阶段的完成报告。
+	StageIndex int `json:"stageIndex,omitempty"`
 }
 
 // ── 注册 / 心跳 ──────────────────────────────────────
@@ -492,6 +501,7 @@ type HistoryRecord struct {
 	TotalBots int `json:"totalBots"`
 	// AgentCount 参与 Agent 数。
 	AgentCount int `json:"agentCount"`
+	ActiveAgentCount int `json:"activeAgentCount"`
 	// CreatedAt 创建时间。
 	CreatedAt time.Time `json:"createdAt"`
 	// StartedAt 启动时间。
@@ -512,6 +522,8 @@ type HistoryRecord struct {
 
 	// ConfigSummary 配置摘要。
 	ConfigSummary ConfigSummary `json:"configSummary"`
+	// StageCount 渐进式加压阶段数（0 表示一次性创建）。
+	StageCount int `json:"stageCount,omitempty"`
 }
 
 // ConfigSummary 历史任务的配置摘要。

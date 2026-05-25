@@ -26,6 +26,8 @@ function action(name: string, overrides: Partial<ActionMetric> = {}): ActionMetr
     avgSendBytes: 100,
     avgRecvBytes: 200,
     timeoutAvgMs: 0,
+    clientAvgMs: 1.5,
+    netSampleCount: 95,
     latency: { count: 95, minMs: 1, maxMs: 100, avgMs: 20, p50Ms: 18, p90Ms: 50, p95Ms: 70, p99Ms: 90 },
     ...overrides,
   };

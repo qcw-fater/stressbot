@@ -9,7 +9,7 @@ import dayjs from 'dayjs';
 import ReactECharts from 'echarts-for-react';
 import { useEffect, useMemo, useState } from 'react';
 import { historyApi, showApiError } from '@/services';
-import type { ActionMetric, ClusterSystemSnapshot, HistoryDetail, TimeseriesPoint, StressAggregate, StressSnapshot } from '@/types/api';
+import type { ActionMetric, ClusterSystemSnapshot, HistoryDetail, HistoryConfigArchive, TimeseriesPoint, StressAggregate, StressSnapshot } from '@/types/api';
 import { ApdexCell } from '@/components/monitoring/shared/ApdexCell';
 import { fmtBytes, fmtMs, NUMERIC_STYLE } from '@/components/monitoring/shared/formats';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
@@ -32,6 +32,8 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
   const [actionSearch, setActionSearch] = useState('');
   const [actionsOnly, setActionsOnly] = useState(false);
   const generateReport = useReportCapture(detail, timeseries);
+  const [configArchive, setConfigArchive] = useState<HistoryConfigArchive | null>(null);
+  const [stagesExpanded, setStagesExpanded] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -44,6 +46,12 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
       })
       .catch(showApiError)
       .finally(() => setLoading(false));
+  }, [id]);
+
+  useEffect(() => {
+    setConfigArchive(null);
+    setStagesExpanded(false);
+    historyApi.getHistoryConfig(id).then(setConfigArchive).catch(() => {});
   }, [id]);
 
   const saveMeta = async () => {
@@ -183,11 +191,12 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
       { title: '超时', dataIndex: 'timeoutCount', key: 'timeoutCount', width: 70, sorter: (a, b) => a.timeoutCount - b.timeoutCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-orange)' : 'var(--text-tertiary)' }}>{v}</span> },
       { title: 'Apdex', dataIndex: 'apdex', key: 'apdex', width: 80, sorter: (a, b) => a.apdex - b.apdex, render: (v: number) => <ApdexCell value={v} /> },
       { title: 'QPS', dataIndex: 'avgQps', key: 'avgQps', width: 78, sorter: (a, b) => a.avgQps - b.avgQps, render: (v: number) => <span style={NUMERIC_STYLE}>{v.toFixed(1)}</span> },
-      { title: 'avg(ms)', key: 'avgMs', width: 76, sorter: (a, b) => a.latency.avgMs - b.latency.avgMs, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.avgMs)}</span> },
-      { title: 'p50(ms)', key: 'p50Ms', width: 76, sorter: (a, b) => a.latency.p50Ms - b.latency.p50Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.p50Ms)}</span> },
-      { title: 'p95(ms)', key: 'p95Ms', width: 76, sorter: (a, b) => a.latency.p95Ms - b.latency.p95Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.p95Ms)}</span> },
-      { title: 'p99(ms)', key: 'p99Ms', width: 76, sorter: (a, b) => a.latency.p99Ms - b.latency.p99Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.p99Ms)}</span> },
-      { title: 'max(ms)', key: 'maxMs', width: 76, sorter: (a, b) => a.latency.maxMs - b.latency.maxMs, render: (_, r) => <span style={NUMERIC_STYLE}>{fmtMs(r.latency.maxMs)}</span> },
+      { title: 'net avg(ms)', key: 'avgMs', width: 92, sorter: (a, b) => a.latency.avgMs - b.latency.avgMs, render: (_, r) => <span style={NUMERIC_STYLE}>{r.netSampleCount > 0 ? fmtMs(r.latency.avgMs) : '—'}</span> },
+      { title: 'p50(ms)', key: 'p50Ms', width: 76, sorter: (a, b) => a.latency.p50Ms - b.latency.p50Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{r.netSampleCount > 0 ? fmtMs(r.latency.p50Ms) : '—'}</span> },
+      { title: 'p95(ms)', key: 'p95Ms', width: 76, sorter: (a, b) => a.latency.p95Ms - b.latency.p95Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{r.netSampleCount > 0 ? fmtMs(r.latency.p95Ms) : '—'}</span> },
+      { title: 'p99(ms)', key: 'p99Ms', width: 76, sorter: (a, b) => a.latency.p99Ms - b.latency.p99Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{r.netSampleCount > 0 ? fmtMs(r.latency.p99Ms) : '—'}</span> },
+      { title: 'max(ms)', key: 'maxMs', width: 76, sorter: (a, b) => a.latency.maxMs - b.latency.maxMs, render: (_, r) => <span style={NUMERIC_STYLE}>{r.netSampleCount > 0 ? fmtMs(r.latency.maxMs) : '—'}</span> },
+      { title: 'client(ms)', dataIndex: 'clientAvgMs', key: 'clientAvgMs', width: 88, sorter: (a, b) => a.clientAvgMs - b.clientAvgMs, render: (v: number) => <span style={NUMERIC_STYLE}>{fmtMs(v)}</span> },
       { title: '超均(ms)', dataIndex: 'timeoutAvgMs', key: 'timeoutAvgMs', width: 84, sorter: (a, b) => a.timeoutAvgMs - b.timeoutAvgMs, render: (v: number) => <span style={NUMERIC_STYLE}>{fmtMs(v)}</span> },
       {
         title: '流量(均)',
@@ -255,7 +264,7 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
           <div>
             <div className="hp-hero-banner__title">{detail.name}</div>
             <div className="hp-hero-banner__id-line">
-              <code>{detail.id.slice(0, 8)}</code> · {formatDuration(detail.durationSec)} · {detail.totalBots} 机器人 · {detail.agentCount} 节点 · 并发 {cs.concurrency} · 超时 {cs.timeoutSec}s
+              <code>{detail.id.slice(0, 8)}</code> · {formatDuration(detail.durationSec)} · {detail.totalBots} 机器人 · {detail.activeAgentCount}/{detail.agentCount} 节点 · {detail.stageCount && detail.stageCount > 0 ? `渐进式 ${detail.stageCount} 阶段 · ` : ''}并发 {cs.concurrency} · 超时 {cs.timeoutSec}s
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -520,6 +529,37 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
               <span className="hp-grid-value">{cs.scriptCount} 个</span>
             </div>
           </div>
+
+          {configArchive?.robotConfig?.rampUp && (() => {
+            const stages = configArchive.robotConfig.rampUp.stages;
+            const total = stages.reduce((s, st) => s + (st.count || 0), 0);
+            return (
+              <div className="hp-rampup-section">
+                <div className="hp-rampup-header" onClick={() => setStagesExpanded(!stagesExpanded)}>
+                  <span className="hp-section-title" style={{ marginBottom: 0 }}>
+                    渐进式加压 · {stages.length} 阶段 · 总计 {total} 机器人
+                  </span>
+                  <span className={`hp-rampup-chevron${stagesExpanded ? ' expanded' : ''}`}>▸</span>
+                </div>
+                {stagesExpanded && (
+                  <div className="hp-rampup-timeline">
+                    {stages.map((stage, i) => (
+                      <div key={i} className="hp-rampup-stage">
+                        <div className="hp-rampup-dot">{i + 1}</div>
+                        {i < stages.length - 1 && <div className="hp-rampup-line" />}
+                        <div className="hp-rampup-stage-info">
+                          <span className="hp-rampup-count">+{stage.count} 机器人</span>
+                          {stage.concurrency ? <span>并发 {stage.concurrency}</span> : null}
+                          {stage.holdSec ? <span>保持 {stage.holdSec}s</span> : null}
+                          {stage.reset && <Tag color="warning" style={{ marginInlineEnd: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>重置</Tag>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           <div className="hp-section-title" style={{ marginTop: 12 }}>时间</div>
           <div className="hp-grid">

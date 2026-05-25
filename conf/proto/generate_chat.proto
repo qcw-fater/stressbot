@@ -31,6 +31,7 @@ message ConveneInfo {
     int32       maxRankLevel  = 11;  // 段位上限
     int32       limitCupNum   = 12;  // 限制杯数(0为不限）
     ActivityBattleRecruitData activityBattleData = 13; // 活动赛数据
+    ActivityBattleSingleRecruitData activityBattleSingleData = 14; // 单模式活动赛数据
 }
 
 message SceneInfo {

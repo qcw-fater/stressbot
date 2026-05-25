@@ -7,5 +7,5 @@ package Game;
 enum ProtoVersion
 {
     InvalidVersion  = 0;             // 占位
-    VersionCode     = 49;            // 协议版本号（新增协议，修改协议数据结构自增）
+    VersionCode     = 50;            // 协议版本号（新增协议，修改协议数据结构自增）
 }
