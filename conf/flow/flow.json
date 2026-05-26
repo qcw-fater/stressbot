@@ -867,13 +867,14 @@
       "s2cProto": "Game.OperateGetListS2C"
     },
     "GMAddHero": {
-      "pattern": "tcpSend",
+      "pattern": "tcpRequest",
       "service": "logic",
       "route": {
         "cmd": 9,
         "act": 1
       },
       "c2sProto": "Game.GmEventC2S",
+      "s2cProto": "Game.GmEventS2C",
       "bindings": [
         {
           "type": "fixed",
@@ -929,13 +930,14 @@
       ]
     },
     "GMAddItem": {
-      "pattern": "tcpSend",
+      "pattern": "tcpRequest",
       "service": "logic",
       "route": {
         "cmd": 9,
         "act": 1
       },
       "c2sProto": "Game.GmEventC2S",
+      "s2cProto": "Game.GmEventS2C",
       "bindings": [
         {
           "type": "fixed",
@@ -1025,13 +1027,14 @@
       ]
     },
     "GMAddHeroCup": {
-      "pattern": "tcpSend",
+      "pattern": "tcpRequest",
       "service": "logic",
       "route": {
         "cmd": 9,
         "act": 1
       },
       "c2sProto": "Game.GmEventC2S",
+      "s2cProto": "Game.GmEventS2C",
       "bindings": [
         {
           "type": "fixed",
@@ -1049,13 +1052,14 @@
       ]
     },
     "GMFinishAllNewUserGuide": {
-      "pattern": "tcpSend",
+      "pattern": "tcpRequest",
       "service": "logic",
       "route": {
         "cmd": 9,
         "act": 1
       },
       "c2sProto": "Game.GmEventC2S",
+      "s2cProto": "Game.GmEventS2C",
       "bindings": [
         {
           "type": "fixed",

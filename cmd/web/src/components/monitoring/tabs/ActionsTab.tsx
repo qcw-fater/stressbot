@@ -2,7 +2,7 @@
  * 动作明细表（v5）。
  *
  * 列设计原则：
- *   - 关键计数（成 / 败 / 超 / 跳 / avgSend / avgRecv / timeoutAvgMs）**全部独立列**，
+ *   - 关键计数（成 / 败 / 超 / 取消）**全部独立列**，
  *     用户要直接对比这些字段，塞在动作名下方小字里不够直观；
  *   - 动作名列收紧到 200px，留出横向空间给数值列；
  *   - 所有数值列、动作名、QPS 等都加 `sorter`；
@@ -66,14 +66,11 @@ export function ActionsTab() {
         );
       },
     },
-    { title: '并发', dataIndex: 'executing', key: 'executing', width: 64, sorter: (a, b) => a.executing - b.executing, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
-    { title: 'QPS', dataIndex: 'avgQps', key: 'avgQps', width: 78, sorter: (a, b) => a.avgQps - b.avgQps, render: (v: number) => <span style={NUMERIC_STYLE}>{v.toFixed(1)}</span> },
     { title: '样本', dataIndex: 'sampleCount', key: 'sampleCount', width: 70, sorter: (a, b) => a.sampleCount - b.sampleCount, defaultSortOrder: 'descend' as const, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
     { title: '成功', dataIndex: 'successCount', key: 'successCount', width: 70, sorter: (a, b) => a.successCount - b.successCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: 'var(--color-success)' }}>{v}</span> },
     { title: '失败', dataIndex: 'failureCount', key: 'failureCount', width: 70, sorter: (a, b) => a.failureCount - b.failureCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-error)' : 'var(--text-tertiary)' }}>{v}</span> },
     { title: '超时', dataIndex: 'timeoutCount', key: 'timeoutCount', width: 70, sorter: (a, b) => a.timeoutCount - b.timeoutCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-orange)' : 'var(--text-tertiary)' }}>{v}</span> },
     { title: '取消', dataIndex: 'canceledCount', key: 'canceledCount', width: 70, sorter: (a, b) => a.canceledCount - b.canceledCount, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
-    { title: 'Apdex', dataIndex: 'apdex', key: 'apdex', width: 80, sorter: (a, b) => a.apdex - b.apdex, render: (v: number) => <ApdexCell value={v} /> },
     // 延迟列均反映"纯网络往返"耗时（不含客户端构建/解析）。
     // 当 netSampleCount=0（如纯本地 setState / Lua 内仅做 connect 等）时显示 — 以避免误导。
     {
@@ -92,20 +89,21 @@ export function ActionsTab() {
       sorter: (a, b) => a.clientAvgMs - b.clientAvgMs,
       render: (v: number) => <span style={NUMERIC_STYLE}>{fmtMs(v)}</span>,
     },
-    { title: '超均(ms)', dataIndex: 'timeoutAvgMs', key: 'timeoutAvgMs', width: 84, sorter: (a, b) => a.timeoutAvgMs - b.timeoutAvgMs, render: (v: number) => <span style={NUMERIC_STYLE}>{fmtMs(v)}</span> },
     {
-      title: '流量(均)',
-      key: 'traffic',
-      width: 110,
-      sorter: (a, b) => (a.avgSendBytes + a.avgRecvBytes) - (b.avgSendBytes + b.avgRecvBytes),
-      render: (_, r) => (
-        <span style={{ ...NUMERIC_STYLE, fontSize: 11, whiteSpace: 'nowrap' }}>
-          <span style={{ color: 'var(--chart-cyan)' }}>↑</span>{fmtBytes(r.avgSendBytes)}
-          {' '}
-          <span style={{ color: 'var(--chart-purple)' }}>↓</span>{fmtBytes(r.avgRecvBytes)}
-        </span>
-      ),
+      title: <Tooltip title="平均每次成功发送的字节数">↑发送(均)</Tooltip>,
+      dataIndex: 'avgSendBytes', key: 'avgSendBytes', width: 80,
+      sorter: (a, b) => a.avgSendBytes - b.avgSendBytes,
+      render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: 'var(--chart-cyan)' }}>{fmtBytes(v)}</span>,
     },
+    {
+      title: <Tooltip title="平均每次成功接收的字节数">↓接收(均)</Tooltip>,
+      dataIndex: 'avgRecvBytes', key: 'avgRecvBytes', width: 80,
+      sorter: (a, b) => a.avgRecvBytes - b.avgRecvBytes,
+      render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: 'var(--chart-purple)' }}>{fmtBytes(v)}</span>,
+    },
+    { title: '并发', dataIndex: 'executing', key: 'executing', width: 64, sorter: (a, b) => a.executing - b.executing, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
+    { title: 'QPS', dataIndex: 'avgQps', key: 'avgQps', width: 78, sorter: (a, b) => a.avgQps - b.avgQps, render: (v: number) => <span style={NUMERIC_STYLE}>{v.toFixed(1)}</span> },
+    { title: 'Apdex', dataIndex: 'apdex', key: 'apdex', width: 80, sorter: (a, b) => a.apdex - b.apdex, render: (_, r) => <ApdexCell value={r.apdex} netSampleCount={r.netSampleCount} /> },
     {
       title: '错误',
       key: 'errors',

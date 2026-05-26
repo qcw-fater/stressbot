@@ -102,10 +102,12 @@ export function AgentsPanel({ open, onClose }: AgentsPanelProps) {
         setShuttingDown(true);
         try {
           const result = await agentsApi.shutdownAllAgents();
-          if (result.failed.length > 0) {
-            message.warning(`${result.succeeded.length} 个节点已关闭，${result.failed.length} 个失败`);
+          const succeeded = result.succeeded ?? [];
+          const failed = result.failed ?? [];
+          if (failed.length > 0) {
+            message.warning(`${succeeded.length} 个节点已关闭，${failed.length} 个失败`);
           } else {
-            message.success(`${result.succeeded.length} 个节点已发送关闭信号`);
+            message.success(`${succeeded.length} 个节点已发送关闭信号`);
           }
           refresh();
         } catch (err) {

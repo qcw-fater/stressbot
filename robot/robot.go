@@ -50,6 +50,7 @@ type Robot struct {
 	adp         adapter.Adapter        // 协议适配器（编解码 + 帧解析）
 	mainService string                 // 主连接服务名，意外断开时停止机器人
 	done        chan struct{}          // 执行 goroutine 结束信号，Close 时等待
+	onDone      func()                 // 执行 goroutine 结束后回调（由 Manager 设置）
 }
 
 // Config 单个机器人的配置。
@@ -167,6 +168,9 @@ func (r *Robot) Start() {
 		}
 
 		stresslog.Info("[ROBOT] 已停止", zap.Int("id", r.id), zap.String("account", r.account))
+		if r.onDone != nil {
+			r.onDone()
+		}
 	})
 }
 
@@ -182,9 +186,10 @@ func (r *Robot) Wait() {
 
 // robotCloseTimeout Robot.Close 总体超时时间。
 // 阻塞点有两处：
-//   1) r.Wait()：等待 executor goroutine 退出（lua 死循环、嵌套调用可能卡死）
-//   2) r.client.CloseAll() 内含 WaitListenDone：等待 listenLoop 退出
-//      （回调里的 lua 脚本等 luaMu 时可能死锁）
+//  1. r.Wait()：等待 executor goroutine 退出（lua 死循环、嵌套调用可能卡死）
+//  2. r.client.CloseAll() 内含 WaitListenDone：等待 listenLoop 退出
+//     （回调里的 lua 脚本等 luaMu 时可能死锁）
+//
 // 任一阻塞超过 robotCloseTimeout 即放弃等待，强制返回让上层推进。
 // 代价：LState 不归还到池、state 不清空（避免与卡死的 goroutine 并发访问），
 // 进程退出时由 OS 回收，轻微资源泄漏可接受。
@@ -281,7 +286,7 @@ func (r *Robot) ConnectTCP(serviceName, address string) bool {
 			r.Stop()
 			r.client.CloseAll()
 		} else {
-			stresslog.Debug("[ROBOT] 连接断开",
+			stresslog.Debug("[ROBOT] TCP 连接断开",
 				zap.Int("id", r.id), zap.String("account", r.account), zap.String("service", serviceName))
 		}
 	})

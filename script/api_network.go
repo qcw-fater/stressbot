@@ -200,25 +200,36 @@ func networkConnectUDP(L *lua.LState) int {
 
 // networkCloseTCP 关闭 TCP 连接。
 // 签名：network.close_tcp(service)
+//
+// **必须用 withReleasedMu**：Connection.Close 内部会同步等待心跳 goroutine 退出
+// （StopHeartbeat → <-hb.done），而心跳 Builder 自身会重新进入 Lua VM 抢 luaMu。
+// 如果这里持着 luaMu 不放，就会形成 executor ↔ heartbeat 循环死锁
+// （historic incident: 12/15 robot 卡死 65 分钟，参见 connection.go doClose 注释）。
 func networkCloseTCP(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
 		return 0
 	}
 	service := L.CheckString(1)
-	ctx.NetSender.CloseTCP(service)
+	withReleasedMu(ctx.LuaMu, func() {
+		ctx.NetSender.CloseTCP(service)
+	})
 	return 0
 }
 
 // networkCloseUDP 关闭 UDP 连接。
 // 签名：network.close_udp(service)
+//
+// 同 networkCloseTCP，必须释放 luaMu 后再调底层 Close，避免与心跳 Builder 死锁。
 func networkCloseUDP(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
 		return 0
 	}
 	service := L.CheckString(1)
-	ctx.NetSender.CloseUDP(service)
+	withReleasedMu(ctx.LuaMu, func() {
+		ctx.NetSender.CloseUDP(service)
+	})
 	return 0
 }
 
@@ -814,13 +825,24 @@ func registerHeartbeat(L *lua.LState, proto heartbeatProto) int {
 	luaMu := ctx.LuaMu
 	adp := ctx.Adapter
 	builder := func() []byte {
+		// 第一关：连接已关闭/取消，跳过本次心跳。
+		// Connection.doClose 会先 cancel 再 StopHeartbeat，所以正常关闭路径下
+		// 心跳 goroutine 调用 Builder 时这里就能立刻 return nil，根本不会去抢 luaMu。
 		if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
 			return nil
 		}
 		var body []byte
 		if builderFn != nil && luaMu != nil {
+			// 第二关（防御性兜底）：TryLock 拿不到 luaMu 就跳过本次心跳。
+			// 关键场景：执行器在 lua 里调 network.close_tcp / register_*_heartbeat
+			// 等"需要等 StopHeartbeat 返回"的同步 API 时，本身就持有 luaMu。
+			// 如果这里 Lock 阻塞等待，就会与 StopHeartbeat 形成循环死锁：
+			//   executor 持 luaMu → 等 hb.done → 心跳 goroutine 等 luaMu。
+			// TryLock 失败即跳过本次发送，下个 tick（或 ctx 取消）能自然推进。
+			if !luaMu.TryLock() {
+				return nil
+			}
 			func() {
-				luaMu.Lock()
 				defer luaMu.Unlock()
 				savedTop := L.GetTop()
 				if err := L.CallByParam(lua.P{Fn: builderFn, NRet: 1, Protect: true}); err != nil {
@@ -843,11 +865,16 @@ func registerHeartbeat(L *lua.LState, proto heartbeatProto) int {
 		return adp.EncodeTCP(goRoute, body, secretKey)
 	}
 
-	if proto == hbProtoUDP {
-		ctx.NetSender.RegisterUDPHeartbeat(service, intervalMs, builder)
-	} else {
-		ctx.NetSender.RegisterTCPHeartbeat(service, intervalMs, builder)
-	}
+	// 必须用 withReleasedMu：RegisterHeartbeat 内部会 StopHeartbeat 停旧心跳，
+	// 如果不释放 luaMu，旧心跳的 Builder TryLock 失败后虽不会死锁，
+	// 但 StopHeartbeat 会卡满 2s 超时才返回，拖慢心跳替换速度。
+	withReleasedMu(ctx.LuaMu, func() {
+		if proto == hbProtoUDP {
+			ctx.NetSender.RegisterUDPHeartbeat(service, intervalMs, builder)
+		} else {
+			ctx.NetSender.RegisterTCPHeartbeat(service, intervalMs, builder)
+		}
+	})
 	return 0
 }
 

@@ -7,8 +7,9 @@
  *
  * 显示策略（紧凑、4 个数字最多）：
  *   - 当前并发：`exec N`（最重要，0 时不显示，避免遮蔽未跑节点）
- *   - p99：`p99 12ms`（仅 successCount > 0 才显示）
- *   - apdex：`A 0.92`（彩色文字按阈值染色）
+ *   - p99：`p99 12ms`（仅网络动作、successCount > 0 才显示）
+ *   - apdex：`A 0.92`（仅网络动作，彩色文字按阈值染色）
+ *   - 本地成功：`✓ 150`（非网络动作如 setState/send，绿色徽章表示已执行成功）
  *   - 错误条：`err N×Top`（hover 看完整 error 列表）
  *
  * 节点边框的 Apdex 染色由 NodeShell 读取 `apdexLevel(...)` 后挂 `apdex-*` className 完成，
@@ -38,10 +39,38 @@ export function useNodeMetrics(nodeId: string): ActionMetric | undefined {
   return provider ? provider(nodeId) : undefined;
 }
 
-/** 将 ActionMetric 的 apdex 转成等级，用于节点边框染色 */
+const LEVEL_ORDER: Record<ApdexLevel, number> = {
+  unknown: 0, danger: 1, poor: 2, fair: 3, good: 4, excellent: 5,
+};
+
+/** 取两个等级中较差的那个 */
+function worseLevel(a: ApdexLevel, b: ApdexLevel): ApdexLevel {
+  return LEVEL_ORDER[a] <= LEVEL_ORDER[b] ? a : b;
+}
+
+/** 成功率 → 健康等级（阈值与 Apdex 对齐：0.94/0.85/0.70/0.50） */
+function classifySuccessRate(rate: number): ApdexLevel {
+  if (rate >= 0.94) return 'excellent';
+  if (rate >= 0.85) return 'good';
+  if (rate >= 0.70) return 'fair';
+  if (rate >= 0.50) return 'poor';
+  return 'danger';
+}
+
+/** 节点边框染色：综合 Apdex 和成功率，取较差值。
+ *  - 未执行（sampleCount=0）→ unknown（无染色）
+ *  - 网络动作：Apdex 等级 vs 成功率等级，取较差
+ *  - 非网络动作：仅看成功率 */
 export function useNodeApdexLevel(nodeId: string): ApdexLevel {
   const m = useNodeMetrics(nodeId);
-  return classifyApdex(m?.apdex);
+  if (!m || m.sampleCount === 0) return 'unknown';
+
+  const srLevel = classifySuccessRate(m.successRate);
+
+  if ((m.netSampleCount ?? 0) === 0) {
+    return srLevel;
+  }
+  return worseLevel(classifyApdex(m.apdex), srLevel);
 }
 
 const APDEX_COLOR: Record<ApdexLevel, string> = {
@@ -61,18 +90,29 @@ export function MetricsBadge({ nodeId }: MetricsBadgeProps) {
   const m = useNodeMetrics(nodeId);
   if (!m) return null;
 
-  const apdexLevel = classifyApdex(m.apdex);
+  const hasNet = (m.netSampleCount ?? 0) > 0;
+  const showP99 = hasNet && m.latency.count > 0;
+  const apdexLevel = hasNet ? classifyApdex(m.apdex) : 'unknown';
   const apdexColor = APDEX_COLOR[apdexLevel];
-  const showP99 = m.latency.count > 0;
+  // 健康等级用于非网络动作徽章颜色（综合成功率）
+  const healthLevel = (m.sampleCount > 0 && !hasNet) ? classifySuccessRate(m.successRate) : 'unknown';
+  const healthColor = APDEX_COLOR[healthLevel];
+  // 网络动作显示 Apdex 评分；非网络动作显示成功计数（样式统一，文本诚实）
+  const showApdex = hasNet && apdexLevel !== 'unknown';
+  const showLocalBadge = !hasNet && m.sampleCount > 0;
   const showErrors = (m.errors?.length ?? 0) > 0;
   const topErr = showErrors ? m.errors![0] : undefined;
 
   // 预构建错误列表，避免 JSX 内联 .map() + 条件渲染触发 React key 警告
   const errorTooltipContent = showErrors ? (
-    <div style={{ maxWidth: 300 }}>
+    <div style={{ maxWidth: 360 }}>
       {m.errors!.slice(0, 6).map((e, i) => (
-        <div key={`e${i}`} style={{ fontSize: 11 }}>
-          <span style={{ color: 'var(--color-error)' }}>×{e.count}</span> {e.codeName || `${e.kind}#${e.code}`}
+        <div key={`e${i}`} style={{ marginTop: i > 0 ? 3 : 0, fontSize: 11, lineHeight: '16px' }}>
+          <span style={{ color: 'var(--color-error)', fontWeight: 700, fontSize: 10, fontVariantNumeric: 'tabular-nums', marginRight: 6 }}>×{e.count}</span>
+          <span style={{ fontWeight: 500 }}>{e.codeName || `${e.kind}#${e.code}`}</span>
+          {e.msgs.length > 0 && (
+            <div style={{ color: 'var(--text-tertiary)', marginLeft: 14, marginTop: 1 }}>{e.msgs.join('; ')}</div>
+          )}
         </div>
       ))}
       {m.errors!.length > 6 && (
@@ -102,12 +142,19 @@ export function MetricsBadge({ nodeId }: MetricsBadgeProps) {
           </span>
         </Tooltip>
       )}
-      {apdexLevel !== 'unknown' && (
+      {showApdex && (
         <Tooltip
           title={`Apdex ${m.apdex.toFixed(3)} · 成功率 ${(m.successRate * 100).toFixed(1)}% · 平均 QPS ${m.avgQps.toFixed(1)} · 样本数 ${m.sampleCount}`}
         >
           <span className="pattern-badge" style={{ color: apdexColor, borderColor: apdexColor, background: `color-mix(in srgb, ${apdexColor} 12%, transparent)` }}>
             Apdex {m.apdex.toFixed(2)}
+          </span>
+        </Tooltip>
+      )}
+      {showLocalBadge && (
+        <Tooltip title={`成功 ${m.successCount} 次 · 成功率 ${(m.successRate * 100).toFixed(1)}% · 平均 QPS ${m.avgQps.toFixed(1)}`}>
+          <span className="pattern-badge" style={{ color: healthColor, borderColor: healthColor, background: `color-mix(in srgb, ${healthColor} 12%, transparent)` }}>
+            ✓ {m.successCount}
           </span>
         </Tooltip>
       )}

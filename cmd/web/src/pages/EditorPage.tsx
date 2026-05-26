@@ -62,8 +62,7 @@ const LazyActiveTaskGuardModal = lazy(() =>
     default: m.ActiveTaskGuardModal,
   })),
 );
-import type { RobotConfig, TaskBrief } from '@/types/api';
-import { fetchBaselineConfig } from '@/services/baselineApi';
+import type { TaskBrief } from '@/types/api';
 
 /** 首次 visible=true 时挂载组件，之后保持挂载（保留组件状态 + 关闭动画） */
 function LazyMount({ visible, children }: { visible: boolean; children: React.ReactNode }) {
@@ -149,21 +148,13 @@ function HomeShellInner() {
     });
     return () => registerTaskConflictHandler(null);
   }, []);
-
-  // 启动检测：是否已有 active 任务 + 同步默认 RobotConfig。
-  //
-  // RobotConfig 引导：从 /conf/config.json 读取单机配置作为默认值。
-  //   - 仅在用户当前字段仍是开箱占位时才覆盖（避免覆盖用户手改）；
-  //   - 失败静默：未挂载 conf/ 时维持开箱默认；
-  //   - 这一步必须放在 startTask 之前，否则前端默认值（
-  //     stateExtra 是 {} 等）会被下发到 agent，导致 lua 脚本鉴权失败。
   useEffect(() => {
+
     if (bootRef.current) return;
     bootRef.current = true;
     (async () => {
       try {
-        // 1. 同步 RobotConfig（不阻塞 listTasks）
-        void syncDefaultRobotConfigFromConf();
+        // 1. RobotConfig 使用内置默认值，不再从 conf/config.json 同步（Admin 模式下无此文件）
         // 2. 探测 history 模块是否启用：admin 未配 MySQL 时 listHistory 会返回 HISTORY_DISABLED。
         //    用 limit=1 最小开销探测一次，结果写到 editorStore.historyEnabled，
         //    RuntimeBar/HistoryDrawer 据此决定按钮是否禁用，避免用户点了才弹错。
@@ -364,108 +355,4 @@ function HomeShellInner() {
       </LazyMount>
     </div>
   );
-}
-
-/**
- * 从 /conf/config.json 读取单机配置作为前端 RobotConfig 默认值的引导。
- *
- * 字段映射（仅在用户当前值还是占位默认时才覆盖）：
- *   conf/config.json                     → RobotConfig
- *   ─────────────────────────────────────────────────────
- *   bot.accountPrefix                    → accountPrefix
- *   bot.startNumber                      → startNumber
- *   bot.mainService                      → mainService
- *   bot.concurrentNum                    → concurrency
- *   network.heartbeatInterval ("5s")     → heartbeatSec
- *   network.tcpTimeout ("60s")           → timeoutSec
- *   network.httpTimeout ("10s")          → httpTimeoutSec
- *   monitor.apdexT                       → apdexT
- *
- * **不同步** stateExtra：
- *   该字段是 State 扩展键值集合（version/channel/platform 等），
- *   单机模式下确实需要，但 Web 模式下用户的诉求是"完全手动控制"——
- *   单机配置里写什么是单机部署的事，Web 端不应该把它当默认值悄悄填上去。
- *   如有需要用户自行在"高级设置 → 添加字段"里加。
- *
- * 失败静默：未挂载 conf/ 时维持开箱默认。
- */
-async function syncDefaultRobotConfigFromConf(): Promise<void> {
-  // 这些是 runtimeStore 中开箱默认值；用户改过就不会等于这些值。
-  const PLACEHOLDERS = {
-    accountPrefix: 'bot_',
-    startNumber: 0,
-    mainService: 'logic',
-    concurrency: 50,
-    timeoutSec: 60,
-    heartbeatSec: 5,
-    httpTimeoutSec: 10,
-    apdexT: 100,
-  } as const;
-
-  try {
-    const cfg = await fetchBaselineConfig<{
-      bot?: { accountPrefix?: string; startNumber?: number; mainService?: string; concurrentNum?: number };
-      network?: { heartbeatInterval?: string; tcpTimeout?: string; httpTimeout?: string };
-      monitor?: { apdexT?: number };
-    }>();
-    if (!cfg) return;
-
-    const cur = useRuntimeStore.getState().robotConfig;
-    const patch: Partial<RobotConfig> = {};
-
-    // 字符串：cur 等于占位时才填入
-    const ap = cfg.bot?.accountPrefix?.trim();
-    if (ap && (cur.accountPrefix ?? '') === PLACEHOLDERS.accountPrefix) patch.accountPrefix = ap;
-
-    const ms = cfg.bot?.mainService?.trim();
-    if (ms && (cur.mainService ?? '') === PLACEHOLDERS.mainService) patch.mainService = ms;
-
-    // 注意：stateExtra 不同步（用户诉求"完全手动控制"，详见上方文档注释）。
-
-    // int：cur 等于占位时才填入
-    if (typeof cfg.bot?.startNumber === 'number' && (cur.startNumber ?? 0) === PLACEHOLDERS.startNumber) {
-      patch.startNumber = cfg.bot.startNumber;
-    }
-    if (typeof cfg.bot?.concurrentNum === 'number' && cur.concurrency === PLACEHOLDERS.concurrency) {
-      patch.concurrency = cfg.bot.concurrentNum;
-    }
-    const tcpSec = parseDurationSeconds(cfg.network?.tcpTimeout);
-    if (tcpSec && cur.timeoutSec === PLACEHOLDERS.timeoutSec) patch.timeoutSec = tcpSec;
-
-    const hbSec = parseDurationSeconds(cfg.network?.heartbeatInterval);
-    if (hbSec && (cur.heartbeatSec ?? 0) === PLACEHOLDERS.heartbeatSec) patch.heartbeatSec = hbSec;
-
-    const httpSec = parseDurationSeconds(cfg.network?.httpTimeout);
-    if (httpSec && (cur.httpTimeoutSec ?? 0) === PLACEHOLDERS.httpTimeoutSec) patch.httpTimeoutSec = httpSec;
-
-    if (typeof cfg.monitor?.apdexT === 'number' && (cur.apdexT ?? 0) === PLACEHOLDERS.apdexT) {
-      patch.apdexT = cfg.monitor.apdexT;
-    }
-
-    if (Object.keys(patch).length > 0) {
-      useRuntimeStore.getState().setRobotConfig(patch);
-    }
-  } catch {
-    // 静默：开发期可能没挂 conf，生产期 admin 会自己提供默认值
-  }
-}
-
-/** 把 Go duration 字符串（"5s" / "100ms" / "1m"）粗略转秒，失败/0/<1s 返回 0 */
-function parseDurationSeconds(s: string | undefined): number {
-  if (!s) return 0;
-  const m = /^(\d+(?:\.\d+)?)(ms|s|m|h)$/.exec(s.trim());
-  if (!m) return 0;
-  const n = parseFloat(m[1]);
-  switch (m[2]) {
-    case 'ms':
-      return Math.round(n / 1000);
-    case 's':
-      return Math.round(n);
-    case 'm':
-      return Math.round(n * 60);
-    case 'h':
-      return Math.round(n * 3600);
-    default:
-      return 0;
-  }
 }

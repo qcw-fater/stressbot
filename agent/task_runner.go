@@ -24,6 +24,10 @@ import (
 	"go.uber.org/zap"
 )
 
+// taskCleanupTimeout 任务清理（停止 gnet 引擎 + 关闭适配器）的超时时间。
+// 部分机器人卡死时 gnet.Client.Stop() 可能长时间阻塞，需要超时保护。
+const taskCleanupTimeout = 30 * time.Second
+
 // TaskRunner 管理单次压测任务的执行：拉配置、写目录、起 Manager、等完成。
 type TaskRunner struct {
 	assignment *TaskAssignment
@@ -172,7 +176,7 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 	stresslog.Error("[TASK] 启动网络引擎失败", zap.String("taskID", taskID), zap.Error(err))
 		return TaskFailed, fmt.Sprintf("启动网络引擎失败: %v", err)
 	}
-	defer dialer.Stop()
+	defer stopDialerWithTimeout(dialer)
 
 	// 9. 初始化 Lua 运行时池
 	luaPool := script.NewRuntimePool(scriptsDir)
@@ -298,4 +302,23 @@ func loadTaskFlow(path string) (*engine.TaskFlow, error) {
 	}
 
 	return flow, nil
+}
+
+// stopDialerWithTimeout 带超时地停止 gnet 引擎。
+// 机器人卡死时 gnet.Client.Stop() 可能长时间阻塞（等待事件循环排空），
+// 超时后强制返回，避免 Agent 因清理阻塞而无法接受新任务。
+func stopDialerWithTimeout(d *network.Dialer) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if err := d.Stop(); err != nil {
+			stresslog.Warn("[TASK] 停止网络引擎失败", zap.Error(err))
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(taskCleanupTimeout):
+		stresslog.Warn("[TASK] 停止网络引擎超时，强制返回（资源由 OS 回收）",
+			zap.Duration("timeout", taskCleanupTimeout))
+	}
 }

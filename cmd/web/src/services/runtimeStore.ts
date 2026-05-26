@@ -116,7 +116,8 @@ export interface RuntimeState {
   backfillHistory: (stress: StressSnapshot[], system: ClusterSystemSnapshot[]) => void;
 }
 
-// 仅作占位，EditorPage 启动时会尝试从 /conf/config.json 同步真实值覆盖。
+import { ENV_ROBOT_DEFAULTS } from './env';
+
 const DEFAULT_ROBOT_CONFIG: RobotConfig = {
   concurrency: 50,
   timeoutSec: 60,
@@ -128,6 +129,7 @@ const DEFAULT_ROBOT_CONFIG: RobotConfig = {
   httpTimeoutSec: 10,
   apdexT: 100,
   logLevel: 'info',
+  ...ENV_ROBOT_DEFAULTS,
 };
 
 const initialState = {

@@ -321,11 +321,20 @@ func (c *Connection) GetListenResp(routeKey string) *Message {
 	return nil
 }
 
-// doClose 执行连接关闭的共享逻辑：CAS 标记 + 停止心跳 + 取消上下文。
+// doClose 执行连接关闭的共享逻辑：取消上下文 + 停止心跳。
 // 调用方负责触发回调。
+//
+// **关键顺序**：必须先 cancel 再 StopHeartbeat。
+// 原因：心跳 Builder 内部会重新进入 Lua VM 抢 luaMu，
+// 如果 cancel 在后面，Builder 不知道连接已在关闭，可能与持有 luaMu 的执行器
+// 形成"executor 等心跳退出 ↔ 心跳等 luaMu"循环死锁。
+// cancel 优先后：
+//  1. Builder 入口的 `ctx.Err() != nil` 会立即返回 nil，跳过 Lua 调用；
+//  2. listenLoop 的 select 看到 ctx.Done 立即退出，回调不再分发。
+// 双重保险（参见 heartbeat.go 的 TryLock 兜底）后，StopHeartbeat 不会被卡死。
 func (c *Connection) doClose() {
-	c.StopHeartbeat()
 	c.cancel()
+	c.StopHeartbeat()
 }
 
 // onClose gnet 异步触发的关闭回调（OnClose 事件）。

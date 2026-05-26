@@ -99,7 +99,7 @@ export function buildApdexTrendOption(
   const data = stressTs.map((p) => {
     const actions = unwrap(p).actions ?? [];
     let total = 0, w = 0;
-    for (const a of actions) { total += a.apdex * a.sampleCount; w += a.sampleCount; }
+    for (const a of actions) { if (a.netSampleCount > 0) { total += a.apdex * a.netSampleCount; w += a.netSampleCount; } }
     return w > 0 ? +(total / w).toFixed(3) : 0;
   });
 

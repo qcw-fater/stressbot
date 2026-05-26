@@ -71,14 +71,17 @@ export function DashboardTab() {
   const send = fmtBandwidth(b.sendMBps ?? 0);
   const recv = fmtBandwidth(b.recvMBps ?? 0);
 
-  // 加权 Apdex / 成功率
-  let totalSamples = 0, wApdex = 0, wSuccess = 0;
+  // 加权 Apdex（用 netSampleCount 作权重，排除纯客户端动作）/ 成功率
+  let totalSamples = 0, apdexWeight = 0, wApdex = 0, wSuccess = 0;
   for (const a of actions) {
     totalSamples += a.sampleCount;
-    wApdex += a.apdex * a.sampleCount;
     wSuccess += a.successRate * a.sampleCount;
+    if (a.netSampleCount > 0) {
+      apdexWeight += a.netSampleCount;
+      wApdex += a.apdex * a.netSampleCount;
+    }
   }
-  const clusterApdex = totalSamples > 0 ? wApdex / totalSamples : 0;
+  const clusterApdex = apdexWeight > 0 ? wApdex / apdexWeight : 0;
   const clusterSuccess = totalSamples > 0 ? wSuccess / totalSamples : 0;
   const apdexLevel = classifyApdex(clusterApdex);
 

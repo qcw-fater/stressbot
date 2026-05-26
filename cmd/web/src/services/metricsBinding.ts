@@ -78,19 +78,25 @@ export function classifyApdex(apdex: number | undefined): ApdexLevel {
   return 'danger';
 }
 
-/** 加权计算一组动作的聚合 Apdex 和成功率 */
+/** 加权计算一组动作的聚合 Apdex 和成功率
+ *  Apdex 权重用 netSampleCount，排除纯客户端动作（netSampleCount=0）避免拉低评分。
+ *  成功率权重仍用 sampleCount，反映整体请求成功率。 */
 export function computeWeightedMetrics(actions: ActionMetric[]) {
   let totalSamples = 0;
+  let apdexWeight = 0;
   let weightedApdex = 0;
   let weightedSuccess = 0;
   for (const a of actions) {
     totalSamples += a.sampleCount;
-    weightedApdex += a.apdex * a.sampleCount;
     weightedSuccess += a.successRate * a.sampleCount;
+    if (a.netSampleCount > 0) {
+      apdexWeight += a.netSampleCount;
+      weightedApdex += a.apdex * a.netSampleCount;
+    }
   }
   return {
     totalSamples,
-    apdex: totalSamples > 0 ? weightedApdex / totalSamples : 0,
+    apdex: apdexWeight > 0 ? weightedApdex / apdexWeight : 0,
     successRate: totalSamples > 0 ? weightedSuccess / totalSamples : 0,
   };
 }

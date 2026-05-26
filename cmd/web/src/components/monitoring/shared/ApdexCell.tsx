@@ -27,10 +27,14 @@ const LABEL: Record<ApdexLevel, string> = {
 
 export interface ApdexCellProps {
   value: number | undefined;
+  netSampleCount?: number;
   showLabel?: boolean;
 }
 
-export function ApdexCell({ value, showLabel = false }: ApdexCellProps) {
+export function ApdexCell({ value, netSampleCount, showLabel = false }: ApdexCellProps) {
+  if (netSampleCount !== undefined && netSampleCount === 0) {
+    return <Tag color="default" style={{ fontVariantNumeric: 'tabular-nums', minWidth: 56, textAlign: 'center' }}>—</Tag>;
+  }
   const level = classifyApdex(value);
   const text = value === undefined || Number.isNaN(value) ? '—' : value.toFixed(3);
   return (

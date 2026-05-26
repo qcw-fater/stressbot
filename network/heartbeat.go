@@ -54,7 +54,17 @@ func (c *Connection) RegisterHeartbeat(cfg HeartbeatConfig) {
 	utils.GetWorkPool().GoWithStop(func(stopCh <-chan struct{}) { c.runHeartbeat(state, stopCh) })
 }
 
+// stopHeartbeatTimeout 等待心跳 goroutine 退出的最长时间。
+// 正常路径下：cancel 先于 StopHeartbeat（见 doClose）+ Builder 用 TryLock 兜底，
+// 心跳通常在 1 个 tick 周期内自然退出。这个超时只为防御"未来某个 lua API
+// 在持 luaMu 时长时间阻塞而忘了 withReleasedMu"导致 Builder TryLock 始终
+// 失败、但心跳 goroutine 卡在 Builder 之后某行的极端情况。
+const stopHeartbeatTimeout = 2 * time.Second
+
 // StopHeartbeat 停止当前心跳并等待 goroutine 退出。
+// 必须有限超时：如果 Builder 已经成功获得 luaMu 并进入 Lua 调用，
+// 此时即便 ctx 已经取消（cancel 提前），仍要等 Lua 执行完成才会回到 select。
+// 在病态情况下（Lua 死循环 / 极慢的 builder），用超时强制返回以避免上层 Close 永久挂起。
 func (c *Connection) StopHeartbeat() {
 	c.heartbeatMu.Lock()
 	hb := c.heartbeat
@@ -63,7 +73,16 @@ func (c *Connection) StopHeartbeat() {
 
 	if hb != nil && atomic.CompareAndSwapInt32(&hb.running, 1, 0) {
 		close(hb.stop)
-		<-hb.done // 等待 goroutine 退出
+		t := time.NewTimer(stopHeartbeatTimeout)
+		defer t.Stop()
+		select {
+		case <-hb.done:
+		case <-t.C:
+			stresslog.Warn("[HEARTBEAT] 停止超时，强制推进（goroutine 后台收敛）",
+				zap.String("service", c.serviceName),
+				zap.String("robot", c.robotName),
+				zap.Duration("timeout", stopHeartbeatTimeout))
+		}
 	}
 }
 

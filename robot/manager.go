@@ -114,6 +114,7 @@ func (m *Manager) startBatch(fromIndex, count, conc int) (int, error) {
 		m.robots = append(m.robots, r)
 		m.mu.Unlock()
 
+		r.onDone = m.onRobotDone
 		r.Start()
 		m.started.Add(1)
 		created++
@@ -299,9 +300,7 @@ func (m *Manager) StopAll() {
 	copy(robots, m.robots)
 	m.mu.RUnlock()
 
-	closeRobotsConcurrent(robots, func() {
-		m.stopped.Add(1)
-	})
+	closeRobotsConcurrent(robots, nil)
 	m.stopOnce.Do(func() { close(m.doneCh) })
 	stresslog.Info("[MANAGER] 全部机器人已停止", zap.Int("count", len(robots)))
 }
@@ -317,9 +316,18 @@ func (m *Manager) resetBots() {
 	m.mu.Unlock()
 
 	closeRobotsConcurrent(robots, nil)
-	// 重置 stopped 计数器，使 WaitDone 的计数逻辑不累积跨阶段数据
+	// 重置计数器，使后续阶段的 onRobotDone 匹配逻辑正确
+	m.started.Add(int32(-len(robots)))
 	m.stopped.Store(0)
 	stresslog.Info("[MANAGER] 阶段重置完成，已停止机器人", zap.Int("count", len(robots)))
+}
+
+// onRobotDone 在单个 Robot 执行 goroutine 结束后回调。
+// 当所有已启动的 Robot 都结束时，自动关闭 doneCh，使 task_runner 的 select 退出。
+func (m *Manager) onRobotDone() {
+	if m.stopped.Add(1) == m.started.Load() {
+		m.stopOnce.Do(func() { close(m.doneCh) })
+	}
 }
 
 // Done 返回一个 channel，所有机器人停止后关闭（定时到期或外部 StopAll 均会触发）。

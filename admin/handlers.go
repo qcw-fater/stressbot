@@ -1044,6 +1044,8 @@ func (s *AdminServer) handleShutdownAgent(w http.ResponseWriter, r *http.Request
 func (s *AdminServer) handleShutdownAllAgents(w http.ResponseWriter, _ *http.Request) {
 	all := s.agents.List()
 	var succeeded, failed []string
+	succeeded = make([]string, 0)
+	failed = make([]string, 0)
 	for _, a := range all {
 		if a.Status == AgentOffline {
 			continue
