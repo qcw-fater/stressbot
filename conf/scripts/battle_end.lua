@@ -61,7 +61,7 @@ function execute(r)
     local code, _, sent, recv = network.tcp_request("battle", {cmd=4, act=13}, msg)
     if code ~= 0 then
         log.error("BattleEnd 发送失败: code=" .. tostring(code))
-        return 1, sent, recv
+        return code, sent, recv  -- 透传底层 code
     end
     log.info("BattleEnd 已发送")
 

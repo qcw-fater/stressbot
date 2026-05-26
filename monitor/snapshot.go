@@ -123,9 +123,7 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 		recvMBps = float64(totalRecv) / 1024 / 1024 / uptimeSec
 	}
 
-	c.cfgMu.RLock()
-	apdexT := c.cfg.ApdexT
-	c.cfgMu.RUnlock()
+	apdexT := int(c.apdexT.Load())
 	snap := &CollectorSnapshot{
 		Timestamp:    time.Now(),
 		Uptime:       uptime,

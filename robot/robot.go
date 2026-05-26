@@ -47,10 +47,11 @@ type Robot struct {
 	dialer      *network.Dialer        // 网络拨号器（封装 gnet 事件循环）
 	httpClient  *http.Client           // HTTP 客户端（声明式 HTTP 动作用）
 	luaMu       sync.Mutex             // Lua 访问互斥锁（回调/心跳可能在其他 goroutine 触发）
-	adp         adapter.Adapter        // 协议适配器（编解码 + 帧解析）
-	mainService string                 // 主连接服务名，意外断开时停止机器人
-	done        chan struct{}          // 执行 goroutine 结束信号，Close 时等待
-	onDone      func()                 // 执行 goroutine 结束后回调（由 Manager 设置）
+	adp            adapter.Adapter // 协议适配器（编解码 + 帧解析）
+	mainService    string          // 主连接服务名，意外断开时停止机器人
+	requestTimeout time.Duration   // robotConfig.timeoutSec 注入；用作 Lua tcp/udp_request 默认 timeout
+	done           chan struct{}   // 执行 goroutine 结束信号，Close 时等待
+	onDone         func()          // 执行 goroutine 结束后回调（由 Manager 设置）
 }
 
 // Config 单个机器人的配置。
@@ -80,9 +81,10 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		cancel:      cancel,
 		dialer:      dialer,
 		httpClient:  &http.Client{Timeout: cfg.HTTPTimeout},
-		adp:         adp,
-		mainService: cfg.MainService,
-		done:        make(chan struct{}),
+		adp:            adp,
+		mainService:    cfg.MainService,
+		requestTimeout: cfg.RequestTimeout,
+		done:           make(chan struct{}),
 	}
 
 	if luaPool != nil {
@@ -129,14 +131,15 @@ func (r *Robot) Start() {
 		if r.l != nil {
 			r.luaMu.Lock()
 			script.SetContext(r.l, &script.Context{
-				RobotID:   r.id,
-				Account:   r.account,
-				Store:     r.state,
-				Factory:   r.factory,
-				Adapter:   r.adp,
-				NetSender: &netSenderAdapter{robot: r},
-				Ctx:       r.ctx,
-				LuaMu:     &r.luaMu,
+				RobotID:               r.id,
+				Account:               r.account,
+				Store:                 r.state,
+				Factory:               r.factory,
+				Adapter:               r.adp,
+				NetSender:             &netSenderAdapter{robot: r},
+				Ctx:                   r.ctx,
+				LuaMu:                 &r.luaMu,
+				DefaultRequestTimeout: r.requestTimeout, // robotConfig.timeoutSec → Lua tcp/udp_request 默认 timeout
 			})
 			r.luaMu.Unlock()
 		}
@@ -384,18 +387,45 @@ func (h *robotActionHandler) ExecuteAction(actionDef *engine.ActionDef) error {
 }
 
 // classifyResult 将 error 映射为 monitor ActionResult。
+//
+// 分类优先级（高到低）：
+//  1. context.Canceled / context.DeadlineExceeded → Canceled
+//     （任务停止或 robot.Close 直接命中 ctx，未经过网络层）
+//  2. ActionError.Code == ErrActionCanceled → Canceled
+//     （网络层等待响应时本地主动 Close 触发 ctx.Done，包成 ActionError 上抛）
+//  3. ActionError.Code ∈ 超时码 → Timeout
+//  4. 其它（含框架/服务端错误码）→ Failure
+//
+// 历史教训：早期未识别 ErrActionCanceled，导致任务停止时 inflight 的 BattleEnd /
+// GameOver / RequestGameModeList 等动作被误归为 Failure，监控面板和历史详情里
+// 堆出大量"假失败"，掩盖了真实的服务端业务错误。
 func classifyResult(err error) monitor.ActionResult {
 	if err == nil {
 		return monitor.ResultSuccess
 	}
-	// 任务取消优先级最高
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return monitor.ResultCanceled
 	}
-	if errors.Is(err, engine.ErrTimeout) {
-		return monitor.ResultTimeout
+	var actionErr *engine.ActionError
+	if errors.As(err, &actionErr) {
+		if isCanceledCode(actionErr.Code) {
+			return monitor.ResultCanceled
+		}
+		if isTimeoutCode(actionErr.Code) {
+			return monitor.ResultTimeout
+		}
 	}
 	return monitor.ResultFailure
+}
+
+// isTimeoutCode 判断错误码是否为超时类（用于 classifyResult 分流 ResultTimeout）。
+func isTimeoutCode(code errcode.ErrorCode) bool {
+	return code == errcode.ErrRecvTimeout || code == errcode.ErrListenTimeout
+}
+
+// isCanceledCode 判断错误码是否表示"本地主动取消"（用于 classifyResult 分流 ResultCanceled）。
+func isCanceledCode(code errcode.ErrorCode) bool {
+	return code == errcode.ErrActionCanceled
 }
 
 // executeLuaAction 执行 lua 脚本动作，返回 (sendBytes, recvBytes, timing, err)。
@@ -425,10 +455,41 @@ func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int,
 	}
 
 	if code != 0 {
-		return send, recv, timing, engine.NewActionError(errcode.ErrLuaExitCode, fmt.Sprintf("script=%s code=%d", actionDef.Script, code))
+		return send, recv, timing, luaCodeToActionErr(code, actionDef.Script)
 	}
 
 	return send, recv, timing, nil
+}
+
+// luaCodeToActionErr 将 Lua 脚本退出码映射为结构化 ActionError。
+//
+// Lua 网络层 API（tcp_request / udp_send 等）已统一使用 errcode 体系返回错误码，
+// 如果 exit code 命中已知 errcode，直接构造对应的 ActionError 透传给 monitor，
+// 使前端 error map 能展示真实错误分类（如 ErrRecvTimeout / ErrConnClosed），
+// 而非全部塌缩为 ErrLuaExitCode。
+//
+// 映射规则：
+//   - code ∈ 已知框架 errcode     → NewActionError，由 classifyResult 按 Code 分流 ResultTimeout/ResultFailure
+//   - code ≥ 100                  → NewServerError，走 ResultFailure + error map (Kind=server)
+//   - 其他                         → 兜底 ErrLuaExitCode
+func luaCodeToActionErr(code int, script string) error {
+	detail := fmt.Sprintf("script=%s", script)
+
+	ec := errcode.ErrorCode(code)
+
+	switch ec {
+	case errcode.ErrConnNotFound, errcode.ErrConnClosed, errcode.ErrSendFailed,
+		errcode.ErrRecvTimeout, errcode.ErrConnDropped, errcode.ErrActionCanceled,
+		errcode.ErrEncodeFailed, errcode.ErrParseFailed,
+		errcode.ErrListenTimeout:
+		return engine.NewActionError(ec, detail)
+	}
+
+	if code >= 100 {
+		return engine.NewServerError(uint64(code), detail)
+	}
+
+	return engine.NewActionError(errcode.ErrLuaExitCode, fmt.Sprintf("%s code=%d", detail, code))
 }
 
 // ExecuteBoolean 执行条件判断
@@ -548,14 +609,15 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 			defer h.robot.luaMu.Unlock()
 
 			script.SetContext(h.robot.l, &script.Context{
-				RobotID:   h.robot.id,
-				Account:   h.robot.account,
-				Store:     h.robot.state,
-				Factory:   h.robot.factory,
-				Adapter:   h.robot.adp,
-				NetSender: &netSenderAdapter{robot: h.robot},
-				Ctx:       h.robot.ctx,
-				LuaMu:     &h.robot.luaMu,
+				RobotID:               h.robot.id,
+				Account:               h.robot.account,
+				Store:                 h.robot.state,
+				Factory:               h.robot.factory,
+				Adapter:               h.robot.adp,
+				NetSender:             &netSenderAdapter{robot: h.robot},
+				Ctx:                   h.robot.ctx,
+				LuaMu:                 &h.robot.luaMu,
+				DefaultRequestTimeout: h.robot.requestTimeout,
 			})
 
 			if err := h.robot.luaPool.RunCallbackScript(h.robot.l, cbDef.Script, msg.Data, cbDef.S2CProto); err != nil {
@@ -624,9 +686,11 @@ func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, routeKey s
 	if err != nil {
 		return nil, 0, netLatency, err
 	}
-	stresslog.Debug("[ACTION] TCPResponse",
-		zap.String("service", service), zap.String("routeKey", routeKey),
-		zap.Int("bodyLen", len(resp.Data)), zap.Uint64("headerErr", resp.HeaderErr))
+	if stresslog.DebugEnabled() {
+		stresslog.Debug("[ACTION] TCPResponse",
+			zap.String("service", service), zap.String("routeKey", routeKey),
+			zap.Int("bodyLen", len(resp.Data)), zap.Uint64("headerErr", resp.HeaderErr))
+	}
 	return resp.Data, resp.HeaderErr, netLatency, nil
 }
 
@@ -640,9 +704,11 @@ func (ns *netSenderAdapter) UDPRequest(service string, packet []byte, routeKey s
 	if err != nil {
 		return nil, 0, netLatency, err
 	}
-	stresslog.Debug("[ACTION] UDPResponse",
-		zap.String("service", service), zap.String("routeKey", routeKey),
-		zap.Int("bodyLen", len(resp.Data)), zap.Uint64("headerErr", resp.HeaderErr))
+	if stresslog.DebugEnabled() {
+		stresslog.Debug("[ACTION] UDPResponse",
+			zap.String("service", service), zap.String("routeKey", routeKey),
+			zap.Int("bodyLen", len(resp.Data)), zap.Uint64("headerErr", resp.HeaderErr))
+	}
 	return resp.Data, resp.HeaderErr, netLatency, nil
 }
 

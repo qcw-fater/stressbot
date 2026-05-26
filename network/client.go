@@ -103,7 +103,9 @@ func (c *Client) CloseUDP(serviceName string) {
 	conn.Close()
 }
 
-// CloseAll 关闭所有连接，并等待所有监听循环退出（确保回调不再使用 Robot 资源）。
+// CloseAll 关闭所有连接，并等待所有后台 goroutine 退出。
+// 等待顺序：先 decode（OnReceive 的源头）再 listen（OnReceive 的下游），
+// 确保任何回调离开后不再有数据流入 Robot 资源。
 func (c *Client) CloseAll() {
 	c.mu.Lock()
 	tcpConns := c.tcpConn
@@ -121,8 +123,15 @@ func (c *Client) CloseAll() {
 	for _, conn := range udpConns {
 		conn.Close()
 	}
-	// 等待所有 listenLoop 退出。回调在 listenLoop 内同步执行，
-	// loop 退出后不会有任何回调仍在使用 Robot 的 LState。
+	// 1. 等 decodeLoop 退出：源头停掉后不会再有新消息进入 listenCh
+	for _, conn := range tcpConns {
+		conn.WaitDecodeDone()
+	}
+	for _, conn := range udpConns {
+		conn.WaitDecodeDone()
+	}
+	// 2. 等 listenLoop 退出：回调串行执行，loop 退出后不会有任何回调
+	//    仍在使用 Robot 的 LState
 	for _, conn := range tcpConns {
 		conn.WaitListenDone()
 	}

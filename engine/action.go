@@ -976,7 +976,7 @@ func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *
 	// listen 超时不算"成功一次网络往返"，SamplesNet=0：不污染 latency 直方图，
 	// 但 timeout 分支会把这段时间记入 timeoutTotalMs（仍代表服务端 SLA 失败边界）。
 	elapsed := time.Since(start)
-	return 0, ActionTiming{NetLatency: elapsed, SamplesNet: 0}, NewTimeoutError(errcode.ErrListenTimeout,
+	return 0, ActionTiming{NetLatency: elapsed, SamplesNet: 0}, NewActionError(errcode.ErrListenTimeout,
 		"action="+def.Name+" service="+def.Service+" route="+routeKey+
 			fmt.Sprintf(" timeout=%ds polls=%d elapsed=%v", timeout, pollCount, elapsed))
 }

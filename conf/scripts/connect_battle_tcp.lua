@@ -26,7 +26,7 @@ function execute(r)
     local battleAddress = robot.get("battleAddress")
     if not battleAddress or battleAddress == "" then
         log.error("ConnectBattleTCP: 无战斗服地址")
-        return 1, 0, 0
+        return 41, 0, 0  -- 41=ADDR_EMPTY
     end
 
     log.info("连接战斗服 TCP: " .. battleAddress)
@@ -34,14 +34,20 @@ function execute(r)
     local ok = network.connect_tcp("battle", battleAddress)
     if not ok then
         log.error("连接战斗服 TCP 失败: " .. battleAddress)
-        return 1, 0, 0
+        return 1, 0, 0  -- 1=CONN_NOT_FOUND：连接没建好（语义准确）
     end
 
     -- 发送空包获取密钥并设置到连接
+    -- 不显式传 timeout，复用 robotConfig.timeoutSec（默认 60s）；
+    -- 若需要单独缩短此握手超时，再传第 5 个参数。
     local code, keyBody, sent, recv = network.tcp_request("battle")
-    if code ~= 0 or not keyBody or #keyBody == 0 then
-        log.error("战斗服密钥交换失败")
-        return 1, sent, recv
+    if code ~= 0 then
+        log.error("战斗服密钥交换失败 code=" .. tostring(code))
+        return code, sent, recv  -- 透传底层 code
+    end
+    if not keyBody or #keyBody == 0 then
+        log.error("战斗服密钥交换响应为空")
+        return 54, sent, recv  -- 54=LUA_EXIT_CODE
     end
     network.set_tcp_secret_key("battle", keyBody)
 

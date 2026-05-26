@@ -14,7 +14,7 @@ function execute(r)
 
     if not resp then
         log.error("RequestPlayerData: 响应为空")
-        return 1, sent, recv
+        return 31, sent, recv  -- 31=LISTEN_TIMEOUT
     end
 
     -- 存储完整玩家数据

@@ -113,8 +113,9 @@ type CollectorConfig struct {
 // enabled=false 时所有方法均为 no-op，压测核心路径零开销。
 type MetricsCollector struct {
 	enabled   bool            // 是否启用
-	cfg       CollectorConfig // 运行期配置副本
-	cfgMu     sync.RWMutex    // 保护 cfg.ApdexT 的运行期读写（任务级可调）
+	cfg       CollectorConfig // 运行期配置副本（除 ApdexT 外）
+	cfgMu     sync.RWMutex    // 保护 cfg 非热路径字段
+	apdexT    atomic.Int32    // Apdex T 阈值（毫秒）热路径独立原子读写，与 cfgMu 解耦
 	startTime time.Time       // 收集器启动时间
 
 	actions sync.Map   // string → *actionMetrics，按 action 名称索引
@@ -148,9 +149,12 @@ func Init(cfg CollectorConfig) {
 			cfg:       cfg,
 			startTime: time.Now(),
 		}
-		if global.cfg.ApdexT <= 0 {
-			global.cfg.ApdexT = 100
+		t := cfg.ApdexT
+		if t <= 0 {
+			t = 100
 		}
+		global.cfg.ApdexT = t
+		global.apdexT.Store(int32(t))
 	})
 }
 
@@ -180,10 +184,13 @@ func (c *MetricsCollector) Reset() {
 }
 
 // SetApdexT 任务级调整 Apdex T 值（毫秒），≤0 不修改。
+// 热路径只读 c.apdexT（atomic），这里同步更新原子字段；
+// cfg.ApdexT 仅用于快照导出，写时一并维护以保持可见。
 func (c *MetricsCollector) SetApdexT(t int) {
 	if t <= 0 {
 		return
 	}
+	c.apdexT.Store(int32(t))
 	c.cfgMu.Lock()
 	c.cfg.ApdexT = t
 	c.cfgMu.Unlock()
@@ -225,8 +232,8 @@ func (c *MetricsCollector) AddBandwidth(send, recv int64) {
 // 设计要点（参见 plans/latency-net-only-redesign.md §3.4）：
 //   - 纯客户端动作（setState / connect / register_heartbeat 等 lua）netSamples=0，
 //     不进直方图避免污染 P95，但 successCount 仍 +1 保持可见性。
-//   - 失败 / 超时不进 latency 直方图（保持原有语义）。
-//   - timeout 仍记 netLatency 到 timeoutTotalMs，反映服务端 SLA 边界值。
+//   - 失败 / 超时不进 latency 直方图（保持原有语义），但都进入 error map。
+//   - timeout 记 netLatency 到 timeoutTotalMs（反映服务端 SLA 边界值）+ error map。
 func (c *MetricsCollector) RecordAction(
 	name string, result ActionResult,
 	netLatency, clientCost time.Duration, netSamples int,
@@ -252,9 +259,7 @@ func (c *MetricsCollector) RecordAction(
 		if netSamples > 0 {
 			am.latency.Record(netLatency)
 			am.netActionCount.Add(1)
-			c.cfgMu.RLock()
-			T := int64(c.cfg.ApdexT)
-			c.cfgMu.RUnlock()
+			T := int64(c.apdexT.Load())
 			ms := netLatency.Milliseconds()
 			switch {
 			case ms < T:
@@ -280,6 +285,9 @@ func (c *MetricsCollector) RecordAction(
 	case ResultTimeout:
 		am.timeoutCount.Add(1)
 		am.timeoutTotalMs.Add(netLatency.Milliseconds())
+		if err != nil {
+			c.recordError(am, err)
+		}
 	case ResultCanceled:
 		am.canceledCount.Add(1)
 	}

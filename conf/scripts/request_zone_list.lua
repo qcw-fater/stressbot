@@ -16,7 +16,7 @@ function execute(r)
         channel = channel
     })
     if code < 0 then
-        return 1, sent, recv
+        return 3, sent, recv  -- 3=SEND_FAILED：HTTP 传输层失败
     end
 
     local ok, resp = pcall(json.decode, body)

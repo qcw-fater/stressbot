@@ -7,10 +7,6 @@ import (
 	"stressbot/errcode"
 )
 
-// ErrTimeout 表示动作超时。
-// 被 NewTimeoutError 包装后，通过 errors.Is(err, ErrTimeout) 识别。
-var ErrTimeout = errors.New("action timeout")
-
 // 流程配置错误哨兵。这些是 flow.json 配置错误，不是运行时动作错误。
 var (
 	ErrNodeNotFound   = errors.New("节点不存在")
@@ -26,7 +22,7 @@ type ActionError struct {
 	Kind   errcode.Kind      // 错误来源类别：KindFramework 或 KindServer
 	Code   errcode.ErrorCode // 错误码，与 Kind 组成唯一标识
 	Detail string            // 上下文描述（service / route / elapsed 等），不含 [code] 前缀
-	cause  error             // 可选下层错误，用于 errors.Is 链式判断（如 ErrTimeout）
+	cause  error             // 可选下层错误，用于 errors.Is 链式判断
 }
 
 // NewActionError 创建框架错误（最常用入口）。
@@ -37,12 +33,6 @@ func NewActionError(code errcode.ErrorCode, detail string, cause ...error) *Acti
 		e.cause = cause[0]
 	}
 	return e
-}
-
-// NewTimeoutError 创建带 ErrTimeout cause 的超时错误。
-// classifyResult 通过 errors.Is(err, ErrTimeout) 识别并归类为 ResultTimeout。
-func NewTimeoutError(code errcode.ErrorCode, detail string) *ActionError {
-	return &ActionError{Kind: errcode.KindFramework, Code: code, Detail: detail, cause: ErrTimeout}
 }
 
 // NewServerError 包装服务端 headerErr 为 ActionError。

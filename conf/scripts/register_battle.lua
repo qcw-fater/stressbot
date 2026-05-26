@@ -14,10 +14,11 @@ function execute(r)
 
     if not fighterIndex then
         log.error("RegisterBattle: 缺少 fighterIndex")
-        return 1, 0, 0
+        return 54, 0, 0  -- 54=LUA_EXIT_CODE：业务前置条件不足
     end
 
     local _send, _recv = 0, 0
+    local lastCode = 54  -- 兜底；首轮失败前不该被使用
 
     -- 战斗服可能还未创建好房间，重试最多 5 次，每次间隔 2 秒
     local maxRetry = 5
@@ -30,6 +31,7 @@ function execute(r)
         local code, _, sent, recv = network.tcp_request("battle", {cmd=4, act=1}, msg, "Game.BattleRegisterS2C")
         _send = _send + sent
         _recv = _recv + recv
+        lastCode = code
         if code == 0 then
             log.info("RegisterBattle 成功: index=" .. tostring(fighterIndex)
                 .. " battleId=" .. tostring(battleId))
@@ -43,6 +45,6 @@ function execute(r)
         end
     end
 
-    log.error("RegisterBattle 最终失败: 已重试 " .. maxRetry .. " 次")
-    return 1, _send, _recv
+    log.error("RegisterBattle 最终失败: 已重试 " .. maxRetry .. " 次 lastCode=" .. tostring(lastCode))
+    return lastCode, _send, _recv  -- 透传最后一次失败的真实 code
 end

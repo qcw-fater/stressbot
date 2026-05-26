@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -80,6 +81,10 @@ func (es *EventServer) OnOpen(gconn gnet.Conn) ([]byte, gnet.Action) {
 }
 
 // OnClose gnet 连接关闭回调。
+//
+// 把 err 字符串归一化为简短 reason 传给 Connection.onClose，让 inflight RequestResponse
+// 命中 ctx.Done() 时能拼到错误 detail（例如 "cause=EOF" / "cause=RST(forcibly closed)"）。
+// reason="" 表示无错误的正常关闭（服务端调 close 但底层没报 error，少见）。
 func (es *EventServer) OnClose(gconn gnet.Conn, err error) gnet.Action {
 	conn := es.registry.get(gconn)
 	if conn != nil {
@@ -91,13 +96,52 @@ func (es *EventServer) OnClose(gconn gnet.Conn, err error) gnet.Action {
 			stresslog.Debug("[GNET] 连接正常关闭",
 				zap.String("service", conn.ServiceName()), zap.String("robot", conn.robotName))
 		}
-		conn.onClose()
+		conn.onClose(closeReasonFromErr(err))
 	}
 	return gnet.None
 }
 
+// closeReasonFromErr 把 gnet 给的 close error 归一化为短标签字符串。
+//
+// 设计：保留辨识度但去除冗长的地址/系统调用名，让前端面板能直接展示；
+// 同一类断开归一为同一个标签便于聚合（避免每个连接的 IP:port 撑出唯一字符串
+// 爆炸聚合维度，monitor 用 (Kind,Code,Detail) 做错误聚合）。
+func closeReasonFromErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	s := err.Error()
+	switch {
+	case s == "EOF":
+		return "EOF"
+	case strings.Contains(s, "forcibly closed"), strings.Contains(s, "connection reset"):
+		return "RST"
+	case strings.Contains(s, "broken pipe"):
+		return "broken-pipe"
+	case strings.Contains(s, "use of closed network connection"):
+		return "local-close"
+	case strings.Contains(s, "timeout"), strings.Contains(s, "deadline"):
+		return "timeout"
+	default:
+		// 兜底：保留原错误但截断防止 detail 过长污染聚合维度
+		if len(s) > 64 {
+			s = s[:64]
+		}
+		return s
+	}
+}
+
 // OnTraffic gnet 收到数据回调。
-// 使用 adapter 接口的纯 Go 方法做帧分割，Lua 仅在 Decode 时调用。
+//
+// 设计原则：此函数运行在 gnet 事件循环 goroutine 上，**严禁同步阻塞**
+// （阻塞会让该 loop 上所有连接的 I/O 一起冻结，是 CONN_DROPPED 雪崩的源头）。
+//
+// 因此只做两件纯 Go 操作：
+//  1. 用 adapter 缓存的元信息做帧分割（HeaderSize / BodyLength，零 Lua 调用）
+//  2. 把 raw msgBuf 投递到 connection 的 decodeCh，由 per-connection 的
+//     decodeLoop goroutine 异步完成 Lua decode + 分发
+//
+// msgBuf 从 sync.Pool 获取，decodeLoop 处理完归还，避免高频 alloc 触发 GC 抖动。
 func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 	headSize := es.adp.HeaderSize()
 
@@ -131,40 +175,44 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 			return gnet.None
 		}
 
-		msgBuf := make([]byte, totalLen)
+		msgBuf := getMsgBuf(totalLen)
 		if _, err = gconn.Read(msgBuf); err != nil {
+			putMsgBuf(msgBuf)
 			stresslog.Error("[GNET] 读取消息失败", zap.Error(err))
 			return gnet.None
 		}
 		// 全局带宽统计：所有真实入站字节都计入（含心跳应答、监听推送、未匹配响应等）。
-		// 与 connection.Send 的出站统计配对，monitor 拿到的是"网卡级"双向流量，
-		// 不再因为只算 RecordAction success 路径而严重低估甚至显示 0。
+		// 与 connection.Send 的出站统计配对，monitor 拿到的是"网卡级"双向流量。
 		monitor.Global().AddBandwidth(0, int64(totalLen))
 
-		if conn != nil {
-			secretKey := conn.GetSecretKey()
-			var routeKey string
-			var body []byte
-			var headerErr uint64
-			if gconn.RemoteAddr().Network() == "udp" {
-				routeKey, body, headerErr = es.adp.DecodeUDP(msgBuf, secretKey)
-			} else {
-				routeKey, body, headerErr = es.adp.DecodeTCP(msgBuf, secretKey)
-			}
-			if routeKey != "" {
-				conn.OnReceive(routeKey, body, headerErr)
-			} else {
-				stresslog.Warn("[NETWORK] 解码返回空 routeKey，响应被丢弃",
-					zap.String("service", conn.ServiceName()),
-					zap.String("robot", conn.robotName),
-					zap.Int("bodyLen", len(body)))
-		}
-		} else {
+		if conn == nil {
+			putMsgBuf(msgBuf)
 			stresslog.Warn("[NETWORK] 收到消息但连接未注册，消息被丢弃",
 				zap.Int("fd", gconn.Fd()), zap.Int("bodyLen", totalLen))
+			continue
+		}
+
+		switch conn.EnqueueRaw(msgBuf) {
+		case EnqueueOK:
+			// 入队成功，msgBuf 由 decodeLoop 在处理后归还
+		case EnqueueClosed:
+			// 连接已关闭或还没启动 decode：这是正常现象（任务停止 / battle_end close_* /
+			// 服务端 EOF 后 inbound 字节仍在路上）。归还 buffer 即可，不重复关闭、不报警。
+			putMsgBuf(msgBuf)
+			stresslog.Debug("[NETWORK] 连接已关闭，丢弃后续 inbound 帧",
+				zap.String("service", conn.ServiceName()),
+				zap.String("robot", conn.robotName),
+				zap.Int("bodyLen", totalLen))
+		case EnqueueChFull:
+			// decodeCh 真满 = decode 严重落后（Lua 池耗尽或对端发包速率超出处理能力）。
+			// 关闭这条连接释放资源，避免持续累积导致整体雪崩。
+			putMsgBuf(msgBuf)
+			stresslog.Warn("[NETWORK] decode 通道已满，关闭连接以释放压力",
+				zap.String("service", conn.ServiceName()),
+				zap.String("robot", conn.robotName))
+			return gnet.Close
 		}
 	}
-
 }
 
 // OnTick gnet 定时回调。
@@ -258,13 +306,15 @@ func (d *Dialer) DialTCP(ctx context.Context, address string, conn *Connection) 
 		gconn := res.conn
 		bindConn(gconn, conn)
 		d.server.registry.register(gconn, conn)
+		// 启动异步 decode goroutine：必须在 register 之后立即启动，
+		// 否则首批 OnTraffic 到达时 decodeCh 还没准备好，会被 EnqueueRaw 拒绝。
+		conn.StartDecodeLoop(d.server.adp, false)
 
 		stresslog.Info("[GNET] TCP 连接已建立",
 			zap.String("address", address), zap.String("service", conn.serviceName), zap.String("robot", conn.robotName))
 		return gconn, nil
 	}
 }
-
 
 // DialUDP 建立 UDP 连接并绑定业务层 Connection。
 func (d *Dialer) DialUDP(address string, conn *Connection) (gnet.Conn, error) {
@@ -275,6 +325,7 @@ func (d *Dialer) DialUDP(address string, conn *Connection) (gnet.Conn, error) {
 
 	bindConn(gconn, conn)
 	d.server.registry.register(gconn, conn)
+	conn.StartDecodeLoop(d.server.adp, true)
 
 	stresslog.Info("[GNET] UDP 连接已建立", zap.String("address", address), zap.String("robot", conn.robotName))
 	return gconn, nil

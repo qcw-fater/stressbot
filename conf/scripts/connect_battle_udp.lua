@@ -41,13 +41,13 @@ function execute(r)
     local battleAddress = robot.get("battleAddress")
     if not battleAddress or battleAddress == "" then
         log.error("ConnectBattleUDP: 无战斗服地址")
-        return 1, 0, 0
+        return 41, 0, 0  -- 41=ADDR_EMPTY
     end
 
     local ok = network.connect_udp("battle", battleAddress)
     if not ok then
         log.error("ConnectBattleUDP 连接失败: " .. battleAddress)
-        return 1, 0, 0
+        return 1, 0, 0  -- 1=CONN_NOT_FOUND
     end
 
     -- 设置 UDP 密钥（从 listen_start_loading 保存）

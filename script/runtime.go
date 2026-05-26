@@ -47,6 +47,14 @@ type Context struct {
 	Ctx       context.Context
 	LuaMu     *sync.Mutex
 
+	// DefaultRequestTimeout 当 Lua 脚本调 network.tcp_request / udp_request 未显式传
+	// timeout 参数时使用的默认值。来自 robotConfig.timeoutSec → ResolvedConfig.RequestTimeout。
+	// 0 表示沿用 engine.DefaultRequestTimeoutSec 的硬编码兜底（保留旧行为兼容）。
+	//
+	// 历史背景：早期版本硬编码 10s，与声明式 tcpRequest 走的 60s（来自 c.requestTimeout）
+	// 不一致。在高并发握手场景下 10s 太短，会把"服务端慢响应但最终能回"误判为 timeout。
+	DefaultRequestTimeout time.Duration
+
 	NetLatencyNs atomic.Int64
 	NetSamples   atomic.Int64
 }

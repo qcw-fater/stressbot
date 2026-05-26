@@ -10,7 +10,7 @@ function execute(r)
     local resp, recv = network.tcp_listen("logic", {cmd=3, act=1}, "Game.MatchSucceedS2C", 600, 1000)
     if not resp then
         log.error("MatchSucceed 超时")
-        return 1, 0, recv
+        return 31, 0, recv  -- 31=LISTEN_TIMEOUT
     end
 
     local ok, err = pcall(function()
@@ -45,7 +45,7 @@ function execute(r)
             .. " battleArea=" .. tostring(robot.get("battleArea")))
     else
         log.error("MatchSucceed 解析失败: " .. tostring(err))
-        return 1, 0, recv
+        return 54, 0, recv  -- 54=LUA_EXIT_CODE
     end
 
     return 0, 0, recv

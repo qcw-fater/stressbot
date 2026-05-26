@@ -16,6 +16,34 @@ import (
 // lstateAcquireTimeout 从 Lua 池获取 LState 的超时时间。
 const lstateAcquireTimeout = 30 * time.Second
 
+// defaultPoolMultiplier 默认池大小相对 NumCPU 的放大系数。
+//
+// 历史 = 1（仅 NumCPU 个 LState），在 10000+ 连接场景下会发生：
+//   - gnet 事件循环（decode）与 1000+ robot goroutine（encode）抢同一池
+//   - acquire 阻塞 → 事件循环停滞 → 心跳/响应被服务端判定掉线 → CONN_DROPPED 雪崩
+//
+// 调整为 4（每核 4 个 LState）：
+//   - 单个 LState 内存约 0.5-1MB，8 核机器默认 32 个 ≈ 32MB，可接受
+//   - 配合 network 层异步 decode（per-connection goroutine），池竞争从 gnet 事件循环
+//     转移到普通 goroutine，短暂排队不再放大成事件循环冻结
+const defaultPoolMultiplier = 4
+
+// defaultPoolCap 默认池大小上限（防止超多核机器创建过多 LState 浪费内存）。
+const defaultPoolCap = 128
+
+// SuggestedPoolSize 推荐的 LState 池大小：max(1, min(NumCPU * defaultPoolMultiplier, defaultPoolCap))。
+// 调用方在不显式指定 poolSize 时应使用此值。
+func SuggestedPoolSize() int {
+	n := runtime.NumCPU() * defaultPoolMultiplier
+	if n < 1 {
+		n = 1
+	}
+	if n > defaultPoolCap {
+		n = defaultPoolCap
+	}
+	return n
+}
+
 // LuaAdapter 通过 gopher-lua LState 池调用适配器脚本实现 Adapter 接口。
 //
 // 热路径优化策略：
@@ -40,11 +68,14 @@ type LuaAdapter struct {
 var _ Adapter = (*LuaAdapter)(nil)
 
 // NewLuaAdapter 创建并初始化 Lua 适配器池。
-// scriptPath: codec.lua 路径；poolSize: LState 池大小（建议 = CPU 核心数）。
+// scriptPath: codec.lua 路径；poolSize: LState 池大小（≤0 使用 SuggestedPoolSize）。
 // errorMapPath: error.lua 路径（可选，空字符串表示不加载错误码映射）。
 func NewLuaAdapter(poolSize int, scriptPath string, errorMapPath string) (*LuaAdapter, error) {
 	if poolSize <= 0 {
-		poolSize = runtime.NumCPU()
+		poolSize = SuggestedPoolSize()
+	}
+	if poolSize > defaultPoolCap {
+		poolSize = defaultPoolCap
 	}
 
 	// Step 1: 编译脚本

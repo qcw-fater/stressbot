@@ -10,14 +10,20 @@ function execute(r)
     local ok = network.connect_tcp("logic", logicAddress)
     if not ok then
         log.error("连接逻辑服失败: " .. logicAddress)
-        return 1, 0, 0
+        return 1, 0, 0  -- 1=CONN_NOT_FOUND：连接没建好（语义准确）
     end
 
     -- 发送空包获取密钥并设置到连接
+    -- 不显式传 timeout，复用 robotConfig.timeoutSec（默认 60s）；
+    -- 若需要单独缩短此握手超时，再传第 5 个参数。
     local code, keyBody, sent, recv = network.tcp_request("logic", nil)
-    if code ~= 0 or not keyBody or #keyBody == 0 then
-        log.error("逻辑服密钥交换失败")
-        return 1, sent, recv
+    if code ~= 0 then
+        log.error("逻辑服密钥交换失败 code=" .. tostring(code))
+        return code, sent, recv  -- 透传底层 code（如 5=CONN_DROPPED / 4=RECV_TIMEOUT）
+    end
+    if not keyBody or #keyBody == 0 then
+        log.error("逻辑服密钥交换响应为空")
+        return 54, sent, recv  -- 54=LUA_EXIT_CODE：协议层异常
     end
     network.set_tcp_secret_key("logic", keyBody)
 

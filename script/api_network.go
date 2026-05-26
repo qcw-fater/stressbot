@@ -2,10 +2,12 @@ package script
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/url"
 	"stressbot/engine"
+	"stressbot/errcode"
 	stresslog "stressbot/utils/log"
 	"sync"
 	"time"
@@ -93,6 +95,35 @@ func pushRequestResult(L *lua.LState, code int, data lua.LValue, sent, recv int)
 	L.Push(lua.LNumber(sent))
 	L.Push(lua.LNumber(recv))
 	return 4
+}
+
+// errToCode 从 ActionError 提取错误码，透传给 Lua。
+// 所有网络层错误都是 ActionError（含 errcode 体系的具体码），
+// 非 ActionError 降级为 -1（理论上不会走到）。
+func errToCode(err error) int {
+	var actionErr *engine.ActionError
+	if errors.As(err, &actionErr) {
+		return int(actionErr.ErrorCode())
+	}
+	return -1
+}
+
+// resolveRequestTimeoutSec 决定 Lua tcp_request / udp_request 的 timeout（秒）。
+//
+// 优先级（高到低）：
+//  1. Lua 调用显式传入的第 5 个参数（始终最高优先级，便于脚本临时覆盖）
+//  2. ctx.DefaultRequestTimeout（来自 robotConfig.timeoutSec，集中配置）
+//  3. engine.DefaultRequestTimeoutSec（硬编码兜底，仅在 ctx 未注入时触发）
+//
+// 把这个逻辑收敛到一处，避免 TCP/UDP 两个 API 各写一遍导致漂移。
+func resolveRequestTimeoutSec(L *lua.LState, ctx *Context) int {
+	if L.GetTop() >= 5 {
+		return L.CheckInt(5)
+	}
+	if ctx != nil && ctx.DefaultRequestTimeout > 0 {
+		return int(ctx.DefaultRequestTimeout / time.Second)
+	}
+	return engine.DefaultRequestTimeoutSec
 }
 
 // extractNetArgs 从 Lua 栈提取 service + route + msg + s2cProto。
@@ -241,7 +272,7 @@ func networkCloseUDP(L *lua.LState) int {
 // 签名：network.tcp_request(service, route, msg [, s2c_proto])
 //
 // 返回：code(number), data(string|userdata|nil), sent(number), recv(number)
-// code=0 成功 / -1 请求失败 / -2 解析失败
+// code=0 成功 / errcode 错误码（1-5 网络层 / 11 协议层 / ≥100 服务端）。
 func networkTCPRequest(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -255,10 +286,7 @@ func networkTCPRequest(L *lua.LState) int {
 		return 0
 	}
 
-	timeout := engine.DefaultRequestTimeoutSec
-	if L.GetTop() >= 5 {
-		timeout = L.CheckInt(5)
-	}
+	timeout := resolveRequestTimeoutSec(L, ctx)
 
 	msgData, err := serializeMsg(ctx, msg)
 	if err != nil {
@@ -268,7 +296,7 @@ func networkTCPRequest(L *lua.LState) int {
 
 	packet := buildPacket(ctx, service, route, msgData)
 	if packet == nil {
-		return pushRequestResult(L, -1, lua.LNil, 0, 0)
+		return pushRequestResult(L, int(errcode.ErrEncodeFailed), lua.LNil, 0, 0)
 	}
 
 	goRoute := luaValueToRoute(route)
@@ -287,7 +315,7 @@ func networkTCPRequest(L *lua.LState) int {
 	ctx.recordNet(netLatency)
 
 	if reqErr != nil {
-		return pushRequestResult(L, -1, lua.LNil, pktLen, 0)
+		return pushRequestResult(L, errToCode(reqErr), lua.LNil, pktLen, 0)
 	}
 	if headerErr != 0 {
 		return pushRequestResult(L, int(headerErr), lua.LString(string(respBody)), pktLen, len(respBody))
@@ -296,7 +324,7 @@ func networkTCPRequest(L *lua.LState) int {
 	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
 		respMsg, err := ctx.Factory.Parse(s2cProto, respBody)
 		if err != nil {
-			return pushRequestResult(L, -2, lua.LString(string(respBody)), pktLen, len(respBody))
+			return pushRequestResult(L, int(errcode.ErrParseFailed), lua.LString(string(respBody)), pktLen, len(respBody))
 		}
 		return pushRequestResult(L, 0, wrapProtoMessage(L, respMsg), pktLen, len(respBody))
 	}
@@ -308,6 +336,7 @@ func networkTCPRequest(L *lua.LState) int {
 // 签名：network.udp_request(service, route, body [, s2c_proto [, timeout_sec [, poll_ms]]])
 //
 // 返回：code(number), data(string|userdata|nil), sent(number), recv(number)
+// code=0 成功 / errcode 错误码（1-5 网络层 / 11 协议层 / ≥100 服务端）。
 func networkUDPRequest(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
@@ -325,17 +354,14 @@ func networkUDPRequest(L *lua.LState) int {
 	if L.GetTop() >= 4 {
 		s2cProto = L.CheckString(4)
 	}
-	timeout := engine.DefaultRequestTimeoutSec
-	if L.GetTop() >= 5 {
-		timeout = L.CheckInt(5)
-	}
+	timeout := resolveRequestTimeoutSec(L, ctx)
 
 	goRoute := luaValueToRoute(route)
 	routeKey := ctx.Adapter.ExpectedRouteKey(goRoute)
 	udpKey := ctx.NetSender.GetUDPSecretKey(service)
 	packet := ctx.Adapter.EncodeUDP(goRoute, body, udpKey)
 	if packet == nil {
-		return pushRequestResult(L, -1, lua.LNil, 0, 0)
+		return pushRequestResult(L, int(errcode.ErrEncodeFailed), lua.LNil, 0, 0)
 	}
 
 	pktLen := len(packet)
@@ -353,10 +379,13 @@ func networkUDPRequest(L *lua.LState) int {
 	ctx.recordNet(netLatency)
 
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-		return pushRequestResult(L, -1, lua.LNil, pktLen, 0)
+		// 脚本上下文被取消（robot.Stop / 任务停止）。区别于 reqErr 携带的 CONN_DROPPED：
+		// 后者是底层连接被对端断开；这里是本地主动取消，归类为 ACTION_CANCELED 避免被
+		// 误判为网络异常污染失败率统计。
+		return pushRequestResult(L, int(errcode.ErrActionCanceled), lua.LNil, pktLen, 0)
 	}
 	if reqErr != nil {
-		return pushRequestResult(L, -1, lua.LNil, pktLen, 0)
+		return pushRequestResult(L, errToCode(reqErr), lua.LNil, pktLen, 0)
 	}
 	if headerErr != 0 {
 		return pushRequestResult(L, int(headerErr), lua.LString(string(respBody)), pktLen, len(respBody))
@@ -365,7 +394,7 @@ func networkUDPRequest(L *lua.LState) int {
 	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
 		respMsg, err := ctx.Factory.Parse(s2cProto, respBody)
 		if err != nil {
-			return pushRequestResult(L, -2, lua.LString(string(respBody)), pktLen, len(respBody))
+			return pushRequestResult(L, int(errcode.ErrParseFailed), lua.LString(string(respBody)), pktLen, len(respBody))
 		}
 		return pushRequestResult(L, 0, wrapProtoMessage(L, respMsg), pktLen, len(respBody))
 	}
@@ -468,6 +497,7 @@ func networkHTTPRequest(L *lua.LState) int {
 // 签名：network.tcp_send(service, route, msg)
 //
 // 返回：code(number), sent(number)
+// code=0 成功 / errcode 错误码（1-5 网络层 / 11 协议层）。
 func networkTCPSend(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -489,7 +519,7 @@ func networkTCPSend(L *lua.LState) int {
 
 	packet := buildPacket(ctx, service, route, msgData)
 	if packet == nil {
-		L.Push(lua.LNumber(-1))
+		L.Push(lua.LNumber(errcode.ErrEncodeFailed))
 		L.Push(lua.LNumber(0))
 		return 2
 	}
@@ -499,7 +529,7 @@ func networkTCPSend(L *lua.LState) int {
 		L.Push(lua.LNumber(0))
 		L.Push(lua.LNumber(n))
 	} else {
-		L.Push(lua.LNumber(-1))
+		L.Push(lua.LNumber(errToCode(err)))
 		L.Push(lua.LNumber(len(packet)))
 	}
 	return 2
@@ -509,6 +539,7 @@ func networkTCPSend(L *lua.LState) int {
 // 签名：network.udp_send(service, route, body)
 //
 // 返回：code(number), sent(number)
+// code=0 成功 / errcode 错误码（1-5 网络层 / 11 协议层）。
 func networkUDPSend(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
@@ -527,7 +558,7 @@ func networkUDPSend(L *lua.LState) int {
 	udpKey := ctx.NetSender.GetUDPSecretKey(service)
 	packet := ctx.Adapter.EncodeUDP(goRoute, body, udpKey)
 	if packet == nil {
-		L.Push(lua.LNumber(-1))
+		L.Push(lua.LNumber(errcode.ErrEncodeFailed))
 		L.Push(lua.LNumber(0))
 		return 2
 	}
@@ -536,7 +567,7 @@ func networkUDPSend(L *lua.LState) int {
 		L.Push(lua.LNumber(0))
 		L.Push(lua.LNumber(n))
 	} else {
-		L.Push(lua.LNumber(-1))
+		L.Push(lua.LNumber(errToCode(err)))
 		L.Push(lua.LNumber(len(packet)))
 	}
 	return 2

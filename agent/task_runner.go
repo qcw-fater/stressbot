@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -120,7 +119,7 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 	if _, err := os.Stat(errorMapScript); err != nil {
 		errorMapScript = ""
 	}
-	poolSize := runtime.NumCPU()
+	poolSize := adapter.SuggestedPoolSize()
 	adp, err := adapter.NewLuaAdapter(poolSize, adapterScript, errorMapScript)
 	if err != nil {
 	stresslog.Error("[TASK] 加载适配器失败", zap.String("taskID", taskID), zap.Error(err))

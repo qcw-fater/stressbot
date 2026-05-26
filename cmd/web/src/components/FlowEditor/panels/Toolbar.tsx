@@ -335,7 +335,6 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
           <Button
             icon={<DeploymentUnitOutlined />}
             onClick={() => applyAutoLayout('LR')}
-            disabled={readOnly}
           >
             布局
           </Button>

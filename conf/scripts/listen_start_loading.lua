@@ -16,7 +16,7 @@ function execute(r)
     local resp, recv = network.tcp_listen("logic", {cmd=4, act=6}, "Game.BattleStartLoadingS2C", 180, 500)
     if not resp then
         log.error("ListenStartLoading 超时")
-        return 1, 0, recv
+        return 31, 0, recv  -- 31=LISTEN_TIMEOUT
     end
 
     local fighterList = nil
@@ -104,7 +104,7 @@ function execute(r)
             .. " battleSession=" .. tostring(robot.get("battleSession")))
     else
         log.error("ListenStartLoading 解析失败: " .. tostring(err))
-        return 1, 0, recv
+        return 54, 0, recv  -- 54=LUA_EXIT_CODE
     end
 
     return 0, 0, recv

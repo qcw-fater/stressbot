@@ -264,6 +264,16 @@ func GetLogLevel() zapcore.Level {
 	return loglevel.Level()
 }
 
+// DebugEnabled 快速判断 Debug 级别是否启用（atomic load，纳秒级）。
+// 用于高频热路径在构造昂贵字段前提前短路，避免无效计算：
+//
+//	if stresslog.DebugEnabled() {
+//	    stresslog.Debug("msg", zap.String(...), ...)
+//	}
+func DebugEnabled() bool {
+	return loglevel.Enabled(zapcore.DebugLevel)
+}
+
 // StrToLevel 日志等级装换
 func StrToLevel(level string) zapcore.Level {
 	switch level {

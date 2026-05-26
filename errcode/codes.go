@@ -15,11 +15,12 @@ const (
 
 const (
 	// 网络层 (1-10)
-	ErrConnNotFound ErrorCode = 1  // 连接未建立（GetTCPConn/GetUDPConn 返回 nil）
-	ErrConnClosed   ErrorCode = 2  // 连接已关闭（isClose == 1）
-	ErrSendFailed   ErrorCode = 3  // socket 写入失败（Send 返回 false）
-	ErrRecvTimeout  ErrorCode = 4  // 等待响应超时（select timeout）
-	ErrConnDropped  ErrorCode = 5  // 等待期间连接断开（ctx.Done）
+	ErrConnNotFound   ErrorCode = 1 // 连接未建立（GetTCPConn/GetUDPConn 返回 nil）
+	ErrConnClosed     ErrorCode = 2 // 连接已关闭（isClose == 1）
+	ErrSendFailed     ErrorCode = 3 // socket 写入失败（Send 返回 false）
+	ErrRecvTimeout    ErrorCode = 4 // 等待响应超时（select timeout）
+	ErrConnDropped    ErrorCode = 5 // 等待期间连接被对端断开（gnet OnClose 触发的 ctx.Done）
+	ErrActionCanceled ErrorCode = 6 // 等待期间连接被本地主动关闭（任务停止 / robot.Stop / 业务 Close）
 
 	// 协议层 (11-20)
 	ErrEncodeFailed ErrorCode = 11 // codec.lua 编码返回 nil
@@ -71,6 +72,7 @@ var codeRegistry = []CodeInfo{
 	{uint64(ErrSendFailed), "SEND_FAILED", KindFramework},
 	{uint64(ErrRecvTimeout), "RECV_TIMEOUT", KindFramework},
 	{uint64(ErrConnDropped), "CONN_DROPPED", KindFramework},
+	{uint64(ErrActionCanceled), "ACTION_CANCELED", KindFramework},
 	{uint64(ErrEncodeFailed), "ENCODE_FAILED", KindFramework},
 	{uint64(ErrParseFailed), "PARSE_FAILED", KindFramework},
 	{uint64(ErrCreateMsg), "CREATE_MSG", KindFramework},

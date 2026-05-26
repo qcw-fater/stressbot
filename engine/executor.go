@@ -59,13 +59,22 @@ func (e *Executor) Flow() *TaskFlow {
 
 // Run 从 main 节点开始执行流程（类比编程语言的 main 函数入口）。
 // 阻塞直到流程结束或 context 取消。
+//
+// 退出日志分级：
+//   - 正常结束（err == nil）→ debug
+//   - ctx 取消（任务停止 / robot.Close）→ debug，这是预期生命周期事件
+//     不打 warn 避免 500 robot 停止时 500 条警告刷屏掩盖真实问题
+//   - 其它错误 → warn，业务/工具异常需要排查
 func (e *Executor) Run(ctx context.Context) error {
 	stresslog.Debug("[ENGINE] 开始执行流程", zap.String("caller", e.caller))
 	err := e.executeNode(ctx, "main")
-	if err != nil {
-		stresslog.Warn("[ENGINE] 流程异常退出", zap.String("caller", e.caller), zap.Error(err))
-	} else {
+	switch {
+	case err == nil:
 		stresslog.Debug("[ENGINE] 流程正常结束", zap.String("caller", e.caller))
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		stresslog.Debug("[ENGINE] 流程因取消退出", zap.String("caller", e.caller), zap.Error(err))
+	default:
+		stresslog.Warn("[ENGINE] 流程异常退出", zap.String("caller", e.caller), zap.Error(err))
 	}
 	return err
 }

@@ -25,25 +25,25 @@ function execute(r)
 
     if code < 0 then
         log.error("PostLogin HTTP 请求失败: code=" .. tostring(code))
-        return 1, sent, recv
+        return 3, sent, recv  -- 3=SEND_FAILED：HTTP 传输层失败
     end
 
     local ok, resp = pcall(json.decode, body)
     if not ok or not resp then
         log.error("PostLogin JSON 解析失败: " .. tostring(body))
-        return 1, sent, recv
+        return 54, sent, recv  -- 54=LUA_EXIT_CODE：业务层异常
     end
 
     -- 检查错误码（error=0 表示成功）
     if resp.error and resp.error ~= 0 then
         log.error("PostLogin 失败: error=" .. tostring(resp.error))
-        return 1, sent, recv
+        return 54, sent, recv  -- 业务返回非零 error，归 LUA_EXIT_CODE
     end
 
     -- 提取 session
     if not resp.session or resp.session == "" then
         log.error("PostLogin 响应缺少 session")
-        return 1, sent, recv
+        return 54, sent, recv
     end
     robot.set("session", resp.session)
 

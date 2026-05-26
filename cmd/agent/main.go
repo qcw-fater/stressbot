@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"runtime/debug"
 	"syscall"
 	"time"
@@ -155,7 +154,7 @@ func runStandalone(cfg *Config, confDir string) {
 	s := cfg.Standalone
 
 	// 加载协议适配器
-	poolSize := runtime.NumCPU()
+	poolSize := adapter.SuggestedPoolSize()
 	errorMapPath := filepath.Join(confDir, "adapter", "error.lua")
 	if _, err := os.Stat(errorMapPath); err != nil {
 		errorMapPath = ""
