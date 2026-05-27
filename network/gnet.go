@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -263,12 +264,32 @@ func NewDialer(adp adapter.Adapter, heartbeatInterval time.Duration) *Dialer {
 	}
 }
 
-// Start 启动 gnet 客户端引擎
+// Start 启动 gnet 客户端引擎。
+//
+// 多 eventloop 配置（关键性能项）：
+//   - 不显式设置时 gnet 默认 numEventLoop=1（client_windows.go: determineEventLoops）。
+//     单 loop 意味着所有连接的 OnTraffic/OnOpen/OnClose 全部串行在一个 goroutine 上跑，
+//     当瞬时建连密度高（如 250 个 robot 同时进入"建连 logic"步骤）时，单 loop
+//     的 1024 容量 channel 容易堆积，导致 PlayerLogin 等首包反应延迟，
+//     落入服务端"建连后 N 秒未鉴权"窗口被 RST。
+//   - `WithMulticore(true) + WithNumEventLoop(NumCPU)` 让 gnet 创建 N 个 eventloop，
+//     用 leastConnectionsLoadBalancer 把 conn 分散到不同 loop，
+//     不同连接的回调真正并发处理。
+//   - 并发安全性已审计（见 network/gnet.go 顶部注释）：
+//     EventServer 自身无可变共享状态；registry 用 RWMutex；
+//     monitor 计数器用 atomic；msgBuf 用 sync.Pool；
+//     同一连接由 gnet LB 固定绑定到一个 loop（不会跨 loop 并发），
+//     所以多 loop 切换是安全的。
+//   - `WithLockOSThread(true)` 与旧工具对齐，把每个 eventloop 绑定到独立的 OS 线程，
+//     Windows 上能减少 Go scheduler 把 loop goroutine 切到不同 OS 线程时的 syscall 抖动。
 func (d *Dialer) Start() error {
 	opts := []gnet.Option{
 		gnet.WithTicker(true),
 		gnet.WithReadBufferCap(gnetReadBufferCap),
 		gnet.WithWriteBufferCap(gnetWriteBufferCap),
+		gnet.WithMulticore(true),
+		gnet.WithNumEventLoop(runtime.NumCPU()),
+		gnet.WithLockOSThread(true),
 	}
 	client, err := gnet.NewClient(d.server, opts...)
 	if err != nil {
@@ -280,7 +301,8 @@ func (d *Dialer) Start() error {
 		return fmt.Errorf("启动 gnet 客户端失败: %w", err)
 	}
 
-	stresslog.Info("[GNET] 客户端引擎已启动")
+	stresslog.Info("[GNET] 客户端引擎已启动",
+		zap.Int("numEventLoop", runtime.NumCPU()))
 	return nil
 }
 

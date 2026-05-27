@@ -6,6 +6,10 @@
   "monitor": {
     "apdexT": 100
   },
+  "pprof": {
+    "enabled": true,
+    "port": 6060
+  },
   "agent": {
     "enabled": true,
     "adminAddr": "http://127.0.0.1:7718",

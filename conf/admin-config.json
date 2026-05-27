@@ -28,5 +28,9 @@
     "maxSizeMB": 100,
     "maxBackups": 10
   },
+  "pprof": {
+    "enabled": false,
+    "port": 6060
+  },
   "daemon": false
 }

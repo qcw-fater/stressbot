@@ -352,19 +352,24 @@ Executor 遍历节点图 → 命中 action 节点
 
 ## 心跳
 
-每个 TCP/UDP 连接可独立注册心跳。通过 Lua API 注册：
+每个 TCP/UDP 连接可独立注册心跳。通过 Lua API 注册，支持两种模式：
+
+### 静态心跳（推荐，body 固定为空）
+
+不传 `builder` 参数，注册时一次性预编码包体。运行时零 Lua 调用、零 luaMu 竞争，适用于大部分游戏服务器心跳。
 
 ```lua
-local network = require("network")
-local robot   = require("robot")
-local utils   = require("utils")
+network.register_tcp_heartbeat("logic", 5000, {cmd=2, act=1})
+network.register_udp_heartbeat("game", 3000, {cmd=1, act=1})
+```
 
--- TCP 心跳
-network.register_tcp_heartbeat("logic", 5000, {cmd=2, act=1}, function() return "" end)
+### 动态心跳（body 每次变化）
 
--- UDP 心跳
-network.register_udp_heartbeat("udp", 150, {cmd=4, act=2}, function()
-    local idx = robot.increment("packageIndex") % 65536
+传入 `builder` 函数，每次 tick 调用构造 body。适用于需要递增序号、携带变化字段的心跳。
+
+```lua
+network.register_tcp_heartbeat("battle", 10000, {cmd=4, act=2}, function()
+    local idx = robot.increment("packetIndex") % 65536
     return utils.pack_le("u16", idx)
         .. utils.pack_le("i64", robot.get("battleId") or 0)
 end)

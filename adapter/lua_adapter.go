@@ -165,11 +165,12 @@ func NewLuaAdapter(poolSize int, scriptPath string, errorMapPath string) (*LuaAd
 	return adp, nil
 }
 
-// newLState 创建已注册 bit + zlib 模块的 LState
+// newLState 创建已注册 bit + zlib + crypto 模块的 LState
 func (a *LuaAdapter) newLState() *lua.LState {
 	L := lua.NewState()
 	L.PreloadModule("bit", LoadBitModule)
 	RegisterZlibModule(L)
+	RegisterCryptoModule(L)
 	return L
 }
 
@@ -451,9 +452,10 @@ func (a *LuaAdapter) NewRobotAdapter(L *lua.LState, luaMu *sync.Mutex) (*RobotAd
 		return nil, fmt.Errorf("NewRobotAdapter: parent LuaAdapter 未初始化")
 	}
 
-	// codec.lua 依赖 bit / zlib，确保两个模块已注册到 L
+	// codec.lua 依赖 bit / zlib / crypto，确保三个模块已注册到 L
 	L.PreloadModule("bit", LoadBitModule)
 	RegisterZlibModule(L)
+	RegisterCryptoModule(L)
 
 	// 复用预编译的 codec.lua 字节码（避免重新解析脚本）
 	fn := L.NewFunctionFromProto(a.scriptProto)

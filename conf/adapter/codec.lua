@@ -18,8 +18,9 @@
 --
 -- 运行时约束：gopher-lua (Lua 5.1)，禁止使用 string.pack/unpack。
 
-local bit  = require("bit")
-local zlib = require("zlib")
+local bit    = require("bit")
+local zlib   = require("zlib")
+local crypto = require("crypto")
 
 -- ─── 协议常量 ────────────────────────────────────────────────────────────────
 local HEADER_SIZE    = 12
@@ -78,101 +79,20 @@ end
 
 -- net_encrypt: 对 data[offset+1 .. #data] 用 32 字节 key 做 stream cipher 加密。
 -- 返回 (加密后完整字节串, bcc 校验字节)。
--- bcc = XOR of all plaintext bytes in [offset+1, #data]。
 local function net_encrypt(data, key, offset)
     if not key or #key ~= 32 or #data == 0 then return data, 0 end
-
     offset = offset or 0
     if offset < 0 then offset = 0 end
-
-    local chunks = {}
-    local bcc = 0
-
-    -- 明文前缀
-    if offset > 0 then
-        chunks[#chunks + 1] = data:sub(1, offset)
-    end
-
-    -- 分段处理加密部分（避免 unpack 栈溢出）
-    local chunk_size = 256
-    local carry = 0
-    local ki = 0
-
-    local i = offset + 1
-    while i <= #data do
-        local j = math.min(i + chunk_size - 1, #data)
-        local buf = {}
-        for k = i, j do
-            local plain_byte = string.byte(data, k)
-            bcc = bit.bxor(bcc, plain_byte)
-
-            local mask = string.byte(key, (ki % 32) + 1)
-            local x = bit.band(plain_byte, 0xFF)
-            x = bit.bxor(x, mask)
-            x = x + carry
-            x = bit.band(x, 0xFF)
-            -- ROL8(x, 3)
-            x = bit.bor(
-                bit.band(bit.lshift(x, 3), 0xFF),
-                bit.rshift(x, 5)
-            )
-            carry = x
-            buf[#buf + 1] = x
-            ki = ki + 1
-        end
-        chunks[#chunks + 1] = string.char(unpack(buf))
-        i = j + 1
-    end
-
-    return table.concat(chunks), bit.band(bcc, 0xFF)
+    return crypto.encrypt_xor_carry_rol(data, key, offset, 3)
 end
 
 -- net_decrypt: 对 data[offset+1 .. #data] 用 32 字节 key 做 stream cipher 解密。
 -- 返回解密后的完整字节串。
 local function net_decrypt(data, key, offset)
     if not key or #key ~= 32 or #data == 0 then return data end
-
     offset = offset or 0
     if offset < 0 then offset = 0 end
-
-    local chunks = {}
-
-    -- 明文前缀
-    if offset > 0 then
-        chunks[#chunks + 1] = data:sub(1, offset)
-    end
-
-    local chunk_size = 256
-    local carry = 0
-    local ki = 0
-
-    local i = offset + 1
-    while i <= #data do
-        local j = math.min(i + chunk_size - 1, #data)
-        local buf = {}
-        for k = i, j do
-            local enc_byte = string.byte(data, k)
-
-            -- ROR8(x, 3) = reverse of ROL8(x, 3)
-            local x = bit.bor(
-                bit.rshift(enc_byte, 3),
-                bit.band(bit.lshift(enc_byte, 5), 0xFF)
-            )
-            x = bit.band(x, 0xFF)
-            local mask = string.byte(key, (ki % 32) + 1)
-            x = x - carry
-            x = bit.band(x, 0xFF)
-            x = bit.bxor(x, mask)
-
-            carry = enc_byte
-            buf[#buf + 1] = x
-            ki = ki + 1
-        end
-        chunks[#chunks + 1] = string.char(unpack(buf))
-        i = j + 1
-    end
-
-    return table.concat(chunks)
+    return crypto.decrypt_xor_carry_rol(data, key, offset, 3)
 end
 
 -- ─── 主接口函数 ───────────────────────────────────────────────────────────────

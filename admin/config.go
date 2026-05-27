@@ -16,7 +16,14 @@ type Config struct {
 	AgentRegistry RegistryConfig `json:"agentRegistry"` // Agent 注册与健康管理
 	History       HistoryConfig  `json:"history"`       // 历史归档
 	Log           LogConfig      `json:"log"`           // 日志
+	Pprof         PprofConfig    `json:"pprof"`         // pprof 调试服务
 	Daemon        bool           `json:"daemon"`        // 以守护进程模式运行（仅 Linux）
+}
+
+// PprofConfig pprof 调试服务配置。
+type PprofConfig struct {
+	Enabled bool `json:"enabled"` // 是否启用 pprof（默认 false）
+	Port    int  `json:"port"`    // pprof 监听端口（默认 6060）
 }
 
 // RegistryConfig Agent 注册与健康管理配置。

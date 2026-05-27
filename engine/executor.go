@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"stressbot/errcode"
+	"stressbot/monitor"
 	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"
@@ -117,19 +118,54 @@ func (e *Executor) executeNode(ctx context.Context, nodeID string) error {
 // executeSequence 顺序节点：按顺序依次执行所有子节点。
 // 捕获 errSkip 时跳过剩余子节点（视为本 sequence 正常完成）。
 // 透传其他错误和信号（含 errBreak / errContinue）。
+//
+// ctx 取消处理：当 sequence 因 ctx 取消而中断时，给剩余的 action 子节点补记
+// canceled 样本（见 reportRemainingCanceled）。避免出现"上一节点 500 样本、
+// 下一节点 481 样本"的监控盲区——19 个 robot 在节点间断流但面板无法呈现。
 func (e *Executor) executeSequence(ctx context.Context, node *Node) error {
-	for _, childID := range node.Next {
+	for i, childID := range node.Next {
 		if ctx.Err() != nil {
+			e.reportRemainingCanceled(node.Next[i:])
 			return ctx.Err()
 		}
 		if err := e.executeNode(ctx, childID); err != nil {
 			if errors.Is(err, errSkip) {
 				break
 			}
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				e.reportRemainingCanceled(node.Next[i+1:])
+			}
 			return err
 		}
 	}
 	return nil
+}
+
+// reportRemainingCanceled 给 sequence 中尚未执行的 action 子节点补记 canceled 样本。
+//
+// 设计背景：robot 在节点 A 完成后、节点 B 调度前因 ctx 取消（如服务端断连）退出时，
+// 监控面板会看到"节点 A 500 样本、节点 B 仅 481 样本"的人数对不上现象——19 个 robot
+// 在两节点之间"凭空消失"。补记 canceled 让数据连续，告知用户"这些 robot 在 A 之后、
+// B 调度前断流"，便于定位握手 / 心跳 / 服务端 RST 时序问题。
+//
+// 仅遍历当前 sequence 层的 action 子节点（不深入嵌套）：
+//   - 嵌套 sequence 内的 action 已在它们各自的 sequence 里被同样处理
+//   - 控制类节点（boolean/weighted/loop/wait）本身不算 action，无样本概念
+func (e *Executor) reportRemainingCanceled(remaining []string) {
+	mc := monitor.Global()
+	if mc == nil {
+		return
+	}
+	for _, id := range remaining {
+		n, ok := e.flow.Nodes[id]
+		if !ok || n.Type != NodeAction || n.Action == "" {
+			continue
+		}
+		// RecordAction 内部 executing-- ，需要先 RecordActionStart 让 executing++ 配对，
+		// 避免 executing 计数漂成负数
+		mc.RecordActionStart(n.Action)
+		mc.RecordAction(n.Action, monitor.ResultCanceled, 0, 0, 0, 0, 0, nil)
+	}
 }
 
 // executeLoop 循环节点：循环执行单个 body 节点。

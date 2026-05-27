@@ -11,6 +11,9 @@ import (
 	"stressbot/utils"
 	stresslog "stressbot/utils/log"
 
+	// pprof 通过 utils.StartPprofServer 间接引用
+	_ "net/http/pprof"
+
 	"go.uber.org/zap"
 )
 
@@ -68,6 +71,16 @@ func main() {
 
 	stresslog.Info("[MAIN] Admin 服务器启动", zap.String("version", Version))
 
+	// pprof 调试服务（独立端口，不依赖 monitor）
+	var stopPprof func()
+	if cfg.Pprof.Enabled {
+		pprofPort := cfg.Pprof.Port
+		if pprofPort <= 0 {
+			pprofPort = 6060
+		}
+		stopPprof = utils.StartPprofServer(pprofPort)
+	}
+
 	srv, err := admin.NewAdminServer(*cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "初始化 Admin 服务器失败: %v\n", err)
@@ -77,5 +90,8 @@ func main() {
 	if err := srv.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Admin 服务器退出: %v\n", err)
 		os.Exit(1)
+	}
+	if stopPprof != nil {
+		stopPprof()
 	}
 }

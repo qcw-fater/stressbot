@@ -323,11 +323,15 @@ const networkModule: LuaModule = {
         { name: 'service', type: 'string', doc: '连接名' },
         { name: 'interval_ms', type: 'number', doc: '心跳间隔（毫秒）' },
         { name: 'route', type: 'table', doc: '路由 {cmd, act}' },
-        { name: 'builder', type: 'function', optional: true, doc: '可选 body 构造器，返回 string' },
+        { name: 'builder', type: 'function', optional: true, doc: '可选 body 构造器，返回 string。不传则为静态心跳（预编码，零 Lua 开销）' },
       ],
       returns: '-',
-      summary: '注册 TCP 心跳',
-      example: `network.register_tcp_heartbeat("logic", 3000, {cmd=0, act=1}, function() return "" end)`,
+      summary: '注册 TCP 心跳。不传 builder 为静态心跳（body 为空，注册时预编码）；传 builder 为动态心跳（每次 tick 调用构造 body）',
+      example: `-- 静态心跳（推荐，body 固定为空）
+network.register_tcp_heartbeat("logic", 5000, {cmd=2, act=1})
+
+-- 动态心跳（body 每次变化）
+network.register_tcp_heartbeat("battle", 10000, {cmd=4, act=2}, build_heartbeat)`,
     },
     {
       name: 'register_udp_heartbeat',
@@ -336,10 +340,15 @@ const networkModule: LuaModule = {
         { name: 'service', type: 'string', doc: '连接名' },
         { name: 'interval_ms', type: 'number', doc: '心跳间隔（毫秒）' },
         { name: 'route', type: 'table', doc: '路由 {cmd, act}' },
-        { name: 'builder', type: 'function', optional: true, doc: '可选 body 构造器' },
+        { name: 'builder', type: 'function', optional: true, doc: '可选 body 构造器。不传则为静态心跳（预编码，零 Lua 开销）' },
       ],
       returns: '-',
-      summary: '注册 UDP 心跳',
+      summary: '注册 UDP 心跳。不传 builder 为静态心跳（body 为空，注册时预编码）；传 builder 为动态心跳',
+      example: `-- 静态心跳
+network.register_udp_heartbeat("game", 3000, {cmd=1, act=1})
+
+-- 动态心跳
+network.register_udp_heartbeat("battle", 150, {cmd=4, act=2}, build_udp_heart)`,
     },
   ],
 };

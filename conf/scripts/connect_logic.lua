@@ -28,9 +28,8 @@ function execute(r)
     network.set_tcp_secret_key("logic", keyBody)
 
     -- 注册 5 秒心跳（Logic: cmd=2 MAIN, act=1 SERVER_TIME_CS，空 body）
-    network.register_tcp_heartbeat("logic", 5000, {cmd=2, act=1}, function()
-        return ""
-    end)
+    -- 不传 builder 参数 → 静态心跳，注册时一次性预编码，运行时零 Lua 开销。
+    network.register_tcp_heartbeat("logic", 5000, {cmd=2, act=1})
 
     log.info("逻辑服连接成功 心跳已注册(5s)")
     return 0, sent, recv

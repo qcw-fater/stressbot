@@ -6,8 +6,12 @@
   "monitor": {
     "enabled": true,
     "httpEnabled": true,
-    "httpPort": 6060,
+    "httpPort": 6061,
     "apdexT": 100
+  },
+  "pprof": {
+    "enabled": true,
+    "port": 6060
   },
   "standalone": {
     "bot": {

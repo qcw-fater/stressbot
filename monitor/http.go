@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	_ "net/http/pprof"
 	"time"
 
 	"stressbot/utils"
@@ -14,7 +13,7 @@ import (
 )
 
 // RegisterHandlers 将 /metrics 和 /metrics/summary 注册到 http.DefaultServeMux。
-// pprof 已通过 import 副作用注册到同一 mux，共享端口。
+// pprof 由 utils.StartPprofServer 独立管理，不与此模块耦合。
 func RegisterHandlers(c *MetricsCollector) {
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		snap := c.Snapshot(nil, 0)
@@ -42,8 +41,7 @@ func StartHTTPServer(port int) {
 	addr := fmt.Sprintf(":%d", port)
 	utils.GetWorkPool().Go(func() {
 		stresslog.Info("[MONITOR] HTTP 指标服务启动", zap.String("addr", addr),
-			zap.String("metrics", "http://localhost"+addr+"/metrics"),
-			zap.String("pprof", "http://localhost"+addr+"/debug/pprof/"))
+			zap.String("metrics", "http://localhost"+addr+"/metrics"))
 		if err := http.ListenAndServe(addr, nil); err != nil {
 			stresslog.Error("[MONITOR] HTTP 服务异常退出", zap.Error(err))
 		}

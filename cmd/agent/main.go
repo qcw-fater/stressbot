@@ -23,6 +23,8 @@ import (
 	"stressbot/utils"
 	stresslog "stressbot/utils/log"
 
+	_ "net/http/pprof"
+
 	"go.uber.org/zap"
 )
 
@@ -47,10 +49,17 @@ type StandaloneConfig struct {
 	Duration string `json:"duration"`
 }
 
+// PprofConfig pprof 调试服务配置（standalone / agent / admin 共用）。
+type PprofConfig struct {
+	Enabled bool `json:"enabled"` // 是否启用 pprof（默认 false）
+	Port    int  `json:"port"`    // pprof 监听端口（默认 6060）
+}
+
 // Config 全局配置结构。
 type Config struct {
 	Log        *stresslog.Config       `json:"log"`
 	Monitor    monitor.CollectorConfig `json:"monitor"`
+	Pprof      PprofConfig             `json:"pprof"`
 	Standalone *StandaloneConfig       `json:"standalone"`
 	Agent      agent.Config            `json:"agent"`
 	Daemon     bool                    `json:"daemon"` // 以守护进程模式运行（仅 Linux）
@@ -128,6 +137,16 @@ func main() {
 // ── Agent 模式 ──────────────────────────────────────────
 
 func runAgentMode(cfg *Config) {
+	// pprof 调试服务（独立端口，不依赖 monitor）
+	var stopPprof func()
+	if cfg.Pprof.Enabled {
+		pprofPort := cfg.Pprof.Port
+		if pprofPort <= 0 {
+			pprofPort = 6060
+		}
+		stopPprof = utils.StartPprofServer(pprofPort)
+	}
+
 	resolved, err := cfg.Agent.Resolve()
 	if err != nil {
 		stresslog.Fatal("Agent 配置校验失败", zap.Error(err))
@@ -145,6 +164,9 @@ func runAgentMode(cfg *Config) {
 
 	if err := a.Run(); err != nil {
 		stresslog.Fatal("Agent 运行失败", zap.Error(err))
+	}
+	if stopPprof != nil {
+		stopPprof()
 	}
 }
 
@@ -253,6 +275,16 @@ func runStandalone(cfg *Config, confDir string) {
 		}
 	}
 
+	// pprof 调试服务（独立端口，不依赖 monitor）
+	var stopPprof func()
+	if cfg.Pprof.Enabled {
+		pprofPort := cfg.Pprof.Port
+		if pprofPort <= 0 {
+			pprofPort = 6060
+		}
+		stopPprof = utils.StartPprofServer(pprofPort)
+	}
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -280,6 +312,9 @@ func runStandalone(cfg *Config, confDir string) {
 	}
 
 	adp.Close()
+	if stopPprof != nil {
+		stopPprof()
+	}
 	utils.GetWorkPool().Shutdown()
 	stresslog.Info("[MAIN] 已退出")
 }
