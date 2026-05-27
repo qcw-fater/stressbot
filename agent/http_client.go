@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 )
@@ -16,27 +17,59 @@ var errNotRegistered = errors.New("agent not registered on admin")
 
 // AdminClient 与 Admin 服务器通信的 HTTP 客户端。
 //
-// 所有请求（注册/心跳/上报/任务完成/拉取任务）共用单一 http.Client，
-// timeout 由调用方通过 ResolvedConfig.RequestTimeout 注入；
-// 调用方 ctx 取消（如 Agent shutdown）能立刻打断阻塞中的请求。
+// 所有请求（注册/心跳/上报/任务完成/拉取任务）共用单一 http.Client：
+//   - 通用 timeout 由调用方通过 ResolvedConfig.RequestTimeout 注入；
+//   - 心跳通过 ctx.WithTimeout(HBRequestTimeout) 单独缩短到秒级，
+//     避免一次心跳卡到 30s 才返回 → 长时间无感知 Admin 状态；
+//   - 调用方 ctx 取消（如 Agent shutdown）能立刻打断阻塞中的请求。
 type AdminClient struct {
-	base    string // "http://admin:7718"
-	agentID string
-	client  *http.Client
+	base       string // "http://admin:7718"
+	agentID    string
+	client     *http.Client
+	hbReqLimit time.Duration // 心跳单次请求超时上限（取 min(HBRequestTimeout, Timeout)）
 }
 
 // NewAdminClient 创建 Admin 客户端。
-// timeout 用于单次 HTTP 请求；ctx 取消优先于 timeout。
-func NewAdminClient(baseURL, agentID string, timeout time.Duration) *AdminClient {
+//
+// 关键：自定义 Transport 而不用 DefaultTransport——
+//   - DefaultTransport 走 ProxyFromEnvironment，Windows 会查 IE 注册表，
+//     每次请求都有 syscall 开销；本机通信不需要走代理。
+//   - DefaultTransport 没设 DialContext.Timeout，握手依赖 OS 内核
+//     （Windows ~21s 才返回 timeout），看不到快速失败。
+//   - 默认 MaxIdleConnsPerHost=2 对 admin 这种"高频心跳+上报+下载"的同一 host
+//     场景偏紧；调大池子让 keep-alive 真正生效，减少不必要的 connect/close 抖动。
+//     （本地多开 agent 互相争抢 ephemeral port 是测试环境问题，工具本身做好该做的。）
+func NewAdminClient(baseURL, agentID string, timeout, hbReqTimeout time.Duration) *AdminClient {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
+	if hbReqTimeout <= 0 || hbReqTimeout > timeout {
+		hbReqTimeout = timeout
+	}
 	return &AdminClient{
-		base:    baseURL,
-		agentID: agentID,
-		client: &http.Client{
-			Timeout: timeout,
-		},
+		base:       baseURL,
+		agentID:    agentID,
+		client:     &http.Client{Timeout: timeout, Transport: newAdminTransport()},
+		hbReqLimit: hbReqTimeout,
+	}
+}
+
+// newAdminTransport 构造 agent → admin 专用 HTTP transport。
+func newAdminTransport() *http.Transport {
+	return &http.Transport{
+		Proxy: nil, // 跳过 proxy lookup（本机通信无需走代理）
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second,  // 显式 dial 超时，避免 Windows 内核 ~21s 慢失败
+			KeepAlive: 30 * time.Second, // TCP keep-alive 探测，及时发现死连接
+		}).DialContext,
+		ForceAttemptHTTP2:     false, // 本机 HTTP/1.1 keep-alive 足够，避免 HTTP/2 协商开销
+		MaxIdleConns:          64,
+		MaxIdleConnsPerHost:   32, // 默认 2 偏紧，提到 32 让心跳/上报/下载真正复用 keep-alive
+		MaxConnsPerHost:       0,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		DisableCompression:    true,
 	}
 }
 
@@ -76,13 +109,21 @@ func (c *AdminClient) Register(ctx context.Context, req RegisterRequest) (*Regis
 }
 
 // Heartbeat 发送心跳。
+//
+// 单次请求超时被压到 hbReqLimit（默认 5s）：
+//   - 心跳是状态探测，应该快失败快重试；
+//   - 用通用 30s timeout 会让一次失败卡 30s 才返回 → agent 长时间无感知 Admin 状态。
+// 仍共用同一个 http.Client / Transport，避免多一个 keep-alive 池占额外 FD。
 func (c *AdminClient) Heartbeat(ctx context.Context, req HeartbeatRequest) error {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return fmt.Errorf("marshal heartbeat: %w", err)
 	}
 
-	resp, err := c.doPost(ctx, "/sbot/agent/"+c.agentID+"/heartbeat", body)
+	hbCtx, cancel := context.WithTimeout(ctx, c.hbReqLimit)
+	defer cancel()
+
+	resp, err := c.doPost(hbCtx, "/sbot/agent/"+c.agentID+"/heartbeat", body)
 	if err != nil {
 		return err
 	}

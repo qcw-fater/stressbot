@@ -55,11 +55,15 @@ func (r *connRegistry) get(gconn gnet.Conn) *Connection {
 }
 
 // EventServer gnet 事件处理器。
+//
+// adp 在 RobotLocalAdapter 重构后角色收窄为"OnTraffic 热路径的元信息源"：
+//   - HeaderSize / BodyLength（纯 Go 缓存字段，零 Lua 调用）
+//   - 真正的 encode/decode 走 per-Robot 的 RobotAdapter（DialTCP/DialUDP 接收 adp 参数注入）
 type EventServer struct {
 	gnet.BuiltinEventEngine
 
 	registry     *connRegistry
-	adp          adapter.Adapter
+	adp          adapter.Adapter // 仅用于 OnTraffic 的帧切割元信息（HeaderSize/BodyLength）
 	tickInterval time.Duration
 }
 
@@ -89,14 +93,25 @@ func (es *EventServer) OnClose(gconn gnet.Conn, err error) gnet.Action {
 	conn := es.registry.get(gconn)
 	if conn != nil {
 		es.registry.unregister(gconn)
-		if err != nil {
+		reason := closeReasonFromErr(err)
+		// 日志分级：
+		//   - 无 err / EOF / local-close：服务端正常 FIN 或本地主动关闭，info 级别
+		//     （短战斗场景每次 BattleEnd 都会触发服务端 EOF，warn 级别每分钟刷 100+ 条噪音）
+		//   - RST / broken-pipe / timeout / 其他：真正的异常断开，仍然 warn 级别
+		switch reason {
+		case "", "EOF", "local-close":
+			stresslog.Info("[GNET] 连接关闭",
+				zap.String("service", conn.ServiceName()),
+				zap.String("robot", conn.robotName),
+				zap.String("reason", reason))
+		default:
 			stresslog.Warn("[GNET] 连接异常关闭",
-				zap.String("service", conn.ServiceName()), zap.String("robot", conn.robotName), zap.Error(err))
-		} else {
-			stresslog.Debug("[GNET] 连接正常关闭",
-				zap.String("service", conn.ServiceName()), zap.String("robot", conn.robotName))
+				zap.String("service", conn.ServiceName()),
+				zap.String("robot", conn.robotName),
+				zap.String("reason", reason),
+				zap.Error(err))
 		}
-		conn.onClose(closeReasonFromErr(err))
+		conn.onClose(reason)
 	}
 	return gnet.None
 }
@@ -187,7 +202,11 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 
 		if conn == nil {
 			putMsgBuf(msgBuf)
-			stresslog.Warn("[NETWORK] 收到消息但连接未注册，消息被丢弃",
+			// 降到 debug：close 后还有 inbound 字节在路上是 TCP 半关闭/对端 FIN
+			// 之前正常排队的帧。registry.unregister 已在 OnClose 同步发生，但
+			// gnet 事件循环上之前累积的 buffered 数据仍会触发本回调，是预期行为。
+			// 历史一次 4 分钟任务可刷出 6500+ 条 warn 噪音，掩盖真正的问题。
+			stresslog.Debug("[NETWORK] 收到消息但连接未注册，消息被丢弃",
 				zap.Int("fd", gconn.Fd()), zap.Int("bodyLen", totalLen))
 			continue
 		}
@@ -279,7 +298,17 @@ func (d *Dialer) Stop() error {
 
 // DialTCP 建立 TCP 连接并绑定业务层 Connection。
 // ctx 用于超时/取消：如果 ctx 在拨号完成前被取消，返回 context 错误。
-func (d *Dialer) DialTCP(ctx context.Context, address string, conn *Connection) (gnet.Conn, error) {
+//
+// adp 是 decodeLoop 使用的协议适配器（RobotLocalAdapter 重构后由 Robot 传入
+// 自己的 RobotAdapter）。OnTraffic 走的是 d.server.adp（全局元信息源），
+// 两个适配器实现同一接口、共享元信息字段，仅 encode/decode 的执行栈不同：
+// gnet 帧切割仍走全局，decode 走 robot 私有 LState 消除跨 robot 争抢。
+//
+// 兼容性：传 nil 时 fallback 到 d.server.adp（保留单元测试 / 非 robot 场景路径）。
+func (d *Dialer) DialTCP(ctx context.Context, address string, conn *Connection, adp adapter.Adapter) (gnet.Conn, error) {
+	if adp == nil {
+		adp = d.server.adp
+	}
 	type dialResult struct {
 		conn gnet.Conn
 		err  error
@@ -308,7 +337,7 @@ func (d *Dialer) DialTCP(ctx context.Context, address string, conn *Connection) 
 		d.server.registry.register(gconn, conn)
 		// 启动异步 decode goroutine：必须在 register 之后立即启动，
 		// 否则首批 OnTraffic 到达时 decodeCh 还没准备好，会被 EnqueueRaw 拒绝。
-		conn.StartDecodeLoop(d.server.adp, false)
+		conn.StartDecodeLoop(adp, false)
 
 		stresslog.Info("[GNET] TCP 连接已建立",
 			zap.String("address", address), zap.String("service", conn.serviceName), zap.String("robot", conn.robotName))
@@ -317,7 +346,11 @@ func (d *Dialer) DialTCP(ctx context.Context, address string, conn *Connection) 
 }
 
 // DialUDP 建立 UDP 连接并绑定业务层 Connection。
-func (d *Dialer) DialUDP(address string, conn *Connection) (gnet.Conn, error) {
+// adp 含义同 DialTCP；nil 时 fallback 到 d.server.adp。
+func (d *Dialer) DialUDP(address string, conn *Connection, adp adapter.Adapter) (gnet.Conn, error) {
+	if adp == nil {
+		adp = d.server.adp
+	}
 	gconn, err := d.client.Dial("udp", address)
 	if err != nil {
 		return nil, fmt.Errorf("UDP 拨号失败 %s: %w", address, err)
@@ -325,7 +358,7 @@ func (d *Dialer) DialUDP(address string, conn *Connection) (gnet.Conn, error) {
 
 	bindConn(gconn, conn)
 	d.server.registry.register(gconn, conn)
-	conn.StartDecodeLoop(d.server.adp, true)
+	conn.StartDecodeLoop(adp, true)
 
 	stresslog.Info("[GNET] UDP 连接已建立", zap.String("address", address), zap.String("robot", conn.robotName))
 	return gconn, nil

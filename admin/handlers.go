@@ -1069,7 +1069,9 @@ func (s *AdminServer) handleShutdownAllAgents(w http.ResponseWriter, _ *http.Req
 func (s *AdminServer) handleGetMetrics(w http.ResponseWriter, r *http.Request) {
 	active := s.tasks.ActiveTask()
 	if active == nil {
-		writeJSON(w, http.StatusOK, &monitor.CollectorSnapshot{})
+		// Actions 显式初始化为空切片：与 monitor.Snapshot / MergeSnapshots 的契约一致，
+		// 保证 JSON 中 "actions": [] 而非 null，前端 for...of 不会崩。
+		writeJSON(w, http.StatusOK, &monitor.CollectorSnapshot{Actions: []monitor.ActionSnapshot{}})
 		return
 	}
 	agg := s.aggregator.AggregateStress(active.ID)

@@ -39,9 +39,13 @@ export function buildNodeMetricsMap(
   const result: NodeMetricsMap = new Map();
   if (!snapshot || !flow) return result;
 
-  // 按 ActionMetric.name 建索引
+  // 按 ActionMetric.name 建索引。
+  // snapshot.actions 类型上是 ActionMetric[]，但 admin 在 stopping/任务刚结束等场景会返回
+  // CollectorSnapshot{}（actions=nil → JSON null），且历史快照里也可能携带空 actions，
+  // 这里统一兜底为空数组，避免 for...of 在 nil 上抛 "snapshot.actions is not iterable"
+  // 让整个 EditorPage 崩溃。
   const byName = new Map<string, ActionMetric>();
-  for (const m of snapshot.actions) {
+  for (const m of snapshot.actions ?? []) {
     byName.set(m.name, m);
   }
 

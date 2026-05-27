@@ -378,17 +378,21 @@ export async function applyConflictResolution(decisions: ConflictDecision[]): Pr
 
 async function fetchIndex(url: string): Promise<string[]> {
   try {
-    const resp = await fetch(url);
-    if (!resp.ok) return [];
+    const resp = await fetch(url, { cache: 'no-cache' });
+    if (!resp.ok) {
+      console.warn(`[baseline] fetchIndex ${url} returned ${resp.status}`);
+      return [];
+    }
     return (await resp.json()) as string[];
-  } catch {
+  } catch (e) {
+    console.warn(`[baseline] fetchIndex ${url} failed:`, e);
     return [];
   }
 }
 
 async function fetchFileText(url: string): Promise<string | null> {
   try {
-    const resp = await fetch(url);
+    const resp = await fetch(url, { cache: 'no-cache' });
     if (!resp.ok) return null;
     return await resp.text();
   } catch {

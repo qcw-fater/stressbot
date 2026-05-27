@@ -863,6 +863,8 @@ type Config struct {
     Port                int    `json:"port"`                // 本地 HTTP 端口（默认 7719）
     MaxBots             int    `json:"maxBots"`             // 最大机器人数量（默认 5000）
     HBInterval          string `json:"hbInterval"`          // 心跳间隔（默认 10s）
+    HBRequestTimeout    string `json:"hbRequestTimeout"`    // 单次心跳请求超时（默认 5s）
+    HBFailThreshold     int    `json:"hbFailThreshold"`     // 任务运行中连续心跳失败容忍次数（默认 3）
     RequestTimeout      string `json:"requestTimeout"`      // 单次 HTTP 超时（默认 30s）
     ReconnectMaxRetries int    `json:"reconnectMaxRetries"` // 最大重连次数（默认 -1 = 持续重连）
     StressInterval      string `json:"stressInterval"`      // 压测指标上报间隔（默认 5s）
@@ -882,6 +884,8 @@ type ResolvedConfig struct {
     SystemInterval       time.Duration // 系统上报间隔（与 StressInterval 同步）
     HBInterval           time.Duration // 心跳间隔
     HBFailInterval       time.Duration // 心跳失败重试间隔
+    HBRequestTimeout     time.Duration // 心跳单次请求超时
+    HBFailThreshold      int           // 任务运行中容忍的连续心跳失败次数
     RequestTimeout       time.Duration // HTTP 超时
     ReconnectInterval    time.Duration // 5s
     ReconnectMaxInterval time.Duration // 60s
@@ -893,9 +897,13 @@ type ResolvedConfig struct {
 ### 10.4 心跳循环行为规则
 
 - 心跳成功用 `HBInterval`；失败用 `HBFailInterval`
+- 心跳单次请求超时受 `HBRequestTimeout`（默认 5s）控制，独立于通用 `RequestTimeout`（30s），保证快失败快重试
 - 任意请求收到 404（`errNotRegistered`）-> 视为 Admin 重启，立即取消任务并重新注册
-- 任意一次心跳失败，若处于 Busy -> 立即取消当前任务（避免无观测数据的压测流量）
+- 任务运行中（Busy）连续心跳失败累计 `HBFailThreshold` 次（默认 3）-> 取消当前任务；单次抖动不会误伤
 - 持续失败不退进程（除非重新注册超出 `ReconnectMaxRetries`）
+
+> **与 Admin 端阈值的联动约束**：`HBFailThreshold × HBInterval` 必须 ≤ `admin.unhealthyAfter`（默认 3×10s = 30s = unhealthyAfter），并且 `admin.offlineAfter > admin.unhealthyAfter`。
+> 调大 `HBFailThreshold` 时务必同步调大 `admin.unhealthyAfter` / `admin.offlineAfter`，否则会出现"节点已被 Admin 标 unhealthy/删除，但 Agent 任务还在跑"的状态错乱。
 
 ### 10.5 任务执行流程
 

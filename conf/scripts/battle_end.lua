@@ -6,6 +6,10 @@ local proto = require("proto")
 local log = require("log")
 
 function execute(r)
+    -- 旧 Robot 工具在发送 BattleEnd(4:13) 前先关闭 UDP。
+    -- 这会停止 UDP 心跳/帧同步，避免结算期间战斗服继续收到局内 UDP 包。
+    network.close_udp("battle")
+
     local msg = proto.create("Game.BattleEndC2S")
     proto.set_field(msg, "resultMD5", "1234567890")
 
@@ -21,13 +25,17 @@ function execute(r)
             proto.set_field(stat, "teamId", f.teamId or 0)
             proto.set_field(stat, "camp", f.camp or 0)
 
-            -- 阵营结算：CtCamp0(1) → 胜利(rank=1)，其余 → 失败(rank=2)
+            -- 旧工具：rank 按 CampType 顺序 1..10；CtCamp0 胜利，其余失败。
             local camp = tonumber(f.camp) or 0
             if camp == 1 then  -- CtCamp0 = 1
                 proto.set_field(stat, "rank", 1)
                 proto.set_field(stat, "result", 1)  -- BRT_WIN = 1
             else
-                proto.set_field(stat, "rank", 2)
+                local rank = camp
+                if rank < 1 then
+                    rank = 2
+                end
+                proto.set_field(stat, "rank", rank)
                 proto.set_field(stat, "result", 2)  -- BRT_LOSE = 2
             end
 
@@ -36,17 +44,36 @@ function execute(r)
                 proto.set_field(stat, "mvp", true)
             end
 
-            -- HeroStatistics：击杀1/死亡1/伤害28256
-            local heroId = tonumber(f.heroId) or 0
-            local skinId = tonumber(f.skinId) or 0
-            if heroId > 0 then
-                local heroStat = proto.create("Game.HeroBattleStatistics")
-                proto.set_field(heroStat, "heroId", heroId)
-                proto.set_field(heroStat, "skinId", skinId)
-                proto.set_field(heroStat, "killNum", 1)
-                proto.set_field(heroStat, "deadNum", 1)
-                proto.set_field(heroStat, "damage", 28256)
-                proto.set_field(stat, "HeroStatistics", {heroStat})
+            -- 旧工具：武道会(GT_BUDOKAI=4)遍历所有 selectHeroes；
+            -- 其它玩法只上报第一个英雄。
+            local heroStats = {}
+            local heroes = f.selectHeroes or {}
+            local skins = f.selectSkins or {}
+            local gameType = tonumber(robot.get("battleGameType")) or 0
+            local heroCount = 0
+            if gameType == 4 then
+                heroCount = #heroes
+            elseif heroes[1] then
+                heroCount = 1
+            end
+            for j = 1, heroCount do
+                local heroId = tonumber(heroes[j]) or 0
+                if heroId > 0 then
+                    local heroStat = proto.create("Game.HeroBattleStatistics")
+                    proto.set_field(heroStat, "heroId", heroId)
+                    proto.set_field(heroStat, "skinId", tonumber(skins[j]) or 0)
+                    proto.set_field(heroStat, "killNum", 1)
+                    proto.set_field(heroStat, "deadNum", 1)
+                    if gameType == 4 then
+                        proto.set_field(heroStat, "damage", 28257)
+                    else
+                        proto.set_field(heroStat, "damage", 28256)
+                    end
+                    heroStats[#heroStats + 1] = heroStat
+                end
+            end
+            if #heroStats > 0 then
+                proto.set_field(stat, "HeroStatistics", heroStats)
             end
 
             playerResults[i] = stat
@@ -65,8 +92,7 @@ function execute(r)
     end
     log.info("BattleEnd 已发送")
 
-    -- 关闭连接
-    network.close_udp("battle")
+    -- 旧工具：收到 BattleEnd 响应后关闭 Battle TCP 并清理战斗状态。
     network.close_tcp("battle")
 
     return 0, sent, recv

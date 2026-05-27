@@ -46,8 +46,10 @@ type Robot struct {
 	running     atomic.Bool            // 是否正在运行
 	dialer      *network.Dialer        // 网络拨号器（封装 gnet 事件循环）
 	httpClient  *http.Client           // HTTP 客户端（声明式 HTTP 动作用）
-	luaMu       sync.Mutex             // Lua 访问互斥锁（回调/心跳可能在其他 goroutine 触发）
-	adp            adapter.Adapter // 协议适配器（编解码 + 帧解析）
+	luaMu       sync.Mutex             // Lua 访问互斥锁（回调/心跳/encode/decode 共抢）
+	// adp 是该 Robot 私有的 codec 适配器（RobotLocalAdapter 重构）。
+	// 所有 encode/decode 都在 r.l 上执行，与其他 Robot 不再共享 LState 池。
+	adp            *adapter.RobotAdapter
 	mainService    string          // 主连接服务名，意外断开时停止机器人
 	requestTimeout time.Duration   // robotConfig.timeoutSec 注入；用作 Lua tcp/udp_request 默认 timeout
 	done           chan struct{}   // 执行 goroutine 结束信号，Close 时等待
@@ -65,23 +67,34 @@ type Config struct {
 }
 
 // NewRobot 创建机器人实例。
+//
+// globalAdp 是进程级共享的 LuaAdapter（持有 codec.lua 字节码 + 元信息 + 错误描述缓存）。
+// NewRobot 内部调 globalAdp.NewRobotAdapter(r.l, &r.luaMu) 在该 Robot 私有 LState 上
+// 注册一份 codec 函数副本，后续编解码不再跨 Robot 抢全局 LState 池。
+//
+// 返回 error 的场景：codec.lua 在 r.l 上加载失败（脚本错误 / 缺少必需函数）。
+// 这种情况说明 codec 配置有问题，重试无意义，调用方应跳过该 Robot 并打 error 日志。
+// 正常运行下这里不会失败（启动期已通过 LuaAdapter 验证过 codec.lua 完整性）。
 func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
-	adp adapter.Adapter, dialer *network.Dialer, luaPool *script.RuntimePool) *Robot {
+	globalAdp *adapter.LuaAdapter, dialer *network.Dialer, luaPool *script.RuntimePool) (*Robot, error) {
+
+	if globalAdp == nil {
+		return nil, fmt.Errorf("NewRobot: globalAdp 不能为 nil")
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	r := &Robot{
-		id:          cfg.ID,
-		account:     cfg.Account,
-		state:       state.NewStore(),
-		client:      network.NewClient(cfg.Account, cfg.RequestTimeout),
-		factory:     factory,
-		luaPool:     luaPool,
-		ctx:         ctx,
-		cancel:      cancel,
-		dialer:      dialer,
-		httpClient:  &http.Client{Timeout: cfg.HTTPTimeout},
-		adp:            adp,
+		id:             cfg.ID,
+		account:        cfg.Account,
+		state:          state.NewStore(),
+		client:         network.NewClient(cfg.Account, cfg.RequestTimeout),
+		factory:        factory,
+		luaPool:        luaPool,
+		ctx:            ctx,
+		cancel:         cancel,
+		dialer:         dialer,
+		httpClient:     &http.Client{Timeout: cfg.HTTPTimeout},
 		mainService:    cfg.MainService,
 		requestTimeout: cfg.RequestTimeout,
 		done:           make(chan struct{}),
@@ -90,6 +103,23 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 	if luaPool != nil {
 		r.l = luaPool.Acquire()
 	}
+
+	// 派生 Robot 私有 codec 适配器（必须在 r.l 准备好之后、Start() 之前完成）。
+	// 此时 r.l 刚从池中拿出，没有其它 goroutine 在用，NewRobotAdapter 不需要持锁也安全。
+	if r.l == nil {
+		cancel()
+		return nil, fmt.Errorf("NewRobot: Lua 运行时池未提供 LState")
+	}
+	robotAdp, err := globalAdp.NewRobotAdapter(r.l, &r.luaMu)
+	if err != nil {
+		// 归还 LState 避免资源泄漏；其它字段会被 GC 回收
+		if luaPool != nil {
+			luaPool.Release(r.l)
+		}
+		cancel()
+		return nil, fmt.Errorf("NewRobot: 创建 RobotAdapter 失败 (account=%s): %w", cfg.Account, err)
+	}
+	r.adp = robotAdp
 
 	r.state.Set("id", cfg.ID)
 	r.state.Set("account", cfg.Account)
@@ -100,7 +130,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 	r.actionExec = engine.NewActionExecutor(r.state, &netSenderAdapter{robot: r}, r.factory, r.adp)
 	r.executor = engine.NewExecutor(flow, &robotActionHandler{robot: r, flow: flow}, r.account)
 
-	return r
+	return r, nil
 }
 
 // GetID 返回机器人 ID。
@@ -266,7 +296,7 @@ func (r *Robot) ConnectTCP(serviceName, address string) bool {
 		return false
 	}
 
-	_, err := r.dialer.DialTCP(r.ctx, address, conn)
+	_, err := r.dialer.DialTCP(r.ctx, address, conn, r.adp)
 	if err != nil {
 		stresslog.Warn("[ROBOT] TCP 连接建立失败",
 			zap.Int("id", r.id), zap.String("service", serviceName), zap.String("addr", address), zap.Error(err))
@@ -309,7 +339,7 @@ func (r *Robot) ConnectUDP(serviceName, address string) bool {
 		return false
 	}
 
-	_, err := r.dialer.DialUDP(address, conn)
+	_, err := r.dialer.DialUDP(address, conn, r.adp)
 	if err != nil {
 		stresslog.Warn("[ROBOT] UDP 拨号失败",
 			zap.Int("id", r.id), zap.String("account", r.account),
@@ -369,6 +399,20 @@ func (h *robotActionHandler) ExecuteAction(actionDef *engine.ActionDef) error {
 		sendBytes, recvBytes, timing, err = h.executeLuaAction(actionDef)
 	} else {
 		sendBytes, recvBytes, timing, err = h.robot.actionExec.Execute(h.robot.ctx, actionDef)
+	}
+
+	// 任务取消时的"副作用错误"覆写：
+	// stop 阶段，Lua 脚本（如 match_succeed.lua / connect_battle_tcp.lua）会因
+	// 底层 ctx 取消而拿到 nil/false，但脚本通常硬编码 return 31/1 等具体错误码，
+	// 经 luaCodeToActionErr 映射后变成 LISTEN_TIMEOUT/CONN_NOT_FOUND；
+	// 实际原因是 ACTION_CANCELED。在这里统一矫正，避免 monitor 把 cancel 流量
+	// 误归类为 Timeout/Failure，也避免 executor 重复刷 error 日志。
+	if err != nil && h.robot.ctx.Err() != nil {
+		var actionErr *engine.ActionError
+		if errors.As(err, &actionErr) && !isCanceledCode(actionErr.Code) {
+			err = engine.NewActionError(errcode.ErrActionCanceled,
+				"stopping: "+actionErr.Detail)
+		}
 	}
 
 	if mc := monitor.Global(); mc != nil && actionDef.Name != "" {

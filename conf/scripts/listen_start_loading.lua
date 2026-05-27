@@ -45,6 +45,10 @@ function execute(r)
             -- 旧工具：遍历 FighterList，匹配 playerId，提取 fighterIndex/secretKey/sessionId
             local myPlayerId = robot.get("roleId") or robot.get("playerId")
             fighterList = record.FighterList
+            local gameType = record.GameType or record.gameType or record.gType
+            if gameType then
+                robot.set("battleGameType", tonumber(gameType) or gameType)
+            end
             if fighterList and myPlayerId then
                 for i, fighter in ipairs(fighterList) do
                     local fid = tonumber(fighter.playerId)
@@ -83,14 +87,15 @@ function execute(r)
                 f.fightIndex = 0
                 f.camp = 0
             end
-            local heroes = fighter.selectHeroes
-            local skins = fighter.selectSkins
-            if heroes and heroes[1] then
-                f.heroId = tonumber(heroes[1])
-                f.skinId = skins and skins[1] and tonumber(skins[1]) or f.heroId or 0
-            else
-                f.heroId = 0
-                f.skinId = 0
+            f.selectHeroes = {}
+            local heroes = fighter.selectHeroes or {}
+            for j, heroId in ipairs(heroes) do
+                f.selectHeroes[j] = tonumber(heroId) or 0
+            end
+            f.selectSkins = {}
+            local skins = fighter.selectSkins or {}
+            for j, skinId in ipairs(skins) do
+                f.selectSkins[j] = tonumber(skinId) or 0
             end
             fighters[i] = f
         end

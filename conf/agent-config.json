@@ -13,6 +13,8 @@
     "port": 7719,
     "maxBots": 5000,
     "hbInterval": "10s",
+    "hbRequestTimeout": "5s",
+    "hbFailThreshold": 3,
     "requestTimeout": "30s",
     "reconnectMaxRetries": -1,
     "stressInterval": "5s"

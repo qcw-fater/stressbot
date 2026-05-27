@@ -109,10 +109,19 @@ func (s *AdminServer) Run() error {
 	// 启动 deadline 看门狗
 	s.startDeadlineWatchdog(ctx)
 
-	// 注册路由（已包裹 recover 中间件）
+	// 注册路由（已包裹 recover 中间件）。
+	//
+	// timeout 配置：
+	//   - ReadHeaderTimeout 防止慢客户端攻击型连接占住 server goroutine 不放，
+	//     避免堆积导致 accept queue 满；
+	//   - IdleTimeout 让长期空闲的 keep-alive 连接主动关闭，
+	//     防止 agent → admin 的 client-side 池保留大量已不再使用的连接；
+	//   - ReadTimeout/WriteTimeout 故意不设：history 导出/日志下载可能很长。
 	s.httpSrv = &http.Server{
-		Addr:    fmt.Sprintf(":%d", s.cfg.Port),
-		Handler: s.registerRoutes(),
+		Addr:              fmt.Sprintf(":%d", s.cfg.Port),
+		Handler:           s.registerRoutes(),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	stresslog.Info("admin 启动",

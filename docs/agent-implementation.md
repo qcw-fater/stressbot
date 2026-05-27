@@ -838,7 +838,7 @@ heartbeatLoop:
         continue
 
       consecutiveFailures++
-      if busy && consecutiveFailures == 1:
+      if busy && consecutiveFailures >= HBFailThreshold:
         cancelCurrentTask("心跳失败 / Admin 断联")
       记录日志（前 3 次 WARN，之后 ERROR）
 
@@ -850,7 +850,7 @@ heartbeatLoop:
 
 1. **成功时用 HBInterval**（默认 10s），**失败时用 HBFailInterval**（与 HBInterval 一致，即快速重试）
 2. **404 立即重注册**：Admin 返回 404 表示 Agent 在 Admin 侧不存在（Admin 重启或主动注销），立即取消任务并重新注册
-3. **任务运行中第一次心跳失败即取消任务**：Admin 是唯一的指标聚合点，断联后压测流量没有观测价值
+3. **任务运行中连续 `HBFailThreshold` 次心跳失败才取消任务**（默认 3 次 × HBInterval 10s = 30s 容忍窗口）：单次 dial 抖动（如测试环境本地 ephemeral port 瞬时阻塞）不应误伤压测任务；持续断联到达阈值才视为 Admin 真正不可达，此时取消任务（Admin 是唯一的指标聚合点，断联后压测流量没有观测价值）
 4. **持续失败不退进程**：除非重新注册超出 `ReconnectMaxRetries`
 5. **重新注册成功后递增 `regGeneration`**：避免旧任务的回调到新生命周期里污染状态
 
@@ -1025,7 +1025,9 @@ type Config struct {
 | `Port` | `port` | int | `7719` | 本地 HTTP 监听端口 |
 | `MaxBots` | `maxBots` | int | `5000` | 单节点最大机器人数 |
 | `HBInterval` | `hbInterval` | string | `"10s"` | 心跳发送间隔 |
-| `RequestTimeout` | `requestTimeout` | string | `"30s"` | 单次 HTTP 请求超时 |
+| `HBRequestTimeout` | `hbRequestTimeout` | string | `"5s"` | 单次心跳请求超时，独立于 RequestTimeout，超过 RequestTimeout 时会被截断 |
+| `HBFailThreshold` | `hbFailThreshold` | int | `3` | 任务运行中连续心跳失败多少次才取消任务（容忍 ephemeral port 等瞬时抖动） |
+| `RequestTimeout` | `requestTimeout` | string | `"30s"` | 单次 HTTP 请求超时（注册/上报/拉任务/下载等） |
 | `ReconnectMaxRetries` | `reconnectMaxRetries` | int | `-1`（无限） | 注册重试次数。-1=持续重连，0=视为未配置回退-1 |
 | `StressInterval` | `stressInterval` | string | `"5s"` | 压测指标上报间隔 |
 | `AppVersion` | (不序列化) | string | `"dev"` | 应用版本号，编译时 `-ldflags` 注入 |
@@ -1046,6 +1048,8 @@ type Config struct {
 | `SystemInterval` | Duration | = StressInterval | 与压测指标同步 |
 | `HBInterval` | Duration | `10s` | |
 | `HBFailInterval` | Duration | = HBInterval | 失败重试间隔 |
+| `HBRequestTimeout` | Duration | `5s` | 单次心跳请求超时，min(配置值, RequestTimeout) |
+| `HBFailThreshold` | int | `3` | 任务运行中容忍的连续心跳失败次数 |
 | `RequestTimeout` | Duration | `30s` | |
 | `ReconnectInterval` | Duration | `5s` | 注册重连初始间隔 |
 | `ReconnectMaxInterval` | Duration | `60s` | 重连退避上限 |
@@ -1296,7 +1300,7 @@ type ErrorResponse struct {
 | 操作 | 失败处理 |
 |------|----------|
 | 注册失败 | 指数退避（5s -> 10s -> 20s -> ... -> 60s 上限），默认永不放弃（`ReconnectMaxRetries=-1`） |
-| 心跳失败 | 使用 `HBFailInterval` 快速重试；404 立即重注册；任务运行中首次失败即取消任务 |
+| 心跳失败 | 使用 `HBFailInterval` 快速重试；404 立即重注册；任务运行中累计达到 `HBFailThreshold`（默认 3）次才取消任务 |
 | 上报压测指标失败 | 指数退避（1s -> 2s -> 4s -> ... -> 30s 上限），ticker 不停 |
 | 上报系统指标失败 | 同上 |
 | 拉取配置失败 | 立即返回 `TaskFailed`，错误信息含 URL |

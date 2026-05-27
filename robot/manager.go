@@ -36,9 +36,13 @@ type ManagerConfig struct {
 	StartNumber    int               `json:"startNumber"`
 	Count          int               `json:"count"`
 	ConcurrentNum  int               `json:"concurrentNum"`
-	StateExtra     map[string]string `json:"stateExtra"`
-	Adapter        adapter.Adapter   `json:"-"`
-	RequestTimeout time.Duration     `json:"requestTimeout"`
+	StateExtra map[string]string `json:"stateExtra"`
+	// Adapter 是进程级共享的 LuaAdapter（持有 codec.lua 字节码 + 元信息 + 错误描述缓存）。
+	// Manager 创建每个 Robot 时通过它派生 RobotAdapter，让 Robot 在自己的 LState 上做编解码。
+	// 类型从 adapter.Adapter 接口收窄到 *adapter.LuaAdapter，是因为只有 LuaAdapter 提供
+	// NewRobotAdapter 工厂方法。
+	Adapter        *adapter.LuaAdapter `json:"-"`
+	RequestTimeout time.Duration       `json:"requestTimeout"`
 	MainService    string            `json:"mainService"`
 	HTTPTimeout    time.Duration     `json:"httpTimeout"`
 	RampUp         *RampUpConfig     `json:"rampUp"`
@@ -101,7 +105,7 @@ func (m *Manager) startBatch(fromIndex, count, conc int) (int, error) {
 		id := m.cfg.StartNumber + fromIndex + i
 		account := fmt.Sprintf("%s%d", m.cfg.AccountPrefix, id)
 
-		r := NewRobot(Config{
+		r, err := NewRobot(Config{
 			ID:             id,
 			Account:        account,
 			StateExtra:     m.cfg.StateExtra,
@@ -109,6 +113,13 @@ func (m *Manager) startBatch(fromIndex, count, conc int) (int, error) {
 			RequestTimeout: m.cfg.RequestTimeout,
 			MainService:    m.cfg.MainService,
 		}, m.flow, m.factory, m.cfg.Adapter, m.dialer, m.luaPool)
+		if err != nil {
+			// codec.lua 加载失败属于配置问题，重试也没用。
+			// 跳过这个 robot，日志告警，继续创建其它（避免单个失败拖垮整批）。
+			stresslog.Error("[MANAGER] 创建机器人失败，跳过",
+				zap.Int("id", id), zap.String("account", account), zap.Error(err))
+			continue
+		}
 
 		m.mu.Lock()
 		m.robots = append(m.robots, r)

@@ -152,11 +152,12 @@ func extractNetArgs(L *lua.LState) (service string, route lua.LValue, msg proto.
 	return
 }
 
-// buildPacket 构建完整 TCP 数据包
+// buildPacket 构建完整 TCP 数据包。
+// 调用方（业务 Lua API）已持 luaMu，走 *Locked 版本避免自锁。
 func buildPacket(ctx *Context, service string, route lua.LValue, msgData []byte) []byte {
 	secretKey := ctx.NetSender.GetTCPSecretKey(service)
 	goRoute := luaValueToRoute(route)
-	return ctx.Adapter.EncodeTCP(goRoute, msgData, secretKey)
+	return ctx.Adapter.EncodeTCPLocked(goRoute, msgData, secretKey)
 }
 
 // luaValueToRoute 将 Lua table/nil/number/string 转换为 Go any。
@@ -300,7 +301,7 @@ func networkTCPRequest(L *lua.LState) int {
 	}
 
 	goRoute := luaValueToRoute(route)
-	routeKey := ctx.Adapter.ExpectedRouteKey(goRoute)
+	routeKey := ctx.Adapter.ExpectedRouteKeyLocked(goRoute)
 	pktLen := len(packet)
 
 	var respBody []byte
@@ -357,9 +358,9 @@ func networkUDPRequest(L *lua.LState) int {
 	timeout := resolveRequestTimeoutSec(L, ctx)
 
 	goRoute := luaValueToRoute(route)
-	routeKey := ctx.Adapter.ExpectedRouteKey(goRoute)
+	routeKey := ctx.Adapter.ExpectedRouteKeyLocked(goRoute)
 	udpKey := ctx.NetSender.GetUDPSecretKey(service)
-	packet := ctx.Adapter.EncodeUDP(goRoute, body, udpKey)
+	packet := ctx.Adapter.EncodeUDPLocked(goRoute, body, udpKey)
 	if packet == nil {
 		return pushRequestResult(L, int(errcode.ErrEncodeFailed), lua.LNil, 0, 0)
 	}
@@ -556,7 +557,7 @@ func networkUDPSend(L *lua.LState) int {
 
 	goRoute := luaValueToRoute(route)
 	udpKey := ctx.NetSender.GetUDPSecretKey(service)
-	packet := ctx.Adapter.EncodeUDP(goRoute, body, udpKey)
+	packet := ctx.Adapter.EncodeUDPLocked(goRoute, body, udpKey)
 	if packet == nil {
 		L.Push(lua.LNumber(errcode.ErrEncodeFailed))
 		L.Push(lua.LNumber(0))
@@ -599,7 +600,7 @@ func networkListen(L *lua.LState, protocol string) int {
 
 	service := L.CheckString(1)
 	route := luaValueToRoute(L.Get(2))
-	routeKey := ctx.Adapter.ExpectedRouteKey(route)
+	routeKey := ctx.Adapter.ExpectedRouteKeyLocked(route)
 
 	var s2cProto string
 	timeout := engine.DefaultListenTimeoutSec
@@ -862,19 +863,30 @@ func registerHeartbeat(L *lua.LState, proto heartbeatProto) int {
 		if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
 			return nil
 		}
-		var body []byte
-		if builderFn != nil && luaMu != nil {
-			// 第二关（防御性兜底）：TryLock 拿不到 luaMu 就跳过本次心跳。
-			// 关键场景：执行器在 lua 里调 network.close_tcp / register_*_heartbeat
-			// 等"需要等 StopHeartbeat 返回"的同步 API 时，本身就持有 luaMu。
-			// 如果这里 Lock 阻塞等待，就会与 StopHeartbeat 形成循环死锁：
-			//   executor 持 luaMu → 等 hb.done → 心跳 goroutine 等 luaMu。
-			// TryLock 失败即跳过本次发送，下个 tick（或 ctx 取消）能自然推进。
-			if !luaMu.TryLock() {
-				return nil
-			}
-			func() {
+
+		// 整个 builder 的 Lua 操作（执行 builder 脚本 → encode）合并到单一持锁块内：
+		//   - 避免两次 Lock/Unlock 抖动；
+		//   - RobotLocalAdapter 改造后 encode 也走 robot.L（同一个 luaMu），
+		//     必须用 *Locked 版本避免自锁。
+		//
+		// 第二关（防御性兜底）：TryLock 拿不到 luaMu 就跳过本次心跳。
+		// 关键场景：执行器在 lua 里调 network.close_tcp / register_*_heartbeat
+		// 等"需要等 StopHeartbeat 返回"的同步 API 时，本身就持有 luaMu。
+		// 如果这里 Lock 阻塞等待，就会与 StopHeartbeat 形成循环死锁：
+		//   executor 持 luaMu → 等 hb.done → 心跳 goroutine 等 luaMu。
+		// TryLock 失败即跳过本次发送，下个 tick（或 ctx 取消）能自然推进。
+		if luaMu != nil && !luaMu.TryLock() {
+			return nil
+		}
+		var packet []byte
+		func() {
+			if luaMu != nil {
 				defer luaMu.Unlock()
+			}
+
+			// Step 1: 执行 builder Lua 脚本拿 body（如有 builderFn）
+			var body []byte
+			if builderFn != nil {
 				savedTop := L.GetTop()
 				if err := L.CallByParam(lua.P{Fn: builderFn, NRet: 1, Protect: true}); err != nil {
 					L.SetTop(savedTop)
@@ -882,18 +894,20 @@ func registerHeartbeat(L *lua.LState, proto heartbeatProto) int {
 						zap.String("proto", protoName), zap.String("service", service), zap.Error(err))
 					return
 				}
-				ret := L.Get(-1)
-				body = []byte(lua.LVAsString(ret))
+				body = []byte(lua.LVAsString(L.Get(-1)))
 				L.SetTop(savedTop)
-			}()
-		}
+			}
 
-		if proto == hbProtoUDP {
-			secretKey := ctx.NetSender.GetUDPSecretKey(service)
-			return adp.EncodeUDP(goRoute, body, secretKey)
-		}
-		secretKey := ctx.NetSender.GetTCPSecretKey(service)
-		return adp.EncodeTCP(goRoute, body, secretKey)
+			// Step 2: 在持锁状态下编码（adapter 走 *Locked 版本避免自锁）
+			if proto == hbProtoUDP {
+				secretKey := ctx.NetSender.GetUDPSecretKey(service)
+				packet = adp.EncodeUDPLocked(goRoute, body, secretKey)
+			} else {
+				secretKey := ctx.NetSender.GetTCPSecretKey(service)
+				packet = adp.EncodeTCPLocked(goRoute, body, secretKey)
+			}
+		}()
+		return packet
 	}
 
 	// 必须用 withReleasedMu：RegisterHeartbeat 内部会 StopHeartbeat 停旧心跳，
@@ -949,12 +963,14 @@ func adapterEncode(L *lua.LState, protocol string) int {
 		key = []byte(L.CheckString(3))
 	}
 
+	// 业务 Lua 脚本调用此函数时已持 luaMu（RunActionScript / RunCallbackScript 入口
+	// 已加锁），走 *Locked 版本避免自锁。
 	var result []byte
 	switch protocol {
 	case "tcp":
-		result = ctx.Adapter.EncodeTCP(route, body, key)
+		result = ctx.Adapter.EncodeTCPLocked(route, body, key)
 	default:
-		result = ctx.Adapter.EncodeUDP(route, body, key)
+		result = ctx.Adapter.EncodeUDPLocked(route, body, key)
 	}
 
 	if result == nil {
@@ -990,14 +1006,15 @@ func adapterDecode(L *lua.LState, protocol string) int {
 		key = []byte(L.CheckString(2))
 	}
 
+	// 业务 Lua 脚本调用时已持 luaMu，走 *Locked 版本。
 	var routeKey string
 	var body []byte
 	var headerErr uint64
 	switch protocol {
 	case "tcp":
-		routeKey, body, headerErr = ctx.Adapter.DecodeTCP(data, key)
+		routeKey, body, headerErr = ctx.Adapter.DecodeTCPLocked(data, key)
 	default:
-		routeKey, body, headerErr = ctx.Adapter.DecodeUDP(data, key)
+		routeKey, body, headerErr = ctx.Adapter.DecodeUDPLocked(data, key)
 	}
 
 	L.Push(lua.LString(routeKey))
@@ -1015,8 +1032,9 @@ func adapterExpectedRouteKey(L *lua.LState) int {
 		L.Push(lua.LString(""))
 		return 1
 	}
+	// 业务 Lua 脚本调用时已持 luaMu，走 *Locked 版本。
 	route := luaValueToRoute(L.Get(1))
-	key := ctx.Adapter.ExpectedRouteKey(route)
+	key := ctx.Adapter.ExpectedRouteKeyLocked(route)
 	L.Push(lua.LString(key))
 	return 1
 }

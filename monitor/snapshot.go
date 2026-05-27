@@ -99,7 +99,8 @@ type CollectorSnapshot struct {
 // prevCounts 由调用方（Reporter）维护，用于计算 periodQPS。传 nil 表示不计算。
 func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float64) *CollectorSnapshot {
 	if !c.enabled {
-		return &CollectorSnapshot{}
+		// 即使监控关闭，Actions 字段也保证非 nil 以满足契约
+		return &CollectorSnapshot{Actions: []ActionSnapshot{}}
 	}
 	uptime := c.Uptime()
 	uptimeSec := uptime.Seconds()
@@ -249,16 +250,31 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 			ClientCostCount:     clientCostCount,
 		})
 	}
+	// 契约保证：Actions 字段在 JSON 中始终是数组，不是 null。
+	// 历史 bug：stopping 阶段或刚启动还没动作时，Actions 是 nil slice →
+	// JSON 序列化成 "actions": null → 前端 `for...of snapshot.actions` 抛
+	// "snapshot.actions is not iterable" 把整个 EditorPage 崩掉。
+	// 在源头初始化为空切片，前端任何调用点都不再需要 `?? []` 兜底。
+	if snap.Actions == nil {
+		snap.Actions = []ActionSnapshot{}
+	}
 	return snap
 }
 
 // MergeSnapshots 合并多个 CollectorSnapshot，用于分布式场景下聚合多 Agent 指标。
+//
+// 契约保证：返回的 *CollectorSnapshot 的 Actions 字段始终非 nil（最少是空切片），
+// 避免前端 JSON 解析后调 for...of 抛 "actions is not iterable"。
 func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 	if len(snaps) == 0 {
-		return &CollectorSnapshot{}
+		return &CollectorSnapshot{Actions: []ActionSnapshot{}}
 	}
 	if len(snaps) == 1 {
-		return snaps[0]
+		out := snaps[0]
+		if out != nil && out.Actions == nil {
+			out.Actions = []ActionSnapshot{}
+		}
+		return out
 	}
 
 	merged := &CollectorSnapshot{
@@ -393,5 +409,9 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 		merged.Actions = append(merged.Actions, ma)
 	}
 
+	// 契约保证（见函数文档）：Actions 字段始终非 nil。
+	if merged.Actions == nil {
+		merged.Actions = []ActionSnapshot{}
+	}
 	return merged
 }

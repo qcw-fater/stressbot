@@ -81,7 +81,7 @@ func New(cfg *ResolvedConfig, collector *monitor.MetricsCollector) (*Agent, erro
 		static.MemTotalMB = vm.Total / 1024 / 1024
 	}
 
-	httpCli := NewAdminClient(cfg.AdminAddr, id, cfg.RequestTimeout)
+	httpCli := NewAdminClient(cfg.AdminAddr, id, cfg.RequestTimeout, cfg.HBRequestTimeout)
 
 	return &Agent{
 		id:        id,
@@ -242,7 +242,9 @@ func (a *Agent) registerWithRetry(ctx context.Context) error {
 // 行为规则（用户需求 §2 + §6）：
 //   - 心跳成功用 HBInterval；失败用 HBFailInterval（更快重试）
 //   - 任意请求收到 404（errNotRegistered）→ 视为 Admin 重启，立即取消任务并重新注册
-//   - 任意一次心跳失败（含超时），若处于 Busy 立即取消当前任务（避免无观测数据的压测流量）
+//   - 心跳连续失败 ≥ HBFailThreshold 次（默认 3）且处于 Busy 时取消任务
+//     （Admin 是唯一指标聚合点，断联后压测流量没有观测价值；
+//      容忍窗口是 N×HBFailInterval，避免本地 ephemeral port 瞬时抖动误伤）
 //   - 持续失败不退进程（除非重新注册超出 ReconnectMaxRetries）
 func (a *Agent) heartbeatLoop(ctx context.Context) {
 	interval := a.cfg.HBInterval
@@ -309,17 +311,21 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 
 			consecutiveFailures++
 
-			// 用户需求 §2.2：运行任务时第一次心跳失败立刻取消任务
-			// （Admin 是唯一的指标聚合点，断联后压测流量没有观测价值）
-			if status == StatusBusy && consecutiveFailures == 1 {
-				stresslog.Error("[AGENT] 任务运行中与 Admin 断联，立即取消当前任务",
+			// 触达阈值才放弃任务，给本地网络抖动一个容忍窗口（默认 3×10s=30s）。
+			// 实测 Windows 本机 127.0.0.1 在密集 robot 流量下会规律性瞬时阻塞
+			// （ephemeral port 短暂耗尽），1 次失败就 cancel 250 robot 损失太大。
+			switch {
+			case status == StatusBusy && consecutiveFailures >= a.cfg.HBFailThreshold:
+				stresslog.Error("[AGENT] 任务运行中连续心跳失败达到阈值，放弃当前任务",
 					zap.String("taskID", taskID),
+					zap.Int("consecutive", consecutiveFailures),
+					zap.Int("threshold", a.cfg.HBFailThreshold),
 					zap.Error(err))
-				a.cancelCurrentTask("心跳失败 / Admin 断联")
-			} else if consecutiveFailures <= 3 {
+				a.cancelCurrentTask(fmt.Sprintf("心跳连续失败 %d 次 / Admin 断联", consecutiveFailures))
+			case consecutiveFailures <= 3:
 				stresslog.Warn("[AGENT] 心跳失败",
 					zap.Int("consecutive", consecutiveFailures), zap.Error(err))
-			} else {
+			default:
 				stresslog.Error("[AGENT] 心跳连续失败",
 					zap.Int("consecutive", consecutiveFailures), zap.Error(err))
 			}

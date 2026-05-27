@@ -9,7 +9,7 @@ import { BASELINE_PREFIX } from './env';
 
 async function fetchText(url: string): Promise<string | null> {
   try {
-    const r = await fetch(url);
+    const r = await fetch(url, { cache: 'no-cache' });
     if (!r.ok) return null;
     return await r.text();
   } catch {
@@ -19,7 +19,7 @@ async function fetchText(url: string): Promise<string | null> {
 
 async function fetchJson<T>(url: string): Promise<T | null> {
   try {
-    const r = await fetch(url);
+    const r = await fetch(url, { cache: 'no-cache' });
     if (!r.ok) return null;
     return (await r.json()) as T;
   } catch {

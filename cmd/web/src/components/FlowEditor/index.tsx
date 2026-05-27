@@ -118,8 +118,8 @@ function FlowEditorInner({
             });
           }
         }
-      } catch {
-        // 基线不可用时不阻塞编辑器
+      } catch (e) {
+        console.warn('[FlowEditor] 基线同步失败:', e);
       }
       // 适配器校验
       try {

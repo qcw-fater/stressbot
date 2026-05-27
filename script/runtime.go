@@ -38,11 +38,15 @@ const registryCtxKey = "__stressbot_ctx__"
 // 使用原子操作而非 mutex：Lua 自身串行（luaMu 已保护），但回调脚本在监听 goroutine 中
 // 也会触碰同一个 Context，原子保证最坏情况下的并发可见性。
 type Context struct {
-	RobotID   int
-	Account   string
-	Store     *state.Store
-	Factory   *protox.Factory
-	Adapter   adapter.Adapter
+	RobotID int
+	Account string
+	Store   *state.Store
+	Factory *protox.Factory
+	// Adapter 是 Robot 私有的 codec 适配器（RobotLocalAdapter 重构后类型从
+	// adapter.Adapter 接口收窄到具体类型 *adapter.RobotAdapter）。这样业务 Lua API
+	// 内部可以直接调 *Locked 版本（已持 luaMu），避免与自动加锁版本互相自锁。
+	// 自动加锁版本则留给 decodeLoop / 声明式动作执行器等"未持 luaMu"的路径。
+	Adapter   *adapter.RobotAdapter
 	NetSender engine.NetSender
 	Ctx       context.Context
 	LuaMu     *sync.Mutex

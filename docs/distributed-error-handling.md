@@ -129,7 +129,18 @@ Agent 与 Admin 通信的所有时间参数都可在 `agent-config.json` 配置�
 |--------|--------|------|
 | `HBInterval` | `10s` | 心跳成功时的下一次间隔 |
 | `HBFailInterval` | 同 `HBInterval` | 心跳失败时的下一次重试间隔 |
+| `HBRequestTimeout` | `5s` | 单次心跳请求超时（独立于 RequestTimeout，快失败快重试） |
+| `HBFailThreshold` | `3` | 任务运行中容忍的连续心跳失败次数；达到阈值才取消任务 |
 | `RequestTimeout` | `30s` | Agent → Admin 单次 HTTP 请求超时 |
+
+**Agent 与 Admin 心跳阈值的联动约束（重要）**：
+
+| 关系 | 必须满足 | 默认值 | 说明 |
+|---|---|---|---|
+| Admin unhealthy 阈值 ≥ Agent 容忍窗口 | `admin.unhealthyAfter ≥ HBFailThreshold × HBInterval` | 30s ≥ 3×10s ✓ | 否则节点已被 admin 标 unhealthy（触发任务回调），agent 端任务还在跑，状态错乱 |
+| Admin offline 阈值 > Admin unhealthy 阈值 | `admin.offlineAfter > admin.unhealthyAfter` | 60s > 30s ✓ | 节点先经过 unhealthy 过渡，再被删除 |
+
+**调参时务必同步**：把 `HBFailThreshold` 从 3 调到 6 后，需要把 `admin.unhealthyAfter` 也从 30s 调到 ≥60s、`admin.offlineAfter` 调到 ≥120s。
 | `ReconnectInterval` | `5s` | 注册重试的初始退避间隔（硬编码） |
 | `ReconnectMaxInterval` | `60s` | 注册重试的退避上限（硬编码） |
 | `ReconnectMaxRetries` | `-1` | 注册重试最大次数。`-1` = 持续重连永不放弃；`0` 视为未配置 → 走默认 `-1` |
@@ -202,15 +213,18 @@ req := HeartbeatRequest{
 
 ### 2.3 Busy 状态 Admin 挂掉
 
-**核心规则：第一次心跳失败立刻取消任务，丢弃，不补档。**
+**核心规则：累计 `HBFailThreshold`（默认 3）次心跳失败才取消任务，丢弃，不补档。**
+
+> 早期实现是"第 1 次失败立刻取消"，但测试环境本地多开 agent 时 ephemeral port 偶发瞬时阻塞，会让单次 dial 在 10~20s 才能恢复。为避免环境抖动误伤压测任务，改为累计阈值；容忍窗口 ≈ `HBFailThreshold × HBFailInterval`（默认 3 × 10s = 30s）。
 
 代码位置：`agent/agent.go::heartbeatLoop`
 
 ```go
-// 用户需求 §2.2：运行任务时第一次心跳失败立刻取消任务
-if status == StatusBusy && consecutiveFailures == 1 {
-    stresslog.Error("[AGENT] 任务运行中与 Admin 断联，立即取消当前任务",
+if status == StatusBusy && consecutiveFailures >= a.cfg.HBFailThreshold {
+    stresslog.Error("[AGENT] 任务运行中与 Admin 断联，达到容忍阈值，取消当前任务",
         zap.String("taskID", taskID),
+        zap.Int("consecutiveFailures", consecutiveFailures),
+        zap.Int("threshold", a.cfg.HBFailThreshold),
         zap.Error(err))
     a.cancelCurrentTask("心跳失败 / Admin 断联")
 }
@@ -982,7 +996,7 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 | 故障场景 | Agent 行为 | Admin 行为 | 任务最终状态 |
 |---------|-----------|-----------|------------|
 | Admin 挂掉，Agent Idle | 心跳失败递进重试，**不退进程** | — | 无任务 |
-| Admin 挂掉，Agent Busy | 第 1 次心跳失败 → 取消任务 → 回 Idle → 持续重连 | — | 任务在 Agent 端被丢弃 |
+| Admin 挂掉，Agent Busy | 连续 `HBFailThreshold` 次心跳失败 → 取消任务 → 回 Idle → 持续重连 | — | 任务在 Agent 端被丢弃 |
 | Admin 重启 | Agent 收到 404 → 取消任务（若有）→ 重新注册 → Idle | 加载旧 active 任务为 failed 并归档 | failed（旧）/ 等待新任务 |
 | Admin 持续不可达 + 注册超出 maxRetries（默认 -1 不会触发）| 退出进程 | — | 任务被丢弃 |
 | Agent 进程退出，无任务 | — | 60s 后标记 offline 并从注册表删除 | 无影响 |
@@ -1020,6 +1034,7 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 
 **计划中提到但实际未实现的配置项**：
 - `heartbeatFailInterval`：计划中描述为独立配置项且默认与 `heartbeatInterval` 不同（更短以加速重连），实际实现中 `HBFailInterval` 硬编码等于 `HBInterval`（`agent/config.go::Resolve` 中 `HBFailInterval: hbInterval`）。
+  - 新增 `HBRequestTimeout`（默认 5s）和 `HBFailThreshold`（默认 3）作为可配置项，分别控制心跳单次请求超时和"任务运行中容忍的连续失败次数"。
 - `reconnectInterval` / `reconnectMaxInterval`：计划中描述为可配置，实际硬编码为 5s / 60s（`agent/config.go::Resolve`）。
 - `taskReportTimeout`：计划中描述为可配置，实际硬编码为 30s。
 - `heartbeatInterval >= 25s` 的启动校验：计划中提到会拒绝启动，实际代码中未发现此校验逻辑。
