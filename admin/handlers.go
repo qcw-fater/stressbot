@@ -1093,7 +1093,7 @@ func (s *AdminServer) handleGetMetricsSummary(w http.ResponseWriter, r *http.Req
 	if len(agg.Snapshot.Actions) > 0 {
 		for _, a := range agg.Snapshot.Actions {
 			fmt.Fprintf(&b, "  %s: count=%d success=%.1f%% p50=%.1fms p99=%.1fms\n",
-				a.Name, a.SampleCount, a.SuccessRate*100, a.Latency.P50Ms, a.Latency.P99Ms)
+				a.Name, a.SampleCount, a.SuccessRate*100, a.RTT.P50Ms, a.RTT.P99Ms)
 		}
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")

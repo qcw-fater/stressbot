@@ -98,7 +98,7 @@ export function HistoryCompareView({ ids }: HistoryCompareViewProps) {
         const a = d.finalSnapshot.actions.find((x) => x.name === name);
         samples.push(a?.sampleCount);
         apdexes.push(a?.apdex);
-        p99s.push(a?.latency.p99Ms);
+        p99s.push(a?.rtt.p99Ms);
       }
       out.push({ name, samples, apdexes, p99s });
     }

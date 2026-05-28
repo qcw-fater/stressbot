@@ -155,6 +155,7 @@ func runAgentMode(cfg *Config) {
 	monitor.Init(monitor.CollectorConfig{
 		Enabled: true,
 		ApdexT:  cfg.Monitor.ApdexT,
+		TimingDetail: cfg.Monitor.TimingDetail,
 	})
 
 	a, err := agent.New(resolved, monitor.Global())
@@ -168,6 +169,7 @@ func runAgentMode(cfg *Config) {
 	if stopPprof != nil {
 		stopPprof()
 	}
+	utils.GetWorkPool().Shutdown()
 }
 
 // ── 单机模式 ──────────────────────────────────────────────

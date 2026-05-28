@@ -307,13 +307,12 @@ func networkTCPRequest(L *lua.LState) int {
 	var respBody []byte
 	var headerErr uint64
 	var reqErr error
-	var netLatency time.Duration
+	var reqTiming engine.RequestTiming
 	withReleasedMu(ctx.LuaMu, func() {
-		respBody, headerErr, netLatency, reqErr = ctx.NetSender.TCPRequest(service, packet, routeKey,
+		respBody, headerErr, reqTiming, reqErr = ctx.NetSender.TCPRequest(service, packet, routeKey,
 			time.Duration(timeout)*time.Second)
 	})
-	// 无论成功/失败/超时，只要发生了真正的 Send→Recv 窗口（netLatency>0）就计入累加器
-	ctx.recordNet(netLatency)
+	ctx.recordRequest(reqTiming)
 
 	if reqErr != nil {
 		return pushRequestResult(L, errToCode(reqErr), lua.LNil, pktLen, 0)
@@ -369,15 +368,15 @@ func networkUDPRequest(L *lua.LState) int {
 	var respBody []byte
 	var headerErr uint64
 	var reqErr error
-	var netLatency time.Duration
+	var reqTiming engine.RequestTiming
 
 	withReleasedMu(ctx.LuaMu, func() {
-		respBody, headerErr, netLatency, reqErr = ctx.NetSender.UDPRequest(
+		respBody, headerErr, reqTiming, reqErr = ctx.NetSender.UDPRequest(
 			service, packet, routeKey,
 			time.Duration(timeout)*time.Second,
 		)
 	})
-	ctx.recordNet(netLatency)
+	ctx.recordRequest(reqTiming)
 
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
 		// 脚本上下文被取消（robot.Stop / 任务停止）。区别于 reqErr 携带的 CONN_DROPPED：
@@ -474,7 +473,7 @@ func networkHTTPRequest(L *lua.LState) int {
 	withReleasedMu(ctx.LuaMu, func() {
 		statusCode, respBody, netLatency, err = ctx.NetSender.HTTPRequest(reqURL, method, contentType, reqBody)
 	})
-	ctx.recordNet(netLatency)
+	ctx.recordRequest(engine.RequestTiming{WireRTT: netLatency})
 	if err != nil {
 		L.Push(lua.LNumber(-1))
 		L.Push(lua.LString(err.Error()))
@@ -628,12 +627,9 @@ func networkListen(L *lua.LState, protocol string) int {
 	var respBody []byte
 	var timedOut bool
 	var headerErr uint64
-	// listen 类按"从进入循环到命中的窗口"作为单次网络往返耗时；超时不计入 latency 直方图。
-	var netLatency time.Duration
 
 	withReleasedMu(ctx.LuaMu, func() {
-		start := time.Now()
-		deadline := start.Add(time.Duration(timeout) * time.Second)
+		deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 		for time.Now().Before(deadline) {
 			if protocol == "tcp" {
 				respBody, headerErr = ctx.NetSender.GetTCPListenResp(service, routeKey)
@@ -641,7 +637,6 @@ func networkListen(L *lua.LState, protocol string) int {
 				respBody, headerErr = ctx.NetSender.GetUDPListenResp(service, routeKey)
 			}
 			if respBody != nil {
-				netLatency = time.Since(start)
 				return
 			}
 			time.Sleep(time.Duration(pollMs) * time.Millisecond)
@@ -653,9 +648,6 @@ func networkListen(L *lua.LState, protocol string) int {
 			timedOut = true
 		}
 	})
-	if respBody != nil {
-		ctx.recordNet(netLatency)
-	}
 
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
 		L.Push(lua.LNil)

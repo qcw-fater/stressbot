@@ -252,12 +252,19 @@ export interface ActionMetric {
   avgSendBytes: number;
   avgRecvBytes: number;
   timeoutAvgMs: number;
-  /** 客户端构建/解析平均耗时（毫秒），所有结果分支累计 */
+  /** 客户端平均耗时（毫秒），所有结果分支累计 */
   clientAvgMs: number;
-  /** 进入 latency 直方图的样本数（netSamples > 0 且成功）。0 表示该 action 没有真正网络往返，延迟列应显示 — */
-  netSampleCount: number;
-  /** 延迟直方图（仅纯网络往返） */
-  latency: HistogramView;
+  buildAvgMs: number;
+  encodeAvgMs: number;
+  sendAvgMs: number;
+  decodeWaitAvgMs: number;
+  decodeAvgMs: number;
+  dispatchToActionWaitAvgMs: number;
+  parseStoreAvgMs: number;
+  /** 进入 RTT 直方图的样本数。0 表示该 action 没有 request-response RTT，RTT 列应显示 — */
+  rttSampleCount: number;
+  /** RTT 直方图（WireRTT） */
+  rtt: HistogramView;
   errors?: ErrorEntry[];
 }
 
@@ -443,6 +450,12 @@ export interface HistoryTrendPoint {
   elapsedSec: number;
   totalQps: number;
   apdex: number;
+  rttAvgMs: number;
+  rttP95Ms: number;
+  rttP99Ms: number;
+  clientAvgMs: number;
+  encodeAvgMs: number;
+  decodeAvgMs: number;
   botsRunning: number;
   botsErrored: number;
   sendKBps: number;

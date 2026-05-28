@@ -286,7 +286,7 @@ func (s *AdminServer) handleCompareHistory(w http.ResponseWriter, r *http.Reques
 	diff := CompareDiff{Actions: make(map[string][]float64)}
 	for _, t := range tasks {
 		for _, a := range t.FinalSnapshot.Actions {
-			diff.Actions[a.Name] = append(diff.Actions[a.Name], a.Latency.P99Ms)
+			diff.Actions[a.Name] = append(diff.Actions[a.Name], a.RTT.P99Ms)
 		}
 	}
 

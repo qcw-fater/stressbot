@@ -488,7 +488,9 @@ func (h *HistoryStore) GetTimeseries(ctx context.Context, id string, maxPoints i
 	maxPoints = normalizeTimeseriesMaxPoints(maxPoints)
 
 	rows, err := h.db.QueryContext(ctx, `
-		SELECT sampled_at, elapsed_sec, total_qps, apdex, bots_running, bots_errored,
+		SELECT sampled_at, elapsed_sec, total_qps, apdex,
+			rtt_avg_ms, rtt_p95_ms, rtt_p99_ms, client_avg_ms, encode_avg_ms, decode_avg_ms,
+			bots_running, bots_errored,
 			send_kbps, recv_kbps, avg_cpu_percent, max_cpu_percent, mem_percent,
 			goroutines, threads, fds, online_count, offline_count
 		FROM task_timeseries WHERE task_id = ?
@@ -503,7 +505,9 @@ func (h *HistoryStore) GetTimeseries(ctx context.Context, id string, maxPoints i
 	for rows.Next() {
 		var p HistoryTrendPoint
 		if err := rows.Scan(
-			&p.SampledAt, &p.ElapsedSec, &p.TotalQPS, &p.Apdex, &p.BotsRunning, &p.BotsErrored,
+			&p.SampledAt, &p.ElapsedSec, &p.TotalQPS, &p.Apdex,
+			&p.RTTAvgMs, &p.RTTP95Ms, &p.RTTP99Ms, &p.ClientAvgMs, &p.EncodeAvgMs, &p.DecodeAvgMs,
+			&p.BotsRunning, &p.BotsErrored,
 			&p.SendKBps, &p.RecvKBps, &p.AvgCPUPercent, &p.MaxCPUPercent, &p.MemPercent,
 			&p.Goroutines, &p.Threads, &p.FDs, &p.OnlineCount, &p.OfflineCount,
 		); err != nil {
@@ -709,11 +713,15 @@ func (h *HistoryStore) AppendTimeseries(ctx context.Context, taskID string, poin
 	}
 	_, err := h.db.ExecContext(ctx, `
 		INSERT INTO task_timeseries (
-			task_id, sampled_at, elapsed_sec, total_qps, apdex, bots_running, bots_errored,
+			task_id, sampled_at, elapsed_sec, total_qps, apdex,
+			rtt_avg_ms, rtt_p95_ms, rtt_p99_ms, client_avg_ms, encode_avg_ms, decode_avg_ms,
+			bots_running, bots_errored,
 			send_kbps, recv_kbps, avg_cpu_percent, max_cpu_percent, mem_percent,
 			goroutines, threads, fds, online_count, offline_count
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, taskID, point.SampledAt, point.ElapsedSec, point.TotalQPS, point.Apdex, point.BotsRunning, point.BotsErrored,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, taskID, point.SampledAt, point.ElapsedSec, point.TotalQPS, point.Apdex,
+		point.RTTAvgMs, point.RTTP95Ms, point.RTTP99Ms, point.ClientAvgMs, point.EncodeAvgMs, point.DecodeAvgMs,
+		point.BotsRunning, point.BotsErrored,
 		point.SendKBps, point.RecvKBps, point.AvgCPUPercent, point.MaxCPUPercent, point.MemPercent,
 		point.Goroutines, point.Threads, point.FDs, point.OnlineCount, point.OfflineCount)
 	return err

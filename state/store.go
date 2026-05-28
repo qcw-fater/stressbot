@@ -73,7 +73,8 @@ func (s *Store) GetString(key string) string {
 	return fmt.Sprintf("%v", v)
 }
 
-// GetList 获取列表副本（any 切片）。返回副本以防止调用方修改内部状态。
+// GetList 获取列表（any 切片）。返回内部引用，调用方不应修改返回的切片。
+// 所有调用方（engine/action.go 的 binding 解析）均为只读访问，无需拷贝。
 func (s *Store) GetList(key string) []any {
 	s.mu.RLock()
 	v := s.data[key]
@@ -82,14 +83,13 @@ func (s *Store) GetList(key string) []any {
 		return nil
 	}
 	if list, ok := v.([]any); ok {
-		cp := make([]any, len(list))
-		copy(cp, list)
-		return cp
+		return list
 	}
 	return nil
 }
 
-// GetMap 获取映射副本。返回副本以防止调用方修改内部状态。
+// GetMap 获取映射。返回内部引用，调用方不应修改返回的 map。
+// 所有调用方（engine/action.go 的 binding 解析）均为只读访问，无需拷贝。
 func (s *Store) GetMap(key string) map[string]any {
 	s.mu.RLock()
 	v := s.data[key]
@@ -98,11 +98,7 @@ func (s *Store) GetMap(key string) map[string]any {
 		return nil
 	}
 	if m, ok := v.(map[string]any); ok {
-		cp := make(map[string]any, len(m))
-		for k, mv := range m {
-			cp[k] = mv
-		}
-		return cp
+		return m
 	}
 	return nil
 }

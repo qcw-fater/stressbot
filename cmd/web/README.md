@@ -82,10 +82,9 @@ npm run test -- codec.test
 # Test Files  1 passed (1)
 #      Tests  6 passed (6)
 
-# 进一步用 Go 校验工具验证导出结果
-cd ..
-go run ./cmd/validate <导出的 json>
-# defaultDelayMs=1000 nodes=89 actions=70 callbacks=18 validate OK
+# 进一步在前端编辑器中导入导出结果，查看校验报告
+npm run test -- codec.test
+# Test Files  1 passed (1)
 ```
 
 ## 作为组件使用

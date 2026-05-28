@@ -27,12 +27,12 @@ const LABEL: Record<ApdexLevel, string> = {
 
 export interface ApdexCellProps {
   value: number | undefined;
-  netSampleCount?: number;
+  rttSampleCount?: number;
   showLabel?: boolean;
 }
 
-export function ApdexCell({ value, netSampleCount, showLabel = false }: ApdexCellProps) {
-  if (netSampleCount !== undefined && netSampleCount === 0) {
+export function ApdexCell({ value, rttSampleCount, showLabel = false }: ApdexCellProps) {
+  if (rttSampleCount !== undefined && rttSampleCount === 0) {
     return <Tag color="default" style={{ fontVariantNumeric: 'tabular-nums', minWidth: 56, textAlign: 'center' }}>—</Tag>;
   }
   const level = classifyApdex(value);

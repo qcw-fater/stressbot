@@ -288,6 +288,75 @@ func (f *Factory) getNestedField(ref protoreflect.Message, parts []string) (any,
 	return nil, fmt.Errorf("字段 %s 不是 message 类型，无法嵌套", part)
 }
 
+// GetListLen 获取 repeated 字段长度，不展开列表内容。
+func (f *Factory) GetListLen(msg proto.Message, fieldPath string) (int, error) {
+	field, list, err := f.getListField(msg.ProtoReflect(), splitPath(fieldPath))
+	if err != nil {
+		return 0, err
+	}
+	if !field.IsList() {
+		return 0, fmt.Errorf("字段 %s 不是 repeated", field.Name())
+	}
+	return list.Len(), nil
+}
+
+// GetListItem 获取 repeated 字段指定元素，message 元素保留为 proto.Message。
+func (f *Factory) GetListItem(msg proto.Message, fieldPath string, idx int) (any, error) {
+	field, list, err := f.getListField(msg.ProtoReflect(), splitPath(fieldPath))
+	if err != nil {
+		return nil, err
+	}
+	if !field.IsList() {
+		return nil, fmt.Errorf("字段 %s 不是 repeated", field.Name())
+	}
+	if idx < 0 || idx >= list.Len() {
+		return nil, fmt.Errorf("数组索引越界: %d", idx)
+	}
+	elem := list.Get(idx)
+	if field.Kind() == protoreflect.MessageKind {
+		if pm, ok := elem.Message().Interface().(proto.Message); ok {
+			return pm, nil
+		}
+		return nil, fmt.Errorf("字段 %s 元素不是 proto.Message", field.Name())
+	}
+	return fromScalarValue(field, elem), nil
+}
+
+func (f *Factory) getListField(ref protoreflect.Message, parts []string) (protoreflect.FieldDescriptor, protoreflect.List, error) {
+	if len(parts) == 0 {
+		return nil, nil, fmt.Errorf("fieldPath 为空")
+	}
+	for _, part := range parts[:len(parts)-1] {
+		if strings.HasPrefix(part, "[") && strings.HasSuffix(part, "]") {
+			return nil, nil, fmt.Errorf("列表路径 %s 不能以数组索引作为中间段", strings.Join(parts, "."))
+		}
+		field := ref.Descriptor().Fields().ByName(protoreflect.Name(part))
+		if field == nil {
+			field = findFieldCaseInsensitive(ref.Descriptor(), part)
+		}
+		if field == nil {
+			return nil, nil, fmt.Errorf("消息 %s 未找到字段 %s", string(ref.Descriptor().FullName()), part)
+		}
+		if field.Kind() != protoreflect.MessageKind || field.IsList() || field.IsMap() {
+			return nil, nil, fmt.Errorf("字段 %s 不是单个 message，无法继续读取列表", field.Name())
+		}
+		ref = ref.Get(field).Message()
+	}
+
+	last := parts[len(parts)-1]
+	field := ref.Descriptor().Fields().ByName(protoreflect.Name(last))
+	if field == nil {
+		field = findFieldCaseInsensitive(ref.Descriptor(), last)
+	}
+	if field == nil {
+		return nil, nil, fmt.Errorf("消息 %s 未找到字段 %s", string(ref.Descriptor().FullName()), last)
+	}
+	if !field.IsList() {
+		return field, nil, nil
+	}
+	return field, ref.Get(field).List(), nil
+}
+
 // GetFieldMap 获取消息的所有字段值（map 形式）。
 // 遍历所有字段描述符，包含 proto3 默认值字段（如 int64=0、bool=false、string=""）。
 // 未设置的 message 类型字段和空的 repeated/map 字段会被跳过。

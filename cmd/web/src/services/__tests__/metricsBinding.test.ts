@@ -27,8 +27,15 @@ function action(name: string, overrides: Partial<ActionMetric> = {}): ActionMetr
     avgRecvBytes: 200,
     timeoutAvgMs: 0,
     clientAvgMs: 1.5,
-    netSampleCount: 95,
-    latency: { count: 95, minMs: 1, maxMs: 100, avgMs: 20, p50Ms: 18, p90Ms: 50, p95Ms: 70, p99Ms: 90 },
+    buildAvgMs: 0,
+    encodeAvgMs: 0,
+    sendAvgMs: 0,
+    decodeWaitAvgMs: 0,
+    decodeAvgMs: 0,
+    dispatchToActionWaitAvgMs: 0,
+    parseStoreAvgMs: 0,
+    rttSampleCount: 95,
+    rtt: { count: 95, minMs: 1, maxMs: 100, avgMs: 20, p50Ms: 18, p90Ms: 50, p95Ms: 70, p99Ms: 90 },
     ...overrides,
   };
 }

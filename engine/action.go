@@ -25,49 +25,77 @@ const (
 	DefaultListenTimeoutSec  = 60   // tcpListen / udpListen 默认超时（秒）
 	DefaultPollMs            = 100  // 轮询间隔（毫秒）
 	DefaultHeartbeatMs       = 3000 // 心跳默认间隔（毫秒）
+
+	// 计时细分级别，控制 ActionExecutor 中哪些时间点被记录。
+	TimingLevelRTTOnly = 0 // 默认：仅 WireRTT + SendCost
+	TimingLevelCodec   = 1 // 增加 EncodeCost
+	TimingLevelFull    = 2 // 增加 BuildCost / ParseStoreCost
 )
 
-// ActionTiming 单次 action 执行的耗时拆解。
-//
-// 设计目标：把"客户端构建/解析"开销与"服务端处理 + 网络往返"剥离开来，
-// 使 monitor 的 latency 直方图只反映服务端能力，不被客户端 CPU 抢占污染。
-//
-//   - NetLatency：纯网络往返时间。
-//     ▸ request 类（tcpRequest / udpRequest）：Send 完成到收到响应的窗口
-//     ▸ listen 类（tcpListen / udpListen）：开始 poll 到拿到响应（受 pollMs 量化）
-//     ▸ http 类：http.Client.Do + body 读完的总时长
-//     ▸ send-only / connect / close / setState / clearState：始终为 0
-//   - SamplesNet：贡献到 NetLatency 的网络调用次数。
-//     声明式动作恒为 1（request/listen 成功）或 0（send-only/state/listen 超时），
-//     lua 动作可能 ≥1（脚本里多次 request 累加）。
-//     0 表示该次执行没有真正进入"send→recv"窗口，不参与 latency 直方图与 Apdex 统计。
-type ActionTiming struct {
-	NetLatency time.Duration
-	SamplesNet int
+// RequestTiming 单次 request-response 的耗时拆解。
+type RequestTiming struct {
+	SendCost             time.Duration
+	WireRTT              time.Duration
+	DecodeWait           time.Duration
+	DecodeCost           time.Duration
+	DispatchToActionWait time.Duration
 }
 
-// Add 把另一段网络耗时累加进来，调用次数 +1。lua 内部多次网络调用使用。
-func (t *ActionTiming) Add(d time.Duration) {
-	t.NetLatency += d
-	t.SamplesNet++
+// ClientTiming 单次 action 的客户端侧耗时拆解。
+type ClientTiming struct {
+	BuildCost      time.Duration
+	EncodeCost     time.Duration
+	SendCost       time.Duration
+	DecodeWait     time.Duration
+	DecodeCost     time.Duration
+	DispatchWait   time.Duration
+	ParseStoreCost time.Duration
+}
+
+// ActionTiming 单次 action 执行的耗时拆解。
+type ActionTiming struct {
+	Requests []RequestTiming
+	Client   ClientTiming
+}
+
+// AddRequest 追加一次 request-response 样本。
+func (t *ActionTiming) AddRequest(req RequestTiming) {
+	if req.WireRTT <= 0 {
+		return
+	}
+	t.Requests = append(t.Requests, req)
+	t.Client.SendCost += req.SendCost
+	t.Client.DecodeWait += req.DecodeWait
+	t.Client.DecodeCost += req.DecodeCost
+	t.Client.DispatchWait += req.DispatchToActionWait
+}
+
+// WireRTTSum 返回本 action 内所有 RTT 样本总和。
+func (t ActionTiming) WireRTTSum() time.Duration {
+	var total time.Duration
+	for _, req := range t.Requests {
+		if req.WireRTT > 0 {
+			total += req.WireRTT
+		}
+	}
+	return total
 }
 
 // ActionExecutor 声明式动作执行器。
 // 根据 ActionDef 的 Pattern 分派到具体的执行方法，处理消息构建、发送、接收和状态存储。
 type ActionExecutor struct {
-	netSender NetSender       // 网络发送委托，由 Robot 层实现
-	store     *state.Store    // Robot 状态存储，保存服务器响应字段和中间变量
-	factory   *protox.Factory // 动态 protobuf 消息工厂，用于创建/序列化/解析 proto 消息
-	adp       adapter.Adapter // 协议适配器，处理消息头编解码和路由键计算
+	netSender   NetSender       // 网络发送委托，由 Robot 层实现
+	store       *state.Store    // Robot 状态存储，保存服务器响应字段和中间变量
+	factory     *protox.Factory // 动态 protobuf 消息工厂，用于创建/序列化/解析 proto 消息
+	adp         adapter.Adapter // 协议适配器，处理消息头编解码和路由键计算
+	timingLevel int             // 计时细分级别：0=rtt, 1=codec, 2=full
 }
 
 // NetSender 网络发送委托接口。
 // 由 Robot 层实现，封装 TCP/UDP 连接管理和 HTTP 请求能力。
 //
-// 注意：TCPRequest / UDPRequest / HTTPRequest 多返回一个 netLatency time.Duration，
-// 反映"Send 完成 → 收到响应"的纯网络往返时长，不含调用方在 Go 侧的 proto 构建、
-// 加密编码、响应解析等客户端开销。netLatency 用于 monitor 的 latency 直方图，
-// 把"服务端处理能力"从"客户端 CPU 开销"中剥离出来。
+// 注意：TCPRequest / UDPRequest 多返回一个 RequestTiming，WireRTT 表示
+// "Send 完成 → 收到完整响应帧"，不含 decode、响应解析和 state 写入等客户端开销。
 type NetSender interface {
 	// ── 发送 / 请求-响应 ─────────────────────────────────────────────────
 
@@ -78,10 +106,10 @@ type NetSender interface {
 	// TCPRequest 发送 TCP 请求并等待匹配 routeKey 的响应。
 	// 返回响应体、协议头错误码、纯网络往返时长和可能的错误。timeout 可选，覆盖默认超时。
 	// 失败/超时分支也返回有效的 netLatency；仅在 Send 阶段错误时返回 0。
-	TCPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) (body []byte, headerErr uint64, netLatency time.Duration, err error)
+	TCPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) (body []byte, headerErr uint64, timing RequestTiming, err error)
 	// UDPRequest 发送 UDP 请求并等待匹配 routeKey 的响应。
 	// 返回值语义同 TCPRequest。
-	UDPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) (body []byte, headerErr uint64, netLatency time.Duration, err error)
+	UDPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) (body []byte, headerErr uint64, timing RequestTiming, err error)
 	// ConnectTCP 建立到指定地址的 TCP 连接，按 service 名注册。
 	ConnectTCP(service, address string) error
 	// ConnectUDP 建立到指定地址的 UDP 连接，按 service 名注册。
@@ -107,9 +135,9 @@ type NetSender interface {
 	// EnsureUDPListener 确保指定 routeKey 的 UDP 监听已注册。
 	EnsureUDPListener(service string, routeKey string)
 	// RegisterTCPHeartbeat 注册 TCP 心跳，按 intervalMs 间隔周期调用 builder 生成心跳包。
-	RegisterTCPHeartbeat(service string, intervalMs int, builder func() []byte)
+	RegisterTCPHeartbeat(service string, intervalMs int, builder func() []byte) error
 	// RegisterUDPHeartbeat 注册 UDP 心跳，按 intervalMs 间隔周期调用 builder 生成心跳包。
-	RegisterUDPHeartbeat(service string, intervalMs int, builder func() []byte)
+	RegisterUDPHeartbeat(service string, intervalMs int, builder func() []byte) error
 
 	// ── 加密密钥 ──────────────────────────────────────────────────────────
 
@@ -123,13 +151,15 @@ type NetSender interface {
 	SetUDPSecretKey(service string, key []byte)
 }
 
-// NewActionExecutor 创建声明式动作执行器
-func NewActionExecutor(store *state.Store, sender NetSender, factory *protox.Factory, adp adapter.Adapter) *ActionExecutor {
+// NewActionExecutor 创建声明式动作执行器。
+// timingLevel: 0=仅 RTT, 1=含编解码, 2=完整客户端细分。
+func NewActionExecutor(store *state.Store, sender NetSender, factory *protox.Factory, adp adapter.Adapter, timingLevel int) *ActionExecutor {
 	return &ActionExecutor{
-		netSender: sender,
-		store:     store,
-		factory:   factory,
-		adp:       adp,
+		netSender:   sender,
+		store:       store,
+		factory:     factory,
+		adp:         adp,
+		timingLevel: timingLevel,
 	}
 }
 
@@ -612,11 +642,11 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, ActionTimin
 
 	sendLen := len(resolvedURL) + len(body)
 	statusCode, respBody, netLatency, err := ae.netSender.HTTPRequest(resolvedURL, method, contentType, body)
-	timing := ActionTiming{NetLatency: netLatency, SamplesNet: 1}
+	var timing ActionTiming
+	if netLatency > 0 {
+		timing.AddRequest(RequestTiming{WireRTT: netLatency})
+	}
 	if err != nil {
-		if netLatency == 0 {
-			timing = ActionTiming{}
-		}
 		return sendLen, 0, timing, err
 	}
 
@@ -811,7 +841,7 @@ func (ae *ActionExecutor) protocolSecretKey(protocol, service string) []byte {
 }
 
 // protocolRequest sends a request and waits for response.
-func (ae *ActionExecutor) protocolRequest(protocol, service string, packet []byte, routeKey string, timeout ...time.Duration) (body []byte, headerErr uint64, netLatency time.Duration, err error) {
+func (ae *ActionExecutor) protocolRequest(protocol, service string, packet []byte, routeKey string, timeout ...time.Duration) (body []byte, headerErr uint64, timing RequestTiming, err error) {
 	if protocol == "udp" {
 		return ae.netSender.UDPRequest(service, packet, routeKey, timeout...)
 	}
@@ -868,9 +898,17 @@ func (ae *ActionExecutor) execSend(protocol string, def *ActionDef) (int, error)
 
 // execRequest sends a request and waits for response.
 func (ae *ActionExecutor) execRequest(protocol string, def *ActionDef) (int, int, ActionTiming, error) {
+	var buildStart time.Time
+	if ae.timingLevel >= TimingLevelFull {
+		buildStart = time.Now()
+	}
 	body, err := ae.buildBody(def)
+	var buildCost time.Duration
+	if ae.timingLevel >= TimingLevelFull && !buildStart.IsZero() {
+		buildCost = time.Since(buildStart)
+	}
 	if err != nil {
-		return 0, 0, ActionTiming{}, err
+		return 0, 0, ActionTiming{Client: ClientTiming{BuildCost: buildCost}}, err
 	}
 
 	routeKey := ae.adp.ExpectedRouteKey(def.Route)
@@ -884,23 +922,29 @@ func (ae *ActionExecutor) execRequest(protocol string, def *ActionDef) (int, int
 		zap.Int("bodyLen", len(body)))
 
 	secretKey := ae.protocolSecretKey(protocol, def.Service)
+	var encodeStart time.Time
+	if ae.timingLevel >= TimingLevelCodec {
+		encodeStart = time.Now()
+	}
 	packet := ae.protocolEncode(protocol, def.Route, body, secretKey)
+	var encodeCost time.Duration
+	if ae.timingLevel >= TimingLevelCodec && !encodeStart.IsZero() {
+		encodeCost = time.Since(encodeStart)
+	}
 	if packet == nil {
-		return 0, 0, ActionTiming{}, NewActionError(errcode.ErrEncodeFailed, "action="+def.Name+" route="+routeKey)
+		return 0, 0, ActionTiming{Client: ClientTiming{BuildCost: buildCost, EncodeCost: encodeCost}}, NewActionError(errcode.ErrEncodeFailed, "action="+def.Name+" route="+routeKey)
 	}
 
 	var reqTimeout []time.Duration
 	if def.Timeout > 0 {
 		reqTimeout = append(reqTimeout, time.Duration(def.Timeout)*time.Second)
 	}
-	respBody, headerErr, netLatency, err := ae.protocolRequest(protocol, def.Service, packet, routeKey, reqTimeout...)
-	// 请求成功 / headerErr / timeout 三种分支 netLatency 都有效，统一构造 timing；
-	// 只有"发送阶段就失败"（连接不存在/已关闭/Send 错误）时 netLatency=0、SamplesNet=0。
-	timing := ActionTiming{NetLatency: netLatency, SamplesNet: 1}
+	respBody, headerErr, reqTiming, err := ae.protocolRequest(protocol, def.Service, packet, routeKey, reqTimeout...)
+	var timing ActionTiming
+	timing.Client.BuildCost += buildCost
+	timing.Client.EncodeCost += encodeCost
+	timing.AddRequest(reqTiming)
 	if err != nil {
-		if netLatency == 0 {
-			timing = ActionTiming{}
-		}
 		return len(packet), 0, timing, err
 	}
 
@@ -908,14 +952,21 @@ func (ae *ActionExecutor) execRequest(protocol string, def *ActionDef) (int, int
 		return len(packet), len(respBody), timing, ae.handleHeaderError(def, headerErr, routeKey, respBody)
 	}
 
+	var parseStart time.Time
+	if ae.timingLevel >= TimingLevelFull {
+		parseStart = time.Now()
+	}
 	if err := ae.parseAndStoreResponse(def, respBody); err != nil {
 		return len(packet), 0, timing, err
+	}
+	if ae.timingLevel >= TimingLevelFull && !parseStart.IsZero() {
+		timing.Client.ParseStoreCost += time.Since(parseStart)
 	}
 
 	stresslog.Debug("[ACTION] "+label+" 成功",
 		zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
 		zap.String("s2cProto", def.S2CProto),
-		zap.Int("respBodyLen", len(respBody)), zap.Duration("netLatency", netLatency))
+		zap.Int("respBodyLen", len(respBody)), zap.Duration("wireRTT", reqTiming.WireRTT))
 	return len(packet), len(respBody), timing, nil
 }
 
@@ -953,30 +1004,32 @@ func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *
 		pollCount++
 		respBody, headerErr := ae.protocolListenResp(protocol, def.Service, routeKey)
 		if respBody != nil {
-			// elapsed 含 pollMs 量化误差，但仍是当前能拿到的最贴近"从挂起到响应到达"的窗口；
-			// 它代表了一次成功的网络等待，因此计入 latency 直方图（SamplesNet=1）。
-			elapsed := time.Since(start)
-			timing := ActionTiming{NetLatency: elapsed, SamplesNet: 1}
+			var timing ActionTiming
 			if headerErr != 0 {
 				return 0, timing, ae.handleHeaderError(def, headerErr, routeKey, respBody)
 			}
+			var parseStart time.Time
+			if ae.timingLevel >= TimingLevelFull {
+				parseStart = time.Now()
+			}
 			if err := ae.parseAndStoreResponse(def, respBody); err != nil {
 				return 0, timing, err
+			}
+			if ae.timingLevel >= TimingLevelFull && !parseStart.IsZero() {
+				timing.Client.ParseStoreCost += time.Since(parseStart)
 			}
 			stresslog.Debug("[ACTION] "+label+" 成功",
 				zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
 				zap.String("s2cProto", def.S2CProto),
 				zap.Int("respBodyLen", len(respBody)),
-				zap.Int("pollCount", pollCount), zap.Duration("netLatency", elapsed))
+				zap.Int("pollCount", pollCount))
 			return len(respBody), timing, nil
 		}
 		time.Sleep(time.Duration(pollMs) * time.Millisecond)
 	}
 
-	// listen 超时不算"成功一次网络往返"，SamplesNet=0：不污染 latency 直方图，
-	// 但 timeout 分支会把这段时间记入 timeoutTotalMs（仍代表服务端 SLA 失败边界）。
 	elapsed := time.Since(start)
-	return 0, ActionTiming{NetLatency: elapsed, SamplesNet: 0}, NewActionError(errcode.ErrListenTimeout,
+	return 0, ActionTiming{}, NewActionError(errcode.ErrListenTimeout,
 		"action="+def.Name+" service="+def.Service+" route="+routeKey+
 			fmt.Sprintf(" timeout=%ds polls=%d elapsed=%v", timeout, pollCount, elapsed))
 }

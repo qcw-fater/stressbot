@@ -637,8 +637,20 @@ type HistoryTrendPoint struct {
 	ElapsedSec int `json:"elapsedSec"`
 	// TotalQPS 集群总 QPS。
 	TotalQPS float64 `json:"totalQps"`
-	// Apdex 按网络样本数加权后的 Apdex。
+	// Apdex 按 RTT 样本数加权后的 Apdex。
 	Apdex float64 `json:"apdex"`
+	// RTTAvgMs 平均 RTT。
+	RTTAvgMs float64 `json:"rttAvgMs"`
+	// RTTP95Ms P95 RTT。
+	RTTP95Ms float64 `json:"rttP95Ms"`
+	// RTTP99Ms P99 RTT。
+	RTTP99Ms float64 `json:"rttP99Ms"`
+	// ClientAvgMs 客户端平均耗时。
+	ClientAvgMs float64 `json:"clientAvgMs"`
+	// EncodeAvgMs 编码平均耗时。
+	EncodeAvgMs float64 `json:"encodeAvgMs"`
+	// DecodeAvgMs 解码平均耗时。
+	DecodeAvgMs float64 `json:"decodeAvgMs"`
 	// BotsRunning 运行中机器人数量。
 	BotsRunning int `json:"botsRunning"`
 	// BotsErrored 异常机器人数量。

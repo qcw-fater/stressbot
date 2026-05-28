@@ -110,11 +110,11 @@ const ACTION_COLUMNS: ColumnsType<ActionMetric> = [
   { title: '成功', dataIndex: 'successCount', key: 'successCount', width: 60, sorter: (a, b) => a.successCount - b.successCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: 'var(--color-success)' }}>{v}</span> },
   { title: '失败', dataIndex: 'failureCount', key: 'failureCount', width: 52, sorter: (a, b) => a.failureCount - b.failureCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-error)' : 'var(--text-tertiary)' }}>{v}</span> },
   { title: '超时', dataIndex: 'timeoutCount', key: 'timeoutCount', width: 52, sorter: (a, b) => a.timeoutCount - b.timeoutCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-orange)' : 'var(--text-tertiary)' }}>{v}</span> },
-  { title: 'avg(ms)', key: 'avgMs', width: 64, sorter: (a, b) => a.latency.avgMs - b.latency.avgMs, render: (_, r) => <span style={NUMERIC_STYLE}>{r.netSampleCount > 0 ? fmtMs(r.latency.avgMs) : '—'}</span> },
-  { title: 'p50(ms)', key: 'p50Ms', width: 64, sorter: (a, b) => a.latency.p50Ms - b.latency.p50Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{r.netSampleCount > 0 ? fmtMs(r.latency.p50Ms) : '—'}</span> },
-  { title: 'p95(ms)', key: 'p95Ms', width: 64, sorter: (a, b) => a.latency.p95Ms - b.latency.p95Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{r.netSampleCount > 0 ? fmtMs(r.latency.p95Ms) : '—'}</span> },
-  { title: 'p99(ms)', key: 'p99Ms', width: 64, sorter: (a, b) => a.latency.p99Ms - b.latency.p99Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{r.netSampleCount > 0 ? fmtMs(r.latency.p99Ms) : '—'}</span> },
-  { title: 'max(ms)', key: 'maxMs', width: 64, sorter: (a, b) => a.latency.maxMs - b.latency.maxMs, render: (_, r) => <span style={NUMERIC_STYLE}>{r.netSampleCount > 0 ? fmtMs(r.latency.maxMs) : '—'}</span> },
+  { title: 'avg(ms)', key: 'avgMs', width: 64, sorter: (a, b) => a.rtt.avgMs - b.rtt.avgMs, render: (_, r) => <span style={NUMERIC_STYLE}>{r.rttSampleCount > 0 ? fmtMs(r.rtt.avgMs) : '—'}</span> },
+  { title: 'p50(ms)', key: 'p50Ms', width: 64, sorter: (a, b) => a.rtt.p50Ms - b.rtt.p50Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{r.rttSampleCount > 0 ? fmtMs(r.rtt.p50Ms) : '—'}</span> },
+  { title: 'p95(ms)', key: 'p95Ms', width: 64, sorter: (a, b) => a.rtt.p95Ms - b.rtt.p95Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{r.rttSampleCount > 0 ? fmtMs(r.rtt.p95Ms) : '—'}</span> },
+  { title: 'p99(ms)', key: 'p99Ms', width: 64, sorter: (a, b) => a.rtt.p99Ms - b.rtt.p99Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{r.rttSampleCount > 0 ? fmtMs(r.rtt.p99Ms) : '—'}</span> },
+  { title: 'max(ms)', key: 'maxMs', width: 64, sorter: (a, b) => a.rtt.maxMs - b.rtt.maxMs, render: (_, r) => <span style={NUMERIC_STYLE}>{r.rttSampleCount > 0 ? fmtMs(r.rtt.maxMs) : '—'}</span> },
   {
     title: <Tooltip title="平均每次成功发送的字节数">↑发送(均)</Tooltip>,
     dataIndex: 'avgSendBytes', key: 'avgSendBytes', width: 72,
@@ -129,7 +129,7 @@ const ACTION_COLUMNS: ColumnsType<ActionMetric> = [
   },
   { title: '并发', dataIndex: 'executing', key: 'executing', width: 52, sorter: (a, b) => a.executing - b.executing, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
   { title: 'QPS', dataIndex: 'avgQps', key: 'avgQps', width: 60, sorter: (a, b) => a.avgQps - b.avgQps, render: (v: number) => <span style={NUMERIC_STYLE}>{v.toFixed(1)}</span> },
-  { title: 'Apdex', dataIndex: 'apdex', key: 'apdex', width: 68, sorter: (a, b) => a.apdex - b.apdex, render: (_, r) => <ApdexCell value={r.apdex} netSampleCount={r.netSampleCount} /> },
+  { title: 'Apdex', dataIndex: 'apdex', key: 'apdex', width: 68, sorter: (a, b) => a.apdex - b.apdex, render: (_, r) => <ApdexCell value={r.apdex} rttSampleCount={r.rttSampleCount} /> },
   {
     title: '错误',
     key: 'errors',
@@ -385,13 +385,13 @@ function TopSection() {
   const recv = fmtBandwidth(b.recvMBps ?? 0);
   const robotPercent = r.started > 0 ? Math.round((r.running / r.started) * 100) : 0;
 
-  // 加权集群 apdex（用 netSampleCount 作权重，排除纯客户端动作）/ 成功率
+  // 加权集群 apdex（用 rttSampleCount 作权重，排除纯客户端动作）/ 成功率
   let totalSamples = 0, wApdex = 0, wSuccess = 0;
   for (const a of actions) {
     totalSamples += a.sampleCount;
     wSuccess += a.successRate * a.sampleCount;
-    if (a.netSampleCount > 0) {
-      wApdex += a.apdex * a.netSampleCount;
+    if (a.rttSampleCount > 0) {
+      wApdex += a.apdex * a.rttSampleCount;
     }
   }
   const clusterSuccess = totalSamples > 0 ? wSuccess / totalSamples : 0;

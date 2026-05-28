@@ -14,29 +14,26 @@ function execute(r)
     end
 
     local ok, err = pcall(function()
-        local fieldMap = proto.get_field_map(resp)
-
         -- 从 actorList 中找到自己的 PlayerGameInfo，提取 matchData.sessionId（校验ID）和 index
         local myPlayerId = tonumber(robot.get("roleId"))
-        local actorList = fieldMap.actorList
-        if actorList and myPlayerId then
-            for _, actor in ipairs(actorList) do
-                local pid = tonumber(actor.playerId)
+        local actorCount = proto.list_size(resp, "actorList")
+        if actorCount > 0 and myPlayerId then
+            for i = 1, actorCount do
+                local actor = proto.list_get(resp, "actorList", i)
+                local pid = tonumber(proto.get_path(actor, "playerId"))
                 if pid and pid == myPlayerId then
-                    -- 提取 matchData 中的 sessionId（校验ID）和 index
-                    if actor.matchData then
-                        if actor.matchData.sessionId then
-                            robot.set("battleSession", actor.matchData.sessionId)
-                        end
+                    local sessionId = proto.get_path(actor, "matchData.sessionId")
+                    if sessionId then
+                        robot.set("battleSession", sessionId)
                     end
                     break
                 end
             end
         end
 
-        -- 存储 battleArea
-        if fieldMap.battleArea then
-            robot.set("battleArea", fieldMap.battleArea)
+        local battleArea = proto.get_path(resp, "battleArea")
+        if battleArea then
+            robot.set("battleArea", battleArea)
         end
     end)
 

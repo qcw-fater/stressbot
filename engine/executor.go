@@ -164,7 +164,7 @@ func (e *Executor) reportRemainingCanceled(remaining []string) {
 		// RecordAction 内部 executing-- ，需要先 RecordActionStart 让 executing++ 配对，
 		// 避免 executing 计数漂成负数
 		mc.RecordActionStart(n.Action)
-		mc.RecordAction(n.Action, monitor.ResultCanceled, 0, 0, 0, 0, 0, nil)
+		mc.RecordAction(n.Action, monitor.ResultCanceled, monitor.ActionTiming{}, 0, 0, 0, nil)
 	}
 }
 

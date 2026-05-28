@@ -1,9 +1,11 @@
 package script
 
 import (
-	lua "github.com/yuin/gopher-lua"
+	"strconv"
 
+	lua "github.com/yuin/gopher-lua"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // loadProtoModule 加载 proto 命名空间模块。
@@ -258,6 +260,7 @@ func protoParse(L *lua.LState) int {
 }
 
 // protoGetFieldMap proto.get_field_map(msg) — 获取所有字段（返回 table）
+// 单遍展开：proto → Lua table，跳过中间 map[string]any 层。
 func protoGetFieldMap(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.Factory == nil {
@@ -271,11 +274,7 @@ func protoGetFieldMap(L *lua.LState) int {
 		return 1
 	}
 
-	fieldMap := ctx.Factory.GetFieldMap(msg)
-	result := L.NewTable()
-	for k, v := range fieldMap {
-		result.RawSetString(k, goValueToLua(L, v))
-	}
+	result := protoMessageToLuaTable(L, msg)
 
 	L.Push(result)
 	return 1
@@ -402,4 +401,103 @@ func findFirstStringArg(L *lua.LState) string {
 		}
 	}
 	return ""
+}
+
+// protoMessageToLuaTable 将 proto.Message 直接转换为 Lua LTable，
+// 跳过中间 map[string]any 层，省掉一次完整的 Go 对象树分配。
+func protoMessageToLuaTable(L *lua.LState, msg proto.Message) *lua.LTable {
+	ref := msg.ProtoReflect()
+	result := L.NewTable()
+
+	fields := ref.Descriptor().Fields()
+	for i := 0; i < fields.Len(); i++ {
+		fd := fields.Get(i)
+
+		// 跳过未设置的非 repeated message 字段（与 factory.GetFieldMap 一致）
+		if fd.Kind() == protoreflect.MessageKind && !fd.IsList() && !fd.IsMap() && !ref.Has(fd) {
+			continue
+		}
+		// 跳过空的 repeated/map 字段
+		if (fd.IsList() || fd.IsMap()) && !ref.Has(fd) {
+			continue
+		}
+
+		val := ref.Get(fd)
+		lv := protoFieldToLua(L, fd, val)
+		result.RawSetString(string(fd.Name()), lv)
+	}
+
+	return result
+}
+
+// protoFieldToLua 将单个 proto 字段值转换为 lua.LValue。
+func protoFieldToLua(L *lua.LState, field protoreflect.FieldDescriptor, val protoreflect.Value) lua.LValue {
+	// repeated 字段
+	if field.IsList() {
+		list := val.List()
+		tb := L.NewTable()
+		for i := 0; i < list.Len(); i++ {
+			tb.RawSetInt(i+1, protoScalarToLua(L, field, list.Get(i)))
+		}
+		return tb
+	}
+
+	// map 字段
+	if field.IsMap() {
+		m := val.Map()
+		tb := L.NewTable()
+		m.Range(func(k protoreflect.MapKey, v protoreflect.Value) bool {
+			tb.RawSetString(k.String(), protoScalarToLua(L, field.MapValue(), v))
+			return true
+		})
+		return tb
+	}
+
+	return protoScalarToLua(L, field, val)
+}
+
+// protoScalarToLua 将标量 proto 值转换为 lua.LValue。
+func protoScalarToLua(L *lua.LState, field protoreflect.FieldDescriptor, val protoreflect.Value) lua.LValue {
+	switch field.Kind() {
+	case protoreflect.BoolKind:
+		return lua.LBool(val.Bool())
+
+	case protoreflect.Int32Kind, protoreflect.Sint32Kind, protoreflect.Sfixed32Kind,
+		protoreflect.Int64Kind, protoreflect.Sint64Kind, protoreflect.Sfixed64Kind:
+		v := val.Int()
+		if v > maxSafeInt || v < -maxSafeInt {
+			return lua.LString(strconv.FormatInt(v, 10))
+		}
+		return lua.LNumber(v)
+
+	case protoreflect.Uint32Kind, protoreflect.Fixed32Kind,
+		protoreflect.Uint64Kind, protoreflect.Fixed64Kind:
+		v := val.Uint()
+		if v > maxSafeInt {
+			return lua.LString(strconv.FormatUint(v, 10))
+		}
+		return lua.LNumber(v)
+
+	case protoreflect.FloatKind, protoreflect.DoubleKind:
+		return lua.LNumber(val.Float())
+
+	case protoreflect.StringKind:
+		return lua.LString(val.String())
+
+	case protoreflect.BytesKind:
+		return lua.LString(string(val.Bytes()))
+
+	case protoreflect.EnumKind:
+		v := int64(val.Enum())
+		if v > maxSafeInt || v < -maxSafeInt {
+			return lua.LString(strconv.FormatInt(v, 10))
+		}
+		return lua.LNumber(v)
+
+	case protoreflect.MessageKind:
+		return protoMessageToLuaTable(L, val.Message().Interface())
+
+	default:
+		return lua.LString(val.String())
+	}
 }

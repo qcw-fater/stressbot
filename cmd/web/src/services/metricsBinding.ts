@@ -83,7 +83,7 @@ export function classifyApdex(apdex: number | undefined): ApdexLevel {
 }
 
 /** 加权计算一组动作的聚合 Apdex 和成功率
- *  Apdex 权重用 netSampleCount，排除纯客户端动作（netSampleCount=0）避免拉低评分。
+ *  Apdex 权重用 rttSampleCount，排除纯客户端动作（rttSampleCount=0）避免拉低评分。
  *  成功率权重仍用 sampleCount，反映整体请求成功率。 */
 export function computeWeightedMetrics(actions: ActionMetric[]) {
   let totalSamples = 0;
@@ -93,9 +93,9 @@ export function computeWeightedMetrics(actions: ActionMetric[]) {
   for (const a of actions) {
     totalSamples += a.sampleCount;
     weightedSuccess += a.successRate * a.sampleCount;
-    if (a.netSampleCount > 0) {
-      apdexWeight += a.netSampleCount;
-      weightedApdex += a.apdex * a.netSampleCount;
+    if (a.rttSampleCount > 0) {
+      apdexWeight += a.rttSampleCount;
+      weightedApdex += a.apdex * a.rttSampleCount;
     }
   }
   return {

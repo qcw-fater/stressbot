@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"io"
+	"sync"
 
 	lua "github.com/yuin/gopher-lua"
 )
@@ -21,18 +22,31 @@ func RegisterZlibModule(L *lua.LState) {
 	})
 }
 
+var gzipWriterPool = sync.Pool{
+	New: func() any {
+		return gzip.NewWriter(io.Discard)
+	},
+}
+
 func luaGzipCompress(L *lua.LState) int {
 	data := []byte(L.CheckString(1))
 	var buf bytes.Buffer
-	w := gzip.NewWriter(&buf)
-	if _, err := w.Write(data); err != nil {
+	w := gzipWriterPool.Get().(*gzip.Writer)
+	w.Reset(&buf)
+
+	_, writeErr := w.Write(data)
+	closeErr := w.Close()
+	w.Reset(io.Discard)
+	gzipWriterPool.Put(w)
+
+	if writeErr != nil {
 		L.Push(lua.LNil)
-		L.Push(lua.LString(err.Error()))
+		L.Push(lua.LString(writeErr.Error()))
 		return 2
 	}
-	if err := w.Close(); err != nil {
+	if closeErr != nil {
 		L.Push(lua.LNil)
-		L.Push(lua.LString(err.Error()))
+		L.Push(lua.LString(closeErr.Error()))
 		return 2
 	}
 	L.Push(lua.LString(buf.String()))

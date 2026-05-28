@@ -212,12 +212,14 @@
           "server": "tcp:logic",
           "listen": null
         }
-      ]
+      ],
+      "delayMs": -1
     },
     "PlayerLogin": {
       "type": "action",
       "action": "PlayerLogin",
-      "errorStrategy": "abort"
+      "errorStrategy": "abort",
+      "delayMs": -1
     },
     "RequestPlayerData": {
       "type": "action",

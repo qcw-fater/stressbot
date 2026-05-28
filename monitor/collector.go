@@ -8,7 +8,45 @@ import (
 
 	"stressbot/errcode"
 	stresslog "stressbot/utils/log"
+
+	"go.uber.org/zap"
 )
+
+// RequestTiming 单次 request-response 的耗时拆解。
+type RequestTiming struct {
+	SendCost             time.Duration
+	WireRTT              time.Duration
+	DecodeWait           time.Duration
+	DecodeCost           time.Duration
+	DispatchToActionWait time.Duration
+}
+
+// ClientTiming 单次 action 的客户端侧耗时拆解。
+type ClientTiming struct {
+	BuildCost      time.Duration
+	EncodeCost     time.Duration
+	SendCost       time.Duration
+	DecodeWait     time.Duration
+	DecodeCost     time.Duration
+	DispatchWait   time.Duration
+	ParseStoreCost time.Duration
+}
+
+// ActionTiming 单次 action 执行的耗时拆解。
+type ActionTiming struct {
+	Requests []RequestTiming
+	Client   ClientTiming
+}
+
+func (t ActionTiming) wireRTTSum() time.Duration {
+	var total time.Duration
+	for _, req := range t.Requests {
+		if req.WireRTT > 0 {
+			total += req.WireRTT
+		}
+	}
+	return total
+}
 
 // ActionResult 动作执行结果类型。
 type ActionResult int
@@ -79,34 +117,49 @@ type actionMetrics struct {
 	timeoutTotalMs  atomic.Int64      // 超时样本累计延迟（毫秒），用于计算平均超时延迟
 	canceledCount   atomic.Int64      // 取消次数（ctx 取消）
 	executing       atomic.Int64      // 当前正在执行中的并发数
-	latency         *LatencyHistogram // 延迟直方图：纯网络往返（仅成功且 netSamples > 0）
+	rtt             *LatencyHistogram // RTT 直方图：纯网络往返（仅成功且有 WireRTT 样本）
 	sendBytes       atomic.Int64      // 发送字节数（per-action，用于 ↑avg 列）
 	recvBytes       atomic.Int64      // 接收字节数（per-action，用于 ↓avg 列）
 	apdexSatisfied  atomic.Int64      // Apdex 满意样本：响应时间 < T
 	apdexTolerating atomic.Int64      // Apdex 容忍样本：响应时间 >= T 且 < 4T
 	errors          sync.Map          // errKey → *errorBucket，按 (Kind, Code) 聚合的错误分布
 
-	// 客户端开销与网络样本计数（latency 拆分模型新增字段）：
+	// 客户端开销与 RTT 样本计数：
 	//   - clientCostSum/Count：累计客户端构建/解析开销（纳秒），用于 ClientAvgMs
-	//   - netActionCount：有网络调用的成功 action 计数（每次 +1），与 latency 直方图 entry 数一致。
-	//     注意：Lua 脚本可能单次 action 内多次 request（netSamples > 1），但 netLatency 已合并为一次记录，
-	//     因此 netActionCount 计数的是"action 粒度的有效直方图条目"而非"底层网络调用次数"。
-	// 客户端开销在所有结果分支（含失败/超时）都累加；netActionCount 仅成功且有网络调用时累加。
+	//   - rttSampleCount：RTT 直方图中的独立样本数（逐个 request 记录，非 action 粒度）
+	//   - Lua 脚本单次 action 内可能多次 request，每次独立记录 WireRTT 到直方图
+	// 客户端开销在所有结果分支（含失败/超时）都累加；rttSampleCount 仅成功且有网络调用时累加。
 	clientCostSum   atomic.Int64
 	clientCostCount atomic.Int64
-	netActionCount  atomic.Int64
+	buildCostSum    atomic.Int64
+	encodeCostSum   atomic.Int64
+	sendCostSum     atomic.Int64
+	decodeWaitSum   atomic.Int64
+	decodeCostSum   atomic.Int64
+	dispatchWaitSum atomic.Int64
+	parseStoreSum   atomic.Int64
+	rttSampleCount  atomic.Int64
 }
 
 func newActionMetrics() *actionMetrics {
-	return &actionMetrics{latency: newLatencyHistogram()}
+	return &actionMetrics{rtt: newLatencyHistogram()}
 }
+
+type TimingDetailLevel string
+
+const (
+	TimingRTTOnly     TimingDetailLevel = "rtt"
+	TimingCodecDetail TimingDetailLevel = "codec"
+	TimingFullDetail  TimingDetailLevel = "full"
+)
 
 // CollectorConfig 监控配置。
 type CollectorConfig struct {
-	Enabled     bool `json:"enabled"`     // 是否启用监控
-	HTTPEnabled bool `json:"httpEnabled"` // 是否启用 HTTP JSON 端点
-	HTTPPort    int  `json:"httpPort"`    // HTTP 端口号
-	ApdexT      int  `json:"apdexT"`      // Apdex T 阈值（毫秒），默认 100
+	Enabled      bool   `json:"enabled"`      // 是否启用监控
+	HTTPEnabled  bool   `json:"httpEnabled"`  // 是否启用 HTTP JSON 端点
+	HTTPPort     int    `json:"httpPort"`     // HTTP 端口号
+	ApdexT       int    `json:"apdexT"`       // Apdex T 阈值（毫秒），默认 100
+	TimingDetail string `json:"timingDetail"` // 计时细分级别：rtt / codec / full，默认 rtt
 }
 
 // MetricsCollector 全局指标收集器（单例）。
@@ -115,8 +168,9 @@ type MetricsCollector struct {
 	enabled   bool            // 是否启用
 	cfg       CollectorConfig // 运行期配置副本（除 ApdexT 外）
 	cfgMu     sync.RWMutex    // 保护 cfg 非热路径字段
-	apdexT    atomic.Int32    // Apdex T 阈值（毫秒）热路径独立原子读写，与 cfgMu 解耦
-	startTime time.Time       // 收集器启动时间
+	apdexT       atomic.Int32      // Apdex T 阈值（毫秒）热路径独立原子读写，与 cfgMu 解耦
+	timingDetail TimingDetailLevel // 计时细分级别
+	startTime    time.Time         // 收集器启动时间
 
 	actions sync.Map   // string → *actionMetrics，按 action 名称索引
 	namesMu sync.Mutex // 保护 names 切片的追加
@@ -141,13 +195,35 @@ var (
 	globalOnce sync.Once
 )
 
+func NormalizeTimingDetail(value string) TimingDetailLevel {
+	switch TimingDetailLevel(value) {
+	case TimingCodecDetail:
+		return TimingCodecDetail
+	case TimingFullDetail:
+		return TimingFullDetail
+	case TimingRTTOnly, "":
+		return TimingRTTOnly
+	default:
+		return TimingRTTOnly
+	}
+}
+
 // Init 初始化全局单例。sync.Once 保证幂等，多次调用不会重置。
 func Init(cfg CollectorConfig) {
 	globalOnce.Do(func() {
+		level := NormalizeTimingDetail(cfg.TimingDetail)
+		if cfg.TimingDetail == "" {
+			stresslog.Warn("[MONITOR] monitor.timingDetail 未配置，使用默认值", zap.String("timingDetail", string(level)))
+			cfg.TimingDetail = string(level)
+		} else if TimingDetailLevel(cfg.TimingDetail) != level {
+			stresslog.Warn("[MONITOR] monitor.timingDetail 配置无效，使用默认值", zap.String("configured", cfg.TimingDetail), zap.String("timingDetail", string(level)))
+			cfg.TimingDetail = string(level)
+		}
 		global = &MetricsCollector{
-			enabled:   cfg.Enabled,
-			cfg:       cfg,
-			startTime: time.Now(),
+			enabled:      cfg.Enabled,
+			cfg:          cfg,
+			timingDetail: level,
+			startTime:    time.Now(),
 		}
 		t := cfg.ApdexT
 		if t <= 0 {
@@ -219,24 +295,9 @@ func (c *MetricsCollector) AddBandwidth(send, recv int64) {
 }
 
 // RecordAction 记录一次动作执行结果（热路径，纯原子操作）。
-//
-// 参数语义：
-//   - netLatency：纯网络往返时间（不含客户端构建/解析开销）。
-//     由 robotActionHandler 从 engine.ActionTiming 拿到，详见 engine.ActionTiming 注释。
-//   - clientCost：客户端构建/序列化/解析开销 = wallClock - netLatency。
-//     用于 ClientAvgMs 列，所有结果分支都累计（包括失败/超时/取消）。
-//   - netSamples：本次贡献的网络调用次数。
-//     声明式 request/listen 命中恒为 1；声明式 send-only/state/listen 超时恒为 0；
-//     lua 可能 ≥1（脚本里多次 request 累加）。仅 netSamples > 0 才进 latency 直方图与 Apdex。
-//
-// 设计要点（参见 plans/latency-net-only-redesign.md §3.4）：
-//   - 纯客户端动作（setState / connect / register_heartbeat 等 lua）netSamples=0，
-//     不进直方图避免污染 P95，但 successCount 仍 +1 保持可见性。
-//   - 失败 / 超时不进 latency 直方图（保持原有语义），但都进入 error map。
-//   - timeout 记 netLatency 到 timeoutTotalMs（反映服务端 SLA 边界值）+ error map。
 func (c *MetricsCollector) RecordAction(
 	name string, result ActionResult,
-	netLatency, clientCost time.Duration, netSamples int,
+	timing ActionTiming, wallClock time.Duration,
 	sendBytes, recvBytes int, err error,
 ) {
 	if !c.enabled {
@@ -246,21 +307,38 @@ func (c *MetricsCollector) RecordAction(
 	am := c.getOrCreateAction(name)
 	am.executing.Add(-1)
 
-	// 客户端开销在所有结果分支累计，便于诊断"高延迟是客户端 CPU 还是服务端慢"
+	clientCost := wallClock - timing.wireRTTSum()
+	if clientCost < 0 {
+		clientCost = 0
+	}
 	if clientCost > 0 {
 		am.clientCostSum.Add(clientCost.Nanoseconds())
 		am.clientCostCount.Add(1)
 	}
+	addDuration := func(dst *atomic.Int64, d time.Duration) {
+		if d > 0 {
+			dst.Add(d.Nanoseconds())
+		}
+	}
+	addDuration(&am.buildCostSum, timing.Client.BuildCost)
+	addDuration(&am.encodeCostSum, timing.Client.EncodeCost)
+	addDuration(&am.sendCostSum, timing.Client.SendCost)
+	addDuration(&am.decodeWaitSum, timing.Client.DecodeWait)
+	addDuration(&am.decodeCostSum, timing.Client.DecodeCost)
+	addDuration(&am.dispatchWaitSum, timing.Client.DispatchWait)
+	addDuration(&am.parseStoreSum, timing.Client.ParseStoreCost)
 
 	switch result {
 	case ResultSuccess:
 		am.successCount.Add(1)
-		// 仅当本次确实有网络调用窗口时才进直方图与 Apdex
-		if netSamples > 0 {
-			am.latency.Record(netLatency)
-			am.netActionCount.Add(1)
+		for _, req := range timing.Requests {
+			if req.WireRTT <= 0 {
+				continue
+			}
+			am.rtt.Record(req.WireRTT)
+			am.rttSampleCount.Add(1)
 			T := int64(c.apdexT.Load())
-			ms := netLatency.Milliseconds()
+			ms := req.WireRTT.Milliseconds()
 			switch {
 			case ms < T:
 				am.apdexSatisfied.Add(1)
@@ -268,9 +346,6 @@ func (c *MetricsCollector) RecordAction(
 				am.apdexTolerating.Add(1)
 			}
 		}
-		// per-action 字节统计仍保留（用于 ActionsTab 的 ↑avg / ↓avg 列）；
-		// 全局带宽（totalSendBytes / totalRecvBytes）由 network 层的 AddBandwidth 统一统计，
-		// 这里**不再累加**，避免与 network 层的统计双计。
 		if sendBytes > 0 {
 			am.sendBytes.Add(int64(sendBytes))
 		}
@@ -284,7 +359,9 @@ func (c *MetricsCollector) RecordAction(
 		}
 	case ResultTimeout:
 		am.timeoutCount.Add(1)
-		am.timeoutTotalMs.Add(netLatency.Milliseconds())
+		if wallClock > 0 {
+			am.timeoutTotalMs.Add(wallClock.Milliseconds())
+		}
 		if err != nil {
 			c.recordError(am, err)
 		}
@@ -410,6 +487,13 @@ func (c *MetricsCollector) ActionNames() []string {
 // Enabled 返回是否启用。
 func (c *MetricsCollector) Enabled() bool {
 	return c.enabled
+}
+
+func (c *MetricsCollector) TimingDetail() TimingDetailLevel {
+	if c == nil {
+		return TimingRTTOnly
+	}
+	return c.timingDetail
 }
 
 // CollectErrors 收集指定 action 的错误分布（只读快照）。

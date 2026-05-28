@@ -52,7 +52,10 @@ function execute(r)
     network.set_tcp_secret_key("battle", keyBody)
 
     -- 注册 10 秒心跳（Battle: cmd=4 BATTLE, act=2 PING_CS）
-    network.register_tcp_heartbeat("battle", 10000, {cmd=4, act=2}, build_battle_tcp_heart)
+    local hbCode = network.register_tcp_heartbeat("battle", 10000, {cmd=4, act=2}, build_battle_tcp_heart)
+    if hbCode ~= 0 then
+        return hbCode, sent, recv
+    end
 
     log.info("战斗服 TCP 连接成功 心跳已注册(10s)")
     return 0, sent, recv

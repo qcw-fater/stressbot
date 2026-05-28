@@ -71,14 +71,14 @@ export function DashboardTab() {
   const send = fmtBandwidth(b.sendMBps ?? 0);
   const recv = fmtBandwidth(b.recvMBps ?? 0);
 
-  // 加权 Apdex（用 netSampleCount 作权重，排除纯客户端动作）/ 成功率
+  // 加权 Apdex（用 rttSampleCount 作权重，排除纯客户端动作）/ 成功率
   let totalSamples = 0, apdexWeight = 0, wApdex = 0, wSuccess = 0;
   for (const a of actions) {
     totalSamples += a.sampleCount;
     wSuccess += a.successRate * a.sampleCount;
-    if (a.netSampleCount > 0) {
-      apdexWeight += a.netSampleCount;
-      wApdex += a.apdex * a.netSampleCount;
+    if (a.rttSampleCount > 0) {
+      apdexWeight += a.rttSampleCount;
+      wApdex += a.apdex * a.rttSampleCount;
     }
   }
   const clusterApdex = apdexWeight > 0 ? wApdex / apdexWeight : 0;
@@ -234,7 +234,7 @@ function ActionMiniRow({ action, maxSamples }: { action: ActionMetric; maxSample
 
   return (
     <div className="dashboard-tab__action-row">
-      <Tooltip title={`avg ${fmtMs(action.latency.avgMs)} · p99 ${fmtMs(action.latency.p99Ms)} · err ${action.failureCount + action.timeoutCount}`}>
+      <Tooltip title={`avg ${fmtMs(action.rtt.avgMs)} · p99 ${fmtMs(action.rtt.p99Ms)} · err ${action.failureCount + action.timeoutCount}`}>
         <span className={`dashboard-tab__action-name${isCallback ? ' dashboard-tab__action-name--callback' : ''}`}>
           {displayName}
         </span>

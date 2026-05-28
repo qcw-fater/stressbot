@@ -67,7 +67,7 @@ export function useNodeApdexLevel(nodeId: string): ApdexLevel {
 
   const srLevel = classifySuccessRate(m.successRate);
 
-  if ((m.netSampleCount ?? 0) === 0) {
+  if ((m.rttSampleCount ?? 0) === 0) {
     return srLevel;
   }
   return worseLevel(classifyApdex(m.apdex), srLevel);
@@ -90,8 +90,8 @@ export function MetricsBadge({ nodeId }: MetricsBadgeProps) {
   const m = useNodeMetrics(nodeId);
   if (!m) return null;
 
-  const hasNet = (m.netSampleCount ?? 0) > 0;
-  const showP99 = hasNet && m.latency.count > 0;
+  const hasNet = (m.rttSampleCount ?? 0) > 0;
+  const showP99 = hasNet && m.rtt.count > 0;
   const apdexLevel = hasNet ? classifyApdex(m.apdex) : 'unknown';
   const apdexColor = APDEX_COLOR[apdexLevel];
   // 健康等级用于非网络动作徽章颜色（综合成功率）
@@ -136,9 +136,9 @@ export function MetricsBadge({ nodeId }: MetricsBadgeProps) {
       }}
     >
       {showP99 && (
-        <Tooltip title={`avg ${m.latency.avgMs.toFixed(1)} · p95 ${m.latency.p95Ms.toFixed(1)} · p99 ${m.latency.p99Ms.toFixed(1)} · max ${m.latency.maxMs.toFixed(1)} (ms)`}>
+        <Tooltip title={`avg ${m.rtt.avgMs.toFixed(1)} · p95 ${m.rtt.p95Ms.toFixed(1)} · p99 ${m.rtt.p99Ms.toFixed(1)} · max ${m.rtt.maxMs.toFixed(1)} (ms)`}>
           <span className="pattern-badge" style={{ color: 'var(--node-continue)', borderColor: 'var(--node-continue)', background: 'color-mix(in srgb, var(--node-continue) 12%, transparent)' }}>
-            p99 {formatMs(m.latency.p99Ms)}
+            p99 {formatMs(m.rtt.p99Ms)}
           </span>
         </Tooltip>
       )}

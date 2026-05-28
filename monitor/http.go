@@ -31,7 +31,7 @@ func RegisterHandlers(c *MetricsCollector) {
 		for _, a := range snap.Actions {
 			fmt.Fprintf(w, "%s: samples=%d success=%d timeout=%d failure=%d avg=%.1fms p99=%.1fms apdex=%.3f qps=%.2f\n",
 				a.Name, a.SampleCount, a.SuccessCount, a.TimeoutCount, a.FailureCount,
-				a.Latency.AvgMs, a.Latency.P99Ms, a.Apdex, a.AvgQPS)
+				a.RTT.AvgMs, a.RTT.P99Ms, a.Apdex, a.AvgQPS)
 		}
 	})
 }

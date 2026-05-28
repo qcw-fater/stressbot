@@ -4,6 +4,8 @@ import (
 	"sync"
 	"time"
 
+	"stressbot/monitor"
+
 	"go.uber.org/zap"
 	stresslog "stressbot/utils/log"
 )
@@ -14,16 +16,18 @@ type Client struct {
 	tcpConn        map[string]*Connection
 	udpConn        map[string]*Connection
 	requestTimeout time.Duration
+	timingDetail   monitor.TimingDetailLevel
 	mu             sync.RWMutex
 }
 
 // NewClient 创建新的网络客户端。
-func NewClient(name string, requestTimeout time.Duration) *Client {
+func NewClient(name string, requestTimeout time.Duration, timingDetail monitor.TimingDetailLevel) *Client {
 	return &Client{
 		name:           name,
 		tcpConn:        make(map[string]*Connection),
 		udpConn:        make(map[string]*Connection),
 		requestTimeout: requestTimeout,
+		timingDetail:   timingDetail,
 	}
 }
 
@@ -37,7 +41,7 @@ func (c *Client) ConnectTCP(serviceName string) bool {
 		return false
 	}
 
-	conn := NewConnection(serviceName, c.name, c.requestTimeout)
+	conn := NewConnection(serviceName, c.name, c.requestTimeout, c.timingDetail)
 	c.tcpConn[serviceName] = conn
 	stresslog.Debug("[CLIENT] TCP 连接占位已创建", zap.String("service", serviceName), zap.String("robot", c.name))
 	return true
@@ -53,7 +57,7 @@ func (c *Client) ConnectUDP(serviceName string) bool {
 		return false
 	}
 
-	conn := NewConnection(serviceName, c.name, c.requestTimeout)
+	conn := NewConnection(serviceName, c.name, c.requestTimeout, c.timingDetail)
 	c.udpConn[serviceName] = conn
 	stresslog.Debug("[CLIENT] UDP 连接占位已创建", zap.String("service", serviceName), zap.String("robot", c.name))
 	return true

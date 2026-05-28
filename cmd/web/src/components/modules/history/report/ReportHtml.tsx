@@ -79,7 +79,7 @@ export function ReportHtml({ detail, charts }: ReportHtmlProps) {
       <ChartSection title="动作性能排行 (p99)" image={charts.ranking} empty="无动作数据" />
 
       {/* Section 5: 延迟分布 */}
-      <ChartSection title="延迟分布" image={charts.latency} empty="无动作数据" />
+      <ChartSection title="延迟分布" image={charts.rtt} empty="无动作数据" />
 
       {/* Section 6: 成功/失败构成 */}
       <div className="report-section">
@@ -366,12 +366,15 @@ function DetailTableSection({ actions }: { actions: ActionMetric[] }) {
             <th className="num">超时</th>
             <th className="num">Apdex</th>
             <th className="num">成功率</th>
-            <th className="num">net avg</th>
+            <th className="num">RTT avg</th>
             <th className="num">p50</th>
             <th className="num">p95</th>
             <th className="num">p99</th>
             <th className="num">max</th>
             <th className="num">client</th>
+            <th className="num">encode</th>
+            <th className="num">decode</th>
+            <th className="num">parse/store</th>
             <th className="num">QPS</th>
           </tr>
         </thead>
@@ -382,8 +385,8 @@ function DetailTableSection({ actions }: { actions: ActionMetric[] }) {
               : level === 'fair' ? 'c-warning'
               : 'c-error';
             const rate = a.sampleCount > 0 ? (a.successRate * 100).toFixed(1) : '0';
-            // netSampleCount=0 时延迟列显示 — 避免误把 0ms 当真实数据
-            const hasNet = (a.netSampleCount ?? 0) > 0;
+            // rttSampleCount=0 时延迟列显示 — 避免误把 0ms 当真实数据
+            const hasNet = (a.rttSampleCount ?? 0) > 0;
             return (
               <tr key={a.name}>
                 <td><code>{a.name}</code></td>
@@ -392,12 +395,15 @@ function DetailTableSection({ actions }: { actions: ActionMetric[] }) {
                 <td className={`num${a.timeoutCount > 0 ? ' c-warning' : ''}`}>{a.timeoutCount}</td>
                 <td className={`num ${apdexColor}`}>{a.apdex.toFixed(3)}</td>
                 <td className="num">{rate}%</td>
-                <td className="num">{hasNet ? fmtMs(a.latency.avgMs) : '—'}</td>
-                <td className="num">{hasNet ? fmtMs(a.latency.p50Ms) : '—'}</td>
-                <td className="num">{hasNet ? fmtMs(a.latency.p95Ms) : '—'}</td>
-                <td className="num">{hasNet ? fmtMs(a.latency.p99Ms) : '—'}</td>
-                <td className="num">{hasNet ? fmtMs(a.latency.maxMs) : '—'}</td>
+                <td className="num">{hasNet ? fmtMs(a.rtt.avgMs) : '—'}</td>
+                <td className="num">{hasNet ? fmtMs(a.rtt.p50Ms) : '—'}</td>
+                <td className="num">{hasNet ? fmtMs(a.rtt.p95Ms) : '—'}</td>
+                <td className="num">{hasNet ? fmtMs(a.rtt.p99Ms) : '—'}</td>
+                <td className="num">{hasNet ? fmtMs(a.rtt.maxMs) : '—'}</td>
                 <td className="num">{fmtMs(a.clientAvgMs ?? 0)}</td>
+                <td className="num">{fmtMs(a.encodeAvgMs ?? 0)}</td>
+                <td className="num">{fmtMs(a.decodeAvgMs ?? 0)}</td>
+                <td className="num">{fmtMs(a.parseStoreAvgMs ?? 0)}</td>
                 <td className="num">{a.avgQps.toFixed(1)}</td>
               </tr>
             );

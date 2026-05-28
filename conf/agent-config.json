@@ -4,7 +4,8 @@
     "printConsole": true
   },
   "monitor": {
-    "apdexT": 100
+    "apdexT": 100,
+    "timingDetail": "rtt"
   },
   "pprof": {
     "enabled": true,

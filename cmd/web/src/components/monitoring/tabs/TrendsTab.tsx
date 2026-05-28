@@ -24,6 +24,7 @@ const COLORS = {
   orange: () => cssVar('--chart-orange', '#fa8c16'),
   cyan: () => cssVar('--chart-cyan', '#13c2c2'),
   purple: () => cssVar('--chart-purple', '#722ed1'),
+  yellow: () => cssVar('--chart-yellow', '#faad14'),
 };
 
 const textColor = () => cssVar('--text-primary', '#333');
@@ -95,6 +96,29 @@ export function TrendsTab() {
     ]);
   }, [stressHistory]);
 
+  const timingOption = useMemo(() => {
+    if (stressHistory.length === 0) return null;
+    const x = stressHistory.map((s) => new Date(s.timestamp).toLocaleTimeString());
+    const weighted = (pick: (a: typeof stressHistory[number]['actions'][number]) => number, weightPick: (a: typeof stressHistory[number]['actions'][number]) => number) =>
+      stressHistory.map((s) => {
+        let sum = 0;
+        let weight = 0;
+        for (const a of s.actions) {
+          const w = weightPick(a);
+          if (w <= 0) continue;
+          sum += pick(a) * w;
+          weight += w;
+        }
+        return weight > 0 ? +(sum / weight).toFixed(2) : 0;
+      });
+    return lineOption('RTT 与客户端成本', x, [
+      { name: 'RTT p95', data: weighted((a) => a.rtt.p95Ms, (a) => a.rttSampleCount), color: COLORS.red() },
+      { name: 'client', data: weighted((a) => a.clientAvgMs, (a) => a.sampleCount), color: COLORS.blue() },
+      { name: 'encode', data: weighted((a) => a.encodeAvgMs, (a) => a.sampleCount), color: COLORS.yellow() },
+      { name: 'decode', data: weighted((a) => a.decodeAvgMs, (a) => a.rttSampleCount), color: COLORS.purple() },
+    ]);
+  }, [stressHistory]);
+
   if (stressHistory.length === 0) {
     return <Empty description="暂无数据；运行至少 1 个采集间隔后展示趋势" />;
   }
@@ -126,6 +150,13 @@ export function TrendsTab() {
         <Col span={12}>
           <Card size="small" bodyStyle={{ padding: 8 }}>
             <ReactECharts option={bwOption} style={{ height: 200 }} notMerge lazyUpdate />
+          </Card>
+        </Col>
+      )}
+      {timingOption && (
+        <Col span={12}>
+          <Card size="small" bodyStyle={{ padding: 8 }}>
+            <ReactECharts option={timingOption} style={{ height: 200 }} notMerge lazyUpdate />
           </Card>
         </Col>
       )}

@@ -1,5 +1,6 @@
 -- battle_end.lua: 发送战斗结束（BattleEndC2S CMD=4, ACT=13）
--- 与旧工具一致：构建 PlayerResult（含战斗统计），通过 battle TCP 发送（request-response）
+-- 使用 tcp_send 而非 tcp_request：服务端 handleResult 同步执行结算（含 COS 上传），
+-- ACK 与 TCP FIN 间隔不足 1 秒，tcp_request 容易因 CONN_DROPPED 失败。
 local network = require("network")
 local robot = require("robot")
 local proto = require("proto")
@@ -7,7 +8,6 @@ local log = require("log")
 
 function execute(r)
     -- 旧 Robot 工具在发送 BattleEnd(4:13) 前先关闭 UDP。
-    -- 这会停止 UDP 心跳/帧同步，避免结算期间战斗服继续收到局内 UDP 包。
     network.close_udp("battle")
 
     local msg = proto.create("Game.BattleEndC2S")
@@ -84,16 +84,22 @@ function execute(r)
         end
     end
 
-    -- 使用 request 模式发送（与旧工具 RequestResponse 一致）
-    local code, _, sent, recv = network.tcp_request("battle", {cmd=4, act=13}, msg)
+    -- 使用 tcp_send 只发不等响应，避免服务端结算阻塞导致 CONN_DROPPED
+    local code, sent = network.tcp_send("battle", {cmd=4, act=13}, msg)
     if code ~= 0 then
         log.error("BattleEnd 发送失败: code=" .. tostring(code))
-        return code, sent, recv  -- 透传底层 code
+        return code, sent, 0
     end
     log.info("BattleEnd 已发送")
 
     -- 旧工具：收到 BattleEnd 响应后关闭 Battle TCP 并清理战斗状态。
     network.close_tcp("battle")
+    robot.delete("fighterListData")
+    robot.delete("battleSecretKey")
+    robot.delete("battleAddress")
+    robot.delete("battleSession")
+    robot.delete("battleId")
+    robot.delete("battleArea")
 
-    return 0, sent, recv
+    return 0, sent, 0
 end

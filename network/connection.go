@@ -50,7 +50,7 @@ type Connection struct {
 	// 阻塞同 loop 上其他连接的 I/O 处理。详见 decodeLoop 注释。
 	adp        adapter.Adapter // decode 用的协议适配器，StartDecodeLoop 时注入
 	isUDP      bool            // 该连接是否 UDP（决定调 DecodeUDP / DecodeTCP）
-	decodeCh   chan []byte     // 待解码的 raw msg buffer（OnTraffic 投递→decode goroutine 消费）
+	decodeCh   chan inboundFrame     // 待解码的 raw msg buffer（OnTraffic 投递→decode goroutine 消费）
 	decodeDone chan struct{}   // decode goroutine 退出信号
 	decodeRun  int32           // 原子标记：1 表示 decodeLoop 已启动（CAS 防重复启动）
 
@@ -58,6 +58,8 @@ type Connection struct {
 	// 由 onClose() 写入（gnet 给的 err 字符串），RequestResponse 读取后拼到错误 detail。
 	// atomic.Value 保证读写无锁；写入只发生一次（与 isClose CAS 在同一路径下）。
 	closeReason atomic.Value // string
+
+	timingDetail monitor.TimingDetailLevel // 计时细分级别，控制 decode/dispatch 时间点是否记录
 }
 
 const (
@@ -65,8 +67,13 @@ const (
 	decodeChSize = 256 // decode 通道缓冲区大小，满则反压（关闭连接）
 )
 
+type inboundFrame struct {
+	Data        []byte
+	RecvFrameAt time.Time
+}
+
 // NewConnection 创建新的网络连接。
-func NewConnection(serviceName, robotName string, requestTimeout time.Duration) *Connection {
+func NewConnection(serviceName, robotName string, requestTimeout time.Duration, timingDetail monitor.TimingDetailLevel) *Connection {
 	conn := &Connection{
 		serviceName:    serviceName,
 		robotName:      robotName,
@@ -77,6 +84,7 @@ func NewConnection(serviceName, robotName string, requestTimeout time.Duration) 
 		listenCh:       make(chan *Message, listenChSize),
 		requestTimeout: requestTimeout,
 		sendFunc:       nil,
+		timingDetail:   timingDetail,
 	}
 	conn.ctx, conn.cancel = context.WithCancel(context.Background())
 	stresslog.Debug("[NETWORK] NewConnection", zap.String("service", serviceName), zap.String("robot", robotName))
@@ -134,17 +142,14 @@ func (c *Connection) GetSecretKey() []byte {
 }
 
 // RequestResponse 发送请求并同步等待响应。
-//
-// 返回值 netLatency 是"Send 完成 → 收到响应（或超时/断连）"的纯网络往返时长，
-// 不含调用方在 Go 侧的 proto 构建 / 加密编码 / 响应解析等客户端开销。
-// 所有结果分支（成功 / 超时 / ctx 取消）均返回有效的 netLatency；发送阶段失败时返回 0。
-func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOverride ...time.Duration) (*Message, time.Duration, error) {
+func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOverride ...time.Duration) (*Message, RequestTiming, error) {
+	var timing RequestTiming
 	if c == nil {
-		return nil, 0, engine.NewActionError(errcode.ErrConnNotFound, "routeKey="+routeKey)
+		return nil, timing, engine.NewActionError(errcode.ErrConnNotFound, "routeKey="+routeKey)
 	}
 	if atomic.LoadInt32(&c.isClose) == 1 {
 		stresslog.Warn("[NETWORK] RequestResponse 连接已关闭", zap.String("service", c.serviceName), zap.String("routeKey", routeKey), zap.String("robot", c.robotName))
-		return nil, 0, engine.NewActionError(errcode.ErrConnClosed, c.serviceName+" routeKey="+routeKey)
+		return nil, timing, engine.NewActionError(errcode.ErrConnClosed, c.serviceName+" routeKey="+routeKey)
 	}
 
 	ch := make(chan *Message, 1)
@@ -159,16 +164,16 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 		close(ch)
 	}()
 
-	// netStart 紧贴 Send 之前；后续所有结果分支测量到此为止的 elapsed
-	// 作为该次请求的"纯网络往返时间"上报给 monitor。
-	netStart := time.Now()
+	sendStart := time.Now()
 	n, sendErr := c.Send(sendData)
+	sendDone := time.Now()
+	timing.SendCost = safeSub(sendDone, sendStart)
 	if sendErr != nil {
 		stresslog.Error("[NETWORK] RequestResponse 发送失败",
 			zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
 			zap.String("robot", c.robotName),
 			zap.Int("pktLen", len(sendData)))
-		return nil, 0, sendErr
+		return nil, timing, sendErr
 	}
 	_ = n
 
@@ -179,19 +184,13 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 	timeoutTimer := time.After(timeout)
 	select {
 	case <-c.ctx.Done():
-		elapsed := time.Since(netStart)
-		// 区分 ctx 取消的两种来源：
-		//   - intentionalClose==1：本地主动关闭（Close()/CloseAll()/任务停止/robot.Stop）。
-		//     inflight 请求被取消是预期行为，不是网络错误 → ErrActionCanceled。
-		//   - intentionalClose==0：gnet OnClose 触发（服务端 RST/EOF/网络异常）。
-		//     真正的网络断开 → ErrConnDropped，并把 gnet 给的 reason 拼到 detail
-		//     方便定位是 EOF 还是 forcibly closed。
+		elapsed := safeSub(time.Now(), sendDone)
 		if atomic.LoadInt32(&c.intentionalClose) == 1 {
 			stresslog.Debug("[NETWORK] RequestResponse 因本地关闭被取消",
 				zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
 				zap.String("robot", c.robotName),
 				zap.Duration("elapsed", elapsed))
-			return nil, elapsed, engine.NewActionError(errcode.ErrActionCanceled,
+			return nil, timing, engine.NewActionError(errcode.ErrActionCanceled,
 				c.serviceName+" routeKey="+routeKey+" (local close)")
 		}
 		reason := c.loadCloseReason()
@@ -204,23 +203,26 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 			zap.String("robot", c.robotName),
 			zap.String("cause", reason),
 			zap.Duration("elapsed", elapsed))
-		return nil, elapsed, engine.NewActionError(errcode.ErrConnDropped, detail)
+		return nil, timing, engine.NewActionError(errcode.ErrConnDropped, detail)
 	case resp := <-ch:
-		elapsed := time.Since(netStart)
+		actionUnblocked := time.Now()
+		timing.WireRTT = safeSub(resp.Timing.RecvFrameAt, sendDone)
+		timing.DecodeWait = safeSub(resp.Timing.DecodeStart, resp.Timing.RecvFrameAt)
+		timing.DecodeCost = safeSub(resp.Timing.DecodeEnd, resp.Timing.DecodeStart)
+		timing.DispatchToActionWait = safeSub(actionUnblocked, resp.Timing.DispatchStart)
 		if stresslog.DebugEnabled() {
 			stresslog.Debug("[NETWORK] RequestResponse 收到响应",
 				zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
 				zap.String("robot", c.robotName),
-				zap.Int("bodyLen", len(resp.Data)), zap.Duration("elapsed", elapsed))
+				zap.Int("bodyLen", len(resp.Data)), zap.Duration("wireRTT", timing.WireRTT))
 		}
-		return resp, elapsed, nil
+		return resp, timing, nil
 	case <-timeoutTimer:
-		elapsed := time.Since(netStart)
 		stresslog.Warn("[NETWORK] RequestResponse 等待超时",
 			zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
 			zap.String("robot", c.robotName),
 			zap.Duration("timeout", timeout))
-		return nil, elapsed, engine.NewActionError(errcode.ErrRecvTimeout, c.serviceName+" routeKey="+routeKey+" timeout="+timeout.String())
+		return nil, timing, engine.NewActionError(errcode.ErrRecvTimeout, c.serviceName+" routeKey="+routeKey+" timeout="+timeout.String())
 	}
 }
 
@@ -386,7 +388,7 @@ func (c *Connection) StartDecodeLoop(adp adapter.Adapter, isUDP bool) {
 	}
 	c.adp = adp
 	c.isUDP = isUDP
-	c.decodeCh = make(chan []byte, decodeChSize)
+	c.decodeCh = make(chan inboundFrame, decodeChSize)
 	c.decodeDone = make(chan struct{})
 	utils.GetWorkPool().Go(c.decodeLoop)
 }
@@ -403,36 +405,44 @@ func (c *Connection) decodeLoop() {
 		case <-c.ctx.Done():
 			for {
 				select {
-				case buf, ok := <-c.decodeCh:
+				case frame, ok := <-c.decodeCh:
 					if !ok {
 						return
 					}
-					putMsgBuf(buf)
+					putMsgBuf(frame.Data)
 				default:
 					return
 				}
 			}
-		case msgBuf, ok := <-c.decodeCh:
+		case frame, ok := <-c.decodeCh:
 			if !ok {
 				return
 			}
-			c.decodeAndDispatch(msgBuf)
+			c.decodeAndDispatch(frame)
 		}
 	}
 }
 
 // decodeAndDispatch 执行单帧的 Lua 解码 + 分发，归还 buffer。
 // 拆出独立方法便于 panic recover 边界明确（utils 池已带 recover，这里不再加一层）。
-func (c *Connection) decodeAndDispatch(msgBuf []byte) {
-	defer putMsgBuf(msgBuf)
+func (c *Connection) decodeAndDispatch(frame inboundFrame) {
+	defer putMsgBuf(frame.Data)
 	secretKey := c.GetSecretKey()
+
+	var decodeStart, decodeEnd time.Time
+	if c.timingDetail >= monitor.TimingCodecDetail {
+		decodeStart = time.Now()
+	}
 	var routeKey string
 	var body []byte
 	var headerErr uint64
 	if c.isUDP {
-		routeKey, body, headerErr = c.adp.DecodeUDP(msgBuf, secretKey)
+		routeKey, body, headerErr = c.adp.DecodeUDP(frame.Data, secretKey)
 	} else {
-		routeKey, body, headerErr = c.adp.DecodeTCP(msgBuf, secretKey)
+		routeKey, body, headerErr = c.adp.DecodeTCP(frame.Data, secretKey)
+	}
+	if c.timingDetail >= monitor.TimingCodecDetail {
+		decodeEnd = time.Now()
 	}
 	if routeKey == "" {
 		stresslog.Warn("[NETWORK] 解码返回空 routeKey，响应被丢弃",
@@ -441,7 +451,11 @@ func (c *Connection) decodeAndDispatch(msgBuf []byte) {
 			zap.Int("bodyLen", len(body)))
 		return
 	}
-	c.OnReceive(routeKey, body, headerErr)
+	c.OnReceive(routeKey, body, headerErr, MessageTiming{
+		RecvFrameAt: frame.RecvFrameAt,
+		DecodeStart: decodeStart,
+		DecodeEnd:   decodeEnd,
+	})
 }
 
 // EnqueueResult 表示 EnqueueRaw 的结果，区分"连接已关"和"通道真满"两种失败原因。
@@ -460,7 +474,7 @@ const (
 //
 // 三态返回让调用方区分"连接已关"和"真反压"，避免停止阶段把 close 后还在路上的
 // inbound 字节当成 decode 满。只有 EnqueueChFull 是需要警示的真问题。
-func (c *Connection) EnqueueRaw(msgBuf []byte) EnqueueResult {
+func (c *Connection) EnqueueRaw(msgBuf []byte, recvFrameAt time.Time) EnqueueResult {
 	if c == nil {
 		return EnqueueClosed
 	}
@@ -472,7 +486,7 @@ func (c *Connection) EnqueueRaw(msgBuf []byte) EnqueueResult {
 		return EnqueueClosed
 	}
 	select {
-	case c.decodeCh <- msgBuf:
+	case c.decodeCh <- inboundFrame{Data: msgBuf, RecvFrameAt: recvFrameAt}:
 		return EnqueueOK
 	default:
 		return EnqueueChFull
@@ -582,7 +596,7 @@ func (c *Connection) Close() {
 // 热路径：每个入站包都会走一次。高频 Debug 日志构造前先做 atomic level 检查，
 // 避免在 info 级别下白白构造 zap.Field 切片（每包 4 个 string field，
 // 10000 连接 × 5 包/s 下能省下数百微秒 CPU/s）。
-func (c *Connection) OnReceive(routeKey string, body []byte, headerErr uint64) {
+func (c *Connection) OnReceive(routeKey string, body []byte, headerErr uint64, timing MessageTiming) {
 	if atomic.LoadInt32(&c.isClose) == 1 {
 		return
 	}
@@ -600,12 +614,15 @@ func (c *Connection) OnReceive(routeKey string, body []byte, headerErr uint64) {
 			zap.Int("bodyLen", len(body)))
 	}
 
-	resp := NewMessage(routeKey, body, headerErr)
+	resp := NewMessage(routeKey, body, headerErr, timing)
 
 	c.mu.Lock()
 	ch, exists := c.responseMap[routeKey]
 	if exists {
 		// 在锁内发送，防止 RequestResponse 的 defer 在 unlock 和 send 之间 close(ch) 导致 panic。
+		if c.timingDetail >= monitor.TimingFullDetail {
+			resp.Timing.DispatchStart = time.Now()
+		}
 		select {
 		case ch <- resp:
 		default:
@@ -618,6 +635,9 @@ func (c *Connection) OnReceive(routeKey string, body []byte, headerErr uint64) {
 	_, exists = c.listenResp[routeKey]
 	if exists {
 		c.mu.Unlock()
+		if c.timingDetail >= monitor.TimingFullDetail {
+			resp.Timing.DispatchStart = time.Now()
+		}
 		select {
 		case c.listenCh <- resp:
 		default:

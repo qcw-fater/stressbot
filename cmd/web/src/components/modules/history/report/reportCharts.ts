@@ -204,11 +204,11 @@ export function buildRankingOption(
 ): echarts.EChartsOption {
   const top = [...actions]
     .filter((a) => !a.name.startsWith('callback:'))
-    .sort((a, b) => a.latency.p99Ms - b.latency.p99Ms)
+    .sort((a, b) => a.rtt.p99Ms - b.rtt.p99Ms)
     .slice(-15);
 
   const names = top.map((a) => a.name.length > 22 ? a.name.slice(0, 20) + '…' : a.name);
-  const values = top.map((a) => a.latency.p99Ms);
+  const values = top.map((a) => a.rtt.p99Ms);
   const colors = values.map((v) =>
     v < 100 ? COLORS.green : v < 500 ? COLORS.yellow : COLORS.red,
   );
@@ -247,7 +247,7 @@ export function buildLatencyOption(
 ): echarts.EChartsOption {
   const top = [...actions]
     .filter((a) => !a.name.startsWith('callback:'))
-    .sort((a, b) => b.latency.p99Ms - a.latency.p99Ms)
+    .sort((a, b) => b.rtt.p99Ms - a.rtt.p99Ms)
     .slice(0, 10);
 
   const names = top.map((a) => a.name.length > 16 ? a.name.slice(0, 14) + '…' : a.name);
@@ -260,10 +260,10 @@ export function buildLatencyOption(
     xAxis: { type: 'category', data: names, axisLabel: { fontSize: 9, rotate: 20 } },
     yAxis: { type: 'value', name: 'ms', axisLabel: { fontSize: 10 } },
     series: [
-      { name: 'p50', type: 'bar', data: top.map((a) => a.latency.p50Ms), itemStyle: { color: COLORS.green }, barMaxWidth: 14 },
-      { name: 'p90', type: 'bar', data: top.map((a) => a.latency.p90Ms), itemStyle: { color: '#bae637' }, barMaxWidth: 14 },
-      { name: 'p95', type: 'bar', data: top.map((a) => a.latency.p95Ms), itemStyle: { color: COLORS.yellow }, barMaxWidth: 14 },
-      { name: 'p99', type: 'bar', data: top.map((a) => a.latency.p99Ms), itemStyle: { color: COLORS.red }, barMaxWidth: 14 },
+      { name: 'p50', type: 'bar', data: top.map((a) => a.rtt.p50Ms), itemStyle: { color: COLORS.green }, barMaxWidth: 14 },
+      { name: 'p90', type: 'bar', data: top.map((a) => a.rtt.p90Ms), itemStyle: { color: '#bae637' }, barMaxWidth: 14 },
+      { name: 'p95', type: 'bar', data: top.map((a) => a.rtt.p95Ms), itemStyle: { color: COLORS.yellow }, barMaxWidth: 14 },
+      { name: 'p99', type: 'bar', data: top.map((a) => a.rtt.p99Ms), itemStyle: { color: COLORS.red }, barMaxWidth: 14 },
     ],
   };
 }
@@ -431,7 +431,7 @@ export interface ChartImages {
   cpu: string | null;
   bandwidth: string | null;
   ranking: string | null;
-  latency: string | null;
+  rtt: string | null;
   successDonut: string | null;
   apdexBar: string | null;
   errors: string | null;
@@ -462,12 +462,12 @@ export function captureAllCharts(
   const ranking = actions.length > 0
     ? captureChartAsPng(buildRankingOption(actions), 700, Math.max(200, Math.min(actions.length, 15) * 32))
     : null;
-  const latency = safeCapture(() => buildLatencyOption(actions), 700, 300);
+  const rtt = safeCapture(() => buildLatencyOption(actions), 700, 300);
   const successDonut = actions.length > 0
     ? captureChartAsPng(buildSuccessDonutOption(actions), 350, 280)
     : null;
   const apdexBar = safeCapture(() => buildApdexOption(actions), 700, 260);
   const errors = safeCapture(() => buildErrorOption(actions), 500, 300);
 
-  return { qps, apdexTrend, cpu, bandwidth, ranking, latency, successDonut, apdexBar, errors };
+  return { qps, apdexTrend, cpu, bandwidth, ranking, rtt, successDonut, apdexBar, errors };
 }

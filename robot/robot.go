@@ -1,4 +1,4 @@
-﻿package robot
+package robot
 
 import (
 	"bytes"
@@ -32,28 +32,28 @@ import (
 // Robot 单个压测机器人实例。
 // 每个 Robot 拥有独立的状态存储、网络客户端、Lua 运行时和流程执行器。
 type Robot struct {
-	id          int                    // 机器人唯一编号
-	account     string                 // 账号名
-	state       *state.Store           // 线程安全的键值状态存储
-	client      *network.Client        // 多服务网络客户端（管理 TCP/UDP 连接池）
-	factory     *protox.Factory        // protobuf 消息工厂（动态创建/解析）
-	executor    *engine.Executor       // 流程图执行器
-	luaPool     *script.RuntimePool    // Lua 运行时池（Robot 持有独占 LState）
-	l           *lua.LState            // 当前 Robot 独占的 Lua 状态（从 luaPool 获取）
-	actionExec  *engine.ActionExecutor // 声明式动作执行器
-	ctx         context.Context        // 机器人生命周期上下文
-	cancel      context.CancelFunc     // 取消函数（Stop 时调用）
-	running     atomic.Bool            // 是否正在运行
-	dialer      *network.Dialer        // 网络拨号器（封装 gnet 事件循环）
-	httpClient  *http.Client           // HTTP 客户端（声明式 HTTP 动作用）
-	luaMu       sync.Mutex             // Lua 访问互斥锁（回调/心跳/encode/decode 共抢）
+	id         int                    // 机器人唯一编号
+	account    string                 // 账号名
+	state      *state.Store           // 线程安全的键值状态存储
+	client     *network.Client        // 多服务网络客户端（管理 TCP/UDP 连接池）
+	factory    *protox.Factory        // protobuf 消息工厂（动态创建/解析）
+	executor   *engine.Executor       // 流程图执行器
+	luaPool    *script.RuntimePool    // Lua 运行时池（Robot 持有独占 LState）
+	l          *lua.LState            // 当前 Robot 独占的 Lua 状态（从 luaPool 获取）
+	actionExec *engine.ActionExecutor // 声明式动作执行器
+	ctx        context.Context        // 机器人生命周期上下文
+	cancel     context.CancelFunc     // 取消函数（Stop 时调用）
+	running    atomic.Bool            // 是否正在运行
+	dialer     *network.Dialer        // 网络拨号器（封装 gnet 事件循环）
+	httpClient *http.Client           // HTTP 客户端（声明式 HTTP 动作用）
+	luaMu      sync.Mutex             // Lua 访问互斥锁（回调/心跳/encode/decode 共抢）
 	// adp 是该 Robot 私有的 codec 适配器（RobotLocalAdapter 重构）。
 	// 所有 encode/decode 都在 r.l 上执行，与其他 Robot 不再共享 LState 池。
 	adp            *adapter.RobotAdapter
-	mainService    string          // 主连接服务名，意外断开时停止机器人
-	requestTimeout time.Duration   // robotConfig.timeoutSec 注入；用作 Lua tcp/udp_request 默认 timeout
-	done           chan struct{}   // 执行 goroutine 结束信号，Close 时等待
-	onDone         func()          // 执行 goroutine 结束后回调（由 Manager 设置）
+	mainService    string        // 主连接服务名，意外断开时停止机器人
+	requestTimeout time.Duration // robotConfig.timeoutSec 注入；用作 Lua tcp/udp_request 默认 timeout
+	done           chan struct{} // 执行 goroutine 结束信号，Close 时等待
+	onDone         func()        // 执行 goroutine 结束后回调（由 Manager 设置）
 }
 
 // Config 单个机器人的配置。
@@ -84,11 +84,26 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// 读取 monitor 的 timingDetail 配置，传递给 network 和 engine 层。
+	var timingDetail monitor.TimingDetailLevel
+	var engineTimingLevel int
+	if mc := monitor.Global(); mc != nil {
+		timingDetail = mc.TimingDetail()
+		switch timingDetail {
+		case monitor.TimingFullDetail:
+			engineTimingLevel = engine.TimingLevelFull
+		case monitor.TimingCodecDetail:
+			engineTimingLevel = engine.TimingLevelCodec
+		default:
+			engineTimingLevel = engine.TimingLevelRTTOnly
+		}
+	}
+
 	r := &Robot{
 		id:             cfg.ID,
 		account:        cfg.Account,
 		state:          state.NewStore(),
-		client:         network.NewClient(cfg.Account, cfg.RequestTimeout),
+		client:         network.NewClient(cfg.Account, cfg.RequestTimeout, timingDetail),
 		factory:        factory,
 		luaPool:        luaPool,
 		ctx:            ctx,
@@ -127,7 +142,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		r.state.Set(k, v)
 	}
 
-	r.actionExec = engine.NewActionExecutor(r.state, &netSenderAdapter{robot: r}, r.factory, r.adp)
+	r.actionExec = engine.NewActionExecutor(r.state, &netSenderAdapter{robot: r}, r.factory, r.adp, engineTimingLevel)
 	r.executor = engine.NewExecutor(flow, &robotActionHandler{robot: r, flow: flow}, r.account)
 
 	return r, nil
@@ -298,10 +313,15 @@ func (r *Robot) ConnectTCP(serviceName, address string) bool {
 
 	_, err := r.dialer.DialTCP(r.ctx, address, conn, r.adp)
 	if err != nil {
-		stresslog.Warn("[ROBOT] TCP 连接建立失败",
-			zap.Int("id", r.id), zap.String("service", serviceName), zap.String("addr", address), zap.Error(err))
+		if r.ctx.Err() != nil {
+			stresslog.Debug("[ROBOT] TCP 连接建立已取消",
+				zap.Int("id", r.id), zap.String("service", serviceName), zap.String("addr", address), zap.Error(err))
+		} else {
+			stresslog.Warn("[ROBOT] TCP 连接建立失败",
+				zap.Int("id", r.id), zap.String("service", serviceName), zap.String("addr", address), zap.Error(err))
+			monitor.Global().ConnFailed()
+		}
 		r.client.CloseTCP(serviceName)
-		monitor.Global().ConnFailed()
 		return false
 	}
 
@@ -380,11 +400,10 @@ type robotActionHandler struct {
 
 // ExecuteAction 执行动作
 //
-// 计时拆解原则（参见 plans/latency-net-only-redesign.md）：
+// 计时拆解原则：
 //   - wallClock = time.Since(start)：含 proto 构建 / 序列化 / 反序列化 / state 写入等全部开销。
-//   - timing.NetLatency：纯网络往返（由 ActionExecutor / Lua API 累加）。
-//   - clientCost = wallClock - NetLatency：客户端 CPU 部分，作为独立列 ClientAvgMs 上报。
-//   - clientCost 可能因测量精度抖动出现极小负值，做下界保护。
+//   - timing.Requests：每次 request-response 的独立 WireRTT 样本。
+//   - clientCost 由 monitor 用 wallClock - sum(WireRTT) 计算。
 func (h *robotActionHandler) ExecuteAction(actionDef *engine.ActionDef) error {
 	if mc := monitor.Global(); mc != nil && actionDef.Name != "" {
 		mc.RecordActionStart(actionDef.Name)
@@ -418,13 +437,7 @@ func (h *robotActionHandler) ExecuteAction(actionDef *engine.ActionDef) error {
 	if mc := monitor.Global(); mc != nil && actionDef.Name != "" {
 		result := classifyResult(err)
 		wallClock := time.Since(start)
-		clientCost := wallClock - timing.NetLatency
-		if clientCost < 0 {
-			clientCost = 0
-		}
-		mc.RecordAction(actionDef.Name, result,
-			timing.NetLatency, clientCost, timing.SamplesNet,
-			sendBytes, recvBytes, err)
+		mc.RecordAction(actionDef.Name, result, toMonitorTiming(timing), wallClock, sendBytes, recvBytes, err)
 	}
 
 	return err
@@ -443,6 +456,33 @@ func (h *robotActionHandler) ExecuteAction(actionDef *engine.ActionDef) error {
 // 历史教训：早期未识别 ErrActionCanceled，导致任务停止时 inflight 的 BattleEnd /
 // GameOver / RequestGameModeList 等动作被误归为 Failure，监控面板和历史详情里
 // 堆出大量"假失败"，掩盖了真实的服务端业务错误。
+func toMonitorTiming(t engine.ActionTiming) monitor.ActionTiming {
+	out := monitor.ActionTiming{
+		Client: monitor.ClientTiming{
+			BuildCost:      t.Client.BuildCost,
+			EncodeCost:     t.Client.EncodeCost,
+			SendCost:       t.Client.SendCost,
+			DecodeWait:     t.Client.DecodeWait,
+			DecodeCost:     t.Client.DecodeCost,
+			DispatchWait:   t.Client.DispatchWait,
+			ParseStoreCost: t.Client.ParseStoreCost,
+		},
+	}
+	if len(t.Requests) > 0 {
+		out.Requests = make([]monitor.RequestTiming, 0, len(t.Requests))
+		for _, req := range t.Requests {
+			out.Requests = append(out.Requests, monitor.RequestTiming{
+				SendCost:             req.SendCost,
+				WireRTT:              req.WireRTT,
+				DecodeWait:           req.DecodeWait,
+				DecodeCost:           req.DecodeCost,
+				DispatchToActionWait: req.DispatchToActionWait,
+			})
+		}
+	}
+	return out
+}
+
 func classifyResult(err error) monitor.ActionResult {
 	if err == nil {
 		return monitor.ResultSuccess
@@ -490,9 +530,8 @@ func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int,
 	h.robot.luaMu.Lock()
 	defer h.robot.luaMu.Unlock()
 
-	// RunActionScript 内部为脚本绑定一个新的 script.Context，
-	// 脚本里的 tcp_request / udp_request / http_request 等会原子累加 NetLatencyNs / NetSamples，
-	// 这里把累加结果作为 timing 上抛给 RecordAction。
+	// RunActionScript 内部通过 script.Context 累积每次 request 的独立 RequestTiming，
+	// 这里把结构化 timing 上抛给 RecordAction。
 	code, send, recv, timing, err := h.robot.luaPool.RunActionScript(h.robot.l, actionDef.Script)
 	if err != nil {
 		return 0, 0, timing, engine.NewActionError(errcode.ErrLuaExecFailed, "script="+actionDef.Script, err)
@@ -721,39 +760,41 @@ func (ns *netSenderAdapter) TCPSend(service string, packet []byte) (int, error) 
 // TCPRequest 发送 TCP 请求并等待响应。
 // 返回 netLatency 是 Connection.RequestResponse 测量的"Send 完成 → 收到响应"窗口，
 // 不含本函数中的连接查找等微秒级开销。
-func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) ([]byte, uint64, time.Duration, error) {
+func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) ([]byte, uint64, engine.RequestTiming, error) {
 	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
-		return nil, 0, 0, engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
+		return nil, 0, engine.RequestTiming{}, engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
 	}
-	resp, netLatency, err := conn.RequestResponse(packet, routeKey, timeout...)
+	resp, netTiming, err := conn.RequestResponse(packet, routeKey, timeout...)
+	timing := engine.RequestTiming(netTiming)
 	if err != nil {
-		return nil, 0, netLatency, err
+		return nil, 0, timing, err
 	}
 	if stresslog.DebugEnabled() {
 		stresslog.Debug("[ACTION] TCPResponse",
 			zap.String("service", service), zap.String("routeKey", routeKey),
 			zap.Int("bodyLen", len(resp.Data)), zap.Uint64("headerErr", resp.HeaderErr))
 	}
-	return resp.Data, resp.HeaderErr, netLatency, nil
+	return resp.Data, resp.HeaderErr, timing, nil
 }
 
 // UDPRequest 发送 UDP 请求并等待响应，与 TCPRequest 同样使用 channel 阻塞等待。
-func (ns *netSenderAdapter) UDPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) ([]byte, uint64, time.Duration, error) {
+func (ns *netSenderAdapter) UDPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) ([]byte, uint64, engine.RequestTiming, error) {
 	conn := ns.robot.client.GetUDPConn(service)
 	if conn == nil {
-		return nil, 0, 0, engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
+		return nil, 0, engine.RequestTiming{}, engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
 	}
-	resp, netLatency, err := conn.RequestResponse(packet, routeKey, timeout...)
+	resp, netTiming, err := conn.RequestResponse(packet, routeKey, timeout...)
+	timing := engine.RequestTiming(netTiming)
 	if err != nil {
-		return nil, 0, netLatency, err
+		return nil, 0, timing, err
 	}
 	if stresslog.DebugEnabled() {
 		stresslog.Debug("[ACTION] UDPResponse",
 			zap.String("service", service), zap.String("routeKey", routeKey),
 			zap.Int("bodyLen", len(resp.Data)), zap.Uint64("headerErr", resp.HeaderErr))
 	}
-	return resp.Data, resp.HeaderErr, netLatency, nil
+	return resp.Data, resp.HeaderErr, timing, nil
 }
 
 // HTTPRequest 发送 HTTP 请求。
@@ -834,6 +875,9 @@ func (ns *netSenderAdapter) UDPSend(service string, data []byte) (int, error) {
 func (ns *netSenderAdapter) ConnectTCP(service, address string) error {
 	ok := ns.robot.ConnectTCP(service, address)
 	if !ok {
+		if ns.robot.ctx.Err() != nil {
+			return engine.NewActionError(errcode.ErrActionCanceled, "service="+service+" address="+address)
+		}
 		return engine.NewActionError(errcode.ErrConnClosed, "service="+service+" address="+address)
 	}
 	return nil
@@ -843,6 +887,9 @@ func (ns *netSenderAdapter) ConnectTCP(service, address string) error {
 func (ns *netSenderAdapter) ConnectUDP(service, address string) error {
 	ok := ns.robot.ConnectUDP(service, address)
 	if !ok {
+		if ns.robot.ctx.Err() != nil {
+			return engine.NewActionError(errcode.ErrActionCanceled, "service="+service+" address="+address)
+		}
 		return engine.NewActionError(errcode.ErrConnClosed, "service="+service+" address="+address)
 	}
 	return nil
@@ -937,29 +984,39 @@ func (ns *netSenderAdapter) GetUDPSecretKey(service string) []byte {
 }
 
 // RegisterTCPHeartbeat 注册 TCP 心跳。
-func (ns *netSenderAdapter) RegisterTCPHeartbeat(service string, intervalMs int, builder func() []byte) {
+func (ns *netSenderAdapter) RegisterTCPHeartbeat(service string, intervalMs int, builder func() []byte) error {
+	if ns.robot.ctx.Err() != nil {
+		return engine.NewActionError(errcode.ErrActionCanceled, "service="+service)
+	}
 	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
+		err := engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
 		stresslog.Warn("[ROBOT] RegisterTCPHeartbeat 连接不存在", zap.String("service", service))
-		return
+		return err
 	}
 	conn.RegisterHeartbeat(network.HeartbeatConfig{
 		Interval: time.Duration(intervalMs) * time.Millisecond,
 		Builder:  builder,
 	})
+	return nil
 }
 
 // RegisterUDPHeartbeat 注册 UDP 心跳。
-func (ns *netSenderAdapter) RegisterUDPHeartbeat(service string, intervalMs int, builder func() []byte) {
+func (ns *netSenderAdapter) RegisterUDPHeartbeat(service string, intervalMs int, builder func() []byte) error {
+	if ns.robot.ctx.Err() != nil {
+		return engine.NewActionError(errcode.ErrActionCanceled, "service="+service)
+	}
 	conn := ns.robot.client.GetUDPConn(service)
 	if conn == nil {
+		err := engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
 		stresslog.Warn("[ROBOT] RegisterUDPHeartbeat 连接不存在", zap.String("service", service))
-		return
+		return err
 	}
 	conn.RegisterHeartbeat(network.HeartbeatConfig{
 		Interval: time.Duration(intervalMs) * time.Millisecond,
 		Builder:  builder,
 	})
+	return nil
 }
 
 // 编译时接口断言

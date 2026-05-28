@@ -15,7 +15,6 @@ import (
 	stresslog "stressbot/utils/log"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
@@ -27,16 +26,8 @@ const registryCtxKey = "__stressbot_ctx__"
 
 // Context Lua 脚本执行上下文。
 //
-// NetLatencyNs / NetSamples 在每次 RunActionScript 入口被原子归零，
-// 脚本内的 api_network 各方法在每次实际产生网络往返时累加对应数值：
-//   - tcp_request / udp_request / http_request：累加一次（成功或失败都计）
-//   - tcp_listen / udp_listen：仅在拿到消息（hit）时累加；超时不计
-//   - tcp_send / udp_send / connect / set_secret_key / register_heartbeat 等
-//     纯客户端 / 不阻塞等响应的 API：不累加
-//
-// 脚本结束后，RunActionScript 把这两个值组装成 engine.ActionTiming 上抛。
-// 使用原子操作而非 mutex：Lua 自身串行（luaMu 已保护），但回调脚本在监听 goroutine 中
-// 也会触碰同一个 Context，原子保证最坏情况下的并发可见性。
+// timing 在每次 RunActionScript 入口清零，脚本内每次 request 追加独立 RequestTiming，
+// 避免 Lua 多次 request 被合并成一个 RTT 直方图样本。
 type Context struct {
 	RobotID int
 	Account string
@@ -59,8 +50,8 @@ type Context struct {
 	// 不一致。在高并发握手场景下 10s 太短，会把"服务端慢响应但最终能回"误判为 timeout。
 	DefaultRequestTimeout time.Duration
 
-	NetLatencyNs atomic.Int64
-	NetSamples   atomic.Int64
+	timingMu       sync.Mutex
+	currentTiming  engine.ActionTiming
 }
 
 // resetTiming 在每次 RunActionScript 开始前清零累加器。
@@ -68,17 +59,19 @@ func (c *Context) resetTiming() {
 	if c == nil {
 		return
 	}
-	c.NetLatencyNs.Store(0)
-	c.NetSamples.Store(0)
+	c.timingMu.Lock()
+	c.currentTiming = engine.ActionTiming{}
+	c.timingMu.Unlock()
 }
 
-// recordNet 累加一次真实的网络往返。供 api_network 调用。
-func (c *Context) recordNet(d time.Duration) {
-	if c == nil || d <= 0 {
+// recordRequest 累加一次真实的 request-response。供 api_network 调用。
+func (c *Context) recordRequest(req engine.RequestTiming) {
+	if c == nil || req.WireRTT <= 0 {
 		return
 	}
-	c.NetLatencyNs.Add(d.Nanoseconds())
-	c.NetSamples.Add(1)
+	c.timingMu.Lock()
+	c.currentTiming.AddRequest(req)
+	c.timingMu.Unlock()
 }
 
 // timing 取出当前累加结果，构造 ActionTiming。
@@ -86,10 +79,13 @@ func (c *Context) timing() engine.ActionTiming {
 	if c == nil {
 		return engine.ActionTiming{}
 	}
-	return engine.ActionTiming{
-		NetLatency: time.Duration(c.NetLatencyNs.Load()),
-		SamplesNet: int(c.NetSamples.Load()),
+	c.timingMu.Lock()
+	defer c.timingMu.Unlock()
+	out := c.currentTiming
+	if len(c.currentTiming.Requests) > 0 {
+		out.Requests = append([]engine.RequestTiming(nil), c.currentTiming.Requests...)
 	}
+	return out
 }
 
 // SetContext 将脚本上下文绑定到 LState 的 registry
@@ -202,9 +198,9 @@ func (rp *RuntimePool) PrecompileScripts(dirs []string) error {
 // 调用方应当把它们透传给 monitor.RecordAction，从而和声明式动作走同一条 per-action
 // 字节统计路径，使 ActionsTab 的 ↑avg / ↓avg 列对 lua 动作也能反映真实流量。
 //
-// timing 由 Context.NetLatencyNs / NetSamples 累加器汇总（详见 Context 注释）：
-//   - 纯客户端脚本（仅 set_secret_key / connect 等）：SamplesNet=0，不进 latency 直方图
-//   - 含 N 次 request 的脚本：SamplesNet=N，NetLatency 是 N 次累计
+// timing 由 Context 中保存的每次 RequestTiming 汇总：
+//   - 纯客户端脚本（仅 set_secret_key / connect 等）：Requests 为空，不进 RTT 直方图
+//   - 含 N 次 request 的脚本：Requests 有 N 个独立 WireRTT 样本
 //   - 出错中断的脚本：timing 仍反映已发生的网络调用
 func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (code, send, recv int, timing engine.ActionTiming, err error) {
 	compiled, ok := rp.precompiled[scriptName]

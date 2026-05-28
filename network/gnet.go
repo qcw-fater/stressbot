@@ -21,8 +21,8 @@ import (
 const maxBodyLen = 16 * 1024 * 1024
 
 const (
-	gnetReadBufferCap  = 64 * 1024 // gnet 读缓冲区容量
-	gnetWriteBufferCap = 64 * 1024 // gnet 写缓冲区容量
+	gnetReadBufferCap  = 32 * 1024 // gnet 读缓冲区容量
+	gnetWriteBufferCap = 32 * 1024 // gnet 写缓冲区容量
 )
 
 // connRegistry 管理 gnet 连接与业务层 Connection 的映射。
@@ -212,7 +212,8 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 			continue
 		}
 
-		switch conn.EnqueueRaw(msgBuf) {
+		recvFrameAt := time.Now()
+		switch conn.EnqueueRaw(msgBuf, recvFrameAt) {
 		case EnqueueOK:
 			// 入队成功，msgBuf 由 decodeLoop 在处理后归还
 		case EnqueueClosed:

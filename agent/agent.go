@@ -244,7 +244,7 @@ func (a *Agent) registerWithRetry(ctx context.Context) error {
 //   - 任意请求收到 404（errNotRegistered）→ 视为 Admin 重启，立即取消任务并重新注册
 //   - 心跳连续失败 ≥ HBFailThreshold 次（默认 3）且处于 Busy 时取消任务
 //     （Admin 是唯一指标聚合点，断联后压测流量没有观测价值；
-//      容忍窗口是 N×HBFailInterval，避免本地 ephemeral port 瞬时抖动误伤）
+//     容忍窗口是 N×HBFailInterval，避免本地 ephemeral port 瞬时抖动误伤）
 //   - 持续失败不退进程（除非重新注册超出 ReconnectMaxRetries）
 func (a *Agent) heartbeatLoop(ctx context.Context) {
 	interval := a.cfg.HBInterval
@@ -514,7 +514,7 @@ func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
 //  2. 等待任务 goroutine 完成上报（taskWG.Wait）；
 //  3. 停止上报循环；
 //  4. cancel 全局 ctx，让常驻 goroutine 退出；
-//  5. 注销（best-effort）→ 关闭 HTTP → 关闭协程池。
+//  5. 注销（best-effort）→ 关闭 HTTP。
 func (a *Agent) shutdown() error {
 	stresslog.Info("[AGENT] 正在关闭...")
 
@@ -562,9 +562,6 @@ func (a *Agent) shutdown() error {
 
 	// 5. 关闭 HTTP 服务器
 	a.shutdownHTTPServer(context.Background())
-
-	// 6. 关闭 work pool（会等待池中所有 goroutine 完成或超时）
-	utils.GetWorkPool().Shutdown()
 
 	stresslog.Info("[AGENT] 已退出")
 	return nil

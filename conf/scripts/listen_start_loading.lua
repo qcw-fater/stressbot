@@ -5,11 +5,21 @@
 --   fighterIndex = FighterList 中自己的索引（0-based）
 --   secretKey = FighterList 中自己的 SecretKey
 --   battleSession = FighterList 中自己的 matchData.sessionId
--- 同时存储完整的 fighterList 供 BattleEnd 构建结算数据使用
+-- 同时存储结算需要的 fighterList 裁剪字段
 local network = require("network")
 local robot = require("robot")
 local proto = require("proto")
 local log = require("log")
+
+local function first_path(msg, paths)
+    for _, path in ipairs(paths) do
+        local value = proto.get_path(msg, path)
+        if value ~= nil then
+            return value
+        end
+    end
+    return nil
+end
 
 function execute(r)
     -- 轮询监听开始加载消息，超时 180 秒（3 分钟），轮询 500 毫秒
@@ -19,88 +29,74 @@ function execute(r)
         return 31, 0, recv  -- 31=LISTEN_TIMEOUT
     end
 
-    local fighterList = nil
-
     local ok, err = pcall(function()
-        local fieldMap = proto.get_field_map(resp)
-
-        -- 提取 battleId（顶层字段，int64 大整数以字符串形式保留精度）
-        if fieldMap.battleId then
-            robot.set("battleId", fieldMap.battleId)
+        local battleId = proto.get_path(resp, "battleId")
+        if battleId then
+            robot.set("battleId", battleId)
         end
 
-        -- 提取 record 中的战斗信息
-        local record = fieldMap.record
-        if record then
-            -- 战斗服地址（去除协议前缀）
-            if record.address then
-                local addr = tostring(record.address)
-                addr = addr:gsub("^all://", "")
-                addr = addr:gsub("^tcp://", "")
-                addr = addr:gsub("^udp://", "")
-                robot.set("battleAddress", addr)
-            end
+        local address = proto.get_path(resp, "record.address")
+        if address then
+            local addr = tostring(address)
+            addr = addr:gsub("^all://", "")
+            addr = addr:gsub("^tcp://", "")
+            addr = addr:gsub("^udp://", "")
+            robot.set("battleAddress", addr)
+        end
 
-            -- 从 FighterList 中找到自己的信息
-            -- 旧工具：遍历 FighterList，匹配 playerId，提取 fighterIndex/secretKey/sessionId
-            local myPlayerId = robot.get("roleId") or robot.get("playerId")
-            fighterList = record.FighterList
-            local gameType = record.GameType or record.gameType or record.gType
-            if gameType then
-                robot.set("battleGameType", tonumber(gameType) or gameType)
-            end
-            if fighterList and myPlayerId then
-                for i, fighter in ipairs(fighterList) do
-                    local fid = tonumber(fighter.playerId)
-                    if fid and fid == tonumber(myPlayerId) then
-                        robot.set("fighterIndex", i - 1)  -- 0-based index
-                        -- 提取自己的 UDP 秘钥
-                        if fighter.secretKey then
-                            robot.set("battleSecretKey", fighter.secretKey)
-                        end
-                        -- 提取 matchData.sessionId（校验ID）
-                        if fighter.matchData and fighter.matchData.sessionId then
-                            robot.set("battleSession", fighter.matchData.sessionId)
-                        end
-                        break
-                    end
+        local gameType = first_path(resp, {"record.GameType", "record.gameType", "record.gType"})
+        if gameType then
+            robot.set("battleGameType", tonumber(gameType) or gameType)
+        end
+
+        local myPlayerId = tonumber(robot.get("roleId") or robot.get("playerId"))
+        local fighterCount = proto.list_size(resp, "record.FighterList")
+        local fighters = {}
+
+        for i = 1, fighterCount do
+            local fighter = proto.list_get(resp, "record.FighterList", i)
+            local playerId = tonumber(proto.get_path(fighter, "playerId")) or 0
+
+            if myPlayerId and playerId == myPlayerId then
+                robot.set("fighterIndex", i - 1)  -- 0-based index
+
+                local secretKey = proto.get_path(fighter, "secretKey")
+                if secretKey then
+                    robot.set("battleSecretKey", secretKey)
+                end
+
+                local sessionId = proto.get_path(fighter, "matchData.sessionId")
+                if sessionId then
+                    robot.set("battleSession", sessionId)
                 end
             end
-        end
-    end)
 
-    -- 存储完整的 fighterList 供 BattleEnd 构建结算数据
-    if fighterList then
-        local fighters = {}
-        for i, fighter in ipairs(fighterList) do
             local f = {}
-            f.playerId = tonumber(fighter.playerId) or 0
-            local md = fighter.matchData
-            if md then
-                f.name = md.base and md.base.name or ""
-                f.teamId = md.teamId or 0
-                f.fightIndex = md.index or 0
-                f.camp = md.camp or 0
-            else
-                f.name = ""
-                f.teamId = 0
-                f.fightIndex = 0
-                f.camp = 0
-            end
+            f.playerId = playerId
+            f.name = tostring(proto.get_path(fighter, "matchData.base.name") or "")
+            f.teamId = tonumber(proto.get_path(fighter, "matchData.teamId")) or 0
+            f.fightIndex = tonumber(proto.get_path(fighter, "matchData.index")) or 0
+            f.camp = tonumber(proto.get_path(fighter, "matchData.camp")) or 0
             f.selectHeroes = {}
-            local heroes = fighter.selectHeroes or {}
-            for j, heroId in ipairs(heroes) do
-                f.selectHeroes[j] = tonumber(heroId) or 0
-            end
             f.selectSkins = {}
-            local skins = fighter.selectSkins or {}
-            for j, skinId in ipairs(skins) do
-                f.selectSkins[j] = tonumber(skinId) or 0
+
+            local heroCount = proto.list_size(fighter, "selectHeroes")
+            for j = 1, heroCount do
+                f.selectHeroes[j] = tonumber(proto.list_get(fighter, "selectHeroes", j)) or 0
             end
+
+            local skinCount = proto.list_size(fighter, "selectSkins")
+            for j = 1, skinCount do
+                f.selectSkins[j] = tonumber(proto.list_get(fighter, "selectSkins", j)) or 0
+            end
+
             fighters[i] = f
         end
-        robot.set("fighterListData", fighters)
-    end
+
+        if #fighters > 0 then
+            robot.set("fighterListData", fighters)
+        end
+    end)
 
     if ok then
         log.info("开始加载: battleAddress=" .. tostring(robot.get("battleAddress"))
