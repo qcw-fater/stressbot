@@ -2,7 +2,7 @@ package admin
 
 import (
 	"context"
-	"encoding/json"
+	"math"
 	"sync"
 	"time"
 
@@ -70,6 +70,7 @@ func (s *Sampler) loop(ctx context.Context, taskID string, startedAt time.Time, 
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
 
+	lastSavedElapsed := -1
 	for {
 		select {
 		case <-ctx.Done():
@@ -78,28 +79,75 @@ func (s *Sampler) loop(ctx context.Context, taskID string, startedAt time.Time, 
 			return
 		case t := <-ticker.C:
 			elapsed := int(t.Sub(startedAt).Seconds())
+			if lastSavedElapsed >= 0 && elapsed-lastSavedElapsed < historySaveIntervalSec(elapsed) {
+				continue
+			}
 
 			stress := s.aggregator.AggregateStress(taskID)
-			if stressJSON, err := json.Marshal(stress); err == nil {
-				if err := s.history.AppendTimeseries(context.Background(), taskID, TimeseriesPoint{
-					TaskID: taskID, SampledAt: t, ElapsedSec: elapsed,
-					DataType: "stress", Snapshot: stressJSON,
-				}); err != nil {
-					stresslog.Warn("[SAMPLER] stress 时序数据写入失败",
-						zap.String("taskId", taskID), zap.Error(err))
-				}
-			}
-
 			sys := s.aggregator.AggregateSystem()
-			if sysJSON, err := json.Marshal(sys); err == nil {
-				if err := s.history.AppendTimeseries(context.Background(), taskID, TimeseriesPoint{
-					TaskID: taskID, SampledAt: t, ElapsedSec: elapsed,
-					DataType: "system", Snapshot: sysJSON,
-				}); err != nil {
-					stresslog.Warn("[SAMPLER] system 时序数据写入失败",
-						zap.String("taskId", taskID), zap.Error(err))
-				}
+			point := buildHistoryTrendPoint(t, elapsed, stress, sys)
+			if err := s.history.AppendTimeseries(context.Background(), taskID, point); err != nil {
+				stresslog.Warn("[SAMPLER] 时序趋势数据写入失败",
+					zap.String("taskId", taskID), zap.Error(err))
+				continue
 			}
+			lastSavedElapsed = elapsed
 		}
 	}
+}
+
+func historySaveIntervalSec(elapsed int) int {
+	switch {
+	case elapsed < 30*60:
+		return 10
+	case elapsed < 6*60*60:
+		return 60
+	default:
+		return 5 * 60
+	}
+}
+
+func buildHistoryTrendPoint(sampledAt time.Time, elapsed int, stress *StressAggregate, sys ClusterSystemSnapshot) HistoryTrendPoint {
+	point := HistoryTrendPoint{
+		SampledAt:     sampledAt,
+		ElapsedSec:    elapsed,
+		AvgCPUPercent: sys.AvgCPUPercent,
+		MaxCPUPercent: sys.MaxCPUPercent,
+		Goroutines:    sys.TotalGoroutines,
+		Threads:       int(sys.TotalThreads),
+		FDs:           int(sys.TotalFDs),
+		OnlineCount:   sys.OnlineCount,
+		OfflineCount:  sys.OfflineCount,
+	}
+	if sys.TotalMemMB > 0 {
+		point.MemPercent = float64(sys.UsedMemMB) / float64(sys.TotalMemMB) * 100
+	}
+	if stress == nil || stress.Snapshot == nil {
+		return point
+	}
+
+	snap := stress.Snapshot
+	point.BotsRunning = int(snap.Robots.Running)
+	point.BotsErrored = int(snap.Robots.Errored)
+	point.SendKBps = snap.Bandwidth.SendMBps * 1024
+	point.RecvKBps = snap.Bandwidth.RecvMBps * 1024
+
+	var apdexWeight float64
+	for _, action := range snap.Actions {
+		point.TotalQPS += action.AvgQPS
+		if action.NetSampleCount > 0 {
+			weight := float64(action.NetSampleCount)
+			point.Apdex += action.Apdex * weight
+			apdexWeight += weight
+		}
+	}
+	if apdexWeight > 0 {
+		point.Apdex = point.Apdex / apdexWeight
+	}
+	point.TotalQPS = math.Round(point.TotalQPS*100) / 100
+	point.Apdex = math.Round(point.Apdex*10000) / 10000
+	point.SendKBps = math.Round(point.SendKBps*100) / 100
+	point.RecvKBps = math.Round(point.RecvKBps*100) / 100
+	point.MemPercent = math.Round(point.MemPercent*100) / 100
+	return point
 }

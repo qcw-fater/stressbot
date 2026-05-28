@@ -20,8 +20,7 @@ import { listProto, listScript, getAdapterScript, getErrorMapScript } from './re
 import { syncFlowScriptsToIdb, collectFlowScriptNames } from './scriptSync';
 import { useRuntimeStore } from './runtimeStore';
 import { ApiError } from './api';
-import * as historyApi from './historyApi';
-import type { RobotConfig, StressAggregate, ClusterSystemSnapshot, TaskBrief, TaskDetail } from '@/types/api';
+import type { RobotConfig, TaskBrief, TaskDetail } from '@/types/api';
 import type { FlowLayout } from '@/types/editor';
 import type { FlowJson } from '@/components/FlowEditor/codec/flowToJson';
 
@@ -280,17 +279,6 @@ export async function attachToActive(taskId: string): Promise<void> {
   // 应该带哪些 .proto 文件；用户需主动到「资源管理」上传。
   void useProtoStore.getState();
 
-  // 回补时序历史：刷新页面后趋势图能立即显示已有数据，而非从空开始
-  void historyApi
-    .getHistoryTimeseries(taskId)
-    .then((ts) => {
-      const { backfillHistory } = useRuntimeStore.getState();
-      backfillHistory(
-        ts.stress.map((p) => (p.snapshot as unknown as StressAggregate).snapshot),
-        ts.system.map((p) => p.snapshot as ClusterSystemSnapshot),
-      );
-    })
-    .catch(() => { /* history 未启用或无数据，静默 */ });
 }
 
 /**

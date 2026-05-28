@@ -803,7 +803,7 @@ const (
 )
 
 // networkRegisterTCPHeartbeat 注册 TCP 心跳。
-// 签名：network.register_tcp_heartbeat(service, interval_ms, route [, builder])
+// 签名：network.register_tcp_heartbeat(service, interval_ms, route [, builder]) -> code
 //
 // 两种模式：
 //   - 静态心跳（不传 builder）：body 固定为空，注册时一次性编码，运行时零 Lua / 零 luaMu 开销。
@@ -813,7 +813,7 @@ func networkRegisterTCPHeartbeat(L *lua.LState) int {
 }
 
 // networkRegisterUDPHeartbeat 注册 UDP 心跳。
-// 签名：network.register_udp_heartbeat(service, interval_ms, route [, builder])
+// 签名：network.register_udp_heartbeat(service, interval_ms, route [, builder]) -> code
 //
 // 两种模式同 register_tcp_heartbeat。
 func networkRegisterUDPHeartbeat(L *lua.LState) int {
@@ -826,6 +826,10 @@ func registerHeartbeat(L *lua.LState, proto heartbeatProto) int {
 	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
 		L.RaiseError("network not available")
 		return 0
+	}
+	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
+		L.Push(lua.LNumber(errcode.ErrActionCanceled))
+		return 1
 	}
 
 	service := L.CheckString(1)
@@ -930,14 +934,20 @@ func registerHeartbeat(L *lua.LState, proto heartbeatProto) int {
 	// 必须用 withReleasedMu：RegisterHeartbeat 内部会 StopHeartbeat 停旧心跳，
 	// 如果不释放 luaMu，旧心跳的 Builder TryLock 失败后虽不会死锁，
 	// 但 StopHeartbeat 会卡满 2s 超时才返回，拖慢心跳替换速度。
+	var err error
 	withReleasedMu(ctx.LuaMu, func() {
 		if proto == hbProtoUDP {
-			ctx.NetSender.RegisterUDPHeartbeat(service, intervalMs, builder)
+			err = ctx.NetSender.RegisterUDPHeartbeat(service, intervalMs, builder)
 		} else {
-			ctx.NetSender.RegisterTCPHeartbeat(service, intervalMs, builder)
+			err = ctx.NetSender.RegisterTCPHeartbeat(service, intervalMs, builder)
 		}
 	})
-	return 0
+	if err != nil {
+		L.Push(lua.LNumber(errToCode(err)))
+		return 1
+	}
+	L.Push(lua.LNumber(0))
+	return 1
 }
 
 // ---------------------------------------------------------------------------

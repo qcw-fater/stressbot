@@ -629,26 +629,52 @@ type CompareDiff struct {
 
 // ── 时序采样 ─────────────────────────────────────────
 
-// TimeseriesPoint 时序采样数据点。
-type TimeseriesPoint struct {
-	// TaskID 任务 ID。
-	TaskID string `json:"taskId"`
+// HistoryTrendPoint 历史趋势采样点。
+type HistoryTrendPoint struct {
 	// SampledAt 采样时间。
 	SampledAt time.Time `json:"sampledAt"`
 	// ElapsedSec 距任务启动的秒数。
 	ElapsedSec int `json:"elapsedSec"`
-	// DataType 数据类型："stress" | "system"。
-	DataType string `json:"dataType"`
-	// Snapshot 原始 JSON 快照。
-	Snapshot json.RawMessage `json:"snapshot"`
+	// TotalQPS 集群总 QPS。
+	TotalQPS float64 `json:"totalQps"`
+	// Apdex 按网络样本数加权后的 Apdex。
+	Apdex float64 `json:"apdex"`
+	// BotsRunning 运行中机器人数量。
+	BotsRunning int `json:"botsRunning"`
+	// BotsErrored 异常机器人数量。
+	BotsErrored int `json:"botsErrored"`
+	// SendKBps 发送带宽 KB/s。
+	SendKBps float64 `json:"sendKBps"`
+	// RecvKBps 接收带宽 KB/s。
+	RecvKBps float64 `json:"recvKBps"`
+	// AvgCPUPercent 平均 CPU 使用率。
+	AvgCPUPercent float64 `json:"avgCpuPercent"`
+	// MaxCPUPercent 最高 CPU 使用率。
+	MaxCPUPercent float64 `json:"maxCpuPercent"`
+	// MemPercent 集群内存使用率。
+	MemPercent float64 `json:"memPercent"`
+	// Goroutines goroutine 总数。
+	Goroutines int `json:"goroutines"`
+	// Threads 线程总数。
+	Threads int `json:"threads"`
+	// FDs 文件描述符总数。
+	FDs int `json:"fds"`
+	// OnlineCount 在线节点数。
+	OnlineCount int `json:"onlineCount"`
+	// OfflineCount 离线节点数。
+	OfflineCount int `json:"offlineCount"`
 }
 
 // TimeseriesResponse 时序数据查询响应。
 type TimeseriesResponse struct {
 	// TaskID 任务 ID。
 	TaskID string `json:"taskId"`
-	// Stress 压测指标时序数据。
-	Stress []TimeseriesPoint `json:"stress"`
-	// System 系统指标时序数据。
-	System []TimeseriesPoint `json:"system"`
+	// Points 趋势采样点。
+	Points []HistoryTrendPoint `json:"points"`
+	// Sampled 是否经过读取侧降采样。
+	Sampled bool `json:"sampled"`
+	// OriginalCount 原始点数。
+	OriginalCount int `json:"originalCount"`
+	// MaxPoints 本次查询最大返回点数。
+	MaxPoints int `json:"maxPoints"`
 }

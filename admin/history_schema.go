@@ -68,14 +68,26 @@ CREATE TABLE IF NOT EXISTS task_aggregated (
 
 const ddlTaskTimeseries = `
 CREATE TABLE IF NOT EXISTS task_timeseries (
-    id              BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    task_id         VARCHAR(32)  NOT NULL,
-    sampled_at      DATETIME(3)  NOT NULL,
-    elapsed_sec     INT          NOT NULL DEFAULT 0,
-    data_type       VARCHAR(32)  NOT NULL,
-    snapshot        JSON         NOT NULL,
-    stage_index     INT          NOT NULL DEFAULT -1,
-    INDEX idx_task_type (task_id, data_type, elapsed_sec)
+    id                  BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    task_id             VARCHAR(32)  NOT NULL,
+    sampled_at          DATETIME(3)  NOT NULL,
+    elapsed_sec         INT          NOT NULL DEFAULT 0,
+    stage_index         INT          NOT NULL DEFAULT -1,
+    total_qps           DOUBLE       NOT NULL DEFAULT 0,
+    apdex               DOUBLE       NOT NULL DEFAULT 0,
+    bots_running        INT          NOT NULL DEFAULT 0,
+    bots_errored        INT          NOT NULL DEFAULT 0,
+    send_kbps           DOUBLE       NOT NULL DEFAULT 0,
+    recv_kbps           DOUBLE       NOT NULL DEFAULT 0,
+    avg_cpu_percent     DOUBLE       NOT NULL DEFAULT 0,
+    max_cpu_percent     DOUBLE       NOT NULL DEFAULT 0,
+    mem_percent         DOUBLE       NOT NULL DEFAULT 0,
+    goroutines          INT          NOT NULL DEFAULT 0,
+    threads             INT          NOT NULL DEFAULT 0,
+    fds                 INT          NOT NULL DEFAULT 0,
+    online_count        INT          NOT NULL DEFAULT 0,
+    offline_count       INT          NOT NULL DEFAULT 0,
+    INDEX idx_task_elapsed (task_id, elapsed_sec)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `
 

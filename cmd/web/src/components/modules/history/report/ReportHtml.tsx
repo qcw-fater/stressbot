@@ -6,7 +6,7 @@
 import type {
   HistoryDetail,
   ActionMetric,
-  TimeseriesPoint,
+  HistoryTrendPoint,
   ClusterSystemSnapshot,
 } from '@/types/api';
 import { computeWeightedMetrics, classifyApdex } from '@/services/metricsBinding';
@@ -15,7 +15,7 @@ import type { ChartImages } from './reportCharts';
 
 export interface ReportHtmlProps {
   detail: HistoryDetail;
-  timeseries: { stress: TimeseriesPoint[]; system: TimeseriesPoint[] };
+  timeseries: { points: HistoryTrendPoint[] };
   charts: ChartImages;
 }
 

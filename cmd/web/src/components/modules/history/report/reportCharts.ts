@@ -8,10 +8,7 @@
 import * as echarts from 'echarts';
 import type {
   ActionMetric,
-  ClusterSystemSnapshot,
-  TimeseriesPoint,
-  StressAggregate,
-  StressSnapshot,
+  HistoryTrendPoint,
 } from '@/types/api';
 import { classifyApdex } from '@/services/metricsBinding';
 
@@ -49,21 +46,15 @@ const COLORS = {
   lightGray: '#d9d9d9',
 };
 
-function unwrap(p: TimeseriesPoint) {
-  return ((p.snapshot as unknown as StressAggregate)?.snapshot ?? {}) as Partial<StressSnapshot>;
-}
-
 /* ── 1. QPS 趋势 ── */
 
 export function buildQpsTrendOption(
-  stressTs: TimeseriesPoint[],
+  points: HistoryTrendPoint[],
 ): echarts.EChartsOption | null {
-  if (stressTs.length === 0) return null;
+  if (points.length === 0) return null;
 
-  const x = stressTs.map((p) => `${p.elapsedSec}s`);
-  const data = stressTs.map((p) =>
-    (unwrap(p).actions ?? []).reduce((sum, a) => sum + a.avgQps, 0),
-  );
+  const x = points.map((p) => `${p.elapsedSec}s`);
+  const data = points.map((p) => p.totalQps);
 
   return {
     animation: false,
@@ -91,17 +82,12 @@ export function buildQpsTrendOption(
 /* ── 2. Apdex 趋势 ── */
 
 export function buildApdexTrendOption(
-  stressTs: TimeseriesPoint[],
+  points: HistoryTrendPoint[],
 ): echarts.EChartsOption | null {
-  if (stressTs.length === 0) return null;
+  if (points.length === 0) return null;
 
-  const x = stressTs.map((p) => `${p.elapsedSec}s`);
-  const data = stressTs.map((p) => {
-    const actions = unwrap(p).actions ?? [];
-    let total = 0, w = 0;
-    for (const a of actions) { if (a.netSampleCount > 0) { total += a.apdex * a.netSampleCount; w += a.netSampleCount; } }
-    return w > 0 ? +(total / w).toFixed(3) : 0;
-  });
+  const x = points.map((p) => `${p.elapsedSec}s`);
+  const data = points.map((p) => p.apdex);
 
   return {
     animation: false,
@@ -129,14 +115,12 @@ export function buildApdexTrendOption(
 /* ── 3. CPU 趋势 ── */
 
 export function buildCpuTrendOption(
-  systemTs: TimeseriesPoint[],
+  points: HistoryTrendPoint[],
 ): echarts.EChartsOption | null {
-  if (systemTs.length === 0) return null;
+  if (points.length === 0) return null;
 
-  const x = systemTs.map((p) => `${p.elapsedSec}s`);
-  const data = systemTs.map((p) =>
-    +((p.snapshot as ClusterSystemSnapshot).avgCpuPercent).toFixed(2),
-  );
+  const x = points.map((p) => `${p.elapsedSec}s`);
+  const data = points.map((p) => +p.avgCpuPercent.toFixed(2));
 
   return {
     animation: false,
@@ -164,17 +148,13 @@ export function buildCpuTrendOption(
 /* ── 4. 带宽趋势 ── */
 
 export function buildBwTrendOption(
-  stressTs: TimeseriesPoint[],
+  points: HistoryTrendPoint[],
 ): echarts.EChartsOption | null {
-  if (stressTs.length === 0) return null;
+  if (points.length === 0) return null;
 
-  const x = stressTs.map((p) => `${p.elapsedSec}s`);
-  const send = stressTs.map((p) =>
-    +((unwrap(p).bandwidth?.sendMBps ?? 0) * 1024).toFixed(2),
-  );
-  const recv = stressTs.map((p) =>
-    +((unwrap(p).bandwidth?.recvMBps ?? 0) * 1024).toFixed(2),
-  );
+  const x = points.map((p) => `${p.elapsedSec}s`);
+  const send = points.map((p) => +p.sendKBps.toFixed(2));
+  const recv = points.map((p) => +p.recvKBps.toFixed(2));
 
   return {
     animation: false,
@@ -459,8 +439,7 @@ export interface ChartImages {
 
 export function captureAllCharts(
   actions: ActionMetric[],
-  stressTs: TimeseriesPoint[],
-  systemTs: TimeseriesPoint[],
+  points: HistoryTrendPoint[],
 ): ChartImages {
   const safeCapture = (
     fn: () => echarts.EChartsOption | null,
@@ -475,10 +454,10 @@ export function captureAllCharts(
   const trendW = 480;
   const trendH = 240;
 
-  const qps = safeCapture(() => buildQpsTrendOption(stressTs), trendW, trendH);
-  const apdexTrend = safeCapture(() => buildApdexTrendOption(stressTs), trendW, trendH);
-  const cpu = safeCapture(() => buildCpuTrendOption(systemTs), trendW, trendH);
-  const bandwidth = safeCapture(() => buildBwTrendOption(stressTs), trendW, trendH);
+  const qps = safeCapture(() => buildQpsTrendOption(points), trendW, trendH);
+  const apdexTrend = safeCapture(() => buildApdexTrendOption(points), trendW, trendH);
+  const cpu = safeCapture(() => buildCpuTrendOption(points), trendW, trendH);
+  const bandwidth = safeCapture(() => buildBwTrendOption(points), trendW, trendH);
 
   const ranking = actions.length > 0
     ? captureChartAsPng(buildRankingOption(actions), 700, Math.max(200, Math.min(actions.length, 15) * 32))

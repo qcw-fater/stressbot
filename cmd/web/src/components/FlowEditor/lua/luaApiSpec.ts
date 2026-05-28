@@ -179,10 +179,11 @@ const networkModule: LuaModule = {
         { name: 'route', type: 'table', doc: '路由 {cmd=N, act=M}' },
         { name: 'msg', type: 'proto userdata', doc: 'C2S 消息（proto.create 的返回值）' },
         { name: 's2c_proto', type: 'string', optional: true, doc: '响应 proto 全名' },
+        { name: 'timeout_sec', type: 'number', optional: true, doc: '超时秒数；不传则使用任务 timeoutSec' },
       ],
       returns: 'code, data, sent, recv : (number, string|userdata|nil, number, number)',
       summary: 'TCP 请求-响应',
-      detail: 'code: 0=成功 / -1=请求失败 / -2=解析失败（data 为原始字节）',
+      detail: 'code: 0=成功 / errcode 错误码（框架码 1-99 / 服务端码 ≥100）。timeout_sec 优先于任务配置。',
       example: `local code, resp = network.tcp_request("logic", {cmd=1, act=1}, msg, "login.LoginS2C")`,
     },
     {
@@ -216,12 +217,11 @@ const networkModule: LuaModule = {
         { name: 'route', type: 'table', doc: '路由 {cmd=N, act=M}' },
         { name: 'body', type: 'string', doc: '消息体字节' },
         { name: 's2c_proto', type: 'string', optional: true, doc: '响应 proto 全名' },
-        { name: 'timeout_sec', type: 'number', optional: true, doc: '超时秒数（默认 10）' },
-        { name: 'poll_ms', type: 'number', optional: true, doc: '轮询间隔毫秒（默认 100）' },
+        { name: 'timeout_sec', type: 'number', optional: true, doc: '超时秒数；不传则使用任务 timeoutSec' },
       ],
       returns: 'code, data, sent, recv : (number, string|userdata|nil, number, number)',
       summary: 'UDP 请求-响应',
-      detail: 'code: 0=成功 / -1=请求失败或超时 / -2=解析失败',
+      detail: 'code: 0=成功 / errcode 错误码（框架码 1-99 / 服务端码 ≥100）。timeout_sec 优先于任务配置。',
     },
     {
       name: 'udp_listen',
@@ -321,34 +321,42 @@ const networkModule: LuaModule = {
       module: 'network',
       params: [
         { name: 'service', type: 'string', doc: '连接名' },
-        { name: 'interval_ms', type: 'number', doc: '心跳间隔（毫秒）' },
-        { name: 'route', type: 'table', doc: '路由 {cmd, act}' },
-        { name: 'builder', type: 'function', optional: true, doc: '可选 body 构造器，返回 string。不传则为静态心跳（预编码，零 Lua 开销）' },
+        { name: 'interval_or_builder', type: 'number | function', doc: '心跳间隔毫秒；也可直接传 builder 函数，此时使用默认心跳间隔' },
+        { name: 'route', type: 'table', optional: true, doc: '路由 {cmd, act}；第二参为 builder 时可省略' },
+        { name: 'builder', type: 'function', optional: true, doc: '动态 body 构造器，返回 string' },
       ],
-      returns: '-',
-      summary: '注册 TCP 心跳。不传 builder 为静态心跳（body 为空，注册时预编码）；传 builder 为动态心跳（每次 tick 调用构造 body）',
+      returns: 'code : number',
+      summary: '注册 TCP 心跳，返回 0 表示成功，否则为 errcode',
+      detail: '支持静态心跳和动态心跳。静态心跳不传 builder，body 固定为空并在注册时预编码；动态心跳传 builder，每次 tick 通过 TryLock 调用，抢不到 luaMu 会跳过本次心跳。第二个参数也可以直接传 builder 函数，此时使用默认心跳间隔。',
       example: `-- 静态心跳（推荐，body 固定为空）
-network.register_tcp_heartbeat("logic", 5000, {cmd=2, act=1})
+local code = network.register_tcp_heartbeat("logic", 5000, {cmd=2, act=1})
 
 -- 动态心跳（body 每次变化）
-network.register_tcp_heartbeat("battle", 10000, {cmd=4, act=2}, build_heartbeat)`,
+local code = network.register_tcp_heartbeat("battle", 10000, {cmd=4, act=2}, build_heartbeat)
+
+-- 使用默认心跳间隔的动态心跳
+local code = network.register_tcp_heartbeat("logic", build_heartbeat)`,
     },
     {
       name: 'register_udp_heartbeat',
       module: 'network',
       params: [
         { name: 'service', type: 'string', doc: '连接名' },
-        { name: 'interval_ms', type: 'number', doc: '心跳间隔（毫秒）' },
-        { name: 'route', type: 'table', doc: '路由 {cmd, act}' },
-        { name: 'builder', type: 'function', optional: true, doc: '可选 body 构造器。不传则为静态心跳（预编码，零 Lua 开销）' },
+        { name: 'interval_or_builder', type: 'number | function', doc: '心跳间隔毫秒；也可直接传 builder 函数，此时使用默认心跳间隔' },
+        { name: 'route', type: 'table', optional: true, doc: '路由 {cmd, act}；第二参为 builder 时可省略' },
+        { name: 'builder', type: 'function', optional: true, doc: '动态 body 构造器，返回 string' },
       ],
-      returns: '-',
-      summary: '注册 UDP 心跳。不传 builder 为静态心跳（body 为空，注册时预编码）；传 builder 为动态心跳',
+      returns: 'code : number',
+      summary: '注册 UDP 心跳，返回 0 表示成功，否则为 errcode',
+      detail: '行为同 register_tcp_heartbeat：静态心跳预编码，动态心跳每次 tick 调用 builder；第二个参数直接传 builder 时使用默认心跳间隔。',
       example: `-- 静态心跳
-network.register_udp_heartbeat("game", 3000, {cmd=1, act=1})
+local code = network.register_udp_heartbeat("game", 3000, {cmd=1, act=1})
 
 -- 动态心跳
-network.register_udp_heartbeat("battle", 150, {cmd=4, act=2}, build_udp_heart)`,
+local code = network.register_udp_heartbeat("battle", 150, {cmd=4, act=2}, build_udp_heart)
+
+-- 使用默认心跳间隔的动态心跳
+local code = network.register_udp_heartbeat("game", build_udp_heart)`,
     },
   ],
 };
@@ -385,6 +393,17 @@ const protoModule: LuaModule = {
       ],
       returns: 'any',
       summary: '读取字段值',
+    },
+    {
+      name: 'get_path',
+      module: 'proto',
+      params: [
+        { name: 'msg', type: 'userdata', doc: 'proto 消息' },
+        { name: 'path', type: 'string', doc: '字段路径；当前后端等同 get_field' },
+      ],
+      returns: 'any',
+      summary: '按字段路径读取值',
+      detail: '后端注册为 proto.get_field 的别名，也支持 msg:get_path(path) 方法调用。',
     },
     {
       name: 'get_field_map',

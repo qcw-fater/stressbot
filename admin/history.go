@@ -475,14 +475,22 @@ func (h *HistoryStore) GetConfig(ctx context.Context, id string) (*TaskConfig, e
 	return &cfg, nil
 }
 
+const (
+	defaultHistoryTimeseriesMaxPoints = 600
+	maxHistoryTimeseriesMaxPoints     = 2000
+)
+
 // GetTimeseries 查询时序采样数据。
-func (h *HistoryStore) GetTimeseries(ctx context.Context, id string) (*TimeseriesResponse, error) {
+func (h *HistoryStore) GetTimeseries(ctx context.Context, id string, maxPoints int) (*TimeseriesResponse, error) {
 	if h.db == nil {
 		return &TimeseriesResponse{TaskID: id}, nil
 	}
+	maxPoints = normalizeTimeseriesMaxPoints(maxPoints)
 
 	rows, err := h.db.QueryContext(ctx, `
-		SELECT sampled_at, elapsed_sec, data_type, snapshot
+		SELECT sampled_at, elapsed_sec, total_qps, apdex, bots_running, bots_errored,
+			send_kbps, recv_kbps, avg_cpu_percent, max_cpu_percent, mem_percent,
+			goroutines, threads, fds, online_count, offline_count
 		FROM task_timeseries WHERE task_id = ?
 		ORDER BY elapsed_sec
 	`, id)
@@ -491,21 +499,59 @@ func (h *HistoryStore) GetTimeseries(ctx context.Context, id string) (*Timeserie
 	}
 	defer rows.Close()
 
-	resp := &TimeseriesResponse{TaskID: id}
+	points := []HistoryTrendPoint{}
 	for rows.Next() {
-		var p TimeseriesPoint
-		p.TaskID = id
-		if err := rows.Scan(&p.SampledAt, &p.ElapsedSec, &p.DataType, &p.Snapshot); err != nil {
+		var p HistoryTrendPoint
+		if err := rows.Scan(
+			&p.SampledAt, &p.ElapsedSec, &p.TotalQPS, &p.Apdex, &p.BotsRunning, &p.BotsErrored,
+			&p.SendKBps, &p.RecvKBps, &p.AvgCPUPercent, &p.MaxCPUPercent, &p.MemPercent,
+			&p.Goroutines, &p.Threads, &p.FDs, &p.OnlineCount, &p.OfflineCount,
+		); err != nil {
 			continue
 		}
-		switch p.DataType {
-		case "stress":
-			resp.Stress = append(resp.Stress, p)
-		case "system":
-			resp.System = append(resp.System, p)
-		}
+		points = append(points, p)
 	}
+
+	originalCount := len(points)
+	resp := &TimeseriesResponse{
+		TaskID:        id,
+		Points:        sampleHistoryTrendPoints(points, maxPoints),
+		OriginalCount: originalCount,
+		MaxPoints:     maxPoints,
+	}
+	resp.Sampled = len(resp.Points) < originalCount
 	return resp, nil
+}
+
+func normalizeTimeseriesMaxPoints(maxPoints int) int {
+	if maxPoints <= 0 {
+		return defaultHistoryTimeseriesMaxPoints
+	}
+	if maxPoints > maxHistoryTimeseriesMaxPoints {
+		return maxHistoryTimeseriesMaxPoints
+	}
+	return maxPoints
+}
+
+func sampleHistoryTrendPoints(points []HistoryTrendPoint, maxPoints int) []HistoryTrendPoint {
+	if len(points) <= maxPoints {
+		return points
+	}
+	if maxPoints <= 1 {
+		return points[len(points)-1:]
+	}
+
+	result := make([]HistoryTrendPoint, 0, maxPoints)
+	lastIdx := -1
+	for i := 0; i < maxPoints; i++ {
+		idx := int(float64(i) * float64(len(points)-1) / float64(maxPoints-1))
+		if idx == lastIdx {
+			continue
+		}
+		result = append(result, points[idx])
+		lastIdx = idx
+	}
+	return result
 }
 
 // AllTags 返回所有去重标签。
@@ -656,15 +702,20 @@ func (h *HistoryStore) Delete(ctx context.Context, id string, force bool) error 
 	return tx.Commit()
 }
 
-// AppendTimeseries 追加时序采样点。
-func (h *HistoryStore) AppendTimeseries(ctx context.Context, taskID string, point TimeseriesPoint) error {
+// AppendTimeseries 追加时序趋势采样点。
+func (h *HistoryStore) AppendTimeseries(ctx context.Context, taskID string, point HistoryTrendPoint) error {
 	if h.db == nil {
 		return nil
 	}
 	_, err := h.db.ExecContext(ctx, `
-		INSERT INTO task_timeseries (task_id, sampled_at, elapsed_sec, data_type, snapshot)
-		VALUES (?, ?, ?, ?, ?)
-	`, taskID, point.SampledAt, point.ElapsedSec, point.DataType, point.Snapshot)
+		INSERT INTO task_timeseries (
+			task_id, sampled_at, elapsed_sec, total_qps, apdex, bots_running, bots_errored,
+			send_kbps, recv_kbps, avg_cpu_percent, max_cpu_percent, mem_percent,
+			goroutines, threads, fds, online_count, offline_count
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, taskID, point.SampledAt, point.ElapsedSec, point.TotalQPS, point.Apdex, point.BotsRunning, point.BotsErrored,
+		point.SendKBps, point.RecvKBps, point.AvgCPUPercent, point.MaxCPUPercent, point.MemPercent,
+		point.Goroutines, point.Threads, point.FDs, point.OnlineCount, point.OfflineCount)
 	return err
 }
 

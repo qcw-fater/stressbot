@@ -30,8 +30,10 @@ export function deleteHistory(id: string, force = false): Promise<void> {
   return del<void>(`/history/${encodeURIComponent(id)}${buildQuery({ force })}`);
 }
 
-export function getHistoryTimeseries(id: string): Promise<TimeseriesResponse> {
-  return getJson<TimeseriesResponse>(`/history/${encodeURIComponent(id)}/timeseries`);
+export function getHistoryTimeseries(id: string, maxPoints?: number): Promise<TimeseriesResponse> {
+  return getJson<TimeseriesResponse>(
+    `/history/${encodeURIComponent(id)}/timeseries${buildQuery({ maxPoints })}`,
+  );
 }
 
 export function getHistoryConfig(id: string): Promise<HistoryConfigArchive> {

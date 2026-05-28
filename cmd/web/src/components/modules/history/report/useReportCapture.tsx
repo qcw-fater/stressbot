@@ -6,17 +6,17 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { captureAllCharts } from './reportCharts';
 import { ReportHtml } from './ReportHtml';
 import { buildStandaloneHtml } from './reportHtmlBuilder';
-import type { HistoryDetail, TimeseriesPoint } from '@/types/api';
+import type { HistoryDetail, HistoryTrendPoint } from '@/types/api';
 
 export function useReportCapture(
   detail: HistoryDetail | null,
-  timeseries: { stress: TimeseriesPoint[]; system: TimeseriesPoint[] } | null,
+  timeseries: { points: HistoryTrendPoint[] } | null,
 ) {
   return function generateReport() {
     if (!detail || !timeseries) return;
 
     const actions = detail.finalSnapshot?.actions ?? [];
-    const charts = captureAllCharts(actions, timeseries.stress, timeseries.system);
+    const charts = captureAllCharts(actions, timeseries.points);
 
     const htmlBody = renderToStaticMarkup(
       <ReportHtml detail={detail} timeseries={timeseries} charts={charts} />,

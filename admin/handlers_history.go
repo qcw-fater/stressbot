@@ -126,7 +126,8 @@ func (s *AdminServer) handleGetHistoryTimeseries(w http.ResponseWriter, r *http.
 	}
 
 	id := r.PathValue("id")
-	resp, err := s.history.GetTimeseries(r.Context(), id)
+	maxPoints := parseIntOrDefault(r.URL.Query().Get("maxPoints"), defaultHistoryTimeseriesMaxPoints)
+	resp, err := s.history.GetTimeseries(r.Context(), id, maxPoints)
 	if err != nil {
 		writeError(w, err)
 		return

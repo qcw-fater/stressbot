@@ -438,18 +438,31 @@ export interface HistoryTagsResponse {
   tags: string[];
 }
 
-export interface TimeseriesPoint {
-  taskId: string;
+export interface HistoryTrendPoint {
   sampledAt: string;
   elapsedSec: number;
-  dataType: 'stress' | 'system';
-  snapshot: StressSnapshot | ClusterSystemSnapshot;
+  totalQps: number;
+  apdex: number;
+  botsRunning: number;
+  botsErrored: number;
+  sendKBps: number;
+  recvKBps: number;
+  avgCpuPercent: number;
+  maxCpuPercent: number;
+  memPercent: number;
+  goroutines: number;
+  threads: number;
+  fds: number;
+  onlineCount: number;
+  offlineCount: number;
 }
 
 export interface TimeseriesResponse {
   taskId: string;
-  stress: TimeseriesPoint[];
-  system: TimeseriesPoint[];
+  points: HistoryTrendPoint[];
+  sampled: boolean;
+  originalCount: number;
+  maxPoints: number;
 }
 
 export interface HistoryConfigArchive {

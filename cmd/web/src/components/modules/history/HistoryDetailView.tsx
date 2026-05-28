@@ -9,7 +9,7 @@ import dayjs from 'dayjs';
 import ReactECharts from 'echarts-for-react';
 import { useEffect, useMemo, useState } from 'react';
 import { historyApi, showApiError } from '@/services';
-import type { ActionMetric, ClusterSystemSnapshot, HistoryDetail, HistoryConfigArchive, TimeseriesPoint, StressAggregate, StressSnapshot } from '@/types/api';
+import type { ActionMetric, HistoryDetail, HistoryConfigArchive, HistoryTrendPoint, StressSnapshot } from '@/types/api';
 import { ApdexCell } from '@/components/monitoring/shared/ApdexCell';
 import { fmtBytes, fmtMs, NUMERIC_STYLE } from '@/components/monitoring/shared/formats';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
@@ -25,7 +25,7 @@ export interface HistoryDetailViewProps {
 export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
   const { message } = App.useApp();
   const [detail, setDetail] = useState<HistoryDetail | null>(null);
-  const [timeseries, setTimeseries] = useState<{ stress: TimeseriesPoint[]; system: TimeseriesPoint[] } | null>(null);
+  const [timeseries, setTimeseries] = useState<{ points: HistoryTrendPoint[]; sampled: boolean; originalCount: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState('');
   const [tags, setTags] = useState<string[]>([]);
@@ -40,7 +40,7 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
     Promise.all([historyApi.getHistory(id), historyApi.getHistoryTimeseries(id)])
       .then(([d, t]) => {
         setDetail(d);
-        setTimeseries({ stress: t?.stress ?? [], system: t?.system ?? [] });
+        setTimeseries({ points: t?.points ?? [], sampled: t?.sampled ?? false, originalCount: t?.originalCount ?? 0 });
         setNote(d.note ?? '');
         setTags(d.tags ?? []);
       })
@@ -91,34 +91,15 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
   const theme = useEditorStore((s) => s.theme);
   const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
   const { qpsOption, apdexOption, cpuOption, bwOption } = useMemo(() => {
-    const stressTs = timeseries?.stress ?? [];
-    const systemTs = timeseries?.system ?? [];
-    const hasStress = stressTs.length > 0;
+    const points = timeseries?.points ?? [];
+    const hasPoints = points.length > 0;
 
-    const stressX = stressTs.map((p) => `${p.elapsedSec}s`);
-    const systemX = systemTs.map((p) => `${p.elapsedSec}s`);
-
-    const unwrap = (p: TimeseriesPoint) =>
-      ((p.snapshot as unknown as StressAggregate)?.snapshot ?? {}) as Partial<StressSnapshot>;
-
-    const qps: number[] = [];
-    const apdex: number[] = [];
-    const sendKBps: number[] = [];
-    const recvKBps: number[] = [];
-
-    if (hasStress) {
-      for (const p of stressTs) {
-        const snap = unwrap(p);
-        qps.push(+((snap.actions ?? []).reduce((s, a) => s + a.avgQps, 0)).toFixed(2));
-        let t = 0, w = 0;
-        for (const a of snap.actions ?? []) { if (a.netSampleCount > 0) { t += a.apdex * a.netSampleCount; w += a.netSampleCount; } }
-        apdex.push(w > 0 ? +(t / w).toFixed(2) : 0);
-        sendKBps.push(+((snap.bandwidth?.sendMBps ?? 0) * 1024).toFixed(2));
-        recvKBps.push(+((snap.bandwidth?.recvMBps ?? 0) * 1024).toFixed(2));
-      }
-    }
-
-    const cpu = systemTs.map((p) => +((p.snapshot as ClusterSystemSnapshot).avgCpuPercent).toFixed(2));
+    const x = points.map((p) => `${p.elapsedSec}s`);
+    const qps = points.map((p) => +p.totalQps.toFixed(2));
+    const apdex = points.map((p) => +p.apdex.toFixed(2));
+    const sendKBps = points.map((p) => +p.sendKBps.toFixed(2));
+    const recvKBps = points.map((p) => +p.recvKBps.toFixed(2));
+    const cpu = points.map((p) => +p.avgCpuPercent.toFixed(2));
 
     const isDark = theme === 'dark';
     const root = document.documentElement;
@@ -150,13 +131,13 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
     });
 
     return {
-      qpsOption: hasStress ? line([{ name: 'QPS', data: qps, color: css('--chart-blue', '#1677ff') }], stressX) : null,
-      apdexOption: hasStress ? line([{ name: 'Apdex', data: apdex, color: css('--chart-green', '#52c41a') }], stressX, 1) : null,
-      cpuOption: systemTs.length > 0 ? line([{ name: 'CPU%', data: cpu, color: css('--chart-orange', '#fa8c16') }], systemX) : null,
-      bwOption: hasStress ? line([
+      qpsOption: hasPoints ? line([{ name: 'QPS', data: qps, color: css('--chart-blue', '#1677ff') }], x) : null,
+      apdexOption: hasPoints ? line([{ name: 'Apdex', data: apdex, color: css('--chart-green', '#52c41a') }], x, 1) : null,
+      cpuOption: hasPoints ? line([{ name: 'CPU%', data: cpu, color: css('--chart-orange', '#fa8c16') }], x) : null,
+      bwOption: hasPoints ? line([
         { name: '↑ 发送', data: sendKBps, color: css('--chart-cyan', '#13c2c2') },
         { name: '↓ 接收', data: recvKBps, color: css('--chart-purple', '#722ed1') },
-      ], stressX) : null,
+      ], x) : null,
     };
   }, [timeseries, theme]);
 
@@ -294,7 +275,13 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
 
       {/* ── 运行趋势 — 2×2 网格 ── */}
       {(qpsOption || cpuOption) && (
-        <div className="hp-trends-grid">
+        <>
+          {timeseries?.sampled && (
+            <div style={{ color: 'var(--text-tertiary)', fontSize: 12, marginBottom: 8 }}>
+              趋势图已降采样展示：{timeseries.points.length} / {timeseries.originalCount} 个采样点
+            </div>
+          )}
+          <div className="hp-trends-grid">
           {qpsOption && (
             <div className="hp-glass hp-glass-thin hp-trends-card">
               <div className="hp-section-title">QPS</div>
@@ -319,7 +306,8 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
               <ReactECharts option={bwOption} style={{ height: 180 }} notMerge lazyUpdate />
             </div>
           )}
-        </div>
+          </div>
+        </>
       )}
 
       {/* ── 动作汇总表 — 全宽主角 ── */}

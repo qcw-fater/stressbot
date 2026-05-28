@@ -25,6 +25,7 @@ func loadProtoModule(L *lua.LState) int {
 	L.SetField(mod, "create", L.NewFunction(protoCreate))
 	L.SetField(mod, "set_field", L.NewFunction(protoSetField))
 	L.SetField(mod, "get_field", L.NewFunction(protoGetField))
+	L.SetField(mod, "get_path", L.NewFunction(protoGetField))
 	L.SetField(mod, "serialize", L.NewFunction(protoSerialize))
 	L.SetField(mod, "parse", L.NewFunction(protoParse))
 	L.SetField(mod, "get_field_map", L.NewFunction(protoGetFieldMap))
@@ -43,6 +44,8 @@ func protoMsgIndex(L *lua.LState) int {
 	case "set_field":
 		L.Push(L.NewFunction(protoSetField))
 	case "get_field":
+		L.Push(L.NewFunction(protoGetField))
+	case "get_path":
 		L.Push(L.NewFunction(protoGetField))
 	case "serialize":
 		L.Push(L.NewFunction(protoSerialize))
@@ -338,13 +341,12 @@ func protoListSize(L *lua.LState) int {
 		return 1
 	}
 	fieldName := findFirstStringArg(L)
-	val, err := ctx.Factory.GetField(msg, fieldName)
+	n, err := ctx.Factory.GetListLen(msg, fieldName)
 	if err != nil {
 		L.Push(lua.LNumber(0))
 		return 1
 	}
-	list, _ := val.([]any)
-	L.Push(lua.LNumber(len(list)))
+	L.Push(lua.LNumber(n))
 	return 1
 }
 
@@ -374,18 +376,12 @@ func protoListGet(L *lua.LState) int {
 			idx = int(lua.LVAsNumber(v))
 		}
 	}
-	val, err := ctx.Factory.GetField(msg, fieldName)
+	i := idx - 1
+	item, err := ctx.Factory.GetListItem(msg, fieldName, i)
 	if err != nil {
 		L.Push(lua.LNil)
 		return 1
 	}
-	list, _ := val.([]any)
-	i := idx - 1
-	if i < 0 || i >= len(list) {
-		L.Push(lua.LNil)
-		return 1
-	}
-	item := list[i]
 	if pm, ok := item.(proto.Message); ok {
 		L.Push(wrapProtoMessage(L, pm))
 	} else {

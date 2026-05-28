@@ -66,7 +66,7 @@ describe('renderSignature / renderDoc', () => {
 
   it('renderSignature 多参数用逗号分隔', () => {
     const fn = getLuaFunction('network', 'tcp_request')!;
-    expect(renderSignature(fn)).toBe('(service, route, msg, [s2c_proto])');
+    expect(renderSignature(fn)).toBe('(service, route, msg, [s2c_proto], [timeout_sec])');
   });
 
   it('renderDoc 包含函数签名、summary、参数和返回值', () => {
@@ -123,8 +123,16 @@ describe('coverage：所有 stressbot 已暴露的核心 Lua API 都被记录', 
     }
   });
 
-  it('proto / utils / json / log / adapter 模块都存在', () => {
-    for (const name of ['proto', 'utils', 'json', 'log', 'adapter']) {
+  it('proto 模块覆盖关键函数', () => {
+    const m = getLuaModule('proto')!;
+    const names = m.functions.map((f) => f.name);
+    for (const expected of ['create', 'set_field', 'get_field', 'get_path', 'serialize', 'parse', 'get_field_map', 'iter_list', 'list_size', 'list_get']) {
+      expect(names, `proto.${expected}`).toContain(expected);
+    }
+  });
+
+  it('utils / json / log / adapter 模块都存在', () => {
+    for (const name of ['utils', 'json', 'log', 'adapter']) {
       expect(getLuaModule(name), `module ${name}`).toBeDefined();
     }
   });
