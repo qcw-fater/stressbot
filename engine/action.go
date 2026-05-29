@@ -170,7 +170,7 @@ func NewActionExecutor(store *state.Store, sender NetSender, factory *protox.Fac
 func (ae *ActionExecutor) Execute(ctx context.Context, def *ActionDef) (sendBytes, recvBytes int, timing ActionTiming, err error) {
 	switch def.Pattern {
 	case PatternTCPSend:
-		sendBytes, err = ae.execSend("tcp", def)
+		sendBytes, timing, err = ae.execSend("tcp", def)
 	case PatternTCPRequest:
 		sendBytes, recvBytes, timing, err = ae.execRequest("tcp", def)
 	case PatternTCPConnect:
@@ -180,7 +180,7 @@ func (ae *ActionExecutor) Execute(ctx context.Context, def *ActionDef) (sendByte
 	case PatternTCPListen:
 		recvBytes, timing, err = ae.execListen(ctx, "tcp", def)
 	case PatternUDPSend:
-		sendBytes, err = ae.execSend("udp", def)
+		sendBytes, timing, err = ae.execSend("udp", def)
 	case PatternUDPRequest:
 		sendBytes, recvBytes, timing, err = ae.execRequest("udp", def)
 	case PatternUDPConnect:
@@ -868,22 +868,32 @@ func (ae *ActionExecutor) protocolListenResp(protocol, service, routeKey string)
 // ── 统一执行方法 ─────────────────────────────────────────────────────
 
 // execSend sends a message without waiting for response.
-func (ae *ActionExecutor) execSend(protocol string, def *ActionDef) (int, error) {
+func (ae *ActionExecutor) execSend(protocol string, def *ActionDef) (int, ActionTiming, error) {
 	body, err := ae.buildBody(def)
 	if err != nil {
-		return 0, err
+		return 0, ActionTiming{}, err
 	}
 
 	routeKey := ae.adp.ExpectedRouteKey(def.Route)
 	secretKey := ae.protocolSecretKey(protocol, def.Service)
+	var encodeStart time.Time
+	if ae.timingLevel >= TimingLevelCodec {
+		encodeStart = time.Now()
+	}
 	packet := ae.protocolEncode(protocol, def.Route, body, secretKey)
+	var timing ActionTiming
+	if ae.timingLevel >= TimingLevelCodec && !encodeStart.IsZero() {
+		timing.Client.EncodeCost = time.Since(encodeStart)
+	}
 	if packet == nil {
-		return 0, NewActionError(errcode.ErrEncodeFailed, "action="+def.Name+" route="+routeKey)
+		return 0, timing, NewActionError(errcode.ErrEncodeFailed, "action="+def.Name+" route="+routeKey)
 	}
 
+	sendStart := time.Now()
 	n, err := ae.protocolSend(protocol, def.Service, packet)
+	timing.Client.SendCost = time.Since(sendStart)
 	if err != nil {
-		return 0, err
+		return 0, timing, err
 	}
 
 	label := "TCPSend"
@@ -893,7 +903,7 @@ func (ae *ActionExecutor) execSend(protocol string, def *ActionDef) (int, error)
 	stresslog.Debug("[ACTION] "+label,
 		zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
 		zap.String("c2sProto", def.C2SProto), zap.Int("bodyLen", len(body)), zap.Int("pktLen", n))
-	return len(packet), nil
+	return len(packet), timing, nil
 }
 
 // execRequest sends a request and waits for response.

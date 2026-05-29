@@ -266,6 +266,23 @@ export interface ConflictDecision {
   keepLocal: boolean;
 }
 
+export function hasSyncDiff(result: BaselineSyncResult | null | undefined): boolean {
+  return !!result && (result.conflicts.length > 0 || result.removed.length > 0);
+}
+
+export function syncDiffIdentity(diff: SyncDiff): string {
+  return `${diff.type}:${diff.name}`;
+}
+
+export function subtractSyncResult(base: BaselineSyncResult | null, handled: BaselineSyncResult): BaselineSyncResult | null {
+  if (!base) return null;
+  const handledKeys = new Set([...handled.conflicts, ...handled.removed].map(syncDiffIdentity));
+  const conflicts = base.conflicts.filter((it) => !handledKeys.has(syncDiffIdentity(it)));
+  const removed = base.removed.filter((it) => !handledKeys.has(syncDiffIdentity(it)));
+  if (conflicts.length === 0 && removed.length === 0) return null;
+  return { ...base, conflicts, removed };
+}
+
 /**
  * 统一基线同步：对比 IDB 与服务端基线，自动新增，冲突/删除返回给调用方处理。
  *
@@ -347,12 +364,20 @@ export async function applyConflictResolution(decisions: ConflictDecision[]): Pr
     if (d.keepLocal) continue; // 保留本地，不需要操作
 
     if (d.type === 'adapter') {
-      // adapter removed + keepLocal=false → 删除
-      const baselineText = await fetchFileText(CODEC_BASELINE_URL);
-      if (baselineText !== null) {
-        await setAdapterScript(baselineText);
+      if (d.name === ERROR_LUA_KEY) {
+        const baselineText = await fetchFileText(`${BASELINE_PREFIX}/adapter/error.lua`);
+        if (baselineText !== null) {
+          await setErrorMapScript(baselineText);
+        } else {
+          await clearErrorMapScript();
+        }
       } else {
-        await clear(adapterStore);
+        const baselineText = await fetchFileText(CODEC_BASELINE_URL);
+        if (baselineText !== null) {
+          await setAdapterScript(baselineText);
+        } else {
+          await clearAdapterScript();
+        }
       }
     } else if (d.type === 'proto') {
       const baseline = await fetchFileText(`${BASELINE_PREFIX}/proto/${encodeURIComponent(d.name)}`);

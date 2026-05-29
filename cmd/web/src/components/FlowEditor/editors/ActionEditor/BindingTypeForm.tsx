@@ -301,21 +301,24 @@ function ValuesField({
   binding: FieldBind;
   set: (p: Partial<FieldBind>) => void;
 }) {
-  const text = JSON.stringify(binding.values ?? []);
+  const [draft, setDraft] = useState<string | null>(null);
+  const text = draft ?? (binding.values?.length ? JSON.stringify(binding.values) : '');
   return (
     <Input
       placeholder='values (JSON 数组，如 [1,2,3] 或 ["a","b"])'
-      value={text === '[]' ? '' : text}
+      value={text}
       onChange={(e) => {
         const raw = e.target.value;
+        setDraft(raw);
         if (!raw) return set({ values: undefined });
         try {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed)) set({ values: parsed });
         } catch {
-          // 输入未完成，暂不更新
+          // 输入未完成，暂不提交
         }
       }}
+      onBlur={() => setDraft(null)}
     />
   );
 }

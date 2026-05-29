@@ -52,6 +52,7 @@ type Robot struct {
 	adp            *adapter.RobotAdapter
 	mainService    string        // 主连接服务名，意外断开时停止机器人
 	requestTimeout time.Duration // robotConfig.timeoutSec 注入；用作 Lua tcp/udp_request 默认 timeout
+	timingLevel    int           // monitor.timingDetail 映射后的 engine 计时级别
 	done           chan struct{} // 执行 goroutine 结束信号，Close 时等待
 	onDone         func()        // 执行 goroutine 结束后回调（由 Manager 设置）
 }
@@ -112,6 +113,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		httpClient:     &http.Client{Timeout: cfg.HTTPTimeout},
 		mainService:    cfg.MainService,
 		requestTimeout: cfg.RequestTimeout,
+		timingLevel:    engineTimingLevel,
 		done:           make(chan struct{}),
 	}
 
@@ -184,8 +186,8 @@ func (r *Robot) Start() {
 				NetSender:             &netSenderAdapter{robot: r},
 				Ctx:                   r.ctx,
 				LuaMu:                 &r.luaMu,
-				DefaultRequestTimeout: r.requestTimeout, // robotConfig.timeoutSec → Lua tcp/udp_request 默认 timeout
-			})
+				DefaultRequestTimeout: r.requestTimeout,
+				TimingLevel:           r.timingLevel})
 			r.luaMu.Unlock()
 		}
 
@@ -490,8 +492,7 @@ func classifyResult(err error) monitor.ActionResult {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return monitor.ResultCanceled
 	}
-	var actionErr *engine.ActionError
-	if errors.As(err, &actionErr) {
+	if actionErr, ok := errors.AsType[*engine.ActionError](err); ok {
 		if isCanceledCode(actionErr.Code) {
 			return monitor.ResultCanceled
 		}
@@ -701,6 +702,7 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 				Ctx:                   h.robot.ctx,
 				LuaMu:                 &h.robot.luaMu,
 				DefaultRequestTimeout: h.robot.requestTimeout,
+				TimingLevel:           h.robot.timingLevel,
 			})
 
 			if err := h.robot.luaPool.RunCallbackScript(h.robot.l, cbDef.Script, msg.Data, cbDef.S2CProto); err != nil {
@@ -822,11 +824,10 @@ func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body
 			req.Header.Set("Content-Type", "application/json")
 		case "form":
 			values := make(url.Values)
-			if err := json.Unmarshal(body, &values); err == nil {
-				req, err = http.NewRequest(method, reqURL, strings.NewReader(values.Encode()))
-			} else {
-				req, err = http.NewRequest(method, reqURL, strings.NewReader(string(body)))
+			if json.Unmarshal(body, &values) == nil {
+				body = []byte(values.Encode())
 			}
+			req, err = http.NewRequest(method, reqURL, strings.NewReader(string(body)))
 			if err != nil {
 				return 0, nil, 0, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 			}

@@ -49,9 +49,10 @@ type Context struct {
 	// 历史背景：早期版本硬编码 10s，与声明式 tcpRequest 走的 60s（来自 c.requestTimeout）
 	// 不一致。在高并发握手场景下 10s 太短，会把"服务端慢响应但最终能回"误判为 timeout。
 	DefaultRequestTimeout time.Duration
+	TimingLevel           int
 
-	timingMu       sync.Mutex
-	currentTiming  engine.ActionTiming
+	timingMu      sync.Mutex
+	currentTiming engine.ActionTiming
 }
 
 // resetTiming 在每次 RunActionScript 开始前清零累加器。
@@ -71,6 +72,21 @@ func (c *Context) recordRequest(req engine.RequestTiming) {
 	}
 	c.timingMu.Lock()
 	c.currentTiming.AddRequest(req)
+	c.timingMu.Unlock()
+}
+
+func (c *Context) recordClientTiming(timing engine.ClientTiming) {
+	if c == nil {
+		return
+	}
+	c.timingMu.Lock()
+	c.currentTiming.Client.BuildCost += timing.BuildCost
+	c.currentTiming.Client.EncodeCost += timing.EncodeCost
+	c.currentTiming.Client.SendCost += timing.SendCost
+	c.currentTiming.Client.DecodeWait += timing.DecodeWait
+	c.currentTiming.Client.DecodeCost += timing.DecodeCost
+	c.currentTiming.Client.DispatchWait += timing.DispatchWait
+	c.currentTiming.Client.ParseStoreCost += timing.ParseStoreCost
 	c.timingMu.Unlock()
 }
 

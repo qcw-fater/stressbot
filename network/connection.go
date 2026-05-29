@@ -1,4 +1,4 @@
-﻿package network
+package network
 
 import (
 	"context"
@@ -48,11 +48,11 @@ type Connection struct {
 	// 异步解码（gnet 事件循环 → per-connection goroutine）
 	// 设计意图：把 Lua Decode 从 gnet event loop 摘除，避免少数慢 decode
 	// 阻塞同 loop 上其他连接的 I/O 处理。详见 decodeLoop 注释。
-	adp        adapter.Adapter // decode 用的协议适配器，StartDecodeLoop 时注入
-	isUDP      bool            // 该连接是否 UDP（决定调 DecodeUDP / DecodeTCP）
-	decodeCh   chan inboundFrame     // 待解码的 raw msg buffer（OnTraffic 投递→decode goroutine 消费）
-	decodeDone chan struct{}   // decode goroutine 退出信号
-	decodeRun  int32           // 原子标记：1 表示 decodeLoop 已启动（CAS 防重复启动）
+	adp        adapter.Adapter   // decode 用的协议适配器，StartDecodeLoop 时注入
+	isUDP      bool              // 该连接是否 UDP（决定调 DecodeUDP / DecodeTCP）
+	decodeCh   chan inboundFrame // 待解码的 raw msg buffer（OnTraffic 投递→decode goroutine 消费）
+	decodeDone chan struct{}     // decode goroutine 退出信号
+	decodeRun  int32             // 原子标记：1 表示 decodeLoop 已启动（CAS 防重复启动）
 
 	// closeReason 记录连接关闭原因，供 inflight RequestResponse 命中 ctx.Done() 时归因。
 	// 由 onClose() 写入（gnet 给的 err 字符串），RequestResponse 读取后拼到错误 detail。
@@ -184,6 +184,17 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 	timeoutTimer := time.After(timeout)
 	select {
 	case <-c.ctx.Done():
+		// ACK 可能先于 ctx cancel 入队但 select 随机选到了此分支，drain channel。
+		select {
+		case resp := <-ch:
+			actionUnblocked := time.Now()
+			timing.WireRTT = safeSub(resp.Timing.RecvFrameAt, sendDone)
+			timing.DecodeWait = safeSub(resp.Timing.DecodeStart, resp.Timing.RecvFrameAt)
+			timing.DecodeCost = safeSub(resp.Timing.DecodeEnd, resp.Timing.DecodeStart)
+			timing.DispatchToActionWait = safeSub(actionUnblocked, resp.Timing.DispatchStart)
+			return resp, timing, nil
+		default:
+		}
 		elapsed := safeSub(time.Now(), sendDone)
 		if atomic.LoadInt32(&c.intentionalClose) == 1 {
 			stresslog.Debug("[NETWORK] RequestResponse 因本地关闭被取消",
@@ -430,7 +441,7 @@ func (c *Connection) decodeAndDispatch(frame inboundFrame) {
 	secretKey := c.GetSecretKey()
 
 	var decodeStart, decodeEnd time.Time
-	if c.timingDetail >= monitor.TimingCodecDetail {
+	if monitor.TimingDetailAtLeast(c.timingDetail, monitor.TimingCodecDetail) {
 		decodeStart = time.Now()
 	}
 	var routeKey string
@@ -441,7 +452,7 @@ func (c *Connection) decodeAndDispatch(frame inboundFrame) {
 	} else {
 		routeKey, body, headerErr = c.adp.DecodeTCP(frame.Data, secretKey)
 	}
-	if c.timingDetail >= monitor.TimingCodecDetail {
+	if monitor.TimingDetailAtLeast(c.timingDetail, monitor.TimingCodecDetail) {
 		decodeEnd = time.Now()
 	}
 	if routeKey == "" {
@@ -620,7 +631,7 @@ func (c *Connection) OnReceive(routeKey string, body []byte, headerErr uint64, t
 	ch, exists := c.responseMap[routeKey]
 	if exists {
 		// 在锁内发送，防止 RequestResponse 的 defer 在 unlock 和 send 之间 close(ch) 导致 panic。
-		if c.timingDetail >= monitor.TimingFullDetail {
+		if monitor.TimingDetailAtLeast(c.timingDetail, monitor.TimingFullDetail) {
 			resp.Timing.DispatchStart = time.Now()
 		}
 		select {
@@ -635,7 +646,7 @@ func (c *Connection) OnReceive(routeKey string, body []byte, headerErr uint64, t
 	_, exists = c.listenResp[routeKey]
 	if exists {
 		c.mu.Unlock()
-		if c.timingDetail >= monitor.TimingFullDetail {
+		if monitor.TimingDetailAtLeast(c.timingDetail, monitor.TimingFullDetail) {
 			resp.Timing.DispatchStart = time.Now()
 		}
 		select {
@@ -655,4 +666,3 @@ func (c *Connection) OnReceive(routeKey string, body []byte, headerErr uint64, t
 			zap.Int("bodyLen", len(body)))
 	}
 }
-

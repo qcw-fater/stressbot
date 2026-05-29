@@ -1,6 +1,6 @@
 -- battle_end.lua: 发送战斗结束（BattleEndC2S CMD=4, ACT=13）
--- 使用 tcp_send 而非 tcp_request：服务端 handleResult 同步执行结算（含 COS 上传），
--- ACK 与 TCP FIN 间隔不足 1 秒，tcp_request 容易因 CONN_DROPPED 失败。
+-- 使用 tcp_request：服务端 handleResult 同步结算后发 ACK，客户端等待确认再关闭。
+-- 连接层已修复 ACK/FIN 竞态（ctx.Done 时先 drain response channel）。
 local network = require("network")
 local robot = require("robot")
 local proto = require("proto")
@@ -84,15 +84,15 @@ function execute(r)
         end
     end
 
-    -- 使用 tcp_send 只发不等响应，避免服务端结算阻塞导致 CONN_DROPPED
-    local code, sent = network.tcp_send("battle", {cmd=4, act=13}, msg)
+    -- 使用 tcp_request 等待服务端 ACK（handleResult 同步结算约 3.6s）
+    local code, _, sent, recv = network.tcp_request("battle", {cmd=4, act=13}, msg)
     if code ~= 0 then
-        log.error("BattleEnd 发送失败: code=" .. tostring(code))
+        log.error("BattleEnd 失败: code=" .. tostring(code))
         return code, sent, 0
     end
-    log.info("BattleEnd 已发送")
+    log.info("BattleEnd 已确认")
 
-    -- 旧工具：收到 BattleEnd 响应后关闭 Battle TCP 并清理战斗状态。
+    -- 收到 ACK 后关闭 Battle TCP，清理战斗状态
     network.close_tcp("battle")
     robot.delete("fighterListData")
     robot.delete("battleSecretKey")

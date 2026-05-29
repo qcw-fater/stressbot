@@ -46,12 +46,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useShallow } from 'zustand/react/shallow';
 import { showApiError, startTask, useRuntimeStore } from '@/services';
-import { listProto, listScript, syncResourcesFromBaseline, type ResourceFile } from '@/services/resourcesStore';
+import { hasSyncDiff, listProto, listScript, subtractSyncResult, type BaselineSyncResult, type ResourceFile } from '@/services/resourcesStore';
+import { checkTaskResourcesAgainstBaseline } from '@/services/taskResourceDiff';
 import { syncFlowScriptsToIdb, collectFlowScriptNames } from '@/services/scriptSync';
 import { useFlowStore } from '@/components/FlowEditor/store/flowStore';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
-import { hashContent, loadSkippedConflicts } from '@/components/FlowEditor/skippedConflicts';
+import { BaselineSyncModal } from '@/components/modules/BaselineSyncModal';
 
 export interface TaskStartModalProps {
   open: boolean;
@@ -136,6 +137,9 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
   const [missingScripts, setMissingScripts] = useState<string[]>([]);
   /** 资源同步进行中，给 UI 一个轻量 loading 态 */
   const [syncing, setSyncing] = useState(false);
+  const [taskDiffResult, setTaskDiffResult] = useState<BaselineSyncResult | null>(null);
+  const [diffChoiceOpen, setDiffChoiceOpen] = useState(false);
+  const [diffResolveOpen, setDiffResolveOpen] = useState(false);
 
   // 弹窗打开 → 基线资源全量对比 + flow 引用脚本 gap-fill + 收集 IDB 全集
   useEffect(() => {
@@ -148,8 +152,6 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
         const refNames = collectFlowScriptNames(flow);
         // flow 引用脚本 gap-fill
         const scriptSync = await syncFlowScriptsToIdb(flow);
-        // 全量基线对比
-        const baselineSync = await syncResourcesFromBaseline();
         // 收集 IDB 全集
         const [p, s] = await Promise.all([listProto(), listScript()]);
         if (cancelled) return;
@@ -157,22 +159,6 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
         setScripts(s);
         setRefScriptCount(refNames.length);
         setMissingScripts(scriptSync.missing);
-        if (baselineSync.conflicts.length > 0 || baselineSync.removed.length > 0) {
-          const skipped = loadSkippedConflicts();
-          const newConflicts = baselineSync.conflicts.filter(
-            (c) => !skipped.has(`${c.type}:${c.name}:${hashContent(c.baselineContent)}`),
-          );
-          const newRemoved = baselineSync.removed.filter(
-            (r) => !skipped.has(`${r.type}:${r.name}:__removed__`),
-          );
-          if (newConflicts.length > 0 || newRemoved.length > 0) {
-            useEditorStore.getState().setPendingSyncResult({
-              ...baselineSync,
-              conflicts: newConflicts,
-              removed: newRemoved,
-            });
-          }
-        }
       } finally {
         if (!cancelled) setSyncing(false);
       }
@@ -257,21 +243,67 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
     }
   }
 
+  const executeStart = async (handledDiff?: BaselineSyncResult | null) => {
+    const id = await startTask({
+      name: taskName,
+      totalBots: rampUpEnabled ? rampUpSum : totalBots,
+      robotConfig: {
+        ...robotConfig,
+        debugMode,
+        rampUp: rampUpEnabled ? { stages: rampUpStages } : undefined,
+      },
+      deadline: deadline ?? undefined,
+    });
+    if (handledDiff) {
+      const { pendingSyncResult, setPendingSyncResult } = useEditorStore.getState();
+      setPendingSyncResult(subtractSyncResult(pendingSyncResult, handledDiff));
+    }
+    onStarted?.(id);
+    onClose();
+  };
+
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
-      const id = await startTask({
-        name: taskName,
-        totalBots: rampUpEnabled ? rampUpSum : totalBots,
-        robotConfig: {
-          ...robotConfig,
-          debugMode,
-          rampUp: rampUpEnabled ? { stages: rampUpStages } : undefined,
-        },
-        deadline: deadline ?? undefined,
-      });
-      onStarted?.(id);
-      onClose();
+      const flow = useFlowStore.getState().toTaskFlow();
+      const scriptSync = await syncFlowScriptsToIdb(flow);
+      setMissingScripts(scriptSync.missing);
+      if (scriptSync.missing.length > 0) {
+        throw new Error(`缺少脚本：${scriptSync.missing.join(', ')}。请在资源管理上传，或在动作编辑器中直接编写。`);
+      }
+      const diff = await checkTaskResourcesAgainstBaseline(flow);
+      if (hasSyncDiff(diff)) {
+        setTaskDiffResult(diff);
+        setDiffChoiceOpen(true);
+        return;
+      }
+      await executeStart();
+    } catch (e) {
+      showApiError(e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleOverwriteRun = async () => {
+    if (!taskDiffResult) return;
+    setDiffChoiceOpen(false);
+    setSubmitting(true);
+    try {
+      await executeStart(taskDiffResult);
+    } catch (e) {
+      showApiError(e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDiffResolved = async () => {
+    const handled = taskDiffResult;
+    setDiffResolveOpen(false);
+    setSubmitting(true);
+    try {
+      await executeStart(handled);
     } catch (e) {
       showApiError(e);
     } finally {
@@ -280,7 +312,8 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
   };
 
   return (
-    <Modal
+    <>
+      <Modal
       title={
         <Space size={8}>
           <span>启动压测任务</span>
@@ -807,6 +840,53 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
           description="请确认至少有一台节点程序已经成功注册。"
         />
       )}
-    </Modal>
+      </Modal>
+
+      <Modal
+        title="本次任务资源与服务器不一致"
+        open={diffChoiceOpen}
+        onCancel={() => setDiffChoiceOpen(false)}
+        footer={
+          <Space>
+            <Button onClick={() => setDiffChoiceOpen(false)}>取消</Button>
+            <Button
+              onClick={() => {
+                setDiffChoiceOpen(false);
+                setDiffResolveOpen(true);
+              }}
+            >
+              处理差异
+            </Button>
+            <Button type="primary" loading={submitting} onClick={handleOverwriteRun}>
+              覆盖运行
+            </Button>
+          </Space>
+        }
+        width={520}
+        destroyOnHidden
+        styles={{ mask: { zIndex: popupZ + 10 }, wrapper: { zIndex: popupZ + 11 } }}
+      >
+        <Typography.Paragraph type="secondary">
+          本次任务会使用的资源与服务器基线不同。你可以取消启动、逐项处理差异，或使用本地存储中的资源覆盖服务器并运行。
+        </Typography.Paragraph>
+        {taskDiffResult && (
+          <Space size={8} wrap>
+            {taskDiffResult.conflicts.length > 0 && <Tag color="orange">内容不同 {taskDiffResult.conflicts.length}</Tag>}
+            {taskDiffResult.removed.length > 0 && <Tag color="red">服务器未找到 {taskDiffResult.removed.length}</Tag>}
+          </Space>
+        )}
+      </Modal>
+
+      {taskDiffResult && (
+        <BaselineSyncModal
+          open={diffResolveOpen}
+          result={taskDiffResult}
+          title="处理本次任务资源差异"
+          description="请确认本次任务使用本地版本还是服务器版本。应用后将继续启动任务。"
+          onClose={() => setDiffResolveOpen(false)}
+          onResolved={handleDiffResolved}
+        />
+      )}
+    </>
   );
 }

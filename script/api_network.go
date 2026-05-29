@@ -295,7 +295,14 @@ func networkTCPRequest(L *lua.LState) int {
 		return 0
 	}
 
+	var encodeStart time.Time
+	if ctx.TimingLevel >= engine.TimingLevelCodec {
+		encodeStart = time.Now()
+	}
 	packet := buildPacket(ctx, service, route, msgData)
+	if ctx.TimingLevel >= engine.TimingLevelCodec && !encodeStart.IsZero() {
+		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart)})
+	}
 	if packet == nil {
 		return pushRequestResult(L, int(errcode.ErrEncodeFailed), lua.LNil, 0, 0)
 	}
@@ -322,7 +329,14 @@ func networkTCPRequest(L *lua.LState) int {
 	}
 
 	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
+		var parseStart time.Time
+		if ctx.TimingLevel >= engine.TimingLevelFull {
+			parseStart = time.Now()
+		}
 		respMsg, err := ctx.Factory.Parse(s2cProto, respBody)
+		if ctx.TimingLevel >= engine.TimingLevelFull && !parseStart.IsZero() {
+			ctx.recordClientTiming(engine.ClientTiming{ParseStoreCost: time.Since(parseStart)})
+		}
 		if err != nil {
 			return pushRequestResult(L, int(errcode.ErrParseFailed), lua.LString(string(respBody)), pktLen, len(respBody))
 		}
@@ -359,7 +373,14 @@ func networkUDPRequest(L *lua.LState) int {
 	goRoute := luaValueToRoute(route)
 	routeKey := ctx.Adapter.ExpectedRouteKeyLocked(goRoute)
 	udpKey := ctx.NetSender.GetUDPSecretKey(service)
+	var encodeStart time.Time
+	if ctx.TimingLevel >= engine.TimingLevelCodec {
+		encodeStart = time.Now()
+	}
 	packet := ctx.Adapter.EncodeUDPLocked(goRoute, body, udpKey)
+	if ctx.TimingLevel >= engine.TimingLevelCodec && !encodeStart.IsZero() {
+		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart)})
+	}
 	if packet == nil {
 		return pushRequestResult(L, int(errcode.ErrEncodeFailed), lua.LNil, 0, 0)
 	}
@@ -392,7 +413,14 @@ func networkUDPRequest(L *lua.LState) int {
 	}
 
 	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
+		var parseStart time.Time
+		if ctx.TimingLevel >= engine.TimingLevelFull {
+			parseStart = time.Now()
+		}
 		respMsg, err := ctx.Factory.Parse(s2cProto, respBody)
+		if ctx.TimingLevel >= engine.TimingLevelFull && !parseStart.IsZero() {
+			ctx.recordClientTiming(engine.ClientTiming{ParseStoreCost: time.Since(parseStart)})
+		}
 		if err != nil {
 			return pushRequestResult(L, int(errcode.ErrParseFailed), lua.LString(string(respBody)), pktLen, len(respBody))
 		}
@@ -517,14 +545,28 @@ func networkTCPSend(L *lua.LState) int {
 		return 0
 	}
 
+	var encodeStart time.Time
+	if ctx.TimingLevel >= engine.TimingLevelCodec {
+		encodeStart = time.Now()
+	}
 	packet := buildPacket(ctx, service, route, msgData)
+	if ctx.TimingLevel >= engine.TimingLevelCodec && !encodeStart.IsZero() {
+		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart)})
+	}
 	if packet == nil {
 		L.Push(lua.LNumber(errcode.ErrEncodeFailed))
 		L.Push(lua.LNumber(0))
 		return 2
 	}
 
+	var sendStart time.Time
+	if ctx.TimingLevel >= engine.TimingLevelRTTOnly {
+		sendStart = time.Now()
+	}
 	n, err := ctx.NetSender.TCPSend(service, packet)
+	if ctx.TimingLevel >= engine.TimingLevelRTTOnly && !sendStart.IsZero() {
+		ctx.recordClientTiming(engine.ClientTiming{SendCost: time.Since(sendStart)})
+	}
 	if err == nil {
 		L.Push(lua.LNumber(0))
 		L.Push(lua.LNumber(n))
@@ -556,13 +598,27 @@ func networkUDPSend(L *lua.LState) int {
 
 	goRoute := luaValueToRoute(route)
 	udpKey := ctx.NetSender.GetUDPSecretKey(service)
+	var encodeStart time.Time
+	if ctx.TimingLevel >= engine.TimingLevelCodec {
+		encodeStart = time.Now()
+	}
 	packet := ctx.Adapter.EncodeUDPLocked(goRoute, body, udpKey)
+	if ctx.TimingLevel >= engine.TimingLevelCodec && !encodeStart.IsZero() {
+		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart)})
+	}
 	if packet == nil {
 		L.Push(lua.LNumber(errcode.ErrEncodeFailed))
 		L.Push(lua.LNumber(0))
 		return 2
 	}
+	var sendStart time.Time
+	if ctx.TimingLevel >= engine.TimingLevelRTTOnly {
+		sendStart = time.Now()
+	}
 	n, err := ctx.NetSender.UDPSend(service, packet)
+	if ctx.TimingLevel >= engine.TimingLevelRTTOnly && !sendStart.IsZero() {
+		ctx.recordClientTiming(engine.ClientTiming{SendCost: time.Since(sendStart)})
+	}
 	if err == nil {
 		L.Push(lua.LNumber(0))
 		L.Push(lua.LNumber(n))

@@ -47,6 +47,7 @@ import {
   setAdapterScript,
   clearAdapterScript,
   validateAdapter,
+  subtractSyncResult,
   getErrorMapScript,
   setErrorMapScript,
   clearErrorMapScript,
@@ -78,7 +79,7 @@ export function ResourcesDrawer({ open, onClose }: ResourcesDrawerProps) {
             type="warning"
             showIcon
             style={{ marginBottom: 12 }}
-            message="远端资源有变更"
+            message="服务器资源有变更"
             description={
               <Space>
                 <span>{pendingSyncResult.conflicts.length + pendingSyncResult.removed.length} 处差异待处理</span>
@@ -107,7 +108,7 @@ export function ResourcesDrawer({ open, onClose }: ResourcesDrawerProps) {
             setSyncModalOpen(false);
           }}
           onResolved={() => {
-            setPendingSyncResult(null);
+            setPendingSyncResult(subtractSyncResult(pendingSyncResult, pendingSyncResult));
           }}
         />
       )}

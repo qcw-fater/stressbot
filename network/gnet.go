@@ -191,6 +191,8 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 			return gnet.None
 		}
 
+		recvFrameAt := time.Now()
+
 		msgBuf := getMsgBuf(totalLen)
 		if _, err = gconn.Read(msgBuf); err != nil {
 			putMsgBuf(msgBuf)
@@ -212,7 +214,6 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 			continue
 		}
 
-		recvFrameAt := time.Now()
 		switch conn.EnqueueRaw(msgBuf, recvFrameAt) {
 		case EnqueueOK:
 			// 入队成功，msgBuf 由 decodeLoop 在处理后归还

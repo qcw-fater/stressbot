@@ -153,6 +153,22 @@ const (
 	TimingFullDetail  TimingDetailLevel = "full"
 )
 
+func timingDetailRank(level TimingDetailLevel) int {
+	switch level {
+	case TimingFullDetail:
+		return 2
+	case TimingCodecDetail:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// TimingDetailAtLeast 判断当前计时级别是否覆盖指定级别。
+func TimingDetailAtLeast(current, required TimingDetailLevel) bool {
+	return timingDetailRank(current) >= timingDetailRank(required)
+}
+
 // CollectorConfig 监控配置。
 type CollectorConfig struct {
 	Enabled      bool   `json:"enabled"`      // 是否启用监控
@@ -165,9 +181,9 @@ type CollectorConfig struct {
 // MetricsCollector 全局指标收集器（单例）。
 // enabled=false 时所有方法均为 no-op，压测核心路径零开销。
 type MetricsCollector struct {
-	enabled   bool            // 是否启用
-	cfg       CollectorConfig // 运行期配置副本（除 ApdexT 外）
-	cfgMu     sync.RWMutex    // 保护 cfg 非热路径字段
+	enabled      bool              // 是否启用
+	cfg          CollectorConfig   // 运行期配置副本（除 ApdexT 外）
+	cfgMu        sync.RWMutex      // 保护 cfg 非热路径字段
 	apdexT       atomic.Int32      // Apdex T 阈值（毫秒）热路径独立原子读写，与 cfgMu 解耦
 	timingDetail TimingDetailLevel // 计时细分级别
 	startTime    time.Time         // 收集器启动时间
@@ -191,7 +207,7 @@ type MetricsCollector struct {
 }
 
 var (
-	global    *MetricsCollector
+	global     *MetricsCollector
 	globalOnce sync.Once
 )
 
@@ -327,25 +343,25 @@ func (c *MetricsCollector) RecordAction(
 	addDuration(&am.decodeCostSum, timing.Client.DecodeCost)
 	addDuration(&am.dispatchWaitSum, timing.Client.DispatchWait)
 	addDuration(&am.parseStoreSum, timing.Client.ParseStoreCost)
+	for _, req := range timing.Requests {
+		if req.WireRTT <= 0 {
+			continue
+		}
+		am.rtt.Record(req.WireRTT)
+		am.rttSampleCount.Add(1)
+		T := int64(c.apdexT.Load())
+		ms := req.WireRTT.Milliseconds()
+		switch {
+		case ms < T:
+			am.apdexSatisfied.Add(1)
+		case ms < 4*T:
+			am.apdexTolerating.Add(1)
+		}
+	}
 
 	switch result {
 	case ResultSuccess:
 		am.successCount.Add(1)
-		for _, req := range timing.Requests {
-			if req.WireRTT <= 0 {
-				continue
-			}
-			am.rtt.Record(req.WireRTT)
-			am.rttSampleCount.Add(1)
-			T := int64(c.apdexT.Load())
-			ms := req.WireRTT.Milliseconds()
-			switch {
-			case ms < T:
-				am.apdexSatisfied.Add(1)
-			case ms < 4*T:
-				am.apdexTolerating.Add(1)
-			}
-		}
 		if sendBytes > 0 {
 			am.sendBytes.Add(int64(sendBytes))
 		}

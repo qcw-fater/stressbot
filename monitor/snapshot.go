@@ -41,55 +41,55 @@ type BandwidthSnapshot struct {
 //     此时 RTT.Count=0，前端 ActionsTab 应显示 "—"。
 //   - ClientAvgMs 反映客户端构建/解析平均耗时，所有结果分支累计，独立于网络指标。
 type ActionSnapshot struct {
-	Name          string            `json:"name"`          // 动作名称
-	SampleCount   int64             `json:"sampleCount"`   // 总样本数（成功 + 失败 + 超时）
-	SuccessCount  int64             `json:"successCount"`  // 成功次数
-	FailureCount  int64             `json:"failureCount"`  // 失败次数（非超时）
-	TimeoutCount  int64             `json:"timeoutCount"`  // 超时次数
-	CanceledCount int64             `json:"canceledCount"` // 取消次数
-	Executing     int64             `json:"executing"`     // 当前执行中的并发数
-	SuccessRate   float64           `json:"successRate"`   // 成功率（0~1）
-	AvgSendBytes  float64           `json:"avgSendBytes"`  // 平均每次成功的发送字节数
-	AvgRecvBytes  float64           `json:"avgRecvBytes"`  // 平均每次成功的接收字节数
-	Apdex         float64           `json:"apdex"`         // Apdex 评分（0~1）
-	RTT            HistogramSnapshot `json:"rtt"`            // RTT 直方图快照（WireRTT）
-	TimeoutAvgMs   float64           `json:"timeoutAvgMs"`   // 平均超时延迟（毫秒）
-	ClientAvgMs    float64           `json:"clientAvgMs"`    // 客户端平均耗时（毫秒）
-	BuildAvgMs     float64           `json:"buildAvgMs"`     // 构建平均耗时（毫秒）
-	EncodeAvgMs    float64           `json:"encodeAvgMs"`    // 编码平均耗时（毫秒）
-	SendAvgMs      float64           `json:"sendAvgMs"`      // 发送平均耗时（毫秒）
-	DecodeWaitAvgMs float64          `json:"decodeWaitAvgMs"` // decode 排队平均耗时（毫秒）
-	DecodeAvgMs    float64           `json:"decodeAvgMs"`    // 解码平均耗时（毫秒）
-	DispatchToActionWaitAvgMs float64 `json:"dispatchToActionWaitAvgMs"` // 分发到 action 平均等待（毫秒）
-	ParseStoreAvgMs float64          `json:"parseStoreAvgMs"` // 解析和状态写入平均耗时（毫秒）
-	RTTSampleCount int64             `json:"rttSampleCount"` // 有 RTT 的成功 request 数
-	AvgQPS         float64           `json:"avgQps"`         // 全周期平均 QPS
-	PeriodQPS     float64           `json:"periodQps"`     // 上次快照到当前的区间 QPS
-	Errors        []ErrorEntry      `json:"errors,omitempty"` // 错误分布（仅失败/超时时有值）
+	Name                      string            `json:"name"`                      // 动作名称
+	SampleCount               int64             `json:"sampleCount"`               // 总样本数（成功 + 失败 + 超时）
+	SuccessCount              int64             `json:"successCount"`              // 成功次数
+	FailureCount              int64             `json:"failureCount"`              // 失败次数（非超时）
+	TimeoutCount              int64             `json:"timeoutCount"`              // 超时次数
+	CanceledCount             int64             `json:"canceledCount"`             // 取消次数
+	Executing                 int64             `json:"executing"`                 // 当前执行中的并发数
+	SuccessRate               float64           `json:"successRate"`               // 成功率（0~1）
+	AvgSendBytes              float64           `json:"avgSendBytes"`              // 平均每次成功的发送字节数
+	AvgRecvBytes              float64           `json:"avgRecvBytes"`              // 平均每次成功的接收字节数
+	Apdex                     float64           `json:"apdex"`                     // Apdex 评分（0~1）
+	RTT                       HistogramSnapshot `json:"rtt"`                       // RTT 直方图快照（WireRTT）
+	TimeoutAvgMs              float64           `json:"timeoutAvgMs"`              // 平均超时延迟（毫秒）
+	ClientAvgMs               float64           `json:"clientAvgMs"`               // 客户端平均耗时（毫秒）
+	BuildAvgMs                float64           `json:"buildAvgMs"`                // 构建平均耗时（毫秒）
+	EncodeAvgMs               float64           `json:"encodeAvgMs"`               // 编码平均耗时（毫秒）
+	SendAvgMs                 float64           `json:"sendAvgMs"`                 // 发送平均耗时（毫秒）
+	DecodeWaitAvgMs           float64           `json:"decodeWaitAvgMs"`           // decode 排队平均耗时（毫秒）
+	DecodeAvgMs               float64           `json:"decodeAvgMs"`               // 解码平均耗时（毫秒）
+	DispatchToActionWaitAvgMs float64           `json:"dispatchToActionWaitAvgMs"` // 分发到 action 平均等待（毫秒）
+	ParseStoreAvgMs           float64           `json:"parseStoreAvgMs"`           // 解析和状态写入平均耗时（毫秒）
+	RTTSampleCount            int64             `json:"rttSampleCount"`            // 有 RTT 的成功 request 数
+	AvgQPS                    float64           `json:"avgQps"`                    // 全周期平均 QPS
+	PeriodQPS                 float64           `json:"periodQps"`                 // 上次快照到当前的区间 QPS
+	Errors                    []ErrorEntry      `json:"errors,omitempty"`          // 错误分布（仅失败/超时时有值）
 
 	// 跨节点聚合所需的原始数据（omitempty 向后兼容单机模式）
 	RTTSumNs        int64   `json:"rttSumNs,omitempty"`        // 延迟总和（纳秒），用于分布式合并
 	RTTBucketCounts []int64 `json:"rttBucketCounts,omitempty"` // 延迟直方图桶计数，用于分布式合并
-	ApdexSatisfied      int64   `json:"apdexSatisfied,omitempty"`      // Apdex 满意样本数，用于分布式合并
-	ApdexTolerating     int64   `json:"apdexTolerating,omitempty"`     // Apdex 容忍样本数，用于分布式合并
-	TotalSendBytes      int64   `json:"totalSendBytes,omitempty"`      // 累计发送字节数，用于分布式合并
-	TotalRecvBytes      int64   `json:"totalRecvBytes,omitempty"`      // 累计接收字节数，用于分布式合并
-	ClientCostSumNs     int64   `json:"clientCostSumNs,omitempty"`     // 客户端开销累计（纳秒），用于分布式合并
-	ClientCostCount     int64   `json:"clientCostCount,omitempty"`     // 客户端开销样本数，用于分布式合并
+	ApdexSatisfied  int64   `json:"apdexSatisfied,omitempty"`  // Apdex 满意样本数，用于分布式合并
+	ApdexTolerating int64   `json:"apdexTolerating,omitempty"` // Apdex 容忍样本数，用于分布式合并
+	TotalSendBytes  int64   `json:"totalSendBytes,omitempty"`  // 累计发送字节数，用于分布式合并
+	TotalRecvBytes  int64   `json:"totalRecvBytes,omitempty"`  // 累计接收字节数，用于分布式合并
+	ClientCostSumNs int64   `json:"clientCostSumNs,omitempty"` // 客户端开销累计（纳秒），用于分布式合并
+	ClientCostCount int64   `json:"clientCostCount,omitempty"` // 客户端开销样本数，用于分布式合并
 }
 
 // RobotSnapshot 机器人状态快照。
 type RobotSnapshot struct {
-	Started  int64 `json:"started"`  // 已启动的机器人总数
-	Running  int64 `json:"running"`  // 当前运行中的机器人数量
-	Stopped  int64 `json:"stopped"`  // 正常停止的机器人数量
-	Errored  int64 `json:"errored"`  // 异常退出的机器人数量
+	Started int64 `json:"started"` // 已启动的机器人总数
+	Running int64 `json:"running"` // 当前运行中的机器人数量
+	Stopped int64 `json:"stopped"` // 正常停止的机器人数量
+	Errored int64 `json:"errored"` // 异常退出的机器人数量
 }
 
 // CollectorSnapshot 全局指标快照，包含系统、机器人、连接、带宽和所有 action 的聚合数据。
 type CollectorSnapshot struct {
-	Timestamp    time.Time          `json:"timestamp"`    // 快照时间
-	Uptime       time.Duration      `json:"uptime"`       // 运行时长
+	Timestamp    time.Time          `json:"timestamp"`     // 快照时间
+	Uptime       time.Duration      `json:"uptime"`        // 运行时长
 	UptimeSec    float64            `json:"uptimeSeconds"` // 运行时长（秒）
 	TotalActions int64              `json:"totalActions"`  // 累计动作总数
 	ApdexT       int                `json:"apdexT"`        // 当前 Apdex T 阈值（毫秒）
@@ -182,19 +182,19 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 		clientCostCount := am.clientCostCount.Load()
 
 		avgMs := func(sum int64, count int64) float64 {
-				if count <= 0 {
-					return 0
-				}
-				return float64(sum) / float64(count) / 1e6
+			if count <= 0 {
+				return 0
 			}
-			clientAvgMs := avgMs(clientCostSum, clientCostCount)
-			buildAvgMs := avgMs(am.buildCostSum.Load(), clientCostCount)
-			encodeAvgMs := avgMs(am.encodeCostSum.Load(), clientCostCount)
-			sendAvgMs := avgMs(am.sendCostSum.Load(), clientCostCount)
-			decodeWaitAvgMs := avgMs(am.decodeWaitSum.Load(), clientCostCount)
-			decodeAvgMs := avgMs(am.decodeCostSum.Load(), clientCostCount)
-			dispatchWaitAvgMs := avgMs(am.dispatchWaitSum.Load(), clientCostCount)
-			parseStoreAvgMs := avgMs(am.parseStoreSum.Load(), clientCostCount)
+			return float64(sum) / float64(count) / 1e6
+		}
+		clientAvgMs := avgMs(clientCostSum, clientCostCount)
+		buildAvgMs := avgMs(am.buildCostSum.Load(), clientCostCount)
+		encodeAvgMs := avgMs(am.encodeCostSum.Load(), clientCostCount)
+		sendAvgMs := avgMs(am.sendCostSum.Load(), clientCostCount)
+		decodeWaitAvgMs := avgMs(am.decodeWaitSum.Load(), clientCostCount)
+		decodeAvgMs := avgMs(am.decodeCostSum.Load(), clientCostCount)
+		dispatchWaitAvgMs := avgMs(am.dispatchWaitSum.Load(), clientCostCount)
+		parseStoreAvgMs := avgMs(am.parseStoreSum.Load(), clientCostCount)
 
 		// Apdex 分母用 rttSamples：纯客户端动作（rttSamples=0）不参与，
 		// 避免大量"成功但无网络往返"的样本把 Apdex 拉到不真实的高位。
@@ -237,39 +237,39 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 		}
 
 		snap.Actions = append(snap.Actions, ActionSnapshot{
-			Name:                name,
-			SampleCount:         total,
-			SuccessCount:        succ,
-			FailureCount:        fail,
-			TimeoutCount:        tout,
-			CanceledCount:       canceled,
-			TimeoutAvgMs:        timeoutAvgMs,
-			ClientAvgMs:         clientAvgMs,
-			BuildAvgMs:          buildAvgMs,
-			EncodeAvgMs:         encodeAvgMs,
-			SendAvgMs:           sendAvgMs,
-			DecodeWaitAvgMs:     decodeWaitAvgMs,
-			DecodeAvgMs:         decodeAvgMs,
+			Name:                      name,
+			SampleCount:               total,
+			SuccessCount:              succ,
+			FailureCount:              fail,
+			TimeoutCount:              tout,
+			CanceledCount:             canceled,
+			TimeoutAvgMs:              timeoutAvgMs,
+			ClientAvgMs:               clientAvgMs,
+			BuildAvgMs:                buildAvgMs,
+			EncodeAvgMs:               encodeAvgMs,
+			SendAvgMs:                 sendAvgMs,
+			DecodeWaitAvgMs:           decodeWaitAvgMs,
+			DecodeAvgMs:               decodeAvgMs,
 			DispatchToActionWaitAvgMs: dispatchWaitAvgMs,
-			ParseStoreAvgMs:     parseStoreAvgMs,
-			RTTSampleCount:      rttSamples,
-			Executing:           exec,
-			SuccessRate:         successRate,
-			AvgSendBytes:        avgSend,
-			AvgRecvBytes:        avgRecv,
-			Apdex:               apdex,
-			RTT:             rttSnap,
-			AvgQPS:              avgQPS,
-			PeriodQPS:           periodQPS,
-			Errors:              errs,
-			RTTSumNs:        rttSnap.SumNs,
-			RTTBucketCounts: rttSnap.BucketCounts,
-			ApdexSatisfied:      satisfied,
-			ApdexTolerating:     tolerating,
-			TotalSendBytes:      totalSendBytes,
-			TotalRecvBytes:      totalRecvBytes,
-			ClientCostSumNs:     clientCostSum,
-			ClientCostCount:     clientCostCount,
+			ParseStoreAvgMs:           parseStoreAvgMs,
+			RTTSampleCount:            rttSamples,
+			Executing:                 exec,
+			SuccessRate:               successRate,
+			AvgSendBytes:              avgSend,
+			AvgRecvBytes:              avgRecv,
+			Apdex:                     apdex,
+			RTT:                       rttSnap,
+			AvgQPS:                    avgQPS,
+			PeriodQPS:                 periodQPS,
+			Errors:                    errs,
+			RTTSumNs:                  rttSnap.SumNs,
+			RTTBucketCounts:           rttSnap.BucketCounts,
+			ApdexSatisfied:            satisfied,
+			ApdexTolerating:           tolerating,
+			TotalSendBytes:            totalSendBytes,
+			TotalRecvBytes:            totalRecvBytes,
+			ClientCostSumNs:           clientCostSum,
+			ClientCostCount:           clientCostCount,
 		})
 	}
 	// 契约保证：Actions 字段在 JSON 中始终是数组，不是 null。
@@ -420,7 +420,10 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 		}
 
 		// 合并错误 — 按 (Kind, Code) 聚合，Messages 取并集去重
-		type mergedErrorKey struct{ Kind errcode.Kind; Code uint64 }
+		type mergedErrorKey struct {
+			Kind errcode.Kind
+			Code uint64
+		}
 		errMap := make(map[mergedErrorKey]*ErrorEntry)
 		for _, a := range agg.snaps {
 			for _, e := range a.Errors {
