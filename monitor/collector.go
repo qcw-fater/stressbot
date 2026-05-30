@@ -128,7 +128,8 @@ type actionMetrics struct {
 	//   - clientCostSum/Count：累计客户端构建/解析开销（纳秒），用于 ClientAvgMs
 	//   - rttSampleCount：RTT 直方图中的独立样本数（逐个 request 记录，非 action 粒度）
 	//   - Lua 脚本单次 action 内可能多次 request，每次独立记录 WireRTT 到直方图
-	// 客户端开销在所有结果分支（含失败/超时）都累加；rttSampleCount 仅成功且有网络调用时累加。
+	// 客户端开销在所有结果分支（含失败/超时）都累加；rttSampleCount 统计所有有完整响应帧且 WireRTT > 0 的 request，
+	// 包括服务端 headerErr/失败响应，不包括超时、发送失败、取消且未收到响应帧的分支。
 	clientCostSum   atomic.Int64
 	clientCostCount atomic.Int64
 	buildCostSum    atomic.Int64

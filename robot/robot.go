@@ -187,7 +187,8 @@ func (r *Robot) Start() {
 				Ctx:                   r.ctx,
 				LuaMu:                 &r.luaMu,
 				DefaultRequestTimeout: r.requestTimeout,
-				TimingLevel:           r.timingLevel})
+				TimingLevel:           r.timingLevel,
+			})
 			r.luaMu.Unlock()
 		}
 

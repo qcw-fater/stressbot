@@ -7,8 +7,8 @@ import {
   getScript,
   hasSyncDiff,
   listProto,
+  reconcileResourceWithServer,
   type BaselineSyncResult,
-  type ResourceFile,
   type ResourceType,
 } from './resourcesStore';
 
@@ -37,19 +37,19 @@ export async function checkTaskResourcesAgainstBaseline(flow: FlowJson): Promise
       const local = await getScript(name);
       if (!local) return;
       const baseline = await fetchBaselineScript(name);
-      compareText(result, 'script', name, local, baseline);
+      await reconcileResourceWithServer(result, 'script', name, local, baseline);
     }),
     ...scope.protos.map(async (name) => {
       const local = protoMap.get(name);
       if (!local) return;
       const baseline = await fetchBaselineProtoContent(name);
-      compareText(result, 'proto', name, local, baseline);
+      await reconcileResourceWithServer(result, 'proto', name, local, baseline);
     }),
     ...scope.adapters.map(async (name) => {
       const local = name === 'error.lua' ? await getErrorMapScript() : await getAdapterScript();
       if (!local) return;
       const baseline = name === 'error.lua' ? await fetchBaselineErrorMap() : await fetchBaselineAdapter();
-      compareText(result, 'adapter', name, local, baseline);
+      await reconcileResourceWithServer(result, 'adapter', name, local, baseline);
     }),
   ]);
 
@@ -61,24 +61,6 @@ export async function checkTaskResourcesAgainstBaseline(flow: FlowJson): Promise
 
 export function hasTaskResourceDiff(result: BaselineSyncResult): boolean {
   return hasSyncDiff(result);
-}
-
-function compareText(
-  result: BaselineSyncResult,
-  type: ResourceType,
-  name: string,
-  local: ResourceFile,
-  baseline: string | null,
-): void {
-  if (baseline === null) {
-    result.removed.push({ type, name, localContent: local.content, baselineContent: '' });
-    return;
-  }
-  if (local.content === baseline) {
-    result.unchanged.push({ type, name });
-    return;
-  }
-  result.conflicts.push({ type, name, localContent: local.content, baselineContent: baseline });
 }
 
 function sortEntry(a: { type: ResourceType; name: string }, b: { type: ResourceType; name: string }): number {

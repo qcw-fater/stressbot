@@ -10,7 +10,7 @@
 import { Alert, Button, Input, Popover, Progress, Space, Switch, Table, Tag, Tooltip } from 'antd';
 import { CaretDownOutlined, CaretUpOutlined, LineChartOutlined, WarningOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import ReactECharts from 'echarts-for-react';
+import { EChartsReact } from './shared/EChartsReact';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useRuntimeStore } from '@/services';
@@ -499,7 +499,7 @@ function TopSection() {
         <div className="monitor-dock__chart-card monitor-dock__chart-card--cpu">
           <div className="monitor-dock__chart-title">CPU%</div>
           {cpuOption ? (
-            <ReactECharts option={cpuOption} style={{ height: 'calc(100% - 16px)' }} notMerge lazyUpdate />
+            <EChartsReact option={cpuOption} style={{ height: 'calc(100% - 16px)' }} notMerge lazyUpdate />
           ) : (
             <div style={{ color: 'var(--text-tertiary)', fontSize: 10, textAlign: 'center', paddingTop: 12 }}>等待数据…</div>
           )}
@@ -507,7 +507,7 @@ function TopSection() {
         <div className="monitor-dock__chart-card monitor-dock__chart-card--qps">
           <div className="monitor-dock__chart-title">QPS</div>
           {qpsOption ? (
-            <ReactECharts option={qpsOption} style={{ height: 'calc(100% - 16px)' }} notMerge lazyUpdate />
+            <EChartsReact option={qpsOption} style={{ height: 'calc(100% - 16px)' }} notMerge lazyUpdate />
           ) : (
             <div style={{ color: 'var(--text-tertiary)', fontSize: 10, textAlign: 'center', paddingTop: 12 }}>等待数据…</div>
           )}

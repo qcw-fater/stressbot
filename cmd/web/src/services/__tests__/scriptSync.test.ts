@@ -1,7 +1,7 @@
 /**
  * scriptSync 单测：扫描 + 同步语义（IDB 已有不覆盖、缺失收集、混合场景）。
  *
- * 不依赖真实 IndexedDB —— 用 vi.mock 把 resourcesStore 的 getScript / addScript 替成内存 Map。
+ * 不依赖真实 IndexedDB —— 用 vi.mock 把 resourcesStore 的 getScript / addScriptFromBaseline 替成内存 Map。
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,8 +12,8 @@ const idb = new Map<string, { name: string; content: string }>();
 
 vi.mock('../resourcesStore', () => ({
   getScript: vi.fn(async (name: string) => idb.get(name)),
-  addScript: vi.fn(async (name: string, content: string) => {
-    const file = { name, content, size: content.length, uploadedAt: '2026-01-01T00:00:00Z' };
+  addScriptFromBaseline: vi.fn(async (name: string, content: string) => {
+    const file = { name, content, size: content.length, uploadedAt: '2026-01-01T00:00:00Z', baseHash: 'sha256:test' };
     idb.set(name, file);
     return file;
   }),
@@ -96,7 +96,7 @@ describe('syncFlowScriptsToIdb', () => {
     const r = await syncFlowScriptsToIdb(flow);
 
     expect(r).toEqual({ added: ['baseline.lua'], skipped: [], missing: [] });
-    expect(fetchMock).toHaveBeenCalledWith('/sbot/baseline/scripts/baseline.lua');
+    expect(fetchMock).toHaveBeenCalledWith('/sbot/baseline/scripts/baseline.lua', { cache: 'no-cache' });
     expect(idb.get('baseline.lua')?.content).toBe('-- baseline content');
   });
 

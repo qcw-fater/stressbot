@@ -16,7 +16,7 @@ import { useProtoStore } from '@/components/FlowEditor/proto/protoStore';
 import { validateFlow } from '@/components/FlowEditor/validation/refsCheck';
 import { useMetricsStore } from '@/components/FlowEditor/nodes/shared/MetricsBadge';
 import * as tasksApi from './tasksApi';
-import { listProto, listScript, getAdapterScript, getErrorMapScript } from './resourcesStore';
+import { listProto, listScript, getAdapterScript, getErrorMapScript, markResourcesAsBaselineSynced } from './resourcesStore';
 import { syncFlowScriptsToIdb, collectFlowScriptNames } from './scriptSync';
 import { useRuntimeStore } from './runtimeStore';
 import { ApiError } from './api';
@@ -174,8 +174,14 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
     fd.append('adapter/error.lua', new Blob([errorMapContent], { type: 'text/plain' }), 'error.lua');
   }
 
-  // 5. 提交
+  // 5. 提交。createTask 成功后服务器已写回 conf/ 基线，立即标记本次上传资源为新基线。
   const created = await tasksApi.createTask(fd);
+  await markResourcesAsBaselineSynced({
+    protos,
+    scripts: usedScripts,
+    adapter: adapterRes ?? null,
+    errorMap: errorMapRes ?? null,
+  });
   await tasksApi.startTask(created.id);
 
   // 6. 同步运行态。clearMonitorData 已经在校验后立刻调过了（开头），这里不必再清。

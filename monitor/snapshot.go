@@ -33,10 +33,11 @@ type BandwidthSnapshot struct {
 
 // ActionSnapshot per-action 完整快照（只读，用于 JSON/CSV/控制台输出）。
 //
-// latency 字段含义说明（参见 plans/latency-net-only-redesign.md）：
+// RTT 字段含义说明（参见 plans/rtt-timing-breakdown.md）：
 //   - RTT 直方图记录的是"纯网络往返"耗时（不含客户端 proto 构建/解析等开销）。
-//   - 只统计 ResultSuccess 且 rttSamples > 0 的样本。
-//   - 因此当 RTTSampleCount < SuccessCount 时，avg/p50/p95/p99 的分母是 RTTSampleCount。
+//   - 只统计有完整响应帧且 WireRTT > 0 的 request 样本；服务端 headerErr/失败响应也计入，
+//     超时、发送失败、取消且未收到响应帧的分支不产生 RTT 样本。
+//   - 因此 avg/p50/p95/p99 的分母是 RTTSampleCount，而不是 action 成功数或总样本数。
 //   - 纯客户端动作（如 lua 内仅做 connect/set_secret_key/register_heartbeat）RTTSampleCount=0，
 //     此时 RTT.Count=0，前端 ActionsTab 应显示 "—"。
 //   - ClientAvgMs 反映客户端构建/解析平均耗时，所有结果分支累计，独立于网络指标。
@@ -62,7 +63,7 @@ type ActionSnapshot struct {
 	DecodeAvgMs               float64           `json:"decodeAvgMs"`               // 解码平均耗时（毫秒）
 	DispatchToActionWaitAvgMs float64           `json:"dispatchToActionWaitAvgMs"` // 分发到 action 平均等待（毫秒）
 	ParseStoreAvgMs           float64           `json:"parseStoreAvgMs"`           // 解析和状态写入平均耗时（毫秒）
-	RTTSampleCount            int64             `json:"rttSampleCount"`            // 有 RTT 的成功 request 数
+	RTTSampleCount            int64             `json:"rttSampleCount"`            // 有完整响应帧且 WireRTT > 0 的 request 数
 	AvgQPS                    float64           `json:"avgQps"`                    // 全周期平均 QPS
 	PeriodQPS                 float64           `json:"periodQps"`                 // 上次快照到当前的区间 QPS
 	Errors                    []ErrorEntry      `json:"errors,omitempty"`          // 错误分布（仅失败/超时时有值）

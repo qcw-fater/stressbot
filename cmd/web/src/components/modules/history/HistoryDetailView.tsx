@@ -6,7 +6,7 @@ import { App, Button, Empty, Input, Popover, Space, Spin, Switch, Table, Tag, Ti
 import type { ColumnsType } from 'antd/es/table';
 import { CopyOutlined, DownloadOutlined, FileTextOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import ReactECharts from 'echarts-for-react';
+import { EChartsReact } from '@/components/monitoring/shared/EChartsReact';
 import { useEffect, useMemo, useState } from 'react';
 import { historyApi, showApiError } from '@/services';
 import type { ActionMetric, HistoryDetail, HistoryConfigArchive, HistoryTrendPoint, StressSnapshot } from '@/types/api';
@@ -288,25 +288,25 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
           {qpsOption && (
             <div className="hp-glass hp-glass-thin hp-trends-card">
               <div className="hp-section-title">QPS</div>
-              <ReactECharts option={qpsOption} style={{ height: 180 }} notMerge lazyUpdate />
+              <EChartsReact option={qpsOption} style={{ height: 180 }} notMerge lazyUpdate />
             </div>
           )}
           {apdexOption && (
             <div className="hp-glass hp-glass-thin hp-trends-card">
               <div className="hp-section-title">Apdex</div>
-              <ReactECharts option={apdexOption} style={{ height: 180 }} notMerge lazyUpdate />
+              <EChartsReact option={apdexOption} style={{ height: 180 }} notMerge lazyUpdate />
             </div>
           )}
           {cpuOption && (
             <div className="hp-glass hp-glass-thin hp-trends-card">
               <div className="hp-section-title">CPU</div>
-              <ReactECharts option={cpuOption} style={{ height: 180 }} notMerge lazyUpdate />
+              <EChartsReact option={cpuOption} style={{ height: 180 }} notMerge lazyUpdate />
             </div>
           )}
           {bwOption && (
             <div className="hp-glass hp-glass-thin hp-trends-card">
               <div className="hp-section-title">带宽 (KB/s)</div>
-              <ReactECharts option={bwOption} style={{ height: 180 }} notMerge lazyUpdate />
+              <EChartsReact option={bwOption} style={{ height: 180 }} notMerge lazyUpdate />
             </div>
           )}
           </div>

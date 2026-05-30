@@ -5,17 +5,39 @@
  * captureChartAsPng 利用 echarts.init 在离屏 canvas 上渲染，导出 base64 PNG。
  */
 
-import * as echarts from 'echarts';
+import * as echarts from 'echarts/core';
+import { BarChart, LineChart, PieChart } from 'echarts/charts';
+import {
+  GraphicComponent,
+  GridComponent,
+  LegendComponent,
+  MarkLineComponent,
+  TooltipComponent,
+} from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
+import type { EChartsOption } from 'echarts';
 import type {
   ActionMetric,
   HistoryTrendPoint,
 } from '@/types/api';
 import { classifyApdex } from '@/services/metricsBinding';
 
+echarts.use([
+  BarChart,
+  LineChart,
+  PieChart,
+  GraphicComponent,
+  GridComponent,
+  LegendComponent,
+  MarkLineComponent,
+  TooltipComponent,
+  CanvasRenderer,
+]);
+
 /* ── 离屏渲染工具 ── */
 
 export function captureChartAsPng(
-  option: echarts.EChartsOption,
+  option: EChartsOption,
   width: number,
   height: number,
 ): string {
@@ -50,7 +72,7 @@ const COLORS = {
 
 export function buildQpsTrendOption(
   points: HistoryTrendPoint[],
-): echarts.EChartsOption | null {
+): EChartsOption | null {
   if (points.length === 0) return null;
 
   const x = points.map((p) => `${p.elapsedSec}s`);
@@ -83,7 +105,7 @@ export function buildQpsTrendOption(
 
 export function buildApdexTrendOption(
   points: HistoryTrendPoint[],
-): echarts.EChartsOption | null {
+): EChartsOption | null {
   if (points.length === 0) return null;
 
   const x = points.map((p) => `${p.elapsedSec}s`);
@@ -116,7 +138,7 @@ export function buildApdexTrendOption(
 
 export function buildCpuTrendOption(
   points: HistoryTrendPoint[],
-): echarts.EChartsOption | null {
+): EChartsOption | null {
   if (points.length === 0) return null;
 
   const x = points.map((p) => `${p.elapsedSec}s`);
@@ -149,7 +171,7 @@ export function buildCpuTrendOption(
 
 export function buildBwTrendOption(
   points: HistoryTrendPoint[],
-): echarts.EChartsOption | null {
+): EChartsOption | null {
   if (points.length === 0) return null;
 
   const x = points.map((p) => `${p.elapsedSec}s`);
@@ -201,7 +223,7 @@ export function buildBwTrendOption(
 
 export function buildRankingOption(
   actions: ActionMetric[],
-): echarts.EChartsOption {
+): EChartsOption {
   const top = [...actions]
     .filter((a) => !a.name.startsWith('callback:'))
     .sort((a, b) => a.rtt.p99Ms - b.rtt.p99Ms)
@@ -244,7 +266,7 @@ export function buildRankingOption(
 
 export function buildLatencyOption(
   actions: ActionMetric[],
-): echarts.EChartsOption {
+): EChartsOption {
   const top = [...actions]
     .filter((a) => !a.name.startsWith('callback:'))
     .sort((a, b) => b.rtt.p99Ms - a.rtt.p99Ms)
@@ -272,7 +294,7 @@ export function buildLatencyOption(
 
 export function buildSuccessDonutOption(
   actions: ActionMetric[],
-): echarts.EChartsOption {
+): EChartsOption {
   let success = 0, failure = 0, timeout = 0;
   for (const a of actions) {
     success += a.successCount;
@@ -335,7 +357,7 @@ const APDEX_COLORS: Record<string, string> = {
 
 export function buildApdexOption(
   actions: ActionMetric[],
-): echarts.EChartsOption {
+): EChartsOption {
   const sorted = [...actions]
     .filter((a) => !a.name.startsWith('callback:'))
     .sort((a, b) => a.apdex - b.apdex);
@@ -371,7 +393,7 @@ export function buildApdexOption(
 
 export function buildErrorOption(
   actions: ActionMetric[],
-): echarts.EChartsOption | null {
+): EChartsOption | null {
   const errorMap = new Map<string, { count: number; label: string }>();
   for (const a of actions) {
     for (const e of a.errors ?? []) {
@@ -442,7 +464,7 @@ export function captureAllCharts(
   points: HistoryTrendPoint[],
 ): ChartImages {
   const safeCapture = (
-    fn: () => echarts.EChartsOption | null,
+    fn: () => EChartsOption | null,
     w: number,
     h: number,
   ): string | null => {

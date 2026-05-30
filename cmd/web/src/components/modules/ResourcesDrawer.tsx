@@ -3,7 +3,7 @@
  *
  * 设计要点：
  * - 三个 Tab：proto / lua / adapter；前两者复用 ResourceTable，adapter 内嵌 Monaco 编辑器；
- * - 顶部显示未处理的基线同步冲突 Alert + "处理差异"按钮，打开 BaselineSyncModal；
+ * - 顶部显示未处理的资源冲突 Alert + "处理冲突"按钮，打开 BaselineSyncModal；
  * - 基线同步在打开编辑器或启动任务时自动执行（内容对比驱动），无需手动导入。
  */
 
@@ -45,11 +45,13 @@ import {
   type ResourceFile,
   getAdapterScript,
   setAdapterScript,
+  setAdapterScriptFromBaseline,
   clearAdapterScript,
   validateAdapter,
   subtractSyncResult,
   getErrorMapScript,
   setErrorMapScript,
+  setErrorMapScriptFromBaseline,
   clearErrorMapScript,
 } from '@/services/resourcesStore';
 import { BaselineSyncModal } from './BaselineSyncModal';
@@ -79,12 +81,12 @@ export function ResourcesDrawer({ open, onClose }: ResourcesDrawerProps) {
             type="warning"
             showIcon
             style={{ marginBottom: 12 }}
-            message="服务器资源有变更"
+            message="资源存在冲突"
             description={
               <Space>
-                <span>{pendingSyncResult.conflicts.length + pendingSyncResult.removed.length} 处差异待处理</span>
+                <span>{pendingSyncResult.conflicts.length + pendingSyncResult.removed.length} 处冲突待处理</span>
                 <Button size="small" type="primary" onClick={() => setSyncModalOpen(true)}>
-                  处理差异
+                  处理冲突
                 </Button>
               </Space>
             }
@@ -210,7 +212,7 @@ function AdapterTab() {
         if (text) {
           setContents((prev) => ({ ...prev, codec: text }));
           setSources((prev) => ({ ...prev, codec: '默认模板' }));
-          void setAdapterScript(text);
+          void setAdapterScriptFromBaseline(text);
         } else {
           setContents((prev) => ({ ...prev, codec: '' }));
           setSources((prev) => ({ ...prev, codec: null }));
@@ -227,6 +229,7 @@ function AdapterTab() {
         if (text) {
           setContents((prev) => ({ ...prev, error: text }));
           setSources((prev) => ({ ...prev, error: '默认模板' }));
+          void setErrorMapScriptFromBaseline(text);
         } else {
           setContents((prev) => ({ ...prev, error: ERROR_MAP_TEMPLATE }));
           setSources((prev) => ({ ...prev, error: '模板（未保存）' }));

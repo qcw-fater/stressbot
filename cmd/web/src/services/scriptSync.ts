@@ -10,7 +10,8 @@
  *   - FlowEditor 初始化、Toolbar 加载、TaskStartModal 打开、startTask 提交前。
  */
 
-import { addScript, getScript } from './resourcesStore';
+import { addScriptFromBaseline, getScript } from './resourcesStore';
+import { fetchBaselineScript } from './baselineApi';
 import { BASELINE_PREFIX } from './env';
 import type { FlowJson } from '@/components/FlowEditor/codec/flowToJson';
 
@@ -72,7 +73,6 @@ function parseLuaCondition(raw: string | undefined): string | null {
  * 不并发限流：lua 脚本通常 < 几十个、< 几 KB，浏览器一次性 fetch 完全可以承受。
  *
  * @param flow      要扫描的 TaskFlow
- * @param baseUrl   基线脚本目录 URL，默认 `${BASELINE_PREFIX}/scripts/`（生产经 Nginx 代理到 Admin）
  */
 export async function syncFlowScriptsToIdb(
   flow: FlowJson,
@@ -91,13 +91,14 @@ export async function syncFlowScriptsToIdb(
         return;
       }
       try {
-        const r = await fetch(baseUrl + encodeURIComponent(name));
-        if (!r.ok) {
+        const text = baseUrl === `${BASELINE_PREFIX}/scripts/`
+          ? await fetchBaselineScript(name)
+          : await fetch(baseUrl + encodeURIComponent(name)).then((r) => (r.ok ? r.text() : null));
+        if (text === null) {
           missing.push(name);
           return;
         }
-        const text = await r.text();
-        await addScript(name, text);
+        await addScriptFromBaseline(name, text);
         added.push(name);
       } catch {
         missing.push(name);

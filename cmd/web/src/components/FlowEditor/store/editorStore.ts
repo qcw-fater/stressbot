@@ -123,7 +123,7 @@ interface EditorState {
    */
   historyEnabled: boolean | null;
 
-  /** 基线同步冲突结果（未处理时非 null），用于资源按钮 badge 和 ResourcesDrawer 处理差异入口 */
+  /** 基线同步冲突结果（未处理时非 null），用于资源按钮 badge 和 ResourcesDrawer 处理冲突入口 */
   pendingSyncResult: import('@/services/resourcesStore').BaselineSyncResult | null;
   setPendingSyncResult: (r: import('@/services/resourcesStore').BaselineSyncResult | null) => void;
 

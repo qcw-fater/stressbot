@@ -843,7 +843,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
       </Modal>
 
       <Modal
-        title="本次任务资源与服务器不一致"
+        title="本次任务资源存在冲突"
         open={diffChoiceOpen}
         onCancel={() => setDiffChoiceOpen(false)}
         footer={
@@ -855,10 +855,10 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
                 setDiffResolveOpen(true);
               }}
             >
-              处理差异
+              处理冲突
             </Button>
             <Button type="primary" loading={submitting} onClick={handleOverwriteRun}>
-              覆盖运行
+              用本地存储覆盖并运行
             </Button>
           </Space>
         }
@@ -867,7 +867,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
         styles={{ mask: { zIndex: popupZ + 10 }, wrapper: { zIndex: popupZ + 11 } }}
       >
         <Typography.Paragraph type="secondary">
-          本次任务会使用的资源与服务器基线不同。你可以取消启动、逐项处理差异，或使用本地存储中的资源覆盖服务器并运行。
+          以下资源在本地存储和服务器中都发生了变化。你可以逐项处理冲突，或使用本地存储中的版本覆盖服务器并运行。
         </Typography.Paragraph>
         {taskDiffResult && (
           <Space size={8} wrap>
@@ -881,8 +881,10 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
         <BaselineSyncModal
           open={diffResolveOpen}
           result={taskDiffResult}
-          title="处理本次任务资源差异"
-          description="请确认本次任务使用本地版本还是服务器版本。应用后将继续启动任务。"
+          title="处理本次任务资源冲突"
+          description="请确认本次任务使用本地存储版本还是服务器版本。应用后将继续启动任务。"
+          localLabel="使用本地存储版本"
+          serverLabel="使用服务器版本"
           onClose={() => setDiffResolveOpen(false)}
           onResolved={handleDiffResolved}
         />

@@ -7,10 +7,10 @@
  *   因此 proto / lua / adapter 各用一个独立 DB（与 library/templateStore.ts 保持一致）；
  * - 文件内容以 utf-8 字符串存储（proto / lua 都是文本），不存 ArrayBuffer，
  *   方便 JSON.stringify 调试与 Monaco 直接拿到 string；
- * - 资源版本号 hash 在 ProtoLoader 端基于内容拼接计算，store 不维护；
+ * - ResourceFile.baseHash 记录上次确认同步到的服务器内容 hash，按 Git/SVN 工作副本语义做三方判断；
  * - 暴露 `subscribe` 给 React 组件订阅"资源变更"事件，配合 useSyncExternalStore。
  *
- * 基线同步：所有资源统一通过内容对比与基线同步，变更时由 UI 组件展示冲突面板供用户确认。
+ * 基线同步：本地/基线/服务器三方比较，只有双方都修改且内容不同时才需要用户处理冲突。
  */
 
 import { clear, createStore, del, get, keys, set, setMany } from 'idb-keyval';
@@ -25,6 +25,8 @@ export interface ResourceFile {
   content: string;
   size: number;
   uploadedAt: string;
+  /** 上次确认同步到的服务器内容 hash；null 表示确认时服务器没有该资源。 */
+  baseHash?: string | null;
 }
 
 const ADAPTER_DB = 'stressbot-resources-adapter';
@@ -33,18 +35,49 @@ const protoStore = createStore(PROTO_DB, 'data');
 const scriptStore = createStore(SCRIPT_DB, 'data');
 const adapterStore = createStore(ADAPTER_DB, 'data');
 
+export async function hashResourceContent(content: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
+  const hex = Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+  return `sha256:${hex}`;
+}
+
+async function localResourceFile(name: string, content: string, previous?: ResourceFile, uploadedAt = new Date().toISOString()): Promise<ResourceFile> {
+  return {
+    name,
+    content,
+    size: byteLength(content),
+    uploadedAt,
+    baseHash: previous?.baseHash ?? null,
+  };
+}
+
+async function serverResourceFile(name: string, content: string, uploadedAt = new Date().toISOString()): Promise<ResourceFile> {
+  return {
+    name,
+    content,
+    size: byteLength(content),
+    uploadedAt,
+    baseHash: await hashResourceContent(content),
+  };
+}
+
 // 模块加载时异步触发迁移；失败静默（旧 DB 不存在 / 已损坏都按"无需迁移"处理）。
 void migrateLegacyResources();
 
 // === Proto ===
 
 export async function addProto(name: string, content: string): Promise<ResourceFile> {
-  const file: ResourceFile = {
-    name,
-    content,
-    size: byteLength(content),
-    uploadedAt: new Date().toISOString(),
-  };
+  const previous = await getProto(name);
+  const file = await localResourceFile(name, content, previous);
+  await set(name, file, protoStore);
+  notify();
+  return file;
+}
+
+export async function addProtoFromBaseline(name: string, content: string): Promise<ResourceFile> {
+  const file = await serverResourceFile(name, content);
   await set(name, file, protoStore);
   notify();
   return file;
@@ -53,10 +86,10 @@ export async function addProto(name: string, content: string): Promise<ResourceF
 export async function addProtos(files: Array<{ name: string; content: string }>): Promise<void> {
   if (files.length === 0) return;
   const now = new Date().toISOString();
-  const entries: Array<[string, ResourceFile]> = files.map(({ name, content }) => [
+  const entries: Array<[string, ResourceFile]> = await Promise.all(files.map(async ({ name, content }) => [
     name,
-    { name, content, size: byteLength(content), uploadedAt: now },
-  ]);
+    await localResourceFile(name, content, await getProto(name), now),
+  ]));
   await setMany(entries, protoStore);
   notify();
 }
@@ -89,12 +122,15 @@ export async function clearProto(): Promise<void> {
 // === Script (Lua) ===
 
 export async function addScript(name: string, content: string): Promise<ResourceFile> {
-  const file: ResourceFile = {
-    name,
-    content,
-    size: byteLength(content),
-    uploadedAt: new Date().toISOString(),
-  };
+  const previous = await getScript(name);
+  const file = await localResourceFile(name, content, previous);
+  await set(name, file, scriptStore);
+  notify();
+  return file;
+}
+
+export async function addScriptFromBaseline(name: string, content: string): Promise<ResourceFile> {
+  const file = await serverResourceFile(name, content);
   await set(name, file, scriptStore);
   notify();
   return file;
@@ -103,10 +139,10 @@ export async function addScript(name: string, content: string): Promise<Resource
 export async function addScripts(files: Array<{ name: string; content: string }>): Promise<void> {
   if (files.length === 0) return;
   const now = new Date().toISOString();
-  const entries: Array<[string, ResourceFile]> = files.map(({ name, content }) => [
+  const entries: Array<[string, ResourceFile]> = await Promise.all(files.map(async ({ name, content }) => [
     name,
-    { name, content, size: byteLength(content), uploadedAt: now },
-  ]);
+    await localResourceFile(name, content, await getScript(name), now),
+  ]));
   await setMany(entries, scriptStore);
   notify();
 }
@@ -146,12 +182,15 @@ export async function getAdapterScript(): Promise<ResourceFile | undefined> {
 }
 
 export async function setAdapterScript(content: string): Promise<ResourceFile> {
-  const file: ResourceFile = {
-    name: CODEC_LUA_KEY,
-    content,
-    size: byteLength(content),
-    uploadedAt: new Date().toISOString(),
-  };
+  const previous = await getAdapterScript();
+  const file = await localResourceFile(CODEC_LUA_KEY, content, previous);
+  await set(CODEC_LUA_KEY, file, adapterStore);
+  notify();
+  return file;
+}
+
+export async function setAdapterScriptFromBaseline(content: string): Promise<ResourceFile> {
+  const file = await serverResourceFile(CODEC_LUA_KEY, content);
   await set(CODEC_LUA_KEY, file, adapterStore);
   notify();
   return file;
@@ -171,12 +210,15 @@ export async function getErrorMapScript(): Promise<ResourceFile | undefined> {
 }
 
 export async function setErrorMapScript(content: string): Promise<ResourceFile> {
-  const file: ResourceFile = {
-    name: ERROR_LUA_KEY,
-    content,
-    size: byteLength(content),
-    uploadedAt: new Date().toISOString(),
-  };
+  const previous = await getErrorMapScript();
+  const file = await localResourceFile(ERROR_LUA_KEY, content, previous);
+  await set(ERROR_LUA_KEY, file, adapterStore);
+  notify();
+  return file;
+}
+
+export async function setErrorMapScriptFromBaseline(content: string): Promise<ResourceFile> {
+  const file = await serverResourceFile(ERROR_LUA_KEY, content);
   await set(ERROR_LUA_KEY, file, adapterStore);
   notify();
   return file;
@@ -220,15 +262,6 @@ interface LastBaselineIndex {
   proto: string[];
   script: string[];
   adapter: boolean;
-}
-
-function loadLastBaseline(): LastBaselineIndex | null {
-  try {
-    const raw = localStorage.getItem(LAST_BASELINE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
 }
 
 function saveLastBaseline(index: LastBaselineIndex): void {
@@ -283,14 +316,137 @@ export function subtractSyncResult(base: BaselineSyncResult | null, handled: Bas
   return { ...base, conflicts, removed };
 }
 
+export type ThreeWayKind =
+  | 'unchanged'
+  | 'legacyRepair'
+  | 'localOnlyChanged'
+  | 'serverOnlyChanged'
+  | 'conflict'
+  | 'serverRemovedOnly'
+  | 'removedConflict';
+
+export interface ThreeWayDecision {
+  kind: ThreeWayKind;
+  localHash: string;
+  serverHash: string | null;
+}
+
+export async function compareResourceThreeWay(local: ResourceFile, serverContent: string | null): Promise<ThreeWayDecision> {
+  const localHash = await hashResourceContent(local.content);
+  const serverHash = serverContent === null ? null : await hashResourceContent(serverContent);
+  const baseHash = local.baseHash;
+
+  if (serverHash !== null && localHash === serverHash) {
+    return { kind: baseHash === serverHash ? 'unchanged' : 'legacyRepair', localHash, serverHash };
+  }
+  if (baseHash === undefined) {
+    return { kind: serverHash === null ? 'removedConflict' : 'conflict', localHash, serverHash };
+  }
+  if (serverHash === null) {
+    if (baseHash === null) return { kind: 'localOnlyChanged', localHash, serverHash };
+    return { kind: baseHash === localHash ? 'serverRemovedOnly' : 'removedConflict', localHash, serverHash };
+  }
+  if (baseHash === serverHash) {
+    return { kind: 'localOnlyChanged', localHash, serverHash };
+  }
+  if (baseHash === localHash) {
+    return { kind: 'serverOnlyChanged', localHash, serverHash };
+  }
+  return { kind: 'conflict', localHash, serverHash };
+}
+
+async function getResource(type: ResourceType, name: string): Promise<ResourceFile | undefined> {
+  if (type === 'proto') return getProto(name);
+  if (type === 'script') return getScript(name);
+  return name === ERROR_LUA_KEY ? getErrorMapScript() : getAdapterScript();
+}
+
+async function writeBaselineResource(type: ResourceType, name: string, content: string): Promise<void> {
+  if (type === 'proto') {
+    await addProtoFromBaseline(name, content);
+  } else if (type === 'script') {
+    await addScriptFromBaseline(name, content);
+  } else if (name === ERROR_LUA_KEY) {
+    await setErrorMapScriptFromBaseline(content);
+  } else {
+    await setAdapterScriptFromBaseline(content);
+  }
+}
+
+async function deleteResource(type: ResourceType, name: string): Promise<void> {
+  if (type === 'proto') await del(name, protoStore);
+  else if (type === 'script') await del(name, scriptStore);
+  else if (name === ERROR_LUA_KEY) await del(ERROR_LUA_KEY, adapterStore);
+  else await del(CODEC_LUA_KEY, adapterStore);
+  notify();
+}
+
+async function setResourceBaseHash(type: ResourceType, name: string, baseHash: string | null): Promise<void> {
+  const existing = await getResource(type, name);
+  if (!existing) return;
+  const next: ResourceFile = { ...existing, baseHash };
+  if (type === 'proto') await set(name, next, protoStore);
+  else if (type === 'script') await set(name, next, scriptStore);
+  else await set(name, next, adapterStore);
+}
+
+export async function reconcileResourceWithServer(
+  result: BaselineSyncResult,
+  type: ResourceType,
+  name: string,
+  local: ResourceFile,
+  serverContent: string | null,
+): Promise<void> {
+  const decision = await compareResourceThreeWay(local, serverContent);
+  switch (decision.kind) {
+    case 'unchanged':
+      result.unchanged.push({ type, name });
+      return;
+    case 'legacyRepair':
+      await setResourceBaseHash(type, name, decision.serverHash);
+      result.unchanged.push({ type, name });
+      return;
+    case 'localOnlyChanged':
+      return;
+    case 'serverOnlyChanged':
+      if (serverContent !== null) await writeBaselineResource(type, name, serverContent);
+      return;
+    case 'serverRemovedOnly':
+      await deleteResource(type, name);
+      return;
+    case 'removedConflict':
+      result.removed.push({ type, name, localContent: local.content, baselineContent: '' });
+      return;
+    case 'conflict':
+      result.conflicts.push({ type, name, localContent: local.content, baselineContent: serverContent ?? '' });
+      return;
+  }
+}
+
+export async function markResourcesAsBaselineSynced(input: {
+  protos?: ResourceFile[];
+  scripts?: ResourceFile[];
+  adapter?: ResourceFile | null;
+  errorMap?: ResourceFile | null;
+}): Promise<void> {
+  const writes: Array<Promise<void>> = [];
+  for (const f of input.protos ?? []) writes.push(setResourceBaseHash('proto', f.name, await hashResourceContent(f.content)));
+  for (const f of input.scripts ?? []) writes.push(setResourceBaseHash('script', f.name, await hashResourceContent(f.content)));
+  if (input.adapter) writes.push(setResourceBaseHash('adapter', CODEC_LUA_KEY, await hashResourceContent(input.adapter.content)));
+  if (input.errorMap) writes.push(setResourceBaseHash('adapter', ERROR_LUA_KEY, await hashResourceContent(input.errorMap.content)));
+  await Promise.all(writes);
+  if (writes.length > 0) notify();
+}
+
 /**
- * 统一基线同步：对比 IDB 与服务端基线，自动新增，冲突/删除返回给调用方处理。
+ * 统一基线同步：按本地/基线/服务器三方判断资源状态。
  *
  * 算法：
  * 1. 并行 fetch proto/scripts index + adapter
- * 2. 对每个基线文件与 IDB 内容对比
- * 3. 新增 → 自动写入 IDB
- * 4. 内容不同 / 基线已删除 → 返回 conflicts/removed
+ * 2. 本地没有、服务器有 → 自动写入本地并记录 baseHash
+ * 3. 仅服务器修改 → 自动采用服务器版本
+ * 4. 仅本地修改 → 保留本地，不提示冲突
+ * 5. 双方都修改且内容不同 / 服务器删除但本地已修改 → 返回 conflicts/removed
  */
 export async function syncResourcesFromBaseline(): Promise<BaselineSyncResult> {
   const result: BaselineSyncResult = {
@@ -300,49 +456,35 @@ export async function syncResourcesFromBaseline(): Promise<BaselineSyncResult> {
     removed: [],
   };
 
-  // 并行拉取三个基线索引
-  const [protoIndex, scriptIndex, adapterText] = await Promise.all([
+  // 并行拉取基线索引和 adapter 文件
+  const [protoIndex, scriptIndex, adapterText, errorMapText] = await Promise.all([
     fetchIndex(`${BASELINE_PREFIX}/proto/index.json`),
     fetchIndex(`${BASELINE_PREFIX}/scripts/index.json`),
     fetchFileText(CODEC_BASELINE_URL),
+    fetchFileText(`${BASELINE_PREFIX}/adapter/error.lua`),
   ]);
 
-  // 加载上次基线快照，用于区分"本地新建"和"远端已删除"
-  const lastBaseline = loadLastBaseline();
-  const lastProtoSet = new Set(lastBaseline?.proto ?? []);
-  const lastScriptSet = new Set(lastBaseline?.script ?? []);
-  const hadAdapter = lastBaseline?.adapter ?? false;
-
   // --- Proto ---
-  await syncFileGroup(protoIndex, 'proto', protoStore, `${BASELINE_PREFIX}/proto/`, result, lastProtoSet);
+  await syncFileGroup(protoIndex, 'proto', protoStore, `${BASELINE_PREFIX}/proto/`, result);
 
   // --- Scripts ---
-  await syncFileGroup(scriptIndex, 'script', scriptStore, `${BASELINE_PREFIX}/scripts/`, result, lastScriptSet);
+  await syncFileGroup(scriptIndex, 'script', scriptStore, `${BASELINE_PREFIX}/scripts/`, result);
 
   // --- Adapter ---
   const existingAdapter = await getAdapterScript();
-  if (adapterText !== null) {
-    if (!existingAdapter) {
-      await setAdapterScript(adapterText);
-      result.added.push({ type: 'adapter', name: CODEC_LUA_KEY });
-    } else if (existingAdapter.content === adapterText) {
-      result.unchanged.push({ type: 'adapter', name: CODEC_LUA_KEY });
-    } else {
-      result.conflicts.push({
-        type: 'adapter',
-        name: CODEC_LUA_KEY,
-        localContent: existingAdapter.content,
-        baselineContent: adapterText,
-      });
-    }
-  } else if (existingAdapter && hadAdapter) {
-    // 仅当上次快照中 adapter 存在时才算"远端已删除"
-    result.removed.push({
-      type: 'adapter',
-      name: CODEC_LUA_KEY,
-      localContent: existingAdapter.content,
-      baselineContent: '',
-    });
+  if (!existingAdapter && adapterText !== null) {
+    await setAdapterScriptFromBaseline(adapterText);
+    result.added.push({ type: 'adapter', name: CODEC_LUA_KEY });
+  } else if (existingAdapter) {
+    await reconcileResourceWithServer(result, 'adapter', CODEC_LUA_KEY, existingAdapter, adapterText);
+  }
+
+  const existingErrorMap = await getErrorMapScript();
+  if (!existingErrorMap && errorMapText !== null) {
+    await setErrorMapScriptFromBaseline(errorMapText);
+    result.added.push({ type: 'adapter', name: ERROR_LUA_KEY });
+  } else if (existingErrorMap) {
+    await reconcileResourceWithServer(result, 'adapter', ERROR_LUA_KEY, existingErrorMap, errorMapText);
   }
 
   // 同步完成后保存当前基线快照
@@ -361,38 +503,13 @@ export async function syncResourcesFromBaseline(): Promise<BaselineSyncResult> {
 export async function applyConflictResolution(decisions: ConflictDecision[]): Promise<void> {
   let changed = false;
   for (const d of decisions) {
-    if (d.keepLocal) continue; // 保留本地，不需要操作
-
-    if (d.type === 'adapter') {
-      if (d.name === ERROR_LUA_KEY) {
-        const baselineText = await fetchFileText(`${BASELINE_PREFIX}/adapter/error.lua`);
-        if (baselineText !== null) {
-          await setErrorMapScript(baselineText);
-        } else {
-          await clearErrorMapScript();
-        }
-      } else {
-        const baselineText = await fetchFileText(CODEC_BASELINE_URL);
-        if (baselineText !== null) {
-          await setAdapterScript(baselineText);
-        } else {
-          await clearAdapterScript();
-        }
-      }
-    } else if (d.type === 'proto') {
-      const baseline = await fetchFileText(`${BASELINE_PREFIX}/proto/${encodeURIComponent(d.name)}`);
-      if (baseline !== null) {
-        await addProto(d.name, baseline);
-      } else {
-        await del(d.name, protoStore);
-      }
+    const baseline = await fetchResourceBaseline(d.type, d.name);
+    if (d.keepLocal) {
+      await setResourceBaseHash(d.type, d.name, baseline === null ? null : await hashResourceContent(baseline));
+    } else if (baseline !== null) {
+      await writeBaselineResource(d.type, d.name, baseline);
     } else {
-      const baseline = await fetchFileText(`${BASELINE_PREFIX}/scripts/${encodeURIComponent(d.name)}`);
-      if (baseline !== null) {
-        await addScript(d.name, baseline);
-      } else {
-        await del(d.name, scriptStore);
-      }
+      await deleteResource(d.type, d.name);
     }
     changed = true;
   }
@@ -425,13 +542,19 @@ async function fetchFileText(url: string): Promise<string | null> {
   }
 }
 
+async function fetchResourceBaseline(type: ResourceType, name: string): Promise<string | null> {
+  if (type === 'proto') return fetchFileText(`${BASELINE_PREFIX}/proto/${encodeURIComponent(name)}`);
+  if (type === 'script') return fetchFileText(`${BASELINE_PREFIX}/scripts/${encodeURIComponent(name)}`);
+  if (name === ERROR_LUA_KEY) return fetchFileText(`${BASELINE_PREFIX}/adapter/error.lua`);
+  return fetchFileText(CODEC_BASELINE_URL);
+}
+
 async function syncFileGroup(
   baselineNames: string[],
   type: ResourceType,
   store: ReturnType<typeof createStore>,
   urlPrefix: string,
   result: BaselineSyncResult,
-  lastBaselineNames: Set<string>,
 ): Promise<void> {
   // 收集 IDB 中已有的所有 key
   const idbKeys = new Set(
@@ -469,40 +592,19 @@ async function syncFileGroup(
 
     const existing = await get<ResourceFile>(name, store);
     if (!existing) {
-      // 新增 → 自动写入
-      const file: ResourceFile = {
-        name,
-        content: baseline,
-        size: byteLength(baseline),
-        uploadedAt: new Date().toISOString(),
-      };
-      await set(name, file, store);
+      await writeBaselineResource(type, name, baseline);
       result.added.push({ type, name });
-    } else if (existing.content === baseline) {
-      result.unchanged.push({ type, name });
     } else {
-      result.conflicts.push({
-        type,
-        name,
-        localContent: existing.content,
-        baselineContent: baseline,
-      });
+      await reconcileResourceWithServer(result, type, name, existing, baseline);
     }
   }
 
-  // 基线没有、IDB 有、且上次基线快照中存在 → 远端已删除（真冲突）
-  // 基线没有、IDB 有、但上次快照中也不存在 → 本地新建，不算冲突
+  // 服务器没有、本地有：由 baseHash 判断是本地新增、服务器删除，还是旧数据未知历史。
   for (const key of idbKeys) {
-    if (!baselineSet.has(key) && lastBaselineNames.has(key)) {
-      const existing = await get<ResourceFile>(key, store);
-      if (existing) {
-        result.removed.push({
-          type,
-          name: key,
-          localContent: existing.content,
-          baselineContent: '',
-        });
-      }
+    if (baselineSet.has(key)) continue;
+    const existing = await get<ResourceFile>(key, store);
+    if (existing) {
+      await reconcileResourceWithServer(result, type, key, existing, null);
     }
   }
 

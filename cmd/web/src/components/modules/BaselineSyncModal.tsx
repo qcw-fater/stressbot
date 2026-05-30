@@ -1,11 +1,11 @@
 /**
  * 基线资源同步冲突解决面板。
  *
- * 当服务端基线资源（proto / lua / adapter）与本地 IDB 内容不同时弹出，
- * 用户通过 Monaco DiffEditor 逐个查看差异并选择保留本地版本或采用服务器版本。
+ * 当服务器资源与本地存储资源发生真实冲突时弹出，
+ * 用户通过 Monaco DiffEditor 逐个查看冲突并选择保留本地版本或采用服务器版本。
  *
  * 性能优化：一次只渲染一个 DiffEditor 实例，通过导航切换，
- * 避免差异项过多时同时创建大量 Monaco 实例导致内存溢出或卡顿。
+ * 避免冲突项过多时同时创建大量 Monaco 实例导致内存溢出或卡顿。
  */
 
 import { Button, Modal, Radio, Space, Tag, Typography } from 'antd';
@@ -16,7 +16,6 @@ import { applyConflictResolution } from '@/services/resourcesStore';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
-import { saveSkippedConflict, hashContent } from '@/components/FlowEditor/skippedConflicts';
 
 export interface BaselineSyncModalProps {
   open: boolean;
@@ -29,7 +28,6 @@ export interface BaselineSyncModalProps {
   localLabel?: string;
   serverLabel?: string;
   applyResolution?: (decisions: ConflictDecision[]) => Promise<void>;
-  saveSkipped?: boolean;
 }
 
 const TYPE_LABEL: Record<ResourceType, { text: string; color: string }> = {
@@ -43,12 +41,11 @@ export function BaselineSyncModal({
   result,
   onClose,
   onResolved,
-  title = '服务器资源变更',
-  description = '服务器资源有变更，请逐个确认保留本地版本还是采用服务器版本。',
-  localLabel = '保留本地版本',
-  serverLabel = '采用服务器版本',
+  title = '资源冲突',
+  description = '服务器和本地存储中的资源都发生了变化，请逐项确认使用哪个版本。',
+  localLabel = '保留本地',
+  serverLabel = '采用服务器',
   applyResolution = applyConflictResolution,
-  saveSkipped = true,
 }: BaselineSyncModalProps) {
   const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
   const themeMode = useEditorStore((s) => s.theme);
@@ -119,18 +116,6 @@ export function BaselineSyncModal({
         name: it.name,
         keepLocal: getDecision(it),
       }));
-      if (saveSkipped) {
-        // 保留本地的项目记录跳过，下次同步不再重复提示
-        for (const it of allItems) {
-          if (getDecision(it)) {
-            const isRemoved = removed.includes(it);
-            const key = isRemoved
-              ? `${it.type}:${it.name}:__removed__`
-              : `${it.type}:${it.name}:${hashContent(it.baselineContent)}`;
-            saveSkippedConflict(key);
-          }
-        }
-      }
       await applyResolution(decArray);
       onClose();
       await onResolved?.(decArray);
@@ -146,6 +131,8 @@ export function BaselineSyncModal({
   const isRemoved = removed.includes(item);
   const keepLocal = getDecision(item);
   const label = TYPE_LABEL[item.type];
+  const localChoiceText = localLabel.replace(/^使用/, '').replace(/版本$/, '') || localLabel;
+  const serverChoiceText = isRemoved ? '删除本地' : (serverLabel.replace(/^使用/, '').replace(/版本$/, '') || serverLabel);
 
   return (
     <Modal
@@ -155,19 +142,20 @@ export function BaselineSyncModal({
       width={860}
       styles={{ mask: { zIndex: popupZ }, wrapper: { zIndex: popupZ + 1 } }}
       footer={
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Space>
-            <Button size="small" onClick={() => setAll(true)}>
-              全部保留本地
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+          <Space size={6} wrap>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>批量：</Typography.Text>
+            <Button size="small" type="text" onClick={() => setAll(true)}>
+              保留本地
             </Button>
-            <Button size="small" onClick={() => setAll(false)}>
-              全部采用服务器
+            <Button size="small" type="text" onClick={() => setAll(false)}>
+              采用服务器
             </Button>
           </Space>
           <Space>
             <Button onClick={handleCancel}>取消</Button>
             <Button type="primary" loading={applying} onClick={handleApply}>
-              应用选择
+              确认处理
             </Button>
           </Space>
         </div>
@@ -208,16 +196,34 @@ export function BaselineSyncModal({
       </div>
 
       {/* 当前项的选择 */}
-      <div style={{ marginBottom: 12 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          marginBottom: 12,
+          padding: '10px 12px',
+          border: '1px solid var(--border-color)',
+          borderRadius: 8,
+          background: 'var(--bg-elevated)',
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <Typography.Text strong style={{ fontSize: 13 }}>本项使用</Typography.Text>
+          <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>
+            {keepLocal ? localChoiceText : serverChoiceText}
+          </Typography.Text>
+        </div>
         <Radio.Group
           value={keepLocal ? 'local' : 'remote'}
           onChange={(e) => setDecision(item, e.target.value === 'local')}
+          optionType="button"
+          buttonStyle="solid"
           size="small"
         >
-          <Radio.Button value="local">{localLabel}</Radio.Button>
-          <Radio.Button value="remote">
-            {isRemoved ? '删除本地版本' : serverLabel}
-          </Radio.Button>
+          <Radio.Button value="local">{localChoiceText}</Radio.Button>
+          <Radio.Button value="remote">{serverChoiceText}</Radio.Button>
         </Radio.Group>
       </div>
 

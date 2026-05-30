@@ -28,7 +28,6 @@ import { fetchBaselineFlow } from '@/services/baselineApi';
 import { useEditorStore } from './store/editorStore';
 import type { FlowJson } from './codec/flowToJson';
 import type { FlowLayout } from '@/types/editor';
-import { hashContent, loadSkippedConflicts } from './skippedConflicts';
 
 export interface FlowEditorProps {
   /** 初始 flow.json，未传时按 autoLoadDefault 决定是否从 /conf/flow/flow.json fetch */
@@ -95,20 +94,8 @@ function FlowEditorInner({
       try {
         const sync = await syncResourcesFromBaseline();
         if (!cancelled) {
-          // 过滤掉用户已确认跳过的冲突
-          const skipped = loadSkippedConflicts();
-          const newConflicts = sync.conflicts.filter(
-            (c) => !skipped.has(`${c.type}:${c.name}:${hashContent(c.baselineContent)}`),
-          );
-          const newRemoved = sync.removed.filter(
-            (r) => !skipped.has(`${r.type}:${r.name}:__removed__`),
-          );
-          if (newConflicts.length > 0 || newRemoved.length > 0) {
-            useEditorStore.getState().setPendingSyncResult({
-              ...sync,
-              conflicts: newConflicts,
-              removed: newRemoved,
-            });
+          if (sync.conflicts.length > 0 || sync.removed.length > 0) {
+            useEditorStore.getState().setPendingSyncResult(sync);
           }
           if (sync.added.length > 0) {
             notification.info({

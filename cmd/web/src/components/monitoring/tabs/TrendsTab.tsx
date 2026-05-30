@@ -9,7 +9,7 @@
  */
 
 import { Card, Col, Empty, Row } from 'antd';
-import ReactECharts from 'echarts-for-react';
+import { EChartsReact } from '../shared/EChartsReact';
 import { useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useRuntimeStore } from '@/services';
@@ -128,35 +128,35 @@ export function TrendsTab() {
       {robotsOption && (
         <Col span={12}>
           <Card size="small" bodyStyle={{ padding: 8 }}>
-            <ReactECharts option={robotsOption} style={{ height: 200 }} notMerge lazyUpdate />
+            <EChartsReact option={robotsOption} style={{ height: 200 }} notMerge lazyUpdate />
           </Card>
         </Col>
       )}
       {qpsOption && (
         <Col span={12}>
           <Card size="small" bodyStyle={{ padding: 8 }}>
-            <ReactECharts option={qpsOption} style={{ height: 200 }} notMerge lazyUpdate />
+            <EChartsReact option={qpsOption} style={{ height: 200 }} notMerge lazyUpdate />
           </Card>
         </Col>
       )}
       {cpuOption && (
         <Col span={12}>
           <Card size="small" bodyStyle={{ padding: 8 }}>
-            <ReactECharts option={cpuOption} style={{ height: 200 }} notMerge lazyUpdate />
+            <EChartsReact option={cpuOption} style={{ height: 200 }} notMerge lazyUpdate />
           </Card>
         </Col>
       )}
       {bwOption && (
         <Col span={12}>
           <Card size="small" bodyStyle={{ padding: 8 }}>
-            <ReactECharts option={bwOption} style={{ height: 200 }} notMerge lazyUpdate />
+            <EChartsReact option={bwOption} style={{ height: 200 }} notMerge lazyUpdate />
           </Card>
         </Col>
       )}
       {timingOption && (
         <Col span={12}>
           <Card size="small" bodyStyle={{ padding: 8 }}>
-            <ReactECharts option={timingOption} style={{ height: 200 }} notMerge lazyUpdate />
+            <EChartsReact option={timingOption} style={{ height: 200 }} notMerge lazyUpdate />
           </Card>
         </Col>
       )}
