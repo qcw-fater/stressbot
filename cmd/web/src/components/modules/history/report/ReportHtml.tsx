@@ -4,10 +4,10 @@
  */
 
 import type {
+  HistoryActionMetric,
   HistoryDetail,
-  ActionMetric,
   HistoryTrendPoint,
-  ClusterSystemSnapshot,
+  HistorySystemSummary,
 } from '@/types/api';
 import { computeWeightedMetrics, classifyApdex } from '@/services/metricsBinding';
 import { fmtMs, fmtBytesPlain } from '@/components/monitoring/shared/formats';
@@ -161,8 +161,8 @@ function CoverSection({ detail, failed, cs }: { detail: HistoryDetail; failed: b
 function KpiSection({
   actions, sys, conn, wm, totalQps,
 }: {
-  actions: ActionMetric[];
-  sys: ClusterSystemSnapshot | null;
+  actions: HistoryActionMetric[];
+  sys: HistorySystemSummary | null;
   conn: { established: number; failed: number; dropped: number };
   wm: { totalSamples: number; apdex: number; successRate: number };
   totalQps: number;
@@ -207,7 +207,7 @@ function ChartSection({ title, image, empty }: { title: string; image: string | 
   );
 }
 
-function FailureSummaryTable({ actions }: { actions: ActionMetric[] }) {
+function FailureSummaryTable({ actions }: { actions: HistoryActionMetric[] }) {
   const problemActions = actions.filter(
     (a) => a.failureCount > 0 || a.timeoutCount > 0,
   );
@@ -250,7 +250,7 @@ function FailureSummaryTable({ actions }: { actions: ActionMetric[] }) {
   );
 }
 
-function ErrorSection({ actions, errorChart }: { actions: ActionMetric[]; errorChart: string }) {
+function ErrorSection({ actions, errorChart }: { actions: HistoryActionMetric[]; errorChart: string }) {
   const allErrors: Array<{ action: string; name: string; msg: string; count: number }> = [];
   for (const a of actions) {
     for (const e of a.errors ?? []) {
@@ -280,7 +280,7 @@ function ErrorSection({ actions, errorChart }: { actions: ActionMetric[]; errorC
   );
 }
 
-function SystemSection({ sys }: { sys: ClusterSystemSnapshot | null }) {
+function SystemSection({ sys }: { sys: HistorySystemSummary | null }) {
   if (!sys) return null;
 
   const items = [
@@ -349,7 +349,7 @@ function AgentSection({ detail }: { detail: HistoryDetail }) {
   );
 }
 
-function DetailTableSection({ actions }: { actions: ActionMetric[] }) {
+function DetailTableSection({ actions }: { actions: HistoryActionMetric[] }) {
   if (actions.length === 0) return null;
 
   const sorted = [...actions].sort((a, b) => b.sampleCount - a.sampleCount);

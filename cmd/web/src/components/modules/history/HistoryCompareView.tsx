@@ -12,7 +12,7 @@ import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { useEffect, useMemo, useState } from 'react';
 import { historyApi, showApiError } from '@/services';
-import type { HistoryDetail } from '@/types/api';
+import type { HistoryCompareTask } from '@/types/api';
 import { ApdexCell } from '@/components/monitoring/shared/ApdexCell';
 import './HistoryPanel.css';
 
@@ -66,7 +66,7 @@ function bestWorst(
 }
 
 export function HistoryCompareView({ ids }: HistoryCompareViewProps) {
-  const [data, setData] = useState<HistoryDetail[] | null>(null);
+  const [data, setData] = useState<HistoryCompareTask[] | null>(null);
   const [loading, setLoading] = useState(true);
   const viewportH = useViewportHeight();
   const tableScrollY = useMemo(

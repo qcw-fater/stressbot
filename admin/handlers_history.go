@@ -53,7 +53,7 @@ func (s *AdminServer) handleGetHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := r.PathValue("id")
-	detail, err := s.history.Get(r.Context(), id)
+	detail, err := s.history.GetDetailSummary(r.Context(), id)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -68,12 +68,12 @@ func (s *AdminServer) handleGetHistoryAgents(w http.ResponseWriter, r *http.Requ
 	}
 
 	id := r.PathValue("id")
-	detail, err := s.history.Get(r.Context(), id)
+	reports, err := s.history.queryReportSummaries(r.Context(), id)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, detail.AgentReports)
+	writeJSON(w, http.StatusOK, reports)
 }
 
 func (s *AdminServer) handleGetHistoryConfig(w http.ResponseWriter, r *http.Request) {
@@ -83,40 +83,27 @@ func (s *AdminServer) handleGetHistoryConfig(w http.ResponseWriter, r *http.Requ
 	}
 
 	id := r.PathValue("id")
-	cfg, err := s.history.GetConfig(r.Context(), id)
+	cfg, err := s.history.GetConfigSummary(r.Context(), id)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
+	writeJSON(w, http.StatusOK, cfg)
+}
 
-	// 查询任务元信息补充到响应
-	meta, _ := s.history.Get(r.Context(), id) // Get 返回 (nil, ErrHistoryNotFound) 时后续代码用 nil 检查处理
-	name := ""
-	var totalBots int
-	if meta != nil {
-		name = meta.Name
-		totalBots = meta.TotalBots
+func (s *AdminServer) handleGetHistoryConfigArchive(w http.ResponseWriter, r *http.Request) {
+	if s.history == nil {
+		writeError(w, ErrHistoryDisabled)
+		return
 	}
 
-	// 前端期望 scripts 而非 luaScripts
-	scripts := make(map[string]string)
-	for k, v := range cfg.LuaScripts {
-		scripts[k] = string(v)
+	id := r.PathValue("id")
+	archive, err := s.history.GetConfigArchive(r.Context(), id)
+	if err != nil {
+		writeError(w, err)
+		return
 	}
-	protoFiles := make(map[string]string)
-	for k, v := range cfg.ProtoFiles {
-		protoFiles[k] = string(v)
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"taskId":      id,
-		"name":        name,
-		"totalBots":   totalBots,
-		"robotConfig": cfg.RobotConfig,
-		"flowJson":    cfg.FlowJSON,
-		"protoFiles":  protoFiles,
-		"scripts":     scripts,
-	})
+	writeJSON(w, http.StatusOK, archive)
 }
 
 func (s *AdminServer) handleGetHistoryTimeseries(w http.ResponseWriter, r *http.Request) {
@@ -170,8 +157,8 @@ func (s *AdminServer) handleUpdateHistory(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// 返回更新后的 HistoryDetail
-	detail, err := s.history.Get(r.Context(), id)
+	// 返回更新后的历史详情展示数据
+	detail, err := s.history.GetDetailSummary(r.Context(), id)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 		return
@@ -221,7 +208,7 @@ func (s *AdminServer) handleCloneHistory(w http.ResponseWriter, r *http.Request)
 	// 查找原始任务获取名称和 totalBots
 	origName := ""
 	totalBots := 0
-	if orig, err := s.history.Get(r.Context(), id); err == nil {
+	if orig, err := s.history.getHistoryRecord(r.Context(), id); err == nil {
 		origName = orig.Name
 		totalBots = orig.TotalBots
 	}
@@ -272,14 +259,14 @@ func (s *AdminServer) handleCompareHistory(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	var tasks []HistoryDetail
+	tasks := make([]HistoryCompareTask, 0, len(ids))
 	for _, id := range ids {
-		detail, err := s.history.Get(r.Context(), strings.TrimSpace(id))
+		task, err := s.history.GetCompareTask(r.Context(), strings.TrimSpace(id))
 		if err != nil {
 			writeError(w, err)
 			return
 		}
-		tasks = append(tasks, *detail)
+		tasks = append(tasks, *task)
 	}
 
 	// 计算每个动作在多个任务间的 P99 对比

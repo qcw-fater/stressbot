@@ -324,13 +324,13 @@ func (h *HistoryStore) List(ctx context.Context, filter HistoryFilter) (*History
 	return &HistoryListResponse{Total: total, Items: items}, nil
 }
 
-// Get 查询单条历史详情。
-func (h *HistoryStore) Get(ctx context.Context, id string) (*HistoryDetail, error) {
+// getHistoryRecord 查询历史任务基础记录。
+func (h *HistoryStore) getHistoryRecord(ctx context.Context, id string) (*HistoryRecord, error) {
 	if h.db == nil {
 		return nil, ErrHistoryNotFound
 	}
 
-	var r HistoryDetail
+	var r HistoryRecord
 	var tagsBytes, summaryBytes []byte
 	var startedAt, stoppedAt sql.NullTime
 
@@ -356,15 +356,45 @@ func (h *HistoryStore) Get(ctx context.Context, id string) (*HistoryDetail, erro
 	if stoppedAt.Valid {
 		r.StoppedAt = &stoppedAt.Time
 	}
-	_ = json.Unmarshal(tagsBytes, &r.Tags) // DB 字段可选，缺失时零值可用
-	_ = json.Unmarshal(summaryBytes, &r.ConfigSummary) // 同上
+	_ = json.Unmarshal(tagsBytes, &r.Tags)
+	_ = json.Unmarshal(summaryBytes, &r.ConfigSummary)
+	return &r, nil
+}
 
+// Get 查询单条完整历史归档。
+func (h *HistoryStore) Get(ctx context.Context, id string) (*HistoryDetail, error) {
+	record, err := h.getHistoryRecord(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	r := HistoryDetail{HistoryRecord: *record}
 	r.Assignments, _ = h.queryAssignments(ctx, id)
 	r.AgentReports, _ = h.queryReports(ctx, id)
 	h.queryAggregated(ctx, id, &r)
 	r.AgentEvents, _ = h.queryAgentEvents(ctx, id)
 
 	return &r, nil
+}
+
+// GetDetailSummary 查询历史详情页展示数据。
+func (h *HistoryStore) GetDetailSummary(ctx context.Context, id string) (*HistoryDetailResponse, error) {
+	record, err := h.getHistoryRecord(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	reports, _ := h.queryReportSummaries(ctx, id)
+	stress, system := h.queryAggregatedSummary(ctx, id)
+	events, _ := h.queryAgentEvents(ctx, id)
+
+	return &HistoryDetailResponse{
+		HistoryRecord: *record,
+		AgentReports:  reports,
+		AgentEvents:   events,
+		FinalSnapshot: stress,
+		FinalSystem:   system,
+	}, nil
 }
 
 // queryAssignments 查询任务分配记录。
@@ -412,16 +442,59 @@ func (h *HistoryStore) queryReports(ctx context.Context, taskID string) ([]Histo
 	return items, nil
 }
 
+// queryReportSummaries 查询历史详情页需要的节点结果摘要。
+func (h *HistoryStore) queryReportSummaries(ctx context.Context, taskID string) ([]HistoryAgentReportSummary, error) {
+	rows, err := h.db.QueryContext(ctx, `
+		SELECT agent_id, agent_name, result, error_msg, finished_at
+		FROM task_report
+		WHERE task_id = ? AND stage_index = -1
+	`, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("query report summaries: %w", err)
+	}
+	defer rows.Close()
+
+	items := []HistoryAgentReportSummary{}
+	for rows.Next() {
+		var rep HistoryAgentReportSummary
+		var finishedAt sql.NullTime
+		if err := rows.Scan(&rep.AgentID, &rep.AgentName, &rep.Result, &rep.ErrorMsg, &finishedAt); err != nil {
+			return nil, fmt.Errorf("scan report summary: %w", err)
+		}
+		if finishedAt.Valid {
+			rep.FinishedAt = finishedAt.Time
+		}
+		items = append(items, rep)
+	}
+	return items, nil
+}
+
 // queryAggregated 查询聚合指标，填入 HistoryDetail。
 func (h *HistoryStore) queryAggregated(ctx context.Context, taskID string, r *HistoryDetail) {
 	var stressBytes, sysBytes []byte
-	err := h.db.QueryRowContext(ctx, `SELECT final_stress, final_system FROM task_aggregated WHERE task_id = ?`, taskID).Scan(&stressBytes, &sysBytes)
+	err := h.db.QueryRowContext(ctx, `SELECT final_stress, final_system FROM task_aggregated WHERE task_id = ? AND stage_index = -1`, taskID).Scan(&stressBytes, &sysBytes)
 	if err != nil && err != sql.ErrNoRows {
 		stresslog.Warn("[ADMIN] 查询聚合指标失败", zap.String("taskID", taskID), zap.Error(err))
 		return
 	}
 	_ = json.Unmarshal(stressBytes, &r.FinalSnapshot) // 同上
 	_ = json.Unmarshal(sysBytes, &r.FinalSystem) // 同上
+}
+
+// queryAggregatedSummary 查询历史详情页需要的聚合指标摘要。
+func (h *HistoryStore) queryAggregatedSummary(ctx context.Context, taskID string) (HistoryStressSnapshotSummary, HistorySystemSummary) {
+	var stressBytes, sysBytes []byte
+	err := h.db.QueryRowContext(ctx, `SELECT final_stress, final_system FROM task_aggregated WHERE task_id = ? AND stage_index = -1`, taskID).Scan(&stressBytes, &sysBytes)
+	if err != nil && err != sql.ErrNoRows {
+		stresslog.Warn("[ADMIN] 查询聚合指标摘要失败", zap.String("taskID", taskID), zap.Error(err))
+		return projectStressSnapshot(monitor.CollectorSnapshot{}), HistorySystemSummary{}
+	}
+
+	var stress monitor.CollectorSnapshot
+	var system ClusterSystemSnapshot
+	_ = json.Unmarshal(stressBytes, &stress)
+	_ = json.Unmarshal(sysBytes, &system)
+	return projectStressSnapshot(stress), projectSystemSnapshot(system)
 }
 
 // queryAgentEvents 查询 Agent 事件。
@@ -445,6 +518,44 @@ func (h *HistoryStore) queryAgentEvents(ctx context.Context, taskID string) ([]A
 		items = append(items, evt)
 	}
 	return items, nil
+}
+
+// GetCompareTask 查询历史对比页需要的任务指标。
+func (h *HistoryStore) GetCompareTask(ctx context.Context, id string) (*HistoryCompareTask, error) {
+	record, err := h.getHistoryRecord(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	var stressBytes []byte
+	err = h.db.QueryRowContext(ctx, `SELECT final_stress FROM task_aggregated WHERE task_id = ? AND stage_index = -1`, id).Scan(&stressBytes)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("get compare stress: %w", err)
+	}
+
+	var stress monitor.CollectorSnapshot
+	_ = json.Unmarshal(stressBytes, &stress)
+	actions := make([]HistoryCompareAction, 0, len(stress.Actions))
+	for _, a := range stress.Actions {
+		actions = append(actions, HistoryCompareAction{
+			Name:        a.Name,
+			SampleCount: a.SampleCount,
+			Apdex:       a.Apdex,
+			RTT:         projectHistogram(a.RTT),
+		})
+	}
+
+	return &HistoryCompareTask{
+		ID:          record.ID,
+		Name:        record.Name,
+		StartedAt:   record.StartedAt,
+		DurationSec: record.DurationSec,
+		TotalBots:   record.TotalBots,
+		FinalSnapshot: HistoryCompareSnapshot{
+			TotalActions: stress.TotalActions,
+			Actions:      actions,
+		},
+	}, nil
 }
 
 // GetConfig 获取历史配置归档。
@@ -475,6 +586,63 @@ func (h *HistoryStore) GetConfig(ctx context.Context, id string) (*TaskConfig, e
 	return &cfg, nil
 }
 
+// GetConfigSummary 获取历史配置摘要。
+func (h *HistoryStore) GetConfigSummary(ctx context.Context, id string) (*HistoryConfigSummaryResponse, error) {
+	record, err := h.getHistoryRecord(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	var robotJSON []byte
+	err = h.db.QueryRowContext(ctx, `SELECT robot_config FROM task_config_archive WHERE task_id = ?`, id).Scan(&robotJSON)
+	if err == sql.ErrNoRows {
+		return nil, ErrHistoryNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get config summary: %w", err)
+	}
+
+	var robotCfg RobotConfig
+	_ = json.Unmarshal(robotJSON, &robotCfg)
+	return &HistoryConfigSummaryResponse{
+		TaskID:      id,
+		Name:        record.Name,
+		TotalBots:   record.TotalBots,
+		RobotConfig: robotCfg,
+	}, nil
+}
+
+// GetConfigArchive 获取历史完整配置归档响应。
+func (h *HistoryStore) GetConfigArchive(ctx context.Context, id string) (*HistoryConfigArchiveResponse, error) {
+	record, err := h.getHistoryRecord(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := h.GetConfig(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	scripts := make(map[string]string, len(cfg.LuaScripts))
+	for k, v := range cfg.LuaScripts {
+		scripts[k] = string(v)
+	}
+	protoFiles := make(map[string]string, len(cfg.ProtoFiles))
+	for k, v := range cfg.ProtoFiles {
+		protoFiles[k] = string(v)
+	}
+
+	return &HistoryConfigArchiveResponse{
+		TaskID:      id,
+		Name:        record.Name,
+		TotalBots:   record.TotalBots,
+		RobotConfig: cfg.RobotConfig,
+		FlowJSON:    cfg.FlowJSON,
+		ProtoFiles:  protoFiles,
+		Scripts:     scripts,
+	}, nil
+}
+
 const (
 	defaultHistoryTimeseriesMaxPoints = 600
 	maxHistoryTimeseriesMaxPoints     = 2000
@@ -488,11 +656,7 @@ func (h *HistoryStore) GetTimeseries(ctx context.Context, id string, maxPoints i
 	maxPoints = normalizeTimeseriesMaxPoints(maxPoints)
 
 	rows, err := h.db.QueryContext(ctx, `
-		SELECT sampled_at, elapsed_sec, total_qps, apdex,
-			rtt_avg_ms, rtt_p95_ms, rtt_p99_ms, client_avg_ms, encode_avg_ms, decode_avg_ms,
-			bots_running, bots_errored,
-			send_kbps, recv_kbps, avg_cpu_percent, max_cpu_percent, mem_percent,
-			goroutines, threads, fds, online_count, offline_count
+		SELECT sampled_at, elapsed_sec, total_qps, apdex, send_kbps, recv_kbps, avg_cpu_percent
 		FROM task_timeseries WHERE task_id = ?
 		ORDER BY elapsed_sec
 	`, id)
@@ -501,15 +665,12 @@ func (h *HistoryStore) GetTimeseries(ctx context.Context, id string, maxPoints i
 	}
 	defer rows.Close()
 
-	points := []HistoryTrendPoint{}
+	points := []HistoryTrendPointResponse{}
 	for rows.Next() {
-		var p HistoryTrendPoint
+		var p HistoryTrendPointResponse
 		if err := rows.Scan(
 			&p.SampledAt, &p.ElapsedSec, &p.TotalQPS, &p.Apdex,
-			&p.RTTAvgMs, &p.RTTP95Ms, &p.RTTP99Ms, &p.ClientAvgMs, &p.EncodeAvgMs, &p.DecodeAvgMs,
-			&p.BotsRunning, &p.BotsErrored,
-			&p.SendKBps, &p.RecvKBps, &p.AvgCPUPercent, &p.MaxCPUPercent, &p.MemPercent,
-			&p.Goroutines, &p.Threads, &p.FDs, &p.OnlineCount, &p.OfflineCount,
+			&p.SendKBps, &p.RecvKBps, &p.AvgCPUPercent,
 		); err != nil {
 			continue
 		}
@@ -537,7 +698,7 @@ func normalizeTimeseriesMaxPoints(maxPoints int) int {
 	return maxPoints
 }
 
-func sampleHistoryTrendPoints(points []HistoryTrendPoint, maxPoints int) []HistoryTrendPoint {
+func sampleHistoryTrendPoints(points []HistoryTrendPointResponse, maxPoints int) []HistoryTrendPointResponse {
 	if len(points) <= maxPoints {
 		return points
 	}
@@ -545,7 +706,7 @@ func sampleHistoryTrendPoints(points []HistoryTrendPoint, maxPoints int) []Histo
 		return points[len(points)-1:]
 	}
 
-	result := make([]HistoryTrendPoint, 0, maxPoints)
+	result := make([]HistoryTrendPointResponse, 0, maxPoints)
 	lastIdx := -1
 	for i := 0; i < maxPoints; i++ {
 		idx := int(float64(i) * float64(len(points)-1) / float64(maxPoints-1))
@@ -556,6 +717,68 @@ func sampleHistoryTrendPoints(points []HistoryTrendPoint, maxPoints int) []Histo
 		lastIdx = idx
 	}
 	return result
+}
+
+func projectStressSnapshot(s monitor.CollectorSnapshot) HistoryStressSnapshotSummary {
+	actions := make([]HistoryActionSummary, 0, len(s.Actions))
+	for _, a := range s.Actions {
+		actions = append(actions, projectActionSnapshot(a))
+	}
+	return HistoryStressSnapshotSummary{
+		Timestamp:    s.Timestamp,
+		UptimeSec:    s.UptimeSec,
+		TotalActions: s.TotalActions,
+		Connections:  s.Connections,
+		Actions:      actions,
+	}
+}
+
+func projectActionSnapshot(a monitor.ActionSnapshot) HistoryActionSummary {
+	return HistoryActionSummary{
+		Name:            a.Name,
+		SampleCount:     a.SampleCount,
+		SuccessCount:    a.SuccessCount,
+		FailureCount:    a.FailureCount,
+		TimeoutCount:    a.TimeoutCount,
+		Executing:       a.Executing,
+		SuccessRate:     a.SuccessRate,
+		AvgSendBytes:    a.AvgSendBytes,
+		AvgRecvBytes:    a.AvgRecvBytes,
+		Apdex:           a.Apdex,
+		RTT:             projectHistogram(a.RTT),
+		ClientAvgMs:     a.ClientAvgMs,
+		EncodeAvgMs:     a.EncodeAvgMs,
+		DecodeAvgMs:     a.DecodeAvgMs,
+		ParseStoreAvgMs: a.ParseStoreAvgMs,
+		RTTSampleCount:  a.RTTSampleCount,
+		AvgQPS:          a.AvgQPS,
+		Errors:          a.Errors,
+	}
+}
+
+func projectHistogram(h monitor.HistogramSnapshot) HistoryHistogramSummary {
+	return HistoryHistogramSummary{
+		MaxMs: h.MaxMs,
+		AvgMs: h.AvgMs,
+		P50Ms: h.P50Ms,
+		P95Ms: h.P95Ms,
+		P99Ms: h.P99Ms,
+	}
+}
+
+func projectSystemSnapshot(s ClusterSystemSnapshot) HistorySystemSummary {
+	return HistorySystemSummary{
+		AvgCPUPercent:    s.AvgCPUPercent,
+		MaxCPUPercent:    s.MaxCPUPercent,
+		HotAgentName:     s.HotAgentName,
+		TotalMemMB:       s.TotalMemMB,
+		UsedMemMB:        s.UsedMemMB,
+		TotalNetSendKBps: s.TotalNetSendKBps,
+		TotalNetRecvKBps: s.TotalNetRecvKBps,
+		TotalGoroutines:  s.TotalGoroutines,
+		TotalThreads:     s.TotalThreads,
+		TotalFDs:         s.TotalFDs,
+	}
 }
 
 // AllTags 返回所有去重标签。

@@ -76,6 +76,7 @@ func (s *AdminServer) registerRoutes() http.Handler {
 	mux.HandleFunc("DELETE /sbot/history/{id}", s.handleDeleteHistory)
 	mux.HandleFunc("GET /sbot/history/{id}/agents", s.handleGetHistoryAgents)
 	mux.HandleFunc("GET /sbot/history/{id}/config", s.handleGetHistoryConfig)
+	mux.HandleFunc("GET /sbot/history/{id}/config/archive", s.handleGetHistoryConfigArchive)
 	mux.HandleFunc("GET /sbot/history/{id}/timeseries", s.handleGetHistoryTimeseries)
 	mux.HandleFunc("POST /sbot/history/{id}/clone", s.handleCloneHistory)
 	mux.HandleFunc("GET /sbot/history/compare", s.handleCompareHistory)

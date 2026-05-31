@@ -9,7 +9,7 @@ import dayjs from 'dayjs';
 import { EChartsReact } from '@/components/monitoring/shared/EChartsReact';
 import { useEffect, useMemo, useState } from 'react';
 import { historyApi, showApiError } from '@/services';
-import type { ActionMetric, HistoryDetail, HistoryConfigArchive, HistoryTrendPoint, StressSnapshot } from '@/types/api';
+import type { HistoryActionMetric, HistoryDetail, HistoryConfigSummary, HistoryTrendPoint } from '@/types/api';
 import { ApdexCell } from '@/components/monitoring/shared/ApdexCell';
 import { fmtBytes, fmtMs, NUMERIC_STYLE } from '@/components/monitoring/shared/formats';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
@@ -32,7 +32,7 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
   const [actionSearch, setActionSearch] = useState('');
   const [actionsOnly, setActionsOnly] = useState(false);
   const generateReport = useReportCapture(detail, timeseries);
-  const [configArchive, setConfigArchive] = useState<HistoryConfigArchive | null>(null);
+  const [configInfo, setConfigInfo] = useState<HistoryConfigSummary | null>(null);
   const [stagesExpanded, setStagesExpanded] = useState(false);
 
   useEffect(() => {
@@ -49,9 +49,9 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
   }, [id]);
 
   useEffect(() => {
-    setConfigArchive(null);
+    setConfigInfo(null);
     setStagesExpanded(false);
-    historyApi.getHistoryConfig(id).then(setConfigArchive).catch(() => {});
+    historyApi.getHistoryConfig(id).then(setConfigInfo).catch(() => {});
   }, [id]);
 
   const saveMeta = async () => {
@@ -66,7 +66,7 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
 
   const downloadConfig = async () => {
     try {
-      const archive = await historyApi.getHistoryConfig(id);
+      const archive = await historyApi.getHistoryConfigArchive(id);
       const blob = new Blob([JSON.stringify(archive, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -142,14 +142,13 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
   }, [timeseries, theme]);
 
   const actionTable = useMemo(() => {
-    const finalSnap = (detail?.finalSnapshot ?? {}) as Partial<StressSnapshot>;
-    let rows = finalSnap.actions ?? [];
+    let rows = detail?.finalSnapshot.actions ?? [];
     if (actionsOnly) rows = rows.filter((a) => !a.name.startsWith('callback:'));
     if (actionSearch) {
       const lo = actionSearch.toLowerCase();
       rows = rows.filter((a) => a.name.toLowerCase().includes(lo));
     }
-    const columns: ColumnsType<ActionMetric> = [
+    const columns: ColumnsType<HistoryActionMetric> = [
       {
         title: '动作', dataIndex: 'name', key: 'name', width: 200, fixed: 'left', ellipsis: true,
         sorter: (a, b) => a.name.localeCompare(b.name),
@@ -230,12 +229,12 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
   if (loading) return <Spin />;
   if (!detail) return <Empty description="加载失败" />;
 
-  const finalSnap = (detail.finalSnapshot ?? {}) as Partial<StressSnapshot>;
+  const finalSnap = detail.finalSnapshot;
   const finalSys = detail.finalSystem;
-  const finalActions = finalSnap.actions ?? [];
-  const finalConnections = finalSnap.connections ?? { established: 0, failed: 0, dropped: 0 };
-  const finalTotalActions = finalSnap.totalActions ?? 0;
-  const finalUptimeSeconds = finalSnap.uptimeSeconds ?? 0;
+  const finalActions = finalSnap.actions;
+  const finalConnections = finalSnap.connections;
+  const finalTotalActions = finalSnap.totalActions;
+  const finalUptimeSeconds = finalSnap.uptimeSeconds;
   const cs = detail.configSummary;
   const failed = detail.state === 'failed';
 
@@ -337,7 +336,7 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
         {actionTable.dataSource.length === 0 ? (
           <Empty description={finalActions.length === 0 ? '无最终动作数据' : '无符合条件的记录'} />
         ) : (
-          <Table<ActionMetric>
+          <Table<HistoryActionMetric>
             rowKey="name"
             size="small"
             dataSource={actionTable.dataSource}
@@ -520,8 +519,8 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
             </div>
           </div>
 
-          {configArchive?.robotConfig?.rampUp && (() => {
-            const stages = configArchive.robotConfig.rampUp.stages;
+          {configInfo?.robotConfig?.rampUp && (() => {
+            const stages = configInfo.robotConfig.rampUp.stages;
             const total = stages.reduce((s, st) => s + (st.count || 0), 0);
             return (
               <div className="hp-rampup-section">

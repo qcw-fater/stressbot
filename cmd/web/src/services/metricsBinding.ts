@@ -12,7 +12,7 @@
  * 与 jsonToFlow 内 React Flow 节点 ID 命名保持一致。
  */
 
-import type { ActionMetric, StressSnapshot } from '@/types/api';
+import type { ActionMetric, HistoryActionMetric, StressSnapshot } from '@/types/api';
 import type { ListenDef } from '@/types/listen';
 import type { FlowNode } from '@/types/flow';
 
@@ -85,7 +85,7 @@ export function classifyApdex(apdex: number | undefined): ApdexLevel {
 /** 加权计算一组动作的聚合 Apdex 和成功率
  *  Apdex 权重用 rttSampleCount，排除纯客户端动作（rttSampleCount=0）避免拉低评分。
  *  成功率权重仍用 sampleCount，反映整体请求成功率。 */
-export function computeWeightedMetrics(actions: ActionMetric[]) {
+export function computeWeightedMetrics(actions: Array<ActionMetric | HistoryActionMetric>) {
   let totalSamples = 0;
   let apdexWeight = 0;
   let weightedApdex = 0;

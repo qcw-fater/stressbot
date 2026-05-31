@@ -540,7 +540,7 @@ type ConfigSummary struct {
 	ScriptCount int `json:"scriptCount"`
 }
 
-// HistoryDetail 历史任务详情（含 Agent 报告和时序数据）。
+// HistoryDetail 历史任务详情归档模型，保留完整内部数据供调试和兼容使用。
 type HistoryDetail struct {
 	HistoryRecord
 	// Assignments Agent 分配方案。
@@ -553,6 +553,73 @@ type HistoryDetail struct {
 	FinalSnapshot monitor.CollectorSnapshot `json:"finalSnapshot"`
 	// FinalSystem 最终聚合系统指标。
 	FinalSystem ClusterSystemSnapshot `json:"finalSystem"`
+}
+
+// HistoryDetailResponse 历史详情页展示响应，只包含界面实际消费的数据。
+type HistoryDetailResponse struct {
+	HistoryRecord
+	// AgentReports 各节点完成结果摘要。
+	AgentReports []HistoryAgentReportSummary `json:"agentReports"`
+	// AgentEvents 节点状态变化事件。
+	AgentEvents []AgentEvent `json:"agentEvents,omitempty"`
+	// FinalSnapshot 最终聚合压测指标摘要。
+	FinalSnapshot HistoryStressSnapshotSummary `json:"finalSnapshot"`
+	// FinalSystem 最终聚合系统指标摘要。
+	FinalSystem HistorySystemSummary `json:"finalSystem"`
+}
+
+// HistoryStressSnapshotSummary 历史详情页使用的压测指标摘要。
+type HistoryStressSnapshotSummary struct {
+	Timestamp    time.Time                  `json:"timestamp,omitempty"`
+	UptimeSec    float64                    `json:"uptimeSeconds"`
+	TotalActions int64                      `json:"totalActions"`
+	Connections  monitor.ConnectionSnapshot `json:"connections"`
+	Actions      []HistoryActionSummary     `json:"actions"`
+}
+
+// HistoryActionSummary 历史 action 表格和报告使用的展示字段。
+type HistoryActionSummary struct {
+	Name            string                  `json:"name"`
+	SampleCount     int64                   `json:"sampleCount"`
+	SuccessCount    int64                   `json:"successCount"`
+	FailureCount    int64                   `json:"failureCount"`
+	TimeoutCount    int64                   `json:"timeoutCount"`
+	Executing       int64                   `json:"executing"`
+	SuccessRate     float64                 `json:"successRate"`
+	AvgSendBytes    float64                 `json:"avgSendBytes"`
+	AvgRecvBytes    float64                 `json:"avgRecvBytes"`
+	Apdex           float64                 `json:"apdex"`
+	RTT             HistoryHistogramSummary `json:"rtt"`
+	ClientAvgMs     float64                 `json:"clientAvgMs"`
+	EncodeAvgMs     float64                 `json:"encodeAvgMs"`
+	DecodeAvgMs     float64                 `json:"decodeAvgMs"`
+	ParseStoreAvgMs float64                 `json:"parseStoreAvgMs"`
+	RTTSampleCount  int64                   `json:"rttSampleCount"`
+	AvgQPS          float64                 `json:"avgQps"`
+	Errors          []monitor.ErrorEntry    `json:"errors,omitempty"`
+}
+
+// HistoryHistogramSummary 历史界面需要的 RTT 分位摘要。
+type HistoryHistogramSummary struct {
+	MaxMs float64 `json:"maxMs"`
+	AvgMs float64 `json:"avgMs"`
+	P50Ms float64 `json:"p50Ms"`
+	P95Ms float64 `json:"p95Ms"`
+	P99Ms float64 `json:"p99Ms"`
+}
+
+// HistorySystemSummary 历史详情页使用的集群系统资源摘要。
+type HistorySystemSummary struct {
+	AvgCPUPercent    float64 `json:"avgCpuPercent"`
+	MaxCPUPercent    float64 `json:"maxCpuPercent"`
+	HotAgentName     string  `json:"hotAgentName,omitempty"`
+	TotalMemMB       uint64  `json:"totalMemMB"`
+	UsedMemMB        uint64  `json:"usedMemMB"`
+	TotalNetSendKBps float64 `json:"totalNetSendKBps"`
+	TotalNetRecvKBps float64 `json:"totalNetRecvKBps"`
+	TotalGoroutines  int     `json:"totalGoroutines"`
+	TotalThreads     int32   `json:"totalThreads"`
+	TotalFDs         int32   `json:"totalFds"`
 }
 
 // HistoryAgentReport 单个 Agent 的历史完成报告。
@@ -569,6 +636,15 @@ type HistoryAgentReport struct {
 	FinishedAt time.Time `json:"finishedAt"`
 	// FinalSnapshot 该 Agent 的最终压测指标。
 	FinalSnapshot monitor.CollectorSnapshot `json:"finalSnapshot"`
+}
+
+// HistoryAgentReportSummary 单个节点的历史完成结果摘要。
+type HistoryAgentReportSummary struct {
+	AgentID    string     `json:"agentId"`
+	AgentName  string     `json:"agentName"`
+	Result     TaskResult `json:"result"`
+	ErrorMsg   string     `json:"errorMsg,omitempty"`
+	FinishedAt time.Time  `json:"finishedAt"`
 }
 
 // HistoryFilter 历史任务查询过滤条件。
@@ -615,10 +691,34 @@ type UpdateHistoryRequest struct {
 
 // CompareResponse 历史任务对比响应。
 type CompareResponse struct {
-	// Tasks 对比的任务详情列表。
-	Tasks []HistoryDetail `json:"tasks"`
+	// Tasks 对比任务的轻量指标列表。
+	Tasks []HistoryCompareTask `json:"tasks"`
 	// Diff 差异对比数据。
 	Diff CompareDiff `json:"diff"`
+}
+
+// HistoryCompareTask 历史对比页使用的任务摘要。
+type HistoryCompareTask struct {
+	ID            string                 `json:"id"`
+	Name          string                 `json:"name"`
+	StartedAt     *time.Time             `json:"startedAt,omitempty"`
+	DurationSec   int                    `json:"durationSec"`
+	TotalBots     int                    `json:"totalBots"`
+	FinalSnapshot HistoryCompareSnapshot `json:"finalSnapshot"`
+}
+
+// HistoryCompareSnapshot 历史对比页使用的压测摘要。
+type HistoryCompareSnapshot struct {
+	TotalActions int64                  `json:"totalActions"`
+	Actions      []HistoryCompareAction `json:"actions"`
+}
+
+// HistoryCompareAction 历史对比页使用的 action 指标。
+type HistoryCompareAction struct {
+	Name        string                  `json:"name"`
+	SampleCount int64                   `json:"sampleCount"`
+	Apdex       float64                 `json:"apdex"`
+	RTT         HistoryHistogramSummary `json:"rtt"`
 }
 
 // CompareDiff 历史任务对比差异。
@@ -677,16 +777,53 @@ type HistoryTrendPoint struct {
 	OfflineCount int `json:"offlineCount"`
 }
 
+// HistoryTrendPointResponse 历史趋势图响应点，只包含当前图表消费的字段。
+type HistoryTrendPointResponse struct {
+	// SampledAt 采样时间。
+	SampledAt time.Time `json:"sampledAt"`
+	// ElapsedSec 距任务启动的秒数。
+	ElapsedSec int `json:"elapsedSec"`
+	// TotalQPS 集群总 QPS。
+	TotalQPS float64 `json:"totalQps"`
+	// Apdex 按 RTT 样本数加权后的 Apdex。
+	Apdex float64 `json:"apdex"`
+	// SendKBps 发送带宽 KB/s。
+	SendKBps float64 `json:"sendKBps"`
+	// RecvKBps 接收带宽 KB/s。
+	RecvKBps float64 `json:"recvKBps"`
+	// AvgCPUPercent 平均 CPU 使用率。
+	AvgCPUPercent float64 `json:"avgCpuPercent"`
+}
+
 // TimeseriesResponse 时序数据查询响应。
 type TimeseriesResponse struct {
 	// TaskID 任务 ID。
 	TaskID string `json:"taskId"`
 	// Points 趋势采样点。
-	Points []HistoryTrendPoint `json:"points"`
+	Points []HistoryTrendPointResponse `json:"points"`
 	// Sampled 是否经过读取侧降采样。
 	Sampled bool `json:"sampled"`
 	// OriginalCount 原始点数。
 	OriginalCount int `json:"originalCount"`
 	// MaxPoints 本次查询最大返回点数。
 	MaxPoints int `json:"maxPoints"`
+}
+
+// HistoryConfigSummaryResponse 历史配置摘要响应。
+type HistoryConfigSummaryResponse struct {
+	TaskID      string      `json:"taskId"`
+	Name        string      `json:"name"`
+	TotalBots   int         `json:"totalBots"`
+	RobotConfig RobotConfig `json:"robotConfig"`
+}
+
+// HistoryConfigArchiveResponse 历史完整配置归档响应。
+type HistoryConfigArchiveResponse struct {
+	TaskID      string            `json:"taskId"`
+	Name        string            `json:"name"`
+	TotalBots   int               `json:"totalBots"`
+	RobotConfig RobotConfig       `json:"robotConfig"`
+	FlowJSON    json.RawMessage   `json:"flowJson"`
+	ProtoFiles  map[string]string `json:"protoFiles"`
+	Scripts     map[string]string `json:"scripts"`
 }

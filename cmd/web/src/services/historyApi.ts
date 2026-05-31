@@ -7,6 +7,7 @@ import type {
   HistoryCloneRequest,
   HistoryCompareResponse,
   HistoryConfigArchive,
+  HistoryConfigSummary,
   HistoryDetail,
   HistoryFilter,
   HistoryListResponse,
@@ -36,8 +37,12 @@ export function getHistoryTimeseries(id: string, maxPoints?: number): Promise<Ti
   );
 }
 
-export function getHistoryConfig(id: string): Promise<HistoryConfigArchive> {
-  return getJson<HistoryConfigArchive>(`/history/${encodeURIComponent(id)}/config`);
+export function getHistoryConfig(id: string): Promise<HistoryConfigSummary> {
+  return getJson<HistoryConfigSummary>(`/history/${encodeURIComponent(id)}/config`);
+}
+
+export function getHistoryConfigArchive(id: string): Promise<HistoryConfigArchive> {
+  return getJson<HistoryConfigArchive>(`/history/${encodeURIComponent(id)}/config/archive`);
 }
 
 export function cloneHistory(
@@ -48,8 +53,8 @@ export function cloneHistory(
 }
 
 export function compareHistory(ids: string[]): Promise<HistoryCompareResponse> {
-  if (ids.length === 0 || ids.length > 5) {
-    return Promise.reject(new Error('对比记录数量必须在 1~5 之间'));
+  if (ids.length < 2 || ids.length > 5) {
+    return Promise.reject(new Error('对比记录数量必须在 2~5 之间'));
   }
   return getJson<HistoryCompareResponse>(
     '/history/compare' + buildQuery({ ids: ids.join(',') }),

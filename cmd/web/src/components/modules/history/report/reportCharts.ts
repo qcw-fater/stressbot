@@ -17,7 +17,7 @@ import {
 import { CanvasRenderer } from 'echarts/renderers';
 import type { EChartsOption } from 'echarts';
 import type {
-  ActionMetric,
+  HistoryActionMetric,
   HistoryTrendPoint,
 } from '@/types/api';
 import { classifyApdex } from '@/services/metricsBinding';
@@ -222,7 +222,7 @@ export function buildBwTrendOption(
 /* ── 5. 动作性能排行（p99 水平条形图） ── */
 
 export function buildRankingOption(
-  actions: ActionMetric[],
+  actions: HistoryActionMetric[],
 ): EChartsOption {
   const top = [...actions]
     .filter((a) => !a.name.startsWith('callback:'))
@@ -265,7 +265,7 @@ export function buildRankingOption(
 /* ── 6. 延迟分布（分组柱状图） ── */
 
 export function buildLatencyOption(
-  actions: ActionMetric[],
+  actions: HistoryActionMetric[],
 ): EChartsOption {
   const top = [...actions]
     .filter((a) => !a.name.startsWith('callback:'))
@@ -283,7 +283,6 @@ export function buildLatencyOption(
     yAxis: { type: 'value', name: 'ms', axisLabel: { fontSize: 10 } },
     series: [
       { name: 'p50', type: 'bar', data: top.map((a) => a.rtt.p50Ms), itemStyle: { color: COLORS.green }, barMaxWidth: 14 },
-      { name: 'p90', type: 'bar', data: top.map((a) => a.rtt.p90Ms), itemStyle: { color: '#bae637' }, barMaxWidth: 14 },
       { name: 'p95', type: 'bar', data: top.map((a) => a.rtt.p95Ms), itemStyle: { color: COLORS.yellow }, barMaxWidth: 14 },
       { name: 'p99', type: 'bar', data: top.map((a) => a.rtt.p99Ms), itemStyle: { color: COLORS.red }, barMaxWidth: 14 },
     ],
@@ -293,7 +292,7 @@ export function buildLatencyOption(
 /* ── 7. 成功/失败构成（环形图） ── */
 
 export function buildSuccessDonutOption(
-  actions: ActionMetric[],
+  actions: HistoryActionMetric[],
 ): EChartsOption {
   let success = 0, failure = 0, timeout = 0;
   for (const a of actions) {
@@ -356,7 +355,7 @@ const APDEX_COLORS: Record<string, string> = {
 };
 
 export function buildApdexOption(
-  actions: ActionMetric[],
+  actions: HistoryActionMetric[],
 ): EChartsOption {
   const sorted = [...actions]
     .filter((a) => !a.name.startsWith('callback:'))
@@ -392,7 +391,7 @@ export function buildApdexOption(
 /* ── 9. 错误分布（环形图） ── */
 
 export function buildErrorOption(
-  actions: ActionMetric[],
+  actions: HistoryActionMetric[],
 ): EChartsOption | null {
   const errorMap = new Map<string, { count: number; label: string }>();
   for (const a of actions) {
@@ -460,7 +459,7 @@ export interface ChartImages {
 }
 
 export function captureAllCharts(
-  actions: ActionMetric[],
+  actions: HistoryActionMetric[],
   points: HistoryTrendPoint[],
 ): ChartImages {
   const safeCapture = (

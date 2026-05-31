@@ -405,21 +405,63 @@ export interface HistoryAgentReport {
   result: TaskResult;
   errorMsg?: string;
   finishedAt: string;
-  finalSnapshot: StressSnapshot;
+}
+
+export interface HistoryHistogramSummary {
+  maxMs: number;
+  avgMs: number;
+  p50Ms: number;
+  p95Ms: number;
+  p99Ms: number;
+}
+
+export interface HistoryActionMetric {
+  name: string;
+  sampleCount: number;
+  successCount: number;
+  failureCount: number;
+  timeoutCount: number;
+  executing: number;
+  successRate: number;
+  avgSendBytes: number;
+  avgRecvBytes: number;
+  apdex: number;
+  rtt: HistoryHistogramSummary;
+  clientAvgMs: number;
+  encodeAvgMs: number;
+  decodeAvgMs: number;
+  parseStoreAvgMs: number;
+  rttSampleCount: number;
+  avgQps: number;
+  errors?: ErrorEntry[];
+}
+
+export interface HistorySnapshotSummary {
+  timestamp?: string;
+  uptimeSeconds: number;
+  totalActions: number;
+  connections: ConnectionsView;
+  actions: HistoryActionMetric[];
+}
+
+export interface HistorySystemSummary {
+  totalMemMB: number;
+  usedMemMB: number;
+  avgCpuPercent: number;
+  maxCpuPercent: number;
+  totalNetSendKBps: number;
+  totalNetRecvKBps: number;
+  totalGoroutines: number;
+  totalThreads: number;
+  totalFds: number;
+  hotAgentName?: string;
 }
 
 export interface HistoryDetail extends HistoryRecord {
-  assignments: Array<{
-    taskId: string;
-    agentId: string;
-    agentName?: string;
-    startNumber: number;
-    totalBots: number;
-  }>;
   agentReports: HistoryAgentReport[];
   agentEvents?: AgentEvent[];
-  finalSnapshot: StressSnapshot;
-  finalSystem: ClusterSystemSnapshot;
+  finalSnapshot: HistorySnapshotSummary;
+  finalSystem: HistorySystemSummary;
 }
 
 export interface HistoryFilter {
@@ -450,24 +492,9 @@ export interface HistoryTrendPoint {
   elapsedSec: number;
   totalQps: number;
   apdex: number;
-  rttAvgMs: number;
-  rttP95Ms: number;
-  rttP99Ms: number;
-  clientAvgMs: number;
-  encodeAvgMs: number;
-  decodeAvgMs: number;
-  botsRunning: number;
-  botsErrored: number;
   sendKBps: number;
   recvKBps: number;
   avgCpuPercent: number;
-  maxCpuPercent: number;
-  memPercent: number;
-  goroutines: number;
-  threads: number;
-  fds: number;
-  onlineCount: number;
-  offlineCount: number;
 }
 
 export interface TimeseriesResponse {
@@ -478,11 +505,14 @@ export interface TimeseriesResponse {
   maxPoints: number;
 }
 
-export interface HistoryConfigArchive {
+export interface HistoryConfigSummary {
   taskId: string;
   name: string;
   totalBots: number;
   robotConfig: RobotConfig;
+}
+
+export interface HistoryConfigArchive extends HistoryConfigSummary {
   flowJson: unknown;
   protoFiles: Record<string, string>;
   scripts: Record<string, string>;
@@ -492,8 +522,25 @@ export interface HistoryCloneRequest {
   name?: string;
 }
 
+export interface HistoryCompareTask {
+  id: string;
+  name: string;
+  startedAt?: string;
+  durationSec: number;
+  totalBots: number;
+  finalSnapshot: {
+    totalActions: number;
+    actions: Array<{
+      name: string;
+      sampleCount: number;
+      apdex: number;
+      rtt: HistoryHistogramSummary;
+    }>;
+  };
+}
+
 export interface HistoryCompareResponse {
-  tasks: HistoryDetail[];
+  tasks: HistoryCompareTask[];
   diff: {
     actions: Record<string, number[]>;
   };
