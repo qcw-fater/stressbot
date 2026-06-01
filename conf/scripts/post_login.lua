@@ -6,6 +6,14 @@ local json = require("json")
 local utils = require("utils")
 local log = require("log")
 
+local function body_preview(body)
+    local text = tostring(body or "")
+    if #text > 1000 then
+        return string.sub(text, 1, 1000) .. "..."
+    end
+    return text
+end
+
 function execute(r)
     local account = robot.get("account")
     local version = robot.get("version") or "1.0.0"
@@ -24,13 +32,18 @@ function execute(r)
     })
 
     if code < 0 then
-        log.error("PostLogin HTTP 请求失败: code=" .. tostring(code))
+        log.error("PostLogin HTTP 请求失败: code=" .. tostring(code) .. " body=" .. body_preview(body))
         return 3, sent, recv  -- 3=SEND_FAILED：HTTP 传输层失败
+    end
+
+    if code < 200 or code >= 300 then
+        log.error("PostLogin HTTP 状态异常: code=" .. tostring(code) .. " body=" .. body_preview(body))
+        return 54, sent, recv  -- 54=LUA_EXIT_CODE：业务层异常
     end
 
     local ok, resp = pcall(json.decode, body)
     if not ok or not resp then
-        log.error("PostLogin JSON 解析失败: " .. tostring(body))
+        log.error("PostLogin JSON 解析失败: " .. body_preview(body))
         return 54, sent, recv  -- 54=LUA_EXIT_CODE：业务层异常
     end
 

@@ -6,6 +6,14 @@ local robot = require("robot")
 local json = require("json")
 local log = require("log")
 
+local function body_preview(body)
+    local text = tostring(body or "")
+    if #text > 1000 then
+        return string.sub(text, 1, 1000) .. "..."
+    end
+    return text
+end
+
 function execute(r)
     local account = robot.get("account")
     local session = robot.get("session")
@@ -27,13 +35,18 @@ function execute(r)
     })
 
     if code < 0 then
-        log.error("NewRole HTTP 请求失败: code=" .. tostring(code))
+        log.error("NewRole HTTP 请求失败: code=" .. tostring(code) .. " body=" .. body_preview(body))
         return 3, sent, recv  -- 3=SEND_FAILED
+    end
+
+    if code < 200 or code >= 300 then
+        log.error("NewRole HTTP 状态异常: code=" .. tostring(code) .. " body=" .. body_preview(body))
+        return 54, sent, recv  -- 54=LUA_EXIT_CODE
     end
 
     local ok, resp = pcall(json.decode, body)
     if not ok or not resp then
-        log.error("NewRole JSON 解析失败")
+        log.error("NewRole JSON 解析失败: " .. body_preview(body))
         return 54, sent, recv  -- 54=LUA_EXIT_CODE
     end
 

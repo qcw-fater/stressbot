@@ -210,6 +210,10 @@ func networkConnectTCP(L *lua.LState) int {
 	}
 	service := L.CheckString(1)
 	address := L.CheckString(2)
+	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
+		L.Push(lua.LBool(false))
+		return 1
+	}
 	err := ctx.NetSender.ConnectTCP(service, address)
 	L.Push(lua.LBool(err == nil))
 	return 1
@@ -225,6 +229,10 @@ func networkConnectUDP(L *lua.LState) int {
 	}
 	service := L.CheckString(1)
 	address := L.CheckString(2)
+	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
+		L.Push(lua.LBool(false))
+		return 1
+	}
 	err := ctx.NetSender.ConnectUDP(service, address)
 	L.Push(lua.LBool(err == nil))
 	return 1

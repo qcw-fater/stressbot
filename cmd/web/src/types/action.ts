@@ -16,7 +16,7 @@ export const ALL_ACTION_PATTERNS: ActionPattern[] = [
 ];
 
 /**
- * 字段绑定类型（15 种）。
+ * 字段绑定类型（16 种）。
  * 详见设计文档 §6.6 / Go 端 FieldBind 注释。
  */
 export type BindingType =

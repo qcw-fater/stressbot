@@ -1,7 +1,7 @@
 /**
  * 单个 FieldBind 编辑器：根据 type 切换不同输入控件。
  *
- * 17 种 type 的具体字段对照（设计文档 §4.1 / §6.3）：
+ * 16 种 type 的具体字段对照（设计文档 §4.1 / §6.3）：
  *   fixed         : value
  *   state         : source + path?
  *   stateFirst    : source + path?
@@ -11,14 +11,13 @@
  *   stateMapValue : source + path? + filters?
  *   randomPick    : values[]
  *   randomPickN   : values[] + count
- *   randomPickMap : keySource + count
+ *   randomPickMap : keySource + values[{key, values}]
  *   randomInt     : min + max
+ *   randomFloat   : min + max + precision?
  *   randomBool    : (无)
  *   randomString  : length + charset
  *   randomExclude : (values[] | source) + excludeSource
  *   listSize      : source
- *   nested        : message + bindings (递归)
- *   nestedList    : items[] (递归 message + bindings)
  */
 
 import { Button, Input, InputNumber, Select, Space, Tag, Tooltip } from 'antd';
@@ -27,6 +26,7 @@ import { useMemo, useState } from 'react';
 import type { FieldBind, FilterDef } from '@/types/action';
 import { useFlowStore } from '../../store/flowStore';
 import { useRuntimeStore } from '@/services/runtimeStore';
+import { JsonDraftInput } from '../shared/JsonDraftInput';
 import { ProtoPathInput } from './ProtoPathInput';
 import { StateKeyInput } from './StateKeyInput';
 import { collectStateKeys, resolveProtoForStateKey } from './stateRegistry';
@@ -275,21 +275,13 @@ export function BindingTypeForm({ binding, currentBindings, onChange }: BindingT
 }
 
 function FixedValueInput({ value, onChange }: { value: unknown; onChange: (v: unknown) => void }) {
-  const text = typeof value === 'string' ? value : JSON.stringify(value ?? '');
   return (
-    <Input
+    <JsonDraftInput
+      mode="jsonOrString"
+      value={value}
+      emptyValue=""
+      onChange={onChange}
       placeholder='固定值（字符串直接写，数字/布尔/JSON 直接写，如 5、true、["a","b"]）'
-      value={text}
-      onChange={(e) => {
-        const raw = e.target.value;
-        try {
-          if (raw === '') return onChange('');
-          const parsed = JSON.parse(raw);
-          onChange(parsed);
-        } catch {
-          onChange(raw);
-        }
-      }}
     />
   );
 }
@@ -301,24 +293,13 @@ function ValuesField({
   binding: FieldBind;
   set: (p: Partial<FieldBind>) => void;
 }) {
-  const [draft, setDraft] = useState<string | null>(null);
-  const text = draft ?? (binding.values?.length ? JSON.stringify(binding.values) : '');
   return (
-    <Input
+    <JsonDraftInput
+      mode="jsonArray"
+      value={binding.values}
+      emptyValue={undefined}
+      onChange={(v) => set({ values: Array.isArray(v) ? v : undefined })}
       placeholder='values (JSON 数组，如 [1,2,3] 或 ["a","b"])'
-      value={text}
-      onChange={(e) => {
-        const raw = e.target.value;
-        setDraft(raw);
-        if (!raw) return set({ values: undefined });
-        try {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) set({ values: parsed });
-        } catch {
-          // 输入未完成，暂不提交
-        }
-      }}
-      onBlur={() => setDraft(null)}
     />
   );
 }
@@ -378,7 +359,7 @@ const FILTER_OP_META: Record<string, { label: string; desc: string }> = {
 
 const NO_VALUE_OPS = new Set(['notNil', 'isNil']);
 const STRUCTURED_OPS = new Set(['timeWindow', 'dailyTimeWindow']);
-const LIST_OPS = new Set(['in', 'notIn']);
+const LIST_OPS = new Set(['in']);
 
 function FilterRow({ filter, sourceProto, onChange, onRemove }: {
   filter: FilterDef;
@@ -461,15 +442,12 @@ function FilterRow({ filter, sourceProto, onChange, onRemove }: {
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={LABEL}>value</span>
-            <Input
+            <JsonDraftInput
+              mode="jsonOrString"
+              value={filter.value}
+              emptyValue={undefined}
+              onChange={(v) => onChange({ value: v })}
               placeholder="比较值（数字/字符串/JSON）"
-              value={filter.value !== undefined ? String(filter.value) : ''}
-              onChange={(e) => {
-                const raw = e.target.value;
-                if (!raw) return onChange({ value: undefined });
-                try { onChange({ value: JSON.parse(raw) }); }
-                catch { onChange({ value: raw }); }
-              }}
               style={{ flex: 1 }}
               size="small"
             />
@@ -608,14 +586,12 @@ function PickMapValuesField({ binding, currentBindings, set }: { binding: FieldB
             style={{ width: 100 }}
             size="small"
           />
-          <Input
+          <JsonDraftInput
+            mode="jsonArray"
             placeholder="values (JSON 数组)"
-            value={JSON.stringify(entry.values ?? [])}
-            onChange={(e) => {
-              try {
-                const parsed = JSON.parse(e.target.value);
-                if (Array.isArray(parsed)) updateEntry(i, { values: parsed });
-              } catch { /* 输入中 */ }
+            value={entry.values ?? []}
+            onChange={(v) => {
+              if (Array.isArray(v)) updateEntry(i, { values: v });
             }}
             style={{ width: 200 }}
             size="small"

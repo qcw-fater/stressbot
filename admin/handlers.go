@@ -564,13 +564,13 @@ func (s *AdminServer) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	for i := offset; i < end; i++ {
 		t := tasks[i]
 		brief := map[string]any{
-			"id":         t.ID,
-			"name":       t.Name,
-			"state":      t.State,
-			"totalBots":  t.TotalBots,
-			"agentCount":      len(t.Assignments),
+			"id":               t.ID,
+			"name":             t.Name,
+			"state":            t.State,
+			"totalBots":        t.TotalBots,
+			"agentCount":       len(t.Assignments),
 			"activeAgentCount": len(t.SucceededAgents),
-			"createdAt":       t.CreatedAt,
+			"createdAt":        t.CreatedAt,
 		}
 		if t.StartedAt != nil {
 			brief["startedAt"] = *t.StartedAt
@@ -697,6 +697,15 @@ func (s *AdminServer) handleStartTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := validateDistributedConcurrency(task.Config.RobotConfig, assignments); err != nil {
+		if _, terr := s.tasks.Transition(id, TaskStarting, TaskFailed); terr != nil {
+			stresslog.Warn("[ADMIN] 状态转换失败 starting→failed",
+				zap.String("taskId", id), zap.Error(terr))
+		}
+		writeError(w, err)
+		return
+	}
+
 	// 保存分配方案
 	s.tasks.Update(id, func(t *Task) {
 		t.Assignments = assignments
@@ -735,6 +744,7 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 	}
 	rc := task.Config.RobotConfig
 	taskTotalBots := task.TotalBots
+	concurrencyByAgent := splitGlobalValues(rc.Concurrency, taskTotalBots, assignments)
 
 	// 构建配置文件清单
 	var configFiles []string
@@ -769,6 +779,7 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 			resultCh <- pushResult{agentID: a.AgentID, err: fmt.Errorf("agent not found")}
 			continue
 		}
+		assignedConcurrency := concurrencyByAgent[a.AgentID]
 		cfg := TaskAssignment{
 			TaskID:            taskID,
 			TaskName:          taskName,
@@ -777,7 +788,7 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 			AccountPrefix:     stringOr(rc.AccountPrefix, "bot_", "robotConfig.accountPrefix"),
 			MainService:       rc.MainService,
 			StateExtra:        rc.StateExtra,
-			ConcurrentNum:     rc.Concurrency,
+			ConcurrentNum:     assignedConcurrency,
 			HeartbeatInterval: secsOr(rc.HeartbeatSec, 5, "robotConfig.heartbeatSec"),
 			TCPTimeout:        secsOr(rc.TimeoutSec, 60, "robotConfig.timeoutSec"),
 			HTTPTimeout:       secsOr(rc.HTTPTimeoutSec, 10, "robotConfig.httpTimeoutSec"),
@@ -785,7 +796,7 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 			LogLevel:          rc.LogLevel,
 			ConfigURL:         fmt.Sprintf("%s/sbot/tasks/%s/config", s.cfg.PublicURL, taskID),
 			ConfigFiles:       configFiles,
-			RampUp:            scaleRampUp(rc.RampUp, taskTotalBots, a.TotalBots),
+			RampUp:            scaleRampUp(rc.RampUp, taskTotalBots, a.TotalBots, assignments, a.AgentID),
 		}
 		addr := agent.Address
 		agentID := a.AgentID
@@ -951,7 +962,7 @@ func (s *AdminServer) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-stresslog.Info("[ADMIN] 任务已删除", zap.String("taskID", id))
+	stresslog.Info("[ADMIN] 任务已删除", zap.String("taskID", id))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1019,7 +1030,7 @@ func (s *AdminServer) handleDeleteAgent(w http.ResponseWriter, r *http.Request) 
 		writeError(w, err)
 		return
 	}
-stresslog.Info("[ADMIN] 节点已删除", zap.String("agentID", id), zap.String("agentName", agent.Name))
+	stresslog.Info("[ADMIN] 节点已删除", zap.String("agentID", id), zap.String("agentName", agent.Name))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1640,6 +1651,83 @@ func serveBaselineFile(w http.ResponseWriter, r *http.Request, dir, key string) 
 	http.ServeFile(w, r, filepath.Join(dir, name))
 }
 
+// validateDistributedConcurrency 校验分布式并发能被拆到所有实际分到 bot 的节点。
+func validateDistributedConcurrency(rc RobotConfig, assignments []Assignment) error {
+	agentCount := assignedAgentCount(assignments)
+	if agentCount <= 1 {
+		return nil
+	}
+	if rc.Concurrency > 0 && rc.Concurrency < agentCount {
+		return ErrInvalidArgument.WithMessage(fmt.Sprintf("robotConfig.concurrency (%d) must be 0 or >= assigned agents (%d)", rc.Concurrency, agentCount))
+	}
+	if rc.RampUp == nil {
+		return nil
+	}
+	for i, s := range rc.RampUp.Stages {
+		if s.Concurrency > 0 && s.Concurrency < agentCount {
+			return ErrInvalidArgument.WithMessage(fmt.Sprintf("rampUp.stages[%d].concurrency (%d) must be 0 or >= assigned agents (%d)", i, s.Concurrency, agentCount))
+		}
+	}
+	return nil
+}
+
+func assignedAgentCount(assignments []Assignment) int {
+	count := 0
+	for _, a := range assignments {
+		if a.TotalBots > 0 {
+			count++
+		}
+	}
+	return count
+}
+
+// splitGlobalValues 将全局并发按 Agent 分到的 bot 占比分摊，保证总和严格等于 global。
+//
+// global <= 0 时保留 0 语义（不限制）。global > 0 时，每个分到 bot 的 Agent 至少为 1，
+// 因此调用前需要保证 global >= 有效分配节点数。
+func splitGlobalValues(global, totalBots int, assignments []Assignment) map[string]int {
+	out := make(map[string]int, len(assignments))
+	if global <= 0 || totalBots <= 0 || len(assignments) == 0 {
+		return out
+	}
+
+	used := 0
+	fracs := make([]float64, len(assignments))
+	for i, a := range assignments {
+		if a.TotalBots <= 0 {
+			continue
+		}
+		exact := float64(global) * float64(a.TotalBots) / float64(totalBots)
+		floor := int(math.Floor(exact))
+		if floor < 1 {
+			floor = 1
+		}
+		out[a.AgentID] = floor
+		used += floor
+		fracs[i] = exact - math.Floor(exact)
+	}
+
+	for remainder := global - used; remainder > 0; remainder-- {
+		bestIdx := -1
+		bestFrac := -1.0
+		for i, a := range assignments {
+			if a.TotalBots <= 0 {
+				continue
+			}
+			if fracs[i] > bestFrac {
+				bestFrac = fracs[i]
+				bestIdx = i
+			}
+		}
+		if bestIdx < 0 {
+			break
+		}
+		out[assignments[bestIdx].AgentID]++
+		fracs[bestIdx] = -1
+	}
+	return out
+}
+
 // scaleRampUp 按比例缩放各 stage 的 count（分布式模式下每个 Agent 分到的 bot 数不同）。
 //
 // 关键约束：
@@ -1655,7 +1743,7 @@ func serveBaselineFile(w http.ResponseWriter, r *http.Request, dir, key string) 
 // 新实现：先按 floor 分配（不补 1），再把 remainder 按"最大小数余量"分配，
 //
 //	保证 Sum=assignedBots 且每个 c ≥ 0。
-func scaleRampUp(cfg *RampUpConfig, totalBots, assignedBots int) *RampUpConfig {
+func scaleRampUp(cfg *RampUpConfig, totalBots, assignedBots int, assignments []Assignment, agentID string) *RampUpConfig {
 	if cfg == nil {
 		return nil
 	}
@@ -1713,9 +1801,13 @@ func scaleRampUp(cfg *RampUpConfig, totalBots, assignedBots int) *RampUpConfig {
 	}
 	scaled := &RampUpConfig{Stages: make([]RampUpStage, 0, n)}
 	for i, s := range cfg.Stages {
+		stageConcurrency := s.Concurrency
+		if stageConcurrency > 0 {
+			stageConcurrency = splitGlobalValues(stageConcurrency, totalBots, assignments)[agentID]
+		}
 		scaled.Stages = append(scaled.Stages, RampUpStage{
 			Count:       counts[i],
-			Concurrency: s.Concurrency,
+			Concurrency: stageConcurrency,
 			Reset:       s.Reset,
 			HoldSec:     s.HoldSec,
 		})

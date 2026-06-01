@@ -110,7 +110,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		ctx:            ctx,
 		cancel:         cancel,
 		dialer:         dialer,
-		httpClient:     &http.Client{Timeout: cfg.HTTPTimeout},
+		httpClient:     newRobotHTTPClient(cfg.HTTPTimeout),
 		mainService:    cfg.MainService,
 		requestTimeout: cfg.RequestTimeout,
 		timingLevel:    engineTimingLevel,
@@ -362,13 +362,18 @@ func (r *Robot) ConnectUDP(serviceName, address string) bool {
 		return false
 	}
 
-	_, err := r.dialer.DialUDP(address, conn, r.adp)
+	_, err := r.dialer.DialUDP(r.ctx, address, conn, r.adp)
 	if err != nil {
-		stresslog.Warn("[ROBOT] UDP 拨号失败",
-			zap.Int("id", r.id), zap.String("account", r.account),
-			zap.String("service", serviceName), zap.String("address", address), zap.Error(err))
+		if r.ctx.Err() != nil {
+			stresslog.Debug("[ROBOT] UDP 连接建立已取消",
+				zap.Int("id", r.id), zap.String("service", serviceName), zap.String("addr", address), zap.Error(err))
+		} else {
+			stresslog.Warn("[ROBOT] UDP 拨号失败",
+				zap.Int("id", r.id), zap.String("account", r.account),
+				zap.String("service", serviceName), zap.String("address", address), zap.Error(err))
+			monitor.Global().ConnFailed()
+		}
 		r.client.CloseUDP(serviceName)
-		monitor.Global().ConnFailed()
 		return false
 	}
 

@@ -13,7 +13,7 @@ import Editor, { type Monaco } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 import { Button, Input, Modal, Select, Space, Switch, Table } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { logsApi, usePolling, useRuntimeStore } from '@/services';
+import { agentsApi, logsApi, usePolling, useRuntimeStore } from '@/services';
 import { API_PREFIX } from '@/services/env';
 import type { LogEntry, LogFileInfo } from '@/types/api';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
@@ -79,6 +79,7 @@ function isEditorAtBottom(ed: editor.IStandaloneCodeEditor): boolean {
 
 export function LogsTab({ open }: { open: boolean }) {
   const agents = useRuntimeStore((s) => s.agents);
+  const setAgents = useRuntimeStore((s) => s.setAgents);
   const themeMode = useEditorStore((s) => s.theme);
   const monacoTheme = getLogTheme(themeMode === 'dark');
   const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
@@ -168,13 +169,24 @@ export function LogsTab({ open }: { open: boolean }) {
     saveState(stateRef.current);
   }, []);
 
-  // === 窗口重新可见时刷新 Monaco 布局 ===
+  // === 窗口重新可见时刷新 Monaco 布局，并同步最新节点列表 ===
   useEffect(() => {
-    if (open) {
-      const ed = editorRef.current;
-      if (ed) requestAnimationFrame(() => ed.layout());
-    }
-  }, [open]);
+    if (!open) return;
+
+    const ed = editorRef.current;
+    if (ed) requestAnimationFrame(() => ed.layout());
+
+    let cancelled = false;
+    agentsApi.listAgents()
+      .then((resp) => {
+        if (!cancelled) setAgents(resp.items);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, setAgents]);
 
   // === 日志文件下载 ===
   const [fileModalOpen, setFileModalOpen] = useState(false);

@@ -1,8 +1,7 @@
 /**
  * 字段绑定列表编辑器（FieldBind[]）。
  *
- * 每行：field（proto 字段下拉）+ type（17 种）+ 类型相关参数（BindingTypeForm）+ 操作
- * 支持递归（nested / nestedList 通过 renderChildren 回调）。
+ * 每行：field（proto 字段下拉）+ type（16 种）+ 类型相关参数（BindingTypeForm）+ 操作。
  */
 
 import { Button, Collapse, Input, Select, Space, Switch, Tag, Tooltip } from 'antd';

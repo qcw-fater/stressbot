@@ -44,7 +44,7 @@ function execute(r)
                 proto.set_field(stat, "mvp", true)
             end
 
-            -- 旧工具：武道会(GT_BUDOKAI=4)遍历所有 selectHeroes；
+            -- 旧工具：武道会(GT_BUDOKAI=4)遍历所有 selectHeroes。
             -- 其它玩法只上报第一个英雄。
             local heroStats = {}
             local heroes = f.selectHeroes or {}

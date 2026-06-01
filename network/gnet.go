@@ -6,11 +6,11 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"stressbot/adapter"
 	"stressbot/monitor"
-	"stressbot/utils"
 	stresslog "stressbot/utils/log"
 
 	"github.com/panjf2000/gnet/v2"
@@ -23,6 +23,7 @@ const maxBodyLen = 16 * 1024 * 1024
 const (
 	gnetReadBufferCap  = 32 * 1024 // gnet 读缓冲区容量
 	gnetWriteBufferCap = 32 * 1024 // gnet 写缓冲区容量
+	maxConcurrentDials = 512       // 限制同一 Agent 内同时阻塞在 gnet Dial/Enroll 的连接数
 )
 
 // connRegistry 管理 gnet 连接与业务层 Connection 的映射。
@@ -254,15 +255,18 @@ func bindConn(gconn gnet.Conn, conn *Connection) {
 
 // Dialer 管理 gnet 客户端。
 type Dialer struct {
-	client *gnet.Client
-	server *EventServer
+	client     *gnet.Client
+	server     *EventServer
+	dialTokens chan struct{}
+	closed     atomic.Bool
 }
 
 // NewDialer 创建拨号器
 func NewDialer(adp adapter.Adapter, heartbeatInterval time.Duration) *Dialer {
 	server := NewEventServer(adp, heartbeatInterval)
 	return &Dialer{
-		server: server,
+		server:     server,
+		dialTokens: make(chan struct{}, maxConcurrentDials),
 	}
 }
 
@@ -310,6 +314,7 @@ func (d *Dialer) Start() error {
 
 // Stop 停止 gnet 客户端引擎
 func (d *Dialer) Stop() error {
+	d.closed.Store(true)
 	if d.client == nil {
 		return nil
 	}
@@ -330,60 +335,62 @@ func (d *Dialer) Stop() error {
 //
 // 兼容性：传 nil 时 fallback 到 d.server.adp（保留单元测试 / 非 robot 场景路径）。
 func (d *Dialer) DialTCP(ctx context.Context, address string, conn *Connection, adp adapter.Adapter) (gnet.Conn, error) {
-	if adp == nil {
-		adp = d.server.adp
-	}
-	type dialResult struct {
-		conn gnet.Conn
-		err  error
-	}
-	ch := make(chan dialResult, 1)
-	utils.GetWorkPool().Go(func() {
-		gc, e := d.client.Dial("tcp", address)
-		ch <- dialResult{gc, e}
-	})
-
-	select {
-	case <-ctx.Done():
-		// ctx 取消，拨号可能已完成，需排空结果并关闭 gnet 连接避免 fd 泄漏
-		utils.GetWorkPool().Go(func() {
-			if res := <-ch; res.conn != nil {
-				_ = res.conn.Close()
-			}
-		})
-		return nil, ctx.Err()
-	case res := <-ch:
-		if res.err != nil {
-			return nil, fmt.Errorf("TCP 拨号失败 %s: %w", address, res.err)
-		}
-		gconn := res.conn
-		bindConn(gconn, conn)
-		d.server.registry.register(gconn, conn)
-		// 启动异步 decode goroutine：必须在 register 之后立即启动，
-		// 否则首批 OnTraffic 到达时 decodeCh 还没准备好，会被 EnqueueRaw 拒绝。
-		conn.StartDecodeLoop(adp, false)
-
-		stresslog.Info("[GNET] TCP 连接已建立",
-			zap.String("address", address), zap.String("service", conn.serviceName), zap.String("robot", conn.robotName))
-		return gconn, nil
-	}
+	return d.dial(ctx, "tcp", address, conn, adp)
 }
 
 // DialUDP 建立 UDP 连接并绑定业务层 Connection。
-// adp 含义同 DialTCP；nil 时 fallback 到 d.server.adp。
-func (d *Dialer) DialUDP(address string, conn *Connection, adp adapter.Adapter) (gnet.Conn, error) {
+// ctx 用于超时/取消：任务停止时不再进入新的 UDP 拨号，避免 Lua action 持有 luaMu 卡死。
+func (d *Dialer) DialUDP(ctx context.Context, address string, conn *Connection, adp adapter.Adapter) (gnet.Conn, error) {
+	return d.dial(ctx, "udp", address, conn, adp)
+}
+
+func (d *Dialer) dial(ctx context.Context, network, address string, conn *Connection, adp adapter.Adapter) (gnet.Conn, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if d.closed.Load() {
+		return nil, context.Canceled
+	}
+	select {
+	case d.dialTokens <- struct{}{}:
+		defer func() { <-d.dialTokens }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if d.closed.Load() {
+		return nil, context.Canceled
+	}
 	if adp == nil {
 		adp = d.server.adp
 	}
-	gconn, err := d.client.Dial("udp", address)
+
+	// gnet.Client.Dial 在 EnrollContext 阶段会等待 eventloop 注册完成。任务停止后先通过
+	// ctx/closed 快速拒绝新拨号，并用 dialTokens 限制同一时刻卡在 Dial 内的 goroutine 数，
+	// 避免一次停止留下成千上万条拨号 goroutine 持有 Lua action 与 Robot 资源。
+	gconn, err := d.client.Dial(network, address)
 	if err != nil {
-		return nil, fmt.Errorf("UDP 拨号失败 %s: %w", address, err)
+		return nil, fmt.Errorf("%s 拨号失败 %s: %w", strings.ToUpper(network), address, err)
+	}
+	if err := ctx.Err(); err != nil {
+		_ = gconn.Close()
+		return nil, err
+	}
+	if d.closed.Load() {
+		_ = gconn.Close()
+		return nil, context.Canceled
 	}
 
 	bindConn(gconn, conn)
 	d.server.registry.register(gconn, conn)
-	conn.StartDecodeLoop(adp, true)
+	// 启动异步 decode goroutine：必须在 register 之后立即启动，
+	// 否则首批 OnTraffic 到达时 decodeCh 还没准备好，会被 EnqueueRaw 拒绝。
+	conn.StartDecodeLoop(adp, network == "udp")
 
-	stresslog.Info("[GNET] UDP 连接已建立", zap.String("address", address), zap.String("robot", conn.robotName))
+	stresslog.Info("[GNET] 连接已建立",
+		zap.String("network", network),
+		zap.String("address", address), zap.String("service", conn.serviceName), zap.String("robot", conn.robotName))
 	return gconn, nil
 }

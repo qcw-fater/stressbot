@@ -1299,8 +1299,7 @@
         "fighterIndex",
         "fighterListData",
         "packageIndex",
-        "battleAck",
-        "battleArea"
+        "battleAck"
       ]
     },
     "ChangeHero": {

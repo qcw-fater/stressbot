@@ -2,12 +2,12 @@
  * 不透明路由编辑器：单 Input 接受 JSON 字符串。
  *
  * 与 DeclarativeForm 中"不透明路由 route"字段保持一致：
- *   - 合法 JSON：解析后存为 object
- *   - 非法 JSON：原样作为 string 暂存（用户输入未完成）
+ *   - 合法 JSON：解析后提交给 route
+ *   - 非法 JSON：仅保留为输入框本地 draft，不写入 route
  *   - 空字符串：返回 undefined
  */
 
-import { Input } from 'antd';
+import { JsonDraftInput } from '../editors/shared/JsonDraftInput';
 import { monoCellStyle } from '../styles/inlineStyles';
 
 export interface RouteEditorProps {
@@ -19,27 +19,14 @@ export interface RouteEditorProps {
 }
 
 export function RouteEditor({ value, onChange, placeholder, size }: RouteEditorProps) {
-  // 显示规则：string 直接用；其它（object / undefined）用 JSON.stringify
-  const display = typeof value === 'string' ? value : JSON.stringify(value ?? {});
-
   return (
-    <Input
-      size={size}
-      value={display}
-      onChange={(e) => {
-        const text = e.target.value;
-        if (text === '') {
-          onChange(undefined);
-          return;
-        }
-        try {
-          onChange(JSON.parse(text));
-        } catch {
-          // JSON 不合法时原样保留，等用户继续输入
-          onChange(text);
-        }
-      }}
+    <JsonDraftInput
+      mode="json"
+      value={value}
+      emptyValue={undefined}
+      onChange={onChange}
       placeholder={placeholder ?? '如 {"cmd":4,"act":10}'}
+      size={size}
       style={monoCellStyle}
     />
   );

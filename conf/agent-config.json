@@ -1,7 +1,12 @@
 {
   "log": {
     "level": "info",
-    "printConsole": true
+    "printConsole": true,
+    "maxSize": 100,
+    "maxBackups": 5,
+    "maxAge": 7,
+    "localTime": true,
+    "compress": true
   },
   "monitor": {
     "apdexT": 100,
