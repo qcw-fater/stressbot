@@ -336,6 +336,30 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
                 render: (v: string) => v ? dayjs(v).format('HH:mm:ss') : '—',
               },
               {
+                title: '清理状态', dataIndex: 'cleanupStatus', key: 'cleanupStatus', width: 120,
+                render: (cleanup: any) => {
+                  if (!cleanup || !cleanup.status) {
+                    return <span style={{ color: 'var(--text-tertiary)' }}>未记录</span>;
+                  }
+                  const map: Record<string, { color: string; label: string }> = {
+                    ok: { color: 'success', label: '清理完成' },
+                    partial: { color: 'warning', label: '部分清理' },
+                    timeout: { color: 'error', label: '清理超时' },
+                    unknown: { color: 'default', label: '未知' },
+                  };
+                  const info = map[cleanup.status as string] ?? { color: 'default', label: cleanup.status };
+                  const detailLines: string[] = [];
+                  if (cleanup.message) detailLines.push(cleanup.message);
+                  if (cleanup.timeoutRobots) detailLines.push(`超时机器人 ${cleanup.timeoutRobots}`);
+                  if (cleanup.luaSkipped) detailLines.push(`Lua 未归还 ${cleanup.luaSkipped}`);
+                  return (
+                    <Tooltip title={detailLines.join('；') || info.label}>
+                      <Tag color={info.color}>{info.label}</Tag>
+                    </Tooltip>
+                  );
+                },
+              },
+              {
                 title: '错误信息', dataIndex: 'errorMsg', key: 'errorMsg', ellipsis: true,
                 render: (v: string) => v ? <Tooltip title={v}><span style={{ color: 'var(--color-error)' }}>{v}</span></Tooltip> : '—',
               },

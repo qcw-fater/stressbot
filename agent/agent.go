@@ -455,7 +455,9 @@ func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
 		})
 	}
 
-	result, errMsg := runner.Run(taskCtx)
+	runResult := runner.Run(taskCtx)
+	result := runResult.Result
+	errMsg := runResult.ErrorMsg
 
 	if result == TaskFailed {
 		stresslog.Error("[AGENT] 任务执行失败",
@@ -491,6 +493,7 @@ func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
 		ErrorMsg:      errMsg,
 		FinishedAt:    time.Now(),
 		FinalSnapshot: finalSnap,
+		CleanupStatus: &runResult.CleanupStatus,
 	}
 
 	if err := a.httpCli.ReportTaskDone(reportCtx, report); err != nil {
@@ -505,6 +508,11 @@ func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
 
 	// 清理临时目录
 	runner.Cleanup()
+
+	// 任务结束、Agent 回到 idle：把 GC 已回收但仍保留在进程内的内存归还给 OS，
+	// 避免常驻 Agent 在多任务之间 RSS 单调增长（每个任务会创建/销毁整套 LState 池、
+	// gnet 引擎与连接，峰值内存较高）。
+	debug.FreeOSMemory()
 }
 
 // shutdown 优雅关闭。

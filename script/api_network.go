@@ -36,7 +36,9 @@ func withReleasedMu(mu *sync.Mutex, fn func()) {
 //	network.close_tcp(service)                → 关闭 TCP 连接
 //	network.close_udp(service)                → 关闭 UDP 连接
 //	network.tcp_request(service, route, msg [, s2c])
+//	network.tcp_request_route(service, request_route, response_route, msg [, s2c])
 //	network.udp_request(service, route, body [, s2c [, timeout [, poll]]])
+//	network.udp_request_route(service, request_route, response_route, body [, s2c])
 //	network.http_request(url [, method [, content_type [, body]]])
 //	network.tcp_send(service, route, msg)
 //	network.udp_send(service, route, body)
@@ -60,7 +62,9 @@ func loadNetworkModule(L *lua.LState) int {
 	L.SetField(mod, "close_udp", L.NewFunction(networkCloseUDP))
 	// 请求-响应
 	L.SetField(mod, "tcp_request", L.NewFunction(networkTCPRequest))
+	L.SetField(mod, "tcp_request_route", L.NewFunction(networkTCPRequestRoute))
 	L.SetField(mod, "udp_request", L.NewFunction(networkUDPRequest))
+	L.SetField(mod, "udp_request_route", L.NewFunction(networkUDPRequestRoute))
 	L.SetField(mod, "http_request", L.NewFunction(networkHTTPRequest))
 	// 发送
 	L.SetField(mod, "tcp_send", L.NewFunction(networkTCPSend))
@@ -117,8 +121,14 @@ func errToCode(err error) int {
 //
 // 把这个逻辑收敛到一处，避免 TCP/UDP 两个 API 各写一遍导致漂移。
 func resolveRequestTimeoutSec(L *lua.LState, ctx *Context) int {
-	if L.GetTop() >= 5 {
-		return L.CheckInt(5)
+	return resolveRequestTimeoutSecAt(L, ctx, 5)
+}
+
+// resolveRequestTimeoutSecAt 从指定参数位置读取 timeout（秒）。
+// 新的 *_request_route API 多了 response_route 参数，timeout 位于第 6 个参数。
+func resolveRequestTimeoutSecAt(L *lua.LState, ctx *Context, argIndex int) int {
+	if argIndex > 0 && L.GetTop() >= argIndex && L.Get(argIndex) != lua.LNil {
+		return L.CheckInt(argIndex)
 	}
 	if ctx != nil && ctx.DefaultRequestTimeout > 0 {
 		return int(ctx.DefaultRequestTimeout / time.Second)
@@ -214,7 +224,14 @@ func networkConnectTCP(L *lua.LState) int {
 		L.Push(lua.LBool(false))
 		return 1
 	}
-	err := ctx.NetSender.ConnectTCP(service, address)
+	var err error
+	withReleasedMu(ctx.LuaMu, func() {
+		err = ctx.NetSender.ConnectTCP(service, address)
+	})
+	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
+		L.Push(lua.LBool(false))
+		return 1
+	}
 	L.Push(lua.LBool(err == nil))
 	return 1
 }
@@ -233,7 +250,14 @@ func networkConnectUDP(L *lua.LState) int {
 		L.Push(lua.LBool(false))
 		return 1
 	}
-	err := ctx.NetSender.ConnectUDP(service, address)
+	var err error
+	withReleasedMu(ctx.LuaMu, func() {
+		err = ctx.NetSender.ConnectUDP(service, address)
+	})
+	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
+		L.Push(lua.LBool(false))
+		return 1
+	}
 	L.Push(lua.LBool(err == nil))
 	return 1
 }
@@ -295,8 +319,46 @@ func networkTCPRequest(L *lua.LState) int {
 		return 0
 	}
 
-	timeout := resolveRequestTimeoutSec(L, ctx)
+	return doTCPRequest(L, ctx, service, route, route, msg, s2cProto, resolveRequestTimeoutSec(L, ctx))
+}
 
+// networkTCPRequestRoute TCP 请求-响应，发送路由和响应匹配路由分离。
+// 签名：network.tcp_request_route(service, request_route, response_route, msg [, s2c_proto [, timeout_sec]])
+//
+// request_route 用于编码请求包，response_route 用于计算等待响应的 routeKey。
+func networkTCPRequestRoute(L *lua.LState) int {
+	ctx := GetContext(L)
+	if ctx == nil || ctx.NetSender == nil {
+		L.RaiseError("network not available")
+		return 0
+	}
+	if L.GetTop() < 4 {
+		L.RaiseError("network.tcp_request_route requires (service, request_route, response_route, msg [, s2c_proto [, timeout_sec]])")
+		return 0
+	}
+
+	service := L.CheckString(1)
+	requestRoute := L.Get(2)
+	responseRoute := L.Get(3)
+	ud, ok := L.Get(4).(*lua.LUserData)
+	if !ok {
+		L.RaiseError("network.tcp_request_route requires proto message at arg 4")
+		return 0
+	}
+	msg, ok := ud.Value.(proto.Message)
+	if !ok {
+		L.RaiseError("network.tcp_request_route requires proto message at arg 4")
+		return 0
+	}
+	s2cProto := ""
+	if L.GetTop() >= 5 && L.Get(5) != lua.LNil {
+		s2cProto = L.CheckString(5)
+	}
+
+	return doTCPRequest(L, ctx, service, requestRoute, responseRoute, msg, s2cProto, resolveRequestTimeoutSecAt(L, ctx, 6))
+}
+
+func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, responseRoute lua.LValue, msg proto.Message, s2cProto string, timeout int) int {
 	msgData, err := serializeMsg(ctx, msg)
 	if err != nil {
 		L.RaiseError("serialize failed: %v", err)
@@ -307,7 +369,7 @@ func networkTCPRequest(L *lua.LState) int {
 	if ctx.TimingLevel >= engine.TimingLevelCodec {
 		encodeStart = time.Now()
 	}
-	packet := buildPacket(ctx, service, route, msgData)
+	packet := buildPacket(ctx, service, requestRoute, msgData)
 	if ctx.TimingLevel >= engine.TimingLevelCodec && !encodeStart.IsZero() {
 		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart)})
 	}
@@ -315,8 +377,7 @@ func networkTCPRequest(L *lua.LState) int {
 		return pushRequestResult(L, int(errcode.ErrEncodeFailed), lua.LNil, 0, 0)
 	}
 
-	goRoute := luaValueToRoute(route)
-	routeKey := ctx.Adapter.ExpectedRouteKeyLocked(goRoute)
+	routeKey := ctx.Adapter.ExpectedRouteKeyLocked(luaValueToRoute(responseRoute))
 	pktLen := len(packet)
 
 	var respBody []byte
@@ -329,6 +390,9 @@ func networkTCPRequest(L *lua.LState) int {
 	})
 	ctx.recordRequest(reqTiming)
 
+	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
+		return pushRequestResult(L, int(errcode.ErrActionCanceled), lua.LNil, pktLen, 0)
+	}
 	if reqErr != nil {
 		return pushRequestResult(L, errToCode(reqErr), lua.LNil, pktLen, 0)
 	}
@@ -376,16 +440,44 @@ func networkUDPRequest(L *lua.LState) int {
 	if L.GetTop() >= 4 {
 		s2cProto = L.CheckString(4)
 	}
-	timeout := resolveRequestTimeoutSec(L, ctx)
+	return doUDPRequest(L, ctx, service, route, route, body, s2cProto, resolveRequestTimeoutSec(L, ctx))
+}
 
-	goRoute := luaValueToRoute(route)
-	routeKey := ctx.Adapter.ExpectedRouteKeyLocked(goRoute)
+// networkUDPRequestRoute UDP 请求-响应，发送路由和响应匹配路由分离。
+// 签名：network.udp_request_route(service, request_route, response_route, body [, s2c_proto [, timeout_sec]])
+//
+// request_route 用于编码请求包，response_route 用于计算等待响应的 routeKey。
+func networkUDPRequestRoute(L *lua.LState) int {
+	ctx := GetContext(L)
+	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
+		L.RaiseError("network not available")
+		return 0
+	}
+	if L.GetTop() < 4 {
+		L.RaiseError("network.udp_request_route requires (service, request_route, response_route, body [, s2c_proto [, timeout_sec]])")
+		return 0
+	}
+
+	service := L.CheckString(1)
+	requestRoute := L.Get(2)
+	responseRoute := L.Get(3)
+	body := []byte(L.CheckString(4))
+	s2cProto := ""
+	if L.GetTop() >= 5 && L.Get(5) != lua.LNil {
+		s2cProto = L.CheckString(5)
+	}
+
+	return doUDPRequest(L, ctx, service, requestRoute, responseRoute, body, s2cProto, resolveRequestTimeoutSecAt(L, ctx, 6))
+}
+
+func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, responseRoute lua.LValue, body []byte, s2cProto string, timeout int) int {
+	routeKey := ctx.Adapter.ExpectedRouteKeyLocked(luaValueToRoute(responseRoute))
 	udpKey := ctx.NetSender.GetUDPSecretKey(service)
 	var encodeStart time.Time
 	if ctx.TimingLevel >= engine.TimingLevelCodec {
 		encodeStart = time.Now()
 	}
-	packet := ctx.Adapter.EncodeUDPLocked(goRoute, body, udpKey)
+	packet := ctx.Adapter.EncodeUDPLocked(luaValueToRoute(requestRoute), body, udpKey)
 	if ctx.TimingLevel >= engine.TimingLevelCodec && !encodeStart.IsZero() {
 		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart)})
 	}

@@ -124,6 +124,39 @@ export interface TaskCompletionReport {
   result: TaskResult;
   errorMsg?: string;
   finishedAt: string;
+  cleanupStatus?: CleanupStatus;
+}
+
+/**
+ * 资源清理状态。
+ *
+ * - ok：清理完成，Lua 运行时已归还。
+ * - partial：部分清理异常。
+ * - timeout：清理超时，部分 Lua 运行时已隔离未归还。
+ * - unknown：节点未上报或停止等待超时，清理状态未知。
+ */
+export type CleanupState = 'ok' | 'partial' | 'timeout' | 'unknown';
+
+export interface CleanupIssue {
+  robotId?: number;
+  account?: string;
+  phase?: string;
+  waitDone?: boolean;
+  closeAllDone?: boolean;
+  message?: string;
+}
+
+export interface CleanupStatus {
+  status: CleanupState;
+  reason?: string;
+  message?: string;
+  durationMs?: number;
+  totalRobots?: number;
+  cleanedRobots?: number;
+  timeoutRobots?: number;
+  luaReturned?: number;
+  luaSkipped?: number;
+  issues?: CleanupIssue[];
 }
 
 export interface TaskDetail extends TaskBrief {
@@ -131,6 +164,7 @@ export interface TaskDetail extends TaskBrief {
   assignments: Assignment[];
   errorMsg?: string;
   reports?: Record<string, TaskCompletionReport>;
+  cleanupSummary?: CleanupStatus;
   agentEvents?: AgentEvent[];
 }
 
@@ -410,6 +444,7 @@ export interface HistoryAgentReport {
   result: TaskResult;
   errorMsg?: string;
   finishedAt: string;
+  cleanupStatus?: CleanupStatus;
 }
 
 export interface HistoryHistogramSummary {

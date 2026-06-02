@@ -196,6 +196,9 @@ function HomeShellInner() {
     return tasksApi.getTask(taskId);
   }, [taskId]);
 
+  // 终态清理状态只通知一次：避免轮询每 5s 重复弹窗
+  const notifiedCleanupRef = useRef<string | null>(null);
+
   usePolling({
     fetcher: taskFetcher,
     intervalMs: policy.intervalMs,
@@ -207,6 +210,37 @@ function HomeShellInner() {
       }
       if (detail.state === 'stopped' || detail.state === 'failed') {
         onTaskFinished();
+        // 首次进入终态时根据 cleanupSummary 弹出运行时清理提示。
+        // partial/timeout/unknown 都需要主动告知，避免用户以为是正常停止。
+        if (notifiedCleanupRef.current !== detail.id) {
+          notifiedCleanupRef.current = detail.id;
+          const summary = detail.cleanupSummary;
+          if (summary && summary.status !== 'ok') {
+            const lines: string[] = [];
+            if (summary.message) lines.push(summary.message);
+            const parts: string[] = [];
+            if (typeof summary.totalRobots === 'number' && summary.totalRobots > 0) {
+              parts.push(`机器人 ${summary.cleanedRobots ?? 0}/${summary.totalRobots}`);
+            }
+            if (typeof summary.timeoutRobots === 'number' && summary.timeoutRobots > 0) {
+              parts.push(`超时 ${summary.timeoutRobots}`);
+            }
+            if (typeof summary.luaSkipped === 'number' && summary.luaSkipped > 0) {
+              parts.push(`Lua 未归还 ${summary.luaSkipped}`);
+            }
+            if (parts.length > 0) lines.push(parts.join(' · '));
+            const titleMap: Record<string, string> = {
+              partial: '任务已停止，但部分资源清理异常',
+              timeout: '任务已停止，但部分机器人清理超时',
+              unknown: '任务已停止，但部分节点清理状态未知',
+            };
+            antApp.notification.warning({
+              message: titleMap[summary.status] ?? '任务已停止，资源清理状态异常',
+              description: lines.length > 0 ? lines.join('\n') : '建议查看节点结果与日志',
+              duration: 10,
+            });
+          }
+        }
       }
     },
     onError: () => {

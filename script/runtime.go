@@ -156,8 +156,11 @@ func (rp *RuntimePool) Acquire() *lua.LState {
 // Release 将 LState 归还到池中。
 // 调用前应清除绑定的 Context。
 func (rp *RuntimePool) Release(L *lua.LState) {
-	// 清除上下文
+	// 清除脚本上下文
 	L.SetField(L.Get(lua.RegistryIndex), registryCtxKey, lua.LNil)
+	// 清除绑定的 context.Context（Robot.Start 通过 L.SetContext 绑定了已 cancel 的 ctx）。
+	// 不清理的话，该 LState 被池内下一个 Robot 复用时会因继承已取消的 ctx 而立即 abort。
+	L.RemoveContext()
 	rp.pool.Put(L)
 }
 

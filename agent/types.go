@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"stressbot/monitor"
+	"stressbot/robot"
 )
 
 // AgentStatus Agent 运行状态。
@@ -80,6 +81,7 @@ type TaskCompletionReport struct {
 	FinishedAt    time.Time                  `json:"finishedAt"`
 	FinalSnapshot *monitor.CollectorSnapshot `json:"finalSnapshot"`
 	StageIndex    int                        `json:"stageIndex,omitempty"`
+	CleanupStatus *robot.CleanupStatus       `json:"cleanupStatus,omitempty"`
 }
 
 // DeregisterRequest 注销请求（best-effort）。

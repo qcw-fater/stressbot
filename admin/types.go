@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"stressbot/monitor"
+	"stressbot/robot"
 )
 
 // ── Task ──────────────────────────────────────────────
@@ -62,6 +63,8 @@ type Task struct {
 	SucceededAgents []string `json:"succeededAgents,omitempty"`
 	// Reports Agent 最终完成报告，key 为 agentID。
 	Reports map[string]TaskCompletionReport `json:"reports,omitempty"`
+	// CleanupSummary 所有节点最终清理状态汇总。
+	CleanupSummary *robot.CleanupStatus `json:"cleanupSummary,omitempty"`
 	// StageReports 渐进式加压阶段完成报告（reset 阶段中间报告）。
 	StageReports []TaskCompletionReport `json:"stageReports,omitempty"`
 	// AgentEvents 任务期间 Agent 状态变化事件。
@@ -325,6 +328,8 @@ type TaskCompletionReport struct {
 	// StageIndex 阶段索引（渐进式加压阶段重置时使用）。
 	// -1 或零值表示最终报告，>= 0 表示该阶段的完成报告。
 	StageIndex int `json:"stageIndex,omitempty"`
+	// CleanupStatus Agent 侧资源清理结果。
+	CleanupStatus *robot.CleanupStatus `json:"cleanupStatus,omitempty"`
 }
 
 // ── 注册 / 心跳 ──────────────────────────────────────
@@ -640,15 +645,18 @@ type HistoryAgentReport struct {
 	FinishedAt time.Time `json:"finishedAt"`
 	// FinalSnapshot 该 Agent 的最终压测指标。
 	FinalSnapshot monitor.CollectorSnapshot `json:"finalSnapshot"`
+	// CleanupStatus Agent 侧资源清理结果。
+	CleanupStatus *robot.CleanupStatus `json:"cleanupStatus,omitempty"`
 }
 
 // HistoryAgentReportSummary 单个节点的历史完成结果摘要。
 type HistoryAgentReportSummary struct {
-	AgentID    string     `json:"agentId"`
-	AgentName  string     `json:"agentName"`
-	Result     TaskResult `json:"result"`
-	ErrorMsg   string     `json:"errorMsg,omitempty"`
-	FinishedAt time.Time  `json:"finishedAt"`
+	AgentID       string               `json:"agentId"`
+	AgentName     string               `json:"agentName"`
+	Result        TaskResult           `json:"result"`
+	ErrorMsg      string               `json:"errorMsg,omitempty"`
+	FinishedAt    time.Time            `json:"finishedAt"`
+	CleanupStatus *robot.CleanupStatus `json:"cleanupStatus,omitempty"`
 }
 
 // HistoryFilter 历史任务查询过滤条件。

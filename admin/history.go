@@ -11,6 +11,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 
 	"stressbot/monitor"
+	"stressbot/robot"
 	"stressbot/utils"
 
 	stresslog "stressbot/utils/log"
@@ -194,10 +195,11 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 	}
 	for agentID, report := range task.Reports {
 		snapJSON, _ := json.Marshal(report.FinalSnapshot) // 同上
+		cleanupJSON, _ := json.Marshal(report.CleanupStatus)
 		_, err = tx.Exec(`
-			INSERT INTO task_report (task_id, agent_id, agent_name, result, error_msg, finished_at, final_snapshot, stage_index)
-			VALUES (?, ?, ?, ?, ?, ?, ?, -1)
-		`, task.ID, agentID, agentNames[agentID], string(report.Result), report.ErrorMsg, report.FinishedAt, snapJSON)
+			INSERT INTO task_report (task_id, agent_id, agent_name, result, error_msg, finished_at, final_snapshot, cleanup_status, stage_index)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, -1)
+		`, task.ID, agentID, agentNames[agentID], string(report.Result), report.ErrorMsg, report.FinishedAt, snapJSON, cleanupJSON)
 		if err != nil {
 			return fmt.Errorf("insert task_report: %w", err)
 		}
@@ -205,10 +207,11 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 	// 3b. task_report (阶段完成报告)
 	for _, report := range task.StageReports {
 		snapJSON, _ := json.Marshal(report.FinalSnapshot)
+		cleanupJSON, _ := json.Marshal(report.CleanupStatus)
 		_, err = tx.Exec(`
-			INSERT INTO task_report (task_id, agent_id, agent_name, result, error_msg, finished_at, final_snapshot, stage_index)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		`, task.ID, report.AgentID, agentNames[report.AgentID], string(report.Result), report.ErrorMsg, report.FinishedAt, snapJSON, report.StageIndex)
+			INSERT INTO task_report (task_id, agent_id, agent_name, result, error_msg, finished_at, final_snapshot, cleanup_status, stage_index)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, task.ID, report.AgentID, agentNames[report.AgentID], string(report.Result), report.ErrorMsg, report.FinishedAt, snapJSON, cleanupJSON, report.StageIndex)
 		if err != nil {
 			return fmt.Errorf("insert task_report (stage): %w", err)
 		}
@@ -419,7 +422,7 @@ func (h *HistoryStore) queryAssignments(ctx context.Context, taskID string) ([]A
 
 // queryReports 查询 Agent 上报结果。
 func (h *HistoryStore) queryReports(ctx context.Context, taskID string) ([]HistoryAgentReport, error) {
-	rows, err := h.db.QueryContext(ctx, `SELECT agent_id, agent_name, result, error_msg, finished_at, final_snapshot FROM task_report WHERE task_id = ?`, taskID)
+	rows, err := h.db.QueryContext(ctx, `SELECT agent_id, agent_name, result, error_msg, finished_at, final_snapshot, cleanup_status FROM task_report WHERE task_id = ?`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("query reports: %w", err)
 	}
@@ -430,13 +433,20 @@ func (h *HistoryStore) queryReports(ctx context.Context, taskID string) ([]Histo
 		var rep HistoryAgentReport
 		var finishedAt sql.NullTime
 		var snapBytes []byte
-		if err := rows.Scan(&rep.AgentID, &rep.AgentName, &rep.Result, &rep.ErrorMsg, &finishedAt, &snapBytes); err != nil {
+		var cleanupBytes []byte
+		if err := rows.Scan(&rep.AgentID, &rep.AgentName, &rep.Result, &rep.ErrorMsg, &finishedAt, &snapBytes, &cleanupBytes); err != nil {
 			return nil, fmt.Errorf("scan report: %w", err)
 		}
 		if finishedAt.Valid {
 			rep.FinishedAt = finishedAt.Time
 		}
 		_ = json.Unmarshal(snapBytes, &rep.FinalSnapshot) // 同上
+		if len(cleanupBytes) > 0 {
+			var cleanup robot.CleanupStatus
+			if err := json.Unmarshal(cleanupBytes, &cleanup); err == nil && cleanup.Status != "" {
+				rep.CleanupStatus = &cleanup
+			}
+		}
 		items = append(items, rep)
 	}
 	return items, nil
@@ -445,7 +455,7 @@ func (h *HistoryStore) queryReports(ctx context.Context, taskID string) ([]Histo
 // queryReportSummaries 查询历史详情页需要的节点结果摘要。
 func (h *HistoryStore) queryReportSummaries(ctx context.Context, taskID string) ([]HistoryAgentReportSummary, error) {
 	rows, err := h.db.QueryContext(ctx, `
-		SELECT agent_id, agent_name, result, error_msg, finished_at
+		SELECT agent_id, agent_name, result, error_msg, finished_at, cleanup_status
 		FROM task_report
 		WHERE task_id = ? AND stage_index = -1
 	`, taskID)
@@ -458,11 +468,18 @@ func (h *HistoryStore) queryReportSummaries(ctx context.Context, taskID string) 
 	for rows.Next() {
 		var rep HistoryAgentReportSummary
 		var finishedAt sql.NullTime
-		if err := rows.Scan(&rep.AgentID, &rep.AgentName, &rep.Result, &rep.ErrorMsg, &finishedAt); err != nil {
+		var cleanupBytes []byte
+		if err := rows.Scan(&rep.AgentID, &rep.AgentName, &rep.Result, &rep.ErrorMsg, &finishedAt, &cleanupBytes); err != nil {
 			return nil, fmt.Errorf("scan report summary: %w", err)
 		}
 		if finishedAt.Valid {
 			rep.FinishedAt = finishedAt.Time
+		}
+		if len(cleanupBytes) > 0 {
+			var cleanup robot.CleanupStatus
+			if err := json.Unmarshal(cleanupBytes, &cleanup); err == nil && cleanup.Status != "" {
+				rep.CleanupStatus = &cleanup
+			}
 		}
 		items = append(items, rep)
 	}

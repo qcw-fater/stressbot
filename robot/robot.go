@@ -52,9 +52,13 @@ type Robot struct {
 	adp            *adapter.RobotAdapter
 	mainService    string        // 主连接服务名，意外断开时停止机器人
 	requestTimeout time.Duration // robotConfig.timeoutSec 注入；用作 Lua tcp/udp_request 默认 timeout
-	timingLevel    int           // monitor.timingDetail 映射后的 engine 计时级别
-	done           chan struct{} // 执行 goroutine 结束信号，Close 时等待
-	onDone         func()        // 执行 goroutine 结束后回调（由 Manager 设置）
+	timingLevel   int           // monitor.timingDetail 映射后的 engine 计时级别
+	execDone      chan struct{} // executor goroutine 结束信号，cleanup 等待它安全退出
+	done          chan struct{} // Robot 生命周期结束信号，Close 时等待
+	onDone        func(*Robot, CleanupStatus) // 执行 goroutine 结束后回调（由 Manager 设置）
+	cleanupOnce   sync.Once
+	cleanupMu     sync.Mutex
+	cleanupResult CleanupStatus
 }
 
 // Config 单个机器人的配置。
@@ -114,6 +118,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		mainService:    cfg.MainService,
 		requestTimeout: cfg.RequestTimeout,
 		timingLevel:    engineTimingLevel,
+		execDone:       make(chan struct{}),
 		done:           make(chan struct{}),
 	}
 
@@ -177,6 +182,11 @@ func (r *Robot) Start() {
 
 		if r.l != nil {
 			r.luaMu.Lock()
+			// 绑定生命周期 ctx 到 LState：cancel 时正在执行的 Lua 脚本（含死循环/超长循环）
+			// 会在下一个指令检查点返回 context canceled 错误并退出，使 cleanup 不再因
+			// 不可中断的 Lua 而永久卡死、隔离 LState 永不回收。
+			// 归还到池前由 RuntimePool.Release 调 RemoveContext 清理，避免复用时被旧 ctx 污染。
+			r.l.SetContext(r.ctx)
 			script.SetContext(r.l, &script.Context{
 				RobotID:               r.id,
 				Account:               r.account,
@@ -196,9 +206,8 @@ func (r *Robot) Start() {
 		monitor.Global().RobotStarted()
 		monitor.Global().RobotRunning()
 
-		done := make(chan struct{})
 		utils.GetWorkPool().Go(func() {
-			defer close(done)
+			defer close(r.execDone)
 			if err := r.executor.Run(r.ctx); err != nil {
 				if r.ctx.Err() == nil {
 					stresslog.Error("[ROBOT] 流程异常退出", zap.Int("id", r.id), zap.Error(err))
@@ -212,15 +221,16 @@ func (r *Robot) Start() {
 		})
 
 		select {
-		case <-done:
+		case <-r.execDone:
 		case <-stopCh:
 			r.cancel()
-			<-done
+			<-r.execDone
 		}
 
-		stresslog.Info("[ROBOT] 已停止", zap.Int("id", r.id), zap.String("account", r.account))
+		cleanup := r.cleanup(CleanupReasonNatural, true)
+		stresslog.Info("[ROBOT] 已停止", zap.Int("id", r.id), zap.String("account", r.account), zap.String("cleanup", string(cleanup.Status)))
 		if r.onDone != nil {
-			r.onDone()
+			r.onDone(r, cleanup)
 		}
 	})
 }
@@ -247,59 +257,114 @@ func (r *Robot) Wait() {
 const robotCloseTimeout = 10 * time.Second
 
 // Close 停止机器人并释放资源。
-// 先 Stop 取消 ctx，再并行关闭连接（释放阻塞中的 RequestResponse）并等待执行退出。
-// 关键修复：r.client.CloseAll() 本身也可能因 listenLoop 回调死锁而长时间阻塞，
-// 必须放进 goroutine 与 r.Wait() 一起在同一个 select 内统一受超时保护。
-func (r *Robot) Close() {
-	r.Stop()
+// 正常路径会归还 Lua LState；超时路径会隔离 LState，避免复用可能仍在使用的运行时。
+func (r *Robot) Close() CleanupStatus {
+	return r.cleanup(CleanupReasonAdminStop, false)
+}
 
-	var waitDone chan struct{}
-	if r.done != nil {
-		waitDone = make(chan struct{})
+func (r *Robot) cleanup(reason CleanupReason, executorDone bool) CleanupStatus {
+	var result CleanupStatus
+	r.cleanupOnce.Do(func() {
+		start := time.Now()
+		r.Stop()
+
+		waitDone := executorDone
+		closeDone := false
+		closeResult := network.CloseAllResult{Done: true}
+
+		closeCh := make(chan network.CloseAllResult, 1)
 		utils.GetWorkPool().Go(func() {
-			r.Wait()
-			close(waitDone)
+			closeCh <- r.client.CloseAllWithTimeout(robotCloseTimeout)
 		})
-	}
-	closeDone := make(chan struct{})
-	utils.GetWorkPool().Go(func() {
-		r.client.CloseAll()
-		close(closeDone)
-	})
 
-	timeout := time.NewTimer(robotCloseTimeout)
-	defer timeout.Stop()
+		waitCh := make(chan struct{}, 1)
+		if !executorDone && r.execDone != nil {
+			utils.GetWorkPool().Go(func() {
+				<-r.execDone
+				waitCh <- struct{}{}
+			})
+		} else {
+			waitDone = true
+		}
 
-	// 等待 waitDone（如有）与 closeDone 双双完成，或整体超时。
-	// 已完成的 channel 置 nil，nil channel 上的接收永远阻塞，自然退出循环。
-	pending := 1
-	if waitDone != nil {
-		pending = 2
-	}
-	for pending > 0 {
-		select {
-		case <-waitDone:
-			waitDone = nil
-			pending--
-		case <-closeDone:
-			closeDone = nil
-			pending--
-		case <-timeout.C:
-			stresslog.Error("[ROBOT] 关闭等待超时，跳过资源归还（可能存在死锁，进程退出时回收）",
+		timer := time.NewTimer(robotCloseTimeout)
+		defer timer.Stop()
+		for !(waitDone && closeDone) {
+			select {
+			case <-waitCh:
+				waitDone = true
+			case cr := <-closeCh:
+				closeDone = true
+				closeResult = cr
+			case <-timer.C:
+				phase := "both"
+				if waitDone && !closeDone {
+					phase = "close_all"
+				} else if !waitDone && closeDone {
+					phase = "executor"
+				}
+				issue := CleanupIssue{
+					RobotID:      r.id,
+					Account:      r.account,
+					Phase:        phase,
+					WaitDone:     waitDone,
+					CloseAllDone: closeDone,
+					Message:      "机器人清理超时，Lua 运行时未归还",
+				}
+				result = cleanupTimeout(reason, time.Since(start), issue)
+				stresslog.Error("[ROBOT] 清理超时，已隔离 Lua 运行时",
+					zap.Int("id", r.id),
+					zap.String("account", r.account),
+					zap.String("reason", string(reason)),
+					zap.String("phase", phase),
+					zap.Duration("timeout", robotCloseTimeout),
+					zap.Bool("waitDone", waitDone),
+					zap.Bool("closeAllDone", closeDone),
+					zap.Int("decodeTimeouts", closeResult.DecodeTimeouts),
+					zap.Int("listenTimeouts", closeResult.ListenTimeouts))
+				return
+			}
+		}
+
+		if !closeResult.Done {
+			issue := CleanupIssue{
+				RobotID:      r.id,
+				Account:      r.account,
+				Phase:        "close_all",
+				WaitDone:     true,
+				CloseAllDone: false,
+				Message:      closeResult.Message,
+			}
+			result = cleanupTimeout(reason, time.Since(start), issue)
+			stresslog.Error("[ROBOT] 连接清理超时，已隔离 Lua 运行时",
 				zap.Int("id", r.id),
 				zap.String("account", r.account),
-				zap.Duration("timeout", robotCloseTimeout),
-				zap.Bool("waitDone", waitDone == nil),
-				zap.Bool("closeDone", closeDone == nil))
+				zap.Int("decodeTimeouts", closeResult.DecodeTimeouts),
+				zap.Int("listenTimeouts", closeResult.ListenTimeouts))
 			return
 		}
-	}
 
-	if r.l != nil && r.luaPool != nil {
-		r.luaPool.Release(r.l)
-		r.l = nil
+		if r.httpClient != nil {
+			if tr, ok := r.httpClient.Transport.(*http.Transport); ok {
+				tr.CloseIdleConnections()
+			}
+		}
+		if r.l != nil && r.luaPool != nil {
+			r.luaPool.Release(r.l)
+			r.l = nil
+		}
+		r.state.Clear()
+		result = cleanupOK(reason, time.Since(start))
+	})
+
+	r.cleanupMu.Lock()
+	if result.Status != "" {
+		r.cleanupResult = result
+	} else {
+		result = r.cleanupResult
 	}
-	r.state.Clear()
+	r.cleanupMu.Unlock()
+	return result
 }
 
 // ConnectTCP 建立 TCP 连接
@@ -340,7 +405,6 @@ func (r *Robot) ConnectTCP(serviceName, address string) bool {
 			stresslog.Warn("[ROBOT] 主连接意外断开，停止机器人",
 				zap.Int("id", r.id), zap.String("account", r.account), zap.String("service", serviceName))
 			r.Stop()
-			r.client.CloseAll()
 		} else {
 			stresslog.Debug("[ROBOT] TCP 连接断开",
 				zap.Int("id", r.id), zap.String("account", r.account), zap.String("service", serviceName))
@@ -689,6 +753,10 @@ func parseServer(server string) (proto, service string, ok bool) {
 func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.ListenDef) network.ListenCallBack {
 	if cbDef.Script != "" {
 		return func(msg *network.Message) {
+			if h.robot.ctx.Err() != nil {
+				stresslog.Debug("[ROBOT] 停止阶段跳过 Lua 回调", zap.Int("id", h.robot.id), zap.String("script", cbDef.Script))
+				return
+			}
 			if h.robot.l == nil || h.robot.luaPool == nil {
 				stresslog.Error("[ROBOT] Lua 运行时未初始化", zap.String("script", cbDef.Script))
 				monitor.Global().RecordCallbackError(cbName, engine.NewActionError(errcode.ErrCallbackLua, "script="+cbDef.Script))
@@ -726,6 +794,10 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 	}
 
 	return func(msg *network.Message) {
+		if h.robot.ctx.Err() != nil {
+			stresslog.Debug("[ROBOT] 停止阶段跳过状态回调", zap.Int("id", h.robot.id), zap.String("callback", cbName))
+			return
+		}
 		if len(msg.Data) == 0 {
 			return
 		}
@@ -823,7 +895,7 @@ func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body
 	if len(body) > 0 {
 		switch contentType {
 		case "json":
-			req, err = http.NewRequest(method, reqURL, bytes.NewReader(body))
+			req, err = http.NewRequestWithContext(ns.robot.ctx, method, reqURL, bytes.NewReader(body))
 			if err != nil {
 				return 0, nil, 0, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 			}
@@ -833,19 +905,19 @@ func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body
 			if json.Unmarshal(body, &values) == nil {
 				body = []byte(values.Encode())
 			}
-			req, err = http.NewRequest(method, reqURL, strings.NewReader(string(body)))
+			req, err = http.NewRequestWithContext(ns.robot.ctx, method, reqURL, strings.NewReader(string(body)))
 			if err != nil {
 				return 0, nil, 0, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 			}
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		default:
-			req, err = http.NewRequest(method, reqURL, bytes.NewReader(body))
+			req, err = http.NewRequestWithContext(ns.robot.ctx, method, reqURL, bytes.NewReader(body))
 			if err != nil {
 				return 0, nil, 0, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 			}
 		}
 	} else {
-		req, err = http.NewRequest(method, reqURL, nil)
+		req, err = http.NewRequestWithContext(ns.robot.ctx, method, reqURL, nil)
 		if err != nil {
 			return 0, nil, 0, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 		}
@@ -855,6 +927,10 @@ func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body
 	resp, err := ns.robot.httpClient.Do(req)
 	if err != nil {
 		netLatency := time.Since(netStart)
+		if ns.robot.ctx.Err() != nil {
+			stresslog.Debug("[HTTP] 请求已取消", zap.String("url", reqURL), zap.Error(err))
+			return 0, nil, netLatency, engine.NewActionError(errcode.ErrActionCanceled, "url="+reqURL, err)
+		}
 		stresslog.Warn("[HTTP] 请求失败", zap.String("url", reqURL), zap.Error(err))
 		return 0, nil, netLatency, engine.NewActionError(errcode.ErrSendFailed, "url="+reqURL, err)
 	}

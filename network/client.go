@@ -10,6 +10,16 @@ import (
 	stresslog "stressbot/utils/log"
 )
 
+// CloseAllResult 表示一次连接池关闭的收尾结果。
+type CloseAllResult struct {
+	Done           bool
+	TCPCount       int
+	UDPCount       int
+	DecodeTimeouts int
+	ListenTimeouts int
+	Message        string
+}
+
 // Client 管理压测机器人的所有网络连接。
 type Client struct {
 	name           string
@@ -111,6 +121,12 @@ func (c *Client) CloseUDP(serviceName string) {
 // 等待顺序：先 decode（OnReceive 的源头）再 listen（OnReceive 的下游），
 // 确保任何回调离开后不再有数据流入 Robot 资源。
 func (c *Client) CloseAll() {
+	_ = c.CloseAllWithTimeout(0)
+}
+
+// CloseAllWithTimeout 关闭所有连接并带超时等待后台 goroutine 退出。
+// timeout<=0 表示不设超时，保持旧 CloseAll 的阻塞语义。
+func (c *Client) CloseAllWithTimeout(timeout time.Duration) CloseAllResult {
 	c.mu.Lock()
 	tcpConns := c.tcpConn
 	udpConns := c.udpConn
@@ -118,6 +134,7 @@ func (c *Client) CloseAll() {
 	c.udpConn = make(map[string]*Connection)
 	c.mu.Unlock()
 
+	result := CloseAllResult{Done: true, TCPCount: len(tcpConns), UDPCount: len(udpConns)}
 	stresslog.Info("[CLIENT] 关闭所有连接", zap.String("robot", c.name),
 		zap.Int("tcp", len(tcpConns)), zap.Int("udp", len(udpConns)))
 
@@ -127,19 +144,50 @@ func (c *Client) CloseAll() {
 	for _, conn := range udpConns {
 		conn.Close()
 	}
-	// 1. 等 decodeLoop 退出：源头停掉后不会再有新消息进入 listenCh
+
+	deadline := time.Time{}
+	if timeout > 0 {
+		deadline = time.Now().Add(timeout)
+	}
+	remaining := func() time.Duration {
+		if deadline.IsZero() {
+			return 0
+		}
+		d := time.Until(deadline)
+		if d <= 0 {
+			return time.Nanosecond
+		}
+		return d
+	}
+
 	for _, conn := range tcpConns {
-		conn.WaitDecodeDone()
+		if !conn.WaitDecodeDoneTimeout(remaining()) {
+			result.Done = false
+			result.DecodeTimeouts++
+		}
 	}
 	for _, conn := range udpConns {
-		conn.WaitDecodeDone()
+		if !conn.WaitDecodeDoneTimeout(remaining()) {
+			result.Done = false
+			result.DecodeTimeouts++
+		}
 	}
-	// 2. 等 listenLoop 退出：回调串行执行，loop 退出后不会有任何回调
-	//    仍在使用 Robot 的 LState
 	for _, conn := range tcpConns {
-		conn.WaitListenDone()
+		if !conn.WaitListenDoneTimeout(remaining()) {
+			result.Done = false
+			result.ListenTimeouts++
+		}
 	}
 	for _, conn := range udpConns {
-		conn.WaitListenDone()
+		if !conn.WaitListenDoneTimeout(remaining()) {
+			result.Done = false
+			result.ListenTimeouts++
+		}
 	}
+	if result.Done {
+		result.Message = "连接清理完成"
+	} else {
+		result.Message = "连接清理超时"
+	}
+	return result
 }

@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS task_report (
     error_msg       TEXT,
     finished_at     DATETIME(3)  NULL,
     final_snapshot  JSON         NULL,
+    cleanup_status  JSON         NULL,
     stage_index     INT          NOT NULL DEFAULT -1,
     INDEX idx_task (task_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

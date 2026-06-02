@@ -27,6 +27,17 @@ import (
 // 部分机器人卡死时 gnet.Client.Stop() 可能长时间阻塞，需要超时保护。
 const taskCleanupTimeout = 30 * time.Second
 
+// RunResult 表示 TaskRunner 一次执行的最终结果。
+type RunResult struct {
+	Result        TaskResult
+	ErrorMsg      string
+	CleanupStatus robot.CleanupStatus
+}
+
+func runFailed(msg string) RunResult {
+	return RunResult{Result: TaskFailed, ErrorMsg: msg, CleanupStatus: robot.UnknownCleanupStatus(robot.CleanupReasonStopWaitTimeout, "任务启动失败，未进入机器人清理阶段")}
+}
+
 // TaskRunner 管理单次压测任务的执行：拉配置、写目录、起 Manager、等完成。
 type TaskRunner struct {
 	assignment *TaskAssignment
@@ -53,7 +64,7 @@ func NewTaskRunner(assignment *TaskAssignment, cfg *ResolvedConfig, cli *AdminCl
 }
 
 // Run 执行任务。阻塞直到任务完成或 ctx 被取消。
-func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
+func (r *TaskRunner) Run(ctx context.Context) RunResult {
 	taskID := r.assignment.TaskID
 
 	// 0. 任务级临时切换日志等级（来自前端 RobotConfig.logLevel）
@@ -82,10 +93,10 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 	protoDir := filepath.Join(confDir, "proto")
 	scriptsDir := filepath.Join(confDir, "scripts")
 	if err := os.MkdirAll(protoDir, 0o755); err != nil {
-		return TaskFailed, fmt.Sprintf("创建临时目录失败: %v", err)
+		return runFailed(fmt.Sprintf("创建临时目录失败: %v", err))
 	}
 	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
-		return TaskFailed, fmt.Sprintf("创建脚本目录失败: %v", err)
+		return runFailed(fmt.Sprintf("创建脚本目录失败: %v", err))
 	}
 
 	stresslog.Info("[TASK] 临时目录已创建", zap.String("dir", r.workDir))
@@ -97,16 +108,16 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 			url := configURL + "/" + relPath
 			targetPath := filepath.Join(confDir, relPath)
 			if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-				return TaskFailed, fmt.Sprintf("创建目录 %s 失败: %v", filepath.Dir(targetPath), err)
+				return runFailed(fmt.Sprintf("创建目录 %s 失败: %v", filepath.Dir(targetPath), err))
 			}
 			if err := r.downloadFile(ctx, url, targetPath); err != nil {
-				return TaskFailed, fmt.Sprintf("下载 %s 失败: %v", relPath, err)
+				return runFailed(fmt.Sprintf("下载 %s 失败: %v", relPath, err))
 			}
 			stresslog.Info("[TASK] 配置文件已下载", zap.String("path", relPath))
 		}
 		stresslog.Info("[TASK] 所有配置文件已下载", zap.Int("count", len(r.assignment.ConfigFiles)))
 	} else {
-		return TaskFailed, "无配置文件可下载（configUrl 或 configFiles 为空）"
+		return runFailed("无配置文件可下载（configUrl 或 configFiles 为空）")
 	}
 
 	// 3. 加载协议适配器（优先使用任务下发的 codec.lua，回退到 Agent 本地配置）
@@ -122,8 +133,8 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 	poolSize := adapter.SuggestedPoolSize()
 	adp, err := adapter.NewLuaAdapter(poolSize, adapterScript, errorMapScript)
 	if err != nil {
-	stresslog.Error("[TASK] 加载适配器失败", zap.String("taskID", taskID), zap.Error(err))
-		return TaskFailed, fmt.Sprintf("加载适配器失败: %v", err)
+		stresslog.Error("[TASK] 加载适配器失败", zap.String("taskID", taskID), zap.Error(err))
+		return runFailed(fmt.Sprintf("加载适配器失败: %v", err))
 	}
 	defer adp.Close()
 
@@ -131,8 +142,8 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 	loader := protox.NewLoader([]string{protoDir}, nil)
 	files, err := loader.Load()
 	if err != nil {
-	stresslog.Error("[TASK] 加载 proto 文件失败", zap.String("taskID", taskID), zap.Error(err))
-		return TaskFailed, fmt.Sprintf("加载 proto 文件失败: %v", err)
+		stresslog.Error("[TASK] 加载 proto 文件失败", zap.String("taskID", taskID), zap.Error(err))
+		return runFailed(fmt.Sprintf("加载 proto 文件失败: %v", err))
 	}
 
 	registry := protox.NewRegistry(files)
@@ -141,8 +152,8 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 	// 5. 加载流程配置
 	flow, err := loadTaskFlow(filepath.Join(confDir, "flow", "flow.json"))
 	if err != nil {
-	stresslog.Error("[TASK] 加载流程配置失败", zap.String("taskID", taskID), zap.Error(err))
-		return TaskFailed, fmt.Sprintf("加载流程配置失败: %v", err)
+		stresslog.Error("[TASK] 加载流程配置失败", zap.String("taskID", taskID), zap.Error(err))
+		return runFailed(fmt.Sprintf("加载流程配置失败: %v", err))
 	}
 
 	// 回填 ActionDef.Name
@@ -172,8 +183,8 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 	// 8. 启动 gnet 网络引擎
 	dialer := network.NewDialer(adp, hbInterval)
 	if err := dialer.Start(); err != nil {
-	stresslog.Error("[TASK] 启动网络引擎失败", zap.String("taskID", taskID), zap.Error(err))
-		return TaskFailed, fmt.Sprintf("启动网络引擎失败: %v", err)
+		stresslog.Error("[TASK] 启动网络引擎失败", zap.String("taskID", taskID), zap.Error(err))
+		return runFailed(fmt.Sprintf("启动网络引擎失败: %v", err))
 	}
 	defer stopDialerWithTimeout(dialer)
 
@@ -227,9 +238,10 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 		// 这是"用户主动停止"而非"失败"，按 TaskStopped 上报，避免历史归档误判为失败。
 		if ctx.Err() == context.Canceled || strings.Contains(startErr.Error(), context.Canceled.Error()) {
 			stresslog.Info("[TASK] 启动阶段被取消", zap.String("taskID", taskID), zap.Error(startErr))
-			return TaskStopped, ""
+			cleanup := mgr.StopAll()
+			return RunResult{Result: TaskStopped, CleanupStatus: cleanup}
 		}
-		return TaskFailed, fmt.Sprintf("启动机器人失败: %v", startErr)
+		return runFailed(fmt.Sprintf("启动机器人失败: %v", startErr))
 	}
 	stresslog.Info("[TASK] 任务执行中",
 		zap.String("taskID", taskID),
@@ -243,13 +255,13 @@ func (r *TaskRunner) Run(ctx context.Context) (TaskResult, string) {
 	}
 
 	// 13. 停止所有机器人
-	mgr.StopAll()
+	cleanup := mgr.StopAll()
 
 	if ctx.Err() == context.Canceled {
-		return TaskStopped, ""
+		return RunResult{Result: TaskStopped, CleanupStatus: cleanup}
 	}
-stresslog.Info("[TASK] 任务已完成", zap.String("taskID", taskID), zap.Int("totalBots", r.assignment.TotalBots))
-	return TaskCompleted, ""
+	stresslog.Info("[TASK] 任务已完成", zap.String("taskID", taskID), zap.Int("totalBots", r.assignment.TotalBots))
+	return RunResult{Result: TaskCompleted, CleanupStatus: cleanup}
 }
 
 // Cleanup 清理临时目录。

@@ -181,7 +181,11 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 	if len(timeoutOverride) > 0 && timeoutOverride[0] > 0 {
 		timeout = timeoutOverride[0]
 	}
-	timeoutTimer := time.After(timeout)
+	// 用 NewTimer + Stop 而非 time.After：响应通常在毫秒级到达即提前返回，
+	// time.After 的底层 timer 要到 timeout（默认 60s）才回收，高 QPS 下会堆积
+	// 数十万个悬挂 timer，徒增堆占用与 GC 压力。
+	timeoutTimer := time.NewTimer(timeout)
+	defer timeoutTimer.Stop()
 	select {
 	case <-c.ctx.Done():
 		// ACK 可能先于 ctx cancel 入队但 select 随机选到了此分支，drain channel。
@@ -228,7 +232,7 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 				zap.Int("bodyLen", len(resp.Data)), zap.Duration("wireRTT", timing.WireRTT))
 		}
 		return resp, timing, nil
-	case <-timeoutTimer:
+	case <-timeoutTimer.C:
 		stresslog.Warn("[NETWORK] RequestResponse 等待超时",
 			zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
 			zap.String("robot", c.robotName),
@@ -319,6 +323,35 @@ func (c *Connection) WaitListenDone() {
 	c.mu.Unlock()
 	if ch != nil {
 		<-ch
+	}
+}
+
+// WaitListenDoneTimeout 带超时等待 listenLoop 退出。
+func (c *Connection) WaitListenDoneTimeout(timeout time.Duration) bool {
+	if c == nil {
+		return true
+	}
+	c.mu.Lock()
+	ch := c.listenDone
+	c.mu.Unlock()
+	if ch == nil {
+		return true
+	}
+	if timeout <= 0 {
+		select {
+		case <-ch:
+			return true
+		default:
+			return false
+		}
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-ch:
+		return true
+	case <-timer.C:
+		return false
 	}
 }
 
@@ -512,6 +545,29 @@ func (c *Connection) WaitDecodeDone() {
 	}
 	if c.decodeDone != nil {
 		<-c.decodeDone
+	}
+}
+
+// WaitDecodeDoneTimeout 带超时等待 decode goroutine 退出。
+func (c *Connection) WaitDecodeDoneTimeout(timeout time.Duration) bool {
+	if c == nil || c.decodeDone == nil {
+		return true
+	}
+	if timeout <= 0 {
+		select {
+		case <-c.decodeDone:
+			return true
+		default:
+			return false
+		}
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-c.decodeDone:
+		return true
+	case <-timer.C:
+		return false
 	}
 }
 

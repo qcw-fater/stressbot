@@ -306,9 +306,31 @@ export function RuntimeBar({
         </Space>
       )}
       {mode === 'finalReport' && (
-        <Tag color={activeTask?.state === 'failed' ? 'error' : 'default'} style={{ margin: 0 }}>
-          已结束（{activeTask?.state ?? 'stopped'}）
-        </Tag>
+        <Space size={4}>
+          <Tag color={activeTask?.state === 'failed' ? 'error' : 'default'} style={{ margin: 0 }}>
+            已结束（{activeTask?.state ?? 'stopped'}）
+          </Tag>
+          {(() => {
+            const detail = activeTask as { cleanupSummary?: import('@/types/api').CleanupStatus } | null;
+            const summary = detail?.cleanupSummary;
+            if (!summary || summary.status === 'ok') return null;
+            const map: Record<string, { color: string; label: string }> = {
+              partial: { color: 'orange', label: '部分清理' },
+              timeout: { color: 'red', label: '清理超时' },
+              unknown: { color: 'default', label: '清理未知' },
+            };
+            const info = map[summary.status] ?? { color: 'orange', label: '清理异常' };
+            const detailLines: string[] = [];
+            if (summary.message) detailLines.push(summary.message);
+            if (summary.timeoutRobots) detailLines.push(`超时机器人 ${summary.timeoutRobots}`);
+            if (summary.luaSkipped) detailLines.push(`Lua 未归还 ${summary.luaSkipped}`);
+            return (
+              <Tooltip title={detailLines.join('；') || info.label}>
+                <Tag color={info.color} style={{ margin: 0 }}>{info.label}</Tag>
+              </Tooltip>
+            );
+          })()}
+        </Space>
       )}
 
       {SECTION_DIVIDER}

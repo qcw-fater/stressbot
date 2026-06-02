@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"stressbot/monitor"
+	"stressbot/robot"
 	"stressbot/utils"
 	stresslog "stressbot/utils/log"
 
@@ -245,12 +246,14 @@ func (s *AdminServer) onAgentStatusChange(agentID string, from, to AgentStatus) 
 				t.Reports = make(map[string]TaskCompletionReport)
 			}
 			if _, exists := t.Reports[agentID]; !exists {
+				cleanup := robot.UnknownCleanupStatus(robot.CleanupReasonOfflineSynthetic, "节点重新注册，清理状态未知")
 				t.Reports[agentID] = TaskCompletionReport{
-					AgentID:    agentID,
-					TaskID:     t.ID,
-					Result:     ResultFailed,
-					ErrorMsg:   "Agent 重新注册，任务已丢失",
-					FinishedAt: time.Now(),
+					AgentID:       agentID,
+					TaskID:        t.ID,
+					Result:        ResultFailed,
+					ErrorMsg:      "Agent 重新注册，任务已丢失",
+					FinishedAt:    time.Now(),
+					CleanupStatus: &cleanup,
 				}
 			}
 		})
@@ -305,22 +308,28 @@ func (s *AdminServer) onAgentStatusChange(agentID string, from, to AgentStatus) 
 
 	// 任务正在 stopping 时节点离线 → 立刻合成 report
 	if task.State == TaskStopping {
+		complete := false
 		s.tasks.Update(task.ID, func(t *Task) {
 			if t.Reports == nil {
 				t.Reports = make(map[string]TaskCompletionReport)
 			}
 			if _, exists := t.Reports[agentID]; !exists {
+				cleanup := robot.UnknownCleanupStatus(robot.CleanupReasonOfflineSynthetic, "节点离线，清理状态未知")
 				t.Reports[agentID] = TaskCompletionReport{
-					AgentID:    agentID,
-					TaskID:     task.ID,
-					Result:     ResultFailed,
-					ErrorMsg:   "节点离线",
-					FinishedAt: time.Now(),
+					AgentID:       agentID,
+					TaskID:        task.ID,
+					Result:        ResultFailed,
+					ErrorMsg:      "节点离线",
+					FinishedAt:    time.Now(),
+					CleanupStatus: &cleanup,
 				}
 			}
+			if len(t.Reports) == len(t.Assignments) {
+				t.CleanupSummary = aggregateTaskCleanup(t)
+				complete = true
+			}
 		})
-		task, _ = s.tasks.Get(task.ID)
-		if len(task.Reports) == len(task.Assignments) {
+		if complete {
 			if _, err := s.tasks.Transition(task.ID, TaskStopping, TaskStopped); err != nil {
 				stresslog.Warn("[ADMIN] 状态转换失败", zap.String("taskId", task.ID), zap.Error(err))
 			}
@@ -330,6 +339,24 @@ func (s *AdminServer) onAgentStatusChange(agentID string, from, to AgentStatus) 
 
 	// 任务 running 时节点离线 → 检查是否所有分配节点都已失效（offline 或已合成 report）
 	s.checkAndStopIfAllLost(task.ID)
+}
+
+// aggregateTaskCleanup 把任务所有节点的 report.CleanupStatus 合并为任务级清理摘要。
+// 缺失 CleanupStatus 的节点（如旧 Agent 或未上报）按 unknown 计入，避免误判为"清理完成"。
+func aggregateTaskCleanup(t *Task) *robot.CleanupStatus {
+	if t == nil || len(t.Reports) == 0 {
+		return nil
+	}
+	statuses := make([]robot.CleanupStatus, 0, len(t.Reports))
+	for _, report := range t.Reports {
+		if report.CleanupStatus != nil {
+			statuses = append(statuses, *report.CleanupStatus)
+		} else {
+			statuses = append(statuses, robot.UnknownCleanupStatus(robot.CleanupReasonStopWaitTimeout, "节点未上报清理结果"))
+		}
+	}
+	cleanup := robot.MergeCleanupStatus(robot.CleanupReasonAdminStop, statuses...)
+	return &cleanup
 }
 
 // synthesizeOfflineReports 为已离线且未上报的分配节点合成 stopped report。
@@ -356,12 +383,14 @@ func (s *AdminServer) synthesizeOfflineReports(taskID string) bool {
 			}
 			node, nodeOk := s.agents.Get(agentID)
 			if !nodeOk || node.Status == AgentOffline {
+				cleanup := robot.UnknownCleanupStatus(robot.CleanupReasonOfflineSynthetic, "节点离线，未上报清理结果")
 				t.Reports[agentID] = TaskCompletionReport{
-					AgentID:    agentID,
-					TaskID:     taskID,
-					Result:     ResultStopped,
-					ErrorMsg:   "节点离线，未上报",
-					FinishedAt: time.Now(),
+					AgentID:       agentID,
+					TaskID:        taskID,
+					Result:        ResultStopped,
+					ErrorMsg:      "节点离线，未上报",
+					FinishedAt:    time.Now(),
+					CleanupStatus: &cleanup,
 				}
 			stresslog.Info("[ADMIN] 合成离线节点报告",
 					zap.String("taskID", taskID), zap.String("agentID", agentID),
@@ -378,6 +407,9 @@ func (s *AdminServer) synthesizeOfflineReports(taskID string) bool {
 		expected := len(targets)
 		if allReported && len(t.Reports) < expected {
 			allReported = false
+		}
+		if allReported {
+			t.CleanupSummary = aggregateTaskCleanup(t)
 		}
 	})
 	return allReported
@@ -415,15 +447,18 @@ func (s *AdminServer) startStopTimeout(taskID string) {
 			}
 			for _, agentID := range targets {
 				if _, exists := t.Reports[agentID]; !exists {
+					cleanup := robot.UnknownCleanupStatus(robot.CleanupReasonStopWaitTimeout, "停止等待超时，节点未响应，清理状态未知")
 					t.Reports[agentID] = TaskCompletionReport{
-						AgentID:    agentID,
-						TaskID:     taskID,
-						Result:     ResultStopped,
-						ErrorMsg:   "停止超时，节点未响应",
-						FinishedAt: time.Now(),
+						AgentID:       agentID,
+						TaskID:        taskID,
+						Result:        ResultStopped,
+						ErrorMsg:      "停止超时，节点未响应",
+						FinishedAt:    time.Now(),
+						CleanupStatus: &cleanup,
 					}
 				}
 			}
+			t.CleanupSummary = aggregateTaskCleanup(t)
 		})
 		if _, err := s.tasks.Transition(taskID, TaskStopping, TaskStopped); err != nil {
 			stresslog.Warn("[ADMIN] 状态转换失败", zap.String("taskId", taskID), zap.Error(err))
@@ -518,15 +553,18 @@ func (s *AdminServer) autoStopTask(taskID string, reason string) {
 		}
 		for _, agentID := range targets {
 			if _, ok := t.Reports[agentID]; !ok {
+				cleanup := robot.UnknownCleanupStatus(robot.CleanupReasonStopWaitTimeout, "节点已失效，清理状态未知")
 				t.Reports[agentID] = TaskCompletionReport{
-					AgentID:    agentID,
-					TaskID:     taskID,
-					Result:     ResultFailed,
-					ErrorMsg:   reason,
-					FinishedAt: time.Now(),
+					AgentID:       agentID,
+					TaskID:        taskID,
+					Result:        ResultFailed,
+					ErrorMsg:      reason,
+					FinishedAt:    time.Now(),
+					CleanupStatus: &cleanup,
 				}
 			}
 		}
+		t.CleanupSummary = aggregateTaskCleanup(t)
 	})
 
 	if _, err := s.tasks.Transition(taskID, TaskStopping, TaskFailed); err != nil {

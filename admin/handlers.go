@@ -315,6 +315,7 @@ func (s *AdminServer) handleAgentTaskDone(w http.ResponseWriter, r *http.Request
 			expected = len(t.Assignments)
 		}
 		if len(t.Reports) == expected {
+			t.CleanupSummary = aggregateTaskCleanup(t)
 			if t.State == TaskRunning {
 				needTransition = TaskRunning
 			} else if t.State == TaskStopping {

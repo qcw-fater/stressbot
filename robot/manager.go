@@ -64,6 +64,8 @@ type Manager struct {
 	stopped  atomic.Int32
 	doneCh   chan struct{} // 所有机器人停止后关闭
 	stopOnce sync.Once
+	cleanupMu sync.Mutex
+	cleanupSummary CleanupStatus
 
 	// OnStageReset 阶段重置回调，由 TaskRunner 注入。
 	// 在 resetBots() 完成后调用，用于上报当前阶段指标并重置采集器。
@@ -271,74 +273,137 @@ const closeRobotsTimeout = 15 * time.Second
 
 // closeRobotsConcurrent 并发关闭一批机器人并等待全部完成。
 // 单个 robot 卡死不会阻塞其他 robot 的关闭，整体超过 closeRobotsTimeout 后强制返回。
-func closeRobotsConcurrent(robots []*Robot, onClosed func()) {
+func closeRobotsConcurrent(robots []*Robot, reason CleanupReason) CleanupStatus {
 	if len(robots) == 0 {
-		return
+		return emptyCleanupSummary(reason)
 	}
 	var wg sync.WaitGroup
+	results := make(chan CleanupStatus, len(robots))
 	for _, r := range robots {
 		r := r
 		wg.Add(1)
 		utils.GetWorkPool().Go(func() {
 			defer wg.Done()
-			r.Close()
-			if onClosed != nil {
-				onClosed()
-			}
+			results <- r.cleanup(reason, false)
 		})
 	}
 
-	doneCh := make(chan struct{})
-	utils.GetWorkPool().Go(func() {
-		wg.Wait()
-		close(doneCh)
-	})
-
-	select {
-	case <-doneCh:
-	case <-time.After(closeRobotsTimeout):
-		stresslog.Error("[MANAGER] 批量关闭机器人超时，强制继续推进",
-			zap.Int("total", len(robots)),
-			zap.Duration("timeout", closeRobotsTimeout))
+	statuses := make([]CleanupStatus, 0, len(robots))
+	timer := time.NewTimer(closeRobotsTimeout)
+	defer timer.Stop()
+	for len(statuses) < len(robots) {
+		select {
+		case cleanup := <-results:
+			statuses = append(statuses, cleanup)
+		case <-timer.C:
+			stresslog.Error("[MANAGER] 批量关闭机器人超时，强制继续推进",
+				zap.Int("total", len(robots)),
+				zap.Int("done", len(statuses)),
+				zap.Duration("timeout", closeRobotsTimeout))
+			missing := len(robots) - len(statuses)
+			for i := 0; i < missing; i++ {
+				statuses = append(statuses, CleanupStatus{
+					Status:        CleanupTimeout,
+					Reason:        reason,
+					Message:       "批量关闭等待超时，机器人清理结果未返回",
+					TotalRobots:   1,
+					TimeoutRobots: 1,
+					LuaSkipped:    1,
+				})
+			}
+		}
 	}
+	return MergeCleanupStatus(reason, statuses...)
 }
 
 // StopAll 停止所有机器人并等待执行 goroutine 结束。
-func (m *Manager) StopAll() {
+//
+// 返回的 CleanupStatus 由两部分合并而成：
+//  1. prior：在本次 StopAll 之前就已"自然完成"的机器人，其清理结果由各自的
+//     Start goroutine 经 onRobotDone → recordCleanup 累积进 m.cleanupSummary。
+//     定时停止 / 流程自然跑完时，机器人会先从 m.robots 中摘除，若不读这里就会丢失它们的清理状态。
+//  2. closeResult：本次 StopAll 主动关闭的、仍在 m.robots 中的机器人。
+//
+// prior 必须在触发关闭"之前"读取：此刻仍在 m.robots 里的机器人都还没结束，
+// 因而尚未进入 m.cleanupSummary，两部分天然不重叠，避免重复计数。
+func (m *Manager) StopAll() CleanupStatus {
 	m.cancel()
 	m.mu.RLock()
 	robots := make([]*Robot, len(m.robots))
 	copy(robots, m.robots)
 	m.mu.RUnlock()
 
-	closeRobotsConcurrent(robots, nil)
+	prior := m.CleanupSummary()
+
+	closeResult := closeRobotsConcurrent(robots, CleanupReasonAdminStop)
 	m.stopOnce.Do(func() { close(m.doneCh) })
-	stresslog.Info("[MANAGER] 全部机器人已停止", zap.Int("count", len(robots)))
+
+	cleanup := MergeCleanupStatus(CleanupReasonAdminStop, prior, closeResult)
+	stresslog.Info("[MANAGER] 全部机器人已停止",
+		zap.Int("count", len(robots)),
+		zap.String("cleanup", string(cleanup.Status)),
+		zap.Int("totalRobots", cleanup.TotalRobots),
+		zap.Int("timeoutRobots", cleanup.TimeoutRobots),
+		zap.Int("luaSkipped", cleanup.LuaSkipped))
+	return cleanup
 }
 
 // resetBots 停止并清空所有已有机器人，但保持 Manager 可继续创建新机器人。
 // 与 StopAll 不同：不 cancel context、不关闭 doneCh。
 // 并发 Close：单个 robot 卡死（如 lua 嵌套回调死锁）不应阻塞阶段切换。
-func (m *Manager) resetBots() {
+func (m *Manager) resetBots() CleanupStatus {
 	m.mu.Lock()
 	robots := make([]*Robot, len(m.robots))
 	copy(robots, m.robots)
 	m.robots = m.robots[:0]
 	m.mu.Unlock()
 
-	closeRobotsConcurrent(robots, nil)
+	cleanup := closeRobotsConcurrent(robots, CleanupReasonRampReset)
 	// 重置计数器，使后续阶段的 onRobotDone 匹配逻辑正确
 	m.started.Add(int32(-len(robots)))
 	m.stopped.Store(0)
-	stresslog.Info("[MANAGER] 阶段重置完成，已停止机器人", zap.Int("count", len(robots)))
+	stresslog.Info("[MANAGER] 阶段重置完成，已停止机器人",
+		zap.Int("count", len(robots)),
+		zap.String("cleanup", string(cleanup.Status)))
+	return cleanup
 }
 
 // onRobotDone 在单个 Robot 执行 goroutine 结束后回调。
 // 当所有已启动的 Robot 都结束时，自动关闭 doneCh，使 task_runner 的 select 退出。
-func (m *Manager) onRobotDone() {
+func (m *Manager) onRobotDone(r *Robot, cleanup CleanupStatus) {
+	m.mu.Lock()
+	for i, item := range m.robots {
+		if item == r {
+			copy(m.robots[i:], m.robots[i+1:])
+			m.robots[len(m.robots)-1] = nil
+			m.robots = m.robots[:len(m.robots)-1]
+			break
+		}
+	}
+	m.mu.Unlock()
+	m.recordCleanup(cleanup)
 	if m.stopped.Add(1) == m.started.Load() {
 		m.stopOnce.Do(func() { close(m.doneCh) })
 	}
+}
+
+func (m *Manager) recordCleanup(cleanup CleanupStatus) {
+	m.cleanupMu.Lock()
+	defer m.cleanupMu.Unlock()
+	if m.cleanupSummary.Status == "" {
+		m.cleanupSummary = cleanup
+		return
+	}
+	m.cleanupSummary = MergeCleanupStatus(cleanup.Reason, m.cleanupSummary, cleanup)
+}
+
+func (m *Manager) CleanupSummary() CleanupStatus {
+	m.cleanupMu.Lock()
+	defer m.cleanupMu.Unlock()
+	if m.cleanupSummary.Status == "" {
+		return emptyCleanupSummary(CleanupReasonNatural)
+	}
+	return m.cleanupSummary
 }
 
 // Done 返回一个 channel，所有机器人停止后关闭（定时到期或外部 StopAll 均会触发）。
