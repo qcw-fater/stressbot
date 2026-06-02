@@ -3,7 +3,6 @@
 -- 使用 utils.pack_le 处理大整数（snowflake ID）的二进制打包
 local network = require("network")
 local robot = require("robot")
-local proto = require("proto")
 local utils = require("utils")
 local log = require("log")
 
@@ -20,6 +19,7 @@ function execute(r)
     local battleId = robot.get("battleId") or 0
     local fighterIndex = robot.get("fighterIndex") or 0
     local session = robot.get("battleSession") or 0
+    local battleAck = robot.get("battleAck") or 0
 
     -- 构建帧同步二进制数据（little-endian）
     local frameData = utils.pack_le("u16", packageIndex)       -- PacketIndex
@@ -27,21 +27,32 @@ function execute(r)
         .. utils.pack_le("u8", fighterIndex)                    -- FighterIndex
         .. utils.pack_le("i64", session)                        -- Session
         .. utils.pack_le("u64", utils.time_ms())                -- MsUnixTime
-        .. utils.pack_le("i32", robot.get("battleAck") or 0)    -- Ack（由 listen_frame_data 更新）
+        .. utils.pack_le("i32", battleAck)                      -- Ack（由 listen_frame_data 更新）
         .. utils.pack_le("i32", packageIndex)                   -- Index
         .. utils.pack_le("u8", 4)                               -- Cmd = BASE_ATTACK
         .. string.char(1, 2, 3, 4, 5, 6)                       -- dummy data (6 bytes)
 
     -- 通过 UDP 发送（带协议头 CMD=4, ACT=11）
     local code, sent = network.udp_send("battle", {cmd=4, act=11}, frameData)
-    if code and code ~= 0 then
-        log.warn("SyncFrame 发送失败: code=" .. tostring(code))
+    if code ~= 0 then
+        local failCode = code or 3
+        log.warn("SyncFrame 发送失败: frame=" .. tostring(frameCount)
+            .. " packageIndex=" .. tostring(packageIndex)
+            .. " battleId=" .. tostring(battleId)
+            .. " fighterIndex=" .. tostring(fighterIndex)
+            .. " battleAck=" .. tostring(battleAck)
+            .. " code=" .. tostring(failCode)
+            .. " sent=" .. tostring(sent))
+        return failCode, sent, 0
     end
 
-    -- 每 20 帧打一次日志：真实上限由 conf/flow.json 的 syncLoop.loopCount 控制，
-    -- 这里只显示本轮实际已发送帧数（frameCount）与共享包序号（pkgIdx）。
+    -- 每 20 帧打一次 debug 日志：真实上限由 conf/flow.json 的 syncLoop.loopCount 控制。
     if frameCount % 20 == 0 then
-        log.info("SyncFrame: frame=" .. frameCount .. " (pkgIdx=" .. packageIndex .. ")")
+        log.debug("SyncFrame: frame=" .. tostring(frameCount)
+            .. " packageIndex=" .. tostring(packageIndex)
+            .. " battleId=" .. tostring(battleId)
+            .. " fighterIndex=" .. tostring(fighterIndex)
+            .. " battleAck=" .. tostring(battleAck))
     end
 
     -- 60ms 间隔（约 16fps）

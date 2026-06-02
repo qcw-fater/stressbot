@@ -66,7 +66,7 @@ func NewHistoryStore(cfg HistoryConfig) (*HistoryStore, error) {
 
 	stresslog.Info("HistoryStore 已连接 MySQL",
 		zap.String("addr", fmt.Sprintf("%s:%d", cfg.MySQL.Host, cfg.MySQL.Port)),
-			zap.String("database", cfg.MySQL.Database),
+		zap.String("database", cfg.MySQL.Database),
 		zap.Int("retentionDays", cfg.RetentionDays))
 
 	return h, nil
@@ -216,7 +216,7 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 
 	// 4. task_aggregated
 	stressJSON, _ := json.Marshal(finalStress) // 同上
-	sysJSON, _ := json.Marshal(finalSys) // 同上
+	sysJSON, _ := json.Marshal(finalSys)       // 同上
 	_, err = tx.Exec(`
 		INSERT INTO task_aggregated (task_id, stage_index, final_stress, final_system)
 		VALUES (?, -1, ?, ?)
@@ -230,7 +230,7 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 	flowJSON := task.Config.FlowJSON
 	protoFilesJSON, _ := json.Marshal(task.Config.ProtoFiles) // 同上
 	luaScriptsJSON, _ := json.Marshal(task.Config.LuaScripts) // 同上
-	robotCfgJSON, _ := json.Marshal(task.Config.RobotConfig) // 同上
+	robotCfgJSON, _ := json.Marshal(task.Config.RobotConfig)  // 同上
 	_, err = tx.Exec(`
 		INSERT INTO task_config_archive (task_id, flow_json, proto_files, lua_scripts, robot_config)
 		VALUES (?, ?, ?, ?, ?)
@@ -310,7 +310,7 @@ func (h *HistoryStore) List(ctx context.Context, filter HistoryFilter) (*History
 		if stoppedAt.Valid {
 			r.StoppedAt = &stoppedAt.Time
 		}
-		_ = json.Unmarshal(tagsBytes, &r.Tags) // DB 字段可选，缺失时零值可用
+		_ = json.Unmarshal(tagsBytes, &r.Tags)             // DB 字段可选，缺失时零值可用
 		_ = json.Unmarshal(summaryBytes, &r.ConfigSummary) // 同上
 		if r.Tags == nil {
 			r.Tags = []string{}
@@ -478,7 +478,7 @@ func (h *HistoryStore) queryAggregated(ctx context.Context, taskID string, r *Hi
 		return
 	}
 	_ = json.Unmarshal(stressBytes, &r.FinalSnapshot) // 同上
-	_ = json.Unmarshal(sysBytes, &r.FinalSystem) // 同上
+	_ = json.Unmarshal(sysBytes, &r.FinalSystem)      // 同上
 }
 
 // queryAggregatedSummary 查询历史详情页需要的聚合指标摘要。
@@ -538,10 +538,13 @@ func (h *HistoryStore) GetCompareTask(ctx context.Context, id string) (*HistoryC
 	actions := make([]HistoryCompareAction, 0, len(stress.Actions))
 	for _, a := range stress.Actions {
 		actions = append(actions, HistoryCompareAction{
-			Name:        a.Name,
-			SampleCount: a.SampleCount,
-			Apdex:       a.Apdex,
-			RTT:         projectHistogram(a.RTT),
+			Name:                     a.Name,
+			SampleCount:              a.SampleCount,
+			RTTApdex:                 a.RTTApdex,
+			TotalDurationApdex:       a.TotalDurationApdex,
+			RTT:                      projectHistogram(a.RTT),
+			TotalDuration:            projectHistogram(a.TotalDuration),
+			TotalDurationSampleCount: a.TotalDurationSampleCount,
 		})
 	}
 
@@ -579,8 +582,8 @@ func (h *HistoryStore) GetConfig(ctx context.Context, id string) (*TaskConfig, e
 	}
 
 	cfg.FlowJSON = json.RawMessage(flowJSON)
-	_ = json.Unmarshal(protoJSON, &cfg.ProtoFiles) // 同上
-	_ = json.Unmarshal(luaJSON, &cfg.LuaScripts) // 同上
+	_ = json.Unmarshal(protoJSON, &cfg.ProtoFiles)  // 同上
+	_ = json.Unmarshal(luaJSON, &cfg.LuaScripts)    // 同上
 	_ = json.Unmarshal(robotJSON, &cfg.RobotConfig) // 同上
 
 	return &cfg, nil
@@ -656,7 +659,8 @@ func (h *HistoryStore) GetTimeseries(ctx context.Context, id string, maxPoints i
 	maxPoints = normalizeTimeseriesMaxPoints(maxPoints)
 
 	rows, err := h.db.QueryContext(ctx, `
-		SELECT sampled_at, elapsed_sec, total_qps, apdex, send_kbps, recv_kbps, avg_cpu_percent
+		SELECT sampled_at, elapsed_sec, total_qps, rtt_apdex, total_duration_apdex,
+			send_kbps, recv_kbps, avg_cpu_percent
 		FROM task_timeseries WHERE task_id = ?
 		ORDER BY elapsed_sec
 	`, id)
@@ -668,11 +672,18 @@ func (h *HistoryStore) GetTimeseries(ctx context.Context, id string, maxPoints i
 	points := []HistoryTrendPointResponse{}
 	for rows.Next() {
 		var p HistoryTrendPointResponse
+		var rttApdex, totalDurationApdex sql.NullFloat64
 		if err := rows.Scan(
-			&p.SampledAt, &p.ElapsedSec, &p.TotalQPS, &p.Apdex,
+			&p.SampledAt, &p.ElapsedSec, &p.TotalQPS, &rttApdex, &totalDurationApdex,
 			&p.SendKBps, &p.RecvKBps, &p.AvgCPUPercent,
 		); err != nil {
 			continue
+		}
+		if rttApdex.Valid {
+			p.RTTApdex = &rttApdex.Float64
+		}
+		if totalDurationApdex.Valid {
+			p.TotalDurationApdex = &totalDurationApdex.Float64
 		}
 		points = append(points, p)
 	}
@@ -735,24 +746,28 @@ func projectStressSnapshot(s monitor.CollectorSnapshot) HistoryStressSnapshotSum
 
 func projectActionSnapshot(a monitor.ActionSnapshot) HistoryActionSummary {
 	return HistoryActionSummary{
-		Name:            a.Name,
-		SampleCount:     a.SampleCount,
-		SuccessCount:    a.SuccessCount,
-		FailureCount:    a.FailureCount,
-		TimeoutCount:    a.TimeoutCount,
-		Executing:       a.Executing,
-		SuccessRate:     a.SuccessRate,
-		AvgSendBytes:    a.AvgSendBytes,
-		AvgRecvBytes:    a.AvgRecvBytes,
-		Apdex:           a.Apdex,
-		RTT:             projectHistogram(a.RTT),
-		ClientAvgMs:     a.ClientAvgMs,
-		EncodeAvgMs:     a.EncodeAvgMs,
-		DecodeAvgMs:     a.DecodeAvgMs,
-		ParseStoreAvgMs: a.ParseStoreAvgMs,
-		RTTSampleCount:  a.RTTSampleCount,
-		AvgQPS:          a.AvgQPS,
-		Errors:          a.Errors,
+		Name:                     a.Name,
+		SampleCount:              a.SampleCount,
+		SuccessCount:             a.SuccessCount,
+		FailureCount:             a.FailureCount,
+		TimeoutCount:             a.TimeoutCount,
+		CanceledCount:            a.CanceledCount,
+		Executing:                a.Executing,
+		SuccessRate:              a.SuccessRate,
+		AvgSendBytes:             a.AvgSendBytes,
+		AvgRecvBytes:             a.AvgRecvBytes,
+		RTTApdex:                 a.RTTApdex,
+		TotalDurationApdex:       a.TotalDurationApdex,
+		RTT:                      projectHistogram(a.RTT),
+		TotalDuration:            projectHistogram(a.TotalDuration),
+		ClientAvgMs:              a.ClientAvgMs,
+		EncodeAvgMs:              a.EncodeAvgMs,
+		DecodeAvgMs:              a.DecodeAvgMs,
+		ParseStoreAvgMs:          a.ParseStoreAvgMs,
+		RTTSampleCount:           a.RTTSampleCount,
+		TotalDurationSampleCount: a.TotalDurationSampleCount,
+		AvgQPS:                   a.AvgQPS,
+		Errors:                   a.Errors,
 	}
 }
 
@@ -936,14 +951,18 @@ func (h *HistoryStore) AppendTimeseries(ctx context.Context, taskID string, poin
 	}
 	_, err := h.db.ExecContext(ctx, `
 		INSERT INTO task_timeseries (
-			task_id, sampled_at, elapsed_sec, total_qps, apdex,
-			rtt_avg_ms, rtt_p95_ms, rtt_p99_ms, client_avg_ms, encode_avg_ms, decode_avg_ms,
+			task_id, sampled_at, elapsed_sec, total_qps, rtt_apdex, total_duration_apdex,
+			rtt_avg_ms, rtt_p95_ms, rtt_p99_ms,
+			total_duration_avg_ms, total_duration_p95_ms, total_duration_p99_ms,
+			client_avg_ms, encode_avg_ms, decode_avg_ms,
 			bots_running, bots_errored,
 			send_kbps, recv_kbps, avg_cpu_percent, max_cpu_percent, mem_percent,
 			goroutines, threads, fds, online_count, offline_count
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, taskID, point.SampledAt, point.ElapsedSec, point.TotalQPS, point.Apdex,
-		point.RTTAvgMs, point.RTTP95Ms, point.RTTP99Ms, point.ClientAvgMs, point.EncodeAvgMs, point.DecodeAvgMs,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, taskID, point.SampledAt, point.ElapsedSec, point.TotalQPS, point.RTTApdex, point.TotalDurationApdex,
+		point.RTTAvgMs, point.RTTP95Ms, point.RTTP99Ms,
+		point.TotalDurationAvgMs, point.TotalDurationP95Ms, point.TotalDurationP99Ms,
+		point.ClientAvgMs, point.EncodeAvgMs, point.DecodeAvgMs,
 		point.BotsRunning, point.BotsErrored,
 		point.SendKBps, point.RecvKBps, point.AvgCPUPercent, point.MaxCPUPercent, point.MemPercent,
 		point.Goroutines, point.Threads, point.FDs, point.OnlineCount, point.OfflineCount)

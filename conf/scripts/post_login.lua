@@ -24,7 +24,8 @@ function execute(r)
     robot.set("battleVersion", utils.fnv_hash(version))
 
     local authAddr = robot.get("authAddr") or ""
-    local code, body, sent, recv = network.http_request(authAddr .. "/login", "POST", "form", {
+    local url = authAddr .. "/login"
+    local code, body, sent, recv = network.http_request(url, "POST", "form", {
         account  = account,
         version  = version,
         channel  = channel,
@@ -32,30 +33,51 @@ function execute(r)
     })
 
     if code < 0 then
-        log.error("PostLogin HTTP 请求失败: code=" .. tostring(code) .. " body=" .. body_preview(body))
+        log.error("PostLogin HTTP 请求失败: account=" .. tostring(account)
+            .. " url=" .. tostring(url)
+            .. " code=" .. tostring(code)
+            .. " sent=" .. tostring(sent)
+            .. " recv=" .. tostring(recv)
+            .. " body=" .. body_preview(body))
         return 3, sent, recv  -- 3=SEND_FAILED：HTTP 传输层失败
     end
 
     if code < 200 or code >= 300 then
-        log.error("PostLogin HTTP 状态异常: code=" .. tostring(code) .. " body=" .. body_preview(body))
+        log.error("PostLogin HTTP 状态异常: account=" .. tostring(account)
+            .. " url=" .. tostring(url)
+            .. " status=" .. tostring(code)
+            .. " sent=" .. tostring(sent)
+            .. " recv=" .. tostring(recv)
+            .. " body=" .. body_preview(body))
         return 54, sent, recv  -- 54=LUA_EXIT_CODE：业务层异常
     end
 
     local ok, resp = pcall(json.decode, body)
     if not ok or not resp then
-        log.error("PostLogin JSON 解析失败: " .. body_preview(body))
+        log.error("PostLogin JSON 解析失败: account=" .. tostring(account)
+            .. " url=" .. tostring(url)
+            .. " sent=" .. tostring(sent)
+            .. " recv=" .. tostring(recv)
+            .. " body=" .. body_preview(body))
         return 54, sent, recv  -- 54=LUA_EXIT_CODE：业务层异常
     end
 
     -- 检查错误码（error=0 表示成功）
     if resp.error and resp.error ~= 0 then
-        log.error("PostLogin 失败: error=" .. tostring(resp.error))
+        log.error("PostLogin 失败: account=" .. tostring(account)
+            .. " error=" .. tostring(resp.error)
+            .. " sent=" .. tostring(sent)
+            .. " recv=" .. tostring(recv)
+            .. " body=" .. body_preview(body))
         return 54, sent, recv  -- 业务返回非零 error，归 LUA_EXIT_CODE
     end
 
     -- 提取 session
     if not resp.session or resp.session == "" then
-        log.error("PostLogin 响应缺少 session")
+        log.error("PostLogin 响应缺少 session: account=" .. tostring(account)
+            .. " sent=" .. tostring(sent)
+            .. " recv=" .. tostring(recv)
+            .. " body=" .. body_preview(body))
         return 54, sent, recv
     end
     robot.set("session", resp.session)
@@ -68,7 +90,8 @@ function execute(r)
     local roles = resp.roles or {}
     robot.set("roles", roles)
 
-    log.info("PostLogin 成功: session=" .. tostring(resp.session)
+    log.info("PostLogin 成功: account=" .. tostring(account)
+        .. " session=" .. tostring(resp.session)
         .. " zoneId=" .. tostring(zoneId)
         .. " 角色数=" .. tostring(#roles))
 

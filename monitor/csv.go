@@ -59,7 +59,7 @@ func ExportCSV(c *MetricsCollector, path string) error {
 			fmt.Sprintf("%.2f", a.RTT.P90Ms),
 			fmt.Sprintf("%.2f", a.RTT.P95Ms),
 			fmt.Sprintf("%.2f", a.RTT.P99Ms),
-			fmt.Sprintf("%.4f", a.Apdex),
+			fmt.Sprintf("%.4f", a.RTTApdex),
 			fmt.Sprintf("%.1f", a.AvgSendBytes),
 			fmt.Sprintf("%.1f", a.AvgRecvBytes),
 			fmt.Sprintf("%.2f", a.AvgQPS),

@@ -6,6 +6,8 @@ local utils = require("utils")
 local log = require("log")
 
 function execute(r)
+    local battleId = robot.get("battleId")
+    local fighterIndex = robot.get("fighterIndex")
     local progress = robot.get("loadProgress") or 0
     progress = progress + 20
     if progress > 100 then
@@ -18,9 +20,25 @@ function execute(r)
 
     local code, sent = network.tcp_send("battle", {cmd=4, act=7}, msg)
     if code ~= 0 then
-        log.warn("LoadProgress 发送失败: code=" .. tostring(code))
+        local failCode = code or 3
+        log.warn("LoadProgress 发送失败: progress=" .. tostring(progress)
+            .. " battleId=" .. tostring(battleId)
+            .. " fighterIndex=" .. tostring(fighterIndex)
+            .. " code=" .. tostring(failCode)
+            .. " sent=" .. tostring(sent))
+        return failCode, sent, 0
+    end
+
+    if progress >= 100 then
+        log.info("LoadProgress 完成: progress=" .. tostring(progress)
+            .. " battleId=" .. tostring(battleId)
+            .. " fighterIndex=" .. tostring(fighterIndex)
+            .. " sent=" .. tostring(sent))
     else
-        log.info("LoadProgress: " .. progress .. "%")
+        log.debug("LoadProgress: progress=" .. tostring(progress)
+            .. " battleId=" .. tostring(battleId)
+            .. " fighterIndex=" .. tostring(fighterIndex)
+            .. " sent=" .. tostring(sent))
     end
 
     -- 模拟加载间隔

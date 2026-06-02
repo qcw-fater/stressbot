@@ -6,17 +6,22 @@ local proto = require("proto")
 local log = require("log")
 
 function execute(r)
+    local roleId = robot.get("roleId")
+
     -- 轮询监听匹配成功消息，超时 600 秒（10 分钟），轮询 1 秒
     local resp, recv = network.tcp_listen("logic", {cmd=3, act=1}, "Game.MatchSucceedS2C", 600, 1000)
     if not resp then
-        log.error("MatchSucceed 超时")
+        log.error("匹配成功消息等待超时: service=logic route=3:1 proto=Game.MatchSucceedS2C timeoutSec=600 pollMs=1000 roleId="
+            .. tostring(roleId)
+            .. " recv=" .. tostring(recv))
         return 31, 0, recv  -- 31=LISTEN_TIMEOUT
     end
 
+    local actorCount = 0
     local ok, err = pcall(function()
         -- 从 actorList 中找到自己的 PlayerGameInfo，提取 matchData.sessionId（校验ID）和 index
-        local myPlayerId = tonumber(robot.get("roleId"))
-        local actorCount = proto.list_size(resp, "actorList")
+        local myPlayerId = tonumber(roleId)
+        actorCount = proto.list_size(resp, "actorList")
         if actorCount > 0 and myPlayerId then
             for i = 1, actorCount do
                 local actor = proto.list_get(resp, "actorList", i)
@@ -37,13 +42,28 @@ function execute(r)
         end
     end)
 
-    if ok then
-        log.info("匹配成功: battleSession=" .. tostring(robot.get("battleSession"))
-            .. " battleArea=" .. tostring(robot.get("battleArea")))
-    else
-        log.error("MatchSucceed 解析失败: " .. tostring(err))
+    if not ok then
+        log.error("MatchSucceed 解析失败: roleId=" .. tostring(roleId)
+            .. " actorCount=" .. tostring(actorCount)
+            .. " recv=" .. tostring(recv)
+            .. " err=" .. tostring(err))
         return 54, 0, recv  -- 54=LUA_EXIT_CODE
     end
+
+    local battleSession = robot.get("battleSession")
+    local battleArea = robot.get("battleArea")
+    if not battleSession then
+        log.error("匹配成功但未找到自己的 battleSession: roleId=" .. tostring(roleId)
+            .. " actorCount=" .. tostring(actorCount)
+            .. " battleArea=" .. tostring(battleArea)
+            .. " recv=" .. tostring(recv))
+        return 54, 0, recv
+    end
+
+    log.info("匹配成功: roleId=" .. tostring(roleId)
+        .. " actorCount=" .. tostring(actorCount)
+        .. " battleSession=" .. tostring(battleSession)
+        .. " battleArea=" .. tostring(battleArea))
 
     return 0, 0, recv
 end

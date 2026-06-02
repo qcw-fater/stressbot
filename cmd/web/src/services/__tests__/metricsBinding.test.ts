@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildNodeMetricsMap,
   classifyApdex,
+  computeWeightedMetrics,
   makeMetricsProvider,
   type FlowSlice,
 } from '../metricsBinding';
@@ -21,7 +22,8 @@ function action(name: string, overrides: Partial<ActionMetric> = {}): ActionMetr
     canceledCount: 0,
     executing: 3,
     successRate: 0.95,
-    apdex: 0.92,
+    rttApdex: 0.92,
+    totalDurationApdex: 0.88,
     avgQps: 10,
     avgSendBytes: 100,
     avgRecvBytes: 200,
@@ -35,7 +37,9 @@ function action(name: string, overrides: Partial<ActionMetric> = {}): ActionMetr
     dispatchToActionWaitAvgMs: 0,
     parseStoreAvgMs: 0,
     rttSampleCount: 95,
+    totalDurationSampleCount: 100,
     rtt: { count: 95, minMs: 1, maxMs: 100, avgMs: 20, p50Ms: 18, p90Ms: 50, p95Ms: 70, p99Ms: 90 },
+    totalDuration: { count: 100, minMs: 2, maxMs: 130, avgMs: 28, p50Ms: 24, p90Ms: 65, p95Ms: 85, p99Ms: 120 },
     ...overrides,
   };
 }
@@ -106,6 +110,23 @@ describe('buildNodeMetricsMap', () => {
     const provider = makeMetricsProvider(map);
     expect(provider('n1')?.executing).toBe(7);
     expect(provider('nonexistent')).toBeUndefined();
+  });
+});
+
+describe('computeWeightedMetrics', () => {
+  it('总耗时模式按总耗时 Apdex 加权', () => {
+    const a = action('A', { sampleCount: 10, successRate: 0.8, totalDurationSampleCount: 10, totalDurationApdex: 0.5, rttSampleCount: 2, rttApdex: 1 });
+    const b = action('B', { sampleCount: 30, successRate: 1, totalDurationSampleCount: 30, totalDurationApdex: 1, rttSampleCount: 30, rttApdex: 0.2 });
+    const result = computeWeightedMetrics([a, b], 'totalDuration');
+    expect(result.apdex).toBeCloseTo(0.875);
+    expect(result.successRate).toBeCloseTo(0.95);
+  });
+
+  it('RTT 模式按 RTT Apdex 加权', () => {
+    const a = action('A', { rttSampleCount: 10, rttApdex: 0.5, totalDurationSampleCount: 10, totalDurationApdex: 1 });
+    const b = action('B', { rttSampleCount: 30, rttApdex: 1, totalDurationSampleCount: 30, totalDurationApdex: 0.2 });
+    const result = computeWeightedMetrics([a, b], 'rtt');
+    expect(result.apdex).toBeCloseTo(0.875);
   });
 });
 

@@ -40,6 +40,8 @@ type BandwidthSnapshot struct {
 //   - 因此 avg/p50/p95/p99 的分母是 RTTSampleCount，而不是 action 成功数或总样本数。
 //   - 纯客户端动作（如 lua 内仅做 connect/set_secret_key/register_heartbeat）RTTSampleCount=0，
 //     此时 RTT.Count=0，前端 ActionsTab 应显示 "—"。
+//   - TotalDuration 直方图记录的是 action 从开始执行到结束的总耗时（wallClock），
+//     单次 action 最多产生 1 个样本，包含 RTT、监听等待、Lua 逻辑、解析和状态写入等。
 //   - ClientAvgMs 反映客户端构建/解析平均耗时，所有结果分支累计，独立于网络指标。
 type ActionSnapshot struct {
 	Name                      string            `json:"name"`                      // 动作名称
@@ -52,8 +54,10 @@ type ActionSnapshot struct {
 	SuccessRate               float64           `json:"successRate"`               // 成功率（0~1）
 	AvgSendBytes              float64           `json:"avgSendBytes"`              // 平均每次成功的发送字节数
 	AvgRecvBytes              float64           `json:"avgRecvBytes"`              // 平均每次成功的接收字节数
-	Apdex                     float64           `json:"apdex"`                     // Apdex 评分（0~1）
+	RTTApdex                  float64           `json:"rttApdex"`                  // RTT Apdex 评分（0~1）
+	TotalDurationApdex        float64           `json:"totalDurationApdex"`        // 总耗时 Apdex 评分（0~1）
 	RTT                       HistogramSnapshot `json:"rtt"`                       // RTT 直方图快照（WireRTT）
+	TotalDuration             HistogramSnapshot `json:"totalDuration"`             // action 总耗时直方图快照（wallClock）
 	TimeoutAvgMs              float64           `json:"timeoutAvgMs"`              // 平均超时延迟（毫秒）
 	ClientAvgMs               float64           `json:"clientAvgMs"`               // 客户端平均耗时（毫秒）
 	BuildAvgMs                float64           `json:"buildAvgMs"`                // 构建平均耗时（毫秒）
@@ -64,19 +68,24 @@ type ActionSnapshot struct {
 	DispatchToActionWaitAvgMs float64           `json:"dispatchToActionWaitAvgMs"` // 分发到 action 平均等待（毫秒）
 	ParseStoreAvgMs           float64           `json:"parseStoreAvgMs"`           // 解析和状态写入平均耗时（毫秒）
 	RTTSampleCount            int64             `json:"rttSampleCount"`            // 有完整响应帧且 WireRTT > 0 的 request 数
+	TotalDurationSampleCount  int64             `json:"totalDurationSampleCount"`  // 总耗时 action 样本数
 	AvgQPS                    float64           `json:"avgQps"`                    // 全周期平均 QPS
 	PeriodQPS                 float64           `json:"periodQps"`                 // 上次快照到当前的区间 QPS
 	Errors                    []ErrorEntry      `json:"errors,omitempty"`          // 错误分布（仅失败/超时时有值）
 
 	// 跨节点聚合所需的原始数据（omitempty 向后兼容单机模式）
-	RTTSumNs        int64   `json:"rttSumNs,omitempty"`        // 延迟总和（纳秒），用于分布式合并
-	RTTBucketCounts []int64 `json:"rttBucketCounts,omitempty"` // 延迟直方图桶计数，用于分布式合并
-	ApdexSatisfied  int64   `json:"apdexSatisfied,omitempty"`  // Apdex 满意样本数，用于分布式合并
-	ApdexTolerating int64   `json:"apdexTolerating,omitempty"` // Apdex 容忍样本数，用于分布式合并
-	TotalSendBytes  int64   `json:"totalSendBytes,omitempty"`  // 累计发送字节数，用于分布式合并
-	TotalRecvBytes  int64   `json:"totalRecvBytes,omitempty"`  // 累计接收字节数，用于分布式合并
-	ClientCostSumNs int64   `json:"clientCostSumNs,omitempty"` // 客户端开销累计（纳秒），用于分布式合并
-	ClientCostCount int64   `json:"clientCostCount,omitempty"` // 客户端开销样本数，用于分布式合并
+	RTTSumNs                     int64   `json:"rttSumNs,omitempty"`                     // RTT 延迟总和（纳秒），用于分布式合并
+	RTTBucketCounts              []int64 `json:"rttBucketCounts,omitempty"`              // RTT 直方图桶计数，用于分布式合并
+	ApdexSatisfied               int64   `json:"apdexSatisfied,omitempty"`               // RTT Apdex 满意样本数，用于分布式合并
+	ApdexTolerating              int64   `json:"apdexTolerating,omitempty"`              // RTT Apdex 容忍样本数，用于分布式合并
+	TotalDurationSumNs           int64   `json:"totalDurationSumNs,omitempty"`           // 总耗时总和（纳秒），用于分布式合并
+	TotalDurationBucketCounts    []int64 `json:"totalDurationBucketCounts,omitempty"`    // 总耗时直方图桶计数，用于分布式合并
+	TotalDurationApdexSatisfied  int64   `json:"totalDurationApdexSatisfied,omitempty"`  // 总耗时 Apdex 满意样本数，用于分布式合并
+	TotalDurationApdexTolerating int64   `json:"totalDurationApdexTolerating,omitempty"` // 总耗时 Apdex 容忍样本数，用于分布式合并
+	TotalSendBytes               int64   `json:"totalSendBytes,omitempty"`               // 累计发送字节数，用于分布式合并
+	TotalRecvBytes               int64   `json:"totalRecvBytes,omitempty"`               // 累计接收字节数，用于分布式合并
+	ClientCostSumNs              int64   `json:"clientCostSumNs,omitempty"`              // 客户端开销累计（纳秒），用于分布式合并
+	ClientCostCount              int64   `json:"clientCostCount,omitempty"`              // 客户端开销样本数，用于分布式合并
 }
 
 // RobotSnapshot 机器人状态快照。
@@ -178,7 +187,10 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 
 		satisfied := am.apdexSatisfied.Load()
 		tolerating := am.apdexTolerating.Load()
+		totalDurationSatisfied := am.totalDurationApdexSatisfied.Load()
+		totalDurationTolerating := am.totalDurationApdexTolerating.Load()
 		rttSamples := am.rttSampleCount.Load()
+		totalDurationSamples := am.totalDurationSampleCount.Load()
 		clientCostSum := am.clientCostSum.Load()
 		clientCostCount := am.clientCostCount.Load()
 
@@ -197,11 +209,15 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 		dispatchWaitAvgMs := avgMs(am.dispatchWaitSum.Load(), clientCostCount)
 		parseStoreAvgMs := avgMs(am.parseStoreSum.Load(), clientCostCount)
 
-		// Apdex 分母用 rttSamples：纯客户端动作（rttSamples=0）不参与，
-		// 避免大量"成功但无网络往返"的样本把 Apdex 拉到不真实的高位。
-		var apdex float64
+		// RTT Apdex 分母用 rttSamples：纯客户端动作（rttSamples=0）不参与，
+		// 避免大量“成功但无网络往返”的样本把 RTT Apdex 拉到不真实的高位。
+		var rttApdex float64
 		if rttSamples > 0 {
-			apdex = (float64(satisfied) + float64(tolerating)*0.5) / float64(rttSamples)
+			rttApdex = (float64(satisfied) + float64(tolerating)*0.5) / float64(rttSamples)
+		}
+		var totalDurationApdex float64
+		if totalDurationSamples > 0 {
+			totalDurationApdex = (float64(totalDurationSatisfied) + float64(totalDurationTolerating)*0.5) / float64(totalDurationSamples)
 		}
 
 		var successRate float64
@@ -218,6 +234,7 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 		}
 
 		rttSnap := am.rtt.Snapshot()
+		totalDurationSnap := am.totalDuration.Snapshot()
 
 		var avgQPS, periodQPS float64
 		if uptimeSec > 0 {
@@ -238,39 +255,46 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 		}
 
 		snap.Actions = append(snap.Actions, ActionSnapshot{
-			Name:                      name,
-			SampleCount:               total,
-			SuccessCount:              succ,
-			FailureCount:              fail,
-			TimeoutCount:              tout,
-			CanceledCount:             canceled,
-			TimeoutAvgMs:              timeoutAvgMs,
-			ClientAvgMs:               clientAvgMs,
-			BuildAvgMs:                buildAvgMs,
-			EncodeAvgMs:               encodeAvgMs,
-			SendAvgMs:                 sendAvgMs,
-			DecodeWaitAvgMs:           decodeWaitAvgMs,
-			DecodeAvgMs:               decodeAvgMs,
-			DispatchToActionWaitAvgMs: dispatchWaitAvgMs,
-			ParseStoreAvgMs:           parseStoreAvgMs,
-			RTTSampleCount:            rttSamples,
-			Executing:                 exec,
-			SuccessRate:               successRate,
-			AvgSendBytes:              avgSend,
-			AvgRecvBytes:              avgRecv,
-			Apdex:                     apdex,
-			RTT:                       rttSnap,
-			AvgQPS:                    avgQPS,
-			PeriodQPS:                 periodQPS,
-			Errors:                    errs,
-			RTTSumNs:                  rttSnap.SumNs,
-			RTTBucketCounts:           rttSnap.BucketCounts,
-			ApdexSatisfied:            satisfied,
-			ApdexTolerating:           tolerating,
-			TotalSendBytes:            totalSendBytes,
-			TotalRecvBytes:            totalRecvBytes,
-			ClientCostSumNs:           clientCostSum,
-			ClientCostCount:           clientCostCount,
+			Name:                         name,
+			SampleCount:                  total,
+			SuccessCount:                 succ,
+			FailureCount:                 fail,
+			TimeoutCount:                 tout,
+			CanceledCount:                canceled,
+			TimeoutAvgMs:                 timeoutAvgMs,
+			ClientAvgMs:                  clientAvgMs,
+			BuildAvgMs:                   buildAvgMs,
+			EncodeAvgMs:                  encodeAvgMs,
+			SendAvgMs:                    sendAvgMs,
+			DecodeWaitAvgMs:              decodeWaitAvgMs,
+			DecodeAvgMs:                  decodeAvgMs,
+			DispatchToActionWaitAvgMs:    dispatchWaitAvgMs,
+			ParseStoreAvgMs:              parseStoreAvgMs,
+			RTTSampleCount:               rttSamples,
+			TotalDurationSampleCount:     totalDurationSamples,
+			Executing:                    exec,
+			SuccessRate:                  successRate,
+			AvgSendBytes:                 avgSend,
+			AvgRecvBytes:                 avgRecv,
+			RTTApdex:                     rttApdex,
+			TotalDurationApdex:           totalDurationApdex,
+			RTT:                          rttSnap,
+			TotalDuration:                totalDurationSnap,
+			AvgQPS:                       avgQPS,
+			PeriodQPS:                    periodQPS,
+			Errors:                       errs,
+			RTTSumNs:                     rttSnap.SumNs,
+			RTTBucketCounts:              rttSnap.BucketCounts,
+			ApdexSatisfied:               satisfied,
+			ApdexTolerating:              tolerating,
+			TotalDurationSumNs:           totalDurationSnap.SumNs,
+			TotalDurationBucketCounts:    totalDurationSnap.BucketCounts,
+			TotalDurationApdexSatisfied:  totalDurationSatisfied,
+			TotalDurationApdexTolerating: totalDurationTolerating,
+			TotalSendBytes:               totalSendBytes,
+			TotalRecvBytes:               totalRecvBytes,
+			ClientCostSumNs:              clientCostSum,
+			ClientCostCount:              clientCostCount,
 		})
 	}
 	// 契约保证：Actions 字段在 JSON 中始终是数组，不是 null。
@@ -349,7 +373,8 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 		var ma ActionSnapshot
 		ma.Name = name
 
-		var totalSatisfied, totalTolerating int64
+		var rttSatisfied, rttTolerating int64
+		var totalDurationSatisfied, totalDurationTolerating int64
 		for _, a := range agg.snaps {
 			ma.SampleCount += a.SampleCount
 			ma.SuccessCount += a.SuccessCount
@@ -357,33 +382,45 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 			ma.TimeoutCount += a.TimeoutCount
 			ma.CanceledCount += a.CanceledCount
 			ma.Executing += a.Executing
-			ma.RTTSumNs += a.RTTSumNs
-			totalSatisfied += a.ApdexSatisfied
-			totalTolerating += a.ApdexTolerating
+			rttSatisfied += a.ApdexSatisfied
+			rttTolerating += a.ApdexTolerating
+			totalDurationSatisfied += a.TotalDurationApdexSatisfied
+			totalDurationTolerating += a.TotalDurationApdexTolerating
 			ma.TotalSendBytes += a.TotalSendBytes
 			ma.TotalRecvBytes += a.TotalRecvBytes
 			ma.RTTSampleCount += a.RTTSampleCount
+			ma.TotalDurationSampleCount += a.TotalDurationSampleCount
 			ma.ClientCostSumNs += a.ClientCostSumNs
 			ma.ClientCostCount += a.ClientCostCount
 		}
 
 		// 合并延迟直方图
 		rttSnaps := make([]HistogramSnapshot, len(agg.snaps))
+		totalDurationSnaps := make([]HistogramSnapshot, len(agg.snaps))
 		for i, a := range agg.snaps {
 			rttSnaps[i] = a.RTT
+			totalDurationSnaps[i] = a.TotalDuration
 		}
 		ma.RTT = MergeHistograms(rttSnaps)
 		ma.RTTSumNs = ma.RTT.SumNs
 		ma.RTTBucketCounts = ma.RTT.BucketCounts
-		ma.ApdexSatisfied = totalSatisfied
-		ma.ApdexTolerating = totalTolerating
+		ma.ApdexSatisfied = rttSatisfied
+		ma.ApdexTolerating = rttTolerating
+		ma.TotalDuration = MergeHistograms(totalDurationSnaps)
+		ma.TotalDurationSumNs = ma.TotalDuration.SumNs
+		ma.TotalDurationBucketCounts = ma.TotalDuration.BucketCounts
+		ma.TotalDurationApdexSatisfied = totalDurationSatisfied
+		ma.TotalDurationApdexTolerating = totalDurationTolerating
 
 		if ma.SampleCount > 0 {
 			ma.SuccessRate = float64(ma.SuccessCount) / float64(ma.SampleCount)
 		}
-		// Apdex 分母用合并后的 RTTSampleCount，与单机模式保持一致语义
+		// RTT Apdex 分母用合并后的 RTTSampleCount，与单机模式保持一致语义。
 		if ma.RTTSampleCount > 0 {
-			ma.Apdex = (float64(totalSatisfied) + float64(totalTolerating)*0.5) / float64(ma.RTTSampleCount)
+			ma.RTTApdex = (float64(rttSatisfied) + float64(rttTolerating)*0.5) / float64(ma.RTTSampleCount)
+		}
+		if ma.TotalDurationSampleCount > 0 {
+			ma.TotalDurationApdex = (float64(totalDurationSatisfied) + float64(totalDurationTolerating)*0.5) / float64(ma.TotalDurationSampleCount)
 		}
 		if ma.SuccessCount > 0 {
 			ma.AvgSendBytes = float64(ma.TotalSendBytes) / float64(ma.SuccessCount)

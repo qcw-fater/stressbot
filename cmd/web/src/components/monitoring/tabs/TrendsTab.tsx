@@ -25,6 +25,7 @@ const COLORS = {
   cyan: () => cssVar('--chart-cyan', '#13c2c2'),
   purple: () => cssVar('--chart-purple', '#722ed1'),
   yellow: () => cssVar('--chart-yellow', '#faad14'),
+  lime: () => cssVar('--chart-lime', '#bae637'),
 };
 
 const textColor = () => cssVar('--text-primary', '#333');
@@ -32,7 +33,12 @@ const splitColor = () => cssVar('--border-color', '#e8e8e8');
 const tipBg = () => cssVar('--bg-elevated', '#fff');
 const tipBorder = () => cssVar('--border-color', '#e8e8e8');
 
-function lineOption(title: string, x: string[], series: Array<{ name: string; data: number[]; color: string }>) {
+function lineOption(
+  title: string,
+  x: string[],
+  series: Array<{ name: string; data: Array<number | null>; color: string }>,
+  yMax?: number,
+) {
   return {
     title: { text: title, left: 0, top: 0, textStyle: { fontSize: 12, fontWeight: 600, color: textColor() } },
     tooltip: {
@@ -44,13 +50,14 @@ function lineOption(title: string, x: string[], series: Array<{ name: string; da
     legend: { right: 0, top: 0, textStyle: { fontSize: 11, color: textColor() } },
     grid: { left: 36, right: 12, top: 28, bottom: 24 },
     xAxis: { type: 'category', data: x, axisLabel: { fontSize: 10, color: textColor(), hideOverlap: true }, splitLine: { lineStyle: { color: splitColor() } } },
-    yAxis: { type: 'value', axisLabel: { fontSize: 10, color: textColor() }, splitLine: { lineStyle: { color: splitColor() } } },
+    yAxis: { type: 'value', max: yMax, axisLabel: { fontSize: 10, color: textColor() }, splitLine: { lineStyle: { color: splitColor() } } },
     series: series.map((s) => ({
       name: s.name,
       type: 'line',
       smooth: true,
       symbol: 'none',
       data: s.data,
+      connectNulls: false,
       itemStyle: { color: s.color },
       lineStyle: { color: s.color },
       areaStyle: { color: s.color, opacity: 0.08 },
@@ -77,6 +84,32 @@ export function TrendsTab() {
     const x = stressHistory.map((s) => new Date(s.timestamp).toLocaleTimeString());
     const totalQps = stressHistory.map((s) => s.actions.reduce((sum, a) => sum + a.avgQps, 0));
     return lineOption('集群 QPS', x, [{ name: 'qps', data: totalQps, color: COLORS.blue() }]);
+  }, [stressHistory]);
+
+  const apdexOption = useMemo(() => {
+    if (stressHistory.length === 0) return null;
+    const x = stressHistory.map((s) => new Date(s.timestamp).toLocaleTimeString());
+    const weighted = (
+      pick: (a: typeof stressHistory[number]['actions'][number]) => number,
+      weightPick: (a: typeof stressHistory[number]['actions'][number]) => number,
+    ) => stressHistory.map((s) => {
+      let sum = 0;
+      let weight = 0;
+      for (const a of s.actions) {
+        const w = weightPick(a);
+        if (w <= 0) continue;
+        sum += pick(a) * w;
+        weight += w;
+      }
+      return weight > 0 ? +(sum / weight).toFixed(3) : null;
+    });
+    const totalDuration = weighted((a) => a.totalDurationApdex, (a) => a.totalDurationSampleCount);
+    const rtt = weighted((a) => a.rttApdex, (a) => a.rttSampleCount);
+    const series = [
+      totalDuration.some((v) => v !== null) ? { name: '总耗时 Apdex', data: totalDuration, color: COLORS.green() } : null,
+      rtt.some((v) => v !== null) ? { name: 'RTT Apdex', data: rtt, color: COLORS.red() } : null,
+    ].filter((s): s is { name: string; data: Array<number | null>; color: string } => s !== null);
+    return series.length > 0 ? lineOption('Apdex', x, series, 1) : null;
   }, [stressHistory]);
 
   const cpuOption = useMemo(() => {
@@ -136,6 +169,13 @@ export function TrendsTab() {
         <Col span={12}>
           <Card size="small" bodyStyle={{ padding: 8 }}>
             <EChartsReact option={qpsOption} style={{ height: 200 }} notMerge lazyUpdate />
+          </Card>
+        </Col>
+      )}
+      {apdexOption && (
+        <Col span={12}>
+          <Card size="small" bodyStyle={{ padding: 8 }}>
+            <EChartsReact option={apdexOption} style={{ height: 200 }} notMerge lazyUpdate />
           </Card>
         </Col>
       )}

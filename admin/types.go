@@ -500,7 +500,7 @@ type HistoryRecord struct {
 	// TotalBots 总 bot 数。
 	TotalBots int `json:"totalBots"`
 	// AgentCount 参与 Agent 数。
-	AgentCount int `json:"agentCount"`
+	AgentCount       int `json:"agentCount"`
 	ActiveAgentCount int `json:"activeAgentCount"`
 	// CreatedAt 创建时间。
 	CreatedAt time.Time `json:"createdAt"`
@@ -579,24 +579,28 @@ type HistoryStressSnapshotSummary struct {
 
 // HistoryActionSummary 历史 action 表格和报告使用的展示字段。
 type HistoryActionSummary struct {
-	Name            string                  `json:"name"`
-	SampleCount     int64                   `json:"sampleCount"`
-	SuccessCount    int64                   `json:"successCount"`
-	FailureCount    int64                   `json:"failureCount"`
-	TimeoutCount    int64                   `json:"timeoutCount"`
-	Executing       int64                   `json:"executing"`
-	SuccessRate     float64                 `json:"successRate"`
-	AvgSendBytes    float64                 `json:"avgSendBytes"`
-	AvgRecvBytes    float64                 `json:"avgRecvBytes"`
-	Apdex           float64                 `json:"apdex"`
-	RTT             HistoryHistogramSummary `json:"rtt"`
-	ClientAvgMs     float64                 `json:"clientAvgMs"`
-	EncodeAvgMs     float64                 `json:"encodeAvgMs"`
-	DecodeAvgMs     float64                 `json:"decodeAvgMs"`
-	ParseStoreAvgMs float64                 `json:"parseStoreAvgMs"`
-	RTTSampleCount  int64                   `json:"rttSampleCount"`
-	AvgQPS          float64                 `json:"avgQps"`
-	Errors          []monitor.ErrorEntry    `json:"errors,omitempty"`
+	Name                     string                  `json:"name"`
+	SampleCount              int64                   `json:"sampleCount"`
+	SuccessCount             int64                   `json:"successCount"`
+	FailureCount             int64                   `json:"failureCount"`
+	TimeoutCount             int64                   `json:"timeoutCount"`
+	CanceledCount            int64                   `json:"canceledCount"`
+	Executing                int64                   `json:"executing"`
+	SuccessRate              float64                 `json:"successRate"`
+	AvgSendBytes             float64                 `json:"avgSendBytes"`
+	AvgRecvBytes             float64                 `json:"avgRecvBytes"`
+	RTTApdex                 float64                 `json:"rttApdex"`
+	TotalDurationApdex       float64                 `json:"totalDurationApdex"`
+	RTT                      HistoryHistogramSummary `json:"rtt"`
+	TotalDuration            HistoryHistogramSummary `json:"totalDuration"`
+	ClientAvgMs              float64                 `json:"clientAvgMs"`
+	EncodeAvgMs              float64                 `json:"encodeAvgMs"`
+	DecodeAvgMs              float64                 `json:"decodeAvgMs"`
+	ParseStoreAvgMs          float64                 `json:"parseStoreAvgMs"`
+	RTTSampleCount           int64                   `json:"rttSampleCount"`
+	TotalDurationSampleCount int64                   `json:"totalDurationSampleCount"`
+	AvgQPS                   float64                 `json:"avgQps"`
+	Errors                   []monitor.ErrorEntry    `json:"errors,omitempty"`
 }
 
 // HistoryHistogramSummary 历史界面需要的 RTT 分位摘要。
@@ -715,10 +719,13 @@ type HistoryCompareSnapshot struct {
 
 // HistoryCompareAction 历史对比页使用的 action 指标。
 type HistoryCompareAction struct {
-	Name        string                  `json:"name"`
-	SampleCount int64                   `json:"sampleCount"`
-	Apdex       float64                 `json:"apdex"`
-	RTT         HistoryHistogramSummary `json:"rtt"`
+	Name                     string                  `json:"name"`
+	SampleCount              int64                   `json:"sampleCount"`
+	RTTApdex                 float64                 `json:"rttApdex"`
+	TotalDurationApdex       float64                 `json:"totalDurationApdex"`
+	RTT                      HistoryHistogramSummary `json:"rtt"`
+	TotalDuration            HistoryHistogramSummary `json:"totalDuration"`
+	TotalDurationSampleCount int64                   `json:"totalDurationSampleCount"`
 }
 
 // CompareDiff 历史任务对比差异。
@@ -737,14 +744,22 @@ type HistoryTrendPoint struct {
 	ElapsedSec int `json:"elapsedSec"`
 	// TotalQPS 集群总 QPS。
 	TotalQPS float64 `json:"totalQps"`
-	// Apdex 按 RTT 样本数加权后的 Apdex。
-	Apdex float64 `json:"apdex"`
+	// RTTApdex 按 RTT 样本数加权后的 Apdex。
+	RTTApdex float64 `json:"rttApdex"`
+	// TotalDurationApdex 按总耗时样本数加权后的 Apdex。
+	TotalDurationApdex float64 `json:"totalDurationApdex"`
 	// RTTAvgMs 平均 RTT。
 	RTTAvgMs float64 `json:"rttAvgMs"`
 	// RTTP95Ms P95 RTT。
 	RTTP95Ms float64 `json:"rttP95Ms"`
 	// RTTP99Ms P99 RTT。
 	RTTP99Ms float64 `json:"rttP99Ms"`
+	// TotalDurationAvgMs 平均总耗时。
+	TotalDurationAvgMs float64 `json:"totalDurationAvgMs"`
+	// TotalDurationP95Ms P95 总耗时。
+	TotalDurationP95Ms float64 `json:"totalDurationP95Ms"`
+	// TotalDurationP99Ms P99 总耗时。
+	TotalDurationP99Ms float64 `json:"totalDurationP99Ms"`
 	// ClientAvgMs 客户端平均耗时。
 	ClientAvgMs float64 `json:"clientAvgMs"`
 	// EncodeAvgMs 编码平均耗时。
@@ -785,8 +800,10 @@ type HistoryTrendPointResponse struct {
 	ElapsedSec int `json:"elapsedSec"`
 	// TotalQPS 集群总 QPS。
 	TotalQPS float64 `json:"totalQps"`
-	// Apdex 按 RTT 样本数加权后的 Apdex。
-	Apdex float64 `json:"apdex"`
+	// RTTApdex 按 RTT 样本数加权后的 Apdex；旧数据完成迁移前可能为空。
+	RTTApdex *float64 `json:"rttApdex"`
+	// TotalDurationApdex 按总耗时样本数加权后的 Apdex；旧数据未采集总耗时时为空。
+	TotalDurationApdex *float64 `json:"totalDurationApdex"`
 	// SendKBps 发送带宽 KB/s。
 	SendKBps float64 `json:"sendKBps"`
 	// RecvKBps 接收带宽 KB/s。

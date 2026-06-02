@@ -67,10 +67,10 @@ export function useNodeApdexLevel(nodeId: string): ApdexLevel {
 
   const srLevel = classifySuccessRate(m.successRate);
 
-  if ((m.rttSampleCount ?? 0) === 0) {
+  if (m.totalDurationSampleCount === 0) {
     return srLevel;
   }
-  return worseLevel(classifyApdex(m.apdex), srLevel);
+  return worseLevel(classifyApdex(m.totalDurationApdex), srLevel);
 }
 
 const APDEX_COLOR: Record<ApdexLevel, string> = {
@@ -90,16 +90,17 @@ export function MetricsBadge({ nodeId }: MetricsBadgeProps) {
   const m = useNodeMetrics(nodeId);
   if (!m) return null;
 
-  const hasNet = (m.rttSampleCount ?? 0) > 0;
-  const showP99 = hasNet && m.rtt.count > 0;
-  const apdexLevel = hasNet ? classifyApdex(m.apdex) : 'unknown';
+  const hasTotalDuration = m.totalDurationSampleCount > 0;
+  const hasNet = m.rttSampleCount > 0;
+  const showP99 = hasTotalDuration && m.totalDuration.count > 0;
+  const apdexLevel = hasTotalDuration ? classifyApdex(m.totalDurationApdex) : 'unknown';
   const apdexColor = APDEX_COLOR[apdexLevel];
-  // 健康等级用于非网络动作徽章颜色（综合成功率）
-  const healthLevel = (m.sampleCount > 0 && !hasNet) ? classifySuccessRate(m.successRate) : 'unknown';
+  // 健康等级用于无总耗时样本动作徽章颜色（综合成功率）
+  const healthLevel = (m.sampleCount > 0 && !hasTotalDuration) ? classifySuccessRate(m.successRate) : 'unknown';
   const healthColor = APDEX_COLOR[healthLevel];
-  // 网络动作显示 Apdex 评分；非网络动作显示成功计数（样式统一，文本诚实）
-  const showApdex = hasNet && apdexLevel !== 'unknown';
-  const showLocalBadge = !hasNet && m.sampleCount > 0;
+  // 有总耗时样本的动作显示总耗时 Apdex；否则显示成功计数（样式统一，文本诚实）
+  const showApdex = hasTotalDuration && apdexLevel !== 'unknown';
+  const showLocalBadge = !hasTotalDuration && m.sampleCount > 0;
   const showErrors = (m.errors?.length ?? 0) > 0;
   const topErr = showErrors ? m.errors![0] : undefined;
 
@@ -136,18 +137,18 @@ export function MetricsBadge({ nodeId }: MetricsBadgeProps) {
       }}
     >
       {showP99 && (
-        <Tooltip title={`avg ${m.rtt.avgMs.toFixed(1)} · p95 ${m.rtt.p95Ms.toFixed(1)} · p99 ${m.rtt.p99Ms.toFixed(1)} · max ${m.rtt.maxMs.toFixed(1)} (ms)`}>
+        <Tooltip title={`总耗时 avg ${m.totalDuration.avgMs.toFixed(1)} · p95 ${m.totalDuration.p95Ms.toFixed(1)} · p99 ${m.totalDuration.p99Ms.toFixed(1)} · max ${m.totalDuration.maxMs.toFixed(1)} (ms)${hasNet ? ` · RTT p99 ${m.rtt.p99Ms.toFixed(1)}ms` : ''}`}>
           <span className="pattern-badge" style={{ color: 'var(--node-continue)', borderColor: 'var(--node-continue)', background: 'color-mix(in srgb, var(--node-continue) 12%, transparent)' }}>
-            p99 {formatMs(m.rtt.p99Ms)}
+            p99 {formatMs(m.totalDuration.p99Ms)}
           </span>
         </Tooltip>
       )}
       {showApdex && (
         <Tooltip
-          title={`Apdex ${m.apdex.toFixed(3)} · 成功率 ${(m.successRate * 100).toFixed(1)}% · 平均 QPS ${m.avgQps.toFixed(1)} · 样本数 ${m.sampleCount}`}
+          title={`总耗时 Apdex ${m.totalDurationApdex.toFixed(3)}${hasNet ? ` · RTT Apdex ${m.rttApdex.toFixed(3)}` : ''} · 成功率 ${(m.successRate * 100).toFixed(1)}% · 平均 QPS ${m.avgQps.toFixed(1)} · 样本数 ${m.sampleCount}`}
         >
           <span className="pattern-badge" style={{ color: apdexColor, borderColor: apdexColor, background: `color-mix(in srgb, ${apdexColor} 12%, transparent)` }}>
-            Apdex {m.apdex.toFixed(2)}
+            Apdex {m.totalDurationApdex.toFixed(2)}
           </span>
         </Tooltip>
       )}

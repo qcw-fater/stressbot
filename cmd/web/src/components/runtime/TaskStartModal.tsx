@@ -716,7 +716,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
                 </Form.Item>
                 <Form.Item
                   label="Apdex 满意阈值（毫秒）"
-                  extra="动作响应时间 ≤ T 计为完全满意；> 4T 计为不满意。默认 100ms"
+                  extra="RTT < T 计为满意；T ≤ RTT < 4T 计为容忍；RTT ≥ 4T 计为不满意。默认 100ms"
                 >
                   <InputNumber
                     min={1}

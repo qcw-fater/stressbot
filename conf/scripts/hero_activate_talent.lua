@@ -2,10 +2,12 @@
 local network = require("network")
 local robot = require("robot")
 local proto = require("proto")
+local log = require("log")
 
 function execute(r)
     local heroIds = robot.get("heroIdList")
     if not heroIds or type(heroIds) ~= "table" or #heroIds == 0 then
+        log.debug("激活英雄天赋跳过: heroIdList 为空")
         return 0, 0, 0
     end
 
@@ -32,6 +34,8 @@ function execute(r)
 
     -- 没有可激活的天赋位，跳过
     if talentIndex < 0 then
+        log.debug("激活英雄天赋跳过: heroId=" .. tostring(heroId)
+            .. " reason=无可激活天赋位")
         return 0, 0, 0
     end
 
@@ -39,6 +43,18 @@ function execute(r)
     proto.set_field(msg, "heroId", heroId)
     proto.set_field(msg, "index", talentIndex)
 
-    local _, sent = network.tcp_send("logic", {cmd=6, act=5}, msg)
+    local code, sent = network.tcp_send("logic", {cmd=6, act=5}, msg)
+    if code ~= 0 then
+        local failCode = code or 3
+        log.warn("激活英雄天赋发送失败: service=logic route=6:5 heroId=" .. tostring(heroId)
+            .. " talentIndex=" .. tostring(talentIndex)
+            .. " code=" .. tostring(failCode)
+            .. " sent=" .. tostring(sent))
+        return failCode, sent, 0
+    end
+
+    log.debug("激活英雄天赋已发送: heroId=" .. tostring(heroId)
+        .. " talentIndex=" .. tostring(talentIndex)
+        .. " sent=" .. tostring(sent))
     return 0, sent, 0
 end

@@ -72,6 +72,7 @@ export function makeMetricsProvider(map: NodeMetricsMap) {
 
 /** Apdex 阈值染色（与 docs/api-monitor §7.5 表对齐） */
 export type ApdexLevel = 'excellent' | 'good' | 'fair' | 'poor' | 'danger' | 'unknown';
+export type ActionLatencyMode = 'totalDuration' | 'rtt';
 
 export function classifyApdex(apdex: number | undefined): ApdexLevel {
   if (apdex === undefined || Number.isNaN(apdex)) return 'unknown';
@@ -82,10 +83,13 @@ export function classifyApdex(apdex: number | undefined): ApdexLevel {
   return 'danger';
 }
 
-/** 加权计算一组动作的聚合 Apdex 和成功率
- *  Apdex 权重用 rttSampleCount，排除纯客户端动作（rttSampleCount=0）避免拉低评分。
+/** 加权计算一组动作的聚合 Apdex 和成功率。
+ *  默认展示 RTT Apdex：用 rttSampleCount 加权，排除无 RTT 样本的纯客户端动作。
  *  成功率权重仍用 sampleCount，反映整体请求成功率。 */
-export function computeWeightedMetrics(actions: Array<ActionMetric | HistoryActionMetric>) {
+export function computeWeightedMetrics(
+  actions: Array<ActionMetric | HistoryActionMetric>,
+  mode: ActionLatencyMode = 'rtt',
+) {
   let totalSamples = 0;
   let apdexWeight = 0;
   let weightedApdex = 0;
@@ -93,9 +97,14 @@ export function computeWeightedMetrics(actions: Array<ActionMetric | HistoryActi
   for (const a of actions) {
     totalSamples += a.sampleCount;
     weightedSuccess += a.successRate * a.sampleCount;
-    if (a.rttSampleCount > 0) {
-      apdexWeight += a.rttSampleCount;
-      weightedApdex += a.apdex * a.rttSampleCount;
+    if (mode === 'rtt') {
+      if (a.rttSampleCount > 0) {
+        apdexWeight += a.rttSampleCount;
+        weightedApdex += a.rttApdex * a.rttSampleCount;
+      }
+    } else if (a.totalDurationSampleCount > 0) {
+      apdexWeight += a.totalDurationSampleCount;
+      weightedApdex += a.totalDurationApdex * a.totalDurationSampleCount;
     }
   }
   return {

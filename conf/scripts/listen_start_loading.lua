@@ -22,13 +22,18 @@ local function first_path(msg, paths)
 end
 
 function execute(r)
+    local roleId = robot.get("roleId") or robot.get("playerId")
+
     -- 轮询监听开始加载消息，超时 180 秒（3 分钟），轮询 500 毫秒
     local resp, recv = network.tcp_listen("logic", {cmd=4, act=6}, "Game.BattleStartLoadingS2C", 180, 500)
     if not resp then
-        log.error("ListenStartLoading 超时")
+        log.error("ListenStartLoading 等待开始加载超时: service=logic route=4:6 proto=Game.BattleStartLoadingS2C timeoutSec=180 pollMs=500 roleId="
+            .. tostring(roleId)
+            .. " recv=" .. tostring(recv))
         return 31, 0, recv  -- 31=LISTEN_TIMEOUT
     end
 
+    local fighterCount = 0
     local ok, err = pcall(function()
         local battleId = proto.get_path(resp, "battleId")
         if battleId then
@@ -49,8 +54,8 @@ function execute(r)
             robot.set("battleGameType", tonumber(gameType) or gameType)
         end
 
-        local myPlayerId = tonumber(robot.get("roleId") or robot.get("playerId"))
-        local fighterCount = proto.list_size(resp, "record.FighterList")
+        local myPlayerId = tonumber(roleId)
+        fighterCount = proto.list_size(resp, "record.FighterList")
         local fighters = {}
 
         for i = 1, fighterCount do
@@ -98,15 +103,38 @@ function execute(r)
         end
     end)
 
-    if ok then
-        log.info("开始加载: battleAddress=" .. tostring(robot.get("battleAddress"))
-            .. " fighterIndex=" .. tostring(robot.get("fighterIndex"))
-            .. " battleId=" .. tostring(robot.get("battleId"))
-            .. " battleSession=" .. tostring(robot.get("battleSession")))
-    else
-        log.error("ListenStartLoading 解析失败: " .. tostring(err))
+    if not ok then
+        log.error("ListenStartLoading 解析失败: roleId=" .. tostring(roleId)
+            .. " fighterCount=" .. tostring(fighterCount)
+            .. " recv=" .. tostring(recv)
+            .. " err=" .. tostring(err))
         return 54, 0, recv  -- 54=LUA_EXIT_CODE
     end
+
+    local battleAddress = robot.get("battleAddress")
+    local battleId = robot.get("battleId")
+    local fighterIndex = robot.get("fighterIndex")
+    local battleSecretKey = robot.get("battleSecretKey")
+    local battleSession = robot.get("battleSession")
+    if not battleAddress or not battleId or fighterIndex == nil or not battleSecretKey or not battleSession then
+        log.error("开始加载解析后关键字段缺失: roleId=" .. tostring(roleId)
+            .. " battleAddress=" .. tostring(battleAddress)
+            .. " battleId=" .. tostring(battleId)
+            .. " fighterIndex=" .. tostring(fighterIndex)
+            .. " hasSecretKey=" .. tostring(battleSecretKey ~= nil)
+            .. " battleSession=" .. tostring(battleSession)
+            .. " fighterCount=" .. tostring(fighterCount)
+            .. " recv=" .. tostring(recv))
+        return 54, 0, recv
+    end
+
+    log.info("开始加载: roleId=" .. tostring(roleId)
+        .. " battleAddress=" .. tostring(battleAddress)
+        .. " fighterIndex=" .. tostring(fighterIndex)
+        .. " battleId=" .. tostring(battleId)
+        .. " battleSession=" .. tostring(battleSession)
+        .. " fighterCount=" .. tostring(fighterCount)
+        .. " hasSecretKey=true")
 
     return 0, 0, recv
 end

@@ -132,18 +132,27 @@ func buildHistoryTrendPoint(sampledAt time.Time, elapsed int, stress *StressAggr
 	point.SendKBps = snap.Bandwidth.SendMBps * 1024
 	point.RecvKBps = snap.Bandwidth.RecvMBps * 1024
 
-	var apdexWeight float64
-	var rttAvg, rttP95, rttP99, clientAvg, encodeAvg, decodeAvg float64
+	var rttWeight, totalDurationWeight float64
+	var rttAvg, rttP95, rttP99, totalDurationAvg, totalDurationP95, totalDurationP99 float64
+	var clientAvg, encodeAvg, decodeAvg float64
 	var clientWeight float64
 	for _, action := range snap.Actions {
 		point.TotalQPS += action.AvgQPS
 		if action.RTTSampleCount > 0 {
 			weight := float64(action.RTTSampleCount)
-			point.Apdex += action.Apdex * weight
+			point.RTTApdex += action.RTTApdex * weight
 			rttAvg += action.RTT.AvgMs * weight
 			rttP95 += action.RTT.P95Ms * weight
 			rttP99 += action.RTT.P99Ms * weight
-			apdexWeight += weight
+			rttWeight += weight
+		}
+		if action.TotalDurationSampleCount > 0 {
+			weight := float64(action.TotalDurationSampleCount)
+			point.TotalDurationApdex += action.TotalDurationApdex * weight
+			totalDurationAvg += action.TotalDuration.AvgMs * weight
+			totalDurationP95 += action.TotalDuration.P95Ms * weight
+			totalDurationP99 += action.TotalDuration.P99Ms * weight
+			totalDurationWeight += weight
 		}
 		if action.SampleCount > 0 {
 			weight := float64(action.SampleCount)
@@ -153,11 +162,17 @@ func buildHistoryTrendPoint(sampledAt time.Time, elapsed int, stress *StressAggr
 			clientWeight += weight
 		}
 	}
-	if apdexWeight > 0 {
-		point.Apdex = point.Apdex / apdexWeight
-		point.RTTAvgMs = rttAvg / apdexWeight
-		point.RTTP95Ms = rttP95 / apdexWeight
-		point.RTTP99Ms = rttP99 / apdexWeight
+	if rttWeight > 0 {
+		point.RTTApdex = point.RTTApdex / rttWeight
+		point.RTTAvgMs = rttAvg / rttWeight
+		point.RTTP95Ms = rttP95 / rttWeight
+		point.RTTP99Ms = rttP99 / rttWeight
+	}
+	if totalDurationWeight > 0 {
+		point.TotalDurationApdex = point.TotalDurationApdex / totalDurationWeight
+		point.TotalDurationAvgMs = totalDurationAvg / totalDurationWeight
+		point.TotalDurationP95Ms = totalDurationP95 / totalDurationWeight
+		point.TotalDurationP99Ms = totalDurationP99 / totalDurationWeight
 	}
 	if clientWeight > 0 {
 		point.ClientAvgMs = clientAvg / clientWeight
@@ -165,7 +180,8 @@ func buildHistoryTrendPoint(sampledAt time.Time, elapsed int, stress *StressAggr
 		point.DecodeAvgMs = decodeAvg / clientWeight
 	}
 	point.TotalQPS = math.Round(point.TotalQPS*100) / 100
-	point.Apdex = math.Round(point.Apdex*10000) / 10000
+	point.RTTApdex = math.Round(point.RTTApdex*10000) / 10000
+	point.TotalDurationApdex = math.Round(point.TotalDurationApdex*10000) / 10000
 	point.SendKBps = math.Round(point.SendKBps*100) / 100
 	point.RecvKBps = math.Round(point.RecvKBps*100) / 100
 	point.MemPercent = math.Round(point.MemPercent*100) / 100

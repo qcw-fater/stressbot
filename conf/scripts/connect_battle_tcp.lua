@@ -24,16 +24,26 @@ end
 
 function execute(r)
     local battleAddress = robot.get("battleAddress")
+    local battleId = robot.get("battleId") or 0
+    local fighterIndex = robot.get("fighterIndex")
+    local battleSession = robot.get("battleSession") or 0
+
     if not battleAddress or battleAddress == "" then
-        log.error("ConnectBattleTCP: 无战斗服地址")
+        log.error("ConnectBattleTCP 缺少战斗服地址: battleId=" .. tostring(battleId)
+            .. " fighterIndex=" .. tostring(fighterIndex)
+            .. " battleSession=" .. tostring(battleSession))
         return 41, 0, 0  -- 41=ADDR_EMPTY
     end
 
-    log.info("连接战斗服 TCP: " .. battleAddress)
+    log.info("连接战斗服 TCP: address=" .. tostring(battleAddress)
+        .. " battleId=" .. tostring(battleId)
+        .. " fighterIndex=" .. tostring(fighterIndex))
 
     local ok = network.connect_tcp("battle", battleAddress)
     if not ok then
-        log.error("连接战斗服 TCP 失败: " .. battleAddress)
+        log.error("连接战斗服 TCP 失败: address=" .. tostring(battleAddress)
+            .. " battleId=" .. tostring(battleId)
+            .. " fighterIndex=" .. tostring(fighterIndex))
         return 1, 0, 0  -- 1=CONN_NOT_FOUND：连接没建好（语义准确）
     end
 
@@ -42,11 +52,20 @@ function execute(r)
     -- 若需要单独缩短此握手超时，再传第 5 个参数。
     local code, keyBody, sent, recv = network.tcp_request("battle")
     if code ~= 0 then
-        log.error("战斗服密钥交换失败 code=" .. tostring(code))
+        log.error("战斗服密钥交换失败: address=" .. tostring(battleAddress)
+            .. " battleId=" .. tostring(battleId)
+            .. " fighterIndex=" .. tostring(fighterIndex)
+            .. " code=" .. tostring(code)
+            .. " sent=" .. tostring(sent)
+            .. " recv=" .. tostring(recv))
         return code, sent, recv  -- 透传底层 code
     end
     if not keyBody or #keyBody == 0 then
-        log.error("战斗服密钥交换响应为空")
+        log.error("战斗服密钥交换响应为空: address=" .. tostring(battleAddress)
+            .. " battleId=" .. tostring(battleId)
+            .. " fighterIndex=" .. tostring(fighterIndex)
+            .. " sent=" .. tostring(sent)
+            .. " recv=" .. tostring(recv))
         return 54, sent, recv  -- 54=LUA_EXIT_CODE
     end
     network.set_tcp_secret_key("battle", keyBody)
@@ -54,9 +73,17 @@ function execute(r)
     -- 注册 10 秒心跳（Battle: cmd=4 BATTLE, act=2 PING_CS）
     local hbCode = network.register_tcp_heartbeat("battle", 10000, {cmd=4, act=2}, build_battle_tcp_heart)
     if hbCode ~= 0 then
+        log.error("战斗服 TCP 心跳注册失败: service=battle route=4:2 intervalMs=10000 address="
+            .. tostring(battleAddress)
+            .. " battleId=" .. tostring(battleId)
+            .. " fighterIndex=" .. tostring(fighterIndex)
+            .. " code=" .. tostring(hbCode))
         return hbCode, sent, recv
     end
 
-    log.info("战斗服 TCP 连接成功 心跳已注册(10s)")
+    log.info("战斗服 TCP 连接成功: address=" .. tostring(battleAddress)
+        .. " battleId=" .. tostring(battleId)
+        .. " fighterIndex=" .. tostring(fighterIndex)
+        .. " hasSecretKey=true 心跳已注册(10s)")
     return 0, sent, recv
 end

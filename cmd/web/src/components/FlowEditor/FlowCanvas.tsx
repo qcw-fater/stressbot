@@ -170,9 +170,11 @@ function FlowCanvasInner() {
           let i = 1;
           while (state.actions[actionName]) actionName = `${template.name}_${i++}`;
           addAction(actionName, template.data as ActionDef);
-          // 唯一 node id
+          // 模板复用节点用动作名作为节点 ID；只有冲突时递增后缀。
           const taken = new Set(Object.keys(useFlowStore.getState().nodes));
-          const nodeId = generateNodeId('action', taken);
+          let nodeId = actionName;
+          let nodeIndex = 1;
+          while (taken.has(nodeId)) nodeId = `${actionName}_${nodeIndex++}`;
           addNode(nodeId, { type: 'action', action: actionName });
           const layout = useFlowStore.getState().layout;
           layout.nodePositions[nodeId] = { x: flowPos.x, y: flowPos.y };

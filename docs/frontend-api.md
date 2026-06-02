@@ -436,7 +436,7 @@ GET /sbot/metrics/summary
 
 ### 6.5 指标计算说明
 
-**Apdex**：`(satisfied + tolerating * 0.5) / total`，其中 satisfied = 延迟 < T，tolerating = T~4T。
+**Apdex**：当前展示的是 RTT Apdex，`(satisfied + tolerating * 0.5) / rttSampleCount`。其中 satisfied = `WireRTT < T`，tolerating = `T <= WireRTT < 4T`，`WireRTT >= 4T` 计为不满意；纯客户端动作、超时、发送失败、取消且未收到响应帧的分支不进入 RTT Apdex 分母。
 
 **QPS**：`avgQps = sampleCount / uptime`（全程平均）。瞬时 QPS 由前端差分计算。
 

@@ -7,17 +7,14 @@
  *   - 高度可通过顶部拖把手调整（160px ~ 80vh）
  */
 
-import { Alert, Button, Input, Popover, Progress, Space, Switch, Table, Tag, Tooltip } from 'antd';
+import { Alert, Button, Progress, Tooltip } from 'antd';
 import { CaretDownOutlined, CaretUpOutlined, LineChartOutlined, WarningOutlined } from '@ant-design/icons';
-import type { ColumnsType } from 'antd/es/table';
 import { EChartsReact } from './shared/EChartsReact';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useRuntimeStore } from '@/services';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
-import { ApdexCell } from './shared/ApdexCell';
-import { fmtBytes, fmtMs, NUMERIC_STYLE } from './shared/formats';
-import type { ActionMetric } from '@/types/api';
+import { ActionMetricsTable } from './shared/ActionMetricsTable';
 import './MonitorDock.css';
 
 const MIN_H = 160;
@@ -79,90 +76,6 @@ function sparkOption(series: Array<{ name: string; data: number[]; color: string
     }),
   };
 }
-
-/* ── 动作表列定义 ── */
-
-const ACTION_COLUMNS: ColumnsType<ActionMetric> = [
-  {
-    title: '动作',
-    dataIndex: 'name',
-    key: 'name',
-    width: 160,
-    fixed: 'left',
-    ellipsis: true,
-    sorter: (a, b) => a.name.localeCompare(b.name),
-    render: (v: string) => {
-      const isCb = v.startsWith('callback:');
-      const display = isCb ? v.slice('callback:'.length) : v;
-      return (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          {isCb && <Tag color="orange" style={{ marginInlineEnd: 0 }}>推送</Tag>}
-          <Tooltip title={display} mouseEnterDelay={0.4}>
-            <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {display}
-            </code>
-          </Tooltip>
-        </div>
-      );
-    },
-  },
-  { title: '样本', dataIndex: 'sampleCount', key: 'sampleCount', width: 60, sorter: (a, b) => a.sampleCount - b.sampleCount, defaultSortOrder: 'descend' as const, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
-  { title: '成功', dataIndex: 'successCount', key: 'successCount', width: 60, sorter: (a, b) => a.successCount - b.successCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: 'var(--color-success)' }}>{v}</span> },
-  { title: '失败', dataIndex: 'failureCount', key: 'failureCount', width: 52, sorter: (a, b) => a.failureCount - b.failureCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-error)' : 'var(--text-tertiary)' }}>{v}</span> },
-  { title: '超时', dataIndex: 'timeoutCount', key: 'timeoutCount', width: 52, sorter: (a, b) => a.timeoutCount - b.timeoutCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-orange)' : 'var(--text-tertiary)' }}>{v}</span> },
-  { title: 'avg(ms)', key: 'avgMs', width: 64, sorter: (a, b) => a.rtt.avgMs - b.rtt.avgMs, render: (_, r) => <span style={NUMERIC_STYLE}>{r.rttSampleCount > 0 ? fmtMs(r.rtt.avgMs) : '—'}</span> },
-  { title: 'p50(ms)', key: 'p50Ms', width: 64, sorter: (a, b) => a.rtt.p50Ms - b.rtt.p50Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{r.rttSampleCount > 0 ? fmtMs(r.rtt.p50Ms) : '—'}</span> },
-  { title: 'p95(ms)', key: 'p95Ms', width: 64, sorter: (a, b) => a.rtt.p95Ms - b.rtt.p95Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{r.rttSampleCount > 0 ? fmtMs(r.rtt.p95Ms) : '—'}</span> },
-  { title: 'p99(ms)', key: 'p99Ms', width: 64, sorter: (a, b) => a.rtt.p99Ms - b.rtt.p99Ms, render: (_, r) => <span style={NUMERIC_STYLE}>{r.rttSampleCount > 0 ? fmtMs(r.rtt.p99Ms) : '—'}</span> },
-  { title: 'max(ms)', key: 'maxMs', width: 64, sorter: (a, b) => a.rtt.maxMs - b.rtt.maxMs, render: (_, r) => <span style={NUMERIC_STYLE}>{r.rttSampleCount > 0 ? fmtMs(r.rtt.maxMs) : '—'}</span> },
-  {
-    title: <Tooltip title="平均每次成功发送的字节数">↑发送(均)</Tooltip>,
-    dataIndex: 'avgSendBytes', key: 'avgSendBytes', width: 72,
-    sorter: (a, b) => a.avgSendBytes - b.avgSendBytes,
-    render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: 'var(--chart-cyan)' }}>{fmtBytes(v)}</span>,
-  },
-  {
-    title: <Tooltip title="平均每次成功接收的字节数">↓接收(均)</Tooltip>,
-    dataIndex: 'avgRecvBytes', key: 'avgRecvBytes', width: 72,
-    sorter: (a, b) => a.avgRecvBytes - b.avgRecvBytes,
-    render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: 'var(--chart-purple)' }}>{fmtBytes(v)}</span>,
-  },
-  { title: '并发', dataIndex: 'executing', key: 'executing', width: 52, sorter: (a, b) => a.executing - b.executing, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
-  { title: 'QPS', dataIndex: 'avgQps', key: 'avgQps', width: 60, sorter: (a, b) => a.avgQps - b.avgQps, render: (v: number) => <span style={NUMERIC_STYLE}>{v.toFixed(1)}</span> },
-  { title: 'Apdex', dataIndex: 'apdex', key: 'apdex', width: 68, sorter: (a, b) => a.apdex - b.apdex, render: (_, r) => <ApdexCell value={r.apdex} rttSampleCount={r.rttSampleCount} /> },
-  {
-    title: '错误',
-    key: 'errors',
-    width: 52,
-    fixed: 'right',
-    sorter: (a, b) => (a.errors?.length ?? 0) - (b.errors?.length ?? 0),
-    render: (_, r) => {
-      if (!r.errors?.length) return <span style={{ color: 'var(--text-tertiary)' }}>—</span>;
-      return (
-        <Popover
-          overlayStyle={{ zIndex: 1200 }}
-          content={
-            <div style={{ maxWidth: 360 }}>
-              {r.errors.map((e) => (
-                <div key={`${e.kind}:${e.code}`} style={{ marginTop: 3, fontSize: 11, lineHeight: '16px' }}>
-                  <span style={{ color: 'var(--color-error)', fontWeight: 700, fontSize: 10, fontVariantNumeric: 'tabular-nums', marginRight: 6 }}>×{e.count}</span>
-                  <span style={{ fontWeight: 500 }}>{e.codeName || `${e.kind}#${e.code}`}</span>
-                  {e.msgs.length > 0 && (
-                    <span style={{ color: 'var(--text-tertiary)', marginLeft: 6 }}>{e.msgs.join('; ')}</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          }
-          title={<span style={{ fontSize: 12 }}>错误明细</span>}
-          mouseEnterDelay={0.3}
-        >
-          <Tag color="error" style={{ marginInlineEnd: 0, cursor: 'pointer' }}>{r.errors.length}</Tag>
-        </Popover>
-      );
-    },
-  },
-];
 
 /* ── Agent 离线告警横幅 ── */
 
@@ -385,14 +298,11 @@ function TopSection() {
   const recv = fmtBandwidth(b.recvMBps ?? 0);
   const robotPercent = r.started > 0 ? Math.round((r.running / r.started) * 100) : 0;
 
-  // 加权集群 apdex（用 rttSampleCount 作权重，排除纯客户端动作）/ 成功率
-  let totalSamples = 0, wApdex = 0, wSuccess = 0;
+  // 加权集群成功率。
+  let totalSamples = 0, wSuccess = 0;
   for (const a of actions) {
     totalSamples += a.sampleCount;
     wSuccess += a.successRate * a.sampleCount;
-    if (a.rttSampleCount > 0) {
-      wApdex += a.apdex * a.rttSampleCount;
-    }
   }
   const clusterSuccess = totalSamples > 0 ? wSuccess / totalSamples : 0;
 
@@ -523,8 +433,6 @@ function TopSection() {
 
 function ActionsSection() {
   const latestStress = useRuntimeStore((s) => s.latestStress);
-  const [search, setSearch] = useState('');
-  const [actionsOnly, setActionsOnly] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollY, setScrollY] = useState(200);
 
@@ -544,52 +452,22 @@ function ActionsSection() {
     return () => ro.disconnect();
   }, []);
 
-  const dataSource = useMemo(() => {
-    if (!latestStress) return [];
-    let rows = latestStress.actions ?? [];
-    if (actionsOnly) rows = rows.filter((a) => !a.name.startsWith('callback:'));
-    if (search) {
-      const lo = search.toLowerCase();
-      rows = rows.filter((a) => a.name.toLowerCase().includes(lo));
-    }
-    return rows;
-  }, [latestStress, search, actionsOnly]);
-
   return (
-    <div className="monitor-dock__actions">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexShrink: 0 }}>
-        <Input.Search
-          placeholder="按动作名搜索"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          allowClear
-          style={{ width: 260 }}
+    <div className="monitor-dock__actions" ref={containerRef}>
+      {latestStress ? (
+        <ActionMetricsTable
+          rows={latestStress.actions ?? []}
+          compact
           size="small"
+          scrollY={scrollY}
+          popupZIndex={1200}
+          showCanceledColumn={false}
         />
-        <Space size={4}>
-          <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>仅动作</span>
-          <Switch checked={actionsOnly} onChange={setActionsOnly} size="small" />
-        </Space>
-        <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
-          {dataSource.length} 条
-        </span>
-      </div>
-      <div ref={containerRef} style={{ flex: 1, minHeight: 0 }}>
-        {latestStress ? (
-          <Table<ActionMetric>
-            rowKey="name"
-            size="small"
-            dataSource={dataSource}
-            columns={ACTION_COLUMNS}
-            pagination={false}
-            scroll={{ x: 'max-content', y: scrollY }}
-          />
-        ) : (
-          <div style={{ color: 'var(--text-tertiary)', fontSize: 12, textAlign: 'center', paddingTop: 20 }}>
-            暂无数据
-          </div>
-        )}
-      </div>
+      ) : (
+        <div style={{ color: 'var(--text-tertiary)', fontSize: 12, textAlign: 'center', paddingTop: 20 }}>
+          暂无数据
+        </div>
+      )}
     </div>
   );
 }

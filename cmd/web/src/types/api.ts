@@ -247,7 +247,8 @@ export interface ActionMetric {
   canceledCount: number;
   executing: number;
   successRate: number;
-  apdex: number;
+  rttApdex: number;
+  totalDurationApdex: number;
   avgQps: number;
   avgSendBytes: number;
   avgRecvBytes: number;
@@ -263,8 +264,12 @@ export interface ActionMetric {
   parseStoreAvgMs: number;
   /** 进入 RTT 直方图的样本数。0 表示该 action 没有 request-response RTT，RTT 列应显示 — */
   rttSampleCount: number;
+  /** 进入总耗时直方图的 action 样本数。0 表示该 action 没有总耗时样本 */
+  totalDurationSampleCount: number;
   /** RTT 直方图（WireRTT） */
   rtt: HistogramView;
+  /** action 总耗时直方图（wallClock） */
+  totalDuration: HistogramView;
   errors?: ErrorEntry[];
 }
 
@@ -421,17 +426,21 @@ export interface HistoryActionMetric {
   successCount: number;
   failureCount: number;
   timeoutCount: number;
+  canceledCount: number;
   executing: number;
   successRate: number;
   avgSendBytes: number;
   avgRecvBytes: number;
-  apdex: number;
+  rttApdex: number;
+  totalDurationApdex: number;
   rtt: HistoryHistogramSummary;
+  totalDuration: HistoryHistogramSummary;
   clientAvgMs: number;
   encodeAvgMs: number;
   decodeAvgMs: number;
   parseStoreAvgMs: number;
   rttSampleCount: number;
+  totalDurationSampleCount: number;
   avgQps: number;
   errors?: ErrorEntry[];
 }
@@ -491,7 +500,8 @@ export interface HistoryTrendPoint {
   sampledAt: string;
   elapsedSec: number;
   totalQps: number;
-  apdex: number;
+  rttApdex: number | null;
+  totalDurationApdex: number | null;
   sendKBps: number;
   recvKBps: number;
   avgCpuPercent: number;
@@ -533,8 +543,11 @@ export interface HistoryCompareTask {
     actions: Array<{
       name: string;
       sampleCount: number;
-      apdex: number;
+      rttApdex: number;
+      totalDurationApdex: number;
       rtt: HistoryHistogramSummary;
+      totalDuration: HistoryHistogramSummary;
+      totalDurationSampleCount: number;
     }>;
   };
 }

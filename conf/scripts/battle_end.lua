@@ -7,6 +7,10 @@ local proto = require("proto")
 local log = require("log")
 
 function execute(r)
+    local battleId = robot.get("battleId")
+    local fighterIndex = robot.get("fighterIndex")
+    local battleSession = robot.get("battleSession")
+
     -- 旧 Robot 工具在发送 BattleEnd(4:13) 前先关闭 UDP。
     network.close_udp("battle")
 
@@ -15,7 +19,9 @@ function execute(r)
 
     -- 构建 PlayerResult（与旧工具 buildBattleStatistics 一致）
     local fighters = robot.get("fighterListData")
+    local fighterCount = 0
     if fighters and type(fighters) == "table" then
+        fighterCount = #fighters
         local playerResults = {}
         for i, f in ipairs(fighters) do
             local stat = proto.create("Game.PlayerBattleStatistics")
@@ -82,15 +88,30 @@ function execute(r)
         if #playerResults > 0 then
             proto.set_field(msg, "playerResult", playerResults)
         end
+    else
+        log.warn("BattleEnd 缺少 fighterListData，将不填充 playerResult: battleId="
+            .. tostring(battleId)
+            .. " fighterIndex=" .. tostring(fighterIndex)
+            .. " battleSession=" .. tostring(battleSession))
     end
 
     -- 使用 tcp_request 等待服务端 ACK（handleResult 同步结算约 3.6s）
     local code, _, sent, recv = network.tcp_request("battle", {cmd=4, act=13}, msg)
     if code ~= 0 then
-        log.error("BattleEnd 失败: code=" .. tostring(code))
-        return code, sent, 0
+        log.error("BattleEnd 请求失败: service=battle route=4:13 battleId=" .. tostring(battleId)
+            .. " fighterIndex=" .. tostring(fighterIndex)
+            .. " battleSession=" .. tostring(battleSession)
+            .. " fighterCount=" .. tostring(fighterCount)
+            .. " code=" .. tostring(code)
+            .. " sent=" .. tostring(sent)
+            .. " recv=" .. tostring(recv))
+        return code, sent, recv
     end
-    log.info("BattleEnd 已确认")
+    log.info("BattleEnd 已确认: battleId=" .. tostring(battleId)
+        .. " fighterIndex=" .. tostring(fighterIndex)
+        .. " fighterCount=" .. tostring(fighterCount)
+        .. " sent=" .. tostring(sent)
+        .. " recv=" .. tostring(recv))
 
     -- 收到 ACK 后关闭 Battle TCP，清理战斗状态
     network.close_tcp("battle")
@@ -101,5 +122,5 @@ function execute(r)
     robot.delete("battleId")
     robot.delete("battleArea")
 
-    return 0, sent, 0
+    return 0, sent, recv
 end

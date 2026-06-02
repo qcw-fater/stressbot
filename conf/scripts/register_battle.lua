@@ -13,7 +13,8 @@ function execute(r)
     local battleSession = robot.get("battleSession") or 0
 
     if not fighterIndex then
-        log.error("RegisterBattle: 缺少 fighterIndex")
+        log.error("RegisterBattle 缺少 fighterIndex: battleId=" .. tostring(battleId)
+            .. " battleSession=" .. tostring(battleSession))
         return 54, 0, 0  -- 54=LUA_EXIT_CODE：业务前置条件不足
     end
 
@@ -34,17 +35,33 @@ function execute(r)
         lastCode = code
         if code == 0 then
             log.info("RegisterBattle 成功: index=" .. tostring(fighterIndex)
-                .. " battleId=" .. tostring(battleId))
+                .. " battleId=" .. tostring(battleId)
+                .. " battleSession=" .. tostring(battleSession)
+                .. " send=" .. tostring(_send)
+                .. " recv=" .. tostring(_recv))
             return 0, _send, _recv
         end
 
-        log.info("RegisterBattle 第 " .. attempt .. " 次尝试失败: code=" .. tostring(code))
+        log.warn("RegisterBattle 第 " .. tostring(attempt) .. "/" .. tostring(maxRetry) .. " 次尝试失败: code="
+            .. tostring(code)
+            .. " sent=" .. tostring(sent)
+            .. " recv=" .. tostring(recv)
+            .. " battleId=" .. tostring(battleId)
+            .. " fighterIndex=" .. tostring(fighterIndex)
+            .. " battleSession=" .. tostring(battleSession))
         if attempt < maxRetry then
-            log.info("等待 2 秒后重试...")
+            log.info("RegisterBattle 等待 2 秒后重试: nextAttempt=" .. tostring(attempt + 1)
+                .. " maxRetry=" .. tostring(maxRetry))
             utils.sleep(2000)
         end
     end
 
-    log.error("RegisterBattle 最终失败: 已重试 " .. maxRetry .. " 次 lastCode=" .. tostring(lastCode))
+    log.error("RegisterBattle 最终失败: retry=" .. tostring(maxRetry)
+        .. " lastCode=" .. tostring(lastCode)
+        .. " totalSend=" .. tostring(_send)
+        .. " totalRecv=" .. tostring(_recv)
+        .. " battleId=" .. tostring(battleId)
+        .. " fighterIndex=" .. tostring(fighterIndex)
+        .. " battleSession=" .. tostring(battleSession))
     return lastCode, _send, _recv  -- 透传最后一次失败的真实 code
 end

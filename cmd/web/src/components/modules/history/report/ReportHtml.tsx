@@ -380,9 +380,11 @@ function DetailTableSection({ actions }: { actions: HistoryActionMetric[] }) {
         </thead>
         <tbody>
           {sorted.map((a) => {
-            const level = classifyApdex(a.apdex);
+            const hasTotalDuration = (a.totalDurationSampleCount ?? 0) > 0;
+            const level = hasTotalDuration ? classifyApdex(a.totalDurationApdex) : 'unknown';
             const apdexColor = level === 'excellent' || level === 'good' ? 'c-success'
               : level === 'fair' ? 'c-warning'
+              : level === 'unknown' ? ''
               : 'c-error';
             const rate = a.sampleCount > 0 ? (a.successRate * 100).toFixed(1) : '0';
             // rttSampleCount=0 时延迟列显示 — 避免误把 0ms 当真实数据
@@ -393,13 +395,13 @@ function DetailTableSection({ actions }: { actions: HistoryActionMetric[] }) {
                 <td className="num">{a.sampleCount.toLocaleString()}</td>
                 <td className={`num${a.failureCount > 0 ? ' c-error' : ''}`}>{a.failureCount}</td>
                 <td className={`num${a.timeoutCount > 0 ? ' c-warning' : ''}`}>{a.timeoutCount}</td>
-                <td className={`num ${apdexColor}`}>{a.apdex.toFixed(3)}</td>
+                <td className={`num ${apdexColor}`}>{hasTotalDuration ? a.totalDurationApdex.toFixed(3) : '—'}</td>
                 <td className="num">{rate}%</td>
-                <td className="num">{hasNet ? fmtMs(a.rtt.avgMs) : '—'}</td>
-                <td className="num">{hasNet ? fmtMs(a.rtt.p50Ms) : '—'}</td>
-                <td className="num">{hasNet ? fmtMs(a.rtt.p95Ms) : '—'}</td>
-                <td className="num">{hasNet ? fmtMs(a.rtt.p99Ms) : '—'}</td>
-                <td className="num">{hasNet ? fmtMs(a.rtt.maxMs) : '—'}</td>
+                <td className="num">{hasNet && a.rtt ? fmtMs(a.rtt.avgMs) : '—'}</td>
+                <td className="num">{hasNet && a.rtt ? fmtMs(a.rtt.p50Ms) : '—'}</td>
+                <td className="num">{hasNet && a.rtt ? fmtMs(a.rtt.p95Ms) : '—'}</td>
+                <td className="num">{hasNet && a.rtt ? fmtMs(a.rtt.p99Ms) : '—'}</td>
+                <td className="num">{hasNet && a.rtt ? fmtMs(a.rtt.maxMs) : '—'}</td>
                 <td className="num">{fmtMs(a.clientAvgMs ?? 0)}</td>
                 <td className="num">{fmtMs(a.encodeAvgMs ?? 0)}</td>
                 <td className="num">{fmtMs(a.decodeAvgMs ?? 0)}</td>

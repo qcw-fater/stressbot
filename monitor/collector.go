@@ -111,39 +111,47 @@ type CodedError interface {
 
 // actionMetrics per-action 指标，全部使用原子操作保证无锁热路径安全。
 type actionMetrics struct {
-	successCount    atomic.Int64      // 成功次数
-	failureCount    atomic.Int64      // 失败次数（非超时）
-	timeoutCount    atomic.Int64      // 超时次数
-	timeoutTotalMs  atomic.Int64      // 超时样本累计延迟（毫秒），用于计算平均超时延迟
-	canceledCount   atomic.Int64      // 取消次数（ctx 取消）
-	executing       atomic.Int64      // 当前正在执行中的并发数
-	rtt             *LatencyHistogram // RTT 直方图：纯网络往返（仅成功且有 WireRTT 样本）
-	sendBytes       atomic.Int64      // 发送字节数（per-action，用于 ↑avg 列）
-	recvBytes       atomic.Int64      // 接收字节数（per-action，用于 ↓avg 列）
-	apdexSatisfied  atomic.Int64      // Apdex 满意样本：响应时间 < T
-	apdexTolerating atomic.Int64      // Apdex 容忍样本：响应时间 >= T 且 < 4T
-	errors          sync.Map          // errKey → *errorBucket，按 (Kind, Code) 聚合的错误分布
+	successCount                 atomic.Int64      // 成功次数
+	failureCount                 atomic.Int64      // 失败次数（非超时）
+	timeoutCount                 atomic.Int64      // 超时次数
+	timeoutTotalMs               atomic.Int64      // 超时样本累计延迟（毫秒），用于计算平均超时延迟
+	canceledCount                atomic.Int64      // 取消次数（ctx 取消）
+	executing                    atomic.Int64      // 当前正在执行中的并发数
+	rtt                          *LatencyHistogram // RTT 直方图：纯网络往返（仅成功且有 WireRTT 样本）
+	totalDuration                *LatencyHistogram // 总耗时直方图：单次 action wallClock
+	sendBytes                    atomic.Int64      // 发送字节数（per-action，用于 ↑avg 列）
+	recvBytes                    atomic.Int64      // 接收字节数（per-action，用于 ↓avg 列）
+	apdexSatisfied               atomic.Int64      // RTT Apdex 满意样本：响应时间 < T
+	apdexTolerating              atomic.Int64      // RTT Apdex 容忍样本：响应时间 >= T 且 < 4T
+	totalDurationApdexSatisfied  atomic.Int64      // 总耗时 Apdex 满意样本：总耗时 < T
+	totalDurationApdexTolerating atomic.Int64      // 总耗时 Apdex 容忍样本：总耗时 >= T 且 < 4T
+	errors                       sync.Map          // errKey → *errorBucket，按 (Kind, Code) 聚合的错误分布
 
-	// 客户端开销与 RTT 样本计数：
+	// 客户端开销、RTT 样本与总耗时样本计数：
 	//   - clientCostSum/Count：累计客户端构建/解析开销（纳秒），用于 ClientAvgMs
 	//   - rttSampleCount：RTT 直方图中的独立样本数（逐个 request 记录，非 action 粒度）
+	//   - totalDurationSampleCount：总耗时直方图中的 action 样本数（单次 action 最多 1 个）
 	//   - Lua 脚本单次 action 内可能多次 request，每次独立记录 WireRTT 到直方图
 	// 客户端开销在所有结果分支（含失败/超时）都累加；rttSampleCount 统计所有有完整响应帧且 WireRTT > 0 的 request，
 	// 包括服务端 headerErr/失败响应，不包括超时、发送失败、取消且未收到响应帧的分支。
-	clientCostSum   atomic.Int64
-	clientCostCount atomic.Int64
-	buildCostSum    atomic.Int64
-	encodeCostSum   atomic.Int64
-	sendCostSum     atomic.Int64
-	decodeWaitSum   atomic.Int64
-	decodeCostSum   atomic.Int64
-	dispatchWaitSum atomic.Int64
-	parseStoreSum   atomic.Int64
-	rttSampleCount  atomic.Int64
+	clientCostSum            atomic.Int64
+	clientCostCount          atomic.Int64
+	buildCostSum             atomic.Int64
+	encodeCostSum            atomic.Int64
+	sendCostSum              atomic.Int64
+	decodeWaitSum            atomic.Int64
+	decodeCostSum            atomic.Int64
+	dispatchWaitSum          atomic.Int64
+	parseStoreSum            atomic.Int64
+	rttSampleCount           atomic.Int64
+	totalDurationSampleCount atomic.Int64
 }
 
 func newActionMetrics() *actionMetrics {
-	return &actionMetrics{rtt: newLatencyHistogram()}
+	return &actionMetrics{
+		rtt:           newLatencyHistogram(),
+		totalDuration: newLatencyHistogram(),
+	}
 }
 
 type TimingDetailLevel string
@@ -331,6 +339,18 @@ func (c *MetricsCollector) RecordAction(
 	if clientCost > 0 {
 		am.clientCostSum.Add(clientCost.Nanoseconds())
 		am.clientCostCount.Add(1)
+	}
+	if wallClock > 0 {
+		am.totalDuration.Record(wallClock)
+		am.totalDurationSampleCount.Add(1)
+		T := int64(c.apdexT.Load())
+		ms := wallClock.Milliseconds()
+		switch {
+		case ms < T:
+			am.totalDurationApdexSatisfied.Add(1)
+		case ms < 4*T:
+			am.totalDurationApdexTolerating.Add(1)
+		}
 	}
 	addDuration := func(dst *atomic.Int64, d time.Duration) {
 		if d > 0 {

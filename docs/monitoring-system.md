@@ -12,7 +12,7 @@
 - **`enabled=false` 时所有公共方法为空操作**，零性能开销
 - **延迟使用固定桶直方图**（16 桶，覆盖 0ms ~ 60s+），全局累积
 - **错误按 `(Kind, Code)` 元组聚合**，环形缓冲保留最近 3 条 Detail
-- **Apdex(T) 标准评分**，T 可配置（默认 100ms）
+- **RTT Apdex(T) 评分**，T 可配置（默认 100ms），按 RTT 样本数计算
 - **支持分布式聚合**，MergeSnapshots 合并多 Agent 指标
 - **声明式动作和 Lua 脚本动作统一自动采集**，用户无感知
 
@@ -22,7 +22,7 @@
 |------|--------|-----------|
 | min/max/P50/P90/P95/P99 | 窗口值（最近 ~10240 样本） | **全局**（固定桶累积计数） |
 | Avg | 窗口值 | **全局**（sum/count） |
-| Apdex | 窗口值，`sample500Less` 命名有歧义 | **全局**，标准 Apdex(T) 公式，T 可配置 |
+| Apdex | 窗口值，`sample500Less` 命名有歧义 | **全局 RTT Apdex(T)**，T 可配置，分母为 RTT 样本数 |
 | 内存/action | ~80KB（10240 x 8B） | **~200B**（固定桶 + 原子计数器） |
 | 锁/channel | channel 传批次 | **无锁**，纯原子操作 |
 | 外部依赖 | `go-metrics` | **无** |
@@ -408,33 +408,38 @@ func classifyResult(err error) monitor.ActionResult {
 - **Canceled 不计入样本数**：取消 = 任务被用户主动停止，不代表服务器能力
 - **sampleCount = successCount + failureCount + timeoutCount**（不含 canceledCount）
 
-### 7.4 Apdex(T) 标准公式
+### 7.4 RTT Apdex(T) 公式
 
 ```
-Apdex = (satisfied + tolerating * 0.5) / total
+RTT Apdex = (satisfied + tolerating * 0.5) / rttSampleCount
 
-其中 total = sampleCount = success + failure + timeout（不含 canceled）
-      satisfied  = 成功且延迟 < T（默认 100ms）
-      tolerating = 成功且 T <= 延迟 < 4T（100ms ~ 400ms）
-      frustrated = 其余（失败 + 超时 + 成功但延迟 >= 4T）
+其中 rttSampleCount = 有完整响应帧且 WireRTT > 0 的 request 数
+      satisfied     = WireRTT < T（默认 100ms）
+      tolerating    = T <= WireRTT < 4T（默认 100ms ~ 400ms）
+      frustrated    = WireRTT >= 4T（隐式 0 分，不单独计数）
 ```
+
+RTT Apdex 只评价网络 RTT 样本；纯客户端动作、超时、发送失败、取消且未收到响应帧的分支不进入分母。失败/超时对整体质量的影响通过 `failureCount`、`timeoutCount`、`successRate` 和错误分布单独展示。
 
 **关键**：`float64(tolerating) * 0.5`，不是 `tolerating / 2`（Go 整数除法会丢精度）。
 
-Apdex 分类在 `RecordAction` 的 `ResultSuccess` 分支中进行：
+RTT Apdex 分类在遍历 `timing.Requests` 时进行：
 
 ```go
-case ResultSuccess:
-    am.successCount.Add(1)
-    am.latency.Record(duration)
-    // Apdex 分类
-    ms := duration.Milliseconds()
+for _, req := range timing.Requests {
+    if req.WireRTT <= 0 {
+        continue
+    }
+    am.rtt.Record(req.WireRTT)
+    am.rttSampleCount.Add(1)
+    ms := req.WireRTT.Milliseconds()
     switch {
     case ms < T:
         am.apdexSatisfied.Add(1)
     case ms < 4*T:
         am.apdexTolerating.Add(1)
     }
+}
 ```
 
 ### 7.5 QPS 计算
@@ -459,11 +464,11 @@ type actionMetrics struct {
     timeoutTotalMs  atomic.Int64      // 超时样本累计延迟（毫秒），用于计算平均超时延迟
     canceledCount   atomic.Int64      // 取消次数（ctx 取消）
     executing       atomic.Int64      // 当前正在执行中的并发数
-    latency         *LatencyHistogram // 延迟直方图（仅成功样本）
+    rtt             *LatencyHistogram // RTT 直方图：纯网络往返（WireRTT）
     sendBytes       atomic.Int64      // 累计发送字节数（per-action，仅成功样本）
     recvBytes       atomic.Int64      // 累计接收字节数（per-action，仅成功样本）
-    apdexSatisfied  atomic.Int64      // Apdex 满意样本：响应时间 < T
-    apdexTolerating atomic.Int64      // Apdex 容忍样本：T <= 响应时间 < 4T
+    apdexSatisfied  atomic.Int64      // RTT Apdex 满意样本：WireRTT < T
+    apdexTolerating atomic.Int64      // RTT Apdex 容忍样本：T <= WireRTT < 4T
     errors          sync.Map          // errKey → *errorBucket，按 (Kind, Code) 聚合的错误分布
 }
 ```
@@ -478,10 +483,10 @@ type actionMetrics struct {
 | `timeoutTotalMs` | ResultTimeout | 超时样本延迟累加，用于计算 `timeoutAvgMs` |
 | `canceledCount` | ResultCanceled | ctx 取消计数，不参与 sampleCount/Apdex/SuccessRate |
 | `executing` | RecordActionStart (+1) / RecordAction (-1) | 当前并发执行数 |
-| `latency` | ResultSuccess | 仅记录成功样本的延迟 |
+| `rtt` | 遍历 `timing.Requests` 时 | 记录有完整响应帧且 WireRTT > 0 的 RTT 样本 |
 | `sendBytes/recvBytes` | ResultSuccess | 仅记录成功样本的字节数 |
-| `apdexSatisfied` | ResultSuccess + 延迟 < T | Apdex 满意计数 |
-| `apdexTolerating` | ResultSuccess + T <= 延迟 < 4T | Apdex 容忍计数 |
+| `apdexSatisfied` | WireRTT < T | RTT Apdex 满意计数 |
+| `apdexTolerating` | T <= WireRTT < 4T | RTT Apdex 容忍计数 |
 | `errors` | ResultFailure | 按 (Kind, Code) 聚合的错误分布 |
 
 ### 8.3 CollectErrors — 只读快照
@@ -607,12 +612,12 @@ func (c *MetricsCollector) recordError(am *actionMetrics, err error) {
 ```go
 func (c *MetricsCollector) RecordAction(
     name string, result ActionResult,
-    netLatency, clientCost time.Duration, netSamples int,
+    timing ActionTiming, wallClock time.Duration,
     sendBytes, recvBytes int, err error,
 )
 ```
 
-参数语义详见 §3.1 表格。`enabled=false` 时立即返回，零开销。
+`timing.Requests` 中每个 `WireRTT > 0` 的 request 都会独立进入 RTT 直方图和 RTT Apdex；`wallClock` 用于客户端开销拆分与总耗时统计。`enabled=false` 时立即返回，零开销。
 
 ### 10.2 处理流程
 
@@ -623,38 +628,40 @@ func (c *MetricsCollector) RecordAction(...) {
     am := c.getOrCreateAction(name)
     am.executing.Add(-1)
 
+    clientCost := wallClock - timing.wireRTTSum()
     if clientCost > 0 {
         am.clientCostSum.Add(clientCost.Nanoseconds())
         am.clientCostCount.Add(1)
     }
 
+    if wallClock > 0 {
+        am.totalDuration.Record(wallClock)
+        am.totalDurationSampleCount.Add(1)
+    }
+
+    for _, req := range timing.Requests {
+        if req.WireRTT <= 0 { continue }
+        am.rtt.Record(req.WireRTT)
+        am.rttSampleCount.Add(1)
+        T := int64(c.apdexT.Load())
+        ms := req.WireRTT.Milliseconds()
+        if ms < T { am.apdexSatisfied.Add(1) }
+        else if ms < 4*T { am.apdexTolerating.Add(1) }
+    }
+
     switch result {
     case ResultSuccess:
         am.successCount.Add(1)
-        // 关键：只有 netSamples > 0（确实有 send→recv 窗口）才进直方图与 Apdex
-        if netSamples > 0 {
-            am.latency.Record(netLatency)
-            am.netSampleCount.Add(1)
-            // Apdex 也以 netLatency 而非 wall clock 分类
-        }
         if sendBytes > 0 { am.sendBytes.Add(int64(sendBytes)) }
         if recvBytes > 0 { am.recvBytes.Add(int64(recvBytes)) }
-        // Apdex 分类
-        T := c.cfg.ApdexT
-        ms := duration.Milliseconds()
-        if ms < T { am.apdexSatisfied.Add(1) }
-        else if ms < 4*T { am.apdexTolerating.Add(1) }
-
     case ResultFailure:
         am.failureCount.Add(1)
         if err != nil { c.recordError(am, err) }
-
     case ResultTimeout:
         am.timeoutCount.Add(1)
-        am.timeoutTotalMs.Add(duration.Milliseconds())
-
+        am.timeoutTotalMs.Add(wallClock.Milliseconds())
     case ResultCanceled:
-        am.canceledCount.Add(1)  // 不进 error map，不污染 Apdex/SuccessRate
+        am.canceledCount.Add(1)
     }
 }
 ```
@@ -662,7 +669,7 @@ func (c *MetricsCollector) RecordAction(...) {
 **关键设计**：
 - per-action 字节统计（`sendBytes`/`recvBytes`）仅记录成功样本，用于 ActionsTab 的平均列
 - 全局带宽（`totalSendBytes`/`totalRecvBytes`）由 network 层的 `AddBandwidth` 统一统计，不在 RecordAction 中累加（避免双计）
-- canceledCount 不参与 sampleCount/Apdex/SuccessRate 计算
+- canceledCount 不参与 sampleCount/SuccessRate 计算；只有产生 WireRTT 的 request 才参与 RTT Apdex
 
 ### 10.3 RecordActionStart
 

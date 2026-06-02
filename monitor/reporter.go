@@ -11,12 +11,12 @@ import (
 
 // Reporter 定时向控制台输出指标摘要。
 type Reporter struct {
-	collector  *MetricsCollector   // 指标收集器引用
-	interval   time.Duration       // 报告间隔
-	prevCounts map[string]int64    // 上次快照时各 action 的样本数，用于计算 periodQPS
-	prevTime   time.Time           // 上次报告时间，用于计算区间 QPS
-	stopCh     chan struct{}       // 停止信号通道
-	stopOnce   sync.Once           // 保证 stopCh 只关闭一次
+	collector  *MetricsCollector // 指标收集器引用
+	interval   time.Duration     // 报告间隔
+	prevCounts map[string]int64  // 上次快照时各 action 的样本数，用于计算 periodQPS
+	prevTime   time.Time         // 上次报告时间，用于计算区间 QPS
+	stopCh     chan struct{}     // 停止信号通道
+	stopOnce   sync.Once         // 保证 stopCh 只关闭一次
 }
 
 // NewReporter 创建定时控制台报告器。
@@ -92,7 +92,7 @@ func (r *Reporter) report() {
 			a.Name,
 			a.SuccessCount, a.FailureCount, a.TimeoutCount,
 			rttAvg, rttP95, a.ClientAvgMs,
-			a.Apdex, a.Executing, a.PeriodQPS)
+			a.RTTApdex, a.Executing, a.PeriodQPS)
 		if a.TimeoutCount > 0 && a.TimeoutAvgMs > 0 {
 			fmt.Printf(" tout=%.0fms", a.TimeoutAvgMs)
 		}

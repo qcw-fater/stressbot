@@ -5,11 +5,11 @@ local log = require("log")
 
 function execute(r)
     local logicAddress = robot.get("logicAddress") or "127.0.0.1:9001"
-    log.info("连接逻辑服: " .. logicAddress)
+    log.info("连接逻辑服: address=" .. tostring(logicAddress))
 
     local ok = network.connect_tcp("logic", logicAddress)
     if not ok then
-        log.error("连接逻辑服失败: " .. logicAddress)
+        log.error("连接逻辑服失败: address=" .. tostring(logicAddress))
         return 1, 0, 0  -- 1=CONN_NOT_FOUND：连接没建好（语义准确）
     end
 
@@ -18,11 +18,16 @@ function execute(r)
     -- 若需要单独缩短此握手超时，再传第 5 个参数。
     local code, keyBody, sent, recv = network.tcp_request("logic", nil)
     if code ~= 0 then
-        log.error("逻辑服密钥交换失败 code=" .. tostring(code))
+        log.error("逻辑服密钥交换失败: address=" .. tostring(logicAddress)
+            .. " code=" .. tostring(code)
+            .. " sent=" .. tostring(sent)
+            .. " recv=" .. tostring(recv))
         return code, sent, recv  -- 透传底层 code（如 5=CONN_DROPPED / 4=RECV_TIMEOUT）
     end
     if not keyBody or #keyBody == 0 then
-        log.error("逻辑服密钥交换响应为空")
+        log.error("逻辑服密钥交换响应为空: address=" .. tostring(logicAddress)
+            .. " sent=" .. tostring(sent)
+            .. " recv=" .. tostring(recv))
         return 54, sent, recv  -- 54=LUA_EXIT_CODE：协议层异常
     end
     network.set_tcp_secret_key("logic", keyBody)
@@ -31,9 +36,11 @@ function execute(r)
     -- 不传 builder 参数 → 静态心跳，注册时一次性预编码，运行时零 Lua 开销。
     local hbCode = network.register_tcp_heartbeat("logic", 5000, {cmd=2, act=1})
     if hbCode ~= 0 then
+        log.error("逻辑服心跳注册失败: service=logic route=2:1 intervalMs=5000 address="
+            .. tostring(logicAddress) .. " code=" .. tostring(hbCode))
         return hbCode, sent, recv
     end
 
-    log.info("逻辑服连接成功 心跳已注册(5s)")
+    log.info("逻辑服连接成功: address=" .. tostring(logicAddress) .. " 心跳已注册(5s)")
     return 0, sent, recv
 end

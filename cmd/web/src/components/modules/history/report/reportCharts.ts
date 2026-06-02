@@ -109,28 +109,50 @@ export function buildApdexTrendOption(
   if (points.length === 0) return null;
 
   const x = points.map((p) => `${p.elapsedSec}s`);
-  const data = points.map((p) => p.apdex);
+  const hasTotalDurationApdex = points.some((p) => p.totalDurationApdex !== null && Number.isFinite(p.totalDurationApdex));
+  const hasRttApdex = points.some((p) => p.rttApdex !== null && Number.isFinite(p.rttApdex));
+  const series = [
+    hasTotalDurationApdex
+      ? {
+          name: '总耗时 Apdex',
+          type: 'line' as const,
+          smooth: true,
+          symbol: 'none',
+          connectNulls: false,
+          data: points.map((p) => p.totalDurationApdex !== null && Number.isFinite(p.totalDurationApdex) ? p.totalDurationApdex : null),
+          itemStyle: { color: COLORS.green },
+          areaStyle: { opacity: 0.08 },
+          lineStyle: { width: 2 },
+        }
+      : null,
+    hasRttApdex
+      ? {
+          name: 'RTT Apdex',
+          type: 'line' as const,
+          smooth: true,
+          symbol: 'none',
+          connectNulls: false,
+          data: points.map((p) => p.rttApdex !== null && Number.isFinite(p.rttApdex) ? p.rttApdex : null),
+          itemStyle: { color: COLORS.red },
+          areaStyle: { opacity: 0.04 },
+          lineStyle: { width: 2 },
+        }
+      : null,
+  ].filter((s): s is NonNullable<typeof s> => s !== null);
+  if (series.length === 0) return null;
 
   return {
     animation: false,
     tooltip: { trigger: 'axis', textStyle: { fontSize: 11 } },
-    grid: { left: 36, right: 8, top: 12, bottom: 24 },
+    legend: { right: 0, top: 0, textStyle: { fontSize: 10, fontFamily: FONT } },
+    grid: { left: 36, right: 8, top: 28, bottom: 24 },
     xAxis: {
       type: 'category',
       data: x,
       axisLabel: { fontSize: 10, hideOverlap: true },
     },
     yAxis: { type: 'value', max: 1, min: 0, axisLabel: { fontSize: 10 } },
-    series: [{
-      name: 'Apdex',
-      type: 'line',
-      smooth: true,
-      symbol: 'none',
-      data,
-      itemStyle: { color: COLORS.green },
-      areaStyle: { opacity: 0.08 },
-      lineStyle: { width: 2 },
-    }],
+    series,
   };
 }
 
@@ -223,11 +245,12 @@ export function buildBwTrendOption(
 
 export function buildRankingOption(
   actions: HistoryActionMetric[],
-): EChartsOption {
+): EChartsOption | null {
   const top = [...actions]
-    .filter((a) => !a.name.startsWith('callback:'))
+    .filter((a) => !a.name.startsWith('callback:') && (a.rttSampleCount ?? 0) > 0 && a.rtt)
     .sort((a, b) => a.rtt.p99Ms - b.rtt.p99Ms)
     .slice(-15);
+  if (top.length === 0) return null;
 
   const names = top.map((a) => a.name.length > 22 ? a.name.slice(0, 20) + '…' : a.name);
   const values = top.map((a) => a.rtt.p99Ms);
@@ -266,11 +289,12 @@ export function buildRankingOption(
 
 export function buildLatencyOption(
   actions: HistoryActionMetric[],
-): EChartsOption {
+): EChartsOption | null {
   const top = [...actions]
-    .filter((a) => !a.name.startsWith('callback:'))
+    .filter((a) => !a.name.startsWith('callback:') && (a.rttSampleCount ?? 0) > 0 && a.rtt)
     .sort((a, b) => b.rtt.p99Ms - a.rtt.p99Ms)
     .slice(0, 10);
+  if (top.length === 0) return null;
 
   const names = top.map((a) => a.name.length > 16 ? a.name.slice(0, 14) + '…' : a.name);
 
@@ -356,10 +380,11 @@ const APDEX_COLORS: Record<string, string> = {
 
 export function buildApdexOption(
   actions: HistoryActionMetric[],
-): EChartsOption {
+): EChartsOption | null {
   const sorted = [...actions]
-    .filter((a) => !a.name.startsWith('callback:'))
-    .sort((a, b) => a.apdex - b.apdex);
+    .filter((a) => !a.name.startsWith('callback:') && (a.totalDurationSampleCount ?? 0) > 0)
+    .sort((a, b) => a.totalDurationApdex - b.totalDurationApdex);
+  if (sorted.length === 0) return null;
 
   const names = sorted.map((a) => a.name.length > 18 ? a.name.slice(0, 16) + '…' : a.name);
 
@@ -372,8 +397,8 @@ export function buildApdexOption(
     series: [{
       type: 'bar',
       data: sorted.map((a) => ({
-        value: a.apdex,
-        itemStyle: { color: APDEX_COLORS[classifyApdex(a.apdex)] },
+        value: a.totalDurationApdex,
+        itemStyle: { color: APDEX_COLORS[classifyApdex(a.totalDurationApdex)] },
       })),
       barMaxWidth: 24,
     }],
@@ -480,9 +505,7 @@ export function captureAllCharts(
   const cpu = safeCapture(() => buildCpuTrendOption(points), trendW, trendH);
   const bandwidth = safeCapture(() => buildBwTrendOption(points), trendW, trendH);
 
-  const ranking = actions.length > 0
-    ? captureChartAsPng(buildRankingOption(actions), 700, Math.max(200, Math.min(actions.length, 15) * 32))
-    : null;
+  const ranking = safeCapture(() => buildRankingOption(actions), 700, Math.max(200, Math.min(actions.length, 15) * 32));
   const rtt = safeCapture(() => buildLatencyOption(actions), 700, 300);
   const successDonut = actions.length > 0
     ? captureChartAsPng(buildSuccessDonutOption(actions), 350, 280)

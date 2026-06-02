@@ -997,8 +997,10 @@ Admin (:8080) ← 多 Agent (:7070) → 目标游戏服务器
 
 ### Apdex 评分
 
-- Satisfied（≤ T ms） / Tolerating（≤ 4T ms） / Frustrated（> 4T ms）
-- T 阈值可通过 `apdexT` 配置（默认 100ms）
+- 当前主指标为 **RTT Apdex**，基于有完整响应帧且 `WireRTT > 0` 的网络 RTT 样本计算。
+- `RTT < T` 计为满意，`T <= RTT < 4T` 计为容忍，`RTT >= 4T` 计为不满意。
+- 分母为 RTT 样本数；纯客户端动作、超时、发送失败、取消且未收到响应帧的分支不进入 RTT Apdex 分母。
+- T 阈值可通过 `apdexT` 配置（默认 100ms）。
 
 ## 分布式聚合
 

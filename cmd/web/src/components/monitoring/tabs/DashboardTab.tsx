@@ -71,14 +71,14 @@ export function DashboardTab() {
   const send = fmtBandwidth(b.sendMBps ?? 0);
   const recv = fmtBandwidth(b.recvMBps ?? 0);
 
-  // 加权 Apdex（用 rttSampleCount 作权重，排除纯客户端动作）/ 成功率
+  // 加权 RTT Apdex（用 rttSampleCount 作权重，排除无 RTT 样本动作）/ 成功率
   let totalSamples = 0, apdexWeight = 0, wApdex = 0, wSuccess = 0;
   for (const a of actions) {
     totalSamples += a.sampleCount;
     wSuccess += a.successRate * a.sampleCount;
     if (a.rttSampleCount > 0) {
       apdexWeight += a.rttSampleCount;
-      wApdex += a.apdex * a.rttSampleCount;
+      wApdex += a.rttApdex * a.rttSampleCount;
     }
   }
   const clusterApdex = apdexWeight > 0 ? wApdex / apdexWeight : 0;

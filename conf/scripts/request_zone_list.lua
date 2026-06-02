@@ -4,29 +4,45 @@
 local network = require("network")
 local robot = require("robot")
 local json = require("json")
+local log = require("log")
+
+local function body_preview(body)
+    local text = tostring(body or "")
+    if #text > 1000 then
+        return string.sub(text, 1, 1000) .. "..."
+    end
+    return text
+end
 
 function execute(r)
     local account = robot.get("account")
     local version = robot.get("version") or "1.0.0"
     local channel = robot.get("platform") or "1000"
     local authAddr = robot.get("authAddr") or ""
-    local code, body, sent, recv = network.http_request(authAddr .. "/zoneList", "POST", "form", {
+    local url = authAddr .. "/zoneList"
+    local code, body, sent, recv = network.http_request(url, "POST", "form", {
         account = account,
         version = version,
         channel = channel
     })
     if code < 0 then
+        log.error("RequestZoneList HTTP 请求失败: account=" .. tostring(account)
+            .. " url=" .. tostring(url)
+            .. " code=" .. tostring(code)
+            .. " sent=" .. tostring(sent)
+            .. " recv=" .. tostring(recv)
+            .. " body=" .. body_preview(body))
         return 3, sent, recv  -- 3=SEND_FAILED：HTTP 传输层失败
     end
 
-    local ok, resp = pcall(json.decode, body)
-    if not ok then
-        return 0, sent, recv
-    end
-
-    -- 尝试从响应中提取逻辑服地址
-    if resp and resp.data and resp.data.logicAddress then
-        robot.set("logicAddress", resp.data.logicAddress)
+    if code < 200 or code >= 300 then
+        log.error("RequestZoneList HTTP 状态异常: account=" .. tostring(account)
+            .. " url=" .. tostring(url)
+            .. " status=" .. tostring(code)
+            .. " sent=" .. tostring(sent)
+            .. " recv=" .. tostring(recv)
+            .. " body=" .. body_preview(body))
+        return 54, sent, recv
     end
 
     return 0, sent, recv
