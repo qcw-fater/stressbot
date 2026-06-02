@@ -89,7 +89,7 @@ ExecuteAction(actionDef)
 - `tcpRequest` / `udpRequest` / `httpRequest`：恒为 1（请求成功或超时都计）
 - `tcpListen` / `udpListen`：命中为 1，超时为 0
 - `tcpSend` / `udpSend` / `tcpConnect` / `udpConnect` / `tcpClose` / `udpClose` / `setState` / `clearState`：恒为 0
-- `lua`：脚本内多次 `network.*_request` 累加，纯客户端脚本为 0
+- `lua`：脚本内多次 `network.*_request` / `network.*_request_route` 累加，纯客户端脚本为 0
 
 **为什么不在 ActionExecutor 中采集？**
 

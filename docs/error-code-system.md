@@ -408,6 +408,8 @@ NetSender 接口签名变更后，6 个 Lua API 需适配。**Lua 侧返回值�
 ```lua
 -- Lua 侧调用约定（保持不变）
 local code, body, sent, recv = network.tcp_request("logic", route, msg, "ResMsg")
+-- 少数请求路由和响应路由不同的接口可用 route 版本，返回约定一致
+local code2, body2, sent2, recv2 = network.tcp_request_route("logic", reqRoute, respRoute, msg, "ResMsg")
 -- code == 0       → 成功
 -- code == -1      → 框架请求失败（连接断开/超时/编码失败等）
 -- code == -2      → 响应解析失败

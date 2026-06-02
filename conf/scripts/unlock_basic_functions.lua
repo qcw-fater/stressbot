@@ -12,7 +12,7 @@ function execute(r)
         local msg = proto.create("Game.MainGetLevelRewardC2S")
         proto.set_field(msg, "Id", id)
 
-        local code, data, sent, recv = network.tcp_request("logic", {cmd=2, act=26}, msg, "Game.MainGetLevelRewardC2S")
+        local code, data, sent, recv = network.tcp_request("logic", {cmd=2, act=26}, msg, "Game.MainGetLevelRewardS2C")
 
         allSend = allSend + (sent or 0)
         allRecv = allRecv + (recv or 0)

@@ -39,7 +39,7 @@ export function registerLuaProviders(monaco: Monaco): void {
         // 场景 1：消息名 — proto.create(" | network.*_request(..., "
         if (protoReady) {
           const protoNameMatch = lineUntil.match(
-            /(?:proto\.(?:create|parse)|network\.(?:tcp_request|udp_request|tcp_listen|udp_listen))\s*\(.*["']([\w.]*)$/
+            /(?:proto\.(?:create|parse)|network\.(?:tcp_request|tcp_request_route|udp_request|udp_request_route|tcp_listen|udp_listen))\s*\(.*["']([\w.]*)$/
           );
           if (protoNameMatch) {
             const prefix = protoNameMatch[1] || '';

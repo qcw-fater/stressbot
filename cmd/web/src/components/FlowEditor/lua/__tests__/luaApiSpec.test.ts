@@ -69,6 +69,11 @@ describe('renderSignature / renderDoc', () => {
     expect(renderSignature(fn)).toBe('(service, route, msg, [s2c_proto], [timeout_sec])');
   });
 
+  it('renderSignature 支持请求/响应路由分离接口', () => {
+    const fn = getLuaFunction('network', 'tcp_request_route')!;
+    expect(renderSignature(fn)).toBe('(service, request_route, response_route, msg, [s2c_proto], [timeout_sec])');
+  });
+
   it('renderDoc 包含函数签名、summary、参数和返回值', () => {
     const fn = getLuaFunction('robot', 'set')!;
     const doc = renderDoc(fn);
@@ -104,7 +109,9 @@ describe('coverage：所有 stressbot 已暴露的核心 Lua API 都被记录', 
       'close_tcp',
       'close_udp',
       'tcp_request',
+      'tcp_request_route',
       'udp_request',
+      'udp_request_route',
       'tcp_send',
       'udp_send',
       'http_request',

@@ -187,6 +187,22 @@ const networkModule: LuaModule = {
       example: `local code, resp = network.tcp_request("logic", {cmd=1, act=1}, msg, "login.LoginS2C")`,
     },
     {
+      name: 'tcp_request_route',
+      module: 'network',
+      params: [
+        { name: 'service', type: 'string', doc: '连接名' },
+        { name: 'request_route', type: 'table', doc: '请求路由，用于编码发送包' },
+        { name: 'response_route', type: 'table', doc: '响应路由，用于计算等待响应的 routeKey' },
+        { name: 'msg', type: 'proto userdata', doc: 'C2S 消息（proto.create 的返回值）' },
+        { name: 's2c_proto', type: 'string', optional: true, doc: '响应 proto 全名' },
+        { name: 'timeout_sec', type: 'number', optional: true, doc: '超时秒数；不传则使用任务 timeoutSec' },
+      ],
+      returns: 'code, data, sent, recv : (number, string|userdata|nil, number, number)',
+      summary: 'TCP 请求-响应（请求/响应路由分离）',
+      detail: '适用于少数请求路由和响应路由不同的协议：request_route 用于编码发送，response_route 经 adapter.expected_route_key 计算后用于 responseMap 匹配。不会 fallback 到请求路由。',
+      example: `local code, resp = network.tcp_request_route("logic", {cmd=10, act=1}, {cmd=20, act=7}, msg, "Game.SpecialS2C")`,
+    },
+    {
       name: 'tcp_send',
       module: 'network',
       params: [
@@ -222,6 +238,22 @@ const networkModule: LuaModule = {
       returns: 'code, data, sent, recv : (number, string|userdata|nil, number, number)',
       summary: 'UDP 请求-响应',
       detail: 'code: 0=成功 / errcode 错误码（框架码 1-99 / 服务端码 ≥100）。timeout_sec 优先于任务配置。',
+    },
+    {
+      name: 'udp_request_route',
+      module: 'network',
+      params: [
+        { name: 'service', type: 'string', doc: '连接名' },
+        { name: 'request_route', type: 'table', doc: '请求路由，用于编码发送包' },
+        { name: 'response_route', type: 'table', doc: '响应路由，用于计算等待响应的 routeKey' },
+        { name: 'body', type: 'string', doc: '消息体字节' },
+        { name: 's2c_proto', type: 'string', optional: true, doc: '响应 proto 全名' },
+        { name: 'timeout_sec', type: 'number', optional: true, doc: '超时秒数；不传则使用任务 timeoutSec' },
+      ],
+      returns: 'code, data, sent, recv : (number, string|userdata|nil, number, number)',
+      summary: 'UDP 请求-响应（请求/响应路由分离）',
+      detail: '适用于少数请求路由和响应路由不同的协议：request_route 用于编码发送，response_route 经 adapter.expected_route_key 计算后用于 responseMap 匹配。不会 fallback 到请求路由。',
+      example: `local code, resp = network.udp_request_route("battle", {cmd=10, act=1}, {cmd=20, act=7}, body, "Game.SpecialS2C")`,
     },
     {
       name: 'udp_listen',

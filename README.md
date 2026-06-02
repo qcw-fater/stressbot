@@ -25,7 +25,7 @@ stressbot/
 ├── network/              TCP/UDP 连接、心跳（基于 gnet）
 ├── protox/               动态 protobuf 加载与反射
 ├── robot/                机器人实例、Manager、ActionHandler
-├── script/               Lua 运行时池（7 模块 65 函数）
+├── script/               Lua 运行时池（7 模块 68 函数）
 ├── state/                线程安全的键值状态存储 + 条件解析器
 └── conf/
     ├── config.json       运行配置（机器人数、并发、网络、Agent）
@@ -425,9 +425,9 @@ end)
 
 # 第三部分：Lua API 参考
 
-加载方式：`local mod = require("<name>")`。7 个模块共 65 个函数。
+加载方式：`local mod = require("<name>")`。7 个模块共 68 个函数。
 
-## network（19 函数）
+## network（22 函数）
 
 ### 连接管理
 
@@ -443,7 +443,9 @@ end)
 | 函数                                                    | 说明                          |
 | ------------------------------------------------------ | ---------------------------- |
 | `tcp_request(service, route, msg [, s2cProto])`         | TCP 请求-响应，返回 code, data, sent, recv |
-| `udp_request(service, route, body [, s2cProto [, timeout [, pollMs]]])` | UDP 请求-响应 |
+| `tcp_request_route(service, requestRoute, responseRoute, msg [, s2cProto])` | TCP 请求-响应，请求路由用于编码，响应路由用于匹配 |
+| `udp_request(service, route, body [, s2cProto [, timeout]])` | UDP 请求-响应 |
+| `udp_request_route(service, requestRoute, responseRoute, body [, s2cProto])` | UDP 请求-响应，请求路由用于编码，响应路由用于匹配 |
 
 ### 单向发送
 

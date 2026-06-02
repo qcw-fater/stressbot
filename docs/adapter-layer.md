@@ -772,6 +772,8 @@ type ActionExecutor struct {
 3. `adp.EncodeTCP/UDP(def.Route, body, secretKey)` -- 编码完整包
 4. `netSender.TCPSend/UDPSend(service, packet)` -- 发送
 
+Lua 的 `network.tcp_request_route` / `network.udp_request_route` 只在第 2 步改用 `responseRoute` 计算等待响应的 routeKey；编码发送仍使用 `requestRoute`。底层 `Connection.RequestResponse` 本来就按传入的 routeKey 注册 `responseMap`，不需要额外兼容逻辑。
+
 **接收流程**：
 - 解码在 gnet OnTraffic 中完成（`adapter.DecodeTCP/UDP`）
 - 结果通过 `Connection.OnReceive(routeKey, body, headerErr)` 传递到业务层

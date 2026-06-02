@@ -660,7 +660,7 @@ interface ManagedFlow {
 
 功能：
 - 导入/导出 .lua 文件
-- Lua API 自动补全（`luaApiSpec.ts`：7 个模块 53 个函数）
+- Lua API 自动补全（`luaApiSpec.ts`：7 个模块 68 个函数）
 - Web Worker 语法检查（`luaSyntaxWorker.ts`）
 
 ---

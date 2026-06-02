@@ -7,27 +7,24 @@ local log = require("log")
 function execute(r)
     local roleId = robot.get("roleId")
 
-    -- 发送 MainLoadOkC2S (CMD=2, ACT=16)
+    -- 发送 MainLoadOkC2S (CMD=2, ACT=16)，等待 LoginPlayerDataS2C (CMD=1, ACT=2)
     local msg = proto.create("Game.MainLoadOkC2S")
-    local sendCode, sent = network.tcp_send("logic", {cmd=2, act=16}, msg)
-    if sendCode ~= 0 then
-        local failCode = sendCode or 3
-        log.error("RequestPlayerData 发送 MainLoadOk 失败: service=logic route=2:16 roleId="
-            .. tostring(roleId)
-            .. " code=" .. tostring(failCode)
-            .. " sent=" .. tostring(sent))
-        return failCode, sent, 0
-    end
+    local code, resp, sent, recv = network.tcp_request_route(
+        "logic",
+        {cmd=2, act=16},
+        {cmd=1, act=2},
+        msg,
+        "Game.LoginPlayerDataS2C",
+        30
+    )
 
-    -- 等待 LoginPlayerDataS2C (CMD=1, ACT=2)，轮询 200 毫秒
-    local resp, recv = network.tcp_listen("logic", {cmd=1, act=2}, "Game.LoginPlayerDataS2C", 30, 200)
-
-    if not resp then
-        log.error("RequestPlayerData 等待玩家数据超时: service=logic route=1:2 proto=Game.LoginPlayerDataS2C timeoutSec=30 pollMs=200 roleId="
+    if code ~= 0 then
+        log.error("RequestPlayerData 请求玩家数据失败: service=logic requestRoute=2:16 responseRoute=1:2 proto=Game.LoginPlayerDataS2C roleId="
             .. tostring(roleId)
+            .. " code=" .. tostring(code)
             .. " sent=" .. tostring(sent)
             .. " recv=" .. tostring(recv))
-        return 31, sent, recv  -- 31=LISTEN_TIMEOUT
+        return code, sent, recv
     end
 
     -- 存储完整玩家数据
