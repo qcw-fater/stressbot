@@ -433,7 +433,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
           >
             <InputNumber
               min={1}
-              max={100000}
+              max={totalCapacity}
               value={totalBots}
               onChange={(v) => setTotalBots(typeof v === 'number' ? v : 0)}
               style={{ width: '100%' }}
