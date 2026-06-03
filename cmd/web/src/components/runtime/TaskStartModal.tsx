@@ -463,7 +463,6 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
         <Form.Item label="并发（每秒新建机器人数）">
           <InputNumber
             min={1}
-            max={1000}
             value={robotConfig.concurrency}
             onChange={(v) => setRobotConfig({ concurrency: typeof v === 'number' ? v : 1 })}
             style={{ width: '100%' }}
@@ -537,8 +536,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
                       render: (v: number | undefined, _, i) => (
                         <InputNumber
                           size="small"
-                          min={0}
-                          max={1000}
+                          min={1}
                           value={v}
                           placeholder="默认"
                           onChange={(n) => {
