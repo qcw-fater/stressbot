@@ -461,7 +461,7 @@ function ActionsSection() {
           size="small"
           scrollY={scrollY}
           popupZIndex={1200}
-          showCanceledColumn={false}
+          showClientBreakdown
         />
       ) : (
         <div style={{ color: 'var(--text-tertiary)', fontSize: 12, textAlign: 'center', paddingTop: 20 }}>

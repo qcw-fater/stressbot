@@ -115,8 +115,10 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
   const [innerMode, setInnerMode] = useState<ActionLatencyMode>('totalDuration');
   const [search, setSearch] = useState('');
   const [actionsOnly, setActionsOnly] = useState(false);
+  const [advancedDiagnostics, setAdvancedDiagnostics] = useState(false);
 
   const mode = latencyMode === undefined ? innerMode : latencyMode;
+  const hasAdvancedDiagnostics = showCanceledColumn || showClientBreakdown;
   const setMode = (next: ActionLatencyMode) => {
     if (latencyMode === undefined) setInnerMode(next);
     onLatencyModeChange?.(next);
@@ -167,7 +169,7 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
       { title: '超时', dataIndex: 'timeoutCount', key: 'timeoutCount', width: compact ? 52 : 70, sorter: (a, b) => a.timeoutCount - b.timeoutCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-orange)' : 'var(--text-tertiary)' }}>{v}</span> },
     ];
 
-    if (showCanceledColumn) {
+    if (showCanceledColumn && advancedDiagnostics) {
       cols.push({ title: '取消', dataIndex: 'canceledCount', key: 'canceledCount', width: 70, sorter: (a, b) => (a.canceledCount || 0) - (b.canceledCount || 0), render: (v: number | undefined) => <span style={NUMERIC_STYLE}>{typeof v === 'number' ? v : 0}</span> });
     }
 
@@ -184,7 +186,7 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
       { title: 'max(ms)', key: 'maxMs', width: latencyWidth, sorter: (a, b) => latencyValue(a, 'maxMs') - latencyValue(b, 'maxMs'), render: (_, r) => renderLatency(r, 'maxMs') },
     );
 
-    if (showClientBreakdown) {
+    if (showClientBreakdown && advancedDiagnostics) {
       cols.push(
         { title: <Tooltip title="非 RTT 平均耗时，约等于动作总耗时扣除已记录 RTT 后的剩余耗时。">非RTT(ms)</Tooltip>, dataIndex: 'clientAvgMs', key: 'clientAvgMs', width: 92, sorter: (a, b) => (a.clientAvgMs || 0) - (b.clientAvgMs || 0), render: (v: number | undefined) => <span style={NUMERIC_STYLE}>{fmtMs(v || 0)}</span> },
         { title: <Tooltip title="协议编码平均耗时。">encode(ms)</Tooltip>, dataIndex: 'encodeAvgMs', key: 'encodeAvgMs', width: 92, sorter: (a, b) => (a.encodeAvgMs || 0) - (b.encodeAvgMs || 0), render: (v: number | undefined) => <span style={NUMERIC_STYLE}>{fmtMs(v || 0)}</span> },
@@ -236,7 +238,7 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
       });
     }
     return cols;
-  }, [compact, latencyTitle, latencyWidth, mode, nameWidth, countWidth, popupZIndex, showBandwidthColumns, showCanceledColumn, showClientBreakdown, showErrorsColumn, showExecutingColumn, showQpsColumn]);
+  }, [advancedDiagnostics, compact, latencyTitle, latencyWidth, mode, nameWidth, countWidth, popupZIndex, showBandwidthColumns, showCanceledColumn, showClientBreakdown, showErrorsColumn, showExecutingColumn, showQpsColumn]);
 
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
@@ -262,6 +264,12 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
             <span style={{ fontSize: compact ? 11 : 12, color: 'var(--text-secondary)' }}>{actionsOnlyLabel || (compact ? '仅动作' : '仅展示动作（隐藏推送）')}</span>
             <Switch checked={actionsOnly} onChange={setActionsOnly} size="small" />
           </Space>
+          {hasAdvancedDiagnostics && (
+            <Space size={6}>
+              <span style={{ fontSize: compact ? 11 : 12, color: 'var(--text-secondary)' }}>高级诊断</span>
+              <Switch checked={advancedDiagnostics} onChange={setAdvancedDiagnostics} size="small" />
+            </Space>
+          )}
           <span style={{ fontSize: compact ? 11 : 12, color: 'var(--text-tertiary)' }}>{dataSource.length} 条</span>
         </Space>
       )}
