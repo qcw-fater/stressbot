@@ -473,7 +473,8 @@ type robotActionHandler struct {
 // ExecuteAction 执行动作
 //
 // 计时拆解原则：
-//   - wallClock = time.Since(start)：含 proto 构建 / 序列化 / 反序列化 / state 写入等全部开销。
+//   - 声明式动作 wallClock 含 proto 构建 / 序列化 / 反序列化 / state 写入等全部开销。
+//   - Lua 动作 wallClock 从抢到 luaMu 后开始，避免把进入 Lua VM 前的锁等待计入动作总耗时。
 //   - timing.Requests：每次 request-response 的独立 WireRTT 样本。
 //   - clientCost 由 monitor 用 wallClock - sum(WireRTT) 计算。
 func (h *robotActionHandler) ExecuteAction(actionDef *engine.ActionDef) error {
@@ -481,15 +482,17 @@ func (h *robotActionHandler) ExecuteAction(actionDef *engine.ActionDef) error {
 		mc.RecordActionStart(actionDef.Name)
 	}
 
-	start := time.Now()
 	var sendBytes, recvBytes int
 	var timing engine.ActionTiming
+	var wallClock time.Duration
 	var err error
 
 	if actionDef.Pattern == engine.PatternLua {
-		sendBytes, recvBytes, timing, err = h.executeLuaAction(actionDef)
+		sendBytes, recvBytes, timing, wallClock, err = h.executeLuaAction(actionDef)
 	} else {
+		start := time.Now()
 		sendBytes, recvBytes, timing, err = h.robot.actionExec.Execute(h.robot.ctx, actionDef)
+		wallClock = time.Since(start)
 	}
 
 	// 任务取消时的"副作用错误"覆写：
@@ -508,7 +511,6 @@ func (h *robotActionHandler) ExecuteAction(actionDef *engine.ActionDef) error {
 
 	if mc := monitor.Global(); mc != nil && actionDef.Name != "" {
 		result := classifyResult(err)
-		wallClock := time.Since(start)
 		mc.RecordAction(actionDef.Name, result, toMonitorTiming(timing), wallClock, sendBytes, recvBytes, err)
 	}
 
@@ -583,36 +585,39 @@ func isCanceledCode(code errcode.ErrorCode) bool {
 	return code == errcode.ErrActionCanceled
 }
 
-// executeLuaAction 执行 lua 脚本动作，返回 (sendBytes, recvBytes, timing, err)。
+// executeLuaAction 执行 lua 脚本动作，返回 (sendBytes, recvBytes, timing, wallClock, err)。
 // timing 由脚本内的网络 API 累加；纯客户端逻辑（如仅 set_secret_key）timing 为零值。
-func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int, int, engine.ActionTiming, error) {
+// wallClock 从抢到 luaMu 后开始计时，不包含进入 Lua VM 前等待锁的时间。
+func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int, int, engine.ActionTiming, time.Duration, error) {
 	if h.robot.l == nil || h.robot.luaPool == nil {
 		stresslog.Error("[ROBOT] Lua 运行时未初始化，无法执行脚本",
 			zap.Int("id", h.robot.id), zap.String("account", h.robot.account), zap.String("script", actionDef.Script))
-		return 0, 0, engine.ActionTiming{}, engine.NewActionError(errcode.ErrLuaNotInit, "")
+		return 0, 0, engine.ActionTiming{}, 0, engine.NewActionError(errcode.ErrLuaNotInit, "")
 	}
 
 	if actionDef.Script == "" {
 		stresslog.Error("[ROBOT] 脚本名为空，无法执行",
 			zap.Int("id", h.robot.id), zap.String("account", h.robot.account), zap.String("action", actionDef.Name))
-		return 0, 0, engine.ActionTiming{}, engine.NewActionError(errcode.ErrLuaNoScript, "")
+		return 0, 0, engine.ActionTiming{}, 0, engine.NewActionError(errcode.ErrLuaNoScript, "")
 	}
 
 	h.robot.luaMu.Lock()
 	defer h.robot.luaMu.Unlock()
+	start := time.Now()
 
 	// RunActionScript 内部通过 script.Context 累积每次 request 的独立 RequestTiming，
 	// 这里把结构化 timing 上抛给 RecordAction。
 	code, send, recv, timing, err := h.robot.luaPool.RunActionScript(h.robot.l, actionDef.Script)
+	wallClock := time.Since(start)
 	if err != nil {
-		return 0, 0, timing, engine.NewActionError(errcode.ErrLuaExecFailed, "script="+actionDef.Script, err)
+		return 0, 0, timing, wallClock, engine.NewActionError(errcode.ErrLuaExecFailed, "script="+actionDef.Script, err)
 	}
 
 	if code != 0 {
-		return send, recv, timing, luaCodeToActionErr(code, actionDef.Script)
+		return send, recv, timing, wallClock, luaCodeToActionErr(code, actionDef.Script)
 	}
 
-	return send, recv, timing, nil
+	return send, recv, timing, wallClock, nil
 }
 
 // luaCodeToActionErr 将 Lua 脚本退出码映射为结构化 ActionError。

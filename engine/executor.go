@@ -226,12 +226,12 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 
 	err := e.handler.ExecuteAction(actionDef)
 	if err != nil {
-		// ctx 取消优先：任务级停止不走 errorStrategy
+		// ctx 取消优先：任务级停止不走 errorStrategy，也不执行节点延迟。
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return err
 		}
 		// ACTION_CANCELED 是"任务停止过程中的副作用"，monitor 已经按 Canceled 归类，
-		// 这里不再当真 error 处理：不打 error 日志、不走 errorStrategy。
+		// 这里不再当真 error 处理：不打 error 日志、不走 errorStrategy，也不执行节点延迟。
 		// 历史一次 4 分钟任务 stop 阶段刷出 60+ 条 match_succeed/connect_battle_tcp 假 error。
 		var actionErr *ActionError
 		if errors.As(err, &actionErr) && actionErr.Code == errcode.ErrActionCanceled {
@@ -241,6 +241,8 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 		}
 		stresslog.Error("[ENGINE] 动作执行失败",
 			zap.String("caller", e.caller), zap.String("action", node.Action), zap.Error(err))
+		// 非取消类失败同样执行节点延迟，避免错误路径下节点推进速度超过配置预期。
+		e.nodeDelay(ctx, node)
 		return applyErrorStrategy(node.ErrorStrategy, func() error {
 			return NewActionError(errcode.ErrExecFailed, "action="+node.Action, err)
 		})
@@ -249,8 +251,13 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 	// 注册监听（连接已在动作中创建）
 	if len(node.ListenRefs) > 0 {
 		if err := e.handler.RegisterListen(node.ListenRefs); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return err
+			}
 			stresslog.Error("[ENGINE] 注册监听失败",
 				zap.String("caller", e.caller), zap.Error(err))
+			// 动作本体已成功但监听注册失败，仍按失败动作执行节点延迟。
+			e.nodeDelay(ctx, node)
 			return applyErrorStrategy(node.ErrorStrategy, func() error {
 				return NewActionError(errcode.ErrListenRegister, "action="+node.Action, err)
 			})
@@ -329,10 +336,7 @@ func (e *Executor) executeWeighted(ctx context.Context, node *Node) error {
 	r := rand.Intn(total)
 	cumulative := 0
 	for _, opt := range node.Options {
-		w := opt.Weight
-		if w < 0 {
-			w = 0
-		}
+		w := max(opt.Weight, 0)
 		cumulative += w
 		if r < cumulative {
 			err := e.executeNode(ctx, opt.Node)

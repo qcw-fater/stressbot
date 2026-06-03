@@ -141,7 +141,9 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
   const [diffChoiceOpen, setDiffChoiceOpen] = useState(false);
   const [diffResolveOpen, setDiffResolveOpen] = useState(false);
 
-  // 弹窗打开 → 基线资源全量对比 + flow 引用脚本 gap-fill + 收集 IDB 全集
+  // 弹窗打开 → flow 引用脚本 gap-fill + 收集本地资源列表。
+  // 注意：与服务器基线的差异检查不在打开时做，而是在点击启动时（handleSubmit →
+  // checkTaskResourcesAgainstBaseline），有冲突再弹二选一（逐项处理 / 覆盖运行）。
   useEffect(() => {
     if (!open) return;
     let cancelled = false;

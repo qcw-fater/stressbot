@@ -667,18 +667,14 @@ func (c *Connection) OnReceive(routeKey string, body []byte, headerErr uint64, t
 	if atomic.LoadInt32(&c.isClose) == 1 {
 		return
 	}
-	if headerErr != 0 {
-		stresslog.Error("[NETWORK] 服务端协议头错误码非零",
-			zap.String("service", c.serviceName),
-			zap.String("key", routeKey),
-			zap.Uint64("headerErr", headerErr))
-	}
 
 	if stresslog.DebugEnabled() {
 		stresslog.Debug("[NETWORK] OnReceive",
-			zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
+			zap.String("service", c.serviceName),
+			zap.String("routeKey", routeKey),
 			zap.String("robot", c.robotName),
-			zap.Int("bodyLen", len(body)))
+			zap.Int("bodyLen", len(body)),
+			zap.Uint64("headerErr", headerErr))
 	}
 
 	resp := NewMessage(routeKey, body, headerErr, timing)

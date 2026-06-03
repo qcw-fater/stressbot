@@ -71,7 +71,7 @@ func (t *ActionTiming) AddRequest(req RequestTiming) {
 }
 
 // WireRTTSum 返回本 action 内所有 RTT 样本总和。
-func (t ActionTiming) WireRTTSum() time.Duration {
+func (t *ActionTiming) WireRTTSum() time.Duration {
 	var total time.Duration
 	for _, req := range t.Requests {
 		if req.WireRTT > 0 {

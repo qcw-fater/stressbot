@@ -38,7 +38,7 @@ type ActionTiming struct {
 	Client   ClientTiming
 }
 
-func (t ActionTiming) wireRTTSum() time.Duration {
+func (t *ActionTiming) wireRTTSum() time.Duration {
 	var total time.Duration
 	for _, req := range t.Requests {
 		if req.WireRTT > 0 {

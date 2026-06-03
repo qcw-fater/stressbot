@@ -23,7 +23,7 @@ import { App as AntApp, ConfigProvider } from 'antd';
 import { useFlowStore } from './store/flowStore';
 import { useFloatingWindowStore } from './store/floatingWindowStore';
 import { useProtoStore } from './proto/protoStore';
-import { syncResourcesFromBaseline, validateAdapter } from '@/services/resourcesStore';
+import { validateAdapter } from '@/services/resourcesStore';
 import { fetchBaselineFlow } from '@/services/baselineApi';
 import { useEditorStore } from './store/editorStore';
 import type { FlowJson } from './codec/flowToJson';
@@ -87,28 +87,12 @@ function FlowEditorInner({
     void loadProtos({ kind: 'static' });
   }, [loadProtos]);
 
-  // 基线资源同步：mount 时无条件触发，自动新增 / 冲突写入 editorStore
+  // 适配器校验：mount 时检查本地存储中的 codec.lua 是否实现了必需函数。
+  // 注意：资源拉取（与服务器对比、冲突合并）已改为显式操作（资源管理面板的「拉取」按钮 /
+  // 启动任务前），不再在加载/刷新时自动进行，避免无感覆盖用户的本地编辑稿。
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        const sync = await syncResourcesFromBaseline();
-        if (!cancelled) {
-          if (sync.conflicts.length > 0 || sync.removed.length > 0) {
-            useEditorStore.getState().setPendingSyncResult(sync);
-          }
-          if (sync.added.length > 0) {
-            notification.info({
-              message: '基线同步',
-              description: `自动新增 ${sync.added.length} 个资源文件`,
-              duration: 3,
-            });
-          }
-        }
-      } catch (e) {
-        console.warn('[FlowEditor] 基线同步失败:', e);
-      }
-      // 适配器校验
       try {
         const missing = await validateAdapter();
         if (!cancelled) {

@@ -3,11 +3,11 @@
  *
  * 设计要点：
  * - 三个 Tab：proto / lua / adapter；前两者复用 ResourceTable，adapter 内嵌 Monaco 编辑器；
- * - 顶部显示未处理的资源冲突 Alert + "处理冲突"按钮，打开 BaselineSyncModal；
- * - 基线同步在打开编辑器或启动任务时自动执行（内容对比驱动），无需手动导入。
+ * - 顶部提供「拉取」按钮做显式同步（svn update），不再自动拉取；
+ * - 冲突通过 BaselineSyncModal 显式处理；本地改动会在启动任务时随配置一并提交到服务器，无需单独推送。
  */
 
-import { DeleteOutlined, InboxOutlined, EditOutlined } from '@ant-design/icons';
+import { DeleteOutlined, InboxOutlined, EditOutlined, CloudDownloadOutlined } from '@ant-design/icons';
 import {
   Alert,
   App as AntApp,
@@ -53,6 +53,7 @@ import {
   setErrorMapScript,
   setErrorMapScriptFromBaseline,
   clearErrorMapScript,
+  syncResourcesFromBaseline,
 } from '@/services/resourcesStore';
 import { BaselineSyncModal } from './BaselineSyncModal';
 import { fetchBaselineAdapter, fetchBaselineErrorMap } from '@/services/baselineApi';
@@ -63,6 +64,7 @@ export interface ResourcesDrawerProps {
 }
 
 export function ResourcesDrawer({ open, onClose }: ResourcesDrawerProps) {
+  const { message } = AntApp.useApp();
   const { pendingSyncResult, setPendingSyncResult } = useEditorStore(
     useShallow((s) => ({
       pendingSyncResult: s.pendingSyncResult,
@@ -70,12 +72,44 @@ export function ResourcesDrawer({ open, onClose }: ResourcesDrawerProps) {
     })),
   );
   const [syncModalOpen, setSyncModalOpen] = useState(false);
+  const [pulling, setPulling] = useState(false);
 
   const hasConflicts = pendingSyncResult != null && (pendingSyncResult.conflicts.length > 0 || pendingSyncResult.removed.length > 0);
+
+  // 拉取（svn update）：与服务器对比，自动合并"仅服务器修改/新增"，冲突弹面板。
+  const handlePull = async () => {
+    setPulling(true);
+    try {
+      const sync = await syncResourcesFromBaseline();
+      if (sync.conflicts.length > 0 || sync.removed.length > 0) {
+        setPendingSyncResult(sync);
+        setSyncModalOpen(true);
+        message.warning(`检测到 ${sync.conflicts.length + sync.removed.length} 处冲突，请逐项确认`);
+      } else if (sync.added.length > 0) {
+        message.success(`已从服务器拉取，新增 ${sync.added.length} 个资源`);
+      } else {
+        message.success('已从服务器拉取完成');
+      }
+    } catch (e) {
+      message.error(`拉取失败：${(e as Error).message}`);
+    } finally {
+      setPulling(false);
+    }
+  };
 
   return (
     <>
       <Drawer title="资源管理" open={open} onClose={onClose} width={760} maskClosable={false} destroyOnHidden={false} styles={{ body: { paddingBottom: 8 } }}>
+        <Flex justify="space-between" align="center" style={{ marginBottom: 12 }}>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            从服务器拉取最新资源到本地；本地改动会在启动任务时随配置一并提交到服务器。
+          </Typography.Text>
+          <Tooltip title="从服务器拉取最新资源（仅服务器改动会自动合并，双方都改的会提示冲突）">
+            <Button icon={<CloudDownloadOutlined />} loading={pulling} onClick={handlePull}>
+              拉取
+            </Button>
+          </Tooltip>
+        </Flex>
         {hasConflicts && (
           <Alert
             type="warning"

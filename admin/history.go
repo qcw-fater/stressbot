@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -882,7 +883,7 @@ func (h *HistoryStore) UpdateMeta(ctx context.Context, id string, req UpdateHist
 	}
 	if req.Tags != nil {
 		sets = append(sets, "tags = ?")
-		tagsJSON, _ := json.Marshal(req.Tags) // []string 序列化不会失败
+		tagsJSON, _ := json.Marshal(*req.Tags) // []string 序列化不会失败
 		args = append(args, tagsJSON)
 	}
 	if req.Note != nil {
@@ -895,16 +896,19 @@ func (h *HistoryStore) UpdateMeta(ctx context.Context, id string, req UpdateHist
 	}
 
 	args = append(args, id)
-	result, err := h.db.ExecContext(ctx,
+	if err := h.db.QueryRowContext(ctx, `SELECT id FROM task_history WHERE id = ?`, id).Scan(new(string)); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrHistoryNotFound
+		}
+		return fmt.Errorf("check history exists: %w", err)
+	}
+
+	_, err := h.db.ExecContext(ctx,
 		fmt.Sprintf("UPDATE task_history SET %s WHERE id = ?", strings.Join(sets, ", ")),
 		args...,
 	)
 	if err != nil {
 		return fmt.Errorf("update meta: %w", err)
-	}
-	n, _ := result.RowsAffected() // RowsAffected 在 DELETE 后，n=0 时外层已处理
-	if n == 0 {
-		return ErrHistoryNotFound
 	}
 	return nil
 }
@@ -1130,9 +1134,9 @@ func buildListWhere(f HistoryFilter) (string, []any) {
 		args = append(args, v)
 	}
 	if f.Search != "" {
-		conds = append(conds, "(name LIKE ? OR id LIKE ?)")
+		conds = append(conds, "(name LIKE ? OR id LIKE ? OR note LIKE ? OR CAST(tags AS CHAR) LIKE ?)")
 		pattern := "%" + f.Search + "%"
-		args = append(args, pattern, pattern)
+		args = append(args, pattern, pattern, pattern, pattern)
 	}
 	for _, tag := range f.Tags {
 		conds = append(conds, "JSON_CONTAINS(tags, ?)")

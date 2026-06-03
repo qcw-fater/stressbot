@@ -41,8 +41,6 @@ func (s *AdminServer) registerRoutes() http.Handler {
 	mux.HandleFunc("GET /sbot/agent/{id}/pending-task", s.handleAgentPendingTask)
 
 	// ── 前端-资源基线 ──
-	mux.HandleFunc("POST /sbot/resources/baseline", s.handleUpdateBaseline)
-
 	// ── 前端-任务 ──
 	mux.HandleFunc("POST /sbot/tasks", s.handleCreateTask)
 	mux.HandleFunc("GET /sbot/tasks", s.handleListTasks)
@@ -1430,100 +1428,6 @@ func serveLogFile(w http.ResponseWriter, r *http.Request, dir, name string) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, name))
 	http.ServeContent(w, r, name, stat.ModTime(), f)
-}
-
-// handleUpdateBaseline 前端主动推送 IDB 资源到磁盘基线。
-// 接受 multipart/form-data（proto/scripts/adapter），写入 conf/ 目录。
-func (s *AdminServer) handleUpdateBaseline(w http.ResponseWriter, r *http.Request) {
-	const maxMultipartMB = 32
-	if err := r.ParseMultipartForm(int64(maxMultipartMB) << 20); err != nil {
-		writeError(w, ErrInvalidArgument.WithMessage("multipart parse error"))
-		return
-	}
-
-	// proto 文件
-	for key, files := range r.MultipartForm.File {
-		if !strings.HasPrefix(key, "proto/") && key != "proto" {
-			continue
-		}
-		for _, fh := range files {
-			f, err := fh.Open()
-			if err != nil {
-				continue
-			}
-			data, err := io.ReadAll(f)
-			_ = f.Close() // multipart 文件句柄，ReadAll 后关闭即可
-			if err != nil {
-				stresslog.Warn("[ADMIN] 读取基线文件失败", zap.String("name", fh.Filename), zap.Error(err))
-				continue
-			}
-			var fileName string
-			if strings.HasPrefix(key, "proto/") && key != "proto/" {
-				fileName = strings.TrimPrefix(key, "proto/")
-			} else {
-				fileName = fh.Filename
-			}
-			if err := safeWriteFile("conf/proto", fileName, data); err != nil {
-				stresslog.Warn("基线更新 proto 失败",
-					zap.String("name", fileName),
-					zap.Error(err))
-			}
-		}
-	}
-
-	// lua 脚本
-	for key, files := range r.MultipartForm.File {
-		if !strings.HasPrefix(key, "scripts/") && key != "scripts" {
-			continue
-		}
-		for _, fh := range files {
-			f, err := fh.Open()
-			if err != nil {
-				continue
-			}
-			data, err := io.ReadAll(f)
-			_ = f.Close() // multipart 文件句柄，ReadAll 后关闭即可
-			if err != nil {
-				stresslog.Warn("[ADMIN] 读取基线文件失败", zap.String("name", fh.Filename), zap.Error(err))
-				continue
-			}
-			var fileName string
-			if strings.HasPrefix(key, "scripts/") && key != "scripts/" {
-				fileName = strings.TrimPrefix(key, "scripts/")
-			} else {
-				fileName = fh.Filename
-			}
-			if err := safeWriteFile("conf/scripts", fileName, data); err != nil {
-				stresslog.Warn("基线更新脚本失败",
-					zap.String("name", fileName),
-					zap.Error(err))
-			}
-		}
-	}
-
-	// adapter
-	if adapterFile, _, err := r.FormFile("adapter/codec.lua"); err == nil {
-		adapterData, err := io.ReadAll(adapterFile)
-		_ = adapterFile.Close() // multipart 文件句柄，ReadAll 后关闭即可
-		if err != nil {
-			stresslog.Warn("[ADMIN] 读取基线适配器文件失败", zap.Error(err))
-		} else if err := safeWriteFile("conf/adapter", "codec.lua", adapterData); err != nil {
-			stresslog.Warn("基线更新适配器失败", zap.Error(err))
-		}
-	}
-
-	// 可选：error.lua
-	if errorMapFile, _, err := r.FormFile("adapter/error.lua"); err == nil {
-		errorMapData, err := io.ReadAll(errorMapFile)
-		_ = errorMapFile.Close() // multipart 文件句柄，ReadAll 后关闭即可
-		if err != nil {
-			stresslog.Warn("[ADMIN] 读取基线错误映射文件失败", zap.Error(err))
-		} else if err := safeWriteFile("conf/adapter", "error.lua", errorMapData); err != nil {
-			stresslog.Warn("基线更新错误映射失败", zap.Error(err))
-		}
-	}
-
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // writeBaselineFiles 将上传的 flow/proto/scripts/adapter 写入磁盘基线目录，

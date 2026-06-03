@@ -50,14 +50,21 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
     historyApi.getHistoryConfig(id).then(setConfigInfo).catch(() => {});
   }, [id]);
 
-  const saveMeta = async () => {
+  const persistMeta = async (nextNote: string, nextTags: string[]) => {
     try {
-      await historyApi.updateHistory(id, { note, tags });
+      const updated = await historyApi.updateHistory(id, { note: nextNote, tags: nextTags });
+      setDetail(updated);
+      setNote(updated.note ?? '');
+      setTags(updated.tags ?? []);
       message.success('已保存');
       onChange();
     } catch (err) {
       showApiError(err);
     }
+  };
+
+  const saveMeta = () => {
+    void persistMeta(note, tags);
   };
 
   const downloadConfig = async () => {
@@ -374,17 +381,32 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
         <div className="hp-glass hp-glass-thin hp-notes-card">
           <div className="hp-section-title">备注与标签</div>
           <Input
-            placeholder="按 Enter 添加标签"
+            placeholder="按 Enter 添加并保存标签"
             onPressEnter={(e) => {
-              const v = (e.target as HTMLInputElement).value.trim();
-              if (v && !tags.includes(v)) setTags([...tags, v]);
-              (e.target as HTMLInputElement).value = '';
+              const input = e.target as HTMLInputElement;
+              const v = input.value.trim();
+              if (v && !tags.includes(v)) {
+                const nextTags = [...tags, v];
+                setTags(nextTags);
+                void persistMeta(note, nextTags);
+              }
+              input.value = '';
             }}
           />
           {tags.length > 0 && (
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 8 }}>
               {tags.map((t) => (
-                <Tag key={t} closable onClose={() => setTags(tags.filter((x) => x !== t))}>{t}</Tag>
+                <Tag
+                  key={t}
+                  closable
+                  onClose={() => {
+                    const nextTags = tags.filter((x) => x !== t);
+                    setTags(nextTags);
+                    void persistMeta(note, nextTags);
+                  }}
+                >
+                  {t}
+                </Tag>
               ))}
             </div>
           )}

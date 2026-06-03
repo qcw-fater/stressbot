@@ -673,7 +673,7 @@ type HistoryFilter struct {
 	TagsAll []string
 	// Starred 仅收藏。
 	Starred *bool
-	// Search 关键词搜索（名称/ID）。
+	// Search 关键词搜索（名称/ID/标签/备注）。
 	Search string
 	// Limit 返回条数上限。
 	Limit int
@@ -696,7 +696,7 @@ type UpdateHistoryRequest struct {
 	// Starred 收藏状态。
 	Starred *bool `json:"starred,omitempty"`
 	// Tags 标签列表（全量替换）。
-	Tags []string `json:"tags,omitempty"`
+	Tags *[]string `json:"tags,omitempty"`
 	// Note 备注。
 	Note *string `json:"note,omitempty"`
 }

@@ -40,7 +40,6 @@ import { useEditorStore } from '../store/editorStore';
 import { useProtoStore } from '../proto/protoStore';
 import { syncFlowScriptsToIdb } from '@/services/scriptSync';
 import { fetchBaselineFlow } from '@/services/baselineApi';
-import { syncResourcesFromBaseline } from '@/services/resourcesStore';
 import { FlowManagerModal } from './FlowManagerModal';
 import { exportAllTemplates, importTemplates, type TemplateBundle } from '../library/templateStore';
 import type { FlowJson } from '../codec/flowToJson';
@@ -153,9 +152,11 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
    * - added 用 info（解释清楚为什么 IDB 突然多出几个文件）；
    * - 任何异常都吞掉，不影响加载主流程。
    */
-  const syncScriptsAfterLoad = async (_flow: FlowJson, action: '导入' | '加载') => {
+  const syncScriptsAfterLoad = async (_flow: FlowJson, _action: '导入' | '加载') => {
     try {
-      // 先做 flow 引用脚本 gap-fill
+      // 仅做 flow 引用脚本的 gap-fill（本地完全没有的脚本从基线拉回，让流程能跑起来）。
+      // 与服务器的全量对比 / 冲突合并已改为显式操作（资源管理面板的「拉取」按钮），
+      // 不再在加载/导入流程时自动触发，避免无感覆盖用户的本地编辑稿。
       const { missing } = await syncFlowScriptsToIdb(_flow);
       if (missing.length > 0) {
         message.warning(
@@ -163,17 +164,6 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
             `启动任务前请到「资源管理」上传或在动作里手写：${missing.join(', ')}`,
           8,
         );
-      }
-      // 全量基线对比：新增自动写入，冲突弹面板
-      const sync = await syncResourcesFromBaseline();
-      if (sync.added.length > 0) {
-        message.info(
-          `${action}流程时自动复制 ${sync.added.length} 个基线资源到本地`,
-          5,
-        );
-      }
-      if (sync.conflicts.length > 0 || sync.removed.length > 0) {
-        useEditorStore.getState().setPendingSyncResult(sync);
       }
     } catch {
       // 同步失败不阻塞主流程
