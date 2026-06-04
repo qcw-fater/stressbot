@@ -1,12 +1,12 @@
 package admin
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	json "stressbot/utils/jsonx"
 	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"

@@ -74,13 +74,30 @@ func checkProtoMsg(L *lua.LState) proto.Message {
 	return nil
 }
 
+// protoMsgMetatableKey proto 消息共享元表在 registry 中的键。
+const protoMsgMetatableKey = "__stressbot_proto_msg_mt__"
+
+// protoMsgMetatable 返回当前 LState 上共享的 proto 消息元表，
+// 惰性创建并缓存到 registry。所有 proto 消息共用同一张元表（__index 固定指向
+// protoMsgIndex），避免每次收包都新建一张表 + 一个 closure。
+func protoMsgMetatable(L *lua.LState) *lua.LTable {
+	reg := L.Get(lua.RegistryIndex)
+	if v := L.GetField(reg, protoMsgMetatableKey); v != lua.LNil {
+		if mt, ok := v.(*lua.LTable); ok {
+			return mt
+		}
+	}
+	mt := L.NewTable()
+	L.SetField(mt, "__index", L.NewFunction(protoMsgIndex))
+	L.SetField(reg, protoMsgMetatableKey, mt)
+	return mt
+}
+
 // wrapProtoMessage 将 proto.Message 包装为带 __index 元方法的 LUserData。
 func wrapProtoMessage(L *lua.LState, msg proto.Message) *lua.LUserData {
 	ud := L.NewUserData()
 	ud.Value = msg
-	mt := L.NewTable()
-	L.SetField(mt, "__index", L.NewFunction(protoMsgIndex))
-	L.SetMetatable(ud, mt)
+	L.SetMetatable(ud, protoMsgMetatable(L))
 	return ud
 }
 
@@ -407,9 +424,11 @@ func findFirstStringArg(L *lua.LState) string {
 // 跳过中间 map[string]any 层，省掉一次完整的 Go 对象树分配。
 func protoMessageToLuaTable(L *lua.LState, msg proto.Message) *lua.LTable {
 	ref := msg.ProtoReflect()
-	result := L.NewTable()
 
 	fields := ref.Descriptor().Fields()
+	// 用字段总数作为 hash 容量上限（实际会跳过未设置字段，略有富余但远优于默认 32 槽，
+	// 且 message 表无数组部分，省掉默认 array 的 512 字节）
+	result := L.CreateTable(0, fields.Len())
 	for i := 0; i < fields.Len(); i++ {
 		fd := fields.Get(i)
 
@@ -435,7 +454,7 @@ func protoFieldToLua(L *lua.LState, field protoreflect.FieldDescriptor, val prot
 	// repeated 字段
 	if field.IsList() {
 		list := val.List()
-		tb := L.NewTable()
+		tb := L.CreateTable(list.Len(), 0)
 		for i := 0; i < list.Len(); i++ {
 			tb.RawSetInt(i+1, protoScalarToLua(L, field, list.Get(i)))
 		}
@@ -445,7 +464,7 @@ func protoFieldToLua(L *lua.LState, field protoreflect.FieldDescriptor, val prot
 	// map 字段
 	if field.IsMap() {
 		m := val.Map()
-		tb := L.NewTable()
+		tb := L.CreateTable(0, m.Len())
 		m.Range(func(k protoreflect.MapKey, v protoreflect.Value) bool {
 			tb.RawSetString(k.String(), protoScalarToLua(L, field.MapValue(), v))
 			return true

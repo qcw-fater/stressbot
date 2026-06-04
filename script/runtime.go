@@ -158,10 +158,113 @@ func (rp *RuntimePool) Acquire() *lua.LState {
 func (rp *RuntimePool) Release(L *lua.LState) {
 	// 清除脚本上下文
 	L.SetField(L.Get(lua.RegistryIndex), registryCtxKey, lua.LNil)
+	// 清理本次 Robot 在脚本运行期写入全局表的"运行时全局"，避免被池内下一个 Robot
+	// 复用时读到上一个 Robot 的残留状态（脚本顶层定义的全局已并入 baseline 受保护）。
+	resetRuntimeGlobals(L)
 	// 清除绑定的 context.Context（Robot.Start 通过 L.SetContext 绑定了已 cancel 的 ctx）。
 	// 不清理的话，该 LState 被池内下一个 Robot 复用时会因继承已取消的 ctx 而立即 abort。
 	L.RemoveContext()
 	rp.pool.Put(L)
+}
+
+// ── 脚本入口函数缓存 + 全局表卫生 ──────────────────────────────
+//
+// 历史实现每次执行动作都 NewFunctionFromProto + PCall(0,0) 重跑整块 chunk 来
+// （重新）定义 execute/onMessage，纯属浪费。现在改为：每个 LState 每个脚本的 chunk
+// 只跑一次，把入口函数捕获进 registry 缓存、并移出全局表；后续直接取缓存函数调用。
+//
+// 配套：chunk 顶层定义的全局（函数定义、常量表等）在首次加载后并入 baseline 集合，
+// Release 时只清理 baseline 之外的"运行时全局"，从而既保留脚本静态定义、又隔离
+// Robot 之间的运行时污染。
+//
+// 注意：脚本顶层副作用由"每次动作"变为"每个 LState 首次加载一次"。正常脚本顶层只有
+// 函数定义 / require，无影响；把可变状态写在顶层裸全局当作每次重置的写法属反模式，
+// 应改用 robot.set/get。
+const (
+	scriptFnCachePrefix = "__sbfn_"          // 入口函数缓存键前缀
+	globalBaselineKey   = "__sb_gbaseline__" // 全局表 baseline 集合键
+)
+
+func scriptFnCacheKey(scriptName, fnName string) string {
+	return scriptFnCachePrefix + scriptName + "#" + fnName
+}
+
+// loadScriptFn 惰性加载脚本入口函数并缓存到当前 LState 的 registry。
+// 首次命中时运行一次 chunk 捕获入口函数（execute / onMessage），随后从全局表移除，
+// 并把 chunk 顶层产生的全局并入 baseline 受保护。后续调用直接返回缓存函数。
+func (rp *RuntimePool) loadScriptFn(L *lua.LState, scriptName, fnName string) (lua.LValue, error) {
+	reg := L.Get(lua.RegistryIndex)
+	cacheKey := scriptFnCacheKey(scriptName, fnName)
+	if v := L.GetField(reg, cacheKey); v != lua.LNil {
+		return v, nil
+	}
+
+	compiled, ok := rp.precompiled[scriptName]
+	if !ok {
+		return nil, fmt.Errorf("脚本未预编译: %s", scriptName)
+	}
+
+	savedTop := L.GetTop()
+	fn := L.NewFunctionFromProto(compiled)
+	L.Push(fn)
+	if err := L.PCall(0, 0, nil); err != nil {
+		L.SetTop(savedTop)
+		return nil, fmt.Errorf("加载脚本 %s 失败: %w", scriptName, err)
+	}
+	L.SetTop(savedTop)
+
+	target := L.GetGlobal(fnName)
+	if target == lua.LNil {
+		return nil, fmt.Errorf("脚本 %s 未定义 %s 函数", scriptName, fnName)
+	}
+	L.SetGlobal(fnName, lua.LNil) // 入口函数移出全局表，避免污染
+	L.SetField(reg, cacheKey, target)
+	rememberGlobalBaseline(L) // chunk 顶层全局并入 baseline，Release 时不清理
+	return target, nil
+}
+
+// rememberGlobalBaseline 把当前全局表的所有键并入 baseline 集合（registry 持有）。
+func rememberGlobalBaseline(L *lua.LState) {
+	reg := L.Get(lua.RegistryIndex)
+	base, ok := L.GetField(reg, globalBaselineKey).(*lua.LTable)
+	if !ok {
+		base = L.NewTable()
+		L.SetField(reg, globalBaselineKey, base)
+	}
+	globals, ok := L.Get(lua.GlobalsIndex).(*lua.LTable)
+	if !ok {
+		return
+	}
+	globals.ForEach(func(k, _ lua.LValue) {
+		if ks, ok := k.(lua.LString); ok {
+			base.RawSetString(string(ks), lua.LTrue)
+		}
+	})
+}
+
+// resetRuntimeGlobals 删除全局表中不在 baseline 内的键（即脚本运行期动态写入的全局）。
+// baseline 尚未建立（该 LState 还没跑过脚本）时全局表为纯净 stdlib，直接返回。
+func resetRuntimeGlobals(L *lua.LState) {
+	reg := L.Get(lua.RegistryIndex)
+	base, ok := L.GetField(reg, globalBaselineKey).(*lua.LTable)
+	if !ok {
+		return
+	}
+	globals, ok := L.Get(lua.GlobalsIndex).(*lua.LTable)
+	if !ok {
+		return
+	}
+	var toDelete []string
+	globals.ForEach(func(k, _ lua.LValue) {
+		if ks, ok := k.(lua.LString); ok {
+			if base.RawGetString(string(ks)) == lua.LNil {
+				toDelete = append(toDelete, string(ks))
+			}
+		}
+	})
+	for _, k := range toDelete {
+		L.SetGlobal(k, lua.LNil)
+	}
 }
 
 // PrecompileScripts 预编译指定目录下的所有 .lua 脚本。
@@ -222,11 +325,6 @@ func (rp *RuntimePool) PrecompileScripts(dirs []string) error {
 //   - 含 N 次 request 的脚本：Requests 有 N 个独立 WireRTT 样本
 //   - 出错中断的脚本：timing 仍反映已发生的网络调用
 func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (code, send, recv int, timing engine.ActionTiming, err error) {
-	compiled, ok := rp.precompiled[scriptName]
-	if !ok {
-		return -1, 0, 0, engine.ActionTiming{}, fmt.Errorf("脚本未预编译: %s", scriptName)
-	}
-
 	// 进入脚本前清零累加器；即使 PCall 报错也要把"已发生"的网络耗时上抛
 	if ctx := GetContext(L); ctx != nil {
 		ctx.resetTiming()
@@ -238,15 +336,9 @@ func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (code, 
 	savedTop := L.GetTop()
 	defer L.SetTop(savedTop)
 
-	fn := L.NewFunctionFromProto(compiled)
-	L.Push(fn)
-	if err = L.PCall(0, 0, nil); err != nil {
-		return -1, 0, 0, engine.ActionTiming{}, fmt.Errorf("加载脚本 %s 失败: %w", scriptName, err)
-	}
-
-	executeFn := L.GetGlobal("execute")
-	if executeFn == lua.LNil {
-		return -1, 0, 0, engine.ActionTiming{}, fmt.Errorf("脚本 %s 未定义 execute 函数", scriptName)
+	executeFn, lerr := rp.loadScriptFn(L, scriptName, "execute")
+	if lerr != nil {
+		return -1, 0, 0, engine.ActionTiming{}, lerr
 	}
 
 	// NRet=3 总是申请 3 个返回值占位；脚本只 return 1~2 个时，Lua 会用 nil 补齐。
@@ -270,7 +362,6 @@ func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (code, 
 		}
 	}
 
-	L.SetGlobal("execute", lua.LNil)
 	return code, send, recv, engine.ActionTiming{}, nil // timing 由上方 defer 从 ctx 累加器覆盖
 }
 
@@ -284,31 +375,18 @@ func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (code, 
 // 返回 number / nil / 其他类型一律视作错误（不再兼容旧版 0/1 约定）：
 // 调用方收到 error 后会判定条件为 false 并打 error 日志，引导脚本作者修正。
 func (rp *RuntimePool) RunBooleanScript(L *lua.LState, scriptName string) (bool, error) {
-	compiled, ok := rp.precompiled[scriptName]
-	if !ok {
-		return false, fmt.Errorf("脚本未预编译: %s", scriptName)
-	}
-
 	savedTop := L.GetTop()
 	defer L.SetTop(savedTop)
 
-	fn := L.NewFunctionFromProto(compiled)
-	L.Push(fn)
-	if err := L.PCall(0, 0, nil); err != nil {
-		return false, fmt.Errorf("加载脚本 %s 失败: %w", scriptName, err)
-	}
-
-	executeFn := L.GetGlobal("execute")
-	if executeFn == lua.LNil {
-		return false, fmt.Errorf("脚本 %s 未定义 execute 函数", scriptName)
+	executeFn, err := rp.loadScriptFn(L, scriptName, "execute")
+	if err != nil {
+		return false, err
 	}
 
 	robotUD := createRobotUserData(L)
 	if err := L.CallByParam(lua.P{Fn: executeFn, NRet: 1, Protect: true}, robotUD); err != nil {
 		return false, fmt.Errorf("执行脚本 %s 失败: %w", scriptName, err)
 	}
-
-	defer L.SetGlobal("execute", lua.LNil)
 
 	if L.GetTop() <= savedTop {
 		return false, fmt.Errorf("布尔脚本 %s 未返回值，必须 return true/false", scriptName)
@@ -325,26 +403,13 @@ func (rp *RuntimePool) RunBooleanScript(L *lua.LState, scriptName string) (bool,
 // Lua 脚本应定义 `function onMessage(r, msg)` 函数。
 // msg 为 proto 消息对象（LUserData）。
 func (rp *RuntimePool) RunCallbackScript(L *lua.LState, scriptName string, msgData []byte, s2cProto string) error {
-	compiled, ok := rp.precompiled[scriptName]
-	if !ok {
-		return fmt.Errorf("回调脚本未预编译: %s", scriptName)
-	}
-
 	// 保存栈顶，确保退出时恢复
 	savedTop := L.GetTop()
 	defer L.SetTop(savedTop)
 
-	// 加载脚本
-	fn := L.NewFunctionFromProto(compiled)
-	L.Push(fn)
-	if err := L.PCall(0, 0, nil); err != nil {
-		return fmt.Errorf("加载回调脚本 %s 失败: %w", scriptName, err)
-	}
-
-	// 获取 onMessage 函数
-	onMsgFn := L.GetGlobal("onMessage")
-	if onMsgFn == lua.LNil {
-		return fmt.Errorf("回调脚本 %s 未定义 onMessage 函数", scriptName)
+	onMsgFn, err := rp.loadScriptFn(L, scriptName, "onMessage")
+	if err != nil {
+		return err
 	}
 
 	// 创建 robot 和 msg 对象
@@ -365,9 +430,6 @@ func (rp *RuntimePool) RunCallbackScript(L *lua.LState, scriptName string, msgDa
 	if err := L.CallByParam(lua.P{Fn: onMsgFn, NRet: 0, Protect: true}, robotUD, msgArg); err != nil {
 		return fmt.Errorf("执行回调脚本 %s 失败: %w", scriptName, err)
 	}
-
-	// 清理
-	L.SetGlobal("onMessage", lua.LNil)
 
 	return nil
 }
@@ -398,15 +460,29 @@ func registerAPIs(L *lua.LState) {
 	L.PreloadModule("adapter", loadAdapterModule)
 }
 
+// robotMetatableKey robot 对象共享元表在 registry 中的键。
+const robotMetatableKey = "__stressbot_robot_mt__"
+
+// robotMetatable 返回当前 LState 上共享的 robot 对象元表，惰性创建并缓存到 registry，
+// 避免每次脚本执行都新建一张元表 + 一个 closure。
+func robotMetatable(L *lua.LState) *lua.LTable {
+	reg := L.Get(lua.RegistryIndex)
+	if v := L.GetField(reg, robotMetatableKey); v != lua.LNil {
+		if mt, ok := v.(*lua.LTable); ok {
+			return mt
+		}
+	}
+	mt := L.NewTable()
+	L.SetField(mt, "__index", L.NewFunction(robotIndex))
+	L.SetField(reg, robotMetatableKey, mt)
+	return mt
+}
+
 // createRobotUserData 创建 robot 对象（LUserData + metatable）
 func createRobotUserData(L *lua.LState) *lua.LUserData {
 	ud := L.NewUserData()
 	ud.Value = GetContext(L)
-
-	mt := L.NewTable()
-	L.SetField(mt, "__index", L.NewFunction(robotIndex))
-	L.SetMetatable(ud, mt)
-
+	L.SetMetatable(ud, robotMetatable(L))
 	return ud
 }
 

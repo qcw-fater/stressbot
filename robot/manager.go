@@ -32,39 +32,39 @@ type RampUpStage struct {
 
 // ManagerConfig 机器人管理器配置
 type ManagerConfig struct {
-	AccountPrefix  string            `json:"accountPrefix"`
-	StartNumber    int               `json:"startNumber"`
-	Count          int               `json:"count"`
-	ConcurrentNum  int               `json:"concurrentNum"`
-	StateExtra map[string]string `json:"stateExtra"`
+	AccountPrefix string            `json:"accountPrefix"`
+	StartNumber   int               `json:"startNumber"`
+	Count         int               `json:"count"`
+	ConcurrentNum int               `json:"concurrentNum"`
+	StateExtra    map[string]string `json:"stateExtra"`
 	// Adapter 是进程级共享的 LuaAdapter（持有 codec.lua 字节码 + 元信息 + 错误描述缓存）。
 	// Manager 创建每个 Robot 时通过它派生 RobotAdapter，让 Robot 在自己的 LState 上做编解码。
 	// 类型从 adapter.Adapter 接口收窄到 *adapter.LuaAdapter，是因为只有 LuaAdapter 提供
 	// NewRobotAdapter 工厂方法。
 	Adapter        *adapter.LuaAdapter `json:"-"`
 	RequestTimeout time.Duration       `json:"requestTimeout"`
-	MainService    string            `json:"mainService"`
-	HTTPTimeout    time.Duration     `json:"httpTimeout"`
-	RampUp         *RampUpConfig     `json:"rampUp"`
-	Duration       time.Duration     `json:"duration"` // 运行时长，0 = 一直运行
+	MainService    string              `json:"mainService"`
+	HTTPTimeout    time.Duration       `json:"httpTimeout"`
+	RampUp         *RampUpConfig       `json:"rampUp"`
+	Duration       time.Duration       `json:"duration"` // 运行时长，0 = 一直运行
 }
 
 // Manager 机器人管理器。
 type Manager struct {
-	cfg      ManagerConfig
-	flow     *engine.TaskFlow
-	factory  *protox.Factory
-	dialer   *network.Dialer
-	luaPool  *script.RuntimePool
-	robots   []*Robot
-	mu       sync.RWMutex
-	ctx      context.Context
-	cancel   context.CancelFunc
-	started  atomic.Int32
-	stopped  atomic.Int32
-	doneCh   chan struct{} // 所有机器人停止后关闭
-	stopOnce sync.Once
-	cleanupMu sync.Mutex
+	cfg            ManagerConfig
+	flow           *engine.TaskFlow
+	factory        *protox.Factory
+	dialer         *network.Dialer
+	luaPool        *script.RuntimePool
+	robots         []*Robot
+	mu             sync.RWMutex
+	ctx            context.Context
+	cancel         context.CancelFunc
+	started        atomic.Int32
+	stopped        atomic.Int32
+	doneCh         chan struct{} // 所有机器人停止后关闭
+	stopOnce       sync.Once
+	cleanupMu      sync.Mutex
 	cleanupSummary CleanupStatus
 
 	// OnStageReset 阶段重置回调，由 TaskRunner 注入。

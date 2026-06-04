@@ -16,13 +16,13 @@ const (
 type CleanupReason string
 
 const (
-	CleanupReasonNatural         CleanupReason = "natural"
-	CleanupReasonAdminStop       CleanupReason = "admin_stop"
-	CleanupReasonAgentShutdown   CleanupReason = "agent_shutdown"
-	CleanupReasonRampReset       CleanupReason = "ramp_reset"
-	CleanupReasonDurationStop    CleanupReason = "duration_stop"
+	CleanupReasonNatural          CleanupReason = "natural"
+	CleanupReasonAdminStop        CleanupReason = "admin_stop"
+	CleanupReasonAgentShutdown    CleanupReason = "agent_shutdown"
+	CleanupReasonRampReset        CleanupReason = "ramp_reset"
+	CleanupReasonDurationStop     CleanupReason = "duration_stop"
 	CleanupReasonOfflineSynthetic CleanupReason = "offline_synthetic"
-	CleanupReasonStopWaitTimeout CleanupReason = "stop_wait_timeout"
+	CleanupReasonStopWaitTimeout  CleanupReason = "stop_wait_timeout"
 )
 
 // CleanupIssue 单个 Robot 清理异常样本。

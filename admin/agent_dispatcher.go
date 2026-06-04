@@ -2,13 +2,13 @@ package admin
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
+	json "stressbot/utils/jsonx"
 	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"

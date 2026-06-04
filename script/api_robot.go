@@ -192,12 +192,11 @@ func robotIncrement(L *lua.LState) int {
 func robotKeys(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.Store == nil {
-		tb := L.NewTable()
-		L.Push(tb)
+		L.Push(L.CreateTable(0, 0))
 		return 1
 	}
 	keys := ctx.Store.Keys()
-	tb := L.NewTable()
+	tb := L.CreateTable(len(keys), 0)
 	for i, k := range keys {
 		tb.RawSetInt(i+1, lua.LString(k))
 	}
@@ -358,13 +357,15 @@ func goValueToLua(L *lua.LState, val any) lua.LValue {
 	case []byte:
 		return lua.LString(string(v))
 	case []any:
-		tb := L.NewTable()
+		// 精确预分配数组容量，避免 L.NewTable() 默认 32 槽 array + 32 槽 hash 的双重浪费
+		tb := L.CreateTable(len(v), 0)
 		for i, elem := range v {
 			tb.RawSetInt(i+1, goValueToLua(L, elem))
 		}
 		return tb
 	case map[string]any:
-		tb := L.NewTable()
+		// 仅预分配 hash 容量，省掉默认 32 槽 array 的 512 字节空转
+		tb := L.CreateTable(0, len(v))
 		for k, elem := range v {
 			tb.RawSetString(k, goValueToLua(L, elem))
 		}
@@ -389,7 +390,9 @@ func luaToGoValue(v lua.LValue) any {
 		tb := v.(*lua.LTable)
 		isArray := true
 		maxIdx := 0
+		count := 0
 		tb.ForEach(func(k, val lua.LValue) {
+			count++
 			if k.Type() == lua.LTNumber {
 				idx := int(lua.LVAsNumber(k))
 				if idx > maxIdx {
@@ -411,7 +414,8 @@ func luaToGoValue(v lua.LValue) any {
 			return arr
 		}
 
-		m := make(map[string]any)
+		// 按实际键数预分配 map，避免边写边扩容的多次 rehash
+		m := make(map[string]any, count)
 		tb.ForEach(func(k, val lua.LValue) {
 			m[lua.LVAsString(k)] = luaToGoValue(val)
 		})

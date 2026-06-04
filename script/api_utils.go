@@ -140,7 +140,7 @@ func utilsRandomPickN(L *lua.LState) int {
 
 	length := tb.Len()
 	if length == 0 || n <= 0 {
-		L.Push(L.NewTable())
+		L.Push(L.CreateTable(0, 0))
 		return 1
 	}
 
@@ -160,7 +160,7 @@ func utilsRandomPickN(L *lua.LState) int {
 	}
 
 	// 构建结果表
-	result := L.NewTable()
+	result := L.CreateTable(n, 0)
 	for i := 0; i < n; i++ {
 		result.RawSetInt(i+1, all[i])
 	}
@@ -215,7 +215,7 @@ func utilsWeightedPick(L *lua.LState) int {
 // 从 items 中随机选一个不在 excludes 内的元素；若都被排除则返回 nil。
 func utilsRandFilterOne(L *lua.LState) int {
 	items := L.CheckTable(1)
-	excludes := L.OptTable(2, L.NewTable())
+	excludes := L.OptTable(2, L.CreateTable(0, 0))
 
 	n := items.Len()
 	if n == 0 {
@@ -247,7 +247,7 @@ func utilsRandFilterOne(L *lua.LState) int {
 // utilsRandFilter utils.rand_filter(items, excludes, count) — 从 items 中过滤掉 excludes 后随机选 count 个
 func utilsRandFilter(L *lua.LState) int {
 	items := L.CheckTable(1)
-	excludes := L.OptTable(2, L.NewTable())
+	excludes := L.OptTable(2, L.CreateTable(0, 0))
 	count := L.OptInt(3, 1)
 
 	excludeSet := make(map[string]bool)
@@ -273,7 +273,7 @@ func utilsRandFilter(L *lua.LState) int {
 		candidates[i], candidates[j] = candidates[j], candidates[i]
 	}
 
-	result := L.NewTable()
+	result := L.CreateTable(count, 0)
 	for i := 0; i < count; i++ {
 		result.RawSetInt(i+1, candidates[i])
 	}

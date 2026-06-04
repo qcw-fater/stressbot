@@ -3,13 +3,14 @@ package agent
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"time"
+
+	json "stressbot/utils/jsonx"
 )
 
 // errNotRegistered Admin 返回 404 时表示 Agent 未注册（可能 Admin 重启了）。
@@ -113,6 +114,7 @@ func (c *AdminClient) Register(ctx context.Context, req RegisterRequest) (*Regis
 // 单次请求超时被压到 hbReqLimit（默认 5s）：
 //   - 心跳是状态探测，应该快失败快重试；
 //   - 用通用 30s timeout 会让一次失败卡 30s 才返回 → agent 长时间无感知 Admin 状态。
+//
 // 仍共用同一个 http.Client / Transport，避免多一个 keep-alive 池占额外 FD。
 func (c *AdminClient) Heartbeat(ctx context.Context, req HeartbeatRequest) error {
 	body, err := json.Marshal(req)

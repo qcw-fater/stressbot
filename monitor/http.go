@@ -1,12 +1,12 @@
 package monitor
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
 
 	"stressbot/utils"
+	json "stressbot/utils/jsonx"
 	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"

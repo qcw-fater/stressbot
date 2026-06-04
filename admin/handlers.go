@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -19,6 +18,7 @@ import (
 	"stressbot/logview"
 	"stressbot/monitor"
 	"stressbot/utils"
+	json "stressbot/utils/jsonx"
 	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"

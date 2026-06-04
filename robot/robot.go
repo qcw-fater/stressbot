@@ -3,7 +3,6 @@ package robot
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -26,6 +25,7 @@ import (
 	"stressbot/script"
 	"stressbot/state"
 	"stressbot/utils"
+	json "stressbot/utils/jsonx"
 	stresslog "stressbot/utils/log"
 )
 
@@ -50,15 +50,15 @@ type Robot struct {
 	// adp 是该 Robot 私有的 codec 适配器（RobotLocalAdapter 重构）。
 	// 所有 encode/decode 都在 r.l 上执行，与其他 Robot 不再共享 LState 池。
 	adp            *adapter.RobotAdapter
-	mainService    string        // 主连接服务名，意外断开时停止机器人
-	requestTimeout time.Duration // robotConfig.timeoutSec 注入；用作 Lua tcp/udp_request 默认 timeout
-	timingLevel   int           // monitor.timingDetail 映射后的 engine 计时级别
-	execDone      chan struct{} // executor goroutine 结束信号，cleanup 等待它安全退出
-	done          chan struct{} // Robot 生命周期结束信号，Close 时等待
-	onDone        func(*Robot, CleanupStatus) // 执行 goroutine 结束后回调（由 Manager 设置）
-	cleanupOnce   sync.Once
-	cleanupMu     sync.Mutex
-	cleanupResult CleanupStatus
+	mainService    string                      // 主连接服务名，意外断开时停止机器人
+	requestTimeout time.Duration               // robotConfig.timeoutSec 注入；用作 Lua tcp/udp_request 默认 timeout
+	timingLevel    int                         // monitor.timingDetail 映射后的 engine 计时级别
+	execDone       chan struct{}               // executor goroutine 结束信号，cleanup 等待它安全退出
+	done           chan struct{}               // Robot 生命周期结束信号，Close 时等待
+	onDone         func(*Robot, CleanupStatus) // 执行 goroutine 结束后回调（由 Manager 设置）
+	cleanupOnce    sync.Once
+	cleanupMu      sync.Mutex
+	cleanupResult  CleanupStatus
 }
 
 // Config 单个机器人的配置。

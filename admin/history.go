@@ -3,7 +3,6 @@ package admin
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"stressbot/monitor"
 	"stressbot/robot"
 	"stressbot/utils"
+	json "stressbot/utils/jsonx"
 
 	stresslog "stressbot/utils/log"
 

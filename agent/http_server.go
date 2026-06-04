@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -16,6 +15,7 @@ import (
 
 	"stressbot/logview"
 	"stressbot/utils"
+	json "stressbot/utils/jsonx"
 	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"

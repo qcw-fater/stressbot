@@ -392,7 +392,7 @@ func (s *AdminServer) synthesizeOfflineReports(taskID string) bool {
 					FinishedAt:    time.Now(),
 					CleanupStatus: &cleanup,
 				}
-			stresslog.Info("[ADMIN] 合成离线节点报告",
+				stresslog.Info("[ADMIN] 合成离线节点报告",
 					zap.String("taskID", taskID), zap.String("agentID", agentID),
 					zap.String("reason", func() string {
 						if !nodeOk {

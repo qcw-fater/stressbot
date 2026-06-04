@@ -14,6 +14,15 @@ export interface ManagedFlow {
   updatedAt: number;
 }
 
+export const FLOW_NAME_MAX_LENGTH = 80;
+
+function normalizeFlowName(name: string): string {
+  const nextName = name.trim();
+  if (!nextName) throw new Error('流程名称不能为空');
+  if (nextName.length > FLOW_NAME_MAX_LENGTH) throw new Error(`流程名称不能超过 ${FLOW_NAME_MAX_LENGTH} 个字符`);
+  return nextName;
+}
+
 export async function saveFlow(name: string, flow: FlowJson, layout: FlowLayout, existingId?: string): Promise<ManagedFlow> {
   const id = existingId || nanoid();
   const entry: ManagedFlow = {
@@ -40,6 +49,24 @@ export async function listFlows(): Promise<ManagedFlow[]> {
   }
   items.sort((a, b) => b.updatedAt - a.updatedAt);
   return items;
+}
+
+export async function renameFlow(id: string, name: string): Promise<ManagedFlow> {
+  const nextName = normalizeFlowName(name);
+  const current = await getFlow(id);
+  if (!current) throw new Error('流程不存在或已损坏');
+
+  const items = await listFlows();
+  const duplicated = items.some((item) => item.id !== id && item.name.trim() === nextName);
+  if (duplicated) throw new Error('已存在同名流程');
+
+  const entry: ManagedFlow = {
+    ...current,
+    name: nextName,
+    updatedAt: Date.now(),
+  };
+  await set(id, entry, store);
+  return entry;
 }
 
 export async function deleteFlow(id: string): Promise<void> {

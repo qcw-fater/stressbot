@@ -1,12 +1,12 @@
 package admin
 
 import (
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
 	"stressbot/utils"
+	json "stressbot/utils/jsonx"
 	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"
@@ -197,7 +197,7 @@ func (ts *TaskStore) Transition(id string, from, to TaskState) (*Task, error) {
 			ts.activeID = ""
 		}
 		if ts.onTerminal != nil {
-		// 深拷贝避免异步归档的 data race
+			// 深拷贝避免异步归档的 data race
 			var taskCopy Task
 			if data, err := json.Marshal(t); err == nil {
 				json.Unmarshal(data, &taskCopy)

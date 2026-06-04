@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -21,6 +20,7 @@ import (
 	"stressbot/robot"
 	"stressbot/script"
 	"stressbot/utils"
+	json "stressbot/utils/jsonx"
 	stresslog "stressbot/utils/log"
 
 	_ "net/http/pprof"
@@ -153,8 +153,8 @@ func runAgentMode(cfg *Config) {
 	}
 
 	monitor.Init(monitor.CollectorConfig{
-		Enabled: true,
-		ApdexT:  cfg.Monitor.ApdexT,
+		Enabled:      true,
+		ApdexT:       cfg.Monitor.ApdexT,
 		TimingDetail: cfg.Monitor.TimingDetail,
 	})
 

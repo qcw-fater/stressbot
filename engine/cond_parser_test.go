@@ -133,10 +133,10 @@ func TestParseExpr_NotWithComparison(t *testing.T) {
 
 func TestParseExpr_Complex(t *testing.T) {
 	s := newCondStore(map[string]any{
-		"hp":     int64(80),
-		"alive":  true,
-		"admin":  false,
-		"level":  int64(10),
+		"hp":    int64(80),
+		"alive": true,
+		"admin": false,
+		"level": int64(10),
 	})
 	// hp > 0 && (alive || admin) → true && (true || false) → true
 	if !parseExpr("hp > 0 && (alive || admin)", s) {

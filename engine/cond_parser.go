@@ -73,7 +73,7 @@ func parseAtom(input string, s *state.Store) bool {
 
 	// 括号分组
 	if strings.HasPrefix(input, "(") && findCloseParen(input) == len(input)-1 {
-		return parseOr(input[1 : len(input)-1], s)
+		return parseOr(input[1:len(input)-1], s)
 	}
 
 	return evalAtom(input, s)

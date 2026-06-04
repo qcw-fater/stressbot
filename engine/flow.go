@@ -100,14 +100,14 @@ const (
 
 // 节点类型常量
 const (
-	NodeSequence  = "sequence"
-	NodeAction    = "action"
-	NodeLoop      = "loop"
-	NodeBoolean   = "boolean"
-	NodeWeighted  = "weighted"
-	NodeWait      = "wait"
-	NodeBreak     = "break"
-	NodeContinue  = "continue"
+	NodeSequence = "sequence"
+	NodeAction   = "action"
+	NodeLoop     = "loop"
+	NodeBoolean  = "boolean"
+	NodeWeighted = "weighted"
+	NodeWait     = "wait"
+	NodeBreak    = "break"
+	NodeContinue = "continue"
 )
 
 // 内容类型常量

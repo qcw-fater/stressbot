@@ -1,7 +1,6 @@
 package script
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -577,7 +576,7 @@ func networkHTTPRequest(L *lua.LState) int {
 
 		switch contentType {
 		case "json":
-			jsonBytes, err := json.Marshal(formData)
+			jsonBytes, err := jsonStdConfig.Marshal(formData)
 			if err != nil {
 				L.RaiseError("json marshal failed: %v", err)
 				return 0

@@ -1,8 +1,9 @@
 package admin
 
 import (
-	"encoding/json"
 	"net/http"
+
+	json "stressbot/utils/jsonx"
 )
 
 // Error 统一 API 错误类型。

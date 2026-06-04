@@ -1,10 +1,11 @@
 package admin
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"time"
+
+	json "stressbot/utils/jsonx"
 )
 
 // Config Admin 服务端配置。
@@ -31,6 +32,7 @@ type PprofConfig struct {
 // 联动约束（与 agent.hbFailThreshold × agent.hbInterval）：
 //   - UnhealthyAfter 必须 ≥ agent 端容忍窗口（默认 3 × 10s = 30s）
 //   - OfflineAfter   必须 > UnhealthyAfter
+//
 // 否则会出现"admin 已把节点标 unhealthy/删除，但 agent 任务还在跑"的状态错乱。
 type RegistryConfig struct {
 	UnhealthyAfter string `json:"unhealthyAfter"` // 心跳超时后标记 unhealthy
@@ -73,7 +75,6 @@ type LogConfig struct {
 	MaxSizeMB  int    `json:"maxSizeMB"`  // 单个日志文件最大体积（MB）
 	MaxBackups int    `json:"maxBackups"` // 保留的旧日志文件数
 }
-
 
 // DefaultConfig 返回填充了默认值的配置。
 func DefaultConfig() Config {

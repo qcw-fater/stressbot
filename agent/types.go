@@ -1,11 +1,11 @@
 package agent
 
 import (
-	"encoding/json"
 	"time"
 
 	"stressbot/monitor"
 	"stressbot/robot"
+	json "stressbot/utils/jsonx"
 )
 
 // AgentStatus Agent 运行状态。
