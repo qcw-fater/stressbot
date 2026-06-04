@@ -96,9 +96,10 @@ func RouteToLuaValue(L *lua.LState, route any) lua.LValue {
 	}
 	switch v := route.(type) {
 	case map[string]any:
-		tbl := L.NewTable()
+		// 预分配 hash 容量、跳过数组部分，并用 RawSetString 直写避免 __newindex 检查。
+		tbl := L.CreateTable(0, len(v))
 		for k, val := range v {
-			L.SetField(tbl, k, RouteToLuaValue(L, val))
+			tbl.RawSetString(k, RouteToLuaValue(L, val))
 		}
 		return tbl
 	case float64:

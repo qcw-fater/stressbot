@@ -53,18 +53,45 @@ func luaGzipCompress(L *lua.LState) int {
 	return 1
 }
 
+// gzipReaderPool 复用 gzip.Reader，避免每次解压都新建 flate.Reader 与 32KB 字典窗
+// （pprof 显示 flate.NewReader + dictDecoder.init 占用了可观的分配 churn）。
+// 池中存的是 *gzip.Reader 指针，通过 Reset 重新绑定输入流。
+var gzipReaderPool = sync.Pool{}
+
 func luaGzipDecompress(L *lua.LState) int {
-	r, err := gzip.NewReader(bytes.NewReader([]byte(L.CheckString(1))))
+	src := bytes.NewReader([]byte(L.CheckString(1)))
+
+	var r *gzip.Reader
+	if v := gzipReaderPool.Get(); v != nil {
+		r = v.(*gzip.Reader)
+		if err := r.Reset(src); err != nil {
+			// Reset 失败时该 reader 已不可用，丢弃不归还。
+			L.Push(lua.LNil)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+	} else {
+		var err error
+		r, err = gzip.NewReader(src)
+		if err != nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+	}
+
+	out, err := io.ReadAll(r)
+	closeErr := r.Close()
+	gzipReaderPool.Put(r)
+
 	if err != nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString(err.Error()))
 		return 2
 	}
-	defer r.Close()
-	out, err := io.ReadAll(r)
-	if err != nil {
+	if closeErr != nil {
 		L.Push(lua.LNil)
-		L.Push(lua.LString(err.Error()))
+		L.Push(lua.LString(closeErr.Error()))
 		return 2
 	}
 	L.Push(lua.LString(string(out)))

@@ -140,7 +140,17 @@ func NewRuntimePool(scriptDir string) *RuntimePool {
 		scriptDir:   scriptDir,
 	}
 	rp.pool.New = func() any {
-		L := lua.NewState()
+		// 默认 lua.NewState 会预分配 RegistrySize(5120) 的数据栈和 CallStackSize(256)
+		// 的固定调用帧栈，×数千机器人时纯固定开销可达数百 MB。这里改为小初始值 +
+		// 按需增长：数据栈从 1024 起步、上限 16384、每次扩 512；调用帧栈用分段自增长。
+		// 栈不够会自动扩，对脚本完全透明，仅省下空闲预分配的峰值内存。
+		L := lua.NewState(lua.Options{
+			RegistrySize:        1024,
+			RegistryMaxSize:     16384,
+			RegistryGrowStep:    512,
+			CallStackSize:       256,
+			MinimizeStackMemory: true,
+		})
 		registerAPIs(L)
 		return L
 	}

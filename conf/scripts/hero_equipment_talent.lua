@@ -13,12 +13,12 @@ function execute(r)
 
     local heroId = heroIds[math.random(#heroIds)]
 
-    -- 从 playerData 中查找天赋状态
+    -- 用 get_path 只取 heroList 子树（仅转换这一小块，避免整表转换全量 playerData）
+    -- 路径: playerData -> loginHeroData -> HeroData(大写 H) -> heroList
     local nextIndex = -1
-    local playerData = robot.get("playerData")
-    if playerData and playerData.loginHeroData and playerData.loginHeroData.heroData
-        and playerData.loginHeroData.heroData.heroList then
-        for _, hero in ipairs(playerData.loginHeroData.heroData.heroList) do
+    local heroList = robot.get_path("playerData.loginHeroData.HeroData.heroList")
+    if heroList then
+        for _, hero in ipairs(heroList) do
             if hero.heroId == heroId and hero.equipTalent then
                 for i, val in ipairs(hero.equipTalent) do
                     if val == 0 then
