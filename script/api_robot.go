@@ -105,14 +105,14 @@ func robotSet(L *lua.LState) int {
 		return 0
 	}
 
-	args := extractArgs(L, L.GetTop())
-	if len(args) < 2 {
+	base := firstRobotArg(L)
+	if L.GetTop() < base+1 {
 		L.RaiseError("robot.set requires (key, value)")
 		return 0
 	}
 
-	key := lua.LVAsString(args[0])
-	value := luaToGoValue(args[1])
+	key := lua.LVAsString(L.Get(base))
+	value := luaToGoValue(L.Get(base + 1))
 	ctx.Store.Set(key, value)
 	return 0
 }
@@ -125,13 +125,13 @@ func robotHas(L *lua.LState) int {
 		return 1
 	}
 
-	args := extractArgs(L, L.GetTop())
-	if len(args) < 1 {
+	base := firstRobotArg(L)
+	if L.GetTop() < base {
 		L.RaiseError("robot.has requires (key)")
 		return 0
 	}
 
-	key := lua.LVAsString(args[0])
+	key := lua.LVAsString(L.Get(base))
 	L.Push(lua.LBool(ctx.Store.Has(key)))
 	return 1
 }
@@ -142,12 +142,12 @@ func robotDelete(L *lua.LState) int {
 	if ctx == nil || ctx.Store == nil {
 		return 0
 	}
-	args := extractArgs(L, L.GetTop())
-	if len(args) == 0 {
+	base := firstRobotArg(L)
+	if L.GetTop() < base {
 		L.RaiseError("robot.delete requires (key)")
 		return 0
 	}
-	key := lua.LVAsString(args[0])
+	key := lua.LVAsString(L.Get(base))
 	ctx.Store.Delete(key)
 	return 0
 }
@@ -158,12 +158,12 @@ func robotClear(L *lua.LState) int {
 	if ctx == nil || ctx.Store == nil {
 		return 0
 	}
-	args := extractArgs(L, L.GetTop())
-	if len(args) == 0 {
+	base := firstRobotArg(L)
+	if L.GetTop() < base {
 		ctx.Store.Clear()
 		return 0
 	}
-	key := lua.LVAsString(args[0])
+	key := lua.LVAsString(L.Get(base))
 	ctx.Store.Delete(key)
 	return 0
 }
@@ -176,13 +176,13 @@ func robotIncrement(L *lua.LState) int {
 		return 1
 	}
 
-	args := extractArgs(L, L.GetTop())
-	if len(args) < 1 {
+	base := firstRobotArg(L)
+	if L.GetTop() < base {
 		L.RaiseError("robot.increment requires (key)")
 		return 0
 	}
 
-	key := lua.LVAsString(args[0])
+	key := lua.LVAsString(L.Get(base))
 	v := ctx.Store.Increment(key)
 	L.Push(lua.LNumber(v))
 	return 1
@@ -211,12 +211,12 @@ func robotGetPath(L *lua.LState) int {
 		L.Push(lua.LNil)
 		return 1
 	}
-	args := extractArgs(L, L.GetTop())
-	if len(args) == 0 {
+	base := firstRobotArg(L)
+	if L.GetTop() < base {
 		L.Push(lua.LNil)
 		return 1
 	}
-	path := lua.LVAsString(args[0])
+	path := lua.LVAsString(L.Get(base))
 	val := navigatePath(ctx.Store, path)
 	L.Push(goValueToLua(L, val))
 	return 1
@@ -309,17 +309,14 @@ func navigatePath(store interface {
 	return cur
 }
 
-// extractArgs 从 Lua 栈中提取参数，跳过 LUserData（self）
-func extractArgs(L *lua.LState, top int) []lua.LValue {
-	args := make([]lua.LValue, 0, top)
-	for i := 1; i <= top; i++ {
-		v := L.Get(i)
-		if _, ok := v.(*lua.LUserData); ok {
-			continue
-		}
-		args = append(args, v)
+// firstRobotArg 返回首个业务参数的栈索引，避免每次调用都分配参数切片。
+// 以方法形式调用（r:set(...)）时栈位 1 是 robot 的 LUserData（self），需跳过返回 2；
+// 以模块形式调用（robot.set(...)）时首参即在栈位 1。
+func firstRobotArg(L *lua.LState) int {
+	if _, ok := L.Get(1).(*lua.LUserData); ok {
+		return 2
 	}
-	return args
+	return 1
 }
 
 // goValueToLua 将 Go 值转换为 Lua 值

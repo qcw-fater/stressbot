@@ -156,12 +156,20 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
     </div>
   );
 
+  const defaultWindowSize = useMemo(
+    () => ({
+      width: Math.min(1720, Math.max(960, window.innerWidth - 32)),
+      height: Math.min(860, Math.max(680, window.innerHeight - 72)),
+    }),
+    [],
+  );
+
   return (
     <FloatingWindow
       windowId="history"
       title={titleContent}
-      defaultSize={{ width: 960, height: 680 }}
-      minSize={{ width: 520, height: 380 }}
+      defaultSize={defaultWindowSize}
+      minSize={{ width: 860, height: 420 }}
       open={open}
       onClose={onClose}
       extra={
@@ -175,7 +183,7 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
           <header className="hp-list-toolbar">
             <Input.Search
               className="hp-list-toolbar__search"
-              placeholder="名称、标签或备注"
+              placeholder="名称、ID、标签或备注"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onSearch={refresh}
@@ -260,7 +268,7 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
   );
 }
 
-/* ── 列表卡片 ── */
+/* ── 列表记录行 ── */
 
 function HistoryCard({
   record: r,
@@ -278,11 +286,16 @@ function HistoryCard({
   onClick: () => void;
 }) {
   const tags = r.tags ?? [];
+  const visibleTags = tags.slice(0, 3);
+  const hiddenTagCount = Math.max(0, tags.length - visibleTags.length);
   const failed = r.state === 'failed';
+  const cfg = r.configSummary;
+  const started = r.startedAt ? dayjs(r.startedAt).format('MM-DD HH:mm') : '—';
+  const note = (r.note ?? '').trim();
 
   return (
     <div
-      className={`hp-card hp-card--list${selected ? ' hp-card--selected' : ''}${failed ? ' hp-card--failed' : ''}`}
+      className={`hp-record-row${selected ? ' hp-record-row--selected' : ''}${failed ? ' hp-record-row--failed' : ''}`}
       onClick={onClick}
       role="button"
       tabIndex={0}
@@ -293,86 +306,89 @@ function HistoryCard({
         }
       }}
     >
-      <Checkbox
-        className="hp-card__checkbox"
-        checked={selected}
-        onClick={(e) => onSelect(r.id, e as unknown as React.MouseEvent)}
-      />
+      <div className="hp-record-select">
+        <Checkbox
+          checked={selected}
+          onClick={(e) => onSelect(r.id, e as unknown as React.MouseEvent)}
+        />
+      </div>
 
-      <div className="hp-card__main">
-        <div className="hp-card__row1">
-          <div className="hp-card__title-block">
-            <Tooltip title={r.name} mouseEnterDelay={0.4}>
-              <div className="hp-card__name">{r.name}</div>
-            </Tooltip>
-            <span className={`hp-card__status hp-card__status--${failed ? 'bad' : 'ok'}`}>
-              <span className="hp-status-dot" />
-              {failed ? '失败' : '完成'}
-            </span>
-          </div>
-          <div className="hp-card__actions">
-            <Tooltip title={r.starred ? '取消收藏' : '收藏'}>
-              <Button
-                type="text"
-                size="small"
-                className="hp-card__icon-btn"
-                icon={r.starred ? <StarFilled style={{ color: 'var(--color-warning)' }} /> : <StarOutlined />}
-                onClick={(e) => onStar(r, e)}
-              />
-            </Tooltip>
-            <Tooltip title="删除">
-              <Button
-                type="text"
-                size="small"
-                className="hp-card__icon-btn"
-                danger
-                icon={<DeleteOutlined />}
-                onClick={(e) => onDelete(r, e)}
-              />
-            </Tooltip>
-          </div>
-        </div>
+      <div className="hp-record-identity">
+        <span className={`hp-record-state hp-record-state--${failed ? 'bad' : 'ok'}`}>{failed ? '失败' : '完成'}</span>
+        <Tooltip title={r.debugMode ? '调试模式' : '测试模式'} mouseEnterDelay={0.3}>
+          <span className={`hp-mode-marker hp-mode-marker--${r.debugMode ? 'debug' : 'test'}`} />
+        </Tooltip>
+        <Tooltip title={r.name} mouseEnterDelay={0.4}>
+          <span className="hp-record-name">{r.name}</span>
+        </Tooltip>
+        <Tooltip title={`记录 ID：${r.id}`} mouseEnterDelay={0.4}>
+          <code className="hp-record-id">#{r.id.slice(0, 8)}</code>
+        </Tooltip>
+      </div>
 
-        <div className="hp-card__metrics" aria-hidden>
-          <Tooltip title="记录 ID" mouseEnterDelay={0.4}>
-            <span className="hp-metric">
-              <span className="hp-metric__k">ID</span>
-              <code className="hp-metric__v">{r.id.slice(0, 8)}</code>
-            </span>
-          </Tooltip>
-          <span className="hp-metric">
-            <span className="hp-metric__k">时长</span>
-            <span className="hp-metric__v">{formatDuration(r.durationSec)}</span>
-          </span>
-          <span className="hp-metric">
-            <span className="hp-metric__k">机器人</span>
-            <span className="hp-metric__v">{r.totalBots}</span>
-          </span>
-          <span className="hp-metric">
-            <span className="hp-metric__k">节点</span>
-            <span className="hp-metric__v">{r.activeAgentCount}/{r.agentCount}</span>
-          </span>
-          {!!r.stageCount && r.stageCount > 0 && (
-            <span className="hp-metric">
-              <span className="hp-metric__k">阶段</span>
-              <span className="hp-metric__v" style={{ color: 'var(--color-blue)' }}>{r.stageCount} 阶段</span>
-            </span>
-          )}
-          <span className="hp-metric hp-metric--wide">
-            <span className="hp-metric__k">开始</span>
-            <span className="hp-metric__v">{r.startedAt ? dayjs(r.startedAt).format('MM-DD HH:mm') : '—'}</span>
-          </span>
-        </div>
+      <div className="hp-record-time">
+        <span className="hp-record-k">开始</span>
+        <span className="hp-record-v">{started}</span>
+      </div>
 
-        {tags.length > 0 && (
-          <div className="hp-card__tags">
-            {tags.map((t) => (
-              <span key={t} className="hp-tag-pill">
-                {t}
-              </span>
-            ))}
-          </div>
+      <div className="hp-record-duration">
+        <span className="hp-record-k">时长</span>
+        <span className="hp-record-v hp-record-v--strong">{formatDuration(r.durationSec)}</span>
+      </div>
+
+      <div className="hp-record-load">
+        <span>机器人 <b>{r.totalBots.toLocaleString()}</b></span>
+        <span>节点 <b>{r.activeAgentCount}/{r.agentCount}</b></span>
+        <span>并发 <b>{cfg.concurrency}</b></span>
+        {!!r.stageCount && r.stageCount > 0 && <span>阶段 <b>{r.stageCount}</b></span>}
+      </div>
+
+      <div className="hp-record-config">
+        <span>超时 {cfg.timeoutSec}s</span>
+        <span>Flow {cfg.flowSizeKB}KB</span>
+        <span>Proto {cfg.protoCount}</span>
+        <span>Lua {cfg.scriptCount}</span>
+      </div>
+
+      <div className="hp-record-tags">
+        {visibleTags.length > 0 ? (
+          <>
+            {visibleTags.map((t) => <span key={t} className="hp-tag-pill">{t}</span>)}
+            {hiddenTagCount > 0 && (
+              <Tooltip title={tags.slice(visibleTags.length).join('、')} mouseEnterDelay={0.3}>
+                <span className="hp-tag-pill hp-tag-pill--more">+{hiddenTagCount}</span>
+              </Tooltip>
+            )}
+          </>
+        ) : (
+          <span className="hp-record-empty">无标签</span>
         )}
+      </div>
+
+      <Tooltip title={note || '无备注'} mouseEnterDelay={0.4}>
+        <div className={`hp-record-note${note ? '' : ' hp-record-note--empty'}`}>{note || '无备注'}</div>
+      </Tooltip>
+
+      <div className="hp-record-actions" onClick={(e) => e.stopPropagation()}>
+        <Tooltip title={r.starred ? '取消收藏' : '收藏'}>
+          <Button
+            type="text"
+            size="small"
+            className="hp-record-icon-btn"
+            icon={r.starred ? <StarFilled style={{ color: 'var(--color-warning)' }} /> : <StarOutlined />}
+            onClick={(e) => onStar(r, e)}
+          />
+        </Tooltip>
+        <Tooltip title="删除">
+          <Button
+            type="text"
+            size="small"
+            className="hp-record-icon-btn"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={(e) => onDelete(r, e)}
+          />
+        </Tooltip>
       </div>
     </div>
   );

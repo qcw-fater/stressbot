@@ -119,9 +119,8 @@ func buildHistoryTrendPoint(sampledAt time.Time, elapsed int, stress *StressAggr
 		OnlineCount:   sys.OnlineCount,
 		OfflineCount:  sys.OfflineCount,
 	}
-	if sys.TotalMemMB > 0 {
-		point.MemPercent = float64(sys.UsedMemMB) / float64(sys.TotalMemMB) * 100
-	}
+	point.AvgMemPercent = sys.AvgMemPercent
+	point.MaxMemPercent = sys.MaxMemPercent
 	if stress == nil || stress.Snapshot == nil {
 		return point
 	}
@@ -184,6 +183,7 @@ func buildHistoryTrendPoint(sampledAt time.Time, elapsed int, stress *StressAggr
 	point.TotalDurationApdex = math.Round(point.TotalDurationApdex*10000) / 10000
 	point.SendKBps = math.Round(point.SendKBps*100) / 100
 	point.RecvKBps = math.Round(point.RecvKBps*100) / 100
-	point.MemPercent = math.Round(point.MemPercent*100) / 100
+	point.AvgMemPercent = math.Round(point.AvgMemPercent*100) / 100
+	point.MaxMemPercent = math.Round(point.MaxMemPercent*100) / 100
 	return point
 }

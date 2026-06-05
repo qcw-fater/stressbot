@@ -241,9 +241,9 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
   }, [advancedDiagnostics, compact, latencyTitle, latencyWidth, mode, nameWidth, countWidth, popupZIndex, showBandwidthColumns, showCanceledColumn, showClientBreakdown, showErrorsColumn, showExecutingColumn, showQpsColumn]);
 
   return (
-    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+    <div className="action-metrics-table" style={{ width: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
       {showToolbar && (
-        <Space size={12} wrap>
+        <Space className="action-metrics-table__toolbar" size={12} wrap>
           <Input.Search
             placeholder="按动作名搜索"
             value={search}
@@ -273,15 +273,17 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
           <span style={{ fontSize: compact ? 11 : 12, color: 'var(--text-tertiary)' }}>{dataSource.length} 条</span>
         </Space>
       )}
-      <Table<T>
-        rowKey="name"
-        size={size}
-        loading={loading}
-        dataSource={dataSource}
-        columns={columns}
-        pagination={false}
-        scroll={{ x: 'max-content', y: scrollY }}
-      />
-    </Space>
+      <div className="action-metrics-table__body" style={{ minHeight: 0 }}>
+        <Table<T>
+          rowKey="name"
+          size={size}
+          loading={loading}
+          dataSource={dataSource}
+          columns={columns}
+          pagination={false}
+          scroll={{ x: 'max-content', y: scrollY }}
+        />
+      </div>
+    </div>
   );
 }

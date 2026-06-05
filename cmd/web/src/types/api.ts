@@ -81,7 +81,7 @@ export interface RobotConfig {
    * 任务结束后 Agent 会自动恢复为原等级，不影响后续任务。
    */
   logLevel?: LogLevel;
-  /** 调试模式：单 agent 分配 + 历史自动标记 "debug" */
+  /** 调试模式：单节点分配，历史中以系统级调试徽标展示 */
   debugMode?: boolean;
   /** 渐进式加压配置，不配时一次性创建全部机器人 */
   rampUp?: RampUpConfig;
@@ -317,6 +317,8 @@ export interface StressAggregate {
   snapshot: StressSnapshot;
   reportingAgents: number;
   totalAgents: number;
+  offlineAgents: number;
+  assignedAgents: number;
 }
 
 export interface StressSnapshot {
@@ -366,6 +368,18 @@ export interface SystemSnapshot {
   gcPauseAvgMs: number;
 }
 
+export interface AgentSystemBrief {
+  agentId: string;
+  name: string;
+  status: AgentStatus | string;
+  cpuPercent: number;
+  memPercent: number;
+  numGoroutine: number;
+  netSendKBps: number;
+  netRecvKBps: number;
+  lastSeen: number;
+}
+
 export interface ClusterSystemSnapshot {
   timestamp: string;
   agentCount: number;
@@ -375,6 +389,8 @@ export interface ClusterSystemSnapshot {
   usedMemMB: number;
   avgCpuPercent: number;
   maxCpuPercent: number;
+  avgMemPercent: number;
+  maxMemPercent: number;
   totalNetSendKBps: number;
   totalNetRecvKBps: number;
   totalGoroutines: number;
@@ -382,6 +398,9 @@ export interface ClusterSystemSnapshot {
   totalFds: number;
   hotAgentId?: string;
   hotAgentName?: string;
+  hotMemAgentId?: string;
+  hotMemAgentName?: string;
+  agents: AgentSystemBrief[];
 }
 
 export interface PerAgentSystemItem {
@@ -429,6 +448,7 @@ export interface HistoryRecord {
   starred: boolean;
   tags: string[];
   note?: string;
+  debugMode: boolean;
   configSummary: ConfigSummary;
   stageCount?: number;
 }
@@ -484,7 +504,10 @@ export interface HistorySnapshotSummary {
   timestamp?: string;
   uptimeSeconds: number;
   totalActions: number;
+  apdexT: number;
+  robots: RobotsView;
   connections: ConnectionsView;
+  bandwidth: BandwidthView;
   actions: HistoryActionMetric[];
 }
 
@@ -493,12 +516,15 @@ export interface HistorySystemSummary {
   usedMemMB: number;
   avgCpuPercent: number;
   maxCpuPercent: number;
+  avgMemPercent: number;
+  maxMemPercent: number;
   totalNetSendKBps: number;
   totalNetRecvKBps: number;
   totalGoroutines: number;
   totalThreads: number;
   totalFds: number;
   hotAgentName?: string;
+  hotMemAgentName?: string;
 }
 
 export interface HistoryDetail extends HistoryRecord {
@@ -534,12 +560,32 @@ export interface HistoryTagsResponse {
 export interface HistoryTrendPoint {
   sampledAt: string;
   elapsedSec: number;
+  stageIndex: number;
   totalQps: number;
   rttApdex: number | null;
   totalDurationApdex: number | null;
+  rttAvgMs: number;
+  rttP95Ms: number;
+  rttP99Ms: number;
+  totalDurationAvgMs: number;
+  totalDurationP95Ms: number;
+  totalDurationP99Ms: number;
+  clientAvgMs: number;
+  encodeAvgMs: number;
+  decodeAvgMs: number;
+  botsRunning: number;
+  botsErrored: number;
   sendKBps: number;
   recvKBps: number;
   avgCpuPercent: number;
+  maxCpuPercent: number;
+  avgMemPercent: number;
+  maxMemPercent: number;
+  goroutines: number;
+  threads: number;
+  fds: number;
+  onlineCount: number;
+  offlineCount: number;
 }
 
 export interface TimeseriesResponse {

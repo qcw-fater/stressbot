@@ -1,133 +1,46 @@
-/**
- * 底部停靠监控面板（统一单面板）。
- *
- * 合并原 4 个 Tab（大盘/动作/错误/趋势）为一张面板：
- *   - 顶部：指标区 + CPU% / QPS 迷你趋势图，横向约各占 1/3 宽度
- *   - 底部：完整动作表（含可展开错误明细 + 搜索/过滤）
- *   - 高度可通过顶部拖把手调整（160px ~ 80vh）
- */
-
-import { Alert, Button, Progress, Tooltip } from 'antd';
-import { CaretDownOutlined, CaretUpOutlined, LineChartOutlined, WarningOutlined } from '@ant-design/icons';
-import { EChartsReact } from './shared/EChartsReact';
+import { Button, Progress, Tooltip } from 'antd';
+import { CaretDownOutlined, CaretUpOutlined, LineChartOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useRuntimeStore } from '@/services';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { ActionMetricsTable } from './shared/ActionMetricsTable';
+import { buildLivePanelModel, type LiveNodeItem } from './shared/liveMetrics';
+import { fmtBandwidthKBps, fmtCompactNumber, fmtDuration, fmtMs, fmtPercent, fmtPercentValue, fmtRate, fmtScore } from './shared/formats';
 import './MonitorDock.css';
 
 const MIN_H = 160;
 const MAX_H_RATIO = 0.8;
 const DEFAULT_H = 360;
 
-/* ── helpers ── */
+const STATE_TEXT: Record<string, string> = {
+  pending: '等待中',
+  starting: '启动中',
+  running: '运行中',
+  stopping: '停止中',
+  stopped: '已停止',
+  failed: '失败',
+};
 
-function fmtBandwidth(mbps: number) {
-  const v = Number.isFinite(mbps) ? mbps : 0;
-  if (v < 1) return { value: v * 1024, suffix: 'KB/s', precision: 1 };
-  return { value: v, suffix: 'MB/s', precision: 2 };
+const NODE_STATUS_TEXT: Record<string, string> = {
+  idle: '空闲',
+  busy: '运行中',
+  unhealthy: '异常',
+  offline: '离线',
+  stale: '上报延迟',
+};
+
+function compactRatio(current: number, total: number) {
+  if (total <= 0) return '—';
+  return `${fmtCompactNumber(current)} / ${fmtCompactNumber(total)}`;
 }
 
-function gaugeColor(v: number): string {
-  if (v > 80) return 'var(--color-error)';
-  if (v > 60) return 'var(--color-warning)';
-  return 'var(--color-blue)';
+function formatDateTime(value?: string) {
+  if (!value) return '—';
+  const ts = Date.parse(value);
+  if (!Number.isFinite(ts)) return '—';
+  return new Date(ts).toLocaleTimeString('zh-CN', { hour12: false });
 }
-
-function successColor(rate: number): string {
-  if (rate >= 0.95) return 'var(--color-success)';
-  if (rate >= 0.8) return 'var(--color-warning)';
-  return 'var(--color-error)';
-}
-
-function sparkOption(series: Array<{ name: string; data: number[]; color: string }>, dark: boolean) {
-  const cs = getComputedStyle(document.documentElement);
-  const resolve = (v: string, fb: string) => {
-    if (!v.startsWith('var(')) return v;
-    const name = v.slice(4, -1);
-    return cs.getPropertyValue(name).trim() || fb;
-  };
-  const len = series[0]?.data.length ?? 0;
-  const x = Array.from({ length: len }, (_, i) => i);
-  return {
-    grid: { left: 28, right: 2, top: 4, bottom: 4 },
-    xAxis: { type: 'category', data: x, show: false, boundaryGap: false },
-    yAxis: { type: 'value', axisLabel: { fontSize: 8, color: cs.getPropertyValue('--text-tertiary').trim() || (dark ? '#888' : '#aaa') }, splitLine: { lineStyle: { color: cs.getPropertyValue('--divider-bg').trim() || (dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)') } } },
-    tooltip: {
-      trigger: 'axis',
-      textStyle: { fontSize: 10, color: cs.getPropertyValue('--text-primary').trim() || (dark ? '#e0e0e0' : '#333') },
-      backgroundColor: cs.getPropertyValue('--bg-panel').trim() || (dark ? '#2a2a2a' : '#fff'),
-      borderColor: cs.getPropertyValue('--border-color').trim() || (dark ? '#444' : '#ddd'),
-      valueFormatter: (v: number) => v?.toFixed(2) ?? '—',
-    },
-    series: series.map((s) => {
-      const c = resolve(s.color, dark ? '#1677ff' : '#1677ff');
-      return {
-        name: s.name,
-        type: 'line',
-        smooth: true,
-        symbol: 'none',
-        data: s.data,
-        itemStyle: { color: c },
-        lineStyle: { color: c, width: 1.5 },
-        areaStyle: { color: c, opacity: 0.12 },
-      };
-    }),
-  };
-}
-
-/* ── Agent 离线告警横幅 ── */
-
-function AgentOfflineAlert() {
-  const agentEvents = useRuntimeStore((s) => s.agentEvents);
-  const agents = useRuntimeStore((s) => s.agents);
-  const [dismissedKeys, setDismissedKeys] = useState<Set<string>>(new Set());
-
-  // 取最近未关闭的 offline / restarted 事件
-  const offlineAlerts = useMemo(() => {
-    const onlineIds = new Set(agents.filter((a) => a.status !== 'offline').map((a) => a.agentId));
-    return agentEvents
-      .filter(
-        (e) =>
-          (e.type === 'offline' || e.type === 'restarted') &&
-          !dismissedKeys.has(e.agentId + e.timestamp + e.type),
-      )
-      .filter((e) => e.type === 'restarted' || !onlineIds.has(e.agentId)) // offline 已恢复的不显示；restarted 是永久事件
-      .slice(-3); // 最多显示 3 条
-  }, [agentEvents, agents, dismissedKeys]);
-
-  if (offlineAlerts.length === 0) return null;
-
-  const onlineCount = agents.filter((a) => a.status !== 'offline').length;
-  const totalCount = agents.length;
-
-  return (
-    <Alert
-      type="warning"
-      showIcon
-      icon={<WarningOutlined />}
-      message={
-        <span style={{ fontSize: 12 }}>
-          节点{' '}
-          {offlineAlerts
-            .map((e) => `"${e.agentName || e.agentId}"(${e.type === 'restarted' ? '重启' : '离线'})`)
-            .join('、')}{' '}
-          异常，任务继续运行中（{onlineCount}/{totalCount} 在线）
-        </span>
-      }
-      closable
-      onClose={() => {
-        const keys = new Set(dismissedKeys);
-        offlineAlerts.forEach((e) => keys.add(e.agentId + e.timestamp + e.type));
-        setDismissedKeys(keys);
-      }}
-      style={{ marginBottom: 4, padding: '4px 12px', borderRadius: 6, fontSize: 12 }}
-    />
-  );
-}
-
-/* ══════════════════════════════════════════════════════════════ */
 
 export function MonitorDock() {
   const mode = useRuntimeStore((s) => s.mode);
@@ -140,7 +53,6 @@ export function MonitorDock() {
   const [topCollapsed, setTopCollapsed] = useState(false);
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
 
-  // auto toggle: edit→closed; running→open
   const lastModeRef = useRef(mode);
   useEffect(() => {
     if (lastModeRef.current === mode) return;
@@ -153,14 +65,16 @@ export function MonitorDock() {
     (e: React.MouseEvent) => {
       e.preventDefault();
       dragRef.current = { startY: e.clientY, startH: height };
+      let lastHeight = height;
       const onMove = (ev: MouseEvent) => {
         if (!dragRef.current) return;
         const max = window.innerHeight * MAX_H_RATIO;
         const next = Math.max(MIN_H, Math.min(max, dragRef.current.startH + (dragRef.current.startY - ev.clientY)));
+        lastHeight = next;
         setHeight(next);
       };
       const onUp = () => {
-        if (dragRef.current) localStorage.setItem('stressbot.monitorDock.h', String(height));
+        if (dragRef.current) localStorage.setItem('stressbot.monitorDock.h', String(lastHeight));
         dragRef.current = null;
         window.removeEventListener('mousemove', onMove);
         window.removeEventListener('mouseup', onUp);
@@ -191,12 +105,11 @@ export function MonitorDock() {
         <div className="monitor-dock__handle" onMouseDown={onDragStart} />
       </Tooltip>
       <div className="monitor-dock__body">
-        <AgentOfflineAlert />
         {!topCollapsed && <TopSection />}
         <ActionsSection />
       </div>
-      <div style={{ position: 'absolute', top: 6, right: 12, display: 'flex', gap: 2, alignItems: 'center' }}>
-        <Tooltip title={topCollapsed ? '展开指标和趋势图' : '收起指标和趋势图'}>
+      <div className="monitor-dock__controls">
+        <Tooltip title={topCollapsed ? '展开指标区' : '收起指标区'}>
           <Button type="text" size="small" icon={<LineChartOutlined />} onClick={() => setTopCollapsed(v => !v)} style={{ opacity: topCollapsed ? 0.5 : 1 }} />
         </Tooltip>
         <Tooltip title="折叠监控">
@@ -207,244 +120,245 @@ export function MonitorDock() {
   );
 }
 
-/* ──────────────────────────────────────────────────
-   顶部指标 + 趋势图
-   ────────────────────────────────────────────────── */
-
 function TopSection() {
   const {
+    activeTask,
     latestStress,
     latestSystem,
-    systemHistory,
     stressHistory,
     agents,
+    reportingAgents,
+    totalAgents,
+    offlineAgents,
+    assignedAgents,
     rampUpEnabled,
     rampUpStages,
   } = useRuntimeStore(
     useShallow((s) => ({
+      activeTask: s.activeTask,
       latestStress: s.latestStress,
       latestSystem: s.latestSystem,
-      systemHistory: s.systemHistory,
       stressHistory: s.stressHistory,
       agents: s.agents,
+      reportingAgents: s.reportingAgents,
+      totalAgents: s.totalAgents,
+      offlineAgents: s.offlineAgents,
+      assignedAgents: s.assignedAgents,
       rampUpEnabled: s.rampUpEnabled,
       rampUpStages: s.rampUpStages,
     })),
   );
-  const theme = useEditorStore((s) => s.theme);
-  const dark = theme === 'dark';
 
-  // 迷你趋势图
-  const cpuOption = useMemo(() => {
-    if (systemHistory.length < 2) return null;
-    return sparkOption([{ name: 'CPU%', data: systemHistory.map((s) => s.avgCpuPercent), color: 'var(--chart-orange)' }], dark);
-  }, [systemHistory]);
-
-  const qpsOption = useMemo(() => {
-    if (stressHistory.length < 2) return null;
-    const totalQps = stressHistory.map((s) => (s.actions ?? []).reduce((sum, a) => sum + a.avgQps, 0));
-    return sparkOption([{ name: 'QPS', data: totalQps, color: 'var(--chart-blue)' }], dark);
-  }, [stressHistory]);
-
-  // 渐进式加压阶段计算（Hooks 必须在条件返回之前调用）
-  const rampUpTotal = rampUpEnabled
-    ? rampUpStages.reduce((sum: number, s) => sum + (s.count || 0), 0)
-    : 0;
-  const rampUpStageInfo = useMemo(() => {
-    if (!rampUpEnabled || rampUpStages.length === 0 || rampUpTotal === 0) return null;
-    const running = latestStress?.robots?.running ?? 0;
-    let cumulative = 0;
-    for (let i = 0; i < rampUpStages.length; i++) {
-      const prev = cumulative;
-      cumulative += rampUpStages[i].count || 0;
-      if (running <= cumulative) {
-        const progress = Math.min(1, Math.max(0, (running - prev) / Math.max(1, rampUpStages[i].count)));
-        return { current: i, progress };
-      }
-    }
-    return { current: rampUpStages.length - 1, progress: 1 };
-  }, [rampUpEnabled, rampUpStages, rampUpTotal, latestStress?.robots?.running]);
+  const model = useMemo(() => buildLivePanelModel({
+    latestStress,
+    latestSystem,
+    stressHistory,
+    agents,
+    reportingAgents,
+    totalAgents,
+    offlineAgents,
+    assignedAgents,
+    rampUpEnabled,
+    rampUpStages,
+  }), [
+    latestStress,
+    latestSystem,
+    stressHistory,
+    agents,
+    reportingAgents,
+    totalAgents,
+    offlineAgents,
+    assignedAgents,
+    rampUpEnabled,
+    rampUpStages,
+  ]);
 
   if (!latestStress) {
-    return (
-      <div className="monitor-dock__top">
-        <div className="monitor-dock__metrics" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>暂无压测数据；启动任务后实时显示</span>
-        </div>
-        <div className="monitor-dock__charts">
-          <div className="monitor-dock__chart-card monitor-dock__chart-card--cpu">
-            <div className="monitor-dock__chart-title">CPU%</div>
-            <div style={{ color: 'var(--text-tertiary)', fontSize: 10, textAlign: 'center', paddingTop: 20 }}>等待数据…</div>
-          </div>
-          <div className="monitor-dock__chart-card monitor-dock__chart-card--qps">
-            <div className="monitor-dock__chart-title">QPS</div>
-            <div style={{ color: 'var(--text-tertiary)', fontSize: 10, textAlign: 'center', paddingTop: 20 }}>等待数据…</div>
-          </div>
-        </div>
-      </div>
-    );
+    return <EmptyRuntimePanel activeTaskName={activeTask?.name} nodes={model.nodes} />;
   }
-
-  const r = latestStress.robots ?? { started: 0, running: 0, stopped: 0, errored: 0 };
-  const c = latestStress.connections ?? { established: 0, failed: 0, dropped: 0 };
-  const b = latestStress.bandwidth ?? { sendMBps: 0, recvMBps: 0 };
-  const sys = latestSystem;
-  const actions = latestStress.actions ?? [];
-
-  const activeConns = Math.max(0, c.established - c.dropped);
-  const onlineAgents = (agents ?? []).filter((a) => a.status !== 'offline').length;
-  const totalAgents = (agents ?? []).length;
-  const send = fmtBandwidth(b.sendMBps ?? 0);
-  const recv = fmtBandwidth(b.recvMBps ?? 0);
-  const robotPercent = r.started > 0 ? Math.round((r.running / r.started) * 100) : 0;
-
-  // 加权集群成功率。
-  let totalSamples = 0, wSuccess = 0;
-  for (const a of actions) {
-    totalSamples += a.sampleCount;
-    wSuccess += a.successRate * a.sampleCount;
-  }
-  const clusterSuccess = totalSamples > 0 ? wSuccess / totalSamples : 0;
 
   return (
-    <div className="monitor-dock__top">
-      {/* 指标区 */}
-      <div className="md-metrics-panel">
-        {/* 核心指标 Hero：机器人 + 连接 */}
-        <div className="md-hero-row">
-          <div className="md-hero-box">
-            <div className="md-hero-title">机器人</div>
-            <div className="md-hero-value" style={{ color: 'var(--color-success)' }}>{r.running}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-secondary)' }}> / {r.started}</span></div>
-          </div>
-          <div className="md-hero-divider" />
-          <div className="md-hero-box">
-            <div className="md-hero-title">活跃连接</div>
-            <div className="md-hero-value" style={{ color: 'var(--color-blue)' }}>{activeConns}</div>
-          </div>
-          <div className="md-hero-divider" />
-          <div className="md-hero-box">
-            <div className="md-hero-title">QPS</div>
-            <div className="md-hero-value" style={{ color: 'var(--color-purple)' }}>
-              {actions.reduce((sum, a) => sum + a.avgQps, 0).toFixed(1)}
-            </div>
-          </div>
-        </div>
+    <div className="monitor-dock__top monitor-dock__top--runtime">
+      <TaskLoadCard taskName={activeTask?.name} taskState={activeTask?.state} uptimeSeconds={latestStress.uptimeSeconds} model={model} />
+      <ThroughputQualityCard model={model} />
+      <LatencyConnectionCard model={model} />
+      <ResourceNodeCard model={model} />
+    </div>
+  );
+}
 
-        {/* 负载 / 渐进式阶段进度 */}
-        <div className="md-load-row">
-          <div className="md-load-header">
-            {rampUpStageInfo ? (
-              <span className="md-load-title">渐进式 阶段 {rampUpStageInfo.current + 1}/{rampUpStages.length}</span>
-            ) : (
-              <span className="md-load-title">负载 {robotPercent}%</span>
-            )}
-            {r.errored > 0 && <span className="md-chip md-chip-errored">错 {r.errored}</span>}
-          </div>
-          {rampUpStageInfo ? (
-            <div className="md-stage-bar">
-              {rampUpStages.map((stage: { count: number }, i: number) => {
-                const widthPct = rampUpTotal > 0 ? (stage.count / rampUpTotal) * 100 : 100 / rampUpStages.length;
-                let fill = 0;
-                if (i < rampUpStageInfo.current) fill = 100;
-                else if (i === rampUpStageInfo.current) fill = rampUpStageInfo.progress * 100;
-                return (
-                  <div key={i} className="md-stage-segment" style={{ width: `${widthPct}%` }}>
-                    <div
-                      className={`md-stage-fill${i === rampUpStageInfo.current ? ' md-stage-fill--active' : ''}`}
-                      style={{ width: `${fill}%` }}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="md-load-progress">
-              <Progress percent={robotPercent} strokeColor="var(--color-success)" showInfo={false} size={4} />
-            </div>
-          )}
-        </div>
-
-        {/* 数据网格 */}
-        <div className="md-grid-row">
-          <div className="md-grid-item">
-            <span className="md-grid-label" style={{ color: 'var(--chart-cyan)' }}>↑ 发送</span>
-            <span className="md-grid-value">{send.value.toFixed(send.precision)} {send.suffix}</span>
-          </div>
-          <div className="md-grid-item">
-            <span className="md-grid-label" style={{ color: 'var(--chart-purple)' }}>↓ 接收</span>
-            <span className="md-grid-value">{recv.value.toFixed(recv.precision)} {recv.suffix}</span>
-          </div>
-          <div className="md-grid-item">
-            <span className="md-grid-label">CPU</span>
-            <span className="md-grid-value" style={{ color: gaugeColor(sys?.avgCpuPercent ?? 0) }}>
-              {sys?.avgCpuPercent.toFixed(0)}%
-            </span>
-          </div>
-          <div className="md-grid-item">
-            <span className="md-grid-label">节点</span>
-            <span
-              className="md-grid-value"
-              style={
-                onlineAgents < totalAgents ? { color: 'var(--color-warning)' } : undefined
-              }
-            >
-              {onlineAgents}/{totalAgents}
-            </span>
-          </div>
-          <div className="md-grid-item">
-            <span className="md-grid-label">成功率</span>
-            <span className="md-grid-value" style={{ color: successColor(clusterSuccess) }}>
-              {(clusterSuccess * 100).toFixed(1)}%
-            </span>
-          </div>
-          <div className="md-grid-item">
-            <span className="md-grid-label">动作</span>
-            <span className="md-grid-value">{latestStress.totalActions.toLocaleString()}</span>
+function EmptyRuntimePanel({ activeTaskName, nodes }: { activeTaskName?: string; nodes: ReturnType<typeof buildLivePanelModel>['nodes'] }) {
+  return (
+    <div className="monitor-dock__top monitor-dock__top--empty">
+      <div className="md-runtime-empty">
+        <div>
+          <div className="md-runtime-empty__title">等待任务采样</div>
+          <div className="md-runtime-empty__desc">
+            {activeTaskName ? `任务「${activeTaskName}」启动后显示实时监控指标。` : '启动任务后显示实时监控指标。'}
           </div>
         </div>
-      </div>
-
-      {/* 趋势图 */}
-      <div className="monitor-dock__charts">
-        <div className="monitor-dock__chart-card monitor-dock__chart-card--cpu">
-          <div className="monitor-dock__chart-title">CPU%</div>
-          {cpuOption ? (
-            <EChartsReact option={cpuOption} style={{ height: 'calc(100% - 16px)' }} notMerge lazyUpdate />
-          ) : (
-            <div style={{ color: 'var(--text-tertiary)', fontSize: 10, textAlign: 'center', paddingTop: 12 }}>等待数据…</div>
-          )}
-        </div>
-        <div className="monitor-dock__chart-card monitor-dock__chart-card--qps">
-          <div className="monitor-dock__chart-title">QPS</div>
-          {qpsOption ? (
-            <EChartsReact option={qpsOption} style={{ height: 'calc(100% - 16px)' }} notMerge lazyUpdate />
-          ) : (
-            <div style={{ color: 'var(--text-tertiary)', fontSize: 10, textAlign: 'center', paddingTop: 12 }}>等待数据…</div>
-          )}
+        <div className="md-runtime-empty__nodes">
+          <span>在线节点 {nodes.online}/{nodes.total || '—'}</span>
+          <span>容量 {compactRatio(nodes.capacityCurrent, nodes.capacityMax)}</span>
         </div>
       </div>
     </div>
   );
 }
 
-/* ──────────────────────────────────────────────────
-   动作表（含搜索 + 过滤 + 可展开错误）
-   ────────────────────────────────────────────────── */
+function TaskLoadCard({
+  taskName,
+  taskState,
+  uptimeSeconds,
+  model,
+}: {
+  taskName?: string;
+  taskState?: string;
+  uptimeSeconds: number;
+  model: ReturnType<typeof buildLivePanelModel>;
+}) {
+  const rampUp = model.load.rampUp;
+  const progress = rampUp ? Math.round(rampUp.progress * 100) : Math.round(model.load.robotPercent);
+
+  return (
+    <MetricGroup title="任务 / 负载" subtitle={taskName || '运行任务'}>
+      <div className="md-kpi-grid md-kpi-grid--two">
+        <MetricCell label="状态" value={STATE_TEXT[taskState ?? ''] ?? '运行中'} />
+        <MetricCell label="运行时长" value={fmtDuration(uptimeSeconds)} />
+        <MetricCell label="运行机器人" value={fmtCompactNumber(model.load.runningRobots)} />
+        <MetricCell label="已启动" value={fmtCompactNumber(model.load.startedRobots)} />
+        <MetricCell label="已停止" value={fmtCompactNumber(model.load.stoppedRobots)} />
+        <MetricCell label="异常机器人" value={fmtCompactNumber(model.load.erroredRobots)} />
+      </div>
+      <div className="md-progress-caption">
+        <span>{rampUp ? `渐进式阶段 ${rampUp.currentStage}/${rampUp.totalStages}` : `负载 ${model.load.robotPercent.toFixed(0)}%`}</span>
+        <span>{progress}%</span>
+      </div>
+      <Progress percent={progress} strokeColor="var(--color-blue)" showInfo={false} size={3} />
+    </MetricGroup>
+  );
+}
+
+function ThroughputQualityCard({ model }: { model: ReturnType<typeof buildLivePanelModel> }) {
+  return (
+    <MetricGroup title="吞吐 / 结果" subtitle={`累计动作 ${fmtCompactNumber(model.throughput.totalActions)}`}>
+      <div className="md-kpi-grid md-kpi-grid--three">
+        <MetricCell label="当前吞吐" value={fmtRate(model.throughput.intervalQps)} unit="/s" title={model.throughput.intervalQps == null ? '等待下一轮采样' : undefined} />
+        <MetricCell label="全程均值" value={fmtRate(model.throughput.lifetimeQps)} unit="/s" />
+        <MetricCell label="成功率" value={fmtPercent(model.quality.successRate)} />
+        <MetricCell label="样本" value={fmtCompactNumber(model.quality.sampleCount)} />
+        <MetricCell label="成功" value={fmtCompactNumber(model.quality.successCount)} />
+        <MetricCell label="失败" value={fmtCompactNumber(model.quality.failureCount)} />
+        <MetricCell label="超时" value={fmtCompactNumber(model.quality.timeoutCount)} />
+        <MetricCell label="取消" value={fmtCompactNumber(model.quality.canceledCount)} />
+        <MetricCell label="执行中" value={fmtCompactNumber(model.quality.executing)} />
+      </div>
+    </MetricGroup>
+  );
+}
+
+function LatencyConnectionCard({ model }: { model: ReturnType<typeof buildLivePanelModel> }) {
+  return (
+    <MetricGroup title="耗时 / 连接" subtitle={`总 Apdex ${fmtScore(model.quality.totalDurationApdex)} · RTT Apdex ${fmtScore(model.quality.rttApdex)}`}>
+      <div className="md-kpi-grid md-kpi-grid--three">
+        <MetricCell label="总 avg" value={fmtMs(model.latency.totalDurationAvgMs ?? 0)} unit="ms" />
+        <MetricCell label="总 p95" value={fmtMs(model.latency.totalDurationP95Ms ?? 0)} unit="ms" />
+        <MetricCell label="总 p99" value={fmtMs(model.latency.totalDurationP99Ms ?? 0)} unit="ms" />
+        <MetricCell label="RTT avg" value={fmtMs(model.latency.rttAvgMs ?? 0)} unit="ms" />
+        <MetricCell label="RTT p95" value={fmtMs(model.latency.rttP95Ms ?? 0)} unit="ms" />
+        <MetricCell label="客户端" value={fmtMs(model.latency.clientAvgMs ?? 0)} unit="ms" />
+        <MetricCell label="活跃连接" value={fmtCompactNumber(model.connections.active)} />
+        <MetricCell label="连接失败" value={fmtCompactNumber(model.connections.failed)} />
+        <MetricCell label="已断开" value={fmtCompactNumber(model.connections.dropped)} />
+      </div>
+    </MetricGroup>
+  );
+}
+
+function ResourceNodeCard({ model }: { model: ReturnType<typeof buildLivePanelModel> }) {
+  const visibleNodes = model.nodes.items.slice(0, 24);
+  const hidden = Math.max(0, model.nodes.items.length - visibleNodes.length);
+
+  return (
+    <MetricGroup title="资源 / 节点" subtitle={`采样 ${model.nodes.reporting}/${model.nodes.assigned || '—'} · 在线 ${model.nodes.online}/${model.nodes.total || '—'}`}>
+      <div className="md-kpi-grid md-kpi-grid--three">
+        <MetricCell label="CPU 均值" value={fmtPercentValue(model.resources.avgCpuPercent)} />
+        <MetricCell label="CPU 最高" value={fmtPercentValue(model.resources.maxCpuPercent)} title={model.resources.hotCpuNode} />
+        <MetricCell label="内存均值" value={fmtPercentValue(model.resources.avgMemPercent)} />
+        <MetricCell label="内存最高" value={fmtPercentValue(model.resources.maxMemPercent)} title={model.resources.hotMemNode} />
+        <MetricCell label="发送" value={fmtBandwidthKBps(model.throughput.sendKBps)} />
+        <MetricCell label="接收" value={fmtBandwidthKBps(model.throughput.recvKBps)} />
+        <MetricCell label="容量" value={compactRatio(model.nodes.capacityCurrent, model.nodes.capacityMax)} />
+        <MetricCell label="离线节点" value={fmtCompactNumber(model.nodes.offline)} />
+        <MetricCell label="文件句柄" value={fmtCompactNumber(model.resources.fds)} title={`协程 ${fmtCompactNumber(model.resources.goroutines)} · 线程 ${fmtCompactNumber(model.resources.threads)}`} />
+      </div>
+      <div className="md-node-row" aria-label="节点状态矩阵">
+        {visibleNodes.map((node) => <NodeDot key={node.id} node={node} />)}
+        {hidden > 0 && <span className="md-node-more">+{hidden}</span>}
+        {visibleNodes.length === 0 && <span className="md-node-empty">暂无节点数据</span>}
+      </div>
+    </MetricGroup>
+  );
+}
+
+function MetricGroup({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+  return (
+    <section className="md-metric-group">
+      <div className="md-metric-group__head">
+        <span className="md-metric-group__title">{title}</span>
+        {subtitle && <span className="md-metric-group__subtitle" title={subtitle}>{subtitle}</span>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function MetricCell({ label, value, unit, title }: { label: string; value: string; unit?: string; title?: string }) {
+  return (
+    <Tooltip title={title} mouseEnterDelay={0.4}>
+      <span className="md-kpi-cell">
+        <span className="md-kpi-cell__label">{label}</span>
+        <span className="md-kpi-cell__value">
+          {value}{unit && value !== '—' ? <em>{unit}</em> : null}
+        </span>
+      </span>
+    </Tooltip>
+  );
+}
+
+function NodeDot({ node }: { node: LiveNodeItem }) {
+  return (
+    <Tooltip
+      title={
+        <div className="md-node-tip">
+          <div>{node.name}</div>
+          <div>状态：{NODE_STATUS_TEXT[node.status] ?? node.status}</div>
+          <div>机器人：{compactRatio(node.currentBots, node.maxBots)}</div>
+          <div>CPU：{fmtPercentValue(node.cpuPercent)} · 内存：{fmtPercentValue(node.memPercent)}</div>
+          <div>更新：{formatDateTime(node.updatedAt)}</div>
+        </div>
+      }
+    >
+      <span className={`md-node-dot md-node-dot--${node.tone}`} />
+    </Tooltip>
+  );
+}
 
 function ActionsSection() {
   const latestStress = useRuntimeStore((s) => s.latestStress);
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollY, setScrollY] = useState(200);
 
-  // ResizeObserver 监听容器实际高度变化，无论触发原因（拖拽 / 折叠 / 窗口缩放 / 首次渲染）
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const update = () => {
       const containerH = el.clientHeight;
+      const toolbar = el.querySelector('.action-metrics-table__toolbar');
       const thead = el.querySelector('.ant-table-thead');
+      const toolbarH = toolbar?.getBoundingClientRect().height ?? 0;
       const headerH = thead?.getBoundingClientRect().height ?? 37;
-      setScrollY(Math.max(60, containerH - headerH - 2));
+      setScrollY(Math.max(60, containerH - toolbarH - headerH - 12));
     };
     update();
     const ro = new ResizeObserver(update);

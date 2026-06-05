@@ -1,23 +1,61 @@
-/**
- * 历史记录详情：紧凑头部 + 全宽趋势 + 全宽动作表 + 底部信息条。
- */
-
 import { App, Button, Empty, Input, Spin, Table, Tag, Timeline, Tooltip } from 'antd';
-import { CopyOutlined, DownloadOutlined, FileTextOutlined } from '@ant-design/icons';
+import { BugOutlined, CheckCircleOutlined, CopyOutlined, DownloadOutlined, FileTextOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { EChartsReact } from '@/components/monitoring/shared/EChartsReact';
 import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { historyApi, showApiError } from '@/services';
-import type { HistoryDetail, HistoryConfigSummary, HistoryTrendPoint } from '@/types/api';
+import type { HistoryActionMetric, HistoryConfigSummary, HistoryDetail, HistoryTrendPoint } from '@/types/api';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
 import { ActionMetricsTable } from '@/components/monitoring/shared/ActionMetricsTable';
+import { fmtBytes, fmtMs } from '@/components/monitoring/shared/formats';
 import { useReportCapture } from './report/useReportCapture';
 import './HistoryPanel.css';
 
 export interface HistoryDetailViewProps {
   id: string;
   onChange: () => void;
+}
+
+interface MetricTileProps {
+  label: string;
+  value: string;
+  sub?: string;
+  tone?: 'good' | 'warn' | 'bad' | 'blue' | 'purple';
+}
+
+interface ActionInsight {
+  label: string;
+  name: string;
+  value: string;
+  tone?: 'good' | 'warn' | 'bad' | 'blue' | 'purple';
+}
+
+interface DerivedSummary {
+  totalSamples: number;
+  totalSuccess: number;
+  totalFailures: number;
+  totalTimeouts: number;
+  totalCanceled: number;
+  totalErrors: number;
+  successRate: number;
+  rttApdex: number | null;
+  totalDurationApdex: number | null;
+  avgQps: number;
+  peakQps: number;
+  peakCpu: number;
+  peakAvgMem: number;
+  peakMaxMem: number;
+  peakBotsRunning: number;
+  peakBotsErrored: number;
+  offlinePoints: number;
+  cleanupIssueCount: number;
+  failedAgents: number;
+  slowestAction?: HistoryActionMetric;
+  worstApdexAction?: HistoryActionMetric;
+  mostFailedAction?: HistoryActionMetric;
+  busiestAction?: HistoryActionMetric;
 }
 
 export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
@@ -27,18 +65,24 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState('');
   const [tags, setTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState('');
+  const [draggingTagIndex, setDraggingTagIndex] = useState<number | null>(null);
+  const [dragOverTagIndex, setDragOverTagIndex] = useState<number | null>(null);
   const generateReport = useReportCapture(detail, timeseries);
   const [configInfo, setConfigInfo] = useState<HistoryConfigSummary | null>(null);
   const [stagesExpanded, setStagesExpanded] = useState(false);
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([historyApi.getHistory(id), historyApi.getHistoryTimeseries(id)])
+    Promise.all([historyApi.getHistory(id), historyApi.getHistoryTimeseries(id, 1200)])
       .then(([d, t]) => {
         setDetail(d);
         setTimeseries({ points: t?.points ?? [], sampled: t?.sampled ?? false, originalCount: t?.originalCount ?? 0 });
         setNote(d.note ?? '');
         setTags(d.tags ?? []);
+        setTagInput('');
+        setDraggingTagIndex(null);
+        setDragOverTagIndex(null);
       })
       .catch(showApiError)
       .finally(() => setLoading(false));
@@ -67,6 +111,17 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
     void persistMeta(note, tags);
   };
 
+  const reorderTags = (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0 || from >= tags.length || to >= tags.length) return;
+    const nextTags = [...tags];
+    const [moved] = nextTags.splice(from, 1);
+    nextTags.splice(to, 0, moved);
+    setTags(nextTags);
+    setDraggingTagIndex(null);
+    setDragOverTagIndex(null);
+    void persistMeta(note, nextTags);
+  };
+
   const downloadConfig = async () => {
     try {
       const archive = await historyApi.getHistoryConfigArchive(id);
@@ -93,74 +148,7 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
 
   const theme = useEditorStore((s) => s.theme);
   const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
-  const { qpsOption, apdexOption, cpuOption, bwOption } = useMemo(() => {
-    const points = timeseries?.points ?? [];
-    const hasPoints = points.length > 0;
-
-    const x = points.map((p) => `${p.elapsedSec}s`);
-    const qps = points.map((p) => +p.totalQps.toFixed(2));
-    const hasTotalDurationApdex = points.some((p) => p.totalDurationApdex !== null && Number.isFinite(p.totalDurationApdex));
-    const hasRttApdex = points.some((p) => p.rttApdex !== null && Number.isFinite(p.rttApdex));
-    const totalDurationApdex = points.map((p) =>
-      p.totalDurationApdex !== null && Number.isFinite(p.totalDurationApdex) ? +p.totalDurationApdex.toFixed(3) : null,
-    );
-    const rttApdex = points.map((p) =>
-      p.rttApdex !== null && Number.isFinite(p.rttApdex) ? +p.rttApdex.toFixed(3) : null,
-    );
-    const sendKBps = points.map((p) => +p.sendKBps.toFixed(2));
-    const recvKBps = points.map((p) => +p.recvKBps.toFixed(2));
-    const cpu = points.map((p) => +p.avgCpuPercent.toFixed(2));
-
-    const isDark = theme === 'dark';
-    const root = document.documentElement;
-    const css = (v: string, fb: string) => getComputedStyle(root).getPropertyValue(v).trim() || fb;
-    const axisLine = isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.15)';
-    const labelClr = isDark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)';
-    const splitClr = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
-    const tipBg = isDark ? 'rgba(20,20,28,0.92)' : 'rgba(255,255,255,0.96)';
-    const tipBorder = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.09)';
-    const tipText = isDark ? '#e0e0e0' : '#333';
-
-    const tooltip = {
-      trigger: 'axis' as const,
-      backgroundColor: tipBg,
-      borderColor: tipBorder,
-      textStyle: { color: tipText, fontSize: 11 },
-    };
-
-    const line = (series: Array<{ name: string; data: Array<number | null>; color: string }>, x: string[], yMax?: number) => ({
-      tooltip,
-      legend: { right: 0, top: 0, textStyle: { fontSize: 11, color: labelClr } },
-      grid: { left: 36, right: 8, top: 24, bottom: 24 },
-      xAxis: { type: 'category', data: x, axisLabel: { fontSize: 10, color: labelClr }, axisLine: { lineStyle: { color: axisLine } } },
-      yAxis: { type: 'value', max: yMax, axisLabel: { fontSize: 10, color: labelClr }, splitLine: { lineStyle: { color: splitClr } } },
-      series: series.map((s) => ({
-        name: s.name, type: 'line', smooth: true, symbol: 'none', data: s.data,
-        connectNulls: false,
-        areaStyle: { opacity: 0.08 }, itemStyle: { color: s.color },
-      })),
-    });
-
-    const apdexSeries = [
-      hasTotalDurationApdex
-        ? { name: '总耗时 Apdex', data: totalDurationApdex, color: css('--chart-green', '#52c41a') }
-        : null,
-      hasRttApdex
-        ? { name: 'RTT Apdex', data: rttApdex, color: css('--chart-red', '#f5222d') }
-        : null,
-    ].filter((s): s is { name: string; data: Array<number | null>; color: string } => s !== null);
-
-    return {
-      qpsOption: hasPoints ? line([{ name: 'QPS', data: qps, color: css('--chart-blue', '#1677ff') }], x) : null,
-      apdexOption: hasPoints && apdexSeries.length > 0 ? line(apdexSeries, x, 1) : null,
-      cpuOption: hasPoints ? line([{ name: 'CPU%', data: cpu, color: css('--chart-orange', '#fa8c16') }], x) : null,
-      bwOption: hasPoints ? line([
-        { name: '↑ 发送', data: sendKBps, color: css('--chart-cyan', '#13c2c2') },
-        { name: '↓ 接收', data: recvKBps, color: css('--chart-purple', '#722ed1') },
-      ], x) : null,
-    };
-  }, [timeseries, theme]);
-
+  const chartOptions = useMemo(() => buildChartOptions(timeseries?.points ?? [], theme), [timeseries, theme]);
 
   if (loading) return <Spin />;
   if (!detail) return <Empty description="加载失败" />;
@@ -169,202 +157,160 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
   const finalSys = detail.finalSystem;
   const finalActions = finalSnap.actions;
   const finalConnections = finalSnap.connections;
-  const finalTotalActions = finalSnap.totalActions;
-  const finalUptimeSeconds = finalSnap.uptimeSeconds;
+  const finalRobots = finalSnap.robots || { started: detail.totalBots, running: 0, stopped: 0, errored: 0 };
+  const finalBandwidth = finalSnap.bandwidth || { totalSendBytes: 0, totalRecvBytes: 0, sendMBps: 0, recvMBps: 0 };
   const cs = detail.configSummary;
   const failed = detail.state === 'failed';
+  const summary = deriveSummary(detail, timeseries?.points ?? []);
+  const agentEvents = detail.agentEvents ?? [];
+  const agentReports = detail.agentReports ?? [];
+  const diagnostics = buildDiagnostics(detail, summary, timeseries?.points ?? []);
+  const actionInsights = buildActionInsights(summary);
 
   return (
-    <div className="hp-detail-root">
-      {/* ── 紧凑头部 ── */}
-      <div className="hp-glass hp-detail-header">
-        <div className="hp-hero-banner__header">
-          <div>
-            <div className="hp-hero-banner__title">{detail.name}</div>
-            <div className="hp-hero-banner__id-line">
-              <code>{detail.id.slice(0, 8)}</code> · {formatDuration(detail.durationSec)} · {detail.totalBots} 机器人 · {detail.activeAgentCount}/{detail.agentCount} 节点 · {detail.stageCount && detail.stageCount > 0 ? `渐进式 ${detail.stageCount} 阶段 · ` : ''}并发 {cs.concurrency} · 超时 {cs.timeoutSec}s
-            </div>
+    <div className="hp-detail-root hp-report-root">
+      <section className={`hp-report-hero hp-glass${failed ? ' hp-report-hero--failed' : ''}`}>
+        <div className="hp-report-hero__main">
+          <div className="hp-report-hero__eyebrow">
+            <span className={`hp-report-state hp-report-state--${failed ? 'bad' : 'good'}`}>{failed ? '失败' : '完成'}</span>
+            <Tag
+              className={`hp-report-mode-badge hp-report-mode-badge--${detail.debugMode ? 'debug' : 'test'}`}
+              icon={detail.debugMode ? <BugOutlined /> : <CheckCircleOutlined />}
+            >
+              {detail.debugMode ? '调试' : '测试'}
+            </Tag>
+            <code>#{detail.id.slice(0, 8)}</code>
+            <span>{detail.startedAt ? dayjs(detail.startedAt).format('YYYY-MM-DD HH:mm') : '未记录开始时间'}</span>
+            <span>耗时 {formatDuration(detail.durationSec)}</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span className="hp-chip" style={{
-              color: failed ? 'var(--color-error)' : 'var(--color-success)',
-              background: failed ? 'color-mix(in srgb, var(--color-error) 10%, transparent)' : 'color-mix(in srgb, var(--color-success) 10%, transparent)',
-              fontSize: 11, lineHeight: '20px', padding: '0 8px',
-            }}>
-              {failed ? '失败' : '完成'}
-            </span>
-            <Tooltip title="生成压测报告（在新标签页打开，可保存为 PDF）">
-              <Button size="small" type="primary" ghost icon={<FileTextOutlined />} onClick={generateReport}>报告</Button>
-            </Tooltip>
-            <Tooltip title="下载完整配置归档 JSON">
-              <Button size="small" icon={<DownloadOutlined />} onClick={downloadConfig}>下载</Button>
-            </Tooltip>
-            <Tooltip title="将此记录的配置克隆为新任务">
-              <Button size="small" icon={<CopyOutlined />} onClick={cloneTask}>克隆</Button>
-            </Tooltip>
+          <div className="hp-report-hero__title">{detail.name}</div>
+          <div className="hp-report-hero__summary">
+            总动作 {finalSnap.totalActions.toLocaleString()} · 成功率 {fmtPercent(summary.successRate)} · QPS {summary.avgQps.toFixed(1)} · 失败 {summary.totalErrors.toLocaleString()} · CPU {finalSys.avgCpuPercent.toFixed(1)}% / {summary.peakCpu.toFixed(1)}%
           </div>
         </div>
+        <div className="hp-report-hero__actions">
+          <Tooltip title="生成压测报告（在新标签页打开，可保存为 PDF）">
+            <Button size="small" type="primary" ghost icon={<FileTextOutlined />} onClick={generateReport}>报告</Button>
+          </Tooltip>
+          <Tooltip title="下载完整配置归档 JSON">
+            <Button size="small" icon={<DownloadOutlined />} onClick={downloadConfig}>下载</Button>
+          </Tooltip>
+          <Tooltip title="将此记录的配置克隆为新任务">
+            <Button size="small" icon={<CopyOutlined />} onClick={cloneTask}>克隆</Button>
+          </Tooltip>
+        </div>
         {detail.errorMsg && (
-          <div className="hp-hero-banner__error">
+          <div className="hp-hero-banner__error hp-report-error">
             <pre style={{ margin: 0 }}>{detail.errorMsg}</pre>
           </div>
         )}
-      </div>
+      </section>
 
-      {/* ── 运行趋势 — 2×2 网格 ── */}
-      {(qpsOption || cpuOption) && (
-        <>
-          {timeseries?.sampled && (
-            <div style={{ color: 'var(--text-tertiary)', fontSize: 12, marginBottom: 8 }}>
-              趋势图已降采样展示：{timeseries.points.length} / {timeseries.originalCount} 个采样点
-            </div>
-          )}
-          <div className="hp-trends-grid">
-          {qpsOption && (
-            <div className="hp-glass hp-glass-thin hp-trends-card">
-              <div className="hp-section-title">QPS</div>
-              <EChartsReact option={qpsOption} style={{ height: 180 }} notMerge lazyUpdate />
-            </div>
-          )}
-          {apdexOption && (
-            <div className="hp-glass hp-glass-thin hp-trends-card">
-              <div className="hp-section-title">Apdex</div>
-              <EChartsReact option={apdexOption} style={{ height: 180 }} notMerge lazyUpdate />
-            </div>
-          )}
-          {cpuOption && (
-            <div className="hp-glass hp-glass-thin hp-trends-card">
-              <div className="hp-section-title">CPU</div>
-              <EChartsReact option={cpuOption} style={{ height: 180 }} notMerge lazyUpdate />
-            </div>
-          )}
-          {bwOption && (
-            <div className="hp-glass hp-glass-thin hp-trends-card">
-              <div className="hp-section-title">带宽 (KB/s)</div>
-              <EChartsReact option={bwOption} style={{ height: 180 }} notMerge lazyUpdate />
-            </div>
-          )}
-          </div>
-        </>
+      <section className="hp-report-kpis">
+        <MetricTile label="累计动作" value={finalSnap.totalActions.toLocaleString()} sub={`${finalActions.length} 类动作`} tone="blue" />
+        <MetricTile label="整体成功率" value={fmtPercent(summary.successRate)} sub={`${summary.totalSuccess.toLocaleString()} 成功 / ${summary.totalSamples.toLocaleString()} 样本`} tone={summary.successRate >= 0.95 ? 'good' : summary.successRate >= 0.8 ? 'warn' : 'bad'} />
+        <MetricTile label="总耗时 Apdex" value={fmtScore(summary.totalDurationApdex)} sub={`阈值 T=${finalSnap.apdexT}ms`} tone={(summary.totalDurationApdex ?? 0) >= 0.9 ? 'good' : (summary.totalDurationApdex ?? 0) >= 0.75 ? 'warn' : 'bad'} />
+        <MetricTile label="峰值 QPS" value={summary.peakQps.toFixed(1)} sub={`全程均值 ${summary.avgQps.toFixed(1)}`} tone="purple" />
+        <MetricTile label="机器人" value={`${finalRobots.running}/${finalRobots.started}`} sub={`异常 ${Math.max(finalRobots.errored, summary.peakBotsErrored)}`} tone={Math.max(finalRobots.errored, summary.peakBotsErrored) > 0 ? 'bad' : 'good'} />
+        <MetricTile label="连接" value={finalConnections.established.toLocaleString()} sub={`失败 ${finalConnections.failed} / 断开 ${finalConnections.dropped}`} tone={finalConnections.failed + finalConnections.dropped > 0 ? 'warn' : 'good'} />
+        <MetricTile label="CPU" value={`均值 ${finalSys.avgCpuPercent.toFixed(1)}%`} sub={`最高节点 ${summary.peakCpu.toFixed(1)}%`} tone={summary.peakCpu >= 80 ? 'bad' : summary.peakCpu >= 60 ? 'warn' : 'blue'} />
+        <MetricTile label="MEM" value={`集群 ${summary.peakAvgMem.toFixed(1)}%`} sub={`最高节点 ${summary.peakMaxMem.toFixed(1)}%`} tone={summary.peakMaxMem >= 85 ? 'bad' : summary.peakMaxMem >= 70 ? 'warn' : 'blue'} />
+      </section>
+
+      {timeseries?.sampled && (
+        <div className="hp-sampled-note">趋势图已降采样展示：{timeseries.points.length} / {timeseries.originalCount} 个采样点</div>
       )}
 
-      {/* ── 动作汇总表 — 全宽主角 ── */}
-      <div className="hp-glass hp-actions-card">
-        <div className="hp-actions-card__header">
-          <div className="hp-section-title" style={{ marginBottom: 0 }}>
-            动作汇总（{finalActions.length} 类）
-          </div>
+      <ReportSection title="负载与性能趋势" subtitle="从历史采样中复盘压测过程、阶段推进与延迟变化">
+        <div className="hp-report-grid hp-report-grid--charts">
+          <TrendCard title="机器人" option={chartOptions.loadOption} value={`峰值 ${summary.peakBotsRunning.toLocaleString()}`} />
+          <TrendCard title="QPS" option={chartOptions.qpsOption} value={`峰值 ${summary.peakQps.toFixed(1)}`} />
+          <TrendCard title="Apdex" option={chartOptions.apdexOption} value={`总耗时 ${fmtScore(summary.totalDurationApdex)}`} />
+          <TrendCard title="客户端成本" option={chartOptions.costOption} value="编码 / 解码" />
+          <TrendCard title="CPU" option={chartOptions.cpuOption} value={`最高节点 ${summary.peakCpu.toFixed(1)}%`} />
+          <TrendCard title="MEM" option={chartOptions.memOption} value={`最高节点 ${summary.peakMaxMem.toFixed(1)}%`} />
+          <TrendCard title="带宽" option={chartOptions.bandwidthOption} value={`${fmtKBpsPeak(timeseries?.points ?? [], 'sendKBps')} 峰值`} />
+          <TrendCard title="节点在线" option={chartOptions.nodeOption} value={summary.offlinePoints > 0 ? `${summary.offlinePoints} 个采样异常` : '全程在线'} />
         </div>
+      </ReportSection>
+
+      <ReportSection title="动作分析" subtitle="最终动作快照聚合，表格支持总耗时/RTT 切换与高级诊断">
+        {actionInsights.length > 0 && (
+          <div className="hp-insight-strip">
+            {actionInsights.map((item) => (
+              <div key={item.label} className={`hp-insight hp-insight--${item.tone ?? 'blue'}`}>
+                <span className="hp-insight__label">{item.label}</span>
+                <Tooltip title={item.name} mouseEnterDelay={0.4}>
+                  <span className="hp-insight__name">{item.name}</span>
+                </Tooltip>
+                <span className="hp-insight__value">{item.value}</span>
+              </div>
+            ))}
+          </div>
+        )}
         {finalActions.length === 0 ? (
           <Empty description="无最终动作数据" />
         ) : (
           <ActionMetricsTable
             rows={finalActions}
             size="small"
-            scrollY={400}
+            scrollY={420}
             popupZIndex={popupZ}
             showClientBreakdown
           />
         )}
-      </div>
+      </ReportSection>
 
-      {/* ── 节点事件 + 节点结果 ── */}
-      {(detail.agentEvents?.length ?? 0) > 0 && (
-        <div className="hp-glass hp-glass-thin" style={{ padding: 16 }}>
-          <div className="hp-section-title">节点事件</div>
+      <ReportSection title="错误与稳定性" subtitle="从错误分布、连接、节点事件与清理结果中提取风险信号">
+        <div className="hp-finding-list">
+          {diagnostics.map((item) => (
+            <div key={`${item.label}:${item.value}`} className={`hp-finding-item hp-finding-item--${item.tone}`}>
+              <span className="hp-finding-item__label">{item.label}</span>
+              <span className="hp-finding-item__value">{item.value}</span>
+            </div>
+          ))}
+        </div>
+      </ReportSection>
+
+      <ReportSection title="节点健康" subtitle={`${agentReports.length} 个节点结果，${agentEvents.length} 条节点事件`}>
+        <div className="hp-health-grid">
+          <MetricTile label="节点完成" value={`${agentReports.filter((r) => r.result === 'completed').length}/${agentReports.length}`} sub={`失败 ${summary.failedAgents}`} tone={summary.failedAgents > 0 ? 'bad' : 'good'} />
+          <MetricTile label="清理异常" value={`${summary.cleanupIssueCount}`} sub="资源回收状态" tone={summary.cleanupIssueCount > 0 ? 'warn' : 'good'} />
+          <MetricTile label="离线事件" value={`${agentEvents.filter((e) => e.type === 'offline').length}`} sub="运行期间节点变化" tone={agentEvents.some((e) => e.type === 'offline') ? 'bad' : 'good'} />
+        </div>
+        {agentEvents.length > 0 && (
           <Timeline
-            style={{ marginTop: 8 }}
-            items={detail.agentEvents!.map((evt, i) => ({
+            className="hp-agent-timeline"
+            items={agentEvents.map((evt, i) => ({
               key: i,
-              color:
-                evt.type === 'offline' || evt.type === 'restarted'
-                  ? 'red'
-                  : evt.type === 'reconnected'
-                  ? 'green'
-                  : 'gray',
+              color: evt.type === 'offline' || evt.type === 'restarted' ? 'red' : evt.type === 'reconnected' ? 'green' : 'gray',
               children: (
                 <span style={{ fontSize: 12 }}>
-                  <Tag
-                    color={
-                      evt.type === 'offline'
-                        ? 'error'
-                        : evt.type === 'restarted'
-                        ? 'warning'
-                        : evt.type === 'reconnected'
-                        ? 'success'
-                        : 'default'
-                    }
-                    style={{ marginInlineEnd: 4 }}
-                  >
-                    {evt.type === 'offline'
-                      ? '离线'
-                      : evt.type === 'restarted'
-                      ? '重启丢任务'
-                      : evt.type === 'reconnected'
-                      ? '恢复'
-                      : '注销'}
-                  </Tag>
+                  <Tag color={eventColor(evt.type)} style={{ marginInlineEnd: 4 }}>{eventLabel(evt.type)}</Tag>
                   <strong>{evt.agentName || evt.agentId}</strong>
-                  <span style={{ color: 'var(--text-tertiary)', marginLeft: 8 }}>
-                    {dayjs(evt.timestamp).format('HH:mm:ss')}
-                  </span>
+                  <span style={{ color: 'var(--text-tertiary)', marginLeft: 8 }}>{dayjs(evt.timestamp).format('HH:mm:ss')}</span>
                   {evt.detail && <span style={{ color: 'var(--text-tertiary)', marginLeft: 8 }}>({evt.detail})</span>}
                 </span>
               ),
             }))}
           />
-        </div>
-      )}
-
-      {detail.agentReports && detail.agentReports.length > 0 && (
-        <div className="hp-glass hp-glass-thin" style={{ padding: 16 }}>
-          <div className="hp-section-title">节点结果</div>
+        )}
+        {agentReports.length > 0 && (
           <Table
             size="small"
-            style={{ marginTop: 8 }}
-            dataSource={detail.agentReports.map((r, i) => ({ ...r, key: i }))}
+            className="hp-agent-table"
+            dataSource={agentReports.map((r, i) => ({ ...r, key: i }))}
             pagination={false}
             columns={[
-              { title: '节点', dataIndex: 'agentName', key: 'agentName', width: 160, render: (v: string, r: any) => v || r.agentId },
+              { title: '节点', dataIndex: 'agentName', key: 'agentName', width: 180, render: (v: string, r: any) => v || r.agentId },
               {
                 title: '结果', dataIndex: 'result', key: 'result', width: 100,
-                render: (v: string) => {
-                  const map: Record<string, { color: string; label: string }> = {
-                    completed: { color: 'success', label: '完成' },
-                    stopped: { color: 'default', label: '停止' },
-                    failed: { color: 'error', label: '失败' },
-                  };
-                  const info = map[v] ?? { color: 'default', label: v };
-                  return <Tag color={info.color}>{info.label}</Tag>;
-                },
+                render: (v: string) => <Tag color={resultColor(v)}>{resultLabel(v)}</Tag>,
               },
+              { title: '完成时间', dataIndex: 'finishedAt', key: 'finishedAt', width: 140, render: (v: string) => v ? dayjs(v).format('HH:mm:ss') : '—' },
               {
-                title: '完成时间', dataIndex: 'finishedAt', key: 'finishedAt', width: 140,
-                render: (v: string) => v ? dayjs(v).format('HH:mm:ss') : '—',
-              },
-              {
-                title: '清理状态', dataIndex: 'cleanupStatus', key: 'cleanupStatus', width: 120,
-                render: (cleanup: any) => {
-                  if (!cleanup || !cleanup.status) {
-                    return <span style={{ color: 'var(--text-tertiary)' }}>未记录</span>;
-                  }
-                  const map: Record<string, { color: string; label: string }> = {
-                    ok: { color: 'success', label: '清理完成' },
-                    partial: { color: 'warning', label: '部分清理' },
-                    timeout: { color: 'error', label: '清理超时' },
-                    unknown: { color: 'default', label: '未知' },
-                  };
-                  const info = map[cleanup.status as string] ?? { color: 'default', label: cleanup.status };
-                  const detailLines: string[] = [];
-                  if (cleanup.message) detailLines.push(cleanup.message);
-                  if (cleanup.timeoutRobots) detailLines.push(`超时机器人 ${cleanup.timeoutRobots}`);
-                  if (cleanup.luaSkipped) detailLines.push(`Lua 未归还 ${cleanup.luaSkipped}`);
-                  return (
-                    <Tooltip title={detailLines.join('；') || info.label}>
-                      <Tag color={info.color}>{info.label}</Tag>
-                    </Tooltip>
-                  );
-                },
+                title: '清理状态', dataIndex: 'cleanupStatus', key: 'cleanupStatus', width: 130,
+                render: (cleanup: any) => renderCleanup(cleanup),
               },
               {
                 title: '错误信息', dataIndex: 'errorMsg', key: 'errorMsg', ellipsis: true,
@@ -372,111 +318,101 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
               },
             ]}
           />
-        </div>
-      )}
+        )}
+      </ReportSection>
 
-      {/* ── 底部双栏：备注 | 快照+配置+时间 ── */}
-      <div className="hp-detail-bottom">
-        {/* 备注与标签 */}
-        <div className="hp-glass hp-glass-thin hp-notes-card">
-          <div className="hp-section-title">备注与标签</div>
+      <div className="hp-detail-bottom hp-report-bottom">
+        <section className="hp-glass hp-glass-thin hp-notes-card hp-report-section">
+          <div className="hp-report-section__header">
+            <div>
+              <div className="hp-report-section__title">备注与标签</div>
+              <div className="hp-report-section__subtitle">用于标记回归、异常或测试场景</div>
+            </div>
+          </div>
           <Input
             placeholder="按 Enter 添加并保存标签"
-            onPressEnter={(e) => {
-              const input = e.target as HTMLInputElement;
-              const v = input.value.trim();
+            value={tagInput}
+            onChange={(e) => setTagInput(e.target.value)}
+            onPressEnter={() => {
+              const v = tagInput.trim();
+              setTagInput('');
               if (v && !tags.includes(v)) {
                 const nextTags = [...tags, v];
                 setTags(nextTags);
                 void persistMeta(note, nextTags);
               }
-              input.value = '';
             }}
           />
           {tags.length > 0 && (
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 8 }}>
-              {tags.map((t) => (
-                <Tag
-                  key={t}
-                  closable
-                  onClose={() => {
-                    const nextTags = tags.filter((x) => x !== t);
-                    setTags(nextTags);
-                    void persistMeta(note, nextTags);
-                  }}
-                >
-                  {t}
-                </Tag>
-              ))}
-            </div>
+            <>
+              <div className="hp-tag-hint">拖动标签可调整历史列表中的展示优先级</div>
+              <div className="hp-edit-tags" onDragLeave={() => setDragOverTagIndex(null)}>
+                {tags.map((t, index) => (
+                  <Tag
+                    key={t}
+                    className={`hp-edit-tag${draggingTagIndex === index ? ' hp-edit-tag--dragging' : ''}${dragOverTagIndex === index && draggingTagIndex !== index ? ' hp-edit-tag--over' : ''}`}
+                    closable
+                    draggable
+                    onDragStart={(e) => {
+                      setDraggingTagIndex(index);
+                      e.dataTransfer.effectAllowed = 'move';
+                      e.dataTransfer.setData('text/plain', t);
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'move';
+                      setDragOverTagIndex(index);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (draggingTagIndex !== null) reorderTags(draggingTagIndex, index);
+                    }}
+                    onDragEnd={() => {
+                      setDraggingTagIndex(null);
+                      setDragOverTagIndex(null);
+                    }}
+                    onClose={() => {
+                      const nextTags = tags.filter((x) => x !== t);
+                      setTags(nextTags);
+                      setDraggingTagIndex(null);
+                      setDragOverTagIndex(null);
+                      void persistMeta(note, nextTags);
+                    }}
+                  >
+                    {t}
+                  </Tag>
+                ))}
+              </div>
+            </>
           )}
           <Input.TextArea
             placeholder="备注（任意文本，对比时可见）"
-            rows={3}
+            rows={4}
             value={note}
             onChange={(e) => setNote(e.target.value)}
             style={{ marginTop: 10 }}
           />
           <Button type="primary" size="small" onClick={saveMeta} style={{ marginTop: 8 }}>保存</Button>
-        </div>
+        </section>
 
-        {/* 快照 · 配置 · 时间 */}
-        <div className="hp-glass hp-glass-thin hp-info-card">
-          <div className="hp-section-title">集群快照</div>
-          <div className="hp-hero-row" style={{ marginTop: 4 }}>
-            <div className="hp-hero-box">
-              <div className="hp-hero-value hp-hero-value-sm" style={{ color: 'var(--color-blue)' }}>
-                {finalTotalActions.toLocaleString()}
-              </div>
-              <div className="hp-hero-title">累计动作</div>
-            </div>
-            <div className="hp-hero-divider" />
-            <div className="hp-hero-box">
-              <div className="hp-hero-value hp-hero-value-sm" style={{ color: 'var(--color-purple)' }}>
-                {Math.floor(finalUptimeSeconds / 60)}m
-              </div>
-              <div className="hp-hero-title">UPTIME</div>
+        <section className="hp-glass hp-glass-thin hp-info-card hp-report-section">
+          <div className="hp-report-section__header">
+            <div>
+              <div className="hp-report-section__title">配置档案</div>
+              <div className="hp-report-section__subtitle">任务规模、协议资源与时间信息</div>
             </div>
           </div>
-          <div className="hp-grid" style={{ marginTop: 10 }}>
-            <div className="hp-grid-item">
-              <span className="hp-grid-label">错误连接</span>
-              <span className="hp-grid-value" style={{ color: finalConnections.failed > 0 ? 'var(--color-error)' : undefined }}>
-                {finalConnections.failed} / {finalConnections.dropped}
-              </span>
-            </div>
-            <div className="hp-grid-item">
-              <span className="hp-grid-label">建连数</span>
-              <span className="hp-grid-value">{finalConnections.established}</span>
-            </div>
-            <div className="hp-grid-item">
-              <span className="hp-grid-label">CPU%</span>
-              <span className="hp-grid-value">{finalSys ? `${(finalSys.avgCpuPercent ?? 0).toFixed(1)}%` : '—'}</span>
-            </div>
-            <div className="hp-grid-item">
-              <span className="hp-grid-label">动作类型</span>
-              <span className="hp-grid-value">{finalActions.length}</span>
-            </div>
-          </div>
-
-          <div className="hp-section-title" style={{ marginTop: 12 }}>配置</div>
-          <div className="hp-grid">
-            <div className="hp-grid-item">
-              <span className="hp-grid-label">并发</span>
-              <span className="hp-grid-value">{cs.concurrency}</span>
-            </div>
-            <div className="hp-grid-item">
-              <span className="hp-grid-label">超时</span>
-              <span className="hp-grid-value">{cs.timeoutSec}s</span>
-            </div>
-            <div className="hp-grid-item">
-              <span className="hp-grid-label">流程</span>
-              <span className="hp-grid-value">{cs.flowSizeKB}KB</span>
-            </div>
-            <div className="hp-grid-item">
-              <span className="hp-grid-label">脚本</span>
-              <span className="hp-grid-value">{cs.scriptCount} 个</span>
-            </div>
+          <div className="hp-config-grid">
+            <Fact label="机器人" value={detail.totalBots.toLocaleString()} />
+            <Fact label="并发" value={cs.concurrency.toLocaleString()} />
+            <Fact label="超时" value={`${cs.timeoutSec}s`} />
+            <Fact label="流程" value={`${cs.flowSizeKB}KB`} />
+            <Fact label="Proto" value={`${cs.protoCount} 个`} />
+            <Fact label="Lua" value={`${cs.scriptCount} 个`} />
+            <Fact label="阶段" value={detail.stageCount && detail.stageCount > 0 ? `${detail.stageCount} 阶段` : '无'} />
+            <Fact label="带宽" value={`${fmtBytes(finalBandwidth.totalSendBytes)} / ${fmtBytes(finalBandwidth.totalRecvBytes)}`} />
+            <Fact label="开始" value={detail.startedAt ? dayjs(detail.startedAt).format('MM-DD HH:mm') : '—'} />
+            <Fact label="结束" value={detail.stoppedAt ? dayjs(detail.stoppedAt).format('MM-DD HH:mm') : '—'} />
           </div>
 
           {configInfo?.robotConfig?.rampUp && (() => {
@@ -509,22 +445,300 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
               </div>
             );
           })()}
-
-          <div className="hp-section-title" style={{ marginTop: 12 }}>时间</div>
-          <div className="hp-grid">
-            <div className="hp-grid-item">
-              <span className="hp-grid-label">开始</span>
-              <span className="hp-grid-value">{detail.startedAt ? dayjs(detail.startedAt).format('MM-DD HH:mm') : '—'}</span>
-            </div>
-            <div className="hp-grid-item">
-              <span className="hp-grid-label">结束</span>
-              <span className="hp-grid-value">{detail.stoppedAt ? dayjs(detail.stoppedAt).format('MM-DD HH:mm') : '—'}</span>
-            </div>
-          </div>
-        </div>
+        </section>
       </div>
     </div>
   );
+}
+
+function MetricTile({ label, value, sub, tone = 'blue' }: MetricTileProps) {
+  return (
+    <div className={`hp-kpi-tile hp-kpi-tile--${tone}`}>
+      <div className="hp-kpi-tile__label">{label}</div>
+      <div className="hp-kpi-tile__value">{value}</div>
+      {sub && <div className="hp-kpi-tile__sub">{sub}</div>}
+    </div>
+  );
+}
+
+function ReportSection({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {
+  return (
+    <section className="hp-glass hp-glass-thin hp-report-section">
+      <div className="hp-report-section__header">
+        <div>
+          <div className="hp-report-section__title">{title}</div>
+          {subtitle && <div className="hp-report-section__subtitle">{subtitle}</div>}
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function TrendCard({ title, option, value }: { title: string; option: any; value?: string }) {
+  return (
+    <div className="hp-chart-card">
+      <div className="hp-chart-card__header">
+        <span>{title}</span>
+        {value && <code>{value}</code>}
+      </div>
+      {option ? <EChartsReact option={option} style={{ height: 170 }} notMerge lazyUpdate /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无数据" />}
+    </div>
+  );
+}
+
+function Fact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="hp-config-fact">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function buildChartOptions(points: HistoryTrendPoint[], theme: string) {
+  const hasPoints = points.length > 0;
+  const x = points.map((p) => `${p.elapsedSec}s`);
+  const isDark = theme === 'dark';
+  const root = document.documentElement;
+  const css = (v: string, fb: string) => getComputedStyle(root).getPropertyValue(v).trim() || fb;
+  const axisLine = isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.15)';
+  const labelClr = isDark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)';
+  const splitClr = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+  const tipBg = isDark ? 'rgba(20,20,28,0.92)' : 'rgba(255,255,255,0.96)';
+  const tipBorder = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.09)';
+  const tipText = isDark ? '#e0e0e0' : '#333';
+  const tooltip = { trigger: 'axis' as const, backgroundColor: tipBg, borderColor: tipBorder, textStyle: { color: tipText, fontSize: 11 } };
+  const palette = {
+    blue: css('--chart-blue', '#1677ff'),
+    cyan: css('--chart-cyan', '#13c2c2'),
+    green: css('--chart-green', '#52c41a'),
+    orange: css('--chart-orange', '#fa8c16'),
+    purple: css('--chart-purple', '#722ed1'),
+    red: css('--chart-red', '#f5222d'),
+    lime: css('--chart-lime', '#bae637'),
+  };
+  const line = (series: Array<{ name: string; data: Array<number | null>; color: string; dashed?: boolean; area?: number }>, yMax?: number) => ({
+    tooltip,
+    legend: { right: 0, top: 0, textStyle: { fontSize: 10, color: labelClr } },
+    grid: { left: 34, right: 8, top: 26, bottom: 22 },
+    xAxis: { type: 'category', data: x, axisLabel: { fontSize: 10, color: labelClr }, axisLine: { lineStyle: { color: axisLine } } },
+    yAxis: { type: 'value', max: yMax, axisLabel: { fontSize: 10, color: labelClr }, splitLine: { lineStyle: { color: splitClr } } },
+    series: series.map((s) => ({
+      name: s.name,
+      type: 'line',
+      smooth: true,
+      symbol: 'none',
+      data: s.data,
+      connectNulls: false,
+      emphasis: { focus: 'series' },
+      areaStyle: { opacity: s.area ?? 0.045 },
+      itemStyle: { color: s.color },
+      lineStyle: { width: s.dashed ? 1.5 : 1.8, type: s.dashed ? 'dashed' : 'solid' },
+    })),
+  });
+
+  const point = (v: number | null | undefined, digits = 2): number | null =>
+    typeof v === 'number' && Number.isFinite(v) ? +v.toFixed(digits) : null;
+  const totalDurationApdex = points.map((p) => point(p.totalDurationApdex, 3));
+  const rttApdex = points.map((p) => point(p.rttApdex, 3));
+  return {
+    qpsOption: hasPoints ? line([{ name: 'QPS', data: points.map((p) => point(p.totalQps)), color: palette.blue, area: 0.06 }]) : null,
+    apdexOption: hasPoints ? line([
+      { name: '总耗时', data: totalDurationApdex, color: palette.green, area: 0.055 },
+      { name: 'RTT', data: rttApdex, color: palette.cyan, dashed: true },
+    ], 1) : null,
+    loadOption: hasPoints ? line([
+      { name: '运行', data: points.map((p) => point(p.botsRunning, 0)), color: palette.blue, area: 0.055 },
+      { name: '异常', data: points.map((p) => point(p.botsErrored, 0)), color: palette.red, dashed: true },
+    ]) : null,
+    costOption: hasPoints ? line([
+      { name: '客户端', data: points.map((p) => point(p.clientAvgMs)), color: palette.purple, area: 0.05 },
+      { name: '编码', data: points.map((p) => point(p.encodeAvgMs)), color: palette.orange, dashed: true },
+      { name: '解码', data: points.map((p) => point(p.decodeAvgMs)), color: palette.cyan, dashed: true },
+    ]) : null,
+    bandwidthOption: hasPoints ? line([
+      { name: '↑发送', data: points.map((p) => point(p.sendKBps)), color: palette.cyan, area: 0.055 },
+      { name: '↓接收', data: points.map((p) => point(p.recvKBps)), color: palette.purple, area: 0.035 },
+    ]) : null,
+    cpuOption: hasPoints ? line([
+      { name: '集群均值', data: points.map((p) => point(p.avgCpuPercent)), color: palette.orange, area: 0.045 },
+      { name: '最高节点', data: points.map((p) => point(p.maxCpuPercent)), color: palette.red, dashed: true },
+    ], 100) : null,
+    memOption: hasPoints ? line([
+      { name: '集群使用率', data: points.map((p) => point(p.avgMemPercent)), color: palette.lime, area: 0.045 },
+      { name: '最高节点', data: points.map((p) => point(p.maxMemPercent)), color: palette.purple, dashed: true },
+    ], 100) : null,
+    nodeOption: hasPoints ? line([
+      { name: '在线', data: points.map((p) => point(p.onlineCount, 0)), color: palette.green, area: 0.05 },
+      { name: '离线', data: points.map((p) => point(p.offlineCount, 0)), color: palette.red, dashed: true },
+    ]) : null,
+  };
+}
+
+function deriveSummary(detail: HistoryDetail, points: HistoryTrendPoint[]): DerivedSummary {
+  const actions = detail.finalSnapshot.actions;
+  const totalSuccess = sum(actions, (a) => a.successCount);
+  const totalFailures = sum(actions, (a) => a.failureCount);
+  const totalTimeouts = sum(actions, (a) => a.timeoutCount);
+  const totalCanceled = sum(actions, (a) => a.canceledCount ?? 0);
+  const totalSamples = sum(actions, (a) => a.sampleCount);
+  const totalOutcomes = totalSuccess + totalFailures + totalTimeouts + totalCanceled;
+  const totalErrors = totalFailures + totalTimeouts + totalCanceled;
+  const actionErrorScore = (a: HistoryActionMetric) => (a.failureCount || 0) + (a.timeoutCount || 0) + (a.canceledCount || 0) + sum(a.errors ?? [], (e) => e.count);
+  return {
+    totalSamples,
+    totalSuccess,
+    totalFailures,
+    totalTimeouts,
+    totalCanceled,
+    totalErrors,
+    successRate: totalOutcomes > 0 ? totalSuccess / totalOutcomes : 0,
+    rttApdex: weighted(actions, (a) => a.rttApdex, (a) => a.rttSampleCount),
+    totalDurationApdex: weighted(actions, (a) => a.totalDurationApdex, (a) => a.totalDurationSampleCount),
+    avgQps: sum(actions, (a) => a.avgQps),
+    peakQps: max(points, (p) => p.totalQps),
+    peakCpu: Math.max(detail.finalSystem.maxCpuPercent, max(points, (p) => p.maxCpuPercent || p.avgCpuPercent)),
+    peakAvgMem: Math.max(detail.finalSystem.avgMemPercent || 0, max(points, (p) => p.avgMemPercent)),
+    peakMaxMem: Math.max(detail.finalSystem.maxMemPercent || 0, max(points, (p) => p.maxMemPercent || p.avgMemPercent)),
+    peakBotsRunning: Math.max(detail.finalSnapshot.robots?.running ?? 0, max(points, (p) => p.botsRunning)),
+    peakBotsErrored: Math.max(detail.finalSnapshot.robots?.errored ?? 0, max(points, (p) => p.botsErrored)),
+    offlinePoints: points.filter((p) => p.offlineCount > 0).length,
+    cleanupIssueCount: detail.agentReports.filter((r) => r.cleanupStatus && r.cleanupStatus.status && r.cleanupStatus.status !== 'ok').length,
+    failedAgents: detail.agentReports.filter((r) => r.result === 'failed').length,
+    slowestAction: maxBy(actions.filter((a) => a.totalDurationSampleCount > 0), (a) => a.totalDuration.p99Ms),
+    worstApdexAction: minBy(actions.filter((a) => a.totalDurationSampleCount > 0), (a) => a.totalDurationApdex),
+    mostFailedAction: maxBy(actions.filter((a) => actionErrorScore(a) > 0), actionErrorScore),
+    busiestAction: maxBy(actions, (a) => a.sampleCount),
+  };
+}
+
+function buildActionInsights(summary: DerivedSummary): ActionInsight[] {
+  const out: ActionInsight[] = [];
+  if (summary.slowestAction) out.push({ label: '最慢动作', name: summary.slowestAction.name, value: `P99 ${fmtMs(summary.slowestAction.totalDuration.p99Ms)}`, tone: 'warn' });
+  if (summary.worstApdexAction) out.push({ label: '最差 Apdex', name: summary.worstApdexAction.name, value: fmtScore(summary.worstApdexAction.totalDurationApdex), tone: summary.worstApdexAction.totalDurationApdex < 0.75 ? 'bad' : 'warn' });
+  if (summary.mostFailedAction) out.push({ label: '错误最多', name: summary.mostFailedAction.name, value: `${summary.mostFailedAction.failureCount + summary.mostFailedAction.timeoutCount + (summary.mostFailedAction.canceledCount ?? 0)} 次`, tone: 'bad' });
+  if (summary.busiestAction) out.push({ label: '样本最多', name: summary.busiestAction.name, value: summary.busiestAction.sampleCount.toLocaleString(), tone: 'blue' });
+  return out;
+}
+
+function buildDiagnostics(detail: HistoryDetail, summary: DerivedSummary, points: HistoryTrendPoint[]) {
+  const items: Array<{ label: string; value: string; tone: 'good' | 'warn' | 'bad' | 'blue' }> = [];
+  if (summary.totalErrors > 0) items.push({ label: '失败/超时/取消', value: `${summary.totalErrors.toLocaleString()} 次`, tone: summary.totalErrors > 100 ? 'bad' : 'warn' });
+  if (detail.finalSnapshot.connections.failed + detail.finalSnapshot.connections.dropped > 0) items.push({ label: '连接异常', value: `失败 ${detail.finalSnapshot.connections.failed} / 断开 ${detail.finalSnapshot.connections.dropped}`, tone: 'warn' });
+  if (summary.peakCpu >= 80) items.push({ label: 'CPU 高水位', value: `${summary.peakCpu.toFixed(1)}%`, tone: 'bad' });
+  if (summary.peakMaxMem >= 85) items.push({ label: 'MEM 高水位', value: `${summary.peakMaxMem.toFixed(1)}%`, tone: 'bad' });
+  if (summary.offlinePoints > 0) items.push({ label: '节点离线采样', value: `${summary.offlinePoints} 个点`, tone: 'bad' });
+  if (summary.cleanupIssueCount > 0) items.push({ label: '清理异常', value: `${summary.cleanupIssueCount} 个节点`, tone: 'warn' });
+  if (summary.slowestAction && summary.slowestAction.totalDuration.p99Ms > 1000) items.push({ label: '慢动作', value: `${summary.slowestAction.name} P99 ${fmtMs(summary.slowestAction.totalDuration.p99Ms)}`, tone: 'warn' });
+  if (detail.agentEvents?.some((e) => e.type === 'restarted')) items.push({ label: '节点重启', value: `${detail.agentEvents.filter((e) => e.type === 'restarted').length} 次`, tone: 'bad' });
+  if (items.length === 0) items.push({ label: '稳定性', value: points.length > 0 ? '未发现明显异常' : '无采样异常', tone: 'good' });
+  return items;
+}
+
+function renderCleanup(cleanup: any) {
+  if (!cleanup || !cleanup.status) return <span style={{ color: 'var(--text-tertiary)' }}>未记录</span>;
+  const map: Record<string, { color: string; label: string }> = {
+    ok: { color: 'success', label: '清理完成' },
+    partial: { color: 'warning', label: '部分清理' },
+    timeout: { color: 'error', label: '清理超时' },
+    unknown: { color: 'default', label: '未知' },
+  };
+  const info = map[cleanup.status as string] ?? { color: 'default', label: cleanup.status };
+  const detailLines: string[] = [];
+  if (cleanup.message) detailLines.push(cleanup.message);
+  if (cleanup.timeoutRobots) detailLines.push(`超时机器人 ${cleanup.timeoutRobots}`);
+  if (cleanup.luaSkipped) detailLines.push(`Lua 未归还 ${cleanup.luaSkipped}`);
+  return <Tooltip title={detailLines.join('；') || info.label}><Tag color={info.color}>{info.label}</Tag></Tooltip>;
+}
+
+function fmtKBpsPeak(points: HistoryTrendPoint[], key: 'sendKBps' | 'recvKBps') {
+  const peak = max(points, (p) => p[key]);
+  if (peak >= 1024) return `${(peak / 1024).toFixed(2)} MB/s`;
+  return `${peak.toFixed(1)} KB/s`;
+}
+
+function fmtScore(v: number | null | undefined) {
+  return typeof v === 'number' && Number.isFinite(v) ? v.toFixed(3) : '—';
+}
+
+function fmtPercent(v: number) {
+  return `${(v * 100).toFixed(2)}%`;
+}
+
+function sum<T>(items: T[], pick: (item: T) => number) {
+  return items.reduce((acc, item) => acc + (Number.isFinite(pick(item)) ? pick(item) : 0), 0);
+}
+
+function max<T>(items: T[], pick: (item: T) => number) {
+  return items.reduce((acc, item) => Math.max(acc, Number.isFinite(pick(item)) ? pick(item) : 0), 0);
+}
+
+function maxBy<T>(items: T[], pick: (item: T) => number): T | undefined {
+  let best: T | undefined;
+  let bestValue = -Infinity;
+  for (const item of items) {
+    const value = pick(item);
+    if (Number.isFinite(value) && value > bestValue) {
+      best = item;
+      bestValue = value;
+    }
+  }
+  return best;
+}
+
+function minBy<T>(items: T[], pick: (item: T) => number): T | undefined {
+  let best: T | undefined;
+  let bestValue = Infinity;
+  for (const item of items) {
+    const value = pick(item);
+    if (Number.isFinite(value) && value < bestValue) {
+      best = item;
+      bestValue = value;
+    }
+  }
+  return best;
+}
+
+function weighted<T>(items: T[], value: (item: T) => number, weight: (item: T) => number) {
+  let totalWeight = 0;
+  let total = 0;
+  for (const item of items) {
+    const w = weight(item);
+    const v = value(item);
+    if (w > 0 && Number.isFinite(v)) {
+      total += v * w;
+      totalWeight += w;
+    }
+  }
+  return totalWeight > 0 ? total / totalWeight : null;
+}
+
+function eventLabel(type: string) {
+  if (type === 'offline') return '离线';
+  if (type === 'restarted') return '重启丢任务';
+  if (type === 'reconnected') return '恢复';
+  return '注销';
+}
+
+function eventColor(type: string) {
+  if (type === 'offline') return 'error';
+  if (type === 'restarted') return 'warning';
+  if (type === 'reconnected') return 'success';
+  return 'default';
+}
+
+function resultLabel(v: string) {
+  if (v === 'completed') return '完成';
+  if (v === 'stopped') return '停止';
+  if (v === 'failed') return '失败';
+  return v;
+}
+
+function resultColor(v: string) {
+  if (v === 'completed') return 'success';
+  if (v === 'failed') return 'error';
+  return 'default';
 }
 
 function formatDuration(sec: number): string {

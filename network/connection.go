@@ -24,7 +24,9 @@ type ListenCallBack func(message *Message)
 type Connection struct {
 	serviceName string // 所属服务名称（如 "logic"、"battle"）
 	robotName   string // 所属机器人账号名
-	secretKey   []byte // 通信加密密钥
+	// secretKey 通信加密密钥，存 []byte。按 immutable 约定使用：SetSecretKey 整体替换为
+	// 新副本，GetSecretKey 返回的切片只读、不得修改。避免每个收发包都加锁复制一次密钥。
+	secretKey atomic.Value
 
 	responseMap      map[string]chan *Message  // routeKey → 临时响应通道（RequestResponse 用）
 	listenResp       map[string]ListenCallBack // routeKey → 持久化推送回调
@@ -77,7 +79,6 @@ func NewConnection(serviceName, robotName string, requestTimeout time.Duration, 
 	conn := &Connection{
 		serviceName:    serviceName,
 		robotName:      robotName,
-		secretKey:      nil,
 		responseMap:    make(map[string]chan *Message),
 		listenResp:     make(map[string]ListenCallBack),
 		listenMsg:      make(map[string]*Message),
@@ -110,6 +111,7 @@ func (c *Connection) SetOnClosed(fn func()) {
 }
 
 // SetSecretKey 设置通信加密密钥。
+// 复制传入的 key 后整体替换（immutable），后续不再修改已存储的切片。
 func (c *Connection) SetSecretKey(key []byte) {
 	if c == nil || atomic.LoadInt32(&c.isClose) == 1 {
 		return
@@ -117,28 +119,22 @@ func (c *Connection) SetSecretKey(key []byte) {
 	if len(key) == 0 {
 		return
 	}
-	c.mu.Lock()
-	if c.secretKey == nil || len(c.secretKey) != len(key) {
-		c.secretKey = make([]byte, len(key))
-	}
-	copy(c.secretKey, key)
-	c.mu.Unlock()
+	cp := make([]byte, len(key))
+	copy(cp, key)
+	c.secretKey.Store(cp)
 }
 
-// GetSecretKey 获取通信加密密钥的副本。
+// GetSecretKey 获取通信加密密钥。
+// 返回的切片为只读快照，调用方不得修改其内容（adapter 仅将其传给 Lua 并 stringify 复制）。
 func (c *Connection) GetSecretKey() []byte {
 	if c == nil {
 		return nil
 	}
-	c.mu.Lock()
-	if c.secretKey == nil {
-		c.mu.Unlock()
+	v := c.secretKey.Load()
+	if v == nil {
 		return nil
 	}
-	key := make([]byte, len(c.secretKey))
-	copy(key, c.secretKey)
-	c.mu.Unlock()
-	return key
+	return v.([]byte)
 }
 
 // RequestResponse 发送请求并同步等待响应。

@@ -2,7 +2,9 @@ package admin
 
 // MySQL DDL — 历史归档 7 张表。
 // Admin 启动时通过 HistoryStore.initSchema() 自动执行（仅创建不存在的表）。
-// 已有数据库升级需手动 ALTER TABLE。
+// 已有数据库升级需手动 ALTER TABLE，例如新增 debug_mode 时需执行：
+// ALTER TABLE task_history ADD COLUMN debug_mode TINYINT(1) NOT NULL DEFAULT 0 AFTER note;
+// 旧历史如需标记调试记录，请按实际任务配置手动回填 debug_mode=1。
 
 const ddlTaskHistory = `
 CREATE TABLE IF NOT EXISTS task_history (
@@ -20,6 +22,7 @@ CREATE TABLE IF NOT EXISTS task_history (
     starred         TINYINT(1)   NOT NULL DEFAULT 0,
     tags            JSON         NULL,
     note            TEXT,
+    debug_mode      TINYINT(1)   NOT NULL DEFAULT 0,
     config_summary  JSON         NULL,
     stage_count     INT          NOT NULL DEFAULT 0,
     INDEX idx_state (state),
@@ -92,7 +95,8 @@ CREATE TABLE IF NOT EXISTS task_timeseries (
     recv_kbps           DOUBLE       NOT NULL DEFAULT 0,
     avg_cpu_percent     DOUBLE       NOT NULL DEFAULT 0,
     max_cpu_percent     DOUBLE       NOT NULL DEFAULT 0,
-    mem_percent         DOUBLE       NOT NULL DEFAULT 0,
+    avg_mem_percent     DOUBLE       NOT NULL DEFAULT 0,
+    max_mem_percent     DOUBLE       NOT NULL DEFAULT 0,
     goroutines          INT          NOT NULL DEFAULT 0,
     threads             INT          NOT NULL DEFAULT 0,
     fds                 INT          NOT NULL DEFAULT 0,

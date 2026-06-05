@@ -187,9 +187,9 @@ export function RuntimeBar({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <Space size={6}>
           {debugMode ? (
-            <BugOutlined style={{ color: 'var(--color-purple)' }} />
+            <BugOutlined style={{ color: 'var(--mode-debug-color)' }} />
           ) : (
-            <CheckCircleOutlined style={{ color: 'var(--color-blue)' }} />
+            <CheckCircleOutlined style={{ color: 'var(--mode-test-color)' }} />
           )}
           <span>运行模式</span>
         </Space>
@@ -201,7 +201,7 @@ export function RuntimeBar({
           options={[
             {
               label: (
-                <span style={{ color: !debugMode ? 'var(--color-blue)' : undefined, fontWeight: !debugMode ? 600 : undefined }}>
+                <span style={{ color: !debugMode ? 'var(--mode-test-color)' : undefined, fontWeight: !debugMode ? 600 : undefined }}>
                   <CheckCircleOutlined style={{ marginRight: 4 }} />
                   测试
                 </span>
@@ -210,7 +210,7 @@ export function RuntimeBar({
             },
             {
               label: (
-                <span style={{ color: debugMode ? 'var(--color-purple)' : undefined, fontWeight: debugMode ? 600 : undefined }}>
+                <span style={{ color: debugMode ? 'var(--mode-debug-color)' : undefined, fontWeight: debugMode ? 600 : undefined }}>
                   <BugOutlined style={{ marginRight: 4 }} />
                   调试
                 </span>
@@ -257,11 +257,27 @@ export function RuntimeBar({
           }
         >
           {debugMode ? (
-            <Tag icon={<BugOutlined />} color="purple" style={{ margin: 0 }}>
+            <Tag
+              icon={<BugOutlined />}
+              style={{
+                margin: 0,
+                color: 'var(--mode-debug-color)',
+                borderColor: 'color-mix(in srgb, var(--mode-debug-color) 32%, transparent)',
+                background: 'color-mix(in srgb, var(--mode-debug-color) 10%, transparent)',
+              }}
+            >
               调试
             </Tag>
           ) : (
-            <Tag icon={<CheckCircleOutlined />} color="blue" style={{ margin: 0 }}>
+            <Tag
+              icon={<CheckCircleOutlined />}
+              style={{
+                margin: 0,
+                color: 'var(--mode-test-color)',
+                borderColor: 'color-mix(in srgb, var(--mode-test-color) 30%, transparent)',
+                background: 'color-mix(in srgb, var(--mode-test-color) 8%, transparent)',
+              }}
+            >
               测试
             </Tag>
           )}

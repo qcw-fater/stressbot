@@ -66,8 +66,6 @@ func (a *MetricsAggregator) AggregateSystem() ClusterSystemSnapshot {
 
 	var totalCPUWeight float64 // 按核数加权
 	var weightedCPUSum float64
-	var totalMem float64
-	var totalMemPercent float64
 
 	for _, agent := range agents {
 		if agent.Status == AgentOffline {
@@ -97,12 +95,13 @@ func (a *MetricsAggregator) AggregateSystem() ClusterSystemSnapshot {
 			cluster.HotAgentName = agent.Name
 		}
 
-		// 内存求和
+		// 内存求和与最高内存节点
 		cluster.TotalMemMB += sys.MemTotalMB
 		cluster.UsedMemMB += sys.MemUsedMB
-		totalMem += float64(sys.MemTotalMB)
-		if sys.MemTotalMB > 0 {
-			totalMemPercent += sys.MemPercent
+		if sys.MemPercent > cluster.MaxMemPercent {
+			cluster.MaxMemPercent = sys.MemPercent
+			cluster.HotMemAgentID = agent.ID
+			cluster.HotMemAgentName = agent.Name
 		}
 
 		// 网络（求和）
@@ -130,6 +129,9 @@ func (a *MetricsAggregator) AggregateSystem() ClusterSystemSnapshot {
 
 	if totalCPUWeight > 0 {
 		cluster.AvgCPUPercent = weightedCPUSum / totalCPUWeight
+	}
+	if cluster.TotalMemMB > 0 {
+		cluster.AvgMemPercent = float64(cluster.UsedMemMB) / float64(cluster.TotalMemMB) * 100
 	}
 
 	return cluster

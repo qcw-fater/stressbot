@@ -452,6 +452,14 @@ type ClusterSystemSnapshot struct {
 	HotAgentID string `json:"hotAgentId,omitempty"`
 	// HotAgentName CPU 最高的 Agent 名称。
 	HotAgentName string `json:"hotAgentName,omitempty"`
+	// AvgMemPercent 集群内存使用率（按总内存加权）。
+	AvgMemPercent float64 `json:"avgMemPercent"`
+	// MaxMemPercent 集群最大内存使用率。
+	MaxMemPercent float64 `json:"maxMemPercent"`
+	// HotMemAgentID 内存使用率最高的 Agent ID。
+	HotMemAgentID string `json:"hotMemAgentId,omitempty"`
+	// HotMemAgentName 内存使用率最高的 Agent 名称。
+	HotMemAgentName string `json:"hotMemAgentName,omitempty"`
 	// TotalMemMB 集群总内存（MB）。
 	TotalMemMB uint64 `json:"totalMemMB"`
 	// UsedMemMB 集群已用内存（MB）。
@@ -524,6 +532,8 @@ type HistoryRecord struct {
 	Tags []string `json:"tags"`
 	// Note 备注。
 	Note string `json:"note"`
+	// DebugMode 是否为调试模式任务。
+	DebugMode bool `json:"debugMode"`
 
 	// ConfigSummary 配置摘要。
 	ConfigSummary ConfigSummary `json:"configSummary"`
@@ -578,7 +588,10 @@ type HistoryStressSnapshotSummary struct {
 	Timestamp    time.Time                  `json:"timestamp,omitempty"`
 	UptimeSec    float64                    `json:"uptimeSeconds"`
 	TotalActions int64                      `json:"totalActions"`
+	ApdexT       int                        `json:"apdexT"`
+	Robots       monitor.RobotSnapshot      `json:"robots"`
 	Connections  monitor.ConnectionSnapshot `json:"connections"`
+	Bandwidth    monitor.BandwidthSnapshot  `json:"bandwidth"`
 	Actions      []HistoryActionSummary     `json:"actions"`
 }
 
@@ -622,6 +635,9 @@ type HistorySystemSummary struct {
 	AvgCPUPercent    float64 `json:"avgCpuPercent"`
 	MaxCPUPercent    float64 `json:"maxCpuPercent"`
 	HotAgentName     string  `json:"hotAgentName,omitempty"`
+	AvgMemPercent    float64 `json:"avgMemPercent"`
+	MaxMemPercent    float64 `json:"maxMemPercent"`
+	HotMemAgentName  string  `json:"hotMemAgentName,omitempty"`
 	TotalMemMB       uint64  `json:"totalMemMB"`
 	UsedMemMB        uint64  `json:"usedMemMB"`
 	TotalNetSendKBps float64 `json:"totalNetSendKBps"`
@@ -786,8 +802,10 @@ type HistoryTrendPoint struct {
 	AvgCPUPercent float64 `json:"avgCpuPercent"`
 	// MaxCPUPercent 最高 CPU 使用率。
 	MaxCPUPercent float64 `json:"maxCpuPercent"`
-	// MemPercent 集群内存使用率。
-	MemPercent float64 `json:"memPercent"`
+	// AvgMemPercent 集群内存使用率（按总内存加权）。
+	AvgMemPercent float64 `json:"avgMemPercent"`
+	// MaxMemPercent 最高节点内存使用率。
+	MaxMemPercent float64 `json:"maxMemPercent"`
 	// Goroutines goroutine 总数。
 	Goroutines int `json:"goroutines"`
 	// Threads 线程总数。
@@ -800,24 +818,64 @@ type HistoryTrendPoint struct {
 	OfflineCount int `json:"offlineCount"`
 }
 
-// HistoryTrendPointResponse 历史趋势图响应点，只包含当前图表消费的字段。
+// HistoryTrendPointResponse 历史趋势图响应点。
 type HistoryTrendPointResponse struct {
 	// SampledAt 采样时间。
 	SampledAt time.Time `json:"sampledAt"`
 	// ElapsedSec 距任务启动的秒数。
 	ElapsedSec int `json:"elapsedSec"`
+	// StageIndex 渐进式阶段下标，-1 表示未记录阶段。
+	StageIndex int `json:"stageIndex"`
 	// TotalQPS 集群总 QPS。
 	TotalQPS float64 `json:"totalQps"`
 	// RTTApdex 按 RTT 样本数加权后的 Apdex；旧数据完成迁移前可能为空。
 	RTTApdex *float64 `json:"rttApdex"`
 	// TotalDurationApdex 按总耗时样本数加权后的 Apdex；旧数据未采集总耗时时为空。
 	TotalDurationApdex *float64 `json:"totalDurationApdex"`
+	// RTTAvgMs 平均 RTT。
+	RTTAvgMs float64 `json:"rttAvgMs"`
+	// RTTP95Ms P95 RTT。
+	RTTP95Ms float64 `json:"rttP95Ms"`
+	// RTTP99Ms P99 RTT。
+	RTTP99Ms float64 `json:"rttP99Ms"`
+	// TotalDurationAvgMs 平均总耗时。
+	TotalDurationAvgMs float64 `json:"totalDurationAvgMs"`
+	// TotalDurationP95Ms P95 总耗时。
+	TotalDurationP95Ms float64 `json:"totalDurationP95Ms"`
+	// TotalDurationP99Ms P99 总耗时。
+	TotalDurationP99Ms float64 `json:"totalDurationP99Ms"`
+	// ClientAvgMs 客户端平均耗时。
+	ClientAvgMs float64 `json:"clientAvgMs"`
+	// EncodeAvgMs 编码平均耗时。
+	EncodeAvgMs float64 `json:"encodeAvgMs"`
+	// DecodeAvgMs 解码平均耗时。
+	DecodeAvgMs float64 `json:"decodeAvgMs"`
+	// BotsRunning 运行中机器人数量。
+	BotsRunning int `json:"botsRunning"`
+	// BotsErrored 异常机器人数量。
+	BotsErrored int `json:"botsErrored"`
 	// SendKBps 发送带宽 KB/s。
 	SendKBps float64 `json:"sendKBps"`
 	// RecvKBps 接收带宽 KB/s。
 	RecvKBps float64 `json:"recvKBps"`
 	// AvgCPUPercent 平均 CPU 使用率。
 	AvgCPUPercent float64 `json:"avgCpuPercent"`
+	// MaxCPUPercent 最高 CPU 使用率。
+	MaxCPUPercent float64 `json:"maxCpuPercent"`
+	// AvgMemPercent 集群内存使用率（按总内存加权）。
+	AvgMemPercent float64 `json:"avgMemPercent"`
+	// MaxMemPercent 最高节点内存使用率。
+	MaxMemPercent float64 `json:"maxMemPercent"`
+	// Goroutines goroutine 总数。
+	Goroutines int `json:"goroutines"`
+	// Threads 线程总数。
+	Threads int `json:"threads"`
+	// FDs 文件描述符总数。
+	FDs int `json:"fds"`
+	// OnlineCount 在线节点数。
+	OnlineCount int `json:"onlineCount"`
+	// OfflineCount 离线节点数。
+	OfflineCount int `json:"offlineCount"`
 }
 
 // TimeseriesResponse 时序数据查询响应。

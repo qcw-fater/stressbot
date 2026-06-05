@@ -85,6 +85,13 @@ const LOG_LEVEL_OPTIONS: Array<{ value: LogLevel; label: string; desc: string }>
   { value: 'error', label: 'error', desc: '仅错误' },
 ];
 
+const LOG_LEVEL_COLORS: Record<LogLevel, string> = {
+  debug: 'var(--color-purple)',
+  info: 'var(--color-blue)',
+  warn: 'var(--color-warning)',
+  error: 'var(--color-error)',
+};
+
 export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps) {
   const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
   const {
@@ -322,11 +329,27 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
           {/* 顶部模式标签：与 RuntimeBar / 设置 Popover 配色一致——
               调试 = 紫色 BugOutlined；测试 = 蓝色 CheckCircleOutlined。 */}
           {debugMode ? (
-            <Tag icon={<BugOutlined />} color="purple" style={{ margin: 0 }}>
+            <Tag
+              icon={<BugOutlined />}
+              style={{
+                margin: 0,
+                color: 'var(--mode-debug-color)',
+                borderColor: 'color-mix(in srgb, var(--mode-debug-color) 32%, transparent)',
+                background: 'color-mix(in srgb, var(--mode-debug-color) 10%, transparent)',
+              }}
+            >
               调试
             </Tag>
           ) : (
-            <Tag icon={<CheckCircleOutlined />} color="blue" style={{ margin: 0 }}>
+            <Tag
+              icon={<CheckCircleOutlined />}
+              style={{
+                margin: 0,
+                color: 'var(--mode-test-color)',
+                borderColor: 'color-mix(in srgb, var(--mode-test-color) 30%, transparent)',
+                background: 'color-mix(in srgb, var(--mode-test-color) 8%, transparent)',
+              }}
+            >
               测试
             </Tag>
           )}
@@ -365,16 +388,16 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
           gap: 12,
           padding: '8px 12px',
           marginBottom: 12,
-          background: debugMode ? 'color-mix(in srgb, var(--color-purple) 8%, transparent)' : 'color-mix(in srgb, var(--color-blue) 6%, transparent)',
-          border: `1px solid ${debugMode ? 'color-mix(in srgb, var(--color-purple) 45%, transparent)' : 'color-mix(in srgb, var(--color-blue) 30%, transparent)'}`,
+          background: debugMode ? 'color-mix(in srgb, var(--mode-debug-color) 8%, transparent)' : 'color-mix(in srgb, var(--mode-test-color) 6%, transparent)',
+          border: `1px solid ${debugMode ? 'color-mix(in srgb, var(--mode-debug-color) 45%, transparent)' : 'color-mix(in srgb, var(--mode-test-color) 30%, transparent)'}`,
           borderRadius: 6,
         }}
       >
         <Space size={8} style={{ flex: 1, minWidth: 0 }}>
           {debugMode ? (
-            <BugOutlined style={{ color: 'var(--color-purple)' }} />
+            <BugOutlined style={{ color: 'var(--mode-debug-color)' }} />
           ) : (
-            <CheckCircleOutlined style={{ color: 'var(--color-blue)' }} />
+            <CheckCircleOutlined style={{ color: 'var(--mode-test-color)' }} />
           )}
           <span style={{ fontWeight: 500 }}>{debugMode ? '调试模式' : '测试模式'}</span>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -391,7 +414,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
             options={[
               {
                 label: (
-                  <span style={{ color: !debugMode ? 'var(--color-blue)' : undefined, fontWeight: !debugMode ? 600 : undefined }}>
+                  <span style={{ color: !debugMode ? 'var(--mode-test-color)' : undefined, fontWeight: !debugMode ? 600 : undefined }}>
                     <CheckCircleOutlined style={{ marginRight: 4 }} />
                     测试
                   </span>
@@ -400,7 +423,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
               },
               {
                 label: (
-                  <span style={{ color: debugMode ? 'var(--color-purple)' : undefined, fontWeight: debugMode ? 600 : undefined }}>
+                  <span style={{ color: debugMode ? 'var(--mode-debug-color)' : undefined, fontWeight: debugMode ? 600 : undefined }}>
                     <BugOutlined style={{ marginRight: 4 }} />
                     调试
                   </span>
@@ -750,7 +773,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
                       value: o.value,
                       label: (
                         <Space size={6}>
-                          <span style={{ fontFamily: 'var(--font-mono, monospace)' }}>{o.label}</span>
+                          <span style={{ color: LOG_LEVEL_COLORS[o.value], fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>{o.label}</span>
                           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                             {o.desc}
                           </Typography.Text>

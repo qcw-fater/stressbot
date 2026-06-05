@@ -144,10 +144,7 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 	}
 	agentCount := len(task.Assignments)
 	activeAgentCount := len(task.SucceededAgents)
-	var tags []string
-	if task.Config.RobotConfig.DebugMode {
-		tags = append(tags, "debug")
-	}
+	tags := []string{}
 	stageCount := 0
 	if task.Config.RobotConfig.RampUp != nil {
 		stageCount = len(task.Config.RobotConfig.RampUp.Stages)
@@ -161,8 +158,8 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 	_, err = tx.Exec(`
 		INSERT INTO task_history (id, name, state, total_bots, agent_count, active_agent_count,
 			created_at, started_at, stopped_at, duration_sec, error_msg,
-			starred, tags, note, config_summary, stage_count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, '', ?, ?)
+			starred, tags, note, debug_mode, config_summary, stage_count)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, '', ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
 			state=VALUES(state), stopped_at=VALUES(stopped_at),
 			duration_sec=VALUES(duration_sec), error_msg=VALUES(error_msg),
@@ -171,7 +168,7 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 	`,
 		task.ID, task.Name, string(task.State), task.TotalBots, agentCount, activeAgentCount,
 		task.CreatedAt, task.StartedAt, task.StoppedAt, durationSec, task.ErrorMsg,
-		tagsJSON, summaryJSON, stageCount,
+		tagsJSON, task.Config.RobotConfig.DebugMode, summaryJSON, stageCount,
 	)
 	if err != nil {
 		return fmt.Errorf("insert task_history: %w", err)
@@ -285,7 +282,7 @@ func (h *HistoryStore) List(ctx context.Context, filter HistoryFilter) (*History
 	}
 
 	querySQL := fmt.Sprintf(
-		"SELECT id, name, state, total_bots, agent_count, active_agent_count, created_at, started_at, stopped_at, duration_sec, error_msg, starred, tags, note, config_summary, stage_count FROM task_history%s ORDER BY %s LIMIT ? OFFSET ?",
+		"SELECT id, name, state, total_bots, agent_count, active_agent_count, created_at, started_at, stopped_at, duration_sec, error_msg, starred, tags, note, debug_mode, config_summary, stage_count FROM task_history%s ORDER BY %s LIMIT ? OFFSET ?",
 		where, orderBy,
 	)
 	rows, err := h.db.QueryContext(ctx, querySQL, append(args, limit, offset)...)
@@ -303,7 +300,7 @@ func (h *HistoryStore) List(ctx context.Context, filter HistoryFilter) (*History
 		if err := rows.Scan(
 			&r.ID, &r.Name, &r.State, &r.TotalBots, &r.AgentCount, &r.ActiveAgentCount,
 			&r.CreatedAt, &startedAt, &stoppedAt, &r.DurationSec, &r.ErrorMsg,
-			&r.Starred, &tagsBytes, &r.Note, &summaryBytes, &r.StageCount,
+			&r.Starred, &tagsBytes, &r.Note, &r.DebugMode, &summaryBytes, &r.StageCount,
 		); err != nil {
 			return nil, fmt.Errorf("scan history: %w", err)
 		}
@@ -340,12 +337,12 @@ func (h *HistoryStore) getHistoryRecord(ctx context.Context, id string) (*Histor
 
 	err := h.db.QueryRowContext(ctx, `
 		SELECT id, name, state, total_bots, agent_count, active_agent_count, created_at, started_at, stopped_at,
-			duration_sec, error_msg, starred, tags, note, config_summary, stage_count
+			duration_sec, error_msg, starred, tags, note, debug_mode, config_summary, stage_count
 		FROM task_history WHERE id = ?
 	`, id).Scan(
 		&r.ID, &r.Name, &r.State, &r.TotalBots, &r.AgentCount, &r.ActiveAgentCount,
 		&r.CreatedAt, &startedAt, &stoppedAt,
-		&r.DurationSec, &r.ErrorMsg, &r.Starred, &tagsBytes, &r.Note, &summaryBytes, &r.StageCount,
+		&r.DurationSec, &r.ErrorMsg, &r.Starred, &tagsBytes, &r.Note, &r.DebugMode, &summaryBytes, &r.StageCount,
 	)
 	if err == sql.ErrNoRows {
 		return nil, ErrHistoryNotFound
@@ -677,8 +674,13 @@ func (h *HistoryStore) GetTimeseries(ctx context.Context, id string, maxPoints i
 	maxPoints = normalizeTimeseriesMaxPoints(maxPoints)
 
 	rows, err := h.db.QueryContext(ctx, `
-		SELECT sampled_at, elapsed_sec, total_qps, rtt_apdex, total_duration_apdex,
-			send_kbps, recv_kbps, avg_cpu_percent
+		SELECT sampled_at, elapsed_sec, stage_index, total_qps, rtt_apdex, total_duration_apdex,
+			rtt_avg_ms, rtt_p95_ms, rtt_p99_ms,
+			total_duration_avg_ms, total_duration_p95_ms, total_duration_p99_ms,
+			client_avg_ms, encode_avg_ms, decode_avg_ms,
+			bots_running, bots_errored, send_kbps, recv_kbps,
+			avg_cpu_percent, max_cpu_percent, avg_mem_percent, max_mem_percent,
+			goroutines, threads, fds, online_count, offline_count
 		FROM task_timeseries WHERE task_id = ?
 		ORDER BY elapsed_sec
 	`, id)
@@ -692,8 +694,13 @@ func (h *HistoryStore) GetTimeseries(ctx context.Context, id string, maxPoints i
 		var p HistoryTrendPointResponse
 		var rttApdex, totalDurationApdex sql.NullFloat64
 		if err := rows.Scan(
-			&p.SampledAt, &p.ElapsedSec, &p.TotalQPS, &rttApdex, &totalDurationApdex,
-			&p.SendKBps, &p.RecvKBps, &p.AvgCPUPercent,
+			&p.SampledAt, &p.ElapsedSec, &p.StageIndex, &p.TotalQPS, &rttApdex, &totalDurationApdex,
+			&p.RTTAvgMs, &p.RTTP95Ms, &p.RTTP99Ms,
+			&p.TotalDurationAvgMs, &p.TotalDurationP95Ms, &p.TotalDurationP99Ms,
+			&p.ClientAvgMs, &p.EncodeAvgMs, &p.DecodeAvgMs,
+			&p.BotsRunning, &p.BotsErrored, &p.SendKBps, &p.RecvKBps,
+			&p.AvgCPUPercent, &p.MaxCPUPercent, &p.AvgMemPercent, &p.MaxMemPercent,
+			&p.Goroutines, &p.Threads, &p.FDs, &p.OnlineCount, &p.OfflineCount,
 		); err != nil {
 			continue
 		}
@@ -757,7 +764,10 @@ func projectStressSnapshot(s monitor.CollectorSnapshot) HistoryStressSnapshotSum
 		Timestamp:    s.Timestamp,
 		UptimeSec:    s.UptimeSec,
 		TotalActions: s.TotalActions,
+		ApdexT:       s.ApdexT,
+		Robots:       s.Robots,
 		Connections:  s.Connections,
+		Bandwidth:    s.Bandwidth,
 		Actions:      actions,
 	}
 }
@@ -804,6 +814,9 @@ func projectSystemSnapshot(s ClusterSystemSnapshot) HistorySystemSummary {
 		AvgCPUPercent:    s.AvgCPUPercent,
 		MaxCPUPercent:    s.MaxCPUPercent,
 		HotAgentName:     s.HotAgentName,
+		AvgMemPercent:    s.AvgMemPercent,
+		MaxMemPercent:    s.MaxMemPercent,
+		HotMemAgentName:  s.HotMemAgentName,
 		TotalMemMB:       s.TotalMemMB,
 		UsedMemMB:        s.UsedMemMB,
 		TotalNetSendKBps: s.TotalNetSendKBps,
@@ -977,15 +990,15 @@ func (h *HistoryStore) AppendTimeseries(ctx context.Context, taskID string, poin
 			total_duration_avg_ms, total_duration_p95_ms, total_duration_p99_ms,
 			client_avg_ms, encode_avg_ms, decode_avg_ms,
 			bots_running, bots_errored,
-			send_kbps, recv_kbps, avg_cpu_percent, max_cpu_percent, mem_percent,
+			send_kbps, recv_kbps, avg_cpu_percent, max_cpu_percent, avg_mem_percent, max_mem_percent,
 			goroutines, threads, fds, online_count, offline_count
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, taskID, point.SampledAt, point.ElapsedSec, point.TotalQPS, point.RTTApdex, point.TotalDurationApdex,
 		point.RTTAvgMs, point.RTTP95Ms, point.RTTP99Ms,
 		point.TotalDurationAvgMs, point.TotalDurationP95Ms, point.TotalDurationP99Ms,
 		point.ClientAvgMs, point.EncodeAvgMs, point.DecodeAvgMs,
 		point.BotsRunning, point.BotsErrored,
-		point.SendKBps, point.RecvKBps, point.AvgCPUPercent, point.MaxCPUPercent, point.MemPercent,
+		point.SendKBps, point.RecvKBps, point.AvgCPUPercent, point.MaxCPUPercent, point.AvgMemPercent, point.MaxMemPercent,
 		point.Goroutines, point.Threads, point.FDs, point.OnlineCount, point.OfflineCount)
 	return err
 }

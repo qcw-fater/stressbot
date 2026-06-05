@@ -34,6 +34,8 @@ const EMPTY_AGGREGATE: StressAggregate = {
   snapshot: EMPTY_STRESS,
   reportingAgents: 0,
   totalAgents: 0,
+  offlineAgents: 0,
+  assignedAgents: 0,
 };
 
 // === 压测指标 ===
@@ -57,6 +59,8 @@ export async function getClusterMetrics(params: MetricsParams = {}): Promise<Str
       snapshot: mergeSnapshot(wrapper.snapshot),
       reportingAgents: wrapper.reportingAgents ?? 0,
       totalAgents: wrapper.totalAgents ?? 0,
+      offlineAgents: wrapper.offlineAgents ?? 0,
+      assignedAgents: wrapper.assignedAgents ?? 0,
     };
   }
   // 旧格式兼容：直接返回 StressSnapshot
@@ -65,6 +69,8 @@ export async function getClusterMetrics(params: MetricsParams = {}): Promise<Str
       snapshot: mergeSnapshot(resp as StressSnapshot),
       reportingAgents: 0,
       totalAgents: 0,
+      offlineAgents: 0,
+      assignedAgents: 0,
     };
   }
   return EMPTY_AGGREGATE;
