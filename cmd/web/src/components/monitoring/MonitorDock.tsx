@@ -1,6 +1,7 @@
-import { Button, Progress, Tooltip } from 'antd';
+import { Button, Tooltip } from 'antd';
 import { CaretDownOutlined, CaretUpOutlined, LineChartOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useRuntimeStore } from '@/services';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
@@ -218,24 +219,82 @@ function TaskLoadCard({
   model: ReturnType<typeof buildLivePanelModel>;
 }) {
   const rampUp = model.load.rampUp;
-  const progress = rampUp ? Math.round(rampUp.progress * 100) : Math.round(model.load.robotPercent);
 
   return (
     <MetricGroup title="任务 / 负载" subtitle={taskName || '运行任务'}>
-      <div className="md-kpi-grid md-kpi-grid--two">
-        <MetricCell label="状态" value={STATE_TEXT[taskState ?? ''] ?? '运行中'} />
-        <MetricCell label="运行时长" value={fmtDuration(uptimeSeconds)} />
-        <MetricCell label="运行机器人" value={fmtCompactNumber(model.load.runningRobots)} />
-        <MetricCell label="已启动" value={fmtCompactNumber(model.load.startedRobots)} />
-        <MetricCell label="已停止" value={fmtCompactNumber(model.load.stoppedRobots)} />
-        <MetricCell label="异常机器人" value={fmtCompactNumber(model.load.erroredRobots)} />
+      <div className="md-load-card">
+        <div className="md-load-taskline">
+          <span>{STATE_TEXT[taskState ?? ''] ?? '运行中'}</span>
+          <span>运行 {fmtDuration(uptimeSeconds)}</span>
+          <span>机器人 {compactRatio(model.load.runningRobots, model.load.startedRobots)}</span>
+        </div>
+
+        {rampUp ? <RampUpLoadView model={model} /> : <NormalLoadView model={model} />}
+
+        <div className="md-load-footline">
+          <span>已停止 {fmtCompactNumber(model.load.stoppedRobots)}</span>
+          <span>异常机器人 {fmtCompactNumber(model.load.erroredRobots)}</span>
+        </div>
       </div>
-      <div className="md-progress-caption">
-        <span>{rampUp ? `渐进式阶段 ${rampUp.currentStage}/${rampUp.totalStages}` : `负载 ${model.load.robotPercent.toFixed(0)}%`}</span>
-        <span>{progress}%</span>
-      </div>
-      <Progress percent={progress} strokeColor="var(--color-blue)" showInfo={false} size={3} />
     </MetricGroup>
+  );
+}
+
+function NormalLoadView({ model }: { model: ReturnType<typeof buildLivePanelModel> }) {
+  const progress = Math.round(model.load.robotPercent);
+  return (
+    <div className="md-load-main md-load-main--normal">
+      <div className="md-load-progress-head">
+        <span>负载进度</span>
+        <b>{progress}%</b>
+      </div>
+      <LoadProgress percent={progress} />
+    </div>
+  );
+}
+
+function LoadProgress({ percent }: { percent: number }) {
+  const safePercent = Math.max(0, Math.min(100, percent));
+  return (
+    <div className="md-load-progress" aria-label={`负载进度 ${safePercent}%`}>
+      <div className="md-load-progress__fill" style={{ width: `${safePercent}%` }} />
+    </div>
+  );
+}
+
+function RampUpLoadView({ model }: { model: ReturnType<typeof buildLivePanelModel> }) {
+  const rampUp = model.load.rampUp;
+  if (!rampUp) return null;
+  const stages = useRuntimeStore.getState().rampUpStages;
+  const totalTarget = stages.reduce((sum, stage) => sum + (stage.count || 0), 0);
+  const stageStart = stages.slice(0, rampUp.currentStage - 1).reduce((sum, stage) => sum + (stage.count || 0), 0);
+  const currentStage = stages[rampUp.currentStage - 1];
+  const stageTarget = currentStage?.count || 0;
+  const stageRunning = Math.max(0, model.load.runningRobots - stageStart);
+  const cumulativePercent = totalTarget > 0 ? Math.min(100, Math.round((model.load.runningRobots / totalTarget) * 100)) : 0;
+
+  return (
+    <div className="md-load-main md-load-main--ramp">
+      <div className="md-ramp-grid">
+        <span>阶段 <b>{rampUp.currentStage}/{rampUp.totalStages}</b></span>
+        <span>本阶段 <b>{fmtCompactNumber(Math.min(stageRunning, stageTarget))}/{fmtCompactNumber(stageTarget)}</b></span>
+        <span>累计 <b>{fmtCompactNumber(model.load.runningRobots)}/{fmtCompactNumber(totalTarget)}</b></span>
+        <span>{currentStage?.concurrency ? `并发 ${currentStage.concurrency}` : '并发 —'} · {currentStage?.holdSec ? `等待 ${currentStage.holdSec}s` : '等待 —'}</span>
+      </div>
+      <div className="md-stage-bar" title={`累计进度 ${cumulativePercent}%`}>
+        {stages.map((stage, i) => {
+          const count = stage.count || 0;
+          const widthPct = totalTarget > 0 ? (count / totalTarget) * 100 : 100 / Math.max(1, stages.length);
+          const prev = stages.slice(0, i).reduce((sum, s) => sum + (s.count || 0), 0);
+          const fill = count > 0 ? Math.min(100, Math.max(0, ((model.load.runningRobots - prev) / count) * 100)) : 0;
+          return (
+            <div key={i} className="md-stage-segment" style={{ width: `${widthPct}%` }}>
+              <div className={`md-stage-fill${i + 1 === rampUp.currentStage ? ' md-stage-fill--active' : ''}`} style={{ width: `${fill}%` }} />
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -243,7 +302,7 @@ function ThroughputQualityCard({ model }: { model: ReturnType<typeof buildLivePa
   return (
     <MetricGroup title="吞吐 / 结果" subtitle={`累计动作 ${fmtCompactNumber(model.throughput.totalActions)}`}>
       <div className="md-kpi-grid md-kpi-grid--three">
-        <MetricCell label="当前吞吐" value={fmtRate(model.throughput.intervalQps)} unit="/s" title={model.throughput.intervalQps == null ? '等待下一轮采样' : undefined} />
+        <MetricCell label="当前 QPS" value={fmtRate(model.throughput.intervalQps)} title={model.throughput.intervalQps == null ? '等待下一轮采样' : undefined} />
         <MetricCell label="全程均值" value={fmtRate(model.throughput.lifetimeQps)} unit="/s" />
         <MetricCell label="成功率" value={fmtPercent(model.quality.successRate)} />
         <MetricCell label="样本" value={fmtCompactNumber(model.quality.sampleCount)} />
@@ -301,7 +360,7 @@ function ResourceNodeCard({ model }: { model: ReturnType<typeof buildLivePanelMo
   );
 }
 
-function MetricGroup({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+function MetricGroup({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {
   return (
     <section className="md-metric-group">
       <div className="md-metric-group__head">

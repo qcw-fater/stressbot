@@ -210,28 +210,148 @@
   color: var(--text-tertiary);
 }
 
-.md-progress-caption {
+.md-load-card {
+  min-height: 0;
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.md-load-taskline,
+.md-load-footline,
+.md-load-progress-head {
+  display: flex;
   align-items: center;
-  height: 12px;
+  justify-content: space-between;
   gap: 8px;
-  font-size: 10px;
+  min-width: 0;
   color: var(--text-tertiary);
+  font-size: 10px;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 
-.md-progress-caption span {
+.md-load-taskline span,
+.md-load-footline span,
+.md-load-progress-head span,
+.md-load-progress-head b {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.md-metric-group .ant-progress-line { margin-bottom: 0; line-height: 1; }
-.md-metric-group .ant-progress-outer { line-height: 1; }
-.md-metric-group .ant-progress-inner { border-radius: 2px; background: var(--fill-quaternary); }
-.md-metric-group .ant-progress-bg { border-radius: 2px; }
+.md-load-taskline span:first-child {
+  color: var(--text-secondary);
+  font-weight: 800;
+}
+
+.md-load-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+}
+
+.md-load-main--normal {
+  padding: 4px 6px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-panel) 54%, transparent);
+}
+
+.md-load-progress-head b {
+  color: var(--color-blue);
+  font-size: 12px;
+}
+
+.md-ramp-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 6px;
+  min-height: 0;
+}
+
+.md-ramp-grid span {
+  min-width: 0;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 2px 5px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--bg-panel) 54%, transparent);
+  color: var(--text-tertiary);
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.md-ramp-grid b {
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+}
+
+.md-stage-bar {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  padding: 1px;
+  border: 1px solid color-mix(in srgb, var(--color-blue) 24%, var(--border-color));
+  background: color-mix(in srgb, var(--bg-panel) 78%, #000 22%);
+}
+
+.md-stage-segment {
+  min-width: 3px;
+  height: 100%;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-tertiary) 16%, transparent);
+  overflow: hidden;
+}
+
+.md-stage-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--color-blue), var(--color-success));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-blue) 44%, transparent);
+  transition: width 0.45s ease;
+}
+
+.md-stage-fill--active {
+  background: linear-gradient(90deg, var(--color-blue), var(--color-purple));
+}
+
+.md-load-progress {
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-blue) 28%, var(--border-color));
+  background:
+    repeating-linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--text-tertiary) 10%, transparent) 0,
+      color-mix(in srgb, var(--text-tertiary) 10%, transparent) 1px,
+      transparent 1px,
+      transparent 8px
+    ),
+    color-mix(in srgb, var(--bg-panel) 78%, #000 22%);
+}
+
+.md-load-progress__fill {
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--color-blue), var(--color-success));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--color-blue) 52%, transparent);
+  transition: width 0.45s ease;
+}
 
 .md-node-row {
   min-width: 0;
