@@ -98,6 +98,47 @@ describe('codec round-trip', () => {
     expect(storeOut).toBe(storeRaw);
   });
 
+  it('filter mode 在导出时被保留', () => {
+    const exported = flowToJson({
+      defaultDelayMs: raw.defaultDelayMs,
+      nodes: raw.nodes,
+      actions: {
+        A1: {
+          pattern: 'tcpSend',
+          bindings: [{ type: 'stateRandom', source: 'shopList', filters: [{ path: 'shopData[].ID', op: 'eq', value: 1, mode: 'none' }] }],
+        },
+      },
+      listens: raw.listens,
+    });
+    expect(exported.actions.A1.bindings?.[0].filters?.[0].mode).toBe('none');
+  });
+
+  it('导出时按 pattern 裁剪无关字段', () => {
+    const exported = flowToJson({
+      defaultDelayMs: raw.defaultDelayMs,
+      nodes: raw.nodes,
+      actions: {
+        A1: {
+          pattern: 'tcpConnect',
+          service: 'logic',
+          address: '127.0.0.1:9000',
+          route: { cmd: 1 },
+          c2sProto: 'Game.TestC2S',
+          s2cProto: 'Game.TestS2C',
+          bindings: [{ type: 'fixed', field: 'id', value: 1 }],
+          store: [{ field: 'id', setter: 'id' }],
+          timeout: 10,
+        },
+      },
+      listens: raw.listens,
+    });
+    expect(exported.actions.A1).toEqual({
+      pattern: 'tcpConnect',
+      service: 'logic',
+      address: '127.0.0.1:9000',
+    });
+  });
+
   it('导出 JSON 写到磁盘，结构稳定', () => {
     const exported = flowToJson({
       defaultDelayMs: raw.defaultDelayMs,

@@ -30,7 +30,8 @@ import { edgeTypes } from './edges/registry';
 import { useFlowStore } from './store/flowStore';
 import { useEditorStore, type Clipboard } from './store/editorStore';
 import { generateNodeId } from './utils/nodeIdGen';
-import { saveActionTemplate, saveListenTemplate } from './library/templateStore';
+import { saveActionTemplate, saveListenTemplate, type ActionTemplate, type ListenTemplate, type ListenTemplateDefaultRef } from './library/templateStore';
+import { cloneListenDefaultRef, inferListenDefaultRef } from './library/listenTemplateDefaults';
 import { useFlowReadOnly } from './flowReadOnlyContext';
 import type { FlowNode, NodeType } from '@/types/flow';
 import type { ActionDef } from '@/types/action';
@@ -63,6 +64,7 @@ function FlowCanvasInner() {
   const addNode = useFlowStore((s) => s.addNode);
   const addAction = useFlowStore((s) => s.addAction);
   const addListen = useFlowStore((s) => s.addListen);
+  const setListenDefaultRef = useFlowStore((s) => s.setListenDefaultRef);
   const removeNode = useFlowStore((s) => s.removeNode);
   const removeListen = useFlowStore((s) => s.removeListen);
   const updateNode = useFlowStore((s) => s.updateNode);
@@ -159,10 +161,9 @@ function FlowCanvasInner() {
       const tplRaw = e.dataTransfer.getData('application/stressbot-template');
       if (!tplRaw) return;
       try {
-        const { kind, template } = JSON.parse(tplRaw) as {
-          kind: 'action' | 'listen';
-          template: { name: string; data: unknown };
-        };
+        const { kind, template } = JSON.parse(tplRaw) as
+          | { kind: 'action'; template: ActionTemplate }
+          | { kind: 'listen'; template: ListenTemplate };
         if (kind === 'action') {
           const state = useFlowStore.getState();
           // 唯一 action 名
@@ -188,6 +189,7 @@ function FlowCanvasInner() {
           let i = 1;
           while (state.listens[listenName]) listenName = `${template.name}_${i++}`;
           addListen(listenName, template.data as ListenDef);
+          setListenDefaultRef(listenName, template.defaultRef);
           // ListenCard 自动由 jsonToFlow 创建；位置覆盖到鼠标落点
           const cardId = `__cb__${listenName}`;
           const layout = useFlowStore.getState().layout;
@@ -347,7 +349,10 @@ function FlowCanvasInner() {
       if (src.type === 'action' && handle === 'listen' && targetListenName) {
         const list = (src.listenRefs ?? []).slice();
         if (!list.some((r) => r.listen === targetListenName)) {
-          list.push({ route: null, server: '', listen: targetListenName });
+          const defaultRef = useFlowStore.getState().listenDefaultRefs[targetListenName];
+          list.push(defaultRef
+            ? { route: cloneListenDefaultRef(defaultRef)?.route, server: defaultRef.server, listen: targetListenName }
+            : { route: null, server: '', listen: targetListenName });
         }
         updateNode(params.source, { listenRefs: list });
         return;
@@ -386,10 +391,12 @@ function FlowCanvasInner() {
       if (n.type === 'listenCard') {
         const listenName = (n.data as { listenName?: string }).listenName;
         if (!listenName || !flow.listens[listenName]) return null;
+        const inferred = inferListenDefaultRef(flow.nodes, listenName);
         return {
           kind: 'listen',
           listenName,
           listen: JSON.parse(JSON.stringify(flow.listens[listenName])),
+          defaultRef: inferred.defaultRef ?? flow.listenDefaultRefs[listenName],
         };
       }
       const node = flow.nodes[n.id];
@@ -399,12 +406,19 @@ function FlowCanvasInner() {
           ? { name: node.action, def: JSON.parse(JSON.stringify(flow.actions[node.action])) as ActionDef }
           : undefined;
       // listenRefs 涉及的 listen 一并复制（跨流程粘贴时不丢引用）
-      const listens: Array<{ name: string; def: ListenDef }> = [];
+      const listens: Array<{ name: string; def: ListenDef; defaultRef?: ListenTemplateDefaultRef }> = [];
       if (node.type === 'action' && node.listenRefs) {
         for (const r of node.listenRefs) {
           if (!r.listen) continue;
           const listenDef = flow.listens[r.listen];
-          if (listenDef) listens.push({ name: r.listen, def: JSON.parse(JSON.stringify(listenDef)) });
+          if (listenDef) {
+            const inferred = inferListenDefaultRef(flow.nodes, r.listen);
+            listens.push({
+              name: r.listen,
+              def: JSON.parse(JSON.stringify(listenDef)),
+              defaultRef: inferred.defaultRef ?? flow.listenDefaultRefs[r.listen],
+            });
+          }
         }
       }
       return {
@@ -457,6 +471,7 @@ function FlowCanvasInner() {
           for (const c of clipboard.listens) {
             const newListen = uniqueListenName(c.name);
             addListen(newListen, c.def);
+            setListenDefaultRef(newListen, c.defaultRef);
             renameMap[c.name] = newListen;
           }
           node.listenRefs = node.listenRefs.map((r) => ({
@@ -476,6 +491,7 @@ function FlowCanvasInner() {
       } else if (clipboard.kind === 'listen') {
         const newName = uniqueListenName(clipboard.listenName);
         addListen(newName, JSON.parse(JSON.stringify(clipboard.listen)));
+        setListenDefaultRef(newName, clipboard.defaultRef);
         const cardId = `__cb__${newName}`;
         const layout = useFlowStore.getState().layout;
         layout.nodePositions[cardId] = { x: flowX, y: flowY };
@@ -485,7 +501,7 @@ function FlowCanvasInner() {
         message.success(`已粘贴 listen ${newName}`);
       }
     },
-    [addAction, addListen, addNode, clipboard, setSelectedNode],
+    [addAction, addListen, addNode, clipboard, setListenDefaultRef, setSelectedNode],
   );
 
   /** 把节点保存为模板（写入 IndexedDB） */
@@ -496,11 +512,16 @@ function FlowCanvasInner() {
       if (!listenName) return;
       const listenDef = flow.listens[listenName];
       if (!listenDef) return;
+      const inferred = inferListenDefaultRef(flow.nodes, listenName);
       await saveListenTemplate({
         name: listenName,
         kind: classifyListen(listenDef),
         data: listenDef,
+        defaultRef: inferred.defaultRef ?? flow.listenDefaultRefs[listenName],
       });
+      if (inferred.ambiguous) {
+        message.warning('存在多条不同监听注册，已使用第一条作为模板默认注册');
+      }
       message.success(`listen ${listenName} 已保存为模板`);
       return;
     }
@@ -519,7 +540,7 @@ function FlowCanvasInner() {
       data: def,
     });
     message.success(`action ${node.action} 已保存为模板`);
-  }, []);
+  }, [message]);
 
   // 记录最近一次鼠标在画布内的客户端坐标，Ctrl+V 粘贴时作为落点
   const lastMousePosRef = useRef<{ x: number; y: number } | null>(null);

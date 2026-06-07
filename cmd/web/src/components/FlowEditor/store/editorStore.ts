@@ -8,6 +8,7 @@ import { create } from 'zustand';
 import type { FlowNode } from '@/types/flow';
 import type { ActionDef } from '@/types/action';
 import type { ListenDef } from '@/types/listen';
+import type { ListenTemplateDefaultRef } from '../library/templateStore';
 import { useFloatingWindowStore } from './floatingWindowStore';
 
 export type ActivePanel =
@@ -76,12 +77,13 @@ export type Clipboard =
       nodeId: string;
       node: FlowNode;
       action?: { name: string; def: ActionDef };
-      listens?: Array<{ name: string; def: ListenDef }>;
+      listens?: Array<{ name: string; def: ListenDef; defaultRef?: ListenTemplateDefaultRef }>;
     }
   | {
       kind: 'listen';
       listenName: string;
       listen: ListenDef;
+      defaultRef?: ListenTemplateDefaultRef;
     };
 
 interface EditorState {

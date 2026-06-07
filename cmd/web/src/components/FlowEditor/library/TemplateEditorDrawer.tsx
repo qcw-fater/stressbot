@@ -26,11 +26,14 @@ import {
   updateListenTemplate,
   type ActionTemplate,
   type ListenTemplate,
+  type ListenTemplateDefaultRef,
 } from './templateStore';
 import type { ActionDef, ActionPattern } from '@/types/action';
 import type { ListenDef } from '@/types/listen';
 import { classifyListen, type ListenKind } from '@/types/listen';
 import { FloatingWindow } from '../panels/FloatingWindow';
+import { RouteEditor } from '../listens/RouteEditor';
+import { cloneListenDefaultRef } from './listenTemplateDefaults';
 
 export function TemplateEditorDrawer() {
   const { message } = AntApp.useApp();
@@ -47,6 +50,7 @@ export function TemplateEditorDrawer() {
   const [actionDef, setActionDef] = useState<ActionDef | null>(null);
   const [listenDef, setListenDef] = useState<ListenDef | null>(null);
   const [listenKind, setListenKind] = useState<ListenKind>('silent');
+  const [listenDefaultRef, setListenDefaultRef] = useState<ListenTemplateDefaultRef | undefined>();
 
   useEffect(() => {
     if (!open || !templateKind || !templateId) {
@@ -66,9 +70,11 @@ export function TemplateEditorDrawer() {
       if (templateKind === 'action') {
         setActionDef((t as ActionTemplate).data);
       } else {
-        const cb = (t as ListenTemplate).data;
+        const listenTpl = t as ListenTemplate;
+        const cb = listenTpl.data;
         setListenDef(cb);
         setListenKind(classifyListen(cb));
+        setListenDefaultRef(cloneListenDefaultRef(listenTpl.defaultRef));
       }
     });
   }, [open, templateKind, templateId, closePanel]);
@@ -101,6 +107,7 @@ export function TemplateEditorDrawer() {
         description: description.trim() || undefined,
         kind: listenKind,
         data: listenDef,
+        defaultRef: cloneListenDefaultRef(listenDefaultRef),
       });
     }
     message.success('已保存');
@@ -162,6 +169,8 @@ export function TemplateEditorDrawer() {
               kind={listenKind}
               onChangeDef={setListenDef}
               onChangeKind={onSwitchListenKind}
+              defaultRef={listenDefaultRef}
+              onChangeDefaultRef={setListenDefaultRef}
             />
           )}
         </div>
@@ -199,15 +208,44 @@ function ListenTemplateBody({
   kind,
   onChangeDef,
   onChangeKind,
+  defaultRef,
+  onChangeDefaultRef,
 }: {
   def: ListenDef;
   kind: ListenKind;
   onChangeDef: (d: ListenDef) => void;
   onChangeKind: (k: ListenKind) => void;
+  defaultRef?: ListenTemplateDefaultRef;
+  onChangeDefaultRef: (ref?: ListenTemplateDefaultRef) => void;
 }) {
   const [protoOpen, setProtoOpen] = useState(false);
   return (
     <div>
+      <div style={{ marginBottom: 12, padding: 12, border: '1px solid var(--border-color)', borderRadius: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>默认注册</span>
+          {defaultRef ? (
+            <Button size="small" onClick={() => onChangeDefaultRef(undefined)}>清除</Button>
+          ) : (
+            <Button size="small" onClick={() => onChangeDefaultRef({ server: '', route: { cmd: 0, act: 0 } })}>添加</Button>
+          )}
+        </div>
+        {defaultRef ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <Input
+              value={defaultRef.server}
+              onChange={(e) => onChangeDefaultRef({ ...defaultRef, server: e.target.value })}
+              placeholder="如 tcp:logic / udp:battle"
+            />
+            <RouteEditor
+              value={defaultRef.route}
+              onChange={(route) => onChangeDefaultRef({ ...defaultRef, route })}
+            />
+          </div>
+        ) : (
+          <Alert type="info" showIcon message="未设置默认注册；从 action 连到该 listen 时仍需手动填写 server 和 route。" />
+        )}
+      </div>
       <Tabs
         activeKey={kind}
         onChange={(k) => onChangeKind(k as ListenKind)}

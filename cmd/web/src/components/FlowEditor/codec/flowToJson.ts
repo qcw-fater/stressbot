@@ -7,6 +7,7 @@
 import type { ActionDef, FieldBind, FilterDef, StoreMapping } from '@/types/action';
 import type { ListenDef } from '@/types/listen';
 import type { FlowNode, ListenRef, WeightedOption } from '@/types/flow';
+import { pruneActionByPattern } from '../editors/ActionEditor/actionPrune';
 
 export interface ExportInput {
   defaultDelayMs: number;
@@ -82,21 +83,22 @@ function cleanListenRef(r: ListenRef): ListenRef {
 }
 
 function cleanAction(a: ActionDef): ActionDef {
-  const out: ActionDef = { pattern: a.pattern };
-  if (a.service) out.service = a.service;
-  if (a.route !== undefined && a.route !== null) out.route = a.route;
-  if (a.script) out.script = a.script;
-  if (a.address) out.address = a.address;
-  if (a.c2sProto) out.c2sProto = a.c2sProto;
-  if (a.s2cProto) out.s2cProto = a.s2cProto;
-  if (a.bindings?.length) out.bindings = a.bindings.map(cleanFieldBind);
-  if (a.store?.length) out.store = a.store.map(cleanStoreMapping);
-  if (typeof a.timeout === 'number' && a.timeout > 0) out.timeout = a.timeout;
-  if (typeof a.pollMs === 'number' && a.pollMs > 0) out.pollMs = a.pollMs;
-  if (a.url) out.url = a.url;
-  if (a.method) out.method = a.method;
-  if (a.contentType) out.contentType = a.contentType;
-  if (a.keys?.length) out.keys = [...a.keys];
+  const pruned = pruneActionByPattern(a);
+  const out: ActionDef = { pattern: pruned.pattern };
+  if (pruned.service) out.service = pruned.service;
+  if (pruned.route !== undefined && pruned.route !== null) out.route = pruned.route;
+  if (pruned.script) out.script = pruned.script;
+  if (pruned.address) out.address = pruned.address;
+  if (pruned.c2sProto) out.c2sProto = pruned.c2sProto;
+  if (pruned.s2cProto) out.s2cProto = pruned.s2cProto;
+  if (pruned.bindings?.length) out.bindings = pruned.bindings.map(cleanFieldBind);
+  if (pruned.store?.length) out.store = pruned.store.map(cleanStoreMapping);
+  if (typeof pruned.timeout === 'number' && pruned.timeout > 0) out.timeout = pruned.timeout;
+  if (typeof pruned.pollMs === 'number' && pruned.pollMs > 0) out.pollMs = pruned.pollMs;
+  if (pruned.url) out.url = pruned.url;
+  if (pruned.method) out.method = pruned.method;
+  if (pruned.contentType) out.contentType = pruned.contentType;
+  if (pruned.keys?.length) out.keys = [...pruned.keys];
   return out;
 }
 
@@ -131,6 +133,7 @@ function cleanFilter(f: FilterDef): FilterDef {
   if (f.path) out.path = f.path;
   if (f.value !== undefined) out.value = f.value;
   if (f.source) out.source = f.source;
+  if (f.mode) out.mode = f.mode;
   return out;
 }
 

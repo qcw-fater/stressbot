@@ -289,7 +289,7 @@ func ToFloat64Safe(v any) (float64, bool) {
 }
 
 // CompareValues 按操作符比较两个值。
-// 支持：eq/==, neq/!=, gt/>, gte/>=, lt/<, lte/<=, contains, in, timeWindow, dailyTimeWindow, notNil, isNil
+// 支持：eq/==, neq/!=, gt/>, gte/>=, lt/<, lte/<=, contains, notContains, in, notIn, timeWindow, dailyTimeWindow, notNil, isNil
 func CompareValues(a, b any, op string) bool {
 	aNum, aIsNum := ToFloat64Safe(a)
 	bNum, bIsNum := ToFloat64Safe(b)
@@ -351,9 +351,10 @@ func CompareValues(a, b any, op string) bool {
 		return false
 
 	case "contains":
-		aStr := fmt.Sprintf("%v", a)
-		bStr := fmt.Sprintf("%v", b)
-		return strings.Contains(aStr, bStr)
+		return containsValue(a, b)
+
+	case "notContains":
+		return !containsValue(a, b)
 
 	case "in":
 		list, ok := b.([]any)
@@ -366,6 +367,9 @@ func CompareValues(a, b any, op string) bool {
 			}
 		}
 		return false
+
+	case "notIn":
+		return !CompareValues(a, b, "in")
 
 	case "timeWindow":
 		var now int
@@ -425,6 +429,24 @@ func CompareValues(a, b any, op string) bool {
 	}
 
 	return false
+}
+
+// containsValue 判断 a 是否包含 b：数组使用 DeepEqual，其他类型按字符串包含。
+func containsValue(a, b any) bool {
+	if a == nil {
+		return false
+	}
+	if list, ok := a.([]any); ok {
+		for _, it := range list {
+			if DeepEqual(it, b) {
+				return true
+			}
+		}
+		return false
+	}
+	aStr := fmt.Sprintf("%v", a)
+	bStr := fmt.Sprintf("%v", b)
+	return strings.Contains(aStr, bStr)
 }
 
 // firstNonNil 返回第一个非 nil 的值。

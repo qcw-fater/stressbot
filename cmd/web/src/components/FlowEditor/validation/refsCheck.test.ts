@@ -151,6 +151,21 @@ describe('validateFlow', () => {
     expect(r.errors.find((e) => e.code === 'FILTER_UNKNOWN_OP')).toBeTruthy();
   });
 
+  it('FILTER_UNKNOWN_MODE：未知 filter mode 报错', () => {
+    const r = validateFlow(baseFlow({ actions: { A1: { pattern: 'tcpSend', service: 'logic', route: {}, c2sProto: 'X.Foo', bindings: [{ field: 'f', type: 'fixed', value: 1, filters: [{ op: 'eq', mode: 'badMode' as 'any' }] }] } } }));
+    expect(r.errors.find((e) => e.code === 'FILTER_UNKNOWN_MODE')).toBeTruthy();
+  });
+
+  it('FILTER_ARRAY_PATH_NO_MODE：数组通配 path 未设置 mode 报 warning', () => {
+    const r = validateFlow(baseFlow({ actions: { A1: { pattern: 'tcpSend', service: 'logic', route: {}, c2sProto: 'X.Foo', bindings: [{ field: 'f', type: 'fixed', value: 1, filters: [{ path: 'shopData[].ID', op: 'eq', value: 1 }] }] } } }));
+    expect(r.warnings.find((e) => e.code === 'FILTER_ARRAY_PATH_NO_MODE')).toBeTruthy();
+  });
+
+  it('notIn / notContains 是合法 filter op', () => {
+    const r = validateFlow(baseFlow({ actions: { A1: { pattern: 'tcpSend', service: 'logic', route: {}, c2sProto: 'X.Foo', bindings: [{ field: 'f', type: 'fixed', value: 1, filters: [{ op: 'notIn', value: [1, 2] }, { op: 'notContains', value: 'x' }] }] } } }));
+    expect(r.errors.find((e) => e.code === 'FILTER_UNKNOWN_OP')).toBeFalsy();
+  });
+
   // ── 正向 ──
 
   it('完整最小合法 flow 0 错误', () => {

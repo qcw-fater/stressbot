@@ -41,8 +41,10 @@ const VALID_NODE_TYPES = new Set(['sequence', 'action', 'loop', 'boolean', 'weig
 const VALID_FILTER_OPS = new Set([
   '', '==', '!=', '>', '>=', '<', '<=',
   'eq', 'neq', 'gt', 'gte', 'lt', 'lte',
-  'contains', 'in', 'timeWindow', 'dailyTimeWindow', 'notNil', 'isNil',
+  'contains', 'notContains', 'in', 'notIn', 'timeWindow', 'dailyTimeWindow', 'notNil', 'isNil',
 ]);
+
+const VALID_FILTER_MODES = new Set(['any', 'all', 'none']);
 
 const VALID_BINDING_TYPE_SET = new Set<string>(ALL_BINDING_TYPES);
 
@@ -555,6 +557,12 @@ function checkFilters(prefix: string, filters: FilterDef[], loc: { kind: 'action
     const f = filters[i];
     if (f.op && !VALID_FILTER_OPS.has(f.op)) {
       issues.push({ severity: 'error', code: 'FILTER_UNKNOWN_OP', message: `${prefix}.filters[${i}] 未知的 op "${f.op}"`, location: loc });
+    }
+    if (f.mode && !VALID_FILTER_MODES.has(f.mode)) {
+      issues.push({ severity: 'error', code: 'FILTER_UNKNOWN_MODE', message: `${prefix}.filters[${i}] 未知的 mode "${f.mode}"`, location: loc });
+    }
+    if (f.path?.includes('[]') && !f.mode) {
+      issues.push({ severity: 'warning', code: 'FILTER_ARRAY_PATH_NO_MODE', message: `${prefix}.filters[${i}] 使用数组通配路径但未配置 mode，建议选择 any / all / none`, location: loc });
     }
   }
   return issues;

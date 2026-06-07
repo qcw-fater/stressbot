@@ -227,11 +227,18 @@ func isImplicitRequired(btype string) bool {
 }
 
 // FilterDef 列表过滤条件定义。
+const (
+	FilterModeAny  = "any"  // 任意一个 path 取值满足比较
+	FilterModeAll  = "all"  // 所有 path 取值都满足比较
+	FilterModeNone = "none" // 没有任何 path 取值满足比较
+)
+
 type FilterDef struct {
 	Path   string `json:"path"`   // 字段导航路径（如 "items[].itemId"）
 	Op     string `json:"op"`     // 比较运算符（==, !=, >, <, >=, <=）
 	Value  any    `json:"value"`  // 比较目标值（固定值）
 	Source string `json:"source"` // 比较目标值（从 state 读取的 key）
+	Mode   string `json:"mode"`   // 多值聚合方式：any / all / none
 }
 
 // StoreMapping S2C 响应字段 -> StateStore 映射。

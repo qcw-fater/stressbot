@@ -501,6 +501,47 @@ func navigatePath(v any, path string) any {
 	return current
 }
 
+// navigatePathValues 按点分路径从嵌套 map/list 中提取一个或多个值。
+// 与 navigatePath 不同，它只用于 filters，支持 [] 数组通配，不影响 binding.path / store.field 的单值语义。
+func navigatePathValues(v any, path string) []any {
+	if path == "" {
+		return []any{v}
+	}
+	values := []any{v}
+	for _, key := range state.SplitPath(path) {
+		next := make([]any, 0, len(values))
+		for _, current := range values {
+			if current == nil {
+				continue
+			}
+			if key == "[]" {
+				if list, ok := current.([]any); ok {
+					next = append(next, list...)
+				}
+				continue
+			}
+			switch c := current.(type) {
+			case map[string]any:
+				if val, ok := c[key]; ok {
+					next = append(next, val)
+				}
+			case []any:
+				idxStr := strings.Trim(key, "[]")
+				var idx int
+				_, err := fmt.Sscanf(idxStr, "%d", &idx)
+				if err == nil && idx >= 0 && idx < len(c) {
+					next = append(next, c[idx])
+				}
+			}
+		}
+		if len(next) == 0 {
+			return nil
+		}
+		values = next
+	}
+	return values
+}
+
 // resolveAddress 解析 address 配置：支持 "state:key" 取 StateStore，否则按字面量
 func (ae *ActionExecutor) resolveAddress(addr string) string {
 	if strings.HasPrefix(addr, PrefixState) {
@@ -763,12 +804,7 @@ func (ae *ActionExecutor) applyFilters(list []any, filters []FilterDef) []any {
 // matchFilters 检查列表项是否满足所有过滤条件
 func (ae *ActionExecutor) matchFilters(item any, filters []FilterDef) bool {
 	for _, f := range filters {
-		var fieldVal any
-		if f.Path == "" {
-			fieldVal = item
-		} else {
-			fieldVal = navigatePath(item, f.Path)
-		}
+		fieldVals := navigatePathValues(item, f.Path)
 
 		var targetVal any
 		if f.Source != "" {
@@ -777,11 +813,49 @@ func (ae *ActionExecutor) matchFilters(item any, filters []FilterDef) bool {
 			targetVal = f.Value
 		}
 
-		if !state.CompareValues(fieldVal, targetVal, f.Op) {
+		if !matchFilterValues(fieldVals, targetVal, f.Op, f.Mode) {
 			return false
 		}
 	}
 	return true
+}
+
+// matchFilterValues 按 mode 聚合多个 path 取值的比较结果。
+func matchFilterValues(values []any, targetVal any, op string, mode string) bool {
+	if len(values) == 0 {
+		return mode == FilterModeNone
+	}
+
+	switch mode {
+	case FilterModeAll:
+		for _, v := range values {
+			if !state.CompareValues(v, targetVal, op) {
+				return false
+			}
+		}
+		return true
+	case FilterModeNone:
+		for _, v := range values {
+			if state.CompareValues(v, targetVal, op) {
+				return false
+			}
+		}
+		return true
+	case FilterModeAny, "":
+		for _, v := range values {
+			if state.CompareValues(v, targetVal, op) {
+				return true
+			}
+		}
+		return false
+	default:
+		for _, v := range values {
+			if state.CompareValues(v, targetVal, op) {
+				return true
+			}
+		}
+		return false
+	}
 }
 
 // evaluateCondition 评估条件表达式（仅 state: 前缀）。返回 true 表示条件满足（或无条件）。

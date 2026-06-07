@@ -56,11 +56,14 @@ export const ALL_BINDING_TYPES: BindingType[] = [
   'listSize',
 ];
 
+export type FilterMode = 'any' | 'all' | 'none';
+
 export interface FilterDef {
   path?: string;
-  op: string; // eq / neq / gt / gte / lt / lte / contains / in / timeWindow / dailyTimeWindow / notNil / isNil
+  op: string; // eq / neq / gt / gte / lt / lte / contains / notContains / in / notIn / timeWindow / dailyTimeWindow / notNil / isNil
   value?: unknown;
   source?: string;
+  mode?: FilterMode;
 }
 
 export interface FieldBind {

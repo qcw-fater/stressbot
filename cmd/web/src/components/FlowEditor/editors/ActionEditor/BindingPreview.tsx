@@ -84,9 +84,9 @@ function fmtState(source?: string, path?: string): string {
   return s;
 }
 
-function fmtFilters(filters?: { path?: string; op: string }[]): string {
+function fmtFilters(filters?: { path?: string; op: string; mode?: string }[]): string {
   if (!filters?.length) return '';
-  return ` (filter: ${filters.map((f) => `${f.path || '.'} ${f.op}`).join(', ')})`;
+  return ` (filter: ${filters.map((f) => `${f.mode ? `[${f.mode}] ` : ''}${f.path || '.'} ${f.op}`).join(', ')})`;
 }
 
 function genSampleString(len: number): string {

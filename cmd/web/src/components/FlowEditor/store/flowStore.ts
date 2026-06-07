@@ -14,6 +14,8 @@ import type { ListenDef } from '@/types/listen';
 import type { FlowNode, TaskFlow } from '@/types/flow';
 import type { FlowLayout } from '@/types/editor';
 import { emptyFlowLayout } from '@/types/editor';
+import type { ListenTemplateDefaultRef } from '../library/templateStore';
+import { cloneListenDefaultRef } from '../library/listenTemplateDefaults';
 import { dagreLayout } from '../codec/dagreLayout';
 import { jsonToFlow } from '../codec/jsonToFlow';
 import { flowToJson, type FlowJson } from '../codec/flowToJson';
@@ -30,6 +32,9 @@ interface FlowState {
   rfNodes: RFNode[];
   rfEdges: Edge[];
   layout: FlowLayout;
+
+  // ── UI-only：模板带入的默认监听注册信息，不导出到 flow.json ────────
+  listenDefaultRefs: Record<string, ListenTemplateDefaultRef | undefined>;
 
   // ── 派生：listen 引用计数 ────────
   listenRefCount: Record<string, number>;
@@ -81,6 +86,7 @@ interface FlowState {
   replaceListen: (name: string, def: ListenDef) => void;
   removeListen: (name: string) => void;
   renameListen: (oldName: string, newName: string) => void;
+  setListenDefaultRef: (name: string, ref?: ListenTemplateDefaultRef) => void;
 
   /** 触发派生数据重算（rfNodes/rfEdges/listenRefCount） */
   syncDerived: () => void;
@@ -94,6 +100,7 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
   rfNodes: [],
   rfEdges: [],
   layout: emptyFlowLayout(),
+  listenDefaultRefs: {},
   listenRefCount: {},
   nodesByListen: {},
   issuesByNodeId: {},
@@ -150,6 +157,7 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
       nodes: flow.nodes,
       actions: flow.actions,
       listens: flow.listens,
+      listenDefaultRefs: {},
       rfNodes: positioned,
       rfEdges,
       listenRefCount,
@@ -172,6 +180,7 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
       nodes: { main: { type: 'sequence', next: [], description: '入口节点' } },
       actions: {},
       listens: {},
+      listenDefaultRefs: {},
       rfNodes: [],
       rfEdges: [],
       layout: {
@@ -399,8 +408,10 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
   removeListen: (name) => {
     set((s) => {
       const listens = { ...s.listens };
+      const listenDefaultRefs = { ...s.listenDefaultRefs };
       delete listens[name];
-      return { listens };
+      delete listenDefaultRefs[name];
+      return { listens, listenDefaultRefs };
     });
     get().syncDerived();
   },
@@ -426,9 +437,25 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
           nodes[k] = v;
         }
       }
-      return { listens, nodes };
+      let listenDefaultRefs = s.listenDefaultRefs;
+      if (oldName in s.listenDefaultRefs) {
+        listenDefaultRefs = { ...s.listenDefaultRefs };
+        listenDefaultRefs[newName] = cloneListenDefaultRef(listenDefaultRefs[oldName]);
+        delete listenDefaultRefs[oldName];
+      }
+      return { listens, nodes, listenDefaultRefs };
     });
     get().syncDerived();
+  },
+
+  setListenDefaultRef: (name, ref) => {
+    set((s) => {
+      const listenDefaultRefs = { ...s.listenDefaultRefs };
+      const next = cloneListenDefaultRef(ref);
+      if (next) listenDefaultRefs[name] = next;
+      else delete listenDefaultRefs[name];
+      return { listenDefaultRefs };
+    });
   },
 
   syncDerived: () => {

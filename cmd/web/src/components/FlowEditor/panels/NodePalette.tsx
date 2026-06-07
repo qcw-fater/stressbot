@@ -9,7 +9,8 @@
  */
 
 import { App as AntApp, Empty, Input, Tooltip } from 'antd';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { NodeType } from '@/types/flow';
 import {
   listActionTemplates,
@@ -20,6 +21,7 @@ import {
   type ActionTemplate,
   type ListenTemplate,
 } from '../library/templateStore';
+import { cloneListenDefaultRef, defaultRefSummary } from '../library/listenTemplateDefaults';
 import { useEditorStore } from '../store/editorStore';
 import { classifyListen } from '@/types/listen';
 import './NodePalette.css';
@@ -69,8 +71,6 @@ export function NodePalette() {
   const [actionFilter, setActionFilter] = useState('');
   const [listenFilter, setListenFilter] = useState('');
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
   const setClipboard = useEditorStore((s) => s.setClipboard);
 
@@ -135,6 +135,7 @@ export function NodePalette() {
       kind: 'listen',
       listenName: t.name,
       listen: JSON.parse(JSON.stringify(t.data)),
+      defaultRef: cloneListenDefaultRef(t.defaultRef),
     });
     message.success('已复制（在画布空白处右键 → 粘贴）');
   };
@@ -145,10 +146,12 @@ export function NodePalette() {
     template: ActionTemplate | ListenTemplate,
   ) => {
     e.preventDefault();
-    const rect = wrapperRef.current?.getBoundingClientRect();
+    const menuW = 150;
+    const menuH = 104;
+    const margin = 8;
     setMenu({
-      x: e.clientX - (rect?.left ?? 0),
-      y: e.clientY - (rect?.top ?? 0),
+      x: Math.max(margin, Math.min(e.clientX, window.innerWidth - menuW - margin)),
+      y: Math.max(margin, Math.min(e.clientY, window.innerHeight - menuH - margin)),
       kind,
       template,
     });
@@ -168,7 +171,7 @@ export function NodePalette() {
   };
 
   return (
-    <div ref={wrapperRef} className="palette-root">
+    <div className="palette-root">
       {/* 节点类型：固定高度，4×2 grid，不滚动 */}
       <div className="palette-nodes">
         <div className="palette-section-title">节点类型</div>
@@ -248,8 +251,10 @@ export function NodePalette() {
             ) : (
               filteredListens.map((t) => {
                 const kind = t.kind || classifyListen(t.data);
+                const refSummary = defaultRefSummary(t.defaultRef);
+                const title = t.description ?? `${t.name} · ${kind}${refSummary ? ` · ${refSummary}` : ''}（双击编辑 / 右键菜单 / 拖入画布）`;
                 return (
-                  <Tooltip key={t.id} title={t.description ?? `${t.name} · ${kind}（双击编辑 / 右键菜单 / 拖入画布）`} mouseEnterDelay={0.4}>
+                  <Tooltip key={t.id} title={title} mouseEnterDelay={0.4}>
                     <div
                       className="tpl-card tpl-card-listen"
                       draggable
@@ -262,6 +267,7 @@ export function NodePalette() {
                         <span className="pattern-badge" data-pattern={kind}>
                           {kind}
                         </span>
+                        {refSummary && <span title={refSummary}>{t.defaultRef?.server}</span>}
                       </div>
                     </div>
                   </Tooltip>
@@ -273,7 +279,7 @@ export function NodePalette() {
       </div>
 
       {/* 右键菜单 */}
-      {menu && (
+      {menu && createPortal(
         <div
           className="palette-context-menu"
           style={{ left: menu.x, top: menu.y }}
@@ -312,7 +318,8 @@ export function NodePalette() {
           >
             删除模板
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

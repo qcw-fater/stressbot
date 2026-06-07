@@ -20,6 +20,7 @@ import { DelayInput } from '../shared/DelayInput';
 import { SaveTemplateButton } from '../../library/SaveTemplateButton';
 import { ActionPreview } from './ActionPreview';
 import { LuaScriptField } from '../shared/LuaScriptField';
+import { pruneActionByPattern } from './actionPrune';
 import type { ActionDef, ActionPattern } from '@/types/action';
 
 export interface ActionEditorProps {
@@ -63,7 +64,7 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
   };
 
   const onPatternChange = (p: ActionPattern) => {
-    onActionDefChange({ ...effectiveAction, pattern: p });
+    onActionDefChange(pruneActionByPattern({ ...effectiveAction, pattern: p }));
   };
 
   const isLua = effectiveAction.pattern === 'lua';

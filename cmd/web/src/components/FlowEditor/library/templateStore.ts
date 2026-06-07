@@ -11,6 +11,11 @@ import { nanoid } from 'nanoid';
 import type { ActionDef } from '@/types/action';
 import type { ListenDef } from '@/types/listen';
 
+export interface ListenTemplateDefaultRef {
+  server: string;
+  route: unknown;
+}
+
 // idb-keyval 的 createStore 在同一 DB 名下只能注册一个 objectStore（IndexedDB 限制）。
 // 用两个独立 DB 隔离 action / listen 模板，避免 NotFoundError。
 const actionStore = createStore('stressbot-action-templates', 'data');
@@ -46,6 +51,7 @@ export interface ListenTemplate {
   description?: string;
   kind: string;
   data: ListenDef;
+  defaultRef?: ListenTemplateDefaultRef;
   createdAt: number;
 }
 

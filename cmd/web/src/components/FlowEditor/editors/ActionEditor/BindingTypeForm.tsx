@@ -316,7 +316,7 @@ function FiltersField({ binding, set, sourceProto }: { binding: FieldBind; set: 
 
   if (!filters.length) {
     return (
-      <Tooltip title="从 state 列表中先按条件筛选，再从结果中随机取值" mouseEnterDelay={0.4}>
+      <Tooltip title="从 state 列表中先按条件筛选保留，再从保留结果中随机取值" mouseEnterDelay={0.4}>
         <a onClick={addFilter} style={{ fontSize: 11 }}>+ 添加 filter</a>
       </Tooltip>
     );
@@ -341,7 +341,7 @@ function FiltersField({ binding, set, sourceProto }: { binding: FieldBind; set: 
   );
 }
 
-const FILTER_OPS = ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'in', 'timeWindow', 'dailyTimeWindow', 'notNil', 'isNil'] as const;
+const FILTER_OPS = ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'notContains', 'in', 'notIn', 'timeWindow', 'dailyTimeWindow', 'notNil', 'isNil'] as const;
 const FILTER_OP_META: Record<string, { label: string; desc: string }> = {
   eq:              { label: '= 等于',         desc: '字段值等于指定值' },
   neq:             { label: '≠ 不等于',       desc: '字段值不等于指定值' },
@@ -349,17 +349,25 @@ const FILTER_OP_META: Record<string, { label: string; desc: string }> = {
   gte:             { label: '≥ 大于等于',     desc: '字段值大于或等于指定值' },
   lt:              { label: '< 小于',         desc: '字段值小于指定值' },
   lte:             { label: '≤ 小于等于',     desc: '字段值小于或等于指定值' },
-  contains:        { label: '包含',           desc: '字符串包含指定子串' },
+  contains:        { label: '包含',           desc: '字符串或列表包含指定值' },
+  notContains:     { label: '不包含',         desc: '字符串或列表不包含指定值' },
   in:              { label: '在列表中',       desc: '字段值在指定列表中' },
+  notIn:           { label: '不在列表中',     desc: '字段值不在指定列表中' },
   timeWindow:      { label: '时间窗口',       desc: '检查字段值（分钟数）是否在指定时间范围内' },
   dailyTimeWindow: { label: '每日时间窗口',   desc: '检查字段值是否在每日开放时间段内' },
   notNil:          { label: '不为空',         desc: '字段值不为 nil' },
   isNil:           { label: '为空',           desc: '字段值为 nil' },
 };
 
+const FILTER_MODE_OPTIONS = [
+  { value: 'any', label: '任意' },
+  { value: 'all', label: '全部' },
+  { value: 'none', label: '无任意' },
+] as const;
+
 const NO_VALUE_OPS = new Set(['notNil', 'isNil']);
 const STRUCTURED_OPS = new Set(['timeWindow', 'dailyTimeWindow']);
-const LIST_OPS = new Set(['in']);
+const LIST_OPS = new Set(['in', 'notIn']);
 
 function FilterRow({ filter, sourceProto, onChange, onRemove }: {
   filter: FilterDef;
@@ -383,6 +391,17 @@ function FilterRow({ filter, sourceProto, onChange, onRemove }: {
           placeholder="字段路径"
           style={{ flex: 1 }}
         />
+        <Tooltip title="数组通配路径（如 items[].id）使用：任意 / 全部 / 无任意；普通路径可留空">
+          <Select
+            value={filter.mode}
+            allowClear
+            placeholder="单值"
+            onChange={(v) => onChange({ mode: v })}
+            options={FILTER_MODE_OPTIONS.map((m) => ({ value: m.value, label: m.label }))}
+            style={{ width: 88 }}
+            size="small"
+          />
+        </Tooltip>
         <Select
           value={op}
           onChange={(v) => {

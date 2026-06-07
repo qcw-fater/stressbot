@@ -126,6 +126,14 @@
         },
         {
           "route": {
+            "cmd": 35,
+            "act": 3
+          },
+          "server": "tcp:logic",
+          "listen": "shopLimitDataUpdate"
+        },
+        {
+          "route": {
             "cmd": 5,
             "act": 3
           },
@@ -203,27 +211,18 @@
           },
           "server": "tcp:logic",
           "listen": "roomUpdateStatus"
-        },
-        {
-          "route": {
-            "cmd": 1,
-            "act": 2
-          },
-          "server": "tcp:logic",
-          "listen": null
         }
-      ],
-      "delayMs": -1
+      ]
     },
     "PlayerLogin": {
       "type": "action",
       "action": "PlayerLogin",
-      "errorStrategy": "abort",
-      "delayMs": -1
+      "errorStrategy": "abort"
     },
     "RequestPlayerData": {
       "type": "action",
-      "action": "RequestPlayerData"
+      "action": "RequestPlayerData",
+      "errorStrategy": "abort"
     },
     "ReportBattleDelay": {
       "type": "action",
@@ -1080,33 +1079,9 @@
       "c2sProto": "Game.LbsPositioningC2S",
       "bindings": [
         {
-          "type": "randomPick",
+          "type": "fixed",
           "field": "lbsId",
-          "value": 1,
-          "values": [
-            12001001,
-            12001002,
-            12001003,
-            12001004,
-            12001005,
-            12001006,
-            12001007,
-            12001008,
-            12001009,
-            12001010,
-            12001011,
-            12001012,
-            12001013,
-            12001014,
-            12001015,
-            12001016,
-            12001017,
-            12001018,
-            12001019,
-            12001020,
-            12001021,
-            12001022
-          ]
+          "value": 10001001
         }
       ]
     },
@@ -1303,13 +1278,14 @@
       ]
     },
     "ChangeHero": {
-      "pattern": "tcpSend",
+      "pattern": "tcpRequest",
       "service": "logic",
       "route": {
         "cmd": 2,
         "act": 11
       },
       "c2sProto": "Game.MainChangeHeroC2S",
+      "s2cProto": "Game.MainChangeHeroS2C",
       "bindings": [
         {
           "type": "stateRandom",
@@ -1324,13 +1300,14 @@
       ]
     },
     "ChangeShowHero": {
-      "pattern": "tcpSend",
+      "pattern": "tcpRequest",
       "service": "logic",
       "route": {
         "cmd": 2,
         "act": 68
       },
       "c2sProto": "Game.MainChangeShowHeroC2S",
+      "s2cProto": "Game.MainChangeShowHeroS2C",
       "bindings": [
         {
           "type": "stateRandom",
@@ -1345,13 +1322,14 @@
       ]
     },
     "ChangeBackground": {
-      "pattern": "tcpSend",
+      "pattern": "tcpRequest",
       "service": "logic",
       "route": {
         "cmd": 2,
         "act": 14
       },
       "c2sProto": "Game.MainChangeBackgroundC2S",
+      "s2cProto": "Game.MainChangeBackgroundS2C",
       "bindings": [
         {
           "type": "randomPick",
@@ -1367,13 +1345,14 @@
       ]
     },
     "ChangeIcon": {
-      "pattern": "tcpSend",
+      "pattern": "tcpRequest",
       "service": "logic",
       "route": {
         "cmd": 2,
         "act": 12
       },
       "c2sProto": "Game.MainChangeIconC2S",
+      "s2cProto": "Game.MainChangeIconS2C",
       "bindings": [
         {
           "type": "randomPick",
@@ -1388,13 +1367,14 @@
       ]
     },
     "ChangeIframe": {
-      "pattern": "tcpSend",
+      "pattern": "tcpRequest",
       "service": "logic",
       "route": {
         "cmd": 2,
         "act": 13
       },
       "c2sProto": "Game.MainChangeIframeC2S",
+      "s2cProto": "Game.MainChangeIframeS2C",
       "bindings": [
         {
           "type": "randomPick",
@@ -1410,13 +1390,14 @@
       ]
     },
     "ChangeTitle": {
-      "pattern": "tcpSend",
+      "pattern": "tcpRequest",
       "service": "logic",
       "route": {
         "cmd": 2,
         "act": 49
       },
       "c2sProto": "Game.MainChangeTitleC2S",
+      "s2cProto": "Game.MainChangeTitleS2C",
       "bindings": [
         {
           "type": "randomPick",
@@ -1435,13 +1416,14 @@
       ]
     },
     "ChangeExpressShowHero": {
-      "pattern": "tcpSend",
+      "pattern": "tcpRequest",
       "service": "logic",
       "route": {
         "cmd": 2,
         "act": 69
       },
       "c2sProto": "Game.MainChangeExpressShowHeroC2S",
+      "s2cProto": "Game.MainChangeExpressShowHeroS2C",
       "bindings": [
         {
           "type": "stateRandom",
@@ -1573,13 +1555,14 @@
       ]
     },
     "LotterySelectUpHero": {
-      "pattern": "tcpSend",
+      "pattern": "tcpRequest",
       "service": "logic",
       "route": {
         "cmd": 23,
         "act": 12
       },
       "c2sProto": "Game.LotterySelectUpHeroC2S",
+      "s2cProto": "Game.LotterySelectUpHeroS2C",
       "bindings": [
         {
           "type": "randomInt",
@@ -1634,13 +1617,14 @@
       ]
     },
     "LotteryLuckyDraw": {
-      "pattern": "tcpSend",
+      "pattern": "tcpRequest",
       "service": "logic",
       "route": {
         "cmd": 23,
         "act": 1
       },
       "c2sProto": "Game.LotteryLuckyDrawC2S",
+      "s2cProto": "Game.LotteryLuckyDrawS2C",
       "bindings": [
         {
           "type": "fixed",
@@ -1668,13 +1652,14 @@
       ]
     },
     "LotteryGetLog": {
-      "pattern": "tcpSend",
+      "pattern": "tcpRequest",
       "service": "logic",
       "route": {
         "cmd": 23,
         "act": 4
       },
       "c2sProto": "Game.LotteryGetLogC2S",
+      "s2cProto": "Game.LotteryGetLogS2C",
       "bindings": [
         {
           "type": "stateRandom",
@@ -1744,79 +1729,8 @@
       "s2cProto": "Game.SystemShopOpenS2C"
     },
     "SystemShopBuy": {
-      "pattern": "tcpSend",
-      "service": "logic",
-      "route": {
-        "cmd": 35,
-        "act": 4
-      },
-      "c2sProto": "Game.SystemShopBuyC2S",
-      "bindings": [
-        {
-          "type": "randomPick",
-          "values": [
-            [
-              201005,
-              10
-            ],
-            [
-              201006,
-              50
-            ],
-            [
-              201008,
-              50
-            ],
-            [
-              201009,
-              150
-            ],
-            [
-              201049,
-              150
-            ],
-            [
-              201050,
-              300
-            ],
-            [
-              201051,
-              1000
-            ],
-            [
-              201052,
-              250
-            ],
-            [
-              201053,
-              130
-            ]
-          ],
-          "storeAs": "_shopPick"
-        },
-        {
-          "type": "fixed",
-          "field": "goodsList[0].shopId",
-          "value": 1
-        },
-        {
-          "type": "state",
-          "field": "goodsList[0].goodsId",
-          "source": "_shopPick",
-          "path": "[0]"
-        },
-        {
-          "type": "fixed",
-          "field": "goodsList[0].buyNumber",
-          "value": 1
-        },
-        {
-          "type": "state",
-          "field": "goodsList[0].costNumber",
-          "source": "_shopPick",
-          "path": "[1]"
-        }
-      ]
+      "pattern": "lua",
+      "script": "system_shop_buy.lua"
     },
     "UnlockAdvanced": {
       "pattern": "tcpRequest",
@@ -1996,13 +1910,14 @@
       ]
     },
     "RequestAddFriend": {
-      "pattern": "tcpSend",
+      "pattern": "tcpRequest",
       "service": "logic",
       "route": {
         "cmd": 15,
         "act": 7
       },
       "c2sProto": "Game.FriendAddRequestC2S",
+      "s2cProto": "Game.FriendAddRequestS2C",
       "bindings": [
         {
           "type": "stateFirst",
@@ -2029,13 +1944,14 @@
       ]
     },
     "DisposeFriendRequest": {
-      "pattern": "tcpSend",
+      "pattern": "tcpRequest",
       "service": "logic",
       "route": {
         "cmd": 15,
         "act": 9
       },
       "c2sProto": "Game.FriendDisposeRequestC2S",
+      "s2cProto": "Game.FriendDisposeRequestS2C",
       "bindings": [
         {
           "type": "stateFirst",
@@ -2052,13 +1968,14 @@
       ]
     },
     "DelFriend": {
-      "pattern": "tcpSend",
+      "pattern": "tcpRequest",
       "service": "logic",
       "route": {
         "cmd": 15,
         "act": 10
       },
       "c2sProto": "Game.FriendDelC2S",
+      "s2cProto": "Game.FriendDelS2C",
       "bindings": [
         {
           "type": "stateRandom",
@@ -2088,7 +2005,23 @@
       ]
     },
     "heroUpdate": {},
-    "shopDataUpdate": {},
+    "shopDataUpdate": {
+      "s2cProto": "Game.SystemShopDataS2C",
+      "store": [
+        {
+          "setter": "systemShopData"
+        }
+      ]
+    },
+    "shopLimitDataUpdate": {
+      "s2cProto": "Game.SystemShopLimitDataS2C",
+      "store": [
+        {
+          "setter": "systemShopGroupData",
+          "field": "shopGroupData"
+        }
+      ]
+    },
     "teamUpdateInfo": {},
     "teamNotifyInvite": {},
     "teamJoin": {},

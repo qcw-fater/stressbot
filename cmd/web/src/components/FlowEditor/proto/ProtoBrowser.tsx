@@ -3,13 +3,14 @@
  *
  * 两种模式：
  *   - 独立模式（不传 open/onClose/onSelect）：由 activePanel 控制，渲染为 FloatingWindow
- *   - 选择器模式（传 open/onClose/onSelect）：嵌入编辑器中临时选消息，渲染为 Modal
+ *   - 选择器模式（传 open/onClose/onSelect）：嵌入编辑器中临时选消息，渲染为临时 FloatingWindow
  */
 
 import { Button, Empty, Input, List, Tooltip, Typography } from 'antd';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useEditorStore } from '../store/editorStore';
+import { useFloatingWindowStore } from '../store/floatingWindowStore';
 import { protoRegistry } from './ProtoRegistry';
 import { useProtoStore } from './protoStore';
 import { FloatingWindow } from '../panels/FloatingWindow';
@@ -37,9 +38,14 @@ export function ProtoBrowser({ windowId: customWindowId, open: openProp, onClose
 
   const protoStatus = useProtoStore((s) => s.status);
   const protoHash = useProtoStore((s) => s.hash);
+  const closeWindow = useFloatingWindowStore((s) => s.closeWindow);
 
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<string | undefined>();
+
+  useEffect(() => {
+    if (!open && isPickerMode) closeWindow(windowId);
+  }, [open, isPickerMode, closeWindow, windowId]);
 
   const messages = useMemo(() => {
     if (protoStatus !== 'ready' || !protoRegistry.isLoaded()) return [];
@@ -58,7 +64,11 @@ export function ProtoBrowser({ windowId: customWindowId, open: openProp, onClose
 
   const handleClose = () => {
     onClose?.();
-    if (!onClose) closePanel('protoBrowser');
+    if (isPickerMode) {
+      closeWindow(windowId);
+    } else if (!onClose) {
+      closePanel('protoBrowser');
+    }
   };
 
   const content = (

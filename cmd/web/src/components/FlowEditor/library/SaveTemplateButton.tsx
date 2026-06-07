@@ -18,6 +18,8 @@ import {
   updateActionTemplate,
   updateListenTemplate,
 } from './templateStore';
+import { useFlowStore } from '../store/flowStore';
+import { inferListenDefaultRef } from './listenTemplateDefaults';
 
 interface ActionProps {
   kind: 'action';
@@ -64,12 +66,15 @@ export function SaveTemplateButton(props: ActionProps | ListenProps) {
           });
         }
       } else {
+        const inferred = inferListenDefaultRef(useFlowStore.getState().nodes, props.name);
+        const defaultRef = inferred.defaultRef ?? (existing && 'defaultRef' in existing ? existing.defaultRef : undefined);
         if (existing) {
           await updateListenTemplate({
             ...existing,
             description: props.description,
             kind: classifyListen(props.data),
             data: props.data,
+            defaultRef,
           });
         } else {
           await saveListenTemplate({
@@ -77,7 +82,11 @@ export function SaveTemplateButton(props: ActionProps | ListenProps) {
             description: props.description,
             kind: classifyListen(props.data),
             data: props.data,
+            defaultRef,
           });
+        }
+        if (inferred.ambiguous) {
+          message.warning('存在多条不同监听注册，已使用第一条作为模板默认注册');
         }
       }
       message.success(`已保存模板 "${props.name}"`);
