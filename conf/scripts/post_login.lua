@@ -32,17 +32,18 @@ function execute(r)
         platform = platform
     })
 
-    if code < 0 then
+    if code ~= 0 and code < 100 then
         log.error("PostLogin HTTP 请求失败: account=" .. tostring(account)
             .. " url=" .. tostring(url)
-            .. " code=" .. tostring(code)            .. " body=" .. body_preview(body))
-        return 3  -- 3=SEND_FAILED：HTTP 传输层失败
+            .. " code=" .. tostring(code))
+        return code
     end
 
     if code < 200 or code >= 300 then
         log.error("PostLogin HTTP 状态异常: account=" .. tostring(account)
             .. " url=" .. tostring(url)
-            .. " status=" .. tostring(code)            .. " body=" .. body_preview(body))
+            .. " status=" .. tostring(code)
+            .. " body=" .. body_preview(body))
         return 54  -- 54=LUA_EXIT_CODE：业务层异常
     end
 

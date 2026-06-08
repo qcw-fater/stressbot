@@ -628,9 +628,13 @@ func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int,
 // 而非全部塌缩为 ErrLuaExitCode。
 //
 // 映射规则：
-//   - code ∈ 已知框架 errcode     → NewActionError，由 classifyResult 按 Code 分流 ResultTimeout/ResultFailure
-//   - code ≥ 100                  → NewServerError，走 ResultFailure + error map (Kind=server)
-//   - 其他                         → 兜底 ErrLuaExitCode
+//   - code ∈ 已知框架 errcode     → NewActionError(KindFramework)，由 classifyResult 按 Code 分流 ResultTimeout/ResultFailure
+//   - code ≥ 100                  → NewServerError(KindServer)，本函数的兜底规则：未知大数归为服务端错误
+//   - 其他                         → 兜底 ErrLuaExitCode(KindFramework)
+//
+// 已知缺陷：服务端 HeaderErr 值如果恰好与框架 errcode 碰撞（如 HeaderErr=5 与 ErrConnNotFound=5），
+// switch 会优先匹配框架码，导致本该归为 KindServer 的错误被错误归类为 KindFramework。
+// 声明式路径（handleHeaderError）直接用 NewServerError 不经 switch，所以不受影响。
 func luaCodeToActionErr(code int, script string) error {
 	detail := fmt.Sprintf("script=%s", script)
 

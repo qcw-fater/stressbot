@@ -7,10 +7,11 @@ function execute(r)
     local logicAddress = robot.get("logicAddress") or "127.0.0.1:9001"
     log.info("连接逻辑服: address=" .. tostring(logicAddress))
 
-    local ok = network.connect_tcp("logic", logicAddress)
-    if not ok then
-        log.error("连接逻辑服失败: address=" .. tostring(logicAddress))
-        return 1  -- 1=CONN_NOT_FOUND：连接没建好（语义准确）
+    local code = network.connect_tcp("logic", logicAddress)
+    if code ~= 0 then
+        log.error("连接逻辑服失败: address=" .. tostring(logicAddress)
+            .. " code=" .. tostring(code))
+        return code
     end
 
     -- 发送空包获取密钥并设置到连接

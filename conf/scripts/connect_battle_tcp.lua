@@ -39,12 +39,13 @@ function execute(r)
         .. " battleId=" .. tostring(battleId)
         .. " fighterIndex=" .. tostring(fighterIndex))
 
-    local ok = network.connect_tcp("battle", battleAddress)
-    if not ok then
+    local code = network.connect_tcp("battle", battleAddress)
+    if code ~= 0 then
         log.error("连接战斗服 TCP 失败: address=" .. tostring(battleAddress)
             .. " battleId=" .. tostring(battleId)
-            .. " fighterIndex=" .. tostring(fighterIndex))
-        return 1  -- 1=CONN_NOT_FOUND：连接没建好（语义准确）
+            .. " fighterIndex=" .. tostring(fighterIndex)
+            .. " code=" .. tostring(code))
+        return code
     end
 
     -- 发送空包获取密钥并设置到连接

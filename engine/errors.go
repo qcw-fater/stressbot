@@ -41,12 +41,16 @@ func NewServerError(serverCode uint64, detail string) *ActionError {
 	return &ActionError{Kind: errcode.KindServer, Code: errcode.ErrorCode(serverCode), Detail: detail}
 }
 
-// Error 格式：[framework/1] service=logic 或 [server/1004] desc: route=CreateTeam。
+// Error 格式：[framework/1] service=logic: cause message 或 [server/1004] desc: route=CreateTeam。
 func (e *ActionError) Error() string {
+	s := fmt.Sprintf("[%s/%d]", e.Kind, e.Code)
 	if e.Detail != "" {
-		return fmt.Sprintf("[%s/%d] %s", e.Kind, e.Code, e.Detail)
+		s += " " + e.Detail
 	}
-	return fmt.Sprintf("[%s/%d]", e.Kind, e.Code)
+	if e.cause != nil {
+		s += ": " + e.cause.Error()
+	}
+	return s
 }
 
 // Unwrap 返回被包装的下层错误，支持 errors.Is 链式判断。

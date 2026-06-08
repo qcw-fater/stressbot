@@ -51,12 +51,13 @@ function execute(r)
         .. " battleId=" .. tostring(battleId)
         .. " fighterIndex=" .. tostring(fighterIndex))
 
-    local ok = network.connect_udp("battle", battleAddress)
-    if not ok then
+    local code = network.connect_udp("battle", battleAddress)
+    if code ~= 0 then
         log.error("ConnectBattleUDP 连接失败: address=" .. tostring(battleAddress)
             .. " battleId=" .. tostring(battleId)
-            .. " fighterIndex=" .. tostring(fighterIndex))
-        return 1  -- 1=CONN_NOT_FOUND
+            .. " fighterIndex=" .. tostring(fighterIndex)
+            .. " code=" .. tostring(code))
+        return code
     end
 
     -- 设置 UDP 密钥（从 listen_start_loading 保存）

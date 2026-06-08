@@ -56,13 +56,13 @@ function execute(r)
         platform = platform
     })
 
-    if code < 0 then
+    if code ~= 0 and code < 100 then
         log.error("SelectRole HTTP 请求失败: account=" .. tostring(account)
             .. " url=" .. tostring(url)
             .. " playerId=" .. tostring(playerId)
             .. " zoneId=" .. tostring(zoneId)
-            .. " code=" .. tostring(code)            .. " body=" .. body_preview(body))
-        return 3  -- 3=SEND_FAILED
+            .. " code=" .. tostring(code))
+        return code
     end
 
     if code < 200 or code >= 300 then
@@ -70,7 +70,8 @@ function execute(r)
             .. " url=" .. tostring(url)
             .. " playerId=" .. tostring(playerId)
             .. " zoneId=" .. tostring(zoneId)
-            .. " status=" .. tostring(code)            .. " body=" .. body_preview(body))
+            .. " status=" .. tostring(code)
+            .. " body=" .. body_preview(body))
         return 54
     end
 

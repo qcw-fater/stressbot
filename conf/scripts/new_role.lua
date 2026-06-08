@@ -35,13 +35,13 @@ function execute(r)
         channel = channel
     })
 
-    if code < 0 then
+    if code ~= 0 and code < 100 then
         log.error("NewRole HTTP 请求失败: account=" .. tostring(account)
             .. " url=" .. tostring(url)
             .. " heroId=" .. tostring(heroId)
             .. " zoneId=" .. tostring(zoneId)
-            .. " code=" .. tostring(code)            .. " body=" .. body_preview(body))
-        return 3  -- 3=SEND_FAILED
+            .. " code=" .. tostring(code))
+        return code
     end
 
     if code < 200 or code >= 300 then
@@ -49,7 +49,8 @@ function execute(r)
             .. " url=" .. tostring(url)
             .. " heroId=" .. tostring(heroId)
             .. " zoneId=" .. tostring(zoneId)
-            .. " status=" .. tostring(code)            .. " body=" .. body_preview(body))
+            .. " status=" .. tostring(code)
+            .. " body=" .. body_preview(body))
         return 54  -- 54=LUA_EXIT_CODE
     end
 

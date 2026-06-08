@@ -8,12 +8,12 @@ local log = require("log")
 function execute(r)
     local roleId = robot.get("roleId")
 
-    -- 轮询监听匹配成功消息，超时 600 秒（10 分钟），轮询 1 秒
-    local resp = network.tcp_listen("logic", {cmd=3, act=1}, "Game.MatchSucceedS2C", 600, 1000)
-    if not resp then
-        log.error("匹配成功消息等待超时: service=logic route=3:1 proto=Game.MatchSucceedS2C timeoutSec=600 pollMs=1000 roleId="
-            .. tostring(roleId))
-        return 31  -- 31=LISTEN_TIMEOUT
+    -- 轮询监听匹配成功消息，超时 1800 秒（30 分钟），轮询 1 秒
+    local code, resp = network.tcp_listen("logic", {cmd=3, act=1}, "Game.MatchSucceedS2C", 1800, 1000)
+    if code ~= 0 then
+        log.error("匹配成功消息等待失败: service=logic route=3:1 proto=Game.MatchSucceedS2C timeoutSec=1800 pollMs=1000 roleId="
+            .. tostring(roleId) .. " code=" .. tostring(code))
+        return code
     end
 
     local actorCount = 0

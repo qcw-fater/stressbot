@@ -25,11 +25,11 @@ function execute(r)
     local roleId = robot.get("roleId") or robot.get("playerId")
 
     -- 轮询监听开始加载消息，超时 180 秒（3 分钟），轮询 500 毫秒
-    local resp = network.tcp_listen("logic", {cmd=4, act=6}, "Game.BattleStartLoadingS2C", 180, 500)
-    if not resp then
-        log.error("ListenStartLoading 等待开始加载超时: service=logic route=4:6 proto=Game.BattleStartLoadingS2C timeoutSec=180 pollMs=500 roleId="
-            .. tostring(roleId))
-        return 31  -- 31=LISTEN_TIMEOUT
+    local code, resp = network.tcp_listen("logic", {cmd=4, act=6}, "Game.BattleStartLoadingS2C", 180, 500)
+    if code ~= 0 then
+        log.error("ListenStartLoading 等待开始加载失败: service=logic route=4:6 proto=Game.BattleStartLoadingS2C timeoutSec=180 pollMs=500 roleId="
+            .. tostring(roleId) .. " code=" .. tostring(code))
+        return code
     end
 
     local fighterCount = 0

@@ -208,6 +208,11 @@ func serializeMsg(ctx *Context, msg proto.Message) ([]byte, error) {
 
 // networkConnectTCP 建立 TCP 连接。
 // 签名：network.connect_tcp(service, address)
+// networkConnectTCP 建立 TCP 连接。
+// 签名：network.connect_tcp(service, address)
+//
+// 返回：code(number)
+// code=0 成功 / errcode 错误码（6=取消 / 2=连接关闭）。
 func networkConnectTCP(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -217,7 +222,7 @@ func networkConnectTCP(L *lua.LState) int {
 	service := L.CheckString(1)
 	address := L.CheckString(2)
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-		L.Push(lua.LBool(false))
+		L.Push(lua.LNumber(errcode.ErrActionCanceled))
 		return 1
 	}
 	var err error
@@ -225,15 +230,22 @@ func networkConnectTCP(L *lua.LState) int {
 		err = ctx.NetSender.ConnectTCP(service, address)
 	})
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-		L.Push(lua.LBool(false))
+		L.Push(lua.LNumber(errcode.ErrActionCanceled))
 		return 1
 	}
-	L.Push(lua.LBool(err == nil))
+	if err != nil {
+		L.Push(lua.LNumber(errToCode(err)))
+	} else {
+		L.Push(lua.LNumber(0))
+	}
 	return 1
 }
 
 // networkConnectUDP 建立 UDP 连接。
 // 签名：network.connect_udp(service, address)
+//
+// 返回：code(number)
+// code=0 成功 / errcode 错误码（6=取消 / 2=连接关闭）。
 func networkConnectUDP(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -243,7 +255,7 @@ func networkConnectUDP(L *lua.LState) int {
 	service := L.CheckString(1)
 	address := L.CheckString(2)
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-		L.Push(lua.LBool(false))
+		L.Push(lua.LNumber(errcode.ErrActionCanceled))
 		return 1
 	}
 	var err error
@@ -251,10 +263,14 @@ func networkConnectUDP(L *lua.LState) int {
 		err = ctx.NetSender.ConnectUDP(service, address)
 	})
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-		L.Push(lua.LBool(false))
+		L.Push(lua.LNumber(errcode.ErrActionCanceled))
 		return 1
 	}
-	L.Push(lua.LBool(err == nil))
+	if err != nil {
+		L.Push(lua.LNumber(errToCode(err)))
+	} else {
+		L.Push(lua.LNumber(0))
+	}
 	return 1
 }
 
@@ -301,7 +317,7 @@ func networkCloseUDP(L *lua.LState) int {
 // 签名：network.tcp_request(service, route, msg [, s2c_proto])
 //
 // 返回：code(number), data(string|userdata|nil)
-// code=0 成功 / errcode 错误码（1-5 网络层 / 11 协议层 / ≥100 服务端）。
+// code=0 成功 / 1-99 框架错误码 / 其他非零=服务端 HeaderErr。
 // WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
 func networkTCPRequest(L *lua.LState) int {
 	ctx := GetContext(L)
@@ -422,7 +438,7 @@ func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 // 签名：network.udp_request(service, route, body [, s2c_proto [, timeout_sec [, poll_ms]]])
 //
 // 返回：code(number), data(string|userdata|nil)
-// code=0 成功 / errcode 错误码（1-5 网络层 / 11 协议层 / ≥100 服务端）。
+// code=0 成功 / 1-99 框架错误码 / 其他非零=服务端 HeaderErr。
 // WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
 func networkUDPRequest(L *lua.LState) int {
 	ctx := GetContext(L)
@@ -538,6 +554,7 @@ func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 // 签名：network.http_request(url [, method [, content_type [, body]]])
 //
 // 返回：status_code(number), body(string)
+// 1-99=框架传输错误（errcode）/ 其他=HTTP 原始状态码（200/404/500 等）。
 // HTTP message bytes 由 Context 自动累计，不返回给 Lua 脚本。
 func networkHTTPRequest(L *lua.LState) int {
 	ctx := GetContext(L)
@@ -607,8 +624,8 @@ func networkHTTPRequest(L *lua.LState) int {
 	ctx.recordRequest(engine.RequestTiming{WireRTT: exchange.NetLatency})
 	ctx.recordBytes(exchange.SendWireBytes, exchange.RecvWireBytes)
 	if err != nil {
-		L.Push(lua.LNumber(-1))
-		L.Push(lua.LString(err.Error()))
+		L.Push(lua.LNumber(errToCode(err)))
+		L.Push(lua.LString(""))
 		return 2
 	}
 
@@ -736,14 +753,16 @@ func networkUDPSend(L *lua.LState) int {
 // networkTCPListen 等待 TCP 监听消息。
 // 签名：network.tcp_listen(service, route [, s2c_proto [, timeout_sec [, poll_ms]]])
 //
-// 返回：data(string|userdata|nil)
+// 返回：code(number), data(string|userdata|nil)
+// code: 0=成功 / 31=超时 / 6=取消 / 12=解析失败 / 其他非零=服务端 HeaderErr。
 // 接收 WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
 func networkTCPListen(L *lua.LState) int { return networkListen(L, "tcp") }
 
 // networkUDPListen 等待 UDP 监听消息。
 // 签名：network.udp_listen(service, route [, s2c_proto [, timeout_sec [, poll_ms]]])
 //
-// 返回：data(string|userdata|nil)
+// 返回：code(number), data(string|userdata|nil)
+// code: 0=成功 / 31=超时 / 6=取消 / 12=解析失败 / 其他非零=服务端 HeaderErr。
 // 接收 WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
 func networkUDPListen(L *lua.LState) int { return networkListen(L, "udp") }
 
@@ -806,33 +825,39 @@ func networkListen(L *lua.LState, protocol string) int {
 	respBody := exchange.Body
 
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
+		L.Push(lua.LNumber(errcode.ErrActionCanceled))
 		L.Push(lua.LNil)
-		return 1
+		return 2
 	}
 	if timedOut {
 		stresslog.Debug("[SCRIPT] "+protocol+"_listen 超时",
 			zap.String("service", service), zap.String("routeKey", routeKey), zap.Int("timeout", timeout),
 			zap.String("hint", "请先调用 ensure_"+protocol+"_listener() 预注册监听"))
+		L.Push(lua.LNumber(errcode.ErrListenTimeout))
 		L.Push(lua.LNil)
-		return 1
+		return 2
 	}
 	if exchange.HeaderErr != 0 {
+		L.Push(lua.LNumber(exchange.HeaderErr))
 		L.Push(lua.LString(string(respBody)))
-		return 1
+		return 2
 	}
 
 	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
 		respMsg, err := ctx.Factory.Parse(s2cProto, respBody)
 		if err != nil {
+			L.Push(lua.LNumber(errcode.ErrParseFailed))
 			L.Push(lua.LNil)
-			return 1
+			return 2
 		}
+		L.Push(lua.LNumber(0))
 		L.Push(wrapProtoMessage(L, respMsg))
-		return 1
+		return 2
 	}
 
+	L.Push(lua.LNumber(0))
 	L.Push(lua.LString(string(respBody)))
-	return 1
+	return 2
 }
 
 // ---------------------------------------------------------------------------
