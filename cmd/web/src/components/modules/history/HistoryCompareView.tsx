@@ -12,6 +12,7 @@ import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { useEffect, useMemo, useState } from 'react';
 import { historyApi, showApiError } from '@/services';
+import type { CompareTarget } from '@/services/historyApi';
 import type { HistoryCompareTask } from '@/types/api';
 import { ApdexCell } from '@/components/monitoring/shared/ApdexCell';
 import './HistoryPanel.css';
@@ -27,7 +28,7 @@ function useViewportHeight(): number {
 }
 
 export interface HistoryCompareViewProps {
-  ids: string[];
+  targets: CompareTarget[];
 }
 
 interface ActionRow {
@@ -65,7 +66,7 @@ function bestWorst(
   };
 }
 
-export function HistoryCompareView({ ids }: HistoryCompareViewProps) {
+export function HistoryCompareView({ targets }: HistoryCompareViewProps) {
   const [data, setData] = useState<HistoryCompareTask[] | null>(null);
   const [loading, setLoading] = useState(true);
   const viewportH = useViewportHeight();
@@ -73,15 +74,20 @@ export function HistoryCompareView({ ids }: HistoryCompareViewProps) {
     () => Math.min(440, Math.max(200, viewportH - 320)),
     [viewportH],
   );
+  const targetsKey = useMemo(
+    () => targets.map((t) => (typeof t === 'string' ? t : `${t.id}:${t.stageIndex ?? -1}`)).join(','),
+    [targets],
+  );
 
   useEffect(() => {
     setLoading(true);
     historyApi
-      .compareHistory(ids)
+      .compareHistory(targets)
       .then((r) => setData(r.tasks))
       .catch(showApiError)
       .finally(() => setLoading(false));
-  }, [ids]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetsKey]);
 
   const rows = useMemo<ActionRow[]>(() => {
     if (!data) return [];
@@ -163,10 +169,11 @@ export function HistoryCompareView({ ids }: HistoryCompareViewProps) {
     <div className="hp-compare-root">
       <div className="hp-compare-cards" style={{ gridTemplateColumns: `repeat(${data.length}, 1fr)` }}>
         {data.map((d, i) => (
-          <div key={d.id} className="hp-glass hp-compare-card" data-index={i}>
+          <div key={`${d.id}:${d.stageIndex ?? -1}`} className="hp-glass hp-compare-card" data-index={i}>
             <div className="hp-compare-card__title">
               <span style={{ marginRight: 6 }}>#{i + 1}</span>
               {d.name}
+              {d.stageLabel && <Tag color="warning" style={{ marginLeft: 6 }}>{d.stageLabel}</Tag>}
             </div>
             <div className="hp-compare-card__meta">
               <code>{d.id.slice(0, 8)}</code> · {d.startedAt ? dayjs(d.startedAt).format('MM-DD HH:mm') : '—'}

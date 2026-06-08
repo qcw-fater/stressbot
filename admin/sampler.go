@@ -18,6 +18,7 @@ type Sampler struct {
 	aggregator *MetricsAggregator
 	history    *HistoryStore
 	registry   *AgentRegistry
+	tasks      *TaskStore
 
 	mu      sync.Mutex
 	current *samplerJob
@@ -29,12 +30,13 @@ type samplerJob struct {
 	cancel    context.CancelFunc
 }
 
-func NewSampler(interval time.Duration, agg *MetricsAggregator, hist *HistoryStore, reg *AgentRegistry) *Sampler {
+func NewSampler(interval time.Duration, agg *MetricsAggregator, hist *HistoryStore, reg *AgentRegistry, tasks *TaskStore) *Sampler {
 	return &Sampler{
 		interval:   interval,
 		aggregator: agg,
 		history:    hist,
 		registry:   reg,
+		tasks:      tasks,
 	}
 }
 
@@ -86,6 +88,7 @@ func (s *Sampler) loop(ctx context.Context, taskID string, startedAt time.Time, 
 			stress := s.aggregator.AggregateStress(taskID)
 			sys := s.aggregator.AggregateSystem()
 			point := buildHistoryTrendPoint(t, elapsed, stress, sys)
+			point.StageIndex = s.currentStageIndex(taskID)
 			if err := s.history.AppendTimeseries(context.Background(), taskID, point); err != nil {
 				stresslog.Warn("[SAMPLER] 时序趋势数据写入失败",
 					zap.String("taskId", taskID), zap.Error(err))
@@ -94,6 +97,40 @@ func (s *Sampler) loop(ctx context.Context, taskID string, startedAt time.Time, 
 			lastSavedElapsed = elapsed
 		}
 	}
+}
+
+// currentStageIndex 返回采样时刻活跃任务所属的阶段段落号。
+//   - 非 ramp-up 或无 reset：-1（不参与段落过滤；非 reset 阶段线由前端按配置近似绘制）。
+//   - 有 reset：已观测到的不同 reset 上报数量 + 1（reset 前=段1，第 k 次 reset 后=段 k+1），
+//     与归档段号映射一致。
+func (s *Sampler) currentStageIndex(taskID string) int {
+	if s.tasks == nil {
+		return -1
+	}
+	task, ok := s.tasks.Get(taskID)
+	if !ok || task == nil {
+		return -1
+	}
+	plan := buildStagePlan(task.Config.RobotConfig.RampUp)
+	if !plan.HasReset {
+		return -1
+	}
+	seg := distinctResetCount(task.StageReports) + 1
+	if seg > len(plan.Segments) {
+		seg = len(plan.Segments)
+	}
+	return seg
+}
+
+// distinctResetCount 统计阶段段落报告中不同 StageIndex（>0）的数量。
+func distinctResetCount(reports []TaskCompletionReport) int {
+	seen := map[int]struct{}{}
+	for _, r := range reports {
+		if r.StageIndex > 0 {
+			seen[r.StageIndex] = struct{}{}
+		}
+	}
+	return len(seen)
 }
 
 func historySaveIntervalSec(elapsed int) int {

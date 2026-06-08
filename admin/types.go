@@ -65,7 +65,9 @@ type Task struct {
 	Reports map[string]TaskCompletionReport `json:"reports,omitempty"`
 	// CleanupSummary 所有节点最终清理状态汇总。
 	CleanupSummary *robot.CleanupStatus `json:"cleanupSummary,omitempty"`
-	// StageReports 渐进式加压阶段完成报告（reset 阶段中间报告）。
+	// StageReports reset 边界阶段段落报告。
+	// 仅在有 reset=true 的渐进式加压任务中产生：每次 reset 前，Agent 快照并上报该段落的累计指标，
+	// StageIndex 为「即将进入的配置阶段下标」（0-based，>=1）。归档时映射为连续 1-based 段落号。
 	StageReports []TaskCompletionReport `json:"stageReports,omitempty"`
 	// AgentEvents 任务期间 Agent 状态变化事件。
 	AgentEvents []AgentEvent `json:"agentEvents,omitempty"`
@@ -324,9 +326,13 @@ type TaskCompletionReport struct {
 	// FinishedAt 完成时间。
 	FinishedAt time.Time `json:"finishedAt"`
 	// FinalSnapshot 最终压测指标快照。
+	// 既可表示整体最终快照（普通/无 reset 任务），也可表示某个 reset 阶段段落结束时的快照
+	// （有 reset 任务：Agent 在 reset 前快照并随后 Reset 采集器，故该快照仅覆盖当前段落）。
 	FinalSnapshot *monitor.CollectorSnapshot `json:"finalSnapshot"`
-	// StageIndex 阶段索引（渐进式加压阶段重置时使用）。
-	// -1 或零值表示最终报告，>= 0 表示该阶段的完成报告。
+	// StageIndex 阶段段落标识。
+	// -1 / 0：最终（兼容）报告，不作为阶段段落报告；
+	// > 0：有 reset 的渐进式加压任务中，reset 边界产生的阶段段落报告，
+	//      值为「即将进入的配置阶段下标」（0-based），归档时映射为连续 1-based 段落号。
 	StageIndex int `json:"stageIndex,omitempty"`
 	// CleanupStatus Agent 侧资源清理结果。
 	CleanupStatus *robot.CleanupStatus `json:"cleanupStatus,omitempty"`
@@ -539,6 +545,24 @@ type HistoryRecord struct {
 	ConfigSummary ConfigSummary `json:"configSummary"`
 	// StageCount 渐进式加压阶段数（0 表示一次性创建）。
 	StageCount int `json:"stageCount,omitempty"`
+
+	// ── 阶段历史展示字段（虚拟，不落 task_history 子行）──
+
+	// RecordKind 记录类型："task"（父任务，默认/空）或 "stage"（阶段段落子记录）。
+	RecordKind string `json:"recordKind,omitempty"`
+	// ParentID 阶段段落子记录所属父任务 ID。
+	ParentID string `json:"parentId,omitempty"`
+	// StageIndex 阶段段落连续 1-based 段落号（仅 RecordKind=="stage"）。
+	StageIndex int `json:"stageIndex,omitempty"`
+	// StageLabel 段落展示标签，如「段 2 · S3-S4」。
+	StageLabel string `json:"stageLabel,omitempty"`
+	// StageFrom/StageTo 段落覆盖的配置阶段范围（1-based，含端点）。
+	StageFrom int `json:"stageFrom,omitempty"`
+	StageTo   int `json:"stageTo,omitempty"`
+	// HasResetStages 父任务是否含 reset 阶段（决定列表是否展开为阶段组）。
+	HasResetStages bool `json:"hasResetStages,omitempty"`
+	// Children 阶段段落子记录（仅有 reset 的父任务且 includeStages 时填充）。
+	Children []HistoryRecord `json:"children,omitempty"`
 }
 
 // ConfigSummary 历史任务的配置摘要。
@@ -697,6 +721,8 @@ type HistoryFilter struct {
 	Offset int
 	// OrderBy 排序字段。
 	OrderBy string
+	// IncludeStages 是否为有 reset 的渐进式加压父记录展开阶段段落子记录。
+	IncludeStages bool
 }
 
 // HistoryListResponse 历史任务列表响应。
@@ -733,6 +759,12 @@ type HistoryCompareTask struct {
 	DurationSec   int                    `json:"durationSec"`
 	TotalBots     int                    `json:"totalBots"`
 	FinalSnapshot HistoryCompareSnapshot `json:"finalSnapshot"`
+	// ParentID 阶段段落对比项所属父任务 ID（整体项为空）。
+	ParentID string `json:"parentId,omitempty"`
+	// StageIndex 对比项阶段段落号；-1 表示整体/最终。
+	StageIndex int `json:"stageIndex,omitempty"`
+	// StageLabel 阶段段落展示标签。
+	StageLabel string `json:"stageLabel,omitempty"`
 }
 
 // HistoryCompareSnapshot 历史对比页使用的压测摘要。
@@ -766,6 +798,8 @@ type HistoryTrendPoint struct {
 	SampledAt time.Time `json:"sampledAt"`
 	// ElapsedSec 距任务启动的秒数。
 	ElapsedSec int `json:"elapsedSec"`
+	// StageIndex 采样点所属阶段段落号。-1 非阶段；> 0 有 reset 任务的连续 1-based 段落号。
+	StageIndex int `json:"stageIndex"`
 	// TotalQPS 集群总 QPS。
 	TotalQPS float64 `json:"totalQps"`
 	// RTTApdex 按 RTT 样本数加权后的 Apdex。
@@ -824,7 +858,8 @@ type HistoryTrendPointResponse struct {
 	SampledAt time.Time `json:"sampledAt"`
 	// ElapsedSec 距任务启动的秒数。
 	ElapsedSec int `json:"elapsedSec"`
-	// StageIndex 渐进式阶段下标，-1 表示未记录阶段。
+	// StageIndex 采样点所属阶段/阶段段落索引。
+	// -1：非渐进式或未记录；> 0：有 reset 任务中该采样点所属的连续 1-based 段落号。
 	StageIndex int `json:"stageIndex"`
 	// TotalQPS 集群总 QPS。
 	TotalQPS float64 `json:"totalQps"`

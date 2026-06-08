@@ -9,7 +9,7 @@ import type { TaskFlow } from '@/types/flow';
 import type { ActionDef, BindingType, FieldBind, FilterDef } from '@/types/action';
 import { ALL_ACTION_PATTERNS, ALL_BINDING_TYPES } from '@/types/action';
 import { protoRegistry } from '../proto/ProtoRegistry';
-import { buildRefsGraph } from '../listens/refsGraph';
+import { buildRefsGraph, routeKey } from '../listens/refsGraph';
 
 export type Severity = 'error' | 'warning' | 'info';
 
@@ -252,6 +252,13 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
       }
       // ListenRef 校验
       (node.listenRefs ?? []).forEach((r, i) => {
+        if (!r.listen) {
+          issues.push({
+            severity: 'error', code: 'LISTEN_EMPTY_NAME',
+            message: `action 节点 "${id}" listenRefs[${i}] 未指定 listen，请引用 listens 表中的定义或新建 silent listen`,
+            location: { kind: 'node', id },
+          });
+        }
         if (!r.server?.trim()) {
           issues.push({
             severity: 'error', code: 'LISTEN_NO_SERVER',
@@ -342,6 +349,33 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
       severity: 'warning', code: 'DUPLICATE_REGISTER',
       message: `${dup.server} ${dup.routeKey} 被多次注册：${dup.refs.map((r) => `${r.nodeId}→${r.cb ?? 'null'}`).join(', ')}`,
     });
+  }
+
+  // R14：tcpListen/udpListen 的 route 必须在某个节点的 listenRefs 中预注册
+  const LISTEN_ACTION_PATTERNS = new Set(['tcpListen', 'udpListen']);
+  const preRegisteredKeys = new Set<string>();
+  for (const node of Object.values(nodes)) {
+    if (node.type !== 'action') continue;
+    for (const ref of node.listenRefs ?? []) {
+      if (ref.server && ref.route != null) {
+        preRegisteredKeys.add(`${ref.server}|${routeKey(ref.route)}`);
+      }
+    }
+  }
+  for (const [actionName, def] of Object.entries(actions)) {
+    if (!LISTEN_ACTION_PATTERNS.has(def.pattern)) continue;
+    if (!referencedActions.has(actionName)) continue;
+    if (!def.service || def.route == null) continue;
+    const proto = def.pattern === 'tcpListen' ? 'tcp' : 'udp';
+    const key = `${proto}:${def.service}|${routeKey(def.route)}`;
+    if (!preRegisteredKeys.has(key)) {
+      issues.push({
+        severity: 'warning',
+        code: 'LISTEN_NO_PREREG',
+        message: `action "${actionName}" (${def.pattern}) 的 route 未通过 listenRefs 预注册，运行时将始终超时`,
+        location: { kind: 'action', id: actionName },
+      });
+    }
   }
 
   return categorize(issues);

@@ -763,8 +763,9 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 				return
 			}
 			if h.robot.l == nil || h.robot.luaPool == nil {
+				callbackErr := engine.NewActionError(errcode.ErrCallbackLua, "script="+cbDef.Script)
 				stresslog.Error("[ROBOT] Lua 运行时未初始化", zap.String("script", cbDef.Script))
-				monitor.Global().RecordCallbackError(cbName, engine.NewActionError(errcode.ErrCallbackLua, "script="+cbDef.Script))
+				monitor.Global().RecordCallback(cbName, monitor.ResultFailure, monitor.ActionTiming{}, 0, 0, msg.WireBytes, callbackErr)
 				return
 			}
 
@@ -784,13 +785,18 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 				TimingLevel:           h.robot.timingLevel,
 			})
 
-			if err := h.robot.luaPool.RunCallbackScript(h.robot.l, cbDef.Script, msg.Data, cbDef.S2CProto); err != nil {
+			start := time.Now()
+			innerSend, innerRecv, timing, err := h.robot.luaPool.RunCallbackScript(h.robot.l, cbDef.Script, msg.Data, cbDef.S2CProto)
+			wallClock := time.Since(start)
+			recvBytes := msg.WireBytes + innerRecv
+			if err != nil {
+				callbackErr := engine.NewActionError(errcode.ErrCallbackLua, "script="+cbDef.Script, err)
 				stresslog.Error("[ROBOT] Lua 回调执行失败",
 					zap.Int("id", h.robot.id), zap.String("script", cbDef.Script), zap.Error(err))
-				monitor.Global().RecordCallbackError(cbName, engine.NewActionError(errcode.ErrCallbackLua, "script="+cbDef.Script, err))
+				monitor.Global().RecordCallback(cbName, monitor.ResultFailure, toMonitorTiming(timing), wallClock, innerSend, recvBytes, callbackErr)
 				return
 			}
-			monitor.Global().RecordCallbackSuccess(cbName)
+			monitor.Global().RecordCallback(cbName, monitor.ResultSuccess, toMonitorTiming(timing), wallClock, innerSend, recvBytes, nil)
 		}
 	}
 
@@ -804,14 +810,16 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 			return
 		}
 		if len(msg.Data) == 0 {
+			monitor.Global().RecordCallback(cbName, monitor.ResultSuccess, monitor.ActionTiming{}, 0, 0, msg.WireBytes, nil)
 			return
 		}
 
 		respMsg, err := h.robot.factory.Parse(cbDef.S2CProto, msg.Data)
 		if err != nil {
+			callbackErr := engine.NewActionError(errcode.ErrCallbackParse, "proto="+cbDef.S2CProto, err)
 			stresslog.Error("[ROBOT] 解析推送消息失败",
 				zap.Int("id", h.robot.id), zap.String("proto", cbDef.S2CProto), zap.Error(err))
-			monitor.Global().RecordCallbackError(cbName, engine.NewActionError(errcode.ErrCallbackParse, "proto="+cbDef.S2CProto, err))
+			monitor.Global().RecordCallback(cbName, monitor.ResultFailure, monitor.ActionTiming{}, 0, 0, msg.WireBytes, callbackErr)
 			return
 		}
 
@@ -823,7 +831,7 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 				h.robot.state.Set(m.Setter, val)
 			}
 		}
-		monitor.Global().RecordCallbackSuccess(cbName)
+		monitor.Global().RecordCallback(cbName, monitor.ResultSuccess, monitor.ActionTiming{}, 0, 0, msg.WireBytes, nil)
 	}
 }
 
@@ -843,55 +851,61 @@ func (ns *netSenderAdapter) TCPSend(service string, packet []byte) (int, error) 
 }
 
 // TCPRequest 发送 TCP 请求并等待响应。
-// 返回 netLatency 是 Connection.RequestResponse 测量的"Send 完成 → 收到响应"窗口，
-// 不含本函数中的连接查找等微秒级开销。
-func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) ([]byte, uint64, engine.RequestTiming, error) {
+// 返回的 SendWireBytes 是已编码请求包长，RecvWireBytes 是入站完整帧长。
+func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) (*engine.NetExchange, error) {
 	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
-		return nil, 0, engine.RequestTiming{}, engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
+		return &engine.NetExchange{SendWireBytes: len(packet)}, engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
 	}
 	resp, netTiming, err := conn.RequestResponse(packet, routeKey, timeout...)
-	timing := engine.RequestTiming(netTiming)
+	exchange := &engine.NetExchange{SendWireBytes: len(packet), Timing: engine.RequestTiming(netTiming)}
 	if err != nil {
-		return nil, 0, timing, err
+		return exchange, err
 	}
+	exchange.Body = resp.Data
+	exchange.HeaderErr = resp.HeaderErr
+	exchange.RecvWireBytes = resp.WireBytes
 	if stresslog.DebugEnabled() {
 		stresslog.Debug("[ACTION] TCPResponse",
 			zap.String("service", service), zap.String("routeKey", routeKey),
-			zap.Int("bodyLen", len(resp.Data)), zap.Uint64("headerErr", resp.HeaderErr))
+			zap.Int("bodyLen", len(resp.Data)), zap.Int("wireBytes", resp.WireBytes), zap.Uint64("headerErr", resp.HeaderErr))
 	}
-	return resp.Data, resp.HeaderErr, timing, nil
+	return exchange, nil
 }
 
 // UDPRequest 发送 UDP 请求并等待响应，与 TCPRequest 同样使用 channel 阻塞等待。
-func (ns *netSenderAdapter) UDPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) ([]byte, uint64, engine.RequestTiming, error) {
+func (ns *netSenderAdapter) UDPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) (*engine.NetExchange, error) {
 	conn := ns.robot.client.GetUDPConn(service)
 	if conn == nil {
-		return nil, 0, engine.RequestTiming{}, engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
+		return &engine.NetExchange{SendWireBytes: len(packet)}, engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
 	}
 	resp, netTiming, err := conn.RequestResponse(packet, routeKey, timeout...)
-	timing := engine.RequestTiming(netTiming)
+	exchange := &engine.NetExchange{SendWireBytes: len(packet), Timing: engine.RequestTiming(netTiming)}
 	if err != nil {
-		return nil, 0, timing, err
+		return exchange, err
 	}
+	exchange.Body = resp.Data
+	exchange.HeaderErr = resp.HeaderErr
+	exchange.RecvWireBytes = resp.WireBytes
 	if stresslog.DebugEnabled() {
 		stresslog.Debug("[ACTION] UDPResponse",
 			zap.String("service", service), zap.String("routeKey", routeKey),
-			zap.Int("bodyLen", len(resp.Data)), zap.Uint64("headerErr", resp.HeaderErr))
+			zap.Int("bodyLen", len(resp.Data)), zap.Int("wireBytes", resp.WireBytes), zap.Uint64("headerErr", resp.HeaderErr))
 	}
-	return resp.Data, resp.HeaderErr, timing, nil
+	return exchange, nil
 }
 
 // HTTPRequest 发送 HTTP 请求。
 //
-// 返回 netLatency 覆盖：http.Client.Do 调用 + 读完 response.Body。
-// http.NewRequest 构造、URL 解析等纯客户端开销不计入。
-func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body []byte) (int, []byte, time.Duration, error) {
+// NetLatency 覆盖：http.Client.Do 调用 + 读完 response.Body。
+// HTTP WireBytes 统计 HTTP message bytes，不含 TCP/IP/TLS record 开销。
+func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body []byte) (*engine.HTTPExchange, error) {
+	exchange := &engine.HTTPExchange{}
 	if reqURL == "" {
-		return 0, nil, 0, engine.NewActionError(errcode.ErrURLEmpty, "")
+		return exchange, engine.NewActionError(errcode.ErrURLEmpty, "")
 	}
 	if !strings.HasPrefix(reqURL, "http://") && !strings.HasPrefix(reqURL, "https://") {
-		return 0, nil, 0, engine.NewActionError(errcode.ErrURLScheme, "url="+reqURL)
+		return exchange, engine.NewActionError(errcode.ErrURLScheme, "url="+reqURL)
 	}
 
 	var req *http.Request
@@ -902,7 +916,7 @@ func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body
 		case "json":
 			req, err = http.NewRequestWithContext(ns.robot.ctx, method, reqURL, bytes.NewReader(body))
 			if err != nil {
-				return 0, nil, 0, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
+				return exchange, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 			}
 			req.Header.Set("Content-Type", "application/json")
 		case "form":
@@ -912,42 +926,95 @@ func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body
 			}
 			req, err = http.NewRequestWithContext(ns.robot.ctx, method, reqURL, strings.NewReader(string(body)))
 			if err != nil {
-				return 0, nil, 0, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
+				return exchange, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 			}
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		default:
 			req, err = http.NewRequestWithContext(ns.robot.ctx, method, reqURL, bytes.NewReader(body))
 			if err != nil {
-				return 0, nil, 0, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
+				return exchange, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 			}
 		}
 	} else {
 		req, err = http.NewRequestWithContext(ns.robot.ctx, method, reqURL, nil)
 		if err != nil {
-			return 0, nil, 0, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
+			return exchange, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 		}
 	}
+	exchange.SendWireBytes = httpRequestBytes(req, body)
 
 	netStart := time.Now()
 	resp, err := ns.robot.httpClient.Do(req)
 	if err != nil {
-		netLatency := time.Since(netStart)
+		exchange.NetLatency = time.Since(netStart)
 		if ns.robot.ctx.Err() != nil {
 			stresslog.Debug("[HTTP] 请求已取消", zap.String("url", reqURL), zap.Error(err))
-			return 0, nil, netLatency, engine.NewActionError(errcode.ErrActionCanceled, "url="+reqURL, err)
+			return exchange, engine.NewActionError(errcode.ErrActionCanceled, "url="+reqURL, err)
 		}
 		stresslog.Warn("[HTTP] 请求失败", zap.String("url", reqURL), zap.Error(err))
-		return 0, nil, netLatency, engine.NewActionError(errcode.ErrSendFailed, "url="+reqURL, err)
+		return exchange, engine.NewActionError(errcode.ErrSendFailed, "url="+reqURL, err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
-	netLatency := time.Since(netStart)
+	exchange.NetLatency = time.Since(netStart)
+	exchange.StatusCode = resp.StatusCode
+	exchange.Body = respBody
+	exchange.RecvWireBytes = httpResponseBytes(resp, respBody)
 	if err != nil {
-		return resp.StatusCode, nil, netLatency, engine.NewActionError(errcode.ErrHTTPReadBody, "url="+reqURL, err)
+		return exchange, engine.NewActionError(errcode.ErrHTTPReadBody, "url="+reqURL, err)
 	}
 
-	return resp.StatusCode, respBody, netLatency, nil
+	return exchange, nil
+}
+
+func httpRequestBytes(req *http.Request, body []byte) int {
+	if req == nil {
+		return 0
+	}
+	path := req.URL.RequestURI()
+	if path == "" {
+		path = "/"
+	}
+	total := len(req.Method) + 1 + len(path) + 1 + len("HTTP/1.1") + 2
+	if req.Host != "" {
+		total += len("Host") + 2 + len(req.Host) + 2
+	} else if req.URL.Host != "" {
+		total += len("Host") + 2 + len(req.URL.Host) + 2
+	}
+	total += httpHeaderBytes(req.Header)
+	if len(body) > 0 {
+		total += len("Content-Length") + 2 + len(fmt.Sprintf("%d", len(body))) + 2
+	}
+	total += 2 + len(body)
+	return total
+}
+
+func httpResponseBytes(resp *http.Response, body []byte) int {
+	if resp == nil {
+		return 0
+	}
+	status := resp.Status
+	if status == "" {
+		status = fmt.Sprintf("%d", resp.StatusCode)
+	}
+	total := len("HTTP/1.1") + 1 + len(status) + 2
+	total += httpHeaderBytes(resp.Header)
+	if resp.ContentLength >= 0 && resp.Header.Get("Content-Length") == "" {
+		total += len("Content-Length") + 2 + len(fmt.Sprintf("%d", resp.ContentLength)) + 2
+	}
+	total += 2 + len(body)
+	return total
+}
+
+func httpHeaderBytes(header http.Header) int {
+	total := 0
+	for k, values := range header {
+		for _, value := range values {
+			total += len(k) + 2 + len(value) + 2
+		}
+	}
+	return total
 }
 
 // UDPSend 通过 UDP 发送数据包。
@@ -984,29 +1051,29 @@ func (ns *netSenderAdapter) ConnectUDP(service, address string) error {
 }
 
 // GetTCPListenResp 获取 TCP 连接的监听响应数据。
-func (ns *netSenderAdapter) GetTCPListenResp(service string, routeKey string) ([]byte, uint64) {
+func (ns *netSenderAdapter) GetTCPListenResp(service string, routeKey string) *engine.NetExchange {
 	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
-		return nil, 0
+		return nil
 	}
 	msg := conn.GetListenResp(routeKey)
 	if msg == nil {
-		return nil, 0
+		return nil
 	}
-	return msg.Data, msg.HeaderErr
+	return &engine.NetExchange{Body: msg.Data, HeaderErr: msg.HeaderErr, RecvWireBytes: msg.WireBytes}
 }
 
 // GetUDPListenResp 获取 UDP 连接的监听响应数据。
-func (ns *netSenderAdapter) GetUDPListenResp(service string, routeKey string) ([]byte, uint64) {
+func (ns *netSenderAdapter) GetUDPListenResp(service string, routeKey string) *engine.NetExchange {
 	conn := ns.robot.client.GetUDPConn(service)
 	if conn == nil {
-		return nil, 0
+		return nil
 	}
 	msg := conn.GetListenResp(routeKey)
 	if msg == nil {
-		return nil, 0
+		return nil
 	}
-	return msg.Data, msg.HeaderErr
+	return &engine.NetExchange{Body: msg.Data, HeaderErr: msg.HeaderErr, RecvWireBytes: msg.WireBytes}
 }
 
 // GetTCPSecretKey 获取 TCP 连接的加密密钥。
@@ -1026,7 +1093,8 @@ func (ns *netSenderAdapter) SetTCPSecretKey(service string, key []byte) {
 	}
 }
 
-// EnsureTCPListener 为 TCP 连接注册监听器占位。
+// EnsureTCPListener 为 TCP 连接注册监听器占位（callback=nil）。
+// 由 RegisterListen（listenRefs 路径）和 Lua ensure_tcp_listener 调用，不由 execListen 调用。
 func (ns *netSenderAdapter) EnsureTCPListener(service string, routeKey string) {
 	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
@@ -1035,7 +1103,8 @@ func (ns *netSenderAdapter) EnsureTCPListener(service string, routeKey string) {
 	conn.AddListener(routeKey, nil)
 }
 
-// EnsureUDPListener 为 UDP 连接注册监听器占位。
+// EnsureUDPListener 为 UDP 连接注册监听器占位（callback=nil）。
+// 由 RegisterListen（listenRefs 路径）和 Lua ensure_udp_listener 调用，不由 execListen 调用。
 func (ns *netSenderAdapter) EnsureUDPListener(service string, routeKey string) {
 	conn := ns.robot.client.GetUDPConn(service)
 	if conn == nil {

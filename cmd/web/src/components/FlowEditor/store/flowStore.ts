@@ -80,7 +80,7 @@ interface FlowState {
   renameAction: (oldName: string, newName: string) => void;
 
   // ── 回调 CRUD ────────
-  addListen: (name: string, def: ListenDef) => void;
+  addListen: (name: string, def: ListenDef, position?: { x: number; y: number }) => void;
   updateListen: (name: string, partial: Partial<ListenDef>) => void;
   /** 完全替换 listen（用于 silent/decl/lua 形态切换：partial merge 会保留旧字段导致 kind 判错） */
   replaceListen: (name: string, def: ListenDef) => void;
@@ -386,8 +386,15 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
     get().syncDerived();
   },
 
-  addListen: (name, def) => {
-    set((s) => ({ listens: { ...s.listens, [name]: def } }));
+  addListen: (name, def, position) => {
+    set((s) => {
+      const listens = { ...s.listens, [name]: def };
+      if (position) {
+        const nodePositions = { ...s.layout.nodePositions, [`__cb__${name}`]: { x: position.x, y: position.y } };
+        return { listens, layout: { ...s.layout, nodePositions } };
+      }
+      return { listens };
+    });
     get().syncDerived();
   },
   updateListen: (name, partial) => {
@@ -411,7 +418,12 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
       const listenDefaultRefs = { ...s.listenDefaultRefs };
       delete listens[name];
       delete listenDefaultRefs[name];
-      return { listens, listenDefaultRefs };
+      // 清理 listenCard 位置
+      const cbId = `__cb__${name}`;
+      const nodePositions = { ...s.layout.nodePositions };
+      delete nodePositions[cbId];
+      const layout = { ...s.layout, nodePositions };
+      return { listens, listenDefaultRefs, layout };
     });
     get().syncDerived();
   },
@@ -443,7 +455,16 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
         listenDefaultRefs[newName] = cloneListenDefaultRef(listenDefaultRefs[oldName]);
         delete listenDefaultRefs[oldName];
       }
-      return { listens, nodes, listenDefaultRefs };
+      // 迁移 listenCard 位置：旧 ID → 新 ID
+      const oldCbId = `__cb__${oldName}`;
+      const newCbId = `__cb__${newName}`;
+      const nodePositions = { ...s.layout.nodePositions };
+      if (oldCbId in nodePositions) {
+        nodePositions[newCbId] = nodePositions[oldCbId];
+        delete nodePositions[oldCbId];
+      }
+      const layout = { ...s.layout, nodePositions };
+      return { listens, nodes, listenDefaultRefs, layout };
     });
     get().syncDerived();
   },
@@ -468,15 +489,32 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
     });
     // 保留已有位置（避免拖动后被覆盖）
     const positions = s.layout.nodePositions;
+    // 计算事件区基准位置：现有 listenCard 的最大 Y + 间距，X 取 listenCard 的 X
+    let cardBaseX = 0;
+    let cardBaseY = 0;
+    for (const n of s.rfNodes) {
+      if (n.type === 'listenCard') {
+        cardBaseX = Math.max(cardBaseX, n.position.x);
+        cardBaseY = Math.max(cardBaseY, n.position.y);
+      }
+    }
+    if (cardBaseX > 0) cardBaseY += 90; // 新节点排在现有最后一张下方
     const positioned = rfNodes.map((n) => {
       const pos = positions[n.id];
       const existing = s.rfNodes.find((x) => x.id === n.id);
-      return {
-        ...n,
-        position: pos
-          ? { x: pos.x, y: pos.y }
-          : (existing?.position ?? { x: 0, y: 0 }),
-      };
+      let position: { x: number; y: number };
+      if (pos) {
+        position = { x: pos.x, y: pos.y };
+      } else if (existing) {
+        position = existing.position;
+      } else if (n.type === 'listenCard') {
+        // 新 listenCard：放到事件区末尾
+        position = { x: cardBaseX, y: cardBaseY };
+        cardBaseY += 90;
+      } else {
+        position = { x: 0, y: 0 };
+      }
+      return { ...n, position };
     });
     // 实时校验：把节点级 issue 按节点 ID 分组，供 NodeShell 显示徽章
     const flowForValidation: TaskFlow = {

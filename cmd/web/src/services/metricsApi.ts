@@ -25,6 +25,7 @@ const EMPTY_STRESS: StressSnapshot = {
   totalActions: 0,
   apdexT: 0,
   robots: { started: 0, running: 0, stopped: 0, errored: 0 },
+  rampUp: { currentStage: 0, totalStages: 0 },
   connections: { established: 0, failed: 0, dropped: 0 },
   bandwidth: { totalSendBytes: 0, totalRecvBytes: 0, sendMBps: 0, recvMBps: 0 },
   actions: [],

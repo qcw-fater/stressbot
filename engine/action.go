@@ -91,10 +91,29 @@ type ActionExecutor struct {
 	timingLevel int             // 计时细分级别：0=rtt, 1=codec, 2=full
 }
 
+// NetExchange 单次 TCP/UDP 请求或监听得到的网络交换结果。
+type NetExchange struct {
+	Body          []byte
+	HeaderErr     uint64
+	SendWireBytes int
+	RecvWireBytes int
+	Timing        RequestTiming
+}
+
+// HTTPExchange 单次 HTTP 请求得到的交换结果。
+// SendWireBytes / RecvWireBytes 表示 HTTP message bytes，不含 TCP/IP/TLS record 开销。
+type HTTPExchange struct {
+	StatusCode    int
+	Body          []byte
+	SendWireBytes int
+	RecvWireBytes int
+	NetLatency    time.Duration
+}
+
 // NetSender 网络发送委托接口。
 // 由 Robot 层实现，封装 TCP/UDP 连接管理和 HTTP 请求能力。
 //
-// 注意：TCPRequest / UDPRequest 多返回一个 RequestTiming，WireRTT 表示
+// 注意：TCPRequest / UDPRequest 返回的 Timing.WireRTT 表示
 // "Send 完成 → 收到完整响应帧"，不含 decode、响应解析和 state 写入等客户端开销。
 type NetSender interface {
 	// ── 发送 / 请求-响应 ─────────────────────────────────────────────────
@@ -104,18 +123,17 @@ type NetSender interface {
 	// UDPSend 向指定服务发送 UDP 数据包（不等响应），返回发送字节数。
 	UDPSend(service string, data []byte) (int, error)
 	// TCPRequest 发送 TCP 请求并等待匹配 routeKey 的响应。
-	// 返回响应体、协议头错误码、纯网络往返时长和可能的错误。timeout 可选，覆盖默认超时。
-	// 失败/超时分支也返回有效的 netLatency；仅在 Send 阶段错误时返回 0。
-	TCPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) (body []byte, headerErr uint64, timing RequestTiming, err error)
+	// 返回发送 WireBytes、接收 WireBytes、响应体、协议头错误码和网络耗时。timeout 可选，覆盖默认超时。
+	TCPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) (*NetExchange, error)
 	// UDPRequest 发送 UDP 请求并等待匹配 routeKey 的响应。
 	// 返回值语义同 TCPRequest。
-	UDPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) (body []byte, headerErr uint64, timing RequestTiming, err error)
+	UDPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) (*NetExchange, error)
 	// ConnectTCP 建立到指定地址的 TCP 连接，按 service 名注册。
 	ConnectTCP(service, address string) error
 	// ConnectUDP 建立到指定地址的 UDP 连接，按 service 名注册。
 	ConnectUDP(service, address string) error
 	// HTTPRequest 发送 HTTP 请求，返回状态码、响应体、纯网络往返时长（含 body 读完）和可能的错误。
-	HTTPRequest(url, method, contentType string, body []byte) (statusCode int, respBody []byte, netLatency time.Duration, err error)
+	HTTPRequest(url, method, contentType string, body []byte) (*HTTPExchange, error)
 
 	// ── 连接管理 ──────────────────────────────────────────────────────────
 
@@ -127,12 +145,14 @@ type NetSender interface {
 	// ── 监听 / 心跳 ────────────────────────────────────────────────────────
 
 	// GetTCPListenResp 非阻塞获取 TCP 监听的最近一次响应（含协议头错误码）。
-	GetTCPListenResp(service string, routeKey string) ([]byte, uint64)
+	GetTCPListenResp(service string, routeKey string) *NetExchange
 	// GetUDPListenResp 非阻塞获取 UDP 监听的最近一次响应（含协议头错误码）。
-	GetUDPListenResp(service string, routeKey string) ([]byte, uint64)
-	// EnsureTCPListener 确保指定 routeKey 的 TCP 监听已注册。
+	GetUDPListenResp(service string, routeKey string) *NetExchange
+	// EnsureTCPListener 为指定 routeKey 注册监听占位（callback=nil，轮询模式）。
+	// 由 RegisterListen（listenRefs 路径）和 Lua ensure_tcp_listener 调用。
 	EnsureTCPListener(service string, routeKey string)
-	// EnsureUDPListener 确保指定 routeKey 的 UDP 监听已注册。
+	// EnsureUDPListener 为指定 routeKey 注册监听占位（callback=nil，轮询模式）。
+	// 由 RegisterListen（listenRefs 路径）和 Lua ensure_udp_listener 调用。
 	EnsureUDPListener(service string, routeKey string)
 	// RegisterTCPHeartbeat 注册 TCP 心跳，按 intervalMs 间隔周期调用 builder 生成心跳包。
 	RegisterTCPHeartbeat(service string, intervalMs int, builder func() []byte) error
@@ -681,25 +701,28 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, ActionTimin
 		}
 	}
 
-	sendLen := len(resolvedURL) + len(body)
-	statusCode, respBody, netLatency, err := ae.netSender.HTTPRequest(resolvedURL, method, contentType, body)
+	exchange, err := ae.netSender.HTTPRequest(resolvedURL, method, contentType, body)
+	if exchange == nil {
+		exchange = &HTTPExchange{}
+	}
+	respBody := exchange.Body
 	var timing ActionTiming
-	if netLatency > 0 {
-		timing.AddRequest(RequestTiming{WireRTT: netLatency})
+	if exchange.NetLatency > 0 {
+		timing.AddRequest(RequestTiming{WireRTT: exchange.NetLatency})
 	}
 	if err != nil {
-		return sendLen, 0, timing, err
+		return exchange.SendWireBytes, exchange.RecvWireBytes, timing, err
 	}
 
 	// 非 2xx 状态码视为请求失败
-	if statusCode < 200 || statusCode >= 300 {
+	if exchange.StatusCode < 200 || exchange.StatusCode >= 300 {
 		stresslog.Warn("[ACTION] HTTP 响应非 2xx",
 			zap.String("action", def.Name),
 			zap.String("url", resolvedURL), zap.String("method", method),
-			zap.Int("statusCode", statusCode),
+			zap.Int("statusCode", exchange.StatusCode),
 			zap.Int("respBodyLen", len(respBody)))
-		return sendLen, len(respBody), timing, NewActionError(errcode.ErrHTTPStatus,
-			fmt.Sprintf("action=%s statusCode=%d", def.Name, statusCode))
+		return exchange.SendWireBytes, exchange.RecvWireBytes, timing, NewActionError(errcode.ErrHTTPStatus,
+			fmt.Sprintf("action=%s statusCode=%d", def.Name, exchange.StatusCode))
 	}
 
 	if len(def.Store) > 0 && len(respBody) > 0 {
@@ -708,7 +731,7 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, ActionTimin
 			if err := json.Unmarshal(respBody, &respMap); err != nil {
 				stresslog.Warn("[ACTION] HTTP 响应 JSON 解析失败",
 					zap.String("action", def.Name),
-					zap.Int("statusCode", statusCode),
+					zap.Int("statusCode", exchange.StatusCode),
 					zap.Error(err))
 			} else {
 				ae.storeResponse(def.Store, respMap)
@@ -719,10 +742,10 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, ActionTimin
 	stresslog.Debug("[ACTION] HTTPRequest 成功",
 		zap.String("action", def.Name),
 		zap.String("url", resolvedURL), zap.String("method", method),
-		zap.Int("statusCode", statusCode),
+		zap.Int("statusCode", exchange.StatusCode),
 		zap.Int("reqBodyLen", len(body)), zap.Int("respBodyLen", len(respBody)),
-		zap.Duration("netLatency", netLatency))
-	return sendLen, len(respBody), timing, nil
+		zap.Duration("netLatency", exchange.NetLatency))
+	return exchange.SendWireBytes, exchange.RecvWireBytes, timing, nil
 }
 
 // parseAndStoreResponse 解析 S2C 响应消息并存储字段
@@ -915,24 +938,15 @@ func (ae *ActionExecutor) protocolSecretKey(protocol, service string) []byte {
 }
 
 // protocolRequest sends a request and waits for response.
-func (ae *ActionExecutor) protocolRequest(protocol, service string, packet []byte, routeKey string, timeout ...time.Duration) (body []byte, headerErr uint64, timing RequestTiming, err error) {
+func (ae *ActionExecutor) protocolRequest(protocol, service string, packet []byte, routeKey string, timeout ...time.Duration) (*NetExchange, error) {
 	if protocol == "udp" {
 		return ae.netSender.UDPRequest(service, packet, routeKey, timeout...)
 	}
 	return ae.netSender.TCPRequest(service, packet, routeKey, timeout...)
 }
 
-// protocolEnsureListener ensures listener is registered.
-func (ae *ActionExecutor) protocolEnsureListener(protocol, service, routeKey string) {
-	if protocol == "udp" {
-		ae.netSender.EnsureUDPListener(service, routeKey)
-	} else {
-		ae.netSender.EnsureTCPListener(service, routeKey)
-	}
-}
-
 // protocolListenResp gets the latest listen response.
-func (ae *ActionExecutor) protocolListenResp(protocol, service, routeKey string) ([]byte, uint64) {
+func (ae *ActionExecutor) protocolListenResp(protocol, service, routeKey string) *NetExchange {
 	if protocol == "udp" {
 		return ae.netSender.GetUDPListenResp(service, routeKey)
 	}
@@ -1023,17 +1037,21 @@ func (ae *ActionExecutor) execRequest(protocol string, def *ActionDef) (int, int
 	if def.Timeout > 0 {
 		reqTimeout = append(reqTimeout, time.Duration(def.Timeout)*time.Second)
 	}
-	respBody, headerErr, reqTiming, err := ae.protocolRequest(protocol, def.Service, packet, routeKey, reqTimeout...)
+	exchange, err := ae.protocolRequest(protocol, def.Service, packet, routeKey, reqTimeout...)
+	if exchange == nil {
+		exchange = &NetExchange{SendWireBytes: len(packet)}
+	}
+	respBody := exchange.Body
 	var timing ActionTiming
 	timing.Client.BuildCost += buildCost
 	timing.Client.EncodeCost += encodeCost
-	timing.AddRequest(reqTiming)
+	timing.AddRequest(exchange.Timing)
 	if err != nil {
-		return len(packet), 0, timing, err
+		return exchange.SendWireBytes, exchange.RecvWireBytes, timing, err
 	}
 
-	if headerErr != 0 {
-		return len(packet), len(respBody), timing, ae.handleHeaderError(def, headerErr, routeKey, respBody)
+	if exchange.HeaderErr != 0 {
+		return exchange.SendWireBytes, exchange.RecvWireBytes, timing, ae.handleHeaderError(def, exchange.HeaderErr, routeKey, respBody)
 	}
 
 	var parseStart time.Time
@@ -1041,7 +1059,7 @@ func (ae *ActionExecutor) execRequest(protocol string, def *ActionDef) (int, int
 		parseStart = time.Now()
 	}
 	if err := ae.parseAndStoreResponse(def, respBody); err != nil {
-		return len(packet), 0, timing, err
+		return exchange.SendWireBytes, exchange.RecvWireBytes, timing, err
 	}
 	if ae.timingLevel >= TimingLevelFull && !parseStart.IsZero() {
 		timing.Client.ParseStoreCost += time.Since(parseStart)
@@ -1050,11 +1068,12 @@ func (ae *ActionExecutor) execRequest(protocol string, def *ActionDef) (int, int
 	stresslog.Debug("[ACTION] "+label+" 成功",
 		zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
 		zap.String("s2cProto", def.S2CProto),
-		zap.Int("respBodyLen", len(respBody)), zap.Duration("wireRTT", reqTiming.WireRTT))
-	return len(packet), len(respBody), timing, nil
+		zap.Int("respBodyLen", len(respBody)), zap.Duration("wireRTT", exchange.Timing.WireRTT))
+	return exchange.SendWireBytes, exchange.RecvWireBytes, timing, nil
 }
 
-// execListen waits for a listen message (polling mode).
+// execListen 轮询消费已通过 ListenRefs 预缓存的推送消息。
+// 不再自行注册监听；若对应 route 未在前驱节点通过 listenRefs 预注册，将始终超时。
 func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *ActionDef) (int, ActionTiming, error) {
 	timeout := def.Timeout
 	if timeout <= 0 {
@@ -1075,8 +1094,6 @@ func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *
 		zap.String("s2cProto", def.S2CProto),
 		zap.Int("timeoutSec", timeout))
 
-	ae.protocolEnsureListener(protocol, def.Service, routeKey)
-
 	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 	start := time.Now()
 	pollCount := 0
@@ -1086,18 +1103,19 @@ func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *
 			return 0, ActionTiming{}, ctx.Err()
 		}
 		pollCount++
-		respBody, headerErr := ae.protocolListenResp(protocol, def.Service, routeKey)
-		if respBody != nil {
+		exchange := ae.protocolListenResp(protocol, def.Service, routeKey)
+		if exchange != nil {
+			respBody := exchange.Body
 			var timing ActionTiming
-			if headerErr != 0 {
-				return 0, timing, ae.handleHeaderError(def, headerErr, routeKey, respBody)
+			if exchange.HeaderErr != 0 {
+				return exchange.RecvWireBytes, timing, ae.handleHeaderError(def, exchange.HeaderErr, routeKey, respBody)
 			}
 			var parseStart time.Time
 			if ae.timingLevel >= TimingLevelFull {
 				parseStart = time.Now()
 			}
 			if err := ae.parseAndStoreResponse(def, respBody); err != nil {
-				return 0, timing, err
+				return exchange.RecvWireBytes, timing, err
 			}
 			if ae.timingLevel >= TimingLevelFull && !parseStart.IsZero() {
 				timing.Client.ParseStoreCost += time.Since(parseStart)
@@ -1107,7 +1125,7 @@ func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *
 				zap.String("s2cProto", def.S2CProto),
 				zap.Int("respBodyLen", len(respBody)),
 				zap.Int("pollCount", pollCount))
-			return len(respBody), timing, nil
+			return exchange.RecvWireBytes, timing, nil
 		}
 		time.Sleep(time.Duration(pollMs) * time.Millisecond)
 	}
@@ -1115,7 +1133,8 @@ func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *
 	elapsed := time.Since(start)
 	return 0, ActionTiming{}, NewActionError(errcode.ErrListenTimeout,
 		"action="+def.Name+" service="+def.Service+" route="+routeKey+
-			fmt.Sprintf(" timeout=%ds polls=%d elapsed=%v", timeout, pollCount, elapsed))
+			fmt.Sprintf(" timeout=%ds polls=%d elapsed=%v", timeout, pollCount, elapsed)+
+			"；route 未通过 listenRefs 预注册，请在前驱节点添加 listenRefs 并设置 listen=null")
 }
 
 // randomStringCharset 生成指定字符集的随机字符串

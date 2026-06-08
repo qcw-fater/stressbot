@@ -2,11 +2,68 @@ package admin
 
 import (
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	json "stressbot/utils/jsonx"
 )
+
+// compareTarget 对比目标：任务 ID + 可选阶段段落号（-1 表示整体）。
+type compareTarget struct {
+	id         string
+	stageIndex int
+}
+
+// parseCompareTargets 解析对比目标，支持新 targets=a:-1,b:2 与旧 ids=a,b。
+func parseCompareTargets(q url.Values) ([]compareTarget, error) {
+	raw := q.Get("targets")
+	useTargets := raw != ""
+	if !useTargets {
+		raw = q.Get("ids")
+	}
+	if raw == "" {
+		return nil, ErrInvalidArgument.WithMessage("ids or targets query param required")
+	}
+
+	parts := strings.Split(raw, ",")
+	if len(parts) < 2 {
+		return nil, ErrInvalidArgument.WithMessage("at least 2 targets required")
+	}
+	if len(parts) > 5 {
+		return nil, ErrInvalidArgument.WithMessage("at most 5 targets for comparison")
+	}
+
+	targets := make([]compareTarget, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		t := compareTarget{stageIndex: -1}
+		if useTargets {
+			if idx := strings.LastIndex(p, ":"); idx >= 0 {
+				t.id = strings.TrimSpace(p[:idx])
+				if n, err := strconv.Atoi(strings.TrimSpace(p[idx+1:])); err == nil {
+					t.stageIndex = n
+				}
+			} else {
+				t.id = p
+			}
+		} else {
+			t.id = p
+		}
+		if t.id == "" {
+			return nil, ErrInvalidArgument.WithMessage("invalid compare target")
+		}
+		targets = append(targets, t)
+	}
+	if len(targets) < 2 {
+		return nil, ErrInvalidArgument.WithMessage("at least 2 valid targets required")
+	}
+	return targets, nil
+}
 
 // ──────────────────────────────────────────────────
 // 历史归档 Handlers
@@ -38,6 +95,7 @@ func (s *AdminServer) handleListHistory(w http.ResponseWriter, r *http.Request) 
 		v := parseBoolOrDefault(star, false)
 		filter.Starred = &v
 	}
+	filter.IncludeStages = parseBoolOrDefault(q.Get("includeStages"), false)
 
 	resp, err := s.history.List(r.Context(), filter)
 	if err != nil {
@@ -54,7 +112,8 @@ func (s *AdminServer) handleGetHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := r.PathValue("id")
-	detail, err := s.history.GetDetailSummary(r.Context(), id)
+	stageIndex := parseIntOrDefault(r.URL.Query().Get("stageIndex"), -1)
+	detail, err := s.history.GetDetailSummary(r.Context(), id, stageIndex)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -69,7 +128,8 @@ func (s *AdminServer) handleGetHistoryAgents(w http.ResponseWriter, r *http.Requ
 	}
 
 	id := r.PathValue("id")
-	reports, err := s.history.queryReportSummaries(r.Context(), id)
+	stageIndex := parseIntOrDefault(r.URL.Query().Get("stageIndex"), -1)
+	reports, err := s.history.queryReportSummaries(r.Context(), id, stageIndex)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -115,7 +175,8 @@ func (s *AdminServer) handleGetHistoryTimeseries(w http.ResponseWriter, r *http.
 
 	id := r.PathValue("id")
 	maxPoints := parseIntOrDefault(r.URL.Query().Get("maxPoints"), defaultHistoryTimeseriesMaxPoints)
-	resp, err := s.history.GetTimeseries(r.Context(), id, maxPoints)
+	stageIndex := parseIntOrDefault(r.URL.Query().Get("stageIndex"), -1)
+	resp, err := s.history.GetTimeseries(r.Context(), id, maxPoints, stageIndex)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -153,13 +214,15 @@ func (s *AdminServer) handleUpdateHistory(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := s.history.UpdateMeta(r.Context(), id, req); err != nil {
+	stageIndex := parseIntOrDefault(r.URL.Query().Get("stageIndex"), -1)
+	// 统一写入：stageIndex<=0 → 任务级（-1），>=1 → 段落级，均存 task_meta。
+	if err := s.history.UpsertMeta(r.Context(), id, stageIndex, req); err != nil {
 		writeError(w, err)
 		return
 	}
 
 	// 返回更新后的历史详情展示数据
-	detail, err := s.history.GetDetailSummary(r.Context(), id)
+	detail, err := s.history.GetDetailSummary(r.Context(), id, stageIndex)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 		return
@@ -245,24 +308,18 @@ func (s *AdminServer) handleCompareHistory(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	idsStr := r.URL.Query().Get("ids")
-	if idsStr == "" {
-		writeError(w, ErrInvalidArgument.WithMessage("ids query param required"))
-		return
-	}
-	ids := strings.Split(idsStr, ",")
-	if len(ids) < 2 {
-		writeError(w, ErrInvalidArgument.WithMessage("at least 2 ids required"))
-		return
-	}
-	if len(ids) > 5 {
-		writeError(w, ErrInvalidArgument.WithMessage("at most 5 ids for comparison"))
+	// 兼容两种入口：
+	//   旧：ids=a,b          → 仅整体对比
+	//   新：targets=a:-1,b:2 → 支持阶段段落对比（stageIndex），冒号后为段落号
+	targets, err := parseCompareTargets(r.URL.Query())
+	if err != nil {
+		writeError(w, err)
 		return
 	}
 
-	tasks := make([]HistoryCompareTask, 0, len(ids))
-	for _, id := range ids {
-		task, err := s.history.GetCompareTask(r.Context(), strings.TrimSpace(id))
+	tasks := make([]HistoryCompareTask, 0, len(targets))
+	for _, t := range targets {
+		task, err := s.history.GetCompareTask(r.Context(), t.id, t.stageIndex)
 		if err != nil {
 			writeError(w, err)
 			return

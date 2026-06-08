@@ -52,8 +52,8 @@ type ActionSnapshot struct {
 	CanceledCount             int64             `json:"canceledCount"`             // 取消次数
 	Executing                 int64             `json:"executing"`                 // 当前执行中的并发数
 	SuccessRate               float64           `json:"successRate"`               // 成功率（0~1）
-	AvgSendBytes              float64           `json:"avgSendBytes"`              // 平均每次成功的发送字节数
-	AvgRecvBytes              float64           `json:"avgRecvBytes"`              // 平均每次成功的接收字节数
+	AvgSendBytes              float64           `json:"avgSendBytes"`              // 平均每次完成/记录的发送 WireBytes
+	AvgRecvBytes              float64           `json:"avgRecvBytes"`              // 平均每次完成/记录的接收 WireBytes
 	RTTApdex                  float64           `json:"rttApdex"`                  // RTT Apdex 评分（0~1）
 	TotalDurationApdex        float64           `json:"totalDurationApdex"`        // 总耗时 Apdex 评分（0~1）
 	RTT                       HistogramSnapshot `json:"rtt"`                       // RTT 直方图快照（WireRTT）
@@ -96,6 +96,12 @@ type RobotSnapshot struct {
 	Errored int64 `json:"errored"` // 异常退出的机器人数量
 }
 
+// RampUpSnapshot 渐进加压阶段快照。
+type RampUpSnapshot struct {
+	CurrentStage int `json:"currentStage"` // 当前阶段（1-based，0 = 未启用）
+	TotalStages  int `json:"totalStages"`  // 总阶段数（0 = 未启用）
+}
+
 // CollectorSnapshot 全局指标快照，包含系统、机器人、连接、带宽和所有 action 的聚合数据。
 type CollectorSnapshot struct {
 	Timestamp    time.Time          `json:"timestamp"`     // 快照时间
@@ -105,6 +111,7 @@ type CollectorSnapshot struct {
 	ApdexT       int                `json:"apdexT"`        // 当前 Apdex T 阈值（毫秒）
 	System       SystemSnapshot     `json:"system"`        // 系统资源快照
 	Robots       RobotSnapshot      `json:"robots"`        // 机器人状态快照
+	RampUp       RampUpSnapshot     `json:"rampUp"`        // 渐进加压阶段快照
 	Connections  ConnectionSnapshot `json:"connections"`   // 连接指标快照
 	Bandwidth    BandwidthSnapshot  `json:"bandwidth"`     // 带宽快照
 	Actions      []ActionSnapshot   `json:"actions"`       // 所有 action 的快照列表
@@ -152,6 +159,10 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 			Running: c.robotsRunning.Load(),
 			Stopped: c.robotsStopped.Load(),
 			Errored: c.robotsErrored.Load(),
+		},
+		RampUp: RampUpSnapshot{
+			CurrentStage: int(c.rampUpCurrentStage.Load()),
+			TotalStages:  int(c.rampUpTotalStages.Load()),
 		},
 		Connections: ConnectionSnapshot{
 			Established: c.connEstablished.Load(),
@@ -224,13 +235,13 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 		if total > 0 {
 			successRate = float64(succ) / float64(total)
 		}
-
 		var avgSend, avgRecv float64
 		totalSendBytes := am.sendBytes.Load()
 		totalRecvBytes := am.recvBytes.Load()
-		if succ > 0 {
-			avgSend = float64(totalSendBytes) / float64(succ)
-			avgRecv = float64(totalRecvBytes) / float64(succ)
+		byteSamples := succ + fail + tout + canceled
+		if byteSamples > 0 {
+			avgSend = float64(totalSendBytes) / float64(byteSamples)
+			avgRecv = float64(totalRecvBytes) / float64(byteSamples)
 		}
 
 		rttSnap := am.rtt.Snapshot()
@@ -330,6 +341,8 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 	}
 
 	var maxUptime float64
+	merged.RampUp.TotalStages = snaps[0].RampUp.TotalStages // 所有 Agent 阶段数相同
+	first := true
 	for _, s := range snaps {
 		merged.TotalActions += s.TotalActions
 		merged.Robots.Started += s.Robots.Started
@@ -343,6 +356,11 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 		merged.Bandwidth.TotalRecvBytes += s.Bandwidth.TotalRecvBytes
 		if s.UptimeSec > maxUptime {
 			maxUptime = s.UptimeSec
+		}
+		// 取最小 currentStage：最慢的 Agent 决定整体阶段进度
+		if s.RampUp.CurrentStage > 0 && (first || s.RampUp.CurrentStage < merged.RampUp.CurrentStage) {
+			merged.RampUp.CurrentStage = s.RampUp.CurrentStage
+			first = false
 		}
 	}
 	merged.UptimeSec = maxUptime
@@ -422,9 +440,10 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 		if ma.TotalDurationSampleCount > 0 {
 			ma.TotalDurationApdex = (float64(totalDurationSatisfied) + float64(totalDurationTolerating)*0.5) / float64(ma.TotalDurationSampleCount)
 		}
-		if ma.SuccessCount > 0 {
-			ma.AvgSendBytes = float64(ma.TotalSendBytes) / float64(ma.SuccessCount)
-			ma.AvgRecvBytes = float64(ma.TotalRecvBytes) / float64(ma.SuccessCount)
+		byteSamples := ma.SuccessCount + ma.FailureCount + ma.TimeoutCount + ma.CanceledCount
+		if byteSamples > 0 {
+			ma.AvgSendBytes = float64(ma.TotalSendBytes) / float64(byteSamples)
+			ma.AvgRecvBytes = float64(ma.TotalRecvBytes) / float64(byteSamples)
 		}
 		if ma.ClientCostCount > 0 {
 			var buildSum, encodeSum, sendSum, decodeWaitSum, decodeSum, dispatchSum, parseStoreSum float64

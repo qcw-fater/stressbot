@@ -74,6 +74,15 @@ describe('renderSignature / renderDoc', () => {
     expect(renderSignature(fn)).toBe('(service, request_route, response_route, msg, [s2c_proto], [timeout_sec])');
   });
 
+  it('network API 不再向脚本返回 sent/recv 字节数', () => {
+    const names = ['tcp_request', 'tcp_request_route', 'udp_request', 'udp_request_route', 'tcp_send', 'udp_send', 'tcp_listen', 'udp_listen', 'http_request'];
+    for (const name of names) {
+      const fn = getLuaFunction('network', name)!;
+      expect(fn.returns, `network.${name}.returns`).not.toMatch(/sent|recv/);
+      expect(fn.detail ?? '', `network.${name}.detail`).not.toMatch(/底层|自动计入|自动统计/);
+    }
+  });
+
   it('renderDoc 包含函数签名、summary、参数和返回值', () => {
     const fn = getLuaFunction('robot', 'set')!;
     const doc = renderDoc(fn);

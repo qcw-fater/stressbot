@@ -91,21 +91,18 @@ func loadNetworkModule(L *lua.LState) int {
 // 内部辅助
 // ---------------------------------------------------------------------------
 
-// pushRequestResult 将请求结果压入 Lua 栈，消除重复的 4 行 push 模式。
-func pushRequestResult(L *lua.LState, code int, data lua.LValue, sent, recv int) int {
+// pushRequestResult 将请求结果压入 Lua 栈。
+func pushRequestResult(L *lua.LState, code int, data lua.LValue, _ int, _ int) int {
 	L.Push(lua.LNumber(code))
 	L.Push(data)
-	L.Push(lua.LNumber(sent))
-	L.Push(lua.LNumber(recv))
-	return 4
+	return 2
 }
 
 // errToCode 从 ActionError 提取错误码，透传给 Lua。
 // 所有网络层错误都是 ActionError（含 errcode 体系的具体码），
 // 非 ActionError 降级为 -1（理论上不会走到）。
 func errToCode(err error) int {
-	var actionErr *engine.ActionError
-	if errors.As(err, &actionErr) {
+	if actionErr, ok := errors.AsType[*engine.ActionError](err); ok {
 		return int(actionErr.ErrorCode())
 	}
 	return -1
@@ -303,8 +300,9 @@ func networkCloseUDP(L *lua.LState) int {
 // networkTCPRequest TCP 请求-响应。
 // 签名：network.tcp_request(service, route, msg [, s2c_proto])
 //
-// 返回：code(number), data(string|userdata|nil), sent(number), recv(number)
+// 返回：code(number), data(string|userdata|nil)
 // code=0 成功 / errcode 错误码（1-5 网络层 / 11 协议层 / ≥100 服务端）。
+// WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
 func networkTCPRequest(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -379,15 +377,18 @@ func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 	routeKey := ctx.Adapter.ExpectedRouteKeyLocked(luaValueToRoute(responseRoute))
 	pktLen := len(packet)
 
-	var respBody []byte
-	var headerErr uint64
+	var exchange *engine.NetExchange
 	var reqErr error
-	var reqTiming engine.RequestTiming
 	withReleasedMu(ctx.LuaMu, func() {
-		respBody, headerErr, reqTiming, reqErr = ctx.NetSender.TCPRequest(service, packet, routeKey,
+		exchange, reqErr = ctx.NetSender.TCPRequest(service, packet, routeKey,
 			time.Duration(timeout)*time.Second)
 	})
-	ctx.recordRequest(reqTiming)
+	if exchange == nil {
+		exchange = &engine.NetExchange{SendWireBytes: pktLen}
+	}
+	ctx.recordRequest(exchange.Timing)
+	ctx.recordBytes(exchange.SendWireBytes, exchange.RecvWireBytes)
+	respBody := exchange.Body
 
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
 		return pushRequestResult(L, int(errcode.ErrActionCanceled), lua.LNil, pktLen, 0)
@@ -395,8 +396,8 @@ func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 	if reqErr != nil {
 		return pushRequestResult(L, errToCode(reqErr), lua.LNil, pktLen, 0)
 	}
-	if headerErr != 0 {
-		return pushRequestResult(L, int(headerErr), lua.LString(string(respBody)), pktLen, len(respBody))
+	if exchange.HeaderErr != 0 {
+		return pushRequestResult(L, int(exchange.HeaderErr), lua.LString(string(respBody)), pktLen, len(respBody))
 	}
 
 	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
@@ -420,8 +421,9 @@ func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 // networkUDPRequest UDP 请求-响应。
 // 签名：network.udp_request(service, route, body [, s2c_proto [, timeout_sec [, poll_ms]]])
 //
-// 返回：code(number), data(string|userdata|nil), sent(number), recv(number)
+// 返回：code(number), data(string|userdata|nil)
 // code=0 成功 / errcode 错误码（1-5 网络层 / 11 协议层 / ≥100 服务端）。
+// WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
 func networkUDPRequest(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
@@ -485,18 +487,21 @@ func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 	}
 
 	pktLen := len(packet)
-	var respBody []byte
-	var headerErr uint64
+	var exchange *engine.NetExchange
 	var reqErr error
-	var reqTiming engine.RequestTiming
 
 	withReleasedMu(ctx.LuaMu, func() {
-		respBody, headerErr, reqTiming, reqErr = ctx.NetSender.UDPRequest(
+		exchange, reqErr = ctx.NetSender.UDPRequest(
 			service, packet, routeKey,
 			time.Duration(timeout)*time.Second,
 		)
 	})
-	ctx.recordRequest(reqTiming)
+	if exchange == nil {
+		exchange = &engine.NetExchange{SendWireBytes: pktLen}
+	}
+	ctx.recordRequest(exchange.Timing)
+	ctx.recordBytes(exchange.SendWireBytes, exchange.RecvWireBytes)
+	respBody := exchange.Body
 
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
 		// 脚本上下文被取消（robot.Stop / 任务停止）。区别于 reqErr 携带的 CONN_DROPPED：
@@ -507,8 +512,8 @@ func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 	if reqErr != nil {
 		return pushRequestResult(L, errToCode(reqErr), lua.LNil, pktLen, 0)
 	}
-	if headerErr != 0 {
-		return pushRequestResult(L, int(headerErr), lua.LString(string(respBody)), pktLen, len(respBody))
+	if exchange.HeaderErr != 0 {
+		return pushRequestResult(L, int(exchange.HeaderErr), lua.LString(string(respBody)), pktLen, len(respBody))
 	}
 
 	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
@@ -532,7 +537,8 @@ func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 // networkHTTPRequest 发送 HTTP 请求。
 // 签名：network.http_request(url [, method [, content_type [, body]]])
 //
-// 返回：status_code(number), body(string), sent(number), recv(number)
+// 返回：status_code(number), body(string)
+// HTTP message bytes 由 Context 自动累计，不返回给 Lua 脚本。
 func networkHTTPRequest(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -567,7 +573,6 @@ func networkHTTPRequest(L *lua.LState) int {
 	}
 
 	var reqBody []byte
-	sent := 0
 	if bodyTable != nil {
 		formData := make(map[string]string)
 		bodyTable.ForEach(func(k, val lua.LValue) {
@@ -582,38 +587,34 @@ func networkHTTPRequest(L *lua.LState) int {
 				return 0
 			}
 			reqBody = jsonBytes
-			sent = len(reqBody)
 		default: // "form"
 			values := make(url.Values)
 			for k, v := range formData {
 				values.Set(k, v)
-				sent += len(k) + 1 + len(v) + 1
 			}
 			reqBody = []byte(values.Encode())
 		}
 	}
 
-	var statusCode int
-	var respBody []byte
+	var exchange *engine.HTTPExchange
 	var err error
-	var netLatency time.Duration
 	withReleasedMu(ctx.LuaMu, func() {
-		statusCode, respBody, netLatency, err = ctx.NetSender.HTTPRequest(reqURL, method, contentType, reqBody)
+		exchange, err = ctx.NetSender.HTTPRequest(reqURL, method, contentType, reqBody)
 	})
-	ctx.recordRequest(engine.RequestTiming{WireRTT: netLatency})
+	if exchange == nil {
+		exchange = &engine.HTTPExchange{}
+	}
+	ctx.recordRequest(engine.RequestTiming{WireRTT: exchange.NetLatency})
+	ctx.recordBytes(exchange.SendWireBytes, exchange.RecvWireBytes)
 	if err != nil {
 		L.Push(lua.LNumber(-1))
 		L.Push(lua.LString(err.Error()))
-		L.Push(lua.LNumber(sent))
-		L.Push(lua.LNumber(0))
-		return 4
+		return 2
 	}
 
-	L.Push(lua.LNumber(statusCode))
-	L.Push(lua.LString(string(respBody)))
-	L.Push(lua.LNumber(sent))
-	L.Push(lua.LNumber(len(respBody)))
-	return 4
+	L.Push(lua.LNumber(exchange.StatusCode))
+	L.Push(lua.LString(string(exchange.Body)))
+	return 2
 }
 
 // ---------------------------------------------------------------------------
@@ -623,8 +624,9 @@ func networkHTTPRequest(L *lua.LState) int {
 // networkTCPSend TCP 发送（不等响应）。
 // 签名：network.tcp_send(service, route, msg)
 //
-// 返回：code(number), sent(number)
+// 返回：code(number)
 // code=0 成功 / errcode 错误码（1-5 网络层 / 11 协议层）。
+// 发送 WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
 func networkTCPSend(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -654,8 +656,7 @@ func networkTCPSend(L *lua.LState) int {
 	}
 	if packet == nil {
 		L.Push(lua.LNumber(errcode.ErrEncodeFailed))
-		L.Push(lua.LNumber(0))
-		return 2
+		return 1
 	}
 
 	var sendStart time.Time
@@ -667,20 +668,21 @@ func networkTCPSend(L *lua.LState) int {
 		ctx.recordClientTiming(engine.ClientTiming{SendCost: time.Since(sendStart)})
 	}
 	if err == nil {
+		ctx.recordBytes(n, 0)
 		L.Push(lua.LNumber(0))
-		L.Push(lua.LNumber(n))
 	} else {
+		ctx.recordBytes(len(packet), 0)
 		L.Push(lua.LNumber(errToCode(err)))
-		L.Push(lua.LNumber(len(packet)))
 	}
-	return 2
+	return 1
 }
 
 // networkUDPSend 发送 UDP 编码消息。
 // 签名：network.udp_send(service, route, body)
 //
-// 返回：code(number), sent(number)
+// 返回：code(number)
 // code=0 成功 / errcode 错误码（1-5 网络层 / 11 协议层）。
+// 发送 WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
 func networkUDPSend(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
@@ -707,8 +709,7 @@ func networkUDPSend(L *lua.LState) int {
 	}
 	if packet == nil {
 		L.Push(lua.LNumber(errcode.ErrEncodeFailed))
-		L.Push(lua.LNumber(0))
-		return 2
+		return 1
 	}
 	var sendStart time.Time
 	if ctx.TimingLevel >= engine.TimingLevelRTTOnly {
@@ -719,13 +720,13 @@ func networkUDPSend(L *lua.LState) int {
 		ctx.recordClientTiming(engine.ClientTiming{SendCost: time.Since(sendStart)})
 	}
 	if err == nil {
+		ctx.recordBytes(n, 0)
 		L.Push(lua.LNumber(0))
-		L.Push(lua.LNumber(n))
 	} else {
+		ctx.recordBytes(len(packet), 0)
 		L.Push(lua.LNumber(errToCode(err)))
-		L.Push(lua.LNumber(len(packet)))
 	}
-	return 2
+	return 1
 }
 
 // ---------------------------------------------------------------------------
@@ -735,13 +736,15 @@ func networkUDPSend(L *lua.LState) int {
 // networkTCPListen 等待 TCP 监听消息。
 // 签名：network.tcp_listen(service, route [, s2c_proto [, timeout_sec [, poll_ms]]])
 //
-// 返回：data(string|userdata|nil), recv(number)
+// 返回：data(string|userdata|nil)
+// 接收 WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
 func networkTCPListen(L *lua.LState) int { return networkListen(L, "tcp") }
 
 // networkUDPListen 等待 UDP 监听消息。
 // 签名：network.udp_listen(service, route [, s2c_proto [, timeout_sec [, poll_ms]]])
 //
-// 返回：data(string|userdata|nil), recv(number)
+// 返回：data(string|userdata|nil)
+// 接收 WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
 func networkUDPListen(L *lua.LState) int { return networkListen(L, "udp") }
 
 // networkListen 通用监听实现，通过 protocol 参数区分 TCP/UDP。
@@ -773,25 +776,18 @@ func networkListen(L *lua.LState, protocol string) int {
 		pollMs = engine.DefaultPollMs
 	}
 
-	if protocol == "tcp" {
-		ctx.NetSender.EnsureTCPListener(service, routeKey)
-	} else {
-		ctx.NetSender.EnsureUDPListener(service, routeKey)
-	}
-
-	var respBody []byte
+	var exchange *engine.NetExchange
 	var timedOut bool
-	var headerErr uint64
 
 	withReleasedMu(ctx.LuaMu, func() {
 		deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 		for time.Now().Before(deadline) {
 			if protocol == "tcp" {
-				respBody, headerErr = ctx.NetSender.GetTCPListenResp(service, routeKey)
+				exchange = ctx.NetSender.GetTCPListenResp(service, routeKey)
 			} else {
-				respBody, headerErr = ctx.NetSender.GetUDPListenResp(service, routeKey)
+				exchange = ctx.NetSender.GetUDPListenResp(service, routeKey)
 			}
-			if respBody != nil {
+			if exchange != nil {
 				return
 			}
 			time.Sleep(time.Duration(pollMs) * time.Millisecond)
@@ -799,44 +795,44 @@ func networkListen(L *lua.LState, protocol string) int {
 				return
 			}
 		}
-		if respBody == nil {
+		if exchange == nil {
 			timedOut = true
 		}
 	})
+	if exchange == nil {
+		exchange = &engine.NetExchange{}
+	}
+	ctx.recordBytes(0, exchange.RecvWireBytes)
+	respBody := exchange.Body
 
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
 		L.Push(lua.LNil)
-		L.Push(lua.LNumber(0))
-		return 2
+		return 1
 	}
 	if timedOut {
 		stresslog.Debug("[SCRIPT] "+protocol+"_listen 超时",
-			zap.String("service", service), zap.String("routeKey", routeKey), zap.Int("timeout", timeout))
+			zap.String("service", service), zap.String("routeKey", routeKey), zap.Int("timeout", timeout),
+			zap.String("hint", "请先调用 ensure_"+protocol+"_listener() 预注册监听"))
 		L.Push(lua.LNil)
-		L.Push(lua.LNumber(0))
-		return 2
+		return 1
 	}
-	if headerErr != 0 {
+	if exchange.HeaderErr != 0 {
 		L.Push(lua.LString(string(respBody)))
-		L.Push(lua.LNumber(len(respBody)))
-		return 2
+		return 1
 	}
 
 	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
 		respMsg, err := ctx.Factory.Parse(s2cProto, respBody)
 		if err != nil {
 			L.Push(lua.LNil)
-			L.Push(lua.LNumber(len(respBody)))
-			return 2
+			return 1
 		}
 		L.Push(wrapProtoMessage(L, respMsg))
-		L.Push(lua.LNumber(len(respBody)))
-		return 2
+		return 1
 	}
 
 	L.Push(lua.LString(string(respBody)))
-	L.Push(lua.LNumber(len(respBody)))
-	return 2
+	return 1
 }
 
 // ---------------------------------------------------------------------------
@@ -912,6 +908,7 @@ func networkGetUDPSecretKey(L *lua.LState) int {
 // ---------------------------------------------------------------------------
 
 // networkEnsureTCPListener 为 TCP routeKey 注册监听器占位。
+// tcp_listen 不再自动注册，Lua 脚本需在触发推送前显式调用此函数。
 // 签名：network.ensure_tcp_listener(service, response_key)
 func networkEnsureTCPListener(L *lua.LState) int {
 	ctx := GetContext(L)
@@ -925,6 +922,7 @@ func networkEnsureTCPListener(L *lua.LState) int {
 }
 
 // networkEnsureUDPListener 为 UDP routeKey 注册监听器占位。
+// udp_listen 不再自动注册，Lua 脚本需在触发推送前显式调用此函数。
 // 签名：network.ensure_udp_listener(service, response_key)
 func networkEnsureUDPListener(L *lua.LState) int {
 	ctx := GetContext(L)

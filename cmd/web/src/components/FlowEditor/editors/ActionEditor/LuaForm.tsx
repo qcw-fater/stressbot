@@ -4,9 +4,8 @@
  * - 选择脚本文件（从基线 scripts 索引列出）
  * - Monaco 全功能 Lua 编辑
  * - 入口签名：
- *   action  模式 : function execute(r) ... return code, send_bytes, recv_bytes end
- *                  return 0 表示成功；send/recv 可省略，由 lua API 第 3、4 个返回值给出，
- *                  会归到 ActionsTab 的 ↑avg / ↓avg per-action 字节统计中。
+ *   action  模式 : function execute(r) ... return code end
+ *                  return 0 表示成功。
  *   listen 模式 : function onMessage(r, msg) ... end
  *   boolean 模式 : function execute(r) ... return true/false end（条件节点 / loop breakCondition 用）
  *
@@ -48,14 +47,11 @@ local robot = require('robot')
 
 function execute(r)
   -- TODO: 业务逻辑
-  -- 累计本 action 内所有 lua API 调用的发/收字节，最终透传给 monitor 做 per-action 统计
-  local _send, _recv = 0, 0
   -- 示例：
-  -- local code, _, sent, recv = network.tcp_request('logic', {cmd=1, act=2}, msg, 'Game.SomeS2C')
+  -- local code, resp = network.tcp_request('logic', {cmd=1, act=2}, msg, 'Game.SomeS2C')
   -- 请求/响应路由不同时可用 network.tcp_request_route(service, requestRoute, responseRoute, msg, s2cProto)
-  -- _send, _recv = _send + sent, _recv + recv
-  -- if code ~= 0 then return 1, _send, _recv end
-  return 0, _send, _recv  -- 第 1 个为错误码（0=成功），后两个为 wire 字节数
+  -- if code ~= 0 then return code end
+  return 0  -- 错误码（0=成功）
 end
 `,
   listen: `-- listen_xxx.lua
@@ -356,8 +352,8 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
             入口签名：<code>{expectedSig}</code>
             {mode === 'action' && (
               <>
-                ；<code>return code, send, recv</code>
-                （错误码，发送字节数，接收字节数）
+                ；<code>return code</code>
+                （错误码）
               </>
             )}
             {mode === 'boolean' && (

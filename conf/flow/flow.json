@@ -190,14 +190,6 @@
         },
         {
           "route": {
-            "cmd": 3,
-            "act": 5
-          },
-          "server": "tcp:logic",
-          "listen": "customRoomStart"
-        },
-        {
-          "route": {
             "cmd": 14,
             "act": 10
           },
@@ -375,7 +367,7 @@
             "act": 10
           },
           "server": "tcp:battle",
-          "listen": null
+          "listen": "battleStartGame"
         }
       ]
     },
@@ -1289,13 +1281,19 @@
       "bindings": [
         {
           "type": "stateRandom",
-          "field": "heroId",
-          "source": "heroIdList"
+          "source": "heroIdList",
+          "storeAs": "heroId"
         },
         {
-          "type": "fixed",
+          "type": "state",
+          "field": "heroId",
+          "source": "heroId"
+        },
+        {
+          "type": "state",
           "field": "skinId",
-          "value": 0
+          "value": 0,
+          "source": "heroId"
         }
       ]
     },
@@ -2029,11 +2027,11 @@
     "guildKickMember": {},
     "guildMemberUpdate": {},
     "guildUpdate": {},
-    "customRoomStart": {},
     "roomUpdateData": {},
     "roomUpdateStatus": {},
     "frameData": {
       "script": "listen_frame_data.lua"
-    }
+    },
+    "battleStartGame": {}
   }
 }

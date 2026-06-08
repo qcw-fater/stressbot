@@ -168,10 +168,10 @@ Apdex = (satisfied + tolerating × 0.5) / total
 | `skippedCount` | int64 | 跳过次数（不计入 sampleCount） |
 | `executing` | int64 | 当前正在执行的机器人数 |
 | `successRate` | float64 | 成功率 [0, 1] |
-| `avgSendBytes` | float64 | 平均发送字节（仅成功样本） |
-| `avgRecvBytes` | float64 | 平均接收字节（仅成功样本） |
+| `avgSendBytes` | float64 | 平均每次已记录动作发送的字节数 |
+| `avgRecvBytes` | float64 | 平均每次已记录动作接收的字节数 |
 | `apdex` | float64 | Apdex 评分 [0, 1] |
-| `latency` | HistogramSnapshot | 延迟分布（仅成功样本） |
+| `latency` | HistogramSnapshot | 有 RTT 样本的请求延迟分布 |
 | `avgQps` | float64 | 全程平均 QPS |
 | `periodQps` | float64 | 最近周期 QPS |
 | `errors` | []ErrorEntry | 错误分布（仅有失败时） |

@@ -47,9 +47,10 @@ type TaskRunner struct {
 	httpCli    *http.Client
 	workDir    string
 
-	// OnStageReset 渐进式加压阶段重置回调，由调用方（Agent.executeTask）注入。
-	// 在 resetBots() 完成后调用，用于上报当前阶段指标并重置采集器。
-	OnStageReset func(completedStageIdx int)
+	// OnStageReset reset 边界阶段段落上报回调，由调用方（Agent.executeTask）注入。
+	// 在 resetBots() 完成后调用，用于上报刚结束段落的累计指标并重置采集器。
+	// 参数为即将进入的配置阶段下标（0-based，>=1）。
+	OnStageReset func(nextStageIdx int)
 }
 
 // NewTaskRunner 创建任务执行器。
@@ -225,6 +226,9 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 	}
 	mgr := robot.NewManager(mgrCfg, flow, factory, dialer, luaPool)
 	mgr.OnStageReset = r.OnStageReset
+	mgr.OnStageChange = func(current, total int) {
+		r.collector.SetRampUpStage(current, total)
+	}
 
 	// 11. 启动机器人
 	var startErr error

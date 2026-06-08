@@ -685,9 +685,8 @@ ActionEditor 是整个编辑器中信息密度最高、动态性最强的部分�
 - **API 提示**（Monaco snippets）：内置 `robot.* / network.* / proto.* / utils.* / json.* / log.*` 的 completion 数据（来自 `flow-config` SKILL 中的 API 速查表）。
 - **本期 Lint**：仅做匹配 `function execute(r)` / `function onMessage(r, msg)` 的存在性检查。
 - **Lua 脚本返回值约定（v2 起）**：
-  - **action 脚本**（`pattern: "lua"`）：`return code [, send_bytes, recv_bytes]`。`code` 仍是 0=成功；
-    `send/recv` 由 lua API 多返回值给出（如 `network.tcp_send` 第 2 个返回值、`network.request`
-    第 3、4 个返回值）。引擎层 `RunActionScript` 透传给 `monitor.RecordAction`，使 ActionsTab
+  - **action 脚本**（`pattern: "lua"`）：只 `return code`。`code` 仍是 0=成功；
+    脚本内网络调用产生的发送/接收字节由运行时统一归入 `monitor.RecordAction`，使 ActionsTab
     的 ↑avg / ↓avg 字节列对 lua 动作也能反映真实流量（旧的"全部 0"已修复）。
   - **boolean 脚本**（`condition: "lua:xxx.lua"` / loop `breakCondition`）：必须 `return true / false`。
     返回 number / nil / 其它类型直接报错（v2 起不再兼容 v1 的 0/1 约定）。
@@ -902,9 +901,9 @@ script: [listen_frame_data.lua  ▾ 已存在 / + 新建]
 | 维度 | action 的 lua | boolean 的 lua（条件 / loop breakCondition） | callback 的 lua |
 |---|---|---|---|
 | 入口函数 | `function execute(r)` | `function execute(r)` | `function onMessage(r, msg)` |
-| 返回值语义 | `return code [, send, recv]`（0=成功；后两个由 lua API 多返回值累加） | `return true / false`（其它类型直接报错） | 无返回值（约定不读） |
+| 返回值语义 | `return code`（0=成功） | `return true / false`（其它类型直接报错） | 无返回值（约定不读） |
 | 入参 | 仅 robot | 仅 robot | robot + msg（proto userdata 或 binary string） |
-| 模板（新建时） | `execute_template.lua`（含 `_send/_recv` 累加示例） | `boolean_template.lua`（`return false`） | `on_message_template.lua` |
+| 模板（新建时） | `execute_template.lua` | `boolean_template.lua`（`return false`） | `on_message_template.lua` |
 | Lint 检查 | 必须存在 `function execute(r)` | 必须存在 `function execute(r)` | 必须存在 `function onMessage(r, msg)` |
 | 引擎入口 | `script.RuntimePool.RunActionScript` | `script.RuntimePool.RunBooleanScript` | `script.RuntimePool.RunCallbackScript` |
 

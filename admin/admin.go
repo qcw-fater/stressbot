@@ -78,7 +78,7 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 
 		sampler := NewSampler(
 			10*time.Second,
-			s.aggregator, s.history, s.agents,
+			s.aggregator, s.history, s.agents, s.tasks,
 		)
 		s.sampler = sampler
 	} else {

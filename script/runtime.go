@@ -51,18 +51,37 @@ type Context struct {
 	DefaultRequestTimeout time.Duration
 	TimingLevel           int
 
-	timingMu      sync.Mutex
-	currentTiming engine.ActionTiming
+	metricsMu        sync.Mutex
+	currentTiming    engine.ActionTiming
+	currentSendBytes int
+	currentRecvBytes int
 }
 
-// resetTiming 在每次 RunActionScript 开始前清零累加器。
-func (c *Context) resetTiming() {
+// resetMetrics 在每次 action/callback 脚本开始前清零累加器。
+func (c *Context) resetMetrics() {
 	if c == nil {
 		return
 	}
-	c.timingMu.Lock()
+	c.metricsMu.Lock()
 	c.currentTiming = engine.ActionTiming{}
-	c.timingMu.Unlock()
+	c.currentSendBytes = 0
+	c.currentRecvBytes = 0
+	c.metricsMu.Unlock()
+}
+
+// recordBytes 累加脚本内网络 API 实际发生的 WireBytes。供 api_network 调用。
+func (c *Context) recordBytes(send, recv int) {
+	if c == nil {
+		return
+	}
+	c.metricsMu.Lock()
+	if send > 0 {
+		c.currentSendBytes += send
+	}
+	if recv > 0 {
+		c.currentRecvBytes += recv
+	}
+	c.metricsMu.Unlock()
 }
 
 // recordRequest 累加一次真实的 request-response。供 api_network 调用。
@@ -70,16 +89,16 @@ func (c *Context) recordRequest(req engine.RequestTiming) {
 	if c == nil || req.WireRTT <= 0 {
 		return
 	}
-	c.timingMu.Lock()
+	c.metricsMu.Lock()
 	c.currentTiming.AddRequest(req)
-	c.timingMu.Unlock()
+	c.metricsMu.Unlock()
 }
 
 func (c *Context) recordClientTiming(timing engine.ClientTiming) {
 	if c == nil {
 		return
 	}
-	c.timingMu.Lock()
+	c.metricsMu.Lock()
 	c.currentTiming.Client.BuildCost += timing.BuildCost
 	c.currentTiming.Client.EncodeCost += timing.EncodeCost
 	c.currentTiming.Client.SendCost += timing.SendCost
@@ -87,21 +106,21 @@ func (c *Context) recordClientTiming(timing engine.ClientTiming) {
 	c.currentTiming.Client.DecodeCost += timing.DecodeCost
 	c.currentTiming.Client.DispatchWait += timing.DispatchWait
 	c.currentTiming.Client.ParseStoreCost += timing.ParseStoreCost
-	c.timingMu.Unlock()
+	c.metricsMu.Unlock()
 }
 
-// timing 取出当前累加结果，构造 ActionTiming。
-func (c *Context) timing() engine.ActionTiming {
+// metrics 取出当前累加结果。
+func (c *Context) metrics() (send int, recv int, timing engine.ActionTiming) {
 	if c == nil {
-		return engine.ActionTiming{}
+		return 0, 0, engine.ActionTiming{}
 	}
-	c.timingMu.Lock()
-	defer c.timingMu.Unlock()
+	c.metricsMu.Lock()
+	defer c.metricsMu.Unlock()
 	out := c.currentTiming
 	if len(c.currentTiming.Requests) > 0 {
 		out.Requests = append([]engine.RequestTiming(nil), c.currentTiming.Requests...)
 	}
-	return out
+	return c.currentSendBytes, c.currentRecvBytes, out
 }
 
 // SetContext 将脚本上下文绑定到 LState 的 registry
@@ -319,27 +338,18 @@ func (rp *RuntimePool) PrecompileScripts(dirs []string) error {
 
 // RunActionScript 执行动作脚本。
 //
-// Lua 脚本应定义 `function execute(r)` 函数，统一返回约定（按位置可省略后两个）：
+// Lua 脚本应定义 `function execute(r)` 函数并只返回 code：
 //
-//	return code             -- 仅 code，send/recv 视为 0（旧脚本兼容）
-//	return code, send       -- 只有发送字节
-//	return code, send, recv -- 完整三元组（推荐）
+//	return code -- 0=成功，非 0=失败
 //
-// code 仍为整数错误码（0=成功，非 0=失败）。send/recv 是本次 action 在
-// lua 内部累计的"线缆字节数"（含 header / 加密后的真实包长，由 lua API 返回值给出），
-// 调用方应当把它们透传给 monitor.RecordAction，从而和声明式动作走同一条 per-action
-// 字节统计路径，使 ActionsTab 的 ↑avg / ↓avg 列对 lua 动作也能反映真实流量。
-//
-// timing 由 Context 中保存的每次 RequestTiming 汇总：
-//   - 纯客户端脚本（仅 set_secret_key / connect 等）：Requests 为空，不进 RTT 直方图
-//   - 含 N 次 request 的脚本：Requests 有 N 个独立 WireRTT 样本
-//   - 出错中断的脚本：timing 仍反映已发生的网络调用
+// send/recv WireBytes 由脚本内 network API 自动累计到 Context；脚本额外返回的 send/recv
+// 会被忽略，避免重复统计。
 func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (code, send, recv int, timing engine.ActionTiming, err error) {
-	// 进入脚本前清零累加器；即使 PCall 报错也要把"已发生"的网络耗时上抛
-	if ctx := GetContext(L); ctx != nil {
-		ctx.resetTiming()
+	ctx := GetContext(L)
+	if ctx != nil {
+		ctx.resetMetrics()
 		defer func() {
-			timing = ctx.timing()
+			send, recv, timing = ctx.metrics()
 		}()
 	}
 
@@ -351,28 +361,16 @@ func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (code, 
 		return -1, 0, 0, engine.ActionTiming{}, lerr
 	}
 
-	// NRet=3 总是申请 3 个返回值占位；脚本只 return 1~2 个时，Lua 会用 nil 补齐。
 	robotUD := createRobotUserData(L)
-	if err = L.CallByParam(lua.P{Fn: executeFn, NRet: 3, Protect: true}, robotUD); err != nil {
+	if err = L.CallByParam(lua.P{Fn: executeFn, NRet: 1, Protect: true}, robotUD); err != nil {
 		return -1, 0, 0, engine.ActionTiming{}, fmt.Errorf("执行脚本 %s 失败: %w", scriptName, err)
 	}
 
-	// L.Get(savedTop+1..savedTop+3) 依次是 code / send / recv（缺省为 nil → 0）
 	if L.GetTop() >= savedTop+1 {
 		code = int(lua.LVAsNumber(L.Get(savedTop + 1)))
 	}
-	if L.GetTop() >= savedTop+2 {
-		if n := int(lua.LVAsNumber(L.Get(savedTop + 2))); n > 0 {
-			send = n
-		}
-	}
-	if L.GetTop() >= savedTop+3 {
-		if n := int(lua.LVAsNumber(L.Get(savedTop + 3))); n > 0 {
-			recv = n
-		}
-	}
 
-	return code, send, recv, engine.ActionTiming{}, nil // timing 由上方 defer 从 ctx 累加器覆盖
+	return code, 0, 0, engine.ActionTiming{}, nil
 }
 
 // RunBooleanScript 执行布尔判断脚本（条件节点 / loop breakCondition）。
@@ -411,15 +409,23 @@ func (rp *RuntimePool) RunBooleanScript(L *lua.LState, scriptName string) (bool,
 
 // RunCallbackScript 执行回调脚本。
 // Lua 脚本应定义 `function onMessage(r, msg)` 函数。
-// msg 为 proto 消息对象（LUserData）。
-func (rp *RuntimePool) RunCallbackScript(L *lua.LState, scriptName string, msgData []byte, s2cProto string) error {
+// msg 为 proto 消息对象（LUserData）。回调内部 network API 的 WireBytes 自动累计到 Context。
+func (rp *RuntimePool) RunCallbackScript(L *lua.LState, scriptName string, msgData []byte, s2cProto string) (send, recv int, timing engine.ActionTiming, err error) {
+	ctx := GetContext(L)
+	if ctx != nil {
+		ctx.resetMetrics()
+		defer func() {
+			send, recv, timing = ctx.metrics()
+		}()
+	}
+
 	// 保存栈顶，确保退出时恢复
 	savedTop := L.GetTop()
 	defer L.SetTop(savedTop)
 
 	onMsgFn, err := rp.loadScriptFn(L, scriptName, "onMessage")
 	if err != nil {
-		return err
+		return 0, 0, engine.ActionTiming{}, err
 	}
 
 	// 创建 robot 和 msg 对象
@@ -438,10 +444,10 @@ func (rp *RuntimePool) RunCallbackScript(L *lua.LState, scriptName string, msgDa
 	}
 
 	if err := L.CallByParam(lua.P{Fn: onMsgFn, NRet: 0, Protect: true}, robotUD, msgArg); err != nil {
-		return fmt.Errorf("执行回调脚本 %s 失败: %w", scriptName, err)
+		return 0, 0, engine.ActionTiming{}, fmt.Errorf("执行回调脚本 %s 失败: %w", scriptName, err)
 	}
 
-	return nil
+	return 0, 0, engine.ActionTiming{}, nil
 }
 
 // HasScript 检查脚本是否已预编译

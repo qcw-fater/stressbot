@@ -1,7 +1,7 @@
 import type {
   AgentBrief,
   ClusterSystemSnapshot,
-  RampUpStage,
+  RampUpSnapshot,
   StressSnapshot,
 } from '@/types/api';
 
@@ -26,7 +26,7 @@ export interface LivePanelModel {
     stoppedRobots: number;
     erroredRobots: number;
     robotPercent: number;
-    rampUp: { currentStage: number; totalStages: number; progress: number } | null;
+    rampUp: { currentStage: number; totalStages: number } | null;
   };
   throughput: {
     intervalQps: number | null;
@@ -93,8 +93,6 @@ export interface BuildLivePanelModelInput {
   totalAgents: number;
   offlineAgents: number;
   assignedAgents: number;
-  rampUpEnabled: boolean;
-  rampUpStages: RampUpStage[];
 }
 
 export function buildLivePanelModel(input: BuildLivePanelModelInput): LivePanelModel {
@@ -111,14 +109,14 @@ export function buildLivePanelModel(input: BuildLivePanelModelInput): LivePanelM
       stoppedRobots: robots.stopped,
       erroredRobots: robots.errored,
       robotPercent: robots.started > 0 ? clamp((robots.running / robots.started) * 100, 0, 100) : 0,
-      rampUp: deriveRampUp(robots.running, input.rampUpEnabled, input.rampUpStages),
+      rampUp: deriveRampUp(stress?.rampUp),
     },
     throughput: {
       intervalQps: deriveIntervalQps(input.stressHistory),
-      lifetimeQps: actions.length > 0 ? actions.reduce((sum, a) => sum + safe(a.avgQps), 0) : null,
+      lifetimeQps: stress && stress.uptimeSeconds > 0 ? stress.totalActions / stress.uptimeSeconds : null,
       totalActions: stress?.totalActions ?? 0,
-      sendKBps: finiteOrNull(input.latestSystem?.totalNetSendKBps),
-      recvKBps: finiteOrNull(input.latestSystem?.totalNetRecvKBps),
+      sendKBps: stress?.bandwidth ? finiteOrNull(stress.bandwidth.sendMBps * 1024) : null,
+      recvKBps: stress?.bandwidth ? finiteOrNull(stress.bandwidth.recvMBps * 1024) : null,
     },
     quality,
     latency: deriveLatency(actions),
@@ -273,24 +271,12 @@ function deriveResources(system: ClusterSystemSnapshot | null): LivePanelModel['
   };
 }
 
-function deriveRampUp(running: number, enabled: boolean, stages: RampUpStage[]): LivePanelModel['load']['rampUp'] {
-  if (!enabled || stages.length === 0) return null;
-  const total = stages.reduce((sum, s) => sum + safe(s.count), 0);
-  if (total <= 0) return null;
-  let cumulative = 0;
-  for (let i = 0; i < stages.length; i++) {
-    const prev = cumulative;
-    const count = safe(stages[i].count);
-    cumulative += count;
-    if (running <= cumulative) {
-      return {
-        currentStage: i + 1,
-        totalStages: stages.length,
-        progress: count > 0 ? clamp((running - prev) / count, 0, 1) : 0,
-      };
-    }
-  }
-  return { currentStage: stages.length, totalStages: stages.length, progress: 1 };
+function deriveRampUp(snapshot: RampUpSnapshot | undefined): LivePanelModel['load']['rampUp'] {
+  if (!snapshot || snapshot.totalStages <= 0 || snapshot.currentStage <= 0) return null;
+  return {
+    currentStage: snapshot.currentStage,
+    totalStages: snapshot.totalStages,
+  };
 }
 
 function normalizeNodeTone(status: string): NodeTone {

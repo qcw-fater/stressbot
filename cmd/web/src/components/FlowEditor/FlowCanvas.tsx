@@ -176,7 +176,7 @@ function FlowCanvasInner() {
           let nodeId = actionName;
           let nodeIndex = 1;
           while (taken.has(nodeId)) nodeId = `${actionName}_${nodeIndex++}`;
-          addNode(nodeId, { type: 'action', action: actionName });
+          addNode(nodeId, { type: 'action', action: actionName, description: template.description });
           const layout = useFlowStore.getState().layout;
           layout.nodePositions[nodeId] = { x: flowPos.x, y: flowPos.y };
           useFlowStore.setState((s) => ({

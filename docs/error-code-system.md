@@ -403,20 +403,17 @@ errcode（顶层包，无业务依赖）
 
 ### 7.6 Lua 桥适配 — `script/api_network.go`
 
-NetSender 接口签名变更后，6 个 Lua API 需适配。**Lua 侧返回值约定不变**：
+NetSender 接口签名变更后，Lua API 只向脚本返回业务结果，WireBytes 由 `script.Context` 自动累计到当前 action/callback：
 
 ```lua
--- Lua 侧调用约定（保持不变）
-local code, body, sent, recv = network.tcp_request("logic", route, msg, "ResMsg")
+local code, body = network.tcp_request("logic", route, msg, "ResMsg")
 -- 少数请求路由和响应路由不同的接口可用 route 版本，返回约定一致
-local code2, body2, sent2, recv2 = network.tcp_request_route("logic", reqRoute, respRoute, msg, "ResMsg")
+local code2, body2 = network.tcp_request_route("logic", reqRoute, respRoute, msg, "ResMsg")
 -- code == 0       → 成功
--- code == -1      → 框架请求失败（连接断开/超时/编码失败等）
--- code == -2      → 响应解析失败
--- code >  0       → 服务端错误码（headerErr 原值）
+-- code 为 errcode → 框架错误码（1-99）或服务端错误码（>=100）
 ```
 
-Go 侧改造：调用 `ctx.NetSender.*` 时，把新接口返回的 `error` 折算回 Lua 期望的 `-1`。Lua 路径暂不接入 monitor。
+Go 侧改造：调用 `ctx.NetSender.*` 时，把新接口返回的 `error` 折算回 errcode 返回给 Lua；脚本不再接收或返回 send/recv。
 
 ---
 

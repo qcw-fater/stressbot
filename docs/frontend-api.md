@@ -502,22 +502,27 @@ GET /sbot/history?limit=20&offset=0&state=stopped&tags=v1.2&starred=true
 | `starred` | bool | 仅收藏 |
 | `search` | string | 模糊匹配 name + note |
 | `orderBy` | string | 排序字段 |
+| `includeStages` | bool | 含 reset 的渐进式加压父记录返回 `children`（阶段段落子记录）并置 `hasResetStages=true` |
 
 ### 8.2 历史详情
 
 ```
 GET /sbot/history/{id}
+GET /sbot/history/{id}?stageIndex=2   // reset 任务的第 2 段段落详情
 ```
 
-**前端函数**：`getHistory(id: string): Promise<HistoryDetail>`
+**前端函数**：`getHistory(id: string, stageIndex?: number): Promise<HistoryDetail>`
+
+`stageIndex > 0` 时返回该 reset 段落详情，响应附带 `recordKind="stage"` / `stageIndex` / `stageLabel` / `stageFrom` / `stageTo`，`totalBots` 为该段峰值机器人数。
 
 ### 8.3 更新历史记录
 
 ```
 PUT /sbot/history/{id}
+PUT /sbot/history/{id}?stageIndex=2   // 更新 reset 任务第 2 段的收藏/标签/备注
 ```
 
-**前端函数**：`updateHistory(id: string, req: UpdateHistoryRequest): Promise<HistoryDetail>`
+**前端函数**：`updateHistory(id: string, req: UpdateHistoryRequest, stageIndex?: number): Promise<HistoryDetail>`
 
 **请求体**（所有字段可选，部分更新）：
 
@@ -528,6 +533,9 @@ interface UpdateHistoryRequest {
   note?: string;    // 最大 8KB，支持 markdown
 }
 ```
+
+> 含 `reset` 的渐进式加压任务，收藏/标签/备注**分属各阶段段落**：带 `stageIndex>0` 时写入段落级元数据
+> （`task_stage_meta`），不带或 `<=0` 时写入任务级（`task_history`）。返回更新后的对应（段落或整体）详情。
 
 ### 8.4 删除历史记录
 
@@ -543,9 +551,12 @@ starred=true 时必须 `?force=true`。
 
 ```
 GET /sbot/history/{id}/timeseries
+GET /sbot/history/{id}/timeseries?stageIndex=2   // 仅第 2 段采样点
 ```
 
-**前端函数**：`getHistoryTimeseries(id: string): Promise<TimeseriesResponse>`
+**前端函数**：`getHistoryTimeseries(id: string, maxPoints?: number, stageIndex?: number): Promise<TimeseriesResponse>`
+
+`stageIndex > 0` 时仅返回该 reset 段落的采样点；采样点 `stageIndex` 字段表示其所属段落号（非 reset 任务恒为 -1）。
 
 ### 8.6 配置归档
 
@@ -568,11 +579,12 @@ Content-Type: application/json
 
 ```
 GET /sbot/history/compare?ids=task-a,task-b,task-c
+GET /sbot/history/compare?targets=task-a:-1,task-b:2   // 支持阶段段落对比
 ```
 
-**前端函数**：`compareHistory(ids: string[]): Promise<HistoryCompareResponse>`
+**前端函数**：`compareHistory(targets: CompareTarget[]): Promise<HistoryCompareResponse>`，其中 `CompareTarget = string | { id: string; stageIndex?: number }`。
 
-最多 5 个。
+2~5 个对比目标。`targets=id:stageIndex` 中 `stageIndex=-1` 表示整体、`>0` 表示该 reset 段落；任一目标带段号即走 `targets=`，否则沿用旧 `ids=`。响应每项附带 `parentId` / `stageIndex` / `stageLabel`。
 
 ### 8.9 历史标签列表
 
@@ -586,6 +598,7 @@ GET /sbot/history/tags
 
 ```
 GET /sbot/history/{id}/agents
+GET /sbot/history/{id}/agents?stageIndex=2   // 第 2 段段落节点报告
 ```
 
 ---
@@ -859,8 +872,8 @@ interface ActionMetric {
   successRate: number;
   apdex: number;
   avgQps: number;
-  avgSendBytes: number;
-  avgRecvBytes: number;
+  avgSendBytes: number; // 平均每次已记录动作发送的 WireBytes
+  avgRecvBytes: number; // 平均每次已记录动作接收的 WireBytes
   timeoutAvgMs: number;
   latency: HistogramView;
   errors?: ErrorEntry[];
@@ -986,6 +999,16 @@ interface HistoryRecord {
   tags: string[];
   note?: string;
   configSummary: ConfigSummary;
+  stageCount?: number;
+  // 阶段历史展示字段（仅含 reset 的渐进式加压任务）
+  recordKind?: 'task' | 'stage';
+  parentId?: string;
+  stageIndex?: number;
+  stageLabel?: string;     // 如「段 2 · S3-S4」
+  stageFrom?: number;
+  stageTo?: number;
+  hasResetStages?: boolean;
+  children?: HistoryRecord[];  // includeStages 时填充
 }
 
 interface HistoryListResponse {

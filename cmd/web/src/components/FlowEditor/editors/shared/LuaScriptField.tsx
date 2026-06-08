@@ -2,7 +2,7 @@
  * Lua 脚本编辑组件：文件名输入 + 编辑按钮 → Modal 内嵌 LuaForm。
  *
  * 统一 action / listen / boolean 三处 lua 编辑入口。
- * action 模式：入口 execute(r)，返回 code, send, recv
+ * action 模式：入口 execute(r)，返回 code
  * listen 模式：入口 onMessage(r, msg)
  * boolean 模式：入口 execute(r)，返回 true / false
  */
@@ -27,7 +27,7 @@ export interface LuaScriptFieldProps {
 const DEFAULT_HELP: Record<LuaMode, React.ReactNode> = {
   action: (
     <>
-      入口 <code>function execute(r)</code>，返回 <code>code, send, recv</code>（错误码 0=成功，发送/接收字节数）。
+      入口 <code>function execute(r)</code>，返回 <code>code</code>（错误码 0=成功）。
       点「编辑」按钮可在编辑器里直接写脚本，按 Ctrl+S 保存到本地。
     </>
   ),

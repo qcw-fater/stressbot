@@ -24,12 +24,13 @@ type Message struct {
 	RouteKey  string        // 路由键字符串（由 adapter.Decode 产生）
 	Data      []byte        // 消息体字节
 	HeaderErr uint64        // 协议头错误码，0 表示无错误
+	WireBytes int           // 入站完整帧长度，包含协议头和消息体
 	Timing    MessageTiming // 入站计时点
 }
 
 // NewMessage 创建新消息
-func NewMessage(routeKey string, data []byte, headerErr uint64, timing MessageTiming) *Message {
-	return &Message{RouteKey: routeKey, Data: data, HeaderErr: headerErr, Timing: timing}
+func NewMessage(routeKey string, data []byte, headerErr uint64, wireBytes int, timing MessageTiming) *Message {
+	return &Message{RouteKey: routeKey, Data: data, HeaderErr: headerErr, WireBytes: wireBytes, Timing: timing}
 }
 
 // Copy 深拷贝消息
@@ -39,7 +40,7 @@ func (m *Message) Copy() *Message {
 	}
 	data := make([]byte, len(m.Data))
 	copy(data, m.Data)
-	return &Message{RouteKey: m.RouteKey, Data: data, HeaderErr: m.HeaderErr, Timing: m.Timing}
+	return &Message{RouteKey: m.RouteKey, Data: data, HeaderErr: m.HeaderErr, WireBytes: m.WireBytes, Timing: m.Timing}
 }
 
 func safeSub(end, start time.Time) time.Duration {

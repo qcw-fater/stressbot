@@ -144,22 +144,18 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 	}
 	agentCount := len(task.Assignments)
 	activeAgentCount := len(task.SucceededAgents)
-	tags := []string{}
 	stageCount := 0
 	if task.Config.RobotConfig.RampUp != nil {
 		stageCount = len(task.Config.RobotConfig.RampUp.Stages)
 	}
-	tagsJSON, _ := json.Marshal(tags) // []string 序列化不会失败
-	if tagsJSON == nil {
-		tagsJSON = []byte("[]")
-	}
-	summaryJSON, _ := json.Marshal(buildConfigSummary(task)) // 同上
+	summaryJSON, _ := json.Marshal(buildConfigSummary(task)) // []string/struct 序列化不会失败
 
+	// 收藏/标签/备注不在归档时写入，统一由 task_meta 懒创建（见 UpsertMeta）。
 	_, err = tx.Exec(`
 		INSERT INTO task_history (id, name, state, total_bots, agent_count, active_agent_count,
 			created_at, started_at, stopped_at, duration_sec, error_msg,
-			starred, tags, note, debug_mode, config_summary, stage_count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, '', ?, ?, ?)
+			debug_mode, config_summary, stage_count)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
 			state=VALUES(state), stopped_at=VALUES(stopped_at),
 			duration_sec=VALUES(duration_sec), error_msg=VALUES(error_msg),
@@ -168,7 +164,7 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 	`,
 		task.ID, task.Name, string(task.State), task.TotalBots, agentCount, activeAgentCount,
 		task.CreatedAt, task.StartedAt, task.StoppedAt, durationSec, task.ErrorMsg,
-		tagsJSON, task.Config.RobotConfig.DebugMode, summaryJSON, stageCount,
+		task.Config.RobotConfig.DebugMode, summaryJSON, stageCount,
 	)
 	if err != nil {
 		return fmt.Errorf("insert task_history: %w", err)
@@ -191,31 +187,38 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 	for _, a := range task.Assignments {
 		agentNames[a.AgentID] = a.AgentName
 	}
+	// 阶段段落计划：用于把 Agent 上报的「配置阶段下标」映射为连续 1-based 段落号。
+	plan := buildStagePlan(task.Config.RobotConfig.RampUp)
+
+	// 3a. 整体最终报告：stage_index = -1（老入口不变）。
+	// 注意：有 reset 任务中，Agent 每段 reset 采集器，故最终报告仅覆盖最后一个段落。
 	for agentID, report := range task.Reports {
-		snapJSON, _ := json.Marshal(report.FinalSnapshot) // 同上
-		cleanupJSON, _ := json.Marshal(report.CleanupStatus)
-		_, err = tx.Exec(`
-			INSERT INTO task_report (task_id, agent_id, agent_name, result, error_msg, finished_at, final_snapshot, cleanup_status, stage_index)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, -1)
-		`, task.ID, agentID, agentNames[agentID], string(report.Result), report.ErrorMsg, report.FinishedAt, snapJSON, cleanupJSON)
-		if err != nil {
+		if err := insertTaskReport(tx, task.ID, agentID, agentNames[agentID], report, -1); err != nil {
 			return fmt.Errorf("insert task_report: %w", err)
 		}
 	}
-	// 3b. task_report (阶段完成报告)
+	// 3b. reset 边界阶段段落报告：映射为连续段落号写入。
 	for _, report := range task.StageReports {
-		snapJSON, _ := json.Marshal(report.FinalSnapshot)
-		cleanupJSON, _ := json.Marshal(report.CleanupStatus)
-		_, err = tx.Exec(`
-			INSERT INTO task_report (task_id, agent_id, agent_name, result, error_msg, finished_at, final_snapshot, cleanup_status, stage_index)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, task.ID, report.AgentID, agentNames[report.AgentID], string(report.Result), report.ErrorMsg, report.FinishedAt, snapJSON, cleanupJSON, report.StageIndex)
-		if err != nil {
+		segNo := plan.SegmentNoForResetIndex(report.StageIndex)
+		if segNo == 0 {
+			continue // 非计划内（异常配置），跳过
+		}
+		if err := insertTaskReport(tx, task.ID, report.AgentID, agentNames[report.AgentID], report, segNo); err != nil {
 			return fmt.Errorf("insert task_report (stage): %w", err)
+		}
+	}
+	// 3c. 有 reset：最终报告额外写入最后一个段落，使末段详情可像普通详情查看节点报告。
+	if plan.HasReset {
+		finalSeg := plan.FinalSegmentNo()
+		for agentID, report := range task.Reports {
+			if err := insertTaskReport(tx, task.ID, agentID, agentNames[agentID], report, finalSeg); err != nil {
+				return fmt.Errorf("insert task_report (final stage): %w", err)
+			}
 		}
 	}
 
 	// 4. task_aggregated
+	// 4a. 整体最终聚合：stage_index = -1（老入口不变）。
 	stressJSON, _ := json.Marshal(finalStress) // 同上
 	sysJSON, _ := json.Marshal(finalSys)       // 同上
 	_, err = tx.Exec(`
@@ -225,6 +228,30 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 	`, task.ID, stressJSON, sysJSON)
 	if err != nil {
 		return fmt.Errorf("insert task_aggregated: %w", err)
+	}
+	// 4b. 有 reset：写入各阶段段落聚合。
+	if plan.HasReset {
+		// 中间段落：按段号分组 StageReports 的 FinalSnapshot 聚合（段级系统快照暂缺）。
+		segSnaps := map[int][]*monitor.CollectorSnapshot{}
+		for _, report := range task.StageReports {
+			segNo := plan.SegmentNoForResetIndex(report.StageIndex)
+			if segNo == 0 || report.FinalSnapshot == nil {
+				continue
+			}
+			segSnaps[segNo] = append(segSnaps[segNo], report.FinalSnapshot)
+		}
+		emptySysJSON, _ := json.Marshal(ClusterSystemSnapshot{})
+		for segNo, snaps := range segSnaps {
+			merged := monitor.MergeSnapshots(snaps)
+			mergedJSON, _ := json.Marshal(merged)
+			if err := insertTaskAggregated(tx, task.ID, segNo, mergedJSON, emptySysJSON); err != nil {
+				return fmt.Errorf("insert task_aggregated (stage): %w", err)
+			}
+		}
+		// 最终段落：等于整体最终聚合（含系统终态）。
+		if err := insertTaskAggregated(tx, task.ID, plan.FinalSegmentNo(), stressJSON, sysJSON); err != nil {
+			return fmt.Errorf("insert task_aggregated (final stage): %w", err)
+		}
 	}
 
 	// 5. task_config_archive
@@ -275,15 +302,17 @@ func (h *HistoryStore) List(ctx context.Context, filter HistoryFilter) (*History
 		offset = 0
 	}
 
+	const fromJoin = " FROM task_history th LEFT JOIN task_meta m ON m.task_id = th.id AND m.stage_index = -1"
+
 	var total int
-	countSQL := "SELECT COUNT(*) FROM task_history" + where
+	countSQL := "SELECT COUNT(*)" + fromJoin + where
 	if err := h.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("count history: %w", err)
 	}
 
 	querySQL := fmt.Sprintf(
-		"SELECT id, name, state, total_bots, agent_count, active_agent_count, created_at, started_at, stopped_at, duration_sec, error_msg, starred, tags, note, debug_mode, config_summary, stage_count FROM task_history%s ORDER BY %s LIMIT ? OFFSET ?",
-		where, orderBy,
+		"SELECT th.id, th.name, th.state, th.total_bots, th.agent_count, th.active_agent_count, th.created_at, th.started_at, th.stopped_at, th.duration_sec, th.error_msg, COALESCE(m.starred, 0), m.tags, COALESCE(m.note, ''), th.debug_mode, th.config_summary, th.stage_count%s%s ORDER BY %s LIMIT ? OFFSET ?",
+		fromJoin, where, orderBy,
 	)
 	rows, err := h.db.QueryContext(ctx, querySQL, append(args, limit, offset)...)
 	if err != nil {
@@ -322,7 +351,89 @@ func (h *HistoryStore) List(ctx context.Context, filter HistoryFilter) (*History
 	if items == nil {
 		items = []HistoryRecord{}
 	}
+	h.enrichStageGroups(ctx, items, filter.IncludeStages)
 	return &HistoryListResponse{Total: total, Items: items}, nil
+}
+
+// enrichStageGroups 为含 reset 的渐进式加压父记录标记 HasResetStages，
+// 并在 includeStages 时填充阶段段落子记录（虚拟记录，不落库）。
+// 批量读取本页 stage_count>0 行的 robot_config，避免 N+1。
+func (h *HistoryStore) enrichStageGroups(ctx context.Context, items []HistoryRecord, includeStages bool) {
+	ids := make([]string, 0)
+	for i := range items {
+		if items[i].StageCount > 0 {
+			ids = append(ids, items[i].ID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+
+	placeholders := strings.Repeat("?,", len(ids))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := h.db.QueryContext(ctx,
+		fmt.Sprintf(`SELECT task_id, robot_config FROM task_config_archive WHERE task_id IN (%s)`, placeholders),
+		args...)
+	if err != nil {
+		stresslog.Warn("[ADMIN] 阶段组展开读取配置失败", zap.Error(err))
+		return
+	}
+	defer rows.Close()
+
+	plans := make(map[string]StagePlan, len(ids))
+	for rows.Next() {
+		var tid string
+		var robotJSON []byte
+		if err := rows.Scan(&tid, &robotJSON); err != nil {
+			continue
+		}
+		var robotCfg RobotConfig
+		_ = json.Unmarshal(robotJSON, &robotCfg)
+		plans[tid] = buildStagePlan(robotCfg.RampUp)
+	}
+
+	var metaByTask map[string]map[int]metaRecord
+	if includeStages {
+		metaByTask = h.loadStageMetaBatch(ctx, ids)
+	}
+
+	for i := range items {
+		plan, ok := plans[items[i].ID]
+		if !ok || !plan.HasReset {
+			continue
+		}
+		items[i].HasResetStages = true
+		if !includeStages {
+			continue
+		}
+		metaByStage := metaByTask[items[i].ID]
+		children := make([]HistoryRecord, 0, len(plan.Segments))
+		for _, seg := range plan.Segments {
+			child := HistoryRecord{
+				ID:         items[i].ID,
+				Name:       items[i].Name,
+				State:      items[i].State,
+				RecordKind: "stage",
+				ParentID:   items[i].ID,
+				StageIndex: seg.No,
+				StageLabel: seg.Label(),
+				StageFrom:  seg.FromStage,
+				StageTo:    seg.ToStage,
+				TotalBots:  seg.PeakBots,
+			}
+			if m, ok := metaByStage[seg.No]; ok {
+				child.Starred = m.Starred
+				child.Tags = m.Tags
+				child.Note = m.Note
+			}
+			children = append(children, child)
+		}
+		items[i].Children = children
+	}
 }
 
 // getHistoryRecord 查询历史任务基础记录。
@@ -336,9 +447,13 @@ func (h *HistoryStore) getHistoryRecord(ctx context.Context, id string) (*Histor
 	var startedAt, stoppedAt sql.NullTime
 
 	err := h.db.QueryRowContext(ctx, `
-		SELECT id, name, state, total_bots, agent_count, active_agent_count, created_at, started_at, stopped_at,
-			duration_sec, error_msg, starred, tags, note, debug_mode, config_summary, stage_count
-		FROM task_history WHERE id = ?
+		SELECT th.id, th.name, th.state, th.total_bots, th.agent_count, th.active_agent_count,
+			th.created_at, th.started_at, th.stopped_at,
+			th.duration_sec, th.error_msg,
+			COALESCE(m.starred, 0), m.tags, COALESCE(m.note, ''), th.debug_mode, th.config_summary, th.stage_count
+		FROM task_history th
+		LEFT JOIN task_meta m ON m.task_id = th.id AND m.stage_index = -1
+		WHERE th.id = ?
 	`, id).Scan(
 		&r.ID, &r.Name, &r.State, &r.TotalBots, &r.AgentCount, &r.ActiveAgentCount,
 		&r.CreatedAt, &startedAt, &stoppedAt,
@@ -379,14 +494,31 @@ func (h *HistoryStore) Get(ctx context.Context, id string) (*HistoryDetail, erro
 }
 
 // GetDetailSummary 查询历史详情页展示数据。
-func (h *HistoryStore) GetDetailSummary(ctx context.Context, id string) (*HistoryDetailResponse, error) {
+// stageIndex > 0 时返回该阶段段落详情；<=0 返回整体/最终详情。
+func (h *HistoryStore) GetDetailSummary(ctx context.Context, id string, stageIndex int) (*HistoryDetailResponse, error) {
 	record, err := h.getHistoryRecord(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
-	reports, _ := h.queryReportSummaries(ctx, id)
-	stress, system := h.queryAggregatedSummary(ctx, id)
+	queryStage := -1
+	if stageIndex > 0 {
+		queryStage = stageIndex
+		h.decorateStageRecord(ctx, id, record, stageIndex)
+		// 段落级元数据覆盖任务级（收藏/标签/备注分属各段落）
+		if m, ok := h.loadMeta(ctx, id, stageIndex); ok {
+			record.Starred = m.Starred
+			record.Tags = m.Tags
+			record.Note = m.Note
+		} else {
+			record.Starred = false
+			record.Tags = nil
+			record.Note = ""
+		}
+	}
+
+	reports, _ := h.queryReportSummaries(ctx, id, queryStage)
+	stress, system := h.queryAggregatedSummary(ctx, id, queryStage)
 	events, _ := h.queryAgentEvents(ctx, id)
 
 	return &HistoryDetailResponse{
@@ -396,6 +528,38 @@ func (h *HistoryStore) GetDetailSummary(ctx context.Context, id string) (*Histor
 		FinalSnapshot: stress,
 		FinalSystem:   system,
 	}, nil
+}
+
+// decorateStageRecord 为阶段段落详情填充展示字段（段号、标签、范围）。
+func (h *HistoryStore) decorateStageRecord(ctx context.Context, id string, record *HistoryRecord, stageIndex int) {
+	plan, err := h.stagePlanForTask(ctx, id)
+	if err != nil || !plan.HasReset {
+		return
+	}
+	record.RecordKind = "stage"
+	record.ParentID = id
+	record.StageIndex = stageIndex
+	for _, seg := range plan.Segments {
+		if seg.No == stageIndex {
+			record.StageLabel = seg.Label()
+			record.StageFrom = seg.FromStage
+			record.StageTo = seg.ToStage
+			record.TotalBots = seg.PeakBots
+			break
+		}
+	}
+}
+
+// stagePlanForTask 读取归档的 RobotConfig 并推导阶段段落计划。
+func (h *HistoryStore) stagePlanForTask(ctx context.Context, id string) (StagePlan, error) {
+	var robotJSON []byte
+	err := h.db.QueryRowContext(ctx, `SELECT robot_config FROM task_config_archive WHERE task_id = ?`, id).Scan(&robotJSON)
+	if err != nil {
+		return StagePlan{}, err
+	}
+	var robotCfg RobotConfig
+	_ = json.Unmarshal(robotJSON, &robotCfg)
+	return buildStagePlan(robotCfg.RampUp), nil
 }
 
 // queryAssignments 查询任务分配记录。
@@ -451,12 +615,16 @@ func (h *HistoryStore) queryReports(ctx context.Context, taskID string) ([]Histo
 }
 
 // queryReportSummaries 查询历史详情页需要的节点结果摘要。
-func (h *HistoryStore) queryReportSummaries(ctx context.Context, taskID string) ([]HistoryAgentReportSummary, error) {
+// stageIndex <=0 时查整体（-1）；>0 时查对应阶段段落。
+func (h *HistoryStore) queryReportSummaries(ctx context.Context, taskID string, stageIndex int) ([]HistoryAgentReportSummary, error) {
+	if stageIndex <= 0 {
+		stageIndex = -1
+	}
 	rows, err := h.db.QueryContext(ctx, `
 		SELECT agent_id, agent_name, result, error_msg, finished_at, cleanup_status
 		FROM task_report
-		WHERE task_id = ? AND stage_index = -1
-	`, taskID)
+		WHERE task_id = ? AND stage_index = ?
+	`, taskID, stageIndex)
 	if err != nil {
 		return nil, fmt.Errorf("query report summaries: %w", err)
 	}
@@ -497,9 +665,13 @@ func (h *HistoryStore) queryAggregated(ctx context.Context, taskID string, r *Hi
 }
 
 // queryAggregatedSummary 查询历史详情页需要的聚合指标摘要。
-func (h *HistoryStore) queryAggregatedSummary(ctx context.Context, taskID string) (HistoryStressSnapshotSummary, HistorySystemSummary) {
+// stageIndex <=0 时查整体（-1）；>0 时查对应阶段段落。
+func (h *HistoryStore) queryAggregatedSummary(ctx context.Context, taskID string, stageIndex int) (HistoryStressSnapshotSummary, HistorySystemSummary) {
+	if stageIndex <= 0 {
+		stageIndex = -1
+	}
 	var stressBytes, sysBytes []byte
-	err := h.db.QueryRowContext(ctx, `SELECT final_stress, final_system FROM task_aggregated WHERE task_id = ? AND stage_index = -1`, taskID).Scan(&stressBytes, &sysBytes)
+	err := h.db.QueryRowContext(ctx, `SELECT final_stress, final_system FROM task_aggregated WHERE task_id = ? AND stage_index = ?`, taskID, stageIndex).Scan(&stressBytes, &sysBytes)
 	if err != nil && err != sql.ErrNoRows {
 		stresslog.Warn("[ADMIN] 查询聚合指标摘要失败", zap.String("taskID", taskID), zap.Error(err))
 		return projectStressSnapshot(monitor.CollectorSnapshot{}), HistorySystemSummary{}
@@ -536,14 +708,19 @@ func (h *HistoryStore) queryAgentEvents(ctx context.Context, taskID string) ([]A
 }
 
 // GetCompareTask 查询历史对比页需要的任务指标。
-func (h *HistoryStore) GetCompareTask(ctx context.Context, id string) (*HistoryCompareTask, error) {
+// stageIndex > 0 时对比该阶段段落；<=0 对比整体/最终。
+func (h *HistoryStore) GetCompareTask(ctx context.Context, id string, stageIndex int) (*HistoryCompareTask, error) {
 	record, err := h.getHistoryRecord(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
+	queryStage := -1
+	if stageIndex > 0 {
+		queryStage = stageIndex
+	}
 	var stressBytes []byte
-	err = h.db.QueryRowContext(ctx, `SELECT final_stress FROM task_aggregated WHERE task_id = ? AND stage_index = -1`, id).Scan(&stressBytes)
+	err = h.db.QueryRowContext(ctx, `SELECT final_stress FROM task_aggregated WHERE task_id = ? AND stage_index = ?`, id, queryStage).Scan(&stressBytes)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, fmt.Errorf("get compare stress: %w", err)
 	}
@@ -563,17 +740,32 @@ func (h *HistoryStore) GetCompareTask(ctx context.Context, id string) (*HistoryC
 		})
 	}
 
-	return &HistoryCompareTask{
+	task := &HistoryCompareTask{
 		ID:          record.ID,
 		Name:        record.Name,
 		StartedAt:   record.StartedAt,
 		DurationSec: record.DurationSec,
 		TotalBots:   record.TotalBots,
+		StageIndex:  -1,
 		FinalSnapshot: HistoryCompareSnapshot{
 			TotalActions: stress.TotalActions,
 			Actions:      actions,
 		},
-	}, nil
+	}
+	if stageIndex > 0 {
+		task.ParentID = id
+		task.StageIndex = stageIndex
+		if plan, err := h.stagePlanForTask(ctx, id); err == nil && plan.HasReset {
+			for _, seg := range plan.Segments {
+				if seg.No == stageIndex {
+					task.StageLabel = seg.Label()
+					task.TotalBots = seg.PeakBots
+					break
+				}
+			}
+		}
+	}
+	return task, nil
 }
 
 // GetConfig 获取历史配置归档。
@@ -667,13 +859,14 @@ const (
 )
 
 // GetTimeseries 查询时序采样数据。
-func (h *HistoryStore) GetTimeseries(ctx context.Context, id string, maxPoints int) (*TimeseriesResponse, error) {
+// stageIndex > 0 时只返回该阶段段落的采样点；<=0 返回全部点（整体趋势）。
+func (h *HistoryStore) GetTimeseries(ctx context.Context, id string, maxPoints, stageIndex int) (*TimeseriesResponse, error) {
 	if h.db == nil {
 		return &TimeseriesResponse{TaskID: id}, nil
 	}
 	maxPoints = normalizeTimeseriesMaxPoints(maxPoints)
 
-	rows, err := h.db.QueryContext(ctx, `
+	query := `
 		SELECT sampled_at, elapsed_sec, stage_index, total_qps, rtt_apdex, total_duration_apdex,
 			rtt_avg_ms, rtt_p95_ms, rtt_p99_ms,
 			total_duration_avg_ms, total_duration_p95_ms, total_duration_p99_ms,
@@ -681,9 +874,15 @@ func (h *HistoryStore) GetTimeseries(ctx context.Context, id string, maxPoints i
 			bots_running, bots_errored, send_kbps, recv_kbps,
 			avg_cpu_percent, max_cpu_percent, avg_mem_percent, max_mem_percent,
 			goroutines, threads, fds, online_count, offline_count
-		FROM task_timeseries WHERE task_id = ?
-		ORDER BY elapsed_sec
-	`, id)
+		FROM task_timeseries WHERE task_id = ?`
+	args := []any{id}
+	if stageIndex > 0 {
+		query += ` AND stage_index = ?`
+		args = append(args, stageIndex)
+	}
+	query += ` ORDER BY elapsed_sec`
+
+	rows, err := h.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("get timeseries: %w", err)
 	}
@@ -833,7 +1032,7 @@ func (h *HistoryStore) AllTags(ctx context.Context) ([]string, error) {
 		return nil, nil
 	}
 
-	rows, err := h.db.QueryContext(ctx, `SELECT DISTINCT jt.tag FROM task_history, JSON_TABLE(tags, '$[*]' COLUMNS(tag VARCHAR(255) PATH '$')) AS jt`)
+	rows, err := h.db.QueryContext(ctx, `SELECT DISTINCT jt.tag FROM task_meta, JSON_TABLE(tags, '$[*]' COLUMNS(tag VARCHAR(255) PATH '$')) AS jt`)
 	if err != nil {
 		return allTagsFallback(ctx, h.db)
 	}
@@ -850,7 +1049,7 @@ func (h *HistoryStore) AllTags(ctx context.Context) ([]string, error) {
 }
 
 func allTagsFallback(ctx context.Context, db *sql.DB) ([]string, error) {
-	rows, err := db.QueryContext(ctx, `SELECT tags FROM task_history WHERE tags IS NOT NULL`)
+	rows, err := db.QueryContext(ctx, `SELECT tags FROM task_meta WHERE tags IS NOT NULL`)
 	if err != nil {
 		return nil, err
 	}
@@ -877,38 +1076,16 @@ func allTagsFallback(ctx context.Context, db *sql.DB) ([]string, error) {
 	return result, nil
 }
 
-// UpdateMeta 更新元数据（starred/tags/note）。
-func (h *HistoryStore) UpdateMeta(ctx context.Context, id string, req UpdateHistoryRequest) error {
+// UpsertMeta 更新元数据（starred/tags/note）。stageIndex<=0 归一化为 -1（任务级，
+// 所有任务都用）；stageIndex>=1 为 reset 渐进式加压的段落级。所有元数据统一存于 task_meta，
+// 按 (task_id, stage_index) upsert，与 task_report/aggregated/timeseries 的键约定一致。
+func (h *HistoryStore) UpsertMeta(ctx context.Context, id string, stageIndex int, req UpdateHistoryRequest) error {
 	if h.db == nil {
 		return ErrHistoryNotFound
 	}
-
-	sets := []string{}
-	args := []any{}
-
-	if req.Starred != nil {
-		sets = append(sets, "starred = ?")
-		v := 0
-		if *req.Starred {
-			v = 1
-		}
-		args = append(args, v)
+	if stageIndex <= 0 {
+		stageIndex = -1
 	}
-	if req.Tags != nil {
-		sets = append(sets, "tags = ?")
-		tagsJSON, _ := json.Marshal(*req.Tags) // []string 序列化不会失败
-		args = append(args, tagsJSON)
-	}
-	if req.Note != nil {
-		sets = append(sets, "note = ?")
-		args = append(args, *req.Note)
-	}
-
-	if len(sets) == 0 {
-		return nil
-	}
-
-	args = append(args, id)
 	if err := h.db.QueryRowContext(ctx, `SELECT id FROM task_history WHERE id = ?`, id).Scan(new(string)); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrHistoryNotFound
@@ -916,14 +1093,93 @@ func (h *HistoryStore) UpdateMeta(ctx context.Context, id string, req UpdateHist
 		return fmt.Errorf("check history exists: %w", err)
 	}
 
-	_, err := h.db.ExecContext(ctx,
-		fmt.Sprintf("UPDATE task_history SET %s WHERE id = ?", strings.Join(sets, ", ")),
-		args...,
-	)
+	// 读出当前值后按请求里出现的字段合并，未出现的字段保持不变（部分更新）。
+	cur, _ := h.loadMeta(ctx, id, stageIndex)
+	if req.Starred != nil {
+		cur.Starred = *req.Starred
+	}
+	if req.Tags != nil {
+		cur.Tags = *req.Tags
+	}
+	if req.Note != nil {
+		cur.Note = *req.Note
+	}
+
+	starredVal := 0
+	if cur.Starred {
+		starredVal = 1
+	}
+	tagsJSON, _ := json.Marshal(cur.Tags)
+	_, err := h.db.ExecContext(ctx, `
+		INSERT INTO task_meta (task_id, stage_index, starred, tags, note, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE starred = VALUES(starred), tags = VALUES(tags), note = VALUES(note), updated_at = VALUES(updated_at)
+	`, id, stageIndex, starredVal, tagsJSON, cur.Note, time.Now())
 	if err != nil {
-		return fmt.Errorf("update meta: %w", err)
+		return fmt.Errorf("upsert meta: %w", err)
 	}
 	return nil
+}
+
+// metaRecord 是一份元数据的内存表示（任务级或段落级同构）。
+type metaRecord struct {
+	Starred bool
+	Tags    []string
+	Note    string
+}
+
+// loadMeta 读取单份元数据（task_id, stageIndex）；不存在时返回零值 + false。
+func (h *HistoryStore) loadMeta(ctx context.Context, id string, stageIndex int) (metaRecord, bool) {
+	var m metaRecord
+	var starred int
+	var tagsBytes []byte
+	err := h.db.QueryRowContext(ctx,
+		`SELECT starred, tags, note FROM task_meta WHERE task_id = ? AND stage_index = ?`,
+		id, stageIndex).Scan(&starred, &tagsBytes, &m.Note)
+	if err != nil {
+		return m, false
+	}
+	m.Starred = starred == 1
+	_ = json.Unmarshal(tagsBytes, &m.Tags)
+	return m, true
+}
+
+// loadStageMetaBatch 批量读取多个任务的段落级元数据（stage_index>=1），按 task_id → (stage_index → meta) 组织。
+// 任务级（-1）元数据由列表 JOIN 直接带出，此处只关心段落行。
+func (h *HistoryStore) loadStageMetaBatch(ctx context.Context, ids []string) map[string]map[int]metaRecord {
+	out := make(map[string]map[int]metaRecord, len(ids))
+	if len(ids) == 0 {
+		return out
+	}
+	placeholders := strings.Repeat("?,", len(ids))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := h.db.QueryContext(ctx,
+		fmt.Sprintf(`SELECT task_id, stage_index, starred, tags, note FROM task_meta WHERE stage_index >= 1 AND task_id IN (%s)`, placeholders),
+		args...)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var tid string
+		var idx, starred int
+		var tagsBytes []byte
+		var note string
+		if err := rows.Scan(&tid, &idx, &starred, &tagsBytes, &note); err != nil {
+			continue
+		}
+		m := metaRecord{Starred: starred == 1, Note: note}
+		_ = json.Unmarshal(tagsBytes, &m.Tags)
+		if out[tid] == nil {
+			out[tid] = make(map[int]metaRecord)
+		}
+		out[tid][idx] = m
+	}
+	return out
 }
 
 // Delete 删除历史记录。starred 的需要 force=true。
@@ -933,12 +1189,16 @@ func (h *HistoryStore) Delete(ctx context.Context, id string, force bool) error 
 	}
 
 	if !force {
-		var starred int
-		err := h.db.QueryRowContext(ctx, `SELECT starred FROM task_history WHERE id = ?`, id).Scan(&starred)
-		if err == sql.ErrNoRows {
-			return ErrHistoryNotFound
+		if err := h.db.QueryRowContext(ctx, `SELECT id FROM task_history WHERE id = ?`, id).Scan(new(string)); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrHistoryNotFound
+			}
+			return fmt.Errorf("check history exists: %w", err)
 		}
-		if err != nil {
+		var starred int
+		// 任务级或任一段落被收藏即受保护
+		if err := h.db.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM task_meta WHERE task_id = ? AND starred = 1)`, id).Scan(&starred); err != nil {
 			return fmt.Errorf("check starred: %w", err)
 		}
 		if starred == 1 {
@@ -959,6 +1219,7 @@ func (h *HistoryStore) Delete(ctx context.Context, id string, force bool) error 
 		"task_timeseries",
 		"task_config_archive",
 		"task_agent_events",
+		"task_meta",
 	}
 	for _, tbl := range childTables {
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE task_id = ?`, tbl), id); err != nil {
@@ -983,17 +1244,21 @@ func (h *HistoryStore) AppendTimeseries(ctx context.Context, taskID string, poin
 	if h.db == nil {
 		return nil
 	}
+	stageIndex := point.StageIndex
+	if stageIndex == 0 {
+		stageIndex = -1
+	}
 	_, err := h.db.ExecContext(ctx, `
 		INSERT INTO task_timeseries (
-			task_id, sampled_at, elapsed_sec, total_qps, rtt_apdex, total_duration_apdex,
+			task_id, sampled_at, elapsed_sec, stage_index, total_qps, rtt_apdex, total_duration_apdex,
 			rtt_avg_ms, rtt_p95_ms, rtt_p99_ms,
 			total_duration_avg_ms, total_duration_p95_ms, total_duration_p99_ms,
 			client_avg_ms, encode_avg_ms, decode_avg_ms,
 			bots_running, bots_errored,
 			send_kbps, recv_kbps, avg_cpu_percent, max_cpu_percent, avg_mem_percent, max_mem_percent,
 			goroutines, threads, fds, online_count, offline_count
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, taskID, point.SampledAt, point.ElapsedSec, point.TotalQPS, point.RTTApdex, point.TotalDurationApdex,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, taskID, point.SampledAt, point.ElapsedSec, stageIndex, point.TotalQPS, point.RTTApdex, point.TotalDurationApdex,
 		point.RTTAvgMs, point.RTTP95Ms, point.RTTP99Ms,
 		point.TotalDurationAvgMs, point.TotalDurationP95Ms, point.TotalDurationP99Ms,
 		point.ClientAvgMs, point.EncodeAvgMs, point.DecodeAvgMs,
@@ -1012,8 +1277,9 @@ func (h *HistoryStore) PruneExpired(ctx context.Context, now time.Time) (int, er
 	cutoff := now.AddDate(0, 0, -h.cfg.RetentionDays)
 
 	rows, err := h.db.QueryContext(ctx, `
-		SELECT id FROM task_history
-		WHERE starred = 0 AND stopped_at IS NOT NULL AND stopped_at < ?
+		SELECT id FROM task_history th
+		WHERE th.stopped_at IS NOT NULL AND th.stopped_at < ?
+		  AND NOT EXISTS (SELECT 1 FROM task_meta m WHERE m.task_id = th.id AND m.starred = 1)
 	`, cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("prune expired: query ids: %w", err)
@@ -1042,7 +1308,7 @@ func (h *HistoryStore) PruneExpired(ctx context.Context, now time.Time) (int, er
 
 	childTables := []string{
 		"task_assignment", "task_report", "task_aggregated",
-		"task_timeseries", "task_config_archive", "task_agent_events",
+		"task_timeseries", "task_config_archive", "task_agent_events", "task_meta",
 	}
 	placeholders := strings.Repeat("?,", len(ids))
 	placeholders = placeholders[:len(placeholders)-1]
@@ -1056,10 +1322,9 @@ func (h *HistoryStore) PruneExpired(ctx context.Context, now time.Time) (int, er
 		}
 	}
 
-	result, err := tx.ExecContext(ctx, `
-		DELETE FROM task_history
-		WHERE starred = 0 AND stopped_at IS NOT NULL AND stopped_at < ?
-	`, cutoff)
+	// 按已筛出的 ids 删除主表（task_meta 已在上面删除，不能再依赖 starred 子查询）。
+	result, err := tx.ExecContext(ctx,
+		fmt.Sprintf(`DELETE FROM task_history WHERE id IN (%s)`, placeholders), args...)
 	if err != nil {
 		return 0, fmt.Errorf("prune expired: delete main: %w", err)
 	}
@@ -1126,38 +1391,39 @@ func buildListWhere(f HistoryFilter) (string, []any) {
 	var conds []string
 	var args []any
 
+	// 列名约定：task_history 走 th.*，元数据（starred/tags/note，stage_index=-1）走 m.*。
 	if f.State != "" {
-		conds = append(conds, "state = ?")
+		conds = append(conds, "th.state = ?")
 		args = append(args, f.State)
 	}
 	if !f.StartedAfter.IsZero() {
-		conds = append(conds, "started_at >= ?")
+		conds = append(conds, "th.started_at >= ?")
 		args = append(args, f.StartedAfter)
 	}
 	if !f.StartedBefore.IsZero() {
-		conds = append(conds, "started_at < ?")
+		conds = append(conds, "th.started_at < ?")
 		args = append(args, f.StartedBefore)
 	}
 	if f.Starred != nil {
-		v := 0
 		if *f.Starred {
-			v = 1
+			// 任务级或任一阶段段落被收藏
+			conds = append(conds, "EXISTS (SELECT 1 FROM task_meta sm WHERE sm.task_id = th.id AND sm.starred = 1)")
+		} else {
+			conds = append(conds, "NOT EXISTS (SELECT 1 FROM task_meta sm WHERE sm.task_id = th.id AND sm.starred = 1)")
 		}
-		conds = append(conds, "starred = ?")
-		args = append(args, v)
 	}
 	if f.Search != "" {
-		conds = append(conds, "(name LIKE ? OR id LIKE ? OR note LIKE ? OR CAST(tags AS CHAR) LIKE ?)")
+		conds = append(conds, "(th.name LIKE ? OR th.id LIKE ? OR m.note LIKE ? OR CAST(m.tags AS CHAR) LIKE ?)")
 		pattern := "%" + f.Search + "%"
 		args = append(args, pattern, pattern, pattern, pattern)
 	}
 	for _, tag := range f.Tags {
-		conds = append(conds, "JSON_CONTAINS(tags, ?)")
+		conds = append(conds, "JSON_CONTAINS(m.tags, ?)")
 		tagJSON, _ := json.Marshal(tag) // []string 序列化不会失败
 		args = append(args, string(tagJSON))
 	}
 	for _, tag := range f.TagsAll {
-		conds = append(conds, "JSON_CONTAINS(tags, ?)")
+		conds = append(conds, "JSON_CONTAINS(m.tags, ?)")
 		tagJSON, _ := json.Marshal(tag) // []string 序列化不会失败
 		args = append(args, string(tagJSON))
 	}
@@ -1167,6 +1433,27 @@ func buildListWhere(f HistoryFilter) (string, []any) {
 		where = " WHERE " + strings.Join(conds, " AND ")
 	}
 	return where, args
+}
+
+// insertTaskReport 写入一条 task_report（指定 stage_index）。
+func insertTaskReport(tx *sql.Tx, taskID, agentID, agentName string, report TaskCompletionReport, stageIndex int) error {
+	snapJSON, _ := json.Marshal(report.FinalSnapshot)
+	cleanupJSON, _ := json.Marshal(report.CleanupStatus)
+	_, err := tx.Exec(`
+		INSERT INTO task_report (task_id, agent_id, agent_name, result, error_msg, finished_at, final_snapshot, cleanup_status, stage_index)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, taskID, agentID, agentName, string(report.Result), report.ErrorMsg, report.FinishedAt, snapJSON, cleanupJSON, stageIndex)
+	return err
+}
+
+// insertTaskAggregated 写入一条 task_aggregated（指定 stage_index，幂等覆盖）。
+func insertTaskAggregated(tx *sql.Tx, taskID string, stageIndex int, stressJSON, sysJSON []byte) error {
+	_, err := tx.Exec(`
+		INSERT INTO task_aggregated (task_id, stage_index, final_stress, final_system)
+		VALUES (?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE final_stress=VALUES(final_stress), final_system=VALUES(final_system)
+	`, taskID, stageIndex, stressJSON, sysJSON)
+	return err
 }
 
 func buildConfigSummary(task *Task) ConfigSummary {

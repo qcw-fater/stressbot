@@ -25,12 +25,11 @@ function execute(r)
     local roleId = robot.get("roleId") or robot.get("playerId")
 
     -- 轮询监听开始加载消息，超时 180 秒（3 分钟），轮询 500 毫秒
-    local resp, recv = network.tcp_listen("logic", {cmd=4, act=6}, "Game.BattleStartLoadingS2C", 180, 500)
+    local resp = network.tcp_listen("logic", {cmd=4, act=6}, "Game.BattleStartLoadingS2C", 180, 500)
     if not resp then
         log.error("ListenStartLoading 等待开始加载超时: service=logic route=4:6 proto=Game.BattleStartLoadingS2C timeoutSec=180 pollMs=500 roleId="
-            .. tostring(roleId)
-            .. " recv=" .. tostring(recv))
-        return 31, 0, recv  -- 31=LISTEN_TIMEOUT
+            .. tostring(roleId))
+        return 31  -- 31=LISTEN_TIMEOUT
     end
 
     local fighterCount = 0
@@ -105,10 +104,8 @@ function execute(r)
 
     if not ok then
         log.error("ListenStartLoading 解析失败: roleId=" .. tostring(roleId)
-            .. " fighterCount=" .. tostring(fighterCount)
-            .. " recv=" .. tostring(recv)
-            .. " err=" .. tostring(err))
-        return 54, 0, recv  -- 54=LUA_EXIT_CODE
+            .. " fighterCount=" .. tostring(fighterCount)            .. " err=" .. tostring(err))
+        return 54  -- 54=LUA_EXIT_CODE
     end
 
     local battleAddress = robot.get("battleAddress")
@@ -123,9 +120,8 @@ function execute(r)
             .. " fighterIndex=" .. tostring(fighterIndex)
             .. " hasSecretKey=" .. tostring(battleSecretKey ~= nil)
             .. " battleSession=" .. tostring(battleSession)
-            .. " fighterCount=" .. tostring(fighterCount)
-            .. " recv=" .. tostring(recv))
-        return 54, 0, recv
+            .. " fighterCount=" .. tostring(fighterCount))
+        return 54
     end
 
     log.info("开始加载: roleId=" .. tostring(roleId)
@@ -136,5 +132,5 @@ function execute(r)
         .. " fighterCount=" .. tostring(fighterCount)
         .. " hasSecretKey=true")
 
-    return 0, 0, recv
+    return 0
 end

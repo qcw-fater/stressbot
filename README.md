@@ -197,12 +197,12 @@ Executor 遍历节点图 → 命中 action 节点
 | `tcpRequest`        | TCP 请求-响应（一发一收 + 超时）                                        |
 | `tcpConnect`        | 建立 TCP 连接（`service` + `address`，支持 `state:` 前缀取地址）       |
 | `tcpClose`          | 关闭 TCP 连接（`service`）                                              |
-| `tcpListen`         | 轮询等待 TCP 推送（超时 `timeout` 秒，轮询间隔 `pollMs`）              |
+| `tcpListen`         | 消费 TCP 推送（需 listenRefs 预注册，超时 `timeout` 秒，轮询间隔 `pollMs`） |
 | `udpSend`           | UDP 发送 protobuf（使用 `c2sProto` + bindings）                         |
 | `udpRequest`        | UDP 请求-响应（一发一收 + 超时）                                        |
 | `udpConnect`        | 建立 UDP 连接（`service` + `address`）                                  |
 | `udpClose`          | 关闭 UDP 连接（`service`）                                              |
-| `udpListen`         | 轮询等待 UDP 推送（超时 `timeout` 秒，轮询间隔 `pollMs`）              |
+| `udpListen`         | 消费 UDP 推送（需 listenRefs 预注册，超时 `timeout` 秒，轮询间隔 `pollMs`） |
 | `httpRequest`       | HTTP 请求（`url` + `method` + `contentType` + body）                   |
 | `setState`          | 从 bindings 写入 state                                                  |
 | `clearState`        | 清除 state（`keys` 列表）                                                |
@@ -442,7 +442,7 @@ end)
 
 | 函数                                                    | 说明                          |
 | ------------------------------------------------------ | ---------------------------- |
-| `tcp_request(service, route, msg [, s2cProto])`         | TCP 请求-响应，返回 code, data, sent, recv |
+| `tcp_request(service, route, msg [, s2cProto])`         | TCP 请求-响应，返回 code, data；WireBytes 自动计入监控 |
 | `tcp_request_route(service, requestRoute, responseRoute, msg [, s2cProto])` | TCP 请求-响应，请求路由用于编码，响应路由用于匹配 |
 | `udp_request(service, route, body [, s2cProto [, timeout]])` | UDP 请求-响应 |
 | `udp_request_route(service, requestRoute, responseRoute, body [, s2cProto])` | UDP 请求-响应，请求路由用于编码，响应路由用于匹配 |
@@ -453,14 +453,14 @@ end)
 | ------------------------------------------------------ | ---------------------------- |
 | `tcp_send(service, route, msg)`                         | TCP 发送不等待                |
 | `udp_send(service, route, body)`                        | UDP 发送                     |
-| `http_request(url [, method [, contentType [, body]]])` | HTTP 请求，返回 status, body, sent, recv |
+| `http_request(url [, method [, contentType [, body]]])` | HTTP 请求，返回 status, body；HTTP message bytes 自动计入监控 |
 
 ### 监听轮询
 
 | 函数                                                    | 说明                          |
 | ------------------------------------------------------ | ---------------------------- |
-| `tcp_listen(service, route [, s2cProto [, timeout [, pollMs]]])` | 等待 TCP 推送 |
-| `udp_listen(service, route [, s2cProto [, timeout [, pollMs]]])` | 等待 UDP 推送 |
+| `tcp_listen(service, route [, s2cProto [, timeout [, pollMs]]])` | 等待 TCP 推送（需先调用 ensure_tcp_listener 预注册） |
+| `udp_listen(service, route [, s2cProto [, timeout [, pollMs]]])` | 等待 UDP 推送（需先调用 ensure_udp_listener 预注册） |
 
 ### 加密密钥
 
@@ -695,7 +695,9 @@ Agent 模式不需要 `standalone` 段 — 运行时参数由 Admin 通过 `Task
 | 策略 | 说明 |
 |------|------|
 | 全量启动（默认） | 一次启动所有机器人，每 `concurrentNum` 个暂停 1 秒 |
-| 渐进加压（`rampUp`） | 按 stages 分阶段启动，每阶段可覆盖 concurrency + 等待 holdSec |
+| 渐进加压（`rampUp`） | 按 stages 分阶段启动，每阶段可覆盖 concurrency + 等待 holdSec；`reset` 阶段开始前清空已有机器人 |
+
+含 `reset` 的渐进加压会被切分为多个**阶段段落**：历史列表中折叠为同任务下的阶段组，每段可单独查看详情/对比，时序与聚合按段号归档；无 `reset` 时仍是单条连续历史，趋势图按配置近似标注阶段切换线。详见 `docs/ramp-up.md` §6.6。
 
 ```json
 "rampUp": {

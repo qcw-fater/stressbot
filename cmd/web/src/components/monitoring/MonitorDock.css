@@ -353,47 +353,6 @@
   transition: width 0.45s ease;
 }
 
-.md-node-row {
-  min-width: 0;
-  height: 19px;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 3px 5px;
-  border: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--bg-panel) 50%, transparent);
-  overflow: hidden;
-}
-
-.md-node-dot {
-  flex-shrink: 0;
-  width: 7px;
-  height: 7px;
-  border-radius: 2px;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg-panel) 60%, transparent), 0 0 5px currentColor;
-  opacity: 0.9;
-}
-
-.md-node-dot--idle { color: var(--color-success); background: currentColor; }
-.md-node-dot--busy { color: var(--color-blue); background: currentColor; }
-.md-node-dot--unhealthy { color: var(--color-warning); background: currentColor; }
-.md-node-dot--offline { color: var(--color-error); background: currentColor; }
-.md-node-dot--stale { color: var(--text-tertiary); background: currentColor; opacity: 0.55; }
-
-.md-node-more,
-.md-node-empty {
-  color: var(--text-tertiary);
-  font-size: 10px;
-  line-height: 10px;
-}
-
-.md-node-tip {
-  font-size: 12px;
-  line-height: 1.7;
-}
-
 .monitor-dock__actions {
   flex: 1;
   min-height: 0;

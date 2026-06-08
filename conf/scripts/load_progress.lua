@@ -18,31 +18,28 @@ function execute(r)
     local msg = proto.create("Game.BattleLoadProgressC2S")
     proto.set_field(msg, "progress", progress)
 
-    local code, sent = network.tcp_send("battle", {cmd=4, act=7}, msg)
+    local code = network.tcp_send("battle", {cmd=4, act=7}, msg)
     if code ~= 0 then
         local failCode = code or 3
         log.warn("LoadProgress 发送失败: progress=" .. tostring(progress)
             .. " battleId=" .. tostring(battleId)
             .. " fighterIndex=" .. tostring(fighterIndex)
-            .. " code=" .. tostring(failCode)
-            .. " sent=" .. tostring(sent))
-        return failCode, sent, 0
+            .. " code=" .. tostring(failCode))
+        return failCode
     end
 
     if progress >= 100 then
         log.info("LoadProgress 完成: progress=" .. tostring(progress)
             .. " battleId=" .. tostring(battleId)
-            .. " fighterIndex=" .. tostring(fighterIndex)
-            .. " sent=" .. tostring(sent))
+            .. " fighterIndex=" .. tostring(fighterIndex))
     else
         log.debug("LoadProgress: progress=" .. tostring(progress)
             .. " battleId=" .. tostring(battleId)
-            .. " fighterIndex=" .. tostring(fighterIndex)
-            .. " sent=" .. tostring(sent))
+            .. " fighterIndex=" .. tostring(fighterIndex))
     end
 
     -- 模拟加载间隔
     utils.sleep(500)
 
-    return 0, sent, 0
+    return 0
 end

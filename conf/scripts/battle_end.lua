@@ -96,22 +96,18 @@ function execute(r)
     end
 
     -- 使用 tcp_request 等待服务端 ACK（handleResult 同步结算约 3.6s）
-    local code, _, sent, recv = network.tcp_request("battle", {cmd=4, act=13}, msg)
+    local code = network.tcp_request("battle", {cmd=4, act=13}, msg)
     if code ~= 0 then
         log.error("BattleEnd 请求失败: service=battle route=4:13 battleId=" .. tostring(battleId)
             .. " fighterIndex=" .. tostring(fighterIndex)
             .. " battleSession=" .. tostring(battleSession)
             .. " fighterCount=" .. tostring(fighterCount)
-            .. " code=" .. tostring(code)
-            .. " sent=" .. tostring(sent)
-            .. " recv=" .. tostring(recv))
-        return code, sent, recv
+            .. " code=" .. tostring(code))
+        return code
     end
     log.info("BattleEnd 已确认: battleId=" .. tostring(battleId)
         .. " fighterIndex=" .. tostring(fighterIndex)
-        .. " fighterCount=" .. tostring(fighterCount)
-        .. " sent=" .. tostring(sent)
-        .. " recv=" .. tostring(recv))
+        .. " fighterCount=" .. tostring(fighterCount))
 
     -- 收到 ACK 后关闭 Battle TCP，清理战斗状态
     network.close_tcp("battle")
@@ -122,5 +118,5 @@ function execute(r)
     robot.delete("battleId")
     robot.delete("battleArea")
 
-    return 0, sent, recv
+    return 0
 end

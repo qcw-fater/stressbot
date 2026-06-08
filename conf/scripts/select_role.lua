@@ -42,12 +42,12 @@ function execute(r)
         log.error("SelectRole 无可用角色: account=" .. tostring(account)
             .. " zoneId=" .. tostring(zoneId)
             .. " roleCount=" .. tostring(roleCount))
-        return 54, 0, 0  -- 54=LUA_EXIT_CODE：业务前置条件不足
+        return 54  -- 54=LUA_EXIT_CODE：业务前置条件不足
     end
 
     local authAddr = robot.get("authAddr") or ""
     local url = authAddr .. "/useRole"
-    local code, body, sent, recv = network.http_request(url, "POST", "form", {
+    local code, body = network.http_request(url, "POST", "form", {
         account  = account,
         id       = tostring(playerId),
         session  = session,
@@ -61,11 +61,8 @@ function execute(r)
             .. " url=" .. tostring(url)
             .. " playerId=" .. tostring(playerId)
             .. " zoneId=" .. tostring(zoneId)
-            .. " code=" .. tostring(code)
-            .. " sent=" .. tostring(sent)
-            .. " recv=" .. tostring(recv)
-            .. " body=" .. body_preview(body))
-        return 3, sent, recv  -- 3=SEND_FAILED
+            .. " code=" .. tostring(code)            .. " body=" .. body_preview(body))
+        return 3  -- 3=SEND_FAILED
     end
 
     if code < 200 or code >= 300 then
@@ -73,11 +70,8 @@ function execute(r)
             .. " url=" .. tostring(url)
             .. " playerId=" .. tostring(playerId)
             .. " zoneId=" .. tostring(zoneId)
-            .. " status=" .. tostring(code)
-            .. " sent=" .. tostring(sent)
-            .. " recv=" .. tostring(recv)
-            .. " body=" .. body_preview(body))
-        return 54, sent, recv
+            .. " status=" .. tostring(code)            .. " body=" .. body_preview(body))
+        return 54
     end
 
     local ok, resp = pcall(json.decode, body)
@@ -85,22 +79,16 @@ function execute(r)
         log.error("SelectRole JSON 解析失败: account=" .. tostring(account)
             .. " url=" .. tostring(url)
             .. " playerId=" .. tostring(playerId)
-            .. " zoneId=" .. tostring(zoneId)
-            .. " sent=" .. tostring(sent)
-            .. " recv=" .. tostring(recv)
-            .. " body=" .. body_preview(body))
-        return 54, sent, recv
+            .. " zoneId=" .. tostring(zoneId)            .. " body=" .. body_preview(body))
+        return 54
     end
 
     if resp.error and resp.error ~= 0 then
         log.error("SelectRole 失败: account=" .. tostring(account)
             .. " playerId=" .. tostring(playerId)
             .. " zoneId=" .. tostring(zoneId)
-            .. " error=" .. tostring(resp.error)
-            .. " sent=" .. tostring(sent)
-            .. " recv=" .. tostring(recv)
-            .. " body=" .. body_preview(body))
-        return 54, sent, recv
+            .. " error=" .. tostring(resp.error)            .. " body=" .. body_preview(body))
+        return 54
     end
 
     -- 更新 logicSession
@@ -121,5 +109,5 @@ function execute(r)
             .. " (无逻辑服地址) body=" .. body_preview(body))
     end
 
-    return 0, sent, recv
+    return 0
 end

@@ -1,10 +1,9 @@
 package admin
 
-// MySQL DDL — 历史归档 7 张表。
+// MySQL DDL — 历史归档 8 张表。
 // Admin 启动时通过 HistoryStore.initSchema() 自动执行（仅创建不存在的表）。
-// 已有数据库升级需手动 ALTER TABLE，例如新增 debug_mode 时需执行：
-// ALTER TABLE task_history ADD COLUMN debug_mode TINYINT(1) NOT NULL DEFAULT 0 AFTER note;
-// 旧历史如需标记调试记录，请按实际任务配置手动回填 debug_mode=1。
+// 已有数据库升级见 deploy/upgrade.sql（INFORMATION_SCHEMA 守卫、幂等）。
+// 收藏/标签/备注统一存于 task_meta（stage_index=-1 为任务级），不再是 task_history 的列。
 
 const ddlTaskHistory = `
 CREATE TABLE IF NOT EXISTS task_history (
@@ -19,17 +18,13 @@ CREATE TABLE IF NOT EXISTS task_history (
     stopped_at      DATETIME(3)  NULL,
     duration_sec    INT          NOT NULL DEFAULT 0,
     error_msg       TEXT,
-    starred         TINYINT(1)   NOT NULL DEFAULT 0,
-    tags            JSON         NULL,
-    note            TEXT,
     debug_mode      TINYINT(1)   NOT NULL DEFAULT 0,
     config_summary  JSON         NULL,
     stage_count     INT          NOT NULL DEFAULT 0,
     INDEX idx_state (state),
     INDEX idx_created (created_at DESC),
-    INDEX idx_starred (starred),
     INDEX idx_started (started_at),
-    INDEX idx_prune (starred, stopped_at)
+    INDEX idx_stopped (stopped_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `
 
@@ -56,7 +51,8 @@ CREATE TABLE IF NOT EXISTS task_report (
     final_snapshot  JSON         NULL,
     cleanup_status  JSON         NULL,
     stage_index     INT          NOT NULL DEFAULT -1,
-    INDEX idx_task (task_id)
+    INDEX idx_task (task_id),
+    INDEX idx_task_stage (task_id, stage_index)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `
 
@@ -102,7 +98,8 @@ CREATE TABLE IF NOT EXISTS task_timeseries (
     fds                 INT          NOT NULL DEFAULT 0,
     online_count        INT          NOT NULL DEFAULT 0,
     offline_count       INT          NOT NULL DEFAULT 0,
-    INDEX idx_task_elapsed (task_id, elapsed_sec)
+    INDEX idx_task_elapsed (task_id, elapsed_sec),
+    INDEX idx_task_stage_elapsed (task_id, stage_index, elapsed_sec)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `
 
@@ -113,6 +110,23 @@ CREATE TABLE IF NOT EXISTS task_config_archive (
     proto_files     MEDIUMBLOB   NULL,
     lua_scripts     MEDIUMBLOB   NULL,
     robot_config    JSON         NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+`
+
+// task_meta — 任务/阶段段落级元数据（收藏/标签/备注），统一按 (task_id, stage_index) 键，
+// 与 task_report / task_aggregated / task_timeseries 同构：stage_index=-1 为整体（任务级，
+// 所有任务都用），stage_index>=1 为 reset 渐进式加压的各阶段段落（各自独立一份）。
+// 行按需懒创建：未编辑过的（任务或段落）无行，读取时取默认值（未收藏 / 无标签 / 空备注）。
+const ddlTaskMeta = `
+CREATE TABLE IF NOT EXISTS task_meta (
+    task_id         VARCHAR(32)  NOT NULL,
+    stage_index     INT          NOT NULL DEFAULT -1,
+    starred         TINYINT(1)   NOT NULL DEFAULT 0,
+    tags            JSON         NULL,
+    note            TEXT,
+    updated_at      DATETIME(3)  NOT NULL,
+    PRIMARY KEY (task_id, stage_index),
+    INDEX idx_starred (starred)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `
 
@@ -137,4 +151,5 @@ var allDDL = []string{
 	ddlTaskTimeseries,
 	ddlTaskConfigArchive,
 	ddlTaskAgentEvents,
+	ddlTaskMeta,
 }

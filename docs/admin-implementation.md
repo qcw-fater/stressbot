@@ -50,7 +50,7 @@ admin/
   aggregator.go          -- MetricsAggregator：压测/系统指标聚合
   agent_dispatcher.go    -- Admin -> Agent HTTP 通信（带重试）
   history.go             -- HistoryStore：MySQL 持久化、查询、标签、清理
-  history_schema.go      -- 7 张表 DDL
+  history_schema.go      -- 8 张表 DDL
   sampler.go             -- Sampler：运行期定时采集时序数据
   handlers.go            -- 全部 HTTP handler（Agent 上行 + 前端任务/Agent/指标/系统/日志/基线）
   handlers_history.go    -- 历史归档相关 handler
@@ -799,7 +799,7 @@ type HistoryStore struct {
 | `GetConfig(ctx, id)` | 查询配置归档 |
 | `GetTimeseries(ctx, id)` | 查询时序采样数据 |
 | `AllTags(ctx)` | 全部去重标签（JSON_TABLE 或降级扫描） |
-| `UpdateMeta(ctx, id, req)` | 更新 starred/tags/note |
+| `UpsertMeta(ctx, id, stageIndex, req)` | 更新 starred/tags/note（stageIndex<=0=任务级，>=1=段落级，统一写 task_meta） |
 | `Delete(ctx, id, force)` | 删除（starred 需要 force=true） |
 | `AppendTimeseries(ctx, taskID, point)` | 追加时序采样点 |
 | `PruneExpired(ctx, now)` | 清理过期记录（事务级联删除） |
@@ -810,10 +810,16 @@ type HistoryStore struct {
 
 1. `task_history`（ON DUPLICATE KEY UPDATE）
 2. `task_assignment`（批量 INSERT）
-3. `task_report`（批量 INSERT，含阶段完成报告）
-4. `task_aggregated`（ON DUPLICATE KEY UPDATE）
+3. `task_report`（批量 INSERT；含 reset 段落报告，按连续段号写入；末段额外写最终报告）
+4. `task_aggregated`（ON DUPLICATE KEY UPDATE；`-1` 整体 + 各 reset 段落 `MergeSnapshots` 聚合）
 5. `task_config_archive`（ON DUPLICATE KEY UPDATE）
 6. `task_agent_events`（批量 INSERT）
+
+**阶段段落归档**（`admin/stage_plan.go` + `history.go`）：含 `reset=true` 的渐进式加压任务，
+`buildStagePlan` 把 reset 边界映射为连续 1-based 段落号；`task_report` / `task_aggregated` / `task_timeseries`
+均按段号写入，三者对齐，支持按 `stageIndex` 查询单段详情与时序。reset 任务的 `stage_index=-1` 等于末段
+（Agent 每段 `Reset()` 采集器）。详见 `docs/ramp-up.md` §6.6。新增索引 `task_report.idx_task_stage`、
+`task_timeseries.idx_task_stage_elapsed`；旧库升级见 `deploy/upgrade.sql` 的 `sb_upgrade_stage_history()`（幂等）。
 
 **与计划的差异**：
 - 使用标准 `database/sql` 而非 `sqlx`
@@ -828,6 +834,7 @@ type Sampler struct {
     aggregator *MetricsAggregator
     history    *HistoryStore
     registry   *AgentRegistry
+    tasks      *TaskStore           // 读取活跃任务的 reset 进度，为采样点打段号
 
     mu      sync.Mutex
     current *samplerJob
@@ -843,6 +850,7 @@ type samplerJob struct {
 每 `interval` 秒执行：
 1. `AggregateStress(taskID)` -> JSON -> `AppendTimeseries`
 2. `AggregateSystem()` -> JSON -> `AppendTimeseries`
+3. `currentStageIndex(taskID)`：reset 任务按「已观测 reset 上报数 + 1」给采样点打段号（非 reset/非 ramp 为 -1）
 
 写入失败仅 log warn，不影响下次采样。
 
@@ -976,7 +984,7 @@ AdminServer 注册了 `onAgentStatusChange` 回调，当 Agent 状态变更时�
 
 ---
 
-## 6. 完整 MySQL DDL（7 张表）
+## 6. 完整 MySQL DDL（8 张表）
 
 ```sql
 -- ===== 1. 任务历史主表 =====
@@ -991,17 +999,15 @@ CREATE TABLE IF NOT EXISTS task_history (
     stopped_at      DATETIME(3)  NULL,
     duration_sec    INT          NOT NULL DEFAULT 0,
     error_msg       TEXT,
-    starred         TINYINT(1)   NOT NULL DEFAULT 0,
-    tags            JSON         NULL,
-    note            TEXT,
+    debug_mode      TINYINT(1)   NOT NULL DEFAULT 0,
     config_summary  JSON         NULL,
     stage_count     INT          NOT NULL DEFAULT 0,
     INDEX idx_state (state),
     INDEX idx_created (created_at DESC),
-    INDEX idx_starred (starred),
     INDEX idx_started (started_at),
-    INDEX idx_prune (starred, stopped_at)
+    INDEX idx_stopped (stopped_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- 注：starred/tags/note 已迁出到 task_meta（见第 8 表），task_history 不再保存元数据。
 
 -- ===== 2. 集群分配快照 =====
 CREATE TABLE IF NOT EXISTS task_assignment (
@@ -1024,7 +1030,8 @@ CREATE TABLE IF NOT EXISTS task_report (
     finished_at     DATETIME(3)  NULL,
     final_snapshot  JSON         NULL,
     stage_index     INT          NOT NULL DEFAULT -1,
-    INDEX idx_task (task_id)
+    INDEX idx_task (task_id),
+    INDEX idx_task_stage (task_id, stage_index)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ===== 4. 集群聚合终态快照 =====
@@ -1045,7 +1052,8 @@ CREATE TABLE IF NOT EXISTS task_timeseries (
     data_type       VARCHAR(32)  NOT NULL,
     snapshot        JSON         NOT NULL,
     stage_index     INT          NOT NULL DEFAULT -1,
-    INDEX idx_task_type (task_id, data_type, elapsed_sec)
+    INDEX idx_task_type (task_id, data_type, elapsed_sec),
+    INDEX idx_task_stage_elapsed (task_id, stage_index, elapsed_sec)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ===== 6. 任务配置归档 =====
@@ -1068,6 +1076,20 @@ CREATE TABLE IF NOT EXISTS task_agent_events (
     detail          TEXT,
     INDEX idx_task (task_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ===== 8. 统一元数据（收藏/标签/备注）=====
+-- 与 task_report/aggregated/timeseries 同构：(task_id, stage_index) 键，stage_index=-1 为任务级
+-- （所有任务），>=1 为 reset 渐进式加压的各阶段段落。行按需懒创建。
+CREATE TABLE IF NOT EXISTS task_meta (
+    task_id         VARCHAR(32)  NOT NULL,
+    stage_index     INT          NOT NULL DEFAULT -1,
+    starred         TINYINT(1)   NOT NULL DEFAULT 0,
+    tags            JSON         NULL,
+    note            TEXT,
+    updated_at      DATETIME(3)  NOT NULL,
+    PRIMARY KEY (task_id, stage_index),
+    INDEX idx_starred (starred)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
 **与计划的差异**：
@@ -1079,6 +1101,7 @@ CREATE TABLE IF NOT EXISTS task_agent_events (
 - `task_timeseries` 新增 `stage_index` 字段
 - `task_config_archive` 使用 `MEDIUMBLOB` 而非 `MEDIUMTEXT`（存储二进制数据）
 - 新增第 7 张表 `task_agent_events`（计划中无此表）
+- 新增第 8 张表 `task_meta`（统一收藏/标签/备注，主键 `(task_id, stage_index)`，`-1`=任务级、`>=1`=reset 段落）；`task_history` 的 `starred/tags/note` 三列已迁入此表
 
 ---
 

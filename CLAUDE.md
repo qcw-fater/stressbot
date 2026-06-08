@@ -88,7 +88,7 @@ React 18 / Vite 5 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 ### 动作 pattern（14 种）
 
 - **请求-响应**：`tcpRequest` / `udpRequest` — channel 一发一收 + 超时
-- **监听**：`tcpListen` / `udpListen` — 轮询等待推送 + 超时 + pollMs
+- **监听**：`tcpListen` / `udpListen` — 消费 ListenRefs 预缓存的推送消息（轮询 + 超时 + pollMs）
 - **连接管理**：`tcpConnect` / `udpConnect` / `tcpClose` / `udpClose`
 - **发送**：`tcpSend` / `udpSend` / `httpRequest`（支持 JSON/form body）
 - **状态与辅助**：`setState` / `clearState` / `lua`

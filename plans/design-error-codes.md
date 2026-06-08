@@ -769,18 +769,15 @@ if headerErr != 0 {
 
 **Lua API 行为不变原则**：
 
-Lua 脚本（用户写的业务代码）**完全不感知**新 `ErrorCode` 体系。Lua API 仍按当前约定返回 `code, data, sent, recv` 四元组：
+Lua 脚本（用户写的业务代码）**完全不感知**新 `ErrorCode` 体系。Lua API 只返回业务结果，不返回字节数：
 
 ```lua
--- Lua 侧调用约定（保持不变）
-local code, body, sent, recv = network.tcp_request("logic", route, msg, "ResMsg")
+local code, body = network.tcp_request("logic", route, msg, "ResMsg")
 -- code == 0       → 成功
--- code == -1      → 框架请求失败（连接断开/超时/编码失败等）
--- code == -2      → 响应解析失败
--- code >  0       → 服务端错误码（headerErr 原值）
+-- code 为 errcode → 框架错误码（1-99）或服务端错误码（>=100）
 ```
 
-**Go 侧改造**：调用 `ctx.NetSender.*` 时，把新接口返回的 `error` 折算回 Lua 期望的 `-1`。
+**Go 侧改造**：调用 `ctx.NetSender.*` 时，把新接口返回的 `error` 折算回 Lua 侧 errcode。
 
 **Lua 路径暂不接入 monitor**（沿用当前行为，错误统计由 Lua 脚本自己决定）。netSenderAdapter 返回的 ActionError 在 Lua 桥这层被"消费"掉转成 -1 给 Lua，原始 err 仅用于 `stresslog.Debug` 排查，不进 monitor 聚合（避免 Lua 业务错误污染框架错误指标）。
 

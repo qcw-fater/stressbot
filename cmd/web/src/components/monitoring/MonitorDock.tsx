@@ -6,7 +6,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useRuntimeStore } from '@/services';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { ActionMetricsTable } from './shared/ActionMetricsTable';
-import { buildLivePanelModel, type LiveNodeItem } from './shared/liveMetrics';
+import { buildLivePanelModel } from './shared/liveMetrics';
 import { fmtBandwidthKBps, fmtCompactNumber, fmtDuration, fmtMs, fmtPercent, fmtPercentValue, fmtRate, fmtScore } from './shared/formats';
 import './MonitorDock.css';
 
@@ -23,24 +23,9 @@ const STATE_TEXT: Record<string, string> = {
   failed: '失败',
 };
 
-const NODE_STATUS_TEXT: Record<string, string> = {
-  idle: '空闲',
-  busy: '运行中',
-  unhealthy: '异常',
-  offline: '离线',
-  stale: '上报延迟',
-};
-
 function compactRatio(current: number, total: number) {
   if (total <= 0) return '—';
   return `${fmtCompactNumber(current)} / ${fmtCompactNumber(total)}`;
-}
-
-function formatDateTime(value?: string) {
-  if (!value) return '—';
-  const ts = Date.parse(value);
-  if (!Number.isFinite(ts)) return '—';
-  return new Date(ts).toLocaleTimeString('zh-CN', { hour12: false });
 }
 
 export function MonitorDock() {
@@ -132,8 +117,6 @@ function TopSection() {
     totalAgents,
     offlineAgents,
     assignedAgents,
-    rampUpEnabled,
-    rampUpStages,
   } = useRuntimeStore(
     useShallow((s) => ({
       activeTask: s.activeTask,
@@ -145,8 +128,6 @@ function TopSection() {
       totalAgents: s.totalAgents,
       offlineAgents: s.offlineAgents,
       assignedAgents: s.assignedAgents,
-      rampUpEnabled: s.rampUpEnabled,
-      rampUpStages: s.rampUpStages,
     })),
   );
 
@@ -159,8 +140,6 @@ function TopSection() {
     totalAgents,
     offlineAgents,
     assignedAgents,
-    rampUpEnabled,
-    rampUpStages,
   }), [
     latestStress,
     latestSystem,
@@ -170,8 +149,6 @@ function TopSection() {
     totalAgents,
     offlineAgents,
     assignedAgents,
-    rampUpEnabled,
-    rampUpStages,
   ]);
 
   if (!latestStress) {
@@ -264,8 +241,8 @@ function LoadProgress({ percent }: { percent: number }) {
 
 function RampUpLoadView({ model }: { model: ReturnType<typeof buildLivePanelModel> }) {
   const rampUp = model.load.rampUp;
+  const stages = useRuntimeStore(useShallow((s) => s.rampUpStages));
   if (!rampUp) return null;
-  const stages = useRuntimeStore.getState().rampUpStages;
   const totalTarget = stages.reduce((sum, stage) => sum + (stage.count || 0), 0);
   const stageStart = stages.slice(0, rampUp.currentStage - 1).reduce((sum, stage) => sum + (stage.count || 0), 0);
   const currentStage = stages[rampUp.currentStage - 1];
@@ -335,9 +312,6 @@ function LatencyConnectionCard({ model }: { model: ReturnType<typeof buildLivePa
 }
 
 function ResourceNodeCard({ model }: { model: ReturnType<typeof buildLivePanelModel> }) {
-  const visibleNodes = model.nodes.items.slice(0, 24);
-  const hidden = Math.max(0, model.nodes.items.length - visibleNodes.length);
-
   return (
     <MetricGroup title="资源 / 节点" subtitle={`采样 ${model.nodes.reporting}/${model.nodes.assigned || '—'} · 在线 ${model.nodes.online}/${model.nodes.total || '—'}`}>
       <div className="md-kpi-grid md-kpi-grid--three">
@@ -350,11 +324,6 @@ function ResourceNodeCard({ model }: { model: ReturnType<typeof buildLivePanelMo
         <MetricCell label="容量" value={compactRatio(model.nodes.capacityCurrent, model.nodes.capacityMax)} />
         <MetricCell label="离线节点" value={fmtCompactNumber(model.nodes.offline)} />
         <MetricCell label="文件句柄" value={fmtCompactNumber(model.resources.fds)} title={`协程 ${fmtCompactNumber(model.resources.goroutines)} · 线程 ${fmtCompactNumber(model.resources.threads)}`} />
-      </div>
-      <div className="md-node-row" aria-label="节点状态矩阵">
-        {visibleNodes.map((node) => <NodeDot key={node.id} node={node} />)}
-        {hidden > 0 && <span className="md-node-more">+{hidden}</span>}
-        {visibleNodes.length === 0 && <span className="md-node-empty">暂无节点数据</span>}
       </div>
     </MetricGroup>
   );
@@ -381,24 +350,6 @@ function MetricCell({ label, value, unit, title }: { label: string; value: strin
           {value}{unit && value !== '—' ? <em>{unit}</em> : null}
         </span>
       </span>
-    </Tooltip>
-  );
-}
-
-function NodeDot({ node }: { node: LiveNodeItem }) {
-  return (
-    <Tooltip
-      title={
-        <div className="md-node-tip">
-          <div>{node.name}</div>
-          <div>状态：{NODE_STATUS_TEXT[node.status] ?? node.status}</div>
-          <div>机器人：{compactRatio(node.currentBots, node.maxBots)}</div>
-          <div>CPU：{fmtPercentValue(node.cpuPercent)} · 内存：{fmtPercentValue(node.memPercent)}</div>
-          <div>更新：{formatDateTime(node.updatedAt)}</div>
-        </div>
-      }
-    >
-      <span className={`md-node-dot md-node-dot--${node.tone}`} />
     </Tooltip>
   );
 }

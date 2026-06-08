@@ -10,6 +10,8 @@ import { App, Button, Checkbox, Empty, Input, Pagination, Spin, Switch, Tooltip 
 import {
   ArrowLeftOutlined,
   DeleteOutlined,
+  DownOutlined,
+  RightOutlined,
   StarFilled,
   StarOutlined,
   SwapOutlined,
@@ -29,7 +31,23 @@ export interface HistoryModalProps {
   onClose: () => void;
 }
 
-type View = { kind: 'list' } | { kind: 'detail'; id: string } | { kind: 'compare'; ids: string[] };
+/** 选中目标：整体记录或某条阶段段落。 */
+interface SelTarget {
+  id: string;
+  stageIndex?: number;
+  stageLabel?: string;
+  name: string;
+  starred: boolean;
+}
+
+function targetKey(t: { id: string; stageIndex?: number }): string {
+  return (t.stageIndex ?? -1) > 0 ? `${t.id}#${t.stageIndex}` : t.id;
+}
+
+type View =
+  | { kind: 'list' }
+  | { kind: 'detail'; id: string; stageIndex?: number; stageLabel?: string }
+  | { kind: 'compare'; targets: SelTarget[] };
 
 export function HistoryModal({ open, onClose }: HistoryModalProps) {
   const { message, modal } = App.useApp();
@@ -39,7 +57,7 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [starredOnly, setStarredOnly] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selected, setSelected] = useState<SelTarget[]>([]);
   const [page, setPage] = useState(1);
   const pageSize = 20;
 
@@ -50,6 +68,7 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
         search: search || undefined,
         starred: starredOnly ? true : undefined,
         limit: 100,
+        includeStages: true,
       });
       setItems(resp.items);
       setTotal(resp.total);
@@ -83,6 +102,20 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
     [refresh],
   );
 
+  // 阶段段落收藏：写入段落级元数据（task_meta，stage_index>=1）
+  const onToggleStageStar = useCallback(
+    async (child: HistoryRecord, e?: React.MouseEvent) => {
+      e?.stopPropagation();
+      try {
+        await historyApi.updateHistory(child.id, { starred: !child.starred }, child.stageIndex);
+        refresh();
+      } catch (err) {
+        showApiError(err);
+      }
+    },
+    [refresh],
+  );
+
   const onDelete = useCallback(
     (record: HistoryRecord, e?: React.MouseEvent) => {
       e?.stopPropagation();
@@ -105,32 +138,39 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
     [modal, message, refresh],
   );
 
-  const toggleSelect = (id: string, e?: React.MouseEvent) => {
+  const toggleSelect = (target: SelTarget, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    setSelectedIds((prev) => {
-      if (prev.includes(id)) return prev.filter((x) => x !== id);
+    const key = targetKey(target);
+    setSelected((prev) => {
+      if (prev.some((t) => targetKey(t) === key)) return prev.filter((t) => targetKey(t) !== key);
       if (prev.length >= 5) return prev;
-      return [...prev, id];
+      return [...prev, target];
     });
   };
+  const isSelected = (target: { id: string; stageIndex?: number }) =>
+    selected.some((t) => targetKey(t) === targetKey(target));
 
-  const selectedRecords = useMemo(
-    () => items.filter((r) => selectedIds.includes(r.id)),
-    [items, selectedIds],
-  );
+  // 批量删除：阶段段落子记录不单独删除，按所属父任务去重后删除。
+  const uniqueParents = useMemo(() => {
+    const map = new Map<string, SelTarget>();
+    for (const t of selected) {
+      if (!map.has(t.id)) map.set(t.id, t);
+    }
+    return [...map.values()];
+  }, [selected]);
 
   const onBatchDelete = useCallback(() => {
-    const starredCount = selectedRecords.filter((r) => r.starred).length;
+    const starredCount = uniqueParents.filter((r) => r.starred).length;
     modal.confirm({
-      title: `确认批量删除 ${selectedIds.length} 条记录？`,
-      content: starredCount > 0 ? `其中 ${starredCount} 条已收藏，将强制删除` : '此操作不可恢复',
+      title: `确认批量删除 ${uniqueParents.length} 个任务？`,
+      content: starredCount > 0 ? `其中 ${starredCount} 个已收藏，将强制删除（含其全部阶段）` : '此操作不可恢复（含其全部阶段）',
       okText: '删除',
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
-          await Promise.all(selectedRecords.map((r) => historyApi.deleteHistory(r.id, r.starred)));
-          message.success(`已删除 ${selectedIds.length} 条记录`);
-          setSelectedIds([]);
+          await Promise.all(uniqueParents.map((r) => historyApi.deleteHistory(r.id, r.starred)));
+          message.success(`已删除 ${uniqueParents.length} 个任务`);
+          setSelected([]);
           refresh();
         } catch (err) {
           showApiError(err);
@@ -138,7 +178,7 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
         }
       },
     });
-  }, [modal, message, refresh, selectedRecords, selectedIds]);
+  }, [modal, message, refresh, uniqueParents]);
 
   const paged = items.slice((page - 1) * pageSize, page * pageSize);
 
@@ -198,18 +238,18 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
                 type="primary"
                 ghost
                 icon={<SwapOutlined />}
-                disabled={selectedIds.length < 2 || selectedIds.length > 5}
-                onClick={() => setView({ kind: 'compare', ids: selectedIds })}
+                disabled={selected.length < 2 || selected.length > 5}
+                onClick={() => setView({ kind: 'compare', targets: selected })}
               >
-                对比 {selectedIds.length > 0 ? `(${selectedIds.length})` : ''}
+                对比 {selected.length > 0 ? `(${selected.length})` : ''}
               </Button>
               <Button
                 danger
                 icon={<DeleteOutlined />}
-                disabled={selectedIds.length === 0}
+                disabled={selected.length === 0}
                 onClick={onBatchDelete}
               >
-                删除 {selectedIds.length > 0 ? `(${selectedIds.length})` : ''}
+                删除 {selected.length > 0 ? `(${uniqueParents.length})` : ''}
               </Button>
             </div>
           </header>
@@ -225,17 +265,31 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
               </div>
             ) : (
               <div className="hp-list">
-                {paged.map((r) => (
-                  <HistoryCard
-                    key={r.id}
-                    record={r}
-                    selected={selectedIds.includes(r.id)}
-                    onSelect={toggleSelect}
-                    onStar={onToggleStar}
-                    onDelete={onDelete}
-                    onClick={() => setView({ kind: 'detail', id: r.id })}
-                  />
-                ))}
+                {paged.map((r) =>
+                  r.hasResetStages && r.children && r.children.length > 0 ? (
+                    <StageGroup
+                      key={r.id}
+                      record={r}
+                      isSelected={isSelected}
+                      onSelect={toggleSelect}
+                      onStarStage={onToggleStageStar}
+                      onDelete={onDelete}
+                      onOpenStage={(stageIndex, stageLabel) =>
+                        setView({ kind: 'detail', id: r.id, stageIndex, stageLabel })
+                      }
+                    />
+                  ) : (
+                    <HistoryCard
+                      key={r.id}
+                      record={r}
+                      selected={isSelected({ id: r.id })}
+                      onSelect={() => toggleSelect({ id: r.id, name: r.name, starred: r.starred })}
+                      onStar={onToggleStar}
+                      onDelete={onDelete}
+                      onClick={() => setView({ kind: 'detail', id: r.id })}
+                    />
+                  ),
+                )}
               </div>
             )}
           </div>
@@ -256,12 +310,21 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
       )}
       {view.kind === 'detail' && (
         <div className="hp-shell hp-shell--detail">
-          <HistoryDetailView id={view.id} onChange={refresh} />
+          <HistoryDetailView
+            id={view.id}
+            stageIndex={view.stageIndex}
+            stageLabel={view.stageLabel}
+            onChange={refresh}
+          />
         </div>
       )}
       {view.kind === 'compare' && (
         <div className="hp-shell hp-shell--compare">
-          <HistoryCompareView ids={view.ids} />
+          <HistoryCompareView
+            targets={view.targets.map((t) =>
+              (t.stageIndex ?? -1) > 0 ? { id: t.id, stageIndex: t.stageIndex } : t.id,
+            )}
+          />
         </div>
       )}
     </FloatingWindow>
@@ -280,7 +343,7 @@ function HistoryCard({
 }: {
   record: HistoryRecord;
   selected: boolean;
-  onSelect: (id: string, e?: React.MouseEvent) => void;
+  onSelect: (e?: React.MouseEvent) => void;
   onStar: (r: HistoryRecord, e?: React.MouseEvent) => void;
   onDelete: (r: HistoryRecord, e?: React.MouseEvent) => void;
   onClick: () => void;
@@ -309,7 +372,7 @@ function HistoryCard({
       <div className="hp-record-select">
         <Checkbox
           checked={selected}
-          onClick={(e) => onSelect(r.id, e as unknown as React.MouseEvent)}
+          onClick={(e) => onSelect(e as unknown as React.MouseEvent)}
         />
       </div>
 
@@ -390,6 +453,228 @@ function HistoryCard({
           />
         </Tooltip>
       </div>
+    </div>
+  );
+}
+
+/* ── 含 reset 的渐进式加压：阶段组（父任务 + 阶段段落子记录） ── */
+
+function StageGroup({
+  record: r,
+  isSelected,
+  onSelect,
+  onStarStage,
+  onDelete,
+  onOpenStage,
+}: {
+  record: HistoryRecord;
+  isSelected: (t: { id: string; stageIndex?: number }) => boolean;
+  onSelect: (t: SelTarget, e?: React.MouseEvent) => void;
+  onStarStage: (child: HistoryRecord, e?: React.MouseEvent) => void;
+  onDelete: (r: HistoryRecord, e?: React.MouseEvent) => void;
+  onOpenStage: (stageIndex: number, stageLabel: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const failed = r.state === 'failed';
+  const children = r.children ?? [];
+  const tags = r.tags ?? [];
+  const visibleTags = tags.slice(0, 3);
+  const hiddenTagCount = Math.max(0, tags.length - visibleTags.length);
+  const cfg = r.configSummary;
+  const started = r.startedAt ? dayjs(r.startedAt).format('MM-DD HH:mm') : '—';
+  const note = (r.note ?? '').trim();
+
+  return (
+    <div
+      className={`hp-stage-group${failed ? ' hp-stage-group--failed' : ''}${expanded ? ' hp-stage-group--open' : ''}`}
+    >
+      {/* 标题带：复用普通记录行布局，仅额外加 chevron + 阶段 badge + 展开折叠 */}
+      <div
+        className={`hp-record-row hp-record-row--group${failed ? ' hp-record-row--failed' : ''}${isSelected({ id: r.id }) ? ' hp-record-row--selected' : ''}`}
+        role="button"
+        tabIndex={0}
+        onClick={() => setExpanded((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setExpanded((v) => !v);
+          }
+        }}
+      >
+        <div className="hp-record-select" onClick={(e) => e.stopPropagation()}>
+          <Checkbox
+            checked={isSelected({ id: r.id })}
+            onClick={(e) => onSelect({ id: r.id, name: r.name, starred: r.starred }, e as unknown as React.MouseEvent)}
+          />
+        </div>
+
+        <div className="hp-record-identity">
+          <span className="hp-stage-caption__chevron" aria-hidden>
+            {expanded ? <DownOutlined /> : <RightOutlined />}
+          </span>
+          <span className={`hp-record-state hp-record-state--${failed ? 'bad' : 'ok'}`}>{failed ? '失败' : '完成'}</span>
+          <Tooltip title={r.debugMode ? '调试模式' : '测试模式'} mouseEnterDelay={0.3}>
+            <span className={`hp-mode-marker hp-mode-marker--${r.debugMode ? 'debug' : 'test'}`} />
+          </Tooltip>
+          <Tooltip title={r.name} mouseEnterDelay={0.4}>
+            <span className="hp-record-name">{r.name}</span>
+          </Tooltip>
+          <span className="hp-stage-caption__badge">阶段任务 · {children.length} 段</span>
+          <Tooltip title={`记录 ID：${r.id}`} mouseEnterDelay={0.4}>
+            <code className="hp-record-id">#{r.id.slice(0, 8)}</code>
+          </Tooltip>
+        </div>
+
+        <div className="hp-record-time">
+          <span className="hp-record-k">开始</span>
+          <span className="hp-record-v">{started}</span>
+        </div>
+
+        <div className="hp-record-duration">
+          <span className="hp-record-k">时长</span>
+          <span className="hp-record-v hp-record-v--strong">{formatDuration(r.durationSec)}</span>
+        </div>
+
+        <div className="hp-record-load">
+          <span>机器人 <b>{r.totalBots.toLocaleString()}</b></span>
+          <span>节点 <b>{r.activeAgentCount}/{r.agentCount}</b></span>
+          <span>并发 <b>{cfg.concurrency}</b></span>
+          <span>阶段 <b>{r.stageCount}</b></span>
+        </div>
+
+        <div className="hp-record-config">
+          <span>超时 {cfg.timeoutSec}s</span>
+          <span>Flow {cfg.flowSizeKB}KB</span>
+          <span>Proto {cfg.protoCount}</span>
+          <span>Lua {cfg.scriptCount}</span>
+        </div>
+
+        <div className="hp-record-tags">
+          {visibleTags.length > 0 ? (
+            <>
+              {visibleTags.map((t) => <span key={t} className="hp-tag-pill">{t}</span>)}
+              {hiddenTagCount > 0 && (
+                <Tooltip title={tags.slice(visibleTags.length).join('、')} mouseEnterDelay={0.3}>
+                  <span className="hp-tag-pill hp-tag-pill--more">+{hiddenTagCount}</span>
+                </Tooltip>
+              )}
+            </>
+          ) : (
+            <span className="hp-record-empty">无标签</span>
+          )}
+        </div>
+
+        <Tooltip title={note || '无备注'} mouseEnterDelay={0.4}>
+          <div className={`hp-record-note${note ? '' : ' hp-record-note--empty'}`}>{note || '无备注'}</div>
+        </Tooltip>
+
+        <div className="hp-record-actions" onClick={(e) => e.stopPropagation()}>
+          <Tooltip title="删除整个任务（含全部阶段）">
+            <Button
+              type="text"
+              size="small"
+              className="hp-record-icon-btn"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={(e) => onDelete(r, e)}
+            />
+          </Tooltip>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="hp-stage-track" role="list">
+          {children.map((c) => {
+            const sel = isSelected({ id: r.id, stageIndex: c.stageIndex });
+            const open = () => onOpenStage(c.stageIndex ?? 0, c.stageLabel ?? '');
+            const cTags = c.tags ?? [];
+            const cNote = (c.note ?? '').trim();
+            const cFailed = c.state === 'failed';
+            return (
+              <div
+                key={c.stageIndex}
+                role="listitem"
+                className={`hp-stage-child${sel ? ' hp-stage-child--selected' : ''}${cFailed ? ' hp-stage-child--failed' : ''}`}
+                onClick={open}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    open();
+                  }
+                }}
+                tabIndex={0}
+              >
+                {/* Col 1: Checkbox — same container as parent */}
+                <div className="hp-record-select" onClick={(e) => e.stopPropagation()}>
+                  <Checkbox
+                    checked={sel}
+                    onClick={(e) =>
+                      onSelect(
+                        {
+                          id: r.id,
+                          stageIndex: c.stageIndex,
+                          stageLabel: c.stageLabel,
+                          name: r.name,
+                          starred: c.starred,
+                        },
+                        e as unknown as React.MouseEvent,
+                      )
+                    }
+                  />
+                </div>
+
+                {/* Col 2: Identity — state pill + segment label (matches parent order) */}
+                <div className="hp-record-identity">
+                  <span className={`hp-sc-state hp-sc-state--${cFailed ? 'bad' : 'ok'}`}>{cFailed ? '失败' : '完成'}</span>
+                  <span className="hp-sc-label">{c.stageLabel ?? `段 ${c.stageIndex}`}</span>
+                </div>
+
+                {/* Col 3: — empty (children share parent's start time) */}
+                <div className="hp-record-time" />
+
+                {/* Col 4: Peak bots (replaces duration) */}
+                <div className="hp-record-duration">
+                  <span className="hp-record-k">峰值</span>
+                  <span className="hp-record-v hp-record-v--strong">{c.totalBots.toLocaleString()}</span>
+                </div>
+
+                {/* Col 5: Load metrics */}
+                <div className="hp-record-load">
+                  {cfg.concurrency > 0 && <span>并发 <b>{cfg.concurrency}</b></span>}
+                </div>
+
+                {/* Col 6: Config — no independent config for stage children */}
+                <div className="hp-record-config" />
+
+                {/* Col 7: Tags */}
+                <div className="hp-record-tags">
+                  {cTags.length > 0 ? (
+                    cTags.slice(0, 3).map((t) => <span key={t} className="hp-tag-pill">{t}</span>)
+                  ) : null}
+                </div>
+
+                {/* Col 8: Note */}
+                <Tooltip title={cNote || undefined} mouseEnterDelay={0.3}>
+                  <div className={`hp-record-note${cNote ? '' : ' hp-record-note--empty'}`}>{cNote || ''}</div>
+                </Tooltip>
+
+                {/* Col 9: Actions — star only */}
+                <div className="hp-record-actions" onClick={(e) => e.stopPropagation()}>
+                  <Tooltip title={c.starred ? '取消收藏本段' : '收藏本段'}>
+                    <Button
+                      type="text"
+                      size="small"
+                      className="hp-record-icon-btn"
+                      icon={c.starred ? <StarFilled style={{ color: 'var(--color-warning)' }} /> : <StarOutlined />}
+                      onClick={(e) => onStarStage(c, e)}
+                    />
+                  </Tooltip>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -1282,3 +1282,179 @@
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
 }
+
+/* ── 阶段组（含 reset 的渐进式加压）
+   设计原则：子记录复用父记录的 9 列 grid 布局与容器类名，
+   仅通过更轻的 accent bar（2px）、淡色玻璃背景和缩小的 badge 区分层级。
+   列对齐保证上下扫描时标签、备注、操作在同一竖线上。 */
+
+/* ── 阶段组容器 ── */
+.hp-stage-group {
+  position: relative;
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--glass-bg);
+  transition: box-shadow 0.15s;
+}
+
+.hp-stage-group--open {
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--color-blue) 6%, var(--border-color-split));
+}
+
+/* 标题行复用普通记录行，展开时底部分割线 */
+.hp-record-row--group {
+  cursor: pointer;
+  border-radius: 9px 9px 0 0;
+}
+
+.hp-stage-group:not(.hp-stage-group--open) .hp-record-row--group {
+  border-radius: 9px;
+}
+
+.hp-stage-caption__chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  flex-shrink: 0;
+  transition: color 0.13s;
+}
+
+.hp-record-row--group:hover .hp-stage-caption__chevron {
+  color: var(--color-blue);
+}
+
+.hp-stage-caption__badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-orange) 13%, transparent);
+  color: var(--color-orange);
+  white-space: nowrap;
+}
+
+/* ── 段落子记录区域 ── */
+
+/* 子记录容器：顶部细线分隔 + 小间距 */
+.hp-stage-track {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 0 6px;
+  border-top: 1px solid color-mix(in srgb, var(--color-blue) 8%, var(--border-color-split));
+  border-radius: 0 0 9px 9px;
+}
+
+/* ── 子记录行：复用父记录的 9 列 grid ── */
+
+@keyframes hp-stage-slide {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.hp-stage-child {
+  position: relative;
+  display: grid;
+  grid-template-columns: 24px minmax(230px, 1.7fr) 88px 72px minmax(250px, 1.35fr) minmax(220px, 1.05fr) minmax(150px, 0.8fr) minmax(150px, 0.8fr) 60px;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 5px 10px 5px 12px;
+  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, var(--color-blue) 5%, var(--border-color-split, rgba(0, 0, 0, 0.06)));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--color-blue) 3%, transparent), transparent 22%),
+    var(--glass-bg);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  animation: hp-stage-slide 0.15s ease-out both;
+}
+
+.hp-stage-child:nth-child(1) { animation-delay: 0ms; }
+.hp-stage-child:nth-child(2) { animation-delay: 30ms; }
+.hp-stage-child:nth-child(3) { animation-delay: 60ms; }
+.hp-stage-child:nth-child(4) { animation-delay: 90ms; }
+.hp-stage-child:nth-child(5) { animation-delay: 120ms; }
+.hp-stage-child:nth-child(n+6) { animation-delay: 150ms; }
+
+/* 左侧 accent bar —— 缩微版父记录的蓝→绿渐变 */
+.hp-stage-child::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: linear-gradient(180deg, var(--color-blue), var(--color-success));
+  opacity: 0.5;
+}
+
+.hp-stage-child--failed::before {
+  background: var(--color-error);
+  opacity: 0.65;
+}
+
+.hp-stage-child:hover {
+  border-color: color-mix(in srgb, var(--color-blue) 20%, var(--border-color-split));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--color-blue) 6%, transparent), transparent 28%),
+    var(--glass-bg);
+}
+
+.hp-stage-child--selected {
+  border-color: color-mix(in srgb, var(--color-blue) 50%, var(--border-color-split));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--color-blue) 9%, transparent), transparent 32%),
+    var(--glass-bg);
+}
+
+/* ── 子记录 identity 列内部元素 ── */
+
+/* 段落标签 */
+.hp-sc-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+}
+
+/* 状态 pill badge */
+.hp-sc-state {
+  display: inline-block;
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.hp-sc-state--ok {
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+}
+
+.hp-sc-state--bad {
+  color: var(--color-error);
+  background: color-mix(in srgb, var(--color-error) 11%, transparent);
+}
+
+/* 响应式：与父记录同步隐藏 config + tags 列 */
+@media (max-width: 1180px) {
+  .hp-stage-child {
+    grid-template-columns: 24px minmax(220px, 1.5fr) 80px 70px minmax(180px, 1fr) minmax(150px, 0.9fr) 58px;
+  }
+}
+
+.hp-report-stage-badge {
+  margin-inline: 2px;
+}

@@ -32,7 +32,7 @@ function execute(r)
         log.error("ConnectBattleTCP 缺少战斗服地址: battleId=" .. tostring(battleId)
             .. " fighterIndex=" .. tostring(fighterIndex)
             .. " battleSession=" .. tostring(battleSession))
-        return 41, 0, 0  -- 41=ADDR_EMPTY
+        return 41  -- 41=ADDR_EMPTY
     end
 
     log.info("连接战斗服 TCP: address=" .. tostring(battleAddress)
@@ -44,29 +44,25 @@ function execute(r)
         log.error("连接战斗服 TCP 失败: address=" .. tostring(battleAddress)
             .. " battleId=" .. tostring(battleId)
             .. " fighterIndex=" .. tostring(fighterIndex))
-        return 1, 0, 0  -- 1=CONN_NOT_FOUND：连接没建好（语义准确）
+        return 1  -- 1=CONN_NOT_FOUND：连接没建好（语义准确）
     end
 
     -- 发送空包获取密钥并设置到连接
     -- 不显式传 timeout，复用 robotConfig.timeoutSec（默认 60s）；
     -- 若需要单独缩短此握手超时，再传第 5 个参数。
-    local code, keyBody, sent, recv = network.tcp_request("battle")
+    local code, keyBody = network.tcp_request("battle")
     if code ~= 0 then
         log.error("战斗服密钥交换失败: address=" .. tostring(battleAddress)
             .. " battleId=" .. tostring(battleId)
             .. " fighterIndex=" .. tostring(fighterIndex)
-            .. " code=" .. tostring(code)
-            .. " sent=" .. tostring(sent)
-            .. " recv=" .. tostring(recv))
-        return code, sent, recv  -- 透传底层 code
+            .. " code=" .. tostring(code))
+        return code  -- 透传底层 code
     end
     if not keyBody or #keyBody == 0 then
         log.error("战斗服密钥交换响应为空: address=" .. tostring(battleAddress)
             .. " battleId=" .. tostring(battleId)
-            .. " fighterIndex=" .. tostring(fighterIndex)
-            .. " sent=" .. tostring(sent)
-            .. " recv=" .. tostring(recv))
-        return 54, sent, recv  -- 54=LUA_EXIT_CODE
+            .. " fighterIndex=" .. tostring(fighterIndex))
+        return 54  -- 54=LUA_EXIT_CODE
     end
     network.set_tcp_secret_key("battle", keyBody)
 
@@ -78,12 +74,12 @@ function execute(r)
             .. " battleId=" .. tostring(battleId)
             .. " fighterIndex=" .. tostring(fighterIndex)
             .. " code=" .. tostring(hbCode))
-        return hbCode, sent, recv
+        return hbCode
     end
 
     log.info("战斗服 TCP 连接成功: address=" .. tostring(battleAddress)
         .. " battleId=" .. tostring(battleId)
         .. " fighterIndex=" .. tostring(fighterIndex)
         .. " hasSecretKey=true 心跳已注册(10s)")
-    return 0, sent, recv
+    return 0
 end

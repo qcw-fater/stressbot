@@ -213,6 +213,9 @@ type MetricsCollector struct {
 
 	totalSendBytes atomic.Int64 // 全局累计发送字节数（由 network 层上报，含心跳等全部流量）
 	totalRecvBytes atomic.Int64 // 全局累计接收字节数
+
+	rampUpCurrentStage atomic.Int32 // 渐进加压当前阶段（1-based，0 = 未启用或未开始）
+	rampUpTotalStages  atomic.Int32 // 渐进加压总阶段数（0 = 未启用或未开始）
 }
 
 var (
@@ -282,6 +285,8 @@ func (c *MetricsCollector) Reset() {
 	c.connDropped.Store(0)
 	c.totalSendBytes.Store(0)
 	c.totalRecvBytes.Store(0)
+	c.rampUpCurrentStage.Store(0)
+	c.rampUpTotalStages.Store(0)
 }
 
 // SetApdexT 任务级调整 Apdex T 值（毫秒），≤0 不修改。
@@ -325,12 +330,23 @@ func (c *MetricsCollector) RecordAction(
 	timing ActionTiming, wallClock time.Duration,
 	sendBytes, recvBytes int, err error,
 ) {
+	c.recordAction(name, result, timing, wallClock, sendBytes, recvBytes, err, true)
+}
+
+func (c *MetricsCollector) recordAction(
+	name string, result ActionResult,
+	timing ActionTiming, wallClock time.Duration,
+	sendBytes, recvBytes int, err error,
+	trackExecuting bool,
+) {
 	if !c.enabled {
 		return
 	}
 	c.totalActions.Add(1)
 	am := c.getOrCreateAction(name)
-	am.executing.Add(-1)
+	if trackExecuting {
+		am.executing.Add(-1)
+	}
 
 	clientCost := wallClock - timing.wireRTTSum()
 	if clientCost < 0 {
@@ -380,15 +396,16 @@ func (c *MetricsCollector) RecordAction(
 		}
 	}
 
+	if sendBytes > 0 {
+		am.sendBytes.Add(int64(sendBytes))
+	}
+	if recvBytes > 0 {
+		am.recvBytes.Add(int64(recvBytes))
+	}
+
 	switch result {
 	case ResultSuccess:
 		am.successCount.Add(1)
-		if sendBytes > 0 {
-			am.sendBytes.Add(int64(sendBytes))
-		}
-		if recvBytes > 0 {
-			am.recvBytes.Add(int64(recvBytes))
-		}
 	case ResultFailure:
 		am.failureCount.Add(1)
 		if err != nil {
@@ -453,6 +470,20 @@ func (c *MetricsCollector) RobotErrored() {
 	}
 }
 
+// SetRampUpStage 设置渐进加压当前阶段（由 Manager 在每个阶段开始时调用）。
+// current 为 1-based 阶段序号，total 为总阶段数。传 0,0 表示加压结束或未启用。
+func (c *MetricsCollector) SetRampUpStage(current, total int) {
+	if c.enabled {
+		c.rampUpCurrentStage.Store(int32(current))
+		c.rampUpTotalStages.Store(int32(total))
+	}
+}
+
+// RampUpStage 返回当前渐进加压阶段（1-based）和总阶段数。均为 0 表示未启用。
+func (c *MetricsCollector) RampUpStage() (current, total int) {
+	return int(c.rampUpCurrentStage.Load()), int(c.rampUpTotalStages.Load())
+}
+
 // 连接生命周期钩子。
 func (c *MetricsCollector) ConnEstablished() {
 	if c.enabled {
@@ -470,27 +501,23 @@ func (c *MetricsCollector) ConnDropped() {
 	}
 }
 
-// RecordCallbackSuccess 记录一次推送回调成功（仅计数，无延迟）。
+// RecordCallback 记录一次推送回调结果。
+func (c *MetricsCollector) RecordCallback(
+	name string, result ActionResult,
+	timing ActionTiming, wallClock time.Duration,
+	sendBytes, recvBytes int, err error,
+) {
+	c.recordAction("callback:"+name, result, timing, wallClock, sendBytes, recvBytes, err, false)
+}
+
+// RecordCallbackSuccess 记录一次推送回调成功。
 func (c *MetricsCollector) RecordCallbackSuccess(name string) {
-	if !c.enabled {
-		return
-	}
-	c.totalActions.Add(1)
-	am := c.getOrCreateAction("callback:" + name)
-	am.successCount.Add(1)
+	c.RecordCallback(name, ResultSuccess, ActionTiming{}, 0, 0, 0, nil)
 }
 
 // RecordCallbackError 记录一次推送回调失败。
 func (c *MetricsCollector) RecordCallbackError(name string, err error) {
-	if !c.enabled {
-		return
-	}
-	c.totalActions.Add(1)
-	am := c.getOrCreateAction("callback:" + name)
-	am.failureCount.Add(1)
-	if err != nil {
-		c.recordError(am, err)
-	}
+	c.RecordCallback(name, ResultFailure, ActionTiming{}, 0, 0, 0, err)
 }
 
 func (c *MetricsCollector) getOrCreateAction(name string) *actionMetrics {

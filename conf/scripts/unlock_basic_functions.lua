@@ -4,7 +4,6 @@ local log = require("log")
 
 function execute(r)
     local ids = {4, 5, 7, 9}
-    local allSend, allRecv = 0, 0
     local failedCount = 0
     local lastCode = 0
 
@@ -12,10 +11,7 @@ function execute(r)
         local msg = proto.create("Game.MainGetLevelRewardC2S")
         proto.set_field(msg, "Id", id)
 
-        local code, data, sent, recv = network.tcp_request("logic", {cmd=2, act=26}, msg, "Game.MainGetLevelRewardS2C")
-
-        allSend = allSend + (sent or 0)
-        allRecv = allRecv + (recv or 0)
+        local code, data = network.tcp_request("logic", {cmd=2, act=26}, msg, "Game.MainGetLevelRewardS2C")
 
         if code ~= 0 or data == nil then
             failedCount = failedCount + 1
@@ -26,24 +22,18 @@ function execute(r)
             end
             log.error("解锁基础功能失败: service=logic route=2:26 id=" .. tostring(id)
                 .. " code=" .. tostring(code)
-                .. " hasData=" .. tostring(data ~= nil)
-                .. " sent=" .. tostring(sent)
-                .. " recv=" .. tostring(recv))
+                .. " hasData=" .. tostring(data ~= nil))
         else
-            log.debug("解锁基础功能成功: id=" .. tostring(id)
-                .. " sent=" .. tostring(sent)
-                .. " recv=" .. tostring(recv))
+            log.debug("解锁基础功能成功: id=" .. tostring(id))
         end
     end
 
     if failedCount > 0 then
         log.warn("解锁基础功能存在失败: failed=" .. tostring(failedCount)
             .. " total=" .. tostring(#ids)
-            .. " lastCode=" .. tostring(lastCode)
-            .. " totalSend=" .. tostring(allSend)
-            .. " totalRecv=" .. tostring(allRecv))
-        return lastCode, allSend, allRecv
+            .. " lastCode=" .. tostring(lastCode))
+        return lastCode
     end
 
-    return 0, allSend, allRecv
+    return 0
 end

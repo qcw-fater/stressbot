@@ -26,7 +26,7 @@ function execute(r)
 
     local authAddr = robot.get("authAddr") or ""
     local url = authAddr .. "/newRole"
-    local code, body, sent, recv = network.http_request(url, "POST", "form", {
+    local code, body = network.http_request(url, "POST", "form", {
         account = account,
         heroId  = tostring(heroId),
         session = session,
@@ -40,11 +40,8 @@ function execute(r)
             .. " url=" .. tostring(url)
             .. " heroId=" .. tostring(heroId)
             .. " zoneId=" .. tostring(zoneId)
-            .. " code=" .. tostring(code)
-            .. " sent=" .. tostring(sent)
-            .. " recv=" .. tostring(recv)
-            .. " body=" .. body_preview(body))
-        return 3, sent, recv  -- 3=SEND_FAILED
+            .. " code=" .. tostring(code)            .. " body=" .. body_preview(body))
+        return 3  -- 3=SEND_FAILED
     end
 
     if code < 200 or code >= 300 then
@@ -52,11 +49,8 @@ function execute(r)
             .. " url=" .. tostring(url)
             .. " heroId=" .. tostring(heroId)
             .. " zoneId=" .. tostring(zoneId)
-            .. " status=" .. tostring(code)
-            .. " sent=" .. tostring(sent)
-            .. " recv=" .. tostring(recv)
-            .. " body=" .. body_preview(body))
-        return 54, sent, recv  -- 54=LUA_EXIT_CODE
+            .. " status=" .. tostring(code)            .. " body=" .. body_preview(body))
+        return 54  -- 54=LUA_EXIT_CODE
     end
 
     local ok, resp = pcall(json.decode, body)
@@ -64,22 +58,16 @@ function execute(r)
         log.error("NewRole JSON 解析失败: account=" .. tostring(account)
             .. " url=" .. tostring(url)
             .. " heroId=" .. tostring(heroId)
-            .. " zoneId=" .. tostring(zoneId)
-            .. " sent=" .. tostring(sent)
-            .. " recv=" .. tostring(recv)
-            .. " body=" .. body_preview(body))
-        return 54, sent, recv  -- 54=LUA_EXIT_CODE
+            .. " zoneId=" .. tostring(zoneId)            .. " body=" .. body_preview(body))
+        return 54  -- 54=LUA_EXIT_CODE
     end
 
     if resp.error and resp.error ~= 0 then
         log.error("NewRole 失败: account=" .. tostring(account)
             .. " heroId=" .. tostring(heroId)
             .. " zoneId=" .. tostring(zoneId)
-            .. " error=" .. tostring(resp.error)
-            .. " sent=" .. tostring(sent)
-            .. " recv=" .. tostring(recv)
-            .. " body=" .. body_preview(body))
-        return 54, sent, recv
+            .. " error=" .. tostring(resp.error)            .. " body=" .. body_preview(body))
+        return 54
     end
 
     -- 提取角色信息
@@ -98,20 +86,15 @@ function execute(r)
             log.error("NewRole 响应中缺少 playerId: account=" .. tostring(account)
                 .. " heroId=" .. tostring(heroId)
                 .. " zoneId=" .. tostring(zoneId)
-                .. " sent=" .. tostring(sent)
-                .. " recv=" .. tostring(recv)
                 .. " body=" .. body_preview(body))
-            return 54, sent, recv
+            return 54
         end
     else
         log.error("NewRole 响应缺少 role 字段: account=" .. tostring(account)
             .. " heroId=" .. tostring(heroId)
-            .. " zoneId=" .. tostring(zoneId)
-            .. " sent=" .. tostring(sent)
-            .. " recv=" .. tostring(recv)
-            .. " body=" .. body_preview(body))
-        return 54, sent, recv
+            .. " zoneId=" .. tostring(zoneId)            .. " body=" .. body_preview(body))
+        return 54
     end
 
-    return 0, sent, recv
+    return 0
 end

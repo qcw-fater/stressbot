@@ -33,7 +33,7 @@ function execute(r)
         .. string.char(1, 2, 3, 4, 5, 6)                       -- dummy data (6 bytes)
 
     -- 通过 UDP 发送（带协议头 CMD=4, ACT=11）
-    local code, sent = network.udp_send("battle", {cmd=4, act=11}, frameData)
+    local code = network.udp_send("battle", {cmd=4, act=11}, frameData)
     if code ~= 0 then
         local failCode = code or 3
         log.warn("SyncFrame 发送失败: frame=" .. tostring(frameCount)
@@ -41,9 +41,8 @@ function execute(r)
             .. " battleId=" .. tostring(battleId)
             .. " fighterIndex=" .. tostring(fighterIndex)
             .. " battleAck=" .. tostring(battleAck)
-            .. " code=" .. tostring(failCode)
-            .. " sent=" .. tostring(sent))
-        return failCode, sent, 0
+            .. " code=" .. tostring(failCode))
+        return failCode
     end
 
     -- 每 20 帧打一次 debug 日志：真实上限由 conf/flow.json 的 syncLoop.loopCount 控制。
@@ -58,5 +57,5 @@ function execute(r)
     -- 60ms 间隔（约 16fps）
     utils.sleep(60)
 
-    return 0, sent, 0
+    return 0
 end

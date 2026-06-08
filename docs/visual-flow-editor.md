@@ -654,7 +654,7 @@ interface ManagedFlow {
 
 | mode | 入口函数 | 返回值 | Lint 检查 |
 |---|---|---|---|
-| `action` | `function execute(r)` | `return code [, send, recv]` | 检查 execute 存在 |
+| `action` | `function execute(r)` | `return code` | 检查 execute 存在 |
 | `boolean` | `function execute(r)` | `return true / false` | 检查 execute 存在 |
 | `callback` | `function onMessage(r, msg)` | 无返回值 | 检查 onMessage 存在 |
 

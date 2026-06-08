@@ -51,6 +51,7 @@ function snapshot(actions: ActionMetric[]): StressSnapshot {
     totalActions: actions.reduce((sum, a) => sum + a.sampleCount, 0),
     apdexT: 100,
     robots: { started: 100, running: 100, stopped: 0, errored: 0 },
+    rampUp: { currentStage: 0, totalStages: 0 },
     connections: { established: 100, failed: 0, dropped: 0 },
     bandwidth: { totalSendBytes: 0, totalRecvBytes: 0, sendMBps: 0, recvMBps: 0 },
     actions,

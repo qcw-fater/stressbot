@@ -27,6 +27,7 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
   const listens = useFlowStore((s) => s.listens);
   const updateNode = useFlowStore((s) => s.updateNode);
   const addListen = useFlowStore((s) => s.addListen);
+  const rfNodePos = useFlowStore((s) => s.rfNodes.find((n) => n.id === nodeId)?.position);
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
 
   const [pasteOpen, setPasteOpen] = useState(false);
@@ -36,9 +37,8 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
   const refs = node.listenRefs ?? [];
   const set = (next: ListenRef[]) => updateNode(nodeId, { listenRefs: next });
 
-  // listen 候选下拉：null + 现有 listen + "新建..."
+  // listen 候选下拉：现有 listen + "新建..."
   const listenOptions = [
-    { value: '__null__', label: '(null) — 静默丢弃' },
     ...Object.keys(listens)
       .sort()
       .map((n) => ({
@@ -53,11 +53,7 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
 
   const onListenChange = (i: number, v: string | undefined) => {
     const arr = [...refs];
-    if (v === '__null__' || !v) {
-      arr[i] = { ...arr[i], listen: null };
-    } else {
-      arr[i] = { ...arr[i], listen: v };
-    }
+    arr[i] = { ...arr[i], listen: v ?? '' };
     set(arr);
   };
 
@@ -65,7 +61,8 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
     let n = 1;
     while (listens[`listen_${n}`]) n++;
     const name = `listen_${n}`;
-    addListen(name, {});
+    const pos = rfNodePos ? { x: rfNodePos.x + 260, y: rfNodePos.y + i * 90 } : undefined;
+    addListen(name, {}, pos);
     onListenChange(i, name);
     setActivePanel({ kind: 'listenEdit', listenName: name });
   };
@@ -95,7 +92,7 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
           <Button
             size="small"
             icon={<PlusOutlined />}
-            onClick={() => set([...refs, { route: { cmd: 0, act: 0 }, server: '', listen: null }])}
+            onClick={() => set([...refs, { route: { cmd: 0, act: 0 }, server: '', listen: '' }])}
           >
             添加
           </Button>
@@ -151,11 +148,12 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
             title: 'listen',
             dataIndex: 'listen',
             render: (_, r) => {
-              const cur = r.listen ?? '__null__';
+              const cur = r.listen || undefined;
               const listen = r.listen ? listens[r.listen] : undefined;
               return (
                 <Space.Compact style={{ width: '100%' }}>
                   <Select
+                    size="small"
                     value={cur}
                     onChange={(v) => onListenChange(r._i, v)}
                     options={listenOptions}
@@ -175,11 +173,13 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
                       </Button>
                     </Tooltip>
                   )}
-                  <Tooltip title="新建并绑定">
-                    <Button size="small" onClick={() => onCreateListen(r._i)}>
-                      +
-                    </Button>
-                  </Tooltip>
+                  {!r.listen && (
+                    <Tooltip title="新建并绑定">
+                      <Button size="small" onClick={() => onCreateListen(r._i)}>
+                        +
+                      </Button>
+                    </Tooltip>
+                  )}
                 </Space.Compact>
               );
             },

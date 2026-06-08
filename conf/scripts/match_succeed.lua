@@ -9,12 +9,11 @@ function execute(r)
     local roleId = robot.get("roleId")
 
     -- 轮询监听匹配成功消息，超时 600 秒（10 分钟），轮询 1 秒
-    local resp, recv = network.tcp_listen("logic", {cmd=3, act=1}, "Game.MatchSucceedS2C", 600, 1000)
+    local resp = network.tcp_listen("logic", {cmd=3, act=1}, "Game.MatchSucceedS2C", 600, 1000)
     if not resp then
         log.error("匹配成功消息等待超时: service=logic route=3:1 proto=Game.MatchSucceedS2C timeoutSec=600 pollMs=1000 roleId="
-            .. tostring(roleId)
-            .. " recv=" .. tostring(recv))
-        return 31, 0, recv  -- 31=LISTEN_TIMEOUT
+            .. tostring(roleId))
+        return 31  -- 31=LISTEN_TIMEOUT
     end
 
     local actorCount = 0
@@ -45,9 +44,8 @@ function execute(r)
     if not ok then
         log.error("MatchSucceed 解析失败: roleId=" .. tostring(roleId)
             .. " actorCount=" .. tostring(actorCount)
-            .. " recv=" .. tostring(recv)
             .. " err=" .. tostring(err))
-        return 54, 0, recv  -- 54=LUA_EXIT_CODE
+        return 54  -- 54=LUA_EXIT_CODE
     end
 
     local battleSession = robot.get("battleSession")
@@ -55,9 +53,8 @@ function execute(r)
     if not battleSession then
         log.error("匹配成功但未找到自己的 battleSession: roleId=" .. tostring(roleId)
             .. " actorCount=" .. tostring(actorCount)
-            .. " battleArea=" .. tostring(battleArea)
-            .. " recv=" .. tostring(recv))
-        return 54, 0, recv
+            .. " battleArea=" .. tostring(battleArea))
+        return 54
     end
 
     log.info("匹配成功: roleId=" .. tostring(roleId)
@@ -65,5 +62,5 @@ function execute(r)
         .. " battleSession=" .. tostring(battleSession)
         .. " battleArea=" .. tostring(battleArea))
 
-    return 0, 0, recv
+    return 0
 end

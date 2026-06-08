@@ -48,7 +48,7 @@ export function buildRefsGraph(flow: TaskFlow): RefsGraph {
     if (refs.length > 0) nodeToRefs.set(nodeId, refs);
     refs.forEach((ref, i) => {
       const rec: RefRecord = { nodeId, refIndex: i, ref };
-      if (ref.listen != null) {
+      if (ref.listen) {
         const list = listenToRefs.get(ref.listen) ?? [];
         list.push(rec);
         listenToRefs.set(ref.listen, list);

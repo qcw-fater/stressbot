@@ -80,8 +80,10 @@ type TaskCompletionReport struct {
 	ErrorMsg      string                     `json:"errorMsg,omitempty"`
 	FinishedAt    time.Time                  `json:"finishedAt"`
 	FinalSnapshot *monitor.CollectorSnapshot `json:"finalSnapshot"`
-	StageIndex    int                        `json:"stageIndex,omitempty"`
-	CleanupStatus *robot.CleanupStatus       `json:"cleanupStatus,omitempty"`
+	// StageIndex 阶段段落标识：-1/0=最终（兼容）报告；>0=reset 边界阶段段落报告，
+	// 值为即将进入的配置阶段下标（0-based），由 Admin 归档时映射为连续 1-based 段落号。
+	StageIndex    int                  `json:"stageIndex,omitempty"`
+	CleanupStatus *robot.CleanupStatus `json:"cleanupStatus,omitempty"`
 }
 
 // DeregisterRequest 注销请求（best-effort）。

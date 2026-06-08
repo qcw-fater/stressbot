@@ -1,5 +1,5 @@
 import { App, Button, Empty, Input, Spin, Table, Tag, Timeline, Tooltip } from 'antd';
-import { BugOutlined, CheckCircleOutlined, CopyOutlined, DownloadOutlined, FileTextOutlined } from '@ant-design/icons';
+import { BugOutlined, CheckCircleOutlined, CopyOutlined, DownloadOutlined, FileTextOutlined, StarFilled, StarOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { EChartsReact } from '@/components/monitoring/shared/EChartsReact';
 import { useEffect, useMemo, useState } from 'react';
@@ -15,6 +15,10 @@ import './HistoryPanel.css';
 
 export interface HistoryDetailViewProps {
   id: string;
+  /** 阶段段落号（>0 时展示该 reset 段落详情）。 */
+  stageIndex?: number;
+  /** 阶段段落标签，如「段 2 · S3-S4」。 */
+  stageLabel?: string;
   onChange: () => void;
 }
 
@@ -58,8 +62,9 @@ interface DerivedSummary {
   busiestAction?: HistoryActionMetric;
 }
 
-export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
+export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: HistoryDetailViewProps) {
   const { message } = App.useApp();
+  const isStageView = (stageIndex ?? -1) > 0;
   const [detail, setDetail] = useState<HistoryDetail | null>(null);
   const [timeseries, setTimeseries] = useState<{ points: HistoryTrendPoint[]; sampled: boolean; originalCount: number } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -74,7 +79,10 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([historyApi.getHistory(id), historyApi.getHistoryTimeseries(id, 1200)])
+    Promise.all([
+      historyApi.getHistory(id, stageIndex),
+      historyApi.getHistoryTimeseries(id, 1200, stageIndex),
+    ])
       .then(([d, t]) => {
         setDetail(d);
         setTimeseries({ points: t?.points ?? [], sampled: t?.sampled ?? false, originalCount: t?.originalCount ?? 0 });
@@ -86,7 +94,7 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
       })
       .catch(showApiError)
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, stageIndex]);
 
   useEffect(() => {
     setConfigInfo(null);
@@ -96,11 +104,22 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
 
   const persistMeta = async (nextNote: string, nextTags: string[]) => {
     try {
-      const updated = await historyApi.updateHistory(id, { note: nextNote, tags: nextTags });
+      const updated = await historyApi.updateHistory(id, { note: nextNote, tags: nextTags }, stageIndex);
       setDetail(updated);
       setNote(updated.note ?? '');
       setTags(updated.tags ?? []);
       message.success('已保存');
+      onChange();
+    } catch (err) {
+      showApiError(err);
+    }
+  };
+
+  const toggleStar = async () => {
+    if (!detail) return;
+    try {
+      const updated = await historyApi.updateHistory(id, { starred: !detail.starred }, stageIndex);
+      setDetail(updated);
       onChange();
     } catch (err) {
       showApiError(err);
@@ -148,7 +167,14 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
 
   const theme = useEditorStore((s) => s.theme);
   const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
-  const chartOptions = useMemo(() => buildChartOptions(timeseries?.points ?? [], theme), [timeseries, theme]);
+  const stageMarks = useMemo(
+    () => computeStageLines(timeseries?.points ?? [], configInfo?.robotConfig?.rampUp ?? null, isStageView),
+    [timeseries, configInfo, isStageView],
+  );
+  const chartOptions = useMemo(
+    () => buildChartOptions(timeseries?.points ?? [], theme, stageMarks),
+    [timeseries, theme, stageMarks],
+  );
 
   if (loading) return <Spin />;
   if (!detail) return <Empty description="加载失败" />;
@@ -180,6 +206,11 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
               {detail.debugMode ? '调试' : '测试'}
             </Tag>
             <code>#{detail.id.slice(0, 8)}</code>
+            {isStageView && (
+              <Tag className="hp-report-stage-badge" color="warning">
+                {stageLabel || detail.stageLabel || `段 ${stageIndex}`}
+              </Tag>
+            )}
             <span>{detail.startedAt ? dayjs(detail.startedAt).format('YYYY-MM-DD HH:mm') : '未记录开始时间'}</span>
             <span>耗时 {formatDuration(detail.durationSec)}</span>
           </div>
@@ -189,13 +220,20 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
           </div>
         </div>
         <div className="hp-report-hero__actions">
+          <Tooltip title={detail.starred ? (isStageView ? '取消收藏本段' : '取消收藏') : (isStageView ? '收藏本段' : '收藏')}>
+            <Button
+              size="small"
+              icon={detail.starred ? <StarFilled style={{ color: 'var(--color-warning)' }} /> : <StarOutlined />}
+              onClick={toggleStar}
+            />
+          </Tooltip>
           <Tooltip title="生成压测报告（在新标签页打开，可保存为 PDF）">
             <Button size="small" type="primary" ghost icon={<FileTextOutlined />} onClick={generateReport}>报告</Button>
           </Tooltip>
-          <Tooltip title="下载完整配置归档 JSON">
+          <Tooltip title="下载完整任务配置归档 JSON（含全部阶段）">
             <Button size="small" icon={<DownloadOutlined />} onClick={downloadConfig}>下载</Button>
           </Tooltip>
-          <Tooltip title="将此记录的配置克隆为新任务">
+          <Tooltip title="将完整任务配置（含全部阶段）克隆为新任务">
             <Button size="small" icon={<CopyOutlined />} onClick={cloneTask}>克隆</Button>
           </Tooltip>
         </div>
@@ -326,7 +364,9 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
           <div className="hp-report-section__header">
             <div>
               <div className="hp-report-section__title">备注与标签</div>
-              <div className="hp-report-section__subtitle">用于标记回归、异常或测试场景</div>
+              <div className="hp-report-section__subtitle">
+                {isStageView ? '分属当前阶段段落，仅标记本段' : '用于标记回归、异常或测试场景'}
+              </div>
             </div>
           </div>
           <Input
@@ -433,7 +473,7 @@ export function HistoryDetailView({ id, onChange }: HistoryDetailViewProps) {
                         <div className="hp-rampup-dot">{i + 1}</div>
                         {i < stages.length - 1 && <div className="hp-rampup-line" />}
                         <div className="hp-rampup-stage-info">
-                          <span className="hp-rampup-count">+{stage.count} 机器人</span>
+                          <span className="hp-rampup-count">增量 {stage.count} 机器人</span>
                           {stage.concurrency ? <span>并发 {stage.concurrency}</span> : null}
                           {stage.holdSec ? <span>保持 {stage.holdSec}s</span> : null}
                           {stage.reset && <Tag color="warning" style={{ marginInlineEnd: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>重置</Tag>}
@@ -496,7 +536,68 @@ function Fact({ label, value }: { label: string; value: string }) {
   );
 }
 
-function buildChartOptions(points: HistoryTrendPoint[], theme: string) {
+interface StageMark {
+  x: string;
+  label: string;
+  reset: boolean;
+}
+
+// computeStageLines 计算趋势图阶段切换线 / reset 段落断点。
+//   - 阶段段落视图（已按段过滤）：不画线。
+//   - 时序自带段落号（有 reset 整体视图）：按 stageIndex 变化点画 RESET 断点。
+//   - 否则用 rampUp 配置累计 holdSec 近似画非 reset 阶段切换线（phase-1 近似）。
+function computeStageLines(
+  points: HistoryTrendPoint[],
+  rampUp: { stages: Array<{ count?: number; holdSec?: number; reset?: boolean }> } | null,
+  isStageView: boolean,
+): StageMark[] {
+  if (isStageView || points.length === 0) return [];
+
+  const nearestX = (elapsed: number): string | null => {
+    let best: HistoryTrendPoint | null = null;
+    let bestDiff = Infinity;
+    for (const p of points) {
+      const diff = Math.abs(p.elapsedSec - elapsed);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = p;
+      }
+    }
+    return best ? `${best.elapsedSec}s` : null;
+  };
+
+  // 1) 时序自带段落号：按变化点断点（reset 整体视图）。
+  const tagged = points.some((p) => (p.stageIndex ?? -1) > 0);
+  if (tagged) {
+    const marks: StageMark[] = [];
+    let prev = points[0]?.stageIndex ?? -1;
+    for (const p of points) {
+      const cur = p.stageIndex ?? -1;
+      if (cur > 0 && cur !== prev) {
+        marks.push({ x: `${p.elapsedSec}s`, label: `段 ${cur}`, reset: true });
+        prev = cur;
+      }
+    }
+    return marks;
+  }
+
+  // 2) 非 reset ramp-up：按配置累计 holdSec 近似画阶段切换线。
+  if (rampUp && rampUp.stages.length > 1) {
+    const marks: StageMark[] = [];
+    let cum = 0;
+    for (let i = 0; i < rampUp.stages.length; i++) {
+      if (i > 0) {
+        const x = nearestX(cum);
+        if (x) marks.push({ x, label: `S${i + 1}`, reset: !!rampUp.stages[i].reset });
+      }
+      cum += Math.max(rampUp.stages[i].holdSec || 0, 30);
+    }
+    return marks;
+  }
+  return [];
+}
+
+function buildChartOptions(points: HistoryTrendPoint[], theme: string, stageMarks: StageMark[] = []) {
   const hasPoints = points.length > 0;
   const x = points.map((p) => `${p.elapsedSec}s`);
   const isDark = theme === 'dark';
@@ -518,13 +619,25 @@ function buildChartOptions(points: HistoryTrendPoint[], theme: string) {
     red: css('--chart-red', '#f5222d'),
     lime: css('--chart-lime', '#bae637'),
   };
+  const resetClr = css('--chart-orange', '#fa8c16');
+  const markLine = stageMarks.length
+    ? {
+        silent: true,
+        symbol: 'none' as const,
+        data: stageMarks.map((m) => ({
+          xAxis: m.x,
+          label: { formatter: m.label, fontSize: 9, color: m.reset ? resetClr : labelClr },
+          lineStyle: { color: m.reset ? resetClr : axisLine, type: 'dashed' as const, width: m.reset ? 1.5 : 1 },
+        })),
+      }
+    : undefined;
   const line = (series: Array<{ name: string; data: Array<number | null>; color: string; dashed?: boolean; area?: number }>, yMax?: number) => ({
     tooltip,
     legend: { right: 0, top: 0, textStyle: { fontSize: 10, color: labelClr } },
     grid: { left: 34, right: 8, top: 26, bottom: 22 },
     xAxis: { type: 'category', data: x, axisLabel: { fontSize: 10, color: labelClr }, axisLine: { lineStyle: { color: axisLine } } },
     yAxis: { type: 'value', max: yMax, axisLabel: { fontSize: 10, color: labelClr }, splitLine: { lineStyle: { color: splitClr } } },
-    series: series.map((s) => ({
+    series: series.map((s, i) => ({
       name: s.name,
       type: 'line',
       smooth: true,
@@ -535,6 +648,7 @@ function buildChartOptions(points: HistoryTrendPoint[], theme: string) {
       areaStyle: { opacity: s.area ?? 0.045 },
       itemStyle: { color: s.color },
       lineStyle: { width: s.dashed ? 1.5 : 1.8, type: s.dashed ? 'dashed' : 'solid' },
+      ...(i === 0 && markLine ? { markLine } : {}),
     })),
   });
 

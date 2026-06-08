@@ -592,13 +592,12 @@ type ActionDef struct {
 **tcpListen / udpListen**：
 1. 计算超时（默认 `DefaultListenTimeoutSec = 60` 秒）和轮询间隔（默认 `DefaultPollMs = 100` 毫秒）
 2. 计算路由键
-3. 调用 `netSender.EnsureTCPListener/UDPListener` 注册监听占位
-4. 轮询循环：
+3. 轮询循环（不自行注册监听，依赖前驱节点 listenRefs 预注册）：
    - 检查 context 取消
-   - 调用 `netSender.GetTCPListenResp/UDPListenResp` 非阻塞获取响应
+   - 调用 `netSender.GetTCPListenResp/UDPListenResp` 非阻塞获取已缓存响应
    - 收到响应后：检查 headerErr、解析存储、返回
    - 等待 pollMs 后重试
-5. 超时时返回 `NewTimeoutError(ErrListenTimeout)`
+4. 超时时返回 `NewActionError(ErrListenTimeout, ...)`
 
 **httpRequest**：
 1. 解析 URL（支持 `state:` 前缀）
@@ -898,7 +897,6 @@ buildBody() -> factory.Create(c2sProto)
 | `protocolEncode(protocol, route, body, key)` | 按 protocol 调用 EncodeTCP/UDP |
 | `protocolSecretKey(protocol, service)` | 按 protocol 获取 TCP/UDP 密钥 |
 | `protocolRequest(protocol, service, packet, routeKey, timeout...)` | 按 protocol 调用 TCP/UDP Request |
-| `protocolEnsureListener(protocol, service, routeKey)` | 按 protocol 注册监听占位 |
 | `protocolListenResp(protocol, service, routeKey)` | 按 protocol 获取监听响应 |
 
 ### 15.5 响应处理

@@ -465,8 +465,8 @@ type actionMetrics struct {
     canceledCount   atomic.Int64      // 取消次数（ctx 取消）
     executing       atomic.Int64      // 当前正在执行中的并发数
     rtt             *LatencyHistogram // RTT 直方图：纯网络往返（WireRTT）
-    sendBytes       atomic.Int64      // 累计发送字节数（per-action，仅成功样本）
-    recvBytes       atomic.Int64      // 累计接收字节数（per-action，仅成功样本）
+    sendBytes       atomic.Int64      // 累计发送 WireBytes（per-action，所有已记录结果分支）
+    recvBytes       atomic.Int64      // 累计接收 WireBytes（per-action，所有已记录结果分支）
     apdexSatisfied  atomic.Int64      // RTT Apdex 满意样本：WireRTT < T
     apdexTolerating atomic.Int64      // RTT Apdex 容忍样本：T <= WireRTT < 4T
     errors          sync.Map          // errKey → *errorBucket，按 (Kind, Code) 聚合的错误分布
@@ -484,7 +484,7 @@ type actionMetrics struct {
 | `canceledCount` | ResultCanceled | ctx 取消计数，不参与 sampleCount/Apdex/SuccessRate |
 | `executing` | RecordActionStart (+1) / RecordAction (-1) | 当前并发执行数 |
 | `rtt` | 遍历 `timing.Requests` 时 | 记录有完整响应帧且 WireRTT > 0 的 RTT 样本 |
-| `sendBytes/recvBytes` | ResultSuccess | 仅记录成功样本的字节数 |
+| `sendBytes/recvBytes` | RecordAction/RecordCallback | 记录实际发生的 WireBytes；失败/超时/取消分支只要已有流量也计入 |
 | `apdexSatisfied` | WireRTT < T | RTT Apdex 满意计数 |
 | `apdexTolerating` | T <= WireRTT < 4T | RTT Apdex 容忍计数 |
 | `errors` | ResultFailure | 按 (Kind, Code) 聚合的错误分布 |
@@ -834,8 +834,8 @@ type ActionSnapshot struct {
 | `SampleCount` | `successCount + failureCount + timeoutCount`（不含 canceledCount） |
 | `SuccessRate` | `float64(successCount) / float64(sampleCount)` |
 | `Apdex` | `(float64(satisfied) + float64(tolerating) * 0.5) / float64(sampleCount)` |
-| `AvgSendBytes` | `float64(totalSendBytes) / float64(successCount)` |
-| `AvgRecvBytes` | `float64(totalRecvBytes) / float64(successCount)` |
+| `AvgSendBytes` | `float64(totalSendBytes) / float64(successCount + failureCount + timeoutCount + canceledCount)` |
+| `AvgRecvBytes` | `float64(totalRecvBytes) / float64(successCount + failureCount + timeoutCount + canceledCount)` |
 | `AvgQPS` | `float64(sampleCount) / uptimeSec` |
 | `PeriodQPS` | `float64(currentSampleCount - prevSampleCount) / periodSec` |
 | `TimeoutAvgMs` | `float64(timeoutTotalMs) / float64(timeoutCount)` |
@@ -895,7 +895,7 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot
 | `Latency` | `MergeHistograms`（逐桶累加 + 重新计算百分位） |
 | `SuccessRate` | 重新计算（`totalSuccess / totalSample`） |
 | `Apdex` | 重新计算（标准公式） |
-| `AvgSendBytes/AvgRecvBytes` | 重新计算（`totalBytes / totalSuccess`） |
+| `AvgSendBytes/AvgRecvBytes` | 重新计算（`totalBytes / (success + failure + timeout + canceled)`） |
 | `AvgQPS` | 重新计算（`totalSample / maxUptime`） |
 | `TimeoutAvgMs` | 重新计算（加权平均：`sum(timeoutAvgMs * timeoutCount) / totalTimeout`） |
 
@@ -968,7 +968,7 @@ func (c *MetricsCollector) AddBandwidth(send, recv int64)
 
 **与 per-action 字节统计的关系**：
 - `AddBandwidth`：全局统计（network 层上报），含心跳等非动作流量
-- `am.sendBytes/recvBytes`：per-action 统计（RecordAction 中记录），仅成功样本
+- `am.sendBytes/recvBytes`：per-action 统计（RecordAction/RecordCallback 中记录），所有已记录结果分支按实际发生的 WireBytes 累计
 - `RecordAction` 中**不再累加** `totalSendBytes/totalRecvBytes`，避免双计
 
 ---
@@ -1164,7 +1164,7 @@ Lua 动作在 `robotActionHandler.ExecuteAction` 中统一采集：
 - **延迟**：整个脚本执行时间（从调用 `executeLuaAction` 到返回）
 - **成功/失败**：基于 `executeLuaAction` 返回的 error
 - **错误分布**：使用结构化 ActionError（ErrLuaNotInit / ErrLuaNoScript / ErrLuaExecFailed / ErrLuaExitCode）
-- **字节统计**：`sendBytes`/`recvBytes` 由 Lua 脚本自己返回（`RunActionScript` 返回值）
+- **字节统计**：脚本内 `network.*` 调用产生的 WireBytes 由 `script.Context` 自动累计，脚本只返回 `code`
 - **executing 计数**：同样适用
 
 ---
@@ -1194,7 +1194,7 @@ sampleCount = successCount + failureCount + timeoutCount
 ### 21.4 全局带宽 vs per-action 字节
 
 - **全局带宽**（`totalSendBytes`/`totalRecvBytes`）：由 network 层的 `AddBandwidth` 统计，含心跳/监听等全部流量
-- **per-action 字节**（`am.sendBytes`/`am.recvBytes`）：由 `RecordAction` 统计，仅成功样本
+- **per-action 字节**（`am.sendBytes`/`am.recvBytes`）：由 `RecordAction`/`RecordCallback` 统计，所有已记录结果分支按实际发生的 WireBytes 累计
 - 两者不重叠：RecordAction 中不再累加全局带宽
 
 ---

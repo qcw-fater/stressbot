@@ -279,7 +279,7 @@ func (s *AdminServer) handleAgentTaskDone(w http.ResponseWriter, r *http.Request
 
 	var needTransition TaskState // 零值表示不需要转换
 	err := s.tasks.Update(taskID, func(t *Task) {
-		// 阶段完成报告（渐进式加压 reset 阶段）：存入 StageReports，不触发状态转换。
+		// reset 边界阶段段落报告：存入 StageReports，不触发状态转换。
 		// 幂等性：同一 (agentId, stageIndex) 已存在则覆盖（重试场景），不重复 append。
 		if !isFinal {
 			replaced := false
@@ -293,7 +293,7 @@ func (s *AdminServer) handleAgentTaskDone(w http.ResponseWriter, r *http.Request
 			if !replaced {
 				t.StageReports = append(t.StageReports, report)
 			}
-			stresslog.Info("[ADMIN] 收到阶段完成报告",
+			stresslog.Info("[ADMIN] 收到 reset 边界阶段段落报告",
 				zap.String("taskId", taskID),
 				zap.String("agentId", agentID),
 				zap.Int("stageIndex", report.StageIndex),

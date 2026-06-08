@@ -80,12 +80,12 @@ const (
 	PatternTCPRequest  = "tcpRequest"  // TCP 请求-响应
 	PatternTCPConnect  = "tcpConnect"  // TCP 连接建立
 	PatternTCPClose    = "tcpClose"    // TCP 连接关闭
-	PatternTCPListen   = "tcpListen"   // TCP 持久推送监听
+	PatternTCPListen   = "tcpListen"   // TCP 推送消息消费（轮询 ListenRefs 预缓存）
 	PatternUDPSend     = "udpSend"     // UDP 单向发送
 	PatternUDPRequest  = "udpRequest"  // UDP 请求-响应
 	PatternUDPConnect  = "udpConnect"  // UDP 连接建立
 	PatternUDPClose    = "udpClose"    // UDP 连接关闭
-	PatternUDPListen   = "udpListen"   // UDP 持久推送监听
+	PatternUDPListen   = "udpListen"   // UDP 推送消息消费（轮询 ListenRefs 预缓存）
 	PatternHTTPRequest = "httpRequest" // HTTP 请求
 	PatternSetState    = "setState"    // 设置状态变量
 	PatternClearState  = "clearState"  // 清除状态变量

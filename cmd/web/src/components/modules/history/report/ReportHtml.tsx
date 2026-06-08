@@ -132,7 +132,14 @@ function CoverSection({ detail, failed, cs }: { detail: HistoryDetail; failed: b
   return (
     <div className="report-section report-cover">
       <div className="report-cover__logo">stressbot 压测报告</div>
-      <div className="report-cover__name">{detail.name}</div>
+      <div className="report-cover__name">
+        {detail.name}
+        {(detail.stageIndex ?? -1) > 0 && (
+          <span className="badge badge--ok" style={{ marginLeft: 10 }}>
+            {detail.stageLabel || `段 ${detail.stageIndex}`}
+          </span>
+        )}
+      </div>
       <div className="report-cover__meta">
         <code>{detail.id.slice(0, 8)}</code>
         {' · '}

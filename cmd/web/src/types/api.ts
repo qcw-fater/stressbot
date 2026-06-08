@@ -321,12 +321,18 @@ export interface StressAggregate {
   assignedAgents: number;
 }
 
+export interface RampUpSnapshot {
+  currentStage: number; // 当前阶段（1-based，0 = 未启用）
+  totalStages: number;  // 总阶段数（0 = 未启用）
+}
+
 export interface StressSnapshot {
   timestamp: string;
   uptimeSeconds: number;
   totalActions: number;
   apdexT: number;
   robots: RobotsView;
+  rampUp: RampUpSnapshot;
   connections: ConnectionsView;
   bandwidth: BandwidthView;
   actions: ActionMetric[];
@@ -451,6 +457,16 @@ export interface HistoryRecord {
   debugMode: boolean;
   configSummary: ConfigSummary;
   stageCount?: number;
+
+  // 阶段历史展示字段（虚拟，不落库）
+  recordKind?: 'task' | 'stage';
+  parentId?: string;
+  stageIndex?: number;
+  stageLabel?: string;
+  stageFrom?: number;
+  stageTo?: number;
+  hasResetStages?: boolean;
+  children?: HistoryRecord[];
 }
 
 export interface HistoryListResponse {
@@ -545,6 +561,7 @@ export interface HistoryFilter {
   orderBy?: string;
   limit?: number;
   offset?: number;
+  includeStages?: boolean;
 }
 
 export interface UpdateHistoryRequest {
@@ -619,6 +636,9 @@ export interface HistoryCompareTask {
   startedAt?: string;
   durationSec: number;
   totalBots: number;
+  parentId?: string;
+  stageIndex?: number;
+  stageLabel?: string;
   finalSnapshot: {
     totalActions: number;
     actions: Array<{

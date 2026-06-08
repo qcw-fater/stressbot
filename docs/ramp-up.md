@@ -441,8 +441,18 @@ const rampUpStageInfo = useMemo(() => {
 | 表 | 字段 | 类型 | 说明 |
 |---|---|---|---|
 | `task_history` | `stage_count` | `INT DEFAULT 0` | 配置的阶段数（非上报数） |
-| `task_report` | `stage_index` | `INT DEFAULT -1` | -1=最终报告，>=0=阶段报告 |
+| `task_report` | `stage_index` | `INT DEFAULT -1` | -1=整体最终；>0=连续 1-based 段落号 |
+| `task_aggregated` | `stage_index` | `INT DEFAULT -1`（主键 `(task_id, stage_index)`） | 同上 |
+| `task_timeseries` | `stage_index` | `INT DEFAULT -1` | 采样点所属段落号（仅 reset 任务 >0） |
 | `task_config_archive` | `robot_config` | `JSON` | 完整 RobotConfig（含 rampUp） |
+| `task_meta` | `(task_id, stage_index)` 主键 | — | 统一元数据：`starred` / `tags(JSON)` / `note` / `updated_at`。`stage_index=-1` 为任务级（所有任务），`>=1` 为 reset 各段落。行按需懒创建 |
+
+> `task_history` **不再有** `starred/tags/note` 列——这三项已统一迁入 `task_meta`，与 `task_report/aggregated/timeseries` 的 `(task_id, stage_index)`（`-1`=整体）键约定保持一致。
+
+索引：`task_report.idx_task_stage(task_id, stage_index)`、`task_timeseries.idx_task_stage_elapsed(task_id, stage_index, elapsed_sec)`、`task_meta.idx_starred(starred)`。
+
+> 旧库升级：所有列/索引/主键变更已在 `deploy/upgrade.sql` 末尾以 `INFORMATION_SCHEMA` 守卫的存储过程
+> `sb_upgrade_stage_history()` 提供，可重复执行（幂等），已在本地 Docker MySQL 9.7 验证。`deploy/` 不纳入版本控制。
 
 ### 6.2 归档写入
 
@@ -530,6 +540,44 @@ StageCount int `json:"stageCount,omitempty"`
 - chevron 点击展开/折叠，`transform: rotate(90deg)` 动画
 - 每阶段：编号圆点 + 虚线连接 + 详细参数
 - `reset` 标记显示为橙色 antd `<Tag color="warning">`
+
+### 6.6 阶段段落历史（含 reset 的渐进式加压）
+
+含 `reset=true` 的任务，每次 reset 前 Agent 会快照并 `Reset()` 采集器，因此整段被切分为多个**阶段段落**。
+设计要点：
+
+- **段号映射**（`admin/stage_plan.go`）：`buildStagePlan` 把 reset 边界（`OnStageReset` 上报的 0-based 配置下标，如 `{2,4}`）
+  映射为连续 1-based 段落号（`{1,2}`）。段落 N 覆盖配置阶段范围 `[Sx, Sy]`，`PeakBots` = 段内各阶段增量之和。
+  最后一段（`IsFinal`）的指标取自任务最终报告。
+- **归档**（`admin/history.go` `Archive`）：
+  - `task_report`：reset 段落报告按段号写入；最终报告同时写 `stage_index=-1`（兼容）与最后一段段号（末段可查节点报告）。
+  - `task_aggregated`：`stage_index=-1` 为整体最终（reset 任务下 = 末段）；各中间段落由 `MergeSnapshots` 聚合该段全部 Agent 快照；末段 = 整体。
+  - `task_timeseries`：`Sampler` 接入 `TaskStore`，按「已观测 reset 上报数 + 1」实时写入采样点段号，与归档段号严格对齐。
+- **整体语义**：reset 任务的 `stage_index=-1` 实为**末段**数据，故前端列表父行渲染为**阶段组**（仅展开/收起），
+  不提供会误导的「整体详情」；可点击的子记录即各段落详情，与普通详情结构一致。
+- **统一元数据**（`task_meta`）：收藏 / 标签 / 备注按 `(task_id, stage_index)` 存储，`stage_index=-1` 为任务级、
+  `>=1` 为各段落，**所有任务走同一张表、同一条读写路径**（`UpsertMeta(id, stageIndex)`，列表/详情用 `LEFT JOIN task_meta ... stage_index=-1`）。
+  含 reset 的任务里收藏 / 标签 / 备注**分属各段落**——每段独立一份，在段落详情页编辑，列表段落节点同步显示
+  （收藏★、标签、备注圆点）。`PUT /history/{id}?stageIndex=N`（缺省 `-1`）统一写入。删除仍以**整个任务**为单位
+  （级联清理含 `task_meta`）。「收藏」筛选匹配「任务级或任一段落被收藏」。
+- **非 reset 的渐进式加压**：仍是单条连续历史；时序不打段号（写 -1），趋势图阶段切换线由前端依据
+  `rampUp` 累计 `holdSec` **近似**绘制（`HistoryDetailView.computeStageLines`，phase-1 近似）。
+
+**HTTP API 扩展**（详见 `docs/frontend-api.md`）：
+
+| 端点 | 新增参数 | 说明 |
+|---|---|---|
+| `GET /history?includeStages=true` | `includeStages` | reset 父记录返回 `children`（阶段段落子记录），`hasResetStages=true` |
+| `GET /history/{id}?stageIndex=N` | `stageIndex` | 返回第 N 段详情（含段标签/范围、段落级收藏/标签/备注） |
+| `PUT /history/{id}?stageIndex=N` | `stageIndex` | 更新第 N 段的收藏/标签/备注（写 `task_meta`；缺省 `-1`=任务级） |
+| `GET /history/{id}/timeseries?stageIndex=N` | `stageIndex` | 仅返回第 N 段采样点 |
+| `GET /history/{id}/agents?stageIndex=N` | `stageIndex` | 第 N 段节点报告 |
+| `GET /history/compare?targets=a:-1,b:2` | `targets` | 支持阶段段落对比（旧 `ids=a,b` 仍兼容） |
+
+**前端阶段组**（`HistoryModal.tsx` `StageGroup`）：渲染为一张玻璃卡片，左侧竖条沿用普通记录的蓝→绿渐变
+（保持整列视觉统一）；卡内为可折叠的任务标题带 + 段落**编号时间线**（复用加压时间线的圆点/连线语言）。
+每个段落节点显示配置阶段范围、峰值机器人、并发与段落级收藏/标签/备注，可勾选参与对比、点击进入段落详情；
+删除按钮位于标题带，作用于整个任务。
 
 ---
 

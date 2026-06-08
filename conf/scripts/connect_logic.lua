@@ -10,25 +10,21 @@ function execute(r)
     local ok = network.connect_tcp("logic", logicAddress)
     if not ok then
         log.error("连接逻辑服失败: address=" .. tostring(logicAddress))
-        return 1, 0, 0  -- 1=CONN_NOT_FOUND：连接没建好（语义准确）
+        return 1  -- 1=CONN_NOT_FOUND：连接没建好（语义准确）
     end
 
     -- 发送空包获取密钥并设置到连接
     -- 不显式传 timeout，复用 robotConfig.timeoutSec（默认 60s）；
     -- 若需要单独缩短此握手超时，再传第 5 个参数。
-    local code, keyBody, sent, recv = network.tcp_request("logic", nil)
+    local code, keyBody = network.tcp_request("logic", nil)
     if code ~= 0 then
         log.error("逻辑服密钥交换失败: address=" .. tostring(logicAddress)
-            .. " code=" .. tostring(code)
-            .. " sent=" .. tostring(sent)
-            .. " recv=" .. tostring(recv))
-        return code, sent, recv  -- 透传底层 code（如 5=CONN_DROPPED / 4=RECV_TIMEOUT）
+            .. " code=" .. tostring(code))
+        return code  -- 透传底层 code（如 5=CONN_DROPPED / 4=RECV_TIMEOUT）
     end
     if not keyBody or #keyBody == 0 then
-        log.error("逻辑服密钥交换响应为空: address=" .. tostring(logicAddress)
-            .. " sent=" .. tostring(sent)
-            .. " recv=" .. tostring(recv))
-        return 54, sent, recv  -- 54=LUA_EXIT_CODE：协议层异常
+        log.error("逻辑服密钥交换响应为空: address=" .. tostring(logicAddress))
+        return 54  -- 54=LUA_EXIT_CODE：协议层异常
     end
     network.set_tcp_secret_key("logic", keyBody)
 
@@ -38,9 +34,9 @@ function execute(r)
     if hbCode ~= 0 then
         log.error("逻辑服心跳注册失败: service=logic route=2:1 intervalMs=5000 address="
             .. tostring(logicAddress) .. " code=" .. tostring(hbCode))
-        return hbCode, sent, recv
+        return hbCode
     end
 
     log.info("逻辑服连接成功: address=" .. tostring(logicAddress) .. " 心跳已注册(5s)")
-    return 0, sent, recv
+    return 0
 end

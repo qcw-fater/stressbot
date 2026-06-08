@@ -67,9 +67,15 @@ type Manager struct {
 	cleanupMu      sync.Mutex
 	cleanupSummary CleanupStatus
 
-	// OnStageReset 阶段重置回调，由 TaskRunner 注入。
-	// 在 resetBots() 完成后调用，用于上报当前阶段指标并重置采集器。
-	OnStageReset func(completedStageIdx int)
+	// OnStageReset 进入带 reset 的后续阶段前，上报 reset 前阶段段落指标。
+	// 在 resetBots() 完成后调用，用于上报刚结束段落的累计指标并重置采集器。
+	// 参数为即将进入的配置阶段下标（0-based，>=1）。
+	OnStageReset func(nextStageIdx int)
+
+	// OnStageChange 每个加压阶段开始时调用（含第一阶段）。
+	// current 为 1-based 阶段序号，total 为总阶段数。
+	// 用于更新监控指标收集器的阶段信息，使前端实时显示正确的加压进度。
+	OnStageChange func(current, total int)
 }
 
 // NewManager 创建机器人管理器
@@ -198,7 +204,7 @@ func (m *Manager) StartWithRampUp() error {
 			case <-time.After(1 * time.Second):
 			}
 			if m.OnStageReset != nil {
-				m.OnStageReset(i) // >= 1, 阶段报告标识
+				m.OnStageReset(i) // i>=1：即将进入的配置阶段下标，作为 reset 边界阶段段落标识
 			}
 		}
 
@@ -219,6 +225,10 @@ func (m *Manager) StartWithRampUp() error {
 			zap.Int("concurrency", conc),
 			zap.Int("holdSec", holdSec),
 			zap.Bool("reset", stage.Reset))
+
+		if m.OnStageChange != nil {
+			m.OnStageChange(i+1, len(stages))
+		}
 
 		created, err := m.startBatch(offset, stage.Count, conc)
 		if err != nil {

@@ -1,6 +1,5 @@
 -- connect_battle_udp.lua: 连接战斗服 UDP + 设置 UDP 密钥 + 注册 150ms 心跳
--- 仅做连接 / 配置 / 注册心跳，无主动收发，所以 send/recv = 0（心跳字节由后台 goroutine
--- 通过 network 层全局带宽统计）。
+-- 仅做连接 / 配置 / 注册心跳；心跳字节由后台 goroutine 通过 network 层全局带宽统计。
 local network = require("network")
 local robot = require("robot")
 local utils = require("utils")
@@ -45,7 +44,7 @@ function execute(r)
         log.error("ConnectBattleUDP 缺少战斗服地址: battleId=" .. tostring(battleId)
             .. " fighterIndex=" .. tostring(fighterIndex)
             .. " battleSession=" .. tostring(robot.get("battleSession")))
-        return 41, 0, 0  -- 41=ADDR_EMPTY
+        return 41  -- 41=ADDR_EMPTY
     end
 
     log.info("连接战斗服 UDP: address=" .. tostring(battleAddress)
@@ -57,7 +56,7 @@ function execute(r)
         log.error("ConnectBattleUDP 连接失败: address=" .. tostring(battleAddress)
             .. " battleId=" .. tostring(battleId)
             .. " fighterIndex=" .. tostring(fighterIndex))
-        return 1, 0, 0  -- 1=CONN_NOT_FOUND
+        return 1  -- 1=CONN_NOT_FOUND
     end
 
     -- 设置 UDP 密钥（从 listen_start_loading 保存）
@@ -85,7 +84,7 @@ function execute(r)
             .. " battleId=" .. tostring(battleId)
             .. " fighterIndex=" .. tostring(fighterIndex)
             .. " code=" .. tostring(hbCode))
-        return hbCode, 0, 0
+        return hbCode
     end
 
     log.info("战斗服 UDP 连接完成: address=" .. tostring(battleAddress)
@@ -93,5 +92,5 @@ function execute(r)
         .. " fighterIndex=" .. tostring(fighterIndex)
         .. " hasSecretKey=" .. tostring(hasSecretKey)
         .. " 心跳已注册(150ms)")
-    return 0, 0, 0
+    return 0
 end

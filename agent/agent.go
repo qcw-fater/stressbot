@@ -432,8 +432,8 @@ func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
 	// 这样新阶段第一时间从零计数，且 HTTP 上报（可能 1~3s 网络延迟）不会阻塞 Manager
 	// 进入下一阶段；网络往返期间的 bot 末次 IO 即使有少量计数也只落到新阶段的"前几ms"，
 	// 不会污染已快照的本阶段数据。
-	runner.OnStageReset = func(completedStageIdx int) {
-		stresslog.Info("[AGENT] 阶段重置回调", zap.Int("stageIndex", completedStageIdx))
+	runner.OnStageReset = func(nextStageIdx int) {
+		stresslog.Info("[AGENT] reset 边界阶段段落上报", zap.Int("stageIndex", nextStageIdx))
 
 		snap := stressReporter.Snapshot()
 		a.collector.Reset()
@@ -442,7 +442,7 @@ func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
 			AgentID:       a.id,
 			TaskID:        task.TaskID,
 			Result:        TaskCompleted,
-			StageIndex:    completedStageIdx,
+			StageIndex:    nextStageIdx,
 			FinalSnapshot: snap,
 			FinishedAt:    time.Now(),
 		}
@@ -450,7 +450,7 @@ func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
 			reportCtx, reportCancel := context.WithTimeout(context.Background(), a.cfg.TaskReportTimeout)
 			defer reportCancel()
 			if err := a.httpCli.ReportTaskDone(reportCtx, report); err != nil {
-				stresslog.Warn("[AGENT] 阶段完成上报失败", zap.Int("stageIndex", completedStageIdx), zap.Error(err))
+				stresslog.Warn("[AGENT] reset 阶段段落上报失败", zap.Int("stageIndex", nextStageIdx), zap.Error(err))
 			}
 		})
 	}

@@ -535,7 +535,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
                       render: (_, __, i) => `#${i + 1}`,
                     },
                     {
-                      title: '新增机器人数',
+                      title: '增量机器人',
                       dataIndex: 'count',
                       width: 120,
                       render: (v: number, _, i) => (
@@ -574,9 +574,9 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
                       ),
                     },
                     {
-                      title: '间隔秒数',
+                      title: '保持时间(秒)',
                       dataIndex: 'holdSec',
-                      width: 100,
+                      width: 110,
                       render: (v: number | undefined, _, i) => (
                         <InputNumber
                           size="small"

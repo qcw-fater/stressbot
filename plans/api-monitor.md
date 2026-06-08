@@ -98,10 +98,9 @@ Admin 上的指标接口分为两类：
 - Action 的名称由后端配置决定（即 `flow.json` 中 actions 段的 key），前端只是消费方
 - 几种特殊 Action：
   - `callback:OnXxx`：Action 名以 `callback:` 开头，表示这是服务器主动推送的回调（不是机器人发起的）
-  - Lua 动作（v2 起）：名称无前缀；`avgSendBytes` / `avgRecvBytes` 由 lua 脚本通过统一返回值约定
-    `return code, send_bytes, recv_bytes` 上报，运行时透传给 `monitor.RecordAction`，与声明式动作走同一条
-    per-action 字节统计路径。旧版本中 lua 动作的字节列恒为 0，已修复。详见 `docs/design-web-editor.md`
-    §7.6 与 `.claude/skills/flow-config/SKILL.md` §4。
+  - Lua 动作（v2 起）：名称无前缀；脚本只返回 `code`，网络调用产生的字节由运行时统一归入
+    `avgSendBytes` / `avgRecvBytes`，与声明式动作走同一条 per-action 字节统计路径。旧版本中 lua
+    动作的字节列恒为 0，已修复。详见 `docs/design-web-editor.md` §7.6 与 `.claude/skills/flow-config/SKILL.md` §4。
 
 **前端展示**：每个动作一行（表格 / 折线图），列出样本数、成功率、QPS、延迟分位数、Apdex 等。这是压测大盘最核心的视图。
 
@@ -729,11 +728,11 @@ type ActionMetric = {
   apdex: number;         // 0~1
   avgQps: number;        // 全程平均 QPS
 
-  avgSendBytes: number;  // 仅成功样本
-  avgRecvBytes: number;
+  avgSendBytes: number;  // 平均每次已记录动作发送的字节数
+  avgRecvBytes: number;  // 平均每次已记录动作接收的字节数
   timeoutAvgMs: number;  // timeoutCount=0 时为 0
 
-  latency: HistogramView; // 仅成功样本
+  latency: HistogramView; // 有 RTT 样本的请求
 
   errors?: ErrorBucket[]; // 失败/超时时存在
 };
@@ -854,11 +853,9 @@ const periodQps = (curr.sampleCount - prev.sampleCount) / ((currTime - prevTime)
 |---|---|---|---|
 | 普通动作 | 任意名 | 完整字段 | 表格 + 详情 |
 | 推送回调 | `callback:OnXxx` | `avgSendBytes=0`、`timeoutCount=0` | 加 "←推送" 标记，单独列出 |
-| Lua 动作 | 任意名 | 与普通动作一致；脚本若未按新约定返回 `code, send, recv`，则 `avgSendBytes / avgRecvBytes` 为 0 | 与普通动作同列展示 |
+| Lua 动作 | 任意名 | 与普通动作一致；脚本只返回 `code` | 与普通动作同列展示 |
 
-> **Lua 动作字节归因（v2）**：lua 脚本统一返回 `(code, send_bytes, recv_bytes)`，
-> `send / recv` 由 lua API 的多返回值累加（如 `network.tcp_send` 第 2 个返回值、
-> `network.request` 第 3、4 个返回值）。引擎层 `RunActionScript` 把它们透传给
+> **Lua 动作字节归因（v2）**：lua 脚本只返回 `code`。脚本内网络调用产生的发送/接收字节由运行时统一归入
 > `monitor.RecordAction`，所以 lua 动作和声明式动作走同一条 per-action 字节统计路径，
 > ActionsTab 的 ↑avg / ↓avg 列对二者表现一致。仅 connect/init 类、纯本地计算等
 > 无 IO 的 lua 动作字节为 0 才正常。

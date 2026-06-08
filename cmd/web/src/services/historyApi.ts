@@ -19,21 +19,32 @@ export function listHistory(filter: HistoryFilter = {}): Promise<HistoryListResp
   return getJson<HistoryListResponse>('/history' + buildQuery(filter as Record<string, unknown>));
 }
 
-export function getHistory(id: string): Promise<HistoryDetail> {
-  return getJson<HistoryDetail>(`/history/${encodeURIComponent(id)}`);
+export function getHistory(id: string, stageIndex?: number): Promise<HistoryDetail> {
+  return getJson<HistoryDetail>(
+    `/history/${encodeURIComponent(id)}${buildQuery({ stageIndex })}`,
+  );
 }
 
-export function updateHistory(id: string, req: UpdateHistoryRequest): Promise<HistoryDetail> {
-  return putJson<HistoryDetail>(`/history/${encodeURIComponent(id)}`, req);
+export function updateHistory(
+  id: string,
+  req: UpdateHistoryRequest,
+  stageIndex?: number,
+): Promise<HistoryDetail> {
+  const query = (stageIndex ?? -1) > 0 ? buildQuery({ stageIndex }) : '';
+  return putJson<HistoryDetail>(`/history/${encodeURIComponent(id)}${query}`, req);
 }
 
 export function deleteHistory(id: string, force = false): Promise<void> {
   return del<void>(`/history/${encodeURIComponent(id)}${buildQuery({ force })}`);
 }
 
-export function getHistoryTimeseries(id: string, maxPoints?: number): Promise<TimeseriesResponse> {
+export function getHistoryTimeseries(
+  id: string,
+  maxPoints?: number,
+  stageIndex?: number,
+): Promise<TimeseriesResponse> {
   return getJson<TimeseriesResponse>(
-    `/history/${encodeURIComponent(id)}/timeseries${buildQuery({ maxPoints })}`,
+    `/history/${encodeURIComponent(id)}/timeseries${buildQuery({ maxPoints, stageIndex })}`,
   );
 }
 
@@ -52,11 +63,21 @@ export function cloneHistory(
   return postJson<{ id: string }>(`/history/${encodeURIComponent(id)}/clone`, req);
 }
 
-export function compareHistory(ids: string[]): Promise<HistoryCompareResponse> {
-  if (ids.length < 2 || ids.length > 5) {
+/** 对比目标：整体（仅 id）或阶段段落（id + stageIndex）。 */
+export type CompareTarget = string | { id: string; stageIndex?: number };
+
+export function compareHistory(targets: CompareTarget[]): Promise<HistoryCompareResponse> {
+  if (targets.length < 2 || targets.length > 5) {
     return Promise.reject(new Error('对比记录数量必须在 2~5 之间'));
   }
-  return getJson<HistoryCompareResponse>(
-    '/history/compare' + buildQuery({ ids: ids.join(',') }),
-  );
+  // 任一目标带阶段段落号则走新入口 targets=a:-1,b:2，否则沿用旧 ids=a,b。
+  const hasStage = targets.some((t) => typeof t === 'object' && (t.stageIndex ?? -1) > 0);
+  if (hasStage) {
+    const encoded = targets
+      .map((t) => (typeof t === 'string' ? `${t}:-1` : `${t.id}:${t.stageIndex ?? -1}`))
+      .join(',');
+    return getJson<HistoryCompareResponse>('/history/compare' + buildQuery({ targets: encoded }));
+  }
+  const ids = targets.map((t) => (typeof t === 'string' ? t : t.id)).join(',');
+  return getJson<HistoryCompareResponse>('/history/compare' + buildQuery({ ids }));
 }

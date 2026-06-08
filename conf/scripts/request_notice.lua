@@ -16,7 +16,7 @@ function execute(r)
     local channel = robot.get("platform") or "1000"
     local authAddr = robot.get("authAddr") or ""
     local url = authAddr .. "/notice"
-    local code, body, sent, recv = network.http_request(url, "POST", "form", {
+    local code, body = network.http_request(url, "POST", "form", {
         account = account,
         channel = channel
     })
@@ -24,21 +24,15 @@ function execute(r)
     if code < 0 then
         log.warn("RequestNotice HTTP 请求失败，不阻断流程: account=" .. tostring(account)
             .. " url=" .. tostring(url)
-            .. " code=" .. tostring(code)
-            .. " sent=" .. tostring(sent)
-            .. " recv=" .. tostring(recv)
-            .. " body=" .. body_preview(body))
-        return 0, sent, recv
+            .. " code=" .. tostring(code)            .. " body=" .. body_preview(body))
+        return 0
     end
 
     if code < 200 or code >= 300 then
         log.warn("RequestNotice HTTP 状态异常，不阻断流程: account=" .. tostring(account)
             .. " url=" .. tostring(url)
-            .. " status=" .. tostring(code)
-            .. " sent=" .. tostring(sent)
-            .. " recv=" .. tostring(recv)
-            .. " body=" .. body_preview(body))
+            .. " status=" .. tostring(code)            .. " body=" .. body_preview(body))
     end
 
-    return 0, sent, recv
+    return 0
 end

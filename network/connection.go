@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -71,6 +72,7 @@ const (
 
 type inboundFrame struct {
 	Data        []byte
+	WireBytes   int
 	RecvFrameAt time.Time
 }
 
@@ -358,9 +360,7 @@ func (c *Connection) ListenResponse(listenRespMap map[string]ListenCallBack) {
 	}
 
 	c.mu.Lock()
-	for k, v := range listenRespMap {
-		c.listenResp[k] = v
-	}
+	maps.Copy(c.listenResp, listenRespMap)
 	c.mu.Unlock()
 
 	if atomic.CompareAndSwapInt32(&c.listenRunning, 0, 1) {
@@ -491,7 +491,7 @@ func (c *Connection) decodeAndDispatch(frame inboundFrame) {
 			zap.Int("bodyLen", len(body)))
 		return
 	}
-	c.OnReceive(routeKey, body, headerErr, MessageTiming{
+	c.OnReceive(routeKey, body, headerErr, frame.WireBytes, MessageTiming{
 		RecvFrameAt: frame.RecvFrameAt,
 		DecodeStart: decodeStart,
 		DecodeEnd:   decodeEnd,
@@ -526,7 +526,7 @@ func (c *Connection) EnqueueRaw(msgBuf []byte, recvFrameAt time.Time) EnqueueRes
 		return EnqueueClosed
 	}
 	select {
-	case c.decodeCh <- inboundFrame{Data: msgBuf, RecvFrameAt: recvFrameAt}:
+	case c.decodeCh <- inboundFrame{Data: msgBuf, WireBytes: len(msgBuf), RecvFrameAt: recvFrameAt}:
 		return EnqueueOK
 	default:
 		return EnqueueChFull
@@ -659,7 +659,7 @@ func (c *Connection) Close() {
 // 热路径：每个入站包都会走一次。高频 Debug 日志构造前先做 atomic level 检查，
 // 避免在 info 级别下白白构造 zap.Field 切片（每包 4 个 string field，
 // 10000 连接 × 5 包/s 下能省下数百微秒 CPU/s）。
-func (c *Connection) OnReceive(routeKey string, body []byte, headerErr uint64, timing MessageTiming) {
+func (c *Connection) OnReceive(routeKey string, body []byte, headerErr uint64, wireBytes int, timing MessageTiming) {
 	if atomic.LoadInt32(&c.isClose) == 1 {
 		return
 	}
@@ -670,10 +670,11 @@ func (c *Connection) OnReceive(routeKey string, body []byte, headerErr uint64, t
 			zap.String("routeKey", routeKey),
 			zap.String("robot", c.robotName),
 			zap.Int("bodyLen", len(body)),
+			zap.Int("wireBytes", wireBytes),
 			zap.Uint64("headerErr", headerErr))
 	}
 
-	resp := NewMessage(routeKey, body, headerErr, timing)
+	resp := NewMessage(routeKey, body, headerErr, wireBytes, timing)
 
 	c.mu.Lock()
 	ch, exists := c.responseMap[routeKey]

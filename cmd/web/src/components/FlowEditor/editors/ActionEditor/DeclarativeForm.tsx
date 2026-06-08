@@ -191,6 +191,12 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
         </Form.Item>
       )}
 
+      {(pattern === 'tcpListen' || pattern === 'udpListen') && (
+        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: -8, marginBottom: 16 }}>
+          此 route 必须在之前节点的 listenRefs 中预注册（listen=null），否则运行时会超时
+        </div>
+      )}
+
       {showKeys && (
         <Form.Item label="keys（要清除的 state key 列表）">
           <Select
