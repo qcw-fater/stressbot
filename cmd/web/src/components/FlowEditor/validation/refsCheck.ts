@@ -41,7 +41,7 @@ const VALID_NODE_TYPES = new Set(['sequence', 'action', 'loop', 'boolean', 'weig
 const VALID_FILTER_OPS = new Set([
   '', '==', '!=', '>', '>=', '<', '<=',
   'eq', 'neq', 'gt', 'gte', 'lt', 'lte',
-  'contains', 'notContains', 'in', 'notIn', 'timeWindow', 'dailyTimeWindow', 'notNil', 'isNil',
+  'contains', 'notContains', 'in', 'notIn', 'notNil', 'isNil',
 ]);
 
 const VALID_FILTER_MODES = new Set(['any', 'all', 'none']);

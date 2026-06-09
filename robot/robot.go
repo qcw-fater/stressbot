@@ -614,6 +614,17 @@ func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int,
 	}
 
 	if code != 0 {
+		if ctx := script.GetContext(h.robot.l); ctx != nil {
+			if last := ctx.LastActionError(); last != nil && int(last.Code) == code {
+				if !strings.Contains(last.Detail, "script=") {
+					if last.Detail != "" {
+						last.Detail += " "
+					}
+					last.Detail += "script=" + actionDef.Script
+				}
+				return send, recv, timing, wallClock, last
+			}
+		}
 		return send, recv, timing, wallClock, luaCodeToActionErr(code, actionDef.Script)
 	}
 
@@ -632,9 +643,10 @@ func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int,
 //   - code ≥ 100                  → NewServerError(KindServer)，本函数的兜底规则：未知大数归为服务端错误
 //   - 其他                         → 兜底 ErrLuaExitCode(KindFramework)
 //
-// 已知缺陷：服务端 HeaderErr 值如果恰好与框架 errcode 碰撞（如 HeaderErr=5 与 ErrConnNotFound=5），
-// switch 会优先匹配框架码，导致本该归为 KindServer 的错误被错误归类为 KindFramework。
-// 声明式路径（handleHeaderError）直接用 NewServerError 不经 switch，所以不受影响。
+// 注意：这是没有 LastActionError 上下文时的兜底映射。Lua 网络 API 会优先在 script.Context
+// 记录结构化 ActionError，executeLuaAction 会在 code 匹配时直接使用它；因此网络 API 返回的
+// HeaderErr 即使与框架 errcode 碰撞，也能保留真实 KindServer。只有脚本手写 return code 且没有
+// LastActionError 时，才会退回到下面的数值猜测规则。
 func luaCodeToActionErr(code int, script string) error {
 	detail := fmt.Sprintf("script=%s", script)
 

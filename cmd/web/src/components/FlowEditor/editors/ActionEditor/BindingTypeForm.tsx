@@ -341,7 +341,7 @@ function FiltersField({ binding, set, sourceProto }: { binding: FieldBind; set: 
   );
 }
 
-const FILTER_OPS = ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'notContains', 'in', 'notIn', 'timeWindow', 'dailyTimeWindow', 'notNil', 'isNil'] as const;
+const FILTER_OPS = ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'notContains', 'in', 'notIn', 'notNil', 'isNil'] as const;
 const FILTER_OP_META: Record<string, { label: string; desc: string }> = {
   eq:              { label: '= 等于',         desc: '字段值等于指定值' },
   neq:             { label: '≠ 不等于',       desc: '字段值不等于指定值' },
@@ -353,8 +353,6 @@ const FILTER_OP_META: Record<string, { label: string; desc: string }> = {
   notContains:     { label: '不包含',         desc: '字符串或列表不包含指定值' },
   in:              { label: '在列表中',       desc: '字段值在指定列表中' },
   notIn:           { label: '不在列表中',     desc: '字段值不在指定列表中' },
-  timeWindow:      { label: '时间窗口',       desc: '检查字段值（分钟数）是否在指定时间范围内' },
-  dailyTimeWindow: { label: '每日时间窗口',   desc: '检查字段值是否在每日开放时间段内' },
   notNil:          { label: '不为空',         desc: '字段值不为 nil' },
   isNil:           { label: '为空',           desc: '字段值为 nil' },
 };
@@ -366,7 +364,6 @@ const FILTER_MODE_OPTIONS = [
 ] as const;
 
 const NO_VALUE_OPS = new Set(['notNil', 'isNil']);
-const STRUCTURED_OPS = new Set(['timeWindow', 'dailyTimeWindow']);
 const LIST_OPS = new Set(['in', 'notIn']);
 
 function FilterRow({ filter, sourceProto, onChange, onRemove }: {
@@ -378,7 +375,6 @@ function FilterRow({ filter, sourceProto, onChange, onRemove }: {
   const op = (filter.op as string) || 'eq';
   const useSource = !!filter.source;
   const noValue = NO_VALUE_OPS.has(op);
-  const isStructured = STRUCTURED_OPS.has(op);
   const isList = LIST_OPS.has(op);
 
   return (
@@ -410,14 +406,6 @@ function FilterRow({ filter, sourceProto, onChange, onRemove }: {
               patch.value = undefined;
               patch.source = undefined;
             }
-            if (v === 'timeWindow') {
-              patch.value = { startTime: 0, endTime: 1440 };
-              patch.source = undefined;
-            }
-            if (v === 'dailyTimeWindow') {
-              patch.value = [{ startHour: 9, startMinute: 0, endHour: 18, endMinute: 0 }];
-              patch.source = undefined;
-            }
             onChange(patch);
           }}
           options={FILTER_OPS.map((o) => ({ value: o, label: FILTER_OP_META[o]?.label ?? o, title: '' }))}
@@ -432,7 +420,7 @@ function FilterRow({ filter, sourceProto, onChange, onRemove }: {
           style={{ width: 110 }}
           size="small"
         />
-        {!noValue && !isStructured && (
+        {!noValue && (
           <Tooltip title={useSource ? '从 state 读取比较值' : '切换为从 state 读取'}>
             <Button
               size="small"
@@ -447,7 +435,7 @@ function FilterRow({ filter, sourceProto, onChange, onRemove }: {
         )}
         <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={onRemove} />
       </div>
-      {!noValue && !isStructured && !isList && (
+      {!noValue && !isList && (
         useSource ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={LABEL}>state</span>
@@ -479,8 +467,6 @@ function FilterRow({ filter, sourceProto, onChange, onRemove }: {
           onChange={(v) => onChange({ value: v })}
         />
       )}
-      {op === 'timeWindow' && <TimeWindowInput value={filter.value as Record<string, number> | undefined} onChange={(v) => onChange({ value: v })} />}
-      {op === 'dailyTimeWindow' && <DailyTimeWindowInput value={filter.value as Array<Record<string, number>> | undefined} onChange={(v) => onChange({ value: v })} />}
     </div>
   );
 }
@@ -522,50 +508,6 @@ function TagListInput({ values, onChange }: { values: unknown[]; onChange: (v: u
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-function TimeWindowInput({ value, onChange }: { value?: Record<string, number>; onChange: (v: Record<string, number>) => void }) {
-  const start = value?.startTime ?? 0;
-  const end = value?.endTime ?? 1440;
-  const fmt = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <span style={LABEL}>开始</span>
-      <InputNumber min={0} max={1440} value={start} onChange={(v) => onChange({ startTime: v ?? 0, endTime: end })} style={{ width: 80 }} size="small" />
-      <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{fmt(start)}</span>
-      <span style={LABEL}>结束</span>
-      <InputNumber min={0} max={1440} value={end} onChange={(v) => onChange({ startTime: start, endTime: v ?? 1440 })} style={{ width: 80 }} size="small" />
-      <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{fmt(end)}</span>
-    </div>
-  );
-}
-
-function DailyTimeWindowInput({ value, onChange }: { value?: Array<Record<string, number>>; onChange: (v: Array<Record<string, number>>) => void }) {
-  const entries = value ?? [{ startHour: 9, startMinute: 0, endHour: 18, endMinute: 0 }];
-  const updateEntry = (i: number, patch: Record<string, number>) => {
-    const arr = [...entries];
-    arr[i] = { ...arr[i], ...patch };
-    onChange(arr);
-  };
-  const addEntry = () => onChange([...entries, { startHour: 0, startMinute: 0, endHour: 23, endMinute: 59 }]);
-  const removeEntry = (i: number) => onChange(entries.filter((_, j) => j !== i));
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      {entries.map((e, i) => (
-        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <InputNumber min={0} max={23} value={e.startHour} onChange={(v) => updateEntry(i, { startHour: v ?? 0 })} style={{ width: 56 }} size="small" placeholder="时" />
-          <span style={LABEL}>:</span>
-          <InputNumber min={0} max={59} value={e.startMinute} onChange={(v) => updateEntry(i, { startMinute: v ?? 0 })} style={{ width: 56 }} size="small" placeholder="分" />
-          <span style={{ margin: '0 2px' }}>~</span>
-          <InputNumber min={0} max={23} value={e.endHour} onChange={(v) => updateEntry(i, { endHour: v ?? 23 })} style={{ width: 56 }} size="small" placeholder="时" />
-          <span style={LABEL}>:</span>
-          <InputNumber min={0} max={59} value={e.endMinute} onChange={(v) => updateEntry(i, { endMinute: v ?? 59 })} style={{ width: 56 }} size="small" placeholder="分" />
-          {entries.length > 1 && <a onClick={() => removeEntry(i)} style={{ color: 'var(--color-error)', fontSize: 11 }}>删除</a>}
-        </div>
-      ))}
-      <a onClick={addEntry} style={{ fontSize: 11 }}>+ 添加时段</a>
     </div>
   );
 }

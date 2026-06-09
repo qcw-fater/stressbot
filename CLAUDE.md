@@ -46,7 +46,7 @@ cd cmd/web && npm run test                 # Vitest
 - **`network/`** — 基于 gnet 的 TCP/UDP 连接层。`Client` 管理多服务命名连接池。`Connection` 处理收发、请求-响应匹配（responseMap + buffered channel + 超时 select）、持久化监听（listenCh + listenLoop goroutine + 回调分发）、per-connection 心跳。`Dialer` 封装 gnet 事件循环。
 - **`protox/`** — 动态 protobuf 加载与反射。`Loader` 发现 .proto 文件，`Registry` 编译，`Factory` 按全名在运行时创建/序列化/解析消息。
 - **`script/`** — Lua 运行时池（`gopher-lua`）。每个 Robot 获取独占 `LState`。7 个模块共 68 个函数：`network`（22）、`robot`（11）、`utils`（15）、`proto`（9）、`adapter`（5，内嵌于 `api_network.go`）、`json`（2）、`log`（4）。Lua 访问通过 `luaMu` 互斥锁串行化。
-- **`state/` — 线程安全的键值状态存储（RWMutex）。保存服务器响应字段（通过 `store` 映射），支持 list/map 操作用于随机选取。`CompareValues` 支持 12 种过滤运算符。
+- **`state/` — 线程安全的键值状态存储（RWMutex）。保存服务器响应字段（通过 `store` 映射），支持 list/map 操作用于随机选取。`CompareValues` 支持 10 种过滤运算符。
 - **`adapter/` — 协议适配器接口（9 方法）。热路径帧解析（`HeaderSize`/`BodyLength`）纯 Go 缓存，编解码通过 Lua 池调用 `codec.lua`。
 - **`admin/` — Admin 服务器（16 文件）。任务调度（TaskStore 状态机 + 单例约束 + 持久化）、Agent 管理（注册/心跳/健康检查/unhealthy→offline/离线清理）、指标聚合（MergeSnapshots）、时序采样（Sampler）、历史归档（SQLite 6 表）、任务分配（proportional/debug-single）、Agent RPC 调度、前端静态托管。51 个 HTTP API 端点。
 - **`agent/` — Agent 节点（8 文件）。注册到 Admin（指数退避）→ 心跳循环 → 任务轮询 → TaskRunner 执行（下载配置 → 加载适配器 → 编译 proto → 构建流程 → Manager → 启动机器人）→ 指标上报 + 系统资源上报。本地 HTTP API（task/stop/shutdown/version/status/logs）。
@@ -106,9 +106,9 @@ React 18 / Vite 5 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 - 条件绑定（ConditionDef）：`source` / `path` / `op` / `value` / `valueSource`
 - store 映射（StoreMapping）：`field`（含嵌套路径）+ `setter`
 
-### 过滤器运算符（12 种）
+### 过滤器运算符（10 种）
 
-`eq` / `neq` / `gt` / `gte` / `lt` / `lte` / `contains` / `in` / `timeWindow` / `dailyTimeWindow` / `notNil` / `isNil`
+`eq` / `neq` / `gt` / `gte` / `lt` / `lte` / `contains` / `in` / `notNil` / `isNil`
 
 ### 条件表达式
 

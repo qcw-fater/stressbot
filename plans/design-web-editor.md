@@ -641,7 +641,7 @@ ActionEditor 是整个编辑器中信息密度最高、动态性最强的部分�
 └──────────────────────────────┘
 ```
 
-`op` 下拉枚举：`==/eq, !=/neq, >/gt, >=/gte, </lt, <=/lte, contains, in, timeWindow, dailyTimeWindow, notNil, isNil`。
+`op` 下拉枚举：`==/eq, !=/neq, >/gt, >=/gte, </lt, <=/lte, contains, in, notNil, isNil`。
 
 ### 7.5 ProtoFieldPicker — 字段自动补全
 

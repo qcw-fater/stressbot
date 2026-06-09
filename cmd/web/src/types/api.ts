@@ -467,6 +467,12 @@ export interface HistoryRecord {
   stageTo?: number;
   hasResetStages?: boolean;
   children?: HistoryRecord[];
+
+  // 阶段段落指标摘要（从 task_aggregated 提取，仅 stage 子记录）
+  totalActions?: number;
+  successRate?: number;
+  avgRttMs?: number;
+  p95RttMs?: number;
 }
 
 export interface HistoryListResponse {

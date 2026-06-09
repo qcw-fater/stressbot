@@ -11,6 +11,7 @@ import type {
 } from '@/types/api';
 import { computeWeightedMetrics, classifyApdex } from '@/services/metricsBinding';
 import { fmtMs, fmtBytesPlain } from '@/components/monitoring/shared/formats';
+import { formatStageLabel } from '../stageLabel';
 import type { ChartImages } from './reportCharts';
 
 export interface ReportHtmlProps {
@@ -136,7 +137,7 @@ function CoverSection({ detail, failed, cs }: { detail: HistoryDetail; failed: b
         {detail.name}
         {(detail.stageIndex ?? -1) > 0 && (
           <span className="badge badge--ok" style={{ marginLeft: 10 }}>
-            {detail.stageLabel || `段 ${detail.stageIndex}`}
+            {formatStageLabel(detail.stageLabel, detail.stageIndex)}
           </span>
         )}
       </div>

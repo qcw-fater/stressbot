@@ -1150,10 +1150,6 @@
               "op": "neq",
               "path": "modeId",
               "value": 0
-            },
-            {
-              "op": "dailyTimeWindow",
-              "path": "DailyOpenTime"
             }
           ]
         }

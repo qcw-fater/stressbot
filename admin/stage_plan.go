@@ -15,12 +15,12 @@ type StageSegment struct {
 	IsFinal bool
 }
 
-// Label 返回段落展示标签，如「段 2 · S3-S4」或「段 1 · S1」。
+// Label 返回段落展示标签，如「第 2 轮 · S3-S4」或「第 1 轮 · S1」。
 func (s StageSegment) Label() string {
 	if s.FromStage == s.ToStage {
-		return fmt.Sprintf("段 %d · S%d", s.No, s.FromStage)
+		return fmt.Sprintf("第 %d 轮 · S%d", s.No, s.FromStage)
 	}
-	return fmt.Sprintf("段 %d · S%d-S%d", s.No, s.FromStage, s.ToStage)
+	return fmt.Sprintf("第 %d 轮 · S%d-S%d", s.No, s.FromStage, s.ToStage)
 }
 
 // StagePlan 由 RampUp 配置推导出的阶段段落计划。

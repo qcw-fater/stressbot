@@ -11,13 +11,14 @@ import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWi
 import { ActionMetricsTable } from '@/components/monitoring/shared/ActionMetricsTable';
 import { fmtBytes, fmtMs } from '@/components/monitoring/shared/formats';
 import { useReportCapture } from './report/useReportCapture';
+import { formatStageLabel } from './stageLabel';
 import './HistoryPanel.css';
 
 export interface HistoryDetailViewProps {
   id: string;
   /** 阶段段落号（>0 时展示该 reset 段落详情）。 */
   stageIndex?: number;
-  /** 阶段段落标签，如「段 2 · S3-S4」。 */
+  /** 阶段段落标签，如「第 2 轮 · S3-S4」。 */
   stageLabel?: string;
   onChange: () => void;
 }
@@ -168,8 +169,13 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
   const theme = useEditorStore((s) => s.theme);
   const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
   const stageMarks = useMemo(
-    () => computeStageLines(timeseries?.points ?? [], configInfo?.robotConfig?.rampUp ?? null, isStageView),
-    [timeseries, configInfo, isStageView],
+    () => computeStageLines(
+      timeseries?.points ?? [],
+      configInfo?.robotConfig?.rampUp ?? null,
+      isStageView,
+      { from: detail?.stageFrom, to: detail?.stageTo },
+    ),
+    [timeseries, configInfo, isStageView, detail?.stageFrom, detail?.stageTo],
   );
   const chartOptions = useMemo(
     () => buildChartOptions(timeseries?.points ?? [], theme, stageMarks),
@@ -208,7 +214,7 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
             <code>#{detail.id.slice(0, 8)}</code>
             {isStageView && (
               <Tag className="hp-report-stage-badge" color="warning">
-                {stageLabel || detail.stageLabel || `段 ${stageIndex}`}
+                {formatStageLabel(stageLabel || detail.stageLabel, stageIndex)}
               </Tag>
             )}
             <span>{detail.startedAt ? dayjs(detail.startedAt).format('YYYY-MM-DD HH:mm') : '未记录开始时间'}</span>
@@ -544,14 +550,15 @@ interface StageMark {
 
 // computeStageLines 计算趋势图阶段切换线 / reset 段落断点。
 //   - 阶段段落视图（已按段过滤）：不画线。
-//   - 时序自带段落号（有 reset 整体视图）：按 stageIndex 变化点画 RESET 断点。
-//   - 否则用 rampUp 配置累计 holdSec 近似画非 reset 阶段切换线（phase-1 近似）。
+//   - 有 reset 整体视图：按时序 stageIndex 变化点画 RESET 断点。
+//   - 无 reset 渐进式：忽略时序 stageIndex，按 rampUp 配置累计 holdSec 近似画阶段切换线。
 function computeStageLines(
   points: HistoryTrendPoint[],
   rampUp: { stages: Array<{ count?: number; holdSec?: number; reset?: boolean }> } | null,
   isStageView: boolean,
+  stageRange?: { from?: number; to?: number },
 ): StageMark[] {
-  if (isStageView || points.length === 0) return [];
+  if (points.length === 0) return [];
 
   const nearestX = (elapsed: number): string | null => {
     let best: HistoryTrendPoint | null = null;
@@ -566,23 +573,42 @@ function computeStageLines(
     return best ? `${best.elapsedSec}s` : null;
   };
 
-  // 1) 时序自带段落号：按变化点断点（reset 整体视图）。
-  const tagged = points.some((p) => (p.stageIndex ?? -1) > 0);
+  const hasReset = rampUp?.stages.some((s) => s.reset) ?? false;
+  const rangeFrom = stageRange?.from ?? 0;
+  const rangeTo = stageRange?.to ?? 0;
+
+  // 1) 阶段段落详情已按「轮」过滤，但同一轮可能覆盖多个配置阶段，例如第 2 轮 · S2-S3。
+  // 这种情况下仍需要在该轮内部画 S3 这类阶段切换线。
+  if (isStageView) {
+    if (!rampUp || rangeFrom <= 0 || rangeTo <= rangeFrom) return [];
+    const marks: StageMark[] = [];
+    let cum = points[0]?.elapsedSec ?? 0;
+    for (let stageNo = rangeFrom; stageNo < rangeTo; stageNo++) {
+      cum += Math.max(rampUp.stages[stageNo - 1]?.holdSec || 0, 30);
+      const x = nearestX(cum);
+      if (x) marks.push({ x, label: `S${stageNo + 1}`, reset: false });
+    }
+    return marks;
+  }
+
+  // 2) 只有 reset 任务才把时序 stageIndex 当作「第 N 轮」段落号。
+  // 无 reset 任务的历史数据即使残留了 stageIndex，也不能显示成第 52/53 轮。
+  const tagged = hasReset && points.some((p) => (p.stageIndex ?? -1) > 0);
   if (tagged) {
     const marks: StageMark[] = [];
     let prev = points[0]?.stageIndex ?? -1;
     for (const p of points) {
       const cur = p.stageIndex ?? -1;
       if (cur > 0 && cur !== prev) {
-        marks.push({ x: `${p.elapsedSec}s`, label: `段 ${cur}`, reset: true });
+        marks.push({ x: `${p.elapsedSec}s`, label: `第 ${cur} 轮`, reset: true });
         prev = cur;
       }
     }
     return marks;
   }
 
-  // 2) 非 reset ramp-up：按配置累计 holdSec 近似画阶段切换线。
-  if (rampUp && rampUp.stages.length > 1) {
+  // 3) 非 reset ramp-up：按配置累计 holdSec 近似画阶段切换线。
+  if (!hasReset && rampUp && rampUp.stages.length > 1) {
     const marks: StageMark[] = [];
     let cum = 0;
     for (let i = 0; i < rampUp.stages.length; i++) {

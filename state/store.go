@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 )
 
 // Store 泛型状态存储。
@@ -289,7 +288,7 @@ func ToFloat64Safe(v any) (float64, bool) {
 }
 
 // CompareValues 按操作符比较两个值。
-// 支持：eq/==, neq/!=, gt/>, gte/>=, lt/<, lte/<=, contains, notContains, in, notIn, timeWindow, dailyTimeWindow, notNil, isNil
+// 支持：eq/==, neq/!=, gt/>, gte/>=, lt/<, lte/<=, contains, notContains, in, notIn, notNil, isNil
 func CompareValues(a, b any, op string) bool {
 	aNum, aIsNum := ToFloat64Safe(a)
 	bNum, bIsNum := ToFloat64Safe(b)
@@ -371,56 +370,6 @@ func CompareValues(a, b any, op string) bool {
 	case "notIn":
 		return !CompareValues(a, b, "in")
 
-	case "timeWindow":
-		var now int
-		if bIsNum {
-			now = int(bNum)
-		} else {
-			t := time.Now()
-			now = t.Hour()*60 + t.Minute()
-		}
-		m, ok := a.(map[string]any)
-		if !ok {
-			return true
-		}
-		start, _ := ToFloat64Safe(m["startTime"])
-		end, _ := ToFloat64Safe(m["endTime"])
-		return float64(now) >= start && float64(now) <= end
-
-	case "dailyTimeWindow":
-		if a == nil {
-			return true
-		}
-		items, ok := a.([]any)
-		if !ok {
-			if single, isMap := a.(map[string]any); isMap {
-				items = []any{single}
-			} else {
-				return true
-			}
-		}
-		if len(items) == 0 {
-			return true
-		}
-		t := time.Now()
-		nowMin := t.Hour()*60 + t.Minute()
-		for _, it := range items {
-			entry, ok := it.(map[string]any)
-			if !ok {
-				continue
-			}
-			sh, _ := ToFloat64Safe(firstNonNil(entry["StartHour"], entry["startHour"]))
-			sm, _ := ToFloat64Safe(firstNonNil(entry["StartMinute"], entry["startMinute"]))
-			eh, _ := ToFloat64Safe(firstNonNil(entry["EndHour"], entry["endHour"]))
-			em, _ := ToFloat64Safe(firstNonNil(entry["EndMinute"], entry["endMinute"]))
-			startMin := int(sh)*60 + int(sm)
-			endMin := int(eh)*60 + int(em)
-			if nowMin >= startMin && nowMin <= endMin {
-				return true
-			}
-		}
-		return false
-
 	case "notNil":
 		return a != nil
 
@@ -447,16 +396,6 @@ func containsValue(a, b any) bool {
 	aStr := fmt.Sprintf("%v", a)
 	bStr := fmt.Sprintf("%v", b)
 	return strings.Contains(aStr, bStr)
-}
-
-// firstNonNil 返回第一个非 nil 的值。
-func firstNonNil(vals ...any) any {
-	for _, v := range vals {
-		if v != nil {
-			return v
-		}
-	}
-	return nil
 }
 
 // DeepEqual 简单的深度相等判断。

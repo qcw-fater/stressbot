@@ -55,6 +55,7 @@ type Context struct {
 	currentTiming    engine.ActionTiming
 	currentSendBytes int
 	currentRecvBytes int
+	lastActionError  *engine.ActionError
 }
 
 // resetMetrics 在每次 action/callback 脚本开始前清零累加器。
@@ -66,6 +67,7 @@ func (c *Context) resetMetrics() {
 	c.currentTiming = engine.ActionTiming{}
 	c.currentSendBytes = 0
 	c.currentRecvBytes = 0
+	c.lastActionError = nil
 	c.metricsMu.Unlock()
 }
 
@@ -121,6 +123,37 @@ func (c *Context) metrics() (send int, recv int, timing engine.ActionTiming) {
 		out.Requests = append([]engine.RequestTiming(nil), c.currentTiming.Requests...)
 	}
 	return c.currentSendBytes, c.currentRecvBytes, out
+}
+
+// SetLastActionError 记录 Lua 网络 API 最近一次结构化错误。
+// Lua 脚本最终 return 非 0 时，robot 层优先使用它，避免只凭 code 猜 Kind/Detail。
+func (c *Context) SetLastActionError(err *engine.ActionError) {
+	if c == nil {
+		return
+	}
+	c.metricsMu.Lock()
+	c.lastActionError = err
+	c.metricsMu.Unlock()
+}
+
+// LastActionError 返回最近一次 Lua 网络 API 记录的结构化错误。
+func (c *Context) LastActionError() *engine.ActionError {
+	if c == nil {
+		return nil
+	}
+	c.metricsMu.Lock()
+	defer c.metricsMu.Unlock()
+	return c.lastActionError
+}
+
+// ClearLastActionError 清理最近一次结构化错误。
+func (c *Context) ClearLastActionError() {
+	if c == nil {
+		return
+	}
+	c.metricsMu.Lock()
+	c.lastActionError = nil
+	c.metricsMu.Unlock()
 }
 
 // SetContext 将脚本上下文绑定到 LState 的 registry

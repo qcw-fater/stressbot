@@ -24,6 +24,7 @@ import { FloatingWindow } from '@/components/FlowEditor/panels/FloatingWindow';
 import type { HistoryRecord } from '@/types/api';
 import { HistoryDetailView } from './HistoryDetailView';
 import { HistoryCompareView } from './HistoryCompareView';
+import { formatStageLabel } from './stageLabel';
 import './HistoryPanel.css';
 
 export interface HistoryModalProps {
@@ -116,17 +117,32 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
     [refresh],
   );
 
+  const taskStarredMap = useMemo(() => {
+    const map = new Map<string, boolean>();
+    for (const r of items) {
+      const anyStageStarred = (r.children ?? []).some((c) => c.starred);
+      map.set(r.id, r.starred || anyStageStarred);
+    }
+    return map;
+  }, [items]);
+
+  const isTaskProtected = useCallback(
+    (id: string, fallback = false) => taskStarredMap.get(id) ?? fallback,
+    [taskStarredMap],
+  );
+
   const onDelete = useCallback(
     (record: HistoryRecord, e?: React.MouseEvent) => {
       e?.stopPropagation();
+      const protectedByStar = isTaskProtected(record.id, record.starred);
       modal.confirm({
         title: '确认删除？',
-        content: record.starred ? '该记录已收藏，需要强制删除' : `将删除 ${record.name} 的所有数据`,
-        okText: record.starred ? '强制删除' : '删除',
+        content: protectedByStar ? '该任务或阶段已收藏，需要强制删除' : `将删除 ${record.name} 的所有数据`,
+        okText: protectedByStar ? '强制删除' : '删除',
         okButtonProps: { danger: true },
         onOk: async () => {
           try {
-            await historyApi.deleteHistory(record.id, record.starred);
+            await historyApi.deleteHistory(record.id, protectedByStar);
             message.success('已删除');
             refresh();
           } catch (err) {
@@ -135,7 +151,7 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
         },
       });
     },
-    [modal, message, refresh],
+    [isTaskProtected, modal, message, refresh],
   );
 
   const toggleSelect = (target: SelTarget, e?: React.MouseEvent) => {
@@ -154,16 +170,34 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
   const uniqueParents = useMemo(() => {
     const map = new Map<string, SelTarget>();
     for (const t of selected) {
-      if (!map.has(t.id)) map.set(t.id, t);
+      const starred = isTaskProtected(t.id, t.starred);
+      const existing = map.get(t.id);
+      if (!existing) {
+        map.set(t.id, { ...t, starred });
+      } else if (starred && !existing.starred) {
+        map.set(t.id, { ...existing, starred: true });
+      }
     }
     return [...map.values()];
-  }, [selected]);
+  }, [isTaskProtected, selected]);
 
   const onBatchDelete = useCallback(() => {
     const starredCount = uniqueParents.filter((r) => r.starred).length;
+    const hasStageWithoutParent = selected.some(
+      (t) =>
+        (t.stageIndex ?? -1) > 0 &&
+        !selected.some((p) => p.id === t.id && (p.stageIndex ?? -1) <= 0),
+    );
+    const content = hasStageWithoutParent
+      ? starredCount > 0
+        ? `阶段不能单独删除，将删除所属完整任务及全部阶段。其中 ${starredCount} 个已收藏，将强制删除。`
+        : '阶段不能单独删除，将删除所属完整任务及全部阶段'
+      : starredCount > 0
+        ? `其中 ${starredCount} 个已收藏，将强制删除（含其全部阶段）`
+        : '此操作不可恢复（含其全部阶段）';
     modal.confirm({
       title: `确认批量删除 ${uniqueParents.length} 个任务？`,
-      content: starredCount > 0 ? `其中 ${starredCount} 个已收藏，将强制删除（含其全部阶段）` : '此操作不可恢复（含其全部阶段）',
+      content,
       okText: '删除',
       okButtonProps: { danger: true },
       onOk: async () => {
@@ -283,7 +317,7 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
                       key={r.id}
                       record={r}
                       selected={isSelected({ id: r.id })}
-                      onSelect={() => toggleSelect({ id: r.id, name: r.name, starred: r.starred })}
+                      onSelect={(e) => toggleSelect({ id: r.id, name: r.name, starred: r.starred }, e)}
                       onStar={onToggleStar}
                       onDelete={onDelete}
                       onClick={() => setView({ kind: 'detail', id: r.id })}
@@ -586,10 +620,12 @@ function StageGroup({
         <div className="hp-stage-track" role="list">
           {children.map((c) => {
             const sel = isSelected({ id: r.id, stageIndex: c.stageIndex });
-            const open = () => onOpenStage(c.stageIndex ?? 0, c.stageLabel ?? '');
+            const displayStageLabel = formatStageLabel(c.stageLabel, c.stageIndex);
+            const open = () => onOpenStage(c.stageIndex ?? 0, displayStageLabel);
             const cTags = c.tags ?? [];
             const cNote = (c.note ?? '').trim();
             const cFailed = c.state === 'failed';
+            const hasMetrics = (c.totalActions ?? 0) > 0;
             return (
               <div
                 key={c.stageIndex}
@@ -604,7 +640,7 @@ function StageGroup({
                 }}
                 tabIndex={0}
               >
-                {/* Col 1: Checkbox — same container as parent */}
+                {/* Col 1: Checkbox */}
                 <div className="hp-record-select" onClick={(e) => e.stopPropagation()}>
                   <Checkbox
                     checked={sel}
@@ -613,7 +649,7 @@ function StageGroup({
                         {
                           id: r.id,
                           stageIndex: c.stageIndex,
-                          stageLabel: c.stageLabel,
+                          stageLabel: displayStageLabel,
                           name: r.name,
                           starred: c.starred,
                         },
@@ -623,28 +659,46 @@ function StageGroup({
                   />
                 </div>
 
-                {/* Col 2: Identity — state pill + segment label (matches parent order) */}
+                {/* Col 2: Identity — state pill + segment label */}
                 <div className="hp-record-identity">
                   <span className={`hp-sc-state hp-sc-state--${cFailed ? 'bad' : 'ok'}`}>{cFailed ? '失败' : '完成'}</span>
-                  <span className="hp-sc-label">{c.stageLabel ?? `段 ${c.stageIndex}`}</span>
+                  <span className="hp-stage-status-marker" aria-hidden />
+                  <span className="hp-sc-label">{displayStageLabel}</span>
                 </div>
 
-                {/* Col 3: — empty (children share parent's start time) */}
-                <div className="hp-record-time" />
-
-                {/* Col 4: Peak bots (replaces duration) */}
-                <div className="hp-record-duration">
+                {/* Col 3: Peak bots */}
+                <div className="hp-record-time">
                   <span className="hp-record-k">峰值</span>
                   <span className="hp-record-v hp-record-v--strong">{c.totalBots.toLocaleString()}</span>
                 </div>
 
-                {/* Col 5: Load metrics */}
-                <div className="hp-record-load">
-                  {cfg.concurrency > 0 && <span>并发 <b>{cfg.concurrency}</b></span>}
+                {/* Col 4: Concurrency */}
+                <div className="hp-record-duration">
+                  <span className="hp-record-k">并发</span>
+                  <span className="hp-record-v hp-record-v--strong">{cfg.concurrency}</span>
                 </div>
 
-                {/* Col 6: Config — no independent config for stage children */}
-                <div className="hp-record-config" />
+                {/* Col 5: Actions count + success rate */}
+                <div className="hp-record-load">
+                  {hasMetrics ? (
+                    <>
+                      <span>动作 <b>{fmtMetricCount(c.totalActions ?? 0)}</b></span>
+                      <span>成功 <b className={fmtRateClass(c.successRate)}>{fmtPercent(c.successRate)}</b></span>
+                    </>
+                  ) : (
+                    <span className="hp-record-empty">—</span>
+                  )}
+                </div>
+
+                {/* Col 6: RTT metrics */}
+                <div className="hp-record-config">
+                  {hasMetrics ? (
+                    <>
+                      <span>RTT <b>{fmtMs(c.avgRttMs)}</b></span>
+                      <span>P95 <b>{fmtMs(c.p95RttMs)}</b></span>
+                    </>
+                  ) : null}
+                </div>
 
                 {/* Col 7: Tags */}
                 <div className="hp-record-tags">
@@ -658,7 +712,7 @@ function StageGroup({
                   <div className={`hp-record-note${cNote ? '' : ' hp-record-note--empty'}`}>{cNote || ''}</div>
                 </Tooltip>
 
-                {/* Col 9: Actions — star only */}
+                {/* Col 9: Star */}
                 <div className="hp-record-actions" onClick={(e) => e.stopPropagation()}>
                   <Tooltip title={c.starred ? '取消收藏本段' : '收藏本段'}>
                     <Button
@@ -683,4 +737,33 @@ function formatDuration(sec: number): string {
   if (sec < 60) return `${sec}s`;
   if (sec < 3600) return `${Math.floor(sec / 60)}m${sec % 60}s`;
   return `${(sec / 3600).toFixed(1)}h`;
+}
+
+/** 格式化大数量：15.2K / 1.3M */
+function fmtMetricCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString();
+}
+
+/** 格式化成功率 0~1 → "99.2%" */
+function fmtPercent(v?: number): string {
+  if (v == null) return '—';
+  return `${(v * 100).toFixed(1)}%`;
+}
+
+/** 成功率着色类名 */
+function fmtRateClass(v?: number): string {
+  if (v == null) return '';
+  if (v >= 0.99) return 'hp-sc-ok';
+  if (v >= 0.95) return 'hp-sc-warn';
+  return 'hp-sc-bad';
+}
+
+/** 格式化延迟毫秒 */
+function fmtMs(v?: number): string {
+  if (v == null || v === 0) return '—';
+  if (v < 1) return '<1ms';
+  if (v < 100) return `${v.toFixed(1)}ms`;
+  return `${Math.round(v)}ms`;
 }

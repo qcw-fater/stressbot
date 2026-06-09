@@ -1426,6 +1426,21 @@
   letter-spacing: -0.01em;
 }
 
+/* 阶段子记录完成标识：用琥珀色竖条与普通行的模式竖条形成对应。 */
+.hp-stage-status-marker {
+  flex-shrink: 0;
+  width: 3px;
+  height: 16px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--color-warning) 78%, white), var(--color-warning));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-warning) 22%, transparent);
+}
+
+.hp-stage-child--failed .hp-stage-status-marker {
+  background: var(--color-error);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-error) 22%, transparent);
+}
+
 /* 状态 pill badge */
 .hp-sc-state {
   display: inline-block;
@@ -1446,6 +1461,18 @@
 .hp-sc-state--bad {
   color: var(--color-error);
   background: color-mix(in srgb, var(--color-error) 11%, transparent);
+}
+
+/* ── 成功率着色 ── */
+
+.hp-stage-child .hp-record-load b.hp-sc-ok { color: var(--color-success); }
+.hp-stage-child .hp-record-load b.hp-sc-warn { color: var(--color-warning); }
+.hp-stage-child .hp-record-load b.hp-sc-bad { color: var(--color-error); }
+
+/* 子记录 config 列 b 使用 text-primary 以保持与父记录一致 */
+.hp-stage-child .hp-record-config b {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
 
 /* 响应式：与父记录同步隐藏 config + tags 列 */

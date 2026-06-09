@@ -2179,7 +2179,6 @@ grep "SyncFrame: frame=" log/stressbot.log       # 应有持续递增帧号
 以下变更明确排除在本 PR 之外：
 
 - `FilterDef` 新增 `StartHourField`/`StartMinField`/`EndHourField`/`EndMinField`（与本重构主题无关）
-- `engine/action.go` 中 `compareValues` / `dailyTimeWindow` 的字段名可配置化
 - 消息体序列化通用化（JSON / MessagePack / `BodySerializer` 接口）：本次固定使用 Protobuf，非 Protobuf 服务器通过 Lua 脚本手动构建 body 处理，不引入 `SchemaFactory` 抽象
 
 ---

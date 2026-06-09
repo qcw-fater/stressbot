@@ -330,7 +330,7 @@ interface FieldBind {
 ```typescript
 interface FilterDef {
   path?: string;
-  op: string;    // eq/neq/gt/gte/lt/lte/contains/in/timeWindow/dailyTimeWindow/notNil/isNil
+  op: string;    // eq/neq/gt/gte/lt/lte/contains/in/notNil/isNil
   value?: unknown;
   source?: string;
 }

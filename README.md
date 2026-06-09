@@ -325,7 +325,7 @@ Executor 遍历节点图 → 命中 action 节点
 
 ## filters — 过滤器
 
-支持 12 种运算符：
+支持 10 种运算符：
 
 | 运算符             | 别名        | 说明                         |
 | ----------------- | ----------- | ---------------------------- |
@@ -337,16 +337,13 @@ Executor 遍历节点图 → 命中 action 节点
 | `lte`             | `<=`        | 小于等于                      |
 | `contains`        |             | 字符串包含                     |
 | `in`              |             | 左值在右值列表中               |
-| `timeWindow`      |             | 当前时间在窗口内               |
-| `dailyTimeWindow` |             | 每日重复时间窗口               |
 | `notNil`          |             | 值非 nil                      |
 | `isNil`           |             | 值为 nil                      |
 
 ```json
 "filters": [
   { "path": "status",   "op": "eq", "value": 1 },
-  { "path": "type",     "op": "in", "value": [1,2,3] },
-  { "path": "startTime","op": "timeWindow", "value": {"startTime": 0, "endTime": 99999999} }
+  { "path": "type",     "op": "in", "value": [1,2,3] }
 ]
 ```
 

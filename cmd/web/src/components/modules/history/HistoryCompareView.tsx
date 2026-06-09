@@ -15,6 +15,7 @@ import { historyApi, showApiError } from '@/services';
 import type { CompareTarget } from '@/services/historyApi';
 import type { HistoryCompareTask } from '@/types/api';
 import { ApdexCell } from '@/components/monitoring/shared/ApdexCell';
+import { formatStageLabel } from './stageLabel';
 import './HistoryPanel.css';
 
 function useViewportHeight(): number {
@@ -173,7 +174,9 @@ export function HistoryCompareView({ targets }: HistoryCompareViewProps) {
             <div className="hp-compare-card__title">
               <span style={{ marginRight: 6 }}>#{i + 1}</span>
               {d.name}
-              {d.stageLabel && <Tag color="warning" style={{ marginLeft: 6 }}>{d.stageLabel}</Tag>}
+              {(d.stageIndex ?? -1) > 0 && (
+                <Tag color="warning" style={{ marginLeft: 6 }}>{formatStageLabel(d.stageLabel, d.stageIndex)}</Tag>
+              )}
             </div>
             <div className="hp-compare-card__meta">
               <code>{d.id.slice(0, 8)}</code> · {d.startedAt ? dayjs(d.startedAt).format('MM-DD HH:mm') : '—'}

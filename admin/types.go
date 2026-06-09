@@ -554,7 +554,7 @@ type HistoryRecord struct {
 	ParentID string `json:"parentId,omitempty"`
 	// StageIndex 阶段段落连续 1-based 段落号（仅 RecordKind=="stage"）。
 	StageIndex int `json:"stageIndex,omitempty"`
-	// StageLabel 段落展示标签，如「段 2 · S3-S4」。
+	// StageLabel 段落展示标签，如「第 2 轮 · S3-S4」。
 	StageLabel string `json:"stageLabel,omitempty"`
 	// StageFrom/StageTo 段落覆盖的配置阶段范围（1-based，含端点）。
 	StageFrom int `json:"stageFrom,omitempty"`
@@ -563,6 +563,17 @@ type HistoryRecord struct {
 	HasResetStages bool `json:"hasResetStages,omitempty"`
 	// Children 阶段段落子记录（仅有 reset 的父任务且 includeStages 时填充）。
 	Children []HistoryRecord `json:"children,omitempty"`
+
+	// ── 阶段段落指标摘要（从 task_aggregated 提取，仅 recordKind=="stage" 有值）──
+
+	// TotalActions 阶段段落总动作采样数。
+	TotalActions int `json:"totalActions,omitempty"`
+	// SuccessRate 阶段段落整体成功率（0-1）。
+	SuccessRate float64 `json:"successRate,omitempty"`
+	// AvgRttMs 阶段段落加权平均 RTT（毫秒）。
+	AvgRttMs float64 `json:"avgRttMs,omitempty"`
+	// P95RttMs 阶段段落加权平均 P95 RTT（毫秒）。
+	P95RttMs float64 `json:"p95RttMs,omitempty"`
 }
 
 // ConfigSummary 历史任务的配置摘要。

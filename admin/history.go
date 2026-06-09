@@ -397,8 +397,10 @@ func (h *HistoryStore) enrichStageGroups(ctx context.Context, items []HistoryRec
 	}
 
 	var metaByTask map[string]map[int]metaRecord
+	var aggByTask map[string]map[int]stageAggMetrics
 	if includeStages {
 		metaByTask = h.loadStageMetaBatch(ctx, ids)
+		aggByTask = h.loadStageAggBatch(ctx, ids)
 	}
 
 	for i := range items {
@@ -411,6 +413,7 @@ func (h *HistoryStore) enrichStageGroups(ctx context.Context, items []HistoryRec
 			continue
 		}
 		metaByStage := metaByTask[items[i].ID]
+		aggByStage := aggByTask[items[i].ID]
 		children := make([]HistoryRecord, 0, len(plan.Segments))
 		for _, seg := range plan.Segments {
 			child := HistoryRecord{
@@ -429,6 +432,12 @@ func (h *HistoryStore) enrichStageGroups(ctx context.Context, items []HistoryRec
 				child.Starred = m.Starred
 				child.Tags = m.Tags
 				child.Note = m.Note
+			}
+			if agg, ok := aggByStage[seg.No]; ok {
+				child.TotalActions = int(agg.totalActions)
+				child.SuccessRate = agg.successRate
+				child.AvgRttMs = agg.avgRttMs
+				child.P95RttMs = agg.p95RttMs
 			}
 			children = append(children, child)
 		}
@@ -1180,6 +1189,80 @@ func (h *HistoryStore) loadStageMetaBatch(ctx context.Context, ids []string) map
 		out[tid][idx] = m
 	}
 	return out
+}
+
+// stageAggMetrics 阶段段落聚合指标摘要。
+type stageAggMetrics struct {
+	totalActions int64
+	successRate  float64
+	avgRttMs     float64
+	p95RttMs     float64
+}
+
+// loadStageAggBatch 批量读取阶段段落的聚合指标（task_aggregated.stage_index>0），
+// 按 task_id → (stage_index → metrics) 组织。
+func (h *HistoryStore) loadStageAggBatch(ctx context.Context, ids []string) map[string]map[int]stageAggMetrics {
+	out := make(map[string]map[int]stageAggMetrics, len(ids))
+	if len(ids) == 0 {
+		return out
+	}
+	placeholders := strings.Repeat("?,", len(ids))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := h.db.QueryContext(ctx,
+		fmt.Sprintf(`SELECT task_id, stage_index, final_stress FROM task_aggregated WHERE stage_index > 0 AND task_id IN (%s)`, placeholders),
+		args...)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var tid string
+		var stageIdx int
+		var stressBytes []byte
+		if err := rows.Scan(&tid, &stageIdx, &stressBytes); err != nil {
+			continue
+		}
+		var snap monitor.CollectorSnapshot
+		if err := json.Unmarshal(stressBytes, &snap); err != nil {
+			continue
+		}
+		m := extractStageSummary(snap)
+		if out[tid] == nil {
+			out[tid] = make(map[int]stageAggMetrics)
+		}
+		out[tid][stageIdx] = m
+	}
+	return out
+}
+
+// extractStageSummary 从聚合快照提取阶段段落展示摘要。
+func extractStageSummary(snap monitor.CollectorSnapshot) stageAggMetrics {
+	m := stageAggMetrics{}
+	var sampleTotal, successTotal int64
+	rttSnaps := make([]monitor.HistogramSnapshot, 0, len(snap.Actions))
+	for _, a := range snap.Actions {
+		sampleTotal += a.SampleCount
+		successTotal += a.SuccessCount
+		if a.RTTSampleCount > 0 {
+			rttSnaps = append(rttSnaps, a.RTT)
+		}
+	}
+	if sampleTotal == 0 {
+		m.totalActions = snap.TotalActions
+		return m
+	}
+	m.totalActions = sampleTotal
+	m.successRate = float64(successTotal) / float64(sampleTotal)
+	if len(rttSnaps) > 0 {
+		merged := monitor.MergeHistograms(rttSnaps)
+		m.avgRttMs = merged.AvgMs
+		m.p95RttMs = merged.P95Ms
+	}
+	return m
 }
 
 // Delete 删除历史记录。starred 的需要 force=true。

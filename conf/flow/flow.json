@@ -415,7 +415,7 @@
     "syncLoop": {
       "type": "loop",
       "body": "SyncFrameData",
-      "loopCount": 30
+      "loopCount": 50
     },
     "SyncFrameData": {
       "type": "action",
@@ -1121,8 +1121,9 @@
               "value": 0
             },
             {
-              "op": "dailyTimeWindow",
-              "path": "DailyOpenTime"
+              "op": "eq",
+              "path": "ruleType",
+              "value": 1
             }
           ]
         }
@@ -1219,7 +1220,7 @@
         "act": 10
       },
       "s2cProto": "Game.BattleStartGameS2C",
-      "timeout": 60
+      "timeout": 180
     },
     "SyncFrameData": {
       "pattern": "lua",
@@ -1237,7 +1238,7 @@
         "act": 72
       },
       "s2cProto": "Game.BattleRewardS2C",
-      "timeout": 60
+      "timeout": 180
     },
     "GameOver": {
       "pattern": "tcpRequest",

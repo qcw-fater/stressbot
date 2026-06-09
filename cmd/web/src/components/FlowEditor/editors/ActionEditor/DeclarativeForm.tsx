@@ -10,6 +10,7 @@ import { ProtoBrowser } from '../../proto/ProtoBrowser';
 import { RouteEditor } from '../../listens/RouteEditor';
 import { BindingsTable } from './BindingsTable';
 import { StoreTable } from './StoreTable';
+import { useRuntimeStore } from '@/services/runtimeStore';
 import { protoRegistry } from '../../proto/ProtoRegistry';
 
 export interface DeclarativeFormProps {
@@ -19,6 +20,8 @@ export interface DeclarativeFormProps {
 
 export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
   const { pattern } = action;
+  const requestTimeoutSec = useRuntimeStore((s) => s.robotConfig.timeoutSec);
+  const timeoutPlaceholder = pattern === 'tcpRequest' || pattern === 'udpRequest' ? String(requestTimeoutSec || 60) : '60';
   const set = (partial: Partial<ActionDef>) => onChange({ ...action, ...partial });
 
   // 用 ProtoBrowser 选 c2sProto / s2cProto（受控模式，不触碰 activePanel）
@@ -165,7 +168,7 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
             <Space.Compact>
               <InputNumber
                 min={0}
-                placeholder={pattern === 'tcpRequest' || pattern === 'udpRequest' ? '10' : '60'}
+                placeholder={timeoutPlaceholder}
                 value={action.timeout}
                 onChange={(v) => set({ timeout: (v as number) ?? undefined })}
                 style={{ width: 120 }}

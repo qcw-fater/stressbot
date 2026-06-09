@@ -733,7 +733,7 @@ type FilterDef struct {
 }
 ```
 
-支持 12 种比较运算符：`eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `contains`, `in`, `timeWindow`, `dailyTimeWindow`, `notNil`, `isNil`。
+支持 10 种比较运算符：`eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `contains`, `in`, `notNil`, `isNil`。
 
 ## 11. StoreMapping -- 响应存储映射
 

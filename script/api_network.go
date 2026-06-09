@@ -108,6 +108,35 @@ func errToCode(err error) int {
 	return -1
 }
 
+func rememberActionErr(ctx *Context, err error) {
+	if ctx == nil || err == nil {
+		return
+	}
+	if actionErr, ok := errors.AsType[*engine.ActionError](err); ok {
+		ctx.SetLastActionError(actionErr)
+	}
+}
+
+func rememberFrameworkErr(ctx *Context, code errcode.ErrorCode, detail string) {
+	if ctx == nil {
+		return
+	}
+	ctx.SetLastActionError(engine.NewActionError(code, detail))
+}
+
+func rememberHeaderErr(ctx *Context, code uint64, service, routeKey string) {
+	if ctx == nil {
+		return
+	}
+	detail := "service=" + service + " route=" + routeKey
+	if ctx.Adapter != nil {
+		if desc := ctx.Adapter.DescribeError(code); desc != "" {
+			detail = desc + ": " + detail
+		}
+	}
+	ctx.SetLastActionError(engine.NewServerError(code, detail))
+}
+
 // resolveRequestTimeoutSec 决定 Lua tcp_request / udp_request 的 timeout（秒）。
 //
 // 优先级（高到低）：
@@ -208,8 +237,6 @@ func serializeMsg(ctx *Context, msg proto.Message) ([]byte, error) {
 
 // networkConnectTCP 建立 TCP 连接。
 // 签名：network.connect_tcp(service, address)
-// networkConnectTCP 建立 TCP 连接。
-// 签名：network.connect_tcp(service, address)
 //
 // 返回：code(number)
 // code=0 成功 / errcode 错误码（6=取消 / 2=连接关闭）。
@@ -222,6 +249,7 @@ func networkConnectTCP(L *lua.LState) int {
 	service := L.CheckString(1)
 	address := L.CheckString(2)
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
+		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" address="+address)
 		L.Push(lua.LNumber(errcode.ErrActionCanceled))
 		return 1
 	}
@@ -230,10 +258,12 @@ func networkConnectTCP(L *lua.LState) int {
 		err = ctx.NetSender.ConnectTCP(service, address)
 	})
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
+		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" address="+address)
 		L.Push(lua.LNumber(errcode.ErrActionCanceled))
 		return 1
 	}
 	if err != nil {
+		rememberActionErr(ctx, err)
 		L.Push(lua.LNumber(errToCode(err)))
 	} else {
 		L.Push(lua.LNumber(0))
@@ -255,6 +285,7 @@ func networkConnectUDP(L *lua.LState) int {
 	service := L.CheckString(1)
 	address := L.CheckString(2)
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
+		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" address="+address)
 		L.Push(lua.LNumber(errcode.ErrActionCanceled))
 		return 1
 	}
@@ -263,10 +294,12 @@ func networkConnectUDP(L *lua.LState) int {
 		err = ctx.NetSender.ConnectUDP(service, address)
 	})
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
+		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" address="+address)
 		L.Push(lua.LNumber(errcode.ErrActionCanceled))
 		return 1
 	}
 	if err != nil {
+		rememberActionErr(ctx, err)
 		L.Push(lua.LNumber(errToCode(err)))
 	} else {
 		L.Push(lua.LNumber(0))
@@ -387,6 +420,7 @@ func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart)})
 	}
 	if packet == nil {
+		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service)
 		return pushRequestResult(L, int(errcode.ErrEncodeFailed), lua.LNil, 0, 0)
 	}
 
@@ -407,12 +441,15 @@ func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 	respBody := exchange.Body
 
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
+		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" route="+routeKey)
 		return pushRequestResult(L, int(errcode.ErrActionCanceled), lua.LNil, pktLen, 0)
 	}
 	if reqErr != nil {
+		rememberActionErr(ctx, reqErr)
 		return pushRequestResult(L, errToCode(reqErr), lua.LNil, pktLen, 0)
 	}
 	if exchange.HeaderErr != 0 {
+		rememberHeaderErr(ctx, exchange.HeaderErr, service, routeKey)
 		return pushRequestResult(L, int(exchange.HeaderErr), lua.LString(string(respBody)), pktLen, len(respBody))
 	}
 
@@ -426,6 +463,7 @@ func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 			ctx.recordClientTiming(engine.ClientTiming{ParseStoreCost: time.Since(parseStart)})
 		}
 		if err != nil {
+			rememberFrameworkErr(ctx, errcode.ErrParseFailed, "service="+service+" route="+routeKey)
 			return pushRequestResult(L, int(errcode.ErrParseFailed), lua.LString(string(respBody)), pktLen, len(respBody))
 		}
 		return pushRequestResult(L, 0, wrapProtoMessage(L, respMsg), pktLen, len(respBody))
@@ -499,6 +537,7 @@ func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart)})
 	}
 	if packet == nil {
+		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service)
 		return pushRequestResult(L, int(errcode.ErrEncodeFailed), lua.LNil, 0, 0)
 	}
 
@@ -523,12 +562,15 @@ func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 		// 脚本上下文被取消（robot.Stop / 任务停止）。区别于 reqErr 携带的 CONN_DROPPED：
 		// 后者是底层连接被对端断开；这里是本地主动取消，归类为 ACTION_CANCELED 避免被
 		// 误判为网络异常污染失败率统计。
+		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" route="+routeKey)
 		return pushRequestResult(L, int(errcode.ErrActionCanceled), lua.LNil, pktLen, 0)
 	}
 	if reqErr != nil {
+		rememberActionErr(ctx, reqErr)
 		return pushRequestResult(L, errToCode(reqErr), lua.LNil, pktLen, 0)
 	}
 	if exchange.HeaderErr != 0 {
+		rememberHeaderErr(ctx, exchange.HeaderErr, service, routeKey)
 		return pushRequestResult(L, int(exchange.HeaderErr), lua.LString(string(respBody)), pktLen, len(respBody))
 	}
 
@@ -542,6 +584,7 @@ func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 			ctx.recordClientTiming(engine.ClientTiming{ParseStoreCost: time.Since(parseStart)})
 		}
 		if err != nil {
+			rememberFrameworkErr(ctx, errcode.ErrParseFailed, "service="+service+" route="+routeKey)
 			return pushRequestResult(L, int(errcode.ErrParseFailed), lua.LString(string(respBody)), pktLen, len(respBody))
 		}
 		return pushRequestResult(L, 0, wrapProtoMessage(L, respMsg), pktLen, len(respBody))
@@ -624,6 +667,7 @@ func networkHTTPRequest(L *lua.LState) int {
 	ctx.recordRequest(engine.RequestTiming{WireRTT: exchange.NetLatency})
 	ctx.recordBytes(exchange.SendWireBytes, exchange.RecvWireBytes)
 	if err != nil {
+		rememberActionErr(ctx, err)
 		L.Push(lua.LNumber(errToCode(err)))
 		L.Push(lua.LString(""))
 		return 2
@@ -672,6 +716,7 @@ func networkTCPSend(L *lua.LState) int {
 		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart)})
 	}
 	if packet == nil {
+		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service)
 		L.Push(lua.LNumber(errcode.ErrEncodeFailed))
 		return 1
 	}
@@ -689,6 +734,7 @@ func networkTCPSend(L *lua.LState) int {
 		L.Push(lua.LNumber(0))
 	} else {
 		ctx.recordBytes(len(packet), 0)
+		rememberActionErr(ctx, err)
 		L.Push(lua.LNumber(errToCode(err)))
 	}
 	return 1
@@ -725,6 +771,7 @@ func networkUDPSend(L *lua.LState) int {
 		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart)})
 	}
 	if packet == nil {
+		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service)
 		L.Push(lua.LNumber(errcode.ErrEncodeFailed))
 		return 1
 	}
@@ -741,6 +788,7 @@ func networkUDPSend(L *lua.LState) int {
 		L.Push(lua.LNumber(0))
 	} else {
 		ctx.recordBytes(len(packet), 0)
+		rememberActionErr(ctx, err)
 		L.Push(lua.LNumber(errToCode(err)))
 	}
 	return 1
@@ -825,6 +873,7 @@ func networkListen(L *lua.LState, protocol string) int {
 	respBody := exchange.Body
 
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
+		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" route="+routeKey)
 		L.Push(lua.LNumber(errcode.ErrActionCanceled))
 		L.Push(lua.LNil)
 		return 2
@@ -833,11 +882,14 @@ func networkListen(L *lua.LState, protocol string) int {
 		stresslog.Debug("[SCRIPT] "+protocol+"_listen 超时",
 			zap.String("service", service), zap.String("routeKey", routeKey), zap.Int("timeout", timeout),
 			zap.String("hint", "请先调用 ensure_"+protocol+"_listener() 预注册监听"))
+		rememberFrameworkErr(ctx, errcode.ErrListenTimeout,
+			fmt.Sprintf("service=%s route=%s timeout=%ds pollMs=%d", service, routeKey, timeout, pollMs))
 		L.Push(lua.LNumber(errcode.ErrListenTimeout))
 		L.Push(lua.LNil)
 		return 2
 	}
 	if exchange.HeaderErr != 0 {
+		rememberHeaderErr(ctx, exchange.HeaderErr, service, routeKey)
 		L.Push(lua.LNumber(exchange.HeaderErr))
 		L.Push(lua.LString(string(respBody)))
 		return 2
@@ -846,6 +898,7 @@ func networkListen(L *lua.LState, protocol string) int {
 	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
 		respMsg, err := ctx.Factory.Parse(s2cProto, respBody)
 		if err != nil {
+			rememberFrameworkErr(ctx, errcode.ErrParseFailed, "service="+service+" route="+routeKey)
 			L.Push(lua.LNumber(errcode.ErrParseFailed))
 			L.Push(lua.LNil)
 			return 2
@@ -997,12 +1050,13 @@ func registerHeartbeat(L *lua.LState, proto heartbeatProto) int {
 		L.RaiseError("network not available")
 		return 0
 	}
+	service := L.CheckString(1)
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
+		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service)
 		L.Push(lua.LNumber(errcode.ErrActionCanceled))
 		return 1
 	}
 
-	service := L.CheckString(1)
 	protoName := "tcp"
 	if proto == hbProtoUDP {
 		protoName = "udp"
@@ -1113,6 +1167,7 @@ func registerHeartbeat(L *lua.LState, proto heartbeatProto) int {
 		}
 	})
 	if err != nil {
+		rememberActionErr(ctx, err)
 		L.Push(lua.LNumber(errToCode(err)))
 		return 1
 	}
