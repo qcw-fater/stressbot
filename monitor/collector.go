@@ -356,17 +356,18 @@ func (c *MetricsCollector) recordAction(
 		am.clientCostSum.Add(clientCost.Nanoseconds())
 		am.clientCostCount.Add(1)
 	}
-	if wallClock > 0 {
-		am.totalDuration.Record(wallClock)
-		am.totalDurationSampleCount.Add(1)
-		T := int64(c.apdexT.Load())
-		ms := wallClock.Milliseconds()
-		switch {
-		case ms < T:
-			am.totalDurationApdexSatisfied.Add(1)
-		case ms < 4*T:
-			am.totalDurationApdexTolerating.Add(1)
-		}
+	// 始终记录 wallClock，即使 == 0（纯内存操作如 setState 在 Windows 上可能 < 500ns，
+	// time.Since 精度不足导致返回 0）。不记录的话 totalDurationSampleCount 不增长，
+	// 前端耗时列就会显示 "—"，虽然 action 已完成数百次。
+	am.totalDuration.Record(wallClock)
+	am.totalDurationSampleCount.Add(1)
+	T := int64(c.apdexT.Load())
+	ms := wallClock.Milliseconds()
+	switch {
+	case ms < T:
+		am.totalDurationApdexSatisfied.Add(1)
+	case ms < 4*T:
+		am.totalDurationApdexTolerating.Add(1)
 	}
 	addDuration := func(dst *atomic.Int64, d time.Duration) {
 		if d > 0 {

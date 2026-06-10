@@ -1,6 +1,7 @@
-import { Input, Popover, Segmented, Space, Switch, Table, Tag, Tooltip } from 'antd';
+import { Button, Input, Popover, Segmented, Space, Switch, Table, Tag, Tooltip } from 'antd';
+import { DownloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { ErrorEntry } from '@/types/api';
 import { ApdexCell } from './ApdexCell';
 import { fmtBytes, fmtMs, NUMERIC_STYLE } from './formats';
@@ -62,8 +63,8 @@ export interface ActionMetricsTableProps<T extends ActionMetricsTableRow> {
   showExecutingColumn?: boolean;
   showQpsColumn?: boolean;
   showErrorsColumn?: boolean;
+  showCsvExport?: boolean;
   searchWidth?: number;
-  actionsOnlyLabel?: string;
 }
 
 interface SelectedLatencyMetric {
@@ -109,8 +110,8 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
   showExecutingColumn = true,
   showQpsColumn = true,
   showErrorsColumn = true,
+  showCsvExport = false,
   searchWidth,
-  actionsOnlyLabel,
 }: ActionMetricsTableProps<T>) {
   const [innerMode, setInnerMode] = useState<ActionLatencyMode>('totalDuration');
   const [search, setSearch] = useState('');
@@ -133,6 +134,81 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
     }
     return out;
   }, [rows, search, actionsOnly]);
+
+  // ── CSV helpers ──
+  function csvEscape(v: string): string {
+    if (v.includes(',') || v.includes('"') || v.includes('\n')) {
+      return '"' + v.replace(/"/g, '""') + '"';
+    }
+    return v;
+  }
+  function latencyCsv(row: T, key: keyof ActionHistogramLike): string {
+    const sel = selectLatencyMetric(row, mode);
+    return sel.sampleCount > 0 && sel.histogram ? fmtMs(sel.histogram[key]) : '—';
+  }
+
+  const exportCsv = useCallback(() => {
+    // 根据当前可见列状态构建 CSV 列定义
+    const csvCols: { header: string; getValue: (row: T) => string }[] = [
+      { header: '动作', getValue: (r) => csvEscape(r.name) },
+      { header: '样本', getValue: (r) => String(r.sampleCount) },
+      { header: '成功', getValue: (r) => String(r.successCount) },
+      { header: '失败', getValue: (r) => String(r.failureCount) },
+      { header: '超时', getValue: (r) => String(r.timeoutCount) },
+    ];
+    if (showCanceledColumn && advancedDiagnostics) {
+      csvCols.push({ header: '取消', getValue: (r) => String(r.canceledCount ?? 0) });
+    }
+    const avgHeader = mode === 'rtt' ? 'RTT avg(ms)' : '总耗时 avg(ms)';
+    csvCols.push(
+      { header: avgHeader, getValue: (r) => latencyCsv(r, 'avgMs') },
+      { header: 'p50(ms)', getValue: (r) => latencyCsv(r, 'p50Ms') },
+      { header: 'p95(ms)', getValue: (r) => latencyCsv(r, 'p95Ms') },
+      { header: 'p99(ms)', getValue: (r) => latencyCsv(r, 'p99Ms') },
+      { header: 'max(ms)', getValue: (r) => latencyCsv(r, 'maxMs') },
+    );
+    if (showClientBreakdown && advancedDiagnostics) {
+      csvCols.push(
+        { header: '非RTT(ms)', getValue: (r) => fmtMs(r.clientAvgMs ?? 0) },
+        { header: 'encode(ms)', getValue: (r) => fmtMs(r.encodeAvgMs ?? 0) },
+        { header: 'decode(ms)', getValue: (r) => fmtMs(r.decodeAvgMs ?? 0) },
+        { header: 'parse/store(ms)', getValue: (r) => fmtMs(r.parseStoreAvgMs ?? 0) },
+      );
+    }
+    if (showBandwidthColumns) {
+      csvCols.push(
+        { header: '发送(均)', getValue: (r) => fmtBytes(r.avgSendBytes) },
+        { header: '接收(均)', getValue: (r) => fmtBytes(r.avgRecvBytes) },
+      );
+    }
+    if (showExecutingColumn) {
+      csvCols.push({ header: '并发', getValue: (r) => String(r.executing) });
+    }
+    if (showQpsColumn) {
+      csvCols.push({ header: 'QPS', getValue: (r) => r.avgQps.toFixed(1) });
+    }
+    csvCols.push({
+      header: 'Apdex',
+      getValue: (r) => {
+        const sel = selectLatencyMetric(r, mode);
+        return sel.apdex != null ? sel.apdex.toFixed(2) : '—';
+      },
+    });
+    // 错误列不导出
+
+    const header = csvCols.map((c) => c.header).join(',');
+    const body = dataSource.map((row) => csvCols.map((c) => c.getValue(row)).join(',')).join('\n');
+    const csv = '﻿' + header + '\n' + body; // BOM 确保 Excel 正确识别 UTF-8
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `action-metrics-${new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-')}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [dataSource, mode, advancedDiagnostics, showCanceledColumn, showClientBreakdown, showBandwidthColumns, showExecutingColumn, showQpsColumn]);
 
   const latencyTitle = mode === 'rtt' ? 'RTT avg(ms)' : '总耗时 avg(ms)';
   const nameWidth = compact ? 160 : 200;
@@ -243,35 +319,42 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
   return (
     <div className="action-metrics-table" style={{ width: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
       {showToolbar && (
-        <Space className="action-metrics-table__toolbar" size={12} wrap>
-          <Input.Search
-            placeholder="按动作名搜索"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            allowClear
-            style={{ width: searchWidth || (compact ? 260 : 320) }}
-            size={size === 'small' ? 'small' : 'middle'}
-          />
-          {showLatencyModeSwitch && (
-            <Segmented<ActionLatencyMode>
+        <div className="action-metrics-table__toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          <Space size={12} wrap>
+            <Input.Search
+              placeholder="按动作名搜索"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              allowClear
+              style={{ width: searchWidth || (compact ? 260 : 320) }}
               size={size === 'small' ? 'small' : 'middle'}
-              value={mode}
-              options={[{ label: '总耗时', value: 'totalDuration' }, { label: 'RTT', value: 'rtt' }]}
-              onChange={(v) => setMode(v)}
             />
-          )}
-          <Space size={6}>
-            <span style={{ fontSize: compact ? 11 : 12, color: 'var(--text-secondary)' }}>{actionsOnlyLabel || (compact ? '仅动作' : '仅展示动作（隐藏推送）')}</span>
-            <Switch checked={actionsOnly} onChange={setActionsOnly} size="small" />
+            {showLatencyModeSwitch && (
+              <Segmented<ActionLatencyMode>
+                size={size === 'small' ? 'small' : 'middle'}
+                value={mode}
+                options={[{ label: '总耗时', value: 'totalDuration' }, { label: 'RTT', value: 'rtt' }]}
+                onChange={(v) => setMode(v)}
+              />
+            )}
+            <span style={{ fontSize: compact ? 11 : 12, color: 'var(--text-tertiary)' }}>{dataSource.length} 条</span>
           </Space>
-          {hasAdvancedDiagnostics && (
+          <Space size={12}>
             <Space size={6}>
-              <span style={{ fontSize: compact ? 11 : 12, color: 'var(--text-secondary)' }}>高级诊断</span>
-              <Switch checked={advancedDiagnostics} onChange={setAdvancedDiagnostics} size="small" />
+              <span style={{ fontSize: compact ? 11 : 12, color: 'var(--text-secondary)' }}>隐藏推送</span>
+              <Switch checked={actionsOnly} onChange={setActionsOnly} size="small" />
             </Space>
-          )}
-          <span style={{ fontSize: compact ? 11 : 12, color: 'var(--text-tertiary)' }}>{dataSource.length} 条</span>
-        </Space>
+            {hasAdvancedDiagnostics && (
+              <Space size={6}>
+                <span style={{ fontSize: compact ? 11 : 12, color: 'var(--text-secondary)' }}>高级诊断</span>
+                <Switch checked={advancedDiagnostics} onChange={setAdvancedDiagnostics} size="small" />
+              </Space>
+            )}
+            {showCsvExport && (
+              <Button type="text" size="small" icon={<DownloadOutlined />} onClick={exportCsv}>导出 CSV</Button>
+            )}
+          </Space>
+        </div>
       )}
       <div className="action-metrics-table__body" style={{ minHeight: 0 }}>
         <Table<T>

@@ -361,7 +361,7 @@
         "BattleEnd",
         "BattleReward",
         "GameOver",
-        "CleanupBattle"
+        "ClearBattleState"
       ]
     },
     "ConnectBattleTCP": {
@@ -442,7 +442,7 @@
       "type": "action",
       "action": "GameOver"
     },
-    "CleanupBattle": {
+    "ClearBattleState": {
       "type": "action",
       "action": "ClearBattleState"
     },
@@ -729,7 +729,7 @@
     "ConfirmMatchSuccess": {
       "type": "action",
       "description": "确认匹配成功",
-      "action": "确认匹配成功"
+      "action": "ConfirmMatchSuccess"
     }
   },
   "actions": {
@@ -2035,7 +2035,7 @@
         }
       ]
     },
-    "确认匹配成功": {
+    "ConfirmMatchSuccess": {
       "pattern": "tcpRequest",
       "service": "logic",
       "route": {

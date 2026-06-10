@@ -825,8 +825,9 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 			stresslog.Debug("[ROBOT] 停止阶段跳过状态回调", zap.Int("id", h.robot.id), zap.String("callback", cbName))
 			return
 		}
+		start := time.Now()
 		if len(msg.Data) == 0 {
-			monitor.Global().RecordCallback(cbName, monitor.ResultSuccess, monitor.ActionTiming{}, 0, 0, msg.WireBytes, nil)
+			monitor.Global().RecordCallback(cbName, monitor.ResultSuccess, monitor.ActionTiming{}, time.Since(start), 0, msg.WireBytes, nil)
 			return
 		}
 
@@ -835,7 +836,7 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 			callbackErr := engine.NewActionError(errcode.ErrCallbackParse, "proto="+cbDef.S2CProto, err)
 			stresslog.Error("[ROBOT] 解析推送消息失败",
 				zap.Int("id", h.robot.id), zap.String("proto", cbDef.S2CProto), zap.Error(err))
-			monitor.Global().RecordCallback(cbName, monitor.ResultFailure, monitor.ActionTiming{}, 0, 0, msg.WireBytes, callbackErr)
+			monitor.Global().RecordCallback(cbName, monitor.ResultFailure, monitor.ActionTiming{}, time.Since(start), 0, msg.WireBytes, callbackErr)
 			return
 		}
 
@@ -847,7 +848,7 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 				h.robot.state.Set(m.Setter, val)
 			}
 		}
-		monitor.Global().RecordCallback(cbName, monitor.ResultSuccess, monitor.ActionTiming{}, 0, 0, msg.WireBytes, nil)
+		monitor.Global().RecordCallback(cbName, monitor.ResultSuccess, monitor.ActionTiming{}, time.Since(start), 0, msg.WireBytes, nil)
 	}
 }
 

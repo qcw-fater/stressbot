@@ -31,7 +31,8 @@ export function fmtBytesPlain(n: number): string {
 
 /** 毫秒紧凑格式（单位由表头标注，单元格只显示数字）。 */
 export function fmtMs(n: number): string {
-  if (!Number.isFinite(n) || n <= 0) return '—';
+  if (!Number.isFinite(n) || n < 0) return '—';
+  if (n === 0) return '0';
   if (n < 1) return n.toFixed(2);
   if (n < 10) return n.toFixed(1);
   return n.toFixed(0);

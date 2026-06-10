@@ -301,6 +301,7 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
             scrollY={420}
             popupZIndex={popupZ}
             showClientBreakdown
+            showCsvExport
           />
         )}
       </ReportSection>

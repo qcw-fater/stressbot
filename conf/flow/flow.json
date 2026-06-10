@@ -361,7 +361,7 @@
         "BattleEnd",
         "BattleReward",
         "GameOver",
-        "CleanupBattle"
+        "ClearBattleState"
       ]
     },
     "ConnectBattleTCP": {
@@ -442,7 +442,7 @@
       "type": "action",
       "action": "GameOver"
     },
-    "CleanupBattle": {
+    "ClearBattleState": {
       "type": "action",
       "action": "ClearBattleState"
     },
