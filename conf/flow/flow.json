@@ -262,20 +262,24 @@
       "type": "weighted",
       "options": [
         {
+          "node": "ladderModel",
+          "weight": 25
+        },
+        {
           "node": "normalModel",
-          "weight": 40
+          "weight": 25
         },
         {
           "node": "lobbyOperation",
-          "weight": 12
+          "weight": 8
         },
         {
           "node": "lottery",
-          "weight": 10
+          "weight": 8
         },
         {
           "node": "heroCultivate",
-          "weight": 10
+          "weight": 8
         },
         {
           "node": "shop",
@@ -287,14 +291,18 @@
         },
         {
           "node": "friend",
-          "weight": 6
-        },
-        {
-          "node": "mail",
           "weight": 5
         },
         {
+          "node": "mail",
+          "weight": 3
+        },
+        {
           "node": "giftCode",
+          "weight": 1
+        },
+        {
+          "node": "LookRankingList",
           "weight": 1
         }
       ]
@@ -443,7 +451,7 @@
       "options": [
         {
           "node": "ChangeHero",
-          "weight": 5
+          "weight": 10
         },
         {
           "node": "ChangeShowHero",
@@ -455,7 +463,7 @@
         },
         {
           "node": "ChangeIcon",
-          "weight": 5
+          "weight": 10
         },
         {
           "node": "ChangeIframe",
@@ -463,7 +471,7 @@
         },
         {
           "node": "ChangeTitle",
-          "weight": 5
+          "weight": 10
         },
         {
           "node": "ChangeExpressShowHero",
@@ -479,15 +487,11 @@
         },
         {
           "node": "GetLevelReward",
-          "weight": 10
+          "weight": 15
         },
         {
           "node": "WorldChat",
           "weight": 10
-        },
-        {
-          "node": "LookRankingList",
-          "weight": 20
         }
       ]
     },
@@ -706,6 +710,26 @@
       "type": "action",
       "description": "解锁排位等基础功能",
       "action": "unlockBasicFunction"
+    },
+    "CreateLadderTeam": {
+      "type": "action",
+      "action": "CreateLadderTeam"
+    },
+    "ladderModel": {
+      "type": "sequence",
+      "next": [
+        "CreateLadderTeam",
+        "StartMatch",
+        "MatchSucceed",
+        "ConfirmMatchSuccess",
+        "ListenStartLoading",
+        "startBattle"
+      ]
+    },
+    "ConfirmMatchSuccess": {
+      "type": "action",
+      "description": "确认匹配成功",
+      "action": "ConfirmMatchSuccess"
     }
   },
   "actions": {
@@ -1987,6 +2011,39 @@
     "unlockBasicFunction": {
       "pattern": "lua",
       "script": "unlock_basic_functions.lua"
+    },
+    "CreateLadderTeam": {
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 5,
+        "act": 1
+      },
+      "c2sProto": "Game.TeamCreateC2S",
+      "s2cProto": "Game.TeamCreateS2C",
+      "bindings": [
+        {
+          "type": "fixed",
+          "field": "model",
+          "value": 2
+        }
+      ],
+      "store": [
+        {
+          "setter": "teamId",
+          "field": "teamId"
+        }
+      ]
+    },
+    "ConfirmMatchSuccess": {
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 3,
+        "act": 2
+      },
+      "c2sProto": "Game.MatchWaitPrepareC2S",
+      "s2cProto": "Game.MatchWaitPrepareS2C"
     }
   },
   "listens": {

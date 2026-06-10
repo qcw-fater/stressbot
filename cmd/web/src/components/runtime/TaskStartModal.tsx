@@ -194,6 +194,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
         concurrency: DEBUG_PRESET.concurrency,
         logLevel: DEBUG_PRESET.logLevel,
       });
+      setRampUpEnabled(false);
       filledRef.current = true;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -235,6 +236,15 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
   // 容量预检：用峰值并发数而非总和，因为 reset 阶段不会叠加
   const capacityWarn = !debugMode && peakBots > totalCapacity;
   const noAgentBlock = onlineAgents === 0; // 无 Agent 在线连调试也跑不起来，仍禁用启动
+  const startDisabled =
+    capacityWarn ||
+    noAgentBlock ||
+    missingScripts.length > 0 ||
+    syncing ||
+    !taskName.trim() ||
+    peakBots <= 0 ||
+    !rampUpValid;
+  const startModeColor = debugMode ? 'var(--mode-debug-color)' : 'var(--mode-test-color)';
 
   function onToggleDebug(v: boolean) {
     setDebugMode(v);
@@ -249,6 +259,8 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
       });
       setRampUpEnabled(false);
       filledRef.current = true;
+    } else {
+      setRobotConfig({ logLevel: 'info' });
     }
   }
 
@@ -362,15 +374,15 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
       cancelText="取消"
       confirmLoading={submitting}
       okButtonProps={{
-        disabled:
-          capacityWarn ||
-          noAgentBlock ||
-          missingScripts.length > 0 ||
-          syncing ||
-          !taskName.trim() ||
-          peakBots <= 0 ||
-          !rampUpValid,
+        disabled: startDisabled,
         danger: debugMode ? false : undefined,
+        style: startDisabled
+          ? undefined
+          : {
+              background: startModeColor,
+              borderColor: startModeColor,
+              boxShadow: `0 4px 12px color-mix(in srgb, ${startModeColor} 28%, transparent)`,
+            },
       }}
       width={620}
       destroyOnHidden
@@ -493,35 +505,30 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
             style={{ width: '100%' }}
           />
         </Form.Item>
-        <Form.Item
-          label={
-            <Space size={6}>
-              <span>渐进式加压</span>
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                分阶段创建机器人，观察逐步增加负载时服务器性能变化
-              </Typography.Text>
-            </Space>
-          }
-        >
-          <Space direction="vertical" style={{ width: '100%' }} size={8}>
-            <Space size={8}>
-              <Switch
-                checked={rampUpEnabled}
-                onChange={(checked) => {
-                  setRampUpEnabled(checked);
-                  if (checked && rampUpStages.length === 0) {
-                    setRampUpStages([{ count: 0, holdSec: 30 }]);
-                  }
-                }}
-                disabled={debugMode}
-              />
-              {debugMode && (
+        {!debugMode && (
+          <Form.Item
+            label={
+              <Space size={6}>
+                <span>阶段性测试</span>
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  调试模式不支持渐进式加压
+                  分阶段创建机器人，观察不同阶段负载下的服务器性能变化
                 </Typography.Text>
-              )}
-            </Space>
-            {rampUpEnabled && !debugMode && (
+              </Space>
+            }
+          >
+            <Space direction="vertical" style={{ width: '100%' }} size={8}>
+              <Space size={8}>
+                <Switch
+                  checked={rampUpEnabled}
+                  onChange={(checked) => {
+                    setRampUpEnabled(checked);
+                    if (checked && rampUpStages.length === 0) {
+                      setRampUpStages([{ count: 0, holdSec: 30 }]);
+                    }
+                  }}
+                />
+              </Space>
+              {rampUpEnabled && (
               <>
                 <Table<RampUpStage & { _idx: number }>
                   size="small"
@@ -652,6 +659,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
             )}
           </Space>
         </Form.Item>
+        )}
       </Form>
 
       <Collapse

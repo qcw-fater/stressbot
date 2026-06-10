@@ -95,7 +95,7 @@ function HomeShellInner() {
   const themeMode = useEditorStore((s) => s.theme);
   useMonacoFindTooltip(themeMode);
 
-  const { mode, activeTask, ownedTaskId, latestStress, onTaskFinished, setActiveTask, setAgents, pushStress, pushSystem, setConnectionLost, appendAgentEvents, setAgentHealth } =
+  const { mode, activeTask, ownedTaskId, latestStress, onTaskFinished, setActiveTask, setDetachedActiveTask, setAgents, pushStress, pushSystem, setConnectionLost, appendAgentEvents, setAgentHealth } =
     useRuntimeStore(
       useShallow((s) => ({
         mode: s.mode,
@@ -104,6 +104,7 @@ function HomeShellInner() {
         latestStress: s.latestStress,
         onTaskFinished: s.onTaskFinished,
         setActiveTask: s.setActiveTask,
+        setDetachedActiveTask: s.setDetachedActiveTask,
         setAgents: s.setAgents,
         pushStress: s.pushStress,
         pushSystem: s.pushSystem,
@@ -176,6 +177,7 @@ function HomeShellInner() {
           t.state === 'starting' || t.state === 'running' || t.state === 'stopping',
         );
         if (active) {
+          setDetachedActiveTask(active);
           setGuardTask(active);
         }
       } catch (e) {
@@ -188,7 +190,7 @@ function HomeShellInner() {
         setBooting(false);
       }
     })();
-  }, [setConnectionLost]);
+  }, [setConnectionLost, setDetachedActiveTask]);
 
   // === 轮询：任务详情（用于检测终态切换） ===
   const taskId = activeTask?.id;

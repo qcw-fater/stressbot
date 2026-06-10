@@ -52,8 +52,8 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
     if (action) {
       updateAction(actionName, next);
     } else {
-      // 第一次编辑：优先用 description 做 action 名，回退 nodeId
-      const base = (node.description?.trim()) || actionName || nodeId;
+      // 第一次编辑：用 actionName 或 nodeId 做 action 名
+      const base = actionName || nodeId;
       const map = useFlowStore.getState().actions;
       let name = base;
       let i = 1;

@@ -63,6 +63,11 @@ export function stopTask(id: string): Promise<TaskBrief> {
   return postJson<TaskBrief>(`/tasks/${encodeURIComponent(id)}/stop`);
 }
 
+/** 读取任务配置 JSON 文件（用于查看运行中时加载远端 flow.json）。 */
+export function getTaskConfigJson<T>(id: string, path: string): Promise<T> {
+  return getJson<T>(`/tasks/${encodeURIComponent(id)}/config/${path}`);
+}
+
 /** 任务配置文件下载链接（用于 a 标签 href，无需走 fetch） */
 export function taskConfigUrl(id: string, path: string): string {
   return `${API_PREFIX}/tasks/${encodeURIComponent(id)}/config/${path}`;

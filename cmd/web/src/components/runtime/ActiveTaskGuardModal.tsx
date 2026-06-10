@@ -3,7 +3,7 @@
  *
  * 用户选择：
  *   - "查看运行中"：调用 attachToActive(taskId)；mode → viewActive；本地稿 stash 到 LocalStorage；
- *   - "继续编辑"：留在 edit；启动按钮禁用（RuntimeBar 显示 tooltip）。
+ *   - "继续编辑"：留在 edit；顶部栏保留“查看监控”入口且启动按钮禁用。
  *
  * 关闭对话框（点 X / mask）等价于"继续编辑"。
  */
@@ -64,7 +64,7 @@ export function ActiveTaskGuardModal({ open, task, onClose, onAttached }: Active
           </Descriptions>
           <p style={{ marginTop: 12, fontSize: 13, color: 'var(--text-secondary)' }}>
             选择「查看运行中」会用该任务的流程替换当前画布并锁定为只读，本地编辑稿会自动暂存；
-            选择「继续编辑」可继续修改本地稿，但启动按钮在该任务结束前禁用。
+            选择「继续编辑」可继续修改本地稿，并可通过顶部「查看监控」重新进入监控。
           </p>
         </>
       )}

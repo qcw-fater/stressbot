@@ -200,18 +200,18 @@ function TaskLoadCard({
   return (
     <MetricGroup title="任务 / 负载" subtitle={taskName || '运行任务'}>
       <div className="md-load-card">
-        <div className="md-load-taskline">
-          <span>{STATE_TEXT[taskState ?? ''] ?? '运行中'}</span>
-          <span>运行 {fmtDuration(uptimeSeconds)}</span>
-          <span>机器人 {compactRatio(model.load.runningRobots, model.load.startedRobots)}</span>
+        <div className="md-load-prime">
+          <div className="md-load-bots">
+            <small>机器人</small>
+            <strong>{compactRatio(model.load.runningRobots, model.load.startedRobots)}</strong>
+          </div>
+          <div className="md-load-meta">
+            <span className={`md-load-state md-load-state--${taskState ?? 'running'}`}>{STATE_TEXT[taskState ?? ''] ?? '运行中'}</span>
+            <span className="md-load-time">运行 <b>{fmtDuration(uptimeSeconds)}</b></span>
+          </div>
         </div>
 
         {rampUp ? <RampUpLoadView model={model} /> : <NormalLoadView model={model} />}
-
-        <div className="md-load-footline">
-          <span>已停止 {fmtCompactNumber(model.load.stoppedRobots)}</span>
-          <span>异常机器人 {fmtCompactNumber(model.load.erroredRobots)}</span>
-        </div>
       </div>
     </MetricGroup>
   );
@@ -252,13 +252,12 @@ function RampUpLoadView({ model }: { model: ReturnType<typeof buildLivePanelMode
 
   return (
     <div className="md-load-main md-load-main--ramp">
-      <div className="md-ramp-grid">
+      <div className="md-ramp-line">
         <span>阶段 <b>{rampUp.currentStage}/{rampUp.totalStages}</b></span>
         <span>本阶段 <b>{fmtCompactNumber(Math.min(stageRunning, stageTarget))}/{fmtCompactNumber(stageTarget)}</b></span>
         <span>累计 <b>{fmtCompactNumber(model.load.runningRobots)}/{fmtCompactNumber(totalTarget)}</b></span>
-        <span>{currentStage?.concurrency ? `并发 ${currentStage.concurrency}` : '并发 —'} · {currentStage?.holdSec ? `等待 ${currentStage.holdSec}s` : '等待 —'}</span>
       </div>
-      <div className="md-stage-bar" title={`累计进度 ${cumulativePercent}%`}>
+      <div className="md-stage-bar" title={`累计进度 ${cumulativePercent}% · ${currentStage?.concurrency ? `并发 ${currentStage.concurrency}` : '并发 —'} · ${currentStage?.holdSec ? `等待 ${currentStage.holdSec}s` : '等待 —'}`}>
         {stages.map((stage, i) => {
           const count = stage.count || 0;
           const widthPct = totalTarget > 0 ? (count / totalTarget) * 100 : 100 / Math.max(1, stages.length);

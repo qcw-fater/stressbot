@@ -325,9 +325,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
           <Button
             icon={<DeploymentUnitOutlined />}
             onClick={() => applyAutoLayout('LR')}
-          >
-            布局
-          </Button>
+          />
         </Tooltip>
       </Space>
 

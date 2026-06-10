@@ -26,7 +26,7 @@ import {
   EditOutlined,
   FileTextOutlined,
   HistoryOutlined,
-
+  EyeOutlined,
   PlayCircleOutlined,
   SettingOutlined,
   StopOutlined,
@@ -35,11 +35,10 @@ import {
   AlignLeftOutlined,
 } from '@ant-design/icons';
 import { App as AntApp, Badge, Button, Divider, Popover, Segmented, Space, Switch, Tag, Tooltip, Typography } from 'antd';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import {
-  hasStashedDraft,
-  restoreStashedDraft,
+  attachToActive,
   showApiError,
   stopTask,
   useRuntimeStore,
@@ -66,8 +65,17 @@ const STATE_COLOR: Record<TaskBrief['state'], string> = {
   starting: 'gold',
   running: 'processing',
   stopping: 'volcano',
-  stopped: 'default',
+  stopped: 'success',
   failed: 'error',
+};
+
+const STATE_LABEL: Record<TaskBrief['state'], string> = {
+  pending: '待启动',
+  starting: '启动中',
+  running: '运行中',
+  stopping: '停止中',
+  stopped: '已停止',
+  failed: '失败',
 };
 
 export function RuntimeBar({
@@ -83,19 +91,23 @@ export function RuntimeBar({
   const {
     mode,
     activeTask,
+    detachedActiveTask,
     ownedTaskId,
     agents,
     connectionLost,
     agentEvents,
+    detachToEdit,
     detachFromActive,
   } = useRuntimeStore(
     useShallow((s) => ({
       mode: s.mode,
       activeTask: s.activeTask,
+      detachedActiveTask: s.detachedActiveTask,
       ownedTaskId: s.ownedTaskId,
       agents: s.agents,
       connectionLost: s.connectionLost,
       agentEvents: s.agentEvents,
+      detachToEdit: s.detachToEdit,
       detachFromActive: s.detachFromActive,
     })),
   );
@@ -117,12 +129,36 @@ export function RuntimeBar({
 
   const [startOpen, setStartOpen] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [attaching, setAttaching] = useState(false);
 
   const safeAgents = agents ?? [];
   const onlineAgents = safeAgents.filter((a) => a.status !== 'offline').length;
   const totalCapacity = safeAgents
     .filter((a) => a.status !== 'offline')
     .reduce((sum, a) => sum + a.maxBots, 0);
+  const startDisabled = onlineAgents === 0;
+  const startDisabledTip = onlineAgents === 0 ? '没有在线的节点，无法启动' : '';
+  const modeIcon = debugMode ? <BugOutlined /> : <CheckCircleOutlined />;
+  const modeText = debugMode ? '调试' : '测试';
+  const modeColor = debugMode ? 'var(--mode-debug-color)' : 'var(--mode-test-color)';
+  const modeTip = debugMode
+    ? '调试模式：启动跳过容量预检 + 自动装填 1 个机器人 / 并发 1 + 日志级别 debug。点击"设置"可切换到测试模式'
+    : '测试模式：使用你填写的完整配置，启用容量预检与默认日志级别。点击"设置"可切换到调试模式';
+  const modeTagStyle = {
+    margin: 0,
+    color: modeColor,
+    borderColor: `color-mix(in srgb, ${modeColor} 32%, transparent)`,
+    background: `color-mix(in srgb, ${modeColor} 10%, transparent)`,
+  };
+  const startButtonColor = modeColor;
+  const startButtonStyle = useMemo(
+    () => ({
+      background: startButtonColor,
+      borderColor: startButtonColor,
+      boxShadow: `0 4px 12px color-mix(in srgb, ${startButtonColor} 28%, transparent)`,
+    }),
+    [startButtonColor],
+  );
 
   const handleStop = (task: TaskBrief) => {
     modal.confirm({
@@ -142,18 +178,31 @@ export function RuntimeBar({
     });
   };
 
-  const handleRestore = () => {
-    if (restoreStashedDraft()) {
-      detachFromActive();
+  const handleViewMonitor = async () => {
+    if (!detachedActiveTask) return;
+    setAttaching(true);
+    try {
+      await attachToActive(detachedActiveTask.id);
+    } catch (e) {
+      showApiError(e);
+    } finally {
+      setAttaching(false);
     }
   };
 
   // 「返回编辑」：纯状态机切换，不动画布也不动监控数据。
-  // 适用场景：自己启动的任务结束后想接着改流程；attach 别人的任务结束后不需要恢复 stash。
-  // 与 reset() 的区别：reset 会清空画布、表单与监控；这里只负责退出"只读 + 监控"。
+  // finalReport 下是最终退出任务上下文；running/viewActive 下任务继续运行，可通过顶部入口重新查看监控。
   const handleBackToEdit = () => {
     detachFromActive();
   };
+
+  const modeTag = (
+    <Tooltip title={modeTip}>
+      <Tag icon={modeIcon} style={modeTagStyle}>
+        {modeText}
+      </Tag>
+    </Tooltip>
+  );
 
   const settingsContent = (
     <Space direction="vertical" size={10} style={{ minWidth: 240 }}>
@@ -244,53 +293,21 @@ export function RuntimeBar({
           </Tag>
         </Tooltip>
       )}
-      {/* 模式标识：测试 vs 调试 互斥
-          - debugMode=true  → 紫色"调试"标签：装填小数据 + 跳过容量预检 + log=debug；
-          - debugMode=false → 蓝色"测试"标签（默认）：保留用户填写的全量配置，按容量预检与日志级别。
-          颜色与 设置 Popover / TaskStartModal 中保持一致，让用户一眼看到当前是哪种模式。 */}
-      {mode === 'edit' && (
-        <Tooltip
-          title={
-            debugMode
-              ? '调试模式：启动跳过容量预检 + 自动装填 1 个机器人 / 并发 1 + 日志级别 debug。点击"设置"可切换到测试模式'
-              : '测试模式：使用你填写的完整配置，启用容量预检与默认日志级别。点击"设置"可切换到调试模式'
-          }
-        >
-          {debugMode ? (
-            <Tag
-              icon={<BugOutlined />}
-              style={{
-                margin: 0,
-                color: 'var(--mode-debug-color)',
-                borderColor: 'color-mix(in srgb, var(--mode-debug-color) 32%, transparent)',
-                background: 'color-mix(in srgb, var(--mode-debug-color) 10%, transparent)',
-              }}
-            >
-              调试
-            </Tag>
-          ) : (
-            <Tag
-              icon={<CheckCircleOutlined />}
-              style={{
-                margin: 0,
-                color: 'var(--mode-test-color)',
-                borderColor: 'color-mix(in srgb, var(--mode-test-color) 30%, transparent)',
-                background: 'color-mix(in srgb, var(--mode-test-color) 8%, transparent)',
-              }}
-            >
-              测试
-            </Tag>
-          )}
-        </Tooltip>
+      {mode === 'edit' && detachedActiveTask && (
+        <Space size={4}>
+          <Tag color={STATE_COLOR[detachedActiveTask.state]} style={{ margin: 0 }}>
+            {STATE_LABEL[detachedActiveTask.state]}
+          </Tag>
+          {modeTag}
+        </Space>
       )}
+      {mode === 'edit' && !detachedActiveTask && modeTag}
       {(mode === 'running' || mode === 'viewActive') && activeTask && (
         <Space size={4}>
           <Tag color={STATE_COLOR[activeTask.state]} style={{ margin: 0 }}>
-            {activeTask.state}
+            {STATE_LABEL[activeTask.state]}
           </Tag>
-          <Typography.Text style={{ maxWidth: 160 }} ellipsis={{ tooltip: activeTask.name }}>
-            {activeTask.name}
-          </Typography.Text>
+          {modeTag}
           {agentEvents.some((e) => e.type === 'offline' || e.type === 'restarted') && (() => {
             const offlineIds = new Set(
               agentEvents.filter((e) => e.type === 'offline').map((e) => e.agentId),
@@ -323,8 +340,8 @@ export function RuntimeBar({
       )}
       {mode === 'finalReport' && (
         <Space size={4}>
-          <Tag color={activeTask?.state === 'failed' ? 'error' : 'default'} style={{ margin: 0 }}>
-            已结束（{activeTask?.state ?? 'stopped'}）
+          <Tag color={STATE_COLOR[activeTask?.state ?? 'stopped']} style={{ margin: 0 }}>
+            {STATE_LABEL[activeTask?.state ?? 'stopped']}
           </Tag>
           {(() => {
             const detail = activeTask as { cleanupSummary?: import('@/types/api').CleanupStatus } | null;
@@ -353,48 +370,64 @@ export function RuntimeBar({
 
       {/* === 主操作组 === */}
       {mode === 'edit' && (
-        <Tooltip title={onlineAgents === 0 ? '没有在线的节点，无法启动' : ''}>
-          <Button
-            type="primary"
-            icon={<PlayCircleOutlined />}
-            onClick={() => setStartOpen(true)}
-            disabled={onlineAgents === 0}
-          >
-            启动
-          </Button>
-        </Tooltip>
-      )}
-      {(mode === 'running' || mode === 'viewActive') && activeTask && (
-        <Tooltip
-          title={
-            mode === 'viewActive' && ownedTaskId !== activeTask.id
-              ? '该任务由其他客户端发起；服务端允许任意客户端停止'
-              : ''
-          }
-        >
-          <Button
-            danger
-            icon={<StopOutlined />}
-            loading={stopping}
-            onClick={() => handleStop(activeTask)}
-          >
-            停止
-          </Button>
-        </Tooltip>
-      )}
-      {mode === 'finalReport' && (
         <Space size={4}>
-          <Tooltip title="退出监控状态，画布与最后一份监控数据保留，可继续修改流程">
-            <Button type="primary" icon={<EditOutlined />} onClick={handleBackToEdit}>
-              返回编辑
-            </Button>
-          </Tooltip>
-          {hasStashedDraft() && (
-            <Tooltip title="从本地存储还原「查看运行中」之前缓存的本地稿">
-              <Button onClick={handleRestore}>恢复编辑稿</Button>
+          {detachedActiveTask && (
+            <Tooltip title="进入当前运行任务的监控面板，画布将切换为只读">
+              <Button
+                type="primary"
+                icon={<EyeOutlined />}
+                loading={attaching}
+                onClick={handleViewMonitor}
+                style={startButtonStyle}
+              >
+                监测
+              </Button>
+            </Tooltip>
+          )}
+          {!detachedActiveTask && (
+            <Tooltip title={startDisabledTip}>
+              <Button
+                type="primary"
+                icon={<PlayCircleOutlined />}
+                onClick={() => setStartOpen(true)}
+                disabled={startDisabled}
+                style={startDisabled ? undefined : startButtonStyle}
+              >
+                启动
+              </Button>
             </Tooltip>
           )}
         </Space>
+      )}
+      {(mode === 'running' || mode === 'viewActive') && activeTask && (
+        <Space size={4}>
+          <Button type="primary" icon={<EditOutlined />} onClick={detachToEdit} style={startButtonStyle}>
+            返回编辑
+          </Button>
+          <Tooltip
+            title={
+              mode === 'viewActive' && ownedTaskId !== activeTask.id
+                ? '该任务由其他客户端发起；服务端允许任意客户端停止'
+                : ''
+            }
+          >
+            <Button
+              danger
+              icon={<StopOutlined />}
+              loading={stopping}
+              onClick={() => handleStop(activeTask)}
+            >
+              停止
+            </Button>
+          </Tooltip>
+        </Space>
+      )}
+      {mode === 'finalReport' && (
+        <Tooltip title="退出监控状态，画布与最后一份监控数据保留，可继续修改流程">
+          <Button type="primary" icon={<EditOutlined />} onClick={handleBackToEdit}>
+            返回编辑
+          </Button>
+        </Tooltip>
       )}
 
       {SECTION_DIVIDER}

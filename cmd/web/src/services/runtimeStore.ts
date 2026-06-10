@@ -36,8 +36,10 @@ const HISTORY_WINDOW = 60;
 export interface RuntimeState {
   mode: RuntimeMode;
 
-  /** 当前 active 任务（任意客户端发起的都算） */
+  /** 当前正在查看的 active 任务（任意客户端发起的都算） */
   activeTask: TaskBrief | null;
+  /** 临时返回编辑后保留的运行中任务，用于无刷新重新进入监控 */
+  detachedActiveTask: TaskBrief | null;
   /** 本端发起的任务 ID（停止时校验用） */
   ownedTaskId: string | null;
 
@@ -73,6 +75,7 @@ export interface RuntimeState {
   // === 状态机 / 数据 setter ===
   setMode: (m: RuntimeMode) => void;
   setActiveTask: (task: TaskBrief | null) => void;
+  setDetachedActiveTask: (task: TaskBrief | null) => void;
   setOwnedTaskId: (id: string | null) => void;
 
   setTaskName: (v: string) => void;
@@ -100,13 +103,14 @@ export interface RuntimeState {
    */
   clearMonitorData: () => void;
   /**
-   * 返回编辑（finalReport / viewActive → edit）。
+   * 运行中临时返回编辑：任务继续运行，保留任务引用供顶部栏无刷新重新进入监控。
+   */
+  detachToEdit: () => void;
+  /**
+   * 最终退出任务上下文（finalReport → edit）。
    *
-   * 仅切状态机 + 清掉与"具体任务"绑定的 activeTask / ownedTaskId，
-   * **不动**画布（flowStore）、表单缓存与最后一份监控快照：
-   *   - 自己启动的任务结束后想接着改流程：画布即原始内容；
-   *   - 只读监控期间想退出查看模式：画布会保留远端 attach 时拉到的 flow（用户可继续基于它编辑）；
-   *   - 监控数据保留是为了让 MonitorDock 仍能查看末次值（edit 模式下默认折叠）。
+   * 仅切状态机 + 清掉与"具体任务"绑定的 activeTask / ownedTaskId / detachedActiveTask，
+   * **不动**画布（flowStore）、表单缓存与最后一份监控快照。
    * 如需彻底清空请用 `reset()`（"新建任务"按钮）。
    */
   detachFromActive: () => void;
@@ -135,6 +139,7 @@ const DEFAULT_ROBOT_CONFIG: RobotConfig = {
 const initialState = {
   mode: 'edit' as RuntimeMode,
   activeTask: null,
+  detachedActiveTask: null,
   ownedTaskId: null,
   taskName: '未命名任务',
   totalBots: 100,
@@ -168,6 +173,7 @@ export const useRuntimeStore = create<RuntimeState>()(
 
       setMode: (m) => set({ mode: m }),
       setActiveTask: (task) => set({ activeTask: task }),
+      setDetachedActiveTask: (task) => set({ detachedActiveTask: task }),
       setOwnedTaskId: (id) => set({ ownedTaskId: id }),
 
       setTaskName: (v) => set({ taskName: v }),
@@ -255,13 +261,22 @@ export const useRuntimeStore = create<RuntimeState>()(
           assignedAgents: 0,
         }),
 
+      detachToEdit: () =>
+        set((s) => ({
+          mode: 'edit',
+          activeTask: null,
+          detachedActiveTask: s.activeTask ?? s.detachedActiveTask,
+          // 保留 ownedTaskId：自己启动的任务稍后重新进入监控时仍按 running 处理。
+          // 保留 latestStress / latestSystem / history，任务继续运行但 edit 模式不展示 MonitorDock。
+        })),
+
       detachFromActive: () =>
         set({
           mode: 'edit',
           activeTask: null,
+          detachedActiveTask: null,
           ownedTaskId: null,
-          // 保留 latestStress / latestSystem / history：edit 模式 MonitorDock 默认折叠，
-          // 用户主动展开仍可看到末次快照，需要彻底清掉请走 reset()。
+          // 保留 latestStress / latestSystem / history：用于终态返回后短暂参考末次快照。
         }),
 
       reset: () =>

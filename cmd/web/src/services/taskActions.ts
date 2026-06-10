@@ -232,6 +232,7 @@ export async function stopTask(taskId?: string): Promise<TaskBrief | null> {
  */
 export async function attachToActive(taskId: string): Promise<void> {
   const detail: TaskDetail = await tasksApi.getTask(taskId);
+  const runtime = useRuntimeStore.getState();
 
   // stash 当前编辑稿到 LocalStorage（仅当前面有内容时）
   const flowState = useFlowStore.getState();
@@ -252,10 +253,7 @@ export async function attachToActive(taskId: string): Promise<void> {
   // 拉远端 flow.json
   let remoteFlow: FlowJson | null = null;
   try {
-    const res = await fetch(tasksApi.taskConfigUrl(taskId, 'flow/flow.json'));
-    if (res.ok) {
-      remoteFlow = (await res.json()) as FlowJson;
-    }
+    remoteFlow = await tasksApi.getTaskConfigJson<FlowJson>(taskId, 'flow/flow.json');
   } catch {
     // 不阻塞：detail 已成功，画布保持本地稿
   }
@@ -267,14 +265,17 @@ export async function attachToActive(taskId: string): Promise<void> {
     void syncFlowScriptsToIdb(remoteFlow);
   }
 
-  const runtime = useRuntimeStore.getState();
   // 同 startTask：在切换 mode 前清掉残留监控数据，避免上一次的 finalReport 数据闪一下；
   // useMetricsStore.provider 也必须同步清掉，否则节点会保留上次任务 1~2 帧的 p99/apdex/边框。
   runtime.clearMonitorData();
   useMetricsStore.getState().setProvider(undefined);
   runtime.setActiveTask(detail);
-  // 本端没主导这个任务（任意客户端发起）→ 走 viewActive
-  if (runtime.ownedTaskId !== taskId) {
+  runtime.setDetachedActiveTask(null);
+  if (detail.state === 'stopped' || detail.state === 'failed') {
+    runtime.setOwnedTaskId(null);
+    runtime.setMode('finalReport');
+  } else if (runtime.ownedTaskId !== taskId) {
+    // 本端没主导这个任务（任意客户端发起）→ 走 viewActive
     runtime.setOwnedTaskId(null);
     runtime.setMode('viewActive');
   } else {

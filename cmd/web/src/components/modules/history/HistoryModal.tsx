@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import dayjs from 'dayjs';
 import { ApiError, historyApi, showApiError } from '@/services';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
+import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
 import { FloatingWindow } from '@/components/FlowEditor/panels/FloatingWindow';
 import type { HistoryRecord } from '@/types/api';
 import { HistoryDetailView } from './HistoryDetailView';
@@ -52,6 +53,7 @@ type View =
 
 export function HistoryModal({ open, onClose }: HistoryModalProps) {
   const { message, modal } = App.useApp();
+  const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
   const [view, setView] = useState<View>({ kind: 'list' });
   const [items, setItems] = useState<HistoryRecord[]>([]);
   const [total, setTotal] = useState(0);
@@ -107,14 +109,19 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
   const onToggleStageStar = useCallback(
     async (child: HistoryRecord, e?: React.MouseEvent) => {
       e?.stopPropagation();
+      const stageIndex = child.stageIndex;
+      if ((stageIndex ?? -1) <= 0) {
+        message.error('阶段索引缺失，无法更新收藏');
+        return;
+      }
       try {
-        await historyApi.updateHistory(child.id, { starred: !child.starred }, child.stageIndex);
+        await historyApi.updateHistory(child.id, { starred: !child.starred }, stageIndex);
         refresh();
       } catch (err) {
         showApiError(err);
       }
     },
-    [refresh],
+    [message, refresh],
   );
 
   const taskStarredMap = useMemo(() => {
@@ -138,6 +145,7 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
       modal.confirm({
         title: '确认删除？',
         content: protectedByStar ? '该任务或阶段已收藏，需要强制删除' : `将删除 ${record.name} 的所有数据`,
+        zIndex: popupZ,
         okText: protectedByStar ? '强制删除' : '删除',
         okButtonProps: { danger: true },
         onOk: async () => {
@@ -151,7 +159,7 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
         },
       });
     },
-    [isTaskProtected, modal, message, refresh],
+    [isTaskProtected, modal, message, popupZ, refresh],
   );
 
   const toggleSelect = (target: SelTarget, e?: React.MouseEvent) => {
@@ -198,6 +206,7 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
     modal.confirm({
       title: `确认批量删除 ${uniqueParents.length} 个任务？`,
       content,
+      zIndex: popupZ,
       okText: '删除',
       okButtonProps: { danger: true },
       onOk: async () => {
@@ -212,7 +221,7 @@ export function HistoryModal({ open, onClose }: HistoryModalProps) {
         }
       },
     });
-  }, [modal, message, refresh, uniqueParents]);
+  }, [modal, message, popupZ, refresh, selected, uniqueParents]);
 
   const paged = items.slice((page - 1) * pageSize, page * pageSize);
 
@@ -619,16 +628,18 @@ function StageGroup({
       {expanded && (
         <div className="hp-stage-track" role="list">
           {children.map((c) => {
-            const sel = isSelected({ id: r.id, stageIndex: c.stageIndex });
-            const displayStageLabel = formatStageLabel(c.stageLabel, c.stageIndex);
-            const open = () => onOpenStage(c.stageIndex ?? 0, displayStageLabel);
+            const stageIndex = c.stageIndex;
+            if (stageIndex === undefined || stageIndex <= 0) return null;
+            const sel = isSelected({ id: r.id, stageIndex });
+            const displayStageLabel = formatStageLabel(c.stageLabel, stageIndex);
+            const open = () => onOpenStage(stageIndex, displayStageLabel);
             const cTags = c.tags ?? [];
             const cNote = (c.note ?? '').trim();
             const cFailed = c.state === 'failed';
             const hasMetrics = (c.totalActions ?? 0) > 0;
             return (
               <div
-                key={c.stageIndex}
+                key={stageIndex}
                 role="listitem"
                 className={`hp-stage-child${sel ? ' hp-stage-child--selected' : ''}${cFailed ? ' hp-stage-child--failed' : ''}`}
                 onClick={open}
@@ -648,7 +659,7 @@ function StageGroup({
                       onSelect(
                         {
                           id: r.id,
-                          stageIndex: c.stageIndex,
+                          stageIndex,
                           stageLabel: displayStageLabel,
                           name: r.name,
                           starred: c.starred,
