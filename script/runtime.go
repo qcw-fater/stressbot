@@ -30,6 +30,7 @@ const registryCtxKey = "__stressbot_ctx__"
 // 避免 Lua 多次 request 被合并成一个 RTT 直方图样本。
 type Context struct {
 	RobotID int
+	Index   int
 	Account string
 	Store   *state.Store
 	Factory *protox.Factory

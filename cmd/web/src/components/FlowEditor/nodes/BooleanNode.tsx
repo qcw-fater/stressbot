@@ -3,7 +3,7 @@
  */
 
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { Tooltip } from 'antd';
+import { Tag, Tooltip } from 'antd';
 import { NodeShell } from './shared/NodeShell';
 import type { FlowNode } from '@/types/flow';
 
@@ -16,8 +16,31 @@ function trim(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + '…' : s;
 }
 
+/** 将条件文本格式化为画布显示：剥离重复 state:/lua: 前缀，保留类型标记 */
+function formatCondition(cond: string): { display: string; tag: string } {
+  let display = cond.trim();
+  let tag = '';
+
+  while (display.startsWith('state:') || display.startsWith('lua:')) {
+    if (display.startsWith('state:')) {
+      tag = 'state';
+      display = display.slice(6).trimStart();
+      continue;
+    }
+    tag = 'lua';
+    display = display.slice(4).trimStart();
+  }
+
+  return { display, tag };
+}
+
 export function BooleanNode({ id, data, selected }: NodeProps) {
   const { node } = data as unknown as NodeData;
+  const normalizedCondition = node.condition ? formatCondition(node.condition) : null;
+  const conditionTitle = normalizedCondition
+    ? normalizedCondition.tag + normalizedCondition.display
+    : '';
+
   return (
     <>
       <Handle type="target" position={Position.Left} id="in" />
@@ -32,9 +55,9 @@ export function BooleanNode({ id, data, selected }: NodeProps) {
         description={node.description}
       >
         {node.condition ? (
-          <Tooltip title={node.condition} mouseEnterDelay={0.4}>
-            <div style={{ fontFamily: 'monospace', fontSize: 10 }}>
-              {trim(node.condition, 32)}
+          <Tooltip title={conditionTitle} mouseEnterDelay={0.4}>
+            <div style={{ fontFamily: 'monospace', fontSize: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <ConditionDisplay condition={node.condition} />
             </div>
           </Tooltip>
         ) : (
@@ -53,6 +76,20 @@ export function BooleanNode({ id, data, selected }: NodeProps) {
         id="false"
         style={{ top: '70%', background: 'var(--edge-false)' }}
       />
+    </>
+  );
+}
+
+/** 条件文本显示组件 */
+function ConditionDisplay({ condition }: { condition: string }) {
+  const { display, tag } = formatCondition(condition);
+  const tagColor = tag === 'lua' ? 'purple' : 'blue';
+  return (
+    <>
+      <Tag color={tagColor} style={{ fontSize: 9, lineHeight: '14px', padding: '0 3px', margin: 0, flexShrink: 0 }}>
+        {tag}
+      </Tag>
+      {trim(display, 28)}
     </>
   );
 }

@@ -289,7 +289,40 @@ export async function attachToActive(taskId: string): Promise<void> {
 }
 
 /**
- * 还原 stash 编辑稿（finalReport / detach 后用户主动选择"恢复编辑稿"时调用）。
+ * 运行中临时返回编辑：恢复本地草稿画布，保留脱离态任务引用。
+ *
+ * 与 attachToActive 配对：attach 负责把本地草稿 stash 并加载远端 flow；
+ * 本函数把 stash 还原回 flowStore，实现编辑/监测两个独立 flow 互不干扰。
+ * 不清除 stash（用户可能重新进入监测）。
+ */
+export function detachToEditWithRestore(): void {
+  restoreStash(false);
+  useRuntimeStore.getState().detachToEdit();
+}
+
+/**
+ * 最终退出任务上下文（finalReport → edit）：恢复本地草稿画布并清除 stash。
+ */
+export function detachFromActiveWithRestore(): void {
+  restoreStash(true);
+  useRuntimeStore.getState().detachFromActive();
+}
+
+/** 从 LocalStorage 恢复 stash 的编辑稿到 flowStore。 */
+function restoreStash(clear: boolean): void {
+  try {
+    const raw = localStorage.getItem(DRAFT_STASH_KEY);
+    if (!raw) return;
+    const stash = JSON.parse(raw) as StashedDraft;
+    useFlowStore.getState().loadFromTaskFlow(stash.flow, stash.layout);
+    if (clear) localStorage.removeItem(DRAFT_STASH_KEY);
+  } catch {
+    // 恢复失败，保持当前画布
+  }
+}
+
+/**
+ * 还原 stash 编辑稿（外部手动调用）。
  * @returns 是否成功还原
  */
 export function restoreStashedDraft(): boolean {

@@ -115,6 +115,7 @@ func (m *Manager) startBatch(fromIndex, count, conc int) (int, error) {
 
 		r, err := NewRobot(Config{
 			ID:             id,
+			Index:          fromIndex + i,
 			Account:        account,
 			StateExtra:     m.cfg.StateExtra,
 			HTTPTimeout:    m.cfg.HTTPTimeout,

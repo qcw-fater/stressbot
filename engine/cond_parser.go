@@ -80,6 +80,8 @@ func parseAtom(input string, s *state.Store) bool {
 }
 
 // evalAtom 求值单个原子条件：key op value 或 key（truthy）。
+// 支持比较运算：>=, <=, !=, ==, >, <
+// 右值支持 nil 字面量（state:key == nil / state:key != nil）。
 func evalAtom(input string, s *state.Store) bool {
 	input = strings.TrimSpace(input)
 
@@ -87,16 +89,13 @@ func evalAtom(input string, s *state.Store) bool {
 		if idx := findOpOutsideParens(input, op); idx > 0 {
 			key := strings.TrimSpace(input[:idx])
 			rhsStr := strings.TrimSpace(input[idx+len(op):])
-			lhs := s.Get(key)
-			if lhs == nil {
-				return false
-			}
+			lhs := s.GetPath(key)
 			rhs := parseRHS(rhsStr)
 			return state.CompareValues(lhs, rhs, op)
 		}
 	}
 
-	val := s.Get(input)
+	val := s.GetPath(input)
 	if val == nil {
 		return false
 	}

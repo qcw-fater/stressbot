@@ -39,6 +39,8 @@ import { useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import {
   attachToActive,
+  detachToEditWithRestore,
+  detachFromActiveWithRestore,
   showApiError,
   stopTask,
   useRuntimeStore,
@@ -96,8 +98,6 @@ export function RuntimeBar({
     agents,
     connectionLost,
     agentEvents,
-    detachToEdit,
-    detachFromActive,
   } = useRuntimeStore(
     useShallow((s) => ({
       mode: s.mode,
@@ -107,8 +107,6 @@ export function RuntimeBar({
       agents: s.agents,
       connectionLost: s.connectionLost,
       agentEvents: s.agentEvents,
-      detachToEdit: s.detachToEdit,
-      detachFromActive: s.detachFromActive,
     })),
   );
 
@@ -190,10 +188,10 @@ export function RuntimeBar({
     }
   };
 
-  // 「返回编辑」：纯状态机切换，不动画布也不动监控数据。
-  // finalReport 下是最终退出任务上下文；running/viewActive 下任务继续运行，可通过顶部入口重新查看监控。
+  // 「返回编辑」：恢复本地草稿画布 + 切换状态机。
+  // finalReport 下清除 stash 并退出任务上下文。
   const handleBackToEdit = () => {
-    detachFromActive();
+    detachFromActiveWithRestore();
   };
 
   const modeTag = (
@@ -401,7 +399,7 @@ export function RuntimeBar({
       )}
       {(mode === 'running' || mode === 'viewActive') && activeTask && (
         <Space size={4}>
-          <Button type="primary" icon={<EditOutlined />} onClick={detachToEdit} style={startButtonStyle}>
+          <Button type="primary" icon={<EditOutlined />} onClick={detachToEditWithRestore} style={startButtonStyle}>
             返回编辑
           </Button>
           <Tooltip

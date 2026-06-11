@@ -28,7 +28,12 @@ func EvalCondition(expr string, s *state.Store) bool {
 }
 
 // parseRHS 尝试将条件右值解析为数值类型，保留字符串回退。
+// 支持 nil 字面量：返回 Go nil，用于 nil 比较（state:key == nil / state:key != nil）。
 func parseRHS(s string) any {
+	s = strings.TrimSpace(s)
+	if s == "nil" {
+		return nil
+	}
 	if v, err := strconv.ParseInt(s, 10, 64); err == nil {
 		return v
 	}

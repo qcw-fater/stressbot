@@ -49,6 +49,8 @@ export {
   startTask,
   stopTask,
   attachToActive,
+  detachToEditWithRestore,
+  detachFromActiveWithRestore,
   restoreStashedDraft,
   hasStashedDraft,
 } from './taskActions';

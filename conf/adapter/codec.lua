@@ -27,7 +27,7 @@ local HEADER_SIZE    = 12
 local FLAG_ENCRYPT   = 1   -- bit0: 已加密
 local FLAG_COMPRESS  = 2   -- bit1: 已压缩（GZIP）
 local UDP_ENC_OFFSET = 11  -- UDP 数据前 11 字节保持明文
-local GZIP_THRESHOLD = 256 -- body 超过此字节数才尝试 GZIP 压缩
+local GZIP_THRESHOLD = 2048 -- 与服务端 CompressLimit 保持一致，body 达到此字节数才尝试 GZIP 压缩
 
 -- ─── 元信息接口（Go 初始化时一次性调用，结果缓存到 Go 层）──────────────────
 

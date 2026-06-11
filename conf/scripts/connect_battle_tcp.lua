@@ -51,7 +51,7 @@ function execute(r)
     -- 发送空包获取密钥并设置到连接
     -- 不显式传 timeout，复用 robotConfig.timeoutSec（默认 60s）；
     -- 若需要单独缩短此握手超时，再传第 5 个参数。
-    local code, keyBody = network.tcp_request("battle")
+    local code, keyBody = network.tcp_request("battle", {cmd=0, act=0})
     if code ~= 0 then
         log.error("战斗服密钥交换失败: address=" .. tostring(battleAddress)
             .. " battleId=" .. tostring(battleId)

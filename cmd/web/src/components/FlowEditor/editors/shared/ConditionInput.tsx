@@ -52,7 +52,7 @@ export function ConditionInput({ value, onChange, placeholder }: ConditionInputP
           {mode === 'state' ? (
             <StateExprInput
               value={tail}
-              onChange={(v) => onChange?.(v ? 'state:' + v : '')}
+              onChange={(v) => onChange?.(v || '')}
               placeholder={placeholder}
             />
           ) : (

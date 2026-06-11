@@ -31,6 +31,7 @@ const SOURCE_TYPE_LABEL: Record<string, { label: string; color: string }> = {
   stateExtra: { label: '启动', color: 'volcano' },
   storeAs: { label: '中间值', color: 'green' },
   lua: { label: 'Lua', color: 'purple' },
+  builtin: { label: '内置', color: 'cyan' },
 };
 
 export function StateKeyInput({
@@ -113,7 +114,7 @@ export function StateKeyInput({
             ← {resolveStateKeyDisplayType(k) ?? k.s2cProto.split('.').pop()}
           </span>
         )}
-        {k.sourceType !== 'stateExtra' && k.sourceType !== 'storeAs' && (
+        {k.sourceType !== 'stateExtra' && k.sourceType !== 'storeAs' && k.sourceType !== 'builtin' && (
           <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
             ({k.sourceName})
           </span>
