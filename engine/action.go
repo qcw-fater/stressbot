@@ -274,7 +274,7 @@ func (ae *ActionExecutor) bindFields(msg proto.Message, bindings []FieldBind, ac
 
 		// 3) StoreAs：同时写 state（即使 Field 为空也写入）
 		if fb.StoreAs != "" && value != nil {
-			ae.store.Set(fb.StoreAs, value)
+			ae.store.SetPath(fb.StoreAs, value)
 		}
 
 		// 4) 值仍为 nil 或 Field 为空 → 跳过 proto 赋值
@@ -498,27 +498,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 
 // navigatePath 按点分路径从嵌套 map/list 中提取值。
 func navigatePath(v any, path string) any {
-	current := v
-	for _, key := range state.SplitPath(path) {
-		if current == nil {
-			return nil
-		}
-		switch c := current.(type) {
-		case map[string]any:
-			current = c[key]
-		case []any:
-			idxStr := strings.Trim(key, "[]")
-			var idx int
-			_, err := fmt.Sscanf(idxStr, "%d", &idx)
-			if err != nil || idx < 0 || idx >= len(c) {
-				return nil
-			}
-			current = c[idx]
-		default:
-			return nil
-		}
-	}
-	return current
+	return state.NavigatePath(v, path)
 }
 
 // navigatePathValues 按点分路径从嵌套 map/list 中提取一个或多个值。
@@ -635,7 +615,7 @@ func (ae *ActionExecutor) execSetState(def *ActionDef) error {
 		if val == nil {
 			continue
 		}
-		ae.store.Set(fb.Field, val)
+		ae.store.SetPath(fb.Field, val)
 	}
 	return nil
 }
@@ -757,7 +737,7 @@ func (ae *ActionExecutor) parseAndStoreResponse(def *ActionDef, respBody []byte)
 	if def.S2CProto == "" {
 		for _, m := range def.Store {
 			if m.Field == "" {
-				ae.store.Set(m.Setter, respBody)
+				ae.store.SetPath(m.Setter, respBody)
 			}
 		}
 		return nil
@@ -794,11 +774,11 @@ func (ae *ActionExecutor) storeResponse(mappings []StoreMapping, fieldMap map[st
 
 	for _, m := range mappings {
 		if m.Field == "" {
-			ae.store.Set(m.Setter, fieldMap)
+			ae.store.SetPath(m.Setter, fieldMap)
 		} else {
 			val := navigatePath(fieldMap, m.Field)
 			if val != nil {
-				ae.store.Set(m.Setter, val)
+				ae.store.SetPath(m.Setter, val)
 				stresslog.Debug("[ACTION] storeResponse 存储",
 					zap.String("field", m.Field), zap.String("setter", m.Setter),
 					zap.String("type", fmt.Sprintf("%T", val)))

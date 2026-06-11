@@ -5,11 +5,14 @@
  *      ListenEditor（declarative 形态的 store）
  */
 
-import { Button, Collapse, Input, Space, Tag, Tooltip } from 'antd';
+import { Button, Collapse, Space, Tag, Tooltip } from 'antd';
 import { ArrowUpOutlined, ArrowDownOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import type { CollapseProps } from 'antd';
 import type { StoreMapping } from '@/types/action';
+import type { ActionDef } from '@/types/action';
+import type { ListenDef } from '@/types/listen';
 import { ProtoPathInput } from './ProtoPathInput';
+import { SetterPathInput } from '../shared/SetterPathInput';
 
 export interface StoreTableProps {
   s2cProto?: string;
@@ -17,9 +20,14 @@ export interface StoreTableProps {
   onChange?: (v: StoreMapping[]) => void;
   /** 区块标题 */
   label?: string;
+  /** 以下 props 透传给 SetterPathInput 以浏览 state key 树 */
+  actions?: Record<string, ActionDef>;
+  listens?: Record<string, ListenDef>;
+  stateExtra?: Record<string, string>;
+  luaScripts?: Array<{ name: string; content: string }>;
 }
 
-export function StoreTable({ s2cProto, value, onChange, label }: StoreTableProps) {
+export function StoreTable({ s2cProto, value, onChange, label, actions, listens, stateExtra, luaScripts }: StoreTableProps) {
   const list = value ?? [];
   const set = (next: StoreMapping[]) => onChange?.(next);
 
@@ -70,38 +78,39 @@ export function StoreTable({ s2cProto, value, onChange, label }: StoreTableProps
       </Space>
     ),
     children: (
-      <Space direction="vertical" style={{ width: '100%' }} size="middle">
-        <Space wrap style={{ width: '100%' }}>
-          <Tooltip title="留空 = 存储整个 S2C 消息" mouseEnterDelay={0.4}>
-            <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>field</span>
-          </Tooltip>
-          <div style={{ width: 320 }}>
-            <ProtoPathInput
-              messageFullName={s2cProto}
-              value={s.field}
-              onChange={(v) => {
-                const arr = [...list];
-                arr[i] = { ...arr[i], field: v || undefined };
-                set(arr);
-              }}
-              placeholder="填写或选择字段 (留空存整体)"
-            />
-          </div>
-          <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>→</span>
-          <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>setter</span>
-          <Input
-            placeholder="state key"
-            value={s.setter ?? ''}
-            onChange={(e) => {
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', minWidth: 0 }}>
+        <Tooltip title="留空 = 存储整个 S2C 消息" mouseEnterDelay={0.4}>
+          <span style={{ fontSize: 12, color: 'var(--text-tertiary)', flexShrink: 0 }}>field</span>
+        </Tooltip>
+        <div style={{ flex: '1 1 260px', minWidth: 180 }}>
+          <ProtoPathInput
+            messageFullName={s2cProto}
+            value={s.field}
+            onChange={(v) => {
               const arr = [...list];
-              arr[i] = { ...arr[i], setter: e.target.value };
+              arr[i] = { ...arr[i], field: v || undefined };
               set(arr);
             }}
-            size="small"
-            style={{ width: 200 }}
+            placeholder="填写或选择字段 (留空存整体)"
           />
-        </Space>
-      </Space>
+        </div>
+        <span style={{ fontSize: 12, color: 'var(--text-tertiary)', flexShrink: 0 }}>→</span>
+        <span style={{ fontSize: 12, color: 'var(--text-tertiary)', flexShrink: 0 }}>setter</span>
+        <div style={{ flex: '1 1 220px', minWidth: 170 }}>
+          <SetterPathInput
+            value={s.setter ?? ''}
+            onChange={(v) => {
+              const arr = [...list];
+              arr[i] = { ...arr[i], setter: v };
+              set(arr);
+            }}
+            actions={actions ?? {}}
+            listens={listens ?? {}}
+            stateExtra={stateExtra}
+            luaScripts={luaScripts}
+          />
+        </div>
+      </div>
     ),
   }));
 

@@ -109,11 +109,29 @@ const robotModule: LuaModule = {
       example: `local item = robot.get_path("playerData.bag[0].itemId")`,
     },
     {
+      name: 'set_path',
+      module: 'robot',
+      params: [
+        { name: 'path', type: 'string', doc: '形如 "a.b[0].c" 的路径' },
+        { name: 'value', type: 'any', doc: '任意值' },
+      ],
+      returns: '-',
+      summary: '按路径写入嵌套 map（自动创建中间节点）',
+      example: `robot.set_path("playerData.bag[0].itemId", 1001)`,
+    },
+    {
       name: 'get_id',
       module: 'robot',
       params: [],
       returns: 'number',
-      summary: '返回机器人编号',
+      summary: '返回机器人编号（= startNumber + index）',
+    },
+    {
+      name: 'get_index',
+      module: 'robot',
+      params: [],
+      returns: 'number',
+      summary: '返回批次内序号（0-based）',
     },
     {
       name: 'get_account',

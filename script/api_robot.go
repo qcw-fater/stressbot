@@ -3,7 +3,6 @@ package script
 import (
 	"fmt"
 	"strconv"
-	"stressbot/state"
 
 	lua "github.com/yuin/gopher-lua"
 	"google.golang.org/protobuf/proto"
@@ -23,7 +22,9 @@ const maxSafeInt = 1 << 53 // 9007199254740992，Lua double 可精确表示的�
 //	r.increment("key")     → 原子递增并返回新值
 //	r.keys()               → 返回所有 key 列表
 //	r.get_path("a.b[0].c") → 按路径读取嵌套值
+//	r.set_path("a.b[0].c", v) → 按路径写入嵌套值（自动创建中间 map）
 //	r.get_id()             → 返回机器人编号
+//	r.get_index()          → 返回批次内序号（0-based）
 //	r.get_account()        → 返回账号名
 //	r.get_context()        → 检查 context 是否已取消
 func loadRobotModule(L *lua.LState) int {
@@ -38,8 +39,10 @@ func loadRobotModule(L *lua.LState) int {
 	L.SetField(mod, "increment", L.NewFunction(robotIncrement))
 	L.SetField(mod, "keys", L.NewFunction(robotKeys))
 	L.SetField(mod, "get_path", L.NewFunction(robotGetPath))
+	L.SetField(mod, "set_path", L.NewFunction(robotSetPath))
 	// 元信息
 	L.SetField(mod, "get_id", L.NewFunction(robotGetID))
+	L.SetField(mod, "get_index", L.NewFunction(robotGetIndex))
 	L.SetField(mod, "get_account", L.NewFunction(robotGetAccount))
 	L.SetField(mod, "get_context", L.NewFunction(robotGetContext))
 
@@ -68,8 +71,12 @@ func robotIndex(L *lua.LState) int {
 		L.Push(L.NewFunction(robotKeys))
 	case "get_path":
 		L.Push(L.NewFunction(robotGetPath))
+	case "set_path":
+		L.Push(L.NewFunction(robotSetPath))
 	case "get_id":
 		L.Push(L.NewFunction(robotGetID))
+	case "get_index":
+		L.Push(L.NewFunction(robotGetIndex))
 	case "get_account":
 		L.Push(L.NewFunction(robotGetAccount))
 	case "get_context":
@@ -217,9 +224,26 @@ func robotGetPath(L *lua.LState) int {
 		return 1
 	}
 	path := lua.LVAsString(L.Get(base))
-	val := navigatePath(ctx.Store, path)
+	val := ctx.Store.GetPath(path)
 	L.Push(goValueToLua(L, val))
 	return 1
+}
+
+// robotSetPath robot.set_path(path, value) — 按路径写入嵌套 map/list（自动创建中间节点）
+func robotSetPath(L *lua.LState) int {
+	ctx := GetContext(L)
+	if ctx == nil || ctx.Store == nil {
+		return 0
+	}
+	base := firstRobotArg(L)
+	if L.GetTop() < base+1 {
+		L.RaiseError("robot.set_path requires (path, value)")
+		return 0
+	}
+	path := lua.LVAsString(L.Get(base))
+	value := luaToGoValue(L.Get(base + 1))
+	ctx.Store.SetPath(path, value)
+	return 0
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +258,17 @@ func robotGetID(L *lua.LState) int {
 		return 1
 	}
 	L.Push(lua.LNumber(ctx.RobotID))
+	return 1
+}
+
+// robotGetIndex robot.get_index() — 获取批次内序号（0-based）
+func robotGetIndex(L *lua.LState) int {
+	ctx := GetContext(L)
+	if ctx == nil {
+		L.Push(lua.LNumber(0))
+		return 1
+	}
+	L.Push(lua.LNumber(ctx.Index))
 	return 1
 }
 
@@ -262,52 +297,6 @@ func robotGetContext(L *lua.LState) int {
 // ---------------------------------------------------------------------------
 // 内部辅助
 // ---------------------------------------------------------------------------
-
-// navigatePath 按路径 "a.b[0].c" 读取值。
-// 顶层 a 从 Store 中获取，随后依次下钻 map/list。
-func navigatePath(store interface {
-	Get(key string) any
-}, path string) any {
-	if path == "" {
-		return nil
-	}
-	segments := state.SplitPath(path)
-	if len(segments) == 0 {
-		return nil
-	}
-	var cur any = store.Get(segments[0])
-	for i := 1; i < len(segments); i++ {
-		seg := segments[i]
-		if cur == nil {
-			return nil
-		}
-		if len(seg) >= 2 && seg[0] == '[' && seg[len(seg)-1] == ']' {
-			idxStr := seg[1 : len(seg)-1]
-			idx, err := strconv.Atoi(idxStr)
-			if err != nil {
-				return nil
-			}
-			switch list := cur.(type) {
-			case []any:
-				if idx >= 0 && idx < len(list) {
-					cur = list[idx]
-				} else {
-					return nil
-				}
-			default:
-				return nil
-			}
-			continue
-		}
-		switch m := cur.(type) {
-		case map[string]any:
-			cur = m[seg]
-		default:
-			return nil
-		}
-	}
-	return cur
-}
 
 // firstRobotArg 返回首个业务参数的栈索引，避免每次调用都分配参数切片。
 // 以方法形式调用（r:set(...)）时栈位 1 是 robot 的 LUserData（self），需跳过返回 2；

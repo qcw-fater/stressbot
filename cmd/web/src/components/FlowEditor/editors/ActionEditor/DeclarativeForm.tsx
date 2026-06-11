@@ -11,6 +11,7 @@ import { RouteEditor } from '../../listens/RouteEditor';
 import { BindingsTable } from './BindingsTable';
 import { StoreTable } from './StoreTable';
 import { useRuntimeStore } from '@/services/runtimeStore';
+import { useFlowStore } from '../../store/flowStore';
 import { protoRegistry } from '../../proto/ProtoRegistry';
 
 export interface DeclarativeFormProps {
@@ -21,6 +22,9 @@ export interface DeclarativeFormProps {
 export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
   const { pattern } = action;
   const requestTimeoutSec = useRuntimeStore((s) => s.robotConfig.timeoutSec);
+  const stateExtra = useRuntimeStore((s) => s.robotConfig.stateExtra);
+  const allActions = useFlowStore((s) => s.actions);
+  const allListens = useFlowStore((s) => s.listens);
   const timeoutPlaceholder = pattern === 'tcpRequest' || pattern === 'udpRequest' ? String(requestTimeoutSec || 60) : '60';
   const set = (partial: Partial<ActionDef>) => onChange({ ...action, ...partial });
 
@@ -158,6 +162,9 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
             value={action.store}
             onChange={(v) => set({ store: v })}
             label={pattern === 'httpRequest' ? 'store（JSON 响应 → state）' : 'store（S2C → state）'}
+            actions={allActions}
+            listens={allListens}
+            stateExtra={stateExtra}
           />
         </div>
       )}

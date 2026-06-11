@@ -5,6 +5,7 @@ package state
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -100,6 +101,107 @@ func (s *Store) GetMap(key string) map[string]any {
 		return m
 	}
 	return nil
+}
+
+// SetPath 按点分路径设置嵌套值，与 GetPath 对称。
+// 路径格式同 SplitPath："key.sub.field" 或 "list[0].field"。
+// 中间 map 不存在时自动创建（类似 mkdir -p）；已存在但非 map 时覆盖为新 map。
+// 遇到 [N] 数组索引段时要求对应位置已是 []any 且长度足够，否则跳过不设置。
+// 单段路径等价于 Set，空路径不操作。
+func (s *Store) SetPath(path string, value any) {
+	segments := SplitPath(path)
+	if len(segments) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 单段路径等价于 Set
+	if len(segments) == 1 {
+		s.data[segments[0]] = value
+		return
+	}
+
+	// 第一段：从 data 取值或创建；非 map/list 时覆盖为新 map
+	cur, ok := s.data[segments[0]]
+	if !ok {
+		cur = make(map[string]any)
+		s.data[segments[0]] = cur
+	} else {
+		switch cur.(type) {
+		case map[string]any, []any:
+		default:
+			cur = make(map[string]any)
+			s.data[segments[0]] = cur
+		}
+	}
+
+	// 中间段 [1..n-2]：导航或创建
+	for i := 1; i < len(segments)-1; i++ {
+		seg := segments[i]
+		next := navigateValue(cur, seg)
+		if next == nil {
+			if isArrayIndex(seg) {
+				return // 不自动创建数组元素
+			}
+			next = make(map[string]any)
+			setInValue(cur, seg, next)
+		} else {
+			switch next.(type) {
+			case map[string]any, []any:
+				// 可继续导航
+			default:
+				if isArrayIndex(seg) {
+					return
+				}
+				next = make(map[string]any)
+				setInValue(cur, seg, next)
+			}
+		}
+		cur = next
+	}
+
+	// 最后一段：写入值
+	setInValue(cur, segments[len(segments)-1], value)
+}
+
+// NavigatePath 从任意值中按点分路径提取子值（公开版本，供 engine/robot 包复用）。
+// 路径格式同 SplitPath，从 v 开始逐段导航 map/list。
+// v 为 nil 或路径不匹配时返回 nil。
+func NavigatePath(v any, path string) any {
+	cur := v
+	for _, seg := range SplitPath(path) {
+		if cur == nil {
+			return nil
+		}
+		cur = navigateValue(cur, seg)
+	}
+	return cur
+}
+
+// isArrayIndex 判断路径段是否为数组索引（如 "[0]"）。
+func isArrayIndex(seg string) bool {
+	return len(seg) >= 2 && seg[0] == '[' && seg[len(seg)-1] == ']'
+}
+
+// setInValue 在 cur 的指定段写入 val。
+// cur 必须为 map[string]any 或 []any；数组索引越界时跳过。
+func setInValue(cur any, seg string, val any) {
+	if isArrayIndex(seg) {
+		idx, err := strconv.Atoi(seg[1 : len(seg)-1])
+		if err != nil {
+			return
+		}
+		list, ok := cur.([]any)
+		if !ok || idx < 0 || idx >= len(list) {
+			return
+		}
+		list[idx] = val
+		return
+	}
+	if m, ok := cur.(map[string]any); ok {
+		m[seg] = val
+	}
 }
 
 // Delete 删除指定 key
@@ -237,6 +339,51 @@ func ToFloat64(v any) float64 {
 	default:
 		return 0
 	}
+}
+
+// GetPath 按点分路径从嵌套 map/list 中提取值。
+// 路径格式同 SplitPath：key.subfield / list[0].field。
+// 单段路径等价于 Get，无路径或路径不匹配返回 nil。
+func (s *Store) GetPath(path string) any {
+	segments := SplitPath(path)
+	if len(segments) == 0 {
+		return nil
+	}
+	cur := s.Get(segments[0])
+	for i := 1; i < len(segments); i++ {
+		if cur == nil {
+			return nil
+		}
+		cur = navigateValue(cur, segments[i])
+	}
+	return cur
+}
+
+// navigateValue 从单个值中按一段路径提取子值。
+func navigateValue(cur any, seg string) any {
+	seg = strings.TrimSpace(seg)
+	if seg == "" {
+		return nil
+	}
+	// 数组索引 [N]
+	if len(seg) >= 2 && seg[0] == '[' && seg[len(seg)-1] == ']' {
+		idxStr := seg[1 : len(seg)-1]
+		idx, err := strconv.Atoi(idxStr)
+		if err != nil {
+			return nil
+		}
+		list, ok := cur.([]any)
+		if !ok || idx < 0 || idx >= len(list) {
+			return nil
+		}
+		return list[idx]
+	}
+	// map key
+	m, ok := cur.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return m[seg]
 }
 
 // SplitPath 将 "a.b[0].c" 拆为 ["a","b","[0]","c"]（公开版本，供其他包使用）

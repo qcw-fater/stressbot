@@ -142,7 +142,7 @@ function simulateMessage(msgName: string, mode: SimulateMode, depth = 0): TreeNo
     if (mode.kind === 's2c') {
       const storeKey = matchStore(store, field.name);
       if (storeKey) {
-        node.storeMapping = `→ state["${storeKey}"]`;
+        node.storeMapping = storeKey.includes('.') ? `→ state.${storeKey}` : `→ state["${storeKey}"]`;
         if (!node.display) {
           node.display = '（响应字段）';
           node.displayKind = 'placeholder';

@@ -32,7 +32,8 @@ import (
 // Robot 单个压测机器人实例。
 // 每个 Robot 拥有独立的状态存储、网络客户端、Lua 运行时和流程执行器。
 type Robot struct {
-	id         int                    // 机器人唯一编号
+	id         int                    // 机器人唯一编号（= startNumber + index）
+	index      int                    // 批次内 0-based 序号
 	account    string                 // 账号名
 	state      *state.Store           // 线程安全的键值状态存储
 	client     *network.Client        // 多服务网络客户端（管理 TCP/UDP 连接池）
@@ -63,7 +64,8 @@ type Robot struct {
 
 // Config 单个机器人的配置。
 type Config struct {
-	ID             int               // 机器人唯一编号
+	ID             int               // 机器人唯一编号（= startNumber + batchOffset）
+	Index          int               // 批次内 0-based 序号
 	Account        string            // 账号名
 	StateExtra     map[string]string // 初始状态额外键值对
 	HTTPTimeout    time.Duration     // HTTP 请求超时
@@ -106,6 +108,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 
 	r := &Robot{
 		id:             cfg.ID,
+		index:          cfg.Index,
 		account:        cfg.Account,
 		state:          state.NewStore(),
 		client:         network.NewClient(cfg.Account, cfg.RequestTimeout, timingDetail),
@@ -144,6 +147,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 	r.adp = robotAdp
 
 	r.state.Set("id", cfg.ID)
+	r.state.Set("index", cfg.Index)
 	r.state.Set("account", cfg.Account)
 	for k, v := range cfg.StateExtra {
 		r.state.Set(k, v)
@@ -189,6 +193,7 @@ func (r *Robot) Start() {
 			r.l.SetContext(r.ctx)
 			script.SetContext(r.l, &script.Context{
 				RobotID:               r.id,
+				Index:                 r.index,
 				Account:               r.account,
 				Store:                 r.state,
 				Factory:               r.factory,
@@ -790,6 +795,7 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 
 			script.SetContext(h.robot.l, &script.Context{
 				RobotID:               h.robot.id,
+				Index:                 h.robot.index,
 				Account:               h.robot.account,
 				Store:                 h.robot.state,
 				Factory:               h.robot.factory,
@@ -843,9 +849,12 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 		fieldMap := h.robot.factory.GetFieldMap(respMsg)
 		for _, m := range cbDef.Store {
 			if m.Field == "" {
-				h.robot.state.Set(m.Setter, fieldMap)
-			} else if val, ok := fieldMap[m.Field]; ok {
-				h.robot.state.Set(m.Setter, val)
+				h.robot.state.SetPath(m.Setter, fieldMap)
+			} else {
+				val := state.NavigatePath(fieldMap, m.Field)
+				if val != nil {
+					h.robot.state.SetPath(m.Setter, val)
+				}
 			}
 		}
 		monitor.Global().RecordCallback(cbName, monitor.ResultSuccess, monitor.ActionTiming{}, time.Since(start), 0, msg.WireBytes, nil)

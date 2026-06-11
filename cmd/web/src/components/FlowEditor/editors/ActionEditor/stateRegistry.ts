@@ -18,21 +18,38 @@ import { protoRegistry } from '../../proto/ProtoRegistry';
 
 export interface StateKeyInfo {
   key: string;
-  sourceType: 'store' | 'listenStore' | 'stateExtra' | 'storeAs' | 'lua';
+  sourceType: 'store' | 'listenStore' | 'stateExtra' | 'storeAs' | 'lua' | 'builtin';
   sourceName: string;
   s2cProto?: string;
   storeField?: string;
+  /** 内置字段的类型说明（如 int、string） */
+  builtinType?: string;
+  /** 内置字段的描述 */
+  builtinDesc?: string;
 }
 
-/** 从 Lua 脚本内容中提取 robot.set("key",…) 的字面量 key */
+/** 内置 state 字段定义：每个机器人启动时自动注入，不可覆盖 */
+const BUILTIN_KEYS: StateKeyInfo[] = [
+  { key: 'id', sourceType: 'builtin', sourceName: '内置', builtinType: 'int', builtinDesc: '机器人编号（= startNumber + index）' },
+  { key: 'index', sourceType: 'builtin', sourceName: '内置', builtinType: 'int', builtinDesc: '批次内序号（0-based）' },
+  { key: 'account', sourceType: 'builtin', sourceName: '内置', builtinType: 'string', builtinDesc: '完整账号名（如 bot_100）' },
+];
+
+/** 从 Lua 脚本内容中提取 robot.set("key",…) 和 robot.set_path("key",…) 的字面量 key */
 function extractLuaSetKeys(content: string): string[] {
   const keys: string[] = [];
-  const re = /robot\.set\s*\(\s*["']([^"']+)["']/g;
+  const re = /robot\.(?:set|set_path)\s*\(\s*["']([^"']+)["']/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(content)) !== null) {
-    keys.push(m[1]);
+    // 嵌套路径取顶层段作为 state key
+    keys.push(m[1].split('.')[0].split('[')[0]);
   }
   return keys;
+}
+
+/** 从 setter 字符串中提取顶层 key（"loginResp.token" → "loginResp"） */
+function setterTopKey(setter: string): string {
+  return setter.split('.')[0].split('[')[0];
 }
 
 /**
@@ -49,18 +66,31 @@ export function collectStateKeys(
 ): StateKeyInfo[] {
   const map = new Map<string, StateKeyInfo>();
 
+  // 0. 内置字段（最高优先级，不可覆盖）
+  for (const b of BUILTIN_KEYS) {
+    map.set(b.key, { ...b });
+  }
+
+  const nestedStoreKeys: StateKeyInfo[] = [];
+
   // 1. ActionDef.store[].setter
   for (const [name, def] of Object.entries(actions)) {
     if (!def.store) continue;
     for (const sm of def.store) {
       if (!sm.setter) continue;
-      map.set(sm.setter, {
-        key: sm.setter,
-        sourceType: 'store',
-        sourceName: name,
-        s2cProto: def.s2cProto,
-        storeField: sm.field,
-      });
+      const topKey = setterTopKey(sm.setter);
+      if (topKey === sm.setter) {
+        map.set(topKey, {
+          key: topKey,
+          sourceType: 'store',
+          sourceName: name,
+          s2cProto: def.s2cProto,
+          storeField: sm.field,
+        });
+      } else {
+        // 嵌套 setter 只说明写入 topKey 的某个子字段，不能把 topKey 整体标记为 S2C 类型。
+        nestedStoreKeys.push({ key: topKey, sourceType: 'store', sourceName: name });
+      }
     }
   }
 
@@ -69,14 +99,20 @@ export function collectStateKeys(
     if (!def.store) continue;
     for (const sm of def.store) {
       if (!sm.setter) continue;
-      if (map.has(sm.setter)) continue;
-      map.set(sm.setter, {
-        key: sm.setter,
-        sourceType: 'listenStore',
-        sourceName: name,
-        s2cProto: def.s2cProto,
-        storeField: sm.field,
-      });
+      const topKey = setterTopKey(sm.setter);
+      if (topKey === sm.setter) {
+        if (map.has(topKey)) continue;
+        map.set(topKey, {
+          key: topKey,
+          sourceType: 'listenStore',
+          sourceName: name,
+          s2cProto: def.s2cProto,
+          storeField: sm.field,
+        });
+      } else {
+        // 嵌套 setter 只作为兜底来源，后续 stateExtra/storeAs/Lua 可声明 topKey 的真实来源。
+        nestedStoreKeys.push({ key: topKey, sourceType: 'listenStore', sourceName: name });
+      }
     }
   }
 
@@ -105,7 +141,7 @@ export function collectStateKeys(
     }
   }
 
-  // 5. Lua 脚本中的 robot.set("key",…)
+  // 5. Lua 脚本中的 robot.set("key",…) / robot.set_path("key",…)
   if (luaScripts) {
     for (const script of luaScripts) {
       const extracted = extractLuaSetKeys(script.content);
@@ -118,6 +154,13 @@ export function collectStateKeys(
         });
       }
     }
+  }
+
+  // 6. 嵌套 setter 的顶层 key 兜底来源。
+  // 必须放在最后，避免 playerData.GuildInfo 这类写入覆盖 Lua/stateExtra/storeAs 对 playerData 的真实来源。
+  for (const info of nestedStoreKeys) {
+    if (map.has(info.key)) continue;
+    map.set(info.key, info);
   }
 
   return Array.from(map.values()).sort((a, b) => a.key.localeCompare(b.key));
@@ -265,4 +308,33 @@ export function resolveProtoForStateKey(
   if (!info.storeField) return info.s2cProto;
 
   return resolveFieldProto(info.s2cProto, info.storeField) ?? info.s2cProto;
+}
+
+/**
+ * 解析某个 state key 值所对应的 proto 消息全名。
+ * 用于确定该 key 是否有可浏览的子字段。
+ *
+ * - storeField 为空（存整个消息）→ 返回 s2cProto
+ * - storeField 非空 → 沿字段路径解析到终端消息类型
+ * - 无 s2cProto 或路径指向标量 → undefined
+ */
+export function resolveSubFieldProto(info: StateKeyInfo): string | undefined {
+  if (!info.s2cProto) return undefined;
+  if (!protoRegistry.isLoaded()) return undefined;
+
+  if (!info.storeField) return info.s2cProto;
+
+  return resolveFieldProto(info.s2cProto, info.storeField);
+}
+
+/**
+ * 返回某个 state key 值的子字段列表（用于嵌套浏览）。
+ * 通过 s2cProto + storeField 定位到终端 proto message，返回其 fields。
+ * 仅当值的类型是 message 时返回非 null。
+ */
+export function resolveSubFields(info: StateKeyInfo): ProtoField[] | null {
+  const msgName = resolveSubFieldProto(info);
+  if (!msgName) return null;
+  const msg = protoRegistry.lookupMessage(msgName);
+  return msg?.fields ?? null;
 }

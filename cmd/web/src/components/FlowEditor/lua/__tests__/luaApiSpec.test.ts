@@ -104,7 +104,7 @@ describe('coverage：所有 stressbot 已暴露的核心 Lua API 都被记录', 
   it('robot 模块覆盖关键函数', () => {
     const m = getLuaModule('robot')!;
     const names = m.functions.map((f) => f.name);
-    for (const expected of ['get', 'set', 'has', 'delete', 'clear', 'increment', 'get_path', 'get_id', 'get_account', 'get_context', 'keys']) {
+    for (const expected of ['get', 'set', 'has', 'delete', 'clear', 'increment', 'get_path', 'set_path', 'get_id', 'get_index', 'get_account', 'get_context', 'keys']) {
       expect(names, `robot.${expected}`).toContain(expected);
     }
   });
