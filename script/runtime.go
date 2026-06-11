@@ -11,6 +11,7 @@ import (
 	"stressbot/adapter"
 	"stressbot/engine"
 	"stressbot/protox"
+	"stressbot/sharedstate"
 	"stressbot/state"
 	stresslog "stressbot/utils/log"
 	"strings"
@@ -42,6 +43,11 @@ type Context struct {
 	NetSender engine.NetSender
 	Ctx       context.Context
 	LuaMu     *sync.Mutex
+
+	// Shared 任务级共享状态后端（Redis）。多个 Robot 共享同一实例。
+	// 未启用共享状态（无 Redis 配置 / 任务未使用 share）时为 nil，
+	// share.* API 返回 ErrNotEnabled，不 panic。
+	Shared sharedstate.Store
 
 	// DefaultRequestTimeout 当 Lua 脚本调 network.tcp_request / udp_request 未显式传
 	// timeout 参数时使用的默认值。来自 robotConfig.timeoutSec → ResolvedConfig.RequestTimeout。
@@ -508,6 +514,7 @@ func registerAPIs(L *lua.LState) {
 	L.PreloadModule("log", loadLogModule)
 	L.PreloadModule("json", loadJsonModule)
 	L.PreloadModule("adapter", loadAdapterModule)
+	L.PreloadModule("share", loadShareModule)
 }
 
 // robotMetatableKey robot 对象共享元表在 registry 中的键。

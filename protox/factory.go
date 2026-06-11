@@ -137,6 +137,9 @@ func (f *Factory) setNestedField(ref protoreflect.Message, parts []string, value
 
 	// 如果是最后一部分，直接赋值
 	if len(parts) == 1 {
+		if field.IsMap() {
+			return setMapField(ref, field, value)
+		}
 		if field.IsList() {
 			return setRepeatedField(ref, field, value)
 		}
@@ -219,6 +222,91 @@ func setRepeatedField(ref protoreflect.Message, field protoreflect.FieldDescript
 		list.Append(val)
 	}
 	return nil
+}
+
+// mapEntryValue 表示一个 map 条目的 key/value 对。
+type mapEntryValue struct {
+	key   any
+	value any
+}
+
+// setMapField 设置 map 字段值。
+// value 接受 map[any]any 或 map[string]any。
+// 清空已有 map，遍历条目并逐一写入 proto Map。
+func setMapField(ref protoreflect.Message, field protoreflect.FieldDescriptor, value any) error {
+	entries, err := normalizeMapEntries(value)
+	if err != nil {
+		return fmt.Errorf("字段 %s 是 map，绑定值需要 map 类型", field.Name())
+	}
+
+	protomap := ref.Mutable(field).Map()
+	// 清空已有条目
+	protomap.Range(func(k protoreflect.MapKey, v protoreflect.Value) bool {
+		protomap.Clear(k)
+		return true
+	})
+
+	valueField := field.MapValue()
+	for _, entry := range entries {
+		mapKey, err := toMapKey(entry.key, field.MapKey())
+		if err != nil {
+			return fmt.Errorf("字段 %s 的 map key=%v 无法转换为 %s: %w", field.Name(), entry.key, field.MapKey().Kind(), err)
+		}
+		val, err := toFieldValue(valueField, entry.value)
+		if err != nil {
+			return fmt.Errorf("字段 %s 的 map value(key=%v) 转换失败: %w", field.Name(), entry.key, err)
+		}
+		protomap.Set(mapKey, val)
+	}
+	return nil
+}
+
+// normalizeMapEntries 将 map[any]any 或 map[string]any 转为 []mapEntryValue。
+func normalizeMapEntries(value any) ([]mapEntryValue, error) {
+	switch m := value.(type) {
+	case map[any]any:
+		entries := make([]mapEntryValue, 0, len(m))
+		for k, v := range m {
+			entries = append(entries, mapEntryValue{key: k, value: v})
+		}
+		return entries, nil
+	case map[string]any:
+		entries := make([]mapEntryValue, 0, len(m))
+		for k, v := range m {
+			entries = append(entries, mapEntryValue{key: k, value: v})
+		}
+		return entries, nil
+	default:
+		return nil, fmt.Errorf("需要 map 类型，实际: %T", value)
+	}
+}
+
+// toMapKey 将 Go 值转换为 protoreflect.MapKey。
+func toMapKey(key any, field protoreflect.FieldDescriptor) (protoreflect.MapKey, error) {
+	switch field.Kind() {
+	case protoreflect.BoolKind:
+		v, ok := key.(bool)
+		if !ok {
+			return protoreflect.MapKey{}, fmt.Errorf("需要 bool, 实际: %T", key)
+		}
+		return protoreflect.ValueOfBool(v).MapKey(), nil
+	case protoreflect.Int32Kind, protoreflect.Sint32Kind, protoreflect.Sfixed32Kind:
+		return protoreflect.ValueOfInt32(int32(toInt64Value(key))).MapKey(), nil
+	case protoreflect.Int64Kind, protoreflect.Sint64Kind, protoreflect.Sfixed64Kind:
+		return protoreflect.ValueOfInt64(toInt64Value(key)).MapKey(), nil
+	case protoreflect.Uint32Kind, protoreflect.Fixed32Kind:
+		return protoreflect.ValueOfUint32(uint32(toUint64Value(key))).MapKey(), nil
+	case protoreflect.Uint64Kind, protoreflect.Fixed64Kind:
+		return protoreflect.ValueOfUint64(toUint64Value(key)).MapKey(), nil
+	case protoreflect.StringKind:
+		v, ok := key.(string)
+		if !ok {
+			return protoreflect.MapKey{}, fmt.Errorf("需要 string, 实际: %T", key)
+		}
+		return protoreflect.ValueOfString(v).MapKey(), nil
+	default:
+		return protoreflect.MapKey{}, fmt.Errorf("不支持的 map key 类型: %v", field.Kind())
+	}
 }
 
 // GetField 获取消息字段值。

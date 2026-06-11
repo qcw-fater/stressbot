@@ -11,6 +11,8 @@ export * as agentsApi from './agentsApi';
 export * as metricsApi from './metricsApi';
 export * as historyApi from './historyApi';
 export * as logsApi from './logsApi';
+export * as capabilitiesApi from './capabilitiesApi';
+export type { CapabilitiesResponse } from './capabilitiesApi';
 
 export { usePolling } from './usePolling';
 export type { UsePollingOptions } from './usePolling';

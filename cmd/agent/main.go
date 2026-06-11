@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 	"stressbot/protox"
 	"stressbot/robot"
 	"stressbot/script"
+	"stressbot/sharedstate"
 	"stressbot/utils"
 	json "stressbot/utils/jsonx"
 	stresslog "stressbot/utils/log"
@@ -62,6 +65,7 @@ type Config struct {
 	Pprof      PprofConfig             `json:"pprof"`
 	Standalone *StandaloneConfig       `json:"standalone"`
 	Agent      agent.Config            `json:"agent"`
+	Shared     *sharedstate.Config     `json:"shared"` // 共享状态（Redis）配置，单机/Agent 共用
 	Daemon     bool                    `json:"daemon"` // 以守护进程模式运行（仅 Linux）
 }
 
@@ -240,6 +244,29 @@ func runStandalone(cfg *Config, confDir string) {
 		duration = d
 	}
 
+	// 自动检测共享状态：脚本是否使用 require("share")。
+	// 使用但未配置 Redis → 启动前直接失败（与 Admin 行为一致），避免运行后 share.* 全部报错。
+	var sharedStore sharedstate.Store
+	if detectShareUsage(filepath.Join(confDir, "scripts")) {
+		if cfg.Shared == nil || !cfg.Shared.Redis.Enabled() {
+			stresslog.Fatal("流程脚本使用了共享状态(share)，但未配置 Redis（shared.redis.addr 为空），无法启动")
+		}
+		resolved, rerr := cfg.Shared.Redis.Resolve()
+		if rerr != nil {
+			stresslog.Fatal("共享状态配置无效", zap.Error(rerr))
+		}
+		runID := fmt.Sprintf("standalone-%d-%d", time.Now().UnixMilli(), os.Getpid())
+		store, serr := sharedstate.NewRedisStore(resolved, runID)
+		if serr != nil {
+			stresslog.Fatal("连接共享状态(Redis)失败", zap.Error(serr))
+		}
+		sharedStore = store
+		stresslog.Info("[MAIN] 共享状态已启用",
+			zap.String("addr", resolved.Addr), zap.Int("db", resolved.DB), zap.String("runId", runID))
+	} else {
+		stresslog.Info("[MAIN] 共享状态未启用（脚本未使用 share）")
+	}
+
 	mgrCfg := robot.ManagerConfig{
 		AccountPrefix:  s.Bot.AccountPrefix,
 		StartNumber:    s.Bot.StartNumber,
@@ -251,6 +278,7 @@ func runStandalone(cfg *Config, confDir string) {
 		MainService:    s.Bot.MainService,
 		HTTPTimeout:    10 * time.Second,
 		Duration:       duration,
+		Shared:         sharedStore,
 	}
 
 	dialer := network.NewDialer(adp, 5*time.Second)
@@ -303,6 +331,18 @@ func runStandalone(cfg *Config, confDir string) {
 
 	mgr.StopAll()
 
+	// 单机模式：本进程独占 runId，统一清理共享状态后再关闭连接。
+	if sharedStore != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := sharedStore.Cleanup(cleanupCtx); err != nil {
+			stresslog.Error("[MAIN] 共享状态清理失败", zap.Error(err))
+		} else {
+			stresslog.Info("[MAIN] 共享状态已清理")
+		}
+		cancel()
+		_ = sharedStore.Close()
+	}
+
 	if cfg.Monitor.Enabled {
 		os.MkdirAll("metrics", 0o755)
 		csvPath := fmt.Sprintf("metrics/metrics_%s.csv", time.Now().Format("2006_01_02_15_04_05"))
@@ -319,6 +359,28 @@ func runStandalone(cfg *Config, confDir string) {
 	}
 	utils.GetWorkPool().Shutdown()
 	stresslog.Info("[MAIN] 已退出")
+}
+
+// detectShareUsage 递归扫描 scripts 目录下的所有 .lua 文件，判断是否有脚本使用了 share 模块。
+func detectShareUsage(scriptsDir string) bool {
+	found := false
+	_ = filepath.WalkDir(scriptsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || found {
+			return nil
+		}
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".lua") {
+			return nil
+		}
+		data, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return nil
+		}
+		if sharedstate.UsesShare(string(data)) {
+			found = true
+		}
+		return nil
+	})
+	return found
 }
 
 // ── 通用工具 ──────────────────────────────────────────────

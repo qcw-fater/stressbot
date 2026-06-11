@@ -140,7 +140,15 @@ const (
 	BindRandomBool    = "randomBool"
 	BindRandomString  = "randomString"
 	BindListSize      = "listSize"
+	BindMap           = "map"
 )
+
+// MapEntryBind 定义 proto map 字段中的单个 entry。
+// Key 是固定 map key；Value 是动态 value 表达式 binding，忽略其 Field 字段。
+type MapEntryBind struct {
+	Key   any       `json:"key"`
+	Value FieldBind `json:"value"`
+}
 
 // ActionDef 动作定义。
 // Pattern 决定执行方式（取值见 Pattern 常量）。
@@ -180,6 +188,7 @@ type ActionDef struct {
 //   - randomString:  随机字符串（Length + Charset 字段）
 //   - randomExclude: 从 Values 或 state list 中随机选一个，且排除 ExcludeSource
 //   - listSize:      返回 state 列表长度（int）
+//   - map:           构造 proto map 字段，固定 key + 动态 value
 //
 // Path 支持用 | 分隔多条候选路径，按顺序尝试，返回第一个非 nil 的值。
 // 例如 "mailUid|gid" 会先尝试 mailUid，不存在则取 gid。
@@ -187,11 +196,12 @@ type ActionDef struct {
 // Wrap 为 true 时，将单个值包装为 []any{val}，用于 repeated 字段赋单个元素的场景。
 type FieldBind struct {
 	Field         string      `json:"field"`         // 目标 proto 字段名（支持嵌套如 "heroList[0].heroId"）
-	Type          string      `json:"type"`          // 绑定类型：fixed / state / stateFirst / stateRandom / stateRandomN / stateMapKey / stateMapValue / randomPick / randomPickMap / randomExclude / randomInt / randomFloat / randomString / listSize
+	Type          string      `json:"type"`          // 绑定类型：fixed / state / stateFirst / stateRandom / stateRandomN / stateMapKey / stateMapValue / randomPick / randomPickMap / randomExclude / randomInt / randomFloat / randomString / listSize / map
 	Value         any         `json:"value"`         // fixed: 固定值
 	Source        string      `json:"source"`        // 数据来源 state key（state/stateFirst/stateRandom/stateRandomN/stateMapKey/stateMapValue/randomPick/randomExclude 使用）
 	Path          string      `json:"path"`          // 从 state 值中导航取子字段（如 "items[0].itemId"）
-	Values        []any       `json:"values"`        // randomPick/randomPickN/randomPickMap/randomExclude: 候选值列表
+	Values        []any          `json:"values"`        // randomPick/randomPickN/randomPickMap/randomExclude: 候选值列表
+	Entries       []MapEntryBind `json:"entries"`       // map: 固定 key + 动态 value 的 entry 列表
 	Required      bool        `json:"required"`      // true = 字段缺失时动作报错（不再静默跳过）
 	Filters       []FilterDef `json:"filters"`       // stateMapValue/stateMapKey: 过滤条件列表
 	Min           int         `json:"min"`           // randomInt/randomFloat: 最小值（含）
@@ -199,7 +209,7 @@ type FieldBind struct {
 	Precision     int         `json:"precision"`     // randomFloat: 小数位数（默认 2）
 	Length        int         `json:"length"`        // randomString: 字符串长度
 	Count         int         `json:"count"`         // stateRandomN/randomPickN: 选取数量
-	Charset       string      `json:"charset"`       // randomString: 字符集（alpha/numeric/alphanum）
+	Charset       string      `json:"charset"`       // randomString: 字符集别名（lower/upper/alpha/numeric/alphanum）或自定义字符集
 	ExcludeSource string      `json:"excludeSource"` // randomExclude: 从 state 读取排除列表
 	Optional      bool        `json:"optional"`      // true = 即使 isRequired() 的类型也允许字段为空（跳过该字段）
 	Wrap          bool        `json:"wrap"`          // true = 赋值给 repeated 字段时将单值包装为 [val]

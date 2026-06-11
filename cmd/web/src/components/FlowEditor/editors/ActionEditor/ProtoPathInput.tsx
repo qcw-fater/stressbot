@@ -46,7 +46,7 @@ export function ProtoPathInput({
       return msg.fields.map((f) => {
         const isMsg = f.kind === 'message' && f.messageName;
         const children = isMsg ? buildTree(f.messageName!, depth + 1) : undefined;
-        const typeLabel = shortType(f.type);
+        const typeLabel = f.kind === 'map' ? `map<${f.mapKey},${f.mapValue}>` : shortType(f.type);
 
         return {
           value: f.name,

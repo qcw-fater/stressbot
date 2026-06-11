@@ -5,6 +5,7 @@ import (
 
 	"stressbot/monitor"
 	"stressbot/robot"
+	"stressbot/sharedstate"
 	json "stressbot/utils/jsonx"
 )
 
@@ -79,6 +80,10 @@ type Task struct {
 	StoppedAt *time.Time `json:"stoppedAt,omitempty"`
 	// ErrorMsg 错误信息（失败时填写）。
 	ErrorMsg string `json:"errorMsg,omitempty"`
+	// SharedUsed 任务脚本是否使用了共享状态（自动检测，require("share")）。
+	SharedUsed bool `json:"sharedUsed,omitempty"`
+	// SharedRunID 共享状态命名空间 runId（= 任务 ID），任务终态时据此统一清理。
+	SharedRunID string `json:"sharedRunId,omitempty"`
 }
 
 // TaskConfig 包含创建任务时上传的所有资源。
@@ -213,6 +218,19 @@ type TaskAssignment struct {
 	ConfigFiles []string `json:"configFiles"`
 	// RampUp 渐进式加压配置（已按比例缩放）。
 	RampUp *RampUpConfig `json:"rampUp,omitempty"`
+	// Shared 共享状态运行时下发（含 Redis 连接与任务 runId）。
+	// 仅当任务脚本使用 share 且服务器配置了 Redis 时下发，否则为 nil。
+	Shared *SharedRuntimeAssignment `json:"shared,omitempty"`
+}
+
+// SharedRuntimeAssignment Admin → Agent 下发的共享状态运行时配置。
+// RunID 由 Admin 统一生成（= 任务 ID），保证同一任务所有 Agent 落在同一命名空间。
+//
+// 注意：Redis.Password 会随该结构通过内网 HTTP 明文下发给 Agent，部署时应保证 Admin↔Agent
+// 链路处于可信内网（与现有 MySQL 密码下发约束一致）。
+type SharedRuntimeAssignment struct {
+	RunID string                  `json:"runId"`
+	Redis sharedstate.RedisConfig `json:"redis"`
 }
 
 // ── Agent ─────────────────────────────────────────────

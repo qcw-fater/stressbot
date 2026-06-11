@@ -64,9 +64,9 @@ export function LoopNode({ id, data, selected }: NodeProps) {
   const normalizedCondition = hasCond ? formatCondition(node.condition!) : null;
   const normalizedBreakCondition = hasBreak ? formatCondition(node.breakCondition!) : null;
   const conditionTitle =
-    (normalizedCondition ? `前置: ${normalizedCondition.tag}${normalizedCondition.display}` : '') +
+    (normalizedCondition ? `前置: ${normalizedCondition.tag}:${normalizedCondition.display}` : '') +
     (normalizedCondition && normalizedBreakCondition ? ' / ' : '') +
-    (normalizedBreakCondition ? `后置: ${normalizedBreakCondition.tag}${normalizedBreakCondition.display}` : '');
+    (normalizedBreakCondition ? `后置: ${normalizedBreakCondition.tag}:${normalizedBreakCondition.display}` : '');
 
   return (
     <>

@@ -17,6 +17,7 @@ import (
 
 	"stressbot/monitor"
 	"stressbot/robot"
+	"stressbot/sharedstate"
 	"stressbot/utils"
 	stresslog "stressbot/utils/log"
 
@@ -37,6 +38,8 @@ type AdminServer struct {
 
 	history *HistoryStore // 可选
 	sampler *Sampler      // 可选
+
+	sharedCleanup *sharedCleanupQueue // 共享状态待清理队列（可选）
 
 	httpSrv *http.Server
 	stopCh  chan struct{}
@@ -89,6 +92,28 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 	// 8. 终态回调
 	s.tasks.SetOnTerminal(s.onTaskTerminal)
 
+	// 9. 共享状态（Redis）：验证连通性 + 初始化待清理队列
+	if cfg.SharedEnabled() {
+		resolved, rerr := cfg.Shared.Redis.Resolve()
+		if rerr != nil {
+			return nil, fmt.Errorf("共享状态配置无效: %w", rerr)
+		}
+		// 启动时 PING 验证 Redis 连通性（不持久占用连接）
+		pingStore, perr := sharedstate.NewRedisStore(resolved, "admin-ping")
+		if perr != nil {
+			return nil, fmt.Errorf("连接共享状态(Redis)失败 (addr=%s): %w", resolved.Addr, perr)
+		}
+		_ = pingStore.Close()
+		stresslog.Info("[ADMIN] 共享状态已启用",
+			zap.String("addr", resolved.AddrMasked()),
+			zap.Int("db", resolved.DB),
+			zap.String("keyPrefix", resolved.KeyPrefix))
+		s.sharedCleanup = newSharedCleanupQueue("data")
+	} else {
+		stresslog.Info("[ADMIN] 共享状态未启用：未配置 Redis（shared.redis.addr 为空），" +
+			"脚本中使用 require(\"share\") 将报错")
+	}
+
 	return s, nil
 }
 
@@ -110,6 +135,9 @@ func (s *AdminServer) Run() error {
 	// 启动 deadline 看门狗
 	s.startDeadlineWatchdog(ctx)
 
+	// 启动共享状态清理重试（恢复上次残留 + 定时重试）
+	s.startSharedCleanupRetry(ctx)
+
 	// 注册路由（已包裹 recover 中间件）。
 	//
 	// timeout 配置：
@@ -127,7 +155,8 @@ func (s *AdminServer) Run() error {
 
 	stresslog.Info("admin 启动",
 		zap.Int("port", s.cfg.Port),
-		zap.Bool("history", s.cfg.History.Enabled))
+		zap.Bool("history", s.cfg.History.Enabled),
+		zap.Bool("shared", s.cfg.SharedEnabled()))
 
 	// 信号处理
 	sigCh := make(chan os.Signal, 2)
@@ -168,6 +197,10 @@ func (s *AdminServer) onTaskTerminal(task *Task) {
 		s.sampler.Stop(task.ID)
 	}
 
+	// 共享状态统一清理：任务已到终态（所有 Agent 已上报或超时），此时删除该 runId
+	// 下的所有 key 是安全的。由 Admin 统一做，避免多 Agent 各自清理时的竞态。
+	s.cleanupSharedState(task)
+
 	// 异步归档
 	if s.history == nil {
 		return
@@ -186,6 +219,20 @@ func (s *AdminServer) onTaskTerminal(task *Task) {
 				zap.Error(err))
 		}
 	})
+}
+
+// cleanupSharedState 在任务终态时统一清理该任务的共享状态命名空间。
+// 仅当任务使用了共享状态且服务器配置了 Redis 时执行。清理登记到待清理队列：
+// 立即尝试一次，失败则持久化并由定时任务/重启后重试，避免无 TTL 的 key 永久泄漏。
+func (s *AdminServer) cleanupSharedState(task *Task) {
+	if task == nil || !task.SharedUsed || !s.cfg.SharedEnabled() {
+		return
+	}
+	runID := task.SharedRunID
+	if runID == "" {
+		runID = task.ID
+	}
+	s.enqueueSharedCleanup(runID)
 }
 
 // buildFinalStressFromReports 从 agent 终止报告聚合最终快照（优先于心跳聚合）。

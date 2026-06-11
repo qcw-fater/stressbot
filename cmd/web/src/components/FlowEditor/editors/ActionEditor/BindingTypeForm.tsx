@@ -23,18 +23,22 @@
 import { Button, Input, InputNumber, Select, Space, Tag, Tooltip } from 'antd';
 import { DeleteOutlined, SwapOutlined } from '@ant-design/icons';
 import { useMemo, useState } from 'react';
-import type { FieldBind, FilterDef } from '@/types/action';
+import type { FieldBind, FilterDef, MapEntryBind } from '@/types/action';
+import { ALL_BINDING_TYPES } from '@/types/action';
 import { useFlowStore } from '../../store/flowStore';
 import { useRuntimeStore } from '@/services/runtimeStore';
 import { JsonDraftInput } from '../shared/JsonDraftInput';
 import { ProtoPathInput } from './ProtoPathInput';
 import { StateKeyInput } from './StateKeyInput';
 import { collectStateKeys, resolveProtoForStateKey } from './stateRegistry';
+import { RANDOM_STRING_CHARSET_OPTIONS } from './randomStringCharset';
 
 export interface BindingTypeFormProps {
   binding: FieldBind;
   /** 当前 action 的全部 bindings，用于收集 storeAs */
   currentBindings?: FieldBind[];
+  /** valueOnly 模式：用于 map entry 的 value 编辑，禁止嵌套 map */
+  valueOnly?: boolean;
   onChange: (b: FieldBind) => void;
 }
 
@@ -82,7 +86,7 @@ function SourcePathRows({
   );
 }
 
-export function BindingTypeForm({ binding, currentBindings, onChange }: BindingTypeFormProps) {
+export function BindingTypeForm({ binding, currentBindings, onChange, valueOnly = false }: BindingTypeFormProps) {
   const t = binding.type;
   const set = (partial: Partial<FieldBind>) => onChange({ ...binding, ...partial });
 
@@ -217,16 +221,14 @@ export function BindingTypeForm({ binding, currentBindings, onChange }: BindingT
             style={{ width: 120 }}
           />
           <Select
+            mode="tags"
             placeholder="charset"
-            value={binding.charset}
-            onChange={(v) => set({ charset: v })}
-            options={[
-              { value: 'alpha', label: 'alpha (a-zA-Z)' },
-              { value: 'numeric', label: 'numeric (0-9)' },
-              { value: 'alphanum', label: 'alphanum' },
-            ]}
+            value={binding.charset ? [binding.charset] : undefined}
+            onChange={(v) => set({ charset: v.slice(-1)[0] || undefined })}
+            options={RANDOM_STRING_CHARSET_OPTIONS}
             allowClear
-            style={{ width: 200 }}
+            maxTagCount={1}
+            style={{ width: 240 }}
           />
         </Space>
       );
@@ -269,6 +271,11 @@ export function BindingTypeForm({ binding, currentBindings, onChange }: BindingT
           />
         </div>
       );
+    case 'map':
+      if (valueOnly) {
+        return <span style={{ color: 'var(--color-error)' }}>map value 不支持嵌套 map</span>;
+      }
+      return <MapEntriesField binding={binding} currentBindings={currentBindings} set={set} />;
     default:
       return <span style={{ color: 'var(--color-error)' }}>未知 binding type: {t}</span>;
   }
@@ -508,6 +515,77 @@ function TagListInput({ values, onChange }: { values: unknown[]; onChange: (v: u
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** proto map 字段编辑器：entries[{key, value}] */
+function MapEntriesField({ binding, currentBindings, set }: { binding: FieldBind; currentBindings?: FieldBind[]; set: (p: Partial<FieldBind>) => void }) {
+  const entries: MapEntryBind[] = binding.entries ?? [];
+
+  const updateEntry = (i: number, patch: Partial<MapEntryBind>) => {
+    const arr = [...entries];
+    arr[i] = { ...arr[i], ...patch };
+    set({ entries: arr });
+  };
+
+  const addEntry = () => set({ entries: [...entries, { key: '', value: { type: 'fixed', value: '' } }] });
+  const removeEntry = (i: number) => set({ entries: entries.filter((_, j) => j !== i) });
+
+  /** 可选的 binding 类型（排除 map） */
+  const MAP_VALUE_TYPES = ALL_BINDING_TYPES.filter((t) => t !== 'map');
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
+      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>map entries（固定 key + 动态 value）</span>
+      {entries.map((entry, i) => (
+        <div
+          key={i}
+          style={{
+            padding: '6px 8px',
+            background: 'var(--hover-bg, rgba(0,0,0,0.02))',
+            borderRadius: 6,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Tag color="blue" style={{ margin: 0 }}>key</Tag>
+            <JsonDraftInput
+              mode="jsonOrString"
+              value={entry.key}
+              emptyValue=""
+              onChange={(v) => updateEntry(i, { key: v })}
+              placeholder="map key（字符串直接写，数字直接写）"
+              style={{ flex: 1 }}
+              size="small"
+            />
+            <Tag color="green" style={{ margin: 0 }}>value</Tag>
+            <Select
+              value={entry.value?.type}
+              onChange={(v) => updateEntry(i, { value: { type: v, value: '' } as FieldBind })}
+              options={MAP_VALUE_TYPES.map((t) => ({ value: t, label: t }))}
+              style={{ width: 130 }}
+              size="small"
+            />
+            <Tooltip title="删除此 entry">
+              <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => removeEntry(i)} />
+            </Tooltip>
+          </div>
+          {entry.value && (
+            <div style={{ paddingLeft: 8 }}>
+              <BindingTypeForm
+                binding={entry.value}
+                currentBindings={currentBindings}
+                onChange={(v) => updateEntry(i, { value: v })}
+                valueOnly
+              />
+            </div>
+          )}
+        </div>
+      ))}
+      <a onClick={addEntry} style={{ fontSize: 11 }}>+ 添加 entry</a>
     </div>
   );
 }

@@ -125,6 +125,21 @@ function cleanFieldBind(b: FieldBind): FieldBind {
   if (b.keySource) out.keySource = b.keySource;
   // if (b.items?.length) out.items = b.items.map(cleanFieldBind);
   if (b.condition) out.condition = b.condition;
+  if (b.entries?.length) {
+    out.entries = b.entries.map((entry) => ({
+      key: entry.key,
+      value: entry.value ? cleanMapEntryValueBind(entry.value) : undefined,
+    }));
+  }
+  return out;
+}
+
+function cleanMapEntryValueBind(b: FieldBind): FieldBind {
+  const out = cleanFieldBind({ ...b, field: undefined, storeAs: undefined, condition: undefined, wrap: undefined });
+  delete out.field;
+  delete out.storeAs;
+  delete out.condition;
+  delete out.wrap;
   return out;
 }
 

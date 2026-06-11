@@ -644,7 +644,7 @@ type FieldBind struct {
     Precision     int         `json:"precision"`     // 浮点精度
     Length        int         `json:"length"`        // 字符串长度
     Count         int         `json:"count"`         // 选取数量
-    Charset       string      `json:"charset"`       // 字符集
+    Charset       string      `json:"charset"`       // 字符集别名或自定义字符集
     ExcludeSource string      `json:"excludeSource"` // 排除列表来源
     Optional      bool        `json:"optional"`      // 允许字段为空
     Wrap          bool        `json:"wrap"`          // 单值包装为切片
@@ -684,7 +684,9 @@ type FieldBind struct {
 | `BindRandomInt` | `"randomInt"` | 随机整数 [Min, Max] |
 | `BindRandomFloat` | `"randomFloat"` | 随机浮点数，Precision 控制精度（默认 2） |
 | `BindRandomBool` | `"randomBool"` | 随机布尔值 |
-| `BindRandomString` | `"randomString"` | 随机字符串，Length + Charset |
+| `BindRandomString` | `"randomString"` | 随机字符串，Length + Charset；Charset 支持 `lower`/`upper`/`alpha`/`numeric`/`alphanum` 或自定义字符集 |
+
+`Charset` 为空时默认 `alphanum`；其他非空字符串按自定义字符集字面量处理，例如 `"ABC-123_"`。
 
 **辅助类**：
 

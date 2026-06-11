@@ -5,6 +5,7 @@ import (
 
 	"stressbot/monitor"
 	"stressbot/robot"
+	"stressbot/sharedstate"
 	json "stressbot/utils/jsonx"
 )
 
@@ -114,6 +115,16 @@ type TaskAssignment struct {
 	ConfigURL   string        `json:"configUrl"`
 	ConfigFiles []string      `json:"configFiles"`
 	RampUp      *RampUpConfig `json:"rampUp,omitempty"`
+	// Shared 共享状态运行时下发（含已解析的 Redis 连接信息与任务 runId）。
+	// 仅当 Admin 检测到脚本使用 share 模块且服务器配置了 Redis 时才下发，否则为 nil。
+	Shared *SharedRuntimeAssignment `json:"shared,omitempty"`
+}
+
+// SharedRuntimeAssignment Admin → Agent 下发的共享状态运行时配置。
+// RunID 由 Admin 统一生成（同一任务所有 Agent 一致），保证落在同一命名空间。
+type SharedRuntimeAssignment struct {
+	RunID string                  `json:"runId"`
+	Redis sharedstate.RedisConfig `json:"redis"`
 }
 
 // RampUpConfig 渐进式加压配置。

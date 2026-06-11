@@ -23,6 +23,7 @@ import (
 	"stressbot/network"
 	"stressbot/protox"
 	"stressbot/script"
+	"stressbot/sharedstate"
 	"stressbot/state"
 	"stressbot/utils"
 	json "stressbot/utils/jsonx"
@@ -51,6 +52,7 @@ type Robot struct {
 	// adp 是该 Robot 私有的 codec 适配器（RobotLocalAdapter 重构）。
 	// 所有 encode/decode 都在 r.l 上执行，与其他 Robot 不再共享 LState 池。
 	adp            *adapter.RobotAdapter
+	shared         sharedstate.Store           // 任务级共享状态后端（可为 nil）
 	mainService    string                      // 主连接服务名，意外断开时停止机器人
 	requestTimeout time.Duration               // robotConfig.timeoutSec 注入；用作 Lua tcp/udp_request 默认 timeout
 	timingLevel    int                         // monitor.timingDetail 映射后的 engine 计时级别
@@ -71,6 +73,7 @@ type Config struct {
 	HTTPTimeout    time.Duration     // HTTP 请求超时
 	RequestTimeout time.Duration     // 网络请求超时（TCP/UDP RequestResponse）
 	MainService    string            // 主连接服务名，意外断开时停止机器人
+	Shared         sharedstate.Store // 任务级共享状态后端（可为 nil，表示未启用）
 }
 
 // NewRobot 创建机器人实例。
@@ -119,6 +122,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		dialer:         dialer,
 		httpClient:     newRobotHTTPClient(cfg.HTTPTimeout),
 		mainService:    cfg.MainService,
+		shared:         cfg.Shared,
 		requestTimeout: cfg.RequestTimeout,
 		timingLevel:    engineTimingLevel,
 		execDone:       make(chan struct{}),
@@ -201,6 +205,7 @@ func (r *Robot) Start() {
 				NetSender:             &netSenderAdapter{robot: r},
 				Ctx:                   r.ctx,
 				LuaMu:                 &r.luaMu,
+				Shared:                r.shared,
 				DefaultRequestTimeout: r.requestTimeout,
 				TimingLevel:           r.timingLevel,
 			})
@@ -803,6 +808,7 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 				NetSender:             &netSenderAdapter{robot: h.robot},
 				Ctx:                   h.robot.ctx,
 				LuaMu:                 &h.robot.luaMu,
+				Shared:                h.robot.shared,
 				DefaultRequestTimeout: h.robot.requestTimeout,
 				TimingLevel:           h.robot.timingLevel,
 			})

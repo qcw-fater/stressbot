@@ -10,6 +10,7 @@ import type { ActionDef, BindingType, FieldBind, FilterDef } from '@/types/actio
 import { ALL_ACTION_PATTERNS, ALL_BINDING_TYPES } from '@/types/action';
 import { protoRegistry } from '../proto/ProtoRegistry';
 import { buildRefsGraph, routeKey } from '../listens/refsGraph';
+import { resolveRandomStringCharset } from '../editors/ActionEditor/randomStringCharset';
 
 export type Severity = 'error' | 'warning' | 'info';
 
@@ -491,7 +492,7 @@ function checkAction(name: string, def: ActionDef): ValidationIssue[] {
 
 // ── Binding 递归校验 ────────────────────────────────────────
 
-function checkBindings(prefix: string, bindings: FieldBind[], loc: { kind: 'action'; id: string }): ValidationIssue[] {
+function checkBindings(prefix: string, bindings: FieldBind[], loc: { kind: 'action'; id: string }, isMapEntryValue = false): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
   for (let i = 0; i < bindings.length; i++) {
@@ -499,8 +500,8 @@ function checkBindings(prefix: string, bindings: FieldBind[], loc: { kind: 'acti
     const label = `${prefix}.bindings[${i}]`;
     const t = b.type ?? '';
 
-    // field + storeAs 都空
-    if (!b.field && !b.storeAs) {
+    // field + storeAs 都空（map entry 内的 value binding 是纯值生成器，不需要 field/storeAs）
+    if (!isMapEntryValue && !b.field && !b.storeAs) {
       issues.push({ severity: 'warning', code: 'BINDING_NO_FIELD', message: `${label} 缺少 field 和 storeAs`, location: loc });
     }
 
@@ -570,6 +571,31 @@ function checkBindings(prefix: string, bindings: FieldBind[], loc: { kind: 'acti
       case 'randomString':
         if (!b.length || b.length <= 0) {
           issues.push({ severity: 'error', code: 'BINDING_INVALID_LENGTH', message: `${label} type=randomString length 必须 > 0`, location: loc });
+        }
+        if (b.charset != null && b.charset.trim().length === 0) {
+          issues.push({ severity: 'error', code: 'BINDING_INVALID_CHARSET', message: `${label} type=randomString charset 不能为空`, location: loc });
+        } else if (b.charset != null && resolveRandomStringCharset(b.charset).length === 0) {
+          issues.push({ severity: 'error', code: 'BINDING_INVALID_CHARSET', message: `${label} type=randomString charset 不能为空`, location: loc });
+        }
+        break;
+      case 'map':
+        if (!b.entries || b.entries.length === 0) {
+          issues.push({ severity: 'error', code: 'BINDING_MAP_NO_ENTRIES', message: `${label} type=map 缺少 entries`, location: loc });
+        } else {
+          for (let ei = 0; ei < b.entries.length; ei++) {
+            const entry = b.entries[ei];
+            const entryLabel = `${label}.entries[${ei}]`;
+            if (entry.key === undefined || entry.key === null || entry.key === '') {
+              issues.push({ severity: 'error', code: 'BINDING_MAP_ENTRY_NO_KEY', message: `${entryLabel} 缺少 key`, location: loc });
+            }
+            if (!entry.value) {
+              issues.push({ severity: 'error', code: 'BINDING_MAP_ENTRY_NO_VALUE', message: `${entryLabel} 缺少 value`, location: loc });
+            } else if (entry.value.type === 'map') {
+              issues.push({ severity: 'error', code: 'BINDING_MAP_ENTRY_VALUE_MAP', message: `${entryLabel} value 不允许嵌套 map 类型`, location: loc });
+            } else {
+              issues.push(...checkBindings(entryLabel, [entry.value], loc, true));
+            }
+          }
         }
         break;
     }

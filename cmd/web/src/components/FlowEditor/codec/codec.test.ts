@@ -152,4 +152,52 @@ describe('codec round-trip', () => {
     const reread = JSON.parse(fs.readFileSync(outPath, 'utf-8')) as FlowJson;
     expect(Object.keys(reread.nodes).length).toBe(Object.keys(raw.nodes).length);
   });
+
+  it('map binding entries 在导出时被保留，entry value 的 field/storeAs/condition/wrap 被剥离', () => {
+    const exported = flowToJson({
+      defaultDelayMs: raw.defaultDelayMs,
+      nodes: raw.nodes,
+      actions: {
+        A1: {
+          pattern: 'tcpSend',
+          service: 'logic',
+          route: { cmd: 1 },
+          c2sProto: 'Game.TestC2S',
+          bindings: [
+            {
+              field: 'heroMap',
+              type: 'map',
+              entries: [
+                { key: 'name', value: { type: 'fixed', value: 'test', field: 'should_be_stripped', storeAs: 'x', condition: 'lua:foo', wrap: true } },
+                { key: 'level', value: { type: 'randomInt', min: 1, max: 100 } },
+              ],
+            },
+          ],
+        },
+      },
+      listens: raw.listens,
+    });
+    const binding = exported.actions.A1.bindings![0];
+    expect(binding.type).toBe('map');
+    expect(binding.entries).toHaveLength(2);
+
+    // entry key preserved
+    expect(binding.entries![0].key).toBe('name');
+    expect(binding.entries![1].key).toBe('level');
+
+    // entry value.field / storeAs / condition / wrap stripped
+    const v0 = binding.entries![0].value!;
+    expect(v0.field).toBeUndefined();
+    expect(v0.storeAs).toBeUndefined();
+    expect(v0.condition).toBeUndefined();
+    expect(v0.wrap).toBeUndefined();
+    expect(v0.value).toBe('test');
+    expect(v0.type).toBe('fixed');
+
+    // non-map fields in entry value preserved
+    const v1 = binding.entries![1].value!;
+    expect(v1.type).toBe('randomInt');
+    expect(v1.min).toBe(1);
+    expect(v1.max).toBe(100);
+  });
 });

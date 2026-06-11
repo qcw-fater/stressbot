@@ -38,7 +38,7 @@ export function BooleanNode({ id, data, selected }: NodeProps) {
   const { node } = data as unknown as NodeData;
   const normalizedCondition = node.condition ? formatCondition(node.condition) : null;
   const conditionTitle = normalizedCondition
-    ? normalizedCondition.tag + normalizedCondition.display
+    ? `${normalizedCondition.tag}:${normalizedCondition.display}`
     : '';
 
   return (

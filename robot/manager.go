@@ -8,6 +8,7 @@ import (
 	"stressbot/network"
 	"stressbot/protox"
 	"stressbot/script"
+	"stressbot/sharedstate"
 	"stressbot/utils"
 	stresslog "stressbot/utils/log"
 	"sync"
@@ -47,6 +48,9 @@ type ManagerConfig struct {
 	HTTPTimeout    time.Duration       `json:"httpTimeout"`
 	RampUp         *RampUpConfig       `json:"rampUp"`
 	Duration       time.Duration       `json:"duration"` // 运行时长，0 = 一直运行
+	// Shared 任务级共享状态后端（可为 nil，表示未启用）。Manager 仅透传给每个 Robot，
+	// 不负责 Cleanup/Close：单机由 cmd/agent 负责，分布式由 Agent(Close)+Admin(Cleanup) 负责。
+	Shared sharedstate.Store `json:"-"`
 }
 
 // Manager 机器人管理器。
@@ -121,6 +125,7 @@ func (m *Manager) startBatch(fromIndex, count, conc int) (int, error) {
 			HTTPTimeout:    m.cfg.HTTPTimeout,
 			RequestTimeout: m.cfg.RequestTimeout,
 			MainService:    m.cfg.MainService,
+			Shared:         m.cfg.Shared,
 		}, m.flow, m.factory, m.cfg.Adapter, m.dialer, m.luaPool)
 		if err != nil {
 			// codec.lua 加载失败属于配置问题，重试也没用。

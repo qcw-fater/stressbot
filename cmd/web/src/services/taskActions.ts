@@ -16,6 +16,7 @@ import { useProtoStore } from '@/components/FlowEditor/proto/protoStore';
 import { validateFlow } from '@/components/FlowEditor/validation/refsCheck';
 import { useMetricsStore } from '@/components/FlowEditor/nodes/shared/MetricsBadge';
 import * as tasksApi from './tasksApi';
+import { getCapabilities } from './capabilitiesApi';
 import { listProto, listScript, getAdapterScript, getErrorMapScript, markResourcesAsBaselineSynced } from './resourcesStore';
 import { syncFlowScriptsToIdb, collectFlowScriptNames } from './scriptSync';
 import { useRuntimeStore } from './runtimeStore';
@@ -25,6 +26,24 @@ import type { FlowLayout } from '@/types/editor';
 import type { FlowJson } from '@/components/FlowEditor/codec/flowToJson';
 
 const DRAFT_STASH_KEY = 'stressbot:flow:stash';
+
+/** 与后端 sharedstate.UsesShare 一致：检测脚本是否引用 share 模块。 */
+const SHARE_REQUIRE_RE = /require\s*\(?\s*['"]share['"]/;
+
+/**
+ * 剥离 Lua 注释（块注释 --[[ ]] 与行注释 --），避免被注释掉的 require("share") 误判。
+ * 仅做前端预检，最终以服务端检测为准，因此实现保持轻量。
+ */
+function stripLuaComments(content: string): string {
+  return content
+    .replace(/--\[(=*)\[[\s\S]*?\]\1\]/g, ' ')
+    .replace(/--[^\n]*/g, ' ');
+}
+
+/** 脚本内容里是否使用了共享状态模块。 */
+function scriptUsesShare(content: string): boolean {
+  return SHARE_REQUIRE_RE.test(stripLuaComments(content));
+}
 
 interface StashedDraft {
   flow: FlowJson;
@@ -127,6 +146,28 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
       },
       400,
     );
+  }
+
+  // 2.5 共享状态预检：脚本使用 share 但服务器未配置 Redis 时，提前拦截并提示，
+  //     避免任务创建后立即被服务端以 SHARED_STATE_UNAVAILABLE 拒绝。
+  if (usedScripts.some((s) => scriptUsesShare(s.content))) {
+    let sharedAvailable = true;
+    try {
+      const caps = await getCapabilities();
+      sharedAvailable = caps.sharedState;
+    } catch {
+      // 能力查询失败不阻塞：交由服务端最终裁决
+      sharedAvailable = true;
+    }
+    if (!sharedAvailable) {
+      throw new ApiError(
+        {
+          code: 'SHARED_STATE_UNAVAILABLE',
+          message: '该流程使用共享状态，但服务器未配置 Redis。请先在服务器配置中启用共享状态后再启动。',
+        },
+        400,
+      );
+    }
   }
 
   // 3. 容量预检

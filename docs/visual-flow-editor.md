@@ -638,9 +638,11 @@ interface ManagedFlow {
 | randomInt | min, max | 数字范围 |
 | randomFloat | min, max, precision | 数字范围 + 精度 |
 | randomBool | - | 无字段 |
-| randomString | length, charset | 长度 + 字符集下拉 |
+| randomString | length, charset | 长度 + 字符集别名选择；支持自定义字符集字面量 |
 | randomPick | values | 数组编辑器 |
 | randomPickN | values, count | 同上 + count |
+
+`randomString.charset` 支持 `lower`（a-z）、`upper`（A-Z）、`alpha`（a-zA-Z）、`numeric`（0-9）、`alphanum`（a-zA-Z0-9，默认）别名，也可以输入自定义字符集字面量，如 `ABC-123_`。
 | randomPickMap | values, keySource | key-values 表格 |
 | randomExclude | values/source, excludeSource | 来源 + 排除源 |
 | stateMapKey | source | 仅 source |

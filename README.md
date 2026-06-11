@@ -255,8 +255,10 @@ Executor 遍历节点图 → 命中 action 节点
 | `randomExclude` | 从 list 随机选，排除 `excludeSource` 当前值                              |
 | `randomInt`     | `[min, max]` 随机整数                                                    |
 | `randomBool`    | 随机布尔                                                                 |
-| `randomString`  | 随机字符串（`length`，可选 `charset`）                                    |
+| `randomString`  | 随机字符串（`length`，可选 `charset`；支持 `lower`/`upper`/`alpha`/`numeric`/`alphanum` 或自定义字符集） |
 | `randomFloat`   | `[min, max]` 随机浮点数（可选 `precision` 小数位数）                     |
+
+`randomString.charset` 支持别名：`lower`（a-z）、`upper`（A-Z）、`alpha`（a-zA-Z）、`numeric`（0-9）、`alphanum`（a-zA-Z0-9，默认）。其他非空字符串按自定义字符集字面量处理，例如 `"ABC-123_"`。
 
 ### 辅助类
 

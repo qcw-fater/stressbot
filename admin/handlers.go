@@ -17,6 +17,7 @@ import (
 	"stressbot/errcode"
 	"stressbot/logview"
 	"stressbot/monitor"
+	"stressbot/sharedstate"
 	"stressbot/utils"
 	json "stressbot/utils/jsonx"
 	stresslog "stressbot/utils/log"
@@ -100,6 +101,9 @@ func (s *AdminServer) registerRoutes() http.Handler {
 	// ── 错误码 ──
 	mux.HandleFunc("GET /sbot/api/error-codes", s.handleErrorCodeIndex)
 
+	// ── 服务器能力 ──
+	mux.HandleFunc("GET /sbot/capabilities", s.handleCapabilities)
+
 	// ── 静态资源 ──
 	fs := http.FileServer(http.Dir(s.cfg.StaticDir))
 	mux.Handle("/", fs)
@@ -123,6 +127,24 @@ func recoverMiddleware(next http.Handler) http.Handler {
 		}()
 		next.ServeHTTP(w, r)
 	})
+}
+
+// CapabilitiesResponse 服务器能力查询响应。
+type CapabilitiesResponse struct {
+	// SharedState 是否已配置共享状态（Redis）。前端据此提示脚本是否可用 share。
+	SharedState bool `json:"sharedState"`
+	// SharedAddr Redis 地址（脱敏展示，主机已隐藏，仅保留端口）。仅当 SharedState=true 时有值。
+	SharedAddr string `json:"sharedAddr,omitempty"`
+}
+
+// handleCapabilities 返回服务器能力（当前仅共享状态可用性），供前端展示与校验提示。
+// 出于安全考虑，不返回原始 Redis 地址，只返回脱敏后的展示地址。
+func (s *AdminServer) handleCapabilities(w http.ResponseWriter, r *http.Request) {
+	resp := CapabilitiesResponse{SharedState: s.cfg.SharedEnabled()}
+	if resp.SharedState {
+		resp.SharedAddr = sharedstate.MaskAddr(s.cfg.Shared.Redis.Addr)
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ── Agent 上行 ──
@@ -684,6 +706,22 @@ func (s *AdminServer) handleStartTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 自动检测共享状态：脚本是否使用 require("share")。
+	// 若使用但服务器未配置 Redis，直接失败并提示，避免任务跑起来后 share.* 全部报错。
+	sharedUsed := taskUsesShare(task)
+	if sharedUsed && !s.cfg.SharedEnabled() {
+		if _, terr := s.tasks.Transition(id, TaskStarting, TaskFailed); terr != nil {
+			stresslog.Warn("[ADMIN] 状态转换失败 starting→failed",
+				zap.String("taskId", id), zap.Error(terr))
+		}
+		writeError(w, ErrSharedUnavailable.WithMessage("任务脚本使用了共享状态(share)，但服务器未配置 Redis，无法启动"))
+		return
+	}
+	s.tasks.Update(id, func(t *Task) {
+		t.SharedUsed = sharedUsed
+		t.SharedRunID = id
+	})
+
 	// 分配 Agent
 	idleAgents := s.agents.ListByStatus(AgentIdle)
 	assignments, err := s.assigner.Assign(task, idleAgents, task.Config.RobotConfig.StartNumber)
@@ -745,6 +783,19 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 	taskTotalBots := task.TotalBots
 	concurrencyByAgent := splitGlobalValues(rc.Concurrency, taskTotalBots, assignments)
 
+	// 共享状态运行时下发：所有 Agent 用同一 runId（= taskID），落在同一命名空间。
+	var sharedAssign *SharedRuntimeAssignment
+	if task.SharedUsed && s.cfg.SharedEnabled() {
+		runID := task.SharedRunID
+		if runID == "" {
+			runID = taskID
+		}
+		sharedAssign = &SharedRuntimeAssignment{
+			RunID: runID,
+			Redis: s.cfg.Shared.Redis,
+		}
+	}
+
 	// 构建配置文件清单
 	var configFiles []string
 	if task.Config.FlowJSON != nil {
@@ -796,6 +847,7 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 			ConfigURL:         fmt.Sprintf("%s/sbot/tasks/%s/config", s.cfg.PublicURL, taskID),
 			ConfigFiles:       configFiles,
 			RampUp:            scaleRampUp(rc.RampUp, taskTotalBots, a.TotalBots, assignments, a.AgentID),
+			Shared:            sharedAssign,
 		}
 		addr := agent.Address
 		agentID := a.AgentID

@@ -5,11 +5,25 @@ import (
 	"strconv"
 
 	"stressbot/logview"
+	"stressbot/sharedstate"
 
 	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"
 )
+
+// taskUsesShare 扫描任务的 Lua 脚本，判断是否使用了共享状态模块（require("share")）。
+func taskUsesShare(task *Task) bool {
+	if task == nil {
+		return false
+	}
+	for _, content := range task.Config.LuaScripts {
+		if sharedstate.UsesShare(string(content)) {
+			return true
+		}
+	}
+	return false
+}
 
 func stringOr(v, fallback string, label ...string) string {
 	if v == "" {

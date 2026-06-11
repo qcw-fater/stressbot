@@ -97,7 +97,7 @@ React 18 / Vite 5 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 
 - **取值**：`fixed`（固定值）/ `state` / `stateFirst`
 - **随机选取**：`stateRandom` / `stateRandomN` / `stateMapKey` / `stateMapValue` / `randomPick` / `randomPickN` / `randomPickMap` / `randomExclude`
-- **随机生成**：`randomInt` / `randomFloat` / `randomBool` / `randomString`
+- **随机生成**：`randomInt` / `randomFloat` / `randomBool` / `randomString`（charset 支持 `lower`/`upper`/`alpha`/`numeric`/`alphanum` 与自定义字符集）
 - **辅助**：`listSize`
 
 ### 通用属性

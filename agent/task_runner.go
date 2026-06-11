@@ -1,4 +1,4 @@
-package agent
+﻿package agent
 
 import (
 	"context"
@@ -16,6 +16,7 @@ import (
 	"stressbot/protox"
 	"stressbot/robot"
 	"stressbot/script"
+	"stressbot/sharedstate"
 	"stressbot/utils"
 	json "stressbot/utils/jsonx"
 	stresslog "stressbot/utils/log"
@@ -195,6 +196,31 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 		stresslog.Warn("[TASK] Lua 脚本预编译失败（非致命）", zap.Error(err))
 	}
 
+	// 9.5 创建共享状态后端（Admin 已检测脚本使用 share 且下发了 Redis 配置）。
+	//     Agent 只负责 Close（断开连接）；统一 Cleanup 由 Admin 在任务终态时触发，
+	//     避免多 Agent 共享同一 runId 时某个 Agent 先结束就删掉别人还在用的 key。
+	var sharedStore sharedstate.Store
+	if r.assignment.Shared != nil && r.assignment.Shared.Redis.Enabled() {
+		resolved, rerr := r.assignment.Shared.Redis.Resolve()
+		if rerr != nil {
+			return runFailed(fmt.Sprintf("共享状态配置无效: %v", rerr))
+		}
+		store, serr := sharedstate.NewRedisStore(resolved, r.assignment.Shared.RunID)
+		if serr != nil {
+			return runFailed(fmt.Sprintf("连接共享状态(Redis)失败: %v", serr))
+		}
+		sharedStore = store
+		defer func() { _ = sharedStore.Close() }()
+		stresslog.Info("[TASK] 共享状态已启用",
+			zap.String("taskID", taskID),
+			zap.String("addr", resolved.Addr),
+			zap.Int("db", resolved.DB),
+			zap.String("runId", r.assignment.Shared.RunID))
+	} else {
+		stresslog.Info("[TASK] 共享状态未启用",
+			zap.String("taskID", taskID))
+	}
+
 	// 10. 创建 Robot Manager
 	accountPrefix := r.assignment.AccountPrefix
 	if accountPrefix == "" {
@@ -212,6 +238,7 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 		RequestTimeout: tcpTimeout,
 		MainService:    mainService,
 		HTTPTimeout:    httpTimeout,
+		Shared:         sharedStore,
 	}
 	if r.assignment.RampUp != nil && len(r.assignment.RampUp.Stages) > 0 {
 		mgrCfg.RampUp = &robot.RampUpConfig{}

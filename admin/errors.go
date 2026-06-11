@@ -49,8 +49,9 @@ var (
 	ErrInvalidArgument  = NewError("INVALID_ARGUMENT", http.StatusBadRequest)
 	ErrHistoryDisabled  = NewError("HISTORY_DISABLED", http.StatusServiceUnavailable)
 	ErrHistoryNotFound  = NewError("HISTORY_NOT_FOUND", http.StatusNotFound)
-	ErrInternal         = NewError("INTERNAL_ERROR", http.StatusInternalServerError)
-	ErrStarredProtected = NewError("HISTORY_STARRED", http.StatusConflict)
+	ErrInternal          = NewError("INTERNAL_ERROR", http.StatusInternalServerError)
+	ErrStarredProtected  = NewError("HISTORY_STARRED", http.StatusConflict)
+	ErrSharedUnavailable = NewError("SHARED_STATE_UNAVAILABLE", http.StatusBadRequest)
 )
 
 // writeJSON 向 response writer 写入 JSON。

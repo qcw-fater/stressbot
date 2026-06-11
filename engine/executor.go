@@ -233,8 +233,7 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 		// ACTION_CANCELED 是"任务停止过程中的副作用"，monitor 已经按 Canceled 归类，
 		// 这里不再当真 error 处理：不打 error 日志、不走 errorStrategy，也不执行节点延迟。
 		// 历史一次 4 分钟任务 stop 阶段刷出 60+ 条 match_succeed/connect_battle_tcp 假 error。
-		var actionErr *ActionError
-		if errors.As(err, &actionErr) && actionErr.Code == errcode.ErrActionCanceled {
+		if actionErr, ok := errors.AsType[*ActionError](err); ok && actionErr.Code == errcode.ErrActionCanceled {
 			stresslog.Debug("[ENGINE] 动作在停止阶段被取消",
 				zap.String("caller", e.caller), zap.String("action", node.Action), zap.Error(err))
 			return context.Canceled
@@ -264,7 +263,7 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 		}
 	}
 
-	stresslog.Debug("[ENGINE] 执行动作", zap.String("caller", e.caller), zap.String("action", node.Action), zap.Int("listens", len(node.ListenRefs)))
+	stresslog.Info("[ENGINE] 执行动作成功", zap.String("caller", e.caller), zap.String("action", node.Action), zap.Int("listens", len(node.ListenRefs)))
 	e.nodeDelay(ctx, node)
 	return nil
 }

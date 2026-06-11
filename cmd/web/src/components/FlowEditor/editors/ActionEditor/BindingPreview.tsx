@@ -3,6 +3,7 @@
  */
 
 import type { FieldBind } from '@/types/action';
+import { randomStringCharsetLabel, resolveRandomStringCharset } from './randomStringCharset';
 
 export type PreviewResult =
   | { kind: 'skipped'; reason: string }
@@ -67,11 +68,15 @@ export function simulateBinding(fb: FieldBind): PreviewResult {
     }
     case 'randomString': {
       const len = fb.length ?? 8;
-      const sample = genSampleString(len);
-      return { kind: 'concrete', display: `"${sample}"  ← length=${len}` };
+      const charset = resolveRandomStringCharset(fb.charset);
+      const sample = genSampleString(len, charset);
+      return { kind: 'concrete', display: `"${sample}"  ← length=${len}, charset=${randomStringCharsetLabel(fb.charset)}` };
     }
     case 'randomExclude':
       return { kind: 'placeholder', display: `从 ${JSON.stringify(fb.values ?? [])} 排除 state["${fb.excludeSource}"] 后随机` };
+
+    case 'map':
+      return { kind: 'placeholder', display: `map[${fb.entries?.length ?? 0} entries]` };
 
     default:
       return { kind: 'error', message: `未知 type: ${fb.type}` };
@@ -89,8 +94,7 @@ function fmtFilters(filters?: { path?: string; op: string; mode?: string }[]): s
   return ` (filter: ${filters.map((f) => `${f.mode ? `[${f.mode}] ` : ''}${f.path || '.'} ${f.op}`).join(', ')})`;
 }
 
-function genSampleString(len: number): string {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+function genSampleString(len: number, chars: string): string {
   let s = '';
   for (let i = 0; i < Math.min(len, 16); i++) s += chars[Math.floor(Math.random() * chars.length)];
   return len > 16 ? s + '...' : s;

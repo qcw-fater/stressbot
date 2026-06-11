@@ -27,6 +27,7 @@ const TYPE_GROUPS: { label: string; types: BindingType[] }[] = [
   { label: '固定值', types: ['fixed'] },
   { label: 'state 取值', types: ['state', 'stateFirst', 'stateRandom', 'stateRandomN', 'stateMapKey', 'stateMapValue', 'listSize'] },
   { label: '随机', types: ['randomPick', 'randomPickN', 'randomPickMap', 'randomInt', 'randomFloat', 'randomBool', 'randomString', 'randomExclude'] },
+  { label: '复合', types: ['map'] },
 ];
 
 const BINDING_TYPE_DESC: Record<BindingType, string> = {
@@ -46,6 +47,7 @@ const BINDING_TYPE_DESC: Record<BindingType, string> = {
   randomBool: '随机布尔值',
   randomString: '随机字符串，指定长度',
   randomExclude: '从 values 中排除指定 state key 后随机选一个',
+  map: 'map 类型，通过 entries 构建键值对',
 };
 
 const TYPE_OPTIONS = TYPE_GROUPS.map((g) => ({

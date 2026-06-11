@@ -170,6 +170,105 @@ func TestNavigatePath(t *testing.T) {
 	}
 }
 
+// TestSetPath_StoreResponseSim_GuildInfo 模拟 storeResponse 写入 playerData.guildInfo 的完整流程：
+//   1. 登录时 LoginPlayerDataS2C 不含 guildInfo（没战队），playerData 不含 guildInfo
+//   2. CreateGuild 成功，GuildCreateS2C.data 字段写入 playerData.guildInfo
+//   3. 条件 state:playerData.guildInfo != nil && playerData.guildInfo.guildId != 0 应为 true
+//   4. 子字段 playerData.guildInfo.mydata.position 可正确导航
+func TestSetPath_StoreResponseSim_GuildInfo(t *testing.T) {
+	s := NewStore()
+
+	// --- 阶段 1：登录，LoginPlayerDataS2C 不含 guildInfo（proto3 未设置的 message 字段被跳过） ---
+	loginFieldMap := map[string]any{
+		"itemData":  []any{"sword", "shield"},
+		"funcList":  []any{map[string]any{"id": 1}},
+		"heroData":  "someHero",
+		// 注意：没有 guildInfo 字段
+	}
+	s.Set("playerData", loginFieldMap)
+
+	// 验证：此时 guildInfo 不存在
+	if v := s.GetPath("playerData.guildInfo"); v != nil {
+		t.Fatalf("阶段1: playerData.guildInfo 应为 nil, got %v", v)
+	}
+
+	// --- 阶段 2：模拟 storeResponse 将 GuildCreateS2C.data 写入 playerData.guildInfo ---
+	// GuildCreateS2C.data 的类型是 GuildLoginInfo，结构如下：
+	guildLoginInfo := map[string]any{
+		"guildId":    int64(12345),
+		"guildGamePlay": map[string]any{},
+		"baseInfo":   map[string]any{"name": "testGuild"},
+		"mydata":     map[string]any{"position": int32(0), "playerId": int32(100)},
+		"baseSetting": map[string]any{},
+	}
+
+	// 这是 storeResponse 实际调用的: ae.store.SetPath(m.Setter, val)
+	// setter = "playerData.guildInfo", val = guildLoginInfo
+	s.SetPath("playerData.guildInfo", guildLoginInfo)
+
+	// --- 阶段 3：验证嵌套写入结果 ---
+
+	// 3a. playerData.guildInfo 整体不为 nil
+	got := s.GetPath("playerData.guildInfo")
+	if got == nil {
+		t.Fatal("阶段3a: playerData.guildInfo 不应为 nil")
+	}
+
+	// 3b. guildId 可正确读取
+	gotGuildId := s.GetPath("playerData.guildInfo.guildId")
+	if gotGuildId != int64(12345) {
+		t.Fatalf("阶段3b: guildId = %v, want 12345", gotGuildId)
+	}
+
+	// 3c. 条件: playerData.guildInfo != nil → true
+	gotGuildInfo := s.GetPath("playerData.guildInfo")
+	if gotGuildInfo == nil {
+		t.Fatal("阶段3c: playerData.guildInfo != nil 应为 true")
+	}
+
+	// 3d. 条件: playerData.guildInfo.guildId != 0 → true
+	if gotGuildId == nil || gotGuildId == int64(0) {
+		t.Fatal("阶段3d: playerData.guildInfo.guildId != 0 应为 true")
+	}
+
+	// 3e. 子字段 mydata.position 可正确导航
+	gotPosition := s.GetPath("playerData.guildInfo.mydata.position")
+	if gotPosition != int32(0) {
+		t.Fatalf("阶段3e: mydata.position = %v, want 0", gotPosition)
+	}
+
+	// --- 阶段 4：验证 playerData 原有字段未被覆盖 ---
+	gotItemData := s.GetPath("playerData.itemData")
+	if gotItemData == nil {
+		t.Fatal("阶段4: playerData.itemData 应保留")
+	}
+	gotHeroData := s.GetPath("playerData.heroData")
+	if gotHeroData != "someHero" {
+		t.Fatalf("阶段4: playerData.heroData = %v, want someHero", gotHeroData)
+	}
+
+	// --- 阶段 5：第二次写入（如 GetGuildInfo 更新战队信息）不应丢失其他 playerData 字段 ---
+	updatedGuildInfo := map[string]any{
+		"guildId":    int64(99999),
+		"mydata":     map[string]any{"position": int32(1), "playerId": int32(100)},
+		"baseInfo":   map[string]any{"name": "updatedGuild"},
+	}
+	s.SetPath("playerData.guildInfo", updatedGuildInfo)
+
+	// 原有字段仍在
+	if s.GetPath("playerData.heroData") != "someHero" {
+		t.Fatal("阶段5: 更新 guildInfo 后 playerData.heroData 应保留")
+	}
+	// guildId 已更新
+	if s.GetPath("playerData.guildInfo.guildId") != int64(99999) {
+		t.Fatal("阶段5: guildId 应已更新为 99999")
+	}
+	// position 已更新
+	if s.GetPath("playerData.guildInfo.mydata.position") != int32(1) {
+		t.Fatal("阶段5: mydata.position 应已更新为 1")
+	}
+}
+
 func TestSetPath_Concurrent(t *testing.T) {
 	s := NewStore()
 	var wg sync.WaitGroup

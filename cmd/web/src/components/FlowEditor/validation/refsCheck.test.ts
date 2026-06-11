@@ -166,10 +166,192 @@ describe('validateFlow', () => {
     expect(r.errors.find((e) => e.code === 'FILTER_UNKNOWN_OP')).toBeFalsy();
   });
 
+  it('randomString 支持字符集别名和自定义字符集', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpSend',
+          service: 'logic',
+          route: {},
+          c2sProto: 'X.Foo',
+          bindings: [
+            { field: 'lowerName', type: 'randomString', length: 8, charset: 'lower' },
+            { field: 'upperName', type: 'randomString', length: 8, charset: 'upper' },
+            { field: 'inviteCode', type: 'randomString', length: 8, charset: 'ABC-123_' },
+          ],
+        },
+      },
+    }));
+
+    expect(r.errors.find((e) => e.code === 'BINDING_INVALID_CHARSET')).toBeFalsy();
+  });
+
+  it('randomString 显式空白 charset 报错', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpSend',
+          service: 'logic',
+          route: {},
+          c2sProto: 'X.Foo',
+          bindings: [{ field: 'name', type: 'randomString', length: 8, charset: '   ' }],
+        },
+      },
+    }));
+
+    expect(r.errors.find((e) => e.code === 'BINDING_INVALID_CHARSET')).toBeTruthy();
+  });
+
   // ── 正向 ──
 
   it('完整最小合法 flow 0 错误', () => {
     const r = validateFlow(baseFlow());
+    expect(r.errors.length).toBe(0);
+  });
+
+  // ── map binding 级 ──
+
+  it('BINDING_MAP_NO_ENTRIES：map 缺少 entries 报错', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpSend',
+          service: 'logic',
+          route: {},
+          c2sProto: 'X.Foo',
+          bindings: [{ field: 'heroMap', type: 'map' }],
+        },
+      },
+    }));
+    expect(r.errors.find((e) => e.code === 'BINDING_MAP_NO_ENTRIES')).toBeTruthy();
+  });
+
+  it('BINDING_MAP_NO_ENTRIES：map entries 为空数组报错', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpSend',
+          service: 'logic',
+          route: {},
+          c2sProto: 'X.Foo',
+          bindings: [{ field: 'heroMap', type: 'map', entries: [] }],
+        },
+      },
+    }));
+    expect(r.errors.find((e) => e.code === 'BINDING_MAP_NO_ENTRIES')).toBeTruthy();
+  });
+
+  it('BINDING_MAP_ENTRY_NO_KEY：map entry 缺少 key 报错', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpSend',
+          service: 'logic',
+          route: {},
+          c2sProto: 'X.Foo',
+          bindings: [{ field: 'heroMap', type: 'map', entries: [{ value: { type: 'fixed', value: 1 } }] }],
+        },
+      },
+    }));
+    expect(r.errors.find((e) => e.code === 'BINDING_MAP_ENTRY_NO_KEY')).toBeTruthy();
+  });
+
+  it('BINDING_MAP_ENTRY_NO_VALUE：map entry 缺少 value 报错', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpSend',
+          service: 'logic',
+          route: {},
+          c2sProto: 'X.Foo',
+          bindings: [{ field: 'heroMap', type: 'map', entries: [{ key: 'name' }] }],
+        },
+      },
+    }));
+    expect(r.errors.find((e) => e.code === 'BINDING_MAP_ENTRY_NO_VALUE')).toBeTruthy();
+  });
+
+  it('BINDING_MAP_ENTRY_VALUE_MAP：map entry value 不允许嵌套 map 类型', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpSend',
+          service: 'logic',
+          route: {},
+          c2sProto: 'X.Foo',
+          bindings: [{
+            field: 'heroMap',
+            type: 'map',
+            entries: [{ key: 'nested', value: { type: 'map', entries: [{ key: 'inner', value: { type: 'fixed', value: 1 } }] } }],
+          }],
+        },
+      },
+    }));
+    expect(r.errors.find((e) => e.code === 'BINDING_MAP_ENTRY_VALUE_MAP')).toBeTruthy();
+  });
+
+  it('map entry value 复用 source 校验：entry value 缺 source 报 BINDING_NO_SOURCE', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpSend',
+          service: 'logic',
+          route: {},
+          c2sProto: 'X.Foo',
+          bindings: [{
+            field: 'heroMap',
+            type: 'map',
+            entries: [{ key: 'name', value: { type: 'state' } }],
+          }],
+        },
+      },
+    }));
+    expect(r.errors.find((e) => e.code === 'BINDING_NO_SOURCE')).toBeTruthy();
+  });
+
+  it('map entry value 不触发 BINDING_NO_FIELD（纯值生成器不需要 field/storeAs）', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpSend',
+          service: 'logic',
+          route: {},
+          c2sProto: 'X.Foo',
+          bindings: [{
+            field: 'params',
+            type: 'map',
+            entries: [
+              { key: 1, value: { type: 'randomInt', min: 0, max: 1 } },
+              { key: 2, value: { type: 'randomInt', min: 0, max: 1 } },
+              { key: 3, value: { type: 'randomInt', min: 1, max: 200 } },
+            ],
+          }],
+        },
+      },
+    }));
+    expect(r.errors.length).toBe(0);
+    expect(r.warnings.find((e) => e.code === 'BINDING_NO_FIELD')).toBeFalsy();
+  });
+
+  it('合法 map binding 无错误', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpSend',
+          service: 'logic',
+          route: {},
+          c2sProto: 'X.Foo',
+          bindings: [{
+            field: 'heroMap',
+            type: 'map',
+            entries: [
+              { key: 'name', value: { type: 'fixed', value: 'test' } },
+              { key: 'level', value: { type: 'randomInt', min: 1, max: 100 } },
+            ],
+          }],
+        },
+      },
+    }));
     expect(r.errors.length).toBe(0);
   });
 });

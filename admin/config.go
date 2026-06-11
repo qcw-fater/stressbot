@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 
+	"stressbot/sharedstate"
 	json "stressbot/utils/jsonx"
 )
 
@@ -14,11 +15,17 @@ type Config struct {
 	PublicURL string `json:"publicUrl"` // 外部可达 URL（Agent 用来连接 Admin，如 http://192.168.1.100:7718）
 	StaticDir string `json:"staticDir"` // 前端静态文件目录（默认 cmd/web/dist）
 
-	AgentRegistry RegistryConfig `json:"agentRegistry"` // Agent 注册与健康管理
-	History       HistoryConfig  `json:"history"`       // 历史归档
-	Log           LogConfig      `json:"log"`           // 日志
-	Pprof         PprofConfig    `json:"pprof"`         // pprof 调试服务
-	Daemon        bool           `json:"daemon"`        // 以守护进程模式运行（仅 Linux）
+	AgentRegistry RegistryConfig      `json:"agentRegistry"` // Agent 注册与健康管理
+	History       HistoryConfig       `json:"history"`       // 历史归档
+	Log           LogConfig           `json:"log"`           // 日志
+	Pprof         PprofConfig         `json:"pprof"`         // pprof 调试服务
+	Shared        *sharedstate.Config `json:"shared"`        // 共享状态（Redis）配置，下发给 Agent
+	Daemon        bool                `json:"daemon"`        // 以守护进程模式运行（仅 Linux）
+}
+
+// SharedEnabled 返回服务器是否配置了共享状态（Redis 地址非空）。
+func (c *Config) SharedEnabled() bool {
+	return c.Shared != nil && c.Shared.Redis.Enabled()
 }
 
 // PprofConfig pprof 调试服务配置。
@@ -133,6 +140,11 @@ func validateConfig(cfg *Config) error {
 	}
 	if _, err := time.ParseDuration(cfg.AgentRegistry.OfflineAfter); cfg.AgentRegistry.OfflineAfter != "" && err != nil {
 		return fmt.Errorf("invalid agentRegistry.offlineAfter: %w", err)
+	}
+	if cfg.SharedEnabled() {
+		if _, err := cfg.Shared.Redis.Resolve(); err != nil {
+			return fmt.Errorf("invalid shared config: %w", err)
+		}
 	}
 	return nil
 }

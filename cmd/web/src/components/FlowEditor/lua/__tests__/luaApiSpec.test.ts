@@ -152,4 +152,34 @@ describe('coverage：所有 stressbot 已暴露的核心 Lua API 都被记录', 
       expect(getLuaModule(name), `module ${name}`).toBeDefined();
     }
   });
+
+  it('share 模块覆盖共享状态关键函数', () => {
+    const m = getLuaModule('share')!;
+    expect(m).toBeDefined();
+    const names = m.functions.map((f) => f.name);
+    for (const expected of [
+      'set',
+      'get',
+      'del',
+      'exists',
+      'expire',
+      'incr',
+      'claim',
+      'release',
+      'owner',
+      'renew',
+      'queue_push',
+      'queue_pop',
+      'queue_len',
+      'queue_expire',
+      'hash_set',
+      'hash_get',
+      'hash_get_all',
+      'hash_del',
+      'hash_incr',
+      'hash_expire',
+    ]) {
+      expect(names, `share.${expected}`).toContain(expected);
+    }
+  });
 });

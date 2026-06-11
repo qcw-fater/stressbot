@@ -769,6 +769,216 @@ const adapterModule: LuaModule = {
   ],
 };
 
+const shareModule: LuaModule = {
+  name: 'share',
+  summary: '跨机器人 / 跨节点共享状态（Redis），用于协作型压测',
+  functions: [
+    {
+      name: 'set',
+      module: 'share',
+      params: [
+        { name: 'key', type: 'string', doc: '键名（自动按任务隔离）' },
+        { name: 'value', type: 'any', doc: '标量 / 数组 / map（JSON 可序列化）' },
+        { name: 'ttl_sec', type: 'number', optional: true, doc: '过期秒数；不传=不过期' },
+      ],
+      returns: 'ok, err : (boolean, string|nil)',
+      summary: '写入共享键值',
+      detail: '所有 share.* 返回 (值或ok, err)；err 非 nil 表示出错。未配置 Redis 时返回明确错误。',
+      example: `local ok, err = share.set("leader", robot.get_account(), 60)`,
+    },
+    {
+      name: 'get',
+      module: 'share',
+      params: [{ name: 'key', type: 'string', doc: '键名' }],
+      returns: 'value, ok, err : (any|nil, boolean, string|nil)',
+      summary: '读取共享键值（ok=false 表示不存在）',
+      detail: 'ok 用于区分「键不存在」与「存储了 null」；常见用法 local v = share.get(k) 仍可只取第一个值。',
+      example: `local v, ok, err = share.get("leader")`,
+    },
+    {
+      name: 'del',
+      module: 'share',
+      params: [{ name: 'key', type: 'string', doc: '键名' }],
+      returns: 'ok, err : (boolean, string|nil)',
+      summary: '删除共享键（作用于该键的所有数据类型）',
+      detail: '跨命名空间删除：清掉该 key 名下的 kv/计数器/队列/hash 全部数据（不影响 claim 锁）。',
+    },
+    {
+      name: 'exists',
+      module: 'share',
+      params: [{ name: 'key', type: 'string', doc: '键名' }],
+      returns: 'exists, err : (boolean, string|nil)',
+      summary: '判断键是否存在（任一数据类型存在即 true）',
+      detail: '检查该 key 名下的 kv/计数器/队列/hash 是否存在（不含 claim 锁）。',
+    },
+    {
+      name: 'expire',
+      module: 'share',
+      params: [
+        { name: 'key', type: 'string', doc: '键名' },
+        { name: 'ttl_sec', type: 'number', doc: '过期秒数' },
+      ],
+      returns: 'ok, err : (boolean, string|nil)',
+      summary: '设置键过期时间（作用于该键的所有数据类型）',
+      detail: '为该 key 名下的 kv/计数器/队列/hash 统一设置 TTL（不含 claim 锁）。',
+    },
+    {
+      name: 'incr',
+      module: 'share',
+      params: [
+        { name: 'key', type: 'string', doc: '计数器键名' },
+        { name: 'delta', type: 'number', optional: true, doc: '增量（默认 1）' },
+        { name: 'ttl_sec', type: 'number', optional: true, doc: '过期秒数' },
+      ],
+      returns: 'value, err : (number, string|nil)',
+      summary: '原子递增计数器并返回新值',
+      example: `local n, err = share.incr("ready_count")`,
+    },
+    {
+      name: 'claim',
+      module: 'share',
+      params: [
+        { name: 'key', type: 'string', doc: '资源键名' },
+        { name: 'owner', type: 'string', doc: '占用者标识（如账号名）' },
+        { name: 'ttl_sec', type: 'number', optional: true, doc: '租约秒数；不传=服务器默认' },
+      ],
+      returns: 'ok, err : (boolean, string|nil)',
+      summary: '抢占资源/分布式锁（成功返回 true）',
+      detail: '原子 SET NX：仅当资源未被占用时成功。配合 renew/release 使用。',
+      example: `if share.claim("room:1", robot.get_account(), 30) then
+  -- 抢到房主
+end`,
+    },
+    {
+      name: 'release',
+      module: 'share',
+      params: [
+        { name: 'key', type: 'string', doc: '资源键名' },
+        { name: 'owner', type: 'string', doc: '占用者标识（须与 claim 一致）' },
+      ],
+      returns: 'released, err : (boolean, string|nil)',
+      summary: '释放自己持有的资源',
+    },
+    {
+      name: 'owner',
+      module: 'share',
+      params: [{ name: 'key', type: 'string', doc: '资源键名' }],
+      returns: 'owner, err : (string|nil, string|nil)',
+      summary: '查询资源当前持有者',
+    },
+    {
+      name: 'renew',
+      module: 'share',
+      params: [
+        { name: 'key', type: 'string', doc: '资源键名' },
+        { name: 'owner', type: 'string', doc: '占用者标识' },
+        { name: 'ttl_sec', type: 'number', optional: true, doc: '续租秒数' },
+      ],
+      returns: 'ok, err : (boolean, string|nil)',
+      summary: '续租自己持有的资源',
+    },
+    {
+      name: 'queue_push',
+      module: 'share',
+      params: [
+        { name: 'key', type: 'string', doc: '队列键名' },
+        { name: 'value', type: 'any', doc: '入队元素' },
+        { name: 'ttl_sec', type: 'number', optional: true, doc: '过期秒数' },
+      ],
+      returns: 'ok, err : (boolean, string|nil)',
+      summary: '尾部入队（FIFO）',
+    },
+    {
+      name: 'queue_pop',
+      module: 'share',
+      params: [{ name: 'key', type: 'string', doc: '队列键名' }],
+      returns: 'value, ok, err : (any|nil, boolean, string|nil)',
+      summary: '头部出队（ok=false 表示队列为空）',
+      detail: 'ok 用于区分「空队列」与「出队了 null 元素」。',
+      example: `local v, ok = share.queue_pop("jobs")
+if ok then -- 拿到一个任务 end`,
+    },
+    {
+      name: 'queue_len',
+      module: 'share',
+      params: [{ name: 'key', type: 'string', doc: '队列键名' }],
+      returns: 'n, err : (number, string|nil)',
+      summary: '队列长度',
+    },
+    {
+      name: 'queue_expire',
+      module: 'share',
+      params: [
+        { name: 'key', type: 'string', doc: '队列键名' },
+        { name: 'ttl_sec', type: 'number', doc: '过期秒数' },
+      ],
+      returns: 'ok, err : (boolean, string|nil)',
+      summary: '设置队列过期时间',
+    },
+    {
+      name: 'hash_set',
+      module: 'share',
+      params: [
+        { name: 'key', type: 'string', doc: 'hash 键名' },
+        { name: 'field', type: 'string', doc: '字段名' },
+        { name: 'value', type: 'any', doc: '字段值' },
+        { name: 'ttl_sec', type: 'number', optional: true, doc: '过期秒数' },
+      ],
+      returns: 'ok, err : (boolean, string|nil)',
+      summary: '写入 hash 字段',
+    },
+    {
+      name: 'hash_get',
+      module: 'share',
+      params: [
+        { name: 'key', type: 'string', doc: 'hash 键名' },
+        { name: 'field', type: 'string', doc: '字段名' },
+      ],
+      returns: 'value, ok, err : (any|nil, boolean, string|nil)',
+      summary: '读取 hash 字段（ok=false 表示字段不存在）',
+    },
+    {
+      name: 'hash_get_all',
+      module: 'share',
+      params: [{ name: 'key', type: 'string', doc: 'hash 键名' }],
+      returns: 'table, err : (table|nil, string|nil)',
+      summary: '读取整个 hash（不存在返回 nil）',
+    },
+    {
+      name: 'hash_del',
+      module: 'share',
+      params: [
+        { name: 'key', type: 'string', doc: 'hash 键名' },
+        { name: 'field', type: 'string', doc: '字段名' },
+      ],
+      returns: 'ok, err : (boolean, string|nil)',
+      summary: '删除 hash 字段',
+    },
+    {
+      name: 'hash_incr',
+      module: 'share',
+      params: [
+        { name: 'key', type: 'string', doc: 'hash 键名' },
+        { name: 'field', type: 'string', doc: '字段名' },
+        { name: 'delta', type: 'number', optional: true, doc: '增量（默认 1）' },
+        { name: 'ttl_sec', type: 'number', optional: true, doc: '过期秒数' },
+      ],
+      returns: 'value, err : (number, string|nil)',
+      summary: '原子递增 hash 字段并返回新值',
+    },
+    {
+      name: 'hash_expire',
+      module: 'share',
+      params: [
+        { name: 'key', type: 'string', doc: 'hash 键名' },
+        { name: 'ttl_sec', type: 'number', doc: '过期秒数' },
+      ],
+      returns: 'ok, err : (boolean, string|nil)',
+      summary: '设置 hash 过期时间',
+    },
+  ],
+};
+
 export const LUA_MODULES: readonly LuaModule[] = [
   robotModule,
   networkModule,
@@ -777,6 +987,7 @@ export const LUA_MODULES: readonly LuaModule[] = [
   jsonModule,
   logModule,
   adapterModule,
+  shareModule,
 ];
 
 const moduleByName = new Map(LUA_MODULES.map((m) => [m.name, m]));

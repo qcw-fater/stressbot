@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"reflect"
 	"strings"
 	"time"
 
@@ -30,7 +31,21 @@ const (
 	TimingLevelRTTOnly = 0 // 默认：仅 WireRTT + SendCost
 	TimingLevelCodec   = 1 // 增加 EncodeCost
 	TimingLevelFull    = 2 // 增加 BuildCost / ParseStoreCost
+
+	randomStringCharsetLower    = "abcdefghijklmnopqrstuvwxyz"
+	randomStringCharsetUpper    = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	randomStringCharsetNumeric  = "0123456789"
+	randomStringCharsetAlpha    = randomStringCharsetLower + randomStringCharsetUpper
+	randomStringCharsetAlphanum = randomStringCharsetAlpha + randomStringCharsetNumeric
 )
+
+var randomStringCharsetAliases = map[string]string{
+	"lower":    randomStringCharsetLower,
+	"upper":    randomStringCharsetUpper,
+	"alpha":    randomStringCharsetAlpha,
+	"numeric":  randomStringCharsetNumeric,
+	"alphanum": randomStringCharsetAlphanum,
+}
 
 // RequestTiming 单次 request-response 的耗时拆解。
 type RequestTiming struct {
@@ -260,7 +275,10 @@ func (ae *ActionExecutor) bindFields(msg proto.Message, bindings []FieldBind, ac
 			continue
 		}
 
-		value := ae.resolveFieldValue(fb)
+		value, err := ae.resolveFieldValueStrict(fb, actionName, fb.Field)
+		if err != nil {
+			return err
+		}
 
 		// 2) nil 值：optional 跳过，required 报错
 		if value == nil {
@@ -287,6 +305,49 @@ func (ae *ActionExecutor) bindFields(msg proto.Message, bindings []FieldBind, ac
 		}
 	}
 	return nil
+}
+
+func (ae *ActionExecutor) resolveFieldValueStrict(fb *FieldBind, actionName, fieldName string) (any, error) {
+	if fb.Type != BindMap {
+		return ae.resolveFieldValue(fb), nil
+	}
+
+	return ae.resolveMapValueStrict(fb, actionName, fieldName)
+}
+
+func (ae *ActionExecutor) resolveMapValueStrict(fb *FieldBind, actionName, fieldName string) (any, error) {
+	result := make(map[any]any, len(fb.Entries))
+	for _, entry := range fb.Entries {
+		if !isComparableMapKey(entry.Key) {
+			return nil, NewActionError(errcode.ErrBindField, fmt.Sprintf("action=%s field=%s mapKey=%v key 不可比较", actionName, fieldName, entry.Key))
+		}
+		if !ae.evaluateCondition(entry.Value.Condition) {
+			continue
+		}
+		if entry.Value.Type == BindMap {
+			return nil, NewActionError(errcode.ErrBindField, fmt.Sprintf("action=%s field=%s mapKey=%v 不支持嵌套 map", actionName, fieldName, entry.Key))
+		}
+
+		value := ae.resolveFieldValue(&entry.Value)
+		if value == nil {
+			if entry.Value.Optional {
+				continue
+			}
+			if entry.Value.Required || isImplicitRequired(entry.Value.Type) {
+				return nil, NewActionError(errcode.ErrBindField, fmt.Sprintf("action=%s field=%s mapKey=%v value 缺失", actionName, fieldName, entry.Key))
+			}
+			continue
+		}
+		result[entry.Key] = value
+	}
+	return result, nil
+}
+
+func isComparableMapKey(key any) bool {
+	if key == nil {
+		return true
+	}
+	return reflect.TypeOf(key).Comparable()
 }
 
 // resolveFieldValue 解析字段绑定值，返回 Go 原生类型。
@@ -470,14 +531,14 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		if length <= 0 {
 			length = 8
 		}
-		charset := fb.Charset
-		if charset == "" {
-			charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-		}
+		charset := resolveRandomStringCharset(fb.Charset)
 		return randomStringCharset(length, charset)
 
 	case BindListSize:
 		return len(ae.store.GetList(fb.Source))
+
+	case BindMap:
+		return nil
 
 	default:
 		stresslog.Debug("[ACTION] 未知 binding type，按 fixed 处理",
@@ -1115,6 +1176,18 @@ func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *
 		"action="+def.Name+" service="+def.Service+" route="+routeKey+
 			fmt.Sprintf(" timeout=%ds polls=%d elapsed=%v", timeout, pollCount, elapsed)+
 			"；route 未通过 listenRefs 预注册，请在前驱节点添加 listenRefs 并设置 listen=null")
+}
+
+// resolveRandomStringCharset 将字符集别名解析为实际字符池，未知非空值按自定义字符集处理。
+func resolveRandomStringCharset(charset string) string {
+	charset = strings.TrimSpace(charset)
+	if charset == "" {
+		return randomStringCharsetAlphanum
+	}
+	if resolved, ok := randomStringCharsetAliases[charset]; ok {
+		return resolved
+	}
+	return charset
 }
 
 // randomStringCharset 生成指定字符集的随机字符串
