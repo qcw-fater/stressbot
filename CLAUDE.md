@@ -16,6 +16,13 @@ go build -o stressbot.exe ./cmd/agent
 
 # 单机压测（agent.enabled 默认 false）
 go run ./cmd/agent -config conf/config.json
+# 单机模式可选 flag：覆盖资源路径（空值回退到 <config 所在目录> 下默认）
+#   -flow <file>     流程配置（默认 <conf>/flow/flow.json）
+#   -proto <dir>     proto 目录（默认 <conf>/proto）
+#   -scripts <dir>   Lua 脚本目录（默认 <conf>/scripts）
+#   -adapter <dir>   适配器目录，含 codec.lua 与可选 error.lua（默认 <conf>/adapter）
+# 示例：切换压测场景无需挪文件
+go run ./cmd/agent -config conf/config.json -flow conf/flow/rank.json
 
 # Admin 服务器
 go run ./cmd/admin -config conf/admin-config.json

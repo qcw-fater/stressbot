@@ -81,6 +81,11 @@ func main() {
 	}()
 
 	configPath := flag.String("config", "conf/config.json", "配置文件路径")
+	// 单机模式资源路径覆盖（空值回退到 <conf> 下默认相对路径；Agent 模式不使用）
+	flowPath := flag.String("flow", "", "单机模式流程配置文件路径（默认 <conf>/flow/flow.json）")
+	protoDir := flag.String("proto", "", "单机模式 proto 目录路径（默认 <conf>/proto）")
+	scriptsDir := flag.String("scripts", "", "单机模式 Lua 脚本目录路径（默认 <conf>/scripts）")
+	adapterDir := flag.String("adapter", "", "单机模式协议适配器目录路径（默认 <conf>/adapter，含 codec.lua 与可选 error.lua）")
 	daemonFlag := flag.Bool("d", false, "以守护进程模式运行")
 	flag.Parse()
 
@@ -134,7 +139,8 @@ func main() {
 		stresslog.Info("[MAIN] 单机模式启动",
 			zap.Int("botCount", botCount),
 			zap.Int("concurrent", conc))
-		runStandalone(cfg, confDir)
+		paths := resolveStandalonePaths(confDir, *flowPath, *protoDir, *scriptsDir, *adapterDir)
+		runStandalone(cfg, paths)
 	}
 }
 
@@ -178,23 +184,29 @@ func runAgentMode(cfg *Config) {
 
 // ── 单机模式 ──────────────────────────────────────────────
 
-func runStandalone(cfg *Config, confDir string) {
+func runStandalone(cfg *Config, paths standalonePaths) {
 	s := cfg.Standalone
+
+	stresslog.Info("[MAIN] 单机模式资源路径",
+		zap.String("flow", paths.Flow),
+		zap.String("proto", paths.Proto),
+		zap.String("scripts", paths.Scripts),
+		zap.String("adapter", paths.Adapter))
 
 	// 加载协议适配器
 	poolSize := adapter.SuggestedPoolSize()
-	errorMapPath := filepath.Join(confDir, "adapter", "error.lua")
+	errorMapPath := filepath.Join(paths.Adapter, "error.lua")
 	if _, err := os.Stat(errorMapPath); err != nil {
 		errorMapPath = ""
 	}
-	adp, err := adapter.NewLuaAdapter(poolSize, filepath.Join(confDir, "adapter", "codec.lua"), errorMapPath)
+	adp, err := adapter.NewLuaAdapter(poolSize, filepath.Join(paths.Adapter, "codec.lua"), errorMapPath)
 	if err != nil {
 		stresslog.Fatal("加载适配器失败", zap.Error(err))
 	}
 	stresslog.Info("[MAIN] 适配器已初始化", zap.Int("headerSize", adp.HeaderSize()))
 
 	// 加载 .proto 文件
-	loader := protox.NewLoader([]string{filepath.Join(confDir, "proto")}, nil)
+	loader := protox.NewLoader([]string{paths.Proto}, nil)
 	files, err := loader.Load()
 	if err != nil {
 		stresslog.Fatal("加载 proto 文件失败", zap.Error(err))
@@ -204,7 +216,7 @@ func runStandalone(cfg *Config, confDir string) {
 	factory := protox.NewFactory(registry)
 
 	// 加载流程配置
-	flow, err := loadFlow(filepath.Join(confDir, "flow", "flow.json"))
+	flow, err := loadFlow(paths.Flow)
 	if err != nil {
 		stresslog.Fatal("加载流程配置失败", zap.Error(err))
 	}
@@ -228,8 +240,8 @@ func runStandalone(cfg *Config, confDir string) {
 	}
 
 	// 初始化 Lua 运行时池
-	luaPool := script.NewRuntimePool(filepath.Join(confDir, "scripts"))
-	if err := luaPool.PrecompileScripts([]string{filepath.Join(confDir, "scripts")}); err != nil {
+	luaPool := script.NewRuntimePool(paths.Scripts)
+	if err := luaPool.PrecompileScripts([]string{paths.Scripts}); err != nil {
 		stresslog.Warn("[MAIN] Lua 脚本预编译失败（非致命错误）", zap.Error(err))
 	} else {
 		stresslog.Info("[MAIN] Lua 脚本已预编译", zap.Int("count", len(luaPool.ListScripts())))
@@ -247,7 +259,7 @@ func runStandalone(cfg *Config, confDir string) {
 	// 自动检测共享状态：脚本是否使用 require("share")。
 	// 使用但未配置 Redis → 启动前直接失败（与 Admin 行为一致），避免运行后 share.* 全部报错。
 	var sharedStore sharedstate.Store
-	if detectShareUsage(filepath.Join(confDir, "scripts")) {
+	if detectShareUsage(paths.Scripts) {
 		if cfg.Shared == nil || !cfg.Shared.Redis.Enabled() {
 			stresslog.Fatal("流程脚本使用了共享状态(share)，但未配置 Redis（shared.redis.addr 为空），无法启动")
 		}
@@ -384,6 +396,37 @@ func detectShareUsage(scriptsDir string) bool {
 }
 
 // ── 通用工具 ──────────────────────────────────────────────
+
+// standalonePaths 单机模式解析后的资源路径（CLI flag 覆盖或 <conf> 下默认相对路径）。
+type standalonePaths struct {
+	Flow    string // 流程配置文件
+	Proto   string // proto 目录
+	Scripts string // Lua 脚本目录
+	Adapter string // 适配器目录（含 codec.lua 与可选 error.lua）
+}
+
+// resolveStandalonePaths 解析单机模式资源路径：对应 flag 为空时回退到 confDir 下的默认相对路径，
+// 非空时通过 resolvePath 解析为绝对路径。
+func resolveStandalonePaths(confDir, flow, proto, scripts, adapter string) standalonePaths {
+	return standalonePaths{
+		Flow:    resolvePath(flow, filepath.Join(confDir, "flow", "flow.json")),
+		Proto:   resolvePath(proto, filepath.Join(confDir, "proto")),
+		Scripts: resolvePath(scripts, filepath.Join(confDir, "scripts")),
+		Adapter: resolvePath(adapter, filepath.Join(confDir, "adapter")),
+	}
+}
+
+// resolvePath flagVal 为空返回 defaultPath，否则解析为绝对路径（解析失败则原样返回）。
+func resolvePath(flagVal, defaultPath string) string {
+	if flagVal == "" {
+		return defaultPath
+	}
+	abs, err := filepath.Abs(flagVal)
+	if err != nil {
+		return flagVal
+	}
+	return abs
+}
 
 func loadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)

@@ -16,6 +16,7 @@ pkg/mod/
 .idea/
 .DS_Store
 *.swp
+.codegraph/
 
 # 日志和数据库
 *.log
@@ -31,6 +32,7 @@ dist/
 log/
 data/
 bugs/
+metrics/
 
 # AI
 .claude/
