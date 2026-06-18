@@ -176,7 +176,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		r.state.Set(k, v)
 	}
 
-	r.actionExec = engine.NewActionExecutor(r.state, &netSenderAdapter{robot: r}, r.factory, r.adp, engineTimingLevel)
+	r.actionExec = engine.NewActionExecutor(r.state, &netSenderAdapter{robot: r}, r.factory, r.resolver, engineTimingLevel)
 	r.executor = engine.NewExecutor(flow, &robotActionHandler{robot: r, flow: flow}, r.account)
 
 	return r, nil
@@ -791,7 +791,15 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 		}
 		key := connKey{proto: proto, service: service}
 
-		routeKey := h.robot.adp.ExpectedRouteKey(ref.Route)
+		// T2-C2：listen routeKey 按 "<proto>:<service>" Resolve 出该连接的 Go SchemaAdapter
+		// 后计算（server=ref.Server 即 proto:service）。Resolve nil → fail loud（中文 error，
+		// 带上下文），不静默兜底——与 dial/decode 侧的 fail-loud 一致（缺 codec 配置即报错）。
+		serverAdp := h.robot.resolver.Resolve(ref.Server)
+		if serverAdp == nil {
+			return fmt.Errorf("监听注册失败：server=%q routeKey 解析失败，连接未配置 codec（resolver.Resolve(%q) nil）",
+				ref.Server, ref.Server)
+		}
+		routeKey := serverAdp.ExpectedRouteKey(ref.Route)
 
 		var cb network.ListenCallBack
 		if ref.Listen == "" {
@@ -1255,8 +1263,9 @@ func (ns *netSenderAdapter) GetUDPSecretKey(service string) []byte {
 //   - raw-binary 模式（len(Fields) > 0）：engine.BuildHeartbeatBody（小端打包 + 私有计数器/时间/随机）；
 //   - 空 body（两者皆无）：静态心跳。
 //
-// body 构造完成后走 adapter 池（ns.robot.adp，非 robot 业务 LState）做 encode。
-// 因此心跳 goroutine **不持 robot luaMu**，这是 2-B 消除心跳 robot-luaMu 依赖的关键。
+// body 构造完成后走 resolver.Resolve("<transport>:<service>") 解析出的 Go SchemaAdapter 做 encode
+// （T2-C2 起；2-B/2-C1 之前是 ns.robot.adp）。因此心跳 goroutine **不持 robot luaMu**，
+// 这是 2-B 消除心跳 robot-luaMu 依赖的关键。
 //
 // 闭包内每次 tick：
 //  1. 按模式分派构造 body（skip=true 跳过本 tick 返回 nil；err 记 Warn 返回 nil）；
@@ -1290,13 +1299,17 @@ func (ns *netSenderAdapter) RegisterHeartbeat(cfg engine.HeartbeatActionConfig) 
 		}
 	}
 
-	// 闭包持有：双模式入参、state、私有计数器、adapter、factory、route、transport、conn（取 secretKey）、skip 标志。
+	// 闭包持有：双模式入参、state、私有计数器、resolver/factory/route、transport、conn（取 secretKey）、skip 标志。
 	// 字段布局 / bindings 拷贝一份避免共享 cfg 切片头被外部修改（ActionDef 生命周期内不可变，防御性拷贝）。
+	//
+	// T2-C2 起 encode 走 resolver：每 tick 按 cfg.Transport+":"+cfg.Service Resolve 出该连接的 Go
+	// SchemaAdapter 后 Encode。Resolve nil（codec 未映射）→ Warn+skip 本 tick（不 fail 流程，
+	// 与心跳 tick 容错语义对齐——单次 encode 失败不应终止整条心跳 goroutine）。
 	fields := append([]engine.HeartbeatField(nil), cfg.Fields...)
 	bindings := append([]engine.FieldBind(nil), cfg.Bindings...)
 	c2sProto := cfg.C2SProto
 	st := ns.robot.state
-	adp := ns.robot.adp
+	resolver := ns.robot.resolver
 	factory := ns.robot.factory
 	route := cfg.Route
 	skipWhenMissing := cfg.SkipWhenMissing
@@ -1336,6 +1349,16 @@ func (ns *netSenderAdapter) RegisterHeartbeat(cfg engine.HeartbeatActionConfig) 
 			return nil
 		}
 		key := conn.GetSecretKey()
+		// T2-C2：按 "<transport>:<service>" Resolve 出该连接的 Go SchemaAdapter 后 encode。
+		// Resolve nil → Warn+skip 本 tick（与 2-B 消除心跳 robot-luaMu 依赖的容错语义一致；
+		// 单 tick encode 失败不应终止整条心跳 goroutine）。
+		adp := resolver.Resolve(transport + ":" + cfg.Service)
+		if adp == nil {
+			stresslog.Warn("[ROBOT] 心跳 encode 失败：codec 未映射（resolver nil），跳过本 tick",
+				zap.String("transport", transport),
+				zap.String("service", cfg.Service))
+			return nil
+		}
 		var packet []byte
 		if transport == "udp" {
 			packet = adp.EncodeUDP(route, body, key)

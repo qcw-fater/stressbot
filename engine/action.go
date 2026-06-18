@@ -98,12 +98,17 @@ func (t *ActionTiming) WireRTTSum() time.Duration {
 
 // ActionExecutor 声明式动作执行器。
 // 根据 ActionDef 的 Pattern 分派到具体的执行方法，处理消息构建、发送、接收和状态存储。
+//
+// T2-C2 起 encode 侧（protocolEncode / ExpectedRouteKey / DescribeError）从单一 adapter
+// 切到 resolver：每次编码按 "<proto>:<service>"（proto 由 pattern 推导，service=def.Service）
+// Resolve 出该连接的 Go SchemaAdapter。Resolve nil 时由调用方 fail loud（ErrEncodeFailed），
+// 不静默兜底。r.adp（Lua RobotAdapter）仍由 Robot 层持有，留给 Phase 2 删除。
 type ActionExecutor struct {
-	netSender   NetSender       // 网络发送委托，由 Robot 层实现
-	store       *state.Store    // Robot 状态存储，保存服务器响应字段和中间变量
-	factory     *protox.Factory // 动态 protobuf 消息工厂，用于创建/序列化/解析 proto 消息
-	adp         adapter.Adapter // 协议适配器，处理消息头编解码和路由键计算
-	timingLevel int             // 计时细分级别：0=rtt, 1=codec, 2=full
+	netSender   NetSender             // 网络发送委托，由 Robot 层实现
+	store       *state.Store          // Robot 状态存储，保存服务器响应字段和中间变量
+	factory     *protox.Factory       // 动态 protobuf 消息工厂，用于创建/序列化/解析 proto 消息
+	resolver    adapter.CodecResolver // 按 "<proto>:<service>" 解析每连接的 Go codec adapter
+	timingLevel int                   // 计时细分级别：0=rtt, 1=codec, 2=full
 }
 
 // NetExchange 单次 TCP/UDP 请求或监听得到的网络交换结果。
@@ -191,13 +196,14 @@ type NetSender interface {
 }
 
 // NewActionExecutor 创建声明式动作执行器。
+// resolver 按 "<proto>:<service>" 解析每连接的 Go codec adapter（T2-C2 起 encode 侧）。
 // timingLevel: 0=仅 RTT, 1=含编解码, 2=完整客户端细分。
-func NewActionExecutor(store *state.Store, sender NetSender, factory *protox.Factory, adp adapter.Adapter, timingLevel int) *ActionExecutor {
+func NewActionExecutor(store *state.Store, sender NetSender, factory *protox.Factory, resolver adapter.CodecResolver, timingLevel int) *ActionExecutor {
 	return &ActionExecutor{
 		netSender:   sender,
 		store:       store,
 		factory:     factory,
-		adp:         adp,
+		resolver:    resolver,
 		timingLevel: timingLevel,
 	}
 }
@@ -892,9 +898,13 @@ func (ae *ActionExecutor) parseAndStoreResponse(def *ActionDef, respBody []byte)
 
 // handleHeaderError 处理服务端返回的非零 headerErr：解析响应、构造错误描述。
 // 将 4 处重复的 headerErr 处理逻辑统一收敛到此方法。
-func (ae *ActionExecutor) handleHeaderError(def *ActionDef, headerErr uint64, routeKey string, respBody []byte) *ActionError {
+//
+// T2-C2 起 DescribeError 按 def.Service + pattern(proto) 推 server 串 Resolve 取 adapter。
+// Resolve nil 时 DescribeError 返回空串（与未配置 errors.json 等价），不在此 fail loud——
+// headerErr 描述缺失不致命，仅 detail 不含人类可读前缀；上层仍按 NewServerError 上抛原错误码。
+func (ae *ActionExecutor) handleHeaderError(proto string, def *ActionDef, headerErr uint64, routeKey string, respBody []byte) *ActionError {
 	ae.parseAndStoreResponse(def, respBody)
-	desc := ae.adp.DescribeError(headerErr)
+	desc := ae.describeError(proto, def.Service, headerErr)
 	detail := "service=" + def.Service + " route=" + routeKey
 	if desc != "" {
 		detail = desc + ": " + detail
@@ -1036,12 +1046,51 @@ func (ae *ActionExecutor) protocolSend(protocol, service string, packet []byte) 
 	return ae.netSender.TCPSend(service, packet)
 }
 
-// protocolEncode encodes a packet via TCP or UDP adapter.
-func (ae *ActionExecutor) protocolEncode(protocol string, route any, body, key []byte) []byte {
-	if protocol == "udp" {
-		return ae.adp.EncodeUDP(route, body, key)
+// protocolEncode encodes a packet via TCP or UDP adapter resolved by "<proto>:<service>".
+//
+// proto 由调用方按 pattern 推导（"tcp" / "udp"）；service 来自 ActionDef.Service。
+// Resolve nil（该连接未配置 codec）时返回 nil，调用方（execSend / execRequest）必须将其
+// 翻译为 ErrEncodeFailed fail loud（不静默兜底）。
+func (ae *ActionExecutor) protocolEncode(proto, service string, route any, body, key []byte) []byte {
+	adp := ae.resolveAdapter(proto, service)
+	if adp == nil {
+		return nil
 	}
-	return ae.adp.EncodeTCP(route, body, key)
+	if proto == "udp" {
+		return adp.EncodeUDP(route, body, key)
+	}
+	return adp.EncodeTCP(route, body, key)
+}
+
+// resolveAdapter 按 "<proto>:<service>" 从 resolver 解析该连接的 codec adapter。
+// proto 必须是 "tcp" / "udp"；非空 service 由调用方保证（ActionDef.Service 已校验）。
+// 未映射返回 nil，调用方 fail loud。
+func (ae *ActionExecutor) resolveAdapter(proto, service string) adapter.Adapter {
+	if ae.resolver == nil {
+		return nil
+	}
+	return ae.resolver.Resolve(proto + ":" + service)
+}
+
+// expectedRouteKey 按 "<proto>:<service>" Resolve 出 adapter 后计算 routeKey。
+// Resolve nil 时返回空串（与未配置 errors.json 等价）；调用方在 routeKey 进入网络层
+// 前不会 fail loud，因空 routeKey 会被 RequestResponse 当作通用匹配键（与历史行为对齐）。
+func (ae *ActionExecutor) expectedRouteKey(proto, service string, route any) string {
+	adp := ae.resolveAdapter(proto, service)
+	if adp == nil {
+		return ""
+	}
+	return adp.ExpectedRouteKey(route)
+}
+
+// describeError 按 "<proto>:<service>" Resolve 出 adapter 后描述 headerErr。
+// Resolve nil 时返回空串（与 errors.json 未配置等价，非致命）。
+func (ae *ActionExecutor) describeError(proto, service string, code uint64) string {
+	adp := ae.resolveAdapter(proto, service)
+	if adp == nil {
+		return ""
+	}
+	return adp.DescribeError(code)
 }
 
 // protocolSecretKey returns the encryption key for the given protocol.
@@ -1077,19 +1126,21 @@ func (ae *ActionExecutor) execSend(protocol string, def *ActionDef) (int, Action
 		return 0, ActionTiming{}, err
 	}
 
-	routeKey := ae.adp.ExpectedRouteKey(def.Route)
+	routeKey := ae.expectedRouteKey(protocol, def.Service, def.Route)
 	secretKey := ae.protocolSecretKey(protocol, def.Service)
 	var encodeStart time.Time
 	if ae.timingLevel >= TimingLevelCodec {
 		encodeStart = time.Now()
 	}
-	packet := ae.protocolEncode(protocol, def.Route, body, secretKey)
+	packet := ae.protocolEncode(protocol, def.Service, def.Route, body, secretKey)
 	var timing ActionTiming
 	if ae.timingLevel >= TimingLevelCodec && !encodeStart.IsZero() {
 		timing.Client.EncodeCost = time.Since(encodeStart)
 	}
 	if packet == nil {
-		return 0, timing, NewActionError(errcode.ErrEncodeFailed, "action="+def.Name+" route="+routeKey)
+		return 0, timing, NewActionError(errcode.ErrEncodeFailed,
+			"action="+def.Name+" service="+def.Service+" route="+routeKey+
+				"；codec 未映射（resolver.Resolve("+protocol+":"+def.Service+") nil）")
 	}
 
 	sendStart := time.Now()
@@ -1124,7 +1175,7 @@ func (ae *ActionExecutor) execRequest(protocol string, def *ActionDef) (int, int
 		return 0, 0, ActionTiming{Client: ClientTiming{BuildCost: buildCost}}, err
 	}
 
-	routeKey := ae.adp.ExpectedRouteKey(def.Route)
+	routeKey := ae.expectedRouteKey(protocol, def.Service, def.Route)
 	label := "TCPRequest"
 	if protocol == "udp" {
 		label = "UDPRequest"
@@ -1139,13 +1190,15 @@ func (ae *ActionExecutor) execRequest(protocol string, def *ActionDef) (int, int
 	if ae.timingLevel >= TimingLevelCodec {
 		encodeStart = time.Now()
 	}
-	packet := ae.protocolEncode(protocol, def.Route, body, secretKey)
+	packet := ae.protocolEncode(protocol, def.Service, def.Route, body, secretKey)
 	var encodeCost time.Duration
 	if ae.timingLevel >= TimingLevelCodec && !encodeStart.IsZero() {
 		encodeCost = time.Since(encodeStart)
 	}
 	if packet == nil {
-		return 0, 0, ActionTiming{Client: ClientTiming{BuildCost: buildCost, EncodeCost: encodeCost}}, NewActionError(errcode.ErrEncodeFailed, "action="+def.Name+" route="+routeKey)
+		return 0, 0, ActionTiming{Client: ClientTiming{BuildCost: buildCost, EncodeCost: encodeCost}}, NewActionError(errcode.ErrEncodeFailed,
+			"action="+def.Name+" service="+def.Service+" route="+routeKey+
+				"；codec 未映射（resolver.Resolve("+protocol+":"+def.Service+") nil）")
 	}
 
 	var reqTimeout []time.Duration
@@ -1166,7 +1219,7 @@ func (ae *ActionExecutor) execRequest(protocol string, def *ActionDef) (int, int
 	}
 
 	if exchange.HeaderErr != 0 {
-		return exchange.SendWireBytes, exchange.RecvWireBytes, timing, ae.handleHeaderError(def, exchange.HeaderErr, routeKey, respBody)
+		return exchange.SendWireBytes, exchange.RecvWireBytes, timing, ae.handleHeaderError(protocol, def, exchange.HeaderErr, routeKey, respBody)
 	}
 
 	var parseStart time.Time
@@ -1199,7 +1252,7 @@ func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *
 		pollMs = DefaultPollMs
 	}
 
-	routeKey := ae.adp.ExpectedRouteKey(def.Route)
+	routeKey := ae.expectedRouteKey(protocol, def.Service, def.Route)
 	label := "TCPListen"
 	if protocol == "udp" {
 		label = "UDPListen"
@@ -1223,7 +1276,7 @@ func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *
 			respBody := exchange.Body
 			var timing ActionTiming
 			if exchange.HeaderErr != 0 {
-				return exchange.RecvWireBytes, timing, ae.handleHeaderError(def, exchange.HeaderErr, routeKey, respBody)
+				return exchange.RecvWireBytes, timing, ae.handleHeaderError(protocol, def, exchange.HeaderErr, routeKey, respBody)
 			}
 			var parseStart time.Time
 			if ae.timingLevel >= TimingLevelFull {
