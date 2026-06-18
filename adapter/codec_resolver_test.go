@@ -11,6 +11,7 @@
 package adapter
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -213,5 +214,111 @@ func TestNewCodecResolver_EmptyMap(t *testing.T) {
 	}
 	if got := r.Resolve("anything"); got != nil {
 		t.Errorf("空 map resolver Resolve 应返回 nil，得到 %v", got)
+	}
+}
+
+// TestInferCodecMap_RealAdapterDir 用 T1.6 真实产物 conf/adapter 推断出三连接映射。
+// 文件名 <proto>_<service>_codec.json → server 串 <proto>:<service>。
+func TestInferCodecMap_RealAdapterDir(t *testing.T) {
+	m, err := InferCodecMap(adapterDir)
+	if err != nil {
+		t.Fatalf("InferCodecMap 失败: %v", err)
+	}
+	want := map[string]string{
+		"tcp:logic":  "tcp_logic_codec.json",
+		"tcp:battle": "tcp_battle_codec.json",
+		"udp:battle": "udp_battle_codec.json",
+	}
+	for server, file := range want {
+		got, ok := m[server]
+		if !ok {
+			t.Errorf("InferCodecMap 缺少 server %q（得到 %v）", server, m)
+			continue
+		}
+		if got != file {
+			t.Errorf("InferCodecMap[%q] = %q，期望 %q", server, got, file)
+		}
+	}
+	if extra := len(m) - len(want); extra > 0 {
+		t.Errorf("InferCodecMap 多出 %d 个映射（应只推断 3 份 codec.json，排除 errors.json/error.lua/codec.lua），得到 %v", extra, m)
+	}
+}
+
+// TestInferCodecMap_RoundTripWithLoader 推断出的 map 能直接喂 LoadCodecResolver 并 Resolve 非 nil。
+func TestInferCodecMap_RoundTripWithLoader(t *testing.T) {
+	m, err := InferCodecMap(adapterDir)
+	if err != nil {
+		t.Fatalf("InferCodecMap 失败: %v", err)
+	}
+	r, err := LoadCodecResolver(adapterDir, m, "errors.json")
+	if err != nil {
+		t.Fatalf("LoadCodecResolver 失败: %v", err)
+	}
+	for _, server := range []string{"tcp:logic", "tcp:battle", "udp:battle"} {
+		if r.Resolve(server) == nil {
+			t.Errorf("Resolve(%q) 返回 nil，期望非 nil", server)
+		}
+	}
+}
+
+// TestInferCodecMap_EmptyDir 空目录 → 中文 error（不静默返回空 map）。
+func TestInferCodecMap_EmptyDir(t *testing.T) {
+	tmp := t.TempDir()
+	_, err := InferCodecMap(tmp)
+	if err == nil {
+		t.Fatal("空目录 InferCodecMap 应返回 error，得到 nil")
+	}
+	if !strings.Contains(err.Error(), "codec") {
+		t.Errorf("error 不含 codec 关键词：%s", err.Error())
+	}
+}
+
+// TestInferCodecMap_MissingDir 目录不存在 → error。
+func TestInferCodecMap_MissingDir(t *testing.T) {
+	_, err := InferCodecMap(filepath.Join(adapterDir, "does_not_exist"))
+	if err == nil {
+		t.Fatal("不存在的目录 InferCodecMap 应返回 error，得到 nil")
+	}
+}
+
+// TestInferCodecMap_IgnoresNonCodecFiles errors.json / codec.lua / error.lua 不被当作 codec 文件。
+func TestInferCodecMap_IgnoresNonCodecFiles(t *testing.T) {
+	tmp := t.TempDir()
+	// 只放非 codec 文件 → 应当作「无 codec 文件」报错。
+	for _, name := range []string{"errors.json", "codec.lua", "error.lua", "README.md"} {
+		if err := os.WriteFile(filepath.Join(tmp, name), []byte("{}"), 0o644); err != nil {
+			t.Fatalf("写入 %s 失败: %v", name, err)
+		}
+	}
+	_, err := InferCodecMap(tmp)
+	if err == nil {
+		t.Fatal("只有非 codec 文件应报错，得到 nil error")
+	}
+}
+
+// TestInferCodecMap_SkipsErrorsJson errors.json（虽然后缀不匹配 *_codec.json，但要确认不会被误收）。
+func TestInferCodecMap_SkipsErrorsJson(t *testing.T) {
+	tmp := t.TempDir()
+	// 放一份真正的 codec 文件 + 一份 errors.json，确认只推断出 1 个。
+	src := filepath.Join(adapterDir, "tcp_logic_codec.json")
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("读取测试 fixture 失败: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "tcp_logic_codec.json"), data, 0o644); err != nil {
+		t.Fatalf("写入 codec 文件失败: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "errors.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("写入 errors.json 失败: %v", err)
+	}
+	m, err := InferCodecMap(tmp)
+	if err != nil {
+		t.Fatalf("InferCodecMap 失败: %v", err)
+	}
+	if len(m) != 1 {
+		t.Errorf("应只推断出 1 个 codec，得到 %d 个：%v", len(m), m)
+	}
+	if _, ok := m["tcp:logic"]; !ok {
+		t.Errorf("缺少 tcp:logic 映射，得到 %v", m)
 	}
 }

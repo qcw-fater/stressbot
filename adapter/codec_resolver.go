@@ -11,17 +11,78 @@
 //   - errors.json 可选：传空字符串跳过错误码 map（Adapter 仍可用，DescribeError 返回空串）。
 //   - resolver 构造后 byServer 只读（构造期填好后不再变），并发安全。
 //
+// InferCodecMap（T2-C1 新增）：扫 codecDir 下 *_codec.json → server 串，省去 main.go
+// 手写 codecs map；文件名规约 `<proto>_<service>_codec.json` 与 T1.6 产物一致。
+//
 // 仅 import codec + stdlib（不 import gopher-lua）。loader 只做「加载 + 编译 + 组装 resolver」，
 // 不读运行 config（config 解析 + 调 loader 是 T2 的 main.go/task_runner 职责）。
 package adapter
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"stressbot/codec"
 )
+
+// codecFileSuffix 是 codec 配置文件名的固定后缀。
+// 文件名规约：<proto>_<service>_codec.json（如 tcp_logic_codec.json）。
+const codecFileSuffix = "_codec.json"
+
+// InferCodecMap 扫描 codecDir 下的 *_codec.json 文件，推断出「server 串 → 文件名」映射。
+//
+// 文件名规约：`<proto>_<service>_codec.json` → server 串 `<proto>:<service>`。
+// 例如 `tcp_logic_codec.json` → "tcp:logic"，`udp_battle_codec.json` → "udp:battle"。
+//
+// 行为：
+//   - 仅匹配后缀 `_codec.json`（errors.json / codec.lua / error.lua / 其它文件不会被收）。
+//   - 文件名去 `_codec.json` 后缀后，按**首个** `_` 拆 `<proto>` 与 `<service>`。
+//     service 内部允许包含下划线（如 `tcp_rank_team_codec.json` → "tcp:rank_team"）。
+//   - proto 或 service 为空（拆不出）→ 返回中文 error，带文件名（配置错误 fail loud）。
+//   - codecDir 不存在 / 不可读 → 返回 error（os.ReadDir 失败透传）。
+//   - 目录下无任何 `*_codec.json` → 返回中文 error（不静默返回空 map）。
+//
+// 返回的 map 直接可喂给 LoadCodecResolver（同 codecDir）。
+// 映射顺序对行为无影响（LoadCodecResolver 内部按 server 串排序遍历）；这里为可读性按 server 串排序。
+func InferCodecMap(codecDir string) (map[string]string, error) {
+	entries, err := os.ReadDir(codecDir)
+	if err != nil {
+		return nil, fmt.Errorf("codec 目录 %q 读取失败：%w", codecDir, err)
+	}
+
+	m := make(map[string]string)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		// 仅收 *_codec.json（排除 errors.json / 任意 .json）。
+		if !strings.HasSuffix(name, codecFileSuffix) {
+			continue
+		}
+		// 去后缀得到 <proto>_<service>。
+		stem := strings.TrimSuffix(name, codecFileSuffix)
+		// 按首个 `_` 拆 proto / service。
+		idx := strings.Index(stem, "_")
+		if idx <= 0 || idx == len(stem)-1 {
+			// 没下划线 / 首字符即下划线 / 末字符即下划线 → 无法拆出 proto:service。
+			return nil, fmt.Errorf("codec 文件名 %q 无法解析为 <proto>_<service>%s", name, codecFileSuffix)
+		}
+		proto := stem[:idx]
+		service := stem[idx+1:]
+		server := proto + ":" + service
+		// 同名文件理论上 os.ReadDir 不会重复（目录项唯一）；保留覆盖以防御意外。
+		m[server] = name
+	}
+
+	if len(m) == 0 {
+		return nil, fmt.Errorf("codec 目录 %q 下无任何 *%s 文件（未声明任何连接的 codec）", codecDir, codecFileSuffix)
+	}
+	return m, nil
+}
 
 // CodecResolver：server 串（"<proto>:<service>"，如 "tcp:logic"/"tcp:battle"/"udp:battle"）→ Adapter。
 // 缺映射返回 nil，由调用方 fail loud（不在 resolver 内 panic）。
@@ -129,4 +190,26 @@ func resolvePath(codecDir, name string) string {
 		return name
 	}
 	return filepath.Join(codecDir, name)
+}
+
+// PickMetaAdapter 从 resolver 取任一 adapter 作为 gnet Dialer/EventServer 的元信息源
+// （仅用于 OnTraffic 的 HeaderSize/BodyLength 帧切割，纯 Go，运行在 gnet 事件循环热路径上）。
+//
+// 入参 codecMap 用于选 key：按 server 串排序取首个，保证可复现。codecMap 必须非空
+// （InferCodecMap 已对空映射 fail loud），否则返回 nil——这会让 NewEventServer 在首次
+// OnTraffic 时 panic，启动期即暴露问题（不静默兜底）。
+//
+// 前提：当前协议 HeaderSize/BodyLength 全局一致（生产 3 份 codec.json 同 frame spec，
+// T1.6 同源生成）。多 codec 但 HeaderSize 不一致的场景，per-connection HeaderSize 下沉
+// 到 Connection 留到 2-C3 connectionPump；2-C1 仍由 EventServer 持单一元信息源。
+func PickMetaAdapter(resolver CodecResolver, codecMap map[string]string) Adapter {
+	if len(codecMap) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(codecMap))
+	for k := range codecMap {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return resolver.Resolve(keys[0])
 }

@@ -51,7 +51,15 @@ type Robot struct {
 	luaMu      sync.Mutex             // Lua 访问互斥锁（回调/心跳/encode/decode 共抢）
 	// adp 是该 Robot 私有的 codec 适配器（RobotLocalAdapter 重构）。
 	// 所有 encode/decode 都在 r.l 上执行，与其他 Robot 不再共享 LState 池。
-	adp            *adapter.RobotAdapter
+	//
+	// T2-C1 起进入双 codec 过渡态：adp 仍负责 encode/心跳/listen/Lua（→ 2-C2 切 encode、2-C3 删整条）；
+	// dial/decode 侧改走 resolver（下方）解析出的 Go SchemaAdapter。
+	adp *adapter.RobotAdapter
+	// resolver 按「server 串 <proto>:<service>」解析每条连接的 Go SchemaAdapter（无 luaMu）。
+	// Robot.ConnectTCP/UDP 在拨号前 Resolve，nil → fail loud；非 nil 注入 Connection，
+	// 该连接生命周期内 decodeLoop 固定用它（plan 02 §2-C「decode 侧不碰 resolver」）。
+	// 2-C1 新增：dial/decode 切 Go codec；encode 仍走 adp。
+	resolver       adapter.CodecResolver
 	shared         sharedstate.Store           // 任务级共享状态后端（可为 nil）
 	mainService    string                      // 主连接服务名，意外断开时停止机器人
 	requestTimeout time.Duration               // robotConfig.timeoutSec 注入；用作 Lua tcp/udp_request 默认 timeout
@@ -80,16 +88,26 @@ type Config struct {
 //
 // globalAdp 是进程级共享的 LuaAdapter（持有 codec.lua 字节码 + 元信息 + 错误描述缓存）。
 // NewRobot 内部调 globalAdp.NewRobotAdapter(r.l, &r.luaMu) 在该 Robot 私有 LState 上
-// 注册一份 codec 函数副本，后续编解码不再跨 Robot 抢全局 LState 池。
+// 注册一份 codec 函数副本，后续 encode/心跳/listen 编解码不再跨 Robot 抢全局 LState 池。
+//
+// resolver（T2-C1 新增）按「server 串 <proto>:<service>」解析每条连接的 Go SchemaAdapter，
+// 供 dial/decode 侧使用（Robot.ConnectTCP/UDP 在拨号前 Resolve；Resolve nil → fail loud）。
+// 与 globalAdp 形成**双 codec 过渡态**：
+//   - decode/dial → resolver（Go，无 luaMu，T1 冻结契约保证并发安全）；
+//   - encode/心跳/listen/Lua → globalAdp 派生的 RobotAdapter（→ 2-C2 切 encode、2-C3 删整条）。
 //
 // 返回 error 的场景：codec.lua 在 r.l 上加载失败（脚本错误 / 缺少必需函数）。
 // 这种情况说明 codec 配置有问题，重试无意义，调用方应跳过该 Robot 并打 error 日志。
 // 正常运行下这里不会失败（启动期已通过 LuaAdapter 验证过 codec.lua 完整性）。
 func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
-	globalAdp *adapter.LuaAdapter, dialer *network.Dialer, luaPool *script.RuntimePool) (*Robot, error) {
+	globalAdp *adapter.LuaAdapter, resolver adapter.CodecResolver,
+	dialer *network.Dialer, luaPool *script.RuntimePool) (*Robot, error) {
 
 	if globalAdp == nil {
 		return nil, fmt.Errorf("NewRobot: globalAdp 不能为 nil")
+	}
+	if resolver == nil {
+		return nil, fmt.Errorf("NewRobot: resolver 不能为 nil（dial/decode 侧 codec 未配置）")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -125,6 +143,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		shared:         cfg.Shared,
 		requestTimeout: cfg.RequestTimeout,
 		timingLevel:    engineTimingLevel,
+		resolver:       resolver,
 		execDone:       make(chan struct{}),
 		done:           make(chan struct{}),
 	}
@@ -393,7 +412,20 @@ func (r *Robot) ConnectTCP(serviceName, address string) bool {
 		return false
 	}
 
-	_, err := r.dialer.DialTCP(r.ctx, address, conn, r.adp)
+	// T2-C1：dial/decode 切 Go SchemaAdapter（无 luaMu）。
+	// 按连接的 server 串 "tcp:<service>" 从 resolver 解析 codec；未映射 → fail loud（不静默回退默认 codec）。
+	server := "tcp:" + serviceName
+	adp := r.resolver.Resolve(server)
+	if adp == nil {
+		stresslog.Error("[ROBOT] TCP 连接无 codec 配置（resolver 未映射），拨号中止",
+			zap.Int("id", r.id), zap.String("account", r.account),
+			zap.String("server", server), zap.String("service", serviceName), zap.String("addr", address))
+		monitor.Global().ConnFailed()
+		r.client.CloseTCP(serviceName)
+		return false
+	}
+
+	_, err := r.dialer.DialTCP(r.ctx, address, conn, adp)
 	if err != nil {
 		if r.ctx.Err() != nil {
 			stresslog.Debug("[ROBOT] TCP 连接建立已取消",
@@ -440,7 +472,20 @@ func (r *Robot) ConnectUDP(serviceName, address string) bool {
 		return false
 	}
 
-	_, err := r.dialer.DialUDP(r.ctx, address, conn, r.adp)
+	// T2-C1：dial/decode 切 Go SchemaAdapter（无 luaMu）。
+	// 按连接的 server 串 "udp:<service>" 从 resolver 解析 codec；未映射 → fail loud（不静默回退默认 codec）。
+	server := "udp:" + serviceName
+	adp := r.resolver.Resolve(server)
+	if adp == nil {
+		stresslog.Error("[ROBOT] UDP 连接无 codec 配置（resolver 未映射），拨号中止",
+			zap.Int("id", r.id), zap.String("account", r.account),
+			zap.String("server", server), zap.String("service", serviceName), zap.String("address", address))
+		monitor.Global().ConnFailed()
+		r.client.CloseUDP(serviceName)
+		return false
+	}
+
+	_, err := r.dialer.DialUDP(r.ctx, address, conn, adp)
 	if err != nil {
 		if r.ctx.Err() != nil {
 			stresslog.Debug("[ROBOT] UDP 连接建立已取消",

@@ -328,18 +328,20 @@ func (d *Dialer) Stop() error {
 // DialTCP 建立 TCP 连接并绑定业务层 Connection。
 // ctx 用于超时/取消：如果 ctx 在拨号完成前被取消，返回 context 错误。
 //
-// adp 是 decodeLoop 使用的协议适配器（RobotLocalAdapter 重构后由 Robot 传入
-// 自己的 RobotAdapter）。OnTraffic 走的是 d.server.adp（全局元信息源），
-// 两个适配器实现同一接口、共享元信息字段，仅 encode/decode 的执行栈不同：
-// gnet 帧切割仍走全局，decode 走 robot 私有 LState 消除跨 robot 争抢。
+// adp 是 decodeLoop 使用的协议适配器（T2-C1 起由 Robot 在拨号前通过 CodecResolver
+// 按 server 串解析后传入的 Go SchemaAdapter）。OnTraffic 走的是 d.server.adp（全局
+// 元信息源，仅 HeaderSize/BodyLength 帧切割，纯 Go）；decode 走连接固定 adp。
 //
-// 兼容性：传 nil 时 fallback 到 d.server.adp（保留单元测试 / 非 robot 场景路径）。
+// adp 必须非 nil：上层 Robot.ConnectTCP 已做 Resolve(nil → fail loud)，dial 内仅保留
+// 防御性 nil-guard（adp==nil 视为编程错误，直接返回错误，不再回退 d.server.adp 兜底）。
 func (d *Dialer) DialTCP(ctx context.Context, address string, conn *Connection, adp adapter.Adapter) (gnet.Conn, error) {
 	return d.dial(ctx, "tcp", address, conn, adp)
 }
 
 // DialUDP 建立 UDP 连接并绑定业务层 Connection。
 // ctx 用于超时/取消：任务停止时不再进入新的 UDP 拨号，避免 Lua action 持有 luaMu 卡死。
+//
+// adp 语义同 DialTCP：上层 Robot.ConnectUDP 已 Resolve 非 nil 注入。
 func (d *Dialer) DialUDP(ctx context.Context, address string, conn *Connection, adp adapter.Adapter) (gnet.Conn, error) {
 	return d.dial(ctx, "udp", address, conn, adp)
 }
@@ -363,8 +365,16 @@ func (d *Dialer) dial(ctx context.Context, network, address string, conn *Connec
 	if d.closed.Load() {
 		return nil, context.Canceled
 	}
+	// T2-C1：删除 `if adp == nil { adp = d.server.adp }` 兜底。
+	// adp 由上层 Robot.ConnectTCP/UDP 在拨号前经 CodecResolver.Resolve 注入（nil → 已 fail loud）。
+	// 此处仅保留防御性 nil-guard：adp==nil 视为编程错误，直接报错而非静默回退默认 codec。
 	if adp == nil {
-		adp = d.server.adp
+		serviceName := ""
+		if conn != nil {
+			serviceName = conn.ServiceName()
+		}
+		return nil, fmt.Errorf("%s 拨号失败 %s：adapter 为 nil（上层应通过 CodecResolver 注入，network=%s service=%q）",
+			strings.ToUpper(network), address, network, serviceName)
 	}
 
 	// gnet.Client.Dial 在 EnrollContext 阶段会等待 eventloop 注册完成。任务停止后先通过

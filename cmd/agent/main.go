@@ -205,6 +205,22 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 	}
 	stresslog.Info("[MAIN] 适配器已初始化", zap.Int("headerSize", adp.HeaderSize()))
 
+	// T2-C1：构造 CodecResolver（dial/decode 侧 Go SchemaAdapter）。
+	// 扫 paths.Adapter 下 *_codec.json 推断「server 串 → 文件名」映射，再 LoadCodecResolver 编译。
+	// 与上方 LuaAdapter 形成**双 codec 过渡态**：decode/dial → resolver（Go，无 luaMu）；
+	// encode/心跳/listen/Lua → adp（Lua RobotAdapter，→ 2-C2/2-C3 切换并删除）。
+	codecMap, err := adapter.InferCodecMap(paths.Adapter)
+	if err != nil {
+		stresslog.Fatal("推断 codec 映射失败", zap.String("dir", paths.Adapter), zap.Error(err))
+	}
+	resolver, err := adapter.LoadCodecResolver(paths.Adapter, codecMap, "errors.json")
+	if err != nil {
+		stresslog.Fatal("加载 CodecResolver 失败", zap.String("dir", paths.Adapter), zap.Error(err))
+	}
+	stresslog.Info("[MAIN] CodecResolver 已加载",
+		zap.Int("connections", len(codecMap)),
+		zap.Int("headerSize", adapter.PickMetaAdapter(resolver, codecMap).HeaderSize()))
+
 	// 加载 .proto 文件
 	loader := protox.NewLoader([]string{paths.Proto}, nil)
 	files, err := loader.Load()
@@ -286,6 +302,7 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 		ConcurrentNum:  s.Bot.ConcurrentNum,
 		StateExtra:     s.StateExtra,
 		Adapter:        adp,
+		CodecResolver:  resolver,
 		RequestTimeout: 60 * time.Second,
 		MainService:    s.Bot.MainService,
 		HTTPTimeout:    10 * time.Second,
@@ -293,7 +310,10 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 		Shared:         sharedStore,
 	}
 
-	dialer := network.NewDialer(adp, 5*time.Second)
+	// Dialer 元信息源：T2-C1 起改用 resolver 任一 adapter（Go SchemaAdapter）。
+	// 当前协议 HeaderSize/BodyLength 全局一致（3 份 codec.json 同 frame spec，T1.6 同源生成），
+	// 故取任一即可；per-connection HeaderSize 下沉留到 2-C3 connectionPump。
+	dialer := network.NewDialer(adapter.PickMetaAdapter(resolver, codecMap), 5*time.Second)
 	if err := dialer.Start(); err != nil {
 		stresslog.Fatal("启动网络引擎失败", zap.Error(err))
 	}

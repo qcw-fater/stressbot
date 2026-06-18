@@ -42,12 +42,22 @@ type ManagerConfig struct {
 	// Manager 创建每个 Robot 时通过它派生 RobotAdapter，让 Robot 在自己的 LState 上做编解码。
 	// 类型从 adapter.Adapter 接口收窄到 *adapter.LuaAdapter，是因为只有 LuaAdapter 提供
 	// NewRobotAdapter 工厂方法。
-	Adapter        *adapter.LuaAdapter `json:"-"`
-	RequestTimeout time.Duration       `json:"requestTimeout"`
-	MainService    string              `json:"mainService"`
-	HTTPTimeout    time.Duration       `json:"httpTimeout"`
-	RampUp         *RampUpConfig       `json:"rampUp"`
-	Duration       time.Duration       `json:"duration"` // 运行时长，0 = 一直运行
+	//
+	// T2-C1 起进入双 codec 过渡态：
+	//   - **decode/dial 侧**改走 CodecResolver（Go SchemaAdapter，无 luaMu）；
+	//   - **encode/心跳/listen/Lua** 仍走 RobotAdapter（→ 2-C2 切 encode、2-C3 删整条）。
+	// 故 Adapter 字段在 2-C1 不删，仍由 Robot 派生 RobotAdapter 给 encode 用。
+	Adapter *adapter.LuaAdapter `json:"-"`
+	// CodecResolver 按「server 串 <proto>:<service>」解析每条连接的 Go SchemaAdapter。
+	// Robot.DialTCP/UDP 在拨号前 Resolve，nil → fail loud（连接无 codec 配置）；
+	// 非 nil 的 adapter 注入 Connection，decodeLoop 用它解码（无 luaMu，T1 冻结契约保证并发安全）。
+	// 2-C1 新增字段，全链路由 main.go/task_runner 启动期 LoadCodecResolver 构造并透传。
+	CodecResolver  adapter.CodecResolver `json:"-"`
+	RequestTimeout time.Duration         `json:"requestTimeout"`
+	MainService    string                `json:"mainService"`
+	HTTPTimeout    time.Duration         `json:"httpTimeout"`
+	RampUp         *RampUpConfig         `json:"rampUp"`
+	Duration       time.Duration         `json:"duration"` // 运行时长，0 = 一直运行
 	// Shared 任务级共享状态后端（可为 nil，表示未启用）。Manager 仅透传给每个 Robot，
 	// 不负责 Cleanup/Close：单机由 cmd/agent 负责，分布式由 Agent(Close)+Admin(Cleanup) 负责。
 	Shared sharedstate.Store `json:"-"`
@@ -126,7 +136,7 @@ func (m *Manager) startBatch(fromIndex, count, conc int) (int, error) {
 			RequestTimeout: m.cfg.RequestTimeout,
 			MainService:    m.cfg.MainService,
 			Shared:         m.cfg.Shared,
-		}, m.flow, m.factory, m.cfg.Adapter, m.dialer, m.luaPool)
+		}, m.flow, m.factory, m.cfg.Adapter, m.cfg.CodecResolver, m.dialer, m.luaPool)
 		if err != nil {
 			// codec.lua 加载失败属于配置问题，重试也没用。
 			// 跳过这个 robot，日志告警，继续创建其它（避免单个失败拖垮整批）。
