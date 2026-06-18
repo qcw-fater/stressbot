@@ -58,10 +58,16 @@
       "type": "sequence",
       "next": [
         "ConnectLogicTCP",
+        "RegisterLogicHeartbeat",
         "PlayerLogin",
         "RequestPlayerData",
         "ReportBattleDelay"
       ]
+    },
+    "RegisterLogicHeartbeat": {
+      "type": "action",
+      "action": "RegisterLogicHeartbeat",
+      "errorStrategy": "abort"
     },
     "ConnectLogicTCP": {
       "type": "action",
@@ -760,6 +766,15 @@
     "ConnectLogicTCP": {
       "pattern": "lua",
       "script": "connect_logic.lua"
+    },
+    "RegisterLogicHeartbeat": {
+      "pattern": "tcpHeartbeat",
+      "service": "logic",
+      "route": {
+        "cmd": 2,
+        "act": 1
+      },
+      "intervalMs": 5000
     },
     "ConnectBattleTCP": {
       "pattern": "lua",

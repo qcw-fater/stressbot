@@ -82,20 +82,22 @@ type ListenRef struct {
 
 // 动作模式常量。
 const (
-	PatternTCPSend     = "tcpSend"     // TCP 单向发送
-	PatternTCPRequest  = "tcpRequest"  // TCP 请求-响应
-	PatternTCPConnect  = "tcpConnect"  // TCP 连接建立
-	PatternTCPClose    = "tcpClose"    // TCP 连接关闭
-	PatternTCPListen   = "tcpListen"   // TCP 推送消息消费（轮询 ListenRefs 预缓存）
-	PatternUDPSend     = "udpSend"     // UDP 单向发送
-	PatternUDPRequest  = "udpRequest"  // UDP 请求-响应
-	PatternUDPConnect  = "udpConnect"  // UDP 连接建立
-	PatternUDPClose    = "udpClose"    // UDP 连接关闭
-	PatternUDPListen   = "udpListen"   // UDP 推送消息消费（轮询 ListenRefs 预缓存）
-	PatternHTTPRequest = "httpRequest" // HTTP 请求
-	PatternSetState    = "setState"    // 设置状态变量
-	PatternClearState  = "clearState"  // 清除状态变量
-	PatternLua         = "lua"         // Lua 脚本执行（由 robot 层 ActionHandler 处理）
+	PatternTCPSend      = "tcpSend"      // TCP 单向发送
+	PatternTCPRequest   = "tcpRequest"   // TCP 请求-响应
+	PatternTCPConnect   = "tcpConnect"   // TCP 连接建立
+	PatternTCPClose     = "tcpClose"     // TCP 连接关闭
+	PatternTCPListen    = "tcpListen"    // TCP 推送消息消费（轮询 ListenRefs 预缓存）
+	PatternUDPSend      = "udpSend"      // UDP 单向发送
+	PatternUDPRequest   = "udpRequest"   // UDP 请求-响应
+	PatternUDPConnect   = "udpConnect"   // UDP 连接建立
+	PatternUDPClose     = "udpClose"     // UDP 连接关闭
+	PatternUDPListen    = "udpListen"    // UDP 推送消息消费（轮询 ListenRefs 预缓存）
+	PatternTCPHeartbeat = "tcpHeartbeat" // 声明式 TCP 心跳注册（Go-only builder，零 Lua）
+	PatternUDPHeartbeat = "udpHeartbeat" // 声明式 UDP 心跳注册（Go-only builder，零 Lua）
+	PatternHTTPRequest  = "httpRequest"  // HTTP 请求
+	PatternSetState     = "setState"     // 设置状态变量
+	PatternClearState   = "clearState"   // 清除状态变量
+	PatternLua          = "lua"          // Lua 脚本执行（由 robot 层 ActionHandler 处理）
 )
 
 // 条件表达式前缀
@@ -175,6 +177,12 @@ type ActionDef struct {
 	URL         string         `json:"url"`         // HTTP 请求 URL（httpRequest 模式），支持 state: 前缀
 	Method      string         `json:"method"`      // HTTP 方法（httpRequest 模式）：POST(默认) / GET
 	ContentType string         `json:"contentType"` // HTTP 内容类型（httpRequest 模式）：json(默认) / form
+	// ── tcpHeartbeat / udpHeartbeat 专用 ───────────────────────────────────
+	// 声明式二进制心跳（Go-only builder）。HeartbeatFields 为空 = 空 body（静态心跳）。
+	// 心跳每 tick 在 Go 内按布局打包（读 state/计数器/时间/随机），不触碰业务 LState。
+	IntervalMs      int              `json:"intervalMs,omitempty"`      // 心跳间隔（毫秒），>0
+	HeartbeatFields []HeartbeatField `json:"heartbeatFields,omitempty"` // 二进制布局（小端），空 = 空 body
+	SkipWhenMissing bool             `json:"skipWhenMissing,omitempty"` // state 源缺失时跳过本 tick（true）而非报错
 }
 
 // FieldBind C2S 字段绑定定义。

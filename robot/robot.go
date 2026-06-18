@@ -1239,6 +1239,129 @@ func (ns *netSenderAdapter) RegisterUDPHeartbeat(service string, intervalMs int,
 	return nil
 }
 
+// RegisterHeartbeat 注册声明式心跳（tcpHeartbeat / udpHeartbeat action，双模式 body 构造）。
+//
+// 与旧 RegisterTCPHeartbeat/RegisterUDPHeartbeat 的区别：心跳 body 不由 Lua 构造，
+// 而是由 Go builder 闭包按配置模式分派：
+//   - proto 模式（C2SProto != ""）：engine.BuildProtoBody（factory + bindings，Go-only）；
+//   - raw-binary 模式（len(Fields) > 0）：engine.BuildHeartbeatBody（小端打包 + 私有计数器/时间/随机）；
+//   - 空 body（两者皆无）：静态心跳。
+//
+// body 构造完成后走 adapter 池（ns.robot.adp，非 robot 业务 LState）做 encode。
+// 因此心跳 goroutine **不持 robot luaMu**，这是 2-B 消除心跳 robot-luaMu 依赖的关键。
+//
+// 闭包内每次 tick：
+//  1. 按模式分派构造 body（skip=true 跳过本 tick 返回 nil；err 记 Warn 返回 nil）；
+//  2. 取 conn 当前 secretKey；
+//  3. adp.EncodeTCP/UDP(route, body, key) → packet；
+//  4. 仅 raw-binary 模式递增 privateCounters（counter 源按 Step 推进；proto 模式无私有计数器）。
+//
+// 与旧 RegisterTCPHeartbeat 临时并存（旧路径 2-B.2 删除）。
+func (ns *netSenderAdapter) RegisterHeartbeat(cfg engine.HeartbeatActionConfig) error {
+	if ns.robot.ctx.Err() != nil {
+		return engine.NewActionError(errcode.ErrActionCanceled, "service="+cfg.Service)
+	}
+	var conn *network.Connection
+	if cfg.Transport == "udp" {
+		conn = ns.robot.client.GetUDPConn(cfg.Service)
+	} else {
+		conn = ns.robot.client.GetTCPConn(cfg.Service)
+	}
+	if conn == nil {
+		stresslog.Warn("[ROBOT] RegisterHeartbeat 连接不存在",
+			zap.String("transport", cfg.Transport), zap.String("service", cfg.Service))
+		return engine.NewActionError(errcode.ErrConnNotFound,
+			"transport="+cfg.Transport+" service="+cfg.Service)
+	}
+
+	// 私有计数器初值：按字段下标 + Start（缺省 0）初始化（raw-binary 模式专用）。
+	privateCounters := make(map[int]int64, len(cfg.Fields))
+	for i, f := range cfg.Fields {
+		if f.Source == engine.HeartbeatSourceCounter {
+			if f.Start != nil {
+				privateCounters[i] = *f.Start
+			}
+		}
+	}
+
+	// 闭包持有：双模式入参、state、私有计数器、adapter、factory、route、transport、conn（取 secretKey）、skip 标志。
+	// 字段布局 / bindings 拷贝一份避免共享 cfg 切片头被外部修改（ActionDef 生命周期内不可变，防御性拷贝）。
+	fields := append([]engine.HeartbeatField(nil), cfg.Fields...)
+	bindings := append([]engine.FieldBind(nil), cfg.Bindings...)
+	c2sProto := cfg.C2SProto
+	st := ns.robot.state
+	adp := ns.robot.adp
+	factory := ns.robot.factory
+	route := cfg.Route
+	skipWhenMissing := cfg.SkipWhenMissing
+	transport := cfg.Transport
+
+	goBuilder := func() []byte {
+		// 双模式 body 分派（与 execHeartbeat 互斥校验一致：c2sProto 与 fields 不会同时非空）：
+		//   proto 模式 → BuildProtoBody（factory + bindings，Go-only，不持 robot luaMu）；
+		//   raw-binary 模式 → BuildHeartbeatBody（小端打包 + 私有计数器成功后递增）；
+		//   两者皆无 → 空 body（静态心跳）。
+		var body []byte
+		var skip bool
+		if c2sProto != "" {
+			b, skipB, err := engine.BuildProtoBody(c2sProto, bindings, st, factory, "heartbeat:"+cfg.Service)
+			if err != nil {
+				stresslog.Warn("[ROBOT] 心跳 proto body 构建失败",
+					zap.String("transport", transport),
+					zap.String("service", cfg.Service),
+					zap.String("c2sProto", c2sProto),
+					zap.Error(err))
+				return nil
+			}
+			body, skip = b, skipB
+		} else if len(fields) > 0 {
+			b, skipB, err := engine.BuildHeartbeatBody(fields, st, privateCounters, skipWhenMissing)
+			if err != nil {
+				stresslog.Warn("[ROBOT] 心跳 body 构建失败",
+					zap.String("transport", transport),
+					zap.String("service", cfg.Service),
+					zap.Error(err))
+				return nil
+			}
+			body, skip = b, skipB
+		}
+		// else: 空 body（静态心跳，body=nil）
+		if skip {
+			return nil
+		}
+		key := conn.GetSecretKey()
+		var packet []byte
+		if transport == "udp" {
+			packet = adp.EncodeUDP(route, body, key)
+		} else {
+			packet = adp.EncodeTCP(route, body, key)
+		}
+		// 构建成功 → 递增私有计数器（仅 raw-binary 模式的 counter 源按 Step 推进；proto 模式无计数器概念）。
+		for i := range fields {
+			f := &fields[i]
+			if f.Source == engine.HeartbeatSourceCounter {
+				step := int64(1)
+				if f.Step != nil {
+					step = *f.Step
+				}
+				privateCounters[i] += step
+			}
+		}
+		return packet
+	}
+
+	conn.RegisterHeartbeat(network.HeartbeatConfig{
+		Interval: time.Duration(cfg.IntervalMs) * time.Millisecond,
+		Builder:  goBuilder,
+	})
+	stresslog.Debug("[ROBOT] RegisterHeartbeat 已注册",
+		zap.String("transport", cfg.Transport),
+		zap.String("service", cfg.Service),
+		zap.Int("intervalMs", cfg.IntervalMs),
+		zap.Int("fieldCount", len(cfg.Fields)))
+	return nil
+}
+
 // 编译时接口断言
 var (
 	_ engine.NetSender     = (*netSenderAdapter)(nil)
