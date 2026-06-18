@@ -4,6 +4,13 @@
 > Worktree: `D:\Gitee\stressbot\.claude\worktrees\declarative-codec`（分支 `worktree-declarative-codec`）
 > 起始 BASE：`8cc8a8b`（origin/master，本 worktree 创建时 HEAD，0 commits ahead）
 
+## ⚡ 当前进度与下一步（新会话恢复入口）
+
+- **状态（2026-06-18）**：T1 + T4 + **T2-A/B/C 全部完成、review clean、已提交、已运行时验证通过**（见末尾完成记录 + 运行时验证 PASS 记录）。3/4 async Lua 入口已清除（listen / heartbeat / codec）；业务 LState 现仅主流程 goroutine 触碰；codec 全 Go（resolver/SchemaAdapter，`lua_adapter.go` 核心+codec.lua 仅留作 T1 测试 oracle）。
+- **下一步 = T2-D（最终任务）**：删 `luaMu` / `withReleasedMu`。流程：① **前置审计闸门**——全仓 grep 确认异步 goroutine 零触碰 `*lua.LState`/`luaPool.Run*`/`L.CallByParam`（只允许主流程；2-A/B/C 已清除 3 处，闸门应通过）；② 删 `withReleasedMu`（`api_network.go` 9 处 + `api_share.go` 20 处 + `api_utils.go` sleep 1 处）→ 阻塞 Lua API 改直接阻塞 + 响应 `ctx`；③ 删 `Robot.luaMu` + `Context.LuaMu` + 全部 `Lock/Unlock`；④ 简化关闭/停止路径（无 luaMu 死锁风险）+ 日志清理。详见 `02-track-backend-integration.md` §2-D（8 个实施切片 + 验收闸门 + 风险）。2-D 完成后 T2 全轨结束，剩 T3（前端）。
+- **恢复方式（新会话）**：进 worktree（`EnterWorktree path=D:\Gitee\stressbot\.claude\worktrees\declarative-codec`）→ 读本账本（含各任务 review 结论 + 运行时验证 + 接力点）+ `02-track` §2-D + `reports/t1-freeze-handoff.md` → 按 subagent-driven 方法论继续（worktree 隔离、顺序、implementer 不自动 commit、批次提交走用户确认 + `git-management` 技能；文件不重叠的任务可开多 agent 并行）。
+- **必读 gotchas**：① **codegraph MCP 索引滞后**（显示主仓/旧态，不反映 worktree 当前代码）——以 Read/Grep 实读 worktree 为准；② **Windows `core.autocrlf=true`**——`gofmt -l` 全标脏是环境现象，勿 `gofmt -w` 单文件（详见 §「全局约束」）；③ **stale LSP 诊断**反复出现（报 undefined 但 `go build` 绿）——`go build ./...` 是权威；④ 运行时验证：单 bot `go run ./cmd/agent -config conf/config.json` 2~5 分钟，查 `BattleEnd≥1` + `grep error|warn|失败|grep -v headError` 空。
+
 ## 已确认决策
 
 - **工作区**：新建 worktree（`worktree-declarative-codec` 分支，隔离，不碰 master）。
