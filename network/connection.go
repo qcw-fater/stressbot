@@ -31,10 +31,10 @@ type Connection struct {
 
 	responseMap      map[string]chan *Message  // routeKey → 临时响应通道（RequestResponse 用）
 	listenResp       map[string]ListenCallBack // routeKey → 持久化推送回调
-	listenMsg        map[string]*Message       // routeKey → 缓存消息（轮询模式，回调为 nil 时）
+	listenQueues     map[string]*listenQueue   // routeKey → 缓存队列（轮询模式，回调为 nil 时）
 	listenCh         chan *Message             // 推送消息分发通道
 	listenDone       chan struct{}             // listenLoop 退出信号，用于 Close 时等待回调完成
-	mu               sync.Mutex                // 保护 responseMap / listenResp / listenMsg / 回调字段
+	mu               sync.Mutex                // 保护 responseMap / listenResp / listenQueues map 键 / 回调字段（各 listenQueue 自带 mu 串行化 Push/Pop）
 	ctx              context.Context           // 连接生命周期上下文
 	cancel           context.CancelFunc        // 取消函数，关闭时调用
 	isClose          int32                     // 原子标记：0=活跃，1=已关闭
@@ -68,6 +68,10 @@ type Connection struct {
 const (
 	listenChSize = 128 // 监听推送消息通道缓冲区大小
 	decodeChSize = 256 // decode 通道缓冲区大小，满则反压（关闭连接）
+	// defaultListenQueueSize 监听缓存队列默认容量。
+	// 容量 1 与旧「单槽 map[string]*Message」语义逐字节等价（同 routeKey 新消息覆盖旧消息）。
+	// 2-A2 起可由 ListenRef.queueSize 显式覆盖（本任务不接配置）。
+	defaultListenQueueSize = 1
 )
 
 type inboundFrame struct {
@@ -83,7 +87,7 @@ func NewConnection(serviceName, robotName string, requestTimeout time.Duration, 
 		robotName:      robotName,
 		responseMap:    make(map[string]chan *Message),
 		listenResp:     make(map[string]ListenCallBack),
-		listenMsg:      make(map[string]*Message),
+		listenQueues:   make(map[string]*listenQueue),
 		listenCh:       make(chan *Message, listenChSize),
 		requestTimeout: requestTimeout,
 		sendFunc:       nil,
@@ -298,7 +302,7 @@ func (c *Connection) listenLoop() {
 		case <-c.ctx.Done():
 			c.mu.Lock()
 			clear(c.listenResp)
-			clear(c.listenMsg)
+			clear(c.listenQueues)
 			c.mu.Unlock()
 			return
 		case resp, ok := <-c.listenCh:
@@ -381,26 +385,46 @@ func (c *Connection) dispatchListen(resp *Message) {
 	if cb != nil {
 		cb(resp)
 	} else {
+		// 缓存 listen：按需为 routeKey 创建默认容量队列并 Push。
+		// c.mu 仅保护 listenQueues map 键的查找/创建；Push 在 c.mu 释放后进行，
+		// 由 per-queue mu 串行化，与 GetListenResp 的 Pop 无死锁。
 		c.mu.Lock()
-		c.listenMsg[resp.RouteKey] = resp
+		q, ok := c.listenQueues[resp.RouteKey]
+		if !ok {
+			q = newListenQueue(defaultListenQueueSize)
+			c.listenQueues[resp.RouteKey] = q
+		}
 		c.mu.Unlock()
+		if q.Push(resp) {
+			// 默认容量 1：从第 2 条起每条都会触发覆盖丢弃（即旧单槽「保最新」语义）。
+			// Debug 级，生产默认不刷屏；2-A2 让高频 route 配 queueSize>1 后自然减少。
+			// dispatchListen 是推送热路径，按本仓惯例（OnReceive/RequestResponse 同款）
+			// 用 DebugEnabled 守卫，避免每条覆盖都构造 zap 字段。
+			if stresslog.DebugEnabled() {
+				stresslog.Debug("[NETWORK] 监听队列已满，覆盖丢弃最旧消息",
+					zap.String("service", c.serviceName),
+					zap.String("routeKey", resp.RouteKey))
+			}
+		}
 	}
 }
 
-// GetListenResp 轮询获取缓存的监听消息。
+// GetListenResp 轮询获取缓存的监听消息（FIFO pop）。
+//
+// c.mu 仅查 map；Pop 走队列自身 mu。默认容量 1 时与旧「读 listenMsg[k] + delete」
+// 行为一致：返回最近一条 Push 并清空。
 func (c *Connection) GetListenResp(routeKey string) *Message {
 	if c == nil || atomic.LoadInt32(&c.isClose) == 1 {
 		return nil
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	resp, exist := c.listenMsg[routeKey]
-	if exist && resp != nil {
-		delete(c.listenMsg, routeKey)
-		return resp
+	q, ok := c.listenQueues[routeKey]
+	c.mu.Unlock()
+	if !ok {
+		return nil
 	}
-	return nil
+	m, _ := q.Pop()
+	return m
 }
 
 // StartDecodeLoop 启动异步 decode goroutine（每个连接独占一个）。
