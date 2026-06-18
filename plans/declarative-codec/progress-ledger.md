@@ -39,7 +39,13 @@
 
 ### T4 — 配置加载与分发（T1 后）
 
-pending — 待 T1 冻结 loader 签名。
+**进行中** — T1 已冻结。 seam：T4 建 resolver/loader/admin 基础设施；runtime 接线（main.go/task_runner/Manager/Robot/Dialer）归 T2。
+
+| 任务 | 内容 | 状态 |
+|---|---|---|
+| T4.1 | `adapter/codec_resolver.go`：CodecResolver 接口 + impl + `NewCodecResolver` + `LoadCodecResolver`（逐连接加载、同文件 dedup、fail loud、errors.json 可选） | ✅ done |
+| T4.2 | admin `POST /sbot/codec/preview`（包 codec.Preview）+ `GET /sbot/codec/algorithms`（包 codec.Algorithms） | ✅ done |
+| T4.3 | admin 多 codec 分发（multipart 上传/下载、configFiles、baseline、TaskConfig.Codecs map） | ✅ done |
 
 ### T2 — 后端集成 + 删锁（T4 后）
 
@@ -58,3 +64,8 @@ pending。
 - T1.5: complete — engine.go decode（3-tuple/flag 反序/onError fail-keep，对拍 codec.lua decode）+ Params/KeyLen 修复（compiledStep 加 params/keyLen，encode 用之，非默认 rol=5/aes keyLen=16 测试证明生效，encode 对拍未回退）+ adapter/schema_adapter.go 9 方法包装（var _ Adapter 断言，仅 import codec，无生产循环）。全 repo `go test ./...` 绿。文件：codec/engine.go, compile.go, adapter/schema_adapter.go, decode_test.go, decode_helpers_test.go, engine_test.go, adapter/schema_adapter_test.go, testdata/aes_ecb_codec.json。**T1.7 必做（reviewer 标记，非阻塞）**：(a) **UDP 压缩+加密 对拍缺口**——decode_test.go:171 该用例被排除；engine 已支持 onError:keep，T1.7 须加 UDP 变体 schema（gz 步 onError:keep）并把 `udp_compressible_encrypted_offset11` 纳入对拍矩阵，证与 codec.lua lenient 行为字节一致，闭环而非文档豁免。(b) **godoc 不准**——engine.go verifyProducesAfterDecrypt 注释把「codec.lua decode 根本不校验 bcc」与「不对称时跳过」混为一谈；实际对称路径 engine 比 codec.lua 更严（会校验）。改成：codec.lua decode 完全不校验 bcc；engine 在 encOffset==decOffset 时额外校验（fail/keep），不对称时无法校验故跳过（与 codec.lua 一致）。
 - T1.6: complete — conf/adapter/{tcp_logic,tcp_battle,udp_battle}_codec.json + errors.json（667 条）+ codec/migration_test.go；tcp_logic 对拍 LuaAdapter 6 case 字节一致；字段布局对 codec.lua 18/18 一致；UDP 产物 = 已证对的 T1.4 UDP 变体（normalized JSON 同 + 单 offset 改动）。review clean。**T1.7 顺带**：(c) errors.json 全量校验——T1.6 只抽样 8 条+计数，T1.7 加「解析 error.lua errors 表，断言全 667 对 verbatim 一致」测试（不依赖 LuaAdapter/zap）。
 - T1.7: complete — 三个 review 遗留全闭环 + 对拍矩阵收口 + benchmark + preview helper + 冻结交接文档。(a) UDP 压缩+加密 用 gz onError=keep 变体纳入对拍（newSchemaCodecUDPKeepGzip + TestDecodeUDP_Parity_CompressibleEncrypted_Offset11，2 case 字节级一致 codec.lua lenient）；(b) verifyProducesAfterDecrypt godoc 修正（仅注释）；(c) TestMigration_ErrorMap_FullVerbatimVsErrorLua 纯文本解析 error.lua 667 对 verbatim PASS。对拍矩阵最终覆盖：encode TCP 13+UDP 9 / decode TCP 10+UDP 5+UDP 压密 2 / 失败语义 5 / 访问器与结构断言全。Benchmark（Win10+i5-9400F）：encode ~1.35×–15×、decode ~1.77×–7.6×、allocs/op −54%–−90%。codec/preview.go + preview_test.go（12 测试 PASS，纯 Go 零 gopher-lua，畸形输入填 Error 不 panic）。冻结交接 plans/declarative-codec/reports/t1-freeze-handoff.md。全 repo go build/vet/test 绿；-race 未跑（无 cgo，结构性论证）。文件：codec/{preview.go,preview_test.go,engine_bench_test.go}、codec/{engine.go(godoc),decode_helpers_test.go,decode_test.go,migration_test.go}、reports/t1-{7-report,freeze-handoff}.md。**T1 全轨冻结**。
+- **T1 批次已提交**（4 commits，worktree-declarative-codec，未 push）：`6e73a30` codec 引擎 / `2362111` SchemaAdapter 包装 / `b2f5c6a` 各连接 codec.json+errors.json / `bb37787` 设计与执行记录。base `8cc8a8b`。
+- T4.1: complete — adapter/codec_resolver.go：CodecResolver 接口（Resolve(server串)→Adapter，缺映射 nil）+ NewCodecResolver（防御性拷贝）+ LoadCodecResolver（逐连接 LoadSchema+NewSchemaAdapter、同文件 dedup fileCache、空映射/缺文件/解析失败 fail loud 中文、errors.json 可选、排序遍历稳定错误）。13 测试用真实 conf/adapter 产物全 PASS。self-review clean（无 gopher-lua、仅 adapter/、不动 runtime/admin）。文件：adapter/codec_resolver.go, codec_resolver_test.go。
+- T4.2: complete — admin/codec_handlers.go：handleCodecPreview（POST /sbot/codec/preview 包 codec.Preview，两步 unmarshal，坏 body/坏 schema→400，预览语义 200 即使 Error 非空）+ handleCodecAlgorithms（GET /sbot/codec/algorithms 包 codec.Algorithms）；路由注册于 handlers.go:108-109。9 测试 PASS（encode/decode 往返、畸形 schema→200+Error、坏 body→400、algorithms 清单含 xor_carry_rol/gzip/xor8）。纯计算无副作用，仅 admin/。self-review clean。文件：admin/codec_handlers.go, codec_handlers_test.go, handlers.go(+2 路由)。
+- T4.3: complete — admin 多 codec 分发：TaskConfig 加 Codecs map[string][]byte + ErrorMap []byte（旧 AdapterScript/ErrorMapScript **保留**以维持 agent 编译，T2 删）；multipart 收多份 *_codec.json+errors.json；configFiles 经 buildConfigFiles 列多文件（不含 codec.lua）；baseline 读写多文件；下载多文件（legacy codec.lua/error.lua→404，无兜底）。review clean（admin-only、无旧→新迁移、无默认 codec 兜底、go build ./... 全绿）。4 测试用 T1.6 产物 PASS。文件：admin/types.go, handlers.go, codec_distribution_test.go。**T2 接力**：① 删 TaskConfig 旧字段 AdapterScript/ErrorMapScript；② agent/task_runner + agent/config.go 下载/加载多 codec 走 resolver；③ main.go(task_runner) 调 LoadCodecResolver → Manager；④ 删 RobotAdapter/NewRobotAdapter、Dialer server.adp 兜底。
+- **T4 全轨完成**（T4.1+T4.2+T4.3 全 review 通过，go build/vet/test 全绿）。待批次提交确认。
