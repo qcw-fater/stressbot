@@ -49,16 +49,12 @@ type Robot struct {
 	dialer     *network.Dialer        // 网络拨号器（封装 gnet 事件循环）
 	httpClient *http.Client           // HTTP 客户端（声明式 HTTP 动作用）
 	luaMu      sync.Mutex             // Lua 访问互斥锁（回调/心跳/encode/decode 共抢）
-	// adp 是该 Robot 私有的 codec 适配器（RobotLocalAdapter 重构）。
-	// 所有 encode/decode 都在 r.l 上执行，与其他 Robot 不再共享 LState 池。
-	//
-	// T2-C1 起进入双 codec 过渡态：adp 仍负责 encode/心跳/listen/Lua（→ 2-C2 切 encode、2-C3 删整条）；
-	// dial/decode 侧改走 resolver（下方）解析出的 Go SchemaAdapter。
-	adp *adapter.RobotAdapter
 	// resolver 按「server 串 <proto>:<service>」解析每条连接的 Go SchemaAdapter（无 luaMu）。
-	// Robot.ConnectTCP/UDP 在拨号前 Resolve，nil → fail loud；非 nil 注入 Connection，
-	// 该连接生命周期内 decodeLoop 固定用它（plan 02 §2-C「decode 侧不碰 resolver」）。
-	// 2-C1 新增：dial/decode 切 Go codec；encode 仍走 adp。
+	// 全 codec 路径（dial/decode/encode/心跳/listen/业务 Lua）共享同一份 codec 映射：
+	//   - dial/decode：ConnectTCP/UDP 拨号前 Resolve，nil → fail loud；非 nil 注入 Connection；
+	//   - encode/心跳/listen：engine.ActionExecutor / robotActionHandler / netSenderAdapter 各自 Resolve；
+	//   - 业务 Lua：通过 script.Context.Resolver（= r.resolver）在 api_network.go 内 Resolve。
+	// T2-C2-Lua 起取代旧 r.adp（*adapter.RobotAdapter，已删），encode 不再经 luaMu。
 	resolver       adapter.CodecResolver
 	shared         sharedstate.Store           // 任务级共享状态后端（可为 nil）
 	mainService    string                      // 主连接服务名，意外断开时停止机器人
@@ -86,28 +82,21 @@ type Config struct {
 
 // NewRobot 创建机器人实例。
 //
-// globalAdp 是进程级共享的 LuaAdapter（持有 codec.lua 字节码 + 元信息 + 错误描述缓存）。
-// NewRobot 内部调 globalAdp.NewRobotAdapter(r.l, &r.luaMu) 在该 Robot 私有 LState 上
-// 注册一份 codec 函数副本，后续 encode/心跳/listen 编解码不再跨 Robot 抢全局 LState 池。
+// resolver（T2-C1 起接入，T2-C2-Lua 起全面接管 codec）按「server 串 <proto>:<service>」
+// 解析每条连接的 Go SchemaAdapter，全 codec 路径共享同一份 codec 映射：
+//   - dial/decode：ConnectTCP/UDP 拨号前 Resolve，nil → fail loud；非 nil 注入 Connection；
+//   - encode/心跳/listen：engine.ActionExecutor / robotActionHandler / netSenderAdapter 各自 Resolve；
+//   - 业务 Lua：经 script.Context.Resolver（= resolver）在 api_network.go 内 Resolve。
 //
-// resolver（T2-C1 新增）按「server 串 <proto>:<service>」解析每条连接的 Go SchemaAdapter，
-// 供 dial/decode 侧使用（Robot.ConnectTCP/UDP 在拨号前 Resolve；Resolve nil → fail loud）。
-// 与 globalAdp 形成**双 codec 过渡态**：
-//   - decode/dial → resolver（Go，无 luaMu，T1 冻结契约保证并发安全）；
-//   - encode/心跳/listen/Lua → globalAdp 派生的 RobotAdapter（→ 2-C2 切 encode、2-C3 删整条）。
-//
-// 返回 error 的场景：codec.lua 在 r.l 上加载失败（脚本错误 / 缺少必需函数）。
-// 这种情况说明 codec 配置有问题，重试无意义，调用方应跳过该 Robot 并打 error 日志。
-// 正常运行下这里不会失败（启动期已通过 LuaAdapter 验证过 codec.lua 完整性）。
+// 返回 error 的场景：Lua 运行时池未提供 LState（pool 未初始化）。
+// codec 配置错误（Resolve nil）不在 NewRobot 暴露——拨号 / 首次 encode 时按 fail-loud 上报，
+// 便于定位到具体连接（service 串）而非整 Robot 创建失败。
 func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
-	globalAdp *adapter.LuaAdapter, resolver adapter.CodecResolver,
+	resolver adapter.CodecResolver,
 	dialer *network.Dialer, luaPool *script.RuntimePool) (*Robot, error) {
 
-	if globalAdp == nil {
-		return nil, fmt.Errorf("NewRobot: globalAdp 不能为 nil")
-	}
 	if resolver == nil {
-		return nil, fmt.Errorf("NewRobot: resolver 不能为 nil（dial/decode 侧 codec 未配置）")
+		return nil, fmt.Errorf("NewRobot: resolver 不能为 nil（codec 未配置）")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -152,22 +141,13 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		r.l = luaPool.Acquire()
 	}
 
-	// 派生 Robot 私有 codec 适配器（必须在 r.l 准备好之后、Start() 之前完成）。
-	// 此时 r.l 刚从池中拿出，没有其它 goroutine 在用，NewRobotAdapter 不需要持锁也安全。
+	// T2-C2-Lua：删除 NewRobotAdapter（codec.lua 不再注入业务 LState）。
+	// 仅校验 LState 可用——业务脚本执行需要 LState；codec 路径完全在 Go 侧（resolver），
+	// 不再依赖 r.l 上的 codec.lua 副本。
 	if r.l == nil {
 		cancel()
 		return nil, fmt.Errorf("NewRobot: Lua 运行时池未提供 LState")
 	}
-	robotAdp, err := globalAdp.NewRobotAdapter(r.l, &r.luaMu)
-	if err != nil {
-		// 归还 LState 避免资源泄漏；其它字段会被 GC 回收
-		if luaPool != nil {
-			luaPool.Release(r.l)
-		}
-		cancel()
-		return nil, fmt.Errorf("NewRobot: 创建 RobotAdapter 失败 (account=%s): %w", cfg.Account, err)
-	}
-	r.adp = robotAdp
 
 	r.state.Set("id", cfg.ID)
 	r.state.Set("index", cfg.Index)
@@ -220,7 +200,7 @@ func (r *Robot) Start() {
 				Account:               r.account,
 				Store:                 r.state,
 				Factory:               r.factory,
-				Adapter:               r.adp,
+				Resolver:              r.resolver,
 				NetSender:             &netSenderAdapter{robot: r},
 				Ctx:                   r.ctx,
 				LuaMu:                 &r.luaMu,

@@ -46,31 +46,28 @@ func SuggestedPoolSize() int {
 
 // LuaAdapter 通过 gopher-lua LState 池调用适配器脚本实现 Adapter 接口。
 //
-// 角色变化（RobotLocalAdapter 重构后）：
-//   - 历史：池中 N 个 LState 直接服务所有 Robot 的 encode/decode 热路径，
-//     在 1000+ Robot 并发时成为瓶颈（acquire 排队 → P95 飙升 → CONN_DROPPED 雪崩）。
-//   - 现在：业务路径（业务 Lua / 声明式动作 / decodeLoop）改走 RobotAdapter，
-//     在每个 Robot 自己的 LState 上执行编解码。LuaAdapter 仅承担：
-//       1. 元信息缓存源（HeaderSize / BodyLength），供 gnet 热路径直接读取；
-//       2. DescribeError 全局缓存 + cache miss 时的 Lua 调用兜底；
-//       3. 持有 codec.lua 字节码 + error.lua 原文，供 NewRobotAdapter 在每个
-//          Robot 的 LState 上复用同一份脚本，避免重复编译。
+// 角色变化（T2-C2-Lua 后）：
+//   - 历史（生产用）：池中 N 个 LState 服务 Robot 的 encode/decode 热路径，在 1000+
+//     Robot 并发时成为瓶颈；后改为 RobotAdapter（per-Robot LState）仍生产用。
+//   - 现在：业务 encode/decode 全走 Go CodecResolver（CodecResolver.Resolve 出的
+//     SchemaAdapter，无 luaMu）；LuaAdapter **仅作测试 oracle**：
+//       1. T1 一致性测试（codec/decode_test / adapter/schema_adapter_test / codec/engine_*）
+//          用 NewLuaAdapter 构造的 LuaAdapter 作字节级真值，对拍 Go SchemaAdapter；
+//       2. 持有 codec.lua 字节码 + error.lua 原文，供测试加载；
+//       3. HeaderSize / BodyLength / DescribeError 等接口方法供测试断言。
 //
-// 热路径仍然是零 Lua：
-//   - HeaderSize / BodyLength 走缓存字段（headerSize / bodyLenInfo）。
-//   - DescribeError 走 sync.Map 缓存，命中率极高。
+// 生产路径（main.go / task_runner.go / robot / script）已**不再构造** LuaAdapter。
 type LuaAdapter struct {
 	states      chan *lua.LState   // 有界 channel 池（DescribeError cache miss 用）
-	scriptProto *lua.FunctionProto // 预编译的适配器脚本字节码（NewRobotAdapter 复用）
+	scriptProto *lua.FunctionProto // 预编译的适配器脚本字节码（测试 oracle 用）
 
 	// 初始化时从 Lua 缓存的元信息（热路径零 Lua 调用）
 	headerSize  int            // 消息头固定字节数，HeaderSize() 直接返回此值
 	bodyLenInfo BodyLengthInfo // 消息体长度解析元信息，BodyLength() 纯 Go 计算
 
 	// error.lua 错误码映射（可选功能）
-	hasErrorMap      bool     // 是否成功加载了 error.lua
-	errorScriptBytes []byte   // error.lua 原文，供 NewRobotAdapter 注入到 Robot LState（保留供未来扩展）
-	errorDescCache   sync.Map // uint64 -> string 永久缓存，避免高频 headerErr 反复调用 Lua
+	hasErrorMap    bool     // 是否成功加载了 error.lua
+	errorDescCache sync.Map // uint64 -> string 永久缓存，避免高频 headerErr 反复调用 Lua
 }
 
 // 编译时接口断言
@@ -127,7 +124,6 @@ func NewLuaAdapter(poolSize int, scriptPath string, errorMapPath string) (*LuaAd
 	// Step 4: 可选 — 加载 error.lua 错误码映射到已创建的 LState 池
 	if errorMapPath != "" {
 		if data, err := os.ReadFile(errorMapPath); err == nil {
-			adp.errorScriptBytes = data // 保存原文供 NewRobotAdapter 复用（如启用 per-Robot describe_error）
 			loaded := true
 			for i := 0; i < poolSize; i++ {
 				LS := adp.acquire()
@@ -418,63 +414,13 @@ func (a *LuaAdapter) callDescribeError(code uint64) string {
 	return desc
 }
 
-// robotAdapterFnNames Robot 私有 LState 上的 codec 函数注册表 key 前缀。
-// 与全局 LuaAdapter 用的 "__adapter_*" 区分，避免互相覆盖。
-var robotAdapterFnNames = []string{
-	"header_size", "body_length", "encode_tcp", "encode_udp",
-	"decode_tcp", "decode_udp", "expected_route_key",
-}
-
-// NewRobotAdapter 为指定的 robot LState 创建一份 codec 适配器。
+// （T2-C2-Lua 删除）历史 NewRobotAdapter / robotAdapterFnNames 已下线。
 //
-// 调用语义：
-//   - 在 L 上注册 bit + zlib 模块（如未注册）；
-//   - 复用 a.scriptProto（codec.lua 字节码）在 L 上执行一次，把
-//     header_size / body_length / encode_tcp / encode_udp / decode_tcp / decode_udp /
-//     expected_route_key 函数缓存到 L 的 registry，避免后续从全局表查找；
-//   - 返回的 *RobotAdapter 实现 Adapter 接口，所有 encode/decode 调用都在 L 上
-//     直接 CallByParam，跨 Robot 零竞争。
-//
-// 前置约束：
-//   - L 必须是 script.RuntimePool.Acquire() 拿到的 LState（业务 API 已 Preload）；
-//     codec.lua 内只依赖 bit / zlib，本函数会负责注册这两个模块。
-//   - luaMu 是该 Robot 的 luaMu。RobotAdapter 的"自动加锁版本"用它串行化所有
-//     Lua 调用（decodeLoop / 声明式动作执行器路径）；"*Locked 版本"假设调用方
-//     已持锁（业务 Lua API / 心跳 builder 路径）。
-//   - 本函数自身不持锁，由调用方（robot.NewRobot）保证此时 L 没有其他 goroutine 在用。
-//
-// 错误返回时调用方应放弃该 Robot 的创建（codec.lua 加载失败说明配置错误，重试无意义）。
-func (a *LuaAdapter) NewRobotAdapter(L *lua.LState, luaMu *sync.Mutex) (*RobotAdapter, error) {
-	if L == nil {
-		return nil, fmt.Errorf("NewRobotAdapter: LState 为空")
-	}
-	if a == nil || a.scriptProto == nil {
-		return nil, fmt.Errorf("NewRobotAdapter: parent LuaAdapter 未初始化")
-	}
-
-	// codec.lua 依赖 bit / zlib / crypto，确保三个模块已注册到 L
-	L.PreloadModule("bit", LoadBitModule)
-	RegisterZlibModule(L)
-	RegisterCryptoModule(L)
-
-	// 复用预编译的 codec.lua 字节码（避免重新解析脚本）
-	fn := L.NewFunctionFromProto(a.scriptProto)
-	L.Push(fn)
-	if err := L.PCall(0, 0, nil); err != nil {
-		return nil, fmt.Errorf("NewRobotAdapter: 执行 codec.lua 失败: %w", err)
-	}
-
-	// 把脚本中导出的全局函数 mv 到 registry，使用独立 key 前缀避免与
-	// 业务 Lua 脚本 / 全局 LuaAdapter 注册的同名函数冲突。
-	reg := L.Get(lua.RegistryIndex)
-	for _, name := range robotAdapterFnNames {
-		gfn := L.GetGlobal(name)
-		if gfn == lua.LNil {
-			return nil, fmt.Errorf("NewRobotAdapter: codec.lua 缺少必需函数 %s()", name)
-		}
-		L.SetField(reg, "__robot_adapter_"+name, gfn)
-		L.SetGlobal(name, lua.LNil) // 清理全局名字，防止业务脚本误调
-	}
-
-	return &RobotAdapter{parent: a, L: L, luaMu: luaMu}, nil
-}
+// 业务 Lua encode/decode 全程走 Go CodecResolver（CodecResolver.Resolve 出的 SchemaAdapter），
+// 不再需要在每个 Robot 的 LState 上注册 codec.lua 副本。LuaAdapter 仅保留为核心测试 oracle
+// （T1 一致性测试用 NewLuaAdapter + EncodeTCP/DecodeTCP/DescribeError 等接口方法对拍）。
+// 相关删除：
+//   - robotAdapterFnNames（"__robot_adapter_*" 注册前缀，已无引用）；
+//   - NewRobotAdapter（在 robot LState 上注册 codec.lua，已无调用方）；
+//   - errorScriptBytes 字段（仅 NewRobotAdapter 复用，已删）；
+//   - adapter/robot_adapter.go 整文件（*RobotAdapter 类型，已删）。

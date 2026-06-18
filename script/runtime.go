@@ -35,11 +35,15 @@ type Context struct {
 	Account string
 	Store   *state.Store
 	Factory *protox.Factory
-	// Adapter 是 Robot 私有的 codec 适配器（RobotLocalAdapter 重构后类型从
-	// adapter.Adapter 接口收窄到具体类型 *adapter.RobotAdapter）。这样业务 Lua API
-	// 内部可以直接调 *Locked 版本（已持 luaMu），避免与自动加锁版本互相自锁。
-	// 自动加锁版本则留给 decodeLoop / 声明式动作执行器等"未持 luaMu"的路径。
-	Adapter   *adapter.RobotAdapter
+	// Resolver 按「server 串 <proto>:<service>」解析每条连接的 Go SchemaAdapter
+	// （T2-C2-Lua 起取代旧 Context.Adapter）。业务 Lua API（buildPacket / doTCPRequest /
+	// networkUDPSend / networkListen / rememberHeaderErr 等）通过 ctx.Resolver.Resolve
+	// （"<proto>:<service>"）取该连接的 adapter 后调 Encode/ExpectedRouteKey/DescribeError；
+	// Resolve nil 由调用方 fail loud（不静默兜底）。
+	//
+	// 与 r.resolver（Robot 持有的 CodecResolver）是同一对象，SetContext 注入；
+	// 与 engine.ActionExecutor.resolver 共享同一份 codec 映射，encode/decode 双向一致。
+	Resolver  adapter.CodecResolver
 	NetSender engine.NetSender
 	Ctx       context.Context
 	LuaMu     *sync.Mutex
@@ -506,6 +510,11 @@ func (rp *RuntimePool) ListScripts() []string {
 }
 
 // registerAPIs 注册所有 Lua API 模块到 LState
+//
+// T2-C2-Lua 起「adapter」Lua 模块（loadAdapterModule，暴露 encode_tcp / decode_udp /
+// expected_route_key 等给业务脚本）已下线——业务 encode/decode 全走 Go CodecResolver
+// （ctx.Resolver.Resolve），不再需要业务 LState 上的 codec.lua 副本。conf/scripts 经 grep
+// 确认零依赖 adapter 模块。codec.lua / error.lua 仅由 adapter.LuaAdapter（测试 oracle）加载。
 func registerAPIs(L *lua.LState) {
 	L.PreloadModule("robot", loadRobotModule)
 	L.PreloadModule("proto", loadProtoModule)
@@ -513,7 +522,6 @@ func registerAPIs(L *lua.LState) {
 	L.PreloadModule("utils", loadUtilsModule)
 	L.PreloadModule("log", loadLogModule)
 	L.PreloadModule("json", loadJsonModule)
-	L.PreloadModule("adapter", loadAdapterModule)
 	L.PreloadModule("share", loadShareModule)
 }
 

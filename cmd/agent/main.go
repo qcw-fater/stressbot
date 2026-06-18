@@ -193,22 +193,10 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 		zap.String("scripts", paths.Scripts),
 		zap.String("adapter", paths.Adapter))
 
-	// 加载协议适配器
-	poolSize := adapter.SuggestedPoolSize()
-	errorMapPath := filepath.Join(paths.Adapter, "error.lua")
-	if _, err := os.Stat(errorMapPath); err != nil {
-		errorMapPath = ""
-	}
-	adp, err := adapter.NewLuaAdapter(poolSize, filepath.Join(paths.Adapter, "codec.lua"), errorMapPath)
-	if err != nil {
-		stresslog.Fatal("加载适配器失败", zap.Error(err))
-	}
-	stresslog.Info("[MAIN] 适配器已初始化", zap.Int("headerSize", adp.HeaderSize()))
-
-	// T2-C1：构造 CodecResolver（dial/decode 侧 Go SchemaAdapter）。
+	// T2-C2-Lua：构造 CodecResolver（全 codec 路径 Go SchemaAdapter）。
 	// 扫 paths.Adapter 下 *_codec.json 推断「server 串 → 文件名」映射，再 LoadCodecResolver 编译。
-	// 与上方 LuaAdapter 形成**双 codec 过渡态**：decode/dial → resolver（Go，无 luaMu）；
-	// encode/心跳/listen/Lua → adp（Lua RobotAdapter，→ 2-C2/2-C3 切换并删除）。
+	// 业务 encode/decode/dial/心跳/listen/Lua 全走 resolver；codec.lua / error.lua 仅由
+	// adapter.LuaAdapter（测试 oracle）加载，生产路径不再构造 LuaAdapter。
 	codecMap, err := adapter.InferCodecMap(paths.Adapter)
 	if err != nil {
 		stresslog.Fatal("推断 codec 映射失败", zap.String("dir", paths.Adapter), zap.Error(err))
@@ -301,7 +289,6 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 		Count:          s.Bot.Count,
 		ConcurrentNum:  s.Bot.ConcurrentNum,
 		StateExtra:     s.StateExtra,
-		Adapter:        adp,
 		CodecResolver:  resolver,
 		RequestTimeout: 60 * time.Second,
 		MainService:    s.Bot.MainService,
@@ -310,7 +297,7 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 		Shared:         sharedStore,
 	}
 
-	// Dialer 元信息源：T2-C1 起改用 resolver 任一 adapter（Go SchemaAdapter）。
+	// Dialer 元信息源：resolver 任一 adapter（Go SchemaAdapter）。
 	// 当前协议 HeaderSize/BodyLength 全局一致（3 份 codec.json 同 frame spec，T1.6 同源生成），
 	// 故取任一即可；per-connection HeaderSize 下沉留到 2-C3 connectionPump。
 	dialer := network.NewDialer(adapter.PickMetaAdapter(resolver, codecMap), 5*time.Second)
@@ -385,7 +372,6 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 		}
 	}
 
-	adp.Close()
 	if stopPprof != nil {
 		stopPprof()
 	}

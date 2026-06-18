@@ -102,7 +102,8 @@ func (t *ActionTiming) WireRTTSum() time.Duration {
 // T2-C2 起 encode 侧（protocolEncode / ExpectedRouteKey / DescribeError）从单一 adapter
 // 切到 resolver：每次编码按 "<proto>:<service>"（proto 由 pattern 推导，service=def.Service）
 // Resolve 出该连接的 Go SchemaAdapter。Resolve nil 时由调用方 fail loud（ErrEncodeFailed），
-// 不静默兜底。r.adp（Lua RobotAdapter）仍由 Robot 层持有，留给 Phase 2 删除。
+// 不静默兜底。T2-C2-Lua 后 r.adp / RobotAdapter / Context.Adapter / ManagerConfig.Adapter 已全部删除，
+// 业务 encode/decode/dial/心跳/listen/Lua 全程经 CodecResolver，无 Lua codec 生产路径。
 type ActionExecutor struct {
 	netSender   NetSender             // 网络发送委托，由 Robot 层实现
 	store       *state.Store          // Robot 状态存储，保存服务器响应字段和中间变量

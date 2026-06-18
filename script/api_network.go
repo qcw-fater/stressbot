@@ -124,15 +124,43 @@ func rememberFrameworkErr(ctx *Context, code errcode.ErrorCode, detail string) {
 	ctx.SetLastActionError(engine.NewActionError(code, detail))
 }
 
+// resolveDescribeError 经 CodecResolver 取任一已知连接的 adapter 后 DescribeError。
+//
+// DescribeError codec 无关（共享 errors.json，全连接同源），故任一已声明的 server 命中即可；
+// Resolver nil 或所有 server 均未映射 → 返回空串（headerErr 描述是增强信息而非核心路径，
+// 缺失非致命——headerErr 错误码本身仍按 NewServerError 上抛，与 2-C2-Go 的 handleHeaderError
+// fail-loud 策略不对称是有意设计）。
+//
+// serverHint 建议传该 Robot 的主连接（如 "tcp:logic"），命中率高；空串时回退首声明的 server。
+func resolveDescribeError(ctx *Context, serverHint string, code uint64) string {
+	if ctx == nil || ctx.Resolver == nil {
+		return ""
+	}
+	// 优先用 hint（通常为该 Robot 实际建立的连接，必然有 codec）。
+	if serverHint != "" {
+		if adp := ctx.Resolver.Resolve(serverHint); adp != nil {
+			return adp.DescribeError(code)
+		}
+	}
+	// hint 未命中：Resolver 不暴露枚举，且生产中 errors.json 全局同源，任一 adapter 即可。
+	// 这里不做穷举——hint 为空或未命中说明配置异常，headerErr 描述降级为空串（错误码本身仍上抛）。
+	return ""
+}
+
 func rememberHeaderErr(ctx *Context, code uint64, service, routeKey string) {
 	if ctx == nil {
 		return
 	}
 	detail := "service=" + service + " route=" + routeKey
-	if ctx.Adapter != nil {
-		if desc := ctx.Adapter.DescribeError(code); desc != "" {
-			detail = desc + ": " + detail
-		}
+	// DescribeError 经 CodecResolver（codec 无关，取该连接或主连接的 adapter 即可）。
+	// server 串按 service 推断：监听/请求路径下 service 即连接标识，proto 未知故双探测。
+	// 任一命中即取描述；未命中（codec 未映射）→ 描述降级空串，headerErr 错误码仍上抛。
+	desc := resolveDescribeError(ctx, "tcp:"+service, code)
+	if desc == "" {
+		desc = resolveDescribeError(ctx, "udp:"+service, code)
+	}
+	if desc != "" {
+		detail = desc + ": " + detail
 	}
 	ctx.SetLastActionError(engine.NewServerError(code, detail))
 }
@@ -188,11 +216,22 @@ func extractNetArgs(L *lua.LState) (service string, route lua.LValue, msg proto.
 }
 
 // buildPacket 构建完整 TCP 数据包。
-// 调用方（业务 Lua API）已持 luaMu，走 *Locked 版本避免自锁。
+//
+// T2-C2-Lua 起走 CodecResolver：按 "tcp:"+service Resolve 出该连接的 Go SchemaAdapter 后
+// EncodeTCP（与 engine.ActionExecutor / 心跳 goBuilder 共享同一份 codec 映射，encode 双向一致）。
+// Resolve nil（连接 codec 未映射）→ 返回 nil，调用方（doTCPRequest / networkTCPSend）fail loud
+// （ErrEncodeFailed，detail 带 service 串，不静默兜底）。
 func buildPacket(ctx *Context, service string, route lua.LValue, msgData []byte) []byte {
+	if ctx == nil || ctx.Resolver == nil {
+		return nil
+	}
+	adp := ctx.Resolver.Resolve("tcp:" + service)
+	if adp == nil {
+		return nil
+	}
 	secretKey := ctx.NetSender.GetTCPSecretKey(service)
 	goRoute := luaValueToRoute(route)
-	return ctx.Adapter.EncodeTCPLocked(goRoute, msgData, secretKey)
+	return adp.EncodeTCP(goRoute, msgData, secretKey)
 }
 
 // luaValueToRoute 将 Lua table/nil/number/string 转换为 Go any。
@@ -424,7 +463,15 @@ func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 		return pushRequestResult(L, int(errcode.ErrEncodeFailed), lua.LNil, 0, 0)
 	}
 
-	routeKey := ctx.Adapter.ExpectedRouteKeyLocked(luaValueToRoute(responseRoute))
+	// ExpectedRouteKey 走 resolver.Resolve("tcp:"+service) 出的 Go SchemaAdapter
+	// （与 encode 同源，避免双 codec 漂移）。Resolve nil → fail loud（理论上 encode 已 fail，
+	// 这里防御性兜 nil routeKey 会导致 RequestResponse 永久等不到响应）。
+	tcpAdp := ctx.Resolver.Resolve("tcp:" + service)
+	if tcpAdp == nil {
+		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service+" routeKey 解析失败（codec 未映射）")
+		return pushRequestResult(L, int(errcode.ErrEncodeFailed), lua.LNil, len(packet), 0)
+	}
+	routeKey := tcpAdp.ExpectedRouteKey(luaValueToRoute(responseRoute))
 	pktLen := len(packet)
 
 	var exchange *engine.NetExchange
@@ -480,7 +527,7 @@ func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 // WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
 func networkUDPRequest(L *lua.LState) int {
 	ctx := GetContext(L)
-	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
+	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
 		L.RaiseError("network not available")
 		return 0
 	}
@@ -504,7 +551,7 @@ func networkUDPRequest(L *lua.LState) int {
 // request_route 用于编码请求包，response_route 用于计算等待响应的 routeKey。
 func networkUDPRequestRoute(L *lua.LState) int {
 	ctx := GetContext(L)
-	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
+	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
 		L.RaiseError("network not available")
 		return 0
 	}
@@ -526,13 +573,24 @@ func networkUDPRequestRoute(L *lua.LState) int {
 }
 
 func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, responseRoute lua.LValue, body []byte, s2cProto string, timeout int) int {
-	routeKey := ctx.Adapter.ExpectedRouteKeyLocked(luaValueToRoute(responseRoute))
+	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
+		L.RaiseError("network not available")
+		return 0
+	}
+	// T2-C2-Lua：encode + ExpectedRouteKey 全走 resolver.Resolve("udp:"+service) 出的 Go SchemaAdapter
+	// （与 TCP 侧 doTCPRequest / engine.ActionExecutor 同源）。Resolve nil → fail loud。
+	udpAdp := ctx.Resolver.Resolve("udp:" + service)
+	if udpAdp == nil {
+		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service+" codec 未映射（resolver.Resolve(udp:"+service+") nil）")
+		return pushRequestResult(L, int(errcode.ErrEncodeFailed), lua.LNil, 0, 0)
+	}
+	routeKey := udpAdp.ExpectedRouteKey(luaValueToRoute(responseRoute))
 	udpKey := ctx.NetSender.GetUDPSecretKey(service)
 	var encodeStart time.Time
 	if ctx.TimingLevel >= engine.TimingLevelCodec {
 		encodeStart = time.Now()
 	}
-	packet := ctx.Adapter.EncodeUDPLocked(luaValueToRoute(requestRoute), body, udpKey)
+	packet := udpAdp.EncodeUDP(luaValueToRoute(requestRoute), body, udpKey)
 	if ctx.TimingLevel >= engine.TimingLevelCodec && !encodeStart.IsZero() {
 		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart)})
 	}
@@ -748,7 +806,7 @@ func networkTCPSend(L *lua.LState) int {
 // 发送 WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
 func networkUDPSend(L *lua.LState) int {
 	ctx := GetContext(L)
-	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
+	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
 		L.RaiseError("network not available")
 		return 0
 	}
@@ -760,13 +818,21 @@ func networkUDPSend(L *lua.LState) int {
 		body = []byte(L.CheckString(3))
 	}
 
+	// T2-C2-Lua：encode 走 resolver.Resolve("udp:"+service) 出的 Go SchemaAdapter。
+	// Resolve nil → fail loud（ErrEncodeFailed，detail 带 service 串）。
+	adp := ctx.Resolver.Resolve("udp:" + service)
+	if adp == nil {
+		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service+" codec 未映射（resolver.Resolve(udp:"+service+") nil）")
+		L.Push(lua.LNumber(errcode.ErrEncodeFailed))
+		return 1
+	}
 	goRoute := luaValueToRoute(route)
 	udpKey := ctx.NetSender.GetUDPSecretKey(service)
 	var encodeStart time.Time
 	if ctx.TimingLevel >= engine.TimingLevelCodec {
 		encodeStart = time.Now()
 	}
-	packet := ctx.Adapter.EncodeUDPLocked(goRoute, body, udpKey)
+	packet := adp.EncodeUDP(goRoute, body, udpKey)
 	if ctx.TimingLevel >= engine.TimingLevelCodec && !encodeStart.IsZero() {
 		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart)})
 	}
@@ -817,14 +883,23 @@ func networkUDPListen(L *lua.LState) int { return networkListen(L, "udp") }
 // networkListen 通用监听实现，通过 protocol 参数区分 TCP/UDP。
 func networkListen(L *lua.LState, protocol string) int {
 	ctx := GetContext(L)
-	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
+	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
 		L.RaiseError("network not available")
 		return 0
 	}
 
 	service := L.CheckString(1)
+	// T2-C2-Lua：routeKey 走 resolver.Resolve("<proto>:"+service) 出的 Go SchemaAdapter 计算
+	// （与 engine robotActionHandler.RegisterListen 同源，闭环双 codec）。Resolve nil → fail loud。
+	adp := ctx.Resolver.Resolve(protocol + ":" + service)
+	if adp == nil {
+		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service+" codec 未映射（resolver.Resolve("+protocol+":"+service+") nil）")
+		L.Push(lua.LNumber(errcode.ErrEncodeFailed))
+		L.Push(lua.LNil)
+		return 2
+	}
 	route := luaValueToRoute(L.Get(2))
-	routeKey := ctx.Adapter.ExpectedRouteKeyLocked(route)
+	routeKey := adp.ExpectedRouteKey(route)
 
 	var s2cProto string
 	timeout := engine.DefaultListenTimeoutSec
@@ -942,14 +1017,24 @@ func networkTryUDPListen(L *lua.LState) int { return networkTryListen(L, "udp") 
 //   - 接收 WireBytes 仍由 Context 累计（与 tcp_listen 一致）。
 func networkTryListen(L *lua.LState, protocol string) int {
 	ctx := GetContext(L)
-	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
+	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
 		L.RaiseError("network not available")
 		return 0
 	}
 
 	service := L.CheckString(1)
+	// T2-C2-Lua：routeKey 走 resolver.Resolve("<proto>:"+service) 出的 Go SchemaAdapter。
+	// Resolve nil → fail loud（与阻塞版 networkListen 一致；try_* 虽是 drain 原语，
+	// 但 routeKey 计算依赖 codec，缺 codec 必须暴露配置错误而非静默返回 timeout）。
+	adp := ctx.Resolver.Resolve(protocol + ":" + service)
+	if adp == nil {
+		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service+" codec 未映射（resolver.Resolve("+protocol+":"+service+") nil）")
+		L.Push(lua.LNumber(errcode.ErrEncodeFailed))
+		L.Push(lua.LNil)
+		return 2
+	}
 	route := luaValueToRoute(L.Get(2))
-	routeKey := ctx.Adapter.ExpectedRouteKeyLocked(route)
+	routeKey := adp.ExpectedRouteKey(route)
 
 	var exchange *engine.NetExchange
 	if protocol == "tcp" {
@@ -1083,117 +1168,12 @@ func networkEnsureUDPListener(L *lua.LState) int {
 }
 
 // ---------------------------------------------------------------------------
-// adapter 模块（编解码适配器，高级用法）
+// adapter 模块（编解码适配器）已下线（T2-C2-Lua）
 // ---------------------------------------------------------------------------
-
-// loadAdapterModule 暴露适配器编解码给 Lua 业务脚本。
-func loadAdapterModule(L *lua.LState) int {
-	mod := L.NewTable()
-	L.SetField(mod, "encode_tcp", L.NewFunction(adapterEncodeTCP))
-	L.SetField(mod, "encode_udp", L.NewFunction(adapterEncodeUDP))
-	L.SetField(mod, "decode_tcp", L.NewFunction(adapterDecodeTCP))
-	L.SetField(mod, "decode_udp", L.NewFunction(adapterDecodeUDP))
-	L.SetField(mod, "expected_route_key", L.NewFunction(adapterExpectedRouteKey))
-	L.Push(mod)
-	return 1
-}
-
-// adapterEncodeTCP TCP 编码。
-// 签名：adapter.encode_tcp(route, body [, key])
-// 返回：packet(string|nil)
-func adapterEncodeTCP(L *lua.LState) int { return adapterEncode(L, "tcp") }
-
-// adapterEncodeUDP UDP 编码。
-// 签名：adapter.encode_udp(route, body [, key])
-// 返回：packet(string|nil)
-func adapterEncodeUDP(L *lua.LState) int { return adapterEncode(L, "udp") }
-
-// adapterEncode 通用编码实现。
-func adapterEncode(L *lua.LState, protocol string) int {
-	ctx := GetContext(L)
-	if ctx == nil || ctx.Adapter == nil {
-		L.Push(lua.LNil)
-		return 1
-	}
-	route := luaValueToRoute(L.Get(1))
-	body := []byte(L.CheckString(2))
-	var key []byte
-	if L.GetTop() >= 3 {
-		key = []byte(L.CheckString(3))
-	}
-
-	// 业务 Lua 脚本调用此函数时已持 luaMu（RunActionScript / RunCallbackScript 入口
-	// 已加锁），走 *Locked 版本避免自锁。
-	var result []byte
-	switch protocol {
-	case "tcp":
-		result = ctx.Adapter.EncodeTCPLocked(route, body, key)
-	default:
-		result = ctx.Adapter.EncodeUDPLocked(route, body, key)
-	}
-
-	if result == nil {
-		L.Push(lua.LNil)
-	} else {
-		L.Push(lua.LString(string(result)))
-	}
-	return 1
-}
-
-// adapterDecodeTCP 解码 TCP 数据包。
-// 签名：adapter.decode_tcp(data [, key])
-// 返回：response_key(string), body(string), header_err(number)
-func adapterDecodeTCP(L *lua.LState) int { return adapterDecode(L, "tcp") }
-
-// adapterDecodeUDP 解码 UDP 数据包。
-// 签名：adapter.decode_udp(data [, key])
-// 返回：response_key(string), body(string), header_err(number)
-func adapterDecodeUDP(L *lua.LState) int { return adapterDecode(L, "udp") }
-
-// adapterDecode 通用解码实现。
-func adapterDecode(L *lua.LState, protocol string) int {
-	ctx := GetContext(L)
-	if ctx == nil || ctx.Adapter == nil {
-		L.Push(lua.LNil)
-		L.Push(lua.LNil)
-		L.Push(lua.LNumber(0))
-		return 3
-	}
-	data := []byte(L.CheckString(1))
-	var key []byte
-	if L.GetTop() >= 2 {
-		key = []byte(L.CheckString(2))
-	}
-
-	// 业务 Lua 脚本调用时已持 luaMu，走 *Locked 版本。
-	var routeKey string
-	var body []byte
-	var headerErr uint64
-	switch protocol {
-	case "tcp":
-		routeKey, body, headerErr = ctx.Adapter.DecodeTCPLocked(data, key)
-	default:
-		routeKey, body, headerErr = ctx.Adapter.DecodeUDPLocked(data, key)
-	}
-
-	L.Push(lua.LString(routeKey))
-	L.Push(lua.LString(string(body)))
-	L.Push(lua.LNumber(headerErr))
-	return 3
-}
-
-// adapterExpectedRouteKey 根据路由计算期望的响应路由键。
-// 签名：adapter.expected_route_key(route)
-// 返回：response_key(string)
-func adapterExpectedRouteKey(L *lua.LState) int {
-	ctx := GetContext(L)
-	if ctx == nil || ctx.Adapter == nil {
-		L.Push(lua.LString(""))
-		return 1
-	}
-	// 业务 Lua 脚本调用时已持 luaMu，走 *Locked 版本。
-	route := luaValueToRoute(L.Get(1))
-	key := ctx.Adapter.ExpectedRouteKeyLocked(route)
-	L.Push(lua.LString(key))
-	return 1
-}
+//
+// 历史 loadAdapterModule / adapterEncodeTCP / adapterDecodeUDP / adapterExpectedRouteKey
+// 等 Lua 模块函数通过 ctx.Adapter（旧 *RobotAdapter，调 *Locked 版本）暴露 codec 给业务
+// 脚本。T2-C2-Lua 起业务 encode/decode 全走 Go CodecResolver（ctx.Resolver.Resolve），
+// conf/scripts 经 grep 确认零依赖 adapter 模块，故整条 Lua 模块下线（registerAPIs 也同步
+// 删除 PreloadModule("adapter")）。codec.lua / error.lua 仅由 adapter.LuaAdapter（测试 oracle）
+// 加载，不再注入业务 LState。

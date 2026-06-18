@@ -122,27 +122,10 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 		return runFailed("无配置文件可下载（configUrl 或 configFiles 为空）")
 	}
 
-	// 3. 加载协议适配器（优先使用任务下发的 codec.lua，回退到 Agent 本地配置）
-	adapterScript := filepath.Join(confDir, "adapter", "codec.lua")
-	if _, err := os.Stat(adapterScript); err != nil {
-		adapterScript = r.cfg.AdapterScript
-	}
-	// 可选：加载错误码映射
-	errorMapScript := filepath.Join(confDir, "adapter", "error.lua")
-	if _, err := os.Stat(errorMapScript); err != nil {
-		errorMapScript = ""
-	}
-	poolSize := adapter.SuggestedPoolSize()
-	adp, err := adapter.NewLuaAdapter(poolSize, adapterScript, errorMapScript)
-	if err != nil {
-		stresslog.Error("[TASK] 加载适配器失败", zap.String("taskID", taskID), zap.Error(err))
-		return runFailed(fmt.Sprintf("加载适配器失败: %v", err))
-	}
-	defer adp.Close()
-
-	// T2-C1：构造 CodecResolver（dial/decode 侧 Go SchemaAdapter）。
+	// T2-C2-Lua：构造 CodecResolver（全 codec 路径 Go SchemaAdapter）。
 	// 任务下发的 adapter 目录 confDir/adapter 含 *_codec.json + errors.json（T4.3 分发）。
-	// 与上方 LuaAdapter 形成**双 codec 过渡态**：decode/dial → resolver；encode/Lua → adp。
+	// 业务 encode/decode/dial/心跳/listen/Lua 全走 resolver；codec.lua / error.lua 仅由
+	// adapter.LuaAdapter（测试 oracle）加载，生产路径不再构造 LuaAdapter。
 	codecAdapterDir := filepath.Join(confDir, "adapter")
 	codecMap, err := adapter.InferCodecMap(codecAdapterDir)
 	if err != nil {
@@ -201,7 +184,7 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 	httpTimeout := utils.ParseDurationDefault(r.assignment.HTTPTimeout, 10*time.Second, "httpTimeout")
 
 	// 8. 启动 gnet 网络引擎
-	// Dialer 元信息源：T2-C1 起用 resolver 任一 Go SchemaAdapter（HeaderSize 全局一致，T1.6 同源）。
+	// Dialer 元信息源：resolver 任一 Go SchemaAdapter（HeaderSize 全局一致，T1.6 同源）。
 	dialer := network.NewDialer(adapter.PickMetaAdapter(resolver, codecMap), hbInterval)
 	if err := dialer.Start(); err != nil {
 		stresslog.Error("[TASK] 启动网络引擎失败", zap.String("taskID", taskID), zap.Error(err))
@@ -253,7 +236,6 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 		Count:          r.assignment.TotalBots,
 		ConcurrentNum:  r.assignment.ConcurrentNum,
 		StateExtra:     r.assignment.StateExtra,
-		Adapter:        adp,
 		CodecResolver:  resolver,
 		RequestTimeout: tcpTimeout,
 		MainService:    mainService,
