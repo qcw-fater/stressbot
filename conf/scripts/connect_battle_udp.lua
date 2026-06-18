@@ -1,40 +1,10 @@
--- connect_battle_udp.lua: 连接战斗服 UDP + 设置 UDP 密钥 + 注册 150ms 心跳
--- 仅做连接 / 配置 / 注册心跳；心跳字节由后台 goroutine 通过 network 层全局带宽统计。
+-- connect_battle_udp.lua: 连接战斗服 UDP + 设置 UDP 密钥
+-- 仅做连接 / 配置；150ms 心跳由 flow.json 的 RegisterBattleUDPHeartbeat
+-- (udpHeartbeat action, raw-binary heartbeatFields) 声明式注册，后台 goroutine
+-- 通过 network 层全局带宽统计，完全不触碰 robot 业务 LState。
 local network = require("network")
 local robot = require("robot")
-local utils = require("utils")
 local log = require("log")
-
-local udp_seq = 0
-
--- 构造 UDP 心跳 body（39 字节）
-local function build_udp_heart()
-    local battleId = robot.get("battleId") or 0
-    local fighterIndex = robot.get("fighterIndex") or 0
-    local session = robot.get("battleSession") or 0
-    local ack = robot.get("battleAck") or 0
-
-    local idx = robot.increment("packageIndex") % 65536
-
-    udp_seq = udp_seq + 1
-    if udp_seq > 4294967295 then udp_seq = 1 end
-
-    local rtt = utils.random_int(10, 40)
-    local now_ms = utils.time_ms()
-
-    local p = utils.pack_le("u16", idx)
-    p = p .. utils.pack_le("i64", battleId)
-    p = p .. utils.pack_le("u8", fighterIndex)
-    p = p .. utils.pack_le("i64", session)
-    p = p .. utils.pack_le("i32", ack)
-    p = p .. utils.pack_le("u16", rtt)
-    p = p .. utils.pack_le("u64", now_ms)
-    p = p .. utils.pack_le("u32", udp_seq)
-    p = p .. utils.pack_le("u16", 0) -- LossCount
-    p = p .. utils.pack_le("u8", 0)  -- Fps
-    p = p .. utils.pack_le("u8", 0)  -- TargetFps
-    return p
-end
 
 function execute(r)
     local battleAddress = robot.get("battleAddress")
@@ -72,26 +42,15 @@ function execute(r)
     end
 
     -- 新一轮战斗开始：复位包序号（对齐旧工具 ClearBattleInfo → packetIndex=0）
-    udp_seq = 0
+    -- 心跳的 udp_seq 私有计数器由 RegisterBattleUDPHeartbeat 节点每 battle 重新注册时从 start=0 开始，等价复位。
     robot.set("packageIndex", 0)
     robot.set("battleAck", 0)
     robot.set("frameCount", 0)
-
-    -- 注册 150ms UDP 心跳
-    local hbCode = network.register_udp_heartbeat("battle", 150, {cmd=4, act=2}, build_udp_heart)
-    if hbCode ~= 0 then
-        log.error("战斗服 UDP 心跳注册失败: service=battle route=4:2 intervalMs=150 address="
-            .. tostring(battleAddress)
-            .. " battleId=" .. tostring(battleId)
-            .. " fighterIndex=" .. tostring(fighterIndex)
-            .. " code=" .. tostring(hbCode))
-        return hbCode
-    end
 
     log.info("战斗服 UDP 连接完成: address=" .. tostring(battleAddress)
         .. " battleId=" .. tostring(battleId)
         .. " fighterIndex=" .. tostring(fighterIndex)
         .. " hasSecretKey=" .. tostring(hasSecretKey)
-        .. " 心跳已注册(150ms)")
+        .. " 心跳由声明式节点注册(150ms)")
     return 0
 end

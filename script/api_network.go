@@ -51,8 +51,6 @@ func withReleasedMu(mu *sync.Mutex, fn func()) {
 //	network.get_udp_secret_key(service)
 //	network.ensure_tcp_listener(service, response_key)
 //	network.ensure_udp_listener(service, response_key)
-//	network.register_tcp_heartbeat(service, interval_ms, route, builder)
-//	network.register_udp_heartbeat(service, interval_ms, route, builder)
 func loadNetworkModule(L *lua.LState) int {
 	mod := L.NewTable()
 
@@ -84,9 +82,6 @@ func loadNetworkModule(L *lua.LState) int {
 	// 监听器占位
 	L.SetField(mod, "ensure_tcp_listener", L.NewFunction(networkEnsureTCPListener))
 	L.SetField(mod, "ensure_udp_listener", L.NewFunction(networkEnsureUDPListener))
-	// 心跳
-	L.SetField(mod, "register_tcp_heartbeat", L.NewFunction(networkRegisterTCPHeartbeat))
-	L.SetField(mod, "register_udp_heartbeat", L.NewFunction(networkRegisterUDPHeartbeat))
 
 	L.Push(mod)
 	return 1
@@ -1085,168 +1080,6 @@ func networkEnsureUDPListener(L *lua.LState) int {
 	routeKey := L.CheckString(2)
 	ctx.NetSender.EnsureUDPListener(service, routeKey, 1)
 	return 0
-}
-
-// ---------------------------------------------------------------------------
-// 心跳
-// ---------------------------------------------------------------------------
-
-// heartbeatProto 区分 TCP/UDP 心跳的编码方式。
-type heartbeatProto int
-
-const (
-	hbProtoTCP heartbeatProto = iota
-	hbProtoUDP
-)
-
-// networkRegisterTCPHeartbeat 注册 TCP 心跳。
-// 签名：network.register_tcp_heartbeat(service, interval_ms, route [, builder]) -> code
-//
-// 两种模式：
-//   - 静态心跳（不传 builder）：body 固定为空，注册时一次性编码，运行时零 Lua / 零 luaMu 开销。
-//   - 动态心跳（传 builder）：每次 tick 调用 builder 构造 body，TryLock(luaMu) 编码。
-func networkRegisterTCPHeartbeat(L *lua.LState) int {
-	return registerHeartbeat(L, hbProtoTCP)
-}
-
-// networkRegisterUDPHeartbeat 注册 UDP 心跳。
-// 签名：network.register_udp_heartbeat(service, interval_ms, route [, builder]) -> code
-//
-// 两种模式同 register_tcp_heartbeat。
-func networkRegisterUDPHeartbeat(L *lua.LState) int {
-	return registerHeartbeat(L, hbProtoUDP)
-}
-
-// registerHeartbeat 心跳注册的共享实现。
-func registerHeartbeat(L *lua.LState, proto heartbeatProto) int {
-	ctx := GetContext(L)
-	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
-		L.RaiseError("network not available")
-		return 0
-	}
-	service := L.CheckString(1)
-	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service)
-		L.Push(lua.LNumber(errcode.ErrActionCanceled))
-		return 1
-	}
-
-	protoName := "tcp"
-	if proto == hbProtoUDP {
-		protoName = "udp"
-	}
-
-	var goRoute any
-	var intervalMs int
-	var builderFn *lua.LFunction
-
-	v2 := L.Get(2)
-	if fn, ok := v2.(*lua.LFunction); ok {
-		builderFn = fn
-	} else {
-		intervalMs = int(lua.LVAsNumber(v2))
-		goRoute = luaValueToRoute(L.Get(3))
-		if L.GetTop() >= 4 {
-			if fn, ok := L.Get(4).(*lua.LFunction); ok {
-				builderFn = fn
-			}
-		}
-	}
-
-	if intervalMs <= 0 {
-		intervalMs = engine.DefaultHeartbeatMs
-	}
-
-	hbRegKey := fmt.Sprintf("__hb_%s_%s__", protoName, service)
-	if builderFn != nil {
-		L.SetField(L.Get(lua.RegistryIndex), hbRegKey, builderFn)
-	}
-
-	luaMu := ctx.LuaMu
-	adp := ctx.Adapter
-
-	// 静态心跳预编码：builderFn==nil 表示 body 固定为空，
-	// 注册时（持有 luaMu）一次性编码，运行时直接返回缓存 []byte，
-	// 零 Lua 调用、零 luaMu 竞争、零分配。
-	var preEncoded []byte
-	if builderFn == nil {
-		if proto == hbProtoUDP {
-			secretKey := ctx.NetSender.GetUDPSecretKey(service)
-			preEncoded = adp.EncodeUDPLocked(goRoute, nil, secretKey)
-		} else {
-			secretKey := ctx.NetSender.GetTCPSecretKey(service)
-			preEncoded = adp.EncodeTCPLocked(goRoute, nil, secretKey)
-		}
-	}
-
-	builder := func() []byte {
-		// 连接已关闭/取消，跳过本次心跳。
-		if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-			return nil
-		}
-
-		// 静态心跳：直接返回预编码数据，不触碰 Lua/luaMu。
-		if preEncoded != nil {
-			return preEncoded
-		}
-
-		// 动态心跳：TryLock 拿不到 luaMu 就跳过本次心跳。
-		// 关键场景：执行器在 lua 里调 network.close_tcp / register_*_heartbeat
-		// 等"需要等 StopHeartbeat 返回"的同步 API 时，本身就持有 luaMu。
-		// 如果这里 Lock 阻塞等待，就会与 StopHeartbeat 形成循环死锁：
-		//   executor 持 luaMu → 等 hb.done → 心跳 goroutine 等 luaMu。
-		// TryLock 失败即跳过本次发送，下个 tick（或 ctx 取消）能自然推进。
-		if luaMu != nil && !luaMu.TryLock() {
-			return nil
-		}
-		var packet []byte
-		func() {
-			if luaMu != nil {
-				defer luaMu.Unlock()
-			}
-
-			// Step 1: 执行 builder Lua 脚本构造 body
-			var body []byte
-			savedTop := L.GetTop()
-			if err := L.CallByParam(lua.P{Fn: builderFn, NRet: 1, Protect: true}); err != nil {
-				L.SetTop(savedTop)
-				stresslog.Warn("[SCRIPT] 心跳 builder Lua 调用失败",
-					zap.String("proto", protoName), zap.String("service", service), zap.Error(err))
-				return
-			}
-			body = []byte(lua.LVAsString(L.Get(-1)))
-			L.SetTop(savedTop)
-
-			// Step 2: 在持锁状态下编码（adapter 走 *Locked 版本避免自锁）
-			if proto == hbProtoUDP {
-				secretKey := ctx.NetSender.GetUDPSecretKey(service)
-				packet = adp.EncodeUDPLocked(goRoute, body, secretKey)
-			} else {
-				secretKey := ctx.NetSender.GetTCPSecretKey(service)
-				packet = adp.EncodeTCPLocked(goRoute, body, secretKey)
-			}
-		}()
-		return packet
-	}
-
-	// 必须用 withReleasedMu：RegisterHeartbeat 内部会 StopHeartbeat 停旧心跳，
-	// 如果不释放 luaMu，旧心跳的 Builder TryLock 失败后虽不会死锁，
-	// 但 StopHeartbeat 会卡满 2s 超时才返回，拖慢心跳替换速度。
-	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		if proto == hbProtoUDP {
-			err = ctx.NetSender.RegisterUDPHeartbeat(service, intervalMs, builder)
-		} else {
-			err = ctx.NetSender.RegisterTCPHeartbeat(service, intervalMs, builder)
-		}
-	})
-	if err != nil {
-		rememberActionErr(ctx, err)
-		L.Push(lua.LNumber(errToCode(err)))
-		return 1
-	}
-	L.Push(lua.LNumber(0))
-	return 1
 }
 
 // ---------------------------------------------------------------------------

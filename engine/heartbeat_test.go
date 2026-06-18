@@ -350,12 +350,6 @@ func (f *fakeHeartbeatNetSender) GetTCPListenResp(string, string) *NetExchange {
 func (f *fakeHeartbeatNetSender) GetUDPListenResp(string, string) *NetExchange { return nil }
 func (f *fakeHeartbeatNetSender) EnsureTCPListener(string, string, int)        {}
 func (f *fakeHeartbeatNetSender) EnsureUDPListener(string, string, int)        {}
-func (f *fakeHeartbeatNetSender) RegisterTCPHeartbeat(string, int, func() []byte) error {
-	return nil
-}
-func (f *fakeHeartbeatNetSender) RegisterUDPHeartbeat(string, int, func() []byte) error {
-	return nil
-}
 func (f *fakeHeartbeatNetSender) GetTCPSecretKey(string) []byte  { return nil }
 func (f *fakeHeartbeatNetSender) SetTCPSecretKey(string, []byte) {}
 func (f *fakeHeartbeatNetSender) GetUDPSecretKey(string) []byte  { return nil }

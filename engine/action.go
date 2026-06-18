@@ -169,17 +169,13 @@ type NetSender interface {
 	// EnsureUDPListener 为指定 routeKey 注册监听占位（callback=nil，轮询模式）。
 	// 由 Lua ensure_udp_listener 调用（queueSize 固定为 1，大容量请用 flow listenRefs 的 queueSize 配置）。
 	EnsureUDPListener(service string, routeKey string, queueSize int)
-	// RegisterTCPHeartbeat 注册 TCP 心跳，按 intervalMs 间隔周期调用 builder 生成心跳包。
-	RegisterTCPHeartbeat(service string, intervalMs int, builder func() []byte) error
-	// RegisterUDPHeartbeat 注册 UDP 心跳，按 intervalMs 间隔周期调用 builder 生成心跳包。
-	RegisterUDPHeartbeat(service string, intervalMs int, builder func() []byte) error
 
 	// ── 声明式心跳（Go-only builder）───────────────────────────────────────
 
 	// RegisterHeartbeat 注册声明式二进制心跳（tcpHeartbeat / udpHeartbeat action）。
 	// Transport/IntervalMs/Route/Fields 由 ActionExecutor 从 ActionDef 装配；
 	// 实现侧（netSenderAdapter）构造 Go builder 闭包（BuildHeartbeatBody + 私有计数器 + adapter encode），
-	// 不触碰 robot 的业务 LState。与旧 RegisterTCPHeartbeat/RegisterUDPHeartbeat 临时并存，2-B.2 删除旧路径。
+	// 不触碰 robot 的业务 LState。
 	RegisterHeartbeat(cfg HeartbeatActionConfig) error
 
 	// ── 加密密钥 ──────────────────────────────────────────────────────────

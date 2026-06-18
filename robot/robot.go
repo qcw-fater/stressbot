@@ -1203,46 +1203,9 @@ func (ns *netSenderAdapter) GetUDPSecretKey(service string) []byte {
 	return conn.GetSecretKey()
 }
 
-// RegisterTCPHeartbeat 注册 TCP 心跳。
-func (ns *netSenderAdapter) RegisterTCPHeartbeat(service string, intervalMs int, builder func() []byte) error {
-	if ns.robot.ctx.Err() != nil {
-		return engine.NewActionError(errcode.ErrActionCanceled, "service="+service)
-	}
-	conn := ns.robot.client.GetTCPConn(service)
-	if conn == nil {
-		err := engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
-		stresslog.Warn("[ROBOT] RegisterTCPHeartbeat 连接不存在", zap.String("service", service))
-		return err
-	}
-	conn.RegisterHeartbeat(network.HeartbeatConfig{
-		Interval: time.Duration(intervalMs) * time.Millisecond,
-		Builder:  builder,
-	})
-	return nil
-}
-
-// RegisterUDPHeartbeat 注册 UDP 心跳。
-func (ns *netSenderAdapter) RegisterUDPHeartbeat(service string, intervalMs int, builder func() []byte) error {
-	if ns.robot.ctx.Err() != nil {
-		return engine.NewActionError(errcode.ErrActionCanceled, "service="+service)
-	}
-	conn := ns.robot.client.GetUDPConn(service)
-	if conn == nil {
-		err := engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
-		stresslog.Warn("[ROBOT] RegisterUDPHeartbeat 连接不存在", zap.String("service", service))
-		return err
-	}
-	conn.RegisterHeartbeat(network.HeartbeatConfig{
-		Interval: time.Duration(intervalMs) * time.Millisecond,
-		Builder:  builder,
-	})
-	return nil
-}
-
 // RegisterHeartbeat 注册声明式心跳（tcpHeartbeat / udpHeartbeat action，双模式 body 构造）。
 //
-// 与旧 RegisterTCPHeartbeat/RegisterUDPHeartbeat 的区别：心跳 body 不由 Lua 构造，
-// 而是由 Go builder 闭包按配置模式分派：
+// 心跳 body 不由 Lua 构造，而是由 Go builder 闭包按配置模式分派：
 //   - proto 模式（C2SProto != ""）：engine.BuildProtoBody（factory + bindings，Go-only）；
 //   - raw-binary 模式（len(Fields) > 0）：engine.BuildHeartbeatBody（小端打包 + 私有计数器/时间/随机）；
 //   - 空 body（两者皆无）：静态心跳。
@@ -1255,8 +1218,6 @@ func (ns *netSenderAdapter) RegisterUDPHeartbeat(service string, intervalMs int,
 //  2. 取 conn 当前 secretKey；
 //  3. adp.EncodeTCP/UDP(route, body, key) → packet；
 //  4. 仅 raw-binary 模式递增 privateCounters（counter 源按 Step 推进；proto 模式无私有计数器）。
-//
-// 与旧 RegisterTCPHeartbeat 临时并存（旧路径 2-B.2 删除）。
 func (ns *netSenderAdapter) RegisterHeartbeat(cfg engine.HeartbeatActionConfig) error {
 	if ns.robot.ctx.Err() != nil {
 		return engine.NewActionError(errcode.ErrActionCanceled, "service="+cfg.Service)

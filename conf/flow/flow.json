@@ -357,7 +357,9 @@
       "type": "sequence",
       "next": [
         "ConnectBattleTCP",
+        "RegisterBattleTCPHeartbeat",
         "ConnectBattleUDP",
+        "RegisterBattleUDPHeartbeat",
         "RegisterBattle",
         "loadLoop",
         "BattleLoadOK",
@@ -385,6 +387,11 @@
         }
       ]
     },
+    "RegisterBattleTCPHeartbeat": {
+      "type": "action",
+      "action": "RegisterBattleTCPHeartbeat",
+      "errorStrategy": "skip"
+    },
     "ConnectBattleUDP": {
       "type": "action",
       "action": "ConnectBattleUDP",
@@ -398,6 +405,11 @@
           "listen": "frameData"
         }
       ]
+    },
+    "RegisterBattleUDPHeartbeat": {
+      "type": "action",
+      "action": "RegisterBattleUDPHeartbeat",
+      "errorStrategy": "skip"
     },
     "RegisterBattle": {
       "type": "action",
@@ -780,9 +792,46 @@
       "pattern": "lua",
       "script": "connect_battle_tcp.lua"
     },
+    "RegisterBattleTCPHeartbeat": {
+      "pattern": "tcpHeartbeat",
+      "service": "battle",
+      "route": {
+        "cmd": 4,
+        "act": 2
+      },
+      "intervalMs": 10000,
+      "heartbeatFields": [
+        { "type": "u16", "source": "stateCounter", "key": "packageIndex" },
+        { "type": "i64", "source": "state", "key": "battleId" },
+        { "type": "u8", "source": "state", "key": "fighterIndex" },
+        { "type": "i64", "source": "state", "key": "battleSession" }
+      ]
+    },
     "ConnectBattleUDP": {
       "pattern": "lua",
       "script": "connect_battle_udp.lua"
+    },
+    "RegisterBattleUDPHeartbeat": {
+      "pattern": "udpHeartbeat",
+      "service": "battle",
+      "route": {
+        "cmd": 4,
+        "act": 2
+      },
+      "intervalMs": 150,
+      "heartbeatFields": [
+        { "type": "u16", "source": "stateCounter", "key": "packageIndex" },
+        { "type": "i64", "source": "state", "key": "battleId" },
+        { "type": "u8", "source": "state", "key": "fighterIndex" },
+        { "type": "i64", "source": "state", "key": "battleSession" },
+        { "type": "i32", "source": "state", "key": "battleAck" },
+        { "type": "u16", "source": "randomInt", "min": 10, "max": 40 },
+        { "type": "u64", "source": "timestamp", "unit": "ms" },
+        { "type": "u32", "source": "counter", "start": 1, "step": 1 },
+        { "type": "u16", "source": "fixed", "value": 0 },
+        { "type": "u8", "source": "fixed", "value": 0 },
+        { "type": "u8", "source": "fixed", "value": 0 }
+      ]
     },
     "RequestPlayerData": {
       "pattern": "lua",
