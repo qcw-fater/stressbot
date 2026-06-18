@@ -83,3 +83,66 @@ func TestEffectiveListenQueueSize(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateListenDef 验证 ListenDef.script 废弃校验（2-A2.2）。
+//
+// v2 起 listen 脚本回调已下线，validateListenDef 对 cbDef.Script != "" fail-loud
+// （中文 error，含 listen+script 上下文）。抽成纯函数便于单测。
+func TestValidateListenDef(t *testing.T) {
+	tests := []struct {
+		name    string
+		listen  string
+		cbDef   *engine.ListenDef
+		wantErr bool
+		errSubs []string
+	}{
+		{
+			name:    "纯缓存listen_空def_通过",
+			listen:  "frameData",
+			cbDef:   &engine.ListenDef{},
+			wantErr: false,
+		},
+		{
+			name:   "s2cProto+store_通过",
+			listen: "roomUpdateData",
+			cbDef: &engine.ListenDef{
+				S2CProto: "game.RoomUpdate",
+				Store:    []engine.StoreMapping{{Field: "id", Setter: "roomId"}},
+			},
+			wantErr: false,
+		},
+		{
+			name:    "script非空_报错",
+			listen:  "frameData",
+			cbDef:   &engine.ListenDef{Script: "listen_frame_data.lua"},
+			wantErr: true,
+			errSubs: []string{"frameData", "listen_frame_data.lua", "script", "废弃"},
+		},
+		{
+			name:    "nil_cbDef_通过",
+			listen:  "x",
+			cbDef:   nil,
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateListenDef(tt.listen, tt.cbDef)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("期望 error，实际 nil")
+				}
+				for _, sub := range tt.errSubs {
+					if !strings.Contains(err.Error(), sub) {
+						t.Fatalf("error %q 不含子串 %q", err.Error(), sub)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("不期望 error，实际 %v", err)
+			}
+		})
+	}
+}

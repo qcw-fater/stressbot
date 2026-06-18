@@ -7,6 +7,17 @@ local utils = require("utils")
 local log = require("log")
 
 function execute(r)
+    -- 非阻塞消费最新服务端 ack 帧（CMD=4, ACT=11），更新 battleAck（主流程 pull 模型，取代已下线的 listen 脚本回调）。
+    -- queueSize=1 保证取到的是最新；无 ack 则 battleAck 保持上轮值（松散「保最新」语义）。
+    -- 解析 byte[13..16] 小端 uint32（对齐旧工具帧序号解析）。
+    local ackCode, ackData = network.try_udp_listen("battle", {cmd=4, act=11})
+    if ackCode == 0 and type(ackData) == "string" and #ackData >= 16 then
+        local b1, b2, b3, b4 = string.byte(ackData, 13, 16)
+        if b1 and b2 and b3 and b4 then
+            robot.set("battleAck", b1 + b2 * 256 + b3 * 65536 + b4 * 16777216)
+        end
+    end
+
     -- packageIndex 由 UDP 心跳、UDP 帧同步、TCP 战斗心跳共享（对齐旧工具 r.battle.packetIndex）
     -- 每帧 +1，uint16 回绕（与旧工具 r.battle.packetIndex++ 一致）
     local packageIndex = ((robot.get("packageIndex") or 0) + 1) % 65536
@@ -27,7 +38,7 @@ function execute(r)
         .. utils.pack_le("u8", fighterIndex)                    -- FighterIndex
         .. utils.pack_le("i64", session)                        -- Session
         .. utils.pack_le("u64", utils.time_ms())                -- MsUnixTime
-        .. utils.pack_le("i32", battleAck)                      -- Ack（由 listen_frame_data 更新）
+        .. utils.pack_le("i32", battleAck)                      -- Ack（由本轮开头 try_udp_listen 更新）
         .. utils.pack_le("i32", packageIndex)                   -- Index
         .. utils.pack_le("u8", 4)                               -- Cmd = BASE_ATTACK
         .. string.char(1, 2, 3, 4, 5, 6)                       -- dummy data (6 bytes)

@@ -757,6 +757,9 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 				stresslog.Error("[ROBOT] 回调定义不存在", zap.String("listen", ref.Listen))
 				continue
 			}
+			if err := validateListenDef(ref.Listen, cbDef); err != nil {
+				return err
+			}
 			cb = h.createListenCallback(ref.Listen, cbDef)
 		}
 		groups[key] = append(groups[key], entry{routeKey: routeKey, cb: cb, queueSize: queueSize})
@@ -807,6 +810,26 @@ func effectiveListenQueueSize(ref engine.ListenRef) (int, error) {
 	return q, nil
 }
 
+// validateListenDef 校验 ListenDef 不含已废弃的 script 字段。
+//
+// v2 起 listen 脚本回调（listenLoop 上跑 RunCallbackScript）已下线：
+// frameData 等高频回调改为主流程非阻塞 pop（network.try_*_listen）消费最新消息，
+// listenLoop 只负责 decode → 分发/缓存/Go-store，不再触碰业务 LState。
+//
+// 故 ListenDef.script 一律 fail-loud：既不留「静默忽略 script」的兜底路径，
+// 也不写「script→store 自动迁移」。抽成纯函数便于单测（不依赖 robot/network 状态）。
+func validateListenDef(listenName string, cbDef *engine.ListenDef) error {
+	if cbDef == nil {
+		return nil
+	}
+	if cbDef.Script != "" {
+		return fmt.Errorf("监听 %q 仍配置已废弃的 script %q；v2 不再支持 listen 脚本回调，"+
+			"请改用主流程 tcpListen/udpListen（或 network.try_*_listen）或声明式 store 消费",
+			listenName, cbDef.Script)
+	}
+	return nil
+}
+
 // parseServer 解析 "tcp:logic" 或 "udp:udp" 格式的 server 字段。
 func parseServer(server string) (proto, service string, ok bool) {
 	if server == "" {
@@ -822,53 +845,12 @@ func parseServer(server string) (proto, service string, ok bool) {
 }
 
 // createListenCallback 根据回调定义创建监听回调函数。
+//
+// v2 起 listen 脚本回调（cbDef.Script）已下线（由 RegisterListen 的 validateListenDef
+// fail-loud 拦截），本函数只处理「s2cProto + Store → Go-store 回调」一种形态：
+//   - cbDef.S2CProto 与 cbDef.Store 均配置：返回 Go 闭包，按 proto 解析后写 state；
+//   - 否则（纯缓存 listen，如 frameData）：返回 nil，消息仅入 listen queue 供主流程消费。
 func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.ListenDef) network.ListenCallBack {
-	if cbDef.Script != "" {
-		return func(msg *network.Message) {
-			if h.robot.ctx.Err() != nil {
-				stresslog.Debug("[ROBOT] 停止阶段跳过 Lua 回调", zap.Int("id", h.robot.id), zap.String("script", cbDef.Script))
-				return
-			}
-			if h.robot.l == nil || h.robot.luaPool == nil {
-				callbackErr := engine.NewActionError(errcode.ErrCallbackLua, "script="+cbDef.Script)
-				stresslog.Error("[ROBOT] Lua 运行时未初始化", zap.String("script", cbDef.Script))
-				monitor.Global().RecordCallback(cbName, monitor.ResultFailure, monitor.ActionTiming{}, 0, 0, msg.WireBytes, callbackErr)
-				return
-			}
-
-			h.robot.luaMu.Lock()
-			defer h.robot.luaMu.Unlock()
-
-			script.SetContext(h.robot.l, &script.Context{
-				RobotID:               h.robot.id,
-				Index:                 h.robot.index,
-				Account:               h.robot.account,
-				Store:                 h.robot.state,
-				Factory:               h.robot.factory,
-				Adapter:               h.robot.adp,
-				NetSender:             &netSenderAdapter{robot: h.robot},
-				Ctx:                   h.robot.ctx,
-				LuaMu:                 &h.robot.luaMu,
-				Shared:                h.robot.shared,
-				DefaultRequestTimeout: h.robot.requestTimeout,
-				TimingLevel:           h.robot.timingLevel,
-			})
-
-			start := time.Now()
-			innerSend, innerRecv, timing, err := h.robot.luaPool.RunCallbackScript(h.robot.l, cbDef.Script, msg.Data, cbDef.S2CProto)
-			wallClock := time.Since(start)
-			recvBytes := msg.WireBytes + innerRecv
-			if err != nil {
-				callbackErr := engine.NewActionError(errcode.ErrCallbackLua, "script="+cbDef.Script, err)
-				stresslog.Error("[ROBOT] Lua 回调执行失败",
-					zap.Int("id", h.robot.id), zap.String("script", cbDef.Script), zap.Error(err))
-				monitor.Global().RecordCallback(cbName, monitor.ResultFailure, toMonitorTiming(timing), wallClock, innerSend, recvBytes, callbackErr)
-				return
-			}
-			monitor.Global().RecordCallback(cbName, monitor.ResultSuccess, toMonitorTiming(timing), wallClock, innerSend, recvBytes, nil)
-		}
-	}
-
 	if cbDef.S2CProto == "" || len(cbDef.Store) == 0 {
 		return nil
 	}

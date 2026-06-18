@@ -43,6 +43,8 @@ func withReleasedMu(mu *sync.Mutex, fn func()) {
 //	network.udp_send(service, route, body)
 //	network.tcp_listen(service, route [, s2c [, timeout [, poll]]])
 //	network.udp_listen(service, route [, s2c [, timeout [, poll]]])
+//	network.try_tcp_listen(service, route) → code, raw_body  (非阻塞单次 pop)
+//	network.try_udp_listen(service, route) → code, raw_body  (非阻塞单次 pop)
 //	network.set_tcp_secret_key(service, key)
 //	network.set_udp_secret_key(service, key)
 //	network.get_tcp_secret_key(service)
@@ -71,6 +73,9 @@ func loadNetworkModule(L *lua.LState) int {
 	// 监听
 	L.SetField(mod, "tcp_listen", L.NewFunction(networkTCPListen))
 	L.SetField(mod, "udp_listen", L.NewFunction(networkUDPListen))
+	// 非阻塞单次 pop（不轮询、不 sleep、不持 luaMu）：取最近一条缓存消息的原始 body
+	L.SetField(mod, "try_tcp_listen", L.NewFunction(networkTryTCPListen))
+	L.SetField(mod, "try_udp_listen", L.NewFunction(networkTryUDPListen))
 	// 密钥
 	L.SetField(mod, "set_tcp_secret_key", L.NewFunction(networkSetTCPSecretKey))
 	L.SetField(mod, "set_udp_secret_key", L.NewFunction(networkSetUDPSecretKey))
@@ -905,6 +910,73 @@ func networkListen(L *lua.LState, protocol string) int {
 		}
 		L.Push(lua.LNumber(0))
 		L.Push(wrapProtoMessage(L, respMsg))
+		return 2
+	}
+
+	L.Push(lua.LNumber(0))
+	L.Push(lua.LString(string(respBody)))
+	return 2
+}
+
+// networkTryTCPListen 非阻塞获取最近一条 TCP 监听消息（不解析 proto，返回原始 body）。
+// 签名：network.try_tcp_listen(service, route)
+//
+// 返回：code(number), data(string|nil)
+//   - code=0：取到一条消息，data 为原始 body 字符串（**不解析 proto**，需要解析请用阻塞版 tcp_listen）。
+//   - code=31（ErrListenTimeout）：队列空、无新消息，data=nil。
+//   - 其他非零：服务端 HeaderErr，data 为原始 body 字符串。
+//
+// 与阻塞版 tcp_listen 的差异：**单次非阻塞 pop**，不轮询、不 sleep、不持 luaMu
+// （非阻塞瞬时调用，无需释放 luaMu）。适用于高频 sync loop 「保最新」消费场景
+// （如 battleAck 追踪：队列容量 1，每轮 pop 最新 ack 写 state）。
+func networkTryTCPListen(L *lua.LState) int { return networkTryListen(L, "tcp") }
+
+// networkTryUDPListen 非阻塞获取最近一条 UDP 监听消息（不解析 proto，返回原始 body）。
+// 签名：network.try_udp_listen(service, route)
+//
+// 返回语义同 networkTryTCPListen。
+func networkTryUDPListen(L *lua.LState) int { return networkTryListen(L, "udp") }
+
+// networkTryListen 非阻塞单次 pop 的共享实现。
+//
+// 设计要点：
+//   - 不走 withReleasedMu：单次非阻塞 pop（GetTCP/UDPListenResp 内部走 per-queue 锁），
+//     无阻塞等待，当前 luaMu 仍在但 try_* 不依赖释放它（2-D 删锁前的过渡形态）。
+//   - 不解析 proto：try_* 是「原始 drain」原语，需 proto 解析的消费请用阻塞版 listen。
+//   - queue 空时返回 ErrListenTimeout（code=31），data=nil；与阻塞超时同码便于脚本统一处理。
+//   - 接收 WireBytes 仍由 Context 累计（与 tcp_listen 一致）。
+func networkTryListen(L *lua.LState, protocol string) int {
+	ctx := GetContext(L)
+	if ctx == nil || ctx.NetSender == nil || ctx.Adapter == nil {
+		L.RaiseError("network not available")
+		return 0
+	}
+
+	service := L.CheckString(1)
+	route := luaValueToRoute(L.Get(2))
+	routeKey := ctx.Adapter.ExpectedRouteKeyLocked(route)
+
+	var exchange *engine.NetExchange
+	if protocol == "tcp" {
+		exchange = ctx.NetSender.GetTCPListenResp(service, routeKey)
+	} else {
+		exchange = ctx.NetSender.GetUDPListenResp(service, routeKey)
+	}
+
+	if exchange == nil {
+		// 队列空：返回超时码（非错误路径，不记 LastActionError，避免污染失败统计）。
+		L.Push(lua.LNumber(errcode.ErrListenTimeout))
+		L.Push(lua.LNil)
+		return 2
+	}
+
+	ctx.recordBytes(0, exchange.RecvWireBytes)
+	respBody := exchange.Body
+
+	if exchange.HeaderErr != 0 {
+		rememberHeaderErr(ctx, exchange.HeaderErr, service, routeKey)
+		L.Push(lua.LNumber(exchange.HeaderErr))
+		L.Push(lua.LString(string(respBody)))
 		return 2
 	}
 
