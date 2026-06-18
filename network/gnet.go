@@ -155,10 +155,11 @@ func closeReasonFromErr(err error) string {
 //
 // 因此只做两件纯 Go 操作：
 //  1. 用 adapter 缓存的元信息做帧分割（HeaderSize / BodyLength，零 Lua 调用）
-//  2. 把 raw msgBuf 投递到 connection 的 decodeCh，由 per-connection 的
-//     decodeLoop goroutine 异步完成 Lua decode + 分发
+//  2. 把 raw msgBuf 投递到 connection 的 inboundCh，由 per-connection 的 connectionPump
+//     goroutine 异步完成 decode + request-response/listen 分发 + 心跳
 //
-// msgBuf 从 sync.Pool 获取，decodeLoop 处理完归还，避免高频 alloc 触发 GC 抖动。
+// msgBuf 从 sync.Pool 获取，pump 处理完（decodeAndDispatch 的 defer putMsgBuf）归还，
+// 避免高频 alloc 触发 GC 抖动。
 func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 	headSize := es.adp.HeaderSize()
 
@@ -217,9 +218,9 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 
 		switch conn.EnqueueRaw(msgBuf, recvFrameAt) {
 		case EnqueueOK:
-			// 入队成功，msgBuf 由 decodeLoop 在处理后归还
+			// 入队成功，msgBuf 由 connectionPump 在 decodeAndDispatch 处理后归还
 		case EnqueueClosed:
-			// 连接已关闭或还没启动 decode：这是正常现象（任务停止 / battle_end close_* /
+			// 连接已关闭或还没启动 pump：这是正常现象（任务停止 / battle_end close_* /
 			// 服务端 EOF 后 inbound 字节仍在路上）。归还 buffer 即可，不重复关闭、不报警。
 			putMsgBuf(msgBuf)
 			stresslog.Debug("[NETWORK] 连接已关闭，丢弃后续 inbound 帧",
@@ -227,10 +228,10 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 				zap.String("robot", conn.robotName),
 				zap.Int("bodyLen", totalLen))
 		case EnqueueChFull:
-			// decodeCh 真满 = decode 严重落后（Lua 池耗尽或对端发包速率超出处理能力）。
+			// inboundCh 真满 = pump decode 严重落后（codec 慢或对端发包速率超出处理能力）。
 			// 关闭这条连接释放资源，避免持续累积导致整体雪崩。
 			putMsgBuf(msgBuf)
-			stresslog.Warn("[NETWORK] decode 通道已满，关闭连接以释放压力",
+			stresslog.Warn("[NETWORK] inbound 通道已满，关闭连接以释放压力",
 				zap.String("service", conn.ServiceName()),
 				zap.String("robot", conn.robotName))
 			return gnet.Close
@@ -395,9 +396,9 @@ func (d *Dialer) dial(ctx context.Context, network, address string, conn *Connec
 
 	bindConn(gconn, conn)
 	d.server.registry.register(gconn, conn)
-	// 启动异步 decode goroutine：必须在 register 之后立即启动，
-	// 否则首批 OnTraffic 到达时 decodeCh 还没准备好，会被 EnqueueRaw 拒绝。
-	conn.StartDecodeLoop(adp, network == "udp")
+	// 启动 connectionPump：必须在 register 之后立即启动，
+	// 否则首批 OnTraffic 到达时 inboundCh 还没准备好，会被 EnqueueRaw 拒绝。
+	conn.StartPump(adp, network == "udp")
 
 	stresslog.Info("[GNET] 连接已建立",
 		zap.String("network", network),
