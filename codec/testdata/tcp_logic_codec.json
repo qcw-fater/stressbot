@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "endianDefault": "le",
+  "frame": {
+    "headerSize": 12,
+    "trailerSize": 0,
+    "lengthIncludesHeader": false,
+    "lengthIncludesTrailer": false
+  },
+  "header": [
+    { "name": "bodyLen", "offset": 0,  "size": 4, "type": "u32", "endian": "le", "role": "length" },
+    { "name": "errCode", "offset": 4,  "size": 2, "type": "u16", "role": "errorCode" },
+    { "name": "cmd",     "offset": 6,  "size": 1, "type": "u8",  "role": "route" },
+    { "name": "act",     "offset": 7,  "size": 1, "type": "u8",  "role": "route" },
+    { "name": "index",   "offset": 8,  "size": 2, "type": "u16", "role": "value", "source": { "kind": "const", "value": 0 } },
+    { "name": "flags",   "offset": 10, "size": 1, "type": "u8",  "role": "flags",
+      "bits": [ { "name": "encrypted", "bit": 0 }, { "name": "compressed", "bit": 1 } ] },
+    { "name": "bcc",     "offset": 11, "size": 1, "type": "u8",  "role": "checksumOut", "from": "enc.bcc" }
+  ],
+  "routeKeyTemplate": "{cmd}:{act}",
+  "pipeline": [
+    { "op": "compress", "name": "gz", "algo": "gzip", "flag": "compressed",
+      "when": { "minBodyLen": 2048, "onlySmaller": true }, "onError": "fail" },
+    { "op": "encrypt",  "name": "enc", "algo": "xor_carry_rol", "params": { "rol": 3 }, "keyLen": 32, "flag": "encrypted",
+      "offset": { "encode": 0, "decode": 0 },
+      "when": { "requireKey": true, "minBodyLen": 1, "guards": [ { "field": "cmd", "op": "neq", "value": 0 } ] },
+      "produces": [ { "name": "bcc", "algo": "xor8", "region": "ciphered" } ],
+      "onError": "fail" }
+  ]
+}
