@@ -266,6 +266,10 @@ func (r *Robot) Wait() {
 // 进程退出时由 OS 回收，轻微资源泄漏可接受。
 const robotCloseTimeout = 10 * time.Second
 
+// defaultListenQueueSize 监听缓存队列默认容量，缺省等价于旧单槽语义。
+// 与 network.defaultListenQueueSize 保持一致（同值，独立定义避免跨包依赖未导出符号）。
+const defaultListenQueueSize = 1
+
 // Close 停止机器人并释放资源。
 // 正常路径会归还 Lua LState；超时路径会隔离 LState，避免复用可能仍在使用的运行时。
 func (r *Robot) Close() CleanupStatus {
@@ -719,9 +723,21 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 		proto   string
 		service string
 	}
-	groups := make(map[connKey]map[string]network.ListenCallBack)
+	// 每个 (proto, service) 分组收集 (routeKey, cb, queueSize) 三元组，注册阶段逐条下发给 Connection。
+	type entry struct {
+		routeKey  string
+		cb        network.ListenCallBack
+		queueSize int
+	}
+	groups := make(map[connKey][]entry)
 
 	for _, ref := range refs {
+		// 有效 queueSize 计算：缺省 1、显式 <=0 报错（fail loud，不静默 clamp）。
+		queueSize, err := effectiveListenQueueSize(ref)
+		if err != nil {
+			return err
+		}
+
 		proto, service, ok := parseServer(ref.Server)
 		if !ok {
 			stresslog.Warn("[ROBOT] 监听引用的 server 解析失败，跳过注册",
@@ -729,26 +745,24 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 			continue
 		}
 		key := connKey{proto: proto, service: service}
-		if _, ok := groups[key]; !ok {
-			groups[key] = make(map[string]network.ListenCallBack)
-		}
 
 		routeKey := h.robot.adp.ExpectedRouteKey(ref.Route)
 
+		var cb network.ListenCallBack
 		if ref.Listen == "" {
-			groups[key][routeKey] = nil
-			continue
+			cb = nil
+		} else {
+			cbDef, ok := h.flow.Listen(ref.Listen)
+			if !ok {
+				stresslog.Error("[ROBOT] 回调定义不存在", zap.String("listen", ref.Listen))
+				continue
+			}
+			cb = h.createListenCallback(ref.Listen, cbDef)
 		}
-
-		cbDef, ok := h.flow.Listen(ref.Listen)
-		if !ok {
-			stresslog.Error("[ROBOT] 回调定义不存在", zap.String("listen", ref.Listen))
-			continue
-		}
-		groups[key][routeKey] = h.createListenCallback(ref.Listen, cbDef)
+		groups[key] = append(groups[key], entry{routeKey: routeKey, cb: cb, queueSize: queueSize})
 	}
 
-	for key, listenMap := range groups {
+	for key, entries := range groups {
 		var conn *network.Connection
 		switch key.proto {
 		case "udp":
@@ -760,10 +774,37 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 			stresslog.Debug("[ROBOT] 无连接可注册监听", zap.String("proto", key.proto), zap.String("service", key.service))
 			continue
 		}
-		conn.ListenResponse(listenMap)
+		// 逐条注册：每条 RegisterListen 预创建队列 + 冲突 fail-loud + 幂等。
+		for _, e := range entries {
+			if err := conn.RegisterListen(e.routeKey, e.cb, e.queueSize); err != nil {
+				return fmt.Errorf("监听注册失败：proto=%s service=%q routeKey=%q：%w",
+					key.proto, key.service, e.routeKey, err)
+			}
+		}
 	}
 
 	return nil
+}
+
+// effectiveListenQueueSize 计算 ListenRef.QueueSize 的有效队列容量。
+//
+// 语义：
+//   - QueueSize == nil（未写）→ 默认 1（与历史单槽逐字节等价）；
+//   - QueueSize 显式 > 0 → 取该值；
+//   - QueueSize 显式 <= 0 → 配置错误，返回带 server+listen 上下文的中文 error。
+//
+// 抽成纯函数便于单测；由 RegisterListen 在注册阶段（运行时）调用。
+// 这里不做静默 clamp（遵循「禁止兼容性兜底」），显式 0/负数一律报错暴露配置错误。
+func effectiveListenQueueSize(ref engine.ListenRef) (int, error) {
+	if ref.QueueSize == nil {
+		return defaultListenQueueSize, nil
+	}
+	q := *ref.QueueSize
+	if q <= 0 {
+		return 0, fmt.Errorf("监听注册失败：server=%q listen=%q 的 queueSize=%d 非法，须 >= 1",
+			ref.Server, ref.Listen, q)
+	}
+	return q, nil
 }
 
 // parseServer 解析 "tcp:logic" 或 "udp:udp" 格式的 server 字段。
@@ -1125,24 +1166,32 @@ func (ns *netSenderAdapter) SetTCPSecretKey(service string, key []byte) {
 	}
 }
 
-// EnsureTCPListener 为 TCP 连接注册监听器占位（callback=nil）。
-// 由 RegisterListen（listenRefs 路径）和 Lua ensure_tcp_listener 调用，不由 execListen 调用。
-func (ns *netSenderAdapter) EnsureTCPListener(service string, routeKey string) {
+// EnsureTCPListener 为 TCP 连接注册监听器占位（callback=nil，缓存模式）。
+// 由 Lua ensure_tcp_listener 调用；queueSize 由调用方传入（Lua 固定 1，flow listenRefs 由 robot.RegisterListen 走另一条路径）。
+// 冲突时记 Error 日志暴露配置异常，不向上 panic（ensure 路径本就是占位注册）。
+func (ns *netSenderAdapter) EnsureTCPListener(service string, routeKey string, queueSize int) {
 	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
 		return
 	}
-	conn.AddListener(routeKey, nil)
+	if err := conn.RegisterListen(routeKey, nil, queueSize); err != nil {
+		stresslog.Error("[ROBOT] TCP 监听占位注册失败",
+			zap.String("service", service), zap.String("routeKey", routeKey), zap.Int("queueSize", queueSize), zap.Error(err))
+	}
 }
 
-// EnsureUDPListener 为 UDP 连接注册监听器占位（callback=nil）。
-// 由 RegisterListen（listenRefs 路径）和 Lua ensure_udp_listener 调用，不由 execListen 调用。
-func (ns *netSenderAdapter) EnsureUDPListener(service string, routeKey string) {
+// EnsureUDPListener 为 UDP 连接注册监听器占位（callback=nil，缓存模式）。
+// 由 Lua ensure_udp_listener 调用；queueSize 由调用方传入（Lua 固定 1，flow listenRefs 由 robot.RegisterListen 走另一条路径）。
+// 冲突时记 Error 日志暴露配置异常，不向上 panic（ensure 路径本就是占位注册）。
+func (ns *netSenderAdapter) EnsureUDPListener(service string, routeKey string, queueSize int) {
 	conn := ns.robot.client.GetUDPConn(service)
 	if conn == nil {
 		return
 	}
-	conn.AddListener(routeKey, nil)
+	if err := conn.RegisterListen(routeKey, nil, queueSize); err != nil {
+		stresslog.Error("[ROBOT] UDP 监听占位注册失败",
+			zap.String("service", service), zap.String("routeKey", routeKey), zap.Int("queueSize", queueSize), zap.Error(err))
+	}
 }
 
 // CloseTCP 关闭 TCP 连接。

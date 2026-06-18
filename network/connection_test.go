@@ -45,7 +45,9 @@ func TestConnection_CachedListen_Capacity1Equivalence(t *testing.T) {
 
 	const routeKey = "S2C.Push"
 	// 注册 nil 回调：进入 dispatchListen 的 else（缓存）分支。
-	conn.AddListener(routeKey, nil)
+	if err := conn.RegisterListen(routeKey, nil, 1); err != nil {
+		t.Fatalf("RegisterListen 失败: %v", err)
+	}
 
 	first := NewMessage(routeKey, []byte{'A'}, 0, 1, MessageTiming{})
 	second := NewMessage(routeKey, []byte{'B'}, 0, 1, MessageTiming{})
@@ -90,9 +92,12 @@ func TestConnection_CachedListen_NonNilCallback(t *testing.T) {
 
 	const routeKey = "S2C.Cb"
 	received := make(chan *Message, 4)
-	conn.AddListener(routeKey, func(m *Message) {
+	cb := func(m *Message) {
 		received <- m
-	})
+	}
+	if err := conn.RegisterListen(routeKey, cb, 1); err != nil {
+		t.Fatalf("RegisterListen 失败: %v", err)
+	}
 
 	dispatchListenForTest(conn, NewMessage(routeKey, []byte{'A'}, 0, 1, MessageTiming{}))
 	dispatchListenForTest(conn, NewMessage(routeKey, []byte{'B'}, 0, 1, MessageTiming{}))
@@ -119,8 +124,12 @@ func TestConnection_CachedListen_MultipleRoutes(t *testing.T) {
 	conn := newTestConnection(t)
 	defer conn.Close()
 
-	conn.AddListener("route.X", nil)
-	conn.AddListener("route.Y", nil)
+	if err := conn.RegisterListen("route.X", nil, 1); err != nil {
+		t.Fatalf("RegisterListen route.X 失败: %v", err)
+	}
+	if err := conn.RegisterListen("route.Y", nil, 1); err != nil {
+		t.Fatalf("RegisterListen route.Y 失败: %v", err)
+	}
 
 	dispatchListenForTest(conn, NewMessage("route.X", []byte{'x'}, 0, 1, MessageTiming{}))
 	dispatchListenForTest(conn, NewMessage("route.Y", []byte{'y'}, 0, 1, MessageTiming{}))
@@ -140,7 +149,9 @@ func TestConnection_CachedListen_MultipleRoutes(t *testing.T) {
 // TestConnection_GetListenResp_Closed 验证：连接关闭后 GetListenResp 返回 nil。
 func TestConnection_GetListenResp_Closed(t *testing.T) {
 	conn := newTestConnection(t)
-	conn.AddListener("k", nil)
+	if err := conn.RegisterListen("k", nil, 1); err != nil {
+		t.Fatalf("RegisterListen 失败: %v", err)
+	}
 	dispatchListenForTest(conn, NewMessage("k", []byte{'a'}, 0, 1, MessageTiming{}))
 
 	conn.Close()
@@ -155,5 +166,150 @@ func TestConnection_GetListenResp_NilReceiver(t *testing.T) {
 	var conn *Connection
 	if got := conn.GetListenResp("k"); got != nil {
 		t.Fatalf("nil receiver GetListenResp 应 nil，实际 %v", got)
+	}
+}
+
+// --- RegisterListen（2-A2.1 接线）---
+
+// TestConnection_RegisterListen_PrecreatesQueue 验证：注册时按 queueSize 预创建队列。
+// 注册 routeKey 容量 3 → dispatchListen 连推 3 条 → GetListenResp FIFO 出队 A/B/C → 第 4 次 nil。
+func TestConnection_RegisterListen_PrecreatesQueue(t *testing.T) {
+	conn := newTestConnection(t)
+	defer conn.Close()
+
+	const routeKey = "S2C.Push3"
+	if err := conn.RegisterListen(routeKey, nil, 3); err != nil {
+		t.Fatalf("RegisterListen(queueSize=3) 失败: %v", err)
+	}
+
+	// 容量 3：push 3 条都进队列（不丢）。
+	dispatchListenForTest(conn, NewMessage(routeKey, []byte{'A'}, 0, 1, MessageTiming{}))
+	dispatchListenForTest(conn, NewMessage(routeKey, []byte{'B'}, 0, 1, MessageTiming{}))
+	dispatchListenForTest(conn, NewMessage(routeKey, []byte{'C'}, 0, 1, MessageTiming{}))
+
+	for i, want := range []byte{'A', 'B', 'C'} {
+		m := conn.GetListenResp(routeKey)
+		if m == nil {
+			t.Fatalf("第 %d 次 GetListenResp 返回 nil", i+1)
+		}
+		if len(m.Data) != 1 || m.Data[0] != want {
+			t.Fatalf("第 %d 次 GetListenResp.Data = %v，want %q", i+1, m.Data, want)
+		}
+	}
+	if m := conn.GetListenResp(routeKey); m != nil {
+		t.Fatalf("容量 3 取 3 次后再取应 nil，实际 %v", m)
+	}
+}
+
+// TestConnection_RegisterListen_DefaultQueueSizeEquivalent 验证：
+// queueSize=1（缺省）走 RegisterListen 入口，与 2-A1 容量 1 等价语义一致。
+func TestConnection_RegisterListen_DefaultQueueSizeEquivalent(t *testing.T) {
+	conn := newTestConnection(t)
+	defer conn.Close()
+
+	const routeKey = "S2C.Default"
+	if err := conn.RegisterListen(routeKey, nil, 1); err != nil {
+		t.Fatalf("RegisterListen(queueSize=1) 失败: %v", err)
+	}
+	dispatchListenForTest(conn, NewMessage(routeKey, []byte{'A'}, 0, 1, MessageTiming{}))
+	dispatchListenForTest(conn, NewMessage(routeKey, []byte{'B'}, 0, 1, MessageTiming{}))
+
+	m := conn.GetListenResp(routeKey)
+	if m == nil || len(m.Data) != 1 || m.Data[0] != 'B' {
+		t.Fatalf("容量 1 等价单槽：GetListenResp = %v，want ['B']", m)
+	}
+	if again := conn.GetListenResp(routeKey); again != nil {
+		t.Fatalf("容量 1 取出后再取应 nil，实际 %v", again)
+	}
+}
+
+// TestConnection_RegisterListen_Idempotent 验证：同 routeKey 同 (cb-nil, queueSize) 再注册
+// 是幂等 no-op（nil error，不重复建队列，不丢失已缓存消息）。
+func TestConnection_RegisterListen_Idempotent(t *testing.T) {
+	conn := newTestConnection(t)
+	defer conn.Close()
+
+	const routeKey = "S2C.Idem"
+	if err := conn.RegisterListen(routeKey, nil, 3); err != nil {
+		t.Fatalf("首次 RegisterListen 失败: %v", err)
+	}
+	// 先 push 一条，验证重复注册后队列不被清空。
+	dispatchListenForTest(conn, NewMessage(routeKey, []byte{'A'}, 0, 1, MessageTiming{}))
+
+	// 同参数再注册一次：幂等。
+	if err := conn.RegisterListen(routeKey, nil, 3); err != nil {
+		t.Fatalf("幂等 RegisterListen 返回 error: %v", err)
+	}
+
+	// 重复注册不应清空已缓存消息。
+	m := conn.GetListenResp(routeKey)
+	if m == nil || len(m.Data) != 1 || m.Data[0] != 'A' {
+		t.Fatalf("幂等注册后已缓存消息丢失：GetListenResp = %v，want ['A']", m)
+	}
+}
+
+// TestConnection_RegisterListen_ConflictQueueSize 验证：同 routeKey 不同 queueSize → error。
+func TestConnection_RegisterListen_ConflictQueueSize(t *testing.T) {
+	conn := newTestConnection(t)
+	defer conn.Close()
+
+	const routeKey = "S2C.Conf"
+	if err := conn.RegisterListen(routeKey, nil, 3); err != nil {
+		t.Fatalf("首次 RegisterListen(3) 失败: %v", err)
+	}
+	err := conn.RegisterListen(routeKey, nil, 5)
+	if err == nil {
+		t.Fatal("queueSize 不一致的重复注册应返回 error，实际 nil")
+	}
+}
+
+// TestConnection_RegisterListen_ConflictMode 验证：
+// 同 routeKey 一 nil-cb（缓存模式）一非 nil-cb（回调模式）→ error。
+func TestConnection_RegisterListen_ConflictMode(t *testing.T) {
+	conn := newTestConnection(t)
+	defer conn.Close()
+
+	const routeKey = "S2C.Mode"
+	if err := conn.RegisterListen(routeKey, nil, 1); err != nil {
+		t.Fatalf("首次 RegisterListen(nil-cb) 失败: %v", err)
+	}
+	cb := func(m *Message) {}
+	err := conn.RegisterListen(routeKey, cb, 1)
+	if err == nil {
+		t.Fatal("cb 模式不一致的重复注册应返回 error，实际 nil")
+	}
+}
+
+// TestConnection_RegisterListen_ModeConsistentIdempotent 验证：
+// 同 routeKey 同为非 nil-cb + 同 queueSize → 幂等 nil error。
+func TestConnection_RegisterListen_ModeConsistentIdempotent(t *testing.T) {
+	conn := newTestConnection(t)
+	defer conn.Close()
+
+	const routeKey = "S2C.CbIdem"
+	cb1 := func(m *Message) {}
+	if err := conn.RegisterListen(routeKey, cb1, 1); err != nil {
+		t.Fatalf("首次 RegisterListen(cb) 失败: %v", err)
+	}
+	cb2 := func(m *Message) {}
+	if err := conn.RegisterListen(routeKey, cb2, 1); err != nil {
+		t.Fatalf("同模式幂等注册应 nil error，实际 %v", err)
+	}
+}
+
+// TestConnection_RegisterListen_NilReceiver 验证：nil receiver 安全返回 error。
+func TestConnection_RegisterListen_NilReceiver(t *testing.T) {
+	var conn *Connection
+	if err := conn.RegisterListen("k", nil, 1); err == nil {
+		t.Fatal("nil receiver RegisterListen 应返回 error，实际 nil")
+	}
+}
+
+// TestConnection_RegisterListen_Closed 验证：已关闭连接注册返回 error。
+func TestConnection_RegisterListen_Closed(t *testing.T) {
+	conn := newTestConnection(t)
+	conn.Close()
+	if err := conn.RegisterListen("k", nil, 1); err == nil {
+		t.Fatal("已关闭连接 RegisterListen 应返回 error，实际 nil")
 	}
 }

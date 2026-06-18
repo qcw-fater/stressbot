@@ -164,11 +164,11 @@ type NetSender interface {
 	// GetUDPListenResp 非阻塞获取 UDP 监听的最近一次响应（含协议头错误码）。
 	GetUDPListenResp(service string, routeKey string) *NetExchange
 	// EnsureTCPListener 为指定 routeKey 注册监听占位（callback=nil，轮询模式）。
-	// 由 RegisterListen（listenRefs 路径）和 Lua ensure_tcp_listener 调用。
-	EnsureTCPListener(service string, routeKey string)
+	// 由 Lua ensure_tcp_listener 调用（queueSize 固定为 1，大容量请用 flow listenRefs 的 queueSize 配置）。
+	EnsureTCPListener(service string, routeKey string, queueSize int)
 	// EnsureUDPListener 为指定 routeKey 注册监听占位（callback=nil，轮询模式）。
-	// 由 RegisterListen（listenRefs 路径）和 Lua ensure_udp_listener 调用。
-	EnsureUDPListener(service string, routeKey string)
+	// 由 Lua ensure_udp_listener 调用（queueSize 固定为 1，大容量请用 flow listenRefs 的 queueSize 配置）。
+	EnsureUDPListener(service string, routeKey string, queueSize int)
 	// RegisterTCPHeartbeat 注册 TCP 心跳，按 intervalMs 间隔周期调用 builder 生成心跳包。
 	RegisterTCPHeartbeat(service string, intervalMs int, builder func() []byte) error
 	// RegisterUDPHeartbeat 注册 UDP 心跳，按 intervalMs 间隔周期调用 builder 生成心跳包。

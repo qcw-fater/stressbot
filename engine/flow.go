@@ -72,6 +72,12 @@ type ListenRef struct {
 	Route  any    `json:"route"`  // 不透明路由（与 ActionDef.Route 格式一致）
 	Server string `json:"server"` // 连接名，格式：协议:服务名（如 "tcp:logic"、"udp:udp"）
 	Listen string `json:"listen"` // 监听定义名称（引用 listens 表），空 = 仅轮询不回调
+	// QueueSize 监听缓存队列容量。
+	//   - 未写（nil）→ 默认 1，与历史单槽语义逐字节等价；
+	//   - 显式 > 0 → 按该值预创建环形队列；
+	//   - 显式 <= 0 → 配置错误，注册时（robot.RegisterListen）报错，不静默 clamp。
+	// 用 *int 区分「未写」与「显式 0」，符合全局约束「禁止兼容性兜底」。
+	QueueSize *int `json:"queueSize,omitempty"`
 }
 
 // 动作模式常量。

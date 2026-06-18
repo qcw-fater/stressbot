@@ -2,7 +2,7 @@ package network
 
 import (
 	"context"
-	"maps"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -267,14 +267,65 @@ func (c *Connection) Send(data []byte) (int, error) {
 	return n, nil
 }
 
-// AddListener 动态添加单个监听器。
-func (c *Connection) AddListener(routeKey string, cb ListenCallBack) {
-	if c == nil || atomic.LoadInt32(&c.isClose) == 1 {
-		return
+// RegisterListen 为指定 routeKey 注册持久化推送监听。是唯一的监听注册入口。
+//
+// 参数：
+//   - routeKey: 路由键（由 adapter.ExpectedRouteKey 计算）。
+//   - cb: nil = 缓存模式（消息进 queue，由 GetListenResp/main-flow 消费）；非 nil = 回调模式。
+//   - queueSize: 缓存队列容量（>=1，cap<1 由 newListenQueue panic）。首次注册时预创建队列。
+//
+// 语义：
+//   - 新注册：写入 listenResp，预创建 listenQueues[routeKey]（容量 queueSize），返回 nil。
+//   - 幂等：同 routeKey 再注册且（queueSize 一致 && cb 是否为 nil 一致）→ 不重建队列、不报错（重写 listenResp[routeKey]=cb 为最新值，队列与 queueSize 不变；nil-cb 即纯 no-op），返回 nil。
+//   - 冲突 fail-loud：同 routeKey 但 queueSize 或 cb 模式不一致 → 返回中文 error。
+//
+// listenLoop 启动：若未运行则 CAS 启动（沿用原 AddListener 的 CAS 模式）。
+// 注册是连接建立时的一次性操作（非热路径），CAS 启动 loop 廉价且幂等。
+//
+// c.mu 保护 listenResp / listenQueues 两个 map 的读-改 + 冲突判断（与 listenLoop/GetListenResp
+// 同样的锁粒度，沿用现状）；CAS 启动 listenLoop 在 c.mu 释放后进行，无锁序变化。
+func (c *Connection) RegisterListen(routeKey string, cb ListenCallBack, queueSize int) error {
+	if c == nil {
+		return fmt.Errorf("监听注册失败：连接为 nil（routeKey=%q）", routeKey)
+	}
+	if atomic.LoadInt32(&c.isClose) == 1 {
+		return fmt.Errorf("监听注册失败：连接已关闭（service=%q routeKey=%q）", c.serviceName, routeKey)
 	}
 
 	c.mu.Lock()
+	existingCb, hasCb := c.listenResp[routeKey]
+	existingQ, hasQ := c.listenQueues[routeKey]
+
+	if hasCb || hasQ {
+		// 冲突检测：同 routeKey 跨次注册。
+		if hasQ && existingQ.capacity != queueSize {
+			c.mu.Unlock()
+			return fmt.Errorf("监听注册冲突：service=%q routeKey=%q 已注册（queueSize=%d），与本次（queueSize=%d）不一致",
+				c.serviceName, routeKey, existingQ.capacity, queueSize)
+		}
+		existingCbIsNil := existingCb == nil
+		newCbIsNil := cb == nil
+		if existingCbIsNil != newCbIsNil {
+			c.mu.Unlock()
+			return fmt.Errorf("监听注册冲突：service=%q routeKey=%q 已注册（回调=%v），与本次（回调=%v）模式不一致",
+				c.serviceName, routeKey, !existingCbIsNil, !newCbIsNil)
+		}
+		// 幂等 no-op：保持一致写回 cb（无副作用），不重复建队列。
+		c.listenResp[routeKey] = cb
+		needStart := atomic.LoadInt32(&c.listenRunning) == 0
+		c.mu.Unlock()
+		if needStart {
+			if atomic.CompareAndSwapInt32(&c.listenRunning, 0, 1) {
+				c.listenDone = make(chan struct{})
+				utils.GetWorkPool().Go(c.listenLoop)
+			}
+		}
+		return nil
+	}
+
+	// 新注册：写入回调 + 预创建队列。
 	c.listenResp[routeKey] = cb
+	c.listenQueues[routeKey] = newListenQueue(queueSize)
 	needStart := atomic.LoadInt32(&c.listenRunning) == 0
 	c.mu.Unlock()
 
@@ -284,6 +335,7 @@ func (c *Connection) AddListener(routeKey string, cb ListenCallBack) {
 			utils.GetWorkPool().Go(c.listenLoop)
 		}
 	}
+	return nil
 }
 
 func (c *Connection) listenLoop() {
@@ -354,22 +406,6 @@ func (c *Connection) WaitListenDoneTimeout(timeout time.Duration) bool {
 		return true
 	case <-timer.C:
 		return false
-	}
-}
-
-// ListenResponse 注册持久化推送消息监听。
-func (c *Connection) ListenResponse(listenRespMap map[string]ListenCallBack) {
-	if c == nil || atomic.LoadInt32(&c.isClose) == 1 {
-		return
-	}
-
-	c.mu.Lock()
-	maps.Copy(c.listenResp, listenRespMap)
-	c.mu.Unlock()
-
-	if atomic.CompareAndSwapInt32(&c.listenRunning, 0, 1) {
-		c.listenDone = make(chan struct{})
-		utils.GetWorkPool().Go(c.listenLoop)
 	}
 }
 

@@ -988,6 +988,7 @@ func networkGetUDPSecretKey(L *lua.LState) int {
 // networkEnsureTCPListener 为 TCP routeKey 注册监听器占位。
 // tcp_listen 不再自动注册，Lua 脚本需在触发推送前显式调用此函数。
 // 签名：network.ensure_tcp_listener(service, response_key)
+// queueSize 固定为 1（Lua 不暴露 queueSize；大容量请用 flow listenRefs 的 queueSize 配置）。
 func networkEnsureTCPListener(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -995,13 +996,14 @@ func networkEnsureTCPListener(L *lua.LState) int {
 	}
 	service := L.CheckString(1)
 	routeKey := L.CheckString(2)
-	ctx.NetSender.EnsureTCPListener(service, routeKey)
+	ctx.NetSender.EnsureTCPListener(service, routeKey, 1)
 	return 0
 }
 
 // networkEnsureUDPListener 为 UDP routeKey 注册监听器占位。
 // udp_listen 不再自动注册，Lua 脚本需在触发推送前显式调用此函数。
 // 签名：network.ensure_udp_listener(service, response_key)
+// queueSize 固定为 1（Lua 不暴露 queueSize；大容量请用 flow listenRefs 的 queueSize 配置）。
 func networkEnsureUDPListener(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -1009,7 +1011,7 @@ func networkEnsureUDPListener(L *lua.LState) int {
 	}
 	service := L.CheckString(1)
 	routeKey := L.CheckString(2)
-	ctx.NetSender.EnsureUDPListener(service, routeKey)
+	ctx.NetSender.EnsureUDPListener(service, routeKey, 1)
 	return 0
 }
 
