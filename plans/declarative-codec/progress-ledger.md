@@ -22,6 +22,7 @@
 - **每份 codec 单 transport**：encrypt offset 为单向 `{encode, decode}`（不是 tcp/udp 四元组）。`udp:battle` = `{encode:11, decode:0}`。
 - **Go 最佳实践**：错误用 `NewActionError` 体系（本轨道若需新框架错误码先在 errcode/codes.go 注册）；包注释/godoc；日志中文；`go build ./...` + `go vet` 通过。
 - **commit**：本阶段 implementer **不要 git commit**。完成后报告改动文件，由 controller 批量拿给用户确认。
+- **gofmt / 换行（Windows 环境注）**：本 worktree `core.autocrlf=true`，工作树所有 `.go`（及 `.md`）检出为 CRLF，`gofmt -l` 会把**全部工作树文件**标记为「需格式化」（CRLF→LF）。这是环境现象，非缺陷——git 提交时 autocrlf 自动归一为 LF，提交后的 blob 是 LF 且 gofmt-clean。**不要**对单个文件跑 `gofmt -w` 去「修」CRLF（会让该文件在工作树里与同级文件换行不一致）。校验内容是否 canonical：`sed 's/\r$//' file.go > /tmp/x.go && gofmt -l /tmp/x.go`（空即 canonical，仅换行差异）。
 
 ## 轨道与任务
 
@@ -49,7 +50,17 @@
 
 ### T2 — 后端集成 + 删锁（T4 后）
 
-pending — 2-A → 2-B → 2-C → 2-D。
+进行中 — 顺序 2-A1 → 2-A2 → 2-B → 2-C1 → 2-C2 → 2-C3 → 2-D（删锁须 2-A/B/C 全完 + 审计）。
+
+| 任务 | 内容 | 状态 |
+|---|---|---|
+| 2-A1 | listen queue 基础设施：`network/listenQueue` 环形队列 + `Connection.listenMsg`→`listenQueues`，默认容量 1≡单槽，零配置面 | ✅ done（工作树未提交，待批次确认） |
+| 2-A2 | `ListenRef.QueueSize` schema + flow 校验 + 注册 API 带 queueSize + 下线 listen script callback + 配置迁移 | pending |
+| 2-B | flow action 声明式心跳（tcpHeartbeat/udpHeartbeat，Go-only builder） | pending |
+| 2-C1 | CodecResolver 替换 per-robot adapter（dial/decode 侧） | pending |
+| 2-C2 | encode 侧全部按连接（server 串）解析 | pending |
+| 2-C3 | 删业务 LState codec 依赖 + connectionPump 替换三协程 | pending |
+| 2-D | 删 luaMu / withReleasedMu（须 2-A/B/C 全完 + 审计闸门） | pending |
 
 ### T3 — 前端（T1 schema + T4 文件名后）
 
@@ -69,3 +80,4 @@ pending。
 - T4.2: complete — admin/codec_handlers.go：handleCodecPreview（POST /sbot/codec/preview 包 codec.Preview，两步 unmarshal，坏 body/坏 schema→400，预览语义 200 即使 Error 非空）+ handleCodecAlgorithms（GET /sbot/codec/algorithms 包 codec.Algorithms）；路由注册于 handlers.go:108-109。9 测试 PASS（encode/decode 往返、畸形 schema→200+Error、坏 body→400、algorithms 清单含 xor_carry_rol/gzip/xor8）。纯计算无副作用，仅 admin/。self-review clean。文件：admin/codec_handlers.go, codec_handlers_test.go, handlers.go(+2 路由)。
 - T4.3: complete — admin 多 codec 分发：TaskConfig 加 Codecs map[string][]byte + ErrorMap []byte（旧 AdapterScript/ErrorMapScript **保留**以维持 agent 编译，T2 删）；multipart 收多份 *_codec.json+errors.json；configFiles 经 buildConfigFiles 列多文件（不含 codec.lua）；baseline 读写多文件；下载多文件（legacy codec.lua/error.lua→404，无兜底）。review clean（admin-only、无旧→新迁移、无默认 codec 兜底、go build ./... 全绿）。4 测试用 T1.6 产物 PASS。文件：admin/types.go, handlers.go, codec_distribution_test.go。**T2 接力**：① 删 TaskConfig 旧字段 AdapterScript/ErrorMapScript；② agent/task_runner + agent/config.go 下载/加载多 codec 走 resolver；③ main.go(task_runner) 调 LoadCodecResolver → Manager；④ 删 RobotAdapter/NewRobotAdapter、Dialer server.adp 兜底。
 - **T4 全轨完成**（T4.1+T4.2+T4.3 全 review 通过，go build/vet/test 全绿）。待批次提交确认。
+- T2-A1: complete — `network/listenQueue`（固定容量环形队列：`Push` 满覆盖最旧+dropped / `Pop` FIFO / `Dropped` / `Clear` / `newListenQueue(cap<1)` panic 暴露编程错误）+ `Connection.listenMsg map[string]*Message`→`listenQueues map[string]*listenQueue`（常量 `defaultListenQueueSize=1` ≡ 旧单槽，逐字节等价）。改写三处：`dispatchListen` 缓存分支（按需建队列 + `Push`，覆盖时 Debug 日志按本仓惯例 `if stresslog.DebugEnabled()` 守卫——OnReceive/RequestResponse 同款）、`GetListenResp`（FIFO `Pop`）、`listenLoop` ctx.Done（`clear(map)`）。并发模型：`Connection.mu` 仅保护 `listenQueues` map 键查找/创建，per-queue `mu` 串行 Push/Pop，**c.mu 释放后才 Push/Pop**，无锁序交叉/无死锁。review（backend-review skill）：无 🔴；修 2 🟡（dispatchListen Debug 热路径缺 `DebugEnabled` 守卫、测试里 `_ = fmt.Sprintf` noop + 多余 `fmt` import）+ 🔵 rangeint×5；遗留 🔵（`listenQueue.mu` 未用 hat 位、`Clear()` 为 2-C3 connectionPump 预留暂未在 prod 调用）不阻塞。go build/vet/test 全绿（network 14 函数 PASS，含容量1等价单槽、满覆盖最旧、dropped 累计、并发 smoke cap1/cap4）。**2-A2 接力**：① `engine.ListenRef` 加 `QueueSize *int json:"queueSize,omitempty"` + flow 校验（缺省 1、`<=0` 报错、同连接同 `routeKey` 重复注册须**完全一致**才幂等，否则 fail loud）；② `AddListener`/`ListenResponse`/`RegisterListen` 收敛为带 queueSize 注册入口（`RegisterListen(routeKey, cb, queueSize)`），`engine.NetSender.EnsureTCPListener/EnsureUDPListener` 加 `queueSize int` 入参，`robot.netSenderAdapter` 同步；③ 删 `createListenCallback` 的 `cbDef.Script != ""` 分支 + `ListenDef.script` 进禁用清单（v2 配置出现 `script` 直接 fail loud）；④ ranked/team（`teamNotifyInvite`/`teamJoin`/`teamUpdateInfo`）→ 主流程 `network.wait_listen`/声明式 `tcpListen` 消费、guild（`listen_guild_*`）→ 主流程消费，迁移完才启用 `script` 禁用校验。新字段**全链路一致**落地（schema→注册→队列），不在 2-A1 留半接。文件：network/listen_queue.go(新)、network/listen_queue_test.go(新)、network/connection.go(改)、network/connection_test.go(新)、briefs/t2-a1-brief.md、reports/t2-a1-report.md。
