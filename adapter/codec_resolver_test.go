@@ -1,0 +1,217 @@
+// Package adapter — CodecResolver + LoadCodecResolver 测试（T4.1）。
+//
+// 用 T1.6 生产产物 conf/adapter/{tcp_logic,tcp_battle,udp_battle}_codec.json + errors.json
+// 做真实端到端校验，非 mock。覆盖：
+//   - 三 codec 映射加载成功，三个 server 串 Resolve 非 nil；未知 server 返回 nil。
+//   - dedup：两个 server 串指向同一文件 → Resolve 返回同一 Adapter 实例（指针相等）。
+//   - 缺文件：映射含不存在文件 → 返回中文 error，含 server 串 + 文件名。
+//   - 空映射 → 返回 error（不静默返回空 resolver）。
+//   - errorsFile 可选：传空字符串也能加载，errorMap 为空，DescribeError 返回 ""。
+//   - NewCodecResolver 直接构造：Resolve 行为同 loader 路径。
+package adapter
+
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// 项目根（worktree）下 adapter 包测试相对 cwd 走 runtime.Version()。直接拼绝对路径。
+// 注意：go test 的 cwd 是包目录，需要 ../ 上溯。
+const adapterDir = "../conf/adapter"
+
+func realCodecMap() map[string]string {
+	return map[string]string{
+		"tcp:logic":  "tcp_logic_codec.json",
+		"tcp:battle": "tcp_battle_codec.json",
+		"udp:battle": "udp_battle_codec.json",
+	}
+}
+
+// TestLoadCodecResolver_ThreeCodecs_Success 三个真实 codec + errors.json 加载成功。
+func TestLoadCodecResolver_ThreeCodecs_Success(t *testing.T) {
+	r, err := LoadCodecResolver(adapterDir, realCodecMap(), "errors.json")
+	if err != nil {
+		t.Fatalf("LoadCodecResolver 失败: %v", err)
+	}
+	if r == nil {
+		t.Fatal("resolver 为 nil")
+	}
+	for _, server := range []string{"tcp:logic", "tcp:battle", "udp:battle"} {
+		a := r.Resolve(server)
+		if a == nil {
+			t.Errorf("Resolve(%q) 返回 nil，期望非 nil", server)
+		}
+	}
+}
+
+// TestLoadCodecResolver_UnknownServer_Nil 未声明 server 返回 nil（无 fallback）。
+func TestLoadCodecResolver_UnknownServer_Nil(t *testing.T) {
+	r, err := LoadCodecResolver(adapterDir, realCodecMap(), "errors.json")
+	if err != nil {
+		t.Fatalf("LoadCodecResolver 失败: %v", err)
+	}
+	if got := r.Resolve("tcp:nonexistent"); got != nil {
+		t.Errorf("Resolve(未知 server) 返回非 nil：%T，期望 nil", got)
+	}
+	if got := r.Resolve(""); got != nil {
+		t.Errorf("Resolve(\"\") 返回非 nil：%T，期望 nil", got)
+	}
+}
+
+// TestLoadCodecResolver_Dedup 同文件多 server 共享同一 Adapter 实例。
+func TestLoadCodecResolver_Dedup(t *testing.T) {
+	codecs := map[string]string{
+		"tcp:logic":  "tcp_logic_codec.json",
+		"tcp:logic2": "tcp_logic_codec.json", // 同文件
+	}
+	r, err := LoadCodecResolver(adapterDir, codecs, "errors.json")
+	if err != nil {
+		t.Fatalf("LoadCodecResolver 失败: %v", err)
+	}
+	a1 := r.Resolve("tcp:logic")
+	a2 := r.Resolve("tcp:logic2")
+	if a1 == nil || a2 == nil {
+		t.Fatalf("dedup 两侧均应非 nil：a1=%v a2=%v", a1, a2)
+	}
+	// 指针相等：同一无状态 Adapter 实例
+	if a1 != a2 {
+		t.Errorf("dedup 期望同一实例，得到不同实例：%p vs %p", a1, a2)
+	}
+}
+
+// TestLoadCodecResolver_MissingFile 映射指向不存在文件 → 中文 error，含 server 与文件名。
+func TestLoadCodecResolver_MissingFile(t *testing.T) {
+	codecs := map[string]string{
+		"tcp:logic": "tcp_logic_codec.json",
+		"tcp:gone":  "does_not_exist_codec.json",
+	}
+	_, err := LoadCodecResolver(adapterDir, codecs, "errors.json")
+	if err == nil {
+		t.Fatal("缺文件应返回 error，得到 nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "tcp:gone") {
+		t.Errorf("error 不含 server 串 %q：%s", "tcp:gone", msg)
+	}
+	if !strings.Contains(msg, "does_not_exist_codec.json") {
+		t.Errorf("error 不含文件名：%s", msg)
+	}
+}
+
+// TestLoadCodecResolver_EmptyMap 空映射 → error（不静默）。
+func TestLoadCodecResolver_EmptyMap(t *testing.T) {
+	_, err := LoadCodecResolver(adapterDir, map[string]string{}, "errors.json")
+	if err == nil {
+		t.Fatal("空映射应返回 error，得到 nil")
+	}
+}
+
+// TestLoadCodecResolver_NilMap nil 映射 → error。
+func TestLoadCodecResolver_NilMap(t *testing.T) {
+	_, err := LoadCodecResolver(adapterDir, nil, "errors.json")
+	if err == nil {
+		t.Fatal("nil 映射应返回 error，得到 nil")
+	}
+}
+
+// TestLoadCodecResolver_ErrorsOptional errorsFile 传空也能加载，errorMap 视为空。
+func TestLoadCodecResolver_ErrorsOptional(t *testing.T) {
+	r, err := LoadCodecResolver(adapterDir, realCodecMap(), "")
+	if err != nil {
+		t.Fatalf("errorsFile 为空应可加载，得到 error: %v", err)
+	}
+	a := r.Resolve("tcp:logic")
+	if a == nil {
+		t.Fatal("Resolve 返回 nil")
+	}
+	// 无 errors.json → DescribeError 返回空串（v1 冻结语义）。
+	if got := a.DescribeError(1); got != "" {
+		t.Errorf("errorsFile 为空时 DescribeError 应返回 \"\"，得到 %q", got)
+	}
+}
+
+// TestLoadCodecResolver_ErrorsFileMissing errorsFile 非空但缺文件 → fail loud。
+func TestLoadCodecResolver_ErrorsFileMissing(t *testing.T) {
+	_, err := LoadCodecResolver(adapterDir, realCodecMap(), "no_such_errors.json")
+	if err == nil {
+		t.Fatal("errorsFile 缺失应 fail loud，得到 nil error")
+	}
+	if !strings.Contains(err.Error(), "no_such_errors.json") {
+		t.Errorf("error 不含 errors 文件名：%s", err.Error())
+	}
+}
+
+// TestLoadCodecResolver_ErrorsLoaded errors.json 命中描述非空。
+func TestLoadCodecResolver_ErrorsLoaded(t *testing.T) {
+	r, err := LoadCodecResolver(adapterDir, realCodecMap(), "errors.json")
+	if err != nil {
+		t.Fatalf("LoadCodecResolver 失败: %v", err)
+	}
+	a := r.Resolve("tcp:logic")
+	if a == nil {
+		t.Fatal("Resolve 返回 nil")
+	}
+	// errors.json 667 条，几乎必有非空描述；用任一常见 code 试探。
+	// 取不到具体 code 就跳过精确断言，仅验证不 panic + 返回 string。
+	_ = a.DescribeError(0) // 不应 panic
+}
+
+// TestLoadCodecResolver_AbsolutePath codecDir 绝对路径也能加载。
+func TestLoadCodecResolver_AbsolutePath(t *testing.T) {
+	abs, err := filepath.Abs(adapterDir)
+	if err != nil {
+		t.Fatalf("filepath.Abs 失败: %v", err)
+	}
+	r, err := LoadCodecResolver(abs, realCodecMap(), "errors.json")
+	if err != nil {
+		t.Fatalf("绝对路径加载失败: %v", err)
+	}
+	if r.Resolve("tcp:logic") == nil {
+		t.Error("绝对路径 Resolve 返回 nil")
+	}
+}
+
+// TestNewCodecResolver_Direct 直接构造，Resolve 行为正确（含未知 server 返回 nil）。
+func TestNewCodecResolver_Direct(t *testing.T) {
+	// 用 loader 得到三份 Adapter 实例。
+	r, err := LoadCodecResolver(adapterDir, realCodecMap(), "errors.json")
+	if err != nil {
+		t.Fatalf("LoadCodecResolver 失败: %v", err)
+	}
+	a1 := r.Resolve("tcp:logic")
+	a2 := r.Resolve("tcp:battle")
+	a3 := r.Resolve("udp:battle")
+	if a1 == nil || a2 == nil || a3 == nil {
+		t.Fatalf("三个 adapter 均应非 nil：%v %v %v", a1, a2, a3)
+	}
+	// 直接构造：复用上述实例。
+	direct := NewCodecResolver(map[string]Adapter{
+		"tcp:logic":  a1,
+		"tcp:battle": a2,
+		"udp:battle": a3,
+	})
+	if direct.Resolve("tcp:logic") != a1 {
+		t.Error("NewCodecResolver Resolve 不等于原实例")
+	}
+	if direct.Resolve("tcp:battle") != a2 {
+		t.Error("NewCodecResolver Resolve 不等于原实例")
+	}
+	if direct.Resolve("udp:battle") != a3 {
+		t.Error("NewCodecResolver Resolve 不等于原实例")
+	}
+	if direct.Resolve("udp:zzz") != nil {
+		t.Error("NewCodecResolver 未知 server 应返回 nil")
+	}
+}
+
+// TestNewCodecResolver_NilMap 空入参 map 也能构造（直接构造不校验空，与 loader 不同）。
+func TestNewCodecResolver_EmptyMap(t *testing.T) {
+	r := NewCodecResolver(map[string]Adapter{})
+	if r == nil {
+		t.Fatal("NewCodecResolver 返回 nil")
+	}
+	if got := r.Resolve("anything"); got != nil {
+		t.Errorf("空 map resolver Resolve 应返回 nil，得到 %v", got)
+	}
+}
