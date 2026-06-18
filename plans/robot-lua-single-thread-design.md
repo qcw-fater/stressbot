@@ -155,6 +155,8 @@ panic 栈最终停在 `[G]: in function 'type'`，即 `type(v)` 本身崩溃。�
 
 B 的取舍：**动态 builder 退化为声明式**。心跳本质 = 「每 N ms 用一组 binding 从 state 取值构造消息发出去」= **带定时器的 `tcpSend`**。引擎已有 `tcpSend` + binding 机制，复用即可：定时 goroutine 取 state（线程安全）→ Go 原生按 binding 构造 proto → 经 adapter 编码（adapter 用的是独立 Lua 池，与 Robot LState 无关，属已隔离关注点）→ 发送。全程不碰 Robot VM。
 
+> **双模式补充（T2-B 落地时确立）**：stressbot 是通用工具，须覆盖主流游戏服的两类心跳——① **proto 心跳**（多数 protobuf 服）走 `c2sProto`+`bindings`（复用 tcpSend proto 构建，即本段原文方案）；② **raw-binary 心跳**（C++ 自研协议服 / 实时战斗同步，如本项目 battle 心跳：无 proto、wire format 是自定义小端二进制而非 protobuf）走声明式 `heartbeatFields` LE 布局（`engine.BuildHeartbeatBody`，Go-only）。两者互斥、同为 Go-only、都不碰 Robot VM。原方案只覆盖①，②是 raw-binary 现实的必要扩展。
+
 > 注：adapter 编解码用的是独立 Lua 池（见 `StartDecodeLoop` 先例），本就不与 Robot LState 共享，不受本设计影响。
 
 #### 顾虑三：Redis 协调怎么办？

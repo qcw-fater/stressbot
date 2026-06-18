@@ -344,8 +344,12 @@ T2 必须按 **2-A → 2-B → 2-C → 2-D** 顺序推进；2-D 删除锁前必�
 
 #### T2-B：flow action 声明式心跳
 
-1. **Action schema**：新增 `tcpHeartbeat` / `udpHeartbeat`；必填 `service`、`intervalMs`、`route`；可选 `c2sProto`、`bindings`、`skipWhenMissing`；`intervalMs<=0` 报错。
-2. **Binding 子集**：v1 只允许 `fixed` / `state` / `counter` / `timestamp`；不复用完整随机/列表/map binding 能力；禁止 Lua 条件。
+1. **Action schema**：新增 `tcpHeartbeat` / `udpHeartbeat`；必填 `service`、`intervalMs`、`route`；可选 `skipWhenMissing`；`intervalMs<=0` 报错。body 构造**双模式**（互斥，覆盖通用游戏服心跳的三类主流形态——stressbot 是通用工具，不止一个游戏）：
+   - **proto 模式**（主流，现代 protobuf 游戏服）：配 `c2sProto` + `bindings`，复用现有 `tcpSend` 的 proto 构建机制（factory + bindFields）→ proto body → adapter 编码。大多数游戏服心跳的形态。
+   - **raw-binary 模式**（C++ 自研协议服 / 实时战斗同步，如本项目 battle 心跳——无 proto、wire format 非 protobuf）：配 `heartbeatFields`（声明式 raw-LE 布局：`{type:u8|u16|u32|u64|i8|i16|i32|i64, source:fixed|state|stateCounter|counter|timestamp|randomInt, ...}`），由 `engine.BuildHeartbeatBody` Go-only 打包 → adapter 编码。
+   - **空 body**：两者都不配 = 只发头+路由（轻量心跳）。
+   - 校验：`c2sProto` 与 `heartbeatFields` **互斥**；同时配报错。
+2. **源子集**：proto 模式 bindings 复用现有 binding 解析；raw-binary 模式 source 子集为 `fixed`/`state`/`stateCounter`(共享计数器自增，如 packageIndex)/`counter`(心跳私有计数器)/`timestamp`/`randomInt`——只覆盖心跳构造所需，不开放完整随机/列表/map binding；禁止 Lua 条件。
 3. **注册语义**：heartbeat action 只注册/更新 runtime，不等待发送；每 tick 不计入该 action 的网络延迟样本。
 4. **Go-only builder**：builder 只返回 `(body, skip, err)`；不捕获 Lua LState，不调用 Redis/HTTP/network request；network/pump 负责 secretKey、codec encode、send。
 5. **过渡策略**：可先让旧 heartbeat goroutine 调 Go-only builder，实现“心跳不进 Lua”；2-C pump 落地后再合并 timer/control。
