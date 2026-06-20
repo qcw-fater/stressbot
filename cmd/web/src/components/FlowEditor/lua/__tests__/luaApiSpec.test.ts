@@ -132,8 +132,6 @@ describe('coverage：所有 stressbot 已暴露的核心 Lua API 都被记录', 
       'get_udp_secret_key',
       'ensure_tcp_listener',
       'ensure_udp_listener',
-      'register_tcp_heartbeat',
-      'register_udp_heartbeat',
     ]) {
       expect(names, `network.${expected}`).toContain(expected);
     }

@@ -23,7 +23,7 @@ import { App as AntApp, ConfigProvider } from 'antd';
 import { useFlowStore } from './store/flowStore';
 import { useFloatingWindowStore } from './store/floatingWindowStore';
 import { useProtoStore } from './proto/protoStore';
-import { validateAdapter } from '@/services/resourcesStore';
+import { collectCodecSchemaErrors } from '@/services/resourcesStore';
 import { fetchBaselineFlow } from '@/services/baselineApi';
 import { useEditorStore } from './store/editorStore';
 import type { FlowJson } from './codec/flowToJson';
@@ -87,16 +87,16 @@ function FlowEditorInner({
     void loadProtos({ kind: 'static' });
   }, [loadProtos]);
 
-  // 适配器校验：mount 时检查本地存储中的 codec.lua 是否实现了必需函数。
-  // 注意：资源拉取（与服务器对比、冲突合并）已改为显式操作（资源管理面板的「拉取」按钮 /
-  // 启动任务前），不再在加载/刷新时自动进行，避免无感覆盖用户的本地编辑稿。
+  // 协议配置校验：mount 时检查本地存储的所有 *_codec.json 是否符合 schema，
+  // 把错误汇总挂到徽标。资源拉取（与服务器对比、冲突合并）已改为显式操作
+  // （资源管理面板的「拉取」按钮 / 启动任务前），不在加载/刷新时自动进行。
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const missing = await validateAdapter();
+        const errors = await collectCodecSchemaErrors();
         if (!cancelled) {
-          useEditorStore.getState().setAdapterMissing(missing);
+          useEditorStore.getState().setCodecSchemaErrors(errors);
         }
       } catch {
         // 静默

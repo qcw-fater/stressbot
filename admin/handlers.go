@@ -94,6 +94,7 @@ func (s *AdminServer) registerRoutes() http.Handler {
 	mux.HandleFunc("GET /sbot/baseline/scripts/index.json", s.handleBaselineScriptIndex)
 	mux.HandleFunc("GET /sbot/baseline/scripts/{name}", s.handleBaselineScriptFile)
 	// T4.3：adapter 基线改为按文件名透传（支持多 *_codec.json + errors.json）。
+	mux.HandleFunc("GET /sbot/baseline/adapter/index.json", s.handleBaselineCodecIndex)
 	mux.HandleFunc("GET /sbot/baseline/adapter/{name}", s.handleBaselineCodecFile)
 	mux.HandleFunc("GET /sbot/baseline/flow/flow.json", s.handleBaselineFlow)
 	mux.HandleFunc("GET /sbot/baseline/config.json", s.handleBaselineConfig)
@@ -1591,6 +1592,18 @@ func (s *AdminServer) handleBaselineScriptIndex(w http.ResponseWriter, r *http.R
 
 func (s *AdminServer) handleBaselineScriptFile(w http.ResponseWriter, r *http.Request) {
 	serveBaselineFile(w, r, "conf/scripts", "name")
+}
+
+// handleBaselineCodecIndex 列出 adapter 基线目录下的 codec/errors 文件名（T3 前端基线同步枚举用）。
+// 目录契约：conf/adapter 下只有 *_codec.json 与 errors.json（写入侧 buildConfigFiles 已拒绝其它）。
+// handler 只按 .json 后缀如实列目录，不二次过滤文件名（前端按 errors.json/其余分类）。
+func (s *AdminServer) handleBaselineCodecIndex(w http.ResponseWriter, r *http.Request) {
+	files, err := listDirFiles("conf/adapter", ".json")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, files)
 }
 
 // handleBaselineCodecFile 提供 adapter 基线目录下的单个 codec/errors 文件（T4.3）。

@@ -18,8 +18,7 @@ export type ActivePanel =
   | { kind: 'protoBrowser' }
   | { kind: 'listenPanel' }
   | { kind: 'jsonPreview' }
-  | { kind: 'templateEdit'; templateKind: 'action' | 'listen'; templateId: string }
-  | { kind: 'codecAdapter' };
+  | { kind: 'templateEdit'; templateKind: 'action' | 'listen'; templateId: string };
 
 /** 每个面板 kind 独立存储，互不干扰 */
 export type ActivePanels = Partial<Record<ActivePanel['kind'], ActivePanel>>;
@@ -129,9 +128,9 @@ interface EditorState {
   pendingSyncResult: import('@/services/resourcesStore').BaselineSyncResult | null;
   setPendingSyncResult: (r: import('@/services/resourcesStore').BaselineSyncResult | null) => void;
 
-  /** 适配器缺失的必需函数列表；null=未检查，空数组=全部实现 */
-  adapterMissing: string[] | null;
-  setAdapterMissing: (v: string[] | null) => void;
+  /** 协议配置的 schema 校验错误数组；null=未校验/空，空数组=全部通过 */
+  codecSchemaErrors: string[] | null;
+  setCodecSchemaErrors: (v: string[] | null) => void;
 
   setSelectedNode: (id: string | null) => void;
   setSelectedListen: (name: string | null) => void;
@@ -173,8 +172,8 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
   historyEnabled: null,
   pendingSyncResult: null,
   setPendingSyncResult: (r) => set({ pendingSyncResult: r }),
-  adapterMissing: null,
-  setAdapterMissing: (v) => set({ adapterMissing: v }),
+  codecSchemaErrors: null,
+  setCodecSchemaErrors: (v) => set({ codecSchemaErrors: v }),
 
   setSelectedNode: (id) => set({ selectedNodeId: id }),
   setSelectedListen: (name) => set({ selectedListenName: name }),
@@ -245,5 +244,4 @@ const DEFAULT_SIZES: Record<string, { width: number; height: number }> = {
   listenPanel: { width: 440, height: 560 },
   jsonPreview: { width: 800, height: 560 },
   templateEdit: { width: 680, height: 520 },
-  codecAdapter: { width: 720, height: 500 },
 };
