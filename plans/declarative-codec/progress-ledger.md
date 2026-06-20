@@ -110,6 +110,15 @@
 
 **Batch 2 待 whole-branch triage 的 Minor**：①B2-A commitHeader 降级 re-serialize（header 非数组 edge-case，合法 schema 不触发）；②B2-A value source 惰性写入（可接受设计）；③B2-B when:undefined 删除隐式依赖 JSON.stringify（语义正确，建议 helper 层显式 delete）；④B2-B ParamsSubform setEntry 可读性。均非阻塞。
 
+### T3 Batch 3 — §3.4 算法清单 + 实时预览（进行中）
+
+| 任务 | 内容 | 状态 |
+|---|---|---|
+| B3-A | `services/codecApi.ts`（fetchCodecAlgorithms + previewCodec，复用 api.ts helper）+ types/codec.ts 追加 AlgoMeta/AlgoParam/Preview* + PipelineEditor algo 文本→下拉（`algosForStepOp` 纯函数，**encrypt↔cipher 映射**）+ params 键值表→按算法动态字段。完成 B2-B staging。 | ✅ done（review clean；encrypt↔cipher 映射 + preview-200-with-error 语义两关键点均验；228 测试绿。4 Minor：清单外 algo 不渲染、加载失败无重试、bytes 无 hex 校验、ApiError 拍平——均非阻塞） |
+| B3-B | `codecEditor/PreviewPanel.tsx`：encode（route 字段输入 + bodyHex + keyHex → frameHex + 字段）/ decode（frameHex + keyHex → 字段 + routeKey + headerErr + bodyHex），走 codecApi.previewCodec，纯编辑辅助不入库。 | ✅ done（review clean；previewHelpers 纯函数正确、纯编辑辅助无副作用已确认；248 测试绿。1 Minor bug 已修：预览失败 Alert 双重「预览失败：」前缀——codecApi 已加前缀，PreviewPanel 又加，去重。2 Minor 非阻塞：buildRouteMap 多余 Number() 计算、decode 空 fields+headerErr 提示） |
+
+**🏁 Batch 3 完成（2026-06-20，待用户确认提交）**：算法清单 + 实时预览接线完成。algo 下拉（encrypt↔cipher 映射）+ 按算法动态 params 替掉 B2-B staging；encode/decode 预览面板走后端真实引擎（`POST /sbot/codec/preview`），纯编辑辅助不入库。前端 tsc exit 0 + vitest 248/248。Batch 3 纯前端。
+
 ## 完成记录
 
 - T1.1: complete — schema+Validate+errors，59/59 测试通过，review clean（仅 gofmt minor，已修）。工作树未提交（待 T1 批次确认）。文件：codec/schema.go, codec/errors.go, codec/schema_test.go, codec/testdata/*。
