@@ -97,6 +97,19 @@
 
 **T2-D 遗留修正（B1-A 期间发现并已修）**：`luaApiSpec.test.ts` 断言 network 模块含 `register_tcp/udp_heartbeat`，但 T2-B.2 已删这两个 Lua 函数、T2-D 清了 spec 源却没改测试（T2-D 验证仅 Go 侧，未跑 `npm run test`）→ 前端测试套件一直红。已在 B1-A 阶段由 controller 删该 2 行修正（15/15 绿）。属 T2-D 遗留，随 Batch 1 一并提交。
 
+### T3 Batch 2 — §3.3 可视化结构化编辑器（进行中）
+
+在 Batch 1 源码 JSON 视图之上加结构化视图（帧布局 + 管线 + 路由键），以 content 字符串为单一数据源双向同步（raw 无损 round-trip）。拆 2 任务：B2-A 帧布局 + 同步骨架、B2-B 管线 + 路由键。
+
+| 任务 | 内容 | 状态 |
+|---|---|---|
+| B2-A | `codecEditor/codecEdit.ts`（parseCodecForEdit/serializeCodec raw 无损 + header 增删改/移动 + scalar）+ FrameLayoutEditor（FrameScalars + ByteStrip[展示+选中,无DnD] + HeaderFieldTable + RoleLinkedForm[flags/value v1约束/checksumOut]）+ AdapterTab 结构化/源码视图切换。 | ✅ done（review clean；codecEdit raw 无损 round-trip A.1-A.6 全验、role 表单 value v1 与后端 validateCodecSchema:491 一致；204 测试绿。3 Minor 记入待 whole-branch triage：①commitHeader 降级 re-serialize ②selectedIndex move 后未跟随(真 UX nit) ③value source 惰性写入） |
+| B2-B | codecEdit 扩展 pipeline 步骤 CRUD/移动 + routeKeyTemplate；PipelineEditor（步骤卡 op/algo[文本staging]/params[键值staging]/flag/when/onError/produces/offset/over + 排序）+ RouteKeyEditor（模板 + 占位校验 + route 字段清单 + 样例）。algo 下拉+动态params+预览属 §3.4 Batch 3。 | ✅ done（review clean；codecEdit pipeline/routeKey helper raw 无损 + 不 mutate + serialize 稳定全验；PipelineEditor per-op/sub-form 与 validateCodecSchema 一致；RouteKeyEditor 占位正则与后端逐字一致；214 测试绿。2 Minor：when:undefined 删除隐式依赖 JSON.stringify（语义正确）、ParamsSubform setEntry 可读性） |
+
+**🏁 Batch 2 完成（2026-06-20，待用户确认提交）**：结构化视图覆盖 codec.json 全部主要结构（header/frame[B2-A] + pipeline + routeKey[B2-B]），与源码视图以 content 字符串为单一数据源 raw 无损双向同步。前端 tsc exit 0 + vitest 214/214。selectedIndex 移动跟随 UX nit 已修。algo 文本/params 键值为 staging（Batch 3 §3.4 接 algorithms 端点改下拉+动态 params+预览）。
+
+**Batch 2 待 whole-branch triage 的 Minor**：①B2-A commitHeader 降级 re-serialize（header 非数组 edge-case，合法 schema 不触发）；②B2-A value source 惰性写入（可接受设计）；③B2-B when:undefined 删除隐式依赖 JSON.stringify（语义正确，建议 helper 层显式 delete）；④B2-B ParamsSubform setEntry 可读性。均非阻塞。
+
 ## 完成记录
 
 - T1.1: complete — schema+Validate+errors，59/59 测试通过，review clean（仅 gofmt minor，已修）。工作树未提交（待 T1 批次确认）。文件：codec/schema.go, codec/errors.go, codec/schema_test.go, codec/testdata/*。
