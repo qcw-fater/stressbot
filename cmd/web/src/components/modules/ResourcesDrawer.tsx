@@ -12,6 +12,7 @@ import {
   Alert,
   App as AntApp,
   Button,
+  Collapse,
   Drawer,
   Empty,
   Flex,
@@ -65,6 +66,8 @@ import { parseCodecForEdit } from './codecEditor/codecEdit';
 import { FrameLayoutEditor } from './codecEditor/FrameLayoutEditor';
 import { PipelineEditor } from './codecEditor/PipelineEditor';
 import { RouteKeyEditor } from './codecEditor/RouteKeyEditor';
+import { PreviewPanel } from './codecEditor/PreviewPanel';
+import { deriveTransport } from './codecEditor/previewHelpers';
 
 export interface ResourcesDrawerProps {
   open: boolean;
@@ -662,6 +665,23 @@ function AdapterTab() {
             <FrameLayoutEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
             <PipelineEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
             <RouteKeyEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
+            {/* 预览面板：调后端真实 codec 引擎跑一次 encode/decode，纯编辑辅助（不落库/不下发） */}
+            <Collapse
+              size="small"
+              items={[
+                {
+                  key: 'preview',
+                  label: '预览（编码/解码）',
+                  children: (
+                    <PreviewPanel
+                      raw={parsed.raw}
+                      schema={parsed.schema}
+                      transport={deriveTransport(activeConn)}
+                    />
+                  ),
+                },
+              ]}
+            />
           </Space>
         </div>
       ) : (

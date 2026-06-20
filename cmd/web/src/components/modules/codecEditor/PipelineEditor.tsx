@@ -4,11 +4,16 @@
  * 卡片顺序即 encode 顺序；decode 由后端自动反序执行，UI 顶部标注「decode 自动反序」。
  *
  * 每张卡按 op 显示相关字段：
- *   - 通用：name / op（PIPELINE_OPS 下拉）/ algo（**文本输入——Batch 3 §3.4 接 algorithms 端点后改下拉**）
- *           / onError（fail|keep）/ flag（下拉 = 所有 role:"flags" 字段命名位的并集，可空）/ when（子表单）。
+ *   - 通用：name / op（PIPELINE_OPS 下拉）/ algo（**下拉——从 GET /sbot/codec/algorithms 拿到的
+ *           算法元数据按当前步 op 过滤**）/ onError（fail|keep）/ flag（下拉 = 所有 role:"flags"
+ *           字段命名位的并集，可空）/ when（子表单）。
  *   - encrypt：keyLen / offset.{encode,decode}（发/收偏移可不同，如 UDP 发=11 收=0）/ produces。
  *   - checksum|hash：over（kind 下拉 OVER_KINDS；range 时 rangeStart/rangeEnd）/ produces。
- *   - params：**通用键值表（staging）**——Batch 3 §3.4 改按算法动态字段。
+ *   - params：**按选中 algo 的 AlgoParam[] 动态字段**（int→InputNumber / string→Input /
+ *     bool→Switch / bytes→hex 输入）；algo 元数据外的残留键不显示但保留（不静默丢弃）。
+ *
+ * 算法清单加载：PipelineEditor 挂载时调一次 fetchCodecAlgorithms（module-level cache 复用，
+ * 失败 → message.error + 空下拉，**禁止本地伪清单兜底**）。
  *
  * 修改经 codecEdit helper（raw 无损）→ onEdit 回灌 content。
  * 非法值（如 op 不合法、name 重复）即时提示但不阻塞；最终校验交 validateCodecSchema。
@@ -16,9 +21,10 @@
  * 单一数据源 = content 字符串（由 AdapterTab 的 setContent 回灌后重算 parsed）。
  */
 
-import { Button, Card, InputNumber, Select, Space, Switch, Typography } from 'antd';
+import { useEffect, useState } from 'react';
+import { Button, Card, InputNumber, Select, Space, Switch, Typography, message } from 'antd';
 import { DeleteOutlined, DownOutlined, PlusOutlined, UpOutlined } from '@ant-design/icons';
-import type { CodecSchema, FlagBit, PipelineStep } from '@/types/codec';
+import type { AlgoMeta, CodecSchema, FlagBit, PipelineStep } from '@/types/codec';
 import {
   GUARD_OPS,
   ON_ERROR,
@@ -32,6 +38,8 @@ import {
   removePipelineStep,
   updatePipelineStep,
 } from './codecEdit';
+import { algosForStepOp } from './algosForStepOp';
+import { fetchCodecAlgorithms } from '@/services/codecApi';
 import './codecEditor.css';
 
 export interface PipelineEditorProps {
@@ -40,8 +48,75 @@ export interface PipelineEditorProps {
   onEdit: (nextContent: string) => void;
 }
 
+// ─── 算法清单加载（module-level cache，整会话拉一次） ───────────────────
+//
+// 后端 GET /sbot/codec/algorithms 返回稳定清单（按 op 分组）；PipelineEditor 多实例共享
+// 一份缓存避免重复请求。加载失败 → 提示 + 空清单，**禁止本地伪清单兜底**（plan §3.4）。
+//
+// 注意：cache 是会话级单例，不随组件卸载重置（清单稳定，符合「拉一次」语义）。
+
+interface AlgoCacheState {
+  /** 已加载完成（无论成功失败）；用 null 区分「未加载」与「加载成功但空清单」。 */
+  loaded: boolean;
+  algos: AlgoMeta[];
+}
+
+let algoCache: AlgoCacheState = { loaded: false, algos: [] };
+/** 正在进行中的请求（避免并发多实例重复拉）——Promise 复用。 */
+let inflight: Promise<AlgoMeta[]> | null = null;
+
+function loadAlgorithms(): Promise<AlgoMeta[]> {
+  if (inflight) return inflight;
+  inflight = (async () => {
+    const algos = await fetchCodecAlgorithms();
+    algoCache = { loaded: true, algos };
+    inflight = null;
+    return algos;
+  })().catch((e: unknown) => {
+    // 失败：置空清单 + 标记已加载（不再重试），抛出由调用方 message.error。
+    algoCache = { loaded: true, algos: [] };
+    inflight = null;
+    throw e;
+  });
+  return inflight;
+}
+
+/**
+ * 挂载时拉一次算法清单到 module cache。失败 → message.error + 空清单（不伪兜底）。
+ * 多个 PipelineEditor 实例共享 cache（inflight 复用，只发一个请求）。
+ */
+function useCodecAlgorithms(): AlgoMeta[] {
+  const [algos, setAlgos] = useState<AlgoMeta[]>(algoCache.loaded ? algoCache.algos : []);
+
+  useEffect(() => {
+    // 已加载（含失败后的空清单）→ 直接用 cache，不再发请求。
+    if (algoCache.loaded) {
+      setAlgos(algoCache.algos);
+      return;
+    }
+    let cancelled = false;
+    loadAlgorithms()
+      .then((a) => {
+        if (!cancelled) setAlgos(a);
+      })
+      .catch((e: unknown) => {
+        const reason = e instanceof Error ? e.message : String(e);
+        if (!cancelled) {
+          message.error(`算法清单加载失败：${reason}`);
+          setAlgos([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return algos;
+}
+
 export function PipelineEditor({ raw, schema, onEdit }: PipelineEditorProps) {
   const steps: PipelineStep[] = Array.isArray(schema.pipeline) ? (schema.pipeline as PipelineStep[]) : [];
+  const algorithms = useCodecAlgorithms();
 
   // flag 下拉选项 = 所有 role:"flags" 字段的命名位 name 并集。
   const flagOptions = collectFlagBitNames(schema).map((n) => ({ label: n, value: n }));
@@ -77,6 +152,7 @@ export function PipelineEditor({ raw, schema, onEdit }: PipelineEditorProps) {
             index={i}
             total={steps.length}
             step={step}
+            algorithms={algorithms}
             flagOptions={flagOptions}
             stepNameOptions={stepNameOptions}
             onEdit={onEdit}
@@ -102,6 +178,7 @@ interface PipelineStepCardProps {
   index: number;
   total: number;
   step: PipelineStep;
+  algorithms: AlgoMeta[];
   flagOptions: { label: string; value: string }[];
   stepNameOptions: { label: string; value: string }[];
   onEdit: (nextContent: string) => void;
@@ -112,6 +189,7 @@ function PipelineStepCard({
   index,
   total,
   step,
+  algorithms,
   flagOptions,
   stepNameOptions,
   onEdit,
@@ -120,6 +198,12 @@ function PipelineStepCard({
   const isEncrypt = op === 'encrypt';
   const isStandaloneDigest = op === 'checksum' || op === 'hash';
   const opInvalid = !(PIPELINE_OPS as readonly string[]).includes(op);
+
+  // 当前步可选算法 = 清单里 op 匹配当前步 op 的算法（encrypt↔cipher 映射在 algosForStepOp 内）。
+  const stepAlgos = algosForStepOp(algorithms, op);
+  const algoOptions = stepAlgos.map((a) => ({ label: a.name, value: a.name }));
+  // 选中算法的元数据（algo 不在清单时 → undefined，动态 params 区不渲染）。
+  const selectedAlgo = stepAlgos.find((a) => a.name === step?.algo);
 
   const patch = (p: Partial<PipelineStep>) => onEdit(updatePipelineStep(raw, index, p));
 
@@ -153,14 +237,26 @@ function PipelineStepCard({
               options={(PIPELINE_OPS as readonly string[]).map((o) => ({ label: o, value: o }))}
             />
           </Field>
-          {/* STAGING：algo 文本输入。Batch 3 §3.4 接 GET /sbot/codec/algorithms 后改下拉。 */}
-          <Field label="algo">
-            <input
-              className="flet-input"
-              style={{ width: 130 }}
-              value={step?.algo ?? ''}
-              placeholder="算法名"
-              onChange={(e) => patch({ algo: e.target.value })}
+          <Field label="算法">
+            <Select
+              size="small"
+              style={{ width: 140 }}
+              showSearch
+              value={step?.algo && step.algo !== '' ? step.algo : undefined}
+              placeholder={stepAlgos.length === 0 ? '无可用算法' : '选择算法'}
+              onChange={(v) => patch({ algo: v ?? '' })}
+              options={algoOptions}
+              // 选中算法有描述时作 title（tooltip 悬停显示）。
+              optionRender={(option) => {
+                const meta = stepAlgos.find((a) => a.name === option.value);
+                const desc = meta?.description;
+                return (
+                  <span title={desc}>
+                    {option.label}
+                    {desc ? <span style={{ color: 'var(--text-secondary, #999)', marginLeft: 6, fontSize: 11 }}>{desc}</span> : null}
+                  </span>
+                );
+              }}
             />
           </Field>
           <Field label="onError">
@@ -262,8 +358,8 @@ function PipelineStepCard({
           <OverSubform step={step} onPatch={patch} />
         )}
 
-        {/* STAGING：params 通用键值表。Batch 3 §3.4 改按算法动态字段。 */}
-        <ParamsSubform step={step} onPatch={patch} />
+        {/* 动态 params：按选中算法的 AlgoParam[] 渲染字段。algo 元数据外的残留键保留在 raw。 */}
+        <ParamsDynamic step={step} algo={selectedAlgo} onPatch={patch} />
 
         {/* produces */}
         <ProducesSubform step={step} onPatch={patch} />
@@ -330,80 +426,119 @@ function OverSubform({
   );
 }
 
-// ─── params 通用键值表（STAGING） ────────────────────────────────────
+// ─── params 动态字段（按选中算法的 AlgoParam[] 渲染） ─────────────────
 
-function ParamsSubform({
+/**
+ * ParamsDynamic —— 按选中算法的 params 元数据渲染对应控件：
+ *   int → InputNumber；string → Input；bool → Switch；bytes → hex 文本输入。
+ *
+ * 语义（与 t3-b3a-algorithms-brief §3.3 一致）：
+ *   - 值读自 step.params[name]，写回经 updatePipelineStep patch params（保留其它 param 键）。
+ *   - 字段无值时用 AlgoParam.default 作 placeholder（惰性，不强制写入）。
+ *   - algo 无 params（空/缺）→ 整个 params 区不渲染。
+ *   - step.params 中 algo 元数据之外的残留键（手编残留）不显示、不删除（保留在 raw，切源码可见）。
+ */
+function ParamsDynamic({
   step,
+  algo,
   onPatch,
 }: {
   step: PipelineStep;
+  algo: AlgoMeta | undefined;
   onPatch: (p: Partial<PipelineStep>) => void;
 }) {
-  const paramsObj = (step.params && typeof step.params === 'object' ? step.params : {}) as Record<string, unknown>;
-  const entries = Object.entries(paramsObj);
+  const paramsMeta = algo?.params;
+  // algo 元数据缺/空 → 不显示 params 区（也不丢弃已有 step.params 残留键）。
+  if (!paramsMeta || paramsMeta.length === 0) return null;
 
-  const setEntry = (oldKey: string, newKey: string, value: unknown) => {
-    const next: Record<string, unknown> = {};
-    for (const [k, v] of entries) {
-      if (k === oldKey) {
-        if (newKey !== '') next[newKey] = value;
-      } else {
-        next[k] = v;
-      }
-    }
-    if (!entries.some(([k]) => k === oldKey) && newKey !== '') {
-      next[newKey] = value;
-    }
-    onPatch({ params: next });
-  };
+  const paramsObj = (step.params && typeof step.params === 'object' ? step.params : {}) as Record<
+    string,
+    unknown
+  >;
 
-  const addEntry = () => {
-    const next: Record<string, unknown> = { ...paramsObj, '': '' };
-    onPatch({ params: next });
-  };
-
-  const removeEntry = (key: string) => {
-    const next: Record<string, unknown> = { ...paramsObj };
-    delete next[key];
-    onPatch({ params: next });
+  const setParam = (name: string, value: unknown) => {
+    onPatch({ params: { ...paramsObj, [name]: value } });
   };
 
   return (
     <div>
       <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
-        params（键值表）
+        参数
       </Typography.Text>
-      <Space direction="vertical" size={4} style={{ width: '100%' }}>
-        {entries.map(([k, v]) => (
-          <Space size={4} key={k}>
-            <input
-              className="flet-input"
-              style={{ width: 120 }}
-              value={k}
-              placeholder="key"
-              onChange={(e) => setEntry(k, e.target.value, v)}
-            />
-            <input
-              className="flet-input"
-              style={{ width: 120 }}
-              value={typeof v === 'string' ? v : String(v ?? '')}
-              placeholder="value"
-              onChange={(e) => setEntry(k, k, coerceParamValue(e.target.value))}
-            />
-            <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => removeEntry(k)} />
-          </Space>
-        ))}
-        <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={addEntry}>
-          添加参数
-        </Button>
+      <Space size={8} wrap align="center">
+        {paramsMeta.map((p) => {
+          const name = p.name;
+          const cur = paramsObj[name];
+          const defaultPlaceholder =
+            p.default !== undefined ? String(p.default) : paramPlaceholder(p.type);
+          return (
+            <Field key={name} label={paramLabel(name, p.description)}>
+              <ParamControl
+                type={p.type}
+                value={cur}
+                placeholder={defaultPlaceholder}
+                onChange={(v) => setParam(name, v)}
+              />
+            </Field>
+          );
+        })}
       </Space>
     </div>
   );
 }
 
-/** value：纯数字串 → number，否则 string。 */
-function coerceParamValue(raw: string): number | string {
-  return raw !== '' && /^-?\d+$/.test(raw) ? Number(raw) : raw;
+/** 单个参数控件：按 AlgoParam.type 选 antd 组件。未选中/清空时传 undefined（保留 default 作 placeholder）。 */
+function ParamControl({
+  type,
+  value,
+  placeholder,
+  onChange,
+}: {
+  type: 'int' | 'string' | 'bool' | 'bytes';
+  value: unknown;
+  placeholder: string;
+  onChange: (v: unknown) => void;
+}) {
+  if (type === 'int') {
+    return (
+      <InputNumber
+        size="small"
+        style={{ width: 100 }}
+        value={typeof value === 'number' ? value : undefined}
+        placeholder={placeholder}
+        onChange={(v) => onChange(typeof v === 'number' ? v : undefined)}
+      />
+    );
+  }
+  if (type === 'bool') {
+    return (
+      <Switch
+        size="small"
+        checked={value === true}
+        onChange={(v) => onChange(v)}
+      />
+    );
+  }
+  // string + bytes 都走文本输入；bytes 的 placeholder 提示「hex」。
+  return (
+    <input
+      className="flet-input"
+      style={{ width: 140 }}
+      value={typeof value === 'string' ? value : value == null ? '' : String(value)}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
+}
+
+/** bytes/string 类型的 placeholder；bytes 默认提示「hex」。 */
+function paramPlaceholder(type: string): string {
+  return type === 'bytes' ? 'hex' : '';
+}
+
+/** 字段标签：name +（若有 description）括注。 */
+function paramLabel(name: string, description?: string): string {
+  return description ? `${name}（${description}）` : name;
 }
 
 // ─── produces 子表单 ────────────────────────────────────────────────

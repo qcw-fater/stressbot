@@ -148,6 +148,88 @@ export interface Guard {
 /** errors.json：code → 中文文案。 */
 export type ErrorMap = Record<string, string>;
 
+// ---------- 算法元数据（镜像 codec/registry.go 172-186） ----------
+
+/**
+ * AlgoParam 描述算法的一个可配参数（供编辑器动态表单）。
+ * 镜像后端 `codec.AlgoParam`（registry.go:172）。
+ */
+export interface AlgoParam {
+  name: string;
+  /** int|string|bool|bytes */
+  type: 'int' | 'string' | 'bool' | 'bytes';
+  /** 缺省值（惰性 placeholder，不强制写入 step.params） */
+  default?: unknown;
+  description?: string;
+}
+
+/**
+ * AlgoMeta 描述一个已注册算法的元数据。
+ * 镜像后端 `codec.AlgoMeta`（registry.go:180）。
+ *
+ * **op 映射 gotcha**：`AlgoMeta.op` 用 `cipher`，而 `PipelineStep.op` 用 `encrypt`——
+ * 二者指同一类算法，前端下拉过滤时需做 encrypt↔cipher 映射（见 `algosForStepOp`）。
+ */
+export interface AlgoMeta {
+  name: string;
+  /** cipher|compress|checksum|hash */
+  op: 'cipher' | 'compress' | 'checksum' | 'hash';
+  description?: string;
+  params?: AlgoParam[];
+}
+
+// ---------- 预览（镜像 codec/preview.go 24-41 + admin/codec_handlers.go 29-37） ----------
+
+/** header 中一个字段的解释结果。镜像 `codec.PreviewField`（preview.go:24）。 */
+export interface PreviewField {
+  name: string;
+  /** 数值化后的字段值 */
+  value: number;
+  /** 在 header 中的字节偏移 */
+  offset: number;
+  /** 字段字节数 */
+  size: number;
+}
+
+/**
+ * Preview 结果。镜像 `codec.PreviewResult`（preview.go:32）。
+ * **Error 非空时其它字段为零值**——编辑器语义：HTTP 200 仍照常返回（由前端据 Error 提示）。
+ */
+export interface PreviewResult {
+  mode: 'encode' | 'decode';
+  /** encode 出参：完整帧 hex */
+  frameHex?: string;
+  /** decode 出参：解出 body hex */
+  bodyHex?: string;
+  /** decode 出参：routeKey */
+  routeKey?: string;
+  /** decode 出参：头 errorCode */
+  headerErr?: number;
+  /** header 字段逐项解释 */
+  fields?: PreviewField[];
+  /** schema 编译/运行错误（中文） */
+  error?: string;
+}
+
+/**
+ * POST /sbot/codec/preview 的请求体。镜像 `admin.codecPreviewRequest`。
+ * schema 用 unknown 承载（编辑器当前 content 的 JSON.parse 结果），由后端二次解析。
+ */
+export interface PreviewRequest {
+  /** 完整 codec.json 内容（对象形式） */
+  schema: unknown;
+  mode: 'encode' | 'decode';
+  transport?: 'tcp' | 'udp';
+  /** encode 入参：route 字段 map */
+  route?: Record<string, unknown>;
+  /** encode 入参：body hex */
+  bodyHex?: string;
+  /** encode/decode 入参：secretKey hex */
+  keyHex?: string;
+  /** decode 入参：完整帧 hex */
+  frameHex?: string;
+}
+
 // ---------- v1 冻结合法值集合（照搬 schema.go 126-162） ----------
 
 /** type → 固定宽度字节数；-1 表示需显式 size（bytes）。 */
