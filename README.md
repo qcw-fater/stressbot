@@ -351,27 +351,36 @@ Executor 遍历节点图 → 命中 action 节点
 
 ## 心跳
 
-每个 TCP/UDP 连接可独立注册心跳。通过 Lua API 注册，支持两种模式：
+每个 TCP/UDP 连接可独立注册声明式心跳。通过 `tcpHeartbeat` / `udpHeartbeat` 动作配置，心跳包体在 Go 侧按 `heartbeatFields` 布局构造；运行时不调用业务 Lua，主流程阻塞等待时心跳仍会继续发送。
 
-### 静态心跳（推荐，body 固定为空）
+### 静态心跳（body 固定为空）
 
-不传 `builder` 参数，注册时一次性预编码包体。运行时零 Lua 调用、零 luaMu 竞争，适用于大部分游戏服务器心跳。
+`heartbeatFields` 为空时发送空 body，适用于大部分游戏服务器心跳。
 
-```lua
-network.register_tcp_heartbeat("logic", 5000, {cmd=2, act=1})
-network.register_udp_heartbeat("game", 3000, {cmd=1, act=1})
+```json
+{
+  "pattern": "tcpHeartbeat",
+  "service": "logic",
+  "route": {"cmd": 2, "act": 1},
+  "intervalMs": 5000
+}
 ```
 
 ### 动态心跳（body 每次变化）
 
-传入 `builder` 函数，每次 tick 调用构造 body。适用于需要递增序号、携带变化字段的心跳。
+需要递增序号、状态字段、时间戳或随机值时，使用 `heartbeatFields` 声明二进制布局，由后台心跳循环按字段来源构造 body。
 
-```lua
-network.register_tcp_heartbeat("battle", 10000, {cmd=4, act=2}, function()
-    local idx = robot.increment("packetIndex") % 65536
-    return utils.pack_le("u16", idx)
-        .. utils.pack_le("i64", robot.get("battleId") or 0)
-end)
+```json
+{
+  "pattern": "tcpHeartbeat",
+  "service": "battle",
+  "route": {"cmd": 4, "act": 2},
+  "intervalMs": 10000,
+  "heartbeatFields": [
+    {"type": "counter", "format": "u16", "key": "packetIndex", "mod": 65536},
+    {"type": "state", "format": "i64", "source": "battleId"}
+  ]
+}
 ```
 
 关闭连接时心跳自动停止；重复注册会替换旧心跳。
@@ -479,10 +488,7 @@ end)
 
 ### 心跳
 
-| 函数                                                    | 说明                          |
-| ------------------------------------------------------ | ---------------------------- |
-| `register_tcp_heartbeat(service, intervalMs, route [, builder])` | 注册 TCP 心跳       |
-| `register_udp_heartbeat(service, intervalMs, route [, builder])` | 注册 UDP 心跳       |
+旧的 Lua 心跳注册接口已移除；请在流程动作中使用 `tcpHeartbeat` / `udpHeartbeat` 声明式心跳。
 
 ## robot（11 函数）
 
@@ -532,7 +538,7 @@ end)
 | `shuffle(arr)`                           | 原地洗牌（Fisher-Yates）                     |
 | `pack_le(format, ...)`                   | 小端二进制打包（`u8/i8/u16/i16/u32/i32/u64/i64/f32/f64`） |
 | `unpack_le(data, fmt1, ...)`             | 小端二进制解包，大整数超 2^53 以字符串返回    |
-| `sleep(ms)`                              | 毫秒休眠（释放 Lua 锁）                      |
+| `sleep(ms)`                              | 毫秒休眠（响应取消，仅暂停当前机器人主流程）   |
 | `time_ms()`                              | 当前时间戳（毫秒）                           |
 | `fnv_hash(str)`                          | FNV-1a 64 位哈希（返回 hex 字符串）          |
 
@@ -790,7 +796,7 @@ Agent 模式不需要 `standalone` 段 — 运行时参数由 Admin 通过 `Task
 
 ### 持久化监听
 
-`listenResp` 注册回调 → `listenCh`（cap 128）缓冲 → `listenLoop` goroutine 分发 → 回调执行。
+connectionPump 解码后按 routeKey 分发：优先唤醒一次性请求响应，其次写入监听队列并执行可选 Go-store 回调；没有匹配项则丢弃。
 
 ### 帧解析
 
@@ -835,7 +841,7 @@ gnet `OnTraffic`：peek header → `BodyLength()` 纯 Go 计算 → read frame �
 
 ### 优雅关闭
 
-`CloseAll` → 等所有 `listenLoop` 退出 → 并行 Close + Wait。
+`CloseAll` → 取消连接上下文并等待 connectionPump 退出 → 并行 Close + Wait。
 
 ---
 

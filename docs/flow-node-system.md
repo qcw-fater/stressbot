@@ -621,9 +621,10 @@ type ActionDef struct {
 
 **lua**：
 1. 由 `robotActionHandler.ExecuteAction` 特殊处理
-2. 获取独占 LState（通过 `luaMu` 互斥锁串行化）
-3. 调用 `luaPool.RunActionScript(L, scriptName)` 执行脚本
-4. 返回码 != 0 时返回 `ErrLuaExitCode`
+2. 当前 Robot 主流程获取独占 LState
+3. 调用 `luaPool.RunActionScript(L, scriptName)` 同步执行脚本
+4. 阻塞型 Lua API 只暂停当前主流程；connectionPump 与声明式心跳继续独立运行
+5. 返回码 != 0 时返回 `ErrLuaExitCode`
 
 ## 10. FieldBind -- 字段绑定
 
@@ -769,14 +770,14 @@ type ListenRef struct {
 type ListenDef struct {
     S2CProto string         `json:"s2cProto"` // 解析推送消息的 proto 全名
     Store    []StoreMapping `json:"store"`    // 响应字段到 StateStore 的映射
-    Script   string         `json:"script"`   // Lua 回调脚本路径
+    Script   string         `json:"script"`   // 已废弃；配置非空会在注册时返回错误
 }
 ```
 
-三态判别：
-- `Script` 非空 -> Lua 回调（通过 Lua 运行时执行脚本）
-- `S2CProto` 非空且 `Store` 非空 -> 声明式回调（解析 proto + 存储字段）
-- 否则 -> 静默（仅接收消息，不处理）
+当前判别：
+- `Script` 非空 -> 配置错误，listen 脚本回调已移除
+- `S2CProto` 非空且 `Store` 非空 -> Go-store 回调（解析 proto + 存储字段）
+- 否则 -> 仅缓存到监听队列，供主流程轮询消费
 
 ## 14. 条件解析器
 
