@@ -73,9 +73,29 @@
 | 2-C3 | 删业务 LState codec 依赖 + connectionPump | ✅ done（工作树未提交，待批次确认 + **运行时验证**） |
 | 2-D | 删 luaMu / withReleasedMu（须 2-A/B/C 全完 + 审计闸门） | ✅ done（已提交 + 运行时验证 PASS，T2 闭环） |
 
-### T3 — 前端（T1 schema + T4 文件名后）
+### T3 — 前端 codec 编辑器（T1 schema + T4 文件名后）
 
-pending。
+**进行中（2026-06-20 起）**。用户定 **垂直切片分 4 批**，**批次末统一确认提交**（implementer 不自动 commit，controller 在 Batch 边界把整批 diff 拿给用户确认后用 git-management 一次性提交）。Batch 1 = 「多文件 codec.json 端到端可编辑/校验/下发」。
+
+**Batch 1 分解（3 任务 + 1 前置，耦合分析后定为 additive→migrate 两段式）**：存储 API 改动波及所有消费方（共享契约），无法逐切片独立编译；故 **A 纯增量**新 API → **B 迁移 UI 消费方**（ResourcesDrawer 源码编辑器 + editorStore/index/RuntimeBar 校验）→ **C 迁移 pipeline 消费方 + 重写 sync 内部 + 删全部旧 adapter API**。旧 API 在 C 末删除，提交到 git 的是「只有新 API」终态（非运行时 fallback）。
+
+| 任务 | 内容 | 状态 |
+|---|---|---|
+| B1-前置 | admin `GET /sbot/baseline/adapter/index.json`（镜像 proto 索引，列 `*_codec.json`+`errors.json`；前端多 codec 基线同步枚举所需） | ✅ done（review clean；1 Minor：测试绕过 mux 未验路由优先级，admin 包既有惯例，非本任务引入） |
+| B1-A | `src/types/codec.ts`（镜像 schema.go 类型）+ resourcesStore 多文件 codec CRUD（`getCodecSchema/setCodecSchema/setCodecSchemaFromBaseline/clearCodecSchema/listCodecFiles`）+ `errors.json` 错误表 + `validateCodecSchema`（镜像 Go `Validate` 结构校验，algo 注册表校验归 §3.4）+ `collectCodecSchemaErrors` + baselineApi `fetchBaselineCodecIndex/fetchBaselineCodec`。**纯增量**，旧 API/消费方零改动。 | ✅ done（review clean；50 新测试绿，tsc exit 0；validateCodecSchema 与 Go Validate parity 无漂移。4 Minor 测试质量建议记入待 whole-branch review triage：①`validCodec`/`validSchema` alias 混用 ②「物理区间越界」用例同时触发多条错误 ③flags bit 命名空/重两分支未覆盖 ④测试 fixture 用 cwd 相对路径脆） |
+| B1-B | ResourcesDrawer 适配器 tab →「协议配置」源码 JSON 编辑器（连接选择器 listCodecFiles + 新建/复制/删除 + Monaco json + import .json + save→validateCodecSchema→setCodecSchema + errors.json 编辑）+ editorStore `adapterMissing`→`codecSchemaErrors` + index.tsx 挂载 `collectCodecSchemaErrors` + RuntimeBar 徽标文案。仅迁移这 4 个 UI 消费方，不动 taskActions/taskResourceDiff/sync/旧 API。 | ✅ done（review clean；tsc exit 0，175/175 测试绿；保存阻塞/连接选择器/模板合法性均核实；旧符号 4 文件内零命中；1 Minor：fileNameToConnName 对 proto 含 `_` 的边界，但 proto∈{tcp,udp} 不触发，健壮性备注） |
+| B1-C | taskActions（multipart `adapter/<name>` 多文件 + flow 引用连接覆盖校验）+ taskResourceDiff（枚举 codecs）+ 重写 resourcesStore sync 内部（syncResourcesFromBaseline/markResourcesAsBaselineSynced/getResource/... 为多文件，用新 baseline index）+ **删除全部旧 adapter API**（getAdapterScript/setAdapterScript/validateAdapter/REQUIRED_ADAPTER_FUNCTIONS/CODEC_LUA_KEY/ERROR_LUA_KEY/getErrorMapScript/...）+ 删旧 fetchBaselineAdapter/fetchBaselineErrorMap。 | ✅ done（review clean；sync 重写 A.1-A.9 全验：adapter 走通用 `syncFileGroup`，3-way 不变量与 proto/scripts 一致；旧符号全仓 grep 零命中；2 Minor 均 pre-existing 非 B1-C 引入：resourcesStore 孤儿注释「基线回写」、syncFileGroup 三分支可合并。flow 引用连接覆盖校验按 §3.5 未做，agent resolver 运行时 fail-loud 兜底） |
+
+| B1-D | 补完 §3.5：`collectFlowCodecConnections(flow)` + `connNameToCodecFileName`/`codecFileNameToConnName`/`findMissingCodecConnections`（taskResourceDiff.ts，从 services/index.ts 导出）+ taskActions 启动前 fail-loud 校验「flow 引用连接缺 codec 文件」+ 12 纯函数单测。 | ✅ done（review clean；collectFlowCodecConnections 正确性人工 trace 验证；命名换算与 ResourcesDrawer 逐字一致无假阳/阴性；接线在 codecs-empty 校验之后、上传范围不变；2 Minor 均 non-issue） |
+| B1-测试严谨性 | review Minor 修正：①`validCodec`/`validSchema` alias 统一 ②「物理区间越界」用例隔离单一触发源 ③flags 命名空/重补 2 用例 ⑥删 resourcesStore 孤儿注释「基线回写」；+ 顺手修 codec.test.ts 非 hermetic（写 `os.tmpdir()` 不再翻动 tracked 文件）。 | ✅ done（189/189 测试绿，tsc exit 0；跑测试后 `git status cmd/tmp_codec_export.json` 为空） |
+
+**🏁 Batch 1 完成（2026-06-20，待用户确认提交）**：6 任务（前置 adapter-index + A + B + C + D + 测试严谨性）全 review clean。集成验证：前端 `npx tsc -b` exit 0 + vitest **189/189**（16 文件）；后端 `go build ./...` exit 0 + `go test ./admin` ok；跑测试后 `cmd/tmp_codec_export.json` 不再翻动。旧 adapter API（codec.lua/error.lua 前端路径）零残留；adapter 基线同步走通用 `syncFileGroup`；**§3.5 flow 引用连接覆盖校验已补**（启动前 fail-loud）；UI 用「协议配置」源码 JSON 编辑器（连接选择器 + 校验阻塞）。
+
+**Batch 1 待 whole-branch review triage 的剩余 Minor**（①②③⑥ 已在「测试严谨性」任务修掉；codec.test.ts 非 hermetic 已修；B1-D 的 2 个 Minor 是 non-issue）：④B1-A 测试 fixture cwd 相对路径（项目约定下能工作，留 triage）；⑤B1-B fileNameToConnName proto 含 `_` 边界（proto∈{tcp,udp} 不触发，won't-do）；⑦B1-C syncFileGroup 三分支可合并（pre-existing，proto/scripts 共用，出 scope，留 triage）。均非阻塞。
+
+**旁注（非 T3，pre-existing，已顺手修）**：`codec.test.ts:149` 原往 tracked 文件 `cmd/tmp_codec_export.json` 写测试产物（每次跑测试翻动它），已在「测试严谨性」任务改为写 `os.tmpdir()`，tracked 文件不再被翻动。该 tracked 文件本身（flow 导出样本，误提交于 `62392b1`）restore 后排除出 Batch 1 提交，不属 T3。
+
+**T2-D 遗留修正（B1-A 期间发现并已修）**：`luaApiSpec.test.ts` 断言 network 模块含 `register_tcp/udp_heartbeat`，但 T2-B.2 已删这两个 Lua 函数、T2-D 清了 spec 源却没改测试（T2-D 验证仅 Go 侧，未跑 `npm run test`）→ 前端测试套件一直红。已在 B1-A 阶段由 controller 删该 2 行修正（15/15 绿）。属 T2-D 遗留，随 Batch 1 一并提交。
 
 ## 完成记录
 
