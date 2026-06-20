@@ -85,7 +85,7 @@ func main() {
 	flowPath := flag.String("flow", "", "单机模式流程配置文件路径（默认 <conf>/flow/flow.json）")
 	protoDir := flag.String("proto", "", "单机模式 proto 目录路径（默认 <conf>/proto）")
 	scriptsDir := flag.String("scripts", "", "单机模式 Lua 脚本目录路径（默认 <conf>/scripts）")
-	adapterDir := flag.String("adapter", "", "单机模式协议适配器目录路径（默认 <conf>/adapter，含 codec.lua 与可选 error.lua）")
+	adapterDir := flag.String("adapter", "", "单机模式协议适配器目录路径（默认 <conf>/adapter，含 *_codec.json 与 errors.json）")
 	daemonFlag := flag.Bool("d", false, "以守护进程模式运行")
 	flag.Parse()
 
@@ -195,8 +195,7 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 
 	// T2-C2-Lua：构造 CodecResolver（全 codec 路径 Go SchemaAdapter）。
 	// 扫 paths.Adapter 下 *_codec.json 推断「server 串 → 文件名」映射，再 LoadCodecResolver 编译。
-	// 业务 encode/decode/dial/心跳/listen/Lua 全走 resolver；codec.lua / error.lua 仅由
-	// adapter.LuaAdapter（测试 oracle）加载，生产路径不再构造 LuaAdapter。
+	// 业务 encode/decode/dial/心跳/listen/Lua 全走 resolver，生产路径不再构造 Lua 适配器。
 	codecMap, err := adapter.InferCodecMap(paths.Adapter)
 	if err != nil {
 		stresslog.Fatal("推断 codec 映射失败", zap.String("dir", paths.Adapter), zap.Error(err))
@@ -408,7 +407,7 @@ type standalonePaths struct {
 	Flow    string // 流程配置文件
 	Proto   string // proto 目录
 	Scripts string // Lua 脚本目录
-	Adapter string // 适配器目录（含 codec.lua 与可选 error.lua）
+	Adapter string // 适配器目录（含 *_codec.json 与 errors.json）
 }
 
 // resolveStandalonePaths 解析单机模式资源路径：对应 flag 为空时回退到 confDir 下的默认相对路径，

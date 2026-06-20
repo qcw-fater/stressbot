@@ -36,8 +36,8 @@ const controlChSize = 16
 //
 // pump 是连接唯一的 owner goroutine：心跳 timer + cfg 都由 pump 持有并在 pump goroutine
 // 内读写，故 RegisterHeartbeat/StopHeartbeat 不再启动独立 goroutine，而是把命令投递给 pump，
-// 由 pump 在自己的 select 分支里串行更新 runtime。这样彻底消除了「心跳 builder 抢 luaMu」
-// 这条历史死锁路径（2-B 已让 builder Go-only，pump 进一步去掉独立 goroutine）。
+// 由 pump 在自己的 select 分支里串行更新 runtime。心跳 builder 是 Go-only，
+// 不触碰业务 LState；pump 进一步去掉独立心跳 goroutine。
 type pumpCmd struct {
 	kind   pumpCmdKind
 	hbCfg  HeartbeatConfig // kind == pumpCmdHeartbeat 时有效
@@ -47,9 +47,9 @@ type pumpCmd struct {
 type pumpCmdKind int
 
 const (
-	pumpCmdHeartbeat pumpCmdKind = iota // 注册/替换心跳（hbCfg 有效）
-	pumpCmdStopHeartbeat                // 停止心跳（hbCfg 无效）
-	pumpCmdStop                         // 主动请求 pump 退出（Close 内部用）
+	pumpCmdHeartbeat     pumpCmdKind = iota // 注册/替换心跳（hbCfg 有效）
+	pumpCmdStopHeartbeat                    // 停止心跳（hbCfg 无效）
+	pumpCmdStop                             // 主动请求 pump 退出（Close 内部用）
 )
 
 // Connection 业务层网络连接封装。
@@ -70,30 +70,30 @@ type Connection struct {
 	// 新副本，GetSecretKey 返回的切片只读、不得修改。避免每个收发包都加锁复制一次密钥。
 	secretKey atomic.Value
 
-	responseMap  map[string]chan *Message  // routeKey → 临时响应通道（RequestResponse 用）
-	listenResp   map[string]ListenCallBack // routeKey → 持久化推送回调
-	listenQueues map[string]*listenQueue   // routeKey → 缓存队列（轮询模式，回调为 nil 时）
-	mu           sync.Mutex                // 保护 responseMap / listenResp / listenQueues map 键 / 回调字段（各 listenQueue 自带 mu 串行化 Push/Pop）
-	ctx          context.Context           // 连接生命周期上下文
-	cancel       context.CancelFunc        // 取消函数，关闭时调用
-	isClose      int32                     // 原子标记：0=活跃，1=已关闭
-	intentionalClose int32                 // 原子标记：1=主动 Close() 触发，不触发 onDisconnect
-	requestTimeout   time.Duration         // RequestResponse 默认超时
-	sendFunc         func(data []byte) error // 底层发送函数（由 Dialer 注入）
-	closeFunc        func() error          // 底层关闭函数（由 Dialer 注入）
-	onDisconnect     func()                // 意外断开回调（非主动 Close 触发，业务用于停 robot）
-	onClosed         func()                // 关闭回调（主动/被动均触发，监控用，与 ConnEstablished 配对）
+	responseMap      map[string]chan *Message  // routeKey → 临时响应通道（RequestResponse 用）
+	listenResp       map[string]ListenCallBack // routeKey → 持久化推送回调
+	listenQueues     map[string]*listenQueue   // routeKey → 缓存队列（轮询模式，回调为 nil 时）
+	mu               sync.Mutex                // 保护 responseMap / listenResp / listenQueues map 键 / 回调字段（各 listenQueue 自带 mu 串行化 Push/Pop）
+	ctx              context.Context           // 连接生命周期上下文
+	cancel           context.CancelFunc        // 取消函数，关闭时调用
+	isClose          int32                     // 原子标记：0=活跃，1=已关闭
+	intentionalClose int32                     // 原子标记：1=主动 Close() 触发，不触发 onDisconnect
+	requestTimeout   time.Duration             // RequestResponse 默认超时
+	sendFunc         func(data []byte) error   // 底层发送函数（由 Dialer 注入）
+	closeFunc        func() error              // 底层关闭函数（由 Dialer 注入）
+	onDisconnect     func()                    // 意外断开回调（非主动 Close 触发，业务用于停 robot）
+	onClosed         func()                    // 关闭回调（主动/被动均触发，监控用，与 ConnEstablished 配对）
 
 	// connectionPump（每连接一个）替代旧的 decodeLoop + listenLoop + 心跳 goroutine。
 	// 详见 connectionPump godoc。pump goroutine 是 inbound decode / listen 分发 / 心跳
-	// timer 的唯一 owner；下列字段除 adp/isUDP 在 StartPump 时一次性注入后只读外，
-	// inboundCh/controlCh/pumpDone 由 pump goroutine 独占读写（无锁）。
-	adp        adapter.Adapter   // decode 用的协议适配器（Go SchemaAdapter），StartPump 时一次性注入
-	isUDP      bool              // 该连接是否 UDP（决定调 DecodeUDP / DecodeTCP）
-	inboundCh  chan inboundFrame // 待解码的 raw msg buffer（OnTraffic 投递→pump 消费）
-	controlCh  chan pumpCmd      // pump 控制通道（注册/停止心跳、stop）
-	pumpDone   chan struct{}     // pump goroutine 退出信号，供 WaitPumpDone/WaitDecodeDone/WaitListenDone 等待
-	pumpRun    int32             // 原子标记：1 表示 pump 已启动（CAS 防重复启动）
+	// pump goroutine 独占处理 inbound/control 和心跳 timer；inboundCh/controlCh 由外部投递、pump 消费，
+	// pumpDone 由 pump 关闭、外部等待。adp/isUDP 在 StartPump 时一次性注入后只读。
+	adp       adapter.Adapter   // decode 用的协议适配器（Go SchemaAdapter），StartPump 时一次性注入
+	isUDP     bool              // 该连接是否 UDP（决定调 DecodeUDP / DecodeTCP）
+	inboundCh chan inboundFrame // 待解码的 raw msg buffer（OnTraffic 投递→pump 消费）
+	controlCh chan pumpCmd      // pump 控制通道（注册/停止心跳、stop）
+	pumpDone  chan struct{}     // pump goroutine 退出信号，供 WaitPumpDone/WaitDecodeDone/WaitListenDone 等待
+	pumpRun   int32             // 原子标记：1 表示 pump 已启动（CAS 防重复启动）
 	// hbMu 保护 hb 字段的替换（RegisterHeartbeat/StopHeartbeat 投递 controlCh 前/后读取）。
 	// pump goroutine 内部读写 hb 不需要这把锁（pump 是唯一执行者）；这把锁只保护
 	// 「pump 外部 goroutine 在投递 controlCh 前快速判断当前是否已注册心跳」这类只读快照。
@@ -172,7 +172,7 @@ func (c *Connection) SetSecretKey(key []byte) {
 }
 
 // GetSecretKey 获取通信加密密钥。
-// 返回的切片为只读快照，调用方不得修改其内容（adapter 仅将其传给 Lua 并 stringify 复制）。
+// 返回的切片为只读快照，调用方不得修改其内容；生产 codec 只读使用该快照。
 func (c *Connection) GetSecretKey() []byte {
 	if c == nil {
 		return nil
@@ -467,8 +467,8 @@ func (c *Connection) GetListenResp(routeKey string) *Message {
 //
 // 设计动机（02-track §2-C）：Go SchemaAdapter 后 decode 是纯 Go（无 Lua），但 codec pipeline
 // 仍含解压/校验/hash/加密等线性 CPU 步，inline 进 gnet event loop 会重新引入 loop 卡顿风险；
-// 同时把 inbound decode / listen 分发 / 心跳 timer 合并进同一 goroutine 可消除「心跳 builder
-// 抢 luaMu」这条历史死锁路径（2-B 已让 builder Go-only，pump 进一步去掉独立 goroutine）。
+// 同时把 inbound decode / listen 分发 / 心跳 timer 合并进同一 goroutine；心跳
+// builder 是 Go-only，不触碰业务 LState，pump 进一步去掉独立心跳 goroutine。
 //
 // 必须在 Dial 成功且 conn 注册到 registry 之后、首次 OnTraffic 可能到达之前调用。
 // CAS 防止 reconnect 场景下重复启动。adp 由上层 Robot 经 CodecResolver.Resolve 在拨号前
@@ -841,9 +841,8 @@ func (c *Connection) loadCloseReason() string {
 // 不必等到 pump 自己 ctx.Done 分支。即便投递丢失（pump 正卡在 inbound batch / 已退出），
 // defer 兜底也会停 timer，无泄漏。
 //
-// 历史的「cancel 必须先于 StopHeartbeat 以避免心跳 Builder 抢 luaMu 死锁」约束在 2-B（builder
-// Go-only）+ 2-C3（pump 单 goroutine，builder 在 pump 内同步调用）后已不复存在——builder 不再
-// 接触业务 LState。此处仍保留 cancel-first 顺序只是为了语义清晰。
+// 2-B（builder Go-only）+ 2-C3（pump 单 goroutine，builder 在 pump 内同步调用）后，
+// 心跳 builder 不再接触业务 LState。此处保留 cancel-first 顺序只是为了语义清晰。
 func (c *Connection) doClose() {
 	c.cancel()
 	c.StopHeartbeat()

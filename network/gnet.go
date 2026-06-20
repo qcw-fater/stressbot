@@ -58,9 +58,9 @@ func (r *connRegistry) get(gconn gnet.Conn) *Connection {
 
 // EventServer gnet 事件处理器。
 //
-// adp 在 RobotLocalAdapter 重构后角色收窄为"OnTraffic 热路径的元信息源"：
+// adp 是 OnTraffic 热路径的元信息源：
 //   - HeaderSize / BodyLength（纯 Go 缓存字段，零 Lua 调用）
-//   - 真正的 encode/decode 走 per-Robot 的 RobotAdapter（DialTCP/DialUDP 接收 adp 参数注入）
+//   - decode 使用 DialTCP/DialUDP 注入到 Connection 的 Go SchemaAdapter
 type EventServer struct {
 	gnet.BuiltinEventEngine
 
@@ -329,7 +329,7 @@ func (d *Dialer) Stop() error {
 // DialTCP 建立 TCP 连接并绑定业务层 Connection。
 // ctx 用于超时/取消：如果 ctx 在拨号完成前被取消，返回 context 错误。
 //
-// adp 是 decodeLoop 使用的协议适配器（T2-C1 起由 Robot 在拨号前通过 CodecResolver
+// adp 是 connectionPump 使用的协议适配器（T2-C1 起由 Robot 在拨号前通过 CodecResolver
 // 按 server 串解析后传入的 Go SchemaAdapter）。OnTraffic 走的是 d.server.adp（全局
 // 元信息源，仅 HeaderSize/BodyLength 帧切割，纯 Go）；decode 走连接固定 adp。
 //
@@ -340,7 +340,7 @@ func (d *Dialer) DialTCP(ctx context.Context, address string, conn *Connection, 
 }
 
 // DialUDP 建立 UDP 连接并绑定业务层 Connection。
-// ctx 用于超时/取消：任务停止时不再进入新的 UDP 拨号，避免 Lua action 持有 luaMu 卡死。
+// ctx 用于超时/取消：任务停止时不再进入新的 UDP 拨号。
 //
 // adp 语义同 DialTCP：上层 Robot.ConnectUDP 已 Resolve 非 nil 注入。
 func (d *Dialer) DialUDP(ctx context.Context, address string, conn *Connection, adp adapter.Adapter) (gnet.Conn, error) {

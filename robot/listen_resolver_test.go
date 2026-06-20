@@ -69,3 +69,35 @@ func TestRegisterListen_ResolverHit_NoError(t *testing.T) {
 		t.Fatalf("resolver 命中且无 conn 时 RegisterListen 应返回 nil（跳过注册），got %v", err)
 	}
 }
+
+// TestRegisterListen_MissingListenDef_NoHardFail 守护：listenRefs[].listen 显式引用的
+// listens 项缺失时，RegisterListen 不得在阶段内 hard-fail（返回 error）。
+//
+// 注意：本断言仅锁定「不 hard-fail」这一点，不区分「跳过该条」与「按 nil 回调注册」。
+// 这两种行为在本测试的脚手架下不可观测——network.NewClient 未建立连接，GetTCPConn 返回
+// nil 导致整组被跳过，无论 entry 是否被加入 groups 都观察不到副作用；为可观测化而注入
+// 真实连接或测试专用钩子会超出既有 stubResolver/fakeAdapter 测试风格，得不偿失。
+// 因此「缺失 listen 定义 → 跳过该条（Error 日志 + continue）」与「配置笔误被静默注册成
+// nil 回调队列」的区分由 code review 守护，而非本断言。本断言只防止「配置笔误直接
+// hard-fail 中断整个流程」这一回归。
+func TestRegisterListen_MissingListenDef_NoHardFail(t *testing.T) {
+	res := &stubResolver{byServer: map[string]adapter.Adapter{
+		"tcp:logic": fakeAdapter{},
+	}}
+	r := &Robot{
+		id:       3,
+		account:  "bot_test3",
+		ctx:      context.Background(),
+		cancel:   func() {},
+		resolver: res,
+		client:   network.NewClient("bot_test3", 0, ""),
+	}
+	h := &robotActionHandler{robot: r, flow: &engine.TaskFlow{Listens: map[string]*engine.ListenDef{}}}
+
+	err := h.RegisterListen([]engine.ListenRef{
+		{Server: "tcp:logic", Listen: "missing", Route: map[string]any{"cmd": 1, "act": 2}},
+	})
+	if err != nil {
+		t.Fatalf("缺失 listen 定义不应在 RegisterListen hard-fail，got %v", err)
+	}
+}

@@ -44,8 +44,7 @@ type ManagerConfig struct {
 	//   - encode/心跳/listen：engine.ActionExecutor / robotActionHandler / netSenderAdapter 各自 Resolve；
 	//   - 业务 Lua：经 script.Context.Resolver 在 api_network.go 内 Resolve。
 	// 全链路由 main.go/task_runner 启动期 LoadCodecResolver 构造并透传。
-	// （T2-C2-Lua 删除 ManagerConfig.Adapter *adapter.LuaAdapter：业务 codec 不再经 Lua，
-	// LuaAdapter 仅保留为测试 oracle，生产路径不再构造。）
+	// 业务 codec 不再经 Lua，生产路径只接收 CodecResolver。
 	CodecResolver  adapter.CodecResolver `json:"-"`
 	RequestTimeout time.Duration         `json:"requestTimeout"`
 	MainService    string                `json:"mainService"`
@@ -371,7 +370,8 @@ func (m *Manager) StopAll() CleanupStatus {
 
 // resetBots 停止并清空所有已有机器人，但保持 Manager 可继续创建新机器人。
 // 与 StopAll 不同：不 cancel context、不关闭 doneCh。
-// 并发 Close：单个 robot 卡死（如 lua 嵌套回调死锁）不应阻塞阶段切换。
+// 并发 Close：单个 robot 清理卡住（如长时间 Lua action / executor 退出 / 连接清理）
+// 不应阻塞阶段切换。
 func (m *Manager) resetBots() CleanupStatus {
 	m.mu.Lock()
 	robots := make([]*Robot, len(m.robots))

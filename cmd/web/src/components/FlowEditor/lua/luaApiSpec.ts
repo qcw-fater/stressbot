@@ -153,7 +153,7 @@ const robotModule: LuaModule = {
 
 const networkModule: LuaModule = {
   name: 'network',
-  summary: 'TCP/UDP 网络收发、密钥管理、心跳注册',
+  summary: 'TCP/UDP 网络收发、密钥管理、监听占位',
   functions: [
     {
       name: 'connect_tcp',
@@ -315,7 +315,7 @@ const networkModule: LuaModule = {
       ],
       returns: 'code, data : (number, string|userdata|nil)',
       summary: '等待 TCP 服务端推送（轮询 ListenRefs 预缓存）',
-      detail: 'code: 0=成功 / 31=超时 / 6=取消 / 12=解析失败 / 其他非零=服务端 HeaderErr。需先调用 ensure_tcp_listener() 注册监听占位。阻塞期间会释放 luaMu 让心跳/回调继续。',
+      detail: 'code: 0=成功 / 31=超时 / 6=取消 / 12=解析失败 / 其他非零=服务端 HeaderErr。需先调用 ensure_tcp_listener() 注册监听占位。等待期间只阻塞当前机器人主流程；连接收包与声明式心跳会继续独立运行。',
     },
     {
       name: 'set_tcp_secret_key',
@@ -370,48 +370,6 @@ const networkModule: LuaModule = {
       ],
       returns: '-',
       summary: '为 UDP responseKey 注册监听占位',
-    },
-    {
-      name: 'register_tcp_heartbeat',
-      module: 'network',
-      params: [
-        { name: 'service', type: 'string', doc: '连接名' },
-        { name: 'interval_or_builder', type: 'number | function', doc: '心跳间隔毫秒；也可直接传 builder 函数，此时使用默认心跳间隔' },
-        { name: 'route', type: 'table', optional: true, doc: '路由 {cmd, act}；第二参为 builder 时可省略' },
-        { name: 'builder', type: 'function', optional: true, doc: '动态 body 构造器，返回 string' },
-      ],
-      returns: 'code : number',
-      summary: '注册 TCP 心跳，返回 0 表示成功，否则为 errcode',
-      detail: '支持静态心跳和动态心跳。静态心跳不传 builder，body 固定为空并在注册时预编码；动态心跳传 builder，每次 tick 通过 TryLock 调用，抢不到 luaMu 会跳过本次心跳。第二个参数也可以直接传 builder 函数，此时使用默认心跳间隔。',
-      example: `-- 静态心跳（推荐，body 固定为空）
-local code = network.register_tcp_heartbeat("logic", 5000, {cmd=2, act=1})
-
--- 动态心跳（body 每次变化）
-local code = network.register_tcp_heartbeat("battle", 10000, {cmd=4, act=2}, build_heartbeat)
-
--- 使用默认心跳间隔的动态心跳
-local code = network.register_tcp_heartbeat("logic", build_heartbeat)`,
-    },
-    {
-      name: 'register_udp_heartbeat',
-      module: 'network',
-      params: [
-        { name: 'service', type: 'string', doc: '连接名' },
-        { name: 'interval_or_builder', type: 'number | function', doc: '心跳间隔毫秒；也可直接传 builder 函数，此时使用默认心跳间隔' },
-        { name: 'route', type: 'table', optional: true, doc: '路由 {cmd, act}；第二参为 builder 时可省略' },
-        { name: 'builder', type: 'function', optional: true, doc: '动态 body 构造器，返回 string' },
-      ],
-      returns: 'code : number',
-      summary: '注册 UDP 心跳，返回 0 表示成功，否则为 errcode',
-      detail: '行为同 register_tcp_heartbeat：静态心跳预编码，动态心跳每次 tick 调用 builder；第二个参数直接传 builder 时使用默认心跳间隔。',
-      example: `-- 静态心跳
-local code = network.register_udp_heartbeat("game", 3000, {cmd=1, act=1})
-
--- 动态心跳
-local code = network.register_udp_heartbeat("battle", 150, {cmd=4, act=2}, build_udp_heart)
-
--- 使用默认心跳间隔的动态心跳
-local code = network.register_udp_heartbeat("game", build_udp_heart)`,
     },
   ],
 };
@@ -607,7 +565,7 @@ const utilsModule: LuaModule = {
       module: 'utils',
       params: [{ name: 'ms', type: 'number', doc: '毫秒数' }],
       returns: '-',
-      summary: '休眠（响应 context 取消，自动释放 luaMu）',
+      summary: '休眠（响应 context 取消，仅暂停当前机器人主流程）',
     },
     {
       name: 'time_ms',

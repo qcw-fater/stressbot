@@ -13,7 +13,7 @@ import (
 // 每次心跳触发时调用，返回完整的待发送字节数据（已含消息头+消息体+加密）。
 // 返回 nil 表示本次跳过发送。
 //
-// 2-B 起为 Go-only builder（不再保存 Lua function、不再抢 luaMu）；
+// 2-B 起为 Go-only builder（不再保存 Lua function）；
 // 2-C3 起由 connectionPump 在其单 goroutine 内同步调用，因此 builder 不必线程安全
 // （pump 是唯一执行者），但仍应避免阻塞——若需读取 state，走线程安全 state API。
 type HeartbeatBuilder func() []byte
@@ -46,7 +46,7 @@ type heartbeatRuntime struct {
 // 2-C3 起：本方法**签名保持稳定**（HeartbeatConfig{Interval, Builder func() []byte}），
 // 但实现从「启动独立 runHeartbeat goroutine」改为「投递 pumpCmdHeartbeat 给 connectionPump，
 // 由 pump 在自己的 select 分支里串行安装 cfg + 重置 timer」。这样心跳发送、inbound decode、
-// listen 分发共享同一 pump goroutine，彻底消除旧的「心跳 builder 抢 luaMu」死锁路径。
+// listen 分发共享同一 pump goroutine，builder 不触碰业务 LState。
 //
 // 必须在 StartPump 之后调用（pump 未启动时 controlCh 为 nil，本方法降级为直接写 c.hb + 启动
 // 临时 timer 的兼容路径——但生产路径 dial 总是先 StartPump 后注册心跳，故该降级路径仅用于测试）。

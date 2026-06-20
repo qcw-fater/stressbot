@@ -46,7 +46,6 @@ type Context struct {
 	Resolver  adapter.CodecResolver
 	NetSender engine.NetSender
 	Ctx       context.Context
-	LuaMu     *sync.Mutex
 
 	// Shared 任务级共享状态后端（Redis）。多个 Robot 共享同一实例。
 	// 未启用共享状态（无 Redis 配置 / 任务未使用 share）时为 nil，
@@ -69,7 +68,7 @@ type Context struct {
 	lastActionError  *engine.ActionError
 }
 
-// resetMetrics 在每次 action/callback 脚本开始前清零累加器。
+// resetMetrics 在每次 action 脚本开始前清零累加器。
 func (c *Context) resetMetrics() {
 	if c == nil {
 		return
@@ -243,7 +242,7 @@ func (rp *RuntimePool) Release(L *lua.LState) {
 // ── 脚本入口函数缓存 + 全局表卫生 ──────────────────────────────
 //
 // 历史实现每次执行动作都 NewFunctionFromProto + PCall(0,0) 重跑整块 chunk 来
-// （重新）定义 execute/onMessage，纯属浪费。现在改为：每个 LState 每个脚本的 chunk
+// （重新）定义 execute，纯属浪费。现在改为：每个 LState 每个脚本的 chunk
 // 只跑一次，把入口函数捕获进 registry 缓存、并移出全局表；后续直接取缓存函数调用。
 //
 // 配套：chunk 顶层定义的全局（函数定义、常量表等）在首次加载后并入 baseline 集合，
@@ -263,7 +262,7 @@ func scriptFnCacheKey(scriptName, fnName string) string {
 }
 
 // loadScriptFn 惰性加载脚本入口函数并缓存到当前 LState 的 registry。
-// 首次命中时运行一次 chunk 捕获入口函数（execute / onMessage），随后从全局表移除，
+// 首次命中时运行一次 chunk 捕获指定入口函数（fnName），随后从全局表移除，
 // 并把 chunk 顶层产生的全局并入 baseline 受保护。后续调用直接返回缓存函数。
 func (rp *RuntimePool) loadScriptFn(L *lua.LState, scriptName, fnName string) (lua.LValue, error) {
 	reg := L.Get(lua.RegistryIndex)
@@ -451,49 +450,6 @@ func (rp *RuntimePool) RunBooleanScript(L *lua.LState, scriptName string) (bool,
 	return bool(b), nil
 }
 
-// RunCallbackScript 执行回调脚本。
-// Lua 脚本应定义 `function onMessage(r, msg)` 函数。
-// msg 为 proto 消息对象（LUserData）。回调内部 network API 的 WireBytes 自动累计到 Context。
-func (rp *RuntimePool) RunCallbackScript(L *lua.LState, scriptName string, msgData []byte, s2cProto string) (send, recv int, timing engine.ActionTiming, err error) {
-	ctx := GetContext(L)
-	if ctx != nil {
-		ctx.resetMetrics()
-		defer func() {
-			send, recv, timing = ctx.metrics()
-		}()
-	}
-
-	// 保存栈顶，确保退出时恢复
-	savedTop := L.GetTop()
-	defer L.SetTop(savedTop)
-
-	onMsgFn, err := rp.loadScriptFn(L, scriptName, "onMessage")
-	if err != nil {
-		return 0, 0, engine.ActionTiming{}, err
-	}
-
-	// 创建 robot 和 msg 对象
-	// - 有 s2cProto 配置时：msg 为 proto.Message UserData，通过 proto.get_field_map 解析
-	// - 无 s2cProto 且有原始字节时：msg 为原始二进制字符串（UDP 帧数据等场景）
-	// - 其他：msg = nil
-	robotUD := createRobotUserData(L)
-	var msgArg lua.LValue
-	switch {
-	case s2cProto != "" && len(msgData) > 0:
-		msgArg = createProtoMessageUserData(L, msgData, s2cProto)
-	case len(msgData) > 0:
-		msgArg = lua.LString(msgData)
-	default:
-		msgArg = lua.LNil
-	}
-
-	if err := L.CallByParam(lua.P{Fn: onMsgFn, NRet: 0, Protect: true}, robotUD, msgArg); err != nil {
-		return 0, 0, engine.ActionTiming{}, fmt.Errorf("执行回调脚本 %s 失败: %w", scriptName, err)
-	}
-
-	return 0, 0, engine.ActionTiming{}, nil
-}
-
 // HasScript 检查脚本是否已预编译
 func (rp *RuntimePool) HasScript(name string) bool {
 	_, ok := rp.precompiled[name]
@@ -509,12 +465,11 @@ func (rp *RuntimePool) ListScripts() []string {
 	return names
 }
 
-// registerAPIs 注册所有 Lua API 模块到 LState
+// registerAPIs 注册所有 Lua API 模块到 LState。
 //
-// T2-C2-Lua 起「adapter」Lua 模块（loadAdapterModule，暴露 encode_tcp / decode_udp /
-// expected_route_key 等给业务脚本）已下线——业务 encode/decode 全走 Go CodecResolver
-// （ctx.Resolver.Resolve），不再需要业务 LState 上的 codec.lua 副本。conf/scripts 经 grep
-// 确认零依赖 adapter 模块。codec.lua / error.lua 仅由 adapter.LuaAdapter（测试 oracle）加载。
+// T2-C2-Lua 起「adapter」Lua 模块已下线——业务 encode/decode 全走 Go CodecResolver
+// （ctx.Resolver.Resolve），不再需要业务 LState 上的适配器脚本副本。conf/scripts 经 grep
+// 确认零依赖 adapter 模块。
 func registerAPIs(L *lua.LState) {
 	L.PreloadModule("robot", loadRobotModule)
 	L.PreloadModule("proto", loadProtoModule)

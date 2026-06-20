@@ -47,14 +47,14 @@ func SuggestedPoolSize() int {
 // LuaAdapter 通过 gopher-lua LState 池调用适配器脚本实现 Adapter 接口。
 //
 // 角色变化（T2-C2-Lua 后）：
-//   - 历史（生产用）：池中 N 个 LState 服务 Robot 的 encode/decode 热路径，在 1000+
-//     Robot 并发时成为瓶颈；后改为 RobotAdapter（per-Robot LState）仍生产用。
+//   - 历史（已删的生产路径）：池中 N 个 LState 服务 Robot 的 encode/decode 热路径，
+//     在 1000+ Robot 并发时成为瓶颈；后续过渡到 per-Robot LState，同样已下线。
 //   - 现在：业务 encode/decode 全走 Go CodecResolver（CodecResolver.Resolve 出的
-//     SchemaAdapter，无 luaMu）；LuaAdapter **仅作测试 oracle**：
-//       1. T1 一致性测试（codec/decode_test / adapter/schema_adapter_test / codec/engine_*）
-//          用 NewLuaAdapter 构造的 LuaAdapter 作字节级真值，对拍 Go SchemaAdapter；
-//       2. 持有 codec.lua 字节码 + error.lua 原文，供测试加载；
-//       3. HeaderSize / BodyLength / DescribeError 等接口方法供测试断言。
+//     SchemaAdapter）；LuaAdapter **仅作测试 oracle**：
+//     1. T1 一致性测试（codec/decode_test / adapter/schema_adapter_test / codec/engine_*）
+//     用 NewLuaAdapter 构造的 LuaAdapter 作字节级真值，对拍 Go SchemaAdapter；
+//     2. 持有 codec.lua 字节码，并可在初始化时加载 error.lua 错误码映射；
+//     3. HeaderSize / BodyLength / DescribeError 等接口方法供测试断言。
 //
 // 生产路径（main.go / task_runner.go / robot / script）已**不再构造** LuaAdapter。
 type LuaAdapter struct {
@@ -414,13 +414,8 @@ func (a *LuaAdapter) callDescribeError(code uint64) string {
 	return desc
 }
 
-// （T2-C2-Lua 删除）历史 NewRobotAdapter / robotAdapterFnNames 已下线。
+// （T2-C2-Lua 删除）历史 per-Robot Lua codec 生产路径已下线。
 //
 // 业务 Lua encode/decode 全程走 Go CodecResolver（CodecResolver.Resolve 出的 SchemaAdapter），
 // 不再需要在每个 Robot 的 LState 上注册 codec.lua 副本。LuaAdapter 仅保留为核心测试 oracle
 // （T1 一致性测试用 NewLuaAdapter + EncodeTCP/DecodeTCP/DescribeError 等接口方法对拍）。
-// 相关删除：
-//   - robotAdapterFnNames（"__robot_adapter_*" 注册前缀，已无引用）；
-//   - NewRobotAdapter（在 robot LState 上注册 codec.lua，已无调用方）；
-//   - errorScriptBytes 字段（仅 NewRobotAdapter 复用，已删）；
-//   - adapter/robot_adapter.go 整文件（*RobotAdapter 类型，已删）。

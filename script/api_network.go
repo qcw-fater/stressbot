@@ -8,23 +8,12 @@ import (
 	"stressbot/engine"
 	"stressbot/errcode"
 	stresslog "stressbot/utils/log"
-	"sync"
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 )
-
-// withReleasedMu 临时释放 mu，执行 fn 后重新获取。
-// 通过 defer 保证即使 fn panic 也能重新获取 mu，防止锁状态不一致。
-func withReleasedMu(mu *sync.Mutex, fn func()) {
-	if mu != nil {
-		mu.Unlock()
-		defer mu.Lock()
-	}
-	fn()
-}
 
 // loadNetworkModule 加载 network 命名空间模块。
 // Lua 用法：
@@ -71,7 +60,7 @@ func loadNetworkModule(L *lua.LState) int {
 	// 监听
 	L.SetField(mod, "tcp_listen", L.NewFunction(networkTCPListen))
 	L.SetField(mod, "udp_listen", L.NewFunction(networkUDPListen))
-	// 非阻塞单次 pop（不轮询、不 sleep、不持 luaMu）：取最近一条缓存消息的原始 body
+	// 非阻塞单次 pop（不轮询、不 sleep）：取最近一条缓存消息的原始 body
 	L.SetField(mod, "try_tcp_listen", L.NewFunction(networkTryTCPListen))
 	L.SetField(mod, "try_udp_listen", L.NewFunction(networkTryUDPListen))
 	// 密钥
@@ -292,10 +281,7 @@ func networkConnectTCP(L *lua.LState) int {
 		L.Push(lua.LNumber(errcode.ErrActionCanceled))
 		return 1
 	}
-	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		err = ctx.NetSender.ConnectTCP(service, address)
-	})
+	err := ctx.NetSender.ConnectTCP(service, address)
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
 		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" address="+address)
 		L.Push(lua.LNumber(errcode.ErrActionCanceled))
@@ -328,10 +314,7 @@ func networkConnectUDP(L *lua.LState) int {
 		L.Push(lua.LNumber(errcode.ErrActionCanceled))
 		return 1
 	}
-	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		err = ctx.NetSender.ConnectUDP(service, address)
-	})
+	err := ctx.NetSender.ConnectUDP(service, address)
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
 		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" address="+address)
 		L.Push(lua.LNumber(errcode.ErrActionCanceled))
@@ -349,35 +332,26 @@ func networkConnectUDP(L *lua.LState) int {
 // networkCloseTCP 关闭 TCP 连接。
 // 签名：network.close_tcp(service)
 //
-// **必须用 withReleasedMu**：Connection.Close 内部会同步等待心跳 goroutine 退出
-// （StopHeartbeat → <-hb.done），而心跳 Builder 自身会重新进入 Lua VM 抢 luaMu。
-// 如果这里持着 luaMu 不放，就会形成 executor ↔ heartbeat 循环死锁
-// （historic incident: 12/15 robot 卡死 65 分钟，参见 connection.go doClose 注释）。
 func networkCloseTCP(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
 		return 0
 	}
 	service := L.CheckString(1)
-	withReleasedMu(ctx.LuaMu, func() {
-		ctx.NetSender.CloseTCP(service)
-	})
+	ctx.NetSender.CloseTCP(service)
 	return 0
 }
 
 // networkCloseUDP 关闭 UDP 连接。
 // 签名：network.close_udp(service)
 //
-// 同 networkCloseTCP，必须释放 luaMu 后再调底层 Close，避免与心跳 Builder 死锁。
 func networkCloseUDP(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
 		return 0
 	}
 	service := L.CheckString(1)
-	withReleasedMu(ctx.LuaMu, func() {
-		ctx.NetSender.CloseUDP(service)
-	})
+	ctx.NetSender.CloseUDP(service)
 	return 0
 }
 
@@ -474,12 +448,8 @@ func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 	routeKey := tcpAdp.ExpectedRouteKey(luaValueToRoute(responseRoute))
 	pktLen := len(packet)
 
-	var exchange *engine.NetExchange
-	var reqErr error
-	withReleasedMu(ctx.LuaMu, func() {
-		exchange, reqErr = ctx.NetSender.TCPRequest(service, packet, routeKey,
-			time.Duration(timeout)*time.Second)
-	})
+	exchange, reqErr := ctx.NetSender.TCPRequest(service, packet, routeKey,
+		time.Duration(timeout)*time.Second)
 	if exchange == nil {
 		exchange = &engine.NetExchange{SendWireBytes: pktLen}
 	}
@@ -600,15 +570,10 @@ func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 	}
 
 	pktLen := len(packet)
-	var exchange *engine.NetExchange
-	var reqErr error
-
-	withReleasedMu(ctx.LuaMu, func() {
-		exchange, reqErr = ctx.NetSender.UDPRequest(
-			service, packet, routeKey,
-			time.Duration(timeout)*time.Second,
-		)
-	})
+	exchange, reqErr := ctx.NetSender.UDPRequest(
+		service, packet, routeKey,
+		time.Duration(timeout)*time.Second,
+	)
 	if exchange == nil {
 		exchange = &engine.NetExchange{SendWireBytes: pktLen}
 	}
@@ -714,11 +679,7 @@ func networkHTTPRequest(L *lua.LState) int {
 		}
 	}
 
-	var exchange *engine.HTTPExchange
-	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		exchange, err = ctx.NetSender.HTTPRequest(reqURL, method, contentType, reqBody)
-	})
+	exchange, err := ctx.NetSender.HTTPRequest(reqURL, method, contentType, reqBody)
 	if exchange == nil {
 		exchange = &engine.HTTPExchange{}
 	}
@@ -921,26 +882,31 @@ func networkListen(L *lua.LState, protocol string) int {
 	var exchange *engine.NetExchange
 	var timedOut bool
 
-	withReleasedMu(ctx.LuaMu, func() {
-		deadline := time.Now().Add(time.Duration(timeout) * time.Second)
-		for time.Now().Before(deadline) {
-			if protocol == "tcp" {
-				exchange = ctx.NetSender.GetTCPListenResp(service, routeKey)
-			} else {
-				exchange = ctx.NetSender.GetUDPListenResp(service, routeKey)
+	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
+	for time.Now().Before(deadline) {
+		if protocol == "tcp" {
+			exchange = ctx.NetSender.GetTCPListenResp(service, routeKey)
+		} else {
+			exchange = ctx.NetSender.GetUDPListenResp(service, routeKey)
+		}
+		if exchange != nil {
+			break
+		}
+		if ctx.Ctx != nil {
+			select {
+			case <-time.After(time.Duration(pollMs) * time.Millisecond):
+			case <-ctx.Ctx.Done():
 			}
-			if exchange != nil {
-				return
-			}
+		} else {
 			time.Sleep(time.Duration(pollMs) * time.Millisecond)
-			if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-				return
-			}
 		}
-		if exchange == nil {
-			timedOut = true
+		if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
+			break
 		}
-	})
+	}
+	if exchange == nil && (ctx.Ctx == nil || ctx.Ctx.Err() == nil) {
+		timedOut = true
+	}
 	if exchange == nil {
 		exchange = &engine.NetExchange{}
 	}
@@ -996,8 +962,7 @@ func networkListen(L *lua.LState, protocol string) int {
 //   - code=31（ErrListenTimeout）：队列空、无新消息，data=nil。
 //   - 其他非零：服务端 HeaderErr，data 为原始 body 字符串。
 //
-// 与阻塞版 tcp_listen 的差异：**单次非阻塞 pop**，不轮询、不 sleep、不持 luaMu
-// （非阻塞瞬时调用，无需释放 luaMu）。适用于高频 sync loop 「保最新」消费场景
+// 与阻塞版 tcp_listen 的差异：**单次非阻塞 pop**，不轮询、不 sleep。适用于高频 sync loop 「保最新」消费场景
 // （如 battleAck 追踪：队列容量 1，每轮 pop 最新 ack 写 state）。
 func networkTryTCPListen(L *lua.LState) int { return networkTryListen(L, "tcp") }
 
@@ -1010,8 +975,7 @@ func networkTryUDPListen(L *lua.LState) int { return networkTryListen(L, "udp") 
 // networkTryListen 非阻塞单次 pop 的共享实现。
 //
 // 设计要点：
-//   - 不走 withReleasedMu：单次非阻塞 pop（GetTCP/UDPListenResp 内部走 per-queue 锁），
-//     无阻塞等待，当前 luaMu 仍在但 try_* 不依赖释放它（2-D 删锁前的过渡形态）。
+//   - 单次非阻塞 pop（GetTCP/UDPListenResp 内部走 per-queue 锁），无阻塞等待。
 //   - 不解析 proto：try_* 是「原始 drain」原语，需 proto 解析的消费请用阻塞版 listen。
 //   - queue 空时返回 ErrListenTimeout（code=31），data=nil；与阻塞超时同码便于脚本统一处理。
 //   - 接收 WireBytes 仍由 Context 累计（与 tcp_listen 一致）。
@@ -1171,9 +1135,7 @@ func networkEnsureUDPListener(L *lua.LState) int {
 // adapter 模块（编解码适配器）已下线（T2-C2-Lua）
 // ---------------------------------------------------------------------------
 //
-// 历史 loadAdapterModule / adapterEncodeTCP / adapterDecodeUDP / adapterExpectedRouteKey
-// 等 Lua 模块函数通过 ctx.Adapter（旧 *RobotAdapter，调 *Locked 版本）暴露 codec 给业务
-// 脚本。T2-C2-Lua 起业务 encode/decode 全走 Go CodecResolver（ctx.Resolver.Resolve），
+// 历史 adapter Lua 模块曾暴露 codec 给业务脚本。T2-C2-Lua 起业务
+// encode/decode 全走 Go CodecResolver（ctx.Resolver.Resolve），
 // conf/scripts 经 grep 确认零依赖 adapter 模块，故整条 Lua 模块下线（registerAPIs 也同步
-// 删除 PreloadModule("adapter")）。codec.lua / error.lua 仅由 adapter.LuaAdapter（测试 oracle）
-// 加载，不再注入业务 LState。
+// 删除 PreloadModule("adapter")），不再向业务 LState 注入适配器脚本。
