@@ -17,6 +17,7 @@ import {
   Flex,
   Input,
   Modal,
+  Segmented,
   Select,
   Space,
   Table,
@@ -27,7 +28,7 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadProps } from 'antd';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import { useShallow } from 'zustand/react/shallow';
 import { useEditorStore } from '../FlowEditor/store/editorStore';
@@ -60,6 +61,10 @@ import {
 } from '@/services/resourcesStore';
 import { BaselineSyncModal } from './BaselineSyncModal';
 import { fetchBaselineCodecIndex, fetchBaselineCodec } from '@/services/baselineApi';
+import { parseCodecForEdit } from './codecEditor/codecEdit';
+import { FrameLayoutEditor } from './codecEditor/FrameLayoutEditor';
+import { PipelineEditor } from './codecEditor/PipelineEditor';
+import { RouteKeyEditor } from './codecEditor/RouteKeyEditor';
 
 export interface ResourcesDrawerProps {
   open: boolean;
@@ -242,6 +247,13 @@ function AdapterTab() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createMode, setCreateMode] = useState<'new' | 'copy'>('new');
   const [createValue, setCreateValue] = useState('');
+  // 视图切换：结构化 | 源码（仅 codec 显示；errors.json 隐藏切换、强制源码）
+  const [viewMode, setViewMode] = useState<'struct' | 'source'>('struct');
+
+  // 结构化视图：把 content 解析为 raw（lossless）+ schema（typed 视图）+ error。
+  const parsed = useMemo(() => parseCodecForEdit(content), [content]);
+  const isErrorsView = activeConn === '__errors__';
+  const showStructView = !isErrorsView && viewMode === 'struct' && parsed.schema !== null;
 
   const reloadFiles = async (): Promise<ResourceFile[]> => {
     setLoading(true);
@@ -620,21 +632,65 @@ function AdapterTab() {
         />
       )}
 
-      <div style={{ height: 'calc(100vh - 440px)', minHeight: 240, border: '1px solid var(--border-color, rgba(0,0,0,0.06))' }}>
-        <Editor
-          language="json"
-          theme={monacoTheme}
-          value={content}
-          onChange={(v) => setContent(v ?? '')}
-          options={{
-            fontSize: 12,
-            minimap: { enabled: false },
-            scrollBeyondLastLine: false,
-            fixedOverflowWidgets: true,
-            automaticLayout: true,
+      {/* 视图切换：结构化 | 源码（errors.json 强制源码，隐藏切换） */}
+      {!isErrorsView && (
+        <Flex justify="flex-start" align="center">
+          <Segmented
+            size="small"
+            value={viewMode}
+            onChange={(v) => setViewMode(v as 'struct' | 'source')}
+            options={[
+              { label: '结构化', value: 'struct' },
+              { label: '源码', value: 'source' },
+            ]}
+          />
+        </Flex>
+      )}
+
+      {/* 结构化视图：parse 失败 → 提示切源码 + 降级显示源码 Monaco；成功 → 帧布局/管线/路由键编辑器 */}
+      {showStructView && parsed.raw && parsed.schema ? (
+        <div
+          style={{
+            maxHeight: 'calc(100vh - 440px)',
+            minHeight: 240,
+            overflow: 'auto',
+            border: '1px solid var(--border-color, rgba(0,0,0,0.06))',
+            padding: 12,
           }}
-        />
-      </div>
+        >
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <FrameLayoutEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
+            <PipelineEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
+            <RouteKeyEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
+          </Space>
+        </div>
+      ) : (
+        <>
+          {!isErrorsView && viewMode === 'struct' && parsed.error && (
+            <Alert
+              type="warning"
+              showIcon
+              message="源码不是合法 JSON，请切到源码视图修正"
+              description={parsed.error}
+            />
+          )}
+          <div style={{ height: 'calc(100vh - 440px)', minHeight: 240, border: '1px solid var(--border-color, rgba(0,0,0,0.06))' }}>
+            <Editor
+              language="json"
+              theme={monacoTheme}
+              value={content}
+              onChange={(v) => setContent(v ?? '')}
+              options={{
+                fontSize: 12,
+                minimap: { enabled: false },
+                scrollBeyondLastLine: false,
+                fixedOverflowWidgets: true,
+                automaticLayout: true,
+              }}
+            />
+          </div>
+        </>
+      )}
 
       {/* 新建/复制连接 Modal */}
       <Modal

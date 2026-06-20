@@ -1,0 +1,22 @@
+/* codecEditor — 帧布局编辑器内联输入与表格行的轻样式。
+   内联 input 复用 antd 的圆角/边框，使其与 InputNumber 视觉一致。 */
+.flet-input {
+  padding: 1px 7px;
+  font-size: 12px;
+  line-height: 22px;
+  border: 1px solid var(--border-color, #d9d9d9);
+  border-radius: 6px;
+  background: var(--field-bg, #fff);
+  color: var(--text-color, rgba(0, 0, 0, 0.88));
+  outline: none;
+}
+
+.flet-input:focus {
+  border-color: #1677ff;
+  box-shadow: 0 0 0 2px rgba(5, 145, 255, 0.1);
+}
+
+/* 字节条带越界/重叠行：左侧细红条提示（错误明细走 liveErrors）。 */
+.flet-row-bad > td {
+  box-shadow: inset 3px 0 0 #ff4d4f;
+}
