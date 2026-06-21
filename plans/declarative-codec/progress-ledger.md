@@ -119,6 +119,16 @@
 
 **🏁 Batch 3 完成（2026-06-20，待用户确认提交）**：算法清单 + 实时预览接线完成。algo 下拉（encrypt↔cipher 映射）+ 按算法动态 params 替掉 B2-B staging；encode/decode 预览面板走后端真实引擎（`POST /sbot/codec/preview`），纯编辑辅助不入库。前端 tsc exit 0 + vitest 248/248。Batch 3 纯前端。
 
+### T3 Batch 4 — §3.6/3.7/3.8 收尾（进行中）
+
+| 任务 | 内容 | 状态 |
+|---|---|---|
+| B4-A | FlowEditor 追平 T2：ListenRef.queueSize + tcpHeartbeat/udpHeartbeat 动作（ActionEditor 心跳表单，body 三模式互斥）+ HeartbeatField 类型 + 禁 ListenDef.script 入口（fail-loud 校验）+ refsCheck 心跳/queueSize/script 校验。 | ✅ done（review clean；类型严格镜像 Go、266 测试绿。**bindings 子集 plan-deviation 已裁定**：计划 §3.6 写「只 fixed/state/counter/timestamp」但 counter/timestamp 非 BindingType、Go 允许全 17 种——按全局「以 Go 为准」约束采 Go-actual 全 17 种，不设假 UI 约束。3 Minor：switchKind 残留 'lua' 死分支、intervalMs `(v as number)??undefined` 类型卫生、bindings 子集关联项） |
+| B4-B | routeKey 从 refsGraph JSON 排序伪 key 改为按 codec.json routeKeyTemplate 真实计算（listen 去重/校验更准）；协议配置缺失/有误时提示不静默伪 key。 | ✅ done（review clean；computeRouteKey/loadRouteKeyTemplates 正确、server 感知 routeKey + ROUTEKEY_CODEC_MISSING 不静默 warning、cache 失效 subscribe→refresh 已验。Important fix：cache 加载后未推 React 信号致 warning 残留——加 editorStore.routeKeyTemplatesVersion + bump，ValidationReport/Toolbar useMemo 加依赖） |
+| B4-C | 删 luaApiSpec adapterModule + LuaApiPopover adapter 项 + 清 adapter.expected_route_key stale 文案 + 测试同步；README/术语清理。 | ✅ done（controller 核验：grep adapterModule/expected_route_key 清零、adapterModule 已删、287 测试绿；保留内部 adapter 命名/历史注释非 stale） |
+
+**🏁 Batch 4 完成（2026-06-21，待用户确认提交）= T3 全轨完成**：FlowEditor 追平 T2（queueSize/心跳动作/禁 script）、routeKey 真实计算（codec.json routeKeyTemplate）、Lua 文档清理。前端 tsc exit 0 + vitest 287/287。Batch 4 纯前端。**T3 四批（Batch 1-4）全部完成**，下一步 = whole-branch review（整条 T3 跨切片集成）→ 合流 master（单独确认）。
+
 ## 完成记录
 
 - T1.1: complete — schema+Validate+errors，59/59 测试通过，review clean（仅 gofmt minor，已修）。工作树未提交（待 T1 批次确认）。文件：codec/schema.go, codec/errors.go, codec/schema_test.go, codec/testdata/*。
