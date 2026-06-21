@@ -2,21 +2,21 @@
 
 ## 1. 概述
 
-stressbot 采用 **Network / Adapter / Business** 三层架构。所有协议编解码知识从 Go 引擎移至用户编写的 Lua 适配器脚本（`codec.lua`），使 Go 引擎协议无关，支持任意二进制消息头协议的游戏服务器压测。
+stressbot 采用 **Network / Adapter / Business** 三层架构。生产运行时通过声明式 `*_codec.json` 加载协议编解码规则，由 `CodecResolver` 按 `<proto>:<service>` 连接串解析到对应的 `SchemaAdapter`（Go codec），使 Go 引擎协议无关，支持多连接使用不同协议编解码配置。
 
-**消息体序列化格式**：本工具固定使用 Protobuf（通过 `protox` 动态加载 `.proto` 文件）。对于非 Protobuf 服务器，用户通过 Lua 脚本手动构建 body 字节（`c2sProto` 留空时 `buildBody` 返回 nil，Lua 负责全权构建）。
+**消息体序列化格式**：本工具固定使用 Protobuf（通过 `protox` 动态加载 `.proto` 文件）。协议头、路由键、加解密和错误码描述由每个连接绑定的声明式 codec 负责；`codec.lua` / `LuaAdapter` 不再参与生产编解码，仅作为测试真值与历史迁移参考保留。
 
 ### 1.1 重构目标
 
-将协议编解码知识完全移入用户编写的 Lua 适配器脚本，Go 引擎保持协议无关，从而实现对任意消息头协议的游戏服务器压测支持。切换服务器只需更换 `codec.lua` + `flow.json` + `.proto` 文件，无需修改任何 Go 代码。
+将协议编解码知识从 Go 引擎硬编码中抽离为声明式 codec 配置。生产路径启动时扫描/加载 `*_codec.json`，构建 `CodecResolver`，每条 `<proto>:<service>` 连接使用独立的 `SchemaAdapter`。切换服务器或连接协议只需更换对应 codec 配置、`flow.json` 和 `.proto` 文件，无需修改业务 Go 代码。
 
 ### 1.2 强制约束
 
 | 约束 | 说明 |
 |------|------|
-| Lua 版本 | 项目使用 `gopher-lua`，实现 Lua 5.1，不支持 `string.pack`/`string.unpack`。字节操作必须用 `string.byte`/`string.char` + `bit` 模块 |
-| gnet 热路径 | `OnTraffic` 每包都调用，`BodyLength` 必须是纯 Go 操作；通过初始化时从 Lua 缓存元信息实现 |
-| LuaAdapter 池隔离 | adapter 池 LState 只注册 `bit` 和 `zlib` 模块，不注册业务 API；script 层使用 per-robot LState，两者严格隔离 |
+| 声明式 codec | 生产编解码由 `conf/adapter/*_codec.json` 描述，文件名规约 `<proto>_<service>_codec.json`，映射到运行时 server 串 `<proto>:<service>` |
+| gnet 热路径 | `OnTraffic` 每包都调用，`BodyLength` 必须是纯 Go 操作；由 `SchemaAdapter`/`SchemaCodec` 的编译产物直接解析 |
+| 连接级适配器 | `CodecResolver` 按 `<proto>:<service>` 显式解析适配器，无默认 fallback；缺映射由调用方 fail loud |
 | TCP/UDP 解码独立 | Adapter 接口提供 `DecodeTCP` 和 `DecodeUDP` 两个独立方法，允许对 TCP/UDP 使用不同的解码策略 |
 
 ## 2. 三层架构
@@ -27,14 +27,14 @@ stressbot 采用 **Network / Adapter / Business** 三层架构。所有协议编
 ┌─────────────────────────────────────┐
 │ Business Layer（engine + robot）      │  流程执行、状态管理、动作调度
 ├─────────────────────────────────────┤
-│ Adapter Layer（adapter 包）           │  协议帧编解码（Lua 桥接）
+│ Adapter Layer（adapter 包）           │  协议帧编解码（CodecResolver + SchemaAdapter）
 ├─────────────────────────────────────┤
 │ Network Layer（network 包 + gnet）    │  TCP/UDP 连接管理、收发、心跳
 └─────────────────────────────────────┘
 ```
 
 - **Business Layer**：流程引擎执行 flow.json 中定义的节点图，通过 `ActionDef` 声明式描述消息收发。不感知任何协议细节。
-- **Adapter Layer**：通过 `Adapter` 接口桥接 Go 引擎与 Lua 适配器脚本。Go 只调用接口方法，不感知具体协议格式。
+- **Adapter Layer**：通过 `CodecResolver` 将 `<proto>:<service>` 连接串解析为对应 `SchemaAdapter`。Go 引擎只调用 `Adapter` 接口方法，不感知具体协议格式。
 - **Network Layer**：基于 gnet 的连接管理，负责 TCP/UDP 帧分割、请求-响应匹配、持久化监听、心跳。
 
 ### 2.2 包依赖图
@@ -42,13 +42,13 @@ stressbot 采用 **Network / Adapter / Business** 三层架构。所有协议编
 ```
 cmd/agent  ->  robot/  ->  engine/  ->  state/
                           ->  protox/
-                          ->  adapter/  <-  (gopher-lua only)
+                          ->  adapter/  ->  codec/
                ->  network/ ->  adapter/
                ->  script/  ->  adapter/
                            ->  engine/
 ```
 
-`adapter/` 包只依赖 `gopher-lua` 和标准库，不依赖项目内其他包，无循环依赖风险。
+`adapter/` 包依赖 `codec/` 和标准库组装生产 `SchemaAdapter`/`CodecResolver`；历史 `LuaAdapter` 文件仅供测试对拍与迁移参考使用，不在生产加载路径中。
 
 ### 2.3 数据流（发送）
 
@@ -67,7 +67,7 @@ flow.json (route any)
 gnet.OnTraffic()
   -> adapter.HeaderSize()（纯 Go，缓存值）
   -> adapter.BodyLength(headerData)（纯 Go，缓存逻辑）
-  -> adapter.DecodeTCP/UDP(data, secretKey)（Lua 调用）
+  -> adapter.DecodeTCP/UDP(data, secretKey)（SchemaAdapter / Go codec）
   -> Connection.OnReceive(routeKey, body, headerErr)
   -> responseMap[routeKey] 或 listenResp[routeKey]
 ```
@@ -80,16 +80,16 @@ gnet.OnTraffic()
 
 ```go
 type Adapter interface {
-    // ─── 帧分割（纯 Go 实现，无 Lua 调用）────────────────────────
+    // ─── 帧分割（纯 Go 实现）────────────────────────────────────
 
     // HeaderSize 返回消息头固定字节数。
     HeaderSize() int
 
     // BodyLength 从消息头字节中解析消息体长度。
-    // 此方法在 gnet 热路径中被每包调用，禁止进行任何 Lua 调用。
+    // 此方法在 gnet 热路径中被每包调用，禁止进行任何阻塞操作。
     BodyLength(headerData []byte) int
 
-    // ─── 编解码（Lua 调用）──────────────────────────────────────
+    // ─── 编解码（SchemaAdapter / Go codec）──────────────────────
 
     // EncodeTCP 将路由信息+消息体编码为完整 TCP 数据包。
     EncodeTCP(route any, body []byte, secretKey []byte) []byte
@@ -108,7 +108,7 @@ type Adapter interface {
 
     // ─── 生命周期 / 辅助 ─────────────────────────────────────────
 
-    // Close 释放适配器持有的资源（如 LState 池）。
+    // Close 释放适配器持有的资源（SchemaAdapter 为 no-op）。
     Close()
 
     // DescribeError 将服务端协议头错误码映射为可读描述。
@@ -118,16 +118,16 @@ type Adapter interface {
 
 ### 3.2 方法分类
 
-**热路径方法（纯 Go，零 Lua 调用）**：
+**热路径方法（纯 Go，零阻塞）**：
 
 | 方法 | 返回值 | 用途 | 调用频率 |
 |------|--------|------|----------|
 | `HeaderSize()` | 缓存的固定 int | 帧头大小 | gnet OnTraffic 每帧 |
 | `BodyLength(headerData)` | 纯 Go 计算 | 从帧头解析 body 长度 | gnet OnTraffic 每帧 |
 
-这两个方法在初始化时从 Lua 获取并缓存到 Go 结构体。gnet 的 `OnTraffic`（每帧必调）**永不调用 Lua**。
+这两个方法来自 `SchemaCodec` 编译产物，gnet 的 `OnTraffic`（每帧必调）不执行脚本、不做 I/O。
 
-**Lua 桥接方法**：
+**SchemaAdapter 方法**：
 
 | 方法 | 用途 | 调用时机 |
 |------|------|----------|
@@ -137,17 +137,17 @@ type Adapter interface {
 | `DecodeUDP(data, secretKey)` | UDP 消息解码 | gnet OnTraffic 收到完整帧时 |
 | `ExpectedRouteKey(route)` | 将 route 转换为 routeKey | 请求-响应匹配、监听注册时 |
 | `DescribeError(code)` | 错误码描述 | headerErr != 0 时 |
-| `Close()` | 释放 LState 池 | 程序退出时 |
+| `Close()` | 释放适配器资源（SchemaAdapter 为 no-op） | 程序退出时 |
 
 ### 3.3 route 不透明设计
 
-`route` 参数类型为 `any`，Go 引擎不解析其内部结构，逐字传递给 Lua。典型格式：
+`route` 参数类型为 `any`，Go 引擎不解析其内部结构，逐字传递给连接对应的 `SchemaAdapter`。典型格式：
 
 ```json
 {"cmd": 1, "act": 1}
 ```
 
-JSON 中的数值被 Go 反序列化为 `float64`，通过 `RouteToLuaValue` 转换为 Lua LNumber（整数值转为 int64 避免浮点问题）。
+JSON 中的数值被 Go 反序列化为 `float64`，`SchemaCodec` 按 codec schema 中声明的路径/类型读取并编码，Go 引擎不直接解释业务路由字段。
 
 ### 3.4 与计划的差异
 
@@ -157,233 +157,111 @@ JSON 中的数值被 Go 反序列化为 `float64`，通过 `RouteToLuaValue` 转
 | headerErr 类型 | `uint16` | `uint64` |
 | Close 方法 | 无 | 有 `Close()` |
 | DescribeError 方法 | 无 | 有 `DescribeError(code uint64) string` |
-| UDPEncryptOffset | 有 `UDPEncryptOffset() int` 方法 | 无，偏移量完全由 codec.lua 内部管理 |
+| UDPEncryptOffset | 有 `UDPEncryptOffset() int` 方法 | 无，偏移量由每份 `*_codec.json` 的 codec schema 声明 |
 | ExpectedResponseKey | `ExpectedResponseKey(route)` | `ExpectedRouteKey(route)`（方法名不同） |
 
-## 4. LuaAdapter 实现
+## 4. 生产适配器实现（CodecResolver + SchemaAdapter）
 
-`adapter/lua_adapter.go` -- 通过 gopher-lua LState 池调用适配器脚本实现 Adapter 接口。
+生产运行时不再加载 `LuaAdapter` / `codec.lua`。启动流程通过 `adapter.InferCodecMap` 扫描 `conf/adapter/*_codec.json`，再由 `adapter.LoadCodecResolver(codecDir, codecs, "errors.json")` 为每个 `<proto>:<service>` 连接构建 `SchemaAdapter`。同一 codec 文件被多个连接引用时会编译一次并复用同一个无状态 Adapter 实例。
 
-### 4.1 结构体
+`adapter/lua_adapter.go` 保留为测试 oracle 与历史迁移参考：单元测试用它和 `codec.lua` 做字节级对拍，确认声明式 Go codec 与迁移前行为一致；生产 main/task runner 不应调用 `NewLuaAdapter`。
 
-```go
-type LuaAdapter struct {
-    states      chan *lua.LState   // 有界 channel 池，容量 = poolSize
-    scriptProto *lua.FunctionProto // 预编译的适配器脚本字节码
-
-    // 初始化时从 Lua 缓存的元信息
-    headerSize  int            // 消息头固定字节数
-    bodyLenInfo BodyLengthInfo // 消息体长度解析元信息
-
-    // error.lua 错误码映射（可选功能）
-    hasErrorMap    bool     // 是否成功加载了 error.lua
-    errorDescCache sync.Map // uint64 -> string 永久缓存
-}
-```
-
-编译时接口断言：`var _ Adapter = (*LuaAdapter)(nil)`
-
-### 4.2 LState 池
-
-- **池大小**：默认 CPU 核心数，可通过配置 `adapterPoolSize` 调整
-- **实现**：有界 channel 池（`chan *lua.LState`），容量 = poolSize
-- **获取超时**：30 秒（`lstateAcquireTimeout`），超时返回 nil
-- **溢出释放**：池满时直接关闭多余 LState（防止泄漏）
+### 4.1 CodecResolver
 
 ```go
-const lstateAcquireTimeout = 30 * time.Second
-
-func (a *LuaAdapter) acquire() *lua.LState {
-    select {
-    case L := <-a.states:
-        return L
-    case <-time.After(lstateAcquireTimeout):
-        return nil  // 超时
-    }
-}
-
-func (a *LuaAdapter) release(L *lua.LState) {
-    select {
-    case a.states <- L:
-    default:
-        L.Close()  // 池满，关闭溢出 LState
-    }
+type CodecResolver interface {
+    Resolve(server string) Adapter
 }
 ```
 
-### 4.3 初始化流程
+`server` 串固定为 `"<proto>:<service>"`，例如 `"tcp:logic"`、`"tcp:battle"`、`"udp:battle"`。resolver 内部是显式 map：
+
+- `Resolve(server)` 命中时返回该连接的 `Adapter`。
+- 缺映射返回 nil，不做默认 codec fallback；调用方负责报错或按当前路径定义处理。
+- 构造完成后 map 只读，并发 Resolve 无需加锁。
+
+### 4.2 SchemaAdapter
+
+```go
+type SchemaAdapter struct {
+    c *codec.SchemaCodec
+}
+```
+
+`SchemaAdapter` 是 `codec.SchemaCodec` 的 `adapter.Adapter` 薄包装：
+
+- `HeaderSize` / `BodyLength` / `EncodeTCP` / `EncodeUDP` / `DecodeTCP` / `DecodeUDP` / `ExpectedRouteKey` / `DescribeError` 均委托给编译后的 `SchemaCodec`。
+- 编译产物无可变状态，任意 goroutine 并发调用不需要加锁。
+- `Close()` 是幂等 no-op。
+
+### 4.3 加载流程
 
 ```
-NewLuaAdapter(poolSize, scriptPath, errorMapPath)
+InferCodecMap(codecDir)
     |
-    +-- Step 1: 编译脚本
-    |       tmpL.LoadFile(scriptPath) -> FunctionProto
+    +-- 扫描 *_codec.json
+    +-- 按文件名 <proto>_<service>_codec.json 推断 server 串 <proto>:<service>
+
+LoadCodecResolver(codecDir, codecs, errorsFile)
     |
-    +-- Step 2: 预创建 LState 池
-    |       for i in 0..poolSize:
-    |           newLState() -> 注册 bit + zlib 模块
-    |           initLState() -> 执行脚本 + 缓存函数到 registry
-    |
-    +-- Step 3: 缓存元信息
-    |       acquire() -> cacheMetaInfo() -> release()
-    |       调用 header_size() 和 body_length() 一次
-    |
-    +-- Step 4: 可选加载 error.lua
-            遍历所有 LState，加载 describe_error 函数
+    +-- 可选加载共享 errors.json（codec.LoadErrorMap）
+    +-- 按 server 串稳定排序遍历 codecs map
+    +-- 每份 codec.LoadSchema(file)
+    +-- NewSchemaAdapter(schema, errorMap)
+    +-- 同一文件名 dedup，多个 server 复用同一 Adapter
+    +-- NewCodecResolver(byServer)
 ```
 
-**Step 1 -- 编译脚本**：
+**失败策略**：codec 映射为空、目录不可读、文件名无法解析、codec 文件缺失/解析失败/校验失败、`errors.json` 非空但加载失败，均返回中文 error，启动期 fail loud。
 
-使用临时 LState 编译 `codec.lua`，得到 `FunctionProto`（字节码）。后续每个池中 LState 通过 `NewFunctionFromProto` 创建函数，避免重复编译。
+### 4.4 codec schema 方法映射
 
-**Step 2 -- 预创建 LState 池**：
+每份 `*_codec.json` 编译为不可变 `SchemaCodec` 后，`SchemaAdapter` 对外暴露统一 Adapter 接口：
 
-每个 LState 执行以下初始化：
-1. `lua.NewState()` 创建空白 LState
-2. `PreloadModule("bit", LoadBitModule)` 注册 bit 模块
-3. `RegisterZlibModule(L)` 注册 zlib 模块
-4. 从预编译的 FunctionProto 创建函数并执行脚本
-5. 从全局表查找 7 个必需函数，缓存到 Lua registry（`__adapter_*` 前缀）
-6. 清理全局函数名（置为 nil，防篡改）
+| Adapter 方法 | SchemaCodec 行为 | 用途 |
+|--------------|------------------|------|
+| `HeaderSize()` | 返回 schema 中声明的 header 大小 | gnet 帧切割 |
+| `BodyLength(headerData)` | 按 schema 声明的 offset/type/includesHeader 纯 Go 解析 | gnet 帧切割 |
+| `EncodeTCP(route, body, secretKey)` | 按 TCP encode schema 写头、压缩/加密/校验、拼包 | TCP 发送 |
+| `EncodeUDP(route, body, secretKey)` | 按 UDP encode schema 写头、偏移加密、拼包 | UDP 发送 |
+| `DecodeTCP(data, secretKey)` | 按 TCP decode schema 解析 headerErr/routeKey/body | TCP 收包 |
+| `DecodeUDP(data, secretKey)` | 按 UDP decode schema 解析 headerErr/routeKey/body | UDP 收包 |
+| `ExpectedRouteKey(route)` | 按 schema 的 routeKey 声明从发送 route 计算响应键 | 请求匹配、监听注册 |
+| `DescribeError(code)` | 查询共享 `errors.json` 编译出的 code→desc map | headerErr 描述 |
+| `Close()` | no-op | 接口一致性 |
 
-初始化失败时清理已创建的 LState（`closeAll()`）。
+### 4.5 LuaAdapter 的保留范围
 
-**Step 3 -- 缓存元信息**：
+`LuaAdapter` / `codec.lua` 当前只用于：
 
-调用 `cacheMetaInfo(L)` 一次性获取并缓存：
-- `header_size()` -> `a.headerSize`
-- `body_length()` -> `a.bodyLenInfo`（`BodyLengthInfo` 结构体）
+1. **测试 oracle**：`adapter/schema_adapter_test.go` 用旧 Lua 编码结果与 `SchemaAdapter` 字节级对拍。
+2. **迁移审计**：`codec/migration_test.go` 用 `error.lua` 条目数/抽样描述校验迁移后的 `errors.json` 覆盖率。
+3. **历史文档/回溯**：解释声明式 codec 的迁移来源。
 
-**Step 4 -- 可选加载 error.lua**：
+生产路径使用 `LoadCodecResolver` + `SchemaAdapter`，不得以 `NewLuaAdapter` 作为运行时兜底。
 
-如果提供了 `errorMapPath`：
-1. 读取 error.lua 文件内容
-2. 在每个 LState 中执行 `DoString`
-3. 从全局表查找 `describe_error` 函数
-4. 缓存到 registry（`__adapter_describe_error`），清理全局名
+## 5. BodyLength 元信息 -- 消息体长度解析
 
-### 4.4 Lua 函数注册表
-
-每个 LState 中缓存以下 7 个必需函数（registry 前缀 `__adapter_`）：
-
-| Lua 函数名 | registry 键 | 用途 |
-|------------|-------------|------|
-| `header_size` | `__adapter_header_size` | 返回消息头大小（仅初始化时调用） |
-| `body_length` | `__adapter_body_length` | 返回 body 长度元信息（仅初始化时调用） |
-| `encode_tcp` | `__adapter_encode_tcp` | TCP 消息编码 |
-| `encode_udp` | `__adapter_encode_udp` | UDP 消息编码 |
-| `decode_tcp` | `__adapter_decode_tcp` | TCP 消息解码 |
-| `decode_udp` | `__adapter_decode_udp` | UDP 消息解码 |
-| `expected_route_key` | `__adapter_expected_route_key` | 路由键计算 |
-
-可选函数：
-
-| Lua 函数名 | registry 键 | 用途 |
-|------------|-------------|------|
-| `describe_error` | `__adapter_describe_error` | 错误码描述映射 |
-
-**与计划的差异**：计划中 Lua 函数名为 `encode`、`decode`、`expected_response_key`。实际代码中为 `encode_tcp`、`decode_tcp`、`decode_udp`、`expected_route_key`。函数名分离是因为实际代码将 TCP/UDP 编解码分为独立函数。
-
-### 4.5 方法实现详解
-
-**HeaderSize()**：
-
-```go
-func (a *LuaAdapter) HeaderSize() int { return a.headerSize }
-```
-
-直接返回缓存值，零 Lua 调用。
-
-**BodyLength(headerData)**：
-
-```go
-func (a *LuaAdapter) BodyLength(headerData []byte) int {
-    return ReadBodyLength(headerData, a.bodyLenInfo, a.headerSize)
-}
-```
-
-委托给纯 Go 的 `ReadBodyLength`，零 Lua 调用。
-
-**EncodeTCP(route, body, secretKey)**：
-
-```go
-func (a *LuaAdapter) EncodeTCP(route any, body []byte, secretKey []byte) []byte {
-    return a.encode("__adapter_encode_tcp", route, body, secretKey)
-}
-```
-
-通用 `encode` 方法：
-1. 从池中 acquire LState
-2. 从 registry 获取函数
-3. 调用 `RouteToLuaValue(L, route)` 转换路由参数
-4. 转换 body 和 secretKey 为 Lua 字符串（空值用 LNil）
-5. `CallByParam` 调用 Lua 函数（NRet=1, Protect=true）
-6. 读取返回值，Pop 栈，归还 LState
-7. 调用失败时打印错误日志并返回 nil
-
-**EncodeUDP(route, body, secretKey)**：
-
-与 EncodeTCP 结构完全相同，调用 `__adapter_encode_udp`。
-
-**DecodeTCP(data, secretKey)** / **DecodeUDP(data, secretKey)**：
-
-```go
-func (a *LuaAdapter) DecodeTCP(data []byte, secretKey []byte) (string, []byte, uint64) {
-    return a.decode("__adapter_decode_tcp", data, secretKey)
-}
-```
-
-通用 `decode` 方法：
-1. acquire LState
-2. 从 registry 获取函数
-3. 转换 data 和 secretKey 为 Lua 值
-4. `CallByParam`（NRet=3, Protect=true）
-5. 按栈顺序读取：`headerErr(uint64)`, `body([]byte)`, `routeKey(string)`
-6. Pop 3 个返回值，归还 LState
-7. 调用失败时返回 `("", nil, 0)`
-
-**ExpectedRouteKey(route)**：
-
-1. acquire LState
-2. 从 registry 获取 `__adapter_expected_route_key`
-3. 转换 route 为 Lua 值
-4. 调用 Lua 函数（NRet=1）
-5. 返回字符串结果
-
-**DescribeError(code)**：
-
-1. 检查 `hasErrorMap` 标志
-2. 查 `errorDescCache`（sync.Map）缓存
-3. 缓存未命中时调用 `callDescribeError`
-4. 结果（含空字符串）永久缓存
-
-**Close()**：
-
-```go
-func (a *LuaAdapter) Close() { a.closeAll() }
-```
-
-`closeAll` 循环从 channel 中取出所有 LState 并 Close。
-
-## 5. BodyLengthInfo -- 消息体长度元信息
-
-`adapter/helpers.go` 定义。
+声明式 codec schema 中定义。
 
 ### 5.1 结构
 
 ```go
-type BodyLengthInfo struct {
-    Offset         int    // header 中 body length 字段的字节偏移
-    FieldType      string // "uint32_le" / "uint32_be" / "uint16_le" / "uint16_be"
-    IncludesHeader bool   // length 值是否包含 header 自身大小
+{
+  "frame": {
+    "headerSize": 12,
+    "bodyLength": {
+      "offset": 0,
+      "type": "uint32_le",
+      "includesHeader": true
+    }
+  }
 }
 ```
 
-### 5.2 ReadBodyLength 纯 Go 实现
+### 5.2 BodyLength 纯 Go 实现
 
-```go
-func ReadBodyLength(headerData []byte, info BodyLengthInfo, headerSize int) int
-```
+`codec.SchemaCodec.BodyLength(headerData)` 在编译后的 schema 上执行，不调用 Lua、不访问网络、不分配业务对象。
 
 支持 4 种字段类型：
 - `uint32_le`：小端 32 位无符号整数
@@ -392,67 +270,40 @@ func ReadBodyLength(headerData []byte, info BodyLengthInfo, headerSize int) int
 - `uint16_be`：大端 16 位无符号整数
 
 处理逻辑：
-1. 按 FieldType 从 headerData 的 Offset 位置读取原始值
-2. 如果 `IncludesHeader == true`，减去 headerSize
+1. 按 schema `type` 从 headerData 的 `offset` 位置读取原始值
+2. 如果 `includesHeader == true`，减去 headerSize
 3. 结果 < 0 时置为 0
 4. headerData 长度不足时返回 0
 
-## 6. RouteToLuaValue -- 类型转换
+## 6. Route 取值与类型转换
 
-`adapter/helpers.go`
+`route any` 来自 flow.json 的 action/listenRef 配置，Go 引擎保持不透明传递。`SchemaCodec` 根据 codec schema 中的字段路径读取 route 值，并在写 header 或计算 routeKey 时按声明类型转换。
 
-```go
-func RouteToLuaValue(L *lua.LState, route any) lua.LValue
-```
+关键规则：
 
-将 Go 的 `route any` 转换为 Lua 值。转换规则：
+| 输入来源 | 处理方式 | 说明 |
+|----------|----------|------|
+| `nil` | 按 schema 默认/空路由处理 | 如密钥交换等无路由请求 |
+| `map[string]any` | 按 path 读取字段 | 支持嵌套路径 |
+| JSON number (`float64`) | 按目标字段类型转整数/浮点 | 避免由 Go 引擎硬编码 cmd/act |
+| `string` / `bool` | 按 schema 声明转换 | 转换失败在 codec 编译/执行路径报错 |
 
-| Go 类型 | Lua 类型 | 说明 |
-|---------|----------|------|
-| `nil` | `LNil` | 无路由（如密钥交换） |
-| `map[string]any` | `LTable` | 递归转换嵌套结构 |
-| `float64`（整数值） | `LNumber(int64)` | 避免 "3.0" 格式问题 |
-| `float64`（非整数） | `LNumber(float64)` | 保留小数 |
-| `string` | `LString` | 直接转换 |
-| `bool` | `LBool` | 直接转换 |
-| `int` | `LNumber` | 直接转换 |
-| `int64` | `LNumber` | 直接转换 |
-| 其他 | `LString(fmt.Sprintf)` | 兜底格式化 |
+**关键细节**：路由键格式由每份 codec schema 的 routeKey 规则决定，典型格式仍可为 `"3:1"`，但也可以是其他协议需要的字符串。
 
-**关键细节**：JSON 中的数值反序列化为 `float64`，整数值统一转为 `int64` 以保证路由键字符串一致（`"3:1"` 而非 `"3.0:1.0"`）。
+## 7. codec 算法模块
 
-## 7. Lua 辅助模块
+生产 codec 的压缩、加密、校验等步骤由 `codec/` 包的算法注册表提供，schema 只声明步骤和参数，运行时调用 Go 实现。
 
-### 7.1 bit 模块
+当前迁移后的生产 codec 覆盖：
 
-`adapter/helpers.go` -- `LoadBitModule(L *lua.LState) int`
+| 能力 | 说明 |
+|------|------|
+| GZIP | 使用 Go 标准库 `compress/gzip`，与服务器协议的 RFC 1952 格式一致 |
+| XOR | 支持按 offset 部分加解密，UDP 可保留前 N 字节明文 |
+| BCC | 对 header/body 执行协议要求的异或校验 |
+| header 读写 | 按 schema 声明的 offset/type 写入或读取字段 |
 
-Lua 5.1 不支持位运算符，通过此模块提供 7 个位运算函数：
-
-| 函数 | 签名 | 说明 |
-|------|------|------|
-| `bxor(a, b)` | `a ^ b` | 按位异或 |
-| `band(a, b)` | `a & b` | 按位与 |
-| `bor(a, b)` | `a \| b` | 按位或 |
-| `bnot(a)` | `^a` | 按位取反 |
-| `lshift(a, n)` | `a << n` | 左移 |
-| `rshift(a, n)` | `int(uint(a) >> n)` | 右移（无符号） |
-| `rol(a, n)` | 循环左移 8 位 | 字节旋转 |
-
-### 7.2 zlib 模块
-
-`adapter/lua_zlib.go` -- `RegisterZlibModule(L *lua.LState)`
-
-使用 Go 标准库 `compress/gzip` 封装为 Lua 模块。codec.lua 通过 `local zlib = require("zlib")` 加载。
-
-| 函数 | 签名 | 说明 |
-|------|------|------|
-| `zlib.compress(data)` | `string, nil/string` | GZIP 压缩（RFC 1952 格式） |
-| `zlib.decompress(data)` | `string, nil/string` | GZIP 解压 |
-
-错误时返回 `(nil, error_string)`。
-
-**与计划的差异**：计划中使用 `compress/zlib`（zlib 格式），实际代码使用 `compress/gzip`（gzip 格式，RFC 1952），与服务器协议一致。
+Lua 侧 `bit` / `zlib` 模块仍随 `LuaAdapter` 文件保留，仅用于测试 oracle 运行旧 `codec.lua`。
 
 ## 8. Network 层
 
@@ -487,7 +338,7 @@ listenResp  map[string]ListenCallBack  // 同上
 listenMsg   map[string]*Message        // 缓存消息（轮询模式）
 ```
 
-路由键格式由 codec.lua 的 `decode_tcp/udp` 函数确定，典型格式为 `"{cmd}:{act}"`（如 `"3:1"`）。Go 引擎不假设任何特定格式。
+路由键格式由连接对应的 codec schema 确定，典型格式为 `"{cmd}:{act}"`（如 `"3:1"`）。Go 引擎不假设任何特定格式。
 
 ### 8.3 Connection 结构体
 
@@ -500,23 +351,24 @@ type Connection struct {
     secretKey   []byte          // 通信加密密钥
 
     responseMap      map[string]chan *Message  // routeKey -> 临时响应通道
-    listenResp       map[string]ListenCallBack // routeKey -> 持久回调
-    listenMsg        map[string]*Message       // routeKey -> 缓存消息
-    listenCh         chan *Message              // 推送消息分发通道（buffer 128）
-    listenDone       chan struct{}              // listenLoop 退出信号
+    listenResp       map[string]ListenCallBack // routeKey -> 持久化推送回调
+    listenQueues     map[string]*listenQueue   // routeKey -> 缓存队列（轮询模式）
     mu               sync.Mutex
     ctx              context.Context
     cancel           context.CancelFunc
     isClose          int32                      // 原子标记
     intentionalClose int32                      // 原子标记
-    listenRunning    int32                      // 原子标记
     requestTimeout   time.Duration
     sendFunc         func(data []byte) error    // 由 Dialer 注入
     closeFunc        func() error               // 由 Dialer 注入
-    heartbeat        *heartbeatState
-    heartbeatMu      sync.Mutex
     onDisconnect     func()                     // 意外断开回调
     onClosed         func()                     // 关闭回调
+    adp              adapter.Adapter            // pump 解码用 SchemaAdapter
+    inboundCh        chan inboundFrame          // raw frame 输入队列
+    controlCh        chan pumpCmd               // pump 控制命令（心跳/停止）
+    pumpDone         chan struct{}              // connectionPump 退出信号
+    hbMu             sync.Mutex
+    hb               *heartbeatRuntime          // pump 持有的心跳 runtime
 }
 ```
 
@@ -538,35 +390,23 @@ type Connection struct {
 
 **OnReceive(routeKey, body, headerErr)**：
 
-由 gnet 层调用：
+当前由 connectionPump 消费 inbound frame 后完成解码与分发：
 1. 检查 `isClose` 标记
-2. `headerErr != 0` 时打印 Error 日志
+2. `headerErr != 0` 时记录协议头错误
 3. 创建 `Message{RouteKey, Data, HeaderErr}`
 4. 加锁查找 `responseMap[routeKey]`：
    - 找到 -> 非阻塞发送到 channel -> 返回
 5. 查找 `listenResp[routeKey]`：
-   - 找到 -> 非阻塞发送到 `listenCh` -> 返回
-6. 都不匹配 -> 解锁，消息丢弃
+   - 找到 -> 写入对应监听队列；回调非 nil 时执行 Go-store 回调 -> 返回
+6. 都不匹配 -> 消息丢弃
 
-**AddListener(routeKey, cb)**：
+**RegisterListen(routeKey, cb, queueSize)**：
 
-动态添加单个监听器。如果 `listenRunning == 0`，启动 `listenLoop` goroutine。
-
-**ListenResponse(listenRespMap)**：
-
-批量注册持久化推送监听（`map[string]ListenCallBack`）。如果 `listenRunning == 0`，启动 `listenLoop` goroutine。
-
-**listenLoop()**：
-
-独立 goroutine，从 `listenCh` 读取消息并分发：
-- 查找 `listenResp[routeKey]` 对应的回调
-- 回调为 nil -> 缓存到 `listenMsg`（轮询模式）
-- 回调非 nil -> 直接调用回调函数
-- ctx 取消时清空所有监听映射并退出
+注册单个持久化推送监听，预创建 routeKey 对应的缓存队列。重复注册同 routeKey 会更新回调和队列容量，供主流程轮询消费。
 
 **GetListenResp(routeKey)**：
 
-轮询获取缓存的监听消息。找到后从 `listenMsg` 中删除（一次性消费）。
+轮询获取缓存的监听消息。找到后从 `listenQueues[routeKey]` 中弹出一条消息。
 
 **Close() / onClose()**：
 
@@ -595,7 +435,7 @@ type Client struct {
 - `ConnectTCP/UDP(serviceName) bool` -- 创建连接占位
 - `GetTCPConn/UDPConn(serviceName) *Connection` -- 获取连接
 - `CloseTCP/UDP(serviceName)` -- 关闭并移除连接
-- `CloseAll()` -- 关闭所有连接并等待 listenLoop 退出
+- `CloseAll()` -- 关闭所有连接并等待 connectionPump 退出
 
 ### 8.6 gnet EventServer
 
@@ -652,7 +492,7 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) gnet.Action {
         gconn.Read(msgBuf)
         monitor.Global().AddBandwidth(0, int64(totalLen))
 
-        // 6. 解码（Lua 调用），分发
+        // 6. 解码（SchemaAdapter / Go codec），分发
         if conn != nil {
             secretKey := conn.GetSecretKey()
             var routeKey string; var body []byte; var headerErr uint64
@@ -833,16 +673,21 @@ type Robot struct {
 
 ```go
 type Context struct {
-    RobotID   int
-    Account   string
-    Store     *state.Store
-    Factory   *protox.Factory
-    Adapter   adapter.Adapter  // 替代旧的 Protocol
+    RobotID int
+    Index   int
+    Account string
+    Store   *state.Store
+    Factory *protox.Factory
+    Resolver  adapter.CodecResolver
     NetSender engine.NetSender
     Ctx       context.Context
-    LuaMu     *sync.Mutex
+    Shared    sharedstate.Store
+    DefaultRequestTimeout time.Duration
+    TimingLevel           int
 }
 ```
+
+`Context` 不再持有旧的 adapter 指针或脚本互斥锁。业务 Lua API 需要编解码时通过 `Resolver.Resolve("<proto>:<service>")` 获取当前连接的 `SchemaAdapter`；Lua 脚本仍运行在该 Robot 独占的脚本运行时中。阻塞型 Lua API（例如 `network.tcp_request`、`network.udp_request`、listen 轮询）只阻塞当前 Robot 的主流程，不会阻塞 codec 编解码或其他 Robot。
 
 ### 10.3 netSenderAdapter
 
@@ -900,13 +745,14 @@ type ListenRef struct {
 
 1. 按 `(proto, service)` 分组（通过 `parseServer` 解析 `"tcp:logic"` 格式）
 2. 对每个 ref：
-   - 调用 `adp.ExpectedRouteKey(ref.Route)` 计算路由键
+   - 通过 `resolver.Resolve(ref.Server)` 获取该连接的 SchemaAdapter
+   - 调用 `adapter.ExpectedRouteKey(ref.Route)` 计算路由键
    - `ref.Listen == ""` -> 注册 nil 回调（轮询模式）
-   - `ref.Listen != ""` -> 查找 ListenDef，创建回调函数
+   - `ref.Listen != ""` -> 查找 ListenDef，创建 Go-store 回调函数；未找到时按 nil 回调注册，仅缓存供轮询
 3. 按组注册到对应 Connection：
    - `proto == "udp"` -> `client.GetUDPConn(service)`
    - `proto == "tcp"` -> `client.GetTCPConn(service)`
-   - 调用 `conn.ListenResponse(listenMap)`
+   - 调用 `conn.RegisterListen(routeKey, cb, queueSize)`
 
 ### 11.3 parseServer
 
@@ -920,144 +766,105 @@ func parseServer(server string) (proto, service string, ok bool)
 
 ### 11.4 回调类型
 
-**Lua 回调**（ListenDef.Script 非空）：
-- 设置 ScriptContext（含 Adapter 引用）
-- 调用 `luaPool.RunCallbackScript(L, script, msg.Data, cbDef.S2CProto)`
-- 错误时记录 `RecordCallbackError`
+**已废弃脚本回调**（ListenDef.Script 非空）：
+- listen 脚本回调已移除
+- 注册阶段返回配置错误，要求改为主流程轮询或 Go-store 回调
 
-**声明式回调**（ListenDef.S2CProto + Store 非空）：
+**Go-store 回调**（ListenDef.S2CProto + Store 非空）：
 - 解析推送消息 `factory.Parse(s2cProto, msg.Data)`
 - 按 Store 映射写入 StateStore
+- 成功/失败通过 `RecordCallback` 计入监控
 
 **静默回调**（以上都不满足）：
 - 返回 nil 回调函数，消息仅缓存供轮询
 
-## 12. codec.lua 架构
+## 12. 声明式 codec schema 架构
 
 ### 12.1 协议规格（当前服务器）
 
-- 头部大小：12 字节，小端序
-- 字段布局：`[len:4][error:2][cmd:1][act:1][index:2][flags:1][bcc:1]`
-- 编码链：GZIP 压缩 -> XOR 加密 -> BCC 校验写入
-- 解码链：XOR 解密 -> GZIP 解压
-- UDP 偏移：前 11 字节保持明文
+生产配置位于 `conf/adapter/*_codec.json`，文件名按 `<proto>_<service>_codec.json` 映射为 `<proto>:<service>` 连接：
 
-### 12.2 链式可组合设计
+- `tcp_logic_codec.json` -> `tcp:logic`
+- `tcp_battle_codec.json` -> `tcp:battle`
+- `udp_battle_codec.json` -> `udp:battle`
 
-每个处理步骤定义为独立 local 函数，通过 `encode_chain` / `decode_chain` 列表按序调用。切换协议时修改链配置即可。
+当前协议头大小 12 字节，小端序，字段布局为 `[len:4][error:2][cmd:1][act:1][index:2][flags:1][bcc:1]`。codec schema 通过 `header` 数组声明字段 offset/size/type/role，通过 `pipeline` 声明 GZIP、XOR、BCC 等处理步骤。
 
-编码链（按顺序执行）：
-1. `step_gzip_encode` -- GZIP 压缩 body
-2. `step_xor_encode` -- XOR 加密 body
+### 12.2 可组合 pipeline
 
-解码链（按顺序执行）：
-1. `step_xor_decode` -- XOR 解密 body
-2. `step_gzip_decode` -- GZIP 解压 body
+每个处理步骤由 JSON 对象声明，运行时编译为 Go codec 步骤。当前生产 schema 使用：
 
-BCC 校验在编码链之后独立计算（`step_bcc_encode`），因为需要校验最终字节。
+1. `compress` / `gzip`：按阈值压缩 body，并写入 compressed flag。
+2. `encrypt` / `xor_carry_rol`：按 key 和 offset 加密 body，并产出 BCC 校验值。
+3. header `checksumOut` 字段：把 pipeline 产出的 BCC 写入 header。
 
-### 12.3 必需函数（7 个）
+UDP schema 可独立声明 encode/decode offset，例如保留前 N 字节明文供服务端查密钥表。
 
-| 函数 | 签名 | 说明 |
-|------|------|------|
-| `header_size()` | `-> number` | 返回消息头固定字节数 |
-| `body_length()` | `-> table` | 返回 `{offset, field_type, includes_header}` |
-| `encode_tcp(route, body, secret_key)` | `-> string` | TCP 消息编码 |
-| `encode_udp(route, body, secret_key)` | `-> string` | UDP 消息编码（含偏移处理） |
-| `decode_tcp(data, secret_key)` | `-> string, string, number` | TCP 消息解码 -> (routeKey, body, headerErr) |
-| `decode_udp(data, secret_key)` | `-> string, string, number` | UDP 消息解码 |
-| `expected_route_key(route)` | `-> string` | 路由键计算 |
+### 12.3 routeKey 与错误码
 
-### 12.4 可选函数
+- `routeKeyTemplate` 定义解码后和请求匹配使用的字符串键，例如 `"{cmd}:{act}"`。
+- header 中 `role: "errorCode"` 的字段作为 headerErr 返回。
+- `errors.json` 是共享错误码描述表，由 `LoadCodecResolver` 加载后注入所有 `SchemaAdapter`。
 
-| 函数 | 签名 | 说明 |
-|------|------|------|
-| `describe_error(code)` | `-> string` | 错误码映射描述 |
+## 13. 历史迁移产物
 
-### 12.5 XOR 加密/解密
+以下 Lua 相关文件/概念已退出生产编解码路径，仅作为迁移参考或测试 oracle 保留：
 
-对 `data[encrypt_offset+1..end]` 用 key 循环 XOR。`encrypt_offset > 0` 时前 N 字节保持明文（UDP 场景）。
-
-为避免 Lua 5.1 的 `table.unpack` 栈深度限制（约 8000 字节），分段拼接（每 256 字节一段）。
-
-### 12.6 BCC 校验
-
-BCC（`header[11]`）是对 header 前 11 字节 + body 逐字节 XOR 累加的校验字节。BCC 与 XOR 加密完全独立（加密密钥来自登录密钥交换）。
-
-### 12.7 gopher-lua 约束
-
-Lua 5.1 环境（gopher-lua）：
-- 不支持 `string.pack` / `string.unpack`（Lua 5.3+ 特性）
-- 所有字节操作使用 `string.byte` / `string.char` + `bit` 模块
-- 字节写入：`write_uint8(n)` -> `string.char(bit.band(n, 0xFF))`
-- 字节读取：`read_uint8(s, offset)` -> `string.byte(s, offset + 1)`
-
-## 13. 已删除的旧架构文件
-
-以下文件在重构中移除：
-
-| 文件/目录 | 原因 |
-|-----------|------|
-| `network/protocol.go` | 编解码完全移入 Lua 适配器 |
-| `network/middleware.go` | PacketContext/PacketMiddleware 类型不再需要 |
-| `network/middleware_gzip.go` | GZIP 由 codec.lua 处理 |
-| `network/middleware_registry.go` | 中间件注册系统删除 |
-| `network/middleware_lua.go` | LuaMiddlewarePool 由 adapter.LuaAdapter 替代 |
-| `conf/header.json` | 协议头定义完全移入 codec.lua |
-| `conf/middlewares/` | 中间件脚本目录删除 |
+| 文件/概念 | 当前状态 |
+|-----------|----------|
+| `adapter/lua_adapter.go` | 仅测试对拍/历史迁移参考，不作为生产 Adapter 加载 |
+| `conf/adapter/codec.lua` | 旧实现真值，用于确认声明式 codec 字节级一致 |
+| `conf/adapter/error.lua` | 旧错误码真值，迁移后由 `errors.json` 承载生产映射 |
+| `network/protocol.go` / middleware 旧架构 | 已移除，协议处理收敛到 Adapter 接口 |
 
 ## 14. 设计决策
 
-### 14.1 热路径零 Lua
+### 14.1 热路径纯 Go
 
-帧解析（HeaderSize + BodyLength）纯 Go 缓存，gnet OnTraffic 永不调用 Lua。这是通过初始化时从 Lua 获取元信息（`header_size()` 和 `body_length()`），缓存到 Go 结构体实现的。
+帧解析（HeaderSize + BodyLength）由 `SchemaCodec` 编译产物直接执行，gnet OnTraffic 不调用脚本、不阻塞。
 
 **性能影响**：
 - `HeaderSize()` -- 直接返回 int，约 1ns
 - `BodyLength()` -- 一次 binary read + 条件判断，约 5ns
-- `Decode()` -- Lua 调用，约 10-50us（每完整帧一次）
+- `DecodeTCP/DecodeUDP()` -- Go codec pipeline 执行，每完整帧一次
 
 ### 14.2 route 不透明化
 
-Go 引擎不解析 cmd/act，完全由 Lua codec.lua 处理。`route` 类型为 `any`，在 Go 引擎中逐字传递。
+Go 引擎不解析 cmd/act。`route` 类型为 `any`，在 Go 引擎中逐字传递，具体字段读取和 routeKey 生成由连接对应的 codec schema 决定。
 
 好处：
 - 支持任意路由格式（不限于 cmd:act）
-- 不同协议的路由结构可以完全不同（如 `{msg_type, session_id}` 或 `{service_id, method_id}`）
+- 不同连接的路由结构可以不同
 - Go 引擎代码与具体协议解耦
 
 ### 14.3 字符串响应键
 
-替代旧的整数 cmdAct，支持任意协议的键空间。格式由 codec.lua 的 `decode_tcp/udp` 和 `expected_route_key` 函数确定。
+替代旧的整数 cmdAct，支持任意协议的键空间。格式由 codec schema 的 `routeKeyTemplate` 决定。
 
-典型格式：`"{cmd}:{act}"` -> `"3:1"`，但也可以是 `"LOGIN_RESP"` 或 `"uuid-xxx"`。
+典型格式：`"{cmd}:{act}"` -> `"3:1"`，但也可以扩展为协议需要的其他字符串。
 
 ### 14.4 TCP/UDP 解码分离
 
-`DecodeTCP` 和 `DecodeUDP` 独立方法，允许对 TCP/UDP 使用不同的解码策略。当前 codec.lua 中两者共享核心逻辑，但接口层预留了差异化空间。
+`DecodeTCP` 和 `DecodeUDP` 独立方法，允许 TCP/UDP 使用不同 schema 和 pipeline。当前通过 `<proto>:<service>` 连接级 resolver 选择对应 `SchemaAdapter`。
 
-### 14.5 LState 池隔离
+### 14.5 业务 Lua 与 codec 隔离
 
-adapter 池的 LState 只注册 `bit` 和 `zlib` 模块，不注册业务 API（network/robot/proto 等模块）。业务脚本使用 per-robot 的独立 LState（通过 `script.RuntimePool`），两者严格隔离，避免状态污染。
+业务脚本仍使用 per-robot 的独立 LState（通过 `script.RuntimePool`）。codec 编解码不走业务 Lua；业务 Lua API 需要发包/收包时经 `Context.Resolver` 取对应连接的 `SchemaAdapter`，阻塞型网络 API 只阻塞当前 Robot 主流程。
 
 ## 15. 与计划的差异汇总
 
-| 差异点 | 计划设计 | 实际代码 |
+| 差异点 | 计划设计 | 当前代码 |
 |--------|----------|----------|
 | Decode 方法 | 单一 `Decode()` | 分离为 `DecodeTCP()` + `DecodeUDP()` |
 | headerErr 类型 | `uint16` | `uint64` |
-| Lua 函数名 | `encode`, `decode`, `expected_response_key` | `encode_tcp`, `encode_udp`, `decode_tcp`, `decode_udp`, `expected_route_key` |
-| zlib 模块 | 使用 `compress/zlib` | 使用 `compress/gzip`（gzip 格式） |
-| UDPEncryptOffset | 有接口方法 | 无，偏移量完全由 codec.lua 内部管理 |
+| 生产 codec | Lua 函数 `encode/decode/expected_response_key` | 声明式 `*_codec.json` + `SchemaAdapter` |
+| UDPEncryptOffset | 有接口方法 | 无，偏移量由每份 codec schema 声明 |
 | ExpectedResponseKey | `ExpectedResponseKey()` | `ExpectedRouteKey()`（方法名不同） |
-| Close 方法 | 无 | 有 `Close()` |
-| DescribeError 方法 | 无 | 有 `DescribeError(code uint64) string` |
+| Close 方法 | 无 | 有 `Close()`；SchemaAdapter 为 no-op |
+| DescribeError 方法 | 无 | 有 `DescribeError(code uint64) string`，描述来自 `errors.json` |
 | ListenRef 字段 | `ResponseKey string` + `Server string` + `Callback string` | `Route any` + `Server string`（`"proto:service"` 格式）+ `Listen string` |
-| Server 字段格式 | 简单服务名 | `"tcp:logic"` 或 `"udp:udp"` 格式 |
-| ActionDef 路由 | 有 `RespRoute` 字段 | 无 `RespRoute`（响应路由与发送路由相同，由 codec.lua 的 `expected_route_key` 处理） |
-| acquire 超时 | 阻塞等待（无超时） | 30 秒超时返回 nil |
-| release 溢出 | 未定义 | 池满时关闭 LState |
-| error.lua 支持 | 未提及 | 有 `DescribeError` + `errorDescCache` 永久缓存 |
+| Server 字段格式 | 简单服务名 | `"tcp:logic"` / `"tcp:battle"` / `"udp:battle"` 等 `<proto>:<service>` 格式 |
+| ActionDef 路由 | 有 `RespRoute` 字段 | 无 `RespRoute`；响应路由由 `ExpectedRouteKey` 从发送 route 计算 |
 | NetSender 方法 | 约 12 个 | 21 个（TCP/UDP 分离，增加 headerErr 返回值） |
 | Connection 字段 | 无 `intentionalClose` | 有 `intentionalClose` 原子标记区分主动/被动关闭 |
 | Connection 回调 | 仅 `onDisconnect` | 有 `onDisconnect` + `onClosed` 双回调 |
@@ -1070,72 +877,38 @@ adapter 池的 LState 只注册 `bit` 和 `zlib` 模块，不注册业务 API（
 
 | 维度 | 场景 | 支持情况 |
 |------|--------|---------|
-| 协议头 | 任意消息头格式（字段布局、长度字段位置、端序均可配置） | codec.lua 全权处理，完全支持 |
-| 路由键 | 任意路由键格式（"3:1"、"LOGIN_RESP"、UUID 均可） | codec.lua decode 返回字符串，完全支持 |
-| 加解密 | XOR / GZIP / BCC / 自定义对称加密 | codec.lua + bit + zlib，支持；AES 等需 Go 层额外注册 Lua 模块 |
-| 消息体格式 | Protobuf（声明式 field binding / store 提取） | protox 层，完全支持 |
-| 消息体格式 | JSON / MessagePack / 其他格式 | 不内置支持；c2sProto="" + Lua 手动构建 body 可绕过，但失去声明式 binding |
-| 连接模式 | TCP 长连接 + UDP | gnet 原生支持，完全支持 |
+| 协议头 | 任意消息头格式（字段布局、长度字段位置、端序均可配置） | 声明式 codec schema 处理，支持 |
+| 路由键 | 任意路由键格式（"3:1"、"LOGIN_RESP"、UUID 等） | 由 `routeKeyTemplate` / schema 规则生成，支持 |
+| 加解密 | XOR / GZIP / BCC 等已注册算法 | schema 声明 pipeline，Go codec 执行；新算法需在 codec 包注册 |
+| 消息体格式 | Protobuf（声明式 field binding / store 提取） | protox 层支持 |
+| 消息体格式 | JSON / MessagePack / 其他格式 | 不内置为声明式主路径；复杂行为仍可在业务 Lua 中实现 |
+| 连接模式 | TCP 长连接 + UDP | gnet 原生支持 |
 | 连接模式 | WebSocket / TLS | 不支持，gnet 只处理原始 TCP 帧 |
-| 连接模式 | HTTP 短连接 / 长轮询 | 不支持，超出本工具设计范围 |
-| 服务发现 | 动态地址（auth HTTP 响应携带） | Lua 脚本提取后调用 network.connect_tcp，支持 |
-| 服务发现 | 静态地址（直连） | Lua 脚本硬写或读 flow state，支持 |
+| 连接模式 | HTTP 短连接 / 长轮询 | 不属于 adapter 层 TCP/UDP 帧协议范围 |
+| 服务发现 | 动态地址（auth HTTP 响应携带） | 业务 Lua 提取后调用 network.connect_tcp，支持 |
+| 服务发现 | 静态地址（直连） | 业务 Lua 或 flow state 配置，支持 |
 
-**核心结论**：本工具针对原始 TCP/UDP + 自定义二进制协议头 + Protobuf 消息体的游戏服务器，做到开箱即用。切换服务器只需更换 `codec.lua`（协议头）+ `flow.json`（流程）+ `.proto`（消息定义），无需修改任何 Go 代码。
+**核心结论**：本工具针对原始 TCP/UDP + 自定义二进制协议头 + Protobuf 消息体的游戏服务器，做到开箱即用。切换服务器只需更换对应 `*_codec.json`、`flow.json` 和 `.proto` 文件，无需修改业务 Go 代码。
 
 ## 17. 新协议适配步骤
 
 当需要接入另一台协议格式不同的服务器时：
 
-### 17.1 编写新的 codec.lua
+### 17.1 编写新的 *_codec.json
 
-假设新服务器使用 8 字节头、无 GZIP、仅 XOR 加密：
+新增或替换 `conf/adapter/<proto>_<service>_codec.json`，声明：
 
-```lua
--- conf/adapter/simple_codec.lua
-local bit = require("bit")
+- `frame.headerSize`、长度字段和 header 字段布局
+- `routeKeyTemplate`
+- TCP/UDP 所需 pipeline（压缩、加密、校验等）
+- header 字段的 source/role（length、route、errorCode、flags、checksumOut 等）
 
-local HEADER_SIZE = 8
-local encode_chain = { step_xor_encode }
-local decode_chain = { step_xor_decode }
+### 17.2 更新流程和资源
 
-function header_size()
-    return HEADER_SIZE
-end
-
-function body_length()
-    return { offset = 0, field_type = "uint32_le", includes_header = true }
-end
-
-function encode_tcp(route, body, secret_key)
-    local cmd = route and math.floor(route.cmd or 0) or 0
-    local act = route and math.floor(route.act or 0) or 0
-    body = body or ""
-
-    local ctx = { body = body, flags = 0, secret_key = secret_key, encrypt_offset = 0 }
-    for _, step in ipairs(encode_chain) do step(ctx) end
-
-    local total = HEADER_SIZE + #ctx.body
-    return string.char(
-        bit.band(total, 0xFF), bit.band(bit.rshift(total, 8), 0xFF),
-        bit.band(bit.rshift(total, 16), 0xFF), bit.band(bit.rshift(total, 24), 0xFF),
-        cmd, act, ctx.flags, 0
-    ) .. ctx.body
-end
-
--- encode_udp, decode_tcp, decode_udp, expected_route_key 类似实现
-```
-
-### 17.2 更新配置文件
-
-修改 `config.json` 中的 `adapterScript` 路径：
-
-```json
-{
-  "adapterScript": "conf/adapter/simple_codec.lua"
-}
-```
+1. flow 中的 `service` 与 listenRef 的 `server` 使用对应 `<proto>:<service>`。
+2. `.proto` 文件继续放在 proto 目录供 `protox` 动态加载。
+3. 如需错误码描述，更新 `conf/adapter/errors.json`。
 
 ### 17.3 Go 层零改动
 
-无需修改任何 Go 代码。Adapter 接口的抽象层确保所有协议差异由 codec.lua 处理。
+无需修改业务 Go 代码。`InferCodecMap` / `LoadCodecResolver` 会按文件名规约加载 codec，Adapter 接口的抽象层确保协议差异由 schema 承载。

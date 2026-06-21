@@ -48,6 +48,13 @@ export {
 export type { ScriptSyncResult } from './scriptSync';
 
 export {
+  collectFlowCodecConnections,
+  connNameToCodecFileName,
+  codecFileNameToConnName,
+  findMissingCodecConnections,
+} from './taskResourceDiff';
+
+export {
   startTask,
   stopTask,
   attachToActive,

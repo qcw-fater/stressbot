@@ -132,8 +132,6 @@ describe('coverage：所有 stressbot 已暴露的核心 Lua API 都被记录', 
       'get_udp_secret_key',
       'ensure_tcp_listener',
       'ensure_udp_listener',
-      'register_tcp_heartbeat',
-      'register_udp_heartbeat',
     ]) {
       expect(names, `network.${expected}`).toContain(expected);
     }
@@ -147,9 +145,16 @@ describe('coverage：所有 stressbot 已暴露的核心 Lua API 都被记录', 
     }
   });
 
-  it('utils / json / log / adapter 模块都存在', () => {
-    for (const name of ['utils', 'json', 'log', 'adapter']) {
+  it('utils / json / log 模块都存在', () => {
+    for (const name of ['utils', 'json', 'log']) {
       expect(getLuaModule(name), `module ${name}`).toBeDefined();
+    }
+  });
+
+  it('adapter 模块已随声明式 codec 重构移除（业务 Lua 不再注入 adapter）', () => {
+    expect(getLuaModule('adapter')).toBeUndefined();
+    for (const m of LUA_MODULES) {
+      expect(m.name, '残留 adapter 模块文档').not.toBe('adapter');
     }
   });
 

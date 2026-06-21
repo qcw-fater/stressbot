@@ -110,8 +110,8 @@ export function RuntimeBar({
     })),
   );
 
-  // 设置 Popover 用到的 UI 状态 + 打开协议适配器面板的 setter
-  const { theme, setTheme, showListenEdges, toggleListenEdges, debugMode, setDebugMode, historyEnabled, pendingSyncResult, adapterMissing } = useEditorStore(
+  // 设置 Popover 用到的 UI 状态
+  const { theme, setTheme, showListenEdges, toggleListenEdges, debugMode, setDebugMode, historyEnabled, pendingSyncResult, codecSchemaErrors } = useEditorStore(
     useShallow((s) => ({
       theme: s.theme,
       setTheme: s.setTheme,
@@ -121,7 +121,7 @@ export function RuntimeBar({
       setDebugMode: s.setDebugMode,
       historyEnabled: s.historyEnabled,
       pendingSyncResult: s.pendingSyncResult,
-      adapterMissing: s.adapterMissing,
+      codecSchemaErrors: s.codecSchemaErrors,
     })),
   );
 
@@ -447,18 +447,18 @@ export function RuntimeBar({
             记事本
           </Button>
         </Tooltip>
-        <Tooltip title={adapterMissing && adapterMissing.length > 0 ? `适配器缺少 ${adapterMissing.length} 个必需函数` : '资源管理（proto / lua / 适配器）'}>
+        <Tooltip title={codecSchemaErrors && codecSchemaErrors.length > 0 ? `协议配置有 ${codecSchemaErrors.length} 处问题` : '资源管理（proto / lua / 协议配置）'}>
           <Badge
             count={
-              adapterMissing && adapterMissing.length > 0
-                ? adapterMissing.length
+              codecSchemaErrors && codecSchemaErrors.length > 0
+                ? codecSchemaErrors.length
                 : pendingSyncResult
                   ? pendingSyncResult.conflicts.length + pendingSyncResult.removed.length
                   : 0
             }
             overflowCount={99}
             offset={[-4, 4]}
-            color={adapterMissing && adapterMissing.length > 0 ? undefined : 'orange'}
+            color={codecSchemaErrors && codecSchemaErrors.length > 0 ? undefined : 'orange'}
           >
             <Button icon={<DatabaseOutlined />} onClick={onOpenResources}>
               资源

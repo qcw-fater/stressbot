@@ -2,7 +2,7 @@ package network
 
 import (
 	"context"
-	"maps"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,8 +20,49 @@ import (
 // ListenCallBack 持久化推送消息的回调函数类型
 type ListenCallBack func(message *Message)
 
+// pumpInboundBatchSize 是 connectionPump 单次内层循环最多连续处理的 inbound 帧数。
+//
+// 两条硬约束之一（02-track §2-C 伪代码）：禁止一直 drain inbound 饿死 heartbeatTimer/controlCh。
+// 每处理一条 inbound 后检查计数，达到本上限后强制回外层 select（重新优先检查 heartbeat due +
+// 给 controlCh/ctx.Done 机会），从而保证心跳到期不被海量入站 backlog 拖延。
+const pumpInboundBatchSize = 16
+
+// controlChSize 是 connectionPump 控制通道缓冲大小。
+// 控制消息（注册/停止心跳、stop）频率极低，容量 16 足以吸收 Close + RegisterHeartbeat
+// 并发的少量突发，且永远不会成为热路径瓶颈。
+const controlChSize = 16
+
+// pumpCmd 是投递到 connectionPump.controlCh 的控制命令。
+//
+// pump 是连接唯一的 owner goroutine：心跳 timer + cfg 都由 pump 持有并在 pump goroutine
+// 内读写，故 RegisterHeartbeat/StopHeartbeat 不再启动独立 goroutine，而是把命令投递给 pump，
+// 由 pump 在自己的 select 分支里串行更新 runtime。心跳 builder 是 Go-only，
+// 不触碰业务 LState；pump 进一步去掉独立心跳 goroutine。
+type pumpCmd struct {
+	kind   pumpCmdKind
+	hbCfg  HeartbeatConfig // kind == pumpCmdHeartbeat 时有效
+	result chan<- error    // 可选：pump 处理完回写结果（nil chan 表示无需回执）
+}
+
+type pumpCmdKind int
+
+const (
+	pumpCmdHeartbeat     pumpCmdKind = iota // 注册/替换心跳（hbCfg 有效）
+	pumpCmdStopHeartbeat                    // 停止心跳（hbCfg 无效）
+	pumpCmdStop                             // 主动请求 pump 退出（Close 内部用）
+)
+
 // Connection 业务层网络连接封装。
 // 封装 request-response 匹配、持久化推送监听、心跳和连接生命周期回调。
+//
+// 调度模型（2-C3 起）：每条连接只有一个 connectionPump goroutine，统一处理
+//   - inbound decode → request-response 通道 / listen queue / store 分发
+//   - heartbeat timer 到期 → 调 builder → Send
+//   - controlCh 命令 → 注册/停止心跳、stop
+//   - ctx.Done → drain inbound buffer、停 timer、关 done
+//
+// 旧三协程模型（decodeLoop + listenLoop + 独立 runHeartbeat goroutine）已下线，
+// 全部并入 pump。pump 是 network 内部调度细节，不泄漏到 flow/engine/Lua。
 type Connection struct {
 	serviceName string // 所属服务名称（如 "logic"、"battle"）
 	robotName   string // 所属机器人账号名
@@ -31,31 +72,33 @@ type Connection struct {
 
 	responseMap      map[string]chan *Message  // routeKey → 临时响应通道（RequestResponse 用）
 	listenResp       map[string]ListenCallBack // routeKey → 持久化推送回调
-	listenMsg        map[string]*Message       // routeKey → 缓存消息（轮询模式，回调为 nil 时）
-	listenCh         chan *Message             // 推送消息分发通道
-	listenDone       chan struct{}             // listenLoop 退出信号，用于 Close 时等待回调完成
-	mu               sync.Mutex                // 保护 responseMap / listenResp / listenMsg / 回调字段
+	listenQueues     map[string]*listenQueue   // routeKey → 缓存队列（轮询模式，回调为 nil 时）
+	mu               sync.Mutex                // 保护 responseMap / listenResp / listenQueues map 键 / 回调字段（各 listenQueue 自带 mu 串行化 Push/Pop）
 	ctx              context.Context           // 连接生命周期上下文
 	cancel           context.CancelFunc        // 取消函数，关闭时调用
 	isClose          int32                     // 原子标记：0=活跃，1=已关闭
 	intentionalClose int32                     // 原子标记：1=主动 Close() 触发，不触发 onDisconnect
-	listenRunning    int32                     // 原子标记：listenLoop 是否运行中
 	requestTimeout   time.Duration             // RequestResponse 默认超时
 	sendFunc         func(data []byte) error   // 底层发送函数（由 Dialer 注入）
 	closeFunc        func() error              // 底层关闭函数（由 Dialer 注入）
-	heartbeat        *heartbeatState           // 心跳运行时状态
-	heartbeatMu      sync.Mutex                // 保护 heartbeat 字段的替换
 	onDisconnect     func()                    // 意外断开回调（非主动 Close 触发，业务用于停 robot）
 	onClosed         func()                    // 关闭回调（主动/被动均触发，监控用，与 ConnEstablished 配对）
 
-	// 异步解码（gnet 事件循环 → per-connection goroutine）
-	// 设计意图：把 Lua Decode 从 gnet event loop 摘除，避免少数慢 decode
-	// 阻塞同 loop 上其他连接的 I/O 处理。详见 decodeLoop 注释。
-	adp        adapter.Adapter   // decode 用的协议适配器，StartDecodeLoop 时注入
-	isUDP      bool              // 该连接是否 UDP（决定调 DecodeUDP / DecodeTCP）
-	decodeCh   chan inboundFrame // 待解码的 raw msg buffer（OnTraffic 投递→decode goroutine 消费）
-	decodeDone chan struct{}     // decode goroutine 退出信号
-	decodeRun  int32             // 原子标记：1 表示 decodeLoop 已启动（CAS 防重复启动）
+	// connectionPump（每连接一个）替代旧的 decodeLoop + listenLoop + 心跳 goroutine。
+	// 详见 connectionPump godoc。pump goroutine 是 inbound decode / listen 分发 / 心跳
+	// pump goroutine 独占处理 inbound/control 和心跳 timer；inboundCh/controlCh 由外部投递、pump 消费，
+	// pumpDone 由 pump 关闭、外部等待。adp/isUDP 在 StartPump 时一次性注入后只读。
+	adp       adapter.Adapter   // decode 用的协议适配器（Go SchemaAdapter），StartPump 时一次性注入
+	isUDP     bool              // 该连接是否 UDP（决定调 DecodeUDP / DecodeTCP）
+	inboundCh chan inboundFrame // 待解码的 raw msg buffer（OnTraffic 投递→pump 消费）
+	controlCh chan pumpCmd      // pump 控制通道（注册/停止心跳、stop）
+	pumpDone  chan struct{}     // pump goroutine 退出信号，供 WaitPumpDone/WaitDecodeDone/WaitListenDone 等待
+	pumpRun   int32             // 原子标记：1 表示 pump 已启动（CAS 防重复启动）
+	// hbMu 保护 hb 字段的替换（RegisterHeartbeat/StopHeartbeat 投递 controlCh 前/后读取）。
+	// pump goroutine 内部读写 hb 不需要这把锁（pump 是唯一执行者）；这把锁只保护
+	// 「pump 外部 goroutine 在投递 controlCh 前快速判断当前是否已注册心跳」这类只读快照。
+	hbMu sync.Mutex
+	hb   *heartbeatRuntime // pump 持有的心跳 runtime（cfg + timer），nil 表示未注册
 
 	// closeReason 记录连接关闭原因，供 inflight RequestResponse 命中 ctx.Done() 时归因。
 	// 由 onClose() 写入（gnet 给的 err 字符串），RequestResponse 读取后拼到错误 detail。
@@ -66,8 +109,11 @@ type Connection struct {
 }
 
 const (
-	listenChSize = 128 // 监听推送消息通道缓冲区大小
-	decodeChSize = 256 // decode 通道缓冲区大小，满则反压（关闭连接）
+	inboundChSize = 256 // inbound 通道缓冲区大小，满则反压（关闭连接）
+	// defaultListenQueueSize 监听缓存队列默认容量。
+	// 容量 1 与旧「单槽 map[string]*Message」语义逐字节等价（同 routeKey 新消息覆盖旧消息）。
+	// 2-A2 起可由 ListenRef.queueSize 显式覆盖（本任务不接配置）。
+	defaultListenQueueSize = 1
 )
 
 type inboundFrame struct {
@@ -83,8 +129,7 @@ func NewConnection(serviceName, robotName string, requestTimeout time.Duration, 
 		robotName:      robotName,
 		responseMap:    make(map[string]chan *Message),
 		listenResp:     make(map[string]ListenCallBack),
-		listenMsg:      make(map[string]*Message),
-		listenCh:       make(chan *Message, listenChSize),
+		listenQueues:   make(map[string]*listenQueue),
 		requestTimeout: requestTimeout,
 		sendFunc:       nil,
 		timingDetail:   timingDetail,
@@ -127,7 +172,7 @@ func (c *Connection) SetSecretKey(key []byte) {
 }
 
 // GetSecretKey 获取通信加密密钥。
-// 返回的切片为只读快照，调用方不得修改其内容（adapter 仅将其传给 Lua 并 stringify 复制）。
+// 返回的切片为只读快照，调用方不得修改其内容；生产 codec 只读使用该快照。
 func (c *Connection) GetSecretKey() []byte {
 	if c == nil {
 		return nil
@@ -263,75 +308,85 @@ func (c *Connection) Send(data []byte) (int, error) {
 	return n, nil
 }
 
-// AddListener 动态添加单个监听器。
-func (c *Connection) AddListener(routeKey string, cb ListenCallBack) {
-	if c == nil || atomic.LoadInt32(&c.isClose) == 1 {
-		return
+// RegisterListen 为指定 routeKey 注册持久化推送监听。是唯一的监听注册入口。
+//
+// 参数：
+//   - routeKey: 路由键（由 adapter.ExpectedRouteKey 计算）。
+//   - cb: nil = 缓存模式（消息进 queue，由 GetListenResp/main-flow 消费）；非 nil = 回调模式。
+//   - queueSize: 缓存队列容量（>=1，cap<1 由 newListenQueue panic）。首次注册时预创建队列。
+//
+// 语义：
+//   - 新注册：写入 listenResp，预创建 listenQueues[routeKey]（容量 queueSize），返回 nil。
+//   - 幂等：同 routeKey 再注册且（queueSize 一致 && cb 是否为 nil 一致）→ 不重建队列、不报错（重写 listenResp[routeKey]=cb 为最新值，队列与 queueSize 不变；nil-cb 即纯 no-op），返回 nil。
+//   - 冲突 fail-loud：同 routeKey 但 queueSize 或 cb 模式不一致 → 返回中文 error。
+//
+// 2-C3 起：listen 分发已并入 connectionPump，注册只是「写两张 map + 预创建队列」的一次性纯 map
+// 操作，**不再启动独立 listenLoop goroutine**。pump 在 decode 后命中 listenResp 时直接调
+// dispatchListen（cb!=nil 跑回调 / cb==nil 写 listenQueues）；GetListenResp 仍由主流程
+// 直接 FIFO Pop（per-queue mu 串行化，与 pump 的 Push 无死锁）。
+//
+// c.mu 保护 listenResp / listenQueues 两个 map 的读-改 + 冲突判断（与 pump dispatchListen /
+// GetListenResp 同样的锁粒度，沿用现状）。
+func (c *Connection) RegisterListen(routeKey string, cb ListenCallBack, queueSize int) error {
+	if c == nil {
+		return fmt.Errorf("监听注册失败：连接为 nil（routeKey=%q）", routeKey)
+	}
+	if atomic.LoadInt32(&c.isClose) == 1 {
+		return fmt.Errorf("监听注册失败：连接已关闭（service=%q routeKey=%q）", c.serviceName, routeKey)
 	}
 
 	c.mu.Lock()
-	c.listenResp[routeKey] = cb
-	needStart := atomic.LoadInt32(&c.listenRunning) == 0
-	c.mu.Unlock()
+	existingCb, hasCb := c.listenResp[routeKey]
+	existingQ, hasQ := c.listenQueues[routeKey]
 
-	if needStart {
-		if atomic.CompareAndSwapInt32(&c.listenRunning, 0, 1) {
-			c.listenDone = make(chan struct{})
-			utils.GetWorkPool().Go(c.listenLoop)
-		}
-	}
-}
-
-func (c *Connection) listenLoop() {
-	defer atomic.StoreInt32(&c.listenRunning, 0)
-	defer func() {
-		c.mu.Lock()
-		ch := c.listenDone
-		c.listenDone = nil
-		c.mu.Unlock()
-		if ch != nil {
-			close(ch)
-		}
-	}()
-	for {
-		select {
-		case <-c.ctx.Done():
-			c.mu.Lock()
-			clear(c.listenResp)
-			clear(c.listenMsg)
+	if hasCb || hasQ {
+		// 冲突检测：同 routeKey 跨次注册。
+		if hasQ && existingQ.capacity != queueSize {
 			c.mu.Unlock()
-			return
-		case resp, ok := <-c.listenCh:
-			if !ok {
-				return
-			}
-			c.dispatchListen(resp)
+			return fmt.Errorf("监听注册冲突：service=%q routeKey=%q 已注册（queueSize=%d），与本次（queueSize=%d）不一致",
+				c.serviceName, routeKey, existingQ.capacity, queueSize)
 		}
+		existingCbIsNil := existingCb == nil
+		newCbIsNil := cb == nil
+		if existingCbIsNil != newCbIsNil {
+			c.mu.Unlock()
+			return fmt.Errorf("监听注册冲突：service=%q routeKey=%q 已注册（回调=%v），与本次（回调=%v）模式不一致",
+				c.serviceName, routeKey, !existingCbIsNil, !newCbIsNil)
+		}
+		// 幂等 no-op：保持一致写回 cb（无副作用），不重复建队列。
+		c.listenResp[routeKey] = cb
+		c.mu.Unlock()
+		return nil
 	}
+
+	// 新注册：写入回调 + 预创建队列。
+	c.listenResp[routeKey] = cb
+	c.listenQueues[routeKey] = newListenQueue(queueSize)
+	c.mu.Unlock()
+	return nil
 }
 
-// WaitListenDone 等待 listenLoop 退出（即所有已分发的回调执行完毕）。
-// 必须在 Close/CloseAll 之后调用，此时 ctx 已取消，listenLoop 会尽快退出。
+// WaitListenDone 等待 connectionPump 退出（pump 已包含旧 listenLoop 的所有工作）。
+//
+// 2-C3 起 listenLoop 已并入 pump：pump 退出时所有已分发的回调均已执行完毕（dispatchListen
+// 是同步调用）。本方法现在与 WaitDecodeDone 等价，都等 pumpDone；保留方法名是为了让
+// client.go 的 CloseAllWithTimeout 调用语义保持「先等 decode，再等 listen」的两阶段表达
+// （client.go 不在本任务可改文件清单内）。
 func (c *Connection) WaitListenDone() {
 	if c == nil {
 		return
 	}
-	c.mu.Lock()
-	ch := c.listenDone
-	c.mu.Unlock()
-	if ch != nil {
-		<-ch
+	if c.pumpDone != nil {
+		<-c.pumpDone
 	}
 }
 
-// WaitListenDoneTimeout 带超时等待 listenLoop 退出。
+// WaitListenDoneTimeout 带超时等待 connectionPump 退出。
 func (c *Connection) WaitListenDoneTimeout(timeout time.Duration) bool {
 	if c == nil {
 		return true
 	}
-	c.mu.Lock()
-	ch := c.listenDone
-	c.mu.Unlock()
+	ch := c.pumpDone
 	if ch == nil {
 		return true
 	}
@@ -353,22 +408,6 @@ func (c *Connection) WaitListenDoneTimeout(timeout time.Duration) bool {
 	}
 }
 
-// ListenResponse 注册持久化推送消息监听。
-func (c *Connection) ListenResponse(listenRespMap map[string]ListenCallBack) {
-	if c == nil || atomic.LoadInt32(&c.isClose) == 1 {
-		return
-	}
-
-	c.mu.Lock()
-	maps.Copy(c.listenResp, listenRespMap)
-	c.mu.Unlock()
-
-	if atomic.CompareAndSwapInt32(&c.listenRunning, 0, 1) {
-		c.listenDone = make(chan struct{})
-		utils.GetWorkPool().Go(c.listenLoop)
-	}
-}
-
 func (c *Connection) dispatchListen(resp *Message) {
 	c.mu.Lock()
 	cb, exist := c.listenResp[resp.RouteKey]
@@ -381,86 +420,275 @@ func (c *Connection) dispatchListen(resp *Message) {
 	if cb != nil {
 		cb(resp)
 	} else {
+		// 缓存 listen：按需为 routeKey 创建默认容量队列并 Push。
+		// c.mu 仅保护 listenQueues map 键的查找/创建；Push 在 c.mu 释放后进行，
+		// 由 per-queue mu 串行化，与 GetListenResp 的 Pop 无死锁。
 		c.mu.Lock()
-		c.listenMsg[resp.RouteKey] = resp
+		q, ok := c.listenQueues[resp.RouteKey]
+		if !ok {
+			q = newListenQueue(defaultListenQueueSize)
+			c.listenQueues[resp.RouteKey] = q
+		}
 		c.mu.Unlock()
+		if q.Push(resp) {
+			// 默认容量 1：从第 2 条起每条都会触发覆盖丢弃（即旧单槽「保最新」语义）。
+			// Debug 级，生产默认不刷屏；2-A2 让高频 route 配 queueSize>1 后自然减少。
+			// dispatchListen 是推送热路径，按本仓惯例（OnReceive/RequestResponse 同款）
+			// 用 DebugEnabled 守卫，避免每条覆盖都构造 zap 字段。
+			if stresslog.DebugEnabled() {
+				stresslog.Debug("[NETWORK] 监听队列已满，覆盖丢弃最旧消息",
+					zap.String("service", c.serviceName),
+					zap.String("routeKey", resp.RouteKey))
+			}
+		}
 	}
 }
 
-// GetListenResp 轮询获取缓存的监听消息。
+// GetListenResp 轮询获取缓存的监听消息（FIFO pop）。
+//
+// c.mu 仅查 map；Pop 走队列自身 mu。默认容量 1 时与旧「读 listenMsg[k] + delete」
+// 行为一致：返回最近一条 Push 并清空。
 func (c *Connection) GetListenResp(routeKey string) *Message {
 	if c == nil || atomic.LoadInt32(&c.isClose) == 1 {
 		return nil
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	resp, exist := c.listenMsg[routeKey]
-	if exist && resp != nil {
-		delete(c.listenMsg, routeKey)
-		return resp
+	q, ok := c.listenQueues[routeKey]
+	c.mu.Unlock()
+	if !ok {
+		return nil
 	}
-	return nil
+	m, _ := q.Pop()
+	return m
 }
 
-// StartDecodeLoop 启动异步 decode goroutine（每个连接独占一个）。
+// StartPump 启动 connectionPump（每连接一个），统一接管 inbound decode / listen 分发 /
+// 心跳 timer + control。替代旧三协程模型（decodeLoop + listenLoop + 独立 runHeartbeat goroutine）。
 //
-// 作用：把 Lua Decode 从 gnet 事件循环上摘除。
-// 历史问题：OnTraffic 在 gnet event loop goroutine 上同步调 adp.DecodeTCP/UDP（走 Lua），
-// 单帧解密在 gopher-lua 上耗时百微秒~毫秒级；在 10000+ 连接稳态下，少数慢 decode 会让
-// event loop 串行卡顿，该 loop 上所有连接的心跳响应/请求响应被延迟，最终被服务端判定为
-// 掉线 → CONN_DROPPED 雪崩。
-//
-// 现行设计：
-//   - OnTraffic 只做纯 Go 帧切割，把 raw msgBuf 投递到本连接的 decodeCh
-//   - decodeLoop 在独立 goroutine 内串行消费 channel（保证同连接消息顺序）
-//   - 多连接之间 decode 完全并行，能充分压榨 LState 池
-//   - event loop 永不接触 Lua，吞吐量提升一个数量级
+// 设计动机（02-track §2-C）：Go SchemaAdapter 后 decode 是纯 Go（无 Lua），但 codec pipeline
+// 仍含解压/校验/hash/加密等线性 CPU 步，inline 进 gnet event loop 会重新引入 loop 卡顿风险；
+// 同时把 inbound decode / listen 分发 / 心跳 timer 合并进同一 goroutine；心跳
+// builder 是 Go-only，不触碰业务 LState，pump 进一步去掉独立心跳 goroutine。
 //
 // 必须在 Dial 成功且 conn 注册到 registry 之后、首次 OnTraffic 可能到达之前调用。
-// CAS 防止 reconnect 场景下重复启动。
-func (c *Connection) StartDecodeLoop(adp adapter.Adapter, isUDP bool) {
+// CAS 防止 reconnect 场景下重复启动。adp 由上层 Robot 经 CodecResolver.Resolve 在拨号前
+// 解析后注入（nil → 上层已 fail loud）；此后该连接 decode 全程用 c.adp，不再查 resolver。
+//
+// pump 是 network 内部调度，不泄漏到 flow/engine/Lua：外层只感知 RegisterListen /
+// GetListenResp / RegisterHeartbeat 这些已存在的接口。
+func (c *Connection) StartPump(adp adapter.Adapter, isUDP bool) {
 	if c == nil || adp == nil {
 		return
 	}
-	if !atomic.CompareAndSwapInt32(&c.decodeRun, 0, 1) {
+	if !atomic.CompareAndSwapInt32(&c.pumpRun, 0, 1) {
 		return
 	}
 	c.adp = adp
 	c.isUDP = isUDP
-	c.decodeCh = make(chan inboundFrame, decodeChSize)
-	c.decodeDone = make(chan struct{})
-	utils.GetWorkPool().Go(c.decodeLoop)
+	c.inboundCh = make(chan inboundFrame, inboundChSize)
+	c.controlCh = make(chan pumpCmd, controlChSize)
+	c.pumpDone = make(chan struct{})
+	utils.GetWorkPool().Go(c.connectionPump)
 }
 
-// decodeLoop 异步消费 decodeCh，逐帧调用 Lua decode 并分发到 OnReceive。
+// connectionPump 是每条连接唯一的 owner goroutine，串行处理：
+//   - inbound decode → request-response 通道 / listen queue / store 分发
+//   - heartbeat timer 到期 → 调 builder → Send
+//   - controlCh 命令 → 注册/停止心跳、stop
+//   - ctx.Done → drain inbound buffer 归还、停 timer、关 done
 //
-// 退出条件：ctx.Done()（连接主动/被动关闭都会触发 cancel）。
-// 退出时：尽量排空通道并归还 buffer 池，避免泄漏；OnReceive 在 isClose==1 后会直接 return，
-// 排空的几个包丢弃即可（连接已关，调用方不再期待这些响应）。
-func (c *Connection) decodeLoop() {
-	defer close(c.decodeDone)
+// 两条硬约束（02-track §2-C 伪代码）：
+//  1. heartbeat-due 优先：每轮循环开头先检查 hb.timer 是否已到期（非阻塞），
+//     到期立即发送心跳，避免 inbound backlog 饿死心跳导致服务端判掉线。
+//  2. inbound bounded batch：进入 inbound 分支后最多连续处理 pumpInboundBatchSize 条，
+//     强制回外层 select 给 heartbeatTimer/controlCh/ctx.Done 机会，防止一直 drain inbound。
+//
+// 并发安全：c.adp 是 Go SchemaAdapter（无可变状态，并发安全）；pump 是 inbound decode 的
+// 唯一执行者（单 goroutine 串行，天然有序）；listenQueues 各 route queue 自带 mu，与主流程
+// 的 GetListenResp Pop 无死锁；responseMap 由 c.mu 保护（与 RequestResponse 同锁粒度）。
+//
+// 退出时（defer）：drain inboundCh 归还 buffer 池避免泄漏；停止心跳 timer；关闭 pumpDone
+// 通知 WaitPumpDone / WaitDecodeDone / WaitListenDone 调用方。
+func (c *Connection) connectionPump() {
+	defer close(c.pumpDone)
+	defer c.stopHeartbeatTimerLocked()
+
 	for {
+		// 硬约束 1：heartbeat-due 优先。timer 已到期时立即发送，避免下文 select 因持续有
+		// inbound 可读而长期随机不到 timer.C 分支（select 是伪随机，hot inbound 通道会饿死 timer）。
+		// heartbeatDueLocked 会非阻塞消费掉一次 timer.C 触发。
+		if c.heartbeatDueLocked() {
+			c.sendHeartbeatLocked()
+			c.resetHeartbeatTimerLocked()
+			continue
+		}
+
+		// 心跳 timer 的 channel 动态拼进 select：未注册心跳时为 nil，select 自动忽略 nil channel。
+		// 必须把 timer.C 放进 select 才能在 timer 到期时唤醒 pump（否则 pump 会一直阻塞在
+		// inbound/control/ctx 三路 select 上，即便心跳到期也无法触发）。timer.C 的实际处理
+		// 交给下一轮循环顶部的 heartbeatDueLocked（消费 + 发送 + 重置），这里只是「唤醒」。
+		var heartbeatC <-chan time.Time
+		if c.hb != nil && c.hb.timer != nil {
+			heartbeatC = c.hb.timer.C
+		}
+
 		select {
 		case <-c.ctx.Done():
-			for {
-				select {
-				case frame, ok := <-c.decodeCh:
-					if !ok {
-						return
-					}
-					putMsgBuf(frame.Data)
-				default:
-					return
-				}
-			}
-		case frame, ok := <-c.decodeCh:
+			c.drainInboundLocked()
+			return
+		case <-heartbeatC:
+			// timer 到期：发心跳 + 重置 timer。直接在这里处理（而非依赖下一轮 heartbeatDueLocked）
+			// 避免 timer.C 在 select 随机选择中被反复跳过（消费掉这次触发）。
+			c.sendHeartbeatLocked()
+			c.resetHeartbeatTimerLocked()
+		case cmd := <-c.controlCh:
+			c.handleControlLocked(cmd)
+		case frame, ok := <-c.inboundCh:
 			if !ok {
+				c.drainInboundLocked()
 				return
 			}
 			c.decodeAndDispatch(frame)
+			// 硬约束 2：bounded batch。最多再连取 pumpInboundBatchSize-1 条（非阻塞），
+			// 处理完强制回外层重新检查 heartbeat due + select，防止海量 inbound 饿死 timer/control。
+			batched := 1
+		batchLoop:
+			for batched < pumpInboundBatchSize {
+				select {
+				case frame2, ok := <-c.inboundCh:
+					if !ok {
+						c.drainInboundLocked()
+						return
+					}
+					c.decodeAndDispatch(frame2)
+					batched++
+				default:
+					// inboundCh 当前为空，跳出回外层让 heartbeat/control/ctx 有机会被选中。
+					break batchLoop
+				}
+			}
 		}
 	}
+}
+
+// drainInboundLocked 排空 inboundCh 并归还 buffer 池。
+// 仅在 pump 退出路径（ctx.Done / inboundCh 关闭）调用。连接已关闭，调用方不再期待这些响应，
+// 丢弃即可，只需归还 buffer 避免泄漏。
+func (c *Connection) drainInboundLocked() {
+	for {
+		select {
+		case frame, ok := <-c.inboundCh:
+			if !ok {
+				return
+			}
+			putMsgBuf(frame.Data)
+		default:
+			return
+		}
+	}
+}
+
+// handleControlLocked 在 pump goroutine 内串行处理 controlCh 命令。
+// 「Locked」后缀表示本方法只能由 pump goroutine 调用（hb / timer 字段无锁访问）。
+func (c *Connection) handleControlLocked(cmd pumpCmd) {
+	switch cmd.kind {
+	case pumpCmdHeartbeat:
+		// 替换/注册心跳：停止旧 timer（若有），装上新 cfg + 新 timer。
+		c.stopHeartbeatTimerLocked()
+		c.hb = &heartbeatRuntime{cfg: cmd.hbCfg}
+		c.resetHeartbeatTimerLocked()
+		if cmd.result != nil {
+			cmd.result <- nil
+		}
+	case pumpCmdStopHeartbeat:
+		c.stopHeartbeatTimerLocked()
+		c.hb = nil
+		if cmd.result != nil {
+			cmd.result <- nil
+		}
+	case pumpCmdStop:
+		// 主动请求退出。pump 主循环不直接 break（需 drain），改 cancel ctx 让主循环走 ctx.Done 分支。
+		c.cancel()
+		if cmd.result != nil {
+			cmd.result <- nil
+		}
+	}
+}
+
+// heartbeatDueLocked 非阻塞检查心跳 timer 是否已到期。
+// hb==nil 或 timer==nil 表示未注册心跳，返回 false。否则尝试非阻塞读 timer.C：
+// 能读到说明已到期，返回 true（并消费掉这次的触发，避免 reset 后立即又触发）。
+func (c *Connection) heartbeatDueLocked() bool {
+	if c.hb == nil || c.hb.timer == nil {
+		return false
+	}
+	select {
+	case <-c.hb.timer.C:
+		return true
+	default:
+		return false
+	}
+}
+
+// sendHeartbeatLocked 发送一次心跳。仅在 pump goroutine 调用。
+// 跳过条件：连接已关闭（isClose==1）或 builder 返回 nil。
+func (c *Connection) sendHeartbeatLocked() {
+	if c.hb == nil {
+		return
+	}
+	if atomic.LoadInt32(&c.isClose) == 1 {
+		return
+	}
+	packet := c.hb.cfg.Builder()
+	if packet == nil {
+		return
+	}
+	n, err := c.Send(packet)
+	if err != nil {
+		stresslog.Warn("[HEARTBEAT] 发送失败",
+			zap.String("service", c.serviceName), zap.Int("pktLen", len(packet)), zap.Error(err))
+		return
+	}
+	stresslog.Debug("[HEARTBEAT] 已发送",
+		zap.String("service", c.serviceName), zap.Int("pktLen", n))
+}
+
+// resetHeartbeatTimerLocked （重新）设置心跳 timer 为 cfg.Interval 后到期。
+// hb==nil 时无操作。timer 复用：若已存在先 Stop 再 Reset，避免 timer 泄漏。
+func (c *Connection) resetHeartbeatTimerLocked() {
+	if c.hb == nil {
+		return
+	}
+	if c.hb.timer == nil {
+		c.hb.timer = time.NewTimer(c.hb.cfg.Interval)
+		return
+	}
+	if !c.hb.timer.Stop() {
+		// 排空可能已在 C 里的触发，避免 reset 后立即旧触发被消费。
+		select {
+		case <-c.hb.timer.C:
+		default:
+		}
+	}
+	c.hb.timer.Reset(c.hb.cfg.Interval)
+}
+
+// stopHeartbeatTimerLocked 停止心跳 timer 并清空 hb runtime。
+// 仅 pump goroutine 调用。hb 字段置 nil，让后续 heartbeatDueLocked/sendHeartbeatLocked 自然 no-op。
+func (c *Connection) stopHeartbeatTimerLocked() {
+	if c.hb == nil {
+		return
+	}
+	if c.hb.timer != nil {
+		if !c.hb.timer.Stop() {
+			select {
+			case <-c.hb.timer.C:
+			default:
+			}
+		}
+		c.hb.timer = nil
+	}
+	c.hb = nil
 }
 
 // decodeAndDispatch 执行单帧的 Lua 解码 + 分发，归还 buffer。
@@ -506,12 +734,13 @@ type EnqueueResult int
 
 const (
 	EnqueueOK     EnqueueResult = iota // 成功入队
-	EnqueueClosed                      // 连接已关闭 / 尚未启动 decode：静默丢包，调用方不应再 Close
-	EnqueueChFull                      // decodeCh 真满：触发反压，调用方应关闭连接释放资源
+	EnqueueClosed                      // 连接已关闭 / 尚未启动 pump：静默丢包，调用方不应再 Close
+	EnqueueChFull                      // inboundCh 真满：触发反压，调用方应关闭连接释放资源
 )
 
-// EnqueueRaw 由 gnet OnTraffic 调用，把 raw 包投递到 decode goroutine。
+// EnqueueRaw 由 gnet OnTraffic 调用，把 raw 包投递到 connectionPump 的 inboundCh。
 //
+// 2-C3 起：OnTraffic 只做纯 Go 帧切割 + 投递，不接触 decode（decode 在 pump 内做）。
 // 三态返回让调用方区分"连接已关"和"真反压"，避免停止阶段把 close 后还在路上的
 // inbound 字节当成 decode 满。只有 EnqueueChFull 是需要警示的真问题。
 func (c *Connection) EnqueueRaw(msgBuf []byte, recvFrameAt time.Time) EnqueueResult {
@@ -521,37 +750,44 @@ func (c *Connection) EnqueueRaw(msgBuf []byte, recvFrameAt time.Time) EnqueueRes
 	if atomic.LoadInt32(&c.isClose) == 1 {
 		return EnqueueClosed
 	}
-	if c.decodeCh == nil {
-		// StartDecodeLoop 还没调用（极端启动竞态）：帧丢弃，业务层会超时/重发。
+	if c.inboundCh == nil {
+		// StartPump 还没调用（极端启动竞态）：帧丢弃，业务层会超时/重发。
 		return EnqueueClosed
 	}
 	select {
-	case c.decodeCh <- inboundFrame{Data: msgBuf, WireBytes: len(msgBuf), RecvFrameAt: recvFrameAt}:
+	case c.inboundCh <- inboundFrame{Data: msgBuf, WireBytes: len(msgBuf), RecvFrameAt: recvFrameAt}:
 		return EnqueueOK
 	default:
 		return EnqueueChFull
 	}
 }
 
-// WaitDecodeDone 等待 decode goroutine 退出。
-// 必须在 Close()/onClose() 之后调用（ctx 已 cancel，decodeLoop 会尽快退出）。
+// WaitDecodeDone 等待 connectionPump 退出（pump 已包含旧 decodeLoop 的所有工作）。
+//
+// 2-C3 起 decodeLoop 已并入 pump；本方法现在等 pumpDone，与 WaitListenDone 等价。
+// 保留方法名是为了让 client.go 的 CloseAllWithTimeout 调用语义保持「先等 decode，再等 listen」
+// 的两阶段表达（client.go 不在本任务可改文件清单内）。
 func (c *Connection) WaitDecodeDone() {
 	if c == nil {
 		return
 	}
-	if c.decodeDone != nil {
-		<-c.decodeDone
+	if c.pumpDone != nil {
+		<-c.pumpDone
 	}
 }
 
-// WaitDecodeDoneTimeout 带超时等待 decode goroutine 退出。
+// WaitDecodeDoneTimeout 带超时等待 connectionPump 退出。
 func (c *Connection) WaitDecodeDoneTimeout(timeout time.Duration) bool {
-	if c == nil || c.decodeDone == nil {
+	if c == nil {
+		return true
+	}
+	ch := c.pumpDone
+	if ch == nil {
 		return true
 	}
 	if timeout <= 0 {
 		select {
-		case <-c.decodeDone:
+		case <-ch:
 			return true
 		default:
 			return false
@@ -560,11 +796,28 @@ func (c *Connection) WaitDecodeDoneTimeout(timeout time.Duration) bool {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
-	case <-c.decodeDone:
+	case <-ch:
 		return true
 	case <-timer.C:
 		return false
 	}
+}
+
+// WaitPumpDone 等待 connectionPump 退出。
+// 与 WaitDecodeDone / WaitListenDone 等价（pump 是三者合并后的唯一 owner goroutine）。
+// 推荐新代码用本方法表达「等连接所有后台 goroutine 退出」的语义。
+func (c *Connection) WaitPumpDone() {
+	if c == nil {
+		return
+	}
+	if c.pumpDone != nil {
+		<-c.pumpDone
+	}
+}
+
+// WaitPumpDoneTimeout 带超时等待 connectionPump 退出。
+func (c *Connection) WaitPumpDoneTimeout(timeout time.Duration) bool {
+	return c.WaitDecodeDoneTimeout(timeout)
 }
 
 // loadCloseReason 读取 onClose 时写入的关闭原因字符串。
@@ -581,16 +834,15 @@ func (c *Connection) loadCloseReason() string {
 // doClose 执行连接关闭的共享逻辑：取消上下文 + 停止心跳。
 // 调用方负责触发回调。
 //
-// **关键顺序**：必须先 cancel 再 StopHeartbeat。
-// 原因：心跳 Builder 内部会重新进入 Lua VM 抢 luaMu，
-// 如果 cancel 在后面，Builder 不知道连接已在关闭，可能与持有 luaMu 的执行器
-// 形成"executor 等心跳退出 ↔ 心跳等 luaMu"循环死锁。
-// cancel 优先后：
-//  1. Builder 入口的 `ctx.Err() != nil` 会立即返回 nil，跳过 Lua 调用；
-//  2. listenLoop 的 select 看到 ctx.Done 立即退出，回调不再分发；
-//  3. decodeLoop 的 select 看到 ctx.Done 立即退出，排空通道归还 buffer。
+// 2-C3 起（connectionPump 模型）：cancel ctx 是 pump 退出的唯一权威信号——pump 主循环
+// 看到 ctx.Done 立即 drain inbound 归还 buffer，并通过 defer stopHeartbeatTimerLocked 停止
+// 心跳 timer。因此 StopHeartbeat 在此处主要是「主动让 pump 尽快丢掉心跳 runtime」的快速路径：
+// 投递一条 pumpCmdStopHeartbeat 到 controlCh，pump 在下一轮 select 收到后立即停 timer + 置 hb=nil，
+// 不必等到 pump 自己 ctx.Done 分支。即便投递丢失（pump 正卡在 inbound batch / 已退出），
+// defer 兜底也会停 timer，无泄漏。
 //
-// 双重保险（参见 heartbeat.go 的 TryLock 兜底）后，StopHeartbeat 不会被卡死。
+// 2-B（builder Go-only）+ 2-C3（pump 单 goroutine，builder 在 pump 内同步调用）后，
+// 心跳 builder 不再接触业务 LState。此处保留 cancel-first 顺序只是为了语义清晰。
 func (c *Connection) doClose() {
 	c.cancel()
 	c.StopHeartbeat()
@@ -656,6 +908,11 @@ func (c *Connection) Close() {
 
 // OnReceive 收到网络消息时分发到 request-response 通道或持久监听回调。
 //
+// 2-C3 起：本方法在 connectionPump goroutine 内被 decodeAndDispatch 同步调用（pump 是 inbound
+// decode 的唯一执行者）。命中 listenResp 时不再投递到独立的 listenCh（listenLoop 已删除），
+// 而是**同步直接调用 dispatchListen**——cb!=nil 跑回调、cb==nil 写 listenQueues。
+// 这样 listen 分发与 decode 共享同一 pump goroutine，彻底消灭旧的 listenCh/listenLoop 链路。
+//
 // 热路径：每个入站包都会走一次。高频 Debug 日志构造前先做 atomic level 检查，
 // 避免在 info 级别下白白构造 zap.Field 切片（每包 4 个 string field，
 // 10000 连接 × 5 包/s 下能省下数百微秒 CPU/s）。
@@ -692,21 +949,19 @@ func (c *Connection) OnReceive(routeKey string, body []byte, headerErr uint64, w
 		return
 	}
 
-	_, exists = c.listenResp[routeKey]
-	if exists {
-		c.mu.Unlock()
+	_, isListen := c.listenResp[routeKey]
+	c.mu.Unlock()
+
+	if isListen {
 		if monitor.TimingDetailAtLeast(c.timingDetail, monitor.TimingFullDetail) {
 			resp.Timing.DispatchStart = time.Now()
 		}
-		select {
-		case c.listenCh <- resp:
-		default:
-			stresslog.Warn("[NETWORK] OnReceive 监听通道已满", zap.String("key", routeKey))
-		}
+		// 同步分发：cb!=nil 跑回调，cb==nil 写 listenQueues（per-queue mu 串行化）。
+		// pump goroutine 独占执行，与主流程 GetListenResp 的 Pop 无死锁。
+		c.dispatchListen(resp)
 		return
 	}
 
-	c.mu.Unlock()
 	if stresslog.DebugEnabled() {
 		stresslog.Debug("[NETWORK] OnReceive 未匹配任何请求或监听",
 			zap.String("service", c.serviceName),

@@ -27,9 +27,9 @@ const (
 	ErrParseFailed  ErrorCode = 12 // S2C proto 解析失败
 
 	// 构建层 (21-30)
-	ErrCreateMsg ErrorCode = 21 // 创建 C2S proto 消息失败
-	ErrBindField ErrorCode = 22 // 必需字段绑定失败（Required=true）
-	ErrSerialize ErrorCode = 23 // C2S 消息序列化失败
+	ErrCreateMsg  ErrorCode = 21 // 创建 C2S proto 消息失败
+	ErrBindField  ErrorCode = 22 // 必需字段绑定失败（Required=true）
+	ErrSerialize  ErrorCode = 23 // C2S 消息序列化失败
 	ErrExecFailed ErrorCode = 24 // 动作执行失败（errorStrategy=abort）
 
 	// 监听层 (31-40)
@@ -37,14 +37,15 @@ const (
 	ErrListenRegister ErrorCode = 32 // 注册持久监听失败
 
 	// 配置层 (41-50)
-	ErrAddrEmpty      ErrorCode = 41 // 连接地址为空
-	ErrURLEmpty       ErrorCode = 42 // HTTP URL 为空
-	ErrURLScheme      ErrorCode = 43 // HTTP URL 协议错误（缺 http:// 前缀）
-	ErrUnknownPattern ErrorCode = 44 // 未知动作模式（配置错误）
-	ErrHTTPBuild      ErrorCode = 45 // http.NewRequest 失败
-	ErrHTTPReadBody   ErrorCode = 46 // 读取 HTTP 响应体失败
-	ErrMarshalBody    ErrorCode = 47 // JSON/form 请求体序列化失败
-	ErrHTTPStatus     ErrorCode = 48 // HTTP 响应状态码非 2xx
+	ErrAddrEmpty       ErrorCode = 41 // 连接地址为空
+	ErrURLEmpty        ErrorCode = 42 // HTTP URL 为空
+	ErrURLScheme       ErrorCode = 43 // HTTP URL 协议错误（缺 http:// 前缀）
+	ErrUnknownPattern  ErrorCode = 44 // 未知动作模式（配置错误）
+	ErrHTTPBuild       ErrorCode = 45 // http.NewRequest 失败
+	ErrHTTPReadBody    ErrorCode = 46 // 读取 HTTP 响应体失败
+	ErrMarshalBody     ErrorCode = 47 // JSON/form 请求体序列化失败
+	ErrHTTPStatus      ErrorCode = 48 // HTTP 响应状态码非 2xx
+	ErrHeartbeatConfig ErrorCode = 49 // 声明式心跳配置错误（intervalMs<=0 / route 缺失 / 字段非法）
 
 	// Lua 层 (51-60)
 	ErrLuaNotInit    ErrorCode = 51 // Lua 运行时未初始化
@@ -89,6 +90,7 @@ var codeRegistry = []CodeInfo{
 	{uint64(ErrHTTPReadBody), "HTTP_READ_BODY", KindFramework},
 	{uint64(ErrMarshalBody), "MARSHAL_BODY", KindFramework},
 	{uint64(ErrHTTPStatus), "HTTP_STATUS", KindFramework},
+	{uint64(ErrHeartbeatConfig), "HEARTBEAT_CONFIG", KindFramework},
 	{uint64(ErrLuaNotInit), "LUA_NOT_INIT", KindFramework},
 	{uint64(ErrLuaNoScript), "LUA_NO_SCRIPT", KindFramework},
 	{uint64(ErrLuaExecFailed), "LUA_EXEC_FAILED", KindFramework},

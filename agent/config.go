@@ -35,7 +35,7 @@ type ResolvedConfig struct {
 	MaxBots              int           // 单节点最大机器人数量
 	AppVersion           string        // 应用版本号
 	TaskWorkDir          string        // 任务工作目录（系统临时目录）
-	AdapterScript        string        // 协议适配器脚本路径
+	AdapterScript        string        // 旧字段：当前生产路径不再使用
 	StressInterval       time.Duration // 压力指标上报间隔
 	SystemInterval       time.Duration // 系统指标上报间隔
 	HBInterval           time.Duration // 心跳发送间隔
@@ -109,7 +109,7 @@ func (c *Config) Resolve() (*ResolvedConfig, error) {
 		MaxBots:              maxBots,
 		AppVersion:           c.AppVersion,
 		TaskWorkDir:          os.TempDir(),
-		AdapterScript:        "conf/adapter/codec.lua",
+		AdapterScript:        "",
 		StressInterval:       stressInterval,
 		SystemInterval:       stressInterval, // 系统指标与压力指标同步上报
 		HBInterval:           hbInterval,

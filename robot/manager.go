@@ -38,16 +38,19 @@ type ManagerConfig struct {
 	Count         int               `json:"count"`
 	ConcurrentNum int               `json:"concurrentNum"`
 	StateExtra    map[string]string `json:"stateExtra"`
-	// Adapter 是进程级共享的 LuaAdapter（持有 codec.lua 字节码 + 元信息 + 错误描述缓存）。
-	// Manager 创建每个 Robot 时通过它派生 RobotAdapter，让 Robot 在自己的 LState 上做编解码。
-	// 类型从 adapter.Adapter 接口收窄到 *adapter.LuaAdapter，是因为只有 LuaAdapter 提供
-	// NewRobotAdapter 工厂方法。
-	Adapter        *adapter.LuaAdapter `json:"-"`
-	RequestTimeout time.Duration       `json:"requestTimeout"`
-	MainService    string              `json:"mainService"`
-	HTTPTimeout    time.Duration       `json:"httpTimeout"`
-	RampUp         *RampUpConfig       `json:"rampUp"`
-	Duration       time.Duration       `json:"duration"` // 运行时长，0 = 一直运行
+	// CodecResolver 按「server 串 <proto>:<service>」解析每条连接的 Go SchemaAdapter。
+	// 全 codec 路径（dial/decode/encode/心跳/listen/业务 Lua）共享同一份 codec 映射：
+	//   - dial/decode：Robot.ConnectTCP/UDP 拨号前 Resolve，nil → fail loud；非 nil 注入 Connection；
+	//   - encode/心跳/listen：engine.ActionExecutor / robotActionHandler / netSenderAdapter 各自 Resolve；
+	//   - 业务 Lua：经 script.Context.Resolver 在 api_network.go 内 Resolve。
+	// 全链路由 main.go/task_runner 启动期 LoadCodecResolver 构造并透传。
+	// 业务 codec 不再经 Lua，生产路径只接收 CodecResolver。
+	CodecResolver  adapter.CodecResolver `json:"-"`
+	RequestTimeout time.Duration         `json:"requestTimeout"`
+	MainService    string                `json:"mainService"`
+	HTTPTimeout    time.Duration         `json:"httpTimeout"`
+	RampUp         *RampUpConfig         `json:"rampUp"`
+	Duration       time.Duration         `json:"duration"` // 运行时长，0 = 一直运行
 	// Shared 任务级共享状态后端（可为 nil，表示未启用）。Manager 仅透传给每个 Robot，
 	// 不负责 Cleanup/Close：单机由 cmd/agent 负责，分布式由 Agent(Close)+Admin(Cleanup) 负责。
 	Shared sharedstate.Store `json:"-"`
@@ -126,10 +129,11 @@ func (m *Manager) startBatch(fromIndex, count, conc int) (int, error) {
 			RequestTimeout: m.cfg.RequestTimeout,
 			MainService:    m.cfg.MainService,
 			Shared:         m.cfg.Shared,
-		}, m.flow, m.factory, m.cfg.Adapter, m.dialer, m.luaPool)
+		}, m.flow, m.factory, m.cfg.CodecResolver, m.dialer, m.luaPool)
 		if err != nil {
-			// codec.lua 加载失败属于配置问题，重试也没用。
-			// 跳过这个 robot，日志告警，继续创建其它（避免单个失败拖垮整批）。
+			// NewRobot 仅在 resolver nil / LState 不可用时失败（codec 配置错误在
+			// 拨号 / 首次 encode 时 fail-loud 上报，便于定位到具体连接）。属于配置 / 资源问题，
+			// 重试也没用——跳过这个 robot，日志告警，继续创建其它（避免单个失败拖垮整批）。
 			stresslog.Error("[MANAGER] 创建机器人失败，跳过",
 				zap.Int("id", id), zap.String("account", account), zap.Error(err))
 			continue
@@ -366,7 +370,8 @@ func (m *Manager) StopAll() CleanupStatus {
 
 // resetBots 停止并清空所有已有机器人，但保持 Manager 可继续创建新机器人。
 // 与 StopAll 不同：不 cancel context、不关闭 doneCh。
-// 并发 Close：单个 robot 卡死（如 lua 嵌套回调死锁）不应阻塞阶段切换。
+// 并发 Close：单个 robot 清理卡住（如长时间 Lua action / executor 退出 / 连接清理）
+// 不应阻塞阶段切换。
 func (m *Manager) resetBots() CleanupStatus {
 	m.mu.Lock()
 	robots := make([]*Robot, len(m.robots))

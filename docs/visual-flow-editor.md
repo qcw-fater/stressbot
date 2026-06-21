@@ -139,7 +139,7 @@ cmd/web/src/
 │       │   └── protoStore.ts           # 加载状态 zustand store
 │       │
 │       ├── adapter/
-│       │   └── CodecAdapterDrawer.tsx  # codec.lua 编辑器
+│       │   └── CodecAdapterDrawer.tsx  # 声明式 codec.json 编辑器（每连接一份 + 共享 errors.json）
 │       │
 │       ├── preview/
 │       │   └── JsonPreviewModal.tsx    # flow.json 预览
@@ -810,7 +810,7 @@ interface ProtoStoreState {
 |---|---|
 | next/body/trueNext/falseNext/options[].node 引用的节点不存在 | 引用合法性 |
 | action 节点的 action 字段不存在于 actions 表 | 引用合法性 |
-| listenRefs[].listen 引用不存在的 listen（null 例外） | 引用合法性 |
+| listenRefs[].listen 可省略；引用不存在的 listen 不作为校验错误，运行时按队列缓存/无回调处理 | queue-only 行为 |
 | loop 的 body 为空 | 必填 |
 | weighted 至少 1 个 option | 必填 |
 | declarative listen 的 s2cProto 不在 ProtoRegistry | proto 存在性 |
@@ -863,7 +863,7 @@ interface ProtoStoreState {
 |---|---|---|
 | `stressbot-resources-proto` | `data` | 用户上传的 .proto |
 | `stressbot-resources-scripts` | `data` | 用户上传的 .lua |
-| `stressbot-resources-adapter` | `data` | codec.lua / error.lua |
+| `stressbot-resources-adapter` | `data` | 各 `*_codec.json` + 共享 `errors.json` |
 
 ---
 

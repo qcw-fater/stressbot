@@ -12,7 +12,7 @@ stressbot 使用统一的错误码体系区分框架内部错误和游戏服务�
 - **`ActionError` 结构化类型**替代 `fmt.Errorf` 自由格式字符串，携带 Code + Kind + Detail + cause
 - **monitor 错误分布按 `(Kind, Code)` 聚合**，固定类别不再爆炸式增长
 - **`CodedError` 接口**隔离 `monitor` 与 `engine` 之间的循环依赖
-- **`error.lua` 可选映射**将服务端错误码映射为可读描述
+- **`errors.json` 可选映射**将服务端错误码映射为可读描述
 
 ### 1.1 设计背景
 
@@ -24,7 +24,7 @@ stressbot 使用统一的错误码体系区分框架内部错误和游戏服务�
 | 底层错误原因丢失 | `network/connection.go` 的 `RequestResponse` 在所有失败路径统一返回 `(nil, 0)` |
 | 超时未正确分类 | 所有超时场景用 `fmt.Errorf` 生成字符串，最终被归为 `ResultFailure` |
 | 业务错误码未结构化 | 服务端 `headerErr` 被拼进字符串，无法按数值聚合 |
-| callback 错误无感 | Lua 回调失败只 Warn，monitor 完全无感 |
+| callback 错误无感 | 推送回调失败只 Warn，monitor 完全无感 |
 
 ### 1.2 设计目标
 
@@ -99,7 +99,7 @@ type CodeInfo struct {
 
 | Code | 常量 | 名称 | 含义 |
 |------|------|------|------|
-| 11 | `ErrEncodeFailed` | `ENCODE_FAILED` | codec.lua 编码返回 nil（TCP/UDP 编码均可能触发） |
+| 11 | `ErrEncodeFailed` | `ENCODE_FAILED` | SchemaAdapter/codec 编码返回 nil（TCP/UDP 编码均可能触发） |
 | 12 | `ErrParseFailed` | `PARSE_FAILED` | S2C proto 解析失败（factory.Parse 返回错误） |
 
 ### 3.3 构建层（21-30）
@@ -144,7 +144,7 @@ type CodeInfo struct {
 
 | Code | 常量 | 名称 | 含义 |
 |------|------|------|------|
-| 61 | `ErrCallbackLua` | `CALLBACK_LUA` | Lua 回调脚本执行失败（RunCallbackScript 返回 error 或 Lua 运行时未初始化） |
+| 61 | `ErrCallbackLua` | `CALLBACK_LUA` | 预留的旧脚本回调错误码；当前 listen 脚本回调已移除 |
 | 62 | `ErrCallbackParse` | `CALLBACK_PARSE` | 推送消息解析失败（factory.Parse 返回错误） |
 
 ### 3.8 错误码分配规则
@@ -595,96 +595,68 @@ merge := func(es []ErrorEntry) {
 
 ---
 
-## 11. 服务端错误码映射 — error.lua
+## 11. 服务端错误码映射 — errors.json
 
 ### 11.1 文件位置
 
 ```
 conf/adapter/
-  ├── codec.lua      # 必需：协议编解码
-  └── error.lua      # 可选：服务端错误码映射
+  ├── tcp_logic_codec.json   # 连接 codec：tcp:logic
+  ├── tcp_battle_codec.json  # 连接 codec：tcp:battle
+  ├── udp_battle_codec.json  # 连接 codec：udp:battle
+  └── errors.json            # 可选：共享服务端错误码映射
 ```
 
 ### 11.2 格式
 
-```lua
--- conf/adapter/error.lua（可选）
--- 将服务端 headerErr 映射为可读描述。文件不存在时无任何影响。
-
-function describe_error(code)
-    local errors = {
-        [1004] = "金币不足",
-        [1005] = "等级不够",
-    }
-    return errors[code] or ""
-end
+```json
+{
+  "1004": "金币不足",
+  "1005": "等级不够"
+}
 ```
 
-只需定义一个全局函数 `describe_error(code: number) -> string`。实际项目中的 `conf/adapter/error.lua` 包含了完整的游戏服务器错误码映射表（覆盖 antnet 框架 0-27 + 区服/登录 256-299 + 各业务模块错误码）。
+`errors.json` 是扁平 `{"code":"中文描述"}` 映射。key 必须可解析为 `uint64`，value 为描述文本。实际项目中的 `conf/adapter/errors.json` 覆盖 antnet 框架 0-27 + 区服/登录 256-299 + 各业务模块错误码。
 
 ### 11.3 Adapter 接口扩展
 
 ```go
 // adapter/adapter.go
 type Adapter interface {
-    // ... 现有 8 个方法 ...
+    // ... 现有方法 ...
     DescribeError(code uint64) string
 }
 ```
 
-### 11.4 LuaAdapter 实现（含内存缓存）
+### 11.4 LoadCodecResolver / SchemaAdapter 实现
 
-```go
-// adapter/lua_adapter.go
-type LuaAdapter struct {
-    // ... 现有字段 ...
-    hasErrorMap    bool     // 是否成功加载了 error.lua
-    errorDescCache sync.Map // uint64 -> string 永久缓存
-}
-```
+生产加载流程：
 
-**加载流程**（`NewLuaAdapter`）：
-1. 加载 `codec.lua`（必需，逻辑不变）
-2. 检查 `errorMapPath` 是否非空 → 文件存在 → 编译并加载到每个 LState
-3. 在每个 LState 中查找 `describe_error` 函数，缓存到 Registry
-4. 不存在或加载失败 → `hasErrorMap = false`，`DescribeError` 直接返回空字符串
+1. `adapter.InferCodecMap(codecDir)` 扫描 `*_codec.json`，按文件名 `<proto>_<service>_codec.json` 推断 server 串 `<proto>:<service>`。
+2. `adapter.LoadCodecResolver(codecDir, codecs, "errors.json")` 可选调用 `codec.LoadErrorMap` 加载共享错误码表。
+3. 每份 codec schema 通过 `codec.LoadSchema` + `adapter.NewSchemaAdapter(schema, errorMap)` 编译为 `SchemaAdapter`。
+4. `SchemaAdapter.DescribeError(code)` 委托 `codec.SchemaCodec.DescribeError(code)`，直接查询编译期注入的错误码 map；未配置或未命中返回空字符串。
+5. 同一 codec 文件被多个 server 引用时 dedup，复用同一无状态 Adapter 实例。
 
-**DescribeError 缓存机制**：
-
-```go
-func (a *LuaAdapter) DescribeError(code uint64) string {
-    if !a.hasErrorMap {
-        return ""
-    }
-    if v, ok := a.errorDescCache.Load(code); ok {
-        return v.(string)
-    }
-    desc := a.callDescribeError(code)
-    a.errorDescCache.Store(code, desc)  // 即使是 "" 也缓存
-    return desc
-}
-```
-
-**缓存必要性**：
-- 服务端 headerErr 在压测中极其高频（如登录失败重试），每秒可能触发数千次
-- 每次 acquire LState -> 调 Lua -> release 至少几十微秒
-- 错误码映射表是编译时确定的静态表，进程生命周期内不会变
-- `sync.Map` 写入是 once-only（首次填充后只读），并发读零锁开销
+`errors.json` 非空但加载失败（文件缺失、JSON 非法、key 非数字）会让 `LoadCodecResolver` 返回中文 error，启动期 fail loud；传空 `errorsFile` 则跳过错误码描述，Adapter 仍可用。
 
 ### 11.5 action 层集成
 
-在 `execHTTPRequest` 等方法中构造 `NewServerError` 时，通过 `adp.DescribeError(headerErr)` 补充描述：
+在 `tcpRequest` / `udpRequest` / listen 消费等收到非零 headerErr 的路径中，通过当前动作的 `<proto>:<service>` 解析对应 Adapter，再调用 `DescribeError(headerErr)` 补充描述：
 
 ```go
-if headerErr != 0 {
-    desc := ae.adp.DescribeError(headerErr)
+func (ae *ActionExecutor) handleHeaderError(proto string, def *ActionDef, headerErr uint64, routeKey string, respBody []byte) *ActionError {
+    ae.parseAndStoreResponse(def, respBody)
+    desc := ae.describeError(proto, def.Service, headerErr)
     detail := "service=" + def.Service + " route=" + routeKey
     if desc != "" {
         detail = desc + ": " + detail
     }
-    return len(packet), len(respBody), NewServerError(headerErr, detail)
+    return NewServerError(headerErr, detail)
 }
 ```
+
+`describeError` 内部使用 `CodecResolver.Resolve(proto + ":" + service)`；描述缺失不是致命错误，返回空串时仍按原 headerErr code 构造 `NewServerError`。
 
 ---
 
@@ -742,20 +714,17 @@ mux.HandleFunc("GET /sbot/api/error-codes", s.handleErrorCodeIndex)
 
 ### 13.4 适配器编辑器
 
-支持在 `codec.lua` / `error.lua` 间切换。`error.lua` 是可选文件，提供默认模板：
+适配器资源以声明式 JSON 为主：`*_codec.json` 描述各连接 codec，`errors.json` 提供可选共享错误码表。错误码文件可提供默认模板：
 
-```lua
-function describe_error(code)
-    local errors = {
-        -- [1004] = "金币不足",
-    }
-    return errors[code] or ""
-end
+```json
+{
+  "1004": "金币不足"
+}
 ```
 
 ### 13.5 任务启动 multipart
 
-`error.lua` 可选随 `codec.lua` 一起提交，后端存储在 `TaskConfig.ErrorMapScript` 字段。
+`errors.json` 可选随 `*_codec.json` 一起提交；后端任务配置按资源文件保存并在运行时传给 `LoadCodecResolver`。
 
 ---
 
@@ -814,12 +783,13 @@ connection.RequestResponse  → (nil, NewActionError(4, ...))  ← 具体原因
 | `monitor/snapshot.go` | 修改 | MergeSnapshots 错误合并改用 (Kind, Code) key；ActionSnapshot 新增 CanceledCount |
 | `monitor/reporter.go` | 修改 | 控制台输出 `[Kind/Code CodeName]` 格式 |
 | `adapter/adapter.go` | 修改 | 接口新增 DescribeError |
-| `adapter/lua_adapter.go` | 修改 | NewLuaAdapter 新增 errorMapPath；实现 DescribeError + errorDescCache |
-| `conf/adapter/error.lua` | 可选新增 | 服务端错误码映射 |
-| `admin/types.go` | 修改 | TaskConfig 新增 ErrorMapScript |
-| `admin/handlers.go` | 修改 | multipart 解析/下载/基线读写 error.lua；GET /sbot/api/error-codes |
-| `agent/task_runner.go` | 修改 | 下载并传递 error.lua |
-| `cmd/agent/main.go` | 修改 | 单机模式 loadAdapter 传 errorMapPath |
+| `adapter/codec_resolver.go` | 修改 | LoadCodecResolver 加载 `errors.json` 并注入 SchemaAdapter |
+| `adapter/schema_adapter.go` | 修改 | SchemaAdapter.DescribeError 委托 SchemaCodec |
+| `codec/errors.go` | 新建 | LoadErrorMap 读取 `errors.json` |
+| `conf/adapter/errors.json` | 可选新增 | 服务端错误码映射 |
+| `admin/handlers.go` | 修改 | 适配器资源基线/下发包含声明式 codec 与 errors.json |
+| `agent/task_runner.go` | 修改 | 下载适配器资源并传给 LoadCodecResolver |
+| `cmd/agent/main.go` | 修改 | 单机模式加载 CodecResolver/SchemaAdapter |
 | 前端 | 修改 | types + ActionsTab + resourcesStore + baselineApi + taskActions + ResourcesDrawer + errorCodeRegistry |
 
 ---
@@ -833,7 +803,7 @@ connection.RequestResponse  → (nil, NewActionError(4, ...))  ← 具体原因
 | ErrActionSkip → ErrFieldNil | 重命名 + 删除 4 处吞咽逻辑 | 未实施重命名。executor 中保留了 skip 相关逻辑 |
 | ResultSkipped | ActionResult 包含此值 | 实际只有 4 个值：Success/Failure/Timeout/Canceled |
 | skippedCount | ActionSnapshot 含此字段 | ActionSnapshot 中无 skippedCount 字段 |
-| describe_error 返回空串 | 未找到时返回 `""` | 实际 error.lua 中返回 `"未知错误(N)"` |
+| errors.json 未命中 | 未找到时返回 `""` | SchemaCodec.DescribeError 未命中返回空串，调用方仍保留原 code |
 | RecordCallback 拆分 | 拆为 Success/Error 两版 | 已实施：RecordCallbackSuccess / RecordCallbackError |
 | 合并后 Messages 上限 | 5 条 | 已实施 |
 | 环形缓冲取模 | uint32 域取模 | 已实施，避免 32 位系统负索引 |
@@ -841,6 +811,6 @@ connection.RequestResponse  → (nil, NewActionError(4, ...))  ← 具体原因
 | ErrHTTPStatus | 计划中未列出 | 实际代码中存在，HTTP 响应非 2xx 时使用 |
 | ErrListenRegister | 计划中未列出 | 实际代码中存在 |
 | codeRegistry 条目数 | 计划列出 24 个 | 实际 27 个（多出 ErrExecFailed、ErrHTTPStatus、ErrListenRegister） |
-| Lua 桥适配 | 详细说明 6 个函数改造 | 已实施 |
+| Lua 桥适配 | 详细说明 6 个函数改造 | 已迁移为 LoadCodecResolver + SchemaAdapter 生产路径 |
 | 前端 actionsOnly/callbacksOnly 互斥开关 | 详细设计 | 待前端实施 |
-| error.lua 默认模板 | 返回空串 | 实际返回 `"未知错误(N)"` |
+| errors.json 默认模板 | Lua 函数模板 | 当前为扁平 JSON code→desc 映射 |

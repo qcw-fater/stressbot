@@ -58,9 +58,9 @@ func (r *connRegistry) get(gconn gnet.Conn) *Connection {
 
 // EventServer gnet 事件处理器。
 //
-// adp 在 RobotLocalAdapter 重构后角色收窄为"OnTraffic 热路径的元信息源"：
+// adp 是 OnTraffic 热路径的元信息源：
 //   - HeaderSize / BodyLength（纯 Go 缓存字段，零 Lua 调用）
-//   - 真正的 encode/decode 走 per-Robot 的 RobotAdapter（DialTCP/DialUDP 接收 adp 参数注入）
+//   - decode 使用 DialTCP/DialUDP 注入到 Connection 的 Go SchemaAdapter
 type EventServer struct {
 	gnet.BuiltinEventEngine
 
@@ -155,10 +155,11 @@ func closeReasonFromErr(err error) string {
 //
 // 因此只做两件纯 Go 操作：
 //  1. 用 adapter 缓存的元信息做帧分割（HeaderSize / BodyLength，零 Lua 调用）
-//  2. 把 raw msgBuf 投递到 connection 的 decodeCh，由 per-connection 的
-//     decodeLoop goroutine 异步完成 Lua decode + 分发
+//  2. 把 raw msgBuf 投递到 connection 的 inboundCh，由 per-connection 的 connectionPump
+//     goroutine 异步完成 decode + request-response/listen 分发 + 心跳
 //
-// msgBuf 从 sync.Pool 获取，decodeLoop 处理完归还，避免高频 alloc 触发 GC 抖动。
+// msgBuf 从 sync.Pool 获取，pump 处理完（decodeAndDispatch 的 defer putMsgBuf）归还，
+// 避免高频 alloc 触发 GC 抖动。
 func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 	headSize := es.adp.HeaderSize()
 
@@ -217,9 +218,9 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 
 		switch conn.EnqueueRaw(msgBuf, recvFrameAt) {
 		case EnqueueOK:
-			// 入队成功，msgBuf 由 decodeLoop 在处理后归还
+			// 入队成功，msgBuf 由 connectionPump 在 decodeAndDispatch 处理后归还
 		case EnqueueClosed:
-			// 连接已关闭或还没启动 decode：这是正常现象（任务停止 / battle_end close_* /
+			// 连接已关闭或还没启动 pump：这是正常现象（任务停止 / battle_end close_* /
 			// 服务端 EOF 后 inbound 字节仍在路上）。归还 buffer 即可，不重复关闭、不报警。
 			putMsgBuf(msgBuf)
 			stresslog.Debug("[NETWORK] 连接已关闭，丢弃后续 inbound 帧",
@@ -227,10 +228,10 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 				zap.String("robot", conn.robotName),
 				zap.Int("bodyLen", totalLen))
 		case EnqueueChFull:
-			// decodeCh 真满 = decode 严重落后（Lua 池耗尽或对端发包速率超出处理能力）。
+			// inboundCh 真满 = pump decode 严重落后（codec 慢或对端发包速率超出处理能力）。
 			// 关闭这条连接释放资源，避免持续累积导致整体雪崩。
 			putMsgBuf(msgBuf)
-			stresslog.Warn("[NETWORK] decode 通道已满，关闭连接以释放压力",
+			stresslog.Warn("[NETWORK] inbound 通道已满，关闭连接以释放压力",
 				zap.String("service", conn.ServiceName()),
 				zap.String("robot", conn.robotName))
 			return gnet.Close
@@ -328,18 +329,20 @@ func (d *Dialer) Stop() error {
 // DialTCP 建立 TCP 连接并绑定业务层 Connection。
 // ctx 用于超时/取消：如果 ctx 在拨号完成前被取消，返回 context 错误。
 //
-// adp 是 decodeLoop 使用的协议适配器（RobotLocalAdapter 重构后由 Robot 传入
-// 自己的 RobotAdapter）。OnTraffic 走的是 d.server.adp（全局元信息源），
-// 两个适配器实现同一接口、共享元信息字段，仅 encode/decode 的执行栈不同：
-// gnet 帧切割仍走全局，decode 走 robot 私有 LState 消除跨 robot 争抢。
+// adp 是 connectionPump 使用的协议适配器（T2-C1 起由 Robot 在拨号前通过 CodecResolver
+// 按 server 串解析后传入的 Go SchemaAdapter）。OnTraffic 走的是 d.server.adp（全局
+// 元信息源，仅 HeaderSize/BodyLength 帧切割，纯 Go）；decode 走连接固定 adp。
 //
-// 兼容性：传 nil 时 fallback 到 d.server.adp（保留单元测试 / 非 robot 场景路径）。
+// adp 必须非 nil：上层 Robot.ConnectTCP 已做 Resolve(nil → fail loud)，dial 内仅保留
+// 防御性 nil-guard（adp==nil 视为编程错误，直接返回错误，不再回退 d.server.adp 兜底）。
 func (d *Dialer) DialTCP(ctx context.Context, address string, conn *Connection, adp adapter.Adapter) (gnet.Conn, error) {
 	return d.dial(ctx, "tcp", address, conn, adp)
 }
 
 // DialUDP 建立 UDP 连接并绑定业务层 Connection。
-// ctx 用于超时/取消：任务停止时不再进入新的 UDP 拨号，避免 Lua action 持有 luaMu 卡死。
+// ctx 用于超时/取消：任务停止时不再进入新的 UDP 拨号。
+//
+// adp 语义同 DialTCP：上层 Robot.ConnectUDP 已 Resolve 非 nil 注入。
 func (d *Dialer) DialUDP(ctx context.Context, address string, conn *Connection, adp adapter.Adapter) (gnet.Conn, error) {
 	return d.dial(ctx, "udp", address, conn, adp)
 }
@@ -363,8 +366,16 @@ func (d *Dialer) dial(ctx context.Context, network, address string, conn *Connec
 	if d.closed.Load() {
 		return nil, context.Canceled
 	}
+	// T2-C1：删除 `if adp == nil { adp = d.server.adp }` 兜底。
+	// adp 由上层 Robot.ConnectTCP/UDP 在拨号前经 CodecResolver.Resolve 注入（nil → 已 fail loud）。
+	// 此处仅保留防御性 nil-guard：adp==nil 视为编程错误，直接报错而非静默回退默认 codec。
 	if adp == nil {
-		adp = d.server.adp
+		serviceName := ""
+		if conn != nil {
+			serviceName = conn.ServiceName()
+		}
+		return nil, fmt.Errorf("%s 拨号失败 %s：adapter 为 nil（上层应通过 CodecResolver 注入，network=%s service=%q）",
+			strings.ToUpper(network), address, network, serviceName)
 	}
 
 	// gnet.Client.Dial 在 EnrollContext 阶段会等待 eventloop 注册完成。任务停止后先通过
@@ -385,9 +396,9 @@ func (d *Dialer) dial(ctx context.Context, network, address string, conn *Connec
 
 	bindConn(gconn, conn)
 	d.server.registry.register(gconn, conn)
-	// 启动异步 decode goroutine：必须在 register 之后立即启动，
-	// 否则首批 OnTraffic 到达时 decodeCh 还没准备好，会被 EnqueueRaw 拒绝。
-	conn.StartDecodeLoop(adp, network == "udp")
+	// 启动 connectionPump：必须在 register 之后立即启动，
+	// 否则首批 OnTraffic 到达时 inboundCh 还没准备好，会被 EnqueueRaw 拒绝。
+	conn.StartPump(adp, network == "udp")
 
 	stresslog.Info("[GNET] 连接已建立",
 		zap.String("network", network),

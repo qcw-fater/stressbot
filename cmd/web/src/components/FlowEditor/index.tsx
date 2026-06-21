@@ -23,7 +23,8 @@ import { App as AntApp, ConfigProvider } from 'antd';
 import { useFlowStore } from './store/flowStore';
 import { useFloatingWindowStore } from './store/floatingWindowStore';
 import { useProtoStore } from './proto/protoStore';
-import { validateAdapter } from '@/services/resourcesStore';
+import { collectCodecSchemaErrors, subscribe as subscribeResources } from '@/services/resourcesStore';
+import { refreshRouteKeyTemplates } from './listens/routeKeyResolver';
 import { fetchBaselineFlow } from '@/services/baselineApi';
 import { useEditorStore } from './store/editorStore';
 import type { FlowJson } from './codec/flowToJson';
@@ -87,22 +88,34 @@ function FlowEditorInner({
     void loadProtos({ kind: 'static' });
   }, [loadProtos]);
 
-  // 适配器校验：mount 时检查本地存储中的 codec.lua 是否实现了必需函数。
-  // 注意：资源拉取（与服务器对比、冲突合并）已改为显式操作（资源管理面板的「拉取」按钮 /
-  // 启动任务前），不再在加载/刷新时自动进行，避免无感覆盖用户的本地编辑稿。
+  // 协议配置校验：mount 时检查本地存储的所有 *_codec.json 是否符合 schema，
+  // 把错误汇总挂到徽标。资源拉取（与服务器对比、冲突合并）已改为显式操作
+  // （资源管理面板的「拉取」按钮 / 启动任务前），不在加载/刷新时自动进行。
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const missing = await validateAdapter();
+        const errors = await collectCodecSchemaErrors();
         if (!cancelled) {
-          useEditorStore.getState().setAdapterMissing(missing);
+          useEditorStore.getState().setCodecSchemaErrors(errors);
         }
       } catch {
         // 静默
       }
     })();
     return () => { cancelled = true; };
+  }, []);
+
+  // routeKey 模板缓存（§3.7）：mount 时加载所有 codec 的 routeKeyTemplate，
+  // 供 refsGraph/refsCheck 的 server 感知 routeKey 计算。codec 文件增删改
+  // （resourcesStore.notify）时自动刷新。validateFlow 调用方全 sync，走 cache。
+  // 每次 refresh 完成都 bump routeKeyTemplatesVersion，触发 ValidationReport /
+  // Toolbar 的 validateFlow useMemo 重算（cache 就绪后 warning 自动刷新）。
+  useEffect(() => {
+    const bump = useEditorStore.getState().bumpRouteKeyTemplatesVersion;
+    void refreshRouteKeyTemplates().then(bump);
+    const unsub = subscribeResources(() => { void refreshRouteKeyTemplates().then(bump); });
+    return unsub;
   }, []);
 
   useEffect(() => {

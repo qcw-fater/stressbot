@@ -94,10 +94,17 @@ type TaskConfig struct {
 	ProtoFiles map[string][]byte `json:"protoFiles,omitempty"`
 	// LuaScripts Lua 脚本名 → 内容。
 	LuaScripts map[string][]byte `json:"luaScripts,omitempty"`
-	// AdapterScript codec.lua 内容。
+	// AdapterScript codec.lua 内容。（旧字段，T4.3 后 admin 不再写入，保留以维持 agent 编译；
+	// 由 T2 切 agent 后删除。）
 	AdapterScript []byte `json:"adapterScript,omitempty"`
-	// ErrorMapScript error.lua 内容。
+	// ErrorMapScript error.lua 内容。（旧字段，T4.3 后 admin 不再写入，保留以维持 agent 编译；
+	// 由 T2 切 agent 后删除。）
 	ErrorMapScript []byte `json:"errorMapScript,omitempty"`
+	// Codecs 每连接一份的声明式 codec 文件（文件名 → 字节，如 tcp_logic_codec.json）。
+	// T4.3 起 admin 上传/baseline/下载一律走此字段（替代旧的单一 AdapterScript）。
+	Codecs map[string][]byte `json:"codecs,omitempty"`
+	// ErrorMap 共享 errors.json 字节（T4.3 起替代旧的单一 ErrorMapScript）。
+	ErrorMap []byte `json:"errorMap,omitempty"`
 	// RobotConfig 任务级运行时配置。
 	RobotConfig RobotConfig `json:"robotConfig"`
 	// Deadline 任务截止时间，超过后 Agent 自动停止。

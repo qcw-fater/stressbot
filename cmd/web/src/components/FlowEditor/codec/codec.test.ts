@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { flowToJson } from './flowToJson';
 import { jsonToFlow } from './jsonToFlow';
@@ -146,7 +147,8 @@ describe('codec round-trip', () => {
       actions: raw.actions,
       listens: raw.listens,
     });
-    const outPath = path.resolve(__dirname, '../../../../../tmp_codec_export.json');
+    // 写到系统临时目录，避免翻动仓库内 tracked 文件（非 hermetic 修正）
+    const outPath = path.join(os.tmpdir(), `stressbot-codec-export-${process.pid}-${Date.now()}.json`);
     fs.writeFileSync(outPath, JSON.stringify(exported, null, 2), 'utf-8');
     // 文件能读回
     const reread = JSON.parse(fs.readFileSync(outPath, 'utf-8')) as FlowJson;

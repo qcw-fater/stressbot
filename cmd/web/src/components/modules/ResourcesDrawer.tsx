@@ -7,16 +7,19 @@
  * - 冲突通过 BaselineSyncModal 显式处理；本地改动会在启动任务时随配置一并提交到服务器，无需单独推送。
  */
 
-import { DeleteOutlined, InboxOutlined, EditOutlined, CloudDownloadOutlined } from '@ant-design/icons';
+import { DeleteOutlined, InboxOutlined, EditOutlined, CloudDownloadOutlined, CopyOutlined, PlusOutlined } from '@ant-design/icons';
 import {
   Alert,
   App as AntApp,
   Button,
+  Collapse,
   Drawer,
   Empty,
   Flex,
+  Input,
   Modal,
   Segmented,
+  Select,
   Space,
   Table,
   Tabs,
@@ -26,7 +29,7 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadProps } from 'antd';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import { useShallow } from 'zustand/react/shallow';
 import { useEditorStore } from '../FlowEditor/store/editorStore';
@@ -43,20 +46,28 @@ import {
   removeScript,
   subscribe,
   type ResourceFile,
-  getAdapterScript,
-  setAdapterScript,
-  setAdapterScriptFromBaseline,
-  clearAdapterScript,
-  validateAdapter,
   subtractSyncResult,
-  getErrorMapScript,
-  setErrorMapScript,
-  setErrorMapScriptFromBaseline,
-  clearErrorMapScript,
   syncResourcesFromBaseline,
+  getCodecSchema,
+  setCodecSchema,
+  setCodecSchemaFromBaseline,
+  clearCodecSchema,
+  listCodecFiles,
+  getErrorMap,
+  setErrorMap,
+  setErrorMapFromBaseline,
+  clearErrorMap,
+  validateCodecSchema,
+  collectCodecSchemaErrors,
 } from '@/services/resourcesStore';
 import { BaselineSyncModal } from './BaselineSyncModal';
-import { fetchBaselineAdapter, fetchBaselineErrorMap } from '@/services/baselineApi';
+import { fetchBaselineCodecIndex, fetchBaselineCodec } from '@/services/baselineApi';
+import { parseCodecForEdit } from './codecEditor/codecEdit';
+import { FrameLayoutEditor } from './codecEditor/FrameLayoutEditor';
+import { PipelineEditor } from './codecEditor/PipelineEditor';
+import { RouteKeyEditor } from './codecEditor/RouteKeyEditor';
+import { PreviewPanel } from './codecEditor/PreviewPanel';
+import { deriveTransport } from './codecEditor/previewHelpers';
 
 export interface ResourcesDrawerProps {
   open: boolean;
@@ -131,7 +142,7 @@ export function ResourcesDrawer({ open, onClose }: ResourcesDrawerProps) {
           items={[
             { key: 'proto', label: 'Proto', children: <ResourceTable kind="proto" /> },
             { key: 'lua', label: 'Lua', children: <ResourceTable kind="lua" /> },
-            { key: 'adapter', label: '适配器', children: <AdapterTab /> },
+            { key: 'adapter', label: '协议配置', children: <AdapterTab /> },
           ]}
         />
       </Drawer>
@@ -152,331 +163,577 @@ export function ResourcesDrawer({ open, onClose }: ResourcesDrawerProps) {
   );
 }
 
-/* ─── Adapter Tab — 内嵌编辑器，支持 codec.lua + error.lua 双文件切换 ─── */
+/* ─── 协议配置 Tab — 按连接多份 codec.json + 共享 errors.json 源码 JSON 编辑器 ─── */
 
-type AdapterFileKey = 'codec' | 'error';
+/** codec 文件名后缀。 */
+const CODEC_FILE_SUFFIX = '_codec.json';
+/** errors.json 固定文件名。 */
+const ERRORS_JSON_KEY = 'errors.json';
+/** 合法连接协议。 */
+const CODEC_PROTOS = ['tcp', 'udp'] as const;
 
-const ADAPTER_FILE_LABELS: Record<AdapterFileKey, string> = {
-  codec: 'codec.lua（必需）',
-  error: 'error.lua（可选）',
-};
-
-const ADAPTER_TEMPLATE = `-- conf/adapter/codec.lua
--- 协议适配器模板。必须实现以下 7 个函数，引擎通过这些接口完成编解码，不感知具体协议格式。
--- 运行时环境：Lua 5.1，禁止使用 string.pack/unpack。
-
--- ─── 元信息（初始化时调用一次）──────────────────────────────────────
-function header_size()
-    return 12  -- 协议头固定字节数
-end
-
-function body_length()
-    return {
-        offset          = 0,           -- header 中 body 长度字段的起始字节偏移
-        field_type      = "uint32_le", -- "uint16_le" / "uint16_be" / "uint32_le" / "uint32_be"
-        includes_header = false,       -- 长度字段值是否包含 header 自身
-    }
-end
-
--- ─── 编码（每条出向消息调用）────────────────────────────────────────
-function encode_tcp(route, body, secret_key)
-    -- route: 不透明路由表（flow.json 中定义），典型 {cmd=3, act=1}
-    -- body:  序列化后的消息体字节
-    -- secret_key: 加密密钥（nil 表示不加密）
-    -- 返回: 完整数据包（header + body）
-    return body
-end
-
-function encode_udp(route, body, secret_key)
-    -- 与 encode_tcp 签名相同，UDP 可使用不同的编码策略
-    return body
-end
-
--- ─── 解码（每条入向消息调用）────────────────────────────────────────
-function decode_tcp(data, secret_key)
-    -- data: 完整帧数据（已按 body_length 切帧）
-    -- 返回: routeKey (string), body (string), headerErr (number)
-    return "0:0", "", 0
-end
-
-function decode_udp(data, secret_key)
-    -- 与 decode_tcp 分离，UDP 可使用不同的解码策略
-    return "0:0", "", 0
-end
-
--- ─── 路由匹配（请求-响应配对）────────────────────────────────────────
-function expected_route_key(route)
-    -- 从发送 route 计算期望的响应路由键，用于请求-响应匹配
-    return ""
-end
+/**
+ * 新建连接用的最小合法 codec.json 模板。
+ * 设计目标：直接通过 validateCodecSchema（version=1、endian="le"、frame.headerSize=8、
+ * 1 个 role:"length" + 2 个 role:"route" 字段、routeKeyTemplate 引用 route 字段、pipeline 空）。
+ */
+const CODEC_JSON_TEMPLATE = `{
+  "version": 1,
+  "endianDefault": "le",
+  "frame": { "headerSize": 8, "trailerSize": 0, "lengthIncludesHeader": false, "lengthIncludesTrailer": false },
+  "header": [
+    { "name": "bodyLen", "offset": 0, "size": 4, "type": "u32", "endian": "le", "role": "length" },
+    { "name": "cmd",     "offset": 4, "size": 1, "type": "u8",  "role": "route" },
+    { "name": "act",     "offset": 5, "size": 1, "type": "u8",  "role": "route" },
+    { "name": "index",   "offset": 6, "size": 2, "type": "u16", "endian": "le", "role": "value", "source": { "kind": "const", "value": 0 } }
+  ],
+  "routeKeyTemplate": "{cmd}:{act}",
+  "pipeline": []
+}
 `;
 
-const ERROR_MAP_TEMPLATE = `-- conf/adapter/error.lua
--- 可选：服务端错误码映射。未提供此文件时，引擎静默忽略，错误码以原始数字展示。
--- 结果按错误码永久缓存，运行时不可变，需重启才能更新。
-
-function describe_error(code)
-    local errors = {
-        -- [1004] = "金币不足",
-    }
-    return errors[code] or ""
-end
+const EMPTY_ERROR_MAP_TEMPLATE = `{
+}
 `;
+
+/**
+ * 连接名 ↔ 文件名互转。
+ *   连接名 `<proto>:<service>`（如 `tcp:logic`）↔ 文件名 `<proto>_<service>_codec.json`（`tcp_logic_codec.json`）。
+ * service 中不允许再出现 `_`（首个 `_` 之前是 proto，之后到 `_codec.json` 之前整体视为 service）。
+ */
+function connNameToFileName(conn: string): string {
+  return `${conn.replace(':', '_')}${CODEC_FILE_SUFFIX}`;
+}
+
+function fileNameToConnName(name: string): string {
+  const stripped = name.endsWith(CODEC_FILE_SUFFIX) ? name.slice(0, -CODEC_FILE_SUFFIX.length) : name;
+  const idx = stripped.indexOf('_');
+  if (idx < 0) return stripped;
+  return `${stripped.slice(0, idx)}:${stripped.slice(idx + 1)}`;
+}
+
+/** 校验连接名 `<proto>:<service>`：proto∈{tcp,udp}、service 非空、不与已存文件重名。 */
+function validateConnName(conn: string, existing: string[]): string | null {
+  const idx = conn.indexOf(':');
+  if (idx <= 0 || idx === conn.length - 1) {
+    return '连接名格式应为 <协议>:<服务名>，例如 tcp:logic';
+  }
+  const proto = conn.slice(0, idx);
+  const service = conn.slice(idx + 1);
+  if (!(CODEC_PROTOS as readonly string[]).includes(proto)) {
+    return `协议必须是 tcp 或 udp（当前 ${proto}）`;
+  }
+  if (!service || service.includes(':') || service.includes('_')) {
+    return '服务名不能为空，也不能包含 ":" 或 "_"';
+  }
+  const fileName = connNameToFileName(conn);
+  if (existing.includes(fileName)) {
+    return `连接 ${conn} 已存在`;
+  }
+  return null;
+}
 
 function AdapterTab() {
-  const { message } = AntApp.useApp();
+  const { message, modal } = AntApp.useApp();
   const theme = useEditorStore((s) => s.theme);
   const monacoTheme = theme === 'dark' ? 'vs-dark' : 'light';
 
-  const [activeFile, setActiveFile] = useState<AdapterFileKey>('codec');
-  const [contents, setContents] = useState<Record<AdapterFileKey, string>>({ codec: '', error: '' });
-  const [sources, setSources] = useState<Record<AdapterFileKey, string | null>>({ codec: null, error: null });
-  const [loadErrors, setLoadErrors] = useState<Record<AdapterFileKey, boolean>>({ codec: false, error: false });
+  // 连接列表（含每个文件名 / 连接名）
+  const [files, setFiles] = useState<ResourceFile[]>([]);
+  const [loading, setLoading] = useState(false);
+  // 当前选中连接（null = 未选；'__errors__' = errors.json；否则 = 连接名如 'tcp:logic'）
+  const [activeConn, setActiveConn] = useState<string | null>(null);
+  const [content, setContent] = useState<string>('');
+  const [source, setSource] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<boolean>(false);
+  // 新建/复制弹窗
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createMode, setCreateMode] = useState<'new' | 'copy'>('new');
+  const [createValue, setCreateValue] = useState('');
+  // 视图切换：结构化 | 源码（仅 codec 显示；errors.json 隐藏切换、强制源码）
+  const [viewMode, setViewMode] = useState<'struct' | 'source'>('struct');
 
-  // 加载指定文件的内容
-  const loadFile = async (key: AdapterFileKey) => {
-    setLoadErrors((prev) => ({ ...prev, [key]: false }));
-    if (key === 'codec') {
-      const file = await getAdapterScript();
+  // 结构化视图：把 content 解析为 raw（lossless）+ schema（typed 视图）+ error。
+  const parsed = useMemo(() => parseCodecForEdit(content), [content]);
+  const isErrorsView = activeConn === '__errors__';
+  const showStructView = !isErrorsView && viewMode === 'struct' && parsed.schema !== null;
+
+  const reloadFiles = async (): Promise<ResourceFile[]> => {
+    setLoading(true);
+    try {
+      const list = await listCodecFiles();
+      setFiles(list);
+      return list;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 加载某连接（或 errors.json）的内容到编辑器。
+  const loadConn = async (conn: string | null) => {
+    setLoadError(false);
+    if (conn === null) {
+      setContent('');
+      setSource(null);
+      return;
+    }
+    if (conn === '__errors__') {
+      const file = await getErrorMap();
       if (file) {
-        setContents((prev) => ({ ...prev, codec: file.content }));
-        setSources((prev) => ({ ...prev, codec: '已保存' }));
+        setContent(file.content);
+        setSource('已保存');
       } else {
-        const text = await fetchBaselineAdapter();
-        if (text) {
-          setContents((prev) => ({ ...prev, codec: text }));
-          setSources((prev) => ({ ...prev, codec: '默认模板' }));
-          void setAdapterScriptFromBaseline(text);
-        } else {
-          setContents((prev) => ({ ...prev, codec: '' }));
-          setSources((prev) => ({ ...prev, codec: null }));
-          setLoadErrors((prev) => ({ ...prev, codec: true }));
-        }
+        setContent(EMPTY_ERROR_MAP_TEMPLATE);
+        setSource('模板（未保存）');
       }
+      return;
+    }
+    const name = connNameToFileName(conn);
+    const file = await getCodecSchema(name);
+    if (file) {
+      setContent(file.content);
+      setSource('已保存');
     } else {
-      const file = await getErrorMapScript();
-      if (file) {
-        setContents((prev) => ({ ...prev, error: file.content }));
-        setSources((prev) => ({ ...prev, error: '已保存' }));
-      } else {
-        const text = await fetchBaselineErrorMap();
-        if (text) {
-          setContents((prev) => ({ ...prev, error: text }));
-          setSources((prev) => ({ ...prev, error: '默认模板' }));
-          void setErrorMapScriptFromBaseline(text);
-        } else {
-          setContents((prev) => ({ ...prev, error: ERROR_MAP_TEMPLATE }));
-          setSources((prev) => ({ ...prev, error: '模板（未保存）' }));
-        }
-      }
+      // 文件不存在（理论不应发生——选中项来自列表）：清空并提示。
+      setContent('');
+      setSource(null);
+      setLoadError(true);
     }
   };
 
-  // 切换文件时加载对应内容（未加载过的才请求）
-  const loaded = useRef<Set<AdapterFileKey>>(new Set());
-  const handleFileSwitch = (val: string | number) => {
-    const key = val as AdapterFileKey;
-    setActiveFile(key);
-    if (!loaded.current.has(key)) {
-      loaded.current.add(key);
-      loadFile(key);
-    }
-  };
-
-  // 首次加载 codec
   useEffect(() => {
-    loaded.current.add('codec');
-    loadFile('codec');
+    void (async () => {
+      const list = await reloadFiles();
+      // 默认选中第一个连接；若没有则不自动选 errors.json
+      if (list.length > 0) {
+        const conn = fileNameToConnName(list[0].name);
+        setActiveConn(conn);
+        await loadConn(conn);
+      } else {
+        setActiveConn(null);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const onUpload: UploadProps['beforeUpload'] = async (file) => {
-    const text = await file.text();
-    setContents((prev) => ({ ...prev, [activeFile]: text }));
-    setSources((prev) => ({ ...prev, [activeFile]: file.name }));
-    setLoadErrors((prev) => ({ ...prev, [activeFile]: false }));
-    if (activeFile === 'codec') {
-      await setAdapterScript(text);
-    } else {
-      await setErrorMapScript(text);
+  const handleSwitch = async (conn: string) => {
+    setActiveConn(conn);
+    await loadConn(conn);
+  };
+
+  const refreshBadge = async () => {
+    const errors = await collectCodecSchemaErrors();
+    useEditorStore.getState().setCodecSchemaErrors(errors);
+  };
+
+  // ─── 新建 / 复制 ───
+  const openCreate = (mode: 'new' | 'copy') => {
+    setCreateMode(mode);
+    setCreateValue('');
+    setCreateOpen(true);
+  };
+
+  const submitCreate = async () => {
+    const conn = createValue.trim();
+    const err = validateConnName(conn, files.map((f) => f.name));
+    if (err) {
+      message.error(err);
+      return;
     }
-    message.success(`已加载并保存：${file.name}`);
-    return false;
+    const fileName = connNameToFileName(conn);
+    let initial: string;
+    if (createMode === 'copy') {
+      if (!activeConn || activeConn === '__errors__') {
+        message.error('请先选中一个要复制的连接');
+        return;
+      }
+      const src = await getCodecSchema(connNameToFileName(activeConn));
+      initial = src?.content ?? CODEC_JSON_TEMPLATE;
+    } else {
+      initial = CODEC_JSON_TEMPLATE;
+    }
+    // 落库前先校验：模板/副本本身必须合法（不允许把已知非法 schema 写入）。
+    const errs = validateCodecSchema(initial);
+    if (errs.length > 0) {
+      message.error(`模板未通过校验，无法创建：${errs[0]}`);
+      return;
+    }
+    await setCodecSchema(fileName, initial);
+    await reloadFiles();
+    setActiveConn(conn);
+    await loadConn(conn);
+    await refreshBadge();
+    setCreateOpen(false);
+    message.success(`已创建连接 ${conn}`);
   };
 
-  const onUseTemplate = () => {
-    const tmpl = activeFile === 'codec' ? ADAPTER_TEMPLATE : ERROR_MAP_TEMPLATE;
-    setContents((prev) => ({ ...prev, [activeFile]: tmpl }));
-    setSources((prev) => ({ ...prev, [activeFile]: '模板（未保存）' }));
-    setLoadErrors((prev) => ({ ...prev, [activeFile]: false }));
-    message.info('已载入模板，编辑后点击保存');
+  // ─── 删除 ───
+  const handleDelete = (conn: string) => {
+    if (conn === '__errors__') return; // errors.json 不在此处删（走清空）
+    modal.confirm({
+      title: '删除连接',
+      content: `确认删除连接 ${conn}？该连接的配置将被移除。`,
+      okType: 'danger',
+      onOk: async () => {
+        const name = connNameToFileName(conn);
+        await clearCodecSchema(name);
+        const list = await reloadFiles();
+        // 切到剩余第一项，或清空
+        if (list.length > 0) {
+          const next = fileNameToConnName(list[0].name);
+          setActiveConn(next);
+          await loadConn(next);
+        } else {
+          setActiveConn(null);
+          setContent('');
+          setSource(null);
+        }
+        await refreshBadge();
+        message.success(`已删除连接 ${conn}`);
+      },
+    });
   };
 
+  // ─── 保存（codec 校验阻塞落库；errors.json 仅 JSON.parse 合法性） ───
   const onSave = async () => {
-    const content = contents[activeFile];
+    if (activeConn === null) {
+      message.warning('请先选择一个连接');
+      return;
+    }
     if (!content.trim()) {
       message.warning('内容为空');
       return;
     }
-    if (activeFile === 'codec') {
-      await setAdapterScript(content);
-      setSources((prev) => ({ ...prev, codec: '已保存' }));
-      setLoadErrors((prev) => ({ ...prev, codec: false }));
-      const missing = await validateAdapter();
-      useEditorStore.getState().setAdapterMissing(missing);
-      if (missing.length > 0) {
-        message.warning(`已保存，但缺少 ${missing.length} 个必需函数：${missing.join(', ')}`);
-      } else {
-        message.success('已保存，启动任务时会自动上传');
+    if (activeConn === '__errors__') {
+      try {
+        JSON.parse(content);
+      } catch (e) {
+        message.error(`错误码映射不是合法 JSON：${(e as Error).message}`);
+        return;
       }
-    } else {
-      await setErrorMapScript(content);
-      setSources((prev) => ({ ...prev, error: '已保存' }));
-      setLoadErrors((prev) => ({ ...prev, error: false }));
-      message.success('已保存，启动任务时会自动上传');
+      await setErrorMap(content);
+      setSource('已保存');
+      message.success('已保存错误码映射');
+      return;
     }
+    // codec.json：结构校验必须通过，否则拒绝落库。
+    const errs = validateCodecSchema(content);
+    if (errs.length > 0) {
+      message.error(`协议配置未通过校验，已拒绝保存（共 ${errs.length} 处问题）：${errs[0]}`);
+      return;
+    }
+    const name = connNameToFileName(activeConn);
+    await setCodecSchema(name, content);
+    setSource('已保存');
+    await refreshBadge();
+    message.success('已保存，启动任务时会自动上传');
   };
 
+  // ─── 导入（当前选中连接；codec 走校验，errors 走 JSON.parse） ───
+  const onUpload: UploadProps['beforeUpload'] = async (file) => {
+    if (activeConn === null) {
+      message.warning('请先选择一个连接');
+      return false;
+    }
+    const text = await file.text();
+    if (activeConn === '__errors__') {
+      try {
+        JSON.parse(text);
+      } catch (e) {
+        message.error(`错误码映射不是合法 JSON：${(e as Error).message}`);
+        return false;
+      }
+      await setErrorMap(text);
+      setContent(text);
+      setSource(file.name);
+      message.success(`已导入并保存：${file.name}`);
+      return false;
+    }
+    const errs = validateCodecSchema(text);
+    if (errs.length > 0) {
+      message.error(`导入文件未通过校验，已拒绝保存（共 ${errs.length} 处问题）：${errs[0]}`);
+      return false;
+    }
+    const name = connNameToFileName(activeConn);
+    await setCodecSchema(name, text);
+    await reloadFiles();
+    setContent(text);
+    setSource(file.name);
+    await refreshBadge();
+    message.success(`已导入并保存：${file.name}`);
+    return false;
+  };
+
+  // ─── 清空当前 ───
   const onClear = async () => {
-    if (activeFile === 'codec') {
-      await clearAdapterScript();
-      const missing = await validateAdapter();
-      useEditorStore.getState().setAdapterMissing(missing);
-    } else {
-      await clearErrorMapScript();
+    if (activeConn === null) return;
+    if (activeConn === '__errors__') {
+      await clearErrorMap();
+      setContent(EMPTY_ERROR_MAP_TEMPLATE);
+      setSource('模板（未保存）');
+      message.success('已清空错误码映射');
+      return;
     }
-    setContents((prev) => ({ ...prev, [activeFile]: '' }));
-    setSources((prev) => ({ ...prev, [activeFile]: null }));
-    setLoadErrors((prev) => ({ ...prev, [activeFile]: true }));
-    message.success('已清空');
+    modal.confirm({
+      title: '清空当前连接配置',
+      content: `确认清空连接 ${activeConn} 的配置内容？文件将从本地删除。`,
+      okType: 'danger',
+      onOk: async () => {
+        const name = connNameToFileName(activeConn);
+        await clearCodecSchema(name);
+        const list = await reloadFiles();
+        if (list.length > 0) {
+          const next = fileNameToConnName(list[0].name);
+          setActiveConn(next);
+          await loadConn(next);
+        } else {
+          setActiveConn(null);
+          setContent('');
+          setSource(null);
+        }
+        await refreshBadge();
+        message.success('已清空');
+      },
+    });
   };
 
+  // ─── 从基线载入（一次性把基线所有 codec + errors 拉到本地） ───
+  const [pullingBaseline, setPullingBaseline] = useState(false);
+  const onPullBaseline = async () => {
+    setPullingBaseline(true);
+    try {
+      const index = await fetchBaselineCodecIndex();
+      if (index.length === 0) {
+        message.info('基线未提供协议配置文件');
+        return;
+      }
+      let codecCount = 0;
+      let errorsLoaded = false;
+      for (const name of index) {
+        const text = await fetchBaselineCodec(name);
+        if (text == null) continue;
+        if (name === ERRORS_JSON_KEY) {
+          await setErrorMapFromBaseline(text);
+          errorsLoaded = true;
+        } else if (name.endsWith(CODEC_FILE_SUFFIX)) {
+          await setCodecSchemaFromBaseline(name, text);
+          codecCount++;
+        }
+      }
+      const list = await reloadFiles();
+      if (list.length > 0) {
+        const conn = fileNameToConnName(list[0].name);
+        setActiveConn(conn);
+        await loadConn(conn);
+      }
+      await refreshBadge();
+      const parts: string[] = [];
+      if (codecCount > 0) parts.push(`${codecCount} 个连接配置`);
+      if (errorsLoaded) parts.push('错误码映射');
+      message.success(parts.length > 0 ? `已从基线载入：${parts.join('、')}` : '基线无可载入的协议配置');
+    } catch (e) {
+      message.error(`从基线载入失败：${(e as Error).message}`);
+    } finally {
+      setPullingBaseline(false);
+    }
+  };
+
+  // 实时校验当前编辑器内容（仅 codec，提供 inline 提示，不阻塞输入）
+  const liveErrors: string[] =
+    activeConn !== null && activeConn !== '__errors__' && content.trim() !== ''
+      ? validateCodecSchema(content)
+      : [];
+
+  // Select 选项：连接列表 + errors.json
+  const selectOptions = [
+    ...files.map((f) => ({ value: fileNameToConnName(f.name), label: fileNameToConnName(f.name) })),
+    { value: '__errors__', label: '错误码映射（共享）' },
+  ];
+
   return (
-    <Tabs
-      size="small"
-      defaultActiveKey="edit"
-      items={[
-        {
-          key: 'edit',
-          label: '编辑',
-          children: (
-            <Flex vertical gap={8}>
-              <Alert type="info" showIcon message="协议适配器随任务下发" description="编辑后点保存。启动任务时会自动上传到服务端，无需手动部署。" />
-              {loadErrors[activeFile] && (
-                <Alert type="error" showIcon message="未找到协议适配器" description="未找到适配器文件且默认模板不可用。请导入文件或载入空模板后保存。" />
-              )}
-              <Flex justify="space-between" align="center">
-                <Segmented
-                  size="small"
-                  value={activeFile}
-                  onChange={handleFileSwitch}
-                  options={[
-                    { value: 'codec', label: ADAPTER_FILE_LABELS.codec },
-                    { value: 'error', label: ADAPTER_FILE_LABELS.error },
-                  ]}
-                />
-                <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{sources[activeFile] ?? '尚未加载'}</span>
-              </Flex>
-              <Space size={4} wrap>
-                <Upload accept=".lua,text/plain" beforeUpload={onUpload} showUploadList={false}>
-                  <Button icon={<InboxOutlined />} size="small">导入 .lua</Button>
-                </Upload>
-                <Button onClick={onUseTemplate} size="small">载入模板</Button>
-                <Button onClick={onSave} type="primary" size="small">保存</Button>
-                <Button onClick={onClear} danger size="small">清空</Button>
-              </Space>
-              <div style={{ height: 'calc(100vh - 400px)', border: '1px solid var(--border-color, rgba(0,0,0,0.06))' }}>
-                <Editor
-                  language="lua"
-                  theme={monacoTheme}
-                  value={contents[activeFile]}
-                  onChange={(v) => setContents((prev) => ({ ...prev, [activeFile]: v ?? '' }))}
-                  options={{
-                    fontSize: 12,
-                    minimap: { enabled: false },
-                    scrollBeyondLastLine: false,
-                    fixedOverflowWidgets: true,
-                  }}
-                />
-              </div>
-            </Flex>
-          ),
-        },
-        {
-          key: 'spec',
-          label: '接口规范',
-          children: activeFile === 'codec' ? (
-            <div style={{ fontSize: 12, lineHeight: 1.6 }}>
-              <Alert
-                type="warning"
-                message="接口规范"
-                showIcon
-                style={{ marginBottom: 12 }}
-                description="codec.lua 必须实现以下 7 个全局函数。引擎只调用这些接口，不感知具体协议格式。"
-              />
-              <SpecBlock title="1. 元信息（初始化时调用一次，结果缓存）" items={CODEC_SPEC.filter((f) => f.category === 'meta')} />
-              <SpecBlock title="2. 编码（每条出向消息调用）" items={CODEC_SPEC.filter((f) => f.category === 'encode')} />
-              <SpecBlock title="3. 解码（每条入向消息调用）" items={CODEC_SPEC.filter((f) => f.category === 'decode')} />
-              <SpecBlock title="4. 路由匹配（请求-响应配对）" items={CODEC_SPEC.filter((f) => f.category === 'route')} />
-              <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 12 }}>
-                运行时约束：Lua 5.1（不支持 string.pack/unpack）；帧分割由引擎根据 body_length 配置自动执行，解码函数收到的 data 已是完整帧；每个机器人独立运行环境，禁止共享可变全局状态。
-              </Typography.Text>
-            </div>
-          ) : (
-            <div style={{ fontSize: 12, lineHeight: 1.6 }}>
-              <Alert
-                type="info"
-                showIcon
-                style={{ marginBottom: 12 }}
-                description="error.lua 为可选文件，用于将服务端协议头错误码映射为可读描述。未提供时引擎静默忽略，错误码以原始数字展示。"
-              />
-              <SpecBlock title="错误码映射" items={ERROR_MAP_SPEC} />
-              <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 12 }}>
-                运行时约束：结果按错误码永久缓存，加载后不可变，需重启才能更新。
-              </Typography.Text>
-            </div>
-          ),
-        },
-      ]}
-    />
-  );
-}
+    <Flex vertical gap={8}>
+      <Alert
+        type="info"
+        showIcon
+        message="协议配置随任务下发"
+        description="为每条连接维护一份配置，启动任务时随配置一并提交到服务端。错误码映射为所有连接共享的一份文件。"
+      />
+      {loadError && (
+        <Alert type="error" showIcon message="未找到该连接的配置" description="配置文件不存在。请新建连接或从基线载入。" />
+      )}
 
-const CODEC_SPEC: Array<{ name: string; signature: string; desc: string; category: string }> = [
-  { name: 'header_size', signature: 'header_size() -> int', desc: '返回协议头固定字节数。初始化时调用一次。', category: 'meta' },
-  { name: 'body_length', signature: 'body_length() -> offset, field_type, includes_header', desc: '描述 body 长度字段在 header 中的位置和类型，引擎据此进行帧分割。', category: 'meta' },
-  { name: 'encode_tcp', signature: 'encode_tcp(route, body, secret_key) -> string', desc: 'TCP 编码：将 route + body + secret_key 编码为完整数据包。route 为 nil 表示无路由请求。', category: 'encode' },
-  { name: 'encode_udp', signature: 'encode_udp(route, body, secret_key) -> string', desc: 'UDP 编码：与 encode_tcp 签名相同，可使用不同的编码策略。', category: 'encode' },
-  { name: 'decode_tcp', signature: 'decode_tcp(data, secret_key) -> routeKey, body, headerErr', desc: 'TCP 解码：从完整帧中解析路由键、消息体和协议头错误码。headerErr 非零时引擎仍继续路由。', category: 'decode' },
-  { name: 'decode_udp', signature: 'decode_udp(data, secret_key) -> routeKey, body, headerErr', desc: 'UDP 解码：与 decode_tcp 分离，可使用不同的解码策略。', category: 'decode' },
-  { name: 'expected_route_key', signature: 'expected_route_key(route) -> string', desc: '从发送 route 计算期望的响应路由键，用于请求-响应匹配。', category: 'route' },
-];
+      {/* 连接选择 + 新建/复制/删除/从基线载入 */}
+      <Flex justify="space-between" align="center" gap={8} wrap="wrap">
+        <Space size={6} wrap>
+          <Select
+            size="small"
+            style={{ minWidth: 200 }}
+            value={activeConn ?? undefined}
+            placeholder={files.length === 0 ? '暂无连接' : '选择连接'}
+            loading={loading}
+            onChange={handleSwitch}
+            options={selectOptions}
+          />
+          <Tooltip title="新建连接（输入 <协议>:<服务名>，如 tcp:logic）">
+            <Button size="small" icon={<PlusOutlined />} onClick={() => openCreate('new')}>新建</Button>
+          </Tooltip>
+          <Tooltip title="复制当前连接为新连接">
+            <Button
+              size="small"
+              icon={<CopyOutlined />}
+              disabled={activeConn === null || activeConn === '__errors__'}
+              onClick={() => openCreate('copy')}
+            >
+              复制
+            </Button>
+          </Tooltip>
+          <Tooltip title="删除当前连接">
+            <Button
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              disabled={activeConn === null || activeConn === '__errors__'}
+              onClick={() => activeConn && handleDelete(activeConn)}
+            >
+              删除
+            </Button>
+          </Tooltip>
+        </Space>
+        <Space size={6} wrap>
+          <Tooltip title="从服务器拉取全部协议配置到本地">
+            <Button size="small" icon={<CloudDownloadOutlined />} loading={pullingBaseline} onClick={onPullBaseline}>
+              从基线载入
+            </Button>
+          </Tooltip>
+          <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{source ?? '尚未加载'}</span>
+        </Space>
+      </Flex>
 
-const ERROR_MAP_SPEC: Array<{ name: string; signature: string; desc: string }> = [
-  { name: 'describe_error', signature: 'describe_error(code) -> string', desc: '将协议头错误码映射为可读描述。返回空字符串表示未知错误码。' },
-];
+      {/* 编辑器工具栏 */}
+      <Space size={4} wrap>
+        <Upload accept=".json,application/json" beforeUpload={onUpload} showUploadList={false}>
+          <Button icon={<InboxOutlined />} size="small" disabled={activeConn === null}>导入 .json</Button>
+        </Upload>
+        <Button onClick={onSave} type="primary" size="small" disabled={activeConn === null}>保存</Button>
+        <Button onClick={onClear} danger size="small" disabled={activeConn === null}>清空</Button>
+      </Space>
 
-function SpecBlock({ title, items }: { title: string; items: Array<{ name: string; signature: string; desc: string }> }) {
-  return (
-    <div style={{ marginBottom: 14 }}>
-      <div style={{ fontWeight: 600, marginBottom: 6 }}>{title}</div>
-      {items.map((it) => (
+      {/* 实时校验提示（仅 codec，不阻塞输入；保存时再强制拦截） */}
+      {activeConn !== null && activeConn !== '__errors__' && liveErrors.length > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          message={`当前配置有 ${liveErrors.length} 处问题`}
+          description={
+            <ul style={{ margin: 0, paddingLeft: 18, maxHeight: 120, overflow: 'auto' }}>
+              {liveErrors.slice(0, 8).map((e, i) => (
+                <li key={i} style={{ fontSize: 12 }}>{e}</li>
+              ))}
+              {liveErrors.length > 8 && <li style={{ fontSize: 12 }}>…（还有 {liveErrors.length - 8} 处）</li>}
+            </ul>
+          }
+        />
+      )}
+
+      {/* 视图切换：结构化 | 源码（errors.json 强制源码，隐藏切换） */}
+      {!isErrorsView && (
+        <Flex justify="flex-start" align="center">
+          <Segmented
+            size="small"
+            value={viewMode}
+            onChange={(v) => setViewMode(v as 'struct' | 'source')}
+            options={[
+              { label: '结构化', value: 'struct' },
+              { label: '源码', value: 'source' },
+            ]}
+          />
+        </Flex>
+      )}
+
+      {/* 结构化视图：parse 失败 → 提示切源码 + 降级显示源码 Monaco；成功 → 帧布局/管线/路由键编辑器 */}
+      {showStructView && parsed.raw && parsed.schema ? (
         <div
-          key={it.name}
           style={{
-            background: 'var(--bg-canvas)',
-            borderLeft: '3px solid var(--node-action)',
-            padding: '8px 10px',
-            marginBottom: 6,
-            borderRadius: 4,
+            maxHeight: 'calc(100vh - 440px)',
+            minHeight: 240,
+            overflow: 'auto',
+            border: '1px solid var(--border-color, rgba(0,0,0,0.06))',
+            padding: 12,
           }}
         >
-          <div style={{ fontFamily: 'monospace', color: 'var(--node-action-border-active)', fontWeight: 600 }}>
-            {it.signature}
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>{it.desc}</div>
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <FrameLayoutEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
+            <PipelineEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
+            <RouteKeyEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
+            {/* 预览面板：调后端真实 codec 引擎跑一次 encode/decode，纯编辑辅助（不落库/不下发） */}
+            <Collapse
+              size="small"
+              items={[
+                {
+                  key: 'preview',
+                  label: '预览（编码/解码）',
+                  children: (
+                    <PreviewPanel
+                      raw={parsed.raw}
+                      schema={parsed.schema}
+                      transport={deriveTransport(activeConn)}
+                    />
+                  ),
+                },
+              ]}
+            />
+          </Space>
         </div>
-      ))}
-    </div>
+      ) : (
+        <>
+          {!isErrorsView && viewMode === 'struct' && parsed.error && (
+            <Alert
+              type="warning"
+              showIcon
+              message="源码不是合法 JSON，请切到源码视图修正"
+              description={parsed.error}
+            />
+          )}
+          <div style={{ height: 'calc(100vh - 440px)', minHeight: 240, border: '1px solid var(--border-color, rgba(0,0,0,0.06))' }}>
+            <Editor
+              language="json"
+              theme={monacoTheme}
+              value={content}
+              onChange={(v) => setContent(v ?? '')}
+              options={{
+                fontSize: 12,
+                minimap: { enabled: false },
+                scrollBeyondLastLine: false,
+                fixedOverflowWidgets: true,
+                automaticLayout: true,
+              }}
+            />
+          </div>
+        </>
+      )}
+
+      {/* 新建/复制连接 Modal */}
+      <Modal
+        title={createMode === 'new' ? '新建连接' : `复制「${activeConn ?? ''}」为新连接`}
+        open={createOpen}
+        onCancel={() => setCreateOpen(false)}
+        onOk={submitCreate}
+        okText="创建"
+        cancelText="取消"
+        destroyOnHidden
+      >
+        <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
+          格式 <code>{'<协议>:<服务名>'}</code>，协议只能是 tcp 或 udp，服务名不能为空、不能含 “:” 或 “_”。例如 <code>tcp:logic</code>。
+        </Typography.Paragraph>
+        <Input
+          autoFocus
+          placeholder="tcp:logic"
+          value={createValue}
+          onChange={(e) => setCreateValue(e.target.value)}
+          onPressEnter={submitCreate}
+        />
+      </Modal>
+    </Flex>
   );
 }
 

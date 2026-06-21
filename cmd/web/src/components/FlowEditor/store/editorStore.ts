@@ -18,8 +18,7 @@ export type ActivePanel =
   | { kind: 'protoBrowser' }
   | { kind: 'listenPanel' }
   | { kind: 'jsonPreview' }
-  | { kind: 'templateEdit'; templateKind: 'action' | 'listen'; templateId: string }
-  | { kind: 'codecAdapter' };
+  | { kind: 'templateEdit'; templateKind: 'action' | 'listen'; templateId: string };
 
 /** 每个面板 kind 独立存储，互不干扰 */
 export type ActivePanels = Partial<Record<ActivePanel['kind'], ActivePanel>>;
@@ -129,9 +128,18 @@ interface EditorState {
   pendingSyncResult: import('@/services/resourcesStore').BaselineSyncResult | null;
   setPendingSyncResult: (r: import('@/services/resourcesStore').BaselineSyncResult | null) => void;
 
-  /** 适配器缺失的必需函数列表；null=未检查，空数组=全部实现 */
-  adapterMissing: string[] | null;
-  setAdapterMissing: (v: string[] | null) => void;
+  /** 协议配置的 schema 校验错误数组；null=未校验/空，空数组=全部通过 */
+  codecSchemaErrors: string[] | null;
+  setCodecSchemaErrors: (v: string[] | null) => void;
+
+  /**
+   * routeKey 模板缓存版本号：每次 refreshRouteKeyTemplates 完成（mount 加载 /
+   * codec CRUD 后刷新）时 bump。validateFlow 的 useMemo 把它列入依赖，使缓存
+   * 就绪后校验报告自动重算（ROUTEKEY_CODEC_MISSING warning 随真实 codec 状态刷新，
+   * 不再卡到下次 flow 编辑）。对齐 proto 模式的 protoStore.set({status:'ready'})。
+   */
+  routeKeyTemplatesVersion: number;
+  bumpRouteKeyTemplatesVersion: () => void;
 
   setSelectedNode: (id: string | null) => void;
   setSelectedListen: (name: string | null) => void;
@@ -173,8 +181,10 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
   historyEnabled: null,
   pendingSyncResult: null,
   setPendingSyncResult: (r) => set({ pendingSyncResult: r }),
-  adapterMissing: null,
-  setAdapterMissing: (v) => set({ adapterMissing: v }),
+  codecSchemaErrors: null,
+  setCodecSchemaErrors: (v) => set({ codecSchemaErrors: v }),
+  routeKeyTemplatesVersion: 0,
+  bumpRouteKeyTemplatesVersion: () => set((s) => ({ routeKeyTemplatesVersion: s.routeKeyTemplatesVersion + 1 })),
 
   setSelectedNode: (id) => set({ selectedNodeId: id }),
   setSelectedListen: (name) => set({ selectedListenName: name }),
@@ -245,5 +255,4 @@ const DEFAULT_SIZES: Record<string, { width: number; height: number }> = {
   listenPanel: { width: 440, height: 560 },
   jsonPreview: { width: 800, height: 560 },
   templateEdit: { width: 680, height: 520 },
-  codecAdapter: { width: 720, height: 500 },
 };

@@ -48,10 +48,11 @@ type Robot struct {
 	running    atomic.Bool            // 是否正在运行
 	dialer     *network.Dialer        // 网络拨号器（封装 gnet 事件循环）
 	httpClient *http.Client           // HTTP 客户端（声明式 HTTP 动作用）
-	luaMu      sync.Mutex             // Lua 访问互斥锁（回调/心跳/encode/decode 共抢）
-	// adp 是该 Robot 私有的 codec 适配器（RobotLocalAdapter 重构）。
-	// 所有 encode/decode 都在 r.l 上执行，与其他 Robot 不再共享 LState 池。
-	adp            *adapter.RobotAdapter
+	// 全 codec 路径（dial/decode/encode/心跳/listen/业务 Lua）共享同一份 codec 映射：
+	//   - dial/decode：ConnectTCP/UDP 拨号前 Resolve，nil → fail loud；非 nil 注入 Connection；
+	//   - encode/心跳/listen：engine.ActionExecutor / robotActionHandler / netSenderAdapter 各自 Resolve；
+	//   - 业务 Lua：通过 script.Context.Resolver（= r.resolver）在 api_network.go 内 Resolve。
+	resolver       adapter.CodecResolver
 	shared         sharedstate.Store           // 任务级共享状态后端（可为 nil）
 	mainService    string                      // 主连接服务名，意外断开时停止机器人
 	requestTimeout time.Duration               // robotConfig.timeoutSec 注入；用作 Lua tcp/udp_request 默认 timeout
@@ -78,18 +79,21 @@ type Config struct {
 
 // NewRobot 创建机器人实例。
 //
-// globalAdp 是进程级共享的 LuaAdapter（持有 codec.lua 字节码 + 元信息 + 错误描述缓存）。
-// NewRobot 内部调 globalAdp.NewRobotAdapter(r.l, &r.luaMu) 在该 Robot 私有 LState 上
-// 注册一份 codec 函数副本，后续编解码不再跨 Robot 抢全局 LState 池。
+// resolver（T2-C1 起接入，T2-C2-Lua 起全面接管 codec）按「server 串 <proto>:<service>」
+// 解析每条连接的 Go SchemaAdapter，全 codec 路径共享同一份 codec 映射：
+//   - dial/decode：ConnectTCP/UDP 拨号前 Resolve，nil → fail loud；非 nil 注入 Connection；
+//   - encode/心跳/listen：engine.ActionExecutor / robotActionHandler / netSenderAdapter 各自 Resolve；
+//   - 业务 Lua：经 script.Context.Resolver（= resolver）在 api_network.go 内 Resolve。
 //
-// 返回 error 的场景：codec.lua 在 r.l 上加载失败（脚本错误 / 缺少必需函数）。
-// 这种情况说明 codec 配置有问题，重试无意义，调用方应跳过该 Robot 并打 error 日志。
-// 正常运行下这里不会失败（启动期已通过 LuaAdapter 验证过 codec.lua 完整性）。
+// 返回 error 的场景：Lua 运行时池未提供 LState（pool 未初始化）。
+// codec 配置错误（Resolve nil）不在 NewRobot 暴露——拨号 / 首次 encode 时按 fail-loud 上报，
+// 便于定位到具体连接（service 串）而非整 Robot 创建失败。
 func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
-	globalAdp *adapter.LuaAdapter, dialer *network.Dialer, luaPool *script.RuntimePool) (*Robot, error) {
+	resolver adapter.CodecResolver,
+	dialer *network.Dialer, luaPool *script.RuntimePool) (*Robot, error) {
 
-	if globalAdp == nil {
-		return nil, fmt.Errorf("NewRobot: globalAdp 不能为 nil")
+	if resolver == nil {
+		return nil, fmt.Errorf("NewRobot: resolver 不能为 nil（codec 未配置）")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -125,6 +129,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		shared:         cfg.Shared,
 		requestTimeout: cfg.RequestTimeout,
 		timingLevel:    engineTimingLevel,
+		resolver:       resolver,
 		execDone:       make(chan struct{}),
 		done:           make(chan struct{}),
 	}
@@ -133,22 +138,12 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		r.l = luaPool.Acquire()
 	}
 
-	// 派生 Robot 私有 codec 适配器（必须在 r.l 准备好之后、Start() 之前完成）。
-	// 此时 r.l 刚从池中拿出，没有其它 goroutine 在用，NewRobotAdapter 不需要持锁也安全。
+	// 仅校验 LState 可用——业务脚本执行需要 LState；codec 路径完全在 Go 侧（resolver），
+	// 不再依赖 r.l 上的适配器脚本副本。
 	if r.l == nil {
 		cancel()
 		return nil, fmt.Errorf("NewRobot: Lua 运行时池未提供 LState")
 	}
-	robotAdp, err := globalAdp.NewRobotAdapter(r.l, &r.luaMu)
-	if err != nil {
-		// 归还 LState 避免资源泄漏；其它字段会被 GC 回收
-		if luaPool != nil {
-			luaPool.Release(r.l)
-		}
-		cancel()
-		return nil, fmt.Errorf("NewRobot: 创建 RobotAdapter 失败 (account=%s): %w", cfg.Account, err)
-	}
-	r.adp = robotAdp
 
 	r.state.Set("id", cfg.ID)
 	r.state.Set("index", cfg.Index)
@@ -157,7 +152,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		r.state.Set(k, v)
 	}
 
-	r.actionExec = engine.NewActionExecutor(r.state, &netSenderAdapter{robot: r}, r.factory, r.adp, engineTimingLevel)
+	r.actionExec = engine.NewActionExecutor(r.state, &netSenderAdapter{robot: r}, r.factory, r.resolver, engineTimingLevel)
 	r.executor = engine.NewExecutor(flow, &robotActionHandler{robot: r, flow: flow}, r.account)
 
 	return r, nil
@@ -189,7 +184,6 @@ func (r *Robot) Start() {
 		defer close(r.done)
 
 		if r.l != nil {
-			r.luaMu.Lock()
 			// 绑定生命周期 ctx 到 LState：cancel 时正在执行的 Lua 脚本（含死循环/超长循环）
 			// 会在下一个指令检查点返回 context canceled 错误并退出，使 cleanup 不再因
 			// 不可中断的 Lua 而永久卡死、隔离 LState 永不回收。
@@ -201,15 +195,13 @@ func (r *Robot) Start() {
 				Account:               r.account,
 				Store:                 r.state,
 				Factory:               r.factory,
-				Adapter:               r.adp,
+				Resolver:              r.resolver,
 				NetSender:             &netSenderAdapter{robot: r},
 				Ctx:                   r.ctx,
-				LuaMu:                 &r.luaMu,
 				Shared:                r.shared,
 				DefaultRequestTimeout: r.requestTimeout,
 				TimingLevel:           r.timingLevel,
 			})
-			r.luaMu.Unlock()
 		}
 
 		stresslog.Info("[ROBOT] 启动", zap.Int("id", r.id), zap.String("account", r.account))
@@ -258,13 +250,16 @@ func (r *Robot) Wait() {
 // robotCloseTimeout Robot.Close 总体超时时间。
 // 阻塞点有两处：
 //  1. r.Wait()：等待 executor goroutine 退出（lua 死循环、嵌套调用可能卡死）
-//  2. r.client.CloseAll() 内含 WaitListenDone：等待 listenLoop 退出
-//     （回调里的 lua 脚本等 luaMu 时可能死锁）
+//  2. r.client.CloseAll()：等待 connectionPump / listen queue 清理退出
 //
 // 任一阻塞超过 robotCloseTimeout 即放弃等待，强制返回让上层推进。
 // 代价：LState 不归还到池、state 不清空（避免与卡死的 goroutine 并发访问），
 // 进程退出时由 OS 回收，轻微资源泄漏可接受。
 const robotCloseTimeout = 10 * time.Second
+
+// defaultListenQueueSize 监听缓存队列默认容量，缺省等价于旧单槽语义。
+// 与 network.defaultListenQueueSize 保持一致（同值，独立定义避免跨包依赖未导出符号）。
+const defaultListenQueueSize = 1
 
 // Close 停止机器人并释放资源。
 // 正常路径会归还 Lua LState；超时路径会隔离 LState，避免复用可能仍在使用的运行时。
@@ -389,7 +384,19 @@ func (r *Robot) ConnectTCP(serviceName, address string) bool {
 		return false
 	}
 
-	_, err := r.dialer.DialTCP(r.ctx, address, conn, r.adp)
+	// 按连接的 server 串 "tcp:<service>" 从 resolver 解析 codec；未映射 → fail loud（不静默回退默认 codec）。
+	server := "tcp:" + serviceName
+	adp := r.resolver.Resolve(server)
+	if adp == nil {
+		stresslog.Error("[ROBOT] TCP 连接无 codec 配置（resolver 未映射），拨号中止",
+			zap.Int("id", r.id), zap.String("account", r.account),
+			zap.String("server", server), zap.String("service", serviceName), zap.String("addr", address))
+		monitor.Global().ConnFailed()
+		r.client.CloseTCP(serviceName)
+		return false
+	}
+
+	_, err := r.dialer.DialTCP(r.ctx, address, conn, adp)
 	if err != nil {
 		if r.ctx.Err() != nil {
 			stresslog.Debug("[ROBOT] TCP 连接建立已取消",
@@ -436,7 +443,19 @@ func (r *Robot) ConnectUDP(serviceName, address string) bool {
 		return false
 	}
 
-	_, err := r.dialer.DialUDP(r.ctx, address, conn, r.adp)
+	// 按连接的 server 串 "udp:<service>" 从 resolver 解析 codec；未映射 → fail loud（不静默回退默认 codec）。
+	server := "udp:" + serviceName
+	adp := r.resolver.Resolve(server)
+	if adp == nil {
+		stresslog.Error("[ROBOT] UDP 连接无 codec 配置（resolver 未映射），拨号中止",
+			zap.Int("id", r.id), zap.String("account", r.account),
+			zap.String("server", server), zap.String("service", serviceName), zap.String("address", address))
+		monitor.Global().ConnFailed()
+		r.client.CloseUDP(serviceName)
+		return false
+	}
+
+	_, err := r.dialer.DialUDP(r.ctx, address, conn, adp)
 	if err != nil {
 		if r.ctx.Err() != nil {
 			stresslog.Debug("[ROBOT] UDP 连接建立已取消",
@@ -484,7 +503,7 @@ type robotActionHandler struct {
 //
 // 计时拆解原则：
 //   - 声明式动作 wallClock 含 proto 构建 / 序列化 / 反序列化 / state 写入等全部开销。
-//   - Lua 动作 wallClock 从抢到 luaMu 后开始，避免把进入 Lua VM 前的锁等待计入动作总耗时。
+//   - Lua 动作 wallClock 覆盖主流程同步执行脚本的总耗时。
 //   - timing.Requests：每次 request-response 的独立 WireRTT 样本。
 //   - clientCost 由 monitor 用 wallClock - sum(WireRTT) 计算。
 func (h *robotActionHandler) ExecuteAction(actionDef *engine.ActionDef) error {
@@ -597,7 +616,7 @@ func isCanceledCode(code errcode.ErrorCode) bool {
 
 // executeLuaAction 执行 lua 脚本动作，返回 (sendBytes, recvBytes, timing, wallClock, err)。
 // timing 由脚本内的网络 API 累加；纯客户端逻辑（如仅 set_secret_key）timing 为零值。
-// wallClock 从抢到 luaMu 后开始计时，不包含进入 Lua VM 前等待锁的时间。
+// wallClock 覆盖主流程同步执行脚本的总耗时。
 func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int, int, engine.ActionTiming, time.Duration, error) {
 	if h.robot.l == nil || h.robot.luaPool == nil {
 		stresslog.Error("[ROBOT] Lua 运行时未初始化，无法执行脚本",
@@ -611,8 +630,6 @@ func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int,
 		return 0, 0, engine.ActionTiming{}, 0, engine.NewActionError(errcode.ErrLuaNoScript, "")
 	}
 
-	h.robot.luaMu.Lock()
-	defer h.robot.luaMu.Unlock()
 	start := time.Now()
 
 	// RunActionScript 内部通过 script.Context 累积每次 request 的独立 RequestTiming，
@@ -700,9 +717,6 @@ func (h *robotActionHandler) executeLuaBoolean(scriptName string) bool {
 		return false
 	}
 
-	h.robot.luaMu.Lock()
-	defer h.robot.luaMu.Unlock()
-
 	result, err := h.robot.luaPool.RunBooleanScript(h.robot.l, scriptName)
 	if err != nil {
 		stresslog.Error("[ROBOT] 条件脚本执行失败，条件判断默认拒绝",
@@ -719,9 +733,21 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 		proto   string
 		service string
 	}
-	groups := make(map[connKey]map[string]network.ListenCallBack)
+	// 每个 (proto, service) 分组收集 (routeKey, cb, queueSize) 三元组，注册阶段逐条下发给 Connection。
+	type entry struct {
+		routeKey  string
+		cb        network.ListenCallBack
+		queueSize int
+	}
+	groups := make(map[connKey][]entry)
 
 	for _, ref := range refs {
+		// 有效 queueSize 计算：缺省 1、显式 <=0 报错（fail loud，不静默 clamp）。
+		queueSize, err := effectiveListenQueueSize(ref)
+		if err != nil {
+			return err
+		}
+
 		proto, service, ok := parseServer(ref.Server)
 		if !ok {
 			stresslog.Warn("[ROBOT] 监听引用的 server 解析失败，跳过注册",
@@ -729,26 +755,35 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 			continue
 		}
 		key := connKey{proto: proto, service: service}
-		if _, ok := groups[key]; !ok {
-			groups[key] = make(map[string]network.ListenCallBack)
+
+		// T2-C2：listen routeKey 按 "<proto>:<service>" Resolve 出该连接的 Go SchemaAdapter
+		// 后计算（server=ref.Server 即 proto:service）。Resolve nil → fail loud（中文 error，
+		// 带上下文），不静默兜底——与 dial/decode 侧的 fail-loud 一致（缺 codec 配置即报错）。
+		serverAdp := h.robot.resolver.Resolve(ref.Server)
+		if serverAdp == nil {
+			return fmt.Errorf("监听注册失败：server=%q routeKey 解析失败，连接未配置 codec（resolver.Resolve(%q) nil）",
+				ref.Server, ref.Server)
 		}
+		routeKey := serverAdp.ExpectedRouteKey(ref.Route)
 
-		routeKey := h.robot.adp.ExpectedRouteKey(ref.Route)
-
+		var cb network.ListenCallBack
 		if ref.Listen == "" {
-			groups[key][routeKey] = nil
-			continue
+			cb = nil
+		} else {
+			cbDef, ok := h.flow.Listen(ref.Listen)
+			if !ok {
+				stresslog.Error("[ROBOT] 回调定义不存在", zap.String("listen", ref.Listen))
+				continue
+			}
+			if err := validateListenDef(ref.Listen, cbDef); err != nil {
+				return err
+			}
+			cb = h.createListenCallback(ref.Listen, cbDef)
 		}
-
-		cbDef, ok := h.flow.Listen(ref.Listen)
-		if !ok {
-			stresslog.Error("[ROBOT] 回调定义不存在", zap.String("listen", ref.Listen))
-			continue
-		}
-		groups[key][routeKey] = h.createListenCallback(ref.Listen, cbDef)
+		groups[key] = append(groups[key], entry{routeKey: routeKey, cb: cb, queueSize: queueSize})
 	}
 
-	for key, listenMap := range groups {
+	for key, entries := range groups {
 		var conn *network.Connection
 		switch key.proto {
 		case "udp":
@@ -760,9 +795,56 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 			stresslog.Debug("[ROBOT] 无连接可注册监听", zap.String("proto", key.proto), zap.String("service", key.service))
 			continue
 		}
-		conn.ListenResponse(listenMap)
+		// 逐条注册：每条 RegisterListen 预创建队列 + 冲突 fail-loud + 幂等。
+		for _, e := range entries {
+			if err := conn.RegisterListen(e.routeKey, e.cb, e.queueSize); err != nil {
+				return fmt.Errorf("监听注册失败：proto=%s service=%q routeKey=%q：%w",
+					key.proto, key.service, e.routeKey, err)
+			}
+		}
 	}
 
+	return nil
+}
+
+// effectiveListenQueueSize 计算 ListenRef.QueueSize 的有效队列容量。
+//
+// 语义：
+//   - QueueSize == nil（未写）→ 默认 1（与历史单槽逐字节等价）；
+//   - QueueSize 显式 > 0 → 取该值；
+//   - QueueSize 显式 <= 0 → 配置错误，返回带 server+listen 上下文的中文 error。
+//
+// 抽成纯函数便于单测；由 RegisterListen 在注册阶段（运行时）调用。
+// 这里不做静默 clamp（遵循「禁止兼容性兜底」），显式 0/负数一律报错暴露配置错误。
+func effectiveListenQueueSize(ref engine.ListenRef) (int, error) {
+	if ref.QueueSize == nil {
+		return defaultListenQueueSize, nil
+	}
+	q := *ref.QueueSize
+	if q <= 0 {
+		return 0, fmt.Errorf("监听注册失败：server=%q listen=%q 的 queueSize=%d 非法，须 >= 1",
+			ref.Server, ref.Listen, q)
+	}
+	return q, nil
+}
+
+// validateListenDef 校验 ListenDef 不含已废弃的 script 字段。
+//
+// v2 起 listen 脚本回调已下线：
+// frameData 等高频回调改为主流程非阻塞 pop（network.try_*_listen）消费最新消息，
+// connectionPump 只负责 decode → 分发/缓存/Go-store，不再触碰业务 LState。
+//
+// 故 ListenDef.script 一律 fail-loud：既不留「静默忽略 script」的兜底路径，
+// 也不写「script→store 自动迁移」。抽成纯函数便于单测（不依赖 robot/network 状态）。
+func validateListenDef(listenName string, cbDef *engine.ListenDef) error {
+	if cbDef == nil {
+		return nil
+	}
+	if cbDef.Script != "" {
+		return fmt.Errorf("监听 %q 仍配置已废弃的 script %q；v2 不再支持 listen 脚本回调，"+
+			"请改用主流程 tcpListen/udpListen（或 network.try_*_listen）或声明式 store 消费",
+			listenName, cbDef.Script)
+	}
 	return nil
 }
 
@@ -781,53 +863,12 @@ func parseServer(server string) (proto, service string, ok bool) {
 }
 
 // createListenCallback 根据回调定义创建监听回调函数。
+//
+// v2 起 listen 脚本回调（cbDef.Script）已下线（由 RegisterListen 的 validateListenDef
+// fail-loud 拦截），本函数只处理「s2cProto + Store → Go-store 回调」一种形态：
+//   - cbDef.S2CProto 与 cbDef.Store 均配置：返回 Go 闭包，按 proto 解析后写 state；
+//   - 否则（纯缓存 listen，如 frameData）：返回 nil，消息仅入 listen queue 供主流程消费。
 func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.ListenDef) network.ListenCallBack {
-	if cbDef.Script != "" {
-		return func(msg *network.Message) {
-			if h.robot.ctx.Err() != nil {
-				stresslog.Debug("[ROBOT] 停止阶段跳过 Lua 回调", zap.Int("id", h.robot.id), zap.String("script", cbDef.Script))
-				return
-			}
-			if h.robot.l == nil || h.robot.luaPool == nil {
-				callbackErr := engine.NewActionError(errcode.ErrCallbackLua, "script="+cbDef.Script)
-				stresslog.Error("[ROBOT] Lua 运行时未初始化", zap.String("script", cbDef.Script))
-				monitor.Global().RecordCallback(cbName, monitor.ResultFailure, monitor.ActionTiming{}, 0, 0, msg.WireBytes, callbackErr)
-				return
-			}
-
-			h.robot.luaMu.Lock()
-			defer h.robot.luaMu.Unlock()
-
-			script.SetContext(h.robot.l, &script.Context{
-				RobotID:               h.robot.id,
-				Index:                 h.robot.index,
-				Account:               h.robot.account,
-				Store:                 h.robot.state,
-				Factory:               h.robot.factory,
-				Adapter:               h.robot.adp,
-				NetSender:             &netSenderAdapter{robot: h.robot},
-				Ctx:                   h.robot.ctx,
-				LuaMu:                 &h.robot.luaMu,
-				Shared:                h.robot.shared,
-				DefaultRequestTimeout: h.robot.requestTimeout,
-				TimingLevel:           h.robot.timingLevel,
-			})
-
-			start := time.Now()
-			innerSend, innerRecv, timing, err := h.robot.luaPool.RunCallbackScript(h.robot.l, cbDef.Script, msg.Data, cbDef.S2CProto)
-			wallClock := time.Since(start)
-			recvBytes := msg.WireBytes + innerRecv
-			if err != nil {
-				callbackErr := engine.NewActionError(errcode.ErrCallbackLua, "script="+cbDef.Script, err)
-				stresslog.Error("[ROBOT] Lua 回调执行失败",
-					zap.Int("id", h.robot.id), zap.String("script", cbDef.Script), zap.Error(err))
-				monitor.Global().RecordCallback(cbName, monitor.ResultFailure, toMonitorTiming(timing), wallClock, innerSend, recvBytes, callbackErr)
-				return
-			}
-			monitor.Global().RecordCallback(cbName, monitor.ResultSuccess, toMonitorTiming(timing), wallClock, innerSend, recvBytes, nil)
-		}
-	}
-
 	if cbDef.S2CProto == "" || len(cbDef.Store) == 0 {
 		return nil
 	}
@@ -1125,24 +1166,32 @@ func (ns *netSenderAdapter) SetTCPSecretKey(service string, key []byte) {
 	}
 }
 
-// EnsureTCPListener 为 TCP 连接注册监听器占位（callback=nil）。
-// 由 RegisterListen（listenRefs 路径）和 Lua ensure_tcp_listener 调用，不由 execListen 调用。
-func (ns *netSenderAdapter) EnsureTCPListener(service string, routeKey string) {
+// EnsureTCPListener 为 TCP 连接注册监听器占位（callback=nil，缓存模式）。
+// 由 Lua ensure_tcp_listener 调用；queueSize 由调用方传入（Lua 固定 1，flow listenRefs 由 robot.RegisterListen 走另一条路径）。
+// 冲突时记 Error 日志暴露配置异常，不向上 panic（ensure 路径本就是占位注册）。
+func (ns *netSenderAdapter) EnsureTCPListener(service string, routeKey string, queueSize int) {
 	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
 		return
 	}
-	conn.AddListener(routeKey, nil)
+	if err := conn.RegisterListen(routeKey, nil, queueSize); err != nil {
+		stresslog.Error("[ROBOT] TCP 监听占位注册失败",
+			zap.String("service", service), zap.String("routeKey", routeKey), zap.Int("queueSize", queueSize), zap.Error(err))
+	}
 }
 
-// EnsureUDPListener 为 UDP 连接注册监听器占位（callback=nil）。
-// 由 RegisterListen（listenRefs 路径）和 Lua ensure_udp_listener 调用，不由 execListen 调用。
-func (ns *netSenderAdapter) EnsureUDPListener(service string, routeKey string) {
+// EnsureUDPListener 为 UDP 连接注册监听器占位（callback=nil，缓存模式）。
+// 由 Lua ensure_udp_listener 调用；queueSize 由调用方传入（Lua 固定 1，flow listenRefs 由 robot.RegisterListen 走另一条路径）。
+// 冲突时记 Error 日志暴露配置异常，不向上 panic（ensure 路径本就是占位注册）。
+func (ns *netSenderAdapter) EnsureUDPListener(service string, routeKey string, queueSize int) {
 	conn := ns.robot.client.GetUDPConn(service)
 	if conn == nil {
 		return
 	}
-	conn.AddListener(routeKey, nil)
+	if err := conn.RegisterListen(routeKey, nil, queueSize); err != nil {
+		stresslog.Error("[ROBOT] UDP 监听占位注册失败",
+			zap.String("service", service), zap.String("routeKey", routeKey), zap.Int("queueSize", queueSize), zap.Error(err))
+	}
 }
 
 // CloseTCP 关闭 TCP 连接。
@@ -1172,39 +1221,136 @@ func (ns *netSenderAdapter) GetUDPSecretKey(service string) []byte {
 	return conn.GetSecretKey()
 }
 
-// RegisterTCPHeartbeat 注册 TCP 心跳。
-func (ns *netSenderAdapter) RegisterTCPHeartbeat(service string, intervalMs int, builder func() []byte) error {
+// RegisterHeartbeat 注册声明式心跳（tcpHeartbeat / udpHeartbeat action，双模式 body 构造）。
+//
+// 心跳 body 不由 Lua 构造，而是由 Go builder 闭包按配置模式分派：
+//   - proto 模式（C2SProto != ""）：engine.BuildProtoBody（factory + bindings，Go-only）；
+//   - raw-binary 模式（len(Fields) > 0）：engine.BuildHeartbeatBody（小端打包 + 私有计数器/时间/随机）；
+//   - 空 body（两者皆无）：静态心跳。
+//
+// body 构造完成后走 resolver.Resolve("<transport>:<service>") 解析出的 Go SchemaAdapter 做 encode
+// 因此 Go builder / pump 心跳路径不触碰业务 LState。
+//
+// 闭包内每次 tick：
+//  1. 按模式分派构造 body（skip=true 跳过本 tick 返回 nil；err 记 Warn 返回 nil）；
+//  2. 取 conn 当前 secretKey；
+//  3. adp.EncodeTCP/UDP(route, body, key) → packet；
+//  4. 仅 raw-binary 模式递增 privateCounters（counter 源按 Step 推进；proto 模式无私有计数器）。
+func (ns *netSenderAdapter) RegisterHeartbeat(cfg engine.HeartbeatActionConfig) error {
 	if ns.robot.ctx.Err() != nil {
-		return engine.NewActionError(errcode.ErrActionCanceled, "service="+service)
+		return engine.NewActionError(errcode.ErrActionCanceled, "service="+cfg.Service)
 	}
-	conn := ns.robot.client.GetTCPConn(service)
+	var conn *network.Connection
+	if cfg.Transport == "udp" {
+		conn = ns.robot.client.GetUDPConn(cfg.Service)
+	} else {
+		conn = ns.robot.client.GetTCPConn(cfg.Service)
+	}
 	if conn == nil {
-		err := engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
-		stresslog.Warn("[ROBOT] RegisterTCPHeartbeat 连接不存在", zap.String("service", service))
-		return err
+		stresslog.Warn("[ROBOT] RegisterHeartbeat 连接不存在",
+			zap.String("transport", cfg.Transport), zap.String("service", cfg.Service))
+		return engine.NewActionError(errcode.ErrConnNotFound,
+			"transport="+cfg.Transport+" service="+cfg.Service)
 	}
-	conn.RegisterHeartbeat(network.HeartbeatConfig{
-		Interval: time.Duration(intervalMs) * time.Millisecond,
-		Builder:  builder,
-	})
-	return nil
-}
 
-// RegisterUDPHeartbeat 注册 UDP 心跳。
-func (ns *netSenderAdapter) RegisterUDPHeartbeat(service string, intervalMs int, builder func() []byte) error {
-	if ns.robot.ctx.Err() != nil {
-		return engine.NewActionError(errcode.ErrActionCanceled, "service="+service)
+	// 私有计数器初值：按字段下标 + Start（缺省 0）初始化（raw-binary 模式专用）。
+	privateCounters := make(map[int]int64, len(cfg.Fields))
+	for i, f := range cfg.Fields {
+		if f.Source == engine.HeartbeatSourceCounter {
+			if f.Start != nil {
+				privateCounters[i] = *f.Start
+			}
+		}
 	}
-	conn := ns.robot.client.GetUDPConn(service)
-	if conn == nil {
-		err := engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
-		stresslog.Warn("[ROBOT] RegisterUDPHeartbeat 连接不存在", zap.String("service", service))
-		return err
+
+	// 闭包持有：双模式入参、state、私有计数器、resolver/factory/route、transport、conn（取 secretKey）、skip 标志。
+	// 字段布局 / bindings 拷贝一份避免共享 cfg 切片头被外部修改（ActionDef 生命周期内不可变，防御性拷贝）。
+	//
+	// T2-C2 起 encode 走 resolver：每 tick 按 cfg.Transport+":"+cfg.Service Resolve 出该连接的 Go
+	// SchemaAdapter 后 Encode。Resolve nil（codec 未映射）→ Warn+skip 本 tick（不 fail 流程，
+	// 单 tick encode 失败不应终止整条心跳 goroutine。
+	fields := append([]engine.HeartbeatField(nil), cfg.Fields...)
+	bindings := append([]engine.FieldBind(nil), cfg.Bindings...)
+	c2sProto := cfg.C2SProto
+	st := ns.robot.state
+	resolver := ns.robot.resolver
+	factory := ns.robot.factory
+	route := cfg.Route
+	skipWhenMissing := cfg.SkipWhenMissing
+	transport := cfg.Transport
+
+	goBuilder := func() []byte {
+		// 双模式 body 分派（与 execHeartbeat 互斥校验一致：c2sProto 与 fields 不会同时非空）：
+		//   proto 模式 → BuildProtoBody（factory + bindings，Go-only）；
+		//   raw-binary 模式 → BuildHeartbeatBody（小端打包 + 私有计数器成功后递增）；
+		//   两者皆无 → 空 body（静态心跳）。
+		var body []byte
+		var skip bool
+		if c2sProto != "" {
+			b, skipB, err := engine.BuildProtoBody(c2sProto, bindings, st, factory, "heartbeat:"+cfg.Service)
+			if err != nil {
+				stresslog.Warn("[ROBOT] 心跳 proto body 构建失败",
+					zap.String("transport", transport),
+					zap.String("service", cfg.Service),
+					zap.String("c2sProto", c2sProto),
+					zap.Error(err))
+				return nil
+			}
+			body, skip = b, skipB
+		} else if len(fields) > 0 {
+			b, skipB, err := engine.BuildHeartbeatBody(fields, st, privateCounters, skipWhenMissing)
+			if err != nil {
+				stresslog.Warn("[ROBOT] 心跳 body 构建失败",
+					zap.String("transport", transport),
+					zap.String("service", cfg.Service),
+					zap.Error(err))
+				return nil
+			}
+			body, skip = b, skipB
+		}
+		// else: 空 body（静态心跳，body=nil）
+		if skip {
+			return nil
+		}
+		key := conn.GetSecretKey()
+		// T2-C2：按 "<transport>:<service>" Resolve 出该连接的 Go SchemaAdapter 后 encode。
+		// 单 tick encode 失败不应终止整条心跳 goroutine。
+		adp := resolver.Resolve(transport + ":" + cfg.Service)
+		if adp == nil {
+			stresslog.Warn("[ROBOT] 心跳 encode 失败：codec 未映射（resolver nil），跳过本 tick",
+				zap.String("transport", transport),
+				zap.String("service", cfg.Service))
+			return nil
+		}
+		var packet []byte
+		if transport == "udp" {
+			packet = adp.EncodeUDP(route, body, key)
+		} else {
+			packet = adp.EncodeTCP(route, body, key)
+		}
+		// 构建成功 → 递增私有计数器（仅 raw-binary 模式的 counter 源按 Step 推进；proto 模式无计数器概念）。
+		for i := range fields {
+			f := &fields[i]
+			if f.Source == engine.HeartbeatSourceCounter {
+				step := int64(1)
+				if f.Step != nil {
+					step = *f.Step
+				}
+				privateCounters[i] += step
+			}
+		}
+		return packet
 	}
+
 	conn.RegisterHeartbeat(network.HeartbeatConfig{
-		Interval: time.Duration(intervalMs) * time.Millisecond,
-		Builder:  builder,
+		Interval: time.Duration(cfg.IntervalMs) * time.Millisecond,
+		Builder:  goBuilder,
 	})
+	stresslog.Debug("[ROBOT] RegisterHeartbeat 已注册",
+		zap.String("transport", cfg.Transport),
+		zap.String("service", cfg.Service),
+		zap.Int("intervalMs", cfg.IntervalMs),
+		zap.Int("fieldCount", len(cfg.Fields)))
 	return nil
 }
 

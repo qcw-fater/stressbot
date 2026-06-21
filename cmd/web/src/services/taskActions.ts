@@ -17,8 +17,9 @@ import { validateFlow } from '@/components/FlowEditor/validation/refsCheck';
 import { useMetricsStore } from '@/components/FlowEditor/nodes/shared/MetricsBadge';
 import * as tasksApi from './tasksApi';
 import { getCapabilities } from './capabilitiesApi';
-import { listProto, listScript, getAdapterScript, getErrorMapScript, markResourcesAsBaselineSynced } from './resourcesStore';
+import { listProto, listScript, listCodecFiles, getErrorMap, markResourcesAsBaselineSynced } from './resourcesStore';
 import { syncFlowScriptsToIdb, collectFlowScriptNames } from './scriptSync';
+import { collectFlowCodecConnections, findMissingCodecConnections } from './taskResourceDiff';
 import { useRuntimeStore } from './runtimeStore';
 import { ApiError } from './api';
 import type { RobotConfig, TaskBrief, TaskDetail } from '@/types/api';
@@ -132,20 +133,41 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
       400,
     );
   }
-  const [protos, scripts, adapterRes, errorMapRes] = await Promise.all([listProto(), listScript(), getAdapterScript(), getErrorMapScript()]);
+  const [protos, scripts, codecs, errorMapRes] = await Promise.all([listProto(), listScript(), listCodecFiles(), getErrorMap()]);
 
   // 只提交 flow 引用到的脚本；proto 文件无法从 message 全名静态映射到文件名，全量提交
   const scriptNames = new Set(collectFlowScriptNames(flowJson));
   const usedScripts = scripts.filter((s) => scriptNames.has(s.name));
-  const adapterContent = adapterRes?.content ?? null;
-  if (!adapterContent) {
+  if (codecs.length === 0) {
     throw new ApiError(
       {
         code: 'INVALID_ARGUMENT',
-        message: '缺少协议适配器。请在「协议适配器」面板导入或载入模板。',
+        message: '缺少协议配置，请在「协议配置」面板导入或新建',
       },
       400,
     );
+  }
+
+  // §3.5：flow 引用的每条连接（tcp*/udp* 动作的 `<proto>:<service>`）都必须在 IDB 有对应的
+  // `<proto>_<service>_codec.json`，否则 agent 在该连接 dial 时 CodecResolver 解析不到 codec
+  // 会 fail-loud。这里把该校验前移到任务启动，给清晰中文提示（启动前拦截 vs 启动后失败）。
+  // 上传范围不变：下面仍发全部 codec 文件，agent resolver 加载全部。
+  {
+    const codecFileNames = codecs.map((f) => f.name);
+    const referenced = collectFlowCodecConnections(flowJson);
+    const missing = findMissingCodecConnections(referenced, codecFileNames);
+    if (missing.length > 0) {
+      throw new ApiError(
+        {
+          code: 'INVALID_ARGUMENT',
+          message:
+            `以下连接缺少协议配置文件：${missing.join('，')}。` +
+            `请在「协议配置」面板新建对应连接的协议配置。`,
+          details: { missingCodecConnections: missing },
+        },
+        400,
+      );
+    }
   }
 
   // 2.5 共享状态预检：脚本使用 share 但服务器未配置 Redis 时，提前拦截并提示，
@@ -207,12 +229,12 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
   for (const f of usedScripts) {
     fd.append(`scripts/${f.name}`, new Blob([f.content], { type: 'text/plain' }), f.name);
   }
-  if (adapterContent) {
-    fd.append('adapter/codec.lua', new Blob([adapterContent], { type: 'text/plain' }), 'codec.lua');
+  for (const f of codecs) {
+    fd.append(`adapter/${f.name}`, new Blob([f.content], { type: 'application/json' }), f.name);
   }
   const errorMapContent = errorMapRes?.content ?? null;
   if (errorMapContent) {
-    fd.append('adapter/error.lua', new Blob([errorMapContent], { type: 'text/plain' }), 'error.lua');
+    fd.append('adapter/errors.json', new Blob([errorMapContent], { type: 'application/json' }), 'errors.json');
   }
 
   // 5. 提交。createTask 成功后服务器已写回 conf/ 基线，立即标记本次上传资源为新基线。
@@ -220,7 +242,7 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
   await markResourcesAsBaselineSynced({
     protos,
     scripts: usedScripts,
-    adapter: adapterRes ?? null,
+    codecs,
     errorMap: errorMapRes ?? null,
   });
   await tasksApi.startTask(created.id);

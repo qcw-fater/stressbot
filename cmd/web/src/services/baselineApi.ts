@@ -59,12 +59,19 @@ export async function fetchBaselineProtoContent(name: string): Promise<string | 
   return fetchText(`${BASELINE_PREFIX}/proto/${encodeURIComponent(name)}`);
 }
 
-/** 获取基线 adapter/codec.lua 内容 */
-export async function fetchBaselineAdapter(): Promise<string | null> {
-  return fetchText(`${BASELINE_PREFIX}/adapter/codec.lua`);
+// === T3 声明式 codec：基线 adapter 多文件读取（codec.json + errors.json）===
+//
+// 后端（T4.3 + B1 adapter-index 前置）已提供：
+//   GET /sbot/baseline/adapter/index.json — 列 *_codec.json + errors.json 文件名
+//   GET /sbot/baseline/adapter/{name}      — 按文件名取单文件（路径透传）
+
+/** 基线 adapter 文件名清单（*_codec.json + errors.json）。 */
+export async function fetchBaselineCodecIndex(): Promise<string[]> {
+  const list = await fetchJson<string[]>(`${BASELINE_PREFIX}/adapter/index.json`);
+  return list ?? [];
 }
 
-/** 获取基线 adapter/error.lua 内容 */
-export async function fetchBaselineErrorMap(): Promise<string | null> {
-  return fetchText(`${BASELINE_PREFIX}/adapter/error.lua`);
+/** 基线单份 codec/errors 文件内容（name = tcp_logic_codec.json / errors.json）。 */
+export async function fetchBaselineCodec(name: string): Promise<string | null> {
+  return fetchText(`${BASELINE_PREFIX}/adapter/${encodeURIComponent(name)}`);
 }

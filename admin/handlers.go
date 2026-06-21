@@ -93,8 +93,9 @@ func (s *AdminServer) registerRoutes() http.Handler {
 	mux.HandleFunc("GET /sbot/baseline/proto/{name}", s.handleBaselineProtoFile)
 	mux.HandleFunc("GET /sbot/baseline/scripts/index.json", s.handleBaselineScriptIndex)
 	mux.HandleFunc("GET /sbot/baseline/scripts/{name}", s.handleBaselineScriptFile)
-	mux.HandleFunc("GET /sbot/baseline/adapter/codec.lua", s.handleBaselineAdapter)
-	mux.HandleFunc("GET /sbot/baseline/adapter/error.lua", s.handleBaselineErrorMap)
+	// T4.3：adapter 基线改为按文件名透传（支持多 *_codec.json + errors.json）。
+	mux.HandleFunc("GET /sbot/baseline/adapter/index.json", s.handleBaselineCodecIndex)
+	mux.HandleFunc("GET /sbot/baseline/adapter/{name}", s.handleBaselineCodecFile)
 	mux.HandleFunc("GET /sbot/baseline/flow/flow.json", s.handleBaselineFlow)
 	mux.HandleFunc("GET /sbot/baseline/config.json", s.handleBaselineConfig)
 
@@ -103,6 +104,10 @@ func (s *AdminServer) registerRoutes() http.Handler {
 
 	// ── 服务器能力 ──
 	mux.HandleFunc("GET /sbot/capabilities", s.handleCapabilities)
+
+	// ── Codec 预览/算法元数据（T4.2，纯计算，供前端 codec 编辑器调用）──
+	mux.HandleFunc("POST /sbot/codec/preview", s.handleCodecPreview)
+	mux.HandleFunc("GET /sbot/codec/algorithms", s.handleCodecAlgorithms)
 
 	// ── 静态资源 ──
 	fs := http.FileServer(http.Dir(s.cfg.StaticDir))
@@ -473,24 +478,42 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 协议适配器（adapter/codec.lua，可选）
-	if adapterFile, _, err := r.FormFile("adapter/codec.lua"); err == nil {
-		adapterData, err := io.ReadAll(adapterFile)
-		if err != nil {
-			stresslog.Warn("[ADMIN] 读取适配器脚本失败", zap.Error(err))
+	// 声明式 codec（每连接一份 adapter/*_codec.json，T4.3）+ 共享 adapter/errors.json。
+	// 按 form field 名收集：field 形如 adapter/<basename>.json，basename 作为 Codecs key。
+	// errors.json 单独落到 cfg.ErrorMap。
+	cfg.Codecs = make(map[string][]byte)
+	for key, files := range r.MultipartForm.File {
+		if !strings.HasPrefix(key, "adapter/") {
+			continue
 		}
-		_ = adapterFile.Close() // multipart 文件句柄，ReadAll 后关闭即可
-		cfg.AdapterScript = adapterData
-	}
-
-	// 可选：error.lua
-	if errorMapFile, _, err := r.FormFile("adapter/error.lua"); err == nil {
-		errorMapData, err := io.ReadAll(errorMapFile)
-		if err != nil {
-			stresslog.Warn("[ADMIN] 读取 error.lua 失败", zap.Error(err))
+		name := strings.TrimPrefix(key, "adapter/")
+		if name == "" || name == "codec.lua" || name == "error.lua" {
+			// 旧字段（codec.lua/error.lua）已被多 codec 模型替代，admin 不再接收。
+			continue
 		}
-		_ = errorMapFile.Close() // multipart 文件句柄，ReadAll 后关闭即可
-		cfg.ErrorMapScript = errorMapData
+		for _, fh := range files {
+			f, err := fh.Open()
+			if err != nil {
+				continue
+			}
+			data, err := io.ReadAll(f)
+			_ = f.Close() // multipart 文件句柄，ReadAll 后关闭即可
+			if err != nil {
+				stresslog.Warn("[ADMIN] 读取 codec 文件失败",
+					zap.String("name", fh.Filename), zap.Error(err))
+				continue
+			}
+			if name == "errors.json" {
+				cfg.ErrorMap = data
+				continue
+			}
+			if !strings.HasSuffix(name, "_codec.json") {
+				stresslog.Warn("[ADMIN] adapter 目录下非 *_codec.json/errors.json 文件已忽略",
+					zap.String("name", name))
+				continue
+			}
+			cfg.Codecs[name] = data
+		}
 	}
 
 	// robotConfig（JSON string）
@@ -650,23 +673,29 @@ func (s *AdminServer) handleGetTaskConfig(w http.ResponseWriter, r *http.Request
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(configJSON)
 
-	case "adapter/codec.lua":
-		if task.Config.AdapterScript == nil {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "text/plain")
-		w.Write(task.Config.AdapterScript)
-
-	case "adapter/error.lua":
-		if task.Config.ErrorMapScript == nil {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "text/plain")
-		w.Write(task.Config.ErrorMapScript)
+	case "adapter/codec.lua", "adapter/error.lua":
+		// 旧字段产物：T4.3 起不再分发；返回 404。
+		http.NotFound(w, r)
 
 	default:
+		// adapter/*_codec.json（按 basename 匹配 Codecs）或 adapter/errors.json
+		if strings.HasPrefix(path, "adapter/") {
+			name := strings.TrimPrefix(path, "adapter/")
+			if name == "errors.json" {
+				if len(task.Config.ErrorMap) == 0 {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.Write(task.Config.ErrorMap)
+				return
+			}
+			if data, found := task.Config.Codecs[name]; found {
+				w.Header().Set("Content-Type", "application/json")
+				w.Write(data)
+				return
+			}
+		}
 		// proto 文件或 lua 脚本
 		if data, found := task.Config.ProtoFiles[path]; found {
 			w.Header().Set("Content-Type", "application/octet-stream")
@@ -797,22 +826,7 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 	}
 
 	// 构建配置文件清单
-	var configFiles []string
-	if task.Config.FlowJSON != nil {
-		configFiles = append(configFiles, "flow/flow.json")
-	}
-	for name := range task.Config.ProtoFiles {
-		configFiles = append(configFiles, "proto/"+name)
-	}
-	for name := range task.Config.LuaScripts {
-		configFiles = append(configFiles, "scripts/"+name)
-	}
-	if task.Config.AdapterScript != nil {
-		configFiles = append(configFiles, "adapter/codec.lua")
-	}
-	if task.Config.ErrorMapScript != nil {
-		configFiles = append(configFiles, "adapter/error.lua")
-	}
+	configFiles := buildConfigFiles(&task.Config)
 
 	// 并行下发到所有 Agent：避免单一慢节点（30s 超时 * 3 次重试 ≈ 90s）阻塞其他节点的启动，
 	// 也避免"只有第一个 Agent 收到任务"的视感。每个节点独立成功/失败收敛后再做状态转换。
@@ -1502,18 +1516,42 @@ func (s *AdminServer) writeBaselineFiles(cfg *TaskConfig, flowData []byte) {
 				zap.Error(err))
 		}
 	}
-	if cfg.AdapterScript != nil {
-		if err := safeWriteFile("conf/adapter", "codec.lua", cfg.AdapterScript); err != nil {
-			stresslog.Warn("写入基线适配器失败",
+	// T4.3：每连接一份 *_codec.json + 共享 errors.json（替代旧的 codec.lua/error.lua）。
+	for name, data := range cfg.Codecs {
+		if err := safeWriteFile("conf/adapter", name, data); err != nil {
+			stresslog.Warn("写入基线 codec 失败",
+				zap.String("name", name),
 				zap.Error(err))
 		}
 	}
-	if cfg.ErrorMapScript != nil {
-		if err := safeWriteFile("conf/adapter", "error.lua", cfg.ErrorMapScript); err != nil {
-			stresslog.Warn("写入基线错误映射失败",
+	if len(cfg.ErrorMap) > 0 {
+		if err := safeWriteFile("conf/adapter", "errors.json", cfg.ErrorMap); err != nil {
+			stresslog.Warn("写入基线 errors.json 失败",
 				zap.Error(err))
 		}
 	}
+}
+
+// buildConfigFiles 构建任务下发的配置文件清单（供分发逻辑与测试共用同一份规则）。
+// T4.3：adapter 下为各 *_codec.json + errors.json，不再列 codec.lua/error.lua。
+func buildConfigFiles(cfg *TaskConfig) []string {
+	var files []string
+	if cfg.FlowJSON != nil {
+		files = append(files, "flow/flow.json")
+	}
+	for name := range cfg.ProtoFiles {
+		files = append(files, "proto/"+name)
+	}
+	for name := range cfg.LuaScripts {
+		files = append(files, "scripts/"+name)
+	}
+	for name := range cfg.Codecs {
+		files = append(files, "adapter/"+name)
+	}
+	if len(cfg.ErrorMap) > 0 {
+		files = append(files, "adapter/errors.json")
+	}
+	return files
 }
 
 // safeWriteFile 将 data 写入 dir/name，自动创建目录，防止路径穿越。
@@ -1556,12 +1594,22 @@ func (s *AdminServer) handleBaselineScriptFile(w http.ResponseWriter, r *http.Re
 	serveBaselineFile(w, r, "conf/scripts", "name")
 }
 
-func (s *AdminServer) handleBaselineAdapter(w http.ResponseWriter, r *http.Request) {
-	http.ServeFile(w, r, "conf/adapter/codec.lua")
+// handleBaselineCodecIndex 列出 adapter 基线目录下的 codec/errors 文件名（T3 前端基线同步枚举用）。
+// 目录契约：conf/adapter 下只有 *_codec.json 与 errors.json（写入侧 buildConfigFiles 已拒绝其它）。
+// handler 只按 .json 后缀如实列目录，不二次过滤文件名（前端按 errors.json/其余分类）。
+func (s *AdminServer) handleBaselineCodecIndex(w http.ResponseWriter, r *http.Request) {
+	files, err := listDirFiles("conf/adapter", ".json")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, files)
 }
 
-func (s *AdminServer) handleBaselineErrorMap(w http.ResponseWriter, r *http.Request) {
-	http.ServeFile(w, r, "conf/adapter/error.lua")
+// handleBaselineCodecFile 提供 adapter 基线目录下的单个 codec/errors 文件（T4.3）。
+// 路径形如 /sbot/baseline/adapter/{name}，name = tcp_logic_codec.json / errors.json 等。
+func (s *AdminServer) handleBaselineCodecFile(w http.ResponseWriter, r *http.Request) {
+	serveBaselineFile(w, r, "conf/adapter", "name")
 }
 
 func (s *AdminServer) handleErrorCodeIndex(w http.ResponseWriter, _ *http.Request) {

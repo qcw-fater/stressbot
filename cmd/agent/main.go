@@ -85,7 +85,7 @@ func main() {
 	flowPath := flag.String("flow", "", "单机模式流程配置文件路径（默认 <conf>/flow/flow.json）")
 	protoDir := flag.String("proto", "", "单机模式 proto 目录路径（默认 <conf>/proto）")
 	scriptsDir := flag.String("scripts", "", "单机模式 Lua 脚本目录路径（默认 <conf>/scripts）")
-	adapterDir := flag.String("adapter", "", "单机模式协议适配器目录路径（默认 <conf>/adapter，含 codec.lua 与可选 error.lua）")
+	adapterDir := flag.String("adapter", "", "单机模式协议适配器目录路径（默认 <conf>/adapter，含 *_codec.json 与 errors.json）")
 	daemonFlag := flag.Bool("d", false, "以守护进程模式运行")
 	flag.Parse()
 
@@ -193,17 +193,20 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 		zap.String("scripts", paths.Scripts),
 		zap.String("adapter", paths.Adapter))
 
-	// 加载协议适配器
-	poolSize := adapter.SuggestedPoolSize()
-	errorMapPath := filepath.Join(paths.Adapter, "error.lua")
-	if _, err := os.Stat(errorMapPath); err != nil {
-		errorMapPath = ""
-	}
-	adp, err := adapter.NewLuaAdapter(poolSize, filepath.Join(paths.Adapter, "codec.lua"), errorMapPath)
+	// T2-C2-Lua：构造 CodecResolver（全 codec 路径 Go SchemaAdapter）。
+	// 扫 paths.Adapter 下 *_codec.json 推断「server 串 → 文件名」映射，再 LoadCodecResolver 编译。
+	// 业务 encode/decode/dial/心跳/listen/Lua 全走 resolver，生产路径不再构造 Lua 适配器。
+	codecMap, err := adapter.InferCodecMap(paths.Adapter)
 	if err != nil {
-		stresslog.Fatal("加载适配器失败", zap.Error(err))
+		stresslog.Fatal("推断 codec 映射失败", zap.String("dir", paths.Adapter), zap.Error(err))
 	}
-	stresslog.Info("[MAIN] 适配器已初始化", zap.Int("headerSize", adp.HeaderSize()))
+	resolver, err := adapter.LoadCodecResolver(paths.Adapter, codecMap, "errors.json")
+	if err != nil {
+		stresslog.Fatal("加载 CodecResolver 失败", zap.String("dir", paths.Adapter), zap.Error(err))
+	}
+	stresslog.Info("[MAIN] CodecResolver 已加载",
+		zap.Int("connections", len(codecMap)),
+		zap.Int("headerSize", adapter.PickMetaAdapter(resolver, codecMap).HeaderSize()))
 
 	// 加载 .proto 文件
 	loader := protox.NewLoader([]string{paths.Proto}, nil)
@@ -285,7 +288,7 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 		Count:          s.Bot.Count,
 		ConcurrentNum:  s.Bot.ConcurrentNum,
 		StateExtra:     s.StateExtra,
-		Adapter:        adp,
+		CodecResolver:  resolver,
 		RequestTimeout: 60 * time.Second,
 		MainService:    s.Bot.MainService,
 		HTTPTimeout:    10 * time.Second,
@@ -293,7 +296,10 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 		Shared:         sharedStore,
 	}
 
-	dialer := network.NewDialer(adp, 5*time.Second)
+	// Dialer 元信息源：resolver 任一 adapter（Go SchemaAdapter）。
+	// 当前协议 HeaderSize/BodyLength 全局一致（3 份 codec.json 同 frame spec，T1.6 同源生成），
+	// 故取任一即可；per-connection HeaderSize 下沉留到 2-C3 connectionPump。
+	dialer := network.NewDialer(adapter.PickMetaAdapter(resolver, codecMap), 5*time.Second)
 	if err := dialer.Start(); err != nil {
 		stresslog.Fatal("启动网络引擎失败", zap.Error(err))
 	}
@@ -365,7 +371,6 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 		}
 	}
 
-	adp.Close()
 	if stopPprof != nil {
 		stopPprof()
 	}
@@ -402,7 +407,7 @@ type standalonePaths struct {
 	Flow    string // 流程配置文件
 	Proto   string // proto 目录
 	Scripts string // Lua 脚本目录
-	Adapter string // 适配器目录（含 codec.lua 与可选 error.lua）
+	Adapter string // 适配器目录（含 *_codec.json 与 errors.json）
 }
 
 // resolveStandalonePaths 解析单机模式资源路径：对应 flag 为空时回退到 confDir 下的默认相对路径，

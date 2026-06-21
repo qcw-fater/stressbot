@@ -15,6 +15,18 @@
 
 import { clear, createStore, del, get, keys, set, setMany } from 'idb-keyval';
 import { BASELINE_PREFIX } from './env';
+import { fetchBaselineCodecIndex, fetchBaselineCodec } from './baselineApi';
+import type { CodecSchema } from '@/types/codec';
+import {
+  FIELD_TYPE_WIDTH,
+  FIELD_ROLES,
+  PIPELINE_OPS,
+  PRODUCE_REGIONS,
+  OVER_KINDS,
+  GUARD_OPS,
+  ON_ERROR,
+  VALUE_SOURCE_KINDS_SUPPORTED,
+} from '@/types/codec';
 
 const PROTO_DB = 'stressbot-resources-proto';
 const SCRIPT_DB = 'stressbot-resources-scripts';
@@ -172,86 +184,513 @@ export async function clearScript(): Promise<void> {
   notify();
 }
 
-// === Adapter (codec.lua) ===
+// === Codec（按连接多份 <proto>_<service>_codec.json）===
+//
+// T3 声明式 codec 重构：把前端适配器从单一 codec.lua 升级为按连接的多份
+// `<proto>_<service>_codec.json`（+ 共享 errors.json）。复用同一个 adapterStore（IDB），
+// 每份 codec = 一个 key（文件名）；共享 errors.json 单独一份 key。
 
-const CODEC_LUA_KEY = 'codec.lua';
-const CODEC_BASELINE_URL = `${BASELINE_PREFIX}/adapter/codec.lua`;
+const CODEC_FILE_SUFFIX = '_codec.json';
+const ERRORS_JSON_KEY = 'errors.json';
 
-export async function getAdapterScript(): Promise<ResourceFile | undefined> {
-  return get<ResourceFile>(CODEC_LUA_KEY, adapterStore);
+/** 校验 name 是否符合 `<proto>_<service>_codec.json` 命名（防误把 errors.json 当 codec 存）。 */
+function assertCodecFileName(name: string): void {
+  if (!name.endsWith(CODEC_FILE_SUFFIX)) {
+    throw new Error(`codec 文件名必须以 "${CODEC_FILE_SUFFIX}" 结尾（当前：${name}）`);
+  }
 }
 
-export async function setAdapterScript(content: string): Promise<ResourceFile> {
-  const previous = await getAdapterScript();
-  const file = await localResourceFile(CODEC_LUA_KEY, content, previous);
-  await set(CODEC_LUA_KEY, file, adapterStore);
+/** 每连接一份 codec（key = 文件名，如 'tcp_logic_codec.json'）。 */
+export async function getCodecSchema(name: string): Promise<ResourceFile | undefined> {
+  assertCodecFileName(name);
+  return get<ResourceFile>(name, adapterStore);
+}
+
+export async function setCodecSchema(name: string, content: string): Promise<ResourceFile> {
+  assertCodecFileName(name);
+  const previous = await get<ResourceFile>(name, adapterStore);
+  const file = await localResourceFile(name, content, previous);
+  await set(name, file, adapterStore);
   notify();
   return file;
 }
 
-export async function setAdapterScriptFromBaseline(content: string): Promise<ResourceFile> {
-  const file = await serverResourceFile(CODEC_LUA_KEY, content);
-  await set(CODEC_LUA_KEY, file, adapterStore);
+export async function setCodecSchemaFromBaseline(name: string, content: string): Promise<ResourceFile> {
+  assertCodecFileName(name);
+  const file = await serverResourceFile(name, content);
+  await set(name, file, adapterStore);
   notify();
   return file;
 }
 
-export async function clearAdapterScript(): Promise<void> {
-  await del(CODEC_LUA_KEY, adapterStore);
+export async function clearCodecSchema(name: string): Promise<void> {
+  assertCodecFileName(name);
+  await del(name, adapterStore);
   notify();
 }
 
-// === Adapter (error.lua) ===
-
-const ERROR_LUA_KEY = 'error.lua';
-
-export async function getErrorMapScript(): Promise<ResourceFile | undefined> {
-  return get<ResourceFile>(ERROR_LUA_KEY, adapterStore);
+/** 列出所有 *_codec.json（不含 errors.json），按 name 排序。 */
+export async function listCodecFiles(): Promise<ResourceFile[]> {
+  const allKeys = (await keys(adapterStore)) as IDBValidKey[];
+  const items: ResourceFile[] = [];
+  for (const k of allKeys) {
+    const name = String(k);
+    if (!name.endsWith(CODEC_FILE_SUFFIX)) continue;
+    const v = await get<ResourceFile>(k, adapterStore);
+    if (v) items.push(v);
+  }
+  items.sort((a, b) => a.name.localeCompare(b.name));
+  return items;
 }
 
-export async function setErrorMapScript(content: string): Promise<ResourceFile> {
-  const previous = await getErrorMapScript();
-  const file = await localResourceFile(ERROR_LUA_KEY, content, previous);
-  await set(ERROR_LUA_KEY, file, adapterStore);
+// === 共享错误表 errors.json（单份，key = 'errors.json'）===
+
+export async function getErrorMap(): Promise<ResourceFile | undefined> {
+  return get<ResourceFile>(ERRORS_JSON_KEY, adapterStore);
+}
+
+export async function setErrorMap(content: string): Promise<ResourceFile> {
+  const previous = await getErrorMap();
+  const file = await localResourceFile(ERRORS_JSON_KEY, content, previous);
+  await set(ERRORS_JSON_KEY, file, adapterStore);
   notify();
   return file;
 }
 
-export async function setErrorMapScriptFromBaseline(content: string): Promise<ResourceFile> {
-  const file = await serverResourceFile(ERROR_LUA_KEY, content);
-  await set(ERROR_LUA_KEY, file, adapterStore);
+export async function setErrorMapFromBaseline(content: string): Promise<ResourceFile> {
+  const file = await serverResourceFile(ERRORS_JSON_KEY, content);
+  await set(ERRORS_JSON_KEY, file, adapterStore);
   notify();
   return file;
 }
 
-export async function clearErrorMapScript(): Promise<void> {
-  await del(ERROR_LUA_KEY, adapterStore);
+export async function clearErrorMap(): Promise<void> {
+  await del(ERRORS_JSON_KEY, adapterStore);
   notify();
 }
 
-const REQUIRED_ADAPTER_FUNCTIONS = [
-  'header_size',
-  'body_length',
-  'encode_tcp',
-  'encode_udp',
-  'decode_tcp',
-  'decode_udp',
-  'expected_route_key',
-];
+// === validateCodecSchema（镜像 codec/schema.go 的 Validate）===
+//
+// 纯结构校验、同步、聚合所有错误一次性返回（空数组=通过）。逐条对齐 Go Validate，
+// 避免前后端漂移。**注意**：algo 是否在注册表中这一条**前端不做**——由 §3.4 后端
+// 算法清单端点（GET /sbot/codec/algorithms）权威，此处仅校验 algo 非空。
 
-/** 检查适配器是否实现了所有必需函数，返回缺失的函数名列表 */
-export async function validateAdapter(): Promise<string[]> {
-  const file = await getAdapterScript();
-  if (!file || !file.content.trim()) return REQUIRED_ADAPTER_FUNCTIONS;
-  return REQUIRED_ADAPTER_FUNCTIONS.filter((fn) => {
-    const content = file.content;
-    return content.includes(`function ${fn}(`) || new RegExp(`\\b${fn}\\s*=`).test(content);
-  }).length === 0
-    ? []
-    : REQUIRED_ADAPTER_FUNCTIONS.filter((fn) => {
-        const content = file.content;
-        return !content.includes(`function ${fn}(`) && !new RegExp(`\\b${fn}\\s*=`).test(content);
-      });
+const CHECKSUM_FROM_RE = /^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)$/;
+const ROUTE_KEY_PLACEHOLDER_RE = /\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
+
+class ErrCollector {
+  msgs: string[] = [];
+  add(msg: string): void {
+    this.msgs.push(msg);
+  }
+}
+
+function isFieldTypeKnown(t: string): boolean {
+  return t in FIELD_TYPE_WIDTH;
+}
+
+/** 对单份 codec.json 文本做结构校验，返回中文错误数组（空=通过）。纯函数、同步。 */
+export function validateCodecSchema(content: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch (e) {
+    return [`codec 配置不是合法 JSON：${(e as Error).message}`];
+  }
+  const ec = new ErrCollector();
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return ['codec 配置不是合法 JSON 对象'];
+  }
+  const s = parsed as CodecSchema;
+  validateBase(s, ec);
+  validateHeader(s, ec);
+  validateRouteKeyTemplate(s, ec);
+  validatePipeline(s, ec);
+  return ec.msgs;
+}
+
+function validateBase(s: CodecSchema, ec: ErrCollector): void {
+  if (s.version !== 1) {
+    ec.add(`codec schema version 必须为 1（当前 ${s.version}）`);
+  }
+  if (s.endianDefault !== 'le' && s.endianDefault !== 'be') {
+    ec.add(`endianDefault 必须为 le 或 be（当前 ${JSON.stringify(s.endianDefault ?? '')}）`);
+  }
+  const headerSize = s.frame?.headerSize;
+  if (typeof headerSize !== 'number' || headerSize <= 0) {
+    ec.add(`frame.headerSize 必须大于 0（当前 ${headerSize ?? ''}）`);
+  }
+  const trailerSize = s.frame?.trailerSize;
+  if (typeof trailerSize === 'number' && trailerSize < 0) {
+    ec.add(`frame.trailerSize 不能为负（当前 ${trailerSize}）`);
+  }
+  if (!s.routeKeyTemplate || s.routeKeyTemplate.trim() === '') {
+    ec.add('routeKeyTemplate 不能为空');
+  }
+}
+
+function validateHeader(s: CodecSchema, ec: ErrCollector): void {
+  const headerSize = s.frame?.headerSize ?? 0;
+  const header = Array.isArray(s.header) ? s.header : [];
+
+  // 字段名唯一 + 基础属性 + type/role/endian
+  const names = new Map<string, number>(); // name → first index
+  for (let i = 0; i < header.length; i++) {
+    const f = header[i] ?? {};
+    let prefix = `header 字段 "${f.name ?? ''}" (index ${i})`;
+    const name = typeof f.name === 'string' ? f.name : '';
+    if (!name || name.trim() === '') {
+      ec.add(`header 字段名不能为空 (index ${i})`);
+      prefix = `header 字段 (index ${i})`;
+    } else if (names.has(name)) {
+      ec.add(`header 字段名 "${name}" 重复（与 index ${names.get(name)} 冲突，字段名必须唯一）`);
+    } else {
+      names.set(name, i);
+    }
+    const offset = typeof f.offset === 'number' ? f.offset : 0;
+    const size = typeof f.size === 'number' ? f.size : 0;
+    if (offset < 0) {
+      ec.add(`${prefix}：offset 不能为负（当前 ${offset}）`);
+    }
+    if (size <= 0) {
+      ec.add(`${prefix}：size 必须大于 0（当前 ${size}）`);
+    }
+    if (offset < 0 || offset + size > headerSize) {
+      ec.add(`${prefix}：物理区间 [offset=${offset}, offset+size=${offset + size}) 越界（headerSize=${headerSize}）`);
+    }
+    const t = typeof f.type === 'string' ? f.type : '';
+    if (!isFieldTypeKnown(t)) {
+      ec.add(`${prefix}：未知 type "${t}"`);
+    } else {
+      const width = FIELD_TYPE_WIDTH[t];
+      if (width > 0) {
+        if (size !== width) {
+          ec.add(`${prefix}：type "${t}" 的 size 必须为 ${width}（当前 ${size}）`);
+        }
+      } else {
+        // bytes
+        if (size <= 0) {
+          ec.add(`${prefix}：type bytes 必须显式指定 size>0`);
+        }
+      }
+    }
+    if (f.endian && f.endian !== '' && f.endian !== 'le' && f.endian !== 'be') {
+      ec.add(`${prefix}：endian 必须为 le 或 be（当前 "${f.endian}"）`);
+    }
+    if (!(FIELD_ROLES as readonly string[]).includes(f.role ?? '')) {
+      ec.add(`${prefix}：未知 role "${f.role ?? ''}"`);
+    }
+  }
+
+  // 物理区间不重叠
+  interface Span {
+    name: string;
+    start: number;
+    end: number;
+  }
+  const spans: Span[] = [];
+  for (const f of header) {
+    const offset = typeof f?.offset === 'number' ? f.offset : 0;
+    const size = typeof f?.size === 'number' ? f.size : 0;
+    if (offset < 0 || size <= 0) continue; // 已报错
+    spans.push({ name: f.name ?? '', start: offset, end: offset + size });
+  }
+  spans.sort((a, b) => a.start - b.start);
+  for (let i = 1; i < spans.length; i++) {
+    if (spans[i].start < spans[i - 1].end) {
+      ec.add(
+        `header 字段物理区间重叠：${spans[i - 1].name} [offset=${spans[i - 1].start},+${spans[i - 1].end - spans[i - 1].start}) 与 ${spans[i].name} [offset=${spans[i].start},+${spans[i].end - spans[i].start})`,
+      );
+    }
+  }
+
+  // role 统计 + flags/checksumOut/value 细则
+  let lengthCount = 0;
+  let routeCount = 0;
+  const routeNames = new Set<string>();
+  const flagsBits = new Map<string, FlagBit[]>();
+  for (const f of header) {
+    const role = f?.role;
+    if (role === 'length') lengthCount++;
+    else if (role === 'route') {
+      routeCount++;
+      routeNames.add(f!.name ?? '');
+    } else if (role === 'flags') {
+      flagsBits.set(f!.name ?? '', Array.isArray(f!.bits) ? f!.bits : []);
+      validateFlagBits(f!, ec);
+    } else if (role === 'checksumOut') {
+      validateChecksumOut(f!, ec);
+    } else if (role === 'value') {
+      validateValueSource(f!, ec);
+    }
+  }
+  if (lengthCount === 0) {
+    ec.add('header 缺少 role:"length" 字段（必须有且仅有 1 个）');
+  } else if (lengthCount > 1) {
+    ec.add(`header 有 ${lengthCount} 个 role:"length" 字段（必须有且仅有 1 个）`);
+  }
+  if (routeCount === 0) {
+    ec.add('header 缺少 role:"route" 字段（至少 1 个）');
+  }
+
+  validatePipelineRefs(s, ec, routeNames, flagsBits);
+}
+
+interface FlagBit {
+  name: string;
+  bit: number;
+}
+
+function validateFlagBits(f: NonNullable<CodecSchema['header'][number]>, ec: ErrCollector): void {
+  const bitWidth = (typeof f.size === 'number' ? f.size : 0) * 8;
+  const seenBit = new Map<number, string>();
+  const seenName = new Map<string, number>();
+  const bits = Array.isArray(f.bits) ? f.bits : [];
+  for (const b of bits) {
+    const bit = typeof b?.bit === 'number' ? b.bit : 0;
+    const bname = typeof b?.name === 'string' ? b.name : '';
+    if (bit < 0 || bit >= bitWidth) {
+      ec.add(`flags 字段 "${f.name}" 的 bit ${bit} 超出 [0,${bitWidth})（bit 位非法）`);
+    }
+    if (seenBit.has(bit)) {
+      ec.add(`flags 字段 "${f.name}" 的 bit ${bit} 重复（与 "${seenBit.get(bit)}" 冲突，命名位不能重复）`);
+    } else {
+      seenBit.set(bit, bname);
+    }
+    if (!bname || bname.trim() === '') {
+      ec.add(`flags 字段 "${f.name}" 的 bit ${bit} 名称为空`);
+    } else if (seenName.has(bname)) {
+      ec.add(`flags 字段 "${f.name}" 的命名位 "${bname}" 重复（与 bit ${seenName.get(bname)} 冲突）`);
+    } else {
+      seenName.set(bname, bit);
+    }
+  }
+}
+
+function validateChecksumOut(f: NonNullable<CodecSchema['header'][number]>, ec: ErrCollector): void {
+  const from = typeof f.from === 'string' ? f.from : '';
+  if (from === '') {
+    ec.add(`checksumOut 字段 "${f.name}" 缺少 from（需 <step>.<output>）`);
+    return;
+  }
+  if (!CHECKSUM_FROM_RE.test(from)) {
+    ec.add(`checksumOut 字段 "${f.name}" 的 from "${from}" 不合法（需匹配 <step>.<output>）`);
+  }
+}
+
+function validateValueSource(f: NonNullable<CodecSchema['header'][number]>, ec: ErrCollector): void {
+  if (!f.source) {
+    // v1 不强制：value 字段缺 source 仅提示性（与 Go schema.go 行为一致）
+    return;
+  }
+  const kind = f.source.kind;
+  if (!(kind in VALUE_SOURCE_KINDS_SUPPORTED)) {
+    ec.add(`value 字段 "${f.name}" 的 source.kind "${kind}" 未知`);
+    return;
+  }
+  if (!VALUE_SOURCE_KINDS_SUPPORTED[kind]) {
+    ec.add(`value 字段 "${f.name}" 的 source.kind="${kind}" 不支持：v1 不支持的头字段取值源 kind="${kind}"，留待 v1.1`);
+  }
+}
+
+// ---------- routeKeyTemplate ----------
+
+function validateRouteKeyTemplate(s: CodecSchema, ec: ErrCollector): void {
+  if (!s.routeKeyTemplate) return; // 已在 base 报
+  const matches = s.routeKeyTemplate.matchAll(ROUTE_KEY_PLACEHOLDER_RE);
+  for (const m of matches) {
+    if (!isRouteField(s, m[1])) {
+      ec.add(`routeKeyTemplate 占位 {${m[1]}} 必须指向某个 role:"route" 字段（未知占位）`);
+    }
+  }
+}
+
+function isRouteField(s: CodecSchema, name: string): boolean {
+  const header = Array.isArray(s.header) ? s.header : [];
+  for (const f of header) {
+    if (f?.role === 'route' && f.name === name) return true;
+  }
+  return false;
+}
+
+// ---------- pipeline ----------
+
+function validatePipeline(s: CodecSchema, ec: ErrCollector): void {
+  const pipeline = Array.isArray(s.pipeline) ? s.pipeline : [];
+
+  // step name 唯一
+  const stepNames = new Map<string, number>();
+  for (let i = 0; i < pipeline.length; i++) {
+    const st = pipeline[i];
+    const name = typeof st?.name === 'string' ? st.name.trim() : '';
+    if (name === '') {
+      ec.add(`pipeline 步骤 (index ${i}) 缺少 name`);
+    } else if (stepNames.has(st!.name)) {
+      ec.add(`pipeline 步骤 name "${st!.name}" 重复（与 index ${stepNames.get(st!.name)} 冲突，name 必须唯一）`);
+    } else {
+      stepNames.set(st!.name, i);
+    }
+  }
+
+  for (const st of pipeline) {
+    if (!st) continue;
+    const prefix = `pipeline 步骤 "${st.name}"`;
+    if (!(PIPELINE_OPS as readonly string[]).includes(st.op ?? '')) {
+      ec.add(`${prefix}：未知 op "${st.op ?? ''}"（合法值：compress|encrypt|checksum|hash）`);
+    }
+    if (!st.algo || st.algo.trim() === '') {
+      ec.add(`${prefix}：algo 不能为空`);
+    }
+    if (st.onError && st.onError !== '' && !(ON_ERROR as readonly string[]).includes(st.onError)) {
+      ec.add(`${prefix}：onError "${st.onError}" 不合法（合法值：fail|keep，空视为 fail）`);
+    }
+    // produces：name 唯一 + region 合法
+    const pn = new Set<string>();
+    const produces = Array.isArray(st.produces) ? st.produces : [];
+    for (const p of produces) {
+      if (pn.has(p.name)) {
+        ec.add(`${prefix}：produces 名称 "${p.name}" 在该步内重复（必须唯一）`);
+      } else {
+        pn.add(p.name);
+      }
+      if (!(PRODUCE_REGIONS as readonly string[]).includes(p.region ?? '')) {
+        ec.add(`${prefix}：produces "${p.name}" 的 region "${p.region ?? ''}" 不合法（合法值：ciphered|bodyPlain|bodyFinal|header|frame）`);
+      }
+    }
+    // offset（encrypt）
+    if (st.op === 'encrypt' && st.offset) {
+      if (st.offset.encode < 0) {
+        ec.add(`${prefix}：encrypt offset.encode 不能为负（当前 ${st.offset.encode}）`);
+      }
+      if (st.offset.decode < 0) {
+        ec.add(`${prefix}：encrypt offset.decode 不能为负（当前 ${st.offset.decode}）`);
+      }
+    }
+    // over（独立 checksum/hash 步）
+    if (st.over) {
+      validateOver(ec, prefix, st.over);
+    }
+    // when
+    if (st.when) {
+      validateWhen(ec, prefix, st.when, stepNames);
+    }
+  }
+}
+
+function validateOver(ec: ErrCollector, prefix: string, o: OverSpecInput): void {
+  if (!(OVER_KINDS as readonly string[]).includes(o.kind ?? '')) {
+    ec.add(`${prefix}：over.kind "${o.kind ?? ''}" 不合法（合法值：bodyPlain|bodyFinal|header|frame|range）`);
+    return;
+  }
+  if (o.kind === 'range') {
+    const start = typeof o.rangeStart === 'number' ? o.rangeStart : 0;
+    const end = typeof o.rangeEnd === 'number' ? o.rangeEnd : 0;
+    if (start < 0 || end < 0 || end < start) {
+      ec.add(`${prefix}：over range 区间非法 [rangeStart=${start}, rangeEnd=${end}]（需 >=0 且 rangeEnd>=rangeStart）`);
+    }
+  }
+}
+
+interface OverSpecInput {
+  kind?: string;
+  rangeStart?: number;
+  rangeEnd?: number;
+}
+
+function validateWhen(
+  ec: ErrCollector,
+  prefix: string,
+  w: NonNullable<NonNullable<CodecSchema['pipeline'][number]>['when']>,
+  stepNames: Map<string, number>,
+): void {
+  if (w.appliesWith && w.appliesWith !== '') {
+    if (!stepNames.has(w.appliesWith)) {
+      ec.add(`${prefix}：when.appliesWith "${w.appliesWith}" 指向不存在的 step`);
+    }
+  }
+  const guards = Array.isArray(w.guards) ? w.guards : [];
+  for (const g of guards) {
+    if (!(GUARD_OPS as readonly string[]).includes(g?.op ?? '')) {
+      ec.add(`${prefix}：guard (field="${g?.field ?? ''}") 的 op "${g?.op ?? ''}" 不合法（合法值：eq|neq|gt|gte|lt|lte）`);
+    }
+  }
+}
+
+/** 校验跨 header↔pipeline 的引用：flag、checksumOut.from、when.appliesWith(已在 when 内)。 */
+function validatePipelineRefs(
+  s: CodecSchema,
+  ec: ErrCollector,
+  _routeNames: Set<string>,
+  flagsBits: Map<string, FlagBit[]>,
+): void {
+  // flagName → flagField 反查（全局 flag 名空间）
+  const flagNameToField = new Map<string, string>();
+  for (const [fName, bits] of flagsBits) {
+    for (const b of bits) {
+      flagNameToField.set(b.name, fName);
+    }
+  }
+
+  // 每个 flag 命名位至多被一个 step 绑定；flag 引用必须存在
+  const boundFlag = new Map<string, string>();
+  const pipeline = Array.isArray(s.pipeline) ? s.pipeline : [];
+  for (const st of pipeline) {
+    if (!st?.flag || st.flag === '') continue;
+    if (!flagNameToField.has(st.flag)) {
+      ec.add(`pipeline 步骤 "${st.name}" 的 flag "${st.flag}" 未在任何 role:"flags" 字段的命名位中声明`);
+      continue;
+    }
+    if (boundFlag.has(st.flag)) {
+      ec.add(`pipeline 步骤 "${st.name}" 的 flag "${st.flag}" 已被步骤 "${boundFlag.get(st.flag)}" 绑定（同一命名 flag 位至多被一个 step 绑定）`);
+    } else {
+      boundFlag.set(st.flag, st.name);
+    }
+  }
+
+  // 凡带 when 的 step 必须绑定 flag
+  for (const st of pipeline) {
+    if (st?.when && (!st.flag || st.flag === '')) {
+      ec.add(`pipeline 步骤 "${st.name}" 带有 when 但未绑定 flag（带 when 的步骤必须绑定 flag，否则 decode 无法复现 encode 决策）`);
+    }
+  }
+
+  // checksumOut.from 指向的 <step>.<output>：step 必须存在、produce 必须存在
+  const stepProduces = new Map<string, Set<string>>();
+  for (const st of pipeline) {
+    const set = new Set<string>();
+    const produces = Array.isArray(st?.produces) ? st!.produces : [];
+    for (const p of produces) set.add(p.name);
+    stepProduces.set(st!.name, set);
+  }
+  const header = Array.isArray(s.header) ? s.header : [];
+  for (const f of header) {
+    if (f?.role !== 'checksumOut' || !f.from) continue;
+    const m = f.from.match(CHECKSUM_FROM_RE);
+    if (!m) continue; // 已在 validateChecksumOut 报错
+    const stepName = m[1];
+    const produceName = m[2];
+    const produces = stepProduces.get(stepName);
+    if (!produces) {
+      ec.add(`checksumOut 字段 "${f.name}" 的 from "${f.from}" 指向不存在的 step "${stepName}"`);
+      continue;
+    }
+    if (!produces.has(produceName)) {
+      ec.add(`checksumOut 字段 "${f.name}" 的 from "${f.from}" 指向 step "${stepName}" 中不存在的 produce "${produceName}"`);
+    }
+  }
+}
+
+/** 读取所有 *_codec.json，逐份校验，汇总错误（每条带文件名前缀）。 */
+export async function collectCodecSchemaErrors(): Promise<string[]> {
+  const files = await listCodecFiles();
+  const out: string[] = [];
+  for (const f of files) {
+    const errs = validateCodecSchema(f.content);
+    for (const e of errs) {
+      out.push(`[${f.name}] ${e}`);
+    }
+  }
+  return out;
 }
 
 // === 统一基线同步 ===
@@ -261,7 +700,7 @@ const LAST_BASELINE_KEY = 'stressbot:baseline:lastIndex';
 interface LastBaselineIndex {
   proto: string[];
   script: string[];
-  adapter: boolean;
+  adapter: string[];
 }
 
 function saveLastBaseline(index: LastBaselineIndex): void {
@@ -358,7 +797,7 @@ export async function compareResourceThreeWay(local: ResourceFile, serverContent
 async function getResource(type: ResourceType, name: string): Promise<ResourceFile | undefined> {
   if (type === 'proto') return getProto(name);
   if (type === 'script') return getScript(name);
-  return name === ERROR_LUA_KEY ? getErrorMapScript() : getAdapterScript();
+  return name === ERRORS_JSON_KEY ? getErrorMap() : getCodecSchema(name);
 }
 
 async function writeBaselineResource(type: ResourceType, name: string, content: string): Promise<void> {
@@ -366,18 +805,17 @@ async function writeBaselineResource(type: ResourceType, name: string, content: 
     await addProtoFromBaseline(name, content);
   } else if (type === 'script') {
     await addScriptFromBaseline(name, content);
-  } else if (name === ERROR_LUA_KEY) {
-    await setErrorMapScriptFromBaseline(content);
+  } else if (name === ERRORS_JSON_KEY) {
+    await setErrorMapFromBaseline(content);
   } else {
-    await setAdapterScriptFromBaseline(content);
+    await setCodecSchemaFromBaseline(name, content);
   }
 }
 
 async function deleteResource(type: ResourceType, name: string): Promise<void> {
   if (type === 'proto') await del(name, protoStore);
   else if (type === 'script') await del(name, scriptStore);
-  else if (name === ERROR_LUA_KEY) await del(ERROR_LUA_KEY, adapterStore);
-  else await del(CODEC_LUA_KEY, adapterStore);
+  else await del(name, adapterStore);
   notify();
 }
 
@@ -426,14 +864,14 @@ export async function reconcileResourceWithServer(
 export async function markResourcesAsBaselineSynced(input: {
   protos?: ResourceFile[];
   scripts?: ResourceFile[];
-  adapter?: ResourceFile | null;
+  codecs?: ResourceFile[];
   errorMap?: ResourceFile | null;
 }): Promise<void> {
   const writes: Array<Promise<void>> = [];
   for (const f of input.protos ?? []) writes.push(setResourceBaseHash('proto', f.name, await hashResourceContent(f.content)));
   for (const f of input.scripts ?? []) writes.push(setResourceBaseHash('script', f.name, await hashResourceContent(f.content)));
-  if (input.adapter) writes.push(setResourceBaseHash('adapter', CODEC_LUA_KEY, await hashResourceContent(input.adapter.content)));
-  if (input.errorMap) writes.push(setResourceBaseHash('adapter', ERROR_LUA_KEY, await hashResourceContent(input.errorMap.content)));
+  for (const f of input.codecs ?? []) writes.push(setResourceBaseHash('adapter', f.name, await hashResourceContent(f.content)));
+  if (input.errorMap) writes.push(setResourceBaseHash('adapter', ERRORS_JSON_KEY, await hashResourceContent(input.errorMap.content)));
   await Promise.all(writes);
   if (writes.length > 0) notify();
 }
@@ -456,12 +894,11 @@ export async function syncResourcesFromBaseline(): Promise<BaselineSyncResult> {
     removed: [],
   };
 
-  // 并行拉取基线索引和 adapter 文件
-  const [protoIndex, scriptIndex, adapterText, errorMapText] = await Promise.all([
+  // 并行拉取各资源组基线索引
+  const [protoIndex, scriptIndex, codecIndex] = await Promise.all([
     fetchIndex(`${BASELINE_PREFIX}/proto/index.json`),
     fetchIndex(`${BASELINE_PREFIX}/scripts/index.json`),
-    fetchFileText(CODEC_BASELINE_URL),
-    fetchFileText(`${BASELINE_PREFIX}/adapter/error.lua`),
+    fetchBaselineCodecIndex(),
   ]);
 
   // --- Proto ---
@@ -470,28 +907,14 @@ export async function syncResourcesFromBaseline(): Promise<BaselineSyncResult> {
   // --- Scripts ---
   await syncFileGroup(scriptIndex, 'script', scriptStore, `${BASELINE_PREFIX}/scripts/`, result);
 
-  // --- Adapter ---
-  const existingAdapter = await getAdapterScript();
-  if (!existingAdapter && adapterText !== null) {
-    await setAdapterScriptFromBaseline(adapterText);
-    result.added.push({ type: 'adapter', name: CODEC_LUA_KEY });
-  } else if (existingAdapter) {
-    await reconcileResourceWithServer(result, 'adapter', CODEC_LUA_KEY, existingAdapter, adapterText);
-  }
-
-  const existingErrorMap = await getErrorMapScript();
-  if (!existingErrorMap && errorMapText !== null) {
-    await setErrorMapScriptFromBaseline(errorMapText);
-    result.added.push({ type: 'adapter', name: ERROR_LUA_KEY });
-  } else if (existingErrorMap) {
-    await reconcileResourceWithServer(result, 'adapter', ERROR_LUA_KEY, existingErrorMap, errorMapText);
-  }
+  // --- Adapter（多 codec + errors.json，与 proto/scripts 同款走 syncFileGroup）---
+  await syncFileGroup(codecIndex, 'adapter', adapterStore, `${BASELINE_PREFIX}/adapter/`, result);
 
   // 同步完成后保存当前基线快照
   saveLastBaseline({
     proto: protoIndex,
     script: scriptIndex,
-    adapter: adapterText !== null,
+    adapter: codecIndex,
   });
 
   return result;
@@ -545,8 +968,7 @@ async function fetchFileText(url: string): Promise<string | null> {
 async function fetchResourceBaseline(type: ResourceType, name: string): Promise<string | null> {
   if (type === 'proto') return fetchFileText(`${BASELINE_PREFIX}/proto/${encodeURIComponent(name)}`);
   if (type === 'script') return fetchFileText(`${BASELINE_PREFIX}/scripts/${encodeURIComponent(name)}`);
-  if (name === ERROR_LUA_KEY) return fetchFileText(`${BASELINE_PREFIX}/adapter/error.lua`);
-  return fetchFileText(CODEC_BASELINE_URL);
+  return fetchBaselineCodec(name);
 }
 
 async function syncFileGroup(
@@ -628,8 +1050,6 @@ function notify(): void {
 function byteLength(s: string): number {
   return new Blob([s]).size;
 }
-
-// === 基线回写 ===
 
 // === Legacy 迁移：v0 同 DB 双 store → v1 双 DB 单 store ===
 

@@ -718,11 +718,9 @@ func (c *MetricsCollector) RecordCallbackError(name string, err error) {
 
 在 `robot/robot.go` 的 `createListenCallback` 中：
 
-- Lua 回调成功 → `RecordCallbackSuccess(cbName)`
-- Lua 回调失败 → `RecordCallbackError(cbName, NewActionError(ErrCallbackLua, "script=...", err))`
-- Lua 运行时未初始化 → `RecordCallbackError(cbName, NewActionError(ErrCallbackLua, "script=..."))`
-- 推送消息解析失败 → `RecordCallbackError(cbName, NewActionError(ErrCallbackParse, "proto=...", err))`
-- 默认回调成功 → `RecordCallbackSuccess(cbName)`
+- Go-store 回调成功 → `RecordCallback(cbName, ResultSuccess, ...)`
+- 推送消息解析失败 → `RecordCallback(cbName, ResultFailure, ..., NewActionError(ErrCallbackParse, "proto=...", err))`
+- 仅缓存监听（无 Go-store 回调）不额外记录 callback 行
 
 ---
 

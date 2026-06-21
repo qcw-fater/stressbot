@@ -476,18 +476,15 @@ func utilsUnpackLE(L *lua.LState) int {
 // ---------------------------------------------------------------------------
 
 // utilsSleep utils.sleep(ms) — 休眠指定毫秒数（响应 context 取消）。
-// 休眠期间释放 luaMu，避免阻塞心跳 builder 和监听回调。
 func utilsSleep(L *lua.LState) int {
 	ms := L.CheckInt(1)
 	if ms > 0 {
 		ctx := GetContext(L)
 		if ctx != nil && ctx.Ctx != nil {
-			withReleasedMu(ctx.LuaMu, func() {
-				select {
-				case <-time.After(time.Duration(ms) * time.Millisecond):
-				case <-ctx.Ctx.Done():
-				}
-			})
+			select {
+			case <-time.After(time.Duration(ms) * time.Millisecond):
+			case <-ctx.Ctx.Done():
+			}
 		} else {
 			time.Sleep(time.Duration(ms) * time.Millisecond)
 		}

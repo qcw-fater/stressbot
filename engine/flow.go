@@ -72,24 +72,32 @@ type ListenRef struct {
 	Route  any    `json:"route"`  // 不透明路由（与 ActionDef.Route 格式一致）
 	Server string `json:"server"` // 连接名，格式：协议:服务名（如 "tcp:logic"、"udp:udp"）
 	Listen string `json:"listen"` // 监听定义名称（引用 listens 表），空 = 仅轮询不回调
+	// QueueSize 监听缓存队列容量。
+	//   - 未写（nil）→ 默认 1，与历史单槽语义逐字节等价；
+	//   - 显式 > 0 → 按该值预创建环形队列；
+	//   - 显式 <= 0 → 配置错误，注册时（robot.RegisterListen）报错，不静默 clamp。
+	// 用 *int 区分「未写」与「显式 0」，符合全局约束「禁止兼容性兜底」。
+	QueueSize *int `json:"queueSize,omitempty"`
 }
 
 // 动作模式常量。
 const (
-	PatternTCPSend     = "tcpSend"     // TCP 单向发送
-	PatternTCPRequest  = "tcpRequest"  // TCP 请求-响应
-	PatternTCPConnect  = "tcpConnect"  // TCP 连接建立
-	PatternTCPClose    = "tcpClose"    // TCP 连接关闭
-	PatternTCPListen   = "tcpListen"   // TCP 推送消息消费（轮询 ListenRefs 预缓存）
-	PatternUDPSend     = "udpSend"     // UDP 单向发送
-	PatternUDPRequest  = "udpRequest"  // UDP 请求-响应
-	PatternUDPConnect  = "udpConnect"  // UDP 连接建立
-	PatternUDPClose    = "udpClose"    // UDP 连接关闭
-	PatternUDPListen   = "udpListen"   // UDP 推送消息消费（轮询 ListenRefs 预缓存）
-	PatternHTTPRequest = "httpRequest" // HTTP 请求
-	PatternSetState    = "setState"    // 设置状态变量
-	PatternClearState  = "clearState"  // 清除状态变量
-	PatternLua         = "lua"         // Lua 脚本执行（由 robot 层 ActionHandler 处理）
+	PatternTCPSend      = "tcpSend"      // TCP 单向发送
+	PatternTCPRequest   = "tcpRequest"   // TCP 请求-响应
+	PatternTCPConnect   = "tcpConnect"   // TCP 连接建立
+	PatternTCPClose     = "tcpClose"     // TCP 连接关闭
+	PatternTCPListen    = "tcpListen"    // TCP 推送消息消费（轮询 ListenRefs 预缓存）
+	PatternUDPSend      = "udpSend"      // UDP 单向发送
+	PatternUDPRequest   = "udpRequest"   // UDP 请求-响应
+	PatternUDPConnect   = "udpConnect"   // UDP 连接建立
+	PatternUDPClose     = "udpClose"     // UDP 连接关闭
+	PatternUDPListen    = "udpListen"    // UDP 推送消息消费（轮询 ListenRefs 预缓存）
+	PatternTCPHeartbeat = "tcpHeartbeat" // 声明式 TCP 心跳注册（Go-only builder，零 Lua）
+	PatternUDPHeartbeat = "udpHeartbeat" // 声明式 UDP 心跳注册（Go-only builder，零 Lua）
+	PatternHTTPRequest  = "httpRequest"  // HTTP 请求
+	PatternSetState     = "setState"     // 设置状态变量
+	PatternClearState   = "clearState"   // 清除状态变量
+	PatternLua          = "lua"          // Lua 脚本执行（由 robot 层 ActionHandler 处理）
 )
 
 // 条件表达式前缀
@@ -169,6 +177,12 @@ type ActionDef struct {
 	URL         string         `json:"url"`         // HTTP 请求 URL（httpRequest 模式），支持 state: 前缀
 	Method      string         `json:"method"`      // HTTP 方法（httpRequest 模式）：POST(默认) / GET
 	ContentType string         `json:"contentType"` // HTTP 内容类型（httpRequest 模式）：json(默认) / form
+	// ── tcpHeartbeat / udpHeartbeat 专用 ───────────────────────────────────
+	// 声明式二进制心跳（Go-only builder）。HeartbeatFields 为空 = 空 body（静态心跳）。
+	// 心跳每 tick 在 Go 内按布局打包（读 state/计数器/时间/随机），不触碰业务 LState。
+	IntervalMs      int              `json:"intervalMs,omitempty"`      // 心跳间隔（毫秒），>0
+	HeartbeatFields []HeartbeatField `json:"heartbeatFields,omitempty"` // 二进制布局（小端），空 = 空 body
+	SkipWhenMissing bool             `json:"skipWhenMissing,omitempty"` // state 源缺失时跳过本 tick（true）而非报错
 }
 
 // FieldBind C2S 字段绑定定义。
@@ -195,27 +209,27 @@ type ActionDef struct {
 //
 // Wrap 为 true 时，将单个值包装为 []any{val}，用于 repeated 字段赋单个元素的场景。
 type FieldBind struct {
-	Field         string      `json:"field"`         // 目标 proto 字段名（支持嵌套如 "heroList[0].heroId"）
-	Type          string      `json:"type"`          // 绑定类型：fixed / state / stateFirst / stateRandom / stateRandomN / stateMapKey / stateMapValue / randomPick / randomPickMap / randomExclude / randomInt / randomFloat / randomString / listSize / map
-	Value         any         `json:"value"`         // fixed: 固定值
-	Source        string      `json:"source"`        // 数据来源 state key（state/stateFirst/stateRandom/stateRandomN/stateMapKey/stateMapValue/randomPick/randomExclude 使用）
-	Path          string      `json:"path"`          // 从 state 值中导航取子字段（如 "items[0].itemId"）
+	Field         string         `json:"field"`         // 目标 proto 字段名（支持嵌套如 "heroList[0].heroId"）
+	Type          string         `json:"type"`          // 绑定类型：fixed / state / stateFirst / stateRandom / stateRandomN / stateMapKey / stateMapValue / randomPick / randomPickMap / randomExclude / randomInt / randomFloat / randomString / listSize / map
+	Value         any            `json:"value"`         // fixed: 固定值
+	Source        string         `json:"source"`        // 数据来源 state key（state/stateFirst/stateRandom/stateRandomN/stateMapKey/stateMapValue/randomPick/randomExclude 使用）
+	Path          string         `json:"path"`          // 从 state 值中导航取子字段（如 "items[0].itemId"）
 	Values        []any          `json:"values"`        // randomPick/randomPickN/randomPickMap/randomExclude: 候选值列表
 	Entries       []MapEntryBind `json:"entries"`       // map: 固定 key + 动态 value 的 entry 列表
-	Required      bool        `json:"required"`      // true = 字段缺失时动作报错（不再静默跳过）
-	Filters       []FilterDef `json:"filters"`       // stateMapValue/stateMapKey: 过滤条件列表
-	Min           int         `json:"min"`           // randomInt/randomFloat: 最小值（含）
-	Max           int         `json:"max"`           // randomInt/randomFloat: 最大值（含）
-	Precision     int         `json:"precision"`     // randomFloat: 小数位数（默认 2）
-	Length        int         `json:"length"`        // randomString: 字符串长度
-	Count         int         `json:"count"`         // stateRandomN/randomPickN: 选取数量
-	Charset       string      `json:"charset"`       // randomString: 字符集别名（lower/upper/alpha/numeric/alphanum）或自定义字符集
-	ExcludeSource string      `json:"excludeSource"` // randomExclude: 从 state 读取排除列表
-	Optional      bool        `json:"optional"`      // true = 即使 isRequired() 的类型也允许字段为空（跳过该字段）
-	Wrap          bool        `json:"wrap"`          // true = 赋值给 repeated 字段时将单值包装为 [val]
-	StoreAs       string      `json:"storeAs"`       // 将解析结果存入 state 的 key（中间变量，供后续 binding 通过 source 引用）
-	KeySource     string      `json:"keySource"`     // randomPickMap: 从 state 读取 map 的 key 列表
-	Condition     string      `json:"condition"`     // 可选条件表达式：不满足时跳过本绑定（state: 或 lua: 前缀）
+	Required      bool           `json:"required"`      // true = 字段缺失时动作报错（不再静默跳过）
+	Filters       []FilterDef    `json:"filters"`       // stateMapValue/stateMapKey: 过滤条件列表
+	Min           int            `json:"min"`           // randomInt/randomFloat: 最小值（含）
+	Max           int            `json:"max"`           // randomInt/randomFloat: 最大值（含）
+	Precision     int            `json:"precision"`     // randomFloat: 小数位数（默认 2）
+	Length        int            `json:"length"`        // randomString: 字符串长度
+	Count         int            `json:"count"`         // stateRandomN/randomPickN: 选取数量
+	Charset       string         `json:"charset"`       // randomString: 字符集别名（lower/upper/alpha/numeric/alphanum）或自定义字符集
+	ExcludeSource string         `json:"excludeSource"` // randomExclude: 从 state 读取排除列表
+	Optional      bool           `json:"optional"`      // true = 即使 isRequired() 的类型也允许字段为空（跳过该字段）
+	Wrap          bool           `json:"wrap"`          // true = 赋值给 repeated 字段时将单值包装为 [val]
+	StoreAs       string         `json:"storeAs"`       // 将解析结果存入 state 的 key（中间变量，供后续 binding 通过 source 引用）
+	KeySource     string         `json:"keySource"`     // randomPickMap: 从 state 读取 map 的 key 列表
+	Condition     string         `json:"condition"`     // 可选条件表达式：不满足时跳过本绑定（state: 或 lua: 前缀）
 }
 
 // isRequired 判断字段绑定是否为必需（缺失时触发动作跳过或报错）。
@@ -261,7 +275,7 @@ type StoreMapping struct {
 type ListenDef struct {
 	S2CProto string         `json:"s2cProto"` // 解析推送消息的 proto 全名
 	Store    []StoreMapping `json:"store"`    // 响应字段到 StateStore 的映射
-	Script   string         `json:"script"`   // Lua 回调脚本路径
+	Script   string         `json:"script"`   // 已废弃：listen 脚本回调不再支持
 }
 
 // Node 获取指定 ID 的节点

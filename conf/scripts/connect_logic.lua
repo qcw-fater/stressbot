@@ -1,4 +1,5 @@
--- connect_logic.lua: 连接逻辑服 TCP + 密钥交换 + 注册 5s 心跳
+-- connect_logic.lua: 连接逻辑服 TCP + 密钥交换
+-- 心跳已迁移到声明式 tcpHeartbeat action（RegisterLogicHeartbeat，flow.json），此处不再注册。
 local network = require("network")
 local robot = require("robot")
 local log = require("log")
@@ -29,15 +30,6 @@ function execute(r)
     end
     network.set_tcp_secret_key("logic", keyBody)
 
-    -- 注册 5 秒心跳（Logic: cmd=2 MAIN, act=1 SERVER_TIME_CS，空 body）
-    -- 不传 builder 参数 → 静态心跳，注册时一次性预编码，运行时零 Lua 开销。
-    local hbCode = network.register_tcp_heartbeat("logic", 5000, {cmd=2, act=1})
-    if hbCode ~= 0 then
-        log.error("逻辑服心跳注册失败: service=logic route=2:1 intervalMs=5000 address="
-            .. tostring(logicAddress) .. " code=" .. tostring(hbCode))
-        return hbCode
-    end
-
-    log.info("逻辑服连接成功: address=" .. tostring(logicAddress) .. " 心跳已注册(5s)")
+    log.info("逻辑服连接成功: address=" .. tostring(logicAddress))
     return 0
 end

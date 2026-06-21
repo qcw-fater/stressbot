@@ -26,8 +26,8 @@ import (
 //   - del / exists / expire 作用于「数据类型」全集（kv+counter+queue+hash），不含 claim
 //     （锁请用 release/renew）。即 share.del(key) 会清掉该 key 名下的所有数据形态。
 //
-// 阻塞型 Redis 调用一律通过 withReleasedMu 释放 luaMu，避免阻塞该 Robot 的
-// 心跳 / 解码 / 监听回调（与 network/utils 模块一致）。
+// 阻塞型 Redis 调用直接阻塞当前 Robot 主流程 goroutine；操作上下文继承
+// Robot 生命周期 ctx，并受共享状态 OpTimeout 限制。
 func loadShareModule(L *lua.LState) int {
 	mod := L.NewTable()
 
@@ -161,11 +161,9 @@ func shareSet(L *lua.LState) int {
 	ttl := optTTL(L, 3)
 
 	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		opCtx, cancel := opContext(ctx)
-		defer cancel()
-		err = ctx.Shared.Set(opCtx, key, value, ttl)
-	})
+	opCtx, cancel := opContext(ctx)
+	defer cancel()
+	err = ctx.Shared.Set(opCtx, key, value, ttl)
 	if err != nil {
 		return pushResult(L, lua.LFalse, err)
 	}
@@ -183,11 +181,9 @@ func shareGet(L *lua.LState) int {
 	var val any
 	var ok bool
 	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		opCtx, cancel := opContext(ctx)
-		defer cancel()
-		val, ok, err = ctx.Shared.Get(opCtx, key)
-	})
+	opCtx, cancel := opContext(ctx)
+	defer cancel()
+	val, ok, err = ctx.Shared.Get(opCtx, key)
 	if err != nil {
 		return pushResult3(L, lua.LNil, false, err)
 	}
@@ -206,11 +202,9 @@ func shareDel(L *lua.LState) int {
 	key := L.CheckString(1)
 
 	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		opCtx, cancel := opContext(ctx)
-		defer cancel()
-		err = ctx.Shared.Delete(opCtx, key)
-	})
+	opCtx, cancel := opContext(ctx)
+	defer cancel()
+	err = ctx.Shared.Delete(opCtx, key)
 	if err != nil {
 		return pushResult(L, lua.LFalse, err)
 	}
@@ -227,11 +221,9 @@ func shareExists(L *lua.LState) int {
 
 	var exists bool
 	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		opCtx, cancel := opContext(ctx)
-		defer cancel()
-		exists, err = ctx.Shared.Exists(opCtx, key)
-	})
+	opCtx, cancel := opContext(ctx)
+	defer cancel()
+	exists, err = ctx.Shared.Exists(opCtx, key)
 	if err != nil {
 		return pushResult(L, lua.LFalse, err)
 	}
@@ -249,11 +241,9 @@ func shareExpire(L *lua.LState) int {
 
 	var ok bool
 	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		opCtx, cancel := opContext(ctx)
-		defer cancel()
-		ok, err = ctx.Shared.Expire(opCtx, key, ttl)
-	})
+	opCtx, cancel := opContext(ctx)
+	defer cancel()
+	ok, err = ctx.Shared.Expire(opCtx, key, ttl)
 	if err != nil {
 		return pushResult(L, lua.LFalse, err)
 	}
@@ -274,11 +264,9 @@ func shareIncr(L *lua.LState) int {
 
 	var n int64
 	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		opCtx, cancel := opContext(ctx)
-		defer cancel()
-		n, err = ctx.Shared.Incr(opCtx, key, delta, ttl)
-	})
+	opCtx, cancel := opContext(ctx)
+	defer cancel()
+	n, err = ctx.Shared.Incr(opCtx, key, delta, ttl)
 	if err != nil {
 		return pushResult(L, lua.LNil, err)
 	}
@@ -299,11 +287,9 @@ func shareClaim(L *lua.LState) int {
 
 	var ok bool
 	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		opCtx, cancel := opContext(ctx)
-		defer cancel()
-		ok, err = ctx.Shared.Claim(opCtx, key, owner, ttl)
-	})
+	opCtx, cancel := opContext(ctx)
+	defer cancel()
+	ok, err = ctx.Shared.Claim(opCtx, key, owner, ttl)
 	if err != nil {
 		return pushResult(L, lua.LFalse, err)
 	}
@@ -321,11 +307,9 @@ func shareRelease(L *lua.LState) int {
 
 	var ok bool
 	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		opCtx, cancel := opContext(ctx)
-		defer cancel()
-		ok, err = ctx.Shared.Release(opCtx, key, owner)
-	})
+	opCtx, cancel := opContext(ctx)
+	defer cancel()
+	ok, err = ctx.Shared.Release(opCtx, key, owner)
 	if err != nil {
 		return pushResult(L, lua.LFalse, err)
 	}
@@ -343,11 +327,9 @@ func shareOwner(L *lua.LState) int {
 	var owner string
 	var ok bool
 	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		opCtx, cancel := opContext(ctx)
-		defer cancel()
-		owner, ok, err = ctx.Shared.Owner(opCtx, key)
-	})
+	opCtx, cancel := opContext(ctx)
+	defer cancel()
+	owner, ok, err = ctx.Shared.Owner(opCtx, key)
 	if err != nil {
 		return pushResult(L, lua.LNil, err)
 	}
@@ -369,11 +351,9 @@ func shareRenew(L *lua.LState) int {
 
 	var ok bool
 	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		opCtx, cancel := opContext(ctx)
-		defer cancel()
-		ok, err = ctx.Shared.Renew(opCtx, key, owner, ttl)
-	})
+	opCtx, cancel := opContext(ctx)
+	defer cancel()
+	ok, err = ctx.Shared.Renew(opCtx, key, owner, ttl)
 	if err != nil {
 		return pushResult(L, lua.LFalse, err)
 	}
@@ -393,11 +373,9 @@ func shareQueuePush(L *lua.LState) int {
 	ttl := optTTL(L, 3)
 
 	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		opCtx, cancel := opContext(ctx)
-		defer cancel()
-		err = ctx.Shared.QueuePush(opCtx, key, value, ttl)
-	})
+	opCtx, cancel := opContext(ctx)
+	defer cancel()
+	err = ctx.Shared.QueuePush(opCtx, key, value, ttl)
 	if err != nil {
 		return pushResult(L, lua.LFalse, err)
 	}
@@ -415,11 +393,9 @@ func shareQueuePop(L *lua.LState) int {
 	var val any
 	var ok bool
 	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		opCtx, cancel := opContext(ctx)
-		defer cancel()
-		val, ok, err = ctx.Shared.QueuePop(opCtx, key)
-	})
+	opCtx, cancel := opContext(ctx)
+	defer cancel()
+	val, ok, err = ctx.Shared.QueuePop(opCtx, key)
 	if err != nil {
 		return pushResult3(L, lua.LNil, false, err)
 	}
@@ -439,11 +415,9 @@ func shareQueueLen(L *lua.LState) int {
 
 	var n int64
 	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		opCtx, cancel := opContext(ctx)
-		defer cancel()
-		n, err = ctx.Shared.QueueLen(opCtx, key)
-	})
+	opCtx, cancel := opContext(ctx)
+	defer cancel()
+	n, err = ctx.Shared.QueueLen(opCtx, key)
 	if err != nil {
 		return pushResult(L, lua.LNil, err)
 	}
@@ -461,11 +435,9 @@ func shareQueueExpire(L *lua.LState) int {
 
 	var ok bool
 	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		opCtx, cancel := opContext(ctx)
-		defer cancel()
-		ok, err = ctx.Shared.QueueExpire(opCtx, key, ttl)
-	})
+	opCtx, cancel := opContext(ctx)
+	defer cancel()
+	ok, err = ctx.Shared.QueueExpire(opCtx, key, ttl)
 	if err != nil {
 		return pushResult(L, lua.LFalse, err)
 	}
@@ -486,11 +458,9 @@ func shareHashSet(L *lua.LState) int {
 	ttl := optTTL(L, 4)
 
 	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		opCtx, cancel := opContext(ctx)
-		defer cancel()
-		err = ctx.Shared.HashSet(opCtx, key, field, value, ttl)
-	})
+	opCtx, cancel := opContext(ctx)
+	defer cancel()
+	err = ctx.Shared.HashSet(opCtx, key, field, value, ttl)
 	if err != nil {
 		return pushResult(L, lua.LFalse, err)
 	}
@@ -509,11 +479,9 @@ func shareHashGet(L *lua.LState) int {
 	var val any
 	var ok bool
 	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		opCtx, cancel := opContext(ctx)
-		defer cancel()
-		val, ok, err = ctx.Shared.HashGet(opCtx, key, field)
-	})
+	opCtx, cancel := opContext(ctx)
+	defer cancel()
+	val, ok, err = ctx.Shared.HashGet(opCtx, key, field)
 	if err != nil {
 		return pushResult3(L, lua.LNil, false, err)
 	}
@@ -534,11 +502,9 @@ func shareHashGetAll(L *lua.LState) int {
 	var m map[string]any
 	var ok bool
 	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		opCtx, cancel := opContext(ctx)
-		defer cancel()
-		m, ok, err = ctx.Shared.HashGetAll(opCtx, key)
-	})
+	opCtx, cancel := opContext(ctx)
+	defer cancel()
+	m, ok, err = ctx.Shared.HashGetAll(opCtx, key)
 	if err != nil {
 		return pushResult(L, lua.LNil, err)
 	}
@@ -562,11 +528,9 @@ func shareHashDel(L *lua.LState) int {
 	field := L.CheckString(2)
 
 	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		opCtx, cancel := opContext(ctx)
-		defer cancel()
-		err = ctx.Shared.HashDelete(opCtx, key, field)
-	})
+	opCtx, cancel := opContext(ctx)
+	defer cancel()
+	err = ctx.Shared.HashDelete(opCtx, key, field)
 	if err != nil {
 		return pushResult(L, lua.LFalse, err)
 	}
@@ -586,11 +550,9 @@ func shareHashIncr(L *lua.LState) int {
 
 	var n int64
 	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		opCtx, cancel := opContext(ctx)
-		defer cancel()
-		n, err = ctx.Shared.HashIncr(opCtx, key, field, delta, ttl)
-	})
+	opCtx, cancel := opContext(ctx)
+	defer cancel()
+	n, err = ctx.Shared.HashIncr(opCtx, key, field, delta, ttl)
 	if err != nil {
 		return pushResult(L, lua.LNil, err)
 	}
@@ -608,11 +570,9 @@ func shareHashExpire(L *lua.LState) int {
 
 	var ok bool
 	var err error
-	withReleasedMu(ctx.LuaMu, func() {
-		opCtx, cancel := opContext(ctx)
-		defer cancel()
-		ok, err = ctx.Shared.HashExpire(opCtx, key, ttl)
-	})
+	opCtx, cancel := opContext(ctx)
+	defer cancel()
+	ok, err = ctx.Shared.HashExpire(opCtx, key, ttl)
 	if err != nil {
 		return pushResult(L, lua.LFalse, err)
 	}

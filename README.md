@@ -15,7 +15,7 @@ stressbot/
 ├── cmd/
 │   ├── agent/            主程序入口（单机模式 / Agent 模式）
 │   └── web/              前端可视化编辑器（React + Vite）
-├── adapter/              协议适配器接口 + Lua 桥接（消息编解码、帧分割、错误码映射）
+├── adapter/              协议适配器接口 + 声明式 codec 引擎（CodecResolver / SchemaAdapter + codec/ Go 编解码、帧分割、错误码映射）
 ├── errcode/              统一错误码定义（框架错误码 + Kind 分类）
 ├── admin/                Admin 服务器（分布式调度、历史归档、前端托管）
 ├── agent/                Agent 节点（注册到 Admin、执行下发任务）
@@ -33,7 +33,8 @@ stressbot/
     ├── flow/
     │   └── flow.json     流程图与动作（声明式）
     ├── adapter/
-    │   └── codec.lua     协议适配器脚本（消息头编解码）
+    │   ├── <proto>_<service>_codec.json  声明式 codec 配置（每连接一份）
+    │   └── errors.json                   共享错误码描述（可选）
     ├── proto/            .proto 文件（动态加载）
     └── scripts/          Lua 脚本（复杂行为）
 ```
@@ -351,27 +352,36 @@ Executor 遍历节点图 → 命中 action 节点
 
 ## 心跳
 
-每个 TCP/UDP 连接可独立注册心跳。通过 Lua API 注册，支持两种模式：
+每个 TCP/UDP 连接可独立注册声明式心跳。通过 `tcpHeartbeat` / `udpHeartbeat` 动作配置，心跳包体在 Go 侧按 `heartbeatFields` 布局构造；运行时不调用业务 Lua，主流程阻塞等待时心跳仍会继续发送。
 
-### 静态心跳（推荐，body 固定为空）
+### 静态心跳（body 固定为空）
 
-不传 `builder` 参数，注册时一次性预编码包体。运行时零 Lua 调用、零 luaMu 竞争，适用于大部分游戏服务器心跳。
+`heartbeatFields` 为空时发送空 body，适用于大部分游戏服务器心跳。
 
-```lua
-network.register_tcp_heartbeat("logic", 5000, {cmd=2, act=1})
-network.register_udp_heartbeat("game", 3000, {cmd=1, act=1})
+```json
+{
+  "pattern": "tcpHeartbeat",
+  "service": "logic",
+  "route": {"cmd": 2, "act": 1},
+  "intervalMs": 5000
+}
 ```
 
 ### 动态心跳（body 每次变化）
 
-传入 `builder` 函数，每次 tick 调用构造 body。适用于需要递增序号、携带变化字段的心跳。
+需要递增序号、状态字段、时间戳或随机值时，使用 `heartbeatFields` 声明二进制布局，由后台心跳循环按字段来源构造 body。
 
-```lua
-network.register_tcp_heartbeat("battle", 10000, {cmd=4, act=2}, function()
-    local idx = robot.increment("packetIndex") % 65536
-    return utils.pack_le("u16", idx)
-        .. utils.pack_le("i64", robot.get("battleId") or 0)
-end)
+```json
+{
+  "pattern": "tcpHeartbeat",
+  "service": "battle",
+  "route": {"cmd": 4, "act": 2},
+  "intervalMs": 10000,
+  "heartbeatFields": [
+    {"type": "counter", "format": "u16", "key": "packetIndex", "mod": 65536},
+    {"type": "state", "format": "i64", "source": "battleId"}
+  ]
+}
 ```
 
 关闭连接时心跳自动停止；重复注册会替换旧心跳。
@@ -389,36 +399,32 @@ end)
 
 ## Adapter 接口
 
+Adapter 接口不变（9 方法），但实现已全 Go 化：`adapter/codec_resolver.go` 的 `CodecResolver` 按 `"<proto>:<service>"` 解析到对应 `SchemaAdapter`，后者包装 `codec/` 引擎读写声明式 schema。
+
 | 方法                              | 说明                                                     |
 | -------------------------------- | ------------------------------------------------------- |
-| `HeaderSize() int`                | 消息头固定字节数（初始化时缓存，运行时零 Lua 调用）        |
-| `BodyLength(header) int`          | 从消息头解析 body 长度（纯 Go 实现，热路径零 Lua 调用）    |
+| `HeaderSize() int`                | 消息头固定字节数（初始化时缓存，热路径零额外开销）          |
+| `BodyLength(header) int`          | 从消息头解析 body 长度（纯 Go，热路径零额外开销）          |
 | `EncodeTCP(route, body, key)`     | 编码 TCP 数据包（含消息头）                               |
 | `EncodeUDP(route, body, key)`     | 编码 UDP 数据包（含 UDP 偏移加密）                         |
 | `DecodeTCP(data, key)`            | 解码 TCP 数据包 → 路由键 + 消息体 + 错误码                 |
 | `DecodeUDP(data, key)`            | 解码 UDP 数据包 → 路由键 + 消息体 + 错误码                 |
 | `ExpectedRouteKey(route)`         | 从发送路由计算期望的响应路由键                              |
-| `Close()`                         | 释放资源（Lua 状态池）                                     |
-| `DescribeError(code)`             | 将服务端错误码映射为可读描述（需 `error.lua`）              |
+| `Close()`                         | 释放资源                                                   |
+| `DescribeError(code)`             | 将服务端错误码映射为可读描述（读取共享 `errors.json`）        |
 
-## Lua 脚本要求
+## 声明式 codec 配置（`<proto>_<service>_codec.json`）
 
-适配器脚本须提供 **7 个必需函数**：
+每条命名连接对应一份 codec 配置，由 `CodecResolver` 按 `"<proto>:<service>"` 解析、`SchemaAdapter` 包装 `codec/` Go 引擎驱动编解码。核心字段：
 
-| 函数                       | 说明                                                        |
-| ------------------------- | ----------------------------------------------------------- |
-| `header_size()`            | 返回消息头固定字节数                                         |
-| `body_length()`            | 返回 `{offset, field_type, includes_header}` 元信息          |
-| `encode_tcp(route, body, key)` | 编码 TCP 包（含头），返回二进制字符串                    |
-| `encode_udp(route, body, key)` | 编码 UDP 包（含头 + 偏移加密），返回二进制字符串         |
-| `decode_tcp(data, key)`    | 解码 TCP → `{route_key, body, header_err}`                  |
-| `decode_udp(data, key)`    | 解码 UDP → `{route_key, body, header_err}`                  |
-| `expected_route_key(route)`    | 计算期望响应路由键，返回字符串                            |
+- `header`：消息头字段布局，每个字段带 `name` / `size` / `role`（如 `route` / `length` / `flags` / `checksumOut` / `value` / `errorCode` / `reserved`）。
+- `frame`：帧参数（`lengthIncludesHeader` / `lengthIncludesTrailer` 等），决定 `length` 字段的字节范围。
+- `routeKeyTemplate`：路由键模板，如 `"{cmd}:{act}"`，占位符对应 `role:"route"` 字段。
+- `pipeline`：encode/decode 管线步骤数组（每步 `op` + `algo` + `params` + `produces`）；decode 由后端自动反序执行。
+- `encrypt.offset.{encode,decode}`：单向偏移加密配置（如 `udp:battle` 发送偏移 11、接收偏移 0），前 N 字节保持明文供服务端查密钥表。
+- 共享 `errors.json`：`DescribeError` 读取，把服务端错误码映射为中文描述。
 
-`body_length` 说明：
-- `offset`：body 长度字段在 header 中的字节偏移
-- `field_type`：`"u16"` / `"u32"` / `"i16"` / `"i32"`
-- `includes_header`：body 长度是否包含 header 本身
+> 旧版 `codec.lua`（7 个必需函数）/ `error.lua` 仅保留为 T1 一致性测试的 oracle，不再参与生产编解码路径。
 
 ---
 
@@ -479,10 +485,7 @@ end)
 
 ### 心跳
 
-| 函数                                                    | 说明                          |
-| ------------------------------------------------------ | ---------------------------- |
-| `register_tcp_heartbeat(service, intervalMs, route [, builder])` | 注册 TCP 心跳       |
-| `register_udp_heartbeat(service, intervalMs, route [, builder])` | 注册 UDP 心跳       |
+旧的 Lua 心跳注册接口已移除；请在流程动作中使用 `tcpHeartbeat` / `udpHeartbeat` 声明式心跳。
 
 ## robot（11 函数）
 
@@ -532,7 +535,7 @@ end)
 | `shuffle(arr)`                           | 原地洗牌（Fisher-Yates）                     |
 | `pack_le(format, ...)`                   | 小端二进制打包（`u8/i8/u16/i16/u32/i32/u64/i64/f32/f64`） |
 | `unpack_le(data, fmt1, ...)`             | 小端二进制解包，大整数超 2^53 以字符串返回    |
-| `sleep(ms)`                              | 毫秒休眠（释放 Lua 锁）                      |
+| `sleep(ms)`                              | 毫秒休眠（响应取消，仅暂停当前机器人主流程）   |
 | `time_ms()`                              | 当前时间戳（毫秒）                           |
 | `fnv_hash(str)`                          | FNV-1a 64 位哈希（返回 hex 字符串）          |
 
@@ -629,10 +632,6 @@ pending → starting → running → stopping → stopped
       "mainService": "logic"
     },
     "stateExtra": { "key": "value" },
-    "adapter": {
-      "script": "conf/adapter/codec.lua",
-      "poolSize": 4
-    },
     "network": {
       "heartbeatInterval": "5s",
       "tcpTimeout": "60s",
@@ -650,6 +649,8 @@ pending → starting → running → stopping → stopped
   "agent": { "enabled": false }
 }
 ```
+
+> codec 配置：单机模式从 `<adapter 目录>/` 下的 `<proto>_<service>_codec.json`（每连接一份）+ 共享 `errors.json` 自动加载，经 `CodecResolver` 按 `"<proto>:<service>"` 解析后由 `SchemaAdapter` 驱动 `codec/` Go 引擎编解码。`codec.lua`/`error.lua` 仅保留为 T1 一致性测试 oracle，不再参与生产路径。
 
 ### Agent 模式示例
 
@@ -681,13 +682,12 @@ pending → starting → running → stopping → stopped
     "registerRetryMaxInterval": "60s",
     "maxHeartbeatFailures": 0,
     "taskRunAdminLostExit": false,
-    "taskWorkDir": "",
-    "adapterScript": "conf/adapter/codec.lua"
+    "taskWorkDir": ""
   }
 }
 ```
 
-Agent 模式不需要 `standalone` 段 — 运行时参数由 Admin 通过 `TaskAssignment` 下发。
+Agent 模式不需要 `standalone` 段 — 运行时参数由 Admin 通过 `TaskAssignment` 下发；codec 配置（各 `*_codec.json` + `errors.json`）随任务资源一起下发，Agent 侧经 `CodecResolver` 解析，不再读取 `adapterScript`。
 
 ### 启动策略
 
@@ -755,14 +755,14 @@ Agent 模式不需要 `standalone` 段 — 运行时参数由 Admin 通过 `Task
 |------|------|------|
 | Proto 文件 | `conf/proto/` | 动态加载，支持全名和短名查找 |
 | Lua 脚本 | `conf/scripts/` | 启动时预编译，通过 `lua:` 引用 |
-| 协议适配器 | `conf/adapter/codec.lua` | 7 个必需函数 |
-| 错误码映射 | `conf/adapter/error.lua` | 可选，提供 `describe_error(code)` 函数 |
+| 声明式 codec 配置 | `conf/adapter/<proto>_<service>_codec.json` | 每连接一份；`CodecResolver` 按 `"<proto>:<service>"` 解析，`SchemaAdapter` 包装 `codec/` Go 引擎 |
+| 错误码描述 | `conf/adapter/errors.json` | 共享；`DescribeError` 读取此文件映射服务端错误码 |
 
 ## 资源编辑器（前端 ResourcesDrawer）
 
 - **Proto tab**：上传 / 编辑 / 删除 / 清空 + Monaco 编辑器
 - **Lua tab**：同上
-- **Adapter tab**：内嵌 Monaco + 载入模板 / 导入文件 / 保存 / 7 函数校验 + 接口规范说明
+- **Adapter tab**：按连接编辑多份 `<proto>_<service>_codec.json` + 共享 `errors.json`；结构化视图（帧布局 / 管线 / 路由键模板编辑器）+ 源码 Monaco 切换 + 预览（调后端真实 codec 引擎跑一次 encode/decode）+ schema 校验
 
 ## 基线同步
 
@@ -790,7 +790,7 @@ Agent 模式不需要 `standalone` 段 — 运行时参数由 Admin 通过 `Task
 
 ### 持久化监听
 
-`listenResp` 注册回调 → `listenCh`（cap 128）缓冲 → `listenLoop` goroutine 分发 → 回调执行。
+connectionPump 解码后按 routeKey 分发：优先唤醒一次性请求响应，其次写入监听队列并执行可选 Go-store 回调；没有匹配项则丢弃。
 
 ### 帧解析
 
@@ -835,7 +835,7 @@ gnet `OnTraffic`：peek header → `BodyLength()` 纯 Go 计算 → read frame �
 
 ### 优雅关闭
 
-`CloseAll` → 等所有 `listenLoop` 退出 → 并行 Close + Wait。
+`CloseAll` → 取消连接上下文并等待 connectionPump 退出 → 并行 Close + Wait。
 
 ---
 
@@ -1030,7 +1030,7 @@ Admin (:8080) ← 多 Agent (:7070) → 目标游戏服务器
 | 51–60 | Lua 层 | `LuaNotInit` / `LuaNoScript` / `LuaExecFailed` / `LuaExitCode` |
 | 61–70 | 回调层 | `CallbackLua` / `CallbackParse` |
 
-监控错误分布按 `(Kind, Code)` 聚合，不再按消息字符串。前端 `ErrorsTab` 按 `Kind` 分组展示，服务端错误码可通过 `error.lua` 映射为可读描述。
+监控错误分布按 `(Kind, Code)` 聚合，不再按消息字符串。前端 `ErrorsTab` 按 `Kind` 分组展示，服务端错误码可通过共享 `errors.json` 映射为可读描述。
 
 ## 前端监控面板
 

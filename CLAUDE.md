@@ -20,7 +20,7 @@ go run ./cmd/agent -config conf/config.json
 #   -flow <file>     流程配置（默认 <conf>/flow/flow.json）
 #   -proto <dir>     proto 目录（默认 <conf>/proto）
 #   -scripts <dir>   Lua 脚本目录（默认 <conf>/scripts）
-#   -adapter <dir>   适配器目录，含 codec.lua 与可选 error.lua（默认 <conf>/adapter）
+#   -adapter <dir>   适配器目录，含各 *_codec.json 与可选 errors.json（默认 <conf>/adapter）
 # 示例：切换压测场景无需挪文件
 go run ./cmd/agent -config conf/config.json -flow conf/flow/rank.json
 
@@ -36,7 +36,7 @@ cd cmd/web && npm run test                 # Vitest
 ## 运行模式
 
 ### 单机模式（standalone）
-`agent.enabled=false`，单个进程完成全部工作：加载配置 → Lua 协议适配器 → .proto 文件 → 流程配置 → 启动 gnet 网络引擎 → 创建 Lua 运行时池 → 创建 Robot Manager → 批量启动机器人。
+`agent.enabled=false`，单个进程完成全部工作：加载配置 → 声明式 codec 配置（`*_codec.json` + `errors.json`）→ .proto 文件 → 流程配置 → 启动 gnet 网络引擎 → 创建 Lua 运行时池 → 创建 Robot Manager → 批量启动机器人。
 
 ### Agent 模式（distributed）
 `agent.enabled=true`，Agent 注册到 Admin → 接收任务 → 下载配置 → 执行。Admin 负责任务调度、Agent 管理、指标聚合、历史归档。
@@ -50,11 +50,11 @@ cd cmd/web && npm run test                 # Vitest
 
 - **`engine/`** — 流程执行引擎。`TaskFlow`（节点 DAG）、`ActionDef`（16 种 pattern 的声明式动作）、`Executor`（节点图遍历）、`ActionExecutor`（消息构建/发送/接收/存储）、条件解析器（`cond_eval.go` + `cond_parser.go`，支持 `&&`/`||`/`!`/括号嵌套）。`Executor` 通过 `ActionHandler` 接口委托实际工作，与 network/robot 层解耦。
 - **`robot/`** — `Robot` 是单个压测客户端实例，持有独立的 state、网络连接、Lua 运行时和执行器。`Manager` 负责批量创建（`StartAll`）和渐进加压（`StartWithRampUp`，分阶段增加机器人数量和并发度）。`robotActionHandler` 实现 `engine.ActionHandler`，桥接 engine 层与 network 层。
-- **`network/`** — 基于 gnet 的 TCP/UDP 连接层。`Client` 管理多服务命名连接池。`Connection` 处理收发、请求-响应匹配（responseMap + buffered channel + 超时 select）、持久化监听（listenCh + listenLoop goroutine + 回调分发）、per-connection 心跳。`Dialer` 封装 gnet 事件循环。
+- **`network/`** — 基于 gnet 的 TCP/UDP 连接层。`Client` 管理多服务命名连接池。`Connection` 处理收发、请求-响应匹配（responseMap + buffered channel + 超时 select）、持久化监听队列/Go 回调分发、per-connection 声明式心跳。`Dialer` 封装 gnet 事件循环。
 - **`protox/`** — 动态 protobuf 加载与反射。`Loader` 发现 .proto 文件，`Registry` 编译，`Factory` 按全名在运行时创建/序列化/解析消息。
-- **`script/`** — Lua 运行时池（`gopher-lua`）。每个 Robot 获取独占 `LState`。7 个模块共 68 个函数：`network`（22）、`robot`（11）、`utils`（15）、`proto`（9）、`adapter`（5，内嵌于 `api_network.go`）、`json`（2）、`log`（4）。Lua 访问通过 `luaMu` 互斥锁串行化。
+- **`script/`** — Lua 运行时池（`gopher-lua`）。每个 Robot 获取独占 `LState`，由主流程同步执行业务 Lua；阻塞型 Lua API 只暂停当前 Robot 主流程，connectionPump 与 Go-only 心跳继续独立运行。6 个模块共 63 个函数：`network`（20）、`robot`（11）、`utils`（15）、`proto`（9）、`json`（2）、`log`（4）、`share`（2）。
 - **`state/` — 线程安全的键值状态存储（RWMutex）。保存服务器响应字段（通过 `store` 映射），支持 list/map 操作用于随机选取。`CompareValues` 支持 10 种过滤运算符。
-- **`adapter/` — 协议适配器接口（9 方法）。热路径帧解析（`HeaderSize`/`BodyLength`）纯 Go 缓存，编解码通过 Lua 池调用 `codec.lua`。
+- **`adapter/` — 协议适配器接口（9 方法）。热路径帧解析（`HeaderSize`/`BodyLength`）纯 Go 缓存，编解码由 `CodecResolver` 按 `"<proto>:<service>"` 解析、`SchemaAdapter` 包装 `codec/` Go 引擎驱动，配置来自 `conf/adapter/<proto>_<service>_codec.json`（每连接一份）。
 - **`admin/` — Admin 服务器（16 文件）。任务调度（TaskStore 状态机 + 单例约束 + 持久化）、Agent 管理（注册/心跳/健康检查/unhealthy→offline/离线清理）、指标聚合（MergeSnapshots）、时序采样（Sampler）、历史归档（SQLite 6 表）、任务分配（proportional/debug-single）、Agent RPC 调度、前端静态托管。51 个 HTTP API 端点。
 - **`agent/` — Agent 节点（8 文件）。注册到 Admin（指数退避）→ 心跳循环 → 任务轮询 → TaskRunner 执行（下载配置 → 加载适配器 → 编译 proto → 构建流程 → Manager → 启动机器人）→ 指标上报 + 系统资源上报。本地 HTTP API（task/stop/shutdown/version/status/logs）。
 - **`monitor/` — 指标采集。原子计数器（热路径零锁：成功/失败/超时/取消/执行中/字节数）、延迟直方图（16 桶 1ms~60s+，P50/P90/P95/P99，**仅纯网络往返**，不含客户端构建/解析）、Apdex 评分（阈值 T 可配，分母为 netSampleCount）、客户端开销独立列（`ClientAvgMs`）、分布式聚合。`RecordAction(name, result, netLatency, clientCost, netSamples, send, recv, err)`：netSamples=0 的纯客户端动作不进直方图但 successCount 仍计数。错误按 `(Kind, Code)` 聚合（`Kind=framework` 框架错误 / `Kind=server` 服务端错误），保留最近 3 条详情。导出：Console / HTTP JSON / CSV / pprof。
@@ -66,7 +66,7 @@ cd cmd/web && npm run test                 # Vitest
 
 1. `Executor` 遍历流程图 → 命中 `action` 节点 → 调用 `ActionHandler.ExecuteAction(actionDef)`
 2. 声明式动作：`ActionExecutor` 构建 protobuf 消息（从 state/随机源解析字段绑定）→ 序列化 → adapter 编码消息头 → gnet 发送 → 接收响应 → adapter 解码 → 解析 S2C proto → 存储字段到 state
-3. Lua 动作（`pattern: "lua"`）：获取 `luaMu` → 通过 `RuntimePool` 执行脚本 → 返回 0 表示成功
+3. Lua 动作（`pattern: "lua"`）：当前 Robot 主流程通过 `RuntimePool` 同步执行脚本 → 返回 0 表示成功；等待网络/休眠时只阻塞该主流程，连接收包与声明式心跳由 Go goroutine 独立推进
 
 ### 前端技术栈
 
@@ -80,7 +80,7 @@ React 18 / Vite 5 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 - `conf/agent-config.json` — Agent 模式精简配置：仅 `log`/`monitor`/`agent`（无 standalone 段，运行时由 Admin 下发）
 - `conf/admin-config.json` — Admin 服务器配置：listenAddr、agentRegistry、task、history（SQLite）、log
 - `conf/flow/flow.json` — 流程图（`defaultDelayMs` + `nodes` + `actions` + `listens`）— 主要配置产物
-- `conf/adapter/codec.lua` — 协议适配器脚本（7 个必需 Lua 函数）
+- `conf/adapter/<proto>_<service>_codec.json` — 每连接一份的声明式 codec 配置；共享 `errors.json` 提供错误码描述。`codec.lua`/`error.lua` 仅保留为 T1 一致性测试的 oracle，非生产路径。
 - `conf/proto/` — 启动时动态加载的 `.proto` 文件
 - `conf/scripts/` — 复杂行为的 Lua 脚本
 
@@ -125,7 +125,7 @@ React 18 / Vite 5 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 
 - `flow.json` 的 nodes 按 ID 反序列化为 `map[string]*Node`。
 - Adapter 接口 9 方法（含 `DescribeError`）。`DecodeTCP` 和 `DecodeUDP` 独立方法。
-- UDP 加密使用偏移量部分加密：前 N 字节（由 `codec.lua` 的 `encrypt.udpOffset` 配置，默认 11）保持明文供服务端查密钥表，剩余部分加密。
+- UDP 加密使用偏移量部分加密：前 N 字节保持明文供服务端查密钥表，剩余部分加密。偏移量由 `<proto>_<service>_codec.json` 的 `encrypt.offset.{encode,decode}` 单向配置（如 `udp:battle` 发送偏移 11、接收偏移 0）。
 - 默认节点延迟由 `TaskFlow.DefaultDelayMs` 控制。`delayMs: -1` 禁用，`delayMs: 0` 使用 defaultDelayMs。
 - `errorStrategy` 控制动作失败行为：`"abort"` 中断流程，`"skip"` 跳过当前节点继续，空或其他值静默忽略。
 - 任务状态机：`pending → starting → running → stopping → stopped / failed`。单例约束：同一时刻只能有一个活跃任务。
