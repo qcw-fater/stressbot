@@ -2,9 +2,9 @@
  * RoleLinkedForm — 选中字段的 role 联动表单。
  *
  * 按 role 显示不同输入：
- *   - route：只读提示（routeKey 模板编辑器在 B2-B）。
+ *   - route：只读提示（routeKey 模板编辑见同面板 RouteKeyEditor 卡片）。
  *   - flags：命名位编辑器（bits:[{name,bit}]，bit∈[0,size*8) 客户端提示）。
- *   - checksumOut：from 输入（<step>.<output>，pipeline 在 B2-B 才有编辑器，先给文本 + 格式提示）。
+ *   - checksumOut：from 输入（<step>.<output>，指向 pipeline 某步 produces 的产物；管线编辑见同面板 PipelineEditor 卡片）。
  *   - value：source.kind 下拉（v1 仅 const/route 可选；state/counter/timestamp 置灰标 v1.1）+ const→value 数字、route→key 文本。
  *   - errorCode：提示（绑定后启用服务端错误码识别与 errors.json）。
  *   - length / reserved：无额外配置。
@@ -38,7 +38,7 @@ export function RoleLinkedForm({ schema, fieldIndex, field, raw, onEdit }: RoleL
     <Card size="small" title={`字段「${fieldName}」的 role 配置`} styles={{ body: { padding: 12 } }}>
       {field.role === 'route' && (
         <Typography.Text type="secondary">
-          该字段参与 routeKeyTemplate 占位（<code>{schema.routeKeyTemplate ?? ''}</code>）。模板编辑器在后续版本提供。
+          该字段参与 routeKeyTemplate 占位（<code>{schema.routeKeyTemplate ?? ''}</code>）。模板编辑见下方「路由键模板」卡片。
         </Typography.Text>
       )}
 
@@ -53,7 +53,7 @@ export function RoleLinkedForm({ schema, fieldIndex, field, raw, onEdit }: RoleL
       {field.role === 'checksumOut' && (
         <Space direction="vertical" size={4}>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            from：填 <code>{'<step>.<output>'}</code>，指向 pipeline 某步 produces 的产物（pipeline 编辑器在后续版本提供）。
+            from：填 <code>{'<step>.<output>'}</code>，指向 pipeline 某步 produces 的产物（见下方「管线」卡片）。
           </Typography.Text>
           <input
             className="flet-input"

@@ -127,7 +127,9 @@
 | B4-B | routeKey 从 refsGraph JSON 排序伪 key 改为按 codec.json routeKeyTemplate 真实计算（listen 去重/校验更准）；协议配置缺失/有误时提示不静默伪 key。 | ✅ done（review clean；computeRouteKey/loadRouteKeyTemplates 正确、server 感知 routeKey + ROUTEKEY_CODEC_MISSING 不静默 warning、cache 失效 subscribe→refresh 已验。Important fix：cache 加载后未推 React 信号致 warning 残留——加 editorStore.routeKeyTemplatesVersion + bump，ValidationReport/Toolbar useMemo 加依赖） |
 | B4-C | 删 luaApiSpec adapterModule + LuaApiPopover adapter 项 + 清 adapter.expected_route_key stale 文案 + 测试同步；README/术语清理。 | ✅ done（controller 核验：grep adapterModule/expected_route_key 清零、adapterModule 已删、287 测试绿；保留内部 adapter 命名/历史注释非 stale） |
 
-**🏁 Batch 4 完成（2026-06-21，待用户确认提交）= T3 全轨完成**：FlowEditor 追平 T2（queueSize/心跳动作/禁 script）、routeKey 真实计算（codec.json routeKeyTemplate）、Lua 文档清理。前端 tsc exit 0 + vitest 287/287。Batch 4 纯前端。**T3 四批（Batch 1-4）全部完成**，下一步 = whole-branch review（整条 T3 跨切片集成）→ 合流 master（单独确认）。
+**🏁 Batch 4 完成（2026-06-21，待用户确认提交）= T3 全轨完成**：FlowEditor 追平 T2（queueSize/心跳动作/禁 script）、routeKey 真实计算（codec.json routeKeyTemplate）、Lua 文档清理。前端 tsc exit 0 + vitest 287/287。Batch 4 纯前端。**T3 四批（Batch 1-4）全部完成**。
+
+**✅ whole-branch review 完成（2026-06-21）**：3 维度并行（契约一致✅ / T3 内部集成自洽✅ / 合并就绪）。发现 1 阻塞（CLAUDE.md+README.md+docs/visual-flow-editor.md 残留 stale codec.lua/error.lua 生产路径表述，T2-D/T3-B4-C 标「文档同步」但漏扫）+ 2 用户面必修（ListenEditor 'lua' 死分支、RoleLinkedForm stale「后续版本提供」提示）→ 已修（commit `见下`）：文档对齐声明式 codec 现状、删死分支、改提示。go build/tsc/287 测试全绿，grep 用户面 stale 清零（剩余皆明确标注「测试 oracle/旧/迁移」的历史注释）。**branch merge-ready**。14 条 Minor 全 defer（见各批 review）。**下一步 = 合流 master（单独确认）**。详见 `reports/t3-wholebranch-review.md`。
 
 ## 完成记录
 

@@ -139,7 +139,7 @@ cmd/web/src/
 │       │   └── protoStore.ts           # 加载状态 zustand store
 │       │
 │       ├── adapter/
-│       │   └── CodecAdapterDrawer.tsx  # codec.lua 编辑器
+│       │   └── CodecAdapterDrawer.tsx  # 声明式 codec.json 编辑器（每连接一份 + 共享 errors.json）
 │       │
 │       ├── preview/
 │       │   └── JsonPreviewModal.tsx    # flow.json 预览
@@ -863,7 +863,7 @@ interface ProtoStoreState {
 |---|---|---|
 | `stressbot-resources-proto` | `data` | 用户上传的 .proto |
 | `stressbot-resources-scripts` | `data` | 用户上传的 .lua |
-| `stressbot-resources-adapter` | `data` | codec.lua / error.lua |
+| `stressbot-resources-adapter` | `data` | 各 `*_codec.json` + 共享 `errors.json` |
 
 ---
 

@@ -163,7 +163,7 @@ export function ListenEditor() {
       />
 
       <Tabs
-        activeKey={selectedKind === 'lua' ? 'silent' : selectedKind}
+        activeKey={selectedKind}
         onChange={(k) => switchKind(k as ListenKind)}
         items={[
           {
