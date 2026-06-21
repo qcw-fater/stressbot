@@ -76,7 +76,9 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
       defaultDelayMs: s.defaultDelayMs,
     })),
   );
-  const validation = useMemo(() => validateFlow(flowSnap), [flowSnap]);
+  // routeKey 模板缓存版本：cache 加载/刷新时 bump，触发重算（与 ValidationReport 对齐）。
+  const routeKeyTemplatesVersion = useEditorStore((s) => s.routeKeyTemplatesVersion);
+  const validation = useMemo(() => validateFlow(flowSnap), [flowSnap, routeKeyTemplatesVersion]);
   const errorCount = validation.errors.length;
   const warnCount = validation.warnings.length;
 

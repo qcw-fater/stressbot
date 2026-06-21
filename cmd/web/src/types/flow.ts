@@ -66,11 +66,14 @@ export interface WeightedOption {
  * - route 为不透明结构，最常见 `{cmd, act}`，但允许任意 JSON 形态
  * - server 形如 `tcp:logic` / `udp:battle`
  * - listen 为 listens 表的 key；null = 静默丢弃（连 listen {} 都不调用）
+ * - queueSize 监听缓存队列容量（镜像 Go ListenRef.QueueSize *int）：
+ *   未写（undefined）→ 默认 1；显式 >0 → 按该值；显式 <=0 → 校验报错（不静默 clamp）。
  */
 export interface ListenRef {
   route: unknown;
   server: string;
   listen: string | null;
+  queueSize?: number;
 }
 
 /** TaskFlow：编辑器主数据模型，1:1 对应 flow.json。 */

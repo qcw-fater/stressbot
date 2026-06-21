@@ -23,7 +23,8 @@ import { App as AntApp, ConfigProvider } from 'antd';
 import { useFlowStore } from './store/flowStore';
 import { useFloatingWindowStore } from './store/floatingWindowStore';
 import { useProtoStore } from './proto/protoStore';
-import { collectCodecSchemaErrors } from '@/services/resourcesStore';
+import { collectCodecSchemaErrors, subscribe as subscribeResources } from '@/services/resourcesStore';
+import { refreshRouteKeyTemplates } from './listens/routeKeyResolver';
 import { fetchBaselineFlow } from '@/services/baselineApi';
 import { useEditorStore } from './store/editorStore';
 import type { FlowJson } from './codec/flowToJson';
@@ -103,6 +104,18 @@ function FlowEditorInner({
       }
     })();
     return () => { cancelled = true; };
+  }, []);
+
+  // routeKey 模板缓存（§3.7）：mount 时加载所有 codec 的 routeKeyTemplate，
+  // 供 refsGraph/refsCheck 的 server 感知 routeKey 计算。codec 文件增删改
+  // （resourcesStore.notify）时自动刷新。validateFlow 调用方全 sync，走 cache。
+  // 每次 refresh 完成都 bump routeKeyTemplatesVersion，触发 ValidationReport /
+  // Toolbar 的 validateFlow useMemo 重算（cache 就绪后 warning 自动刷新）。
+  useEffect(() => {
+    const bump = useEditorStore.getState().bumpRouteKeyTemplatesVersion;
+    void refreshRouteKeyTemplates().then(bump);
+    const unsub = subscribeResources(() => { void refreshRouteKeyTemplates().then(bump); });
+    return unsub;
   }, []);
 
   useEffect(() => {

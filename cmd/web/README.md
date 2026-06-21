@@ -38,6 +38,7 @@ npm run test         # Vitest 单元测试（22 个，覆盖 codec / refsGraph /
 - `conf/flow/flow.json` —— 流程定义（开发环境通过 Vite 中间件挂载到 `/conf/flow/flow.json`）
 - `conf/proto/*.proto` —— 消息定义；启动时全量解析后供 ActionEditor 字段补全
 - `conf/scripts/*.lua` —— Lua 脚本
+- `conf/adapter/*_codec.json` / `conf/adapter/errors.json` —— 协议配置（codec.json）：声明式编解码（帧布局 / pipeline / routeKey 模板）+ 错误码描述；在资源抽屉「协议配置」Tab 内编辑，由 Go 端 codec 在运行时加载
 
 无需复制，dev server 通过 `confMountPlugin` 直接读 `../conf/`，并自动生成 `proto/index.json` / `scripts/index.json` 供前端枚举。
 

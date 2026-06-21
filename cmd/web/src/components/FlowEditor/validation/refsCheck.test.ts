@@ -120,13 +120,13 @@ describe('validateFlow', () => {
     expect(r.warnings.find((e) => e.code === 'LISTEN_ORPHAN')).toBeTruthy();
   });
 
-  it('LISTEN_LUA_NO_SCRIPT：lua callback 缺少 script', () => {
+  it('LISTEN_SCRIPT_DISABLED：listen 配置 script（即使为空）即报错（T2 后端 fail-loud）', () => {
     const r = validateFlow(baseFlow({
       nodes: { main: { type: 'action', action: 'A1', listenRefs: [{ server: 'tcp:x', listen: 'cb1', route: {} }] } },
       actions: { A1: { pattern: 'tcpSend', service: 'x', route: {}, c2sProto: 'X.Foo' } },
       listens: { cb1: { script: '' } },
     }));
-    expect(r.errors.find((e) => e.code === 'LISTEN_LUA_NO_SCRIPT')).toBeTruthy();
+    expect(r.errors.find((e) => e.code === 'LISTEN_SCRIPT_DISABLED')).toBeTruthy();
   });
 
   // ── Binding 级 ──
@@ -353,5 +353,237 @@ describe('validateFlow', () => {
       },
     }));
     expect(r.errors.length).toBe(0);
+  });
+
+  // ── 心跳（tcpHeartbeat / udpHeartbeat）──
+
+  // 镜像 conf/flow/flow.json 的真实心跳动作：空 body / raw-binary 均应无心跳相关错误。
+  it('真实 flow.json 心跳样例（空 body + raw-binary）校验无 HEARTBEAT 错误', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpHeartbeat',
+          service: 'logic',
+          route: { cmd: 2, act: 1 },
+          intervalMs: 5000,
+        },
+        A2: {
+          pattern: 'tcpHeartbeat',
+          service: 'battle',
+          route: { cmd: 4, act: 2 },
+          intervalMs: 10000,
+          heartbeatFields: [
+            { type: 'u16', source: 'stateCounter', key: 'packageIndex' },
+            { type: 'i64', source: 'state', key: 'battleId' },
+            { type: 'u8', source: 'state', key: 'fighterIndex' },
+            { type: 'i64', source: 'state', key: 'battleSession' },
+          ],
+        },
+      },
+    }));
+    expect(r.errors.filter((e) => e.code.startsWith('HEARTBEAT') || e.code === 'ACTION_NO_SERVICE' || e.code === 'ACTION_NO_ROUTE')).toEqual([]);
+  });
+
+
+  it('tcpHeartbeat 空 body（无 c2sProto 无 heartbeatFields）+ service + route + intervalMs 合法', () => {
+    const r = validateFlow(baseFlow({
+      actions: { A1: { pattern: 'tcpHeartbeat', service: 'logic', route: { cmd: 2, act: 1 }, intervalMs: 5000 } },
+    }));
+    expect(r.errors.filter((e) => e.code.startsWith('HEARTBEAT') || e.code === 'ACTION_NO_SERVICE' || e.code === 'ACTION_NO_ROUTE')).toEqual([]);
+  });
+
+  it('tcpHeartbeat raw-binary（heartbeatFields）合法', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpHeartbeat',
+          service: 'battle',
+          route: { cmd: 4, act: 2 },
+          intervalMs: 10000,
+          heartbeatFields: [
+            { type: 'u16', source: 'stateCounter', key: 'packageIndex' },
+            { type: 'i64', source: 'state', key: 'battleId' },
+            { type: 'u16', source: 'randomInt', min: 10, max: 40 },
+            { type: 'u64', source: 'timestamp', unit: 'ms' },
+            { type: 'u32', source: 'counter', start: 1, step: 1 },
+            { type: 'u16', source: 'fixed', value: 0 },
+          ],
+        },
+      },
+    }));
+    expect(r.errors.filter((e) => e.code.startsWith('HEARTBEAT') || e.code === 'ACTION_NO_SERVICE' || e.code === 'ACTION_NO_ROUTE')).toEqual([]);
+  });
+
+  it('tcpHeartbeat proto 模式（c2sProto + bindings）合法', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpHeartbeat',
+          service: 'logic',
+          route: { cmd: 2, act: 1 },
+          intervalMs: 3000,
+          c2sProto: 'X.Heartbeat',
+          bindings: [{ field: 'seq', type: 'fixed', value: 1 }],
+        },
+      },
+    }));
+    expect(r.errors.filter((e) => e.code.startsWith('HEARTBEAT'))).toEqual([]);
+  });
+
+  it('udpHeartbeat 与 tcpHeartbeat 等价校验', () => {
+    const r = validateFlow(baseFlow({
+      actions: { A1: { pattern: 'udpHeartbeat', service: 'battle', route: { cmd: 4, act: 2 }, intervalMs: 150 } },
+    }));
+    expect(r.errors.filter((e) => e.code.startsWith('HEARTBEAT') || e.code === 'ACTION_NO_SERVICE' || e.code === 'ACTION_NO_ROUTE')).toEqual([]);
+  });
+
+  it('HEARTBEAT_NO_INTERVAL：intervalMs<=0 报错', () => {
+    const r = validateFlow(baseFlow({
+      actions: { A1: { pattern: 'tcpHeartbeat', service: 'logic', route: { cmd: 2, act: 1 }, intervalMs: 0 } },
+    }));
+    expect(r.errors.find((e) => e.code === 'HEARTBEAT_NO_INTERVAL')).toBeTruthy();
+  });
+
+  it('HEARTBEAT_NO_INTERVAL：intervalMs 缺失报错', () => {
+    const r = validateFlow(baseFlow({
+      actions: { A1: { pattern: 'tcpHeartbeat', service: 'logic', route: { cmd: 2, act: 1 } } },
+    }));
+    expect(r.errors.find((e) => e.code === 'HEARTBEAT_NO_INTERVAL')).toBeTruthy();
+  });
+
+  it('HEARTBEAT_DUAL_MODE：c2sProto 与 heartbeatFields 同时配置报错（互斥）', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpHeartbeat',
+          service: 'logic',
+          route: { cmd: 2, act: 1 },
+          intervalMs: 3000,
+          c2sProto: 'X.Hb',
+          heartbeatFields: [{ type: 'u16', source: 'fixed', value: 0 }],
+        },
+      },
+    }));
+    expect(r.errors.find((e) => e.code === 'HEARTBEAT_DUAL_MODE')).toBeTruthy();
+  });
+
+  it('tcpHeartbeat 缺 service 报 ACTION_NO_SERVICE', () => {
+    const r = validateFlow(baseFlow({
+      actions: { A1: { pattern: 'tcpHeartbeat', route: { cmd: 2, act: 1 }, intervalMs: 5000 } },
+    }));
+    expect(r.errors.find((e) => e.code === 'ACTION_NO_SERVICE')).toBeTruthy();
+  });
+
+  it('tcpHeartbeat 缺 route 报 ACTION_NO_ROUTE', () => {
+    const r = validateFlow(baseFlow({
+      actions: { A1: { pattern: 'tcpHeartbeat', service: 'logic', intervalMs: 5000 } },
+    }));
+    expect(r.errors.find((e) => e.code === 'ACTION_NO_ROUTE')).toBeTruthy();
+  });
+
+  it('HEARTBEAT_FIELD_UNKNOWN_TYPE：heartbeatFields type 非法报错', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpHeartbeat',
+          service: 'logic',
+          route: { cmd: 2, act: 1 },
+          intervalMs: 5000,
+          heartbeatFields: [{ type: 'u128' as 'u16', source: 'fixed', value: 0 }],
+        },
+      },
+    }));
+    expect(r.errors.find((e) => e.code === 'HEARTBEAT_FIELD_UNKNOWN_TYPE')).toBeTruthy();
+  });
+
+  it('HEARTBEAT_FIELD_UNKNOWN_SOURCE：heartbeatFields source 非法报错', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpHeartbeat',
+          service: 'logic',
+          route: { cmd: 2, act: 1 },
+          intervalMs: 5000,
+          heartbeatFields: [{ type: 'u16', source: 'magic' as 'fixed', key: 'x' }],
+        },
+      },
+    }));
+    expect(r.errors.find((e) => e.code === 'HEARTBEAT_FIELD_UNKNOWN_SOURCE')).toBeTruthy();
+  });
+
+  it('HEARTBEAT_FIELD_NO_KEY：state/stateCounter 源缺 key 报错', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpHeartbeat',
+          service: 'logic',
+          route: { cmd: 2, act: 1 },
+          intervalMs: 5000,
+          heartbeatFields: [{ type: 'u16', source: 'state' }],
+        },
+      },
+    }));
+    expect(r.errors.find((e) => e.code === 'HEARTBEAT_FIELD_NO_KEY')).toBeTruthy();
+  });
+
+  it('HEARTBEAT_FIELD_FIXED_NO_VALUE：fixed 源缺 value 报错', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpHeartbeat',
+          service: 'logic',
+          route: { cmd: 2, act: 1 },
+          intervalMs: 5000,
+          heartbeatFields: [{ type: 'u16', source: 'fixed' }],
+        },
+      },
+    }));
+    expect(r.errors.find((e) => e.code === 'HEARTBEAT_FIELD_FIXED_NO_VALUE')).toBeTruthy();
+  });
+
+  it('HEARTBEAT_FIELD_RANDOM_NO_RANGE：randomInt 缺 min/max 报错', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpHeartbeat',
+          service: 'logic',
+          route: { cmd: 2, act: 1 },
+          intervalMs: 5000,
+          heartbeatFields: [{ type: 'u16', source: 'randomInt' }],
+        },
+      },
+    }));
+    expect(r.errors.find((e) => e.code === 'HEARTBEAT_FIELD_RANDOM_NO_RANGE')).toBeTruthy();
+  });
+
+  // ── ListenRef.queueSize ──
+
+  it('LISTEN_QUEUE_INVALID：listenRefs queueSize <= 0 报错', () => {
+    const r = validateFlow(baseFlow({
+      nodes: { main: { type: 'action', action: 'A1', listenRefs: [{ server: 'tcp:x', listen: 'cb1', route: {}, queueSize: 0 }] } },
+      actions: { A1: { pattern: 'tcpSend', service: 'x', route: {}, c2sProto: 'X.Foo' } },
+      listens: { cb1: {} },
+    }));
+    expect(r.errors.find((e) => e.code === 'LISTEN_QUEUE_INVALID')).toBeTruthy();
+  });
+
+  it('listenRefs queueSize = 2（>0）合法', () => {
+    const r = validateFlow(baseFlow({
+      nodes: { main: { type: 'action', action: 'A1', listenRefs: [{ server: 'tcp:x', listen: 'cb1', route: {}, queueSize: 2 }] } },
+      actions: { A1: { pattern: 'tcpSend', service: 'x', route: {}, c2sProto: 'X.Foo' } },
+      listens: { cb1: {} },
+    }));
+    expect(r.errors.find((e) => e.code === 'LISTEN_QUEUE_INVALID')).toBeFalsy();
+  });
+
+  // ── ListenDef.script 已下线 ──
+
+  it('LISTEN_SCRIPT_DISABLED：listen 配置 script 字段报错', () => {
+    const r = validateFlow(baseFlow({
+      nodes: { main: { type: 'action', action: 'A1', listenRefs: [{ server: 'tcp:x', listen: 'cb1', route: {} }] } },
+      actions: { A1: { pattern: 'tcpSend', service: 'x', route: {}, c2sProto: 'X.Foo' } },
+      listens: { cb1: { script: 'foo.lua' } },
+    }));
+    expect(r.errors.find((e) => e.code === 'LISTEN_SCRIPT_DISABLED')).toBeTruthy();
   });
 });

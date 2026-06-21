@@ -219,7 +219,7 @@ const networkModule: LuaModule = {
       ],
       returns: 'code, data : (number, string|userdata|nil)',
       summary: 'TCP 请求-响应（请求/响应路由分离）',
-      detail: '适用于少数请求路由和响应路由不同的协议：request_route 用于编码发送，response_route 经 adapter.expected_route_key 计算后用于 responseMap 匹配。不会 fallback 到请求路由。',
+      detail: '适用于少数请求路由和响应路由不同的协议：request_route 用于编码发送，response_route 由协议配置（codec）计算 route 后用于 responseMap 匹配。不会 fallback 到请求路由。',
       example: `local code, resp = network.tcp_request_route("logic", {cmd=10, act=1}, {cmd=20, act=7}, msg, "Game.SpecialS2C")`,
     },
     {
@@ -273,7 +273,7 @@ const networkModule: LuaModule = {
       ],
       returns: 'code, data : (number, string|userdata|nil)',
       summary: 'UDP 请求-响应（请求/响应路由分离）',
-      detail: '适用于少数请求路由和响应路由不同的协议：request_route 用于编码发送，response_route 经 adapter.expected_route_key 计算后用于 responseMap 匹配。不会 fallback 到请求路由。',
+      detail: '适用于少数请求路由和响应路由不同的协议：request_route 用于编码发送，response_route 由协议配置（codec）计算 route 后用于 responseMap 匹配。不会 fallback 到请求路由。',
       example: `local code, resp = network.udp_request_route("battle", {cmd=10, act=1}, {cmd=20, act=7}, body, "Game.SpecialS2C")`,
     },
     {
@@ -671,62 +671,6 @@ const logModule: LuaModule = {
   ],
 };
 
-const adapterModule: LuaModule = {
-  name: 'adapter',
-  summary: '编解码适配器（高级用法，通常不直接调用）',
-  functions: [
-    {
-      name: 'encode_tcp',
-      module: 'adapter',
-      params: [
-        { name: 'route', type: 'table', doc: '路由' },
-        { name: 'body', type: 'string', doc: '消息体' },
-        { name: 'key', type: 'string', optional: true, doc: '加密密钥' },
-      ],
-      returns: 'string | nil',
-      summary: 'TCP 编码',
-    },
-    {
-      name: 'encode_udp',
-      module: 'adapter',
-      params: [
-        { name: 'route', type: 'table', doc: '路由' },
-        { name: 'body', type: 'string', doc: '消息体' },
-        { name: 'key', type: 'string', optional: true, doc: '加密密钥' },
-      ],
-      returns: 'string | nil',
-      summary: 'UDP 编码',
-    },
-    {
-      name: 'decode_tcp',
-      module: 'adapter',
-      params: [
-        { name: 'data', type: 'string', doc: '原始数据' },
-        { name: 'key', type: 'string', optional: true, doc: '解密密钥' },
-      ],
-      returns: 'response_key, body, header_err : (string, string, number)',
-      summary: 'TCP 解码',
-    },
-    {
-      name: 'decode_udp',
-      module: 'adapter',
-      params: [
-        { name: 'data', type: 'string', doc: '原始数据' },
-        { name: 'key', type: 'string', optional: true, doc: '解密密钥' },
-      ],
-      returns: 'response_key, body, header_err : (string, string, number)',
-      summary: 'UDP 解码',
-    },
-    {
-      name: 'expected_route_key',
-      module: 'adapter',
-      params: [{ name: 'route', type: 'table', doc: '路由' }],
-      returns: 'string',
-      summary: '由路由计算预期响应键',
-    },
-  ],
-};
-
 const shareModule: LuaModule = {
   name: 'share',
   summary: '跨机器人 / 跨节点共享状态（Redis），用于协作型压测',
@@ -944,7 +888,6 @@ export const LUA_MODULES: readonly LuaModule[] = [
   utilsModule,
   jsonModule,
   logModule,
-  adapterModule,
   shareModule,
 ];
 

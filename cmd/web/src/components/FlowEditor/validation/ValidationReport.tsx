@@ -27,8 +27,11 @@ export function ValidationReportDrawer({ open, onClose }: ValidationReportDrawer
   );
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
   const setSelectedNode = useEditorStore((s) => s.setSelectedNode);
+  // routeKey 模板缓存版本：cache 加载/刷新时 bump，触发重算（消除 cache 未就绪时
+  // 误报的 ROUTEKEY_CODEC_MISSING warning）。
+  const routeKeyTemplatesVersion = useEditorStore((s) => s.routeKeyTemplatesVersion);
 
-  const report = useMemo(() => validateFlow(flow), [flow]);
+  const report = useMemo(() => validateFlow(flow), [flow, routeKeyTemplatesVersion]);
 
   const goto = (issue: ValidationIssue) => {
     if (!issue.location) return;

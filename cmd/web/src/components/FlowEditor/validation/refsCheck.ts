@@ -6,10 +6,11 @@
  */
 
 import type { TaskFlow } from '@/types/flow';
-import type { ActionDef, BindingType, FieldBind, FilterDef } from '@/types/action';
-import { ALL_ACTION_PATTERNS, ALL_BINDING_TYPES } from '@/types/action';
+import type { ActionDef, BindingType, FieldBind, FilterDef, HeartbeatField, HeartbeatFieldSource } from '@/types/action';
+import { ALL_ACTION_PATTERNS, ALL_BINDING_TYPES, ALL_HEARTBEAT_FIELD_TYPES, ALL_HEARTBEAT_FIELD_SOURCES } from '@/types/action';
 import { protoRegistry } from '../proto/ProtoRegistry';
-import { buildRefsGraph, routeKey } from '../listens/refsGraph';
+import { buildRefsGraph } from '../listens/refsGraph';
+import { resolveRouteKeyForServer } from '../listens/routeKeyResolver';
 import { resolveRandomStringCharset } from '../editors/ActionEditor/randomStringCharset';
 
 export type Severity = 'error' | 'warning' | 'info';
@@ -31,11 +32,15 @@ export interface ValidationReport {
 
 // ── pattern 必填字段映射 ──────────────────────────────────────
 
-const PATTERNS_REQUIRE_SERVICE = ['tcpSend', 'tcpRequest', 'tcpConnect', 'tcpClose', 'tcpListen', 'udpSend', 'udpRequest', 'udpConnect', 'udpClose', 'udpListen'];
-const PATTERNS_REQUIRE_ROUTE = ['tcpSend', 'tcpRequest', 'tcpListen', 'udpSend', 'udpRequest', 'udpListen'];
+const PATTERNS_REQUIRE_SERVICE = ['tcpSend', 'tcpRequest', 'tcpConnect', 'tcpClose', 'tcpListen', 'udpSend', 'udpRequest', 'udpConnect', 'udpClose', 'udpListen', 'tcpHeartbeat', 'udpHeartbeat'];
+const PATTERNS_REQUIRE_ROUTE = ['tcpSend', 'tcpRequest', 'tcpListen', 'udpSend', 'udpRequest', 'udpListen', 'tcpHeartbeat', 'udpHeartbeat'];
 const PATTERNS_REQUIRE_ADDRESS = ['tcpConnect', 'udpConnect'];
 const PATTERNS_REQUIRE_C2S = ['tcpSend', 'udpSend'];
 const PATTERNS_REQUIRE_S2C = ['tcpRequest', 'udpRequest'];
+
+const HEARTBEAT_PATTERNS = new Set(['tcpHeartbeat', 'udpHeartbeat']);
+const VALID_HEARTBEAT_TYPE_SET = new Set<string>(ALL_HEARTBEAT_FIELD_TYPES);
+const VALID_HEARTBEAT_SOURCE_SET = new Set<string>(ALL_HEARTBEAT_FIELD_SOURCES);
 
 const VALID_NODE_TYPES = new Set(['sequence', 'action', 'loop', 'boolean', 'weighted', 'wait', 'break', 'continue']);
 
@@ -286,6 +291,14 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
             }
           }
         }
+        // queueSize：未写合法（缺省 1）；显式 <=0 报错（不静默 clamp，与后端 fail-loud 一致）
+        if (r.queueSize !== undefined && r.queueSize !== null && r.queueSize <= 0) {
+          issues.push({
+            severity: 'error', code: 'LISTEN_QUEUE_INVALID',
+            message: `action 节点 "${id}" listenRefs[${i}] queueSize 必须 > 0（当前 ${r.queueSize}，缺省 1）`,
+            location: { kind: 'node', id },
+          });
+        }
       });
     }
   }
@@ -315,10 +328,13 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
   // R11–R13：listens 校验 + ref graph 校验
   const graph = buildRefsGraph(flow);
   for (const [name, cb] of Object.entries(callbacks)) {
-    if (cb.script !== undefined && !cb.script?.trim()) {
+    // ListenDef.script 已下线（T2 后端 fail-loud）。
+    // 类型保留 script? 仅用于旧 flow.json round-trip；存在该字段即报错，
+    // 提示用户改用 silent / declarative。不静默兜底。
+    if (cb.script !== undefined) {
       issues.push({
-        severity: 'error', code: 'LISTEN_LUA_NO_SCRIPT',
-        message: `listen "${name}" 是 lua 模式但缺少 script`,
+        severity: 'error', code: 'LISTEN_SCRIPT_DISABLED',
+        message: `listen "${name}" 的 script 字段已下线，请改用 s2cProto+store（declarative）或 silent 空对象`,
         location: { kind: 'listen', id: name },
       });
     }
@@ -352,6 +368,16 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
     });
   }
 
+  // 连接的协议配置缺失/有误 → listen 去重只能用近似 routeKey，显式提示先修复协议配置。
+  // 不静默伪 key（设计 §3.7）：每个缺失 server 一条 warning。
+  for (const server of graph.missingCodecServers) {
+    issues.push({
+      severity: 'warning',
+      code: 'ROUTEKEY_CODEC_MISSING',
+      message: `连接 ${server} 的协议配置缺失或有误，listen 去重使用近似匹配，请先在协议配置面板修复`,
+    });
+  }
+
   // R14：tcpListen/udpListen 的 route 必须在某个节点的 listenRefs 中预注册
   const LISTEN_ACTION_PATTERNS = new Set(['tcpListen', 'udpListen']);
   const preRegisteredKeys = new Set<string>();
@@ -359,7 +385,8 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
     if (node.type !== 'action') continue;
     for (const ref of node.listenRefs ?? []) {
       if (ref.server && ref.route != null) {
-        preRegisteredKeys.add(`${ref.server}|${routeKey(ref.route)}`);
+        // 与 buildRefsGraph 用同一个 server 感知解析器，保证 key 一致
+        preRegisteredKeys.add(`${ref.server}|${resolveRouteKeyForServer(ref.server, ref.route)}`);
       }
     }
   }
@@ -368,7 +395,8 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
     if (!referencedActions.has(actionName)) continue;
     if (!def.service || def.route == null) continue;
     const proto = def.pattern === 'tcpListen' ? 'tcp' : 'udp';
-    const key = `${proto}:${def.service}|${routeKey(def.route)}`;
+    const server = `${proto}:${def.service}`;
+    const key = `${server}|${resolveRouteKeyForServer(server, def.route)}`;
     if (!preRegisteredKeys.has(key)) {
       issues.push({
         severity: 'warning',
@@ -437,6 +465,11 @@ function checkAction(name: string, def: ActionDef): ValidationIssue[] {
     issues.push({ severity: 'warning', code: 'SETSTATE_NO_BINDINGS', message: `action "${name}" pattern=setState 缺少 bindings（无实际效果）`, location: loc });
   }
 
+  // tcpHeartbeat / udpHeartbeat 校验（镜像 Go engine/action.go:execHeartbeat + heartbeat.go）
+  if (HEARTBEAT_PATTERNS.has(p)) {
+    issues.push(...checkHeartbeat(name, def, loc));
+  }
+
   // proto 真实存在校验
   if (protoRegistry.isLoaded()) {
     if (def.c2sProto && !protoRegistry.lookupMessage(def.c2sProto)) {
@@ -485,6 +518,87 @@ function checkAction(name: string, def: ActionDef): ValidationIssue[] {
   // binding 递归校验
   if (def.bindings) {
     issues.push(...checkBindings(`action "${name}"`, def.bindings, loc));
+  }
+
+  return issues;
+}
+
+// ── 心跳字段校验（tcpHeartbeat / udpHeartbeat） ─────────────
+//
+// 严格镜像 Go engine/action.go:execHeartbeat + engine/heartbeat.go：
+//   - intervalMs > 0
+//   - c2sProto 与 heartbeatFields 互斥（双模式二选一）
+//   - heartbeatFields 每行 type/source 合法，按 source 检查必填字段
+// proto 模式的 bindings 走既有 checkBindings（复用 tcpSend 全套语义，Go 不做心跳专用子集限制）。
+
+function checkHeartbeat(name: string, def: ActionDef, loc: { kind: 'action'; id: string }): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  if (def.intervalMs === undefined || def.intervalMs === null || def.intervalMs <= 0) {
+    issues.push({
+      severity: 'error', code: 'HEARTBEAT_NO_INTERVAL', location: loc,
+      message: `action "${name}" (${def.pattern}) intervalMs 必须 > 0（当前 ${def.intervalMs ?? '未配置'}）`,
+    });
+  }
+
+  // c2sProto 与 heartbeatFields 互斥（双模式二选一，不写兼容兜底）
+  if (def.c2sProto && def.heartbeatFields && def.heartbeatFields.length > 0) {
+    issues.push({
+      severity: 'error', code: 'HEARTBEAT_DUAL_MODE', location: loc,
+      message: `action "${name}" (${def.pattern}) 同时配置 c2sProto 与 heartbeatFields，须二选一（双模式互斥）`,
+    });
+  }
+
+  const fields = def.heartbeatFields ?? [];
+  for (let i = 0; i < fields.length; i++) {
+    issues.push(...checkHeartbeatField(name, i, fields[i], loc));
+  }
+
+  return issues;
+}
+
+function checkHeartbeatField(name: string, idx: number, f: HeartbeatField, loc: { kind: 'action'; id: string }): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const label = `action "${name}".heartbeatFields[${idx}]`;
+
+  if (!f.type || !VALID_HEARTBEAT_TYPE_SET.has(f.type)) {
+    issues.push({
+      severity: 'error', code: 'HEARTBEAT_FIELD_UNKNOWN_TYPE', location: loc,
+      message: `${label} type 非法 "${f.type}"（合法：u8/i8/u16/i16/u32/i32/u64/i64）`,
+    });
+  }
+  if (!f.source || !VALID_HEARTBEAT_SOURCE_SET.has(f.source)) {
+    issues.push({
+      severity: 'error', code: 'HEARTBEAT_FIELD_UNKNOWN_SOURCE', location: loc,
+      message: `${label} source 非法 "${f.source}"（合法：fixed/state/stateCounter/counter/timestamp/randomInt）`,
+    });
+    return issues; // source 非法时后续字段检查无意义
+  }
+
+  const src = f.source as HeartbeatFieldSource;
+  switch (src) {
+    case 'fixed':
+      if (f.value === undefined || f.value === null) {
+        issues.push({ severity: 'error', code: 'HEARTBEAT_FIELD_FIXED_NO_VALUE', location: loc, message: `${label} source=fixed 缺 value` });
+      }
+      break;
+    case 'state':
+    case 'stateCounter':
+      if (!f.key) {
+        issues.push({ severity: 'error', code: 'HEARTBEAT_FIELD_NO_KEY', location: loc, message: `${label} source=${src} 缺 key` });
+      }
+      break;
+    case 'randomInt':
+      if (f.min === undefined || f.max === undefined) {
+        issues.push({ severity: 'error', code: 'HEARTBEAT_FIELD_RANDOM_NO_RANGE', location: loc, message: `${label} source=randomInt 缺 min/max` });
+      } else if (f.min > f.max) {
+        issues.push({ severity: 'error', code: 'HEARTBEAT_FIELD_RANDOM_NO_RANGE', location: loc, message: `${label} source=randomInt min(${f.min}) > max(${f.max})` });
+      }
+      break;
+    case 'counter':
+    case 'timestamp':
+      // counter 可选 start/step；timestamp 可选 unit(ms/s，缺省 ms) —— Go 侧宽容，此处不强校验。
+      break;
   }
 
   return issues;

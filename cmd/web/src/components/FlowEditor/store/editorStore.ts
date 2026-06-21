@@ -132,6 +132,15 @@ interface EditorState {
   codecSchemaErrors: string[] | null;
   setCodecSchemaErrors: (v: string[] | null) => void;
 
+  /**
+   * routeKey 模板缓存版本号：每次 refreshRouteKeyTemplates 完成（mount 加载 /
+   * codec CRUD 后刷新）时 bump。validateFlow 的 useMemo 把它列入依赖，使缓存
+   * 就绪后校验报告自动重算（ROUTEKEY_CODEC_MISSING warning 随真实 codec 状态刷新，
+   * 不再卡到下次 flow 编辑）。对齐 proto 模式的 protoStore.set({status:'ready'})。
+   */
+  routeKeyTemplatesVersion: number;
+  bumpRouteKeyTemplatesVersion: () => void;
+
   setSelectedNode: (id: string | null) => void;
   setSelectedListen: (name: string | null) => void;
   setHoveredListen: (name: string | null) => void;
@@ -174,6 +183,8 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
   setPendingSyncResult: (r) => set({ pendingSyncResult: r }),
   codecSchemaErrors: null,
   setCodecSchemaErrors: (v) => set({ codecSchemaErrors: v }),
+  routeKeyTemplatesVersion: 0,
+  bumpRouteKeyTemplatesVersion: () => set((s) => ({ routeKeyTemplatesVersion: s.routeKeyTemplatesVersion + 1 })),
 
   setSelectedNode: (id) => set({ selectedNodeId: id }),
   setSelectedListen: (name) => set({ selectedListenName: name }),

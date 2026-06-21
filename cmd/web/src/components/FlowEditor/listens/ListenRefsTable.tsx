@@ -4,7 +4,7 @@
  * 设计文档 §8.6：route + server + listen 三列 + 形态徽章 + 排序删除 + 批量入口。
  */
 
-import { App as AntApp, Button, Input, Modal, Select, Space, Table, Tag, Tooltip } from 'antd';
+import { App as AntApp, Button, Input, InputNumber, Modal, Select, Space, Table, Tag, Tooltip } from 'antd';
 import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { useState } from 'react';
 import type { ListenRef } from '@/types/flow';
@@ -183,6 +183,27 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
                 </Space.Compact>
               );
             },
+          },
+          {
+            title: '队列容量',
+            dataIndex: 'queueSize',
+            width: 120,
+            render: (_, r) => (
+              <Tooltip title="监听缓存队列容量，缺省 1；<=0 会在校验报错">
+                <InputNumber
+                  size="small"
+                  min={1}
+                  placeholder="缺省 1"
+                  value={r.queueSize}
+                  onChange={(v) => {
+                    const arr = [...refs];
+                    arr[r._i] = { ...arr[r._i], queueSize: (v as number) ?? undefined };
+                    set(arr);
+                  }}
+                  style={{ width: 100 }}
+                />
+              </Tooltip>
+            ),
           },
           {
             title: '操作',
