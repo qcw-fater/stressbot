@@ -2,6 +2,7 @@ package utils
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
@@ -21,7 +22,7 @@ func StartPprofServer(port int) (stop func()) {
 	GetWorkPool().Go(func() {
 		stresslog.Info("[DEBUG] pprof 服务启动",
 			zap.String("endpoint", "http://localhost"+addr+"/debug/pprof/"))
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			stresslog.Error("[DEBUG] pprof 服务异常退出", zap.Error(err))
 		}
 	})

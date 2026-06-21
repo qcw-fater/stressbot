@@ -18,8 +18,8 @@
     "bot": {
       "accountPrefix": "bot_",
       "startNumber": 20,
-      "count": 1,
-      "concurrentNum": 0,
+      "count": 100,
+      "concurrentNum": 20,
       "mainService": "logic"
     },
     "stateExtra": {
@@ -31,6 +31,18 @@
   },
   "agent": {
     "enabled": false
+  },
+  "shared": {
+    "redis": {
+      "addr": "127.0.0.1:6379",
+      "username": "",
+      "password": "",
+      "db": 0,
+      "keyPrefix": "stressbot",
+      "defaultClaimTTL": "30s",
+      "opTimeout": "2s",
+      "poolSize": 0
+    }
   },
   "daemon": false
 }

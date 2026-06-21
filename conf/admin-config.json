@@ -32,5 +32,17 @@
     "enabled": false,
     "port": 6060
   },
+  "shared": {
+    "redis": {
+      "addr": "127.0.0.1:6379",
+      "username": "",
+      "password": "",
+      "db": 0,
+      "keyPrefix": "stressbot",
+      "defaultClaimTTL": "30s",
+      "opTimeout": "2s",
+      "poolSize": 0
+    }
+  },
   "daemon": false
 }

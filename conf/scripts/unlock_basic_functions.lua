@@ -3,7 +3,7 @@ local proto = require("proto")
 local log = require("log")
 
 function execute(r)
-    local ids = {4, 5, 7, 9}
+    local ids = {3, 5, 7, 9, 11, 13}
     local failedCount = 0
     local lastCode = 0
 

@@ -337,14 +337,14 @@
       "type": "boolean",
       "condition": "state:isNewRole == true",
       "trueNext": "initNewRole",
-      "falseNext": "rankedUnlockAndLoop"
+      "falseNext": "GetActivityList"
     },
     "initNewRole": {
       "type": "sequence",
       "next": [
         "gmCommands",
         "unlockBasicFunction",
-        "businessLoop"
+        "LbsPositioning"
       ]
     },
     "unlockBasicFunction": {
@@ -355,59 +355,49 @@
     "ConfirmMatchSuccess": {
       "type": "action",
       "description": "确认匹配成功",
-      "action": "ConfirmMatchSuccess"
+      "action": "ConfirmMatchSuccess",
+      "errorStrategy": "skip"
     },
     "rankedModel": {
       "type": "sequence",
       "next": [
         "RankedTeamReset",
         "RankedTeamPrepare",
-        "rankedIsSolo",
         "SelectHero",
-        "rankedCanStartMatch",
-        "MatchSucceed",
-        "ConfirmMatchSuccess",
-        "ListenStartLoading",
-        "startBattle",
+        "rankedCanAttemptMatch",
+        "rankedAfterMatchStart",
         "RankedTeamCleanup"
       ]
     },
-    "rankedIsSolo": {
+    "rankedCanAttemptMatch": {
       "type": "boolean",
-      "condition": "state:rankedTeamRole==solo",
-      "falseNext": "rankedTeamPhase"
-    },
-    "rankedTeamPhase": {
-      "type": "sequence",
-      "next": [
-        "rankedIsLeader"
-      ]
-    },
-    "rankedIsLeader": {
-      "type": "boolean",
-      "condition": "state:rankedTeamRole==leader",
-      "trueNext": "rankedLeaderPhase",
-      "falseNext": "rankedMemberPhase"
-    },
-    "rankedLeaderPhase": {
-      "type": "sequence",
-      "next": [
-        "RankedLeaderRecruit",
-        "RankedLeaderWaitReady"
-      ]
-    },
-    "rankedMemberPhase": {
-      "type": "sequence",
-      "next": [
-        "RankedMemberJoin",
-        "RankedMemberWaitReady"
-      ]
+      "condition": "state:rankedRoundFailed",
+      "falseNext": "rankedCanStartMatch"
     },
     "rankedCanStartMatch": {
       "type": "boolean",
       "condition": "state:rankedTeamRole!=member",
       "trueNext": "RankedStartMatch",
       "falseNext": "RankedMemberWaitMatch"
+    },
+    "rankedAfterMatchStart": {
+      "type": "boolean",
+      "condition": "state:rankedMatchStarted==true && !rankedRoundFailed",
+      "trueNext": "rankedBattlePhase"
+    },
+    "rankedBattlePhase": {
+      "type": "sequence",
+      "next": [
+        "MatchSucceed",
+        "ConfirmMatchSuccess",
+        "ListenStartLoading",
+        "rankedCanEnterBattle"
+      ]
+    },
+    "rankedCanEnterBattle": {
+      "type": "boolean",
+      "condition": "state:battleAddress && battleId && battleSecretKey && battleSession",
+      "trueNext": "startBattle"
     },
     "RankedTeamReset": {
       "type": "action",
@@ -417,26 +407,6 @@
     "RankedTeamPrepare": {
       "type": "action",
       "action": "RankedTeamPrepare",
-      "errorStrategy": "skip"
-    },
-    "RankedLeaderRecruit": {
-      "type": "action",
-      "action": "RankedLeaderRecruit",
-      "errorStrategy": "skip"
-    },
-    "RankedLeaderWaitReady": {
-      "type": "action",
-      "action": "RankedLeaderWaitReady",
-      "errorStrategy": "skip"
-    },
-    "RankedMemberJoin": {
-      "type": "action",
-      "action": "RankedMemberJoin",
-      "errorStrategy": "skip"
-    },
-    "RankedMemberWaitReady": {
-      "type": "action",
-      "action": "RankedMemberWaitReady",
       "errorStrategy": "skip"
     },
     "RankedStartMatch": {
@@ -453,12 +423,14 @@
       "type": "action",
       "action": "RankedTeamCleanup"
     },
-    "rankedUnlockAndLoop": {
-      "type": "sequence",
-      "next": [
-        "unlockBasicFunction",
-        "businessLoop"
-      ]
+    "LbsPositioning": {
+      "type": "action",
+      "description": "Lbs定位",
+      "action": "LbsPositioning"
+    },
+    "GetActivityList": {
+      "type": "action",
+      "action": "GetActivityList"
     }
   },
   "actions": {
@@ -951,22 +923,6 @@
       "pattern": "lua",
       "script": "ranked_team_prepare.lua"
     },
-    "RankedLeaderRecruit": {
-      "pattern": "lua",
-      "script": "ranked_leader_recruit.lua"
-    },
-    "RankedLeaderWaitReady": {
-      "pattern": "lua",
-      "script": "ranked_leader_wait_ready.lua"
-    },
-    "RankedMemberJoin": {
-      "pattern": "lua",
-      "script": "ranked_member_join.lua"
-    },
-    "RankedMemberWaitReady": {
-      "pattern": "lua",
-      "script": "ranked_member_wait_ready.lua"
-    },
     "RankedStartMatch": {
       "pattern": "lua",
       "script": "ranked_start_match.lua"
@@ -978,6 +934,155 @@
     "RankedTeamCleanup": {
       "pattern": "lua",
       "script": "ranked_team_cleanup.lua"
+    },
+    "LbsPositioning": {
+      "pattern": "tcpSend",
+      "service": "logic",
+      "route": {
+        "cmd": 40,
+        "act": 2
+      },
+      "c2sProto": "Game.LbsPositioningC2S",
+      "bindings": [
+        {
+          "type": "randomPick",
+          "field": "lbsId",
+          "value": [
+            10003001,
+            10003002,
+            10003003,
+            10003004,
+            10003005,
+            10003006,
+            10003007,
+            10003008,
+            10003009,
+            10003010,
+            10003011,
+            10003012,
+            10003013,
+            10005001,
+            10005002,
+            10005003,
+            10005004,
+            10005005,
+            10005006,
+            10005007,
+            10005008,
+            10005009,
+            10005010,
+            10005011,
+            10005012,
+            10005013,
+            10005014,
+            10005015,
+            10005016,
+            10005017,
+            10005018,
+            10005019,
+            10005020,
+            10005021,
+            10005022,
+            10005023,
+            10005024,
+            10005025,
+            10005026,
+            10005027,
+            10005028,
+            10005029,
+            10005030,
+            10005031,
+            10005032,
+            10005033,
+            10005034,
+            10005035,
+            10005036,
+            10005037,
+            20005001,
+            20005002,
+            20005003,
+            20005004,
+            20005005,
+            30001001,
+            30001002,
+            30001003,
+            30001004,
+            30001005
+          ],
+          "values": [
+            10003001,
+            10003002,
+            10003003,
+            10003004,
+            10003005,
+            10003006,
+            10003007,
+            10003008,
+            10003009,
+            10003010,
+            10003011,
+            10003012,
+            10003013,
+            10005001,
+            10005002,
+            10005003,
+            10005004,
+            10005005,
+            10005006,
+            10005007,
+            10005008,
+            10005009,
+            10005010,
+            10005011,
+            10005012,
+            10005013,
+            10005014,
+            10005015,
+            10005016,
+            10005017,
+            10005018,
+            10005019,
+            10005020,
+            10005021,
+            10005022,
+            10005023,
+            10005024,
+            10005025,
+            10005026,
+            10005027,
+            10005028,
+            10005029,
+            10005030,
+            10005031,
+            10005032,
+            10005033,
+            10005034,
+            10005035,
+            10005036,
+            10005037,
+            20005001,
+            20005002,
+            20005003,
+            20005004,
+            20005005,
+            30001001,
+            30001002,
+            30001003,
+            30001004,
+            30001005
+          ]
+        }
+      ]
+    },
+    "GetActivityList": {
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 22,
+        "act": 1
+      },
+      "c2sProto": "Game.OperateGetListC2S",
+      "s2cProto": "Game.OperateGetListS2C"
     }
   },
   "listens": {
