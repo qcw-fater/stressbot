@@ -1119,19 +1119,15 @@
     },
     "teamUpdateInfo": {
       "s2cProto": "Game.TeamUpdateInfoS2C",
-      "script": "listen_team_update_info.lua"
+      "store": [
+        {
+          "setter": "teamData"
+        }
+      ]
     },
-    "teamNotifyInvite": {
-      "s2cProto": "Game.TeamNotifyInviteS2C",
-      "script": "listen_team_notify_invite.lua"
-    },
-    "teamJoin": {
-      "s2cProto": "Game.TeamJoinS2C",
-      "script": "listen_team_join.lua"
-    },
-    "frameData": {
-      "script": "listen_frame_data.lua"
-    },
+    "teamNotifyInvite": {},
+    "teamJoin": {},
+    "frameData": {},
     "battleStartGame": {},
     "roomUpdateData": {},
     "roomUpdateStatus": {}

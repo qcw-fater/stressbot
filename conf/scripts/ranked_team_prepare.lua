@@ -153,6 +153,115 @@ local function waitUntil(timeoutMs, fn)
     return false
 end
 
+-- v2 listen 迁移：listen 脚本回调已下线（framework/32），改为 memberPrepare 主流程
+-- 主动 try_tcp_listen pop 缓存队列消费。drain* 在 waitUntil 循环里反复调用直到队列空。
+local PROTO_INVITE = "Game.TeamNotifyInviteS2C"
+local PROTO_JOIN = "Game.TeamJoinS2C"
+
+-- drainInvite：非阻塞 pop TeamNotifyInvite 队列；仅 model==2 的排位邀请写 rankedTeamInvite。
+local function drainInvite()
+    local gotRanked = false
+    while true do
+        local code, raw = network.try_tcp_listen("logic", {cmd = 5, act = 6})
+        if code == 31 then break end
+        if code ~= 0 then
+            log.warn("drainInvite: try_tcp_listen code=" .. tostring(code))
+            break
+        end
+        if raw == nil or raw == "" then break end
+
+        local ok, msg = pcall(proto.parse, PROTO_INVITE, raw)
+        if not ok then
+            log.warn("drainInvite: 解析失败丢弃 err=" .. tostring(msg))
+        else
+            local fm = proto.get_field_map(msg)
+            if fm and tonumber(fm.model) == 2 then
+                local inviterId = nil
+                if type(fm.inviteInfo) == "table" then
+                    inviterId = fm.inviteInfo.playerId
+                end
+                robot.set("rankedTeamInvite", {
+                    teamId = fm.teamId,
+                    model = fm.model,
+                    gType = fm.gType,
+                    battleModeId = fm.battleModeId,
+                    roomId = fm.roomId,
+                    isInvite = fm.isInvite,
+                    inviterId = inviterId,
+                    beInvite = fm.beInvite,
+                })
+                robot.set("rankedTeamInviteReceived", true)
+                gotRanked = true
+                log.info("drainInvite: 收到排位邀请 inviter=" .. tostring(inviterId)
+                    .. " teamId=" .. tostring(fm.teamId))
+            else
+                log.debug("drainInvite: 非排位邀请 model=" .. tostring(fm and fm.model))
+            end
+        end
+    end
+    return gotRanked
+end
+
+-- drainJoin：非阻塞 pop TeamJoin 队列；code==0 置 rankedTeamAcceptDone 并写 Redis members 通知队长。
+local function drainJoin(roleId, account)
+    local joined = false
+    while true do
+        local code, raw = network.try_tcp_listen("logic", {cmd = 5, act = 10})
+        if code == 31 then break end
+        if code ~= 0 then
+            log.warn("drainJoin: try_tcp_listen code=" .. tostring(code))
+            break
+        end
+        if raw == nil or raw == "" then break end
+
+        local ok, msg = pcall(proto.parse, PROTO_JOIN, raw)
+        if not ok then
+            log.warn("drainJoin: 解析失败丢弃 err=" .. tostring(msg))
+        else
+            local codeNum = tonumber(proto.get_field(msg, "code"))
+            robot.set("teamJoinCode", codeNum or -1)
+            local teamId = proto.get_field(msg, "teamId")
+            if teamId then robot.set("teamId", tonumber(teamId) or teamId) end
+            robot.set("teamModel", proto.get_field(msg, "model"))
+            robot.set("teamGType", proto.get_field(msg, "gType"))
+            robot.set("teamModeId", proto.get_field(msg, "modeId"))
+            robot.set("teamTsId", proto.get_field(msg, "tsId"))
+
+            if codeNum == 0 then
+                robot.set("rankedTeamAcceptDone", true)
+                joined = true
+                local tk = robot.get("rankedTeamKey")
+                if tk and tostring(tk) ~= "" then
+                    local _, setErr = share.hash_set(teamKey(tostring(tk)) .. ":members", tostring(roleId), {
+                        playerId = roleId,
+                        account = account or "",
+                        role = "member",
+                        status = "joined",
+                        teamId = teamId,
+                        joinedAtMs = tostring(utils.time_ms()),
+                    }, TEAM_TTL)
+                    if setErr then
+                        log.debug("drainJoin: 写 Redis members 失败（可忽略）err=" .. tostring(setErr))
+                    end
+                end
+                log.info("drainJoin: 加入成功 teamId=" .. tostring(teamId))
+            else
+                log.warn("drainJoin: 加入失败 code=" .. tostring(codeNum))
+            end
+        end
+    end
+    return joined
+end
+
+-- drainUpdate：非阻塞 pop TeamUpdateInfo 队列清残留（teamData 由 Go 声明式 store 实时写，Lua 仅消费队列）。
+local function drainUpdate()
+    while true do
+        local code = network.try_tcp_listen("logic", {cmd = 5, act = 3})
+        if code == 31 then break end
+        if code ~= 0 then break end
+    end
+end
+
 local function chooseRole()
     local r = math.random(100)
     if r <= 20 then return "solo" end
@@ -228,6 +337,7 @@ local function waitForInvite(roleId, token)
             if claim.teamId then robot.set("teamId", tonumber(claim.teamId) or claim.teamId) end
         end
 
+        drainInvite()
         if robot.get("rankedTeamInviteReceived") then
             invite = robot.get("rankedTeamInvite")
             return invite ~= nil
@@ -264,8 +374,9 @@ local function acceptInvite(invite)
     return true
 end
 
-local function waitForJoin()
+local function waitForJoin(roleId, account)
     return waitUntil(WAIT_JOIN_MS, function()
+        drainJoin(roleId, account)
         return robot.get("rankedTeamAcceptDone") == true
     end)
 end
@@ -302,7 +413,7 @@ local function memberPrepare(roleId, account)
         return 0
     end
 
-    if not waitForJoin() then
+    if not waitForJoin(roleId, account) then
         writeWaitMark(roleId, token, "join_timeout")
         log.warn("排位队员等待入队确认超时 code=" .. tostring(robot.get("teamJoinCode")))
         safeLeaveTeam("member_join_timeout")
@@ -388,33 +499,23 @@ local function sendInvite(member)
 end
 
 local function waitForJoinedCount(tk, expected)
-    waitUntil(WAIT_JOINED_MS, function()
-        local count = tonumber(robot.get("teamMemberCount") or "0") or 0
-        if count >= expected then return true end
-
+    local function countJoined()
         local members, err = share.hash_get_all(teamKey(tk) .. ":members")
-        if err or not members then return false end
-        count = 0
+        if err or not members then return 0 end
+        local count = 0
         for _, member in pairs(members) do
             if type(member) == "table" and (member.status == "joined" or member.status == "ready") then
                 count = count + 1
             end
         end
-        return count >= expected
-    end)
-
-    local count = tonumber(robot.get("teamMemberCount") or "0") or 0
-    local members, err = share.hash_get_all(teamKey(tk) .. ":members")
-    if not err and members then
-        local sharedCount = 0
-        for _, member in pairs(members) do
-            if type(member) == "table" and (member.status == "joined" or member.status == "ready") then
-                sharedCount = sharedCount + 1
-            end
-        end
-        if sharedCount > count then count = sharedCount end
+        return count
     end
 
+    waitUntil(WAIT_JOINED_MS, function()
+        return countJoined() >= expected
+    end)
+
+    local count = countJoined()
     if count <= 0 then count = 1 end
     if count > expected then count = expected end
     return count
@@ -561,6 +662,10 @@ function execute(r)
         markRoundFailed("prepare_no_role_id")
         return 0
     end
+
+    -- 入口清 Go 侧 listenQueues 物理残留（上一轮未消费的 invite/update 消息），再清 state。
+    drainInvite()
+    drainUpdate()
 
     robot.delete("rankedRoundFailed")
     robot.delete("rankedMatchStarted")

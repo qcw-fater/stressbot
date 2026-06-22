@@ -107,7 +107,9 @@ local function logStartMatchError(code, resp)
     local targetSize = robot.get("rankedTeamTargetSize")
     local heroIds = robot.get("heroIdList")
     local currentHeroIds = robot.get("currentHeroIds")
-    local teamMemberCount = robot.get("teamMemberCount")
+    local td = robot.get("teamData")
+    local teamDataMembers = td and td.teamData and td.teamData.Members
+    local teamMemberCount = teamDataMembers and #teamDataMembers or 0
 
     local detail = ""
     if code == 386 and resp ~= nil and type(resp) == "string" and #resp > 0 then
