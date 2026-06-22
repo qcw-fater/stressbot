@@ -13,7 +13,7 @@ import {
   Alert,
   App as AntApp,
   Button,
-  Collapse,
+  Card,
   Flex,
   Input,
   Modal,
@@ -25,6 +25,7 @@ import {
   Upload,
 } from 'antd';
 import type { UploadProps } from 'antd';
+import './codecEditor/codecEditor.css';
 import { useEffect, useMemo, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import { useEditorStore } from '../FlowEditor/store/editorStore';
@@ -441,81 +442,35 @@ export function ProtocolConfigEditor() {
   ];
 
   return (
-    <Flex vertical gap={8}>
+    <Flex vertical gap={0} className="pce-root">
+      {/* === 工具条区（自然高）=== */}
+      {/* 提示信息 */}
       <Alert
         type="info"
         showIcon
         message="协议配置随任务下发"
         description="为每条连接维护一份配置，启动任务时随配置一并提交到服务端。错误码映射为所有连接共享的一份文件。"
+        className="pce-alert"
       />
       {loadError && (
-        <Alert type="error" showIcon message="未找到该连接的配置" description="配置文件不存在。请新建连接或从基线载入。" />
+        <Alert
+          type="error"
+          showIcon
+          message="未找到该连接的配置"
+          description="配置文件不存在。请新建连接或从基线载入。"
+          className="pce-alert"
+        />
       )}
-
-      {/* 连接选择 + 新建/复制/删除/从基线载入 */}
-      <Flex justify="space-between" align="center" gap={8} wrap="wrap">
-        <Space size={6} wrap>
-          <Select
-            size="small"
-            style={{ minWidth: 200 }}
-            value={activeConn ?? undefined}
-            placeholder={files.length === 0 ? '暂无连接' : '选择连接'}
-            loading={loading}
-            onChange={handleSwitch}
-            options={selectOptions}
-          />
-          <Tooltip title="新建连接（输入 <协议>:<服务名>，如 tcp:logic）">
-            <Button size="small" icon={<PlusOutlined />} onClick={() => openCreate('new')}>新建</Button>
-          </Tooltip>
-          <Tooltip title="复制当前连接为新连接">
-            <Button
-              size="small"
-              icon={<CopyOutlined />}
-              disabled={activeConn === null || activeConn === '__errors__'}
-              onClick={() => openCreate('copy')}
-            >
-              复制
-            </Button>
-          </Tooltip>
-          <Tooltip title="删除当前连接">
-            <Button
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
-              disabled={activeConn === null || activeConn === '__errors__'}
-              onClick={() => activeConn && handleDelete(activeConn)}
-            >
-              删除
-            </Button>
-          </Tooltip>
-        </Space>
-        <Space size={6} wrap>
-          <Tooltip title="从服务器拉取全部协议配置到本地">
-            <Button size="small" icon={<CloudDownloadOutlined />} loading={pullingBaseline} onClick={onPullBaseline}>
-              从基线载入
-            </Button>
-          </Tooltip>
-          <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{source ?? '尚未加载'}</span>
-        </Space>
-      </Flex>
-
-      {/* 编辑器工具栏 */}
-      <Space size={4} wrap>
-        <Upload accept=".json,application/json" beforeUpload={onUpload} showUploadList={false}>
-          <Button icon={<InboxOutlined />} size="small" disabled={activeConn === null}>导入 .json</Button>
-        </Upload>
-        <Button onClick={onSave} type="primary" size="small" disabled={activeConn === null}>保存</Button>
-        <Button onClick={onClear} danger size="small" disabled={activeConn === null}>清空</Button>
-      </Space>
 
       {/* 实时校验提示（仅 codec，不阻塞输入；保存时再强制拦截） */}
       {activeConn !== null && activeConn !== '__errors__' && liveErrors.length > 0 && (
         <Alert
           type="warning"
           showIcon
+          className="pce-alert"
           message={`当前配置有 ${liveErrors.length} 处问题`}
           description={
-            <ul style={{ margin: 0, paddingLeft: 18, maxHeight: 120, overflow: 'auto' }}>
+            <ul style={{ margin: 0, paddingLeft: 20, maxHeight: 120, overflow: 'auto' }}>
               {liveErrors.slice(0, 8).map((e, i) => (
                 <li key={i} style={{ fontSize: 12 }}>{e}</li>
               ))}
@@ -525,82 +480,130 @@ export function ProtocolConfigEditor() {
         />
       )}
 
-      {/* 视图切换：结构化 | 源码（errors.json 强制源码，隐藏切换） */}
-      {!isErrorsView && (
-        <Flex justify="flex-start" align="center">
-          <Segmented
-            size="small"
-            value={viewMode}
-            onChange={(v) => setViewMode(v as 'struct' | 'source')}
-            options={[
-              { label: '结构化', value: 'struct' },
-              { label: '源码', value: 'source' },
-            ]}
-          />
-        </Flex>
-      )}
-
-      {/* 结构化视图：parse 失败 → 提示切源码 + 降级显示源码 Monaco；成功 → 帧布局/管线/路由键编辑器 */}
-      {showStructView && parsed.raw && parsed.schema ? (
-        <div
-          style={{
-            maxHeight: 'calc(100vh - 440px)',
-            minHeight: 240,
-            overflow: 'auto',
-            border: '1px solid var(--border-color, rgba(0,0,0,0.06))',
-            padding: 12,
-          }}
-        >
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <FrameLayoutEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
-            <PipelineEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
-            <RouteKeyEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
-            {/* 预览面板：调后端真实 codec 引擎跑一次 encode/decode，纯编辑辅助（不落库/不下发） */}
-            <Collapse
+      {/* 连接管理组：选择器 + 新建/复制/删除 + 从基线载入 + 来源状态 */}
+      <Card size="small" className="pce-toolbar-card" styles={{ body: { padding: 'var(--space-sm)' } }}>
+        <Flex justify="space-between" align="center" gap={8} wrap="wrap">
+          <Space size={6} wrap>
+            <Select
               size="small"
-              items={[
-                {
-                  key: 'preview',
-                  label: '预览（编码/解码）',
-                  children: (
-                    <PreviewPanel
-                      raw={parsed.raw}
-                      schema={parsed.schema}
-                      transport={deriveTransport(activeConn)}
-                    />
-                  ),
-                },
+              style={{ minWidth: 200 }}
+              value={activeConn ?? undefined}
+              placeholder={files.length === 0 ? '暂无连接' : '选择连接'}
+              loading={loading}
+              onChange={handleSwitch}
+              options={selectOptions}
+            />
+            <Tooltip title="新建连接（输入 <协议>:<服务名>，如 tcp:logic）">
+              <Button size="small" icon={<PlusOutlined />} onClick={() => openCreate('new')}>新建</Button>
+            </Tooltip>
+            <Tooltip title="复制当前连接为新连接">
+              <Button
+                size="small"
+                icon={<CopyOutlined />}
+                disabled={activeConn === null || activeConn === '__errors__'}
+                onClick={() => openCreate('copy')}
+              >
+                复制
+              </Button>
+            </Tooltip>
+            <Tooltip title="删除当前连接">
+              <Button
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                disabled={activeConn === null || activeConn === '__errors__'}
+                onClick={() => activeConn && handleDelete(activeConn)}
+              >
+                删除
+              </Button>
+            </Tooltip>
+            <Tooltip title="从服务器拉取全部协议配置到本地">
+              <Button size="small" icon={<CloudDownloadOutlined />} loading={pullingBaseline} onClick={onPullBaseline}>
+                从基线载入
+              </Button>
+            </Tooltip>
+          </Space>
+          {/* 来源状态：与操作按钮语义分离，走 --text-tertiary 小字 */}
+          <span className="pce-source-label">{source ?? '尚未加载'}</span>
+        </Flex>
+      </Card>
+
+      {/* 编辑操作组：导入/保存/清空 + 视图切换（结构化 | 源码） */}
+      <Card size="small" className="pce-toolbar-card" styles={{ body: { padding: 'var(--space-sm)' } }}>
+        <Flex justify="space-between" align="center" gap={8} wrap="wrap">
+          <Space size={4} wrap>
+            <Upload accept=".json,application/json" beforeUpload={onUpload} showUploadList={false}>
+              <Button icon={<InboxOutlined />} size="small" disabled={activeConn === null}>导入 .json</Button>
+            </Upload>
+            <Button onClick={onSave} type="primary" size="small" disabled={activeConn === null}>保存</Button>
+            <Button onClick={onClear} danger size="small" disabled={activeConn === null}>清空</Button>
+          </Space>
+          {/* 视图切换：errors.json 强制源码、隐藏切换 */}
+          {!isErrorsView && (
+            <Segmented
+              size="small"
+              value={viewMode}
+              onChange={(v) => setViewMode(v as 'struct' | 'source')}
+              options={[
+                { label: '结构化', value: 'struct' },
+                { label: '源码', value: 'source' },
               ]}
             />
-          </Space>
-        </div>
-      ) : (
-        <>
-          {!isErrorsView && viewMode === 'struct' && parsed.error && (
-            <Alert
-              type="warning"
-              showIcon
-              message="源码不是合法 JSON，请切到源码视图修正"
-              description={parsed.error}
-            />
           )}
-          <div style={{ height: 'calc(100vh - 440px)', minHeight: 240, border: '1px solid var(--border-color, rgba(0,0,0,0.06))' }}>
-            <Editor
-              language="json"
-              theme={monacoTheme}
-              value={content}
-              onChange={(v) => setContent(v ?? '')}
-              options={{
-                fontSize: 12,
-                minimap: { enabled: false },
-                scrollBeyondLastLine: false,
-                fixedOverflowWidgets: true,
-                automaticLayout: true,
-              }}
-            />
+        </Flex>
+      </Card>
+
+      {/* === 主内容区（flex:1 撑满浮窗剩余空间，替代 calc(100vh - 440) magic number）=== */}
+      <div className="pce-main">
+        {/* 结构化视图：parse 失败 → 提示切源码 + 降级显示源码 Monaco；成功 → 两列布局 */}
+        {showStructView && parsed.raw && parsed.schema ? (
+          <div className="pce-struct-cols">
+            {/* 左列：帧布局 + 管线 + 路由键（编辑器主体） */}
+            <div className="pce-col-left">
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                <FrameLayoutEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
+                <PipelineEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
+                <RouteKeyEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
+              </Space>
+            </div>
+            {/* 右列：预览面板（常驻，独立于左列滚动） */}
+            <div className="pce-col-right">
+              <PreviewPanel
+                raw={parsed.raw}
+                schema={parsed.schema}
+                transport={deriveTransport(activeConn)}
+              />
+            </div>
           </div>
-        </>
-      )}
+        ) : (
+          <>
+            {!isErrorsView && viewMode === 'struct' && parsed.error && (
+              <Alert
+                type="warning"
+                showIcon
+                message="源码不是合法 JSON，请切到源码视图修正"
+                description={parsed.error}
+                className="pce-alert"
+              />
+            )}
+            <div className="pce-source-editor">
+              <Editor
+                language="json"
+                theme={monacoTheme}
+                value={content}
+                onChange={(v) => setContent(v ?? '')}
+                options={{
+                  fontSize: 12,
+                  minimap: { enabled: false },
+                  scrollBeyondLastLine: false,
+                  fixedOverflowWidgets: true,
+                  automaticLayout: true,
+                }}
+              />
+            </div>
+          </>
+        )}
+      </div>
 
       {/* 新建/复制连接 Modal — zIndex 合规：照搬 ResourceTable 的 floatingWindowStore pattern */}
       <Modal

@@ -72,6 +72,34 @@ function HexInput(props: { value: string; onChange: (v: string) => void; placeho
   );
 }
 
+/**
+ * 把任意 hex 字符串规范化为「按字节分组展示」：
+ *   - 抽出所有 [0-9a-fA-F] 字符，每两位一组（不足偶数时尾部留单字符）。
+ *   - 字节之间用单空格分隔；每 8 字节（= 一段）末尾再加一个空格，增强长 hex 可读性。
+ *   - 每 16 字节换行（行间视觉断句）。
+ *
+ * 仅用于展示，回灌输入仍走原始字符串（HexInput 的 onChange 保留用户原样）。
+ */
+function formatHexGrouped(raw: string): string {
+  const cleaned = raw.replace(/[^0-9a-fA-F]/g, '');
+  if (cleaned.length === 0) return '';
+  const bytes: string[] = [];
+  for (let i = 0; i < cleaned.length; i += 2) {
+    bytes.push(cleaned.slice(i, i + 2));
+  }
+  const lines: string[] = [];
+  for (let i = 0; i < bytes.length; i += 16) {
+    const lineBytes = bytes.slice(i, i + 16);
+    // 每 8 字节插一个额外空格作为「半行」分隔。
+    const parts: string[] = [];
+    for (let j = 0; j < lineBytes.length; j += 8) {
+      parts.push(lineBytes.slice(j, j + 8).join(' '));
+    }
+    lines.push(parts.join('  '));
+  }
+  return lines.join('\n');
+}
+
 /** 一段可复制的 hex 结果展示（带复制按钮）。 */
 function HexOutput(props: { label: string; value: string | undefined }) {
   const { message } = AntApp.useApp();
@@ -88,7 +116,11 @@ function HexOutput(props: { label: string; value: string | undefined }) {
             type="text"
             icon={<CopyOutlined />}
             onClick={() => {
-              navigator.clipboard?.writeText(val).then(
+              if (!navigator.clipboard) {
+                message.warning('当前环境不支持复制');
+                return;
+              }
+              navigator.clipboard.writeText(val).then(
                 () => message.success('已复制'),
                 () => message.error('复制失败'),
               );
@@ -101,13 +133,14 @@ function HexOutput(props: { label: string; value: string | undefined }) {
           fontFamily: 'monospace',
           fontSize: 12,
           padding: '6px 8px',
-          background: 'var(--fill-quaternary, rgba(0,0,0,0.02))',
+          background: 'var(--hover-bg)',
           borderRadius: 4,
-          wordBreak: 'break-all',
+          whiteSpace: 'pre-wrap',
           minHeight: 28,
+          lineHeight: 1.6,
         }}
       >
-        {val || <Typography.Text type="secondary" style={{ fontSize: 12 }}>（空）</Typography.Text>}
+        {val ? formatHexGrouped(val) : <Typography.Text type="secondary" style={{ fontSize: 12 }}>（空）</Typography.Text>}
       </div>
     </div>
   );

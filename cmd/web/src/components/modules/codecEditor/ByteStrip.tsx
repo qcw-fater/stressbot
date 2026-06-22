@@ -23,6 +23,33 @@ export interface ByteStripProps {
 // 每字节的渲染宽度（px）。trailer 段同此宽度。
 const BYTE_PX = 18;
 
+/**
+ * 自适应刻度间隔：按 headerSize 取「每 N 字节一个 tick」，保证刻度密但不拥挤。
+ *   - headerSize ≤ 8：每 1 字节一个 tick（全程密集，便于精确读偏移）。
+ *   - headerSize ≤ 16：每 2 字节一个 tick。
+ *   - headerSize ≤ 32：每 4 字节一个 tick。
+ *   - 更大：每 8 字节一个 tick（避免长条带时刻度挤成一片）。
+ * 起始 tick = 0，末尾 tick = headerSize-1（若不是间隔倍数，单独补一个，便于看末边界）。
+ */
+function tickStepFor(headerSize: number): number {
+  if (headerSize <= 8) return 1;
+  if (headerSize <= 16) return 2;
+  if (headerSize <= 32) return 4;
+  return 8;
+}
+
+/** 计算偏移标尺上应标注的字节序号集合（去重 + 保序）。 */
+function rulerTicks(headerSize: number): number[] {
+  if (headerSize <= 0) return [];
+  const step = tickStepFor(headerSize);
+  const ticks: number[] = [];
+  for (let i = 0; i < headerSize; i += step) ticks.push(i);
+  // 末字节单独补（仅当未自然落在 step 倍数上）。
+  const last = headerSize - 1;
+  if (ticks[ticks.length - 1] !== last) ticks.push(last);
+  return ticks;
+}
+
 export function ByteStrip({ schema, selectedIndex, onSelect }: ByteStripProps) {
   const fields: Field[] = schema.header ?? [];
   const headerSize: number = schema.frame?.headerSize ?? 0;
@@ -46,9 +73,9 @@ export function ByteStrip({ schema, selectedIndex, onSelect }: ByteStripProps) {
           height: 44,
           marginTop: 6,
           marginBottom: 4,
-          background: 'var(--fill-color-quaternary, rgba(0,0,0,0.04))',
+          background: 'var(--hover-bg)',
           borderRadius: 4,
-          border: '1px solid var(--border-color, rgba(0,0,0,0.08))',
+          border: '1px solid var(--border-color)',
         }}
       >
         {headerSize > 0 &&
@@ -61,7 +88,7 @@ export function ByteStrip({ schema, selectedIndex, onSelect }: ByteStripProps) {
                 top: 0,
                 bottom: 0,
                 width: 1,
-                background: 'rgba(0,0,0,0.06)',
+                background: 'var(--divider-bg)',
               }}
             />
           ))}
@@ -87,9 +114,9 @@ export function ByteStrip({ schema, selectedIndex, onSelect }: ByteStripProps) {
                   top: 4,
                   width: Math.max(width, 4),
                   bottom: 4,
-                  background: r.bad ? '#ff4d4f' : fieldColor(i),
+                  background: r.bad ? 'var(--color-error)' : fieldColor(i),
                   opacity: isSel ? 1 : 0.78,
-                  outline: isSel ? '2px solid #1677ff' : 'none',
+                  outline: isSel ? '2px solid var(--color-blue)' : 'none',
                   outlineOffset: 1,
                   borderRadius: 3,
                   cursor: 'pointer',
@@ -120,9 +147,9 @@ export function ByteStrip({ schema, selectedIndex, onSelect }: ByteStripProps) {
                 top: 4,
                 width: trailerSize * BYTE_PX,
                 bottom: 4,
-                background: 'rgba(0,0,0,0.18)',
+                background: 'var(--badge-bg)',
                 borderRadius: 3,
-                color: '#fff',
+                color: 'var(--text-secondary)',
                 fontSize: 11,
                 display: 'flex',
                 alignItems: 'center',
@@ -135,16 +162,13 @@ export function ByteStrip({ schema, selectedIndex, onSelect }: ByteStripProps) {
             </div>
           </Tooltip>
         )}
-        {/* 偏移标尺 */}
-        <div style={{ position: 'relative', height: 14, marginTop: 2, fontSize: 10, color: 'var(--text-tertiary, #999)' }}>
-          {headerSize > 0 &&
-            [0, Math.floor(headerSize / 2), headerSize - 1]
-              .filter((v, idx, arr) => arr.indexOf(v) === idx)
-              .map((tick) => (
-                <span key={`lab-${tick}`} style={{ position: 'absolute', left: tick * BYTE_PX }}>
-                  {tick}
-                </span>
-              ))}
+        {/* 偏移标尺：自适应间隔加密 tick（headerSize 越大步长越大，保持刻度密但不拥挤） */}
+        <div style={{ position: 'relative', height: 14, marginTop: 2, fontSize: 10, color: 'var(--text-tertiary)' }}>
+          {rulerTicks(headerSize).map((tick) => (
+            <span key={`lab-${tick}`} style={{ position: 'absolute', left: tick * BYTE_PX }}>
+              {tick}
+            </span>
+          ))}
         </div>
       </div>
     </div>

@@ -22,7 +22,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Button, Card, InputNumber, Select, Space, Switch, Typography, message } from 'antd';
+import { Button, Card, Divider, InputNumber, Select, Space, Switch, Typography, message } from 'antd';
 import { DeleteOutlined, DownOutlined, PlusOutlined, UpOutlined } from '@ant-design/icons';
 import type { AlgoMeta, CodecSchema, FlagBit, PipelineStep } from '@/types/codec';
 import {
@@ -210,13 +210,13 @@ function PipelineStepCard({
   return (
     <div
       style={{
-        border: '1px solid var(--border-color, rgba(0,0,0,0.1))',
+        border: '1px solid var(--border-color)',
         borderRadius: 6,
         padding: 10,
       }}
     >
       <Space direction="vertical" size={8} style={{ width: '100%' }}>
-        {/* 行 1：name + op + algo + onError + flag + 移序/删除 */}
+        {/* ── 组1：基本属性（name / op / 算法 / onError / flag + 移序/删除） ── */}
         <Space size={8} wrap align="center">
           <Field label="name">
             <input
@@ -253,7 +253,7 @@ function PipelineStepCard({
                 return (
                   <span title={desc}>
                     {option.label}
-                    {desc ? <span style={{ color: 'var(--text-secondary, #999)', marginLeft: 6, fontSize: 11 }}>{desc}</span> : null}
+                    {desc ? <span style={{ color: 'var(--text-secondary)', marginLeft: 6, fontSize: 11 }}>{desc}</span> : null}
                   </span>
                 );
               }}
@@ -313,6 +313,10 @@ function PipelineStepCard({
           </Typography.Text>
         )}
 
+        {/* ── 组2：输入处理（encrypt 偏移 / checksum·hash over / 算法 params） ── */}
+        {(isEncrypt || isStandaloneDigest || selectedAlgo) && (
+          <Divider style={{ margin: '8px 0' }} dashed />
+        )}
         {/* encrypt 专属 */}
         {isEncrypt && (
           <Space size={12} wrap align="center">
@@ -360,6 +364,9 @@ function PipelineStepCard({
 
         {/* 动态 params：按选中算法的 AlgoParam[] 渲染字段。algo 元数据外的残留键保留在 raw。 */}
         <ParamsDynamic step={step} algo={selectedAlgo} onPatch={patch} />
+
+        {/* ── 组3：输出与条件（produces / when） ── */}
+        <Divider style={{ margin: '8px 0' }} dashed />
 
         {/* produces */}
         <ProducesSubform step={step} onPatch={patch} />
@@ -749,14 +756,31 @@ function collectFlagBitNames(schema: CodecSchema): string[] {
   return out;
 }
 
-/** 小字段标签 + 控件的统一布局。 */
+/** 小字段标签 + 控件的统一布局。
+ *  宽度足够时 label + 控件同一行（label 固定 80px，控件 flex:1）；
+ *  窄时（< 160px 容器）通过 flex-wrap 回退为 label 独占行，保持可读。 */
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div>
-      <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 2 }}>
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        minWidth: 0,
+      }}
+    >
+      <Typography.Text
+        type="secondary"
+        style={{
+          fontSize: 12,
+          flex: '0 0 80px',
+          marginRight: 6,
+          whiteSpace: 'nowrap',
+        }}
+      >
         {label}
       </Typography.Text>
-      {children}
+      <div style={{ flex: '1 1 auto', minWidth: 0 }}>{children}</div>
     </div>
   );
 }

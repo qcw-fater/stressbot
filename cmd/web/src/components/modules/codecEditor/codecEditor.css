@@ -1,22 +1,97 @@
-/* codecEditor — 帧布局编辑器内联输入与表格行的轻样式。
-   内联 input 复用 antd 的圆角/边框，使其与 InputNumber 视觉一致。 */
+/* codecEditor — 协议配置编辑器布局 + 帧布局表格内联输入的轻样式。
+   颜色全部走 tokens.css 变量，不硬编码 #xxx（功能性色板 FIELD_COLORS 除外）。 */
+
+/* === ProtocolConfigEditor 布局 === */
+
+/* 顶层 flex 列：工具条区（自然高）+ 主内容区（flex:1 撑满浮窗剩余空间）。
+   浮窗本身是固定/可调尺寸容器，内容区用 flex 撑满替代 calc(100vh - 440) magic number。 */
+.pce-root {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+/* Alert 间距统一 */
+.pce-alert {
+  margin-bottom: var(--space-sm);
+}
+
+/* 工具条卡片：连接管理 / 编辑操作两组视觉分隔，不再紧贴 */
+.pce-toolbar-card {
+  margin-bottom: var(--space-sm);
+  border: 1px solid var(--border-color);
+}
+
+/* 来源状态：与操作按钮语义分离，走 --text-tertiary 小字 */
+.pce-source-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+/* 主内容区：flex:1 撑满剩余，min-height:0 让子元素可滚动 */
+.pce-main {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 结构化视图两列容器：flex-wrap，窄窗（< 总 min-width）自动回退单列 */
+.pce-struct-cols {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  align-content: flex-start;
+  overflow: auto;
+  padding: var(--space-sm);
+  border: 1px solid var(--border-color);
+}
+
+/* 左列：编辑器主体（帧布局 + 管线 + 路由键） */
+.pce-col-left {
+  flex: 1 1 60%;
+  min-width: 360px;
+}
+
+/* 右列：预览面板（常驻） */
+.pce-col-right {
+  flex: 1 1 36%;
+  min-width: 280px;
+}
+
+/* 源码视图：Monaco 编辑器撑满主内容区 */
+.pce-source-editor {
+  flex: 1;
+  min-height: 240px;
+  border: 1px solid var(--border-color);
+}
+
+/* === 帧布局表格内联输入 === */
+
+/* 内联 input 复用 antd 圆角/边框，与 InputNumber 视觉一致。
+   边框/背景/文字均走 tokens 变量。 */
 .flet-input {
   padding: 1px 7px;
   font-size: 12px;
   line-height: 22px;
-  border: 1px solid var(--border-color, #d9d9d9);
+  border: 1px solid var(--border-color);
   border-radius: 6px;
-  background: var(--field-bg, #fff);
-  color: var(--text-color, rgba(0, 0, 0, 0.88));
+  background: var(--bg-elevated);
+  color: var(--text-primary);
   outline: none;
 }
 
+/* 聚焦态：主色（--color-blue 浅 #1677ff / 深 #4096ff），自动跟随暗色 */
 .flet-input:focus {
-  border-color: #1677ff;
-  box-shadow: 0 0 0 2px rgba(5, 145, 255, 0.1);
+  border-color: var(--color-blue);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-blue) 12%, transparent);
 }
 
-/* 字节条带越界/重叠行：左侧细红条提示（错误明细走 liveErrors）。 */
+/* 字节条带越界/重叠行：左侧细红条提示（错误明细走 liveErrors）。
+   红色走 --color-error（浅 #f5222d / 深 #ff7875）。 */
 .flet-row-bad > td {
-  box-shadow: inset 3px 0 0 #ff4d4f;
+  box-shadow: inset 3px 0 0 var(--color-error);
 }

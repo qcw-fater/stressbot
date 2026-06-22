@@ -199,7 +199,7 @@ export function HeaderFieldTable({ raw, schema, selectedIndex, onSelect, onEdit 
           onClick: () => onSelect(typeof idx === 'number' ? idx : null),
           style: {
             cursor: 'pointer',
-            background: typeof idx === 'number' && selectedIndex === idx ? 'var(--primary-color, #e6f4ff)' : undefined,
+            background: typeof idx === 'number' && selectedIndex === idx ? 'var(--hover-bg)' : undefined,
           },
         })}
         rowClassName={(_record, idx) => (ranges[idx]?.bad ? 'flet-row-bad' : '')}
