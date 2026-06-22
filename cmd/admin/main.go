@@ -59,8 +59,8 @@ func main() {
 	// 初始化日志
 	logConf := &stresslog.Config{
 		PrintConsole: true,
-		LogLevel:     cfg.Log.Level,
-		MaxSize:      cfg.Log.MaxSizeMB,
+		LogLevel:     cfg.Log.LogLevel,
+		MaxSize:      cfg.Log.MaxSize,
 		MaxBackups:   cfg.Log.MaxBackups,
 		MaxAge:       30,
 		Compress:     true,
