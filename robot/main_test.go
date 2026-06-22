@@ -18,6 +18,6 @@ import (
 func TestMain(m *testing.M) {
 	stresslog.InitLog(filepath.Join(os.TempDir(), "stressbot_robot_test.log"), "test",
 		&stresslog.Config{PrintConsole: false, LogLevel: "error"}, "")
-	monitor.Init(monitor.CollectorConfig{Enabled: true})
+	monitor.Init(monitor.CollectorConfig{})
 	os.Exit(m.Run())
 }

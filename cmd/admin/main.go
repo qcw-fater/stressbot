@@ -73,7 +73,7 @@ func main() {
 
 	// pprof 调试服务（独立端口，不依赖 monitor）
 	var stopPprof func()
-	if cfg.Pprof.Enabled {
+	if cfg.Pprof != nil {
 		pprofPort := cfg.Pprof.Port
 		if pprofPort <= 0 {
 			pprofPort = 6060

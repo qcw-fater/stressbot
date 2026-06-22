@@ -20,14 +20,14 @@ var errNotRegistered = errors.New("agent not registered on admin")
 //
 // 所有请求（注册/心跳/上报/任务完成/拉取任务）共用单一 http.Client：
 //   - 通用 timeout 由调用方通过 ResolvedConfig.RequestTimeout 注入；
-//   - 心跳通过 ctx.WithTimeout(HBRequestTimeout) 单独缩短到秒级，
+//   - 心跳通过 ctx.WithTimeout(HeartbeatTimeout) 单独缩短到秒级，
 //     避免一次心跳卡到 30s 才返回 → 长时间无感知 Admin 状态；
 //   - 调用方 ctx 取消（如 Agent shutdown）能立刻打断阻塞中的请求。
 type AdminClient struct {
 	base       string // "http://admin:7718"
 	agentID    string
 	client     *http.Client
-	hbReqLimit time.Duration // 心跳单次请求超时上限（取 min(HBRequestTimeout, Timeout)）
+	hbReqLimit time.Duration // 心跳单次请求超时上限（取 min(HeartbeatTimeout, Timeout)）
 }
 
 // NewAdminClient 创建 Admin 客户端。

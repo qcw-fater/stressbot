@@ -40,8 +40,8 @@ type StandaloneConfig struct {
 	Bot struct {
 		AccountPrefix string `json:"accountPrefix"` // 账号名前缀（默认 bot_）
 		StartNumber   int    `json:"startNumber"`   // 起始编号（默认 1）
-		Count         int    `json:"count"`         // 机器人总数（默认 1）
-		ConcurrentNum int    `json:"concurrentNum"` // 并发启动数（0=不限）
+		TotalBots     int    `json:"totalBots"`     // 机器人总数（默认 1）
+		Concurrency   int    `json:"concurrency"`   // 并发启动数（0=不限）
 		MainService   string `json:"mainService"`   // 主服务名（必填，TCP 连接标识）
 	} `json:"bot"`
 
@@ -60,13 +60,13 @@ type PprofConfig struct {
 
 // Config 全局配置结构。
 type Config struct {
-	Log        *stresslog.Config       `json:"log"`
-	Monitor    monitor.CollectorConfig `json:"monitor"`
-	Pprof      PprofConfig             `json:"pprof"`
-	Standalone *StandaloneConfig       `json:"standalone"`
-	Agent      agent.Config            `json:"agent"`
-	Shared     *sharedstate.Config     `json:"shared"` // 共享状态（Redis）配置，单机/Agent 共用
-	Daemon     bool                    `json:"daemon"` // 以守护进程模式运行（仅 Linux）
+	Log        *stresslog.Config         `json:"log"`
+	Monitor    *monitor.CollectorConfig  `json:"monitor"`   // nil = 不启用监控
+	Pprof      *PprofConfig              `json:"pprof"`      // nil = 不启用 pprof
+	Standalone *StandaloneConfig         `json:"standalone"` // nil = 非单机模式
+	Agent      agent.Config              `json:"agent"`
+	Redis      *sharedstate.RedisConfig  `json:"redis"` // nil = 未配置 Redis
+	Daemon     bool                      `json:"daemon"` // 以守护进程模式运行（仅 Linux）
 }
 
 func main() {
@@ -127,14 +127,14 @@ func main() {
 	stresslog.ReplaceLogger(newLogger)
 
 	if cfg.Agent.Enabled {
-		stresslog.Info("[MAIN] Agent 模式启动", zap.String("adminAddr", cfg.Agent.AdminAddr))
+		stresslog.Info("[MAIN] Agent 模式启动", zap.String("adminUrl", cfg.Agent.AdminUrl))
 		runAgentMode(cfg)
 	} else {
 		botCount := 0
 		conc := 0
 		if cfg.Standalone != nil {
-			botCount = cfg.Standalone.Bot.Count
-			conc = cfg.Standalone.Bot.ConcurrentNum
+			botCount = cfg.Standalone.Bot.TotalBots
+			conc = cfg.Standalone.Bot.Concurrency
 		}
 		stresslog.Info("[MAIN] 单机模式启动",
 			zap.Int("botCount", botCount),
@@ -149,7 +149,7 @@ func main() {
 func runAgentMode(cfg *Config) {
 	// pprof 调试服务（独立端口，不依赖 monitor）
 	var stopPprof func()
-	if cfg.Pprof.Enabled {
+	if cfg.Pprof != nil {
 		pprofPort := cfg.Pprof.Port
 		if pprofPort <= 0 {
 			pprofPort = 6060
@@ -162,11 +162,12 @@ func runAgentMode(cfg *Config) {
 		stresslog.Fatal("Agent 配置校验失败", zap.Error(err))
 	}
 
-	monitor.Init(monitor.CollectorConfig{
-		Enabled:      true,
-		ApdexT:       cfg.Monitor.ApdexT,
-		TimingDetail: cfg.Monitor.TimingDetail,
-	})
+	// Agent 模式默认启用监控（配置可空）。配置非空时沿用其 ApdexThresholdMs/TimingDetail。
+	monCfg := monitor.CollectorConfig{}
+	if cfg.Monitor != nil {
+		monCfg = *cfg.Monitor
+	}
+	monitor.Init(monCfg)
 
 	a, err := agent.New(resolved, monitor.Global())
 	if err != nil {
@@ -234,12 +235,13 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 		action.Name = name
 	}
 
-	// 初始化监控
-	monitor.Init(cfg.Monitor)
-	if cfg.Monitor.Enabled {
+	// 初始化监控（nil = 不启用）
+	if cfg.Monitor != nil {
+		monitor.Init(*cfg.Monitor)
+		httpEnabled := cfg.Monitor.HTTP != nil
 		stresslog.Info("[MAIN] 监控已启用",
-			zap.Bool("httpEnabled", cfg.Monitor.HTTPEnabled),
-			zap.Int("apdexT", cfg.Monitor.ApdexT))
+			zap.Bool("httpEnabled", httpEnabled),
+			zap.Int("apdexThresholdMs", cfg.Monitor.ApdexThresholdMs))
 	}
 
 	// 初始化 Lua 运行时池
@@ -263,10 +265,10 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 	// 使用但未配置 Redis → 启动前直接失败（与 Admin 行为一致），避免运行后 share.* 全部报错。
 	var sharedStore sharedstate.Store
 	if detectShareUsage(paths.Scripts) {
-		if cfg.Shared == nil || !cfg.Shared.Redis.Enabled() {
-			stresslog.Fatal("流程脚本使用了共享状态(share)，但未配置 Redis（shared.redis.addr 为空），无法启动")
+		if cfg.Redis == nil || !cfg.Redis.Enabled() {
+			stresslog.Fatal("流程脚本使用了共享状态(share)，但未配置 Redis（redis.host 为空），无法启动")
 		}
-		resolved, rerr := cfg.Shared.Redis.Resolve()
+		resolved, rerr := cfg.Redis.Resolve()
 		if rerr != nil {
 			stresslog.Fatal("共享状态配置无效", zap.Error(rerr))
 		}
@@ -277,7 +279,7 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 		}
 		sharedStore = store
 		stresslog.Info("[MAIN] 共享状态已启用",
-			zap.String("addr", resolved.Addr), zap.Int("db", resolved.DB), zap.String("runId", runID))
+			zap.String("addr", resolved.AddrMasked()), zap.Int("dbIndex", resolved.DBIndex), zap.String("runId", runID))
 	} else {
 		stresslog.Info("[MAIN] 共享状态未启用（脚本未使用 share）")
 	}
@@ -285,8 +287,8 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 	mgrCfg := robot.ManagerConfig{
 		AccountPrefix:  s.Bot.AccountPrefix,
 		StartNumber:    s.Bot.StartNumber,
-		Count:          s.Bot.Count,
-		ConcurrentNum:  s.Bot.ConcurrentNum,
+		Count:          s.Bot.TotalBots,
+		ConcurrentNum:  s.Bot.Concurrency,
 		StateExtra:     s.StateExtra,
 		CodecResolver:  resolver,
 		RequestTimeout: 60 * time.Second,
@@ -313,19 +315,19 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 
 	// 启动监控 Reporter 和 HTTP
 	var reporter *monitor.Reporter
-	if cfg.Monitor.Enabled {
+	if cfg.Monitor != nil {
 		reporter = monitor.NewReporter(monitor.Global(), 5*time.Second)
 		reporter.Start()
 
-		if cfg.Monitor.HTTPEnabled {
+		if cfg.Monitor.HTTP != nil {
 			monitor.RegisterHandlers(monitor.Global())
-			monitor.StartHTTPServer(cfg.Monitor.HTTPPort)
+			monitor.StartHTTPServer(cfg.Monitor.HTTP.Port)
 		}
 	}
 
 	// pprof 调试服务（独立端口，不依赖 monitor）
 	var stopPprof func()
-	if cfg.Pprof.Enabled {
+	if cfg.Pprof != nil {
 		pprofPort := cfg.Pprof.Port
 		if pprofPort <= 0 {
 			pprofPort = 6060
@@ -361,7 +363,7 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 		_ = sharedStore.Close()
 	}
 
-	if cfg.Monitor.Enabled {
+	if cfg.Monitor != nil {
 		os.MkdirAll("metrics", 0o755)
 		csvPath := fmt.Sprintf("metrics/metrics_%s.csv", time.Now().Format("2006_01_02_15_04_05"))
 		if err := monitor.ExportCSV(monitor.Global(), csvPath); err != nil {
@@ -455,8 +457,8 @@ func loadConfig(path string) (*Config, error) {
 		if s.Bot.StartNumber == 0 {
 			s.Bot.StartNumber = 1
 		}
-		if s.Bot.Count == 0 {
-			s.Bot.Count = 1
+		if s.Bot.TotalBots == 0 {
+			s.Bot.TotalBots = 1
 		}
 		if s.Bot.AccountPrefix == "" {
 			s.Bot.AccountPrefix = "bot_"

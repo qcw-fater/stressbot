@@ -71,7 +71,7 @@ func New(cfg *ResolvedConfig, collector *monitor.MetricsCollector) (*Agent, erro
 	id := generateUUID()
 
 	static := CollectStaticInfo()
-	sysmon, err := NewSystemMonitor(cfg.SystemInterval, static)
+	sysmon, err := NewSystemMonitor(cfg.MetricsInterval, static)
 	if err != nil {
 		return nil, fmt.Errorf("创建 SystemMonitor 失败: %w", err)
 	}
@@ -81,7 +81,7 @@ func New(cfg *ResolvedConfig, collector *monitor.MetricsCollector) (*Agent, erro
 		static.MemTotalMB = vm.Total / 1024 / 1024
 	}
 
-	httpCli := NewAdminClient(cfg.AdminAddr, id, cfg.RequestTimeout, cfg.HBRequestTimeout)
+	httpCli := NewAdminClient(cfg.AdminUrl, id, cfg.RequestTimeout, cfg.HeartbeatTimeout)
 
 	return &Agent{
 		id:        id,
@@ -111,7 +111,7 @@ func (a *Agent) Run() (err error) {
 	stresslog.Info("[AGENT] 启动中",
 		zap.String("agentID", a.id),
 		zap.String("name", a.cfg.Name),
-		zap.String("adminAddr", a.cfg.AdminAddr),
+		zap.String("adminUrl", a.cfg.AdminUrl),
 		zap.Duration("requestTimeout", a.cfg.RequestTimeout),
 		zap.Duration("reconnectInterval", a.cfg.ReconnectInterval),
 		zap.Duration("reconnectMaxInterval", a.cfg.ReconnectMaxInterval),
@@ -137,7 +137,7 @@ func (a *Agent) Run() (err error) {
 	a.regGeneration.Add(1)
 
 	// 4. 启动系统指标上报（常驻）
-	a.sysReporter = NewSystemReporter(a.httpCli, a.id, a.cfg.SystemInterval, a.sysmon)
+	a.sysReporter = NewSystemReporter(a.httpCli, a.id, a.cfg.MetricsInterval, a.sysmon)
 	a.sysReporter.Start(ctx)
 
 	// 5. 启动心跳循环
@@ -207,6 +207,9 @@ func (a *Agent) cancelCurrentTask(reason string) (taskID string, canceled bool) 
 // registerWithRetry 按配置的重连策略重试注册。
 //   - ReconnectMaxRetries < 0  → 持续重连，永不放弃
 //   - ReconnectMaxRetries >= 0 → 最多重试 N 次，超出返回 error 触发 triggerStop
+//
+// 协议约定：RegisterRequest 仍向 Admin 发送 stressInterval/systemInterval 两个 JSON 字段
+// （Admin 侧 AgentNode 列表分别展示），两者值相同（均取自 MetricsInterval）。
 func (a *Agent) registerWithRetry(ctx context.Context) error {
 	static := a.sysmon.Static()
 	req := RegisterRequest{
@@ -215,13 +218,13 @@ func (a *Agent) registerWithRetry(ctx context.Context) error {
 		Address:        a.cfg.Address,
 		AppVersion:     a.cfg.AppVersion,
 		MaxBots:        a.cfg.MaxBots,
-		StressInterval: a.cfg.StressInterval.String(),
-		SystemInterval: a.cfg.SystemInterval.String(),
+		StressInterval: a.cfg.MetricsInterval.String(),
+		SystemInterval: a.cfg.MetricsInterval.String(),
 		StaticInfo:     static,
 	}
 
 	stresslog.Info("[AGENT] 开始注册到 Admin",
-		zap.String("adminAddr", a.cfg.AdminAddr),
+		zap.String("adminUrl", a.cfg.AdminUrl),
 		zap.Int("maxRetries", a.cfg.ReconnectMaxRetries))
 
 	return RetryWithRetriesAndBackoff(ctx, func() error {
@@ -240,14 +243,14 @@ func (a *Agent) registerWithRetry(ctx context.Context) error {
 // heartbeatLoop 心跳循环。
 //
 // 行为规则（用户需求 §2 + §6）：
-//   - 心跳成功用 HBInterval；失败用 HBFailInterval（更快重试）
+//   - 心跳成功用 HeartbeatInterval；失败用 HeartbeatFailInterval（更快重试）
 //   - 任意请求收到 404（errNotRegistered）→ 视为 Admin 重启，立即取消任务并重新注册
-//   - 心跳连续失败 ≥ HBFailThreshold 次（默认 3）且处于 Busy 时取消任务
+//   - 心跳连续失败 ≥ HeartbeatFailThreshold 次（默认 3）且处于 Busy 时取消任务
 //     （Admin 是唯一指标聚合点，断联后压测流量没有观测价值；
-//     容忍窗口是 N×HBFailInterval，避免本地 ephemeral port 瞬时抖动误伤）
+//     容忍窗口是 N×HeartbeatFailInterval，避免本地 ephemeral port 瞬时抖动误伤）
 //   - 持续失败不退进程（除非重新注册超出 ReconnectMaxRetries）
 func (a *Agent) heartbeatLoop(ctx context.Context) {
-	interval := a.cfg.HBInterval
+	interval := a.cfg.HeartbeatInterval
 	timer := time.NewTimer(interval)
 	defer timer.Stop()
 
@@ -284,7 +287,7 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 					stresslog.Info("[AGENT] 心跳恢复", zap.Int("previousFailures", consecutiveFailures))
 				}
 				consecutiveFailures = 0
-				interval = a.cfg.HBInterval
+				interval = a.cfg.HeartbeatInterval
 				timer.Reset(interval)
 				continue
 			}
@@ -304,7 +307,7 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 				stresslog.Info("[AGENT] 重新注册成功，继续心跳")
 				a.regGeneration.Add(1)
 				consecutiveFailures = 0
-				interval = a.cfg.HBInterval
+				interval = a.cfg.HeartbeatInterval
 				timer.Reset(interval)
 				continue
 			}
@@ -315,11 +318,11 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 			// 实测 Windows 本机 127.0.0.1 在密集 robot 流量下会规律性瞬时阻塞
 			// （ephemeral port 短暂耗尽），1 次失败就 cancel 250 robot 损失太大。
 			switch {
-			case status == StatusBusy && consecutiveFailures >= a.cfg.HBFailThreshold:
+			case status == StatusBusy && consecutiveFailures >= a.cfg.HeartbeatFailThreshold:
 				stresslog.Error("[AGENT] 任务运行中连续心跳失败达到阈值，放弃当前任务",
 					zap.String("taskID", taskID),
 					zap.Int("consecutive", consecutiveFailures),
-					zap.Int("threshold", a.cfg.HBFailThreshold),
+					zap.Int("threshold", a.cfg.HeartbeatFailThreshold),
 					zap.Error(err))
 				a.cancelCurrentTask(fmt.Sprintf("心跳连续失败 %d 次 / Admin 断联", consecutiveFailures))
 			case consecutiveFailures <= 3:
@@ -331,7 +334,7 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 			}
 
 			// 失败时使用更短的重试间隔
-			interval = a.cfg.HBFailInterval
+			interval = a.cfg.HeartbeatFailInterval
 			timer.Reset(interval)
 		}
 	}
@@ -418,7 +421,7 @@ func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
 	// 创建并启动 StressReporter
 	stressReporter := NewStressReporter(
 		a.httpCli, a.id, task.TaskID,
-		a.cfg.StressInterval, a.collector,
+		a.cfg.MetricsInterval, a.collector,
 	)
 	a.mu.Lock()
 	a.stressReporter = stressReporter
