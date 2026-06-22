@@ -95,3 +95,135 @@
 .flet-row-bad > td {
   box-shadow: inset 3px 0 0 var(--color-error);
 }
+
+/* === ByteStrip 三明治布局 ===
+   颜色/间距全走 tokens 变量；FIELD_COLORS 功能性色板豁免（组件内 inline）。 */
+
+/* 外层横向滚动容器：仅在 totalBytes×8 超出容器宽时出现横向滚动条 */
+.bs-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* 内层：三层共用基准宽度，保证标签/色带/刻度尺水平对齐 */
+.bs-inner {
+  position: relative;
+}
+
+/* 三层通用 */
+.bs-label-layer,
+.bs-ruler-layer {
+  position: relative;
+  height: 16px;
+}
+.bs-ruler-layer {
+  height: 14px;
+  margin-top: 2px;
+}
+
+/* 字段名标签（层 1）：绝对定位 left=色块中心百分比，translateX 居中 */
+.bs-field-label {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+/* 选中字段标签：加粗 + 主文字色 + 置顶（强制显示时盖在相邻标签之上） */
+.bs-field-label-sel {
+  font-weight: 600;
+  color: var(--text-primary);
+  z-index: 2;
+}
+
+/* 色带（层 2）：overflow hidden clip 越界色块超出 totalBytes 的部分 */
+.bs-strip {
+  position: relative;
+  height: 28px;
+  overflow: hidden;
+  background: var(--hover-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+/* 字节分隔线：1px divider-bg，top/bottom 贴边 */
+.bs-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--divider-bg);
+  pointer-events: none;
+}
+
+/* headerSize 边界线：1px 实线 text-tertiary，区分 header 与 trailer */
+.bs-header-border {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--text-tertiary);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* 字段色块：absolute，top/bottom 各留 3px，圆角 3，点击选中 */
+.bs-field {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 3px;
+  cursor: pointer;
+  color: #fff;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  overflow: hidden;
+}
+/* 选中：主色 outline + offset */
+.bs-field-sel {
+  outline: 2px solid var(--color-blue);
+  outline-offset: 1px;
+  z-index: 2;
+}
+/* offset 范围内显（白字 10px 居中） */
+.bs-field-offset {
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* trailer 段：badge-bg 底，text-secondary 字 */
+.bs-trailer {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  background: var(--badge-bg);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+  user-select: none;
+}
+.bs-trailer-label {
+  color: var(--text-secondary);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* 刻度尺 tick（层 3）：绝对定位 left=字节序号百分比，translateX 居中 */
+.bs-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
