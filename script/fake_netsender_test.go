@@ -1,7 +1,9 @@
 package script
 
 import (
+	"bytes"
 	"context"
+	"testing"
 	"time"
 
 	"stressbot/adapter"
@@ -68,11 +70,33 @@ func (f *fakeNetSender) RegisterHeartbeat(engine.HeartbeatActionConfig) error { 
 
 func (f *fakeNetSender) GetTCPSecretKey(string) []byte { return f.tcpKey }
 
-func (f *fakeNetSender) SetTCPSecretKey(string, []byte) {}
+func (f *fakeNetSender) SetTCPSecretKey(_ string, key []byte) {
+	f.tcpKey = append([]byte(nil), key...)
+}
 
 func (f *fakeNetSender) GetUDPSecretKey(string) []byte { return f.udpKey }
 
-func (f *fakeNetSender) SetUDPSecretKey(string, []byte) {}
+func (f *fakeNetSender) SetUDPSecretKey(_ string, key []byte) {
+	f.udpKey = append([]byte(nil), key...)
+}
+
+func TestFakeNetSenderSecretKeyCopiesInput(t *testing.T) {
+	f := &fakeNetSender{}
+
+	tcpKey := []byte{1, 2, 3}
+	f.SetTCPSecretKey("logic", tcpKey)
+	tcpKey[0] = 9
+	if got, want := f.GetTCPSecretKey("logic"), []byte{1, 2, 3}; !bytes.Equal(got, want) {
+		t.Fatalf("TCP secret key = %v, want %v", got, want)
+	}
+
+	udpKey := []byte{4, 5, 6}
+	f.SetUDPSecretKey("battle", udpKey)
+	udpKey[0] = 9
+	if got, want := f.GetUDPSecretKey("battle"), []byte{4, 5, 6}; !bytes.Equal(got, want) {
+		t.Fatalf("UDP secret key = %v, want %v", got, want)
+	}
+}
 
 // newTestState 注册全部模块 + 注入 fake Context。
 func newTestState(t interface{ Helper() }, ctx context.Context, ns engine.NetSender, resolver adapter.CodecResolver) *lua.LState {
