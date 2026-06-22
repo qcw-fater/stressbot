@@ -22,6 +22,7 @@ import {
   BranchesOutlined,
   BugOutlined,
   CheckCircleOutlined,
+  ClusterOutlined,
   DatabaseOutlined,
   EditOutlined,
   FileTextOutlined,
@@ -56,6 +57,7 @@ export interface RuntimeBarProps {
   onOpenSystem?: () => void;
   onOpenLogs?: () => void;
   onOpenNotepad?: () => void;
+  onOpenProtocolConfig?: () => void;
 }
 
 const SECTION_DIVIDER = (
@@ -87,6 +89,7 @@ export function RuntimeBar({
   onOpenSystem,
   onOpenLogs,
   onOpenNotepad,
+  onOpenProtocolConfig,
 }: RuntimeBarProps) {
   const { modal } = AntApp.useApp();
 
@@ -447,18 +450,23 @@ export function RuntimeBar({
             记事本
           </Button>
         </Tooltip>
-        <Tooltip title={codecSchemaErrors && codecSchemaErrors.length > 0 ? `协议配置有 ${codecSchemaErrors.length} 处问题` : '资源管理（proto / lua / 协议配置）'}>
+        <Tooltip title={codecSchemaErrors && codecSchemaErrors.length > 0 ? `协议配置有 ${codecSchemaErrors.length} 处问题` : '协议配置：按连接管理帧布局与错误码映射'}>
           <Badge
-            count={
-              codecSchemaErrors && codecSchemaErrors.length > 0
-                ? codecSchemaErrors.length
-                : pendingSyncResult
-                  ? pendingSyncResult.conflicts.length + pendingSyncResult.removed.length
-                  : 0
-            }
+            count={codecSchemaErrors && codecSchemaErrors.length > 0 ? codecSchemaErrors.length : 0}
             overflowCount={99}
             offset={[-4, 4]}
-            color={codecSchemaErrors && codecSchemaErrors.length > 0 ? undefined : 'orange'}
+          >
+            <Button icon={<ClusterOutlined />} onClick={onOpenProtocolConfig}>
+              协议
+            </Button>
+          </Badge>
+        </Tooltip>
+        <Tooltip title="资源管理（proto / lua / 适配器）：编辑定义文件并下发到节点">
+          <Badge
+            count={pendingSyncResult ? pendingSyncResult.conflicts.length + pendingSyncResult.removed.length : 0}
+            overflowCount={99}
+            offset={[-4, 4]}
+            color="orange"
           >
             <Button icon={<DatabaseOutlined />} onClick={onOpenResources}>
               资源

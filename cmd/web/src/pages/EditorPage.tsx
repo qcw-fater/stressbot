@@ -57,6 +57,9 @@ const LazyLogsTab = lazy(() =>
 const LazyNotepadTab = lazy(() =>
   import('@/components/modules/notepad/NotepadTab').then((m) => ({ default: m.NotepadTab })),
 );
+const LazyProtocolConfigEditor = lazy(() =>
+  import('@/components/modules/ProtocolConfigEditor').then((m) => ({ default: m.ProtocolConfigEditor })),
+);
 const LazyActiveTaskGuardModal = lazy(() =>
   import('@/components/runtime/ActiveTaskGuardModal').then((m) => ({
     default: m.ActiveTaskGuardModal,
@@ -131,6 +134,7 @@ function HomeShellInner() {
   const [systemOpen, setSystemOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
   const [notepadOpen, setNotepadOpen] = useState(false);
+  const [protocolConfigOpen, setProtocolConfigOpen] = useState(false);
   const [guardTask, setGuardTask] = useState<TaskBrief | null>(null);
   const [booting, setBooting] = useState(true);
   const policy = useMemo(() => pollingPolicy(mode), [mode]);
@@ -321,6 +325,7 @@ function HomeShellInner() {
               onOpenSystem={() => setSystemOpen(true)}
               onOpenLogs={() => setLogsOpen(true)}
               onOpenNotepad={() => setNotepadOpen(true)}
+              onOpenProtocolConfig={() => setProtocolConfigOpen(true)}
             />
           }
         />
@@ -380,6 +385,20 @@ function HomeShellInner() {
         >
           <Suspense fallback={<Spin />}>
             <LazyNotepadTab />
+          </Suspense>
+        </FloatingWindow>
+      </LazyMount>
+      <LazyMount visible={protocolConfigOpen}>
+        <FloatingWindow
+          windowId="protocolConfig"
+          title="协议配置"
+          defaultSize={{ width: 900, height: 640 }}
+          minSize={{ width: 600, height: 400 }}
+          open={protocolConfigOpen}
+          onClose={() => setProtocolConfigOpen(false)}
+        >
+          <Suspense fallback={<Spin />}>
+            <LazyProtocolConfigEditor />
           </Suspense>
         </FloatingWindow>
       </LazyMount>
