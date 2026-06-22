@@ -24,9 +24,10 @@ var logFilePath string
 
 // Config 日志配置的结构体
 type Config struct {
+	Path        string `json:"path" yaml:"path"`                 // 日志文件路径
 	PrintConsole bool   `json:"printConsole" yaml:"printConsole"` // 是否控制台输出
 	LogLevel     string `json:"level" yaml:"logLevel"`            // 日志等级[debug, info, warn, error]
-	MaxSize      int    `json:"maxSize" yaml:"maxSize"`           // 日志文件大小，超过则切割，单位M
+	MaxSize      int    `json:"maxSizeMB" yaml:"maxSizeMB"`       // 日志文件大小，超过则切割，单位M
 	MaxBackups   int    `json:"maxBackups" yaml:"maxBackups"`     // 日志文件最大保留个数
 	MaxAge       int    `json:"maxAge" yaml:"maxAge"`             // 日志文件最大保存天数
 	LocalTime    bool   `json:"localTime" yaml:"localTime"`       // 是否使用服务器本地时间
@@ -36,6 +37,7 @@ type Config struct {
 
 func defaultConfig() *Config {
 	return &Config{
+		Path:         "log/stressbot.log",
 		PrintConsole: true,
 		LogLevel:     "debug",
 		MaxSize:      500,

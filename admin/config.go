@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"stressbot/sharedstate"
+	stresslog "stressbot/utils/log"
 	json "stressbot/utils/jsonx"
 )
 
@@ -18,7 +19,7 @@ type Config struct {
 
 	AgentRegistry RegistryConfig      `json:"agentRegistry"` // Agent 注册与健康管理
 	History       HistoryConfig       `json:"history"`       // 历史归档
-	Log           LogConfig           `json:"log"`           // 日志
+	Log           stresslog.Config    `json:"log"`           // 日志
 	Pprof         PprofConfig         `json:"pprof"`         // pprof 调试服务
 	Shared        *sharedstate.Config `json:"shared"`        // 共享状态（Redis）配置，下发给 Agent
 	Daemon        bool                `json:"daemon"`        // 以守护进程模式运行（仅 Linux）
@@ -94,14 +95,6 @@ func (c MySQLConfig) DSN() string {
 		c.Username, c.Password, c.Host, port, c.Database, extra)
 }
 
-// LogConfig 日志配置。
-type LogConfig struct {
-	Level      string `json:"level"`      // 日志级别（debug/info/warn/error）
-	Path       string `json:"path"`       // 日志文件路径
-	MaxSizeMB  int    `json:"maxSizeMB"`  // 单个日志文件最大体积（MB）
-	MaxBackups int    `json:"maxBackups"` // 保留的旧日志文件数
-}
-
 // DefaultConfig 返回填充了默认值的配置。
 func DefaultConfig() Config {
 	return Config{
@@ -120,10 +113,10 @@ func DefaultConfig() Config {
 				ConnMaxLifetime: "1h",
 			},
 		},
-		Log: LogConfig{
-			Level:      "info",
+		Log: stresslog.Config{
 			Path:       "log/admin.log",
-			MaxSizeMB:  100,
+			LogLevel:   "info",
+			MaxSize:    100,
 			MaxBackups: 10,
 		},
 	}
