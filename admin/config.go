@@ -3,6 +3,7 @@ package admin
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"stressbot/sharedstate"
@@ -57,22 +58,40 @@ type HistoryConfig struct {
 type MySQLConfig struct {
 	Host            string `json:"host"`            // 主机地址
 	Port            int    `json:"port"`            // 端口号（默认 3306）
-	User            string `json:"user"`            // 用户名
+	Username        string `json:"username"`        // 用户名
 	Password        string `json:"password"`        // 密码
 	Database        string `json:"database"`        // 数据库名
+	DialTimeout     string `json:"dialTimeout"`     // 拨号超时（DSN timeout）
+	ReadTimeout     string `json:"readTimeout"`     // 读超时（DSN readTimeout）
+	WriteTimeout    string `json:"writeTimeout"`    // 写超时（DSN writeTimeout）
 	MaxOpenConns    int    `json:"maxOpenConns"`    // 最大打开连接数
 	MaxIdleConns    int    `json:"maxIdleConns"`    // 最大空闲连接数
 	ConnMaxLifetime string `json:"connMaxLifetime"` // 连接最大存活时间
 }
 
-// DSN 拼接标准 MySQL 连接字符串。
+// DSN 拼接标准 MySQL 连接字符串，含 timeout 参数。
 func (c MySQLConfig) DSN() string {
 	port := c.Port
 	if port == 0 {
 		port = 3306
 	}
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true&loc=Local",
-		c.User, c.Password, c.Host, port, c.Database)
+	// timeout 参数：各字段未配则用驱动默认（不写进 DSN）。
+	var params []string
+	if c.DialTimeout != "" {
+		params = append(params, "timeout="+c.DialTimeout)
+	}
+	if c.ReadTimeout != "" {
+		params = append(params, "readTimeout="+c.ReadTimeout)
+	}
+	if c.WriteTimeout != "" {
+		params = append(params, "writeTimeout="+c.WriteTimeout)
+	}
+	extra := "parseTime=true&loc=Local"
+	if len(params) > 0 {
+		extra += "&" + strings.Join(params, "&")
+	}
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?%s",
+		c.Username, c.Password, c.Host, port, c.Database, extra)
 }
 
 // LogConfig 日志配置。
