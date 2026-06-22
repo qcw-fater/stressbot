@@ -1,6 +1,7 @@
 package script
 
 import (
+	"errors"
 	"strings"
 
 	"stressbot/engine"
@@ -67,7 +68,8 @@ func buildActionError(code int, detail, scriptName string) error {
 // errTableFromActionErr 从 *engine.ActionError 提取 code+detail 构造 err table（不压栈）。
 // 供“网络层已有完整 ActionError”的分支使用（替代 rememberActionErr）。
 func errTableFromActionErr(L *lua.LState, err error) *lua.LTable {
-	if ae, ok := err.(*engine.ActionError); ok {
+	var ae *engine.ActionError
+	if errors.As(err, &ae) {
 		return newErrTable(L, int(ae.ErrorCode()), ae.ErrorDetail())
 	}
 	return newErrTable(L, int(errcode.ErrSendFailed), err.Error())

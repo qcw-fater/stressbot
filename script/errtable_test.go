@@ -2,6 +2,7 @@ package script
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -47,6 +48,20 @@ func TestClassifyCode(t *testing.T) {
 	}
 	if classifyCode(1004) != errcode.KindServer {
 		t.Fatal("code=1004 应 server")
+	}
+}
+
+func TestErrTableFromActionErrPreservesWrappedActionError(t *testing.T) {
+	L := lua.NewState()
+	defer L.Close()
+
+	wrapped := fmt.Errorf("包装: %w", engine.NewActionError(errcode.ErrRecvTimeout, "service=logic route=1:2 recv 超时"))
+	tb := errTableFromActionErr(L, wrapped)
+	if got := tb.RawGetString("code"); got != lua.LNumber(int(errcode.ErrRecvTimeout)) {
+		t.Fatalf("code = %v, want %d", got, int(errcode.ErrRecvTimeout))
+	}
+	if got := lua.LVAsString(tb.RawGetString("detail")); got != "service=logic route=1:2 recv 超时" {
+		t.Fatalf("detail = %q", got)
 	}
 }
 
