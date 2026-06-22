@@ -79,8 +79,8 @@ func pushNotEnabled(L *lua.LState, first lua.LValue) int {
 	return 2
 }
 
-// pushResult 推送 (first, err)；err 为 nil 时第二返回值为 nil。
-func pushResult(L *lua.LState, first lua.LValue, err error) int {
+// pushShareResult 推送 (first, err)；err 为 nil 时第二返回值为 nil。
+func pushShareResult(L *lua.LState, first lua.LValue, err error) int {
 	L.Push(first)
 	if err != nil {
 		L.Push(lua.LString(err.Error()))
@@ -165,9 +165,9 @@ func shareSet(L *lua.LState) int {
 	defer cancel()
 	err = ctx.Shared.Set(opCtx, key, value, ttl)
 	if err != nil {
-		return pushResult(L, lua.LFalse, err)
+		return pushShareResult(L, lua.LFalse, err)
 	}
-	return pushResult(L, lua.LTrue, nil)
+	return pushShareResult(L, lua.LTrue, nil)
 }
 
 // share.get(key) -> value, ok, err
@@ -206,9 +206,9 @@ func shareDel(L *lua.LState) int {
 	defer cancel()
 	err = ctx.Shared.Delete(opCtx, key)
 	if err != nil {
-		return pushResult(L, lua.LFalse, err)
+		return pushShareResult(L, lua.LFalse, err)
 	}
-	return pushResult(L, lua.LTrue, nil)
+	return pushShareResult(L, lua.LTrue, nil)
 }
 
 // share.exists(key) -> exists, err
@@ -225,9 +225,9 @@ func shareExists(L *lua.LState) int {
 	defer cancel()
 	exists, err = ctx.Shared.Exists(opCtx, key)
 	if err != nil {
-		return pushResult(L, lua.LFalse, err)
+		return pushShareResult(L, lua.LFalse, err)
 	}
-	return pushResult(L, lua.LBool(exists), nil)
+	return pushShareResult(L, lua.LBool(exists), nil)
 }
 
 // share.expire(key, ttlSec) -> ok, err
@@ -245,9 +245,9 @@ func shareExpire(L *lua.LState) int {
 	defer cancel()
 	ok, err = ctx.Shared.Expire(opCtx, key, ttl)
 	if err != nil {
-		return pushResult(L, lua.LFalse, err)
+		return pushShareResult(L, lua.LFalse, err)
 	}
-	return pushResult(L, lua.LBool(ok), nil)
+	return pushShareResult(L, lua.LBool(ok), nil)
 }
 
 // ── Counter ───────────────────────────────────────────
@@ -268,9 +268,9 @@ func shareIncr(L *lua.LState) int {
 	defer cancel()
 	n, err = ctx.Shared.Incr(opCtx, key, delta, ttl)
 	if err != nil {
-		return pushResult(L, lua.LNil, err)
+		return pushShareResult(L, lua.LNil, err)
 	}
-	return pushResult(L, lua.LNumber(n), nil)
+	return pushShareResult(L, lua.LNumber(n), nil)
 }
 
 // ── Claim / Lock ──────────────────────────────────────
@@ -291,9 +291,9 @@ func shareClaim(L *lua.LState) int {
 	defer cancel()
 	ok, err = ctx.Shared.Claim(opCtx, key, owner, ttl)
 	if err != nil {
-		return pushResult(L, lua.LFalse, err)
+		return pushShareResult(L, lua.LFalse, err)
 	}
-	return pushResult(L, lua.LBool(ok), nil)
+	return pushShareResult(L, lua.LBool(ok), nil)
 }
 
 // share.release(key, owner) -> released, err
@@ -311,9 +311,9 @@ func shareRelease(L *lua.LState) int {
 	defer cancel()
 	ok, err = ctx.Shared.Release(opCtx, key, owner)
 	if err != nil {
-		return pushResult(L, lua.LFalse, err)
+		return pushShareResult(L, lua.LFalse, err)
 	}
-	return pushResult(L, lua.LBool(ok), nil)
+	return pushShareResult(L, lua.LBool(ok), nil)
 }
 
 // share.owner(key) -> owner, err
@@ -331,12 +331,12 @@ func shareOwner(L *lua.LState) int {
 	defer cancel()
 	owner, ok, err = ctx.Shared.Owner(opCtx, key)
 	if err != nil {
-		return pushResult(L, lua.LNil, err)
+		return pushShareResult(L, lua.LNil, err)
 	}
 	if !ok {
-		return pushResult(L, lua.LNil, nil)
+		return pushShareResult(L, lua.LNil, nil)
 	}
-	return pushResult(L, lua.LString(owner), nil)
+	return pushShareResult(L, lua.LString(owner), nil)
 }
 
 // share.renew(key, owner [, ttlSec]) -> ok, err
@@ -355,9 +355,9 @@ func shareRenew(L *lua.LState) int {
 	defer cancel()
 	ok, err = ctx.Shared.Renew(opCtx, key, owner, ttl)
 	if err != nil {
-		return pushResult(L, lua.LFalse, err)
+		return pushShareResult(L, lua.LFalse, err)
 	}
-	return pushResult(L, lua.LBool(ok), nil)
+	return pushShareResult(L, lua.LBool(ok), nil)
 }
 
 // ── Queue / List ──────────────────────────────────────
@@ -377,9 +377,9 @@ func shareQueuePush(L *lua.LState) int {
 	defer cancel()
 	err = ctx.Shared.QueuePush(opCtx, key, value, ttl)
 	if err != nil {
-		return pushResult(L, lua.LFalse, err)
+		return pushShareResult(L, lua.LFalse, err)
 	}
-	return pushResult(L, lua.LTrue, nil)
+	return pushShareResult(L, lua.LTrue, nil)
 }
 
 // share.queue_pop(key) -> value, ok, err（ok=false 表示队列为空，用于区分空队列与存储的 null）
@@ -419,9 +419,9 @@ func shareQueueLen(L *lua.LState) int {
 	defer cancel()
 	n, err = ctx.Shared.QueueLen(opCtx, key)
 	if err != nil {
-		return pushResult(L, lua.LNil, err)
+		return pushShareResult(L, lua.LNil, err)
 	}
-	return pushResult(L, lua.LNumber(n), nil)
+	return pushShareResult(L, lua.LNumber(n), nil)
 }
 
 // share.queue_expire(key, ttlSec) -> ok, err
@@ -439,9 +439,9 @@ func shareQueueExpire(L *lua.LState) int {
 	defer cancel()
 	ok, err = ctx.Shared.QueueExpire(opCtx, key, ttl)
 	if err != nil {
-		return pushResult(L, lua.LFalse, err)
+		return pushShareResult(L, lua.LFalse, err)
 	}
-	return pushResult(L, lua.LBool(ok), nil)
+	return pushShareResult(L, lua.LBool(ok), nil)
 }
 
 // ── Hash ──────────────────────────────────────────────
@@ -462,9 +462,9 @@ func shareHashSet(L *lua.LState) int {
 	defer cancel()
 	err = ctx.Shared.HashSet(opCtx, key, field, value, ttl)
 	if err != nil {
-		return pushResult(L, lua.LFalse, err)
+		return pushShareResult(L, lua.LFalse, err)
 	}
-	return pushResult(L, lua.LTrue, nil)
+	return pushShareResult(L, lua.LTrue, nil)
 }
 
 // share.hash_get(key, field) -> value, ok, err
@@ -506,16 +506,16 @@ func shareHashGetAll(L *lua.LState) int {
 	defer cancel()
 	m, ok, err = ctx.Shared.HashGetAll(opCtx, key)
 	if err != nil {
-		return pushResult(L, lua.LNil, err)
+		return pushShareResult(L, lua.LNil, err)
 	}
 	if !ok {
-		return pushResult(L, lua.LNil, nil)
+		return pushShareResult(L, lua.LNil, nil)
 	}
 	tb := L.CreateTable(0, len(m))
 	for field, v := range m {
 		tb.RawSetString(field, goValueToLua(L, v))
 	}
-	return pushResult(L, tb, nil)
+	return pushShareResult(L, tb, nil)
 }
 
 // share.hash_del(key, field) -> ok, err
@@ -532,9 +532,9 @@ func shareHashDel(L *lua.LState) int {
 	defer cancel()
 	err = ctx.Shared.HashDelete(opCtx, key, field)
 	if err != nil {
-		return pushResult(L, lua.LFalse, err)
+		return pushShareResult(L, lua.LFalse, err)
 	}
-	return pushResult(L, lua.LTrue, nil)
+	return pushShareResult(L, lua.LTrue, nil)
 }
 
 // share.hash_incr(key, field [, delta [, ttlSec]]) -> value, err
@@ -554,9 +554,9 @@ func shareHashIncr(L *lua.LState) int {
 	defer cancel()
 	n, err = ctx.Shared.HashIncr(opCtx, key, field, delta, ttl)
 	if err != nil {
-		return pushResult(L, lua.LNil, err)
+		return pushShareResult(L, lua.LNil, err)
 	}
-	return pushResult(L, lua.LNumber(n), nil)
+	return pushShareResult(L, lua.LNumber(n), nil)
 }
 
 // share.hash_expire(key, ttlSec) -> ok, err
@@ -574,7 +574,7 @@ func shareHashExpire(L *lua.LState) int {
 	defer cancel()
 	ok, err = ctx.Shared.HashExpire(opCtx, key, ttl)
 	if err != nil {
-		return pushResult(L, lua.LFalse, err)
+		return pushShareResult(L, lua.LFalse, err)
 	}
-	return pushResult(L, lua.LBool(ok), nil)
+	return pushShareResult(L, lua.LBool(ok), nil)
 }
