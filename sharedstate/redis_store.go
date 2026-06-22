@@ -55,7 +55,7 @@ func NewRedisStore(cfg ResolvedRedisConfig, runID string) (*RedisStore, error) {
 		opts.PoolSize = cfg.MaxOpenConns
 	}
 	if cfg.MaxIdleConns > 0 {
-		opts.MinIdleConns = cfg.MaxIdleConns
+		opts.MaxIdleConns = cfg.MaxIdleConns
 	}
 	if cfg.ConnMaxLifetime > 0 {
 		opts.ConnMaxLifetime = cfg.ConnMaxLifetime
