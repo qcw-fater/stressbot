@@ -4,7 +4,6 @@ local robot = require("robot")
 local proto = require("proto")
 local network = require("network")
 local log = require("log")
-local share = require("share")
 
 local function currentTeamId()
     local teamId = robot.get("teamId")
@@ -52,20 +51,6 @@ end
 
 function execute(r)
     leaveTeamIfNeeded()
-
-    -- 兼容清理旧 v1 锁；v2 不再依赖长期机器人锁。
-    local roleId = robot.get("roleId")
-    local account = robot.get("account") or ""
-    local prevTeamKey = robot.get("rankedTeamKey")
-    if roleId and share then
-        pcall(function()
-            share.release("ranked:v1:robot:" .. tostring(roleId), account)
-            if prevTeamKey then
-                share.release("ranked:v1:team:" .. tostring(prevTeamKey) .. ":lock", account)
-            end
-        end)
-    end
-
     clearLocalState()
     return 0
 end
