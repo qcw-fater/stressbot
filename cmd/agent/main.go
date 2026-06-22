@@ -52,10 +52,9 @@ type StandaloneConfig struct {
 	Duration string `json:"duration"`
 }
 
-// PprofConfig pprof 调试服务配置（standalone / agent / admin 共用）。
+// PprofConfig pprof 调试服务配置（Config.Pprof 为 nil 时不启用）。
 type PprofConfig struct {
-	Enabled bool `json:"enabled"` // 是否启用 pprof（默认 false）
-	Port    int  `json:"port"`    // pprof 监听端口（默认 6060）
+	Port int `json:"port"` // pprof 监听端口（默认 6060）
 }
 
 // Config 全局配置结构。
