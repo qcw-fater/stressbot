@@ -2,20 +2,38 @@ package sharedstate
 
 import (
 	"context"
+	"net"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 )
 
-// newTestStore 连接测试 Redis；未配置 STRESSBOT_TEST_REDIS 时跳过整组集成测试。
-// 用法：STRESSBOT_TEST_REDIS=127.0.0.1:6379 go test ./sharedstate/ -run Integration
-func newTestStore(t *testing.T) *RedisStore {
+// testRedisConfig 从 STRESSBOT_TEST_REDIS 环境变量读取 host:port 并构造 RedisConfig。
+// 环境变量未设置时跳过当前测试。
+func testRedisConfig(t *testing.T) RedisConfig {
 	t.Helper()
 	addr := os.Getenv("STRESSBOT_TEST_REDIS")
 	if addr == "" {
 		t.Skip("未设置 STRESSBOT_TEST_REDIS，跳过 Redis 集成测试")
 	}
-	resolved, err := RedisConfig{Addr: addr, KeyPrefix: "sbtest"}.Resolve()
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatalf("解析 STRESSBOT_TEST_REDIS 失败 (期望 host:port): %v", err)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		t.Fatalf("解析 STRESSBOT_TEST_REDIS 端口失败: %v", err)
+	}
+	return RedisConfig{Host: host, Port: port, KeyPrefix: "sbtest"}
+}
+
+// newTestStore 连接测试 Redis；未配置 STRESSBOT_TEST_REDIS 时跳过整组集成测试。
+// 用法：STRESSBOT_TEST_REDIS=127.0.0.1:6379 go test ./sharedstate/ -run Integration
+func newTestStore(t *testing.T) *RedisStore {
+	t.Helper()
+	cfg := testRedisConfig(t)
+	resolved, err := cfg.Resolve()
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -172,11 +190,8 @@ func TestIntegrationHash(t *testing.T) {
 }
 
 func TestIntegrationCleanup(t *testing.T) {
-	addr := os.Getenv("STRESSBOT_TEST_REDIS")
-	if addr == "" {
-		t.Skip("未设置 STRESSBOT_TEST_REDIS，跳过 Redis 集成测试")
-	}
-	resolved, _ := RedisConfig{Addr: addr, KeyPrefix: "sbtest"}.Resolve()
+	cfg := testRedisConfig(t)
+	resolved, _ := cfg.Resolve()
 	store, err := NewRedisStore(resolved, "cleanup-"+time.Now().Format("150405.000000"))
 	if err != nil {
 		t.Fatalf("connect: %v", err)

@@ -42,22 +42,31 @@ func NewRedisStore(cfg ResolvedRedisConfig, runID string) (*RedisStore, error) {
 	if runID == "" {
 		return nil, fmt.Errorf("sharedstate: runID 不能为空")
 	}
-	rdb := redis.NewClient(&redis.Options{
-		Addr:         cfg.Addr,
+	opts := &redis.Options{
+		Addr:         fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
 		Username:     cfg.Username,
 		Password:     cfg.Password,
-		DB:           cfg.DB,
+		DB:           cfg.DBIndex,
 		DialTimeout:  cfg.DialTimeout,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
-		PoolSize:     cfg.PoolSize,
-	})
+	}
+	if cfg.MaxOpenConns > 0 {
+		opts.PoolSize = cfg.MaxOpenConns
+	}
+	if cfg.MaxIdleConns > 0 {
+		opts.MinIdleConns = cfg.MaxIdleConns
+	}
+	if cfg.ConnMaxLifetime > 0 {
+		opts.ConnMaxLifetime = cfg.ConnMaxLifetime
+	}
+	rdb := redis.NewClient(opts)
 
 	pingCtx, cancel := context.WithTimeout(context.Background(), cfg.DialTimeout)
 	defer cancel()
 	if err := rdb.Ping(pingCtx).Err(); err != nil {
 		_ = rdb.Close()
-		return nil, fmt.Errorf("sharedstate: 连接 Redis 失败 (addr=%s db=%d): %w", cfg.Addr, cfg.DB, err)
+		return nil, fmt.Errorf("sharedstate: 连接 Redis 失败 (host=%s port=%d dbIndex=%d): %w", cfg.Host, cfg.Port, cfg.DBIndex, err)
 	}
 
 	s := &RedisStore{

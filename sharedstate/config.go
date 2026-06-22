@@ -9,7 +9,6 @@ package sharedstate
 
 import (
 	"fmt"
-	"net"
 	"time"
 )
 
@@ -29,53 +28,66 @@ type Config struct {
 
 // RedisConfig Redis 连接配置（原始字符串形态，duration 用字符串便于配置文件书写）。
 type RedisConfig struct {
-	Addr            string `json:"addr"`
+	Host            string `json:"host"`
+	Port            int    `json:"port"`
 	Username        string `json:"username"`
 	Password        string `json:"password"`
-	DB              int    `json:"db"`
+	DBIndex         int    `json:"dbIndex"`
 	KeyPrefix       string `json:"keyPrefix"`
 	DefaultClaimTTL string `json:"defaultClaimTTL"`
 	OpTimeout       string `json:"opTimeout"`
 	DialTimeout     string `json:"dialTimeout"`
 	ReadTimeout     string `json:"readTimeout"`
 	WriteTimeout    string `json:"writeTimeout"`
-	PoolSize        int    `json:"poolSize"`
+	MaxOpenConns    int    `json:"maxOpenConns"`
+	MaxIdleConns    int    `json:"maxIdleConns"`
+	ConnMaxLifetime string `json:"connMaxLifetime"`
 }
 
 // ResolvedRedisConfig 已解析（duration 转 time.Duration、填充默认值）的配置。
 type ResolvedRedisConfig struct {
-	Addr            string
+	Host            string
+	Port            int
 	Username        string
 	Password        string
-	DB              int
+	DBIndex         int
 	KeyPrefix       string
 	DefaultClaimTTL time.Duration
 	OpTimeout       time.Duration
 	DialTimeout     time.Duration
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration
-	PoolSize        int
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
 }
 
-// Enabled 返回是否配置了 Redis 地址（空地址表示不启用共享状态）。
+// Enabled 返回是否配置了 Redis 地址（host 为空表示不启用）。
 func (c RedisConfig) Enabled() bool {
-	return c.Addr != ""
+	return c.Host != ""
 }
 
 // Resolve 校验并解析配置，填充默认值。
-// addr 为空时返回错误（调用方应在 Resolve 前用 Enabled() 判断）。
+// host 为空时返回错误（调用方应在 Resolve 前用 Enabled() 判断）。
 func (c RedisConfig) Resolve() (ResolvedRedisConfig, error) {
-	if c.Addr == "" {
-		return ResolvedRedisConfig{}, fmt.Errorf("sharedstate: redis.addr 为空，未启用共享状态")
+	if c.Host == "" {
+		return ResolvedRedisConfig{}, fmt.Errorf("sharedstate: redis.host 为空，未启用共享状态")
+	}
+
+	port := c.Port
+	if port == 0 {
+		port = 6379
 	}
 
 	out := ResolvedRedisConfig{
-		Addr:      c.Addr,
-		Username:  c.Username,
-		Password:  c.Password,
-		DB:        c.DB,
-		KeyPrefix: c.KeyPrefix,
-		PoolSize:  c.PoolSize,
+		Host:         c.Host,
+		Port:         port,
+		Username:     c.Username,
+		Password:     c.Password,
+		DBIndex:      c.DBIndex,
+		KeyPrefix:    c.KeyPrefix,
+		MaxOpenConns: c.MaxOpenConns,
+		MaxIdleConns: c.MaxIdleConns,
 	}
 	if out.KeyPrefix == "" {
 		out.KeyPrefix = defaultKeyPrefix
@@ -97,25 +109,23 @@ func (c RedisConfig) Resolve() (ResolvedRedisConfig, error) {
 	if out.WriteTimeout, err = parseDurationDefault(c.WriteTimeout, defaultReadWriteTimout); err != nil {
 		return ResolvedRedisConfig{}, fmt.Errorf("sharedstate: 解析 writeTimeout 失败: %w", err)
 	}
+	if out.ConnMaxLifetime, err = parseDurationDefault(c.ConnMaxLifetime, 0); err != nil {
+		return ResolvedRedisConfig{}, fmt.Errorf("sharedstate: 解析 connMaxLifetime 失败: %w", err)
+	}
 	return out, nil
 }
 
 // AddrMasked 返回脱敏后的地址（用于 capabilities 展示）。
 func (c ResolvedRedisConfig) AddrMasked() string {
-	return MaskAddr(c.Addr)
+	return MaskHostPort(c.Host, c.Port)
 }
 
-// MaskAddr 对 host:port 地址脱敏：隐藏主机（避免泄露内网细节），仅保留端口。
-// 解析失败时返回固定占位。空地址返回空串。
-func MaskAddr(addr string) string {
-	if addr == "" {
+// MaskHostPort 对 host+port 脱敏：隐藏主机（避免泄露内网细节），仅保留端口。
+func MaskHostPort(host string, port int) string {
+	if host == "" {
 		return ""
 	}
-	_, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return "***"
-	}
-	return "***:" + port
+	return fmt.Sprintf("***:%d", port)
 }
 
 func parseDurationDefault(s string, def time.Duration) (time.Duration, error) {
