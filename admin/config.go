@@ -37,7 +37,7 @@ type PprofConfig struct {
 
 // RegistryConfig Agent 注册与健康管理配置。
 //
-// 联动约束（与 agent.hbFailThreshold × agent.hbInterval）：
+// 联动约束（与 agent.heartbeatFailThreshold × agent.heartbeatInterval）：
 //   - UnhealthyAfter 必须 ≥ agent 端容忍窗口（默认 3 × 10s = 30s）
 //   - OfflineAfter   必须 > UnhealthyAfter
 //
