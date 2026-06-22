@@ -13,27 +13,26 @@ import (
 
 // Config Admin 服务端配置。
 type Config struct {
-	Port      int    `json:"port"`      // HTTP 监听端口（默认 7718）
-	PublicURL string `json:"publicUrl"` // 外部可达 URL（Agent 用来连接 Admin，如 http://192.168.1.100:7718）
-	StaticDir string `json:"staticDir"` // 前端静态文件目录（默认 cmd/web/dist）
-
-	AgentRegistry RegistryConfig      `json:"agentRegistry"` // Agent 注册与健康管理
-	History       HistoryConfig       `json:"history"`       // 历史归档
-	Log           stresslog.Config    `json:"log"`           // 日志
-	Pprof         PprofConfig         `json:"pprof"`         // pprof 调试服务
-	Shared        *sharedstate.Config `json:"shared"`        // 共享状态（Redis）配置，下发给 Agent
-	Daemon        bool                `json:"daemon"`        // 以守护进程模式运行（仅 Linux）
+	Port          int                      `json:"port"`          // HTTP 监听端口（默认 7718）
+	PublicURL     string                   `json:"publicUrl"`     // 外部可达 URL（Agent 用来连接 Admin，如 http://192.168.1.100:7718）
+	StaticDir     string                   `json:"staticDir"`     // 前端静态文件目录（默认 cmd/web/dist）
+	AgentRegistry RegistryConfig           `json:"agentRegistry"` // Agent 注册与健康管理
+	MySQL         *MySQLConfig             `json:"mysql"`         // MySQL 连接配置（全局共享 *sql.DB）
+	Redis         *sharedstate.RedisConfig `json:"redis"`         // Redis 配置（host 非空时启用）
+	History       *HistoryConfig           `json:"history"`       // 历史归档（仅 RetentionDays）
+	Log           stresslog.Config         `json:"log"`           // 日志
+	Pprof         *PprofConfig             `json:"pprof"`         // pprof 调试服务（nil 时不启用）
+	Daemon        bool                     `json:"daemon"`        // 以守护进程模式运行（仅 Linux）
 }
 
-// SharedEnabled 返回服务器是否配置了共享状态（Redis 地址非空）。
-func (c *Config) SharedEnabled() bool {
-	return c.Shared != nil && c.Shared.Redis.Enabled()
+// RedisEnabled 返回服务器是否配置了 Redis（host 非空）。
+func (c *Config) RedisEnabled() bool {
+	return c.Redis != nil && c.Redis.Enabled()
 }
 
-// PprofConfig pprof 调试服务配置。
+// PprofConfig pprof 调试服务配置（Config.Pprof 为 nil 时不启用）。
 type PprofConfig struct {
-	Enabled bool `json:"enabled"` // 是否启用 pprof（默认 false）
-	Port    int  `json:"port"`    // pprof 监听端口（默认 6060）
+	Port int `json:"port"` // pprof 监听端口（默认 6060）
 }
 
 // RegistryConfig Agent 注册与健康管理配置。
@@ -48,11 +47,9 @@ type RegistryConfig struct {
 	OfflineAfter   string `json:"offlineAfter"`   // 超过此时间标记 offline 并删除
 }
 
-// HistoryConfig 历史归档配置。
+// HistoryConfig 历史归档配置（MySQL 已提升为 Config.MySQL）。
 type HistoryConfig struct {
-	Enabled       bool        `json:"enabled"`       // 是否启用 MySQL 历史归档
-	MySQL         MySQLConfig `json:"mysql"`         // MySQL 连接配置
-	RetentionDays int         `json:"retentionDays"` // 历史数据保留天数（默认 90）
+	RetentionDays int `json:"retentionDays"` // 历史数据保留天数（默认 90）
 }
 
 // MySQLConfig MySQL 连接配置。
@@ -104,15 +101,15 @@ func DefaultConfig() Config {
 			UnhealthyAfter: "30s",
 			OfflineAfter:   "60s",
 		},
-		History: HistoryConfig{
-			Enabled:       true,
-			RetentionDays: 90,
-			MySQL: MySQLConfig{
-				MaxOpenConns:    10,
-				MaxIdleConns:    5,
-				ConnMaxLifetime: "1h",
-			},
+		MySQL: &MySQLConfig{
+			MaxOpenConns:    10,
+			MaxIdleConns:    5,
+			ConnMaxLifetime: "1h",
+			DialTimeout:     "5s",
+			ReadTimeout:     "30s",
+			WriteTimeout:    "30s",
 		},
+		History: &HistoryConfig{RetentionDays: 90},
 		Log: stresslog.Config{
 			Path:       "log/admin.log",
 			LogLevel:   "info",
@@ -153,10 +150,11 @@ func validateConfig(cfg *Config) error {
 	if _, err := time.ParseDuration(cfg.AgentRegistry.OfflineAfter); cfg.AgentRegistry.OfflineAfter != "" && err != nil {
 		return fmt.Errorf("invalid agentRegistry.offlineAfter: %w", err)
 	}
-	if cfg.SharedEnabled() {
-		if _, err := cfg.Shared.Redis.Resolve(); err != nil {
-			return fmt.Errorf("invalid shared config: %w", err)
+	if cfg.RedisEnabled() {
+		if _, err := cfg.Redis.Resolve(); err != nil {
+			return fmt.Errorf("invalid redis config: %w", err)
 		}
 	}
+	// MySQL 连通性校验推迟到装配阶段（NewAdminServer 里 openDB + ping）。
 	return nil
 }

@@ -17,7 +17,6 @@ import (
 	"stressbot/errcode"
 	"stressbot/logview"
 	"stressbot/monitor"
-	"stressbot/sharedstate"
 	"stressbot/utils"
 	json "stressbot/utils/jsonx"
 	stresslog "stressbot/utils/log"
@@ -145,9 +144,11 @@ type CapabilitiesResponse struct {
 // handleCapabilities 返回服务器能力（当前仅共享状态可用性），供前端展示与校验提示。
 // 出于安全考虑，不返回原始 Redis 地址，只返回脱敏后的展示地址。
 func (s *AdminServer) handleCapabilities(w http.ResponseWriter, r *http.Request) {
-	resp := CapabilitiesResponse{SharedState: s.cfg.SharedEnabled()}
+	resp := CapabilitiesResponse{SharedState: s.cfg.RedisEnabled()}
 	if resp.SharedState {
-		resp.SharedAddr = sharedstate.MaskAddr(s.cfg.Shared.Redis.Addr)
+		if resolved, err := s.cfg.Redis.Resolve(); err == nil {
+			resp.SharedAddr = resolved.AddrMasked()
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -738,7 +739,7 @@ func (s *AdminServer) handleStartTask(w http.ResponseWriter, r *http.Request) {
 	// 自动检测共享状态：脚本是否使用 require("share")。
 	// 若使用但服务器未配置 Redis，直接失败并提示，避免任务跑起来后 share.* 全部报错。
 	sharedUsed := taskUsesShare(task)
-	if sharedUsed && !s.cfg.SharedEnabled() {
+	if sharedUsed && !s.cfg.RedisEnabled() {
 		if _, terr := s.tasks.Transition(id, TaskStarting, TaskFailed); terr != nil {
 			stresslog.Warn("[ADMIN] 状态转换失败 starting→failed",
 				zap.String("taskId", id), zap.Error(terr))
@@ -814,14 +815,14 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 
 	// 共享状态运行时下发：所有 Agent 用同一 runId（= taskID），落在同一命名空间。
 	var sharedAssign *SharedRuntimeAssignment
-	if task.SharedUsed && s.cfg.SharedEnabled() {
+	if task.SharedUsed && s.cfg.RedisEnabled() {
 		runID := task.SharedRunID
 		if runID == "" {
 			runID = taskID
 		}
 		sharedAssign = &SharedRuntimeAssignment{
 			RunID: runID,
-			Redis: s.cfg.Shared.Redis,
+			Redis: *s.cfg.Redis,
 		}
 	}
 

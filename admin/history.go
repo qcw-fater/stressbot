@@ -36,44 +36,30 @@ var allowedOrderBy = map[string]bool{
 }
 
 // HistoryStore MySQL 历史归档存储。
-// 当 cfg.Enabled=false 时，NewHistoryStore 仍然返回实例但底层无 DB 连接，
-// 由 admin.go 判断 history==nil 来跳过。
+// db 由 AdminServer 统一管理（共享全局 MySQL 实例），HistoryStore 不负责 Close。
 type HistoryStore struct {
-	cfg    HistoryConfig
-	db     *sql.DB
-	prune  time.Duration
-	cancel context.CancelFunc
+	db            *sql.DB
+	retentionDays int
+	prune         time.Duration
+	cancel        context.CancelFunc
 }
 
-func NewHistoryStore(cfg HistoryConfig) (*HistoryStore, error) {
-	if !cfg.Enabled {
-		return nil, nil
+// NewHistoryStore 创建历史归档存储。
+// db 必须非 nil（由 AdminServer 装配时传入共享 *sql.DB）。
+// cfg 可为 nil（表示不启用历史归档，retentionDays 用默认 90）。
+func NewHistoryStore(db *sql.DB, cfg *HistoryConfig) *HistoryStore {
+	retention := 90
+	if cfg != nil && cfg.RetentionDays > 0 {
+		retention = cfg.RetentionDays
 	}
-
-	db, err := openDB(cfg.MySQL)
-	if err != nil {
-		return nil, fmt.Errorf("connect mysql: %w", err)
+	return &HistoryStore{
+		db:            db,
+		retentionDays: retention,
+		prune:         24 * time.Hour,
 	}
-
-	h := &HistoryStore{cfg: cfg, db: db}
-	if err := h.initSchema(); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("init schema: %w", err)
-	}
-
-	if cfg.RetentionDays <= 0 {
-		cfg.RetentionDays = 90
-	}
-	h.prune = 24 * time.Hour
-
-	stresslog.Info("HistoryStore 已连接 MySQL",
-		zap.String("addr", fmt.Sprintf("%s:%d", cfg.MySQL.Host, cfg.MySQL.Port)),
-		zap.String("database", cfg.MySQL.Database),
-		zap.Int("retentionDays", cfg.RetentionDays))
-
-	return h, nil
 }
 
+// openDB 打开 MySQL 连接池（AdminServer 装配阶段调用一次）。
 func openDB(cfg MySQLConfig) (*sql.DB, error) {
 	db, err := sql.Open("mysql", cfg.DSN())
 	if err != nil {
@@ -97,19 +83,21 @@ func openDB(cfg MySQLConfig) (*sql.DB, error) {
 	return db, nil
 }
 
-func (h *HistoryStore) initSchema() error {
+// initMySQLSchema 初始化所有 MySQL 表（幂等，CREATE IF NOT EXISTS）。
+// 由 AdminServer 装配时调用一次。
+func initMySQLSchema(db *sql.DB) error {
 	ctx := context.Background()
 	for _, ddl := range allDDL {
-		if _, err := h.db.ExecContext(ctx, ddl); err != nil {
+		if _, err := db.ExecContext(ctx, ddl); err != nil {
 			return err
 		}
 	}
-	h.dropLegacyForeignKeys(ctx)
+	dropLegacyForeignKeys(ctx, db)
 	return nil
 }
 
 // dropLegacyForeignKeys 移除旧版本遗留的物理外键约束。
-func (h *HistoryStore) dropLegacyForeignKeys(ctx context.Context) {
+func dropLegacyForeignKeys(ctx context.Context, db *sql.DB) {
 	type fk struct {
 		table, name string
 	}
@@ -121,7 +109,7 @@ func (h *HistoryStore) dropLegacyForeignKeys(ctx context.Context) {
 		{"task_config_archive", "task_config_archive_ibfk_1"},
 		{"task_agent_events", "task_agent_events_ibfk_1"},
 	} {
-		_, _ = h.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s DROP FOREIGN KEY %s", k.table, k.name))
+		_, _ = db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s DROP FOREIGN KEY %s", k.table, k.name))
 	}
 }
 
@@ -1357,7 +1345,7 @@ func (h *HistoryStore) PruneExpired(ctx context.Context, now time.Time) (int, er
 		return 0, nil
 	}
 
-	cutoff := now.AddDate(0, 0, -h.cfg.RetentionDays)
+	cutoff := now.AddDate(0, 0, -h.retentionDays)
 
 	rows, err := h.db.QueryContext(ctx, `
 		SELECT id FROM task_history th
@@ -1420,7 +1408,7 @@ func (h *HistoryStore) PruneExpired(ctx context.Context, now time.Time) (int, er
 	if n > 0 {
 		stresslog.Info("历史清理完成",
 			zap.Int64("deleted", n),
-			zap.Int("retentionDays", h.cfg.RetentionDays))
+			zap.Int("retentionDays", h.retentionDays))
 	}
 	return int(n), nil
 }
@@ -1455,15 +1443,11 @@ func (h *HistoryStore) StartPruneLoop(ctx context.Context) {
 	})
 }
 
-// Close 关闭数据库连接。
-// cancel 会使 prune goroutine 中进行中的 ExecContext 立即中断，
-// driver 自行关闭连接，避免与 db.Close 并发导致 WSASend SEGV。
+// Close 仅取消 prune loop；数据库连接池由 AdminServer 统一管理（db 不由 HistoryStore 关闭）。
+// cancel 会使 prune goroutine 中进行中的 ExecContext 立即中断。
 func (h *HistoryStore) Close() error {
 	if h.cancel != nil {
 		h.cancel()
-	}
-	if h.db != nil {
-		return h.db.Close()
 	}
 	return nil
 }
