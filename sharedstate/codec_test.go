@@ -77,7 +77,7 @@ func TestDecodeNestedBigInteger(t *testing.T) {
 }
 
 func TestResolveDefaults(t *testing.T) {
-	cfg := RedisConfig{Addr: "127.0.0.1:6379"}
+	cfg := RedisConfig{Host: "127.0.0.1", Port: 6379}
 	r, err := cfg.Resolve()
 	if err != nil {
 		t.Fatalf("resolve error: %v", err)
@@ -91,14 +91,29 @@ func TestResolveDefaults(t *testing.T) {
 	if r.OpTimeout != defaultOpTimeout {
 		t.Fatalf("opTimeout default mismatch: %v", r.OpTimeout)
 	}
+	if r.Port != 6379 {
+		t.Fatalf("port mismatch: %d", r.Port)
+	}
 }
 
-func TestResolveEmptyAddr(t *testing.T) {
+func TestResolveEmptyHost(t *testing.T) {
 	cfg := RedisConfig{}
 	if cfg.Enabled() {
-		t.Fatal("empty addr should be disabled")
+		t.Fatal("empty host should be disabled")
 	}
 	if _, err := cfg.Resolve(); err == nil {
-		t.Fatal("expected error for empty addr")
+		t.Fatal("expected error for empty host")
+	}
+}
+
+func TestResolveDefaultPort(t *testing.T) {
+	// Port 为 0 时应回退到 6379。
+	cfg := RedisConfig{Host: "127.0.0.1"}
+	r, err := cfg.Resolve()
+	if err != nil {
+		t.Fatalf("resolve error: %v", err)
+	}
+	if r.Port != 6379 {
+		t.Fatalf("default port mismatch: %d", r.Port)
 	}
 }

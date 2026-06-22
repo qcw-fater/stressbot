@@ -1,25 +1,26 @@
 {
   "log": {
+    "path": "log/stressbot.log",
     "level": "info",
-    "printConsole": true
+    "printConsole": true,
+    "maxSizeMB": 100,
+    "maxBackups": 5,
+    "maxAge": 7,
+    "localTime": true,
+    "compress": true
   },
   "monitor": {
-    "enabled": true,
-    "httpEnabled": true,
-    "httpPort": 6061,
-    "apdexT": 100,
-    "timingDetail": "rtt"
+    "apdexThresholdMs": 100,
+    "timingDetail": "rtt",
+    "http": { "port": 6061 }
   },
-  "pprof": {
-    "enabled": true,
-    "port": 6060
-  },
+  "pprof": { "port": 6060 },
   "standalone": {
     "bot": {
       "accountPrefix": "bot_",
       "startNumber": 20,
-      "count": 100,
-      "concurrentNum": 20,
+      "totalBots": 100,
+      "concurrency": 20,
       "mainService": "logic"
     },
     "stateExtra": {
@@ -32,17 +33,21 @@
   "agent": {
     "enabled": false
   },
-  "shared": {
-    "redis": {
-      "addr": "127.0.0.1:6379",
-      "username": "",
-      "password": "",
-      "db": 0,
-      "keyPrefix": "stressbot",
-      "defaultClaimTTL": "30s",
-      "opTimeout": "2s",
-      "poolSize": 0
-    }
+  "redis": {
+    "host": "127.0.0.1",
+    "port": 6379,
+    "username": "",
+    "password": "",
+    "dbIndex": 0,
+    "keyPrefix": "stressbot",
+    "dialTimeout": "5s",
+    "readTimeout": "2s",
+    "writeTimeout": "2s",
+    "maxOpenConns": 10,
+    "maxIdleConns": 5,
+    "connMaxLifetime": "1h",
+    "defaultClaimTTL": "30s",
+    "opTimeout": "2s"
   },
   "daemon": false
 }

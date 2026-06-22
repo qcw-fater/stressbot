@@ -214,8 +214,8 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 		defer func() { _ = sharedStore.Close() }()
 		stresslog.Info("[TASK] 共享状态已启用",
 			zap.String("taskID", taskID),
-			zap.String("addr", resolved.Addr),
-			zap.Int("db", resolved.DB),
+			zap.String("addr", resolved.AddrMasked()),
+			zap.Int("dbIndex", resolved.DBIndex),
 			zap.String("runId", r.assignment.Shared.RunID))
 	} else {
 		stresslog.Info("[TASK] 共享状态未启用",

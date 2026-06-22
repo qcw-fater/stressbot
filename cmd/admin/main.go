@@ -59,8 +59,8 @@ func main() {
 	// 初始化日志
 	logConf := &stresslog.Config{
 		PrintConsole: true,
-		LogLevel:     cfg.Log.Level,
-		MaxSize:      cfg.Log.MaxSizeMB,
+		LogLevel:     cfg.Log.LogLevel,
+		MaxSize:      cfg.Log.MaxSize,
 		MaxBackups:   cfg.Log.MaxBackups,
 		MaxAge:       30,
 		Compress:     true,
@@ -73,7 +73,7 @@ func main() {
 
 	// pprof 调试服务（独立端口，不依赖 monitor）
 	var stopPprof func()
-	if cfg.Pprof.Enabled {
+	if cfg.Pprof != nil {
 		pprofPort := cfg.Pprof.Port
 		if pprofPort <= 0 {
 			pprofPort = 6060

@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -39,6 +40,8 @@ type AdminServer struct {
 	history *HistoryStore // 可选
 	sampler *Sampler      // 可选
 
+	db *sql.DB // 全局共享 MySQL 连接池（HistoryStore 复用，由 AdminServer 统一 Close）
+
 	sharedCleanup *sharedCleanupQueue // 共享状态待清理队列（可选）
 
 	httpSrv *http.Server
@@ -71,46 +74,58 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 	// 6. Assigner
 	s.assigner = NewAssigner()
 
-	// 7. HistoryStore（可选）
-	if cfg.History.Enabled {
-		history, err := NewHistoryStore(cfg.History)
+	// 7. HistoryStore（可选）+ 共享全局 MySQL 连接池
+	//    MySQL 由 Config.MySQL 统一配置，HistoryStore 不再自管 *sql.DB 生命周期。
+	//    装配顺序：openDB → initMySQLSchema → NewHistoryStore(db, cfg)。
+	if cfg.MySQL != nil {
+		db, err := openDB(*cfg.MySQL)
 		if err != nil {
-			return nil, fmt.Errorf("init history store: %w", err)
+			return nil, fmt.Errorf("connect mysql: %w", err)
 		}
-		s.history = history
+		if err := initMySQLSchema(db); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("init mysql schema: %w", err)
+		}
+		stresslog.Info("[ADMIN] MySQL 已连接",
+			zap.String("addr", fmt.Sprintf("%s:%d", cfg.MySQL.Host, cfg.MySQL.Port)),
+			zap.String("database", cfg.MySQL.Database))
 
-		sampler := NewSampler(
-			10*time.Second,
-			s.aggregator, s.history, s.agents, s.tasks,
-		)
-		s.sampler = sampler
+		if cfg.History != nil {
+			s.history = NewHistoryStore(db, cfg.History)
+			sampler := NewSampler(
+				10*time.Second,
+				s.aggregator, s.history, s.agents, s.tasks,
+			)
+			s.sampler = sampler
+		}
+		s.db = db // 由 AdminServer 统一 Close（Shutdown）
 	} else {
-		stresslog.Info("[ADMIN] history 模块未启用：所有 /api/history* 接口将返回 HISTORY_DISABLED；" +
-			"如需启用，请在 config.json 设置 history.enabled=true 且填写 history.mysql.dsn")
+		stresslog.Info("[ADMIN] MySQL 未配置：历史归档模块未启用，" +
+			"所有 /api/history* 接口将返回 HISTORY_DISABLED")
 	}
 
 	// 8. 终态回调
 	s.tasks.SetOnTerminal(s.onTaskTerminal)
 
 	// 9. 共享状态（Redis）：验证连通性 + 初始化待清理队列
-	if cfg.SharedEnabled() {
-		resolved, rerr := cfg.Shared.Redis.Resolve()
+	if cfg.RedisEnabled() {
+		resolved, rerr := cfg.Redis.Resolve()
 		if rerr != nil {
 			return nil, fmt.Errorf("共享状态配置无效: %w", rerr)
 		}
 		// 启动时 PING 验证 Redis 连通性（不持久占用连接）
 		pingStore, perr := sharedstate.NewRedisStore(resolved, "admin-ping")
 		if perr != nil {
-			return nil, fmt.Errorf("连接共享状态(Redis)失败 (addr=%s): %w", resolved.Addr, perr)
+			return nil, fmt.Errorf("连接共享状态(Redis)失败 (addr=%s): %w", resolved.AddrMasked(), perr)
 		}
 		_ = pingStore.Close()
 		stresslog.Info("[ADMIN] 共享状态已启用",
 			zap.String("addr", resolved.AddrMasked()),
-			zap.Int("db", resolved.DB),
+			zap.Int("dbIndex", resolved.DBIndex),
 			zap.String("keyPrefix", resolved.KeyPrefix))
 		s.sharedCleanup = newSharedCleanupQueue("data")
 	} else {
-		stresslog.Info("[ADMIN] 共享状态未启用：未配置 Redis（shared.redis.addr 为空），" +
+		stresslog.Info("[ADMIN] 共享状态未启用：未配置 Redis（redis.host 为空），" +
 			"脚本中使用 require(\"share\") 将报错")
 	}
 
@@ -155,8 +170,8 @@ func (s *AdminServer) Run() error {
 
 	stresslog.Info("admin 启动",
 		zap.Int("port", s.cfg.Port),
-		zap.Bool("history", s.cfg.History.Enabled),
-		zap.Bool("shared", s.cfg.SharedEnabled()))
+		zap.Bool("history", s.history != nil),
+		zap.Bool("redis", s.cfg.RedisEnabled()))
 
 	// 信号处理
 	sigCh := make(chan os.Signal, 2)
@@ -185,6 +200,10 @@ func (s *AdminServer) Shutdown(ctx context.Context) error {
 	}
 	if s.history != nil {
 		s.history.Close()
+	}
+	// 全局共享 MySQL 连接池：HistoryStore 不再 Close，由 AdminServer 统一关闭。
+	if s.db != nil {
+		_ = s.db.Close()
 	}
 	utils.GetWorkPool().Shutdown()
 	close(s.stopCh)
@@ -225,7 +244,7 @@ func (s *AdminServer) onTaskTerminal(task *Task) {
 // 仅当任务使用了共享状态且服务器配置了 Redis 时执行。清理登记到待清理队列：
 // 立即尝试一次，失败则持久化并由定时任务/重启后重试，避免无 TTL 的 key 永久泄漏。
 func (s *AdminServer) cleanupSharedState(task *Task) {
-	if task == nil || !task.SharedUsed || !s.cfg.SharedEnabled() {
+	if task == nil || !task.SharedUsed || !s.cfg.RedisEnabled() {
 		return
 	}
 	runID := task.SharedRunID

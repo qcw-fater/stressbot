@@ -180,18 +180,21 @@ func TimingDetailAtLeast(current, required TimingDetailLevel) bool {
 
 // CollectorConfig 监控配置。
 type CollectorConfig struct {
-	Enabled      bool   `json:"enabled"`      // 是否启用监控
-	HTTPEnabled  bool   `json:"httpEnabled"`  // 是否启用 HTTP JSON 端点
-	HTTPPort     int    `json:"httpPort"`     // HTTP 端口号
-	ApdexT       int    `json:"apdexT"`       // Apdex T 阈值（毫秒），默认 100
-	TimingDetail string `json:"timingDetail"` // 计时细分级别：rtt / codec / full，默认 rtt
+	ApdexThresholdMs int         `json:"apdexThresholdMs"` // Apdex T 阈值（毫秒），默认 100
+	TimingDetail     string      `json:"timingDetail"`     // 计时细分级别：rtt / codec / full，默认 rtt
+	HTTP             *HTTPConfig `json:"http"`             // nil = 不启用 HTTP JSON 端点
+}
+
+// HTTPConfig 监控 HTTP JSON 端点配置。
+type HTTPConfig struct {
+	Port int `json:"port"` // HTTP 端口号
 }
 
 // MetricsCollector 全局指标收集器（单例）。
 // enabled=false 时所有方法均为 no-op，压测核心路径零开销。
 type MetricsCollector struct {
 	enabled      bool              // 是否启用
-	cfg          CollectorConfig   // 运行期配置副本（除 ApdexT 外）
+	cfg          CollectorConfig   // 运行期配置副本（除 ApdexThresholdMs 外）
 	cfgMu        sync.RWMutex      // 保护 cfg 非热路径字段
 	apdexT       atomic.Int32      // Apdex T 阈值（毫秒）热路径独立原子读写，与 cfgMu 解耦
 	timingDetail TimingDetailLevel // 计时细分级别
@@ -237,6 +240,8 @@ func NormalizeTimingDetail(value string) TimingDetailLevel {
 }
 
 // Init 初始化全局单例。sync.Once 保证幂等，多次调用不会重置。
+// 调用方（cmd/agent/main.go）保证只在 cfg.Monitor != nil 时调用 Init，
+// 因此这里固定 enabled=true（nil = 调用方根本不调 Init）。
 func Init(cfg CollectorConfig) {
 	globalOnce.Do(func() {
 		level := NormalizeTimingDetail(cfg.TimingDetail)
@@ -248,16 +253,16 @@ func Init(cfg CollectorConfig) {
 			cfg.TimingDetail = string(level)
 		}
 		global = &MetricsCollector{
-			enabled:      cfg.Enabled,
+			enabled:      true,
 			cfg:          cfg,
 			timingDetail: level,
 			startTime:    time.Now(),
 		}
-		t := cfg.ApdexT
+		t := cfg.ApdexThresholdMs
 		if t <= 0 {
 			t = 100
 		}
-		global.cfg.ApdexT = t
+		global.cfg.ApdexThresholdMs = t
 		global.apdexT.Store(int32(t))
 	})
 }
@@ -291,14 +296,14 @@ func (c *MetricsCollector) Reset() {
 
 // SetApdexT 任务级调整 Apdex T 值（毫秒），≤0 不修改。
 // 热路径只读 c.apdexT（atomic），这里同步更新原子字段；
-// cfg.ApdexT 仅用于快照导出，写时一并维护以保持可见。
+// cfg.ApdexThresholdMs 仅用于快照导出，写时一并维护以保持可见。
 func (c *MetricsCollector) SetApdexT(t int) {
 	if t <= 0 {
 		return
 	}
 	c.apdexT.Store(int32(t))
 	c.cfgMu.Lock()
-	c.cfg.ApdexT = t
+	c.cfg.ApdexThresholdMs = t
 	c.cfgMu.Unlock()
 }
 

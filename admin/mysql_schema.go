@@ -1,6 +1,6 @@
 package admin
 
-// MySQL DDL — 历史归档 8 张表。
+// MySQL DDL — Admin 所有表（历史归档 + 未来流程模板库）。
 // Admin 启动时通过 HistoryStore.initSchema() 自动执行（仅创建不存在的表）。
 // 已有数据库升级见 deploy/upgrade.sql（INFORMATION_SCHEMA 守卫、幂等）。
 // 收藏/标签/备注统一存于 task_meta（stage_index=-1 为任务级），不再是 task_history 的列。

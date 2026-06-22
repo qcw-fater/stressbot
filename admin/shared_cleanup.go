@@ -107,7 +107,7 @@ func (q *sharedCleanupQueue) list() []string {
 
 // enqueueSharedCleanup 登记一个待清理 runId 并立即尝试清理一次（失败则留待定时重试）。
 func (s *AdminServer) enqueueSharedCleanup(runID string) {
-	if runID == "" || !s.cfg.SharedEnabled() || s.sharedCleanup == nil {
+	if runID == "" || !s.cfg.RedisEnabled() || s.sharedCleanup == nil {
 		return
 	}
 	s.sharedCleanup.add(runID)
@@ -116,10 +116,10 @@ func (s *AdminServer) enqueueSharedCleanup(runID string) {
 
 // attemptSharedCleanup 尝试清理单个 runId；成功后从待清理列表移除。
 func (s *AdminServer) attemptSharedCleanup(runID string) bool {
-	if !s.cfg.SharedEnabled() {
+	if !s.cfg.RedisEnabled() {
 		return false
 	}
-	resolved, err := s.cfg.Shared.Redis.Resolve()
+	resolved, err := s.cfg.Redis.Resolve()
 	if err != nil {
 		stresslog.Error("[ADMIN] 共享状态清理：配置解析失败", zap.String("runId", runID), zap.Error(err))
 		return false
@@ -145,7 +145,7 @@ func (s *AdminServer) attemptSharedCleanup(runID string) bool {
 
 // startSharedCleanupRetry 定时重试待清理列表（Admin 启动时调用）。
 func (s *AdminServer) startSharedCleanupRetry(ctx context.Context) {
-	if s.sharedCleanup == nil || !s.cfg.SharedEnabled() {
+	if s.sharedCleanup == nil || !s.cfg.RedisEnabled() {
 		return
 	}
 	// 启动即尝试一次，处理上次进程残留

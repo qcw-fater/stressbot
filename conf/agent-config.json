@@ -1,33 +1,31 @@
 {
   "log": {
+    "path": "log/agent.log",
     "level": "info",
     "printConsole": true,
-    "maxSize": 100,
+    "maxSizeMB": 100,
     "maxBackups": 5,
     "maxAge": 7,
     "localTime": true,
     "compress": true
   },
   "monitor": {
-    "apdexT": 100,
+    "apdexThresholdMs": 100,
     "timingDetail": "rtt"
   },
-  "pprof": {
-    "enabled": true,
-    "port": 6060
-  },
+  "pprof": { "port": 6060 },
   "agent": {
     "enabled": true,
-    "adminAddr": "http://127.0.0.1:7718",
+    "adminUrl": "http://127.0.0.1:7718",
     "publicUrl": "http://127.0.0.1:7719",
     "port": 7719,
     "maxBots": 5000,
-    "hbInterval": "10s",
-    "hbRequestTimeout": "5s",
-    "hbFailThreshold": 3,
+    "heartbeatInterval": "10s",
+    "heartbeatTimeout": "5s",
+    "heartbeatFailThreshold": 3,
     "requestTimeout": "30s",
     "reconnectMaxRetries": -1,
-    "stressInterval": "5s"
+    "metricsInterval": "5s"
   },
   "daemon": false
 }
