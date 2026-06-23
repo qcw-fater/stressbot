@@ -734,8 +734,8 @@ func networkHTTPRequest(L *lua.LState) int {
 // networkTCPSend TCP 发送（不等响应）。
 // 签名：network.tcp_send(service, route, msg)
 //
-// 返回：code(number)
-// code=0 成功 / errcode 错误码（1-5 网络层 / 11 协议层）。
+// 返回：err(table|nil)
+// 成功返回 nil；失败返回 err table。
 // 发送 WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
 func networkTCPSend(L *lua.LState) int {
 	ctx := GetContext(L)
@@ -765,9 +765,7 @@ func networkTCPSend(L *lua.LState) int {
 		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart)})
 	}
 	if packet == nil {
-		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service)
-		L.Push(lua.LNumber(errcode.ErrEncodeFailed))
-		return 1
+		return pushErr(L, int(errcode.ErrEncodeFailed), "service="+service+" codec 未映射")
 	}
 
 	var sendStart time.Time
@@ -780,11 +778,10 @@ func networkTCPSend(L *lua.LState) int {
 	}
 	if err == nil {
 		ctx.recordBytes(n, 0)
-		L.Push(lua.LNumber(0))
+		L.Push(lua.LNil)
 	} else {
 		ctx.recordBytes(len(packet), 0)
-		rememberActionErr(ctx, err)
-		L.Push(lua.LNumber(errToCode(err)))
+		L.Push(errTableFromActionErr(L, err))
 	}
 	return 1
 }
@@ -792,12 +789,12 @@ func networkTCPSend(L *lua.LState) int {
 // networkUDPSend 发送 UDP 编码消息。
 // 签名：network.udp_send(service, route, body)
 //
-// 返回：code(number)
-// code=0 成功 / errcode 错误码（1-5 网络层 / 11 协议层）。
+// 返回：err(table|nil)
+// 成功返回 nil；失败返回 err table。
 // 发送 WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
 func networkUDPSend(L *lua.LState) int {
 	ctx := GetContext(L)
-	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
+	if ctx == nil || ctx.NetSender == nil {
 		L.RaiseError("network not available")
 		return 0
 	}
@@ -811,11 +808,12 @@ func networkUDPSend(L *lua.LState) int {
 
 	// T2-C2-Lua：encode 走 resolver.Resolve("udp:"+service) 出的 Go SchemaAdapter。
 	// Resolve nil → fail loud（ErrEncodeFailed，detail 带 service 串）。
+	if ctx.Resolver == nil {
+		return pushErr(L, int(errcode.ErrEncodeFailed), "service="+service+" codec 未映射")
+	}
 	adp := ctx.Resolver.Resolve("udp:" + service)
 	if adp == nil {
-		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service+" codec 未映射（resolver.Resolve(udp:"+service+") nil）")
-		L.Push(lua.LNumber(errcode.ErrEncodeFailed))
-		return 1
+		return pushErr(L, int(errcode.ErrEncodeFailed), "service="+service+" codec 未映射（resolver.Resolve(udp:"+service+") nil）")
 	}
 	goRoute := luaValueToRoute(route)
 	udpKey := ctx.NetSender.GetUDPSecretKey(service)
@@ -828,9 +826,7 @@ func networkUDPSend(L *lua.LState) int {
 		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart)})
 	}
 	if packet == nil {
-		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service)
-		L.Push(lua.LNumber(errcode.ErrEncodeFailed))
-		return 1
+		return pushErr(L, int(errcode.ErrEncodeFailed), "service="+service+" codec 未映射")
 	}
 	var sendStart time.Time
 	if ctx.TimingLevel >= engine.TimingLevelRTTOnly {
@@ -842,11 +838,10 @@ func networkUDPSend(L *lua.LState) int {
 	}
 	if err == nil {
 		ctx.recordBytes(n, 0)
-		L.Push(lua.LNumber(0))
+		L.Push(lua.LNil)
 	} else {
 		ctx.recordBytes(len(packet), 0)
-		rememberActionErr(ctx, err)
-		L.Push(lua.LNumber(errToCode(err)))
+		L.Push(errTableFromActionErr(L, err))
 	}
 	return 1
 }

@@ -38,6 +38,64 @@ func (a *requestTestAdapter) Close() {}
 
 func (a *requestTestAdapter) DescribeError(uint64) string { return a.desc }
 
+func TestTCPSend_EncodeFailure_ReturnsErrTable(t *testing.T) {
+	// resolver nil → buildPacket 命中 encode 失败分支，send API 应返回 err table。
+	ns := &fakeNetSender{}
+	L := newTestState(t, context.Background(), ns, nil)
+	defer L.Close()
+	if err := L.DoString(`
+		local network = require("network")
+		e = network.tcp_send("logic", {cmd=1,act=1}, nil)
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+	assertRequestErr(t, L, int(errcode.ErrEncodeFailed), "service=logic")
+}
+
+func TestUDPSend_EncodeFailure_ReturnsErrTable(t *testing.T) {
+	// resolver nil → udp_send 保留 network not available 编程错误；codec 未映射用 resolver 返回 nil 覆盖。
+	ns := &fakeNetSender{}
+	L := newTestState(t, context.Background(), ns, &fakeResolver{})
+	defer L.Close()
+	if err := L.DoString(`
+		local network = require("network")
+		e = network.udp_send("battle", {cmd=1,act=1}, "body")
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+	assertRequestErr(t, L, int(errcode.ErrEncodeFailed), "service=battle")
+}
+
+func TestTCPSend_SuccessReturnsNil(t *testing.T) {
+	ns := &fakeNetSender{}
+	L := newTestState(t, context.Background(), ns, &fakeResolver{adp: &requestTestAdapter{}})
+	defer L.Close()
+	if err := L.DoString(`
+		local network = require("network")
+		e = network.tcp_send("logic", {cmd=1,act=1}, nil)
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+	if got := L.GetGlobal("e"); got != lua.LNil {
+		t.Fatalf("成功 err = %T(%v), want nil", got, got)
+	}
+}
+
+func TestUDPSend_SuccessReturnsNil(t *testing.T) {
+	ns := &fakeNetSender{}
+	L := newTestState(t, context.Background(), ns, &fakeResolver{adp: &requestTestAdapter{}})
+	defer L.Close()
+	if err := L.DoString(`
+		local network = require("network")
+		e = network.udp_send("battle", {cmd=1,act=1}, "body")
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+	if got := L.GetGlobal("e"); got != lua.LNil {
+		t.Fatalf("成功 err = %T(%v), want nil", got, got)
+	}
+}
+
 func TestTCPRequest_EncodeFailure_ReturnsErrTable(t *testing.T) {
 	// resolver nil → buildPacket/Resolve 命中 encode 失败分支
 	ns := &fakeNetSender{}
