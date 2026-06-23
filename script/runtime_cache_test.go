@@ -161,3 +161,22 @@ func TestRunActionScript_LegacyReturnCodeFailsLoud(t *testing.T) {
 		t.Fatalf("错误文案 = %q，期望包含旧式 return code 或 返回非法值", msg)
 	}
 }
+
+func TestRunActionScript_MalformedErrTableFailsLoud(t *testing.T) {
+	rp := newPoolWithScript(t, "malformed.lua", `
+		function execute(r)
+			return {detail="x"}
+		end
+	`)
+	L := rp.Acquire()
+	defer L.Close()
+
+	_, _, _, err := rp.RunActionScript(L, "malformed.lua")
+	if err == nil {
+		t.Fatal("期望 malformed err table 报错")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "返回非法值") && !strings.Contains(msg, "err table") {
+		t.Fatalf("错误文案 = %q，期望包含 返回非法值 或 err table", msg)
+	}
+}

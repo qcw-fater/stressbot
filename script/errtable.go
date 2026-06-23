@@ -37,9 +37,15 @@ func parseErrTable(v lua.LValue) (code int, detail string, ok bool) {
 	if !isTable {
 		return 0, "", false
 	}
-	code = int(lua.LVAsNumber(tb.RawGetString("code")))
-	detail = lua.LVAsString(tb.RawGetString("detail"))
-	return code, detail, true
+	codeVal, codeOK := tb.RawGetString("code").(lua.LNumber)
+	if !codeOK || codeVal == 0 {
+		return 0, "", false
+	}
+	detailVal, detailOK := tb.RawGetString("detail").(lua.LString)
+	if !detailOK {
+		return 0, "", false
+	}
+	return int(codeVal), string(detailVal), true
 }
 
 // classifyCode 由错误码推导 Kind。框架码 <100，服务端码 >=100。

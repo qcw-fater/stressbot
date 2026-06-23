@@ -39,6 +39,47 @@ func TestParseErrTable(t *testing.T) {
 	}
 }
 
+func TestParseErrTableRejectsMalformedTable(t *testing.T) {
+	L := lua.NewState()
+	defer L.Close()
+
+	cases := []struct {
+		name string
+		set  func(tb *lua.LTable)
+	}{
+		{
+			name: "missing code",
+			set: func(tb *lua.LTable) {
+				tb.RawSetString("detail", lua.LString("x"))
+			},
+		},
+		{
+			name: "string code",
+			set: func(tb *lua.LTable) {
+				tb.RawSetString("code", lua.LString("54"))
+				tb.RawSetString("detail", lua.LString("x"))
+			},
+		},
+		{
+			name: "zero code",
+			set: func(tb *lua.LTable) {
+				tb.RawSetString("code", lua.LNumber(0))
+				tb.RawSetString("detail", lua.LString("x"))
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tb := L.CreateTable(0, 2)
+			tc.set(tb)
+			if code, detail, ok := parseErrTable(tb); ok {
+				t.Fatalf("malformed table parsed as err table: code=%d detail=%q", code, detail)
+			}
+		})
+	}
+}
+
 func TestClassifyCode(t *testing.T) {
 	if classifyCode(4) != errcode.KindFramework {
 		t.Fatal("code=4 应 framework")
