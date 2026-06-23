@@ -1,10 +1,14 @@
 package script
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"stressbot/engine"
+	"stressbot/errcode"
 	stresslog "stressbot/utils/log"
 
 	lua "github.com/yuin/gopher-lua"
@@ -36,15 +40,15 @@ func TestChunkCachedAcrossCalls(t *testing.T) {
 	rp := newPoolWithScript(t, "a.lua", `
 		_G.__load_count = (_G.__load_count or 0) + 1   -- 顶层副作用：每次跑 chunk +1
 		function execute(r)
-			return 0
+			return nil
 		end
 	`)
 	L := rp.Acquire()
 	defer L.Close()
 
 	for i := 0; i < 5; i++ {
-		if code, _, _, _, err := rp.RunActionScript(L, "a.lua"); err != nil || code != 0 {
-			t.Fatalf("run %d: code=%d err=%v", i, code, err)
+		if _, _, _, err := rp.RunActionScript(L, "a.lua"); err != nil {
+			t.Fatalf("run %d: err=%v", i, err)
 		}
 	}
 
@@ -65,13 +69,13 @@ func TestRuntimeGlobalsResetOnRelease(t *testing.T) {
 		TOP_CONST = 42                  -- 顶层全局：受保护
 		function execute(r)
 			runtime_leak = 7            -- 运行时全局：应被清理
-			return 0
+			return nil
 		end
 	`)
 	L := rp.Acquire()
 	defer L.Close()
 
-	if _, _, _, _, err := rp.RunActionScript(L, "b.lua"); err != nil {
+	if _, _, _, err := rp.RunActionScript(L, "b.lua"); err != nil {
 		t.Fatal(err)
 	}
 	if L.GetGlobal("runtime_leak") != lua.LNumber(7) {
@@ -93,7 +97,67 @@ func TestMissingExecuteFn(t *testing.T) {
 	rp := newPoolWithScript(t, "c.lua", `local x = 1`)
 	L := rp.Acquire()
 	defer L.Close()
-	if _, _, _, _, err := rp.RunActionScript(L, "c.lua"); err == nil {
+	if _, _, _, err := rp.RunActionScript(L, "c.lua"); err == nil {
 		t.Errorf("期望未定义 execute 报错")
+	}
+}
+
+func TestRunActionScript_ErrTableBecomesActionError(t *testing.T) {
+	rp := newPoolWithScript(t, "fail.lua", `
+		local robot = require("robot")
+		function execute(r)
+			return robot.error(54, "battleId 缺失")
+		end
+	`)
+	L := rp.Acquire()
+	defer L.Close()
+
+	_, _, _, err := rp.RunActionScript(L, "fail.lua")
+	if err == nil {
+		t.Fatal("期望 err table 转为 ActionError")
+	}
+	var ae *engine.ActionError
+	if !errors.As(err, &ae) {
+		t.Fatalf("err 类型 = %T，期望 *engine.ActionError: %v", err, err)
+	}
+	if ae.Code != errcode.ErrorCode(54) {
+		t.Fatalf("code = %d，期望 54", ae.Code)
+	}
+	if !strings.Contains(ae.Detail, "battleId 缺失") || !strings.Contains(ae.Detail, "script=fail.lua") {
+		t.Fatalf("detail = %q，期望包含 battleId 缺失 和 script=fail.lua", ae.Detail)
+	}
+}
+
+func TestRunActionScript_NilIsSuccess(t *testing.T) {
+	rp := newPoolWithScript(t, "ok.lua", `
+		function execute(r)
+			return nil
+		end
+	`)
+	L := rp.Acquire()
+	defer L.Close()
+
+	_, _, _, err := rp.RunActionScript(L, "ok.lua")
+	if err != nil {
+		t.Fatalf("期望 nil 返回成功，实际 err=%v", err)
+	}
+}
+
+func TestRunActionScript_LegacyReturnCodeFailsLoud(t *testing.T) {
+	rp := newPoolWithScript(t, "legacy.lua", `
+		function execute(r)
+			return 0
+		end
+	`)
+	L := rp.Acquire()
+	defer L.Close()
+
+	_, _, _, err := rp.RunActionScript(L, "legacy.lua")
+	if err == nil {
+		t.Fatal("期望旧式 return code 报错")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "旧式 return code") && !strings.Contains(msg, "返回非法值") {
+		t.Fatalf("错误文案 = %q，期望包含旧式 return code 或 返回非法值", msg)
 	}
 }

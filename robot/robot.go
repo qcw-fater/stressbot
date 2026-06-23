@@ -634,25 +634,10 @@ func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int,
 
 	// RunActionScript 内部通过 script.Context 累积每次 request 的独立 RequestTiming，
 	// 这里把结构化 timing 上抛给 RecordAction。
-	code, send, recv, timing, err := h.robot.luaPool.RunActionScript(h.robot.l, actionDef.Script)
+	send, recv, timing, err := h.robot.luaPool.RunActionScript(h.robot.l, actionDef.Script)
 	wallClock := time.Since(start)
 	if err != nil {
-		return 0, 0, timing, wallClock, engine.NewActionError(errcode.ErrLuaExecFailed, "script="+actionDef.Script, err)
-	}
-
-	if code != 0 {
-		if ctx := script.GetContext(h.robot.l); ctx != nil {
-			if last := ctx.LastActionError(); last != nil && int(last.Code) == code {
-				if !strings.Contains(last.Detail, "script=") {
-					if last.Detail != "" {
-						last.Detail += " "
-					}
-					last.Detail += "script=" + actionDef.Script
-				}
-				return send, recv, timing, wallClock, last
-			}
-		}
-		return send, recv, timing, wallClock, luaCodeToActionErr(code, actionDef.Script)
+		return send, recv, timing, wallClock, err
 	}
 
 	return send, recv, timing, wallClock, nil

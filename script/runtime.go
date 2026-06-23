@@ -381,13 +381,15 @@ func (rp *RuntimePool) PrecompileScripts(dirs []string) error {
 
 // RunActionScript 执行动作脚本。
 //
-// Lua 脚本应定义 `function execute(r)` 函数并只返回 code：
+// Lua 脚本应定义 `function execute(r)` 函数，返回 nil 表示成功，返回 err table 表示失败：
 //
-//	return code -- 0=成功，非 0=失败
+//	return nil                         -- 成功
+//	return robot.error(code, detail)   -- 失败
 //
+// 旧式 return code 已废弃，返回 number/string/bool 等非 nil 非 table 值会直接报错。
 // send/recv WireBytes 由脚本内 network API 自动累计到 Context；脚本额外返回的 send/recv
 // 会被忽略，避免重复统计。
-func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (code, send, recv int, timing engine.ActionTiming, err error) {
+func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (send, recv int, timing engine.ActionTiming, err error) {
 	ctx := GetContext(L)
 	if ctx != nil {
 		ctx.resetMetrics()
@@ -401,19 +403,28 @@ func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (code, 
 
 	executeFn, lerr := rp.loadScriptFn(L, scriptName, "execute")
 	if lerr != nil {
-		return -1, 0, 0, engine.ActionTiming{}, lerr
+		return 0, 0, engine.ActionTiming{}, lerr
 	}
 
 	robotUD := createRobotUserData(L)
 	if err = L.CallByParam(lua.P{Fn: executeFn, NRet: 1, Protect: true}, robotUD); err != nil {
-		return -1, 0, 0, engine.ActionTiming{}, fmt.Errorf("执行脚本 %s 失败: %w", scriptName, err)
+		return 0, 0, engine.ActionTiming{}, fmt.Errorf("执行脚本 %s 失败: %w", scriptName, err)
 	}
 
+	ret := lua.LNil
 	if L.GetTop() >= savedTop+1 {
-		code = int(lua.LVAsNumber(L.Get(savedTop + 1)))
+		ret = L.Get(savedTop + 1)
+	}
+	if ret == lua.LNil {
+		return 0, 0, engine.ActionTiming{}, nil
+	}
+	if code, detail, ok := parseErrTable(ret); ok {
+		return 0, 0, engine.ActionTiming{}, buildActionError(code, detail, scriptName)
 	}
 
-	return code, 0, 0, engine.ActionTiming{}, nil
+	return 0, 0, engine.ActionTiming{}, fmt.Errorf(
+		"脚本 %s 返回非法值（类型 %s，值 %s），须返回 nil 或 err table，旧式 return code 已废弃",
+		scriptName, ret.Type().String(), ret.String())
 }
 
 // RunBooleanScript 执行布尔判断脚本（条件节点 / loop breakCondition）。
