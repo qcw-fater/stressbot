@@ -50,7 +50,5 @@
     "maxBackups": 10
   },
 
-  "pprof": { "port": 6060 },
-
   "daemon": false
 }
