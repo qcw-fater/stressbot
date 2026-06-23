@@ -284,6 +284,107 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 	}
 }
 
+// PendingRequest 一次异步请求-响应的待响应句柄（协作式 await 用）。
+//
+// 与 RequestResponse 共用 responseMap + pump 投递通路，但把「发送」与「等待」拆开：
+// SendRequest 注册响应通道并立即发出请求；调用方随后自行 select C()（可同时 drain 其他
+// 协作式工作），命中后用 Timing 计算耗时；无论命中 / 超时 / 取消都**必须**调 Close 注销通道。
+type PendingRequest struct {
+	conn      *Connection
+	routeKey  string
+	ch        chan *Message
+	sendCost  time.Duration
+	sendDone  time.Time
+	timeout   time.Duration
+	closeOnce sync.Once
+}
+
+// SendRequest 注册响应通道 + 立即发送请求，返回待响应句柄（不阻塞等待）。
+// 发送失败时内部已 Close（不泄漏 responseMap 条目），返回 error。
+// timeout<=0 时回退到连接默认超时。
+func (c *Connection) SendRequest(sendData []byte, routeKey string, timeout time.Duration) (*PendingRequest, error) {
+	if c == nil {
+		return nil, engine.NewActionError(errcode.ErrConnNotFound, "routeKey="+routeKey)
+	}
+	if atomic.LoadInt32(&c.isClose) == 1 {
+		return nil, engine.NewActionError(errcode.ErrConnClosed, c.serviceName+" routeKey="+routeKey)
+	}
+	if timeout <= 0 {
+		timeout = c.requestTimeout
+	}
+
+	ch := make(chan *Message, 1)
+	c.mu.Lock()
+	c.responseMap[routeKey] = ch
+	c.mu.Unlock()
+
+	pr := &PendingRequest{conn: c, routeKey: routeKey, ch: ch, timeout: timeout}
+
+	sendStart := time.Now()
+	_, sendErr := c.Send(sendData)
+	pr.sendDone = time.Now()
+	pr.sendCost = safeSub(pr.sendDone, sendStart)
+	if sendErr != nil {
+		stresslog.Error("[NETWORK] SendRequest 发送失败",
+			zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
+			zap.String("robot", c.robotName), zap.Int("pktLen", len(sendData)))
+		pr.Close()
+		return nil, sendErr
+	}
+	return pr, nil
+}
+
+// C 返回响应通道，供调用方 select（命中时收到一个 *Message）。
+func (pr *PendingRequest) C() <-chan *Message {
+	if pr == nil {
+		return nil
+	}
+	return pr.ch
+}
+
+// Timeout 返回有效超时。
+func (pr *PendingRequest) Timeout() time.Duration {
+	if pr == nil {
+		return 0
+	}
+	return pr.timeout
+}
+
+// Timing 据发送时刻与响应入站计时点计算 RequestTiming（与 RequestResponse 同口径）。
+func (pr *PendingRequest) Timing(resp *Message) RequestTiming {
+	var t RequestTiming
+	if pr == nil {
+		return t
+	}
+	t.SendCost = pr.sendCost
+	if resp == nil {
+		return t
+	}
+	actionUnblocked := time.Now()
+	t.WireRTT = safeSub(resp.Timing.RecvFrameAt, pr.sendDone)
+	t.DecodeWait = safeSub(resp.Timing.DecodeStart, resp.Timing.RecvFrameAt)
+	t.DecodeCost = safeSub(resp.Timing.DecodeEnd, resp.Timing.DecodeStart)
+	t.DispatchToActionWait = safeSub(actionUnblocked, resp.Timing.DispatchStart)
+	return t
+}
+
+// Close 注销 responseMap 条目并关闭通道。并发安全且幂等（sync.Once 保证 close(ch) 仅一次）。
+// 完成 / 超时 / 取消都必须调用。与 OnReceive 同样在 c.mu 内删除，保证不会向已关闭通道发送
+// （pump 删后查不到即不发）。
+func (pr *PendingRequest) Close() {
+	if pr == nil {
+		return
+	}
+	pr.closeOnce.Do(func() {
+		pr.conn.mu.Lock()
+		if cur, ok := pr.conn.responseMap[pr.routeKey]; ok && cur == pr.ch {
+			delete(pr.conn.responseMap, pr.routeKey)
+		}
+		pr.conn.mu.Unlock()
+		close(pr.ch)
+	})
+}
+
 // Send 异步发送数据。
 func (c *Connection) Send(data []byte) (int, error) {
 	if c == nil {

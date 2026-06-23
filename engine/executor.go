@@ -38,8 +38,21 @@ type ActionHandler interface {
 	// ExecuteBoolean 对条件表达式求值，返回 true/false。
 	// 表达式支持 state: 前缀（从 StateStore 比较）和 lua: 前缀（调用 Lua 脚本）。
 	ExecuteBoolean(expression string) bool
-	// RegisterListen 批量注册持久化推送监听，回调在后台触发，不阻塞流程。
+	// RegisterListen 批量注册持久化推送监听（注册本身不阻塞流程）。推送到达后的处理分两路，
+	// 均不在网络 pump goroutine 内碰业务 LState：① script 回调——pump 只把回调**投递到 Robot
+	// 任务队列**，由执行器 goroutine 在安全点（节点边界 RunPendingTasks / await 等待窗口 drain）
+	// **串行**执行；② 声明式 store——pump 直接写线程安全的 state.Store（纯 Go，无 LState）。
 	RegisterListen(refs []ListenRef) error
+	// RunPendingTasks 串行 drain Robot 任务队列（如 listen 脚本回调），在拥有业务 LState 的执行器
+	// goroutine 内安全执行。这是协作式调度的「节点边界」安全点：网络 pump goroutine 只投递任务、
+	// 绝不碰业务 LState，Lua 回调推迟到安全点由单一 goroutine 串行执行（另一类安全点是 await/IO
+	// 等待窗口，由调度器在等待期间 drain，不经本方法）。无 task 时立即返回。
+	RunPendingTasks(ctx context.Context)
+	// CooperativeSleep 协作式休眠 d（节点延迟 / wait 节点用）。与裸 time.After 的区别：
+	// 等待期间持续 drain 任务队列（跑 listen 回调等），不让「会等待」的点饿死推送回调——
+	// 这是 actor 运行时「任何阻塞点都不裸阻塞」的统一约束。d<=0 立即返回。
+	// ctx 取消时返回 ctx.Err()，供 wait 节点向上传播取消。
+	CooperativeSleep(ctx context.Context, d time.Duration) error
 }
 
 // NewExecutor 创建流程执行器。
@@ -85,6 +98,10 @@ func (e *Executor) executeNode(ctx context.Context, nodeID string) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
+
+	// 节点边界安全点：drain Robot 任务队列（listen 脚本回调等异步 Lua 工作）。
+	// 此处运行在执行器 goroutine（业务 LState 唯一所有者），故串行执行的回调可安全访问 Lua。
+	e.handler.RunPendingTasks(ctx)
 
 	node, ok := e.flow.Nodes[nodeID]
 	if !ok {
@@ -378,12 +395,8 @@ func (e *Executor) executeWait(ctx context.Context, node *Node) error {
 		return nil
 	}
 
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(time.Duration(ms) * time.Millisecond):
-		return nil
-	}
+	// wait 节点同样走协作式休眠：等待期间 drain 任务队列；ctx 取消时向上传播。
+	return e.handler.CooperativeSleep(ctx, time.Duration(ms)*time.Millisecond)
 }
 
 // nodeDelay 执行节点级延迟，仅在 action 节点执行完后调用。
@@ -396,8 +409,7 @@ func (e *Executor) nodeDelay(ctx context.Context, node *Node) {
 	if ms < 0 {
 		return
 	}
-	select {
-	case <-ctx.Done():
-	case <-time.After(time.Duration(ms) * time.Millisecond):
-	}
+	// 走 handler 的协作式休眠：延迟期间继续 drain 任务队列，避免 listen 回调被推迟到
+	// 下一节点边界。延迟被取消（ctx）无需特殊处理，下一节点入口会感知 ctx 并退出。
+	_ = e.handler.CooperativeSleep(ctx, time.Duration(ms)*time.Millisecond)
 }

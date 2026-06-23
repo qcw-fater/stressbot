@@ -49,17 +49,20 @@ func loadNetworkModule(L *lua.LState) int {
 	L.SetField(mod, "close_tcp", L.NewFunction(networkCloseTCP))
 	L.SetField(mod, "close_udp", L.NewFunction(networkCloseUDP))
 	// 请求-响应
-	L.SetField(mod, "tcp_request", L.NewFunction(networkTCPRequest))
-	L.SetField(mod, "tcp_request_route", L.NewFunction(networkTCPRequestRoute))
-	L.SetField(mod, "udp_request", L.NewFunction(networkUDPRequest))
-	L.SetField(mod, "udp_request_route", L.NewFunction(networkUDPRequestRoute))
+	// 请求-响应：协作式实现（actor 运行时统一约束：会等待的点全部 yield 让出，
+	// 等待窗口内调度器 drain mailbox）。无独立"阻塞版"，故无 await_ 前缀别名。
+	L.SetField(mod, "tcp_request", L.NewFunction(networkAwaitTCPRequest))
+	L.SetField(mod, "tcp_request_route", L.NewFunction(networkAwaitTCPRequestRoute))
+	L.SetField(mod, "udp_request", L.NewFunction(networkAwaitUDPRequest))
+	L.SetField(mod, "udp_request_route", L.NewFunction(networkAwaitUDPRequestRoute))
 	L.SetField(mod, "http_request", L.NewFunction(networkHTTPRequest))
 	// 发送
 	L.SetField(mod, "tcp_send", L.NewFunction(networkTCPSend))
 	L.SetField(mod, "udp_send", L.NewFunction(networkUDPSend))
 	// 监听
-	L.SetField(mod, "tcp_listen", L.NewFunction(networkTCPListen))
-	L.SetField(mod, "udp_listen", L.NewFunction(networkUDPListen))
+	// 监听：协作式实现（等待窗口内调度器 drain mailbox）。无独立"阻塞版"，故无 await_ 前缀别名。
+	L.SetField(mod, "tcp_listen", L.NewFunction(networkAwaitTCPListen))
+	L.SetField(mod, "udp_listen", L.NewFunction(networkAwaitUDPListen))
 	// 非阻塞单次 pop（不轮询、不 sleep）：取最近一条缓存消息的原始 body
 	L.SetField(mod, "try_tcp_listen", L.NewFunction(networkTryTCPListen))
 	L.SetField(mod, "try_udp_listen", L.NewFunction(networkTryUDPListen))
@@ -276,24 +279,7 @@ func networkConnectTCP(L *lua.LState) int {
 	}
 	service := L.CheckString(1)
 	address := L.CheckString(2)
-	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" address="+address)
-		L.Push(lua.LNumber(errcode.ErrActionCanceled))
-		return 1
-	}
-	err := ctx.NetSender.ConnectTCP(service, address)
-	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" address="+address)
-		L.Push(lua.LNumber(errcode.ErrActionCanceled))
-		return 1
-	}
-	if err != nil {
-		rememberActionErr(ctx, err)
-		L.Push(lua.LNumber(errToCode(err)))
-	} else {
-		L.Push(lua.LNumber(0))
-	}
-	return 1
+	return awaitConnect(L, ctx, "tcp", service, address)
 }
 
 // networkConnectUDP 建立 UDP 连接。
@@ -309,24 +295,39 @@ func networkConnectUDP(L *lua.LState) int {
 	}
 	service := L.CheckString(1)
 	address := L.CheckString(2)
+	return awaitConnect(L, ctx, "udp", service, address)
+}
+
+// awaitConnect 协作式拨号（Class B）：拨号阻塞至连接建立，故在后台协程执行，等待窗口内执行器
+// 持续 drain 任务队列。拨号前后的 ctx 取消判定与错误记录（rememberFrameworkErr/rememberActionErr）
+// 在 renderer 内做（执行器 goroutine，Context 非并发安全）。返回值契约与旧同步版完全一致：
+// code(number)，0 成功 / errcode 错误码。
+func awaitConnect(L *lua.LState, ctx *Context, proto, service, address string) int {
+	// 拨号前已取消：无需投递后台作业，直接返回取消码。
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
 		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" address="+address)
 		L.Push(lua.LNumber(errcode.ErrActionCanceled))
 		return 1
 	}
-	err := ctx.NetSender.ConnectUDP(service, address)
-	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" address="+address)
-		L.Push(lua.LNumber(errcode.ErrActionCanceled))
-		return 1
-	}
-	if err != nil {
-		rememberActionErr(ctx, err)
-		L.Push(lua.LNumber(errToCode(err)))
-	} else {
-		L.Push(lua.LNumber(0))
-	}
-	return 1
+	return awaitIO(L, "network.connect_"+proto, func() IORenderer {
+		var err error
+		if proto == "udp" {
+			err = ctx.NetSender.ConnectUDP(service, address)
+		} else {
+			err = ctx.NetSender.ConnectTCP(service, address)
+		}
+		return func(L *lua.LState) []lua.LValue {
+			if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
+				rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" address="+address)
+				return []lua.LValue{lua.LNumber(errcode.ErrActionCanceled)}
+			}
+			if err != nil {
+				rememberActionErr(ctx, err)
+				return []lua.LValue{lua.LNumber(errToCode(err))}
+			}
+			return []lua.LValue{lua.LNumber(0)}
+		}
+	})
 }
 
 // networkCloseTCP 关闭 TCP 连接。
@@ -359,71 +360,72 @@ func networkCloseUDP(L *lua.LState) int {
 // 请求-响应
 // ---------------------------------------------------------------------------
 
-// networkTCPRequest TCP 请求-响应。
-// 签名：network.tcp_request(service, route, msg [, s2c_proto])
-//
-// 返回：code(number), data(string|userdata|nil)
-// code=0 成功 / 1-99 框架错误码 / 其他非零=服务端 HeaderErr。
-// WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
-func networkTCPRequest(L *lua.LState) int {
+// requestResultValues 把一次请求-响应等待的结果（命中/服务端错误/请求错误/取消）转成
+// Lua 返回值 (code, data)。协作式 await_*_request 的 drive-loop 用；与同步 doTCPRequest /
+// doUDPRequest 的返回契约一致。
+func requestResultValues(L *lua.LState, ctx *Context, spec *WaitSpec, outcome WaitOutcome) []lua.LValue {
+	pktLen := len(spec.Packet)
+	ex := outcome.Exchange
+	if ex == nil {
+		ex = &engine.NetExchange{SendWireBytes: pktLen}
+	}
+	ctx.recordRequest(ex.Timing)
+	ctx.recordBytes(ex.SendWireBytes, ex.RecvWireBytes)
+	respBody := ex.Body
+
+	if outcome.Canceled {
+		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+spec.Service+" route="+spec.RouteKey)
+		return []lua.LValue{lua.LNumber(errcode.ErrActionCanceled), lua.LNil}
+	}
+	if outcome.Err != nil {
+		rememberActionErr(ctx, outcome.Err)
+		return []lua.LValue{lua.LNumber(errToCode(outcome.Err)), lua.LNil}
+	}
+	if ex.HeaderErr != 0 {
+		rememberHeaderErr(ctx, ex.HeaderErr, spec.Service, spec.RouteKey)
+		return []lua.LValue{lua.LNumber(ex.HeaderErr), lua.LString(string(respBody))}
+	}
+	if spec.S2CProto != "" && ctx.Factory != nil && len(respBody) > 0 {
+		var parseStart time.Time
+		if ctx.TimingLevel >= engine.TimingLevelFull {
+			parseStart = time.Now()
+		}
+		respMsg, err := ctx.Factory.Parse(spec.S2CProto, respBody)
+		if ctx.TimingLevel >= engine.TimingLevelFull && !parseStart.IsZero() {
+			ctx.recordClientTiming(engine.ClientTiming{ParseStoreCost: time.Since(parseStart)})
+		}
+		if err != nil {
+			rememberFrameworkErr(ctx, errcode.ErrParseFailed, "service="+spec.Service+" route="+spec.RouteKey)
+			return []lua.LValue{lua.LNumber(errcode.ErrParseFailed), lua.LString(string(respBody))}
+		}
+		return []lua.LValue{lua.LNumber(0), wrapProtoMessage(L, respMsg)}
+	}
+	return []lua.LValue{lua.LNumber(0), lua.LString(string(respBody))}
+}
+
+// networkAwaitTCPRequest 实现 network.tcp_request（协作式 TCP 请求-响应）：构建请求包后 yield，
+// 等待窗口内调度器可 drain 任务队列；响应到达经通道 select 即时唤醒（不轮询，RTT 测量准确）。
+// 签名：network.tcp_request(service, route, msg [, s2c_proto [, timeout_sec]])
+func networkAwaitTCPRequest(L *lua.LState) int {
 	ctx := GetContext(L)
-	if ctx == nil || ctx.NetSender == nil {
+	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
 		L.RaiseError("network not available")
 		return 0
 	}
-
 	service, route, msg, s2cProto := extractNetArgs(L)
 	if service == "" {
 		L.RaiseError("network.tcp_request requires (service, route, msg [, s2c_proto [, timeout_sec]])")
 		return 0
 	}
-
-	return doTCPRequest(L, ctx, service, route, route, msg, s2cProto, resolveRequestTimeoutSec(L, ctx))
+	return doAwaitTCPRequest(L, ctx, service, route, route, msg, s2cProto, resolveRequestTimeoutSec(L, ctx))
 }
 
-// networkTCPRequestRoute TCP 请求-响应，发送路由和响应匹配路由分离。
-// 签名：network.tcp_request_route(service, request_route, response_route, msg [, s2c_proto [, timeout_sec]])
-//
-// request_route 用于编码请求包，response_route 用于计算等待响应的 routeKey。
-func networkTCPRequestRoute(L *lua.LState) int {
-	ctx := GetContext(L)
-	if ctx == nil || ctx.NetSender == nil {
-		L.RaiseError("network not available")
-		return 0
-	}
-	if L.GetTop() < 4 {
-		L.RaiseError("network.tcp_request_route requires (service, request_route, response_route, msg [, s2c_proto [, timeout_sec]])")
-		return 0
-	}
-
-	service := L.CheckString(1)
-	requestRoute := L.Get(2)
-	responseRoute := L.Get(3)
-	ud, ok := L.Get(4).(*lua.LUserData)
-	if !ok {
-		L.RaiseError("network.tcp_request_route requires proto message at arg 4")
-		return 0
-	}
-	msg, ok := ud.Value.(proto.Message)
-	if !ok {
-		L.RaiseError("network.tcp_request_route requires proto message at arg 4")
-		return 0
-	}
-	s2cProto := ""
-	if L.GetTop() >= 5 && L.Get(5) != lua.LNil {
-		s2cProto = L.CheckString(5)
-	}
-
-	return doTCPRequest(L, ctx, service, requestRoute, responseRoute, msg, s2cProto, resolveRequestTimeoutSecAt(L, ctx, 6))
-}
-
-func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, responseRoute lua.LValue, msg proto.Message, s2cProto string, timeout int) int {
+func doAwaitTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, responseRoute lua.LValue, msg proto.Message, s2cProto string, timeout int) int {
 	msgData, err := serializeMsg(ctx, msg)
 	if err != nil {
 		L.RaiseError("serialize failed: %v", err)
 		return 0
 	}
-
 	var encodeStart time.Time
 	if ctx.TimingLevel >= engine.TimingLevelCodec {
 		encodeStart = time.Now()
@@ -436,72 +438,32 @@ func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service)
 		return pushRequestResult(L, int(errcode.ErrEncodeFailed), lua.LNil, 0, 0)
 	}
-
-	// ExpectedRouteKey 走 resolver.Resolve("tcp:"+service) 出的 Go SchemaAdapter
-	// （与 encode 同源，避免双 codec 漂移）。Resolve nil → fail loud（理论上 encode 已 fail，
-	// 这里防御性兜 nil routeKey 会导致 RequestResponse 永久等不到响应）。
 	tcpAdp := ctx.Resolver.Resolve("tcp:" + service)
 	if tcpAdp == nil {
 		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service+" routeKey 解析失败（codec 未映射）")
 		return pushRequestResult(L, int(errcode.ErrEncodeFailed), lua.LNil, len(packet), 0)
 	}
 	routeKey := tcpAdp.ExpectedRouteKey(luaValueToRoute(responseRoute))
-	pktLen := len(packet)
 
-	exchange, reqErr := ctx.NetSender.TCPRequest(service, packet, routeKey,
-		time.Duration(timeout)*time.Second)
-	if exchange == nil {
-		exchange = &engine.NetExchange{SendWireBytes: pktLen}
-	}
-	ctx.recordRequest(exchange.Timing)
-	ctx.recordBytes(exchange.SendWireBytes, exchange.RecvWireBytes)
-	respBody := exchange.Body
-
-	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" route="+routeKey)
-		return pushRequestResult(L, int(errcode.ErrActionCanceled), lua.LNil, pktLen, 0)
-	}
-	if reqErr != nil {
-		rememberActionErr(ctx, reqErr)
-		return pushRequestResult(L, errToCode(reqErr), lua.LNil, pktLen, 0)
-	}
-	if exchange.HeaderErr != 0 {
-		rememberHeaderErr(ctx, exchange.HeaderErr, service, routeKey)
-		return pushRequestResult(L, int(exchange.HeaderErr), lua.LString(string(respBody)), pktLen, len(respBody))
-	}
-
-	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
-		var parseStart time.Time
-		if ctx.TimingLevel >= engine.TimingLevelFull {
-			parseStart = time.Now()
-		}
-		respMsg, err := ctx.Factory.Parse(s2cProto, respBody)
-		if ctx.TimingLevel >= engine.TimingLevelFull && !parseStart.IsZero() {
-			ctx.recordClientTiming(engine.ClientTiming{ParseStoreCost: time.Since(parseStart)})
-		}
-		if err != nil {
-			rememberFrameworkErr(ctx, errcode.ErrParseFailed, "service="+service+" route="+routeKey)
-			return pushRequestResult(L, int(errcode.ErrParseFailed), lua.LString(string(respBody)), pktLen, len(respBody))
-		}
-		return pushRequestResult(L, 0, wrapProtoMessage(L, respMsg), pktLen, len(respBody))
-	}
-
-	return pushRequestResult(L, 0, lua.LString(string(respBody)), pktLen, len(respBody))
+	return awaitYield(L, "tcp_request", &WaitSpec{
+		Kind:     WaitResponse,
+		Duration: time.Duration(timeout) * time.Second,
+		Proto:    "tcp",
+		Service:  service,
+		RouteKey: routeKey,
+		S2CProto: s2cProto,
+		Packet:   packet,
+	})
 }
 
-// networkUDPRequest UDP 请求-响应。
-// 签名：network.udp_request(service, route, body [, s2c_proto [, timeout_sec [, poll_ms]]])
-//
-// 返回：code(number), data(string|userdata|nil)
-// code=0 成功 / 1-99 框架错误码 / 其他非零=服务端 HeaderErr。
-// WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
-func networkUDPRequest(L *lua.LState) int {
+// networkAwaitUDPRequest 实现 network.udp_request（协作式 UDP 请求-响应）。
+// 签名：network.udp_request(service, route, body [, s2c_proto [, timeout_sec]])
+func networkAwaitUDPRequest(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
 		L.RaiseError("network not available")
 		return 0
 	}
-
 	service := L.CheckString(1)
 	route := L.Get(2)
 	var body []byte
@@ -512,43 +474,10 @@ func networkUDPRequest(L *lua.LState) int {
 	if L.GetTop() >= 4 {
 		s2cProto = L.CheckString(4)
 	}
-	return doUDPRequest(L, ctx, service, route, route, body, s2cProto, resolveRequestTimeoutSec(L, ctx))
+	return doAwaitUDPRequest(L, ctx, service, route, route, body, s2cProto, resolveRequestTimeoutSec(L, ctx))
 }
 
-// networkUDPRequestRoute UDP 请求-响应，发送路由和响应匹配路由分离。
-// 签名：network.udp_request_route(service, request_route, response_route, body [, s2c_proto [, timeout_sec]])
-//
-// request_route 用于编码请求包，response_route 用于计算等待响应的 routeKey。
-func networkUDPRequestRoute(L *lua.LState) int {
-	ctx := GetContext(L)
-	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
-		L.RaiseError("network not available")
-		return 0
-	}
-	if L.GetTop() < 4 {
-		L.RaiseError("network.udp_request_route requires (service, request_route, response_route, body [, s2c_proto [, timeout_sec]])")
-		return 0
-	}
-
-	service := L.CheckString(1)
-	requestRoute := L.Get(2)
-	responseRoute := L.Get(3)
-	body := []byte(L.CheckString(4))
-	s2cProto := ""
-	if L.GetTop() >= 5 && L.Get(5) != lua.LNil {
-		s2cProto = L.CheckString(5)
-	}
-
-	return doUDPRequest(L, ctx, service, requestRoute, responseRoute, body, s2cProto, resolveRequestTimeoutSecAt(L, ctx, 6))
-}
-
-func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, responseRoute lua.LValue, body []byte, s2cProto string, timeout int) int {
-	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
-		L.RaiseError("network not available")
-		return 0
-	}
-	// T2-C2-Lua：encode + ExpectedRouteKey 全走 resolver.Resolve("udp:"+service) 出的 Go SchemaAdapter
-	// （与 TCP 侧 doTCPRequest / engine.ActionExecutor 同源）。Resolve nil → fail loud。
+func doAwaitUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, responseRoute lua.LValue, body []byte, s2cProto string, timeout int) int {
 	udpAdp := ctx.Resolver.Resolve("udp:" + service)
 	if udpAdp == nil {
 		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service+" codec 未映射（resolver.Resolve(udp:"+service+") nil）")
@@ -569,51 +498,72 @@ func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 		return pushRequestResult(L, int(errcode.ErrEncodeFailed), lua.LNil, 0, 0)
 	}
 
-	pktLen := len(packet)
-	exchange, reqErr := ctx.NetSender.UDPRequest(
-		service, packet, routeKey,
-		time.Duration(timeout)*time.Second,
-	)
-	if exchange == nil {
-		exchange = &engine.NetExchange{SendWireBytes: pktLen}
-	}
-	ctx.recordRequest(exchange.Timing)
-	ctx.recordBytes(exchange.SendWireBytes, exchange.RecvWireBytes)
-	respBody := exchange.Body
+	return awaitYield(L, "udp_request", &WaitSpec{
+		Kind:     WaitResponse,
+		Duration: time.Duration(timeout) * time.Second,
+		Proto:    "udp",
+		Service:  service,
+		RouteKey: routeKey,
+		S2CProto: s2cProto,
+		Packet:   packet,
+	})
+}
 
-	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-		// 脚本上下文被取消（robot.Stop / 任务停止）。区别于 reqErr 携带的 CONN_DROPPED：
-		// 后者是底层连接被对端断开；这里是本地主动取消，归类为 ACTION_CANCELED 避免被
-		// 误判为网络异常污染失败率统计。
-		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" route="+routeKey)
-		return pushRequestResult(L, int(errcode.ErrActionCanceled), lua.LNil, pktLen, 0)
+// networkAwaitTCPRequestRoute 实现 network.tcp_request_route（协作式 TCP 请求-响应，发送路由与
+// 响应匹配路由分离）。
+// 签名：network.tcp_request_route(service, request_route, response_route, msg [, s2c_proto [, timeout_sec]])
+func networkAwaitTCPRequestRoute(L *lua.LState) int {
+	ctx := GetContext(L)
+	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
+		L.RaiseError("network not available")
+		return 0
 	}
-	if reqErr != nil {
-		rememberActionErr(ctx, reqErr)
-		return pushRequestResult(L, errToCode(reqErr), lua.LNil, pktLen, 0)
+	if L.GetTop() < 4 {
+		L.RaiseError("network.tcp_request_route requires (service, request_route, response_route, msg [, s2c_proto [, timeout_sec]])")
+		return 0
 	}
-	if exchange.HeaderErr != 0 {
-		rememberHeaderErr(ctx, exchange.HeaderErr, service, routeKey)
-		return pushRequestResult(L, int(exchange.HeaderErr), lua.LString(string(respBody)), pktLen, len(respBody))
+	service := L.CheckString(1)
+	requestRoute := L.Get(2)
+	responseRoute := L.Get(3)
+	ud, ok := L.Get(4).(*lua.LUserData)
+	if !ok {
+		L.RaiseError("network.tcp_request_route requires proto message at arg 4")
+		return 0
 	}
+	msg, ok := ud.Value.(proto.Message)
+	if !ok {
+		L.RaiseError("network.tcp_request_route requires proto message at arg 4")
+		return 0
+	}
+	s2cProto := ""
+	if L.GetTop() >= 5 && L.Get(5) != lua.LNil {
+		s2cProto = L.CheckString(5)
+	}
+	return doAwaitTCPRequest(L, ctx, service, requestRoute, responseRoute, msg, s2cProto, resolveRequestTimeoutSecAt(L, ctx, 6))
+}
 
-	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
-		var parseStart time.Time
-		if ctx.TimingLevel >= engine.TimingLevelFull {
-			parseStart = time.Now()
-		}
-		respMsg, err := ctx.Factory.Parse(s2cProto, respBody)
-		if ctx.TimingLevel >= engine.TimingLevelFull && !parseStart.IsZero() {
-			ctx.recordClientTiming(engine.ClientTiming{ParseStoreCost: time.Since(parseStart)})
-		}
-		if err != nil {
-			rememberFrameworkErr(ctx, errcode.ErrParseFailed, "service="+service+" route="+routeKey)
-			return pushRequestResult(L, int(errcode.ErrParseFailed), lua.LString(string(respBody)), pktLen, len(respBody))
-		}
-		return pushRequestResult(L, 0, wrapProtoMessage(L, respMsg), pktLen, len(respBody))
+// networkAwaitUDPRequestRoute 实现 network.udp_request_route（协作式 UDP 请求-响应，发送路由与
+// 响应匹配路由分离）。
+// 签名：network.udp_request_route(service, request_route, response_route, body [, s2c_proto [, timeout_sec]])
+func networkAwaitUDPRequestRoute(L *lua.LState) int {
+	ctx := GetContext(L)
+	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
+		L.RaiseError("network not available")
+		return 0
 	}
-
-	return pushRequestResult(L, 0, lua.LString(string(respBody)), pktLen, len(respBody))
+	if L.GetTop() < 4 {
+		L.RaiseError("network.udp_request_route requires (service, request_route, response_route, body [, s2c_proto [, timeout_sec]])")
+		return 0
+	}
+	service := L.CheckString(1)
+	requestRoute := L.Get(2)
+	responseRoute := L.Get(3)
+	body := []byte(L.CheckString(4))
+	s2cProto := ""
+	if L.GetTop() >= 5 && L.Get(5) != lua.LNil {
+		s2cProto = L.CheckString(5)
+	}
+	return doAwaitUDPRequest(L, ctx, service, requestRoute, responseRoute, body, s2cProto, resolveRequestTimeoutSecAt(L, ctx, 6))
 }
 
 // networkHTTPRequest 发送 HTTP 请求。
@@ -679,22 +629,24 @@ func networkHTTPRequest(L *lua.LState) int {
 		}
 	}
 
-	exchange, err := ctx.NetSender.HTTPRequest(reqURL, method, contentType, reqBody)
-	if exchange == nil {
-		exchange = &engine.HTTPExchange{}
-	}
-	ctx.recordRequest(engine.RequestTiming{WireRTT: exchange.NetLatency})
-	ctx.recordBytes(exchange.SendWireBytes, exchange.RecvWireBytes)
-	if err != nil {
-		rememberActionErr(ctx, err)
-		L.Push(lua.LNumber(errToCode(err)))
-		L.Push(lua.LString(""))
-		return 2
-	}
-
-	L.Push(lua.LNumber(exchange.StatusCode))
-	L.Push(lua.LString(string(exchange.Body)))
-	return 2
+	// 协作式 Class B：HTTP Do 在后台协程执行（HTTP 往返可能较慢），等待窗口内执行器持续 drain
+	// 任务队列。指标累计（recordRequest/recordBytes）与错误记录（rememberActionErr）必须在
+	// renderer 内做——它在执行器 goroutine 上调用，Context 非并发安全。
+	return awaitIO(L, "network.http_request", func() IORenderer {
+		exchange, err := ctx.NetSender.HTTPRequest(reqURL, method, contentType, reqBody)
+		return func(L *lua.LState) []lua.LValue {
+			if exchange == nil {
+				exchange = &engine.HTTPExchange{}
+			}
+			ctx.recordRequest(engine.RequestTiming{WireRTT: exchange.NetLatency})
+			ctx.recordBytes(exchange.SendWireBytes, exchange.RecvWireBytes)
+			if err != nil {
+				rememberActionErr(ctx, err)
+				return []lua.LValue{lua.LNumber(errToCode(err)), lua.LString("")}
+			}
+			return []lua.LValue{lua.LNumber(exchange.StatusCode), lua.LString(string(exchange.Body))}
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -825,47 +777,24 @@ func networkUDPSend(L *lua.LState) int {
 // 监听
 // ---------------------------------------------------------------------------
 
-// networkTCPListen 等待 TCP 监听消息。
-// 签名：network.tcp_listen(service, route [, s2c_proto [, timeout_sec [, poll_ms]]])
+// listenParams 解析 *_listen / await_*_listen 系列的公共入参并计算 routeKey。
 //
-// 返回：code(number), data(string|userdata|nil)
-// code: 0=成功 / 31=超时 / 6=取消 / 12=解析失败 / 其他非零=服务端 HeaderErr。
-// 接收 WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
-func networkTCPListen(L *lua.LState) int { return networkListen(L, "tcp") }
-
-// networkUDPListen 等待 UDP 监听消息。
-// 签名：network.udp_listen(service, route [, s2c_proto [, timeout_sec [, poll_ms]]])
-//
-// 返回：code(number), data(string|userdata|nil)
-// code: 0=成功 / 31=超时 / 6=取消 / 12=解析失败 / 其他非零=服务端 HeaderErr。
-// 接收 WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
-func networkUDPListen(L *lua.LState) int { return networkListen(L, "udp") }
-
-// networkListen 通用监听实现，通过 protocol 参数区分 TCP/UDP。
-func networkListen(L *lua.LState, protocol string) int {
-	ctx := GetContext(L)
-	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
-		L.RaiseError("network not available")
-		return 0
-	}
-
-	service := L.CheckString(1)
-	// T2-C2-Lua：routeKey 走 resolver.Resolve("<proto>:"+service) 出的 Go SchemaAdapter 计算
-	// （与 engine robotActionHandler.RegisterListen 同源，闭环双 codec）。Resolve nil → fail loud。
+// 入参约定：(service, route [, s2cProto [, timeout秒 [, pollMs]]])。
+// routeKey 走 resolver.Resolve("<proto>:"+service) 出的 Go SchemaAdapter 计算
+// （与 engine robotActionHandler.RegisterListen 同源）。codec 未映射时记框架错误并返回
+// ok=false，调用方据此直接返回 (ErrEncodeFailed, nil)。
+func listenParams(L *lua.LState, ctx *Context, protocol string) (service, routeKey, s2cProto string, timeout, pollMs int, ok bool) {
+	service = L.CheckString(1)
 	adp := ctx.Resolver.Resolve(protocol + ":" + service)
 	if adp == nil {
 		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service+" codec 未映射（resolver.Resolve("+protocol+":"+service+") nil）")
-		L.Push(lua.LNumber(errcode.ErrEncodeFailed))
-		L.Push(lua.LNil)
-		return 2
+		return service, "", "", 0, 0, false
 	}
 	route := luaValueToRoute(L.Get(2))
-	routeKey := adp.ExpectedRouteKey(route)
+	routeKey = adp.ExpectedRouteKey(route)
 
-	var s2cProto string
-	timeout := engine.DefaultListenTimeoutSec
-	pollMs := engine.DefaultPollMs
-
+	timeout = engine.DefaultListenTimeoutSec
+	pollMs = engine.DefaultPollMs
 	if L.GetTop() >= 3 {
 		s2cProto = L.CheckString(3)
 	}
@@ -878,80 +807,75 @@ func networkListen(L *lua.LState, protocol string) int {
 	if pollMs <= 0 {
 		pollMs = engine.DefaultPollMs
 	}
+	return service, routeKey, s2cProto, timeout, pollMs, true
+}
 
-	var exchange *engine.NetExchange
-	var timedOut bool
-
-	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
-	for time.Now().Before(deadline) {
-		if protocol == "tcp" {
-			exchange = ctx.NetSender.GetTCPListenResp(service, routeKey)
-		} else {
-			exchange = ctx.NetSender.GetUDPListenResp(service, routeKey)
-		}
-		if exchange != nil {
-			break
-		}
-		if ctx.Ctx != nil {
-			select {
-			case <-time.After(time.Duration(pollMs) * time.Millisecond):
-			case <-ctx.Ctx.Done():
-			}
-		} else {
-			time.Sleep(time.Duration(pollMs) * time.Millisecond)
-		}
-		if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-			break
-		}
-	}
-	if exchange == nil && (ctx.Ctx == nil || ctx.Ctx.Err() == nil) {
-		timedOut = true
-	}
+// listenResultValues 把一次监听等待的结果（命中/超时/取消）转成 Lua 返回值 (code, data)。
+// 协作式 await_*_listen 的 drive-loop 用。
+func listenResultValues(L *lua.LState, ctx *Context, spec *WaitSpec, outcome WaitOutcome) []lua.LValue {
+	exchange := outcome.Exchange
 	if exchange == nil {
 		exchange = &engine.NetExchange{}
 	}
 	ctx.recordBytes(0, exchange.RecvWireBytes)
 	respBody := exchange.Body
 
-	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" route="+routeKey)
-		L.Push(lua.LNumber(errcode.ErrActionCanceled))
-		L.Push(lua.LNil)
-		return 2
+	if outcome.Canceled {
+		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+spec.Service+" route="+spec.RouteKey)
+		return []lua.LValue{lua.LNumber(errcode.ErrActionCanceled), lua.LNil}
 	}
-	if timedOut {
-		stresslog.Debug("[SCRIPT] "+protocol+"_listen 超时",
-			zap.String("service", service), zap.String("routeKey", routeKey), zap.Int("timeout", timeout),
-			zap.String("hint", "请先调用 ensure_"+protocol+"_listener() 预注册监听"))
+	if outcome.TimedOut {
+		timeoutSec := int(spec.Duration / time.Second)
+		stresslog.Debug("[SCRIPT] "+spec.Proto+"_listen 超时",
+			zap.String("service", spec.Service), zap.String("routeKey", spec.RouteKey), zap.Int("timeout", timeoutSec),
+			zap.String("hint", "请先调用 ensure_"+spec.Proto+"_listener() 预注册监听"))
 		rememberFrameworkErr(ctx, errcode.ErrListenTimeout,
-			fmt.Sprintf("service=%s route=%s timeout=%ds pollMs=%d", service, routeKey, timeout, pollMs))
-		L.Push(lua.LNumber(errcode.ErrListenTimeout))
-		L.Push(lua.LNil)
-		return 2
+			fmt.Sprintf("service=%s route=%s timeout=%ds pollMs=%d", spec.Service, spec.RouteKey, timeoutSec, spec.PollMs))
+		return []lua.LValue{lua.LNumber(errcode.ErrListenTimeout), lua.LNil}
 	}
 	if exchange.HeaderErr != 0 {
-		rememberHeaderErr(ctx, exchange.HeaderErr, service, routeKey)
-		L.Push(lua.LNumber(exchange.HeaderErr))
-		L.Push(lua.LString(string(respBody)))
-		return 2
+		rememberHeaderErr(ctx, exchange.HeaderErr, spec.Service, spec.RouteKey)
+		return []lua.LValue{lua.LNumber(exchange.HeaderErr), lua.LString(string(respBody))}
 	}
-
-	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
-		respMsg, err := ctx.Factory.Parse(s2cProto, respBody)
+	if spec.S2CProto != "" && ctx.Factory != nil && len(respBody) > 0 {
+		respMsg, err := ctx.Factory.Parse(spec.S2CProto, respBody)
 		if err != nil {
-			rememberFrameworkErr(ctx, errcode.ErrParseFailed, "service="+service+" route="+routeKey)
-			L.Push(lua.LNumber(errcode.ErrParseFailed))
-			L.Push(lua.LNil)
-			return 2
+			rememberFrameworkErr(ctx, errcode.ErrParseFailed, "service="+spec.Service+" route="+spec.RouteKey)
+			return []lua.LValue{lua.LNumber(errcode.ErrParseFailed), lua.LNil}
 		}
-		L.Push(lua.LNumber(0))
-		L.Push(wrapProtoMessage(L, respMsg))
+		return []lua.LValue{lua.LNumber(0), wrapProtoMessage(L, respMsg)}
+	}
+	return []lua.LValue{lua.LNumber(0), lua.LString(string(respBody))}
+}
+
+// networkAwaitTCPListen / networkAwaitUDPListen 实现 network.tcp_listen / udp_listen
+// （协作式监听）：在监听等待处 yield，等待窗口内调度器可 drain 任务队列。
+func networkAwaitTCPListen(L *lua.LState) int { return awaitNetworkListen(L, "tcp") }
+func networkAwaitUDPListen(L *lua.LState) int { return awaitNetworkListen(L, "udp") }
+
+func awaitNetworkListen(L *lua.LState, protocol string) int {
+	ctx := GetContext(L)
+	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
+		L.RaiseError("network not available")
+		return 0
+	}
+	service, routeKey, s2cProto, timeout, pollMs, ok := listenParams(L, ctx, protocol)
+	if !ok {
+		// codec 未映射：直接返回错误，不进入协作式等待（无须 yield）。
+		L.Push(lua.LNumber(errcode.ErrEncodeFailed))
+		L.Push(lua.LNil)
 		return 2
 	}
-
-	L.Push(lua.LNumber(0))
-	L.Push(lua.LString(string(respBody)))
-	return 2
+	spec := &WaitSpec{
+		Kind:     WaitListen,
+		Duration: time.Duration(timeout) * time.Second,
+		PollMs:   pollMs,
+		Proto:    protocol,
+		Service:  service,
+		RouteKey: routeKey,
+		S2CProto: s2cProto,
+	}
+	return awaitYield(L, protocol+"_listen", spec)
 }
 
 // networkTryTCPListen 非阻塞获取最近一条 TCP 监听消息（不解析 proto，返回原始 body）。

@@ -110,6 +110,64 @@ type ActionExecutor struct {
 	factory     *protox.Factory       // 动态 protobuf 消息工厂，用于创建/序列化/解析 proto 消息
 	resolver    adapter.CodecResolver // 按 "<proto>:<service>" 解析每连接的 Go codec adapter
 	timingLevel int                   // 计时细分级别：0=rtt, 1=codec, 2=full
+	// coopSleep 协作式休眠（由 Robot 调度器注入）：声明式 listen 轮询间隔走它，
+	// 等待期间 drain Robot mailbox（跑 listen 回调等），不饿死协作式工作。
+	// nil（engine 独立运行/测试）时回退裸 time.After + ctx，保持 engine 对 robot 解耦。
+	coopSleep func(ctx context.Context, d time.Duration) error
+	// coopIO 协作式阻塞 I/O（由 Robot 调度器注入 sched.runIO）：声明式 httpRequest / tcpConnect /
+	// udpConnect 的阻塞调用经它在后台 goroutine 执行，调用 goroutine 等待期间 drain Robot mailbox。
+	// 与 Lua await_*（share/http/connect）同源（同一 runIO 原语），声明式与脚本两条路径协作式语义一致。
+	// nil（engine 独立运行/测试）时直接同步调 job，保持 engine 对 robot 解耦。
+	coopIO func(job func())
+}
+
+// SetCooperativeSleeper 注入协作式休眠后端（Robot 调度器）。
+// 注入后声明式 listen 的轮询间隔不再裸 time.Sleep，而是在等待窗口内 drain Robot mailbox，
+// 与 Lua await / 节点延迟同源——actor 运行时「任何阻塞点都不裸阻塞」的统一约束覆盖到声明式动作。
+func (ae *ActionExecutor) SetCooperativeSleeper(f func(ctx context.Context, d time.Duration) error) {
+	ae.coopSleep = f
+}
+
+// SetCooperativeIO 注入协作式阻塞 I/O 后端（Robot 调度器 sched.runIO）。
+// 注入后声明式 httpRequest / tcpConnect / udpConnect 的阻塞调用不再裸阻塞执行器，而是在后台
+// goroutine 执行、等待期间 drain Robot mailbox——与 Lua await_*（share/http/connect）同一原语。
+func (ae *ActionExecutor) SetCooperativeIO(f func(job func())) {
+	ae.coopIO = f
+}
+
+// runIO 协作式执行一次阻塞 I/O：注入了 coopIO 则走调度器（后台跑 + drain mailbox），否则直接
+// 同步调 job（engine 独立运行无 mailbox 可 drain）。job 的结果经其自身闭包捕获，调用方在 runIO
+// 返回后读取。
+func (ae *ActionExecutor) runIO(job func()) {
+	if ae.coopIO != nil {
+		ae.coopIO(job)
+		return
+	}
+	job()
+}
+
+// sleep 协作式休眠 d：注入了 coopSleep 则走调度器（drain mailbox），否则裸 time.After + ctx。
+// 返回非 nil（= ctx.Err()）表示被取消，调用方据此提前退出。
+func (ae *ActionExecutor) sleep(ctx context.Context, d time.Duration) error {
+	if ae.coopSleep != nil {
+		return ae.coopSleep(ctx, d)
+	}
+	if d <= 0 {
+		if ctx != nil {
+			return ctx.Err()
+		}
+		return nil
+	}
+	if ctx == nil {
+		time.Sleep(d)
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
 }
 
 // NetExchange 单次 TCP/UDP 请求或监听得到的网络交换结果。
@@ -664,7 +722,9 @@ func (ae *ActionExecutor) execTCPConnect(def *ActionDef) error {
 	if addr == "" {
 		return NewActionError(errcode.ErrAddrEmpty, "action="+def.Name+" service="+def.Service)
 	}
-	err := ae.netSender.ConnectTCP(def.Service, addr)
+	// 协作式 Class B：拨号阻塞至连接建立，在后台 goroutine 执行，等待窗口内执行器 drain mailbox。
+	var err error
+	ae.runIO(func() { err = ae.netSender.ConnectTCP(def.Service, addr) })
 	if err != nil {
 		return err
 	}
@@ -678,7 +738,9 @@ func (ae *ActionExecutor) execUDPConnect(def *ActionDef) error {
 	if addr == "" {
 		return NewActionError(errcode.ErrAddrEmpty, "action="+def.Name+" service="+def.Service)
 	}
-	err := ae.netSender.ConnectUDP(def.Service, addr)
+	// 协作式 Class B：拨号阻塞至连接建立，在后台 goroutine 执行，等待窗口内执行器 drain mailbox。
+	var err error
+	ae.runIO(func() { err = ae.netSender.ConnectUDP(def.Service, addr) })
 	if err != nil {
 		return err
 	}
@@ -823,7 +885,11 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, ActionTimin
 		}
 	}
 
-	exchange, err := ae.netSender.HTTPRequest(resolvedURL, method, contentType, body)
+	// 协作式 Class B：HTTP Do 在后台 goroutine 执行（往返可能较慢），等待窗口内执行器 drain
+	// mailbox。后续 timing/store/parse 均在 runIO 返回后于执行器 goroutine 串行处理。
+	var exchange *HTTPExchange
+	var err error
+	ae.runIO(func() { exchange, err = ae.netSender.HTTPRequest(resolvedURL, method, contentType, body) })
 	if exchange == nil {
 		exchange = &HTTPExchange{}
 	}
@@ -1296,7 +1362,11 @@ func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *
 				zap.Int("pollCount", pollCount))
 			return exchange.RecvWireBytes, timing, nil
 		}
-		time.Sleep(time.Duration(pollMs) * time.Millisecond)
+		// 协作式休眠：等待窗口内 drain Robot mailbox（跑 listen 回调），不饿死协作式工作。
+		// ctx 取消时提前返回（下一轮 ctx 检查也会兜底）。
+		if err := ae.sleep(ctx, time.Duration(pollMs)*time.Millisecond); err != nil {
+			return 0, ActionTiming{}, err
+		}
 	}
 
 	elapsed := time.Since(start)

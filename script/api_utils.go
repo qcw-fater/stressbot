@@ -57,7 +57,8 @@ func loadUtilsModule(L *lua.LState) int {
 	L.SetField(mod, "pack_le", L.NewFunction(utilsPackLE))
 	L.SetField(mod, "unpack_le", L.NewFunction(utilsUnpackLE))
 	// 通用工具
-	L.SetField(mod, "sleep", L.NewFunction(utilsSleep))
+	// sleep 协作式休眠（actor 运行时统一约束：等待窗口内调度器 drain mailbox）。无 await_ 前缀别名。
+	L.SetField(mod, "sleep", L.NewFunction(utilsAwaitSleep))
 	L.SetField(mod, "time_ms", L.NewFunction(utilsTimeMs))
 	L.SetField(mod, "fnv_hash", L.NewFunction(utilsFnvHash))
 
@@ -475,21 +476,19 @@ func utilsUnpackLE(L *lua.LState) int {
 // 通用工具
 // ---------------------------------------------------------------------------
 
-// utilsSleep utils.sleep(ms) — 休眠指定毫秒数（响应 context 取消）。
-func utilsSleep(L *lua.LState) int {
+// utilsAwaitSleep 实现 utils.sleep（协作式休眠指定毫秒数）。
+//
+// 在协程内 yield 让出 LState，休眠窗口内调度器可 drain 任务队列（跑 listen 回调等），
+// 不会饿死其他协作式工作。只能在脚本顶层（调度器协程）直接调用，否则 fail-loud（见 awaitYield）。
+func utilsAwaitSleep(L *lua.LState) int {
 	ms := L.CheckInt(1)
-	if ms > 0 {
-		ctx := GetContext(L)
-		if ctx != nil && ctx.Ctx != nil {
-			select {
-			case <-time.After(time.Duration(ms) * time.Millisecond):
-			case <-ctx.Ctx.Done():
-			}
-		} else {
-			time.Sleep(time.Duration(ms) * time.Millisecond)
-		}
+	if ms <= 0 {
+		return 0
 	}
-	return 0
+	return awaitYield(L, "sleep", &WaitSpec{
+		Kind:     WaitSleep,
+		Duration: time.Duration(ms) * time.Millisecond,
+	})
 }
 
 // utilsTimeMs utils.time_ms() — 获取当前时间戳（毫秒）

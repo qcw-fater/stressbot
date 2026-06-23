@@ -61,6 +61,16 @@ type Context struct {
 	DefaultRequestTimeout time.Duration
 	TimingLevel           int
 
+	// Waiter 协作式调度的等待后端（由 Robot 实现）：action 脚本协程在 await_* 处 yield 出
+	// WaitSpec 后，drive-loop 调 Waiter.Await 让 Robot 在等待窗口内 drain 任务队列
+	// （跑 listen 回调等），条件满足/超时后返回 WaitOutcome，再 resume 协程。
+	// 为 nil 时脚本一旦 yield（调 await_*）即报错（未接入协作式调度）。
+	Waiter Waiter
+	// topThread 当前被调度器 Resume 的 action 协程线程。await_* 运行时据此校验
+	// 「自己处于调度器直接 resume 的顶层协程」：L != topThread（用户 coroutine.create
+	// 协程）即 fail-loud。仅执行器 goroutine 单线程读写，无需加锁。
+	topThread *lua.LState
+
 	metricsMu        sync.Mutex
 	currentTiming    engine.ActionTiming
 	currentSendBytes int
@@ -396,24 +406,105 @@ func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (code, 
 		}()
 	}
 
-	savedTop := L.GetTop()
-	defer L.SetTop(savedTop)
-
-	executeFn, lerr := rp.loadScriptFn(L, scriptName, "execute")
+	// 协作式执行：脚本跑在子线程协程上，遇 await_* 时 yield 出 WaitSpec，
+	// drive-loop 调 Waiter.Await 等待（窗口内 Robot drain 任务队列），再 resume。
+	// 不含 await 的脚本首次 Resume 即 ResumeOK 跑完，行为与旧 CallByParam 等价。
+	co, lerr := rp.startActionCoroutine(L, scriptName)
 	if lerr != nil {
 		return -1, 0, 0, engine.ActionTiming{}, lerr
 	}
+	defer co.close()
+
+	var resumeVals []lua.LValue
+	for {
+		res, rerr := rp.resumeCoroutine(co, ctx, resumeVals)
+		if rerr != nil {
+			return -1, 0, 0, engine.ActionTiming{}, rerr
+		}
+		if res.done {
+			return res.code, 0, 0, engine.ActionTiming{}, nil
+		}
+
+		// 协程在 await_* 处 yield：交给 Waiter 协作式等待，再把结果转回 Lua 返回值。
+		if ctx == nil || ctx.Waiter == nil {
+			return -1, 0, 0, engine.ActionTiming{}, fmt.Errorf(
+				"脚本 %s 调用 await_*，但运行时未接入协作式调度（Waiter 为 nil）", scriptName)
+		}
+		outcome, werr := ctx.Waiter.Await(res.wait)
+		if werr != nil {
+			return -1, 0, 0, engine.ActionTiming{}, werr
+		}
+		resumeVals = rp.buildResumeVals(L, ctx, res.wait, outcome)
+	}
+}
+
+// buildResumeVals 把 Waiter 的等待结果转成喂回协程的 Lua 返回值（成为 await_* 的返回值）。
+func (rp *RuntimePool) buildResumeVals(L *lua.LState, ctx *Context, spec *WaitSpec, outcome WaitOutcome) []lua.LValue {
+	switch spec.Kind {
+	case WaitSleep:
+		return nil // await_sleep 无返回值
+	case WaitListen:
+		return listenResultValues(L, ctx, spec, outcome)
+	case WaitResponse:
+		return requestResultValues(L, ctx, spec, outcome)
+	case WaitIO:
+		// 后台作业完成：在执行器 goroutine 上调用 renderer 产出 Lua 返回值。
+		// renderer 为 nil（作业被放弃/panic）时返回空——脚本所有返回值取 nil，调用方据此当错误处理。
+		if outcome.IORender != nil {
+			return outcome.IORender(L)
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+// RunListenScript 执行 listen 脚本回调（协作式调度安全模型）。
+//
+// Lua 脚本应定义 `function on_message(r, msg)`：
+//   - r   为 robot 句柄（与 execute(r) 同一句柄，可调用 robot/network/state 等 API）；
+//   - msg 为按 ListenDef.s2cProto 解码后的字段表；未配置 s2cProto 时为 nil。
+//
+// 调用约束：本方法**必须**由 Robot 调度器在安全点（节点边界 / 等待窗口 drain，执行器
+// goroutine = 业务 LState 唯一所有者）串行调用，绝不能在网络 pump goroutine 内执行——
+// 否则会与主流程并发抢占同一 LState 导致栈损坏。返回值忽略；失败返回 error 供调用方记指标。
+//
+// 与 action 脚本一致跑在子线程协程上：on_message 内可直接调用 await_*（如 await_tcp_request
+// 回应推送），遇 await 时 yield，由 Waiter 协作式等待后 resume。嵌套（回调 await 期间 drain
+// 出另一回调）安全：resumeCoroutine 每次 resume 前重设 topThread。
+func (rp *RuntimePool) RunListenScript(L *lua.LState, scriptName string, respMsg proto.Message) error {
+	ctx := GetContext(L)
 
 	robotUD := createRobotUserData(L)
-	if err = L.CallByParam(lua.P{Fn: executeFn, NRet: 1, Protect: true}, robotUD); err != nil {
-		return -1, 0, 0, engine.ActionTiming{}, fmt.Errorf("执行脚本 %s 失败: %w", scriptName, err)
+	var msgVal lua.LValue = lua.LNil
+	if respMsg != nil {
+		msgVal = protoMessageToLuaTable(L, respMsg)
 	}
 
-	if L.GetTop() >= savedTop+1 {
-		code = int(lua.LVAsNumber(L.Get(savedTop + 1)))
+	co, lerr := rp.startCoroutine(L, scriptName, "on_message", robotUD, msgVal)
+	if lerr != nil {
+		return lerr
 	}
+	defer co.close()
 
-	return code, 0, 0, engine.ActionTiming{}, nil
+	var resumeVals []lua.LValue
+	for {
+		res, rerr := rp.resumeCoroutine(co, ctx, resumeVals)
+		if rerr != nil {
+			return rerr
+		}
+		if res.done {
+			return nil // on_message 返回值忽略
+		}
+		if ctx == nil || ctx.Waiter == nil {
+			return fmt.Errorf("监听脚本 %s 调用 await_*，但运行时未接入协作式调度（Waiter 为 nil）", scriptName)
+		}
+		outcome, werr := ctx.Waiter.Await(res.wait)
+		if werr != nil {
+			return werr
+		}
+		resumeVals = rp.buildResumeVals(L, ctx, res.wait, outcome)
+	}
 }
 
 // RunBooleanScript 执行布尔判断脚本（条件节点 / loop breakCondition）。
@@ -426,28 +517,41 @@ func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (code, 
 // 返回 number / nil / 其他类型一律视作错误（不再兼容旧版 0/1 约定）：
 // 调用方收到 error 后会判定条件为 false 并打 error 日志，引导脚本作者修正。
 func (rp *RuntimePool) RunBooleanScript(L *lua.LState, scriptName string) (bool, error) {
-	savedTop := L.GetTop()
-	defer L.SetTop(savedTop)
+	ctx := GetContext(L)
 
-	executeFn, err := rp.loadScriptFn(L, scriptName, "execute")
-	if err != nil {
-		return false, err
+	// 与 action / listen 一致跑在子线程协程上：条件脚本同样可调用 await_*（如先 await 一次
+	// 请求再据响应判定）。不含 await 时首次 Resume 即结束，行为与旧 CallByParam 等价。
+	co, lerr := rp.startActionCoroutine(L, scriptName)
+	if lerr != nil {
+		return false, lerr
 	}
+	defer co.close()
 
-	robotUD := createRobotUserData(L)
-	if err := L.CallByParam(lua.P{Fn: executeFn, NRet: 1, Protect: true}, robotUD); err != nil {
-		return false, fmt.Errorf("执行脚本 %s 失败: %w", scriptName, err)
+	var resumeVals []lua.LValue
+	for {
+		res, rerr := rp.resumeCoroutine(co, ctx, resumeVals)
+		if rerr != nil {
+			return false, rerr
+		}
+		if res.done {
+			if len(res.retVals) == 0 {
+				return false, fmt.Errorf("布尔脚本 %s 未返回值，必须 return true/false", scriptName)
+			}
+			b, ok := res.retVals[0].(lua.LBool)
+			if !ok {
+				return false, fmt.Errorf("布尔脚本 %s 必须 return true/false，实际类型 %s", scriptName, res.retVals[0].Type().String())
+			}
+			return bool(b), nil
+		}
+		if ctx == nil || ctx.Waiter == nil {
+			return false, fmt.Errorf("布尔脚本 %s 调用 await_*，但运行时未接入协作式调度（Waiter 为 nil）", scriptName)
+		}
+		outcome, werr := ctx.Waiter.Await(res.wait)
+		if werr != nil {
+			return false, werr
+		}
+		resumeVals = rp.buildResumeVals(L, ctx, res.wait, outcome)
 	}
-
-	if L.GetTop() <= savedTop {
-		return false, fmt.Errorf("布尔脚本 %s 未返回值，必须 return true/false", scriptName)
-	}
-	ret := L.Get(-1)
-	b, ok := ret.(lua.LBool)
-	if !ok {
-		return false, fmt.Errorf("布尔脚本 %s 必须 return true/false，实际类型 %s", scriptName, ret.Type().String())
-	}
-	return bool(b), nil
 }
 
 // HasScript 检查脚本是否已预编译

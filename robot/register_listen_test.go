@@ -84,10 +84,10 @@ func TestEffectiveListenQueueSize(t *testing.T) {
 	}
 }
 
-// TestValidateListenDef 验证 ListenDef.script 废弃校验（2-A2.2）。
+// TestValidateListenDef 验证 ListenDef 的形态约束。
 //
-// v2 起 listen 脚本回调已下线，validateListenDef 对 cbDef.Script != "" fail-loud
-// （中文 error，含 listen+script 上下文）。抽成纯函数便于单测。
+// 协作式调度下 listen 脚本回调已恢复为正式能力，validateListenDef 不再对 cbDef.Script
+// fail-loud；唯一约束是 store 与 script 互斥（中文 error，含 listen 上下文）。抽成纯函数便于单测。
 func TestValidateListenDef(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -112,11 +112,29 @@ func TestValidateListenDef(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "script非空_报错",
+			name:    "纯script_通过",
 			listen:  "frameData",
 			cbDef:   &engine.ListenDef{Script: "listen_frame_data.lua"},
+			wantErr: false,
+		},
+		{
+			name:   "script+s2cProto_通过",
+			listen: "roomPush",
+			cbDef: &engine.ListenDef{
+				S2CProto: "game.RoomUpdate",
+				Script:   "listen_room.lua",
+			},
+			wantErr: false,
+		},
+		{
+			name:   "store与script并存_报错",
+			listen: "roomPush",
+			cbDef: &engine.ListenDef{
+				Script: "listen_room.lua",
+				Store:  []engine.StoreMapping{{Field: "id", Setter: "roomId"}},
+			},
 			wantErr: true,
-			errSubs: []string{"frameData", "listen_frame_data.lua", "script", "废弃"},
+			errSubs: []string{"roomPush", "store", "script", "互斥"},
 		},
 		{
 			name:    "nil_cbDef_通过",

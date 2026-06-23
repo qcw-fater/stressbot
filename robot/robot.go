@@ -53,16 +53,20 @@ type Robot struct {
 	//   - encode/心跳/listen：engine.ActionExecutor / robotActionHandler / netSenderAdapter 各自 Resolve；
 	//   - 业务 Lua：通过 script.Context.Resolver（= r.resolver）在 api_network.go 内 Resolve。
 	resolver       adapter.CodecResolver
-	shared         sharedstate.Store           // 任务级共享状态后端（可为 nil）
-	mainService    string                      // 主连接服务名，意外断开时停止机器人
-	requestTimeout time.Duration               // robotConfig.timeoutSec 注入；用作 Lua tcp/udp_request 默认 timeout
-	timingLevel    int                         // monitor.timingDetail 映射后的 engine 计时级别
-	execDone       chan struct{}               // executor goroutine 结束信号，cleanup 等待它安全退出
-	done           chan struct{}               // Robot 生命周期结束信号，Close 时等待
-	onDone         func(*Robot, CleanupStatus) // 执行 goroutine 结束后回调（由 Manager 设置）
-	cleanupOnce    sync.Once
-	cleanupMu      sync.Mutex
-	cleanupResult  CleanupStatus
+	shared         sharedstate.Store // 任务级共享状态后端（可为 nil）
+	mainService    string            // 主连接服务名，意外断开时停止机器人
+	requestTimeout time.Duration     // robotConfig.timeoutSec 注入；用作 Lua tcp/udp_request 默认 timeout
+	timingLevel    int               // monitor.timingDetail 映射后的 engine 计时级别
+	execDone       chan struct{}     // executor goroutine 结束信号，cleanup 等待它安全退出
+	done           chan struct{}     // Robot 生命周期结束信号，Close 时等待
+	// sched 是 Robot 的协作式调度核心（actor 运行时）：mailbox + 统一等待 pump。
+	// 网络 pump goroutine 经 sched.enqueue 投递异步 Lua 工作（listen 回调），
+	// 由执行器 goroutine 在节点边界 / 等待窗口经 sched.drain 串行消费。详见 scheduler.go。
+	sched         *robotScheduler
+	onDone        func(*Robot, CleanupStatus) // 执行 goroutine 结束后回调（由 Manager 设置）
+	cleanupOnce   sync.Once
+	cleanupMu     sync.Mutex
+	cleanupResult CleanupStatus
 }
 
 // Config 单个机器人的配置。
@@ -133,6 +137,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		execDone:       make(chan struct{}),
 		done:           make(chan struct{}),
 	}
+	r.sched = newRobotScheduler(r)
 
 	if luaPool != nil {
 		r.l = luaPool.Acquire()
@@ -153,6 +158,11 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 	}
 
 	r.actionExec = engine.NewActionExecutor(r.state, &netSenderAdapter{robot: r}, r.factory, r.resolver, engineTimingLevel)
+	// 注入协作式休眠：声明式 listen 轮询间隔走调度器（drain mailbox），与 Lua await / 节点延迟同源。
+	r.actionExec.SetCooperativeSleeper(r.cooperativeSleep)
+	// 注入协作式阻塞 I/O：声明式 httpRequest / tcpConnect / udpConnect 走调度器 runIO（后台跑 +
+	// drain mailbox），与 Lua await_*（share/http/connect）同一原语，两条路径协作式语义统一。
+	r.actionExec.SetCooperativeIO(r.sched.runIO)
 	r.executor = engine.NewExecutor(flow, &robotActionHandler{robot: r, flow: flow}, r.account)
 
 	return r, nil
@@ -201,6 +211,7 @@ func (r *Robot) Start() {
 				Shared:                r.shared,
 				DefaultRequestTimeout: r.requestTimeout,
 				TimingLevel:           r.timingLevel,
+				Waiter:                &robotWaiter{robot: r, netSender: &netSenderAdapter{robot: r}},
 			})
 		}
 
@@ -260,6 +271,60 @@ const robotCloseTimeout = 10 * time.Second
 // defaultListenQueueSize 监听缓存队列默认容量，缺省等价于旧单槽语义。
 // 与 network.defaultListenQueueSize 保持一致（同值，独立定义避免跨包依赖未导出符号）。
 const defaultListenQueueSize = 1
+
+const (
+	// robotTaskQueueSize Robot 协作式调度任务队列容量。满则丢弃最新任务并计入 taskDropped，
+	// 不阻塞投递方（网络 pump goroutine）。listen 脚本回调属推送热路径，丢弃语义与 listen
+	// 缓存队列「保最新」一致：宁可丢回调也不阻塞 I/O 平面。
+	robotTaskQueueSize = 256
+	// maxDrainPerBoundary 单个节点边界一次 drain 的最大任务数。
+	// 防止回调洪峰把执行器 goroutine 长期占在 drain 循环里、饿死主流程推进；
+	// 未 drain 完的任务留待下一节点边界继续。
+	maxDrainPerBoundary = 64
+)
+
+// pendingTask 投递到 Robot 任务队列的一个工作单元。
+// exec 由 RunPendingTasks 在执行器 goroutine（业务 LState 唯一所有者）内串行调用，
+// 因此 exec 内可安全访问业务 Lua（r.l）。
+type pendingTask struct {
+	name string // 任务名（= listen 名），用于日志与指标
+	exec func() // 实际工作，在执行器 goroutine 内执行
+}
+
+// defaultAwaitPollMs await 监听轮询的兜底间隔（spec.PollMs<=0 时用）。
+const defaultAwaitPollMs = 50
+
+// robotWaiter 实现 script.Waiter：action 协程在 await_* 处 yield 后，由 drive-loop 调本类型
+// 在执行器 goroutine 内协作式等待。等待窗口内 drain Robot 任务队列（跑 listen 回调等），
+// 故长 sleep / listen 期间其他协作式工作不被饿死（计划 §9 的解法）。
+type robotWaiter struct {
+	robot     *Robot
+	netSender *netSenderAdapter
+}
+
+// Await 解释一条 WaitSpec：WaitSleep 纯计时等待；WaitListen 轮询监听队列。
+// 两者等待期间都 drain 任务队列。ctx 取消经 WaitOutcome.Canceled 表达（不返回 error）。
+func (w *robotWaiter) Await(spec *script.WaitSpec) (script.WaitOutcome, error) {
+	deadline := time.Now().Add(spec.Duration)
+	switch spec.Kind {
+	case script.WaitSleep:
+		return w.robot.sched.wait(deadline, 0, nil), nil
+	case script.WaitListen:
+		check := func() *engine.NetExchange {
+			if spec.Proto == "udp" {
+				return w.netSender.GetUDPListenResp(spec.Service, spec.RouteKey)
+			}
+			return w.netSender.GetTCPListenResp(spec.Service, spec.RouteKey)
+		}
+		return w.robot.sched.wait(deadline, spec.PollMs, check), nil
+	case script.WaitResponse:
+		return w.robot.sched.awaitResponse(spec), nil
+	case script.WaitIO:
+		return w.robot.sched.awaitIO(spec), nil
+	default:
+		return script.WaitOutcome{}, fmt.Errorf("未知的 WaitSpec.Kind=%d", spec.Kind)
+	}
+}
 
 // Close 停止机器人并释放资源。
 // 正常路径会归还 Lua LState；超时路径会隔离 LState，避免复用可能仍在使用的运行时。
@@ -727,6 +792,35 @@ func (h *robotActionHandler) executeLuaBoolean(scriptName string) bool {
 	return result
 }
 
+// RunPendingTasks 实现 engine.ActionHandler：在节点边界串行 drain Robot 任务队列。
+//
+// 运行在执行器 goroutine（业务 LState 唯一所有者），故队列里的 listen 脚本回调等任务
+// 可安全访问业务 Lua。单次最多执行 maxDrainPerBoundary 个，避免回调洪峰饿死流程推进；
+// ctx 取消时立即停止（停止阶段不再执行回调）。无 task 时立即返回（select default）。
+func (h *robotActionHandler) RunPendingTasks(ctx context.Context) {
+	h.robot.sched.drain(ctx, maxDrainPerBoundary)
+}
+
+// CooperativeSleep 实现 engine.ActionHandler：节点延迟 / wait 节点的协作式休眠。
+func (h *robotActionHandler) CooperativeSleep(ctx context.Context, d time.Duration) error {
+	return h.robot.cooperativeSleep(ctx, d)
+}
+
+// cooperativeSleep 协作式休眠 d：复用调度器统一等待 pump（sched.wait，check==nil 即纯计时），
+// 休眠期间持续 drain 任务队列。ctx 取消时返回 ctx.Err()。
+//
+// 三处共用：节点延迟 / wait 节点（engine.ActionHandler.CooperativeSleep）、声明式 listen 轮询
+// 间隔（注入 ActionExecutor.coopSleep）—— 统一约束「任何阻塞点都不裸阻塞」。
+func (r *Robot) cooperativeSleep(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	if r.sched.wait(time.Now().Add(d), 0, nil).Canceled {
+		return ctx.Err()
+	}
+	return nil
+}
+
 // RegisterListen 注册持久化监听
 func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 	type connKey struct {
@@ -828,22 +922,22 @@ func effectiveListenQueueSize(ref engine.ListenRef) (int, error) {
 	return q, nil
 }
 
-// validateListenDef 校验 ListenDef 不含已废弃的 script 字段。
+// validateListenDef 校验 ListenDef 的形态约束。
 //
-// v2 起 listen 脚本回调已下线：
-// frameData 等高频回调改为主流程非阻塞 pop（network.try_*_listen）消费最新消息，
-// connectionPump 只负责 decode → 分发/缓存/Go-store，不再触碰业务 LState。
+// 协作式调度下 listen 脚本回调（cbDef.Script）已恢复为正式能力：connectionPump 命中推送时
+// 只复制消息 + 投递 Robot 任务队列，Lua on_message 由执行器 goroutine 在节点边界串行执行，
+// 不再在 pump goroutine 内触碰业务 LState（消除旧版的跨 goroutine LState 抢占）。
 //
-// 故 ListenDef.script 一律 fail-loud：既不留「静默忽略 script」的兜底路径，
-// 也不写「script→store 自动迁移」。抽成纯函数便于单测（不依赖 robot/network 状态）。
+// 唯一约束：store 与 script 互斥——同一条推送不允许既走 Go 声明式 store、又走 Lua handler
+// 改写 state，避免双写与顺序语义混乱。需要兼得时把 store 逻辑写进 Lua handler。
+// 抽成纯函数便于单测（不依赖 robot/network 状态）。
 func validateListenDef(listenName string, cbDef *engine.ListenDef) error {
 	if cbDef == nil {
 		return nil
 	}
-	if cbDef.Script != "" {
-		return fmt.Errorf("监听 %q 仍配置已废弃的 script %q；v2 不再支持 listen 脚本回调，"+
-			"请改用主流程 tcpListen/udpListen（或 network.try_*_listen）或声明式 store 消费",
-			listenName, cbDef.Script)
+	if cbDef.Script != "" && len(cbDef.Store) > 0 {
+		return fmt.Errorf("监听 %q 同时配置了 store 与 script：二者互斥（同一推送不可既 Go-store 又 Lua 改 state）；"+
+			"需要兼得请把 store 逻辑写进 Lua handler", listenName)
 	}
 	return nil
 }
@@ -864,11 +958,30 @@ func parseServer(server string) (proto, service string, ok bool) {
 
 // createListenCallback 根据回调定义创建监听回调函数。
 //
-// v2 起 listen 脚本回调（cbDef.Script）已下线（由 RegisterListen 的 validateListenDef
-// fail-loud 拦截），本函数只处理「s2cProto + Store → Go-store 回调」一种形态：
-//   - cbDef.S2CProto 与 cbDef.Store 均配置：返回 Go 闭包，按 proto 解析后写 state；
+// 三种形态：
+//   - cbDef.Script 配置：协作式 listen 脚本回调。返回的闭包在 pump goroutine 内只复制消息
+//   - 投递 Robot 任务队列；Lua on_message 由执行器 goroutine 在节点边界串行执行（见
+//     runListenScript），绝不在 pump 内碰业务 LState。
+//   - cbDef.S2CProto 与 cbDef.Store 均配置：返回 Go 闭包，按 proto 解析后写 state（纯 Go，
+//     pump goroutine 内安全执行）。
 //   - 否则（纯缓存 listen，如 frameData）：返回 nil，消息仅入 listen queue 供主流程消费。
+//
+// store 与 script 互斥由 validateListenDef 在注册前 fail-loud 保证，故此处分支无歧义。
 func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.ListenDef) network.ListenCallBack {
+	if cbDef.Script != "" {
+		return func(msg *network.Message) {
+			if h.robot.ctx.Err() != nil {
+				return
+			}
+			// pump 可能复用 msg.Data 底层数组，入队前深拷贝快照；on_message 推迟执行。
+			snapshot := msg.Copy()
+			h.robot.sched.enqueue(pendingTask{
+				name: cbName,
+				exec: func() { h.runListenScript(cbName, cbDef, snapshot) },
+			})
+		}
+	}
+
 	if cbDef.S2CProto == "" || len(cbDef.Store) == 0 {
 		return nil
 	}
@@ -908,6 +1021,43 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 	}
 }
 
+// runListenScript 在执行器 goroutine（业务 LState 唯一所有者）内执行一条 listen 脚本回调。
+// 由 RunPendingTasks 在节点边界串行调用，因此可安全访问 r.l。
+//
+// 解码失败 / 脚本失败均记 callback 失败指标，不向上传播——listen 回调是旁路推送，
+// 失败不应中断主流程。配置了 s2cProto 时解码后以字段表传给 on_message(r, msg)，
+// 否则传 nil（脚本可自行用 proto API 处理原始消息）。
+func (h *robotActionHandler) runListenScript(cbName string, cbDef *engine.ListenDef, msg *network.Message) {
+	if h.robot.ctx.Err() != nil {
+		return
+	}
+	start := time.Now()
+
+	var runErr error
+	if cbDef.S2CProto != "" && len(msg.Data) > 0 {
+		respMsg, perr := h.robot.factory.Parse(cbDef.S2CProto, msg.Data)
+		if perr != nil {
+			cbErr := engine.NewActionError(errcode.ErrCallbackParse, "proto="+cbDef.S2CProto, perr)
+			stresslog.Error("[ROBOT] 解析监听推送失败",
+				zap.Int("id", h.robot.id), zap.String("proto", cbDef.S2CProto), zap.Error(perr))
+			monitor.Global().RecordCallback(cbName, monitor.ResultFailure, monitor.ActionTiming{}, time.Since(start), 0, msg.WireBytes, cbErr)
+			return
+		}
+		runErr = h.robot.luaPool.RunListenScript(h.robot.l, cbDef.Script, respMsg)
+	} else {
+		runErr = h.robot.luaPool.RunListenScript(h.robot.l, cbDef.Script, nil)
+	}
+
+	if runErr != nil {
+		cbErr := engine.NewActionError(errcode.ErrCallbackLua, "script="+cbDef.Script, runErr)
+		stresslog.Error("[ROBOT] 监听脚本执行失败",
+			zap.Int("id", h.robot.id), zap.String("script", cbDef.Script), zap.Error(runErr))
+		monitor.Global().RecordCallback(cbName, monitor.ResultFailure, monitor.ActionTiming{}, time.Since(start), 0, msg.WireBytes, cbErr)
+		return
+	}
+	monitor.Global().RecordCallback(cbName, monitor.ResultSuccess, monitor.ActionTiming{}, time.Since(start), 0, msg.WireBytes, nil)
+}
+
 // netSenderAdapter 将 Robot 适配为 engine.NetSender 接口，
 // 桥接流程引擎与网络层（TCP/UDP/HTTP 收发、连接管理、心跳、密钥）。
 type netSenderAdapter struct {
@@ -923,49 +1073,58 @@ func (ns *netSenderAdapter) TCPSend(service string, packet []byte) (int, error) 
 	return conn.Send(packet)
 }
 
-// TCPRequest 发送 TCP 请求并等待响应。
-// 返回的 SendWireBytes 是已编码请求包长，RecvWireBytes 是入站完整帧长。
+// TCPRequest 发送 TCP 请求并协作式等待响应（声明式 tcpRequest 动作用）。
+// 经 sched.awaitResponse 与 Lua await_tcp_request 同源：发送 + 等待窗口内 drain mailbox，
+// 故声明式请求期间 listen 回调不被饿死。返回 SendWireBytes=已编码请求包长，RecvWireBytes=入站帧长。
+//
+// 唯一调用方是 engine.ActionExecutor.execRequest（执行器 goroutine = 业务 LState 唯一所有者），
+// 故在此 drain mailbox 安全。
 func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) (*engine.NetExchange, error) {
-	conn := ns.robot.client.GetTCPConn(service)
-	if conn == nil {
-		return &engine.NetExchange{SendWireBytes: len(packet)}, engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
-	}
-	resp, netTiming, err := conn.RequestResponse(packet, routeKey, timeout...)
-	exchange := &engine.NetExchange{SendWireBytes: len(packet), Timing: engine.RequestTiming(netTiming)}
-	if err != nil {
-		return exchange, err
-	}
-	exchange.Body = resp.Data
-	exchange.HeaderErr = resp.HeaderErr
-	exchange.RecvWireBytes = resp.WireBytes
-	if stresslog.DebugEnabled() {
-		stresslog.Debug("[ACTION] TCPResponse",
-			zap.String("service", service), zap.String("routeKey", routeKey),
-			zap.Int("bodyLen", len(resp.Data)), zap.Int("wireBytes", resp.WireBytes), zap.Uint64("headerErr", resp.HeaderErr))
-	}
-	return exchange, nil
+	return ns.cooperativeRequest("tcp", service, packet, routeKey, timeout...)
 }
 
-// UDPRequest 发送 UDP 请求并等待响应，与 TCPRequest 同样使用 channel 阻塞等待。
+// UDPRequest 发送 UDP 请求并协作式等待响应（与 TCPRequest 同源，经 sched.awaitResponse）。
 func (ns *netSenderAdapter) UDPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) (*engine.NetExchange, error) {
-	conn := ns.robot.client.GetUDPConn(service)
-	if conn == nil {
-		return &engine.NetExchange{SendWireBytes: len(packet)}, engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
+	return ns.cooperativeRequest("udp", service, packet, routeKey, timeout...)
+}
+
+// cooperativeRequest 声明式请求-响应的协作式实现：构建 WaitSpec → sched.awaitResponse
+// （发送 + select 响应通道 + drain mailbox）。与 Lua await_*_request 完全同一路径，保证
+// 声明式与脚本两条请求路径行为/计时一致。命中 / 超时 / 取消 / 发送失败经 WaitOutcome 映射回
+// (*NetExchange, error)，与旧 RequestResponse 返回契约对齐（execRequest 下游 HeaderErr/parse 不变）。
+func (ns *netSenderAdapter) cooperativeRequest(proto, service string, packet []byte, routeKey string, timeout ...time.Duration) (*engine.NetExchange, error) {
+	var d time.Duration
+	if len(timeout) > 0 {
+		d = timeout[0]
 	}
-	resp, netTiming, err := conn.RequestResponse(packet, routeKey, timeout...)
-	exchange := &engine.NetExchange{SendWireBytes: len(packet), Timing: engine.RequestTiming(netTiming)}
-	if err != nil {
-		return exchange, err
+	outcome := ns.robot.sched.awaitResponse(&script.WaitSpec{
+		Kind:     script.WaitResponse,
+		Proto:    proto,
+		Service:  service,
+		RouteKey: routeKey,
+		Packet:   packet,
+		Duration: d,
+	})
+	switch {
+	case outcome.Err != nil:
+		ex := outcome.Exchange
+		if ex == nil {
+			ex = &engine.NetExchange{SendWireBytes: len(packet)}
+		}
+		return ex, outcome.Err
+	case outcome.Canceled:
+		return &engine.NetExchange{SendWireBytes: len(packet)},
+			engine.NewActionError(errcode.ErrActionCanceled, "service="+service+" route="+routeKey)
+	default:
+		if stresslog.DebugEnabled() && outcome.Exchange != nil {
+			stresslog.Debug("[ACTION] "+proto+"Response",
+				zap.String("service", service), zap.String("routeKey", routeKey),
+				zap.Int("bodyLen", len(outcome.Exchange.Body)),
+				zap.Int("wireBytes", outcome.Exchange.RecvWireBytes),
+				zap.Uint64("headerErr", outcome.Exchange.HeaderErr))
+		}
+		return outcome.Exchange, nil
 	}
-	exchange.Body = resp.Data
-	exchange.HeaderErr = resp.HeaderErr
-	exchange.RecvWireBytes = resp.WireBytes
-	if stresslog.DebugEnabled() {
-		stresslog.Debug("[ACTION] UDPResponse",
-			zap.String("service", service), zap.String("routeKey", routeKey),
-			zap.Int("bodyLen", len(resp.Data)), zap.Int("wireBytes", resp.WireBytes), zap.Uint64("headerErr", resp.HeaderErr))
-	}
-	return exchange, nil
 }
 
 // HTTPRequest 发送 HTTP 请求。
