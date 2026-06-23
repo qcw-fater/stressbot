@@ -27,6 +27,7 @@ const maxSafeInt = 1 << 53 // 9007199254740992，Lua double 可精确表示的�
 //	r.get_index()          → 返回批次内序号（0-based）
 //	r.get_account()        → 返回账号名
 //	r.get_context()        → 检查 context 是否已取消
+//	r.error(code, detail)  → 构造 err table
 func loadRobotModule(L *lua.LState) int {
 	mod := L.NewTable()
 
@@ -45,6 +46,7 @@ func loadRobotModule(L *lua.LState) int {
 	L.SetField(mod, "get_index", L.NewFunction(robotGetIndex))
 	L.SetField(mod, "get_account", L.NewFunction(robotGetAccount))
 	L.SetField(mod, "get_context", L.NewFunction(robotGetContext))
+	L.SetField(mod, "error", L.NewFunction(robotError))
 
 	L.Push(mod)
 	return 1
@@ -81,6 +83,8 @@ func robotIndex(L *lua.LState) int {
 		L.Push(L.NewFunction(robotGetAccount))
 	case "get_context":
 		L.Push(L.NewFunction(robotGetContext))
+	case "error":
+		L.Push(L.NewFunction(robotError))
 	default:
 		L.RaiseError("unknown robot method: %s", method)
 	}
@@ -208,6 +212,16 @@ func robotKeys(L *lua.LState) int {
 		tb.RawSetInt(i+1, lua.LString(k))
 	}
 	L.Push(tb)
+	return 1
+}
+
+// robotError 构造 err table 供脚本 return。
+// Lua: robot.error(code, detail) → {code=number, detail=string}
+func robotError(L *lua.LState) int {
+	base := firstRobotArg(L)
+	code := L.CheckInt(base)
+	detail := L.CheckString(base + 1)
+	L.Push(newErrTable(L, code, detail))
 	return 1
 }
 
