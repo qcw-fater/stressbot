@@ -1,7 +1,9 @@
 package script
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -79,6 +81,15 @@ func TestTCPSend_SuccessReturnsNil(t *testing.T) {
 	if got := L.GetGlobal("e"); got != lua.LNil {
 		t.Fatalf("成功 err = %T(%v), want nil", got, got)
 	}
+	if got := ns.tcpSendCalls; got != 1 {
+		t.Fatalf("TCPSend calls = %d, want 1", got)
+	}
+	if got := ns.lastTCPService; got != "logic" {
+		t.Fatalf("TCPSend service = %q, want logic", got)
+	}
+	if want := []byte("tcp:"); !bytes.Equal(ns.lastTCPPacket, want) {
+		t.Fatalf("TCPSend packet = %q, want %q", ns.lastTCPPacket, want)
+	}
 }
 
 func TestUDPSend_SuccessReturnsNil(t *testing.T) {
@@ -93,6 +104,53 @@ func TestUDPSend_SuccessReturnsNil(t *testing.T) {
 	}
 	if got := L.GetGlobal("e"); got != lua.LNil {
 		t.Fatalf("成功 err = %T(%v), want nil", got, got)
+	}
+	if got := ns.udpSendCalls; got != 1 {
+		t.Fatalf("UDPSend calls = %d, want 1", got)
+	}
+	if got := ns.lastUDPService; got != "battle" {
+		t.Fatalf("UDPSend service = %q, want battle", got)
+	}
+	if want := []byte("udp:body"); !bytes.Equal(ns.lastUDPPacket, want) {
+		t.Fatalf("UDPSend packet = %q, want %q", ns.lastUDPPacket, want)
+	}
+}
+
+func TestTCPSend_SendFailure_ReturnsErrTable(t *testing.T) {
+	ns := &fakeNetSender{tcpSendErr: engine.NewActionError(errcode.ErrSendFailed, "send 失败 detail")}
+	L := newTestState(t, context.Background(), ns, &fakeResolver{adp: &requestTestAdapter{}})
+	defer L.Close()
+	if err := L.DoString(`
+		local network = require("network")
+		e, extra = network.tcp_send("logic", {cmd=1,act=1}, nil)
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+	assertRequestErr(t, L, int(errcode.ErrSendFailed), "send 失败 detail")
+	if got := L.GetGlobal("extra"); got != lua.LNil {
+		t.Fatalf("失败 extra = %T(%v), want nil", got, got)
+	}
+	if got := ns.tcpSendCalls; got != 1 {
+		t.Fatalf("TCPSend calls = %d, want 1", got)
+	}
+}
+
+func TestUDPSend_SendFailure_ReturnsErrTable(t *testing.T) {
+	ns := &fakeNetSender{udpSendErr: engine.NewActionError(errcode.ErrSendFailed, "send 失败 detail", errors.New("底层 send error"))}
+	L := newTestState(t, context.Background(), ns, &fakeResolver{adp: &requestTestAdapter{}})
+	defer L.Close()
+	if err := L.DoString(`
+		local network = require("network")
+		e, extra = network.udp_send("battle", {cmd=1,act=1}, "body")
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+	assertRequestErr(t, L, int(errcode.ErrSendFailed), "send 失败 detail")
+	if got := L.GetGlobal("extra"); got != lua.LNil {
+		t.Fatalf("失败 extra = %T(%v), want nil", got, got)
+	}
+	if got := ns.udpSendCalls; got != 1 {
+		t.Fatalf("UDPSend calls = %d, want 1", got)
 	}
 }
 

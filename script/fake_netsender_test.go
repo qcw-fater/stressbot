@@ -28,6 +28,14 @@ type fakeNetSender struct {
 	udpReqCalls    int
 	tcpSendErr     error
 	udpSendErr     error
+	tcpSendCalls   int
+	udpSendCalls   int
+	lastTCPService string
+	lastUDPService string
+	lastTCPPacket  []byte
+	lastUDPPacket  []byte
+	tcpSendBytes   int
+	udpSendBytes   int
 	connectErr     error
 	httpExchange   *engine.HTTPExchange
 	httpErr        error
@@ -36,9 +44,25 @@ type fakeNetSender struct {
 	udpKey         []byte
 }
 
-func (f *fakeNetSender) TCPSend(string, []byte) (int, error) { return 0, f.tcpSendErr }
+func (f *fakeNetSender) TCPSend(service string, packet []byte) (int, error) {
+	f.tcpSendCalls++
+	f.lastTCPService = service
+	f.lastTCPPacket = append([]byte(nil), packet...)
+	if f.tcpSendBytes != 0 {
+		return f.tcpSendBytes, f.tcpSendErr
+	}
+	return len(packet), f.tcpSendErr
+}
 
-func (f *fakeNetSender) UDPSend(string, []byte) (int, error) { return 0, f.udpSendErr }
+func (f *fakeNetSender) UDPSend(service string, packet []byte) (int, error) {
+	f.udpSendCalls++
+	f.lastUDPService = service
+	f.lastUDPPacket = append([]byte(nil), packet...)
+	if f.udpSendBytes != 0 {
+		return f.udpSendBytes, f.udpSendErr
+	}
+	return len(packet), f.udpSendErr
+}
 
 func (f *fakeNetSender) TCPRequest(string, []byte, string, ...time.Duration) (*engine.NetExchange, error) {
 	f.tcpReqCalls++
