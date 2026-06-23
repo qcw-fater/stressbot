@@ -14,20 +14,22 @@ function execute(r)
         log.error("ConnectBattleUDP 缺少战斗服地址: battleId=" .. tostring(battleId)
             .. " fighterIndex=" .. tostring(fighterIndex)
             .. " battleSession=" .. tostring(robot.get("battleSession")))
-        return 41  -- 41=ADDR_EMPTY
+        return robot.error(41, "ConnectBattleUDP 缺少战斗服地址: battleId=" .. tostring(battleId)
+            .. " fighterIndex=" .. tostring(fighterIndex)
+            .. " battleSession=" .. tostring(robot.get("battleSession")))  -- 41=ADDR_EMPTY
     end
 
     log.info("连接战斗服 UDP: address=" .. tostring(battleAddress)
         .. " battleId=" .. tostring(battleId)
         .. " fighterIndex=" .. tostring(fighterIndex))
 
-    local code = network.connect_udp("battle", battleAddress)
-    if code ~= 0 then
+    local err = network.connect_udp("battle", battleAddress)
+    if err then
         log.error("ConnectBattleUDP 连接失败: address=" .. tostring(battleAddress)
             .. " battleId=" .. tostring(battleId)
             .. " fighterIndex=" .. tostring(fighterIndex)
-            .. " code=" .. tostring(code))
-        return code
+            .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+        return err
     end
 
     -- 设置 UDP 密钥（从 listen_start_loading 保存）
@@ -52,5 +54,5 @@ function execute(r)
         .. " fighterIndex=" .. tostring(fighterIndex)
         .. " hasSecretKey=" .. tostring(hasSecretKey)
         .. " 心跳由声明式节点注册(150ms)")
-    return 0
+    return nil
 end

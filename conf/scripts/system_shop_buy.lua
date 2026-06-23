@@ -7,13 +7,13 @@ local utils = require("utils")
 function execute(r)
     local shopData = robot.get("systemShopData")
     if type(shopData) ~= "table" or type(shopData.shopData) ~= "table" or #shopData.shopData == 0 then
-        return 0
+        return nil
     end
 
     local shop = shopData.shopData[utils.random_int(#shopData.shopData) + 1]
     local shopId = tonumber(shop.ID) or 0
     if shopId <= 0 then
-        return 0
+        return nil
     end
 
     local groupId = 0
@@ -37,12 +37,12 @@ function execute(r)
         end
     end
     if group == nil or type(group.goodsList) ~= "table" or #group.goodsList == 0 then
-        return 0
+        return nil
     end
 
     local goodsId = tonumber(group.goodsList[utils.random_int(#group.goodsList) + 1]) or 0
     if goodsId <= 0 then
-        return 0
+        return nil
     end
 
     local price = 0
@@ -67,6 +67,6 @@ function execute(r)
     local msg = proto.create("Game.SystemShopBuyC2S")
     proto.set_field(msg, "goodsList", {goodsData})
 
-    local code = network.tcp_request("logic", {cmd = 35, act = 4}, msg)
-    return code
+    local err = network.tcp_request("logic", {cmd = 35, act = 4}, msg)
+    return err  -- nil 成功 / err table 失败
 end

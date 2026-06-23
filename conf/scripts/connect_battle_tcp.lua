@@ -16,38 +16,42 @@ function execute(r)
         log.error("ConnectBattleTCP 缺少战斗服地址: battleId=" .. tostring(battleId)
             .. " fighterIndex=" .. tostring(fighterIndex)
             .. " battleSession=" .. tostring(battleSession))
-        return 41  -- 41=ADDR_EMPTY
+        return robot.error(41, "ConnectBattleTCP 缺少战斗服地址: battleId=" .. tostring(battleId)
+            .. " fighterIndex=" .. tostring(fighterIndex)
+            .. " battleSession=" .. tostring(battleSession))  -- 41=ADDR_EMPTY
     end
 
     log.info("连接战斗服 TCP: address=" .. tostring(battleAddress)
         .. " battleId=" .. tostring(battleId)
         .. " fighterIndex=" .. tostring(fighterIndex))
 
-    local code = network.connect_tcp("battle", battleAddress)
-    if code ~= 0 then
+    local err = network.connect_tcp("battle", battleAddress)
+    if err then
         log.error("连接战斗服 TCP 失败: address=" .. tostring(battleAddress)
             .. " battleId=" .. tostring(battleId)
             .. " fighterIndex=" .. tostring(fighterIndex)
-            .. " code=" .. tostring(code))
-        return code
+            .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+        return err
     end
 
     -- 发送空包获取密钥并设置到连接
     -- 不显式传 timeout，复用 robotConfig.timeoutSec（默认 60s）；
     -- 若需要单独缩短此握手超时，再传第 5 个参数。
-    local code, keyBody = network.tcp_request("battle", {cmd=0, act=0})
-    if code ~= 0 then
+    local err, keyBody = network.tcp_request("battle", {cmd=0, act=0})
+    if err then
         log.error("战斗服密钥交换失败: address=" .. tostring(battleAddress)
             .. " battleId=" .. tostring(battleId)
             .. " fighterIndex=" .. tostring(fighterIndex)
-            .. " code=" .. tostring(code))
-        return code  -- 透传底层 code
+            .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+        return err  -- 透传底层 err table
     end
     if not keyBody or #keyBody == 0 then
         log.error("战斗服密钥交换响应为空: address=" .. tostring(battleAddress)
             .. " battleId=" .. tostring(battleId)
             .. " fighterIndex=" .. tostring(fighterIndex))
-        return 54  -- 54=LUA_EXIT_CODE
+        return robot.error(12, "battle 密钥交换响应为空: address=" .. tostring(battleAddress)
+            .. " battleId=" .. tostring(battleId)
+            .. " fighterIndex=" .. tostring(fighterIndex))  -- 12=PARSE_FAILED：协议层异常
     end
     network.set_tcp_secret_key("battle", keyBody)
 
@@ -55,5 +59,5 @@ function execute(r)
         .. " battleId=" .. tostring(battleId)
         .. " fighterIndex=" .. tostring(fighterIndex)
         .. " hasSecretKey=true 心跳由声明式节点注册(10s)")
-    return 0
+    return nil
 end

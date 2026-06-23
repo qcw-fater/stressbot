@@ -38,13 +38,13 @@ function execute(r)
     if beforeGuildId ~= nil and beforeGuildId ~= 0 then
         log.debug("JoinGuild 跳过: 本地已在社团 roleId=" .. tostring(roleId)
             .. " guildId=" .. tostring(beforeGuildId))
-        return 0
+        return nil
     end
 
     local target = pick_guild_id(robot.get("guildList"))
     if target == nil then
         log.info("JoinGuild 无可申请社团，跳过: roleId=" .. tostring(roleId))
-        return 0
+        return nil
     end
 
     local msg = proto.create("Game.GuildJoinC2S")
@@ -52,12 +52,12 @@ function execute(r)
     proto.set_field(msg, "msg", "申请加入社团")
     proto.set_field(msg, "account", tostring(robot.get("account")))
 
-    local code, resp = network.tcp_request("logic", {cmd=21, act=3}, msg, "Game.GuildJoinS2C")
-    if code ~= 0 then
+    local err, resp = network.tcp_request("logic", {cmd=21, act=3}, msg, "Game.GuildJoinS2C")
+    if err then
         log.error("JoinGuild 失败: roleId=" .. tostring(roleId)
             .. " target=" .. tostring(target)
-            .. " code=" .. tostring(code))
-        return code
+            .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+        return err
     end
 
     local fm = proto.get_field_map(resp)
@@ -73,5 +73,5 @@ function execute(r)
         log.info("JoinGuild 已提交申请，等待审核: roleId=" .. tostring(roleId)
             .. " guildId=" .. tostring(target))
     end
-    return 0
+    return nil
 end

@@ -29,7 +29,7 @@ function execute(r)
 
     if #candidates == 0 then
         log.info("AuditGuildJoin 无申请候选，跳过: roleId=" .. tostring(roleId))
-        return 0
+        return nil
     end
 
     local target = utils.random_pick(candidates)
@@ -38,17 +38,17 @@ function execute(r)
     proto.set_field(msg, "joinPlayerId", target)
     proto.set_field(msg, "operate", operate)
 
-    local code = network.tcp_request("logic", {cmd=21, act=7}, msg, "Game.GuildAuditS2C")
-    if code ~= 0 then
+    local err = network.tcp_request("logic", {cmd=21, act=7}, msg, "Game.GuildAuditS2C")
+    if err then
         log.error("AuditGuildJoin 失败: roleId=" .. tostring(roleId)
             .. " target=" .. tostring(target)
             .. " operate=" .. tostring(operate)
-            .. " code=" .. tostring(code))
-        return code
+            .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+        return err
     end
 
     log.info("AuditGuildJoin 成功: roleId=" .. tostring(roleId)
         .. " target=" .. tostring(target)
         .. " operate=" .. tostring(operate))
-    return 0
+    return nil
 end

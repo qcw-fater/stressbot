@@ -9,11 +9,11 @@ function execute(r)
     local roleId = robot.get("roleId")
 
     -- 轮询监听匹配成功消息，超时 1860 秒（服务器匹配超时 1800 秒 + 60 秒调度余量），轮询 1 秒
-    local code, resp = network.tcp_listen("logic", {cmd=3, act=1}, "Game.MatchSucceedS2C", 1860, 1000)
-    if code ~= 0 then
+    local err, resp = network.tcp_listen("logic", {cmd=3, act=1}, "Game.MatchSucceedS2C", 1860, 1000)
+    if err then
         log.error("匹配成功消息等待失败: service=logic route=3:1 proto=Game.MatchSucceedS2C timeoutSec=1860 pollMs=1000 roleId="
-            .. tostring(roleId) .. " code=" .. tostring(code))
-        return code
+            .. tostring(roleId) .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+        return err
     end
 
     local actorCount = 0
@@ -45,7 +45,9 @@ function execute(r)
         log.error("MatchSucceed 解析失败: roleId=" .. tostring(roleId)
             .. " actorCount=" .. tostring(actorCount)
             .. " err=" .. tostring(err))
-        return 54  -- 54=LUA_EXIT_CODE
+        return robot.error(12, "MatchSucceed 解析失败: roleId=" .. tostring(roleId)
+            .. " actorCount=" .. tostring(actorCount)
+            .. " err=" .. tostring(err))  -- 12=PARSE_FAILED：协议层异常
     end
 
     local battleSession = robot.get("battleSession")
@@ -54,7 +56,9 @@ function execute(r)
         log.error("匹配成功但未找到自己的 battleSession: roleId=" .. tostring(roleId)
             .. " actorCount=" .. tostring(actorCount)
             .. " battleArea=" .. tostring(battleArea))
-        return 54
+        return robot.error(54, "MatchSucceed battleSession 缺失: roleId=" .. tostring(roleId)
+            .. " actorCount=" .. tostring(actorCount)
+            .. " battleArea=" .. tostring(battleArea))  -- 54=LUA_EXIT_CODE：脚本断言失败
     end
 
     log.info("匹配成功: roleId=" .. tostring(roleId)
@@ -62,5 +66,5 @@ function execute(r)
         .. " battleSession=" .. tostring(battleSession)
         .. " battleArea=" .. tostring(battleArea))
 
-    return 0
+    return nil
 end

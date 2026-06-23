@@ -8,7 +8,7 @@ function execute(r)
     local heroIds = robot.get("heroIdList")
     if not heroIds or type(heroIds) ~= "table" or #heroIds == 0 then
         log.debug("装备英雄天赋跳过: heroIdList 为空")
-        return 0
+        return nil
     end
 
     local heroId = heroIds[math.random(#heroIds)]
@@ -35,7 +35,7 @@ function execute(r)
         log.debug("装备英雄天赋跳过: heroId=" .. tostring(heroId)
             .. " nextIndex=" .. tostring(nextIndex)
             .. " reason=无可装备天赋位")
-        return 0
+        return nil
     end
 
     -- 计算 randIndex: random(1, nextIndex) 向下取偶数
@@ -49,18 +49,21 @@ function execute(r)
     proto.set_field(msg, "index", {randIndex})
     proto.set_field(msg, "talentIndex", {talentIndex})
 
-    local code = network.tcp_send("logic", {cmd=6, act=6}, msg)
-    if code ~= 0 then
-        local failCode = code or 3
+    local err = network.tcp_send("logic", {cmd=6, act=6}, msg)
+    if err then
+        local c = (err and err.code) or 3
         log.warn("装备英雄天赋发送失败: service=logic route=6:6 heroId=" .. tostring(heroId)
             .. " randIndex=" .. tostring(randIndex)
             .. " talentIndex=" .. tostring(talentIndex)
-            .. " code=" .. tostring(failCode))
-        return failCode
+            .. " code=" .. tostring(c) .. " detail=" .. tostring(err.detail))
+        return robot.error(c, "装备英雄天赋发送失败: heroId=" .. tostring(heroId)
+            .. " randIndex=" .. tostring(randIndex)
+            .. " talentIndex=" .. tostring(talentIndex)
+            .. " code=" .. tostring(c) .. " detail=" .. tostring(err.detail))
     end
 
     log.debug("装备英雄天赋已发送: heroId=" .. tostring(heroId)
         .. " randIndex=" .. tostring(randIndex)
         .. " talentIndex=" .. tostring(talentIndex))
-    return 0
+    return nil
 end

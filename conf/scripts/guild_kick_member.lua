@@ -44,22 +44,22 @@ function execute(r)
 
     if #candidates == 0 then
         log.info("KickGuildMember 无普通成员候选，跳过: roleId=" .. tostring(roleId))
-        return 0
+        return nil
     end
 
     local target = utils.random_pick(candidates)
     local msg = proto.create("Game.GuildKickC2S")
     proto.set_field(msg, "playerId", target)
 
-    local code = network.tcp_request("logic", {cmd=21, act=10}, msg, "Game.GuildKickS2C")
-    if code ~= 0 then
+    local err = network.tcp_request("logic", {cmd=21, act=10}, msg, "Game.GuildKickS2C")
+    if err then
         log.error("KickGuildMember 失败: roleId=" .. tostring(roleId)
             .. " target=" .. tostring(target)
-            .. " code=" .. tostring(code))
-        return code
+            .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+        return err
     end
 
     log.info("KickGuildMember 成功: roleId=" .. tostring(roleId)
         .. " target=" .. tostring(target))
-    return 0
+    return nil
 end

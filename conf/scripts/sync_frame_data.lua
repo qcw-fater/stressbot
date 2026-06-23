@@ -10,8 +10,8 @@ function execute(r)
     -- 非阻塞消费最新服务端 ack 帧（CMD=4, ACT=11），更新 battleAck（主流程 pull 模型，取代已下线的 listen 脚本回调）。
     -- queueSize=1 保证取到的是最新；无 ack 则 battleAck 保持上轮值（松散「保最新」语义）。
     -- 解析 byte[13..16] 小端 uint32（对齐旧工具帧序号解析）。
-    local ackCode, ackData = network.try_udp_listen("battle", {cmd=4, act=11})
-    if ackCode == 0 and type(ackData) == "string" and #ackData >= 16 then
+    local ackErr, ackData = network.try_udp_listen("battle", {cmd=4, act=11})
+    if not ackErr and type(ackData) == "string" and #ackData >= 16 then
         local b1, b2, b3, b4 = string.byte(ackData, 13, 16)
         if b1 and b2 and b3 and b4 then
             robot.set("battleAck", b1 + b2 * 256 + b3 * 65536 + b4 * 16777216)
@@ -44,16 +44,21 @@ function execute(r)
         .. string.char(1, 2, 3, 4, 5, 6)                       -- dummy data (6 bytes)
 
     -- 通过 UDP 发送（带协议头 CMD=4, ACT=11）
-    local code = network.udp_send("battle", {cmd=4, act=11}, frameData)
-    if code ~= 0 then
-        local failCode = code or 3
+    local err = network.udp_send("battle", {cmd=4, act=11}, frameData)
+    if err then
+        local c = (err and err.code) or 3
         log.warn("SyncFrame 发送失败: frame=" .. tostring(frameCount)
             .. " packageIndex=" .. tostring(packageIndex)
             .. " battleId=" .. tostring(battleId)
             .. " fighterIndex=" .. tostring(fighterIndex)
             .. " battleAck=" .. tostring(battleAck)
-            .. " code=" .. tostring(failCode))
-        return failCode
+            .. " code=" .. tostring(c) .. " detail=" .. tostring(err.detail))
+        return robot.error(c, "SyncFrame 发送失败: frame=" .. tostring(frameCount)
+            .. " packageIndex=" .. tostring(packageIndex)
+            .. " battleId=" .. tostring(battleId)
+            .. " fighterIndex=" .. tostring(fighterIndex)
+            .. " battleAck=" .. tostring(battleAck)
+            .. " code=" .. tostring(c) .. " detail=" .. tostring(err.detail))
     end
 
     -- 每 20 帧打一次 debug 日志：真实上限由 conf/flow.json 的 syncLoop.loopCount 控制。
@@ -68,5 +73,5 @@ function execute(r)
     -- 60ms 间隔（约 16fps）
     utils.sleep(60)
 
-    return 0
+    return nil
 end

@@ -1,5 +1,5 @@
 -- ranked_team_prepare.lua: 排位组队准备（v2）
--- 压测优先保证长期稳定运行：Redis 只做轻量协调，服务端业务失败记录后清理本轮并返回 0。
+-- 压测优先保证长期稳定运行：Redis 只做轻量协调，服务端业务失败记录后清理本轮并返回 nil。
 local share = require("share")
 local robot = require("robot")
 local proto = require("proto")
@@ -67,19 +67,20 @@ local function safeLeaveTeam(reason)
     local tid = currentTeamId()
     if not tid then
         log.info("排位组队准备退出队伍: reason=" .. tostring(reason) .. " 本地无 teamId，跳过")
-        return 0
+        return nil
     end
 
     local msg = proto.create("Game.TeamLeaveC2S")
     proto.set_field(msg, "teamId", tonumber(tid))
-    local code = network.tcp_request("logic", {cmd=5, act=2}, msg, "Game.TeamLeaveS2C")
+    local err = network.tcp_request("logic", {cmd=5, act=2}, msg, "Game.TeamLeaveS2C")
+    local codeText = err and (tostring(err.code) .. " " .. tostring(err.detail)) or "0"
     log.info("排位组队准备退出队伍: reason=" .. tostring(reason)
-        .. " teamId=" .. tostring(tid) .. " code=" .. tostring(code))
+        .. " teamId=" .. tostring(tid) .. " code=" .. codeText)
     robot.delete("teamId")
     robot.delete("teamData")
     robot.delete("teamMemberCount")
     robot.delete("teamHeaderId")
-    return code
+    return nil
 end
 
 local function markRoundFailed(reason)
@@ -103,26 +104,26 @@ end
 local function createTeamWithRetry(reason)
     local msg = proto.create("Game.TeamCreateC2S")
     proto.set_field(msg, "model", 2)
-    local code, resp = network.tcp_request("logic", {cmd=5, act=1}, msg, "Game.TeamCreateS2C")
-    if code == 0 then return code, resp end
+    local err, resp = network.tcp_request("logic", {cmd=5, act=1}, msg, "Game.TeamCreateS2C")
+    if not err then return err, resp end
 
-    log.warn("排位创建队伍失败: reason=" .. tostring(reason) .. " code=" .. tostring(code) .. "，退出后重试一次")
-    safeLeaveTeam("create_retry_after_" .. tostring(code))
+    log.warn("排位创建队伍失败: reason=" .. tostring(reason) .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail) .. "，退出后重试一次")
+    safeLeaveTeam("create_retry_after_" .. tostring(err.code))
 
     msg = proto.create("Game.TeamCreateC2S")
     proto.set_field(msg, "model", 2)
-    code, resp = network.tcp_request("logic", {cmd=5, act=1}, msg, "Game.TeamCreateS2C")
-    if code ~= 0 then
-        log.warn("排位创建队伍重试失败: reason=" .. tostring(reason) .. " code=" .. tostring(code))
+    err, resp = network.tcp_request("logic", {cmd=5, act=1}, msg, "Game.TeamCreateS2C")
+    if err then
+        log.warn("排位创建队伍重试失败: reason=" .. tostring(reason) .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
     end
-    return code, resp
+    return err, resp
 end
 
 local function createSoloTeam(reason)
-    local code, resp = createTeamWithRetry(reason)
-    if code ~= 0 then
+    local err, resp = createTeamWithRetry(reason)
+    if err then
         clearTeamState()
-        markRoundFailed("solo_create_failed_" .. tostring(code))
+        markRoundFailed("solo_create_failed_" .. tostring(err.code))
         return false
     end
 
@@ -135,9 +136,10 @@ end
 local function sendTeamPrepare(reason)
     local msg = proto.create("Game.TeamPrepareC2S")
     proto.set_field(msg, "isPrepare", true)
-    local code = network.tcp_send("logic", {cmd=5, act=12}, msg)
-    if code ~= 0 then
-        log.warn("排位准备发送失败: reason=" .. tostring(reason) .. " code=" .. tostring(code))
+    local err = network.tcp_send("logic", {cmd=5, act=12}, msg)
+    if err then
+        log.warn("排位准备发送失败: reason=" .. tostring(reason)
+            .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
         return false
     end
     return true
@@ -256,9 +258,9 @@ local function acceptInvite(invite)
     robot.delete("rankedTeamAcceptDone")
     robot.delete("teamJoinCode")
 
-    local code = network.tcp_send("logic", {cmd=5, act=8}, msg)
-    if code ~= 0 then
-        log.warn("排位队员入队: TeamAccept 发送失败 code=" .. tostring(code))
+    local err = network.tcp_send("logic", {cmd=5, act=8}, msg)
+    if err then
+        log.warn("排位队员入队: TeamAccept 发送失败 code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
         return false
     end
     return true
@@ -282,7 +284,7 @@ local function memberPrepare(roleId, account)
         writeWaitMark(roleId, token, "queue_failed")
         log.warn("排位队员入队列失败: err=" .. tostring(err) .. "，改为单排")
         createSoloTeam("member_queue_failed")
-        return 0
+        return nil
     end
 
     log.info("排位队员等待邀请: roleId=" .. tostring(roleId))
@@ -291,7 +293,7 @@ local function memberPrepare(roleId, account)
         writeWaitMark(roleId, token, "invite_timeout")
         log.info("排位队员等待邀请超时，改为单排 roleId=" .. tostring(roleId))
         createSoloTeam("member_invite_timeout")
-        return 0
+        return nil
     end
 
     writeWaitMark(roleId, token, "accepting")
@@ -299,7 +301,7 @@ local function memberPrepare(roleId, account)
         writeWaitMark(roleId, token, "accept_failed")
         safeLeaveTeam("member_accept_failed")
         createSoloTeam("member_accept_failed")
-        return 0
+        return nil
     end
 
     if not waitForJoin() then
@@ -307,7 +309,7 @@ local function memberPrepare(roleId, account)
         log.warn("排位队员等待入队确认超时 code=" .. tostring(robot.get("teamJoinCode")))
         safeLeaveTeam("member_join_timeout")
         markRoundFailed("member_join_timeout")
-        return 0
+        return nil
     end
 
     writeWaitMark(roleId, token, "joined")
@@ -315,7 +317,7 @@ local function memberPrepare(roleId, account)
         writeWaitMark(roleId, token, "prepare_failed")
         safeLeaveTeam("member_prepare_failed")
         markRoundFailed("member_prepare_failed")
-        return 0
+        return nil
     end
 
     local teamKeyValue = robot.get("rankedTeamKey")
@@ -336,7 +338,7 @@ local function memberPrepare(roleId, account)
     log.info("排位队员准备完成: roleId=" .. tostring(roleId)
         .. " teamKey=" .. tostring(teamKeyValue)
         .. " teamId=" .. tostring(robot.get("teamId")))
-    return 0
+    return nil
 end
 
 local function popMembers(targetSize, leaderRoleId)
@@ -375,12 +377,12 @@ local function sendInvite(member)
     local msg = proto.create("Game.TeamInviteC2S")
     proto.set_field(msg, "beInviter", member.roleId)
     proto.set_field(msg, "isInvite", true)
-    local code, resp = network.tcp_request("logic", {cmd=5, act=4}, msg, "Game.TeamInviteS2C")
-    if code ~= 0 then
+    local err, resp = network.tcp_request("logic", {cmd=5, act=4}, msg, "Game.TeamInviteS2C")
+    if err then
         local raw = ""
         if type(resp) == "string" then raw = " raw=" .. tostring(#resp) .. "B" end
         log.warn("排位队长邀请失败: target=" .. tostring(member.roleId)
-            .. " code=" .. tostring(code) .. raw)
+            .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail) .. raw)
         return false
     end
     log.info("排位队长邀请发送: target=" .. tostring(member.roleId))
@@ -432,10 +434,10 @@ local function waitReadyCount(tk, expected)
 end
 
 local function leaderPrepare(roleId, account)
-    local code, resp = createTeamWithRetry("leader")
-    if code ~= 0 then
-        markRoundFailed("leader_create_failed_" .. tostring(code))
-        return 0
+    local err, resp = createTeamWithRetry("leader")
+    if err then
+        markRoundFailed("leader_create_failed_" .. tostring(err.code))
+        return nil
     end
 
     local tid = proto.get_field(resp, "teamId")
@@ -445,14 +447,14 @@ local function leaderPrepare(roleId, account)
     if targetSize <= 1 then
         setSoloState(tid)
         log.info("排位队长决定单排: roleId=" .. tostring(roleId) .. " teamId=" .. tostring(tid))
-        return 0
+        return nil
     end
 
     local seq, seqErr = share.incr(PREFIX .. ":seq")
     if seqErr then
         log.warn("排位队长获取队伍序号失败: err=" .. tostring(seqErr) .. "，改为单排")
         setSoloState(tid)
-        return 0
+        return nil
     end
 
     local tk = tostring(seq)
@@ -519,7 +521,7 @@ local function leaderPrepare(roleId, account)
         writeTeamStatus(tk, "done", "no_member_joined")
         log.info("排位队长未形成多排，使用已有队伍单排: target=" .. tostring(targetSize)
             .. " invited=" .. tostring(invited))
-        return 0
+        return nil
     end
 
     robot.set("rankedTeamRole", "leader")
@@ -532,7 +534,7 @@ local function leaderPrepare(roleId, account)
         writeTeamStatus(tk, "failed", "leader_prepare_failed")
         safeLeaveTeam("leader_prepare_failed")
         markRoundFailed("leader_prepare_failed")
-        return 0
+        return nil
     end
 
     share.hash_set(hashKey .. ":ready", tostring(roleId), "1", TEAM_TTL)
@@ -540,7 +542,7 @@ local function leaderPrepare(roleId, account)
         writeTeamStatus(tk, "failed", "ready_timeout")
         safeLeaveTeam("ready_timeout")
         markRoundFailed("ready_timeout")
-        return 0
+        return nil
     end
 
     writeTeamStatus(tk, "ready", nil)
@@ -550,7 +552,7 @@ local function leaderPrepare(roleId, account)
         .. " target=" .. tostring(targetSize)
         .. " actual=" .. tostring(actualSize)
         .. " invited=" .. tostring(invited))
-    return 0
+    return nil
 end
 
 function execute(r)
@@ -559,7 +561,7 @@ function execute(r)
     if not roleId then
         log.error("ranked_team_prepare: roleId 为空，本轮跳过")
         markRoundFailed("prepare_no_role_id")
-        return 0
+        return nil
     end
 
     robot.delete("rankedRoundFailed")
@@ -575,7 +577,7 @@ function execute(r)
 
     if role == "solo" then
         createSoloTeam("random_solo")
-        return 0
+        return nil
     end
     if role == "member" then
         return memberPrepare(roleId, account)

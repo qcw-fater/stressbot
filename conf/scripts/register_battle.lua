@@ -15,10 +15,11 @@ function execute(r)
     if not fighterIndex then
         log.error("RegisterBattle 缺少 fighterIndex: battleId=" .. tostring(battleId)
             .. " battleSession=" .. tostring(battleSession))
-        return 54  -- 54=LUA_EXIT_CODE：业务前置条件不足
+        return robot.error(54, "RegisterBattle 缺少 fighterIndex: battleId=" .. tostring(battleId)
+            .. " battleSession=" .. tostring(battleSession))  -- 54=LUA_EXIT_CODE：业务前置条件不足
     end
 
-    local lastCode = 54  -- 兜底；首轮失败前不该被使用
+    local lastErr = nil  -- 兜底；首轮失败前为 nil
 
     -- 战斗服可能还未创建好房间，重试最多 5 次，每次间隔 2 秒
     local maxRetry = 5
@@ -28,17 +29,18 @@ function execute(r)
         proto.set_field(msg, "battleId", battleId)
         proto.set_field(msg, "sessionId", battleSession)
 
-        local code = network.tcp_request("battle", {cmd=4, act=1}, msg, "Game.BattleRegisterS2C")
-        lastCode = code
-        if code == 0 then
+        local err = network.tcp_request("battle", {cmd=4, act=1}, msg, "Game.BattleRegisterS2C")
+        lastErr = err
+        if not err then
             log.info("RegisterBattle 成功: index=" .. tostring(fighterIndex)
                 .. " battleId=" .. tostring(battleId)
                 .. " battleSession=" .. tostring(battleSession))
-            return 0
+            return nil
         end
 
         log.warn("RegisterBattle 第 " .. tostring(attempt) .. "/" .. tostring(maxRetry) .. " 次尝试失败: code="
-            .. tostring(code)            .. " battleId=" .. tostring(battleId)
+            .. tostring(err.code) .. " detail=" .. tostring(err.detail)
+            .. " battleId=" .. tostring(battleId)
             .. " fighterIndex=" .. tostring(fighterIndex)
             .. " battleSession=" .. tostring(battleSession))
         if attempt < maxRetry then
@@ -48,9 +50,13 @@ function execute(r)
         end
     end
 
+    local codeText = lastErr and tostring(lastErr.code) or "nil"
+    local detailText = lastErr and lastErr.detail or ""
     log.error("RegisterBattle 最终失败: retry=" .. tostring(maxRetry)
-        .. " lastCode=" .. tostring(lastCode)        .. " battleId=" .. tostring(battleId)
+        .. " lastCode=" .. codeText
+        .. " detail=" .. detailText
+        .. " battleId=" .. tostring(battleId)
         .. " fighterIndex=" .. tostring(fighterIndex)
         .. " battleSession=" .. tostring(battleSession))
-    return lastCode  -- 透传最后一次失败的真实 code
+    return lastErr  -- 透传最后一次失败的 err table
 end

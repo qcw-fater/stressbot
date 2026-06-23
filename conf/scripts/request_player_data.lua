@@ -9,7 +9,7 @@ function execute(r)
 
     -- 发送 MainLoadOkC2S (CMD=2, ACT=16)，等待 LoginPlayerDataS2C (CMD=1, ACT=2)
     local msg = proto.create("Game.MainLoadOkC2S")
-    local code, resp = network.tcp_request_route(
+    local err, resp = network.tcp_request_route(
         "logic",
         {cmd=2, act=16},
         {cmd=1, act=2},
@@ -18,11 +18,11 @@ function execute(r)
         30
     )
 
-    if code ~= 0 then
+    if err then
         log.error("RequestPlayerData 请求玩家数据失败: service=logic requestRoute=2:16 responseRoute=1:2 proto=Game.LoginPlayerDataS2C roleId="
             .. tostring(roleId)
-            .. " code=" .. tostring(code))
-        return code
+            .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+        return err
     end
 
     -- 存储完整玩家数据
@@ -54,5 +54,5 @@ function execute(r)
 
     log.info("RequestPlayerData 成功: roleId=" .. tostring(roleId)
         .. " heroCount=" .. tostring(#heroIds))
-    return 0
+    return nil
 end

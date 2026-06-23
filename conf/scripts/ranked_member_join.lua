@@ -34,9 +34,10 @@ local function leaveAndClearTeam(reason)
     if tid then
         local msg = proto.create("Game.TeamLeaveC2S")
         proto.set_field(msg, "teamId", tonumber(tid))
-        local code = network.tcp_request("logic", {cmd=5, act=2}, msg, "Game.TeamLeaveS2C")
+        local err = network.tcp_request("logic", {cmd=5, act=2}, msg, "Game.TeamLeaveS2C")
+        local codeText = err and (tostring(err.code) .. " " .. tostring(err.detail)) or "0"
         log.info("排位队员入队清理队伍: reason=" .. tostring(reason)
-            .. " teamId=" .. tostring(tid) .. " code=" .. tostring(code))
+            .. " teamId=" .. tostring(tid) .. " code=" .. codeText)
     end
     robot.delete("teamId")
     robot.delete("teamData")
@@ -74,7 +75,7 @@ function execute(r)
             local status, _, _ = share.hash_get(hashKey, "status")
             if status == "failed" or status == "done" then
                 degradeSolo("队伍已结束 status=" .. tostring(status))
-                return 0
+                return nil
             end
         end
         local received = robot.get("rankedTeamInviteReceived")
@@ -86,7 +87,7 @@ function execute(r)
 
     if not invite then
         degradeSolo("等邀请超时")
-        return 0
+        return nil
     end
 
     log.info("排位队员入队: 收到邀请 inviter=" .. tostring(invite.inviterId))
@@ -95,7 +96,7 @@ function execute(r)
     local inviteModel = tonumber(invite.model) or 0
     if inviteModel ~= 2 then
         degradeSolo("邀请模式非排位 model=" .. tostring(inviteModel))
-        return 0
+        return nil
     end
 
     -- ========== 接受邀请 ==========
@@ -111,14 +112,14 @@ function execute(r)
     robot.delete("rankedTeamAcceptDone")
     robot.delete("teamJoinCode")
 
-    local code = network.tcp_send("logic", {cmd=5, act=8}, msg)
-    if code ~= 0 then
+    local err = network.tcp_send("logic", {cmd=5, act=8}, msg)
+    if err then
         if hashKey then
             share.hash_set(hashKey, "status", "done", TEAM_TTL)
-            share.hash_set(hashKey, "failReason", "member_join_accept_failed_" .. tostring(code), TEAM_TTL)
+            share.hash_set(hashKey, "failReason", "member_join_accept_failed_" .. tostring(err.code), TEAM_TTL)
         end
-        degradeSolo("发送 TeamAccept 失败 code=" .. tostring(code))
-        return 0
+        degradeSolo("发送 TeamAccept 失败 code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+        return nil
     end
 
     -- ========== 等待入队确认 ==========
@@ -128,7 +129,7 @@ function execute(r)
             local status, _, _ = share.hash_get(hashKey, "status")
             if status == "failed" or status == "done" then
                 degradeSolo("等入队确认时队伍已结束 status=" .. tostring(status))
-                return 0
+                return nil
             end
         end
         utils.sleep(500)
@@ -142,10 +143,10 @@ function execute(r)
             share.hash_set(hashKey, "failReason", "member_join_confirm_failed_" .. tostring(joinCode or "timeout"), TEAM_TTL)
         end
         degradeSolo("等待入队确认失败 code=" .. tostring(joinCode or "timeout"))
-        return 0
+        return nil
     end
 
     robot.delete("rankedRoundFailed")
     log.info("排位队员入队: 成功 teamId=" .. tostring(robot.get("teamId")))
-    return 0
+    return nil
 end

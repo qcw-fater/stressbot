@@ -72,9 +72,10 @@ local function leaveCurrentTeam(reason)
     if tid then
         proto.set_field(msg, "teamId", tonumber(tid))
     end
-    local code = network.tcp_request("logic", {cmd=5, act=2}, msg, "Game.TeamLeaveS2C")
+    local err = network.tcp_request("logic", {cmd=5, act=2}, msg, "Game.TeamLeaveS2C")
+    local codeText = err and (tostring(err.code) .. " " .. tostring(err.detail)) or "0"
     log.info("排位开始匹配清理退出队伍: reason=" .. tostring(reason)
-        .. " teamId=" .. tostring(tid) .. " code=" .. tostring(code))
+        .. " teamId=" .. tostring(tid) .. " code=" .. codeText)
     robot.delete("teamId")
 end
 
@@ -99,7 +100,7 @@ local function cleanupStartMatchFailure(reason)
     leaveCurrentTeam(reason)
 end
 
-local function logStartMatchError(code, resp)
+local function logStartMatchError(errObj, resp)
     local roleId = robot.get("roleId")
     local role = robot.get("rankedTeamRole")
     local teamId = robot.get("teamId")
@@ -108,6 +109,9 @@ local function logStartMatchError(code, resp)
     local heroIds = robot.get("heroIdList")
     local currentHeroIds = robot.get("currentHeroIds")
     local teamMemberCount = robot.get("teamMemberCount")
+
+    local code = errObj and errObj.code or nil
+    local errDetail = errObj and errObj.detail or ""
 
     local detail = ""
     if code == 386 and resp ~= nil and type(resp) == "string" and #resp > 0 then
@@ -128,6 +132,7 @@ local function logStartMatchError(code, resp)
     end
 
     log.warn("排位开始匹配失败: code=" .. tostring(code)
+        .. " detail=" .. tostring(errDetail)
         .. " roleId=" .. tostring(roleId)
         .. " role=" .. tostring(role)
         .. " teamId=" .. tostring(teamId)
@@ -145,7 +150,7 @@ function execute(r)
     local existingFailure = robot.get("rankedRoundFailed")
     if existingFailure then
         log.warn("排位开始匹配: 本轮已失败，跳过 StartMatch reason=" .. tostring(existingFailure))
-        return 0
+        return nil
     end
 
     local role = robot.get("rankedTeamRole")
@@ -157,17 +162,17 @@ function execute(r)
         log.info("排位开始匹配: solo 缺少 teamId，补建单排队伍")
         local createMsg = proto.create("Game.TeamCreateC2S")
         proto.set_field(createMsg, "model", 2)
-        local createCode, createResp = network.tcp_request("logic", {cmd=5, act=1}, createMsg, "Game.TeamCreateS2C")
-        if createCode ~= 0 then
-            log.warn("排位开始匹配: 补建队伍失败 code=" .. tostring(createCode) .. "，退出后重试一次")
-            leaveCurrentTeam("start_create_retry_after_" .. tostring(createCode))
+        local createErr, createResp = network.tcp_request("logic", {cmd=5, act=1}, createMsg, "Game.TeamCreateS2C")
+        if createErr then
+            log.warn("排位开始匹配: 补建队伍失败 code=" .. tostring(createErr.code) .. " detail=" .. tostring(createErr.detail) .. "，退出后重试一次")
+            leaveCurrentTeam("start_create_retry_after_" .. tostring(createErr.code))
             createMsg = proto.create("Game.TeamCreateC2S")
             proto.set_field(createMsg, "model", 2)
-            createCode, createResp = network.tcp_request("logic", {cmd=5, act=1}, createMsg, "Game.TeamCreateS2C")
-            if createCode ~= 0 then
-                log.warn("排位开始匹配: 补建队伍重试失败 code=" .. tostring(createCode) .. "，本轮跳过匹配")
-                cleanupStartMatchFailure("start_create_failed_" .. tostring(createCode))
-                return 0
+            createErr, createResp = network.tcp_request("logic", {cmd=5, act=1}, createMsg, "Game.TeamCreateS2C")
+            if createErr then
+                log.warn("排位开始匹配: 补建队伍重试失败 code=" .. tostring(createErr.code) .. " detail=" .. tostring(createErr.detail) .. "，本轮跳过匹配")
+                cleanupStartMatchFailure("start_create_failed_" .. tostring(createErr.code))
+                return nil
             end
         end
         teamId = proto.get_field(createResp, "teamId")
@@ -181,11 +186,11 @@ function execute(r)
 
     -- 发送 TeamStartMatchC2S
     local msg = proto.create("Game.TeamStartMatchC2S")
-    local code, resp = network.tcp_request("logic", {cmd=5, act=20}, msg, "Game.TeamStartMatchS2C")
-    if code ~= 0 then
-        logStartMatchError(code, resp)
-        cleanupStartMatchFailure("start_failed_" .. tostring(code))
-        return 0
+    local err, resp = network.tcp_request("logic", {cmd=5, act=20}, msg, "Game.TeamStartMatchS2C")
+    if err then
+        logStartMatchError(err, resp)
+        cleanupStartMatchFailure("start_failed_" .. tostring(err.code))
+        return nil
     end
 
     robot.set("rankedMatchStarted", true)
@@ -201,5 +206,5 @@ function execute(r)
     local predictCost = proto.get_field(resp, "predictCost")
     log.info("排位开始匹配成功: modeId=" .. tostring(modeId)
         .. " predictCost=" .. tostring(predictCost))
-    return 0
+    return nil
 end

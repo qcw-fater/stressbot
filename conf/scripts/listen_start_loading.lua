@@ -25,11 +25,11 @@ function execute(r)
     local roleId = robot.get("roleId") or robot.get("playerId")
 
     -- 轮询监听开始加载消息，超时 180 秒（3 分钟），轮询 500 毫秒
-    local code, resp = network.tcp_listen("logic", {cmd=4, act=6}, "Game.BattleStartLoadingS2C", 180, 500)
-    if code ~= 0 then
+    local err, resp = network.tcp_listen("logic", {cmd=4, act=6}, "Game.BattleStartLoadingS2C", 180, 500)
+    if err then
         log.error("ListenStartLoading 等待开始加载失败: service=logic route=4:6 proto=Game.BattleStartLoadingS2C timeoutSec=180 pollMs=500 roleId="
-            .. tostring(roleId) .. " code=" .. tostring(code))
-        return code
+            .. tostring(roleId) .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+        return err
     end
 
     local fighterCount = 0
@@ -105,7 +105,9 @@ function execute(r)
     if not ok then
         log.error("ListenStartLoading 解析失败: roleId=" .. tostring(roleId)
             .. " fighterCount=" .. tostring(fighterCount)            .. " err=" .. tostring(err))
-        return 54  -- 54=LUA_EXIT_CODE
+        return robot.error(12, "ListenStartLoading 解析失败: roleId=" .. tostring(roleId)
+            .. " fighterCount=" .. tostring(fighterCount)
+            .. " err=" .. tostring(err))  -- 12=PARSE_FAILED：协议层异常
     end
 
     local battleAddress = robot.get("battleAddress")
@@ -121,7 +123,13 @@ function execute(r)
             .. " hasSecretKey=" .. tostring(battleSecretKey ~= nil)
             .. " battleSession=" .. tostring(battleSession)
             .. " fighterCount=" .. tostring(fighterCount))
-        return 54
+        return robot.error(54, "开始加载解析后关键字段缺失: roleId=" .. tostring(roleId)
+            .. " battleAddress=" .. tostring(battleAddress)
+            .. " battleId=" .. tostring(battleId)
+            .. " fighterIndex=" .. tostring(fighterIndex)
+            .. " hasSecretKey=" .. tostring(battleSecretKey ~= nil)
+            .. " battleSession=" .. tostring(battleSession)
+            .. " fighterCount=" .. tostring(fighterCount))  -- 54=LUA_EXIT_CODE：脚本断言失败
     end
 
     log.info("开始加载: roleId=" .. tostring(roleId)
@@ -132,5 +140,5 @@ function execute(r)
         .. " fighterCount=" .. tostring(fighterCount)
         .. " hasSecretKey=true")
 
-    return 0
+    return nil
 end

@@ -25,25 +25,25 @@ function execute(r)
 
     if guildId == nil or guildId == 0 then
         log.info("ExitGuild 跳过: 本地不在社团 roleId=" .. tostring(roleId))
-        return 0
+        return nil
     end
 
     if position ~= nil and position == 0 then
         log.info("ExitGuild 跳过: 当前是会长，需先传位 roleId=" .. tostring(roleId)
             .. " guildId=" .. tostring(guildId))
-        return 0
+        return nil
     end
 
     local msg = proto.create("Game.GuildExitC2S")
-    local code = network.tcp_request("logic", {cmd=21, act=6}, msg, "Game.GuildExitS2C")
-    if code ~= 0 then
+    local err = network.tcp_request("logic", {cmd=21, act=6}, msg, "Game.GuildExitS2C")
+    if err then
         log.error("ExitGuild 失败: roleId=" .. tostring(roleId)
             .. " guildId=" .. tostring(guildId)
             .. " position=" .. tostring(position)
-            .. " code=" .. tostring(code))
-        return code
+            .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+        return err
     end
 
     clear_guild_state(roleId)
-    return 0
+    return nil
 end

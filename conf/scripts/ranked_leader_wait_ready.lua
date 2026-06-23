@@ -33,9 +33,10 @@ local function leaveAndClearTeam(reason)
     if tid then
         local msg = proto.create("Game.TeamLeaveC2S")
         proto.set_field(msg, "teamId", tonumber(tid))
-        local code = network.tcp_request("logic", {cmd=5, act=2}, msg, "Game.TeamLeaveS2C")
+        local err = network.tcp_request("logic", {cmd=5, act=2}, msg, "Game.TeamLeaveS2C")
+        local codeText = err and (tostring(err.code) .. " " .. tostring(err.detail)) or "0"
         log.info("排位队长等就绪清理队伍: reason=" .. tostring(reason)
-            .. " teamId=" .. tostring(tid) .. " code=" .. tostring(code))
+            .. " teamId=" .. tostring(tid) .. " code=" .. codeText)
     end
     robot.delete("teamId")
     robot.delete("teamData")
@@ -58,7 +59,7 @@ function execute(r)
     local teamKey = robot.get("rankedTeamKey")
     if not teamKey then
         degradeSolo("teamKey 为空")
-        return 0
+        return nil
     end
 
     local roleId = tostring(robot.get("roleId"))
@@ -67,12 +68,12 @@ function execute(r)
     -- 通知服务端自己已准备（必须在 Redis 标记之前）
     local msg = proto.create("Game.TeamPrepareC2S")
     proto.set_field(msg, "isPrepare", true)
-    local code = network.tcp_send("logic", {cmd=5, act=12}, msg)
-    if code ~= 0 then
+    local err = network.tcp_send("logic", {cmd=5, act=12}, msg)
+    if err then
         share.hash_set("ranked:v1:team:" .. teamKey, "status", "done", TEAM_TTL)
-        share.hash_set("ranked:v1:team:" .. teamKey, "failReason", "leader_prepare_send_failed_" .. tostring(code), TEAM_TTL)
-        degradeSolo("TeamPrepare 发送失败 code=" .. tostring(code))
-        return 0
+        share.hash_set("ranked:v1:team:" .. teamKey, "failReason", "leader_prepare_send_failed_" .. tostring(err.code), TEAM_TTL)
+        degradeSolo("TeamPrepare 发送失败 code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+        return nil
     else
         log.info("排位队长等就绪: TeamPrepare 已发送")
     end
@@ -98,7 +99,7 @@ function execute(r)
                     robot.delete("rankedRoundFailed")
                     log.info("排位队长等就绪: 完成 count=" .. tostring(count)
                         .. "/" .. tostring(targetSize))
-                    return 0
+                    return nil
                 end
             end
         end
@@ -109,5 +110,5 @@ function execute(r)
     share.hash_set("ranked:v1:team:" .. teamKey, "status", "done", TEAM_TTL)
     share.hash_set("ranked:v1:team:" .. teamKey, "failReason", "leader_ready_timeout", TEAM_TTL)
     degradeSolo("超时 targetSize=" .. tostring(targetSize))
-    return 0
+    return nil
 end

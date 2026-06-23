@@ -34,9 +34,10 @@ local function leaveAndClearTeam(reason)
     if tid then
         local msg = proto.create("Game.TeamLeaveC2S")
         proto.set_field(msg, "teamId", tonumber(tid))
-        local code = network.tcp_request("logic", {cmd=5, act=2}, msg, "Game.TeamLeaveS2C")
+        local err = network.tcp_request("logic", {cmd=5, act=2}, msg, "Game.TeamLeaveS2C")
+        local codeText = err and (tostring(err.code) .. " " .. tostring(err.detail)) or "0"
         log.info("排位队长招募清理队伍: reason=" .. tostring(reason)
-            .. " teamId=" .. tostring(tid) .. " code=" .. tostring(code))
+            .. " teamId=" .. tostring(tid) .. " code=" .. codeText)
     end
     robot.delete("teamId")
     robot.delete("teamData")
@@ -66,7 +67,7 @@ function execute(r)
         robot.set("rankedTeamRole", "solo")
         robot.set("rankedTeamSize", 1)
         robot.set("rankedTeamTargetSize", 1)
-        return 0
+        return nil
     end
 
     local targetSize = tonumber(robot.get("rankedTeamTargetSize") or robot.get("rankedTeamSize") or 1)
@@ -95,7 +96,7 @@ function execute(r)
         robot.set("rankedTeamSize", 1)
         robot.set("rankedTeamTargetSize", 1)
         robot.delete("rankedRoundFailed")
-        return 0
+        return nil
     end
 
     -- 有人但不够：调整目标人数
@@ -115,7 +116,7 @@ function execute(r)
     if err or not ok then
         log.warn("排位队长招募: 获取队伍锁失败，降级单排继续")
         degradeSolo(hashKey,"leader_recruit_lock_failed")
-        return 0
+        return nil
     end
 
     local memberHashKey = "ranked:v1:team:" .. teamKey .. ":members"
@@ -125,7 +126,7 @@ function execute(r)
     if merr or not members then
         log.warn("排位队长招募: 读取成员列表失败，降级单排继续")
         degradeSolo(hashKey,"leader_recruit_members_read_failed")
-        return 0
+        return nil
     end
 
     local roleId = tonumber(robot.get("roleId"))
@@ -136,8 +137,8 @@ function execute(r)
             local msg = proto.create("Game.TeamInviteC2S")
             proto.set_field(msg, "beInviter", pid)
             proto.set_field(msg, "isInvite", true)
-            local code, resp = network.tcp_request("logic", {cmd=5, act=4}, msg, "Game.TeamInviteS2C")
-            if code == 0 then
+            local err, resp = network.tcp_request("logic", {cmd=5, act=4}, msg, "Game.TeamInviteS2C")
+            if not err then
                 invited = invited + 1
                 local respData = ""
                 if resp then
@@ -152,7 +153,8 @@ function execute(r)
                 if resp then
                     respData = " raw=" .. tostring(string.len(resp)) .. "B"
                 end
-                log.warn("排位队长招募: 邀请失败 target=" .. tostring(pid) .. " code=" .. tostring(code) .. respData)
+                log.warn("排位队长招募: 邀请失败 target=" .. tostring(pid)
+                    .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail) .. respData)
             end
         end
     end
@@ -162,11 +164,11 @@ function execute(r)
         log.warn("排位队长招募: 邀请未全部成功 invited=" .. tostring(invited)
             .. "/" .. tostring(expectedInvites) .. "，降级单排继续")
         degradeSolo(hashKey,"leader_recruit_invite_incomplete")
-        return 0
+        return nil
     end
 
     share.hash_set(hashKey, "status", "inviting", TEAM_TTL)
     robot.delete("rankedRoundFailed")
     log.info("排位队长招募: 完成 invited=" .. tostring(invited))
-    return 0
+    return nil
 end

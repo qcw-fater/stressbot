@@ -16,24 +16,24 @@ function execute(r)
     local channel = robot.get("platform") or "1000"
     local authAddr = robot.get("authAddr") or ""
     local url = authAddr .. "/notice"
-    local code, body = network.http_request(url, "POST", "form", {
+    local err, status, body = network.http_request(url, "POST", "form", {
         account = account,
         channel = channel
     })
 
-    if code ~= 0 and code < 100 then
+    if err then
         log.warn("RequestNotice HTTP 请求失败，不阻断流程: account=" .. tostring(account)
             .. " url=" .. tostring(url)
-            .. " code=" .. tostring(code))
-        return 0
+            .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+        return nil
     end
 
-    if code < 200 or code >= 300 then
+    if status < 200 or status >= 300 then
         log.warn("RequestNotice HTTP 状态异常，不阻断流程: account=" .. tostring(account)
             .. " url=" .. tostring(url)
-            .. " status=" .. tostring(code)
+            .. " status=" .. tostring(status)
             .. " body=" .. body_preview(body))
     end
 
-    return 0
+    return nil
 end
