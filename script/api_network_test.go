@@ -257,6 +257,89 @@ func TestUDPSend_SendFailure_ReturnsErrTable(t *testing.T) {
 	}
 }
 
+func TestHTTPRequest_Success_ReturnsNilErrAndStatus(t *testing.T) {
+	ns := &fakeNetSender{httpExchange: &engine.HTTPExchange{StatusCode: 404, Body: []byte("not found")}}
+	L := newTestState(t, context.Background(), ns, nil)
+	defer L.Close()
+	if err := L.DoString(`
+		local network = require("network")
+		e, s, b = network.http_request("http://x/notice", "POST", "form", "a=1")
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+	if L.GetGlobal("e") != lua.LNil {
+		t.Fatalf("成功 err 应 nil: %T", L.GetGlobal("e"))
+	}
+	if got := L.GetGlobal("s"); got != lua.LNumber(404) {
+		t.Fatalf("status=%v want 404", got)
+	}
+	if got := lua.LVAsString(L.GetGlobal("b")); got != "not found" {
+		t.Fatalf("body=%q", got)
+	}
+}
+
+func TestHTTPRequest_Error_ReturnsErrTableAndEmptyResponse(t *testing.T) {
+	ns := &fakeNetSender{httpErr: engine.NewActionError(errcode.ErrSendFailed, "http 发送失败 detail", errors.New("底层错误"))}
+	L := newTestState(t, context.Background(), ns, nil)
+	defer L.Close()
+	if err := L.DoString(`
+		local network = require("network")
+		e, s, b = network.http_request("http://x/notice")
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+	assertRequestErr(t, L, int(errcode.ErrSendFailed), "http 发送失败 detail")
+	if got := L.GetGlobal("s"); got != lua.LNumber(0) {
+		t.Fatalf("status=%v want 0", got)
+	}
+	if got := lua.LVAsString(L.GetGlobal("b")); got != "" {
+		t.Fatalf("body=%q want empty", got)
+	}
+}
+
+func TestHTTPRequest_ReturnsExactlyThreeValues(t *testing.T) {
+	ns := &fakeNetSender{httpExchange: &engine.HTTPExchange{StatusCode: 500, Body: []byte("server error")}}
+	L := newTestState(t, context.Background(), ns, nil)
+	defer L.Close()
+	if err := L.DoString(`
+		local network = require("network")
+		e, s, b, extra = network.http_request("http://x/notice")
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+	if got := L.GetGlobal("e"); got != lua.LNil {
+		t.Fatalf("成功 err = %T(%v), want nil", got, got)
+	}
+	if got := L.GetGlobal("s"); got != lua.LNumber(500) {
+		t.Fatalf("status=%v want 500", got)
+	}
+	if got := lua.LVAsString(L.GetGlobal("b")); got != "server error" {
+		t.Fatalf("body=%q want server error", got)
+	}
+	if got := L.GetGlobal("extra"); got != lua.LNil {
+		t.Fatalf("extra=%T(%v), want nil", got, got)
+	}
+}
+
+func TestHTTPRequest_NilExchangeWithoutError_ReturnsErrTable(t *testing.T) {
+	ns := &fakeNetSender{}
+	L := newTestState(t, context.Background(), ns, nil)
+	defer L.Close()
+	if err := L.DoString(`
+		local network = require("network")
+		e, s, b = network.http_request("http://x/notice")
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+	assertRequestErr(t, L, int(errcode.ErrSendFailed), "HTTP 响应为空")
+	if got := L.GetGlobal("s"); got != lua.LNumber(0) {
+		t.Fatalf("status=%v want 0", got)
+	}
+	if got := lua.LVAsString(L.GetGlobal("b")); got != "" {
+		t.Fatalf("body=%q want empty", got)
+	}
+}
+
 func TestTCPRequest_EncodeFailure_ReturnsErrTable(t *testing.T) {
 	// resolver nil → buildPacket/Resolve 命中 encode 失败分支
 	ns := &fakeNetSender{}

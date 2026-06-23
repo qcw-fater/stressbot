@@ -639,8 +639,9 @@ func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 // networkHTTPRequest 发送 HTTP 请求。
 // 签名：network.http_request(url [, method [, content_type [, body]]])
 //
-// 返回：status_code(number), body(string)
-// 1-99=框架传输错误（errcode）/ 其他=HTTP 原始状态码（200/404/500 等）。
+// 返回：err(table|nil), status_code(number), body(string)
+// 成功拿到响应（包含 404/500 等非 2xx HTTP 状态）：err=nil，status_code=HTTP 原始状态码。
+// 框架/传输错误：err=错误表，status_code=0，body=""。
 // HTTP message bytes 由 Context 自动累计，不返回给 Lua 脚本。
 func networkHTTPRequest(L *lua.LState) int {
 	ctx := GetContext(L)
@@ -700,21 +701,32 @@ func networkHTTPRequest(L *lua.LState) int {
 	}
 
 	exchange, err := ctx.NetSender.HTTPRequest(reqURL, method, contentType, reqBody)
-	if exchange == nil {
+	nilExchange := exchange == nil
+	if nilExchange {
 		exchange = &engine.HTTPExchange{}
 	}
 	ctx.recordRequest(engine.RequestTiming{WireRTT: exchange.NetLatency})
 	ctx.recordBytes(exchange.SendWireBytes, exchange.RecvWireBytes)
 	if err != nil {
 		rememberActionErr(ctx, err)
-		L.Push(lua.LNumber(errToCode(err)))
+		L.Push(errTableFromActionErr(L, err))
+		L.Push(lua.LNumber(0))
 		L.Push(lua.LString(""))
-		return 2
+		return 3
+	}
+	if nilExchange {
+		err := engine.NewActionError(errcode.ErrSendFailed, "HTTP 响应为空")
+		rememberActionErr(ctx, err)
+		L.Push(errTableFromActionErr(L, err))
+		L.Push(lua.LNumber(0))
+		L.Push(lua.LString(""))
+		return 3
 	}
 
+	L.Push(lua.LNil)
 	L.Push(lua.LNumber(exchange.StatusCode))
 	L.Push(lua.LString(string(exchange.Body)))
-	return 2
+	return 3
 }
 
 // ---------------------------------------------------------------------------
