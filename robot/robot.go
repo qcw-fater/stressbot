@@ -617,6 +617,15 @@ func isCanceledCode(code errcode.ErrorCode) bool {
 // executeLuaAction 执行 lua 脚本动作，返回 (sendBytes, recvBytes, timing, wallClock, err)。
 // timing 由脚本内的网络 API 累加；纯客户端逻辑（如仅 set_secret_key）timing 为零值。
 // wallClock 覆盖主流程同步执行脚本的总耗时。
+//
+// 错误处理（与声明式动作 detail 风格对齐，补 action= 上下文）：
+//   - err == nil：成功；
+//   - err 是 *engine.ActionError：透传，detail 不含 action= 时补 action=<actionDef.Name>，
+//     保留 RunActionScript 已写入的 script= 等上下文；
+//   - err 非 ActionError：包装为 ErrLuaExecFailed，detail 同时含 action= / script=。
+//
+// Task 3.2 起已移除基于 exit code / LastActionError 的旧对账逻辑——err table 经
+// RunActionScript 解析后即为权威 ActionError，无需再二次映射。
 func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int, int, engine.ActionTiming, time.Duration, error) {
 	if h.robot.l == nil || h.robot.luaPool == nil {
 		stresslog.Error("[ROBOT] Lua 运行时未初始化，无法执行脚本",
@@ -641,9 +650,33 @@ func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int,
 	}
 	var actionErr *engine.ActionError
 	if errors.As(err, &actionErr) {
+		// detail 补 action=（若尚未包含），保留已有 script= 等上下文。
+		appendActionDetail(actionErr, actionDef.Name)
 		return send, recv, timing, wallClock, actionErr
 	}
-	return send, recv, timing, wallClock, engine.NewActionError(errcode.ErrLuaExecFailed, "script="+actionDef.Script, err)
+	// 非 ActionError（如 RunActionScript 返回的"返回非法值"/loadScriptFn 失败等普通 error）：
+	// 包装为 ErrLuaExecFailed，detail 含 script=，actionDef.Name 非空时再补 action=。
+	detail := "script=" + actionDef.Script
+	if actionDef.Name != "" {
+		detail = "action=" + actionDef.Name + " " + detail
+	}
+	return send, recv, timing, wallClock, engine.NewActionError(errcode.ErrLuaExecFailed, detail, err)
+}
+
+// appendActionDetail 向 ActionError.Detail 补 action=<name>（仅当 detail 未含 action= 前缀时）。
+// ActionError.Detail 是可写字段，直接赋值合法；保留已有 script= 等上下文，仅在前面拼接 action=。
+func appendActionDetail(ae *engine.ActionError, name string) {
+	if ae == nil || name == "" {
+		return
+	}
+	if strings.Contains(ae.Detail, "action=") {
+		return
+	}
+	if ae.Detail == "" {
+		ae.Detail = "action=" + name
+		return
+	}
+	ae.Detail = "action=" + name + " " + ae.Detail
 }
 
 // luaCodeToActionErr 将 Lua 脚本退出码映射为结构化 ActionError。
