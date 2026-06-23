@@ -853,16 +853,16 @@ func networkUDPSend(L *lua.LState) int {
 // networkTCPListen 等待 TCP 监听消息。
 // 签名：network.tcp_listen(service, route [, s2c_proto [, timeout_sec [, poll_ms]]])
 //
-// 返回：code(number), data(string|userdata|nil)
-// code: 0=成功 / 31=超时 / 6=取消 / 12=解析失败 / 其他非零=服务端 HeaderErr。
+// 返回：err(table|nil), data(string|userdata|nil)
+// err=nil 成功；失败时 err={code, detail}。
 // 接收 WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
 func networkTCPListen(L *lua.LState) int { return networkListen(L, "tcp") }
 
 // networkUDPListen 等待 UDP 监听消息。
 // 签名：network.udp_listen(service, route [, s2c_proto [, timeout_sec [, poll_ms]]])
 //
-// 返回：code(number), data(string|userdata|nil)
-// code: 0=成功 / 31=超时 / 6=取消 / 12=解析失败 / 其他非零=服务端 HeaderErr。
+// 返回：err(table|nil), data(string|userdata|nil)
+// err=nil 成功；失败时 err={code, detail}。
 // 接收 WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
 func networkUDPListen(L *lua.LState) int { return networkListen(L, "udp") }
 
@@ -879,13 +879,17 @@ func networkListen(L *lua.LState, protocol string) int {
 	// （与 engine robotActionHandler.RegisterListen 同源，闭环双 codec）。Resolve nil → fail loud。
 	adp := ctx.Resolver.Resolve(protocol + ":" + service)
 	if adp == nil {
-		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service+" codec 未映射（resolver.Resolve("+protocol+":"+service+") nil）")
-		L.Push(lua.LNumber(errcode.ErrEncodeFailed))
-		L.Push(lua.LNil)
-		return 2
+		detail := "service=" + service + " codec 未映射（resolver.Resolve(" + protocol + ":" + service + ") nil）"
+		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
+		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
 	}
 	route := luaValueToRoute(L.Get(2))
 	routeKey := adp.ExpectedRouteKey(route)
+	if routeKey == "" {
+		detail := "service=" + service + " routeKey 解析失败（codec 未映射或监听路由无效）"
+		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
+		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
+	}
 
 	var s2cProto string
 	timeout := engine.DefaultListenTimeoutSec
@@ -939,44 +943,35 @@ func networkListen(L *lua.LState, protocol string) int {
 	respBody := exchange.Body
 
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" route="+routeKey)
-		L.Push(lua.LNumber(errcode.ErrActionCanceled))
-		L.Push(lua.LNil)
-		return 2
+		detail := "service=" + service
+		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, detail)
+		return pushResult(L, newErrTable(L, int(errcode.ErrActionCanceled), detail), lua.LNil)
 	}
 	if timedOut {
 		stresslog.Debug("[SCRIPT] "+protocol+"_listen 超时",
 			zap.String("service", service), zap.String("routeKey", routeKey), zap.Int("timeout", timeout),
 			zap.String("hint", "请先调用 ensure_"+protocol+"_listener() 预注册监听"))
-		rememberFrameworkErr(ctx, errcode.ErrListenTimeout,
-			fmt.Sprintf("service=%s route=%s timeout=%ds pollMs=%d", service, routeKey, timeout, pollMs))
-		L.Push(lua.LNumber(errcode.ErrListenTimeout))
-		L.Push(lua.LNil)
-		return 2
+		detail := fmt.Sprintf("service=%s route=%s timeout=%ds pollMs=%d", service, routeKey, timeout, pollMs)
+		rememberFrameworkErr(ctx, errcode.ErrListenTimeout, detail)
+		return pushResult(L, newErrTable(L, int(errcode.ErrListenTimeout), detail), lua.LNil)
 	}
 	if exchange.HeaderErr != 0 {
+		detail := headerErrDetail(ctx, protocol+":"+service, exchange.HeaderErr, service, routeKey)
 		rememberHeaderErr(ctx, exchange.HeaderErr, service, routeKey)
-		L.Push(lua.LNumber(exchange.HeaderErr))
-		L.Push(lua.LString(string(respBody)))
-		return 2
+		return pushResult(L, newErrTable(L, int(exchange.HeaderErr), detail), lua.LString(string(respBody)))
 	}
 
 	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
 		respMsg, err := ctx.Factory.Parse(s2cProto, respBody)
 		if err != nil {
-			rememberFrameworkErr(ctx, errcode.ErrParseFailed, "service="+service+" route="+routeKey)
-			L.Push(lua.LNumber(errcode.ErrParseFailed))
-			L.Push(lua.LNil)
-			return 2
+			detail := "service=" + service
+			rememberFrameworkErr(ctx, errcode.ErrParseFailed, detail)
+			return pushResult(L, newErrTable(L, int(errcode.ErrParseFailed), detail), lua.LNil)
 		}
-		L.Push(lua.LNumber(0))
-		L.Push(wrapProtoMessage(L, respMsg))
-		return 2
+		return pushResult(L, lua.LNil, wrapProtoMessage(L, respMsg))
 	}
 
-	L.Push(lua.LNumber(0))
-	L.Push(lua.LString(string(respBody)))
-	return 2
+	return pushResult(L, lua.LNil, lua.LString(string(respBody)))
 }
 
 // networkTryTCPListen 非阻塞获取最近一条 TCP 监听消息（不解析 proto，返回原始 body）。

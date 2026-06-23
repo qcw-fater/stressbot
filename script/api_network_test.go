@@ -265,6 +265,80 @@ func TestTCPRequest_HeaderErr_ReturnsErrTableAndBody(t *testing.T) {
 	}
 }
 
+func TestTCPListen_Timeout_ReturnsErrTable(t *testing.T) {
+	ns := &fakeNetSender{}
+	L := newTestState(t, context.Background(), ns, &fakeResolver{adp: &requestTestAdapter{expectedRouteKey: "1:1"}})
+	defer L.Close()
+
+	if err := L.DoString(`
+		local network = require("network")
+		e, d = network.tcp_listen("logic", {cmd=1,act=1}, "Game.X", 1, 50)
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+
+	assertRequestErr(t, L, int(errcode.ErrListenTimeout), "service=logic route=1:1")
+	if got := L.GetGlobal("d"); got != lua.LNil {
+		t.Fatalf("超时 data = %T(%v), want nil", got, got)
+	}
+}
+
+func TestUDPListen_Timeout_ReturnsErrTable(t *testing.T) {
+	ns := &fakeNetSender{}
+	L := newTestState(t, context.Background(), ns, &fakeResolver{adp: &requestTestAdapter{expectedRouteKey: "1:1"}})
+	defer L.Close()
+
+	if err := L.DoString(`
+		local network = require("network")
+		e, d = network.udp_listen("battle", {cmd=1,act=1}, "Game.X", 1, 50)
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+
+	assertRequestErr(t, L, int(errcode.ErrListenTimeout), "service=battle route=1:1")
+	if got := L.GetGlobal("d"); got != lua.LNil {
+		t.Fatalf("超时 data = %T(%v), want nil", got, got)
+	}
+}
+
+func TestTCPListen_HeaderErr_ReturnsErrTableAndBody(t *testing.T) {
+	ns := &fakeNetSender{listenResp: &engine.NetExchange{HeaderErr: 101, Body: []byte("listen-body")}}
+	L := newTestState(t, context.Background(), ns, &fakeResolver{adp: &requestTestAdapter{expectedRouteKey: "1:1", desc: "角色不存在"}})
+	defer L.Close()
+
+	if err := L.DoString(`
+		local network = require("network")
+		e, d = network.tcp_listen("logic", {cmd=1,act=1}, "", 1, 50)
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+
+	assertRequestErr(t, L, 101, "角色不存在: service=logic route=1:1")
+	if got := lua.LVAsString(L.GetGlobal("d")); got != "listen-body" {
+		t.Fatalf("data = %q, want listen-body", got)
+	}
+}
+
+func TestTCPListen_RawBodySuccess_ReturnsNilAndString(t *testing.T) {
+	ns := &fakeNetSender{listenResp: &engine.NetExchange{Body: []byte("listen-body")}}
+	L := newTestState(t, context.Background(), ns, &fakeResolver{adp: &requestTestAdapter{expectedRouteKey: "1:1"}})
+	defer L.Close()
+
+	if err := L.DoString(`
+		local network = require("network")
+		e, d = network.tcp_listen("logic", {cmd=1,act=1}, "", 1, 50)
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+
+	if got := L.GetGlobal("e"); got != lua.LNil {
+		t.Fatalf("成功 err = %T(%v), want nil", got, got)
+	}
+	if got := lua.LVAsString(L.GetGlobal("d")); got != "listen-body" {
+		t.Fatalf("data = %q, want listen-body", got)
+	}
+}
+
 func assertRequestErr(t *testing.T, L *lua.LState, wantCode int, wantDetailContains string) {
 	t.Helper()
 	errLV := L.GetGlobal("e")
