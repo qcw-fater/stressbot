@@ -14,10 +14,21 @@ import (
 )
 
 type fakeResolver struct {
-	adp adapter.Adapter
+	adp      adapter.Adapter
+	adps     map[string]adapter.Adapter
+	resolved []string
 }
 
-func (r *fakeResolver) Resolve(server string) adapter.Adapter { return r.adp }
+func (r *fakeResolver) Resolve(server string) adapter.Adapter {
+	if r == nil {
+		return nil
+	}
+	r.resolved = append(r.resolved, server)
+	if r.adps != nil {
+		return r.adps[server]
+	}
+	return r.adp
+}
 
 type fakeNetSender struct {
 	tcpReqExchange *engine.NetExchange
@@ -40,6 +51,8 @@ type fakeNetSender struct {
 	httpExchange   *engine.HTTPExchange
 	httpErr        error
 	listenResp     *engine.NetExchange
+	tcpListenCalls int
+	udpListenCalls int
 	tcpKey         []byte
 	udpKey         []byte
 }
@@ -86,9 +99,15 @@ func (f *fakeNetSender) CloseTCP(string) {}
 
 func (f *fakeNetSender) CloseUDP(string) {}
 
-func (f *fakeNetSender) GetTCPListenResp(string, string) *engine.NetExchange { return f.listenResp }
+func (f *fakeNetSender) GetTCPListenResp(string, string) *engine.NetExchange {
+	f.tcpListenCalls++
+	return f.listenResp
+}
 
-func (f *fakeNetSender) GetUDPListenResp(string, string) *engine.NetExchange { return f.listenResp }
+func (f *fakeNetSender) GetUDPListenResp(string, string) *engine.NetExchange {
+	f.udpListenCalls++
+	return f.listenResp
+}
 
 func (f *fakeNetSender) EnsureTCPListener(string, string, int) {}
 

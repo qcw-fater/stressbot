@@ -4,13 +4,19 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"stressbot/adapter"
 	"stressbot/engine"
 	"stressbot/errcode"
+	"stressbot/protox"
+	stresslog "stressbot/utils/log"
 
 	lua "github.com/yuin/gopher-lua"
+	"go.uber.org/zap"
 )
 
 type requestTestAdapter struct {
@@ -265,6 +271,90 @@ func TestTCPRequest_HeaderErr_ReturnsErrTableAndBody(t *testing.T) {
 	}
 }
 
+func TestTCPListen_EncodeFailure_ReturnsErrTable(t *testing.T) {
+	ns := &fakeNetSender{}
+	L := newTestState(t, context.Background(), ns, &fakeResolver{})
+	defer L.Close()
+
+	if err := L.DoString(`
+		local network = require("network")
+		e, d = network.tcp_listen("logic", {cmd=1,act=1}, "Game.X", 0, 1)
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+
+	assertRequestErr(t, L, int(errcode.ErrEncodeFailed), "resolver.Resolve(tcp:logic) nil")
+	if got := L.GetGlobal("d"); got != lua.LNil {
+		t.Fatalf("编码失败 data = %T(%v), want nil", got, got)
+	}
+	if got := ns.tcpListenCalls; got != 0 {
+		t.Fatalf("GetTCPListenResp calls = %d, want 0", got)
+	}
+}
+
+func TestTCPListen_EmptyRouteKey_ReturnsErrTableWithoutPolling(t *testing.T) {
+	ns := &fakeNetSender{}
+	L := newTestState(t, context.Background(), ns, &fakeResolver{adp: &requestTestAdapter{}})
+	defer L.Close()
+
+	if err := L.DoString(`
+		local network = require("network")
+		e, d = network.tcp_listen("logic", {cmd=1,act=1}, "Game.X", 0, 1)
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+
+	assertRequestErr(t, L, int(errcode.ErrEncodeFailed), "service=logic routeKey 解析失败")
+	if got := L.GetGlobal("d"); got != lua.LNil {
+		t.Fatalf("routeKey 失败 data = %T(%v), want nil", got, got)
+	}
+	if got := ns.tcpListenCalls; got != 0 {
+		t.Fatalf("GetTCPListenResp calls = %d, want 0", got)
+	}
+}
+
+func TestTCPListen_Canceled_ReturnsErrTable(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ns := &fakeNetSender{}
+	L := newTestState(t, ctx, ns, &fakeResolver{adp: &requestTestAdapter{expectedRouteKey: "1:1"}})
+	defer L.Close()
+
+	if err := L.DoString(`
+		local network = require("network")
+		e, d = network.tcp_listen("logic", {cmd=1,act=1}, "Game.X", 1, 50)
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+
+	assertRequestErr(t, L, int(errcode.ErrActionCanceled), "service=logic")
+	if got := L.GetGlobal("d"); got != lua.LNil {
+		t.Fatalf("取消 data = %T(%v), want nil", got, got)
+	}
+}
+
+func TestTCPListen_ParseFailure_ReturnsErrTable(t *testing.T) {
+	ns := &fakeNetSender{listenResp: &engine.NetExchange{Body: []byte("not-protobuf")}}
+	L := newTestState(t, context.Background(), ns, &fakeResolver{adp: &requestTestAdapter{expectedRouteKey: "1:1"}})
+	GetContext(L).Factory = newListenTestFactory(t)
+	defer L.Close()
+
+	if err := L.DoString(`
+		local network = require("network")
+		e, d = network.tcp_listen("logic", {cmd=1,act=1}, "listentest.Push", 1, 50)
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+
+	assertRequestErr(t, L, int(errcode.ErrParseFailed), "service=logic")
+	if got := L.GetGlobal("d"); got != lua.LNil {
+		t.Fatalf("解析失败 data = %T(%v), want nil", got, got)
+	}
+	if got := ns.tcpListenCalls; got != 1 {
+		t.Fatalf("GetTCPListenResp calls = %d, want 1", got)
+	}
+}
+
 func TestTCPListen_Timeout_ReturnsErrTable(t *testing.T) {
 	ns := &fakeNetSender{}
 	L := newTestState(t, context.Background(), ns, &fakeResolver{adp: &requestTestAdapter{expectedRouteKey: "1:1"}})
@@ -272,7 +362,7 @@ func TestTCPListen_Timeout_ReturnsErrTable(t *testing.T) {
 
 	if err := L.DoString(`
 		local network = require("network")
-		e, d = network.tcp_listen("logic", {cmd=1,act=1}, "Game.X", 1, 50)
+		e, d = network.tcp_listen("logic", {cmd=1,act=1}, "Game.X", 0, 50)
 	`); err != nil {
 		t.Fatalf("lua error: %v", err)
 	}
@@ -290,7 +380,7 @@ func TestUDPListen_Timeout_ReturnsErrTable(t *testing.T) {
 
 	if err := L.DoString(`
 		local network = require("network")
-		e, d = network.udp_listen("battle", {cmd=1,act=1}, "Game.X", 1, 50)
+		e, d = network.udp_listen("battle", {cmd=1,act=1}, "Game.X", 0, 50)
 	`); err != nil {
 		t.Fatalf("lua error: %v", err)
 	}
@@ -316,6 +406,33 @@ func TestTCPListen_HeaderErr_ReturnsErrTableAndBody(t *testing.T) {
 	assertRequestErr(t, L, 101, "角色不存在: service=logic route=1:1")
 	if got := lua.LVAsString(L.GetGlobal("d")); got != "listen-body" {
 		t.Fatalf("data = %q, want listen-body", got)
+	}
+}
+
+func TestUDPListen_HeaderError_ReturnsErrTableAndBody(t *testing.T) {
+	ns := &fakeNetSender{listenResp: &engine.NetExchange{HeaderErr: 102, Body: []byte("udp-listen-body")}}
+	resolver := &fakeResolver{adps: map[string]adapter.Adapter{
+		"udp:battle": &requestTestAdapter{expectedRouteKey: "2:3", desc: "战斗错误"},
+	}}
+	L := newTestState(t, context.Background(), ns, resolver)
+	defer L.Close()
+
+	if err := L.DoString(`
+		local network = require("network")
+		e, d = network.udp_listen("battle", {cmd=2,act=3}, "", 1, 50)
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+
+	assertRequestErr(t, L, 102, "战斗错误: service=battle route=2:3")
+	if got := lua.LVAsString(L.GetGlobal("d")); got != "udp-listen-body" {
+		t.Fatalf("data = %q, want udp-listen-body", got)
+	}
+	if got := ns.udpListenCalls; got != 1 {
+		t.Fatalf("GetUDPListenResp calls = %d, want 1", got)
+	}
+	if len(resolver.resolved) < 2 || resolver.resolved[0] != "udp:battle" || resolver.resolved[1] != "udp:battle" {
+		t.Fatalf("resolved = %q, want err table detail to prefer udp:battle", strings.Join(resolver.resolved, ","))
 	}
 }
 
@@ -353,4 +470,28 @@ func assertRequestErr(t *testing.T, L *lua.LState, wantCode int, wantDetailConta
 	if !strings.Contains(detail, wantDetailContains) {
 		t.Fatalf("detail = %q, want contains %q", detail, wantDetailContains)
 	}
+}
+
+func newListenTestFactory(t *testing.T) *protox.Factory {
+	t.Helper()
+	stresslog.ReplaceLogger(zap.NewNop())
+	dir := t.TempDir()
+	protoContent := `syntax = "proto3";
+
+package listentest;
+
+message Push {
+  int32 seq = 1;
+}
+`
+	protoPath := filepath.Join(dir, "listen_test.proto")
+	if err := os.WriteFile(protoPath, []byte(protoContent), 0644); err != nil {
+		t.Fatalf("写入测试 proto 失败: %v", err)
+	}
+	loader := protox.NewLoader([]string{dir}, []string{"listen_test.proto"})
+	files, err := loader.Load()
+	if err != nil {
+		t.Fatalf("加载测试 proto 失败: %v", err)
+	}
+	return protox.NewFactory(protox.NewRegistry(files))
 }
