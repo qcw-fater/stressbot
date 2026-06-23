@@ -80,13 +80,6 @@ func loadNetworkModule(L *lua.LState) int {
 // 内部辅助
 // ---------------------------------------------------------------------------
 
-// pushRequestResult 将请求结果压入 Lua 栈。
-func pushRequestResult(L *lua.LState, code int, data lua.LValue, _ int, _ int) int {
-	L.Push(lua.LNumber(code))
-	L.Push(data)
-	return 2
-}
-
 // errToCode 从 ActionError 提取错误码，透传给 Lua。
 // 所有网络层错误都是 ActionError（含 errcode 体系的具体码），
 // 非 ActionError 降级为 -1（理论上不会走到）。
@@ -362,8 +355,8 @@ func networkCloseUDP(L *lua.LState) int {
 // networkTCPRequest TCP 请求-响应。
 // 签名：network.tcp_request(service, route, msg [, s2c_proto])
 //
-// 返回：code(number), data(string|userdata|nil)
-// code=0 成功 / 1-99 框架错误码 / 其他非零=服务端 HeaderErr。
+// 返回：err(table|nil), data(string|userdata|nil)
+// err=nil 成功；失败时 err={code, detail}。
 // WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
 func networkTCPRequest(L *lua.LState) int {
 	ctx := GetContext(L)
@@ -433,17 +426,24 @@ func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart)})
 	}
 	if packet == nil {
-		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service)
-		return pushRequestResult(L, int(errcode.ErrEncodeFailed), lua.LNil, 0, 0)
+		detail := "service=" + service + " codec 未映射"
+		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
+		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
 	}
 
 	// ExpectedRouteKey 走 resolver.Resolve("tcp:"+service) 出的 Go SchemaAdapter
 	// （与 encode 同源，避免双 codec 漂移）。Resolve nil → fail loud（理论上 encode 已 fail，
 	// 这里防御性兜 nil routeKey 会导致 RequestResponse 永久等不到响应）。
+	if ctx.Resolver == nil {
+		detail := "service=" + service + " routeKey 解析失败（codec 未映射）"
+		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
+		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
+	}
 	tcpAdp := ctx.Resolver.Resolve("tcp:" + service)
 	if tcpAdp == nil {
-		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service+" routeKey 解析失败（codec 未映射）")
-		return pushRequestResult(L, int(errcode.ErrEncodeFailed), lua.LNil, len(packet), 0)
+		detail := "service=" + service + " routeKey 解析失败（codec 未映射）"
+		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
+		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
 	}
 	routeKey := tcpAdp.ExpectedRouteKey(luaValueToRoute(responseRoute))
 	pktLen := len(packet)
@@ -458,16 +458,21 @@ func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 	respBody := exchange.Body
 
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" route="+routeKey)
-		return pushRequestResult(L, int(errcode.ErrActionCanceled), lua.LNil, pktLen, 0)
+		detail := "service=" + service + " route=" + routeKey
+		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, detail)
+		return pushResult(L, newErrTable(L, int(errcode.ErrActionCanceled), detail), lua.LNil)
 	}
 	if reqErr != nil {
 		rememberActionErr(ctx, reqErr)
-		return pushRequestResult(L, errToCode(reqErr), lua.LNil, pktLen, 0)
+		return pushResult(L, errTableFromActionErr(L, reqErr), lua.LNil)
 	}
 	if exchange.HeaderErr != 0 {
+		detail := "service=" + service + " route=" + routeKey
+		if desc := resolveDescribeError(ctx, "tcp:"+service, exchange.HeaderErr); desc != "" {
+			detail = desc + ": " + detail
+		}
 		rememberHeaderErr(ctx, exchange.HeaderErr, service, routeKey)
-		return pushRequestResult(L, int(exchange.HeaderErr), lua.LString(string(respBody)), pktLen, len(respBody))
+		return pushResult(L, newErrTable(L, int(exchange.HeaderErr), detail), lua.LString(string(respBody)))
 	}
 
 	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
@@ -480,24 +485,25 @@ func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 			ctx.recordClientTiming(engine.ClientTiming{ParseStoreCost: time.Since(parseStart)})
 		}
 		if err != nil {
-			rememberFrameworkErr(ctx, errcode.ErrParseFailed, "service="+service+" route="+routeKey)
-			return pushRequestResult(L, int(errcode.ErrParseFailed), lua.LString(string(respBody)), pktLen, len(respBody))
+			detail := "service=" + service + " route=" + routeKey
+			rememberFrameworkErr(ctx, errcode.ErrParseFailed, detail)
+			return pushResult(L, newErrTable(L, int(errcode.ErrParseFailed), detail), lua.LString(string(respBody)))
 		}
-		return pushRequestResult(L, 0, wrapProtoMessage(L, respMsg), pktLen, len(respBody))
+		return pushResult(L, lua.LNil, wrapProtoMessage(L, respMsg))
 	}
 
-	return pushRequestResult(L, 0, lua.LString(string(respBody)), pktLen, len(respBody))
+	return pushResult(L, lua.LNil, lua.LString(string(respBody)))
 }
 
 // networkUDPRequest UDP 请求-响应。
 // 签名：network.udp_request(service, route, body [, s2c_proto [, timeout_sec [, poll_ms]]])
 //
-// 返回：code(number), data(string|userdata|nil)
-// code=0 成功 / 1-99 框架错误码 / 其他非零=服务端 HeaderErr。
+// 返回：err(table|nil), data(string|userdata|nil)
+// err=nil 成功；失败时 err={code, detail}。
 // WireBytes 由 Context 自动累计，不返回给 Lua 脚本。
 func networkUDPRequest(L *lua.LState) int {
 	ctx := GetContext(L)
-	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
+	if ctx == nil || ctx.NetSender == nil {
 		L.RaiseError("network not available")
 		return 0
 	}
@@ -521,7 +527,7 @@ func networkUDPRequest(L *lua.LState) int {
 // request_route 用于编码请求包，response_route 用于计算等待响应的 routeKey。
 func networkUDPRequestRoute(L *lua.LState) int {
 	ctx := GetContext(L)
-	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
+	if ctx == nil || ctx.NetSender == nil {
 		L.RaiseError("network not available")
 		return 0
 	}
@@ -543,16 +549,22 @@ func networkUDPRequestRoute(L *lua.LState) int {
 }
 
 func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, responseRoute lua.LValue, body []byte, s2cProto string, timeout int) int {
-	if ctx == nil || ctx.NetSender == nil || ctx.Resolver == nil {
+	if ctx == nil || ctx.NetSender == nil {
 		L.RaiseError("network not available")
 		return 0
 	}
 	// T2-C2-Lua：encode + ExpectedRouteKey 全走 resolver.Resolve("udp:"+service) 出的 Go SchemaAdapter
 	// （与 TCP 侧 doTCPRequest / engine.ActionExecutor 同源）。Resolve nil → fail loud。
+	if ctx.Resolver == nil {
+		detail := "service=" + service + " codec 未映射（resolver.Resolve(udp:" + service + ") nil）"
+		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
+		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
+	}
 	udpAdp := ctx.Resolver.Resolve("udp:" + service)
 	if udpAdp == nil {
-		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service+" codec 未映射（resolver.Resolve(udp:"+service+") nil）")
-		return pushRequestResult(L, int(errcode.ErrEncodeFailed), lua.LNil, 0, 0)
+		detail := "service=" + service + " codec 未映射（resolver.Resolve(udp:" + service + ") nil）"
+		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
+		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
 	}
 	routeKey := udpAdp.ExpectedRouteKey(luaValueToRoute(responseRoute))
 	udpKey := ctx.NetSender.GetUDPSecretKey(service)
@@ -565,8 +577,9 @@ func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart)})
 	}
 	if packet == nil {
-		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service)
-		return pushRequestResult(L, int(errcode.ErrEncodeFailed), lua.LNil, 0, 0)
+		detail := "service=" + service + " codec 未映射"
+		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
+		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
 	}
 
 	pktLen := len(packet)
@@ -585,16 +598,21 @@ func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 		// 脚本上下文被取消（robot.Stop / 任务停止）。区别于 reqErr 携带的 CONN_DROPPED：
 		// 后者是底层连接被对端断开；这里是本地主动取消，归类为 ACTION_CANCELED 避免被
 		// 误判为网络异常污染失败率统计。
-		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" route="+routeKey)
-		return pushRequestResult(L, int(errcode.ErrActionCanceled), lua.LNil, pktLen, 0)
+		detail := "service=" + service + " route=" + routeKey
+		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, detail)
+		return pushResult(L, newErrTable(L, int(errcode.ErrActionCanceled), detail), lua.LNil)
 	}
 	if reqErr != nil {
 		rememberActionErr(ctx, reqErr)
-		return pushRequestResult(L, errToCode(reqErr), lua.LNil, pktLen, 0)
+		return pushResult(L, errTableFromActionErr(L, reqErr), lua.LNil)
 	}
 	if exchange.HeaderErr != 0 {
+		detail := "service=" + service + " route=" + routeKey
+		if desc := resolveDescribeError(ctx, "udp:"+service, exchange.HeaderErr); desc != "" {
+			detail = desc + ": " + detail
+		}
 		rememberHeaderErr(ctx, exchange.HeaderErr, service, routeKey)
-		return pushRequestResult(L, int(exchange.HeaderErr), lua.LString(string(respBody)), pktLen, len(respBody))
+		return pushResult(L, newErrTable(L, int(exchange.HeaderErr), detail), lua.LString(string(respBody)))
 	}
 
 	if s2cProto != "" && ctx.Factory != nil && len(respBody) > 0 {
@@ -607,13 +625,14 @@ func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 			ctx.recordClientTiming(engine.ClientTiming{ParseStoreCost: time.Since(parseStart)})
 		}
 		if err != nil {
-			rememberFrameworkErr(ctx, errcode.ErrParseFailed, "service="+service+" route="+routeKey)
-			return pushRequestResult(L, int(errcode.ErrParseFailed), lua.LString(string(respBody)), pktLen, len(respBody))
+			detail := "service=" + service + " route=" + routeKey
+			rememberFrameworkErr(ctx, errcode.ErrParseFailed, detail)
+			return pushResult(L, newErrTable(L, int(errcode.ErrParseFailed), detail), lua.LString(string(respBody)))
 		}
-		return pushRequestResult(L, 0, wrapProtoMessage(L, respMsg), pktLen, len(respBody))
+		return pushResult(L, lua.LNil, wrapProtoMessage(L, respMsg))
 	}
 
-	return pushRequestResult(L, 0, lua.LString(string(respBody)), pktLen, len(respBody))
+	return pushResult(L, lua.LNil, lua.LString(string(respBody)))
 }
 
 // networkHTTPRequest 发送 HTTP 请求。
