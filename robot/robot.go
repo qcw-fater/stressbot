@@ -636,11 +636,14 @@ func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int,
 	// 这里把结构化 timing 上抛给 RecordAction。
 	send, recv, timing, err := h.robot.luaPool.RunActionScript(h.robot.l, actionDef.Script)
 	wallClock := time.Since(start)
-	if err != nil {
-		return send, recv, timing, wallClock, err
+	if err == nil {
+		return send, recv, timing, wallClock, nil
 	}
-
-	return send, recv, timing, wallClock, nil
+	var actionErr *engine.ActionError
+	if errors.As(err, &actionErr) {
+		return send, recv, timing, wallClock, actionErr
+	}
+	return send, recv, timing, wallClock, engine.NewActionError(errcode.ErrLuaExecFailed, "script="+actionDef.Script, err)
 }
 
 // luaCodeToActionErr 将 Lua 脚本退出码映射为结构化 ActionError。
