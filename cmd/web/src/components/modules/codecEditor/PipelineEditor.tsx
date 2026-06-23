@@ -129,11 +129,12 @@ export function PipelineEditor({ raw, schema, onEdit }: PipelineEditorProps) {
   return (
     <Card
       size="small"
+      className="pce-bench pipeline-bench"
       title={
         <Space size={8} align="center">
-          <span>管线</span>
-          <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 'normal' }}>
-            卡片顺序 = encode 顺序（decode 自动反序）
+          <span className="pce-bench-title">PIPELINE</span>
+          <Typography.Text type="secondary" className="pce-bench-meta">
+            {steps.length} steps · encode 顺序，decode 自动反序
           </Typography.Text>
         </Space>
       }

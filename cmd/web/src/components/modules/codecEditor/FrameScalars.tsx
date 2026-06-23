@@ -6,7 +6,7 @@
  * 修改经 setCodecScalar → onEdit 回灌 content。
  */
 
-import { Card, InputNumber, Radio, Space, Typography } from 'antd';
+import { InputNumber, Radio, Space, Tooltip, Typography } from 'antd';
 import type { CodecSchema } from '@/types/codec';
 import { setCodecScalar, type CodecScalarPath } from './codecEdit';
 
@@ -24,83 +24,87 @@ export function FrameScalars({ raw, schema, onEdit }: FrameScalarsProps) {
   };
 
   return (
-    <Card size="small" title="帧布局参数" styles={{ body: { padding: 12 } }}>
-      <Space size={16} wrap align="center">
-        <LabeledNumber
-          label="version"
-          value={schema.version}
-          min={0}
-          onChange={(v) => v != null && editScalar('version', v)}
-        />
-        <div>
-          <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 2 }}>
-            字节序（endianDefault）
-          </Typography.Text>
+    <div className="frame-controls">
+      <LabeledNumber
+        label="配置格式版本"
+        tooltip="用于后端识别 codec.json 结构；不是工具版本，也不是业务协议字段。"
+        value={schema.version}
+        min={0}
+        onChange={(v) => v != null && editScalar('version', v)}
+      />
+      <div className="frame-control-item">
+        <Typography.Text type="secondary" className="frame-control-label">
+          默认字节序
+        </Typography.Text>
+        <Radio.Group
+          size="small"
+          value={schema.endianDefault}
+          onChange={(e) => editScalar('endianDefault', e.target.value as string)}
+        >
+          <Radio.Button value="le">le 小端</Radio.Button>
+          <Radio.Button value="be">be 大端</Radio.Button>
+        </Radio.Group>
+      </div>
+      <LabeledNumber
+        label="header bytes"
+        value={frame?.headerSize ?? 0}
+        min={0}
+        onChange={(v) => v != null && editScalar('frame.headerSize', v)}
+      />
+      <LabeledNumber
+        label="trailer bytes"
+        value={frame?.trailerSize ?? 0}
+        min={0}
+        onChange={(v) => v != null && editScalar('frame.trailerSize', v)}
+      />
+      <div className="frame-control-item frame-length-scope">
+        <Typography.Text type="secondary" className="frame-control-label">
+          length 计数范围
+        </Typography.Text>
+        <Space size={8} wrap>
           <Radio.Group
             size="small"
-            value={schema.endianDefault}
-            onChange={(e) => editScalar('endianDefault', e.target.value as string)}
+            value={frame?.lengthIncludesHeader ? 'h' : 'no-h'}
+            onChange={(e) => editScalar('frame.lengthIncludesHeader', e.target.value === 'h')}
           >
-            <Radio.Button value="le">le（小端）</Radio.Button>
-            <Radio.Button value="be">be（大端）</Radio.Button>
+            <Radio.Button value="no-h">不含 header</Radio.Button>
+            <Radio.Button value="h">含 header</Radio.Button>
           </Radio.Group>
-        </div>
-        <LabeledNumber
-          label="headerSize"
-          value={frame?.headerSize ?? 0}
-          min={0}
-          onChange={(v) => v != null && editScalar('frame.headerSize', v)}
-        />
-        <LabeledNumber
-          label="trailerSize"
-          value={frame?.trailerSize ?? 0}
-          min={0}
-          onChange={(v) => v != null && editScalar('frame.trailerSize', v)}
-        />
-        <div>
-          <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 2 }}>
-            length 字段范围
-          </Typography.Text>
-          <Space size={8}>
-            <Radio.Group
-              size="small"
-              value={frame?.lengthIncludesHeader ? 'h' : 'no-h'}
-              onChange={(e) => editScalar('frame.lengthIncludesHeader', e.target.value === 'h')}
-            >
-              <Radio.Button value="no-h">不含 header</Radio.Button>
-              <Radio.Button value="h">含 header</Radio.Button>
-            </Radio.Group>
-            <Radio.Group
-              size="small"
-              value={frame?.lengthIncludesTrailer ? 't' : 'no-t'}
-              onChange={(e) => editScalar('frame.lengthIncludesTrailer', e.target.value === 't')}
-            >
-              <Radio.Button value="no-t">不含 trailer</Radio.Button>
-              <Radio.Button value="t">含 trailer</Radio.Button>
-            </Radio.Group>
-          </Space>
-        </div>
-      </Space>
-    </Card>
+          <Radio.Group
+            size="small"
+            value={frame?.lengthIncludesTrailer ? 't' : 'no-t'}
+            onChange={(e) => editScalar('frame.lengthIncludesTrailer', e.target.value === 't')}
+          >
+            <Radio.Button value="no-t">不含 trailer</Radio.Button>
+            <Radio.Button value="t">含 trailer</Radio.Button>
+          </Radio.Group>
+        </Space>
+      </div>
+    </div>
   );
 }
 
 function LabeledNumber({
   label,
+  tooltip,
   value,
   min,
   onChange,
 }: {
   label: string;
+  tooltip?: string;
   value: number;
   min?: number;
   onChange: (v: number | null) => void;
 }) {
+  const labelNode = (
+    <Typography.Text type="secondary" className="frame-control-label">
+      {label}
+    </Typography.Text>
+  );
   return (
-    <div>
-      <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 2 }}>
-        {label}
-      </Typography.Text>
+    <div className="frame-control-item">
+      {tooltip ? <Tooltip title={tooltip}>{labelNode}</Tooltip> : labelNode}
       <InputNumber size="small" value={value} min={min} onChange={onChange} />
     </div>
   );

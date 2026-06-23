@@ -186,43 +186,47 @@ export function HeaderFieldTable({ raw, schema, selectedIndex, onSelect, onEdit 
     },
   ];
 
+  const addField = () => {
+    const next: Field = {
+      name: `field${fields.length}`,
+      offset: headerSize,
+      size: 1,
+      type: 'u8',
+      role: 'reserved',
+    };
+    onEdit(addHeaderField(raw, next));
+    onSelect(fields.length);
+  };
+
   return (
-    <div>
+    <div className="header-fields-panel">
+      <div className="pce-bench-header header-fields-header">
+        <div>
+          <Typography.Text className="pce-bench-title">HEADER FIELDS</Typography.Text>
+          <Typography.Text className="pce-bench-meta">{fields.length} fields · offset / size / type / role</Typography.Text>
+        </div>
+        <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={addField}>
+          添加字段
+        </Button>
+      </div>
       <Table<Field>
         rowKey={(_record, idx) => String(idx)}
         size="small"
         dataSource={fields}
         columns={columns}
         pagination={false}
-        scroll={{ y: 280 }}
+        scroll={{ x: 'max-content', y: 280 }}
         onRow={(_record, idx) => ({
           onClick: () => onSelect(typeof idx === 'number' ? idx : null),
-          style: {
-            cursor: 'pointer',
-            background: typeof idx === 'number' && selectedIndex === idx ? 'var(--hover-bg)' : undefined,
-          },
+          style: { cursor: 'pointer' },
         })}
-        rowClassName={(_record, idx) => (ranges[idx]?.bad ? 'flet-row-bad' : '')}
-      />
-      <Button
-        size="small"
-        type="dashed"
-        icon={<PlusOutlined />}
-        style={{ marginTop: 8 }}
-        onClick={() => {
-          const next: Field = {
-            name: `field${fields.length}`,
-            offset: headerSize,
-            size: 1,
-            type: 'u8',
-            role: 'reserved',
-          };
-          onEdit(addHeaderField(raw, next));
-          onSelect(fields.length);
+        rowClassName={(_record, idx) => {
+          const parts: string[] = [];
+          if (ranges[idx]?.bad) parts.push('flet-row-bad');
+          if (typeof idx === 'number' && selectedIndex === idx) parts.push('flet-row-selected');
+          return parts.join(' ');
         }}
-      >
-        添加字段
-      </Button>
+      />
     </div>
   );
 }

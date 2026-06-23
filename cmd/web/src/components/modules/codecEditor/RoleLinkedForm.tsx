@@ -12,7 +12,7 @@
  * 修改经 updateHeaderField → onEdit 回灌 content。
  */
 
-import { Card, InputNumber, Select, Space, Typography } from 'antd';
+import { InputNumber, Select, Space, Tag, Typography } from 'antd';
 import type { CodecSchema, Field, FlagBit, ValueSource } from '@/types/codec';
 import { VALUE_SOURCE_KINDS_SUPPORTED } from '@/types/codec';
 import { updateHeaderField } from './codecEdit';
@@ -35,25 +35,29 @@ export function RoleLinkedForm({ schema, fieldIndex, field, raw, onEdit }: RoleL
 
   const fieldName = field.name || '未命名';
   return (
-    <Card size="small" title={`字段「${fieldName}」的 role 配置`} styles={{ body: { padding: 12 } }}>
+    <div className="field-inspector">
+      <div className="field-inspector-header">
+        <div>
+          <Typography.Text className="pce-bench-title">FIELD PROBE</Typography.Text>
+          <Typography.Text className="pce-bench-meta">{fieldName}</Typography.Text>
+        </div>
+        <Tag>{field.role}</Tag>
+      </div>
+
       {field.role === 'route' && (
-        <Typography.Text type="secondary">
-          该字段参与 routeKeyTemplate 占位（<code>{schema.routeKeyTemplate ?? ''}</code>）。模板编辑见下方「路由键模板」卡片。
+        <Typography.Text type="secondary" className="field-inspector-text">
+          这个字段参与路由键模板占位（<code>{schema.routeKeyTemplate ?? ''}</code>）。模板在下方 ROUTE KEY 区域编辑。
         </Typography.Text>
       )}
 
       {field.role === 'flags' && (
-        <FlagsEditor
-          bits={bits}
-          maxBit={maxBit}
-          onChange={(next) => patch({ bits: next })}
-        />
+        <FlagsEditor bits={bits} maxBit={maxBit} onChange={(next) => patch({ bits: next })} />
       )}
 
       {field.role === 'checksumOut' && (
         <Space direction="vertical" size={4}>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            from：填 <code>{'<step>.<output>'}</code>，指向 pipeline 某步 produces 的产物（见下方「管线」卡片）。
+          <Typography.Text type="secondary" className="field-inspector-text">
+            写入某个 pipeline step 的输出，格式 <code>{'<step>.<output>'}</code>。
           </Typography.Text>
           <input
             className="flet-input"
@@ -64,29 +68,24 @@ export function RoleLinkedForm({ schema, fieldIndex, field, raw, onEdit }: RoleL
         </Space>
       )}
 
-      {field.role === 'value' && (
-        <ValueSourceEditor
-          source={source}
-          onChange={(next) => patch({ source: next })}
-        />
-      )}
+      {field.role === 'value' && <ValueSourceEditor source={source} onChange={(next) => patch({ source: next })} />}
 
       {field.role === 'errorCode' && (
-        <Typography.Text type="secondary">
-          绑定后启用服务端错误码识别，配合错误码映射（errors.json）显示中文文案。
+        <Typography.Text type="secondary" className="field-inspector-text">
+          这个字段用于识别服务端错误码，并从共享错误码映射里显示中文文案。
         </Typography.Text>
       )}
 
       {field.role === 'length' && (
-        <Typography.Text type="secondary">
-          length 字段的字节范围由 frame 的 lengthIncludesHeader / lengthIncludesTrailer 控制（见上方帧布局参数）。
+        <Typography.Text type="secondary" className="field-inspector-text">
+          这个字段表示消息长度。计数是否包含 header / trailer 由上方 length 计数范围决定。
         </Typography.Text>
       )}
 
       {field.role === 'reserved' && (
-        <Typography.Text type="secondary">保留字段，无额外配置。</Typography.Text>
+        <Typography.Text type="secondary" className="field-inspector-text">保留字段，无额外配置。</Typography.Text>
       )}
-    </Card>
+    </div>
   );
 }
 

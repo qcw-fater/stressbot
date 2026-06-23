@@ -38,7 +38,13 @@ export function RouteKeyEditor({ raw, schema, onEdit }: RouteKeyEditorProps) {
   return (
     <Card
       size="small"
-      title="路由键模板"
+      className="pce-bench route-bench"
+      title={
+        <Space size={8} align="center">
+          <span className="pce-bench-title">ROUTE KEY</span>
+          <Typography.Text type="secondary" className="pce-bench-meta">模板与示例</Typography.Text>
+        </Space>
+      }
       styles={{ body: { padding: 12 } }}
     >
       <Space direction="vertical" size={8} style={{ width: '100%' }}>

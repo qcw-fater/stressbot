@@ -9,7 +9,7 @@
  */
 
 import { useState } from 'react';
-import { Space } from 'antd';
+import { Tag, Typography } from 'antd';
 import type { CodecSchema, Field } from '@/types/codec';
 import './codecEditor.css';
 import { FrameScalars } from './FrameScalars';
@@ -33,26 +33,53 @@ export function FrameLayoutEditor({ raw, schema, onEdit }: FrameLayoutEditorProp
       ? fields[selectedIndex]
       : undefined;
 
+  const headerSize = schema.frame?.headerSize ?? 0;
+  const trailerSize = schema.frame?.trailerSize ?? 0;
+
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    <section className="pce-bench frame-bench">
+      <div className="pce-bench-header">
+        <div>
+          <Typography.Text className="pce-bench-title">FRAME</Typography.Text>
+          <Typography.Text className="pce-bench-meta">
+            header {headerSize} bytes · trailer {trailerSize} bytes · {fields.length} fields
+          </Typography.Text>
+        </div>
+        {selectedField && <Tag className="frame-selected-tag">{selectedField.name || '未命名'}</Tag>}
+      </div>
+
       <FrameScalars raw={raw} schema={schema} onEdit={onEdit} />
       <ByteStrip schema={schema} selectedIndex={selectedIndex} onSelect={setSelectedIndex} />
-      <HeaderFieldTable
-        raw={raw}
-        schema={schema}
-        selectedIndex={selectedIndex}
-        onSelect={setSelectedIndex}
-        onEdit={onEdit}
-      />
-      {selectedField && selectedIndex !== null && (
-        <RoleLinkedForm
-          raw={raw}
-          schema={schema}
-          fieldIndex={selectedIndex}
-          field={selectedField}
-          onEdit={onEdit}
-        />
-      )}
-    </Space>
+
+      <div className="frame-edit-stack">
+        <div className="frame-table-pane">
+          <HeaderFieldTable
+            raw={raw}
+            schema={schema}
+            selectedIndex={selectedIndex}
+            onSelect={setSelectedIndex}
+            onEdit={onEdit}
+          />
+        </div>
+        <div className="frame-inspector-pane">
+          {selectedField && selectedIndex !== null ? (
+            <RoleLinkedForm
+              raw={raw}
+              schema={schema}
+              fieldIndex={selectedIndex}
+              field={selectedField}
+              onEdit={onEdit}
+            />
+          ) : (
+            <div className="frame-empty-inspector">
+              <Typography.Text className="pce-bench-title">FIELD PROBE</Typography.Text>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                从字节尺或表格选择一个字段，查看它的 role 配置。
+              </Typography.Text>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
