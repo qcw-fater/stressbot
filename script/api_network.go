@@ -129,22 +129,31 @@ func resolveDescribeError(ctx *Context, serverHint string, code uint64) string {
 	return ""
 }
 
-func rememberHeaderErr(ctx *Context, code uint64, service, routeKey string) {
-	if ctx == nil {
-		return
-	}
+func headerErrDetail(ctx *Context, protoService string, code uint64, service, routeKey string) string {
 	detail := "service=" + service + " route=" + routeKey
 	// DescribeError 经 CodecResolver（codec 无关，取该连接或主连接的 adapter 即可）。
 	// server 串按 service 推断：监听/请求路径下 service 即连接标识，proto 未知故双探测。
 	// 任一命中即取描述；未命中（codec 未映射）→ 描述降级空串，headerErr 错误码仍上抛。
-	desc := resolveDescribeError(ctx, "tcp:"+service, code)
-	if desc == "" {
-		desc = resolveDescribeError(ctx, "udp:"+service, code)
+	desc := ""
+	if protoService != "" {
+		desc = resolveDescribeError(ctx, protoService, code)
+	} else {
+		desc = resolveDescribeError(ctx, "tcp:"+service, code)
+		if desc == "" {
+			desc = resolveDescribeError(ctx, "udp:"+service, code)
+		}
 	}
 	if desc != "" {
 		detail = desc + ": " + detail
 	}
-	ctx.SetLastActionError(engine.NewServerError(code, detail))
+	return detail
+}
+
+func rememberHeaderErr(ctx *Context, code uint64, service, routeKey string) {
+	if ctx == nil {
+		return
+	}
+	ctx.SetLastActionError(engine.NewServerError(code, headerErrDetail(ctx, "", code, service, routeKey)))
 }
 
 // resolveRequestTimeoutSec 决定 Lua tcp_request / udp_request 的 timeout（秒）。
@@ -324,7 +333,6 @@ func networkConnectUDP(L *lua.LState) int {
 
 // networkCloseTCP 关闭 TCP 连接。
 // 签名：network.close_tcp(service)
-//
 func networkCloseTCP(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -337,7 +345,6 @@ func networkCloseTCP(L *lua.LState) int {
 
 // networkCloseUDP 关闭 UDP 连接。
 // 签名：network.close_udp(service)
-//
 func networkCloseUDP(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -446,6 +453,11 @@ func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
 	}
 	routeKey := tcpAdp.ExpectedRouteKey(luaValueToRoute(responseRoute))
+	if routeKey == "" {
+		detail := "service=" + service + " routeKey 解析失败（codec 未映射或响应路由无效）"
+		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
+		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
+	}
 	pktLen := len(packet)
 
 	exchange, reqErr := ctx.NetSender.TCPRequest(service, packet, routeKey,
@@ -467,10 +479,7 @@ func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 		return pushResult(L, errTableFromActionErr(L, reqErr), lua.LNil)
 	}
 	if exchange.HeaderErr != 0 {
-		detail := "service=" + service + " route=" + routeKey
-		if desc := resolveDescribeError(ctx, "tcp:"+service, exchange.HeaderErr); desc != "" {
-			detail = desc + ": " + detail
-		}
+		detail := headerErrDetail(ctx, "tcp:"+service, exchange.HeaderErr, service, routeKey)
 		rememberHeaderErr(ctx, exchange.HeaderErr, service, routeKey)
 		return pushResult(L, newErrTable(L, int(exchange.HeaderErr), detail), lua.LString(string(respBody)))
 	}
@@ -567,6 +576,11 @@ func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
 	}
 	routeKey := udpAdp.ExpectedRouteKey(luaValueToRoute(responseRoute))
+	if routeKey == "" {
+		detail := "service=" + service + " routeKey 解析失败（codec 未映射或响应路由无效）"
+		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
+		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
+	}
 	udpKey := ctx.NetSender.GetUDPSecretKey(service)
 	var encodeStart time.Time
 	if ctx.TimingLevel >= engine.TimingLevelCodec {
@@ -607,10 +621,7 @@ func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 		return pushResult(L, errTableFromActionErr(L, reqErr), lua.LNil)
 	}
 	if exchange.HeaderErr != 0 {
-		detail := "service=" + service + " route=" + routeKey
-		if desc := resolveDescribeError(ctx, "udp:"+service, exchange.HeaderErr); desc != "" {
-			detail = desc + ": " + detail
-		}
+		detail := headerErrDetail(ctx, "udp:"+service, exchange.HeaderErr, service, routeKey)
 		rememberHeaderErr(ctx, exchange.HeaderErr, service, routeKey)
 		return pushResult(L, newErrTable(L, int(exchange.HeaderErr), detail), lua.LString(string(respBody)))
 	}

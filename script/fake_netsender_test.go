@@ -24,6 +24,8 @@ type fakeNetSender struct {
 	tcpReqErr      error
 	udpReqExchange *engine.NetExchange
 	udpReqErr      error
+	tcpReqCalls    int
+	udpReqCalls    int
 	tcpSendErr     error
 	udpSendErr     error
 	connectErr     error
@@ -39,10 +41,12 @@ func (f *fakeNetSender) TCPSend(string, []byte) (int, error) { return 0, f.tcpSe
 func (f *fakeNetSender) UDPSend(string, []byte) (int, error) { return 0, f.udpSendErr }
 
 func (f *fakeNetSender) TCPRequest(string, []byte, string, ...time.Duration) (*engine.NetExchange, error) {
+	f.tcpReqCalls++
 	return f.tcpReqExchange, f.tcpReqErr
 }
 
 func (f *fakeNetSender) UDPRequest(string, []byte, string, ...time.Duration) (*engine.NetExchange, error) {
+	f.udpReqCalls++
 	return f.udpReqExchange, f.udpReqErr
 }
 
