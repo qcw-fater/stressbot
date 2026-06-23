@@ -46,6 +46,103 @@ func (a *requestTestAdapter) Close() {}
 
 func (a *requestTestAdapter) DescribeError(uint64) string { return a.desc }
 
+func TestTCPConnect_SuccessReturnsNilAndRecordsAddress(t *testing.T) {
+	ns := &fakeNetSender{}
+	L := newTestState(t, context.Background(), ns, nil)
+	defer L.Close()
+	if err := L.DoString(`
+		local network = require("network")
+		e = network.connect_tcp("logic", "127.0.0.1:9001")
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+	if got := L.GetGlobal("e"); got != lua.LNil {
+		t.Fatalf("成功 err = %T(%v), want nil", got, got)
+	}
+	if got := ns.connectTCPCalls; got != 1 {
+		t.Fatalf("ConnectTCP calls = %d, want 1", got)
+	}
+	if got := ns.lastConnectTCPService; got != "logic" {
+		t.Fatalf("ConnectTCP service = %q, want logic", got)
+	}
+	if got := ns.lastConnectTCPAddress; got != "127.0.0.1:9001" {
+		t.Fatalf("ConnectTCP address = %q, want 127.0.0.1:9001", got)
+	}
+}
+
+func TestUDPConnect_SuccessReturnsNilAndRecordsAddress(t *testing.T) {
+	ns := &fakeNetSender{}
+	L := newTestState(t, context.Background(), ns, nil)
+	defer L.Close()
+	if err := L.DoString(`
+		local network = require("network")
+		e = network.connect_udp("battle", "127.0.0.1:9002")
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+	if got := L.GetGlobal("e"); got != lua.LNil {
+		t.Fatalf("成功 err = %T(%v), want nil", got, got)
+	}
+	if got := ns.connectUDPCalls; got != 1 {
+		t.Fatalf("ConnectUDP calls = %d, want 1", got)
+	}
+	if got := ns.lastConnectUDPService; got != "battle" {
+		t.Fatalf("ConnectUDP service = %q, want battle", got)
+	}
+	if got := ns.lastConnectUDPAddress; got != "127.0.0.1:9002" {
+		t.Fatalf("ConnectUDP address = %q, want 127.0.0.1:9002", got)
+	}
+}
+
+func TestTCPConnect_ErrorReturnsErrTable(t *testing.T) {
+	ns := &fakeNetSender{connectErr: engine.NewActionError(errcode.ErrConnClosed, "connect 失败 detail")}
+	L := newTestState(t, context.Background(), ns, nil)
+	defer L.Close()
+	if err := L.DoString(`
+		local network = require("network")
+		e = network.connect_tcp("logic", "127.0.0.1:9001")
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+	assertRequestErr(t, L, int(errcode.ErrConnClosed), "connect 失败 detail")
+}
+
+func TestUDPConnect_CanceledReturnsErrTable(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ns := &fakeNetSender{}
+	L := newTestState(t, ctx, ns, nil)
+	defer L.Close()
+	if err := L.DoString(`
+		local network = require("network")
+		e = network.connect_udp("battle", "127.0.0.1:9002")
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+	assertRequestErr(t, L, int(errcode.ErrActionCanceled), "service=battle address=127.0.0.1:9002")
+	if got := ns.connectUDPCalls; got != 0 {
+		t.Fatalf("ctx 已取消时不应调用 ConnectUDP，实际 %d", got)
+	}
+}
+
+func TestTCPConnect_ReturnsSingleValue(t *testing.T) {
+	ns := &fakeNetSender{}
+	L := newTestState(t, context.Background(), ns, nil)
+	defer L.Close()
+	if err := L.DoString(`
+		local network = require("network")
+		e, extra = network.connect_tcp("logic", "127.0.0.1:9001")
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+	if got := L.GetGlobal("e"); got != lua.LNil {
+		t.Fatalf("成功 err = %T(%v), want nil", got, got)
+	}
+	if got := L.GetGlobal("extra"); got != lua.LNil {
+		t.Fatalf("extra = %T(%v), want nil", got, got)
+	}
+}
+
 func TestTCPSend_EncodeFailure_ReturnsErrTable(t *testing.T) {
 	// resolver nil → buildPacket 命中 encode 失败分支，send API 应返回 err table。
 	ns := &fakeNetSender{}

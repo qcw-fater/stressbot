@@ -268,8 +268,8 @@ func serializeMsg(ctx *Context, msg proto.Message) ([]byte, error) {
 // networkConnectTCP 建立 TCP 连接。
 // 签名：network.connect_tcp(service, address)
 //
-// 返回：code(number)
-// code=0 成功 / errcode 错误码（6=取消 / 2=连接关闭）。
+// 返回：err(table|nil)
+// err=nil 成功；失败时 err={code, detail}。
 func networkConnectTCP(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -279,30 +279,25 @@ func networkConnectTCP(L *lua.LState) int {
 	service := L.CheckString(1)
 	address := L.CheckString(2)
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" address="+address)
-		L.Push(lua.LNumber(errcode.ErrActionCanceled))
-		return 1
+		return pushErr(L, int(errcode.ErrActionCanceled), "service="+service+" address="+address)
 	}
 	err := ctx.NetSender.ConnectTCP(service, address)
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" address="+address)
-		L.Push(lua.LNumber(errcode.ErrActionCanceled))
-		return 1
+		return pushErr(L, int(errcode.ErrActionCanceled), "service="+service+" address="+address)
 	}
 	if err != nil {
-		rememberActionErr(ctx, err)
-		L.Push(lua.LNumber(errToCode(err)))
-	} else {
-		L.Push(lua.LNumber(0))
+		L.Push(errTableFromActionErr(L, err))
+		return 1
 	}
+	L.Push(lua.LNil)
 	return 1
 }
 
 // networkConnectUDP 建立 UDP 连接。
 // 签名：network.connect_udp(service, address)
 //
-// 返回：code(number)
-// code=0 成功 / errcode 错误码（6=取消 / 2=连接关闭）。
+// 返回：err(table|nil)
+// err=nil 成功；失败时 err={code, detail}。
 func networkConnectUDP(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -312,22 +307,17 @@ func networkConnectUDP(L *lua.LState) int {
 	service := L.CheckString(1)
 	address := L.CheckString(2)
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" address="+address)
-		L.Push(lua.LNumber(errcode.ErrActionCanceled))
-		return 1
+		return pushErr(L, int(errcode.ErrActionCanceled), "service="+service+" address="+address)
 	}
 	err := ctx.NetSender.ConnectUDP(service, address)
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
-		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, "service="+service+" address="+address)
-		L.Push(lua.LNumber(errcode.ErrActionCanceled))
-		return 1
+		return pushErr(L, int(errcode.ErrActionCanceled), "service="+service+" address="+address)
 	}
 	if err != nil {
-		rememberActionErr(ctx, err)
-		L.Push(lua.LNumber(errToCode(err)))
-	} else {
-		L.Push(lua.LNumber(0))
+		L.Push(errTableFromActionErr(L, err))
+		return 1
 	}
+	L.Push(lua.LNil)
 	return 1
 }
 

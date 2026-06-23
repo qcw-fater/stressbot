@@ -31,30 +31,36 @@ func (r *fakeResolver) Resolve(server string) adapter.Adapter {
 }
 
 type fakeNetSender struct {
-	tcpReqExchange *engine.NetExchange
-	tcpReqErr      error
-	udpReqExchange *engine.NetExchange
-	udpReqErr      error
-	tcpReqCalls    int
-	udpReqCalls    int
-	tcpSendErr     error
-	udpSendErr     error
-	tcpSendCalls   int
-	udpSendCalls   int
-	lastTCPService string
-	lastUDPService string
-	lastTCPPacket  []byte
-	lastUDPPacket  []byte
-	tcpSendBytes   int
-	udpSendBytes   int
-	connectErr     error
-	httpExchange   *engine.HTTPExchange
-	httpErr        error
-	listenResp     *engine.NetExchange
-	tcpListenCalls int
-	udpListenCalls int
-	tcpKey         []byte
-	udpKey         []byte
+	tcpReqExchange        *engine.NetExchange
+	tcpReqErr             error
+	udpReqExchange        *engine.NetExchange
+	udpReqErr             error
+	tcpReqCalls           int
+	udpReqCalls           int
+	tcpSendErr            error
+	udpSendErr            error
+	tcpSendCalls          int
+	udpSendCalls          int
+	lastTCPService        string
+	lastUDPService        string
+	lastTCPPacket         []byte
+	lastUDPPacket         []byte
+	tcpSendBytes          int
+	udpSendBytes          int
+	connectErr            error
+	connectTCPCalls       int
+	connectUDPCalls       int
+	lastConnectTCPService string
+	lastConnectTCPAddress string
+	lastConnectUDPService string
+	lastConnectUDPAddress string
+	httpExchange          *engine.HTTPExchange
+	httpErr               error
+	listenResp            *engine.NetExchange
+	tcpListenCalls        int
+	udpListenCalls        int
+	tcpKey                []byte
+	udpKey                []byte
 }
 
 func (f *fakeNetSender) TCPSend(service string, packet []byte) (int, error) {
@@ -87,9 +93,19 @@ func (f *fakeNetSender) UDPRequest(string, []byte, string, ...time.Duration) (*e
 	return f.udpReqExchange, f.udpReqErr
 }
 
-func (f *fakeNetSender) ConnectTCP(string, string) error { return f.connectErr }
+func (f *fakeNetSender) ConnectTCP(service, address string) error {
+	f.connectTCPCalls++
+	f.lastConnectTCPService = service
+	f.lastConnectTCPAddress = address
+	return f.connectErr
+}
 
-func (f *fakeNetSender) ConnectUDP(string, string) error { return f.connectErr }
+func (f *fakeNetSender) ConnectUDP(service, address string) error {
+	f.connectUDPCalls++
+	f.lastConnectUDPService = service
+	f.lastConnectUDPAddress = address
+	return f.connectErr
+}
 
 func (f *fakeNetSender) HTTPRequest(string, string, string, []byte) (*engine.HTTPExchange, error) {
 	return f.httpExchange, f.httpErr
