@@ -456,6 +456,132 @@ func TestTCPListen_RawBodySuccess_ReturnsNilAndString(t *testing.T) {
 	}
 }
 
+func TestTryTCPListen_EmptyQueueReturnsNilNil(t *testing.T) {
+	ns := &fakeNetSender{}
+	L := newTestState(t, context.Background(), ns, &fakeResolver{adp: &requestTestAdapter{expectedRouteKey: "1:1"}})
+	defer L.Close()
+
+	if err := L.DoString(`
+		local network = require("network")
+		e, d = network.try_tcp_listen("logic", {cmd=1,act=1})
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+
+	if got := L.GetGlobal("e"); got != lua.LNil {
+		t.Fatalf("队列空 err = %T(%v), want nil", got, got)
+	}
+	if got := L.GetGlobal("d"); got != lua.LNil {
+		t.Fatalf("队列空 data = %T(%v), want nil", got, got)
+	}
+	if got := ns.tcpListenCalls; got != 1 {
+		t.Fatalf("GetTCPListenResp calls = %d, want 1", got)
+	}
+}
+
+func TestTryUDPListen_EmptyQueueReturnsNilNil(t *testing.T) {
+	ns := &fakeNetSender{}
+	L := newTestState(t, context.Background(), ns, &fakeResolver{adp: &requestTestAdapter{expectedRouteKey: "2:3"}})
+	defer L.Close()
+
+	if err := L.DoString(`
+		local network = require("network")
+		e, d = network.try_udp_listen("battle", {cmd=2,act=3})
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+
+	if got := L.GetGlobal("e"); got != lua.LNil {
+		t.Fatalf("队列空 err = %T(%v), want nil", got, got)
+	}
+	if got := L.GetGlobal("d"); got != lua.LNil {
+		t.Fatalf("队列空 data = %T(%v), want nil", got, got)
+	}
+	if got := ns.udpListenCalls; got != 1 {
+		t.Fatalf("GetUDPListenResp calls = %d, want 1", got)
+	}
+}
+
+func TestTryTCPListen_HeaderErrReturnsErrTableAndBody(t *testing.T) {
+	ns := &fakeNetSender{listenResp: &engine.NetExchange{HeaderErr: 101, Body: []byte("try-body")}}
+	L := newTestState(t, context.Background(), ns, &fakeResolver{adp: &requestTestAdapter{expectedRouteKey: "1:1", desc: "角色不存在"}})
+	defer L.Close()
+
+	if err := L.DoString(`
+		local network = require("network")
+		e, d = network.try_tcp_listen("logic", {cmd=1,act=1})
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+
+	assertRequestErr(t, L, 101, "角色不存在: service=logic route=1:1")
+	if got := lua.LVAsString(L.GetGlobal("d")); got != "try-body" {
+		t.Fatalf("data = %q, want try-body", got)
+	}
+}
+
+func TestTryUDPListen_RawBodySuccessReturnsNilAndString(t *testing.T) {
+	ns := &fakeNetSender{listenResp: &engine.NetExchange{Body: []byte("udp-try-body")}}
+	L := newTestState(t, context.Background(), ns, &fakeResolver{adp: &requestTestAdapter{expectedRouteKey: "2:3"}})
+	defer L.Close()
+
+	if err := L.DoString(`
+		local network = require("network")
+		e, d = network.try_udp_listen("battle", {cmd=2,act=3})
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+
+	if got := L.GetGlobal("e"); got != lua.LNil {
+		t.Fatalf("成功 err = %T(%v), want nil", got, got)
+	}
+	if got := lua.LVAsString(L.GetGlobal("d")); got != "udp-try-body" {
+		t.Fatalf("data = %q, want udp-try-body", got)
+	}
+}
+
+func TestTryTCPListen_EncodeFailureReturnsErrTable(t *testing.T) {
+	ns := &fakeNetSender{}
+	L := newTestState(t, context.Background(), ns, &fakeResolver{})
+	defer L.Close()
+
+	if err := L.DoString(`
+		local network = require("network")
+		e, d = network.try_tcp_listen("logic", {cmd=1,act=1})
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+
+	assertRequestErr(t, L, int(errcode.ErrEncodeFailed), "resolver.Resolve(tcp:logic) nil")
+	if got := L.GetGlobal("d"); got != lua.LNil {
+		t.Fatalf("编码失败 data = %T(%v), want nil", got, got)
+	}
+	if got := ns.tcpListenCalls; got != 0 {
+		t.Fatalf("GetTCPListenResp calls = %d, want 0", got)
+	}
+}
+
+func TestTryTCPListen_EmptyRouteKeyReturnsErrTableWithoutPolling(t *testing.T) {
+	ns := &fakeNetSender{}
+	L := newTestState(t, context.Background(), ns, &fakeResolver{adp: &requestTestAdapter{}})
+	defer L.Close()
+
+	if err := L.DoString(`
+		local network = require("network")
+		e, d = network.try_tcp_listen("logic", {cmd=1,act=1})
+	`); err != nil {
+		t.Fatalf("lua error: %v", err)
+	}
+
+	assertRequestErr(t, L, int(errcode.ErrEncodeFailed), "service=logic routeKey 解析失败")
+	if got := L.GetGlobal("d"); got != lua.LNil {
+		t.Fatalf("routeKey 失败 data = %T(%v), want nil", got, got)
+	}
+	if got := ns.tcpListenCalls; got != 0 {
+		t.Fatalf("GetTCPListenResp calls = %d, want 0", got)
+	}
+}
+
 func assertRequestErr(t *testing.T, L *lua.LState, wantCode int, wantDetailContains string) {
 	t.Helper()
 	errLV := L.GetGlobal("e")

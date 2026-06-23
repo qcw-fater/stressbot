@@ -32,8 +32,8 @@ import (
 //	network.udp_send(service, route, body)
 //	network.tcp_listen(service, route [, s2c [, timeout [, poll]]])
 //	network.udp_listen(service, route [, s2c [, timeout [, poll]]])
-//	network.try_tcp_listen(service, route) → code, raw_body  (非阻塞单次 pop)
-//	network.try_udp_listen(service, route) → code, raw_body  (非阻塞单次 pop)
+//	network.try_tcp_listen(service, route) → err, raw_body  (非阻塞单次 pop)
+//	network.try_udp_listen(service, route) → err, raw_body  (非阻塞单次 pop)
 //	network.set_tcp_secret_key(service, key)
 //	network.set_udp_secret_key(service, key)
 //	network.get_tcp_secret_key(service)
@@ -977,10 +977,10 @@ func networkListen(L *lua.LState, protocol string) int {
 // networkTryTCPListen 非阻塞获取最近一条 TCP 监听消息（不解析 proto，返回原始 body）。
 // 签名：network.try_tcp_listen(service, route)
 //
-// 返回：code(number), data(string|nil)
-//   - code=0：取到一条消息，data 为原始 body 字符串（**不解析 proto**，需要解析请用阻塞版 tcp_listen）。
-//   - code=31（ErrListenTimeout）：队列空、无新消息，data=nil。
-//   - 其他非零：服务端 HeaderErr，data 为原始 body 字符串。
+// 返回：err(table|nil), data(string|nil)
+//   - err=nil, data=nil：队列空、无新消息。
+//   - err=nil, data=string：取到一条消息，data 为原始 body 字符串（**不解析 proto**，需要解析请用阻塞版 tcp_listen）。
+//   - err=table：编码/routeKey 解析失败或服务端 HeaderErr；HeaderErr 时 data 为原始 body 字符串。
 //
 // 与阻塞版 tcp_listen 的差异：**单次非阻塞 pop**，不轮询、不 sleep。适用于高频 sync loop 「保最新」消费场景
 // （如 battleAck 追踪：队列容量 1，每轮 pop 最新 ack 写 state）。
@@ -997,7 +997,7 @@ func networkTryUDPListen(L *lua.LState) int { return networkTryListen(L, "udp") 
 // 设计要点：
 //   - 单次非阻塞 pop（GetTCP/UDPListenResp 内部走 per-queue 锁），无阻塞等待。
 //   - 不解析 proto：try_* 是「原始 drain」原语，需 proto 解析的消费请用阻塞版 listen。
-//   - queue 空时返回 ErrListenTimeout（code=31），data=nil；与阻塞超时同码便于脚本统一处理。
+//   - queue 空是成功无消息，返回 (nil, nil)，不记 LastActionError。
 //   - 接收 WireBytes 仍由 Context 累计（与 tcp_listen 一致）。
 func networkTryListen(L *lua.LState, protocol string) int {
 	ctx := GetContext(L)
@@ -1012,13 +1012,17 @@ func networkTryListen(L *lua.LState, protocol string) int {
 	// 但 routeKey 计算依赖 codec，缺 codec 必须暴露配置错误而非静默返回 timeout）。
 	adp := ctx.Resolver.Resolve(protocol + ":" + service)
 	if adp == nil {
-		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, "service="+service+" codec 未映射（resolver.Resolve("+protocol+":"+service+") nil）")
-		L.Push(lua.LNumber(errcode.ErrEncodeFailed))
-		L.Push(lua.LNil)
-		return 2
+		detail := "service=" + service + " codec 未映射（resolver.Resolve(" + protocol + ":" + service + ") nil）"
+		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
+		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
 	}
 	route := luaValueToRoute(L.Get(2))
 	routeKey := adp.ExpectedRouteKey(route)
+	if routeKey == "" {
+		detail := "service=" + service + " routeKey 解析失败（codec 未映射或监听路由无效）"
+		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
+		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
+	}
 
 	var exchange *engine.NetExchange
 	if protocol == "tcp" {
@@ -1028,25 +1032,20 @@ func networkTryListen(L *lua.LState, protocol string) int {
 	}
 
 	if exchange == nil {
-		// 队列空：返回超时码（非错误路径，不记 LastActionError，避免污染失败统计）。
-		L.Push(lua.LNumber(errcode.ErrListenTimeout))
-		L.Push(lua.LNil)
-		return 2
+		// 队列空：成功无消息（非错误路径，不记 LastActionError，避免污染失败统计）。
+		return pushResult(L, lua.LNil, lua.LNil)
 	}
 
 	ctx.recordBytes(0, exchange.RecvWireBytes)
 	respBody := exchange.Body
 
 	if exchange.HeaderErr != 0 {
+		detail := headerErrDetail(ctx, protocol+":"+service, exchange.HeaderErr, service, routeKey)
 		rememberHeaderErr(ctx, exchange.HeaderErr, service, routeKey)
-		L.Push(lua.LNumber(exchange.HeaderErr))
-		L.Push(lua.LString(string(respBody)))
-		return 2
+		return pushResult(L, newErrTable(L, int(exchange.HeaderErr), detail), lua.LString(string(respBody)))
 	}
 
-	L.Push(lua.LNumber(0))
-	L.Push(lua.LString(string(respBody)))
-	return 2
+	return pushResult(L, lua.LNil, lua.LString(string(respBody)))
 }
 
 // ---------------------------------------------------------------------------
