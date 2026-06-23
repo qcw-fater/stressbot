@@ -120,13 +120,13 @@ describe('validateFlow', () => {
     expect(r.warnings.find((e) => e.code === 'LISTEN_ORPHAN')).toBeTruthy();
   });
 
-  it('LISTEN_SCRIPT_DISABLED：listen 配置 script（即使为空）即报错（T2 后端 fail-loud）', () => {
+  it('LISTEN_LUA_NO_SCRIPT：listen 为 lua 模式但缺少 script', () => {
     const r = validateFlow(baseFlow({
       nodes: { main: { type: 'action', action: 'A1', listenRefs: [{ server: 'tcp:x', listen: 'cb1', route: {} }] } },
       actions: { A1: { pattern: 'tcpSend', service: 'x', route: {}, c2sProto: 'X.Foo' } },
       listens: { cb1: { script: '' } },
     }));
-    expect(r.errors.find((e) => e.code === 'LISTEN_SCRIPT_DISABLED')).toBeTruthy();
+    expect(r.errors.find((e) => e.code === 'LISTEN_LUA_NO_SCRIPT')).toBeTruthy();
   });
 
   // ── Binding 级 ──
@@ -576,14 +576,14 @@ describe('validateFlow', () => {
     expect(r.errors.find((e) => e.code === 'LISTEN_QUEUE_INVALID')).toBeFalsy();
   });
 
-  // ── ListenDef.script 已下线 ──
+  // ── ListenDef.script ──
 
-  it('LISTEN_SCRIPT_DISABLED：listen 配置 script 字段报错', () => {
+  it('listen 配置非空 script 字段合法', () => {
     const r = validateFlow(baseFlow({
       nodes: { main: { type: 'action', action: 'A1', listenRefs: [{ server: 'tcp:x', listen: 'cb1', route: {} }] } },
       actions: { A1: { pattern: 'tcpSend', service: 'x', route: {}, c2sProto: 'X.Foo' } },
       listens: { cb1: { script: 'foo.lua' } },
     }));
-    expect(r.errors.find((e) => e.code === 'LISTEN_SCRIPT_DISABLED')).toBeTruthy();
+    expect(r.errors.find((e) => e.code === 'LISTEN_LUA_NO_SCRIPT')).toBeFalsy();
   });
 });

@@ -328,13 +328,10 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
   // R11–R13：listens 校验 + ref graph 校验
   const graph = buildRefsGraph(flow);
   for (const [name, cb] of Object.entries(callbacks)) {
-    // ListenDef.script 已下线（T2 后端 fail-loud）。
-    // 类型保留 script? 仅用于旧 flow.json round-trip；存在该字段即报错，
-    // 提示用户改用 silent / declarative。不静默兜底。
-    if (cb.script !== undefined) {
+    if (cb.script !== undefined && !cb.script?.trim()) {
       issues.push({
-        severity: 'error', code: 'LISTEN_SCRIPT_DISABLED',
-        message: `listen "${name}" 的 script 字段已下线，请改用 s2cProto+store（declarative）或 silent 空对象`,
+        severity: 'error', code: 'LISTEN_LUA_NO_SCRIPT',
+        message: `listen "${name}" 是 lua 模式但缺少 script`,
         location: { kind: 'listen', id: name },
       });
     }

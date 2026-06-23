@@ -4,12 +4,7 @@
  * 一个 listen 在引擎里有三种形态：
  *   - silent       : `{}`         空对象，收到推送后丢弃
  *   - declarative  : `{ s2cProto, store }`  解析 + 写 state
- *   - lua          : `{ script }` （可选 s2cProto）  执行脚本 —— **已下线**
- *
- * ⚠️ `script` 字段在 T2 后端已改为 fail-loud：配置即报错。
- * 此处保留 `script?` 类型仅为旧 flow.json round-trip（读入/导出不丢字段），
- * 编辑器不再提供该形态入口（classifyListen 的 'lua' 分支在 UI 不可达），
- * 校验会对存在的 script 字段报 LISTEN_SCRIPT_DISABLED。
+ *   - lua          : `{ script }` （可选 s2cProto）  执行脚本
  *
  * 需要严格区分：
  *   - ListenRef.listen = null            : 不调用 dispatcher

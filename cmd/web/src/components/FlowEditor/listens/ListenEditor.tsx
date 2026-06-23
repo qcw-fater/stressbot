@@ -19,6 +19,7 @@ import { useFlowStore } from '../store/flowStore';
 import { useRuntimeStore } from '@/services/runtimeStore';
 import { ProtoBrowser } from '../proto/ProtoBrowser';
 import { StoreTable } from '../editors/ActionEditor/StoreTable';
+import { LuaScriptField } from '../editors/shared/LuaScriptField';
 import { BackrefList } from './BackrefList';
 import { SaveTemplateButton } from '../library/SaveTemplateButton';
 import { listenKindTagColor } from './listenKindStyle';
@@ -143,10 +144,8 @@ export function ListenEditor() {
     >
       <Space style={{ width: '100%', marginBottom: 12, justifyContent: 'space-between' }}>
         <Space.Compact style={{ width: 360 }}>
-        <Space.Compact style={{ width: 360 }}>
           <span style={{ display: 'flex', alignItems: 'center', padding: '0 11px', background: 'var(--container-bg)', border: '1px solid var(--border-color)', borderRadius: '6px 0 0 6px', fontSize: 14, whiteSpace: 'nowrap' }}>名称</span>
           <Input style={{ flex: 1 }} value={draftName} onChange={(e) => setDraftName(e.target.value)} />
-        </Space.Compact>
           <Button onClick={onApplyRename} disabled={draftName === listenName || !draftName}>
             重命名
           </Button>
@@ -195,30 +194,19 @@ export function ListenEditor() {
               </>
             ),
           },
+          {
+            key: 'lua',
+            label: 'lua',
+            children: (
+              <LuaScriptField
+                mode="listen"
+                value={listen.script}
+                onChange={(s) => updateListen(listenName, { script: s })}
+              />
+            ),
+          },
         ]}
       />
-
-      {/* script 字段已下线（T2 后端 fail-loud）。
-          类型保留 script? 仅用于旧 flow.json round-trip；编辑器不再提供「执行脚本」形态入口。
-          若旧数据读入了 script，在此显式提示并给出「移除 script」按钮（不静默兜底）。 */}
-      {listen.script !== undefined && (
-        <Alert
-          type="error"
-          showIcon
-          style={{ marginTop: 12 }}
-          message="监听脚本回调已下线"
-          description={
-            <Space>
-              <span>
-                该 listen 含 <code>script</code> 字段，运行时会 fail-loud。请改用 silent（空对象）或 declarative（s2cProto + store）。
-              </span>
-              <Button size="small" danger onClick={() => replaceListen(listenName, {})}>
-                移除 script
-              </Button>
-            </Space>
-          }
-        />
-      )}
 
       <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--divider-bg)' }}>
         <BackrefList listenName={listenName} />
