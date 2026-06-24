@@ -109,9 +109,9 @@ export function ByteStrip({ schema, selectedIndex, onSelect }: ByteStripProps) {
   return (
     <div className="byte-bench-ruler">
       <div className="byte-bench-caption">
-        <Typography.Text className="pce-bench-title">BYTE RULER</Typography.Text>
+        <Typography.Text className="pce-bench-title">字节尺</Typography.Text>
         <Typography.Text type="secondary" className="pce-bench-meta">
-          click span to select · red hatch = overlap / out of bounds
+          点击色块选中字段 · 红色斜纹 = 越界或重叠
         </Typography.Text>
       </div>
 
