@@ -52,6 +52,28 @@ interface StashedDraft {
   savedAt: number;
 }
 
+/**
+ * 进入运行态前：stash 当前编辑草稿到 LocalStorage，再用实际启动/运行的 flow 替换画布。
+ * 主动启动（startTask）与挂载运行中任务（attachToActive）共用，保证草稿保存与画布替换一致。
+ */
+export function stashAndReplaceCanvas(flow: FlowJson, layout?: FlowLayout) {
+  const flowState = useFlowStore.getState();
+  const hasLocal = Object.keys(flowState.nodes).length > 0;
+  if (hasLocal) {
+    try {
+      const stash: StashedDraft = {
+        flow: flowState.toTaskFlow(),
+        layout: flowState.layout,
+        savedAt: Date.now(),
+      };
+      localStorage.setItem(DRAFT_STASH_KEY, JSON.stringify(stash));
+    } catch {
+      // localStorage 满 / 隐私模式 → 静默跳过
+    }
+  }
+  flowState.loadFromTaskFlow(flow, layout);
+}
+
 export interface StartTaskOptions {
   /** 任务名 */
   name: string;
@@ -61,6 +83,12 @@ export interface StartTaskOptions {
   robotConfig: RobotConfig;
   /** 自动停止时间（RFC3339），可选 */
   deadline?: string | null;
+  /** 实际启动的流程（当前画布或已保存流程），由调用方显式传入 */
+  flow: FlowJson;
+  /** flow 对应的布局，用于运行态画布还原（可选） */
+  flowLayout?: FlowLayout;
+  /** 来源流程模板 ID，仅用于历史溯源（可选） */
+  flowTemplateId?: string;
 }
 
 /**
@@ -78,16 +106,10 @@ export interface StartTaskOptions {
  * @returns 创建并启动的任务 ID
  */
 export async function startTask(opts: StartTaskOptions): Promise<string> {
-  const flowState = useFlowStore.getState();
-  const flowJson = flowState.toTaskFlow();
+  const flowJson = opts.flow;
 
-  // 1. 业务校验
-  const report = validateFlow({
-    nodes: flowState.nodes,
-    actions: flowState.actions,
-    listens: flowState.listens,
-    defaultDelayMs: flowState.defaultDelayMs,
-  });
+  // 1. 业务校验（FlowJson 与 TaskFlow 同构，可直接校验）
+  const report = validateFlow(flowJson);
   if (report.errors.length > 0) {
     throw new ApiError(
       {
@@ -222,6 +244,7 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
   fd.append('totalBots', String(opts.totalBots));
   fd.append('robotConfig', JSON.stringify(opts.robotConfig));
   if (opts.deadline) fd.append('deadline', opts.deadline);
+  if (opts.flowTemplateId) fd.append('flowTemplateId', opts.flowTemplateId);
   fd.append('flow.json', new Blob([JSON.stringify(flowJson, null, 2)], { type: 'application/json' }), 'flow.json');
   for (const f of protos) {
     fd.append(`proto/${f.name}`, new Blob([f.content], { type: 'text/plain' }), f.name);
@@ -247,7 +270,9 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
   });
   await tasksApi.startTask(created.id);
 
-  // 6. 同步运行态。clearMonitorData 已经在校验后立刻调过了（开头），这里不必再清。
+  // 6. 同步运行态：用实际启动的 flow 替换画布（stash 当前草稿），再切 running。
+  //    clearMonitorData 已经在校验后立刻调过了（开头），这里不必再清。
+  stashAndReplaceCanvas(opts.flow, opts.flowLayout);
   const runtime = useRuntimeStore.getState();
   runtime.setOwnedTaskId(created.id);
   runtime.setMode('running');
@@ -297,22 +322,6 @@ export async function attachToActive(taskId: string): Promise<void> {
   const detail: TaskDetail = await tasksApi.getTask(taskId);
   const runtime = useRuntimeStore.getState();
 
-  // stash 当前编辑稿到 LocalStorage（仅当前面有内容时）
-  const flowState = useFlowStore.getState();
-  const hasLocal = Object.keys(flowState.nodes).length > 0;
-  if (hasLocal) {
-    try {
-      const stash: StashedDraft = {
-        flow: flowState.toTaskFlow(),
-        layout: flowState.layout,
-        savedAt: Date.now(),
-      };
-      localStorage.setItem(DRAFT_STASH_KEY, JSON.stringify(stash));
-    } catch {
-      // localStorage 满 / 隐私模式 → 静默跳过
-    }
-  }
-
   // 拉远端 flow.json
   let remoteFlow: FlowJson | null = null;
   try {
@@ -321,8 +330,9 @@ export async function attachToActive(taskId: string): Promise<void> {
     // 不阻塞：detail 已成功，画布保持本地稿
   }
 
+  // 远端 flow 拉取成功才 stash 草稿 + 替换画布；失败时画布保持本地稿（草稿未丢失，无需 stash）。
   if (remoteFlow) {
-    flowState.loadFromTaskFlow(remoteFlow);
+    stashAndReplaceCanvas(remoteFlow);
     // attach 到远端任务时也尝试同步脚本到 IDB（保护已存在的编辑稿不覆盖）。
     // 这样用户后续切回 edit 模式接续修改时不会因为缺脚本而失败。
     void syncFlowScriptsToIdb(remoteFlow);
