@@ -253,9 +253,9 @@ const networkModule: LuaModule = {
         { name: 'route', type: 'table', doc: '路由 {cmd, act}' },
         { name: 'body', type: 'string', doc: '消息体字节' },
       ],
-      returns: 'code : number',
+      returns: 'err : nil|table',
       summary: 'UDP 发送（带路由编码，不等响应）',
-      detail: 'code: 0=成功 / errcode 错误码。',
+      detail: 'err=nil 成功；err table 失败（含 code/detail）。',
     },
     {
       name: 'udp_request',
