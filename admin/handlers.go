@@ -101,6 +101,13 @@ func (s *AdminServer) registerRoutes() http.Handler {
 	// ── 错误码 ──
 	mux.HandleFunc("GET /sbot/api/error-codes", s.handleErrorCodeIndex)
 
+	// ── 流程模板库 ──
+	mux.HandleFunc("GET /sbot/flows", s.handleListFlows)
+	mux.HandleFunc("POST /sbot/flows", s.handleCreateFlow)
+	mux.HandleFunc("GET /sbot/flows/{id}", s.handleGetFlow)
+	mux.HandleFunc("PUT /sbot/flows/{id}", s.handleUpdateFlow)
+	mux.HandleFunc("DELETE /sbot/flows/{id}", s.handleDeleteFlow)
+
 	// ── 服务器能力 ──
 	mux.HandleFunc("GET /sbot/capabilities", s.handleCapabilities)
 
@@ -556,16 +563,32 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// flowTemplateId（可选）：来源流程模板 ID，仅用于历史溯源。
+	// 实际运行 flow 仍来自上面的 flow.json，不反查模板。MySQL 可用时校验模板存在。
+	flowTemplateID := r.FormValue("flowTemplateId")
+	if flowTemplateID != "" && s.flows != nil {
+		if _, err := s.flows.Get(r.Context(), flowTemplateID); err != nil {
+			// 区分"模板不存在"（404）与 DB 故障（500），避免把连接错误误报为模板缺失。
+			if ae, ok := err.(*Error); ok && ae.Code == ErrFlowTemplateNotFound.Code {
+				writeError(w, ErrFlowTemplateNotFound.WithMessage("来源流程模板不存在"))
+			} else {
+				writeError(w, ErrInternal.WithMessage(err.Error()))
+			}
+			return
+		}
+	}
+
 	// 将上传的资源写入磁盘基线，使前端下次同步时 IDB 与基线一致
 	s.writeBaselineFiles(&cfg, flowData)
 
 	task := &Task{
-		ID:        generateID(),
-		Name:      name,
-		State:     TaskPending,
-		TotalBots: totalBots,
-		Config:    cfg,
-		CreatedAt: time.Now(),
+		ID:             generateID(),
+		Name:           name,
+		State:          TaskPending,
+		TotalBots:      totalBots,
+		Config:         cfg,
+		FlowTemplateID: flowTemplateID,
+		CreatedAt:      time.Now(),
 	}
 	if err := s.tasks.Create(task); err != nil {
 		writeError(w, err)

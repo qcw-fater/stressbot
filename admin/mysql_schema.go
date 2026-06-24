@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS task_history (
     debug_mode      TINYINT(1)   NOT NULL DEFAULT 0,
     config_summary  JSON         NULL,
     stage_count     INT          NOT NULL DEFAULT 0,
+    flow_template_id VARCHAR(32) NULL, -- 来源流程模板 ID（逻辑外键，可空；模板删除不影响历史快照）
     INDEX idx_state (state),
     INDEX idx_created (created_at DESC),
     INDEX idx_started (started_at),
@@ -143,6 +144,23 @@ CREATE TABLE IF NOT EXISTS task_agent_events (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `
 
+// flow_template — 流程模板库。命名流程的 flow + layout，供「选择已保存流程启动」复用。
+// 不内嵌 Lua/proto/adapter：资源走独立管理链路，启动时按 flow 引用收集。
+// node_count/action_count 由服务端保存时从 flow_json 计算（不由前端信任传入）。
+const ddlFlowTemplate = `
+CREATE TABLE IF NOT EXISTS flow_template (
+    id           VARCHAR(32)  NOT NULL PRIMARY KEY,
+    name         VARCHAR(80)  NOT NULL,
+    flow_json    MEDIUMBLOB   NOT NULL,
+    layout_json  MEDIUMBLOB   NULL,
+    node_count   INT          NOT NULL DEFAULT 0,
+    action_count INT          NOT NULL DEFAULT 0,
+    created_at   DATETIME(3)  NOT NULL,
+    updated_at   DATETIME(3)  NOT NULL,
+    INDEX idx_flow_template_updated (updated_at DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+`
+
 var allDDL = []string{
 	ddlTaskHistory,
 	ddlTaskAssignment,
@@ -152,4 +170,5 @@ var allDDL = []string{
 	ddlTaskConfigArchive,
 	ddlTaskAgentEvents,
 	ddlTaskMeta,
+	ddlFlowTemplate,
 }
