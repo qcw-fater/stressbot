@@ -308,7 +308,7 @@
 }
 .bs-strip {
   position: relative;
-  height: 30px;
+  height: 44px;
   overflow: hidden;
   background: linear-gradient(180deg, var(--bg-panel), var(--hover-bg));
   border: 1px solid var(--border-color);
@@ -409,4 +409,129 @@
 }
 .bs-tick-end {
   transform: translateX(-100%);
+}
+
+/* === 重设计布局（2026-06-24）：分区 Tabs + 双栏 + hero + 行内展开 ===
+   增量追加：旧布局类（.pce-root/.pce-command-rail/.frame-edit-stack 等）保留至
+   各组件 Task 切换到新类后，由 Task 8 统一清理。颜色走 tokens.css 变量。 */
+
+.pce-shell {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+/* 命令栏：左 target（连接选择+来源） | 右 actions（分组按钮+视图切换） */
+.pce-cmdbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  align-items: center;
+  padding: var(--space-sm);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+.pce-cmdbar-target {
+  flex: 1 1 320px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+.pce-cmdbar-actions {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+.pce-cmdbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.pce-cmdbar-divider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--divider-bg);
+  margin-inline: 2px;
+}
+
+/* 校验条：常驻紧凑单行 */
+.pce-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--color-blue);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+}
+.pce-status-warn { border-left-color: var(--color-error); }
+.pce-status-title { font-size: 12px; font-weight: 600; }
+.pce-status-note { font-size: 12px; color: var(--text-tertiary); }
+.pce-status-details { width: 100%; }
+.pce-status-list { margin: 0; padding-left: 18px; max-height: 120px; overflow: auto; font-size: 12px; }
+
+/* 分区 Tabs */
+.pce-tabs { flex: 0 0 auto; }
+.pce-tabs .ant-tabs-nav { margin-bottom: 0; }
+
+/* 主舞台：随 tab 切换，flex 撑满剩余 */
+.pce-stage {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+
+/* 帧布局 tab 内部 */
+.frame-tab {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+}
+.byte-hero {
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+}
+.frame-table-wrap { min-width: 0; }
+
+/* 行内展开详情（全宽内嵌） */
+.field-detail-inline {
+  padding: 10px 12px;
+  background: var(--bg-panel);
+}
+
+/* 通用左右双栏（路由键 / 预览） */
+.split-2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-md);
+  min-width: 0;
+}
+.split-2-left,
+.split-2-right { min-width: 0; }
+
+/* 响应式：窄窗双栏退化为单列 */
+@media (max-width: 720px) {
+  .split-2 { grid-template-columns: minmax(0, 1fr); }
 }
