@@ -45,9 +45,10 @@ local function markRoundFailed(reason)
     if tid then
         proto.set_field(msg, "teamId", tonumber(tid))
     end
-    local code = network.tcp_request("logic", {cmd=5, act=2}, msg, "Game.TeamLeaveS2C")
+    local err = network.tcp_request("logic", {cmd=5, act=2}, msg, "Game.TeamLeaveS2C")
+    local codeText = err and (tostring(err.code) .. " " .. tostring(err.detail)) or "0"
     log.info("排位队员等匹配清理退出队伍: reason=" .. tostring(reason)
-        .. " teamId=" .. tostring(tid) .. " code=" .. tostring(code))
+        .. " teamId=" .. tostring(tid) .. " code=" .. codeText)
     robot.delete("teamId")
 end
 
@@ -59,7 +60,7 @@ function execute(r)
     if not teamKey then
         log.warn("排位队员等匹配: teamKey 为空，本轮跳过匹配")
         markRoundFailed("member_match_no_team_key")
-        return 0
+        return nil
     end
 
     local hashKey = TEAM_PREFIX .. teamKey
@@ -70,12 +71,12 @@ function execute(r)
             robot.set("rankedMatchStarted", true)
             robot.delete("rankedRoundFailed")
             log.info("排位队员等匹配: 匹配已开始")
-            return 0
+            return nil
         end
         if status == "failed" or status == "done" then
             log.warn("排位队员等匹配: 队伍已结束 status=" .. tostring(status) .. "，本轮跳过匹配")
             markRoundFailed("member_match_team_" .. tostring(status))
-            return 0
+            return nil
         end
         utils.sleep(500)
         waited = waited + 500
@@ -83,5 +84,5 @@ function execute(r)
 
     log.warn("排位队员等匹配: 超时，本轮跳过匹配")
     markRoundFailed("member_match_timeout")
-    return 0
+    return nil
 end

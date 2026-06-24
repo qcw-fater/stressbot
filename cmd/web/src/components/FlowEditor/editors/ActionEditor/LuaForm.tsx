@@ -4,8 +4,8 @@
  * - 选择脚本文件（从基线 scripts 索引列出）
  * - Monaco 全功能 Lua 编辑
  * - 入口签名：
- *   action  模式 : function execute(r) ... return code end
- *                  return 0 表示成功。
+ *   action  模式 : function execute(r) ... return nil / err table end
+ *                  return nil 表示成功，失败时 return err table。
  *   listen 模式 : function onMessage(r, msg) ... end
  *   boolean 模式 : function execute(r) ... return true/false end（条件节点 / loop breakCondition 用）
  *
@@ -48,10 +48,9 @@ local robot = require('robot')
 function execute(r)
   -- TODO: 业务逻辑
   -- 示例：
-  -- local code, resp = network.tcp_request('logic', {cmd=1, act=2}, msg, 'Game.SomeS2C')
-  -- 请求/响应路由不同时可用 network.tcp_request_route(service, requestRoute, responseRoute, msg, s2cProto)
-  -- if code ~= 0 then return code end
-  return 0  -- 错误码（0=成功）
+  -- local err, resp = network.tcp_request('logic', {cmd=1, act=2}, msg, 'Game.SomeS2C')
+  -- if err then return err end
+  return nil  -- 成功；失败时 return robot.error(code, 'detail') 或透传 err
 end
 `,
   listen: `-- listen_xxx.lua
@@ -352,8 +351,7 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
             入口签名：<code>{expectedSig}</code>
             {mode === 'action' && (
               <>
-                ；<code>return code</code>
-                （错误码）
+                ；<code>return nil</code>（成功）/ <code>return err table</code>（失败）
               </>
             )}
             {mode === 'boolean' && (

@@ -1161,8 +1161,8 @@ Lua 动作在 `robotActionHandler.ExecuteAction` 中统一采集：
 
 - **延迟**：整个脚本执行时间（从调用 `executeLuaAction` 到返回）
 - **成功/失败**：基于 `executeLuaAction` 返回的 error
-- **错误分布**：使用结构化 ActionError（ErrLuaNotInit / ErrLuaNoScript / ErrLuaExecFailed / ErrLuaExitCode）
-- **字节统计**：脚本内 `network.*` 调用产生的 WireBytes 由 `script.Context` 自动累计，脚本只返回 `code`
+- **错误分布**：使用结构化 ActionError（ErrLuaNotInit / ErrLuaNoScript / ErrLuaExecFailed / ErrLuaScriptCheck）
+- **字节统计**：脚本内 `network.*` 调用产生的 WireBytes 由 `script.Context` 自动累计，脚本返回 nil（成功）或 err table（失败）
 - **executing 计数**：同样适用
 
 ---

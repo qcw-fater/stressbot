@@ -26,7 +26,7 @@ function execute(r)
 
     local authAddr = robot.get("authAddr") or ""
     local url = authAddr .. "/newRole"
-    local code, body = network.http_request(url, "POST", "form", {
+    local err, status, body = network.http_request(url, "POST", "form", {
         account = account,
         heroId  = tostring(heroId),
         session = session,
@@ -35,23 +35,28 @@ function execute(r)
         channel = channel
     })
 
-    if code ~= 0 and code < 100 then
+    if err then
         log.error("NewRole HTTP 请求失败: account=" .. tostring(account)
             .. " url=" .. tostring(url)
             .. " heroId=" .. tostring(heroId)
             .. " zoneId=" .. tostring(zoneId)
-            .. " code=" .. tostring(code))
-        return code
+            .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+        return err
     end
 
-    if code < 200 or code >= 300 then
+    if status < 200 or status >= 300 then
         log.error("NewRole HTTP 状态异常: account=" .. tostring(account)
             .. " url=" .. tostring(url)
             .. " heroId=" .. tostring(heroId)
             .. " zoneId=" .. tostring(zoneId)
-            .. " status=" .. tostring(code)
+            .. " status=" .. tostring(status)
             .. " body=" .. body_preview(body))
-        return 54  -- 54=LUA_EXIT_CODE
+        return robot.error(54, "NewRole HTTP 状态异常: account=" .. tostring(account)
+            .. " url=" .. tostring(url)
+            .. " heroId=" .. tostring(heroId)
+            .. " zoneId=" .. tostring(zoneId)
+            .. " status=" .. tostring(status)
+            .. " body=" .. body_preview(body))  -- 54=LUA_SCRIPT_CHECK：脚本断言失败
     end
 
     local ok, resp = pcall(json.decode, body)
@@ -60,7 +65,11 @@ function execute(r)
             .. " url=" .. tostring(url)
             .. " heroId=" .. tostring(heroId)
             .. " zoneId=" .. tostring(zoneId)            .. " body=" .. body_preview(body))
-        return 54  -- 54=LUA_EXIT_CODE
+        return robot.error(54, "NewRole JSON 解析失败: account=" .. tostring(account)
+            .. " url=" .. tostring(url)
+            .. " heroId=" .. tostring(heroId)
+            .. " zoneId=" .. tostring(zoneId)
+            .. " body=" .. body_preview(body))  -- 54=LUA_SCRIPT_CHECK：脚本断言失败
     end
 
     if resp.error and resp.error ~= 0 then
@@ -68,7 +77,11 @@ function execute(r)
             .. " heroId=" .. tostring(heroId)
             .. " zoneId=" .. tostring(zoneId)
             .. " error=" .. tostring(resp.error)            .. " body=" .. body_preview(body))
-        return 54
+        return robot.error(resp.error, "NewRole 业务失败: account=" .. tostring(account)
+            .. " heroId=" .. tostring(heroId)
+            .. " zoneId=" .. tostring(zoneId)
+            .. " error=" .. tostring(resp.error)
+            .. " body=" .. body_preview(body))  -- 透传服务端业务错误码（≥100）
     end
 
     -- 提取角色信息
@@ -88,14 +101,20 @@ function execute(r)
                 .. " heroId=" .. tostring(heroId)
                 .. " zoneId=" .. tostring(zoneId)
                 .. " body=" .. body_preview(body))
-            return 54
+            return robot.error(54, "NewRole 响应中缺少 playerId: account=" .. tostring(account)
+                .. " heroId=" .. tostring(heroId)
+                .. " zoneId=" .. tostring(zoneId)
+                .. " body=" .. body_preview(body))  -- 54=LUA_SCRIPT_CHECK：脚本断言失败
         end
     else
         log.error("NewRole 响应缺少 role 字段: account=" .. tostring(account)
             .. " heroId=" .. tostring(heroId)
             .. " zoneId=" .. tostring(zoneId)            .. " body=" .. body_preview(body))
-        return 54
+        return robot.error(54, "NewRole 响应缺少 role 字段: account=" .. tostring(account)
+            .. " heroId=" .. tostring(heroId)
+            .. " zoneId=" .. tostring(zoneId)
+            .. " body=" .. body_preview(body))  -- 54=LUA_SCRIPT_CHECK：脚本断言失败
     end
 
-    return 0
+    return nil
 end

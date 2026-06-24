@@ -66,7 +66,7 @@ cd cmd/web && npm run test                 # Vitest
 
 1. `Executor` 遍历流程图 → 命中 `action` 节点 → 调用 `ActionHandler.ExecuteAction(actionDef)`
 2. 声明式动作：`ActionExecutor` 构建 protobuf 消息（从 state/随机源解析字段绑定）→ 序列化 → adapter 编码消息头 → gnet 发送 → 接收响应 → adapter 解码 → 解析 S2C proto → 存储字段到 state
-3. Lua 动作（`pattern: "lua"`）：当前 Robot 主流程通过 `RuntimePool` 同步执行脚本 → 返回 0 表示成功；等待网络/休眠时只阻塞该主流程，连接收包与声明式心跳由 Go goroutine 独立推进
+3. Lua 动作（`pattern: "lua"`）：当前 Robot 主流程通过 `RuntimePool` 同步执行脚本 → `execute(r)` 返回 nil 表示成功，err table `{code, detail}` 表示失败（`robot.error(code, detail)` 构造）；等待网络/休眠时只阻塞该主流程，连接收包与声明式心跳由 Go goroutine 独立推进
 
 ### 前端技术栈
 

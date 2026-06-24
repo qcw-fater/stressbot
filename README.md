@@ -207,7 +207,7 @@ Executor 遍历节点图 → 命中 action 节点
 | `httpRequest`       | HTTP 请求（`url` + `method` + `contentType` + body）                   |
 | `setState`          | 从 bindings 写入 state                                                  |
 | `clearState`        | 清除 state（`keys` 列表）                                                |
-| `lua`               | 执行 `script` 指定的 Lua 脚本（`execute(r)` 返回 0 表示成功）          |
+| `lua`               | 执行 `script` 指定的 Lua 脚本（`execute(r)` 返回 nil 表示成功，err table 表示失败） |
 
 ### ActionDef 全字段
 
@@ -391,7 +391,7 @@ Executor 遍历节点图 → 命中 action 节点
 `boolean` 节点和 `loop` 的 `condition` / `breakCondition` 支持两种格式：
 
 - **内置**：`state:key op value`，如 `state:heroId > 0`。运算符：`>= <= != == > <`。支持 `|| && !` 和括号嵌套。
-- **Lua**：`lua:script_name.lua`，执行 Lua 脚本，返回 0 = true，非 0 = false。
+- **Lua**：`lua:script_name.lua`，执行 Lua boolean 脚本，return true/false（true 满足）。
 
 ---
 

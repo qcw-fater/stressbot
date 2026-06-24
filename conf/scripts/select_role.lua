@@ -42,12 +42,14 @@ function execute(r)
         log.error("SelectRole 无可用角色: account=" .. tostring(account)
             .. " zoneId=" .. tostring(zoneId)
             .. " roleCount=" .. tostring(roleCount))
-        return 54  -- 54=LUA_EXIT_CODE：业务前置条件不足
+        return robot.error(54, "SelectRole 无可用角色: account=" .. tostring(account)
+            .. " zoneId=" .. tostring(zoneId)
+            .. " roleCount=" .. tostring(roleCount))  -- 54=LUA_SCRIPT_CHECK：业务前置条件不足
     end
 
     local authAddr = robot.get("authAddr") or ""
     local url = authAddr .. "/useRole"
-    local code, body = network.http_request(url, "POST", "form", {
+    local err, status, body = network.http_request(url, "POST", "form", {
         account  = account,
         id       = tostring(playerId),
         session  = session,
@@ -56,23 +58,28 @@ function execute(r)
         platform = platform
     })
 
-    if code ~= 0 and code < 100 then
+    if err then
         log.error("SelectRole HTTP 请求失败: account=" .. tostring(account)
             .. " url=" .. tostring(url)
             .. " playerId=" .. tostring(playerId)
             .. " zoneId=" .. tostring(zoneId)
-            .. " code=" .. tostring(code))
-        return code
+            .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+        return err
     end
 
-    if code < 200 or code >= 300 then
+    if status < 200 or status >= 300 then
         log.error("SelectRole HTTP 状态异常: account=" .. tostring(account)
             .. " url=" .. tostring(url)
             .. " playerId=" .. tostring(playerId)
             .. " zoneId=" .. tostring(zoneId)
-            .. " status=" .. tostring(code)
+            .. " status=" .. tostring(status)
             .. " body=" .. body_preview(body))
-        return 54
+        return robot.error(54, "SelectRole HTTP 状态异常: account=" .. tostring(account)
+            .. " url=" .. tostring(url)
+            .. " playerId=" .. tostring(playerId)
+            .. " zoneId=" .. tostring(zoneId)
+            .. " status=" .. tostring(status)
+            .. " body=" .. body_preview(body))  -- 54=LUA_SCRIPT_CHECK：脚本断言失败
     end
 
     local ok, resp = pcall(json.decode, body)
@@ -81,7 +88,11 @@ function execute(r)
             .. " url=" .. tostring(url)
             .. " playerId=" .. tostring(playerId)
             .. " zoneId=" .. tostring(zoneId)            .. " body=" .. body_preview(body))
-        return 54
+        return robot.error(54, "SelectRole JSON 解析失败: account=" .. tostring(account)
+            .. " url=" .. tostring(url)
+            .. " playerId=" .. tostring(playerId)
+            .. " zoneId=" .. tostring(zoneId)
+            .. " body=" .. body_preview(body))  -- 54=LUA_SCRIPT_CHECK：脚本断言失败
     end
 
     if resp.error and resp.error ~= 0 then
@@ -89,7 +100,11 @@ function execute(r)
             .. " playerId=" .. tostring(playerId)
             .. " zoneId=" .. tostring(zoneId)
             .. " error=" .. tostring(resp.error)            .. " body=" .. body_preview(body))
-        return 54
+        return robot.error(resp.error, "SelectRole 业务失败: account=" .. tostring(account)
+            .. " playerId=" .. tostring(playerId)
+            .. " zoneId=" .. tostring(zoneId)
+            .. " error=" .. tostring(resp.error)
+            .. " body=" .. body_preview(body))  -- 透传服务端业务错误码（≥100）
     end
 
     -- 更新 logicSession
@@ -110,5 +125,5 @@ function execute(r)
             .. " (无逻辑服地址) body=" .. body_preview(body))
     end
 
-    return 0
+    return nil
 end

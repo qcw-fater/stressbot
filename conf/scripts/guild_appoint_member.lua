@@ -44,7 +44,7 @@ function execute(r)
 
     if #candidates == 0 then
         log.info("GuildAppointMember 无普通成员候选，跳过: roleId=" .. tostring(roleId))
-        return 0
+        return nil
     end
 
     local target = utils.random_pick(candidates)
@@ -52,15 +52,15 @@ function execute(r)
     proto.set_field(msg, "playerId", target)
     proto.set_field(msg, "position", 1)
 
-    local code = network.tcp_request("logic", {cmd=21, act=11}, msg, "Game.GuildAppointS2C")
-    if code ~= 0 then
+    local err = network.tcp_request("logic", {cmd=21, act=11}, msg, "Game.GuildAppointS2C")
+    if err then
         log.error("GuildAppointMember 失败: roleId=" .. tostring(roleId)
             .. " target=" .. tostring(target)
-            .. " code=" .. tostring(code))
-        return code
+            .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+        return err
     end
 
     log.info("GuildAppointMember 成功: roleId=" .. tostring(roleId)
         .. " target=" .. tostring(target))
-    return 0
+    return nil
 end

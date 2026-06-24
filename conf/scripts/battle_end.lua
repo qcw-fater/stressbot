@@ -96,14 +96,14 @@ function execute(r)
     end
 
     -- 使用 tcp_request 等待服务端 ACK（handleResult 同步结算约 3.6s）
-    local code = network.tcp_request("battle", {cmd=4, act=13}, msg)
-    if code ~= 0 then
+    local err = network.tcp_request("battle", {cmd=4, act=13}, msg)
+    if err then
         log.error("BattleEnd 请求失败: service=battle route=4:13 battleId=" .. tostring(battleId)
             .. " fighterIndex=" .. tostring(fighterIndex)
             .. " battleSession=" .. tostring(battleSession)
             .. " fighterCount=" .. tostring(fighterCount)
-            .. " code=" .. tostring(code))
-        return code
+            .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+        return err
     end
     log.info("BattleEnd 已确认: battleId=" .. tostring(battleId)
         .. " fighterIndex=" .. tostring(fighterIndex)
@@ -118,5 +118,5 @@ function execute(r)
     robot.delete("battleId")
     robot.delete("battleArea")
 
-    return 0
+    return nil
 end

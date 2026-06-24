@@ -1,5 +1,5 @@
 -- request_zone_list.lua: HTTP POST /zoneList 获取区服列表
--- Action 脚本统一返回约定：return code
+-- Action 脚本统一返回约定：return nil（成功）/ err table（失败）
 -- send/recv WireBytes 由 network API 自动计入当前脚本 Context。
 local network = require("network")
 local robot = require("robot")
@@ -20,25 +20,28 @@ function execute(r)
     local channel = robot.get("platform") or "1000"
     local authAddr = robot.get("authAddr") or ""
     local url = authAddr .. "/zoneList"
-    local code, body = network.http_request(url, "POST", "form", {
+    local err, status, body = network.http_request(url, "POST", "form", {
         account = account,
         version = version,
         channel = channel
     })
-    if code ~= 0 and code < 100 then
+    if err then
         log.error("RequestZoneList HTTP 请求失败: account=" .. tostring(account)
             .. " url=" .. tostring(url)
-            .. " code=" .. tostring(code))
-        return code
+            .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+        return err
     end
 
-    if code < 200 or code >= 300 then
+    if status < 200 or status >= 300 then
         log.error("RequestZoneList HTTP 状态异常: account=" .. tostring(account)
             .. " url=" .. tostring(url)
-            .. " status=" .. tostring(code)
+            .. " status=" .. tostring(status)
             .. " body=" .. body_preview(body))
-        return 54
+        return robot.error(54, "RequestZoneList HTTP 状态异常: account=" .. tostring(account)
+            .. " url=" .. tostring(url)
+            .. " status=" .. tostring(status)
+            .. " body=" .. body_preview(body))  -- 54=LUA_SCRIPT_CHECK：脚本断言失败
     end
 
-    return 0
+    return nil
 end

@@ -2,7 +2,7 @@
  * Lua 语法分析 Web Worker。
  *
  * 主线程发送 `{ type: 'parse', code, mode }`：
- *   - mode='action'   : 期望存在 `function execute(r) ... end`（return code）
+ *   - mode='action'   : 期望存在 `function execute(r) ... end`（return nil / err table）
  *   - mode='boolean'  : 期望存在 `function execute(r) ... end`（return true / false，签名同 action）
  *   - mode='callback' : 期望存在 `function onMessage(r, msg) ... end`
  *   - mode='free'     : 不做入口签名校验
