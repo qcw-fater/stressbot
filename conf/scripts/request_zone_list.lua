@@ -40,7 +40,7 @@ function execute(r)
         return robot.error(54, "RequestZoneList HTTP 状态异常: account=" .. tostring(account)
             .. " url=" .. tostring(url)
             .. " status=" .. tostring(status)
-            .. " body=" .. body_preview(body))  -- 54=LUA_EXIT_CODE：脚本断言失败
+            .. " body=" .. body_preview(body))  -- 54=LUA_SCRIPT_CHECK：脚本断言失败
     end
 
     return nil

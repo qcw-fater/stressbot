@@ -415,12 +415,13 @@ local err2, body2 = network.tcp_request_route("logic", reqRoute, respRoute, msg,
 -- err 为 table → 失败（含 code/detail，框架错误码 1-99 或服务端错误码 >=100）
 
 -- HTTP 请求：三返回值 (err, status, body)
-local err, status, body = network.http_request(url, method, headers, bodyData)
+-- content_type 为 "form"（默认）或 "json"，body 为键值对 table
+local err, status, body = network.http_request(url, "POST", "form", { account = account })
 -- err == nil → 成功
 
 -- 发送/连接类：单返回值 err
 local err = network.tcp_send("logic", route, msg)
-local err = network.tcp_connect("logic")
+local err = network.connect_tcp("logic", "1.2.3.4:9001")
 -- err == nil → 成功；err 为 table → 失败
 ```
 

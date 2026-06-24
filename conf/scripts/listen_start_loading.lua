@@ -129,7 +129,7 @@ function execute(r)
             .. " fighterIndex=" .. tostring(fighterIndex)
             .. " hasSecretKey=" .. tostring(battleSecretKey ~= nil)
             .. " battleSession=" .. tostring(battleSession)
-            .. " fighterCount=" .. tostring(fighterCount))  -- 54=LUA_EXIT_CODE：脚本断言失败
+            .. " fighterCount=" .. tostring(fighterCount))  -- 54=LUA_SCRIPT_CHECK：脚本断言失败
     end
 
     log.info("开始加载: roleId=" .. tostring(roleId)

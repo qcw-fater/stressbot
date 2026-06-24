@@ -47,7 +47,7 @@ function execute(r)
         return robot.error(54, "PostLogin HTTP 状态异常: account=" .. tostring(account)
             .. " url=" .. tostring(url)
             .. " status=" .. tostring(status)
-            .. " body=" .. body_preview(body))  -- 54=LUA_EXIT_CODE：脚本断言失败
+            .. " body=" .. body_preview(body))  -- 54=LUA_SCRIPT_CHECK：脚本断言失败
     end
 
     local ok, resp = pcall(json.decode, body)
@@ -56,7 +56,7 @@ function execute(r)
             .. " url=" .. tostring(url)            .. " body=" .. body_preview(body))
         return robot.error(54, "PostLogin JSON 解析失败: account=" .. tostring(account)
             .. " url=" .. tostring(url)
-            .. " body=" .. body_preview(body))  -- 54=LUA_EXIT_CODE：脚本断言失败
+            .. " body=" .. body_preview(body))  -- 54=LUA_SCRIPT_CHECK：脚本断言失败
     end
 
     -- 检查错误码（error=0 表示成功）
@@ -72,7 +72,7 @@ function execute(r)
     if not resp.session or resp.session == "" then
         log.error("PostLogin 响应缺少 session: account=" .. tostring(account)            .. " body=" .. body_preview(body))
         return robot.error(54, "PostLogin 响应缺少 session: account=" .. tostring(account)
-            .. " body=" .. body_preview(body))  -- 54=LUA_EXIT_CODE：脚本断言失败
+            .. " body=" .. body_preview(body))  -- 54=LUA_SCRIPT_CHECK：脚本断言失败
     end
     robot.set("session", resp.session)
 

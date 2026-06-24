@@ -19,7 +19,7 @@ function execute(r)
             if err then
                 lastErr = err
             else
-                lastErr = robot.error(54, "解锁基础功能响应为空: id=" .. tostring(id))  -- 54=LUA_EXIT_CODE：脚本断言失败
+                lastErr = robot.error(54, "解锁基础功能响应为空: id=" .. tostring(id))  -- 54=LUA_SCRIPT_CHECK：脚本断言失败
             end
             log.error("解锁基础功能失败: service=logic route=2:26 id=" .. tostring(id)
                 .. " code=" .. (err and tostring(err.code) or "nil")

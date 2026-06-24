@@ -58,7 +58,7 @@ function execute(r)
             .. " battleArea=" .. tostring(battleArea))
         return robot.error(54, "MatchSucceed battleSession 缺失: roleId=" .. tostring(roleId)
             .. " actorCount=" .. tostring(actorCount)
-            .. " battleArea=" .. tostring(battleArea))  -- 54=LUA_EXIT_CODE：脚本断言失败
+            .. " battleArea=" .. tostring(battleArea))  -- 54=LUA_SCRIPT_CHECK：脚本断言失败
     end
 
     log.info("匹配成功: roleId=" .. tostring(roleId)

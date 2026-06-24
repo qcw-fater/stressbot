@@ -16,7 +16,7 @@ function execute(r)
         log.error("RegisterBattle 缺少 fighterIndex: battleId=" .. tostring(battleId)
             .. " battleSession=" .. tostring(battleSession))
         return robot.error(54, "RegisterBattle 缺少 fighterIndex: battleId=" .. tostring(battleId)
-            .. " battleSession=" .. tostring(battleSession))  -- 54=LUA_EXIT_CODE：业务前置条件不足
+            .. " battleSession=" .. tostring(battleSession))  -- 54=LUA_SCRIPT_CHECK：业务前置条件不足
     end
 
     local lastErr = nil  -- 兜底；首轮失败前为 nil

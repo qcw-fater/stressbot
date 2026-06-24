@@ -44,7 +44,7 @@ function execute(r)
             .. " roleCount=" .. tostring(roleCount))
         return robot.error(54, "SelectRole 无可用角色: account=" .. tostring(account)
             .. " zoneId=" .. tostring(zoneId)
-            .. " roleCount=" .. tostring(roleCount))  -- 54=LUA_EXIT_CODE：业务前置条件不足
+            .. " roleCount=" .. tostring(roleCount))  -- 54=LUA_SCRIPT_CHECK：业务前置条件不足
     end
 
     local authAddr = robot.get("authAddr") or ""
@@ -79,7 +79,7 @@ function execute(r)
             .. " playerId=" .. tostring(playerId)
             .. " zoneId=" .. tostring(zoneId)
             .. " status=" .. tostring(status)
-            .. " body=" .. body_preview(body))  -- 54=LUA_EXIT_CODE：脚本断言失败
+            .. " body=" .. body_preview(body))  -- 54=LUA_SCRIPT_CHECK：脚本断言失败
     end
 
     local ok, resp = pcall(json.decode, body)
@@ -92,7 +92,7 @@ function execute(r)
             .. " url=" .. tostring(url)
             .. " playerId=" .. tostring(playerId)
             .. " zoneId=" .. tostring(zoneId)
-            .. " body=" .. body_preview(body))  -- 54=LUA_EXIT_CODE：脚本断言失败
+            .. " body=" .. body_preview(body))  -- 54=LUA_SCRIPT_CHECK：脚本断言失败
     end
 
     if resp.error and resp.error ~= 0 then
