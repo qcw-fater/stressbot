@@ -18,6 +18,7 @@ import {
   updateHeaderField,
 } from './codecEdit';
 import { computeByteRanges } from './byteLayout';
+import { RoleLinkedForm } from './RoleLinkedForm';
 
 export interface HeaderFieldTableProps {
   raw: Record<string, unknown>;
@@ -41,7 +42,7 @@ export function HeaderFieldTable({ raw, schema, selectedIndex, onSelect, onEdit 
 
   const columns: ColumnsType<Field> = [
     {
-      title: 'name',
+      title: '字段名',
       dataIndex: 'name',
       width: 140,
       render: (_, record, idx) => (
@@ -99,28 +100,6 @@ export function HeaderFieldTable({ raw, schema, selectedIndex, onSelect, onEdit 
           style={{ width: 116 }}
           options={typeOptions}
           onChange={(v) => onEdit(updateHeaderField(raw, idx, { type: v }))}
-        />
-      ),
-    },
-    {
-      title: 'endian',
-      dataIndex: 'endian',
-      width: 110,
-      render: (_, record, idx) => (
-        <Select
-          size="small"
-          value={record.endian ?? '__default__'}
-          style={{ width: 96 }}
-          options={[
-            { value: '__default__', label: `默认（${schema.endianDefault ?? 'le'}）` },
-            { value: 'le', label: 'le' },
-            { value: 'be', label: 'be' },
-          ]}
-          onChange={(v) =>
-            onEdit(
-              updateHeaderField(raw, idx, { endian: v === '__default__' ? undefined : (v as string) }),
-            )
-          }
         />
       ),
     },
@@ -215,9 +194,22 @@ export function HeaderFieldTable({ raw, schema, selectedIndex, onSelect, onEdit 
         dataSource={fields}
         columns={columns}
         pagination={false}
-        scroll={{ x: 'max-content', y: 280 }}
+        scroll={{ x: 'max-content' }}
+        expandable={{
+          showExpandColumn: false,
+          expandedRowKeys: selectedIndex !== null ? [String(selectedIndex)] : [],
+          expandedRowRender: (_record, idx) => {
+            const i = typeof idx === 'number' ? idx : 0;
+            const f = fields[i];
+            if (!f) return null;
+            return <RoleLinkedForm raw={raw} schema={schema} fieldIndex={i} field={f} onEdit={onEdit} />;
+          },
+        }}
         onRow={(_record, idx) => ({
-          onClick: () => onSelect(typeof idx === 'number' ? idx : null),
+          onClick: () => {
+            const i = typeof idx === 'number' ? idx : null;
+            onSelect(i !== null && selectedIndex === i ? null : i);
+          },
           style: { cursor: 'pointer' },
         })}
         rowClassName={(_record, idx) => {
