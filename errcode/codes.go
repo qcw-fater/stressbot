@@ -48,10 +48,10 @@ const (
 	ErrHeartbeatConfig ErrorCode = 49 // 声明式心跳配置错误（intervalMs<=0 / route 缺失 / 字段非法）
 
 	// Lua 层 (51-60)
-	ErrLuaNotInit    ErrorCode = 51 // Lua 运行时未初始化
-	ErrLuaNoScript   ErrorCode = 52 // lua 动作缺少 script 配置
-	ErrLuaExecFailed ErrorCode = 53 // Lua 脚本执行异常
-	ErrLuaExitCode   ErrorCode = 54 // Lua 脚本返回非零退出码
+	ErrLuaNotInit     ErrorCode = 51 // Lua 运行时未初始化
+	ErrLuaNoScript    ErrorCode = 52 // lua 动作缺少 script 配置
+	ErrLuaExecFailed  ErrorCode = 53 // Lua 脚本执行异常
+	ErrLuaScriptCheck ErrorCode = 54 // 脚本主动校验失败（字段缺失/值不符等业务断言；原 ErrLuaExitCode 重命名）
 
 	// 回调层 (61-70)
 	ErrCallbackLua   ErrorCode = 61 // Lua 回调脚本执行失败
@@ -94,7 +94,7 @@ var codeRegistry = []CodeInfo{
 	{uint64(ErrLuaNotInit), "LUA_NOT_INIT", KindFramework},
 	{uint64(ErrLuaNoScript), "LUA_NO_SCRIPT", KindFramework},
 	{uint64(ErrLuaExecFailed), "LUA_EXEC_FAILED", KindFramework},
-	{uint64(ErrLuaExitCode), "LUA_EXIT_CODE", KindFramework},
+	{uint64(ErrLuaScriptCheck), "LUA_SCRIPT_CHECK", KindFramework},
 	{uint64(ErrCallbackLua), "CALLBACK_LUA", KindFramework},
 	{uint64(ErrCallbackParse), "CALLBACK_PARSE", KindFramework},
 }
