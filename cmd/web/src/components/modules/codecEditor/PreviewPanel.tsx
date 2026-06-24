@@ -245,135 +245,122 @@ export function PreviewPanel({ raw, schema, transport }: PreviewPanelProps) {
           </Typography.Text>
         </Space>
 
-        {/* 输入区 */}
-        {mode === 'encode' ? (
-          <>
-            {/* route 字段值输入 */}
-            <div>
-              <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
-                路由字段（role:&quot;route&quot;，数值化取整）
-              </Typography.Text>
-              {routeFields.length === 0 ? (
-                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  当前 header 无 role:&quot;route&quot; 字段
-                </Typography.Text>
-              ) : (
-                <Space size={6} wrap>
-                  {routeFields.map((f) => (
-                    <Space key={f.name} size={4} align="center">
-                      <Typography.Text code style={{ fontSize: 12 }}>{f.name}</Typography.Text>
-                      <Input
-                        size="small"
-                        style={{ width: 90 }}
-                        placeholder="0"
-                        value={routeForm[f.name] ?? ''}
-                        onChange={(e) =>
-                          setRouteForm((prev) => ({ ...prev, [f.name]: e.target.value }))
-                        }
-                      />
-                    </Space>
-                  ))}
-                </Space>
-              )}
-            </div>
-            <div>
-              <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
-                body hex
-              </Typography.Text>
-              <HexInput value={bodyHex} onChange={setBodyHex} placeholder="body hex，如 0a 2b" />
-            </div>
-          </>
-        ) : (
-          <div>
-            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
-              帧 hex（完整帧）
-            </Typography.Text>
-            <HexInput value={frameHex} onChange={setFrameHex} placeholder="粘贴完整帧 hex" />
-          </div>
-        )}
-
-        <div>
-          <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
-            key hex（可空）
-          </Typography.Text>
-          <HexInput value={keyHex} onChange={setKeyHex} placeholder="secretKey hex，可空" />
-        </div>
-
-        {/* 触发按钮 */}
-        <Button type="primary" size="small" loading={loading} onClick={runPreview}>
-          预览
-        </Button>
-
-        {/* 结果区 */}
-        {empty && (
-          <Empty
-            description={<span style={{ fontSize: 12 }}>点「预览」查看编解码结果</span>}
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-          />
-        )}
-
-        {reqError && (
-          <Alert type="error" showIcon message={reqError} />
-        )}
-
-        {result && result.error && (
-          <Alert type="error" showIcon message={result.error} />
-        )}
-
-        {result && !result.error && !reqError && (
-          <Space direction="vertical" size={8} style={{ width: '100%' }}>
-            {mode === 'encode' ? (
-              <>
-                <HexOutput label="帧 hex" value={result.frameHex} />
-                <div>
-                  <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
-                    字段解释
-                  </Typography.Text>
-                  <FieldsTable fields={result.fields} />
-                </div>
-              </>
-            ) : (
-              <>
-                {result.routeKey !== undefined && (
+        <div className="split-2">
+          {/* 左：输入 + 触发 */}
+          <div className="split-2-left">
+            <Space direction="vertical" size={10} style={{ width: '100%' }}>
+              {mode === 'encode' ? (
+                <>
                   <div>
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      路由键：
-                    </Typography.Text>{' '}
-                    <Typography.Text code style={{ fontSize: 12 }}>
-                      {result.routeKey || '（空）'}
+                    <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                      路由字段（role:&quot;route&quot;，数值化取整）
                     </Typography.Text>
+                    {routeFields.length === 0 ? (
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        当前 header 无 role:&quot;route&quot; 字段
+                      </Typography.Text>
+                    ) : (
+                      <Space size={6} wrap>
+                        {routeFields.map((f) => (
+                          <Space key={f.name} size={4} align="center">
+                            <Typography.Text code style={{ fontSize: 12 }}>{f.name}</Typography.Text>
+                            <Input
+                              size="small"
+                              style={{ width: 90 }}
+                              placeholder="0"
+                              value={routeForm[f.name] ?? ''}
+                              onChange={(e) =>
+                                setRouteForm((prev) => ({ ...prev, [f.name]: e.target.value }))
+                              }
+                            />
+                          </Space>
+                        ))}
+                      </Space>
+                    )}
                   </div>
-                )}
-                {result.headerErr !== undefined && result.headerErr !== 0 && (
-                  <Alert
-                    type="error"
-                    showIcon
-                    style={{ padding: '4px 12px' }}
-                    message={
-                      <span style={{ fontSize: 12 }}>
-                        头 errorCode 非 0：<code>{result.headerErr}</code>
-                      </span>
-                    }
-                  />
-                )}
+                  <div>
+                    <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                      body hex
+                    </Typography.Text>
+                    <HexInput value={bodyHex} onChange={setBodyHex} placeholder="body hex，如 0a 2b" />
+                  </div>
+                </>
+              ) : (
                 <div>
                   <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
-                    字段解释
+                    帧 hex（完整帧）
                   </Typography.Text>
-                  <FieldsTable fields={result.fields} />
+                  <HexInput value={frameHex} onChange={setFrameHex} placeholder="粘贴完整帧 hex" />
                 </div>
-                <HexOutput label="body hex" value={result.bodyHex} />
-              </>
-            )}
-          </Space>
-        )}
+              )}
+              <div>
+                <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                  key hex（可空）
+                </Typography.Text>
+                <HexInput value={keyHex} onChange={setKeyHex} placeholder="secretKey hex，可空" />
+              </div>
+              <Button type="primary" size="small" loading={loading} onClick={runPreview}>
+                预览
+              </Button>
+            </Space>
+          </div>
 
-        {/* 纯编辑辅助提示：用 message 一次性 toast 会与结果区常驻语义冲突，这里不放额外说明 */}
-        {!hasError && !empty && (
-          <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-            结果仅用于核对，不会保存或影响任务下发。
-          </Typography.Text>
-        )}
+          {/* 右：结果 */}
+          <div className="split-2-right">
+            {empty && (
+              <Empty
+                description={<span style={{ fontSize: 12 }}>点「预览」查看编解码结果</span>}
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+              />
+            )}
+            {reqError && <Alert type="error" showIcon message={reqError} />}
+            {result && result.error && <Alert type="error" showIcon message={result.error} />}
+            {result && !result.error && !reqError && (
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                {mode === 'encode' ? (
+                  <>
+                    <HexOutput label="帧 hex" value={result.frameHex} />
+                    <div>
+                      <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                        字段解释
+                      </Typography.Text>
+                      <FieldsTable fields={result.fields} />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {result.routeKey !== undefined && (
+                      <div>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>路由键：</Typography.Text>{' '}
+                        <Typography.Text code style={{ fontSize: 12 }}>{result.routeKey || '（空）'}</Typography.Text>
+                      </div>
+                    )}
+                    {result.headerErr !== undefined && result.headerErr !== 0 && (
+                      <Alert
+                        type="error"
+                        showIcon
+                        style={{ padding: '4px 12px' }}
+                        message={<span style={{ fontSize: 12 }}>头 errorCode 非 0：<code>{result.headerErr}</code></span>}
+                      />
+                    )}
+                    <div>
+                      <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                        字段解释
+                      </Typography.Text>
+                      <FieldsTable fields={result.fields} />
+                    </div>
+                    <HexOutput label="body hex" value={result.bodyHex} />
+                  </>
+                )}
+              </Space>
+            )}
+            {!hasError && !empty && (
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                结果仅用于核对，不会保存或影响任务下发。
+              </Typography.Text>
+            )}
+          </div>
+        </div>
       </Space>
     </Card>
   );
