@@ -1,7 +1,6 @@
 package script
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"net/url"
@@ -80,32 +79,6 @@ func loadNetworkModule(L *lua.LState) int {
 // 内部辅助
 // ---------------------------------------------------------------------------
 
-// errToCode 从 ActionError 提取错误码，透传给 Lua。
-// 所有网络层错误都是 ActionError（含 errcode 体系的具体码），
-// 非 ActionError 降级为 -1（理论上不会走到）。
-func errToCode(err error) int {
-	if actionErr, ok := errors.AsType[*engine.ActionError](err); ok {
-		return int(actionErr.ErrorCode())
-	}
-	return -1
-}
-
-func rememberActionErr(ctx *Context, err error) {
-	if ctx == nil || err == nil {
-		return
-	}
-	if actionErr, ok := errors.AsType[*engine.ActionError](err); ok {
-		ctx.SetLastActionError(actionErr)
-	}
-}
-
-func rememberFrameworkErr(ctx *Context, code errcode.ErrorCode, detail string) {
-	if ctx == nil {
-		return
-	}
-	ctx.SetLastActionError(engine.NewActionError(code, detail))
-}
-
 // resolveDescribeError 经 CodecResolver 取任一已知连接的 adapter 后 DescribeError。
 //
 // DescribeError codec 无关（共享 errors.json，全连接同源），故任一已声明的 server 命中即可；
@@ -147,13 +120,6 @@ func headerErrDetail(ctx *Context, protoService string, code uint64, service, ro
 		detail = desc + ": " + detail
 	}
 	return detail
-}
-
-func rememberHeaderErr(ctx *Context, code uint64, service, routeKey string) {
-	if ctx == nil {
-		return
-	}
-	ctx.SetLastActionError(engine.NewServerError(code, headerErrDetail(ctx, "", code, service, routeKey)))
 }
 
 // resolveRequestTimeoutSec 决定 Lua tcp_request / udp_request 的 timeout（秒）。
@@ -424,7 +390,6 @@ func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 	}
 	if packet == nil {
 		detail := "service=" + service + " codec 未映射"
-		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
 		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
 	}
 
@@ -433,19 +398,16 @@ func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 	// 这里防御性兜 nil routeKey 会导致 RequestResponse 永久等不到响应）。
 	if ctx.Resolver == nil {
 		detail := "service=" + service + " routeKey 解析失败（codec 未映射）"
-		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
 		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
 	}
 	tcpAdp := ctx.Resolver.Resolve("tcp:" + service)
 	if tcpAdp == nil {
 		detail := "service=" + service + " routeKey 解析失败（codec 未映射）"
-		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
 		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
 	}
 	routeKey := tcpAdp.ExpectedRouteKey(luaValueToRoute(responseRoute))
 	if routeKey == "" {
 		detail := "service=" + service + " routeKey 解析失败（codec 未映射或响应路由无效）"
-		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
 		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
 	}
 	pktLen := len(packet)
@@ -461,16 +423,13 @@ func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
 		detail := "service=" + service + " route=" + routeKey
-		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, detail)
 		return pushResult(L, newErrTable(L, int(errcode.ErrActionCanceled), detail), lua.LNil)
 	}
 	if reqErr != nil {
-		rememberActionErr(ctx, reqErr)
 		return pushResult(L, errTableFromActionErr(L, reqErr), lua.LNil)
 	}
 	if exchange.HeaderErr != 0 {
 		detail := headerErrDetail(ctx, "tcp:"+service, exchange.HeaderErr, service, routeKey)
-		rememberHeaderErr(ctx, exchange.HeaderErr, service, routeKey)
 		return pushResult(L, newErrTable(L, int(exchange.HeaderErr), detail), lua.LString(string(respBody)))
 	}
 
@@ -485,7 +444,6 @@ func doTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 		}
 		if err != nil {
 			detail := "service=" + service + " route=" + routeKey
-			rememberFrameworkErr(ctx, errcode.ErrParseFailed, detail)
 			return pushResult(L, newErrTable(L, int(errcode.ErrParseFailed), detail), lua.LString(string(respBody)))
 		}
 		return pushResult(L, lua.LNil, wrapProtoMessage(L, respMsg))
@@ -556,19 +514,16 @@ func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 	// （与 TCP 侧 doTCPRequest / engine.ActionExecutor 同源）。Resolve nil → fail loud。
 	if ctx.Resolver == nil {
 		detail := "service=" + service + " codec 未映射（resolver.Resolve(udp:" + service + ") nil）"
-		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
 		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
 	}
 	udpAdp := ctx.Resolver.Resolve("udp:" + service)
 	if udpAdp == nil {
 		detail := "service=" + service + " codec 未映射（resolver.Resolve(udp:" + service + ") nil）"
-		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
 		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
 	}
 	routeKey := udpAdp.ExpectedRouteKey(luaValueToRoute(responseRoute))
 	if routeKey == "" {
 		detail := "service=" + service + " routeKey 解析失败（codec 未映射或响应路由无效）"
-		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
 		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
 	}
 	udpKey := ctx.NetSender.GetUDPSecretKey(service)
@@ -582,7 +537,6 @@ func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 	}
 	if packet == nil {
 		detail := "service=" + service + " codec 未映射"
-		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
 		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
 	}
 
@@ -603,16 +557,13 @@ func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 		// 后者是底层连接被对端断开；这里是本地主动取消，归类为 ACTION_CANCELED 避免被
 		// 误判为网络异常污染失败率统计。
 		detail := "service=" + service + " route=" + routeKey
-		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, detail)
 		return pushResult(L, newErrTable(L, int(errcode.ErrActionCanceled), detail), lua.LNil)
 	}
 	if reqErr != nil {
-		rememberActionErr(ctx, reqErr)
 		return pushResult(L, errTableFromActionErr(L, reqErr), lua.LNil)
 	}
 	if exchange.HeaderErr != 0 {
 		detail := headerErrDetail(ctx, "udp:"+service, exchange.HeaderErr, service, routeKey)
-		rememberHeaderErr(ctx, exchange.HeaderErr, service, routeKey)
 		return pushResult(L, newErrTable(L, int(exchange.HeaderErr), detail), lua.LString(string(respBody)))
 	}
 
@@ -627,7 +578,6 @@ func doUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, res
 		}
 		if err != nil {
 			detail := "service=" + service + " route=" + routeKey
-			rememberFrameworkErr(ctx, errcode.ErrParseFailed, detail)
 			return pushResult(L, newErrTable(L, int(errcode.ErrParseFailed), detail), lua.LString(string(respBody)))
 		}
 		return pushResult(L, lua.LNil, wrapProtoMessage(L, respMsg))
@@ -708,7 +658,6 @@ func networkHTTPRequest(L *lua.LState) int {
 	ctx.recordRequest(engine.RequestTiming{WireRTT: exchange.NetLatency})
 	ctx.recordBytes(exchange.SendWireBytes, exchange.RecvWireBytes)
 	if err != nil {
-		rememberActionErr(ctx, err)
 		L.Push(errTableFromActionErr(L, err))
 		L.Push(lua.LNumber(0))
 		L.Push(lua.LString(""))
@@ -716,7 +665,6 @@ func networkHTTPRequest(L *lua.LState) int {
 	}
 	if nilExchange {
 		err := engine.NewActionError(errcode.ErrSendFailed, "HTTP 响应为空")
-		rememberActionErr(ctx, err)
 		L.Push(errTableFromActionErr(L, err))
 		L.Push(lua.LNumber(0))
 		L.Push(lua.LString(""))
@@ -882,14 +830,12 @@ func networkListen(L *lua.LState, protocol string) int {
 	adp := ctx.Resolver.Resolve(protocol + ":" + service)
 	if adp == nil {
 		detail := "service=" + service + " codec 未映射（resolver.Resolve(" + protocol + ":" + service + ") nil）"
-		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
 		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
 	}
 	route := luaValueToRoute(L.Get(2))
 	routeKey := adp.ExpectedRouteKey(route)
 	if routeKey == "" {
 		detail := "service=" + service + " routeKey 解析失败（codec 未映射或监听路由无效）"
-		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
 		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
 	}
 
@@ -946,7 +892,6 @@ func networkListen(L *lua.LState, protocol string) int {
 
 	if ctx.Ctx != nil && ctx.Ctx.Err() != nil {
 		detail := "service=" + service
-		rememberFrameworkErr(ctx, errcode.ErrActionCanceled, detail)
 		return pushResult(L, newErrTable(L, int(errcode.ErrActionCanceled), detail), lua.LNil)
 	}
 	if timedOut {
@@ -954,12 +899,10 @@ func networkListen(L *lua.LState, protocol string) int {
 			zap.String("service", service), zap.String("routeKey", routeKey), zap.Int("timeout", timeout),
 			zap.String("hint", "请先调用 ensure_"+protocol+"_listener() 预注册监听"))
 		detail := fmt.Sprintf("service=%s route=%s timeout=%ds pollMs=%d", service, routeKey, timeout, pollMs)
-		rememberFrameworkErr(ctx, errcode.ErrListenTimeout, detail)
 		return pushResult(L, newErrTable(L, int(errcode.ErrListenTimeout), detail), lua.LNil)
 	}
 	if exchange.HeaderErr != 0 {
 		detail := headerErrDetail(ctx, protocol+":"+service, exchange.HeaderErr, service, routeKey)
-		rememberHeaderErr(ctx, exchange.HeaderErr, service, routeKey)
 		return pushResult(L, newErrTable(L, int(exchange.HeaderErr), detail), lua.LString(string(respBody)))
 	}
 
@@ -967,7 +910,6 @@ func networkListen(L *lua.LState, protocol string) int {
 		respMsg, err := ctx.Factory.Parse(s2cProto, respBody)
 		if err != nil {
 			detail := "service=" + service
-			rememberFrameworkErr(ctx, errcode.ErrParseFailed, detail)
 			return pushResult(L, newErrTable(L, int(errcode.ErrParseFailed), detail), lua.LNil)
 		}
 		return pushResult(L, lua.LNil, wrapProtoMessage(L, respMsg))
@@ -999,7 +941,7 @@ func networkTryUDPListen(L *lua.LState) int { return networkTryListen(L, "udp") 
 // 设计要点：
 //   - 单次非阻塞 pop（GetTCP/UDPListenResp 内部走 per-queue 锁），无阻塞等待。
 //   - 不解析 proto：try_* 是「原始 drain」原语，需 proto 解析的消费请用阻塞版 listen。
-//   - queue 空是成功无消息，返回 (nil, nil)，不记 LastActionError。
+//   - queue 空是成功无消息，返回 (nil, nil)，不上抛 err table。
 //   - 接收 WireBytes 仍由 Context 累计（与 tcp_listen 一致）。
 func networkTryListen(L *lua.LState, protocol string) int {
 	ctx := GetContext(L)
@@ -1015,14 +957,12 @@ func networkTryListen(L *lua.LState, protocol string) int {
 	adp := ctx.Resolver.Resolve(protocol + ":" + service)
 	if adp == nil {
 		detail := "service=" + service + " codec 未映射（resolver.Resolve(" + protocol + ":" + service + ") nil）"
-		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
 		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
 	}
 	route := luaValueToRoute(L.Get(2))
 	routeKey := adp.ExpectedRouteKey(route)
 	if routeKey == "" {
 		detail := "service=" + service + " routeKey 解析失败（codec 未映射或监听路由无效）"
-		rememberFrameworkErr(ctx, errcode.ErrEncodeFailed, detail)
 		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), detail), lua.LNil)
 	}
 
@@ -1034,7 +974,7 @@ func networkTryListen(L *lua.LState, protocol string) int {
 	}
 
 	if exchange == nil {
-		// 队列空：成功无消息（非错误路径，不记 LastActionError，避免污染失败统计）。
+		// 队列空：成功无消息（非错误路径，不上抛 err table，避免污染失败统计）。
 		return pushResult(L, lua.LNil, lua.LNil)
 	}
 
@@ -1043,7 +983,6 @@ func networkTryListen(L *lua.LState, protocol string) int {
 
 	if exchange.HeaderErr != 0 {
 		detail := headerErrDetail(ctx, protocol+":"+service, exchange.HeaderErr, service, routeKey)
-		rememberHeaderErr(ctx, exchange.HeaderErr, service, routeKey)
 		return pushResult(L, newErrTable(L, int(exchange.HeaderErr), detail), lua.LString(string(respBody)))
 	}
 

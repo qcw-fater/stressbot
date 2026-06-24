@@ -72,7 +72,7 @@ func buildActionError(code int, detail, scriptName string) error {
 }
 
 // errTableFromActionErr 从 *engine.ActionError 提取 code+detail 构造 err table（不压栈）。
-// 供“网络层已有完整 ActionError”的分支使用（替代 rememberActionErr）。
+// 供“网络层已有完整 ActionError”的分支使用。
 func errTableFromActionErr(L *lua.LState, err error) *lua.LTable {
 	var ae *engine.ActionError
 	if errors.As(err, &ae) {
