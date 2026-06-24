@@ -22,7 +22,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Button, Card, Divider, InputNumber, Select, Space, Switch, Typography, message } from 'antd';
+import { Button, Card, InputNumber, Select, Space, Switch, Typography, message } from 'antd';
 import { DeleteOutlined, DownOutlined, PlusOutlined, UpOutlined } from '@ant-design/icons';
 import type { AlgoMeta, CodecSchema, FlagBit, PipelineStep } from '@/types/codec';
 import {
@@ -132,7 +132,7 @@ export function PipelineEditor({ raw, schema, onEdit }: PipelineEditorProps) {
       className="pce-bench pipeline-bench"
       title={
         <Space size={8} align="center">
-          <span className="pce-bench-title">PIPELINE</span>
+          <span className="pce-bench-title">管线</span>
           <Typography.Text type="secondary" className="pce-bench-meta">
             {steps.length} steps · encode 顺序，decode 自动反序
           </Typography.Text>
@@ -314,9 +314,10 @@ function PipelineStepCard({
           </Typography.Text>
         )}
 
-        {/* ── 组2：输入处理（encrypt 偏移 / checksum·hash over / 算法 params） ── */}
         {(isEncrypt || isStandaloneDigest || selectedAlgo) && (
-          <Divider style={{ margin: '8px 0' }} dashed />
+          <Typography.Text type="secondary" style={{ fontSize: 11, letterSpacing: '0.04em', marginTop: 4 }}>
+            输入处理
+          </Typography.Text>
         )}
         {/* encrypt 专属 */}
         {isEncrypt && (
@@ -366,8 +367,9 @@ function PipelineStepCard({
         {/* 动态 params：按选中算法的 AlgoParam[] 渲染字段。algo 元数据外的残留键保留在 raw。 */}
         <ParamsDynamic step={step} algo={selectedAlgo} onPatch={patch} />
 
-        {/* ── 组3：输出与条件（produces / when） ── */}
-        <Divider style={{ margin: '8px 0' }} dashed />
+        <Typography.Text type="secondary" style={{ fontSize: 11, letterSpacing: '0.04em', marginTop: 4 }}>
+          输出与条件
+        </Typography.Text>
 
         {/* produces */}
         <ProducesSubform step={step} onPatch={patch} />
