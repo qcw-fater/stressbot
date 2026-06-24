@@ -20,15 +20,10 @@ export interface ByteStripProps {
 }
 
 const MIN_BYTE_PX = 12;
-const MAX_BYTE_PX = 32;
 const DEFAULT_CONTAINER_PX = 640;
 const OFFSET_LABEL_MIN_PX = 42;
 const FIELD_NAME_MIN_PX = 44;
 const DENSE_HEADER_THRESHOLD = 32;
-
-function clamp(n: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, n));
-}
 
 function tickStepFor(totalBytes: number): number {
   if (totalBytes <= 8) return 1;
@@ -94,9 +89,10 @@ export function ByteStrip({ schema, selectedIndex, onSelect }: ByteStripProps) {
 
   const rulerPadPx = rulerPadFor(totalBytes);
   const availableTrackPx = Math.max(0, containerWidth - rulerPadPx * 2);
+  // 字节尺撑满可用宽度（短 header 也撑满，不右侧留白）；长 header 触底 MIN_BYTE_PX 后横向滚动。
   const pxPerByte = totalBytes > 0
-    ? clamp(availableTrackPx / totalBytes, MIN_BYTE_PX, MAX_BYTE_PX)
-    : MAX_BYTE_PX;
+    ? Math.max(MIN_BYTE_PX, availableTrackPx / totalBytes)
+    : MIN_BYTE_PX;
   const trackWidthPx = totalBytes * pxPerByte;
   const innerWidthPx = trackWidthPx + rulerPadPx * 2;
   const byteLeft = (byte: number) => rulerPadPx + byte * pxPerByte;

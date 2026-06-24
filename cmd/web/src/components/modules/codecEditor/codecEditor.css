@@ -481,9 +481,19 @@
 .pce-status-details { width: 100%; }
 .pce-status-list { margin: 0; padding-left: 18px; max-height: 120px; overflow: auto; font-size: 12px; }
 
-/* 分区 Tabs */
-.pce-tabs { flex: 0 0 auto; }
-.pce-tabs .ant-tabs-nav { margin-bottom: 0; }
+/* 分区 Tabs：撑满 stage，nav 固定顶部，content-holder 统一滚动 */
+.pce-tabs {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pce-tabs .ant-tabs-nav { margin-bottom: 0; flex: none; }
+.pce-tabs > .ant-tabs-content-holder {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
 
 /* 主舞台：随 tab 切换，flex 撑满剩余 */
 .pce-stage {
@@ -497,11 +507,8 @@
   background: var(--bg-panel);
 }
 
-/* 帧布局 tab 内部 */
+/* 帧布局 tab 内部（自然高度，由 content-holder 统一滚动） */
 .frame-tab {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
