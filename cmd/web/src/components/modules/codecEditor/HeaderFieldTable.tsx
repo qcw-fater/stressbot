@@ -181,8 +181,8 @@ export function HeaderFieldTable({ raw, schema, selectedIndex, onSelect, onEdit 
     <div className="header-fields-panel">
       <div className="pce-bench-header header-fields-header">
         <div>
-          <Typography.Text className="pce-bench-title">HEADER FIELDS</Typography.Text>
-          <Typography.Text className="pce-bench-meta">{fields.length} fields · offset / size / type / role</Typography.Text>
+          <Typography.Text className="pce-bench-title">字段表</Typography.Text>
+          <Typography.Text className="pce-bench-meta">{fields.length} 字段 · offset / size / type / role</Typography.Text>
         </div>
         <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={addField}>
           添加字段
