@@ -41,67 +41,68 @@ export function RouteKeyEditor({ raw, schema, onEdit }: RouteKeyEditorProps) {
       className="pce-bench route-bench"
       title={
         <Space size={8} align="center">
-          <span className="pce-bench-title">ROUTE KEY</span>
+          <span className="pce-bench-title">路由键</span>
           <Typography.Text type="secondary" className="pce-bench-meta">模板与示例</Typography.Text>
         </Space>
       }
       styles={{ body: { padding: 12 } }}
     >
-      <Space direction="vertical" size={8} style={{ width: '100%' }}>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          模板中的 {`{name}`} 占位需对应 role:&quot;route&quot; 字段，如 {`{cmd}:{act}`}
-        </Typography.Text>
-        <Input
-          size="small"
-          value={template}
-          placeholder="{cmd}:{act}"
-          onChange={(e) => onEdit(setRouteKeyTemplate(raw, e.target.value))}
-        />
-
-        {/* route 字段清单 */}
-        <div>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            可用 route 字段：
-          </Typography.Text>
-          {routeFields.length === 0 ? (
-            <Typography.Text type="secondary" style={{ fontSize: 12, marginLeft: 6 }}>
-              （当前 header 无 role:&quot;route&quot; 字段）
+      <div className="split-2">
+        {/* 左：模板编辑 + 校验 */}
+        <div className="split-2-left">
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              模板中的 {`{name}`} 占位需对应 role:&quot;route&quot; 字段，如 {`{cmd}:{act}`}
             </Typography.Text>
-          ) : (
-            <Space size={4} wrap style={{ marginTop: 4 }}>
-              {routeFields.map((n) => (
-                <Tag key={n} style={{ fontSize: 12 }}>
-                  {`{${n}}`}
-                </Tag>
-              ))}
-            </Space>
-          )}
+            <Input
+              size="small"
+              value={template}
+              placeholder="{cmd}:{act}"
+              onChange={(e) => onEdit(setRouteKeyTemplate(raw, e.target.value))}
+            />
+            <div>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>可用 route 字段：</Typography.Text>
+              {routeFields.length === 0 ? (
+                <Typography.Text type="secondary" style={{ fontSize: 12, marginLeft: 6 }}>
+                  （当前 header 无 role:&quot;route&quot; 字段）
+                </Typography.Text>
+              ) : (
+                <Space size={4} wrap style={{ marginTop: 4 }}>
+                  {routeFields.map((n) => (
+                    <Tag key={n} style={{ fontSize: 12 }}>{`{${n}}`}</Tag>
+                  ))}
+                </Space>
+              )}
+            </div>
+            {unknown.length > 0 && (
+              <Alert
+                type="error"
+                showIcon
+                style={{ padding: '6px 12px' }}
+                message={
+                  <span style={{ fontSize: 12 }}>
+                    未知占位：{unknown.map((u) => `{${u}}`).join(' ')}（必须指向某个 route 字段）
+                  </span>
+                }
+              />
+            )}
+          </Space>
         </div>
 
-        {/* 未知占位提示（不阻塞编辑） */}
-        {unknown.length > 0 && (
-          <Alert
-            type="error"
-            showIcon
-            style={{ padding: '6px 12px' }}
-            message={
-              <span style={{ fontSize: 12 }}>
-                未知占位：{unknown.map((u) => `{${u}}`).join(' ')}（必须指向某个 route 字段）
-              </span>
-            }
-          />
-        )}
-
-        {/* 样例 routeKey */}
-        <div>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            样例：
-          </Typography.Text>{' '}
-          <Typography.Text code style={{ fontSize: 12 }}>
-            {sample || '（空）'}
+        {/* 右：实时样例 */}
+        <div className="split-2-right">
+          <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
+            样例 routeKey
           </Typography.Text>
+          <div style={{
+            fontFamily: 'monospace', fontSize: 16, fontWeight: 600,
+            padding: '10px 12px', background: 'var(--hover-bg)', borderRadius: 6,
+            wordBreak: 'break-all', minHeight: 44, display: 'flex', alignItems: 'center',
+          }}>
+            {sample || <Typography.Text type="secondary" style={{ fontSize: 12 }}>（空）</Typography.Text>}
+          </div>
         </div>
-      </Space>
+      </div>
     </Card>
   );
 }
