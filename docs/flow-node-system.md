@@ -624,7 +624,7 @@ type ActionDef struct {
 2. 当前 Robot 主流程获取独占 LState
 3. 调用 `luaPool.RunActionScript(L, scriptName)` 同步执行脚本
 4. 阻塞型 Lua API 只暂停当前主流程；connectionPump 与声明式心跳继续独立运行
-5. 返回码 != 0 时返回 `ErrLuaExitCode`
+5. 脚本 `return nil` 表示成功；`return err table` 时由 runtime 重建 `*ActionError` 透传（含 Kind/Code/Detail）；返回 number 等非法值 fail loud（报错）
 
 ## 10. FieldBind -- 字段绑定
 

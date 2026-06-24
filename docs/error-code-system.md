@@ -138,7 +138,7 @@ type CodeInfo struct {
 | 51 | `ErrLuaNotInit` | `LUA_NOT_INIT` | Lua 运行时未初始化（Robot 的 luaPool 或 l 为 nil） |
 | 52 | `ErrLuaNoScript` | `LUA_NO_SCRIPT` | lua 动作缺少 script 配置（ActionDef.Script 为空） |
 | 53 | `ErrLuaExecFailed` | `LUA_EXEC_FAILED` | Lua 脚本执行异常（RunActionScript 返回 error） |
-| 54 | `ErrLuaExitCode` | `LUA_EXIT_CODE` | Lua 脚本返回非零退出码（code != 0） |
+| 54 | `ErrLuaScriptCheck` | `LUA_SCRIPT_CHECK` | 脚本校验失败（字段缺失/值不符等业务断言） |
 
 ### 3.7 回调层（61-70）
 
@@ -185,7 +185,7 @@ var codeRegistry = []CodeInfo{
     {51, "LUA_NOT_INIT",     KindFramework},
     {52, "LUA_NO_SCRIPT",    KindFramework},
     {53, "LUA_EXEC_FAILED",  KindFramework},
-    {54, "LUA_EXIT_CODE",    KindFramework},
+    {54, "LUA_SCRIPT_CHECK", KindFramework},
     {61, "CALLBACK_LUA",     KindFramework},
     {62, "CALLBACK_PARSE",   KindFramework},
 }
@@ -399,21 +399,32 @@ errcode（顶层包，无业务依赖）
 | Lua 运行时未初始化 | `NewActionError(ErrLuaNotInit, "")` |
 | lua 动作缺少 script 配置 | `NewActionError(ErrLuaNoScript, "")` |
 | 脚本执行异常 | `NewActionError(ErrLuaExecFailed, "script=...", err)` |
-| 脚本返回非零退出码 | `NewActionError(ErrLuaExitCode, "script=... code=...")` |
+| 脚本 `return err table` | runtime 解析 table 重建 `*ActionError`（携带 Kind/Code/Detail）透传；脚本断言类失败（字段缺失/值不符）使用 `ErrLuaScriptCheck` |
+| 脚本返回 number 等非法值 | fail loud（报错），不再走旧式 code 退出码路径 |
 
 ### 7.6 Lua 桥适配 — `script/api_network.go`
 
-NetSender 接口签名变更后，Lua API 只向脚本返回业务结果，WireBytes 由 `script.Context` 自动累计到当前 action/callback：
+NetSender 接口返回 err table 后，Lua API 直接把 err table 透传给脚本，WireBytes 由 `script.Context` 自动累计到当前 action/callback，**不再折算回 errcode**：
 
 ```lua
-local code, body = network.tcp_request("logic", route, msg, "ResMsg")
+-- 请求-响应类：双返回值 (err, data)
+local err, body = network.tcp_request("logic", route, msg, "ResMsg")
 -- 少数请求路由和响应路由不同的接口可用 route 版本，返回约定一致
-local code2, body2 = network.tcp_request_route("logic", reqRoute, respRoute, msg, "ResMsg")
--- code == 0       → 成功
--- code 为 errcode → 框架错误码（1-99）或服务端错误码（>=100）
+local err2, body2 = network.tcp_request_route("logic", reqRoute, respRoute, msg, "ResMsg")
+-- err == nil → 成功，body 为响应数据
+-- err 为 table → 失败（含 code/detail，框架错误码 1-99 或服务端错误码 >=100）
+
+-- HTTP 请求：三返回值 (err, status, body)
+local err, status, body = network.http_request(url, method, headers, bodyData)
+-- err == nil → 成功
+
+-- 发送/连接类：单返回值 err
+local err = network.tcp_send("logic", route, msg)
+local err = network.tcp_connect("logic")
+-- err == nil → 成功；err 为 table → 失败
 ```
 
-Go 侧改造：调用 `ctx.NetSender.*` 时，把新接口返回的 `error` 折算回 errcode 返回给 Lua；脚本不再接收或返回 send/recv。
+Go 侧改造：调用 `ctx.NetSender.*` 时直接拿到 err table，原样返回给 Lua；脚本不再接收或返回 send/recv，也不再处理 errcode 折算。
 
 ---
 
