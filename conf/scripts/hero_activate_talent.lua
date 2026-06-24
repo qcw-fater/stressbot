@@ -45,13 +45,10 @@ function execute(r)
 
     local err = network.tcp_send("logic", {cmd=6, act=5}, msg)
     if err then
-        local c = (err and err.code) or 3
         log.warn("激活英雄天赋发送失败: service=logic route=6:5 heroId=" .. tostring(heroId)
             .. " talentIndex=" .. tostring(talentIndex)
-            .. " code=" .. tostring(c) .. " detail=" .. tostring(err.detail))
-        return robot.error(c, "激活英雄天赋发送失败: heroId=" .. tostring(heroId)
-            .. " talentIndex=" .. tostring(talentIndex)
-            .. " code=" .. tostring(c) .. " detail=" .. tostring(err.detail))
+            .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+        return err
     end
 
     log.debug("激活英雄天赋已发送: heroId=" .. tostring(heroId)

@@ -46,19 +46,13 @@ function execute(r)
     -- 通过 UDP 发送（带协议头 CMD=4, ACT=11）
     local err = network.udp_send("battle", {cmd=4, act=11}, frameData)
     if err then
-        local c = (err and err.code) or 3
         log.warn("SyncFrame 发送失败: frame=" .. tostring(frameCount)
             .. " packageIndex=" .. tostring(packageIndex)
             .. " battleId=" .. tostring(battleId)
             .. " fighterIndex=" .. tostring(fighterIndex)
             .. " battleAck=" .. tostring(battleAck)
-            .. " code=" .. tostring(c) .. " detail=" .. tostring(err.detail))
-        return robot.error(c, "SyncFrame 发送失败: frame=" .. tostring(frameCount)
-            .. " packageIndex=" .. tostring(packageIndex)
-            .. " battleId=" .. tostring(battleId)
-            .. " fighterIndex=" .. tostring(fighterIndex)
-            .. " battleAck=" .. tostring(battleAck)
-            .. " code=" .. tostring(c) .. " detail=" .. tostring(err.detail))
+            .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+        return err
     end
 
     -- 每 20 帧打一次 debug 日志：真实上限由 conf/flow.json 的 syncLoop.loopCount 控制。

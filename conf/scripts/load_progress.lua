@@ -20,15 +20,11 @@ function execute(r)
 
     local err = network.tcp_send("battle", {cmd=4, act=7}, msg)
     if err then
-        local c = (err and err.code) or 3
         log.warn("LoadProgress 发送失败: progress=" .. tostring(progress)
             .. " battleId=" .. tostring(battleId)
             .. " fighterIndex=" .. tostring(fighterIndex)
-            .. " code=" .. tostring(c) .. " detail=" .. tostring(err.detail))
-        return robot.error(c, "LoadProgress 发送失败: progress=" .. tostring(progress)
-            .. " battleId=" .. tostring(battleId)
-            .. " fighterIndex=" .. tostring(fighterIndex)
-            .. " code=" .. tostring(c) .. " detail=" .. tostring(err.detail))
+            .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+        return err
     end
 
     if progress >= 100 then
