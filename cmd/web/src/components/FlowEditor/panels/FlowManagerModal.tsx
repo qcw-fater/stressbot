@@ -1,5 +1,7 @@
 /**
  * 流程管理面板。
+ *
+ * 已保存流程存放在服务器流程模板库（后端 MySQL），不再使用浏览器本地存储。
  */
 
 import { App as AntApp, Button, Input, Modal, Space, Table, Popconfirm, Tooltip } from 'antd';
@@ -33,6 +35,10 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
     try {
       const data = await listFlows();
       setFlows(data);
+    } catch (e) {
+      // 服务器未启用流程库等错误：给出提示并置空，避免残留旧列表。
+      message.error(`加载流程列表失败：${(e as Error).message}`);
+      setFlows([]);
     } finally {
       setLoading(false);
     }
@@ -116,12 +122,12 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
 
   const handleOpen = async (id: string, name: string) => {
     try {
-      const record = await getFlow(id);
-      if (!record) {
+      const detail = await getFlow(id);
+      if (!detail) {
         message.error('流程不存在或已损坏');
         return;
       }
-      loadFromTaskFlow(record.flow, record.layout);
+      loadFromTaskFlow(detail.flow, detail.layout);
       message.success(`已打开流程 "${name}"`);
       onClose();
     } catch (e) {
@@ -192,11 +198,18 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
       },
     },
     {
+      title: '节点',
+      dataIndex: 'nodeCount',
+      key: 'nodeCount',
+      width: 70,
+      render: (v: number) => <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{v}</span>,
+    },
+    {
       title: '更新时间',
       dataIndex: 'updatedAt',
       key: 'updatedAt',
       width: 160,
-      render: (v: number) => <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{dayjs(v).format('YYYY-MM-DD HH:mm:ss')}</span>,
+      render: (v: string) => <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{dayjs(v).format('YYYY-MM-DD HH:mm:ss')}</span>,
     },
     {
       title: '操作',
@@ -225,7 +238,7 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
 
   return (
     <Modal
-      title="本地流程管理"
+      title="流程管理"
       open={open}
       onCancel={handleModalClose}
       footer={null}

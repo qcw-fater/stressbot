@@ -142,17 +142,19 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 	_, err = tx.Exec(`
 		INSERT INTO task_history (id, name, state, total_bots, agent_count, active_agent_count,
 			created_at, started_at, stopped_at, duration_sec, error_msg,
-			debug_mode, config_summary, stage_count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			debug_mode, config_summary, stage_count, flow_template_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
 			state=VALUES(state), stopped_at=VALUES(stopped_at),
 			duration_sec=VALUES(duration_sec), error_msg=VALUES(error_msg),
 			stage_count=VALUES(stage_count),
-			active_agent_count=VALUES(active_agent_count)
+			active_agent_count=VALUES(active_agent_count),
+			flow_template_id=VALUES(flow_template_id)
 	`,
 		task.ID, task.Name, string(task.State), task.TotalBots, agentCount, activeAgentCount,
 		task.CreatedAt, task.StartedAt, task.StoppedAt, durationSec, task.ErrorMsg,
 		task.Config.RobotConfig.DebugMode, summaryJSON, stageCount,
+		sql.NullString{String: task.FlowTemplateID, Valid: task.FlowTemplateID != ""},
 	)
 	if err != nil {
 		return fmt.Errorf("insert task_history: %w", err)

@@ -50,6 +50,10 @@ import { hasSyncDiff, listProto, listScript, subtractSyncResult, type BaselineSy
 import { checkTaskResourcesAgainstBaseline } from '@/services/taskResourceDiff';
 import { syncFlowScriptsToIdb, collectFlowScriptNames } from '@/services/scriptSync';
 import { useFlowStore } from '@/components/FlowEditor/store/flowStore';
+import { listFlows, type ManagedFlow } from '@/components/FlowEditor/store/flowManagerStore';
+import { getFlowTemplate } from '@/services/flowsApi';
+import type { FlowJson } from '@/components/FlowEditor/codec/flowToJson';
+import type { FlowLayout } from '@/types/editor';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
 import { BaselineSyncModal } from '@/components/modules/BaselineSyncModal';
@@ -147,8 +151,49 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
   const [taskDiffResult, setTaskDiffResult] = useState<BaselineSyncResult | null>(null);
   const [diffChoiceOpen, setDiffChoiceOpen] = useState(false);
   const [diffResolveOpen, setDiffResolveOpen] = useState(false);
+  // 流程来源：当前画布 / 已保存流程（服务器流程模板库）
+  const [flowSource, setFlowSource] = useState<'canvas' | 'saved'>('canvas');
+  const [savedFlows, setSavedFlows] = useState<ManagedFlow[]>([]);
+  const [selectedFlowId, setSelectedFlowId] = useState<string | undefined>(undefined);
 
-  // 弹窗打开 → flow 引用脚本 gap-fill + 收集本地资源列表。
+  // 解析当前选中的流程：当前画布直接取 flowStore；已保存流程从服务器读详情。
+  // 返回 null 表示未选中（已保存流程但还没选），调用方据此拦截。
+  const resolveSelectedFlow = async (): Promise<{
+    flow: FlowJson;
+    layout?: FlowLayout;
+    flowTemplateId?: string;
+  } | null> => {
+    if (flowSource === 'canvas') {
+      const st = useFlowStore.getState();
+      return { flow: st.toTaskFlow(), layout: st.layout };
+    }
+    if (!selectedFlowId) return null;
+    // 已保存流程：错误冒泡（如服务器未启用流程库），由调用方 showApiError 展示真实原因。
+    const detail = await getFlowTemplate(selectedFlowId);
+    return { flow: detail.flow, layout: detail.layout, flowTemplateId: detail.id };
+  };
+
+  // 弹窗打开 → 加载已保存流程列表（流程模板库）。
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await listFlows();
+        if (cancelled) return;
+        setSavedFlows(data);
+        // 保留已选；若失效则默认第一个
+        setSelectedFlowId((cur) => (cur && data.some((f) => f.id === cur) ? cur : data[0]?.id));
+      } catch {
+        if (!cancelled) setSavedFlows([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  // 弹窗打开 / 切换流程来源 / 选择已保存流程 → flow 引用脚本 gap-fill + 收集本地资源列表。
   // 注意：与服务器基线的差异检查不在打开时做，而是在点击启动时（handleSubmit →
   // checkTaskResourcesAgainstBaseline），有冲突再弹二选一（逐项处理 / 覆盖运行）。
   useEffect(() => {
@@ -157,10 +202,15 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
     setSyncing(true);
     (async () => {
       try {
-        const flow = useFlowStore.getState().toTaskFlow();
-        const refNames = collectFlowScriptNames(flow);
+        const sel = await resolveSelectedFlow();
+        if (!sel) {
+          setRefScriptCount(0);
+          setMissingScripts([]);
+          return;
+        }
+        const refNames = collectFlowScriptNames(sel.flow);
         // flow 引用脚本 gap-fill
-        const scriptSync = await syncFlowScriptsToIdb(flow);
+        const scriptSync = await syncFlowScriptsToIdb(sel.flow);
         // 收集 IDB 全集
         const [p, s] = await Promise.all([listProto(), listScript()]);
         if (cancelled) return;
@@ -168,6 +218,10 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
         setScripts(s);
         setRefScriptCount(refNames.length);
         setMissingScripts(scriptSync.missing);
+      } catch {
+        // 已保存流程读取失败（如服务器未启用）：清空统计，启动时再报真实错误。
+        setRefScriptCount(0);
+        setMissingScripts([]);
       } finally {
         if (!cancelled) setSyncing(false);
       }
@@ -175,7 +229,9 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
     return () => {
       cancelled = true;
     };
-  }, [open]);
+    // resolveSelectedFlow 依赖 flowSource/selectedFlowId，只在这两者变化时重跑
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, flowSource, selectedFlowId]);
 
   // 弹窗打开时自动生成任务名 + 调试模式装填预设值。
   const filledRef = useRef(false);
@@ -243,7 +299,8 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
     syncing ||
     !taskName.trim() ||
     peakBots <= 0 ||
-    !rampUpValid;
+    !rampUpValid ||
+    (flowSource === 'saved' && !selectedFlowId);
   const startModeColor = debugMode ? 'var(--mode-debug-color)' : 'var(--mode-test-color)';
 
   function onToggleDebug(v: boolean) {
@@ -264,7 +321,10 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
     }
   }
 
-  const executeStart = async (handledDiff?: BaselineSyncResult | null) => {
+  const executeStart = async (
+    sel: { flow: FlowJson; layout?: FlowLayout; flowTemplateId?: string },
+    handledDiff?: BaselineSyncResult | null,
+  ) => {
     const id = await startTask({
       name: taskName,
       totalBots: rampUpEnabled ? rampUpSum : totalBots,
@@ -274,6 +334,9 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
         rampUp: rampUpEnabled ? { stages: rampUpStages } : undefined,
       },
       deadline: deadline ?? undefined,
+      flow: sel.flow,
+      flowLayout: sel.layout,
+      flowTemplateId: sel.flowTemplateId,
     });
     if (handledDiff) {
       const { pendingSyncResult, setPendingSyncResult } = useEditorStore.getState();
@@ -286,19 +349,22 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
-      const flow = useFlowStore.getState().toTaskFlow();
-      const scriptSync = await syncFlowScriptsToIdb(flow);
+      const sel = await resolveSelectedFlow();
+      if (!sel) {
+        throw new Error('请先选择已保存的流程');
+      }
+      const scriptSync = await syncFlowScriptsToIdb(sel.flow);
       setMissingScripts(scriptSync.missing);
       if (scriptSync.missing.length > 0) {
         throw new Error(`缺少脚本：${scriptSync.missing.join(', ')}。请在资源管理上传，或在动作编辑器中直接编写。`);
       }
-      const diff = await checkTaskResourcesAgainstBaseline(flow);
+      const diff = await checkTaskResourcesAgainstBaseline(sel.flow);
       if (hasSyncDiff(diff)) {
         setTaskDiffResult(diff);
         setDiffChoiceOpen(true);
         return;
       }
-      await executeStart();
+      await executeStart(sel);
     } catch (e) {
       showApiError(e);
     } finally {
@@ -311,7 +377,9 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
     setDiffChoiceOpen(false);
     setSubmitting(true);
     try {
-      await executeStart(taskDiffResult);
+      const sel = await resolveSelectedFlow();
+      if (!sel) throw new Error('请先选择已保存的流程');
+      await executeStart(sel, taskDiffResult);
     } catch (e) {
       showApiError(e);
     } finally {
@@ -324,7 +392,9 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
     setDiffResolveOpen(false);
     setSubmitting(true);
     try {
-      await executeStart(handled);
+      const sel = await resolveSelectedFlow();
+      if (!sel) throw new Error('请先选择已保存的流程');
+      await executeStart(sel, handled);
     } catch (e) {
       showApiError(e);
     } finally {
@@ -448,6 +518,33 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
       </div>
 
       <Form layout="vertical">
+        <Form.Item label="流程来源">
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <Segmented
+              size="small"
+              value={flowSource}
+              onChange={(v) => setFlowSource(v as 'canvas' | 'saved')}
+              options={[
+                { label: '当前画布', value: 'canvas' },
+                { label: '已保存流程', value: 'saved' },
+              ]}
+            />
+            {flowSource === 'saved' && (
+              <Select
+                size="small"
+                placeholder="选择已保存的流程"
+                value={selectedFlowId}
+                onChange={setSelectedFlowId}
+                options={savedFlows.map((f) => ({
+                  value: f.id,
+                  label: `${f.name}（${f.nodeCount} 节点 · ${dayjs(f.updatedAt).format('MM-DD HH:mm')}）`,
+                }))}
+                notFoundContent="暂无已保存流程"
+                style={{ width: '100%' }}
+              />
+            )}
+          </Space>
+        </Form.Item>
         <Form.Item label="任务名" required>
           <Input value={taskName} onChange={(e) => setTaskName(e.target.value)} placeholder="例：200v200 v1.2" />
         </Form.Item>

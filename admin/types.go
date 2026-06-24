@@ -84,6 +84,9 @@ type Task struct {
 	SharedUsed bool `json:"sharedUsed,omitempty"`
 	// SharedRunID 共享状态命名空间 runId（= 任务 ID），任务终态时据此统一清理。
 	SharedRunID string `json:"sharedRunId,omitempty"`
+	// FlowTemplateID 来源流程模板 ID（可选，逻辑外键）。从模板启动时记录用于溯源；
+	// 历史实际配置仍以 task_config_archive.flow_json 为准，不反查此 ID 取 flow。
+	FlowTemplateID string `json:"flowTemplateId,omitempty"`
 }
 
 // TaskConfig 包含创建任务时上传的所有资源。
