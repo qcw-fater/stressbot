@@ -19,7 +19,7 @@ import {
   Modal,
   Segmented,
   Select,
-  Space,
+  Tabs,
   Tooltip,
   Typography,
   Upload,
@@ -448,53 +448,49 @@ export function ProtocolConfigEditor() {
       : `${liveErrors.length} 处问题：${liveErrors[0]}`;
 
   return (
-    <Flex vertical gap={0} className="pce-root">
-      <div className="pce-command-rail">
-        <div className="pce-command-group pce-command-primary">
-          <div className="pce-target-block">
-            <Typography.Text className="pce-target-kicker">当前对象</Typography.Text>
-            <Space size={8} wrap align="center">
-              <Select
-                size="small"
-                style={{ minWidth: 220 }}
-                value={activeConn ?? undefined}
-                placeholder={files.length === 0 ? '暂无连接' : '选择连接'}
-                loading={loading}
-                onChange={handleSwitch}
-                options={selectOptions}
-              />
-              <Typography.Text code className="pce-target-name">{activeLabel}</Typography.Text>
-              <span className="pce-source-label">{source ?? '尚未加载'}</span>
-            </Space>
-          </div>
-          <Space size={6} wrap>
+    <Flex vertical gap={0} className="pce-shell">
+      <div className="pce-cmdbar">
+        <div className="pce-cmdbar-target">
+          <Typography.Text className="pce-target-kicker">当前对象</Typography.Text>
+          <Select
+            size="small"
+            style={{ minWidth: 200 }}
+            value={activeConn ?? undefined}
+            placeholder={files.length === 0 ? '暂无连接' : '选择连接'}
+            loading={loading}
+            onChange={handleSwitch}
+            options={selectOptions}
+          />
+          <Typography.Text code className="pce-target-name">{activeLabel}</Typography.Text>
+          <span className="pce-source-label">{source ?? '尚未加载'}</span>
+        </div>
+
+        <div className="pce-cmdbar-actions">
+          <div className="pce-cmdbar-group">
             <Tooltip title="新建连接（输入 <协议>:<服务名>，如 tcp:logic）">
               <Button size="small" icon={<PlusOutlined />} onClick={() => openCreate('new')}>新建</Button>
             </Tooltip>
             <Tooltip title="复制当前连接为新连接">
-              <Button size="small" icon={<CopyOutlined />} disabled={activeConn === null || activeConn === '__errors__'} onClick={() => openCreate('copy')}>
-                复制
-              </Button>
+              <Button size="small" icon={<CopyOutlined />} disabled={activeConn === null || activeConn === '__errors__'} onClick={() => openCreate('copy')}>复制</Button>
             </Tooltip>
             <Tooltip title="删除当前连接">
-              <Button size="small" danger icon={<DeleteOutlined />} disabled={activeConn === null || activeConn === '__errors__'} onClick={() => activeConn && handleDelete(activeConn)}>
-                删除
-              </Button>
+              <Button size="small" danger icon={<DeleteOutlined />} disabled={activeConn === null || activeConn === '__errors__'} onClick={() => activeConn && handleDelete(activeConn)}>删除</Button>
             </Tooltip>
+          </div>
+          <span className="pce-cmdbar-divider" />
+          <div className="pce-cmdbar-group">
             <Tooltip title="从服务器拉取全部协议配置到本地">
               <Button size="small" icon={<CloudDownloadOutlined />} loading={pullingBaseline} onClick={onPullBaseline}>从基线载入</Button>
             </Tooltip>
-          </Space>
-        </div>
-
-        <div className="pce-command-group pce-command-actions">
-          <Space size={4} wrap>
             <Upload accept=".json,application/json" beforeUpload={onUpload} showUploadList={false}>
-              <Button icon={<InboxOutlined />} size="small" disabled={activeConn === null}>导入 .json</Button>
+              <Button icon={<InboxOutlined />} size="small" disabled={activeConn === null}>导入</Button>
             </Upload>
+          </div>
+          <span className="pce-cmdbar-divider" />
+          <div className="pce-cmdbar-group">
             <Button onClick={onSave} type="primary" size="small" disabled={activeConn === null}>保存</Button>
             <Button onClick={onClear} danger size="small" disabled={activeConn === null}>清空</Button>
-          </Space>
+          </div>
           {!isErrorsView && (
             <Segmented
               size="small"
@@ -509,23 +505,23 @@ export function ProtocolConfigEditor() {
         </div>
       </div>
 
-      <div className={`pce-validation-strip${liveErrors.length > 0 || loadError ? ' pce-validation-strip-warn' : ''}`}>
-        <Typography.Text className="pce-validation-title">
+      <div className={`pce-status${liveErrors.length > 0 || loadError ? ' pce-status-warn' : ''}`}>
+        <Typography.Text className="pce-status-title">
           {loadError ? '配置文件不存在' : validationSummary}
         </Typography.Text>
-        <Typography.Text type="secondary" className="pce-validation-note">
+        <Typography.Text className="pce-status-note">
           {loadError ? '请新建连接或从基线载入。' : '协议配置启动任务时随连接配置一起下发。'}
         </Typography.Text>
         {activeConn !== null && activeConn !== '__errors__' && liveErrors.length > 1 && (
           <Collapse
             ghost
             size="small"
-            className="pce-validation-details"
+            className="pce-status-details"
             items={[{
               key: 'errors',
               label: `查看全部 ${liveErrors.length} 处问题`,
               children: (
-                <ul className="pce-validation-list">
+                <ul className="pce-status-list">
                   {liveErrors.map((e, i) => <li key={i}>{e}</li>)}
                 </ul>
               ),
@@ -534,30 +530,20 @@ export function ProtocolConfigEditor() {
         )}
       </div>
 
-      {/* === 主内容区（flex:1 撑满浮窗剩余空间，替代 calc(100vh - 440) magic number）=== */}
-      <div className="pce-main">
-        {/* 结构化视图：parse 失败 → 提示切源码 + 降级显示源码 Monaco；成功 → Byte Bench 单列工作台 */}
+      {/* 主舞台：随 tab 切换；源码模式隐藏 Tabs 显示 Monaco */}
+      <div className="pce-stage">
         {showStructView && parsed.raw && parsed.schema ? (
-          <div className="pce-workspace">
-            <FrameLayoutEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
-            <PipelineEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
-            <RouteKeyEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} />
-            <Collapse
-              size="small"
-              className="pce-preview-bench"
-              items={[{
-                key: 'preview',
-                label: <span className="pce-bench-title">PREVIEW · 编解码核对</span>,
-                children: (
-                  <PreviewPanel
-                    raw={parsed.raw}
-                    schema={parsed.schema}
-                    transport={deriveTransport(activeConn)}
-                  />
-                ),
-              }]}
-            />
-          </div>
+          <Tabs
+            size="small"
+            className="pce-tabs"
+            defaultActiveKey="frame"
+            items={[
+              { key: 'frame', label: '帧布局', children: <FrameLayoutEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} /> },
+              { key: 'pipeline', label: '管线', children: <PipelineEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} /> },
+              { key: 'route', label: '路由键', children: <RouteKeyEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} /> },
+              { key: 'preview', label: '预览', children: <PreviewPanel raw={parsed.raw} schema={parsed.schema} transport={deriveTransport(activeConn)} /> },
+            ]}
+          />
         ) : (
           <>
             {!isErrorsView && viewMode === 'struct' && parsed.error && (
@@ -566,7 +552,7 @@ export function ProtocolConfigEditor() {
                 showIcon
                 message="源码不是合法 JSON，请切到源码视图修正"
                 description={parsed.error}
-                className="pce-alert"
+                style={{ margin: 8 }}
               />
             )}
             <div className="pce-source-editor">
