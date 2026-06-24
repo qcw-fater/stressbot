@@ -1,10 +1,14 @@
 package script
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"stressbot/engine"
+	"stressbot/errcode"
 	stresslog "stressbot/utils/log"
 
 	lua "github.com/yuin/gopher-lua"
@@ -36,15 +40,15 @@ func TestChunkCachedAcrossCalls(t *testing.T) {
 	rp := newPoolWithScript(t, "a.lua", `
 		_G.__load_count = (_G.__load_count or 0) + 1   -- 顶层副作用：每次跑 chunk +1
 		function execute(r)
-			return 0
+			return nil
 		end
 	`)
 	L := rp.Acquire()
 	defer L.Close()
 
 	for i := 0; i < 5; i++ {
-		if code, _, _, _, err := rp.RunActionScript(L, "a.lua"); err != nil || code != 0 {
-			t.Fatalf("run %d: code=%d err=%v", i, code, err)
+		if _, _, _, err := rp.RunActionScript(L, "a.lua"); err != nil {
+			t.Fatalf("run %d: err=%v", i, err)
 		}
 	}
 
@@ -65,13 +69,13 @@ func TestRuntimeGlobalsResetOnRelease(t *testing.T) {
 		TOP_CONST = 42                  -- 顶层全局：受保护
 		function execute(r)
 			runtime_leak = 7            -- 运行时全局：应被清理
-			return 0
+			return nil
 		end
 	`)
 	L := rp.Acquire()
 	defer L.Close()
 
-	if _, _, _, _, err := rp.RunActionScript(L, "b.lua"); err != nil {
+	if _, _, _, err := rp.RunActionScript(L, "b.lua"); err != nil {
 		t.Fatal(err)
 	}
 	if L.GetGlobal("runtime_leak") != lua.LNumber(7) {
@@ -93,7 +97,63 @@ func TestMissingExecuteFn(t *testing.T) {
 	rp := newPoolWithScript(t, "c.lua", `local x = 1`)
 	L := rp.Acquire()
 	defer L.Close()
-	if _, _, _, _, err := rp.RunActionScript(L, "c.lua"); err == nil {
+	if _, _, _, err := rp.RunActionScript(L, "c.lua"); err == nil {
 		t.Errorf("期望未定义 execute 报错")
+	}
+}
+
+// TestRunActionScript_ReturnNil 成功路径：脚本 return nil → 无 error。
+func TestRunActionScript_ReturnNil(t *testing.T) {
+	rp := newPoolWithScript(t, "ok.lua", `function execute(r) return nil end`)
+	L := rp.Acquire()
+	defer L.Close()
+	_, _, _, err := rp.RunActionScript(L, "ok.lua")
+	if err != nil {
+		t.Fatalf("return nil 应为成功，实际 err=%v", err)
+	}
+}
+
+// TestRunActionScript_ReturnErrTable 脚本 return robot.error(code, detail) →
+// 重建 *engine.ActionError，code/detail 透传，detail 补 script=。
+func TestRunActionScript_ReturnErrTable(t *testing.T) {
+	rp := newPoolWithScript(t, "err.lua", `
+		function execute(r)
+			return r.error(54, "bad-field")
+		end
+	`)
+	L := rp.Acquire()
+	defer L.Close()
+	_, _, _, err := rp.RunActionScript(L, "err.lua")
+	if err == nil {
+		t.Fatalf("return err table 应产生 error")
+	}
+	var ae *engine.ActionError
+	if !errors.As(err, &ae) {
+		t.Fatalf("error 应为 *engine.ActionError，实际 %T: %v", err, err)
+	}
+	if ae.Code != errcode.ErrLuaScriptCheck {
+		t.Fatalf("code=%d，want ErrLuaScriptCheck(%d)", ae.Code, errcode.ErrLuaScriptCheck)
+	}
+	if !strings.Contains(ae.Detail, "bad-field") {
+		t.Fatalf("detail %q 应含原始 detail \"bad-field\"", ae.Detail)
+	}
+	if !strings.Contains(ae.Detail, "script=") {
+		t.Fatalf("detail %q 应补 script= 上下文", ae.Detail)
+	}
+}
+
+// TestRunActionScript_ReturnNumber_FailLoud 旧式 return code 必须 fail loud。
+func TestRunActionScript_ReturnNumber_FailLoud(t *testing.T) {
+	rp := newPoolWithScript(t, "num.lua", `function execute(r) return 0 end`)
+	L := rp.Acquire()
+	defer L.Close()
+	_, _, _, err := rp.RunActionScript(L, "num.lua")
+	if err == nil {
+		t.Fatalf("return number 应 fail loud，实际 nil")
+	}
+	// 应为框架错误（ErrLuaExecFailed 包装），非 ActionError 透传的脚本业务错误。
+	var ae *engine.ActionError
+	if errors.As(err, &ae) {
+		t.Fatalf("旧式 return number 应包装为框架错误，不应透传 *ActionError（code=%d）", ae.Code)
 	}
 }

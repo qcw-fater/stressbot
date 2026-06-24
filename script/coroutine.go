@@ -121,7 +121,7 @@ func (rp *RuntimePool) startActionCoroutine(L *lua.LState, scriptName string) (*
 // resumeResult 描述一次 Resume 的结果。
 type resumeResult struct {
 	done    bool         // 协程是否已结束
-	code    int          // done 时脚本返回码（首个返回值按 number 解释，action 脚本用）
+	ret     lua.LValue   // done 时脚本首个返回值原始 LValue（action 脚本据此区分 nil / err table / 非法值）
 	retVals []lua.LValue // done 时脚本的全部返回值（boolean 脚本据此取 LBool）
 	wait    *WaitSpec    // 未结束时 yield 出的等待规格
 }
@@ -166,11 +166,11 @@ func (rp *RuntimePool) resumeCoroutine(co *coroutine, ctx *Context, resumeVals [
 				"脚本 %s 的 await_* 被 pcall/coroutine 吞掉（yield 未到达调度器）；"+
 					"await_* 只能在动作脚本顶层直接调用，不可置于 pcall/xpcall 或 coroutine.create 内", co.name)
 		}
-		code := 0
+		var ret lua.LValue = lua.LNil
 		if len(vals) > 0 {
-			code = int(lua.LVAsNumber(vals[0]))
+			ret = vals[0]
 		}
-		return resumeResult{done: true, code: code, retVals: vals}, nil
+		return resumeResult{done: true, ret: ret, retVals: vals}, nil
 	}
 }
 

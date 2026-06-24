@@ -44,47 +44,39 @@ func newTestPool(t *testing.T, scripts map[string]string) *RuntimePool {
 	return rp
 }
 
-func runScript(t *testing.T, rp *RuntimePool, ctx *Context, name string) (int, error) {
+func runScript(t *testing.T, rp *RuntimePool, ctx *Context, name string) error {
 	t.Helper()
 	L := rp.Acquire()
 	defer rp.Release(L)
 	SetContext(L, ctx)
-	code, _, _, _, err := rp.RunActionScript(L, name)
-	return code, err
+	_, _, _, err := rp.RunActionScript(L, name)
+	return err
 }
 
-// TestRunActionScript_NoYield 不含 await 的脚本应在协程首次 resume 即跑完，返回码正确
-// （协程化后与旧 CallByParam 行为等价的回归）。
+// TestRunActionScript_NoYield 不含 await 的脚本应在协程首次 resume 即跑完并成功返回 nil
+// （协程化后与旧 CallByParam 行为等价的回归）。err-table 契约下成功 = return nil。
 func TestRunActionScript_NoYield(t *testing.T) {
 	rp := newTestPool(t, map[string]string{
-		"ret.lua": `function execute(r) return 7 end`,
+		"ret.lua": `function execute(r) return nil end`,
 	})
-	code, err := runScript(t, rp, &Context{}, "ret.lua")
-	if err != nil {
+	if err := runScript(t, rp, &Context{}, "ret.lua"); err != nil {
 		t.Fatalf("不期望 error: %v", err)
-	}
-	if code != 7 {
-		t.Fatalf("code=%d，want 7", code)
 	}
 }
 
 // TestAwaitSleep_YieldsAndResumes 验证 await_sleep yield 出 WaitSleep、被 Waiter 接管、
-// 再 resume 回脚本并跑到 return。
+// 再 resume 回脚本并跑到 return nil（成功）。
 func TestAwaitSleep_YieldsAndResumes(t *testing.T) {
 	rp := newTestPool(t, map[string]string{
 		"sleep.lua": `function execute(r)
   local utils = require("utils")
   utils.sleep(25)
-  return 42
+  return nil
 end`,
 	})
 	w := &recordingWaiter{}
-	code, err := runScript(t, rp, &Context{Waiter: w}, "sleep.lua")
-	if err != nil {
+	if err := runScript(t, rp, &Context{Waiter: w}, "sleep.lua"); err != nil {
 		t.Fatalf("不期望 error: %v", err)
-	}
-	if code != 42 {
-		t.Fatalf("code=%d，want 42", code)
 	}
 	if len(w.specs) != 1 {
 		t.Fatalf("期望 1 次 Await，实际 %d", len(w.specs))
@@ -97,7 +89,7 @@ end`,
 	}
 }
 
-// TestAwaitSleep_MultipleInLoop 循环内多次 await 应逐次 yield/resume，最终正常结束。
+// TestAwaitSleep_MultipleInLoop 循环内多次 await 应逐次 yield/resume，最终正常结束（return nil）。
 func TestAwaitSleep_MultipleInLoop(t *testing.T) {
 	rp := newTestPool(t, map[string]string{
 		"loop.lua": `function execute(r)
@@ -105,16 +97,12 @@ func TestAwaitSleep_MultipleInLoop(t *testing.T) {
   for i = 1, 3 do
     utils.sleep(1)
   end
-  return 0
+  return nil
 end`,
 	})
 	w := &recordingWaiter{}
-	code, err := runScript(t, rp, &Context{Waiter: w}, "loop.lua")
-	if err != nil {
+	if err := runScript(t, rp, &Context{Waiter: w}, "loop.lua"); err != nil {
 		t.Fatalf("不期望 error: %v", err)
-	}
-	if code != 0 {
-		t.Fatalf("code=%d，want 0", code)
 	}
 	if len(w.specs) != 3 {
 		t.Fatalf("期望 3 次 Await，实际 %d", len(w.specs))
@@ -128,11 +116,11 @@ func TestAwaitInsidePcall_FailLoud(t *testing.T) {
 		"pcall.lua": `function execute(r)
   local utils = require("utils")
   pcall(function() utils.sleep(5) end)
-  return 0
+  return nil
 end`,
 	})
 	w := &recordingWaiter{}
-	_, err := runScript(t, rp, &Context{Waiter: w}, "pcall.lua")
+	err := runScript(t, rp, &Context{Waiter: w}, "pcall.lua")
 	if err == nil {
 		t.Fatalf("期望 fail-loud error，实际 nil")
 	}
@@ -150,11 +138,11 @@ func TestAwaitInsideUserCoroutine_FailLoud(t *testing.T) {
   local co = coroutine.create(function() utils.sleep(5) end)
   local ok, err = coroutine.resume(co)
   if not ok then error(err) end
-  return 0
+  return nil
 end`,
 	})
 	w := &recordingWaiter{}
-	_, err := runScript(t, rp, &Context{Waiter: w}, "userco.lua")
+	err := runScript(t, rp, &Context{Waiter: w}, "userco.lua")
 	if err == nil {
 		t.Fatalf("期望 fail-loud error，实际 nil")
 	}
@@ -203,10 +191,10 @@ func TestAwaitWithoutWaiter_FailLoud(t *testing.T) {
 		"nowaiter.lua": `function execute(r)
   local utils = require("utils")
   utils.sleep(5)
-  return 0
+  return nil
 end`,
 	})
-	_, err := runScript(t, rp, &Context{}, "nowaiter.lua")
+	err := runScript(t, rp, &Context{}, "nowaiter.lua")
 	if err == nil {
 		t.Fatalf("期望 fail-loud error，实际 nil")
 	}

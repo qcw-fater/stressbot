@@ -37,7 +37,7 @@ type Context struct {
 	Factory *protox.Factory
 	// Resolver 按「server 串 <proto>:<service>」解析每条连接的 Go SchemaAdapter
 	// （T2-C2-Lua 起取代旧 Context.Adapter）。业务 Lua API（buildPacket / doTCPRequest /
-	// networkUDPSend / networkListen / rememberHeaderErr 等）通过 ctx.Resolver.Resolve
+	// networkUDPSend / networkListen / headerErrDetail 等）通过 ctx.Resolver.Resolve
 	// （"<proto>:<service>"）取该连接的 adapter 后调 Encode/ExpectedRouteKey/DescribeError；
 	// Resolve nil 由调用方 fail loud（不静默兜底）。
 	//
@@ -75,7 +75,6 @@ type Context struct {
 	currentTiming    engine.ActionTiming
 	currentSendBytes int
 	currentRecvBytes int
-	lastActionError  *engine.ActionError
 }
 
 // resetMetrics 在每次 action 脚本开始前清零累加器。
@@ -87,7 +86,6 @@ func (c *Context) resetMetrics() {
 	c.currentTiming = engine.ActionTiming{}
 	c.currentSendBytes = 0
 	c.currentRecvBytes = 0
-	c.lastActionError = nil
 	c.metricsMu.Unlock()
 }
 
@@ -143,37 +141,6 @@ func (c *Context) metrics() (send int, recv int, timing engine.ActionTiming) {
 		out.Requests = append([]engine.RequestTiming(nil), c.currentTiming.Requests...)
 	}
 	return c.currentSendBytes, c.currentRecvBytes, out
-}
-
-// SetLastActionError 记录 Lua 网络 API 最近一次结构化错误。
-// Lua 脚本最终 return 非 0 时，robot 层优先使用它，避免只凭 code 猜 Kind/Detail。
-func (c *Context) SetLastActionError(err *engine.ActionError) {
-	if c == nil {
-		return
-	}
-	c.metricsMu.Lock()
-	c.lastActionError = err
-	c.metricsMu.Unlock()
-}
-
-// LastActionError 返回最近一次 Lua 网络 API 记录的结构化错误。
-func (c *Context) LastActionError() *engine.ActionError {
-	if c == nil {
-		return nil
-	}
-	c.metricsMu.Lock()
-	defer c.metricsMu.Unlock()
-	return c.lastActionError
-}
-
-// ClearLastActionError 清理最近一次结构化错误。
-func (c *Context) ClearLastActionError() {
-	if c == nil {
-		return
-	}
-	c.metricsMu.Lock()
-	c.lastActionError = nil
-	c.metricsMu.Unlock()
 }
 
 // SetContext 将脚本上下文绑定到 LState 的 registry
@@ -391,13 +358,16 @@ func (rp *RuntimePool) PrecompileScripts(dirs []string) error {
 
 // RunActionScript 执行动作脚本。
 //
-// Lua 脚本应定义 `function execute(r)` 函数并只返回 code：
+// Lua 脚本应定义 `function execute(r)` 并返回：
 //
-//	return code -- 0=成功，非 0=失败
+//	return nil            -- 成功
+//	return robot.error(code, detail)  -- 失败（err table，code 由 robot.error 构造）
+//	return <number>       -- 非法：旧式 return code 已废弃，fail loud
 //
 // send/recv WireBytes 由脚本内 network API 自动累计到 Context；脚本额外返回的 send/recv
-// 会被忽略，避免重复统计。
-func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (code, send, recv int, timing engine.ActionTiming, err error) {
+// 会被忽略，避免重复统计。返回的 error 仅为脚本执行框架错误（加载/resume/Waiter）；
+// 脚本业务失败经 err table 重建为 *engine.ActionError 返回。
+func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (send, recv int, timing engine.ActionTiming, err error) {
 	ctx := GetContext(L)
 	if ctx != nil {
 		ctx.resetMetrics()
@@ -411,7 +381,7 @@ func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (code, 
 	// 不含 await 的脚本首次 Resume 即 ResumeOK 跑完，行为与旧 CallByParam 等价。
 	co, lerr := rp.startActionCoroutine(L, scriptName)
 	if lerr != nil {
-		return -1, 0, 0, engine.ActionTiming{}, lerr
+		return 0, 0, engine.ActionTiming{}, lerr
 	}
 	defer co.close()
 
@@ -419,20 +389,29 @@ func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (code, 
 	for {
 		res, rerr := rp.resumeCoroutine(co, ctx, resumeVals)
 		if rerr != nil {
-			return -1, 0, 0, engine.ActionTiming{}, rerr
+			return 0, 0, engine.ActionTiming{}, rerr
 		}
 		if res.done {
-			return res.code, 0, 0, engine.ActionTiming{}, nil
+			// err-table 契约：nil 成功 / err table 失败 / 旧式 number fail loud。
+			if code, detail, isErr := parseErrTable(res.ret); isErr {
+				return 0, 0, engine.ActionTiming{}, buildActionError(code, detail, scriptName)
+			}
+			if res.ret != lua.LNil {
+				return 0, 0, engine.ActionTiming{}, fmt.Errorf(
+					"脚本 %s 返回非法值 %s：须返回 nil（成功）或 err table（失败），旧式 return code 已废弃",
+					scriptName, res.ret.String())
+			}
+			return 0, 0, engine.ActionTiming{}, nil
 		}
 
 		// 协程在 await_* 处 yield：交给 Waiter 协作式等待，再把结果转回 Lua 返回值。
 		if ctx == nil || ctx.Waiter == nil {
-			return -1, 0, 0, engine.ActionTiming{}, fmt.Errorf(
+			return 0, 0, engine.ActionTiming{}, fmt.Errorf(
 				"脚本 %s 调用 await_*，但运行时未接入协作式调度（Waiter 为 nil）", scriptName)
 		}
 		outcome, werr := ctx.Waiter.Await(res.wait)
 		if werr != nil {
-			return -1, 0, 0, engine.ActionTiming{}, werr
+			return 0, 0, engine.ActionTiming{}, werr
 		}
 		resumeVals = rp.buildResumeVals(L, ctx, res.wait, outcome)
 	}

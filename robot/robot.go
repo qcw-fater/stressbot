@@ -591,10 +591,10 @@ func (h *robotActionHandler) ExecuteAction(actionDef *engine.ActionDef) error {
 
 	// 任务取消时的"副作用错误"覆写：
 	// stop 阶段，Lua 脚本（如 match_succeed.lua / connect_battle_tcp.lua）会因
-	// 底层 ctx 取消而拿到 nil/false，但脚本通常硬编码 return 31/1 等具体错误码，
-	// 经 luaCodeToActionErr 映射后变成 LISTEN_TIMEOUT/CONN_NOT_FOUND；
-	// 实际原因是 ACTION_CANCELED。在这里统一矫正，避免 monitor 把 cancel 流量
-	// 误归类为 Timeout/Failure，也避免 executor 重复刷 error 日志。
+	// 底层 ctx 取消而让网络层返回 ErrActionCanceled，或脚本经 err table 重建出
+	// LISTEN_TIMEOUT/CONN_NOT_FOUND 等 ActionError；实际根因是 ACTION_CANCELED。
+	// 在这里统一矫正，避免 monitor 把 cancel 流量误归类为 Timeout/Failure，
+	// 也避免 executor 重复刷 error 日志。
 	if err != nil && h.robot.ctx.Err() != nil {
 		var actionErr *engine.ActionError
 		if errors.As(err, &actionErr) && !isCanceledCode(actionErr.Code) {
@@ -682,6 +682,12 @@ func isCanceledCode(code errcode.ErrorCode) bool {
 // executeLuaAction 执行 lua 脚本动作，返回 (sendBytes, recvBytes, timing, wallClock, err)。
 // timing 由脚本内的网络 API 累加；纯客户端逻辑（如仅 set_secret_key）timing 为零值。
 // wallClock 覆盖主流程同步执行脚本的总耗时。
+//
+// err-table 契约：RunActionScript 返回 nil（脚本成功）/ *engine.ActionError（脚本 return
+// err table 经 buildActionError 重建）/ 其它 error（脚本框架错误，如加载失败/await 非法）。
+// - nil → 成功；
+// - *engine.ActionError → 透传，补 action=<actionDef.Name> 上下文（若 detail 未含）；
+// - 非 ActionError → 包装 ErrLuaExecFailed（detail 带 script=）。
 func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int, int, engine.ActionTiming, time.Duration, error) {
 	if h.robot.l == nil || h.robot.luaPool == nil {
 		stresslog.Error("[ROBOT] Lua 运行时未初始化，无法执行脚本",
@@ -699,64 +705,32 @@ func (h *robotActionHandler) executeLuaAction(actionDef *engine.ActionDef) (int,
 
 	// RunActionScript 内部通过 script.Context 累积每次 request 的独立 RequestTiming，
 	// 这里把结构化 timing 上抛给 RecordAction。
-	code, send, recv, timing, err := h.robot.luaPool.RunActionScript(h.robot.l, actionDef.Script)
+	send, recv, timing, err := h.robot.luaPool.RunActionScript(h.robot.l, actionDef.Script)
 	wallClock := time.Since(start)
-	if err != nil {
-		return 0, 0, timing, wallClock, engine.NewActionError(errcode.ErrLuaExecFailed, "script="+actionDef.Script, err)
+	if err == nil {
+		return send, recv, timing, wallClock, nil
 	}
 
-	if code != 0 {
-		if ctx := script.GetContext(h.robot.l); ctx != nil {
-			if last := ctx.LastActionError(); last != nil && int(last.Code) == code {
-				if !strings.Contains(last.Detail, "script=") {
-					if last.Detail != "" {
-						last.Detail += " "
-					}
-					last.Detail += "script=" + actionDef.Script
-				}
-				return send, recv, timing, wallClock, last
-			}
-		}
-		return send, recv, timing, wallClock, luaCodeToActionErr(code, actionDef.Script)
+	var actionErr *engine.ActionError
+	if errors.As(err, &actionErr) {
+		// 脚本 return err table 重建的 ActionError：透传，补 action= 上下文。
+		actionErr.Detail = appendActionDetail(actionErr.Detail, actionDef.Name)
+		return send, recv, timing, wallClock, actionErr
 	}
-
-	return send, recv, timing, wallClock, nil
+	// 框架错误（脚本加载失败 / await 非法 / 返回非法值 等）：包装 ErrLuaExecFailed。
+	return 0, 0, timing, wallClock, engine.NewActionError(errcode.ErrLuaExecFailed, "script="+actionDef.Script, err)
 }
 
-// luaCodeToActionErr 将 Lua 脚本退出码映射为结构化 ActionError。
-//
-// Lua 网络层 API（tcp_request / udp_send 等）已统一使用 errcode 体系返回错误码，
-// 如果 exit code 命中已知 errcode，直接构造对应的 ActionError 透传给 monitor，
-// 使前端 error map 能展示真实错误分类（如 ErrRecvTimeout / ErrConnClosed），
-// 而非全部塌缩为 ErrLuaExitCode。
-//
-// 映射规则：
-//   - code ∈ 已知框架 errcode     → NewActionError(KindFramework)，由 classifyResult 按 Code 分流 ResultTimeout/ResultFailure
-//   - code ≥ 100                  → NewServerError(KindServer)，本函数的兜底规则：未知大数归为服务端错误
-//   - 其他                         → 兜底 ErrLuaExitCode(KindFramework)
-//
-// 注意：这是没有 LastActionError 上下文时的兜底映射。Lua 网络 API 会优先在 script.Context
-// 记录结构化 ActionError，executeLuaAction 会在 code 匹配时直接使用它；因此网络 API 返回的
-// HeaderErr 即使与框架 errcode 碰撞，也能保留真实 KindServer。只有脚本手写 return code 且没有
-// LastActionError 时，才会退回到下面的数值猜测规则。
-func luaCodeToActionErr(code int, script string) error {
-	detail := fmt.Sprintf("script=%s", script)
-
-	ec := errcode.ErrorCode(code)
-
-	switch ec {
-	case errcode.ErrConnNotFound, errcode.ErrConnClosed, errcode.ErrSendFailed,
-		errcode.ErrRecvTimeout, errcode.ErrConnDropped, errcode.ErrActionCanceled,
-		errcode.ErrEncodeFailed, errcode.ErrParseFailed,
-		errcode.ErrListenTimeout:
-		return engine.NewActionError(ec, detail)
+// appendActionDetail 在 detail 末尾补 action=<name>（若 detail 未含 action=）。
+// 便于前端/日志定位到具体 action 配置项，而非仅脚本名。
+func appendActionDetail(detail, actionName string) string {
+	if strings.Contains(detail, "action=") {
+		return detail
 	}
-
-	if code >= 100 {
-		return engine.NewServerError(uint64(code), detail)
+	if detail != "" {
+		detail += " "
 	}
-
-	return engine.NewActionError(errcode.ErrLuaExitCode, fmt.Sprintf("%s code=%d", detail, code))
+	return detail + "action=" + actionName
 }
 
 // ExecuteBoolean 执行条件判断

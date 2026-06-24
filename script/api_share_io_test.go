@@ -78,18 +78,15 @@ func TestShareIO_YieldsWaitIOAndResumes(t *testing.T) {
   local v, found = share.get("k")
   if not found then error("get not found") end
   if v ~= "hello" then error("get mismatch: " .. tostring(v)) end
-  return 0
+  return nil
 end`,
 	})
 
 	w := &recordingWaiter{}
 	store := newFakeKVStore()
-	code, err := runScript(t, rp, &Context{Waiter: w, Shared: store, Ctx: context.Background()}, "share.lua")
+	err := runScript(t, rp, &Context{Waiter: w, Shared: store, Ctx: context.Background()}, "share.lua")
 	if err != nil {
 		t.Fatalf("不期望 error: %v", err)
-	}
-	if code != 0 {
-		t.Fatalf("code=%d，want 0", code)
 	}
 	// set + get 各 yield 一次 WaitIO。
 	if len(w.specs) != 2 {
@@ -112,17 +109,14 @@ func TestShareIO_NotEnabled(t *testing.T) {
   local share = require("share")
   local ok, err = share.set("k", "v")
   if ok then error("expected not-enabled error") end
-  return 0
+  return nil
 end`,
 	})
 
 	w := &recordingWaiter{}
-	code, err := runScript(t, rp, &Context{Waiter: w}, "noshare.lua")
+	err := runScript(t, rp, &Context{Waiter: w}, "noshare.lua")
 	if err != nil {
 		t.Fatalf("不期望 error: %v", err)
-	}
-	if code != 0 {
-		t.Fatalf("code=%d，want 0", code)
 	}
 	if len(w.specs) != 0 {
 		t.Fatalf("未启用共享状态不应 yield，实际 %d 次", len(w.specs))
