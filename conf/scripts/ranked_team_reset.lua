@@ -28,8 +28,9 @@ local function leaveTeamIfNeeded()
 
     local msg = proto.create("Game.TeamLeaveC2S")
     proto.set_field(msg, "teamId", tonumber(teamId))
-    local code = network.tcp_request("logic", {cmd=5, act=2}, msg, "Game.TeamLeaveS2C")
-    log.info("排位重置退出队伍: teamId=" .. tostring(teamId) .. " code=" .. tostring(code))
+    local err = network.tcp_request("logic", {cmd=5, act=2}, msg, "Game.TeamLeaveS2C")
+    local codeText = err and (tostring(err.code) .. " " .. tostring(err.detail)) or "0"
+    log.info("排位重置退出队伍: teamId=" .. tostring(teamId) .. " code=" .. codeText)
 end
 
 local function clearLocalState()
@@ -52,5 +53,5 @@ end
 function execute(r)
     leaveTeamIfNeeded()
     clearLocalState()
-    return 0
+    return nil
 end

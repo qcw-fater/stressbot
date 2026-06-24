@@ -16,9 +16,9 @@ end
 -- drain 一条 route 的所有缓存消息；proto.parse 失败会 RaiseError，必须 pcall。
 local function drainRoute(route, protoName, handler)
     while true do
-        local code, raw = network.try_tcp_listen("logic", route)
-        if code == 31 then break end   -- 队列空
-        if code ~= 0 then break end    -- 其它错误留待下轮
+        local err, raw = network.try_tcp_listen("logic", route)
+        if err and err.code == 31 then break end   -- 队列空
+        if err then break end    -- 其它错误留待下轮
         if raw == nil or raw == "" then break end
 
         local ok, msg = pcall(proto.parse, protoName, raw)
@@ -117,5 +117,5 @@ function execute(r)
     drainRoute({cmd = 21, act = 16}, "Game.GuildNotifyKickMemberS2C", handleKick)
     drainRoute({cmd = 21, act = 14}, "Game.GuildMemberUpdateNotifyS2C", handleMemberUpdate)
     drainRoute({cmd = 21, act = 13}, "Game.GuildUpdateNotifyS2C", handleUpdate)
-    return 0
+    return nil
 end
