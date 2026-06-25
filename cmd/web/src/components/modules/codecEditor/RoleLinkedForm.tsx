@@ -13,20 +13,19 @@
  */
 
 import { InputNumber, Select, Space, Tag, Typography } from 'antd';
-import type { CodecSchema, Field, FlagBit, ValueSource } from '@/types/codec';
+import type { Field, FlagBit, ValueSource } from '@/types/codec';
 import { VALUE_SOURCE_KINDS_SUPPORTED } from '@/types/codec';
 import { updateHeaderField } from './codecEdit';
 
 export interface RoleLinkedFormProps {
   raw: Record<string, unknown>;
-  schema: CodecSchema;
   /** 选中的字段在 schema.header 中的 index。 */
   fieldIndex: number;
   field: Field;
   onEdit: (nextContent: string) => void;
 }
 
-export function RoleLinkedForm({ schema, fieldIndex, field, raw, onEdit }: RoleLinkedFormProps) {
+export function RoleLinkedForm({ fieldIndex, field, raw, onEdit }: RoleLinkedFormProps) {
   const patch = (p: Partial<Field>) => onEdit(updateHeaderField(raw, fieldIndex, p));
   const bits: FlagBit[] = Array.isArray(field.bits) ? field.bits : [];
   const source: ValueSource =
@@ -49,7 +48,7 @@ export function RoleLinkedForm({ schema, fieldIndex, field, raw, onEdit }: RoleL
 
       {field.role === 'route' && (
         <Typography.Text type="secondary" className="field-inspector-text">
-          这个字段参与路由键模板的占位（当前模板：<code>{schema.routeKeyTemplate ?? ''}</code>）。模板在「路由键」标签页编辑。
+          这是路由键字段——它的名字会作为「路由键」标签页模板里的占位（如 <code>{`{${field.name ?? 'name'}}`}</code>）。本字段无需在此配置；要改模板请到「路由键」标签页。
         </Typography.Text>
       )}
 

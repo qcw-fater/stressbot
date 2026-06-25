@@ -202,7 +202,7 @@ export function HeaderFieldTable({ raw, schema, selectedIndex, onSelect, onEdit 
             const i = typeof idx === 'number' ? idx : 0;
             const f = fields[i];
             if (!f) return null;
-            return <RoleLinkedForm raw={raw} schema={schema} fieldIndex={i} field={f} onEdit={onEdit} />;
+            return <RoleLinkedForm raw={raw} fieldIndex={i} field={f} onEdit={onEdit} />;
           },
         }}
         onRow={(_record, idx) => ({
