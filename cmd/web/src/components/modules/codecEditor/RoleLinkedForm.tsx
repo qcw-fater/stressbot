@@ -49,7 +49,7 @@ export function RoleLinkedForm({ schema, fieldIndex, field, raw, onEdit }: RoleL
 
       {field.role === 'route' && (
         <Typography.Text type="secondary" className="field-inspector-text">
-          这个字段参与路由键模板占位（<code>{schema.routeKeyTemplate ?? ''}</code>）。模板在下方 ROUTE KEY 区域编辑。
+          这个字段参与路由键模板的占位（当前模板：<code>{schema.routeKeyTemplate ?? ''}</code>）。模板在「路由键」标签页编辑。
         </Typography.Text>
       )}
 
@@ -81,7 +81,7 @@ export function RoleLinkedForm({ schema, fieldIndex, field, raw, onEdit }: RoleL
 
       {field.role === 'length' && (
         <Typography.Text type="secondary" className="field-inspector-text">
-          这个字段表示消息长度。计数是否包含 header / trailer 由上方 length 计数范围决定。
+          这个字段表示消息长度。计数是否含 header / trailer 由帧布局顶部的「length 计数范围」决定。
         </Typography.Text>
       )}
 
