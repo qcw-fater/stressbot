@@ -48,7 +48,7 @@ export function RoleLinkedForm({ fieldIndex, field, raw, onEdit }: RoleLinkedFor
 
       {field.role === 'route' && (
         <Typography.Text type="secondary" className="field-inspector-text">
-          这是路由键字段——它的名字会作为「路由键」标签页模板里的占位（如 <code>{`{${field.name ?? 'name'}}`}</code>）。本字段无需在此配置；要改模板请到「路由键」标签页。
+          该字段被标记为路由字段（role: route）。路由字段的字段名可在「路由键」标签页的模板里作为占位引用；本字段在此无需配置。
         </Typography.Text>
       )}
 
