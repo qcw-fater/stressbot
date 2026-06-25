@@ -282,7 +282,7 @@ export function PreviewPanel({ raw, schema, transport }: PreviewPanelProps) {
                     <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
                       body hex
                     </Typography.Text>
-                    <HexInput value={bodyHex} onChange={setBodyHex} placeholder="body hex，如 0a 2b" />
+                    <HexInput value={bodyHex} onChange={setBodyHex} placeholder="body hex" />
                   </div>
                 </>
               ) : (
@@ -297,7 +297,7 @@ export function PreviewPanel({ raw, schema, transport }: PreviewPanelProps) {
                 <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
                   key hex（可空）
                 </Typography.Text>
-                <HexInput value={keyHex} onChange={setKeyHex} placeholder="secretKey hex，可空" />
+                <HexInput value={keyHex} onChange={setKeyHex} placeholder="key hex，可空" />
               </div>
               <Button type="primary" size="small" loading={loading} onClick={runPreview}>
                 预览

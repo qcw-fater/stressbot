@@ -7,7 +7,7 @@
  *   - 通用：name / op（PIPELINE_OPS 下拉）/ algo（**下拉——从 GET /sbot/codec/algorithms 拿到的
  *           算法元数据按当前步 op 过滤**）/ onError（fail|keep）/ flag（下拉 = 所有 role:"flags"
  *           字段命名位的并集，可空）/ when（子表单）。
- *   - encrypt：keyLen / offset.{encode,decode}（发/收偏移可不同，如 UDP 发=11 收=0）/ produces。
+ *   - encrypt：keyLen / offset.{encode,decode}（发/收偏移可不同）/ produces。
  *   - checksum|hash：over（kind 下拉 OVER_KINDS；range 时 rangeStart/rangeEnd）/ produces。
  *   - params：**按选中 algo 的 AlgoParam[] 动态字段**（int→InputNumber / string→Input /
  *     bool→Switch / bytes→hex 输入）；algo 元数据外的残留键不显示但保留（不静默丢弃）。
@@ -354,7 +354,7 @@ function PipelineStepCard({
               />
             </Field>
             <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-              发/收偏移可不同，如 UDP 发=11 收=0
+              发/收偏移可不同（如某些协议发送与接收使用不同偏移）
             </Typography.Text>
           </Space>
         )}

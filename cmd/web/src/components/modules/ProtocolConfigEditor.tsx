@@ -71,12 +71,12 @@ const CODEC_JSON_TEMPLATE = `{
   "endianDefault": "le",
   "frame": { "headerSize": 8, "trailerSize": 0, "lengthIncludesHeader": false, "lengthIncludesTrailer": false },
   "header": [
-    { "name": "bodyLen", "offset": 0, "size": 4, "type": "u32", "endian": "le", "role": "length" },
-    { "name": "cmd",     "offset": 4, "size": 1, "type": "u8",  "role": "route" },
-    { "name": "act",     "offset": 5, "size": 1, "type": "u8",  "role": "route" },
-    { "name": "index",   "offset": 6, "size": 2, "type": "u16", "endian": "le", "role": "value", "source": { "kind": "const", "value": 0 } }
+    { "name": "field0", "offset": 0, "size": 4, "type": "u32", "endian": "le", "role": "length" },
+    { "name": "field1", "offset": 4, "size": 1, "type": "u8", "role": "route" },
+    { "name": "field2", "offset": 5, "size": 1, "type": "u8", "role": "route" },
+    { "name": "field3", "offset": 6, "size": 2, "type": "u16", "endian": "le", "role": "value", "source": { "kind": "const", "value": 0 } }
   ],
-  "routeKeyTemplate": "{cmd}:{act}",
+  "routeKeyTemplate": "{field1}:{field2}",
   "pipeline": []
 }
 `;

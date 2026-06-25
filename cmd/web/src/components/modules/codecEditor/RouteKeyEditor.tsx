@@ -52,12 +52,12 @@ export function RouteKeyEditor({ raw, schema, onEdit }: RouteKeyEditorProps) {
         <div className="split-2-left">
           <Space direction="vertical" size={8} style={{ width: '100%' }}>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              模板中的 {`{name}`} 占位需对应 role:&quot;route&quot; 字段，如 {`{cmd}:{act}`}
+              模板中的 {`{字段名}`} 占位需对应 role:&quot;route&quot; 字段
             </Typography.Text>
             <Input
               size="small"
               value={template}
-              placeholder="{cmd}:{act}"
+              placeholder="{字段名}"
               onChange={(e) => onEdit(setRouteKeyTemplate(raw, e.target.value))}
             />
             <div>
