@@ -34,11 +34,6 @@ export function RoleLinkedForm({ schema, fieldIndex, field, raw, onEdit }: RoleL
   const maxBit = Math.max(0, (field.size ?? 0) * 8);
 
   const fieldName = field.name || '未命名';
-  const endianOptions = [
-    { value: '__default__', label: `默认（${schema.endianDefault ?? 'le'}）` },
-    { value: 'le', label: 'le' },
-    { value: 'be', label: 'be' },
-  ];
   return (
     <div className="field-detail-inline">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
@@ -49,17 +44,8 @@ export function RoleLinkedForm({ schema, fieldIndex, field, raw, onEdit }: RoleL
         <Tag>{field.role}</Tag>
       </div>
 
-      {/* 字节序（原表格 endian 列，所有 role 通用） */}
-      <div className="frame-control-item" style={{ marginBottom: 8 }}>
-        <Typography.Text type="secondary" className="frame-control-label">字节序（endian）</Typography.Text>
-        <Select
-          size="small"
-          style={{ width: 160 }}
-          value={field.endian ?? '__default__'}
-          options={endianOptions}
-          onChange={(v) => patch({ endian: v === '__default__' ? undefined : (v as string) })}
-        />
-      </div>
+      {/* 字节序统一在帧布局的「默认字节序」(endianDefault) 选一次，覆盖所有字段。
+          个别字段需不同字节序属罕见例外（混合字节序协议），切源码手编 field.endian。 */}
 
       {field.role === 'route' && (
         <Typography.Text type="secondary" className="field-inspector-text">
