@@ -262,7 +262,7 @@ function ErrorSection({ actions, errorChart }: { actions: HistoryActionMetric[];
   const allErrors: Array<{ action: string; name: string; msg: string; count: number }> = [];
   for (const a of actions) {
     for (const e of a.errors ?? []) {
-      const name = e.codeName || `${e.kind}#${e.code}`;
+      const name = e.codeName || `#${e.code}`;
       allErrors.push({ action: a.name, name, msg: e.msgs.join('; '), count: e.count });
     }
   }

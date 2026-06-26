@@ -11,7 +11,7 @@
 - **所有计数器使用原子操作**，无 mutex/channel/外部依赖
 - **`enabled=false` 时所有公共方法为空操作**，零性能开销
 - **延迟使用固定桶直方图**（16 桶，覆盖 0ms ~ 60s+），全局累积
-- **错误按 `(Kind, Code)` 元组聚合**，环形缓冲保留最近 3 条 Detail
+- **错误按 `code` 单维聚合**（展示时按 code<100 推导"框架"/code≥100 推导"业务"标签），环形缓冲保留最近 3 条 Detail
 - **RTT Apdex(T) 评分**，T 可配置（默认 100ms），按 RTT 样本数计算
 - **支持分布式聚合**，MergeSnapshots 合并多 Agent 指标
 - **声明式动作和 Lua 脚本动作统一自动采集**，用户无感知
@@ -29,7 +29,7 @@
 | 系统资源 | 无 | goroutines/mem/GC |
 | 连接健康 | 无 | 建立/失败/断连计数 |
 | 全局带宽 | 无 | 发送/接收 MB/s |
-| 错误分布 | 无 | 按 (Kind, Code) 聚合 + 环形缓冲 Detail |
+| 错误分布 | 无 | 按 code 单维聚合 + 环形缓冲 Detail |
 | 取消统计 | 无 | canceledCount（ctx 取消不计入失败率） |
 | 回调监控 | 无 | callback 成功/失败/错误聚合 |
 | 并发执行 | 无 | per-action executing 计数 |
@@ -45,7 +45,7 @@
 3. `enabled=false` 时所有方法为 no-op，零开销
 4. 不修改任何公开接口（`ActionHandler`、`NetSender`、`Executor`）
 5. 声明式动作和 Lua 脚本动作统一自动采集，用户无感知
-6. 错误按结构化 `(Kind, Code)` 聚合，替代自由格式字符串爆炸
+6. 错误按结构化 `code` 单维聚合（码段 <100 框架 / ≥100 业务），替代自由格式字符串爆炸
 7. 支持分布式场景下的多 Agent 指标聚合
 
 ---
@@ -105,9 +105,9 @@ func (ae *ActionExecutor) Execute(ctx context.Context, def *ActionDef) (sendByte
 
 16 个预定义桶（详见第 6 节），覆盖 0ms ~ 60s+。全局累积，不淘汰旧样本。每次 `Record(duration)` 纯原子操作。百分位通过桶计数前缀和 + 线性插值计算。
 
-### 3.3 错误按 (Kind, Code) 聚合
+### 3.3 错误按 code 单维聚合
 
-替代设计前的自由格式字符串聚合。使用 `sync.Map` 存储 `errKey -> *errorBucket`，环形缓冲保留最近 3 条 Detail。
+替代设计前的自由格式字符串聚合。使用 `sync.Map` 存储 `errKey -> *errorBucket`，按 `code` 单维聚合，环形缓冲保留最近 3 条 Detail。码段约定：`code < 100` 为框架错误，`code >= 100` 为业务错误；展示标签由 code 推导，不持久化 Kind 字段。
 
 ---
 
@@ -398,7 +398,7 @@ func classifyResult(err error) monitor.ActionResult {
 | 结果 | 延迟直方图 | Apdex | QPS (sampleCount) | 错误分布 | executing |
 |------|-----------|-------|-------------------|---------|-----------|
 | Success | **记录** | satisfied 或 tolerating | 计入 | - | -1 |
-| Failure | 不记录 | 隐式 frustrated | 计入 | **按 (Kind,Code) 记录** | -1 |
+| Failure | 不记录 | 隐式 frustrated | 计入 | **按 code 记录** | -1 |
 | Timeout | 不记录 | 隐式 frustrated | 计入 | - | -1 |
 | Canceled | 不记录 | **不计入** | **不计入** | - | -1 |
 
@@ -469,7 +469,7 @@ type actionMetrics struct {
     recvBytes       atomic.Int64      // 累计接收 WireBytes（per-action，所有已记录结果分支）
     apdexSatisfied  atomic.Int64      // RTT Apdex 满意样本：WireRTT < T
     apdexTolerating atomic.Int64      // RTT Apdex 容忍样本：T <= WireRTT < 4T
-    errors          sync.Map          // errKey → *errorBucket，按 (Kind, Code) 聚合的错误分布
+    errors          sync.Map          // errKey → *errorBucket，按 code 单维聚合的错误分布
 }
 ```
 
@@ -487,7 +487,7 @@ type actionMetrics struct {
 | `sendBytes/recvBytes` | RecordAction/RecordCallback | 记录实际发生的 WireBytes；失败/超时/取消分支只要已有流量也计入 |
 | `apdexSatisfied` | WireRTT < T | RTT Apdex 满意计数 |
 | `apdexTolerating` | T <= WireRTT < 4T | RTT Apdex 容忍计数 |
-| `errors` | ResultFailure | 按 (Kind, Code) 聚合的错误分布 |
+| `errors` | ResultFailure | 按 code 单维聚合的错误分布 |
 
 ### 8.3 CollectErrors — 只读快照
 
@@ -499,9 +499,8 @@ func (am *actionMetrics) CollectErrors() []ErrorEntry
 
 ```go
 ErrorEntry{
-    Kind:     k.Kind,
     Code:     k.Code,
-    CodeName: errcode.ErrorCode(k.Code).String(),  // 框架错误有名称，服务端错误为 ""
+    CodeName: errcode.ErrorCode(k.Code).String(),  // 框架错误（code<100）有名称，业务错误为 ""
     Messages: msgs,                                  // 环形缓冲去重后的 Detail 列表
     Count:    count,                                 // 累计出现次数
 }
@@ -517,11 +516,10 @@ ErrorEntry{
 
 ```go
 type ErrorEntry struct {
-    Kind     errcode.Kind `json:"kind"`     // "framework" / "server"
-    Code     uint64       `json:"code"`     // 错误码
-    CodeName string       `json:"codeName"` // ErrorCode.String()；服务端错误为 ""
-    Messages []string     `json:"msgs"`     // 最近 N 条 Detail（最多 3 条，环形缓冲）
-    Count    int64        `json:"count"`    // 该错误累计出现次数
+    Code     uint64   `json:"code"`     // 错误码（<100 框架，>=100 业务）
+    CodeName string   `json:"codeName"` // ErrorCode.String()；业务错误为 ""
+    Messages []string `json:"msgs"`     // 最近 N 条 Detail（最多 3 条，环形缓冲）
+    Count    int64    `json:"count"`    // 该错误累计出现次数
 }
 ```
 
@@ -529,12 +527,11 @@ type ErrorEntry struct {
 
 ```go
 type errKey struct {
-    Kind errcode.Kind
-    Code uint64
+    Code uint64 // 错误码
 }
 ```
 
-`Kind` 区分框架/服务端来源，避免游戏 code=1 与框架 code=1 数值冲突后合并到同一 bucket。
+按 `code` 单维聚合。码段约定 `<100` 为框架错误、`>=100` 为业务错误，避免数值冲突（框架 code 与业务 code 分段，不共用数值空间）；框架/业务区分仅在展示层由 code 推导，聚合层不持久化 Kind。
 
 ### 9.3 errorBucket — 环形缓冲区
 
@@ -562,15 +559,14 @@ type errorBucket struct {
 ```go
 type CodedError interface {
     error
-    ErrorKind() errcode.Kind // 返回错误分类（framework / server）
-    ErrorCode() uint64       // 返回错误码
-    ErrorDetail() string     // 返回错误详情（用于环形缓冲存储）
+    ErrorCode() uint64   // 返回错误码
+    ErrorDetail() string // 返回错误详情（用于环形缓冲存储）
 }
 ```
 
 **为什么用接口而不是直接引用 `engine.ActionError`？**
 
-`monitor` 不能 `import "stressbot/engine"`，否则形成 `engine -> monitor -> engine` 循环依赖。通过接口隔离，`engine.ActionError` 在 `engine/errors.go` 中实现 `ErrorKind()/ErrorCode()/ErrorDetail()` 三个方法即可。
+`monitor` 不能 `import "stressbot/engine"`，否则形成 `engine -> monitor -> engine` 循环依赖。通过接口隔离，`engine.ActionError` 在 `engine/errors.go` 中实现 `ErrorCode()/ErrorDetail()` 两个方法即可。
 
 ### 9.5 recordError 实现
 
@@ -580,7 +576,7 @@ func (c *MetricsCollector) recordError(am *actionMetrics, err error) {
     if !errors.As(err, &ce) {
         return  // 无法提取 code 的 error，忽略
     }
-    key := errKey{Kind: ce.ErrorKind(), Code: ce.ErrorCode()}
+    key := errKey{Code: ce.ErrorCode()}
     detail := ce.ErrorDetail()
     if len(detail) > 120 {
         detail = detail[:120]  // 截断防止极端情况内存膨胀
@@ -899,21 +895,21 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot
 
 ### 13.4 错误合并
 
-按 `(Kind, Code)` 二元组聚合：
+按 `code` 单维聚合：
 
 ```go
-type mergedErrorKey struct{ Kind errcode.Kind; Code uint64 }
+type mergedErrorKey struct{ Code uint64 }
 errMap := make(map[mergedErrorKey]*ErrorEntry)
 ```
 
 **合并规则**：
 1. Count：累加
 2. Messages：取并集去重，超过 5 条截断
-3. Kind/Code/CodeName：相同 key 保持不变
+3. Code/CodeName：相同 key 保持不变
 
 ```go
 for _, e := range a.Errors {
-    k := mergedErrorKey{Kind: e.Kind, Code: e.Code}
+    k := mergedErrorKey{Code: e.Code}
     if existing, ok := errMap[k]; ok {
         existing.Count += e.Count
         for _, m := range e.Messages {
@@ -995,20 +991,21 @@ type Reporter struct {
 [MONITOR] robots: 1运行 0停止 0错误 | conn: 3建立 0失败 0断连 | 0.5/1.2 MB/s
 [MONITOR] 动作                    成功 失败 超时    avg    p95 apdex exec   qps
 [MONITOR] CreateNormalTeam        280    4    0    46ms   120ms  0.95    2  0.95
-[MONITOR] errors: CreateNormalTeam→[framework/4 RECV_TIMEOUT]×26 service=logic elapsed=2.3s (+2 more),
-                      CreateNormalTeam→[server/1004]×15 service=logic route=CreateTeam
+[MONITOR] errors: CreateNormalTeam→[框架 RECV_TIMEOUT]×26 service=logic elapsed=2.3s (+2 more),
+                      CreateNormalTeam→[业务 #1004]×15 service=logic route=CreateTeam
 ```
 
 **四行结构**：
 - 第一行：运行时间 + 系统资源 + 总动作数
 - 第二行：机器人状态 + 连接健康 + 带宽
 - 表格：每动作一行（名称 + 成功/失败/超时 + avg + p95 + apdex + executing + periodQPS）
-- errors：仅在有失败时追加一行，格式 `动作→[Kind/Code CodeName]xCount msg`
+- errors：仅在有失败时追加一行，格式 `动作→[框架/业务 CodeName或#code]xCount msg`（标签由 code 推导：<100 为"框架"，>=100 为"业务"）
 
 ### 16.3 错误输出格式
 
 ```
-actionName→[kind/code codeName]×count firstMsg
+actionName→[框架 RECV_TIMEOUT]×count firstMsg       // code<100
+actionName→[业务 #1004]×count firstMsg              // code>=100，CodeName 为空时显示 #code
 ```
 
 超过 1 条 Messages 时追加 `(+N more)` 提示。错误按次数降序排列（`sortedErrors`）。
@@ -1068,7 +1065,7 @@ func RegisterHandlers(c *MetricsCollector)
       "avgQps": 1.89,
       "periodQps": 0,
       "errors": [
-        { "kind": "framework", "code": 4, "codeName": "RECV_TIMEOUT", "msgs": ["service=logic elapsed=2.3s"], "count": 3 }
+        { "code": 4, "codeName": "RECV_TIMEOUT", "msgs": ["service=logic elapsed=2.3s"], "count": 3 }
       ]
     }
   ]
@@ -1084,8 +1081,8 @@ func RegisterHandlers(c *MetricsCollector)
 - 所有数值字段保证非 null（零值兜底）
 - `periodQps` 在 HTTP 端点为 0（前端轮询两次用 `timestamp` 差值自行计算）
 - `errors` 仅在有失败时出现（`omitempty`）
-- `errors[].kind` — `"framework"` / `"server"`，前端按此上色
-- `errors[].codeName` — 框架错误有值（如 `"RECV_TIMEOUT"`），服务端错误为 `""`
+- `errors[].code` — 错误码，前端按 `code < 100` 推导"框架"标签、`code >= 100` 推导"业务"标签并上色
+- `errors[].codeName` — 框架错误（code<100）有值（如 `"RECV_TIMEOUT"`），业务错误（code>=100）为 `""`，前端可 fallback 为 `#code`
 
 ### 17.3 GET /metrics/summary
 
@@ -1203,13 +1200,13 @@ sampleCount = successCount + failureCount + timeoutCount
 |------|------|------|
 | 桶数量 | 17 个桶 | **16 个桶**（`NumBuckets = 16`），15 个边界值 + 1 个溢出桶 |
 | `skippedCount` | ActionSnapshot 含此字段 | **未实现**。ActionResult 中无 ResultSkipped，classifyResult 只有 4 个分支 |
-| 错误聚合 | string → *atomic.Int64 | **errKey → *errorBucket**，按 (Kind, Code) 聚合 + 环形缓冲 |
-| ErrorEntry | `{msg, count}` | **`{kind, code, codeName, msgs, count}`**，结构化替代字符串 |
+| 错误聚合 | string → *atomic.Int64 | **errKey → *errorBucket**，按 code 单维聚合 + 环形缓冲 |
+| ErrorEntry | `{msg, count}` | **`{code, codeName, msgs, count}`**，结构化替代字符串 |
 | RecordAction 签名 | `(name, result, duration, send, recv, errMsg string)` | `(name, result, duration, send, recv, err error)` |
 | CanceledCount | 未提及 | **已实现**。ActionSnapshot 含 CanceledCount，不参与 sampleCount |
 | Callback 监控 | 未提及 | **已实现**。RecordCallbackSuccess / RecordCallbackError |
 | TimeoutAvgMs | 未提及 | **已实现**。actionMetrics 含 timeoutTotalMs，ActionSnapshot 含 TimeoutAvgMs |
-| 控制台错误格式 | `动作→错误消息(次数)` | `动作→[Kind/Code CodeName]×Count msg (+N more)` |
+| 控制台错误格式 | `动作→错误消息(次数)` | `动作→[框架/业务 CodeName或#code]×Count msg (+N more)`（标签由 code 推导） |
 | CSV 表头 | 含"跳过次数"列 | **不含"跳过次数"列** |
 | `totalSendBytes/totalRecvBytes` | 在 RecordAction 中累加 | **由 network 层的 AddBandwidth 统计**，RecordAction 中不累加（避免双计） |
 | LatencyHistogram minMs 初始化 | 文档提及 | **已正确实现**（newLatencyHistogram 中 Store(math.MaxInt64)） |

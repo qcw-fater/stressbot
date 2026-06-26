@@ -14,36 +14,26 @@ var (
 	ErrActionNotFound  = errors.New("动作不存在")
 )
 
-// ActionError 携带错误码与来源类别的结构化错误。
-// (Kind, Code) 二元组唯一标识一类错误：
-//   - 框架错误：Kind=KindFramework, Code=errcode.Err*
-//   - 服务端错误：Kind=KindServer,   Code=headerErr 原值
+// ActionError 携带错误码的结构化错误。单一 code 唯一标识（< 100 框架 / ≥ 100 业务）。
 type ActionError struct {
-	Kind   errcode.Kind      // 错误来源类别：KindFramework 或 KindServer
-	Code   errcode.ErrorCode // 错误码，与 Kind 组成唯一标识
-	Detail string            // 上下文描述（service / route / elapsed 等），不含 [code] 前缀
-	cause  error             // 可选下层错误，用于 errors.Is 链式判断
+	Code   errcode.ErrorCode
+	Detail string
+	cause  error
 }
 
-// NewActionError 创建框架错误（最常用入口）。
+// NewActionError 创建结构化错误（框架码与业务码统一入口）。
 // 可选 cause 参数用于包装下层 error（如 factory.Create 失败）。
 func NewActionError(code errcode.ErrorCode, detail string, cause ...error) *ActionError {
-	e := &ActionError{Kind: errcode.KindFramework, Code: code, Detail: detail}
+	e := &ActionError{Code: code, Detail: detail}
 	if len(cause) > 0 {
 		e.cause = cause[0]
 	}
 	return e
 }
 
-// NewServerError 包装服务端 headerErr 为 ActionError。
-// Kind 显式标为 KindServer，便于 monitor/前端区分。
-func NewServerError(serverCode uint64, detail string) *ActionError {
-	return &ActionError{Kind: errcode.KindServer, Code: errcode.ErrorCode(serverCode), Detail: detail}
-}
-
-// Error 格式：[framework/1] service=logic: cause message 或 [server/1004] desc: route=CreateTeam。
+// Error 格式：[1] service=logic: cause 或 [1004] desc: route=CreateTeam。
 func (e *ActionError) Error() string {
-	s := fmt.Sprintf("[%s/%d]", e.Kind, e.Code)
+	s := fmt.Sprintf("[%d]", e.Code)
 	if e.Detail != "" {
 		s += " " + e.Detail
 	}
@@ -55,12 +45,6 @@ func (e *ActionError) Error() string {
 
 // Unwrap 返回被包装的下层错误，支持 errors.Is 链式判断。
 func (e *ActionError) Unwrap() error { return e.cause }
-
-// IsServerError 判断是否为服务端错误（基于 Kind，而非数值区间）。
-func (e *ActionError) IsServerError() bool { return e.Kind == errcode.KindServer }
-
-// ErrorKind 返回错误来源类别，供 monitor 通过接口提取，避免循环依赖。
-func (e *ActionError) ErrorKind() errcode.Kind { return e.Kind }
 
 // ErrorCode 返回数值错误码，供 monitor 通过接口提取。
 func (e *ActionError) ErrorCode() uint64 { return uint64(e.Code) }

@@ -242,10 +242,9 @@ func TestMigration_ErrorMap_Coverage(t *testing.T) {
 			len(em), luaCount)
 	}
 
-	// 3. 抽样核对（跨区段：框架/登录/战队/充值/搜打撤/快捷消息 等）。
+	// 3. 抽样核对（跨区段：登录/战队/充值/搜打撤/快捷消息 等；< 100 的服务端系统码
+	//    不作为业务结果返回，已从 errors.json/error.lua 清理，故不在此断言）。
 	curated := map[uint64]string{
-		0:    "成功",
-		27:   "错误码未定义",
 		256:  "区服没有找到",
 		700:  "已申请过当前战队，不可重复申请",
 		707:  "您当前是会长，需传位后才能离开战队",
@@ -325,16 +324,16 @@ func genBodyMig(n int) []byte {
 	return b
 }
 
-// TestMigration_ErrorMap_FullVerbatimVsErrorLua 对 errors.json 全部 667 对 code→desc
-// 与 error.lua 真值做 verbatim 比对（T1.7 carry-over c，闭环 T1.6 仅抽样 8 条的缺口）。
+// TestMigration_ErrorMap_FullVerbatimVsErrorLua 对 errors.json 全部 639 对 code→desc
+// 与 error.lua 真值做 verbatim 比对（T1.7 carry-over c，闭环 T1.6 仅抽样的缺口）。
 //
 // 不依赖 LuaAdapter（其 DescribeError 路径在未初始化 zap logger 时会 nil panic，与迁移
 // 正确性无关）；改用纯文本解析 error.lua 的 `errors = {...}` 表——按行匹配
-// `^\s*\[(\d+)\]\s*=\s*"(.*)"\s*,?$`，提取 (code, desc) 对。error.lua 已确认全部 667
+// `^\s*\[(\d+)\]\s*=\s*"(.*)"\s*,?$`，提取 (code, desc) 对。error.lua 已确认全部 639
 // 条目均符合该格式（无转义引号、无多行字符串），解析无歧义。
 //
 // 断言：
-//  1. 双方条目数相等（667），不漏不重（LoadErrorMap 已保证 key 唯一）；
+//  1. 双方条目数相等（639），不漏不重（LoadErrorMap 已保证 key 唯一）；
 //  2. 每对 code→desc 在 errors.json 与 error.lua 间 verbatim 一致（string==）。
 func TestMigration_ErrorMap_FullVerbatimVsErrorLua(t *testing.T) {
 	dir := findConfAdapterDir(t)
@@ -370,8 +369,8 @@ func TestMigration_ErrorMap_FullVerbatimVsErrorLua(t *testing.T) {
 	if len(em) != len(lua) {
 		t.Fatalf("条目数不一致：errors.json=%d error.lua=%d", len(em), len(lua))
 	}
-	if len(em) != 667 {
-		t.Errorf("条目数=%d，期望 667（若 error.lua 故意增减，请同步更新此断言）", len(em))
+	if len(em) != 639 {
+		t.Errorf("条目数=%d，期望 639（若 error.lua 故意增减，请同步更新此断言）", len(em))
 	}
 
 	// 4. 逐对 verbatim 比对。

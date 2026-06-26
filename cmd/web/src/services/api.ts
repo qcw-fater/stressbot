@@ -9,7 +9,7 @@
  * 单一事实源：docs/api-monitor.md §3.3 / §14.13.1。
  */
 
-import type { ApiErrorBody } from '@/types/api';
+import type { ApiErrorBody, FrameworkCode } from '@/types/api';
 import { API_PREFIX } from './env';
 
 /**
@@ -111,6 +111,11 @@ export function postMultipart<T>(path: string, fd: FormData, init?: RequestInit)
     headers: { Accept: 'application/json', ...(init?.headers ?? {}) },
     body: fd,
   });
+}
+
+/** 获取工具内置框架错误码（< 100 保留段） */
+export function getErrorCodes(): Promise<FrameworkCode[]> {
+  return getJson<FrameworkCode[]>('/api/error-codes');
 }
 
 /** 文本响应（用于 /api/metrics/summary 等纯文本接口） */

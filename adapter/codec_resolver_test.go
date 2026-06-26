@@ -143,6 +143,40 @@ func TestLoadCodecResolver_ErrorsFileMissing(t *testing.T) {
 	}
 }
 
+// TestLoadCodecResolver_ErrorMapRejectsFrameworkRange errors.json 含 < 100 码（框架保留段）
+// → fail loud（码段契约：业务码不得占用框架保留段）。error 信息须含触发撞码的具体 code。
+//
+// 用 t.TempDir 隔离，写一份含 54（< 100，框架保留）+ 1004（合法）的 errors.json，
+// 加一份最小 tcp_logic_codec.json（避免「无 codec 文件」分支提前报错）。
+func TestLoadCodecResolver_ErrorMapRejectsFrameworkRange(t *testing.T) {
+	tmp := t.TempDir()
+
+	// errors.json：54 撞框架保留段，1004 合法。撞码应优先生效（硬报错）。
+	errorsJSON := `{"54":"撞框架","1004":"队伍已满"}`
+	if err := os.WriteFile(filepath.Join(tmp, "errors.json"), []byte(errorsJSON), 0o644); err != nil {
+		t.Fatalf("写入 errors.json 失败: %v", err)
+	}
+
+	// 最小 codec 文件：从真实产物复制（让 resolver 不报「无 codec / 解析失败」）。
+	src := filepath.Join(adapterDir, "tcp_logic_codec.json")
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("读取测试 fixture 失败: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "tcp_logic_codec.json"), data, 0o644); err != nil {
+		t.Fatalf("写入 codec 文件失败: %v", err)
+	}
+
+	codecs := map[string]string{"tcp:logic": "tcp_logic_codec.json"}
+	_, err = LoadCodecResolver(tmp, codecs, "errors.json")
+	if err == nil {
+		t.Fatal("errors.json 含 < 100 框架保留码应返回 error，得到 nil")
+	}
+	if !strings.Contains(err.Error(), "54") {
+		t.Errorf("error 不含撞码 code 54：%s", err.Error())
+	}
+}
+
 // TestLoadCodecResolver_ErrorsLoaded errors.json 命中描述非空。
 func TestLoadCodecResolver_ErrorsLoaded(t *testing.T) {
 	r, err := LoadCodecResolver(adapterDir, realCodecMap(), "errors.json")
@@ -153,7 +187,7 @@ func TestLoadCodecResolver_ErrorsLoaded(t *testing.T) {
 	if a == nil {
 		t.Fatal("Resolve 返回 nil")
 	}
-	// errors.json 667 条，几乎必有非空描述；用任一常见 code 试探。
+	// errors.json 639 条，几乎必有非空描述；用任一常见 code 试探。
 	// 取不到具体 code 就跳过精确断言，仅验证不 panic + 返回 string。
 	_ = a.DescribeError(0) // 不应 panic
 }

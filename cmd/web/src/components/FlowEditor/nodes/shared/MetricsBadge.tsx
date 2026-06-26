@@ -110,7 +110,7 @@ export function MetricsBadge({ nodeId }: MetricsBadgeProps) {
       {m.errors!.slice(0, 6).map((e, i) => (
         <div key={`e${i}`} style={{ marginTop: i > 0 ? 3 : 0, fontSize: 11, lineHeight: '16px' }}>
           <span style={{ color: 'var(--color-error)', fontWeight: 700, fontSize: 10, fontVariantNumeric: 'tabular-nums', marginRight: 6 }}>×{e.count}</span>
-          <span style={{ fontWeight: 500 }}>{e.codeName || `${e.kind}#${e.code}`}</span>
+          <span style={{ fontWeight: 500 }}>{e.codeName || `#${e.code}`}</span>
           {e.msgs.length > 0 && (
             <div style={{ color: 'var(--text-tertiary)', marginLeft: 14, marginTop: 1 }}>{e.msgs.join('; ')}</div>
           )}

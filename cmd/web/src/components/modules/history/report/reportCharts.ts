@@ -421,8 +421,8 @@ export function buildErrorOption(
   const errorMap = new Map<string, { count: number; label: string }>();
   for (const a of actions) {
     for (const e of a.errors ?? []) {
-      const key = `${e.kind}:${e.code}`;
-      const label = e.codeName || `${e.kind}#${e.code}`;
+      const key = `${e.code}`;
+      const label = e.codeName || `#${e.code}`;
       const existing = errorMap.get(key);
       if (existing) {
         existing.count += e.count;

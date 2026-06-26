@@ -262,14 +262,17 @@ export interface HistogramView {
   p99Ms: number;
 }
 
-export type ErrorKind = 'framework' | 'server';
-
 export interface ErrorEntry {
-  kind: ErrorKind;
   code: number;
   codeName: string;
   msgs: string[];
   count: number;
+}
+
+/** 框架错误码（工具自产，< 100），来自 GET /sbot/api/error-codes */
+export interface FrameworkCode {
+  code: number;
+  name: string;
 }
 
 export interface ActionMetric {

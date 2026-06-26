@@ -16,7 +16,7 @@ stressbot/
 │   ├── agent/            主程序入口（单机模式 / Agent 模式）
 │   └── web/              前端可视化编辑器（React + Vite）
 ├── adapter/              协议适配器接口 + 声明式 codec 引擎（CodecResolver / SchemaAdapter + codec/ Go 编解码、帧分割、错误码映射）
-├── errcode/              统一错误码定义（框架错误码 + Kind 分类）
+├── errcode/              统一错误码定义（框架码 < 100 + 业务码 ≥ 100，单一 code 维度）
 ├── admin/                Admin 服务器（分布式调度、历史归档、前端托管）
 ├── agent/                Agent 节点（注册到 Admin、执行下发任务）
 ├── engine/               流程执行引擎（节点图遍历、动作模式、字段绑定）
@@ -1011,26 +1011,33 @@ Admin (:8080) ← 多 Agent (:7070) → 目标游戏服务器
 
 ### 错误码体系
 
-动作执行错误分为两类，用 `Kind` 区分：
+动作执行错误使用单维数值 `code`（`uint64`），码段契约划分来源（无 `Kind` 维度）：
 
-| Kind | 范围 | 说明 |
+| 码段 | 来源 | 说明 |
 |------|------|------|
-| `framework` | 1–99 | 工具自身故障（连接/编码/Lua 等） |
-| `server` | ≥ 100 | 服务端返回的 `headerErr` 原值 |
+| `< 100` | 框架码（工具自产） | 连接/编码/Lua/配置等自身故障，由 `errcode` 包 `codeRegistry` 分配 |
+| `≥ 100` | 业务码（服务器返回） | 服务端 `headerErr` 原值 |
 
 框架错误码（`errcode` 包）按层分段：
 
 | 范围 | 层级 | 包含 |
 |------|------|------|
-| 1–10 | 网络层 | `ConnNotFound` / `ConnClosed` / `SendFailed` / `RecvTimeout` / `ConnDropped` |
+| 1–10 | 网络层 | `ConnNotFound` / `ConnClosed` / `SendFailed` / `RecvTimeout` / `ConnDropped` / `ActionCanceled` |
 | 11–20 | 协议层 | `EncodeFailed` / `ParseFailed` |
-| 21–30 | 构建层 | `CreateMsg` / `BindField` / `Serialize` |
-| 31–40 | 监听层 | `ListenTimeout` |
-| 41–50 | 配置层 | `AddrEmpty` / `URLEmpty` / `URLScheme` / `UnknownPattern` / `HTTPBuild` / `HTTPReadBody` / `MarshalBody` |
-| 51–60 | Lua 层 | `LuaNotInit` / `LuaNoScript` / `LuaExecFailed` / `LuaExitCode` |
+| 21–30 | 构建层 | `CreateMsg` / `BindField` / `Serialize` / `ExecFailed` |
+| 31–40 | 监听层 | `ListenTimeout` / `ListenRegister` |
+| 41–50 | 配置层 | `AddrEmpty` / `URLEmpty` / `URLScheme` / `UnknownPattern` / `HTTPBuild` / `HTTPReadBody` / `MarshalBody` / `HTTPStatus` / `HeartbeatConfig` |
+| 51–60 | Lua 层 | `LuaNotInit` / `LuaNoScript` / `LuaExecFailed` / `LuaScriptCheck` |
 | 61–70 | 回调层 | `CallbackLua` / `CallbackParse` |
 
-监控错误分布按 `(Kind, Code)` 聚合，不再按消息字符串。前端 `ErrorsTab` 按 `Kind` 分组展示，服务端错误码可通过共享 `errors.json` 映射为可读描述。
+监控错误分布按 `code` 单维聚合，不再按消息字符串。前端 `ErrorsTab` 按 `code < 100` 推导"框架"/"业务"标签展示，业务码可通过共享 `errors.json` 映射为可读描述。
+
+#### errors.json 码段契约
+
+`conf/adapter/errors.json`（扁平 `{"code":"中文描述"}`）只能包含业务码（`≥ 100`）。
+
+- **后端撞码硬报错**：`LoadCodecResolver` 加载期发现任一 key `< 100`（占用框架保留段）立即 fail loud，错误信息含触发撞码的具体 code。
+- **前端实时校验**：`ErrorMapEditor` 行式表单实时校验"码非正整数 / `< 100` 占用框架保留段 / 重复码 / 描述空"，并在顶部展示框架保留码（`< 100`，标"不可用"），存在错误时阻断保存——与后端硬报错形成双重防线。
 
 ## 前端监控面板
 

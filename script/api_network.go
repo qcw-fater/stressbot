@@ -100,7 +100,7 @@ func headerErrDetail(ctx *Context, service string, code uint64, service2, routeK
 //
 // DescribeError codec 无关（共享 errors.json，全连接同源），故任一已声明的 server 命中即可；
 // Resolver nil 或所有 server 均未映射 → 返回空串（headerErr 描述是增强信息而非核心路径，
-// 缺失非致命——headerErr 错误码本身仍按 NewServerError 上抛，与 2-C2-Go 的 handleHeaderError
+// 缺失非致命——headerErr 错误码本身仍按 NewActionError 上抛，与 2-C2-Go 的 handleHeaderError
 // fail-loud 策略不对称是有意设计）。
 //
 // serverHint 建议传该 Robot 的主连接（如 "tcp:logic"），命中率高；空串时回退首声明的 server。

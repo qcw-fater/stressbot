@@ -189,8 +189,9 @@ func TestSchemaAdapter_ParityWithLuaAdapter(t *testing.T) {
 			lr, lb, le, gr, gb, ge)
 	}
 
-	// DescribeError 对拍。
-	if got, want := a.DescribeError(19), lua.DescribeError(19); got != want {
-		t.Errorf("DescribeError(19): wrap=%q lua=%q", got, want)
+	// DescribeError 对拍（用业务码 256：testdata errors.json 与 生产 error.lua 均命中，
+	// 且 >= 100 不属框架保留段；< 100 的服务端系统码已从生产 error.lua 清理，不可用于跨文件对拍）。
+	if got, want := a.DescribeError(256), lua.DescribeError(256); got != want {
+		t.Errorf("DescribeError(256): wrap=%q lua=%q", got, want)
 	}
 }

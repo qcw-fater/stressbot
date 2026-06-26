@@ -142,6 +142,13 @@ func LoadCodecResolver(codecDir string, codecs map[string]string, errorsFile str
 			return nil, fmt.Errorf("codec 加载失败：错误码文件 %q：%w", errorsFile, err)
 		}
 		errorMap = em
+		// 码段契约：< 100 为框架码保留段（errcode 包常量），errors.json（业务码）不得占用。
+		// adapter 是通用模块、零耦合，不 import errcode；这里用纯数值常量 100 表达同一契约。
+		for code := range errorMap {
+			if code < 100 {
+				return nil, fmt.Errorf("codec 加载失败：错误码文件 %q 码 %d < 100 属框架保留段，业务码请使用 ≥ 100", errorsFile, code)
+			}
+		}
 	}
 
 	// dedup：同一文件名只编译一次。

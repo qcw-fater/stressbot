@@ -437,7 +437,7 @@ func TestLoadErrorMap_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadErrorMap failed: %v", err)
 	}
-	want := map[uint64]string{0: "成功", 1: "数据库错误", 2: "协议解析错误", 19: "消息解密失败"}
+	want := map[uint64]string{0: "成功", 1: "数据库错误", 2: "协议解析错误", 19: "消息解密失败", 256: "区服没有找到"}
 	for k, v := range want {
 		if m[k] != v {
 			t.Errorf("m[%d] = %q, want %q", k, m[k], v)

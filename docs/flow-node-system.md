@@ -577,7 +577,7 @@ type ActionDef struct {
 **tcpRequest / udpRequest**：
 1. 同 tcpSend 的 1-4 步构建并发送请求包
 2. 调用 `netSender.TCPRequest/UDPRequest(service, packet, routeKey, timeout...)` 等待响应
-3. `headerErr != 0` 时：解析响应体，构造 `NewServerError` 返回
+3. `headerErr != 0` 时：解析响应体，构造 `NewActionError(errcode.ErrorCode(headerErr), ...)` 返回
 4. 调用 `parseAndStoreResponse(def, respBody)` 解析 S2C proto 并存储字段
 5. 返回发送字节数、接收字节数和错误
 
@@ -624,7 +624,7 @@ type ActionDef struct {
 2. 当前 Robot 主流程获取独占 LState
 3. 调用 `luaPool.RunActionScript(L, scriptName)` 同步执行脚本
 4. 阻塞型 Lua API 只暂停当前主流程；connectionPump 与声明式心跳继续独立运行
-5. 脚本 `return nil` 表示成功；`return err table` 时由 runtime 重建 `*ActionError` 透传（含 Kind/Code/Detail）；返回 number 等非法值 fail loud（报错）
+5. 脚本 `return nil` 表示成功；`return err table` 时由 runtime 重建 `*ActionError` 透传（含 Code/Detail）；返回 number 等非法值 fail loud（报错）
 
 ## 10. FieldBind -- 字段绑定
 
@@ -911,7 +911,7 @@ buildBody() -> factory.Create(c2sProto)
          -> navigatePath(fieldMap, field) 逐个字段存储到 StateStore
 ```
 
-`handleHeaderError` 统一处理服务端返回的非零 headerErr：解析响应体 + 调用 `adapter.DescribeError` 获取描述 + 构造 `NewServerError`。
+`handleHeaderError` 统一处理服务端返回的非零 headerErr：解析响应体 + 调用 `adapter.DescribeError` 获取描述 + 构造 `NewActionError(errcode.ErrorCode(headerErr), ...)`。
 
 ## 16. ActionError -- 结构化错误
 
@@ -919,8 +919,7 @@ buildBody() -> factory.Create(c2sProto)
 
 ```go
 type ActionError struct {
-    Kind   errcode.Kind      // 错误来源：KindFramework 或 KindServer
-    Code   errcode.ErrorCode // 错误码
+    Code   errcode.ErrorCode // 错误码（<100 框架错误，>=100 业务错误）
     Detail string            // 上下文描述
     cause  error             // 可选下层错误
 }
@@ -928,18 +927,19 @@ type ActionError struct {
 
 ### 16.2 错误格式
 
+单一 code 维度，码段区分来源（<100 为框架错误，>=100 为业务/服务端错误），展示标签由 code 推导：
+
 ```
-[framework/1] service=logic          // 框架错误
-[server/1004] desc: route=CreateTeam // 服务端错误
+[#1] service=logic          // 框架错误（code<100）
+[#1004] desc: route=CreateTeam // 业务错误（code>=100）
 ```
 
 ### 16.3 构造方法
 
 | 方法 | 说明 |
 |------|------|
-| `NewActionError(code, detail, ...cause)` | 创建框架错误 |
+| `NewActionError(code, detail, ...cause)` | 创建结构化错误（框架码 <100 / 业务码 ≥100 统一入口） |
 | `NewTimeoutError(code, detail)` | 创建超时错误（包装 `ErrTimeout`） |
-| `NewServerError(serverCode, detail)` | 包装服务端 headerErr |
 
 ### 16.4 哨兵错误
 
@@ -956,9 +956,7 @@ type ActionError struct {
 |------|------|
 | `Error() string` | 格式化输出 |
 | `Unwrap() error` | 返回 cause，支持 `errors.Is` 链式判断 |
-| `IsServerError() bool` | 基于 Kind 判断 |
-| `ErrorKind() errcode.Kind` | 返回错误类别 |
-| `ErrorCode() uint64` | 返回数值错误码 |
+| `ErrorCode() uint64` | 返回数值错误码（<100 框架，>=100 业务） |
 | `ErrorDetail() string` | 返回上下文描述 |
 
 ## 17. 默认常量
