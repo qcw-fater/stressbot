@@ -111,10 +111,12 @@ export interface StoreMapping {
  * 字段名 / json tag / 类型逐一对齐，勿臆测。
  */
 export interface HeartbeatField {
-  type: HeartbeatFieldType;              // u8/u16/u32/u64/i8/i16/i32/i64（小端打包）
-  source: HeartbeatFieldSource;          // fixed/state/stateCounter/counter/timestamp/randomInt
-  /** source=fixed：固定值（nil → Go 报错，不静默默认） */
+  type: HeartbeatFieldType;              // u8/u16/u32/u64/i8/i16/i32/i64（小端整数）/ f32/f64（小端 IEEE754 浮点）
+  source: HeartbeatFieldSource;          // fixed/state/stateCounter/counter/timestamp/randomInt（f32/f64 仅 fixed/state）
+  /** source=fixed 且整型：固定值（nil → Go 报错，不静默默认） */
   value?: number;
+  /** source=fixed 且 f32/f64：固定浮点值（缺失 → Go 报错） */
+  floatValue?: number;
   /** source=state|stateCounter：state 键名（缺失 → Go 报错） */
   key?: string;
   /** source=randomInt：下界（含）；缺失 → Go 报错 */
@@ -129,11 +131,11 @@ export interface HeartbeatField {
   unit?: 'ms' | 's';
 }
 
-/** 心跳字段支持的整数类型（小端宽度）。镜像 Go heartbeatTypeWidth 的 key 集合。 */
-export type HeartbeatFieldType = 'u8' | 'i8' | 'u16' | 'i16' | 'u32' | 'i32' | 'u64' | 'i64';
+/** 心跳字段支持的类型（小端宽度）：整数 u8..i64 + 浮点 f32/f64（IEEE754）。镜像 Go heartbeatTypeWidth 的 key 集合。 */
+export type HeartbeatFieldType = 'u8' | 'i8' | 'u16' | 'i16' | 'u32' | 'i32' | 'u64' | 'i64' | 'f32' | 'f64';
 
 export const ALL_HEARTBEAT_FIELD_TYPES: HeartbeatFieldType[] = [
-  'u8', 'i8', 'u16', 'i16', 'u32', 'i32', 'u64', 'i64',
+  'u8', 'i8', 'u16', 'i16', 'u32', 'i32', 'u64', 'i64', 'f32', 'f64',
 ];
 
 /**

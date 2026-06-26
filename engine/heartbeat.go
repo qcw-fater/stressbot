@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"math/rand"
 	"time"
 
@@ -19,27 +20,33 @@ const (
 	HeartbeatSourceRandomInt    = "randomInt"    // [Min,Max] 随机整数（含两端）
 )
 
-// 支持的小端整数类型宽度（字节）。
+// 支持的小端字段类型宽度（字节）：整数 u8..i64 + 浮点 f32/f64（IEEE754）。
 var heartbeatTypeWidth = map[string]int{
 	"u8": 1, "i8": 1,
 	"u16": 2, "i16": 2,
 	"u32": 4, "i32": 4,
 	"u64": 8, "i64": 8,
+	"f32": 4, "f64": 8,
 }
 
 // HeartbeatField 声明式 raw-LE 心跳包中的一个字段。
 // 框架通用布局（无游戏概念）：游戏包格式由 flow.json 配置组装，不进 Go 代码。
 type HeartbeatField struct {
-	Type   string `json:"type"`            // u8/u16/u32/u64/i8/i16/i32/i64（小端打包）
-	Source string `json:"source"`          // fixed/state/stateCounter/counter/timestamp/randomInt
-	Value  *int64 `json:"value,omitempty"` // source=fixed：固定值（nil → err，不静默默认）
-	Key    string `json:"key,omitempty"`   // source=state|stateCounter：state 键名
-	Min    *int64 `json:"min,omitempty"`   // source=randomInt：下界（含）；缺失 → err
-	Max    *int64 `json:"max,omitempty"`   // source=randomInt：上界（含）；缺失 → err
-	Start  *int64 `json:"start,omitempty"` // source=counter：私有计数器初值（缺省 0）
-	Step   *int64 `json:"step,omitempty"`  // source=counter：递增步长（缺省 1，由调用方应用）
-	Unit   string `json:"unit,omitempty"`  // source=timestamp："ms"|"s"，缺省 ms
+	Type       string   `json:"type"`                 // u8/u16/u32/u64/i8/i16/i32/i64（小端整数）/ f32/f64（小端 IEEE754 浮点）
+	Source     string   `json:"source"`               // fixed/state/stateCounter/counter/timestamp/randomInt（f32/f64 仅支持 fixed/state）
+	Value      *int64   `json:"value,omitempty"`      // source=fixed 且整型：固定值（nil → err，不静默默认）
+	FloatValue *float64 `json:"floatValue,omitempty"` // source=fixed 且 f32/f64：固定浮点值（nil → err）
+	Key        string   `json:"key,omitempty"`        // source=state|stateCounter：state 键名
+	Min        *int64   `json:"min,omitempty"`        // source=randomInt：下界（含）；缺失 → err
+	Max        *int64   `json:"max,omitempty"`        // source=randomInt：上界（含）；缺失 → err
+	Start      *int64   `json:"start,omitempty"`      // source=counter：私有计数器初值（缺省 0）
+	Step       *int64   `json:"step,omitempty"`       // source=counter：递增步长（缺省 1，由调用方应用）
+	Unit       string   `json:"unit,omitempty"`       // source=timestamp："ms"|"s"，缺省 ms
 }
+
+// isFloatType 判断心跳字段类型是否为浮点（f32/f64）。浮点字段走 resolveFloatField，
+// 仅支持 fixed/state 两个 source（计数器/时间戳/随机等整型语义对浮点无意义）。
+func isFloatType(typ string) bool { return typ == "f32" || typ == "f64" }
 
 // HeartbeatActionConfig 声明式心跳动作配置（双模式 body 构造）。
 // 由 ActionExecutor 从 ActionDef 装配，传给 NetSender.RegisterHeartbeat。
@@ -61,11 +68,15 @@ type HeartbeatActionConfig struct {
 }
 
 // appendLE 按 type 将 int64 值以小端字节序追加到 buf。
-// 支持的类型与宽度见 heartbeatTypeWidth。
-// 有符号类型按无符号位模式写入（uintN(int64) 截断），等价 Lua 的回绕掩码：
+// 支持的类型与宽度见 heartbeatTypeWidth（整数 u8..i64 + 浮点 f32/f64）。
+//
+// 整数：有符号按无符号位模式写入（uintN(int64) 截断），等价 Lua 回绕掩码
 //
 //	u16 → &0xFFFF，u32 → &0xFFFFFFFF，u64/i64 → 全 64 位。
-//	未知 type 返回中文 error。
+//
+// 浮点（f32/f64）：调用方 resolveHeartbeatField 已把 IEEE754 位模式塞进 int64，
+// 这里按宽度直接 PutUint 还原为小端字节，故无需为浮点单开分支。
+// 未知 type 返回中文 error。
 func appendLE(buf []byte, typ string, v int64) ([]byte, error) {
 	width, ok := heartbeatTypeWidth[typ]
 	if !ok {
@@ -127,11 +138,25 @@ func BuildHeartbeatBody(fields []HeartbeatField, st *state.Store, privateCounter
 	return body, false, nil
 }
 
-// resolveHeartbeatField 解析单个心跳字段的 int64 值。
+// resolveHeartbeatField 解析单个心跳字段的 int64 值（整数=真值/位掩码；浮点=IEEE754 位模式）。
 // 返回 (value, skip, err)：
 //   - skip=true 表示因 skipWhenMissing 命中 state 缺失（非错误）；
 //   - err 为配置/类型错误（不静默兜底）。
+//
+// 浮点字段（f32/f64）先经 resolveFloatField 产出 float64，再转 IEEE754 位模式塞进 int64——
+// appendLE 按宽度 PutUint 即可还原小端字节，无需为浮点单开分支。
 func resolveHeartbeatField(f *HeartbeatField, idx int, st *state.Store, privateCounters map[int]int64, skipWhenMissing bool) (int64, bool, error) {
+	if isFloatType(f.Type) {
+		fv, skip, err := resolveFloatField(f, idx, st, skipWhenMissing)
+		if err != nil || skip {
+			return 0, skip, err
+		}
+		if f.Type == "f32" {
+			return int64(math.Float32bits(float32(fv))), false, nil
+		}
+		return int64(math.Float64bits(fv)), false, nil
+	}
+
 	switch f.Source {
 	case HeartbeatSourceFixed:
 		if f.Value == nil {
@@ -193,5 +218,40 @@ func resolveHeartbeatField(f *HeartbeatField, idx int, st *state.Store, privateC
 
 	default:
 		return 0, false, fmt.Errorf("心跳字段未知 source=%q（idx=%d type=%q）", f.Source, idx, f.Type)
+	}
+}
+
+// resolveFloatField 解析浮点字段（f32/f64）的 float64 值。
+// 仅支持 fixed（FloatValue）/ state（线程安全读）；其余 source（计数器/时间戳/随机等整型语义）
+// 对浮点无意义 → err（不静默兜底）。
+// 返回 (value, skip, err)：skip=true 因 skipWhenMissing 命中 state 缺失（非错误）。
+func resolveFloatField(f *HeartbeatField, idx int, st *state.Store, skipWhenMissing bool) (float64, bool, error) {
+	switch f.Source {
+	case HeartbeatSourceFixed:
+		if f.FloatValue == nil {
+			return 0, false, fmt.Errorf("心跳 fixed 浮点源缺 floatValue 字段（idx=%d type=%q）", idx, f.Type)
+		}
+		return *f.FloatValue, false, nil
+
+	case HeartbeatSourceState:
+		if f.Key == "" {
+			return 0, false, fmt.Errorf("心跳 state 浮点源缺 key 字段（idx=%d type=%q）", idx, f.Type)
+		}
+		got := st.Get(f.Key)
+		if got == nil {
+			if skipWhenMissing {
+				return 0, true, nil
+			}
+			return 0, false, fmt.Errorf("心跳 state 浮点源缺失 key=%q（idx=%d type=%q）", f.Key, idx, f.Type)
+		}
+		fv, ok := state.ToFloat64Safe(got)
+		if !ok {
+			return 0, false, fmt.Errorf("心跳 state 浮点源值非数值 key=%q（idx=%d type=%q）", f.Key, idx, f.Type)
+		}
+		return fv, false, nil
+
+	default:
+		return 0, false, fmt.Errorf("心跳浮点字段 type=%q 不支持 source=%q（仅 fixed/state）（idx=%d）",
+			f.Type, f.Source, idx)
 	}
 }

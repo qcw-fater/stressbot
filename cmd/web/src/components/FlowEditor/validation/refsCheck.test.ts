@@ -414,6 +414,48 @@ describe('validateFlow', () => {
     expect(r.errors.filter((e) => e.code.startsWith('HEARTBEAT') || e.code === 'ACTION_NO_SERVICE' || e.code === 'ACTION_NO_ROUTE')).toEqual([]);
   });
 
+  it('tcpHeartbeat raw-binary f32/f64 浮点字段合法（fixed floatValue + state）', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpHeartbeat',
+          service: 'battle',
+          route: { cmd: 4, act: 2 },
+          intervalMs: 10000,
+          heartbeatFields: [
+            { type: 'f32', source: 'fixed', floatValue: 1.5 },
+            { type: 'f64', source: 'state', key: 'posX' },
+          ],
+        },
+      },
+    }));
+    expect(r.errors.filter((e) => e.code.startsWith('HEARTBEAT') || e.code === 'ACTION_NO_SERVICE' || e.code === 'ACTION_NO_ROUTE')).toEqual([]);
+  });
+
+  it('HEARTBEAT_FIELD_FIXED_NO_VALUE：f32 fixed 缺 floatValue 报错', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpHeartbeat', service: 'logic', route: { cmd: 2, act: 1 }, intervalMs: 5000,
+          heartbeatFields: [{ type: 'f32', source: 'fixed' }],
+        },
+      },
+    }));
+    expect(r.errors.find((e) => e.code === 'HEARTBEAT_FIELD_FIXED_NO_VALUE')).toBeTruthy();
+  });
+
+  it('HEARTBEAT_FIELD_FLOAT_BAD_SOURCE：f32 + randomInt 报错（浮点仅 fixed/state）', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpHeartbeat', service: 'logic', route: { cmd: 2, act: 1 }, intervalMs: 5000,
+          heartbeatFields: [{ type: 'f32', source: 'randomInt', min: 1, max: 9 }],
+        },
+      },
+    }));
+    expect(r.errors.find((e) => e.code === 'HEARTBEAT_FIELD_FLOAT_BAD_SOURCE')).toBeTruthy();
+  });
+
   it('tcpHeartbeat proto 模式（c2sProto + bindings）合法', () => {
     const r = validateFlow(baseFlow({
       actions: {

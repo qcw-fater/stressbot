@@ -2,9 +2,9 @@
  * 心跳二进制布局字段表（HeartbeatField[]）。
  *
  * 严格镜像 Go 端 `engine/heartbeat.go:HeartbeatField`：
- *   - type:   u8/i8/u16/i16/u32/i32/u64/i64（小端宽度）
- *   - source: fixed/state/stateCounter/counter/timestamp/randomInt
- *   - 按 source 动态展示配套字段（value / key / min,max / start,step / unit）
+ *   - type:   u8/i8/u16/i16/u32/i32/u64/i64（小端整数）/ f32/f64（小端 IEEE754 浮点）
+ *   - source: fixed/state/stateCounter/counter/timestamp/randomInt（f32/f64 仅 fixed/state）
+ *   - 按 source 动态展示配套字段（value / floatValue / key / min,max / start,step / unit）
  *
  * 每行一个字段，按顺序拼接成小端 body；增删 / 排序。
  */
@@ -141,7 +141,7 @@ export function HeartbeatFields({ value, onChange, label }: HeartbeatFieldsProps
         ]}
       />
       <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
-        字段按顺序以小端字节序拼接。source=fixed 填 value；state/stateCounter 填 key；randomInt 填 min/max。
+        字段按顺序以小端字节序拼接。source=fixed 填 value（f32/f64 填 floatValue）；state/stateCounter 填 key；randomInt 填 min/max。
       </div>
     </div>
   );
@@ -150,18 +150,24 @@ export function HeartbeatFields({ value, onChange, label }: HeartbeatFieldsProps
 /** 按 source 动态展示配套字段。 */
 function SourceParams({ field, onChange }: { field: HeartbeatField; onChange: (p: Partial<HeartbeatField>) => void }) {
   switch (field.source) {
-    case 'fixed':
+    case 'fixed': {
+      // f32/f64 走 floatValue（支持小数）；整型走 value。两者同属 source=fixed，按 type 切换绑定字段。
+      const isFloat = field.type === 'f32' || field.type === 'f64';
       return (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>value</span>
+          <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{isFloat ? 'floatValue' : 'value'}</span>
           <InputNumber
             size="small"
-            value={field.value}
-            onChange={(v) => onChange({ value: (v as number) ?? undefined })}
+            value={isFloat ? field.floatValue : field.value}
+            onChange={(v) =>
+              onChange(isFloat ? { floatValue: (v as number) ?? undefined } : { value: (v as number) ?? undefined })
+            }
+            step={isFloat ? 0.1 : 1}
             style={{ width: 140 }}
           />
         </span>
       );
+    }
     case 'state':
     case 'stateCounter':
       return (

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -34,6 +35,9 @@ func TestAppendLE(t *testing.T) {
 		{"u32_大数", "u32", 0x12345678, []byte{0x78, 0x56, 0x34, 0x12}},
 		{"u64_全1", "u64", -1, []byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}},
 		{"u64_0x0102030405060708", "u64", 0x0102030405060708, []byte{0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01}},
+		// f32/f64：v 为 IEEE754 位模式（resolveHeartbeatField 对浮点产出），appendLE 按宽度还原小端字节。
+		{"f32_1.0", "f32", int64(math.Float32bits(1.0)), []byte{0x00, 0x00, 0x80, 0x3f}},
+		{"f64_1.0", "f64", int64(math.Float64bits(1.0)), []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0x3f}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -64,7 +68,7 @@ func TestAppendLE_UnknownType(t *testing.T) {
 }
 
 func TestAppendLE_WidthByType(t *testing.T) {
-	widths := map[string]int{"u8": 1, "i8": 1, "u16": 2, "i16": 2, "u32": 4, "i32": 4, "u64": 8, "i64": 8}
+	widths := map[string]int{"u8": 1, "i8": 1, "u16": 2, "i16": 2, "u32": 4, "i32": 4, "u64": 8, "i64": 8, "f32": 4, "f64": 8}
 	for typ, w := range widths {
 		got, err := appendLE(nil, typ, 1)
 		if err != nil {
@@ -80,7 +84,8 @@ func TestAppendLE_WidthByType(t *testing.T) {
 // BuildHeartbeatBody：逐源解析
 // ──────────────────────────────────────────────────────────────────────────
 
-func i64ptr(v int64) *int64 { return &v }
+func i64ptr(v int64) *int64     { return &v }
+func f64ptr(v float64) *float64 { return &v }
 
 func TestBuildHeartbeatBody_Fixed(t *testing.T) {
 	fields := []HeartbeatField{{Type: "u16", Source: "fixed", Value: i64ptr(0x0102)}}
@@ -251,6 +256,89 @@ func TestBuildHeartbeatBody_RandomInt_MissingMax(t *testing.T) {
 	}
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// BuildHeartbeatBody：f32/f64 浮点字段（fixed / state / 非法 source）
+// ──────────────────────────────────────────────────────────────────────────
+
+func TestBuildHeartbeatBody_F32_Fixed(t *testing.T) {
+	fields := []HeartbeatField{{Type: "f32", Source: "fixed", FloatValue: f64ptr(1.0)}}
+	body, skip, err := BuildHeartbeatBody(fields, state.NewStore(), nil, false)
+	if err != nil || skip {
+		t.Fatalf("unexpected: body=%x skip=%v err=%v", body, skip, err)
+	}
+	want := []byte{0x00, 0x00, 0x80, 0x3f} // math.Float32bits(1.0)=0x3F800000 LE
+	if string(body) != string(want) {
+		t.Fatalf("body=%x want=%x", body, want)
+	}
+}
+
+func TestBuildHeartbeatBody_F64_Fixed(t *testing.T) {
+	fields := []HeartbeatField{{Type: "f64", Source: "fixed", FloatValue: f64ptr(1.0)}}
+	body, skip, err := BuildHeartbeatBody(fields, state.NewStore(), nil, false)
+	if err != nil || skip {
+		t.Fatalf("unexpected: body=%x skip=%v err=%v", body, skip, err)
+	}
+	want := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0x3f} // Float64bits(1.0)=0x3FF0000000000000 LE
+	if string(body) != string(want) {
+		t.Fatalf("body=%x want=%x", body, want)
+	}
+}
+
+func TestBuildHeartbeatBody_F32_State(t *testing.T) {
+	st := state.NewStore()
+	st.Set("posX", float64(1.5))
+	fields := []HeartbeatField{{Type: "f32", Source: "state", Key: "posX"}}
+	body, skip, err := BuildHeartbeatBody(fields, st, nil, false)
+	if err != nil || skip {
+		t.Fatalf("unexpected: body=%x skip=%v err=%v", body, skip, err)
+	}
+	want := []byte{0x00, 0x00, 0xc0, 0x3f} // float32(1.5)=0x3FC00000 LE
+	if string(body) != string(want) {
+		t.Fatalf("body=%x want=%x", body, want)
+	}
+}
+
+func TestBuildHeartbeatBody_F32_FixedMissingFloatValue(t *testing.T) {
+	fields := []HeartbeatField{{Type: "f32", Source: "fixed"}} // 缺 FloatValue
+	_, _, err := BuildHeartbeatBody(fields, state.NewStore(), nil, false)
+	if err == nil {
+		t.Fatal("f32 fixed 缺 floatValue 应报错")
+	}
+	if !strings.Contains(err.Error(), "floatValue") {
+		t.Fatalf("错误信息应含 floatValue: %v", err)
+	}
+}
+
+func TestBuildHeartbeatBody_Float_IllegalSource(t *testing.T) {
+	// f32/f64 仅支持 fixed/state；stateCounter 等整型语义对浮点无意义 → err（不静默兜底）
+	fields := []HeartbeatField{{Type: "f32", Source: "stateCounter", Key: "seq"}}
+	_, _, err := BuildHeartbeatBody(fields, state.NewStore(), nil, false)
+	if err == nil {
+		t.Fatal("f32 + stateCounter 应报错")
+	}
+}
+
+func TestBuildHeartbeatBody_F32_StateNonNumeric(t *testing.T) {
+	st := state.NewStore()
+	st.Set("bad", "not-a-number")
+	fields := []HeartbeatField{{Type: "f32", Source: "state", Key: "bad"}}
+	_, _, err := BuildHeartbeatBody(fields, st, nil, false)
+	if err == nil {
+		t.Fatal("f32 state 非数值应报错")
+	}
+}
+
+func TestBuildHeartbeatBody_F32_StateMissing_SkipWhenMissing(t *testing.T) {
+	fields := []HeartbeatField{{Type: "f32", Source: "state", Key: "missing"}}
+	body, skip, err := BuildHeartbeatBody(fields, state.NewStore(), nil, true)
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if !skip {
+		t.Fatalf("SkipWhenMissing 缺失应 skip=true, body=%x", body)
+	}
+}
+
 func TestBuildHeartbeatBody_UnknownSource(t *testing.T) {
 	fields := []HeartbeatField{{Type: "u8", Source: "unknownSource"}}
 	_, _, err := BuildHeartbeatBody(fields, state.NewStore(), nil, false)
@@ -350,10 +438,10 @@ func (f *fakeHeartbeatNetSender) GetTCPListenResp(string, string) *NetExchange {
 func (f *fakeHeartbeatNetSender) GetUDPListenResp(string, string) *NetExchange { return nil }
 func (f *fakeHeartbeatNetSender) EnsureTCPListener(string, string, int)        {}
 func (f *fakeHeartbeatNetSender) EnsureUDPListener(string, string, int)        {}
-func (f *fakeHeartbeatNetSender) GetTCPSecretKey(string) []byte  { return nil }
-func (f *fakeHeartbeatNetSender) SetTCPSecretKey(string, []byte) {}
-func (f *fakeHeartbeatNetSender) GetUDPSecretKey(string) []byte  { return nil }
-func (f *fakeHeartbeatNetSender) SetUDPSecretKey(string, []byte) {}
+func (f *fakeHeartbeatNetSender) GetTCPSecretKey(string) []byte                { return nil }
+func (f *fakeHeartbeatNetSender) SetTCPSecretKey(string, []byte)               {}
+func (f *fakeHeartbeatNetSender) GetUDPSecretKey(string) []byte                { return nil }
+func (f *fakeHeartbeatNetSender) SetUDPSecretKey(string, []byte)               {}
 
 func TestExecute_TCPHeartbeat_CallsRegisterHeartbeat(t *testing.T) {
 	fake := &fakeHeartbeatNetSender{}

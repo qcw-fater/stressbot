@@ -561,7 +561,7 @@ function checkHeartbeatField(name: string, idx: number, f: HeartbeatField, loc: 
   if (!f.type || !VALID_HEARTBEAT_TYPE_SET.has(f.type)) {
     issues.push({
       severity: 'error', code: 'HEARTBEAT_FIELD_UNKNOWN_TYPE', location: loc,
-      message: `${label} type 非法 "${f.type}"（合法：u8/i8/u16/i16/u32/i32/u64/i64）`,
+      message: `${label} type 非法 "${f.type}"（合法：u8/i8/u16/i16/u32/i32/u64/i64/f32/f64）`,
     });
   }
   if (!f.source || !VALID_HEARTBEAT_SOURCE_SET.has(f.source)) {
@@ -573,12 +573,27 @@ function checkHeartbeatField(name: string, idx: number, f: HeartbeatField, loc: 
   }
 
   const src = f.source as HeartbeatFieldSource;
+
+  // f32/f64 仅支持 fixed/state；其余 source（计数器/时间戳/随机等整型语义）对浮点无意义。
+  if ((f.type === 'f32' || f.type === 'f64') && src !== 'fixed' && src !== 'state') {
+    issues.push({
+      severity: 'error', code: 'HEARTBEAT_FIELD_FLOAT_BAD_SOURCE', location: loc,
+      message: `${label} type=${f.type} 仅支持 source=fixed/state（当前 source=${src}）`,
+    });
+  }
+
   switch (src) {
-    case 'fixed':
-      if (f.value === undefined || f.value === null) {
-        issues.push({ severity: 'error', code: 'HEARTBEAT_FIELD_FIXED_NO_VALUE', location: loc, message: `${label} source=fixed 缺 value` });
+    case 'fixed': {
+      // f32/f64 校验 floatValue；整型校验 value。
+      const isFloat = f.type === 'f32' || f.type === 'f64';
+      const hasVal = isFloat
+        ? f.floatValue !== undefined && f.floatValue !== null
+        : f.value !== undefined && f.value !== null;
+      if (!hasVal) {
+        issues.push({ severity: 'error', code: 'HEARTBEAT_FIELD_FIXED_NO_VALUE', location: loc, message: `${label} source=fixed 缺 ${isFloat ? 'floatValue' : 'value'}` });
       }
       break;
+    }
     case 'state':
     case 'stateCounter':
       if (!f.key) {
