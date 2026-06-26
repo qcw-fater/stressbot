@@ -1,7 +1,6 @@
 package robot
 
 import (
-	"context"
 	"sync/atomic"
 	"time"
 
@@ -18,77 +17,57 @@ import (
 // robotScheduler 是单个 Robot 的协作式调度核心（actor 运行时）。
 //
 // 对标 skynet 的 service 语义：执行器 goroutine 独占业务 LState，**所有「会等待」的点**
-// （Lua await / 节点延迟 / wait 节点 / 请求-响应）都经本调度器的统一 pump（wait）收敛——
-// 等待期间持续 drain mailbox（taskCh），绝不裸阻塞，从而任何阻塞点都不会饿死推送回调，
-// 也不会出现「pump goroutine 抢占业务 LState」的并发栈损坏。
+// （Lua await / 节点延迟 / wait 节点 / 请求-响应）都经本调度器的统一 pump（wait / awaitResponse /
+// runIO）收敛——等待窗口内直接 select taskCh 就地处理 listen 回调，绝不裸阻塞，从而任何阻塞点
+// 都不会饿死推送回调，也不会出现「pump goroutine 抢占业务 LState」的并发栈损坏。
 //
 // 线程模型：
 //   - mailbox（taskCh）：网络 pump goroutine 投递异步 Lua 工作（listen 回调），只复制消息 + 投递，
 //     绝不在 pump goroutine 内碰业务 LState；
-//   - owner（执行器 goroutine）：唯一消费者，串行 drain + 推进流程 + resume 协程；
-//   - taskWake：投递唤醒信号（1 容量、非阻塞），令处于等待窗口的 owner 及时醒来 drain。
+//   - owner（执行器 goroutine）：唯一消费者，在等待窗口的 select 内就地处理 taskCh + 推进流程 +
+//     resume 协程。owner 不在 select 上时（正跑业务 Lua / 推进流程），任务在 taskCh 排队等下个等待窗口。
+//
+// 终端条件纯语义化（就绪 / 响应 / done / 超时 / 取消）：无计数上界、无独立唤醒通道——taskCh 的
+// channel 收发本身就是 owner 与 pump 之间的唤醒信号（向正 select 在 taskCh 上的 owner 投递即唤醒）。
+// drain 只发生在空闲窗口（action 节点的 nodeDelay / wait 节点 / Lua await），flat-out 流程不 drain。
 //
 // 调度器只持有对 Robot 的回引用以读取 actor 的 I/O 句柄（ctx / client），自身不重复持有，
 // 保证与 Robot 生命周期一致、并便于独立单测。
 type robotScheduler struct {
 	robot       *Robot
 	taskCh      chan pendingTask
-	taskWake    chan struct{}
 	taskDropped atomic.Int64
 }
 
-// newRobotScheduler 构造调度器（mailbox 容量 robotTaskQueueSize，唤醒信号容量 1）。
+// newRobotScheduler 构造调度器（mailbox 容量 robotTaskQueueSize）。
 func newRobotScheduler(r *Robot) *robotScheduler {
 	return &robotScheduler{
-		robot:    r,
-		taskCh:   make(chan pendingTask, robotTaskQueueSize),
-		taskWake: make(chan struct{}, 1),
+		robot:  r,
+		taskCh: make(chan pendingTask, robotTaskQueueSize),
 	}
 }
 
 // enqueue 投递一个任务到 mailbox（线程安全，由网络 pump goroutine 调用）。
-// 队列满时丢弃最新并计数，绝不阻塞 pump（保护 I/O 平面吞吐）；投递成功后 notify owner。
+// 队列满时丢弃最新并计数，绝不阻塞 pump（保护 I/O 平面吞吐）。
+// 投递成功后无需显式唤醒——向 taskCh 发送本身就会唤醒正 select 在其上的 owner。
+// 丢弃走 Warn 级别（回调丢弃是压测保真度问题，不应藏在 debug 里）。
 func (s *robotScheduler) enqueue(t pendingTask) {
 	select {
 	case s.taskCh <- t:
-		// 唤醒可能正处于等待窗口的 owner，及时 drain。
-		select {
-		case s.taskWake <- struct{}{}:
-		default:
-		}
 	default:
 		n := s.taskDropped.Add(1)
-		if stresslog.DebugEnabled() {
-			stresslog.Debug("[ROBOT] 任务队列已满，丢弃 listen 回调任务",
-				zap.Int("id", s.robot.id), zap.String("task", t.name), zap.Int64("dropped", n))
-		}
-	}
-}
-
-// dropped 返回累计丢弃任务数（指标用）。
-func (s *robotScheduler) dropped() int64 { return s.taskDropped.Load() }
-
-// drain 串行执行至多 max 个待处理任务（在 owner goroutine 内调用，业务 LState 唯一所有者）。
-// 节点边界（RunPendingTasks）与等待窗口（wait）共用，确保两类安全点行为一致。ctx 取消立即停止。
-func (s *robotScheduler) drain(ctx context.Context, max int) {
-	for i := 0; i < max; i++ {
-		if ctx != nil && ctx.Err() != nil {
-			return
-		}
-		select {
-		case t := <-s.taskCh:
-			t.exec()
-		default:
-			return
-		}
+		stresslog.Warn("[ROBOT] 任务队列已满，丢弃 listen 回调任务",
+			zap.Int("id", s.robot.id), zap.String("task", t.name), zap.Int64("dropped", n))
 	}
 }
 
 // wait 是统一的协作式等待 pump，等待至 deadline：
-//   - check==nil（sleep / 节点延迟 / wait 节点）：等到截止；taskWake 唤醒时提前醒来 drain 后续等。
-//   - check!=nil（listen）：每 pollMs 轮询一次 check，命中即返回；taskWake 也会触发提前 drain。
+//   - check==nil（sleep / 节点延迟 / wait 节点）：等到截止；
+//   - check!=nil（listen）：命中即返回，超时返回 TimedOut。
 //
-// 每轮都 drain mailbox（跑 listen 回调等）。ctx 取消立即返回 Canceled。
+// park 期间直接 select taskCh：来一个 listen 回调任务就地处理一个，每处理完回 loop 顶
+// 重查 check / deadline——天然实现 per-callback 的就绪检查（取代旧的批 drain + boundary check）。
+// ctx 取消立即返回 Canceled。
 func (s *robotScheduler) wait(deadline time.Time, pollMs int, check func() *engine.NetExchange) script.WaitOutcome {
 	ctx := s.robot.ctx
 	for {
@@ -100,13 +79,6 @@ func (s *robotScheduler) wait(deadline time.Time, pollMs int, check func() *engi
 				return script.WaitOutcome{Exchange: ex}
 			}
 		}
-		s.drain(ctx, maxDrainPerBoundary)
-		if check != nil {
-			if ex := check(); ex != nil {
-				return script.WaitOutcome{Exchange: ex}
-			}
-		}
-
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			if check == nil {
@@ -114,7 +86,6 @@ func (s *robotScheduler) wait(deadline time.Time, pollMs int, check func() *engi
 			}
 			return script.WaitOutcome{TimedOut: true} // listen 超时
 		}
-
 		w := remaining
 		if check != nil {
 			tick := time.Duration(pollMs) * time.Millisecond
@@ -125,22 +96,24 @@ func (s *robotScheduler) wait(deadline time.Time, pollMs int, check func() *engi
 				w = tick
 			}
 		}
-
 		timer := time.NewTimer(w)
 		select {
+		case t := <-s.taskCh:
+			timer.Stop()
+			t.exec() // 就地处理 → loop 回顶重查 check / deadline
 		case <-ctx.Done():
 			timer.Stop()
 			return script.WaitOutcome{Canceled: true}
-		case <-s.taskWake:
-			timer.Stop()
 		case <-timer.C:
+			// poll 到点重查 ready / sleep 到时 → loop 回顶
 		}
 	}
 }
 
-// awaitResponse 协作式请求-响应：发送 spec.Packet 并注册响应通道，select 通道 + drain mailbox。
-// 用通道即时唤醒（非轮询），保证 WireRTT 测量不被轮询间隔污染。命中 / 超时 / 取消 / 发送失败
-// 分别返回带 Exchange / Err / Canceled 的 WaitOutcome，由 drive-loop 的 requestResultValues 转 Lua 值。
+// awaitResponse 协作式请求-响应：发送 spec.Packet 并注册响应通道，select 通道 + taskCh。
+// taskCh 与响应通道在同一个 select 里公平竞争：响应经通道即时命中（不被 drain 批次挡），
+// 保证 WireRTT 测量不被轮询间隔污染。命中 / 超时 / 取消 / 发送失败分别返回带 Exchange / Err /
+// Canceled 的 WaitOutcome，由 drive-loop 的 requestResultValues 转 Lua 值。
 func (s *robotScheduler) awaitResponse(spec *script.WaitSpec) script.WaitOutcome {
 	ctx := s.robot.ctx
 	var conn *network.Connection
@@ -159,15 +132,16 @@ func (s *robotScheduler) awaitResponse(spec *script.WaitSpec) script.WaitOutcome
 	}
 	defer pr.Close()
 
-	// 单一 timer 计满整个超时窗口；taskWake 唤醒只 drain 不重置超时。
+	// 单一 timer 计满整个超时窗口。
 	timer := time.NewTimer(pr.Timeout())
 	defer timer.Stop()
 	for {
 		if ctx.Err() != nil {
 			return script.WaitOutcome{Canceled: true}
 		}
-		s.drain(ctx, maxDrainPerBoundary)
 		select {
+		case t := <-s.taskCh:
+			t.exec() // 就地处理 listen 回调
 		case resp := <-pr.C():
 			if resp == nil {
 				return script.WaitOutcome{Canceled: true}
@@ -179,8 +153,6 @@ func (s *robotScheduler) awaitResponse(spec *script.WaitSpec) script.WaitOutcome
 				RecvWireBytes: resp.WireBytes,
 				Timing:        engine.RequestTiming(pr.Timing(resp)),
 			}}
-		case <-s.taskWake:
-			// 唤醒后回到循环顶部 drain，再继续 select。
 		case <-ctx.Done():
 			return script.WaitOutcome{Canceled: true}
 		case <-timer.C:
@@ -191,8 +163,8 @@ func (s *robotScheduler) awaitResponse(spec *script.WaitSpec) script.WaitOutcome
 }
 
 // runIO 协作式执行一次 Class B 阻塞 I/O（share.* Redis / http / 拨号）：把 job 投递到协程池
-// 后台执行真正的阻塞调用，调用方（执行器 goroutine）等待期间持续 drain mailbox（**串行**跑
-// listen 回调等），故 I/O 往返不会饿死协作式工作，也不会出现「pump goroutine 抢占业务 LState」。
+// 后台执行真正的阻塞调用，调用方（执行器 goroutine）等待期间直接 select taskCh 就地处理
+// listen 回调，故 I/O 往返不会饿死协作式工作，也不会出现「pump goroutine 抢占业务 LState」。
 // job 的结果由其自身经闭包捕获，调用方在 runIO 返回后读取（happens-before 经 done 通道保证）。
 //
 // 这是 **Lua await_*（awaitIO）与声明式 http/connect 动作（ActionExecutor.coopIO）共用的唯一
@@ -224,12 +196,11 @@ func (s *robotScheduler) runIO(job func()) {
 	})
 
 	for {
-		s.drain(s.robot.ctx, maxDrainPerBoundary)
 		select {
+		case t := <-s.taskCh:
+			t.exec() // 就地处理 listen 回调
 		case <-done:
 			return
-		case <-s.taskWake:
-			// 唤醒后回到循环顶部 drain，再继续等作业完成。
 		}
 	}
 }

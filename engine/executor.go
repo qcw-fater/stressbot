@@ -40,14 +40,9 @@ type ActionHandler interface {
 	ExecuteBoolean(expression string) bool
 	// RegisterListen 批量注册持久化推送监听（注册本身不阻塞流程）。推送到达后的处理分两路，
 	// 均不在网络 pump goroutine 内碰业务 LState：① script 回调——pump 只把回调**投递到 Robot
-	// 任务队列**，由执行器 goroutine 在安全点（节点边界 RunPendingTasks / await 等待窗口 drain）
-	// **串行**执行；② 声明式 store——pump 直接写线程安全的 state.Store（纯 Go，无 LState）。
+	// 任务队列**，由执行器 goroutine 在 await / 等待窗口的 select 内就地**串行**执行；② 声明式
+	// store——pump 直接写线程安全的 state.Store（纯 Go，无 LState）。
 	RegisterListen(refs []ListenRef) error
-	// RunPendingTasks 串行 drain Robot 任务队列（如 listen 脚本回调），在拥有业务 LState 的执行器
-	// goroutine 内安全执行。这是协作式调度的「节点边界」安全点：网络 pump goroutine 只投递任务、
-	// 绝不碰业务 LState，Lua 回调推迟到安全点由单一 goroutine 串行执行（另一类安全点是 await/IO
-	// 等待窗口，由调度器在等待期间 drain，不经本方法）。无 task 时立即返回。
-	RunPendingTasks(ctx context.Context)
 	// CooperativeSleep 协作式休眠 d（节点延迟 / wait 节点用）。与裸 time.After 的区别：
 	// 等待期间持续 drain 任务队列（跑 listen 回调等），不让「会等待」的点饿死推送回调——
 	// 这是 actor 运行时「任何阻塞点都不裸阻塞」的统一约束。d<=0 立即返回。
@@ -58,10 +53,17 @@ type ActionHandler interface {
 // NewExecutor 创建流程执行器。
 // caller 用于日志中标识调用方（如机器人账号），便于追踪问题。
 func NewExecutor(flow *TaskFlow, handler ActionHandler, caller string) *Executor {
+	// defaultDelayMs 兜底：flow 未配置（0）时按引擎默认 1000ms，兑现 DefaultDelayMs 字段注释承诺的
+	// 「0=引擎默认(1000ms)」。保证漏配的流程每个 action 节点仍有 drain 窗口（listen 回调靠节点延迟
+	// drain，不在节点入口单独 drain）。
+	defaultDelayMs := flow.DefaultDelayMs
+	if defaultDelayMs == 0 {
+		defaultDelayMs = 1000
+	}
 	return &Executor{
 		flow:           flow,
 		handler:        handler,
-		defaultDelayMs: flow.DefaultDelayMs,
+		defaultDelayMs: defaultDelayMs,
 		caller:         caller,
 	}
 }
@@ -99,10 +101,8 @@ func (e *Executor) executeNode(ctx context.Context, nodeID string) error {
 		return ctx.Err()
 	}
 
-	// 节点边界安全点：drain Robot 任务队列（listen 脚本回调等异步 Lua 工作）。
-	// 此处运行在执行器 goroutine（业务 LState 唯一所有者），故串行执行的回调可安全访问 Lua。
-	e.handler.RunPendingTasks(ctx)
-
+	// 节点入口不 drain 任务队列——listen 回调的 drain 收敛到空闲窗口（action 节点的 nodeDelay →
+	// CooperativeSleep、wait 节点、Lua await），由调度器在 wait 的 select 内就地处理。
 	node, ok := e.flow.Nodes[nodeID]
 	if !ok {
 		return fmt.Errorf("%w: %s (caller=%s)", ErrNodeNotFound, nodeID, e.caller)

@@ -155,3 +155,36 @@ func TestAwaitIO_DispatchesAndDrains(t *testing.T) {
 		t.Fatalf("renderer 应产出 [\"done\"]，实际 %+v", vals)
 	}
 }
+
+// TestCooperativeWait_ListenHitMidTaskBatch 回归：listen 在一批回调任务处理期间就绪时，
+// 应被 per-callback 检查及时捕获，而不是先把整批任务 drain 完才在边界查到。
+// 旧实现（drain 批 + boundary check）会把整批跑完（ran≈N）才命中；内联版每处理完一个任务即
+// 回 loop 顶 check，命中的时候只 drain 了极少数（ran≪N）。
+func TestCooperativeWait_ListenHitMidTaskBatch(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := newWaitRobot(ctx)
+
+	const batch = 30
+	var ran int32
+	for i := 0; i < batch; i++ {
+		r.sched.enqueue(pendingTask{name: "cb", exec: func() { atomic.AddInt32(&ran, 1) }})
+	}
+
+	want := &engine.NetExchange{Body: []byte("hit")}
+	var calls int32
+	check := func() *engine.NetExchange {
+		if atomic.AddInt32(&calls, 1) >= 2 {
+			return want // 第二次起视为就绪（模拟消息在首批任务处理后到达）
+		}
+		return nil
+	}
+
+	out := r.sched.wait(time.Now().Add(time.Second), 100, check)
+	if out.Exchange != want {
+		t.Fatalf("应返回命中的 Exchange，实际 %+v", out)
+	}
+	if got := atomic.LoadInt32(&ran); got >= batch {
+		t.Fatalf("listen 命中前不应 drain 整批任务：ran=%d（旧实现会 drain 完 %d 个才在边界命中）", got, batch)
+	}
+}

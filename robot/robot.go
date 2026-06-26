@@ -61,7 +61,7 @@ type Robot struct {
 	done           chan struct{}     // Robot 生命周期结束信号，Close 时等待
 	// sched 是 Robot 的协作式调度核心（actor 运行时）：mailbox + 统一等待 pump。
 	// 网络 pump goroutine 经 sched.enqueue 投递异步 Lua 工作（listen 回调），
-	// 由执行器 goroutine 在节点边界 / 等待窗口经 sched.drain 串行消费。详见 scheduler.go。
+	// 由执行器 goroutine 在等待窗口的 select 内就地串行消费（节点入口不再单独 drain）。详见 scheduler.go。
 	sched         *robotScheduler
 	onDone        func(*Robot, CleanupStatus) // 执行 goroutine 结束后回调（由 Manager 设置）
 	cleanupOnce   sync.Once
@@ -277,14 +277,10 @@ const (
 	// 不阻塞投递方（网络 pump goroutine）。listen 脚本回调属推送热路径，丢弃语义与 listen
 	// 缓存队列「保最新」一致：宁可丢回调也不阻塞 I/O 平面。
 	robotTaskQueueSize = 256
-	// maxDrainPerBoundary 单个节点边界一次 drain 的最大任务数。
-	// 防止回调洪峰把执行器 goroutine 长期占在 drain 循环里、饿死主流程推进；
-	// 未 drain 完的任务留待下一节点边界继续。
-	maxDrainPerBoundary = 64
 )
 
 // pendingTask 投递到 Robot 任务队列的一个工作单元。
-// exec 由 RunPendingTasks 在执行器 goroutine（业务 LState 唯一所有者）内串行调用，
+// exec 在执行器 goroutine（业务 LState 唯一所有者）的等待窗口 select 内就地串行调用，
 // 因此 exec 内可安全访问业务 Lua（r.l）。
 type pendingTask struct {
 	name string // 任务名（= listen 名），用于日志与指标
@@ -766,15 +762,6 @@ func (h *robotActionHandler) executeLuaBoolean(scriptName string) bool {
 	return result
 }
 
-// RunPendingTasks 实现 engine.ActionHandler：在节点边界串行 drain Robot 任务队列。
-//
-// 运行在执行器 goroutine（业务 LState 唯一所有者），故队列里的 listen 脚本回调等任务
-// 可安全访问业务 Lua。单次最多执行 maxDrainPerBoundary 个，避免回调洪峰饿死流程推进；
-// ctx 取消时立即停止（停止阶段不再执行回调）。无 task 时立即返回（select default）。
-func (h *robotActionHandler) RunPendingTasks(ctx context.Context) {
-	h.robot.sched.drain(ctx, maxDrainPerBoundary)
-}
-
 // CooperativeSleep 实现 engine.ActionHandler：节点延迟 / wait 节点的协作式休眠。
 func (h *robotActionHandler) CooperativeSleep(ctx context.Context, d time.Duration) error {
 	return h.robot.cooperativeSleep(ctx, d)
@@ -996,7 +983,7 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 }
 
 // runListenScript 在执行器 goroutine（业务 LState 唯一所有者）内执行一条 listen 脚本回调。
-// 由 RunPendingTasks 在节点边界串行调用，因此可安全访问 r.l。
+// 在等待窗口的 select 内就地串行调用（由 listen 回调的 exec 闭包触发），因此可安全访问 r.l。
 //
 // 解码失败 / 脚本失败均记 callback 失败指标，不向上传播——listen 回调是旁路推送，
 // 失败不应中断主流程。配置了 s2cProto 时解码后以字段表传给 on_message(r, msg)，
