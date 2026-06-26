@@ -45,7 +45,10 @@ import {
   validateCodecSchema,
 } from '@/services/resourcesStore';
 import { fetchBaselineCodec, fetchBaselineCodecIndex } from '@/services/baselineApi';
+import { getErrorCodes } from '@/services/api';
+import type { FrameworkCode } from '@/types/api';
 import { parseCodecForEdit } from './codecEditor/codecEdit';
+import { ErrorMapEditor, validateErrorMap, parseErrorMapSafe } from './ErrorMapEditor';
 import { FrameLayoutEditor } from './codecEditor/FrameLayoutEditor';
 import { PipelineEditor } from './codecEditor/PipelineEditor';
 import { RouteKeyEditor } from './codecEditor/RouteKeyEditor';
@@ -143,6 +146,14 @@ export function ProtocolConfigEditor() {
   const [createValue, setCreateValue] = useState('');
   // 视图切换：结构化 | 源码（仅 codec 显示；errors.json 隐藏切换、强制源码）
   const [viewMode, setViewMode] = useState<'struct' | 'source'>('struct');
+  // errors.json 结构化表单：框架保留码（只读展示）+ 行级校验错误（保存前 gate）
+  const [frameworkCodes, setFrameworkCodes] = useState<FrameworkCode[]>([]);
+  const [errorMapErrors, setErrorMapErrors] = useState<string[]>([]);
+  useEffect(() => {
+    getErrorCodes()
+      .then(setFrameworkCodes)
+      .catch(() => setFrameworkCodes([]));
+  }, []);
 
   // 结构化视图：把 content 解析为 raw（lossless）+ schema（typed 视图）+ error。
   const parsed = useMemo(() => parseCodecForEdit(content), [content]);
@@ -170,13 +181,10 @@ export function ProtocolConfigEditor() {
     }
     if (conn === '__errors__') {
       const file = await getErrorMap();
-      if (file) {
-        setContent(file.content);
-        setSource('已保存');
-      } else {
-        setContent(EMPTY_ERROR_MAP_TEMPLATE);
-        setSource('模板（未保存）');
-      }
+      const initial = file ? file.content : EMPTY_ERROR_MAP_TEMPLATE;
+      setContent(initial);
+      setSource(file ? '已保存' : '模板（未保存）');
+      setErrorMapErrors(validateErrorMap(parseErrorMapSafe(initial)).map((e) => e.message));
       return;
     }
     const name = connNameToFileName(conn);
@@ -296,6 +304,10 @@ export function ProtocolConfigEditor() {
       return;
     }
     if (activeConn === '__errors__') {
+      if (errorMapErrors.length > 0) {
+        message.error(`errors.json 有 ${errorMapErrors.length} 处错误（含 < 100 或重复码），无法保存`);
+        return;
+      }
       try {
         JSON.parse(content);
       } catch (e) {
@@ -337,6 +349,7 @@ export function ProtocolConfigEditor() {
       await setErrorMap(text);
       setContent(text);
       setSource(file.name);
+      setErrorMapErrors(validateErrorMap(parseErrorMapSafe(text)).map((e) => e.message));
       message.success(`已导入并保存：${file.name}`);
       return false;
     }
@@ -362,6 +375,7 @@ export function ProtocolConfigEditor() {
       await clearErrorMap();
       setContent(EMPTY_ERROR_MAP_TEMPLATE);
       setSource('模板（未保存）');
+      setErrorMapErrors([]);
       message.success('已清空错误码映射');
       return;
     }
@@ -442,7 +456,9 @@ export function ProtocolConfigEditor() {
   ];
   const activeLabel = activeConn === '__errors__' ? '错误码映射' : (activeConn ?? '未选择连接');
   const validationSummary = isErrorsView
-    ? '共享错误码映射：保存前检查 JSON 格式'
+    ? errorMapErrors.length === 0
+      ? '校验通过'
+      : `${errorMapErrors.length} 处问题：${errorMapErrors[0]}`
     : liveErrors.length === 0
       ? '校验通过'
       : `${liveErrors.length} 处问题：${liveErrors[0]}`;
@@ -555,21 +571,32 @@ export function ProtocolConfigEditor() {
                 style={{ margin: 8 }}
               />
             )}
-            <div className="pce-source-editor">
-              <Editor
-                language="json"
-                theme={monacoTheme}
+            {isErrorsView ? (
+              <ErrorMapEditor
                 value={content}
-                onChange={(v) => setContent(v ?? '')}
-                options={{
-                  fontSize: 12,
-                  minimap: { enabled: false },
-                  scrollBeyondLastLine: false,
-                  fixedOverflowWidgets: true,
-                  automaticLayout: true,
+                onChange={(next) => {
+                  setContent(next);
+                  setErrorMapErrors(validateErrorMap(parseErrorMapSafe(next)).map((e) => e.message));
                 }}
+                frameworkCodes={frameworkCodes}
               />
-            </div>
+            ) : (
+              <div className="pce-source-editor">
+                <Editor
+                  language="json"
+                  theme={monacoTheme}
+                  value={content}
+                  onChange={(v) => setContent(v ?? '')}
+                  options={{
+                    fontSize: 12,
+                    minimap: { enabled: false },
+                    scrollBeyondLastLine: false,
+                    fixedOverflowWidgets: true,
+                    automaticLayout: true,
+                  }}
+                />
+              </div>
+            )}
           </>
         )}
       </div>
