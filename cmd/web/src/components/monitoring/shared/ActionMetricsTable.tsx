@@ -295,13 +295,17 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
               overlayStyle={popupZIndex ? { zIndex: popupZIndex } : undefined}
               content={(
                 <div style={{ maxWidth: 360 }}>
-                  {r.errors.map((e) => (
-                    <div key={`${e.kind}:${e.code}`} style={{ marginTop: 3, fontSize: 11, lineHeight: '16px' }}>
-                      <span style={{ color: 'var(--color-error)', fontWeight: 700, fontSize: 10, fontVariantNumeric: 'tabular-nums', marginRight: 6 }}>×{e.count}</span>
-                      <span style={{ fontWeight: 500 }}>{e.codeName || `${e.kind}#${e.code}`}</span>
-                      {e.msgs.length > 0 && <span style={{ color: 'var(--text-tertiary)', marginLeft: 6 }}>{e.msgs.join('; ')}</span>}
-                    </div>
-                  ))}
+                  {r.errors.map((e) => {
+                    const isFramework = e.code < 100;
+                    return (
+                      <div key={e.code} style={{ marginTop: 3, fontSize: 11, lineHeight: '16px' }}>
+                        <span style={{ color: 'var(--color-error)', fontWeight: 700, fontSize: 10, fontVariantNumeric: 'tabular-nums', marginRight: 6 }}>×{e.count}</span>
+                        <Tag color={isFramework ? 'default' : 'blue'} style={{ fontSize: 10, marginInlineEnd: 4 }}>{isFramework ? '框架' : '业务'}</Tag>
+                        <span style={{ fontWeight: 500 }}>{e.codeName || `#${e.code}`}</span>
+                        {e.msgs.length > 0 && <span style={{ color: 'var(--text-tertiary)', marginLeft: 6 }}>{e.msgs.join('; ')}</span>}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
               title={<span style={{ fontSize: 12 }}>错误明细</span>}
