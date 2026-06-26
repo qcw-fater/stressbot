@@ -89,9 +89,9 @@ export function ByteStrip({ schema, selectedIndex, onSelect }: ByteStripProps) {
 
   const rulerPadPx = rulerPadFor(totalBytes);
   const availableTrackPx = Math.max(0, containerWidth - rulerPadPx * 2);
-  // 字节尺撑满可用宽度（短 header 也撑满，不右侧留白）；长 header 触底 MIN_BYTE_PX 后横向滚动。
+  // 字节尺根据字段数自动调节：始终撑满可用宽度（字段多则每字节等比变窄），不产生横向滚动。
   const pxPerByte = totalBytes > 0
-    ? Math.max(MIN_BYTE_PX, availableTrackPx / totalBytes)
+    ? availableTrackPx / totalBytes
     : MIN_BYTE_PX;
   const trackWidthPx = totalBytes * pxPerByte;
   const innerWidthPx = trackWidthPx + rulerPadPx * 2;
