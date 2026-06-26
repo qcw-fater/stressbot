@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"net/http"
 	"reflect"
 	"strings"
 	"time"
@@ -904,13 +905,23 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, ActionTimin
 
 	// 非 2xx 状态码视为请求失败
 	if exchange.StatusCode < 200 || exchange.StatusCode >= 300 {
+		// body 截断进日志（可能很长，不进 detail）
+		bodyForLog := respBody
+		if len(bodyForLog) > 512 {
+			bodyForLog = bodyForLog[:512]
+		}
 		stresslog.Warn("[ACTION] HTTP 响应非 2xx",
 			zap.String("action", def.Name),
 			zap.String("url", resolvedURL), zap.String("method", method),
 			zap.Int("statusCode", exchange.StatusCode),
-			zap.Int("respBodyLen", len(respBody)))
-		return exchange.SendWireBytes, exchange.RecvWireBytes, timing, NewActionError(errcode.ErrHTTPStatus,
-			fmt.Sprintf("action=%s statusCode=%d", def.Name, exchange.StatusCode))
+			zap.Int("respBodyLen", len(respBody)),
+			zap.ByteString("body", bodyForLog))
+		// detail 只保留 status 文本（http.StatusText），不含 body
+		hdetail := fmt.Sprintf("action=%s status=%d", def.Name, exchange.StatusCode)
+		if statusText := http.StatusText(exchange.StatusCode); statusText != "" {
+			hdetail += " " + statusText
+		}
+		return exchange.SendWireBytes, exchange.RecvWireBytes, timing, NewActionError(errcode.ErrHTTPStatus, hdetail)
 	}
 
 	if len(def.Store) > 0 && len(respBody) > 0 {
