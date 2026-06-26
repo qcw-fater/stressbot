@@ -553,7 +553,7 @@ type StressAggregate struct {
 | 带宽（sendBytes/recvBytes） | **求和** |
 | 延迟直方图 | **合并桶计数** -> 重算百分位 |
 | Apdex | 用合并后的 satisfied/tolerating **重新计算** |
-| 错误分布 | 相同 `(Kind, Code)` 的计数**相加**，Messages 取并集去重（上限 5 条） |
+| 错误分布 | 相同 `code` 的计数**相加**，Messages 取并集去重（上限 5 条） |
 
 ### 7.4 延迟直方图
 
