@@ -187,7 +187,7 @@ func TestLoadCodecResolver_ErrorsLoaded(t *testing.T) {
 	if a == nil {
 		t.Fatal("Resolve 返回 nil")
 	}
-	// errors.json 667 条，几乎必有非空描述；用任一常见 code 试探。
+	// errors.json 639 条，几乎必有非空描述；用任一常见 code 试探。
 	// 取不到具体 code 就跳过精确断言，仅验证不 panic + 返回 string。
 	_ = a.DescribeError(0) // 不应 panic
 }

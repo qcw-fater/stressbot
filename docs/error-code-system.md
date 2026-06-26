@@ -6,13 +6,13 @@
 
 ## 1. 概述
 
-stressbot 使用统一的错误码体系区分框架内部错误和游戏服务端错误。核心设计包括：
+stressbot 使用单维数值错误码（`uint64`）区分框架内部错误和游戏服务端错误。核心设计包括：
 
-- **`(Kind, Code)` 二元组**唯一标识一类错误，`Kind` 区分框架/服务端来源，`Code` 为 `uint64` 数值
-- **`ActionError` 结构化类型**替代 `fmt.Errorf` 自由格式字符串，携带 Code + Kind + Detail + cause
-- **monitor 错误分布按 `(Kind, Code)` 聚合**，固定类别不再爆炸式增长
+- **单一 `code` 维度**唯一标识一类错误，码段契约：< 100 为框架保留段（工具自产，由 `errcode` 包 `codeRegistry` 分配），≥ 100 为业务段（服务器返回的 `headerErr` 原值）
+- **`ActionError` 结构化类型**替代 `fmt.Errorf` 自由格式字符串，携带 `{Code, Detail}` + cause
+- **monitor 错误分布按 `code` 单维聚合**，固定类别不再爆炸式增长；展示时按 `code < 100` 推导"框架"/"业务"标签
 - **`CodedError` 接口**隔离 `monitor` 与 `engine` 之间的循环依赖
-- **`errors.json` 可选映射**将服务端错误码映射为可读描述
+- **`errors.json` 业务码映射**：扁平 `{"code":"中文描述"}`，加载期对 < 100 撞码硬报错（fail loud）
 
 ### 1.1 设计背景
 
@@ -28,10 +28,10 @@ stressbot 使用统一的错误码体系区分框架内部错误和游戏服务�
 
 ### 1.2 设计目标
 
-1. 引入统一的 `(Kind, Code)` 二元组错误标识
+1. 引入统一的单维数值 `code` 错误标识（码段契约 < 100 框架 / ≥ 100 业务）
 2. 结构化 `ActionError` 类型替代自由格式字符串
 3. 底层返回具体错误原因（Connection、Adapter 层不再返回无差异的失败值）
-4. monitor error map 按错误码聚合，相同 Code 合并计数
+4. monitor error map 按错误码聚合，相同 code 合并计数
 5. 超时正确归类（通过 `Unwrap()` 链让 `classifyResult` 识别超时）
 6. ctx 取消不计入失败率（新增 `ResultCanceled`）
 7. callback 路径接入错误聚合
@@ -44,46 +44,39 @@ stressbot 使用统一的错误码体系区分框架内部错误和游戏服务�
 
 **为什么需要独立顶层包？**
 
-`engine.ActionError.Code` 需要引用 `ErrorCode` 类型；`monitor.recordError` 又需要从 error 中提取 Code。如果把常量放在 `monitor` 或 `engine`，会形成循环依赖。`errcode` 包只放常量和 `Kind` 枚举，无业务依赖，任何包都可引用。
+`engine.ActionError.Code` 需要引用 `ErrorCode` 类型；`monitor.recordError` 又需要从 error 中提取 Code。如果把常量放在 `monitor` 或 `engine`，会形成循环依赖。`errcode` 包只放常量和 `codeRegistry`，无业务依赖，任何包都可引用。
 
-#### 2.1.1 ErrorCode
+#### 2.1.1 ErrorCode + 码段契约
 
 ```go
 type ErrorCode uint64
 ```
 
-统一错误码类型。与 `Kind` 配合使用，`(Kind, Code)` 二元组唯一标识一类错误。
+统一错误码类型。**单一 code 唯一标识**，码段契约划分来源（不再需要 `Kind` 维度）：
 
-#### 2.1.2 Kind
+| 码段 | 来源 | 分配方 |
+|------|------|--------|
+| `< 100` | 框架码（工具自产：连接/编码/Lua/配置等） | `errcode` 包 `codeRegistry` |
+| `>= 100` | 业务码（服务器返回的 `headerErr` 原值） | `errors.json` 业务映射 |
 
-```go
-type Kind string
+码段以纯数值 `100` 为界，`adapter` 是通用零耦合模块、不 import `errcode`，因此撞码硬报错在 `adapter/codec_resolver.go` 用数值常量 `100` 表达同一契约。
 
-const (
-    KindFramework Kind = "framework" // 框架内部错误（连接/编码/Lua 等）
-    KindServer    Kind = "server"    // 服务端 headerErr
-)
-```
-
-用显式字符串枚举替代"数值区间"约定。原因：游戏服务器可能用 `1..N` 编排业务码，与框架错误码数值冲突；用 `Kind` 显式标记后，monitor 按 `(Kind, Code)` 聚合，互不干扰。
-
-#### 2.1.3 CodeInfo
+#### 2.1.2 CodeInfo
 
 ```go
 type CodeInfo struct {
     Code uint64 `json:"code"` // 数值错误码
     Name string `json:"name"` // 大写下划线格式名称，如 "CONN_NOT_FOUND"
-    Kind Kind   `json:"kind"` // 错误来源类别
 }
 ```
 
-供 `GET /sbot/api/error-codes` 返回前端，用于 i18n 兜底。
+供 `GET /sbot/api/error-codes` 返回前端，用于 i18n 兜底与编辑器"框架保留码"展示。结构不含类别字段——前端按 `code < 100` 自行推导框架/业务标签。
 
 ---
 
-## 3. 框架错误码完整列表（27 个）
+## 3. 框架错误码完整列表（29 个）
 
-框架错误码按分类预留 10 个槽位（1-10, 11-20, ...），便于扩展。不再依赖"数值区间"区分框架/服务端错误，改用 `Kind` 显式标识。
+框架错误码占据 `< 100` 保留段，按分类预留 10 个槽位（1-10, 11-20, ...），便于扩展。码段以数值 `100` 为界与业务码隔离，不再需要 Kind 维度。
 
 ### 3.1 网络层（1-10）
 
@@ -93,7 +86,8 @@ type CodeInfo struct {
 | 2 | `ErrConnClosed` | `CONN_CLOSED` | 连接已关闭（isClose == 1） |
 | 3 | `ErrSendFailed` | `SEND_FAILED` | socket 写入失败（Send 返回错误）。含 HTTP 请求发送失败 |
 | 4 | `ErrRecvTimeout` | `RECV_TIMEOUT` | 等待响应超时（select timeout）。此错误通过 `NewTimeoutError` 构造，内嵌 `ErrTimeout` cause |
-| 5 | `ErrConnDropped` | `CONN_DROPPED` | 等待期间连接断开（ctx.Done） |
+| 5 | `ErrConnDropped` | `CONN_DROPPED` | 等待期间连接被对端断开（gnet OnClose 触发的 ctx.Done） |
+| 6 | `ErrActionCanceled` | `ACTION_CANCELED` | 等待期间连接被本地主动关闭（任务停止 / robot.Stop / 业务 Close） |
 
 ### 3.2 协议层（11-20）
 
@@ -130,6 +124,7 @@ type CodeInfo struct {
 | 46 | `ErrHTTPReadBody` | `HTTP_READ_BODY` | 读取 HTTP 响应体失败（io.ReadAll 返回错误） |
 | 47 | `ErrMarshalBody` | `MARSHAL_BODY` | JSON/form 请求体序列化失败（覆盖两种序列化场景） |
 | 48 | `ErrHTTPStatus` | `HTTP_STATUS` | HTTP 响应状态码非 2xx |
+| 49 | `ErrHeartbeatConfig` | `HEARTBEAT_CONFIG` | 声明式心跳配置错误（intervalMs<=0 / route 缺失 / 字段非法） |
 
 ### 3.6 Lua 层（51-60）
 
@@ -149,45 +144,47 @@ type CodeInfo struct {
 
 ### 3.8 错误码分配规则
 
+- 框架码占据 `< 100` 保留段，业务码使用 `>= 100`，码段以数值 `100` 为界
 - 每个分类预留 10 个槽位，便于扩展
-- 不依赖数值区间区分框架/服务端，改用 `Kind` 显式标识
 - 新增/重命名/废弃错误码只动 `codeRegistry`（单一数据源），`String()` 和 `AllCodes()` 从它派生
 
 ---
 
 ## 4. codeRegistry — 单一数据源
 
-`codeRegistry` 是唯一真理源，定义在 `errcode/codes.go` 中：
+`codeRegistry` 是唯一真理源，定义在 `errcode/codes.go` 中（仅 `code` + `name` 两字段，无类别列）：
 
 ```go
 var codeRegistry = []CodeInfo{
-    {1,  "CONN_NOT_FOUND",   KindFramework},
-    {2,  "CONN_CLOSED",      KindFramework},
-    {3,  "SEND_FAILED",      KindFramework},
-    {4,  "RECV_TIMEOUT",     KindFramework},
-    {5,  "CONN_DROPPED",     KindFramework},
-    {11, "ENCODE_FAILED",    KindFramework},
-    {12, "PARSE_FAILED",     KindFramework},
-    {21, "CREATE_MSG",       KindFramework},
-    {22, "BIND_FIELD",       KindFramework},
-    {23, "SERIALIZE",        KindFramework},
-    {24, "EXEC_FAILED",      KindFramework},
-    {31, "LISTEN_TIMEOUT",   KindFramework},
-    {32, "LISTEN_REGISTER",  KindFramework},
-    {41, "ADDR_EMPTY",       KindFramework},
-    {42, "URL_EMPTY",        KindFramework},
-    {43, "URL_SCHEME",       KindFramework},
-    {44, "UNKNOWN_PATTERN",  KindFramework},
-    {45, "HTTP_BUILD",       KindFramework},
-    {46, "HTTP_READ_BODY",   KindFramework},
-    {47, "MARSHAL_BODY",     KindFramework},
-    {48, "HTTP_STATUS",      KindFramework},
-    {51, "LUA_NOT_INIT",     KindFramework},
-    {52, "LUA_NO_SCRIPT",    KindFramework},
-    {53, "LUA_EXEC_FAILED",  KindFramework},
-    {54, "LUA_SCRIPT_CHECK", KindFramework},
-    {61, "CALLBACK_LUA",     KindFramework},
-    {62, "CALLBACK_PARSE",   KindFramework},
+    {1,  "CONN_NOT_FOUND"},
+    {2,  "CONN_CLOSED"},
+    {3,  "SEND_FAILED"},
+    {4,  "RECV_TIMEOUT"},
+    {5,  "CONN_DROPPED"},
+    {6,  "ACTION_CANCELED"},
+    {11, "ENCODE_FAILED"},
+    {12, "PARSE_FAILED"},
+    {21, "CREATE_MSG"},
+    {22, "BIND_FIELD"},
+    {23, "SERIALIZE"},
+    {24, "EXEC_FAILED"},
+    {31, "LISTEN_TIMEOUT"},
+    {32, "LISTEN_REGISTER"},
+    {41, "ADDR_EMPTY"},
+    {42, "URL_EMPTY"},
+    {43, "URL_SCHEME"},
+    {44, "UNKNOWN_PATTERN"},
+    {45, "HTTP_BUILD"},
+    {46, "HTTP_READ_BODY"},
+    {47, "MARSHAL_BODY"},
+    {48, "HTTP_STATUS"},
+    {49, "HEARTBEAT_CONFIG"},
+    {51, "LUA_NOT_INIT"},
+    {52, "LUA_NO_SCRIPT"},
+    {53, "LUA_EXEC_FAILED"},
+    {54, "LUA_SCRIPT_CHECK"},
+    {61, "CALLBACK_LUA"},
+    {62, "CALLBACK_PARSE"},
 }
 ```
 
@@ -221,8 +218,7 @@ var (
 
 ```go
 type ActionError struct {
-    Kind   errcode.Kind      // 错误来源类别：KindFramework 或 KindServer
-    Code   errcode.ErrorCode // (Kind, Code) 二元组唯一标识
+    Code   errcode.ErrorCode // 单一 code 唯一标识（< 100 框架 / >= 100 业务）
     Detail string            // 上下文描述（service/route/elapsed 等），不含 [code] 前缀
     cause  error             // 可选下层错误（如 ErrTimeout），支持 errors.Is 链式判断
 }
@@ -232,20 +228,19 @@ type ActionError struct {
 
 | 字段 | 用途 |
 |------|------|
-| `Kind` | 区分框架错误（`KindFramework`）与服务端错误（`KindServer`） |
-| `Code` | 框架错误码（`errcode.Err*`）或服务端 headerErr 原值 |
+| `Code` | 单一错误码：框架码（`errcode.Err*`，< 100）或业务码（服务端 headerErr 原值，≥ 100） |
 | `Detail` | 有限基数的上下文字符串（如 `service=logic route=CreateTeam`），不含 `[code]` 前缀，避免不同参数组合产生不同的聚合 key |
 | `cause` | 可选下层 error，支持 `errors.Is()` 链式判断（如识别超时） |
 
 ### 5.3 构造器
 
-#### NewActionError — 创建框架错误（最常用入口）
+#### NewActionError — 统一入口（框架码与业务码共用）
 
 ```go
 func NewActionError(code errcode.ErrorCode, detail string, cause ...error) *ActionError
 ```
 
-`Kind` 固定为 `KindFramework`。可选 `cause` 参数包装下层 error（如 `factory.Create` 失败时透传原始 error）。
+框架码与业务码统一走此入口，无 `Kind` 维度区分。可选 `cause` 参数包装下层 error（如 `factory.Create` 失败时透传原始 error）。
 
 #### NewTimeoutError — 创建超时错误
 
@@ -255,26 +250,18 @@ func NewTimeoutError(code errcode.ErrorCode, detail string) *ActionError
 
 内嵌 `ErrTimeout` 作为 cause，使 `errors.Is(err, ErrTimeout)` 返回 true，被 `classifyResult` 正确归类为 `ResultTimeout`。
 
-#### NewServerError — 包装服务端 headerErr
-
-```go
-func NewServerError(serverCode uint64, detail string) *ActionError
-```
-
-`Kind` 显式标为 `KindServer`，`Code` 为 headerErr 原值。便于 monitor/前端区分。
+> 注：历史 `NewServerError(serverCode, detail)` 已合并入 `NewActionError`——服务端 headerErr 直接以 `errcode.ErrorCode(headerErr)`（≥ 100）调用同一构造器。同理 `IsServerError()` / `ErrorKind()` 已删除，调用方按 `code >= 100` 自行推导业务/框架属性。
 
 ### 5.4 方法
 
 | 方法 | 签名 | 用途 |
 |------|------|------|
-| `Error()` | `string` | 格式：`[framework/1] service=logic` 或 `[server/1004] desc: route=CreateTeam` |
+| `Error()` | `string` | 格式：`[1] service=logic: cause` 或 `[1004] desc: route=CreateTeam` |
 | `Unwrap()` | `error` | 返回 cause，支持 `errors.Is` 链式判断 |
-| `IsServerError()` | `bool` | 基于 Kind 判断是否为服务端错误 |
-| `ErrorKind()` | `errcode.Kind` | CodedError 接口方法，供 monitor 提取 Kind |
-| `ErrorCode()` | `uint64` | CodedError 接口方法，供 monitor 提取 Code |
+| `ErrorCode()` | `uint64` | CodedError 接口方法，供 monitor 提取 code |
 | `ErrorDetail()` | `string` | CodedError 接口方法，供 monitor 提取 Detail |
 
-`Error()` 格式包含 Kind 是为了日志一眼能分辨框架错误 vs 服务端错误，避免误把游戏 code=1 当成框架错误。
+`Error()` 格式为 `[code] ...`，code 本身即区分来源（< 100 框架 / ≥ 100 业务），不再需要 Kind 前缀。
 
 ---
 
@@ -288,9 +275,8 @@ func NewServerError(serverCode uint64, detail string) *ActionError
 // CodedError 带错误码的错误接口。monitor 包定义此接口以避免循环依赖 engine 包。
 type CodedError interface {
     error
-    ErrorKind() errcode.Kind // 返回错误分类（framework / server）
-    ErrorCode() uint64       // 返回错误码
-    ErrorDetail() string     // 返回错误详情（用于环形缓冲存储）
+    ErrorCode() uint64   // 返回错误码（< 100 框架 / >= 100 业务）
+    ErrorDetail() string // 返回错误详情（用于环形缓冲存储）
 }
 ```
 
@@ -299,9 +285,8 @@ type CodedError interface {
 `engine/errors.go` 中 `ActionError` 实现该接口（只是把已有字段暴露成方法）：
 
 ```go
-func (e *ActionError) ErrorKind() errcode.Kind { return e.Kind }
-func (e *ActionError) ErrorCode() uint64       { return uint64(e.Code) }
-func (e *ActionError) ErrorDetail() string     { return e.Detail }
+func (e *ActionError) ErrorCode() uint64   { return uint64(e.Code) }
+func (e *ActionError) ErrorDetail() string { return e.Detail }
 ```
 
 ### 6.3 依赖关系
@@ -373,12 +358,12 @@ errcode（顶层包，无业务依赖）
 | execTCPSend | 发送失败 | 透传底层 ActionError |
 | execTCPRequest | encode 返回 nil | `NewActionError(ErrEncodeFailed, ...)` |
 | execTCPRequest | !ok | 透传底层 ActionError |
-| execTCPRequest | headerErr != 0 | `NewServerError(headerErr, "service=... route=...")` |
+| execTCPRequest | headerErr != 0 | `NewActionError(headerErr, "service=... route=...")`（业务码 ≥ 100，走统一入口） |
 | execTCPConnect | 地址为空 | `NewActionError(ErrAddrEmpty, "service=...")` |
 | execTCPConnect | 连接失败 | 透传 ConnectTCP 返回的 ActionError |
 | execUDPConnect | 地址为空 | `NewActionError(ErrAddrEmpty, "service=...")` |
 | execUDPConnect | 连接失败 | 透传 ConnectUDP 返回的 ActionError |
-| execTCPListen | headerErr != 0 | `NewServerError(headerErr, ...)` |
+| execTCPListen | headerErr != 0 | `NewActionError(headerErr, ...)`（业务码统一入口） |
 | execTCPListen | 轮询超时 | `NewTimeoutError(ErrListenTimeout, "service=... timeout=...")` |
 | execUDPSend | encode 返回 nil | `NewActionError(ErrEncodeFailed, ...)` |
 | execUDPSend | 发送失败 | 透传底层 ActionError |
@@ -399,7 +384,7 @@ errcode（顶层包，无业务依赖）
 | Lua 运行时未初始化 | `NewActionError(ErrLuaNotInit, "")` |
 | lua 动作缺少 script 配置 | `NewActionError(ErrLuaNoScript, "")` |
 | 脚本执行异常 | `NewActionError(ErrLuaExecFailed, "script=...", err)` |
-| 脚本 `return err table` | runtime 解析 table 重建 `*ActionError`（携带 Kind/Code/Detail）透传；脚本断言类失败（字段缺失/值不符）使用 `ErrLuaScriptCheck` |
+| 脚本 `return err table` | runtime 解析 table 重建 `*ActionError`（携带 Code/Detail）透传；脚本断言类失败（字段缺失/值不符）使用 `ErrLuaScriptCheck` |
 | 脚本返回 number 等非法值 | fail loud（报错），不再走旧式 code 退出码路径 |
 
 ### 7.6 Lua 桥适配 — `script/api_network.go`
@@ -454,7 +439,7 @@ func classifyResult(err error) monitor.ActionResult {
 | 常量 | 值 | 含义 | 进 monitor 错误 map |
 |------|---|------|---------------------|
 | `ResultSuccess` | 0 | 执行成功 | 否 |
-| `ResultFailure` | 1 | 执行失败（非超时） | 是（按 `(Kind, Code)` 聚合） |
+| `ResultFailure` | 1 | 执行失败（非超时） | 是（按 `code` 单维聚合） |
 | `ResultTimeout` | 2 | 超时 | 否 |
 | `ResultCanceled` | 3 | ctx 取消（任务停止/连接断开） | 否 |
 
@@ -475,11 +460,10 @@ func classifyResult(err error) monitor.ActionResult {
 
 ```go
 type ErrorEntry struct {
-    Kind     errcode.Kind `json:"kind"`     // "framework" / "server"
-    Code     uint64       `json:"code"`     // 错误码
-    CodeName string       `json:"codeName"` // ErrorCode.String()；服务端错误为 ""
-    Messages []string     `json:"msgs"`     // 最近 N 条 Detail（最多 3 条，环形缓冲）
-    Count    int64        `json:"count"`    // 该错误累计出现次数
+    Code     uint64   `json:"code"`     // 错误码（< 100 框架 / >= 100 业务）
+    CodeName string   `json:"codeName"` // ErrorCode.String()；业务码为 ""
+    Messages []string `json:"msgs"`     // 最近 N 条 Detail（最多 3 条，环形缓冲）
+    Count    int64    `json:"count"`    // 该错误累计出现次数
 }
 ```
 
@@ -487,12 +471,11 @@ type ErrorEntry struct {
 
 ```go
 type errKey struct {
-    Kind errcode.Kind
-    Code uint64
+    Code uint64 // 单一 code 维度
 }
 ```
 
-即使游戏服务器 code=1 与框架 code=1 数值相同，因为 Kind 不同会落到 `(server, 1)` 和 `(framework, 1)` 两个不同的 bucket，互不污染。
+码段契约保证业务码（≥ 100）与框架码（< 100）数值天然不冲突，单一 code 即可作为聚合键；无需 Kind 区分。
 
 ### 9.3 errorBucket — 环形缓冲区
 
@@ -527,7 +510,7 @@ func (c *MetricsCollector) recordError(am *actionMetrics, err error) {
     if !errors.As(err, &ce) {
         return  // 无法提取 code 的 error，忽略
     }
-    key := errKey{Kind: ce.ErrorKind(), Code: ce.ErrorCode()}
+    key := errKey{Code: ce.ErrorCode()}
     detail := ce.ErrorDetail()
     if len(detail) > 120 {
         detail = detail[:120]
@@ -572,15 +555,15 @@ func (c *MetricsCollector) RecordCallbackError(name string, err error)  // 失�
 
 ## 10. MergeSnapshots 错误合并 — `monitor/snapshot.go`
 
-分布式场景下合并多个 Agent 的 CollectorSnapshot 时，错误按 `(Kind, Code)` 聚合：
+分布式场景下合并多个 Agent 的 CollectorSnapshot 时，错误按 `code` 单维聚合：
 
 ```go
-type mergedErrorKey struct{ Kind errcode.Kind; Code uint64 }
+type mergedErrorKey struct{ Code uint64 }
 errMap := make(map[mergedErrorKey]*ErrorEntry)
 
 merge := func(es []ErrorEntry) {
     for _, e := range es {
-        k := mergedErrorKey{Kind: e.Kind, Code: e.Code}
+        k := mergedErrorKey{Code: e.Code}
         if existing, ok := errMap[k]; ok {
             existing.Count += e.Count         // 计数累加
             // Messages 取并集去重
@@ -603,7 +586,7 @@ merge := func(es []ErrorEntry) {
 **合并规则**：
 - Count：累加
 - Messages：取并集去重，超过 5 条截断（单节点 3 条 × 多节点合并后最多 5 条）
-- Kind/Code/CodeName：相同 key 保持不变
+- Code/CodeName：相同 key 保持不变
 
 ---
 
@@ -628,7 +611,7 @@ conf/adapter/
 }
 ```
 
-`errors.json` 是扁平 `{"code":"中文描述"}` 映射。key 必须可解析为 `uint64`，value 为描述文本。实际项目中的 `conf/adapter/errors.json` 覆盖 antnet 框架 0-27 + 区服/登录 256-299 + 各业务模块错误码。
+`errors.json` 是扁平 `{"code":"中文描述"}` 映射。key 必须可解析为 `uint64` 且 **≥ 100**（码段契约：< 100 属框架保留段，业务码不得占用），value 为描述文本。实际项目中的 `conf/adapter/errors.json` 覆盖 antnet 框架业务码 + 区服/登录 256-299 + 各业务模块错误码（U2.1 清理后约 639 条，全部 ≥ 100）。
 
 ### 11.3 Adapter 接口扩展
 
@@ -650,7 +633,7 @@ type Adapter interface {
 4. `SchemaAdapter.DescribeError(code)` 委托 `codec.SchemaCodec.DescribeError(code)`，直接查询编译期注入的错误码 map；未配置或未命中返回空字符串。
 5. 同一 codec 文件被多个 server 引用时 dedup，复用同一无状态 Adapter 实例。
 
-`errors.json` 非空但加载失败（文件缺失、JSON 非法、key 非数字）会让 `LoadCodecResolver` 返回中文 error，启动期 fail loud；传空 `errorsFile` 则跳过错误码描述，Adapter 仍可用。
+`errors.json` 非空但加载失败（文件缺失、JSON 非法、key 非数字）会让 `LoadCodecResolver` 返回中文 error，启动期 fail loud；**码段撞码硬报错**——任一 key `< 100` 即视为占用框架保留段，`LoadCodecResolver` 返回形如 `codec 加载失败：错误码文件 "errors.json" 码 54 < 100 属框架保留段，业务码请使用 ≥ 100` 的 error，启动期 fail loud（`adapter` 是通用零耦合模块、不 import `errcode`，用纯数值常量 `100` 表达同一契约）。传空 `errorsFile` 则跳过错误码描述，Adapter 仍可用。
 
 ### 11.5 action 层集成
 
@@ -664,11 +647,11 @@ func (ae *ActionExecutor) handleHeaderError(proto string, def *ActionDef, header
     if desc != "" {
         detail = desc + ": " + detail
     }
-    return NewServerError(headerErr, detail)
+    return NewActionError(errcode.ErrorCode(headerErr), detail)
 }
 ```
 
-`describeError` 内部使用 `CodecResolver.Resolve(proto + ":" + service)`；描述缺失不是致命错误，返回空串时仍按原 headerErr code 构造 `NewServerError`。
+`describeError` 内部使用 `CodecResolver.Resolve(proto + ":" + service)`；描述缺失不是致命错误，返回空串时仍按原 headerErr code（≥ 100 业务码）走统一 `NewActionError` 入口。
 
 ---
 
@@ -680,7 +663,7 @@ func (ae *ActionExecutor) handleHeaderError(proto string, def *ActionDef, header
 |------|------|
 | ActionResult | `ResultFailure` |
 | failureCount | +1 |
-| error map | 写入，key = (KindServer, headerErr 值) |
+| error map | 写入，key = headerErr 值（≥ 100 业务码，单一 code 维度） |
 | 响应解析 | 仍然 `parseAndStoreResponse`（后续 action 可用响应字段） |
 | 字节统计 | sendBytes + recvBytes 都计入 |
 | errorStrategy | 受 abort/skip/ignore 控制 |
@@ -693,22 +676,20 @@ func (ae *ActionExecutor) handleHeaderError(proto string, def *ActionDef, header
 ### 13.1 TypeScript 类型
 
 ```typescript
-export type ErrorKind = 'framework' | 'server';
-
 export interface ErrorEntry {
-    kind: ErrorKind;     // 显式区分框架/服务端错误
-    code: number;        // 错误码数值
-    codeName: string;    // ErrorCode.String()，如 "RECV_TIMEOUT"；服务端错误为 ""
+    code: number;        // 错误码数值（< 100 框架 / >= 100 业务）
+    codeName: string;    // ErrorCode.String()，如 "RECV_TIMEOUT"；业务码为 ""
     msgs: string[];      // 最近 N 条 Detail，最多 3 条
     count: number;       // 累计计数
 }
 ```
 
+无 `kind` 字段——前端按 `code < 100` 自行推导"框架"/"业务"标签。
+
 ### 13.2 ActionsTab 展示
 
-- **错误展开行**：`[Kind 标签] [Code:CodeName] xCount | 最近 N 条 msgs`
-  - `framework` 用蓝色标签
-  - `server` 用橙色标签
+- **错误展开行**：`[来源标签] [Code:CodeName] xCount | 最近 N 条 msgs`
+  - 标签由 `code < 100` 推导：`< 100` 显示"框架"（蓝色），`>= 100` 显示"业务"（橙色）
 - **新增"取消"列**：`canceledCount`，灰色，与"跳过"列并列
 - **前端过滤**：
   - `actionsOnly` 开关：隐藏 `callback:*` 行
@@ -722,11 +703,11 @@ export interface ErrorEntry {
 mux.HandleFunc("GET /sbot/api/error-codes", s.handleErrorCodeIndex)
 ```
 
-前端启动时通过此端点拉取框架错误码全量表（约 27 条），用于 i18n 兜底。返回数据量极小，可永久缓存。
+前端启动时通过此端点拉取框架错误码全量表（约 29 条，全部 `< 100`），用于 i18n 兜底与编辑器"框架保留码"展示。返回数据量极小，可永久缓存。
 
 ### 13.4 适配器编辑器
 
-适配器资源以声明式 JSON 为主：`*_codec.json` 描述各连接 codec，`errors.json` 提供可选共享错误码表。错误码文件可提供默认模板：
+适配器资源以声明式 JSON 为主：`*_codec.json` 描述各连接 codec，`errors.json` 提供可选共享业务错误码表。错误码文件可提供默认模板：
 
 ```json
 {
@@ -734,9 +715,18 @@ mux.HandleFunc("GET /sbot/api/error-codes", s.handleErrorCodeIndex)
 }
 ```
 
-### 13.5 任务启动 multipart
+### 13.5 errors.json 结构化表单 + 实时校验
 
-`errors.json` 可选随 `*_codec.json` 一起提交；后端任务配置按资源文件保存并在运行时传给 `LoadCodecResolver`。
+前端 `ErrorMapEditor`（`cmd/web/src/components/modules/ErrorMapEditor.tsx`）把 `errors.json` 原文解析为行式 KV 表单（每行 = 一个码 + 描述），提供：
+
+- **行级实时校验**（`validateErrorMap`）：码非正整数 / `< 100` 占用框架保留段 / 重复码 / 描述空，任一触发即标红并聚合到顶部 Alert（"N 处错误，保存前需全部修正"）。
+- **保留码展示**：表单顶部以 Tag 列出全部框架保留码（`< 100`，由 `/sbot/api/error-codes` 拉取的 `frameworkCodes`），明确标注"不可用"。
+- **序列化兜底**：`serializeErrorMap` 落库前丢弃码非数字或描述空的条目，保证写入 JSON 合法。
+- **保存拦截**：`ProtocolConfigEditor` 在 `errors.json` 存在校验错误时 `message.error` 阻断保存，与后端 `LoadCodecResolver` 撞码硬报错形成前后端双重防线。
+
+### 13.6 任务启动 multipart
+
+`errors.json` 可选随 `*_codec.json` 一起提交；后端任务配置按资源文件保存并在运行时传给 `LoadCodecResolver`（撞码 `< 100` 会在 Agent 启动期 fail loud）。
 
 ---
 
@@ -757,9 +747,9 @@ connection.RequestResponse  → (nil, 0)         ← 原因丢失
 ```
 connection.RequestResponse  → (nil, NewActionError(4, ...))  ← 具体原因
   netSenderAdapter.TCPRequest → (nil, 0, err)               ← 透传 ActionError
-    action.execTCPRequest     → err                          ← 透传或 NewServerError
+    action.execTCPRequest     → err                          ← 透传或 NewActionError(1004, ...)
       robot.ExecuteAction     → err error                    ← 传 error
-        monitor.recordError   → key = (Kind, Code)           ← 固定类别，可聚合
+        monitor.recordError   → key = code                   ← 固定类别，可聚合
 ```
 
 ### monitor error map 对比
@@ -771,10 +761,10 @@ connection.RequestResponse  → (nil, NewActionError(4, ...))  ← 具体原因
 "服务端错误码 1004: service=logic route=CreateTeam"                  → 12
 ```
 
-**改后**（按 `(Kind, Code)` 聚合）：
+**改后**（按 `code` 单维聚合）：
 ```
-(framework, 4) → 26  msgs: ["service=logic respKey=1002 elapsed=2.3s", ...]  // RECV_TIMEOUT
-(server, 1004) → 15  msgs: ["service=logic route=CreateTeam"]                 // 服务端错误码
+4    → 26  msgs: ["service=logic respKey=1002 elapsed=2.3s", ...]  // RECV_TIMEOUT（框架码 < 100）
+1004 → 15  msgs: ["service=logic route=CreateTeam"]                 // 业务码 >= 100
 ```
 
 ---
@@ -783,17 +773,17 @@ connection.RequestResponse  → (nil, NewActionError(4, ...))  ← 具体原因
 
 | 文件 | 变更类型 | 说明 |
 |------|----------|------|
-| `errcode/codes.go` | 新建 | ErrorCode/Kind 常量 + codeRegistry + String() + AllCodes() |
-| `engine/errors.go` | 新建 | ErrTimeout + ActionError + NewActionError/NewTimeoutError/NewServerError + CodedError 接口方法 |
+| `errcode/codes.go` | 新建 | ErrorCode 常量 + codeRegistry + String() + AllCodes()（无 Kind） |
+| `engine/errors.go` | 新建 | ErrTimeout + ActionError + NewActionError/NewTimeoutError + CodedError 接口方法（无 Kind） |
 | `network/connection.go` | 修改 | Send + RequestResponse 签名变更，各路径返回 ActionError |
 | `network/heartbeat.go` | 修改 | 适配 Send 新签名 |
 | `engine/action.go` | 修改 | NetSender 接口 7 个方法签名变更；所有 exec* 改用 ActionError；ErrExecFailed + ErrHTTPStatus |
 | `engine/executor.go` | 修改 | errorStrategy=abort 时使用 ErrExecFailed |
 | `script/api_network.go` | 修改 | 6 个 Lua API 适配 NetSender 新签名 |
 | `robot/robot.go` | 修改 | netSenderAdapter 适配；executeLuaAction 改用 ActionError；HTTPRequest 替换；classifyResult 增加 ctx 判断；callback 接入 RecordCallbackError |
-| `monitor/collector.go` | 修改 | RecordAction 签名变更；ErrorEntry 增加 Kind/Code/CodeName/Messages；errKey + errorBucket；CodedError 接口；ResultCanceled；RecordCallbackSuccess/Error |
-| `monitor/snapshot.go` | 修改 | MergeSnapshots 错误合并改用 (Kind, Code) key；ActionSnapshot 新增 CanceledCount |
-| `monitor/reporter.go` | 修改 | 控制台输出 `[Kind/Code CodeName]` 格式 |
+| `monitor/collector.go` | 修改 | RecordAction 签名变更；ErrorEntry 增加 Code/CodeName/Messages；errKey + errorBucket；CodedError 接口；ResultCanceled；RecordCallbackSuccess/Error |
+| `monitor/snapshot.go` | 修改 | MergeSnapshots 错误合并改用 code key；ActionSnapshot 新增 CanceledCount |
+| `monitor/reporter.go` | 修改 | 控制台输出 `[Code CodeName]` 格式 |
 | `adapter/adapter.go` | 修改 | 接口新增 DescribeError |
 | `adapter/codec_resolver.go` | 修改 | LoadCodecResolver 加载 `errors.json` 并注入 SchemaAdapter |
 | `adapter/schema_adapter.go` | 修改 | SchemaAdapter.DescribeError 委托 SchemaCodec |
@@ -810,8 +800,8 @@ connection.RequestResponse  → (nil, NewActionError(4, ...))  ← 具体原因
 
 | 章节 | 计划 | 实际 |
 |------|------|------|
-| Kind 类型 | `uint8` + `iota` | `string`（`"framework"` / `"server"`），与前端 JSON 直接对齐 |
-| Kind.String() | switch-case 方法 | string 类型本身就是可读字符串，不需要 String() 方法 |
+| Kind 维度 | 原计划 `(Kind, Code)` 二元组（Kind 为 `uint8`/`string`） | **已删除 Kind**：改单维 `code` + 码段契约（< 100 框架 / ≥ 100 业务），码段以数值 `100` 为界，互不冲突 |
+| Kind.String() | switch-case 方法 | Kind 已删除，无需 String()；框架/业务标签由 `code < 100` 推导 |
 | ErrActionSkip → ErrFieldNil | 重命名 + 删除 4 处吞咽逻辑 | 未实施重命名。executor 中保留了 skip 相关逻辑 |
 | ResultSkipped | ActionResult 包含此值 | 实际只有 4 个值：Success/Failure/Timeout/Canceled |
 | skippedCount | ActionSnapshot 含此字段 | ActionSnapshot 中无 skippedCount 字段 |
@@ -822,7 +812,7 @@ connection.RequestResponse  → (nil, NewActionError(4, ...))  ← 具体原因
 | ErrExecFailed | 计划中未列出 | 实际代码中存在，executor abort 时使用 |
 | ErrHTTPStatus | 计划中未列出 | 实际代码中存在，HTTP 响应非 2xx 时使用 |
 | ErrListenRegister | 计划中未列出 | 实际代码中存在 |
-| codeRegistry 条目数 | 计划列出 24 个 | 实际 27 个（多出 ErrExecFailed、ErrHTTPStatus、ErrListenRegister） |
+| codeRegistry 条目数 | 计划列出 24 个 | 实际 29 个（多出 ErrExecFailed、ErrHTTPStatus、ErrListenRegister、ErrActionCanceled、ErrHeartbeatConfig） |
 | Lua 桥适配 | 详细说明 6 个函数改造 | 已迁移为 LoadCodecResolver + SchemaAdapter 生产路径 |
 | 前端 actionsOnly/callbacksOnly 互斥开关 | 详细设计 | 待前端实施 |
 | errors.json 默认模板 | Lua 函数模板 | 当前为扁平 JSON code→desc 映射 |
