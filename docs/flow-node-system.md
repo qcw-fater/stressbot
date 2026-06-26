@@ -577,7 +577,7 @@ type ActionDef struct {
 **tcpRequest / udpRequest**：
 1. 同 tcpSend 的 1-4 步构建并发送请求包
 2. 调用 `netSender.TCPRequest/UDPRequest(service, packet, routeKey, timeout...)` 等待响应
-3. `headerErr != 0` 时：解析响应体，构造 `NewServerError` 返回
+3. `headerErr != 0` 时：解析响应体，构造 `NewActionError(errcode.ErrorCode(headerErr), ...)` 返回
 4. 调用 `parseAndStoreResponse(def, respBody)` 解析 S2C proto 并存储字段
 5. 返回发送字节数、接收字节数和错误
 
@@ -911,7 +911,7 @@ buildBody() -> factory.Create(c2sProto)
          -> navigatePath(fieldMap, field) 逐个字段存储到 StateStore
 ```
 
-`handleHeaderError` 统一处理服务端返回的非零 headerErr：解析响应体 + 调用 `adapter.DescribeError` 获取描述 + 构造 `NewServerError`。
+`handleHeaderError` 统一处理服务端返回的非零 headerErr：解析响应体 + 调用 `adapter.DescribeError` 获取描述 + 构造 `NewActionError(errcode.ErrorCode(headerErr), ...)`。
 
 ## 16. ActionError -- 结构化错误
 
@@ -938,9 +938,8 @@ type ActionError struct {
 
 | 方法 | 说明 |
 |------|------|
-| `NewActionError(code, detail, ...cause)` | 创建框架错误 |
+| `NewActionError(code, detail, ...cause)` | 创建结构化错误（框架码 <100 / 业务码 ≥100 统一入口） |
 | `NewTimeoutError(code, detail)` | 创建超时错误（包装 `ErrTimeout`） |
-| `NewServerError(serverCode, detail)` | 包装服务端 headerErr |
 
 ### 16.4 哨兵错误
 

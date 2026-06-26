@@ -122,7 +122,7 @@ type actionMetrics struct {
 	apdexTolerating              atomic.Int64      // RTT Apdex 容忍样本：响应时间 >= T 且 < 4T
 	totalDurationApdexSatisfied  atomic.Int64      // 总耗时 Apdex 满意样本：总耗时 < T
 	totalDurationApdexTolerating atomic.Int64      // 总耗时 Apdex 容忍样本：总耗时 >= T 且 < 4T
-	errors                       sync.Map          // errKey → *errorBucket，按 (Kind, Code) 聚合的错误分布
+	errors                       sync.Map          // errKey → *errorBucket，按 code 单维聚合的错误分布
 
 	// 客户端开销、RTT 样本与总耗时样本计数：
 	//   - clientCostSum/Count：累计客户端构建/解析开销（纳秒），用于 ClientAvgMs
