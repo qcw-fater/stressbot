@@ -1,10 +1,9 @@
 /**
  * ByteStrip — 字节尺（byte ruler）。
  *
- * 设计目标：这是协议配置里的主视觉与主校验工具，不追求“填满好看”，而追求
- * offset/size 可读、首尾刻度完整、长 header 只在条带内部横向滚动。
- *
- * scope 决策：仅展示 + 点击选中；offset/size 修改仍走 HeaderFieldTable。
+ * 主视觉与主校验工具。字段/刻度用**百分比**定位（相对条带宽度），布局不依赖 JS 测宽——
+ * 字段增减、容器宽度变化（如祖先出现滚动条）都自动等比适配，结构上不会挤出横向滚动条。
+ * scope：仅展示 + 点击选中；offset/size 修改走 HeaderFieldTable。
  */
 
 import { useLayoutEffect, useRef, useState } from 'react';
@@ -19,7 +18,6 @@ export interface ByteStripProps {
   onSelect: (index: number) => void;
 }
 
-const MIN_BYTE_PX = 12;
 const DEFAULT_CONTAINER_PX = 640;
 const OFFSET_LABEL_MIN_PX = 42;
 const FIELD_NAME_MIN_PX = 44;
@@ -53,9 +51,14 @@ function dividerBytes(totalBytes: number): number[] {
   return ticks;
 }
 
-/** 按最大 tick 文本长度预留左右安全区，避免 0 和末尾刻度贴边被裁。 */
+/** 按最大 tick 文本长度预留左右安全区，避免首尾刻度贴边被裁。 */
 function rulerPadFor(totalBytes: number): number {
   return Math.max(18, String(Math.max(0, totalBytes)).length * 7 + 12);
+}
+
+/** 字节位置 → 相对条带宽度的百分比。 */
+function pct(n: number, total: number): string {
+  return total > 0 ? `${(n / total) * 100}%` : '0%';
 }
 
 function tickClass(tick: number, totalBytes: number): string {
@@ -71,31 +74,22 @@ export function ByteStrip({ schema, selectedIndex, onSelect }: ByteStripProps) {
   const ranges = computeByteRanges(fields, headerSize);
 
   const totalBytes = Math.max(0, headerSize) + Math.max(0, trailerSize);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const [containerWidth, setContainerWidth] = useState(DEFAULT_CONTAINER_PX);
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  // stripPx 仅用于判断 offset/字段名标签是否显示（非布局）；布局走百分比，不依赖它的精度。
+  const [stripPx, setStripPx] = useState(DEFAULT_CONTAINER_PX);
 
   useLayoutEffect(() => {
-    const el = scrollRef.current;
+    const el = stripRef.current;
     if (!el) return;
-    setContainerWidth(el.clientWidth || DEFAULT_CONTAINER_PX);
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.contentRect.width > 0) setContainerWidth(entry.contentRect.width);
-      }
-    });
+    const measure = () => setStripPx(el.clientWidth || DEFAULT_CONTAINER_PX);
+    measure();
+    const ro = new ResizeObserver(() => measure());
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
   const rulerPadPx = rulerPadFor(totalBytes);
-  const availableTrackPx = Math.max(0, containerWidth - rulerPadPx * 2);
-  // 字节尺根据字段数自动调节：始终撑满可用宽度（字段多则每字节等比变窄），不产生横向滚动。
-  const pxPerByte = totalBytes > 0
-    ? availableTrackPx / totalBytes
-    : MIN_BYTE_PX;
-  const trackWidthPx = totalBytes * pxPerByte;
-  const innerWidthPx = trackWidthPx + rulerPadPx * 2;
-  const byteLeft = (byte: number) => rulerPadPx + byte * pxPerByte;
+  const pxPerByte = totalBytes > 0 ? stripPx / totalBytes : 0;
 
   const ticks = rulerTicks(totalBytes);
   const dividers = dividerBytes(totalBytes);
@@ -111,8 +105,9 @@ export function ByteStrip({ schema, selectedIndex, onSelect }: ByteStripProps) {
         </Typography.Text>
       </div>
 
-      <div ref={scrollRef} className="bs-scroll">
-        <div className="bs-inner" style={{ width: innerWidthPx }}>
+      <div className="bs-scroll">
+        {/* paddingInline 留出首尾刻度安全区；内部三层用百分比撑满 content，随容器自适应 */}
+        <div className="bs-inner" style={{ padding: `0 ${rulerPadPx}px` }}>
           <div className="bs-label-layer">
             {ranges.map((r, i) => {
               const sizeBytes = r.end - r.start;
@@ -124,30 +119,30 @@ export function ByteStrip({ schema, selectedIndex, onSelect }: ByteStripProps) {
                 <span
                   key={`lbl-${i}`}
                   className={`bs-field-label${isSel ? ' bs-field-label-sel' : ''}`}
-                  style={{ left: byteLeft(center) }}
+                  style={{ left: pct(center, totalBytes) }}
                 >
                   {r.field.name || '(未命名)'}
                 </span>
               );
             })}
             {trailerSize > 0 && (
-              <span className="bs-field-label" style={{ left: byteLeft(headerSize + trailerSize / 2) }}>
+              <span className="bs-field-label" style={{ left: pct(headerSize + trailerSize / 2, totalBytes) }}>
                 trailer
               </span>
             )}
           </div>
 
-          <div className="bs-strip" style={{ left: rulerPadPx, width: trackWidthPx }}>
+          <div ref={stripRef} className="bs-strip">
             {dividers.map((b) => (
-              <div key={`div-${b}`} className="bs-divider" style={{ left: b * pxPerByte }} />
+              <div key={`div-${b}`} className="bs-divider" style={{ left: pct(b, totalBytes) }} />
             ))}
 
             {headerSize > 0 && headerSize < totalBytes && (
-              <div className="bs-header-border" style={{ left: headerSize * pxPerByte }} />
+              <div className="bs-header-border" style={{ left: pct(headerSize, totalBytes) }} />
             )}
 
             {selectedCenter !== null && (
-              <div className="bs-probe" style={{ left: selectedCenter * pxPerByte }} />
+              <div className="bs-probe" style={{ left: pct(selectedCenter, totalBytes) }} />
             )}
 
             {ranges.map((r, i) => {
@@ -168,8 +163,8 @@ export function ByteStrip({ schema, selectedIndex, onSelect }: ByteStripProps) {
                     className={`bs-field${isSel ? ' bs-field-sel' : ''}${r.bad ? ' bs-field-bad' : ''}`}
                     onClick={() => onSelect(i)}
                     style={{
-                      left: r.start * pxPerByte,
-                      width: Math.max(sizeBytes * pxPerByte, 2),
+                      left: pct(r.start, totalBytes),
+                      width: pct(sizeBytes, totalBytes),
                       background: r.bad ? 'var(--pce-fault)' : fieldColor(i),
                       opacity: isSel ? 1 : 0.84,
                     }}
@@ -186,7 +181,7 @@ export function ByteStrip({ schema, selectedIndex, onSelect }: ByteStripProps) {
               <Tooltip title={`trailer · ${headerSize}–${headerSize + trailerSize}（灰色：不计入 header 字段）`}>
                 <div
                   className="bs-trailer"
-                  style={{ left: headerSize * pxPerByte, width: trailerSize * pxPerByte }}
+                  style={{ left: pct(headerSize, totalBytes), width: pct(trailerSize, totalBytes) }}
                 >
                   {trailerSize * pxPerByte >= OFFSET_LABEL_MIN_PX && <span className="bs-trailer-label">trailer</span>}
                 </div>
@@ -196,7 +191,7 @@ export function ByteStrip({ schema, selectedIndex, onSelect }: ByteStripProps) {
 
           <div className="bs-ruler-layer">
             {ticks.map((tick) => (
-              <span key={`tick-${tick}`} className={tickClass(tick, totalBytes)} style={{ left: byteLeft(tick) }}>
+              <span key={`tick-${tick}`} className={tickClass(tick, totalBytes)} style={{ left: pct(tick, totalBytes) }}>
                 {tick}
               </span>
             ))}

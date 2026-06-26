@@ -274,8 +274,7 @@
 }
 .bs-scroll {
   max-width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: hidden;
   padding-bottom: 2px;
 }
 .bs-inner {
