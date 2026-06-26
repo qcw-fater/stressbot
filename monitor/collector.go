@@ -58,19 +58,17 @@ const (
 	ResultCanceled                     // ctx 取消（任务停止/连接断开）
 )
 
-// ErrorEntry 错误分布条目，按 (Kind, Code) 聚合。
+// ErrorEntry 错误分布条目，按 code 单维聚合。
 type ErrorEntry struct {
-	Kind     errcode.Kind `json:"kind"`     // 错误分类："framework" / "server"
-	Code     uint64       `json:"code"`     // 错误码
-	CodeName string       `json:"codeName"` // 错误码名称（ErrorCode.String()）；服务端错误为 ""
-	Messages []string     `json:"msgs"`     // 最近 N 条 Detail（最多 3 条，环形缓冲）
-	Count    int64        `json:"count"`    // 该错误累计出现次数
+	Code     uint64   `json:"code"`     // 错误码
+	CodeName string   `json:"codeName"` // 错误码名称（ErrorCode.String()）；业务码为 ""
+	Messages []string `json:"msgs"`     // 最近 N 条 Detail（最多 3 条，环形缓冲）
+	Count    int64    `json:"count"`    // 该错误累计出现次数
 }
 
-// errKey 错误桶的复合键，按 (Kind, Code) 唯一标识一类错误。
+// errKey 错误桶的键，按 code 唯一标识一类错误。
 type errKey struct {
-	Kind errcode.Kind // 错误分类
-	Code uint64       // 错误码
+	Code uint64 // 错误码
 }
 
 // errorBucket 错误桶，原子计数 + 环形缓冲最近 3 条 Detail。
@@ -104,9 +102,8 @@ func (b *errorBucket) snapshot() (count int64, msgs []string) {
 // CodedError 带错误码的错误接口。monitor 包定义此接口以避免循环依赖 engine 包。
 type CodedError interface {
 	error
-	ErrorKind() errcode.Kind // 返回错误分类（framework / server）
-	ErrorCode() uint64       // 返回错误码
-	ErrorDetail() string     // 返回错误详情（用于环形缓冲存储）
+	ErrorCode() uint64   // 返回错误码
+	ErrorDetail() string // 返回错误详情（用于环形缓冲存储）
 }
 
 // actionMetrics per-action 指标，全部使用原子操作保证无锁热路径安全。
@@ -428,13 +425,13 @@ func (c *MetricsCollector) recordAction(
 	}
 }
 
-// recordError 记录错误到分布 map，按 (Kind, Code) 聚合。
+// recordError 记录错误到分布 map，按 code 聚合。
 func (c *MetricsCollector) recordError(am *actionMetrics, err error) {
 	var ce CodedError
 	if !errors.As(err, &ce) {
 		return
 	}
-	key := errKey{Kind: ce.ErrorKind(), Code: ce.ErrorCode()}
+	key := errKey{Code: ce.ErrorCode()}
 	detail := ce.ErrorDetail()
 	if len(detail) > 120 {
 		detail = detail[:120]
@@ -571,7 +568,6 @@ func (am *actionMetrics) CollectErrors() []ErrorEntry {
 		k := key.(errKey)
 		count, msgs := value.(*errorBucket).snapshot()
 		entries = append(entries, ErrorEntry{
-			Kind:     k.Kind,
 			Code:     k.Code,
 			CodeName: errcode.ErrorCode(k.Code).String(),
 			Messages: msgs,

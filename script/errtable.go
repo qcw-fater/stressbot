@@ -48,14 +48,6 @@ func parseErrTable(v lua.LValue) (code int, detail string, ok bool) {
 	return int(codeVal), string(detailVal), true
 }
 
-// classifyCode 由错误码推导 Kind。框架码 <100，服务端码 >=100。
-func classifyCode(code int) errcode.Kind {
-	if code >= 100 {
-		return errcode.KindServer
-	}
-	return errcode.KindFramework
-}
-
 // buildActionError 由 code+detail 构造 *engine.ActionError，补 script= 上下文。
 func buildActionError(code int, detail, scriptName string) error {
 	full := detail
@@ -64,9 +56,6 @@ func buildActionError(code int, detail, scriptName string) error {
 			full += " "
 		}
 		full += "script=" + scriptName
-	}
-	if classifyCode(code) == errcode.KindServer {
-		return engine.NewServerError(uint64(code), full)
 	}
 	return engine.NewActionError(errcode.ErrorCode(code), full)
 }

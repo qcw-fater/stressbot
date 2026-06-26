@@ -4,8 +4,6 @@ import (
 	"runtime"
 	"slices"
 	"time"
-
-	"stressbot/errcode"
 )
 
 // SystemSnapshot 系统资源快照。
@@ -476,15 +474,14 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 			ma.TimeoutAvgMs = float64(totalTimeoutMs) / float64(ma.TimeoutCount)
 		}
 
-		// 合并错误 — 按 (Kind, Code) 聚合，Messages 取并集去重
+		// 合并错误 — 按 code 聚合，Messages 取并集去重
 		type mergedErrorKey struct {
-			Kind errcode.Kind
 			Code uint64
 		}
 		errMap := make(map[mergedErrorKey]*ErrorEntry)
 		for _, a := range agg.snaps {
 			for _, e := range a.Errors {
-				k := mergedErrorKey{Kind: e.Kind, Code: e.Code}
+				k := mergedErrorKey{Code: e.Code}
 				if existing, ok := errMap[k]; ok {
 					existing.Count += e.Count
 					for _, m := range e.Messages {

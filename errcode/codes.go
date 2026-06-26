@@ -1,17 +1,7 @@
 package errcode
 
-// ErrorCode 统一错误码类型。
-// 与 Kind 配合使用：(Kind, Code) 二元组才能唯一标识一类错误。
+// ErrorCode 统一错误码类型。码段契约：< 100 框架码（工具自产，本 registry 分配），≥ 100 业务码（服务器返回）。单一 code 唯一标识，不再需要 Kind 维度。
 type ErrorCode uint64
-
-// Kind 错误来源类别。
-// 用显式枚举替代"数值区间"约定，避免与游戏自身 1..N 编码冲突。
-type Kind string
-
-const (
-	KindFramework Kind = "framework" // 框架内部错误（连接/编码/Lua 等）
-	KindServer    Kind = "server"    // 服务端 headerErr
-)
 
 const (
 	// 网络层 (1-10)
@@ -62,41 +52,40 @@ const (
 type CodeInfo struct {
 	Code uint64 `json:"code"` // 数值错误码
 	Name string `json:"name"` // 大写下划线格式的错误码名称（如 "CONN_NOT_FOUND"）
-	Kind Kind   `json:"kind"` // 错误来源类别（KindFramework 或 KindServer）
 }
 
 // codeRegistry 是唯一真理源：新增/重命名错误码只动这里。
 // String() 和 AllCodes() 都从它派生，避免两份独立 switch/数组漂移导致的不一致 bug。
 var codeRegistry = []CodeInfo{
-	{uint64(ErrConnNotFound), "CONN_NOT_FOUND", KindFramework},
-	{uint64(ErrConnClosed), "CONN_CLOSED", KindFramework},
-	{uint64(ErrSendFailed), "SEND_FAILED", KindFramework},
-	{uint64(ErrRecvTimeout), "RECV_TIMEOUT", KindFramework},
-	{uint64(ErrConnDropped), "CONN_DROPPED", KindFramework},
-	{uint64(ErrActionCanceled), "ACTION_CANCELED", KindFramework},
-	{uint64(ErrEncodeFailed), "ENCODE_FAILED", KindFramework},
-	{uint64(ErrParseFailed), "PARSE_FAILED", KindFramework},
-	{uint64(ErrCreateMsg), "CREATE_MSG", KindFramework},
-	{uint64(ErrBindField), "BIND_FIELD", KindFramework},
-	{uint64(ErrSerialize), "SERIALIZE", KindFramework},
-	{uint64(ErrExecFailed), "EXEC_FAILED", KindFramework},
-	{uint64(ErrListenTimeout), "LISTEN_TIMEOUT", KindFramework},
-	{uint64(ErrListenRegister), "LISTEN_REGISTER", KindFramework},
-	{uint64(ErrAddrEmpty), "ADDR_EMPTY", KindFramework},
-	{uint64(ErrURLEmpty), "URL_EMPTY", KindFramework},
-	{uint64(ErrURLScheme), "URL_SCHEME", KindFramework},
-	{uint64(ErrUnknownPattern), "UNKNOWN_PATTERN", KindFramework},
-	{uint64(ErrHTTPBuild), "HTTP_BUILD", KindFramework},
-	{uint64(ErrHTTPReadBody), "HTTP_READ_BODY", KindFramework},
-	{uint64(ErrMarshalBody), "MARSHAL_BODY", KindFramework},
-	{uint64(ErrHTTPStatus), "HTTP_STATUS", KindFramework},
-	{uint64(ErrHeartbeatConfig), "HEARTBEAT_CONFIG", KindFramework},
-	{uint64(ErrLuaNotInit), "LUA_NOT_INIT", KindFramework},
-	{uint64(ErrLuaNoScript), "LUA_NO_SCRIPT", KindFramework},
-	{uint64(ErrLuaExecFailed), "LUA_EXEC_FAILED", KindFramework},
-	{uint64(ErrLuaScriptCheck), "LUA_SCRIPT_CHECK", KindFramework},
-	{uint64(ErrCallbackLua), "CALLBACK_LUA", KindFramework},
-	{uint64(ErrCallbackParse), "CALLBACK_PARSE", KindFramework},
+	{uint64(ErrConnNotFound), "CONN_NOT_FOUND"},
+	{uint64(ErrConnClosed), "CONN_CLOSED"},
+	{uint64(ErrSendFailed), "SEND_FAILED"},
+	{uint64(ErrRecvTimeout), "RECV_TIMEOUT"},
+	{uint64(ErrConnDropped), "CONN_DROPPED"},
+	{uint64(ErrActionCanceled), "ACTION_CANCELED"},
+	{uint64(ErrEncodeFailed), "ENCODE_FAILED"},
+	{uint64(ErrParseFailed), "PARSE_FAILED"},
+	{uint64(ErrCreateMsg), "CREATE_MSG"},
+	{uint64(ErrBindField), "BIND_FIELD"},
+	{uint64(ErrSerialize), "SERIALIZE"},
+	{uint64(ErrExecFailed), "EXEC_FAILED"},
+	{uint64(ErrListenTimeout), "LISTEN_TIMEOUT"},
+	{uint64(ErrListenRegister), "LISTEN_REGISTER"},
+	{uint64(ErrAddrEmpty), "ADDR_EMPTY"},
+	{uint64(ErrURLEmpty), "URL_EMPTY"},
+	{uint64(ErrURLScheme), "URL_SCHEME"},
+	{uint64(ErrUnknownPattern), "UNKNOWN_PATTERN"},
+	{uint64(ErrHTTPBuild), "HTTP_BUILD"},
+	{uint64(ErrHTTPReadBody), "HTTP_READ_BODY"},
+	{uint64(ErrMarshalBody), "MARSHAL_BODY"},
+	{uint64(ErrHTTPStatus), "HTTP_STATUS"},
+	{uint64(ErrHeartbeatConfig), "HEARTBEAT_CONFIG"},
+	{uint64(ErrLuaNotInit), "LUA_NOT_INIT"},
+	{uint64(ErrLuaNoScript), "LUA_NO_SCRIPT"},
+	{uint64(ErrLuaExecFailed), "LUA_EXEC_FAILED"},
+	{uint64(ErrLuaScriptCheck), "LUA_SCRIPT_CHECK"},
+	{uint64(ErrCallbackLua), "CALLBACK_LUA"},
+	{uint64(ErrCallbackParse), "CALLBACK_PARSE"},
 }
 
 // 派生：包初始化时一次性建索引，String() O(1) 查询。

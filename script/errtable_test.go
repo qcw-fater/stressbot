@@ -80,18 +80,6 @@ func TestParseErrTableRejectsMalformedTable(t *testing.T) {
 	}
 }
 
-func TestClassifyCode(t *testing.T) {
-	if classifyCode(4) != errcode.KindFramework {
-		t.Fatal("code=4 应 framework")
-	}
-	if classifyCode(54) != errcode.KindFramework {
-		t.Fatal("code=54 应 framework")
-	}
-	if classifyCode(1004) != errcode.KindServer {
-		t.Fatal("code=1004 应 server")
-	}
-}
-
 func TestErrTableFromActionErrPreservesWrappedActionError(t *testing.T) {
 	L := lua.NewState()
 	defer L.Close()
@@ -113,24 +101,21 @@ func TestBuildActionError(t *testing.T) {
 	if !errors.As(err, &ae) {
 		t.Fatalf("err 不是 *ActionError: %T", err)
 	}
-	if ae.Kind != errcode.KindFramework {
-		t.Fatalf("kind=%v want framework", ae.Kind)
-	}
 	if ae.Code != errcode.ErrRecvTimeout {
 		t.Fatalf("code=%v want %v", ae.Code, errcode.ErrRecvTimeout)
 	}
 	if !strings.Contains(ae.Detail, "script=match_succeed.lua") {
 		t.Fatalf("detail 缺 script=: %q", ae.Detail)
 	}
-	// 服务端码
+	// 业务码
 	err = buildActionError(1004, "队伍已满: route=CreateTeam", "guild_join.lua")
 	if !errors.As(err, &ae) {
-		t.Fatal("server err 不是 *ActionError")
-	}
-	if ae.Kind != errcode.KindServer {
-		t.Fatalf("server kind=%v want server", ae.Kind)
+		t.Fatal("业务码 err 不是 *ActionError")
 	}
 	if ae.Code != errcode.ErrorCode(1004) {
 		t.Fatalf("code=%v want 1004", ae.Code)
+	}
+	if !strings.Contains(ae.Detail, "队伍已满") {
+		t.Fatalf("detail 缺原因: %q", ae.Detail)
 	}
 }

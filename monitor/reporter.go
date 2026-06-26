@@ -113,7 +113,15 @@ func (r *Reporter) report() {
 				if !first {
 					fmt.Printf(", ")
 				}
-				fmt.Printf("%s→[%s/%d %s]×%d %s", a.Name, e.Kind, e.Code, e.CodeName, e.Count, truncateError(firstMsg(e.Messages), 40))
+				label := "业务"
+				if e.Code < 100 {
+					label = "框架"
+				}
+				name := e.CodeName
+				if name == "" {
+					name = fmt.Sprintf("#%d", e.Code)
+				}
+				fmt.Printf("%s→[%s %s]×%d %s", a.Name, label, name, e.Count, truncateError(firstMsg(e.Messages), 40))
 				first = false
 			}
 		}
