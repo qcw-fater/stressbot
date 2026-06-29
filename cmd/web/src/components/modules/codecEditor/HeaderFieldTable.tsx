@@ -33,12 +33,14 @@ export function HeaderFieldTable({ raw, schema, selectedIndex, onSelect, onEdit 
   const headerSize: number = schema.frame?.headerSize ?? 0;
   const ranges = computeByteRanges(fields, headerSize);
 
-  const typeOptions = FIELD_TYPES.map((t) => {
-    const w = FIELD_TYPE_WIDTH[t];
-    return { value: t, label: w > 0 ? `${t}（${w} 字节）` : `${t}（变长）` };
-  });
+  const typeOptions = FIELD_TYPES.map((t) => ({ value: t, label: t }));
 
   const roleOptions = FIELD_ROLES.map((r) => ({ value: r, label: r }));
+
+  const patchType = (idx: number, type: string) => {
+    const width = FIELD_TYPE_WIDTH[type];
+    onEdit(updateHeaderField(raw, idx, width > 0 ? { type, size: width } : { type }));
+  };
 
   const columns: ColumnsType<Field> = [
     {
@@ -69,11 +71,29 @@ export function HeaderFieldTable({ raw, schema, selectedIndex, onSelect, onEdit 
       ),
     },
     {
+      title: 'type',
+      dataIndex: 'type',
+      width: 110,
+      render: (_, record, idx) => (
+        <Select
+          size="small"
+          value={record.type}
+          style={{ width: 96 }}
+          options={typeOptions}
+          onChange={(v) => patchType(idx, v)}
+        />
+      ),
+    },
+    {
       title: 'size',
       dataIndex: 'size',
-      width: 90,
-      render: (_, record, idx) => (
-        <Space size={4} direction="vertical" style={{ lineHeight: 1 }}>
+      width: 80,
+      render: (_, record, idx) => {
+        const fixedWidth = record.type ? FIELD_TYPE_WIDTH[record.type] : undefined;
+        if (fixedWidth && fixedWidth > 0) {
+          return <Typography.Text code style={{ fontSize: 12 }}>{fixedWidth}</Typography.Text>;
+        }
+        return (
           <InputNumber
             size="small"
             min={0}
@@ -81,27 +101,8 @@ export function HeaderFieldTable({ raw, schema, selectedIndex, onSelect, onEdit 
             style={{ width: 64 }}
             onChange={(v) => onEdit(updateHeaderField(raw, idx, { size: typeof v === 'number' ? v : 0 }))}
           />
-          {record.type && FIELD_TYPE_WIDTH[record.type] > 0 && record.size !== FIELD_TYPE_WIDTH[record.type] && (
-            <Typography.Text type="warning" style={{ fontSize: 10 }}>
-              {record.type} 应为 {FIELD_TYPE_WIDTH[record.type]}
-            </Typography.Text>
-          )}
-        </Space>
-      ),
-    },
-    {
-      title: 'type',
-      dataIndex: 'type',
-      width: 130,
-      render: (_, record, idx) => (
-        <Select
-          size="small"
-          value={record.type}
-          style={{ width: 116 }}
-          options={typeOptions}
-          onChange={(v) => onEdit(updateHeaderField(raw, idx, { type: v }))}
-        />
-      ),
+        );
+      },
     },
     {
       title: 'role',
@@ -182,7 +183,7 @@ export function HeaderFieldTable({ raw, schema, selectedIndex, onSelect, onEdit 
       <div className="pce-bench-header header-fields-header">
         <div>
           <Typography.Text className="pce-bench-title">字段表</Typography.Text>
-          <Typography.Text className="pce-bench-meta">{fields.length} 字段 · offset / size / type / role</Typography.Text>
+          <Typography.Text className="pce-bench-meta">{fields.length} 字段 · offset / type / size / role</Typography.Text>
         </div>
         <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={addField}>
           添加字段

@@ -2,8 +2,8 @@
  * routeKey 真实计算（T3 Batch-4 任务 B，§3.7）。
  *
  * 背景：旧的 `routeKey(route)` 是「按 key 排序的 JSON 字符串」伪实现——前端无法运行
- * Lua adapter，用排序 JSON 凑合覆盖 99% `{cmd, act}` 形态的查重。声明式 codec 后，
- * routeKey 是**确定的**：`codec.json` 的 `routeKeyTemplate`（如 `{cmd}:{act}`）
+ * Lua adapter，用排序 JSON 作为查重降级。声明式 codec 后，
+ * routeKey 是**确定的**：`codec.json` 的 `routeKeyTemplate`
  * + route 字段值。本模块提供真实计算 + codec 模板加载。
  *
  * 约定：
@@ -13,8 +13,7 @@
  *     **并显式产 ROUTEKEY_CODEC_MISSING warning**（不静默伪 key）。
  */
 
-import { listCodecFiles, type ResourceFile } from '@/services/resourcesStore';
-import { codecFileNameToConnName } from '@/services/taskResourceDiff';
+import { loadCodecRouteSpecs } from '@/services/codecConnections';
 
 /** 占位正则，与 resourcesStore.validateCodecSchema 的 ROUTE_KEY_PLACEHOLDER_RE 一致。 */
 const ROUTE_KEY_PLACEHOLDER_RE = /\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
@@ -22,7 +21,7 @@ const ROUTE_KEY_PLACEHOLDER_RE = /\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
 /**
  * 按 routeKeyTemplate 把 route 字段值代入占位，返回真实 routeKey。
  *
- * @param template codec.json 的 routeKeyTemplate（如 `{cmd}:{act}`）
+ * @param template codec.json 的 routeKeyTemplate
  * @param route    listenRefs[].route / action.route（字段值 map）
  * @returns 代入后的字符串；占位字段缺失 / route 非对象 → null
  */
@@ -68,7 +67,7 @@ export function pseudoRouteKey(route: unknown): string {
 }
 
 /**
- * 加载所有 codec 的 routeKeyTemplate：server（如 `tcp:logic`）→ template。
+ * 加载所有 codec 的 routeKeyTemplate：server → template。
  *
  * 遍历 IDB 中所有 `*_codec.json`：JSON.parse 取 `routeKeyTemplate`（字符串），
  * 文件名经 `codecFileNameToConnName` 得 server。解析失败 / 无 template / 非字符串
@@ -77,20 +76,10 @@ export function pseudoRouteKey(route: unknown): string {
  * @returns server → routeKeyTemplate 的 Map；空 Map = 无可用 codec
  */
 export async function loadRouteKeyTemplates(): Promise<Map<string, string>> {
-  const files: ResourceFile[] = await listCodecFiles();
+  const specs = await loadCodecRouteSpecs({ strict: false });
   const map = new Map<string, string>();
-  for (const f of files) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(f.content);
-    } catch {
-      continue; // 坏 JSON，跳过
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
-    const template = (parsed as { routeKeyTemplate?: unknown }).routeKeyTemplate;
-    if (typeof template !== 'string') continue; // 缺/非字符串，跳过
-    const server = codecFileNameToConnName(f.name);
-    map.set(server, template);
+  for (const [server, spec] of specs) {
+    map.set(server, spec.routeKeyTemplate);
   }
   return map;
 }

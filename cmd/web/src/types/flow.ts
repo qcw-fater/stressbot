@@ -63,8 +63,8 @@ export interface WeightedOption {
 
 /**
  * 监听引用。
- * - route 为不透明结构，最常见 `{cmd, act}`，但允许任意 JSON 形态
- * - server 形如 `tcp:logic` / `udp:battle`
+ * - route 为不透明结构，字段由对应 codec 的 routeKeyTemplate 决定
+ * - server 为 `<protocol>:<service>` 形式，对应协议配置里的连接
  * - listen 为 listens 表的 key；null = 静默丢弃（连 listen {} 都不调用）
  * - queueSize 监听缓存队列容量（镜像 Go ListenRef.QueueSize *int）：
  *   未写（undefined）→ 默认 1；显式 >0 → 按该值；显式 <=0 → 校验报错（不静默 clamp）。

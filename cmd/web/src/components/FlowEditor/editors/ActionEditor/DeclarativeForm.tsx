@@ -14,6 +14,9 @@ import { HeartbeatFields } from './HeartbeatFields';
 import { useRuntimeStore } from '@/services/runtimeStore';
 import { useFlowStore } from '../../store/flowStore';
 import { protoRegistry } from '../../proto/ProtoRegistry';
+import { CodecServiceSelect } from '../../codec/CodecConnectionSelect';
+import { useCodecConnections, useCodecRouteSpecs } from '../../codec/useCodecConnections';
+import type { CodecProtocol } from '@/services/codecConnections';
 
 export interface DeclarativeFormProps {
   action: ActionDef;
@@ -26,6 +29,8 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
   const stateExtra = useRuntimeStore((s) => s.robotConfig.stateExtra);
   const allActions = useFlowStore((s) => s.actions);
   const allListens = useFlowStore((s) => s.listens);
+  const { connections, loading: connectionsLoading, error: connectionsError } = useCodecConnections();
+  const { specs, loading: routeSpecsLoading, error: routeSpecsError } = useCodecRouteSpecs();
   const timeoutPlaceholder = pattern === 'tcpRequest' || pattern === 'udpRequest' ? String(requestTimeoutSec || 60) : '60';
   const set = (partial: Partial<ActionDef>) => onChange({ ...action, ...partial });
 
@@ -46,6 +51,9 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
   const showMethod = pattern === 'httpRequest';
   const showContentType = pattern === 'httpRequest';
   const isHeartbeat = pattern === 'tcpHeartbeat' || pattern === 'udpHeartbeat';
+  const protocol = actionProtocol(pattern);
+  const server = protocol && action.service ? `${protocol}:${action.service}` : undefined;
+  const routeSpec = server ? specs.get(server) : undefined;
 
   return (
     <Form layout="vertical">
@@ -89,21 +97,31 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
         </Form.Item>
       )}
 
-      {showService && (
+      {showService && protocol && (
         <Form.Item label="service（目标服务名）">
-          <Input
-            value={action.service ?? ''}
-            onChange={(e) => set({ service: e.target.value })}
-            placeholder="如 logic / battle / login"
+          <CodecServiceSelect
+            protocol={protocol}
+            value={action.service}
+            onChange={(v) => set({ service: v })}
+            connections={connections}
+            loading={connectionsLoading}
+            error={connectionsError}
           />
         </Form.Item>
       )}
 
       {showRoute && (
         <Form.Item label="route（不透明路由结构）">
-          <RouteEditor value={action.route} onChange={(v) => set({ route: v })} />
+          <RouteEditor
+            value={action.route}
+            onChange={(v) => set({ route: v })}
+            server={server}
+            routeKeyTemplate={routeSpec?.routeKeyTemplate}
+            loading={routeSpecsLoading}
+            error={routeSpecsError}
+          />
           <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
-            JSON 直接写；引擎透传给 adapter.codec。
+            根据所选 service 的 routeKeyTemplate 生成字段；引擎仍透传 route 给 adapter.codec。
           </div>
         </Form.Item>
       )}
@@ -262,6 +280,12 @@ function patternHas(pattern: ActionPattern, fields: Array<keyof ActionDef>): boo
   };
   const allowed = map[pattern] ?? [];
   return fields.some((f) => allowed.includes(f));
+}
+
+function actionProtocol(pattern: ActionPattern): CodecProtocol | null {
+  if (pattern.startsWith('tcp')) return 'tcp';
+  if (pattern.startsWith('udp')) return 'udp';
+  return null;
 }
 
 function ProtoHint({ fullName }: { fullName?: string }) {

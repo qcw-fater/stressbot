@@ -54,7 +54,7 @@ export interface RefsGraph {
 /**
  * server 感知的 routeKey 解析。
  *
- * @param server listenRefs[].server（如 'tcp:logic'）
+ * @param server listenRefs[].server，对应协议配置中的连接
  * @param route  listenRefs[].route（字段值 map）
  * @returns 解析后的 routeKey 字符串（真实 / 伪降级）
  */

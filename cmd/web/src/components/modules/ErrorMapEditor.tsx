@@ -21,8 +21,9 @@ export interface ErrorMapError {
 export function parseErrorMap(json: string): ErrorMapEntry[] {
   const trimmed = json.trim();
   if (!trimmed || trimmed === '{}') return [];
-  const obj = JSON.parse(trimmed) as Record<string, string>;
-  const entries = Object.entries(obj).map(([k, v]) => ({ code: Number(k), desc: v }));
+  const obj = JSON.parse(trimmed) as Record<string, unknown>;
+  if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) return [];
+  const entries = Object.entries(obj).map(([k, v]) => ({ code: Number(k), desc: typeof v === 'string' ? v : '' }));
   entries.sort((a, b) => a.code - b.code);
   return entries;
 }

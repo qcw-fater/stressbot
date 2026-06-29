@@ -19,6 +19,7 @@ import {
   Modal,
   Segmented,
   Select,
+  Space,
   Tabs,
   Tooltip,
   Typography,
@@ -54,15 +55,20 @@ import { PipelineEditor } from './codecEditor/PipelineEditor';
 import { RouteKeyEditor } from './codecEditor/RouteKeyEditor';
 import { PreviewPanel } from './codecEditor/PreviewPanel';
 import { deriveTransport } from './codecEditor/previewHelpers';
+import {
+  buildCodecConnectionName,
+  codecFileNameToConnNameStrict,
+  CODEC_FILE_SUFFIX,
+  CODEC_PROTOCOLS,
+  connNameToCodecFileName,
+  type CodecProtocol,
+  validateCodecCreateInput,
+} from '@/services/codecConnections';
 
 /* ─── 协议配置 — 按连接多份 codec.json + 共享 errors.json 源码 JSON 编辑器 ─── */
 
-/** codec 文件名后缀。 */
-const CODEC_FILE_SUFFIX = '_codec.json';
 /** errors.json 固定文件名。 */
 const ERRORS_JSON_KEY = 'errors.json';
-/** 合法连接协议。 */
-const CODEC_PROTOS = ['tcp', 'udp'] as const;
 
 /**
  * 新建连接用的最小合法 codec.json 模板。
@@ -88,43 +94,6 @@ const EMPTY_ERROR_MAP_TEMPLATE = `{
 }
 `;
 
-/**
- * 连接名 ↔ 文件名互转。
- *   连接名 `<proto>:<service>`（如 `tcp:logic`）↔ 文件名 `<proto>_<service>_codec.json`（`tcp_logic_codec.json`）。
- * service 中不允许再出现 `_`（首个 `_` 之前是 proto，之后到 `_codec.json` 之前整体视为 service）。
- */
-function connNameToFileName(conn: string): string {
-  return `${conn.replace(':', '_')}${CODEC_FILE_SUFFIX}`;
-}
-
-function fileNameToConnName(name: string): string {
-  const stripped = name.endsWith(CODEC_FILE_SUFFIX) ? name.slice(0, -CODEC_FILE_SUFFIX.length) : name;
-  const idx = stripped.indexOf('_');
-  if (idx < 0) return stripped;
-  return `${stripped.slice(0, idx)}:${stripped.slice(idx + 1)}`;
-}
-
-/** 校验连接名 `<proto>:<service>`：proto∈{tcp,udp}、service 非空、不与已存文件重名。 */
-function validateConnName(conn: string, existing: string[]): string | null {
-  const idx = conn.indexOf(':');
-  if (idx <= 0 || idx === conn.length - 1) {
-    return '连接名格式应为 <协议>:<服务名>，例如 tcp:logic';
-  }
-  const proto = conn.slice(0, idx);
-  const service = conn.slice(idx + 1);
-  if (!(CODEC_PROTOS as readonly string[]).includes(proto)) {
-    return `协议必须是 tcp 或 udp（当前 ${proto}）`;
-  }
-  if (!service || service.includes(':') || service.includes('_')) {
-    return '服务名不能为空，也不能包含 ":" 或 "_"';
-  }
-  const fileName = connNameToFileName(conn);
-  if (existing.includes(fileName)) {
-    return `连接 ${conn} 已存在`;
-  }
-  return null;
-}
-
 export function ProtocolConfigEditor() {
   const { message, modal } = AntApp.useApp();
   const theme = useEditorStore((s) => s.theme);
@@ -135,15 +104,17 @@ export function ProtocolConfigEditor() {
   // 连接列表（含每个文件名 / 连接名）
   const [files, setFiles] = useState<ResourceFile[]>([]);
   const [loading, setLoading] = useState(false);
-  // 当前选中连接（null = 未选；'__errors__' = errors.json；否则 = 连接名如 'tcp:logic'）
+  // 当前选中对象（null = 未选；'__errors__' = errors.json；否则 = protocol/service 对应的内部连接标识）
   const [activeConn, setActiveConn] = useState<string | null>(null);
   const [content, setContent] = useState<string>('');
   const [source, setSource] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<boolean>(false);
+  const [fileListError, setFileListError] = useState<string | null>(null);
   // 新建/复制弹窗
   const [createOpen, setCreateOpen] = useState(false);
   const [createMode, setCreateMode] = useState<'new' | 'copy'>('new');
-  const [createValue, setCreateValue] = useState('');
+  const [createProtocol, setCreateProtocol] = useState<CodecProtocol>('tcp');
+  const [createService, setCreateService] = useState('');
   // 视图切换：结构化 | 源码（仅 codec 显示；errors.json 隐藏切换、强制源码）
   const [viewMode, setViewMode] = useState<'struct' | 'source'>('struct');
   // errors.json 结构化表单：框架保留码（只读展示）+ 行级校验错误（保存前 gate）
@@ -164,8 +135,14 @@ export function ProtocolConfigEditor() {
     setLoading(true);
     try {
       const list = await listCodecFiles();
+      for (const f of list) codecFileNameToConnNameStrict(f.name);
+      setFileListError(null);
       setFiles(list);
       return list;
+    } catch (e) {
+      setFileListError((e as Error).message);
+      setFiles([]);
+      throw e;
     } finally {
       setLoading(false);
     }
@@ -187,7 +164,7 @@ export function ProtocolConfigEditor() {
       setErrorMapErrors(validateErrorMap(parseErrorMapSafe(initial)).map((e) => e.message));
       return;
     }
-    const name = connNameToFileName(conn);
+    const name = connNameToCodecFileName(conn);
     const file = await getCodecSchema(name);
     if (file) {
       setContent(file.content);
@@ -202,20 +179,30 @@ export function ProtocolConfigEditor() {
 
   useEffect(() => {
     void (async () => {
-      const list = await reloadFiles();
-      // 默认选中第一个连接；若没有则不自动选 errors.json
-      if (list.length > 0) {
-        const conn = fileNameToConnName(list[0].name);
-        setActiveConn(conn);
-        await loadConn(conn);
-      } else {
+      try {
+        const list = await reloadFiles();
+        // 默认选中第一个连接；若没有则不自动选 errors.json
+        if (list.length > 0) {
+          const conn = codecFileNameToConnNameStrict(list[0].name);
+          setActiveConn(conn);
+          await loadConn(conn);
+        } else {
+          setActiveConn(null);
+        }
+      } catch {
         setActiveConn(null);
+        setContent('');
+        setSource(null);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSwitch = async (conn: string) => {
+    // 先清空旧内容，避免切换瞬间用新视图渲染上一个对象的 content（如 ErrorMapEditor 读到 codec.json）。
+    setContent('');
+    setSource(null);
+    setErrorMapErrors([]);
     setActiveConn(conn);
     await loadConn(conn);
   };
@@ -228,25 +215,26 @@ export function ProtocolConfigEditor() {
   // ─── 新建 / 复制 ───
   const openCreate = (mode: 'new' | 'copy') => {
     setCreateMode(mode);
-    setCreateValue('');
+    setCreateProtocol('tcp');
+    setCreateService('');
     setCreateOpen(true);
   };
 
   const submitCreate = async () => {
-    const conn = createValue.trim();
-    const err = validateConnName(conn, files.map((f) => f.name));
+    const err = validateCodecCreateInput(createProtocol, createService, files.map((f) => f.name));
     if (err) {
       message.error(err);
       return;
     }
-    const fileName = connNameToFileName(conn);
+    const conn = buildCodecConnectionName(createProtocol, createService.trim());
+    const fileName = connNameToCodecFileName(conn);
     let initial: string;
     if (createMode === 'copy') {
       if (!activeConn || activeConn === '__errors__') {
         message.error('请先选中一个要复制的连接');
         return;
       }
-      const src = await getCodecSchema(connNameToFileName(activeConn));
+      const src = await getCodecSchema(connNameToCodecFileName(activeConn));
       initial = src?.content ?? CODEC_JSON_TEMPLATE;
     } else {
       initial = CODEC_JSON_TEMPLATE;
@@ -274,12 +262,12 @@ export function ProtocolConfigEditor() {
       content: `确认删除连接 ${conn}？该连接的配置将被移除。`,
       okType: 'danger',
       onOk: async () => {
-        const name = connNameToFileName(conn);
+        const name = connNameToCodecFileName(conn);
         await clearCodecSchema(name);
         const list = await reloadFiles();
         // 切到剩余第一项，或清空
         if (list.length > 0) {
-          const next = fileNameToConnName(list[0].name);
+          const next = codecFileNameToConnNameStrict(list[0].name);
           setActiveConn(next);
           await loadConn(next);
         } else {
@@ -325,14 +313,14 @@ export function ProtocolConfigEditor() {
       message.error(`协议配置未通过校验，已拒绝保存（共 ${errs.length} 处问题）：${errs[0]}`);
       return;
     }
-    const name = connNameToFileName(activeConn);
+    const name = connNameToCodecFileName(activeConn);
     await setCodecSchema(name, content);
     setSource('已保存');
     await refreshBadge();
     message.success('已保存，启动任务时会自动上传');
   };
 
-  // ─── 导入（当前选中连接；codec 走校验，errors 走 JSON.parse） ───
+  // ─── 导入（当前选中对象；codec 走校验，errors 走 JSON.parse） ───
   const onUpload: UploadProps['beforeUpload'] = async (file) => {
     if (activeConn === null) {
       message.warning('请先选择一个连接');
@@ -358,7 +346,7 @@ export function ProtocolConfigEditor() {
       message.error(`导入文件未通过校验，已拒绝保存（共 ${errs.length} 处问题）：${errs[0]}`);
       return false;
     }
-    const name = connNameToFileName(activeConn);
+    const name = connNameToCodecFileName(activeConn);
     await setCodecSchema(name, text);
     await reloadFiles();
     setContent(text);
@@ -384,11 +372,11 @@ export function ProtocolConfigEditor() {
       content: `确认清空连接 ${activeConn} 的配置内容？文件将从本地删除。`,
       okType: 'danger',
       onOk: async () => {
-        const name = connNameToFileName(activeConn);
+        const name = connNameToCodecFileName(activeConn);
         await clearCodecSchema(name);
         const list = await reloadFiles();
         if (list.length > 0) {
-          const next = fileNameToConnName(list[0].name);
+          const next = codecFileNameToConnNameStrict(list[0].name);
           setActiveConn(next);
           await loadConn(next);
         } else {
@@ -427,7 +415,7 @@ export function ProtocolConfigEditor() {
       }
       const list = await reloadFiles();
       if (list.length > 0) {
-        const conn = fileNameToConnName(list[0].name);
+        const conn = codecFileNameToConnNameStrict(list[0].name);
         setActiveConn(conn);
         await loadConn(conn);
       }
@@ -451,7 +439,7 @@ export function ProtocolConfigEditor() {
 
   // Select 选项：连接列表 + errors.json
   const selectOptions = [
-    ...files.map((f) => ({ value: fileNameToConnName(f.name), label: fileNameToConnName(f.name) })),
+    ...files.map((f) => ({ value: codecFileNameToConnNameStrict(f.name), label: codecFileNameToConnNameStrict(f.name) })),
     { value: '__errors__', label: '错误码映射（共享）' },
   ];
   const activeLabel = activeConn === '__errors__' ? '错误码映射' : (activeConn ?? '未选择连接');
@@ -483,7 +471,7 @@ export function ProtocolConfigEditor() {
 
         <div className="pce-cmdbar-actions">
           <div className="pce-cmdbar-group">
-            <Tooltip title="新建连接（输入 <协议>:<服务名>，如 tcp:logic）">
+            <Tooltip title="新建连接（选择 protocol，填写 service）">
               <Button size="small" icon={<PlusOutlined />} onClick={() => openCreate('new')}>新建</Button>
             </Tooltip>
             <Tooltip title="复制当前连接为新连接">
@@ -521,12 +509,12 @@ export function ProtocolConfigEditor() {
         </div>
       </div>
 
-      <div className={`pce-status${liveErrors.length > 0 || loadError ? ' pce-status-warn' : ''}`}>
+      <div className={`pce-status${liveErrors.length > 0 || loadError || fileListError ? ' pce-status-warn' : ''}`}>
         <Typography.Text className="pce-status-title">
-          {loadError ? '配置文件不存在' : validationSummary}
+          {fileListError ? '协议配置文件名非法' : loadError ? '配置文件不存在' : validationSummary}
         </Typography.Text>
         <Typography.Text className="pce-status-note">
-          {loadError ? '请新建连接或从基线载入。' : '协议配置启动任务时随连接配置一起下发。'}
+          {fileListError ? fileListError : loadError ? '请新建连接或从基线载入。' : '协议配置启动任务时随连接配置一起下发。'}
         </Typography.Text>
         {activeConn !== null && activeConn !== '__errors__' && liveErrors.length > 1 && (
           <Collapse
@@ -613,15 +601,23 @@ export function ProtocolConfigEditor() {
         styles={{ mask: { zIndex: popupZ }, wrapper: { zIndex: popupZ + 1 } }}
       >
         <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
-          格式 <code>{'<协议>:<服务名>'}</code>，协议只能是 tcp 或 udp，服务名不能为空、不能含 “:” 或 “_”。例如 <code>tcp:logic</code>。
+          请选择 <code>protocol</code>，并填写 <code>service</code>。service 不能为空，且不能包含 <code>:</code> 或 <code>_</code>。
         </Typography.Paragraph>
-        <Input
-          autoFocus
-          placeholder="tcp:logic"
-          value={createValue}
-          onChange={(e) => setCreateValue(e.target.value)}
-          onPressEnter={submitCreate}
-        />
+        <Space.Compact style={{ width: '100%' }}>
+          <Select
+            value={createProtocol}
+            options={CODEC_PROTOCOLS.map((p) => ({ value: p, label: p }))}
+            onChange={(v) => setCreateProtocol(v)}
+            style={{ width: 110 }}
+          />
+          <Input
+            autoFocus
+            placeholder="service"
+            value={createService}
+            onChange={(e) => setCreateService(e.target.value)}
+            onPressEnter={submitCreate}
+          />
+        </Space.Compact>
       </Modal>
     </Flex>
   );

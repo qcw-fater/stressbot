@@ -1,5 +1,6 @@
 import type { FlowJson } from '@/components/FlowEditor/codec/flowToJson';
 import { fetchBaselineCodec, fetchBaselineProtoContent, fetchBaselineScript } from './baselineApi';
+import { connNameToCodecFileName, codecFileNameToConnNameStrict } from './codecConnections';
 import { collectFlowScriptNames } from './scriptSync';
 import {
   getCodecSchema,
@@ -15,33 +16,10 @@ import {
 
 const ERRORS_JSON_NAME = 'errors.json';
 
-// === flow 引用连接的 codec 覆盖校验（计划 §3.5）===
-//
-// 与 ResourcesDrawer 的 connNameToFileName / fileNameToConnName 保持一致的命名换算
-// 规则，但本模块独立实现（不在 B1-B 的 UI 文件里抽共享），避免 UI 层耦合。
-//   连接名 `<proto>:<service>`（如 `tcp:logic`）
-//   ↔ 文件名 `<proto>_<service>_codec.json`（如 `tcp_logic_codec.json`）
+export { connNameToCodecFileName } from './codecConnections';
 
-/** codec 文件名后缀。 */
-const CODEC_FILE_SUFFIX = '_codec.json';
-
-/**
- * 连接名 → codec 文件名：`'tcp:logic'` → `'tcp_logic_codec.json'`。
- * 首个 `:` 换 `_`，追加 `_codec.json`。
- */
-export function connNameToCodecFileName(conn: string): string {
-  return `${conn.replace(':', '_')}${CODEC_FILE_SUFFIX}`;
-}
-
-/**
- * codec 文件名 → 连接名：`'tcp_logic_codec.json'` → `'tcp:logic'`。
- * 去 `_codec.json` 后缀，首个 `_` 换 `:`。
- */
 export function codecFileNameToConnName(name: string): string {
-  const stripped = name.endsWith(CODEC_FILE_SUFFIX) ? name.slice(0, -CODEC_FILE_SUFFIX.length) : name;
-  const idx = stripped.indexOf('_');
-  if (idx < 0) return stripped;
-  return `${stripped.slice(0, idx)}:${stripped.slice(idx + 1)}`;
+  return codecFileNameToConnNameStrict(name);
 }
 
 /**

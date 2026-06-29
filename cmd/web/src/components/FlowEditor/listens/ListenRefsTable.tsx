@@ -13,8 +13,9 @@ import { useFlowStore } from '../store/flowStore';
 import { useEditorStore } from '../store/editorStore';
 import { RouteEditor } from './RouteEditor';
 import { listenKindTagColor } from './listenKindStyle';
-import { monoCellStyle } from '../styles/inlineStyles';
 import { useFloatingWindowStore } from '../store/floatingWindowStore';
+import { CodecServerSelect } from '../codec/CodecConnectionSelect';
+import { useCodecConnections, useCodecRouteSpecs } from '../codec/useCodecConnections';
 
 export interface ListenRefsTableProps {
   nodeId: string;
@@ -29,6 +30,8 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
   const addListen = useFlowStore((s) => s.addListen);
   const rfNodePos = useFlowStore((s) => s.rfNodes.find((n) => n.id === nodeId)?.position);
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
+  const { connections, loading: connectionsLoading, error: connectionsError } = useCodecConnections();
+  const { specs, loading: routeSpecsLoading, error: routeSpecsError } = useCodecRouteSpecs();
 
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
@@ -92,7 +95,7 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
           <Button
             size="small"
             icon={<PlusOutlined />}
-            onClick={() => set([...refs, { route: { cmd: 0, act: 0 }, server: '', listen: '' }])}
+            onClick={() => set([...refs, { route: undefined, server: '', listen: '' }])}
           >
             添加
           </Button>
@@ -113,34 +116,42 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
           {
             title: 'route',
             dataIndex: 'route',
-            width: 220,
-            render: (_, r) => (
-              <RouteEditor
-                size="small"
-                value={r.route}
-                onChange={(v) => {
-                  const arr = [...refs];
-                  arr[r._i] = { ...arr[r._i], route: v };
-                  set(arr);
-                }}
-              />
-            ),
+            width: 260,
+            render: (_, r) => {
+              const spec = r.server ? specs.get(r.server) : undefined;
+              return (
+                <RouteEditor
+                  size="small"
+                  value={r.route}
+                  server={r.server}
+                  routeKeyTemplate={spec?.routeKeyTemplate}
+                  loading={routeSpecsLoading}
+                  error={routeSpecsError}
+                  onChange={(v) => {
+                    const arr = [...refs];
+                    arr[r._i] = { ...arr[r._i], route: v };
+                    set(arr);
+                  }}
+                />
+              );
+            },
           },
           {
             title: 'server',
             dataIndex: 'server',
-            width: 160,
+            width: 190,
             render: (_, r) => (
-              <Input
+              <CodecServerSelect
                 size="small"
                 value={r.server}
-                onChange={(e) => {
+                connections={connections}
+                loading={connectionsLoading}
+                error={connectionsError}
+                onChange={(v) => {
                   const arr = [...refs];
-                  arr[r._i] = { ...arr[r._i], server: e.target.value };
+                  arr[r._i] = { ...arr[r._i], server: v ?? '' };
                   set(arr);
                 }}
-                placeholder="如 tcp:logic"
-                style={monoCellStyle}
               />
             ),
           },
@@ -258,7 +269,7 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
           rows={12}
           value={pasteText}
           onChange={(e) => setPasteText(e.target.value)}
-          placeholder={`[\n  {"route":{"cmd":3,"act":1},"server":"tcp:logic","listen":"matchPoll"},\n  {"route":{"cmd":2,"act":18},"server":"tcp:logic","listen":"stateUpdate"}\n]`}
+          placeholder="[]"
           style={{ fontFamily: 'monospace' }}
         />
       </Modal>

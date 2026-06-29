@@ -34,6 +34,8 @@ import { classifyListen, type ListenKind } from '@/types/listen';
 import { FloatingWindow } from '../panels/FloatingWindow';
 import { RouteEditor } from '../listens/RouteEditor';
 import { cloneListenDefaultRef } from './listenTemplateDefaults';
+import { CodecServerSelect } from '../codec/CodecConnectionSelect';
+import { useCodecConnections, useCodecRouteSpecs } from '../codec/useCodecConnections';
 
 export function TemplateEditorDrawer() {
   const { message } = AntApp.useApp();
@@ -219,6 +221,8 @@ function ListenTemplateBody({
   onChangeDefaultRef: (ref?: ListenTemplateDefaultRef) => void;
 }) {
   const [protoOpen, setProtoOpen] = useState(false);
+  const { connections, loading: connectionsLoading, error: connectionsError } = useCodecConnections();
+  const { specs, loading: routeSpecsLoading, error: routeSpecsError } = useCodecRouteSpecs();
   return (
     <div>
       <div style={{ marginBottom: 12, padding: 12, border: '1px solid var(--border-color)', borderRadius: 8 }}>
@@ -227,23 +231,29 @@ function ListenTemplateBody({
           {defaultRef ? (
             <Button size="small" onClick={() => onChangeDefaultRef(undefined)}>清除</Button>
           ) : (
-            <Button size="small" onClick={() => onChangeDefaultRef({ server: '', route: { cmd: 0, act: 0 } })}>添加</Button>
+            <Button size="small" onClick={() => onChangeDefaultRef({ server: '', route: undefined })}>添加</Button>
           )}
         </div>
         {defaultRef ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <Input
+            <CodecServerSelect
               value={defaultRef.server}
-              onChange={(e) => onChangeDefaultRef({ ...defaultRef, server: e.target.value })}
-              placeholder="如 tcp:logic / udp:battle"
+              connections={connections}
+              loading={connectionsLoading}
+              error={connectionsError}
+              onChange={(server) => onChangeDefaultRef({ ...defaultRef, server: server ?? '' })}
             />
             <RouteEditor
               value={defaultRef.route}
+              server={defaultRef.server}
+              routeKeyTemplate={defaultRef.server ? specs.get(defaultRef.server)?.routeKeyTemplate : undefined}
+              loading={routeSpecsLoading}
+              error={routeSpecsError}
               onChange={(route) => onChangeDefaultRef({ ...defaultRef, route })}
             />
           </div>
         ) : (
-          <Alert type="info" showIcon message="未设置默认注册；从 action 连到该 listen 时仍需手动填写 server 和 route。" />
+          <Alert type="info" showIcon message="未设置默认注册；从 action 连到该 listen 时需选择 server，并按 routeKeyTemplate 填写 route 字段。" />
         )}
       </div>
       <Tabs

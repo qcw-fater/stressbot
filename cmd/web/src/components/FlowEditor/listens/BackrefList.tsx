@@ -6,7 +6,7 @@
  * 这样用户在 listen 节点（ListenCard）上直接编辑监听路由，无需回到 action 节点。
  */
 
-import { Button, Input, List, Space, Tooltip, Typography } from 'antd';
+import { Button, List, Space, Tooltip, Typography } from 'antd';
 import { DeleteOutlined } from '@ant-design/icons';
 import { useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
@@ -15,6 +15,8 @@ import { useEditorStore } from '../store/editorStore';
 import { buildRefsGraph } from './refsGraph';
 import { RouteEditor } from './RouteEditor';
 import { monoCellStyle } from '../styles/inlineStyles';
+import { CodecServerSelect } from '../codec/CodecConnectionSelect';
+import { useCodecConnections, useCodecRouteSpecs } from '../codec/useCodecConnections';
 
 export interface BackrefListProps {
   listenName: string;
@@ -32,6 +34,8 @@ export function BackrefList({ listenName }: BackrefListProps) {
   const updateNode = useFlowStore((s) => s.updateNode);
   const setSelectedNode = useEditorStore((s) => s.setSelectedNode);
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
+  const { connections, loading: connectionsLoading, error: connectionsError } = useCodecConnections();
+  const { specs, loading: routeSpecsLoading, error: routeSpecsError } = useCodecRouteSpecs();
 
   const graph = useMemo(() => buildRefsGraph(flow), [flow]);
   const refs = graph.listenToRefs.get(listenName) ?? [];
@@ -101,12 +105,13 @@ export function BackrefList({ listenName }: BackrefListProps) {
           </div>
           <Space.Compact style={{ width: '100%', marginBottom: 4 }}>
             <span style={{ display: 'flex', alignItems: 'center', padding: '0 11px', background: 'var(--container-bg)', border: '1px solid var(--border-color)', borderRadius: '6px 0 0 6px', fontSize: 12, whiteSpace: 'nowrap' }}>server</span>
-            <Input
+            <CodecServerSelect
               size="small"
               value={r.ref.server}
-              onChange={(e) => updateRefField(r.nodeId, r.refIndex, { server: e.target.value })}
-              placeholder="如 tcp:logic"
-              style={{ ...monoCellStyle, flex: 1 }}
+              connections={connections}
+              loading={connectionsLoading}
+              error={connectionsError}
+              onChange={(server) => updateRefField(r.nodeId, r.refIndex, { server: server ?? '' })}
             />
           </Space.Compact>
           <Space.Compact style={{ width: '100%' }}>
@@ -128,6 +133,10 @@ export function BackrefList({ listenName }: BackrefListProps) {
             <RouteEditor
               size="small"
               value={r.ref.route}
+              server={r.ref.server}
+              routeKeyTemplate={r.ref.server ? specs.get(r.ref.server)?.routeKeyTemplate : undefined}
+              loading={routeSpecsLoading}
+              error={routeSpecsError}
               onChange={(v) => updateRefField(r.nodeId, r.refIndex, { route: v })}
             />
           </Space.Compact>

@@ -21,4 +21,10 @@ describe('parseErrorMap / serializeErrorMap', () => {
     expect(entries).toEqual([{ code: 1004, desc: '队伍已满' }, { code: 2002, desc: '金币不足' }]);
     expect(JSON.parse(serializeErrorMap(entries))).toEqual(JSON.parse(json));
   });
+
+  it('非字符串描述不会让校验崩溃', () => {
+    const entries = parseErrorMap('{"1004":1}');
+    expect(() => validateErrorMap(entries)).not.toThrow();
+    expect(validateErrorMap(entries).some((e) => /描述/.test(e.message))).toBe(true);
+  });
 });

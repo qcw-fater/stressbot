@@ -19,7 +19,7 @@ export interface CodecSchema {
   endianDefault: string;
   frame: FrameSpec;
   header: Field[];
-  /** 如 "{cmd}:{act}" */
+  /** routeKeyTemplate，用 header 中 role=route 的字段名作为占位 */
   routeKeyTemplate: string;
   pipeline: PipelineStep[];
 }
@@ -104,7 +104,7 @@ export interface PipelineStep {
 
 /** encrypt 步的单向偏移（每份 codec 单 transport）。 */
 export interface StepOffset {
-  /** 缺省 0；如 udp:battle = 11 */
+  /** 缺省 0；发送方向加密偏移 */
   encode: number;
   /** 缺省 0 */
   decode: number;

@@ -2,7 +2,7 @@
  * previewHelpers — PreviewPanel 的纯函数 helper（无 React 依赖，便于单测）。
  *
  * 设计要点：
- *   - **transport 由连接名推导**：`<proto>:<service>` 取首个 `:` 前的 proto，
+ *   - **transport 由连接标识推导**：取首个 `:` 前的 proto，
  *     仅识别 tcp/udp；无法识别时回退 'tcp'（与后端 preview.go 空串/非法→tcp 语义对齐）。
  *   - **route 字段提取**：从 schema.header 取所有 `role:"route"` 且 name 非空的字段，
  *     保序返回（供 encode 表单渲染每字段一个值输入）。
@@ -19,8 +19,8 @@ import type { CodecSchema, Field } from '@/types/codec';
 export type PreviewTransport = 'tcp' | 'udp';
 
 /**
- * 从连接名推导 transport。
- *   'tcp:logic' → 'tcp'；'udp:battle' → 'udp'；无法识别（无冒号/未知 proto）→ 'tcp'。
+ * 从连接标识推导 transport。
+ * 格式无法识别（无冒号/未知 proto）时回退 'tcp'。
  */
 export function deriveTransport(connName: string | null | undefined): PreviewTransport {
   if (!connName) return 'tcp';

@@ -77,8 +77,8 @@ describe('connNameToCodecFileName / codecFileNameToConnName', () => {
     }
   });
 
-  it('codecFileNameToConnName 对无后缀名也不崩（首个 _ 换 :）', () => {
-    expect(codecFileNameToConnName('tcp_logic')).toBe('tcp:logic');
+  it('codecFileNameToConnName 拒绝无后缀名', () => {
+    expect(() => codecFileNameToConnName('tcp_logic')).toThrow(/_codec\.json/);
   });
 });
 
