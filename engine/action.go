@@ -991,8 +991,11 @@ func (ae *ActionExecutor) handleHeaderError(proto string, def *ActionDef, header
 
 // storeResponse 将响应字段存储到 StateStore
 func (ae *ActionExecutor) storeResponse(mappings []StoreMapping, fieldMap map[string]any) {
-	stresslog.Debug("[ACTION] storeResponse",
-		zap.Int("mappingCount", len(mappings)), zap.Int("fieldCount", len(fieldMap)))
+	debugOn := stresslog.DebugEnabled()
+	if debugOn {
+		stresslog.Debug("[ACTION] storeResponse",
+			zap.Int("mappingCount", len(mappings)), zap.Int("fieldCount", len(fieldMap)))
+	}
 
 	for _, m := range mappings {
 		if m.Field == "" {
@@ -1001,10 +1004,12 @@ func (ae *ActionExecutor) storeResponse(mappings []StoreMapping, fieldMap map[st
 			val := navigatePath(fieldMap, m.Field)
 			if val != nil {
 				ae.store.SetPath(m.Setter, val)
-				stresslog.Debug("[ACTION] storeResponse 存储",
-					zap.String("field", m.Field), zap.String("setter", m.Setter),
-					zap.String("type", fmt.Sprintf("%T", val)))
-			} else {
+				if debugOn {
+					stresslog.Debug("[ACTION] storeResponse 存储",
+						zap.String("field", m.Field), zap.String("setter", m.Setter),
+						zap.String("type", fmt.Sprintf("%T", val)))
+				}
+			} else if debugOn {
 				stresslog.Debug("[ACTION] storeResponse 字段未找到",
 					zap.String("field", m.Field), zap.String("setter", m.Setter))
 			}
@@ -1231,9 +1236,12 @@ func (ae *ActionExecutor) execSend(protocol string, def *ActionDef) (int, Action
 	if protocol == "udp" {
 		label = "UDPSend"
 	}
-	stresslog.Debug("[ACTION] "+label,
-		zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
-		zap.String("c2sProto", def.C2SProto), zap.Int("bodyLen", len(body)), zap.Int("pktLen", n))
+	if stresslog.DebugEnabled() {
+		stresslog.Debug("[ACTION] 发送完成",
+			zap.String("action", def.Name), zap.String("service", def.Service),
+			zap.String("transport", protocol), zap.String("pattern", label), zap.String("routeKey", routeKey),
+			zap.String("c2sProto", def.C2SProto), zap.Int("bodyLen", len(body)), zap.Int("pktLen", n))
+	}
 	return len(packet), timing, nil
 }
 
@@ -1257,10 +1265,13 @@ func (ae *ActionExecutor) execRequest(protocol string, def *ActionDef) (int, int
 	if protocol == "udp" {
 		label = "UDPRequest"
 	}
-	stresslog.Debug("[ACTION] "+label+" 发送",
-		zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
-		zap.String("c2sProto", def.C2SProto), zap.String("s2cProto", def.S2CProto),
-		zap.Int("bodyLen", len(body)))
+	if stresslog.DebugEnabled() {
+		stresslog.Debug("[ACTION] 请求发送",
+			zap.String("action", def.Name), zap.String("service", def.Service),
+			zap.String("transport", protocol), zap.String("pattern", label), zap.String("routeKey", routeKey),
+			zap.String("c2sProto", def.C2SProto), zap.String("s2cProto", def.S2CProto),
+			zap.Int("bodyLen", len(body)))
+	}
 
 	secretKey := ae.protocolSecretKey(protocol, def.Service)
 	var encodeStart time.Time
@@ -1310,10 +1321,13 @@ func (ae *ActionExecutor) execRequest(protocol string, def *ActionDef) (int, int
 		timing.Client.ParseStoreCost += time.Since(parseStart)
 	}
 
-	stresslog.Debug("[ACTION] "+label+" 成功",
-		zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
-		zap.String("s2cProto", def.S2CProto),
-		zap.Int("respBodyLen", len(respBody)), zap.Duration("wireRTT", exchange.Timing.WireRTT))
+	if stresslog.DebugEnabled() {
+		stresslog.Debug("[ACTION] 请求成功",
+			zap.String("action", def.Name), zap.String("service", def.Service),
+			zap.String("transport", protocol), zap.String("pattern", label), zap.String("routeKey", routeKey),
+			zap.String("s2cProto", def.S2CProto),
+			zap.Int("respBodyLen", len(respBody)), zap.Duration("wireRTT", exchange.Timing.WireRTT))
+	}
 	return exchange.SendWireBytes, exchange.RecvWireBytes, timing, nil
 }
 
@@ -1334,10 +1348,13 @@ func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *
 	if protocol == "udp" {
 		label = "UDPListen"
 	}
-	stresslog.Debug("[ACTION] "+label+" 开始",
-		zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
-		zap.String("s2cProto", def.S2CProto),
-		zap.Int("timeoutSec", timeout))
+	if stresslog.DebugEnabled() {
+		stresslog.Debug("[ACTION] 监听开始",
+			zap.String("action", def.Name), zap.String("service", def.Service),
+			zap.String("transport", protocol), zap.String("pattern", label), zap.String("routeKey", routeKey),
+			zap.String("s2cProto", def.S2CProto),
+			zap.Int("timeoutSec", timeout), zap.Int("pollMs", pollMs))
+	}
 
 	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 	start := time.Now()
@@ -1365,11 +1382,14 @@ func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *
 			if ae.timingLevel >= TimingLevelFull && !parseStart.IsZero() {
 				timing.Client.ParseStoreCost += time.Since(parseStart)
 			}
-			stresslog.Debug("[ACTION] "+label+" 成功",
-				zap.String("action", def.Name), zap.String("service", def.Service), zap.String("route", routeKey),
-				zap.String("s2cProto", def.S2CProto),
-				zap.Int("respBodyLen", len(respBody)),
-				zap.Int("pollCount", pollCount))
+			if stresslog.DebugEnabled() {
+				stresslog.Debug("[ACTION] 监听成功",
+					zap.String("action", def.Name), zap.String("service", def.Service),
+					zap.String("transport", protocol), zap.String("pattern", label), zap.String("routeKey", routeKey),
+					zap.String("s2cProto", def.S2CProto),
+					zap.Int("respBodyLen", len(respBody)),
+					zap.Int("pollCount", pollCount))
+			}
 			return exchange.RecvWireBytes, timing, nil
 		}
 		// 协作式休眠：等待窗口内 drain Robot mailbox（跑 listen 回调），不饿死协作式工作。

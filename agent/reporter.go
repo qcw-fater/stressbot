@@ -107,6 +107,7 @@ func (r *StressReporter) run(ctx context.Context) {
 		if err := r.cli.PostStress(ctx, report); err != nil {
 			backoff = nextBackoff(backoff, 30*time.Second)
 			stresslog.Warn("[AGENT] 压测指标上报失败",
+				zap.String("agentID", r.agentID),
 				zap.String("taskID", r.taskID),
 				zap.Duration("backoff", backoff),
 				zap.Error(err))
@@ -186,6 +187,7 @@ func (r *SystemReporter) run(ctx context.Context) {
 		if err := r.cli.PostSystem(ctx, report); err != nil {
 			backoff = nextBackoff(backoff, 30*time.Second)
 			stresslog.Warn("[AGENT] 系统指标上报失败",
+				zap.String("agentID", r.agentID),
 				zap.Duration("backoff", backoff),
 				zap.Error(err))
 		} else {

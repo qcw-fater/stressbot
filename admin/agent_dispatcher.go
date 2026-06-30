@@ -90,8 +90,12 @@ func (d *AgentDispatcher) post(addr, path string, body any, retries int) error {
 				return fmt.Errorf("after %d retries: %w", retries, err)
 			}
 			stresslog.Warn("[DISPATCHER] POST 失败，将重试",
+				zap.String("addr", addr),
+				zap.String("path", path),
 				zap.String("url", url),
 				zap.Int("attempt", i+1),
+				zap.Int("maxRetries", retries),
+				zap.Duration("backoff", backoff),
 				zap.Error(err))
 			time.Sleep(backoff)
 			backoff = backoff * 2

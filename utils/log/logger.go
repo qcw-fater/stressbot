@@ -15,7 +15,7 @@ var logger *zap.Logger
 // 可以输出 结构化日志、非结构化日志 性能差于 zap.Logger
 var sugarLogger *zap.SugaredLogger
 
-var loglevel zap.AtomicLevel
+var loglevel = zap.NewAtomicLevelAt(zapcore.InfoLevel)
 
 var defaultConf *Config
 
@@ -24,7 +24,7 @@ var logFilePath string
 
 // Config 日志配置的结构体
 type Config struct {
-	Path        string `json:"path" yaml:"path"`                 // 日志文件路径
+	Path         string `json:"path" yaml:"path"`                 // 日志文件路径
 	PrintConsole bool   `json:"printConsole" yaml:"printConsole"` // 是否控制台输出
 	LogLevel     string `json:"level" yaml:"logLevel"`            // 日志等级[debug, info, warn, error]
 	MaxSize      int    `json:"maxSizeMB" yaml:"maxSizeMB"`       // 日志文件大小，超过则切割，单位M
@@ -273,6 +273,9 @@ func GetLogLevel() zapcore.Level {
 //	    stresslog.Debug("msg", zap.String(...), ...)
 //	}
 func DebugEnabled() bool {
+	if logger == nil {
+		return false
+	}
 	return loglevel.Enabled(zapcore.DebugLevel)
 }
 

@@ -257,8 +257,15 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 				zap.String("caller", e.caller), zap.String("action", node.Action), zap.Error(err))
 			return context.Canceled
 		}
-		stresslog.Error("[ENGINE] 动作执行失败",
-			zap.String("caller", e.caller), zap.String("action", node.Action), zap.Error(err))
+		fields := []zap.Field{
+			zap.String("caller", e.caller),
+			zap.String("action", node.Action),
+			zap.String("pattern", actionDef.Pattern),
+			zap.String("errorStrategy", node.ErrorStrategy),
+			zap.Error(err),
+		}
+		fields = append(fields, actionErrorLogFields(err)...)
+		logActionFailure("[ENGINE] 动作执行失败", node.ErrorStrategy, fields...)
 		// 非取消类失败同样执行节点延迟，避免错误路径下节点推进速度超过配置预期。
 		e.nodeDelay(ctx, node)
 		return applyErrorStrategy(node.ErrorStrategy, func() error {
@@ -272,8 +279,16 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return err
 			}
-			stresslog.Error("[ENGINE] 注册监听失败",
-				zap.String("caller", e.caller), zap.Error(err))
+			fields := []zap.Field{
+				zap.String("caller", e.caller),
+				zap.String("action", node.Action),
+				zap.String("pattern", actionDef.Pattern),
+				zap.String("errorStrategy", node.ErrorStrategy),
+				zap.Int("listenCount", len(node.ListenRefs)),
+				zap.Error(err),
+			}
+			fields = append(fields, actionErrorLogFields(err)...)
+			logActionFailure("[ENGINE] 注册监听失败", node.ErrorStrategy, fields...)
 			// 动作本体已成功但监听注册失败，仍按失败动作执行节点延迟。
 			e.nodeDelay(ctx, node)
 			return applyErrorStrategy(node.ErrorStrategy, func() error {
@@ -282,9 +297,34 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 		}
 	}
 
-	stresslog.Info("[ENGINE] 执行动作成功", zap.String("caller", e.caller), zap.String("action", node.Action), zap.Int("listens", len(node.ListenRefs)))
+	if stresslog.DebugEnabled() {
+		stresslog.Debug("[ENGINE] 执行动作成功",
+			zap.String("caller", e.caller),
+			zap.String("action", node.Action),
+			zap.String("pattern", actionDef.Pattern),
+			zap.Int("listens", len(node.ListenRefs)))
+	}
 	e.nodeDelay(ctx, node)
 	return nil
+}
+
+func actionErrorLogFields(err error) []zap.Field {
+	actionErr, ok := errors.AsType[*ActionError](err)
+	if !ok || actionErr == nil {
+		return nil
+	}
+	return []zap.Field{
+		zap.Uint64("errorCode", uint64(actionErr.Code)),
+		zap.String("errorDetail", actionErr.Detail),
+	}
+}
+
+func logActionFailure(msg, strategy string, fields ...zap.Field) {
+	if strategy == StrategyAbort {
+		stresslog.Error(msg, fields...)
+		return
+	}
+	stresslog.Warn(msg, fields...)
 }
 
 // applyErrorStrategy 根据 errorStrategy 配置决定如何处理错误。

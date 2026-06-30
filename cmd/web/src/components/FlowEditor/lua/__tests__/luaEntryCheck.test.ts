@@ -50,8 +50,8 @@ describe('入口函数定位', () => {
     expect(r?.paramCount).toBe(1);
   });
 
-  it('识别 onMessage(r, msg) 双参', () => {
-    const r = findEntry(`function onMessage(r, msg)\nend\n`, 'onMessage');
+  it('识别 on_message(r, msg) 双参', () => {
+    const r = findEntry(`function on_message(r, msg)\nend\n`, 'on_message');
     expect(r?.paramCount).toBe(2);
   });
 

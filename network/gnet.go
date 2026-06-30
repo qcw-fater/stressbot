@@ -102,7 +102,7 @@ func (es *EventServer) OnClose(gconn gnet.Conn, err error) gnet.Action {
 		//   - RST / broken-pipe / timeout / 其他：真正的异常断开，仍然 warn 级别
 		switch reason {
 		case "", "EOF", "local-close":
-			stresslog.Info("[GNET] 连接关闭",
+			stresslog.Debug("[GNET] 连接关闭",
 				zap.String("service", conn.ServiceName()),
 				zap.String("robot", conn.robotName),
 				zap.String("reason", reason))
@@ -179,11 +179,17 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 		bodyLen := es.adp.BodyLength(headBuf)
 		if bodyLen < 0 || bodyLen > maxBodyLen {
 			serviceName := ""
+			robotName := ""
 			if conn != nil {
 				serviceName = conn.ServiceName()
+				robotName = conn.robotName
 			}
 			stresslog.Warn("[NETWORK] 协议头非法或包体过长，关闭连接",
 				zap.String("service", serviceName),
+				zap.String("robot", robotName),
+				zap.Int("fd", gconn.Fd()),
+				zap.Int("headSize", headSize),
+				zap.Int("available", available),
 				zap.Int("bodyLen", bodyLen))
 			return gnet.Close
 		}
@@ -198,7 +204,20 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 		msgBuf := getMsgBuf(totalLen)
 		if _, err = gconn.Read(msgBuf); err != nil {
 			putMsgBuf(msgBuf)
-			stresslog.Error("[GNET] 读取消息失败", zap.Error(err))
+			serviceName := ""
+			robotName := ""
+			if conn != nil {
+				serviceName = conn.ServiceName()
+				robotName = conn.robotName
+			}
+			stresslog.Error("[GNET] 读取消息失败",
+				zap.String("service", serviceName),
+				zap.String("robot", robotName),
+				zap.Int("fd", gconn.Fd()),
+				zap.Int("headSize", headSize),
+				zap.Int("bodyLen", bodyLen),
+				zap.Int("totalLen", totalLen),
+				zap.Error(err))
 			return gnet.None
 		}
 		// 全局带宽统计：所有真实入站字节都计入（含心跳应答、监听推送、未匹配响应等）。
@@ -233,7 +252,10 @@ func (es *EventServer) OnTraffic(gconn gnet.Conn) (action gnet.Action) {
 			putMsgBuf(msgBuf)
 			stresslog.Warn("[NETWORK] inbound 通道已满，关闭连接以释放压力",
 				zap.String("service", conn.ServiceName()),
-				zap.String("robot", conn.robotName))
+				zap.String("robot", conn.robotName),
+				zap.Int("fd", gconn.Fd()),
+				zap.Int("bodyLen", bodyLen),
+				zap.Int("totalLen", totalLen))
 			return gnet.Close
 		}
 	}
@@ -400,8 +422,10 @@ func (d *Dialer) dial(ctx context.Context, network, address string, conn *Connec
 	// 否则首批 OnTraffic 到达时 inboundCh 还没准备好，会被 EnqueueRaw 拒绝。
 	conn.StartPump(adp, network == "udp")
 
-	stresslog.Info("[GNET] 连接已建立",
-		zap.String("network", network),
-		zap.String("address", address), zap.String("service", conn.serviceName), zap.String("robot", conn.robotName))
+	if stresslog.DebugEnabled() {
+		stresslog.Debug("[GNET] 连接已建立",
+			zap.String("network", network),
+			zap.String("address", address), zap.String("service", conn.serviceName), zap.String("robot", conn.robotName))
+	}
 	return gconn, nil
 }

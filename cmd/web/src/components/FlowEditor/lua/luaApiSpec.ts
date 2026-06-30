@@ -445,7 +445,7 @@ const protoModule: LuaModule = {
       module: 'proto',
       params: [
         { name: 'msg', type: 'userdata', doc: 'proto 消息' },
-        { name: 'path', type: 'string', doc: '字段路径；当前后端等同 get_field' },
+        { name: 'path', type: 'string', doc: '字段路径，支持点分路径和数组索引' },
       ],
       returns: 'any',
       summary: '按字段路径读取值',

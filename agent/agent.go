@@ -60,8 +60,6 @@ type Agent struct {
 	stopCh   chan struct{}
 	stopOnce sync.Once
 
-	// 注册重置版本号：每次重新注册成功后递增。
-	// stressReporter / taskCancel 等"按生命周期"分配的资源都和它绑定，
 	// 避免旧任务的回调到新生命周期里污染状态。
 	regGeneration atomic.Int64
 }
@@ -284,7 +282,13 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 			err := a.httpCli.Heartbeat(ctx, req)
 			if err == nil {
 				if consecutiveFailures > 0 {
-					stresslog.Info("[AGENT] 心跳恢复", zap.Int("previousFailures", consecutiveFailures))
+					stresslog.Info("[AGENT] 心跳恢复",
+						zap.String("agentID", a.id),
+						zap.String("status", string(status)),
+						zap.String("taskID", taskID),
+						zap.Int("currentBots", bots),
+						zap.Int("previousFailures", consecutiveFailures),
+						zap.Duration("nextInterval", a.cfg.HeartbeatInterval))
 				}
 				consecutiveFailures = 0
 				interval = a.cfg.HeartbeatInterval
@@ -298,13 +302,24 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 				if status == StatusBusy {
 					a.cancelCurrentTask("Admin 报告未注册，可能重启")
 				}
-				stresslog.Warn("[AGENT] Admin 报告未注册，尝试重新注册")
+				stresslog.Warn("[AGENT] Admin 报告未注册，尝试重新注册",
+					zap.String("agentID", a.id),
+					zap.String("status", string(status)),
+					zap.String("taskID", taskID),
+					zap.Int("currentBots", bots))
 				if regErr := a.registerWithRetry(ctx); regErr != nil {
-					stresslog.Error("[AGENT] 重新注册失败，退出 Agent", zap.Error(regErr))
+					stresslog.Error("[AGENT] 重新注册失败，退出 Agent",
+						zap.String("agentID", a.id),
+						zap.String("status", string(status)),
+						zap.String("taskID", taskID),
+						zap.Error(regErr))
 					a.triggerStop()
 					return
 				}
-				stresslog.Info("[AGENT] 重新注册成功，继续心跳")
+				stresslog.Info("[AGENT] 重新注册成功，继续心跳",
+					zap.String("agentID", a.id),
+					zap.String("status", string(status)),
+					zap.String("taskID", taskID))
 				a.regGeneration.Add(1)
 				consecutiveFailures = 0
 				interval = a.cfg.HeartbeatInterval
@@ -320,19 +335,36 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 			switch {
 			case status == StatusBusy && consecutiveFailures >= a.cfg.HeartbeatFailThreshold:
 				stresslog.Error("[AGENT] 任务运行中连续心跳失败达到阈值，放弃当前任务",
+					zap.String("agentID", a.id),
+					zap.String("status", string(status)),
 					zap.String("taskID", taskID),
+					zap.Int("currentBots", bots),
 					zap.Int("consecutive", consecutiveFailures),
 					zap.Int("threshold", a.cfg.HeartbeatFailThreshold),
+					zap.Duration("nextInterval", a.cfg.HeartbeatFailInterval),
 					zap.Error(err))
 				a.cancelCurrentTask(fmt.Sprintf("心跳连续失败 %d 次 / Admin 断联", consecutiveFailures))
 			case consecutiveFailures <= 3:
 				stresslog.Warn("[AGENT] 心跳失败",
-					zap.Int("consecutive", consecutiveFailures), zap.Error(err))
+					zap.String("agentID", a.id),
+					zap.String("status", string(status)),
+					zap.String("taskID", taskID),
+					zap.Int("currentBots", bots),
+					zap.Int("consecutive", consecutiveFailures),
+					zap.Int("threshold", a.cfg.HeartbeatFailThreshold),
+					zap.Duration("nextInterval", a.cfg.HeartbeatFailInterval),
+					zap.Error(err))
 			default:
-				stresslog.Error("[AGENT] 心跳连续失败",
-					zap.Int("consecutive", consecutiveFailures), zap.Error(err))
+				stresslog.Warn("[AGENT] 心跳连续失败",
+					zap.String("agentID", a.id),
+					zap.String("status", string(status)),
+					zap.String("taskID", taskID),
+					zap.Int("currentBots", bots),
+					zap.Int("consecutive", consecutiveFailures),
+					zap.Int("threshold", a.cfg.HeartbeatFailThreshold),
+					zap.Duration("nextInterval", a.cfg.HeartbeatFailInterval),
+					zap.Error(err))
 			}
-
 			// 失败时使用更短的重试间隔
 			interval = a.cfg.HeartbeatFailInterval
 			timer.Reset(interval)
@@ -402,6 +434,17 @@ func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
 	a.status = StatusBusy
 	a.mu.Unlock()
 
+	startedAt := time.Now()
+	stresslog.Info("[AGENT] 任务开始执行",
+		zap.String("agentID", a.id),
+		zap.String("taskID", task.TaskID),
+		zap.String("taskName", task.TaskName),
+		zap.Int("totalBots", task.TotalBots),
+		zap.Int("startNumber", task.StartNumber),
+		zap.Int("concurrentNum", task.ConcurrentNum),
+		zap.String("from", string(StatusIdle)),
+		zap.String("to", string(StatusBusy)))
+
 	// 任务结束时清理状态
 	defer func() {
 		a.mu.Lock()
@@ -436,7 +479,10 @@ func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
 	// 进入下一阶段；网络往返期间的 bot 末次 IO 即使有少量计数也只落到新阶段的"前几ms"，
 	// 不会污染已快照的本阶段数据。
 	runner.OnStageReset = func(nextStageIdx int) {
-		stresslog.Info("[AGENT] reset 边界阶段段落上报", zap.Int("stageIndex", nextStageIdx))
+		stresslog.Info("[AGENT] reset 边界阶段段落上报",
+			zap.String("agentID", a.id),
+			zap.String("taskID", task.TaskID),
+			zap.Int("stageIndex", nextStageIdx))
 
 		snap := stressReporter.Snapshot()
 		a.collector.Reset()
@@ -453,7 +499,11 @@ func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
 			reportCtx, reportCancel := context.WithTimeout(context.Background(), a.cfg.TaskReportTimeout)
 			defer reportCancel()
 			if err := a.httpCli.ReportTaskDone(reportCtx, report); err != nil {
-				stresslog.Warn("[AGENT] reset 阶段段落上报失败", zap.Int("stageIndex", nextStageIdx), zap.Error(err))
+				stresslog.Warn("[AGENT] reset 阶段段落上报失败",
+					zap.String("agentID", a.id),
+					zap.String("taskID", task.TaskID),
+					zap.Int("stageIndex", nextStageIdx),
+					zap.Error(err))
 			}
 		})
 	}
@@ -464,10 +514,12 @@ func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
 
 	if result == TaskFailed {
 		stresslog.Error("[AGENT] 任务执行失败",
+			zap.String("agentID", a.id),
 			zap.String("taskID", task.TaskID),
 			zap.String("error", errMsg))
 	} else if errMsg != "" {
 		stresslog.Warn("[AGENT] 任务完成但有错误",
+			zap.String("agentID", a.id),
 			zap.String("taskID", task.TaskID),
 			zap.String("result", string(result)),
 			zap.String("error", errMsg))
@@ -501,16 +553,25 @@ func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
 
 	if err := a.httpCli.ReportTaskDone(reportCtx, report); err != nil {
 		stresslog.Warn("[AGENT] 任务完成上报失败（任务已丢弃，由 Admin 心跳超时自动收尾）",
+			zap.String("agentID", a.id),
 			zap.String("taskID", task.TaskID),
 			zap.Error(err))
 	} else {
 		stresslog.Info("[AGENT] 任务完成已上报",
+			zap.String("agentID", a.id),
 			zap.String("taskID", task.TaskID),
 			zap.String("result", string(result)))
 	}
 
 	// 清理临时目录
 	runner.Cleanup()
+	stresslog.Info("[AGENT] 任务执行状态已恢复",
+		zap.String("agentID", a.id),
+		zap.String("taskID", task.TaskID),
+		zap.String("result", string(result)),
+		zap.String("from", string(StatusBusy)),
+		zap.String("to", string(StatusIdle)),
+		zap.Duration("duration", time.Since(startedAt)))
 
 	// 任务结束、Agent 回到 idle：把 GC 已回收但仍保留在进程内的内存归还给 OS，
 	// 避免常驻 Agent 在多任务之间 RSS 单调增长（每个任务会创建/销毁整套 LState 池、

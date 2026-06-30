@@ -215,7 +215,8 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 		stresslog.Error("[NETWORK] RequestResponse 发送失败",
 			zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
 			zap.String("robot", c.robotName),
-			zap.Int("pktLen", len(sendData)))
+			zap.Int("pktLen", len(sendData)),
+			zap.Error(sendErr))
 		return nil, timing, sendErr
 	}
 	_ = n
@@ -327,7 +328,8 @@ func (c *Connection) SendRequest(sendData []byte, routeKey string, timeout time.
 	if sendErr != nil {
 		stresslog.Error("[NETWORK] SendRequest 发送失败",
 			zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
-			zap.String("robot", c.robotName), zap.Int("pktLen", len(sendData)))
+			zap.String("robot", c.robotName), zap.Int("pktLen", len(sendData)),
+			zap.Duration("timeout", timeout), zap.Error(sendErr))
 		pr.Close()
 		return nil, sendErr
 	}
@@ -394,14 +396,21 @@ func (c *Connection) Send(data []byte) (int, error) {
 		return 0, engine.NewActionError(errcode.ErrConnClosed, c.serviceName)
 	}
 	if c.sendFunc == nil {
-		stresslog.Warn("[NETWORK] Send sendFunc 未注入", zap.String("service", c.serviceName))
+		stresslog.Warn("[NETWORK] Send sendFunc 未注入",
+			zap.String("service", c.serviceName),
+			zap.String("robot", c.robotName),
+			zap.Int("pktLen", len(data)))
 		return 0, engine.NewActionError(errcode.ErrSendFailed, c.serviceName)
 	}
 
 	n := len(data)
 	err := c.sendFunc(data)
 	if err != nil {
-		stresslog.Error("[NETWORK] Send 发送失败", zap.String("service", c.serviceName), zap.Error(err))
+		stresslog.Error("[NETWORK] Send 发送失败",
+			zap.String("service", c.serviceName),
+			zap.String("robot", c.robotName),
+			zap.Int("pktLen", n),
+			zap.Error(err))
 		return 0, engine.NewActionError(errcode.ErrSendFailed, c.serviceName, err)
 	}
 	// 全局带宽统计
@@ -747,11 +756,19 @@ func (c *Connection) sendHeartbeatLocked() {
 	n, err := c.Send(packet)
 	if err != nil {
 		stresslog.Warn("[HEARTBEAT] 发送失败",
-			zap.String("service", c.serviceName), zap.Int("pktLen", len(packet)), zap.Error(err))
+			zap.String("service", c.serviceName),
+			zap.String("robot", c.robotName),
+			zap.Bool("udp", c.isUDP),
+			zap.Int("pktLen", len(packet)), zap.Error(err))
 		return
 	}
-	stresslog.Debug("[HEARTBEAT] 已发送",
-		zap.String("service", c.serviceName), zap.Int("pktLen", n))
+	if stresslog.DebugEnabled() {
+		stresslog.Debug("[HEARTBEAT] 已发送",
+			zap.String("service", c.serviceName),
+			zap.String("robot", c.robotName),
+			zap.Bool("udp", c.isUDP),
+			zap.Int("pktLen", n))
+	}
 }
 
 // resetHeartbeatTimerLocked （重新）设置心跳 timer 为 cfg.Interval 后到期。
@@ -817,7 +834,10 @@ func (c *Connection) decodeAndDispatch(frame inboundFrame) {
 		stresslog.Warn("[NETWORK] 解码返回空 routeKey，响应被丢弃",
 			zap.String("service", c.serviceName),
 			zap.String("robot", c.robotName),
-			zap.Int("bodyLen", len(body)))
+			zap.Bool("udp", c.isUDP),
+			zap.Int("wireBytes", frame.WireBytes),
+			zap.Int("bodyLen", len(body)),
+			zap.Uint64("headerErr", headerErr))
 		return
 	}
 	c.OnReceive(routeKey, body, headerErr, frame.WireBytes, MessageTiming{
@@ -1043,7 +1063,13 @@ func (c *Connection) OnReceive(routeKey string, body []byte, headerErr uint64, w
 		select {
 		case ch <- resp:
 		default:
-			stresslog.Warn("[NETWORK] OnReceive 响应通道已满", zap.String("key", routeKey))
+			stresslog.Warn("[NETWORK] OnReceive 响应通道已满",
+				zap.String("service", c.serviceName),
+				zap.String("routeKey", routeKey),
+				zap.String("robot", c.robotName),
+				zap.Int("bodyLen", len(body)),
+				zap.Int("wireBytes", wireBytes),
+				zap.Uint64("headerErr", headerErr))
 		}
 		c.mu.Unlock()
 		return

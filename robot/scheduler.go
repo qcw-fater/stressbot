@@ -57,7 +57,12 @@ func (s *robotScheduler) enqueue(t pendingTask) {
 	default:
 		n := s.taskDropped.Add(1)
 		stresslog.Warn("[ROBOT] 任务队列已满，丢弃 listen 回调任务",
-			zap.Int("id", s.robot.id), zap.String("task", t.name), zap.Int64("dropped", n))
+			zap.Int("id", s.robot.id),
+			zap.String("account", s.robot.account),
+			zap.String("task", t.name),
+			zap.Int("queueLen", len(s.taskCh)),
+			zap.Int("queueCap", cap(s.taskCh)),
+			zap.Int64("dropped", n))
 	}
 }
 

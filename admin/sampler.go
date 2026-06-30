@@ -91,7 +91,7 @@ func (s *Sampler) loop(ctx context.Context, taskID string, startedAt time.Time, 
 			point.StageIndex = s.currentStageIndex(taskID)
 			if err := s.history.AppendTimeseries(context.Background(), taskID, point); err != nil {
 				stresslog.Warn("[SAMPLER] 时序趋势数据写入失败",
-					zap.String("taskId", taskID), zap.Error(err))
+					zap.String("taskID", taskID), zap.Error(err))
 				continue
 			}
 			lastSavedElapsed = elapsed

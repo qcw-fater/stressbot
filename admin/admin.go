@@ -237,7 +237,7 @@ func (s *AdminServer) onTaskTerminal(task *Task) {
 		finalSys := s.aggregator.AggregateSystem()
 		if err := s.history.Archive(context.Background(), task, finalStress, finalSys); err != nil {
 			stresslog.Error("任务归档失败",
-				zap.String("taskId", taskID),
+				zap.String("taskID", taskID),
 				zap.Error(err))
 		}
 	})
@@ -327,8 +327,8 @@ func (s *AdminServer) onAgentStatusChange(agentID string, from, to AgentStatus) 
 			}
 		})
 		stresslog.Warn("[ADMIN] 分配节点重新注册，任务在该节点已丢失",
-			zap.String("taskId", task.ID),
-			zap.String("agentId", agentID),
+			zap.String("taskID", task.ID),
+			zap.String("agentID", agentID),
 			zap.String("agentName", agentName),
 			zap.String("from", string(from)))
 
@@ -349,8 +349,8 @@ func (s *AdminServer) onAgentStatusChange(agentID string, from, to AgentStatus) 
 			})
 		})
 		stresslog.Info("[ADMIN] 分配节点恢复",
-			zap.String("taskId", task.ID),
-			zap.String("agentId", agentID),
+			zap.String("taskID", task.ID),
+			zap.String("agentID", agentID),
 			zap.String("agentName", agentName))
 		return
 	}
@@ -371,8 +371,8 @@ func (s *AdminServer) onAgentStatusChange(agentID string, from, to AgentStatus) 
 	})
 
 	stresslog.Warn("[ADMIN] 分配节点离线",
-		zap.String("taskId", task.ID),
-		zap.String("agentId", agentID),
+		zap.String("taskID", task.ID),
+		zap.String("agentID", agentID),
 		zap.String("agentName", agentName))
 
 	// 任务正在 stopping 时节点离线 → 立刻合成 report
@@ -400,7 +400,7 @@ func (s *AdminServer) onAgentStatusChange(agentID string, from, to AgentStatus) 
 		})
 		if complete {
 			if _, err := s.tasks.Transition(task.ID, TaskStopping, TaskStopped); err != nil {
-				stresslog.Warn("[ADMIN] 状态转换失败", zap.String("taskId", task.ID), zap.Error(err))
+				stresslog.Warn("[ADMIN] 状态转换失败", zap.String("taskID", task.ID), zap.Error(err))
 			}
 		}
 		return
@@ -500,7 +500,7 @@ func (s *AdminServer) startStopTimeout(taskID string) {
 			return
 		}
 		stresslog.Warn("[ADMIN] 停止超时，合成未上报节点的 report",
-			zap.String("taskId", taskID),
+			zap.String("taskID", taskID),
 			zap.Int("reported", len(task.Reports)),
 			zap.Int("total", len(task.SucceededAgents)))
 		s.tasks.Update(taskID, func(t *Task) {
@@ -530,7 +530,7 @@ func (s *AdminServer) startStopTimeout(taskID string) {
 			t.CleanupSummary = aggregateTaskCleanup(t)
 		})
 		if _, err := s.tasks.Transition(taskID, TaskStopping, TaskStopped); err != nil {
-			stresslog.Warn("[ADMIN] 状态转换失败", zap.String("taskId", taskID), zap.Error(err))
+			stresslog.Warn("[ADMIN] 状态转换失败", zap.String("taskID", taskID), zap.Error(err))
 		}
 	})
 }
@@ -564,7 +564,7 @@ func (s *AdminServer) checkAndStopIfAllLost(taskID string) {
 	}
 	if !anyAlive {
 		stresslog.Error("[ADMIN] 所有分配节点已失效（offline 或 restarted），自动停止任务",
-			zap.String("taskId", taskID))
+			zap.String("taskID", taskID))
 		s.autoStopTask(taskID, "所有分配节点已失效")
 	}
 }
@@ -604,7 +604,7 @@ func (s *AdminServer) autoStopTask(taskID string, reason string) {
 		if ok && node.Status != AgentOffline {
 			if err := s.dispatcher.Stop(node.Address, taskID); err != nil {
 				stresslog.Warn("[ADMIN] 停止节点任务失败",
-					zap.String("agentId", agentID), zap.Error(err))
+					zap.String("agentID", agentID), zap.Error(err))
 			}
 		}
 	}
@@ -637,7 +637,7 @@ func (s *AdminServer) autoStopTask(taskID string, reason string) {
 	})
 
 	if _, err := s.tasks.Transition(taskID, TaskStopping, TaskFailed); err != nil {
-		stresslog.Warn("[ADMIN] 状态转换失败", zap.String("taskId", taskID), zap.Error(err))
+		stresslog.Warn("[ADMIN] 状态转换失败", zap.String("taskID", taskID), zap.Error(err))
 	}
 }
 
@@ -671,7 +671,7 @@ func (s *AdminServer) startDeadlineWatchdog(ctx context.Context) {
 					}
 					if task.Config.Deadline != nil && time.Now().After(*task.Config.Deadline) {
 						stresslog.Info("[ADMIN] 任务超时，自动停止",
-							zap.String("taskId", task.ID),
+							zap.String("taskID", task.ID),
 							zap.Time("deadline", *task.Config.Deadline))
 						s.autoStopTask(task.ID, "任务超时")
 					}

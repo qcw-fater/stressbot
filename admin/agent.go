@@ -69,15 +69,22 @@ func (r *AgentRegistry) Register(node *AgentNode) error {
 
 	if exists {
 		stresslog.Warn("agent 重新注册",
-			zap.String("agentId", node.ID),
-			zap.String("name", node.Name),
-			zap.String("address", node.Address),
-			zap.String("previousStatus", string(from)))
+			zap.String("agentID", node.ID),
+			zap.String("agentName", node.Name),
+			zap.String("addr", node.Address),
+			zap.String("appVersion", node.AppVersion),
+			zap.Int("maxBots", node.MaxBots),
+			zap.String("currentTaskID", node.CurrentTaskID),
+			zap.String("previousStatus", string(from)),
+			zap.String("status", string(node.Status)))
 	} else {
 		stresslog.Info("agent 注册",
-			zap.String("agentId", node.ID),
-			zap.String("name", node.Name),
-			zap.String("address", node.Address))
+			zap.String("agentID", node.ID),
+			zap.String("agentName", node.Name),
+			zap.String("addr", node.Address),
+			zap.String("appVersion", node.AppVersion),
+			zap.Int("maxBots", node.MaxBots),
+			zap.String("status", string(node.Status)))
 	}
 	r.mu.Unlock()
 
@@ -143,7 +150,10 @@ func (r *AgentRegistry) touchLocked(node *AgentNode, appVersion string) *statusC
 			node.Status = AgentIdle
 		}
 		stresslog.Warn("agent 状态恢复",
-			zap.String("agentId", node.ID),
+			zap.String("agentID", node.ID),
+			zap.String("agentName", node.Name),
+			zap.String("addr", node.Address),
+			zap.String("currentTaskID", node.CurrentTaskID),
 			zap.String("from", string(from)),
 			zap.String("to", string(node.Status)))
 		return &statusChange{agentID: node.ID, from: from, to: node.Status}
@@ -165,8 +175,12 @@ func (r *AgentRegistry) Deregister(agentID string) error {
 		change = &statusChange{agentID: agentID, from: node.Status, to: AgentOffline}
 	}
 	delete(r.agents, agentID)
-	stresslog.Info("agent 注销", zap.String("agentId", agentID),
-		zap.String("currentTaskId", node.CurrentTaskID))
+	stresslog.Info("agent 注销",
+		zap.String("agentID", agentID),
+		zap.String("agentName", node.Name),
+		zap.String("addr", node.Address),
+		zap.String("currentTaskID", node.CurrentTaskID),
+		zap.String("status", string(node.Status)))
 	r.mu.Unlock()
 
 	if change != nil {
@@ -268,7 +282,11 @@ func (r *AgentRegistry) scanAndMarkStatus() {
 			node.Status = newStatus
 			changes = append(changes, statusChange{agentID: node.ID, from: from, to: newStatus})
 			stresslog.Warn("agent 状态变更",
-				zap.String("agentId", node.ID),
+				zap.String("agentID", node.ID),
+				zap.String("agentName", node.Name),
+				zap.String("addr", node.Address),
+				zap.String("currentTaskID", node.CurrentTaskID),
+				zap.Int("currentBots", node.CurrentBots),
 				zap.String("from", string(from)),
 				zap.String("to", string(newStatus)),
 				zap.Duration("lag", lag))
@@ -278,8 +296,11 @@ func (r *AgentRegistry) scanAndMarkStatus() {
 		if node.Status == AgentOffline {
 			delete(r.agents, node.ID)
 			stresslog.Info("agent 已离线，自动清理",
-				zap.String("agentId", node.ID),
-				zap.String("name", node.Name))
+				zap.String("agentID", node.ID),
+				zap.String("agentName", node.Name),
+				zap.String("addr", node.Address),
+				zap.String("currentTaskID", node.CurrentTaskID),
+				zap.Duration("lag", lag))
 		}
 	}
 	r.mu.Unlock()

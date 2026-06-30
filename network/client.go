@@ -187,6 +187,13 @@ func (c *Client) CloseAllWithTimeout(timeout time.Duration) CloseAllResult {
 		result.Message = "连接清理完成"
 	} else {
 		result.Message = "连接清理超时"
+		stresslog.Warn("[CLIENT] 连接清理超时",
+			zap.String("robot", c.name),
+			zap.Int("tcp", result.TCPCount),
+			zap.Int("udp", result.UDPCount),
+			zap.Duration("timeout", timeout),
+			zap.Int("decodeTimeouts", result.DecodeTimeouts),
+			zap.Int("listenTimeouts", result.ListenTimeouts))
 	}
 	return result
 }

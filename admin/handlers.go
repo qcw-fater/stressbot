@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"stressbot/errcode"
@@ -248,9 +249,9 @@ func (s *AdminServer) handleAgentStressReport(w http.ResponseWriter, r *http.Req
 	if currentTaskID == "" || (report.TaskID != "" && report.TaskID != currentTaskID) {
 		// 旧任务的延迟报告 / agent 已 idle，直接丢弃，避免 LatestStress 被串。
 		stresslog.Debug("丢弃过期 stress 报告",
-			zap.String("agentId", report.AgentID),
+			zap.String("agentID", report.AgentID),
 			zap.String("reportTaskId", report.TaskID),
-			zap.String("currentTaskId", currentTaskID))
+			zap.String("currentTaskID", currentTaskID))
 		writeJSON(w, http.StatusOK, map[string]string{"status": "stale"})
 		return
 	}
@@ -308,7 +309,7 @@ func (s *AdminServer) handleAgentTaskDone(w http.ResponseWriter, r *http.Request
 		}); err != nil {
 			// Agent 已被 admin 删除等场景，不影响 report 入库
 			stresslog.Warn("[ADMIN] handleAgentTaskDone Heartbeat 失败",
-				zap.String("agentId", agentID), zap.Error(err))
+				zap.String("agentID", agentID), zap.Error(err))
 		}
 	}
 
@@ -329,8 +330,8 @@ func (s *AdminServer) handleAgentTaskDone(w http.ResponseWriter, r *http.Request
 				t.StageReports = append(t.StageReports, report)
 			}
 			stresslog.Info("[ADMIN] 收到 reset 边界阶段段落报告",
-				zap.String("taskId", taskID),
-				zap.String("agentId", agentID),
+				zap.String("taskID", taskID),
+				zap.String("agentID", agentID),
 				zap.Int("stageIndex", report.StageIndex),
 				zap.Bool("dedup", replaced))
 			return
@@ -366,12 +367,12 @@ func (s *AdminServer) handleAgentTaskDone(w http.ResponseWriter, r *http.Request
 	if needTransition == TaskRunning {
 		if _, err := s.tasks.Transition(taskID, TaskRunning, TaskStopped); err != nil {
 			stresslog.Warn("[ADMIN] 状态转换失败 running→stopped",
-				zap.String("taskId", taskID), zap.Error(err))
+				zap.String("taskID", taskID), zap.Error(err))
 		}
 	} else if needTransition == TaskStopping {
 		if _, err := s.tasks.Transition(taskID, TaskStopping, TaskStopped); err != nil {
 			stresslog.Warn("[ADMIN] 状态转换失败 stopping→stopped",
-				zap.String("taskId", taskID), zap.Error(err))
+				zap.String("taskID", taskID), zap.Error(err))
 		}
 	}
 
@@ -595,7 +596,7 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stresslog.Info("任务创建", zap.String("taskId", task.ID), zap.String("name", task.Name))
+	stresslog.Info("任务创建", zap.String("taskID", task.ID), zap.String("name", task.Name))
 	writeJSON(w, http.StatusCreated, map[string]string{"id": task.ID})
 }
 
@@ -753,6 +754,10 @@ func (s *AdminServer) handleGetTaskConfig(w http.ResponseWriter, r *http.Request
 func (s *AdminServer) handleStartTask(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
+	stresslog.Info("[ADMIN] 收到任务启动请求",
+		zap.String("taskID", id),
+		zap.String("remoteAddr", r.RemoteAddr))
+
 	task, err := s.tasks.StartTask(id)
 	if err != nil {
 		writeError(w, err)
@@ -765,7 +770,7 @@ func (s *AdminServer) handleStartTask(w http.ResponseWriter, r *http.Request) {
 	if sharedUsed && !s.cfg.RedisEnabled() {
 		if _, terr := s.tasks.Transition(id, TaskStarting, TaskFailed); terr != nil {
 			stresslog.Warn("[ADMIN] 状态转换失败 starting→failed",
-				zap.String("taskId", id), zap.Error(terr))
+				zap.String("taskID", id), zap.Error(terr))
 		}
 		writeError(w, ErrSharedUnavailable.WithMessage("任务脚本使用了共享状态(share)，但服务器未配置 Redis，无法启动"))
 		return
@@ -781,16 +786,24 @@ func (s *AdminServer) handleStartTask(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if _, terr := s.tasks.Transition(id, TaskStarting, TaskFailed); terr != nil {
 			stresslog.Warn("[ADMIN] 状态转换失败 starting→failed",
-				zap.String("taskId", id), zap.Error(terr))
+				zap.String("taskID", id), zap.Error(terr))
 		}
 		writeError(w, err)
 		return
 	}
 
+	stresslog.Info("[ADMIN] 任务分配完成",
+		zap.String("taskID", id),
+		zap.String("taskName", task.Name),
+		zap.Int("totalBots", task.TotalBots),
+		zap.Bool("sharedUsed", sharedUsed),
+		zap.Int("idleAgents", len(idleAgents)),
+		zap.Int("assignments", len(assignments)))
+
 	if err := validateDistributedConcurrency(task.Config.RobotConfig, assignments); err != nil {
 		if _, terr := s.tasks.Transition(id, TaskStarting, TaskFailed); terr != nil {
 			stresslog.Warn("[ADMIN] 状态转换失败 starting→failed",
-				zap.String("taskId", id), zap.Error(terr))
+				zap.String("taskID", id), zap.Error(terr))
 		}
 		writeError(w, err)
 		return
@@ -822,10 +835,10 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 	task, ok := s.tasks.Get(taskID)
 	if !ok || task == nil {
 		// 任务在异步路径里已被删除 / 不存在：把任务标记为 failed 并清理 sampler
-		stresslog.Error("[ADMIN] 任务不存在，取消下发", zap.String("taskId", taskID))
+		stresslog.Error("[ADMIN] 任务不存在，取消下发", zap.String("taskID", taskID))
 		if _, err := s.tasks.Transition(taskID, TaskStarting, TaskFailed); err != nil {
 			stresslog.Warn("[ADMIN] 状态转换失败 starting→failed",
-				zap.String("taskId", taskID), zap.Error(err))
+				zap.String("taskID", taskID), zap.Error(err))
 		}
 		if s.sampler != nil {
 			s.sampler.Stop(taskID)
@@ -903,7 +916,7 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 		if r.err != nil {
 			failed = append(failed, r.agentID)
 			stresslog.Error("推送任务失败",
-				zap.String("agentId", r.agentID),
+				zap.String("agentID", r.agentID),
 				zap.Error(r.err))
 			continue
 		}
@@ -918,7 +931,7 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 
 	if len(failed) > 0 {
 		stresslog.Warn("部分 Agent 推送任务失败",
-			zap.String("taskId", taskID),
+			zap.String("taskID", taskID),
 			zap.Strings("failedAgents", failed),
 			zap.Strings("succeededAgents", succeeded))
 
@@ -926,19 +939,19 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 			// 全部失败 → 标记任务 failed
 			if _, err := s.tasks.Transition(taskID, TaskStarting, TaskFailed); err != nil {
 				stresslog.Warn("[ADMIN] 状态转换失败 starting→failed",
-					zap.String("taskId", taskID), zap.Error(err))
+					zap.String("taskID", taskID), zap.Error(err))
 			}
 			if s.sampler != nil {
 				s.sampler.Stop(taskID)
 			}
 			stresslog.Error("任务启动失败，无 Agent 成功",
-				zap.String("taskId", taskID),
+				zap.String("taskID", taskID),
 				zap.Strings("failedAgents", failed))
 			return
 		}
 		// 部分成功 → 继续执行
 		stresslog.Warn("任务将以部分 Agent 继续执行",
-			zap.String("taskId", taskID),
+			zap.String("taskID", taskID),
 			zap.Int("expectedAgents", len(assignments)),
 			zap.Int("actualAgents", len(succeeded)))
 	}
@@ -950,10 +963,10 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 
 	if _, err := s.tasks.Transition(taskID, TaskStarting, TaskRunning); err != nil {
 		stresslog.Warn("[ADMIN] 状态转换失败 starting→running",
-			zap.String("taskId", taskID), zap.Error(err))
+			zap.String("taskID", taskID), zap.Error(err))
 	}
 	stresslog.Info("任务启动成功",
-		zap.String("taskId", taskID),
+		zap.String("taskID", taskID),
 		zap.Int("agents", len(succeeded)))
 }
 
@@ -975,6 +988,11 @@ func (s *AdminServer) handleStopTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	stresslog.Info("[ADMIN] 收到任务停止请求",
+		zap.String("taskID", id),
+		zap.String("remoteAddr", r.RemoteAddr),
+		zap.String("state", string(task.State)))
+
 	// 向实际运行任务的节点发送 stop。
 	// 并行下发：单个 Agent stop RPC 可能因为节点 IO 阻塞而耗时（HTTP 客户端超时 ~30s），
 	// 串行会让"第二个节点"额外等待第一个节点的超时，给用户造成"只对一个 Agent 生效"的错觉。
@@ -987,18 +1005,25 @@ func (s *AdminServer) handleStopTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var wg sync.WaitGroup
+	var sentCount atomic.Int64
+	var failedCount atomic.Int64
+	var skippedCount atomic.Int64
 	for _, agentID := range targets {
 		agentID := agentID
 		agent, ok := s.agents.Get(agentID)
 		if !ok {
+			skippedCount.Add(1)
 			stresslog.Warn("停止跳过：节点未找到",
-				zap.String("agentId", agentID))
+				zap.String("taskID", id),
+				zap.String("agentID", agentID))
 			continue
 		}
 		if agent.Status == AgentOffline {
+			skippedCount.Add(1)
 			stresslog.Warn("停止跳过：节点离线",
-				zap.String("agentId", agentID),
-				zap.String("address", agent.Address))
+				zap.String("taskID", id),
+				zap.String("agentID", agentID),
+				zap.String("addr", agent.Address))
 			continue
 		}
 		addr := agent.Address
@@ -1006,18 +1031,28 @@ func (s *AdminServer) handleStopTask(w http.ResponseWriter, r *http.Request) {
 		utils.GetWorkPool().Go(func() {
 			defer wg.Done()
 			if err := s.dispatcher.Stop(addr, id); err != nil {
+				failedCount.Add(1)
 				stresslog.Warn("停止命令发送失败",
-					zap.String("agentId", agentID),
-					zap.String("address", addr),
+					zap.String("taskID", id),
+					zap.String("agentID", agentID),
+					zap.String("addr", addr),
 					zap.Error(err))
 			} else {
+				sentCount.Add(1)
 				stresslog.Info("停止命令已发送",
-					zap.String("agentId", agentID),
-					zap.String("address", addr))
+					zap.String("taskID", id),
+					zap.String("agentID", agentID),
+					zap.String("addr", addr))
 			}
 		})
 	}
 	wg.Wait()
+	stresslog.Info("[ADMIN] 停止命令下发完成",
+		zap.String("taskID", id),
+		zap.Int("targetCount", len(targets)),
+		zap.Int64("sentCount", sentCount.Load()),
+		zap.Int64("failedCount", failedCount.Load()),
+		zap.Int64("skippedCount", skippedCount.Load()))
 
 	// 立刻为已离线且未上报的节点合成 stopped report（Admin 已知它们不可能再上报了）
 	allReported := s.synthesizeOfflineReports(id)
@@ -1026,7 +1061,7 @@ func (s *AdminServer) handleStopTask(w http.ResponseWriter, r *http.Request) {
 	if allReported {
 		if _, err := s.tasks.Transition(id, TaskStopping, TaskStopped); err != nil {
 			stresslog.Warn("[ADMIN] 状态转换失败 stopping→stopped",
-				zap.String("taskId", id), zap.Error(err))
+				zap.String("taskID", id), zap.Error(err))
 		}
 	} else {
 		// 安全网：30s 后如果还在 stopping（在线节点未响应），强制完成
@@ -1135,7 +1170,7 @@ func (s *AdminServer) handleShutdownAgent(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err := s.dispatcher.Shutdown(agent.Address); err != nil {
-		stresslog.Warn("关闭命令发送失败", zap.String("agentId", id), zap.Error(err))
+		stresslog.Warn("关闭命令发送失败", zap.String("agentID", id), zap.Error(err))
 		writeError(w, ErrAgentOffline.WithMessage("agent unreachable: "+err.Error()))
 		return
 	}
@@ -1153,7 +1188,7 @@ func (s *AdminServer) handleShutdownAllAgents(w http.ResponseWriter, _ *http.Req
 		}
 		if err := s.dispatcher.Shutdown(a.Address); err != nil {
 			failed = append(failed, a.ID)
-			stresslog.Warn("关闭命令发送失败", zap.String("agentId", a.ID), zap.Error(err))
+			stresslog.Warn("关闭命令发送失败", zap.String("agentID", a.ID), zap.Error(err))
 		} else {
 			succeeded = append(succeeded, a.ID)
 		}

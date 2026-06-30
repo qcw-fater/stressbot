@@ -658,7 +658,7 @@ interface ManagedFlow {
 |---|---|---|---|
 | `action` | `function execute(r)` | `return nil / err table` | 检查 execute 存在 |
 | `boolean` | `function execute(r)` | `return true / false` | 检查 execute 存在 |
-| `callback` | `function onMessage(r, msg)` | 无返回值 | 检查 onMessage 存在 |
+| `listen` | `function on_message(r, msg)` | 无返回值 | 检查 on_message 存在 |
 
 功能：
 - 导入/导出 .lua 文件
@@ -677,7 +677,7 @@ interface ManagedFlow {
 |---|---|---|
 | silent | `{}`（空对象） | 收到推送即丢弃 |
 | declarative | `{s2cProto, store}` | 按 proto 反序列化，挑字段写 state |
-| lua | `{script}` （可选 s2cProto） | 执行 Lua function onMessage(r, msg) |
+| lua | `{script}` （可选 s2cProto） | 执行 Lua function on_message(r, msg)；配置 s2cProto 时 msg 为字段表，未配置时为 nil |
 
 ### 8.2 视觉布局
 
@@ -715,7 +715,7 @@ Tab 切换形态：silent / declarative / lua。
 
 **lua 形态**：
 - script 选择（新建/已存在）
-- Monaco 编辑器（mode='callback'）
+- Monaco 编辑器（mode='listen'）
 
 ### 8.5 ListenRefsTable — 监听引用编辑
 

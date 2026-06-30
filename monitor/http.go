@@ -43,7 +43,7 @@ func StartHTTPServer(port int) {
 		stresslog.Info("[MONITOR] HTTP 指标服务启动", zap.String("addr", addr),
 			zap.String("metrics", "http://localhost"+addr+"/metrics"))
 		if err := http.ListenAndServe(addr, nil); err != nil {
-			stresslog.Error("[MONITOR] HTTP 服务异常退出", zap.Error(err))
+			stresslog.Error("[MONITOR] HTTP 服务异常退出", zap.String("addr", addr), zap.Error(err))
 		}
 	})
 }

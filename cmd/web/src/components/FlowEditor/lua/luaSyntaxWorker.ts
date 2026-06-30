@@ -4,7 +4,7 @@
  * 主线程发送 `{ type: 'parse', code, mode }`：
  *   - mode='action'   : 期望存在 `function execute(r) ... end`（return nil / err table）
  *   - mode='boolean'  : 期望存在 `function execute(r) ... end`（return true / false，签名同 action）
- *   - mode='callback' : 期望存在 `function onMessage(r, msg) ... end`
+ *   - mode='listen'   : 期望存在 `function on_message(r, msg) ... end`
  *   - mode='free'     : 不做入口签名校验
  *
  * Worker 返回 `{ type: 'result', errors: SyntaxError[] }`，errors 由 Monaco 转成 markers。
@@ -63,10 +63,10 @@ self.onmessage = (e: MessageEvent<ParseRequest>) => {
   }
 
   if (ast && mode !== 'free') {
-    // action / boolean 共用 execute(r) 签名；listen 用 onMessage(r, msg)
+    // action / boolean 共用 execute(r) 签名；listen 用 on_message(r, msg)
     const expected =
       mode === 'listen'
-        ? { name: 'onMessage', params: 2 }
+        ? { name: 'on_message', params: 2 }
         : { name: 'execute', params: 1 };
     const found = findEntryFunction(ast, expected.name);
     if (!found) {

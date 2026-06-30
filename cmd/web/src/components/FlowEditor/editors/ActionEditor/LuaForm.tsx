@@ -6,7 +6,7 @@
  * - 入口签名：
  *   action  模式 : function execute(r) ... return nil / err table end
  *                  return nil 表示成功，失败时 return err table。
- *   listen 模式 : function onMessage(r, msg) ... end
+ *   listen 模式 : function on_message(r, msg) ... end
  *   boolean 模式 : function execute(r) ... return true/false end（条件节点 / loop breakCondition 用）
  *
  * 持久化：
@@ -56,8 +56,8 @@ end
   listen: `-- listen_xxx.lua
 local robot = require('robot')
 
-function onMessage(r, msg)
-  -- 有 s2cProto 时 msg 为 proto userdata，否则为原始二进制 string
+function on_message(r, msg)
+  -- 有 s2cProto 时 msg 为字段表；未配置 s2cProto 时 msg 为 nil
   if msg == nil then return end
   -- TODO: 写 state
 end
@@ -225,7 +225,7 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
   };
 
   const expectedSig =
-    mode === 'listen' ? 'function onMessage(r, msg)' : 'function execute(r)';
+    mode === 'listen' ? 'function on_message(r, msg)' : 'function execute(r)';
   const errorCount = issues.filter((i) => i.severity === 'error').length;
   const warnCount = issues.filter((i) => i.severity === 'warning').length;
   const lintFallbackWarn = issues.length === 0 && !content.includes(expectedSig);
@@ -361,7 +361,7 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
             )}
             {mode === 'listen' && (
               <>
-                ；未指定响应消息类型时，<code>msg</code> 为原始二进制数据
+                ；配置响应消息类型时 <code>msg</code> 为字段表，未配置时为 <code>nil</code>
               </>
             )}
             {errorCount > 0 && (

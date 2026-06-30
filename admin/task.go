@@ -48,7 +48,7 @@ func NewTaskStore(dataDir string) (*TaskStore, error) {
 		if IsActiveState(t.State) {
 			// 活跃任务在 Admin 重启后重置为 failed
 			stresslog.Info("恢复活跃任务为 failed",
-				zap.String("taskId", t.ID),
+				zap.String("taskID", t.ID),
 				zap.String("oldState", string(t.State)))
 			t.State = TaskFailed
 			t.ErrorMsg = "admin restart, task lost"
@@ -175,7 +175,7 @@ func (ts *TaskStore) Transition(id string, from, to TaskState) (*Task, error) {
 
 	t.State = to
 	stresslog.Info("[TASK] 状态转换",
-		zap.String("taskId", id),
+		zap.String("taskID", id),
 		zap.String("from", string(from)),
 		zap.String("to", string(to)))
 	now := time.Now()

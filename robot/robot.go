@@ -785,12 +785,16 @@ func (h *robotActionHandler) ExecuteBoolean(expression string) bool {
 func (h *robotActionHandler) executeLuaBoolean(scriptName string) bool {
 	if h.robot.l == nil || h.robot.luaPool == nil {
 		stresslog.Error("[ROBOT] Lua 运行时未初始化，条件判断默认拒绝",
+			zap.Int("id", h.robot.id),
+			zap.String("account", h.robot.account),
 			zap.String("script", scriptName))
 		return false
 	}
 
 	if !h.robot.luaPool.HasScript(scriptName) {
 		stresslog.Error("[ROBOT] 条件脚本不存在，条件判断默认拒绝",
+			zap.Int("id", h.robot.id),
+			zap.String("account", h.robot.account),
 			zap.String("script", scriptName))
 		return false
 	}
@@ -798,6 +802,8 @@ func (h *robotActionHandler) executeLuaBoolean(scriptName string) bool {
 	result, err := h.robot.luaPool.RunBooleanScript(h.robot.l, scriptName)
 	if err != nil {
 		stresslog.Error("[ROBOT] 条件脚本执行失败，条件判断默认拒绝",
+			zap.Int("id", h.robot.id),
+			zap.String("account", h.robot.account),
 			zap.String("script", scriptName), zap.Error(err))
 		return false
 	}
@@ -849,6 +855,8 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 		proto, service, ok := parseServer(ref.Server)
 		if !ok {
 			stresslog.Warn("[ROBOT] 监听引用的 server 解析失败，跳过注册",
+				zap.Int("id", h.robot.id),
+				zap.String("account", h.robot.account),
 				zap.String("server", ref.Server), zap.String("listen", ref.Listen))
 			continue
 		}
@@ -870,7 +878,11 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 		} else {
 			cbDef, ok := h.flow.Listen(ref.Listen)
 			if !ok {
-				stresslog.Error("[ROBOT] 回调定义不存在", zap.String("listen", ref.Listen))
+				stresslog.Error("[ROBOT] 回调定义不存在",
+					zap.Int("id", h.robot.id),
+					zap.String("account", h.robot.account),
+					zap.String("server", ref.Server),
+					zap.String("listen", ref.Listen))
 				continue
 			}
 			if err := validateListenDef(ref.Listen, cbDef); err != nil {
@@ -890,7 +902,10 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 			conn = h.robot.client.GetTCPConn(key.service)
 		}
 		if conn == nil {
-			stresslog.Debug("[ROBOT] 无连接可注册监听", zap.String("proto", key.proto), zap.String("service", key.service))
+			stresslog.Debug("[ROBOT] 无连接可注册监听",
+				zap.Int("id", h.robot.id),
+				zap.String("account", h.robot.account),
+				zap.String("proto", key.proto), zap.String("service", key.service))
 			continue
 		}
 		// 逐条注册：每条 RegisterListen 预创建队列 + 冲突 fail-loud + 幂等。
@@ -992,7 +1007,8 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 
 	return func(msg *network.Message) {
 		if h.robot.ctx.Err() != nil {
-			stresslog.Debug("[ROBOT] 停止阶段跳过状态回调", zap.Int("id", h.robot.id), zap.String("callback", cbName))
+			stresslog.Debug("[ROBOT] 停止阶段跳过状态回调",
+				zap.Int("id", h.robot.id), zap.String("account", h.robot.account), zap.String("callback", cbName))
 			return
 		}
 		start := time.Now()
@@ -1005,7 +1021,15 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 		if err != nil {
 			callbackErr := engine.NewActionError(errcode.ErrCallbackParse, "proto="+cbDef.S2CProto, err)
 			stresslog.Error("[ROBOT] 解析推送消息失败",
-				zap.Int("id", h.robot.id), zap.String("proto", cbDef.S2CProto), zap.Error(err))
+				zap.Int("id", h.robot.id),
+				zap.String("account", h.robot.account),
+				zap.String("callback", cbName),
+				zap.String("proto", cbDef.S2CProto),
+				zap.String("routeKey", msg.RouteKey),
+				zap.Int("bodyLen", len(msg.Data)),
+				zap.Int("wireBytes", msg.WireBytes),
+				zap.Uint64("headerErr", msg.HeaderErr),
+				zap.Error(err))
 			monitor.Global().RecordCallback(cbName, monitor.ResultFailure, monitor.ActionTiming{}, time.Since(start), 0, msg.WireBytes, callbackErr)
 			return
 		}
@@ -1043,7 +1067,16 @@ func (h *robotActionHandler) runListenScript(cbName string, cbDef *engine.Listen
 		if perr != nil {
 			cbErr := engine.NewActionError(errcode.ErrCallbackParse, "proto="+cbDef.S2CProto, perr)
 			stresslog.Error("[ROBOT] 解析监听推送失败",
-				zap.Int("id", h.robot.id), zap.String("proto", cbDef.S2CProto), zap.Error(perr))
+				zap.Int("id", h.robot.id),
+				zap.String("account", h.robot.account),
+				zap.String("listen", cbName),
+				zap.String("script", cbDef.Script),
+				zap.String("proto", cbDef.S2CProto),
+				zap.String("routeKey", msg.RouteKey),
+				zap.Int("bodyLen", len(msg.Data)),
+				zap.Int("wireBytes", msg.WireBytes),
+				zap.Uint64("headerErr", msg.HeaderErr),
+				zap.Error(perr))
 			monitor.Global().RecordCallback(cbName, monitor.ResultFailure, monitor.ActionTiming{}, time.Since(start), 0, msg.WireBytes, cbErr)
 			return
 		}
@@ -1055,7 +1088,16 @@ func (h *robotActionHandler) runListenScript(cbName string, cbDef *engine.Listen
 	if runErr != nil {
 		cbErr := engine.NewActionError(errcode.ErrCallbackLua, "script="+cbDef.Script, runErr)
 		stresslog.Error("[ROBOT] 监听脚本执行失败",
-			zap.Int("id", h.robot.id), zap.String("script", cbDef.Script), zap.Error(runErr))
+			zap.Int("id", h.robot.id),
+			zap.String("account", h.robot.account),
+			zap.String("listen", cbName),
+			zap.String("script", cbDef.Script),
+			zap.String("proto", cbDef.S2CProto),
+			zap.String("routeKey", msg.RouteKey),
+			zap.Int("bodyLen", len(msg.Data)),
+			zap.Int("wireBytes", msg.WireBytes),
+			zap.Uint64("headerErr", msg.HeaderErr),
+			zap.Error(runErr))
 		monitor.Global().RecordCallback(cbName, monitor.ResultFailure, monitor.ActionTiming{}, time.Since(start), 0, msg.WireBytes, cbErr)
 		return
 	}
@@ -1121,7 +1163,8 @@ func (ns *netSenderAdapter) cooperativeRequest(proto, service string, packet []b
 			engine.NewActionError(errcode.ErrActionCanceled, "service="+service+" route="+routeKey)
 	default:
 		if stresslog.DebugEnabled() && outcome.Exchange != nil {
-			stresslog.Debug("[ACTION] "+proto+"Response",
+			stresslog.Debug("[ACTION] 协作请求收到响应",
+				zap.String("transport", proto),
 				zap.String("service", service), zap.String("routeKey", routeKey),
 				zap.Int("bodyLen", len(outcome.Exchange.Body)),
 				zap.Int("wireBytes", outcome.Exchange.RecvWireBytes),

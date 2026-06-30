@@ -3,7 +3,7 @@
  *
  * 统一 action / listen / boolean 三处 lua 编辑入口。
  * action 模式：入口 execute(r)，返回 nil / err table
- * listen 模式：入口 onMessage(r, msg)
+ * listen 模式：入口 on_message(r, msg)
  * boolean 模式：入口 execute(r)，返回 true / false
  */
 
@@ -33,8 +33,8 @@ const DEFAULT_HELP: Record<LuaMode, React.ReactNode> = {
   ),
   listen: (
     <>
-      入口 <code>function onMessage(r, msg)</code>，
-      未指定响应消息类型时 <code>msg</code> 为原始二进制数据。
+      入口 <code>function on_message(r, msg)</code>，
+      配置响应消息类型时 <code>msg</code> 为字段表；未配置时为 <code>nil</code>。
       点「编辑」按钮可在编辑器里直接写脚本，按 Ctrl+S 保存到本地。
     </>
   ),
