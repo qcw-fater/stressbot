@@ -504,7 +504,7 @@ function FlowCanvasInner() {
     [addAction, addListen, addNode, clipboard, setListenDefaultRef, setSelectedNode],
   );
 
-  /** 把节点保存为模板（写入 IndexedDB） */
+  /** 把节点保存为模板（写入本地模板库） */
   const saveNodeAsTemplate = useCallback(async (n: RFNode) => {
     const flow = useFlowStore.getState();
     if (n.type === 'listenCard') {

@@ -1,5 +1,5 @@
 /**
- * 记事本文件管理（IndexedDB + Zustand）。
+ * 记事本文件管理（本地存储 + Zustand）。
  *
  * 设计要点：
  * - 使用 idb-keyval 的 createStore 模式（与 resourcesStore.ts 一致）；
@@ -56,7 +56,7 @@ function detectLanguage(filename: string): string {
   return EXT_LANG_MAP[ext] ?? 'plaintext';
 }
 
-// ── IDB helpers ──
+// ── 本地存储 helpers ──
 
 async function loadIndex(): Promise<NotepadFileMeta[]> {
   const raw = await get<NotepadFileMeta[]>(INDEX_KEY, notepadStore);

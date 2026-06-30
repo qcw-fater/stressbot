@@ -2,7 +2,7 @@
  * 记事本 — 右侧 Monaco 编辑器。
  *
  * 选中文件时渲染可编辑 Monaco 实例，未选中时显示空状态。
- * 编辑内容 300ms debounce 自动保存到 IDB。
+ * 编辑内容 300ms debounce 自动保存到本地存储。
  */
 
 import { FileTextOutlined } from '@ant-design/icons';

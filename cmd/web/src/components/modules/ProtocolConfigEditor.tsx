@@ -1,7 +1,7 @@
 /**
- * 协议配置编辑器：按连接多份 codec.json + 共享 errors.json 源码 / 结构化 JSON 编辑。
+ * 协议配置编辑器：按连接多份 *_codec.json + 共享 errors.json 源码 / 结构化 JSON 编辑。
  *
- * 从 ResourcesDrawer 抽离（B1-1），为后续挂到独立浮窗做准备。本组件只做功能平移，不重构样式/逻辑。
+ * 本组件负责连接选择、结构化编辑、源码编辑、基线拉取和本地校验。
  *
  * 设计要点：
  * - 连接选择器 + 视图切换（结构化 / 源码）+ 保存 / 校验 / 从基线载入 + 新建 / 复制 / 删除连接。
@@ -65,13 +65,13 @@ import {
   validateCodecCreateInput,
 } from '@/services/codecConnections';
 
-/* ─── 协议配置 — 按连接多份 codec.json + 共享 errors.json 源码 JSON 编辑器 ─── */
+/* ─── 协议配置 — 按连接多份 *_codec.json + 共享 errors.json 源码 JSON 编辑器 ─── */
 
 /** errors.json 固定文件名。 */
 const ERRORS_JSON_KEY = 'errors.json';
 
 /**
- * 新建连接用的最小合法 codec.json 模板。
+ * 新建连接用的最小合法 *_codec.json 模板。
  * 设计目标：直接通过 validateCodecSchema（version=1、endian="le"、frame.headerSize=8、
  * 1 个 role:"length" + 2 个 role:"route" 字段、routeKeyTemplate 引用 route 字段、pipeline 空）。
  */

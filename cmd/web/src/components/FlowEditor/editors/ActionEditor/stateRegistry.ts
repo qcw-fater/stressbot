@@ -55,7 +55,7 @@ function setterTopKey(setter: string): string {
 /**
  * 收集所有已知 state key。
  * storeAs 仅收集 currentBindings（当前 action 的 bindings）。
- * luaScripts 为 { name, content }[] 批量传入（由调用方从 IDB 异步加载）。
+ * luaScripts 为 { name, content }[] 批量传入（由调用方从本地存储异步加载）。
  */
 export function collectStateKeys(
   actions: Record<string, ActionDef>,

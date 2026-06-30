@@ -1,5 +1,5 @@
 /**
- * "加入模板库"按钮：一键保存当前 action/listen 到 IndexedDB。
+ * "加入模板库"按钮：一键保存当前 action/listen 到本地模板库。
  *
  * 模板名默认取 action/listen 名。
  * 同名模板已存在时弹出确认框，确认后覆盖更新。

@@ -74,7 +74,7 @@ type ValueSource struct {
 type PipelineStep struct {
 	Op       string         `json:"op"`   // compress|encrypt|checksum|hash
 	Name     string         `json:"name"` // 供 flag/from/appliesWith 引用
-	Algo     string         `json:"algo"` // 注册表键（存在性在 T1.3 校验）
+	Algo     string         `json:"algo"` // 注册表键（Validate 阶段校验存在性）
 	Flag     string         `json:"flag,omitempty"`
 	Params   map[string]any `json:"params,omitempty"`
 	KeyLen   int            `json:"keyLen,omitempty"` // encrypt

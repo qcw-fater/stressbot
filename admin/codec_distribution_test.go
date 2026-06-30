@@ -1,6 +1,6 @@
-// Package admin — T4.3 多 codec 分发测试（上传/configFiles/baseline/下载）。
+// Package admin 覆盖多 codec 分发测试（上传/configFiles/baseline/下载）。
 //
-// 覆盖（与 brief 验收逐条对齐）：
+// 覆盖：
 //   - multipart 上传多份 adapter/*_codec.json + adapter/errors.json → TaskConfig.Codecs 含各文件、ErrorMap 非空。
 //   - configFiles 清单含各 adapter/*_codec.json + adapter/errors.json，不含 codec.lua/error.lua。
 //   - writeBaselineFiles 落盘各 *_codec.json + errors.json；baseline HTTP 可读各文件。
@@ -145,7 +145,7 @@ func setupCodecDistServer(t *testing.T) (*AdminServer, string, func()) {
 }
 
 // TestCodecDist_UploadPopulatesMultiCodec 上传多份 codec 文件后，TaskConfig.Codecs
-// 含每个 *_codec.json、ErrorMap 非空；且不再写入旧的 AdapterScript/ErrorMapScript。
+// 含每个 *_codec.json，且 ErrorMap 非空。
 func TestCodecDist_UploadPopulatesMultiCodec(t *testing.T) {
 	srv, _, cleanup := setupCodecDistServer(t)
 	defer cleanup()
@@ -187,13 +187,6 @@ func TestCodecDist_UploadPopulatesMultiCodec(t *testing.T) {
 	// ErrorMap 必须非空（errors.json 内容）
 	if len(task.Config.ErrorMap) == 0 {
 		t.Fatalf("ErrorMap empty")
-	}
-	// 旧字段：admin 不再写入，应为 nil
-	if task.Config.AdapterScript != nil {
-		t.Fatalf("AdapterScript should be nil (admin writes new fields only), got %d bytes", len(task.Config.AdapterScript))
-	}
-	if task.Config.ErrorMapScript != nil {
-		t.Fatalf("ErrorMapScript should be nil (admin writes new fields only), got %d bytes", len(task.Config.ErrorMapScript))
 	}
 }
 
@@ -254,7 +247,7 @@ func TestCodecDist_ConfigFilesListsMultiCodec(t *testing.T) {
 			t.Fatalf("configFiles missing %s; got %v", w, files)
 		}
 	}
-	// 不得含旧字段产物
+	// 不得含历史 Lua adapter 产物
 	for _, f := range files {
 		if f == "adapter/codec.lua" || f == "adapter/error.lua" {
 			t.Fatalf("configFiles must not contain legacy %s; got %v", f, files)

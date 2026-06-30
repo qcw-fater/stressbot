@@ -437,9 +437,9 @@ workDir = {TaskWorkDir}/stressbot-task-{taskID}/
 
 遍历 `TaskAssignment.ConfigFiles` 列表，拼接 `ConfigURL + "/" + relPath`，逐个 HTTP GET 下载到 `workDir/conf/` 下对应的子目录。任何文件下载失败（HTTP 非 200）即返回 `TaskFailed`。
 
-**步骤 3：加载 Lua 协议适配器**
+**步骤 3：加载声明式 codec resolver**
 
-优先使用任务下发的 `workDir/conf/adapter/codec.lua`；若不存在则回退到 Agent 本地配置的 `cfg.AdapterScript`（默认 `conf/adapter/codec.lua`）。可选加载错误码映射 `error.lua`。池大小默认 `runtime.NumCPU()`。
+使用任务下发的 `workDir/conf/adapter/*_codec.json` 与共享 `errors.json` 构建 `CodecResolver`，按 `<proto>:<service>` 显式映射到对应的 `SchemaAdapter`。缺少映射或配置非法时 fail loud。
 
 **步骤 4：加载 .proto 文件**
 
@@ -775,7 +775,8 @@ Content-Type: application/json
     "flow.json",
     "proto/c2s.proto",
     "scripts/battle.lua",
-    "adapter/codec.lua"
+    "adapter/tcp_logic_codec.json",
+    "adapter/errors.json"
   ],
   "rampUp": {
     "stages": [
@@ -902,8 +903,8 @@ func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment)
       battle.lua
       heartbeat.lua
     adapter/
-      codec.lua
-      error.lua        (可选)
+      tcp_logic_codec.json
+      errors.json        (可选)
 ```
 
 任务结束（completed / stopped / failed）后立即删除整个目录。
@@ -1043,7 +1044,6 @@ type Config struct {
 | `MaxBots` | int | `5000` | |
 | `AppVersion` | string | `"dev"` | |
 | `TaskWorkDir` | string | `os.TempDir()` | 任务临时目录根 |
-| `AdapterScript` | string | `"conf/adapter/codec.lua"` | 默认适配器脚本路径 |
 | `StressInterval` | Duration | `5s` | |
 | `SystemInterval` | Duration | = StressInterval | 与压测指标同步 |
 | `HBInterval` | Duration | `10s` | |
@@ -1417,7 +1417,7 @@ func CollectStaticInfo() StaticInfo
 | `agent.systemInterval` | = `stressInterval` | 独立参数合并，与压测指标同步上报 |
 | `agent.heartbeatFailInterval` | = `hbInterval` | 独立参数合并，失败重试用相同间隔 |
 | `agent.taskWorkDir` | 硬编码 `os.TempDir()` | 未暴露为配置项 |
-| `agent.adapterScript` | 硬编码 `"conf/adapter/codec.lua"` | 未暴露为配置项 |
+| codec resolver | 任务下发的 `adapter/*_codec.json` + `errors.json` | 不再暴露单脚本配置项 |
 
 ### 14.5 未实现：多任务并发
 
@@ -1439,7 +1439,7 @@ func CollectStaticInfo() StaticInfo
 | `OnStageReset` 回调 | 渐进式加压阶段重置时上报阶段指标 |
 | `Daemon` 模式 | `-d` 标志或配置 `"daemon": true` 启动守护进程 |
 | `StateExtra` 注入 | 任务下发时注入额外状态键值对到每个 Robot |
-| `error.lua` 可选加载 | 适配器支持可选的错误码映射 Lua 脚本 |
+| `errors.json` 可选加载 | 适配器支持共享错误码映射 JSON |
 | `Duration` 运行时长 | 单机模式支持配置运行时长（如 `"10m"`） |
 
 ## 15. 与 Admin 的协议契约

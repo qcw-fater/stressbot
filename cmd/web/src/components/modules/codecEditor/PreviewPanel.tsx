@@ -9,7 +9,7 @@
  *     按钮带 loading 态，用户感知「正在跑」。
  *   - **错误双通道**：PreviewResult.error 非空（schema 编译失败 / 坏 hex 等，HTTP 200）
  *     → Alert 中文展示；previewCodec 自身抛错（网络 / 非 2xx）→ catch Alert 中文「预览失败：…」。
- *   - **纯编辑辅助**：不落 IDB、不改 baseline、不进任务下发（不调任何 set* / save）。
+ *   - **纯编辑辅助**：不落本地存储、不改 baseline、不进任务下发（不调任何 set* / save）。
  *   - **schema 非法仍允许预览**——后端会回填中文 error，用户据此修 schema。
  *   - **请求收拢 services**：走 `services/codecApi.ts` 的 `previewCodec`，不直接 fetch。
  *

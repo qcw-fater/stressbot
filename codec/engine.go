@@ -1,20 +1,18 @@
-// Package codec — encode 引擎执行层（T1.4）。
+// Package codec 提供声明式 codec 的 encode/decode 执行层。
 //
-// 本文件（engine.go）在 T1.3 编译产物 *SchemaCodec 上追加 **encode 执行方法**
-// 与**只读帧访问器**。同包跨文件加方法，合法。本任务**不含 decode**（T1.5）与
-// adapter.NewSchemaAdapter 包装（T1.5）。
+// 本文件在编译产物 *SchemaCodec 上实现帧访问、路由键计算、TCP/UDP encode/decode。
 //
-// 核心契约（与 T1.4 brief 逐字对齐）：
-//   - **逐字节对拍 conf/adapter/codec.lua**（经旧 LuaAdapter）为唯一验收标准。
+// 迁移/回归契约：Go SchemaCodec 在既有协议样例上需与旧 conf/adapter/codec.lua oracle
+// 字节级对拍；生产输入为声明式 *_codec.json。
 //   - encode 管线按 c.steps 正序执行：compress（onlySmaller 先压后判）→ encrypt（guards/minBodyLen/requireKey）。
 //   - bcc = xor8(body[encOffset:])（UDP 排除前 11 明文字节）—— encrypt 步 produces 的 ciphered region。
 //   - 头部整体零初始化：make([]byte, headerSize) 后只写字段；未写字节恒 0；
 //     checksumOut 引用的 step 未执行时写 0。
-//   - 多字节字段按 endian 写；数值路由字段 math.Floor 后取整（对齐 codec.lua）。
+//   - 多字节字段按 endian 写；数值路由字段 math.Floor 后取整（对齐旧 oracle）。
 //
 // 设计说明：
 //   - EncodeTCP / EncodeUDP 共用同一 encode 内部函数（codec 单 transport；方向已固化在各
-//     encrypt step 的 encOffset）。两者并存仅为满足将来 adapter.Adapter 接口（9 方法）。
+//     encrypt step 的 encOffset）。两者并存用于满足当前 adapter.Adapter 接口（9 方法）。
 //   - 热路径零 schema 解析、零字符串查表（编译期已全部预解析为索引/掩码/实现）。
 //   - 不 import gopher-lua。
 package codec
@@ -290,14 +288,14 @@ func keySatisfies(step *compiledStep, key []byte) bool {
 
 // keyLenSatisfied 判定 key 长度是否满足 step 的 keyLen 要求。
 //
-// T1.5 修复：从 compiledStep.keyLen（编译期由 PipelineStep.KeyLen 填充）读取，
-// 替换 T1.4 硬编码的 `len(key)==32`。
+// 从 compiledStep.keyLen（编译期由 PipelineStep.KeyLen 填充）读取，
+// 替换早期固定 `len(key)==32` 的假设。
 //   - step.keyLen == 0：不校验长度（仅 requireKey 看存在性）。
 //   - step.keyLen > 0：要求 len(key) >= step.keyLen（与 codec.lua `#secret_key == 32`
 //     等价；用 >= 兼容变长 key 算法，xor_carry_rol schema 声明 keyLen=32）。
 //
-// 现协议（xor_carry_rol, keyLen=32）行为与 T1.4 一致，对拍不回归；
-// 非默认 schema（如 aes_ecb keyLen=16）现可正确触发加密分支。
+// 现协议（xor_carry_rol, keyLen=32）行为与旧 oracle 一致，对拍不回归；
+// 非默认 schema（如 aes_ecb keyLen=16）也可正确触发加密分支。
 func keyLenSatisfied(step *compiledStep, key []byte) bool {
 	if step.keyLen <= 0 {
 		return true // schema 未声明 keyLen，不校验
@@ -453,7 +451,7 @@ func stashSingleBytes(stash map[int]map[string]uint64, stepIdx int, step *compil
 // v1 现协议不用；正确实现以备未来扩展。
 func (c *SchemaCodec) regionForOver(step *compiledStep, work, bodyPlain, header []byte) []byte {
 	// 现协议 schema 的独立 checksum 步无 Over 字段（nil），返回 work 作为安全默认。
-	// Over 的真正解析需要编译期存 step.over；T1.3 未存。这里保守返回 work。
+	// Over 的真正解析需要编译期存 step.over；当前 schema 未用到。这里保守返回 work。
 	return work
 }
 

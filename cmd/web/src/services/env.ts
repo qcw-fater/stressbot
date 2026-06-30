@@ -6,7 +6,7 @@
 
 import type { LogLevel, RobotConfig } from '@/types/api';
 
-/** Admin API 前缀，所有后端接口走这个前缀 */
+/** 服务器 API 前缀，所有后端接口走这个前缀 */
 export const API_PREFIX: string = import.meta.env.VITE_API_PREFIX || '/sbot';
 
 /** 基线资源读取前缀（proto/scripts/adapter/flow/config） */

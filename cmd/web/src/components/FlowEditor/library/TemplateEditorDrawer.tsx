@@ -1,5 +1,5 @@
 /**
- * 模板编辑器（独立 Drawer）：直接编辑 IndexedDB 中的模板本体（不触碰 flow.actions/listens）。
+ * 模板编辑器（独立 Drawer）：直接编辑本地模板库中的模板本体（不触碰 flow.actions/listens）。
  *
  * 触发：在 NodePalette 中双击模板，或右键菜单选择「编辑模板」。
  *
@@ -7,7 +7,7 @@
  *   - action 模板：PatternSelector + DeclarativeForm / LuaForm
  *   - listen 模板：Tabs(silent / declarative / lua)
  *
- * 保存：updateActionTemplate / updateListenTemplate，写回 IndexedDB 并广播 template-change。
+ * 保存：updateActionTemplate / updateListenTemplate，写回本地模板库并广播 template-change。
  */
 
 import { useEffect, useState } from 'react';

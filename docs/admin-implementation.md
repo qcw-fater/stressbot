@@ -132,17 +132,17 @@ const (
 
 ```go
 type TaskConfig struct {
-    FlowJSON        json.RawMessage `json:"flowJson"`               // flow.json 原始内容
-    ProtoFiles      map[string][]byte `json:"protoFiles,omitempty"` // 文件名 -> 内容
-    LuaScripts      map[string][]byte `json:"luaScripts,omitempty"` // 文件名 -> 内容
-    AdapterScript   []byte          `json:"adapterScript,omitempty"` // codec.lua
-    ErrorMapScript  []byte          `json:"errorMapScript,omitempty"` // error.lua
-    RobotConfig     RobotConfig     `json:"robotConfig"`             // 运行时配置
-    Deadline        *time.Time      `json:"deadline,omitempty"`      // 任务截止时间
+    FlowJSON    json.RawMessage   `json:"flowJson"`           // flow.json 原始内容
+    ProtoFiles  map[string][]byte `json:"protoFiles,omitempty"` // 文件名 -> 内容
+    LuaScripts  map[string][]byte `json:"luaScripts,omitempty"` // 文件名 -> 内容
+    Codecs      map[string][]byte `json:"codecs,omitempty"`   // *_codec.json 文件名 -> 内容
+    ErrorMap    []byte            `json:"errorMap,omitempty"` // errors.json 内容
+    RobotConfig RobotConfig       `json:"robotConfig"`        // 运行时配置
+    Deadline    *time.Time        `json:"deadline,omitempty"` // 任务截止时间
 }
 ```
 
-**与计划的差异**：新增 `AdapterScript`（codec.lua 内容）和 `ErrorMapScript`（error.lua 内容）字段。
+**与计划的差异**：协议适配资源已改为 `Codecs`（多份 `*_codec.json`）+ `ErrorMap`（共享 `errors.json`）。
 
 ### 3.5 RobotConfig
 
@@ -963,8 +963,8 @@ AdminServer 注册了 `onAgentStatusChange` 回调，当 Agent 状态变更时�
 | `GET` | `/sbot/baseline/proto/{name}` | `handleBaselineProtoFile` | 下载 proto 文件 |
 | `GET` | `/sbot/baseline/scripts/index.json` | `handleBaselineScriptIndex` | 列出 Lua 脚本 |
 | `GET` | `/sbot/baseline/scripts/{name}` | `handleBaselineScriptFile` | 下载 Lua 脚本 |
-| `GET` | `/sbot/baseline/adapter/codec.lua` | `handleBaselineAdapter` | 下载 codec.lua |
-| `GET` | `/sbot/baseline/adapter/error.lua` | `handleBaselineErrorMap` | 下载 error.lua |
+| `GET` | `/sbot/baseline/adapter/index.json` | `handleBaselineCodecIndex` | 列出 adapter 基线文件 |
+| `GET` | `/sbot/baseline/adapter/{name}` | `handleBaselineCodecFile` | 下载指定 codec/errors 文件 |
 | `GET` | `/sbot/baseline/flow/flow.json` | `handleBaselineFlow` | 下载 flow.json |
 | `GET` | `/sbot/baseline/config.json` | `handleBaselineConfig` | 下载 config.json |
 
@@ -1395,7 +1395,7 @@ go build -o admin.exe ./cmd/admin -ldflags "-X main.Version=v1.0.0"
 | 新增表 | 5 张 | 7 张（新增 task_agent_events） | Agent 状态变化事件追踪 |
 | StageReports | 无 | 有 | 渐进式加压阶段完成报告 |
 | AgentEvents | 无 | 有 | 任务期间 Agent 状态变化事件 |
-| TaskConfig.AdapterScript/ErrorMapScript | 无 | 有 | 协议适配器和错误映射脚本上传 |
+| TaskConfig.Codecs/ErrorMap | 无 | 有 | 声明式 codec 与错误码映射上传 |
 | TaskAssignment 字段 | 简化 | 完整（含 ConfigURL/ConfigFiles/RampUp） | Agent 配置下载机制 |
 | Sampler interval 配置 | 从 config 读取 | 硬编码 10s | 简化实现 |
 | PruneRunAt 配置 | HH:MM 格式 | 固定 24h 间隔 | 简化实现 |
@@ -1499,7 +1499,7 @@ defer func() {
 - flow.json 为必需文件
 - proto 文件：字段名前缀 `proto/` 或 `proto`
 - lua 脚本：字段名前缀 `scripts/` 或 `scripts`
-- adapter/codec.lua 和 adapter/error.lua 可选
+- adapter 下接收多份 `*_codec.json`，`errors.json` 可选
 - rampUp 校验：stages count 之和必须等于 totalBots
 - 自动将上传资源写入磁盘基线目录（`conf/`），使前端下次同步时 IDB 与基线一致
 

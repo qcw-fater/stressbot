@@ -1,14 +1,13 @@
 /**
- * routeKeyResolver 单测：computeRouteKey 纯函数 + loadRouteKeyTemplates（mock IDB）。
+ * routeKeyResolver 单测：computeRouteKey 纯函数 + loadRouteKeyTemplates（mock 本地存储）。
  *
- * T3 Batch-4 任务 B（§3.7）：routeKey 从「总伪 JSON 排序」升级为
- * 「codec.json routeKeyTemplate 代入 route 字段值」的真实计算。
+ * routeKey 使用协议配置的 routeKeyTemplate 代入 route 字段值计算。
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { computeRouteKey, pseudoRouteKey, loadRouteKeyTemplates } from './routeKeyResolver';
 
-// 隔离 resourcesStore 的 listCodecFiles / codecFileNameToConnName，避免触碰真实 IDB。
+// 隔离 resourcesStore 的 listCodecFiles / codecFileNameToConnName，避免触碰真实本地数据库。
 vi.mock('@/services/resourcesStore', () => ({
   listCodecFiles: vi.fn(),
 }));

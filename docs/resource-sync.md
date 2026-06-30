@@ -45,7 +45,7 @@ stressbot 的 proto / lua / adapter 等资源，存在两份副本：
 |-------|------|
 | `stressbot-resources-proto` | 所有 `.proto` 文件 |
 | `stressbot-resources-scripts` | 所有 `.lua` 脚本 |
-| `stressbot-resources-adapter` | `codec.lua` + `error.lua` |
+| `stressbot-resources-adapter` | 多份 `*_codec.json` + 共享 `errors.json` |
 
 每个文件的数据结构（`[cmd/web/src/services/resourcesStore.ts](../cmd/web/src/services/resourcesStore.ts)`）：
 
@@ -85,7 +85,7 @@ interface ResourceFile {
 | 写入函数 | 场景 | baseHash 取值 |
 |----------|------|---------------|
 | `serverResourceFile`（`addProtoFromBaseline` 等） | 从基线拉回 / 采用服务器版本写入本地 | 服务器内容哈希 |
-| `localResourceFile`（`addProto` / `addScript` / `setAdapterScript` 等） | 用户本地新增 / 编辑 | 沿用 previous 的 baseHash（无则 `null`） |
+| `localResourceFile`（`addProto` / `addScript` / `setCodecSchema` 等） | 用户本地新增 / 编辑 | 沿用 previous 的 baseHash（无则 `null`） |
 | `markResourcesAsBaselineSynced` | 启动任务提交成功后 | 刚提交内容的哈希 |
 | `setResourceBaseHash` | reconcile 内部修正（legacyRepair / 冲突解决保留本地） | 视场景而定 |
 
@@ -104,7 +104,7 @@ interface ResourceFile {
 
 | 触发点 | 行为 | 文件 |
 |--------|------|------|
-| 页面加载 / 刷新 | **不拉取**；仅做适配器必需函数校验 `validateAdapter` | `[cmd/web/src/components/FlowEditor/index.tsx](../cmd/web/src/components/FlowEditor/index.tsx)` |
+| 页面加载 / 刷新 | **不拉取**；仅使用本地资源状态 | `[cmd/web/src/components/FlowEditor/index.tsx](../cmd/web/src/components/FlowEditor/index.tsx)` |
 | 加载 / 导入 flow | 仅做脚本 gap-fill（见 §6），**不做全量基线对比** | `[cmd/web/src/components/FlowEditor/panels/Toolbar.tsx](../cmd/web/src/components/FlowEditor/panels/Toolbar.tsx)` |
 | 点击「拉取」按钮 | `syncResourcesFromBaseline()`，冲突弹 `BaselineSyncModal` | `[cmd/web/src/components/modules/ResourcesDrawer.tsx](../cmd/web/src/components/modules/ResourcesDrawer.tsx)` |
 | 启动任务 | `createTask` 上传配置 → 后端 `writeBaselineFiles` 写盘提交 | `[cmd/web/src/services/taskActions.ts](../cmd/web/src/services/taskActions.ts)` |
@@ -119,9 +119,9 @@ interface ResourceFile {
 「资源管理」面板顶部的「拉取」按钮调用 `syncResourcesFromBaseline()`：
 
 ```
-fetch proto/index.json + scripts/index.json + adapter/codec.lua + adapter/error.lua
-  → 对 proto / scripts 分组做 syncFileGroup
-  → 对 codec.lua / error.lua 单独 reconcile
+fetch proto/index.json + scripts/index.json + adapter/index.json + adapter/{name}
+  → 对 proto / scripts / adapter 分组做 syncFileGroup
+  → 对 errors.json 单独按 adapter 资源 reconcile
   → 汇总 BaselineSyncResult { added, unchanged, conflicts, removed }
 ```
 
@@ -207,8 +207,8 @@ localHash == serverHash ?
 
 1. 校验 flow（`validateFlow`），有 error 直接拒绝。
 2. `syncFlowScriptsToIdb` gap-fill，仍缺失脚本则抛错。
-3. 收集 IDB 资源：全量 proto、flow 引用到的 lua（`usedScripts`）、`codec.lua`、`error.lua`。
-4. 组装 multipart（`flow.json` + `proto/<n>` + `scripts/<n>` + `adapter/codec.lua` + `adapter/error.lua`）。
+3. 收集 IDB 资源：全量 proto、flow 引用到的 lua（`usedScripts`）、全部 `*_codec.json`、`errors.json`。
+4. 组装 multipart（`flow.json` + `proto/<n>` + `scripts/<n>` + `adapter/<codec>` + `adapter/errors.json`）。
 5. `POST /sbot/tasks` 创建任务；成功后立即 `markResourcesAsBaselineSynced` 把上传内容的哈希写为新的 `baseHash`，避免下次误报冲突。
 6. `POST /sbot/tasks/{id}/start` 启动。
 
@@ -252,8 +252,8 @@ handleSubmit
 | `GET /sbot/baseline/proto/{name}` | 指定 proto 内容 |
 | `GET /sbot/baseline/scripts/index.json` | lua 脚本名列表 |
 | `GET /sbot/baseline/scripts/{name}` | 指定脚本内容 |
-| `GET /sbot/baseline/adapter/codec.lua` | 适配器内容 |
-| `GET /sbot/baseline/adapter/error.lua` | 错误码映射内容 |
+| `GET /sbot/baseline/adapter/index.json` | adapter 文件名列表 |
+| `GET /sbot/baseline/adapter/{name}` | 指定 codec/errors 文件内容 |
 | `GET /sbot/baseline/flow/flow.json` | 基线流程 |
 | `GET /sbot/baseline/config.json` | 基线运行配置 |
 

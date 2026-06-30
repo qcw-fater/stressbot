@@ -1,8 +1,8 @@
 /**
- * T3 Batch-1 任务 A — 多 codec 存储 + baseline 封装单测。
+ * 多 codec 存储 + baseline 封装单测。
  *
- * Node 环境无 IndexedDB，mock idb-keyval 为内存 Map（保留 createStore 句柄，但不实际打开 IDB）。
- * 新 codec 文件 key 形如 `<proto>_<service>_codec.json`，与旧 `codec.lua`/`error.lua` 不冲突。
+ * Node 环境无浏览器本地数据库，mock idb-keyval 为内存 Map（保留 createStore 句柄，但不实际打开数据库）。
+ * 新 codec 文件 key 形如 `<protocol>_<service>_codec.json`，errors.json 单独存储。
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

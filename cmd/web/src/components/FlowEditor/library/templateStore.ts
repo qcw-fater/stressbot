@@ -1,5 +1,5 @@
 /**
- * IndexedDB 模板库（idb-keyval 实现）：
+ * 本地模板库（idb-keyval 实现）：
  *   - actions/{id}     ActionTemplate
  *   - listens/{id}     ListenTemplate
  *
@@ -16,7 +16,7 @@ export interface ListenTemplateDefaultRef {
   route: unknown;
 }
 
-// idb-keyval 的 createStore 在同一 DB 名下只能注册一个 objectStore（IndexedDB 限制）。
+// idb-keyval 的 createStore 在同一 DB 名下只能注册一个 objectStore（浏览器本地数据库限制）。
 // 用两个独立 DB 隔离 action / listen 模板，避免 NotFoundError。
 const actionStore = createStore('stressbot-action-templates', 'data');
 const listenStore = createStore('stressbot-listen-templates', 'data');

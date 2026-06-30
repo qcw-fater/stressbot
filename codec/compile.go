@@ -1,17 +1,17 @@
 // Package codec — 编译层：schema → 不可变编译产物 SchemaCodec。
 //
 // 本文件（compile.go）只负责编译，不实现 encode/decode/BodyLength/ExpectedRouteKey
-// 执行逻辑（T1.4/T1.5 在 engine.go 中以同包方法形式追加）。
+// 执行逻辑；运行时执行逻辑在 engine.go 中以同包方法形式实现。
 //
-// 编译期完成所有「字符串 → 索引/掩码/实现」预解析，使热路径（T1.4/T1.5）不再查注册表、
-// 不再做字符串解析。算法存在性校验在本任务首次落地（T1.1 刻意推迟）。
+// 编译期完成所有「字符串 → 索引/掩码/实现」预解析，使热路径不再查注册表、
+// 不再做字符串解析。算法存在性也在编译期校验。
 //
-// 设计契约（与 plans/declarative-codec 总纲 §3.1.4 / T1.3 brief 对齐）：
+// 设计契约：
 //   - SchemaCodec 构造后只读、无可变状态（invariant 2：无锁并发安全）。
 //   - 缺算法 / 悬空引用 → 编译期 fail loud（中文信息，带 step/field/算法名）。
 //   - 不 import gopher-lua；不改 T1.1/T1.2 文件。
 //   - onlySmaller（compress「仅当变小才采用」）无法在编译期或 applies() 预判——
-//     取决于 encode 时压缩后的实际字节数；它仅在 T1.4 encode 的 compress 步内处理，
+//     取决于 encode 时压缩后的实际字节数；它仅在 encode 的 compress 步内处理，
 //     applies() 不引用。
 package codec
 
@@ -271,8 +271,8 @@ type compiledStep struct {
 	produces   []compiledProduce
 	onError    onErrorPolicy
 	name       string
-	params     map[string]any // 来自 PipelineStep.Params（透传给算法 impl；T1.5 修复 T1.4 漏存）
-	keyLen     int            // 来自 PipelineStep.KeyLen（encrypt key 长度要求；0 表示不校验；T1.5 修复）
+	params     map[string]any // 来自 PipelineStep.Params，透传给算法 impl
+	keyLen     int            // 来自 PipelineStep.KeyLen（encrypt key 长度要求；0 表示不校验）
 }
 
 // compiledProduce 是某 step 声明的派生产物（如 bcc）。
@@ -291,11 +291,11 @@ type compiledProduce struct {
 //
 // onlySmaller（compress「仅当变小才采用」）**无法在编译期或 applies() 预判**——
 // 它取决于 encode 时压缩后的实际字节数。因此 onlySmaller 不进 applies()，
-// 仅在 T1.4 encode 的 compress 步内「先压缩、比对大小、变小才采用并置 flag」专门处理。
+// 仅在 encode 的 compress 步内「先压缩、比对大小、变小才采用并置 flag」专门处理。
 type compiledWhen struct {
 	enabled        bool // 无 When 时为「无条件」（applies 总返回 true）
 	minBodyLen     int
-	onlySmaller    bool // 仅 compress；applies() 不引用，仅 T1.4 encode 步内使用
+	onlySmaller    bool // 仅 compress；applies() 不引用，仅 encode 步内使用
 	requireKey     bool
 	appliesWithIdx int // -1 无；指向依赖 step 的下标
 	guards         []compiledGuard
@@ -316,7 +316,7 @@ type compiledGuard struct {
 //   - hasKey：调用方是否持有本 step 的 key（requireKey 用）。
 //   - route：route 字段名 → 当前取值（guards 用，可为 nil）。
 //
-// onlySmaller（compress 变小才采用）由 T1.4 encode 步内处理，本函数不参与。
+// onlySmaller（compress 变小才采用）由 encode 步内处理，本函数不参与。
 func (w *compiledWhen) applies(bodyLen int, hasKey bool, route map[string]any) bool {
 	if !w.enabled {
 		return true // 无条件
@@ -332,7 +332,7 @@ func (w *compiledWhen) applies(bodyLen int, hasKey bool, route map[string]any) b
 			return false
 		}
 	}
-	// appliesWith 依赖（前置 step 是否生效）由 T1.4 在调用 applies 前自行串行判断
+	// appliesWith 依赖（前置 step 是否生效）由调用方在调用 applies 前自行串行判断
 	// （需要前一步的判定结果），这里不重复实现——appliesWithIdx 仅作预解析下标。
 	return true
 }
@@ -341,7 +341,7 @@ func (w *compiledWhen) applies(bodyLen int, hasKey bool, route map[string]any) b
 func (g *compiledGuard) satisfied(route map[string]any) bool {
 	if route == nil {
 		// 无 route 上下文：保守视为不满足（guard 无法求值）。
-		// T1.4 encode 总会传入 route。
+		// encode 总会传入 route。
 		return false
 	}
 	// guard.fieldIdx 指向 compiledField；但本函数只有 route map（字段名→值），
@@ -426,7 +426,7 @@ func (c *SchemaCodec) HeaderSize() int { return c.headerSize }
 
 // NewSchemaCodec 把已 Load 的 *CodecSchema 一次性编译成不可变的 *SchemaCodec。
 //
-// 编译步骤（与 T1.3 brief「编译期必须完成的预解析」逐条对应）：
+// 编译步骤：
 //  1. 调 schema.Validate()；失败直接返回其 error。
 //  2. 解析 EndianDefault、frame 布局。
 //  3. 收集 lengthField（role:"length"）与其它 fields；解析 endian/kind/role。
@@ -651,8 +651,8 @@ func compileStep(st *PipelineStep, flagMaskByName map[string]uint64, routeFieldI
 		op:      op,
 		name:    st.Name,
 		onError: parseOnError(st.OnError),
-		params:  st.Params, // T1.5：透传给算法 impl（修复 T1.4 漏存导致 rol 等参数丢失）
-		keyLen:  st.KeyLen, // T1.5：encrypt key 长度要求（修复 T1.4 漏存导致硬编码 32）
+		params:  st.Params, // 透传给算法 impl
+		keyLen:  st.KeyLen, // encrypt key 长度要求（0 表示不校验）
 	}
 
 	// flagMask：step.Flag → mask。

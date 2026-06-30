@@ -242,8 +242,8 @@ agent/
 | `GET` | `/sbot/baseline/proto/{name}` | 下载基线 proto 文件 |
 | `GET` | `/sbot/baseline/scripts/index.json` | 列出基线脚本文件 |
 | `GET` | `/sbot/baseline/scripts/{name}` | 下载基线脚本文件 |
-| `GET` | `/sbot/baseline/adapter/codec.lua` | 下载基线适配器 |
-| `GET` | `/sbot/baseline/adapter/error.lua` | 下载基线错误映射 |
+| `GET` | `/sbot/baseline/adapter/index.json` | 列出基线 adapter 文件 |
+| `GET` | `/sbot/baseline/adapter/{name}` | 下载指定 codec/errors 文件 |
 | `GET` | `/sbot/baseline/flow/flow.json` | 下载基线 flow 配置 |
 | `GET` | `/sbot/baseline/config.json` | 下载基线运行配置 |
 | `GET` | `/sbot/api/error-codes` | 列出所有错误码 |
@@ -319,13 +319,13 @@ func IsActiveState(s TaskState) bool {
 
 ```go
 type TaskConfig struct {
-    FlowJSON        json.RawMessage   `json:"flowJson"`
-    ProtoFiles      map[string][]byte `json:"protoFiles,omitempty"`
-    LuaScripts      map[string][]byte `json:"luaScripts,omitempty"`
-    AdapterScript   []byte            `json:"adapterScript,omitempty"`    // codec.lua
-    ErrorMapScript  []byte            `json:"errorMapScript,omitempty"`   // error.lua
-    RobotConfig     RobotConfig       `json:"robotConfig"`
-    Deadline        *time.Time        `json:"deadline,omitempty"`
+    FlowJSON    json.RawMessage   `json:"flowJson"`
+    ProtoFiles  map[string][]byte `json:"protoFiles,omitempty"`
+    LuaScripts  map[string][]byte `json:"luaScripts,omitempty"`
+    Codecs      map[string][]byte `json:"codecs,omitempty"`   // *_codec.json
+    ErrorMap    []byte            `json:"errorMap,omitempty"` // errors.json
+    RobotConfig RobotConfig       `json:"robotConfig"`
+    Deadline    *time.Time        `json:"deadline,omitempty"`
 }
 ```
 
@@ -879,7 +879,6 @@ type ResolvedConfig struct {
     MaxBots              int           // 最大机器人数量
     AppVersion           string
     TaskWorkDir          string        // 系统临时目录
-    AdapterScript        string        // "conf/adapter/codec.lua"
     StressInterval       time.Duration // 压测上报间隔
     SystemInterval       time.Duration // 系统上报间隔（与 StressInterval 同步）
     HBInterval           time.Duration // 心跳间隔

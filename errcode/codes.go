@@ -13,7 +13,7 @@ const (
 	ErrActionCanceled ErrorCode = 6 // 等待期间连接被本地主动关闭（任务停止 / robot.Stop / 业务 Close）
 
 	// 协议层 (11-20)
-	ErrEncodeFailed ErrorCode = 11 // codec.lua 编码返回 nil
+	ErrEncodeFailed ErrorCode = 11 // Adapter 编码返回 nil
 	ErrParseFailed  ErrorCode = 12 // S2C proto 解析失败
 
 	// 构建层 (21-30)

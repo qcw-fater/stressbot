@@ -59,13 +59,13 @@ type PprofConfig struct {
 
 // Config 全局配置结构。
 type Config struct {
-	Log        *stresslog.Config         `json:"log"`
-	Monitor    *monitor.CollectorConfig  `json:"monitor"`   // nil = 不启用监控
-	Pprof      *PprofConfig              `json:"pprof"`      // nil = 不启用 pprof
-	Standalone *StandaloneConfig         `json:"standalone"` // nil = 非单机模式
-	Agent      agent.Config              `json:"agent"`
-	Redis      *sharedstate.RedisConfig  `json:"redis"` // nil = 未配置 Redis
-	Daemon     bool                      `json:"daemon"` // 以守护进程模式运行（仅 Linux）
+	Log        *stresslog.Config        `json:"log"`
+	Monitor    *monitor.CollectorConfig `json:"monitor"`    // nil = 不启用监控
+	Pprof      *PprofConfig             `json:"pprof"`      // nil = 不启用 pprof
+	Standalone *StandaloneConfig        `json:"standalone"` // nil = 非单机模式
+	Agent      agent.Config             `json:"agent"`
+	Redis      *sharedstate.RedisConfig `json:"redis"`  // nil = 未配置 Redis
+	Daemon     bool                     `json:"daemon"` // 以守护进程模式运行（仅 Linux）
 }
 
 func main() {
@@ -193,9 +193,9 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 		zap.String("scripts", paths.Scripts),
 		zap.String("adapter", paths.Adapter))
 
-	// T2-C2-Lua：构造 CodecResolver（全 codec 路径 Go SchemaAdapter）。
-	// 扫 paths.Adapter 下 *_codec.json 推断「server 串 → 文件名」映射，再 LoadCodecResolver 编译。
-	// 业务 encode/decode/dial/心跳/listen/Lua 全走 resolver，生产路径不再构造 Lua 适配器。
+	// 构造生产 CodecResolver：扫描 adapter 目录下 *_codec.json 推断「server 串 → 文件名」映射。
+	// 再加载共享 errors.json 并编译为 Go SchemaAdapter。
+	// 业务 encode/decode/dial/心跳/listen/Lua 网络 API 均走 resolver，生产路径不构造 LuaAdapter。
 	codecMap, err := adapter.InferCodecMap(paths.Adapter)
 	if err != nil {
 		stresslog.Fatal("推断 codec 映射失败", zap.String("dir", paths.Adapter), zap.Error(err))

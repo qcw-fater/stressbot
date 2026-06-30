@@ -2,7 +2,7 @@
  * 流程模板库 API 封装（对应后端 /sbot/flows CRUD）。
  *
  * 流程模板保存在服务器 MySQL，前端流程管理（flowManagerStore）经此模块读写，
- * 不再使用浏览器 IndexedDB。服务器未配置 MySQL 时接口返回 FLOW_LIBRARY_DISABLED，
+ * 不再使用浏览器本地存储。服务器未配置 MySQL 时接口返回 FLOW_LIBRARY_DISABLED，
  * 由调用方（flowManagerStore）翻译为用户可理解的提示。
  */
 import type { FlowJson } from '@/components/FlowEditor/codec/flowToJson';

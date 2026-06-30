@@ -92,7 +92,7 @@ func (s *AdminServer) registerRoutes() http.Handler {
 	mux.HandleFunc("GET /sbot/baseline/proto/{name}", s.handleBaselineProtoFile)
 	mux.HandleFunc("GET /sbot/baseline/scripts/index.json", s.handleBaselineScriptIndex)
 	mux.HandleFunc("GET /sbot/baseline/scripts/{name}", s.handleBaselineScriptFile)
-	// T4.3：adapter 基线改为按文件名透传（支持多 *_codec.json + errors.json）。
+	// adapter 基线按文件名透传（支持多 *_codec.json + errors.json）。
 	mux.HandleFunc("GET /sbot/baseline/adapter/index.json", s.handleBaselineCodecIndex)
 	mux.HandleFunc("GET /sbot/baseline/adapter/{name}", s.handleBaselineCodecFile)
 	mux.HandleFunc("GET /sbot/baseline/flow/flow.json", s.handleBaselineFlow)
@@ -486,7 +486,7 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 声明式 codec（每连接一份 adapter/*_codec.json，T4.3）+ 共享 adapter/errors.json。
+	// 声明式 codec（每连接一份 adapter/*_codec.json）+ 共享 adapter/errors.json。
 	// 按 form field 名收集：field 形如 adapter/<basename>.json，basename 作为 Codecs key。
 	// errors.json 单独落到 cfg.ErrorMap。
 	cfg.Codecs = make(map[string][]byte)
@@ -496,7 +496,7 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		}
 		name := strings.TrimPrefix(key, "adapter/")
 		if name == "" || name == "codec.lua" || name == "error.lua" {
-			// 旧字段（codec.lua/error.lua）已被多 codec 模型替代，admin 不再接收。
+			// 历史 Lua adapter 文件已被声明式 codec 模型替代，admin 不再接收。
 			continue
 		}
 		for _, fh := range files {
@@ -698,7 +698,7 @@ func (s *AdminServer) handleGetTaskConfig(w http.ResponseWriter, r *http.Request
 		w.Write(configJSON)
 
 	case "adapter/codec.lua", "adapter/error.lua":
-		// 旧字段产物：T4.3 起不再分发；返回 404。
+		// 历史 Lua adapter 文件不再分发。
 		http.NotFound(w, r)
 
 	default:
@@ -1540,7 +1540,7 @@ func (s *AdminServer) writeBaselineFiles(cfg *TaskConfig, flowData []byte) {
 				zap.Error(err))
 		}
 	}
-	// T4.3：每连接一份 *_codec.json + 共享 errors.json（替代旧的 codec.lua/error.lua）。
+	// 当前 adapter 分发格式：每连接一份 *_codec.json + 共享 errors.json。
 	for name, data := range cfg.Codecs {
 		if err := safeWriteFile("conf/adapter", name, data); err != nil {
 			stresslog.Warn("写入基线 codec 失败",
@@ -1557,7 +1557,7 @@ func (s *AdminServer) writeBaselineFiles(cfg *TaskConfig, flowData []byte) {
 }
 
 // buildConfigFiles 构建任务下发的配置文件清单（供分发逻辑与测试共用同一份规则）。
-// T4.3：adapter 下为各 *_codec.json + errors.json，不再列 codec.lua/error.lua。
+// adapter 下分发各 *_codec.json + errors.json，不列历史 codec.lua/error.lua。
 func buildConfigFiles(cfg *TaskConfig) []string {
 	var files []string
 	if cfg.FlowJSON != nil {
@@ -1630,7 +1630,7 @@ func (s *AdminServer) handleBaselineCodecIndex(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, files)
 }
 
-// handleBaselineCodecFile 提供 adapter 基线目录下的单个 codec/errors 文件（T4.3）。
+// handleBaselineCodecFile 提供 adapter 基线目录下的单个 codec/errors 文件。
 // 路径形如 /sbot/baseline/adapter/{name}，name = tcp_logic_codec.json / errors.json 等。
 func (s *AdminServer) handleBaselineCodecFile(w http.ResponseWriter, r *http.Request) {
 	serveBaselineFile(w, r, "conf/adapter", "name")

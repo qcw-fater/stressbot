@@ -2,7 +2,7 @@
  * 流程模板库前端存取（后端 MySQL，经 services/flowsApi）。
  *
  * 保留 saveFlow/getFlow/listFlows/renameFlow/deleteFlow 函数形态，使 FlowManagerModal
- * 逻辑改动最小；底层从浏览器 IndexedDB 切换到服务器流程模板库。
+ * 逻辑改动最小；底层从浏览器本地存储切换到服务器流程模板库。
  *
  * 流程模板只存 flow + layout，不内嵌 Lua/proto/adapter（资源走独立管理链路）。
  */

@@ -83,7 +83,7 @@ func loadNetworkModule(L *lua.LState) int {
 // ---------------------------------------------------------------------------
 
 // headerErrDetail 拼 HeaderErr 的 detail：优先经 CodecResolver 取服务端错误码描述，
-// 再附 service/route 上下文。描述缺失非致命——HeaderErr 错误码本身仍透传给 Lua。
+// 再附 service/route 上下文。描述缺失非致命——HeaderErr 错误码本身仍透传给调用方。
 func headerErrDetail(ctx *Context, service string, code uint64, service2, routeKey string) string {
 	detail := "service=" + service2 + " route=" + routeKey
 	desc := resolveDescribeError(ctx, "tcp:"+service, code)
@@ -96,14 +96,12 @@ func headerErrDetail(ctx *Context, service string, code uint64, service2, routeK
 	return detail
 }
 
-// resolveDescribeError 经 CodecResolver 取任一已知连接的 adapter 后 DescribeError。
+// resolveDescribeError 经 CodecResolver 取指定连接的 adapter 后 DescribeError。
 //
-// DescribeError codec 无关（共享 errors.json，全连接同源），故任一已声明的 server 命中即可；
-// Resolver nil 或所有 server 均未映射 → 返回空串（headerErr 描述是增强信息而非核心路径，
-// 缺失非致命——headerErr 错误码本身仍按 NewActionError 上抛，与 2-C2-Go 的 handleHeaderError
-// fail-loud 策略不对称是有意设计）。
+// Resolver nil、serverHint 为空或未命中时返回空串。headerErr 描述只是增强信息，
+// 缺失非致命：错误码本身仍会被构造成 ActionError 上抛；与 engine.handleHeaderError 一致。
 //
-// serverHint 建议传该 Robot 的主连接（如 "tcp:logic"），命中率高；空串时回退首声明的 server。
+// serverHint 建议传该 Robot 的主连接（如 "tcp:logic"），命中率高；当前 Resolver 不支持枚举全部 server。
 func resolveDescribeError(ctx *Context, serverHint string, code uint64) string {
 	if ctx == nil || ctx.Resolver == nil {
 		return ""
@@ -171,8 +169,8 @@ func extractNetArgs(L *lua.LState) (service string, route lua.LValue, msg proto.
 
 // buildPacket 构建完整 TCP 数据包。
 //
-// T2-C2-Lua 起走 CodecResolver：按 "tcp:"+service Resolve 出该连接的 Go SchemaAdapter 后
-// EncodeTCP（与 engine.ActionExecutor / 心跳 goBuilder 共享同一份 codec 映射，encode 双向一致）。
+// 走 CodecResolver：按 "tcp:"+service Resolve 出该连接的 Go SchemaAdapter 后 EncodeTCP
+// （与 engine.ActionExecutor / 心跳 goBuilder 共享同一份 codec 映射，encode 双向一致）。
 // Resolve nil（连接 codec 未映射）→ 返回 nil，调用方（doTCPRequest / networkTCPSend）fail loud
 // （ErrEncodeFailed，detail 带 service 串，不静默兜底）。
 func buildPacket(ctx *Context, service string, route lua.LValue, msgData []byte) []byte {
@@ -686,7 +684,7 @@ func networkUDPSend(L *lua.LState) int {
 		body = []byte(L.CheckString(3))
 	}
 
-	// T2-C2-Lua：encode 走 resolver.Resolve("udp:"+service) 出的 Go SchemaAdapter。
+	// encode 走 resolver.Resolve("udp:"+service) 出的 Go SchemaAdapter。
 	// Resolve nil → fail loud（ErrEncodeFailed，detail 带 service 串）。
 	adp := ctx.Resolver.Resolve("udp:" + service)
 	if adp == nil {
@@ -867,7 +865,7 @@ func networkTryListen(L *lua.LState, protocol string) int {
 	}
 
 	service := L.CheckString(1)
-	// T2-C2-Lua：routeKey 走 resolver.Resolve("<proto>:"+service) 出的 Go SchemaAdapter。
+	// routeKey 走 resolver.Resolve("<proto>:"+service) 出的 Go SchemaAdapter。
 	// Resolve nil → fail loud（与阻塞版 networkListen 一致；try_* 虽是 drain 原语，
 	// 但 routeKey 计算依赖 codec，缺 codec 必须暴露配置错误而非静默返回 timeout）。
 	adp := ctx.Resolver.Resolve(protocol + ":" + service)
@@ -1008,10 +1006,10 @@ func networkEnsureUDPListener(L *lua.LState) int {
 }
 
 // ---------------------------------------------------------------------------
-// adapter 模块（编解码适配器）已下线（T2-C2-Lua）
+// adapter 模块（编解码适配器）已下线
 // ---------------------------------------------------------------------------
 //
-// 历史 adapter Lua 模块曾暴露 codec 给业务脚本。T2-C2-Lua 起业务
-// encode/decode 全走 Go CodecResolver（ctx.Resolver.Resolve），
+// 历史 adapter Lua 模块曾暴露 codec 给业务脚本；现在业务 encode/decode
+// 全走 Go CodecResolver（ctx.Resolver.Resolve），
 // conf/scripts 经 grep 确认零依赖 adapter 模块，故整条 Lua 模块下线（registerAPIs 也同步
 // 删除 PreloadModule("adapter")），不再向业务 LState 注入适配器脚本。

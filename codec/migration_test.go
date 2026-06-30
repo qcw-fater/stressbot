@@ -1,9 +1,8 @@
-// Package codec_test — T1.6 迁移产物自验。
+// Package codec_test 校验声明式 codec 迁移产物。
 //
-// 验收对象：conf/adapter/ 下三份生产 codec.json + 共享 errors.json。
-// 不再使用 codec/testdata/ 下的 fixture（那是 T1.4/T1.5 的对拍 fixture），
-// 而是直接 LoadSchema/NewSchemaCodec 生产位置的 conf/adapter/*_codec.json，
-// 证明 T4 切换时实际加载的文件经引擎编译/验证通过。
+// 验收对象：conf/adapter/ 下三份生产 *_codec.json + 共享 errors.json。
+// 不再使用 codec/testdata/ 下的 fixture，而是直接 LoadSchema/NewSchemaCodec
+// 生产位置的 conf/adapter/*_codec.json，证明实际加载的文件经引擎编译/验证通过。
 //
 // 关于 encOffset/decOffset 断言：compiledStep.encOffset/decOffset 为未导出字段，
 // 本任务约束「不改 codec/ 或 adapter/ 代码」，故不为此加访问器。改为**行为级**断言——
@@ -265,7 +264,7 @@ func TestMigration_ErrorMap_Coverage(t *testing.T) {
 }
 
 // TestMigration_TCPLogic_ParityWithLuaAdapter 对生产 tcp_logic_codec.json
-// 跑一次 encode 字节级对拍（T1.4 的 fixture 已对拍过，这里证明**生产文件**同样字节一致）。
+// 跑一次 encode 字节级对拍，证明生产文件与旧 LuaAdapter oracle 字节一致。
 func TestMigration_TCPLogic_ParityWithLuaAdapter(t *testing.T) {
 	dir := findConfAdapterDir(t)
 	ut, _ := loadProdCodec(t, "tcp_logic_codec.json")

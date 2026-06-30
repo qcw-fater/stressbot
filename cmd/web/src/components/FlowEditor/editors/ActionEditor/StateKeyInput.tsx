@@ -5,7 +5,7 @@
  * 提供 AutoComplete 建议。选中后通过 onProtoResolved 回调返回对应的 s2cProto。
  *
  * Lua 脚本只加载 flow 图中实际引用的（actions/listens 中 script 字段），
- * 不扫描 IDB 中的全部脚本（模板库、资源列表中可能有未使用的脚本）。
+ * 不扫描本地存储中的全部脚本（模板库、资源列表中可能有未使用的脚本）。
  */
 
 import { AutoComplete, Space, Tag } from 'antd';

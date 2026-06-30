@@ -3,7 +3,7 @@
 // 本文件（registry.go）只负责：
 //   - 四张算法注册表（cipher / compressor / checksum / hasher）及其接口；
 //   - Register* / Lookup* helper；
-//   - 元数据导出（AlgoMeta / AlgoParam / Algorithms），供 T4 HTTP 接口与 T3 前端下拉使用。
+//   - 元数据导出（AlgoMeta / AlgoParam / Algorithms），供 HTTP 接口与前端下拉使用。
 //
 // 算法实现位于 ciphers.go / compressors.go / checksums.go / hashes.go，并在各自 init()
 // 阶段注册到本文件的四张表。运行期注册表只读：所有注册在 init 完成，查找在热路径。
@@ -11,7 +11,7 @@
 // 设计要点：
 //   - 注册表用 map + sync.RWMutex（读多写极少；init 后只读，但 RWMutex 仍保留以允
 //     许测试或未来扩展在不重启进程时增注册）。
-//   - 查找缺失返回 (nil, false)——由调用方（T1.3 编译层）fail loud，本层不 panic。
+//   - 查找缺失返回 (nil, false)——由编译层 fail loud，本层不 panic。
 //   - 不 import gopher-lua；与 adapter/ 完全解耦。
 package codec
 

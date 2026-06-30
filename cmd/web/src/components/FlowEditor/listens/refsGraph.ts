@@ -6,15 +6,14 @@
  *   - 重复注册检测：同一 (server, routeKey) 在不同 action 中绑了不同 listen
  *   - 孤儿 listen：引用计数为 0
  *
- * T3 Batch-4 任务 B（§3.7）：routeKey 从「总伪 JSON 排序」升级为
- * 「codec.json routeKeyTemplate 代入 route 字段值」的真实计算（server 感知）。
+ * routeKey 使用协议配置的 routeKeyTemplate 代入 route 字段值计算（server 感知）。
  *   - server 在 templates Map 有 template → computeRouteKey(template, route)；
  *   - server 无 codec → 伪 routeKey 降级，**收集到 missingCodecServers** 供
  *     refsCheck 显式产 ROUTEKEY_CODEC_MISSING warning（不静默伪 key）；
  *   - codec 有但 route 缺占位字段（computeRouteKey → null）→ 伪 routeKey 降级
  *     （flow 数据问题，不产 codec warning）。
  *
- * templates 经 routeKeyResolver 的模块级 cache 同步读取（调用方 sync，无法 await IDB）。
+ * templates 经 routeKeyResolver 的模块级 cache 同步读取（调用方 sync，无法 await 本地存储）。
  */
 
 import type { ListenRef, TaskFlow } from '@/types/flow';
@@ -47,7 +46,7 @@ export interface RefsGraph {
   refCount: Map<string, number>;
   /** 引用了不存在 listen 的悬空记录 */
   danglingRefs: RefRecord[];
-  /** 被 listenRefs 引用但 IDB 无对应 codec 的 server 集合（供 refsCheck 产 warning） */
+  /** 被 listenRefs 引用但本地存储无对应协议配置的 server 集合（供 refsCheck 产 warning） */
   missingCodecServers: Set<string>;
 }
 
@@ -96,7 +95,7 @@ export function buildRefsGraph(flow: TaskFlow): RefsGraph {
           danglingRefs.push(rec);
         }
       }
-      // codec 缺失检测：server 非空但 IDB 无对应 codec template
+      // codec 缺失检测：server 非空但本地存储无对应 routeKeyTemplate
       const server = ref.server?.trim();
       if (server && !getRouteKeyTemplatesSync().has(server)) {
         missingCodecServers.add(server);

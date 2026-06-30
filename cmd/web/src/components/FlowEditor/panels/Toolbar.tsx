@@ -148,10 +148,10 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
   };
 
   /**
-   * 加载/导入 flow 后自动把引用的 lua 脚本同步到 IDB。
-   * - 静默 skipped（已在 IDB），只对 added / missing 给提示；
+   * 加载/导入 flow 后自动把引用的 lua 脚本同步到本地存储。
+   * - 静默 skipped（本地已存在），只对 added / missing 给提示；
    * - missing 用 warning（不阻塞，用户也许稍后会手敲）；
-   * - added 用 info（解释清楚为什么 IDB 突然多出几个文件）；
+   * - added 用 info（解释清楚为什么本地存储突然多出几个文件）；
    * - 任何异常都吞掉，不影响加载主流程。
    */
   const syncScriptsAfterLoad = async (_flow: FlowJson, _action: '导入' | '加载') => {

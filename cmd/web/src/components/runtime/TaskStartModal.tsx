@@ -3,18 +3,18 @@
  *
  * 数据来源：
  *   - 任务名 / totalBots / robotConfig / deadline 来自 useRuntimeStore（与 RuntimeBar 双向绑定）；
- *   - 资源清单（proto / lua）来自 resourcesStore.listProto / listScript；
+ *   - 资源清单（定义文件 / 脚本）来自 resourcesStore.listProto / listScript；
  *   - 容量提示来自 useRuntimeStore.agents。
  *
  * 运行模式（editorStore.debugMode）：测试 ↔ 调试 互斥，顶部 Segmented 控制，持久化到 localStorage。
  *   - 测试（debugMode=false，默认，蓝色）：使用用户填写的全量配置 + 容量预检 + 默认日志级别；
  *   - 调试（debugMode=true，紫色）：自动装填 totalBots=1 / concurrency=1 / logLevel=debug，
- *     后端 debugMode=true 时单 Agent 分配 + 历史自动标记 "debug"；
- *   - 0 个在线 Agent 时无论哪种模式都 disable 启动按钮（前端最低门槛）；
+ *     后端 debugMode=true 时单节点分配 + 历史自动标记 "debug"；
+ *   - 0 个在线节点时无论哪种模式都 disable 启动按钮（前端最低门槛）；
  *   - 模式切换不回滚已填数值（保留用户偏好）。
  *
  * 日志等级（robotConfig.logLevel）：
- *   - 任务期临时切换 Agent 进程的日志等级，任务结束后 Agent 自动恢复原等级；
+ *   - 任务期临时切换节点进程的日志等级，任务结束后节点自动恢复原等级；
  *   - debug 等级下会打印全部收发包与字段绑定，仅用于调试，测试压测建议 info。
  *
  * 提交：调用 services.startTask；成功后由调用方关闭 modal，失败由 showApiError 接住并展示。
@@ -80,7 +80,7 @@ const DEBUG_PRESET = {
  * - warn ：仅异常或潜在问题；
  * - error：仅错误。
  *
- * 该字段会临时改写 Agent 进程的日志等级，任务结束后自动恢复，不影响其他任务。
+ * 该字段会临时改写节点进程的日志等级，任务结束后自动恢复，不影响其他任务。
  */
 const LOG_LEVEL_OPTIONS: Array<{ value: LogLevel; label: string; desc: string }> = [
   { value: 'debug', label: 'debug', desc: '全量收发包/字段，调试用' },
@@ -144,7 +144,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
   const [submitting, setSubmitting] = useState(false);
   /** flow 引用的脚本总数（actions/callbacks 中 script 字段的去重和） */
   const [refScriptCount, setRefScriptCount] = useState(0);
-  /** flow 引用了但既不在 IDB 也拉不到默认基线的脚本名（启动会失败） */
+  /** flow 引用了但既不在本地存储也拉不到默认基线的脚本名（启动会失败） */
   const [missingScripts, setMissingScripts] = useState<string[]>([]);
   /** 资源同步进行中，给 UI 一个轻量 loading 态 */
   const [syncing, setSyncing] = useState(false);
@@ -211,7 +211,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
         const refNames = collectFlowScriptNames(sel.flow);
         // flow 引用脚本 gap-fill
         const scriptSync = await syncFlowScriptsToIdb(sel.flow);
-        // 收集 IDB 全集
+        // 收集本地资源全集
         const [p, s] = await Promise.all([listProto(), listScript()]);
         if (cancelled) return;
         setProtos(p);

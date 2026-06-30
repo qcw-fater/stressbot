@@ -3,12 +3,10 @@
  *
  * 设计要点：
  * - 进入页面 boot()：listTasks 检查 active 任务 → 弹 ActiveTaskGuardModal 或 mode=edit；
- * - 编辑态：仅轮询 /api/agents 与 /api/system（10s）→ 显示集群状态徽章；
- * - 运行 / viewActive：5s 轮询 /api/tasks/{id} + /api/metrics + /api/system + /api/agents；
+ * - 编辑态：仅轮询节点列表与系统资源（10s）→ 显示集群状态徽章；
+ * - 运行 / viewActive：5s 轮询任务详情、压测指标、系统资源与节点列表；
  *   - 当 task.state ∈ {stopped, failed} → onTaskFinished() → mode='finalReport'；
  * - finalReport：停止轮询，保留最后一份数据用于报告展示。
- *
- * T3 阶段先完成数据通路与 mode 切换；MonitorDock / 节点指标染色由 T4/T5 接入。
  */
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -160,7 +158,7 @@ function HomeShellInner() {
     bootRef.current = true;
     (async () => {
       try {
-        // 1. RobotConfig 使用内置默认值，不再从 conf/config.json 同步（Admin 模式下无此文件）
+        // 1. RobotConfig 使用内置默认值，不再从 conf/config.json 同步（服务器模式下无此文件）
         // 2. 探测 history 模块是否启用：admin 未配 MySQL 时 listHistory 会返回 HISTORY_DISABLED。
         //    用 limit=1 最小开销探测一次，结果写到 editorStore.historyEnabled，
         //    RuntimeBar/HistoryDrawer 据此决定按钮是否禁用，避免用户点了才弹错。

@@ -18,7 +18,7 @@ export interface MetricsParams {
   taskId?: string;
 }
 
-/** 空快照，作为 `/api/metrics` 在 active=null 时的兜底值。 */
+/** 空快照，作为 metrics API 在 active=null 时的兜底值。 */
 const EMPTY_STRESS: StressSnapshot = {
   timestamp: new Date(0).toISOString(),
   uptimeSeconds: 0,
@@ -42,7 +42,7 @@ const EMPTY_AGGREGATE: StressAggregate = {
 // === 压测指标 ===
 
 /**
- * 后端 `/api/metrics` 返回 `{snapshot, reportingAgents, totalAgents}`：
+ * 后端 metrics API 返回 `{snapshot, reportingAgents, totalAgents, offlineAgents, assignedAgents}`：
  *   - active=null: snapshot 是空的 CollectorSnapshot
  *   - active!=null: snapshot 是该任务的 StressSnapshot
  *
@@ -54,7 +54,7 @@ export async function getClusterMetrics(params: MetricsParams = {}): Promise<Str
   );
   if (!resp || typeof resp !== 'object') return EMPTY_AGGREGATE;
   const wrapper = resp as Partial<StressAggregate> & { snapshot?: StressSnapshot } & Partial<StressSnapshot>;
-  // 新格式：{snapshot, reportingAgents, totalAgents}
+  // 新格式：{snapshot, reportingAgents, totalAgents, offlineAgents, assignedAgents}
   if (wrapper.snapshot && typeof wrapper.snapshot === 'object') {
     return {
       snapshot: mergeSnapshot(wrapper.snapshot),
@@ -89,7 +89,7 @@ function mergeSnapshot(s: Partial<StressSnapshot>): StressSnapshot {
 }
 
 /**
- * 后端 `/api/metrics/agents` 返回 `[]{agentId, snapshot, updatedAt}`，
+ * 后端 per-node metrics API 返回 `[]{agentId, snapshot, updatedAt}`，
  * 前端包装为 `{items}` 并将 agentName 兜底为 agentId。
  */
 export async function getPerAgentMetrics(params: MetricsParams = {}): Promise<PerAgentMetrics> {

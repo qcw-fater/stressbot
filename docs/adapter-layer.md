@@ -385,7 +385,7 @@ type Connection struct {
 3. 调用 `Send(sendData)` 发送请求
 4. select 等待：ctx.Done / ch 收到响应 / 超时
 5. defer 清理 responseMap 条目和关闭 channel
-6. 超时时返回 `NewTimeoutError(ErrRecvTimeout)`
+6. 超时时返回 `NewActionError(ErrRecvTimeout, ...)`
 7. ctx 取消时返回 `NewActionError(ErrConnDropped)`
 
 **OnReceive(routeKey, body, headerErr)**：
@@ -637,12 +637,12 @@ func (ae *ActionExecutor) protocolEncode(protocol string, route any, body, key [
 `handleHeaderError` 统一处理非零 headerErr：
 
 ```go
-func (ae *ActionExecutor) handleHeaderError(def *ActionDef, headerErr uint64, routeKey string, respBody []byte) *ActionError {
-    ae.parseAndStoreResponse(def, respBody)        // 仍然解析响应体
-    desc := ae.adp.DescribeError(headerErr)        // 可选：获取错误描述
+func (ae *ActionExecutor) handleHeaderError(proto string, def *ActionDef, headerErr uint64, routeKey string, respBody []byte) *ActionError {
+    ae.parseAndStoreResponse(def, respBody)        // 尽量解析响应体
+    desc := ae.describeError(proto, def.Service, headerErr) // 可选：获取错误描述
     detail := "service=" + def.Service + " route=" + routeKey
     if desc != "" { detail = desc + ": " + detail }
-    return NewServerError(headerErr, detail)
+    return NewActionError(errcode.ErrorCode(headerErr), detail)
 }
 ```
 

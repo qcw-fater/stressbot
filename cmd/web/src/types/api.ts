@@ -1,5 +1,5 @@
 /**
- * 与 Admin（默认 :7718）交互的全量 TS 类型定义。
+ * 与后端服务器交互的全量 TS 类型定义。
  *
  * 单一事实源：docs/api-monitor.md §12；本文件结构与该文档保持完全一致，新增字段两边同步。
  */
@@ -8,7 +8,7 @@
 export type TaskState = 'pending' | 'starting' | 'running' | 'stopping' | 'stopped' | 'failed';
 export type AgentStatus = 'idle' | 'busy' | 'unhealthy' | 'offline';
 export type TaskResult = 'completed' | 'stopped' | 'failed';
-// OS / Arch 用于 StaticInfo（Agent 自报），保留仅用于展示，不再参与二进制平台匹配。
+// OS / Arch 用于 StaticInfo（节点自报），保留仅用于展示，不再参与二进制平台匹配。
 export type OS = 'windows' | 'linux' | 'darwin';
 export type Arch = 'amd64' | 'arm64';
 
@@ -77,7 +77,7 @@ export interface RobotConfig {
 
   // ── 日志 ──
   /**
-   * 任务期临时切换 Agent 进程日志等级；省略 = 沿用 Agent 启动配置（通常为 info）。
+   * 任务期临时切换 节点进程日志等级；省略 = 沿用 Agent 启动配置（通常为 info）。
    * 任务结束后 Agent 会自动恢复为原等级，不影响后续任务。
    */
   logLevel?: LogLevel;

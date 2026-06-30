@@ -122,9 +122,8 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 		return runFailed("无配置文件可下载（configUrl 或 configFiles 为空）")
 	}
 
-	// T2-C2-Lua：构造 CodecResolver（全 codec 路径 Go SchemaAdapter）。
-	// 任务下发的 adapter 目录 confDir/adapter 含 *_codec.json + errors.json（T4.3 分发）。
-	// 业务 encode/decode/dial/心跳/listen/Lua 全走 resolver，生产路径不再构造 Lua 适配器。
+	// 构造生产 CodecResolver：任务下发的 adapter 目录包含每连接 *_codec.json 与共享 errors.json。
+	// 业务 encode/decode/dial/心跳/listen/Lua 网络 API 均走 resolver，生产路径不构造 LuaAdapter。
 	codecAdapterDir := filepath.Join(confDir, "adapter")
 	codecMap, err := adapter.InferCodecMap(codecAdapterDir)
 	if err != nil {

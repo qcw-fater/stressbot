@@ -1,4 +1,4 @@
-// Package codec_test — T1.4 encode 引擎对拍测试（外部测试包，避免 codec↔adapter 循环）。
+// Package codec_test — encode 引擎对拍测试（外部测试包，避免 codec↔adapter 循环）。
 //
 // 验收核心：字节级对拍 conf/adapter/codec.lua 经旧 adapter.LuaAdapter 的 encode 输出。
 // 测试在此 import adapter 包仅用于构造真值 oracle（gopher-lua 经 adapter 传递引入，
@@ -9,7 +9,7 @@
 // 编译为独立包，可同时 import codec 与 adapter 而不形成循环。codec 内部测试包
 // （compile_test.go / registry_test.go / schema_test.go，需访问未导出符号）保留不变。
 //
-// 组合覆盖矩阵（与 T1.4 brief 一致）：
+// 组合覆盖矩阵：
 //   - TCP encode：offset 0、加密/不加密、压缩/不压缩、空 body、cmd=0
 //   - UDP encode：offset 11（前 11 明文 + bcc 排除前缀）
 //   - BodyLength / ExpectedRouteKey 行为与 helpers / lua_adapter 对齐
@@ -65,10 +65,9 @@ func findRepoRoot(t *testing.T) string {
 
 // newLuaOracle 构造旧 LuaAdapter 作为 encode 真值 oracle。
 //
-// 池大小用 2：poolSize=1 在 adapter.NewLuaAdapter 的 error.lua 加载循环里存在 acquire
-// 超时 bug（cacheMetaInfo 释放后 error.lua 循环第一次 acquire 仍 30s 超时——疑似
-// 单元素 channel 在 release→acquire 紧邻时的 select 竞态；与 codec 包无关，属 oracle
-// 自身限制）。poolSize=2 验证可正常构造；codec 测试串行调用无需更大池。
+// 池大小用 2：poolSize=1 时 NewLuaAdapter 在初始化期持有一个 LState，加载
+// error.lua 时再次 acquire 会耗尽池并超时；这是旧 Lua oracle 的初始化限制，
+// 与 codec 包无关。poolSize=2 验证可正常构造；codec 测试串行调用无需更大池。
 func newLuaOracle(t *testing.T) *adapter.LuaAdapter {
 	t.Helper()
 	codecPath, errorPath := adapterPaths(t)
@@ -556,7 +555,7 @@ func TestBCC_ParityWithOracle(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// HeaderSize 访问器（T1.3 已实现；这里仅回归）
+// HeaderSize 访问器回归
 // ---------------------------------------------------------------------------
 
 func TestHeaderSize(t *testing.T) {

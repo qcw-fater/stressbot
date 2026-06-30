@@ -85,7 +85,7 @@ type CodeInfo struct {
 | 1 | `ErrConnNotFound` | `CONN_NOT_FOUND` | 连接未建立（GetTCPConn/GetUDPConn 返回 nil）。调用方传了 nil connection，语义是"连接未建立/已被销毁" |
 | 2 | `ErrConnClosed` | `CONN_CLOSED` | 连接已关闭（isClose == 1） |
 | 3 | `ErrSendFailed` | `SEND_FAILED` | socket 写入失败（Send 返回错误）。含 HTTP 请求发送失败 |
-| 4 | `ErrRecvTimeout` | `RECV_TIMEOUT` | 等待响应超时（select timeout）。此错误通过 `NewTimeoutError` 构造，内嵌 `ErrTimeout` cause |
+| 4 | `ErrRecvTimeout` | `RECV_TIMEOUT` | 等待响应超时（select timeout）。`classifyResult` 按错误码归类为 `ResultTimeout` |
 | 5 | `ErrConnDropped` | `CONN_DROPPED` | 等待期间连接被对端断开（gnet OnClose 触发的 ctx.Done） |
 | 6 | `ErrActionCanceled` | `ACTION_CANCELED` | 等待期间连接被本地主动关闭（任务停止 / robot.Stop / 业务 Close） |
 
@@ -200,11 +200,9 @@ var codeRegistry = []CodeInfo{
 
 ## 5. ActionError 类型 — `engine/errors.go`
 
-### 5.1 哨兵值
+### 5.1 流程配置错误哨兵
 
 ```go
-var ErrTimeout = errors.New("action timeout")        // 被 NewTimeoutError 包装，通过 errors.Is 识别
-
 var (
     ErrNodeNotFound    = errors.New("节点不存在")       // 流程配置错误
     ErrUnknownNodeType = errors.New("未知节点类型")     // 流程配置错误
@@ -212,7 +210,7 @@ var (
 )
 ```
 
-`ErrTimeout` 是超时哨兵值，被 `NewTimeoutError` 作为 cause 内嵌。`classifyResult` 通过 `errors.Is(err, ErrTimeout)` 识别并归类为 `ResultTimeout`。
+运行时动作错误统一使用 `ActionError.Code` 分类；超时类错误不再依赖额外哨兵，而是由 `ErrRecvTimeout` / `ErrListenTimeout` 等错误码归类。
 
 ### 5.2 ActionError 结构体
 
@@ -220,7 +218,7 @@ var (
 type ActionError struct {
     Code   errcode.ErrorCode // 单一 code 唯一标识（< 100 框架 / >= 100 业务）
     Detail string            // 上下文描述（service/route/elapsed 等），不含 [code] 前缀
-    cause  error             // 可选下层错误（如 ErrTimeout），支持 errors.Is 链式判断
+    cause  error             // 可选下层错误，支持 errors.Is 链式判断
 }
 ```
 
@@ -230,7 +228,7 @@ type ActionError struct {
 |------|------|
 | `Code` | 单一错误码：框架码（`errcode.Err*`，< 100）或业务码（服务端 headerErr 原值，≥ 100） |
 | `Detail` | 有限基数的上下文字符串（如 `service=logic route=CreateTeam`），不含 `[code]` 前缀，避免不同参数组合产生不同的聚合 key |
-| `cause` | 可选下层 error，支持 `errors.Is()` 链式判断（如识别超时） |
+| `cause` | 可选下层 error，支持 `errors.Is()` 链式判断 |
 
 ### 5.3 构造器
 
@@ -242,15 +240,7 @@ func NewActionError(code errcode.ErrorCode, detail string, cause ...error) *Acti
 
 框架码与业务码统一走此入口，无 `Kind` 维度区分。可选 `cause` 参数包装下层 error（如 `factory.Create` 失败时透传原始 error）。
 
-#### NewTimeoutError — 创建超时错误
-
-```go
-func NewTimeoutError(code errcode.ErrorCode, detail string) *ActionError
-```
-
-内嵌 `ErrTimeout` 作为 cause，使 `errors.Is(err, ErrTimeout)` 返回 true，被 `classifyResult` 正确归类为 `ResultTimeout`。
-
-> 注：历史 `NewServerError(serverCode, detail)` 已合并入 `NewActionError`——服务端 headerErr 直接以 `errcode.ErrorCode(headerErr)`（≥ 100）调用同一构造器。同理 `IsServerError()` / `ErrorKind()` 已删除，调用方按 `code >= 100` 自行推导业务/框架属性。
+> 注：服务端 headerErr 直接以 `errcode.ErrorCode(headerErr)`（≥ 100）调用 `NewActionError`。调用方按 `code >= 100` 自行推导业务/框架属性。
 
 ### 5.4 方法
 
@@ -316,7 +306,7 @@ errcode（顶层包，无业务依赖）
 | `isClose == 1` | `NewActionError(ErrConnClosed, c.serviceName + " responseKey=...")` |
 | `Send()` 返回错误 | `NewActionError(ErrSendFailed, c.serviceName + " responseKey=...", sendErr)` |
 | `ctx.Done()` | `NewActionError(ErrConnDropped, c.serviceName + " responseKey=...")` |
-| 超时 | `NewTimeoutError(ErrRecvTimeout, c.serviceName + " responseKey=..." + " timeout=...")` |
+| 超时 | `NewActionError(ErrRecvTimeout, c.serviceName + " routeKey=..." + " timeout=...")` |
 
 `Connection.Send` 签名已从 `(bool, int)` 改为 `(int, error)`。
 
@@ -364,7 +354,7 @@ errcode（顶层包，无业务依赖）
 | execUDPConnect | 地址为空 | `NewActionError(ErrAddrEmpty, "service=...")` |
 | execUDPConnect | 连接失败 | 透传 ConnectUDP 返回的 ActionError |
 | execTCPListen | headerErr != 0 | `NewActionError(headerErr, ...)`（业务码统一入口） |
-| execTCPListen | 轮询超时 | `NewTimeoutError(ErrListenTimeout, "service=... timeout=...")` |
+| execTCPListen | 轮询超时 | `NewActionError(ErrListenTimeout, "service=... timeout=...")` |
 | execUDPSend | encode 返回 nil | `NewActionError(ErrEncodeFailed, ...)` |
 | execUDPSend | 发送失败 | 透传底层 ActionError |
 | execUDPRequest | encode/!ok/headerErr | 同 TCPRequest 模式 |
@@ -427,8 +417,13 @@ func classifyResult(err error) monitor.ActionResult {
     if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
         return monitor.ResultCanceled
     }
-    if errors.Is(err, engine.ErrTimeout) {
-        return monitor.ResultTimeout
+    if actionErr, ok := errors.AsType[*engine.ActionError](err); ok {
+        if isCanceledCode(actionErr.Code) {
+            return monitor.ResultCanceled
+        }
+        if isTimeoutCode(actionErr.Code) {
+            return monitor.ResultTimeout
+        }
     }
     return monitor.ResultFailure
 }
@@ -774,7 +769,7 @@ connection.RequestResponse  → (nil, NewActionError(4, ...))  ← 具体原因
 | 文件 | 变更类型 | 说明 |
 |------|----------|------|
 | `errcode/codes.go` | 新建 | ErrorCode 常量 + codeRegistry + String() + AllCodes()（无 Kind） |
-| `engine/errors.go` | 新建 | ErrTimeout + ActionError + NewActionError/NewTimeoutError + CodedError 接口方法（无 Kind） |
+| `engine/errors.go` | 新建 | ActionError + NewActionError + CodedError 接口方法（无 Kind） |
 | `network/connection.go` | 修改 | Send + RequestResponse 签名变更，各路径返回 ActionError |
 | `network/heartbeat.go` | 修改 | 适配 Send 新签名 |
 | `engine/action.go` | 修改 | NetSender 接口 7 个方法签名变更；所有 exec* 改用 ActionError；ErrExecFailed + ErrHTTPStatus |

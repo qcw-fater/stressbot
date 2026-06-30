@@ -1,8 +1,8 @@
 /**
- * Agent 管理 API 封装（对应 docs/api-monitor.md §6）。
+ * 节点管理 API 封装（对应 docs/api-monitor.md §6）。
  *
- * 升级相关接口已废弃：版本更新通过手动重启 Agent 完成，无需前端介入。
- * 仅保留：列表 / 详情 / 强制注销（仅 offline）。
+ * 升级相关接口已废弃：版本更新通过手动重启节点完成，无需前端介入。
+ * 仅保留：列表 / 详情 / 强制注销（仅离线 / offline）。
  */
 
 import { adaptList, del, getJson, postJson } from './api';

@@ -1,9 +1,9 @@
 /**
  * Proto 加载器：按优先级从多个来源加载 .proto 文件。
  *
- * 设计文档 §9.1；T2 阶段调整后的 `static` 加载链：
+ * `static` 加载链：
  *
- *   IndexedDB (用户上传) → Vite 中间件 /conf/proto/* → import.meta.glob 兜底
+ *   本地存储（用户上传） → 服务器基线 → import.meta.glob 兜底
  *
  * 这样开发期 / 生产期 / 离线包装期都能拿到 proto；上传后调用 `reloadProtos()` 立即生效。
  *
@@ -11,7 +11,7 @@
  *   - 通过 `import.meta.glob` 把仓库根 `conf/proto/*.proto` 内联为原始字符串，
  *     避免依赖 dev server 中间件 / HTTP fetch（曾因 SPA fallback、路由顺序导致加载失败）。
  *   - HMR 友好：修改 .proto 文件 vite 会自动重启加载。
- *   - 缺点：所有 proto 文本会打包进 bundle，但生产模式应优先使用 IDB / Admin。
+ *   - 缺点：所有 proto 文本会打包进 bundle，但生产模式应优先使用本地存储 / 服务器基线。
  */
 
 import * as protobuf from 'protobufjs';
@@ -29,7 +29,7 @@ const STATIC_PROTO_FILES = import.meta.glob('../../../../../conf/proto/*.proto',
 
 export type ProtoSource =
   | { kind: 'static' } // A：Vite 编译期内联
-  | { kind: 'api'; baseUrl: string } // B：Go monitor HTTP
+  | { kind: 'api'; baseUrl: string } // B：服务器基线 API
   | { kind: 'files'; files: File[] }; // C：用户上传
 
 export interface LoadResult {
@@ -51,10 +51,10 @@ export async function loadProtos(source: ProtoSource): Promise<LoadResult> {
   }
 }
 
-/** A：按 IndexedDB → /conf/proto/* → import.meta.glob 顺序加载。
+/** A：按本地存储 → 服务器基线 → import.meta.glob 顺序加载。
  *      任一来源得到非空文件清单即视为成功并返回；其余跳过。 */
 async function loadFromInline(): Promise<LoadResult> {
-  // 1) IndexedDB：用户在"资源管理"中上传的 proto。优先级最高，离线 / 生产环境都能用。
+  // 1) 本地存储：用户在「资源管理」中上传的 proto。优先级最高，离线 / 生产环境都能用。
   try {
     const userProtos = await listProto();
     if (userProtos.length > 0) {
@@ -65,20 +65,20 @@ async function loadFromInline(): Promise<LoadResult> {
         files.push(f.name);
       }
       files.sort();
-      console.log(`[ProtoLoader] 通过 IndexedDB 加载（${files.length} 个文件）`);
+      console.log(`[ProtoLoader] 通过 本地存储 加载（${files.length} 个文件）`);
       return parseAll(sources, files);
     }
   } catch (e) {
-    console.warn(`[ProtoLoader] IndexedDB 读取失败，回退到 /conf/proto/：`, (e as Error).message);
+    console.warn(`[ProtoLoader] 本地存储 读取失败，回退到服务器基线：`, (e as Error).message);
   }
 
-  // 2) 走 baselineApi（Admin 服务器或 Vite 代理提供）
+  // 2) 走 baselineApi（后端服务器或 Vite 代理提供）
   try {
     const r = await loadFromBaselineApi();
     console.log(`[ProtoLoader] 通过 baselineApi 加载成功（${r.files.length} 个文件）`);
     return r;
   } catch (e) {
-    console.warn(`[ProtoLoader] /conf/proto/ 加载失败，尝试 import.meta.glob 兜底：`, (e as Error).message);
+    console.warn(`[ProtoLoader] 服务器基线加载失败，尝试 import.meta.glob 兜底：`, (e as Error).message);
   }
 
   // 3) 兜底：编译期 glob 注入
@@ -91,7 +91,7 @@ async function loadFromInline(): Promise<LoadResult> {
   }
   if (files.length === 0) {
     throw new Error(
-      `所有 proto 来源均为空：IndexedDB / /conf/proto/ / import.meta.glob('../../../../../conf/proto/*.proto') 均未命中。请确认资源已上传，或 stressbot/conf/proto 下存在 .proto 文件，且 vite server.fs.allow 已包含 '..'。`,
+      `所有 proto 来源均为空：本地存储 / 服务器基线 / import.meta.glob('../../../../../conf/proto/*.proto') 均未命中。请确认资源已上传，或 stressbot/conf/proto 下存在 .proto 文件，且 vite server.fs.allow 已包含 '..'。`,
     );
   }
   files.sort();

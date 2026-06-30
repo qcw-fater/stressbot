@@ -1,5 +1,5 @@
 /**
- * 任务启停编排：连接 flowStore（业务数据）+ resourcesStore（资源）+ Admin API + runtimeStore（状态机）。
+ * 任务启停编排：连接 flowStore（业务数据）+ resourcesStore（资源）+ 服务器 API + runtimeStore（状态机）。
  *
  * 设计要点：
  * - 这层是 stress test 的"事务边界"：失败回滚（mode 不切，ownedTaskId 不写）；
@@ -92,15 +92,15 @@ export interface StartTaskOptions {
 }
 
 /**
- * 启动新任务：组装 multipart → POST /api/tasks → POST /api/tasks/{id}/start。
+ * 启动新任务：组装 multipart → tasksApi.createTask → tasksApi.startTask。
  *
  * 流程（任意一步失败抛出，runtimeStore 不变更）：
  *   1. flowStore.toTaskFlow() + validateFlow() → 有 error 直接拒绝；
- *   2. syncFlowScriptsToIdb：把 flow 引用、IDB 缺失的脚本从基线拉回 IDB（保护已编辑稿）；
+ *   2. syncFlowScriptsToIdb：把 flow 引用、本地存储缺失的脚本从基线拉回本地存储（保护已编辑稿）；
  *      仍缺失则抛错。listProto / listScript 拉资源；
- *   3. 容量预检：sum(online agents.maxBots) >= totalBots；
- *   4. POST /api/tasks → 拿 taskId；
- *   5. POST /api/tasks/{id}/start → 拿 assignments；
+ *   3. 容量预检：在线节点 maxBots 之和 >= totalBots；
+ *   4. tasksApi.createTask → 拿 taskId；
+ *   5. tasksApi.startTask → 拿 assignments；
  *   6. 写入 runtimeStore：mode='running', ownedTaskId=id, activeTask, robotConfig...
  *
  * @returns 创建并启动的任务 ID
@@ -139,9 +139,9 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
   useMetricsStore.getState().setProvider(undefined);
 
   // 2. 资源收集
-  //   - flow 引用脚本缺失检测（基线同步已在 TaskStartModal useEffect 中完成）
-  //   - 收集 IDB 内容作为 multipart payload
-  //   - 确保 adapter 存在
+  //   - 再次执行 flow 引用脚本 gap-fill 与缺失检测，作为启动前最终拦截
+  //   - 收集本地存储内容作为 multipart payload
+  //   - 确保协议配置（*_codec.json / errors.json）存在
   const sync = await syncFlowScriptsToIdb(flowJson);
   if (sync.missing.length > 0) {
     throw new ApiError(
@@ -170,10 +170,10 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
     );
   }
 
-  // §3.5：flow 引用的每条连接（tcp*/udp* 动作的 `<proto>:<service>`）都必须在 IDB 有对应的
-  // `<proto>_<service>_codec.json`，否则 agent 在该连接 dial 时 CodecResolver 解析不到 codec
+  // flow 引用的每条连接（tcp*/udp* 动作的 `<protocol>:<service>`）都必须在本地存储有对应的
+  // `<protocol>_<service>_codec.json`，否则节点在该连接 dial 时 CodecResolver 解析不到 codec
   // 会 fail-loud。这里把该校验前移到任务启动，给清晰中文提示（启动前拦截 vs 启动后失败）。
-  // 上传范围不变：下面仍发全部 codec 文件，agent resolver 加载全部。
+  // 上传范围不变：下面仍发全部 codec 文件，节点侧 resolver 加载全部。
   {
     const codecFileNames = codecs.map((f) => f.name);
     const referenced = collectFlowCodecConnections(flowJson);
@@ -292,7 +292,7 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
 /**
  * 停止当前任务。RuntimeBar 调用；服务端进入 stopping → stopped 后由轮询触发 onTaskFinished。
  *
- * 后端 `POST /api/tasks/{id}/stop` 同步返回最新 TaskBrief（含 state=stopping），
+ * tasksApi.stopTask 同步返回最新 TaskBrief（含 state=stopping），
  * 这里立即写入 store，让 UI 不必等到下一轮 5s 轮询才反映"停止中"状态。
  *
  * 兼容老后端返回 `{status:"stopping"}` 的形态：判断返回对象是否带 `state` 字段，
@@ -333,7 +333,7 @@ export async function attachToActive(taskId: string): Promise<void> {
   // 远端 flow 拉取成功才 stash 草稿 + 替换画布；失败时画布保持本地稿（草稿未丢失，无需 stash）。
   if (remoteFlow) {
     stashAndReplaceCanvas(remoteFlow);
-    // attach 到远端任务时也尝试同步脚本到 IDB（保护已存在的编辑稿不覆盖）。
+    // attach 到远端任务时也尝试同步脚本到本地存储（保护已存在的编辑稿不覆盖）。
     // 这样用户后续切回 edit 模式接续修改时不会因为缺脚本而失败。
     void syncFlowScriptsToIdb(remoteFlow);
   }

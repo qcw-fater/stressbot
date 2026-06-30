@@ -47,7 +47,7 @@ export function collectFlowCodecConnections(flow: FlowJson): string[] {
 }
 
 /**
- * 给定引用连接集合与 IDB 中已有的 codec 文件名，返回缺少对应文件的连接名（排序）。
+ * 给定引用连接集合与本地存储中已有的 *_codec.json 文件名，返回缺少对应文件的连接名（排序）。
  *
  * 纯函数，供单测；taskActions.startTask 内部调用。
  */

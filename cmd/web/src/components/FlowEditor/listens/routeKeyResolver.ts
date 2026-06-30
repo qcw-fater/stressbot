@@ -69,7 +69,7 @@ export function pseudoRouteKey(route: unknown): string {
 /**
  * 加载所有 codec 的 routeKeyTemplate：server → template。
  *
- * 遍历 IDB 中所有 `*_codec.json`：JSON.parse 取 `routeKeyTemplate`（字符串），
+ * 遍历本地存储中所有 `*_codec.json`：JSON.parse 取 `routeKeyTemplate`（字符串），
  * 文件名经 `codecFileNameToConnName` 得 server。解析失败 / 无 template / 非字符串
  * 的条目跳过（不抛）。
  *
@@ -106,7 +106,7 @@ export function resolveRouteKeyForServer(server: string | undefined, route: unkn
   return pseudoRouteKey(route);
 }
 
-// ── 模块级缓存（调用方 sync，无法 await IDB） ─────────────────────────
+// ── 模块级缓存（调用方 sync，无法 await 本地存储） ─────────────────────────
 //
 // 接入方案选择：**cache**（非透传）。
 // 理由：validateFlow/buildRefsGraph 的调用方（ValidationReport.tsx / Toolbar.tsx /

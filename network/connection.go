@@ -865,9 +865,8 @@ func (c *Connection) EnqueueRaw(msgBuf []byte, recvFrameAt time.Time) EnqueueRes
 
 // WaitDecodeDone 等待 connectionPump 退出（pump 已包含旧 decodeLoop 的所有工作）。
 //
-// 2-C3 起 decodeLoop 已并入 pump；本方法现在等 pumpDone，与 WaitListenDone 等价。
-// 保留方法名是为了让 client.go 的 CloseAllWithTimeout 调用语义保持「先等 decode，再等 listen」
-// 的两阶段表达（client.go 不在本任务可改文件清单内）。
+// decode/listen 已合并到 connectionPump；本方法为兼容旧调用名保留，等价于 WaitPumpDone。
+// 新代码请直接使用 WaitPumpDone。
 func (c *Connection) WaitDecodeDone() {
 	if c == nil {
 		return

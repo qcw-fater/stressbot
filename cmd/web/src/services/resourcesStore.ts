@@ -1,11 +1,11 @@
 /**
- * 用户上传的 proto / lua / adapter 资源管理（IndexedDB）。
+ * 用户上传的定义文件、脚本、协议配置资源管理（本地存储）。
  *
  * 设计要点：
  * - 不直接依赖 idb 库，使用 idb-keyval 提供的 createStore + key-value API；
  * - **每个 DB 只能挂一个 object store**（idb-keyval 不会触发 version upgrade 加 store），
- *   因此 proto / lua / adapter 各用一个独立 DB（与 library/templateStore.ts 保持一致）；
- * - 文件内容以 utf-8 字符串存储（proto / lua 都是文本），不存 ArrayBuffer，
+ *   因此定义文件、脚本、协议配置各用一个独立 DB（与 library/templateStore.ts 保持一致）；
+ * - 文件内容以 utf-8 字符串存储（定义文件 / 脚本 / 协议配置都是文本），不存 ArrayBuffer，
  *   方便 JSON.stringify 调试与 Monaco 直接拿到 string；
  * - ResourceFile.baseHash 记录上次确认同步到的服务器内容 hash，按 Git/SVN 工作副本语义做三方判断；
  * - 暴露 `subscribe` 给 React 组件订阅"资源变更"事件，配合 useSyncExternalStore。
@@ -184,16 +184,16 @@ export async function clearScript(): Promise<void> {
   notify();
 }
 
-// === Codec（按连接多份 <proto>_<service>_codec.json）===
+// === Codec（按连接多份 <protocol>_<service>_codec.json）===
 //
-// T3 声明式 codec 重构：把前端适配器从单一 codec.lua 升级为按连接的多份
-// `<proto>_<service>_codec.json`（+ 共享 errors.json）。复用同一个 adapterStore（IDB），
-// 每份 codec = 一个 key（文件名）；共享 errors.json 单独一份 key。
+// 协议配置采用按连接多份 `<protocol>_<service>_codec.json` + 共享 errors.json。
+// 底层沿用历史命名的 adapterStore 作为本地存储命名空间；每份 codec = 一个 key（文件名），
+// 共享 errors.json 单独一份 key。
 
 const CODEC_FILE_SUFFIX = '_codec.json';
 const ERRORS_JSON_KEY = 'errors.json';
 
-/** 校验 name 是否符合 `<proto>_<service>_codec.json` 命名（防误把 errors.json 当 codec 存）。 */
+/** 校验 name 是否符合 `<protocol>_<service>_codec.json` 命名（防误把 errors.json 当 *_codec.json 存）。 */
 function assertCodecFileName(name: string): void {
   if (!name.endsWith(CODEC_FILE_SUFFIX)) {
     throw new Error(`codec 文件名必须以 "${CODEC_FILE_SUFFIX}" 结尾（当前：${name}）`);
@@ -272,7 +272,7 @@ export async function clearErrorMap(): Promise<void> {
 // === validateCodecSchema（镜像 codec/schema.go 的 Validate）===
 //
 // 纯结构校验、同步、聚合所有错误一次性返回（空数组=通过）。逐条对齐 Go Validate，
-// 避免前后端漂移。**注意**：algo 是否在注册表中这一条**前端不做**——由 §3.4 后端
+// 避免前后端漂移。**注意**：algo 是否在注册表中这一条**前端不做**——由后端
 // 算法清单端点（GET /sbot/codec/algorithms）权威，此处仅校验 algo 非空。
 
 const CHECKSUM_FROM_RE = /^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)$/;
@@ -721,13 +721,13 @@ export interface SyncDiff {
 }
 
 export interface BaselineSyncResult {
-  /** 基线有、IDB 没有 → 已自动写入 IDB */
+  /** 基线有、本地存储没有 → 已自动写入本地存储 */
   added: Array<{ type: ResourceType; name: string }>;
-  /** 基线有、IDB 有、内容相同 */
+  /** 基线有、本地存储有、内容相同 */
   unchanged: Array<{ type: ResourceType; name: string }>;
-  /** 基线有、IDB 有、内容不同 → 需要用户确认 */
+  /** 基线有、本地存储有、内容不同 → 需要用户确认 */
   conflicts: SyncDiff[];
-  /** 基线没有、IDB 有 → 需要用户确认 */
+  /** 基线没有、本地存储有 → 需要用户确认 */
   removed: SyncDiff[];
 }
 
@@ -978,7 +978,7 @@ async function syncFileGroup(
   urlPrefix: string,
   result: BaselineSyncResult,
 ): Promise<void> {
-  // 收集 IDB 中已有的所有 key
+  // 收集本地存储中已有的所有 key
   const idbKeys = new Set(
     ((await keys(store)) as IDBValidKey[]).map(String),
   );
@@ -989,7 +989,7 @@ async function syncFileGroup(
   for (const name of baselineNames) {
     const existing = await get<ResourceFile>(name, store);
     if (!existing) {
-      toFetch.push(name); // IDB 没有，后面批量 fetch 再写入
+      toFetch.push(name); // 本地存储没有，后面批量 fetch 再写入
     } else if (existing.content === '') {
       // 无法区分"内容就是空"和"元数据损坏"，fetch 基线对比
       toFetch.push(name);
@@ -1100,7 +1100,7 @@ function openExistingDb(name: string): Promise<IDBDatabase | null> {
     req.onsuccess = () => {
       if (needCreate) {
         req.result.close();
-        // 把刚被我们意外创建的空 DB 删掉，避免污染浏览器 IDB 列表
+        // 把刚被我们意外创建的空 DB 删掉，避免污染浏览器本地数据库列表
         indexedDB.deleteDatabase(name);
         resolve(null);
         return;

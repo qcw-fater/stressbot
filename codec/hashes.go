@@ -4,7 +4,7 @@
 //   - key 为空 → 走原始哈希；
 //   - key 非空 → 走 HMAC 变体（crypto/hmac）。
 //
-// 返回原始摘要字节（非 hex）——比 hex 字符串更通用；T1.4 engine 在写入 bytes 字段时
+// 返回原始摘要字节（非 hex）——比 hex 字符串更通用；engine 在写入 bytes 字段时
 // 可按需 hex/base64 编码。lua_crypto.go 的 Lua 入口返回 hex 字符串，那是对 Lua 友好的
 // 一层包装；本层是更底层的 Go 接口，返回原始摘要。
 //

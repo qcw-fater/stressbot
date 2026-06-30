@@ -333,7 +333,7 @@ func (c rc4Cipher) Decrypt(data, key []byte, offset int, params map[string]any) 
 // 本接口要求 len(out)==len(data) 与块密码语义冲突；这里的处理是：
 //   - Encrypt 对 data[offset:] 整段做 PKCS#7+ECB，输出长度 = padding 后的块对齐长度。
 //   - 返回 out = data[:offset] + 加密后的尾部，因此 len(out) ≠ len(data)（这是块密码固有特性）。
-//   - 与 cipher offset 语义的协调由 T1.4 engine 处理（块密码步骤通常不与流密码混用 offset）。
+//   - 与 cipher offset 语义的协调由 engine 处理（块密码步骤通常不与流密码混用 offset）。
 //   - Decrypt 对 data[offset:] 做反向；len(out) ≤ len(data)（去填充后）。
 type aesEcbCipher struct{}
 

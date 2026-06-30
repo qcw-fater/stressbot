@@ -1,13 +1,12 @@
 package network
 
 import (
+	"stressbot/monitor"
+	stresslog "stressbot/utils/log"
 	"sync"
 	"time"
 
-	"stressbot/monitor"
-
 	"go.uber.org/zap"
-	stresslog "stressbot/utils/log"
 )
 
 // CloseAllResult 表示一次连接池关闭的收尾结果。

@@ -5,15 +5,12 @@
  * - mode 是单向状态机，由方法（startTask/attachToActive/onTaskFinished/detachFromActive/reset）驱动；
  * - latestStress / latestSystem 由 HomeShell 的 usePolling 写入，store 仅维护数据结构与滑窗；
  * - stressHistory / systemHistory 默认保留 60 个点（5s × 60 = 5min），上限可调；
- * - T1 阶段不实现 startTask / attachToActive 内部细节（依赖 flowStore + IDB），留给 T3。
- *   先把状态机骨架与 setter 都做好，让 T2 资源管理能复用 mode 判定（idle 才允许编辑资源）。
+ * - 状态机只保存运行态与监控快照；启动/挂载任务的业务编排在 taskActions 中完成。
  *
  * 持久化（partialize）：仅缓存"启动表单字段"到 localStorage：
  *   taskName / totalBots / robotConfig / deadline。
  * 运行态字段（mode / activeTask / latestStress / agents / history / connectionLost）
- * **不持久化**：刷新页面应当重新查询 admin 拿到最新真实状态，而不是恢复旧 mode。
- *
- * 单一事实源：plan §2 / §4。
+ * **不持久化**：刷新页面应当重新查询服务器拿到最新真实状态，而不是恢复旧 mode。
  */
 
 import { create } from 'zustand';
@@ -60,10 +57,10 @@ export interface RuntimeState {
   stressHistory: StressSnapshot[];
   systemHistory: ClusterSystemSnapshot[];
 
-  /** 连接 Admin 失败 banner（usePolling 触发） */
+  /** 连接服务器失败 banner（usePolling 触发） */
   connectionLost: boolean;
 
-  /** 任务期间 Agent 事件（离线/重连/注销） */
+  /** 任务期间节点事件（离线/重连/注销） */
   agentEvents: AgentEvent[];
 
   /** 节点健康指标（来自 StressAggregate） */
@@ -189,8 +186,8 @@ export const useRuntimeStore = create<RuntimeState>()(
       // 1. 模式守门：只在 running / viewActive 写入（finalReport / edit 下静默丢弃）。
       //    polling 本身在这两种模式下也是 disabled，这里只是兜底竞态。
       //
-      // 2. **空快照守门**：任务结束的瞬间 admin 会立刻清空 activeID（admin/task.go:166），
-      //    handleGetMetrics 看到 active==nil 直接返回 `&CollectorSnapshot{}`（零值，actions=null）。
+      // 2. **空快照守门**：任务结束的瞬间服务器会立刻清空 activeID，
+      //    metrics API 看到 active==nil 直接返回零值快照（actions=null）。
       //    而前端 mode 还要等下一次 task polling 才切到 finalReport，期间 pushStress 仍允许写入。
       //    如果直接接受这份空快照，会把"最后一份真实数据"覆盖成空 → 用户看到动作面板在
       //    任务一结束就瞬间变空。识别空快照后 return {}，可以保留最后的有效快照供 finalReport 展示。
@@ -244,7 +241,7 @@ export const useRuntimeStore = create<RuntimeState>()(
       // clearMonitorData 只清"任务级监控数据"，**不动 agents 列表**：
       //   - agents 是集群在线/容量状态，独立于某次任务的 stress 数据，下一拍 polling
       //     才能拉回来。如果在这里清掉，TaskStartModal 在 await createTask 的几百毫秒里
-      //     会误判 onlineAgents===0 → 闪现"没有在线的 Agent"红色 Alert，体验非常差。
+      //     会误判 onlineAgents===0 → 闪现"没有在线节点"红色 Alert，体验非常差。
       //   - latestSystem 同理：edit 模式下 polling 在跑，清掉只会让大盘瞬间归零。
       //     不过 latestSystem 与"上次任务"语义上有些粘连（系统快照确实在上次任务期间采的），
       //     当前选择保守清掉，等下一拍 system polling 补；如果发现也有闪烁问题再调整。

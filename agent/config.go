@@ -35,7 +35,6 @@ type ResolvedConfig struct {
 	MaxBots                int           // 单节点最大机器人数量
 	AppVersion             string        // 应用版本号
 	TaskWorkDir            string        // 任务工作目录（系统临时目录）
-	AdapterScript          string        // 旧字段：当前生产路径不再使用
 	MetricsInterval        time.Duration // 指标上报间隔（压力 + 系统同步）
 	HeartbeatInterval      time.Duration // 心跳发送间隔
 	HeartbeatFailInterval  time.Duration // 心跳失败后重试间隔
@@ -108,7 +107,6 @@ func (c *Config) Resolve() (*ResolvedConfig, error) {
 		MaxBots:                maxBots,
 		AppVersion:             c.AppVersion,
 		TaskWorkDir:            os.TempDir(),
-		AdapterScript:          "",
 		MetricsInterval:        metricsInterval,
 		HeartbeatInterval:      heartbeatInterval,
 		HeartbeatFailInterval:  heartbeatInterval, // 失败重试间隔与心跳间隔一致

@@ -1,9 +1,9 @@
 /**
- * routeKey 集成校验（§3.7）：
- *   - listenRefs 引用了 IDB 没有 codec 的 server → ROUTEKEY_CODEC_MISSING warning；
+ * routeKey 集成校验：
+ *   - listenRefs 引用了本地存储没有 codec 的 server → ROUTEKEY_CODEC_MISSING warning；
  *   - 往 routeKeyResolver 的 cache 注入 template 后，duplicateRegisters 命中真实 routeKey。
  *
- * 不触真实 IDB：直接操作 routeKeyResolver 的模块级 cache（测试 reset/手动 set）。
+ * 不触真实本地数据库：直接操作 routeKeyResolver 的模块级 cache（测试 reset/手动 set）。
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';

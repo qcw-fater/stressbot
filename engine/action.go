@@ -100,11 +100,10 @@ func (t *ActionTiming) WireRTTSum() time.Duration {
 // ActionExecutor 声明式动作执行器。
 // 根据 ActionDef 的 Pattern 分派到具体的执行方法，处理消息构建、发送、接收和状态存储。
 //
-// T2-C2 起 encode 侧（protocolEncode / ExpectedRouteKey / DescribeError）从单一 adapter
-// 切到 resolver：每次编码按 "<proto>:<service>"（proto 由 pattern 推导，service=def.Service）
-// Resolve 出该连接的 Go SchemaAdapter。Resolve nil 时由调用方 fail loud（ErrEncodeFailed），
-// 不静默兜底。T2-C2-Lua 后业务 encode/decode/dial/心跳/listen/Lua 全程经
-// CodecResolver，无 Lua codec 生产路径。
+// encode 侧（protocolEncode / ExpectedRouteKey / DescribeError）通过 resolver 按
+// "<proto>:<service>"（proto 由 pattern 推导，service=def.Service）Resolve 出该连接的
+// Go SchemaAdapter。Resolve nil 时由调用方 fail loud（ErrEncodeFailed），不静默兜底；
+// 业务 encode/decode/dial/心跳/listen/Lua 网络 API 全程经 CodecResolver，无 Lua codec 生产路径。
 type ActionExecutor struct {
 	netSender   NetSender             // 网络发送委托，由 Robot 层实现
 	store       *state.Store          // Robot 状态存储，保存服务器响应字段和中间变量
@@ -1151,8 +1150,8 @@ func (ae *ActionExecutor) resolveAdapter(proto, service string) adapter.Adapter 
 }
 
 // expectedRouteKey 按 "<proto>:<service>" Resolve 出 adapter 后计算 routeKey。
-// Resolve nil 时返回空串（与未配置 errors.json 等价）；调用方在 routeKey 进入网络层
-// 前不会 fail loud，因空 routeKey 会被 RequestResponse 当作通用匹配键（与历史行为对齐）。
+// Resolve nil 时无法计算 routeKey，返回空串；正常请求路径应已在 encode 阶段
+// 因缺 codec fail-loud。该返回值仅作为防御性兜底。
 func (ae *ActionExecutor) expectedRouteKey(proto, service string, route any) string {
 	adp := ae.resolveAdapter(proto, service)
 	if adp == nil {

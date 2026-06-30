@@ -384,8 +384,13 @@ func classifyResult(err error) monitor.ActionResult {
     if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
         return monitor.ResultCanceled
     }
-    if errors.Is(err, engine.ErrTimeout) {
-        return monitor.ResultTimeout
+    if actionErr, ok := errors.AsType[*engine.ActionError](err); ok {
+        if isCanceledCode(actionErr.Code) {
+            return monitor.ResultCanceled
+        }
+        if isTimeoutCode(actionErr.Code) {
+            return monitor.ResultTimeout
+        }
     }
     return monitor.ResultFailure
 }

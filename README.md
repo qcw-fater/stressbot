@@ -181,7 +181,7 @@ Executor 遍历节点图 → 命中 action 节点
 | `falseNext`       | boolean        | 条件为 false 时跳转的节点 ID                                             |
 | `options`         | weighted       | 加权选项：`[{"node": "id", "weight": N}]`                                |
 | `action`          | action         | 引用 `actions` 表中的动作名                                              |
-| `errorStrategy`   | action         | `"abort"` = 失败中断整个流程；空或 `"ignore"` = 继续                      |
+| `errorStrategy`   | action         | `"abort"` = 失败中断整个流程；`"skip"` = 结束当前分支/层级；空或 `"ignore"` = 继续 |
 | `listenCallbacks` | action         | 注册持久化推送监听（数组）                                               |
 | `waitMs`          | wait           | 等待时长（毫秒）                                                         |
 | `waitMin`         | wait           | 随机等待下界（毫秒，与 `waitMax` 配合使用）                               |

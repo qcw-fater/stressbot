@@ -10,9 +10,9 @@
  *   boolean 模式 : function execute(r) ... return true/false end（条件节点 / loop breakCondition 用）
  *
  * 持久化：
- *   - 加载脚本时优先读 IDB（用户保存过的版本），IDB 没有再从基线 fetch 兜底；
+ *   - 加载脚本时优先读本地存储（用户保存过的版本），本地没有再从基线 fetch 兜底；
  *   - 需手动保存（Ctrl+S 或「保存到本地」按钮），脚本名不能为空；
- *   - "导入本地"按钮也会立即写入 IDB；
+ *   - "导入本地"按钮也会立即写入本地存储；
  *   - 启动任务时 taskActions.collectScripts 会自动一并提交。
  */
 
@@ -113,7 +113,7 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
     };
   }, []);
 
-  // 拉取选中脚本内容：IDB 优先 → baselineApi 兜底
+  // 拉取选中脚本内容：本地存储优先 → baselineApi 兜底
   useEffect(() => {
     if (!script) {
       const tpl = TEMPLATE[mode];

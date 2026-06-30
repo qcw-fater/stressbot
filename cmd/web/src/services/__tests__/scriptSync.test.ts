@@ -1,7 +1,7 @@
 /**
- * scriptSync 单测：扫描 + 同步语义（IDB 已有不覆盖、缺失收集、混合场景）。
+ * scriptSync 单测：扫描 + 同步语义（本地已有不覆盖、缺失收集、混合场景）。
  *
- * 不依赖真实 IndexedDB —— 用 vi.mock 把 resourcesStore 的 getScript / addScriptFromBaseline 替成内存 Map。
+ * 不依赖真实浏览器本地数据库 —— 用 vi.mock 把 resourcesStore 的 getScript / addScriptFromBaseline 替成内存 Map。
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -75,7 +75,7 @@ describe('collectFlowScriptNames', () => {
 });
 
 describe('syncFlowScriptsToIdb', () => {
-  it('IDB 已有的脚本不会再 fetch、不会被覆盖', async () => {
+  it('本地存储已有的脚本不会再 fetch、不会被覆盖', async () => {
     idb.set('keep.lua', { name: 'keep.lua', content: '-- user edit' });
     const flow = buildFlow({ actions: { a: { script: 'keep.lua' } } });
 
@@ -86,7 +86,7 @@ describe('syncFlowScriptsToIdb', () => {
     expect(idb.get('keep.lua')!.content).toBe('-- user edit'); // 内容未变
   });
 
-  it('IDB 缺失的脚本从默认基线拉回并写 IDB', async () => {
+  it('本地存储缺失的脚本从默认基线拉回并写本地存储', async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       text: async () => '-- baseline content',
@@ -109,7 +109,7 @@ describe('syncFlowScriptsToIdb', () => {
     expect(fetchMock).toHaveBeenCalledWith('/custom/has%20space.lua');
   });
 
-  it('fetch 404 / 网络异常的脚本进入 missing，不写 IDB', async () => {
+  it('fetch 404 / 网络异常的脚本进入 missing，不写本地存储', async () => {
     fetchMock
       .mockResolvedValueOnce({ ok: false, status: 404 })
       .mockRejectedValueOnce(new Error('network'));
@@ -125,7 +125,7 @@ describe('syncFlowScriptsToIdb', () => {
     expect(idb.size).toBe(0);
   });
 
-  it('混合场景：部分已在 IDB、部分需拉、部分缺失', async () => {
+  it('混合场景：部分已在本地存储、部分需拉、部分缺失', async () => {
     idb.set('a.lua', { name: 'a.lua', content: 'A' });
     fetchMock.mockImplementation(async (url: string) => {
       if (url.endsWith('b.lua')) return { ok: true, text: async () => 'B-baseline' };

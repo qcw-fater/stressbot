@@ -15,7 +15,8 @@ import (
 )
 
 // errBreak / errContinue 是循环控制的内部信号，通过 error 冒泡直到被 executeLoop 捕获。
-// errSkip 是 skip 错误策略的内部信号：跳出当前所在的 sequence/loop，完成当前节点的执行。
+// errSkip 是 skip 错误策略的内部信号：被 sequence/loop/boolean/weighted 捕获后，
+// 视为当前分支完成，不继续传播为失败。
 var (
 	errBreak    = errors.New("break")
 	errContinue = errors.New("continue")
@@ -34,7 +35,8 @@ type Executor struct {
 // 由 Robot 层实现，负责具体的网络请求、Lua 脚本执行、条件判断和推送监听注册。
 type ActionHandler interface {
 	// ExecuteAction 执行声明式动作或 Lua 脚本，返回 nil 表示成功。
-	ExecuteAction(actionDef *ActionDef) error
+	// ctx 来自当前流程执行上下文，供声明式 / Lua 动作外壳共享同一取消语义。
+	ExecuteAction(ctx context.Context, actionDef *ActionDef) error
 	// ExecuteBoolean 对条件表达式求值，返回 true/false。
 	// 表达式支持 state: 前缀（从 StateStore 比较）和 lua: 前缀（调用 Lua 脚本）。
 	ExecuteBoolean(expression string) bool
@@ -241,7 +243,7 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 		return fmt.Errorf("%w: %s", ErrActionNotFound, node.Action)
 	}
 
-	err := e.handler.ExecuteAction(actionDef)
+	err := e.handler.ExecuteAction(ctx, actionDef)
 	if err != nil {
 		// ctx 取消优先：任务级停止不走 errorStrategy，也不执行节点延迟。
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

@@ -36,7 +36,7 @@ type Context struct {
 	Store   *state.Store
 	Factory *protox.Factory
 	// Resolver 按「server 串 <proto>:<service>」解析每条连接的 Go SchemaAdapter
-	// （T2-C2-Lua 起取代旧 Context.Adapter）。业务 Lua API（buildPacket / doTCPRequest /
+	// 取代旧 Context.Adapter。业务 Lua API（buildPacket / doTCPRequest /
 	// networkUDPSend / networkListen / headerErrDetail 等）通过 ctx.Resolver.Resolve
 	// （"<proto>:<service>"）取该连接的 adapter 后调 Encode/ExpectedRouteKey/DescribeError；
 	// Resolve nil 由调用方 fail loud（不静默兜底）。
@@ -550,7 +550,7 @@ func (rp *RuntimePool) ListScripts() []string {
 
 // registerAPIs 注册所有 Lua API 模块到 LState。
 //
-// T2-C2-Lua 起「adapter」Lua 模块已下线——业务 encode/decode 全走 Go CodecResolver
+// 「adapter」Lua 模块已下线——业务 encode/decode 全走 Go CodecResolver
 // （ctx.Resolver.Resolve），不再需要业务 LState 上的适配器脚本副本。conf/scripts 经 grep
 // 确认零依赖 adapter 模块。
 func registerAPIs(L *lua.LState) {

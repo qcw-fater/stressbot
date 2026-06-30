@@ -1,8 +1,8 @@
 /**
- * Agent 节点面板：FloatingWindow + Vue 风格指标卡片。
+ * 压测节点面板：FloatingWindow + 指标卡片。
  *
- * 每个 Agent 一张全宽卡片（header + Circle 仪表盘 + 信息列含操作按钮），
- * 纵向堆叠。"全部关闭"发送 shutdown 信号关闭 Agent 进程。
+ * 每个节点一张全宽卡片（header + Circle 仪表盘 + 信息列含操作按钮），
+ * 纵向堆叠。"全部关闭"发送 shutdown 信号关闭节点进程。
  */
 
 import { App as AntApp, Button, Empty, Progress, Space, Tooltip } from 'antd';

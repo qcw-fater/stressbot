@@ -939,13 +939,10 @@ type ActionError struct {
 | 方法 | 说明 |
 |------|------|
 | `NewActionError(code, detail, ...cause)` | 创建结构化错误（框架码 <100 / 业务码 ≥100 统一入口） |
-| `NewTimeoutError(code, detail)` | 创建超时错误（包装 `ErrTimeout`） |
-
 ### 16.4 哨兵错误
 
 | 错误 | 用途 |
 |------|------|
-| `ErrTimeout` | 动作超时，被 `NewTimeoutError` 包装 |
 | `ErrNodeNotFound` | 节点 ID 不存在 |
 | `ErrUnknownNodeType` | 未知的节点 Type |
 | `ErrActionNotFound` | 动作名不存在 |

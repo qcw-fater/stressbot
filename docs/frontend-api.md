@@ -247,8 +247,8 @@ Content-Type: multipart/form-data
 | `scripts/<filename>` | file | 否 | 多个 .lua 文件 |
 | `robotConfig` | string (JSON) | 是 | RobotConfig 序列化 |
 | `deadline` | string (RFC3339) | 否 | 自动停止时间 |
-| `adapter/codec.lua` | file | 否 | 协议适配器 |
-| `adapter/error.lua` | file | 否 | 错误码映射 |
+| `adapter/<name>_codec.json` | file | 否 | 声明式 codec 配置，可多份 |
+| `adapter/errors.json` | file | 否 | 错误码映射 |
 
 > 实际由 `services/taskActions.ts` 的 `startTask()` 组装 FormData，只提交 flow 引用到的脚本，proto 全量提交。
 
@@ -1218,7 +1218,7 @@ async function startTask(opts: StartTaskOptions): Promise<string>
 2. `clearMonitorData()` + 清 metricsProvider
 3. `syncFlowScriptsToIdb()` 同步脚本
 4. 容量预检：`sum(online agents.maxBots) >= totalBots`
-5. 组装 multipart（flow.json + proto + scripts + adapter + error.lua）
+5. 组装 multipart（flow.json + proto + scripts + `*_codec.json` + errors.json）
 6. `tasksApi.createTask(fd)` → `tasksApi.startTask(id)`
 7. 更新 runtimeStore：mode='running', ownedTaskId, activeTask
 
@@ -1265,8 +1265,8 @@ async function attachToActive(taskId: string): Promise<void>
 | `fetchBaselineScript(name)` | `/sbot/baseline/scripts/<name>` | 脚本内容 |
 | `fetchBaselineProtoIndex()` | `/sbot/baseline/proto/index.json` | proto 文件列表 |
 | `fetchBaselineProtoContent(name)` | `/sbot/baseline/proto/<name>` | proto 内容 |
-| `fetchBaselineAdapter()` | `/sbot/baseline/adapter/codec.lua` | 协议适配器 |
-| `fetchBaselineErrorMap()` | `/sbot/baseline/adapter/error.lua` | 错误码映射 |
+| `fetchBaselineCodecIndex()` | `/sbot/baseline/adapter/index.json` | adapter 文件列表 |
+| `fetchBaselineCodec(name)` | `/sbot/baseline/adapter/<name>` | 指定 codec/errors 文件 |
 
 ---
 
@@ -1280,7 +1280,7 @@ async function attachToActive(taskId: string): Promise<void>
 |---|---|---|
 | `stressbot-resources-proto` | `data` | 用户上传的 .proto 文件 |
 | `stressbot-resources-scripts` | `data` | 用户上传/编辑的 .lua 脚本 |
-| `stressbot-resources-adapter` | `data` | codec.lua / error.lua |
+| `stressbot-resources-adapter` | `data` | `*_codec.json` / `errors.json` |
 
 ### 14.2 ResourceFile 数据模型
 
@@ -1319,13 +1319,13 @@ interface ResourceFile {
 
 | 函数 | 说明 |
 |---|---|
-| `getAdapterScript()` | 获取 codec.lua |
-| `setAdapterScript(content)` | 设置 codec.lua |
-| `clearAdapterScript()` | 删除 |
-| `getErrorMapScript()` | 获取 error.lua |
-| `setErrorMapScript(content)` | 设置 error.lua |
-| `clearErrorMapScript()` | 删除 |
-| `validateAdapter()` | 检查必需函数完整性 |
+| `getCodecSchema(name)` | 获取单个 `*_codec.json` |
+| `setCodecSchema(name, content)` | 设置单个 `*_codec.json` |
+| `clearCodecSchema(name)` | 删除单个 codec 配置 |
+| `listCodecFiles()` | 列出全部 `*_codec.json` |
+| `getErrorMap()` | 获取共享 `errors.json` |
+| `setErrorMap(content)` | 设置共享 `errors.json` |
+| `clearErrorMap()` | 删除共享错误码映射 |
 
 ### 14.6 基线同步
 
@@ -1467,8 +1467,8 @@ interface ScriptSyncResult {
 | GET | `/sbot/baseline/proto/{name}` | `handleBaselineProtoFile` |
 | GET | `/sbot/baseline/scripts/index.json` | `handleBaselineScriptIndex` |
 | GET | `/sbot/baseline/scripts/{name}` | `handleBaselineScriptFile` |
-| GET | `/sbot/baseline/adapter/codec.lua` | `handleBaselineAdapter` |
-| GET | `/sbot/baseline/adapter/error.lua` | `handleBaselineErrorMap` |
+| GET | `/sbot/baseline/adapter/index.json` | `handleBaselineCodecIndex` |
+| GET | `/sbot/baseline/adapter/{name}` | `handleBaselineCodecFile` |
 | GET | `/sbot/baseline/flow/flow.json` | `handleBaselineFlow` |
 | GET | `/sbot/baseline/config.json` | `handleBaselineConfig` |
 

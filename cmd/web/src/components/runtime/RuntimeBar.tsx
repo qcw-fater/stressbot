@@ -357,7 +357,7 @@ export function RuntimeBar({
             const detailLines: string[] = [];
             if (summary.message) detailLines.push(summary.message);
             if (summary.timeoutRobots) detailLines.push(`超时机器人 ${summary.timeoutRobots}`);
-            if (summary.luaSkipped) detailLines.push(`Lua 未归还 ${summary.luaSkipped}`);
+            if (summary.luaSkipped) detailLines.push(`脚本运行时未归还 ${summary.luaSkipped}`);
             return (
               <Tooltip title={detailLines.join('；') || info.label}>
                 <Tag color={info.color} style={{ margin: 0 }}>{info.label}</Tag>
@@ -461,7 +461,7 @@ export function RuntimeBar({
             </Button>
           </Badge>
         </Tooltip>
-        <Tooltip title="资源管理（proto / lua / 适配器）：编辑定义文件并下发到节点">
+        <Tooltip title="资源管理：编辑定义文件与脚本，并在启动任务时下发到节点">
           <Badge
             count={pendingSyncResult ? pendingSyncResult.conflicts.length + pendingSyncResult.removed.length : 0}
             overflowCount={99}
@@ -476,7 +476,7 @@ export function RuntimeBar({
         <Tooltip
           title={
             historyEnabled === false
-              ? '历史压测记录（历史记录功能未启用，请联系管理员）'
+              ? '历史压测记录（历史记录功能未启用，请检查服务器配置）'
               : '历史压测记录'
           }
         >

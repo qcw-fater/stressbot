@@ -4,7 +4,7 @@
  * 设计要点：
  * - 所有非 2xx 响应（包括网络错误）一律抛出 `ApiError` 实例，调用方按 `code` 分支处理；
  * - `204 No Content` 返回 `undefined`，调用方按 `Promise<void>` 接住即可；
- * - 不依赖 axios，使用浏览器原生 fetch；浏览器开发期通过 vite proxy 转到 Admin :7718。
+ * - 不依赖 axios，使用浏览器原生 fetch；浏览器开发期通过 Vite proxy 转到后端服务器。
  *
  * 单一事实源：docs/api-monitor.md §3.3 / §14.13.1。
  */
@@ -32,7 +32,7 @@ export class ApiError extends Error {
   }
 }
 
-/** API 前缀；vite dev server 会代理到 Admin :7718，生产由 Admin 同源托管。 */
+/** API 前缀；Vite dev server 会代理到后端服务器，生产由服务器同源托管。 */
 
 /** 内部统一入口：所有方法走它。 */
 async function request<T>(method: string, path: string, init?: RequestInit): Promise<T> {
@@ -63,7 +63,7 @@ async function request<T>(method: string, path: string, init?: RequestInit): Pro
     return undefined as T;
   }
 
-  // 大部分接口都是 application/json，少数（如 /api/metrics/summary）返回 text/plain；
+  // 大部分接口都是 application/json，少数（如 metrics summary）返回 text/plain；
   // 调用侧主动选择走 `requestText` 即可，这里默认按 JSON 解析。
   return (await res.json()) as T;
 }
@@ -118,7 +118,7 @@ export function getErrorCodes(): Promise<FrameworkCode[]> {
   return getJson<FrameworkCode[]>('/api/error-codes');
 }
 
-/** 文本响应（用于 /api/metrics/summary 等纯文本接口） */
+/** 文本响应（用于 metrics summary 等纯文本接口） */
 export async function getText(path: string, init?: RequestInit): Promise<string> {
   const url = path.startsWith('http') ? path : API_PREFIX + path;
   let res: Response;
@@ -139,7 +139,7 @@ export async function getText(path: string, init?: RequestInit): Promise<string>
 /**
  * 兼容后端"裸数组"或"{items}"两种返回格式，统一吐出 `{items, total}`。
  *
- * 后端 `handleListTasks/handleListAgents/handleListBinaries` 直接返回 `[]T`，
+ * 后端部分列表接口直接返回 `[]T`，
  * 但前端约定 `{items, total}` 形态便于后续追加分页元数据；
  * 这里在 services 层抹平差异，让 store / 组件代码不感知差别。
  */

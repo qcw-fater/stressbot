@@ -1,10 +1,10 @@
 /**
- * 资源管理 Drawer：管理用户上传到 IndexedDB 的 proto / lua 文件。
+ * 资源管理 Drawer：管理用户上传到本地存储的定义文件与脚本。
  *
  * 设计要点：
- * - 两个 Tab：proto / lua；前两者复用 ResourceTable。
- * - 协议配置（codec.json / errors.json）已抽离为独立的 ProtocolConfigEditor（B1-1），后续挂浮窗。
- * - 顶部提供「拉取」按钮做显式同步（svn update），不再自动拉取；
+ * - 两个 Tab：Proto / Lua；二者复用 ResourceTable。
+ * - 协议配置（*_codec.json / errors.json）已抽离为独立的 ProtocolConfigEditor。
+ * - 顶部提供「拉取」按钮做显式同步（拉取服务器基线），不再自动拉取；
  * - 冲突通过 BaselineSyncModal 显式处理；本地改动会在启动任务时随配置一并提交到服务器，无需单独推送。
  */
 
@@ -268,7 +268,7 @@ function ResourceTable({ kind }: ResourceTableProps) {
       toWrite = Array.from(batch.values());
     }
 
-    // 阶段 3：写入 IndexedDB
+    // 阶段 3：写入本地存储
     if (toWrite.length > 0) {
       if (kind === 'proto') {
         await addProtos(toWrite);

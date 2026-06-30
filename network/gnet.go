@@ -121,8 +121,8 @@ func (es *EventServer) OnClose(gconn gnet.Conn, err error) gnet.Action {
 // closeReasonFromErr 把 gnet 给的 close error 归一化为短标签字符串。
 //
 // 设计：保留辨识度但去除冗长的地址/系统调用名，让前端面板能直接展示；
-// 同一类断开归一为同一个标签便于聚合（避免每个连接的 IP:port 撑出唯一字符串
-// 爆炸聚合维度，monitor 用 (Kind,Code,Detail) 做错误聚合）。
+// 同一类断开归一为同一个标签便于按 code 单维聚合，并避免每个连接的
+// IP:port 撑出唯一 detail。
 func closeReasonFromErr(err error) string {
 	if err == nil {
 		return ""

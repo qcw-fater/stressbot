@@ -275,7 +275,7 @@ type StoreMapping struct {
 type ListenDef struct {
 	S2CProto string         `json:"s2cProto"` // 解析推送消息的 proto 全名
 	Store    []StoreMapping `json:"store"`    // 响应字段到 StateStore 的映射
-	Script   string         `json:"script"`   // 已废弃：listen 脚本回调不再支持
+	Script   string         `json:"script"`   // Lua listen 回调脚本；与 Store 互斥，推送到达后串行执行
 }
 
 // Node 获取指定 ID 的节点
