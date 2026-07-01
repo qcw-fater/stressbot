@@ -6,16 +6,15 @@
  * 这样用户在 listen 节点（ListenCard）上直接编辑监听路由，无需回到 action 节点。
  */
 
-import { Button, List, Space, Tooltip, Typography } from 'antd';
+import { Button, List, Tooltip, Typography } from 'antd';
 import { DeleteOutlined } from '@ant-design/icons';
 import { useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useFlowStore } from '../store/flowStore';
 import { useEditorStore } from '../store/editorStore';
 import { buildRefsGraph } from './refsGraph';
-import { RouteEditor } from './RouteEditor';
 import { monoCellStyle } from '../styles/inlineStyles';
-import { CodecServerSelect } from '../codec/CodecConnectionSelect';
+import { TargetConnectionRouteEditor } from '../codec/TargetConnectionRouteEditor';
 import { useCodecConnections, useCodecRouteSpecs } from '../codec/useCodecConnections';
 
 export interface BackrefListProps {
@@ -103,43 +102,19 @@ export function BackrefList({ listenName }: BackrefListProps) {
               />
             </Tooltip>
           </div>
-          <Space.Compact style={{ width: '100%', marginBottom: 4 }}>
-            <span style={{ display: 'flex', alignItems: 'center', padding: '0 11px', background: 'var(--container-bg)', border: '1px solid var(--border-color)', borderRadius: '6px 0 0 6px', fontSize: 12, whiteSpace: 'nowrap' }}>server</span>
-            <CodecServerSelect
-              size="small"
-              value={r.ref.server}
-              connections={connections}
-              loading={connectionsLoading}
-              error={connectionsError}
-              onChange={(server) => updateRefField(r.nodeId, r.refIndex, { server: server ?? '' })}
-            />
-          </Space.Compact>
-          <Space.Compact style={{ width: '100%' }}>
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                padding: '0 11px',
-                background: 'var(--bg-panel, rgba(0,0,0,0.02))',
-                border: '1px solid var(--border-color, rgba(0,0,0,0.15))',
-                borderRight: 'none',
-                borderRadius: '6px 0 0 6px',
-                color: 'var(--text-tertiary)',
-                fontSize: 12,
-              }}
-            >
-              route
-            </span>
-            <RouteEditor
-              size="small"
-              value={r.ref.route}
-              server={r.ref.server}
-              routeKeyTemplate={r.ref.server ? specs.get(r.ref.server)?.routeKeyTemplate : undefined}
-              loading={routeSpecsLoading}
-              error={routeSpecsError}
-              onChange={(v) => updateRefField(r.nodeId, r.refIndex, { route: v })}
-            />
-          </Space.Compact>
+          <TargetConnectionRouteEditor
+            size="small"
+            server={r.ref.server}
+            onChangeServer={(server) => updateRefField(r.nodeId, r.refIndex, { server: server ?? '' })}
+            route={r.ref.route}
+            onChangeRoute={(v) => updateRefField(r.nodeId, r.refIndex, { route: v })}
+            connections={connections}
+            connectionsLoading={connectionsLoading}
+            connectionsError={connectionsError}
+            specs={specs}
+            routeSpecsLoading={routeSpecsLoading}
+            routeSpecsError={routeSpecsError}
+          />
         </List.Item>
       )}
     />

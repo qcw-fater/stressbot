@@ -7,16 +7,15 @@ import { ApiOutlined } from '@ant-design/icons';
 import { useState } from 'react';
 import type { ActionDef, ActionPattern } from '@/types/action';
 import { ProtoBrowser } from '../../proto/ProtoBrowser';
-import { RouteEditor } from '../../listens/RouteEditor';
 import { BindingsTable } from './BindingsTable';
 import { StoreTable } from './StoreTable';
 import { HeartbeatFields } from './HeartbeatFields';
 import { useRuntimeStore } from '@/services/runtimeStore';
 import { useFlowStore } from '../../store/flowStore';
 import { protoRegistry } from '../../proto/ProtoRegistry';
-import { CodecServiceSelect } from '../../codec/CodecConnectionSelect';
 import { useCodecConnections, useCodecRouteSpecs } from '../../codec/useCodecConnections';
-import type { CodecProtocol } from '@/services/codecConnections';
+import { actionProtocol } from '../../codec/connectionRouteModel';
+import { TargetConnectionRouteEditor } from '../../codec/TargetConnectionRouteEditor';
 
 export interface DeclarativeFormProps {
   action: ActionDef;
@@ -39,6 +38,7 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
 
   const showService = patternHas(pattern, ['service']);
   const showRoute = patternHas(pattern, ['route']);
+  const showTargetConnection = showService && showRoute;
   const showAddress = patternHas(pattern, ['address']);
   const showC2S = patternHas(pattern, ['c2sProto']);
   const showS2C = patternHas(pattern, ['s2cProto']);
@@ -52,8 +52,6 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
   const showContentType = pattern === 'httpRequest';
   const isHeartbeat = pattern === 'tcpHeartbeat' || pattern === 'udpHeartbeat';
   const protocol = actionProtocol(pattern);
-  const server = protocol && action.service ? `${protocol}:${action.service}` : undefined;
-  const routeSpec = server ? specs.get(server) : undefined;
 
   return (
     <Form layout="vertical">
@@ -97,32 +95,37 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
         </Form.Item>
       )}
 
-      {showService && protocol && (
-        <Form.Item label="service（目标服务名）">
-          <CodecServiceSelect
+      {showTargetConnection && protocol && (
+        <Form.Item label="目标连接 + route 模板字段">
+          <TargetConnectionRouteEditor
             protocol={protocol}
-            value={action.service}
-            onChange={(v) => set({ service: v })}
+            service={action.service}
+            onChangeService={(v) => set({ service: v })}
+            route={action.route}
+            onChangeRoute={(v) => set({ route: v })}
             connections={connections}
-            loading={connectionsLoading}
-            error={connectionsError}
+            connectionsLoading={connectionsLoading}
+            connectionsError={connectionsError}
+            specs={specs}
+            routeSpecsLoading={routeSpecsLoading}
+            routeSpecsError={routeSpecsError}
           />
         </Form.Item>
       )}
 
-      {showRoute && (
-        <Form.Item label="route（不透明路由结构）">
-          <RouteEditor
-            value={action.route}
-            onChange={(v) => set({ route: v })}
-            server={server}
-            routeKeyTemplate={routeSpec?.routeKeyTemplate}
-            loading={routeSpecsLoading}
-            error={routeSpecsError}
+      {showService && !showRoute && protocol && (
+        <Form.Item label="目标连接">
+          <TargetConnectionRouteEditor
+            protocol={protocol}
+            service={action.service}
+            onChangeService={(v) => set({ service: v })}
+            connections={connections}
+            connectionsLoading={connectionsLoading}
+            connectionsError={connectionsError}
+            specs={specs}
+            routeSpecsLoading={routeSpecsLoading}
+            routeSpecsError={routeSpecsError}
           />
-          <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
-            根据所选 service 的 routeKeyTemplate 生成字段；引擎仍透传 route 给 adapter.codec。
-          </div>
         </Form.Item>
       )}
 
@@ -280,12 +283,6 @@ function patternHas(pattern: ActionPattern, fields: Array<keyof ActionDef>): boo
   };
   const allowed = map[pattern] ?? [];
   return fields.some((f) => allowed.includes(f));
-}
-
-function actionProtocol(pattern: ActionPattern): CodecProtocol | null {
-  if (pattern.startsWith('tcp')) return 'tcp';
-  if (pattern.startsWith('udp')) return 'udp';
-  return null;
 }
 
 function ProtoHint({ fullName }: { fullName?: string }) {

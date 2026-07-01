@@ -32,9 +32,8 @@ import type { ActionDef, ActionPattern } from '@/types/action';
 import type { ListenDef } from '@/types/listen';
 import { classifyListen, type ListenKind } from '@/types/listen';
 import { FloatingWindow } from '../panels/FloatingWindow';
-import { RouteEditor } from '../listens/RouteEditor';
 import { cloneListenDefaultRef } from './listenTemplateDefaults';
-import { CodecServerSelect } from '../codec/CodecConnectionSelect';
+import { TargetConnectionRouteEditor } from '../codec/TargetConnectionRouteEditor';
 import { useCodecConnections, useCodecRouteSpecs } from '../codec/useCodecConnections';
 
 export function TemplateEditorDrawer() {
@@ -236,20 +235,17 @@ function ListenTemplateBody({
         </div>
         {defaultRef ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <CodecServerSelect
-              value={defaultRef.server}
-              connections={connections}
-              loading={connectionsLoading}
-              error={connectionsError}
-              onChange={(server) => onChangeDefaultRef({ ...defaultRef, server: server ?? '' })}
-            />
-            <RouteEditor
-              value={defaultRef.route}
+            <TargetConnectionRouteEditor
               server={defaultRef.server}
-              routeKeyTemplate={defaultRef.server ? specs.get(defaultRef.server)?.routeKeyTemplate : undefined}
-              loading={routeSpecsLoading}
-              error={routeSpecsError}
-              onChange={(route) => onChangeDefaultRef({ ...defaultRef, route })}
+              onChangeServer={(server) => onChangeDefaultRef({ ...defaultRef, server: server ?? '' })}
+              route={defaultRef.route}
+              onChangeRoute={(route) => onChangeDefaultRef({ ...defaultRef, route })}
+              connections={connections}
+              connectionsLoading={connectionsLoading}
+              connectionsError={connectionsError}
+              specs={specs}
+              routeSpecsLoading={routeSpecsLoading}
+              routeSpecsError={routeSpecsError}
             />
           </div>
         ) : (

@@ -11,10 +11,9 @@ import type { ListenRef } from '@/types/flow';
 import { classifyListen } from '@/types/listen';
 import { useFlowStore } from '../store/flowStore';
 import { useEditorStore } from '../store/editorStore';
-import { RouteEditor } from './RouteEditor';
 import { listenKindTagColor } from './listenKindStyle';
 import { useFloatingWindowStore } from '../store/floatingWindowStore';
-import { CodecServerSelect } from '../codec/CodecConnectionSelect';
+import { TargetConnectionRouteEditor } from '../codec/TargetConnectionRouteEditor';
 import { useCodecConnections, useCodecRouteSpecs } from '../codec/useCodecConnections';
 
 export interface ListenRefsTableProps {
@@ -114,44 +113,30 @@ export function ListenRefsTable({ nodeId }: ListenRefsTableProps) {
         scroll={{ x: 700 }}
         columns={[
           {
-            title: 'route',
+            title: '目标连接 + route 模板字段',
             dataIndex: 'route',
-            width: 260,
-            render: (_, r) => {
-              const spec = r.server ? specs.get(r.server) : undefined;
-              return (
-                <RouteEditor
-                  size="small"
-                  value={r.route}
-                  server={r.server}
-                  routeKeyTemplate={spec?.routeKeyTemplate}
-                  loading={routeSpecsLoading}
-                  error={routeSpecsError}
-                  onChange={(v) => {
-                    const arr = [...refs];
-                    arr[r._i] = { ...arr[r._i], route: v };
-                    set(arr);
-                  }}
-                />
-              );
-            },
-          },
-          {
-            title: 'server',
-            dataIndex: 'server',
-            width: 190,
+            width: 360,
             render: (_, r) => (
-              <CodecServerSelect
+              <TargetConnectionRouteEditor
                 size="small"
-                value={r.server}
-                connections={connections}
-                loading={connectionsLoading}
-                error={connectionsError}
-                onChange={(v) => {
+                server={r.server}
+                onChangeServer={(v) => {
                   const arr = [...refs];
                   arr[r._i] = { ...arr[r._i], server: v ?? '' };
                   set(arr);
                 }}
+                route={r.route}
+                onChangeRoute={(v) => {
+                  const arr = [...refs];
+                  arr[r._i] = { ...arr[r._i], route: v };
+                  set(arr);
+                }}
+                connections={connections}
+                connectionsLoading={connectionsLoading}
+                connectionsError={connectionsError}
+                specs={specs}
+                routeSpecsLoading={routeSpecsLoading}
+                routeSpecsError={routeSpecsError}
               />
             ),
           },
