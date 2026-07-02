@@ -461,7 +461,7 @@
   font-weight: 500;
 }
 
-.breakoff-badge {
+.onerror-badge {
   display: inline-flex;
   align-items: center;
   padding: 0 5px;

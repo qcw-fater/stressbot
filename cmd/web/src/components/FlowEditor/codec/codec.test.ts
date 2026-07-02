@@ -60,6 +60,63 @@ describe('codec round-trip', () => {
     expect(rfEdges.filter((e) => e.type === 'loopBody').length).toBe(expectedLoopBody);
   });
 
+  it('导出 onError 且不导出旧 errorStrategy 字段', () => {
+    const exported = flowToJson({
+      defaultDelayMs: 1000,
+      nodes: {
+        main: { type: 'action', action: 'A1', onError: { strategy: 'abort', ignoreCodes: [1001], retry: { maxRetries: 2, retryDelayMs: 500 } } },
+      },
+      actions: { A1: { pattern: 'clearState', keys: ['x'] } },
+      listens: {},
+    });
+    expect(exported.nodes.main).toEqual({
+      type: 'action',
+      action: 'A1',
+      onError: { ignoreCodes: [1001], retry: { maxRetries: 2, retryDelayMs: 500 }, strategy: 'abort' },
+    });
+    expect('errorStrategy' in (exported.nodes.main as unknown as Record<string, unknown>)).toBe(false);
+  });
+
+  it('空 onError 在导出时被裁剪', () => {
+    const exported = flowToJson({
+      defaultDelayMs: 1000,
+      nodes: { main: { type: 'action', action: 'A1', onError: { strategy: 'resume', retry: { maxRetries: 0, retryDelayMs: 0 }, ignoreCodes: [] } } },
+      actions: { A1: { pattern: 'clearState', keys: ['x'] } },
+      listens: {},
+    });
+    expect(exported.nodes.main.onError).toBeUndefined();
+  });
+
+  it('jsonToFlow 为 onError.handler 生成错误处理边', () => {
+    const { rfEdges } = jsonToFlow({
+      defaultDelayMs: 1000,
+      nodes: {
+        main: { type: 'sequence', next: ['act'] },
+        act: { type: 'action', action: 'A1', onError: { handler: 'cleanup' } },
+        cleanup: { type: 'action', action: 'Cleanup' },
+      },
+      actions: { A1: { pattern: 'clearState', keys: ['x'] }, Cleanup: { pattern: 'clearState', keys: ['y'] } },
+      listens: {},
+    });
+    const edge = rfEdges.find((e) => e.type === 'error');
+    expect(edge).toMatchObject({ source: 'act', target: 'cleanup', sourceHandle: 'error' });
+  });
+
+  it('jsonToFlow 不迁移旧 breakOff / errorStrategy 字段', () => {
+    const legacy = {
+      defaultDelayMs: 1000,
+      nodes: {
+        main: { type: 'action', action: 'A1', breakOff: true, errorStrategy: 'abort' },
+      },
+      actions: { A1: { pattern: 'clearState', keys: ['x'] } },
+      listens: {},
+    } as unknown as FlowJsonInput;
+    const { rfNodes, rfEdges } = jsonToFlow(legacy);
+    const node = rfNodes.find((n) => n.id === 'main')?.data as { node?: Record<string, unknown> };
+    expect(node.node?.onError).toBeUndefined();
+    expect(rfEdges.filter((e) => e.type === 'error')).toHaveLength(0);
+  });
+
   it('listenRefs 在导出时被保留', () => {
     const exported = flowToJson({
       defaultDelayMs: raw.defaultDelayMs,

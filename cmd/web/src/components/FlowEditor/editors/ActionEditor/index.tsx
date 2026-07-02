@@ -8,7 +8,7 @@
  * 由 NodeEditorDrawer 在 node.type === 'action' 时调用。
  */
 
-import { Alert, Button, Collapse, Form, Modal, Select, Space } from 'antd';
+import { Alert, Button, Collapse, Form, Modal, Space } from 'antd';
 import { EyeOutlined } from '@ant-design/icons';
 import { useMemo, useState } from 'react';
 import { useFlowStore } from '../../store/flowStore';
@@ -19,6 +19,7 @@ import { ListenRefsTable } from '../../listens/ListenRefsTable';
 import { DelayInput } from '../shared/DelayInput';
 import { SaveTemplateButton } from '../../library/SaveTemplateButton';
 import { ActionPreview } from './ActionPreview';
+import { OnErrorEditor } from './OnErrorEditor';
 import { LuaScriptField } from '../shared/LuaScriptField';
 import { pruneActionByPattern } from './actionPrune';
 import type { ActionDef, ActionPattern } from '@/types/action';
@@ -119,20 +120,10 @@ export function ActionEditor({ nodeId }: ActionEditorProps) {
         items={[
           {
             key: 'node',
-            label: '节点级字段（errorStrategy / delayMs）',
+            label: '节点级字段（onError / delayMs）',
             children: (
               <Form layout="vertical">
-                <Form.Item label="错误处理策略（动作失败时）">
-                  <Select
-                    value={node.errorStrategy || 'ignore'}
-                    onChange={(v) => updateNode(nodeId, { errorStrategy: v === 'ignore' ? undefined : v })}
-                    options={[
-                      { value: 'ignore', label: 'ignore（忽略当前错误）' },
-                      { value: 'skip', label: 'skip（跳过当前层级）' },
-                      { value: 'abort', label: 'abort（中止当前流程）' },
-                    ]}
-                  />
-                </Form.Item>
+                <OnErrorEditor nodeId={nodeId} node={node} />
                 <Form.Item label="节点延迟 delayMs">
                   <DelayInput value={node.delayMs} onChange={(v) => updateNode(nodeId, { delayMs: v })} />
                 </Form.Item>

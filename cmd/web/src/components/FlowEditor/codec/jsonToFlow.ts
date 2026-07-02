@@ -8,7 +8,8 @@
  *   loop.body                   → edge[source=id, sourceHandle='body', target=body, type='loopBody']
  *   boolean.trueNext/falseNext  → edge[source=id, sourceHandle='true'/'false', target=*, type='branch']
  *   weighted.options[i]         → edge[source=id, sourceHandle=`opt-${i}`, target=*, type='weight', label=weight]
- *   action.listenRefs[i]   → edge[source=id, sourceHandle='listen', target=`__cb__${callback}`, type='listen']（callback=null 不画边）
+ *   action.listenRefs[i]        → edge[source=id, sourceHandle='listen', target=`__cb__${callback}`, type='listen']（callback=null 不画边）
+ *   action.onError.handler      → edge[source=id, sourceHandle='error', target=handler, type='error']
  */
 
 import type { Edge, Node as RFNode } from '@xyflow/react';
@@ -41,13 +42,6 @@ export function jsonToFlow(flow: FlowJsonInput): ConvertResult {
   const nodesByListen: Record<string, string[]> = {};
 
   // 1. 主 DAG 节点
-  // 兼容旧 breakOff → errorStrategy
-  for (const node of Object.values(flow.nodes) as unknown as Record<string, unknown>[]) {
-    if ((node as Record<string, unknown>).breakOff && !(node as Record<string, unknown>).errorStrategy) {
-      (node as Record<string, unknown>).errorStrategy = 'abort';
-    }
-    delete (node as Record<string, unknown>).breakOff;
-  }
   for (const [id, node] of Object.entries(flow.nodes)) {
     rfNodes.push({
       id,
@@ -104,7 +98,7 @@ function emitEdgesFor(id: string, node: FlowNode, flow: FlowJsonInput): Edge[] {
     case 'sequence':
       return emitSequenceEdges(id, node.next ?? []);
     case 'action':
-      return emitListenEdges(id, node.listenRefs ?? [], flow);
+      return [...emitListenEdges(id, node.listenRefs ?? [], flow), ...emitOnErrorEdges(id, node)];
     case 'loop':
       return node.body ? [makeEdge(`${id}->body->${node.body}`, id, node.body, 'loopBody', 'body')] : [];
     case 'boolean': {
@@ -161,6 +155,12 @@ function emitListenEdges(id: string, refs: ListenRef[], flow: FlowJsonInput): Ed
     );
   });
   return out;
+}
+
+function emitOnErrorEdges(id: string, node: FlowNode): Edge[] {
+  const handler = node.onError?.handler;
+  if (!handler) return [];
+  return [makeEdge(`${id}->error->${handler}`, id, handler, 'error', 'error', { relation: 'onErrorHandler' })];
 }
 
 function makeEdge(

@@ -8,6 +8,7 @@ import { BranchEdge } from './BranchEdge';
 import { WeightEdge } from './WeightEdge';
 import { LoopBodyEdge } from './LoopBodyEdge';
 import { ListenEdge } from './ListenEdge';
+import { ErrorEdge } from './ErrorEdge';
 
 export const edgeTypes: EdgeTypes = {
   seq: SeqEdge,
@@ -15,4 +16,5 @@ export const edgeTypes: EdgeTypes = {
   weight: WeightEdge,
   loopBody: LoopBodyEdge,
   listen: ListenEdge,
+  error: ErrorEdge,
 };

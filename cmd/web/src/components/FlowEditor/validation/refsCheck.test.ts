@@ -55,6 +55,64 @@ describe('validateFlow', () => {
     expect(r.errors.find((e) => e.code === 'WEIGHTED_ALL_ZERO')).toBeTruthy();
   });
 
+  // ── onError ──
+
+  it('合法 onError 配置无错误', () => {
+    const r = validateFlow(baseFlow({
+      nodes: {
+        main: { type: 'sequence', next: ['act1', 'cleanup'] },
+        act1: { type: 'action', action: 'A1', onError: { strategy: 'abort', ignoreCodes: [1001], handler: 'cleanup', retry: { maxRetries: 2, retryDelayMs: 500 } } },
+        cleanup: { type: 'action', action: 'A2' },
+      },
+      actions: {
+        A1: { pattern: 'tcpSend', service: 'logic', route: { cmd: 1, act: 1 }, c2sProto: 'X.Foo' },
+        A2: { pattern: 'clearState', keys: ['x'] },
+      },
+    }));
+    expect(r.errors.filter((e) => e.code.startsWith('ON_ERROR'))).toEqual([]);
+  });
+
+  it('ON_ERROR_STRATEGY_INVALID：非法 strategy 报错', () => {
+    const r = validateFlow(baseFlow({ nodes: { main: { type: 'sequence', next: ['act1'] }, act1: { type: 'action', action: 'A1', onError: { strategy: 'bad' as 'abort' } } } }));
+    expect(r.errors.find((e) => e.code === 'ON_ERROR_STRATEGY_INVALID')).toBeTruthy();
+  });
+
+  it('ON_ERROR_IGNORE_CODE_INVALID：ignoreCodes 必须是正整数', () => {
+    const r = validateFlow(baseFlow({ nodes: { main: { type: 'sequence', next: ['act1'] }, act1: { type: 'action', action: 'A1', onError: { ignoreCodes: [0, -1, 1.5] } } } }));
+    expect(r.errors.filter((e) => e.code === 'ON_ERROR_IGNORE_CODE_INVALID')).toHaveLength(3);
+  });
+
+  it('ON_ERROR_HANDLER_NOT_FOUND：handler 指向不存在节点报错', () => {
+    const r = validateFlow(baseFlow({ nodes: { main: { type: 'sequence', next: ['act1'] }, act1: { type: 'action', action: 'A1', onError: { handler: 'ghost' } } } }));
+    expect(r.errors.find((e) => e.code === 'ON_ERROR_HANDLER_NOT_FOUND')).toBeTruthy();
+  });
+
+  it('ON_ERROR_HANDLER_SELF：handler 指向自身报错', () => {
+    const r = validateFlow(baseFlow({ nodes: { main: { type: 'sequence', next: ['act1'] }, act1: { type: 'action', action: 'A1', onError: { handler: 'act1' } } } }));
+    expect(r.errors.find((e) => e.code === 'ON_ERROR_HANDLER_SELF')).toBeTruthy();
+  });
+
+  it('ON_ERROR_RETRY_*：retry 负数报错', () => {
+    const r = validateFlow(baseFlow({ nodes: { main: { type: 'sequence', next: ['act1'] }, act1: { type: 'action', action: 'A1', onError: { retry: { maxRetries: -1, retryDelayMs: -1 } } } } }));
+    expect(r.errors.find((e) => e.code === 'ON_ERROR_RETRY_MAX_INVALID')).toBeTruthy();
+    expect(r.errors.find((e) => e.code === 'ON_ERROR_RETRY_DELAY_INVALID')).toBeTruthy();
+  });
+
+  it('onError.handler 引用的节点不判定为孤立', () => {
+    const r = validateFlow(baseFlow({
+      nodes: {
+        main: { type: 'sequence', next: ['act1'] },
+        act1: { type: 'action', action: 'A1', onError: { handler: 'cleanup' } },
+        cleanup: { type: 'action', action: 'A2' },
+      },
+      actions: {
+        A1: { pattern: 'tcpSend', service: 'logic', route: { cmd: 1, act: 1 }, c2sProto: 'X.Foo' },
+        A2: { pattern: 'clearState', keys: ['x'] },
+      },
+    }));
+    expect(r.warnings.find((e) => e.code === 'NODE_ORPHAN' && e.location?.id === 'cleanup')).toBeFalsy();
+  });
+
   // ── ListenRef ──
 
   it('LISTEN_SERVER_FORMAT：server 格式错误报错', () => {

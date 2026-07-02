@@ -41,7 +41,7 @@ export interface FlowNode {
 
   // action 专用
   action?: string;
-  errorStrategy?: 'ignore' | 'skip' | 'abort';
+  onError?: OnErrorDef;
   listenRefs?: ListenRef[];
 
   // weighted 专用
@@ -59,6 +59,20 @@ export interface FlowNode {
 export interface WeightedOption {
   node: string;
   weight: number;
+}
+
+export type OnErrorStrategy = 'resume' | 'skip' | 'abort';
+
+export interface OnErrorDef {
+  ignoreCodes?: number[];
+  handler?: string;
+  retry?: RetryDef;
+  strategy?: OnErrorStrategy;
+}
+
+export interface RetryDef {
+  maxRetries?: number;
+  retryDelayMs?: number;
 }
 
 /**

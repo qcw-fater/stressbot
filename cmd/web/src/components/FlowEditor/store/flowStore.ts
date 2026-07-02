@@ -20,6 +20,7 @@ import { dagreLayout } from '../codec/dagreLayout';
 import { jsonToFlow } from '../codec/jsonToFlow';
 import { flowToJson, type FlowJson } from '../codec/flowToJson';
 import { validateFlow, type ValidationIssue } from '../validation/refsCheck';
+import { normalizeOnError } from '../utils/onError';
 
 interface FlowState {
   // ── 业务数据（与 flow.json 1:1） ────────
@@ -293,6 +294,9 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
         if (n.options?.some((o) => o.node === id)) {
           partial.options = n.options.filter((o) => o.node !== id);
         }
+        if (n.type === 'action' && n.onError?.handler === id) {
+          partial.onError = normalizeOnError({ ...n.onError, handler: undefined });
+        }
         if (Object.keys(partial).length > 0) {
           nodes[nid] = { ...n, ...partial };
         }
@@ -565,6 +569,9 @@ function renameRefsInNode(node: FlowNode, oldId: string, newId: string): FlowNod
   if (node.falseNext === oldId) out.falseNext = newId;
   if (node.options?.length) {
     out.options = node.options.map((o) => (o.node === oldId ? { ...o, node: newId } : o));
+  }
+  if (node.type === 'action' && node.onError?.handler === oldId) {
+    out.onError = { ...node.onError, handler: newId };
   }
   return out;
 }

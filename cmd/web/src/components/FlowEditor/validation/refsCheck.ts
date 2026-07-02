@@ -5,7 +5,7 @@
  * 覆盖原 cmd/validate 的全部校验（Lua 语法检查除外）。
  */
 
-import type { TaskFlow } from '@/types/flow';
+import type { OnErrorStrategy, TaskFlow } from '@/types/flow';
 import type { ActionDef, BindingType, FieldBind, FilterDef, HeartbeatField, HeartbeatFieldSource } from '@/types/action';
 import { ALL_ACTION_PATTERNS, ALL_BINDING_TYPES, ALL_HEARTBEAT_FIELD_TYPES, ALL_HEARTBEAT_FIELD_SOURCES } from '@/types/action';
 import { protoRegistry } from '../proto/ProtoRegistry';
@@ -43,6 +43,7 @@ const VALID_HEARTBEAT_TYPE_SET = new Set<string>(ALL_HEARTBEAT_FIELD_TYPES);
 const VALID_HEARTBEAT_SOURCE_SET = new Set<string>(ALL_HEARTBEAT_FIELD_SOURCES);
 
 const VALID_NODE_TYPES = new Set(['sequence', 'action', 'loop', 'boolean', 'weighted', 'wait', 'break', 'continue']);
+const VALID_ON_ERROR_STRATEGIES = new Set<OnErrorStrategy>(['resume', 'skip', 'abort']);
 
 const VALID_FILTER_OPS = new Set([
   '', '==', '!=', '>', '>=', '<', '<=',
@@ -235,14 +236,7 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
         });
       }
     } else if (node.type === 'action') {
-      // errorStrategy 值校验
-      if (node.errorStrategy && node.errorStrategy !== 'ignore' && node.errorStrategy !== 'skip' && node.errorStrategy !== 'abort') {
-        issues.push({
-          severity: 'warning', code: 'INVALID_ERROR_STRATEGY',
-          message: `action 节点 "${id}" 的 errorStrategy "${node.errorStrategy}" 不合法（应为 ignore、skip 或 abort）`,
-          location: { kind: 'node', id },
-        });
-      }
+      issues.push(...checkNodeOnError(id, node, nodes));
       if (!node.action) {
         issues.push({
           severity: 'error', code: 'ACTION_REF_EMPTY',
@@ -520,6 +514,67 @@ function checkAction(name: string, def: ActionDef): ValidationIssue[] {
   return issues;
 }
 
+// ── action 节点 onError 校验 ───────────────────────────────
+
+function checkNodeOnError(id: string, node: TaskFlow['nodes'][string], nodes: TaskFlow['nodes']): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const onError = node.onError;
+  if (!onError) return issues;
+
+  if (onError.strategy && !VALID_ON_ERROR_STRATEGIES.has(onError.strategy)) {
+    issues.push({
+      severity: 'error', code: 'ON_ERROR_STRATEGY_INVALID',
+      message: `action 节点 "${id}" 的 onError.strategy "${onError.strategy}" 不合法（应为 resume、skip 或 abort）`,
+      location: { kind: 'node', id },
+    });
+  }
+
+  (onError.ignoreCodes ?? []).forEach((code, i) => {
+    if (!Number.isInteger(code) || code <= 0) {
+      issues.push({
+        severity: 'error', code: 'ON_ERROR_IGNORE_CODE_INVALID',
+        message: `action 节点 "${id}" 的 onError.ignoreCodes[${i}] 必须是正整数（当前 ${code}）`,
+        location: { kind: 'node', id },
+      });
+    }
+  });
+
+  if (onError.handler) {
+    if (onError.handler === id) {
+      issues.push({
+        severity: 'error', code: 'ON_ERROR_HANDLER_SELF',
+        message: `action 节点 "${id}" 的 onError.handler 不能指向自身`,
+        location: { kind: 'node', id },
+      });
+    } else if (!nodes[onError.handler]) {
+      issues.push({
+        severity: 'error', code: 'ON_ERROR_HANDLER_NOT_FOUND',
+        message: `action 节点 "${id}" 的 onError.handler 指向不存在的 "${onError.handler}"`,
+        location: { kind: 'node', id },
+      });
+    }
+  }
+
+  if (onError.retry) {
+    if (onError.retry.maxRetries !== undefined && onError.retry.maxRetries < 0) {
+      issues.push({
+        severity: 'error', code: 'ON_ERROR_RETRY_MAX_INVALID',
+        message: `action 节点 "${id}" 的 onError.retry.maxRetries 必须 >= 0`,
+        location: { kind: 'node', id },
+      });
+    }
+    if (onError.retry.retryDelayMs !== undefined && onError.retry.retryDelayMs < 0) {
+      issues.push({
+        severity: 'error', code: 'ON_ERROR_RETRY_DELAY_INVALID',
+        message: `action 节点 "${id}" 的 onError.retry.retryDelayMs 必须 >= 0`,
+        location: { kind: 'node', id },
+      });
+    }
+  }
+
+  return issues;
+}
+
 // ── 心跳字段校验（tcpHeartbeat / udpHeartbeat） ─────────────
 //
 // 严格镜像 Go engine/action.go:execHeartbeat + engine/heartbeat.go：
@@ -756,7 +811,7 @@ function checkFilters(prefix: string, filters: FilterDef[], loc: { kind: 'action
 
 // ── 孤立节点检测 ─────────────────────────────────────────────
 
-function detectOrphanNodes(nodes: Record<string, { type: string; next?: string[]; body?: string; trueNext?: string; falseNext?: string; options?: Array<{ node: string }> }>): ValidationIssue[] {
+function detectOrphanNodes(nodes: Record<string, NodeLike>): ValidationIssue[] {
   const reachable = new Set<string>();
 
   const visit = (id: string) => {
@@ -769,6 +824,7 @@ function detectOrphanNodes(nodes: Record<string, { type: string; next?: string[]
     if (node.trueNext) visit(node.trueNext);
     if (node.falseNext) visit(node.falseNext);
     (node.options ?? []).forEach((o) => visit(o.node));
+    if (node.onError?.handler) visit(node.onError.handler);
   };
 
   visit('main');
@@ -788,7 +844,7 @@ function detectOrphanNodes(nodes: Record<string, { type: string; next?: string[]
 
 // ── break/continue 位置检测 ──────────────────────────────────
 
-type NodeLike = { type: string; next?: string[]; body?: string; trueNext?: string; falseNext?: string; options?: Array<{ node: string }> };
+type NodeLike = { type: string; next?: string[]; body?: string; trueNext?: string; falseNext?: string; options?: Array<{ node: string }>; onError?: { handler?: string } };
 
 /** 收集所有 loop body 子图中的节点 ID */
 function collectLoopBodyNodes(nodes: Record<string, NodeLike>): Set<string> {
@@ -803,6 +859,7 @@ function collectLoopBodyNodes(nodes: Record<string, NodeLike>): Set<string> {
     if (node.trueNext) visit(node.trueNext);
     if (node.falseNext) visit(node.falseNext);
     (node.options ?? []).forEach((o) => visit(o.node));
+    if (node.onError?.handler) visit(node.onError.handler);
   };
   for (const node of Object.values(nodes)) {
     if (node.type === 'loop' && node.body) {

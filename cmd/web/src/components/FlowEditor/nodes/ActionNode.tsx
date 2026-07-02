@@ -1,13 +1,13 @@
 /**
- * action 节点：左入 + 右出（专用于监听 listen）。
+ * action 节点：左入 + 右侧 listen 出口 + 底部 onError handler 出口。
  *
- * action 自身在父 sequence 内顺序执行，没有 next 字段，因此右侧 handle 仅承担"注册监听"语义：
- *   - 拖线到 listenCard → 追加 listenRefs
- *   - 拖线到普通节点不会建立任何业务关系（onConnect 中无视）
+ * action 自身在父 sequence 内顺序执行，没有 next 字段：
+ *   - listen handle：拖线到 listenCard，追加 listenRefs
+ *   - error handle：拖线到普通节点，设置 onError.handler（调用边，不写入 next）
  *
  * 极简化布局：
  *   第一行：节点 ID（独占）
- *   第二行：pattern 标签 + breakOff 徽章 + listen 徽章
+ *   第二行：pattern 标签 + onError 摘要 + listen 徽章
  *   详细字段（绑定、store、proto 等）在双击后的编辑面板中查看。
  */
 
@@ -28,6 +28,7 @@ export function ActionNode({ id, data, selected }: NodeProps) {
   const { node, action } = data as unknown as NodeData;
   const pattern = action?.pattern ?? '?';
   const listens = node.listenRefs?.length ?? 0;
+  const onErrorLabel = formatOnErrorLabel(node);
 
   return (
     <>
@@ -46,14 +47,9 @@ export function ActionNode({ id, data, selected }: NodeProps) {
               {pattern}
             </span>
           </Tooltip>
-          {node.errorStrategy === 'abort' && (
-            <Tooltip title="出错时中断流程">
-              <span className="breakoff-badge">abort</span>
-            </Tooltip>
-          )}
-          {node.errorStrategy === 'skip' && (
-            <Tooltip title="出错时跳过当前层级">
-              <span className="skip-badge">skip</span>
+          {onErrorLabel && (
+            <Tooltip title="动作失败后的 onError 错误处理链路">
+              <span className="onerror-badge">{onErrorLabel}</span>
             </Tooltip>
           )}
           {listens > 0 && (
@@ -64,6 +60,19 @@ export function ActionNode({ id, data, selected }: NodeProps) {
         </div>
       </NodeShell>
       <Handle type="source" position={Position.Right} id="listen" />
+      <Handle type="source" position={Position.Bottom} id="error" style={{ background: 'var(--color-error)' }} />
     </>
   );
+}
+
+function formatOnErrorLabel(node: FlowNode): string {
+  const onError = node.onError;
+  if (!onError) return '';
+  const parts: string[] = ['onError'];
+  const ignoreCount = onError.ignoreCodes?.length ?? 0;
+  if (ignoreCount > 0) parts.push(`ignore:${ignoreCount}`);
+  if ((onError.retry?.maxRetries ?? 0) > 0) parts.push(`retry:${onError.retry?.maxRetries}`);
+  if (onError.handler) parts.push('handler');
+  if (onError.strategy && onError.strategy !== 'resume') parts.push(onError.strategy);
+  return parts.length > 1 ? parts.join(' · ') : '';
 }

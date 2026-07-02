@@ -37,6 +37,7 @@ import type { FlowNode, NodeType } from '@/types/flow';
 import type { ActionDef } from '@/types/action';
 import type { ListenDef } from '@/types/listen';
 import { classifyListen } from '@/types/listen';
+import { normalizeOnError } from './utils/onError';
 
 interface ContextMenu {
   x: number;
@@ -285,6 +286,8 @@ function FlowCanvasInner() {
             listenRefs: src.listenRefs.filter((r) => r.listen !== listenName),
           });
         }
+      } else if (src.type === 'action' && handleId === 'error') {
+        updateNode(e.source, { onError: normalizeOnError({ ...(src.onError ?? {}), handler: undefined }) });
       }
     },
     [updateNode],
@@ -301,6 +304,7 @@ function FlowCanvasInner() {
    *   weighted  · opt-N      → options[N].node = target
    *   weighted  · opt-add    → options.push({ node: target, weight: 1 })
    *   action    · listen     → listenRefs.push({ listen })，target 必须是 listenCard
+   *   action    · error      → onError.handler = target，target 必须是普通节点
    *
    * 注：业务图通过 syncDerived 重算 rfEdges，所以这里不要直接 setEdges。
    */
@@ -357,8 +361,20 @@ function FlowCanvasInner() {
         updateNode(params.source, { listenRefs: list });
         return;
       }
+      if (src.type === 'action' && handle === 'error') {
+        if (!targetNodeId) {
+          message.warning('错误处理节点必须连接到普通节点');
+          return;
+        }
+        if (targetNodeId === params.source) {
+          message.warning('错误处理节点不能指向自身');
+          return;
+        }
+        updateNode(params.source, { onError: normalizeOnError({ ...(src.onError ?? {}), handler: targetNodeId }) });
+        return;
+      }
     },
-    [readOnly, updateNode],
+    [message, readOnly, updateNode],
   );
 
   const onNodesDelete = useCallback(

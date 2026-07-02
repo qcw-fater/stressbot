@@ -6,7 +6,7 @@
 
 import type { ActionDef, FieldBind, FilterDef, StoreMapping } from '@/types/action';
 import type { ListenDef } from '@/types/listen';
-import type { FlowNode, ListenRef, WeightedOption } from '@/types/flow';
+import type { FlowNode, ListenRef, OnErrorDef, RetryDef, WeightedOption } from '@/types/flow';
 import { pruneActionByPattern } from '../editors/ActionEditor/actionPrune';
 
 export interface ExportInput {
@@ -43,7 +43,10 @@ function cleanNode(n: FlowNode): FlowNode {
       break;
     case 'action':
       if (n.action) out.action = n.action;
-      if (n.errorStrategy && n.errorStrategy !== 'ignore') out.errorStrategy = n.errorStrategy;
+      {
+        const onError = cleanOnError(n.onError);
+        if (onError) out.onError = onError;
+      }
       if (n.listenRefs?.length) out.listenRefs = n.listenRefs.map(cleanListenRef);
       if (typeof n.delayMs === 'number' && n.delayMs !== 0) out.delayMs = n.delayMs;
       break;
@@ -74,12 +77,40 @@ function cleanNode(n: FlowNode): FlowNode {
   return out;
 }
 
+function cleanOnError(onError: OnErrorDef | undefined): OnErrorDef | undefined {
+  if (!onError) return undefined;
+  const out: OnErrorDef = {};
+
+  const ignoreCodes = (onError.ignoreCodes ?? []).filter((code) => Number.isInteger(code) && code > 0);
+  if (ignoreCodes.length > 0) out.ignoreCodes = ignoreCodes;
+
+  const handler = onError.handler?.trim();
+  if (handler) out.handler = handler;
+
+  const retry = cleanRetry(onError.retry);
+  if (retry) out.retry = retry;
+
+  if (onError.strategy && onError.strategy !== 'resume') out.strategy = onError.strategy;
+
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function cleanRetry(retry: RetryDef | undefined): RetryDef | undefined {
+  if (!retry) return undefined;
+  const out: RetryDef = {};
+  if (typeof retry.maxRetries === 'number' && retry.maxRetries > 0) out.maxRetries = retry.maxRetries;
+  if (typeof retry.retryDelayMs === 'number' && retry.retryDelayMs > 0) out.retryDelayMs = retry.retryDelayMs;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function cleanListenRef(r: ListenRef): ListenRef {
-  return {
+  const out: ListenRef = {
     route: r.route,
     server: r.server,
     listen: r.listen,
   };
+  if (typeof r.queueSize === 'number') out.queueSize = r.queueSize;
+  return out;
 }
 
 function cleanAction(a: ActionDef): ActionDef {
