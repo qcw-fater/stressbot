@@ -20,7 +20,7 @@ const (
 	ErrCreateMsg  ErrorCode = 21 // 创建 C2S proto 消息失败
 	ErrBindField  ErrorCode = 22 // 必需字段绑定失败（Required=true）
 	ErrSerialize  ErrorCode = 23 // C2S 消息序列化失败
-	ErrExecFailed ErrorCode = 24 // 动作执行失败（errorStrategy=abort）
+	ErrExecFailed ErrorCode = 24 // 动作执行失败（onError.strategy=abort）
 
 	// 监听层 (31-40)
 	ErrListenTimeout  ErrorCode = 31 // TCP/UDP Listen 轮询超时

@@ -33,7 +33,7 @@ type Adapter interface {
 	// DecodeTCP 将 TCP 数据包解码为路由键、消息体和协议头错误码。
 	// routeKey 是字符串路由键，用于请求-响应匹配和监听分发。
 	// 格式由适配器决定，典型格式："{cmd}:{act}"，如 "3:1"。
-	// headerErr 为协议头错误码；非零表示服务端业务失败，调用方负责记录并进入 errorStrategy。
+	// headerErr 为协议头错误码；非零表示服务端业务失败，调用方负责记录并进入 action onError 链路。
 	DecodeTCP(data []byte, secretKey []byte) (routeKey string, body []byte, headerErr uint64)
 
 	// DecodeUDP 将 UDP 数据包解码为路由键、消息体和协议头错误码。

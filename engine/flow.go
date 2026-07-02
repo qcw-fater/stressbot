@@ -3,6 +3,8 @@
 // 所有结构均可从 JSON 配置加载，无需硬编码行为逻辑。
 package engine
 
+import "stressbot/errcode"
+
 // TaskFlow 流程图定义。
 // 由一组 Node 组成的有向图，从 "main" 节点开始串行执行。
 // nodes 使用 JSON object（key = 节点 ID），无需自定义反序列化。
@@ -43,9 +45,9 @@ type Node struct {
 	FalseNext string `json:"falseNext"` // 条件为 false 时跳转的节点 ID（空 = 不跳转）
 
 	// ── action 专用 ─────────────────────────────────────────────
-	Action        string      `json:"action"`        // 引用 actions 表中的动作名称
-	ErrorStrategy string      `json:"errorStrategy"` // "abort" = 中断整个流程；"skip" = 跳过当前层级；空/"ignore" = 忽略继续
-	ListenRefs    []ListenRef `json:"listenRefs"`    // 动作执行后注册的持久化推送监听引用
+	Action     string      `json:"action"`     // 引用 actions 表中的动作名称
+	OnError    *OnErrorDef `json:"onError"`    // 动作失败后的错误链路（ignoreCodes/handler/retry/strategy）
+	ListenRefs []ListenRef `json:"listenRefs"` // 动作执行后注册的持久化推送监听引用
 
 	// ── weighted 专用 ─────────────────────────────────────────────
 	Options []WeightedOption `json:"options"` // 加权选项列表
@@ -63,6 +65,20 @@ type Node struct {
 type WeightedOption struct {
 	Node   string `json:"node"`   // 目标节点 ID
 	Weight int    `json:"weight"` // 权重值
+}
+
+// OnErrorDef 定义 action 节点失败后的错误链路。
+type OnErrorDef struct {
+	IgnoreCodes []errcode.ErrorCode `json:"ignoreCodes"` // 命中后流程继续，但 monitor 保留原始失败样本
+	Handler     string              `json:"handler"`     // 错误处理子流程节点 ID（调用边，不是普通 next）
+	Retry       *RetryDef           `json:"retry"`       // 当前 action 的局部重试配置
+	Strategy    string              `json:"strategy"`    // resume/skip/abort，空等同 resume
+}
+
+// RetryDef 定义 action 失败后的局部重试配置。
+type RetryDef struct {
+	MaxRetries   int `json:"maxRetries"`   // 额外重试次数；2 表示最多执行 1+2 次
+	RetryDelayMs int `json:"retryDelayMs"` // 每次重试前的协作式等待毫秒数
 }
 
 // ListenRef 监听引用，定义在节点上。
@@ -124,10 +140,11 @@ const (
 	ContentForm = "form"
 )
 
-// 错误策略常量
+// onError.strategy 常量。
 const (
-	StrategyAbort = "abort"
-	StrategySkip  = "skip"
+	StrategyResume = "resume"
+	StrategyAbort  = "abort"
+	StrategySkip   = "skip"
 )
 
 // 字段绑定类型常量

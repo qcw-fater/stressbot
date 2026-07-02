@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"slices"
 	"time"
 
 	"stressbot/errcode"
@@ -15,7 +16,7 @@ import (
 )
 
 // errBreak / errContinue 是循环控制的内部信号，通过 error 冒泡直到被 executeLoop 捕获。
-// errSkip 是 skip 错误策略的内部信号：被 sequence/loop/boolean/weighted 捕获后，
+// errSkip 是 onError.strategy=skip 的内部信号：被 sequence/loop/boolean/weighted 捕获后，
 // 视为当前分支完成，不继续传播为失败。
 var (
 	errBreak    = errors.New("break")
@@ -243,60 +244,58 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 		return fmt.Errorf("%w: %s", ErrActionNotFound, node.Action)
 	}
 
-	err := e.handler.ExecuteAction(ctx, actionDef)
-	if err != nil {
-		// ctx 取消优先：任务级停止不走 errorStrategy，也不执行节点延迟。
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	retriesUsed := 0
+	maxRetries := onErrorMaxRetries(node)
+	for {
+		err := e.handler.ExecuteAction(ctx, actionDef)
+		if err == nil {
+			return e.finishActionSuccess(ctx, node, actionDef)
+		}
+
+		if cancelErr := normalizeActionCancel(err); cancelErr != nil {
+			if errors.Is(cancelErr, context.Canceled) && stresslog.DebugEnabled() {
+				stresslog.Debug("[ENGINE] 动作在停止阶段被取消",
+					zap.String("caller", e.caller), zap.String("action", node.Action), zap.Error(err))
+			}
+			return cancelErr
+		}
+
+		if isIgnoredActionError(node, err) {
+			return e.finishActionAccepted(ctx, node, actionDef, err)
+		}
+
+		e.logActionFailure("[ENGINE] 动作执行失败", node, actionDef, retriesUsed, maxRetries, err)
+		if err := e.executeOnErrorHandler(ctx, node); err != nil {
+			if errors.Is(err, errSkip) {
+				// handler 内部的 skip 表示 handler 子流程正常收束，不作为原 action 错误继续传播。
+			} else {
+				return err
+			}
+		}
+
+		if retriesUsed < maxRetries {
+			retriesUsed++
+			e.logActionRetry(node, actionDef, retriesUsed, maxRetries, err)
+			if err := e.retryDelay(ctx, node.OnError.Retry); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// 非取消类失败最终收束前执行节点延迟，避免错误路径下节点推进速度超过配置预期。
+		if err := e.nodeDelay(ctx, node); err != nil {
 			return err
 		}
-		// ACTION_CANCELED 是"任务停止过程中的副作用"，monitor 已经按 Canceled 归类，
-		// 这里不再当真 error 处理：不打 error 日志、不走 errorStrategy，也不执行节点延迟。
-		// 历史一次 4 分钟任务 stop 阶段刷出 60+ 条 match_succeed/connect_battle_tcp 假 error。
-		if actionErr, ok := errors.AsType[*ActionError](err); ok && actionErr.Code == errcode.ErrActionCanceled {
-			stresslog.Debug("[ENGINE] 动作在停止阶段被取消",
-				zap.String("caller", e.caller), zap.String("action", node.Action), zap.Error(err))
-			return context.Canceled
-		}
-		fields := []zap.Field{
-			zap.String("caller", e.caller),
-			zap.String("action", node.Action),
-			zap.String("pattern", actionDef.Pattern),
-			zap.String("errorStrategy", node.ErrorStrategy),
-			zap.Error(err),
-		}
-		fields = append(fields, actionErrorLogFields(err)...)
-		logActionFailure("[ENGINE] 动作执行失败", node.ErrorStrategy, fields...)
-		// 非取消类失败同样执行节点延迟，避免错误路径下节点推进速度超过配置预期。
-		e.nodeDelay(ctx, node)
-		return applyErrorStrategy(node.ErrorStrategy, func() error {
+		return applyOnErrorStrategy(onErrorStrategy(node), func() error {
 			return NewActionError(errcode.ErrExecFailed, "action="+node.Action, err)
 		})
 	}
+}
 
-	// 注册监听（连接已在动作中创建）
-	if len(node.ListenRefs) > 0 {
-		if err := e.handler.RegisterListen(node.ListenRefs); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return err
-			}
-			fields := []zap.Field{
-				zap.String("caller", e.caller),
-				zap.String("action", node.Action),
-				zap.String("pattern", actionDef.Pattern),
-				zap.String("errorStrategy", node.ErrorStrategy),
-				zap.Int("listenCount", len(node.ListenRefs)),
-				zap.Error(err),
-			}
-			fields = append(fields, actionErrorLogFields(err)...)
-			logActionFailure("[ENGINE] 注册监听失败", node.ErrorStrategy, fields...)
-			// 动作本体已成功但监听注册失败，仍按失败动作执行节点延迟。
-			e.nodeDelay(ctx, node)
-			return applyErrorStrategy(node.ErrorStrategy, func() error {
-				return NewActionError(errcode.ErrListenRegister, "action="+node.Action, err)
-			})
-		}
+func (e *Executor) finishActionSuccess(ctx context.Context, node *Node, actionDef *ActionDef) error {
+	if err := e.registerActionListens(ctx, node, actionDef); err != nil {
+		return err
 	}
-
 	if stresslog.DebugEnabled() {
 		stresslog.Debug("[ENGINE] 执行动作成功",
 			zap.String("caller", e.caller),
@@ -304,8 +303,63 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 			zap.String("pattern", actionDef.Pattern),
 			zap.Int("listens", len(node.ListenRefs)))
 	}
-	e.nodeDelay(ctx, node)
+	if err := e.nodeDelay(ctx, node); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (e *Executor) finishActionAccepted(ctx context.Context, node *Node, actionDef *ActionDef, err error) error {
+	fields := []zap.Field{
+		zap.String("caller", e.caller),
+		zap.String("action", node.Action),
+		zap.String("pattern", actionDef.Pattern),
+		zap.Int("ignoreCodeCount", len(node.OnError.IgnoreCodes)),
+		zap.Error(err),
+	}
+	fields = append(fields, actionErrorLogFields(err)...)
+	stresslog.Warn("[ENGINE] 动作错误码已忽略，流程继续", fields...)
+	if listenErr := e.registerActionListens(ctx, node, actionDef); listenErr != nil {
+		return listenErr
+	}
+	if err := e.nodeDelay(ctx, node); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (e *Executor) registerActionListens(ctx context.Context, node *Node, actionDef *ActionDef) error {
+	if len(node.ListenRefs) == 0 {
+		return nil
+	}
+	if err := e.handler.RegisterListen(node.ListenRefs); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		e.logActionFailure("[ENGINE] 注册监听失败", node, actionDef, 0, onErrorMaxRetries(node), err, zap.Int("listenCount", len(node.ListenRefs)))
+		// 动作本体已成功但监听注册失败，不重试原 action，按最终错误路径执行节点延迟。
+		if err := e.nodeDelay(ctx, node); err != nil {
+			return err
+		}
+		return applyOnErrorStrategy(onErrorStrategy(node), func() error {
+			return NewActionError(errcode.ErrListenRegister, "action="+node.Action, err)
+		})
+	}
+	return nil
+}
+
+func (e *Executor) executeOnErrorHandler(ctx context.Context, node *Node) error {
+	if node.OnError == nil || node.OnError.Handler == "" {
+		return nil
+	}
+	return e.executeNode(ctx, node.OnError.Handler)
+}
+
+func (e *Executor) retryDelay(ctx context.Context, retry *RetryDef) error {
+	if retry == nil || retry.RetryDelayMs <= 0 {
+		return nil
+	}
+	return e.handler.CooperativeSleep(ctx, time.Duration(retry.RetryDelayMs)*time.Millisecond)
 }
 
 func actionErrorLogFields(err error) []zap.Field {
@@ -319,17 +373,94 @@ func actionErrorLogFields(err error) []zap.Field {
 	}
 }
 
-func logActionFailure(msg, strategy string, fields ...zap.Field) {
-	if strategy == StrategyAbort {
+func (e *Executor) logActionFailure(msg string, node *Node, actionDef *ActionDef, retriesUsed, maxRetries int, err error, extraFields ...zap.Field) {
+	fields := []zap.Field{
+		zap.String("caller", e.caller),
+		zap.String("action", node.Action),
+		zap.String("pattern", actionDef.Pattern),
+		zap.String("onErrorStrategy", onErrorStrategy(node)),
+		zap.String("handler", onErrorHandler(node)),
+		zap.Int("retryUsed", retriesUsed),
+		zap.Int("maxRetries", maxRetries),
+		zap.Error(err),
+	}
+	fields = append(fields, extraFields...)
+	fields = append(fields, actionErrorLogFields(err)...)
+	if onErrorStrategy(node) == StrategyAbort {
 		stresslog.Error(msg, fields...)
 		return
 	}
 	stresslog.Warn(msg, fields...)
 }
 
-// applyErrorStrategy 根据 errorStrategy 配置决定如何处理错误。
+func (e *Executor) logActionRetry(node *Node, actionDef *ActionDef, retriesUsed, maxRetries int, err error) {
+	fields := []zap.Field{
+		zap.String("caller", e.caller),
+		zap.String("action", node.Action),
+		zap.String("pattern", actionDef.Pattern),
+		zap.String("handler", onErrorHandler(node)),
+		zap.Int("retryUsed", retriesUsed),
+		zap.Int("maxRetries", maxRetries),
+		zap.Int("retryDelayMs", node.OnError.Retry.RetryDelayMs),
+		zap.Error(err),
+	}
+	fields = append(fields, actionErrorLogFields(err)...)
+	stresslog.Warn("[ENGINE] 动作失败后准备重试", fields...)
+}
+
+func onErrorHandler(node *Node) string {
+	if node == nil || node.OnError == nil {
+		return ""
+	}
+	return node.OnError.Handler
+}
+
+func onErrorStrategy(node *Node) string {
+	if node == nil || node.OnError == nil || node.OnError.Strategy == "" {
+		return StrategyResume
+	}
+	return node.OnError.Strategy
+}
+
+func onErrorMaxRetries(node *Node) int {
+	if node == nil || node.OnError == nil || node.OnError.Retry == nil || node.OnError.Retry.MaxRetries <= 0 {
+		return 0
+	}
+	return node.OnError.Retry.MaxRetries
+}
+
+func actionErrorCode(err error) (errcode.ErrorCode, bool) {
+	actionErr, ok := errors.AsType[*ActionError](err)
+	if !ok || actionErr == nil {
+		return 0, false
+	}
+	return actionErr.Code, true
+}
+
+func isIgnoredActionError(node *Node, err error) bool {
+	if node == nil || node.OnError == nil || len(node.OnError.IgnoreCodes) == 0 {
+		return false
+	}
+	code, ok := actionErrorCode(err)
+	if !ok {
+		return false
+	}
+	return slices.Contains(node.OnError.IgnoreCodes, code)
+}
+
+func normalizeActionCancel(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	if actionErr, ok := errors.AsType[*ActionError](err); ok && actionErr.Code == errcode.ErrActionCanceled {
+		return context.Canceled
+	}
+	return nil
+}
+
+// applyOnErrorStrategy 根据 onError.strategy 配置决定如何处理错误。
 // abortErr 函数在 strategy 为 "abort" 时调用，用于构造带有上下文信息的 ActionError。
-func applyErrorStrategy(strategy string, abortErr func() error) error {
+func applyOnErrorStrategy(strategy string, abortErr func() error) error {
 	switch strategy {
 	case StrategyAbort:
 		return abortErr()
@@ -442,16 +573,15 @@ func (e *Executor) executeWait(ctx context.Context, node *Node) error {
 }
 
 // nodeDelay 执行节点级延迟，仅在 action 节点执行完后调用。
-// 延迟值优先级：node.DelayMs > e.defaultDelayMs
-func (e *Executor) nodeDelay(ctx context.Context, node *Node) {
+// 延迟值优先级：node.DelayMs > e.defaultDelayMs。
+// 使用协作式休眠，等待期间继续 drain 任务队列；ctx 取消时向上传播取消。
+func (e *Executor) nodeDelay(ctx context.Context, node *Node) error {
 	ms := node.DelayMs
 	if ms == 0 {
 		ms = e.defaultDelayMs
 	}
 	if ms < 0 {
-		return
+		return nil
 	}
-	// 走 handler 的协作式休眠：延迟期间继续 drain 任务队列，避免 listen 回调被推迟到
-	// 下一节点边界。延迟被取消（ctx）无需特殊处理，下一节点入口会感知 ctx 并退出。
-	_ = e.handler.CooperativeSleep(ctx, time.Duration(ms)*time.Millisecond)
+	return e.handler.CooperativeSleep(ctx, time.Duration(ms)*time.Millisecond)
 }
