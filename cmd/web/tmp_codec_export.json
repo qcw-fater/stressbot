@@ -25,7 +25,9 @@
     "RequestZoneList": {
       "type": "action",
       "action": "RequestZoneList",
-      "breakOff": true
+      "onError": {
+        "strategy": "abort"
+      }
     },
     "RequestOutsideNotice": {
       "type": "action",
@@ -38,7 +40,9 @@
     "PostLogin": {
       "type": "action",
       "action": "PostLogin",
-      "breakOff": true
+      "onError": {
+        "strategy": "abort"
+      }
     },
     "hasRole": {
       "type": "boolean",
@@ -48,12 +52,16 @@
     "createNewRole": {
       "type": "action",
       "action": "NewRole",
-      "breakOff": true
+      "onError": {
+        "strategy": "abort"
+      }
     },
     "SelectRole": {
       "type": "action",
       "action": "SelectRole",
-      "breakOff": true
+      "onError": {
+        "strategy": "abort"
+      }
     },
     "logicLogin": {
       "type": "sequence",
@@ -68,8 +76,10 @@
     "ConnectLogicTCP": {
       "type": "action",
       "action": "ConnectLogicTCP",
-      "breakOff": true,
-      "listenCallbacks": [
+      "onError": {
+        "strategy": "abort"
+      },
+      "listenRefs": [
         {
           "route": {
             "cmd": 3,
@@ -219,7 +229,9 @@
     "PlayerLogin": {
       "type": "action",
       "action": "PlayerLogin",
-      "breakOff": true
+      "onError": {
+        "strategy": "abort"
+      }
     },
     "RequestPlayerData": {
       "type": "action",
@@ -370,7 +382,7 @@
     "ConnectBattleTCP": {
       "type": "action",
       "action": "ConnectBattleTCP",
-      "listenCallbacks": [
+      "listenRefs": [
         {
           "route": {
             "cmd": 4,
@@ -384,7 +396,7 @@
     "ConnectBattleUDP": {
       "type": "action",
       "action": "ConnectBattleUDP",
-      "listenCallbacks": [
+      "listenRefs": [
         {
           "route": {
             "cmd": 4,
