@@ -142,7 +142,7 @@ Executor 遍历节点图 → 命中 action 节点
 { "type": "sequence", "next": ["nodeA", "nodeB", "nodeC"] }
 
 // action — 执行动作
-{ "type": "action", "action": "Login", "errorStrategy": "abort", "listenCallbacks": [...] }
+{ "type": "action", "action": "Login", "onError": { "strategy": "abort" }, "listenRefs": [...] }
 
 // loop — 循环（loopCount ≤ 0 视为无限）
 // body 为单个节点 ID；多步骤循环体用 sequence 节点包装后填入 body
@@ -181,12 +181,24 @@ Executor 遍历节点图 → 命中 action 节点
 | `falseNext`       | boolean        | 条件为 false 时跳转的节点 ID                                             |
 | `options`         | weighted       | 加权选项：`[{"node": "id", "weight": N}]`                                |
 | `action`          | action         | 引用 `actions` 表中的动作名                                              |
-| `errorStrategy`   | action         | `"abort"` = 失败中断整个流程；`"skip"` = 结束当前分支/层级；空或 `"ignore"` = 继续 |
-| `listenCallbacks` | action         | 注册持久化推送监听（数组）                                               |
+| `onError`         | action         | 动作失败后的错误链路：`ignoreCodes` / `handler` / `retry` / `strategy`    |
+| `listenRefs`      | action         | 注册持久化推送监听（数组）                                               |
 | `waitMs`          | wait           | 等待时长（毫秒）                                                         |
 | `waitMin`         | wait           | 随机等待下界（毫秒，与 `waitMax` 配合使用）                               |
 | `waitMax`         | wait           | 随机等待上界（毫秒）                                                     |
 | `delayMs`         | action 等      | 节点执行后延迟；`> 0` 使用此值，`= 0` 使用 defaultDelayMs，`< 0` 禁用    |
+
+### action.onError
+
+`onError` 定义 action 失败后的错误链路。
+
+| 字段 | 说明 |
+| ---- | ---- |
+| `ignoreCodes` | 可接受的正整数错误码；命中后流程继续，但监控仍记录本次失败样本 |
+| `handler` | 错误处理节点 ID；这是调用边，不写入普通 `next` |
+| `retry.maxRetries` | 当前 action 的额外重试次数；`2` 表示原始执行 + 2 次重试 |
+| `retry.retryDelayMs` | 每次重试前的协作式等待毫秒数 |
+| `strategy` | 空 / `resume` = 继续；`skip` = 跳过当前层级；`abort` = 中断流程 |
 
 ## actions — 声明式动作
 

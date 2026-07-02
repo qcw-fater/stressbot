@@ -10,7 +10,7 @@
 
 | 差异点 | 计划 | 实际实现 |
 |---|---|---|
-| FlowNode.breakOff | 计划中有 | 实际 `types/flow.ts` 中不存在 |
+| 旧版 action 布尔中断字段 | 计划中有 | 实际 `types/flow.ts` 中不存在；action 错误处理使用 `onError` |
 | FlowNode.listenCallbacks | 计划中字段名 | 实际为 `listenRefs`（`FlowNode.listenRefs`） |
 | ListenRef.callback | 计划中字段名 | 实际为 `listen`（`ListenRef.listen`） |
 | ActionDef 字段集 | 计划中有 `target/secretArg` 等 | 实际为 `url/method/contentType/keys` 等，pattern 名也不同（如 `tcpSend/tcpRequest` 而非 `connect/connectUDP`） |
@@ -208,7 +208,7 @@ interface FlowNode {
 
   // action 专用
   action?: string;             // actions 表的 key
-  errorStrategy?: 'ignore' | 'skip' | 'abort';
+  onError?: OnErrorDef;        // ignoreCodes / handler / retry / strategy
   listenRefs?: ListenRef[];
 
   // weighted 专用
@@ -400,10 +400,11 @@ ListenCard 节点位置也存在 `nodePositions` 中，key 为 `__cb__<name>`。
 ### 4.2 action（动作节点）
 
 - **颜色**：蓝紫 `#597ef7`
-- **Handle**：左入 + 右出（单 handle）+ 右侧监听专用 handle 区
-- **中部摘要**：action 名 + pattern 标签 + listenRefs 数量徽章
-- **字段**：`action: string`（引用 actions 表）, `errorStrategy`, `listenRefs`, `delayMs`
-- **监听连线**：右侧监听 handle → ListenEdge（橙色虚线）→ CallbackCard
+- **Handle**：左入 + 右侧 listen handle + 底部 error handle
+- **中部摘要**：action 名 + pattern 标签 + onError 摘要 + listenRefs 数量徽章
+- **字段**：`action: string`（引用 actions 表）, `onError`, `listenRefs`, `delayMs`
+- **监听连线**：右侧 listen handle → ListenEdge（橙色虚线）→ ListenCard
+- **错误连线**：底部 error handle → ErrorEdge → 普通节点，保存为 `onError.handler`，不写入 `next`
 
 ### 4.3 loop（循环节点）
 

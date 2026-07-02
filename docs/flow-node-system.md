@@ -112,37 +112,38 @@ type TaskFlow struct {
 |------|------|---------|------|
 | `Type` | string | `type` | 固定值 `"action"` |
 | `Action` | string | `action` | 引用 `actions` 表中的动作名称 |
-| `ErrorStrategy` | string | `errorStrategy` | `"abort"` / `"skip"` / 空（默认静默忽略） |
+| `OnError` | `*OnErrorDef` | `onError` | 动作失败后的错误链路：ignoreCodes / handler / retry / strategy |
 | `ListenRefs` | `[]ListenRef` | `listenRefs` | 动作执行后注册的持久化推送监听引用 |
 | `DelayMs` | int | `delayMs` | 节点级延迟覆盖（>0 使用此值，=0 使用 DefaultDelayMs，<0 禁用） |
 
 **行为**：
 - 查找 `actions[action]` 获取 ActionDef
-- 调用 `ActionHandler.ExecuteAction(actionDef)` 执行动作
-- 执行失败时按 `ErrorStrategy` 处理：
-  - `"abort"`：构造 `ActionError(errcode.ErrExecFailed)` 返回，中断流程
-  - `"skip"`：返回 `errSkip`，跳过当前所在 sequence 的剩余节点
-  - 默认/空：静默忽略，继续执行
-  - **例外**：context 取消（Canceled/DeadlineExceeded）绕过错误策略，直接传播
-- 动作成功后，如果 `ListenRefs` 非空，调用 `ActionHandler.RegisterListen(listenRefs)` 注册监听
-- 监听注册失败时也按 `ErrorStrategy` 处理
-- 最后执行节点级延迟 `nodeDelay()`
+- 调用 `ActionHandler.ExecuteAction(ctx, actionDef)` 执行动作
+- 执行失败时进入 `onError` 链路：
+  - context 取消（Canceled/DeadlineExceeded）直接传播，不走 `onError`，不执行节点延迟
+  - `ErrActionCanceled` 映射为 `context.Canceled`，不走 `onError`，不执行节点延迟
+  - 命中 `ignoreCodes`：warn 日志，流程继续，monitor 保留原始失败样本
+  - `handler`：执行普通节点子流程，完成后回到错误链路继续判断 retry / strategy
+  - `retry`：只重试当前 action；`maxRetries` 是额外重试次数
+  - `strategy`：空/`resume` 继续，`skip` 返回 `errSkip`，`abort` 返回 `ActionError(errcode.ErrExecFailed)`
+- action 最终成功或命中 `ignoreCodes` 后，如果 `ListenRefs` 非空，调用 `ActionHandler.RegisterListen(listenRefs)` 注册监听
+- 监听注册失败不进入 handler/retry/ignoreCodes；执行节点延迟后按 `onError.strategy` 收束
+- 最终成功、ignore 或最终失败收束前执行节点级延迟 `nodeDelay()`；重试间隔只执行 `retryDelayMs`
 
-**ErrorStrategy 常量**：
+**onError.strategy 常量**：
 
 | 常量 | 值 | 行为 |
 |------|----|------|
+| `StrategyResume` | `"resume"` | 继续原流程 |
 | `StrategyAbort` | `"abort"` | 返回 `ActionError`，中断流程 |
 | `StrategySkip` | `"skip"` | 发射 `errSkip`，跳过当前层级 |
-
-**与计划的差异**：计划中使用 `breakOff bool` 字段（二选一），实际代码使用 `errorStrategy string`（三选一），提供了更细粒度的错误处理控制。
 
 **JSON 示例**：
 ```json
 {
   "type": "action",
   "action": "AuthLogin",
-  "errorStrategy": "abort",
+  "onError": { "strategy": "abort" },
   "listenRefs": [
     { "route": {"cmd": 3, "act": 1}, "server": "tcp:logic", "listen": "matchPoll" }
   ],
@@ -356,7 +357,7 @@ var (
 | `executeBoolean` | 透传 | 透传 | 捕获，返回 nil |
 | `executeWeighted` | 透传 | 透传 | 捕获，返回 nil |
 | `executeLoop` | 捕获，退出循环 | 捕获，继续下次迭代 | 捕获，退出循环 |
-| `executeAction` | - | - | 不产生（由 ErrorStrategy 决定） |
+| `executeAction` | - | - | 由 `onError.strategy=skip` 产生 |
 
 ### 5.3 信号传播完整链路
 
@@ -489,7 +490,7 @@ type ActionHandler interface {
 | `FalseNext` | string | `falseNext` | boolean | 条件为 false 时的目标节点 |
 | `Options` | `[]WeightedOption` | `options` | weighted | 加权选项列表 |
 | `Action` | string | `action` | action | 引用 actions 表中的动作名 |
-| `ErrorStrategy` | string | `errorStrategy` | action | 错误处理策略 |
+| `OnError` | `*OnErrorDef` | `onError` | action | 错误处理链路 |
 | `ListenRefs` | `[]ListenRef` | `listenRefs` | action | 动作后注册的推送监听引用 |
 | `WaitMs` | int | `waitMs` | wait | 固定等待时长（毫秒） |
 | `WaitMin` | int | `waitMin` | wait | 随机等待最小值 |
@@ -969,7 +970,7 @@ type ActionError struct {
 
 | 差异点 | 计划设计 | 实际代码 |
 |--------|----------|----------|
-| action 节点错误处理 | `breakOff bool`（二选一） | `errorStrategy string`（三选一：abort/skip/ignore） |
+| action 节点错误处理 | 旧版布尔中断字段 | `onError` 错误链路（ignoreCodes/handler/retry/strategy） |
 | wait 节点字段 | 仅 `WaitMs int` | 额外支持 `WaitMin/WaitMax` 随机等待 |
 | boolean 节点延迟 | 执行后调用 `nodeDelay()` | 不调用 `nodeDelay()` |
 | exchangeKey pattern | 存在 | 已移除（由通用 tcpRequest 替代） |
@@ -999,17 +1000,17 @@ type ActionError struct {
     "connectLogic": {
       "type": "action",
       "action": "ConnectLogic",
-      "errorStrategy": "abort"
+      "onError": { "strategy": "abort" }
     },
     "authLogin": {
       "type": "action",
       "action": "AuthLogin",
-      "errorStrategy": "abort"
+      "onError": { "strategy": "abort" }
     },
     "logicLogin": {
       "type": "action",
       "action": "LogicLogin",
-      "errorStrategy": "abort",
+      "onError": { "strategy": "abort" },
       "listenRefs": [
         { "route": {"cmd": 3, "act": 1}, "server": "tcp:logic", "listen": "matchPoll" }
       ]

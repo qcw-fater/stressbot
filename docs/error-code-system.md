@@ -103,7 +103,7 @@ type CodeInfo struct {
 | 21 | `ErrCreateMsg` | `CREATE_MSG` | 创建 C2S proto 消息失败（factory.Create 返回错误） |
 | 22 | `ErrBindField` | `BIND_FIELD` | 必需字段绑定失败（Required=true 的 binding 值为 nil） |
 | 23 | `ErrSerialize` | `SERIALIZE` | C2S 消息序列化失败（proto.Marshal 返回错误） |
-| 24 | `ErrExecFailed` | `EXEC_FAILED` | 动作执行失败（errorStrategy=abort 时由 executor 产生） |
+| 24 | `ErrExecFailed` | `EXEC_FAILED` | 动作执行失败（onError.strategy=abort 时由 executor 产生） |
 
 ### 3.4 监听层（31-40）
 
@@ -661,8 +661,8 @@ func (ae *ActionExecutor) handleHeaderError(proto string, def *ActionDef, header
 | error map | 写入，key = headerErr 值（≥ 100 业务码，单一 code 维度） |
 | 响应解析 | 仍然 `parseAndStoreResponse`（后续 action 可用响应字段） |
 | 字节统计 | sendBytes + recvBytes 都计入 |
-| errorStrategy | 受 abort/skip/ignore 控制 |
-| 流程中断 | 由 errorStrategy 决定 |
+| onError | 受 ignoreCodes / handler / retry / strategy 控制 |
+| 流程中断 | 由 onError.strategy 决定 |
 
 ---
 
@@ -773,7 +773,7 @@ connection.RequestResponse  → (nil, NewActionError(4, ...))  ← 具体原因
 | `network/connection.go` | 修改 | Send + RequestResponse 签名变更，各路径返回 ActionError |
 | `network/heartbeat.go` | 修改 | 适配 Send 新签名 |
 | `engine/action.go` | 修改 | NetSender 接口 7 个方法签名变更；所有 exec* 改用 ActionError；ErrExecFailed + ErrHTTPStatus |
-| `engine/executor.go` | 修改 | errorStrategy=abort 时使用 ErrExecFailed |
+| `engine/executor.go` | 修改 | onError.strategy=abort 时使用 ErrExecFailed |
 | `script/api_network.go` | 修改 | 6 个 Lua API 适配 NetSender 新签名 |
 | `robot/robot.go` | 修改 | netSenderAdapter 适配；executeLuaAction 改用 ActionError；HTTPRequest 替换；classifyResult 增加 ctx 判断；callback 接入 RecordCallbackError |
 | `monitor/collector.go` | 修改 | RecordAction 签名变更；ErrorEntry 增加 Code/CodeName/Messages；errKey + errorBucket；CodedError 接口；ResultCanceled；RecordCallbackSuccess/Error |

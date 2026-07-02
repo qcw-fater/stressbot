@@ -127,7 +127,7 @@ React 18 / Vite 5 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 - Adapter 接口 9 方法（含 `DescribeError`）。`DecodeTCP` 和 `DecodeUDP` 独立方法。
 - UDP 加密使用偏移量部分加密：前 N 字节保持明文供服务端查密钥表，剩余部分加密。偏移量由 `<proto>_<service>_codec.json` 的 `encrypt.offset.{encode,decode}` 单向配置（如 `udp:battle` 发送偏移 11、接收偏移 0）。
 - 默认节点延迟由 `TaskFlow.DefaultDelayMs` 控制。`delayMs: -1` 禁用，`delayMs: 0` 使用 defaultDelayMs。
-- `errorStrategy` 控制动作失败行为：`"abort"` 中断流程，`"skip"` 结束当前分支/层级（由 sequence/loop/boolean/weighted 捕获），空或其他值静默忽略。
+- `onError` 控制 action 失败后的错误链路：`ignoreCodes` 命中后 warn 并继续流程但 monitor 保留失败样本；`handler` 是普通节点调用边（不写入 next）；`retry.maxRetries` 是当前 action 的额外重试次数；`strategy` 支持空/`resume` 继续、`skip` 结束当前分支/层级（由 sequence/loop/boolean/weighted 捕获）、`abort` 中断流程。
 - 任务状态机：`pending → starting → running → stopping → stopped / failed`。单例约束：同一时刻只能有一个活跃任务。
 - Agent 心跳连续失败 `maxHeartbeatFailures` 次后自动退出（0 = 不退出）。Admin 重启后活跃任务自动重置为 `failed`。
 - 日志和错误信息使用中文。
