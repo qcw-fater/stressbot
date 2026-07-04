@@ -364,39 +364,42 @@ Executor 遍历节点图 → 命中 action 节点
 
 ## 心跳
 
-每个 TCP/UDP 连接可独立注册声明式心跳。通过 `tcpHeartbeat` / `udpHeartbeat` 动作配置，心跳包体在 Go 侧按 `heartbeatFields` 布局构造；运行时不调用业务 Lua，主流程阻塞等待时心跳仍会继续发送。
+心跳是连接级协议配置，不再作为 flow action 编排。每份 `conf/adapter/<protocol>_<service>_codec.json` 可选配置一个 `heartbeat` 对象；没有该对象表示该连接不启用心跳。连接建立后会按对应 codec 的心跳配置自动注册，关闭连接时自动停止。
 
 ### 静态心跳（body 固定为空）
 
-`heartbeatFields` 为空时发送空 body，适用于大部分游戏服务器心跳。
+只配置 `intervalMs` 与 `route` 时发送空 body，适用于只需要保活帧的连接。
 
 ```json
 {
-  "pattern": "tcpHeartbeat",
-  "service": "logic",
-  "route": {"cmd": 2, "act": 1},
-  "intervalMs": 5000
+  "routeKeyTemplate": "{field1}:{field2}",
+  "heartbeat": {
+    "intervalMs": 5000,
+    "route": {"field1": 2, "field2": 1}
+  }
 }
 ```
 
 ### 动态心跳（body 每次变化）
 
-需要递增序号、状态字段、时间戳或随机值时，使用 `heartbeatFields` 声明二进制布局，由后台心跳循环按字段来源构造 body。
+需要递增序号、状态字段、时间戳或随机值时，在 codec 的 `heartbeat.heartbeatFields` 中声明二进制布局，由连接级心跳循环按字段来源构造 body。
 
 ```json
 {
-  "pattern": "tcpHeartbeat",
-  "service": "battle",
-  "route": {"cmd": 4, "act": 2},
-  "intervalMs": 10000,
-  "heartbeatFields": [
-    {"type": "counter", "format": "u16", "key": "packetIndex", "mod": 65536},
-    {"type": "state", "format": "i64", "source": "battleId"}
-  ]
+  "routeKeyTemplate": "{field1}:{field2}",
+  "heartbeat": {
+    "intervalMs": 10000,
+    "route": {"field1": 4, "field2": 2},
+    "heartbeatFields": [
+      {"type": "u16", "source": "counter", "start": 0, "step": 1},
+      {"type": "i64", "source": "state", "key": "battleId"}
+    ],
+    "skipWhenMissing": true
+  }
 }
 ```
 
-关闭连接时心跳自动停止；重复注册会替换旧心跳。
+也可使用 `c2sProto + bindings` 构造 protobuf body；`c2sProto` 与 `heartbeatFields` 互斥。心跳运行时不调用业务 Lua，主流程阻塞等待时心跳仍会继续发送。
 
 ## 条件表达式
 
@@ -442,9 +445,9 @@ Adapter 接口不变（9 方法），但实现已全 Go 化：`adapter/codec_res
 
 # 第三部分：Lua API 参考
 
-加载方式：`local mod = require("<name>")`。7 个模块共 68 个函数。
+加载方式：`local mod = require("<name>")`。7 个模块共 86 个函数。
 
-## network（22 函数）
+## network（21 函数）
 
 ### 连接管理
 
@@ -497,31 +500,35 @@ Adapter 接口不变（9 方法），但实现已全 Go 化：`adapter/codec_res
 
 ### 心跳
 
-旧的 Lua 心跳注册接口已移除；请在流程动作中使用 `tcpHeartbeat` / `udpHeartbeat` 声明式心跳。
+旧的 Lua 心跳注册接口已移除；请在对应连接的 `*_codec.json` 中配置可选 `heartbeat` 对象。
 
-## robot（11 函数）
+## robot（14 函数）
 
 | 函数                                       | 说明                                    |
 | ----------------------------------------- | -------------------------------------- |
 | `get(key)`                                | 读取 state 值                           |
 | `set(key, value)`                         | 写入 state                              |
 | `has(key)`                                | 检查 key 是否存在                        |
-| `delete(key)`                             | 删除 key                                |
-| `clear([key])`                             | 无参数清空全部；有参数删除指定 key         |
-| `increment(key [, delta])`                | 原子自增，返回新值                       |
-| `keys()`                                  | 返回所有 key                              |
-| `get_path("a.b[0].c")`                    | 按路径取嵌套值                            |
+| `delete(key)`                             | 删除单个 key                            |
+| `clear([key])`                            | 无参数清空全部；有参数删除指定 key         |
+| `increment(key)`                          | 原子自增，返回新值                       |
+| `keys()`                                  | 返回所有 key 列表                         |
+| `get_path("a.b[0].c")`                   | 按路径读取嵌套值                          |
+| `set_path("a.b[0].c", value)`            | 按路径写入嵌套值                          |
 | `get_id()`                                | 获取机器人 ID                            |
+| `get_index()`                             | 获取批次内序号（0-based）                 |
 | `get_account()`                           | 获取机器人账号                            |
 | `get_context()`                           | 检查 context 是否已取消                   |
+| `error(code, detail)`                     | 构造 err table                           |
 
-## proto（9 函数）
+## proto（10 函数）
 
 | 函数                          | 说明                                    |
 | ---------------------------- | -------------------------------------- |
 | `create(name)`                | 创建 protobuf 消息（返回 userdata）      |
 | `set_field(msg, field, val)`  | 设置字段                                |
 | `get_field(msg, field)`       | 获取字段值                              |
+| `get_path(msg, path)`         | 按路径获取字段值                         |
 | `get_field_map(msg)`          | 获取所有字段为 Lua table                |
 | `serialize(msg)`              | 序列化为二进制                          |
 | `parse(name, data)`           | 从二进制解析消息                        |
@@ -550,16 +557,6 @@ Adapter 接口不变（9 方法），但实现已全 Go 化：`adapter/codec_res
 | `sleep(ms)`                              | 毫秒休眠（响应取消，仅暂停当前机器人主流程）   |
 | `time_ms()`                              | 当前时间戳（毫秒）                           |
 | `fnv_hash(str)`                          | FNV-1a 64 位哈希（返回 hex 字符串）          |
-
-## adapter（5 函数）
-
-| 函数                                    | 说明                                  |
-| -------------------------------------- | ------------------------------------ |
-| `encode_tcp(route, body [, key])`       | TCP 编码，返回二进制或 nil            |
-| `encode_udp(route, body [, key])`       | UDP 编码，返回二进制或 nil            |
-| `decode_tcp(data [, key])`              | TCP 解码 → routeKey, body, headerErr |
-| `decode_udp(data [, key])`              | UDP 解码 → routeKey, body, headerErr |
-| `expected_route_key(route)`             | 计算期望响应路由键                     |
 
 ## log（4 函数）
 

@@ -13,10 +13,6 @@ const PATTERN_FIELDS: Record<ActionPattern, ActionKey[]> = {
   udpClose: ['pattern', 'service'],
   tcpListen: ['pattern', 'service', 'route', 's2cProto', 'store', 'timeout', 'pollMs'],
   udpListen: ['pattern', 'service', 'route', 's2cProto', 'store', 'timeout', 'pollMs'],
-  // 心跳：双模式 body 互斥（c2sProto+bindings 或 heartbeatFields），service/route/intervalMs 必填，
-  // skipWhenMissing 仅 raw-binary 有意义。bindings 复用 tcpSend 全套语义（Go 不做心跳专用子集限制）。
-  tcpHeartbeat: ['pattern', 'service', 'route', 'intervalMs', 'c2sProto', 'bindings', 'heartbeatFields', 'skipWhenMissing'],
-  udpHeartbeat: ['pattern', 'service', 'route', 'intervalMs', 'c2sProto', 'bindings', 'heartbeatFields', 'skipWhenMissing'],
   httpRequest: ['pattern', 'url', 'method', 'contentType', 'bindings', 'store'],
   setState: ['pattern', 'bindings'],
   clearState: ['pattern', 'keys'],

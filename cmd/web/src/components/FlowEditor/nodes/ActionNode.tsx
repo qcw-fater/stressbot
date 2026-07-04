@@ -28,7 +28,7 @@ export function ActionNode({ id, data, selected }: NodeProps) {
   const { node, action } = data as unknown as NodeData;
   const pattern = action?.pattern ?? '?';
   const listens = node.listenRefs?.length ?? 0;
-  const onErrorLabel = formatOnErrorLabel(node);
+  const onErrorLabel = hasOnErrorConfig(node) ? 'onError' : '';
 
   return (
     <>
@@ -48,7 +48,7 @@ export function ActionNode({ id, data, selected }: NodeProps) {
             </span>
           </Tooltip>
           {onErrorLabel && (
-            <Tooltip title="动作失败后的 onError 错误处理链路">
+            <Tooltip title="动作失败后的 onError 错误处理配置">
               <span className="onerror-badge">{onErrorLabel}</span>
             </Tooltip>
           )}
@@ -65,14 +65,13 @@ export function ActionNode({ id, data, selected }: NodeProps) {
   );
 }
 
-function formatOnErrorLabel(node: FlowNode): string {
+function hasOnErrorConfig(node: FlowNode): boolean {
   const onError = node.onError;
-  if (!onError) return '';
-  const parts: string[] = ['onError'];
-  const ignoreCount = onError.ignoreCodes?.length ?? 0;
-  if (ignoreCount > 0) parts.push(`ignore:${ignoreCount}`);
-  if ((onError.retry?.maxRetries ?? 0) > 0) parts.push(`retry:${onError.retry?.maxRetries}`);
-  if (onError.handler) parts.push('handler');
-  if (onError.strategy && onError.strategy !== 'resume') parts.push(onError.strategy);
-  return parts.length > 1 ? parts.join(' · ') : '';
+  if (!onError) return false;
+  return Boolean(
+    onError.handler
+      || (onError.ignoreCodes?.length ?? 0) > 0
+      || (onError.retry?.maxRetries ?? 0) > 0
+      || (onError.strategy && onError.strategy !== 'resume'),
+  );
 }

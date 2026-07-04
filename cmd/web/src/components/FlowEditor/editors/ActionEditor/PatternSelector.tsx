@@ -1,5 +1,6 @@
 /**
- * pattern 选择器：14 种 pattern 的下拉，附带说明 tooltip。
+ * pattern 选择器：12 种 flow action pattern 的下拉，附带说明 tooltip。
+ * 心跳不再是 action，改为协议连接配置中的 heartbeat。
  */
 
 import { Select, Tooltip } from 'antd';
@@ -16,8 +17,6 @@ export const PATTERN_DESC: Record<ActionPattern, string> = {
   udpConnect: '建立 UDP 连接',
   udpClose: '关闭 UDP 连接',
   udpListen: '消费 UDP 推送消息（需 listenRefs 预注册）',
-  tcpHeartbeat: '声明式 TCP 心跳（Go-only builder，零 Lua）',
-  udpHeartbeat: '声明式 UDP 心跳（Go-only builder，零 Lua）',
   httpRequest: '发送 HTTP 请求',
   setState: '直接给 state 写入值（绑定列表）',
   clearState: '清空指定的 state key',
@@ -32,7 +31,6 @@ export interface PatternSelectorProps {
 const PATTERN_GROUPS: { label: string; patterns: ActionPattern[] }[] = [
   { label: '网络通信', patterns: ['tcpSend', 'udpSend', 'tcpRequest', 'udpRequest', 'httpRequest'] },
   { label: '连接管理', patterns: ['tcpConnect', 'udpConnect', 'tcpClose', 'udpClose'] },
-  { label: '心跳', patterns: ['tcpHeartbeat', 'udpHeartbeat'] },
   { label: '监听', patterns: ['tcpListen', 'udpListen'] },
   { label: '状态操作', patterns: ['setState', 'clearState'] },
   { label: '脚本', patterns: ['lua'] },

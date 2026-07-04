@@ -48,15 +48,15 @@ type HeartbeatField struct {
 // 仅支持 fixed/state 两个 source（计数器/时间戳/随机等整型语义对浮点无意义）。
 func isFloatType(typ string) bool { return typ == "f32" || typ == "f64" }
 
-// HeartbeatActionConfig 声明式心跳动作配置（双模式 body 构造）。
-// 由 ActionExecutor 从 ActionDef 装配，传给 NetSender.RegisterHeartbeat。
+// HeartbeatConfig 声明连接级心跳运行时配置（双模式 body 构造）。
+// 由 codec.heartbeat 转换后交给 robot 层安装到对应 network.Connection。
 //
-// body 构造模式（互斥，execHeartbeat 校验）：
+// body 构造模式（互斥，由 codec schema 校验）：
 //   - proto 模式：C2SProto != "" → 每 tick 用 factory + Bindings 构造 proto body（多数 protobuf 服心跳）；
 //   - raw-binary 模式：len(Fields) > 0 → 每 tick 用 BuildHeartbeatBody 小端打包（自研协议服/战斗同步）；
 //   - 空 body：两者皆无 → 静态心跳（轻量保活）。
-type HeartbeatActionConfig struct {
-	Transport  string // "tcp"|"udp"（由 pattern 决定）
+type HeartbeatConfig struct {
+	Transport  string // "tcp"|"udp"（由连接类型决定）
 	Service    string // 目标服务名
 	IntervalMs int    // 发送间隔（毫秒）
 	Route      any    // 不透明路由（{cmd,act}），与 ActionDef.Route 同构

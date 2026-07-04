@@ -1,13 +1,10 @@
 package engine
 
 import (
-	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"stressbot/errcode"
 	"stressbot/protox"
 	"stressbot/state"
 
@@ -175,71 +172,5 @@ func TestBuildBody_RefactoredViaBuildProtoBody(t *testing.T) {
 	}
 	if tok, _ := factory.GetField(parsed, "token"); tok != "xyz" {
 		t.Fatalf("token=%v want=xyz", tok)
-	}
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// execHeartbeat：proto 模式装配 + 互斥校验（c2sProto 与 heartbeatFields 不能同时配）
-// ──────────────────────────────────────────────────────────────────────────
-
-// TestExecute_TCPHeartbeat_PassesProtoBindings 验证 C2SProto/Bindings 从 ActionDef
-// 透传到 HeartbeatActionConfig（proto 模式装配）。
-func TestExecute_TCPHeartbeat_PassesProtoBindings(t *testing.T) {
-	fake := &fakeHeartbeatNetSender{}
-	ae := &ActionExecutor{netSender: fake, store: state.NewStore()}
-
-	def := &ActionDef{
-		Name:       "RegProtoHeart",
-		Pattern:    PatternTCPHeartbeat,
-		Service:    "logic",
-		Route:      map[string]any{"cmd": 2, "act": 1},
-		IntervalMs: 5000,
-		C2SProto:   "hbtest.HeartbeatC2S",
-		Bindings:   []FieldBind{{Field: "seq", Type: BindFixed, Value: 1}},
-	}
-	_, _, _, err := ae.Execute(context.Background(), def)
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
-	got := fake.registered[0]
-	if got.C2SProto != "hbtest.HeartbeatC2S" {
-		t.Fatalf("C2SProto=%q want=hbtest.HeartbeatC2S", got.C2SProto)
-	}
-	if len(got.Bindings) != 1 || got.Bindings[0].Field != "seq" {
-		t.Fatalf("Bindings 未透传: %#v", got.Bindings)
-	}
-}
-
-// TestExecute_TCPHeartbeat_ProtoAndFieldsMutuallyExclusive 互斥校验：
-// c2sProto 与 heartbeatFields 同时配置 → ErrHeartbeatConfig（中文，不写兼容兜底）。
-func TestExecute_TCPHeartbeat_ProtoAndFieldsMutuallyExclusive(t *testing.T) {
-	fake := &fakeHeartbeatNetSender{}
-	ae := &ActionExecutor{netSender: fake, store: state.NewStore()}
-
-	def := &ActionDef{
-		Name:       "BadDual",
-		Pattern:    PatternTCPHeartbeat,
-		Service:    "logic",
-		Route:      map[string]any{"cmd": 2, "act": 1},
-		IntervalMs: 5000,
-		C2SProto:   "hbtest.HeartbeatC2S",
-		Bindings:   []FieldBind{{Field: "seq", Type: BindFixed, Value: 1}},
-		HeartbeatFields: []HeartbeatField{
-			{Type: "u16", Source: "state", Key: "battleId"},
-		},
-	}
-	_, _, _, err := ae.Execute(context.Background(), def)
-	if err == nil {
-		t.Fatal("c2sProto 与 heartbeatFields 同时配置应报错")
-	}
-	var ae2 *ActionError
-	if !errors.As(err, &ae2) {
-		t.Fatalf("err 类型=%T 应为 *ActionError", err)
-	}
-	if ae2.Code != errcode.ErrHeartbeatConfig {
-		t.Fatalf("Code=%d want ErrHeartbeatConfig", ae2.Code)
-	}
-	if len(fake.registered) != 0 {
-		t.Fatalf("互斥冲突不应调用 RegisterHeartbeat")
 	}
 }

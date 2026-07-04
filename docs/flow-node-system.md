@@ -854,7 +854,7 @@ type ActionExecutor struct {
 
 ### 15.2 NetSender 接口
 
-由 Robot 层的 `netSenderAdapter` 实现，21 个方法：
+由 Robot 层的 `netSenderAdapter` 实现，19 个方法：
 
 **发送/请求**：
 - `TCPSend(service, packet) (int, error)`
@@ -869,13 +869,13 @@ type ActionExecutor struct {
 - `CloseTCP(service)`
 - `CloseUDP(service)`
 
-**监听/心跳**：
+**监听**：
 - `GetTCPListenResp(service, routeKey) ([]byte, uint64)`
 - `GetUDPListenResp(service, routeKey) ([]byte, uint64)`
 - `EnsureTCPListener(service, routeKey)`
 - `EnsureUDPListener(service, routeKey)`
-- `RegisterTCPHeartbeat(service, intervalMs, builder)`
-- `RegisterUDPHeartbeat(service, intervalMs, builder)`
+
+心跳不再是 flow action，由 Robot 建连后读取对应 codec 的 `heartbeat` 配置并注册到连接。
 
 **密钥**：
 - `GetTCPSecretKey(service) []byte`

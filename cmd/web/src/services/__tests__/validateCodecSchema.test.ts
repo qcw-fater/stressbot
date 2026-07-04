@@ -294,6 +294,70 @@ describe('validateCodecSchema — pipeline', () => {
   });
 });
 
+describe('validateCodecSchema — heartbeat', () => {
+  it('连接级 protobuf 心跳合法', () => {
+    const s = validSchema();
+    s.heartbeat = {
+      intervalMs: 5000,
+      route: { cmd: 1, act: 2 },
+      c2sProto: 'X.Heartbeat',
+      bindings: [{ field: 'seq', type: 'fixed', value: 1 }],
+    };
+    expect(validateCodecSchema(JSON.stringify(s))).toEqual([]);
+  });
+
+  it('连接级 raw-binary 心跳合法', () => {
+    const s = validSchema();
+    s.heartbeat = {
+      intervalMs: 5000,
+      route: { cmd: 1, act: 2 },
+      heartbeatFields: [{ type: 'u32', source: 'counter', start: 1, step: 1 }],
+      skipWhenMissing: true,
+    };
+    expect(validateCodecSchema(JSON.stringify(s))).toEqual([]);
+  });
+
+  it('intervalMs 必须大于 0', () => {
+    const s = validSchema();
+    s.heartbeat = { intervalMs: 0, route: { cmd: 1, act: 2 } };
+    const errs = validateCodecSchema(JSON.stringify(s));
+    expect(errs.some((e) => e.includes('heartbeat.intervalMs 必须大于 0'))).toBe(true);
+  });
+
+  it('按 routeKeyTemplate 校验 route 字段', () => {
+    const s = validSchema();
+    s.heartbeat = { intervalMs: 5000, route: { cmd: 1 } };
+    const errs = validateCodecSchema(JSON.stringify(s));
+    expect(errs.some((e) => e.includes('heartbeat.route 缺少字段 "act"'))).toBe(true);
+  });
+
+  it('c2sProto 与 heartbeatFields 互斥', () => {
+    const s = validSchema();
+    s.heartbeat = {
+      intervalMs: 5000,
+      route: { cmd: 1, act: 2 },
+      c2sProto: 'X.Heartbeat',
+      heartbeatFields: [{ type: 'u16', source: 'fixed', value: 0 }],
+    };
+    const errs = validateCodecSchema(JSON.stringify(s));
+    expect(errs.some((e) => e.includes('不能同时配置 c2sProto 与 heartbeatFields'))).toBe(true);
+  });
+
+  it('bindings 只能配合 c2sProto 使用', () => {
+    const s = validSchema();
+    s.heartbeat = { intervalMs: 5000, route: { cmd: 1, act: 2 }, bindings: [{ field: 'seq', type: 'fixed', value: 1 }] };
+    const errs = validateCodecSchema(JSON.stringify(s));
+    expect(errs.some((e) => e.includes('heartbeat.bindings 只能在配置 c2sProto 时使用'))).toBe(true);
+  });
+
+  it('校验 heartbeatFields 字段参数', () => {
+    const s = validSchema();
+    s.heartbeat = { intervalMs: 5000, route: { cmd: 1, act: 2 }, heartbeatFields: [{ type: 'f32', source: 'randomInt', min: 1, max: 2 }] };
+    const errs = validateCodecSchema(JSON.stringify(s));
+    expect(errs.some((e) => e.includes('浮点字段仅支持 fixed/state source'))).toBe(true);
+  });
+});
+
 describe('validateCodecSchema — pipeline↔header 引用', () => {
   it('flag 引用未在任何 flags 字段命名位中声明', () => {
     const s = validSchema();

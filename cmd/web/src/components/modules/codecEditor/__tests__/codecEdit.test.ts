@@ -19,6 +19,8 @@ import {
   removePipelineStep,
   movePipelineStep,
   setRouteKeyTemplate,
+  setHeartbeat,
+  updateHeartbeat,
 } from '../codecEdit';
 import type { Field } from '@/types/codec';
 
@@ -322,6 +324,46 @@ describe('pipeline 步骤增删改/移动 — raw 无损 + 不 mutate', () => {
     const keys = Object.keys(reparsed.raw!);
     expect(keys.indexOf('version')).toBeLessThan(keys.indexOf('customMarker'));
     expect(keys.indexOf('customMarker')).toBeLessThan(keys.indexOf('frame'));
+  });
+});
+
+describe('heartbeat 编辑 — raw 无损 + 不 mutate', () => {
+  const baseContent = `{
+  "version": 1,
+  "endianDefault": "le",
+  "customMarker": "keep-me",
+  "frame": { "headerSize": 8, "trailerSize": 0, "lengthIncludesHeader": false, "lengthIncludesTrailer": false },
+  "header": [
+    { "name": "cmd", "offset": 0, "size": 1, "type": "u8", "role": "route" },
+    { "name": "act", "offset": 1, "size": 1, "type": "u8", "role": "route" }
+  ],
+  "routeKeyTemplate": "{cmd}:{act}",
+  "pipeline": []
+}
+`;
+
+  it('setHeartbeat：写入连接级心跳，保留未知键且不 mutate', () => {
+    const { raw } = parseCodecForEdit(baseContent);
+    const snapshot = JSON.parse(JSON.stringify(raw));
+    const next = setHeartbeat(raw!, { intervalMs: 5000, route: { cmd: 1, act: 2 } });
+    expect(raw!).toEqual(snapshot);
+    const parsed = JSON.parse(next);
+    expect(parsed.heartbeat).toEqual({ intervalMs: 5000, route: { cmd: 1, act: 2 } });
+    expect(parsed.customMarker).toBe('keep-me');
+  });
+
+  it('setHeartbeat(null)：删除 heartbeat，不影响其他键', () => {
+    const withHeartbeat = JSON.parse(setHeartbeat(JSON.parse(baseContent), { intervalMs: 3000 }));
+    const next = setHeartbeat(withHeartbeat, null);
+    const parsed = JSON.parse(next);
+    expect(parsed.heartbeat).toBeUndefined();
+    expect(parsed.routeKeyTemplate).toBe('{cmd}:{act}');
+  });
+
+  it('updateHeartbeat：局部 patch 合并', () => {
+    const raw = JSON.parse(setHeartbeat(JSON.parse(baseContent), { intervalMs: 3000, route: { cmd: 1 } }));
+    const next = updateHeartbeat(raw, { skipWhenMissing: true });
+    expect(JSON.parse(next).heartbeat).toEqual({ intervalMs: 3000, route: { cmd: 1 }, skipWhenMissing: true });
   });
 });
 

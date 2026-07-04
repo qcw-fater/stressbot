@@ -378,6 +378,57 @@ func TestValidate_SourceKindRouteAccepted(t *testing.T) {
 	assertValid(t, s)
 }
 
+// ---------- heartbeat ----------
+
+func TestValidate_HeartbeatValidProtoBody(t *testing.T) {
+	s := validSchema()
+	s.Heartbeat = &HeartbeatConfigDef{
+		IntervalMs: 5000,
+		Route:      map[string]any{"cmd": float64(1), "act": float64(2)},
+		C2SProto:   "Game.HeartbeatC2S",
+		Bindings:   []FieldBind{{Field: "seq", Type: BindState, Source: "hbSeq"}},
+	}
+	assertValid(t, s)
+}
+
+func TestValidate_HeartbeatValidRawBody(t *testing.T) {
+	s := validSchema()
+	s.Heartbeat = &HeartbeatConfigDef{
+		IntervalMs:       5000,
+		Route:            map[string]any{"cmd": float64(1), "act": float64(2)},
+		HeartbeatFields:  []HeartbeatField{{Type: "u32", Source: HeartbeatSourceCounter}},
+		SkipWhenMissing: true,
+	}
+	assertValid(t, s)
+}
+
+func TestValidate_HeartbeatIntervalRequired(t *testing.T) {
+	s := validSchema()
+	s.Heartbeat = &HeartbeatConfigDef{Route: map[string]any{"cmd": float64(1), "act": float64(2)}}
+	assertInvalid(t, s, "heartbeat.intervalMs")
+}
+
+func TestValidate_HeartbeatRejectsProtoAndRawTogether(t *testing.T) {
+	s := validSchema()
+	s.Heartbeat = &HeartbeatConfigDef{
+		IntervalMs:      5000,
+		Route:           map[string]any{"cmd": float64(1), "act": float64(2)},
+		C2SProto:        "Game.HeartbeatC2S",
+		HeartbeatFields: []HeartbeatField{{Type: "u16", Source: HeartbeatSourceCounter}},
+	}
+	assertInvalid(t, s, "heartbeat", "c2sProto", "heartbeatFields")
+}
+
+func TestValidate_HeartbeatRejectsBindingsWithoutProto(t *testing.T) {
+	s := validSchema()
+	s.Heartbeat = &HeartbeatConfigDef{
+		IntervalMs: 5000,
+		Route:      map[string]any{"cmd": float64(1), "act": float64(2)},
+		Bindings:   []FieldBind{{Field: "seq", Type: BindState, Source: "hbSeq"}},
+	}
+	assertInvalid(t, s, "heartbeat.bindings", "c2sProto")
+}
+
 // ---------- LoadSchema ----------
 
 func TestLoadSchema_Success(t *testing.T) {

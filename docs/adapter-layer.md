@@ -565,31 +565,24 @@ type HeartbeatConfig struct {
 
 **RegisterHeartbeat(cfg)**：
 
-1. 停止已有心跳（`StopHeartbeat`）
-2. 创建 `heartbeatState`
-3. 通过 `utils.GetWorkPool().GoWithStop` 启动心跳 goroutine
-
-**runHeartbeat(hb, stopCh)**：
+1. 校验连接未关闭、`Interval > 0` 且 `Builder` 非空
+2. 通过 `controlCh` 投递心跳配置给 connectionPump
+3. pump 串行替换旧心跳、重置 timer，并在 timer 到期时调用 builder 生成完整包
 
 ```go
-for {
-    select {
-    case <-c.ctx.Done():   return    // 连接关闭
-    case <-hb.stop:        return    // 被替换/停止
-    case <-stopCh:         return    // 协程池停止
-    case <-ticker.C:
-        packet := hb.cfg.Builder()  // 调用 builder 生成完整包
-        if packet == nil { continue }
+case <-hb.timer.C:
+    packet := hb.cfg.Builder()
+    if packet != nil {
         c.Send(packet)
     }
-}
+    resetHeartbeatTimerLocked()
 ```
 
-Builder 闭包在创建时捕获 `adapter` 引用，内部调用 `adapter.EncodeTCP/UDP` 编码心跳包。
+Builder 闭包由 Robot 建连后根据 codec 的 `heartbeat` 配置创建，内部调用 `adapter.EncodeTCP/UDP` 编码心跳包。
 
 **StopHeartbeat()**：
 
-CAS 标记 + close(stop channel) + 等待 done channel（确保 goroutine 退出）。
+投递停止命令给 pump；连接关闭时 pump 的退出路径也会停止 timer。
 
 ## 9. Engine 层与 Adapter 的交互
 

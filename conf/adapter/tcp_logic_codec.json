@@ -21,5 +21,9 @@
       "when": { "requireKey": true, "minBodyLen": 1, "guards": [ { "field": "cmd", "op": "neq", "value": 0 } ] },
       "produces": [ { "name": "bcc", "algo": "xor8", "region": "ciphered" } ],
       "onError": "fail" }
-  ]
+  ],
+  "heartbeat": {
+    "intervalMs": 5000,
+    "route": { "cmd": 2, "act": 1 }
+  }
 }

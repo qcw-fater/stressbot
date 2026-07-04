@@ -93,7 +93,8 @@ type CodecResolver interface {
 // codecResolver：纯显式映射，无 fallback（遵循「禁止兼容性兜底」）。
 // 构造后 byServer 只读；并发 Resolve 无需加锁。
 type codecResolver struct {
-	byServer map[string]Adapter
+	byServer  map[string]Adapter
+	heartbeat map[string]*codec.HeartbeatConfigDef
 }
 
 // 编译期断言：*codecResolver 必须实现 CodecResolver 接口。
@@ -102,16 +103,35 @@ var _ CodecResolver = (*codecResolver)(nil)
 // Resolve 返回 server 串对应的 Adapter；未声明返回 nil。
 func (r *codecResolver) Resolve(server string) Adapter { return r.byServer[server] }
 
+// Heartbeat 返回 server 串对应的连接级心跳配置；未配置返回 nil。
+func Heartbeat(resolver CodecResolver, server string) *codec.HeartbeatConfigDef {
+	if r, ok := resolver.(*codecResolver); ok {
+		return r.heartbeat[server]
+	}
+	return nil
+}
+
 // NewCodecResolver：显式 map 构造（每个声明的 server → 其 codec）。
 // 入参 byServer 可为空（构造不校验，与 loader 不同——loader 对空映射 fail loud，但
 // 直接构造允许上层传入已组装好的映射，含空集）。
 func NewCodecResolver(byServer map[string]Adapter) CodecResolver {
+	return NewCodecResolverWithHeartbeat(byServer, nil)
+}
+
+// NewCodecResolverWithHeartbeat：显式 map 构造，同时携带连接级可选心跳配置。
+func NewCodecResolverWithHeartbeat(byServer map[string]Adapter, heartbeat map[string]*codec.HeartbeatConfigDef) CodecResolver {
 	// 防御性拷贝：避免上层后续修改影响 resolver 内部状态（resolver 构造后应只读）。
 	copied := make(map[string]Adapter, len(byServer))
 	for k, v := range byServer {
 		copied[k] = v
 	}
-	return &codecResolver{byServer: copied}
+	hbCopied := make(map[string]*codec.HeartbeatConfigDef, len(heartbeat))
+	for k, v := range heartbeat {
+		if v != nil {
+			hbCopied[k] = v
+		}
+	}
+	return &codecResolver{byServer: copied, heartbeat: hbCopied}
 }
 
 // LoadCodecResolver 按「server 串 → codec 文件名」映射，从 codecDir 逐份加载并构建 resolver。
@@ -153,7 +173,9 @@ func LoadCodecResolver(codecDir string, codecs map[string]string, errorsFile str
 
 	// dedup：同一文件名只编译一次。
 	fileCache := make(map[string]Adapter)
+	heartbeatCache := make(map[string]*codec.HeartbeatConfigDef)
 	byServer := make(map[string]Adapter, len(codecs))
+	heartbeatByServer := make(map[string]*codec.HeartbeatConfigDef)
 
 	// 按 server 串排序遍历，保证错误信息稳定。
 	servers := make([]string, 0, len(codecs))
@@ -168,9 +190,12 @@ func LoadCodecResolver(codecDir string, codecs map[string]string, errorsFile str
 			return nil, fmt.Errorf("codec 加载失败：连接 %q 文件名为空", server)
 		}
 
-		// dedup 命中：直接复用已编译实例。
+		// dedup 命中：直接复用已编译实例和同文件心跳配置。
 		if cached, ok := fileCache[file]; ok {
 			byServer[server] = cached
+			if hb := heartbeatCache[file]; hb != nil {
+				heartbeatByServer[server] = hb
+			}
 			continue
 		}
 
@@ -185,10 +210,14 @@ func LoadCodecResolver(codecDir string, codecs map[string]string, errorsFile str
 		}
 
 		fileCache[file] = a
+		heartbeatCache[file] = schema.Heartbeat
 		byServer[server] = a
+		if schema.Heartbeat != nil {
+			heartbeatByServer[server] = schema.Heartbeat
+		}
 	}
 
-	return NewCodecResolver(byServer), nil
+	return NewCodecResolverWithHeartbeat(byServer, heartbeatByServer), nil
 }
 
 // resolvePath：errorsFile/codecFile 若为绝对路径则直接使用，否则相对 codecDir 拼。

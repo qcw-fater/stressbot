@@ -12,7 +12,7 @@
  * 不做结构校验：字段是否合法交给 `validateCodecSchema`，这里只管「能否解析成对象」+ 字段定位。
  */
 
-import type { CodecSchema, Field, PipelineStep } from '@/types/codec';
+import type { CodecHeartbeat, CodecSchema, Field, PipelineStep } from '@/types/codec';
 
 /** parseCodecForEdit 的返回。 */
 export interface ParsedCodec {
@@ -217,5 +217,25 @@ export function movePipelineStep(raw: Record<string, unknown>, index: number, di
 export function setRouteKeyTemplate(raw: Record<string, unknown>, template: string): string {
   const next: Record<string, unknown> = JSON.parse(JSON.stringify(raw));
   next['routeKeyTemplate'] = template;
+  return serializeCodec(next);
+}
+
+/** 设置或删除连接级 heartbeat。heartbeat=null 表示删除配置（不启用心跳）。 */
+export function setHeartbeat(raw: Record<string, unknown>, heartbeat: CodecHeartbeat | null): string {
+  const next: Record<string, unknown> = JSON.parse(JSON.stringify(raw));
+  if (heartbeat === null) {
+    delete next['heartbeat'];
+  } else {
+    next['heartbeat'] = heartbeat;
+  }
+  return serializeCodec(next);
+}
+
+/** 局部更新连接级 heartbeat；若原来没有 heartbeat，则从 patch 创建。 */
+export function updateHeartbeat(raw: Record<string, unknown>, patch: Partial<CodecHeartbeat>): string {
+  const next: Record<string, unknown> = JSON.parse(JSON.stringify(raw));
+  const cur = next['heartbeat'];
+  const base = cur !== null && typeof cur === 'object' && !Array.isArray(cur) ? cur as Record<string, unknown> : {};
+  next['heartbeat'] = { ...base, ...patch };
   return serializeCodec(next);
 }

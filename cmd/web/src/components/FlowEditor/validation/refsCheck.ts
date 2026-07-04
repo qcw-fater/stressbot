@@ -6,8 +6,8 @@
  */
 
 import type { OnErrorStrategy, TaskFlow } from '@/types/flow';
-import type { ActionDef, BindingType, FieldBind, FilterDef, HeartbeatField, HeartbeatFieldSource } from '@/types/action';
-import { ALL_ACTION_PATTERNS, ALL_BINDING_TYPES, ALL_HEARTBEAT_FIELD_TYPES, ALL_HEARTBEAT_FIELD_SOURCES } from '@/types/action';
+import type { ActionDef, BindingType, FieldBind, FilterDef } from '@/types/action';
+import { ALL_ACTION_PATTERNS, ALL_BINDING_TYPES } from '@/types/action';
 import { protoRegistry } from '../proto/ProtoRegistry';
 import { buildRefsGraph } from '../listens/refsGraph';
 import { resolveRouteKeyForServer } from '../listens/routeKeyResolver';
@@ -32,15 +32,13 @@ export interface ValidationReport {
 
 // ── pattern 必填字段映射 ──────────────────────────────────────
 
-const PATTERNS_REQUIRE_SERVICE = ['tcpSend', 'tcpRequest', 'tcpConnect', 'tcpClose', 'tcpListen', 'udpSend', 'udpRequest', 'udpConnect', 'udpClose', 'udpListen', 'tcpHeartbeat', 'udpHeartbeat'];
-const PATTERNS_REQUIRE_ROUTE = ['tcpSend', 'tcpRequest', 'tcpListen', 'udpSend', 'udpRequest', 'udpListen', 'tcpHeartbeat', 'udpHeartbeat'];
+const PATTERNS_REQUIRE_SERVICE = ['tcpSend', 'tcpRequest', 'tcpConnect', 'tcpClose', 'tcpListen', 'udpSend', 'udpRequest', 'udpConnect', 'udpClose', 'udpListen'];
+const PATTERNS_REQUIRE_ROUTE = ['tcpSend', 'tcpRequest', 'tcpListen', 'udpSend', 'udpRequest', 'udpListen'];
 const PATTERNS_REQUIRE_ADDRESS = ['tcpConnect', 'udpConnect'];
 const PATTERNS_REQUIRE_C2S = ['tcpSend', 'udpSend'];
 const PATTERNS_REQUIRE_S2C = ['tcpRequest', 'udpRequest'];
 
-const HEARTBEAT_PATTERNS = new Set(['tcpHeartbeat', 'udpHeartbeat']);
-const VALID_HEARTBEAT_TYPE_SET = new Set<string>(ALL_HEARTBEAT_FIELD_TYPES);
-const VALID_HEARTBEAT_SOURCE_SET = new Set<string>(ALL_HEARTBEAT_FIELD_SOURCES);
+const REMOVED_HEARTBEAT_PATTERNS = new Set(['tcpHeartbeat', 'udpHeartbeat']);
 
 const VALID_NODE_TYPES = new Set(['sequence', 'action', 'loop', 'boolean', 'weighted', 'wait', 'break', 'continue']);
 const VALID_ON_ERROR_STRATEGIES = new Set<OnErrorStrategy>(['resume', 'skip', 'abort']);
@@ -414,7 +412,10 @@ function checkAction(name: string, def: ActionDef): ValidationIssue[] {
 
   // pattern 合法性
   if (!(ALL_ACTION_PATTERNS as readonly string[]).includes(def.pattern)) {
-    issues.push({ severity: 'error', code: 'ACTION_UNKNOWN_PATTERN', message: `action "${name}" 的 pattern "${def.pattern}" 不合法`, location: loc });
+    const removedHint = REMOVED_HEARTBEAT_PATTERNS.has(def.pattern)
+      ? '。心跳已迁移到协议连接配置的 heartbeat 中，请在对应连接里配置'
+      : '';
+    issues.push({ severity: 'error', code: 'ACTION_UNKNOWN_PATTERN', message: `action "${name}" 的 pattern "${def.pattern}" 不合法${removedHint}`, location: loc });
     return issues;
   }
 
@@ -454,11 +455,6 @@ function checkAction(name: string, def: ActionDef): ValidationIssue[] {
   // setState with no bindings is a no-op
   if (p === 'setState' && (!def.bindings || def.bindings.length === 0)) {
     issues.push({ severity: 'warning', code: 'SETSTATE_NO_BINDINGS', message: `action "${name}" pattern=setState 缺少 bindings（无实际效果）`, location: loc });
-  }
-
-  // tcpHeartbeat / udpHeartbeat 校验（镜像 Go engine/action.go:execHeartbeat + heartbeat.go）
-  if (HEARTBEAT_PATTERNS.has(p)) {
-    issues.push(...checkHeartbeat(name, def, loc));
   }
 
   // proto 真实存在校验
@@ -570,102 +566,6 @@ function checkNodeOnError(id: string, node: TaskFlow['nodes'][string], nodes: Ta
         location: { kind: 'node', id },
       });
     }
-  }
-
-  return issues;
-}
-
-// ── 心跳字段校验（tcpHeartbeat / udpHeartbeat） ─────────────
-//
-// 严格镜像 Go engine/action.go:execHeartbeat + engine/heartbeat.go：
-//   - intervalMs > 0
-//   - c2sProto 与 heartbeatFields 互斥（双模式二选一）
-//   - heartbeatFields 每行 type/source 合法，按 source 检查必填字段
-// proto 模式的 bindings 走既有 checkBindings（复用 tcpSend 全套语义，Go 不做心跳专用子集限制）。
-
-function checkHeartbeat(name: string, def: ActionDef, loc: { kind: 'action'; id: string }): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-
-  if (def.intervalMs === undefined || def.intervalMs === null || def.intervalMs <= 0) {
-    issues.push({
-      severity: 'error', code: 'HEARTBEAT_NO_INTERVAL', location: loc,
-      message: `action "${name}" (${def.pattern}) intervalMs 必须 > 0（当前 ${def.intervalMs ?? '未配置'}）`,
-    });
-  }
-
-  // c2sProto 与 heartbeatFields 互斥（双模式二选一，不写兼容兜底）
-  if (def.c2sProto && def.heartbeatFields && def.heartbeatFields.length > 0) {
-    issues.push({
-      severity: 'error', code: 'HEARTBEAT_DUAL_MODE', location: loc,
-      message: `action "${name}" (${def.pattern}) 同时配置 c2sProto 与 heartbeatFields，须二选一（双模式互斥）`,
-    });
-  }
-
-  const fields = def.heartbeatFields ?? [];
-  for (let i = 0; i < fields.length; i++) {
-    issues.push(...checkHeartbeatField(name, i, fields[i], loc));
-  }
-
-  return issues;
-}
-
-function checkHeartbeatField(name: string, idx: number, f: HeartbeatField, loc: { kind: 'action'; id: string }): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-  const label = `action "${name}".heartbeatFields[${idx}]`;
-
-  if (!f.type || !VALID_HEARTBEAT_TYPE_SET.has(f.type)) {
-    issues.push({
-      severity: 'error', code: 'HEARTBEAT_FIELD_UNKNOWN_TYPE', location: loc,
-      message: `${label} type 非法 "${f.type}"（合法：u8/i8/u16/i16/u32/i32/u64/i64/f32/f64）`,
-    });
-  }
-  if (!f.source || !VALID_HEARTBEAT_SOURCE_SET.has(f.source)) {
-    issues.push({
-      severity: 'error', code: 'HEARTBEAT_FIELD_UNKNOWN_SOURCE', location: loc,
-      message: `${label} source 非法 "${f.source}"（合法：fixed/state/stateCounter/counter/timestamp/randomInt）`,
-    });
-    return issues; // source 非法时后续字段检查无意义
-  }
-
-  const src = f.source as HeartbeatFieldSource;
-
-  // f32/f64 仅支持 fixed/state；其余 source（计数器/时间戳/随机等整型语义）对浮点无意义。
-  if ((f.type === 'f32' || f.type === 'f64') && src !== 'fixed' && src !== 'state') {
-    issues.push({
-      severity: 'error', code: 'HEARTBEAT_FIELD_FLOAT_BAD_SOURCE', location: loc,
-      message: `${label} type=${f.type} 仅支持 source=fixed/state（当前 source=${src}）`,
-    });
-  }
-
-  switch (src) {
-    case 'fixed': {
-      // f32/f64 校验 floatValue；整型校验 value。
-      const isFloat = f.type === 'f32' || f.type === 'f64';
-      const hasVal = isFloat
-        ? f.floatValue !== undefined && f.floatValue !== null
-        : f.value !== undefined && f.value !== null;
-      if (!hasVal) {
-        issues.push({ severity: 'error', code: 'HEARTBEAT_FIELD_FIXED_NO_VALUE', location: loc, message: `${label} source=fixed 缺 ${isFloat ? 'floatValue' : 'value'}` });
-      }
-      break;
-    }
-    case 'state':
-    case 'stateCounter':
-      if (!f.key) {
-        issues.push({ severity: 'error', code: 'HEARTBEAT_FIELD_NO_KEY', location: loc, message: `${label} source=${src} 缺 key` });
-      }
-      break;
-    case 'randomInt':
-      if (f.min === undefined || f.max === undefined) {
-        issues.push({ severity: 'error', code: 'HEARTBEAT_FIELD_RANDOM_NO_RANGE', location: loc, message: `${label} source=randomInt 缺 min/max` });
-      } else if (f.min > f.max) {
-        issues.push({ severity: 'error', code: 'HEARTBEAT_FIELD_RANDOM_NO_RANGE', location: loc, message: `${label} source=randomInt min(${f.min}) > max(${f.max})` });
-      }
-      break;
-    case 'counter':
-    case 'timestamp':
-      // counter 可选 start/step；timestamp 可选 unit(ms/s，缺省 ms) —— Go 侧宽容，此处不强校验。
-      break;
   }
 
   return issues;

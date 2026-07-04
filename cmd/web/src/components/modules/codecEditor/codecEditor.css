@@ -423,6 +423,11 @@
   gap: var(--space-sm);
 }
 
+/* 顶层区段切换：协议配置 | 错误码映射（两类对象各自工具栏，不再混进连接下拉） */
+.pce-section-bar {
+  padding: var(--space-sm) var(--space-sm) 0;
+}
+
 /* 命令栏：左 target（连接选择+来源） | 右 actions（分组按钮+视图切换） */
 .pce-cmdbar {
   display: flex;
@@ -541,3 +546,26 @@
 @media (max-width: 720px) {
   .split-2 { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* 错误码映射编辑器（ErrorMapEditor）—— 受控于 errors.json 原文 */
+.eme-root { display: flex; flex-direction: column; gap: var(--space-sm); padding: var(--space-sm); }
+.eme-alert { margin: 0; }
+.eme-framework { padding: 8px; background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 6px; }
+.eme-framework-title { font-size: 12px; color: var(--text-tertiary); margin-bottom: 4px; }
+
+/* 固定添加/编辑区：码（定宽）| 描述（flex 撑满，消除右侧留白）| 按钮 */
+.eme-draft { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.eme-draft .ant-input-number { flex: 0 0 130px; width: 130px; }
+.eme-draft .ant-input { flex: 1 1 160px; min-width: 120px; }
+.eme-draft-err { font-size: 12px; color: var(--color-error); margin-top: -2px; }
+.eme-empty { font-size: 12px; color: var(--text-tertiary); padding: 6px 0; }
+
+/* 框架保留码：素色小标签（只读） */
+.eme-reserved-tag { font-size: 11px; margin-inline-end: 0; }
+
+/* 业务码标签：整体可点编辑，右侧 × 删除；蓝（normal）/ 黄（空描述）/ 红（结构性非法） */
+.eme-biz-tag { cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 6px; margin-inline-end: 0; }
+.eme-biz-label { white-space: nowrap; }
+.eme-biz-close { font-size: 10px; opacity: 0.5; transition: opacity 0.15s; }
+.eme-biz-tag:hover .eme-biz-close { opacity: 1; }
+.eme-biz-tag-editing { box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-blue) 45%, transparent); }

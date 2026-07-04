@@ -29,6 +29,7 @@ export function ErrorEdge({
       <BaseEdge id={id} path={path} style={selected ? style : { ...style, opacity: 0.82 }} markerEnd={markerEnd} />
       <EdgeLabelRenderer>
         <div
+          title="onError.handler 调用边"
           style={{
             position: 'absolute',
             transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
@@ -43,7 +44,7 @@ export function ErrorEdge({
           }}
           className="nodrag nopan"
         >
-          onError
+          handler
         </div>
       </EdgeLabelRenderer>
     </>

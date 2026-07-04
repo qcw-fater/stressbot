@@ -17,6 +17,7 @@ import (
 	"go.uber.org/zap"
 
 	"stressbot/adapter"
+	"stressbot/codec"
 	"stressbot/engine"
 	"stressbot/errcode"
 	"stressbot/monitor"
@@ -472,6 +473,10 @@ func (r *Robot) ConnectTCP(serviceName, address string) bool {
 	}
 
 	monitor.Global().ConnEstablished()
+	if err := (&netSenderAdapter{robot: r}).RegisterCodecHeartbeat("tcp", serviceName); err != nil {
+		stresslog.Warn("[ROBOT] TCP 连接级心跳注册失败",
+			zap.Int("id", r.id), zap.String("account", r.account), zap.String("service", serviceName), zap.Error(err))
+	}
 
 	// onClosed：主动/被动关闭都触发，仅用于监控 -1（与 ConnEstablished 配对，保证当前连接数准确）
 	conn.SetOnClosed(func() {
@@ -532,6 +537,10 @@ func (r *Robot) ConnectUDP(serviceName, address string) bool {
 	}
 
 	monitor.Global().ConnEstablished()
+	if err := (&netSenderAdapter{robot: r}).RegisterCodecHeartbeat("udp", serviceName); err != nil {
+		stresslog.Warn("[ROBOT] UDP 连接级心跳注册失败",
+			zap.Int("id", r.id), zap.String("account", r.account), zap.String("service", serviceName), zap.Error(err))
+	}
 
 	conn.SetOnClosed(func() {
 		monitor.Global().ConnDropped()
@@ -1427,7 +1436,28 @@ func (ns *netSenderAdapter) GetUDPSecretKey(service string) []byte {
 	return conn.GetSecretKey()
 }
 
-// RegisterHeartbeat 注册声明式心跳（tcpHeartbeat / udpHeartbeat action，双模式 body 构造）。
+// RegisterCodecHeartbeat 按 codec 连接配置注册可选心跳。
+func (ns *netSenderAdapter) RegisterCodecHeartbeat(transport, service string) error {
+	if ns.robot == nil || ns.robot.resolver == nil {
+		return nil
+	}
+	hb := adapter.Heartbeat(ns.robot.resolver, transport+":"+service)
+	if hb == nil {
+		return nil
+	}
+	return ns.installHeartbeat(engine.HeartbeatConfig{
+		Transport:       transport,
+		Service:         service,
+		IntervalMs:      hb.IntervalMs,
+		Route:           hb.Route,
+		C2SProto:        hb.C2SProto,
+		Bindings:        codecFieldBindsToEngine(hb.Bindings),
+		Fields:          codecHeartbeatFieldsToEngine(hb.HeartbeatFields),
+		SkipWhenMissing: hb.SkipWhenMissing,
+	})
+}
+
+// installHeartbeat 安装连接级心跳（双模式 body 构造）。
 //
 // 心跳 body 不由 Lua 构造，而是由 Go builder 闭包按配置模式分派：
 //   - proto 模式（C2SProto != ""）：engine.BuildProtoBody（factory + bindings，Go-only）；
@@ -1442,7 +1472,7 @@ func (ns *netSenderAdapter) GetUDPSecretKey(service string) []byte {
 //  2. 取 conn 当前 secretKey；
 //  3. adp.EncodeTCP/UDP(route, body, key) → packet；
 //  4. 仅 raw-binary 模式递增 privateCounters（counter 源按 Step 推进；proto 模式无私有计数器）。
-func (ns *netSenderAdapter) RegisterHeartbeat(cfg engine.HeartbeatActionConfig) error {
+func (ns *netSenderAdapter) installHeartbeat(cfg engine.HeartbeatConfig) error {
 	if ns.robot.ctx.Err() != nil {
 		return engine.NewActionError(errcode.ErrActionCanceled, "service="+cfg.Service)
 	}
@@ -1453,7 +1483,7 @@ func (ns *netSenderAdapter) RegisterHeartbeat(cfg engine.HeartbeatActionConfig) 
 		conn = ns.robot.client.GetTCPConn(cfg.Service)
 	}
 	if conn == nil {
-		stresslog.Warn("[ROBOT] RegisterHeartbeat 连接不存在",
+		stresslog.Warn("[ROBOT] 连接级心跳安装失败：连接不存在",
 			zap.String("transport", cfg.Transport), zap.String("service", cfg.Service))
 		return engine.NewActionError(errcode.ErrConnNotFound,
 			"transport="+cfg.Transport+" service="+cfg.Service)
@@ -1552,12 +1582,113 @@ func (ns *netSenderAdapter) RegisterHeartbeat(cfg engine.HeartbeatActionConfig) 
 		Interval: time.Duration(cfg.IntervalMs) * time.Millisecond,
 		Builder:  goBuilder,
 	})
-	stresslog.Debug("[ROBOT] RegisterHeartbeat 已注册",
+	stresslog.Debug("[ROBOT] 连接级心跳已安装",
 		zap.String("transport", cfg.Transport),
 		zap.String("service", cfg.Service),
 		zap.Int("intervalMs", cfg.IntervalMs),
 		zap.Int("fieldCount", len(cfg.Fields)))
 	return nil
+}
+
+func codecFieldBindsToEngine(in []codec.FieldBind) []engine.FieldBind {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]engine.FieldBind, len(in))
+	for i := range in {
+		out[i] = engine.FieldBind{
+			Field:         in[i].Field,
+			Type:          in[i].Type,
+			Value:         in[i].Value,
+			Source:        in[i].Source,
+			Path:          in[i].Path,
+			Values:        append([]any(nil), in[i].Values...),
+			Entries:       codecMapEntryBindsToEngine(in[i].Entries),
+			Required:      in[i].Required,
+			Filters:       codecFilterDefsToEngine(in[i].Filters),
+			Min:           in[i].Min,
+			Max:           in[i].Max,
+			Precision:     in[i].Precision,
+			Length:        in[i].Length,
+			Count:         in[i].Count,
+			Charset:       in[i].Charset,
+			ExcludeSource: in[i].ExcludeSource,
+			Optional:      in[i].Optional,
+			Wrap:          in[i].Wrap,
+			StoreAs:       in[i].StoreAs,
+			KeySource:     in[i].KeySource,
+			Condition:     in[i].Condition,
+		}
+	}
+	return out
+}
+
+func codecMapEntryBindsToEngine(in []codec.MapEntryBind) []engine.MapEntryBind {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]engine.MapEntryBind, len(in))
+	for i := range in {
+		out[i] = engine.MapEntryBind{Key: in[i].Key}
+		converted := codecFieldBindsToEngine([]codec.FieldBind{in[i].Value})
+		out[i].Value = converted[0]
+	}
+	return out
+}
+
+func codecFilterDefsToEngine(in []codec.FilterDef) []engine.FilterDef {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]engine.FilterDef, len(in))
+	for i := range in {
+		out[i] = engine.FilterDef{
+			Path:   in[i].Path,
+			Op:     in[i].Op,
+			Value:  in[i].Value,
+			Source: in[i].Source,
+			Mode:   in[i].Mode,
+		}
+	}
+	return out
+}
+
+func codecHeartbeatFieldsToEngine(in []codec.HeartbeatField) []engine.HeartbeatField {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]engine.HeartbeatField, len(in))
+	for i := range in {
+		out[i] = engine.HeartbeatField{
+			Type:       in[i].Type,
+			Source:     in[i].Source,
+			Value:      cloneInt64Ptr(in[i].Value),
+			FloatValue: cloneFloat64Ptr(in[i].FloatValue),
+			Key:        in[i].Key,
+			Min:        cloneInt64Ptr(in[i].Min),
+			Max:        cloneInt64Ptr(in[i].Max),
+			Start:      cloneInt64Ptr(in[i].Start),
+			Step:       cloneInt64Ptr(in[i].Step),
+			Unit:       in[i].Unit,
+		}
+	}
+	return out
+}
+
+func cloneInt64Ptr(v *int64) *int64 {
+	if v == nil {
+		return nil
+	}
+	vv := *v
+	return &vv
+}
+
+func cloneFloat64Ptr(v *float64) *float64 {
+	if v == nil {
+		return nil
+	}
+	vv := *v
+	return &vv
 }
 
 // 编译时接口断言

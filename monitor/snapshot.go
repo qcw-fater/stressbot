@@ -36,7 +36,7 @@ type BandwidthSnapshot struct {
 //   - 只统计有完整响应帧且 WireRTT > 0 的 request 样本；服务端 headerErr/失败响应也计入，
 //     超时、发送失败、取消且未收到响应帧的分支不产生 RTT 样本。
 //   - 因此 avg/p50/p95/p99 的分母是 RTTSampleCount，而不是 action 成功数或总样本数。
-//   - 纯客户端动作（如 lua 内仅做 connect/set_secret_key/register_heartbeat）RTTSampleCount=0，
+//   - 纯客户端动作（如 lua 内仅做 connect/set_secret_key/set_state）RTTSampleCount=0，
 //     此时 RTT.Count=0，前端 ActionsTab 应显示 "—"。
 //   - TotalDuration 直方图记录的是 action 从开始执行到结束的总耗时（wallClock），
 //     单次 action 最多产生 1 个样本，包含 RTT、监听等待、Lua 逻辑、解析和状态写入等。

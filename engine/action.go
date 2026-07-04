@@ -221,7 +221,7 @@ type NetSender interface {
 	// CloseUDP 关闭指定服务的 UDP 连接。
 	CloseUDP(service string)
 
-	// ── 监听 / 心跳 ────────────────────────────────────────────────────────
+	// ── 监听 ──────────────────────────────────────────────────────────────
 
 	// GetTCPListenResp 非阻塞获取 TCP 监听的最近一次响应（含协议头错误码）。
 	GetTCPListenResp(service string, routeKey string) *NetExchange
@@ -233,14 +233,6 @@ type NetSender interface {
 	// EnsureUDPListener 为指定 routeKey 注册监听占位（callback=nil，轮询模式）。
 	// 由 Lua ensure_udp_listener 调用（queueSize 固定为 1，大容量请用 flow listenRefs 的 queueSize 配置）。
 	EnsureUDPListener(service string, routeKey string, queueSize int)
-
-	// ── 声明式心跳（Go-only builder）───────────────────────────────────────
-
-	// RegisterHeartbeat 注册声明式二进制心跳（tcpHeartbeat / udpHeartbeat action）。
-	// Transport/IntervalMs/Route/Fields 由 ActionExecutor 从 ActionDef 装配；
-	// 实现侧（netSenderAdapter）构造 Go builder 闭包（BuildHeartbeatBody + 私有计数器 + adapter encode），
-	// 不触碰 robot 的业务 LState。
-	RegisterHeartbeat(cfg HeartbeatActionConfig) error
 
 	// ── 加密密钥 ──────────────────────────────────────────────────────────
 
@@ -299,10 +291,6 @@ func (ae *ActionExecutor) Execute(ctx context.Context, def *ActionDef) (sendByte
 		err = ae.execClearState(def)
 	case PatternSetState:
 		err = ae.execSetState(def)
-	case PatternTCPHeartbeat:
-		err = ae.execHeartbeat("tcp", def)
-	case PatternUDPHeartbeat:
-		err = ae.execHeartbeat("udp", def)
 	default:
 		err = NewActionError(errcode.ErrUnknownPattern, "pattern="+def.Pattern)
 	}
@@ -323,7 +311,7 @@ func (ae *ActionExecutor) buildBody(def *ActionDef) ([]byte, error) {
 // BuildProtoBody 按 c2sProto + bindings 构造 proto 消息并序列化为 body 字节。
 //
 // 复用现有 binding 解析（bindFields 同语义），供 tcpSend/tcpRequest（经 buildBody）
-// 与心跳 proto 模式（HeartbeatActionConfig.C2SProto + Bindings）共享。Go-only，不碰 Lua。
+// 与心跳 proto 模式（HeartbeatConfig.C2SProto + Bindings）共享。Go-only，不碰 Lua。
 //
 // 参数：
 //   - c2sProto：proto 全名；空串 → 返回 (nil, false, nil)（空 body，与 buildBody 旧行为对齐）；
@@ -787,41 +775,6 @@ func (ae *ActionExecutor) execSetState(def *ActionDef) error {
 		ae.store.SetPath(fb.Field, val)
 	}
 	return nil
-}
-
-// execHeartbeat 注册声明式心跳（tcpHeartbeat / udpHeartbeat action）。
-// 校验：
-//   - IntervalMs<=0 → ErrHeartbeatConfig；
-//   - Route 缺失 → ErrHeartbeatConfig；
-//   - C2SProto 与 HeartbeatFields 互斥（双模式不能同时配）→ ErrHeartbeatConfig（不写兼容兜底）。
-//
-// 通过后装配 HeartbeatActionConfig 委托 netSender.RegisterHeartbeat（Go builder 闭包在 robot 层按模式分派）。
-// 返回 nil（注册动作本身不产生网络延迟样本，不等待发送）。
-func (ae *ActionExecutor) execHeartbeat(transport string, def *ActionDef) error {
-	if def.IntervalMs <= 0 {
-		return NewActionError(errcode.ErrHeartbeatConfig,
-			fmt.Sprintf("心跳间隔非法 intervalMs=%d action=%s service=%s", def.IntervalMs, def.Name, def.Service))
-	}
-	if def.C2SProto != "" && len(def.HeartbeatFields) > 0 {
-		return NewActionError(errcode.ErrHeartbeatConfig,
-			fmt.Sprintf("心跳 %s 同时配置 c2sProto 与 heartbeatFields，须二选一（双模式互斥）service=%s",
-				def.Name, def.Service))
-	}
-	if def.Route == nil {
-		return NewActionError(errcode.ErrHeartbeatConfig,
-			"心跳缺 route 配置 action="+def.Name+" service="+def.Service)
-	}
-	cfg := HeartbeatActionConfig{
-		Transport:       transport,
-		Service:         def.Service,
-		IntervalMs:      def.IntervalMs,
-		Route:           def.Route,
-		C2SProto:        def.C2SProto,
-		Bindings:        def.Bindings,
-		Fields:          def.HeartbeatFields,
-		SkipWhenMissing: def.SkipWhenMissing,
-	}
-	return ae.netSender.RegisterHeartbeat(cfg)
 }
 
 // execHTTPRequest HTTP 请求

@@ -1,5 +1,5 @@
 -- connect_logic.lua: 连接逻辑服 TCP + 密钥交换
--- 心跳已迁移到声明式 tcpHeartbeat action（RegisterLogicHeartbeat，flow.json），此处不再注册。
+-- 心跳随 tcp_logic_codec.json 的 heartbeat 配置在连接建立后自动注册。
 local network = require("network")
 local robot = require("robot")
 local log = require("log")

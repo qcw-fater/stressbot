@@ -79,11 +79,6 @@ func TestConnectUDP_ResolverNil_FailLoud(t *testing.T) {
 func TestConnectTCP_ResolverHit_ResolveNonNil(t *testing.T) {
 	want := fakeAdapter{}
 	r := &Robot{
-		id:       3,
-		account:  "bot_test3",
-		client:   network.NewClient("bot_test3", 0, ""),
-		ctx:      context.Background(),
-		cancel:   func() {},
 		resolver: &stubResolver{byServer: map[string]adapter.Adapter{"tcp:logic": want}},
 	}
 

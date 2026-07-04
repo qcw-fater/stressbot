@@ -1,6 +1,5 @@
 -- connect_battle_udp.lua: 连接战斗服 UDP + 设置 UDP 密钥
--- 仅做连接 / 配置；150ms 心跳由 flow.json 的 RegisterBattleUDPHeartbeat
--- (udpHeartbeat action, raw-binary heartbeatFields) 声明式注册，后台 goroutine
+-- 仅做连接 / 配置；150ms 心跳随 udp_battle_codec.json 的 heartbeat 配置在连接建立后自动注册，
 -- 通过 network 层全局带宽统计，完全不触碰 robot 业务 LState。
 local network = require("network")
 local robot = require("robot")
@@ -43,8 +42,8 @@ function execute(r)
             .. " address=" .. tostring(battleAddress))
     end
 
-    -- 新一轮战斗开始：复位包序号（对齐旧工具 ClearBattleInfo → packetIndex=0）
-    -- 心跳的 udp_seq 私有计数器由 RegisterBattleUDPHeartbeat 节点每 battle 重新注册时从 start=0 开始，等价复位。
+    -- 新一轮战斗开始：复位共享包序号（对齐旧工具 ClearBattleInfo → packetIndex=0）。
+    -- UDP 心跳的 heartbeatFields 使用 stateCounter 读取并推进 packageIndex；重新连接前复位即可从 0 重新开始。
     robot.set("packageIndex", 0)
     robot.set("battleAck", 0)
     robot.set("frameCount", 0)
@@ -53,6 +52,6 @@ function execute(r)
         .. " battleId=" .. tostring(battleId)
         .. " fighterIndex=" .. tostring(fighterIndex)
         .. " hasSecretKey=" .. tostring(hasSecretKey)
-        .. " 心跳由声明式节点注册(150ms)")
+        .. " 心跳由协议配置自动注册(150ms)")
     return nil
 end

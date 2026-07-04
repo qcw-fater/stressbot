@@ -20,12 +20,13 @@ import (
 
 // CodecSchema 是 codec.json 的根类型。
 type CodecSchema struct {
-	Version       int            `json:"version"`
-	EndianDefault string         `json:"endianDefault"` // "le" | "be"
-	Frame         FrameSpec      `json:"frame"`
-	Header        []Field        `json:"header"`
-	RouteKeyTmpl  string         `json:"routeKeyTemplate"` // 如 "{cmd}:{act}"
-	Pipeline      []PipelineStep `json:"pipeline"`
+	Version       int                 `json:"version"`
+	EndianDefault string              `json:"endianDefault"` // "le" | "be"
+	Frame         FrameSpec           `json:"frame"`
+	Header        []Field             `json:"header"`
+	RouteKeyTmpl  string              `json:"routeKeyTemplate"` // 如 "{cmd}:{act}"
+	Pipeline      []PipelineStep      `json:"pipeline"`
+	Heartbeat     *HeartbeatConfigDef `json:"heartbeat,omitempty"` // 连接级可选心跳；nil 表示不启用
 }
 
 // FrameSpec 描述帧的物理布局（不含字段类型——类型由 Header 中唯一的
@@ -121,6 +122,80 @@ type Guard struct {
 	Value int64  `json:"value"`
 }
 
+// HeartbeatConfigDef 是 codec 连接级可选心跳配置。
+// 心跳强绑定当前连接：transport/service 由 codec 文件名对应的连接名决定，不在本对象内重复配置。
+type HeartbeatConfigDef struct {
+	IntervalMs      int              `json:"intervalMs"`
+	Route           any              `json:"route,omitempty"`
+	C2SProto        string           `json:"c2sProto,omitempty"`
+	Bindings        []FieldBind      `json:"bindings,omitempty"`
+	HeartbeatFields []HeartbeatField `json:"heartbeatFields,omitempty"`
+	SkipWhenMissing bool             `json:"skipWhenMissing,omitempty"`
+}
+
+// FieldBind 是心跳 protobuf body 模式复用的字段绑定定义。
+// 字段语义与 engine.FieldBind 同构，codec 包只负责承载和基础校验，不解释业务值。
+type FieldBind struct {
+	Field         string         `json:"field"`
+	Type          string         `json:"type"`
+	Value         any            `json:"value"`
+	Source        string         `json:"source"`
+	Path          string         `json:"path"`
+	Values        []any          `json:"values"`
+	Entries       []MapEntryBind `json:"entries"`
+	Required      bool           `json:"required"`
+	Filters       []FilterDef    `json:"filters"`
+	Min           int            `json:"min"`
+	Max           int            `json:"max"`
+	Precision     int            `json:"precision"`
+	Length        int            `json:"length"`
+	Count         int            `json:"count"`
+	Charset       string         `json:"charset"`
+	ExcludeSource string         `json:"excludeSource"`
+	Optional      bool           `json:"optional"`
+	Wrap          bool           `json:"wrap"`
+	StoreAs       string         `json:"storeAs"`
+	KeySource     string         `json:"keySource"`
+	Condition     string         `json:"condition"`
+}
+
+type MapEntryBind struct {
+	Key   any       `json:"key"`
+	Value FieldBind `json:"value"`
+}
+
+type FilterDef struct {
+	Path   string `json:"path"`
+	Op     string `json:"op"`
+	Value  any    `json:"value"`
+	Source string `json:"source"`
+	Mode   string `json:"mode"`
+}
+
+// HeartbeatField 声明 raw-binary 心跳 body 的一个小端字段。
+type HeartbeatField struct {
+	Type       string   `json:"type"`
+	Source     string   `json:"source"`
+	Value      *int64   `json:"value,omitempty"`
+	FloatValue *float64 `json:"floatValue,omitempty"`
+	Key        string   `json:"key,omitempty"`
+	Min        *int64   `json:"min,omitempty"`
+	Max        *int64   `json:"max,omitempty"`
+	Start      *int64   `json:"start,omitempty"`
+	Step       *int64   `json:"step,omitempty"`
+	Unit       string   `json:"unit,omitempty"`
+}
+
+const (
+	BindState                  = "state"
+	HeartbeatSourceCounter     = "counter"
+	HeartbeatSourceFixed       = "fixed"
+	HeartbeatSourceState       = "state"
+	HeartbeatSourceStateCounter = "stateCounter"
+	HeartbeatSourceTimestamp   = "timestamp"
+	HeartbeatSourceRandomInt   = "randomInt"
+)
+
 // ---------- 集合（v1 冻结值） ----------
 
 var validFieldTypes = map[string]int{
@@ -206,6 +281,7 @@ func (s *CodecSchema) Validate() error {
 	s.validateHeader(&ec)
 	s.validateRouteKeyTemplate(&ec)
 	s.validatePipeline(&ec)
+	s.validateHeartbeat(&ec)
 	return ec.err()
 }
 
@@ -406,6 +482,22 @@ func (s *CodecSchema) isRouteField(name string) bool {
 }
 
 // ---------- pipeline ----------
+
+func (s *CodecSchema) validateHeartbeat(ec *errCollector) {
+	hb := s.Heartbeat
+	if hb == nil {
+		return
+	}
+	if hb.IntervalMs <= 0 {
+		ec.addf("heartbeat.intervalMs 必须大于 0（当前 %d）", hb.IntervalMs)
+	}
+	if hb.C2SProto != "" && len(hb.HeartbeatFields) > 0 {
+		ec.addf("heartbeat 不能同时配置 c2sProto 与 heartbeatFields，须二选一")
+	}
+	if hb.C2SProto == "" && len(hb.Bindings) > 0 {
+		ec.addf("heartbeat.bindings 只能在配置 c2sProto 时使用")
+	}
+}
 
 func (s *CodecSchema) validatePipeline(ec *errCollector) {
 	// step name 唯一。

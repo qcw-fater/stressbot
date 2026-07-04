@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"stressbot/codec"
 )
 
 // 项目根（worktree）下 adapter 包测试相对 cwd 走 runtime.Version()。直接拼绝对路径。
@@ -249,6 +251,45 @@ func TestNewCodecResolver_EmptyMap(t *testing.T) {
 	if got := r.Resolve("anything"); got != nil {
 		t.Errorf("空 map resolver Resolve 应返回 nil，得到 %v", got)
 	}
+}
+
+func TestCodecResolverHeartbeat_Direct(t *testing.T) {
+	r, err := LoadCodecResolver(adapterDir, realCodecMap(), "errors.json")
+	if err != nil {
+		t.Fatalf("LoadCodecResolver 失败: %v", err)
+	}
+	logic := r.Resolve("tcp:logic")
+	direct := NewCodecResolverWithHeartbeat(
+		map[string]Adapter{"tcp:logic": logic},
+		map[string]*codec.HeartbeatConfigDef{"tcp:logic": {IntervalMs: 5000, Route: map[string]any{"cmd": 1}}},
+	)
+	got := Heartbeat(direct, "tcp:logic")
+	if got == nil || got.IntervalMs != 5000 {
+		t.Fatalf("Heartbeat(tcp:logic) = %#v，期望 intervalMs=5000", got)
+	}
+	if Heartbeat(r, "tcp:missing") != nil {
+		t.Fatal("未配置 heartbeat 的连接应返回 nil")
+	}
+}
+
+func TestCodecResolverHeartbeat_LoadedFromSchema(t *testing.T) {
+	dir := t.TempDir()
+	schema := strings.Replace(validCodecJSONForResolver(), `"pipeline":[]`, `"pipeline":[],"heartbeat":{"intervalMs":3000,"route":{"cmd":1,"act":2}}`, 1)
+	if err := os.WriteFile(filepath.Join(dir, "tcp_logic_codec.json"), []byte(schema), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, err := LoadCodecResolver(dir, map[string]string{"tcp:logic": "tcp_logic_codec.json"}, "")
+	if err != nil {
+		t.Fatalf("LoadCodecResolver err: %v", err)
+	}
+	got := Heartbeat(r, "tcp:logic")
+	if got == nil || got.IntervalMs != 3000 {
+		t.Fatalf("加载 schema heartbeat 失败：%#v", got)
+	}
+}
+
+func validCodecJSONForResolver() string {
+	return `{"version":1,"endianDefault":"le","frame":{"headerSize":8,"trailerSize":0,"lengthIncludesHeader":false,"lengthIncludesTrailer":false},"header":[{"name":"bodyLen","offset":0,"size":4,"type":"u32","role":"length"},{"name":"cmd","offset":4,"size":1,"type":"u8","role":"route"},{"name":"act","offset":5,"size":1,"type":"u8","role":"route"},{"name":"err","offset":6,"size":2,"type":"u16","role":"errorCode"}],"routeKeyTemplate":"{cmd}:{act}","pipeline":[]}`
 }
 
 // TestInferCodecMap_RealAdapterDir 用 T1.6 真实产物 conf/adapter 推断出三连接映射。

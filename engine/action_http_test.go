@@ -10,10 +10,10 @@ import (
 	stresslog "stressbot/utils/log"
 )
 
-// httpStatusNetSender 注入指定 StatusCode + Body 的 HTTP 响应，复用 fakeHeartbeatNetSender
+// httpStatusNetSender 注入指定 StatusCode + Body 的 HTTP 响应，复用 fakeNetSender
 // 兜底其余方法（TCP/UDP/connect 不参与本测试）。
 type httpStatusNetSender struct {
-	*fakeHeartbeatNetSender
+	*fakeNetSender
 	statusCode int
 	body       []byte
 	httpReq    int32
@@ -38,7 +38,7 @@ func TestHTTPRequest_Non2xx_DetailIncludesStatusAndBody(t *testing.T) {
 	const actionName = "createTeam"
 	body := []byte(`{"error":1004,"errstr":"队伍已满"}`)
 	fake := &httpStatusNetSender{
-		fakeHeartbeatNetSender: &fakeHeartbeatNetSender{},
+		fakeNetSender: &fakeNetSender{},
 		statusCode:             404,
 		body:                   body,
 	}

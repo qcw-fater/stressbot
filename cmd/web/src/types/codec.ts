@@ -22,6 +22,8 @@ export interface CodecSchema {
   /** routeKeyTemplate，用 header 中 role=route 的字段名作为占位 */
   routeKeyTemplate: string;
   pipeline: PipelineStep[];
+  /** 连接级可选心跳；没有该对象表示不启用心跳 */
+  heartbeat?: CodecHeartbeat;
 }
 
 /** 帧物理布局（不含字段类型——类型由 Header 中唯一的 role:"length" 字段携带）。 */
@@ -135,6 +137,15 @@ export interface StepCond {
   requireKey?: boolean;
   appliesWith?: string;
   guards?: Guard[];
+}
+
+export interface CodecHeartbeat {
+  intervalMs: number;
+  route?: unknown;
+  c2sProto?: string;
+  bindings?: import('@/types/action').FieldBind[];
+  heartbeatFields?: import('@/types/action').HeartbeatField[];
+  skipWhenMissing?: boolean;
 }
 
 /** when.guards 的一个条件项。 */

@@ -2,14 +2,13 @@
  * 声明式动作主表单：根据 pattern 动态显示对应字段。
  */
 
-import { Button, Form, Input, InputNumber, Radio, Select, Space, Switch } from 'antd';
+import { Button, Form, Input, InputNumber, Select, Space } from 'antd';
 import { ApiOutlined } from '@ant-design/icons';
 import { useState } from 'react';
 import type { ActionDef, ActionPattern } from '@/types/action';
 import { ProtoBrowser } from '../../proto/ProtoBrowser';
 import { BindingsTable } from './BindingsTable';
 import { StoreTable } from './StoreTable';
-import { HeartbeatFields } from './HeartbeatFields';
 import { useRuntimeStore } from '@/services/runtimeStore';
 import { useFlowStore } from '../../store/flowStore';
 import { protoRegistry } from '../../proto/ProtoRegistry';
@@ -50,7 +49,6 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
   const showURL = pattern === 'httpRequest';
   const showMethod = pattern === 'httpRequest';
   const showContentType = pattern === 'httpRequest';
-  const isHeartbeat = pattern === 'tcpHeartbeat' || pattern === 'udpHeartbeat';
   const protocol = actionProtocol(pattern);
 
   return (
@@ -242,10 +240,6 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
         </Form.Item>
       )}
 
-      {isHeartbeat && (
-        <HeartbeatForm action={action} set={set} setProtoTarget={setProtoTarget} />
-      )}
-
       <ProtoBrowser
         windowId="protoPicker_action"
         open={protoTarget !== null}
@@ -272,10 +266,6 @@ function patternHas(pattern: ActionPattern, fields: Array<keyof ActionDef>): boo
     udpConnect: ['service', 'address'],
     udpClose: ['service'],
     udpListen: ['service', 'route', 's2cProto', 'store'],
-    // 心跳的 c2sProto/bindings/heartbeatFields/intervalMs/skipWhenMissing 由 HeartbeatForm 专属渲染，
-    // 此处只声明 service/route（复用通用输入）。
-    tcpHeartbeat: ['service', 'route'],
-    udpHeartbeat: ['service', 'route'],
     httpRequest: ['bindings', 'store'],
     clearState: [],
     setState: ['bindings'],
@@ -293,120 +283,5 @@ function ProtoHint({ fullName }: { fullName?: string }) {
     <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
       {msg.comment}
     </div>
-  );
-}
-
-// ── 心跳表单（tcpHeartbeat / udpHeartbeat） ─────────────────
-//
-// body 三模式互斥（镜像 Go engine/action.go:execHeartbeat 校验）：
-//   - 空 body：都不填（静态心跳，如 RegisterLogicHeartbeat）；
-//   - proto 模式：c2sProto + bindings（复用 BindingsTable，Go 不做心跳专用子集限制，
-//     bindings 全套 type 都允许，与 tcpRequest 同语义）；
-//   - raw-binary 模式：heartbeatFields（小端布局表格）。
-// 切换模式时清对方字段（互斥）。skipWhenMissing 仅 raw-binary 有意义，proto 模式置灰。
-type HeartbeatBodyMode = 'empty' | 'proto' | 'raw';
-
-function detectHeartbeatBodyMode(action: ActionDef): HeartbeatBodyMode {
-  if (action.c2sProto) return 'proto';
-  if (action.heartbeatFields && action.heartbeatFields.length > 0) return 'raw';
-  return 'empty';
-}
-
-function HeartbeatForm({
-  action,
-  set,
-  setProtoTarget,
-}: {
-  action: ActionDef;
-  set: (partial: Partial<ActionDef>) => void;
-  setProtoTarget: (t: 'c2s' | null) => void;
-}) {
-  const bodyMode = detectHeartbeatBodyMode(action);
-
-  const onModeChange = (next: HeartbeatBodyMode) => {
-    if (next === bodyMode) return;
-    // 互斥：切到 proto 清 heartbeatFields；切到 raw 清 c2sProto+bindings；切 empty 都清
-    if (next === 'proto') {
-      set({ heartbeatFields: undefined, skipWhenMissing: undefined });
-    } else if (next === 'raw') {
-      set({ c2sProto: undefined, bindings: undefined });
-    } else {
-      set({ c2sProto: undefined, bindings: undefined, heartbeatFields: undefined, skipWhenMissing: undefined });
-    }
-  };
-
-  return (
-    <>
-      <Form.Item label="intervalMs（心跳间隔，必须 > 0）">
-        <Space.Compact>
-          <InputNumber
-            min={1}
-            placeholder="如 5000"
-            value={action.intervalMs}
-            onChange={(v) => set({ intervalMs: (v as number) ?? undefined })}
-            style={{ width: 160 }}
-          />
-          <span style={{ display: 'flex', alignItems: 'center', padding: '0 8px', background: 'var(--container-bg)', border: '1px solid var(--border-color)', borderRadius: '0 6px 6px 0', fontSize: 13 }}>ms</span>
-        </Space.Compact>
-      </Form.Item>
-
-      <Form.Item label="body 模式（三选一，互斥）">
-        <Radio.Group value={bodyMode} onChange={(e) => onModeChange(e.target.value as HeartbeatBodyMode)}>
-          <Radio.Button value="empty">空 body（静态心跳）</Radio.Button>
-          <Radio.Button value="proto">proto（c2sProto + bindings）</Radio.Button>
-          <Radio.Button value="raw">raw-binary（heartbeatFields）</Radio.Button>
-        </Radio.Group>
-      </Form.Item>
-
-      {bodyMode === 'proto' && (
-        <>
-          <Form.Item label="c2sProto（C2S 消息全名）">
-            <Space.Compact style={{ width: '100%' }}>
-              <Input
-                value={action.c2sProto ?? ''}
-                onChange={(e) => set({ c2sProto: e.target.value })}
-                placeholder="如 Game.HeartbeatC2S"
-              />
-              <Button icon={<ApiOutlined />} onClick={() => setProtoTarget('c2s')} />
-            </Space.Compact>
-            <ProtoHint fullName={action.c2sProto} />
-          </Form.Item>
-          <div style={{ marginBottom: 24 }}>
-            <BindingsTable
-              messageFullName={action.c2sProto}
-              value={action.bindings}
-              onChange={(v) => set({ bindings: v })}
-              label="bindings（C2S 字段绑定，与 tcpRequest 同语义）"
-            />
-          </div>
-        </>
-      )}
-
-      {bodyMode === 'raw' && (
-        <>
-          <div style={{ marginBottom: 24 }}>
-            <HeartbeatFields
-              value={action.heartbeatFields}
-              onChange={(v) => set({ heartbeatFields: v })}
-            />
-          </div>
-          <Form.Item label="skipWhenMissing（state 源缺失时跳过本 tick，而非报错）">
-            <Switch
-              checked={!!action.skipWhenMissing}
-              onChange={(v) => set({ skipWhenMissing: v })}
-            />
-            <span style={{ marginLeft: 12, fontSize: 11, color: 'var(--text-tertiary)' }}>
-              仅 raw-binary 模式有意义（state 源读不到值时的行为）
-            </span>
-          </Form.Item>
-        </>
-      )}
-
-      {bodyMode === 'empty' && (
-        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: -8, marginBottom: 16 }}>
-          空 body = 每 tick 发送固定空包，适合轻量保活心跳。
-        </div>
-      )}
-    </>
   );
 }

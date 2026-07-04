@@ -7,9 +7,9 @@ import (
 	"stressbot/state"
 )
 
-// fakeIONetSender 复用 fakeHeartbeatNetSender，仅记录 connect/http 调用次数。
+// fakeIONetSender 复用 fakeNetSender，仅记录 connect/http 调用次数。
 type fakeIONetSender struct {
-	*fakeHeartbeatNetSender
+	*fakeNetSender
 	connectTCP int32
 	connectUDP int32
 	httpReq    int32
@@ -31,7 +31,7 @@ func (f *fakeIONetSender) HTTPRequest(string, string, string, []byte) (*HTTPExch
 // TestDeclarativeIO_RoutesThroughCoopIO 声明式 httpRequest / tcpConnect / udpConnect 的阻塞调用
 // 应全部经注入的 coopIO（协作式：后台跑 + drain mailbox），与 Lua await_* 同一原语。
 func TestDeclarativeIO_RoutesThroughCoopIO(t *testing.T) {
-	fake := &fakeIONetSender{fakeHeartbeatNetSender: &fakeHeartbeatNetSender{}}
+	fake := &fakeIONetSender{fakeNetSender: &fakeNetSender{}}
 	ae := &ActionExecutor{netSender: fake, store: state.NewStore()}
 
 	var coopCalls int32

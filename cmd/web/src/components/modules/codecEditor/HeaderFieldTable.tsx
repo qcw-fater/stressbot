@@ -33,6 +33,11 @@ export function HeaderFieldTable({ raw, schema, selectedIndex, onSelect, onEdit 
   const headerSize: number = schema.frame?.headerSize ?? 0;
   const ranges = computeByteRanges(fields, headerSize);
 
+  // 行 key 用位置索引注入为数据字段（_k），走字符串形式 rowKey="_k"。
+  // 不能用 name/offset 等可编辑字段当 key：键入时 key 变化会导致该行 remount、输入框失焦。
+  type HeaderFieldRow = Field & { _k: number };
+  const rows: HeaderFieldRow[] = fields.map((f, i) => ({ ...f, _k: i }));
+
   const typeOptions = FIELD_TYPES.map((t) => ({ value: t, label: t }));
 
   const roleOptions = FIELD_ROLES.map((r) => ({ value: r, label: r }));
@@ -42,7 +47,7 @@ export function HeaderFieldTable({ raw, schema, selectedIndex, onSelect, onEdit 
     onEdit(updateHeaderField(raw, idx, width > 0 ? { type, size: width } : { type }));
   };
 
-  const columns: ColumnsType<Field> = [
+  const columns: ColumnsType<HeaderFieldRow> = [
     {
       title: '字段名',
       dataIndex: 'name',
@@ -189,16 +194,16 @@ export function HeaderFieldTable({ raw, schema, selectedIndex, onSelect, onEdit 
           添加字段
         </Button>
       </div>
-      <Table<Field>
-        rowKey={(_record, idx) => String(idx)}
+      <Table<HeaderFieldRow>
+        rowKey="_k"
         size="small"
-        dataSource={fields}
+        dataSource={rows}
         columns={columns}
         pagination={false}
         scroll={{ x: 'max-content' }}
         expandable={{
           showExpandColumn: false,
-          expandedRowKeys: selectedIndex !== null ? [String(selectedIndex)] : [],
+          expandedRowKeys: selectedIndex !== null ? [selectedIndex] : [],
           expandedRowRender: (_record, idx) => {
             const i = typeof idx === 'number' ? idx : 0;
             const f = fields[i];

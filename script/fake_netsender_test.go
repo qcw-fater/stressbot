@@ -129,8 +129,6 @@ func (f *fakeNetSender) EnsureTCPListener(string, string, int) {}
 
 func (f *fakeNetSender) EnsureUDPListener(string, string, int) {}
 
-func (f *fakeNetSender) RegisterHeartbeat(engine.HeartbeatActionConfig) error { return nil }
-
 func (f *fakeNetSender) GetTCPSecretKey(string) []byte { return f.tcpKey }
 
 func (f *fakeNetSender) SetTCPSecretKey(_ string, key []byte) {

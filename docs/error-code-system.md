@@ -324,7 +324,7 @@ errcode（顶层包，无业务依赖）
 | `ConnectUDP` | `bool` | `error` |
 | `HTTPRequest` | 签名不变 | 内部改用 ActionError |
 
-12 个方法签名不变（Close、Get/Set 密钥、Ensure 监听器、心跳注册等）。
+11 个方法签名不变（Close、Get/Set 密钥、Ensure 监听器等）；心跳不再通过 NetSender 接口暴露注册入口，而是在连接建立后按 codec heartbeat 自动安装。
 
 ### 7.3 netSenderAdapter — `robot/robot.go`
 

@@ -17,6 +17,12 @@ import { clear, createStore, del, get, keys, set, setMany } from 'idb-keyval';
 import { BASELINE_PREFIX } from './env';
 import { fetchBaselineCodecIndex, fetchBaselineCodec } from './baselineApi';
 import type { CodecSchema } from '@/types/codec';
+import type { BindingType, FieldBind, FilterDef, HeartbeatField, HeartbeatFieldSource, HeartbeatFieldType } from '@/types/action';
+import {
+  ALL_BINDING_TYPES,
+  ALL_HEARTBEAT_FIELD_SOURCES,
+  ALL_HEARTBEAT_FIELD_TYPES,
+} from '@/types/action';
 import {
   FIELD_TYPE_WIDTH,
   FIELD_ROLES,
@@ -306,6 +312,7 @@ export function validateCodecSchema(content: string): string[] {
   validateHeader(s, ec);
   validateRouteKeyTemplate(s, ec);
   validatePipeline(s, ec);
+  validateHeartbeat(s, ec);
   return ec.msgs;
 }
 
@@ -514,6 +521,176 @@ function isRouteField(s: CodecSchema, name: string): boolean {
 }
 
 // ---------- pipeline ----------
+
+function validateHeartbeat(s: CodecSchema, ec: ErrCollector): void {
+  const hb = s.heartbeat;
+  if (hb === undefined) return;
+  if (!hb || typeof hb !== 'object' || Array.isArray(hb)) {
+    ec.add('heartbeat 必须是对象；没有 heartbeat 对象表示不启用心跳');
+    return;
+  }
+  if (typeof hb.intervalMs !== 'number' || hb.intervalMs <= 0) {
+    ec.add(`heartbeat.intervalMs 必须大于 0（当前 ${hb.intervalMs ?? ''}）`);
+  }
+
+  const placeholders = extractRoutePlaceholders(s.routeKeyTemplate ?? '');
+  if (placeholders.length > 0) {
+    if (!isPlainObject(hb.route)) {
+      ec.add('heartbeat.route 必须按 routeKeyTemplate 填写对象字段');
+    } else {
+      for (const name of placeholders) {
+        if (hb.route[name] === undefined || hb.route[name] === null) {
+          ec.add(`heartbeat.route 缺少字段 "${name}"（来自 routeKeyTemplate 占位）`);
+        }
+      }
+    }
+  }
+
+  const hasC2SProto = typeof hb.c2sProto === 'string' && hb.c2sProto.trim() !== '';
+  const heartbeatFields = Array.isArray(hb.heartbeatFields) ? hb.heartbeatFields : [];
+  if (hasC2SProto && heartbeatFields.length > 0) {
+    ec.add('heartbeat 不能同时配置 c2sProto 与 heartbeatFields，须二选一');
+  }
+  if (!hasC2SProto && Array.isArray(hb.bindings) && hb.bindings.length > 0) {
+    ec.add('heartbeat.bindings 只能在配置 c2sProto 时使用');
+  }
+  if (Array.isArray(hb.bindings)) {
+    validateFieldBindings('heartbeat', hb.bindings, ec);
+  }
+  if (Array.isArray(hb.heartbeatFields)) {
+    validateHeartbeatFields(hb.heartbeatFields, ec);
+  }
+}
+
+function validateFieldBindings(prefix: string, bindings: FieldBind[], ec: ErrCollector, isMapEntryValue = false): void {
+  const validTypes = new Set<string>(ALL_BINDING_TYPES);
+  for (let i = 0; i < bindings.length; i++) {
+    const b = bindings[i];
+    const label = `${prefix}.bindings[${i}]`;
+    const t = b?.type ?? '';
+    if (!isMapEntryValue && !b.field && !b.storeAs) {
+      ec.add(`${label} 缺少 field 和 storeAs`);
+    }
+    if (t && !validTypes.has(t)) {
+      ec.add(`${label} 未知的 binding type "${t}"`);
+      continue;
+    }
+    switch (t as BindingType | '') {
+      case 'state':
+      case 'stateFirst':
+      case 'stateRandom':
+      case 'stateMapKey':
+      case 'stateMapValue':
+      case 'listSize':
+        if (!b.source) ec.add(`${label} type=${t} 缺少 source`);
+        break;
+      case 'stateRandomN':
+        if (!b.source) ec.add(`${label} type=stateRandomN 缺少 source`);
+        if (!b.count || b.count <= 0) ec.add(`${label} type=stateRandomN count 必须 > 0`);
+        break;
+      case 'randomPick':
+      case 'randomPickN':
+        if (!b.values || b.values.length === 0) ec.add(`${label} type=${t} 缺少 values`);
+        if (t === 'randomPickN' && (!b.count || b.count <= 0)) ec.add(`${label} type=randomPickN count 必须 > 0`);
+        break;
+      case 'randomPickMap':
+        if (!b.values || b.values.length === 0) ec.add(`${label} type=randomPickMap 缺少 values`);
+        if (!b.keySource) ec.add(`${label} type=randomPickMap 缺少 keySource`);
+        break;
+      case 'randomExclude':
+        if ((!b.values || b.values.length === 0) && !b.source) ec.add(`${label} type=randomExclude 缺少 values 和 source`);
+        break;
+      case 'randomInt':
+      case 'randomFloat':
+        if (b.min != null && b.max != null && b.min >= b.max) ec.add(`${label} type=${t} min 必须小于 max`);
+        break;
+      case 'randomString':
+        if (!b.length || b.length <= 0) ec.add(`${label} type=randomString length 必须 > 0`);
+        if (b.charset != null && b.charset.trim().length === 0) ec.add(`${label} type=randomString charset 不能为空`);
+        break;
+      case 'map':
+        if (!b.entries || b.entries.length === 0) {
+          ec.add(`${label} type=map 缺少 entries`);
+        } else {
+          for (let ei = 0; ei < b.entries.length; ei++) {
+            const entry = b.entries[ei];
+            const entryLabel = `${label}.entries[${ei}]`;
+            if (entry.key === undefined || entry.key === null || entry.key === '') ec.add(`${entryLabel} 缺少 key`);
+            if (!entry.value) {
+              ec.add(`${entryLabel} 缺少 value`);
+            } else if (entry.value.type === 'map') {
+              ec.add(`${entryLabel} value 不允许嵌套 map 类型`);
+            } else {
+              validateFieldBindings(entryLabel, [entry.value], ec, true);
+            }
+          }
+        }
+        break;
+    }
+    if (b.filters) validateCodecFilters(label, b.filters, ec);
+  }
+}
+
+function validateCodecFilters(prefix: string, filters: FilterDef[], ec: ErrCollector): void {
+  const validOps = new Set(['', '==', '!=', '>', '>=', '<', '<=', 'eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'notContains', 'in', 'notIn', 'notNil', 'isNil']);
+  const validModes = new Set(['any', 'all', 'none']);
+  for (let i = 0; i < filters.length; i++) {
+    const f = filters[i];
+    if (f.op && !validOps.has(f.op)) ec.add(`${prefix}.filters[${i}] 未知的 op "${f.op}"`);
+    if (f.mode && !validModes.has(f.mode)) ec.add(`${prefix}.filters[${i}] 未知的 mode "${f.mode}"`);
+  }
+}
+
+function validateHeartbeatFields(fields: HeartbeatField[], ec: ErrCollector): void {
+  const validTypes = new Set<string>(ALL_HEARTBEAT_FIELD_TYPES);
+  const validSources = new Set<string>(ALL_HEARTBEAT_FIELD_SOURCES);
+  for (let i = 0; i < fields.length; i++) {
+    const f = fields[i];
+    const label = `heartbeat.heartbeatFields[${i}]`;
+    const t = f?.type ?? '';
+    const source = f?.source ?? '';
+    if (!validTypes.has(t)) ec.add(`${label} 未知 type "${t}"`);
+    if (!validSources.has(source)) {
+      ec.add(`${label} 未知 source "${source}"`);
+      continue;
+    }
+    const isFloat = (t as HeartbeatFieldType) === 'f32' || (t as HeartbeatFieldType) === 'f64';
+    if (isFloat && source !== 'fixed' && source !== 'state') ec.add(`${label} 浮点字段仅支持 fixed/state source`);
+    switch (source as HeartbeatFieldSource) {
+      case 'fixed':
+        if (isFloat) {
+          if (f.floatValue === undefined || f.floatValue === null) ec.add(`${label} source=fixed 缺少 floatValue`);
+        } else if (f.value === undefined || f.value === null) {
+          ec.add(`${label} source=fixed 缺少 value`);
+        }
+        break;
+      case 'state':
+      case 'stateCounter':
+        if (!f.key) ec.add(`${label} source=${source} 缺少 key`);
+        break;
+      case 'randomInt':
+        if (f.min === undefined || f.max === undefined) ec.add(`${label} source=randomInt 缺少 min/max`);
+        break;
+    }
+  }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function extractRoutePlaceholders(template: string): string[] {
+  const re = /\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
+  const out: string[] = [];
+  const seen = new Set<string>();
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(template)) !== null) {
+    if (seen.has(m[1])) continue;
+    seen.add(m[1]);
+    out.push(m[1]);
+  }
+  return out;
+}
 
 function validatePipeline(s: CodecSchema, ec: ErrCollector): void {
   const pipeline = Array.isArray(s.pipeline) ? s.pipeline : [];

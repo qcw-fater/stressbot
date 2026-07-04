@@ -1,10 +1,10 @@
 /**
- * 协议配置编辑器：按连接多份 *_codec.json + 共享 errors.json 源码 / 结构化 JSON 编辑。
- *
- * 本组件负责连接选择、结构化编辑、源码编辑、基线拉取和本地校验。
+ * 协议配置面板：顶部 Segmented 切换两类对象，各自独立工具栏，互不混进同一个下拉。
+ * - 协议配置：按连接多份 *_codec.json，结构化（帧布局/管线/路由键/预览）+ 源码 + 新建/复制/删除。
+ * - 错误码映射：共享 errors.json（KV 字典），专用标签编辑器；仅 保存/导入/从基线载入/清空。
  *
  * 设计要点：
- * - 连接选择器 + 视图切换（结构化 / 源码）+ 保存 / 校验 / 从基线载入 + 新建 / 复制 / 删除连接。
+ * - section 状态区分两类对象；连接选择器只在「协议配置」区段出现。
  * - 内嵌「新建 / 复制连接」Modal 走 floatingWindowStore zIndex 合规 pattern（浮窗基线 1000+，内嵌 Modal 更高）。
  */
 
@@ -53,6 +53,7 @@ import { ErrorMapEditor, validateErrorMap, parseErrorMapSafe } from './ErrorMapE
 import { FrameLayoutEditor } from './codecEditor/FrameLayoutEditor';
 import { PipelineEditor } from './codecEditor/PipelineEditor';
 import { RouteKeyEditor } from './codecEditor/RouteKeyEditor';
+import { HeartbeatEditor } from './codecEditor/HeartbeatEditor';
 import { PreviewPanel } from './codecEditor/PreviewPanel';
 import { deriveTransport } from './codecEditor/previewHelpers';
 import {
@@ -104,7 +105,7 @@ export function ProtocolConfigEditor() {
   // 连接列表（含每个文件名 / 连接名）
   const [files, setFiles] = useState<ResourceFile[]>([]);
   const [loading, setLoading] = useState(false);
-  // 当前选中对象（null = 未选；'__errors__' = errors.json；否则 = protocol/service 对应的内部连接标识）
+  // 当前选中连接（null = 未选；仅协议配置区段使用，错误码映射区段切换由 section 控制）
   const [activeConn, setActiveConn] = useState<string | null>(null);
   const [content, setContent] = useState<string>('');
   const [source, setSource] = useState<string | null>(null);
@@ -117,6 +118,9 @@ export function ProtocolConfigEditor() {
   const [createService, setCreateService] = useState('');
   // 视图切换：结构化 | 源码（仅 codec 显示；errors.json 隐藏切换、强制源码）
   const [viewMode, setViewMode] = useState<'struct' | 'source'>('struct');
+  // 顶层区段：协议配置（每连接 codec）| 错误码映射（共享 errors.json）。
+  // 两类对象形态/工具栏都不同，不再把 errors 混进连接下拉。
+  const [section, setSection] = useState<'codec' | 'errors'>('codec');
   // errors.json 结构化表单：框架保留码（只读展示）+ 行级校验错误（保存前 gate）
   const [frameworkCodes, setFrameworkCodes] = useState<FrameworkCode[]>([]);
   const [errorMapErrors, setErrorMapErrors] = useState<string[]>([]);
@@ -128,7 +132,7 @@ export function ProtocolConfigEditor() {
 
   // 结构化视图：把 content 解析为 raw（lossless）+ schema（typed 视图）+ error。
   const parsed = useMemo(() => parseCodecForEdit(content), [content]);
-  const isErrorsView = activeConn === '__errors__';
+  const isErrorsView = section === 'errors';
   const showStructView = !isErrorsView && viewMode === 'struct' && parsed.schema !== null;
 
   const reloadFiles = async (): Promise<ResourceFile[]> => {
@@ -148,20 +152,22 @@ export function ProtocolConfigEditor() {
     }
   };
 
-  // 加载某连接（或 errors.json）的内容到编辑器。
+  // 加载共享 errors.json 到编辑器。
+  const loadErrors = async () => {
+    setLoadError(false);
+    const file = await getErrorMap();
+    const initial = file ? file.content : EMPTY_ERROR_MAP_TEMPLATE;
+    setContent(initial);
+    setSource(file ? '已保存' : '模板（未保存）');
+    setErrorMapErrors(validateErrorMap(parseErrorMapSafe(initial)).map((e) => e.message));
+  };
+
+  // 加载某连接的 codec.json 到编辑器。
   const loadConn = async (conn: string | null) => {
     setLoadError(false);
     if (conn === null) {
       setContent('');
       setSource(null);
-      return;
-    }
-    if (conn === '__errors__') {
-      const file = await getErrorMap();
-      const initial = file ? file.content : EMPTY_ERROR_MAP_TEMPLATE;
-      setContent(initial);
-      setSource(file ? '已保存' : '模板（未保存）');
-      setErrorMapErrors(validateErrorMap(parseErrorMapSafe(initial)).map((e) => e.message));
       return;
     }
     const name = connNameToCodecFileName(conn);
@@ -207,6 +213,20 @@ export function ProtocolConfigEditor() {
     await loadConn(conn);
   };
 
+  // 顶层区段切换：协议配置 ↔ 错误码映射。各自加载对应内容，互不混进连接下拉。
+  const handleSwitchSection = async (next: 'codec' | 'errors') => {
+    if (next === section) return;
+    setContent('');
+    setSource(null);
+    setErrorMapErrors([]);
+    setSection(next);
+    if (next === 'errors') {
+      await loadErrors();
+    } else {
+      await loadConn(activeConn);
+    }
+  };
+
   const refreshBadge = async () => {
     const errors = await collectCodecSchemaErrors();
     useEditorStore.getState().setCodecSchemaErrors(errors);
@@ -230,7 +250,7 @@ export function ProtocolConfigEditor() {
     const fileName = connNameToCodecFileName(conn);
     let initial: string;
     if (createMode === 'copy') {
-      if (!activeConn || activeConn === '__errors__') {
+      if (!activeConn) {
         message.error('请先选中一个要复制的连接');
         return;
       }
@@ -256,7 +276,6 @@ export function ProtocolConfigEditor() {
 
   // ─── 删除 ───
   const handleDelete = (conn: string) => {
-    if (conn === '__errors__') return; // errors.json 不在此处删（走清空）
     modal.confirm({
       title: '删除连接',
       content: `确认删除连接 ${conn}？该连接的配置将被移除。`,
@@ -283,15 +302,11 @@ export function ProtocolConfigEditor() {
 
   // ─── 保存（codec 校验阻塞落库；errors.json 仅 JSON.parse 合法性） ───
   const onSave = async () => {
-    if (activeConn === null) {
-      message.warning('请先选择一个连接');
-      return;
-    }
-    if (!content.trim()) {
-      message.warning('内容为空');
-      return;
-    }
-    if (activeConn === '__errors__') {
+    if (section === 'errors') {
+      if (!content.trim()) {
+        message.warning('内容为空');
+        return;
+      }
       if (errorMapErrors.length > 0) {
         message.error(`errors.json 有 ${errorMapErrors.length} 处错误（含 < 100 或重复码），无法保存`);
         return;
@@ -305,6 +320,14 @@ export function ProtocolConfigEditor() {
       await setErrorMap(content);
       setSource('已保存');
       message.success('已保存错误码映射');
+      return;
+    }
+    if (activeConn === null) {
+      message.warning('请先选择一个连接');
+      return;
+    }
+    if (!content.trim()) {
+      message.warning('内容为空');
       return;
     }
     // codec.json：结构校验必须通过，否则拒绝落库。
@@ -322,12 +345,8 @@ export function ProtocolConfigEditor() {
 
   // ─── 导入（当前选中对象；codec 走校验，errors 走 JSON.parse） ───
   const onUpload: UploadProps['beforeUpload'] = async (file) => {
-    if (activeConn === null) {
-      message.warning('请先选择一个连接');
-      return false;
-    }
     const text = await file.text();
-    if (activeConn === '__errors__') {
+    if (section === 'errors') {
       try {
         JSON.parse(text);
       } catch (e) {
@@ -339,6 +358,10 @@ export function ProtocolConfigEditor() {
       setSource(file.name);
       setErrorMapErrors(validateErrorMap(parseErrorMapSafe(text)).map((e) => e.message));
       message.success(`已导入并保存：${file.name}`);
+      return false;
+    }
+    if (activeConn === null) {
+      message.warning('请先选择一个连接');
       return false;
     }
     const errs = validateCodecSchema(text);
@@ -358,8 +381,7 @@ export function ProtocolConfigEditor() {
 
   // ─── 清空当前 ───
   const onClear = async () => {
-    if (activeConn === null) return;
-    if (activeConn === '__errors__') {
+    if (section === 'errors') {
       await clearErrorMap();
       setContent(EMPTY_ERROR_MAP_TEMPLATE);
       setSource('模板（未保存）');
@@ -367,6 +389,7 @@ export function ProtocolConfigEditor() {
       message.success('已清空错误码映射');
       return;
     }
+    if (activeConn === null) return;
     modal.confirm({
       title: '清空当前连接配置',
       content: `确认清空连接 ${activeConn} 的配置内容？文件将从本地删除。`,
@@ -414,7 +437,9 @@ export function ProtocolConfigEditor() {
         }
       }
       const list = await reloadFiles();
-      if (list.length > 0) {
+      if (section === 'errors') {
+        await loadErrors();
+      } else if (list.length > 0) {
         const conn = codecFileNameToConnNameStrict(list[0].name);
         setActiveConn(conn);
         await loadConn(conn);
@@ -433,16 +458,16 @@ export function ProtocolConfigEditor() {
 
   // 实时校验当前编辑器内容（仅 codec，提供 inline 提示，不阻塞输入）
   const liveErrors: string[] =
-    activeConn !== null && activeConn !== '__errors__' && content.trim() !== ''
+    section === 'codec' && activeConn !== null && content.trim() !== ''
       ? validateCodecSchema(content)
       : [];
 
-  // Select 选项：连接列表 + errors.json
-  const selectOptions = [
-    ...files.map((f) => ({ value: codecFileNameToConnNameStrict(f.name), label: codecFileNameToConnNameStrict(f.name) })),
-    { value: '__errors__', label: '错误码映射（共享）' },
-  ];
-  const activeLabel = activeConn === '__errors__' ? '错误码映射' : (activeConn ?? '未选择连接');
+  // 连接下拉：仅协议配置区段，不再混入 errors.json
+  const selectOptions = files.map((f) => ({
+    value: codecFileNameToConnNameStrict(f.name),
+    label: codecFileNameToConnNameStrict(f.name),
+  }));
+  const activeLabel = section === 'errors' ? '错误码映射' : (activeConn ?? '未选择连接');
   const validationSummary = isErrorsView
     ? errorMapErrors.length === 0
       ? '校验通过'
@@ -453,47 +478,71 @@ export function ProtocolConfigEditor() {
 
   return (
     <Flex vertical gap={0} className="pce-shell">
+      <div className="pce-section-bar">
+        <Segmented
+          value={section}
+          onChange={(v) => void handleSwitchSection(v as 'codec' | 'errors')}
+          options={[
+            { label: '协议配置', value: 'codec' },
+            { label: '错误码映射', value: 'errors' },
+          ]}
+        />
+      </div>
+
       <div className="pce-cmdbar">
         <div className="pce-cmdbar-target">
-          <Typography.Text className="pce-target-kicker">当前对象</Typography.Text>
-          <Select
-            size="small"
-            style={{ minWidth: 200 }}
-            value={activeConn ?? undefined}
-            placeholder={files.length === 0 ? '暂无连接' : '选择连接'}
-            loading={loading}
-            onChange={handleSwitch}
-            options={selectOptions}
-          />
-          <Typography.Text code className="pce-target-name">{activeLabel}</Typography.Text>
+          {section === 'codec' ? (
+            <>
+              <Typography.Text className="pce-target-kicker">当前连接</Typography.Text>
+              <Select
+                size="small"
+                style={{ minWidth: 200 }}
+                value={activeConn ?? undefined}
+                placeholder={files.length === 0 ? '暂无连接' : '选择连接'}
+                loading={loading}
+                onChange={handleSwitch}
+                options={selectOptions}
+              />
+              <Typography.Text code className="pce-target-name">{activeLabel}</Typography.Text>
+            </>
+          ) : (
+            <>
+              <Typography.Text className="pce-target-kicker">共享对象</Typography.Text>
+              <Typography.Text code className="pce-target-name">errors.json</Typography.Text>
+            </>
+          )}
           <span className="pce-source-label">{source ?? '尚未加载'}</span>
         </div>
 
         <div className="pce-cmdbar-actions">
-          <div className="pce-cmdbar-group">
-            <Tooltip title="新建连接（选择 protocol，填写 service）">
-              <Button size="small" icon={<PlusOutlined />} onClick={() => openCreate('new')}>新建</Button>
-            </Tooltip>
-            <Tooltip title="复制当前连接为新连接">
-              <Button size="small" icon={<CopyOutlined />} disabled={activeConn === null || activeConn === '__errors__'} onClick={() => openCreate('copy')}>复制</Button>
-            </Tooltip>
-            <Tooltip title="删除当前连接">
-              <Button size="small" danger icon={<DeleteOutlined />} disabled={activeConn === null || activeConn === '__errors__'} onClick={() => activeConn && handleDelete(activeConn)}>删除</Button>
-            </Tooltip>
-          </div>
-          <span className="pce-cmdbar-divider" />
+          {section === 'codec' && (
+            <>
+              <div className="pce-cmdbar-group">
+                <Tooltip title="新建连接（选择 protocol，填写 service）">
+                  <Button size="small" icon={<PlusOutlined />} onClick={() => openCreate('new')}>新建</Button>
+                </Tooltip>
+                <Tooltip title="复制当前连接为新连接">
+                  <Button size="small" icon={<CopyOutlined />} disabled={activeConn === null} onClick={() => openCreate('copy')}>复制</Button>
+                </Tooltip>
+                <Tooltip title="删除当前连接">
+                  <Button size="small" danger icon={<DeleteOutlined />} disabled={activeConn === null} onClick={() => activeConn && handleDelete(activeConn)}>删除</Button>
+                </Tooltip>
+              </div>
+              <span className="pce-cmdbar-divider" />
+            </>
+          )}
           <div className="pce-cmdbar-group">
             <Tooltip title="从服务器拉取全部协议配置到本地">
               <Button size="small" icon={<CloudDownloadOutlined />} loading={pullingBaseline} onClick={onPullBaseline}>从基线载入</Button>
             </Tooltip>
             <Upload accept=".json,application/json" beforeUpload={onUpload} showUploadList={false}>
-              <Button icon={<InboxOutlined />} size="small" disabled={activeConn === null}>导入</Button>
+              <Button icon={<InboxOutlined />} size="small" disabled={section === 'codec' && activeConn === null}>导入</Button>
             </Upload>
           </div>
           <span className="pce-cmdbar-divider" />
           <div className="pce-cmdbar-group">
-            <Button onClick={onSave} type="primary" size="small" disabled={activeConn === null}>保存</Button>
-            <Button onClick={onClear} danger size="small" disabled={activeConn === null}>清空</Button>
+            <Button onClick={onSave} type="primary" size="small" disabled={section === 'codec' && activeConn === null}>保存</Button>
+            <Button onClick={onClear} danger size="small" disabled={section === 'codec' && activeConn === null}>清空</Button>
           </div>
           {!isErrorsView && (
             <Segmented
@@ -516,7 +565,7 @@ export function ProtocolConfigEditor() {
         <Typography.Text className="pce-status-note">
           {fileListError ? fileListError : loadError ? '请新建连接或从基线载入。' : '协议配置启动任务时随连接配置一起下发。'}
         </Typography.Text>
-        {activeConn !== null && activeConn !== '__errors__' && liveErrors.length > 1 && (
+        {section === 'codec' && liveErrors.length > 1 && (
           <Collapse
             ghost
             size="small"
@@ -545,6 +594,7 @@ export function ProtocolConfigEditor() {
               { key: 'frame', label: '帧布局', children: <FrameLayoutEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} /> },
               { key: 'pipeline', label: '管线', children: <PipelineEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} /> },
               { key: 'route', label: '路由键', children: <RouteKeyEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} /> },
+              { key: 'heartbeat', label: '心跳', children: <HeartbeatEditor raw={parsed.raw} schema={parsed.schema} onEdit={setContent} /> },
               { key: 'preview', label: '预览', children: <PreviewPanel raw={parsed.raw} schema={parsed.schema} transport={deriveTransport(activeConn)} /> },
             ]}
           />
