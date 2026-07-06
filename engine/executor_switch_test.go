@@ -164,7 +164,7 @@ func TestExecuteSwitchPropagatesChildError(t *testing.T) {
 	exec := newSwitchTestExecutor(h, &Node{Type: NodeSwitch, Cases: []SwitchCase{
 		{Condition: "state:ready", Next: "advanced"},
 	}, DefaultNext: "fallback"})
-	exec.flow.Nodes["advanced"].ErrorStrategy = StrategyAbort
+	exec.flow.Nodes["advanced"].OnError = &OnErrorDef{Strategy: StrategyAbort}
 
 	err := exec.Run(context.Background())
 	if !errors.Is(err, boom) {
