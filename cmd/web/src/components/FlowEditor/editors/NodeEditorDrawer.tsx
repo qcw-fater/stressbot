@@ -13,6 +13,7 @@ import { isValidNodeId } from '../utils/nodeIdGen';
 import { SequenceEditor } from './SequenceEditor';
 import { LoopEditor } from './LoopEditor';
 import { BooleanEditor } from './BooleanEditor';
+import { SwitchEditor } from './SwitchEditor';
 import { WeightedEditor } from './WeightedEditor';
 import { WaitEditor } from './WaitEditor';
 import { ActionEditor } from './ActionEditor';
@@ -23,7 +24,8 @@ const nodeTypeTagColor: Record<NodeType, string> = {
   sequence: 'blue',
   action: 'geekblue',
   loop: 'green',
-  boolean: 'gold',
+  boolean: 'lime',
+  switch: 'magenta',
   weighted: 'purple',
   wait: 'red',
   break: 'orange',
@@ -111,6 +113,8 @@ export function NodeEditorDrawer() {
         return <LoopEditor nodeId={nodeId} />;
       case 'boolean':
         return <BooleanEditor nodeId={nodeId} />;
+      case 'switch':
+        return <SwitchEditor nodeId={nodeId} />;
       case 'weighted':
         return <WeightedEditor nodeId={nodeId} />;
       case 'wait':

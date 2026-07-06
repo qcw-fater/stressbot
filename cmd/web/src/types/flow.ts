@@ -13,6 +13,7 @@ export type NodeType =
   | 'action'
   | 'loop'
   | 'boolean'
+  | 'switch'
   | 'weighted'
   | 'wait'
   | 'break'
@@ -38,6 +39,10 @@ export interface FlowNode {
   // boolean 专用（condition 与 loop 共享）
   trueNext?: string;
   falseNext?: string;
+
+  // switch 专用
+  cases?: SwitchCase[];
+  defaultNext?: string;
 
   // action 专用
   action?: string;
@@ -73,6 +78,12 @@ export interface OnErrorDef {
 export interface RetryDef {
   maxRetries?: number;
   retryDelayMs?: number;
+}
+
+export interface SwitchCase {
+  condition: string;
+  next: string;
+  description?: string;
 }
 
 /**

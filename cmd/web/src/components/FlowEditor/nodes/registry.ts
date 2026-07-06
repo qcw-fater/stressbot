@@ -9,6 +9,7 @@ import { SequenceNode } from './SequenceNode';
 import { ActionNode } from './ActionNode';
 import { LoopNode } from './LoopNode';
 import { BooleanNode } from './BooleanNode';
+import { SwitchNode } from './SwitchNode';
 import { WeightedNode } from './WeightedNode';
 import { WaitNode } from './WaitNode';
 import { BreakNode } from './BreakNode';
@@ -20,6 +21,7 @@ export const nodeTypes: NodeTypes = {
   action: ActionNode,
   loop: LoopNode,
   boolean: BooleanNode,
+  switch: SwitchNode,
   weighted: WeightedNode,
   wait: WaitNode,
   break: BreakNode,

@@ -387,11 +387,13 @@ ListenCard 节点位置也存在 `nodePositions` 中，key 为 `__cb__<name>`。
 
 ---
 
-## 4. 8 种节点类型
+## 4. 9 种节点类型
+
+> 8 种控制流节点配色按色环 ~45° 均布，任意两色相相差 ≥39°，避免相似；action 为中性灰黑（动作辅助，不抢戏）。色相定义见 `cmd/web/src/styles/tokens.css`。
 
 ### 4.1 sequence（顺序容器）
 
-- **颜色**：蓝色 `#1890ff`
+- **颜色**：蓝色 `#1677ff`（215°）
 - **Handle**：左入（target）+ 右出（source，每个 next 一个 handle，垂直排列）
 - **中部摘要**：子节点列表
 - **字段**：`next: string[]`
@@ -399,7 +401,7 @@ ListenCard 节点位置也存在 `nodePositions` 中，key 为 `__cb__<name>`。
 
 ### 4.2 action（动作节点）
 
-- **颜色**：蓝紫 `#597ef7`
+- **颜色**：中性灰黑 `#595959`（动作辅助，无独立色相）
 - **Handle**：左入 + 右侧 listen handle + 底部 error handle
 - **中部摘要**：action 名 + pattern 标签 + onError 摘要 + listenRefs 数量徽章
 - **字段**：`action: string`（引用 actions 表）, `onError`, `listenRefs`, `delayMs`
@@ -408,7 +410,7 @@ ListenCard 节点位置也存在 `nodePositions` 中，key 为 `__cb__<name>`。
 
 ### 4.3 loop（循环节点）
 
-- **颜色**：绿色 `#52c41a`
+- **颜色**：绿色 `#1ea01e`（120°）
 - **Handle**：左入 + 下出（body 唯一）；无 exit handle
 - **中部摘要**：`loopCount`、`condition`、`breakCondition`
 - **字段**：`body`, `loopCount`, `condition`, `breakCondition`
@@ -416,34 +418,43 @@ ListenCard 节点位置也存在 `nodePositions` 中，key 为 `__cb__<name>`。
 
 ### 4.4 boolean（条件分支）
 
-- **颜色**：黄色 `#fadb14`，菱形
+- **颜色**：黄绿 `#a8c418`（70°），菱形
 - **Handle**：左入 + 右出 true（绿色）+ 右出 false（红色）
 - **中部摘要**：`condition` 文本
 - **字段**：`condition`, `trueNext`, `falseNext`, `delayMs`
 
-### 4.5 weighted（加权随机）
+### 4.5 switch（多条件分支）
 
-- **颜色**：紫色 `#722ed1`
+- **颜色**：品红 `#c92dd1`（297°）
+- **Handle**：左入 + 右出每个 case 一个 handle + 右出 default handle
+- **中部摘要**：case 列表（条件摘要 + 目标节点）+ default 行
+- **字段**：`cases: SwitchCase[]`（`condition` / `next` / `description`）, `defaultNext`
+- **连线语义**：case handle → 目标节点（branch 边）；default handle → 默认目标（branch 边）
+- **执行语义**：按顺序求值 cases，命中第一条执行其 next；全部未命中走 defaultNext；无 default 则正常结束
+
+### 4.6 weighted（加权随机）
+
+- **颜色**：靛色 `#6234d0`（258°）
 - **Handle**：左入 + 右出每个 option 一个 handle，旁标 weight
 - **中部摘要**：option 列表 + 内嵌横向条形图（权重比例可视化）
 - **字段**：`options: WeightedOption[]`
 
-### 4.6 wait（等待）
+### 4.7 wait（等待）
 
-- **颜色**：红色 `#f5222d`
+- **颜色**：玫红 `#f52256`（345°）
 - **Handle**：左入 + 右出
 - **中部摘要**：`waitMs` 数值 + 秒数换算
 - **字段**：`waitMs`, `waitMin`, `waitMax`
 
-### 4.7 break（跳出循环）
+### 4.8 break（跳出循环）
 
-- **颜色**：橙色 `#fa8c16`
+- **颜色**：橙色 `#fa8c16`（31°）
 - **Handle**：左入（无出）
 - **中部摘要**："break" 字样
 
-### 4.8 continue（跳过本次）
+### 4.9 continue（跳过本次）
 
-- **颜色**：青色 `#13c2c2`
+- **颜色**：青绿 `#13c2a0`（168°）
 - **Handle**：左入（无出）
 - **中部摘要**："continue" 字样
 

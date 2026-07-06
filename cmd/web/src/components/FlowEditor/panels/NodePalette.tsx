@@ -38,6 +38,7 @@ const PALETTE: NodeMeta[] = [
   { type: 'sequence', label: 'Sequence', color: 'var(--node-sequence)' },
   { type: 'loop', label: 'Loop', color: 'var(--node-loop)' },
   { type: 'boolean', label: 'Boolean', color: 'var(--node-boolean)' },
+  { type: 'switch', label: 'Switch', color: 'var(--node-switch)' },
   { type: 'weighted', label: 'Weighted', color: 'var(--node-weighted)' },
   { type: 'wait', label: 'Wait', color: 'var(--node-wait)' },
   { type: 'break', label: 'Break', color: 'var(--node-break)' },

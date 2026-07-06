@@ -12,6 +12,7 @@ const NODE_COLOR_MAP: Record<string, { main: string; deep: string }> = {
   action: { main: 'var(--node-action)', deep: 'var(--node-action-border-active)' },
   loop: { main: 'var(--node-loop)', deep: 'var(--node-loop-border-active)' },
   boolean: { main: 'var(--node-boolean)', deep: 'var(--node-boolean-border-active)' },
+  switch: { main: 'var(--node-switch)', deep: 'var(--node-switch-border-active)' },
   weighted: { main: 'var(--node-weighted)', deep: 'var(--node-weighted-border-active)' },
   wait: { main: 'var(--node-wait)', deep: 'var(--node-wait-border-active)' },
   break: { main: 'var(--node-break)', deep: 'var(--node-break-border-active)' },

@@ -34,6 +34,9 @@
 .node-boolean.selected {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-boolean) 45%, transparent), var(--shadow-node-hover);
 }
+.node-switch.selected {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-switch) 45%, transparent), var(--shadow-node-hover);
+}
 .node-weighted.selected {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-weighted) 45%, transparent), var(--shadow-node-hover);
 }
@@ -234,6 +237,14 @@
   color: var(--node-boolean-border-active);
 }
 
+.node-switch {
+  border-color: var(--node-switch);
+  background: var(--node-switch-bg);
+}
+.node-switch .node-title {
+  color: var(--node-switch-border-active);
+}
+
 .node-weighted {
   border-color: var(--node-weighted);
   background: var(--node-weighted-bg);
@@ -347,6 +358,9 @@
 }
 .react-flow__node-boolean .react-flow__handle {
   background: var(--node-boolean);
+}
+.react-flow__node-switch .react-flow__handle {
+  background: var(--node-switch);
 }
 .react-flow__node-weighted .react-flow__handle {
   background: var(--node-weighted);

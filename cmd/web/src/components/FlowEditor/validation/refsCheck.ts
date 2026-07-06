@@ -40,7 +40,7 @@ const PATTERNS_REQUIRE_S2C = ['tcpRequest', 'udpRequest'];
 
 const REMOVED_HEARTBEAT_PATTERNS = new Set(['tcpHeartbeat', 'udpHeartbeat']);
 
-const VALID_NODE_TYPES = new Set(['sequence', 'action', 'loop', 'boolean', 'weighted', 'wait', 'break', 'continue']);
+const VALID_NODE_TYPES = new Set(['sequence', 'action', 'loop', 'boolean', 'switch', 'weighted', 'wait', 'break', 'continue']);
 const VALID_ON_ERROR_STRATEGIES = new Set<OnErrorStrategy>(['resume', 'skip', 'abort']);
 
 const VALID_FILTER_OPS = new Set([
@@ -154,6 +154,40 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
       }
       ref(node.trueNext, 'trueNext');
       ref(node.falseNext, 'falseNext');
+    } else if (node.type === 'switch') {
+      const cases = node.cases ?? [];
+      if (cases.length === 0) {
+        issues.push({
+          severity: 'error', code: 'SWITCH_NO_CASES',
+          message: `switch 节点 "${id}" 缺少 cases`,
+          location: { kind: 'node', id },
+        });
+      }
+      cases.forEach((c, i) => {
+        if (!c.condition?.trim()) {
+          issues.push({
+            severity: 'error', code: 'SWITCH_CASE_NO_CONDITION',
+            message: `switch 节点 "${id}" cases[${i}] 缺少 condition`,
+            location: { kind: 'node', id },
+          });
+        }
+        if (!c.next?.trim()) {
+          issues.push({
+            severity: 'error', code: 'SWITCH_CASE_NO_NEXT',
+            message: `switch 节点 "${id}" cases[${i}] 缺少 next`,
+            location: { kind: 'node', id },
+          });
+        }
+        ref(c.next?.trim(), `cases[${i}].next`);
+      });
+      ref(node.defaultNext?.trim(), 'defaultNext');
+      if (!node.defaultNext?.trim()) {
+        issues.push({
+          severity: 'warning', code: 'SWITCH_NO_DEFAULT',
+          message: `switch 节点 "${id}" 未配置 defaultNext，所有条件未命中时将直接结束`,
+          location: { kind: 'node', id },
+        });
+      }
     } else if (node.type === 'wait') {
       const hasRandom = typeof node.waitMin === 'number' || typeof node.waitMax === 'number';
       if (hasRandom) {
@@ -725,6 +759,10 @@ function detectOrphanNodes(nodes: Record<string, NodeLike>): ValidationIssue[] {
     if (node.falseNext) visit(node.falseNext);
     (node.options ?? []).forEach((o) => visit(o.node));
     if (node.onError?.handler) visit(node.onError.handler);
+    (node.cases ?? []).forEach((c) => {
+      if (c.next) visit(c.next);
+    });
+    if (node.defaultNext) visit(node.defaultNext);
   };
 
   visit('main');
@@ -744,7 +782,7 @@ function detectOrphanNodes(nodes: Record<string, NodeLike>): ValidationIssue[] {
 
 // ── break/continue 位置检测 ──────────────────────────────────
 
-type NodeLike = { type: string; next?: string[]; body?: string; trueNext?: string; falseNext?: string; options?: Array<{ node: string }>; onError?: { handler?: string } };
+type NodeLike = { type: string; next?: string[]; body?: string; trueNext?: string; falseNext?: string; options?: Array<{ node: string }>; onError?: { handler?: string }; cases?: Array<{ next: string }>; defaultNext?: string };
 
 /** 收集所有 loop body 子图中的节点 ID */
 function collectLoopBodyNodes(nodes: Record<string, NodeLike>): Set<string> {
@@ -760,6 +798,10 @@ function collectLoopBodyNodes(nodes: Record<string, NodeLike>): Set<string> {
     if (node.falseNext) visit(node.falseNext);
     (node.options ?? []).forEach((o) => visit(o.node));
     if (node.onError?.handler) visit(node.onError.handler);
+    (node.cases ?? []).forEach((c) => {
+      if (c.next) visit(c.next);
+    });
+    if (node.defaultNext) visit(node.defaultNext);
   };
   for (const node of Object.values(nodes)) {
     if (node.type === 'loop' && node.body) {

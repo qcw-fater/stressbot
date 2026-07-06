@@ -284,7 +284,7 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
           delete actions[removed.action];
         }
       }
-      // 清理其他节点中对被删节点的引用（next/body/trueNext/falseNext/options）
+      // 清理其他节点中对被删节点的引用（next/body/trueNext/falseNext/options/cases/defaultNext）
       for (const [nid, n] of Object.entries(nodes)) {
         const partial: Partial<FlowNode> = {};
         if (n.next?.includes(id)) partial.next = n.next.filter((x) => x !== id);
@@ -297,6 +297,10 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
         if (n.type === 'action' && n.onError?.handler === id) {
           partial.onError = normalizeOnError({ ...n.onError, handler: undefined });
         }
+        if (n.cases?.some((c) => c.next === id)) {
+          partial.cases = n.cases.filter((c) => c.next !== id);
+        }
+        if (n.defaultNext === id) partial.defaultNext = '';
         if (Object.keys(partial).length > 0) {
           nodes[nid] = { ...n, ...partial };
         }
@@ -558,7 +562,7 @@ function computeCardX(positions: Record<string, { x: number; y: number }>): numb
   return maxX + 360;
 }
 
-/** 节点重命名时，同步更新所有指向它的引用（next/body/trueNext/falseNext/options） */
+/** 节点重命名时，同步更新所有指向它的引用（next/body/trueNext/falseNext/options/cases/defaultNext） */
 function renameRefsInNode(node: FlowNode, oldId: string, newId: string): FlowNode {
   const out: FlowNode = { ...node };
   if (node.next?.length) {
@@ -573,5 +577,9 @@ function renameRefsInNode(node: FlowNode, oldId: string, newId: string): FlowNod
   if (node.type === 'action' && node.onError?.handler === oldId) {
     out.onError = { ...node.onError, handler: newId };
   }
+  if (node.cases?.length) {
+    out.cases = node.cases.map((c) => (c.next === oldId ? { ...c, next: newId } : c));
+  }
+  if (node.defaultNext === oldId) out.defaultNext = newId;
   return out;
 }
