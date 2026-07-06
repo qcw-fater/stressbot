@@ -222,6 +222,7 @@ function FlowCanvasInner() {
           action: 'var(--node-action)',
           loop: 'var(--node-loop)',
           boolean: 'var(--node-boolean)',
+          switch: 'var(--node-switch)',
           weighted: 'var(--node-weighted)',
           wait: 'var(--node-wait)',
           break: 'var(--node-break)',
@@ -268,6 +269,15 @@ function FlowCanvasInner() {
         updateNode(e.source, { trueNext: '' });
       } else if (src.type === 'boolean' && handleId === 'false') {
         updateNode(e.source, { falseNext: '' });
+      } else if (src.type === 'switch' && handleId.startsWith('case-')) {
+        const idx = Number(handleId.slice(5));
+        if (Number.isFinite(idx) && src.cases) {
+          const cases = src.cases.slice();
+          cases.splice(idx, 1);
+          updateNode(e.source, { cases });
+        }
+      } else if (src.type === 'switch' && handleId === 'default') {
+        updateNode(e.source, { defaultNext: '' });
       } else if (src.type === 'weighted' && handleId.startsWith('opt-')) {
         const idx = Number(handleId.slice(4));
         if (Number.isFinite(idx) && src.options) {
@@ -298,6 +308,8 @@ function FlowCanvasInner() {
    *   sequence  · seq-add    → next.push(target)           （便于增量续接）
    *   loop      · body       → body = target
    *   boolean   · true/false → trueNext / falseNext = target
+   *   switch    · case-N     → cases[N].next = target
+   *   switch    · default    → defaultNext = target
    *   weighted  · opt-N      → options[N].node = target
    *   weighted  · opt-add    → options.push({ node: target, weight: 1 })
    *   action    · listen     → listenRefs.push({ listen })，target 必须是 listenCard
@@ -333,6 +345,19 @@ function FlowCanvasInner() {
       if (src.type === 'boolean') {
         if (handle === 'true' && targetNodeId) updateNode(params.source, { trueNext: targetNodeId });
         else if (handle === 'false' && targetNodeId) updateNode(params.source, { falseNext: targetNodeId });
+        return;
+      }
+      if (src.type === 'switch') {
+        if (handle === 'default' && targetNodeId) {
+          updateNode(params.source, { defaultNext: targetNodeId });
+        } else if (handle.startsWith('case-') && targetNodeId) {
+          const idx = Number(handle.slice(5));
+          const cases = (src.cases ?? []).slice();
+          if (Number.isFinite(idx) && cases[idx]) {
+            cases[idx] = { ...cases[idx], next: targetNodeId };
+            updateNode(params.source, { cases });
+          }
+        }
         return;
       }
       if (src.type === 'weighted') {
@@ -645,6 +670,7 @@ function FlowCanvasInner() {
       action: '--node-action',
       loop: '--node-loop',
       boolean: '--node-boolean',
+      switch: '--node-switch',
       weighted: '--node-weighted',
       wait: '--node-wait',
       break: '--node-break',
@@ -849,6 +875,7 @@ const QUICK_NODE_TYPES: Array<{ type: NodeType; label: string }> = [
   { type: 'sequence', label: 'Sequence' },
   { type: 'loop', label: 'Loop' },
   { type: 'boolean', label: 'Boolean' },
+  { type: 'switch', label: 'Switch' },
   { type: 'weighted', label: 'Weighted' },
   { type: 'wait', label: 'Wait' },
   { type: 'break', label: 'Break' },

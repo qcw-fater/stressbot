@@ -6,7 +6,7 @@
 
 import type { ActionDef, FieldBind, FilterDef, StoreMapping } from '@/types/action';
 import type { ListenDef } from '@/types/listen';
-import type { FlowNode, ListenRef, WeightedOption } from '@/types/flow';
+import type { FlowNode, ListenRef, SwitchCase, WeightedOption } from '@/types/flow';
 import { pruneActionByPattern } from '../editors/ActionEditor/actionPrune';
 
 export interface ExportInput {
@@ -59,6 +59,18 @@ function cleanNode(n: FlowNode): FlowNode {
       if (n.falseNext) out.falseNext = n.falseNext;
       if (typeof n.delayMs === 'number' && n.delayMs !== 0) out.delayMs = n.delayMs;
       break;
+    case 'switch': {
+      const cases = (n.cases ?? [])
+        .filter((c) => c.condition?.trim() && c.next?.trim())
+        .map((c): SwitchCase => {
+          const out: SwitchCase = { condition: c.condition.trim(), next: c.next.trim() };
+          if (c.description?.trim()) out.description = c.description.trim();
+          return out;
+        });
+      if (cases.length) out.cases = cases;
+      if (n.defaultNext?.trim()) out.defaultNext = n.defaultNext.trim();
+      break;
+    }
     case 'weighted':
       if (n.options?.length) out.options = n.options.map((o): WeightedOption => ({ node: o.node, weight: o.weight }));
       break;

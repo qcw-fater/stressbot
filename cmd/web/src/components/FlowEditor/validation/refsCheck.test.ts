@@ -629,3 +629,110 @@ describe('validateFlow', () => {
     expect(r.errors.find((e) => e.code === 'LISTEN_LUA_NO_SCRIPT')).toBeFalsy();
   });
 });
+
+describe('switch node validation', () => {
+  it('accepts valid switch nodes and warns when default is missing', () => {
+    const report = validateFlow({
+      defaultDelayMs: 1000,
+      nodes: {
+        main: {
+          type: 'switch',
+          cases: [{ condition: 'state:level >= 10', next: 'advanced' }],
+        },
+        advanced: { type: 'action', action: 'advanced' },
+      },
+      actions: { advanced: { pattern: 'clearState', keys: ['x'] } },
+      listens: {},
+    });
+
+    expect(report.errors.map((e) => e.code)).not.toContain('NODE_UNKNOWN_TYPE');
+    expect(report.errors.map((e) => e.code)).not.toContain('SWITCH_NO_CASES');
+    expect(report.warnings.map((e) => e.code)).toContain('SWITCH_NO_DEFAULT');
+  });
+
+  it('reports missing cases, empty condition, missing next, and invalid default', () => {
+    const report = validateFlow({
+      defaultDelayMs: 1000,
+      nodes: {
+        main: {
+          type: 'switch',
+          cases: [{ condition: '', next: '' }],
+          defaultNext: 'missing',
+        },
+      },
+      actions: {},
+      listens: {},
+    });
+
+    expect(report.errors.map((e) => e.code)).toEqual(expect.arrayContaining([
+      'SWITCH_CASE_NO_CONDITION',
+      'SWITCH_CASE_NO_NEXT',
+      'NODE_REF_NOT_FOUND',
+    ]));
+  });
+
+  it('does not report switch case and default targets as orphan nodes', () => {
+    const report = validateFlow({
+      defaultDelayMs: 1000,
+      nodes: {
+        main: {
+          type: 'switch',
+          cases: [{ condition: 'state:level >= 10', next: 'advanced' }],
+          defaultNext: 'basic',
+        },
+        advanced: { type: 'action', action: 'advanced' },
+        basic: { type: 'action', action: 'basic' },
+      },
+      actions: {
+        advanced: { pattern: 'clearState', keys: ['advanced'] },
+        basic: { pattern: 'clearState', keys: ['basic'] },
+      },
+      listens: {},
+    });
+
+    expect(report.warnings.filter((e) => e.code === 'NODE_ORPHAN')).toEqual([]);
+  });
+
+  it('accepts break and continue reachable through switch branches inside a loop', () => {
+    const report = validateFlow({
+      defaultDelayMs: 1000,
+      nodes: {
+        main: { type: 'loop', body: 'switchInLoop', loopCount: 1 },
+        switchInLoop: {
+          type: 'switch',
+          cases: [{ condition: 'state:done == true', next: 'breakNode' }],
+          defaultNext: 'continueNode',
+        },
+        breakNode: { type: 'break' },
+        continueNode: { type: 'continue' },
+      },
+      actions: {},
+      listens: {},
+    });
+
+    expect(report.errors.filter((e) => e.code === 'BREAK_CONTINUE_OUTSIDE_LOOP')).toEqual([]);
+  });
+
+  it('trims whitespace in case next and defaultNext before resolving refs', () => {
+    const report = validateFlow({
+      defaultDelayMs: 1000,
+      nodes: {
+        main: {
+          type: 'switch',
+          cases: [{ condition: 'state:level >= 10', next: ' advanced ' }],
+          defaultNext: ' basic ',
+        },
+        advanced: { type: 'action', action: 'advanced' },
+        basic: { type: 'action', action: 'basic' },
+      },
+      actions: {
+        advanced: { pattern: 'clearState', keys: ['advanced'] },
+        basic: { pattern: 'clearState', keys: ['basic'] },
+      },
+      listens: {},
+    });
+
+    expect(report.errors.filter((e) => e.code === 'NODE_REF_NOT_FOUND')).toEqual([]);
+    expect(report.errors.filter((e) => e.code === 'NODE_SELF_REF')).toEqual([]);
+  });
+});

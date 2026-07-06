@@ -13,6 +13,7 @@ export type NodeType =
   | 'action'
   | 'loop'
   | 'boolean'
+  | 'switch'
   | 'weighted'
   | 'wait'
   | 'break'
@@ -39,6 +40,10 @@ export interface FlowNode {
   trueNext?: string;
   falseNext?: string;
 
+  // switch 专用
+  cases?: SwitchCase[];
+  defaultNext?: string;
+
   // action 专用
   action?: string;
   errorStrategy?: 'ignore' | 'skip' | 'abort';
@@ -59,6 +64,12 @@ export interface FlowNode {
 export interface WeightedOption {
   node: string;
   weight: number;
+}
+
+export interface SwitchCase {
+  condition: string;
+  next: string;
+  description?: string;
 }
 
 /**

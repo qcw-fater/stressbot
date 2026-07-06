@@ -1,10 +1,12 @@
 /*
  * 设计 token：颜色 / 间距 / 阴影 / 节点尺寸
  *
- * 节点配色采用 Ant Design 5 调色板的主色阶。
- * action 用 magenta（洋红）与 sequence 蓝明显错开，避免视觉混淆。
+ * 节点配色采用 8 色按色环 ~45° 均布，任意两色相至少相差 ~39°，避免相似。
+ * action / listen 为中性灰黑（动作辅助，不抢戏）；其余 8 种控制流节点色相依次为：
+ * wait 玫红(345°) / break 橙(31°) / boolean 黄绿(70°) / loop 绿(120°) /
+ * continue 青绿(168°) / sequence 蓝(215°) / weighted 靛(258°) / switch 品红(297°)。
  *
- * 详见 docs/design-web-editor.md §5.2
+ * 详见 docs/visual-flow-editor.md §4
  */
 
 :root {
@@ -17,29 +19,33 @@
   --node-action-bg: #ededed; /* 淡灰，跟其他节点的浅色背景一致而非纯白 */
   --node-action-border-active: #1f1f1f;
 
-  --node-loop: #52c41a; /* 绿色 */
-  --node-loop-bg: #f6ffed;
-  --node-loop-border-active: #237804;
+  --node-loop: #1ea01e; /* 绿（120°） */
+  --node-loop-bg: #e8ffe6;
+  --node-loop-border-active: #0d5c0d;
 
-  --node-boolean: #faad14; /* 金黄（比纯黄更易读） */
-  --node-boolean-bg: #fffbe6;
-  --node-boolean-border-active: #ad6800;
+  --node-boolean: #a8c418; /* 黄绿（70°） */
+  --node-boolean-bg: #f9ffe6;
+  --node-boolean-border-active: #556b00;
 
-  --node-weighted: #722ed1; /* 紫色 */
-  --node-weighted-bg: #f9f0ff;
-  --node-weighted-border-active: #391085;
+  --node-switch: #c92dd1; /* 品红（297°） */
+  --node-switch-bg: #fae8ff;
+  --node-switch-border-active: #7a1a8a;
 
-  --node-wait: #f5222d; /* 红色 */
-  --node-wait-bg: #fff1f0;
-  --node-wait-border-active: #a8071a;
+  --node-weighted: #6234d0; /* 靛（258°） */
+  --node-weighted-bg: #ede8ff;
+  --node-weighted-border-active: #2a1a8a;
 
-  --node-break: #fa8c16; /* 橙色 */
+  --node-wait: #f52256; /* 玫红（345°） */
+  --node-wait-bg: #fff0f3;
+  --node-wait-border-active: #b00c33;
+
+  --node-break: #fa8c16; /* 橙（31°） */
   --node-break-bg: #fff7e6;
   --node-break-border-active: #ad4e00;
 
-  --node-continue: #13c2c2; /* 青色 */
-  --node-continue-bg: #e6fffb;
-  --node-continue-border-active: #006d75;
+  --node-continue: #13c2a0; /* 青绿（168°） */
+  --node-continue-bg: #e6fff5;
+  --node-continue-border-active: #00663d;
 
   --node-listen: #595959; /* ListenCard：与 action 同灰黑，因为 listen 也属于动作辅助 */
   --node-listen-bg: #ededed;
@@ -144,29 +150,33 @@
   --node-action-bg: #2a2a2a;
   --node-action-border-active: #ffffff;
 
-  --node-loop: #95de64;
-  --node-loop-bg: #1c2e15;
+  --node-loop: #8ad870;
+  --node-loop-bg: #16290e;
   --node-loop-border-active: #b7eb8f;
 
-  --node-boolean: #ffc53d;
-  --node-boolean-bg: #3a2c10;
-  --node-boolean-border-active: #ffd666;
+  --node-boolean: #d4df80;
+  --node-boolean-bg: #2c2e10;
+  --node-boolean-border-active: #e8f0a0;
 
-  --node-weighted: #b37feb;
-  --node-weighted-bg: #271845;
-  --node-weighted-border-active: #d3adf7;
+  --node-switch: #e08ce0;
+  --node-switch-bg: #2e0e30;
+  --node-switch-border-active: #f0b8f0;
 
-  --node-wait: #ff7875;
-  --node-wait-bg: #401414;
-  --node-wait-border-active: #ffa39e;
+  --node-weighted: #a08ef0;
+  --node-weighted-bg: #1a1645;
+  --node-weighted-border-active: #c0b4f5;
+
+  --node-wait: #ff7896;
+  --node-wait-bg: #401420;
+  --node-wait-border-active: #ffa8b8;
 
   --node-break: #ffa940;
   --node-break-bg: #3d2710;
   --node-break-border-active: #ffc069;
 
-  --node-continue: #5cdbd3;
-  --node-continue-bg: #112d2c;
-  --node-continue-border-active: #87e8de;
+  --node-continue: #5cd9b8;
+  --node-continue-bg: #112d2a;
+  --node-continue-border-active: #8fe8d0;
 
   --node-listen: #d9d9d9;
   --node-listen-bg: #2a2a2a;

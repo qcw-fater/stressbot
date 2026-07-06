@@ -7,12 +7,13 @@
  *   sequence.next[i]            → edge[source=id, sourceHandle=`seq-${i}`, target=next[i], type='seq']
  *   loop.body                   → edge[source=id, sourceHandle='body', target=body, type='loopBody']
  *   boolean.trueNext/falseNext  → edge[source=id, sourceHandle='true'/'false', target=*, type='branch']
+ *   switch.cases[i]/defaultNext → edge[source=id, sourceHandle=`case-${i}`/'default', target=*, type='branch']
  *   weighted.options[i]         → edge[source=id, sourceHandle=`opt-${i}`, target=*, type='weight', label=weight]
  *   action.listenRefs[i]   → edge[source=id, sourceHandle='listen', target=`__cb__${callback}`, type='listen']（callback=null 不画边）
  */
 
 import type { Edge, Node as RFNode } from '@xyflow/react';
-import type { FlowNode, ListenRef, WeightedOption } from '@/types/flow';
+import type { FlowNode, ListenRef, SwitchCase, WeightedOption } from '@/types/flow';
 import type { ListenDef } from '@/types/listen';
 import type { ActionDef } from '@/types/action';
 
@@ -117,6 +118,8 @@ function emitEdgesFor(id: string, node: FlowNode, flow: FlowJsonInput): Edge[] {
       }
       return out;
     }
+    case 'switch':
+      return emitSwitchEdges(id, node.cases ?? [], node.defaultNext);
     case 'weighted':
       return emitWeightedEdges(id, node.options ?? []);
     case 'wait':
@@ -142,6 +145,21 @@ function emitWeightedEdges(id: string, options: WeightedOption[]): Edge[] {
       ratio: total > 0 ? opt.weight / total : 0,
     }),
   );
+}
+
+function emitSwitchEdges(id: string, cases: SwitchCase[], defaultNext?: string): Edge[] {
+  const out: Edge[] = [];
+  cases.forEach((c, i) => {
+    if (!c.next) return;
+    out.push(makeEdge(`${id}->case[${i}]->${c.next}`, id, c.next, 'branch', `case-${i}`, {
+      branch: 'case',
+      caseIndex: i,
+    }));
+  });
+  if (defaultNext) {
+    out.push(makeEdge(`${id}->default->${defaultNext}`, id, defaultNext, 'branch', 'default', { branch: 'default' }));
+  }
+  return out;
 }
 
 function emitListenEdges(id: string, refs: ListenRef[], flow: FlowJsonInput): Edge[] {
