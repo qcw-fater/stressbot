@@ -541,15 +541,10 @@ func (c *Connection) dispatchListen(resp *Message) {
 		}
 		c.mu.Unlock()
 		if q.Push(resp) {
-			// 默认容量 1：从第 2 条起每条都会触发覆盖丢弃（即旧单槽「保最新」语义）。
-			// Debug 级，生产默认不刷屏；2-A2 让高频 route 配 queueSize>1 后自然减少。
-			// dispatchListen 是推送热路径，按本仓惯例（OnReceive/RequestResponse 同款）
-			// 用 DebugEnabled 守卫，避免每条覆盖都构造 zap 字段。
-			if stresslog.DebugEnabled() {
-				stresslog.Debug("[NETWORK] 监听队列已满，覆盖丢弃最旧消息",
-					zap.String("service", c.serviceName),
-					zap.String("routeKey", resp.RouteKey))
-			}
+			// 默认容量 1：从第 2 条起每条都会触发覆盖丢弃，保最新的消息。
+			stresslog.Warn("[NETWORK] 监听队列已满，覆盖丢弃最旧消息",
+				zap.String("service", c.serviceName),
+				zap.String("routeKey", resp.RouteKey))
 		}
 	}
 }

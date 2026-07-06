@@ -24,6 +24,7 @@
   ],
   "heartbeat": {
     "intervalMs": 10000,
+    "requireSecretKey": true,
     "route": { "cmd": 4, "act": 2 },
     "heartbeatFields": [
       { "type": "u16", "source": "stateCounter", "key": "packageIndex" },

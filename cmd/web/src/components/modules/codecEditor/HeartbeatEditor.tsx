@@ -86,6 +86,12 @@ export function HeartbeatEditor({ raw, schema, onEdit }: HeartbeatEditorProps) {
             <Typography.Text type="secondary">毫秒</Typography.Text>
           </div>
 
+          <div className="pce-inline-row">
+            <Typography.Text className="pce-inline-label">requireSecretKey</Typography.Text>
+            <Switch checked={!!hb.requireSecretKey} onChange={(v) => patch({ requireSecretKey: v })} />
+            <Typography.Text type="secondary">等待连接密钥设置后再启动心跳</Typography.Text>
+          </div>
+
           <div>
             <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
               route（按当前 routeKeyTemplate 生成字段）

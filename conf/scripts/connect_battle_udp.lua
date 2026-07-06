@@ -1,5 +1,5 @@
 -- connect_battle_udp.lua: 连接战斗服 UDP + 设置 UDP 密钥
--- 仅做连接 / 配置；150ms 心跳随 udp_battle_codec.json 的 heartbeat 配置在连接建立后自动注册，
+-- 仅做连接 / 配置；150ms 心跳随 udp_battle_codec.json 的 heartbeat 配置安装，requireSecretKey=true 时在密钥设置后启动，
 -- 通过 network 层全局带宽统计，完全不触碰 robot 业务 LState。
 local network = require("network")
 local robot = require("robot")
@@ -52,6 +52,6 @@ function execute(r)
         .. " battleId=" .. tostring(battleId)
         .. " fighterIndex=" .. tostring(fighterIndex)
         .. " hasSecretKey=" .. tostring(hasSecretKey)
-        .. " 心跳由协议配置自动注册(150ms)")
+        .. " 心跳由协议配置在密钥设置后启动(150ms)")
     return nil
 end

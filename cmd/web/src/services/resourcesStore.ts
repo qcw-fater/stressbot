@@ -532,6 +532,9 @@ function validateHeartbeat(s: CodecSchema, ec: ErrCollector): void {
   if (typeof hb.intervalMs !== 'number' || hb.intervalMs <= 0) {
     ec.add(`heartbeat.intervalMs 必须大于 0（当前 ${hb.intervalMs ?? ''}）`);
   }
+  if (hb.requireSecretKey !== undefined && typeof hb.requireSecretKey !== 'boolean') {
+    ec.add('heartbeat.requireSecretKey 必须是布尔值');
+  }
 
   const placeholders = extractRoutePlaceholders(s.routeKeyTemplate ?? '');
   if (placeholders.length > 0) {

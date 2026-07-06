@@ -5,6 +5,7 @@ package state
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -282,35 +283,57 @@ func toInt(v any) int {
 	}
 }
 
-// ToInt64 将 any 转换为 int64（公开版本，供其他包使用）
+// ToInt64 将 any 转换为 int64（公开版本，供其他包使用）。
+// 字符串仅接受十进制整数字面量，用于承接 Lua 层为避免大整数精度丢失而保存的 int64 文本。
 func ToInt64(v any) int64 {
-	if v == nil {
+	got, ok := ToInt64Safe(v)
+	if !ok {
 		return 0
+	}
+	return got
+}
+
+// ToInt64Safe 将 any 转换为 int64，并返回转换是否成功。
+func ToInt64Safe(v any) (int64, bool) {
+	if v == nil {
+		return 0, false
 	}
 	switch n := v.(type) {
 	case int:
-		return int64(n)
+		return int64(n), true
 	case int32:
-		return int64(n)
+		return int64(n), true
 	case int64:
-		return n
+		return n, true
 	case uint:
-		return int64(n)
+		if uint64(n) > uint64(math.MaxInt64) {
+			return 0, false
+		}
+		return int64(n), true
 	case uint32:
-		return int64(n)
+		return int64(n), true
 	case uint64:
-		return int64(n)
+		if n > uint64(math.MaxInt64) {
+			return 0, false
+		}
+		return int64(n), true
 	case float64:
-		return int64(n)
+		return int64(n), true
 	case float32:
-		return int64(n)
+		return int64(n), true
 	case bool:
 		if n {
-			return 1
+			return 1, true
 		}
-		return 0
+		return 0, true
+	case string:
+		got, err := strconv.ParseInt(strings.TrimSpace(n), 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return got, true
 	default:
-		return 0
+		return 0, false
 	}
 }
 

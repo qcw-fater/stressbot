@@ -61,10 +61,11 @@ type HeartbeatConfig struct {
 	IntervalMs int    // 发送间隔（毫秒）
 	Route      any    // 不透明路由（{cmd,act}），与 ActionDef.Route 同构
 	// 双模式 body 构造（互斥）：
-	C2SProto        string           // proto 模式：proto 全名（与 ActionDef.C2SProto 同构）
-	Bindings        []FieldBind      // proto 模式：字段绑定（复用 tcpSend bindFields 解析）
-	Fields          []HeartbeatField // raw-binary 模式：LE 布局；与 C2SProto 互斥
-	SkipWhenMissing bool             // raw 模式 state 源缺失时跳过本 tick（true）而非报错
+	C2SProto         string           // proto 模式：proto 全名（与 ActionDef.C2SProto 同构）
+	Bindings         []FieldBind      // proto 模式：字段绑定（复用 tcpSend bindFields 解析）
+	Fields           []HeartbeatField // raw-binary 模式：LE 布局；与 C2SProto 互斥
+	SkipWhenMissing  bool             // raw 模式 state 源缺失时跳过本 tick（true）而非报错
+	RequireSecretKey bool             // true=等待连接设置密钥后再启动心跳 timer
 }
 
 // appendLE 按 type 将 int64 值以小端字节序追加到 buf。
@@ -175,7 +176,11 @@ func resolveHeartbeatField(f *HeartbeatField, idx int, st *state.Store, privateC
 			}
 			return 0, false, fmt.Errorf("心跳 state 源缺失 key=%q（idx=%d type=%q）", f.Key, idx, f.Type)
 		}
-		return state.ToInt64(got), false, nil
+		iv, ok := state.ToInt64Safe(got)
+		if !ok {
+			return 0, false, fmt.Errorf("心跳 state 源值非整数 key=%q（idx=%d type=%q）", f.Key, idx, f.Type)
+		}
+		return iv, false, nil
 
 	case HeartbeatSourceStateCounter:
 		// 共享计数器自增：state.Increment 返回递增后的新值。

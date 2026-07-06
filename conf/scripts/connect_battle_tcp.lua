@@ -1,5 +1,5 @@
 -- connect_battle_tcp.lua: 连接战斗服 TCP + 密钥交换
--- 10s 心跳随 tcp_battle_codec.json 的 heartbeat 配置在连接建立后自动注册，
+-- 10s 心跳随 tcp_battle_codec.json 的 heartbeat 配置安装；requireSecretKey=true 时在密钥设置后启动，
 -- 通过 network 层全局带宽统计，完全不触碰 robot 业务 LState。
 local network = require("network")
 local robot = require("robot")
@@ -57,6 +57,6 @@ function execute(r)
     log.info("战斗服 TCP 连接成功: address=" .. tostring(battleAddress)
         .. " battleId=" .. tostring(battleId)
         .. " fighterIndex=" .. tostring(fighterIndex)
-        .. " hasSecretKey=true 心跳由协议配置自动注册(10s)")
+        .. " hasSecretKey=true 心跳由协议配置在密钥设置后启动(10s)")
     return nil
 end

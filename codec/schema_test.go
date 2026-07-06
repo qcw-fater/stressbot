@@ -394,12 +394,27 @@ func TestValidate_HeartbeatValidProtoBody(t *testing.T) {
 func TestValidate_HeartbeatValidRawBody(t *testing.T) {
 	s := validSchema()
 	s.Heartbeat = &HeartbeatConfigDef{
-		IntervalMs:       5000,
-		Route:            map[string]any{"cmd": float64(1), "act": float64(2)},
-		HeartbeatFields:  []HeartbeatField{{Type: "u32", Source: HeartbeatSourceCounter}},
+		IntervalMs:      5000,
+		Route:           map[string]any{"cmd": float64(1), "act": float64(2)},
+		HeartbeatFields: []HeartbeatField{{Type: "u32", Source: HeartbeatSourceCounter}},
 		SkipWhenMissing: true,
 	}
 	assertValid(t, s)
+}
+
+func TestLoadSchema_HeartbeatRequireSecretKey(t *testing.T) {
+	json := `{"version":1,"endianDefault":"le","frame":{"headerSize":12},"header":[{"name":"bodyLen","offset":0,"size":4,"type":"u32","role":"length"},{"name":"cmd","offset":4,"size":1,"type":"u8","role":"route"}],"routeKeyTemplate":"{cmd}","pipeline":[],"heartbeat":{"intervalMs":150,"requireSecretKey":true}}`
+	path := filepath.Join(t.TempDir(), "udp_battle_codec.json")
+	if err := os.WriteFile(path, []byte(json), 0o644); err != nil {
+		t.Fatalf("写入 schema fixture 失败: %v", err)
+	}
+	s, err := LoadSchema(path)
+	if err != nil {
+		t.Fatalf("LoadSchema 失败: %v", err)
+	}
+	if s.Heartbeat == nil || !s.Heartbeat.RequireSecretKey {
+		t.Fatalf("heartbeat.requireSecretKey 应解析为 true，实际 %+v", s.Heartbeat)
+	}
 }
 
 func TestValidate_HeartbeatIntervalRequired(t *testing.T) {

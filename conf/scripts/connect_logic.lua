@@ -1,5 +1,5 @@
 -- connect_logic.lua: 连接逻辑服 TCP + 密钥交换
--- 心跳随 tcp_logic_codec.json 的 heartbeat 配置在连接建立后自动注册。
+-- 心跳随 tcp_logic_codec.json 的 heartbeat 配置安装；requireSecretKey=true 时在密钥设置后启动。
 local network = require("network")
 local robot = require("robot")
 local log = require("log")

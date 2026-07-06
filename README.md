@@ -364,7 +364,7 @@ Executor 遍历节点图 → 命中 action 节点
 
 ## 心跳
 
-心跳是连接级协议配置，不再作为 flow action 编排。每份 `conf/adapter/<protocol>_<service>_codec.json` 可选配置一个 `heartbeat` 对象；没有该对象表示该连接不启用心跳。连接建立后会按对应 codec 的心跳配置自动注册，关闭连接时自动停止。
+心跳是连接级协议配置，不再作为 flow action 编排。每份 `conf/adapter/<protocol>_<service>_codec.json` 可选配置一个 `heartbeat` 对象；没有该对象表示该连接不启用心跳。默认在连接建立后按对应 codec 的心跳配置启动；若配置 `requireSecretKey: true`，则等待连接密钥设置后再启动。关闭连接时心跳自动停止。
 
 ### 静态心跳（body 固定为空）
 

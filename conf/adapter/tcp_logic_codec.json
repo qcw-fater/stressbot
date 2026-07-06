@@ -24,6 +24,7 @@
   ],
   "heartbeat": {
     "intervalMs": 5000,
+    "requireSecretKey": true,
     "route": { "cmd": 2, "act": 1 }
   }
 }

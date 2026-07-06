@@ -120,6 +120,21 @@ func TestBuildHeartbeatBody_StateHit(t *testing.T) {
 	}
 }
 
+func TestBuildHeartbeatBody_StateStringInteger(t *testing.T) {
+	st := state.NewStore()
+	st.Set("battleSession", "664714659830361091")
+	fields := []HeartbeatField{{Type: "i64", Source: "state", Key: "battleSession"}}
+	body, skip, err := BuildHeartbeatBody(fields, st, nil, false)
+	if err != nil || skip {
+		t.Fatalf("unexpected: body=%x skip=%v err=%v", body, skip, err)
+	}
+	want := make([]byte, 8)
+	binary.LittleEndian.PutUint64(want, uint64(664714659830361091))
+	if string(body) != string(want) {
+		t.Fatalf("body=%x want=%x", body, want)
+	}
+}
+
 func TestBuildHeartbeatBody_StateMissing_SkipWhenMissing(t *testing.T) {
 	fields := []HeartbeatField{{Type: "u64", Source: "state", Key: "missing"}}
 	body, skip, err := BuildHeartbeatBody(fields, state.NewStore(), nil, true)

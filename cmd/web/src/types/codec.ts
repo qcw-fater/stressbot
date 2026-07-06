@@ -146,6 +146,7 @@ export interface CodecHeartbeat {
   bindings?: import('@/types/action').FieldBind[];
   heartbeatFields?: import('@/types/action').HeartbeatField[];
   skipWhenMissing?: boolean;
+  requireSecretKey?: boolean;
 }
 
 /** when.guards 的一个条件项。 */

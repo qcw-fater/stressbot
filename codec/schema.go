@@ -125,12 +125,13 @@ type Guard struct {
 // HeartbeatConfigDef 是 codec 连接级可选心跳配置。
 // 心跳强绑定当前连接：transport/service 由 codec 文件名对应的连接名决定，不在本对象内重复配置。
 type HeartbeatConfigDef struct {
-	IntervalMs      int              `json:"intervalMs"`
-	Route           any              `json:"route,omitempty"`
-	C2SProto        string           `json:"c2sProto,omitempty"`
-	Bindings        []FieldBind      `json:"bindings,omitempty"`
-	HeartbeatFields []HeartbeatField `json:"heartbeatFields,omitempty"`
-	SkipWhenMissing bool             `json:"skipWhenMissing,omitempty"`
+	IntervalMs       int              `json:"intervalMs"`
+	Route            any              `json:"route,omitempty"`
+	C2SProto         string           `json:"c2sProto,omitempty"`
+	Bindings         []FieldBind      `json:"bindings,omitempty"`
+	HeartbeatFields  []HeartbeatField `json:"heartbeatFields,omitempty"`
+	SkipWhenMissing  bool             `json:"skipWhenMissing,omitempty"`
+	RequireSecretKey bool             `json:"requireSecretKey,omitempty"`
 }
 
 // FieldBind 是心跳 protobuf body 模式复用的字段绑定定义。
@@ -187,13 +188,13 @@ type HeartbeatField struct {
 }
 
 const (
-	BindState                  = "state"
-	HeartbeatSourceCounter     = "counter"
-	HeartbeatSourceFixed       = "fixed"
-	HeartbeatSourceState       = "state"
+	BindState                   = "state"
+	HeartbeatSourceCounter      = "counter"
+	HeartbeatSourceFixed        = "fixed"
+	HeartbeatSourceState        = "state"
 	HeartbeatSourceStateCounter = "stateCounter"
-	HeartbeatSourceTimestamp   = "timestamp"
-	HeartbeatSourceRandomInt   = "randomInt"
+	HeartbeatSourceTimestamp    = "timestamp"
+	HeartbeatSourceRandomInt    = "randomInt"
 )
 
 // ---------- 集合（v1 冻结值） ----------

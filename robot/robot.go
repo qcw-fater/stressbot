@@ -63,11 +63,13 @@ type Robot struct {
 	// sched 是 Robot 的协作式调度核心（actor 运行时）：mailbox + 统一等待 pump。
 	// 网络 pump goroutine 经 sched.enqueue 投递异步 Lua 工作（listen 回调），
 	// 由执行器 goroutine 在等待窗口的 select 内就地串行消费（节点入口不再单独 drain）。详见 scheduler.go。
-	sched         *robotScheduler
-	onDone        func(*Robot, CleanupStatus) // 执行 goroutine 结束后回调（由 Manager 设置）
-	cleanupOnce   sync.Once
-	cleanupMu     sync.Mutex
-	cleanupResult CleanupStatus
+	sched              *robotScheduler
+	onDone             func(*Robot, CleanupStatus) // 执行 goroutine 结束后回调（由 Manager 设置）
+	cleanupOnce        sync.Once
+	cleanupMu          sync.Mutex
+	cleanupResult      CleanupStatus
+	pendingHeartbeatMu sync.Mutex
+	pendingHeartbeats  map[string]engine.HeartbeatConfig
 }
 
 // Config 单个机器人的配置。
@@ -1378,6 +1380,7 @@ func (ns *netSenderAdapter) SetTCPSecretKey(service string, key []byte) {
 	conn := ns.robot.client.GetTCPConn(service)
 	if conn != nil {
 		conn.SetSecretKey(key)
+		ns.startPendingHeartbeatAfterSecretKey("tcp", service)
 	}
 }
 
@@ -1424,6 +1427,7 @@ func (ns *netSenderAdapter) SetUDPSecretKey(service string, key []byte) {
 	conn := ns.robot.client.GetUDPConn(service)
 	if conn != nil {
 		conn.SetSecretKey(key)
+		ns.startPendingHeartbeatAfterSecretKey("udp", service)
 	}
 }
 
@@ -1445,16 +1449,58 @@ func (ns *netSenderAdapter) RegisterCodecHeartbeat(transport, service string) er
 	if hb == nil {
 		return nil
 	}
-	return ns.installHeartbeat(engine.HeartbeatConfig{
-		Transport:       transport,
-		Service:         service,
-		IntervalMs:      hb.IntervalMs,
-		Route:           hb.Route,
-		C2SProto:        hb.C2SProto,
-		Bindings:        codecFieldBindsToEngine(hb.Bindings),
-		Fields:          codecHeartbeatFieldsToEngine(hb.HeartbeatFields),
-		SkipWhenMissing: hb.SkipWhenMissing,
-	})
+	cfg := engine.HeartbeatConfig{
+		Transport:        transport,
+		Service:          service,
+		IntervalMs:       hb.IntervalMs,
+		Route:            hb.Route,
+		C2SProto:         hb.C2SProto,
+		Bindings:         codecFieldBindsToEngine(hb.Bindings),
+		Fields:           codecHeartbeatFieldsToEngine(hb.HeartbeatFields),
+		SkipWhenMissing:  hb.SkipWhenMissing,
+		RequireSecretKey: hb.RequireSecretKey,
+	}
+	if cfg.RequireSecretKey {
+		ns.robot.deferHeartbeatUntilSecretKey(cfg)
+		return nil
+	}
+	return ns.installHeartbeat(cfg)
+}
+
+func heartbeatKey(transport, service string) string {
+	return transport + ":" + service
+}
+
+func (r *Robot) deferHeartbeatUntilSecretKey(cfg engine.HeartbeatConfig) {
+	r.pendingHeartbeatMu.Lock()
+	if r.pendingHeartbeats == nil {
+		r.pendingHeartbeats = make(map[string]engine.HeartbeatConfig)
+	}
+	r.pendingHeartbeats[heartbeatKey(cfg.Transport, cfg.Service)] = cfg
+	r.pendingHeartbeatMu.Unlock()
+	stresslog.Debug("[ROBOT] 连接级心跳等待密钥后启动",
+		zap.String("transport", cfg.Transport),
+		zap.String("service", cfg.Service),
+		zap.Int("intervalMs", cfg.IntervalMs))
+}
+
+func (ns *netSenderAdapter) startPendingHeartbeatAfterSecretKey(transport, service string) {
+	if ns.robot == nil {
+		return
+	}
+	key := heartbeatKey(transport, service)
+	ns.robot.pendingHeartbeatMu.Lock()
+	cfg, ok := ns.robot.pendingHeartbeats[key]
+	if ok {
+		delete(ns.robot.pendingHeartbeats, key)
+	}
+	ns.robot.pendingHeartbeatMu.Unlock()
+	if ok {
+		if err := ns.installHeartbeat(cfg); err != nil {
+			stresslog.Warn("[ROBOT] 密钥就绪后启动连接级心跳失败",
+				zap.String("transport", transport), zap.String("service", service), zap.Error(err))
+		}
+	}
 }
 
 // installHeartbeat 安装连接级心跳（双模式 body 构造）。

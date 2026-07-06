@@ -313,8 +313,16 @@ describe('validateCodecSchema — heartbeat', () => {
       route: { cmd: 1, act: 2 },
       heartbeatFields: [{ type: 'u32', source: 'counter', start: 1, step: 1 }],
       skipWhenMissing: true,
+      requireSecretKey: true,
     };
     expect(validateCodecSchema(JSON.stringify(s))).toEqual([]);
+  });
+
+  it('requireSecretKey 必须是布尔值', () => {
+    const s = validSchema();
+    s.heartbeat = { intervalMs: 5000, route: { cmd: 1, act: 2 }, requireSecretKey: 'yes' as unknown as boolean };
+    const errs = validateCodecSchema(JSON.stringify(s));
+    expect(errs.some((e) => e.includes('heartbeat.requireSecretKey 必须是布尔值'))).toBe(true);
   });
 
   it('intervalMs 必须大于 0', () => {
