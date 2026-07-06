@@ -42,6 +42,10 @@ type Node struct {
 	TrueNext  string `json:"trueNext"`  // 条件为 true 时跳转的节点 ID（空 = 不跳转）
 	FalseNext string `json:"falseNext"` // 条件为 false 时跳转的节点 ID（空 = 不跳转）
 
+	// ── switch 专用 ──────────────────────────────────────────────
+	Cases       []SwitchCase `json:"cases"`       // 按顺序匹配的条件分支
+	DefaultNext string       `json:"defaultNext"` // 所有 case 未命中时跳转的节点 ID（空 = 正常结束）
+
 	// ── action 专用 ─────────────────────────────────────────────
 	Action        string      `json:"action"`        // 引用 actions 表中的动作名称
 	ErrorStrategy string      `json:"errorStrategy"` // "abort" = 中断整个流程；"skip" = 跳过当前层级；空/"ignore" = 忽略继续
@@ -63,6 +67,13 @@ type Node struct {
 type WeightedOption struct {
 	Node   string `json:"node"`   // 目标节点 ID
 	Weight int    `json:"weight"` // 权重值
+}
+
+// SwitchCase 表示 switch 节点的一条条件分支。
+type SwitchCase struct {
+	Condition   string `json:"condition"`   // 条件表达式，语法同 boolean/loop
+	Next        string `json:"next"`        // 条件命中后执行的节点 ID
+	Description string `json:"description"` // 可选说明，仅用于配置可读性
 }
 
 // ListenRef 监听引用，定义在节点上。
@@ -112,6 +123,7 @@ const (
 	NodeAction   = "action"
 	NodeLoop     = "loop"
 	NodeBoolean  = "boolean"
+	NodeSwitch   = "switch"
 	NodeWeighted = "weighted"
 	NodeWait     = "wait"
 	NodeBreak    = "break"

@@ -121,6 +121,8 @@ func (e *Executor) executeNode(ctx context.Context, nodeID string) error {
 		return e.executeLoop(ctx, node)
 	case NodeBoolean:
 		return e.executeBoolean(ctx, node)
+	case NodeSwitch:
+		return e.executeSwitch(ctx, node)
 	case NodeWeighted:
 		return e.executeWeighted(ctx, node)
 	case NodeWait:
@@ -364,6 +366,45 @@ func (e *Executor) executeBoolean(ctx context.Context, node *Node) error {
 	}
 
 	err := e.executeNode(ctx, targetID)
+	if errors.Is(err, errSkip) {
+		return nil
+	}
+	return err
+}
+
+// executeSwitch 多条件分支节点：按顺序执行第一条命中的 case。
+func (e *Executor) executeSwitch(ctx context.Context, node *Node) error {
+	for i, c := range node.Cases {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		matched := e.handler.ExecuteBoolean(c.Condition)
+		stresslog.Debug("[ENGINE] switch 条件判断",
+			zap.String("caller", e.caller),
+			zap.Int("case", i),
+			zap.String("condition", c.Condition),
+			zap.Bool("matched", matched),
+			zap.String("next", c.Next))
+		if !matched {
+			continue
+		}
+		if c.Next == "" {
+			return nil
+		}
+		err := e.executeNode(ctx, c.Next)
+		if errors.Is(err, errSkip) {
+			return nil
+		}
+		return err
+	}
+
+	if node.DefaultNext == "" {
+		return nil
+	}
+	stresslog.Debug("[ENGINE] switch 执行默认分支",
+		zap.String("caller", e.caller),
+		zap.String("next", node.DefaultNext))
+	err := e.executeNode(ctx, node.DefaultNext)
 	if errors.Is(err, errSkip) {
 		return nil
 	}
