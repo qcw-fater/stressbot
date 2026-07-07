@@ -1022,6 +1022,8 @@ NodeShell 消费：
 | `Delete` | 删除选中节点/边 |
 | `Ctrl+D` | 复制选中节点 |
 | `Ctrl+F` | 节点搜索 |
+| `F1`–`F9` | 在鼠标位置新建对应节点（按 QUICK_NODE_TYPES 顺序：sequence/loop/boolean/switch/weighted/wait/break/continue/action） |
+| `F10` | 在鼠标位置新建 Listen 卡片 |
 
 ---
 

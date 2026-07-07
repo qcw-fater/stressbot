@@ -599,7 +599,7 @@ function FlowCanvasInner() {
   const lastMousePosRef = useRef<{ x: number; y: number } | null>(null);
 
   // 全局快捷键：
-  //   F1~F9 在鼠标位置新建节点 / listen 卡片
+  //   F1~F10 在鼠标位置新建节点 / listen 卡片
   //   Ctrl/Cmd+C 复制 / Ctrl/Cmd+X 剪切 / Ctrl/Cmd+V 粘贴
   // 关键约束：
   //   - 在 input/textarea/contentEditable 中触发时让浏览器原生处理（不抢复制粘贴）
@@ -617,16 +617,17 @@ function FlowCanvasInner() {
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
       if (!inCanvas()) return;
 
-      // F1~F9 快捷新建节点（无需修饰键）
-      const fKey = /^F(\d)$/i.exec(e.key);
+      // F1..F9 快捷新建节点、F10 新建 listen 卡片（无需修饰键）
+      const fKey = /^F(\d{1,2})$/i.exec(e.key);
       if (fKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const idx = parseInt(fKey[1], 10);
-        if (idx >= 1 && idx <= 9) {
+        const nodeCount = QUICK_NODE_TYPES.length;
+        if (idx >= 1 && idx <= nodeCount + 1) {
           const last = lastMousePosRef.current;
           if (!last) return;
           e.preventDefault();
           const flowPos = screenToFlowPosition({ x: last.x, y: last.y });
-          if (idx <= 8) {
+          if (idx <= nodeCount) {
             const q = QUICK_NODE_TYPES[idx - 1];
             const taken = new Set(Object.keys(useFlowStore.getState().nodes));
             const id = generateNodeId(q.type, taken);
@@ -638,7 +639,7 @@ function FlowCanvasInner() {
             }));
             setSelectedNode(id);
           } else {
-            // F9 = Listen
+            // F{nodeCount+1} = Listen
             const listenName = uniqueListenName('listen');
             addListen(listenName, {});
             const cardId = `__cb__${listenName}`;
@@ -899,6 +900,8 @@ interface CanvasContextMenuProps {
   onDeleteEdge: (id: string) => void;
 }
 
+// 右键菜单「新建节点」+ F1..F9 快捷键对应的节点类型；listen 占 F{length+1}（当前 F10）。
+// 键盘 handler 与右键菜单均按数组长度推导（节点 F1..F{length}，listen F{length+1}），新增类型加到末尾即可顺延。
 const QUICK_NODE_TYPES: Array<{ type: NodeType; label: string }> = [
   { type: 'sequence', label: 'Sequence' },
   { type: 'loop', label: 'Loop' },
@@ -1043,7 +1046,7 @@ function CanvasContextMenu({
               onClose();
             }}
           >
-            Listen <Hint>F9</Hint>
+            Listen <Hint>F{QUICK_NODE_TYPES.length + 1}</Hint>
           </MenuItem>
         </>
       )}
