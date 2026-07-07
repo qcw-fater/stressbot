@@ -16,7 +16,7 @@ import (
 )
 
 // errBreak / errContinue 是循环控制的内部信号，通过 error 冒泡直到被 executeLoop 捕获。
-// errSkip 是 onError.strategy=skip 的内部信号：被 sequence/loop/boolean/weighted 捕获后，
+// errSkip 是 onError.strategy=skip 的内部信号：被 sequence/loop/boolean/switch/weighted 捕获后，
 // 视为当前分支完成，不继续传播为失败。
 var (
 	errBreak    = errors.New("break")
@@ -172,7 +172,7 @@ func (e *Executor) executeSequence(ctx context.Context, node *Node) error {
 //
 // 仅遍历当前 sequence 层的 action 子节点（不深入嵌套）：
 //   - 嵌套 sequence 内的 action 已在它们各自的 sequence 里被同样处理
-//   - 控制类节点（boolean/weighted/loop/wait）本身不算 action，无样本概念
+//   - 控制类节点（boolean/switch/weighted/loop/wait/break/continue）本身不算 action，无样本概念
 func (e *Executor) reportRemainingCanceled(remaining []string) {
 	mc := monitor.Global()
 	if mc == nil {
@@ -504,24 +504,27 @@ func (e *Executor) executeBoolean(ctx context.Context, node *Node) error {
 }
 
 // executeSwitch 多条件分支节点：按顺序执行第一条命中的 case。
+// 日志只在"决策点"打（命中哪条 / 走默认 / 静默结束），不逐 case 打，避免噪音：
+//   - 命中 case / 走 default / 命中空 next：debug（正常控制流决策）
+//   - 无 case 命中且无 default：warn（分支静默结束，压测里易藏 bug，默认可见；补 default 可消除）
+// 子流程内的失败由 executeAction 自行 warn，此处不重复。
 func (e *Executor) executeSwitch(ctx context.Context, node *Node) error {
 	for i, c := range node.Cases {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		matched := e.handler.ExecuteBoolean(c.Condition)
-		stresslog.Debug("[ENGINE] switch 条件判断",
-			zap.String("caller", e.caller),
-			zap.Int("case", i),
-			zap.String("condition", c.Condition),
-			zap.Bool("matched", matched),
-			zap.String("next", c.Next))
-		if !matched {
+		if !e.handler.ExecuteBoolean(c.Condition) {
 			continue
 		}
+		// 命中第 i 条 case
 		if c.Next == "" {
+			stresslog.Debug("[ENGINE] switch 命中 case 但 next 为空，结束分支",
+				zap.String("caller", e.caller), zap.Int("case", i), zap.String("condition", c.Condition))
 			return nil
 		}
+		stresslog.Debug("[ENGINE] switch 命中 case",
+			zap.String("caller", e.caller), zap.Int("case", i),
+			zap.String("condition", c.Condition), zap.String("next", c.Next))
 		err := e.executeNode(ctx, c.Next)
 		if errors.Is(err, errSkip) {
 			return nil
@@ -529,12 +532,16 @@ func (e *Executor) executeSwitch(ctx context.Context, node *Node) error {
 		return err
 	}
 
+	// 无 case 命中
 	if node.DefaultNext == "" {
+		// 未配置 default 且全部 case 未命中：分支静默结束（机器人此处什么都没做）。
+		// 这是压测里最易藏 bug 的场景（路由落空），升 warn 默认可见；若属预期 fall-through，补一个 default 即可消除。
+		stresslog.Warn("[ENGINE] switch 无 case 命中且未配置 default，分支静默结束",
+			zap.String("caller", e.caller), zap.Int("cases", len(node.Cases)))
 		return nil
 	}
-	stresslog.Debug("[ENGINE] switch 执行默认分支",
-		zap.String("caller", e.caller),
-		zap.String("next", node.DefaultNext))
+	stresslog.Debug("[ENGINE] switch 无 case 命中，执行默认分支",
+		zap.String("caller", e.caller), zap.Int("cases", len(node.Cases)), zap.String("next", node.DefaultNext))
 	err := e.executeNode(ctx, node.DefaultNext)
 	if errors.Is(err, errSkip) {
 		return nil

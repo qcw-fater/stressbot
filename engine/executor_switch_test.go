@@ -7,21 +7,13 @@ import (
 	"reflect"
 	"testing"
 	"time"
-
-	stresslog "stressbot/utils/log"
-
-	"go.uber.org/zap"
 )
-
-func init() {
-	stresslog.ReplaceLogger(zap.NewNop())
-}
 
 func TestSwitchNodeJSONModel(t *testing.T) {
 	data := []byte(`{
 		"type":"switch",
 		"cases":[
-			{"condition":"state:level >= 10","next":"advanced","description":"高等级"},
+			{"condition":"state:level >= 10","next":"advanced"},
 			{"condition":"lua:has_guild.lua","next":"guild"}
 		],
 		"defaultNext":"normal"
@@ -43,9 +35,6 @@ func TestSwitchNodeJSONModel(t *testing.T) {
 	if node.Cases[0].Next != "advanced" {
 		t.Fatalf("first next = %q", node.Cases[0].Next)
 	}
-	if node.Cases[0].Description != "高等级" {
-		t.Fatalf("first description = %q", node.Cases[0].Description)
-	}
 	if node.DefaultNext != "normal" {
 		t.Fatalf("DefaultNext = %q, want normal", node.DefaultNext)
 	}
@@ -57,6 +46,7 @@ type switchTestHandler struct {
 	booleanCalls   []string
 	actionErrors   map[string]error
 	sleepCalls     int
+	onBoolean      func() // 每次 ExecuteBoolean 的副作用钩子（测试用，如求值时取消 ctx）
 }
 
 func (h *switchTestHandler) ExecuteAction(_ context.Context, actionDef *ActionDef) error {
@@ -68,6 +58,9 @@ func (h *switchTestHandler) ExecuteAction(_ context.Context, actionDef *ActionDe
 }
 
 func (h *switchTestHandler) ExecuteBoolean(expression string) bool {
+	if h.onBoolean != nil {
+		h.onBoolean()
+	}
 	h.booleanCalls = append(h.booleanCalls, expression)
 	return h.booleanResults[expression]
 }
@@ -172,5 +165,83 @@ func TestExecuteSwitchPropagatesChildError(t *testing.T) {
 	}
 	if !reflect.DeepEqual(h.actions, []string{"advanced"}) {
 		t.Fatalf("actions = %#v", h.actions)
+	}
+}
+
+// 命中 case 但 Next 为空：视为本分支正常结束，不回退 default，也不执行任何 action。
+func TestExecuteSwitchMatchedEmptyNextEndsWithoutDefault(t *testing.T) {
+	h := &switchTestHandler{booleanResults: map[string]bool{"state:ready": true}}
+	exec := newSwitchTestExecutor(h, &Node{Type: NodeSwitch, Cases: []SwitchCase{
+		{Condition: "state:ready", Next: ""},
+	}, DefaultNext: "fallback"})
+
+	if err := exec.Run(context.Background()); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !reflect.DeepEqual(h.booleanCalls, []string{"state:ready"}) {
+		t.Fatalf("booleanCalls = %#v", h.booleanCalls)
+	}
+	if len(h.actions) != 0 {
+		t.Fatalf("actions = %#v, want none（命中空 Next 不应回退到 default）", h.actions)
+	}
+}
+
+// 子节点返回 errSkip（onError.strategy=skip）：switch 视为分支正常结束，Run 返回 nil。
+func TestExecuteSwitchNormalizesErrSkip(t *testing.T) {
+	h := &switchTestHandler{
+		booleanResults: map[string]bool{"state:ready": true},
+		actionErrors:   map[string]error{"advanced": errors.New("fail")},
+	}
+	exec := newSwitchTestExecutor(h, &Node{Type: NodeSwitch, Cases: []SwitchCase{
+		{Condition: "state:ready", Next: "advanced"},
+	}, DefaultNext: "fallback"})
+	exec.flow.Nodes["advanced"].OnError = &OnErrorDef{Strategy: StrategySkip}
+
+	if err := exec.Run(context.Background()); err != nil {
+		t.Fatalf("Run error = %v, want nil（errSkip 应被归一化为分支正常结束）", err)
+	}
+	if !reflect.DeepEqual(h.actions, []string{"advanced"}) {
+		t.Fatalf("actions = %#v", h.actions)
+	}
+}
+
+// 空 cases + 有 defaultNext：前端校验会拦，但后端不应 panic，直接走 default。
+func TestExecuteSwitchEmptyCasesRunsDefault(t *testing.T) {
+	h := &switchTestHandler{}
+	exec := newSwitchTestExecutor(h, &Node{Type: NodeSwitch, Cases: nil, DefaultNext: "fallback"})
+
+	if err := exec.Run(context.Background()); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(h.booleanCalls) != 0 {
+		t.Fatalf("booleanCalls = %#v, want none（无 case 可求值）", h.booleanCalls)
+	}
+	if !reflect.DeepEqual(h.actions, []string{"fallback"}) {
+		t.Fatalf("actions = %#v, want [fallback]", h.actions)
+	}
+}
+
+// case 之间 ctx 取消：求值第 1 个 case 时取消 ctx，第 2 个 case 不再求值，Run 返回 ctx.Err。
+func TestExecuteSwitchStopsOnContextCancelBetweenCases(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	h := &switchTestHandler{
+		booleanResults: map[string]bool{"c0": false, "c1": false},
+		onBoolean:      func() { cancel() }, // 求值 c0 时取消 ctx
+	}
+	exec := newSwitchTestExecutor(h, &Node{Type: NodeSwitch, Cases: []SwitchCase{
+		{Condition: "c0", Next: "advanced"},
+		{Condition: "c1", Next: "normal"},
+	}, DefaultNext: "fallback"})
+
+	err := exec.Run(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run error = %v, want context.Canceled", err)
+	}
+	// c0 已求值（求值时取消 ctx），c1 因 ctx 取消在迭代入口被拦
+	if !reflect.DeepEqual(h.booleanCalls, []string{"c0"}) {
+		t.Fatalf("booleanCalls = %#v, want [c0]", h.booleanCalls)
+	}
+	if len(h.actions) != 0 {
+		t.Fatalf("actions = %#v, want none", h.actions)
 	}
 }

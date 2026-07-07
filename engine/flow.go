@@ -1,5 +1,5 @@
 // Package engine 提供流程引擎，驱动压测机器人的行为。
-// flow.go 定义流程图结构（TaskFlow/Node/Action/Callback），
+// flow.go 定义流程图结构（TaskFlow / Node / ActionDef / ListenDef / ListenRef 等），
 // 所有结构均可从 JSON 配置加载，无需硬编码行为逻辑。
 package engine
 
@@ -23,6 +23,7 @@ type TaskFlow struct {
 //   - action:   执行一个声明式动作或 Lua 脚本，唯一产生副作用的节点
 //   - loop:     循环执行单个 body 节点，支持次数/前置条件/后置条件
 //   - boolean:  对 condition 求值，跳转到 trueNext 或 falseNext
+//   - switch:   按 cases 顺序求值，跳转到第一条命中分支；全未命中走 defaultNext
 //   - weighted: 按 options 中的权重随机选择一路节点执行
 //   - wait:     用户显式等待，与全局默认延迟无关
 //   - break:    产生 errBreak 信号，中断最近的 loop
@@ -35,7 +36,7 @@ type Node struct {
 
 	// ── loop 专用 ────────────────────────────────────────────────
 	Body           string `json:"body"`           // 循环体节点 ID（单个）；多步骤时指向一个 sequence 节点
-	LoopCount      int    `json:"loopCount"`      // 循环次数；≤0 = 无限循环
+	LoopCount      int    `json:"loopCount"`      // 循环次数；<0 = 无限循环，=0 = 跳过循环体，>0 = 执行 N 次
 	Condition      string `json:"condition"`      // 前置条件：每次迭代开始前求值，false 时退出循环
 	BreakCondition string `json:"breakCondition"` // 后置条件：每次迭代结束后求值，true 时退出循环
 
@@ -87,9 +88,8 @@ type RetryDef struct {
 
 // SwitchCase 表示 switch 节点的一条条件分支。
 type SwitchCase struct {
-	Condition   string `json:"condition"`   // 条件表达式，语法同 boolean/loop
-	Next        string `json:"next"`        // 条件命中后执行的节点 ID
-	Description string `json:"description"` // 可选说明，仅用于配置可读性
+	Condition string `json:"condition"` // 条件表达式，语法同 boolean/loop
+	Next      string `json:"next"`      // 条件命中后执行的节点 ID
 }
 
 // ListenRef 监听引用，定义在节点上。
@@ -219,6 +219,7 @@ type ActionDef struct {
 //   - randomPickN:   从 Values 列表随机选 N 个（Count 个）
 //   - randomPickMap: 按 KeySource 从 Values 映射表 [{key,values}] 中查找并随机选一个
 //   - randomInt:     随机整数（Min/Max 字段）
+//   - randomFloat:   随机浮点数（Min/Max 字段，Precision 控制小数位）
 //   - randomBool:    随机布尔（无参数）
 //   - randomString:  随机字符串（Length + Charset 字段）
 //   - randomExclude: 从 Values 或 state list 中随机选一个，且排除 ExcludeSource
@@ -231,7 +232,7 @@ type ActionDef struct {
 // Wrap 为 true 时，将单个值包装为 []any{val}，用于 repeated 字段赋单个元素的场景。
 type FieldBind struct {
 	Field         string         `json:"field"`         // 目标 proto 字段名（支持嵌套如 "heroList[0].heroId"）
-	Type          string         `json:"type"`          // 绑定类型：fixed / state / stateFirst / stateRandom / stateRandomN / stateMapKey / stateMapValue / randomPick / randomPickMap / randomExclude / randomInt / randomFloat / randomString / listSize / map
+	Type          string         `json:"type"`          // 绑定类型：fixed / state / stateFirst / stateRandom / stateRandomN / stateMapKey / stateMapValue / randomPick / randomPickN / randomPickMap / randomExclude / randomInt / randomFloat / randomBool / randomString / listSize / map
 	Value         any            `json:"value"`         // fixed: 固定值
 	Source        string         `json:"source"`        // 数据来源 state key（state/stateFirst/stateRandom/stateRandomN/stateMapKey/stateMapValue/randomPick/randomExclude 使用）
 	Path          string         `json:"path"`          // 从 state 值中导航取子字段（如 "items[0].itemId"）
@@ -271,7 +272,7 @@ func isImplicitRequired(btype string) bool {
 	return false
 }
 
-// FilterDef 列表过滤条件定义。
+// FilterMode 过滤聚合模式常量（配合 FilterDef.Mode 使用）。
 const (
 	FilterModeAny  = "any"  // 任意一个 path 取值满足比较
 	FilterModeAll  = "all"  // 所有 path 取值都满足比较
@@ -280,7 +281,7 @@ const (
 
 type FilterDef struct {
 	Path   string `json:"path"`   // 字段导航路径（如 "items[].itemId"）
-	Op     string `json:"op"`     // 比较运算符（==, !=, >, <, >=, <=）
+	Op     string `json:"op"`     // 比较运算符：eq(==) / neq(!=) / gt(>) / gte(>=) / lt(<) / lte(<=) / contains / notContains / in / notIn / notNil / isNil（命名与符号两种写法均接受）
 	Value  any    `json:"value"`  // 比较目标值（固定值）
 	Source string `json:"source"` // 比较目标值（从 state 读取的 key）
 	Mode   string `json:"mode"`   // 多值聚合方式：any / all / none
