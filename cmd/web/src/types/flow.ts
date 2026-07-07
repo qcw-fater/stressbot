@@ -83,7 +83,6 @@ export interface RetryDef {
 export interface SwitchCase {
   condition: string;
   next: string;
-  description?: string;
 }
 
 /**

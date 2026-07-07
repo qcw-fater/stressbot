@@ -65,11 +65,7 @@ function cleanNode(n: FlowNode): FlowNode {
     case 'switch': {
       const cases = (n.cases ?? [])
         .filter((c) => c.condition?.trim() && c.next?.trim())
-        .map((c): SwitchCase => {
-          const out: SwitchCase = { condition: c.condition.trim(), next: c.next.trim() };
-          if (c.description?.trim()) out.description = c.description.trim();
-          return out;
-        });
+        .map((c): SwitchCase => ({ condition: c.condition.trim(), next: c.next.trim() }));
       if (cases.length) out.cases = cases;
       if (n.defaultNext?.trim()) out.defaultNext = n.defaultNext.trim();
       break;
@@ -162,11 +158,8 @@ function cleanFieldBind(b: FieldBind): FieldBind {
   if (b.excludeSource) out.excludeSource = b.excludeSource;
   if (b.optional) out.optional = true;
   if (b.wrap) out.wrap = true;
-  // if (b.message) out.message = b.message;
-  // if (b.bindings?.length) out.bindings = b.bindings.map(cleanFieldBind);
   if (b.storeAs) out.storeAs = b.storeAs;
   if (b.keySource) out.keySource = b.keySource;
-  // if (b.items?.length) out.items = b.items.map(cleanFieldBind);
   if (b.condition) out.condition = b.condition;
   if (b.entries?.length) {
     out.entries = b.entries.map((entry) => ({

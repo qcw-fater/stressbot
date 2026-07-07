@@ -8,7 +8,7 @@
  *   loop.body                   → edge[source=id, sourceHandle='body', target=body, type='loopBody']
  *   boolean.trueNext/falseNext  → edge[source=id, sourceHandle='true'/'false', target=*, type='branch']
  *   switch.cases[i]/defaultNext → edge[source=id, sourceHandle=`case-${i}`/'default', target=*, type='branch']
- *   weighted.options[i]         → edge[source=id, sourceHandle=`opt-${i}`, target=*, type='weight', label=weight]
+ *   weighted.options[i]         → edge[source=id, sourceHandle=`opt-${i}`, target=*, type='weight', data={weight,ratio}]
  *   action.listenRefs[i]        → edge[source=id, sourceHandle='listen', target=`__cb__${callback}`, type='listen']（callback=null 不画边）
  *   action.onError.handler      → edge[source=id, sourceHandle='error', target=handler, type='error']
  */
@@ -35,7 +35,7 @@ export interface ConvertResult {
   nodesByListen: Record<string, string[]>;
 }
 
-/** 把 flow.json 转换为 React Flow 节点 / 边数组（位置由后续 dagre 计算） */
+/** 把 flow.json 转换为 React Flow 节点 / 边数组（position 占位为 0,0，由 flowStore 后续填入） */
 export function jsonToFlow(flow: FlowJsonInput): ConvertResult {
   const rfNodes: RFNode[] = [];
   const rfEdges: Edge[] = [];
@@ -56,8 +56,7 @@ export function jsonToFlow(flow: FlowJsonInput): ConvertResult {
     });
   }
 
-  // 2. ListenCard 节点（事件区，独立节点类型 'listenCard'）
-  // 在事件区按 listen 名字母序竖排
+  // 2. ListenCard 节点（事件区，独立节点类型 'listenCard'；定位由 flowStore 负责，按 listens 迭代顺序）
   let cardIdx = 0;
   for (const [cbName, cb] of Object.entries(flow.listens)) {
     rfNodes.push({

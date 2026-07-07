@@ -496,6 +496,20 @@ describe('switch node validation', () => {
     ]));
   });
 
+  it('reports SWITCH_NO_CASES when cases is empty or absent', () => {
+    const report = validateFlow({
+      defaultDelayMs: 1000,
+      nodes: {
+        main: { type: 'switch', defaultNext: 'fallback' },
+        fallback: { type: 'action', action: 'F' },
+      },
+      actions: { F: { pattern: 'clearState', keys: ['f'] } },
+      listens: {},
+    });
+
+    expect(report.errors.map((e) => e.code)).toContain('SWITCH_NO_CASES');
+  });
+
   it('does not report switch case and default targets as orphan nodes', () => {
     const report = validateFlow({
       defaultDelayMs: 1000,

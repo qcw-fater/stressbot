@@ -9,7 +9,7 @@ const baseFlow: FlowJson = {
     main: {
       type: 'switch',
       cases: [
-        { condition: 'state:level >= 10', next: 'advanced', description: '高等级' },
+        { condition: 'state:level >= 10', next: 'advanced' },
         { condition: 'lua:has_guild.lua', next: 'guild' },
       ],
       defaultNext: 'normal',
@@ -43,11 +43,10 @@ describe('switch node codec', () => {
         main: {
           type: 'switch',
           cases: [
-            { condition: 'state:level >= 10', next: 'advanced', description: '高等级' },
-            { condition: '', next: '', description: '' },
-            { condition: 'state:level >= 20', next: '', description: '' },
-            { condition: '', next: 'advanced', description: '' },
-            { condition: '', next: '', description: '仅说明' },
+            { condition: 'state:level >= 10', next: 'advanced' },
+            { condition: '', next: '' },
+            { condition: 'state:level >= 20', next: '' },
+            { condition: '', next: 'advanced' },
           ],
           defaultNext: '',
         },
@@ -59,7 +58,7 @@ describe('switch node codec', () => {
 
     expect(exported.nodes.main).toEqual({
       type: 'switch',
-      cases: [{ condition: 'state:level >= 10', next: 'advanced', description: '高等级' }],
+      cases: [{ condition: 'state:level >= 10', next: 'advanced' }],
     });
   });
 });

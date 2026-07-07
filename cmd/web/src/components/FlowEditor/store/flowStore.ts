@@ -43,7 +43,7 @@ interface FlowState {
   // ── 派生：每个 listen 被哪些 action 节点注册（用于反向悬停高亮） ────────
   nodesByListen: Record<string, string[]>;
 
-  // ── 派生：节点级校验问题（按节点 ID 分组，仅含 location.kind === 'node' 的 issue） ────────
+  // ── 派生：节点级校验问题（按节点 ID 分组；含 node-kind issue，以及 action-kind issue 映射到引用该 action 的节点） ────────
   issuesByNodeId: Record<string, ValidationIssue[]>;
 
   // ── UI 信号：加载/重置后需要 fitView ────────
@@ -89,7 +89,7 @@ interface FlowState {
   renameListen: (oldName: string, newName: string) => void;
   setListenDefaultRef: (name: string, ref?: ListenTemplateDefaultRef) => void;
 
-  /** 触发派生数据重算（rfNodes/rfEdges/listenRefCount） */
+  /** 触发派生数据重算（rfNodes/rfEdges/listenRefCount/nodesByListen/issuesByNodeId） */
   syncDerived: () => void;
 }
 
@@ -284,7 +284,7 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
           delete actions[removed.action];
         }
       }
-      // 清理其他节点中对被删节点的引用（next/body/trueNext/falseNext/options/cases/defaultNext）
+      // 清理其他节点中对被删节点的引用（next/body/trueNext/falseNext/options/onError.handler/cases/defaultNext）
       for (const [nid, n] of Object.entries(nodes)) {
         const partial: Partial<FlowNode> = {};
         if (n.next?.includes(id)) partial.next = n.next.filter((x) => x !== id);
@@ -562,7 +562,7 @@ function computeCardX(positions: Record<string, { x: number; y: number }>): numb
   return maxX + 360;
 }
 
-/** 节点重命名时，同步更新所有指向它的引用（next/body/trueNext/falseNext/options/cases/defaultNext） */
+/** 节点重命名时，同步更新所有指向它的引用（next/body/trueNext/falseNext/options/onError.handler/cases/defaultNext） */
 function renameRefsInNode(node: FlowNode, oldId: string, newId: string): FlowNode {
   const out: FlowNode = { ...node };
   if (node.next?.length) {
