@@ -2,7 +2,7 @@
 
 ## 概述
 
-基于 React Flow 的 UE 蓝图风格可视化流程编辑器，作为核心 UI 组件 `<FlowEditor />` 嵌入主页面。支持 8 种节点类型的拖拽创建、可视化连线、声明式动作配置、Lua 脚本编辑、Proto 字段选择、实时指标叠加、验证和自动布局。
+基于 React Flow 的 UE 蓝图风格可视化流程编辑器，作为核心 UI 组件 `<FlowEditor />` 嵌入主页面。支持 9 种节点类型的拖拽创建、可视化连线、声明式动作配置、Lua 脚本编辑、Proto 字段选择、实时指标叠加、验证和自动布局。
 
 本文档对照 `plans/design-web-editor.md`（计划文档）和实际代码，详尽记录编辑器架构、组件体系、Store 设计、数据模型和集成方式。
 
@@ -180,13 +180,13 @@ cmd/web/src/
 
 ## 3. 数据模型
 
-### 3.1 FlowNode（8 种节点类型）
+### 3.1 FlowNode（9 种节点类型）
 
 源文件：`cmd/web/src/types/flow.ts`
 
 ```typescript
 type NodeType =
-  | 'sequence' | 'action' | 'loop' | 'boolean'
+  | 'sequence' | 'action' | 'loop' | 'boolean' | 'switch'
   | 'weighted' | 'wait' | 'break' | 'continue';
 
 interface FlowNode {
@@ -205,6 +205,10 @@ interface FlowNode {
   // boolean 专用
   trueNext?: string;
   falseNext?: string;
+
+  // switch 专用
+  cases?: SwitchCase[];        // 按顺序匹配的条件分支（condition / next）
+  defaultNext?: string;        // 所有 case 未命中时跳转的节点；空 = 正常结束
 
   // action 专用
   action?: string;             // actions 表的 key
@@ -287,7 +291,7 @@ interface ActionDef {
 }
 ```
 
-### 3.6 FieldBind（16 种绑定类型）
+### 3.6 FieldBind（17 种绑定类型）
 
 ```typescript
 type BindingType =
@@ -297,7 +301,7 @@ type BindingType =
   | 'randomPick' | 'randomPickN' | 'randomPickMap'
   | 'randomInt' | 'randomFloat' | 'randomBool' | 'randomString'
   | 'randomExclude'
-  | 'listSize';
+  | 'listSize' | 'map';
 ```
 
 ```typescript
@@ -330,9 +334,10 @@ interface FieldBind {
 ```typescript
 interface FilterDef {
   path?: string;
-  op: string;    // eq/neq/gt/gte/lt/lte/contains/in/notNil/isNil
+  op: string;    // eq/neq/gt/gte/lt/lte/contains/notContains/in/notIn/notNil/isNil
   value?: unknown;
   source?: string;
+  mode?: FilterMode; // 'any' | 'all' | 'none'
 }
 ```
 
@@ -389,11 +394,11 @@ ListenCard 节点位置也存在 `nodePositions` 中，key 为 `__cb__<name>`。
 
 ## 4. 9 种节点类型
 
-> 8 种控制流节点配色按色环 ~45° 均布，任意两色相相差 ≥39°，避免相似；action 为中性灰黑（动作辅助，不抢戏）。色相定义见 `cmd/web/src/styles/tokens.css`。
+> 8 种控制流节点走高对比鲜艳配色（分散节点需强对比才好区分）；action 为中性灰黑（动作辅助）。主色取 Tailwind -600 级，定义见 `cmd/web/src/styles/tokens.css`。
 
 ### 4.1 sequence（顺序容器）
 
-- **颜色**：蓝色 `#1677ff`（215°）
+- **颜色**：蓝色 `#2563eb`
 - **Handle**：左入（target）+ 右出（source，每个 next 一个 handle，垂直排列）
 - **中部摘要**：子节点列表
 - **字段**：`next: string[]`
@@ -410,7 +415,7 @@ ListenCard 节点位置也存在 `nodePositions` 中，key 为 `__cb__<name>`。
 
 ### 4.3 loop（循环节点）
 
-- **颜色**：绿色 `#1ea01e`（120°）
+- **颜色**：绿色 `#16a34a`
 - **Handle**：左入 + 下出（body 唯一）；无 exit handle
 - **中部摘要**：`loopCount`、`condition`、`breakCondition`
 - **字段**：`body`, `loopCount`, `condition`, `breakCondition`
@@ -418,43 +423,43 @@ ListenCard 节点位置也存在 `nodePositions` 中，key 为 `__cb__<name>`。
 
 ### 4.4 boolean（条件分支）
 
-- **颜色**：黄绿 `#a8c418`（70°），菱形
+- **颜色**：金黄 `#c9920a`，菱形
 - **Handle**：左入 + 右出 true（绿色）+ 右出 false（红色）
 - **中部摘要**：`condition` 文本
 - **字段**：`condition`, `trueNext`, `falseNext`, `delayMs`
 
 ### 4.5 switch（多条件分支）
 
-- **颜色**：品红 `#c92dd1`（297°）
-- **Handle**：左入 + 右出每个 case 一个 handle + 右出 default handle
-- **中部摘要**：case 列表（条件摘要 + 目标节点）+ default 行
-- **字段**：`cases: SwitchCase[]`（`condition` / `next` / `description`）, `defaultNext`
-- **连线语义**：case handle → 目标节点（branch 边）；default handle → 默认目标（branch 边）
+- **颜色**：品红 `#c026d3`
+- **Handle**：左入 + 右出每 case 一个 handle + 右侧 case-add（虚线，拖线追加 case）+ 底部 default handle
+- **中部摘要**：case 列表（条件摘要 + 目标节点）+ case-add 续接行 + 底部 default 页脚（显示默认目标）
+- **字段**：`cases: SwitchCase[]`（`condition` / `next`）, `defaultNext`
+- **连线语义**：case handle → 目标节点（branch 边）；case-add 拖线 → 追加 case（condition 默认 state:，进面板补）；底部 default handle → 默认目标（branch 边）
 - **执行语义**：按顺序求值 cases，命中第一条执行其 next；全部未命中走 defaultNext；无 default 则正常结束
 
 ### 4.6 weighted（加权随机）
 
-- **颜色**：靛色 `#6234d0`（258°）
+- **颜色**：紫色 `#7c3aed`
 - **Handle**：左入 + 右出每个 option 一个 handle，旁标 weight
 - **中部摘要**：option 列表 + 内嵌横向条形图（权重比例可视化）
 - **字段**：`options: WeightedOption[]`
 
 ### 4.7 wait（等待）
 
-- **颜色**：玫红 `#f52256`（345°）
+- **颜色**：红色 `#dc2626`
 - **Handle**：左入 + 右出
 - **中部摘要**：`waitMs` 数值 + 秒数换算
 - **字段**：`waitMs`, `waitMin`, `waitMax`
 
 ### 4.8 break（跳出循环）
 
-- **颜色**：橙色 `#fa8c16`（31°）
+- **颜色**：橙色 `#ea580c`
 - **Handle**：左入（无出）
 - **中部摘要**："break" 字样
 
 ### 4.9 continue（跳过本次）
 
-- **颜色**：青绿 `#13c2a0`（168°）
+- **颜色**：青色 `#0d9488`
 - **Handle**：左入（无出）
 - **中部摘要**："continue" 字样
 
@@ -468,10 +473,12 @@ ListenCard 节点位置也存在 `nodePositions` 中，key 为 `__cb__<name>`。
 
 ### 5.2 BranchEdge（分支边）
 
-- true 边：绿色，标签 "T"
-- false 边：红色，标签 "F"
+- true 边：绿色，标签 "true"
+- false 边：红色，标签 "false"
+- switch case 边：标签 "case 1/2/…"（带序号），颜色跟随源节点色（switch 品红）
+- switch default 边：标签 "default"，颜色跟随源节点色
 
-用于 `boolean.trueNext` / `falseNext`。
+用于 `boolean.trueNext` / `falseNext` 与 `switch.cases[].next` / `switch.defaultNext`。boolean 的 true/false 固定绿红；switch 等其余分支跟随源节点配色。
 
 ### 5.3 WeightEdge（权重边）
 
@@ -599,7 +606,7 @@ interface ManagedFlow {
 ### 7.2 NodeEditorDrawer — 抽屉式属性编辑
 
 双击节点打开 `NodeEditorDrawer`，按 `node.type` 路由到具体编辑器：
-- SequenceEditor / LoopEditor / BooleanEditor / WeightedEditor / WaitEditor / ActionEditor
+- SequenceEditor / LoopEditor / BooleanEditor / SwitchEditor / WeightedEditor / WaitEditor / ActionEditor
 - break / continue 仅显示 ID
 
 **「还原本次修改」按钮**：打开抽屉时 `useRef` 记录深拷贝快照，编辑过程中激活，点击整体回退。
@@ -661,6 +668,7 @@ interface ManagedFlow {
 | stateMapValue | source, path?, filters? | 同 stateRandom |
 | stateFirst | source, path?, filters? | 同 state |
 | listSize | source | 仅 source |
+| map | entries | key→value 映射条目（key 固定，value 为子 binding） |
 
 ### 7.6 LuaForm — 脚本编辑器
 
@@ -820,11 +828,13 @@ interface ProtoStoreState {
 
 | 规则 | 说明 |
 |---|---|
-| next/body/trueNext/falseNext/options[].node 引用的节点不存在 | 引用合法性 |
+| next/body/trueNext/falseNext/options[].node/cases[].next/defaultNext 引用的节点不存在 | 引用合法性 |
 | action 节点的 action 字段不存在于 actions 表 | 引用合法性 |
 | listenRefs[].listen 可省略；引用不存在的 listen 不作为校验错误，运行时按队列缓存/无回调处理 | queue-only 行为 |
 | loop 的 body 为空 | 必填 |
 | weighted 至少 1 个 option | 必填 |
+| switch 至少 1 个 case（SWITCH_NO_CASES） | 必填 |
+| switch 的 case 缺少 condition（SWITCH_CASE_NO_CONDITION）或 next（SWITCH_CASE_NO_NEXT） | 必填 |
 | declarative listen 的 s2cProto 不在 ProtoRegistry | proto 存在性 |
 | lua listen 的 script 不存在 | 脚本存在性 |
 | pattern=lua 的 action 的 script 必填 | 必填 |
@@ -837,6 +847,7 @@ interface ProtoStoreState {
 | callback 引用计数为 0（孤儿） | 未使用 |
 | 不可达节点（从 start BFS 不到） | 死代码 |
 | loop 至少需要 loopCount > 0 或 condition 或 breakCondition | 必填项至少一项 |
+| switch 未配置 defaultNext（SWITCH_NO_DEFAULT） | 所有条件未命中时将直接结束 |
 
 ### 10.2 ValidationReport — 校验报告 UI
 
@@ -990,6 +1001,7 @@ NodeShell 消费：
 反序列化 flow.json 为 React Flow 节点和边：
 - 按 node type 生成对应视觉节点
 - 按 next/body/trueNext/falseNext/options 生成对应类型的边
+- switch：`cases[i].next` → branch 边（sourceHandle=`case-${i}`，data.branch=`case`）；`defaultNext` → branch 边（sourceHandle=`default`，data.branch=`default`）
 - 计算 callbackRefCount / nodesByCallback 派生数据
 - CallbackCard 节点 key 为 `__cb__<name>`
 
@@ -1017,11 +1029,13 @@ NodeShell 消费：
 
 | 源 | 合法目标 | 备注 |
 |---|---|---|
-| sequence next handle | 任意节点 target | next[] 追加 |
+| sequence next handle | 任意节点 target | 在 N 处插入（seq-add 末尾追加） |
 | loop body handle | 任意节点 target | 一对一 |
 | boolean true/false handle | 任意节点 target | 一对一 |
-| weighted option handle | 任意节点 target | 一对一 |
-| wait / action 右侧 handle | 任意节点 target | 一对一 |
+| switch case-${i} handle | 任意节点 target | 在 i 处插入新 case（condition 默认 state:），原 case 下移 |
+| switch case-add handle（虚线） | 任意节点 target | cases 末尾追加（condition 默认 state:） |
+| switch default handle（底部） | 任意节点 target | defaultNext 赋值 |
+| weighted option handle | 任意节点 target | 在 N 处插入（opt-add 末尾追加） |
 | action 监听 handle | CallbackCard | ListenEdge |
 
 **禁止**：自环、重复连接、break/continue 连出。

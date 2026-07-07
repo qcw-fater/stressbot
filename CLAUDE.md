@@ -70,7 +70,7 @@ cd cmd/web && npm run test                 # Vitest
 
 ### 前端技术栈
 
-React 18 / Vite 5 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Editor / Zustand + Zundo（撤销重做）/ ECharts 6 / idb-keyval（IndexedDB）/ protobufjs / Vitest。
+React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Editor / Zustand + Zundo（撤销重做）/ ECharts 6 / idb-keyval（IndexedDB）/ protobufjs / Vitest。
 
 主要功能模块：可视化流程编辑器（FlowEditor）、资源管理（Proto/Lua/Adapter 的上传/编辑/同步/下发）、任务管理（创建/启动/停止）、实时监控面板（MonitorDock：动作表/趋势图/系统资源）、日志查看（Monaco）、历史归档面板、Agent 管理面板。
 
