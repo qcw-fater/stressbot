@@ -4,7 +4,7 @@
  *   2. Action 模板库（搜索 + 列表，独立滚动）
  *   3. Listen 模板库（搜索 + 列表，独立滚动）
  *
- * 模板项使用与画布节点一致的视觉风格；右键菜单出「复用 / 编辑 / 删除」。
+ * 模板项使用与画布节点一致的视觉风格；右键菜单出「编辑 / 复制到剪贴板 / 删除」。
  * 模板项可拖入画布：拖入时同时插入 ActionDef/ListenDef 到 flow 并建立对应节点。
  */
 
@@ -173,7 +173,7 @@ export function NodePalette() {
 
   return (
     <div className="palette-root">
-      {/* 节点类型：固定高度，4×2 grid，不滚动 */}
+      {/* 节点类型：固定高度，5×2 grid，不滚动 */}
       <div className="palette-nodes">
         <div className="palette-section-title">节点类型</div>
         <div className="palette-grid">

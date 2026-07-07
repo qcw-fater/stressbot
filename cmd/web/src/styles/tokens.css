@@ -1,51 +1,51 @@
 /*
  * 设计 token：颜色 / 间距 / 阴影 / 节点尺寸
  *
- * 节点配色采用 8 色按色环 ~45° 均布，任意两色相至少相差 ~39°，避免相似。
- * action / listen 为中性灰黑（动作辅助，不抢戏）；其余 8 种控制流节点色相依次为：
- * wait 玫红(345°) / break 橙(31°) / boolean 黄绿(70°) / loop 绿(120°) /
- * continue 青绿(168°) / sequence 蓝(215°) / weighted 靛(258°) / switch 品红(297°)。
+ * 节点配色走高对比路线：分散节点需强对比才好区分。action / listen 为中性灰黑（动作辅助）；
+ * 其余 8 种控制流节点取鲜艳饱和、色相均匀分布：
+ * wait 红 / break 橙 / boolean 金黄 / loop 绿 / continue 青 / sequence 蓝 / weighted 紫 / switch 品红。
+ * 主色用 Tailwind -600 级（深鲜，白底对比强）；switch 取品红与 wait 红拉开。
  *
  * 详见 docs/visual-flow-editor.md §4
  */
 
 :root {
   /* === 节点主色 === */
-  --node-sequence: #1677ff; /* 蓝色 */
-  --node-sequence-bg: #e6f4ff;
-  --node-sequence-border-active: #003eb3;
+  --node-sequence: #2563eb; /* 蓝 (Tailwind blue-600) */
+  --node-sequence-bg: #dbeafe;
+  --node-sequence-border-active: #1e40af;
 
   --node-action: #595959; /* 中性灰黑（用最多，不抢戏） */
   --node-action-bg: #ededed; /* 淡灰，跟其他节点的浅色背景一致而非纯白 */
   --node-action-border-active: #1f1f1f;
 
-  --node-loop: #1ea01e; /* 绿（120°） */
-  --node-loop-bg: #e8ffe6;
-  --node-loop-border-active: #0d5c0d;
+  --node-loop: #16a34a; /* 绿 (green-600) */
+  --node-loop-bg: #dcfce7;
+  --node-loop-border-active: #166534;
 
-  --node-boolean: #a8c418; /* 黄绿（70°） */
-  --node-boolean-bg: #f9ffe6;
-  --node-boolean-border-active: #556b00;
+  --node-boolean: #c9920a; /* 金黄 */
+  --node-boolean-bg: #fef9c3;
+  --node-boolean-border-active: #713f12;
 
-  --node-switch: #c92dd1; /* 品红（297°） */
+  --node-switch: #c026d3; /* 品红 (fuchsia-600) */
   --node-switch-bg: #fae8ff;
-  --node-switch-border-active: #7a1a8a;
+  --node-switch-border-active: #86198f;
 
-  --node-weighted: #6234d0; /* 靛（258°） */
-  --node-weighted-bg: #ede8ff;
-  --node-weighted-border-active: #2a1a8a;
+  --node-weighted: #7c3aed; /* 紫 (violet-600) */
+  --node-weighted-bg: #ede9fe;
+  --node-weighted-border-active: #5b21b6;
 
-  --node-wait: #f52256; /* 玫红（345°） */
-  --node-wait-bg: #fff0f3;
-  --node-wait-border-active: #b00c33;
+  --node-wait: #dc2626; /* 红 (red-600) */
+  --node-wait-bg: #fee2e2;
+  --node-wait-border-active: #991b1b;
 
-  --node-break: #fa8c16; /* 橙（31°） */
-  --node-break-bg: #fff7e6;
-  --node-break-border-active: #ad4e00;
+  --node-break: #ea580c; /* 橙 (orange-600) */
+  --node-break-bg: #fff7ed;
+  --node-break-border-active: #9a3412;
 
-  --node-continue: #13c2a0; /* 青绿（168°） */
-  --node-continue-bg: #e6fff5;
-  --node-continue-border-active: #00663d;
+  --node-continue: #0d9488; /* 青 (teal-600) */
+  --node-continue-bg: #ccfbf1;
+  --node-continue-border-active: #115e59;
 
   --node-listen: #595959; /* ListenCard：与 action 同灰黑，因为 listen 也属于动作辅助 */
   --node-listen-bg: #ededed;
@@ -142,41 +142,41 @@
 /* === 暗色主题：通过 [data-theme="dark"] 覆盖 token === */
 :root[data-theme='dark'] {
   /* 节点主色（保留色相，背景换深色） */
-  --node-sequence: #4096ff;
-  --node-sequence-bg: #112545;
-  --node-sequence-border-active: #69b1ff;
+  --node-sequence: #60a5fa;
+  --node-sequence-bg: #172554;
+  --node-sequence-border-active: #93c5fd;
 
   --node-action: #d9d9d9;
   --node-action-bg: #2a2a2a;
   --node-action-border-active: #ffffff;
 
-  --node-loop: #8ad870;
-  --node-loop-bg: #16290e;
-  --node-loop-border-active: #b7eb8f;
+  --node-loop: #4ade80;
+  --node-loop-bg: #052e16;
+  --node-loop-border-active: #86efac;
 
-  --node-boolean: #d4df80;
-  --node-boolean-bg: #2c2e10;
-  --node-boolean-border-active: #e8f0a0;
+  --node-boolean: #facc15;
+  --node-boolean-bg: #1f1a0a;
+  --node-boolean-border-active: #fde047;
 
-  --node-switch: #e08ce0;
-  --node-switch-bg: #2e0e30;
-  --node-switch-border-active: #f0b8f0;
+  --node-switch: #e879f9;
+  --node-switch-bg: #4a044e;
+  --node-switch-border-active: #f0abfc;
 
-  --node-weighted: #a08ef0;
-  --node-weighted-bg: #1a1645;
-  --node-weighted-border-active: #c0b4f5;
+  --node-weighted: #a78bfa;
+  --node-weighted-bg: #2e1065;
+  --node-weighted-border-active: #c4b5fd;
 
-  --node-wait: #ff7896;
-  --node-wait-bg: #401420;
-  --node-wait-border-active: #ffa8b8;
+  --node-wait: #f87171;
+  --node-wait-bg: #450a0a;
+  --node-wait-border-active: #fca5a5;
 
-  --node-break: #ffa940;
-  --node-break-bg: #3d2710;
-  --node-break-border-active: #ffc069;
+  --node-break: #fb923c;
+  --node-break-bg: #431407;
+  --node-break-border-active: #fdba74;
 
-  --node-continue: #5cd9b8;
-  --node-continue-bg: #112d2a;
-  --node-continue-border-active: #8fe8d0;
+  --node-continue: #2dd4bf;
+  --node-continue-bg: #042f2e;
+  --node-continue-border-active: #5eead4;
 
   --node-listen: #d9d9d9;
   --node-listen-bg: #2a2a2a;

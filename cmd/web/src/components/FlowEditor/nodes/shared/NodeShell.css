@@ -277,7 +277,7 @@
   color: var(--node-continue-border-active);
 }
 
-/* === 形状：通过 clip-path 与 border-radius 实现 === */
+/* === 形状：通过 clip-path / border-radius / transform 实现 === */
 
 /* loop：胶囊形（强调"循环"语义） */
 .node-shell.shape-pill {
@@ -395,12 +395,12 @@
 
 /* pattern 徽章按语义分组着色：
  *   send     (tcpSend / udpSend)                 → 蓝
- *   request  (tcpRequest / udpRequest)           → 紫
+ *   request  (tcpRequest / udpRequest)           → 金黄
  *   conn     (tcpConnect / udpConnect)           → 绿
  *   close    (tcpClose / udpClose)               → 红
  *   listen   (tcpListen / udpListen)             → 橙
- *   http     (httpRequest)                       → 青（teal）
- *   state    (clearState / setState)             → 绿
+ *   http     (httpRequest)                       → 金黄
+ *   state    (clearState / setState)             → 青
  *   lua      (lua 脚本)                          → 紫
  *   silent / declarative / lua（callback kind 同 badge）
  */
@@ -542,7 +542,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* "+" 占位行：sequence / weighted 末尾的拖线续接占位，颜色更弱 */
+/* "+" 占位行：sequence / weighted / switch 末尾的拖线续接占位，颜色更弱 */
 .row-item-add {
   opacity: 0.7;
 }

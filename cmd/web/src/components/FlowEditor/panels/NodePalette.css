@@ -28,7 +28,7 @@
   margin-bottom: 4px;
 }
 
-/* 节点类型：固定高度区，4×2 grid */
+/* 节点类型：固定高度区，5×2 grid */
 .palette-nodes {
   flex-shrink: 0;
   padding: 8px 10px;

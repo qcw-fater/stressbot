@@ -23,7 +23,7 @@ export function LoopEditor({ nodeId }: LoopEditorProps) {
     <Form layout="vertical">
       <Form.Item
         label="循环次数 loopCount"
-        help="≤0 = 无限循环；>0 = 固定次数"
+        help="<0 = 无限循环；=0 = 跳过循环体；>0 = 固定次数"
       >
         <InputNumber
           value={node.loopCount ?? -1}

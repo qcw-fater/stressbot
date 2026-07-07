@@ -307,13 +307,14 @@ function FlowCanvasInner() {
    * 用户从 source handle 拖线到 target handle 时建立业务关系。
    *
    * 规则：
-   *   sequence  · seq-N      → next[N] = target            （已存在则替换）
-   *   sequence  · seq-add    → next.push(target)           （便于增量续接）
+   *   sequence  · seq-N      → next.splice(N, 0, target)   （在 N 处插入，原项顺位下移）
+   *   sequence  · seq-add    → next.push(target)           （末尾追加）
    *   loop      · body       → body = target
    *   boolean   · true/false → trueNext / falseNext = target
-   *   switch    · case-N     → cases[N].next = target
+   *   switch    · case-N     → cases.splice(N, 0, {condition:'state:', next:target}) （在 N 处插入新 case，原 case 下移）
+   *   switch    · case-add   → cases.push(...)             （末尾追加新 case）
    *   switch    · default    → defaultNext = target
-   *   weighted  · opt-N      → options[N].node = target
+   *   weighted  · opt-N      → options.splice(N, 0, {node:target, weight:1}) （在 N 处插入）
    *   weighted  · opt-add    → options.push({ node: target, weight: 1 })
    *   action    · listen     → listenRefs.push({ listen })，target 必须是 listenCard
    *   action    · error      → onError.handler = target，target 必须是普通节点
@@ -354,11 +355,22 @@ function FlowCanvasInner() {
       if (src.type === 'switch') {
         if (handle === 'default' && targetNodeId) {
           updateNode(params.source, { defaultNext: targetNodeId });
-        } else if (handle.startsWith('case-') && targetNodeId) {
-          const idx = Number(handle.slice(5));
+          return;
+        }
+        if (handle === 'case-add' && targetNodeId) {
+          // 拖线新增 case：condition 默认 state:（后续在编辑面板补），next 即目标节点
           const cases = (src.cases ?? []).slice();
-          if (Number.isFinite(idx) && cases[idx]) {
-            cases[idx] = { ...cases[idx], next: targetNodeId };
+          cases.push({ condition: 'state:', next: targetNodeId });
+          updateNode(params.source, { cases });
+          return;
+        }
+        if (handle.startsWith('case-') && targetNodeId) {
+          const idx = Number(handle.slice(5));
+          if (Number.isFinite(idx)) {
+            // 与 sequence/weighted 一致：拖到 case-${i} handle = 在该位置插入新 case（原 case 顺位下移），
+            // 不替换、不删除原 case 的目标；condition 默认 state:，进编辑面板补
+            const cases = (src.cases ?? []).slice();
+            cases.splice(idx, 0, { condition: 'state:', next: targetNodeId });
             updateNode(params.source, { cases });
           }
         }

@@ -1,5 +1,8 @@
 /**
- * switch 节点：左入 + 右出（每个 case / default 各一条分支）。
+ * switch 节点：左入 + 右出（每 case 一个 handle + 右下 case-add 拖线新增）+ 底部 default handle。
+ *
+ * - 右侧 `case-${i}`：命中分支；`case-add`（虚线）：拖线到目标 → 追加 case。
+ * - 底部 `default`：默认分支。default 目标也同步在节点底部页脚显示。
  */
 
 import { Handle, Position, type NodeProps } from '@xyflow/react';
@@ -49,15 +52,13 @@ export function SwitchNode({ id, data, selected }: NodeProps) {
         title={id}
         subtitle={`switch · ${cases.length}`}
         selected={selected}
-        minWidth={280}
+        minWidth={240}
         description={node.description}
       >
         <div className="row-list">
           {cases.map((c, i) => {
             const { display, tag } = formatCondition(c.condition ?? '');
-            const title = c.description
-              ? `${c.description}\n${tag}:${display}`
-              : `${tag}:${display}`;
+            const title = `${tag}:${display}`;
             return (
               <Tooltip key={i} title={title} mouseEnterDelay={0.4}>
                 <div className="row-item">
@@ -68,20 +69,46 @@ export function SwitchNode({ id, data, selected }: NodeProps) {
                   >
                     {tag || 'state'}
                   </Tag>
-                  <span className="row-name">{display ? trim(display, 24) : '未配置条件'}</span>
+                  <span className="row-name">{display ? trim(display, 20) : '未配置条件'}</span>
                   <span className="row-tail">{c.next || '未选择'}</span>
                 </div>
               </Tooltip>
             );
           })}
-          <div className="row-item">
-            <span className="row-index">def</span>
-            <span className="row-name" style={{ color: 'var(--text-tertiary)' }}>
-              默认分支
-            </span>
-            <span className="row-tail">{node.defaultNext || '未选择'}</span>
-          </div>
+          {/* 拖线续接 case：从右侧虚线 case-add handle 拖到目标节点 → 追加 case */}
+          <Tooltip title="从右侧虚线 handle 拖线到目标节点 → 追加 case" mouseEnterDelay={0.4}>
+            <div className="row-item row-item-add">
+              <span className="row-name" style={{ color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
+                + 拖线续接…
+              </span>
+            </div>
+          </Tooltip>
         </div>
+        {/* default 分支页脚：目标节点 + 底部 handle */}
+        <Tooltip
+          title={node.defaultNext ? `default → ${node.defaultNext}` : '从底部 handle 拖线到目标 → 设置默认分支'}
+          mouseEnterDelay={0.4}
+        >
+          <div
+            className="row-item"
+            style={{ borderTop: '1px dashed var(--border-color, rgba(0,0,0,0.12))', marginTop: 3, paddingTop: 3 }}
+          >
+            <span className="row-index">↳</span>
+            <span
+              className="row-name"
+              style={{
+                color: node.defaultNext ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+                fontStyle: node.defaultNext ? 'normal' : 'italic',
+                fontSize: 10,
+              }}
+            >
+              default
+            </span>
+            <span className="row-tail" style={{ fontSize: 10 }}>
+              {node.defaultNext || '未选择'}
+            </span>
+          </div>
+        </Tooltip>
       </NodeShell>
       {cases.map((_, i) => (
         <Handle
@@ -92,12 +119,19 @@ export function SwitchNode({ id, data, selected }: NodeProps) {
           style={{ top: HEADER_OFFSET + i * ROW_HEIGHT }}
         />
       ))}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="default"
-        style={{ top: HEADER_OFFSET + cases.length * ROW_HEIGHT }}
-      />
+      {/* case-add：拖线到目标 → 追加 case（condition 默认 state:，进编辑面板再填） */}
+      <Tooltip title="拖线到目标节点 → 追加 case（默认条件 state:，可在编辑面板修改）" mouseEnterDelay={0.4}>
+        <Handle
+          type="source"
+          position={Position.Right}
+          id="case-add"
+          className="handle-add"
+          style={{ top: HEADER_OFFSET + cases.length * ROW_HEIGHT }}
+        />
+      </Tooltip>
+      {/* default：底部 handle */}
+      <Handle type="source" position={Position.Bottom} id="default" />
     </>
   );
 }
+

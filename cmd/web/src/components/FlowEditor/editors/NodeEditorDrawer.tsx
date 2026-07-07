@@ -24,7 +24,7 @@ const nodeTypeTagColor: Record<NodeType, string> = {
   sequence: 'blue',
   action: 'geekblue',
   loop: 'green',
-  boolean: 'lime',
+  boolean: 'gold',
   switch: 'magenta',
   weighted: 'purple',
   wait: 'red',
