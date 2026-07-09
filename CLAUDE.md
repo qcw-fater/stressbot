@@ -42,7 +42,7 @@ cd cmd/web && npm run test                 # Vitest
 `agent.enabled=true`，Agent 注册到 Admin → 接收任务 → 下载配置 → 执行。Admin 负责任务调度、Agent 管理、指标聚合、历史归档。
 
 ### Admin 模式
-独立服务器进程，提供 Web UI + 51 个 HTTP API 端点，管理多个 Agent 节点的任务下发和指标收集。
+独立服务器进程，提供 Web UI + 60 个 HTTP API 端点（前缀 `/sbot/`），管理多个 Agent 节点的任务下发和指标收集。
 
 ## 架构
 
@@ -55,9 +55,9 @@ cd cmd/web && npm run test                 # Vitest
 - **`script/`** — Lua 运行时池（`gopher-lua`）。每个 Robot 获取独占 `LState`，由主流程同步执行业务 Lua；阻塞型 Lua API 只暂停当前 Robot 主流程，connectionPump 与连接级心跳继续独立运行。7 个模块共 86 个函数：`network`（21）、`robot`（14）、`utils`（15）、`proto`（10）、`json`（2）、`log`（4）、`share`（20）。
 - **`state/` — 线程安全的键值状态存储（RWMutex）。保存服务器响应字段（通过 `store` 映射），支持 list/map 操作用于随机选取。`CompareValues` 支持 10 种过滤运算符。
 - **`adapter/` — 协议适配器接口（9 方法）。热路径帧解析（`HeaderSize`/`BodyLength`）纯 Go 缓存，编解码由 `CodecResolver` 按 `"<proto>:<service>"` 解析、`SchemaAdapter` 包装 `codec/` Go 引擎驱动，配置来自 `conf/adapter/<proto>_<service>_codec.json`（每连接一份）。
-- **`admin/` — Admin 服务器（16 文件）。任务调度（TaskStore 状态机 + 单例约束 + 持久化）、Agent 管理（注册/心跳/健康检查/unhealthy→offline/离线清理）、指标聚合（MergeSnapshots）、时序采样（Sampler）、历史归档（SQLite 6 表）、任务分配（proportional/debug-single）、Agent RPC 调度、前端静态托管。51 个 HTTP API 端点。
-- **`agent/` — Agent 节点（8 文件）。注册到 Admin（指数退避）→ 心跳循环 → 任务轮询 → TaskRunner 执行（下载配置 → 加载适配器 → 编译 proto → 构建流程 → Manager → 启动机器人）→ 指标上报 + 系统资源上报。本地 HTTP API（task/stop/shutdown/version/status/logs）。
-- **`monitor/` — 指标采集。原子计数器（热路径零锁：成功/失败/超时/取消/执行中/字节数）、延迟直方图（16 桶 1ms~60s+，P50/P90/P95/P99，**仅纯网络往返**，不含客户端构建/解析）、Apdex 评分（阈值 T 可配，分母为 netSampleCount）、客户端开销独立列（`ClientAvgMs`）、分布式聚合。`RecordAction(name, result, netLatency, clientCost, netSamples, send, recv, err)`：netSamples=0 的纯客户端动作不进直方图但 successCount 仍计数。错误按 `code` 单维聚合（展示按 `code < 100` 推导框架/业务标签），保留最近 3 条详情。导出：Console / HTTP JSON / CSV / pprof。
+- **`admin/` — Admin 服务器（16 文件）。任务调度（TaskStore 状态机 + 单例约束 + 持久化）、Agent 管理（注册/心跳/健康检查/unhealthy→offline/离线清理）、指标聚合（MergeSnapshots）、时序采样（Sampler）、历史归档（MySQL 6 表）、任务分配（proportional/debug-single）、Agent RPC 调度、前端静态托管。60 个 HTTP API 端点（前缀 `/sbot/`）。
+- **`agent/` — Agent 节点（8 文件）。注册到 Admin（指数退避）→ 心跳循环 → 任务轮询 → TaskRunner 执行（下载配置 → 加载适配器 → 编译 proto → 构建流程 → Manager → 启动机器人）→ 指标上报 + 系统资源上报。本地 HTTP API（前缀 `/agent/v1/`：task/stop/shutdown/version/status/logs + `/healthz`）。
+- **`monitor/` — 指标采集。原子计数器（热路径零锁：成功/失败/超时/取消/执行中/字节数）、延迟直方图（16 桶 1ms~60s+，P50/P90/P95/P99，**仅纯网络往返**，不含客户端构建/解析）、Apdex 评分（阈值 T 可配，分母为 netSampleCount）、客户端开销独立列（`ClientAvgMs`）、分布式聚合。`RecordAction(name, result, timing, wallClock, sendBytes, recvBytes, err)`：`result` ∈ Success/Failure/Timeout/Canceled，`timing` 携带 RTT 与各编解码阶段耗时；纯客户端动作（无 RTT 样本）不进直方图但 successCount 仍计数。错误按 `code` 单维聚合（展示按 `code < 100` 推导框架/业务标签），保留最近 3 条详情。导出：Console / HTTP JSON / CSV / pprof。
 - **`logview/` — 日志环形缓冲区。O(1) 写入 + cursor 分页查询，供前端实时日志面板使用。
 - **`errcode/` — 统一错误码。`ErrorCode`（uint64）单一维度 + 码段契约（< 100 框架保留段，工具自产、由 `codeRegistry` 分配 / ≥ 100 业务段，服务器返回）+ 29 个框架错误码常量（Network 6 / Protocol 2 / Build 4 / Listen 2 / Config 9 / Lua 4 / Callback 2）。`ActionError` 携带 `{Code, Detail}`（无 Kind）；monitor 按 code 单维聚合，展示按 `code < 100` 推导框架/业务标签。`errors.json` 加载期对 < 100 撞码硬报错。
 - **`utils/` — `work_pool.go`（协程池 + recover 防止 panic 扩散）、`duration.go`、`utils/log/`（结构化日志 zap + lumberjack 轮转 + 企业微信 webhook 告警）。
@@ -76,9 +76,9 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 
 ## 配置文件
 
-- `conf/config.json` — 运行配置：`log`/`monitor`（共享）+ `standalone`（单机模式：bot/adapter/network/proto/flow/script）+ `agent`（Agent 模式）
+- `conf/config.json` — 运行配置：`log`/`monitor`/`pprof`（共享）+ `standalone`（单机模式：`bot`/`stateExtra`）+ `agent`（Agent 模式）+ 可选 `redis`/`daemon`；资源路径（`flow`/`proto`/`scripts`/`adapter`）为 CLI flag（默认回退 `<conf>` 下子目录）
 - `conf/agent-config.json` — Agent 模式精简配置：仅 `log`/`monitor`/`agent`（无 standalone 段，运行时由 Admin 下发）
-- `conf/admin-config.json` — Admin 服务器配置：listenAddr、agentRegistry、task、history（SQLite）、log
+- `conf/admin-config.json` — Admin 服务器配置：`port`、`publicUrl`、`staticDir`、`agentRegistry`、`mysql`（顶层，全局共享 `*sql.DB`）、`redis`、`history`（`retentionDays`）、`log`、`daemon`
 - `conf/flow/flow.json` — 流程图（`defaultDelayMs` + `nodes` + `actions` + `listens`）— 主要配置产物
 - `conf/adapter/<proto>_<service>_codec.json` — 每连接一份的声明式 codec 配置；共享 `errors.json` 提供错误码描述。`codec.lua`/`error.lua` 仅保留为 T1 一致性测试的 oracle，非生产路径。
 - `conf/proto/` — 启动时动态加载的 `.proto` 文件
@@ -86,9 +86,9 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 
 ## flow.json 数据模型
 
-### 节点类型（8 种）
+### 节点类型（9 种）
 
-- **控制流**：`sequence`（顺序执行子节点）、`loop`（循环，支持无限/前置条件/后置条件/break/continue）、`boolean`（条件分支 trueNext/falseNext）、`weighted`（加权随机 options:[{node,weight}]）、`wait`（显式等待）
+- **控制流**：`sequence`（顺序执行子节点）、`loop`（循环，支持无限/前置条件/后置条件/break/continue）、`boolean`（条件分支 trueNext/falseNext）、`switch`（按 cases 顺序首匹配、单跳无 fall-through，defaultNext 兜底）、`weighted`（加权随机 options:[{node,weight}]）、`wait`（显式等待）
 - **执行**：`action`（引用 actions 表执行动作，或通过 listenRefs 注册持久化推送监听）
 - **循环控制**：`break`（跳出循环）、`continue`（跳过本次）
 
@@ -105,17 +105,17 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 - **取值**：`fixed`（固定值）/ `state` / `stateFirst`
 - **随机选取**：`stateRandom` / `stateRandomN` / `stateMapKey` / `stateMapValue` / `randomPick` / `randomPickN` / `randomPickMap` / `randomExclude`
 - **随机生成**：`randomInt` / `randomFloat` / `randomBool` / `randomString`（charset 支持 `lower`/`upper`/`alpha`/`numeric`/`alphanum` 与自定义字符集）
-- **辅助**：`listSize`
+- **辅助**：`listSize` / `map`（用 entries:[{key,value}] 构造 proto map 字段）
 
 ### 通用属性
 
 - binding 可选属性：`optional` / `required` / `wrap` / `storeAs` / `path` / `filters`
-- 条件绑定（ConditionDef）：`source` / `path` / `op` / `value` / `valueSource`
+- 条件绑定：FieldBind 上的 `condition` 字符串（`state:`/`lua:` 前缀），非结构体；过滤器比较用 FilterDef（`path` / `op` / `value` / `source` / `mode`）
 - store 映射（StoreMapping）：`field`（含嵌套路径）+ `setter`
 
-### 过滤器运算符（10 种）
+### 过滤器运算符（12 种）
 
-`eq` / `neq` / `gt` / `gte` / `lt` / `lte` / `contains` / `in` / `notNil` / `isNil`
+`eq` / `neq` / `gt` / `gte` / `lt` / `lte` / `contains` / `notContains` / `in` / `notIn` / `notNil` / `isNil`；FilterDef 含 `mode`（any/all/none）多值聚合
 
 ### 条件表达式
 
@@ -129,7 +129,7 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 - 默认节点延迟由 `TaskFlow.DefaultDelayMs` 控制。`delayMs: -1` 禁用，`delayMs: 0` 使用 defaultDelayMs。
 - `onError` 控制 action 失败后的错误链路：`ignoreCodes` 命中后 warn 并继续流程但 monitor 保留失败样本；`handler` 是普通节点调用边（不写入 next）；`retry.maxRetries` 是当前 action 的额外重试次数；`strategy` 支持空/`resume` 继续、`skip` 结束当前分支/层级（由 sequence/loop/boolean/weighted 捕获）、`abort` 中断流程。
 - 任务状态机：`pending → starting → running → stopping → stopped / failed`。单例约束：同一时刻只能有一个活跃任务。
-- Agent 心跳连续失败 `maxHeartbeatFailures` 次后自动退出（0 = 不退出）。Admin 重启后活跃任务自动重置为 `failed`。
+- Agent 心跳连续失败 `heartbeatFailThreshold` 次（默认 3）后放弃当前任务。Admin 重启后活跃任务自动重置为 `failed`。
 - 日志和错误信息使用中文。
 - Go 字段名与 JSON tag 一致：`Listens`/`listens`、`ListenRefs`/`listenRefs`、`Listen`/`listen`。`ListenDef` 是监听定义类型，`ListenCallBack`（network 包）是回调函数类型。`listen` 是外层概念，`callback` 是 listen 内部的处理机制。
 - 后端 goroutine 统一走 `utils/work_pool.go` 协程池（自带 recover）。
