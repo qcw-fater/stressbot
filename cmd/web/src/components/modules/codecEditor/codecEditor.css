@@ -547,11 +547,15 @@
   .split-2 { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* 错误码映射编辑器（ErrorMapEditor）—— 受控于 errors.json 原文 */
-.eme-root { display: flex; flex-direction: column; gap: var(--space-sm); padding: var(--space-sm); }
+/* 错误码映射编辑器（ErrorMapEditor）—— 受控于 errors.json 原文。
+   自身撑满 .pce-stage 并内部滚动：业务码很多时不再被外层 overflow:hidden 截断。 */
+.eme-root { display: flex; flex-direction: column; gap: var(--space-sm); padding: var(--space-sm); flex: 1 1 0; min-height: 0; overflow: auto; }
 .eme-alert { margin: 0; }
 .eme-framework { padding: 8px; background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 6px; }
 .eme-framework-title { font-size: 12px; color: var(--text-tertiary); margin-bottom: 4px; }
+.eme-biz-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.eme-biz-head .eme-framework-title { margin-bottom: 0; }
+.eme-search { flex: 0 1 200px; min-width: 140px; }
 
 /* 固定添加/编辑区：码（定宽）| 描述（flex 撑满，消除右侧留白）| 按钮 */
 .eme-draft { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

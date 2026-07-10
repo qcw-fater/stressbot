@@ -5,6 +5,8 @@ import {
   serializeErrorMap,
   nextBusinessCode,
   validateErrorDraft,
+  isDraftEngaged,
+  matchesErrorQuery,
 } from '../ErrorMapEditor';
 
 describe('validateErrorMap', () => {
@@ -91,5 +93,43 @@ describe('validateErrorDraft', () => {
 
   it('非正整数码拒绝', () => {
     expect(validateErrorDraft(Number.NaN, 'x', null, [])).toMatch(/正整数/);
+  });
+});
+
+describe('isDraftEngaged', () => {
+  // 空载（刚进入错误码映射、尚未输入）不应立即报红；只有介入后才展示行内错误。
+  it('初始空载未介入', () => {
+    expect(isDraftEngaged(null, '', null)).toBe(false);
+  });
+  it('填了码即介入', () => {
+    expect(isDraftEngaged(1000, '', null)).toBe(true);
+  });
+  it('编辑已有码即介入', () => {
+    expect(isDraftEngaged(null, '', 1004)).toBe(true);
+  });
+  it('只填描述也介入', () => {
+    expect(isDraftEngaged(null, '金币不足', null)).toBe(true);
+  });
+  it('纯空格描述不算介入（配合空载）', () => {
+    expect(isDraftEngaged(null, '   ', null)).toBe(false);
+  });
+});
+
+describe('matchesErrorQuery', () => {
+  it('空串恒匹配', () => {
+    expect(matchesErrorQuery(1000, '队伍已满', '')).toBe(true);
+    expect(matchesErrorQuery(1000, '队伍已满', '   ')).toBe(true);
+  });
+  it('按码子串匹配', () => {
+    expect(matchesErrorQuery(1000, 'x', '100')).toBe(true);
+    expect(matchesErrorQuery(1000, 'x', '1000')).toBe(true);
+    expect(matchesErrorQuery(2002, 'x', '1000')).toBe(false);
+  });
+  it('按描述匹配（大小写不敏感）', () => {
+    expect(matchesErrorQuery(1000, '队伍已满', '队伍')).toBe(true);
+    expect(matchesErrorQuery(1000, 'Gold Not Enough', 'gold')).toBe(true);
+  });
+  it('码与描述都不匹配', () => {
+    expect(matchesErrorQuery(1000, '队伍已满', 'xyz')).toBe(false);
   });
 });

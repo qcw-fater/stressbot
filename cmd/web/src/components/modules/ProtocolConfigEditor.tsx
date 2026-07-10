@@ -27,7 +27,7 @@ import {
 } from 'antd';
 import type { UploadProps } from 'antd';
 import './codecEditor/codecEditor.css';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import { useEditorStore } from '../FlowEditor/store/editorStore';
 import { useFloatingWindowStore } from '../FlowEditor/store/floatingWindowStore';
@@ -124,11 +124,16 @@ export function ProtocolConfigEditor() {
   // errors.json 结构化表单：框架保留码（只读展示）+ 行级校验错误（保存前 gate）
   const [frameworkCodes, setFrameworkCodes] = useState<FrameworkCode[]>([]);
   const [errorMapErrors, setErrorMapErrors] = useState<string[]>([]);
+  // 框架保留码来自 /sbot/api/error-codes。每次切入「错误码映射」区段时拉取，
+  // 避免开页瞬间服务器未连上时一次失败就永久为空（无重试、无提示）。
   useEffect(() => {
+    if (section !== 'errors') return;
+    let cancelled = false;
     getErrorCodes()
-      .then(setFrameworkCodes)
-      .catch(() => setFrameworkCodes([]));
-  }, []);
+      .then((codes) => { if (!cancelled) setFrameworkCodes(codes); })
+      .catch(() => { if (!cancelled) setFrameworkCodes([]); });
+    return () => { cancelled = true; };
+  }, [section]);
 
   // 结构化视图：把 content 解析为 raw（lossless）+ schema（typed 视图）+ error。
   const parsed = useMemo(() => parseCodecForEdit(content), [content]);
@@ -153,9 +158,15 @@ export function ProtocolConfigEditor() {
   };
 
   // 加载共享 errors.json 到编辑器。
+  // 加载代际：每次发起新加载自增；迟到的旧加载（如切到错误码映射后才回来的 codec 请求）
+  // 会在 await 后发现代际已变而丢弃结果，避免 stale codec 内容覆盖 errors 视图（产生 NaN 条目）。
+  const loadIdRef = useRef(0);
+
   const loadErrors = async () => {
+    const id = ++loadIdRef.current;
     setLoadError(false);
     const file = await getErrorMap();
+    if (id !== loadIdRef.current) return; // 已被更新的加载取代
     const initial = file ? file.content : EMPTY_ERROR_MAP_TEMPLATE;
     setContent(initial);
     setSource(file ? '已保存' : '模板（未保存）');
@@ -164,14 +175,17 @@ export function ProtocolConfigEditor() {
 
   // 加载某连接的 codec.json 到编辑器。
   const loadConn = async (conn: string | null) => {
+    const id = ++loadIdRef.current;
     setLoadError(false);
     if (conn === null) {
+      if (id !== loadIdRef.current) return;
       setContent('');
       setSource(null);
       return;
     }
     const name = connNameToCodecFileName(conn);
     const file = await getCodecSchema(name);
+    if (id !== loadIdRef.current) return; // 已切到其它连接/区段，丢弃 stale codec 内容
     if (file) {
       setContent(file.content);
       setSource('已保存');
