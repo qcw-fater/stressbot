@@ -481,10 +481,22 @@
   padding: 0 5px;
   font-size: 10px;
   border-radius: 8px;
+  font-weight: 500;
+}
+.onerror-badge[data-tone='warning'] {
+  background: var(--node-break-bg);
+  color: var(--node-break-border-active);
+  border: 1px solid var(--node-break);
+}
+.onerror-badge[data-tone='continue'] {
+  background: var(--node-continue-bg);
+  color: var(--node-continue-border-active);
+  border: 1px solid var(--node-continue);
+}
+.onerror-badge[data-tone='error'] {
   background: var(--node-wait-bg);
   color: var(--node-wait-border-active);
   border: 1px solid var(--node-wait);
-  font-weight: 500;
 }
 
 .skip-badge {

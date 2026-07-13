@@ -7,7 +7,7 @@
  *
  * 极简化布局：
  *   第一行：节点 ID（独占）
- *   第二行：pattern 标签 + onError 摘要 + listen 徽章
+ *   第二行：pattern 标签 + onError 重点标签 + listen 徽章
  *   详细字段（绑定、store、proto 等）在双击后的编辑面板中查看。
  */
 
@@ -17,6 +17,7 @@ import { NodeShell } from './shared/NodeShell';
 import type { FlowNode } from '@/types/flow';
 import type { ActionDef } from '@/types/action';
 import { PATTERN_DESC } from '../editors/ActionEditor/PatternSelector';
+import { buildOnErrorBadges } from './onErrorBadges';
 
 interface NodeData {
   nodeId: string;
@@ -28,7 +29,7 @@ export function ActionNode({ id, data, selected }: NodeProps) {
   const { node, action } = data as unknown as NodeData;
   const pattern = action?.pattern ?? '?';
   const listens = node.listenRefs?.length ?? 0;
-  const onErrorLabel = hasOnErrorConfig(node) ? 'onError' : '';
+  const onErrorBadges = buildOnErrorBadges(node);
 
   return (
     <>
@@ -47,11 +48,11 @@ export function ActionNode({ id, data, selected }: NodeProps) {
               {pattern}
             </span>
           </Tooltip>
-          {onErrorLabel && (
-            <Tooltip title="动作失败后的 onError 错误处理配置">
-              <span className="onerror-badge">{onErrorLabel}</span>
+          {onErrorBadges.map((badge) => (
+            <Tooltip key={badge.label} title={badge.tooltip}>
+              <span className="onerror-badge" data-tone={badge.tone}>{badge.label}</span>
             </Tooltip>
-          )}
+          ))}
           {listens > 0 && (
             <Tooltip title={`注册了 ${listens} 个 listen 监听`}>
               <span className="listen-badge">listen {listens}</span>
@@ -62,16 +63,5 @@ export function ActionNode({ id, data, selected }: NodeProps) {
       <Handle type="source" position={Position.Right} id="listen" />
       <Handle type="source" position={Position.Bottom} id="error" style={{ background: 'var(--color-error)' }} />
     </>
-  );
-}
-
-function hasOnErrorConfig(node: FlowNode): boolean {
-  const onError = node.onError;
-  if (!onError) return false;
-  return Boolean(
-    onError.handler
-      || (onError.ignoreCodes?.length ?? 0) > 0
-      || (onError.retry?.maxRetries ?? 0) > 0
-      || (onError.strategy && onError.strategy !== 'resume'),
   );
 }
