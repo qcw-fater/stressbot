@@ -108,6 +108,8 @@ export function ProtocolConfigEditor() {
   // 当前选中连接（null = 未选；仅协议配置区段使用，错误码映射区段切换由 section 控制）
   const [activeConn, setActiveConn] = useState<string | null>(null);
   const [content, setContent] = useState<string>('');
+  // 上次保存/加载到编辑器的内容——用于判断是否有未保存改动（dirty）。
+  const [savedContent, setSavedContent] = useState<string>('');
   const [source, setSource] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<boolean>(false);
   const [fileListError, setFileListError] = useState<string | null>(null);
@@ -169,6 +171,7 @@ export function ProtocolConfigEditor() {
     if (id !== loadIdRef.current) return; // 已被更新的加载取代
     const initial = file ? file.content : EMPTY_ERROR_MAP_TEMPLATE;
     setContent(initial);
+    setSavedContent(initial);
     setSource(file ? '已保存' : '模板（未保存）');
     setErrorMapErrors(validateErrorMap(parseErrorMapSafe(initial)).map((e) => e.message));
   };
@@ -180,6 +183,7 @@ export function ProtocolConfigEditor() {
     if (conn === null) {
       if (id !== loadIdRef.current) return;
       setContent('');
+      setSavedContent('');
       setSource(null);
       return;
     }
@@ -188,10 +192,12 @@ export function ProtocolConfigEditor() {
     if (id !== loadIdRef.current) return; // 已切到其它连接/区段，丢弃 stale codec 内容
     if (file) {
       setContent(file.content);
+      setSavedContent(file.content);
       setSource('已保存');
     } else {
       // 文件不存在（理论不应发生——选中项来自列表）：清空并提示。
       setContent('');
+      setSavedContent('');
       setSource(null);
       setLoadError(true);
     }
@@ -218,27 +224,49 @@ export function ProtocolConfigEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleSwitch = async (conn: string) => {
-    // 先清空旧内容，避免切换瞬间用新视图渲染上一个对象的 content（如 ErrorMapEditor 读到 codec.json）。
-    setContent('');
-    setSource(null);
-    setErrorMapErrors([]);
-    setActiveConn(conn);
-    await loadConn(conn);
+  // 是否有未保存改动：content 与上次保存/加载的内容不一致。
+  const isDirty = content !== savedContent;
+  // 切换连接/区段、从基线载入等隐式丢弃场景前，若有未保存改动则弹确认。
+  const confirmIfDirty = (action: () => Promise<void> | void) => {
+    if (!isDirty) {
+      void action();
+      return;
+    }
+    modal.confirm({
+      title: '有未保存改动',
+      content: '当前对象的修改尚未保存，继续将丢失。是否继续？',
+      okText: '丢弃并继续',
+      cancelText: '取消',
+      okType: 'danger',
+      onOk: () => action(),
+    });
+  };
+
+  const handleSwitch = (conn: string) => {
+    confirmIfDirty(async () => {
+      // 先清空旧内容，避免切换瞬间用新视图渲染上一个对象的 content（如 ErrorMapEditor 读到 codec.json）。
+      setContent('');
+      setSource(null);
+      setErrorMapErrors([]);
+      setActiveConn(conn);
+      await loadConn(conn);
+    });
   };
 
   // 顶层区段切换：协议配置 ↔ 错误码映射。各自加载对应内容，互不混进连接下拉。
-  const handleSwitchSection = async (next: 'codec' | 'errors') => {
+  const handleSwitchSection = (next: 'codec' | 'errors') => {
     if (next === section) return;
-    setContent('');
-    setSource(null);
-    setErrorMapErrors([]);
-    setSection(next);
-    if (next === 'errors') {
-      await loadErrors();
-    } else {
-      await loadConn(activeConn);
-    }
+    confirmIfDirty(async () => {
+      setContent('');
+      setSource(null);
+      setErrorMapErrors([]);
+      setSection(next);
+      if (next === 'errors') {
+        await loadErrors();
+      } else {
+        await loadConn(activeConn);
+      }
+    });
   };
 
   const refreshBadge = async () => {
@@ -332,6 +360,7 @@ export function ProtocolConfigEditor() {
         return;
       }
       await setErrorMap(content);
+      setSavedContent(content);
       setSource('已保存');
       message.success('已保存错误码映射');
       return;
@@ -352,6 +381,7 @@ export function ProtocolConfigEditor() {
     }
     const name = connNameToCodecFileName(activeConn);
     await setCodecSchema(name, content);
+    setSavedContent(content);
     setSource('已保存');
     await refreshBadge();
     message.success('已保存，启动任务时会自动上传');
@@ -369,6 +399,7 @@ export function ProtocolConfigEditor() {
       }
       await setErrorMap(text);
       setContent(text);
+      setSavedContent(text);
       setSource(file.name);
       setErrorMapErrors(validateErrorMap(parseErrorMapSafe(text)).map((e) => e.message));
       message.success(`已导入并保存：${file.name}`);
@@ -387,6 +418,7 @@ export function ProtocolConfigEditor() {
     await setCodecSchema(name, text);
     await reloadFiles();
     setContent(text);
+    setSavedContent(text);
     setSource(file.name);
     await refreshBadge();
     message.success(`已导入并保存：${file.name}`);
@@ -398,6 +430,7 @@ export function ProtocolConfigEditor() {
     if (section === 'errors') {
       await clearErrorMap();
       setContent(EMPTY_ERROR_MAP_TEMPLATE);
+      setSavedContent(EMPTY_ERROR_MAP_TEMPLATE);
       setSource('模板（未保存）');
       setErrorMapErrors([]);
       message.success('已清空错误码映射');
@@ -525,7 +558,10 @@ export function ProtocolConfigEditor() {
               <Typography.Text code className="pce-target-name">errors.json</Typography.Text>
             </>
           )}
-          <span className="pce-source-label">{source ?? '尚未加载'}</span>
+          <span className="pce-source-label">
+            {source ?? '尚未加载'}
+            {isDirty && <Typography.Text type="danger" style={{ marginLeft: 6 }}>· 未保存</Typography.Text>}
+          </span>
         </div>
 
         <div className="pce-cmdbar-actions">
@@ -547,7 +583,7 @@ export function ProtocolConfigEditor() {
           )}
           <div className="pce-cmdbar-group">
             <Tooltip title="从服务器拉取全部协议配置到本地">
-              <Button size="small" icon={<CloudDownloadOutlined />} loading={pullingBaseline} onClick={onPullBaseline}>从基线载入</Button>
+              <Button size="small" icon={<CloudDownloadOutlined />} loading={pullingBaseline} onClick={() => confirmIfDirty(onPullBaseline)}>从基线载入</Button>
             </Tooltip>
             <Upload accept=".json,application/json" beforeUpload={onUpload} showUploadList={false}>
               <Button icon={<InboxOutlined />} size="small" disabled={section === 'codec' && activeConn === null}>导入</Button>

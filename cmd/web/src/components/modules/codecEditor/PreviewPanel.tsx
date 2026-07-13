@@ -17,7 +17,7 @@
  * parseCodecForEdit 提供）；`schema` 的 typed 视图读 route 字段清单；`transport` 来自连接名。
  */
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { CopyOutlined } from '@ant-design/icons';
 import {
   Alert,
@@ -38,6 +38,7 @@ import { previewCodec } from '@/services/codecApi';
 import {
   buildRouteMap,
   collectRouteFields,
+  pruneRouteForm,
   type PreviewTransport,
 } from './previewHelpers';
 
@@ -183,7 +184,17 @@ export function PreviewPanel({ raw, schema, transport }: PreviewPanelProps) {
   const [result, setResult] = useState<PreviewResult | null>(null);
   const [reqError, setReqError] = useState<string | null>(null);
 
-  const routeFields = collectRouteFields(schema);
+  const routeFields = useMemo(() => collectRouteFields(schema), [schema]);
+
+  // raw（切连接 / 改 schema）变化即清上一次预览结果——旧结果已过期，避免误导。
+  useEffect(() => {
+    setResult(null);
+    setReqError(null);
+  }, [raw]);
+  // route 字段集合变化时剔除残留键（切连接后上一个连接的 route 字段值不再有效）。
+  useEffect(() => {
+    setRouteForm((prev) => pruneRouteForm(prev, routeFields));
+  }, [routeFields]);
 
   const runPreview = async () => {
     setLoading(true);

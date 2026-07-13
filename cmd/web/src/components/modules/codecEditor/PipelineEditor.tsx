@@ -85,38 +85,60 @@ function loadAlgorithms(): Promise<AlgoMeta[]> {
  * 挂载时拉一次算法清单到 module cache。失败 → message.error + 空清单（不伪兜底）。
  * 多个 PipelineEditor 实例共享 cache（inflight 复用，只发一个请求）。
  */
-function useCodecAlgorithms(): AlgoMeta[] {
+interface UseCodecAlgorithmsResult {
+  algos: AlgoMeta[];
+  loading: boolean;
+  /** 重置 module cache 并重新拉取——加载失败后会话内可恢复。 */
+  reload: () => void;
+}
+
+function useCodecAlgorithms(): UseCodecAlgorithmsResult {
   const [algos, setAlgos] = useState<AlgoMeta[]>(algoCache.loaded ? algoCache.algos : []);
+  const [loading, setLoading] = useState(!algoCache.loaded);
+  // reloadTick 触发 useEffect 重新拉取（重置 cache 后 loaded=false，不再走「直接用 cache」分支）。
+  const [reloadTick, setReloadTick] = useState(0);
+
+  const reload = () => {
+    algoCache = { loaded: false, algos: [] };
+    inflight = null;
+    setReloadTick((t) => t + 1);
+  };
 
   useEffect(() => {
     // 已加载（含失败后的空清单）→ 直接用 cache，不再发请求。
     if (algoCache.loaded) {
       setAlgos(algoCache.algos);
+      setLoading(false);
       return;
     }
     let cancelled = false;
+    setLoading(true);
     loadAlgorithms()
       .then((a) => {
-        if (!cancelled) setAlgos(a);
+        if (!cancelled) {
+          setAlgos(a);
+          setLoading(false);
+        }
       })
       .catch((e: unknown) => {
         const reason = e instanceof Error ? e.message : String(e);
         if (!cancelled) {
           message.error(`算法清单加载失败：${reason}`);
           setAlgos([]);
+          setLoading(false);
         }
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadTick]);
 
-  return algos;
+  return { algos, loading, reload };
 }
 
 export function PipelineEditor({ raw, schema, onEdit }: PipelineEditorProps) {
   const steps: PipelineStep[] = Array.isArray(schema.pipeline) ? (schema.pipeline as PipelineStep[]) : [];
-  const algorithms = useCodecAlgorithms();
+  const { algos: algorithms, reload: reloadAlgorithms, loading: algosLoading } = useCodecAlgorithms();
 
   // flag 下拉选项 = 所有 role:"flags" 字段的命名位 name 并集。
   const flagOptions = collectFlagBitNames(schema).map((n) => ({ label: n, value: n }));
@@ -141,6 +163,16 @@ export function PipelineEditor({ raw, schema, onEdit }: PipelineEditorProps) {
       styles={{ body: { padding: 12 } }}
     >
       <Space direction="vertical" size={10} style={{ width: '100%' }}>
+        {algorithms.length === 0 && (
+          <Space size={8} align="center" style={{ padding: '6px 10px', border: '1px solid var(--border-color)', borderRadius: 6, background: 'var(--bg-elevated)' }}>
+            <Typography.Text type="warning" style={{ fontSize: 12 }}>
+              算法清单为空（可能加载失败或后端未提供）
+            </Typography.Text>
+            <Button size="small" loading={algosLoading} onClick={reloadAlgorithms}>
+              重新加载算法清单
+            </Button>
+          </Space>
+        )}
         {steps.length === 0 && (
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             暂无管线步骤

@@ -33,6 +33,8 @@ export function HeartbeatEditor({ raw, schema, onEdit }: HeartbeatEditorProps) {
 
   const patch = (p: Partial<CodecHeartbeat>) => onEdit(updateHeartbeat(raw, p));
   const bodyMode = hb ? detectBodyMode(hb) : 'empty';
+  // intervalMs 清空回退 0（保留键不丢，避免 JSON 丢键后保存被拒却无行内反馈）。
+  const intervalInvalid = hb ? (!hb.intervalMs || hb.intervalMs <= 0) : false;
 
   const switchMode = (mode: HeartbeatBodyMode) => {
     if (!hb || mode === bodyMode) return;
@@ -80,11 +82,17 @@ export function HeartbeatEditor({ raw, schema, onEdit }: HeartbeatEditorProps) {
             <InputNumber
               min={1}
               value={hb.intervalMs}
-              onChange={(v) => patch({ intervalMs: (v as number) ?? undefined as unknown as number })}
+              status={intervalInvalid ? 'error' : undefined}
+              onChange={(v) => patch({ intervalMs: typeof v === 'number' ? v : 0 })}
               style={{ width: 160 }}
             />
             <Typography.Text type="secondary">毫秒</Typography.Text>
           </div>
+          {intervalInvalid && (
+            <Typography.Text type="danger" style={{ fontSize: 12 }}>
+              intervalMs 必须大于 0
+            </Typography.Text>
+          )}
 
           <div className="pce-inline-row">
             <Typography.Text className="pce-inline-label">requireSecretKey</Typography.Text>

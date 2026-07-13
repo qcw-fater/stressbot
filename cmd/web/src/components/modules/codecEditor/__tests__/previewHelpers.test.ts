@@ -6,8 +6,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { buildRouteMap, collectRouteFields, deriveTransport } from '../previewHelpers';
-import type { CodecSchema } from '@/types/codec';
+import { buildRouteMap, collectRouteFields, deriveTransport, pruneRouteForm } from '../previewHelpers';
+import type { CodecSchema, Field } from '@/types/codec';
 
 describe('deriveTransport', () => {
   it("'tcp:logic' → 'tcp'", () => {
@@ -132,5 +132,29 @@ describe('buildRouteMap', () => {
   it('"1e3" 不按整数解析（保留 string）', () => {
     // 正则 ^-?\d+$ 不匹配，保留 string
     expect(buildRouteMap({ cmd: '1e3' })).toEqual({ cmd: '1e3' });
+  });
+});
+
+describe('pruneRouteForm', () => {
+  const fields = (names: string[]): Field[] => names.map((name) => ({ name } as Field));
+
+  it('保留仍存在的 route 字段键', () => {
+    expect(pruneRouteForm({ cmd: '1', act: '2' }, fields(['cmd', 'act']))).toEqual({ cmd: '1', act: '2' });
+  });
+
+  it('剔除切连接后残留的旧字段键', () => {
+    expect(pruneRouteForm({ cmd: '1', act: '2' }, fields(['cmd', 'sub']))).toEqual({ cmd: '1' });
+  });
+
+  it('routeFields 为空时清空所有', () => {
+    expect(pruneRouteForm({ cmd: '1', act: '2' }, [])).toEqual({});
+  });
+
+  it('空表单返回空', () => {
+    expect(pruneRouteForm({}, fields(['cmd']))).toEqual({});
+  });
+
+  it('只按键名过滤，不按值（空串值也保留，空串剔除交 buildRouteMap）', () => {
+    expect(pruneRouteForm({ cmd: '' }, fields(['cmd']))).toEqual({ cmd: '' });
   });
 });

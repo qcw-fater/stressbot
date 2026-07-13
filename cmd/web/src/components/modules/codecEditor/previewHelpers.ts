@@ -71,3 +71,19 @@ export function buildRouteMap(input: Record<string, string>): Record<string, num
   }
   return out;
 }
+
+/**
+ * 清理 route 表单：只保留仍存在于当前 route 字段集合里的键，剔除切连接后残留的旧字段值。
+ * 避免把上一个连接的 route 输入发给新连接后端（buildRouteMap 会原样转发残留键）。
+ */
+export function pruneRouteForm(
+  form: Record<string, string>,
+  routeFields: Field[],
+): Record<string, string> {
+  const valid = new Set(routeFields.map((f) => f.name));
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(form)) {
+    if (valid.has(k)) out[k] = v;
+  }
+  return out;
+}
