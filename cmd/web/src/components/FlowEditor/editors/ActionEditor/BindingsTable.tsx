@@ -30,7 +30,7 @@ const TYPE_GROUPS: { label: string; types: BindingType[] }[] = [
   { label: '复合', types: ['map'] },
 ];
 
-const BINDING_TYPE_DESC: Record<BindingType, string> = {
+export const BINDING_TYPE_DESC: Record<BindingType, string> = {
   fixed: '固定值，直接填入 value 字段',
   state: '从 state 中取出 key 对应的单个值',
   stateFirst: '取 state list 的第一个元素',
@@ -50,7 +50,8 @@ const BINDING_TYPE_DESC: Record<BindingType, string> = {
   map: 'map 类型，通过 entries 构建键值对',
 };
 
-const TYPE_OPTIONS = TYPE_GROUPS.map((g) => ({
+/** 普通动作（tcpSend / httpRequest 等）取值方式下拉选项，按 TYPE_GROUPS 分组。 */
+export const BINDING_TYPE_OPTIONS = TYPE_GROUPS.map((g) => ({
   label: g.label,
   options: g.types.map((t) => ({ value: t, label: t })),
 }));
@@ -172,7 +173,7 @@ function BindingRow({
         <Select
           value={binding.type}
           onChange={(v) => set({ type: v as BindingType })}
-          options={TYPE_OPTIONS.map((g) => ({
+          options={BINDING_TYPE_OPTIONS.map((g) => ({
             label: g.label,
             options: g.options.map((o) => ({
               value: o.value,
@@ -191,6 +192,27 @@ function BindingRow({
         currentBindings={allBindings}
         onChange={onChange}
       />
+      <BindingCommonAdvancedFields binding={binding} onChange={onChange} />
+    </Space>
+  );
+}
+
+/**
+ * 所有 binding type 共享的「通用高级配置」控件：required / optional / wrap / storeAs / condition。
+ *
+ * 从 BindingRow 中抽出，便于 SetStateEditor / ClearStateEditor 等状态动作编辑器复用同一份 UI；
+ * 控件、label、tooltip 与原内联实现完全一致，普通动作（tcpSend / httpRequest 等）的渲染与行为不变。
+ */
+export function BindingCommonAdvancedFields({
+  binding,
+  onChange,
+}: {
+  binding: FieldBind;
+  onChange: (binding: FieldBind) => void;
+}) {
+  const set = (partial: Partial<FieldBind>) => onChange({ ...binding, ...partial });
+  return (
+    <>
       <Space wrap>
         <Tooltip title="缺失时报错（隐式必需的类型默认 true，可通过 optional 反转）">
           <Space size={4}>
@@ -254,7 +276,7 @@ function BindingRow({
           </a>
         </Tooltip>
       )}
-    </Space>
+    </>
   );
 }
 

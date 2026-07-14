@@ -1,23 +1,32 @@
 /**
  * 单个 FieldBind 编辑器：根据 type 切换不同输入控件。
  *
- * 16 种 type 的具体字段对照（设计文档 §4.1 / §6.3）：
- *   fixed         : value
- *   state         : source + path?
- *   stateFirst    : source + path?
- *   stateRandom   : source + path? + filters?
- *   stateRandomN  : source + count + path?
- *   stateMapKey   : source + filters?
- *   stateMapValue : source + path? + filters?
- *   randomPick    : values[]
- *   randomPickN   : values[] + count
- *   randomPickMap : keySource + values[{key, values}]
- *   randomInt     : min + max
- *   randomFloat   : min + max + precision?
- *   randomBool    : (无)
- *   randomString  : length + charset
- *   randomExclude : (values[] | source) + excludeSource
- *   listSize      : source
+ * 通过 `section` prop 控制渲染区段：
+ *   - 'all'（默认）= primary + advanced 纵向组合，与历史行为一致；BindingsTable 与 map entry
+ *     的 `<BindingTypeForm valueOnly />` 走此路径，外观/行为不变。
+ *   - 'primary' 仅核心取值控件；'advanced' 仅类型高级字段（path/filters/excludeSource），无则返回 null。
+ *
+ * 17 种 type 的 primary / advanced 字段对照（设计文档 §4.1 / §6.3，task-4-brief.md Step 4）：
+ *   fixed         : primary=value                        advanced=none
+ *   state         : primary=source                        advanced=path
+ *   stateFirst    : primary=source                        advanced=path
+ *   stateRandom   : primary=source                        advanced=path + filters
+ *   stateRandomN  : primary=source + count                advanced=path + filters
+ *   stateMapKey   : primary=source                        advanced=filters
+ *   stateMapValue : primary=source                        advanced=path + filters
+ *   randomPick    : primary=values                        advanced=none
+ *   randomPickN   : primary=values + count                advanced=none
+ *   randomPickMap : primary=keySource + 映射表             advanced=none
+ *   randomInt     : primary=min/max                       advanced=none
+ *   randomFloat   : primary=min/max/precision             advanced=none
+ *   randomBool    : primary=无参数提示                     advanced=none
+ *   randomString  : primary=length/charset                advanced=none
+ *   randomExclude : primary=values/source                 advanced=excludeSource
+ *   listSize      : primary=source                        advanced=none
+ *   map           : primary=entries                       advanced=none
+ *
+ * 通用高级字段（required/optional/wrap/storeAs/condition）由
+ * BindingsTable.BindingCommonAdvancedFields 统一渲染，不归本组件管。
  */
 
 import { Button, Input, InputNumber, Select, Space, Tag, Tooltip } from 'antd';
@@ -39,55 +48,76 @@ export interface BindingTypeFormProps {
   currentBindings?: FieldBind[];
   /** valueOnly 模式：用于 map entry 的 value 编辑，禁止嵌套 map */
   valueOnly?: boolean;
+  /**
+   * 区段选择：
+   *   - 'all'（默认）：渲染 primary + advanced，纵向小间距组合，等价于历史行为。
+   *   - 'primary'：仅渲染主参数（source/values/min-max 等取值方式必备项）。
+   *   - 'advanced'：仅渲染类型高级字段（path/filters/excludeSource），无则返回 null。
+   *
+   * setState/clearState 行用 'primary' 渲染紧凑主体，把通用高级配置与类型高级字段
+   * 收进折叠区；其它 pattern（tcpSend/httpRequest 等）继续使用默认 'all'，外观不变。
+   */
+  section?: 'all' | 'primary' | 'advanced';
   onChange: (b: FieldBind) => void;
 }
 
 const LABEL: React.CSSProperties = { fontSize: 12, color: 'var(--text-tertiary)', flexShrink: 0 };
 
-/** source + path 两行布局 */
-function SourcePathRows({
+/** source 单行（primary 段单元） */
+function SourceRow({
   binding,
   currentBindings,
   set,
-  sourceProto,
-  showPath,
 }: {
   binding: FieldBind;
   currentBindings?: FieldBind[];
   set: (p: Partial<FieldBind>) => void;
-  sourceProto: string | undefined;
-  showPath: boolean;
 }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={LABEL}>source</span>
-        <StateKeyInput
-          value={binding.source}
-          onChange={(v) => set({ source: v || undefined })}
-          currentBindings={currentBindings}
-          placeholder="state key"
-          style={{ flex: 1 }}
-        />
-      </div>
-      {showPath && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={LABEL}>path</span>
-          <ProtoPathInput
-            messageFullName={sourceProto}
-            value={binding.path}
-            onChange={(v) => set({ path: v || undefined })}
-            placeholder="可选，从 state 值中取子字段"
-            style={{ flex: 1 }}
-          />
-        </div>
-      )}
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span style={LABEL}>source</span>
+      <StateKeyInput
+        value={binding.source}
+        onChange={(v) => set({ source: v || undefined })}
+        currentBindings={currentBindings}
+        placeholder="state key"
+        style={{ flex: 1 }}
+      />
     </div>
   );
 }
 
-export function BindingTypeForm({ binding, currentBindings, onChange, valueOnly = false }: BindingTypeFormProps) {
-  const t = binding.type;
+/** path 单行（advanced 段单元） */
+function PathRow({
+  binding,
+  set,
+  sourceProto,
+}: {
+  binding: FieldBind;
+  set: (p: Partial<FieldBind>) => void;
+  sourceProto: string | undefined;
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span style={LABEL}>path</span>
+      <ProtoPathInput
+        messageFullName={sourceProto}
+        value={binding.path}
+        onChange={(v) => set({ path: v || undefined })}
+        placeholder="可选，从 state 值中取子字段"
+        style={{ flex: 1 }}
+      />
+    </div>
+  );
+}
+
+export function BindingTypeForm({
+  binding,
+  currentBindings,
+  onChange,
+  valueOnly = false,
+  section = 'all',
+}: BindingTypeFormProps) {
   const set = (partial: Partial<FieldBind>) => onChange({ ...binding, ...partial });
 
   const actions = useFlowStore((s) => s.actions);
@@ -101,25 +131,84 @@ export function BindingTypeForm({ binding, currentBindings, onChange, valueOnly 
     return resolveProtoForStateKey(keys, binding.source);
   }, [binding.source, actions, listens, stateExtra, currentBindings]);
 
-  switch (t) {
+  if (section === 'primary') {
+    return (
+      <BindingPrimaryFields
+        binding={binding}
+        currentBindings={currentBindings}
+        set={set}
+        sourceProto={sourceProto}
+        valueOnly={valueOnly}
+      />
+    );
+  }
+  if (section === 'advanced') {
+    return (
+      <BindingTypeAdvancedFields
+        binding={binding}
+        currentBindings={currentBindings}
+        set={set}
+        sourceProto={sourceProto}
+      />
+    );
+  }
+  // section === 'all'：先渲染 primary，再渲染 advanced；保持与历史调用一致的纵向组合。
+  // advanced 对没有「类型高级字段」的类型返回 null，Space 会自动跳过。
+  return (
+    <Space direction="vertical" style={{ width: '100%' }} size="small">
+      <BindingPrimaryFields
+        binding={binding}
+        currentBindings={currentBindings}
+        set={set}
+        sourceProto={sourceProto}
+        valueOnly={valueOnly}
+      />
+      <BindingTypeAdvancedFields
+        binding={binding}
+        currentBindings={currentBindings}
+        set={set}
+        sourceProto={sourceProto}
+      />
+    </Space>
+  );
+}
+
+/**
+ * 主参数渲染器（primary 段）：每个 binding type 的「核心取值方式」控件。
+ *
+ * 字段归属严格按设计表（task-4-brief.md Step 4）的 primary 列；不要在此处放入
+ * path/filters/excludeSource 等高级字段。
+ */
+function BindingPrimaryFields({
+  binding,
+  currentBindings,
+  set,
+  sourceProto: _sourceProto,
+  valueOnly,
+}: {
+  binding: FieldBind;
+  currentBindings?: FieldBind[];
+  set: (p: Partial<FieldBind>) => void;
+  sourceProto: string | undefined;
+  valueOnly: boolean;
+}) {
+  // sourceProto 仅 advanced 段的 path/filters 需要；primary 段目前不直接使用，
+  // 但为了保持调用签名对称、未来扩展（如带 proto 提示的 source 选择）保留入参。
+  void _sourceProto;
+
+  switch (binding.type) {
     case 'fixed':
       return <FixedValueInput value={binding.value} onChange={(v) => set({ value: v })} />;
     case 'state':
     case 'stateFirst':
-      return (
-        <SourcePathRows binding={binding} currentBindings={currentBindings} set={set} sourceProto={sourceProto} showPath />
-      );
     case 'stateRandom':
-      return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
-          <SourcePathRows binding={binding} currentBindings={currentBindings} set={set} sourceProto={sourceProto} showPath />
-          <FiltersField binding={binding} set={set} sourceProto={sourceProto} />
-        </div>
-      );
+    case 'stateMapKey':
+    case 'stateMapValue':
+      return <SourceRow binding={binding} currentBindings={currentBindings} set={set} />;
     case 'stateRandomN':
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
-          <SourcePathRows binding={binding} currentBindings={currentBindings} set={set} sourceProto={sourceProto} showPath />
+          <SourceRow binding={binding} currentBindings={currentBindings} set={set} />
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={LABEL}>count</span>
             <InputNumber
@@ -131,21 +220,6 @@ export function BindingTypeForm({ binding, currentBindings, onChange, valueOnly 
               onChange={(v) => set({ count: (v as number) ?? undefined })}
             />
           </div>
-          <FiltersField binding={binding} set={set} sourceProto={sourceProto} />
-        </div>
-      );
-    case 'stateMapKey':
-      return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
-          <SourcePathRows binding={binding} currentBindings={currentBindings} set={set} sourceProto={sourceProto} showPath={false} />
-          <FiltersField binding={binding} set={set} sourceProto={sourceProto} />
-        </div>
-      );
-    case 'stateMapValue':
-      return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
-          <SourcePathRows binding={binding} currentBindings={currentBindings} set={set} sourceProto={sourceProto} showPath />
-          <FiltersField binding={binding} set={set} sourceProto={sourceProto} />
         </div>
       );
     case 'randomPick':
@@ -251,49 +325,71 @@ export function BindingTypeForm({ binding, currentBindings, onChange, valueOnly 
     case 'randomExclude':
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={LABEL}>source</span>
-            <StateKeyInput
-              value={binding.source}
-              onChange={(v) => set({ source: v || undefined })}
-              currentBindings={currentBindings}
-              placeholder="state list"
-              style={{ flex: 1 }}
-            />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={LABEL}>exclude</span>
-            <StateKeyInput
-              value={binding.excludeSource}
-              onChange={(v) => set({ excludeSource: v || undefined })}
-              currentBindings={currentBindings}
-              placeholder="排除列表 (state key)"
-              style={{ flex: 1 }}
-            />
-          </div>
+          <SourceRow binding={binding} currentBindings={currentBindings} set={set} />
           <ValuesField binding={binding} set={set} />
         </div>
       );
     case 'listSize':
-      return (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={LABEL}>source</span>
-          <StateKeyInput
-            value={binding.source}
-            onChange={(v) => set({ source: v || undefined })}
-            currentBindings={currentBindings}
-            placeholder="state list key"
-            style={{ flex: 1 }}
-          />
-        </div>
-      );
+      return <SourceRow binding={binding} currentBindings={currentBindings} set={set} />;
     case 'map':
       if (valueOnly) {
         return <span style={{ color: 'var(--color-error)' }}>map value 不支持嵌套 map</span>;
       }
       return <MapEntriesField binding={binding} currentBindings={currentBindings} set={set} />;
     default:
-      return <span style={{ color: 'var(--color-error)' }}>未知 binding type: {t}</span>;
+      return <span style={{ color: 'var(--color-error)' }}>未知 binding type: {binding.type}</span>;
+  }
+}
+
+/**
+ * 类型高级字段渲染器（advanced 段）：仅渲染 path/filters/excludeSource 等该 type 的「高级」控件。
+ *
+ * 字段归属严格按设计表（task-4-brief.md Step 4）的 advanced 列；没有高级字段的 type 返回 null。
+ * 注意：通用高级字段（required/optional/wrap/storeAs/condition）不在此处，由
+ * BindingsTable.BindingCommonAdvancedFields 统一渲染。
+ */
+function BindingTypeAdvancedFields({
+  binding,
+  currentBindings,
+  set,
+  sourceProto,
+}: {
+  binding: FieldBind;
+  currentBindings?: FieldBind[];
+  set: (p: Partial<FieldBind>) => void;
+  sourceProto: string | undefined;
+}) {
+  switch (binding.type) {
+    case 'state':
+    case 'stateFirst':
+      return <PathRow binding={binding} set={set} sourceProto={sourceProto} />;
+    case 'stateRandom':
+    case 'stateRandomN':
+    case 'stateMapValue':
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
+          <PathRow binding={binding} set={set} sourceProto={sourceProto} />
+          <FiltersField binding={binding} set={set} sourceProto={sourceProto} />
+        </div>
+      );
+    case 'stateMapKey':
+      return <FiltersField binding={binding} set={set} sourceProto={sourceProto} />;
+    case 'randomExclude':
+      return (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={LABEL}>exclude</span>
+          <StateKeyInput
+            value={binding.excludeSource}
+            onChange={(v) => set({ excludeSource: v || undefined })}
+            currentBindings={currentBindings}
+            placeholder="排除列表 (state key)"
+            style={{ flex: 1 }}
+          />
+        </div>
+      );
+    default:
+      // 该类型没有「类型高级字段」：advanced 段不渲染任何内容。
+      return null;
   }
 }
 
