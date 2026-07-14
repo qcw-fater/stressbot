@@ -103,10 +103,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		return nil, fmt.Errorf("NewRobot: resolver 不能为 nil（codec 未配置）")
 	}
 
-	// 以 WorkPool ctx 为父级：WorkPool.Shutdown 时取消会派生到 Robot ctx，
-	// 使 Executor 优雅退出（异常路径：直接 Shutdown 而未走 StopAll 时的兜底）。
-	// 正常停止仍由 Stop/Close/StopAll 显式调 r.cancel。
-	ctx, cancel := context.WithCancel(utils.GetWorkPool().Context())
+	ctx, cancel := context.WithCancel(context.Background())
 
 	// 读取 monitor 的 timingDetail 配置，传递给 network 和 engine 层。
 	var timingDetail monitor.TimingDetailLevel
@@ -195,12 +192,7 @@ func (r *Robot) Start() {
 		return
 	}
 
-	// Robot 生命周期任务（合并自原 G1 监督 + G2 执行）：单个 WorkPool 任务串行完成
-	// 「初始化 → 业务执行 → cleanup → onDone」。停止信号经 r.ctx 传导——正常路径由
-	// Stop/Close/StopAll 调 r.cancel；异常路径（直接 WorkPool.Shutdown 不 StopAll）由
-	// WorkPool ctx 取消派生到 r.ctx（NewRobot 以 utils.GetWorkPool().Context() 为父级），
-	// 故无需 GoWithStop 的 stopCh 通道兜底。稳定态常驻任务由 2+C 降为 1+C。
-	utils.GetWorkPool().Go(func() {
+	utils.GetWorkPool().GoWithStop(func(stopCh <-chan struct{}) {
 		defer r.running.Store(false)
 		defer close(r.done)
 
@@ -233,23 +225,27 @@ func (r *Robot) Start() {
 		monitor.Global().RobotStarted()
 		monitor.Global().RobotRunning()
 
-		// 业务执行（原内层 G2 内联到本任务）：r.ctx 在两条停止路径下都会被取消，
-		// Executor 在下一个 ctx 检查点退出。
-		if err := r.executor.Run(r.ctx); err != nil {
-			if r.ctx.Err() == nil {
-				stresslog.Error("[ROBOT] 流程异常退出", zap.Int("id", r.id), zap.Error(err))
-				monitor.Global().RobotErrored()
+		utils.GetWorkPool().Go(func() {
+			defer close(r.execDone)
+			if err := r.executor.Run(r.ctx); err != nil {
+				if r.ctx.Err() == nil {
+					stresslog.Error("[ROBOT] 流程异常退出", zap.Int("id", r.id), zap.Error(err))
+					monitor.Global().RobotErrored()
+				} else {
+					monitor.Global().RobotStopped()
+				}
 			} else {
 				monitor.Global().RobotStopped()
 			}
-		} else {
-			monitor.Global().RobotStopped()
+		})
+
+		select {
+		case <-r.execDone:
+		case <-stopCh:
+			r.cancel()
+			<-r.execDone
 		}
 
-		// 通知并发 Close：Executor 已退出业务执行栈（外部 cleanup(false) 依赖此信号）。
-		close(r.execDone)
-
-		// 统一收尾：executorDone=true，同 goroutine 已知 Executor 退出，不再等待 execDone。
 		cleanup := r.cleanup(CleanupReasonNatural, true)
 		stresslog.Info("[ROBOT] 已停止", zap.Int("id", r.id), zap.String("account", r.account), zap.String("cleanup", string(cleanup.Status)))
 		if r.onDone != nil {

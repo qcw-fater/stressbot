@@ -119,7 +119,7 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 
 ### 条件表达式
 
-`state:` 前缀为声明式表达式（`cond_parser.go` 词法+递归下降解析）：字面量只有数字与**带引号字符串**，裸标识符恒为 state 路径；支持比较 `== != > >= < <=`、算术 `+ - * / %`（`%` 仅整数）、逻辑 `&& || !` 与括号。**严格类型、零关键字（无 `true`/`false`/`nil`）、无隐式转换**——裸操作数须 bool、`>`等须数值、`==`/`!=` 须同类型；类型不匹配或 key 缺失 → warn + 条件 false。`lua:script.lua` 为脚本求值（须 `return true/false`）。
+支持复合表达式：`state:key op value`（内置比较）+ `lua:script.lua`（脚本求值），支持 `&&` / `||` / `!` / 括号嵌套。
 
 ## 关键约定
 
