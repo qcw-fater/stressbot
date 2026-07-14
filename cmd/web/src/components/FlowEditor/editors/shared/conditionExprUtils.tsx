@@ -1,13 +1,15 @@
 /**
  * 条件表达式高亮渲染工具。
  *
- * 从表达式中提取标识符词元（含点分路径和数组下标），
- * 与已知 state key 匹配后渲染为彩色标签。
- * 用于 ConditionInput 下方预览条的可视化。
+ * 从表达式中提取词元：state 路径（含点分路径与数组下标）、字符串/数字字面量。
+ * 已知 state key 渲染为彩色标签，字面量渲染为值标签，用于 ConditionInput 下方预览。
+ *
+ * 严格类型文法下裸标识符恒为 state 路径、字符串必须带引号：此处把带引号字符串作为
+ * 整体字面量高亮，避免其内容被误识别为 path。
  */
 
 import { Tag } from 'antd';
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import type { StateKeyInfo } from '../ActionEditor/stateRegistry';
 
 const SOURCE_TYPE_COLOR: Record<string, string> = {
@@ -19,15 +21,22 @@ const SOURCE_TYPE_COLOR: Record<string, string> = {
   builtin: 'cyan',
 };
 
+const tagStyle: CSSProperties = {
+  fontSize: 10,
+  lineHeight: '16px',
+  padding: '0 4px',
+  margin: 0,
+};
+
 /**
- * 匹配点分路径标识符：支持 a.b.c、items[0].name 等形式。
- * 首段为常规标识符，后续可跟 .xxx 或 [N] 的组合。
+ * 词元正则：依次匹配 带引号字符串 | 数字 | state 路径。
+ * 字符串分支在最前，保证引号内内容不会被 path 分支抢先匹配。
  */
-const PATH_RE = /[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*|\[\d+\])*/g;
+const TOKEN_RE = /"(?:[^"]*)"?|\d+(?:\.\d+)?|[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*|\[\d+\])*/g;
 
 /**
  * 将条件表达式渲染为混合 ReactNode：
- * 已知 state key（含子字段路径）→ 彩色 Tag；其余字符 → 纯文本 span。
+ * 已知 state key（含子字段路径）→ 彩色 Tag；字符串/数字字面量 → 值 Tag；其余字符 → 纯文本。
  */
 export function renderExprWithHighlights(
   expr: string,
@@ -35,59 +44,75 @@ export function renderExprWithHighlights(
 ): ReactNode[] {
   if (!expr) return [];
 
-  // 构建 key 集合：顶层 key + 可能的子字段路径前缀
   const keyMap = new Map(knownKeys.map((k) => [k.key, k]));
   const nodes: ReactNode[] = [];
   let lastIndex = 0;
 
-  for (const m of expr.matchAll(PATH_RE)) {
+  for (const m of expr.matchAll(TOKEN_RE)) {
+    const text = m[0];
     const start = m.index!;
-    const end = start + m[0].length;
+    const end = start + text.length;
 
-    // 匹配前的非标识符文本
+    // 匹配前的非词元文本（运算符、括号、空白）
     if (start > lastIndex) {
       nodes.push(expr.slice(lastIndex, start));
     }
 
-    // 尝试最长匹配：先看完整路径是否是已知 key
-    // 如果不是，尝试逐步缩短看是否匹配顶层 key
-    let matched = false;
-    let path = m[0];
+    // ① 带引号字符串字面量 → 整体作为值标签（内容不当 path）
+    if (text.startsWith('"')) {
+      nodes.push(
+        <Tag key={start} color="green" style={tagStyle}>
+          {text}
+        </Tag>,
+      );
+      lastIndex = end;
+      continue;
+    }
 
-    const info = keyMap.get(path);
+    // ② 数字字面量 → 值标签
+    if (/^\d/.test(text)) {
+      nodes.push(
+        <Tag key={start} color="default" style={tagStyle}>
+          {text}
+        </Tag>,
+      );
+      lastIndex = end;
+      continue;
+    }
+
+    // ③ state 路径：先看完整路径是否是已知 key，否则看首段（嵌套路径）
+    let matched = false;
+    const info = keyMap.get(text);
     if (info) {
       nodes.push(
         <Tag
           key={start}
           color={SOURCE_TYPE_COLOR[info.sourceType] ?? 'default'}
-          style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0 }}
+          style={tagStyle}
         >
-          {path}
+          {text}
         </Tag>,
       );
       matched = true;
     }
 
-    // 如果完整路径不匹配，检查是否以某个已知 key 开头（说明是子字段路径）
     if (!matched) {
-      // 检查首段是否是已知 key（说明是嵌套路径）
-      const dotIdx = path.indexOf('.');
-      const bracketIdx = path.indexOf('[');
-      let firstSegEnd = path.length;
+      const dotIdx = text.indexOf('.');
+      const bracketIdx = text.indexOf('[');
+      let firstSegEnd = text.length;
       if (dotIdx > 0) firstSegEnd = Math.min(firstSegEnd, dotIdx);
       if (bracketIdx > 0) firstSegEnd = Math.min(firstSegEnd, bracketIdx);
 
-      const firstSeg = path.slice(0, firstSegEnd);
+      const firstSeg = text.slice(0, firstSegEnd);
       const rootInfo = keyMap.get(firstSeg);
       if (rootInfo) {
-        // 首段是已知 key，整条路径高亮为嵌套引用
         nodes.push(
           <Tag
             key={start}
             color={SOURCE_TYPE_COLOR[rootInfo.sourceType] ?? 'default'}
-            style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0, opacity: 0.85 }}
+            style={{ ...tagStyle, opacity: 0.85 }}
           >
-            {path}
+            {text}
           </Tag>,
         );
         matched = true;
@@ -95,23 +120,7 @@ export function renderExprWithHighlights(
     }
 
     if (!matched) {
-      // nil 关键字高亮
-      if (path === 'nil') {
-        nodes.push(
-          <Tag
-            key={start}
-            color="red"
-            style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0 }}
-          >
-            nil
-          </Tag>,
-        );
-        matched = true;
-      }
-    }
-
-    if (!matched) {
-      nodes.push(m[0]);
+      nodes.push(text);
     }
 
     lastIndex = end;

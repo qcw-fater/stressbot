@@ -669,7 +669,7 @@
     },
     "checkNewRole": {
       "type": "boolean",
-      "condition": "state:isNewRole == true",
+      "condition": "state:isNewRole",
       "trueNext": "initNewRole",
       "falseNext": "GetActivityList"
     },

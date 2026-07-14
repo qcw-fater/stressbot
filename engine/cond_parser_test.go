@@ -40,23 +40,32 @@ func TestParseExpr_SingleComparison(t *testing.T) {
 }
 
 func TestParseExpr_SingleKey_Nil(t *testing.T) {
+	// missing key → 错误（warn）+ false
 	s := newCondStore(map[string]any{})
 	if parseExpr("missing", s) {
 		t.Error("missing key should be false")
 	}
 }
 
-func TestParseExpr_SingleKey_NonZeroInt(t *testing.T) {
+// 严格类型：裸数值不再隐式 truthy。必须显式比较。
+func TestParseExpr_SingleKey_IntRequiresExplicitCompare(t *testing.T) {
+	// count=3 裸用 → 非布尔上下文 → false
 	s := newCondStore(map[string]any{"count": int64(3)})
-	if !parseExpr("count", s) {
-		t.Error("count=3 should be truthy")
-	}
-}
-
-func TestParseExpr_SingleKey_ZeroInt(t *testing.T) {
-	s := newCondStore(map[string]any{"count": int64(0)})
 	if parseExpr("count", s) {
-		t.Error("count=0 should be falsy")
+		t.Error("count=3 bare should be false (非布尔上下文)")
+	}
+	// 显式比较才合法
+	if !parseExpr("count != 0", s) {
+		t.Error("count=3 != 0 should be true")
+	}
+
+	// count=0
+	s2 := newCondStore(map[string]any{"count": int64(0)})
+	if !parseExpr("count == 0", s2) {
+		t.Error("count=0 == 0 should be true")
+	}
+	if parseExpr("count != 0", s2) {
+		t.Error("count=0 != 0 should be false")
 	}
 }
 
@@ -86,13 +95,11 @@ func TestParseExpr_Or(t *testing.T) {
 
 func TestParseExpr_AndOr(t *testing.T) {
 	s := newCondStore(map[string]any{"a": true, "b": true, "c": false})
-	// a && b || c → (true && true) || false → true
 	if !parseExpr("a && b || c", s) {
 		t.Error("a && b || c should be true")
 	}
 
 	s2 := newCondStore(map[string]any{"a": false, "b": true, "c": false})
-	// a && b || c → (false && true) || false → false
 	if parseExpr("a && b || c", s2) {
 		t.Error("a && b || c (a=false,c=false) should be false")
 	}
@@ -100,13 +107,11 @@ func TestParseExpr_AndOr(t *testing.T) {
 
 func TestParseExpr_Parens(t *testing.T) {
 	s := newCondStore(map[string]any{"a": true, "b": false, "c": false})
-	// a || (b && c) → true || (false && false) → true
 	if !parseExpr("a || (b && c)", s) {
 		t.Error("a || (b && c) should be true")
 	}
 
 	s2 := newCondStore(map[string]any{"a": false, "b": true, "c": true})
-	// (a || b) && c → (false || true) && true → true
 	if !parseExpr("(a || b) && c", s2) {
 		t.Error("(a || b) && c should be true")
 	}
@@ -138,17 +143,12 @@ func TestParseExpr_Complex(t *testing.T) {
 		"admin": false,
 		"level": int64(10),
 	})
-	// hp > 0 && (alive || admin) → true && (true || false) → true
 	if !parseExpr("hp > 0 && (alive || admin)", s) {
 		t.Error("complex expr 1 should be true")
 	}
-
-	// level >= 10 || (alive && admin) → true || (true && false) → true
 	if !parseExpr("level >= 10 || (alive && admin)", s) {
 		t.Error("complex expr 2 should be true")
 	}
-
-	// !admin && hp > 50 → true && true → true
 	if !parseExpr("!admin && hp > 50", s) {
 		t.Error("complex expr 3 should be true")
 	}
@@ -180,5 +180,286 @@ func TestParseExpr_MultipleOr(t *testing.T) {
 	s := newCondStore(map[string]any{"a": false, "b": false, "c": true})
 	if !parseExpr("a || b || c", s) {
 		t.Error("a || b || c (c=true) should be true")
+	}
+}
+
+// ─── 算术 ────────────────────────────────────────────────
+
+func TestParseExpr_ArithmeticPrecedence(t *testing.T) {
+	s := newCondStore(map[string]any{"n": int64(5)})
+	if !parseExpr("n + 2 * 3 == 11", s) { // 5 + 6
+		t.Error("n + 2*3 == 11 should be true")
+	}
+	if !parseExpr("(n + 2) * 3 == 21", s) { // 7 * 3
+		t.Error("(n+2)*3 == 21 should be true")
+	}
+}
+
+func TestParseExpr_Modulo(t *testing.T) {
+	even := newCondStore(map[string]any{"index": int64(4)})
+	odd := newCondStore(map[string]any{"index": int64(5)})
+	if !parseExpr("index % 2 == 0", even) {
+		t.Error("4 % 2 == 0 should be true")
+	}
+	if parseExpr("index % 2 == 0", odd) {
+		t.Error("5 % 2 == 0 should be false")
+	}
+}
+
+// 内置 id/index 经 state.Set 注入为原生 Go int（非 int64）——数值层必须识别，
+// 否则 index % 2、index > 0 等会误判为非数值。
+func TestParseExpr_BuiltinIntIndex(t *testing.T) {
+	even := newCondStore(map[string]any{"index": 4}) // 原生 int
+	odd := newCondStore(map[string]any{"index": 5})
+	if !parseExpr("index % 2 == 0", even) {
+		t.Error("index(原生 int) % 2 == 0 应为 true")
+	}
+	if parseExpr("index % 2 == 0", odd) {
+		t.Error("index(原生 int)=5 % 2 == 0 应为 false")
+	}
+	s := newCondStore(map[string]any{"index": 7})
+	if !parseExpr("index > 0", s) {
+		t.Error("index(原生 int) > 0 应为 true")
+	}
+	if !parseExpr("index == 7", s) {
+		t.Error("index(原生 int) == 7 应为 true")
+	}
+	if !parseExpr("-index < 0", s) {
+		t.Error("-index(原生 int) < 0 应为 true")
+	}
+}
+
+func TestParseExpr_Division_IntVsFloat(t *testing.T) {
+	// 字面量整除
+	if !parseExpr("7 / 2 == 3", newCondStore(nil)) {
+		t.Error("7 / 2 == 3 (整除) should be true")
+	}
+	if parseExpr("7 / 2 == 3.5", newCondStore(nil)) {
+		t.Error("7 / 2 == 3.5 should be false (整除得 3)")
+	}
+	// 任一浮点 → 浮点除
+	if !parseExpr("7.0 / 2 == 3.5", newCondStore(nil)) {
+		t.Error("7.0 / 2 == 3.5 (浮点除) should be true")
+	}
+}
+
+func TestParseExpr_UnaryMinus(t *testing.T) {
+	s := newCondStore(map[string]any{"hp": int64(5)})
+	if !parseExpr("-hp < 0", s) {
+		t.Error("-hp < 0 (hp=5) should be true")
+	}
+	if !parseExpr("-5 == -5", newCondStore(nil)) {
+		t.Error("-5 == -5 should be true")
+	}
+}
+
+func TestParseExpr_NegativeDivMod(t *testing.T) {
+	// Go 语义：整除向零截断、取模取被除数符号
+	if !parseExpr("-7 / 2 == -3", newCondStore(nil)) {
+		t.Error("-7 / 2 == -3 (向零截断) should be true")
+	}
+	if !parseExpr("-5 % 3 == -2", newCondStore(nil)) {
+		t.Error("-5 % 3 == -2 should be true")
+	}
+}
+
+// ─── 字符串字面量 ────────────────────────────────────────
+
+func TestParseExpr_StringLiteral(t *testing.T) {
+	s := newCondStore(map[string]any{"role": "member", "empty": ""})
+	if !parseExpr("role == \"member\"", s) {
+		t.Error("role == \"member\" should be true")
+	}
+	if !parseExpr("role != \"guest\"", s) {
+		t.Error("role != \"guest\" should be true")
+	}
+	if !parseExpr("empty == \"\"", s) {
+		t.Error("empty == \"\" should be true")
+	}
+}
+
+// ─── 类型不匹配（均应 false + warn）─────────────────────
+
+func TestParseExpr_TypeMismatch(t *testing.T) {
+	cases := []struct {
+		name string
+		expr string
+		data map[string]any
+	}{
+		{"int vs string", "hp == \"x\"", map[string]any{"hp": int64(5)}},
+		{"bool vs int", "alive == 1", map[string]any{"alive": true}},
+		{"number in bool context", "hp && alive", map[string]any{"hp": int64(5), "alive": true}},
+		{"bool in arithmetic", "alive + 1 == 1", map[string]any{"alive": true}},
+		{"string concat", "\"a\" + \"b\" == \"ab\"", nil},
+	}
+	for _, c := range cases {
+		s := newCondStore(c.data)
+		if parseExpr(c.expr, s) {
+			t.Errorf("%s: %q should be false (类型不匹配)", c.name, c.expr)
+		}
+	}
+}
+
+// ─── missing key（均应 false + warn）────────────────────
+
+func TestParseExpr_MissingKey(t *testing.T) {
+	s := newCondStore(map[string]any{})
+	if parseExpr("missing == 0", s) {
+		t.Error("missing == 0 should be false (key 不存在)")
+	}
+	if parseExpr("missing != \"\"", s) {
+		t.Error("missing != \"\" should be false (key 不存在)")
+	}
+}
+
+// ─── 除零 / 取模零 / 浮点取模 ────────────────────────────
+
+func TestParseExpr_ArithmeticErrors(t *testing.T) {
+	s := newCondStore(map[string]any{"hp": int64(5)})
+	if parseExpr("hp / 0 == 0", s) {
+		t.Error("hp / 0 (除零) should be false")
+	}
+	if parseExpr("hp % 0 == 0", s) {
+		t.Error("hp % 0 (取模零) should be false")
+	}
+	if parseExpr("1.5 % 2 == 0", newCondStore(nil)) {
+		t.Error("1.5 % 2 (浮点取模) should be false")
+	}
+}
+
+// ─── uint64 精确比较（防 2^53 失真）────────────────────
+
+func TestParseExpr_Uint64Exactness(t *testing.T) {
+	// 2^53+1 作为 float64 会 round 到 2^53；必须按整数精确比较。
+	pid := uint64(9007199254740993) // 2^53 + 1
+	s := newCondStore(map[string]any{"pid": pid})
+	if !parseExpr("pid == 9007199254740993", s) {
+		t.Error("uint64 精确比较失败（浮点会失真）")
+	}
+	if parseExpr("pid == 9007199254740992", s) {
+		t.Error("pid 不应等于 2^53")
+	}
+}
+
+// ─── 括号算术分组 ────────────────────────────────────────
+
+func TestParseExpr_ParensArithmetic(t *testing.T) {
+	x3 := newCondStore(map[string]any{"x": int64(3)})
+	x4 := newCondStore(map[string]any{"x": int64(4)})
+	if !parseExpr("(x + 1) % 2 == 0", x3) { // 4 % 2
+		t.Error("(3+1)%2 == 0 should be true")
+	}
+	if parseExpr("(x + 1) % 2 == 0", x4) { // 5 % 2
+		t.Error("(4+1)%2 == 0 should be false")
+	}
+}
+
+// ─── PATH 数组下标 ───────────────────────────────────────
+
+func TestParseExpr_PathArrayIndex(t *testing.T) {
+	s := newCondStore(map[string]any{
+		"items": []any{
+			map[string]any{"count": int64(10)},
+		},
+	})
+	if !parseExpr("items[0].count > 5", s) {
+		t.Error("items[0].count > 5 should be true")
+	}
+}
+
+// ─── 畸形表达式（均应 false + warn）────────────────────
+
+func TestParseExpr_Malformed(t *testing.T) {
+	cases := []string{
+		"hp >> 0",   // 多余 >
+		"hp = 0",    // 单 =
+		"(hp > 0",   // 缺 )
+		"hp > 0)",   // 多余 )
+		"1.guildId", // 数字后跟 .
+		".5",        // 前导 .
+		"hp ? 1",    // 非法字符
+		"items[]",   // 空下标
+	}
+	for _, e := range cases {
+		s := newCondStore(map[string]any{"hp": int64(5)})
+		if parseExpr(e, s) {
+			t.Errorf("malformed %q should be false", e)
+		}
+	}
+}
+
+// ─── 无空格健壮性 ────────────────────────────────────────
+
+func TestParseExpr_NoWhitespace(t *testing.T) {
+	s := newCondStore(map[string]any{"hp": int64(50), "alive": true, "admin": false})
+	if !parseExpr("hp>0&&(alive||admin)", s) {
+		t.Error("无空格表达式应与带空格等价")
+	}
+}
+
+// ! 在 unary 层（高于比较）：!a == b 解析为 !(a == b)，对 bool 等价于 a != b。
+func TestParseExpr_NotPrecedence(t *testing.T) {
+	// a=true, b=false: !(a==b) = !(true==false) = !false = true
+	s := newCondStore(map[string]any{"a": true, "b": false})
+	if !parseExpr("!a == b", s) {
+		t.Error("!a == b (a=true,b=false) 应为 true（等价 !(a==b)）")
+	}
+	// a=true, b=true: !(true==true) = !true = false
+	s2 := newCondStore(map[string]any{"a": true, "b": true})
+	if parseExpr("!a == b", s2) {
+		t.Error("!a == b (a=true,b=true) 应为 false")
+	}
+}
+
+// 链式比较不合法（多余 token）。
+func TestParseExpr_ChainedComparisonRejected(t *testing.T) {
+	if parseExpr("1 < 2 < 3", newCondStore(nil)) {
+		t.Error("1 < 2 < 3 应被拒绝（多余 token）")
+	}
+}
+
+// 裸算术在顶层（非布尔结果）→ false。
+func TestParseExpr_BareArithmeticTopLevel(t *testing.T) {
+	s := newCondStore(map[string]any{"x": int64(3)})
+	if parseExpr("x + 1", s) {
+		t.Error("x + 1 顶层裸算术应为 false（结果非布尔）")
+	}
+}
+
+// 非标量操作数（list / []byte）→ false。
+func TestParseExpr_NonScalarOperand(t *testing.T) {
+	list := newCondStore(map[string]any{"items": []any{int64(1)}})
+	if parseExpr("items == 0", list) {
+		t.Error("list == 0 应为 false（非标量）")
+	}
+	bytes := newCondStore(map[string]any{"data": []byte("x")})
+	if parseExpr("data == \"x\"", bytes) {
+		t.Error("[]byte == \"x\" 应为 false（非标量，不隐式转字符串）")
+	}
+}
+
+// local-false 语义：missing || fallback，fallback 为真 → 结果 true（同时 warn missing）。
+func TestParseExpr_LocalFalseOrFallback(t *testing.T) {
+	s := newCondStore(map[string]any{"fallback": true})
+	if !parseExpr("missing || fallback", s) {
+		t.Error("missing || fallback (fallback=true) 应为 true（local-false 语义）")
+	}
+}
+
+// ─── EvalCondition（state: 前缀公开入口）────────────────
+
+func TestEvalCondition_StatePrefix(t *testing.T) {
+	s := newCondStore(map[string]any{"hp": int64(80), "index": int64(4)})
+	if !EvalCondition("state:hp > 0", s) {
+		t.Error("state:hp > 0 should be true")
+	}
+	if !EvalCondition("state:index % 2 == 0", s) {
+		t.Error("state:index % 2 == 0 should be true")
+	}
+	if EvalCondition("hp > 0", s) {
+		t.Error("缺少 state: 前缀应返回 false")
+	}
+	if !EvalCondition("  ", s) {
+		t.Error("空表达式应返回 true")
 	}
 }

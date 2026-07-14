@@ -47,7 +47,7 @@
 
     "checkNewRole": {
       "type": "boolean",
-      "condition": "state:isNewRole == true",
+      "condition": "state:isNewRole",
       "trueNext": "initNewRole",
       "falseNext": "GetActivityList"
     },
@@ -123,7 +123,7 @@
     },
     "rankedRoleStartMatch": {
       "type": "boolean",
-      "condition": "state:rankedTeamRole!=member",
+      "condition": "state:rankedTeamRole != \"member\"",
       "trueNext": "RankedStartMatch",
       "falseNext": "RankedMemberWaitMatch"
     },
@@ -131,7 +131,7 @@
     "RankedMemberWaitMatch": { "type": "action", "action": "RankedMemberWaitMatch" },
     "rankedAfterMatchStart": {
       "type": "boolean",
-      "condition": "state:rankedMatchStarted==true && !rankedRoundFailed",
+      "condition": "state:rankedMatchStarted",
       "trueNext": "rankedBattlePhase"
     },
 
@@ -144,7 +144,7 @@
     "ListenStartLoading": { "type": "action", "action": "ListenStartLoading", "onError": { "strategy": "skip" } },
     "rankedCanEnterBattle": {
       "type": "boolean",
-      "condition": "state:battleAddress && battleId && battleSecretKey && battleSession",
+      "condition": "state:battleId != 0 && battleSession != 0 && battleAddress != \"\" && battleSecretKey != \"\"",
       "trueNext": "startBattle"
     },
 

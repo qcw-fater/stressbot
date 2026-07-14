@@ -160,7 +160,7 @@ export function StateExprInput({ value, onChange, placeholder }: StateExprInputP
           ref={inputRef}
           value={tail}
           onChange={(e) => setTail(e.target.value)}
-          placeholder={placeholder ?? '如 hp > 0 || playerInfo.level >= 10'}
+          placeholder={placeholder ?? '如 hp > 0 && index % 2 == 0'}
           style={{ flex: 1 }}
         />
         <Popover
@@ -179,10 +179,8 @@ export function StateExprInput({ value, onChange, placeholder }: StateExprInputP
         </Popover>
       </div>
       <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
-        布尔值：<code>alive</code>；比较：<code>hp &gt; 0</code>；
-        nil 判断：<code>key != nil</code> / <code>key == nil</code>；
-        嵌套字段：<code>playerInfo.hp &gt; 0</code>；
-        复合 <code>&&</code> <code>||</code> <code>!</code> 和括号
+        示例：<code>alive</code>（布尔字段）、<code>hp &gt; 0</code>（比较）、<code>index % 2 == 0</code>（算术）、<code>role == "member"</code>（文字值需加双引号）；
+        可用 <code>&&</code>（并且）、<code>||</code>（或者）、<code>!</code>（取反）与括号组合
       </div>
       {previewNodes && previewNodes.length > 0 && (
         <div

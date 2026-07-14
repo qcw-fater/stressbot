@@ -39,7 +39,8 @@ type ActionHandler interface {
 	// ctx 来自当前流程执行上下文，供声明式 / Lua 动作外壳共享同一取消语义。
 	ExecuteAction(ctx context.Context, actionDef *ActionDef) error
 	// ExecuteBoolean 对条件表达式求值，返回 true/false。
-	// 表达式支持 state: 前缀（从 StateStore 比较）和 lua: 前缀（调用 Lua 脚本）。
+	// 表达式支持 state: 前缀（声明式表达式：比较/算术/逻辑，严格类型，见 cond_parser.go）
+	// 和 lua: 前缀（调用 Lua 脚本，须 return true/false）。
 	ExecuteBoolean(expression string) bool
 	// RegisterListen 批量注册持久化推送监听（注册本身不阻塞流程）。推送到达后的处理分两路，
 	// 均不在网络 pump goroutine 内碰业务 LState：① script 回调——pump 只把回调**投递到 Robot

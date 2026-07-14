@@ -789,47 +789,60 @@ type ListenDef struct {
 | `PrefixState` | `"state:"` | 状态存储条件表达式 |
 | `PrefixLua` | `"lua:"` | Lua 脚本条件 |
 
-### 14.2 递归下降解析器语法
+### 14.2 文法（严格类型，零关键字）
 
 ```
-expr     -> or_expr
-or_expr  -> and_expr ( "||" and_expr )*
-and_expr -> unary ( "&&" unary )*
-unary    -> "!" unary | atom
-atom     -> "(" expr ")" | comparison
-comparison -> key op value | key
-op       -> ">=" | "<=" | "!=" | "==" | ">" | "<"
+expr       → or
+or         → and ("||" and)*
+and        → unary ("&&" unary)*
+unary      → "!" unary | comparison
+comparison → arith (comp_op arith)?
+arith      → term (("+"|"-") term)*
+term       → factor (("*"|"/"|"%") factor)*
+factor     → NUMBER | STRING | PATH | "(" expr ")" | "-" factor
+comp_op    → "==" | "!=" | ">" | ">=" | "<" | "<="
 ```
 
-### 14.3 解析函数
+字面量只有数字（`123`、`1.5`）和带引号字符串（`"member"`）；裸标识符恒为 state 路径。
+**无 `true`/`false`/`nil` 关键字**——store 值域闭合且无指针，nil 只可能是「key 缺失」，
+由「缺失 → 错误」处理；存在性用按类型的非零比较表达（`!= 0` / `!= ""`）。
+
+### 14.3 词法分析（`cond_tokenizer.go`）
+
+`tokenize(input)` 产出 token 序列（末尾 EOF 哨兵）：NUMBER、STRING、PATH、运算符、括号。
+
+- 数字 `.` 后必须跟数字；拒绝科学计数/十六进制；整数字面量溢出报错（不退化为 float）。
+- 字符串 `"..."` 无转义；未闭合报错；`""` 合法。
+- PATH 支持点分与 `[N]` 续段；空/非数字下标报错。
+- 单字符 `=`/`|`/`&` 直接报错（常见笔误）。
+
+### 14.4 解析函数（`cond_parser.go`，递归下降解释器）
 
 | 函数 | 职责 |
 |------|------|
-| `parseExpr` | 入口，剥离前缀后调用 `parseOr` |
-| `parseOr` | 按 `||` 拆分（括号外层），任一为 true 即返回 |
-| `parseAnd` | 按 `&&` 拆分（括号外层），全部为 true 才返回 |
-| `parseUnary` | 处理 `!` 前缀取反，支持嵌套 `!!` |
-| `parseAtom` | 匹配括号分组或原子条件 |
-| `evalAtom` | 求值单个原子条件 |
+| `parseExpr` | 入口，剥离 `state:` 后求值；错误 → 一条 warn |
+| `parseOr` / `parseAnd` | `\|\|` / `&&`；仅当运算符出现才对操作数 asBool，单操作数透传 |
+| `parseUnary` | `!` 取反（要求操作数 bool） |
+| `parseComparison` | `arith (comp_op arith)?`，有 comp_op 返回 bool，否则透传值 |
+| `parseArith` / `parseTerm` | 加减 / 乘除模 |
+| `parseFactor` | NUMBER/STRING/PATH/`( expr )`/一元 `-` |
 
-### 14.4 辅助函数
+短路：`&&` 在左操作数 effective-false 时跳过右侧求值、`||` 在 effective-true 时跳过
+（通过 `skip` 标志在解析结构的同时跳过求值，token 仍被正确消费）。
 
-| 函数 | 职责 |
-|------|------|
-| `splitOutsideParens` | 按分隔符拆分字符串，跳过括号内的部分 |
-| `findCloseParen` | 找到与第一个 `(` 匹配的 `)` 位置 |
-| `findOpOutsideParens` | 在括号外层查找运算符位置 |
-| `parseRHS` | 尝试将右值解析为 int64、float64 或 string |
+### 14.5 严格类型纪律与错误语义（`cond_compare.go`）
 
-### 14.5 原子求值
+- 裸操作数（布尔上下文）必须 bool；数/串/missing → warn + false。
+- `> >= < <=` 仅数值；`== !=` 仅同类型（number/string/bool），跨类型 → warn + false。
+- 算术 `+ - * / %` 仅数值；`%` 仅整数；除法两边整型→整除、任一浮点→浮点除；不做字符串拼接。
+- missing key → warn + false；除零、浮点取模、uint64 越界参与整数运算 → warn + false。
+- `[]byte`/list/map 非标量，任何操作 → warn + false。
+- 数值比较用 `cmpNumbersExact`（int64/uint64 精确比较，防玩家 ID 超 2^53 失真）。
+- `state.CompareValues` 不再用于条件求值，仅 FilterDef 过滤器沿用（语义未变）。
 
-- **比较表达式** `key op value`：从 StateStore 读取 lhs，使用 `state.CompareValues(lhs, rhs, op)` 类型感知比较
-- **裸键** `key`：从 StateStore 读取值，进行真值检查：
-  - `bool` -> 直接返回
-  - `int/int64/float64` -> != 0
-  - `string` -> != ""
-  - 其他 -> true
-- 值为 nil 时返回 false
+错误语义（local-false）：出错的子表达式视为 effective-false 并记录首个错误；短路照常；
+顶层若有错误打一条 warn，但返回实际计算出的布尔结果（如 `missing || fallback`，fallback
+为真时结果为 true）。仅当结果不是 bool（裸数值/字符串顶层、结构错误）才返回 false。
 
 ### 14.6 条件求值入口
 
