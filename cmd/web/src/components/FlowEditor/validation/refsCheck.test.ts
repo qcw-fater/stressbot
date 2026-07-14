@@ -122,11 +122,18 @@ describe('validateFlow', () => {
     expect(r.errors.find((e) => e.code === 'LISTEN_SERVER_FORMAT')).toBeTruthy();
   });
 
-  it('LISTEN_CB_NOT_FOUND：listenRefs 引用不存在 listen', () => {
+  it('LISTEN_REF_NOT_FOUND：listenRefs 引用不存在 listen', () => {
     const r = validateFlow(baseFlow({
       nodes: { main: { type: 'action', action: 'A1', listenRefs: [{ server: 'tcp:x', listen: 'ghost', route: {} }] } },
     }));
-    expect(r.errors.find((e) => e.code === 'LISTEN_CB_NOT_FOUND')).toBeTruthy();
+    expect(r.errors.find((e) => e.code === 'LISTEN_REF_NOT_FOUND')).toBeTruthy();
+  });
+
+  it('listenRefs listen=null 合法（静默预注册，不再报 LISTEN_EMPTY_NAME）', () => {
+    const r = validateFlow(baseFlow({
+      nodes: { main: { type: 'action', action: 'A1', listenRefs: [{ server: 'tcp:x', listen: null, route: {} }] } },
+    }));
+    expect(r.errors.find((e) => e.code === 'LISTEN_EMPTY_NAME')).toBeFalsy();
   });
 
   // ── Action 级 ──
@@ -573,5 +580,55 @@ describe('switch node validation', () => {
 
     expect(report.errors.filter((e) => e.code === 'NODE_REF_NOT_FOUND')).toEqual([]);
     expect(report.errors.filter((e) => e.code === 'NODE_SELF_REF')).toEqual([]);
+  });
+
+  // ── 整数契约 / HTTP / required-optional 互斥（前端兜底，对齐 Go int / 白名单） ──
+
+  it('BINDING_NON_INTEGER：min/max/length/count/precision 小数报错', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpSend', service: 'logic', route: { cmd: 1 }, c2sProto: 'X.Foo',
+          bindings: [
+            { field: 'a', type: 'randomInt', min: 1.5, max: 10 },
+            { field: 'b', type: 'randomString', length: 8.5 },
+          ],
+        },
+      },
+    }));
+    expect(r.errors.filter((e) => e.code === 'BINDING_NON_INTEGER').map((e) => e.message)).toEqual([
+      'action "A1".bindings[0] 的 min 必须是整数（当前 1.5）',
+      'action "A1".bindings[1] 的 length 必须是整数（当前 8.5）',
+    ]);
+  });
+
+  it('ACTION_TIMEOUT_NON_INTEGER / ACTION_POLLMS_NON_INTEGER：超时/轮询小数报错', () => {
+    const r = validateFlow(baseFlow({
+      actions: { A1: { pattern: 'tcpListen', service: 'logic', route: { cmd: 1 }, timeout: 1.5, pollMs: 2.5 } },
+    }));
+    expect(r.errors.find((e) => e.code === 'ACTION_TIMEOUT_NON_INTEGER')).toBeTruthy();
+    expect(r.errors.find((e) => e.code === 'ACTION_POLLMS_NON_INTEGER')).toBeTruthy();
+  });
+
+  it('HTTP_METHOD_INVALID / HTTP_CONTENT_TYPE_INVALID：非法 method/contentType 报错', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: { pattern: 'httpRequest', url: 'http://x', method: 'POTS' as 'POST', contentType: 'jsno' as 'json' },
+      },
+    }));
+    expect(r.errors.find((e) => e.code === 'HTTP_METHOD_INVALID')).toBeTruthy();
+    expect(r.errors.find((e) => e.code === 'HTTP_CONTENT_TYPE_INVALID')).toBeTruthy();
+  });
+
+  it('BINDING_REQUIRED_OPTIONAL_CONFLICT：required 与 optional 同开报 warning', () => {
+    const r = validateFlow(baseFlow({
+      actions: {
+        A1: {
+          pattern: 'tcpSend', service: 'logic', route: { cmd: 1 }, c2sProto: 'X.Foo',
+          bindings: [{ field: 'a', type: 'fixed', value: 1, required: true, optional: true }],
+        },
+      },
+    }));
+    expect(r.warnings.find((e) => e.code === 'BINDING_REQUIRED_OPTIONAL_CONFLICT')).toBeTruthy();
   });
 });

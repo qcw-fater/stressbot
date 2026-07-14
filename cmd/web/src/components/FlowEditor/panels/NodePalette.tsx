@@ -268,7 +268,8 @@ export function NodePalette() {
                         <span className="pattern-badge" data-pattern={kind}>
                           {kind}
                         </span>
-                        {refSummary && <span title={refSummary}>{t.defaultRef?.server}</span>}
+                        {/* 服务器名直接展示；外层卡片 Tooltip 已含 refSummary，不再叠加原生 title 避免双提示 */}
+                        {refSummary && <span>{t.defaultRef?.server}</span>}
                       </div>
                     </div>
                   </Tooltip>

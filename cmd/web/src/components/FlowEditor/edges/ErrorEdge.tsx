@@ -3,6 +3,7 @@
  */
 
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps } from '@xyflow/react';
+import { Tooltip } from 'antd';
 import { buildEdgeStyle } from './edgeStyle';
 
 export function ErrorEdge({
@@ -28,24 +29,25 @@ export function ErrorEdge({
     <>
       <BaseEdge id={id} path={path} style={selected ? style : { ...style, opacity: 0.82 }} markerEnd={markerEnd} />
       <EdgeLabelRenderer>
-        <div
-          title="onError.handler 调用边"
-          style={{
-            position: 'absolute',
-            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-            fontSize: 10,
-            padding: '1px 6px',
-            borderRadius: 8,
-            background: 'var(--bg-panel)',
-            border: '1px solid var(--color-error)',
-            color: 'var(--color-error)',
-            fontWeight: 600,
-            pointerEvents: 'all',
-          }}
-          className="nodrag nopan"
-        >
-          handler
-        </div>
+        <Tooltip title="onError.handler 调用边" mouseEnterDelay={0.4}>
+          <div
+            style={{
+              position: 'absolute',
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+              fontSize: 10,
+              padding: '1px 6px',
+              borderRadius: 8,
+              background: 'var(--bg-panel)',
+              border: '1px solid var(--color-error)',
+              color: 'var(--color-error)',
+              fontWeight: 600,
+              pointerEvents: 'all',
+            }}
+            className="nodrag nopan"
+          >
+            handler
+          </div>
+        </Tooltip>
       </EdgeLabelRenderer>
     </>
   );

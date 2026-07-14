@@ -106,7 +106,7 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
   useEffect(() => {
     let cancel = false;
     fetchBaselineScriptIndex()
-      .then((list) => { if (!cancel) setFiles(list); })
+      .then((list) => { if (!cancel) setFiles(list ?? []); })
       .catch(() => undefined);
     return () => {
       cancel = true;

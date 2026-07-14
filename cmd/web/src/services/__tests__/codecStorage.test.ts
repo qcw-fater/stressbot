@@ -139,10 +139,10 @@ describe('baseline codec 封装', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/sbot/baseline/adapter/index.json');
   });
 
-  it('fetchBaselineCodecIndex fetch 失败返回 []', async () => {
+  it('fetchBaselineCodecIndex fetch 失败返回 null（不再折叠为 []，避免误判为「服务器删光」）', async () => {
     const fetchMock = vi.mocked(globalThis.fetch);
     fetchMock.mockResolvedValueOnce(new Response('Not Found', { status: 404 }));
-    expect(await fetchBaselineCodecIndex()).toEqual([]);
+    expect(await fetchBaselineCodecIndex()).toBeNull();
   });
 
   it('fetchBaselineCodec 命中 /sbot/baseline/adapter/{name}，encodeURIComponent 生效', async () => {

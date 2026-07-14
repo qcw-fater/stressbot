@@ -38,6 +38,8 @@ export interface LoadResult {
   hash: string;
   /** 实际加载的文件名 */
   files: string[];
+  /** 编译期遇到的错误（语法错误、缺失 import、未知类型等）；非空表示本次加载不完整。 */
+  errors: string[];
 }
 
 export async function loadProtos(source: ProtoSource): Promise<LoadResult> {
@@ -101,6 +103,7 @@ async function loadFromInline(): Promise<LoadResult> {
 
 async function loadFromBaselineApi(): Promise<LoadResult> {
   const files = await fetchBaselineProtoIndex();
+  if (files === null) throw new Error('proto 索引请求失败，请检查网络或服务器');
   if (files.length === 0) throw new Error('proto index 为空');
   const sources: Record<string, string> = {};
   await Promise.all(
@@ -115,6 +118,7 @@ async function loadFromBaselineApi(): Promise<LoadResult> {
 
 async function loadFromHttp(): Promise<LoadResult> {
   const files = await fetchBaselineProtoIndex();
+  if (files === null) throw new Error('proto 索引请求失败，请检查网络或服务器');
   const sources: Record<string, string> = {};
   await Promise.all(
     files.map(async (name) => {
@@ -214,12 +218,21 @@ async function parseAll(
     `[ProtoLoader] 加载完成：${fileList.length} 个 .proto 文件、${countMessages(root)} 个 message（load 阶段 ${registeredAfterLoad} → 兜底后 ${registeredAfterFallback}）`,
   );
   if (errors.length > 0) {
-    console.warn(`[ProtoLoader] ${errors.length} 处警告：`, errors.slice(0, 8));
+    console.warn(`[ProtoLoader] ${errors.length} 处错误：`, errors.slice(0, 8));
+  }
+
+  // 编译完整性判定：若没有任何 message 注册成功，说明 .proto 集合整体不可用，
+  // 不能返回一个空 Root 让上层标 ready——否则 ProtoBrowser/字段选择/校验会基于空集合工作，
+  // 而任务下发仍带原始 proto，后端编译时才失败。这里直接拒绝，让 protoStore 进入 error 态。
+  if (registeredAfterFallback === 0 && fileList.length > 0) {
+    throw new Error(
+      `proto 编译失败，没有成功注册任何 message。请检查 .proto 语法或 import 是否完整：\n${errors.slice(0, 5).join('\n')}`,
+    );
   }
 
   const concat = fileList.map((f) => sources[f] ?? '').join('\n---\n');
   const hash = await sha1(concat);
-  return { root, hash, files: fileList };
+  return { root, hash, files: fileList, errors };
 }
 
 /** 简单递归计数 root 下的 message 类型，用于诊断加载完成度。

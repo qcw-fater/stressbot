@@ -279,7 +279,8 @@ export function RuntimeBar({
   );
 
   return (
-    <Space size={4} align="center">
+    // flexWrap 让顶部命令条在窄屏换行，避免被 overflow:hidden 的外壳裁切导致按钮不可达。
+    <Space size={4} align="center" wrap>
       {connectionLost && <Tag color="error">服务器连接异常</Tag>}
 
       {/* === 状态徽章组 === */}

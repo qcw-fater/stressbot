@@ -26,7 +26,8 @@ export interface FlowJson {
 
 export function flowToJson(input: ExportInput): FlowJson {
   return {
-    defaultDelayMs: input.defaultDelayMs,
+    // Go 端 TaskFlow.DefaultDelayMs 为 int：截断小数，避免后端 json.Unmarshal 失败。
+    defaultDelayMs: Math.trunc(input.defaultDelayMs),
     nodes: mapValues(input.nodes, cleanNode),
     actions: mapValues(input.actions, cleanAction),
     listens: mapValues(input.listens, cleanListen),
@@ -52,7 +53,7 @@ function cleanNode(n: FlowNode): FlowNode {
       break;
     case 'loop':
       if (n.body) out.body = n.body;
-      if (typeof n.loopCount === 'number') out.loopCount = n.loopCount;
+      if (typeof n.loopCount === 'number') out.loopCount = Math.trunc(n.loopCount);
       if (n.condition) out.condition = n.condition;
       if (n.breakCondition) out.breakCondition = n.breakCondition;
       break;
@@ -60,23 +61,27 @@ function cleanNode(n: FlowNode): FlowNode {
       if (n.condition) out.condition = n.condition;
       if (n.trueNext) out.trueNext = n.trueNext;
       if (n.falseNext) out.falseNext = n.falseNext;
-      if (typeof n.delayMs === 'number' && n.delayMs !== 0) out.delayMs = n.delayMs;
+      if (typeof n.delayMs === 'number' && n.delayMs !== 0) out.delayMs = Math.trunc(n.delayMs);
       break;
     case 'switch': {
-      const cases = (n.cases ?? [])
-        .filter((c) => c.condition?.trim() && c.next?.trim())
-        .map((c): SwitchCase => ({ condition: c.condition.trim(), next: c.next.trim() }));
+      // 不再过滤空 condition/next 的 case：旧实现会静默删掉无效 case，
+      // 导致启动时 validateFlow（对 toTaskFlow 结果）看不到原始错误而放行，
+      // 同时保存/导出也永久丢项。保留原样，让 validateFlow 的 SWITCH_CASE_INVALID 拦截。
+      const cases = (n.cases ?? []).map((c): SwitchCase => ({
+        condition: typeof c.condition === 'string' ? c.condition.trim() : '',
+        next: typeof c.next === 'string' ? c.next.trim() : '',
+      }));
       if (cases.length) out.cases = cases;
       if (n.defaultNext?.trim()) out.defaultNext = n.defaultNext.trim();
       break;
     }
     case 'weighted':
-      if (n.options?.length) out.options = n.options.map((o): WeightedOption => ({ node: o.node, weight: o.weight }));
+      if (n.options?.length) out.options = n.options.map((o): WeightedOption => ({ node: o.node, weight: Math.trunc(o.weight) }));
       break;
     case 'wait':
-      if (typeof n.waitMs === 'number' && n.waitMs !== 0) out.waitMs = n.waitMs;
-      if (typeof n.waitMin === 'number') out.waitMin = n.waitMin;
-      if (typeof n.waitMax === 'number') out.waitMax = n.waitMax;
+      if (typeof n.waitMs === 'number' && n.waitMs !== 0) out.waitMs = Math.trunc(n.waitMs);
+      if (typeof n.waitMin === 'number') out.waitMin = Math.trunc(n.waitMin);
+      if (typeof n.waitMax === 'number') out.waitMax = Math.trunc(n.waitMax);
       break;
     case 'break':
     case 'continue':
@@ -132,8 +137,8 @@ function cleanAction(a: ActionDef): ActionDef {
   if (pruned.s2cProto) out.s2cProto = pruned.s2cProto;
   if (pruned.bindings?.length) out.bindings = pruned.bindings.map(cleanFieldBind);
   if (pruned.store?.length) out.store = pruned.store.map(cleanStoreMapping);
-  if (typeof pruned.timeout === 'number' && pruned.timeout > 0) out.timeout = pruned.timeout;
-  if (typeof pruned.pollMs === 'number' && pruned.pollMs > 0) out.pollMs = pruned.pollMs;
+  if (typeof pruned.timeout === 'number' && pruned.timeout > 0) out.timeout = Math.trunc(pruned.timeout);
+  if (typeof pruned.pollMs === 'number' && pruned.pollMs > 0) out.pollMs = Math.trunc(pruned.pollMs);
   if (pruned.url) out.url = pruned.url;
   if (pruned.method) out.method = pruned.method;
   if (pruned.contentType) out.contentType = pruned.contentType;
@@ -150,10 +155,12 @@ function cleanFieldBind(b: FieldBind): FieldBind {
   if (b.values?.length) out.values = [...b.values];
   if (b.required) out.required = true;
   if (b.filters?.length) out.filters = b.filters.map(cleanFilter);
-  if (typeof b.min === 'number') out.min = b.min;
-  if (typeof b.max === 'number') out.max = b.max;
-  if (typeof b.length === 'number') out.length = b.length;
-  if (typeof b.count === 'number') out.count = b.count;
+  // 这些字段在 Go 端为 int：导出时强制 Math.trunc，避免小数落到 JSON 让后端 json.Unmarshal 失败。
+  if (typeof b.min === 'number') out.min = Math.trunc(b.min);
+  if (typeof b.max === 'number') out.max = Math.trunc(b.max);
+  if (typeof b.length === 'number') out.length = Math.trunc(b.length);
+  if (typeof b.count === 'number') out.count = Math.trunc(b.count);
+  if (typeof b.precision === 'number') out.precision = Math.trunc(b.precision);
   if (b.charset) out.charset = b.charset;
   if (b.excludeSource) out.excludeSource = b.excludeSource;
   if (b.optional) out.optional = true;
@@ -171,11 +178,13 @@ function cleanFieldBind(b: FieldBind): FieldBind {
 }
 
 function cleanMapEntryValueBind(b: FieldBind): FieldBind {
-  const out = cleanFieldBind({ ...b, field: undefined, storeAs: undefined, condition: undefined, wrap: undefined });
+  // map entry value 保留 condition / wrap：后端 resolveMapValueStrict 会求值 entry.Value.Condition
+  // 并在通用分支按 fb.Wrap 包装（engine/action.go:416-418, 641-649）。旧实现无条件 delete，
+  // 导致从 JSON 导入的合法 condition/wrap 在保存或启动导出时静默消失。
+  // 仅剥离 field/storeAs（map entry value 不消费这两个字段）。
+  const out = cleanFieldBind({ ...b, field: undefined, storeAs: undefined });
   delete out.field;
   delete out.storeAs;
-  delete out.condition;
-  delete out.wrap;
   return out;
 }
 

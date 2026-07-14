@@ -62,7 +62,7 @@ export function LuaScriptField({ mode, value, onChange, helpText }: LuaScriptFie
   useEffect(() => {
     let cancel = false;
     fetchBaselineScriptIndex()
-      .then((list) => { if (!cancel) setFiles(list); })
+      .then((list) => { if (!cancel) setFiles(list ?? []); })
       .catch(() => undefined);
     return () => { cancel = true; };
   }, []);

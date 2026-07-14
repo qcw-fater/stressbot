@@ -289,12 +289,17 @@ function FlowCanvasInner() {
       } else if (src.type === 'wait' && handleId === 'out') {
         // wait 没有显式 next 字段（顺序由 sequence 控制），无需处理
       } else if (handleId === 'listen') {
-        // action → listen：从 listenRefs 中移除指向 e.target 的引用
+        // action → listen：按边的 refIndex 精确移除一条 listenRefs。
+        // 派生边为每条 listenRef 编码了唯一 refIndex（jsonToFlow）；旧实现按 listenName 整体过滤，
+        // 会把同一 action 下所有同名 listen 的注册一起删掉。
         if (src.type === 'action' && src.listenRefs) {
-          const listenName = e.target.replace(/^__cb__/, '');
-          updateNode(e.source, {
-            listenRefs: src.listenRefs.filter((r) => r.listen !== listenName),
-          });
+          const refIndex = typeof e.data?.refIndex === 'number' ? (e.data.refIndex as number) : null;
+          if (refIndex === null) return;
+          const next = src.listenRefs.slice();
+          if (refIndex >= 0 && refIndex < next.length) {
+            next.splice(refIndex, 1);
+            updateNode(e.source, { listenRefs: next });
+          }
         }
       } else if (src.type === 'action' && handleId === 'error') {
         updateNode(e.source, { onError: normalizeOnError({ ...(src.onError ?? {}), handler: undefined }) });
@@ -425,9 +430,64 @@ function FlowCanvasInner() {
   const onEdgesDelete = useCallback(
     (deleted: Edge[]) => {
       if (readOnly) return;
-      for (const e of deleted) deleteRfEdge(e);
+      // 批量删除时按 source 聚合，避免逐条 splice 导致索引漂移：
+      // 旧实现按 ReactFlow 给的顺序逐条调 deleteRfEdge，每删一条就 updateNode+syncDerived 缩短数组，
+      // 第二条用的还是旧 sourceHandle index → 可能删到未选中的项。
+      // 这里先按 source 收集所有要删的索引/引用，一次重建该 source，保证只删选中的项。
+      interface PendingIdx { kind: 'seq' | 'case' | 'opt'; index: number }
+      const bySource = new Map<string, { idx: PendingIdx[]; refs: number[]; errors: boolean }>();
+      const others: Edge[] = []; // loop/boolean/default/error/listen 单值边，逐条删即可（无索引漂移）
+      for (const e of deleted) {
+        const handleId = e.sourceHandle ?? '';
+        const isIdx = handleId.startsWith('seq-') || handleId.startsWith('case-') || handleId.startsWith('opt-');
+        const isListen = handleId === 'listen';
+        if (isIdx) {
+          let kind: PendingIdx['kind'];
+          let raw: string;
+          if (handleId.startsWith('seq-')) { kind = 'seq'; raw = handleId.slice(4); }
+          else if (handleId.startsWith('case-')) { kind = 'case'; raw = handleId.slice(5); }
+          else { kind = 'opt'; raw = handleId.slice(4); }
+          const index = Number(raw);
+          if (!Number.isFinite(index)) { others.push(e); continue; }
+          const p = bySource.get(e.source) ?? { idx: [], refs: [], errors: false };
+          p.idx.push({ kind, index });
+          bySource.set(e.source, p);
+        } else if (isListen) {
+          const refIndex = typeof e.data?.refIndex === 'number' ? (e.data.refIndex as number) : null;
+          if (refIndex === null) { others.push(e); continue; }
+          const p = bySource.get(e.source) ?? { idx: [], refs: [], errors: false };
+          p.refs.push(refIndex);
+          bySource.set(e.source, p);
+        } else {
+          others.push(e);
+        }
+      }
+      // 逐 source 重建：过滤掉命中的索引（idx 去重后按值过滤，不依赖顺序）。
+      for (const [sourceId, p] of bySource) {
+        const src = useFlowStore.getState().nodes[sourceId];
+        if (!src) continue;
+        const patch: Record<string, unknown> = {};
+        if (p.idx.some((x) => x.kind === 'seq') && src.type === 'sequence' && src.next) {
+          const drop = new Set(p.idx.filter((x) => x.kind === 'seq').map((x) => x.index));
+          patch.next = src.next.filter((_, i) => !drop.has(i));
+        }
+        if (p.idx.some((x) => x.kind === 'case') && src.type === 'switch' && src.cases) {
+          const drop = new Set(p.idx.filter((x) => x.kind === 'case').map((x) => x.index));
+          patch.cases = src.cases.filter((_, i) => !drop.has(i));
+        }
+        if (p.idx.some((x) => x.kind === 'opt') && src.type === 'weighted' && src.options) {
+          const drop = new Set(p.idx.filter((x) => x.kind === 'opt').map((x) => x.index));
+          patch.options = src.options.filter((_, i) => !drop.has(i));
+        }
+        if (p.refs.length > 0 && src.type === 'action' && src.listenRefs) {
+          const drop = new Set(p.refs);
+          patch.listenRefs = src.listenRefs.filter((_, i) => !drop.has(i));
+        }
+        if (Object.keys(patch).length > 0) updateNode(sourceId, patch);
+      }
+      for (const e of others) deleteRfEdge(e);
     },
-    [deleteRfEdge, readOnly],
+    [deleteRfEdge, readOnly, updateNode],
   );
 
   // 关闭右键菜单的全局监听
@@ -616,6 +676,9 @@ function FlowCanvasInner() {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
       if (!inCanvas()) return;
+      // 只读模式（运行 / 查看运行 / 终态报告）下，所有写操作快捷键全部失效：
+      // ReactFlow props 与右键菜单的 readOnly 保护覆盖不到全局键盘（F1~F10 / Ctrl+X / Ctrl+V）。
+      if (readOnly) return;
 
       // F1..F9 快捷新建节点、F10 新建 listen 卡片（无需修饰键）
       const fKey = /^F(\d{1,2})$/i.exec(e.key);
@@ -689,7 +752,7 @@ function FlowCanvasInner() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [copyRfNode, deleteRfNode, pasteAt, rfNodes, screenToFlowPosition, setClipboard]);
+  }, [copyRfNode, deleteRfNode, pasteAt, readOnly, rfNodes, screenToFlowPosition, setClipboard]);
 
   // MiniMap 节点色：直接读 CSS token，确保与节点本体配色 / 主题切换保持完全一致。
   // 注意：每次回调实时读取 getComputedStyle，不缓存（dark/light 切换不需要重 mount）。

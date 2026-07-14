@@ -36,6 +36,7 @@ import { useFlowStore } from '@/components/FlowEditor/store/flowStore';
 import { RuntimeBar } from '@/components/runtime/RuntimeBar';
 import { MonitorDock } from '@/components/monitoring/MonitorDock';
 import { FloatingWindow } from '@/components/FlowEditor/panels/FloatingWindow';
+import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
 
 const LazyResourcesDrawer = lazy(() =>
   import('@/components/modules/ResourcesDrawer').then((m) => ({ default: m.ResourcesDrawer })),
@@ -95,6 +96,14 @@ function HomeShellInner() {
   // 全局 Monaco find-widget 中文 tooltip（替代被 display:none 隐藏的原生 hover）
   const themeMode = useEditorStore((s) => s.theme);
   useMonacoFindTooltip(themeMode);
+
+  // 视口缩放时重新夹紧所有浮动窗口：否则分屏 / 缩放后窗口可能大于可视区，
+  // 标题栏、关闭按钮、缩放手柄落到屏幕外且无法操作。
+  useEffect(() => {
+    const onResize = () => useFloatingWindowStore.getState().reclampAll();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   const { mode, activeTask, ownedTaskId, latestStress, onTaskFinished, setActiveTask, setDetachedActiveTask, setAgents, pushStress, pushSystem, setConnectionLost, appendAgentEvents, setAgentHealth } =
     useRuntimeStore(

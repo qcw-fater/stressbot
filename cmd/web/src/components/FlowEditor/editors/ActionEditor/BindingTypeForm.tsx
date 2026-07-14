@@ -124,6 +124,8 @@ export function BindingTypeForm({ binding, currentBindings, onChange, valueOnly 
             <span style={LABEL}>count</span>
             <InputNumber
               min={1}
+              precision={0}
+              step={1}
               placeholder="随机取几个"
               value={binding.count}
               onChange={(v) => set({ count: (v as number) ?? undefined })}
@@ -154,6 +156,8 @@ export function BindingTypeForm({ binding, currentBindings, onChange, valueOnly 
           <ValuesField binding={binding} set={set} />
           <InputNumber
             min={1}
+            precision={0}
+            step={1}
             placeholder="count"
             value={binding.count}
             onChange={(v) => set({ count: (v as number) ?? undefined })}
@@ -167,6 +171,8 @@ export function BindingTypeForm({ binding, currentBindings, onChange, valueOnly 
         <Space>
           <InputNumber
             placeholder="min"
+            precision={0}
+            step={1}
             value={binding.min}
             onChange={(v) => set({ min: (v as number) ?? undefined })}
             style={{ width: 120 }}
@@ -174,6 +180,8 @@ export function BindingTypeForm({ binding, currentBindings, onChange, valueOnly 
           <span>~</span>
           <InputNumber
             placeholder="max"
+            precision={0}
+            step={1}
             value={binding.max}
             onChange={(v) => set({ max: (v as number) ?? undefined })}
             style={{ width: 120 }}
@@ -185,6 +193,8 @@ export function BindingTypeForm({ binding, currentBindings, onChange, valueOnly 
         <Space>
           <InputNumber
             placeholder="min"
+            precision={0}
+            step={1}
             value={binding.min}
             onChange={(v) => set({ min: (v as number) ?? undefined })}
             style={{ width: 120 }}
@@ -192,6 +202,8 @@ export function BindingTypeForm({ binding, currentBindings, onChange, valueOnly 
           <span>~</span>
           <InputNumber
             placeholder="max"
+            precision={0}
+            step={1}
             value={binding.max}
             onChange={(v) => set({ max: (v as number) ?? undefined })}
             style={{ width: 120 }}
@@ -200,6 +212,8 @@ export function BindingTypeForm({ binding, currentBindings, onChange, valueOnly 
           <InputNumber
             min={1}
             max={10}
+            precision={0}
+            step={1}
             placeholder="2"
             value={binding.precision}
             onChange={(v) => set({ precision: (v as number) ?? undefined })}
@@ -215,6 +229,8 @@ export function BindingTypeForm({ binding, currentBindings, onChange, valueOnly 
           <InputNumber
             min={1}
             max={4096}
+            precision={0}
+            step={1}
             placeholder="length"
             value={binding.length}
             onChange={(v) => set({ length: (v as number) ?? undefined })}
@@ -380,7 +396,12 @@ function FilterRow({ filter, sourceProto, onChange, onRemove }: {
   onRemove: () => void;
 }) {
   const op = (filter.op as string) || 'eq';
-  const useSource = !!filter.source;
+  // 模式与 source 真值解耦：useSource 由「是否有非空 source」派生，但切换到 state 模式时写入空串会让
+  // !!source 仍为 false，StateKeyInput 永远不挂载、用户无法进入 state 配置。
+  // 引入 local sourceMode：一旦用户点了切到 state，就显示输入框，直到切回 value 或切到无值 op。
+  const [sourceMode, setSourceMode] = useState(false);
+  // 已有非空 source（如导入数据）默认进入 source 模式，保证可查看/编辑。
+  const useSource = sourceMode || !!filter.source;
   const noValue = NO_VALUE_OPS.has(op);
   const isList = LIST_OPS.has(op);
 
@@ -412,6 +433,7 @@ function FilterRow({ filter, sourceProto, onChange, onRemove }: {
             if (NO_VALUE_OPS.has(v)) {
               patch.value = undefined;
               patch.source = undefined;
+              setSourceMode(false);
             }
             onChange(patch);
           }}
@@ -434,8 +456,14 @@ function FilterRow({ filter, sourceProto, onChange, onRemove }: {
               type={useSource ? 'primary' : 'text'}
               icon={<SwapOutlined />}
               onClick={() => {
-                if (useSource) onChange({ source: undefined });
-                else onChange({ source: '', value: undefined });
+                if (useSource) {
+                  setSourceMode(false);
+                  onChange({ source: undefined });
+                } else {
+                  setSourceMode(true);
+                  onChange({ value: undefined });
+                  // 不写 source:'' —— 空串会让派生 useSource 回退；交给用户在 StateKeyInput 填写。
+                }
               }}
             />
           </Tooltip>

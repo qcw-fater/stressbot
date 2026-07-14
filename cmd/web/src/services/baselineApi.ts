@@ -37,10 +37,14 @@ export async function fetchBaselineConfig<T = unknown>(): Promise<T | null> {
   return fetchJson<T>(`${BASELINE_PREFIX}/config.json`);
 }
 
-/** 获取基线脚本文件名列表 */
-export async function fetchBaselineScriptIndex(): Promise<string[]> {
-  const list = await fetchJson<string[]>(`${BASELINE_PREFIX}/scripts/index.json`);
-  return list ?? [];
+/**
+ * 获取基线脚本文件名列表。
+ *
+ * 返回 null 表示「请求失败 / 无法解析」；返回 string[] 表示「服务器权威返回的清单（含空清单）」。
+ * 区分二者是为了让上层同步逻辑在失败时中止删除对账，而不是把空清单当作「服务器删光了」。
+ */
+export async function fetchBaselineScriptIndex(): Promise<string[] | null> {
+  return fetchJson<string[]>(`${BASELINE_PREFIX}/scripts/index.json`);
 }
 
 /** 获取基线中指定脚本内容 */
@@ -48,10 +52,14 @@ export async function fetchBaselineScript(name: string): Promise<string | null> 
   return fetchText(`${BASELINE_PREFIX}/scripts/${encodeURIComponent(name)}`);
 }
 
-/** 获取基线 proto 文件名列表 */
-export async function fetchBaselineProtoIndex(): Promise<string[]> {
-  const list = await fetchJson<string[]>(`${BASELINE_PREFIX}/proto/index.json`);
-  return list ?? [];
+/**
+ * 获取基线 proto 文件名列表。
+ *
+ * 返回 null 表示「请求失败 / 无法解析」；返回 string[] 表示「服务器权威返回的清单（含空清单）」。
+ * 上层同步逻辑据此在失败时中止删除对账，避免空清单被误判为「服务器删光了」。
+ */
+export async function fetchBaselineProtoIndex(): Promise<string[] | null> {
+  return fetchJson<string[]>(`${BASELINE_PREFIX}/proto/index.json`);
 }
 
 /** 获取基线中指定 proto 文件内容 */
@@ -65,10 +73,14 @@ export async function fetchBaselineProtoContent(name: string): Promise<string | 
 //   GET /sbot/baseline/adapter/index.json — 列 *_codec.json + errors.json 文件名
 //   GET /sbot/baseline/adapter/{name}      — 按文件名取单文件（路径透传）
 
-/** 基线 adapter 文件名清单（*_codec.json + errors.json）。 */
-export async function fetchBaselineCodecIndex(): Promise<string[]> {
-  const list = await fetchJson<string[]>(`${BASELINE_PREFIX}/adapter/index.json`);
-  return list ?? [];
+/**
+ * 基线 adapter 文件名清单（*_codec.json + errors.json）。
+ *
+ * 返回 null 表示「请求失败 / 无法解析」；返回 string[] 表示「服务器权威返回的清单（含空清单）」。
+ * 上层同步逻辑据此在失败时中止删除对账，避免空清单被误判为「服务器删光了」。
+ */
+export async function fetchBaselineCodecIndex(): Promise<string[] | null> {
+  return fetchJson<string[]>(`${BASELINE_PREFIX}/adapter/index.json`);
 }
 
 /** 基线单份 codec/errors 文件内容（name = tcp_logic_codec.json / errors.json）。 */

@@ -36,7 +36,7 @@ describe('switch node codec', () => {
     ]);
   });
 
-  it('exports switch fields without empty values', () => {
+  it('导出保留所有 switch case（含空 condition/next），不再静默丢弃，交给校验拦截', () => {
     const exported = flowToJson({
       defaultDelayMs: 1000,
       nodes: {
@@ -56,9 +56,16 @@ describe('switch node codec', () => {
       listens: {},
     });
 
+    // 全部 case 原样保留（trim 后），让 validateFlow 的 SWITCH_CASE_INVALID 能稳定拦截，
+    // 而不是在导出时静默删除导致启动校验看不到原始错误。
     expect(exported.nodes.main).toEqual({
       type: 'switch',
-      cases: [{ condition: 'state:level >= 10', next: 'advanced' }],
+      cases: [
+        { condition: 'state:level >= 10', next: 'advanced' },
+        { condition: '', next: '' },
+        { condition: 'state:level >= 20', next: '' },
+        { condition: '', next: 'advanced' },
+      ],
     });
   });
 });

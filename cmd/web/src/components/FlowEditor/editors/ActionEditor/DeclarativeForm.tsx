@@ -196,6 +196,8 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
             <Space.Compact>
               <InputNumber
                 min={0}
+                precision={0}
+                step={1}
                 placeholder={timeoutPlaceholder}
                 value={action.timeout}
                 onChange={(v) => set({ timeout: (v as number) ?? undefined })}
@@ -209,6 +211,8 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
                 <Space.Compact>
                   <InputNumber
                     min={0}
+                    precision={0}
+                    step={1}
                     placeholder="100"
                     value={action.pollMs}
                     onChange={(v) => set({ pollMs: (v as number) ?? undefined })}

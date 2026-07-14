@@ -212,7 +212,7 @@ describe('codec round-trip', () => {
     expect(Object.keys(reread.nodes).length).toBe(Object.keys(raw.nodes).length);
   });
 
-  it('map binding entries 在导出时被保留，entry value 的 field/storeAs/condition/wrap 被剥离', () => {
+  it('map binding entries 在导出时被保留，entry value 的 field/storeAs 被剥离，condition/wrap 保留', () => {
     const exported = flowToJson({
       defaultDelayMs: raw.defaultDelayMs,
       nodes: raw.nodes,
@@ -244,12 +244,13 @@ describe('codec round-trip', () => {
     expect(binding.entries![0].key).toBe('name');
     expect(binding.entries![1].key).toBe('level');
 
-    // entry value.field / storeAs / condition / wrap stripped
+    // entry value.field / storeAs stripped（map entry value 不消费这两个字段）；
+    // condition / wrap 保留（后端 resolveMapValueStrict 会求值 condition、通用分支按 wrap 包裹）。
     const v0 = binding.entries![0].value!;
     expect(v0.field).toBeUndefined();
     expect(v0.storeAs).toBeUndefined();
-    expect(v0.condition).toBeUndefined();
-    expect(v0.wrap).toBeUndefined();
+    expect(v0.condition).toBe('lua:foo');
+    expect(v0.wrap).toBe(true);
     expect(v0.value).toBe('test');
     expect(v0.type).toBe('fixed');
 

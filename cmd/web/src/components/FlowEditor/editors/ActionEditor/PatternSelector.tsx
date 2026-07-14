@@ -20,7 +20,13 @@ export const PATTERN_DESC: Record<ActionPattern, string> = {
   httpRequest: '发送 HTTP 请求',
   setState: '直接给 state 写入值（绑定列表）',
   clearState: '清空指定的 state key',
-  lua: '执行一段 Lua 脚本（function execute(r)）',
+  // 用户可见文本避免暴露实现技术：用「脚本」表述，不出现 Lua / function execute(r)。
+  lua: '执行一段脚本实现复杂业务逻辑',
+};
+
+/** 下拉项展示名：默认用 pattern 原值，lua 统一展示为「脚本」避免暴露技术术语。 */
+const PATTERN_LABEL: Partial<Record<ActionPattern, string>> = {
+  lua: '脚本',
 };
 
 export interface PatternSelectorProps {
@@ -38,21 +44,23 @@ const PATTERN_GROUPS: { label: string; patterns: ActionPattern[] }[] = [
 
 export function PatternSelector({ value, onChange }: PatternSelectorProps) {
   return (
-    <Select
+    <Select<ActionPattern>
       value={value}
       onChange={onChange}
       style={{ width: 240 }}
       options={PATTERN_GROUPS.map((g) => ({
         label: g.label,
-        options: g.patterns.map((p) => ({
-          value: p,
-          label: (
-            <Tooltip title={PATTERN_DESC[p]} placement="right">
-              <span className="pattern-badge" data-pattern={p} style={{ margin: 0, height: 20, lineHeight: '18px' }}>{p}</span>
-            </Tooltip>
-          ),
-        })),
+        // label 用展示名（lua → 脚本），既用于下拉项显示也用于选中态回显。
+        options: g.patterns.map((p) => ({ value: p, label: PATTERN_LABEL[p] ?? p })),
       }))}
+      // 下拉项额外带说明 Tooltip（不暴露实现细节）。
+      optionRender={(option) => (
+        <Tooltip title={PATTERN_DESC[option.value as ActionPattern]} placement="right">
+          <span className="pattern-badge" data-pattern={option.value as string} style={{ margin: 0, height: 20, lineHeight: '18px' }}>
+            {option.label}
+          </span>
+        </Tooltip>
+      )}
     />
   );
 }

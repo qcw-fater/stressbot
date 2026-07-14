@@ -30,7 +30,8 @@ const SOURCE_TYPE_LABEL: Record<string, { label: string; color: string }> = {
   listenStore: { label: '推送', color: 'orange' },
   stateExtra: { label: '启动', color: 'volcano' },
   storeAs: { label: '中间值', color: 'green' },
-  lua: { label: 'Lua', color: 'purple' },
+  // 用户可见文本避免暴露实现技术：脚本来源展示为「脚本」而非 Lua。
+  lua: { label: '脚本', color: 'purple' },
   builtin: { label: '内置', color: 'cyan' },
 };
 

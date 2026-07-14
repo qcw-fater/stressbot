@@ -279,12 +279,12 @@ function PipelineStepCard({
               placeholder={stepAlgos.length === 0 ? '无可用算法' : '选择算法'}
               onChange={(v) => patch({ algo: v ?? '' })}
               options={algoOptions}
-              // 选中算法有描述时作 title（tooltip 悬停显示）。
+              // 算法描述直接以内联文本展示；不使用原生 title（不跟随 antd 主题/延迟/定位）。
               optionRender={(option) => {
                 const meta = stepAlgos.find((a) => a.name === option.value);
                 const desc = meta?.description;
                 return (
-                  <span title={desc}>
+                  <span>
                     {option.label}
                     {desc ? <span style={{ color: 'var(--text-secondary)', marginLeft: 6, fontSize: 11 }}>{desc}</span> : null}
                   </span>

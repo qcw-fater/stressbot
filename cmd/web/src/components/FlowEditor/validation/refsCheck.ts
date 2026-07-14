@@ -284,12 +284,19 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
       }
       // ListenRef 校验
       (node.listenRefs ?? []).forEach((r, i) => {
-        if (!r.listen) {
-          issues.push({
-            severity: 'error', code: 'LISTEN_EMPTY_NAME',
-            message: `action 节点 "${id}" listenRefs[${i}] 未指定 listen，请引用 listens 表中的定义或新建 silent listen`,
-            location: { kind: 'node', id },
-          });
+        // listen:null / undefined 是合法的「静默预注册」语义（仅注册缓存队列、不回调），
+        // 后端 ref.Listen=="" 时 cb=nil 并照常入队（engine/flow.go RegisterListen）。
+        // 因此不再把「未指定 listen」判为错误；只有显式写了 listen 但引用不存在的定义才算错（下方）。
+        const silent = r.listen === null || r.listen === undefined || r.listen === '';
+        if (!silent) {
+          const ln = r.listen as string;
+          if (!(ln in callbacks)) {
+            issues.push({
+              severity: 'error', code: 'LISTEN_REF_NOT_FOUND',
+              message: `action 节点 "${id}" listenRefs[${i}] 引用了不存在的 listen "${ln}"`,
+              location: { kind: 'node', id },
+            });
+          }
         }
         if (!r.server?.trim()) {
           issues.push({
@@ -486,9 +493,29 @@ function checkAction(name: string, def: ActionDef): ValidationIssue[] {
   if (p === 'httpRequest' && !def.url) {
     issues.push({ severity: 'error', code: 'ACTION_NO_URL', message: `action "${name}" pattern=httpRequest 缺少 url`, location: loc });
   }
+  // httpRequest method / contentType 白名单：导入路径只做 JSON.parse cast，这里兜住非法值，
+  // 否则 method 被原样透传、未知 contentType 让请求体为空，到运行期才失败。
+  if (p === 'httpRequest') {
+    const method = typeof def.method === 'string' && def.method ? def.method.toUpperCase() : 'GET';
+    if (!['GET', 'POST'].includes(method)) {
+      issues.push({ severity: 'error', code: 'HTTP_METHOD_INVALID', message: `action "${name}" pattern=httpRequest 的 method "${def.method}" 不合法（仅支持 GET / POST）`, location: loc });
+    }
+    // 导入的 JSON 经 cast 后类型是 'json'|'form'，但运行时可能是任意字符串；这里兜住非法值。
+    const ct = def.contentType as string | undefined;
+    if (ct !== undefined && ct !== null && ct !== '' && !['json', 'form'].includes(ct)) {
+      issues.push({ severity: 'error', code: 'HTTP_CONTENT_TYPE_INVALID', message: `action "${name}" pattern=httpRequest 的 contentType "${ct}" 不合法（仅支持 json / form）`, location: loc });
+    }
+  }
   // setState with no bindings is a no-op
   if (p === 'setState' && (!def.bindings || def.bindings.length === 0)) {
     issues.push({ severity: 'warning', code: 'SETSTATE_NO_BINDINGS', message: `action "${name}" pattern=setState 缺少 bindings（无实际效果）`, location: loc });
+  }
+  // timeout / pollMs 整数契约（Go 端为 int）：小数会让后端 json.Unmarshal 失败。
+  if (typeof def.timeout === 'number' && !Number.isInteger(def.timeout)) {
+    issues.push({ severity: 'error', code: 'ACTION_TIMEOUT_NON_INTEGER', message: `action "${name}" 的 timeout 必须是整数（当前 ${def.timeout}）`, location: loc });
+  }
+  if (typeof def.pollMs === 'number' && !Number.isInteger(def.pollMs)) {
+    issues.push({ severity: 'error', code: 'ACTION_POLLMS_NON_INTEGER', message: `action "${name}" 的 pollMs 必须是整数（当前 ${def.pollMs}）`, location: loc });
   }
 
   // proto 真实存在校验
@@ -624,6 +651,20 @@ function checkBindings(prefix: string, bindings: FieldBind[], loc: { kind: 'acti
     if (t && !VALID_BINDING_TYPE_SET.has(t)) {
       issues.push({ severity: 'error', code: 'BINDING_UNKNOWN_TYPE', message: `${label} 未知的 binding type "${t}"`, location: loc });
       continue;
+    }
+
+    // 整数契约：min/max/length/count/precision 在 Go 端为 int，前端不得存小数。
+    // 小数会导致后端 json.Unmarshal 到 int 失败、任务无法加载。
+    for (const [fname, fval] of [
+      ['min', b.min], ['max', b.max], ['length', b.length], ['count', b.count], ['precision', b.precision],
+    ] as const) {
+      if (typeof fval === 'number' && !Number.isInteger(fval)) {
+        issues.push({ severity: 'error', code: 'BINDING_NON_INTEGER', message: `${label} 的 ${fname} 必须是整数（当前 ${fval}）`, location: loc });
+      }
+    }
+    // required 与 optional 互斥：Go 在缺值时 optional 优先（静默跳过），二者同开会让 UI 的 required 承诺失效。
+    if (b.required && b.optional) {
+      issues.push({ severity: 'warning', code: 'BINDING_REQUIRED_OPTIONAL_CONFLICT', message: `${label} 的 required 与 optional 互斥，运行时按 optional 处理（缺失时跳过）`, location: loc });
     }
 
     // 按 type 检查必填字段

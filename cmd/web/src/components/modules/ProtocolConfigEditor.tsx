@@ -39,13 +39,14 @@ import {
   getErrorMap,
   listCodecFiles,
   setCodecSchema,
-  setCodecSchemaFromBaseline,
   setErrorMap,
-  setErrorMapFromBaseline,
+  syncResourcesFromBaseline,
+  subtractSyncResult,
   type ResourceFile,
+  type BaselineSyncResult,
   validateCodecSchema,
 } from '@/services/resourcesStore';
-import { fetchBaselineCodec, fetchBaselineCodecIndex } from '@/services/baselineApi';
+import { BaselineSyncModal } from './BaselineSyncModal';
 import { getErrorCodes } from '@/services/api';
 import type { FrameworkCode } from '@/types/api';
 import { parseCodecForEdit } from './codecEditor/codecEdit';
@@ -59,7 +60,6 @@ import { deriveTransport } from './codecEditor/previewHelpers';
 import {
   buildCodecConnectionName,
   codecFileNameToConnNameStrict,
-  CODEC_FILE_SUFFIX,
   CODEC_PROTOCOLS,
   connNameToCodecFileName,
   type CodecProtocol,
@@ -67,9 +67,6 @@ import {
 } from '@/services/codecConnections';
 
 /* ─── 协议配置 — 按连接多份 *_codec.json + 共享 errors.json 源码 JSON 编辑器 ─── */
-
-/** errors.json 固定文件名。 */
-const ERRORS_JSON_KEY = 'errors.json';
 
 /**
  * 新建连接用的最小合法 *_codec.json 模板。
@@ -126,6 +123,9 @@ export function ProtocolConfigEditor() {
   // errors.json 结构化表单：框架保留码（只读展示）+ 行级校验错误（保存前 gate）
   const [frameworkCodes, setFrameworkCodes] = useState<FrameworkCode[]>([]);
   const [errorMapErrors, setErrorMapErrors] = useState<string[]>([]);
+  // 基线对账冲突面板：从基线载入若检测到双方都改的协议配置，交给用户裁决。
+  const [pendingSyncResult, setPendingSyncResult] = useState<BaselineSyncResult | null>(null);
+  const [syncModalOpen, setSyncModalOpen] = useState(false);
   // 框架保留码来自 /sbot/api/error-codes。每次切入「错误码映射」区段时拉取，
   // 避免开页瞬间服务器未连上时一次失败就永久为空（无重试、无提示）。
   useEffect(() => {
@@ -275,11 +275,14 @@ export function ProtocolConfigEditor() {
   };
 
   // ─── 新建 / 复制 ───
+  // 打开弹窗前先过未保存确认：创建成功后会切换连接并覆盖编辑状态，当前草稿无提示丢失。
   const openCreate = (mode: 'new' | 'copy') => {
-    setCreateMode(mode);
-    setCreateProtocol('tcp');
-    setCreateService('');
-    setCreateOpen(true);
+    confirmIfDirty(() => {
+      setCreateMode(mode);
+      setCreateProtocol('tcp');
+      setCreateService('');
+      setCreateOpen(true);
+    });
   };
 
   const submitCreate = async () => {
@@ -296,8 +299,15 @@ export function ProtocolConfigEditor() {
         message.error('请先选中一个要复制的连接');
         return;
       }
-      const src = await getCodecSchema(connNameToCodecFileName(activeConn));
-      initial = src?.content ?? CODEC_JSON_TEMPLATE;
+      // 复制取当前编辑器内容（含未保存草稿），而非 IDB 上次保存版本。
+      // 否则副本与屏幕内容不一致，且当前草稿会在切换连接时静默丢失。
+      // 当前正在 codec 区段且内容非空时，content 就是 activeConn 的（已保存版本或草稿）。
+      if (section === 'codec' && content.trim() !== '') {
+        initial = content;
+      } else {
+        const src = await getCodecSchema(connNameToCodecFileName(activeConn));
+        initial = src?.content ?? CODEC_JSON_TEMPLATE;
+      }
     } else {
       initial = CODEC_JSON_TEMPLATE;
     }
@@ -391,17 +401,31 @@ export function ProtocolConfigEditor() {
   const onUpload: UploadProps['beforeUpload'] = async (file) => {
     const text = await file.text();
     if (section === 'errors') {
+      // 导入与「保存」走同一道契约闸门：先 JSON.parse，再走完整 validateErrorMap，
+      // **全部通过后才落库**。否则数组 `[]`、保留码 < 100、非字符串值等会被持久化并伪装成已保存，
+      // 而后端按 map[string]string 解析时会失败。
+      let parsed: unknown;
       try {
-        JSON.parse(text);
+        parsed = JSON.parse(text);
       } catch (e) {
         message.error(`错误码映射不是合法 JSON：${(e as Error).message}`);
+        return false;
+      }
+      // 顶层必须是对象（map[string]string）；数组会被 parseErrorMap 误判为空映射，必须显式拒绝。
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        message.error('错误码映射必须是 JSON 对象（{ "错误码": "描述" }），不能是数组');
+        return false;
+      }
+      const errs = validateErrorMap(parseErrorMapSafe(text));
+      if (errs.length > 0) {
+        message.error(`错误码映射未通过校验，已拒绝导入（共 ${errs.length} 处问题）：${errs[0].message}`);
         return false;
       }
       await setErrorMap(text);
       setContent(text);
       setSavedContent(text);
       setSource(file.name);
-      setErrorMapErrors(validateErrorMap(parseErrorMapSafe(text)).map((e) => e.message));
+      setErrorMapErrors([]);
       message.success(`已导入并保存：${file.name}`);
       return false;
     }
@@ -460,29 +484,18 @@ export function ProtocolConfigEditor() {
     });
   };
 
-  // ─── 从基线载入（一次性把基线所有 codec + errors 拉到本地） ───
+  // ─── 从基线载入（与服务器对账：仅服务器改动自动采用，双方都改的提示冲突） ───
+  //
+  // 旧实现逐个 setCodecSchemaFromBaseline / setErrorMapFromBaseline 无条件覆盖本地已保存的同名文件，
+  // 也不做三方比较——会静默丢失其它连接已保存的本地定制。
+  // 现复用 syncResourcesFromBaseline（已含本地/基线/服务器三方判断 + 冲突收集）：
+  //   - 仅服务器修改 / 新增 → 自动采用；
+  //   - 双方都改且不同 / 服务器删除但本地已改 → 进入 conflicts/removed，由 BaselineSyncModal 让用户裁决。
   const [pullingBaseline, setPullingBaseline] = useState(false);
   const onPullBaseline = async () => {
     setPullingBaseline(true);
     try {
-      const index = await fetchBaselineCodecIndex();
-      if (index.length === 0) {
-        message.info('基线未提供协议配置文件');
-        return;
-      }
-      let codecCount = 0;
-      let errorsLoaded = false;
-      for (const name of index) {
-        const text = await fetchBaselineCodec(name);
-        if (text == null) continue;
-        if (name === ERRORS_JSON_KEY) {
-          await setErrorMapFromBaseline(text);
-          errorsLoaded = true;
-        } else if (name.endsWith(CODEC_FILE_SUFFIX)) {
-          await setCodecSchemaFromBaseline(name, text);
-          codecCount++;
-        }
-      }
+      const sync = await syncResourcesFromBaseline();
       const list = await reloadFiles();
       if (section === 'errors') {
         await loadErrors();
@@ -492,10 +505,16 @@ export function ProtocolConfigEditor() {
         await loadConn(conn);
       }
       await refreshBadge();
-      const parts: string[] = [];
-      if (codecCount > 0) parts.push(`${codecCount} 个连接配置`);
-      if (errorsLoaded) parts.push('错误码映射');
-      message.success(parts.length > 0 ? `已从基线载入：${parts.join('、')}` : '基线无可载入的协议配置');
+      const conflictCount = sync.conflicts.length + sync.removed.length;
+      if (conflictCount > 0) {
+        setPendingSyncResult(sync);
+        setSyncModalOpen(true);
+        message.warning(`检测到 ${conflictCount} 处冲突，请逐项确认`);
+      } else if (sync.added.length > 0) {
+        message.success(`已从基线载入：新增 ${sync.added.length} 个协议配置`);
+      } else {
+        message.success('已从基线载入完成');
+      }
     } catch (e) {
       message.error(`从基线载入失败：${(e as Error).message}`);
     } finally {
@@ -719,6 +738,23 @@ export function ProtocolConfigEditor() {
           />
         </Space.Compact>
       </Modal>
+
+      {/* 基线对账冲突面板：从基线载入若检测到双方都改的协议配置，交给用户裁决 */}
+      {pendingSyncResult && (
+        <BaselineSyncModal
+          open={syncModalOpen}
+          result={pendingSyncResult}
+          onClose={() => setSyncModalOpen(false)}
+          onResolved={() => {
+            setPendingSyncResult(subtractSyncResult(pendingSyncResult, pendingSyncResult));
+            void reloadFiles().then(() => {
+              if (section === 'errors') void loadErrors();
+              else if (activeConn) void loadConn(activeConn);
+              void refreshBadge();
+            });
+          }}
+        />
+      )}
     </Flex>
   );
 }

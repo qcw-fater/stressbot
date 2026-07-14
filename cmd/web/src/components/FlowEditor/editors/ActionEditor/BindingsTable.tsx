@@ -198,7 +198,7 @@ function BindingRow({
             <Switch
               size="small"
               checked={!!binding.required}
-              onChange={(v) => set({ required: v || undefined })}
+              onChange={(v) => set({ required: v || undefined, optional: v ? undefined : binding.optional })}
             />
           </Space>
         </Tooltip>
@@ -208,7 +208,7 @@ function BindingRow({
             <Switch
               size="small"
               checked={!!binding.optional}
-              onChange={(v) => set({ optional: v || undefined })}
+              onChange={(v) => set({ optional: v || undefined, required: v ? undefined : binding.required })}
             />
           </Space>
         </Tooltip>

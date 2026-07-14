@@ -240,7 +240,10 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
   return (
     <div
       style={{
+        // flexWrap 让工具栏在中等宽度换行而非裁切——主操作（撤销/重做/保存/校验）与
+        // 运行命令组在窄屏会溢出 overflow:hidden 的外壳导致不可达。
         display: 'flex',
+        flexWrap: 'wrap',
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: '8px 16px',

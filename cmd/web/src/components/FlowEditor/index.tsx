@@ -130,9 +130,19 @@ function FlowEditorInner({
 
   useEffect(() => {
     // 全局快捷键：Ctrl/Cmd+Z 撤销 / Ctrl/Cmd+Shift+Z 重做
+    //
+    // 必须避让编辑目标：在 INPUT/TEXTAREA/contentEditable/Monaco 中按 Ctrl+Z 应让浏览器/编辑器
+    // 做原生撤销，而不是回退整张流程的业务快照。否则用户在表单/Monaco 里改字后按 Ctrl+Z，
+    // 文本没退一格，反而整张流程图被替换。
+    // 只读模式（运行 / 查看运行 / 终态报告）下也不应触发：undo/redo 会替换业务状态。
     const handler = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      // Monaco 编辑器渲染为 .monaco-editor 容器（无 INPUT/TEXTAREA 在 activeElement），单独识别。
+      if (target?.closest('.monaco-editor')) return;
+      if (readOnly) return;
       const key = e.key.toLowerCase();
       if (key === 'z' && !e.shiftKey) {
         e.preventDefault();
@@ -144,7 +154,7 @@ function FlowEditorInner({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [readOnly]);
 
   // StrictMode 下 effect 会跑两次；用 ref 标记保证 loadDraft / fetch 只发生一次
   const initOnceRef = useRef(false);

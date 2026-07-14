@@ -257,19 +257,21 @@ function RampUpLoadView({ model }: { model: ReturnType<typeof buildLivePanelMode
         <span>本阶段 <b>{fmtCompactNumber(Math.min(stageRunning, stageTarget))}/{fmtCompactNumber(stageTarget)}</b></span>
         <span>累计 <b>{fmtCompactNumber(model.load.runningRobots)}/{fmtCompactNumber(totalTarget)}</b></span>
       </div>
-      <div className="md-stage-bar" title={`累计进度 ${cumulativePercent}% · ${currentStage?.concurrency ? `并发 ${currentStage.concurrency}` : '并发 —'} · ${currentStage?.holdSec ? `等待 ${currentStage.holdSec}s` : '等待 —'}`}>
-        {stages.map((stage, i) => {
-          const count = stage.count || 0;
-          const widthPct = totalTarget > 0 ? (count / totalTarget) * 100 : 100 / Math.max(1, stages.length);
-          const prev = stages.slice(0, i).reduce((sum, s) => sum + (s.count || 0), 0);
-          const fill = count > 0 ? Math.min(100, Math.max(0, ((model.load.runningRobots - prev) / count) * 100)) : 0;
-          return (
-            <div key={i} className="md-stage-segment" style={{ width: `${widthPct}%` }}>
-              <div className={`md-stage-fill${i + 1 === rampUp.currentStage ? ' md-stage-fill--active' : ''}`} style={{ width: `${fill}%` }} />
-            </div>
-          );
-        })}
-      </div>
+      <Tooltip title={`累计进度 ${cumulativePercent}% · ${currentStage?.concurrency ? `并发 ${currentStage.concurrency}` : '并发 —'} · ${currentStage?.holdSec ? `等待 ${currentStage.holdSec}s` : '等待 —'}`} mouseEnterDelay={0.4}>
+        <div className="md-stage-bar">
+          {stages.map((stage, i) => {
+            const count = stage.count || 0;
+            const widthPct = totalTarget > 0 ? (count / totalTarget) * 100 : 100 / Math.max(1, stages.length);
+            const prev = stages.slice(0, i).reduce((sum, s) => sum + (s.count || 0), 0);
+            const fill = count > 0 ? Math.min(100, Math.max(0, ((model.load.runningRobots - prev) / count) * 100)) : 0;
+            return (
+              <div key={i} className="md-stage-segment" style={{ width: `${widthPct}%` }}>
+                <div className={`md-stage-fill${i + 1 === rampUp.currentStage ? ' md-stage-fill--active' : ''}`} style={{ width: `${fill}%` }} />
+              </div>
+            );
+          })}
+        </div>
+      </Tooltip>
     </div>
   );
 }
@@ -333,7 +335,11 @@ function MetricGroup({ title, subtitle, children }: { title: string; subtitle?: 
     <section className="md-metric-group">
       <div className="md-metric-group__head">
         <span className="md-metric-group__title">{title}</span>
-        {subtitle && <span className="md-metric-group__subtitle" title={subtitle}>{subtitle}</span>}
+        {subtitle && (
+          <Tooltip title={subtitle} mouseEnterDelay={0.4}>
+            <span className="md-metric-group__subtitle">{subtitle}</span>
+          </Tooltip>
+        )}
       </div>
       {children}
     </section>

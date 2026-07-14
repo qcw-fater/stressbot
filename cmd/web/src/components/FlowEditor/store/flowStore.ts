@@ -422,16 +422,33 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
   },
   removeListen: (name) => {
     set((s) => {
+      if (!(name in s.listens)) return {};
       const listens = { ...s.listens };
       const listenDefaultRefs = { ...s.listenDefaultRefs };
       delete listens[name];
       delete listenDefaultRefs[name];
+      // 级联清理：所有 action 节点的 listenRefs 中指向该 listen 的注册必须一并移除，
+      // 否则派生边会隐藏不存在的 listen（jsonToFlow 跳过），画布看似干净却留下悬空引用，
+      // 导出/校验/启动会报引用不存在。
+      const nodes: Record<string, FlowNode> = {};
+      let touched = false;
+      for (const [k, v] of Object.entries(s.nodes)) {
+        if (v.type === 'action' && v.listenRefs?.length) {
+          const filtered = v.listenRefs.filter((r) => r.listen !== name);
+          if (filtered.length !== v.listenRefs.length) {
+            touched = true;
+            nodes[k] = { ...v, listenRefs: filtered };
+            continue;
+          }
+        }
+        nodes[k] = v;
+      }
       // 清理 listenCard 位置
       const cbId = `__cb__${name}`;
       const nodePositions = { ...s.layout.nodePositions };
       delete nodePositions[cbId];
       const layout = { ...s.layout, nodePositions };
-      return { listens, listenDefaultRefs, layout };
+      return touched ? { listens, nodes, listenDefaultRefs, layout } : { listens, listenDefaultRefs, layout };
     });
     get().syncDerived();
   },

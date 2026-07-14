@@ -62,13 +62,19 @@ export function ResourcesDrawer({ open, onClose }: ResourcesDrawerProps) {
   const [syncModalOpen, setSyncModalOpen] = useState(false);
   const [pulling, setPulling] = useState(false);
 
+  const reloadProtos = useProtoStore((s) => s.reload);
+
   const hasConflicts = pendingSyncResult != null && (pendingSyncResult.conflicts.length > 0 || pendingSyncResult.removed.length > 0);
 
   // 拉取（svn update）：与服务器对比，自动合并"仅服务器修改/新增"，冲突弹面板。
+  // 拉取成功后必须刷新内存 protoRegistry：syncResourcesFromBaseline 只改 IndexedDB/资源列表，
+  // 不会通知 ProtoStore 重新编译；否则 ProtoBrowser/字段选择/校验继续用旧定义，
+  // 而任务下发却用新 proto，形成前后端语义错位。
   const handlePull = async () => {
     setPulling(true);
     try {
       const sync = await syncResourcesFromBaseline();
+      await reloadProtos();
       if (sync.conflicts.length > 0 || sync.removed.length > 0) {
         setPendingSyncResult(sync);
         setSyncModalOpen(true);
@@ -132,6 +138,9 @@ export function ResourcesDrawer({ open, onClose }: ResourcesDrawerProps) {
           }}
           onResolved={() => {
             setPendingSyncResult(subtractSyncResult(pendingSyncResult, pendingSyncResult));
+            // 冲突解决同样改写了 proto 的 IDB（采用服务器版本或删除本地），
+            // 必须刷新内存 protoRegistry，否则编辑器继续用旧 proto。
+            void reloadProtos();
           }}
         />
       )}

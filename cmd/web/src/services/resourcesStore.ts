@@ -1065,6 +1065,10 @@ export async function markResourcesAsBaselineSynced(input: {
  * 3. 仅服务器修改 → 自动采用服务器版本
  * 4. 仅本地修改 → 保留本地，不提示冲突
  * 5. 双方都修改且内容不同 / 服务器删除但本地已修改 → 返回 conflicts/removed
+ *
+ * **失败保护**：任一资源组的索引请求失败（断网 / 非 2xx / 解析异常）都会抛出
+ * `BaselineIndexFetchError` 并中止本次同步——绝不能把失败的空结果折叠成「服务器删光了」，
+ * 否则会按 serverRemovedOnly 静默删除本地已同步的资源。
  */
 export async function syncResourcesFromBaseline(): Promise<BaselineSyncResult> {
   const result: BaselineSyncResult = {
@@ -1074,12 +1078,15 @@ export async function syncResourcesFromBaseline(): Promise<BaselineSyncResult> {
     removed: [],
   };
 
-  // 并行拉取各资源组基线索引
+  // 并行拉取各资源组基线索引。null 表示该组请求失败——直接中止，不做任何删除对账。
   const [protoIndex, scriptIndex, codecIndex] = await Promise.all([
     fetchIndex(`${BASELINE_PREFIX}/proto/index.json`),
     fetchIndex(`${BASELINE_PREFIX}/scripts/index.json`),
     fetchBaselineCodecIndex(),
   ]);
+  if (protoIndex === null || scriptIndex === null || codecIndex === null) {
+    throw new BaselineIndexFetchError();
+  }
 
   // --- Proto ---
   await syncFileGroup(protoIndex, 'proto', protoStore, `${BASELINE_PREFIX}/proto/`, result);
@@ -1098,6 +1105,14 @@ export async function syncResourcesFromBaseline(): Promise<BaselineSyncResult> {
   });
 
   return result;
+}
+
+/** 基线索引请求失败（用于上层给出中文提示，区别于普通业务错误）。 */
+export class BaselineIndexFetchError extends Error {
+  constructor() {
+    super('基线索引请求失败，已中止本次同步以保护本地资源');
+    this.name = 'BaselineIndexFetchError';
+  }
 }
 
 /**
@@ -1121,17 +1136,28 @@ export async function applyConflictResolution(decisions: ConflictDecision[]): Pr
 
 // --- 内部辅助 ---
 
-async function fetchIndex(url: string): Promise<string[]> {
+/**
+ * 拉取基线索引清单。
+ *
+ * 返回 null 表示请求失败（断网 / 非 2xx / 解析异常）；返回 string[] 表示服务器权威清单（含空清单）。
+ * 上层 syncResourcesFromBaseline 据此在失败时中止删除对账，绝不能把空清单当作「服务器删光了」。
+ */
+async function fetchIndex(url: string): Promise<string[] | null> {
   try {
     const resp = await fetch(url, { cache: 'no-cache' });
     if (!resp.ok) {
       console.warn(`[baseline] fetchIndex ${url} returned ${resp.status}`);
-      return [];
+      return null;
     }
-    return (await resp.json()) as string[];
+    const data = await resp.json();
+    if (!Array.isArray(data)) {
+      console.warn(`[baseline] fetchIndex ${url} returned non-array`);
+      return null;
+    }
+    return data as string[];
   } catch (e) {
     console.warn(`[baseline] fetchIndex ${url} failed:`, e);
-    return [];
+    return null;
   }
 }
 
