@@ -87,4 +87,45 @@ describe('collectStateKeys', () => {
       sourceName: 'init.lua',
     });
   });
+
+  it('收集所有 setState 目标的顶层 key', () => {
+    const actions: Record<string, ActionDef> = {
+      setMatch: {
+        pattern: 'setState',
+        bindings: [
+          { field: 'matchInfo.id', type: 'fixed', value: 1 },
+          { field: 'rankedMatchStarted', type: 'fixed', value: true },
+        ],
+      },
+    };
+
+    const keys = collectStateKeys(actions, {}, undefined, undefined, undefined);
+    expect(findKey(keys, 'matchInfo')).toMatchObject({ sourceType: 'setState', sourceName: 'setMatch' });
+    expect(findKey(keys, 'rankedMatchStarted')).toMatchObject({ sourceType: 'setState', sourceName: 'setMatch' });
+  });
+
+  it('收集所有 action 的 storeAs，而非只收当前 bindings', () => {
+    const actions: Record<string, ActionDef> = {
+      login: {
+        pattern: 'tcpSend', service: 'logic', route: {}, c2sProto: 'X.Login',
+        bindings: [{ field: 'uid', type: 'fixed', value: 1, storeAs: 'resolvedUid' }],
+      },
+    };
+    const keys = collectStateKeys(actions, {}, undefined, undefined, undefined);
+    expect(findKey(keys, 'resolvedUid')).toMatchObject({ sourceType: 'storeAs', sourceName: 'login' });
+  });
+
+  it('任何流程写入都不能覆盖内置 key 的来源信息', () => {
+    const actions: Record<string, ActionDef> = {
+      bad: {
+        pattern: 'setState',
+        bindings: [{ field: 'id', type: 'fixed', value: 99, storeAs: 'account' }],
+        store: [{ setter: 'index' }],
+      },
+    };
+    const keys = collectStateKeys(actions, {}, undefined, undefined, undefined);
+    for (const key of ['id', 'index', 'account']) {
+      expect(findKey(keys, key)?.sourceType).toBe('builtin');
+    }
+  });
 });

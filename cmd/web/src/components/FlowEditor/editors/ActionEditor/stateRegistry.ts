@@ -6,8 +6,12 @@
  *   1. ActionDef.store[].setter          — S2C 响应写入（有 s2cProto）
  *   2. ListenDef.store[].setter          — 推送监听写入（有 s2cProto）
  *   3. RobotConfig.stateExtra            — 启动前写入的扩展字段
- *   4. 当前 action 的 bindings[].storeAs — 中间变量（仅限当前 action）
- *   5. Lua 脚本中的 robot.set("key",…)   — 静态正则提取，无类型信息
+ *   4. 所有 action 的 bindings[].storeAs — 中间变量（跨全部 action，非仅当前）
+ *   5. 所有 setState action 的 field     — 状态动作写入（取顶层 key）
+ *   6. Lua 脚本中的 robot.set("key",…)   — 静态正则提取，无类型信息
+ *
+ * 内置 key（id/index/account）由 step 0 直接播种，任何流程写入都不可覆盖；
+ * 其余来源统一走 register 辅助函数（仅在该 key 不存在时写入，即「首写者赢」）。
  */
 
 import type { ActionDef, FieldBind } from '@/types/action';
@@ -16,9 +20,12 @@ import type { FlowNode } from '@/types/flow';
 import type { ProtoField } from '@/types/proto';
 import { protoRegistry } from '../../proto/ProtoRegistry';
 
+export type StateKeySourceType =
+  | 'store' | 'listenStore' | 'stateExtra' | 'storeAs' | 'setState' | 'lua' | 'builtin';
+
 export interface StateKeyInfo {
   key: string;
-  sourceType: 'store' | 'listenStore' | 'stateExtra' | 'storeAs' | 'lua' | 'builtin';
+  sourceType: StateKeySourceType;
   sourceName: string;
   s2cProto?: string;
   storeField?: string;
@@ -28,12 +35,20 @@ export interface StateKeyInfo {
   builtinDesc?: string;
 }
 
+/** 内置 state key 名称集合 */
+export const BUILTIN_STATE_KEYS = ['id', 'index', 'account'] as const;
+
 /** 内置 state 字段定义：每个机器人启动时自动注入，不可覆盖 */
-const BUILTIN_KEYS: StateKeyInfo[] = [
+export const BUILTIN_KEYS: StateKeyInfo[] = [
   { key: 'id', sourceType: 'builtin', sourceName: '内置', builtinType: 'int', builtinDesc: '机器人编号（= startNumber + index）' },
   { key: 'index', sourceType: 'builtin', sourceName: '内置', builtinType: 'int', builtinDesc: '任务全局序号（0-based，不含 startNumber 偏移）' },
   { key: 'account', sourceType: 'builtin', sourceName: '内置', builtinType: 'string', builtinDesc: '完整账号名（如 bot_100）' },
 ];
+
+/** 判断某个 key 是否为内置 state key（内置 key 一旦播种即不可被流程写入覆盖） */
+export function isBuiltinStateKey(key: string): boolean {
+  return (BUILTIN_STATE_KEYS as readonly string[]).includes(key);
+}
 
 /** 从 Lua 脚本内容中提取 robot.set("key",…) 和 robot.set_path("key",…) 的字面量 key */
 function extractLuaSetKeys(content: string): string[] {
@@ -54,7 +69,17 @@ function setterTopKey(setter: string): string {
 
 /**
  * 收集所有已知 state key。
- * storeAs 仅收集 currentBindings（当前 action 的 bindings）。
+ *
+ * 优先级（首写者赢，内置 key 永不被覆盖）：
+ *   0. 内置字段（直接播种）
+ *   1. ActionDef.store[].setter        — 扁平 setter 携带 s2cProto 类型
+ *   2. ListenDef.store[].setter
+ *   3. RobotConfig.stateExtra
+ *   4. 所有 action 的 bindings[].storeAs 与 setState field（跨全部 action）
+ *   5. currentBindings 的 storeAs（当前编辑中、尚未落盘的中间值）
+ *   6. Lua 脚本中的 robot.set("key",…)
+ *   7. 嵌套 store/listen setter 的顶层 key 兜底
+ *
  * luaScripts 为 { name, content }[] 批量传入（由调用方从本地存储异步加载）。
  */
 export function collectStateKeys(
@@ -66,7 +91,17 @@ export function collectStateKeys(
 ): StateKeyInfo[] {
   const map = new Map<string, StateKeyInfo>();
 
-  // 0. 内置字段（最高优先级，不可覆盖）
+  /**
+   * 注册一个 state key 来源信息。
+   * - 内置 key 若已播种则永不覆盖（store/listen/storeAs/setState 等流程写入均不能顶替内置字段）。
+   * - 其余 key 仅在 map 中尚无记录时写入（首写者赢，由调用顺序保证优先级）。
+   */
+  const register = (info: StateKeyInfo) => {
+    if (isBuiltinStateKey(info.key) && map.has(info.key)) return;
+    if (!map.has(info.key)) map.set(info.key, info);
+  };
+
+  // 0. 内置字段（最高优先级，直接播种，不可覆盖）
   for (const b of BUILTIN_KEYS) {
     map.set(b.key, { ...b });
   }
@@ -80,7 +115,7 @@ export function collectStateKeys(
       if (!sm.setter) continue;
       const topKey = setterTopKey(sm.setter);
       if (topKey === sm.setter) {
-        map.set(topKey, {
+        register({
           key: topKey,
           sourceType: 'store',
           sourceName: name,
@@ -101,8 +136,7 @@ export function collectStateKeys(
       if (!sm.setter) continue;
       const topKey = setterTopKey(sm.setter);
       if (topKey === sm.setter) {
-        if (map.has(topKey)) continue;
-        map.set(topKey, {
+        register({
           key: topKey,
           sourceType: 'listenStore',
           sourceName: name,
@@ -110,7 +144,7 @@ export function collectStateKeys(
           storeField: sm.field,
         });
       } else {
-        // 嵌套 setter 只作为兜底来源，后续 stateExtra/storeAs/Lua 可声明 topKey 的真实来源。
+        // 嵌套 setter 只作为兜底来源，后续 stateExtra/storeAs/setState/Lua 可声明 topKey 的真实来源。
         nestedStoreKeys.push({ key: topKey, sourceType: 'listenStore', sourceName: name });
       }
     }
@@ -119,48 +153,47 @@ export function collectStateKeys(
   // 3. stateExtra（启动配置）
   if (stateExtra) {
     for (const k of Object.keys(stateExtra)) {
-      if (!k || map.has(k)) continue;
-      map.set(k, {
-        key: k,
-        sourceType: 'stateExtra',
-        sourceName: '启动配置',
-      });
+      if (!k) continue;
+      register({ key: k, sourceType: 'stateExtra', sourceName: '启动配置' });
     }
   }
 
-  // 4. 当前 action 的 bindings[].storeAs
-  if (currentBindings) {
-    for (const b of currentBindings) {
-      if (!b.storeAs) continue;
-      if (map.has(b.storeAs)) continue;
-      map.set(b.storeAs, {
-        key: b.storeAs,
-        sourceType: 'storeAs',
-        sourceName: '当前节点',
-      });
-    }
-  }
-
-  // 5. Lua 脚本中的 robot.set("key",…) / robot.set_path("key",…)
-  if (luaScripts) {
-    for (const script of luaScripts) {
-      const extracted = extractLuaSetKeys(script.content);
-      for (const k of extracted) {
-        if (map.has(k)) continue;
-        map.set(k, {
-          key: k,
-          sourceType: 'lua',
-          sourceName: script.name,
-        });
+  // 4. 跨全部 action 收集 bindings[].storeAs 与 setState field 的顶层 key。
+  //    已落盘 action 的来源比 currentBindings（编辑中、尚未落盘）更权威，故先于 currentBindings 注册。
+  for (const [name, def] of Object.entries(actions)) {
+    for (const binding of def.bindings ?? []) {
+      if (binding.storeAs) {
+        register({ key: binding.storeAs, sourceType: 'storeAs', sourceName: name });
+      }
+      if (def.pattern === 'setState' && binding.field) {
+        const key = setterTopKey(binding.field);
+        if (key) register({ key, sourceType: 'setState', sourceName: name });
       }
     }
   }
 
-  // 6. 嵌套 setter 的顶层 key 兜底来源。
-  // 必须放在最后，避免 playerData.GuildInfo 这类写入覆盖 Lua/stateExtra/storeAs 对 playerData 的真实来源。
+  // 5. currentBindings 的 storeAs（当前编辑中、尚未落盘的 action，其 storeAs 可能还未进入 actions 表）
+  if (currentBindings) {
+    for (const b of currentBindings) {
+      if (!b.storeAs) continue;
+      register({ key: b.storeAs, sourceType: 'storeAs', sourceName: '当前节点' });
+    }
+  }
+
+  // 6. Lua 脚本中的 robot.set("key",…) / robot.set_path("key",…)
+  if (luaScripts) {
+    for (const script of luaScripts) {
+      const extracted = extractLuaSetKeys(script.content);
+      for (const k of extracted) {
+        register({ key: k, sourceType: 'lua', sourceName: script.name });
+      }
+    }
+  }
+
+  // 7. 嵌套 setter 的顶层 key 兜底来源。
+  //    必须放在最后，避免 playerData.GuildInfo 这类写入覆盖 Lua/stateExtra/storeAs 对 playerData 的真实来源。
   for (const info of nestedStoreKeys) {
-    if (map.has(info.key)) continue;
-    map.set(info.key, info);
+    register(info);
   }
 
   return Array.from(map.values()).sort((a, b) => a.key.localeCompare(b.key));

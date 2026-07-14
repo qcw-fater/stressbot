@@ -8,17 +8,15 @@
 import type { InputRef } from 'antd';
 import { Button, Input, Popover, Tag, Tooltip } from 'antd';
 import { RightOutlined, SearchOutlined } from '@ant-design/icons';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useFloatingWindowStore } from '../../store/floatingWindowStore';
-import { useFlowStore } from '../../store/flowStore';
-import { useRuntimeStore } from '@/services/runtimeStore';
-import { getScript } from '@/services/resourcesStore';
 import {
-  collectStateKeys,
-  collectUsedScriptNames,
   resolveStateKeyDisplayType,
   resolveSubFields,
+  type StateKeyInfo,
 } from '../ActionEditor/stateRegistry';
+import { useStateKeyOptions } from '../ActionEditor/useStateKeyOptions';
+import { STATE_SOURCE_LABEL } from '../ActionEditor/stateKeyPresentation';
 import type { ProtoField } from '@/types/proto';
 import { protoRegistry } from '../../proto/ProtoRegistry';
 import { renderExprWithHighlights } from './conditionExprUtils';
@@ -29,15 +27,6 @@ export interface StateExprInputProps {
   onChange?: (v: string) => void;
   placeholder?: string;
 }
-
-const SOURCE_TYPE_LABEL: Record<string, { label: string; color: string }> = {
-  store: { label: 'S2C', color: 'blue' },
-  listenStore: { label: '推送', color: 'orange' },
-  stateExtra: { label: '启动', color: 'volcano' },
-  storeAs: { label: '中间值', color: 'green' },
-  lua: { label: 'Lua', color: 'purple' },
-  builtin: { label: '内置', color: 'cyan' },
-};
 
 /** 展开状态：key path → 是否展开 */
 type ExpandedMap = Record<string, boolean>;
@@ -60,36 +49,8 @@ export function StateExprInput({ value, onChange, placeholder }: StateExprInputP
   const [expanded, setExpanded] = useState<ExpandedMap>({});
   const inputRef = useRef<InputRef>(null);
 
-  // 收集已知 state keys
-  const actions = useFlowStore((s) => s.actions);
-  const listens = useFlowStore((s) => s.listens);
-  const nodes = useFlowStore((s) => s.nodes);
-  const stateExtra = useRuntimeStore((s) => s.robotConfig.stateExtra);
-
-  const usedScriptNames = useMemo(
-    () => collectUsedScriptNames(actions, listens, nodes),
-    [actions, listens, nodes],
-  );
-
-  const [luaScripts, setLuaScripts] = useState<Array<{ name: string; content: string }>>([]);
-  useEffect(() => {
-    if (usedScriptNames.size === 0) { setLuaScripts([]); return; }
-    let cancelled = false;
-    const entries: Array<{ name: string; content: string }> = [];
-    let pending = usedScriptNames.size;
-    for (const name of usedScriptNames) {
-      getScript(name)
-        .then((file) => { if (!cancelled && file) entries.push({ name: file.name, content: file.content }); })
-        .catch(() => {})
-        .finally(() => { if (!cancelled && --pending === 0) setLuaScripts(entries); });
-    }
-    return () => { cancelled = true; };
-  }, [usedScriptNames]);
-
-  const allKeys = useMemo(
-    () => collectStateKeys(actions, listens, stateExtra, undefined, luaScripts),
-    [actions, listens, stateExtra, luaScripts],
-  );
+  // 候选 state keys 由 useStateKeyOptions 统一加载（flow graph + 启动配置 + 异步 Lua 脚本）
+  const { keys: allKeys } = useStateKeyOptions();
 
   const filteredKeys = useMemo(() => {
     if (!browseSearch) return allKeys;
@@ -207,7 +168,7 @@ export function StateExprInput({ value, onChange, placeholder }: StateExprInputP
 // ─── 子字段行组件 ────────────────────────────────────────────
 
 interface StateKeyRowProps {
-  keyInfo: { key: string; sourceType: string; s2cProto?: string; storeField?: string };
+  keyInfo: StateKeyInfo;
   expanded: ExpandedMap;
   onToggleExpand: (path: string) => void;
   onInsert: (path: string) => void;
@@ -240,7 +201,7 @@ function StateKeyRow({ keyInfo, expanded, onToggleExpand, onInsert }: StateKeyRo
 
   // 获取子字段列表
   const subFields = useMemo(
-    () => resolveSubFields(keyInfo as Parameters<typeof resolveSubFields>[0]),
+    () => resolveSubFields(keyInfo),
     [keyInfo],
   );
 
@@ -288,14 +249,14 @@ function StateKeyRow({ keyInfo, expanded, onToggleExpand, onInsert }: StateKeyRo
         >
           <code style={{ whiteSpace: 'nowrap' }}>{keyInfo.key}</code>
           <Tag
-            color={SOURCE_TYPE_LABEL[keyInfo.sourceType]?.color ?? 'default'}
+            color={STATE_SOURCE_LABEL[keyInfo.sourceType].color}
             style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0 }}
           >
-            {SOURCE_TYPE_LABEL[keyInfo.sourceType]?.label ?? keyInfo.sourceType}
+            {STATE_SOURCE_LABEL[keyInfo.sourceType].label}
           </Tag>
           {keyInfo.s2cProto && (
             <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
-              ← {resolveStateKeyDisplayType(keyInfo as Parameters<typeof resolveStateKeyDisplayType>[0]) ?? keyInfo.s2cProto.split('.').pop()}
+              ← {resolveStateKeyDisplayType(keyInfo) ?? keyInfo.s2cProto.split('.').pop()}
             </span>
           )}
         </span>
