@@ -3,6 +3,7 @@
 package utils
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"runtime"
@@ -48,6 +49,12 @@ type WorkPool struct {
 	goCount   atomic.Int32 // 当前运行中的 goroutine 数
 
 	cfg *PoolConfig
+
+	// ctx/cancel 是 stopCh 的 context 形态：Shutdown 时一并取消，
+	// 供需要「随池停止而取消」的派生 ctx 使用（如 Robot 生命周期 ctx）。
+	// 与 stopCh 双轨并存：现有 GoWithStop/StopChan 调用者不受影响。
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // 错误定义
@@ -87,9 +94,12 @@ func InitWorkPool(cfg *PoolConfig) {
 			panic(err)
 		}
 
+		ctx, cancel := context.WithCancel(context.Background())
 		workPool = &WorkPool{
 			pool:   pool,
 			stopCh: make(chan struct{}),
+			ctx:    ctx,
+			cancel: cancel,
 			cfg:    cfg,
 		}
 		log.Info("work pool initialized",
@@ -114,6 +124,14 @@ func (p *WorkPool) IsStopped() bool {
 // StopChan 获取停止通道，用于监听关闭信号
 func (p *WorkPool) StopChan() <-chan struct{} {
 	return p.stopCh
+}
+
+// Context 返回随池 Shutdown 而取消的 context。
+// 供需要「随池停止而取消」的派生 ctx 使用：以本 ctx 为父级创建子 ctx，
+// Shutdown 时父 ctx 取消会派生到子 ctx，从而优雅停止依赖该 ctx 的工作
+// （如 Robot 业务执行 ctx）。仅用于随池停止而取消的语义，不替代业务自有超时 ctx。
+func (p *WorkPool) Context() context.Context {
+	return p.ctx
 }
 
 // submit 提交带停止通知的任务。
@@ -225,6 +243,11 @@ func (p *WorkPool) Shutdown() {
 		zap.Duration("timeout", timeout))
 
 	close(p.stopCh)
+	// 取消 context 形态的停止信号：派生到所有以 WorkPool.Context() 为父级的子 ctx
+	// （如 Robot 生命周期 ctx），使其随池停止优雅退出。
+	if p.cancel != nil {
+		p.cancel()
+	}
 
 	done := make(chan struct{})
 	go func() {
