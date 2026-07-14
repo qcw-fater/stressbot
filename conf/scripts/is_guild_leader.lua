@@ -12,7 +12,7 @@ end
 function execute(r)
     local roleId = to_number(robot.get("roleId"))
     local position = to_number(robot.get_path("playerData.guildInfo.mydata.position"))
-    local guildId = to_number(robot.get_path("playerData.guildInfo.guildId"))
+    local guildId = robot.get_path("playerData.guildInfo.guildId")
 
     local isLeader = position ~= nil and position == 0
     log.debug("判断社团会长: roleId=" .. tostring(roleId)

@@ -1,15 +1,9 @@
--- has_guild.lua: 按旧工具 IsInGuild 语义判断当前是否在社团
--- 前提：JoinGuild 申请待审核时不能写 playerData.guildInfo.guildId；
--- 只有 CreateGuild、直接加入成功、入会推送、成员更新才维护该字段。
+-- has_guild.lua: 判断当前机器人是否已加入社团
+-- guildId 是 int64：声明式响应 store 可能保存整数，Lua 推送为避免精度损失会保存字符串，
+-- 因此这里只做字符串化的零值判断，不能 tonumber。
 local robot = require("robot")
 
-local function to_number(v)
-    if v == nil then return nil end
-    if type(v) == "number" then return v end
-    return tonumber(v)
-end
-
 function execute(r)
-    local guildId = to_number(robot.get_path("playerData.guildInfo.guildId"))
-    return guildId ~= nil and guildId ~= 0
+    local guildId = robot.get_path("playerData.guildInfo.guildId")
+    return guildId ~= nil and tostring(guildId) ~= "" and tostring(guildId) ~= "0"
 end

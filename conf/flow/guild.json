@@ -271,13 +271,8 @@
     "guildCheckFlow": {
       "type": "sequence",
       "next": [
-        "guildDrain",
         "decideGuildPath"
       ]
-    },
-    "guildDrain": {
-      "type": "action",
-      "action": "GuildDrain"
     },
     "decideGuildPath": {
       "type": "boolean",
@@ -456,13 +451,14 @@
     },
     "unlockBasicFunction": {
       "type": "action",
-      "description": "解锁排位等基础功能",
+      "description": "领取等级奖励",
       "action": "unlockBasicFunction"
     },
     "inGuildBase": {
       "type": "sequence",
       "next": [
         "GetGuildInfo",
+        "GuildRefreshPublish",
         "GetGuildMemberList",
         "judgeRole"
       ]
@@ -471,7 +467,7 @@
       "type": "sequence",
       "next": [
         "GetGuildList",
-        "applyGuild"
+        "outGuildIsCreator"
       ]
     },
     "GetGuildInfo": {
@@ -497,24 +493,10 @@
     },
     "CreateGuild": {
       "type": "action",
-      "action": "CreateGuild"
-    },
-    "applyGuild": {
-      "type": "weighted",
-      "options": [
-        {
-          "node": "CreateGuild",
-          "weight": 20
-        },
-        {
-          "node": "SearchGuildList",
-          "weight": 45
-        },
-        {
-          "node": "JoinGuild",
-          "weight": 35
-        }
-      ]
+      "action": "CreateGuild",
+      "onError": {
+        "strategy": "skip"
+      }
     },
     "SearchGuildList": {
       "type": "action",
@@ -526,7 +508,7 @@
     },
     "judgeRole": {
       "type": "boolean",
-      "condition": "lua:is_guild_manager.lua",
+      "condition": "state:playerData.guildInfo.mydata.position == 0 || playerData.guildInfo.mydata.position == 1",
       "trueNext": "judgeLeader",
       "falseNext": "guildNormal"
     },
@@ -537,7 +519,7 @@
     },
     "judgeLeader": {
       "type": "boolean",
-      "condition": "lua:is_guild_leader.lua",
+      "condition": "state:playerData.guildInfo.mydata.position == 0",
       "trueNext": "guildLeader",
       "falseNext": "guildManage"
     },
@@ -704,6 +686,74 @@
       "type": "action",
       "description": "修改社团基础配置",
       "action": "EditGuildInfo"
+    },
+    "outGuildIsCreator": {
+      "type": "boolean",
+      "condition": "state:index % 15 == 0",
+      "trueNext": "guildCreatorBootstrap",
+      "falseNext": "guildParticipantActions"
+    },
+    "guildCreatorBootstrap": {
+      "type": "sequence",
+      "next": [
+        "CreateGuild",
+        "GuildPublish"
+      ]
+    },
+    "guildParticipantActions": {
+      "type": "weighted",
+      "options": [
+        {
+          "node": "SearchTaskGuild",
+          "weight": 45
+        },
+        {
+          "node": "JoinTaskGuild",
+          "weight": 40
+        }
+      ]
+    },
+    "SearchTaskGuild": {
+      "type": "sequence",
+      "next": [
+        "SelectTaskGuild",
+        "hasSearchTaskGuildTarget"
+      ]
+    },
+    "JoinTaskGuild": {
+      "type": "sequence",
+      "next": [
+        "SelectTaskGuild",
+        "hasJoinTaskGuildTarget"
+      ]
+    },
+    "SelectTaskGuild": {
+      "type": "action",
+      "action": "SelectTaskGuild",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "hasSearchTaskGuildTarget": {
+      "type": "boolean",
+      "condition": "state:taskGuildTargetReady",
+      "trueNext": "SearchGuildList"
+    },
+    "hasJoinTaskGuildTarget": {
+      "type": "boolean",
+      "condition": "state:taskGuildTargetReady",
+      "trueNext": "JoinGuild"
+    },
+    "GuildPublish": {
+      "type": "action",
+      "action": "GuildPublish",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "GuildRefreshPublish": {
+      "type": "action",
+      "action": "GuildPublish"
     }
   },
   "actions": {
@@ -870,53 +920,7 @@
         {
           "type": "fixed",
           "field": "GM.type",
-          "value": 4
-        },
-        {
-          "type": "fixed",
-          "field": "GM.param",
-          "value": [
-            109,
-            5,
-            110,
-            5,
-            113,
-            5,
-            118,
-            5,
-            122,
-            5,
-            123,
-            5,
-            124,
-            5,
-            125,
-            5,
-            130,
-            5,
-            138,
-            5,
-            140,
-            5,
-            142,
-            5,
-            143,
-            5,
-            148,
-            5,
-            150,
-            5,
-            153,
-            5,
-            156,
-            5,
-            158,
-            5,
-            159,
-            5,
-            160,
-            5
-          ]
+          "value": 70
         }
       ]
     },
@@ -1256,10 +1260,6 @@
       "pattern": "lua",
       "script": "unlock_basic_functions.lua"
     },
-    "GuildDrain": {
-      "pattern": "lua",
-      "script": "guild_drain.lua"
-    },
     "GetGuildInfo": {
       "pattern": "tcpRequest",
       "service": "logic",
@@ -1284,6 +1284,22 @@
         {
           "setter": "playerData.guildInfo.guildId",
           "field": "baseInfo.uid"
+        },
+        {
+          "setter": "playerData.guildInfo.baseInfo",
+          "field": "baseInfo"
+        },
+        {
+          "setter": "playerData.guildInfo.baseSetting",
+          "field": "baseSetting"
+        },
+        {
+          "setter": "playerData.guildInfo.mydata",
+          "field": "mydata"
+        },
+        {
+          "setter": "playerData.guildInfo.routeData",
+          "field": "route"
         }
       ]
     },
@@ -1366,6 +1382,10 @@
         {
           "setter": "playerData.guildInfo",
           "field": "data"
+        },
+        {
+          "setter": "taskGuildCreatedId",
+          "field": "data.guildId"
         }
       ]
     },
@@ -1380,16 +1400,63 @@
       "s2cProto": "Game.GuildSearchS2C",
       "bindings": [
         {
-          "type": "randomString",
+          "type": "state",
           "field": "name",
-          "length": 5,
-          "charset": "alpha"
+          "source": "taskGuildTargetName",
+          "required": true
+        }
+      ],
+      "store": [
+        {
+          "setter": "guildSearchResult",
+          "field": "infos"
         }
       ]
     },
     "JoinGuild": {
-      "pattern": "lua",
-      "script": "guild_join.lua"
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 21,
+        "act": 3
+      },
+      "c2sProto": "Game.GuildJoinC2S",
+      "s2cProto": "Game.GuildJoinS2C",
+      "bindings": [
+        {
+          "type": "state",
+          "field": "uid",
+          "source": "taskGuildTargetId",
+          "required": true
+        },
+        {
+          "type": "fixed",
+          "field": "msg",
+          "value": "申请加入社团"
+        },
+        {
+          "type": "state",
+          "field": "account",
+          "source": "account"
+        }
+      ],
+      "store": [
+        {
+          "setter": "lastGuildJoinResp"
+        },
+        {
+          "setter": "playerData.guildInfo.guildId",
+          "field": "mydata.guildUid"
+        },
+        {
+          "setter": "playerData.guildInfo.baseInfo",
+          "field": "baseInfo"
+        },
+        {
+          "setter": "playerData.guildInfo.mydata",
+          "field": "mydata"
+        }
+      ]
     },
     "LbsPositioning": {
       "pattern": "tcpSend",
@@ -1697,6 +1764,14 @@
           ]
         }
       ]
+    },
+    "GuildPublish": {
+      "pattern": "lua",
+      "script": "guild_publish.lua"
+    },
+    "SelectTaskGuild": {
+      "pattern": "lua",
+      "script": "guild_select_target.lua"
     }
   },
   "listens": {
@@ -1734,13 +1809,64 @@
     "teamUpdateInfo": {},
     "teamNotifyInvite": {},
     "teamJoin": {},
-    "guildJoin": {},
-    "guildKickMember": {},
-    "guildMemberUpdate": {},
-    "guildUpdate": {},
+    "guildJoin": {
+      "s2cProto": "Game.GuildNotifyNewMemberS2C",
+      "script": "listen_guild_join.lua"
+    },
+    "guildKickMember": {
+      "s2cProto": "Game.GuildNotifyKickMemberS2C",
+      "script": "listen_guild_kick_member.lua"
+    },
+    "guildMemberUpdate": {
+      "s2cProto": "Game.GuildMemberUpdateNotifyS2C",
+      "script": "listen_guild_member_update.lua"
+    },
+    "guildUpdate": {
+      "s2cProto": "Game.GuildUpdateNotifyS2C",
+      "store": [
+        {
+          "setter": "currentGuildInfo.baseInfo",
+          "field": "baseInfo"
+        },
+        {
+          "setter": "playerData.guildInfo.baseInfo",
+          "field": "baseInfo"
+        },
+        {
+          "setter": "playerData.guildInfo.guildId",
+          "field": "baseInfo.uid"
+        },
+        {
+          "setter": "currentGuildInfo.baseSetting",
+          "field": "baseSetting"
+        },
+        {
+          "setter": "playerData.guildInfo.baseSetting",
+          "field": "baseSetting"
+        },
+        {
+          "setter": "currentGuildInfo.statistics",
+          "field": "statistics"
+        },
+        {
+          "setter": "currentGuildInfo.timeRecord",
+          "field": "timeRecord"
+        },
+        {
+          "setter": "currentGuildInfo.route",
+          "field": "routData"
+        },
+        {
+          "setter": "playerData.guildInfo.routeData",
+          "field": "routData"
+        }
+      ]
+    },
     "roomUpdateData": {},
     "roomUpdateStatus": {},
-    "frameData": {},
+    "frameData": {
+      "script": "listen_frame_data.lua"
+    },
     "battleStartGame": {}
   }
 }

@@ -15,15 +15,16 @@ local function clear_guild_state(roleId)
     robot.set("currentGuildInfo", nil)
     robot.set("guildMembers", nil)
     robot.set("guildApplyList", nil)
+    robot.delete("taskGuildCreatedId")
     log.info("ExitGuild 成功，清理本地社团状态: roleId=" .. tostring(roleId))
 end
 
 function execute(r)
     local roleId = to_number(robot.get("roleId"))
-    local guildId = to_number(robot.get_path("playerData.guildInfo.guildId"))
+    local guildId = robot.get_path("playerData.guildInfo.guildId")
     local position = to_number(robot.get_path("playerData.guildInfo.mydata.position"))
 
-    if guildId == nil or guildId == 0 then
+    if guildId == nil or tostring(guildId) == "0" then
         log.info("ExitGuild 跳过: 本地不在社团 roleId=" .. tostring(roleId))
         return nil
     end
