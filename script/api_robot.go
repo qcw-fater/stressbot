@@ -24,7 +24,7 @@ const maxSafeInt = 1 << 53 // 9007199254740992，Lua double 可精确表示的�
 //	r.get_path("a.b[0].c") → 按路径读取嵌套值
 //	r.set_path("a.b[0].c", v) → 按路径写入嵌套值（自动创建中间 map）
 //	r.get_id()             → 返回机器人编号
-//	r.get_index()          → 返回批次内序号（0-based）
+//	r.get_index()          → 返回任务全局序号（0-based，不含 startNumber 偏移）
 //	r.get_account()        → 返回账号名
 //	r.get_context()        → 检查 context 是否已取消
 //	r.error(code, detail)  → 构造 err table
@@ -275,7 +275,7 @@ func robotGetID(L *lua.LState) int {
 	return 1
 }
 
-// robotGetIndex robot.get_index() — 获取批次内序号（0-based）
+// robotGetIndex robot.get_index() — 获取任务全局序号（0-based，不含 startNumber 偏移）
 func robotGetIndex(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil {

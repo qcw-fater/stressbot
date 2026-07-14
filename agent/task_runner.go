@@ -68,6 +68,9 @@ func NewTaskRunner(assignment *TaskAssignment, cfg *ResolvedConfig, cli *AdminCl
 // Run 执行任务。阻塞直到任务完成或 ctx 被取消。
 func (r *TaskRunner) Run(ctx context.Context) RunResult {
 	taskID := r.assignment.TaskID
+	if err := r.assignment.Validate(); err != nil {
+		return runFailed(err.Error())
+	}
 
 	// 0. 任务级临时切换日志等级（来自前端 RobotConfig.logLevel）
 	//    结束时（包括异常路径）恢复原等级，避免影响后续任务。
@@ -231,6 +234,7 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 	mgrCfg := robot.ManagerConfig{
 		AccountPrefix:  accountPrefix,
 		StartNumber:    r.assignment.StartNumber,
+		StartIndex:     *r.assignment.StartIndex,
 		Count:          r.assignment.TotalBots,
 		ConcurrentNum:  r.assignment.ConcurrentNum,
 		StateExtra:     r.assignment.StateExtra,

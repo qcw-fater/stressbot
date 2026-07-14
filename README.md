@@ -594,7 +594,7 @@ Adapter 接口共 **9 方法**，实现已全 Go 化：`adapter/codec_resolver.g
 | `get_path("a.b[0].c")`                   | 按路径读取嵌套值 |
 | `set_path("a.b[0].c", value)`            | 按路径写入嵌套值（自动创建中间节点） |
 | `get_id()`                                | 获取机器人 ID |
-| `get_index()`                             | 获取批次内序号（0-based） |
+| `get_index()`                             | 获取任务全局序号（0-based，不含 `startNumber` 偏移） |
 | `get_account()`                           | 获取机器人账号 |
 | `get_context()`                           | 检查 context 是否已取消 |
 | `error(code, detail)`                     | 构造 err table `{code, detail}` |

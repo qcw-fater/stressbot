@@ -31,7 +31,7 @@ export interface StateKeyInfo {
 /** 内置 state 字段定义：每个机器人启动时自动注入，不可覆盖 */
 const BUILTIN_KEYS: StateKeyInfo[] = [
   { key: 'id', sourceType: 'builtin', sourceName: '内置', builtinType: 'int', builtinDesc: '机器人编号（= startNumber + index）' },
-  { key: 'index', sourceType: 'builtin', sourceName: '内置', builtinType: 'int', builtinDesc: '批次内序号（0-based）' },
+  { key: 'index', sourceType: 'builtin', sourceName: '内置', builtinType: 'int', builtinDesc: '任务全局序号（0-based，不含 startNumber 偏移）' },
   { key: 'account', sourceType: 'builtin', sourceName: '内置', builtinType: 'string', builtinDesc: '完整账号名（如 bot_100）' },
 ];
 

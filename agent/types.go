@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"time"
 
 	"stressbot/monitor"
@@ -98,7 +99,8 @@ type DeregisterRequest struct {
 type TaskAssignment struct {
 	TaskID            string            `json:"taskId"`
 	TaskName          string            `json:"taskName"`
-	StartNumber       int               `json:"startNumber"`
+	StartNumber       int               `json:"startNumber"` // 任务账号编号基数，所有 Agent 相同
+	StartIndex        *int              `json:"startIndex"`  // 本 Agent 的任务全局机器人序号起点（0-based）
 	TotalBots         int               `json:"totalBots"`
 	AccountPrefix     string            `json:"accountPrefix"`
 	ConcurrentNum     int               `json:"concurrentNum"`
@@ -118,6 +120,17 @@ type TaskAssignment struct {
 	// Shared 共享状态运行时下发（含已解析的 Redis 连接信息与任务 runId）。
 	// 仅当 Admin 检测到脚本使用 share 模块且服务器配置了 Redis 时才下发，否则为 nil。
 	Shared *SharedRuntimeAssignment `json:"shared,omitempty"`
+}
+
+// Validate 校验 Admin 下发的任务分配契约。
+func (a TaskAssignment) Validate() error {
+	if a.StartIndex == nil {
+		return fmt.Errorf("任务分配缺少必填字段 startIndex")
+	}
+	if *a.StartIndex < 0 {
+		return fmt.Errorf("任务分配 startIndex 不能为负数（当前 %d）", *a.StartIndex)
+	}
+	return nil
 }
 
 // SharedRuntimeAssignment Admin → Agent 下发的共享状态运行时配置。

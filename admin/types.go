@@ -193,8 +193,10 @@ type TaskAssignment struct {
 	TaskID string `json:"taskId"`
 	// TaskName 任务名称。
 	TaskName string `json:"taskName"`
-	// StartNumber 本 Agent 的 bot 起始编号。
+	// StartNumber 任务账号编号基数，所有 Agent 相同。
 	StartNumber int `json:"startNumber"`
+	// StartIndex 本 Agent 在任务全局机器人序号中的起点（0-based，不含 StartNumber 偏移）。
+	StartIndex int `json:"startIndex"`
 	// TotalBots 本 Agent 分配的 bot 数量。
 	TotalBots int `json:"totalBots"`
 	// AccountPrefix 账号名前缀。

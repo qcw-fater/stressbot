@@ -64,6 +64,11 @@ func (a *Assigner) Assign(task *Task, agents []*AgentNode, startNumber int) ([]A
 	return a.proportionalAssign(task, available, startNumber), nil
 }
 
+// assignmentStartIndex 返回分片在任务全局机器人序号中的起点，不包含账号编号基数偏移。
+func assignmentStartIndex(assignment Assignment, taskStartNumber int) int {
+	return assignment.StartNumber - taskStartNumber
+}
+
 // proportionalAssign 按 maxBots 比例分配，保证 sum(bots) == totalBots。
 func (a *Assigner) proportionalAssign(task *Task, agents []*AgentNode, startNumber int) []Assignment {
 	totalCapacity := 0

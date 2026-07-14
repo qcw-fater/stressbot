@@ -7,6 +7,16 @@ function findKey(keys: ReturnType<typeof collectStateKeys>, key: string) {
 }
 
 describe('collectStateKeys', () => {
+  it('内置 index 描述为任务全局零基序号', () => {
+    const keys = collectStateKeys({}, {}, undefined, undefined, undefined);
+
+    expect(findKey(keys, 'index')).toMatchObject({
+      sourceType: 'builtin',
+      builtinType: 'int',
+      builtinDesc: '任务全局序号（0-based，不含 startNumber 偏移）',
+    });
+  });
+
   it('嵌套 setter 不覆盖 Lua 已声明的顶层 state key 来源', () => {
     const actions: Record<string, ActionDef> = {
       guildLogin: {

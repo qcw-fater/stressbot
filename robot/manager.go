@@ -34,7 +34,8 @@ type RampUpStage struct {
 // ManagerConfig 机器人管理器配置
 type ManagerConfig struct {
 	AccountPrefix string            `json:"accountPrefix"`
-	StartNumber   int               `json:"startNumber"`
+	StartNumber   int               `json:"startNumber"` // 任务账号编号基数
+	StartIndex    int               `json:"startIndex"`  // 本 Manager 的任务全局机器人序号起点（0-based）
 	Count         int               `json:"count"`
 	ConcurrentNum int               `json:"concurrentNum"`
 	StateExtra    map[string]string `json:"stateExtra"`
@@ -103,6 +104,14 @@ func NewManager(cfg ManagerConfig, flow *engine.TaskFlow, factory *protox.Factor
 	}
 }
 
+// robotIdentity 根据 Manager 分片起点与本地序号计算任务全局身份。
+func (c ManagerConfig) robotIdentity(localIndex int) (id, index int, account string) {
+	index = c.StartIndex + localIndex
+	id = c.StartNumber + index
+	account = fmt.Sprintf("%s%d", c.AccountPrefix, id)
+	return id, index, account
+}
+
 // startBatch 创建 [fromIndex, fromIndex+count) 的 bot，使用 conc 做批量限速。
 // 返回实际创建的数量（即使中途被 ctx 取消，调用方也能知道完成了多少）。
 func (m *Manager) startBatch(fromIndex, count, conc int) (int, error) {
@@ -117,12 +126,11 @@ func (m *Manager) startBatch(fromIndex, count, conc int) (int, error) {
 			return created, m.ctx.Err()
 		}
 
-		id := m.cfg.StartNumber + fromIndex + i
-		account := fmt.Sprintf("%s%d", m.cfg.AccountPrefix, id)
+		id, index, account := m.cfg.robotIdentity(fromIndex + i)
 
 		r, err := NewRobot(Config{
 			ID:             id,
-			Index:          fromIndex + i,
+			Index:          index,
 			Account:        account,
 			StateExtra:     m.cfg.StateExtra,
 			HTTPTimeout:    m.cfg.HTTPTimeout,

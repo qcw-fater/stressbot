@@ -208,6 +208,9 @@ func (c *AdminClient) FetchPendingTask(ctx context.Context) (*TaskAssignment, er
 	if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
 		return nil, fmt.Errorf("decode pending task: %w", err)
 	}
+	if err := task.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid pending task: %w", err)
+	}
 	return &task, nil
 }
 

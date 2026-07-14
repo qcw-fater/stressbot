@@ -85,6 +85,10 @@ func (a *Agent) handleTaskAssign(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
+	if err := task.Validate(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	a.mu.Lock()
 	if a.currentTask != nil {
@@ -104,7 +108,8 @@ func (a *Agent) handleTaskAssign(w http.ResponseWriter, r *http.Request) {
 		zap.String("taskID", task.TaskID),
 		zap.String("name", task.TaskName),
 		zap.Int("totalBots", task.TotalBots),
-		zap.Int("startNumber", task.StartNumber))
+		zap.Int("startNumber", task.StartNumber),
+		zap.Int("startIndex", *task.StartIndex))
 
 	// 返回 202 Accepted，异步执行
 	w.WriteHeader(http.StatusAccepted)

@@ -35,7 +35,7 @@ import (
 // 每个 Robot 拥有独立的状态存储、网络客户端、Lua 运行时和流程执行器。
 type Robot struct {
 	id         int                    // 机器人唯一编号（= startNumber + index）
-	index      int                    // 批次内 0-based 序号
+	index      int                    // 任务全局 0-based 序号，不含 startNumber 偏移
 	account    string                 // 账号名
 	state      *state.Store           // 线程安全的键值状态存储
 	client     *network.Client        // 多服务网络客户端（管理 TCP/UDP 连接池）
@@ -74,8 +74,8 @@ type Robot struct {
 
 // Config 单个机器人的配置。
 type Config struct {
-	ID             int               // 机器人唯一编号（= startNumber + batchOffset）
-	Index          int               // 批次内 0-based 序号
+	ID             int               // 机器人唯一编号（= startNumber + index）
+	Index          int               // 任务全局 0-based 序号，不含 startNumber 偏移
 	Account        string            // 账号名
 	StateExtra     map[string]string // 初始状态额外键值对
 	HTTPTimeout    time.Duration     // HTTP 请求超时
@@ -218,7 +218,10 @@ func (r *Robot) Start() {
 			})
 		}
 
-		stresslog.Info("[ROBOT] 启动", zap.Int("id", r.id), zap.String("account", r.account))
+		stresslog.Info("[ROBOT] 启动",
+			zap.Int("id", r.id),
+			zap.Int("index", r.index),
+			zap.String("account", r.account))
 		monitor.Global().RobotStarted()
 		monitor.Global().RobotRunning()
 

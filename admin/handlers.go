@@ -873,6 +873,7 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 		bots    int
 	}
 	resultCh := make(chan pushResult, len(assignments))
+	taskStartNumber := assignments[0].StartNumber
 	for _, a := range assignments {
 		a := a // 捕获循环变量
 		agent, ok := s.agents.Get(a.AgentID)
@@ -884,7 +885,8 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 		cfg := TaskAssignment{
 			TaskID:            taskID,
 			TaskName:          taskName,
-			StartNumber:       a.StartNumber,
+			StartNumber:       taskStartNumber,
+			StartIndex:        assignmentStartIndex(a, taskStartNumber),
 			TotalBots:         a.TotalBots,
 			AccountPrefix:     stringOr(rc.AccountPrefix, "bot_", "robotConfig.accountPrefix"),
 			MainService:       rc.MainService,

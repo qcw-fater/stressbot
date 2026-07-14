@@ -131,7 +131,7 @@ const robotModule: LuaModule = {
       module: 'robot',
       params: [],
       returns: 'number',
-      summary: '返回批次内序号（0-based）',
+      summary: '返回任务全局序号（0-based，不含 startNumber 偏移）',
     },
     {
       name: 'get_account',
