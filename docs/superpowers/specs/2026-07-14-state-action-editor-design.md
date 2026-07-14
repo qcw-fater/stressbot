@@ -61,7 +61,9 @@
 - 流程实际引用脚本中写入的状态；
 - 嵌套 setter 推导出的顶层状态。
 
-为避免新组件重复异步加载脚本和拼装展示信息，将当前 `StateKeyInput` 内部的候选加载流程抽成 `useStateKeyOptions(currentBindings?)` hook。该 hook 返回完整 `StateKeyInfo[]`；`StateKeyInput`、`SetStateEditor` 和 `ClearStateEditor` 使用同一接口，来源标签和类型显示继续由现有纯函数生成。
+为避免新组件重复异步加载脚本和拼装展示信息，将当前 `StateKeyInput` 内部的候选加载流程抽成 `useStateKeyOptions(currentBindings?)` hook。该 hook 返回 `{ keys: StateKeyInfo[], ready: boolean }`：无脚本需要加载时立即 ready，有脚本时在全部读取完成后 ready。`StateKeyInput`、`SetStateEditor`、`ClearStateEditor` 和流程校验入口使用同一接口；来源标签和类型显示继续由现有纯函数生成。校验器只在 `ready=true` 时判断未知 key，避免脚本资源尚未加载时产生瞬时误报。
+
+状态注册表同时补齐两类现有写入来源：所有 `setState.bindings[].field` 的顶层 key，以及所有 action binding 的 `storeAs`。两者都是后续节点可访问的真实状态，不再只收集当前 action 的 `storeAs`。`setState` 嵌套目标如 `matchInfo.id` 注册顶层 `matchInfo`，与 `clearState` 只能删除顶层 key 的后端语义一致。
 
 ## setState 交互
 
