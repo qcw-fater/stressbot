@@ -752,6 +752,9 @@ func (ae *ActionExecutor) execUDPClose(def *ActionDef) error {
 
 // execClearState 清除 StateStore 中的多个 key
 func (ae *ActionExecutor) execClearState(def *ActionDef) error {
+	if err := validateClearStateKeys(def.Name, def.Keys); err != nil {
+		return NewActionError(errcode.ErrStateConfig, "action="+def.Name, err)
+	}
 	for _, key := range def.Keys {
 		ae.store.Delete(key)
 	}

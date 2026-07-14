@@ -36,6 +36,7 @@ const (
 	ErrMarshalBody     ErrorCode = 47 // JSON/form 请求体序列化失败
 	ErrHTTPStatus      ErrorCode = 48 // HTTP 响应状态码非 2xx
 	ErrHeartbeatConfig ErrorCode = 49 // 声明式心跳配置错误（intervalMs<=0 / route 缺失 / 字段非法）
+	ErrStateConfig     ErrorCode = 50 // 状态动作配置错误（如 clearState 清除内置状态）
 
 	// Lua 层 (51-60)
 	ErrLuaNotInit     ErrorCode = 51 // Lua 运行时未初始化
@@ -80,6 +81,7 @@ var codeRegistry = []CodeInfo{
 	{uint64(ErrMarshalBody), "MARSHAL_BODY"},
 	{uint64(ErrHTTPStatus), "HTTP_STATUS"},
 	{uint64(ErrHeartbeatConfig), "HEARTBEAT_CONFIG"},
+	{uint64(ErrStateConfig), "STATE_CONFIG"},
 	{uint64(ErrLuaNotInit), "LUA_NOT_INIT"},
 	{uint64(ErrLuaNoScript), "LUA_NO_SCRIPT"},
 	{uint64(ErrLuaExecFailed), "LUA_EXEC_FAILED"},

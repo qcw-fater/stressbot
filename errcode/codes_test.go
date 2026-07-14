@@ -25,3 +25,22 @@ func TestString_FrameworkCode(t *testing.T) {
 		t.Fatalf("未注册码应空串，实际 %q", got)
 	}
 }
+
+func TestStateConfigCodeRegistered(t *testing.T) {
+	if ErrStateConfig != 50 {
+		t.Fatalf("ErrStateConfig=%d want 50", ErrStateConfig)
+	}
+	if got := ErrStateConfig.String(); got != "STATE_CONFIG" {
+		t.Fatalf("ErrStateConfig.String()=%q want STATE_CONFIG", got)
+	}
+}
+
+func TestAllCodesUnique(t *testing.T) {
+	seen := make(map[uint64]string)
+	for _, code := range AllCodes() {
+		if previous, ok := seen[code.Code]; ok {
+			t.Fatalf("框架错误码 %d 重复注册: %s / %s", code.Code, previous, code.Name)
+		}
+		seen[code.Code] = code.Name
+	}
+}
