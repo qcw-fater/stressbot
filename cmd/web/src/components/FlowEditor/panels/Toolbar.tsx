@@ -38,9 +38,9 @@ import { useShallow } from 'zustand/react/shallow';
 import { useFlowStore } from '../store/flowStore';
 import { useEditorStore } from '../store/editorStore';
 import { useProtoStore } from '../proto/protoStore';
-import { syncFlowScriptsToIdb } from '@/services/scriptSync';
 import { fetchBaselineFlow } from '@/services/baselineApi';
 import { FlowManagerModal } from './FlowManagerModal';
+import { useFlowFileIO } from './useFlowFileIO';
 import { exportAllTemplates, importTemplates, type TemplateBundle } from '../library/templateStore';
 import type { FlowJson } from '../codec/flowToJson';
 
@@ -58,6 +58,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
   const readOnly = useFlowReadOnly();
   const { message } = AntApp.useApp();
   const loadFromTaskFlow = useFlowStore((s) => s.loadFromTaskFlow);
+  const { importFlow, exportFlow, syncScriptsAfterLoad } = useFlowFileIO();
   const reset = useFlowStore((s) => s.reset);
   const applyAutoLayout = useFlowStore((s) => s.applyAutoLayout);
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
@@ -85,31 +86,6 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
   // 隐藏的 input[type=file]，由"文件 → 导入"菜单项触发
   const importInputRef = useRef<HTMLInputElement>(null);
   const templateImportRef = useRef<HTMLInputElement>(null);
-
-  const handleImportFile = async (file: File) => {
-    try {
-      const text = await file.text();
-      const parsed = JSON.parse(text) as FlowJson;
-      loadFromTaskFlow(parsed);
-      message.success(`已加载 ${file.name}`);
-      void syncScriptsAfterLoad(parsed, '导入');
-    } catch (e) {
-      message.error(`导入失败：${(e as Error).message}`);
-    }
-  };
-
-  const onExport = () => {
-    const flow = useFlowStore.getState().toTaskFlow();
-    const blob = new Blob([JSON.stringify(flow, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'flow.json';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
 
   const onExportTemplates = async () => {
     const bundle = await exportAllTemplates();
@@ -141,34 +117,9 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
       if (!flow) throw new Error('flow.json 不存在');
       loadFromTaskFlow(flow);
       message.success('已加载基线流程');
-      void syncScriptsAfterLoad(flow, '加载');
+      void syncScriptsAfterLoad(flow);
     } catch (e) {
       message.error(`加载失败：${(e as Error).message}`);
-    }
-  };
-
-  /**
-   * 加载/导入 flow 后自动把引用的 lua 脚本同步到本地存储。
-   * - 静默 skipped（本地已存在），只对 added / missing 给提示；
-   * - missing 用 warning（不阻塞，用户也许稍后会手敲）；
-   * - added 用 info（解释清楚为什么本地存储突然多出几个文件）；
-   * - 任何异常都吞掉，不影响加载主流程。
-   */
-  const syncScriptsAfterLoad = async (_flow: FlowJson, _action: '导入' | '加载') => {
-    try {
-      // 仅做 flow 引用脚本的 gap-fill（本地完全没有的脚本从基线拉回，让流程能跑起来）。
-      // 与服务器的全量对比 / 冲突合并已改为显式操作（资源管理面板的「拉取」按钮），
-      // 不再在加载/导入流程时自动触发，避免无感覆盖用户的本地编辑稿。
-      const { missing } = await syncFlowScriptsToIdb(_flow);
-      if (missing.length > 0) {
-        message.warning(
-          `${missing.length} 个被引用的 lua 脚本不存在于 conf/scripts/，` +
-            `启动任务前请到「资源管理」上传或在动作里手写：${missing.join(', ')}`,
-          8,
-        );
-      }
-    } catch {
-      // 同步失败不阻塞主流程
     }
   };
 
@@ -202,7 +153,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
       key: 'export',
       icon: <DownloadOutlined />,
       label: '导出流程 JSON',
-      onClick: onExport,
+      onClick: exportFlow,
     },
     { type: 'divider' as const },
     {
@@ -345,7 +296,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
         style={{ display: 'none' }}
         onChange={(e) => {
           const f = e.target.files?.[0];
-          if (f) handleImportFile(f);
+          if (f) importFlow(f);
           e.target.value = '';
         }}
       />

@@ -5,12 +5,13 @@
  */
 
 import { App as AntApp, Button, Input, Modal, Space, Table, Popconfirm, Tooltip } from 'antd';
-import { DeleteOutlined, FolderOpenOutlined, SaveOutlined, SyncOutlined } from '@ant-design/icons';
+import { DeleteOutlined, DownloadOutlined, FolderOpenOutlined, ImportOutlined, SaveOutlined, SyncOutlined } from '@ant-design/icons';
 import { useEffect, useRef, useState } from 'react';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { FLOW_NAME_MAX_LENGTH, getFlow, listFlows, saveFlow, deleteFlow, renameFlow, type ManagedFlow } from '../store/flowManagerStore';
 import { useFlowStore } from '../store/flowStore';
+import { useFlowFileIO } from './useFlowFileIO';
 
 export interface FlowManagerModalProps {
   open: boolean;
@@ -27,6 +28,10 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
   const [renameValue, setRenameValue] = useState('');
   const [isRenaming, setIsRenaming] = useState(false);
   const committingRenameRef = useRef(false);
+
+  const { importFlow, exportFlow } = useFlowFileIO();
+  // 隐藏的 input[type=file]，由「导入流程」按钮触发
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const loadFromTaskFlow = useFlowStore((s) => s.loadFromTaskFlow);
 
@@ -245,7 +250,7 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
       width={700}
       destroyOnHidden
     >
-      <div style={{ marginBottom: 16, display: 'flex', gap: 8 }}>
+      <div style={{ marginBottom: 16, display: 'flex', gap: 8, alignItems: 'center' }}>
         <Input
           placeholder="输入流程名称保存当前草稿..."
           value={saveName}
@@ -256,6 +261,18 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
         <Button type="primary" icon={<SaveOutlined />} onClick={handleSaveAs} loading={isSaving}>
           另存为新流程
         </Button>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <Tooltip title="从本地 JSON 文件导入流程">
+            <Button icon={<ImportOutlined />} onClick={() => importInputRef.current?.click()}>
+              导入流程
+            </Button>
+          </Tooltip>
+          <Tooltip title="导出当前流程为 flow.json">
+            <Button icon={<DownloadOutlined />} onClick={exportFlow}>
+              导出流程
+            </Button>
+          </Tooltip>
+        </div>
       </div>
       <Table<ManagedFlow>
         rowKey="id"
@@ -265,6 +282,21 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
         size="small"
         pagination={{ pageSize: 10 }}
         locale={{ emptyText: '暂无保存的流程' }}
+      />
+      {/* 隐藏 input：「导入流程」按钮触发；成功后关闭弹窗回画布，与「打开」一致 */}
+      <input
+        ref={importInputRef}
+        type="file"
+        accept="application/json,.json"
+        style={{ display: 'none' }}
+        onChange={async (e) => {
+          const f = e.target.files?.[0];
+          if (f) {
+            const ok = await importFlow(f);
+            if (ok) handleModalClose();
+          }
+          e.target.value = '';
+        }}
       />
     </Modal>
   );
