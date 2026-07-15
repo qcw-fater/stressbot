@@ -12,6 +12,7 @@ import { protoRegistry } from '../proto/ProtoRegistry';
 import { buildRefsGraph } from '../listens/refsGraph';
 import { resolveRouteKeyForServer } from '../listens/routeKeyResolver';
 import { resolveRandomStringCharset } from '../editors/ActionEditor/randomStringCharset';
+import { isBuiltinStateKey, type StateKeyInfo } from '../editors/ActionEditor/stateRegistry';
 
 export type Severity = 'error' | 'warning' | 'info';
 
@@ -55,11 +56,27 @@ const VALID_BINDING_TYPE_SET = new Set<string>(ALL_BINDING_TYPES);
 
 // ── 主入口 ──────────────────────────────────────────────────
 
-export function validateFlow(flow: TaskFlow): ValidationReport {
+/**
+ * 校验上下文：携带校验所需的运行时外部数据（可选）。
+ * - stateKeys / stateKeysReady：状态注册表候选。仅当 ready（脚本异步加载完成）时
+ *   才用于 CLEARSTATE_UNKNOWN_KEY 检测，避免加载途中误报未知 key。
+ */
+export interface FlowValidationContext {
+  stateKeys?: StateKeyInfo[];
+  stateKeysReady?: boolean;
+}
+
+export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}): ValidationReport {
   const issues: ValidationIssue[] = [];
   const nodes = flow.nodes ?? {};
   const actions = flow.actions ?? {};
   const callbacks = flow.listens ?? {};
+
+  // 仅当状态注册表 ready 时才建立已知 key 集合，供 clearState 未知 key 检测；
+  // 未 ready 时为 undefined，CLEARSTATE_UNKNOWN_KEY 检测整体跳过（避免误报）。
+  const knownStateKeys = context.stateKeysReady
+    ? new Set((context.stateKeys ?? []).map((info) => info.key))
+    : undefined;
 
   // R1：必须有 main 节点
   if (!nodes.main) {
@@ -348,7 +365,7 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
   }
   for (const [name, def] of Object.entries(actions)) {
     if (referencedActions.has(name)) {
-      issues.push(...checkAction(name, def));
+      issues.push(...checkAction(name, def, knownStateKeys));
     } else {
       issues.push({
         severity: 'warning', code: 'ACTION_ORPHAN',
@@ -442,7 +459,7 @@ export function validateFlow(flow: TaskFlow): ValidationReport {
 
 // ── Action 校验 ─────────────────────────────────────────────
 
-function checkAction(name: string, def: ActionDef): ValidationIssue[] {
+function checkAction(name: string, def: ActionDef, knownStateKeys: Set<string> | undefined): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const loc = { kind: 'action' as const, id: name };
 
@@ -563,9 +580,50 @@ function checkAction(name: string, def: ActionDef): ValidationIssue[] {
     }
   }
 
-  // binding 递归校验
+  // setState 语义：每条 binding 必须有目标 field（空目标是编辑器里未填的脏数据），
+  // 重复目标给出 warning（后项会覆盖前项，合法但可疑）。
+  // 这一组检查在通用 checkBindings 之前：专门用 SETSTATE_TARGET_MISSING 取代对该场景的
+  // BINDING_NO_FIELD 通用 warning（下方 checkBindings 通过 requireTargetField=false 抑制）。
+  if (p === 'setState' && def.bindings) {
+    const firstByTarget = new Map<string, number>();
+    def.bindings.forEach((binding, index) => {
+      const target = binding.field?.trim();
+      if (!target) {
+        issues.push({ severity: 'error', code: 'SETSTATE_TARGET_MISSING', message: `action "${name}" 的第 ${index + 1} 条状态写入缺少目标状态`, location: loc });
+        return;
+      }
+      const previous = firstByTarget.get(target);
+      if (previous !== undefined) {
+        issues.push({ severity: 'warning', code: 'SETSTATE_TARGET_DUPLICATE', message: `action "${name}" 的第 ${index + 1} 条写入会覆盖第 ${previous + 1} 条对状态 "${target}" 的写入`, location: loc });
+      } else {
+        firstByTarget.set(target, index);
+      }
+    });
+  }
+
+  // clearState 语义：内置 key（id/index/account）由后端 Task 2 守卫保护、禁止清除；
+  // 重复 key 与当前流程未识别的 key 给出 warning（未识别检测仅在状态注册表 ready 时启用）。
+  if (p === 'clearState' && def.keys) {
+    const seen = new Set<string>();
+    for (const key of def.keys) {
+      if (isBuiltinStateKey(key)) {
+        issues.push({ severity: 'error', code: 'CLEARSTATE_PROTECTED_KEY', message: `action "${name}" 不允许清除内置状态 "${key}"`, location: loc });
+      }
+      if (seen.has(key)) {
+        issues.push({ severity: 'warning', code: 'CLEARSTATE_DUPLICATE_KEY', message: `action "${name}" 重复清除状态 "${key}"`, location: loc });
+      }
+      seen.add(key);
+      if (knownStateKeys && !knownStateKeys.has(key) && !isBuiltinStateKey(key)) {
+        issues.push({ severity: 'warning', code: 'CLEARSTATE_UNKNOWN_KEY', message: `action "${name}" 要清除的状态 "${key}" 当前流程未识别`, location: loc });
+      }
+    }
+  }
+
+  // binding 递归校验：setState 已由上方 SETSTATE_TARGET_MISSING 专门检查空目标，
+  // 这里通过 requireTargetField=false 抑制通用 BINDING_NO_FIELD warning，避免重复告警；
+  // 其余 pattern 保持默认（requireTargetField=true），缺 field 且无 storeAs 仍告警。
   if (def.bindings) {
-    issues.push(...checkBindings(`action "${name}"`, def.bindings, loc));
+    issues.push(...checkBindings(`action "${name}"`, def.bindings, loc, false, { requireTargetField: p !== 'setState' }));
   }
 
   return issues;
@@ -634,7 +692,13 @@ function checkNodeOnError(id: string, node: TaskFlow['nodes'][string], nodes: Ta
 
 // ── Binding 递归校验 ────────────────────────────────────────
 
-function checkBindings(prefix: string, bindings: FieldBind[], loc: { kind: 'action'; id: string }, isMapEntryValue = false): ValidationIssue[] {
+function checkBindings(
+  prefix: string,
+  bindings: FieldBind[],
+  loc: { kind: 'action'; id: string },
+  isMapEntryValue = false,
+  options: { requireTargetField?: boolean } = {},
+): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
   for (let i = 0; i < bindings.length; i++) {
@@ -642,8 +706,9 @@ function checkBindings(prefix: string, bindings: FieldBind[], loc: { kind: 'acti
     const label = `${prefix}.bindings[${i}]`;
     const t = b.type ?? '';
 
-    // field + storeAs 都空（map entry 内的 value binding 是纯值生成器，不需要 field/storeAs）
-    if (!isMapEntryValue && !b.field && !b.storeAs) {
+    // field + storeAs 都空（map entry 内的 value binding 是纯值生成器，不需要 field/storeAs；
+    // setState 由 SETSTATE_TARGET_MISSING 专门检查，requireTargetField=false 时跳过）。
+    if (!isMapEntryValue && options.requireTargetField !== false && !b.field && !b.storeAs) {
       issues.push({ severity: 'warning', code: 'BINDING_NO_FIELD', message: `${label} 缺少 field 和 storeAs`, location: loc });
     }
 

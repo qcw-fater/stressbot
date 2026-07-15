@@ -9,6 +9,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useFlowStore } from '../store/flowStore';
 import { useEditorStore } from '../store/editorStore';
 import { validateFlow, type ValidationIssue } from './refsCheck';
+import { useStateKeyOptions } from '../editors/ActionEditor/useStateKeyOptions';
 import { FloatingWindow } from '../panels/FloatingWindow';
 
 export interface ValidationReportDrawerProps {
@@ -30,8 +31,13 @@ export function ValidationReportDrawer({ open, onClose }: ValidationReportDrawer
   // routeKey 模板缓存版本：cache 加载/刷新时 bump，触发重算（消除 cache 未就绪时
   // 误报的 ROUTEKEY_CODEC_MISSING warning）。
   const routeKeyTemplatesVersion = useEditorStore((s) => s.routeKeyTemplatesVersion);
+  // 状态注册表：仅当 ready（脚本异步加载完成）时才参与 clearState 未知 key 校验。
+  const { keys: stateKeys, ready: stateKeysReady } = useStateKeyOptions();
 
-  const report = useMemo(() => validateFlow(flow), [flow, routeKeyTemplatesVersion]);
+  const report = useMemo(
+    () => validateFlow(flow, { stateKeys, stateKeysReady }),
+    [flow, routeKeyTemplatesVersion, stateKeys, stateKeysReady],
+  );
 
   const goto = (issue: ValidationIssue) => {
     if (!issue.location) return;

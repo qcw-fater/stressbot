@@ -31,6 +31,7 @@ import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { validateFlow } from '../validation/refsCheck';
 import { redo, undo } from '../store/undoRedo';
 import { clearDraft } from '../store/persistDraft';
+import { useStateKeyOptions } from '../editors/ActionEditor/useStateKeyOptions';
 import { useFlowReadOnly } from '../flowReadOnlyContext';
 import type { MenuProps } from 'antd';
 
@@ -79,7 +80,12 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
   );
   // routeKey 模板缓存版本：cache 加载/刷新时 bump，触发重算（与 ValidationReport 对齐）。
   const routeKeyTemplatesVersion = useEditorStore((s) => s.routeKeyTemplatesVersion);
-  const validation = useMemo(() => validateFlow(flowSnap), [flowSnap, routeKeyTemplatesVersion]);
+  // 状态注册表：仅当 ready（脚本异步加载完成）时才参与 clearState 未知 key 校验（与 ValidationReport 对齐）。
+  const { keys: stateKeys, ready: stateKeysReady } = useStateKeyOptions();
+  const validation = useMemo(
+    () => validateFlow(flowSnap, { stateKeys, stateKeysReady }),
+    [flowSnap, routeKeyTemplatesVersion, stateKeys, stateKeysReady],
+  );
   const errorCount = validation.errors.length;
   const warnCount = validation.warnings.length;
 

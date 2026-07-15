@@ -17,6 +17,12 @@ function baseFlow(overrides: Partial<TaskFlow> = {}): TaskFlow {
   };
 }
 
+/** 构造一个 stateKeys 已 ready 的校验上下文（keys 以 setState 来源登记） */
+const stateContext = (keys: string[]) => ({
+  stateKeys: keys.map((key) => ({ key, sourceType: 'setState' as const, sourceName: 'test' })),
+  stateKeysReady: true,
+});
+
 describe('validateFlow', () => {
   // ── 节点级 ──
 
@@ -459,6 +465,45 @@ describe('validateFlow', () => {
       listens: { cb1: { script: 'foo.lua' } },
     }));
     expect(r.errors.find((e) => e.code === 'LISTEN_LUA_NO_SCRIPT')).toBeFalsy();
+  });
+
+  // ── setState / clearState 语义校验 ──
+
+  it('SETSTATE_TARGET_MISSING：setState 空目标是 error', () => {
+    const r = validateFlow(baseFlow({ actions: { A1: {
+      pattern: 'setState', bindings: [{ type: 'fixed', value: 1 }],
+    } } }));
+    expect(r.errors.find((e) => e.code === 'SETSTATE_TARGET_MISSING')).toBeTruthy();
+  });
+
+  it('SETSTATE_TARGET_DUPLICATE：后项覆盖前项时 warning', () => {
+    const r = validateFlow(baseFlow({ actions: { A1: {
+      pattern: 'setState', bindings: [
+        { field: 'battleId', type: 'fixed', value: 1 },
+        { field: 'battleId', type: 'fixed', value: 2 },
+      ],
+    } } }));
+    expect(r.warnings.find((e) => e.code === 'SETSTATE_TARGET_DUPLICATE')).toBeTruthy();
+  });
+
+  it.each(['id', 'index', 'account'])('CLEARSTATE_PROTECTED_KEY：%s 是 error', (key) => {
+    const r = validateFlow(baseFlow({ actions: { A1: { pattern: 'clearState', keys: ['battleId', key] } } }), stateContext(['battleId']));
+    expect(r.errors.find((e) => e.code === 'CLEARSTATE_PROTECTED_KEY')).toBeTruthy();
+  });
+
+  it('CLEARSTATE_DUPLICATE_KEY：导入重复 key 时 warning', () => {
+    const r = validateFlow(baseFlow({ actions: { A1: { pattern: 'clearState', keys: ['battleId', 'battleId'] } } }), stateContext(['battleId']));
+    expect(r.warnings.find((e) => e.code === 'CLEARSTATE_DUPLICATE_KEY')).toBeTruthy();
+  });
+
+  it('CLEARSTATE_UNKNOWN_KEY：注册表 ready 后未知 key warning', () => {
+    const r = validateFlow(baseFlow({ actions: { A1: { pattern: 'clearState', keys: ['legacyBattle'] } } }), stateContext(['battleId']));
+    expect(r.warnings.find((e) => e.code === 'CLEARSTATE_UNKNOWN_KEY')).toBeTruthy();
+  });
+
+  it('状态注册表未 ready 时不误报未知 key', () => {
+    const r = validateFlow(baseFlow({ actions: { A1: { pattern: 'clearState', keys: ['scriptState'] } } }), { stateKeys: [], stateKeysReady: false });
+    expect(r.warnings.find((e) => e.code === 'CLEARSTATE_UNKNOWN_KEY')).toBeFalsy();
   });
 });
 
