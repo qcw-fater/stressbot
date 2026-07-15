@@ -240,9 +240,9 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
       )}
 
       {pattern === 'clearState' && (
-        <Form.Item label="keys（要清除的 state key 列表）">
+        <div style={{ marginBottom: 24 }}>
           <ClearStateEditor value={action.keys} onChange={(keys) => set({ keys })} />
-        </Form.Item>
+        </div>
       )}
 
       <ProtoBrowser
