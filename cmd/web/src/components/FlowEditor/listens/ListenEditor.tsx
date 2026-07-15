@@ -16,7 +16,6 @@ import type { ListenDef } from '@/types/listen';
 import { classifyListen, type ListenKind } from '@/types/listen';
 import { useEditorStore } from '../store/editorStore';
 import { useFlowStore } from '../store/flowStore';
-import { useRuntimeStore } from '@/services/runtimeStore';
 import { ProtoBrowser } from '../proto/ProtoBrowser';
 import { StoreTable } from '../editors/ActionEditor/StoreTable';
 import { LuaScriptField } from '../editors/shared/LuaScriptField';
@@ -234,10 +233,6 @@ function DeclarativeListenBody({
   onChange: (v: ListenDef) => void;
   onOpenProto: () => void;
 }) {
-  const allActions = useFlowStore((s) => s.actions);
-  const allListens = useFlowStore((s) => s.listens);
-  const stateExtra = useRuntimeStore((s) => s.robotConfig.stateExtra);
-
   return (
     <div>
       <div style={{ marginBottom: 12 }}>
@@ -255,9 +250,6 @@ function DeclarativeListenBody({
         s2cProto={value.s2cProto}
         value={value.store}
         onChange={(v) => onChange({ ...value, store: v })}
-        actions={allActions}
-        listens={allListens}
-        stateExtra={stateExtra}
       />
     </div>
   );

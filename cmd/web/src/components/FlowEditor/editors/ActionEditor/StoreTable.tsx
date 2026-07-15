@@ -9,8 +9,6 @@ import { Button, Collapse, Space, Tag, Tooltip } from 'antd';
 import { ArrowUpOutlined, ArrowDownOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import type { CollapseProps } from 'antd';
 import type { StoreMapping } from '@/types/action';
-import type { ActionDef } from '@/types/action';
-import type { ListenDef } from '@/types/listen';
 import { ProtoPathInput } from './ProtoPathInput';
 import { SetterPathInput } from '../shared/SetterPathInput';
 
@@ -20,14 +18,9 @@ export interface StoreTableProps {
   onChange?: (v: StoreMapping[]) => void;
   /** 区块标题 */
   label?: string;
-  /** 以下 props 透传给 SetterPathInput 以浏览 state key 树 */
-  actions?: Record<string, ActionDef>;
-  listens?: Record<string, ListenDef>;
-  stateExtra?: Record<string, string>;
-  luaScripts?: Array<{ name: string; content: string }>;
 }
 
-export function StoreTable({ s2cProto, value, onChange, label, actions, listens, stateExtra, luaScripts }: StoreTableProps) {
+export function StoreTable({ s2cProto, value, onChange, label }: StoreTableProps) {
   const list = value ?? [];
   const set = (next: StoreMapping[]) => onChange?.(next);
 
@@ -104,10 +97,6 @@ export function StoreTable({ s2cProto, value, onChange, label, actions, listens,
               arr[i] = { ...arr[i], setter: v };
               set(arr);
             }}
-            actions={actions ?? {}}
-            listens={listens ?? {}}
-            stateExtra={stateExtra}
-            luaScripts={luaScripts}
           />
         </div>
       </div>

@@ -12,7 +12,6 @@ import { StoreTable } from './StoreTable';
 import { SetStateEditor } from './SetStateEditor';
 import { ClearStateEditor } from './ClearStateEditor';
 import { useRuntimeStore } from '@/services/runtimeStore';
-import { useFlowStore } from '../../store/flowStore';
 import { protoRegistry } from '../../proto/ProtoRegistry';
 import { useCodecConnections, useCodecRouteSpecs } from '../../codec/useCodecConnections';
 import { actionProtocol } from '../../codec/connectionRouteModel';
@@ -26,9 +25,6 @@ export interface DeclarativeFormProps {
 export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
   const { pattern } = action;
   const requestTimeoutSec = useRuntimeStore((s) => s.robotConfig.timeoutSec);
-  const stateExtra = useRuntimeStore((s) => s.robotConfig.stateExtra);
-  const allActions = useFlowStore((s) => s.actions);
-  const allListens = useFlowStore((s) => s.listens);
   const { connections, loading: connectionsLoading, error: connectionsError } = useCodecConnections();
   const { specs, loading: routeSpecsLoading, error: routeSpecsError } = useCodecRouteSpecs();
   const timeoutPlaceholder = pattern === 'tcpRequest' || pattern === 'udpRequest' ? String(requestTimeoutSec || 60) : '60';
@@ -190,9 +186,6 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
             value={action.store}
             onChange={(v) => set({ store: v })}
             label={pattern === 'httpRequest' ? 'store（JSON 响应 → state）' : 'store（S2C → state）'}
-            actions={allActions}
-            listens={allListens}
-            stateExtra={stateExtra}
           />
         </div>
       )}

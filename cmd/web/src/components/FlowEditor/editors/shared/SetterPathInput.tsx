@@ -8,31 +8,21 @@
 import type { InputRef } from 'antd';
 import { Button, Input, Popover, Space, Tag, Tooltip } from 'antd';
 import { RightOutlined, SearchOutlined } from '@ant-design/icons';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useFloatingWindowStore } from '../../store/floatingWindowStore';
-import { useFlowStore } from '../../store/flowStore';
-import { getScript } from '@/services/resourcesStore';
 import {
-  collectStateKeys,
-  collectUsedScriptNames,
   resolveStateKeyDisplayType,
   resolveSubFields,
   type StateKeySourceType,
 } from '../ActionEditor/stateRegistry';
 import { STATE_SOURCE_LABEL } from '../ActionEditor/stateKeyPresentation';
+import { useStateKeyOptions } from '../ActionEditor/useStateKeyOptions';
 import type { ProtoField } from '@/types/proto';
 import { protoRegistry } from '../../proto/ProtoRegistry';
-import type { ActionDef } from '@/types/action';
-import type { ListenDef } from '@/types/listen';
 
 export interface SetterPathInputProps {
   value: string;
   onChange: (v: string) => void;
-  /** 传入 actions/listens 以避免组件内部自行订阅 store */
-  actions: Record<string, ActionDef>;
-  listens: Record<string, ListenDef>;
-  stateExtra?: Record<string, string>;
-  luaScripts?: Array<{ name: string; content: string }>;
   style?: React.CSSProperties;
 }
 
@@ -41,10 +31,6 @@ type ExpandedMap = Record<string, boolean>;
 export function SetterPathInput({
   value,
   onChange,
-  actions,
-  listens,
-  stateExtra,
-  luaScripts: externalLuaScripts,
   style,
 }: SetterPathInputProps) {
   const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
@@ -54,34 +40,8 @@ export function SetterPathInput({
   const [expanded, setExpanded] = useState<ExpandedMap>({});
   const inputRef = useRef<InputRef>(null);
 
-  // 收集已知 state keys
-  const nodes = useFlowStore((s) => s.nodes);
-  const usedScriptNames = useMemo(
-    () => collectUsedScriptNames(actions, listens, nodes),
-    [actions, listens, nodes],
-  );
-
-  const [loadedLuaScripts, setLoadedLuaScripts] = useState<Array<{ name: string; content: string }>>([]);
-  useEffect(() => {
-    if (usedScriptNames.size === 0) { setLoadedLuaScripts([]); return; }
-    let cancelled = false;
-    const entries: Array<{ name: string; content: string }> = [];
-    let pending = usedScriptNames.size;
-    for (const name of usedScriptNames) {
-      getScript(name)
-        .then((file) => { if (!cancelled && file) entries.push({ name: file.name, content: file.content }); })
-        .catch(() => {})
-        .finally(() => { if (!cancelled && --pending === 0) setLoadedLuaScripts(entries); });
-    }
-    return () => { cancelled = true; };
-  }, [usedScriptNames]);
-
-  const luaScripts = externalLuaScripts ?? loadedLuaScripts;
-
-  const allKeys = useMemo(
-    () => collectStateKeys(actions, listens, stateExtra, undefined, luaScripts),
-    [actions, listens, stateExtra, luaScripts],
-  );
+  // 已知 state keys 由统一钩子提供（StateKeyOptionsProvider 下共享脚本加载）
+  const { keys: allKeys } = useStateKeyOptions();
 
   const filteredKeys = useMemo(() => {
     if (!browseSearch) return allKeys;
