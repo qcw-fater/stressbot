@@ -3,9 +3,9 @@
  *
  * 与通用 BindingsTable 编辑同一个 `ActionDef.bindings` 数组，但面向 setState 场景重新组织：
  *   - 每条 binding 一张 Collapse 摘要卡片：折叠态显示「目标状态 + 取值方式 + 值摘要 + 高级标签」。
- *   - 展开态：目标状态输入（StateKeyInput，候选不存在时标记「新状态」）、取值方式下拉、
- *     primary 段表单（BindingTypeForm section="primary"），以及嵌套「高级设置（N）」折叠区
- *     （advanced 段 + 通用高级字段）。
+ *   - 展开态：目标状态输入（StateKeyInput，候选不存在时标记「新状态」）、取值方式下拉，
+ *     随后取值字段（BindingTypeForm 全字段）+ 通用高级字段（required/optional/wrap/storeAs/condition）
+ *     全部内联 —— 与 BindingsTable 的展开行一致，不再套内层折叠。
  *
  * 设计约束：
  *   - 不自动创建、改名、去重、迁移任何 state key；只通过 onChange 原地编辑数组。
@@ -25,7 +25,6 @@ import { BindingCommonAdvancedFields, BINDING_TYPE_DESC } from './BindingsTable'
 import { BindingTypeForm } from './BindingTypeForm';
 import {
   SET_STATE_TYPE_GROUPS,
-  bindingAdvancedCount,
   bindingValueSummary,
   changeBindingType,
   moveBinding,
@@ -59,7 +58,6 @@ export function SetStateEditor({ value, onChange }: SetStateEditorProps) {
 
   const items = list.map((binding, i) => {
     const isNew = isNewTarget(binding.field);
-    const advancedCount = bindingAdvancedCount(binding);
     return {
       key: String(i),
       label: (
@@ -148,33 +146,13 @@ export function SetStateEditor({ value, onChange }: SetStateEditorProps) {
             />
           </Form.Item>
           <BindingTypeForm
-            section="primary"
             binding={binding}
             currentBindings={list}
             onChange={(b) => setBinding(i, b)}
           />
-          <Collapse
-            size="small"
-            items={[
-              {
-                key: 'advanced',
-                label: `高级设置（${advancedCount}）`,
-                children: (
-                  <Space direction="vertical" style={{ width: '100%' }} size="middle">
-                    <BindingTypeForm
-                      section="advanced"
-                      binding={binding}
-                      currentBindings={list}
-                      onChange={(b) => setBinding(i, b)}
-                    />
-                    <BindingCommonAdvancedFields
-                      binding={binding}
-                      onChange={(b) => setBinding(i, b)}
-                    />
-                  </Space>
-                ),
-              },
-            ]}
+          <BindingCommonAdvancedFields
+            binding={binding}
+            onChange={(b) => setBinding(i, b)}
           />
         </Space>
       ),

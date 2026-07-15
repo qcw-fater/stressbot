@@ -1,12 +1,11 @@
 /**
  * 单个 FieldBind 编辑器：根据 type 切换不同输入控件。
  *
- * 通过 `section` prop 控制渲染区段：
- *   - 'all'（默认）= primary + advanced 纵向组合，与历史行为一致；BindingsTable 与 map entry
- *     的 `<BindingTypeForm valueOnly />` 走此路径，外观/行为不变。
- *   - 'primary' 仅核心取值控件；'advanced' 仅类型高级字段（path/filters/excludeSource），无则返回 null。
+ * 渲染顺序：先 primary 段（取值方式必备控件），再 advanced 段（path/filters 等类型高级字段，
+ * 无则不渲染），全部内联纵向组合。通用高级字段（required/optional/wrap/storeAs/condition）
+ * 由 BindingsTable.BindingCommonAdvancedFields 统一渲染，不归本组件管。
  *
- * 17 种 type 的 primary / advanced 字段对照（设计文档 §4.1 / §6.3，task-4-brief.md Step 4）：
+ * 17 种 type 的 primary / advanced 字段对照：
  *   fixed         : primary=value                        advanced=none
  *   state         : primary=source                        advanced=path
  *   stateFirst    : primary=source                        advanced=path
@@ -24,9 +23,6 @@
  *   randomExclude : primary=values/source                 advanced=excludeSource
  *   listSize      : primary=source                        advanced=none
  *   map           : primary=entries                       advanced=none
- *
- * 通用高级字段（required/optional/wrap/storeAs/condition）由
- * BindingsTable.BindingCommonAdvancedFields 统一渲染，不归本组件管。
  */
 
 import { Button, Input, InputNumber, Select, Space, Tag, Tooltip } from 'antd';
@@ -48,16 +44,6 @@ export interface BindingTypeFormProps {
   currentBindings?: FieldBind[];
   /** valueOnly 模式：用于 map entry 的 value 编辑，禁止嵌套 map */
   valueOnly?: boolean;
-  /**
-   * 区段选择：
-   *   - 'all'（默认）：渲染 primary + advanced，纵向小间距组合，等价于历史行为。
-   *   - 'primary'：仅渲染主参数（source/values/min-max 等取值方式必备项）。
-   *   - 'advanced'：仅渲染类型高级字段（path/filters/excludeSource），无则返回 null。
-   *
-   * setState/clearState 行用 'primary' 渲染紧凑主体，把通用高级配置与类型高级字段
-   * 收进折叠区；其它 pattern（tcpSend/httpRequest 等）继续使用默认 'all'，外观不变。
-   */
-  section?: 'all' | 'primary' | 'advanced';
   onChange: (b: FieldBind) => void;
 }
 
@@ -118,7 +104,6 @@ export function BindingTypeForm({
   currentBindings,
   onChange,
   valueOnly = false,
-  section = 'all',
 }: BindingTypeFormProps) {
   const set = (partial: Partial<FieldBind>) => onChange({ ...binding, ...partial });
 
@@ -133,29 +118,8 @@ export function BindingTypeForm({
     return resolveProtoForStateKey(keys, binding.source);
   }, [binding.source, actions, listens, stateExtra, currentBindings]);
 
-  if (section === 'primary') {
-    return (
-      <BindingPrimaryFields
-        binding={binding}
-        currentBindings={currentBindings}
-        set={set}
-        sourceProto={sourceProto}
-        valueOnly={valueOnly}
-      />
-    );
-  }
-  if (section === 'advanced') {
-    return (
-      <BindingTypeAdvancedFields
-        binding={binding}
-        currentBindings={currentBindings}
-        set={set}
-        sourceProto={sourceProto}
-      />
-    );
-  }
-  // section === 'all'：先渲染 primary，再渲染 advanced；保持与历史调用一致的纵向组合。
-  // advanced 对没有「类型高级字段」的类型返回 null，Space 会自动跳过。
+  // 先渲染 primary，再渲染 advanced；advanced 对没有「类型高级字段」的类型返回 null，
+  // Space 会自动跳过。
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="small">
       <BindingPrimaryFields

@@ -68,7 +68,7 @@ describe('SetStateEditor', () => {
     expect(screen.getByText('新状态')).toBeTruthy();
   });
 
-  it('已配置高级字段时显示标签和配置数量', async () => {
+  it('展开后高级字段内联显示（无内层折叠）', async () => {
     const user = userEvent.setup();
     render(
       <Harness
@@ -86,8 +86,10 @@ describe('SetStateEditor', () => {
     );
     // required 标签在折叠摘要里始终渲染
     expect(screen.getByText('required')).toBeTruthy();
-    // 展开后才能看到嵌套「高级设置（N）」折叠标题
+    // 不存在内层「高级设置」折叠（与 BindingsTable 展开行一致）
+    expect(screen.queryByText(/高级设置/)).toBeNull();
+    // 展开后通用高级字段内联渲染：condition 已配置 → 出现「删除条件」
     await user.click(screen.getByText('battleId'));
-    expect(screen.getByText(/高级设置（3）/)).toBeTruthy();
+    expect(screen.getByText('删除条件')).toBeTruthy();
   });
 });

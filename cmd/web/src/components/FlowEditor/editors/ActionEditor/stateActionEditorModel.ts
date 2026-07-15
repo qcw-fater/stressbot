@@ -83,53 +83,6 @@ export function bindingValueSummary(binding: FieldBind): string {
   }
 }
 
-/** path 字段是哪些 binding type 的「类型高级字段」（来自设计表的 advanced 列）。 */
-const PATH_ADVANCED_TYPES: ReadonlySet<BindingType> = new Set<BindingType>([
-  'state',
-  'stateFirst',
-  'stateRandom',
-  'stateRandomN',
-  'stateMapValue',
-]);
-
-/** filters 字段是哪些 binding type 的「类型高级字段」（来自设计表的 advanced 列）。 */
-const FILTERS_ADVANCED_TYPES: ReadonlySet<BindingType> = new Set<BindingType>([
-  'stateRandom',
-  'stateRandomN',
-  'stateMapKey',
-  'stateMapValue',
-]);
-
-/**
- * 统计 binding 在「高级配置」折叠区中实际渲染的项数。
- *
- * 由两部分组成：
- *   1. 通用高级字段（所有 type 共享）：required / optional / wrap / storeAs / condition —— 每项配置 +1。
- *   2. 类型高级字段（按设计表 advanced 列）：
- *      - path：state / stateFirst / stateRandom / stateRandomN / stateMapValue 配置时 +1。
- *      - filters（非空数组）：stateRandom / stateRandomN / stateMapKey / stateMapValue +1。
- *      - excludeSource：randomExclude 配置时 +1。
- *
- * 注意：keySource（randomPickMap）与 entries（map）属于 primary 段，不计入此处；
- * values / min / max / precision / length / count / charset / source 也都是 primary，不计入。
- */
-export function bindingAdvancedCount(binding: FieldBind): number {
-  let count = 0;
-
-  if (binding.required) count += 1;
-  if (binding.optional) count += 1;
-  if (binding.wrap) count += 1;
-  if (binding.storeAs) count += 1;
-  if (binding.condition) count += 1;
-
-  const t = binding.type;
-  if (PATH_ADVANCED_TYPES.has(t) && binding.path) count += 1;
-  if (FILTERS_ADVANCED_TYPES.has(t) && binding.filters && binding.filters.length > 0) count += 1;
-  if (t === 'randomExclude' && binding.excludeSource) count += 1;
-
-  return count;
-}
-
 /**
  * 把列表的第 `from` 项移动到 `to` 位置（remove+insert 语义，非 swap）。
  *

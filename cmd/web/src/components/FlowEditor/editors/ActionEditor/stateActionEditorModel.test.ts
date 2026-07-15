@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { ALL_BINDING_TYPES, type FieldBind } from '@/types/action';
 import {
   SET_STATE_TYPE_GROUPS,
-  bindingAdvancedCount,
   bindingValueSummary,
   changeBindingType,
   moveBinding,
@@ -28,12 +27,6 @@ describe('state action editor model', () => {
     expect(changeBindingType(before, 'fixed')).toEqual({
       field: 'battleId', type: 'fixed', required: true, condition: 'state:ready', storeAs: 'picked',
     });
-  });
-
-  it('高级配置数量包含通用字段和类型高级字段', () => {
-    expect(bindingAdvancedCount({
-      type: 'stateRandom', source: 'items', path: 'id', filters: [{ op: 'eq', value: 1 }], optional: true,
-    })).toBe(3);
   });
 
   it('移动条目保持不可变并守住边界', () => {
