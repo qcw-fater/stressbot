@@ -68,10 +68,12 @@ function SourceRow({
   binding,
   currentBindings,
   set,
+  placeholder = 'state key',
 }: {
   binding: FieldBind;
   currentBindings?: FieldBind[];
   set: (p: Partial<FieldBind>) => void;
+  placeholder?: string;
 }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -80,7 +82,7 @@ function SourceRow({
         value={binding.source}
         onChange={(v) => set({ source: v || undefined })}
         currentBindings={currentBindings}
-        placeholder="state key"
+        placeholder={placeholder}
         style={{ flex: 1 }}
       />
     </div>
@@ -325,12 +327,12 @@ function BindingPrimaryFields({
     case 'randomExclude':
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
-          <SourceRow binding={binding} currentBindings={currentBindings} set={set} />
+          <SourceRow binding={binding} currentBindings={currentBindings} set={set} placeholder="state list" />
           <ValuesField binding={binding} set={set} />
         </div>
       );
     case 'listSize':
-      return <SourceRow binding={binding} currentBindings={currentBindings} set={set} />;
+      return <SourceRow binding={binding} currentBindings={currentBindings} set={set} placeholder="state list key" />;
     case 'map':
       if (valueOnly) {
         return <span style={{ color: 'var(--color-error)' }}>map value 不支持嵌套 map</span>;

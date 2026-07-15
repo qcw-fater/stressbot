@@ -212,6 +212,11 @@ describe('validateFlow', () => {
     expect(r.errors.find((e) => e.code === 'BINDING_NO_SOURCE')).toBeTruthy();
   });
 
+  it('BINDING_NO_FIELD：非 setState pattern 的 binding 缺 field 且无 storeAs 报 warning', () => {
+    const r = validateFlow(baseFlow({ actions: { A1: { pattern: 'tcpSend', service: 'logic', route: {}, c2sProto: 'X.Foo', bindings: [{ type: 'fixed', value: 1 }] } } }));
+    expect(r.warnings.find((e) => e.code === 'BINDING_NO_FIELD')).toBeTruthy();
+  });
+
   it('BINDING_NO_COUNT：randomPickN 缺 count 报错', () => {
     const r = validateFlow(baseFlow({ actions: { A1: { pattern: 'tcpSend', service: 'logic', route: {}, c2sProto: 'X.Foo', bindings: [{ field: 'f', type: 'randomPickN', values: ['a', 'b'] }] } } }));
     expect(r.errors.find((e) => e.code === 'BINDING_NO_COUNT')).toBeTruthy();

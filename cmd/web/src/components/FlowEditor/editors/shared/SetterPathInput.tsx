@@ -17,7 +17,9 @@ import {
   collectUsedScriptNames,
   resolveStateKeyDisplayType,
   resolveSubFields,
+  type StateKeySourceType,
 } from '../ActionEditor/stateRegistry';
+import { STATE_SOURCE_LABEL } from '../ActionEditor/stateKeyPresentation';
 import type { ProtoField } from '@/types/proto';
 import { protoRegistry } from '../../proto/ProtoRegistry';
 import type { ActionDef } from '@/types/action';
@@ -33,15 +35,6 @@ export interface SetterPathInputProps {
   luaScripts?: Array<{ name: string; content: string }>;
   style?: React.CSSProperties;
 }
-
-const SOURCE_TYPE_LABEL: Record<string, { label: string; color: string }> = {
-  store: { label: 'S2C', color: 'blue' },
-  listenStore: { label: '推送', color: 'orange' },
-  stateExtra: { label: '启动', color: 'volcano' },
-  storeAs: { label: '中间值', color: 'green' },
-  lua: { label: 'Lua', color: 'purple' },
-  builtin: { label: '内置', color: 'cyan' },
-};
 
 type ExpandedMap = Record<string, boolean>;
 
@@ -165,7 +158,7 @@ export function SetterPathInput({
 // ─── 顶层 state key 行 ──────────────────────────────────────
 
 interface SetterKeyRowProps {
-  keyInfo: { key: string; sourceType: string; s2cProto?: string; storeField?: string };
+  keyInfo: { key: string; sourceType: StateKeySourceType; s2cProto?: string; storeField?: string };
   expanded: ExpandedMap;
   onToggleExpand: (path: string) => void;
   onSelect: (path: string) => void;
@@ -173,6 +166,8 @@ interface SetterKeyRowProps {
 
 function SetterKeyRow({ keyInfo, expanded, onToggleExpand, onSelect }: SetterKeyRowProps) {
   const isExpanded = expanded[keyInfo.key] ?? false;
+  // STATE_SOURCE_LABEL 覆盖 StateKeySourceType 全集，无需 fallback。
+  const sourceLabel = STATE_SOURCE_LABEL[keyInfo.sourceType];
 
   const subFields = useMemo(
     () => resolveSubFields(keyInfo as Parameters<typeof resolveSubFields>[0]),
@@ -215,10 +210,10 @@ function SetterKeyRow({ keyInfo, expanded, onToggleExpand, onSelect }: SetterKey
         >
           <code style={{ whiteSpace: 'nowrap' }}>{keyInfo.key}</code>
           <Tag
-            color={SOURCE_TYPE_LABEL[keyInfo.sourceType]?.color ?? 'default'}
+            color={sourceLabel.color}
             style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0 }}
           >
-            {SOURCE_TYPE_LABEL[keyInfo.sourceType]?.label ?? keyInfo.sourceType}
+            {sourceLabel.label}
           </Tag>
           {keyInfo.s2cProto && (
             <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
