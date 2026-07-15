@@ -9,6 +9,8 @@ import type { ActionDef, ActionPattern } from '@/types/action';
 import { ProtoBrowser } from '../../proto/ProtoBrowser';
 import { BindingsTable } from './BindingsTable';
 import { StoreTable } from './StoreTable';
+import { SetStateEditor } from './SetStateEditor';
+import { ClearStateEditor } from './ClearStateEditor';
 import { useRuntimeStore } from '@/services/runtimeStore';
 import { useFlowStore } from '../../store/flowStore';
 import { protoRegistry } from '../../proto/ProtoRegistry';
@@ -45,7 +47,6 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
   const showStore = patternHas(pattern, ['store']);
   const showTimeout = pattern === 'tcpListen' || pattern === 'udpListen' || pattern === 'tcpRequest' || pattern === 'udpRequest';
   const showPollMs = pattern === 'tcpListen' || pattern === 'udpListen';
-  const showKeys = pattern === 'clearState';
   const showURL = pattern === 'httpRequest';
   const showMethod = pattern === 'httpRequest';
   const showContentType = pattern === 'httpRequest';
@@ -165,13 +166,19 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
         </Form.Item>
       )}
 
-      {showBindings && (
+      {pattern === 'setState' && (
+        <div style={{ marginBottom: 24 }}>
+          <SetStateEditor value={action.bindings} onChange={(bindings) => set({ bindings })} />
+        </div>
+      )}
+
+      {showBindings && pattern !== 'setState' && (
         <div style={{ marginBottom: 24 }}>
           <BindingsTable
             messageFullName={pattern === 'httpRequest' ? undefined : action.c2sProto}
             value={action.bindings}
             onChange={(v) => set({ bindings: v })}
-            label={pattern === 'httpRequest' ? 'bindings（请求体字段）' : pattern === 'setState' ? 'bindings（State 写入绑定）' : 'bindings（C2S 字段绑定）'}
+            label={pattern === 'httpRequest' ? 'bindings（请求体字段）' : 'bindings（C2S 字段绑定）'}
           />
         </div>
       )}
@@ -232,15 +239,9 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
         </div>
       )}
 
-      {showKeys && (
+      {pattern === 'clearState' && (
         <Form.Item label="keys（要清除的 state key 列表）">
-          <Select
-            mode="tags"
-            value={action.keys ?? []}
-            onChange={(v) => set({ keys: v })}
-            placeholder="输入 state key，回车确认"
-            style={{ width: '100%' }}
-          />
+          <ClearStateEditor value={action.keys} onChange={(keys) => set({ keys })} />
         </Form.Item>
       )}
 
