@@ -27,6 +27,7 @@ import { collectCodecSchemaErrors, subscribe as subscribeResources } from '@/ser
 import { refreshRouteKeyTemplates } from './listens/routeKeyResolver';
 import { fetchBaselineFlow } from '@/services/baselineApi';
 import { useEditorStore } from './store/editorStore';
+import { StateKeyOptionsProvider } from './editors/ActionEditor/useStateKeyOptions';
 import type { FlowJson } from './codec/flowToJson';
 import type { FlowLayout } from '@/types/editor';
 
@@ -195,35 +196,37 @@ function FlowEditorInner({
 
   return (
     <FlowReadOnlyContext.Provider value={readOnly}>
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', position: 'relative' }}>
-        <Toolbar onOpenValidation={() => setValidationOpen(true)} extra={topbarExtra} />
-        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-          {/* 只读模式（运行 / 查看 / finalReport）下完全隐藏 NodePalette：
-              这些模式下不能拖入新节点，画布也是只读，留着只是"灰底占位"
-              意义不大；隐藏后画布占满宽度，监控信息更易读。
-              切回 edit 模式时自动重新挂载，无状态丢失。 */}
-          {!readOnly && (
-            <div
-              style={{
-                width: 240,
-                borderRight: '1px solid var(--border-color, rgba(0,0,0,0.06))',
-                background: 'var(--bg-panel)',
-              }}
-            >
-              <NodePalette />
+      <StateKeyOptionsProvider>
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', position: 'relative' }}>
+          <Toolbar onOpenValidation={() => setValidationOpen(true)} extra={topbarExtra} />
+          <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+            {/* 只读模式（运行 / 查看 / finalReport）下完全隐藏 NodePalette：
+                这些模式下不能拖入新节点，画布也是只读，留着只是"灰底占位"
+                意义不大；隐藏后画布占满宽度，监控信息更易读。
+                切回 edit 模式时自动重新挂载，无状态丢失。 */}
+            {!readOnly && (
+              <div
+                style={{
+                  width: 240,
+                  borderRight: '1px solid var(--border-color, rgba(0,0,0,0.06))',
+                  background: 'var(--bg-panel)',
+                }}
+              >
+                <NodePalette />
+              </div>
+            )}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <FlowCanvas />
             </div>
-          )}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <FlowCanvas />
           </div>
+          <JsonPreviewModal />
+          <NodeEditorDrawer />
+          <ProtoBrowser />
+          <ListenPanel />
+          <TemplateEditorDrawer />
+          <ValidationReportDrawer open={validationOpen} onClose={() => setValidationOpen(false)} />
         </div>
-        <JsonPreviewModal />
-        <NodeEditorDrawer />
-        <ProtoBrowser />
-        <ListenPanel />
-        <TemplateEditorDrawer />
-        <ValidationReportDrawer open={validationOpen} onClose={() => setValidationOpen(false)} />
-      </div>
+      </StateKeyOptionsProvider>
     </FlowReadOnlyContext.Provider>
   );
 }
