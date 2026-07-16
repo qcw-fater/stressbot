@@ -11,6 +11,7 @@ import { App as AntApp } from 'antd';
 import { useFlowStore } from '../store/flowStore';
 import { syncFlowScriptsToIdb } from '@/services/scriptSync';
 import type { FlowJson } from '../codec/flowToJson';
+import { validateLatestFlow } from '../validation/validationStore';
 
 export function useFlowFileIO() {
   const { message } = AntApp.useApp();
@@ -29,7 +30,7 @@ export function useFlowFileIO() {
       const { missing } = await syncFlowScriptsToIdb(flow);
       if (missing.length > 0) {
         message.warning(
-          `${missing.length} 个被引用的 lua 脚本不存在于 conf/scripts/，` +
+          `${missing.length} 个被引用的脚本不存在于 conf/scripts/，` +
             `启动任务前请到「资源管理」上传或在动作里手写：${missing.join(', ')}`,
           8,
         );
@@ -57,6 +58,11 @@ export function useFlowFileIO() {
   /** 导出当前草稿为 flow.json 下载。 */
   const exportFlow = () => {
     const flow = useFlowStore.getState().toTaskFlow();
+    const report = validateLatestFlow(flow);
+    if (report.errors.length > 0) {
+      message.error(`流程存在 ${report.errors.length} 项错误，请修复后再导出`);
+      return;
+    }
     const blob = new Blob([JSON.stringify(flow, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

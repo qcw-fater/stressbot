@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
 import * as React from 'react';
 import { useStateKeyOptions, StateKeyOptionsProvider } from './useStateKeyOptions';
 import { useFlowStore } from '../../store/flowStore';
@@ -60,5 +60,28 @@ describe('StateKeyOptionsProvider', () => {
     await waitFor(() => expect(ref.current?.ready).toBe(true));
     expect(getScriptMock).toHaveBeenCalledTimes(1); // 单消费方回退也加载一次
     expect(ref.current?.keys.map((k) => (k as { key: string }).key)).toContain('demoKey');
+  });
+
+  it('动作普通字段变化不重新加载脚本，脚本引用变化时才加载', async () => {
+    const ref = React.createRef<{ keys: unknown[]; ready: boolean }>();
+    render(
+      <StateKeyOptionsProvider>
+        <Consumer ref={ref} />
+      </StateKeyOptionsProvider>,
+    );
+    await waitFor(() => expect(ref.current?.ready).toBe(true));
+    expect(getScriptMock).toHaveBeenCalledTimes(1);
+    getScriptMock.mockClear();
+
+    await act(async () => {
+      useFlowStore.getState().updateAction('A1', { timeout: 1500 });
+      await Promise.resolve();
+    });
+    expect(getScriptMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      useFlowStore.getState().updateAction('A1', { script: 'other.lua' });
+    });
+    await waitFor(() => expect(getScriptMock).toHaveBeenCalledWith('other.lua'));
   });
 });

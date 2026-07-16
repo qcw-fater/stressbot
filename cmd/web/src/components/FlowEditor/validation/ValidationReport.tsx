@@ -4,13 +4,11 @@
 
 import { Alert, Badge, Button, Empty, List, Space, Tabs, Tag } from 'antd';
 import { CloseCircleFilled, ExclamationCircleFilled, InfoCircleFilled, ReloadOutlined } from '@ant-design/icons';
-import { useMemo } from 'react';
-import { useShallow } from 'zustand/react/shallow';
 import { useFlowStore } from '../store/flowStore';
 import { useEditorStore } from '../store/editorStore';
-import { validateFlow, type ValidationIssue } from './refsCheck';
-import { useStateKeyOptions } from '../editors/ActionEditor/useStateKeyOptions';
+import type { ValidationIssue } from './refsCheck';
 import { FloatingWindow } from '../panels/FloatingWindow';
+import { useValidationStore } from './validationStore';
 
 export interface ValidationReportDrawerProps {
   open: boolean;
@@ -18,26 +16,10 @@ export interface ValidationReportDrawerProps {
 }
 
 export function ValidationReportDrawer({ open, onClose }: ValidationReportDrawerProps) {
-  const flow = useFlowStore(
-    useShallow((s) => ({
-      defaultDelayMs: s.defaultDelayMs,
-      nodes: s.nodes,
-      actions: s.actions,
-      listens: s.listens,
-    })),
-  );
+  const nodes = useFlowStore((state) => state.nodes);
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
   const setSelectedNode = useEditorStore((s) => s.setSelectedNode);
-  // routeKey 模板缓存版本：cache 加载/刷新时 bump，触发重算（消除 cache 未就绪时
-  // 误报的 ROUTEKEY_CODEC_MISSING warning）。
-  const routeKeyTemplatesVersion = useEditorStore((s) => s.routeKeyTemplatesVersion);
-  // 状态注册表：仅当 ready（脚本异步加载完成）时才参与 clearState 未知 key 校验。
-  const { keys: stateKeys, ready: stateKeysReady } = useStateKeyOptions();
-
-  const report = useMemo(
-    () => validateFlow(flow, { stateKeys, stateKeysReady }),
-    [flow, routeKeyTemplatesVersion, stateKeys, stateKeysReady],
-  );
+  const report = useValidationStore((state) => state.report);
 
   const goto = (issue: ValidationIssue) => {
     if (!issue.location) return;
@@ -53,7 +35,7 @@ export function ValidationReportDrawer({ open, onClose }: ValidationReportDrawer
     if (issue.location.kind === 'action') {
       // 找出第一个引用此 action 的 node，跳过去（ActionEditor 嵌入 NodeEditorDrawer）
       const actionName = issue.location.id;
-      for (const [id, n] of Object.entries(flow.nodes)) {
+      for (const [id, n] of Object.entries(nodes)) {
         if (n.type === 'action' && n.action === actionName) {
           setSelectedNode(id);
           setActivePanel({ kind: 'nodeEdit', nodeId: id });
@@ -112,7 +94,7 @@ export function ValidationReportDrawer({ open, onClose }: ValidationReportDrawer
       minSize={{ width: 400, height: 300 }}
       extra={
         <Button icon={<ReloadOutlined />} size="small" onClick={() => 0}>
-          已实时刷新
+          自动更新
         </Button>
       }
     >
@@ -121,7 +103,7 @@ export function ValidationReportDrawer({ open, onClose }: ValidationReportDrawer
           type="success"
           showIcon
           message="校验通过"
-          description="所有节点 / 动作 / 回调引用合法。可放心导出 flow.json。"
+          description="所有节点、动作和监听引用均合法，可以导出流程配置。"
         />
       ) : (
         <Tabs

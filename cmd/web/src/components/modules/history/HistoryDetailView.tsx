@@ -4,8 +4,9 @@ import dayjs from 'dayjs';
 import { EChartsReact } from '@/components/monitoring/shared/EChartsReact';
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import type { EChartsOption } from 'echarts';
 import { historyApi, showApiError } from '@/services';
-import type { HistoryActionMetric, HistoryConfigSummary, HistoryDetail, HistoryTrendPoint } from '@/types/api';
+import type { CleanupStatus, HistoryActionMetric, HistoryAgentReport, HistoryConfigSummary, HistoryDetail, HistoryTrendPoint } from '@/types/api';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
 import { ActionMetricsTable } from '@/components/monitoring/shared/ActionMetricsTable';
@@ -341,13 +342,13 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
           />
         )}
         {agentReports.length > 0 && (
-          <Table
+          <Table<HistoryAgentReport & { key: number }>
             size="small"
             className="hp-agent-table"
             dataSource={agentReports.map((r, i) => ({ ...r, key: i }))}
             pagination={false}
             columns={[
-              { title: '节点', dataIndex: 'agentName', key: 'agentName', width: 180, render: (v: string, r: any) => v || r.agentId },
+              { title: '节点', dataIndex: 'agentName', key: 'agentName', width: 180, render: (v: string, r) => v || r.agentId },
               {
                 title: '结果', dataIndex: 'result', key: 'result', width: 100,
                 render: (v: string) => <Tag color={resultColor(v)}>{resultLabel(v)}</Tag>,
@@ -355,7 +356,7 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
               { title: '完成时间', dataIndex: 'finishedAt', key: 'finishedAt', width: 140, render: (v: string) => v ? dayjs(v).format('HH:mm:ss') : '—' },
               {
                 title: '清理状态', dataIndex: 'cleanupStatus', key: 'cleanupStatus', width: 130,
-                render: (cleanup: any) => renderCleanup(cleanup),
+                render: (cleanup: CleanupStatus | undefined) => renderCleanup(cleanup),
               },
               {
                 title: '错误信息', dataIndex: 'errorMsg', key: 'errorMsg', ellipsis: true,
@@ -455,7 +456,7 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
             <Fact label="超时" value={`${cs.timeoutSec}s`} />
             <Fact label="流程" value={`${cs.flowSizeKB}KB`} />
             <Fact label="Proto" value={`${cs.protoCount} 个`} />
-            <Fact label="Lua" value={`${cs.scriptCount} 个`} />
+            <Fact label="脚本" value={`${cs.scriptCount} 个`} />
             <Fact label="阶段" value={detail.stageCount && detail.stageCount > 0 ? `${detail.stageCount} 阶段` : '无'} />
             <Fact label="带宽" value={`${fmtBytes(finalBandwidth.totalSendBytes)} / ${fmtBytes(finalBandwidth.totalRecvBytes)}`} />
             <Fact label="开始" value={detail.startedAt ? dayjs(detail.startedAt).format('MM-DD HH:mm') : '—'} />
@@ -522,7 +523,7 @@ function ReportSection({ title, subtitle, children }: { title: string; subtitle?
   );
 }
 
-function TrendCard({ title, option, value }: { title: string; option: any; value?: string }) {
+function TrendCard({ title, option, value }: { title: string; option: EChartsOption | null; value?: string }) {
   return (
     <div className="hp-chart-card">
       <div className="hp-chart-card__header">
@@ -658,7 +659,7 @@ function buildChartOptions(points: HistoryTrendPoint[], theme: string, stageMark
         })),
       }
     : undefined;
-  const line = (series: Array<{ name: string; data: Array<number | null>; color: string; dashed?: boolean; area?: number }>, yMax?: number) => ({
+  const line = (series: Array<{ name: string; data: Array<number | null>; color: string; dashed?: boolean; area?: number }>, yMax?: number): EChartsOption => ({
     tooltip,
     legend: { right: 0, top: 0, textStyle: { fontSize: 10, color: labelClr } },
     grid: { left: 34, right: 8, top: 26, bottom: 22 },
@@ -777,7 +778,7 @@ function buildDiagnostics(detail: HistoryDetail, summary: DerivedSummary, points
   return items;
 }
 
-function renderCleanup(cleanup: any) {
+function renderCleanup(cleanup: CleanupStatus | undefined) {
   if (!cleanup || !cleanup.status) return <span style={{ color: 'var(--text-tertiary)' }}>未记录</span>;
   const map: Record<string, { color: string; label: string }> = {
     ok: { color: 'success', label: '清理完成' },
@@ -789,7 +790,7 @@ function renderCleanup(cleanup: any) {
   const detailLines: string[] = [];
   if (cleanup.message) detailLines.push(cleanup.message);
   if (cleanup.timeoutRobots) detailLines.push(`超时机器人 ${cleanup.timeoutRobots}`);
-  if (cleanup.luaSkipped) detailLines.push(`Lua 未归还 ${cleanup.luaSkipped}`);
+  if (cleanup.luaSkipped) detailLines.push(`脚本运行时未归还 ${cleanup.luaSkipped}`);
   return <Tooltip title={detailLines.join('；') || info.label}><Tag color={info.color}>{info.label}</Tag></Tooltip>;
 }
 

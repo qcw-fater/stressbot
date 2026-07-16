@@ -70,7 +70,7 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
   const issues: ValidationIssue[] = [];
   const nodes = flow.nodes ?? {};
   const actions = flow.actions ?? {};
-  const callbacks = flow.listens ?? {};
+  const listens = flow.listens ?? {};
 
   // 仅当状态注册表 ready 时才建立已知 key 集合，供 clearState 未知 key 检测；
   // 未 ready 时为 undefined，CLEARSTATE_UNKNOWN_KEY 检测整体跳过（避免误报）。
@@ -307,7 +307,7 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
         const silent = r.listen === null || r.listen === undefined || r.listen === '';
         if (!silent) {
           const ln = r.listen as string;
-          if (!(ln in callbacks)) {
+          if (!(ln in listens)) {
             issues.push({
               severity: 'error', code: 'LISTEN_REF_NOT_FOUND',
               message: `action 节点 "${id}" listenRefs[${i}] 引用了不存在的 listen "${ln}"`,
@@ -377,18 +377,18 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
 
   // R11–R13：listens 校验 + ref graph 校验
   const graph = buildRefsGraph(flow);
-  for (const [name, cb] of Object.entries(callbacks)) {
-    if (cb.script !== undefined && !cb.script?.trim()) {
+  for (const [name, listenDef] of Object.entries(listens)) {
+    if (listenDef.script !== undefined && !listenDef.script?.trim()) {
       issues.push({
         severity: 'error', code: 'LISTEN_LUA_NO_SCRIPT',
         message: `listen "${name}" 是 lua 模式但缺少 script`,
         location: { kind: 'listen', id: name },
       });
     }
-    if (cb.s2cProto && protoRegistry.isLoaded() && !protoRegistry.lookupMessage(cb.s2cProto)) {
+    if (listenDef.s2cProto && protoRegistry.isLoaded() && !protoRegistry.lookupMessage(listenDef.s2cProto)) {
       issues.push({
         severity: 'error', code: 'LISTEN_S2C_NOT_FOUND',
-        message: `listen "${name}" 的 s2cProto "${cb.s2cProto}" 在 proto 中不存在`,
+        message: `listen "${name}" 的 s2cProto "${listenDef.s2cProto}" 在 proto 中不存在`,
         location: { kind: 'listen', id: name },
       });
     }

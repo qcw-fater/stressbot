@@ -40,9 +40,9 @@ export function StateExprInput({ value, onChange, placeholder }: StateExprInputP
     return value.startsWith('state:') ? value.slice(6) : value;
   }, [value]);
 
-  const setTail = (t: string) => {
+  const setTail = useCallback((t: string) => {
     onChange?.(t ? 'state:' + t : '');
-  };
+  }, [onChange]);
 
   const [browseOpen, setBrowseOpen] = useState(false);
   const [browseSearch, setBrowseSearch] = useState('');

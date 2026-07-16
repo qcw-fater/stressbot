@@ -25,6 +25,8 @@ export interface FloatingWindowProps {
   minSize?: { width: number; height: number };
   /** 是否渲染 */
   open: boolean;
+  /** 关闭后是否保留子组件，仅用于存在未提交草稿的编辑窗口。 */
+  keepMounted?: boolean;
   /** 关闭回调 */
   onClose: () => void;
   /** 标题栏右侧额外内容（如操作按钮） */
@@ -44,6 +46,7 @@ export function FloatingWindow({
   defaultPosition,
   minSize = { width: 320, height: 200 },
   open,
+  keepMounted = false,
   onClose,
   extra,
   footer,
@@ -91,9 +94,7 @@ export function FloatingWindow({
     return () => document.removeEventListener('keydown', handleEsc, true);
   }, [handleEsc, open]);
 
-  // 关闭时不卸载子组件，用 CSS 隐藏 + 禁用交互
-  // 保证 Monaco 等有状态组件不会丢失滚动/数据
-  if (!windowState) {
+  if ((!open && !keepMounted) || !windowState) {
     // 窗口从未打开过，不渲染
     return null;
   }

@@ -12,7 +12,7 @@
  *   - ready=true 且无非内置候选时，提示「当前流程没有可清除的状态」，不退化为自由输入。
  */
 
-import { Select, Tag } from 'antd';
+import { Select, Tag, Tooltip } from 'antd';
 import { CloseOutlined } from '@ant-design/icons';
 import { isBuiltinStateKey, type StateKeyInfo } from './stateRegistry';
 import { StateKeyOptionLabel } from './stateKeyPresentation';
@@ -35,17 +35,17 @@ export function ClearStateEditor({ value, onChange }: ClearStateEditorProps) {
     return {
       value: info.key,
       disabled: builtin,
-      // 包一层带 title 的 span：下拉项 DOM 结构随 antd 版本变化，title 让测试用
-      // findByTitle(info.key) 稳定命中真实可点击的选项节点。
       label: (
-        <span title={info.key}>
-          <StateKeyOptionLabel info={info} />
-          {builtin && (
-            <span style={{ fontSize: 10, color: 'var(--text-tertiary)', marginLeft: 4 }}>
-              内置状态不可清除
-            </span>
-          )}
-        </span>
+        <Tooltip title={info.key} placement="right">
+          <span data-state-key={info.key}>
+            <StateKeyOptionLabel info={info} />
+            {builtin && (
+              <span style={{ fontSize: 10, color: 'var(--text-tertiary)', marginLeft: 4 }}>
+                内置状态不可清除
+              </span>
+            )}
+          </span>
+        </Tooltip>
       ),
     };
   });

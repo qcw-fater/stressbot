@@ -24,7 +24,7 @@ export function RouteEditor({ value, onChange, server, routeKeyTemplate, loading
   const fields = useMemo(() => buildRouteTemplateFields(routeKeyTemplate ?? '', value), [routeKeyTemplate, value]);
 
   if (!server) {
-    return <Alert type="info" showIcon message="请先选择 service/server" />;
+    return <Alert type="info" showIcon message="请先选择连接服务" />;
   }
   if (loading) {
     return <Spin size="small" />;

@@ -77,7 +77,7 @@ function simulateMessage(msgName: string, mode: SimulateMode, depth = 0): TreeNo
     // 判断此字段（含子级）是否有任何 binding
     const hasDirectBinding = bindings.some((fb) => {
       if (!fb.field) return false;
-      const seg = fb.field.split(/[\.\[]/)[0].replace(/\]$/, '');
+      const seg = fb.field.split(/[.[\]]/)[0].replace(/\]$/, '');
       return seg === field.name;
     });
 
@@ -120,7 +120,7 @@ function simulateMessage(msgName: string, mode: SimulateMode, depth = 0): TreeNo
     if (mode.kind === 'c2s' && hasDirectBinding) {
       const matched = bindings.find((fb) => {
         if (!fb.field) return false;
-        const seg = fb.field.split(/[\.\[]/)[0].replace(/\]$/, '');
+        const seg = fb.field.split(/[.[\]]/)[0].replace(/\]$/, '');
         return seg === field.name;
       });
       if (matched) {

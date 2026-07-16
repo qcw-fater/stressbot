@@ -48,7 +48,7 @@ import {
 } from '@/services';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { TaskStartModal } from './TaskStartModal';
-import type { TaskBrief } from '@/types/api';
+import type { CleanupStatus, TaskBrief } from '@/types/api';
 
 export interface RuntimeBarProps {
   onOpenResources?: () => void;
@@ -346,7 +346,7 @@ export function RuntimeBar({
             {STATE_LABEL[activeTask?.state ?? 'stopped']}
           </Tag>
           {(() => {
-            const detail = activeTask as { cleanupSummary?: import('@/types/api').CleanupStatus } | null;
+            const detail = activeTask as { cleanupSummary?: CleanupStatus } | null;
             const summary = detail?.cleanupSummary;
             if (!summary || summary.status === 'ok') return null;
             const map: Record<string, { color: string; label: string }> = {

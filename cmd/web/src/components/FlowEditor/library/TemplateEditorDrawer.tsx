@@ -78,7 +78,7 @@ export function TemplateEditorDrawer() {
         setListenDefaultRef(cloneListenDefaultRef(listenTpl.defaultRef));
       }
     });
-  }, [open, templateKind, templateId, closePanel]);
+  }, [open, templateKind, templateId, closePanel, message]);
 
   const onSwitchListenKind = (next: ListenKind) => {
     if (next === listenKind) return;
@@ -275,7 +275,7 @@ function ListenTemplateBody({
                 <Alert
                   type="info"
                   showIcon
-                  message="声明式回调：指定 s2cProto + store 映射，自动解析推送消息并存入 state。"
+                  message="声明式监听：指定响应协议和存储映射，自动解析推送消息并写入状态。"
                   style={{ marginBottom: 12 }}
                 />
                 <div style={{ marginBottom: 12 }}>

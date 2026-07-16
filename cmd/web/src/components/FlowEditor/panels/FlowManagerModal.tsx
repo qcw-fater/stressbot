@@ -6,12 +6,13 @@
 
 import { App as AntApp, Button, Input, Modal, Space, Table, Popconfirm, Tooltip } from 'antd';
 import { DeleteOutlined, DownloadOutlined, FolderOpenOutlined, ImportOutlined, SaveOutlined, SyncOutlined } from '@ant-design/icons';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { FLOW_NAME_MAX_LENGTH, getFlow, listFlows, saveFlow, deleteFlow, renameFlow, type ManagedFlow } from '../store/flowManagerStore';
 import { useFlowStore } from '../store/flowStore';
 import { useFlowFileIO } from './useFlowFileIO';
+import { validateLatestFlow } from '../validation/validationStore';
 
 export interface FlowManagerModalProps {
   open: boolean;
@@ -35,7 +36,7 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
 
   const loadFromTaskFlow = useFlowStore((s) => s.loadFromTaskFlow);
 
-  const fetchFlows = async () => {
+  const fetchFlows = useCallback(async () => {
     setLoading(true);
     try {
       const data = await listFlows();
@@ -47,7 +48,7 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [message]);
 
   useEffect(() => {
     if (open) {
@@ -57,7 +58,7 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
       setRenameValue('');
       committingRenameRef.current = false;
     }
-  }, [open]);
+  }, [fetchFlows, open]);
 
   const startRename = (record: ManagedFlow) => {
     setRenamingId(record.id);
@@ -113,6 +114,11 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
     try {
       const state = useFlowStore.getState();
       const flow = state.toTaskFlow();
+      const report = validateLatestFlow(flow);
+      if (report.errors.length > 0) {
+        message.error(`流程存在 ${report.errors.length} 项错误，请修复后再保存`);
+        return;
+      }
       const layout = state.layout;
       await saveFlow(saveName, flow, layout);
       message.success(`已保存流程 "${saveName}"`);
@@ -154,6 +160,11 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
     try {
       const state = useFlowStore.getState();
       const flow = state.toTaskFlow();
+      const report = validateLatestFlow(flow);
+      if (report.errors.length > 0) {
+        message.error(`流程存在 ${report.errors.length} 项错误，请修复后再保存`);
+        return;
+      }
       const layout = state.layout;
       await saveFlow(name, flow, layout, id);
       message.success(`已覆盖流程 "${name}"`);

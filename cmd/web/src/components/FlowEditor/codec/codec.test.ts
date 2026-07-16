@@ -2,7 +2,7 @@
  * codec 圆周等价测试：
  *   1. 读取 conf/flow/flow.json
  *   2. flowToJson(原数据) → 导出
- *   3. 字段集与节点/动作/回调数量必须一致
+ *   3. 字段集与节点/动作/监听数量必须一致
  *   4. 嵌套结构（bindings、listenRefs、store）在导出时仍存在
  */
 
@@ -14,6 +14,7 @@ import { flowToJson } from './flowToJson';
 import { jsonToFlow } from './jsonToFlow';
 import type { FlowJsonInput } from './jsonToFlow';
 import type { FlowJson } from './flowToJson';
+import { validateFlow } from '../validation/refsCheck';
 
 // web 移到 cmd/web 后，从 codec.test.ts 到仓库根需要 6 层 ..
 const flowPath = path.resolve(__dirname, '../../../../../../conf/flow/flow.json');
@@ -21,7 +22,7 @@ const flowPath = path.resolve(__dirname, '../../../../../../conf/flow/flow.json'
 describe('codec round-trip', () => {
   const raw = JSON.parse(fs.readFileSync(flowPath, 'utf-8')) as FlowJsonInput;
 
-  it('节点 / 动作 / 回调数量与原文件一致', () => {
+  it('节点 / 动作 / 监听数量与原文件一致', () => {
     const exported = flowToJson({
       defaultDelayMs: raw.defaultDelayMs,
       nodes: raw.nodes,
@@ -38,8 +39,13 @@ describe('codec round-trip', () => {
     const { rfNodes, listenRefCount } = jsonToFlow(raw);
     const expected = Object.keys(raw.nodes).length + Object.keys(raw.listens).length;
     expect(rfNodes.length).toBe(expected);
-    // 至少有一些 callback 是被引用的
+    // 至少有一些监听被引用
     expect(Object.keys(listenRefCount).length).toBeGreaterThan(0);
+  });
+
+  it('当前默认流程通过前端完整校验', () => {
+    const report = validateFlow(raw);
+    expect(report.errors).toEqual([]);
   });
 
   it('jsonToFlow 生成的边能覆盖所有 sequence next / boolean trueNext / weighted options', () => {

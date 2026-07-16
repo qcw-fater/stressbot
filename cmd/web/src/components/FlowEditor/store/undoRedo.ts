@@ -1,7 +1,7 @@
 /**
  * 简易 Undo/Redo：基于 store 的快照栈，独立于 zundo（避免与现有 store 结构冲突）。
  *
- * 设计文档 §14：撤销/重做仅作用于业务字段（nodes/actions/callbacks），
+ * 设计文档 §14：撤销/重做仅作用于业务字段（nodes/actions/listens），
  * 不影响视觉位置/选中等 UI 状态。
  */
 

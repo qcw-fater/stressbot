@@ -90,7 +90,7 @@ export function LuaApiPopover() {
 
   return (
     <Popover
-      title="内置 Lua API 参考"
+      title="内置脚本接口参考"
       trigger="click"
       open={open}
       onOpenChange={setOpen}

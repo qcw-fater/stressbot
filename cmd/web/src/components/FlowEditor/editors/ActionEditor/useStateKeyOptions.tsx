@@ -29,22 +29,32 @@ interface LoadedScripts {
   ready: boolean;
 }
 
-const StateKeyOptionsContext = createContext<LoadedScripts | null>(null);
+interface SharedStateKeys {
+  keys: StateKeyInfo[];
+  ready: boolean;
+}
+
+const EMPTY_ACTIONS = {};
+const EMPTY_LISTENS = {};
+const EMPTY_STATE_EXTRA = {};
+
+const StateKeyOptionsContext = createContext<SharedStateKeys | null>(null);
 
 /**
  * 异步加载流程引用的 Lua 脚本。enabled=false 时不加载（Provider 已加载时由
  * 消费方短路），保证遵守 Rules of Hooks（始终调用本钩子），同时在 Provider 下零重复加载。
  */
 function useLoadedStateKeyScripts(enabled: boolean): LoadedScripts {
-  const actions = useFlowStore((s) => s.actions);
-  const listens = useFlowStore((s) => s.listens);
-  const nodes = useFlowStore((s) => s.nodes);
+  const scriptNameSignature = useFlowStore((state) => {
+    if (!enabled) return '';
+    return [...collectUsedScriptNames(state.actions, state.listens, state.nodes)].sort().join('\u0000');
+  });
   const scriptNames = useMemo(
-    () => collectUsedScriptNames(actions, listens, nodes),
-    [actions, listens, nodes],
+    () => scriptNameSignature ? scriptNameSignature.split('\u0000') : [],
+    [scriptNameSignature],
   );
   const [scripts, setScripts] = useState<LuaScript[]>([]);
-  const [ready, setReady] = useState(!enabled || scriptNames.size === 0);
+  const [ready, setReady] = useState(!enabled || scriptNames.length === 0);
 
   useEffect(() => {
     if (!enabled) {
@@ -53,12 +63,12 @@ function useLoadedStateKeyScripts(enabled: boolean): LoadedScripts {
       return;
     }
     let cancelled = false;
-    setReady(scriptNames.size === 0);
-    if (scriptNames.size === 0) {
+    setReady(scriptNames.length === 0);
+    if (scriptNames.length === 0) {
       setScripts([]);
       return () => { cancelled = true; };
     }
-    Promise.all([...scriptNames].map(async (name) => {
+    Promise.all(scriptNames.map(async (name) => {
       try {
         const file = await getScript(name);
         return file ? { name: file.name, content: file.content } : null;
@@ -71,7 +81,7 @@ function useLoadedStateKeyScripts(enabled: boolean): LoadedScripts {
       setReady(true);
     });
     return () => { cancelled = true; };
-  }, [enabled, scriptNames]);
+  }, [enabled, scriptNameSignature, scriptNames]);
 
   return { scripts, ready };
 }
@@ -79,7 +89,15 @@ function useLoadedStateKeyScripts(enabled: boolean): LoadedScripts {
 /** FlowEditor 顶层挂载一次，共享脚本加载结果。 */
 export function StateKeyOptionsProvider({ children }: { children: ReactNode }) {
   const loaded = useLoadedStateKeyScripts(true);
-  return <StateKeyOptionsContext.Provider value={loaded}>{children}</StateKeyOptionsContext.Provider>;
+  const actions = useFlowStore((state) => state.actions);
+  const listens = useFlowStore((state) => state.listens);
+  const stateExtra = useRuntimeStore((state) => state.robotConfig.stateExtra);
+  const keys = useMemo(
+    () => collectStateKeys(actions, listens, stateExtra, undefined, loaded.scripts),
+    [actions, listens, stateExtra, loaded.scripts],
+  );
+  const value = useMemo(() => ({ keys, ready: loaded.ready }), [keys, loaded.ready]);
+  return <StateKeyOptionsContext.Provider value={value}>{children}</StateKeyOptionsContext.Provider>;
 }
 
 /**
@@ -90,15 +108,38 @@ export function StateKeyOptionsProvider({ children }: { children: ReactNode }) {
 export function useStateKeyOptions(currentBindings?: FieldBind[]): StateKeyOptionsResult {
   const ctx = useContext(StateKeyOptionsContext);
   const local = useLoadedStateKeyScripts(ctx === null);
-  const scripts = ctx ? ctx.scripts : local.scripts;
   const ready = ctx ? ctx.ready : local.ready;
 
-  const actions = useFlowStore((s) => s.actions);
-  const listens = useFlowStore((s) => s.listens);
-  const stateExtra = useRuntimeStore((s) => s.robotConfig.stateExtra);
+  const actions = useFlowStore((state) => ctx ? EMPTY_ACTIONS : state.actions);
+  const listens = useFlowStore((state) => ctx ? EMPTY_LISTENS : state.listens);
+  const stateExtra = useRuntimeStore((state) => ctx ? EMPTY_STATE_EXTRA : state.robotConfig.stateExtra);
   const keys = useMemo(
-    () => collectStateKeys(actions, listens, stateExtra, currentBindings, scripts),
-    [actions, listens, stateExtra, currentBindings, scripts],
+    () => ctx
+      ? mergeCurrentBindingKeys(ctx.keys, currentBindings)
+      : collectStateKeys(actions, listens, stateExtra, currentBindings, local.scripts),
+    [actions, listens, stateExtra, currentBindings, ctx, local.scripts],
   );
   return { keys, ready };
+}
+
+function mergeCurrentBindingKeys(
+  baseKeys: StateKeyInfo[],
+  currentBindings: FieldBind[] | undefined,
+): StateKeyInfo[] {
+  if (!currentBindings?.some((binding) => binding.storeAs)) return baseKeys;
+  const map = new Map(baseKeys.map((info) => [info.key, info]));
+  for (const binding of currentBindings) {
+    if (!binding.storeAs) continue;
+    const existing = map.get(binding.storeAs);
+    const isFallback = existing?.sourceType === 'lua'
+      || ((existing?.sourceType === 'store' || existing?.sourceType === 'listenStore') && !existing.storeField);
+    if (!existing || isFallback) {
+      map.set(binding.storeAs, {
+        key: binding.storeAs,
+        sourceType: 'storeAs',
+        sourceName: '当前节点',
+      });
+    }
+  }
+  return [...map.values()].sort((a, b) => a.key.localeCompare(b.key));
 }

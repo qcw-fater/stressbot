@@ -160,42 +160,42 @@ export function TrendsTab() {
     <Row gutter={[12, 12]}>
       {robotsOption && (
         <Col span={12}>
-          <Card size="small" bodyStyle={{ padding: 8 }}>
+          <Card size="small" styles={{ body: { padding: 8 } }}>
             <EChartsReact option={robotsOption} style={{ height: 200 }} notMerge lazyUpdate />
           </Card>
         </Col>
       )}
       {qpsOption && (
         <Col span={12}>
-          <Card size="small" bodyStyle={{ padding: 8 }}>
+          <Card size="small" styles={{ body: { padding: 8 } }}>
             <EChartsReact option={qpsOption} style={{ height: 200 }} notMerge lazyUpdate />
           </Card>
         </Col>
       )}
       {apdexOption && (
         <Col span={12}>
-          <Card size="small" bodyStyle={{ padding: 8 }}>
+          <Card size="small" styles={{ body: { padding: 8 } }}>
             <EChartsReact option={apdexOption} style={{ height: 200 }} notMerge lazyUpdate />
           </Card>
         </Col>
       )}
       {cpuOption && (
         <Col span={12}>
-          <Card size="small" bodyStyle={{ padding: 8 }}>
+          <Card size="small" styles={{ body: { padding: 8 } }}>
             <EChartsReact option={cpuOption} style={{ height: 200 }} notMerge lazyUpdate />
           </Card>
         </Col>
       )}
       {bwOption && (
         <Col span={12}>
-          <Card size="small" bodyStyle={{ padding: 8 }}>
+          <Card size="small" styles={{ body: { padding: 8 } }}>
             <EChartsReact option={bwOption} style={{ height: 200 }} notMerge lazyUpdate />
           </Card>
         </Col>
       )}
       {timingOption && (
         <Col span={12}>
-          <Card size="small" bodyStyle={{ padding: 8 }}>
+          <Card size="small" styles={{ body: { padding: 8 } }}>
             <EChartsReact option={timingOption} style={{ height: 200 }} notMerge lazyUpdate />
           </Card>
         </Col>

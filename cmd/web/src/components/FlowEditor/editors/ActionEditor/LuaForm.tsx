@@ -191,7 +191,7 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
     } catch (e) {
       message.error(`保存失败：${(e as Error).message}`);
     }
-  }, [script, content]);
+  }, [script, content, message, onChangeScript]);
 
   const handleSaveRef = useRef(handleSave);
   handleSaveRef.current = handleSave;

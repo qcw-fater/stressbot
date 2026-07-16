@@ -282,7 +282,7 @@ export function BindingCommonAdvancedFields({
 
 function resolveFieldPath(messageFullName: string, path: string): ProtoField | undefined {
   const segments = path
-    .split(/[\.\[]/)
+    .split(/[.[\]]/)
     .map(s => s.replace(/\]$/, ''))
     .filter(s => s && !/^\d+$/.test(s));
   let currentMsg = messageFullName;

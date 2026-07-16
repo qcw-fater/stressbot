@@ -82,7 +82,7 @@ export function JsonPreviewModal() {
           }}
         >
           <span>
-            节点 {Object.keys(flow.nodes).length} · 动作 {Object.keys(flow.actions).length} · 回调{' '}
+            节点 {Object.keys(flow.nodes).length} · 动作 {Object.keys(flow.actions).length} · 监听{' '}
             {Object.keys(flow.listens).length}
           </span>
           <Tooltip title="复制到剪贴板">

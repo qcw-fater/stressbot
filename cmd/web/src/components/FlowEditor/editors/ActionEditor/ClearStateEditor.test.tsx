@@ -55,11 +55,11 @@ describe('ClearStateEditor', () => {
     const user = userEvent.setup();
     render(<ClearStateEditor value={[]} onChange={onChange} />);
     await user.click(screen.getByRole('combobox'));
-    // 通过稳定的 title 包装定位真实候选项，断言其携带禁用类名
-    const opt = screen.getByTitle(key).closest('.ant-select-item-option');
+    const label = document.querySelector(`[data-state-key="${key}"]`);
+    const opt = label?.closest('.ant-select-item-option');
     expect(opt?.className).toMatch(/ant-select-item-option-disabled/);
     // 点击禁用项不应触发选中
-    await user.click(screen.getByTitle(key));
+    if (label) await user.click(label);
     expect(onChange).not.toHaveBeenCalled();
   });
 
@@ -76,8 +76,8 @@ describe('ClearStateEditor', () => {
     render(<SelectionHarness spy={onChange} />);
     await user.click(screen.getByRole('combobox'));
     // 多选下拉打开后不会因选择而关闭，直接连续点击两个候选项
-    await user.click(await screen.findByTitle('battleSession'));
-    await user.click(await screen.findByTitle('battleId'));
+    await user.click(document.querySelector('[data-state-key="battleSession"]') as HTMLElement);
+    await user.click(document.querySelector('[data-state-key="battleId"]') as HTMLElement);
     expect(onChange).toHaveBeenLastCalledWith(['battleSession', 'battleId']);
   });
 

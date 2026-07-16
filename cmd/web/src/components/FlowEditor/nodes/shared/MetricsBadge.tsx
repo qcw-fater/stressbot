@@ -22,21 +22,20 @@ import { WarningOutlined } from '@ant-design/icons';
 import type { ActionMetric } from '@/types/api';
 import { classifyApdex, type ApdexLevel } from '@/services/metricsBinding';
 
-/** 节点指标 provider 类型；HomeShell 注入 */
-export type MetricsProvider = (nodeId: string) => ActionMetric | undefined;
-
 interface MetricsState {
-  provider?: MetricsProvider;
-  setProvider: (p: MetricsProvider | undefined) => void;
+  metrics: ReadonlyMap<string, ActionMetric>;
+  setMetrics: (metrics: ReadonlyMap<string, ActionMetric> | undefined) => void;
 }
 
+const EMPTY_METRICS: ReadonlyMap<string, ActionMetric> = new Map();
+
 export const useMetricsStore = create<MetricsState>()((set) => ({
-  setProvider: (p) => set({ provider: p }),
+  metrics: EMPTY_METRICS,
+  setMetrics: (metrics) => set({ metrics: metrics ?? EMPTY_METRICS }),
 }));
 
 export function useNodeMetrics(nodeId: string): ActionMetric | undefined {
-  const provider = useMetricsStore((s) => s.provider);
-  return provider ? provider(nodeId) : undefined;
+  return useMetricsStore((state) => state.metrics.get(nodeId));
 }
 
 const LEVEL_ORDER: Record<ApdexLevel, number> = {
@@ -61,8 +60,7 @@ function classifySuccessRate(rate: number): ApdexLevel {
  *  - 未执行（sampleCount=0）→ unknown（无染色）
  *  - 网络动作：Apdex 等级 vs 成功率等级，取较差
  *  - 非网络动作：仅看成功率 */
-export function useNodeApdexLevel(nodeId: string): ApdexLevel {
-  const m = useNodeMetrics(nodeId);
+export function getNodeApdexLevel(m: ActionMetric | undefined): ApdexLevel {
   if (!m || m.sampleCount === 0) return 'unknown';
 
   const srLevel = classifySuccessRate(m.successRate);
@@ -83,11 +81,10 @@ const APDEX_COLOR: Record<ApdexLevel, string> = {
 };
 
 export interface MetricsBadgeProps {
-  nodeId: string;
+  metric?: ActionMetric;
 }
 
-export function MetricsBadge({ nodeId }: MetricsBadgeProps) {
-  const m = useNodeMetrics(nodeId);
+export function MetricsBadge({ metric: m }: MetricsBadgeProps) {
   if (!m) return null;
 
   const hasTotalDuration = m.totalDurationSampleCount > 0;

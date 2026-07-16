@@ -15,7 +15,7 @@ import {
   TooltipComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
-import type { EChartsOption } from 'echarts';
+import type { DefaultLabelFormatterCallbackParams, EChartsOption, GraphicComponentOption } from 'echarts';
 import type {
   HistoryActionMetric,
   HistoryTrendPoint,
@@ -279,7 +279,7 @@ export function buildRankingOption(
         show: true,
         position: 'right',
         fontSize: 10,
-        formatter: (p: any) => `${(p.value as number).toFixed(0)}ms`,
+        formatter: (p: DefaultLabelFormatterCallbackParams) => `${formatterNumber(p.value).toFixed(0)}ms`,
       },
     }],
   };
@@ -351,7 +351,7 @@ export function buildSuccessDonutOption(
         fontSize: 16,
         fontWeight: 700,
         fill: '#1a1a1a',
-        textAlign: 'center' as const,
+        align: 'center' as const,
       },
     }, {
       type: 'text',
@@ -361,9 +361,9 @@ export function buildSuccessDonutOption(
         text: '总样本',
         fontSize: 10,
         fill: '#8c8c8c',
-        textAlign: 'center' as const,
+        align: 'center' as const,
       },
-    }] as any : [],
+    }] as GraphicComponentOption[] : [],
   };
 }
 
@@ -449,9 +449,10 @@ export function buildErrorOption(
       label: {
         show: true,
         fontSize: 10,
-        formatter: (p: any) => {
+        formatter: (p: DefaultLabelFormatterCallbackParams) => {
           const name = p.name.length > 20 ? p.name.slice(0, 18) + '…' : p.name;
-          return `{cnt|×${p.value}}  {name|${name}}\n{pct|${p.percent}%}`;
+          const percent = 'percent' in p && typeof p.percent === 'number' ? p.percent : 0;
+          return `{cnt|×${formatterNumber(p.value)}}  {name|${name}}\n{pct|${percent}%}`;
         },
         rich: {
           cnt: { fontSize: 10, fontWeight: 700, color: '#cf1322', lineHeight: 16 },
@@ -467,6 +468,11 @@ export function buildErrorOption(
       })),
     }],
   };
+}
+
+function formatterNumber(value: DefaultLabelFormatterCallbackParams['value']): number {
+  const scalar = Array.isArray(value) ? value[0] : value;
+  return typeof scalar === 'number' ? scalar : Number(scalar ?? 0);
 }
 
 /* ── 统一捕获所有图表 ── */

@@ -143,8 +143,8 @@ export interface CodecHeartbeat {
   intervalMs: number;
   route?: unknown;
   c2sProto?: string;
-  bindings?: import('@/types/action').FieldBind[];
-  heartbeatFields?: import('@/types/action').HeartbeatField[];
+  bindings?: FieldBind[];
+  heartbeatFields?: HeartbeatField[];
   skipWhenMissing?: boolean;
   requireSecretKey?: boolean;
 }
@@ -307,3 +307,4 @@ export const VALUE_SOURCE_KINDS_SUPPORTED: Record<string, boolean> = {
   counter: false,
   timestamp: false,
 };
+import type { FieldBind, HeartbeatField } from './action';

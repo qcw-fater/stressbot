@@ -2,7 +2,7 @@
  * FlowEditor 组件封装出口。
  *
  * 设计文档 §13：作为独立的 React 组件，外部容器只需挂载 <FlowEditor />。
- * 后续接 onSave / metricsProvider 等 props（Phase 11 收口）。
+ * 支持初始流程、只读状态、节点指标和工具栏扩展内容。
  */
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
@@ -17,7 +17,8 @@ import { ValidationReportDrawer } from './validation/ValidationReport';
 import { TemplateEditorDrawer } from './library/TemplateEditorDrawer';
 import { startAutoPersist, loadDraft } from './store/persistDraft';
 import { startHistory, undo, redo } from './store/undoRedo';
-import { useMetricsStore, type MetricsProvider } from './nodes/shared/MetricsBadge';
+import { useMetricsStore } from './nodes/shared/MetricsBadge';
+import type { ActionMetric } from '@/types/api';
 import { FlowReadOnlyContext } from './flowReadOnlyContext';
 import { App as AntApp, ConfigProvider } from 'antd';
 import { useFlowStore } from './store/flowStore';
@@ -28,6 +29,7 @@ import { refreshRouteKeyTemplates } from './listens/routeKeyResolver';
 import { fetchBaselineFlow } from '@/services/baselineApi';
 import { useEditorStore } from './store/editorStore';
 import { StateKeyOptionsProvider } from './editors/ActionEditor/useStateKeyOptions';
+import { FlowValidationCoordinator } from './validation/FlowValidationCoordinator';
 import type { FlowJson } from './codec/flowToJson';
 import type { FlowLayout } from '@/types/editor';
 
@@ -38,8 +40,8 @@ export interface FlowEditorProps {
   initialLayout?: FlowLayout;
   /** 自动加载 conf/flow/flow.json（开发模式默认 true） */
   autoLoadDefault?: boolean;
-  /** 监控数据提供方：实时返回某节点的运行指标，未提供时不显示监控徽章 */
-  metricsProvider?: MetricsProvider;
+  /** 按节点 ID 索引的运行指标，未提供时不显示监控徽章 */
+  metrics?: ReadonlyMap<string, ActionMetric>;
   /** 只读模式：viewActive / running / finalReport 时为 true，画布与编辑器均锁定 */
   readOnly?: boolean;
   /** 渲染在 Toolbar 最右侧（运行控制条等） */
@@ -62,26 +64,26 @@ function FlowEditorInner({
   initialFlow,
   initialLayout,
   autoLoadDefault = true,
-  metricsProvider,
+  metrics,
   readOnly = false,
   topbarExtra,
 }: FlowEditorProps) {
   const loadFromTaskFlow = useFlowStore((s) => s.loadFromTaskFlow);
   const loadProtos = useProtoStore((s) => s.load);
-  const setMetricsProvider = useMetricsStore((s) => s.setProvider);
+  const setMetrics = useMetricsStore((state) => state.setMetrics);
   const [validationOpen, setValidationOpen] = useState(false);
   const { notification } = AntApp.useApp();
 
-  // 同步推送 metricsProvider 到全局 useMetricsStore：必须用 useLayoutEffect 而非 useEffect。
+  // 同步推送指标 Map 到全局 useMetricsStore：必须用 useLayoutEffect 而非 useEffect。
   //   - useEffect 在 paint 之后异步执行；启动新任务时 EditorPage 会先把 latestStress 清成 null，
-  //     useMemo 重算 metricsProvider=undefined，但浏览器还是会先按"旧 provider"画一帧
+  //     useMemo 重算 metrics=undefined，但浏览器还是会先按旧指标画一帧
   //     节点上的 p99/apdex/边框，下一拍才被清掉 → 用户看到的"残留" 1~2 帧。
-  //   - useLayoutEffect 在 commit 后、paint 前同步执行，setProvider(undefined) 立即生效，
+  //   - useLayoutEffect 在 commit 后、paint 前同步执行，setMetrics(undefined) 立即生效，
   //     paint 时所有 NodeShell/MetricsBadge 拿到的都是新值，不会出现残留闪烁。
   useLayoutEffect(() => {
-    setMetricsProvider(metricsProvider);
-    return () => setMetricsProvider(undefined);
-  }, [metricsProvider, setMetricsProvider]);
+    setMetrics(metrics);
+    return () => setMetrics(undefined);
+  }, [metrics, setMetrics]);
 
   useEffect(() => {
     // 启动时全量加载 proto：先尝试 vite 中间件 /conf/proto/*，失败再用编译期 glob 兜底
@@ -197,6 +199,7 @@ function FlowEditorInner({
   return (
     <FlowReadOnlyContext.Provider value={readOnly}>
       <StateKeyOptionsProvider>
+        <FlowValidationCoordinator />
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', position: 'relative' }}>
           <Toolbar onOpenValidation={() => setValidationOpen(true)} extra={topbarExtra} />
           <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>

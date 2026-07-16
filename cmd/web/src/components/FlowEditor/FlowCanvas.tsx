@@ -62,6 +62,7 @@ function FlowCanvasInner() {
   // flowStore: stable action refs (never change, individual calls are fine)
   const onNodesChange = useFlowStore((s) => s.onNodesChange);
   const onEdgesChange = useFlowStore((s) => s.onEdgesChange);
+  const setNodePositions = useFlowStore((s) => s.setNodePositions);
   const addNode = useFlowStore((s) => s.addNode);
   const addAction = useFlowStore((s) => s.addAction);
   const addListen = useFlowStore((s) => s.addListen);
@@ -132,11 +133,7 @@ function FlowCanvasInner() {
         const id = generateNodeId(type, taken);
         const node: FlowNode = { type };
         addNode(id, node);
-        const layout = useFlowStore.getState().layout;
-        layout.nodePositions[id] = { x: flowPos.x, y: flowPos.y };
-        useFlowStore.setState((s) => ({
-          rfNodes: s.rfNodes.map((n) => (n.id === id ? { ...n, position: flowPos } : n)),
-        }));
+        setNodePositions({ [id]: flowPos });
         setSelectedNode(id);
         return;
       }
@@ -149,11 +146,7 @@ function FlowCanvasInner() {
         while (state.listens[listenName]) listenName = `listen_${i++}`;
         addListen(listenName, {});
         const cardId = `__cb__${listenName}`;
-        const layout = useFlowStore.getState().layout;
-        layout.nodePositions[cardId] = { x: flowPos.x, y: flowPos.y };
-        useFlowStore.setState((s) => ({
-          rfNodes: s.rfNodes.map((n) => (n.id === cardId ? { ...n, position: flowPos } : n)),
-        }));
+        setNodePositions({ [cardId]: flowPos });
         setActivePanel({ kind: 'listenEdit', listenName });
         return;
       }
@@ -178,11 +171,7 @@ function FlowCanvasInner() {
           let nodeIndex = 1;
           while (taken.has(nodeId)) nodeId = `${actionName}_${nodeIndex++}`;
           addNode(nodeId, { type: 'action', action: actionName, description: template.description });
-          const layout = useFlowStore.getState().layout;
-          layout.nodePositions[nodeId] = { x: flowPos.x, y: flowPos.y };
-          useFlowStore.setState((s) => ({
-            rfNodes: s.rfNodes.map((n) => (n.id === nodeId ? { ...n, position: flowPos } : n)),
-          }));
+          setNodePositions({ [nodeId]: flowPos });
           setSelectedNode(nodeId);
         } else if (kind === 'listen') {
           const state = useFlowStore.getState();
@@ -193,17 +182,13 @@ function FlowCanvasInner() {
           setListenDefaultRef(listenName, template.defaultRef);
           // ListenCard 自动由 jsonToFlow 创建；位置覆盖到鼠标落点
           const cardId = `__cb__${listenName}`;
-          const layout = useFlowStore.getState().layout;
-          layout.nodePositions[cardId] = { x: flowPos.x, y: flowPos.y };
-          useFlowStore.setState((s) => ({
-            rfNodes: s.rfNodes.map((n) => (n.id === cardId ? { ...n, position: flowPos } : n)),
-          }));
+          setNodePositions({ [cardId]: flowPos });
         }
       } catch (err) {
         console.warn('[FlowCanvas] 解析模板拖入数据失败：', err);
       }
     },
-    [addNode, addAction, addListen, readOnly, screenToFlowPosition, setActivePanel, setSelectedNode],
+    [addNode, addAction, addListen, readOnly, screenToFlowPosition, setActivePanel, setListenDefaultRef, setNodePositions, setSelectedNode],
   );
 
   // 选中变化 → 计算 edgeHighlightNodeIds + 高亮颜色（取第一条选中边的源节点类型）
@@ -594,11 +579,7 @@ function FlowCanvasInner() {
         }
         const newId = uniqueNodeId(node.type ?? 'sequence');
         addNode(newId, node);
-        const layout = useFlowStore.getState().layout;
-        layout.nodePositions[newId] = { x: flowX, y: flowY };
-        useFlowStore.setState((s) => ({
-          rfNodes: s.rfNodes.map((n) => (n.id === newId ? { ...n, position: { x: flowX, y: flowY } } : n)),
-        }));
+        setNodePositions({ [newId]: { x: flowX, y: flowY } });
         setSelectedNode(newId);
         message.success(`已粘贴节点 ${newId}`);
       } else if (clipboard.kind === 'listen') {
@@ -606,15 +587,11 @@ function FlowCanvasInner() {
         addListen(newName, JSON.parse(JSON.stringify(clipboard.listen)));
         setListenDefaultRef(newName, clipboard.defaultRef);
         const cardId = `__cb__${newName}`;
-        const layout = useFlowStore.getState().layout;
-        layout.nodePositions[cardId] = { x: flowX, y: flowY };
-        useFlowStore.setState((s) => ({
-          rfNodes: s.rfNodes.map((n) => (n.id === cardId ? { ...n, position: { x: flowX, y: flowY } } : n)),
-        }));
+        setNodePositions({ [cardId]: { x: flowX, y: flowY } });
         message.success(`已粘贴 listen ${newName}`);
       }
     },
-    [addAction, addListen, addNode, clipboard, setListenDefaultRef, setSelectedNode],
+    [addAction, addListen, addNode, clipboard, message, setListenDefaultRef, setNodePositions, setSelectedNode],
   );
 
   /** 把节点保存为模板（写入本地模板库） */
@@ -695,22 +672,14 @@ function FlowCanvasInner() {
             const taken = new Set(Object.keys(useFlowStore.getState().nodes));
             const id = generateNodeId(q.type, taken);
             addNode(id, { type: q.type });
-            const layout = useFlowStore.getState().layout;
-            layout.nodePositions[id] = { x: flowPos.x, y: flowPos.y };
-            useFlowStore.setState((s) => ({
-              rfNodes: s.rfNodes.map((n) => (n.id === id ? { ...n, position: flowPos } : n)),
-            }));
+            setNodePositions({ [id]: flowPos });
             setSelectedNode(id);
           } else {
             // F{nodeCount+1} = Listen
             const listenName = uniqueListenName('listen');
             addListen(listenName, {});
             const cardId = `__cb__${listenName}`;
-            const layout = useFlowStore.getState().layout;
-            layout.nodePositions[cardId] = { x: flowPos.x, y: flowPos.y };
-            useFlowStore.setState((s) => ({
-              rfNodes: s.rfNodes.map((n) => (n.id === cardId ? { ...n, position: flowPos } : n)),
-            }));
+            setNodePositions({ [cardId]: flowPos });
           }
           return;
         }
@@ -752,7 +721,7 @@ function FlowCanvasInner() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [copyRfNode, deleteRfNode, pasteAt, readOnly, rfNodes, screenToFlowPosition, setClipboard]);
+  }, [addListen, addNode, copyRfNode, deleteRfNode, message, pasteAt, readOnly, rfNodes, screenToFlowPosition, setClipboard, setNodePositions, setSelectedNode]);
 
   // MiniMap 节点色：直接读 CSS token，确保与节点本体配色 / 主题切换保持完全一致。
   // 注意：每次回调实时读取 getComputedStyle，不缓存（dark/light 切换不需要重 mount）。
@@ -796,6 +765,9 @@ function FlowCanvasInner() {
         nodesConnectable={!readOnly}
         edgesFocusable={!readOnly}
         onNodesChange={readOnly ? undefined : onNodesChange}
+        onNodeDragStop={readOnly ? undefined : (_event, node) => {
+          setNodePositions({ [node.id]: node.position });
+        }}
         onEdgesChange={readOnly ? undefined : onEdgesChange}
         onConnect={onConnect}
         onNodesDelete={onNodesDelete}
@@ -915,22 +887,14 @@ function FlowCanvasInner() {
             const taken = new Set(Object.keys(useFlowStore.getState().nodes));
             const id = generateNodeId(type, taken);
             addNode(id, { type });
-            const layout = useFlowStore.getState().layout;
-            layout.nodePositions[id] = { x: fx, y: fy };
-            useFlowStore.setState((s) => ({
-              rfNodes: s.rfNodes.map((n) => (n.id === id ? { ...n, position: { x: fx, y: fy } } : n)),
-            }));
+            setNodePositions({ [id]: { x: fx, y: fy } });
             setSelectedNode(id);
           }}
           onAddListen={(fx, fy) => {
             const listenName = uniqueListenName('listen');
             addListen(listenName, {});
             const cardId = `__cb__${listenName}`;
-            const layout = useFlowStore.getState().layout;
-            layout.nodePositions[cardId] = { x: fx, y: fy };
-            useFlowStore.setState((s) => ({
-              rfNodes: s.rfNodes.map((n) => (n.id === cardId ? { ...n, position: { x: fx, y: fy } } : n)),
-            }));
+            setNodePositions({ [cardId]: { x: fx, y: fy } });
           }}
           onDeleteNode={(id) => {
             const n = rfNodes.find((x) => x.id === id);

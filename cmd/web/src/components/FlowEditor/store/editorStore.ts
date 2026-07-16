@@ -9,6 +9,7 @@ import type { FlowNode } from '@/types/flow';
 import type { ActionDef } from '@/types/action';
 import type { ListenDef } from '@/types/listen';
 import type { ListenTemplateDefaultRef } from '../library/templateStore';
+import type { BaselineSyncResult } from '@/services/resourcesStore';
 import { useFloatingWindowStore } from './floatingWindowStore';
 
 export type ActivePanel =
@@ -125,8 +126,8 @@ interface EditorState {
   historyEnabled: boolean | null;
 
   /** 基线同步冲突结果（未处理时非 null），用于资源按钮 badge 和 ResourcesDrawer 处理冲突入口 */
-  pendingSyncResult: import('@/services/resourcesStore').BaselineSyncResult | null;
-  setPendingSyncResult: (r: import('@/services/resourcesStore').BaselineSyncResult | null) => void;
+  pendingSyncResult: BaselineSyncResult | null;
+  setPendingSyncResult: (r: BaselineSyncResult | null) => void;
 
   /** 协议配置的 schema 校验错误数组；null=未校验/空，空数组=全部通过 */
   codecSchemaErrors: string[] | null;
@@ -206,7 +207,8 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
     const fws = useFloatingWindowStore.getState();
     fws.closeWindow(kind);
     set((s) => {
-      const { [kind]: _, ...rest } = s.activePanel;
+      const rest = { ...s.activePanel };
+      delete rest[kind];
       return { activePanel: rest };
     });
   },

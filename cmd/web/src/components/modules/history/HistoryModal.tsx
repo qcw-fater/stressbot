@@ -453,7 +453,7 @@ function HistoryCard({
         <span>超时 {cfg.timeoutSec}s</span>
         <span>Flow {cfg.flowSizeKB}KB</span>
         <span>Proto {cfg.protoCount}</span>
-        <span>Lua {cfg.scriptCount}</span>
+        <span>脚本 {cfg.scriptCount}</span>
       </div>
 
       <div className="hp-record-tags">
@@ -589,7 +589,7 @@ function StageGroup({
           <span>超时 {cfg.timeoutSec}s</span>
           <span>Flow {cfg.flowSizeKB}KB</span>
           <span>Proto {cfg.protoCount}</span>
-          <span>Lua {cfg.scriptCount}</span>
+          <span>脚本 {cfg.scriptCount}</span>
         </div>
 
         <div className="hp-record-tags">

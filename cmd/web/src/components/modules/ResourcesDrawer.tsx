@@ -24,7 +24,7 @@ import {
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import { useShallow } from 'zustand/react/shallow';
 import { useEditorStore } from '../FlowEditor/store/editorStore';
@@ -124,7 +124,7 @@ export function ResourcesDrawer({ open, onClose }: ResourcesDrawerProps) {
           defaultActiveKey="proto"
           items={[
             { key: 'proto', label: 'Proto', children: <ResourceTable kind="proto" /> },
-            { key: 'lua', label: 'Lua', children: <ResourceTable kind="lua" /> },
+            { key: 'lua', label: '脚本', children: <ResourceTable kind="lua" /> },
           ]}
         />
       </Drawer>
@@ -156,12 +156,12 @@ interface ResourceTableProps {
 
 const KIND_LABEL: Record<ResourceTableProps['kind'], string> = {
   proto: 'Proto',
-  lua: 'Lua',
+  lua: '脚本',
 };
 
 const KIND_DESC: Record<ResourceTableProps['kind'], string> = {
   proto: 'Proto 文件：定义消息结构与序列化格式，启动任务时随流程配置一起提交。',
-  lua: 'Lua 脚本：实现复杂业务逻辑，被流程节点中的 lua 动作引用。',
+  lua: '脚本文件：实现复杂业务逻辑，由流程中的脚本动作引用。',
 };
 
 const KIND_EXT: Record<ResourceTableProps['kind'], string[]> = {
@@ -181,7 +181,7 @@ function ResourceTable({ kind }: ResourceTableProps) {
   const [editContent, setEditContent] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const data = kind === 'proto' ? await listProto() : await listScript();
@@ -189,13 +189,13 @@ function ResourceTable({ kind }: ResourceTableProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [kind]);
 
   useEffect(() => {
     load();
     const unsub = subscribe(() => load());
     return () => unsub();
-  }, [kind]);
+  }, [load]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);

@@ -8,7 +8,8 @@ import type { ReactNode } from 'react';
 import { Tooltip } from 'antd';
 import { useEditorStore } from '../../store/editorStore';
 import { useFlowStore } from '../../store/flowStore';
-import { MetricsBadge, useNodeApdexLevel, useNodeMetrics } from './MetricsBadge';
+import { getNodeApdexLevel, MetricsBadge, useNodeMetrics } from './MetricsBadge';
+import { useValidationStore } from '../../validation/validationStore';
 import './NodeShell.css';
 
 /** 节点视觉形状：决定额外的 className（圆角矩形 / 胶囊 / 菱形 / 六边形 / 圆 / 标签） */
@@ -54,7 +55,7 @@ export function NodeShell({
     s.edgeHighlightNodeIds.includes(nodeId) ? 'edge-highlight' : '',
   );
   const edgeHighlightColor = useEditorStore((s) => s.edgeHighlightColor);
-  const issues = useFlowStore((s) => s.issuesByNodeId[nodeId]);
+  const issues = useValidationStore((state) => state.issuesByNodeId[nodeId]);
   const errCount = issues?.filter((i) => i.severity === 'error').length ?? 0;
   const warnCount = issues?.filter((i) => i.severity === 'warning').length ?? 0;
   const issueClass = errCount > 0 ? 'has-error' : warnCount > 0 ? 'has-warning' : '';
@@ -69,9 +70,9 @@ export function NodeShell({
   const compactClass = compact ? 'compact' : '';
 
   // 运行态 Apdex 染色：未注入 metrics 时返回 'unknown'，CSS 不覆盖原配色
-  const apdexLevel = useNodeApdexLevel(nodeId);
-  const apdexClass = apdexLevel !== 'unknown' ? `apdex-${apdexLevel}` : '';
   const metrics = useNodeMetrics(nodeId);
+  const apdexLevel = getNodeApdexLevel(metrics);
+  const apdexClass = apdexLevel !== 'unknown' ? `apdex-${apdexLevel}` : '';
   const executing = metrics?.executing ?? 0;
 
   const style: React.CSSProperties = { minWidth };
@@ -118,7 +119,7 @@ export function NodeShell({
         </div>
       )}
       {children && <div className="node-body">{children}</div>}
-      <MetricsBadge nodeId={nodeId} />
+      <MetricsBadge metric={metrics} />
     </div>
   );
 }

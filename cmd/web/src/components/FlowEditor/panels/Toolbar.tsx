@@ -27,15 +27,12 @@ import {
   ThunderboltOutlined,
   UndoOutlined,
 } from '@ant-design/icons';
-import { useMemo, useRef, useState, type ReactNode } from 'react';
-import { validateFlow } from '../validation/refsCheck';
+import { useRef, useState, type ReactNode } from 'react';
 import { redo, undo } from '../store/undoRedo';
 import { clearDraft } from '../store/persistDraft';
-import { useStateKeyOptions } from '../editors/ActionEditor/useStateKeyOptions';
 import { useFlowReadOnly } from '../flowReadOnlyContext';
 import type { MenuProps } from 'antd';
 
-import { useShallow } from 'zustand/react/shallow';
 import { useFlowStore } from '../store/flowStore';
 import { useEditorStore } from '../store/editorStore';
 import { useProtoStore } from '../proto/protoStore';
@@ -44,6 +41,7 @@ import { FlowManagerModal } from './FlowManagerModal';
 import { useFlowFileIO } from './useFlowFileIO';
 import { exportAllTemplates, importTemplates, type TemplateBundle } from '../library/templateStore';
 import type { FlowJson } from '../codec/flowToJson';
+import { useValidationStore } from '../validation/validationStore';
 
 export interface ToolbarProps {
   onOpenValidation?: () => void;
@@ -69,23 +67,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
 
   const [flowManagerOpen, setFlowManagerOpen] = useState(false);
 
-  // 实时校验：错误数量徽章（用浅采样：每次状态变化重新计算）
-  const flowSnap = useFlowStore(
-    useShallow((s) => ({
-      nodes: s.nodes,
-      actions: s.actions,
-      listens: s.listens,
-      defaultDelayMs: s.defaultDelayMs,
-    })),
-  );
-  // routeKey 模板缓存版本：cache 加载/刷新时 bump，触发重算（与 ValidationReport 对齐）。
-  const routeKeyTemplatesVersion = useEditorStore((s) => s.routeKeyTemplatesVersion);
-  // 状态注册表：仅当 ready（脚本异步加载完成）时才参与 clearState 未知 key 校验（与 ValidationReport 对齐）。
-  const { keys: stateKeys, ready: stateKeysReady } = useStateKeyOptions();
-  const validation = useMemo(
-    () => validateFlow(flowSnap, { stateKeys, stateKeysReady }),
-    [flowSnap, routeKeyTemplatesVersion, stateKeys, stateKeysReady],
-  );
+  const validation = useValidationStore((state) => state.report);
   const errorCount = validation.errors.length;
   const warnCount = validation.warnings.length;
 
@@ -243,7 +225,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
 
         {SECTION_DIVIDER}
 
-        {/* 视图组：JSON / Proto / 回调 / 校验 */}
+        {/* 视图组：JSON / Proto / 监听 / 校验 */}
         <Space size={4}>
           <Tooltip title="预览生成的 flow.json">
             <Button icon={<CodeOutlined />} onClick={() => setActivePanel({ kind: 'jsonPreview' })}>

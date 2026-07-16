@@ -90,7 +90,7 @@ function latencyTooltip(mode: ActionLatencyMode) {
   if (mode === 'rtt') {
     return 'RTT：从客户端请求发送完成，到客户端收到完整响应帧；不包含客户端解码、解析和状态写入耗时';
   }
-  return '总耗时：动作从开始执行到结束的耗时，包含请求 RTT、编码/解码、监听等待、Lua 逻辑、解析与状态写入等';
+  return '总耗时：动作从开始执行到结束的耗时，包含请求 RTT、编码/解码、监听等待、脚本逻辑、解析与状态写入等';
 }
 
 export function ActionMetricsTable<T extends ActionMetricsTableRow>({
@@ -142,10 +142,10 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
     }
     return v;
   }
-  function latencyCsv(row: T, key: keyof ActionHistogramLike): string {
+  const latencyCsv = useCallback((row: T, key: keyof ActionHistogramLike): string => {
     const sel = selectLatencyMetric(row, mode);
     return sel.sampleCount > 0 && sel.histogram ? fmtMs(sel.histogram[key]) : '—';
-  }
+  }, [mode]);
 
   const exportCsv = useCallback(() => {
     // 根据当前可见列状态构建 CSV 列定义
@@ -208,7 +208,7 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }, [dataSource, mode, advancedDiagnostics, showCanceledColumn, showClientBreakdown, showBandwidthColumns, showExecutingColumn, showQpsColumn]);
+  }, [dataSource, mode, advancedDiagnostics, showCanceledColumn, showClientBreakdown, showBandwidthColumns, showExecutingColumn, showQpsColumn, latencyCsv]);
 
   const latencyTitle = mode === 'rtt' ? 'RTT avg(ms)' : '总耗时 avg(ms)';
   const nameWidth = compact ? 160 : 200;

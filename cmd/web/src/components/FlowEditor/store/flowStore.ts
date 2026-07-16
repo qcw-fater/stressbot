@@ -11,7 +11,7 @@ import type { Edge, EdgeChange, Node as RFNode, NodeChange } from '@xyflow/react
 
 import type { ActionDef } from '@/types/action';
 import type { ListenDef } from '@/types/listen';
-import type { FlowNode, TaskFlow } from '@/types/flow';
+import type { FlowNode } from '@/types/flow';
 import type { FlowLayout } from '@/types/editor';
 import { emptyFlowLayout } from '@/types/editor';
 import type { ListenTemplateDefaultRef } from '../library/templateStore';
@@ -19,7 +19,6 @@ import { cloneListenDefaultRef } from '../library/listenTemplateDefaults';
 import { dagreLayout } from '../codec/dagreLayout';
 import { jsonToFlow } from '../codec/jsonToFlow';
 import { flowToJson, type FlowJson } from '../codec/flowToJson';
-import { validateFlow, type ValidationIssue } from '../validation/refsCheck';
 import { normalizeOnError } from '../utils/onError';
 
 interface FlowState {
@@ -43,9 +42,6 @@ interface FlowState {
   // ── 派生：每个 listen 被哪些 action 节点注册（用于反向悬停高亮） ────────
   nodesByListen: Record<string, string[]>;
 
-  // ── 派生：节点级校验问题（按节点 ID 分组；含 node-kind issue，以及 action-kind issue 映射到引用该 action 的节点） ────────
-  issuesByNodeId: Record<string, ValidationIssue[]>;
-
   // ── UI 信号：加载/重置后需要 fitView ────────
   needsFitView: boolean;
 
@@ -60,6 +56,8 @@ interface FlowState {
   // ── React Flow 事件代理 ────────
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
+  /** 提交一个或多个节点的最终位置，并同步画布与持久化布局。 */
+  setNodePositions: (positions: Record<string, { x: number; y: number }>) => void;
 
   // ── 自动布局 ────────
   applyAutoLayout: (direction?: 'LR' | 'TB') => void;
@@ -80,7 +78,7 @@ interface FlowState {
   removeAction: (name: string) => void;
   renameAction: (oldName: string, newName: string) => void;
 
-  // ── 回调 CRUD ────────
+  // ── 监听 CRUD ────────
   addListen: (name: string, def: ListenDef, position?: { x: number; y: number }) => void;
   updateListen: (name: string, partial: Partial<ListenDef>) => void;
   /** 完全替换 listen（用于 silent/decl/lua 形态切换：partial merge 会保留旧字段导致 kind 判错） */
@@ -89,7 +87,7 @@ interface FlowState {
   renameListen: (oldName: string, newName: string) => void;
   setListenDefaultRef: (name: string, ref?: ListenTemplateDefaultRef) => void;
 
-  /** 触发派生数据重算（rfNodes/rfEdges/listenRefCount/nodesByListen/issuesByNodeId） */
+  /** 触发画布派生数据重算（rfNodes/rfEdges/listenRefCount/nodesByListen） */
   syncDerived: () => void;
 }
 
@@ -104,7 +102,6 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
   listenDefaultRefs: {},
   listenRefCount: {},
   nodesByListen: {},
-  issuesByNodeId: {},
   needsFitView: false,
 
   loadFromTaskFlow: (flow, layout) => {
@@ -132,27 +129,6 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
       }
     }
     const positioned = rfNodes.map((n) => ({ ...n, position: positions[n.id] ?? { x: 0, y: 0 } }));
-    // 计算节点级校验
-    const flowForValidation: TaskFlow = {
-      defaultDelayMs: flow.defaultDelayMs,
-      nodes: flow.nodes,
-      actions: flow.actions,
-      listens: flow.listens,
-    };
-    const report = validateFlow(flowForValidation);
-    const issuesByNodeId: Record<string, ValidationIssue[]> = {};
-    for (const it of [...report.errors, ...report.warnings]) {
-      if (it.location?.kind === 'node') {
-        (issuesByNodeId[it.location.id] ??= []).push(it);
-      }
-      if (it.location?.kind === 'action') {
-        for (const [id, n] of Object.entries(flow.nodes)) {
-          if (n.type === 'action' && n.action === it.location.id) {
-            (issuesByNodeId[id] ??= []).push(it);
-          }
-        }
-      }
-    }
     set({
       defaultDelayMs: flow.defaultDelayMs,
       nodes: flow.nodes,
@@ -163,7 +139,6 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
       rfEdges,
       listenRefCount,
       nodesByListen,
-      issuesByNodeId,
       needsFitView: true,
       layout: layout ?? {
         ...emptyFlowLayout(),
@@ -190,7 +165,6 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
       },
       listenRefCount: {},
       nodesByListen: {},
-      issuesByNodeId: {},
       needsFitView: true,
     });
     get().syncDerived();
@@ -207,21 +181,31 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
   },
 
   onNodesChange: (changes) => {
-    set((s) => {
-      const next = applyNodeChanges(changes, s.rfNodes);
-      // 把位置变更同步到 layout（用户拖动时自动持久化）
-      const layout = { ...s.layout, nodePositions: { ...s.layout.nodePositions } };
-      for (const c of changes) {
-        if (c.type === 'position' && c.position) {
-          layout.nodePositions[c.id] = { ...layout.nodePositions[c.id], x: c.position.x, y: c.position.y };
-        }
-      }
-      return { rfNodes: next, layout };
-    });
+    set((s) => ({ rfNodes: applyNodeChanges(changes, s.rfNodes) }));
   },
 
   onEdgesChange: (changes) => {
     set((s) => ({ rfEdges: applyEdgeChanges(changes, s.rfEdges) }));
+  },
+
+  setNodePositions: (positions) => {
+    const ids = new Set(Object.keys(positions));
+    if (ids.size === 0) return;
+    set((s) => ({
+      layout: {
+        ...s.layout,
+        nodePositions: {
+          ...s.layout.nodePositions,
+          ...Object.fromEntries(
+            Object.entries(positions).map(([id, position]) => [id, { ...position }]),
+          ),
+        },
+      },
+      rfNodes: s.rfNodes.map((node) => {
+        const position = positions[node.id];
+        return position ? { ...node, position: { ...position } } : node;
+      }),
+    }));
   },
 
   applyAutoLayout: (direction = 'LR') => {
@@ -252,12 +236,19 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
   },
 
   updateNode: (id, partial) => {
+    const affectsTopology = nodePatchAffectsTopology(partial);
     set((s) => {
       const cur = s.nodes[id];
       if (!cur) return {};
-      return { nodes: { ...s.nodes, [id]: { ...cur, ...partial } } };
+      const node = { ...cur, ...partial };
+      const nodes = { ...s.nodes, [id]: node };
+      if (affectsTopology) return { nodes };
+      return {
+        nodes,
+        rfNodes: patchFlowNode(s.rfNodes, id, node, s.actions),
+      };
     });
-    get().syncDerived();
+    if (affectsTopology) get().syncDerived();
   },
 
   replaceNode: (id, node) => {
@@ -353,16 +344,21 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
     set((s) => {
       const cur = s.actions[name];
       if (!cur) return {};
-      return { actions: { ...s.actions, [name]: { ...cur, ...partial } } };
+      const action = { ...cur, ...partial };
+      return {
+        actions: { ...s.actions, [name]: action },
+        rfNodes: patchActionNodes(s.rfNodes, s.nodes, name, action),
+      };
     });
-    get().syncDerived();
   },
   replaceAction: (name, def) => {
     set((s) => {
       if (!s.actions[name]) return {};
-      return { actions: { ...s.actions, [name]: def } };
+      return {
+        actions: { ...s.actions, [name]: def },
+        rfNodes: patchActionNodes(s.rfNodes, s.nodes, name, def),
+      };
     });
-    get().syncDerived();
   },
   removeAction: (name) => {
     set((s) => {
@@ -409,16 +405,21 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
     set((s) => {
       const cur = s.listens[name];
       if (!cur) return {};
-      return { listens: { ...s.listens, [name]: { ...cur, ...partial } } };
+      const listen = { ...cur, ...partial };
+      return {
+        listens: { ...s.listens, [name]: listen },
+        rfNodes: patchListenCard(s.rfNodes, name, listen),
+      };
     });
-    get().syncDerived();
   },
   replaceListen: (name, def) => {
     set((s) => {
       if (!s.listens[name]) return {};
-      return { listens: { ...s.listens, [name]: def } };
+      return {
+        listens: { ...s.listens, [name]: def },
+        rfNodes: patchListenCard(s.rfNodes, name, def),
+      };
     });
-    get().syncDerived();
   },
   removeListen: (name) => {
     set((s) => {
@@ -524,9 +525,10 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
       }
     }
     if (cardBaseX > 0) cardBaseY += 90; // 新节点排在现有最后一张下方
+    const existingById = new Map(s.rfNodes.map((node) => [node.id, node]));
     const positioned = rfNodes.map((n) => {
       const pos = positions[n.id];
-      const existing = s.rfNodes.find((x) => x.id === n.id);
+      const existing = existingById.get(n.id);
       let position: { x: number; y: number };
       if (pos) {
         position = { x: pos.x, y: pos.y };
@@ -541,31 +543,71 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
       }
       return { ...n, position };
     });
-    // 实时校验：把节点级 issue 按节点 ID 分组，供 NodeShell 显示徽章
-    const flowForValidation: TaskFlow = {
-      defaultDelayMs: s.defaultDelayMs,
-      nodes: s.nodes,
-      actions: s.actions,
-      listens: s.listens,
-    };
-    const report = validateFlow(flowForValidation);
-    const issuesByNodeId: Record<string, ValidationIssue[]> = {};
-    for (const it of [...report.errors, ...report.warnings]) {
-      if (it.location?.kind === 'node') {
-        (issuesByNodeId[it.location.id] ??= []).push(it);
-      }
-      // 把 action 上的 issue 关联到引用此 action 的所有节点上
-      if (it.location?.kind === 'action') {
-        for (const [id, n] of Object.entries(s.nodes)) {
-          if (n.type === 'action' && n.action === it.location.id) {
-            (issuesByNodeId[id] ??= []).push(it);
-          }
-        }
-      }
-    }
-    set({ rfNodes: positioned, rfEdges, listenRefCount, nodesByListen, issuesByNodeId });
+    set({ rfNodes: positioned, rfEdges, listenRefCount, nodesByListen });
   },
 }));
+
+const TOPOLOGY_FIELDS = new Set<keyof FlowNode>([
+  'type',
+  'next',
+  'body',
+  'trueNext',
+  'falseNext',
+  'cases',
+  'defaultNext',
+  'options',
+  'listenRefs',
+  'onError',
+]);
+
+function nodePatchAffectsTopology(partial: Partial<FlowNode>): boolean {
+  return Object.keys(partial).some((key) => TOPOLOGY_FIELDS.has(key as keyof FlowNode));
+}
+
+function patchFlowNode(
+  rfNodes: RFNode[],
+  id: string,
+  node: FlowNode,
+  actions: Record<string, ActionDef>,
+): RFNode[] {
+  return rfNodes.map((rfNode) => {
+    if (rfNode.id !== id) return rfNode;
+    return {
+      ...rfNode,
+      type: node.type,
+      data: {
+        ...rfNode.data,
+        nodeId: id,
+        node,
+        action: node.action ? actions[node.action] : undefined,
+      },
+    };
+  });
+}
+
+function patchActionNodes(
+  rfNodes: RFNode[],
+  nodes: Record<string, FlowNode>,
+  actionName: string,
+  action: ActionDef,
+): RFNode[] {
+  const affected = new Set(
+    Object.entries(nodes)
+      .filter(([, node]) => node.type === 'action' && node.action === actionName)
+      .map(([id]) => id),
+  );
+  if (affected.size === 0) return rfNodes;
+  return rfNodes.map((rfNode) => affected.has(rfNode.id)
+    ? { ...rfNode, data: { ...rfNode.data, action } }
+    : rfNode);
+}
+
+function patchListenCard(rfNodes: RFNode[], name: string, listen: ListenDef): RFNode[] {
+  const id = `__cb__${name}`;
+  return rfNodes.map((rfNode) => rfNode.id === id
+    ? { ...rfNode, data: { ...rfNode.data, listen } }
+    : rfNode);
+}
 
 /**
  * 计算 ListenCard 的 X 坐标：取主区最右节点 +距离。

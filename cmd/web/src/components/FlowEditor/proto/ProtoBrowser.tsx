@@ -48,6 +48,7 @@ export function ProtoBrowser({ windowId: customWindowId, open: openProp, onClose
   }, [open, isPickerMode, closeWindow, windowId]);
 
   const messages = useMemo(() => {
+    void protoHash;
     if (protoStatus !== 'ready' || !protoRegistry.isLoaded()) return [];
     let list = protoRegistry.listMessages();
     if (filter) list = list.filter(filter);

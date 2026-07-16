@@ -195,7 +195,7 @@ async function parseAll(
 
   // 第二阶段：兜底逐文件 parse —— root.load 中断时仍然可以补齐剩余文件。
   // 同名 message 会抛 "duplicate name"，安全跳过即可（说明 root.load 已注册过它）。
-  let registeredAfterLoad = countMessages(root);
+  const registeredAfterLoad = countMessages(root);
   for (const name of fileList) {
     try {
       protobuf.parse(sources[name], root, parseOpts);

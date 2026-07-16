@@ -31,9 +31,9 @@ export interface BaselineSyncModalProps {
 }
 
 const TYPE_LABEL: Record<ResourceType, { text: string; color: string }> = {
-  proto: { text: 'Proto', color: 'blue' },
-  script: { text: 'Lua', color: 'purple' },
-  adapter: { text: 'Adapter', color: 'orange' },
+  proto: { text: '协议', color: 'blue' },
+  script: { text: '脚本', color: 'purple' },
+  adapter: { text: '连接配置', color: 'orange' },
 };
 
 export function BaselineSyncModal({
@@ -53,6 +53,9 @@ export function BaselineSyncModal({
   const [applying, setApplying] = useState(false);
   const [currentIdx, setCurrentIdx] = useState(0);
   const editorRef = useRef<editor.IDiffEditor | null>(null);
+  const handleEditorMount = useCallback((ed: editor.IDiffEditor) => {
+    editorRef.current = ed;
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -91,10 +94,6 @@ export function BaselineSyncModal({
 
   // 统计已选择数量
   const decidedCount = allItems.filter((it) => decisions[decisionKey(it)] !== undefined).length;
-
-  const handleEditorMount = useCallback((ed: editor.IDiffEditor) => {
-    editorRef.current = ed;
-  }, []);
 
   // 切换项时清理上一个编辑器模型
   function navigateTo(newIdx: number) {

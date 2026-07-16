@@ -33,7 +33,7 @@ function ThemedApp() {
 const container = document.getElementById('root')!;
 // @ts-expect-error — Vite HMR 复用已有 root
 const root = container._reactRoot ?? createRoot(container);
-// @ts-expect-error
+// @ts-expect-error -- 在 DOM 容器上缓存 React root，供 Vite 热更新复用
 container._reactRoot = root;
 root.render(
   <StrictMode>

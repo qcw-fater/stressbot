@@ -99,7 +99,8 @@ export const useFloatingWindowStore = create<FloatingWindowStore>()((set, get) =
 
   closeWindow: (id) => {
     set((s) => {
-      const { [id]: _, ...rest } = s.windows;
+      const rest = { ...s.windows };
+      delete rest[id];
       return { windows: rest };
     });
   },

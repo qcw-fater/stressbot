@@ -77,11 +77,17 @@ export function JsonDraftInput({
         const parsed = parseJsonDraftValue(draft, mode, emptyValue);
         if (parsed.ok) {
           onChange(parsed.value);
+          setDraft(null);
+          setInvalid(false);
         } else if (mode === 'jsonOrString') {
           onChange(draft);
+          setDraft(null);
+          setInvalid(false);
+        } else {
+          // JSON 编辑允许暂时处于不完整状态。失焦后保留草稿和错误提示，
+          // 用户回来可继续输入，不会被强制还原为上一次合法值。
+          setInvalid(true);
         }
-        setDraft(null);
-        setInvalid(false);
       }}
     />
   );

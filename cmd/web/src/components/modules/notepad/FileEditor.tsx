@@ -34,10 +34,6 @@ export function FileEditor() {
     [activeFileId, updateContent],
   );
 
-  const handleMount = useCallback((_ed: any, _monaco: any) => {
-    // Monaco 编辑器已加载，全局 Ctrl+F / Ctrl+H 均由 Monaco 内置处理
-  }, []);
-
   // 拖拽导入支持
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -123,7 +119,6 @@ export function FileEditor() {
         theme={monacoTheme}
         value={activeContent}
         onChange={handleChange}
-        onMount={handleMount}
         options={{
           fixedOverflowWidgets: true,
           minimap: { enabled: false },

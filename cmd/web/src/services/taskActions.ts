@@ -120,24 +120,6 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
     );
   }
 
-  // 校验通过 → 立即清空上次 finalReport 的监控数据。
-  //
-  // 这一步必须在 await tasks API 之前完成，原因：
-  //   - createTask 上传 multipart（含 lua/proto），可能耗时几百 ms 到数秒；
-  //   - 在此期间 UI 仍处于 finalReport，节点上保留着上一次任务的 p99/apdex/边框颜色；
-  //   - 用户点完"开始压测"后会看到"上次的指标"持续展示，直到第一份新 polling 回来才更新；
-  //   - 早清不晚清：极端情况下 createTask 失败回滚，用户也只丢一份"已经看完的最终报告"，
-  //     与"开始压测"语义不冲突，可接受。
-  //
-  // 同时同步清掉 useMetricsStore.provider —— 这一步必须显式做：
-  //   - latestStress=null 后 EditorPage 的 useMemo 重算 metricsProvider=undefined；
-  //   - 但把 undefined 推到 useMetricsStore 是在 useLayoutEffect 里，仍要等下一次 commit；
-  //   - 而 React 组件 re-render 在 zustand set() 之后还要排队，至少 1 个 microtask；
-  //   - 直接同步把 provider 设成 undefined 后，所有 NodeShell/MetricsBadge 立刻失去依据，
-  //     下一次重渲染就不会再看到上次任务的 p99/apdex/边框残留。
-  useRuntimeStore.getState().clearMonitorData();
-  useMetricsStore.getState().setProvider(undefined);
-
   // 2. 资源收集
   //   - 再次执行 flow 引用脚本 gap-fill 与缺失检测，作为启动前最终拦截
   //   - 收集本地存储内容作为 multipart payload
@@ -270,10 +252,14 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
   });
   await tasksApi.startTask(created.id);
 
-  // 6. 同步运行态：用实际启动的 flow 替换画布（stash 当前草稿），再切 running。
-  //    clearMonitorData 已经在校验后立刻调过了（开头），这里不必再清。
-  stashAndReplaceCanvas(opts.flow, opts.flowLayout);
+  // 6. 远端启动成功后再提交本地运行态。此前任何预检或请求失败都必须保留
+  //    上一次最终报告，避免用户因为一次失败启动丢失仍在查看的数据。
   const runtime = useRuntimeStore.getState();
+  runtime.clearMonitorData();
+  useMetricsStore.getState().setMetrics(undefined);
+
+  // 用实际启动的 flow 替换画布（stash 当前草稿），再切 running。
+  stashAndReplaceCanvas(opts.flow, opts.flowLayout);
   runtime.setOwnedTaskId(created.id);
   runtime.setMode('running');
   runtime.setActiveTask({
@@ -339,9 +325,9 @@ export async function attachToActive(taskId: string): Promise<void> {
   }
 
   // 同 startTask：在切换 mode 前清掉残留监控数据，避免上一次的 finalReport 数据闪一下；
-  // useMetricsStore.provider 也必须同步清掉，否则节点会保留上次任务 1~2 帧的 p99/apdex/边框。
+  // 节点指标 Map 也必须同步清掉，否则节点会保留上次任务 1~2 帧的 p99/apdex/边框。
   runtime.clearMonitorData();
-  useMetricsStore.getState().setProvider(undefined);
+  useMetricsStore.getState().setMetrics(undefined);
   runtime.setActiveTask(detail);
   runtime.setDetachedActiveTask(null);
   if (detail.state === 'stopped' || detail.state === 'failed') {

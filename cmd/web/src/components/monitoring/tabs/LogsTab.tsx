@@ -20,6 +20,7 @@ import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
 import dayjs from 'dayjs';
 import { registerLogLanguage, getLogTheme } from './logLanguage';
+import { filterLogEntries, planLogRender, type LogViewEntry } from './logViewModel';
 import './LogsTab.css';
 
 const MAX_ENTRIES_ADMIN = 5000;
@@ -42,13 +43,11 @@ function loadState(): SavedState | null {
 }
 
 function saveState(s: SavedState) {
-  try { localStorage.setItem(STATE_KEY, JSON.stringify(s)); } catch {}
-}
-
-interface FormattedEntry {
-  level: string;
-  message: string;
-  text: string;
+  try {
+    localStorage.setItem(STATE_KEY, JSON.stringify(s));
+  } catch {
+    // 本地存储不可用时不影响日志查看。
+  }
 }
 
 function formatTimestamp(raw: string): string {
@@ -104,7 +103,7 @@ export function LogsTab({ open }: { open: boolean }) {
 
   const maxEntries = target === 'admin' ? MAX_ENTRIES_ADMIN : MAX_ENTRIES_AGENT;
 
-  const [entries, setEntries] = useState<FormattedEntry[]>([]);
+  const [entries, setEntries] = useState<LogViewEntry[]>([]);
   const [polling, setPolling] = useState(saved?.polling ?? true);
   const lineCountElRef = useRef<HTMLSpanElement>(null);
 
@@ -113,13 +112,13 @@ export function LogsTab({ open }: { open: boolean }) {
   const monacoRef = useRef<Monaco | null>(null);
   const languageRegistered = useRef(false);
 
-  const prevTextRef = useRef('');
+  const renderedEntriesRef = useRef<LogViewEntry[]>([]);
   // 用户主动滚动到底部标记，避免 layout/isEditorAtBottom 误判
   const userAtBottomRef = useRef(true);
   // seekToLatest 期间标记，跳过正常轮询
   const seekingRef = useRef(false);
   const [seeking, setSeeking] = useState(false);
-  // 等级/过滤变更后需要全量替换 Monaco 文本，但不清 prevTextRef 以保留增量追加能力
+  // 等级或关键词变化后执行一次完整替换，后续轮询继续增量追加。
   const needsFullReplaceRef = useRef(false);
 
   // === seekToLatest：切换 target 时跳到最新，不逐批渲染 ===
@@ -127,7 +126,7 @@ export function LogsTab({ open }: { open: boolean }) {
     seekingRef.current = true;
     setSeeking(true);
     let afterSeq = 0;
-    let lastEntries: FormattedEntry[] = [];
+    let lastEntries: LogViewEntry[] = [];
     let lastNextSeq = 0;
 
     try {
@@ -157,7 +156,7 @@ export function LogsTab({ open }: { open: boolean }) {
     setSeeking(false);
     setEntries(lastEntries);
     nextSeqRef.current = lastNextSeq;
-    prevTextRef.current = '';
+    renderedEntriesRef.current = [];
     userAtBottomRef.current = true;
     setPollingInterval(3000);
   }, []);
@@ -219,7 +218,7 @@ export function LogsTab({ open }: { open: boolean }) {
   const handleTargetChange = (val: string) => {
     setTarget(val);
     setEntries([]);
-    prevTextRef.current = '';
+    renderedEntriesRef.current = [];
     nextSeqRef.current = 0;
     seekToLatest(val);
   };
@@ -233,7 +232,7 @@ export function LogsTab({ open }: { open: boolean }) {
   };
   const clearLogs = () => {
     setEntries([]);
-    prevTextRef.current = '';
+    renderedEntriesRef.current = [];
     nextSeqRef.current = 0;
     const ed = editorRef.current;
     if (ed) {
@@ -290,21 +289,10 @@ export function LogsTab({ open }: { open: boolean }) {
     onError: () => {},
   });
 
-  // === 过滤统计 ===
-  const filteredCount = useRef(0);
-  const totalCount = useRef(0);
-
-  useMemo(() => {
-    let list = entries;
-    if (level) list = list.filter((e) => e.level === level);
-    if (filterText) {
-      const lower = filterText.toLowerCase();
-      list = list.filter((e) => e.message.toLowerCase().includes(lower));
-    }
-    filteredCount.current = list.length;
-    totalCount.current = entries.length;
-    return null;
-  }, [entries, level, filterText]);
+  const filteredEntries = useMemo(
+    () => filterLogEntries(entries, level, filterText),
+    [entries, level, filterText],
+  );
 
   const [editorReady, setEditorReady] = useState(false);
 
@@ -315,42 +303,10 @@ export function LogsTab({ open }: { open: boolean }) {
     const model = ed.getModel();
     if (!model) return;
 
-    let list = entries;
-    if (level) list = list.filter((e) => e.level === level);
-    if (filterText) {
-      const lower = filterText.toLowerCase();
-      list = list.filter((e) => e.message.toLowerCase().includes(lower));
-    }
-    const text = list.map((e) => e.text).join('\n');
-
-    if (text === prevTextRef.current) {
-      needsFullReplaceRef.current = false;
-      return;
-    }
-
-    // ── 等级/过滤变更：全量替换但保持滚动位置 ──
-    if (needsFullReplaceRef.current) {
-      needsFullReplaceRef.current = false;
-      const savedVS = ed.saveViewState();
-      model.setValue(text);
-      prevTextRef.current = text;
-      const lc = model.getLineCount();
-      if (lineCountElRef.current) lineCountElRef.current.textContent = `${lc} 行`;
-      if (savedVS) ed.restoreViewState(savedVS);
-      return;
-    }
-
-    // ── 首次加载 ──
-    if (!prevTextRef.current) {
-      model.setValue(text);
-      prevTextRef.current = text;
-
-      const lc = model.getLineCount();
-      if (lineCountElRef.current) lineCountElRef.current.textContent = `${lc} 行`;
-      // 首次加载直接滚到底部展示最新日志
-      requestAnimationFrame(() => ed.revealLine(lc));
-      return;
-    }
+    const previousEntries = renderedEntriesRef.current;
+    const plan = planLogRender(previousEntries, filteredEntries, needsFullReplaceRef.current);
+    needsFullReplaceRef.current = false;
+    if (plan.kind === 'none') return;
 
     // 在修改前捕获滚动位置
     const savedVS = ed.saveViewState();
@@ -365,34 +321,32 @@ export function LogsTab({ open }: { open: boolean }) {
       }
     };
 
-    // ── 尝试增量追加 ──
-    const prev = prevTextRef.current;
-    if (text.length > prev.length && text.startsWith(prev + '\n') && monacoRef.current) {
-      const newPart = text.slice(prev.length + 1);
+    if (plan.kind === 'append' && monacoRef.current) {
+      const newPart = plan.entries.map((entry) => entry.text).join('\n');
       const lastLine = model.getLineCount();
       const lastCol = model.getLineMaxColumn(lastLine);
       model.applyEdits([{
         range: new monacoRef.current.Range(lastLine, lastCol, lastLine, lastCol),
-        text: '\n' + newPart,
+        text: (previousEntries.length > 0 ? '\n' : '') + newPart,
       }]);
-      prevTextRef.current = text;
-
-      const lc = model.getLineCount();
-      if (lineCountElRef.current) lineCountElRef.current.textContent = `${lc} 行`;
+      renderedEntriesRef.current = filteredEntries;
+      if (lineCountElRef.current) lineCountElRef.current.textContent = `${filteredEntries.length} 行`;
 
       restoreScroll();
       return;
     }
 
-    // ── 全量替换 ──
+    const text = filteredEntries.map((entry) => entry.text).join('\n');
     model.setValue(text);
-    prevTextRef.current = text;
+    renderedEntriesRef.current = filteredEntries;
+    if (lineCountElRef.current) lineCountElRef.current.textContent = `${filteredEntries.length} 行`;
 
-    const lc = model.getLineCount();
-    if (lineCountElRef.current) lineCountElRef.current.textContent = `${lc} 行`;
-
-    restoreScroll();
-  }, [entries, level, filterText, editorReady]);
+    if (previousEntries.length === 0 && filteredEntries.length > 0) {
+      requestAnimationFrame(() => ed.revealLine(model.getLineCount()));
+    } else {
+      restoreScroll();
+    }
+  }, [editorReady, filteredEntries]);
 
   // === Monaco beforeMount ===
   const handleBeforeMount = (mon: Monaco) => {
@@ -480,7 +434,7 @@ export function LogsTab({ open }: { open: boolean }) {
         <Button onClick={clearLogs} size="small">清空</Button>
         <Button onClick={openFileList} size="small">下载日志</Button>
         <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
-          {filteredCount.current} 条{filteredCount.current !== totalCount.current ? ` / 共 ${totalCount.current}` : ''}
+          {filteredEntries.length} 条{filteredEntries.length !== entries.length ? ` / 共 ${entries.length}` : ''}
         </span>
       </Space>
 

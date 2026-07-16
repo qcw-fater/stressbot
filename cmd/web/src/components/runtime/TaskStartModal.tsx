@@ -142,7 +142,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
   const [protos, setProtos] = useState<ResourceFile[]>([]);
   const [scripts, setScripts] = useState<ResourceFile[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  /** flow 引用的脚本总数（actions/callbacks 中 script 字段的去重和） */
+  /** flow 引用的脚本总数（actions/listens 中 script 字段的去重和） */
   const [refScriptCount, setRefScriptCount] = useState(0);
   /** flow 引用了但既不在本地存储也拉不到默认基线的脚本名（启动会失败） */
   const [missingScripts, setMissingScripts] = useState<string[]>([]);
@@ -906,7 +906,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
         <Descriptions.Item label="Proto 文件">
           {protos.length === 0 ? <Tag color="default">无</Tag> : <Tag color="blue">{protos.length} 个</Tag>}
         </Descriptions.Item>
-        <Descriptions.Item label="Lua 脚本">
+        <Descriptions.Item label="脚本">
           <Tooltip
             title={
               `flow 引用 ${refScriptCount} 个；本地共 ${scripts.length} 个（含历史）；` +

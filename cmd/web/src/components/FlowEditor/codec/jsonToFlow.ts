@@ -9,7 +9,7 @@
  *   boolean.trueNext/falseNext  → edge[source=id, sourceHandle='true'/'false', target=*, type='branch']
  *   switch.cases[i]/defaultNext → edge[source=id, sourceHandle=`case-${i}`/'default', target=*, type='branch']
  *   weighted.options[i]         → edge[source=id, sourceHandle=`opt-${i}`, target=*, type='weight', data={weight,ratio}]
- *   action.listenRefs[i]        → edge[source=id, sourceHandle='listen', target=`__cb__${callback}`, type='listen']（callback=null 不画边）
+ *   action.listenRefs[i]        → edge[source=id, sourceHandle='listen', target=`__cb__${listen}`, type='listen']（listen=null 不画边）
  *   action.onError.handler      → edge[source=id, sourceHandle='error', target=handler, type='error']
  */
 

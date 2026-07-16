@@ -308,8 +308,14 @@ export const useRuntimeStore = create<RuntimeState>()(
         const p = (persisted ?? {}) as Partial<RuntimeState>;
         // v2 → v3：authExtra → stateExtra，移除 authAddr。
         if (version < 3 && p.robotConfig) {
-          const { authAddr: _, authExtra, ...rest } = p.robotConfig as any;
-          p.robotConfig = { ...rest, stateExtra: authExtra ?? {} };
+          const rest = { ...p.robotConfig } as Partial<RobotConfig> & {
+            authAddr?: string;
+            authExtra?: Record<string, string>;
+          };
+          const authExtra = rest.authExtra;
+          delete rest.authAddr;
+          delete rest.authExtra;
+          p.robotConfig = { ...DEFAULT_ROBOT_CONFIG, ...rest, stateExtra: authExtra ?? {} };
         }
         return p;
       },

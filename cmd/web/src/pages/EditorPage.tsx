@@ -18,7 +18,6 @@ import {
   agentsApi,
   buildNodeMetricsMap,
   historyApi,
-  makeMetricsProvider,
   metricsApi,
   pollingPolicy,
   registerTaskConflictHandler,
@@ -30,6 +29,7 @@ import {
   usePolling,
 } from '@/services';
 import { useMonacoFindTooltip } from '@/services/monacoTooltip';
+import { useConnectionHealth } from '@/services/connectionHealth';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { FlowEditor } from '@/components/FlowEditor';
 import { useFlowStore } from '@/components/FlowEditor/store/flowStore';
@@ -66,8 +66,13 @@ const LazyActiveTaskGuardModal = lazy(() =>
 );
 import type { TaskBrief } from '@/types/api';
 
-/** 首次 visible=true 时挂载组件，之后保持挂载（保留组件状态 + 关闭动画） */
-function LazyMount({ visible, children }: { visible: boolean; children: React.ReactNode }) {
+/** 只读重型视图关闭即卸载；有未提交草稿的编辑器可显式保活。 */
+function LazyMount({ visible, keepMounted = false, children }: { visible: boolean; keepMounted?: boolean; children: React.ReactNode }) {
+  if (!keepMounted) return visible ? <>{children}</> : null;
+  return <PersistentLazyMount visible={visible}>{children}</PersistentLazyMount>;
+}
+
+function PersistentLazyMount({ visible, children }: { visible: boolean; children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     if (visible) setMounted(true);
@@ -129,10 +134,10 @@ function HomeShellInner() {
   const flowSlice = useFlowStore(
     useShallow((s) => ({ nodes: s.nodes, listens: s.listens })),
   );
-  const metricsProvider = useMemo(() => {
+  const nodeMetrics = useMemo(() => {
     if (mode === 'edit') return undefined;
     const map = buildNodeMetricsMap(latestStress ?? undefined, flowSlice);
-    return map.size > 0 ? makeMetricsProvider(map) : undefined;
+    return map.size > 0 ? map : undefined;
   }, [mode, latestStress, flowSlice]);
 
   const [resourcesOpen, setResourcesOpen] = useState(false);
@@ -145,6 +150,7 @@ function HomeShellInner() {
   const [guardTask, setGuardTask] = useState<TaskBrief | null>(null);
   const [booting, setBooting] = useState(true);
   const policy = useMemo(() => pollingPolicy(mode), [mode]);
+  const reportConnectionHealth = useConnectionHealth(setConnectionLost);
 
   const bootRef = useRef(false);
 
@@ -184,6 +190,7 @@ function HomeShellInner() {
           });
         // 3. 检测远端 active 任务
         const list = await tasksApi.listTasks();
+        reportConnectionHealth('boot', false);
         const active = list.items.find((t) =>
           t.state === 'starting' || t.state === 'running' || t.state === 'stopping',
         );
@@ -193,7 +200,7 @@ function HomeShellInner() {
         }
       } catch (e) {
         if (e instanceof ApiError && e.code === 'NETWORK_ERROR') {
-          setConnectionLost(true);
+          reportConnectionHealth('boot', true);
         } else {
           showApiError(e);
         }
@@ -201,7 +208,7 @@ function HomeShellInner() {
         setBooting(false);
       }
     })();
-  }, [setConnectionLost, setDetachedActiveTask]);
+  }, [reportConnectionHealth, setDetachedActiveTask]);
 
   // === 轮询：任务详情（用于检测终态切换） ===
   const taskId = activeTask?.id;
@@ -218,6 +225,7 @@ function HomeShellInner() {
     intervalMs: policy.intervalMs,
     enabled: policy.pollActiveTask && !!taskId,
     onSuccess: (detail) => {
+      reportConnectionHealth('boot', false);
       setActiveTask(detail);
       if (detail.agentEvents?.length) {
         appendAgentEvents(detail.agentEvents);
@@ -240,7 +248,7 @@ function HomeShellInner() {
               parts.push(`超时 ${summary.timeoutRobots}`);
             }
             if (typeof summary.luaSkipped === 'number' && summary.luaSkipped > 0) {
-              parts.push(`Lua 未归还 ${summary.luaSkipped}`);
+              parts.push(`脚本运行时未归还 ${summary.luaSkipped}`);
             }
             if (parts.length > 0) lines.push(parts.join(' · '));
             const titleMap: Record<string, string> = {
@@ -260,8 +268,8 @@ function HomeShellInner() {
     onError: () => {
       // 单错误静默；usePolling 自带连续失败检测
     },
-    onConnectionLost: () => setConnectionLost(true),
-    onConnectionRestored: () => setConnectionLost(false),
+    onConnectionLost: () => reportConnectionHealth('task', true),
+    onConnectionRestored: () => reportConnectionHealth('task', false),
   });
 
   // === 轮询：压测 metrics ===
@@ -271,11 +279,12 @@ function HomeShellInner() {
     intervalMs: policy.intervalMs,
     enabled: policy.pollStress,
     onSuccess: (agg) => {
+      reportConnectionHealth('boot', false);
       pushStress(agg.snapshot);
       setAgentHealth(agg.reportingAgents, agg.totalAgents, agg.offlineAgents, agg.assignedAgents);
     },
-    onConnectionLost: () => setConnectionLost(true),
-    onConnectionRestored: () => setConnectionLost(false),
+    onConnectionLost: () => reportConnectionHealth('stress', true),
+    onConnectionRestored: () => reportConnectionHealth('stress', false),
   });
 
   // === 轮询：集群系统资源 ===
@@ -284,21 +293,34 @@ function HomeShellInner() {
     fetcher: systemFetcher,
     intervalMs: policy.intervalMs,
     enabled: policy.pollSystem,
-    onSuccess: (snap) => pushSystem(snap),
-    onConnectionLost: () => setConnectionLost(true),
-    onConnectionRestored: () => setConnectionLost(false),
+    onSuccess: (snap) => {
+      reportConnectionHealth('boot', false);
+      pushSystem(snap);
+    },
+    onConnectionLost: () => reportConnectionHealth('system', true),
+    onConnectionRestored: () => reportConnectionHealth('system', false),
   });
 
-  // === 轮询：Agent 列表 ===
+  // === 轮询：节点列表 ===
   const agentsFetcher = useCallback(() => agentsApi.listAgents(), []);
   usePolling({
     fetcher: agentsFetcher,
     intervalMs: policy.intervalMs,
     enabled: policy.pollAgents,
-    onSuccess: (resp) => setAgents(resp.items),
-    onConnectionLost: () => setConnectionLost(true),
-    onConnectionRestored: () => setConnectionLost(false),
+    onSuccess: (resp) => {
+      reportConnectionHealth('boot', false);
+      setAgents(resp.items);
+    },
+    onConnectionLost: () => reportConnectionHealth('agents', true),
+    onConnectionRestored: () => reportConnectionHealth('agents', false),
   });
+
+  useEffect(() => {
+    if (!policy.pollActiveTask || !taskId) reportConnectionHealth('task', false);
+    if (!policy.pollStress) reportConnectionHealth('stress', false);
+    if (!policy.pollSystem) reportConnectionHealth('system', false);
+    if (!policy.pollAgents) reportConnectionHealth('agents', false);
+  }, [policy, reportConnectionHealth, taskId]);
 
   const isReadOnly = mode === 'viewActive' || mode === 'running' || mode === 'finalReport';
 
@@ -323,7 +345,7 @@ function HomeShellInner() {
         <FlowEditor
           autoLoadDefault
           readOnly={isReadOnly}
-          metricsProvider={metricsProvider}
+          metrics={nodeMetrics}
           topbarExtra={
             <RuntimeBar
               onOpenResources={() => setResourcesOpen(true)}
@@ -338,7 +360,7 @@ function HomeShellInner() {
         />
       </div>
       <MonitorDock />
-      <LazyMount visible={resourcesOpen}>
+      <LazyMount visible={resourcesOpen} keepMounted>
         <Suspense fallback={null}>
           <LazyResourcesDrawer open={resourcesOpen} onClose={() => setResourcesOpen(false)} />
         </Suspense>
@@ -381,8 +403,9 @@ function HomeShellInner() {
           </Suspense>
         </FloatingWindow>
       </LazyMount>
-      <LazyMount visible={notepadOpen}>
+      <LazyMount visible={notepadOpen} keepMounted>
         <FloatingWindow
+          keepMounted
           windowId="notepad"
           title="记事本"
           defaultSize={{ width: 960, height: 600 }}
@@ -395,8 +418,9 @@ function HomeShellInner() {
           </Suspense>
         </FloatingWindow>
       </LazyMount>
-      <LazyMount visible={protocolConfigOpen}>
+      <LazyMount visible={protocolConfigOpen} keepMounted>
         <FloatingWindow
+          keepMounted
           windowId="protocolConfig"
           title="协议配置"
           defaultSize={{ width: 900, height: 640 }}

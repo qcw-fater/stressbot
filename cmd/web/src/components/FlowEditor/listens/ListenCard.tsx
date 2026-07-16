@@ -16,7 +16,7 @@ import './ListenCard.css';
 const LISTEN_KIND_DESC: Record<ListenKind, string> = {
   silent: '收到推送后静默处理',
   declarative: '解析 S2C 消息并写入 state',
-  lua: '收到推送后执行 Lua 脚本',
+  lua: '收到推送后执行脚本',
 };
 
 interface CardData {
