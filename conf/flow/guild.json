@@ -1370,12 +1370,14 @@
           "max": 200
         },
         {
-          "type": "randomBool",
-          "field": "needApproval"
+          "type": "fixed",
+          "field": "needApproval",
+          "value": true
         },
         {
-          "type": "randomBool",
-          "field": "acceptApply"
+          "type": "fixed",
+          "field": "acceptApply",
+          "value": true
         }
       ],
       "store": [
@@ -1737,22 +1739,6 @@
           "type": "map",
           "field": "params",
           "entries": [
-            {
-              "key": 1,
-              "value": {
-                "type": "randomInt",
-                "min": 0,
-                "max": 1
-              }
-            },
-            {
-              "key": 2,
-              "value": {
-                "type": "randomInt",
-                "min": 0,
-                "max": 1
-              }
-            },
             {
               "key": 3,
               "value": {
