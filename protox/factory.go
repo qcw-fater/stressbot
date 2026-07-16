@@ -446,10 +446,25 @@ func (f *Factory) getListField(ref protoreflect.Message, parts []string) (protor
 }
 
 // GetFieldMap 获取消息的所有字段值（map 形式）。
-// 遍历所有字段描述符，包含 proto3 默认值字段（如 int64=0、bool=false、string=""）。
+// 遍历所有字段描述符，包含 proto3 默认值字段（如 int64=0、bool=false、string=""、枚举=0）。
 // 未设置的 message 类型字段和空的 repeated/map 字段会被跳过。
+// 嵌套 message 递归走 messageToMap，保证嵌套结构同样保留 proto3 默认值字段
+// （否则取默认值的零值字段——如会长职位 position=GPT_Leader=0——会在嵌套层丢失，
+// 导致客户端把会长判成非会长）。
 func (f *Factory) GetFieldMap(msg proto.Message) map[string]any {
-	ref := msg.ProtoReflect()
+	return messageToMap(msg.ProtoReflect())
+}
+
+// messageToMap 将 protoreflect.Message 展开为 map[string]any。
+// 与 GetFieldMap 语义一致：遍历全部字段描述符，保留 proto3 标量/枚举默认值
+// （int64=0、bool=false、string=""、枚举=0），仅跳过未设置的 message 字段与空的 repeated/map。
+// 供 GetFieldMap 顶层与 fromScalarValue 的 MessageKind 递归共用——二者必须用同一套规则：
+// 嵌套 message 若改用 msg.Range（只产出非默认值字段），会丢掉零值字段。
+//
+// 注意：Has(fd) 仅对 message/repeated/map 字段调用（这些类型支持 presence），
+// 绝不对 proto3 标量/枚举字段调用 Has（它们无 presence，Has 会 panic）——标量/枚举一律用
+// ref.Get(fd) 取值（未设置即返回默认值 0/""/false）。
+func messageToMap(ref protoreflect.Message) map[string]any {
 	result := make(map[string]any)
 
 	// 遍历所有字段描述符（不仅限于已设置的字段）
@@ -466,8 +481,7 @@ func (f *Factory) GetFieldMap(msg proto.Message) map[string]any {
 			continue
 		}
 
-		val := ref.Get(fd)
-		result[string(fd.Name())] = fromFieldValue(fd, val)
+		result[string(fd.Name())] = fromFieldValue(fd, ref.Get(fd))
 	}
 
 	return result
@@ -604,14 +618,9 @@ func fromScalarValue(field protoreflect.FieldDescriptor, val protoreflect.Value)
 	case protoreflect.EnumKind:
 		return int64(val.Enum())
 	case protoreflect.MessageKind:
-		// 返回原始 map 表示
-		msg := val.Message()
-		result := make(map[string]any)
-		msg.Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
-			result[string(fd.Name())] = fromFieldValue(fd, v)
-			return true
-		})
-		return result
+		// 嵌套 message：与 GetFieldMap 同源走 messageToMap，保留 proto3 默认值字段。
+		// 不能用 msg.Range——它只产出非默认值字段，会丢掉零值字段（如会长职位 position=0）。
+		return messageToMap(val.Message())
 	default:
 		return val.Interface()
 	}
