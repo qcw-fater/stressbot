@@ -15,6 +15,7 @@ import { jsonToFlow } from './jsonToFlow';
 import type { FlowJsonInput } from './jsonToFlow';
 import type { FlowJson } from './flowToJson';
 import { validateFlow } from '../validation/refsCheck';
+import { edgeTypes } from '../edges/registry';
 
 // web 移到 cmd/web 后，从 codec.test.ts 到仓库根需要 6 层 ..
 const flowPath = path.resolve(__dirname, '../../../../../../conf/flow/flow.json');
@@ -106,6 +107,51 @@ describe('codec round-trip', () => {
     });
     const edge = rfEdges.find((e) => e.type === 'error');
     expect(edge).toMatchObject({ source: 'act', target: 'cleanup', sourceHandle: 'error' });
+  });
+
+  it('jsonToFlow 为 wait.then 生成后继边', () => {
+    const input: FlowJsonInput = {
+      defaultDelayMs: 1000,
+      nodes: {
+        main: { type: 'wait', waitMs: 10, then: 'after' },
+        after: { type: 'action', action: 'After' },
+      },
+      actions: { After: { pattern: 'clearState', keys: ['done'] } },
+      listens: {},
+    };
+
+    const edge = jsonToFlow(input).rfEdges.find((item) => item.type === 'waitThen');
+
+    expect(edge).toMatchObject({ source: 'main', target: 'after', sourceHandle: 'out' });
+  });
+
+  it('flowToJson 导出 wait.then', () => {
+    const input: FlowJson = {
+      defaultDelayMs: 1000,
+      nodes: {
+        main: { type: 'wait', waitMs: 10, then: 'after' },
+        after: { type: 'action', action: 'After' },
+      },
+      actions: { After: { pattern: 'clearState', keys: ['done'] } },
+      listens: {},
+    };
+
+    expect(flowToJson(input).nodes.main.then).toBe('after');
+  });
+
+  it('flowToJson 裁剪空白 wait.then', () => {
+    const input: FlowJson = {
+      defaultDelayMs: 1000,
+      nodes: { main: { type: 'wait', waitMs: 10, then: '   ' } },
+      actions: {},
+      listens: {},
+    };
+
+    expect(flowToJson(input).nodes.main.then).toBeUndefined();
+  });
+
+  it('注册 waitThen 边渲染器', () => {
+    expect(edgeTypes.waitThen).toBeDefined();
   });
 
   it('jsonToFlow 不迁移旧 breakOff / errorStrategy 字段', () => {

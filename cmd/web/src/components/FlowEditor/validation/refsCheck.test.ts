@@ -46,6 +46,48 @@ describe('validateFlow', () => {
     expect(r.warnings.find((e) => e.code === 'NODE_ORPHAN')).toBeTruthy();
   });
 
+  it('NODE_REF_NOT_FOUND：wait then 指向不存在节点', () => {
+    const r = validateFlow(baseFlow({
+      nodes: {
+        main: { type: 'sequence', next: ['wait'] },
+        wait: { type: 'wait', waitMs: 10, then: 'ghost' },
+      },
+    }));
+    expect(r.errors.find((e) => e.code === 'NODE_REF_NOT_FOUND')).toBeTruthy();
+  });
+
+  it('NODE_SELF_REF：wait then 不能指向自身', () => {
+    const r = validateFlow(baseFlow({
+      nodes: {
+        main: { type: 'sequence', next: ['wait'] },
+        wait: { type: 'wait', waitMs: 10, then: 'wait' },
+      },
+    }));
+    expect(r.errors.find((e) => e.code === 'NODE_SELF_REF')).toBeTruthy();
+  });
+
+  it('wait then 指向的节点不视为孤立节点', () => {
+    const r = validateFlow(baseFlow({
+      nodes: {
+        main: { type: 'sequence', next: ['wait'] },
+        wait: { type: 'wait', waitMs: 10, then: 'after' },
+        after: { type: 'action', action: 'A1' },
+      },
+    }));
+    expect(r.warnings.filter((e) => e.code === 'NODE_ORPHAN')).toEqual([]);
+  });
+
+  it('WAIT_THEN_DUPLICATE_SEQUENCE_NEXT：相邻的相同后继提示重复执行', () => {
+    const r = validateFlow(baseFlow({
+      nodes: {
+        main: { type: 'sequence', next: ['wait', 'after'] },
+        wait: { type: 'wait', waitMs: 10, then: 'after' },
+        after: { type: 'action', action: 'A1' },
+      },
+    }));
+    expect(r.warnings.find((e) => e.code === 'WAIT_THEN_DUPLICATE_SEQUENCE_NEXT')).toBeTruthy();
+  });
+
   it('LOOP_BODY_MISSING：loop 缺少 body 报错', () => {
     const r = validateFlow(baseFlow({ nodes: { main: { type: 'loop' } } }));
     expect(r.errors.find((e) => e.code === 'LOOP_BODY_MISSING')).toBeTruthy();

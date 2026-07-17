@@ -56,6 +56,7 @@ export interface FlowNode {
   waitMs?: number;
   waitMin?: number;
   waitMax?: number;
+  then?: string;
 
   // 通用：action / boolean
   delayMs?: number;

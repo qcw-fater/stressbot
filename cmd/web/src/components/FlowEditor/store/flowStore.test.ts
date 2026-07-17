@@ -113,3 +113,51 @@ describe('flowStore incremental derivation', () => {
     expect(after.rfNodes.find((node) => node.id === 'send')?.position).toEqual({ x: 220, y: 110 });
   });
 });
+
+describe('flowStore wait then references', () => {
+  const waitFlow: FlowJson = {
+    defaultDelayMs: 1000,
+    nodes: {
+      main: { type: 'sequence', next: ['wait'] },
+      wait: { type: 'wait', waitMs: 10 },
+      after: { type: 'action', action: 'after' },
+    },
+    actions: { after: { pattern: 'clearState', keys: ['done'] } },
+    listens: {},
+  };
+
+  beforeEach(() => {
+    useFlowStore.getState().loadFromTaskFlow(waitFlow);
+  });
+
+  it('rebuilds the derived edge when wait.then changes', () => {
+    const beforeEdges = useFlowStore.getState().rfEdges;
+
+    useFlowStore.getState().updateNode('wait', { then: 'after' });
+
+    const after = useFlowStore.getState();
+    expect(after.rfEdges).not.toBe(beforeEdges);
+    expect(after.rfEdges).toContainEqual(expect.objectContaining({
+      source: 'wait',
+      target: 'after',
+      sourceHandle: 'out',
+      type: 'waitThen',
+    }));
+  });
+
+  it('clears wait.then when the target node is removed', () => {
+    useFlowStore.getState().updateNode('wait', { then: 'after' });
+
+    useFlowStore.getState().removeNode('after');
+
+    expect(useFlowStore.getState().nodes.wait.then).toBe('');
+  });
+
+  it('updates wait.then when the target node is renamed', () => {
+    useFlowStore.getState().updateNode('wait', { then: 'after' });
+
+    useFlowStore.getState().renameNode('after', 'renamed');
+
+    expect(useFlowStore.getState().nodes.wait.then).toBe('renamed');
+  });
+});

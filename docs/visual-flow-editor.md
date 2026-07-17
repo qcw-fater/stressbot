@@ -222,6 +222,7 @@ interface FlowNode {
   waitMs?: number;
   waitMin?: number;
   waitMax?: number;
+  then?: string;
 
   // 通用：action / boolean
   delayMs?: number;
@@ -447,9 +448,9 @@ ListenCard 节点位置也存在 `nodePositions` 中，key 为 `__cb__<name>`。
 ### 4.7 wait（等待）
 
 - **颜色**：红色 `#dc2626`
-- **Handle**：左入 + 右出
+- **Handle**：左入 + 右出；右侧连接写入 `then`，再次连接会替换原后继
 - **中部摘要**：`waitMs` 数值 + 秒数换算
-- **字段**：`waitMs`, `waitMin`, `waitMax`
+- **字段**：`waitMs`, `waitMin`, `waitMax`, `then`
 
 ### 4.8 break（跳出循环）
 

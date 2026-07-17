@@ -282,6 +282,7 @@ type TaskFlow struct {
 | `WaitMs` | int | `waitMs` | 固定等待时长（毫秒） |
 | `WaitMin` | int | `waitMin` | 随机等待最小值（毫秒，含） |
 | `WaitMax` | int | `waitMax` | 随机等待最大值（毫秒，含） |
+| `Then` | string | `then` | 等待完成后执行的唯一后继节点 ID（可选） |
 
 **行为**：
 - 优先级：`WaitMin/WaitMax`（随机模式）> `WaitMs`（固定模式）
@@ -291,6 +292,8 @@ type TaskFlow struct {
 - `WaitMs > 0` 时等待固定毫秒数
 - `WaitMs < 0` 时打印警告并跳过
 - 所有等待均可被 context 取消中断
+- 等待成功或因参数无效被跳过后，`Then` 非空时执行对应后继节点
+- context 取消或协作式休眠失败时直接返回，不执行 `Then`
 
 **与计划的差异**：计划中 `wait` 节点仅有 `WaitMs int` 单一字段。实际代码额外支持 `WaitMin/WaitMax` 随机等待范围，提供更灵活的业务模拟。
 
@@ -298,6 +301,7 @@ type TaskFlow struct {
 ```json
 { "type": "wait", "waitMs": 2000 }
 { "type": "wait", "waitMin": 1000, "waitMax": 3000 }
+{ "type": "wait", "waitMs": 2000, "then": "nextAction" }
 ```
 
 ### 4.8 break 节点
@@ -495,6 +499,7 @@ type ActionHandler interface {
 | `WaitMs` | int | `waitMs` | wait | 固定等待时长（毫秒） |
 | `WaitMin` | int | `waitMin` | wait | 随机等待最小值 |
 | `WaitMax` | int | `waitMax` | wait | 随机等待最大值 |
+| `Then` | string | `then` | wait | 等待完成后的唯一后继节点 ID |
 | `DelayMs` | int | `delayMs` | action | 覆盖 defaultDelayMs |
 
 ## 9. ActionDef -- 动作定义

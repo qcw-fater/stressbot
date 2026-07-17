@@ -9,6 +9,7 @@
  *   boolean.trueNext/falseNext  → edge[source=id, sourceHandle='true'/'false', target=*, type='branch']
  *   switch.cases[i]/defaultNext → edge[source=id, sourceHandle=`case-${i}`/'default', target=*, type='branch']
  *   weighted.options[i]         → edge[source=id, sourceHandle=`opt-${i}`, target=*, type='weight', data={weight,ratio}]
+ *   wait.then                   → edge[source=id, sourceHandle='out', target=then, type='waitThen']
  *   action.listenRefs[i]        → edge[source=id, sourceHandle='listen', target=`__cb__${listen}`, type='listen']（listen=null 不画边）
  *   action.onError.handler      → edge[source=id, sourceHandle='error', target=handler, type='error']
  */
@@ -116,6 +117,7 @@ function emitEdgesFor(id: string, node: FlowNode, flow: FlowJsonInput): Edge[] {
     case 'weighted':
       return emitWeightedEdges(id, node.options ?? []);
     case 'wait':
+      return node.then ? [makeEdge(`${id}->then->${node.then}`, id, node.then, 'waitThen', 'out')] : [];
     case 'break':
     case 'continue':
       return [];

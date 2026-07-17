@@ -82,6 +82,7 @@ function cleanNode(n: FlowNode): FlowNode {
       if (typeof n.waitMs === 'number' && n.waitMs !== 0) out.waitMs = Math.trunc(n.waitMs);
       if (typeof n.waitMin === 'number') out.waitMin = Math.trunc(n.waitMin);
       if (typeof n.waitMax === 'number') out.waitMax = Math.trunc(n.waitMax);
+      if (n.then?.trim()) out.then = n.then.trim();
       break;
     case 'break':
     case 'continue':

@@ -27,6 +27,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { App as AntApp } from 'antd';
 import { nodeTypes } from './nodes/registry';
 import { edgeTypes } from './edges/registry';
+import { resolveWaitConnection } from './connections/waitConnection';
 import { useFlowStore } from './store/flowStore';
 import { useEditorStore, type Clipboard } from './store/editorStore';
 import { generateNodeId } from './utils/nodeIdGen';
@@ -272,7 +273,7 @@ function FlowCanvasInner() {
           updateNode(e.source, { options });
         }
       } else if (src.type === 'wait' && handleId === 'out') {
-        // wait 没有显式 next 字段（顺序由 sequence 控制），无需处理
+        updateNode(e.source, { then: '' });
       } else if (handleId === 'listen') {
         // action → listen：按边的 refIndex 精确移除一条 listenRefs。
         // 派生边为每条 listenRef 编码了唯一 refIndex（jsonToFlow）；旧实现按 listenName 整体过滤，
@@ -306,6 +307,7 @@ function FlowCanvasInner() {
    *   switch    · default    → defaultNext = target
    *   weighted  · opt-N      → options.splice(N, 0, {node:target, weight:1}) （在 N 处插入）
    *   weighted  · opt-add    → options.push({ node: target, weight: 1 })
+   *   wait      · out        → then = target
    *   action    · listen     → listenRefs.push({ listen })，target 必须是 listenCard
    *   action    · error      → onError.handler = target，target 必须是普通节点
    *
@@ -321,6 +323,13 @@ function FlowCanvasInner() {
       const targetIsListenCard = params.target.startsWith('__cb__');
       const targetListenName = targetIsListenCard ? params.target.slice('__cb__'.length) : null;
       const targetNodeId = !targetIsListenCard ? params.target : null;
+
+      const waitConnection = resolveWaitConnection(src, params.source, handle, targetNodeId);
+      if (waitConnection.matched) {
+        if ('error' in waitConnection) message.warning(waitConnection.error);
+        else updateNode(params.source, waitConnection.patch);
+        return;
+      }
 
       if (src.type === 'sequence') {
         const next = (src.next ?? []).slice();

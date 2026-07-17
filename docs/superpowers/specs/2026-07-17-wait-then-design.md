@@ -30,10 +30,13 @@ wait 节点保留右侧 `out` 锚点。
 2. 已存在 `then` 时再次连线，新目标替换旧目标，画布上始终只有一条 then 边。
 3. 删除 then 边时清空源 wait 的 `then`。
 4. 删除目标节点时，所有指向该节点的 `then` 引用一并清空。
-5. 只读模式继续禁止创建和删除连接。
-6. 连接监听卡片或自身时拒绝更新，并显示中文提示。
+5. 重命名目标节点时，所有指向旧 ID 的 `then` 引用同步更新。
+6. 只读模式继续禁止创建和删除连接。
+7. 连接监听卡片或自身时拒绝更新，并显示中文提示。
 
 JSON 转换层根据 `wait.then` 生成 `sourceHandle: "out"` 的派生边。边使用独立类型 `waitThen`，颜色继承 wait 节点主题色。导出时仅在 `then` 为非空字符串时写入 JSON。
+
+`waitThen` 由独立的 `WaitThenEdge` 组件渲染，固定显示 `then` 标签。它在视觉上与 `LoopBodyEdge` 的关系标签保持一致，但不抽取共享基础组件，也不复用 `SeqEdge` 或 `LoopBodyEdge`；各边组件继续独立表达自己的语义。
 
 ## 后端执行语义
 
@@ -72,6 +75,8 @@ Go 端 `engine.Node` 增加 `Then string \`json:"then"\``，只在 wait 节点�
 - `cmd/web/src/components/FlowEditor/FlowCanvas.tsx`：连接创建与边删除。
 - `cmd/web/src/components/FlowEditor/codec/jsonToFlow.ts`：生成 then 边。
 - `cmd/web/src/components/FlowEditor/codec/flowToJson.ts`：导出 then 字段。
+- `cmd/web/src/components/FlowEditor/edges/WaitThenEdge.tsx`：独立渲染 wait 后继边和 `then` 标签。
+- `cmd/web/src/components/FlowEditor/edges/registry.ts`：注册独立的 `WaitThenEdge`。
 - `cmd/web/src/components/FlowEditor/validation/refsCheck.ts`：引用、重复执行和可达性校验。
 - `cmd/web/src/components/FlowEditor/store/flowStore.ts`：删除节点时清理 then 引用。
 - 对应 Vitest 与 Go 测试文件。
@@ -84,6 +89,7 @@ Go 端 `engine.Node` 增加 `Then string \`json:"then"\``，只在 wait 节点�
 
 - JSON 加载能生成 `waitThen` 边。
 - JSON 导出保留合法 `then`，省略空值。
+- `waitThen` 使用独立边组件并显示 `then` 标签。
 - 创建连接写入或替换 `then`，删除连接清空 `then`。
 - 删除目标节点清空引用。
 - 自引用、缺失引用和重复执行配置产生预期校验结果。

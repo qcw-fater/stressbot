@@ -213,6 +213,13 @@ func (e *Executor) executeLoop(ctx context.Context, node *Node) error {
 			}
 		}
 
+		// 后置退出条件检查（对应 Go: do { } while !breakCondition）。
+		// 提成闭包：continue 分支也必须评估，否则依赖 breakCondition 退出的无限 loop
+		// 一旦命中 continue 就跳过退出判断 → 永不退出。
+		checkBreak := func() bool {
+			return node.BreakCondition != "" && e.handler.ExecuteBoolean(node.BreakCondition)
+		}
+
 		// 执行循环体（单个节点）
 		err := e.executeNode(ctx, node.Body)
 
@@ -220,17 +227,18 @@ func (e *Executor) executeLoop(ctx context.Context, node *Node) error {
 			break
 		}
 		if errors.Is(err, errContinue) {
+			// continue 语义对齐 do-while：跳过本轮剩余逻辑，但仍要判断后置退出条件。
+			if checkBreak() {
+				break
+			}
 			continue
 		}
 		if err != nil {
 			return err
 		}
 
-		// 后置条件检查（对应 Go: do { } while !breakCondition）
-		if node.BreakCondition != "" {
-			if e.handler.ExecuteBoolean(node.BreakCondition) {
-				break
-			}
+		if checkBreak() {
+			break
 		}
 	}
 	return nil
@@ -508,6 +516,7 @@ func (e *Executor) executeBoolean(ctx context.Context, node *Node) error {
 // 日志只在"决策点"打（命中哪条 / 走默认 / 静默结束），不逐 case 打，避免噪音：
 //   - 命中 case / 走 default / 命中空 next：debug（正常控制流决策）
 //   - 无 case 命中且无 default：warn（分支静默结束，压测里易藏 bug，默认可见；补 default 可消除）
+//
 // 子流程内的失败由 executeAction 自行 warn，此处不重复。
 func (e *Executor) executeSwitch(ctx context.Context, node *Node) error {
 	for i, c := range node.Cases {
@@ -607,18 +616,24 @@ func (e *Executor) executeWait(ctx context.Context, node *Node) error {
 	} else if node.WaitMin > 0 || node.WaitMax > 0 {
 		stresslog.Warn("[ENGINE] wait 节点 waitMin/waitMax 必须同时 > 0",
 			zap.Int("waitMin", node.WaitMin), zap.Int("waitMax", node.WaitMax))
-		return nil
 	} else if node.WaitMs > 0 {
 		ms = node.WaitMs
 	} else {
 		if node.WaitMs < 0 {
 			stresslog.Warn("[ENGINE] wait 节点 waitMs < 0，跳过", zap.Int("waitMs", node.WaitMs))
 		}
-		return nil
 	}
 
-	// wait 节点同样走协作式休眠：等待期间 drain 任务队列；ctx 取消时向上传播。
-	return e.handler.CooperativeSleep(ctx, time.Duration(ms)*time.Millisecond)
+	if ms > 0 {
+		// wait 节点同样走协作式休眠：等待期间 drain 任务队列；ctx 取消时向上传播。
+		if err := e.handler.CooperativeSleep(ctx, time.Duration(ms)*time.Millisecond); err != nil {
+			return err
+		}
+	}
+	if node.Then == "" {
+		return nil
+	}
+	return e.executeNode(ctx, node.Then)
 }
 
 // nodeDelay 执行节点级延迟，仅在 action 节点执行完后调用。

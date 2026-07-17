@@ -120,7 +120,21 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
     }
 
     if (node.type === 'sequence') {
-      (node.next ?? []).forEach((t, i) => ref(t, `next[${i}]`));
+      const next = node.next ?? [];
+      next.forEach((t, i) => ref(t, `next[${i}]`));
+      for (let i = 0; i < next.length - 1; i++) {
+        const waitId = next[i];
+        const targetId = next[i + 1];
+        const waitNode = nodes[waitId];
+        if (waitNode?.type === 'wait' && waitNode.then?.trim() === targetId) {
+          issues.push({
+            severity: 'warning',
+            code: 'WAIT_THEN_DUPLICATE_SEQUENCE_NEXT',
+            message: `wait 节点 "${waitId}" 的 then 与 sequence "${id}" 中的下一项相同，目标 "${targetId}" 将执行两次`,
+            location: { kind: 'node', id: waitId },
+          });
+        }
+      }
       if (!node.next || node.next.length === 0) {
         issues.push({
           severity: 'warning', code: 'EMPTY_SEQUENCE',
@@ -206,6 +220,7 @@ export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}
         });
       }
     } else if (node.type === 'wait') {
+      ref(node.then?.trim(), 'then');
       const hasRandom = typeof node.waitMin === 'number' || typeof node.waitMax === 'number';
       if (hasRandom) {
         if (typeof node.waitMin !== 'number' || typeof node.waitMax !== 'number') {
@@ -869,6 +884,7 @@ function detectOrphanNodes(nodes: Record<string, NodeLike>): ValidationIssue[] {
       if (c.next) visit(c.next);
     });
     if (node.defaultNext) visit(node.defaultNext);
+    if (node.then) visit(node.then);
   };
 
   visit('main');
@@ -888,7 +904,7 @@ function detectOrphanNodes(nodes: Record<string, NodeLike>): ValidationIssue[] {
 
 // ── break/continue 位置检测 ──────────────────────────────────
 
-type NodeLike = { type: string; next?: string[]; body?: string; trueNext?: string; falseNext?: string; options?: Array<{ node: string }>; onError?: { handler?: string }; cases?: Array<{ next: string }>; defaultNext?: string };
+type NodeLike = { type: string; next?: string[]; body?: string; trueNext?: string; falseNext?: string; options?: Array<{ node: string }>; onError?: { handler?: string }; cases?: Array<{ next: string }>; defaultNext?: string; then?: string };
 
 /** 收集所有 loop body 子图中的节点 ID */
 function collectLoopBodyNodes(nodes: Record<string, NodeLike>): Set<string> {
@@ -908,6 +924,7 @@ function collectLoopBodyNodes(nodes: Record<string, NodeLike>): Set<string> {
       if (c.next) visit(c.next);
     });
     if (node.defaultNext) visit(node.defaultNext);
+    if (node.then) visit(node.then);
   };
   for (const node of Object.values(nodes)) {
     if (node.type === 'loop' && node.body) {

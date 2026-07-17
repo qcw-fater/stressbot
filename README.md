@@ -149,7 +149,7 @@ Executor 遍历节点图 → 命中 action 节点
 | `boolean`  | 对 `condition` 求值，跳转到 `trueNext` 或 `falseNext` |
 | `switch`   | 按 `cases` 顺序匹配条件，命中则跳转其 `next`；全不命中跳 `defaultNext` |
 | `weighted` | 按 `options` 中的权重随机选择一个子节点执行 |
-| `wait`     | 暂停指定毫秒数（`waitMs` 或 `waitMin`~`waitMax` 随机范围） |
+| `wait`     | 暂停指定毫秒数，等待完成后可通过 `then` 执行唯一后继节点 |
 | `break`    | 产生中断信号，跳出最近的 `loop` |
 | `continue` | 跳过本次迭代剩余步骤，进入 `loop` 的下一次迭代 |
 
@@ -198,6 +198,7 @@ Executor 遍历节点图 → 命中 action 节点
 // wait — 显式等待
 { "type": "wait", "waitMs": 2000 }
 { "type": "wait", "waitMin": 1000, "waitMax": 3000 }
+{ "type": "wait", "waitMs": 2000, "then": "nextAction" }
 
 // break / continue — 循环控制
 { "type": "break" }
@@ -224,6 +225,7 @@ Executor 遍历节点图 → 命中 action 节点
 | `waitMs`          | wait           | 等待时长（毫秒） |
 | `waitMin`         | wait           | 随机等待下界（毫秒，与 `waitMax` 配合使用） |
 | `waitMax`         | wait           | 随机等待上界（毫秒） |
+| `then`            | wait           | 等待完成后执行的唯一后继节点 ID（可选） |
 | `delayMs`         | action 等      | 节点执行后延迟；`> 0` 使用此值，`= 0` 使用 defaultDelayMs，`< 0` 禁用 |
 
 ### action.onError

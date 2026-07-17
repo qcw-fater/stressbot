@@ -58,9 +58,10 @@ type Node struct {
 	Options []WeightedOption `json:"options"` // 加权选项列表
 
 	// ── wait 专用 ─────────────────────────────────────────────────
-	WaitMs  int `json:"waitMs"`  // 固定等待时长（毫秒）；仅当 WaitMin/WaitMax 都 ≤ 0 时生效
-	WaitMin int `json:"waitMin"` // 随机等待最小值（毫秒，含）；与 WaitMax 配合使用
-	WaitMax int `json:"waitMax"` // 随机等待最大值（毫秒，含）；WaitMin/WaitMax 同时 > 0 时随机模式优先
+	WaitMs  int    `json:"waitMs"`  // 固定等待时长（毫秒）；仅当 WaitMin/WaitMax 都 ≤ 0 时生效
+	WaitMin int    `json:"waitMin"` // 随机等待最小值（毫秒，含）；与 WaitMax 配合使用
+	WaitMax int    `json:"waitMax"` // 随机等待最大值（毫秒，含）；WaitMin/WaitMax 同时 > 0 时随机模式优先
+	Then    string `json:"then"`    // 等待完成后执行的唯一后继节点 ID；空表示流程在此结束
 
 	// ── 通用（action 节点有效）────────────────────────────
 	DelayMs int `json:"delayMs"` // > 0: 使用此值；= 0: 使用 TaskFlow.DefaultDelayMs；< 0: 禁用延迟
