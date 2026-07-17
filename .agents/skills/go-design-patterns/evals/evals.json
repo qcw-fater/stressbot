@@ -1,0 +1,23 @@
+{
+  "skill_name": "go-design-patterns",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我正在开发一个通用任务处理系统，需要根据任务类型创建不同的处理器。任务类型包括 HTTP、队列、定时任务三种，每种处理器有不同的初始化参数和处理逻辑。请帮我实现一个合适的创建方式。",
+      "expected_output": "应该推荐工厂方法模式，提供完整的 Go 代码示例，包括 Handler 接口、具体的处理器实现和工厂函数。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "我的服务需要处理大量请求，但是数据库连接创建很慢。我担心频繁创建和销毁连接会影响性能。有什么好的解决方案吗？",
+      "expected_output": "应该推荐对象池模式，解释如何使用连接池来复用连接，提供完整的 Go 代码示例。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "请帮我审查这段代码。我有一个全局的配置管理器，但是感觉实现方式不太好：\n\n```go\nvar config *Config\nvar configMu sync.Mutex\n\nfunc GetConfig() *Config {\n    configMu.Lock()\n    defer configMu.Unlock()\n    if config == nil {\n        config = &Config{loadFromFile()}\n    }\n    return config\n}\n```\n\n这样写有什么问题？应该如何改进？",
+      "expected_output": "应该识别出这是单例模式的实现，指出每次获取都需要加锁的性能问题，推荐使用 sync.Once 的正确实现方式。",
+      "files": []
+    }
+  ]
+}
