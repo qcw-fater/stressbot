@@ -148,18 +148,17 @@ func (s *RedisStore) Exists(ctx context.Context, key string) (bool, error) {
 }
 
 // Expire 为该 key 在所有数据类型命名空间下设置过期时间，任一设置成功即返回 true。
+//
+// 单条 EXPIRE 只能作用一个 key，故用 Lua 脚本在服务端遍历 4 个数据类型命名空间，
+// 把原先「每命名空间一次 RTT」（4 次）合并为单次脚本调用（1 次 RTT）。
+// 秒数用 int64(ttl/time.Second) 复刻 go-redis 原 Expire 的 formatSec 截断语义
+// （含 ttl<=0 时传非正秒数触发立即删除，与旧逐 key 调用行为一致）。
 func (s *RedisStore) Expire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
-	any := false
-	for _, k := range s.dataKeys(key) {
-		ok, err := s.rdb.Expire(ctx, k, ttl).Result()
-		if err != nil {
-			return any, err
-		}
-		if ok {
-			any = true
-		}
+	n, err := expireScript.Run(ctx, s.rdb, s.dataKeys(key), int64(ttl/time.Second)).Int64()
+	if err != nil {
+		return false, err
 	}
-	return any, nil
+	return n > 0, nil
 }
 
 // ── Counter ───────────────────────────────────────────

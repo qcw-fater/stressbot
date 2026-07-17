@@ -1,9 +1,10 @@
 package sharedstate
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
+	"strings"
+
+	json "stressbot/utils/jsonx"
 )
 
 // maxSafeInt Lua double 可精确表示的最大整数（2^53）。
@@ -24,11 +25,11 @@ func encodeValue(v any) (string, error) {
 	default:
 		return "", fmt.Errorf("sharedstate: 不支持的值类型 %T", v)
 	}
-	b, err := json.Marshal(v)
+	s, err := json.MarshalToString(v)
 	if err != nil {
 		return "", fmt.Errorf("sharedstate: JSON 编码失败: %w", err)
 	}
-	return string(b), nil
+	return s, nil
 }
 
 // decodeValue 把 Redis 中的 JSON 字符串还原为 Go 值（供转回 Lua）。
@@ -37,8 +38,10 @@ func encodeValue(v any) (string, error) {
 //   - 可安全用 Lua number 表示的整数（|n| <= 2^53）→ int64 或 float64。
 //   - 超出安全范围的大整数 → string（与 script 层 goValueToLua 的策略一致）。
 //   - 含小数/指数的数字 → float64。
+//
+// strings.NewReader 直接读取字符串，省去 []byte(s) 的额外拷贝。
 func decodeValue(s string) (any, error) {
-	dec := json.NewDecoder(bytes.NewReader([]byte(s)))
+	dec := json.NewDecoder(strings.NewReader(s))
 	dec.UseNumber()
 	var raw any
 	if err := dec.Decode(&raw); err != nil {

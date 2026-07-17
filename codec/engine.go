@@ -221,8 +221,11 @@ func (c *SchemaCodec) encode(route any, body []byte, key []byte) []byte {
 		}
 	}
 
-	// ---- 写头（零初始化）----
-	header := make([]byte, c.headerSize)
+	// ---- 一次性分配整包，头写入 out[:headerSize]，body/trailer 直接拷入 ----
+	// out 全长零初始化：头部未写字节恒 0、trailer 恒 0，与原「header 单独 make 后 append」等价，
+	// 但省去 header 的独立分配与二次拷贝（每次发送/心跳 tick 都走此路径）。
+	out := make([]byte, c.headerSize+len(work)+c.trailerSize)
+	header := out[:c.headerSize]
 	// length：wire body 长，按 includes* 调整。
 	wireBodyLen := len(work)
 	lengthVal := wireBodyLen
@@ -263,13 +266,8 @@ func (c *SchemaCodec) encode(route any, body []byte, key []byte) []byte {
 		}
 	}
 
-	// ---- 拼接 ----
-	out := make([]byte, 0, c.headerSize+len(work)+c.trailerSize)
-	out = append(out, header...)
-	out = append(out, work...)
-	if c.trailerSize > 0 {
-		out = append(out, make([]byte, c.trailerSize)...)
-	}
+	// ---- body 拷入头之后；trailer 区已由零初始化保证为 0 ----
+	copy(out[c.headerSize:], work)
 	return out
 }
 
@@ -558,11 +556,25 @@ func readUint(src []byte, order binary.ByteOrder, kind fieldKind) uint64 {
 //   - onError=keep → 保留当前 body 继续后续步骤；
 //   - 最终按 routeKeySegs 拼 routeKey 返回。
 func (c *SchemaCodec) DecodeTCP(data, secretKey []byte) (routeKey string, body []byte, headerErr uint64) {
-	return c.decode(data, secretKey)
+	routeKey, body, headerErr, _ = c.decode(data, secretKey)
+	return
 }
 
 // DecodeUDP 解码 UDP 数据包（codec 单 transport；UDP decode 偏移恒 0，固化在 encrypt step.decOffset）。
 func (c *SchemaCodec) DecodeUDP(data, secretKey []byte) (routeKey string, body []byte, headerErr uint64) {
+	routeKey, body, headerErr, _ = c.decode(data, secretKey)
+	return
+}
+
+// DecodeTCPWithReason 与 DecodeTCP 等价，但额外返回失败原因（reason）。
+// reason 为空表示解码成功；非空表示某解码步骤按 onError=fail 中止（body 未外泄），
+// 供上层（SchemaAdapter）打印可追踪日志，区分"帧不完整"与"解密/解压/校验失败"。
+func (c *SchemaCodec) DecodeTCPWithReason(data, secretKey []byte) (routeKey string, body []byte, headerErr uint64, reason string) {
+	return c.decode(data, secretKey)
+}
+
+// DecodeUDPWithReason 与 DecodeUDP 等价，额外返回失败原因（reason），语义同 DecodeTCPWithReason。
+func (c *SchemaCodec) DecodeUDPWithReason(data, secretKey []byte) (routeKey string, body []byte, headerErr uint64, reason string) {
 	return c.decode(data, secretKey)
 }
 
@@ -573,10 +585,11 @@ func (c *SchemaCodec) DecodeUDP(data, secretKey []byte) (routeKey string, body [
 //  2. body = data[headerSize : len-trailerSize]；
 //  3. 管线反序：flag 置位则执行；encrypt 解密 + bcc 校验；compress 解压；失败按 onError；
 //  4. routeKey 拼接。
-func (c *SchemaCodec) decode(data, key []byte) (string, []byte, uint64) {
+func (c *SchemaCodec) decode(data, key []byte) (string, []byte, uint64, string) {
 	// ---- 1. 长度校验 + 读头 ----
 	if len(data) < c.headerSize+c.trailerSize {
-		return "", nil, 0
+		// 帧不完整属正常分包情形，非解码失败：reason 留空，不产生错误日志。
+		return "", nil, 0, ""
 	}
 	header := data[:c.headerSize]
 
@@ -629,14 +642,14 @@ func (c *SchemaCodec) decode(data, key []byte) (string, []byte, uint64) {
 			// key 校验：!requireKey || len(key)>=step.keyLen；否则走 onError。
 			if step.encodeWhen.requireKey && !keyLenSatisfied(step, key) {
 				if step.onError == onErrorFail {
-					return "", nil, headerErr
+					return "", nil, headerErr, fmt.Sprintf("encrypt(step %d): 密钥长度不足（need>=%d, got=%d）", i, step.keyLen, len(key))
 				}
 				continue // keep：保留当前 work（密文），继续后续步骤
 			}
 			decOut, err := ciph.Decrypt(work, key, step.decOffset, step.params)
 			if err != nil {
 				if step.onError == onErrorFail {
-					return "", nil, headerErr
+					return "", nil, headerErr, fmt.Sprintf("encrypt(step %d): 解密失败: %v", i, err)
 				}
 				continue // keep：保留当前 work
 			}
@@ -644,7 +657,7 @@ func (c *SchemaCodec) decode(data, key []byte) (string, []byte, uint64) {
 			// bcc 校验：若该步 produces 被 checksumOut 字段引用，重算并比对头里值。
 			if c.verifyProducesAfterDecrypt(i, work, checksumOut) {
 				if step.onError == onErrorFail {
-					return "", nil, headerErr
+					return "", nil, headerErr, fmt.Sprintf("encrypt(step %d): bcc 校验失败", i)
 				}
 				// keep：保留解密后的 work，继续（不外泄由调用方决定）。
 			}
@@ -657,7 +670,7 @@ func (c *SchemaCodec) decode(data, key []byte) (string, []byte, uint64) {
 			decOut, err := comp.Decompress(work)
 			if err != nil {
 				if step.onError == onErrorFail {
-					return "", nil, headerErr
+					return "", nil, headerErr, fmt.Sprintf("compress(step %d): 解压失败: %v", i, err)
 				}
 				continue // keep：保留当前 work（未解压的 gzip 流）
 			}
@@ -671,7 +684,7 @@ func (c *SchemaCodec) decode(data, key []byte) (string, []byte, uint64) {
 
 	// ---- 4. routeKey 拼接 ----
 	routeKey := c.buildDecodeRouteKey(routeMap)
-	return routeKey, work, headerErr
+	return routeKey, work, headerErr, ""
 }
 
 // verifyProducesAfterDecrypt 重算 encrypt 步 produces 的 checksumOut 产物并比对头里的值。

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,7 +26,6 @@ import (
 	"stressbot/sharedstate"
 	"stressbot/state"
 	"stressbot/utils"
-	json "stressbot/utils/jsonx"
 	stresslog "stressbot/utils/log"
 )
 
@@ -48,7 +46,12 @@ type Robot struct {
 	cancel     context.CancelFunc     // 取消函数（Stop 时调用）
 	running    atomic.Bool            // 是否正在运行
 	dialer     *network.Dialer        // 网络拨号器（封装 gnet 事件循环）
-	httpClient *http.Client           // HTTP 客户端（声明式 HTTP 动作用）
+	// HTTP 客户端惰性创建：多数游戏压测不含 httpRequest 动作，若每个 Robot 都无条件建一份
+	// http.Transport（含连接池等结构），×数千 Robot 会造成可观的常驻内存浪费。
+	// 仅首次执行 httpRequest 时经 httpClientOnce 构造。
+	httpTimeout    time.Duration
+	httpClientOnce sync.Once
+	httpClient     *http.Client
 	// 全 codec 路径（dial/decode/encode/心跳/listen/业务 Lua）共享同一份 codec 映射：
 	//   - dial/decode：ConnectTCP/UDP 拨号前 Resolve，nil → fail loud；非 nil 注入 Connection；
 	//   - encode/心跳/listen：engine.ActionExecutor / robotActionHandler / netSenderAdapter 各自 Resolve；
@@ -131,7 +134,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		ctx:            ctx,
 		cancel:         cancel,
 		dialer:         dialer,
-		httpClient:     newRobotHTTPClient(cfg.HTTPTimeout),
+		httpTimeout:    cfg.HTTPTimeout,
 		mainService:    cfg.MainService,
 		shared:         cfg.Shared,
 		requestTimeout: cfg.RequestTimeout,
@@ -1048,15 +1051,19 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 			return
 		}
 
-		fieldMap := h.robot.factory.GetFieldMap(respMsg)
+		// 按需取值：Field != "" 直接 GetFieldForStore（不展开整树），仅整存映射(Field=="")
+		// 才 GetFieldMap 一次。与 GetFieldMap+NavigatePath 语义等价（见 factory 侧 godoc）。
+		var fieldMap map[string]any
+		fullBuilt := false
 		for _, m := range cbDef.Store {
 			if m.Field == "" {
-				h.robot.state.SetPath(m.Setter, fieldMap)
-			} else {
-				val := state.NavigatePath(fieldMap, m.Field)
-				if val != nil {
-					h.robot.state.SetPath(m.Setter, val)
+				if !fullBuilt {
+					fieldMap = h.robot.factory.GetFieldMap(respMsg)
+					fullBuilt = true
 				}
+				h.robot.state.SetPath(m.Setter, fieldMap)
+			} else if val, ok := h.robot.factory.GetFieldForStore(respMsg, m.Field); ok {
+				h.robot.state.SetPath(m.Setter, val)
 			}
 		}
 		monitor.Global().RecordCallback(cbName, monitor.ResultSuccess, monitor.ActionTiming{}, time.Since(start), 0, msg.WireBytes, nil)
@@ -1192,6 +1199,15 @@ func (ns *netSenderAdapter) cooperativeRequest(proto, service string, packet []b
 //
 // NetLatency 覆盖：http.Client.Do 调用 + 读完 response.Body。
 // HTTP WireBytes 统计 HTTP message bytes，不含 TCP/IP/TLS record 开销。
+// getHTTPClient 惰性返回 Robot 独占的 HTTP 客户端（首次调用时构造）。
+// 仅在执行器 goroutine（httpRequest 动作）内调用，Close 与之串行，无并发写。
+func (r *Robot) getHTTPClient() *http.Client {
+	r.httpClientOnce.Do(func() {
+		r.httpClient = newRobotHTTPClient(r.httpTimeout)
+	})
+	return r.httpClient
+}
+
 func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body []byte) (*engine.HTTPExchange, error) {
 	exchange := &engine.HTTPExchange{}
 	if reqURL == "" {
@@ -1213,11 +1229,8 @@ func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body
 			}
 			req.Header.Set("Content-Type", "application/json")
 		case "form":
-			values := make(url.Values)
-			if json.Unmarshal(body, &values) == nil {
-				body = []byte(values.Encode())
-			}
-			req, err = http.NewRequestWithContext(ns.robot.ctx, method, reqURL, strings.NewReader(string(body)))
+			// body 已由 engine 层编码为 x-www-form-urlencoded（k=v&...），此处直接透传。
+			req, err = http.NewRequestWithContext(ns.robot.ctx, method, reqURL, bytes.NewReader(body))
 			if err != nil {
 				return exchange, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 			}
@@ -1237,7 +1250,7 @@ func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body
 	exchange.SendWireBytes = httpRequestBytes(req, body)
 
 	netStart := time.Now()
-	resp, err := ns.robot.httpClient.Do(req)
+	resp, err := ns.robot.getHTTPClient().Do(req)
 	if err != nil {
 		exchange.NetLatency = time.Since(netStart)
 		if ns.robot.ctx.Err() != nil {
@@ -1564,6 +1577,10 @@ func (ns *netSenderAdapter) installHeartbeat(cfg engine.HeartbeatConfig) error {
 	skipWhenMissing := cfg.SkipWhenMissing
 	transport := cfg.Transport
 
+	// proto 模式复用同一执行器：goBuilder 由本连接 pump 单 goroutine 串行调用，
+	// 无并发，避免每 tick 新建临时 ActionExecutor（仅承载 store+factory，与旧临时实例等价）。
+	hbExec := engine.NewActionExecutor(st, nil, factory, nil, 0)
+
 	goBuilder := func() []byte {
 		// 双模式 body 分派（与 execHeartbeat 互斥校验一致：c2sProto 与 fields 不会同时非空）：
 		//   proto 模式 → BuildProtoBody（factory + bindings，Go-only）；
@@ -1572,7 +1589,7 @@ func (ns *netSenderAdapter) installHeartbeat(cfg engine.HeartbeatConfig) error {
 		var body []byte
 		var skip bool
 		if c2sProto != "" {
-			b, skipB, err := engine.BuildProtoBody(c2sProto, bindings, st, factory, "heartbeat:"+cfg.Service)
+			b, skipB, err := hbExec.BuildProtoBody(c2sProto, bindings, "heartbeat:"+cfg.Service)
 			if err != nil {
 				stresslog.Warn("[ROBOT] 心跳 proto body 构建失败",
 					zap.String("transport", transport),

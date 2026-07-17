@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"reflect"
 	"strings"
 	"time"
@@ -298,10 +299,11 @@ func (ae *ActionExecutor) Execute(ctx context.Context, def *ActionDef) (sendByte
 }
 
 // buildBody 构建消息体字节（序列化 proto 消息）。
-// 经 BuildProtoBody 共享 proto 构造路径（与心跳 proto 模式复用），行为保持不变。
+// 直接复用当前执行器构造 proto body（不再经 BuildProtoBody 新建临时 ActionExecutor），
+// 与心跳 proto 模式共享同一 bindFields 语义，行为保持不变。
 // 为保留旧错误上下文（"action=Name field=..."），将 ActionDef.Name 注入 bindFields actionName。
 func (ae *ActionExecutor) buildBody(def *ActionDef) ([]byte, error) {
-	body, _, err := BuildProtoBody(def.C2SProto, def.Bindings, ae.store, ae.factory, def.Name)
+	body, _, err := ae.BuildProtoBody(def.C2SProto, def.Bindings, def.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -327,20 +329,34 @@ func (ae *ActionExecutor) buildBody(def *ActionDef) ([]byte, error) {
 //
 // 不变量：buildBody 重构后 tcpSend/request 行为零变化（既有测试全绿）。
 func BuildProtoBody(c2sProto string, bindings []FieldBind, store *state.Store, factory *protox.Factory, actionName string) (body []byte, skip bool, err error) {
+	// 一次性调用（无常驻执行器）时的便捷入口：临时 ActionExecutor 仅承载 store+factory。
+	// 高频路径（tcpSend/request 经 buildBody、心跳 tick）应改持有可复用执行器并调 (*ActionExecutor).BuildProtoBody，
+	// 避免每次分配临时执行器。
+	ae := &ActionExecutor{store: store, factory: factory}
+	return ae.BuildProtoBody(c2sProto, bindings, actionName)
+}
+
+// BuildProtoBody 用当前执行器构造并序列化 proto 消息 body。
+//
+// 复用 ae.bindFields 的完整 binding 解析语义（condition/optional/required/map 等），
+// 供 tcpSend/tcpRequest（经 buildBody）与心跳 proto 模式共享，且可复用同一执行器实例，
+// 消除每次发送 / 每个心跳 tick 新建临时 ActionExecutor 的分配。Go-only，不碰 Lua。
+//
+//   - c2sProto 为空 → 返回 (nil,false,nil)（空 body，与旧 buildBody 行为对齐）；
+//   - skip 恒为 false（保留给未来 binding 缺失「跳过」语义）；
+//   - err 含 proto 创建/绑定/序列化失败（ActionError，中文上下文）。
+func (ae *ActionExecutor) BuildProtoBody(c2sProto string, bindings []FieldBind, actionName string) (body []byte, skip bool, err error) {
 	if c2sProto == "" {
 		return nil, false, nil
 	}
-	msg, err := factory.Create(c2sProto)
+	msg, err := ae.factory.Create(c2sProto)
 	if err != nil {
 		return nil, false, NewActionError(errcode.ErrCreateMsg, "action="+actionName+" proto="+c2sProto, err)
 	}
-	// bindFields 当前为 ActionExecutor 方法（依赖 ae.store/ae.factory 的解析路径），
-	// 此处用临时 ActionExecutor 复用其完整 binding 解析语义，避免拷贝大段解析代码。
-	ae := &ActionExecutor{store: store, factory: factory}
 	if err := ae.bindFields(msg, bindings, actionName); err != nil {
 		return nil, false, err
 	}
-	body, err = factory.Serialize(msg)
+	body, err = ae.factory.Serialize(msg)
 	if err != nil {
 		return nil, false, NewActionError(errcode.ErrSerialize, "action="+actionName+" proto="+c2sProto, err)
 	}
@@ -457,22 +473,33 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		val = ae.store.Get(fb.Source)
 
 	case BindStateFirst:
-		list := ae.store.GetList(fb.Source)
-		if len(list) == 0 {
+		// 零拷贝取首元素（不再 GetList 全表拷贝）。
+		v, ok := ae.store.PickFromList(fb.Source, func(int) int { return 0 })
+		if !ok {
 			return nil
 		}
-		val = list[0]
+		val = v
 
 	case BindStateRandom:
-		list := ae.store.GetList(fb.Source)
-		if len(list) == 0 {
-			return nil
+		if len(fb.Filters) == 0 {
+			// 无过滤器：读锁内直接随机取一个，避免 GetList 全表拷贝。
+			v, ok := ae.store.PickFromList(fb.Source, rand.Intn)
+			if !ok {
+				return nil
+			}
+			val = v
+		} else {
+			// 有过滤器：需先拿到（快照）列表再筛选。
+			list := ae.store.GetList(fb.Source)
+			if len(list) == 0 {
+				return nil
+			}
+			filtered := ae.applyFilters(list, fb.Filters)
+			if len(filtered) == 0 {
+				return nil
+			}
+			val = filtered[rand.Intn(len(filtered))]
 		}
-		filtered := ae.applyFilters(list, fb.Filters)
-		if len(filtered) == 0 {
-			return nil
-		}
-		val = filtered[rand.Intn(len(filtered))]
 
 	case BindStateRandomN:
 		list := ae.store.GetList(fb.Source)
@@ -501,32 +528,37 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		return picked
 
 	case BindStateMapKey:
-		m := ae.store.GetMap(fb.Source)
-		if len(m) == 0 {
+		// 零拷贝随机取一个 key（不再构造 keys 切片）。
+		k, ok := ae.store.PickMapKey(fb.Source, rand.Intn)
+		if !ok {
 			return nil
 		}
-		keys := make([]string, 0, len(m))
-		for k := range m {
-			keys = append(keys, k)
-		}
-		return keys[rand.Intn(len(keys))]
+		return k
 
 	case BindStateMapValue:
-		m := ae.store.GetMap(fb.Source)
-		if len(m) == 0 {
-			return nil
-		}
-		values := make([]any, 0, len(m))
-		for _, v := range m {
-			values = append(values, v)
-		}
-		if len(fb.Filters) > 0 {
+		if len(fb.Filters) == 0 {
+			// 无过滤器：读锁内直接随机取一个 value，避免 GetMap 全表拷贝。
+			v, ok := ae.store.PickMapValue(fb.Source, rand.Intn)
+			if !ok {
+				return nil
+			}
+			val = v
+		} else {
+			// 有过滤器：需全量 values 再筛选。
+			m := ae.store.GetMap(fb.Source)
+			if len(m) == 0 {
+				return nil
+			}
+			values := make([]any, 0, len(m))
+			for _, v := range m {
+				values = append(values, v)
+			}
 			values = ae.applyFilters(values, fb.Filters)
+			if len(values) == 0 {
+				return nil
+			}
+			val = values[rand.Intn(len(values))]
 		}
-		if len(values) == 0 {
-			return nil
-		}
-		val = values[rand.Intn(len(values))]
 
 	case BindRandomPick:
 		if len(fb.Values) == 0 {
@@ -627,7 +659,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		return randomStringCharset(length, charset)
 
 	case BindListSize:
-		return len(ae.store.GetList(fb.Source))
+		return ae.store.ListLen(fb.Source)
 
 	case BindMap:
 		return nil
@@ -818,7 +850,9 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, ActionTimin
 				return 0, 0, ActionTiming{}, NewActionError(errcode.ErrMarshalBody, "action="+def.Name+" type=json", err)
 			}
 		case ContentForm:
-			formData := make(map[string]string)
+			// application/x-www-form-urlencoded：直接编码为 k=v&k2=v2，
+			// 而非 JSON（此前误用 json.Marshal 导致发送 {"k":"v"} 与 form 头不匹配）。
+			formData := make(url.Values)
 			for i := range def.Bindings {
 				fb := &def.Bindings[i]
 				if !ae.evaluateCondition(fb.Condition) {
@@ -828,13 +862,9 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, ActionTimin
 				if val == nil {
 					continue
 				}
-				formData[fb.Field] = fmt.Sprintf("%v", val)
+				formData.Set(fb.Field, fmt.Sprintf("%v", val))
 			}
-			var err error
-			body, err = json.Marshal(formData)
-			if err != nil {
-				return 0, 0, ActionTiming{}, NewActionError(errcode.ErrMarshalBody, "action="+def.Name+" type=form", err)
-			}
+			body = []byte(formData.Encode())
 		default:
 			stresslog.Warn("[ACTION] 未知 contentType，将发送原始字节",
 				zap.String("action", def.Name), zap.String("contentType", contentType))
@@ -922,11 +952,47 @@ func (ae *ActionExecutor) parseAndStoreResponse(def *ActionDef, respBody []byte)
 		return NewActionError(errcode.ErrParseFailed, "action="+def.Name+" proto="+def.S2CProto, err)
 	}
 
-	fieldMap := ae.factory.GetFieldMap(respMsg)
 	stresslog.Debug("[ACTION] TCPResponseProto", zap.String("proto", def.S2CProto), zap.Int("bodyLen", len(respBody)))
 
-	ae.storeResponse(def.Store, fieldMap)
+	ae.storeResponseProto(def.Store, respMsg)
 	return nil
+}
+
+// storeResponseProto 从 proto 响应消息按 store 映射取值并写入 state。
+//
+// 相比旧的 GetFieldMap（整树展开成嵌套 map/slice）+ navigatePath 逐个挑值，本方法对
+// Field != "" 的映射直接 GetFieldForStore 按路径取值，不展开无关的大字段（如未被引用的
+// repeated 列表），显著降低大响应下的分配与 CPU。仅当存在 Field == "" 的整存映射时
+// 才展开一次整树并复用。GetFieldForStore 与 navigatePath(GetFieldMap) 语义等价（见其 godoc
+// 及 TestGetFieldForStoreEquivalence）。
+func (ae *ActionExecutor) storeResponseProto(mappings []StoreMapping, respMsg proto.Message) {
+	debugOn := stresslog.DebugEnabled()
+	var fullMap map[string]any
+	fullBuilt := false
+	for _, m := range mappings {
+		if m.Field == "" {
+			if !fullBuilt {
+				fullMap = ae.factory.GetFieldMap(respMsg)
+				fullBuilt = true
+			}
+			ae.store.SetPath(m.Setter, fullMap)
+			continue
+		}
+		val, ok := ae.factory.GetFieldForStore(respMsg, m.Field)
+		if !ok {
+			if debugOn {
+				stresslog.Debug("[ACTION] storeResponse 字段未找到",
+					zap.String("field", m.Field), zap.String("setter", m.Setter))
+			}
+			continue
+		}
+		ae.store.SetPath(m.Setter, val)
+		if debugOn {
+			stresslog.Debug("[ACTION] storeResponse 存储",
+				zap.String("field", m.Field), zap.String("setter", m.Setter),
+				zap.String("type", fmt.Sprintf("%T", val)))
+		}
+	}
 }
 
 // handleHeaderError 处理服务端返回的非零 headerErr：解析响应、构造错误描述。

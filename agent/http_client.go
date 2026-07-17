@@ -95,7 +95,7 @@ func (c *AdminClient) Register(ctx context.Context, req RegisterRequest) (*Regis
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer drainAndClose(resp)
 
 	if resp.StatusCode != 200 {
 		respBody, _ := io.ReadAll(resp.Body) // HTTP 错误响应体，ReadAll 失败不影响错误返回
@@ -129,7 +129,7 @@ func (c *AdminClient) Heartbeat(ctx context.Context, req HeartbeatRequest) error
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer drainAndClose(resp)
 
 	if resp.StatusCode != 200 {
 		respBody, _ := io.ReadAll(resp.Body) // HTTP 错误响应体，ReadAll 失败不影响错误返回
@@ -152,7 +152,7 @@ func (c *AdminClient) PostStress(ctx context.Context, report StressReport) error
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer drainAndClose(resp)
 
 	if resp.StatusCode != 200 && resp.StatusCode != 202 {
 		respBody, _ := io.ReadAll(resp.Body) // HTTP 错误响应体，ReadAll 失败不影响错误返回
@@ -172,7 +172,7 @@ func (c *AdminClient) PostSystem(ctx context.Context, report SystemReport) error
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer drainAndClose(resp)
 
 	if resp.StatusCode != 200 && resp.StatusCode != 202 {
 		respBody, _ := io.ReadAll(resp.Body) // HTTP 错误响应体，ReadAll 失败不影响错误返回
@@ -194,7 +194,7 @@ func (c *AdminClient) FetchPendingTask(ctx context.Context) (*TaskAssignment, er
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer drainAndClose(resp)
 
 	if resp.StatusCode == 204 {
 		return nil, nil // 无任务
@@ -226,7 +226,7 @@ func (c *AdminClient) ReportTaskDone(ctx context.Context, report TaskCompletionR
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer drainAndClose(resp)
 
 	if resp.StatusCode != 200 && resp.StatusCode != 202 {
 		respBody, _ := io.ReadAll(resp.Body) // HTTP 错误响应体，ReadAll 失败不影响错误返回
@@ -244,7 +244,7 @@ func (c *AdminClient) Deregister(ctx context.Context) error {
 	if err != nil {
 		return err // 不重试
 	}
-	resp.Body.Close()
+	drainAndClose(resp)
 	return nil
 }
 
@@ -258,13 +258,27 @@ func (c *AdminClient) DownloadFile(ctx context.Context, url string, dst io.Write
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer drainAndClose(resp)
 
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("download failed: status=%d", resp.StatusCode)
 	}
 	_, err = io.Copy(dst, resp.Body)
 	return err
+}
+
+// drainAndClose 在关闭响应体前排空剩余字节，让 net/http 能把该连接放回 keep-alive 空闲池复用。
+//
+// net/http 仅在响应体读到 EOF 后再 Close 才会复用底层 TCP 连接；若未读完就 Close，
+// 连接会被直接丢弃。Agent→Admin 是「秒级心跳 + 高频上报」的同 host 场景，不复用会导致
+// 持续新建/关闭 TCP，浪费 FD 与 ephemeral port（正是自定义 Transport 调大空闲池想避免的）。
+// 用 LimitReader 兜底：正常控制面响应都很小，异常超大 body 则放弃排空（退化为不复用），不拖住调用方。
+func drainAndClose(resp *http.Response) {
+	if resp == nil || resp.Body == nil {
+		return
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+	_ = resp.Body.Close()
 }
 
 func (c *AdminClient) doPost(ctx context.Context, path string, body []byte) (*http.Response, error) {

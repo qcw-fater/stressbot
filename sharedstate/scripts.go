@@ -92,3 +92,17 @@ end
 redis.call('SADD', KEYS[2], KEYS[1])
 return v
 `)
+
+// expireScript: 对全部 KEYS（某 key 的所有数据类型命名空间）逐个 EXPIRE，
+// 返回命中（成功设置过期）的个数。用于把「逐 key 一次 EXPIRE RTT」合并为单次脚本调用。
+// ARGV[1]=秒数（可为 <=0：EXPIRE 传非正秒数会立即删除，与直接调用 EXPIRE 行为一致）。
+var expireScript = redis.NewScript(`
+local secs = tonumber(ARGV[1])
+local hit = 0
+for i = 1, #KEYS do
+  if redis.call('EXPIRE', KEYS[i], secs) == 1 then
+    hit = hit + 1
+  end
+end
+return hit
+`)

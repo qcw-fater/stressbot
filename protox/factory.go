@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -14,11 +15,28 @@ import (
 // 提供基于消息全名创建、序列化、反序列化、字段读写的能力。
 type Factory struct {
 	registry *Registry
+	// pathCache 缓存字段路径 → 分段结果（map[string][]string）。
+	// 字段路径集合由配置固定、数量有界（写一次读多次），Factory 跨全部 Robot 共享，
+	// 故用 sync.Map：热路径 SetField/GetField 不再每次 splitPath 分配 []string。
+	pathCache sync.Map
 }
 
 // NewFactory 创建动态消息工厂
 func NewFactory(registry *Registry) *Factory {
 	return &Factory{registry: registry}
+}
+
+// splitPathCached 返回 path 的分段结果，命中缓存则复用同一 []string。
+//
+// 返回的切片由 set/get 路径按**只读**方式消费（仅索引与子切片，绝不改写元素），
+// 因此在多 Robot 间共享同一底层切片是安全的。空路径返回 nil。
+func (f *Factory) splitPathCached(path string) []string {
+	if v, ok := f.pathCache.Load(path); ok {
+		return v.([]string)
+	}
+	parts := splitPath(path)
+	f.pathCache.Store(path, parts)
+	return parts
 }
 
 // Create 创建指定名称的动态消息。
@@ -35,7 +53,7 @@ func (f *Factory) Create(name string) (proto.Message, error) {
 // 支持 bool、整数、浮点、字符串、字节切片、枚举、嵌套消息、repeated 字段等类型。
 // fieldName 支持点分路径和数组索引（如 "heroData.heroList[0].heroId"）。
 func (f *Factory) SetField(msg proto.Message, fieldPath string, value any) error {
-	parts := splitPath(fieldPath)
+	parts := f.splitPathCached(fieldPath)
 	if len(parts) == 0 {
 		return fmt.Errorf("fieldPath 为空")
 	}
@@ -51,9 +69,6 @@ func (f *Factory) SetFieldsFromMap(msg proto.Message, fields map[string]any) err
 
 	for key, value := range fields {
 		fd := desc.Fields().ByName(protoreflect.Name(key))
-		if fd == nil {
-			fd = findFieldCaseInsensitive(desc, key)
-		}
 		if fd == nil {
 			return fmt.Errorf("消息 %s 未找到字段 %s", string(desc.FullName()), key)
 		}
@@ -126,11 +141,8 @@ func (f *Factory) setNestedField(ref protoreflect.Message, parts []string, value
 		return fmt.Errorf("路径不能以数组索引开头: %s", part)
 	}
 
-	// 查找字段
+	// 查找字段（字段名必须与 proto 定义精确一致，大小写敏感）
 	field := desc.Fields().ByName(protoreflect.Name(fieldName))
-	if field == nil {
-		field = findFieldCaseInsensitive(desc, fieldName)
-	}
 	if field == nil {
 		return fmt.Errorf("消息 %s 未找到字段 %s", string(desc.FullName()), fieldName)
 	}
@@ -200,6 +212,136 @@ func (f *Factory) setNestedField(ref protoreflect.Message, parts []string, value
 	}
 
 	return fmt.Errorf("字段 %s 不是 message 类型，无法嵌套", fieldName)
+}
+
+// GetFieldForStore 按点分路径取单个字段值，语义与 navigatePath(GetFieldMap(msg), path)
+// 完全一致，但**不展开整条消息**：只沿路径下探到目标字段，避免为无关的大字段
+// （如未被引用的 repeated 列表）递归分配 map/slice。这是 storeResponse 热路径的关键优化。
+//
+// 返回 (nil,false) 表示该路径在 GetFieldMap 语义下不产出值，等价于旧路径
+// navigatePath 命中 nil，具体包括：
+//   - 字段不存在（按 proto 字段名**精确**匹配，与 GetFieldMap 用 fd.Name() 建 key 一致，
+//     不做大小写兜底）；
+//   - 中间 / 终端为未设置的 message（messageToMap 跳过未设置 message）；
+//   - 终端为空的 repeated / map（messageToMap 跳过空 list/map）；
+//   - 路径类型不匹配（如在标量上继续下探、在 message 节点用数组下标）。
+//
+// 返回值与内部消息共享底层（同 GetFieldMap 的浅拷贝语义），调用方只读使用。
+func (f *Factory) GetFieldForStore(msg proto.Message, path string) (any, bool) {
+	parts := f.splitPathCached(path)
+	if len(parts) == 0 {
+		return nil, false
+	}
+	return getFieldForStore(msg.ProtoReflect(), parts)
+}
+
+// getFieldForStore 在 message 节点上消费一个字段名段并按需继续下探。
+// message 节点在 GetFieldMap 展开树里对应 map[string]any，故首段必须是字段名而非数组下标。
+func getFieldForStore(ref protoreflect.Message, parts []string) (any, bool) {
+	seg := parts[0]
+	if isIndexSeg(seg) {
+		// navigatePath 在 map 节点上遇到数组下标段 → navigateValue 返回 nil。
+		return nil, false
+	}
+	fd := ref.Descriptor().Fields().ByName(protoreflect.Name(seg))
+	if fd == nil {
+		return nil, false
+	}
+	// 复刻 messageToMap 的跳过规则：未设置的 message、空 repeated/map 不进展开树。
+	if fd.Kind() == protoreflect.MessageKind && !fd.IsList() && !fd.IsMap() {
+		if !ref.Has(fd) {
+			return nil, false
+		}
+	}
+	if (fd.IsList() || fd.IsMap()) && !ref.Has(fd) {
+		return nil, false
+	}
+	if len(parts) == 1 {
+		// 终端：产出的值与 GetFieldMap 在该 key 上存的值逐字一致。
+		return fromFieldValue(fd, ref.Get(fd)), true
+	}
+	return descendFieldValue(fd, ref.Get(fd), parts[1:])
+}
+
+// descendFieldValue 在「字段值」的展开表示上继续下探剩余路径段。
+// fd/val 为父 message 上一个已确认存在的字段及其取值，parts 为字段名之后的剩余段。
+func descendFieldValue(fd protoreflect.FieldDescriptor, val protoreflect.Value, parts []string) (any, bool) {
+	switch {
+	case fd.IsList():
+		// 展开表示为 []any：只能用数组下标继续（navigateValue 在 []any 上按下标取元素）。
+		seg := parts[0]
+		idx, ok := parseIndexSeg(seg)
+		if !ok {
+			return nil, false
+		}
+		list := val.List()
+		if idx < 0 || idx >= list.Len() {
+			return nil, false
+		}
+		elem := list.Get(idx)
+		if len(parts) == 1 {
+			return fromScalarValue(fd, elem), true
+		}
+		if fd.Kind() == protoreflect.MessageKind {
+			return getFieldForStore(elem.Message(), parts[1:])
+		}
+		return nil, false
+
+	case fd.IsMap():
+		// 展开表示为 map[string]any（key 为 protoreflect.MapKey.String()）。
+		seg := parts[0]
+		if isIndexSeg(seg) {
+			return nil, false
+		}
+		protomap := val.Map()
+		valFd := fd.MapValue()
+		var found protoreflect.Value
+		ok := false
+		protomap.Range(func(k protoreflect.MapKey, v protoreflect.Value) bool {
+			if k.String() == seg {
+				found = v
+				ok = true
+				return false
+			}
+			return true
+		})
+		if !ok {
+			return nil, false
+		}
+		if len(parts) == 1 {
+			return fromScalarValue(valFd, found), true
+		}
+		if valFd.Kind() == protoreflect.MessageKind {
+			return getFieldForStore(found.Message(), parts[1:])
+		}
+		return nil, false
+
+	case fd.Kind() == protoreflect.MessageKind:
+		// 单个 message：展开表示为 map[string]any，继续在子 message 上下探。
+		return getFieldForStore(val.Message(), parts)
+
+	default:
+		// 标量后仍有剩余路径 → navigatePath 在标量上返回 nil。
+		return nil, false
+	}
+}
+
+// isIndexSeg 判断路径段是否为数组下标（如 "[0]"）。
+func isIndexSeg(seg string) bool {
+	return len(seg) >= 2 && seg[0] == '[' && seg[len(seg)-1] == ']'
+}
+
+// parseIndexSeg 解析数组下标段为整数；非下标段或空下标 "[]" 返回 (0,false)，
+// 与 state.navigateValue（strconv.Atoi，空串报错）行为一致。
+func parseIndexSeg(seg string) (int, bool) {
+	if !isIndexSeg(seg) {
+		return 0, false
+	}
+	idx, err := strconv.Atoi(seg[1 : len(seg)-1])
+	if err != nil {
+		return 0, false
+	}
+	return idx, true
 }
 
 // setRepeatedField 设置 repeated 字段值。
@@ -315,7 +457,7 @@ func toMapKey(key any, field protoreflect.FieldDescriptor) (protoreflect.MapKey,
 // 嵌套消息返回 map[string]any（递归展开）。
 // fieldName 支持点分路径和数组索引。
 func (f *Factory) GetField(msg proto.Message, fieldPath string) (any, error) {
-	parts := splitPath(fieldPath)
+	parts := f.splitPathCached(fieldPath)
 	if len(parts) == 0 {
 		return nil, fmt.Errorf("fieldPath 为空")
 	}
@@ -331,9 +473,6 @@ func (f *Factory) getNestedField(ref protoreflect.Message, parts []string) (any,
 	}
 
 	field := desc.Fields().ByName(protoreflect.Name(part))
-	if field == nil {
-		field = findFieldCaseInsensitive(desc, part)
-	}
 	if field == nil {
 		return nil, fmt.Errorf("消息 %s 未找到字段 %s", string(desc.FullName()), part)
 	}
@@ -378,7 +517,7 @@ func (f *Factory) getNestedField(ref protoreflect.Message, parts []string) (any,
 
 // GetListLen 获取 repeated 字段长度，不展开列表内容。
 func (f *Factory) GetListLen(msg proto.Message, fieldPath string) (int, error) {
-	field, list, err := f.getListField(msg.ProtoReflect(), splitPath(fieldPath))
+	field, list, err := f.getListField(msg.ProtoReflect(), f.splitPathCached(fieldPath))
 	if err != nil {
 		return 0, err
 	}
@@ -390,7 +529,7 @@ func (f *Factory) GetListLen(msg proto.Message, fieldPath string) (int, error) {
 
 // GetListItem 获取 repeated 字段指定元素，message 元素保留为 proto.Message。
 func (f *Factory) GetListItem(msg proto.Message, fieldPath string, idx int) (any, error) {
-	field, list, err := f.getListField(msg.ProtoReflect(), splitPath(fieldPath))
+	field, list, err := f.getListField(msg.ProtoReflect(), f.splitPathCached(fieldPath))
 	if err != nil {
 		return nil, err
 	}
@@ -420,9 +559,6 @@ func (f *Factory) getListField(ref protoreflect.Message, parts []string) (protor
 		}
 		field := ref.Descriptor().Fields().ByName(protoreflect.Name(part))
 		if field == nil {
-			field = findFieldCaseInsensitive(ref.Descriptor(), part)
-		}
-		if field == nil {
 			return nil, nil, fmt.Errorf("消息 %s 未找到字段 %s", string(ref.Descriptor().FullName()), part)
 		}
 		if field.Kind() != protoreflect.MessageKind || field.IsList() || field.IsMap() {
@@ -433,9 +569,6 @@ func (f *Factory) getListField(ref protoreflect.Message, parts []string) (protor
 
 	last := parts[len(parts)-1]
 	field := ref.Descriptor().Fields().ByName(protoreflect.Name(last))
-	if field == nil {
-		field = findFieldCaseInsensitive(ref.Descriptor(), last)
-	}
 	if field == nil {
 		return nil, nil, fmt.Errorf("消息 %s 未找到字段 %s", string(ref.Descriptor().FullName()), last)
 	}
@@ -707,17 +840,4 @@ func toFloat64Value(v any) float64 {
 	default:
 		return 0
 	}
-}
-
-// findFieldCaseInsensitive 大小写不敏感查找 proto 字段
-func findFieldCaseInsensitive(desc protoreflect.MessageDescriptor, name string) protoreflect.FieldDescriptor {
-	lower := strings.ToLower(name)
-	fields := desc.Fields()
-	for i := 0; i < fields.Len(); i++ {
-		fd := fields.Get(i)
-		if strings.ToLower(string(fd.Name())) == lower {
-			return fd
-		}
-	}
-	return nil
 }
