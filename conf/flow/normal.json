@@ -24,9 +24,7 @@
     "RequestZoneList": {
       "type": "action",
       "action": "RequestZoneList",
-      "onError": {
-        "strategy": "abort"
-      }
+      "errorStrategy": "abort"
     },
     "RequestOutsideNotice": {
       "type": "action",
@@ -39,9 +37,7 @@
     "PostLogin": {
       "type": "action",
       "action": "PostLogin",
-      "onError": {
-        "strategy": "abort"
-      }
+      "errorStrategy": "abort"
     },
     "hasRole": {
       "type": "boolean",
@@ -51,16 +47,12 @@
     "createNewRole": {
       "type": "action",
       "action": "NewRole",
-      "onError": {
-        "strategy": "abort"
-      }
+      "errorStrategy": "abort"
     },
     "SelectRole": {
       "type": "action",
       "action": "SelectRole",
-      "onError": {
-        "strategy": "abort"
-      }
+      "errorStrategy": "abort"
     },
     "logicLogin": {
       "type": "sequence",
@@ -74,9 +66,7 @@
     "ConnectLogicTCP": {
       "type": "action",
       "action": "ConnectLogicTCP",
-      "onError": {
-        "strategy": "abort"
-      },
+      "errorStrategy": "abort",
       "listenRefs": [
         {
           "route": {
@@ -136,14 +126,6 @@
         },
         {
           "route": {
-            "cmd": 35,
-            "act": 3
-          },
-          "server": "tcp:logic",
-          "listen": "shopLimitDataUpdate"
-        },
-        {
-          "route": {
             "cmd": 5,
             "act": 3
           },
@@ -200,6 +182,14 @@
         },
         {
           "route": {
+            "cmd": 3,
+            "act": 5
+          },
+          "server": "tcp:logic",
+          "listen": "customRoomStart"
+        },
+        {
+          "route": {
             "cmd": 14,
             "act": 10
           },
@@ -219,16 +209,12 @@
     "PlayerLogin": {
       "type": "action",
       "action": "PlayerLogin",
-      "onError": {
-        "strategy": "abort"
-      }
+      "errorStrategy": "abort"
     },
     "RequestPlayerData": {
       "type": "action",
       "action": "RequestPlayerData",
-      "onError": {
-        "strategy": "abort"
-      }
+      "errorStrategy": "abort"
     },
     "ReportBattleDelay": {
       "type": "action",
@@ -265,20 +251,8 @@
     },
     "businessLoop": {
       "type": "loop",
-      "body": "guildCheckFlow",
+      "body": "normalModel",
       "loopCount": -1
-    },
-    "guildCheckFlow": {
-      "type": "sequence",
-      "next": [
-        "decideGuildPath"
-      ]
-    },
-    "decideGuildPath": {
-      "type": "boolean",
-      "condition": "lua:has_guild.lua",
-      "trueNext": "inGuildBase",
-      "falseNext": "outGuildBase"
     },
     "normalModel": {
       "type": "sequence",
@@ -299,9 +273,7 @@
     "CreateNormalTeam": {
       "type": "action",
       "action": "CreateNormalTeam",
-      "onError": {
-        "strategy": "skip"
-      }
+      "errorStrategy": "skip"
     },
     "SelectHero": {
       "type": "action",
@@ -310,23 +282,17 @@
     "StartMatch": {
       "type": "action",
       "action": "StartMatch",
-      "onError": {
-        "strategy": "skip"
-      }
+      "errorStrategy": "skip"
     },
     "MatchSucceed": {
       "type": "action",
       "action": "MatchSucceed",
-      "onError": {
-        "strategy": "skip"
-      }
+      "errorStrategy": "skip"
     },
     "ListenStartLoading": {
       "type": "action",
       "action": "ListenStartLoading",
-      "onError": {
-        "strategy": "skip"
-      }
+      "errorStrategy": "skip"
     },
     "startBattle": {
       "type": "sequence",
@@ -342,15 +308,13 @@
         "BattleEnd",
         "BattleReward",
         "GameOver",
-        "ClearBattleState"
+        "CleanupBattle"
       ]
     },
     "ConnectBattleTCP": {
       "type": "action",
       "action": "ConnectBattleTCP",
-      "onError": {
-        "strategy": "skip"
-      },
+      "errorStrategy": "skip",
       "listenRefs": [
         {
           "route": {
@@ -365,9 +329,7 @@
     "ConnectBattleUDP": {
       "type": "action",
       "action": "ConnectBattleUDP",
-      "onError": {
-        "strategy": "skip"
-      },
+      "errorStrategy": "skip",
       "listenRefs": [
         {
           "route": {
@@ -382,9 +344,7 @@
     "RegisterBattle": {
       "type": "action",
       "action": "RegisterBattle",
-      "onError": {
-        "strategy": "skip"
-      }
+      "errorStrategy": "skip"
     },
     "loadLoop": {
       "type": "loop",
@@ -412,7 +372,7 @@
     "syncLoop": {
       "type": "loop",
       "body": "SyncFrameData",
-      "loopCount": 50
+      "loopCount": 30
     },
     "SyncFrameData": {
       "type": "action",
@@ -431,13 +391,13 @@
       "type": "action",
       "action": "GameOver"
     },
-    "ClearBattleState": {
+    "CleanupBattle": {
       "type": "action",
       "action": "ClearBattleState"
     },
     "checkNewRole": {
       "type": "boolean",
-      "condition": "state:isNewRole",
+      "condition": "state:isNewRole == true",
       "trueNext": "initNewRole",
       "falseNext": "GetActivityList"
     },
@@ -451,309 +411,13 @@
     },
     "unlockBasicFunction": {
       "type": "action",
-      "description": "领取等级奖励",
+      "description": "解锁排位等基础功能",
       "action": "unlockBasicFunction"
-    },
-    "inGuildBase": {
-      "type": "sequence",
-      "next": [
-        "GetGuildInfo",
-        "GuildRefreshPublish",
-        "GetGuildMemberList",
-        "judgeRole"
-      ]
-    },
-    "outGuildBase": {
-      "type": "sequence",
-      "next": [
-        "GetGuildList",
-        "outGuildIsCreator"
-      ]
-    },
-    "GetGuildInfo": {
-      "type": "action",
-      "action": "GetGuildInfo"
-    },
-    "battleModel": {
-      "type": "weighted",
-      "options": [
-        {
-          "node": "normalModel",
-          "weight": 50
-        }
-      ]
-    },
-    "GetGuildList": {
-      "type": "action",
-      "action": "GetGuildList"
-    },
-    "GetGuildMemberList": {
-      "type": "action",
-      "action": "GetGuildMemberList"
-    },
-    "CreateGuild": {
-      "type": "action",
-      "action": "CreateGuild",
-      "onError": {
-        "strategy": "skip"
-      }
-    },
-    "SearchGuildList": {
-      "type": "action",
-      "action": "SearchGuildList"
-    },
-    "JoinGuild": {
-      "type": "action",
-      "action": "JoinGuild"
-    },
-    "judgeRole": {
-      "type": "boolean",
-      "condition": "state:playerData.guildInfo.mydata.position == 0 || playerData.guildInfo.mydata.position == 1",
-      "trueNext": "judgeLeader",
-      "falseNext": "guildNormal"
     },
     "LbsPositioning": {
       "type": "action",
       "description": "Lbs定位",
       "action": "LbsPositioning"
-    },
-    "judgeLeader": {
-      "type": "boolean",
-      "condition": "state:playerData.guildInfo.mydata.position == 0",
-      "trueNext": "guildLeader",
-      "falseNext": "guildManage"
-    },
-    "guildNormal": {
-      "type": "weighted",
-      "options": [
-        {
-          "node": "GetGuildActiveReward",
-          "weight": 5
-        },
-        {
-          "node": "ExitGuild",
-          "weight": 2
-        },
-        {
-          "node": "GetGuildRank",
-          "weight": 5
-        },
-        {
-          "node": "GuildSign",
-          "weight": 5
-        },
-        {
-          "node": "GetGuildRouteRank",
-          "weight": 5
-        },
-        {
-          "node": "GetGuildRouteReward",
-          "weight": 10
-        },
-        {
-          "node": "GetGuildRouteRankReward",
-          "weight": 8
-        },
-        {
-          "node": "SelectRoute",
-          "weight": 15
-        },
-        {
-          "node": "GetGuildRouteInfo",
-          "weight": 15
-        },
-        {
-          "node": "battleModel",
-          "weight": 1
-        }
-      ]
-    },
-    "GetGuildActiveReward": {
-      "type": "action",
-      "action": "GetGuildActiveReward"
-    },
-    "ExitGuild": {
-      "type": "action",
-      "action": "ExitGuildAction"
-    },
-    "GetGuildRank": {
-      "type": "action",
-      "action": "GetGuildRank"
-    },
-    "GuildSign": {
-      "type": "action",
-      "action": "GuildSign"
-    },
-    "GetGuildRouteRank": {
-      "type": "action",
-      "action": "GetGuildRouteRank"
-    },
-    "GetGuildRouteReward": {
-      "type": "action",
-      "action": "GetGuildRouteReward"
-    },
-    "GetGuildRouteRankReward": {
-      "type": "action",
-      "action": "GetGuildRouteRankReward"
-    },
-    "SelectRoute": {
-      "type": "action",
-      "action": "SelectRoute"
-    },
-    "GetGuildRouteInfo": {
-      "type": "action",
-      "action": "GetGuildRouteInfo"
-    },
-    "guildLeader": {
-      "type": "weighted",
-      "options": [
-        {
-          "node": "GuildAppointMember",
-          "weight": 20
-        },
-        {
-          "node": "SetGuildIcon",
-          "weight": 10
-        },
-        {
-          "node": "ChangeGuildName",
-          "weight": 10
-        },
-        {
-          "node": "ChangeGuildPublicity",
-          "weight": 10
-        },
-        {
-          "node": "EditGuildInfo",
-          "weight": 10
-        },
-        {
-          "node": "guildManage",
-          "weight": 40
-        }
-      ]
-    },
-    "guildManage": {
-      "type": "weighted",
-      "options": [
-        {
-          "node": "GetGuildApplyList",
-          "weight": 20
-        },
-        {
-          "node": "AuditGuildJoin",
-          "weight": 25
-        },
-        {
-          "node": "KickGuildMember",
-          "weight": 5
-        },
-        {
-          "node": "guildNormal",
-          "weight": 50
-        }
-      ]
-    },
-    "GetGuildApplyList": {
-      "type": "action",
-      "action": "GetGuildApplyList"
-    },
-    "AuditGuildJoin": {
-      "type": "action",
-      "action": "AuditGuildJoin"
-    },
-    "KickGuildMember": {
-      "type": "action",
-      "action": "KickGuildMember"
-    },
-    "GuildAppointMember": {
-      "type": "action",
-      "action": "GuildAppointMember"
-    },
-    "SetGuildIcon": {
-      "type": "action",
-      "action": "SetGuildIcon"
-    },
-    "ChangeGuildName": {
-      "type": "action",
-      "action": "ChangeGuildName"
-    },
-    "ChangeGuildPublicity": {
-      "type": "action",
-      "action": "ChangeGuildPublicity"
-    },
-    "EditGuildInfo": {
-      "type": "action",
-      "description": "修改社团基础配置",
-      "action": "EditGuildInfo"
-    },
-    "outGuildIsCreator": {
-      "type": "boolean",
-      "condition": "state:index % 15 == 0",
-      "trueNext": "guildCreatorBootstrap",
-      "falseNext": "guildParticipantActions"
-    },
-    "guildCreatorBootstrap": {
-      "type": "sequence",
-      "next": [
-        "CreateGuild",
-        "GuildPublish"
-      ]
-    },
-    "guildParticipantActions": {
-      "type": "weighted",
-      "options": [
-        {
-          "node": "SearchTaskGuild",
-          "weight": 45
-        },
-        {
-          "node": "JoinTaskGuild",
-          "weight": 40
-        }
-      ]
-    },
-    "SearchTaskGuild": {
-      "type": "sequence",
-      "next": [
-        "SelectTaskGuild",
-        "hasSearchTaskGuildTarget"
-      ]
-    },
-    "JoinTaskGuild": {
-      "type": "sequence",
-      "next": [
-        "SelectTaskGuild",
-        "hasJoinTaskGuildTarget"
-      ]
-    },
-    "SelectTaskGuild": {
-      "type": "action",
-      "action": "SelectTaskGuild",
-      "onError": {
-        "strategy": "skip"
-      }
-    },
-    "hasSearchTaskGuildTarget": {
-      "type": "boolean",
-      "condition": "state:taskGuildTargetReady",
-      "trueNext": "SearchGuildList"
-    },
-    "hasJoinTaskGuildTarget": {
-      "type": "boolean",
-      "condition": "state:taskGuildTargetReady",
-      "trueNext": "JoinGuild"
-    },
-    "GuildPublish": {
-      "type": "action",
-      "action": "GuildPublish",
-      "onError": {
-        "strategy": "skip"
-      }
-    },
-    "GuildRefreshPublish": {
-      "type": "action",
-      "action": "GuildPublish"
     }
   },
   "actions": {
@@ -920,7 +584,53 @@
         {
           "type": "fixed",
           "field": "GM.type",
-          "value": 70
+          "value": 4
+        },
+        {
+          "type": "fixed",
+          "field": "GM.param",
+          "value": [
+            109,
+            5,
+            110,
+            5,
+            113,
+            5,
+            118,
+            5,
+            122,
+            5,
+            123,
+            5,
+            124,
+            5,
+            125,
+            5,
+            130,
+            5,
+            138,
+            5,
+            140,
+            5,
+            142,
+            5,
+            143,
+            5,
+            148,
+            5,
+            150,
+            5,
+            153,
+            5,
+            156,
+            5,
+            158,
+            5,
+            159,
+            5,
+            160,
+            5
+          ]
         }
       ]
     },
@@ -1105,11 +815,6 @@
               "op": "neq",
               "path": "modeId",
               "value": 0
-            },
-            {
-              "op": "eq",
-              "path": "ruleType",
-              "value": 1
             }
           ]
         }
@@ -1156,7 +861,8 @@
         "act": 20
       },
       "c2sProto": "Game.TeamStartMatchC2S",
-      "s2cProto": "Game.TeamStartMatchS2C"
+      "s2cProto": "Game.TeamStartMatchS2C",
+      "timeout": 30
     },
     "MatchSucceed": {
       "pattern": "lua",
@@ -1260,206 +966,6 @@
       "pattern": "lua",
       "script": "unlock_basic_functions.lua"
     },
-    "GetGuildInfo": {
-      "pattern": "tcpRequest",
-      "service": "logic",
-      "route": {
-        "cmd": 21,
-        "act": 4
-      },
-      "c2sProto": "Game.GuildInfoC2S",
-      "s2cProto": "Game.GuildInfoS2C",
-      "bindings": [
-        {
-          "type": "state",
-          "field": "guildId",
-          "source": "playerData",
-          "path": "guildInfo.guildId"
-        }
-      ],
-      "store": [
-        {
-          "setter": "currentGuildInfo"
-        },
-        {
-          "setter": "playerData.guildInfo.guildId",
-          "field": "baseInfo.uid"
-        },
-        {
-          "setter": "playerData.guildInfo.baseInfo",
-          "field": "baseInfo"
-        },
-        {
-          "setter": "playerData.guildInfo.baseSetting",
-          "field": "baseSetting"
-        },
-        {
-          "setter": "playerData.guildInfo.mydata",
-          "field": "mydata"
-        },
-        {
-          "setter": "playerData.guildInfo.routeData",
-          "field": "route"
-        }
-      ]
-    },
-    "GetGuildList": {
-      "pattern": "tcpRequest",
-      "service": "logic",
-      "route": {
-        "cmd": 21,
-        "act": 2
-      },
-      "c2sProto": "Game.GuildListC2S",
-      "s2cProto": "Game.GuildListS2C",
-      "store": [
-        {
-          "setter": "guildList",
-          "field": "infos"
-        }
-      ]
-    },
-    "GetGuildMemberList": {
-      "pattern": "tcpRequest",
-      "service": "logic",
-      "route": {
-        "cmd": 21,
-        "act": 12
-      },
-      "c2sProto": "Game.GuildGetMembersListC2S",
-      "s2cProto": "Game.GuildGetMembersListS2C",
-      "store": [
-        {
-          "setter": "guildMembers",
-          "field": "members"
-        }
-      ]
-    },
-    "CreateGuild": {
-      "pattern": "tcpRequest",
-      "service": "logic",
-      "route": {
-        "cmd": 21,
-        "act": 1
-      },
-      "c2sProto": "Game.GuildCreateC2S",
-      "s2cProto": "Game.GuildCreateS2C",
-      "bindings": [
-        {
-          "type": "randomString",
-          "field": "name",
-          "length": 5,
-          "charset": "alpha"
-        },
-        {
-          "type": "randomInt",
-          "field": "icon",
-          "min": 0,
-          "max": 9
-        },
-        {
-          "type": "randomString",
-          "field": "publicity",
-          "length": 25,
-          "charset": "alphanum"
-        },
-        {
-          "type": "randomInt",
-          "field": "cups",
-          "min": 1,
-          "max": 200
-        },
-        {
-          "type": "fixed",
-          "field": "needApproval",
-          "value": true
-        },
-        {
-          "type": "fixed",
-          "field": "acceptApply",
-          "value": true
-        }
-      ],
-      "store": [
-        {
-          "setter": "playerData.guildInfo",
-          "field": "data"
-        },
-        {
-          "setter": "taskGuildCreatedId",
-          "field": "data.guildId"
-        }
-      ]
-    },
-    "SearchGuildList": {
-      "pattern": "tcpRequest",
-      "service": "logic",
-      "route": {
-        "cmd": 21,
-        "act": 17
-      },
-      "c2sProto": "Game.GuildSearchC2S",
-      "s2cProto": "Game.GuildSearchS2C",
-      "bindings": [
-        {
-          "type": "state",
-          "field": "name",
-          "source": "taskGuildTargetName",
-          "required": true
-        }
-      ],
-      "store": [
-        {
-          "setter": "guildSearchResult",
-          "field": "infos"
-        }
-      ]
-    },
-    "JoinGuild": {
-      "pattern": "tcpRequest",
-      "service": "logic",
-      "route": {
-        "cmd": 21,
-        "act": 3
-      },
-      "c2sProto": "Game.GuildJoinC2S",
-      "s2cProto": "Game.GuildJoinS2C",
-      "bindings": [
-        {
-          "type": "state",
-          "field": "uid",
-          "source": "taskGuildTargetId",
-          "required": true
-        },
-        {
-          "type": "fixed",
-          "field": "msg",
-          "value": "申请加入社团"
-        },
-        {
-          "type": "state",
-          "field": "account",
-          "source": "account"
-        }
-      ],
-      "store": [
-        {
-          "setter": "lastGuildJoinResp"
-        },
-        {
-          "setter": "playerData.guildInfo.guildId",
-          "field": "mydata.guildUid"
-        },
-        {
-          "setter": "playerData.guildInfo.baseInfo",
-          "field": "baseInfo"
-        },
-        {
-          "setter": "playerData.guildInfo.mydata",
-          "field": "mydata"
-        }
-      ]
-    },
     "LbsPositioning": {
       "pattern": "tcpSend",
       "service": "logic",
@@ -1472,6 +978,68 @@
         {
           "type": "randomPick",
           "field": "lbsId",
+          "value": [
+            10003001,
+            10003002,
+            10003003,
+            10003004,
+            10003005,
+            10003006,
+            10003007,
+            10003008,
+            10003009,
+            10003010,
+            10003011,
+            10003012,
+            10003013,
+            10005001,
+            10005002,
+            10005003,
+            10005004,
+            10005005,
+            10005006,
+            10005007,
+            10005008,
+            10005009,
+            10005010,
+            10005011,
+            10005012,
+            10005013,
+            10005014,
+            10005015,
+            10005016,
+            10005017,
+            10005018,
+            10005019,
+            10005020,
+            10005021,
+            10005022,
+            10005023,
+            10005024,
+            10005025,
+            10005026,
+            10005027,
+            10005028,
+            10005029,
+            10005030,
+            10005031,
+            10005032,
+            10005033,
+            10005034,
+            10005035,
+            10005036,
+            10005037,
+            20005001,
+            20005002,
+            20005003,
+            20005004,
+            20005005,
+            30001001,
+            30001002,
+            30001003,
+            30001004,
+            30001005
+          ],
           "values": [
             10003001,
             10003002,
@@ -1536,228 +1104,6 @@
           ]
         }
       ]
-    },
-    "GetGuildActiveReward": {
-      "pattern": "tcpRequest",
-      "service": "logic",
-      "route": {
-        "cmd": 21,
-        "act": 30
-      },
-      "c2sProto": "Game.GuildGetActiveRewardC2S",
-      "s2cProto": "Game.GuildGetActiveRewardS2C"
-    },
-    "ExitGuildAction": {
-      "pattern": "lua",
-      "script": "guild_exit.lua"
-    },
-    "GetGuildRank": {
-      "pattern": "tcpRequest",
-      "service": "logic",
-      "route": {
-        "cmd": 21,
-        "act": 26
-      },
-      "c2sProto": "Game.GuildRankDataC2S",
-      "s2cProto": "Game.GuildRankDataS2C",
-      "bindings": [
-        {
-          "type": "randomPick",
-          "field": "typeId",
-          "values": [
-            6,
-            7
-          ]
-        },
-        {
-          "type": "state",
-          "field": "guildId",
-          "source": "playerData",
-          "path": "guildInfo.guildId"
-        }
-      ]
-    },
-    "GuildSign": {
-      "pattern": "tcpRequest",
-      "service": "logic",
-      "route": {
-        "cmd": 21,
-        "act": 35
-      },
-      "c2sProto": "Game.GuildSignC2S",
-      "s2cProto": "Game.GuildSignS2C"
-    },
-    "GetGuildRouteRank": {
-      "pattern": "tcpRequest",
-      "service": "logic",
-      "route": {
-        "cmd": 21,
-        "act": 33
-      },
-      "c2sProto": "Game.GuildRouteRankDataC2S",
-      "s2cProto": "Game.GuildRouteRankDataS2C"
-    },
-    "GetGuildRouteReward": {
-      "pattern": "tcpRequest",
-      "service": "logic",
-      "route": {
-        "cmd": 21,
-        "act": 34
-      },
-      "c2sProto": "Game.GuildRouteRewardC2S",
-      "s2cProto": "Game.GuildRouteRewardS2C"
-    },
-    "GetGuildRouteRankReward": {
-      "pattern": "tcpRequest",
-      "service": "logic",
-      "route": {
-        "cmd": 21,
-        "act": 41
-      },
-      "c2sProto": "Game.GuildRouteRankRewardC2S",
-      "s2cProto": "Game.GuildRouteRankRewardS2C"
-    },
-    "SelectRoute": {
-      "pattern": "tcpRequest",
-      "service": "logic",
-      "route": {
-        "cmd": 21,
-        "act": 36
-      },
-      "c2sProto": "Game.GuildSelectRouteC2S",
-      "s2cProto": "Game.GuildSelectRouteS2C",
-      "bindings": [
-        {
-          "type": "randomBool",
-          "field": "select"
-        }
-      ]
-    },
-    "GetGuildRouteInfo": {
-      "pattern": "tcpRequest",
-      "service": "logic",
-      "route": {
-        "cmd": 21,
-        "act": 37
-      },
-      "c2sProto": "Game.GuildRouteInfoC2S",
-      "s2cProto": "Game.GuildRouteInfoS2C"
-    },
-    "GetGuildApplyList": {
-      "pattern": "tcpRequest",
-      "service": "logic",
-      "route": {
-        "cmd": 21,
-        "act": 20
-      },
-      "c2sProto": "Game.GuildGetApplyListC2S",
-      "s2cProto": "Game.GuildGetApplyListS2C",
-      "store": [
-        {
-          "setter": "guildApplyList",
-          "field": "request"
-        }
-      ]
-    },
-    "AuditGuildJoin": {
-      "pattern": "lua",
-      "script": "guild_audit_join.lua"
-    },
-    "KickGuildMember": {
-      "pattern": "lua",
-      "script": "guild_kick_member.lua"
-    },
-    "GuildAppointMember": {
-      "pattern": "lua",
-      "script": "guild_appoint_member.lua"
-    },
-    "SetGuildIcon": {
-      "pattern": "tcpRequest",
-      "service": "logic",
-      "route": {
-        "cmd": 21,
-        "act": 5
-      },
-      "c2sProto": "Game.GuildSetIconC2S",
-      "s2cProto": "Game.GuildSetIconS2C",
-      "bindings": [
-        {
-          "type": "randomInt",
-          "field": "icons",
-          "min": 1,
-          "max": 9
-        }
-      ]
-    },
-    "ChangeGuildName": {
-      "pattern": "tcpRequest",
-      "service": "logic",
-      "route": {
-        "cmd": 21,
-        "act": 23
-      },
-      "c2sProto": "Game.GuildChangeNameC2S",
-      "s2cProto": "Game.GuildChangeNameS2C",
-      "bindings": [
-        {
-          "type": "randomString",
-          "field": "name",
-          "length": 5,
-          "charset": "alpha"
-        }
-      ]
-    },
-    "ChangeGuildPublicity": {
-      "pattern": "tcpRequest",
-      "service": "logic",
-      "route": {
-        "cmd": 21,
-        "act": 21
-      },
-      "c2sProto": "Game.GuildEditC2S",
-      "s2cProto": "Game.GuildEditS2C",
-      "bindings": [
-        {
-          "type": "randomString",
-          "field": "content",
-          "length": 25,
-          "charset": "alphanum"
-        }
-      ]
-    },
-    "EditGuildInfo": {
-      "pattern": "tcpRequest",
-      "service": "logic",
-      "route": {
-        "cmd": 21,
-        "act": 38
-      },
-      "c2sProto": "Game.GuildEditInfoC2S",
-      "s2cProto": "Game.GuildEditInfoS2C",
-      "bindings": [
-        {
-          "type": "map",
-          "field": "params",
-          "entries": [
-            {
-              "key": 3,
-              "value": {
-                "type": "randomInt",
-                "min": 1,
-                "max": 200
-              }
-            }
-          ]
-        }
-      ]
-    },
-    "GuildPublish": {
-      "pattern": "lua",
-      "script": "guild_publish.lua"
-    },
-    "SelectTaskGuild": {
-      "pattern": "lua",
-      "script": "guild_select_target.lua"
     }
   },
   "listens": {
@@ -1775,79 +1121,15 @@
       ]
     },
     "heroUpdate": {},
-    "shopDataUpdate": {
-      "s2cProto": "Game.SystemShopDataS2C",
-      "store": [
-        {
-          "setter": "systemShopData"
-        }
-      ]
-    },
-    "shopLimitDataUpdate": {
-      "s2cProto": "Game.SystemShopLimitDataS2C",
-      "store": [
-        {
-          "setter": "systemShopGroupData",
-          "field": "shopGroupData"
-        }
-      ]
-    },
+    "shopDataUpdate": {},
     "teamUpdateInfo": {},
     "teamNotifyInvite": {},
     "teamJoin": {},
-    "guildJoin": {
-      "s2cProto": "Game.GuildNotifyNewMemberS2C",
-      "script": "listen_guild_join.lua"
-    },
-    "guildKickMember": {
-      "s2cProto": "Game.GuildNotifyKickMemberS2C",
-      "script": "listen_guild_kick_member.lua"
-    },
-    "guildMemberUpdate": {
-      "s2cProto": "Game.GuildMemberUpdateNotifyS2C",
-      "script": "listen_guild_member_update.lua"
-    },
-    "guildUpdate": {
-      "s2cProto": "Game.GuildUpdateNotifyS2C",
-      "store": [
-        {
-          "setter": "currentGuildInfo.baseInfo",
-          "field": "baseInfo"
-        },
-        {
-          "setter": "playerData.guildInfo.baseInfo",
-          "field": "baseInfo"
-        },
-        {
-          "setter": "playerData.guildInfo.guildId",
-          "field": "baseInfo.uid"
-        },
-        {
-          "setter": "currentGuildInfo.baseSetting",
-          "field": "baseSetting"
-        },
-        {
-          "setter": "playerData.guildInfo.baseSetting",
-          "field": "baseSetting"
-        },
-        {
-          "setter": "currentGuildInfo.statistics",
-          "field": "statistics"
-        },
-        {
-          "setter": "currentGuildInfo.timeRecord",
-          "field": "timeRecord"
-        },
-        {
-          "setter": "currentGuildInfo.route",
-          "field": "routData"
-        },
-        {
-          "setter": "playerData.guildInfo.routeData",
-          "field": "routData"
-        }
-      ]
-    },
+    "guildJoin": {},
+    "guildKickMember": {},
+    "guildMemberUpdate": {},
+    "guildUpdate": {},
+    "customRoomStart": {},
     "roomUpdateData": {},
     "roomUpdateStatus": {},
     "frameData": {

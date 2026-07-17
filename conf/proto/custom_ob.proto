@@ -6,6 +6,7 @@ package Game;
 // 导入枚举
 import "player.proto";
 import "enum_battle.proto";
+import "nohot_custom_battle.proto"; // PlayerStandings（ObReplayInfo 展示体）
 
 message ObBattlePlayer {
     PlayerBase base = 1;  // 玩家基础数据
@@ -29,6 +30,8 @@ message ObBattleInfoBase {
     int32 avgStar                   = 10; // 平均星级
     int32 matchFlag                 = 11; // 匹配标识 0普通 1新手 2温暖
     int32 hazardOpsDifficultyLevel  = 12; // 搜打撤难度等级
+    repeated int32 affix            = 13; // 词缀（与真实战斗 Record.affix 同源，客户端据此还原 BattleEventIdxs）
+    int32 godPlayerId               = 14; // 上榜代表玩家 ID（room 写 detail 时固化；0=无代表/未上榜）
 }
 
 message ObBattleInfo {
@@ -48,6 +51,7 @@ message ObPlayerInfoClient {
     int32 starNum      = 8;   // 5v5星星数量
     int32 DragonScore  = 9;   // 龙珠积分
     int32 playerId     = 10;  // 玩家ID
+    bool isGod         = 11;  // 是否为本局大神观战代表（上榜推荐分最高的 1 人；仅大神列表 31|1 置位）
 }
 
 // 用于客户端展示
@@ -83,6 +87,21 @@ message CommonRpcRequest {
 
 message BattleFrameData {
     repeated bytes frames = 1;
+    int64 latestFrame     = 2;  // 当前帧前沿索引（observer 拉帧用，PERF）
+    bool endFlag          = 3;  // 战斗是否已结束
+}
+
+// 回放/录像/收藏列表通用条目（同时作为玩家维度录像/收藏的存储 meta，B3）
+// 展示体统一用 PlayerStandings（对战后战绩，含结果/段位/英雄），回放榜/我的录像/收藏共用。
+message ObReplayInfo {
+    PlayerStandings standings = 1;  // 对战战绩（展示体）
+    int32 avgLadderCode       = 2;  // 平均段位编码（巅峰回放榜排序分）
+    bool collected            = 3;  // 当前玩家是否已收藏
+    int64 markTimestamp       = 4;  // 保存/收藏时间戳
+    string battleVersion      = 5;  // 录像版本（对齐 PlayerBattleEnd.battleVersion，失效判定绑定）
+    bool valid                = 6;  // 录像是否有效（版本更新后列表层标失效，文件不删）
+    int32 recordType          = 7;  // 来源类型 0=主动保存 1=收藏 2=巅峰回放
+    int32 winCamp             = 8;  // 对战结果：胜方阵营
 }
 
 message BulletInfo {

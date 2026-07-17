@@ -1,0 +1,365 @@
+{
+  "defaultDelayMs": 1000,
+  "nodes": {
+    "main": {
+      "type": "sequence",
+      "next": ["authLogin", "logicLogin", "checkNewRole", "roleSplit"]
+    },
+
+    "authLogin": {
+      "type": "sequence",
+      "next": ["RequestZoneList", "RequestOutsideNotice", "RequestNotice", "PostLogin", "hasRole", "SelectRole"]
+    },
+    "RequestZoneList": { "type": "action", "action": "RequestZoneList", "onError": { "strategy": "abort" } },
+    "RequestOutsideNotice": { "type": "action", "action": "RequestOutsideNotice" },
+    "RequestNotice": { "type": "action", "action": "RequestNotice" },
+    "PostLogin": { "type": "action", "action": "PostLogin", "onError": { "strategy": "abort" } },
+    "hasRole": { "type": "boolean", "condition": "lua:check_role.lua", "falseNext": "createNewRole" },
+    "createNewRole": { "type": "action", "action": "NewRole", "onError": { "strategy": "abort" } },
+    "SelectRole": { "type": "action", "action": "SelectRole", "onError": { "strategy": "abort" } },
+
+    "logicLogin": {
+      "type": "sequence",
+      "next": ["ConnectLogicTCP", "PlayerLogin", "RequestPlayerData", "ReportBattleDelay"]
+    },
+    "ConnectLogicTCP": {
+      "type": "action",
+      "action": "ConnectLogicTCP",
+      "onError": { "strategy": "abort" },
+      "listenRefs": [
+        { "route": { "cmd": 3, "act": 1 }, "server": "tcp:logic", "listen": "matchPoll" },
+        { "route": { "cmd": 5, "act": 20 }, "server": "tcp:logic", "listen": "teamStartMatch" },
+        { "route": { "cmd": 4, "act": 6 }, "server": "tcp:logic", "listen": "loadingPoll" },
+        { "route": { "cmd": 4, "act": 72 }, "server": "tcp:logic", "listen": "rewardPoll" },
+        { "route": { "cmd": 2, "act": 18 }, "server": "tcp:logic", "listen": "stateUpdate" },
+        { "route": { "cmd": 6, "act": 1 }, "server": "tcp:logic", "listen": "heroUpdate" },
+        { "route": { "cmd": 35, "act": 2 }, "server": "tcp:logic", "listen": "shopDataUpdate" },
+        { "route": { "cmd": 5, "act": 3 }, "server": "tcp:logic", "listen": "teamUpdateInfo" },
+        { "route": { "cmd": 5, "act": 6 }, "server": "tcp:logic", "listen": "teamNotifyInvite" },
+        { "route": { "cmd": 5, "act": 10 }, "server": "tcp:logic", "listen": "teamJoin" },
+        { "route": { "cmd": 14, "act": 10 }, "server": "tcp:logic", "listen": "roomUpdateData" },
+        { "route": { "cmd": 14, "act": 23 }, "server": "tcp:logic", "listen": "roomUpdateStatus" }
+      ]
+    },
+    "PlayerLogin": { "type": "action", "action": "PlayerLogin", "onError": { "strategy": "abort" } },
+    "RequestPlayerData": { "type": "action", "action": "RequestPlayerData", "onError": { "strategy": "abort" } },
+    "ReportBattleDelay": { "type": "action", "action": "ReportBattleDelay" },
+
+    "checkNewRole": {
+      "type": "boolean",
+      "condition": "state:isNewRole",
+      "trueNext": "initNewRole",
+      "falseNext": "roleSplit"
+    },
+    "initNewRole": {
+      "type": "sequence",
+      "next": ["gmCommands", "GMAddLadderLevel", "unlockBasicFunction", "LbsPositioning"]
+    },
+    "gmCommands": {
+      "type": "sequence",
+      "next": ["GMAddHero", "GMAddItem", "GMAddHeroCup", "GMFinishAllNewUserGuide"]
+    },
+    "GMAddHero": { "type": "action", "action": "GMAddHero" },
+    "GMAddItem": { "type": "action", "action": "GMAddItem" },
+    "GMAddHeroCup": { "type": "action", "action": "GMAddHeroCup" },
+    "GMFinishAllNewUserGuide": { "type": "action", "action": "GMFinishAllNewUserGuide" },
+    "GMAddLadderLevel": { "type": "action", "description": "GM 抬段位至大神榜门槛(星耀1=21)以上，使 anchor 对局可上榜被观战", "action": "GMAddLadderLevel" },
+    "unlockBasicFunction": { "type": "action", "description": "解锁排位等基础功能", "action": "unlockBasicFunction" },
+    "LbsPositioning": { "type": "action", "description": "Lbs定位", "action": "LbsPositioning" },
+
+    "roleSplit": {
+      "type": "boolean",
+      "description": "index%5==0 → 战斗源(anchor)造在战对局；其余 → 观战者",
+      "condition": "state:index % 5 == 0",
+      "trueNext": "businessLoop",
+      "falseNext": "watchLoop"
+    },
+
+    "businessLoop": { "type": "loop", "description": "anchor：循环单排造在战对局", "body": "normalModel", "loopCount": -1 },
+    "normalModel": {
+      "type": "sequence",
+      "next": ["CreateLadderTeam", "StartMatch", "MatchSucceed", "ConfirmMatchSuccess", "ListenStartLoading", "startBattle"]
+    },
+    "CreateLadderTeam": { "type": "action", "action": "CreateLadderTeam", "onError": { "strategy": "skip" } },
+    "StartMatch": { "type": "action", "action": "StartMatch", "onError": { "strategy": "skip" } },
+    "MatchSucceed": { "type": "action", "action": "MatchSucceed", "onError": { "strategy": "skip" } },
+    "ConfirmMatchSuccess": { "type": "action", "description": "确认匹配成功", "action": "ConfirmMatchSuccess" },
+    "ListenStartLoading": { "type": "action", "action": "ListenStartLoading", "onError": { "strategy": "skip" } },
+    "startBattle": {
+      "type": "sequence",
+      "next": ["ConnectBattleTCP", "ConnectBattleUDP", "RegisterBattle", "loadLoop", "BattleLoadOK", "ResetLoadState", "StartGame", "syncLoop", "BattleEnd", "BattleReward", "GameOver", "CleanupBattle"]
+    },
+    "ConnectBattleTCP": {
+      "type": "action",
+      "action": "ConnectBattleTCP",
+      "onError": { "strategy": "skip" },
+      "listenRefs": [ { "route": { "cmd": 4, "act": 10 }, "server": "tcp:battle", "listen": "battleStartGame" } ]
+    },
+    "ConnectBattleUDP": {
+      "type": "action",
+      "action": "ConnectBattleUDP",
+      "listenRefs": [ { "route": { "cmd": 4, "act": 11 }, "server": "udp:battle", "listen": "frameData" } ]
+    },
+    "RegisterBattle": { "type": "action", "action": "RegisterBattle" },
+    "loadLoop": { "type": "loop", "body": "LoadProgress", "loopCount": -1, "breakCondition": "state:loadProgress>=100" },
+    "LoadProgress": { "type": "action", "action": "LoadProgress", "delayMs": -1 },
+    "BattleLoadOK": { "type": "action", "action": "BattleLoadOK" },
+    "ResetLoadState": { "type": "action", "action": "ResetLoadState" },
+    "StartGame": { "type": "action", "action": "StartGame" },
+    "syncLoop": { "type": "loop", "description": "anchor 战斗帧同步；60ms/帧 × 3000 ≈ 3 分钟在战窗口供观战", "body": "SyncFrameData", "loopCount": 3000 },
+    "SyncFrameData": { "type": "action", "action": "SyncFrameData", "delayMs": -1 },
+    "BattleEnd": { "type": "action", "action": "BattleEnd" },
+    "BattleReward": { "type": "action", "action": "BattleReward" },
+    "GameOver": { "type": "action", "action": "GameOver" },
+    "CleanupBattle": { "type": "action", "action": "ClearBattleState" },
+
+    "watchLoop": { "type": "loop", "description": "观战者：循环拉榜→取址→连 ob→观战", "body": "watchRound", "loopCount": -1 },
+    "watchRound": {
+      "type": "sequence",
+      "next": ["closeStaleOb", "ObBattleList", "pickTarget", "hasTarget"]
+    },
+    "closeStaleOb": { "type": "action", "description": "关闭上一轮残留的观战服连接", "action": "CloseObserver" },
+    "ObBattleList": { "type": "action", "action": "ObBattleList", "onError": { "strategy": "skip" } },
+    "pickTarget": { "type": "action", "action": "PickObTarget" },
+    "hasTarget": {
+      "type": "boolean",
+      "condition": "state:obHasTarget == 1",
+      "trueNext": "fetchAddress"
+    },
+    "fetchAddress": {
+      "type": "sequence",
+      "next": ["ObRoomAddress", "connectOb", "enterRoom", "watchLoading", "watchEnd"]
+    },
+    "ObRoomAddress": {
+      "type": "action",
+      "description": "31|2 取观战房地址；失败(对局结束/满员/无实例)→本轮跳过",
+      "action": "ObRoomAddress",
+      "onError": { "strategy": "skip" }
+    },
+    "connectOb": {
+      "type": "action",
+      "description": "连观战服 + 密钥握手；注册 31|4/32|1/32|2 持久监听",
+      "action": "ConnectObserver",
+      "onError": { "strategy": "skip" },
+      "listenRefs": [
+        { "route": { "cmd": 31, "act": 4 }, "server": "tcp:ob", "listen": "obLoading" },
+        { "route": { "cmd": 32, "act": 1 }, "server": "tcp:ob", "listen": "obFrame" },
+        { "route": { "cmd": 32, "act": 2 }, "server": "tcp:ob", "listen": "obBattleEnd" }
+      ]
+    },
+    "enterRoom": {
+      "type": "action",
+      "description": "31|3 进观战房(发送，不等ack；成功信号是 31|4 loading)",
+      "action": "ObEnterRoom",
+      "onError": { "strategy": "skip" }
+    },
+    "watchLoading": {
+      "type": "action",
+      "description": "收 31|4 加载数据；超时=进房失败(票据失效/已结束)→本轮跳过",
+      "action": "WatchObLoading",
+      "onError": { "strategy": "skip" }
+    },
+    "watchEnd": {
+      "type": "action",
+      "description": "观战至 32|2 战斗结束；超时=主动结束本次观战",
+      "action": "WatchObEnd",
+      "onError": { "strategy": "skip" }
+    }
+  },
+  "actions": {
+    "RequestZoneList": { "pattern": "lua", "script": "request_zone_list.lua" },
+    "RequestOutsideNotice": { "pattern": "lua", "script": "request_outside_notice.lua" },
+    "RequestNotice": { "pattern": "lua", "script": "request_notice.lua" },
+    "PostLogin": { "pattern": "lua", "script": "post_login.lua" },
+    "NewRole": { "pattern": "lua", "script": "new_role.lua" },
+    "SelectRole": { "pattern": "lua", "script": "select_role.lua" },
+    "ConnectLogicTCP": { "pattern": "lua", "script": "connect_logic.lua" },
+    "ConnectBattleTCP": { "pattern": "lua", "script": "connect_battle_tcp.lua" },
+    "ConnectBattleUDP": { "pattern": "lua", "script": "connect_battle_udp.lua" },
+    "RequestPlayerData": { "pattern": "lua", "script": "request_player_data.lua" },
+    "PlayerLogin": {
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": { "cmd": 1, "act": 1 },
+      "c2sProto": "Game.LoginPlayerC2S",
+      "s2cProto": "Game.LoginPlayerS2C",
+      "bindings": [
+        { "type": "state", "field": "playerId", "source": "roleId" },
+        { "type": "state", "field": "session", "source": "session" },
+        { "type": "state", "field": "version", "source": "version" },
+        { "type": "state", "field": "battleVersion", "source": "battleVersion" },
+        { "type": "state", "field": "account", "source": "account" },
+        { "type": "state", "field": "zoneId", "source": "zoneId" }
+      ],
+      "store": [ { "setter": "loginResp" } ]
+    },
+    "ReportBattleDelay": {
+      "pattern": "tcpSend",
+      "service": "logic",
+      "route": { "cmd": 2, "act": 29 },
+      "c2sProto": "Game.MainBattleDelayC2S",
+      "bindings": [
+        { "type": "fixed", "field": "battleDelayList[0].BattleArea", "value": "ap.hongkong" },
+        { "type": "randomInt", "field": "battleDelayList[0].DelayTime", "min": 30, "max": 100 },
+        { "type": "fixed", "field": "battleDelayList[0].PingSendCnt", "value": 10 },
+        { "type": "fixed", "field": "battleDelayList[0].PingRecvCnt", "value": 10 },
+        { "type": "fixed", "field": "battleDelayList[1].BattleArea", "value": "ap.taibei" },
+        { "type": "randomInt", "field": "battleDelayList[1].DelayTime", "min": 30, "max": 100 },
+        { "type": "fixed", "field": "battleDelayList[1].PingSendCnt", "value": 10 },
+        { "type": "fixed", "field": "battleDelayList[1].PingRecvCnt", "value": 10 }
+      ]
+    },
+    "GMAddHero": {
+      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 9, "act": 1 },
+      "c2sProto": "Game.GmEventC2S", "s2cProto": "Game.GmEventS2C",
+      "bindings": [ { "type": "fixed", "field": "GM.type", "value": 70 } ]
+    },
+    "GMAddItem": {
+      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 9, "act": 1 },
+      "c2sProto": "Game.GmEventC2S", "s2cProto": "Game.GmEventS2C",
+      "bindings": [
+        { "type": "fixed", "field": "GM.type", "value": 4 },
+        { "type": "fixed", "field": "GM.param", "value": [1, 2147483647, 2, 2147483647, 5, 2147483647, 6, 2147483647, 7, 2147483647, 8, 2147483647, 10, 2147483647, 14, 2147483647, 32, 2147483647, 33, 2147483647, 7200001, 1, 7200002, 1, 7200003, 1, 7200004, 1, 7300001, 1, 7300003, 1, 7300004, 1, 7300005, 1, 7300006, 1, 7090001, 1, 7090002, 1, 7090005, 1, 7110001, 1, 7110002, 1, 7110003, 1, 7110004, 1, 7110005, 1, 7110006, 1, 7110007, 1, 7110008, 1, 7110009, 1, 7120001, 1, 7120002, 1, 7120003, 1, 7120004, 1, 7120005, 1, 7040001, 100000] }
+      ]
+    },
+    "GMAddHeroCup": {
+      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 9, "act": 1 },
+      "c2sProto": "Game.GmEventC2S", "s2cProto": "Game.GmEventS2C",
+      "bindings": [
+        { "type": "fixed", "field": "GM.type", "value": 13 },
+        { "type": "fixed", "field": "GM.param", "value": [109, 1000] }
+      ]
+    },
+    "GMFinishAllNewUserGuide": {
+      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 9, "act": 1 },
+      "c2sProto": "Game.GmEventC2S", "s2cProto": "Game.GmEventS2C",
+      "bindings": [ { "type": "fixed", "field": "GM.type", "value": 52 } ]
+    },
+    "GMAddLadderLevel": {
+      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 9, "act": 1 },
+      "c2sProto": "Game.GmEventC2S", "s2cProto": "Game.GmEventS2C",
+      "bindings": [
+        { "type": "fixed", "field": "GM.type", "value": 10 },
+        { "type": "fixed", "field": "GM.param", "value": [30] }
+      ]
+    },
+    "unlockBasicFunction": { "pattern": "lua", "script": "unlock_basic_functions.lua" },
+    "LbsPositioning": {
+      "pattern": "tcpSend", "service": "logic", "route": { "cmd": 40, "act": 2 },
+      "c2sProto": "Game.LbsPositioningC2S",
+      "bindings": [ { "type": "fixed", "field": "lbsId", "value": 10001001 } ]
+    },
+
+    "CreateLadderTeam": {
+      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 5, "act": 1 },
+      "c2sProto": "Game.TeamCreateC2S", "s2cProto": "Game.TeamCreateS2C",
+      "bindings": [ { "type": "fixed", "field": "model", "value": 2 } ],
+      "store": [ { "setter": "teamId", "field": "teamId" } ]
+    },
+    "StartMatch": {
+      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 5, "act": 20 },
+      "c2sProto": "Game.TeamStartMatchC2S", "s2cProto": "Game.TeamStartMatchS2C"
+    },
+    "MatchSucceed": { "pattern": "lua", "script": "match_succeed.lua" },
+    "ConfirmMatchSuccess": {
+      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 3, "act": 2 },
+      "c2sProto": "Game.MatchWaitPrepareC2S", "s2cProto": "Game.MatchWaitPrepareS2C"
+    },
+    "ListenStartLoading": { "pattern": "lua", "script": "listen_start_loading.lua" },
+    "RegisterBattle": { "pattern": "lua", "script": "register_battle.lua" },
+    "LoadProgress": { "pattern": "lua", "script": "load_progress.lua" },
+    "BattleLoadOK": {
+      "pattern": "tcpSend", "service": "battle", "route": { "cmd": 4, "act": 9 },
+      "c2sProto": "Game.BattleLoadOkC2S"
+    },
+    "ResetLoadState": {
+      "pattern": "setState",
+      "bindings": [ { "type": "fixed", "field": "loadProgress", "value": 0 }, { "type": "fixed", "field": "packageIndex", "value": 0 } ]
+    },
+    "StartGame": {
+      "pattern": "tcpListen", "service": "battle", "route": { "cmd": 4, "act": 10 },
+      "s2cProto": "Game.BattleStartGameS2C", "timeout": 180
+    },
+    "SyncFrameData": { "pattern": "lua", "script": "sync_frame_data.lua" },
+    "BattleEnd": { "pattern": "lua", "script": "battle_end.lua" },
+    "BattleReward": {
+      "pattern": "tcpListen", "service": "logic", "route": { "cmd": 4, "act": 72 },
+      "s2cProto": "Game.BattleRewardS2C", "timeout": 180
+    },
+    "GameOver": {
+      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 2, "act": 62 },
+      "c2sProto": "Game.MainGameOverC2S", "s2cProto": "Game.MainGameOverS2C",
+      "bindings": [ { "type": "fixed", "field": "operation", "value": 0 } ]
+    },
+    "ClearBattleState": {
+      "pattern": "clearState",
+      "keys": ["battleId", "battleAddress", "battleSecretKey", "battleSession", "fighterIndex", "fighterListData", "packageIndex", "battleAck"]
+    },
+
+    "ObBattleList": {
+      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 31, "act": 1 },
+      "c2sProto": "Game.ObBattleListC2S", "s2cProto": "Game.ObBattleListS2C",
+      "bindings": [ { "type": "fixed", "field": "battleModeId", "value": 0 } ],
+      "store": [ { "field": "list", "setter": "obBattleList" } ]
+    },
+    "PickObTarget": { "pattern": "lua", "script": "spectator_select_target.lua" },
+    "ObRoomAddress": {
+      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 31, "act": 2 },
+      "c2sProto": "Game.ObRoomAddressC2S", "s2cProto": "Game.ObRoomAddressS2C",
+      "bindings": [
+        { "type": "state", "field": "battleId", "source": "obTargetBattleId" },
+        { "type": "state", "field": "battleModeId", "source": "obTargetModeId" },
+        { "type": "fixed", "field": "filterApplied", "value": false }
+      ],
+      "store": [
+        { "field": "session", "setter": "obSession" },
+        { "field": "address", "setter": "obAddress" },
+        { "field": "sid", "setter": "obSid" }
+      ]
+    },
+    "ConnectObserver": { "pattern": "lua", "script": "connect_observer.lua" },
+    "ObEnterRoom": {
+      "pattern": "tcpSend", "service": "ob", "route": { "cmd": 31, "act": 3 },
+      "c2sProto": "Game.ObEnterRoomC2S",
+      "bindings": [
+        { "type": "state", "field": "playerId", "source": "roleId" },
+        { "type": "state", "field": "battleId", "source": "obTargetBattleId" },
+        { "type": "state", "field": "session", "source": "obSession" },
+        { "type": "fixed", "field": "spectateStartMode", "value": 0 },
+        { "type": "fixed", "field": "lastFrameIndex", "value": -1 }
+      ]
+    },
+    "WatchObLoading": {
+      "pattern": "tcpListen", "service": "ob", "route": { "cmd": 31, "act": 4 },
+      "s2cProto": "Game.ObBeginLoadingS2C", "timeout": 30,
+      "store": [ { "field": "maxFrame", "setter": "obMaxFrame" } ]
+    },
+    "WatchObEnd": {
+      "pattern": "tcpListen", "service": "ob", "route": { "cmd": 32, "act": 2 },
+      "timeout": 300
+    },
+    "CloseObserver": { "pattern": "tcpClose", "service": "ob" }
+  },
+  "listens": {
+    "matchPoll": {},
+    "teamStartMatch": {},
+    "loadingPoll": {},
+    "rewardPoll": {},
+    "stateUpdate": {
+      "s2cProto": "Game.MainStateUpdateS2C",
+      "store": [ { "setter": "playerStatus", "field": "status" } ]
+    },
+    "heroUpdate": {},
+    "shopDataUpdate": {},
+    "teamUpdateInfo": {},
+    "teamNotifyInvite": {},
+    "teamJoin": {},
+    "roomUpdateData": {},
+    "roomUpdateStatus": {},
+    "frameData": { "script": "listen_frame_data.lua" },
+    "battleStartGame": {},
+    "obLoading": {},
+    "obFrame": { "script": "listen_ob_frame.lua" },
+    "obBattleEnd": {}
+  }
+}

@@ -12,12 +12,16 @@ message ObBattleListC2S {
 message ObBattleListS2C {
     repeated ObBattleClient list = 1;
     int32 battleModeId           = 2;
+    map<int32, int64> heatHero   = 3;  // 英雄热度 heroId->热度(×1000)，筛选UI展示（读L0快照，零额外Redis）
+    map<int32, int64> heatMode   = 4;  // 玩法热度 battleModeId->热度(×1000)
+    map<int32, int64> heatMap    = 5;  // 地图热度 mapId->热度(×1000)
 }
 
 // 请求观战房间地址
 message ObRoomAddressC2S {
     int64 battleId     = 1;  // 房间ID
     int32 battleModeId = 2;
+    bool filterApplied = 3;  // 是否经筛选进入（决定热度增量口径：筛选>普通）
 }
 // 请求观战房间地址
 message ObRoomAddressS2C {
@@ -46,9 +50,11 @@ message ObRoomAddressS2C {
 
 // 加载观战房间初始数据
 message ObEnterRoomC2S {
-    int32 playerId = 1;
-    int64 battleId = 2;  // 房间ID
-    int64 session  = 3;  // 进入观战服务器session
+    int32 playerId         = 1;
+    int64 battleId         = 2;  // 房间ID
+    int64 session          = 3;  // 进入观战服务器session
+    int32 spectateStartMode = 4; // 起点模式 0=从头 1=从最新（配置 SpectatorParameter ID=29）
+    int32 lastFrameIndex   = 5;  // 断线重连续传：客户端本地已收到的最后帧索引；首次进房传 -1（从头）
 }
 // 加载观战房间初始数据
 message ObEnterRoomS2C {
@@ -117,4 +123,70 @@ message ObFriendRoomC2S {
 }
 // 请求好友观战房间地址
 message ObFriendRoomS2C {
+}
+//巅峰回放榜列表
+message ObReplayListC2S
+{
+    int32 battleModeId = 1;  // 玩法筛选，0=全部
+}
+//巅峰回放榜列表
+message ObReplayListS2C
+{
+    repeated ObReplayInfo list = 1;  // 巅峰回放列表
+    int32 battleModeId         = 2;  // 玩法筛选回显
+}
+//我的录像列表
+message ObMyRecordListC2S
+{
+}
+//我的录像列表
+message ObMyRecordListS2C
+{
+    repeated ObReplayInfo list = 1;  // 我的录像列表
+    int32 saveCountLeft        = 2;  // 剩余可保存数量
+}
+//我的收藏列表
+message ObCollectListC2S
+{
+}
+//我的收藏列表
+message ObCollectListS2C
+{
+    repeated ObReplayInfo list = 1;  // 我的收藏列表
+    int32 collectCountLeft     = 2;  // 剩余可收藏数量
+}
+//收藏/取消收藏录像
+message ObCollectC2S
+{
+    int64 battleId = 1;  // 录像（对战）ID
+    bool collect   = 2;  // true=收藏 false=取消收藏
+}
+//收藏/取消收藏录像
+message ObCollectS2C
+{
+    int64 battleId         = 1;  // 录像（对战）ID
+    bool collect           = 2;  // 当前收藏状态
+    int32 collectCountLeft = 3;  // 剩余可收藏数量
+}
+//保存录像
+message ObSaveRecordC2S
+{
+    int64 battleId = 1;  // 对战ID
+}
+//保存录像
+message ObSaveRecordS2C
+{
+    int64 battleId      = 1;  // 对战ID
+    int32 saveCountLeft = 2;  // 剩余可保存数量
+}
+//删除录像
+message ObDelRecordC2S
+{
+    int64 battleId = 1;  // 对战ID
+}
+//删除录像
+message ObDelRecordS2C
+{
+    int64 battleId      = 1;  // 对战ID
+    int32 saveCountLeft = 2;  // 剩余可保存数量
 }
