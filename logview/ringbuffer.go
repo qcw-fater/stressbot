@@ -12,12 +12,12 @@ import (
 
 // Entry 单条结构化日志。
 type Entry struct {
-	Level   string  `json:"level"`
+	Level   string    `json:"level"`
 	Time    time.Time `json:"time"`
-	Caller  string  `json:"caller,omitempty"`
-	Message string  `json:"message"`
-	Service string  `json:"service,omitempty"`
-	Fields  []Field `json:"fields,omitempty"`
+	Caller  string    `json:"caller,omitempty"`
+	Message string    `json:"message"`
+	Service string    `json:"service,omitempty"`
+	Fields  []Field   `json:"fields,omitempty"`
 }
 
 // Field 序列化后的 zap 字段键值对。
@@ -106,17 +106,19 @@ func (rb *RingBuffer) Query(params QueryParams) QueryResult {
 		limit = 200
 	}
 
+	// 整个遍历持有读锁：Append 在写锁内会就地覆盖底层数组元素（含 fields 切片头），
+	// 释放读锁后再读 buf[idx] 会与之并发触发 data race。toEntry 的编码开销在读锁内完成，
+	// 但 Query 频率低（前端轮询）、limit 有界（默认 200），对 Append 的阻塞可忽略。
 	rb.mu.RLock()
+	defer rb.mu.RUnlock()
+
 	count := rb.count
 	if count == 0 {
-		rb.mu.RUnlock()
 		return QueryResult{Entries: []Entry{}, HasMore: false, NextSeq: 0}
 	}
 
 	start := (rb.head - count + rb.size) % rb.size
-	buf := rb.buf
 	size := rb.size
-	rb.mu.RUnlock()
 
 	var entries []Entry
 	lastSeq := uint64(0)
@@ -125,7 +127,7 @@ func (rb *RingBuffer) Query(params QueryParams) QueryResult {
 
 	for i := 0; i < count; i++ {
 		idx := (start + i) % size
-		item := &buf[idx]
+		item := &rb.buf[idx]
 
 		if item.seq <= params.AfterSeq {
 			continue

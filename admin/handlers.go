@@ -343,12 +343,15 @@ func (s *AdminServer) handleAgentTaskDone(w http.ResponseWriter, r *http.Request
 		}
 		t.Reports[agentID] = report
 
-		// 检查是否全部完成：只等实际成功的 Agent
+		// 检查是否全部完成：只等实际成功的 Agent。
+		// 用 >= 而非 ==：若出现额外报告（如未计入 SucceededAgents 的 Agent 上报），
+		// == 会永远错过相等时刻导致任务卡在 running/stopping；>= 保证达到阈值即收尾，
+		// 且后续报告因 t.State 已非 running/stopping 不会重复触发 transition。
 		expected := len(t.SucceededAgents)
 		if expected == 0 {
 			expected = len(t.Assignments)
 		}
-		if len(t.Reports) == expected {
+		if expected > 0 && len(t.Reports) >= expected {
 			t.CleanupSummary = aggregateTaskCleanup(t)
 			if t.State == TaskRunning {
 				needTransition = TaskRunning
@@ -1066,7 +1069,7 @@ func (s *AdminServer) handleStopTask(w http.ResponseWriter, r *http.Request) {
 				zap.String("taskID", id), zap.Error(err))
 		}
 	} else {
-		// 安全网：30s 后如果还在 stopping（在线节点未响应），强制完成
+		// 安全网：stopWaitTimeout（60s）后如果还在 stopping（在线节点未响应），强制完成
 		s.startStopTimeout(id)
 	}
 

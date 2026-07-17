@@ -16,7 +16,8 @@ func (e monitorTestCodedError) ErrorCode() uint64   { return e.code }
 func (e monitorTestCodedError) ErrorDetail() string { return e.detail }
 
 func newMonitorTestCollector() *MetricsCollector {
-	c := &MetricsCollector{enabled: true, startTime: time.Now()}
+	c := &MetricsCollector{enabled: true}
+	c.startTime.Store(time.Now().UnixNano())
 	c.apdexT.Store(100)
 	return c
 }

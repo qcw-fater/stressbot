@@ -189,36 +189,51 @@ func (r *AgentRegistry) Deregister(agentID string) error {
 	return nil
 }
 
-// Get 获取 Agent。
+// Get 获取 Agent 的读安全副本（无则返回 false）。
 func (r *AgentRegistry) Get(agentID string) (*AgentNode, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	node, ok := r.agents[agentID]
-	return node, ok
+	if !ok {
+		return nil, false
+	}
+	return cloneNodeForRead(node), true
 }
 
-// List 列出所有 Agent。
+// List 列出所有 Agent 的读安全副本。
 func (r *AgentRegistry) List() []*AgentNode {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := make([]*AgentNode, 0, len(r.agents))
 	for _, n := range r.agents {
-		out = append(out, n)
+		out = append(out, cloneNodeForRead(n))
 	}
 	return out
 }
 
-// ListByStatus 按状态列出 Agent。
+// ListByStatus 按状态列出 Agent 的读安全副本。
 func (r *AgentRegistry) ListByStatus(status AgentStatus) []*AgentNode {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []*AgentNode
 	for _, n := range r.agents {
 		if n.Status == status {
-			out = append(out, n)
+			out = append(out, cloneNodeForRead(n))
 		}
 	}
 	return out
+}
+
+// cloneNodeForRead 返回 AgentNode 的读安全浅拷贝。
+//
+// Register/Heartbeat/Touch/UpdateStress/scanAndMarkStatus 均在 r.mu 写锁内就地改写 *AgentNode
+// 的标量字段（Status/CurrentTaskID/CurrentBots/LastHeartbeatAt 等），若 Get/List 直接返回内部
+// 指针，调用方在锁外读取这些字段会与写入并发触发 data race。指针字段 LatestStress/LatestSystem
+// 以「整体重新赋值」方式更新（不就地改写指向的快照对象），浅拷贝持有的指针即为一致快照。
+// 调用方必须持有 r.mu。
+func cloneNodeForRead(n *AgentNode) *AgentNode {
+	cp := *n
+	return &cp
 }
 
 // UpdateStress 更新 Agent 压测指标快照。

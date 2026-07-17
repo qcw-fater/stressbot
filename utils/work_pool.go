@@ -126,6 +126,15 @@ func (p *WorkPool) submit(task func(stopCh <-chan struct{})) error {
 		return ErrPoolStopped
 	}
 
+	// 先登记 wg，再二次检查 stopped：Shutdown 会「置位 stopped → wg.Wait()」。
+	// 若在首次检查与此处之间 Shutdown 置位，二次检查命中后 Done 抵消计数并退出，
+	// 保证已 Add 的计数不会遗留，避免 Shutdown 的 wg.Wait() 永久阻塞。
+	p.wg.Add(1)
+	if p.IsStopped() {
+		p.wg.Done()
+		return ErrPoolStopped
+	}
+
 	p.waiting.Add(1)
 	p.submitted.Add(1)
 	p.goCount.Add(1)
@@ -151,7 +160,6 @@ func (p *WorkPool) submit(task func(stopCh <-chan struct{})) error {
 			zap.String("caller", caller))
 	}
 
-	p.wg.Add(1)
 	err := p.pool.Submit(func() {
 		defer func() {
 			p.wg.Done()
@@ -177,6 +185,9 @@ func (p *WorkPool) submit(task func(stopCh <-chan struct{})) error {
 	})
 
 	if err != nil {
+		// 补齐 wg.Done：提交失败时任务体不会执行，其 defer 中的 wg.Done 也不会触发，
+		// 若不在此抵消，Shutdown 的 wg.Wait() 将永久阻塞至超时。
+		p.wg.Done()
 		p.waiting.Add(-1)
 		p.goCount.Add(-1)
 		if debugOn {

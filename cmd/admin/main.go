@@ -66,7 +66,7 @@ func main() {
 		Compress:     true,
 	}
 	stresslog.InitLog(cfg.Log.Path, "admin", logConf, "")
-	newLogger := logview.AttachRingBuffer(stresslog.GetLogger(), 5000, zap.String("SR", "admin"))
+	newLogger := logview.AttachRingBuffer(stresslog.GetLogger(), 5000, stresslog.LevelEnabler(), zap.String("SR", "admin"))
 	stresslog.ReplaceLogger(newLogger)
 
 	stresslog.Info("[MAIN] Admin 服务器启动", zap.String("version", Version))

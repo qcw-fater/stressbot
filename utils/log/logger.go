@@ -87,6 +87,9 @@ func InitLog(logPath, serviceName string, conf *Config, buildLogLevel string) {
 		}
 	}
 	defaultConf = conf
+	// 装配企业微信告警 Hook 密钥：DPanic 及以上级别经 zap.Hooks 推送。
+	// 未配置（空串）时 postQYWXMsg 直接返回，等价于关闭告警。
+	SetWechatToken(conf.WeChatToken)
 	if buildLogLevel != "" {
 		conf.LogLevel = buildLogLevel
 	}
@@ -264,6 +267,12 @@ func SetLogLevel(logLevel zapcore.Level) {
 // GetLogLevel 获取日志等级接口
 func GetLogLevel() zapcore.Level {
 	return loglevel.Level()
+}
+
+// LevelEnabler 返回全局日志等级过滤器（AtomicLevel）。
+// 供 logview.AttachRingBuffer 复用同一等级门槛，随 SetLogLevel 动态变化。
+func LevelEnabler() zapcore.LevelEnabler {
+	return loglevel
 }
 
 // DebugEnabled 快速判断 Debug 级别是否启用（atomic load，纳秒级）。

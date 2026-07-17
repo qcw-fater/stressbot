@@ -239,7 +239,12 @@ func (s *AdminServer) onTaskTerminal(task *Task) {
 			stresslog.Error("任务归档失败",
 				zap.String("taskID", taskID),
 				zap.Error(err))
+			return
 		}
+		stresslog.Info("[ADMIN] 任务归档完成",
+			zap.String("taskID", taskID),
+			zap.String("state", string(task.State)),
+			zap.Int("reports", len(task.Reports)))
 	})
 }
 
@@ -393,7 +398,7 @@ func (s *AdminServer) onAgentStatusChange(agentID string, from, to AgentStatus) 
 					CleanupStatus: &cleanup,
 				}
 			}
-			if len(t.Reports) == len(t.Assignments) {
+			if len(t.Assignments) > 0 && len(t.Reports) >= len(t.Assignments) {
 				t.CleanupSummary = aggregateTaskCleanup(t)
 				complete = true
 			}

@@ -122,7 +122,7 @@ func main() {
 		logTag = "agent"
 	}
 	stresslog.InitLog(logPath, logTag, cfg.Log, "")
-	newLogger := logview.AttachRingBuffer(stresslog.GetLogger(), 50000, zap.String("SR", logTag))
+	newLogger := logview.AttachRingBuffer(stresslog.GetLogger(), 50000, stresslog.LevelEnabler(), zap.String("SR", logTag))
 	stresslog.ReplaceLogger(newLogger)
 
 	if cfg.Agent.Enabled {

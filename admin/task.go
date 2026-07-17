@@ -88,6 +88,35 @@ func (ts *TaskStore) Create(t *Task) error {
 	return saveTaskFile(ts.dataDir, t)
 }
 
+// cloneForRead 返回 Task 的读安全副本：在浅拷贝基础上，对会被 Update 回调就地改写的
+// 引用型集合字段（Reports map、Assignments/SucceededAgents/StageReports/AgentEvents 切片）
+// 做一层拷贝，避免调用方遍历副本时与持锁的 Update 并发读写同一底层容器触发 fatal data race。
+// StartedAt/StoppedAt 等指针字段在 Update 内以「整体重新赋值」方式更新（不就地改写指向对象），
+// 浅拷贝持有旧指针值即为一致快照，无需深拷。CleanupSummary 亦为一次性整体赋值。
+// 调用方必须持有 ts.mu（读锁或写锁）。
+func cloneForRead(t *Task) *Task {
+	cp := *t
+	if t.Reports != nil {
+		cp.Reports = make(map[string]TaskCompletionReport, len(t.Reports))
+		for k, v := range t.Reports {
+			cp.Reports[k] = v
+		}
+	}
+	if t.Assignments != nil {
+		cp.Assignments = append([]Assignment(nil), t.Assignments...)
+	}
+	if t.SucceededAgents != nil {
+		cp.SucceededAgents = append([]string(nil), t.SucceededAgents...)
+	}
+	if t.StageReports != nil {
+		cp.StageReports = append([]TaskCompletionReport(nil), t.StageReports...)
+	}
+	if t.AgentEvents != nil {
+		cp.AgentEvents = append([]AgentEvent(nil), t.AgentEvents...)
+	}
+	return &cp
+}
+
 // Get 获取任务副本。
 func (ts *TaskStore) Get(id string) (*Task, bool) {
 	ts.mu.RLock()
@@ -96,8 +125,7 @@ func (ts *TaskStore) Get(id string) (*Task, bool) {
 	if !ok {
 		return nil, false
 	}
-	cp := *t // shallow copy
-	return &cp, true
+	return cloneForRead(t), true
 }
 
 // List 列出所有任务副本。
@@ -106,8 +134,7 @@ func (ts *TaskStore) List() []*Task {
 	defer ts.mu.RUnlock()
 	out := make([]*Task, 0, len(ts.tasks))
 	for _, t := range ts.tasks {
-		cp := *t
-		out = append(out, &cp)
+		out = append(out, cloneForRead(t))
 	}
 	return out
 }
@@ -119,8 +146,7 @@ func (ts *TaskStore) ListByState(state TaskState) []*Task {
 	var out []*Task
 	for _, t := range ts.tasks {
 		if t.State == state {
-			cp := *t
-			out = append(out, &cp)
+			out = append(out, cloneForRead(t))
 		}
 	}
 	return out
@@ -219,8 +245,8 @@ func (ts *TaskStore) ActiveTaskID() string {
 	return ts.activeID
 }
 
-// ActiveTask 返回当前活跃任务的浅拷贝（无则返回 nil）。
-// 注意：返回值中的 slice/map/pointer 字段仍指向内部数据，仅供只读访问。
+// ActiveTask 返回当前活跃任务的读安全副本（无则返回 nil）。
+// 引用型集合字段（Reports/Assignments/... ）已由 cloneForRead 拷贝，可安全只读遍历。
 func (ts *TaskStore) ActiveTask() *Task {
 	ts.mu.RLock()
 	defer ts.mu.RUnlock()
@@ -231,8 +257,7 @@ func (ts *TaskStore) ActiveTask() *Task {
 	if !ok {
 		return nil
 	}
-	cp := *t // shallow copy
-	return &cp
+	return cloneForRead(t)
 }
 
 // HasActive 是否有活跃任务。

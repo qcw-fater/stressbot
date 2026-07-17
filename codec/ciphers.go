@@ -22,6 +22,7 @@ import (
 	"crypto/cipher"
 	"encoding/binary"
 	"errors"
+	"fmt"
 )
 
 // ---------------------------------------------------------------------------
@@ -144,6 +145,9 @@ func pkcs7Unpad(data []byte) ([]byte, error) {
 
 // xxteaDelta XXTEA 黄金比例增量常量。
 const xxteaDelta uint32 = 0x9E3779B9
+
+// xxteaKeyLen XXTEA 密钥要求的字节数（4 个小端 uint32）。
+const xxteaKeyLen = 16
 
 // encryptXXTEA XXTEA 加密（迁移自 lua_crypto.go:628）。
 func encryptXXTEA(data []byte, key [4]uint32) []byte {
@@ -384,14 +388,20 @@ func (aesCbcCipher) iv(params map[string]any) ([]byte, error) {
 	if !ok {
 		return nil, errors.New("aes_cbc 缺少参数 iv")
 	}
-	switch iv := v.(type) {
+	var iv []byte
+	switch t := v.(type) {
 	case []byte:
-		return iv, nil
+		iv = t
 	case string:
-		return []byte(iv), nil
+		iv = []byte(t)
 	default:
 		return nil, errors.New("aes_cbc 参数 iv 类型非法（需 bytes 或 string）")
 	}
+	// cipher.NewCBCEncrypter/Decrypter 对非 blockSize 的 IV 直接 panic，这里提前转成可控错误。
+	if len(iv) != aes.BlockSize {
+		return nil, fmt.Errorf("aes_cbc iv 长度非法：需 %d 字节，实际 %d", aes.BlockSize, len(iv))
+	}
+	return iv, nil
 }
 
 func (c aesCbcCipher) Encrypt(data, key []byte, offset int, params map[string]any) ([]byte, error) {
@@ -450,14 +460,20 @@ func (aesCtrCipher) iv(params map[string]any) ([]byte, error) {
 	if !ok {
 		return nil, errors.New("aes_ctr 缺少参数 iv")
 	}
-	switch iv := v.(type) {
+	var iv []byte
+	switch t := v.(type) {
 	case []byte:
-		return iv, nil
+		iv = t
 	case string:
-		return []byte(iv), nil
+		iv = []byte(t)
 	default:
 		return nil, errors.New("aes_ctr 参数 iv 类型非法（需 bytes 或 string）")
 	}
+	// cipher.NewCTR 对非 blockSize 的 IV 直接 panic，这里提前转成可控错误。
+	if len(iv) != aes.BlockSize {
+		return nil, fmt.Errorf("aes_ctr iv 长度非法：需 %d 字节，实际 %d", aes.BlockSize, len(iv))
+	}
+	return iv, nil
 }
 
 func (c aesCtrCipher) Encrypt(data, key []byte, offset int, params map[string]any) ([]byte, error) {
@@ -497,6 +513,11 @@ func (xxteaCipher) keyWords(key []byte) [4]uint32 {
 }
 
 func (c xxteaCipher) Encrypt(data, key []byte, offset int, params map[string]any) ([]byte, error) {
+	// keyWords 对不足 16 字节的 key 会静默零填充 → 加解密结果错误却不报错。
+	// 显式校验，把"静默错密钥"变成可定位的错误。
+	if len(key) < xxteaKeyLen {
+		return nil, fmt.Errorf("xxtea key 长度非法：需 %d 字节，实际 %d", xxteaKeyLen, len(key))
+	}
 	off := clampOffset(offset, len(data))
 	body := data[off:]
 	// 补齐到 4 字节对齐（迁移自 lua_crypto.go:709）。
@@ -514,6 +535,9 @@ func (c xxteaCipher) Encrypt(data, key []byte, offset int, params map[string]any
 }
 
 func (c xxteaCipher) Decrypt(data, key []byte, offset int, params map[string]any) ([]byte, error) {
+	if len(key) < xxteaKeyLen {
+		return nil, fmt.Errorf("xxtea key 长度非法：需 %d 字节，实际 %d", xxteaKeyLen, len(key))
+	}
 	off := clampOffset(offset, len(data))
 	body := data[off:]
 	if len(body)%4 != 0 || len(body) < 8 {

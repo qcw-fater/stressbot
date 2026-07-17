@@ -359,12 +359,13 @@ func loadTaskFlow(path string) (*engine.TaskFlow, error) {
 // 超时后强制返回，避免 Agent 因清理阻塞而无法接受新任务。
 func stopDialerWithTimeout(d *network.Dialer) {
 	done := make(chan struct{})
-	go func() {
+	// 走协程池而非裸 go：统一 recover 防止 d.Stop() panic 扩散，且纳入池化管理。
+	utils.GetWorkPool().Go(func() {
 		defer close(done)
 		if err := d.Stop(); err != nil {
 			stresslog.Warn("[TASK] 停止网络引擎失败", zap.Error(err))
 		}
-	}()
+	})
 	select {
 	case <-done:
 	case <-time.After(taskCleanupTimeout):

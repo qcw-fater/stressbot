@@ -11,7 +11,6 @@ import (
 	"os/signal"
 	"runtime/debug"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -59,9 +58,6 @@ type Agent struct {
 	// 优雅退出
 	stopCh   chan struct{}
 	stopOnce sync.Once
-
-	// 避免旧任务的回调到新生命周期里污染状态。
-	regGeneration atomic.Int64
 }
 
 // New 创建 Agent 实例。
@@ -132,7 +128,6 @@ func (a *Agent) Run() (err error) {
 		a.shutdownHTTPServer(ctx)
 		return fmt.Errorf("注册失败: %w", err)
 	}
-	a.regGeneration.Add(1)
 
 	// 4. 启动系统指标上报（常驻）
 	a.sysReporter = NewSystemReporter(a.httpCli, a.id, a.cfg.MetricsInterval, a.sysmon)
@@ -320,7 +315,6 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 					zap.String("agentID", a.id),
 					zap.String("status", string(status)),
 					zap.String("taskID", taskID))
-				a.regGeneration.Add(1)
 				consecutiveFailures = 0
 				interval = a.cfg.HeartbeatInterval
 				timer.Reset(interval)

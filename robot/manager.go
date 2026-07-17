@@ -59,18 +59,27 @@ type ManagerConfig struct {
 
 // Manager 机器人管理器。
 type Manager struct {
-	cfg            ManagerConfig
-	flow           *engine.TaskFlow
-	factory        *protox.Factory
-	dialer         *network.Dialer
-	luaPool        *script.RuntimePool
-	robots         []*Robot
-	mu             sync.RWMutex
-	ctx            context.Context
-	cancel         context.CancelFunc
-	started        atomic.Int32
-	stopped        atomic.Int32
-	doneCh         chan struct{} // 所有机器人停止后关闭
+	cfg     ManagerConfig
+	flow    *engine.TaskFlow
+	factory *protox.Factory
+	dialer  *network.Dialer
+	luaPool *script.RuntimePool
+	robots  []*Robot
+	mu      sync.RWMutex
+	ctx     context.Context
+	cancel  context.CancelFunc
+
+	// 生命周期计数（替代旧 started/stopped 对，消除 ramp-up 竞态）：
+	//   - active：当前代存活 robot 数（startBatch 创建时 +1，onRobotDone -1）；
+	//   - generation：代号，resetBots 递增；onRobotDone 按创建时捕获的代号归属，
+	//     旧代回调（gen 不符）不得触碰当前代 active/doneCh，隔离阶段重置的异步回调污染；
+	//   - creationDone：创建阶段是否结束（Manager 不再新建 robot）。
+	// doneCh 关闭的唯一条件：creationDone==true 且 active==0。这一条同时消灭
+	// "错过完成事件（永不结束）""阶段间瞬时归零（提前结束）""旧代回调污染计数"三类问题。
+	active         atomic.Int32
+	generation     atomic.Int32
+	creationDone   atomic.Bool
+	doneCh         chan struct{} // 创建阶段结束且所有机器人停止后关闭
 	stopOnce       sync.Once
 	cleanupMu      sync.Mutex
 	cleanupSummary CleanupStatus
@@ -116,6 +125,8 @@ func (c ManagerConfig) robotIdentity(localIndex int) (id, index int, account str
 // 返回实际创建的数量（即使中途被 ctx 取消，调用方也能知道完成了多少）。
 func (m *Manager) startBatch(fromIndex, count, conc int) (int, error) {
 	created := 0
+	// 本批全部归属同一代：generation 只在 resetBots 于阶段之间递增，单次 startBatch 内不变。
+	gen := m.generation.Load()
 	for i := 0; i < count; i++ {
 		if m.ctx.Err() != nil {
 			stresslog.Warn("[MANAGER] 批次创建被取消",
@@ -151,9 +162,11 @@ func (m *Manager) startBatch(fromIndex, count, conc int) (int, error) {
 		m.robots = append(m.robots, r)
 		m.mu.Unlock()
 
-		r.onDone = m.onRobotDone
+		// 先登记 active 再 Start：杜绝 robot 秒退时 onRobotDone 的 -1 早于本处 +1，
+		// 否则会错过"最后一个完成"事件导致 doneCh 永不关闭。
+		m.active.Add(1)
+		r.onDone = func(rr *Robot, c CleanupStatus) { m.onRobotDone(gen, rr, c) }
 		r.Start()
-		m.started.Add(1)
 		created++
 
 		// 仅在批次中间触发限速等待；最后一个 robot 启动后不再等，避免阶段切换时多等 1s。
@@ -173,6 +186,8 @@ func (m *Manager) startBatch(fromIndex, count, conc int) (int, error) {
 
 // StartAll 一次性创建全部机器人。
 func (m *Manager) StartAll() error {
+	// defer 保证成功/失败/早退所有路径都标记创建阶段结束，打开 doneCh 关闭门闩。
+	defer m.finishCreation()
 	stresslog.Info("[MANAGER] 开始创建机器人",
 		zap.Int("count", m.cfg.Count),
 		zap.Int("concurrent", m.cfg.ConcurrentNum))
@@ -191,6 +206,8 @@ func (m *Manager) StartAll() error {
 
 // StartWithRampUp 分阶段创建机器人。
 func (m *Manager) StartWithRampUp() error {
+	// defer 保证成功/失败/早退所有路径都标记创建阶段结束，打开 doneCh 关闭门闩。
+	defer m.finishCreation()
 	stages := m.cfg.RampUp.Stages
 	total := 0
 	for _, s := range stages {
@@ -211,10 +228,13 @@ func (m *Manager) StartWithRampUp() error {
 		// 阶段重置：清空已有机器人，上报当前阶段指标。
 		// resetBots 后短暂 sleep 给"机器人末次 IO + 计数器最终值"留出 flush 窗口，
 		// 同时 select ctx.Done() 以便用户中途停止任务能立即返回。
-		if stage.Reset && len(m.robots) > 0 {
+		m.mu.RLock()
+		curBots := len(m.robots) // 锁内读：onRobotDone 持写锁改 m.robots，锁外读有数据竞争
+		m.mu.RUnlock()
+		if stage.Reset && curBots > 0 {
 			stresslog.Info("[MANAGER] 阶段重置，停止所有机器人",
 				zap.Int("nextStage", i+1),
-				zap.Int("currentBots", len(m.robots)))
+				zap.Int("currentBots", curBots))
 			m.resetBots()
 			select {
 			case <-m.ctx.Done():
@@ -381,6 +401,10 @@ func (m *Manager) StopAll() CleanupStatus {
 // 并发 Close：单个 robot 清理卡住（如长时间 Lua action / executor 退出 / 连接清理）
 // 不应阻塞阶段切换。
 func (m *Manager) resetBots() CleanupStatus {
+	// 先递增代号：此后被关闭的旧 robot 的 onRobotDone 归入旧代，被 onRobotDone 的 gen 检查挡下，
+	// 不会误改新代 active / 误关 doneCh，隔离异步回调与本处同步调账的竞争。
+	m.generation.Add(1)
+
 	m.mu.Lock()
 	robots := make([]*Robot, len(m.robots))
 	copy(robots, m.robots)
@@ -388,18 +412,17 @@ func (m *Manager) resetBots() CleanupStatus {
 	m.mu.Unlock()
 
 	cleanup := closeRobotsConcurrent(robots, CleanupReasonRampReset)
-	// 重置计数器，使后续阶段的 onRobotDone 匹配逻辑正确
-	m.started.Add(int32(-len(robots)))
-	m.stopped.Store(0)
+	// 新代 active 基线归零（旧代回调因 gen 不符不会再减 active，故直接 Store 安全）。
+	m.active.Store(0)
 	stresslog.Info("[MANAGER] 阶段重置完成，已停止机器人",
 		zap.Int("count", len(robots)),
 		zap.String("cleanup", string(cleanup.Status)))
 	return cleanup
 }
 
-// onRobotDone 在单个 Robot 执行 goroutine 结束后回调。
-// 当所有已启动的 Robot 都结束时，自动关闭 doneCh，使 task_runner 的 select 退出。
-func (m *Manager) onRobotDone(r *Robot, cleanup CleanupStatus) {
+// onRobotDone 在单个 Robot 执行 goroutine 结束后回调（gen 为该 robot 创建时捕获的代号）。
+// 创建阶段结束且当前代所有 Robot 都结束时，关闭 doneCh，使 task_runner 的 select 退出。
+func (m *Manager) onRobotDone(gen int32, r *Robot, cleanup CleanupStatus) {
 	m.mu.Lock()
 	for i, item := range m.robots {
 		if item == r {
@@ -411,7 +434,26 @@ func (m *Manager) onRobotDone(r *Robot, cleanup CleanupStatus) {
 	}
 	m.mu.Unlock()
 	m.recordCleanup(cleanup)
-	if m.stopped.Add(1) == m.started.Load() {
+
+	// 旧代回调：resetBots 已把该代整体清零并递增 generation，此处不得再改当前代 active
+	// 或关闭 doneCh，否则会污染新阶段计数。摘除+记账已在上方完成（对已截断的 robots 为 no-op）。
+	if gen != m.generation.Load() {
+		return
+	}
+	// 关闭门闩：仅当创建阶段结束（不再新建）且当前代无存活 robot 时关闭。
+	if m.active.Add(-1) == 0 && m.creationDone.Load() {
+		m.stopOnce.Do(func() { close(m.doneCh) })
+	}
+}
+
+// finishCreation 标记创建阶段结束（本 Manager 不再新建 robot），打开 doneCh 关闭门闩。
+// 若此刻已无存活 robot（全部提前结束），立即关闭 doneCh。
+// 语义为"创建阶段已终结"，故 StartAll/StartWithRampUp 的所有返回路径（成功/失败/早退）
+// 都应以 defer 触发；与 onRobotDone 的关闭判定交叉覆盖（一方先置 creationDone 再读 active，
+// 另一方先减 active 再读 creationDone），stopOnce 去重防双关。
+func (m *Manager) finishCreation() {
+	m.creationDone.Store(true)
+	if m.active.Load() == 0 {
 		m.stopOnce.Do(func() { close(m.doneCh) })
 	}
 }

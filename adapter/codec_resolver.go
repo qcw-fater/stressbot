@@ -217,6 +217,33 @@ func LoadCodecResolver(codecDir string, codecs map[string]string, errorsFile str
 		}
 	}
 
+	// 校验所有 codec 帧切割规则一致：gnet EventServer 仅持单一元信息源（PickMetaAdapter 取排序首个），
+	// 各连接 HeaderSize/长度字段口径不同会直接错帧。异构 frame spec 在此启动期 fail loud，
+	// 而非留到运行时静默错帧（per-connection 帧规则下沉到 Connection 是后续工作）。
+	type frameSigProvider interface {
+		FrameSignature() codec.FrameSignature
+	}
+	var (
+		baseSig     codec.FrameSignature
+		baseServer  string
+		haveBaseSig bool
+	)
+	for _, server := range servers { // servers 已排序，错误信息稳定
+		fp, ok := byServer[server].(frameSigProvider)
+		if !ok {
+			continue
+		}
+		sig := fp.FrameSignature()
+		if !haveBaseSig {
+			baseSig, baseServer, haveBaseSig = sig, server, true
+			continue
+		}
+		if sig != baseSig {
+			return nil, fmt.Errorf("codec 加载失败：连接 %q(%s) 与 %q(%s) 帧切割规则不一致（HeaderSize/长度字段口径不同），当前仅支持全局统一帧规则：%+v vs %+v",
+				server, codecs[server], baseServer, codecs[baseServer], sig, baseSig)
+		}
+	}
+
 	return NewCodecResolverWithHeartbeat(byServer, heartbeatByServer), nil
 }
 

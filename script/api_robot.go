@@ -403,7 +403,10 @@ func luaToGoValue(v lua.LValue) any {
 			}
 		})
 
-		if isArray && maxIdx > 0 {
+		// 仅"稠密"表按 maxIdx 分配：isArray 只保证键全为数字，maxIdx 可能远大于实际元素数。
+		// 稀疏表（如 {[1e9]=1}：count=1 而 maxIdx=1e9）若按 maxIdx 分配会申请十亿级切片 → OOM。
+		// maxIdx == count 表示下标连续 1..N，分配量恒等于元素数；否则退化为 map（键转字符串）。
+		if isArray && maxIdx > 0 && maxIdx == count {
 			arr := make([]any, maxIdx)
 			tb.ForEach(func(k, val lua.LValue) {
 				idx := int(lua.LVAsNumber(k)) - 1

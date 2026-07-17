@@ -12,9 +12,9 @@ const NumBuckets = 16
 const numBuckets = NumBuckets
 
 // bucketBoundsMs 定义桶上边界（毫秒），覆盖 0 ~ 60s+。
-// buckets[i] 记录落在 (boundsMs[i-1], boundsMs[i]] 区间的样本数。
-// buckets[0] 记录 == 0ms 的样本（极少见，占位）。
-// 最后一个桶（index 15）为 >60000ms 的溢出桶。
+// 归属规则为左闭右开（见 Record：ms < bound 命中）：
+// buckets[0] 记录 [0, 1) 区间；buckets[i]（1≤i≤14）记录 [boundsMs[i-1], boundsMs[i]) 区间。
+// 最后一个桶（index 15）为 [60000, +∞) 的溢出桶。
 var BucketBoundsMs = [NumBuckets - 1]float64{
 	1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 30000, 60000,
 }

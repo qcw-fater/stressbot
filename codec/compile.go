@@ -420,6 +420,38 @@ func (g *compiledGuard) routeValue(route map[string]any) (int64, bool) {
 // HeaderSize 返回帧头字节数（来自 schema.Frame.HeaderSize）。
 func (c *SchemaCodec) HeaderSize() int { return c.headerSize }
 
+// FrameSignature 是影响 gnet 帧切割（HeaderSize/BodyLength）的全部参数快照。
+// 全部字段可比较：两份 codec 的 FrameSignature 相等 ⇔ 切帧规则完全一致。
+// 供多连接场景校验各 codec 帧规则统一（gnet EventServer 仅持单一元信息源）。
+type FrameSignature struct {
+	HeaderSize            int
+	TrailerSize           int
+	LengthIncludesHeader  bool
+	LengthIncludesTrailer bool
+	LenOffset             int
+	LenSize               int
+	LenEndian             string
+	LenKind               int
+}
+
+// FrameSignature 返回本 codec 的帧切割签名。
+func (c *SchemaCodec) FrameSignature() FrameSignature {
+	endian := "le"
+	if c.lengthField.endian == binary.BigEndian {
+		endian = "be"
+	}
+	return FrameSignature{
+		HeaderSize:            c.headerSize,
+		TrailerSize:           c.trailerSize,
+		LengthIncludesHeader:  c.lengthIncludesHeader,
+		LengthIncludesTrailer: c.lengthIncludesTrailer,
+		LenOffset:             c.lengthField.offset,
+		LenSize:               c.lengthField.size,
+		LenEndian:             endian,
+		LenKind:               int(c.lengthField.kind),
+	}
+}
+
 // ---------------------------------------------------------------------------
 // NewSchemaCodec 构造
 // ---------------------------------------------------------------------------
@@ -499,6 +531,11 @@ func NewSchemaCodec(schema *CodecSchema, errorMap map[uint64]string) (*SchemaCod
 			kind:   parseFieldKind(f.Type),
 			role:   parseRole(f.Role),
 			name:   f.Name,
+		}
+		// 浮点字段暂不支持：writeUint/readUint 未做 IEEE-754 位转换（f32 被当 uint32 截断、
+		// f64 无 read 分支），一旦使用会静默错帧。加载期直接拒绝，等类型矩阵补全后再放开。
+		if cf.kind == kindF32 || cf.kind == kindF64 {
+			return nil, fmt.Errorf("codec schema 编译失败：字段 %q 类型 %q 暂未实现（浮点未做 IEEE-754 位转换，会静默错帧），请勿使用", f.Name, f.Type)
 		}
 		// endian：字段级优先，否则回退 EndianDefault。
 		if f.Endian == "be" {
@@ -653,6 +690,13 @@ func compileStep(st *PipelineStep, flagMaskByName map[string]uint64, routeFieldI
 		onError: parseOnError(st.OnError),
 		params:  st.Params, // 透传给算法 impl
 		keyLen:  st.KeyLen, // encrypt key 长度要求（0 表示不校验）
+	}
+
+	// over region 声明能力与实现不一致：regionForOver 目前恒返回 work，无视 over.kind
+	// （header/frame/range 等）。为杜绝"声明 over 却静默按 work 计算"的错帧，加载期直接拒绝，
+	// 待 regionForOver 真正实现后再放开（Validate 仅校验 over.kind 合法性，不代表引擎已实现）。
+	if st.Over != nil {
+		return compiledStep{}, fmt.Errorf("codec schema 编译失败：步骤 %q 声明了 over region（kind=%q），但独立 checksum/hash 的 over 作用域暂未实现，会静默错帧，请勿使用", st.Name, st.Over.Kind)
 	}
 
 	// flagMask：step.Flag → mask。

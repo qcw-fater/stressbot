@@ -165,7 +165,7 @@ type AgentEvent struct {
 	AgentID string `json:"agentId"`
 	// AgentName Agent 显示名称。
 	AgentName string `json:"agentName"`
-	// Type 事件类型："offline" | "reconnected" | "deregistered"。
+	// Type 事件类型："offline"（心跳超时）| "reconnected"（分配节点恢复）| "restarted"（Agent 重新注册，任务丢失）。
 	Type string `json:"type"`
 	// Timestamp 事件发生时间。
 	Timestamp time.Time `json:"timestamp"`

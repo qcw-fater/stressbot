@@ -195,7 +195,7 @@ type MetricsCollector struct {
 	cfgMu        sync.RWMutex      // 保护 cfg 非热路径字段
 	apdexT       atomic.Int32      // Apdex T 阈值（毫秒）热路径独立原子读写，与 cfgMu 解耦
 	timingDetail TimingDetailLevel // 计时细分级别
-	startTime    time.Time         // 收集器启动时间
+	startTime    atomic.Int64      // 收集器启动时间（UnixNano）；Reset 写、Uptime 读，用原子避免 time.Time 多字结构撕裂
 
 	actions sync.Map   // string → *actionMetrics，按 action 名称索引
 	namesMu sync.Mutex // 保护 names 切片的追加
@@ -253,8 +253,8 @@ func Init(cfg CollectorConfig) {
 			enabled:      true,
 			cfg:          cfg,
 			timingDetail: level,
-			startTime:    time.Now(),
 		}
+		global.startTime.Store(time.Now().UnixNano())
 		t := cfg.ApdexThresholdMs
 		if t <= 0 {
 			t = 100
@@ -272,7 +272,7 @@ func Global() *MetricsCollector {
 // Reset 重置所有计数器，用于新任务开始前清零。
 func (c *MetricsCollector) Reset() {
 	stresslog.Info("[MONITOR] 指标收集器已重置")
-	c.startTime = time.Now()
+	c.startTime.Store(time.Now().UnixNano())
 	c.actions.Clear()
 	c.namesMu.Lock()
 	c.names = c.names[:0]
@@ -306,7 +306,7 @@ func (c *MetricsCollector) SetApdexT(t int) {
 
 // RecordActionStart 记录动作开始执行（递增 executing 计数）。
 func (c *MetricsCollector) RecordActionStart(name string) {
-	if !c.enabled {
+	if c == nil || !c.enabled {
 		return
 	}
 	am := c.getOrCreateAction(name)
@@ -341,7 +341,7 @@ func (c *MetricsCollector) recordAction(
 	sendBytes, recvBytes int, err error,
 	trackExecuting bool,
 ) {
-	if !c.enabled {
+	if c == nil || !c.enabled {
 		return
 	}
 	c.totalActions.Add(1)
@@ -448,24 +448,26 @@ func (c *MetricsCollector) recordError(am *actionMetrics, err error) {
 }
 
 // RobotStarted / RobotRunning / RobotStopped / RobotErrored 机器人生命周期钩子。
+// 全部对 nil receiver 安全：monitor 未 Init（global==nil）时静默 no-op，
+// 避免热路径 monitor.Global().RobotXxx() 在未启用监控时 panic。
 func (c *MetricsCollector) RobotStarted() {
-	if c.enabled {
+	if c != nil && c.enabled {
 		c.robotsStarted.Add(1)
 	}
 }
 func (c *MetricsCollector) RobotRunning() {
-	if c.enabled {
+	if c != nil && c.enabled {
 		c.robotsRunning.Add(1)
 	}
 }
 func (c *MetricsCollector) RobotStopped() {
-	if c.enabled {
+	if c != nil && c.enabled {
 		c.robotsRunning.Add(-1)
 		c.robotsStopped.Add(1)
 	}
 }
 func (c *MetricsCollector) RobotErrored() {
-	if c.enabled {
+	if c != nil && c.enabled {
 		c.robotsRunning.Add(-1)
 		c.robotsErrored.Add(1)
 	}
@@ -474,7 +476,7 @@ func (c *MetricsCollector) RobotErrored() {
 // SetRampUpStage 设置渐进加压当前阶段（由 Manager 在每个阶段开始时调用）。
 // current 为 1-based 阶段序号，total 为总阶段数。传 0,0 表示加压结束或未启用。
 func (c *MetricsCollector) SetRampUpStage(current, total int) {
-	if c.enabled {
+	if c != nil && c.enabled {
 		c.rampUpCurrentStage.Store(int32(current))
 		c.rampUpTotalStages.Store(int32(total))
 	}
@@ -482,22 +484,25 @@ func (c *MetricsCollector) SetRampUpStage(current, total int) {
 
 // RampUpStage 返回当前渐进加压阶段（1-based）和总阶段数。均为 0 表示未启用。
 func (c *MetricsCollector) RampUpStage() (current, total int) {
+	if c == nil {
+		return 0, 0
+	}
 	return int(c.rampUpCurrentStage.Load()), int(c.rampUpTotalStages.Load())
 }
 
-// 连接生命周期钩子。
+// 连接生命周期钩子。对 nil receiver 安全（monitor 未 Init 时 no-op）。
 func (c *MetricsCollector) ConnEstablished() {
-	if c.enabled {
+	if c != nil && c.enabled {
 		c.connEstablished.Add(1)
 	}
 }
 func (c *MetricsCollector) ConnFailed() {
-	if c.enabled {
+	if c != nil && c.enabled {
 		c.connFailed.Add(1)
 	}
 }
 func (c *MetricsCollector) ConnDropped() {
-	if c.enabled {
+	if c != nil && c.enabled {
 		c.connDropped.Add(1)
 	}
 }
@@ -537,7 +542,7 @@ func (c *MetricsCollector) getOrCreateAction(name string) *actionMetrics {
 
 // Uptime 返回运行时长。
 func (c *MetricsCollector) Uptime() time.Duration {
-	return time.Since(c.startTime)
+	return time.Since(time.Unix(0, c.startTime.Load()))
 }
 
 // ActionNames 返回按首次出现顺序排列的 action 名称列表（快照副本）。
@@ -549,9 +554,9 @@ func (c *MetricsCollector) ActionNames() []string {
 	return names
 }
 
-// Enabled 返回是否启用。
+// Enabled 返回是否启用。对 nil receiver 安全（返回 false）。
 func (c *MetricsCollector) Enabled() bool {
-	return c.enabled
+	return c != nil && c.enabled
 }
 
 func (c *MetricsCollector) TimingDetail() TimingDetailLevel {

@@ -292,7 +292,7 @@ func validCodecJSONForResolver() string {
 	return `{"version":1,"endianDefault":"le","frame":{"headerSize":8,"trailerSize":0,"lengthIncludesHeader":false,"lengthIncludesTrailer":false},"header":[{"name":"bodyLen","offset":0,"size":4,"type":"u32","role":"length"},{"name":"cmd","offset":4,"size":1,"type":"u8","role":"route"},{"name":"act","offset":5,"size":1,"type":"u8","role":"route"},{"name":"err","offset":6,"size":2,"type":"u16","role":"errorCode"}],"routeKeyTemplate":"{cmd}:{act}","pipeline":[]}`
 }
 
-// TestInferCodecMap_RealAdapterDir 用 T1.6 真实产物 conf/adapter 推断出三连接映射。
+// TestInferCodecMap_RealAdapterDir 用真实产物 conf/adapter 推断连接映射。
 // 文件名 <proto>_<service>_codec.json → server 串 <proto>:<service>。
 func TestInferCodecMap_RealAdapterDir(t *testing.T) {
 	m, err := InferCodecMap(adapterDir)
@@ -302,6 +302,7 @@ func TestInferCodecMap_RealAdapterDir(t *testing.T) {
 	want := map[string]string{
 		"tcp:logic":  "tcp_logic_codec.json",
 		"tcp:battle": "tcp_battle_codec.json",
+		"tcp:ob":     "tcp_ob_codec.json",
 		"udp:battle": "udp_battle_codec.json",
 	}
 	for server, file := range want {
@@ -315,7 +316,7 @@ func TestInferCodecMap_RealAdapterDir(t *testing.T) {
 		}
 	}
 	if extra := len(m) - len(want); extra > 0 {
-		t.Errorf("InferCodecMap 多出 %d 个映射（应只推断 3 份 codec.json，排除 errors.json/error.lua/codec.lua），得到 %v", extra, m)
+		t.Errorf("InferCodecMap 多出 %d 个映射（应只推断 codec.json，排除 errors.json/error.lua/codec.lua），得到 %v", extra, m)
 	}
 }
 
