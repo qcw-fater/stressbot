@@ -44,6 +44,18 @@ type HistoryStore struct {
 	cancel        context.CancelFunc
 }
 
+const upsertTaskConfigArchiveSQL = `
+	INSERT INTO task_config_archive (task_id, flow_json, proto_files, lua_scripts, codecs, error_map, robot_config)
+	VALUES (?, ?, ?, ?, ?, ?, ?)
+	ON DUPLICATE KEY UPDATE
+		flow_json=VALUES(flow_json),
+		proto_files=VALUES(proto_files),
+		lua_scripts=VALUES(lua_scripts),
+		codecs=VALUES(codecs),
+		error_map=VALUES(error_map),
+		robot_config=VALUES(robot_config)
+`
+
 // NewHistoryStore 创建历史归档存储。
 // db 必须非 nil（由 AdminServer 装配时传入共享 *sql.DB）。
 // cfg 可为 nil（表示不启用历史归档，retentionDays 用默认 90）。
@@ -92,25 +104,7 @@ func initMySQLSchema(db *sql.DB) error {
 			return err
 		}
 	}
-	dropLegacyForeignKeys(ctx, db)
 	return nil
-}
-
-// dropLegacyForeignKeys 移除旧版本遗留的物理外键约束。
-func dropLegacyForeignKeys(ctx context.Context, db *sql.DB) {
-	type fk struct {
-		table, name string
-	}
-	for _, k := range []fk{
-		{"task_assignment", "task_assignment_ibfk_1"},
-		{"task_report", "task_report_ibfk_1"},
-		{"task_aggregated", "task_aggregated_ibfk_1"},
-		{"task_timeseries", "task_timeseries_ibfk_1"},
-		{"task_config_archive", "task_config_archive_ibfk_1"},
-		{"task_agent_events", "task_agent_events_ibfk_1"},
-	} {
-		_, _ = db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s DROP FOREIGN KEY %s", k.table, k.name))
-	}
 }
 
 // Archive 将终态任务归档到 MySQL（事务写入 6 张表）。
@@ -248,12 +242,10 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 	flowJSON := task.Config.FlowJSON
 	protoFilesJSON, _ := json.Marshal(task.Config.ProtoFiles) // 同上
 	luaScriptsJSON, _ := json.Marshal(task.Config.LuaScripts) // 同上
+	codecsJSON, _ := json.Marshal(task.Config.Codecs)         // 同上
 	robotCfgJSON, _ := json.Marshal(task.Config.RobotConfig)  // 同上
-	_, err = tx.Exec(`
-		INSERT INTO task_config_archive (task_id, flow_json, proto_files, lua_scripts, robot_config)
-		VALUES (?, ?, ?, ?, ?)
-		ON DUPLICATE KEY UPDATE flow_json=VALUES(flow_json)
-	`, task.ID, flowJSON, protoFilesJSON, luaScriptsJSON, robotCfgJSON)
+	_, err = tx.Exec(upsertTaskConfigArchiveSQL,
+		task.ID, flowJSON, protoFilesJSON, luaScriptsJSON, codecsJSON, task.Config.ErrorMap, robotCfgJSON)
 	if err != nil {
 		return fmt.Errorf("insert task_config_archive: %w", err)
 	}
@@ -774,12 +766,12 @@ func (h *HistoryStore) GetConfig(ctx context.Context, id string) (*TaskConfig, e
 	}
 
 	var cfg TaskConfig
-	var flowJSON, protoJSON, luaJSON, robotJSON []byte
+	var flowJSON, protoJSON, luaJSON, codecsJSON, errorMap, robotJSON []byte
 
 	err := h.db.QueryRowContext(ctx, `
-		SELECT flow_json, proto_files, lua_scripts, robot_config
+		SELECT flow_json, proto_files, lua_scripts, codecs, error_map, robot_config
 		FROM task_config_archive WHERE task_id = ?
-	`, id).Scan(&flowJSON, &protoJSON, &luaJSON, &robotJSON)
+	`, id).Scan(&flowJSON, &protoJSON, &luaJSON, &codecsJSON, &errorMap, &robotJSON)
 	if err == sql.ErrNoRows {
 		return nil, ErrHistoryNotFound
 	}
@@ -790,6 +782,8 @@ func (h *HistoryStore) GetConfig(ctx context.Context, id string) (*TaskConfig, e
 	cfg.FlowJSON = json.RawMessage(flowJSON)
 	_ = json.Unmarshal(protoJSON, &cfg.ProtoFiles)  // 同上
 	_ = json.Unmarshal(luaJSON, &cfg.LuaScripts)    // 同上
+	_ = json.Unmarshal(codecsJSON, &cfg.Codecs)     // 同上
+	cfg.ErrorMap = errorMap                         // 保留 errors.json 原始字节；NULL 对应 nil
 	_ = json.Unmarshal(robotJSON, &cfg.RobotConfig) // 同上
 
 	return &cfg, nil

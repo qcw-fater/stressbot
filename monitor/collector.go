@@ -350,37 +350,49 @@ func (c *MetricsCollector) recordAction(
 		am.executing.Add(-1)
 	}
 
-	clientCost := wallClock - timing.wireRTTSum()
-	if clientCost < 0 {
-		clientCost = 0
-	}
-	if clientCost > 0 {
-		am.clientCostSum.Add(clientCost.Nanoseconds())
-		am.clientCostCount.Add(1)
-	}
-	// 记录 wallClock
-	am.totalDuration.Record(wallClock)
-	am.totalDurationSampleCount.Add(1)
-	T := int64(c.apdexT.Load())
-	ms := wallClock.Milliseconds()
-	switch {
-	case ms < T:
-		am.totalDurationApdexSatisfied.Add(1)
-	case ms < 4*T:
-		am.totalDurationApdexTolerating.Add(1)
-	}
-	addDuration := func(dst *atomic.Int64, d time.Duration) {
-		if d > 0 {
-			dst.Add(d.Nanoseconds())
+	// 记录 wallClock 时延 / Apdex / 客户端分项的判据：result != Canceled || wallClock > 0。
+	// 只排除"取消补记"这一类伪样本，而非一切 wallClock==0：
+	//   - 取消补记（执行器对未执行节点的配平记账，result=Canceled 且 wallClock=0）必须排除：
+	//     否则 0ms 样本会压低 P50/P90/P99，且 0ms<T 恒记 satisfied 令 Apdex 虚高；
+	//   - 真实执行后才取消的样本（result=Canceled 且 wallClock>0）仍按契约完整记录；
+	//   - 成功/失败/超时一律记录——纯客户端动作（setState/clearState）耗时可能被时钟粒度
+	//     测成 0（Windows 时钟粒度较粗），此前用 wallClock>0 会把这类快动作静默丢样本。
+	// 客户端分项（build/encode/...）与分母 clientCostCount 必须同处一个采样条件下累加，
+	// 否则会出现"分子含取消样本、分母不含"的均值偏高（snapshot 按 clientCostCount 求均值）。
+	// canceledCount 仍在下方单独累加，字节数照常计，取消事件不丢失。
+	if result != ResultCanceled || wallClock > 0 {
+		clientCost := wallClock - timing.wireRTTSum()
+		if clientCost < 0 {
+			clientCost = 0
 		}
+		if clientCost > 0 {
+			am.clientCostSum.Add(clientCost.Nanoseconds())
+		}
+		am.clientCostCount.Add(1)
+		// 记录 wallClock
+		am.totalDuration.Record(wallClock)
+		am.totalDurationSampleCount.Add(1)
+		T := int64(c.apdexT.Load())
+		ms := wallClock.Milliseconds()
+		switch {
+		case ms < T:
+			am.totalDurationApdexSatisfied.Add(1)
+		case ms < 4*T:
+			am.totalDurationApdexTolerating.Add(1)
+		}
+		addDuration := func(dst *atomic.Int64, d time.Duration) {
+			if d > 0 {
+				dst.Add(d.Nanoseconds())
+			}
+		}
+		addDuration(&am.buildCostSum, timing.Client.BuildCost)
+		addDuration(&am.encodeCostSum, timing.Client.EncodeCost)
+		addDuration(&am.sendCostSum, timing.Client.SendCost)
+		addDuration(&am.decodeWaitSum, timing.Client.DecodeWait)
+		addDuration(&am.decodeCostSum, timing.Client.DecodeCost)
+		addDuration(&am.dispatchWaitSum, timing.Client.DispatchWait)
+		addDuration(&am.parseStoreSum, timing.Client.ParseStoreCost)
 	}
-	addDuration(&am.buildCostSum, timing.Client.BuildCost)
-	addDuration(&am.encodeCostSum, timing.Client.EncodeCost)
-	addDuration(&am.sendCostSum, timing.Client.SendCost)
-	addDuration(&am.decodeWaitSum, timing.Client.DecodeWait)
-	addDuration(&am.decodeCostSum, timing.Client.DecodeCost)
-	addDuration(&am.dispatchWaitSum, timing.Client.DispatchWait)
-	addDuration(&am.parseStoreSum, timing.Client.ParseStoreCost)
 	for _, req := range timing.Requests {
 		if req.WireRTT <= 0 {
 			continue

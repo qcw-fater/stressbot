@@ -1,8 +1,7 @@
 package admin
 
 // MySQL DDL — Admin 所有表（历史归档 + 未来流程模板库）。
-// Admin 启动时通过 HistoryStore.initSchema() 自动执行（仅创建不存在的表）。
-// 已有数据库升级见 deploy/upgrade.sql（INFORMATION_SCHEMA 守卫、幂等）。
+// Admin 启动时仅创建不存在的表，不兼容或迁移旧版本数据库。
 // 收藏/标签/备注统一存于 task_meta（stage_index=-1 为任务级），不再是 task_history 的列。
 
 const ddlTaskHistory = `
@@ -110,6 +109,8 @@ CREATE TABLE IF NOT EXISTS task_config_archive (
     flow_json       MEDIUMBLOB   NULL,
     proto_files     MEDIUMBLOB   NULL,
     lua_scripts     MEDIUMBLOB   NULL,
+    codecs          MEDIUMBLOB   NULL,
+    error_map       MEDIUMBLOB   NULL,
     robot_config    JSON         NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `

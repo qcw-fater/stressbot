@@ -75,6 +75,45 @@ func TestRecordActionCanceledDoesNotRecordErrorDistribution(t *testing.T) {
 	}
 }
 
+func TestRecordActionRealCanceledKeepsTimingSamples(t *testing.T) {
+	c := newMonitorTestCollector()
+	timing := ActionTiming{Client: ClientTiming{BuildCost: 2 * time.Millisecond}}
+
+	c.RecordActionStart("real-cancel")
+	c.RecordAction("real-cancel", ResultCanceled, timing, 5*time.Millisecond, 0, 0, nil)
+
+	action := findMonitorTestAction(t, c.Snapshot(nil, 0), "real-cancel")
+	if action.CanceledCount != 1 {
+		t.Fatalf("CanceledCount = %d, want 1", action.CanceledCount)
+	}
+	if action.TotalDurationSampleCount != 1 || action.ClientCostCount != 1 {
+		t.Fatalf("real canceled timing counts: total=%d client=%d, want 1/1",
+			action.TotalDurationSampleCount, action.ClientCostCount)
+	}
+	if action.BuildAvgMs != 2 {
+		t.Fatalf("BuildAvgMs = %v, want 2", action.BuildAvgMs)
+	}
+}
+
+func TestRecordActionSyntheticCanceledExcludesTimingSamples(t *testing.T) {
+	c := newMonitorTestCollector()
+
+	c.RecordActionStart("synthetic-cancel")
+	c.RecordAction("synthetic-cancel", ResultCanceled, ActionTiming{}, 0, 0, 0, nil)
+
+	action := findMonitorTestAction(t, c.Snapshot(nil, 0), "synthetic-cancel")
+	if action.CanceledCount != 1 {
+		t.Fatalf("CanceledCount = %d, want 1", action.CanceledCount)
+	}
+	if action.TotalDurationSampleCount != 0 || action.ClientCostCount != 0 {
+		t.Fatalf("synthetic canceled timing counts: total=%d client=%d, want 0/0",
+			action.TotalDurationSampleCount, action.ClientCostCount)
+	}
+	if action.TotalDuration.Count != 0 || action.TotalDurationApdex != 0 {
+		t.Fatalf("synthetic canceled polluted duration metrics: %+v", action.TotalDuration)
+	}
+}
+
 func TestRecordActionMultipleRequestsRemainSeparateRTTSamples(t *testing.T) {
 	c := newMonitorTestCollector()
 	timing := ActionTiming{Requests: []RequestTiming{
@@ -96,6 +135,28 @@ func TestRecordActionMultipleRequestsRemainSeparateRTTSamples(t *testing.T) {
 	if action.ClientCostCount != 1 || action.ClientCostSumNs != int64(10*time.Millisecond) {
 		t.Fatalf("clientCost 应为 wallClock-RTTSum=10ms，count=%d sum=%d",
 			action.ClientCostCount, action.ClientCostSumNs)
+	}
+}
+
+func TestRecordActionCountsZeroClientCostSample(t *testing.T) {
+	c := newMonitorTestCollector()
+	timing := ActionTiming{
+		Requests: []RequestTiming{{WireRTT: 10 * time.Millisecond}},
+		Client:   ClientTiming{BuildCost: time.Millisecond},
+	}
+
+	c.RecordActionStart("zero-client-cost")
+	c.RecordAction("zero-client-cost", ResultSuccess, timing, 10*time.Millisecond, 0, 0, nil)
+
+	action := findMonitorTestAction(t, c.Snapshot(nil, 0), "zero-client-cost")
+	if action.ClientCostCount != 1 {
+		t.Fatalf("ClientCostCount = %d, want 1", action.ClientCostCount)
+	}
+	if action.ClientAvgMs != 0 {
+		t.Fatalf("ClientAvgMs = %v, want 0", action.ClientAvgMs)
+	}
+	if action.BuildAvgMs != 1 {
+		t.Fatalf("BuildAvgMs = %v, want 1", action.BuildAvgMs)
 	}
 }
 
