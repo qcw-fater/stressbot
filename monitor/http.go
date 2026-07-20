@@ -1,6 +1,8 @@
 package monitor
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -36,14 +38,33 @@ func RegisterHandlers(c *MetricsCollector) {
 	})
 }
 
-// StartHTTPServer 启动 HTTP 服务（非阻塞）。
-func StartHTTPServer(port int) {
+// StartHTTPServer 启动 HTTP 服务（非阻塞），返回优雅关闭函数。
+func StartHTTPServer(port int) (stop func(), err error) {
+	return startHTTPServerWithSubmit(port, utils.GetWorkPool().Submit)
+}
+
+func startHTTPServerWithSubmit(port int, submit func(func()) error) (stop func(), err error) {
 	addr := fmt.Sprintf(":%d", port)
-	utils.GetWorkPool().Go(func() {
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           http.DefaultServeMux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	if err := submit(func() {
 		stresslog.Info("[MONITOR] HTTP 指标服务启动", zap.String("addr", addr),
 			zap.String("metrics", "http://localhost"+addr+"/metrics"))
-		if err := http.ListenAndServe(addr, nil); err != nil {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			stresslog.Error("[MONITOR] HTTP 服务异常退出", zap.String("addr", addr), zap.Error(err))
 		}
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("提交监控 HTTP 服务任务失败: %w", err)
+	}
+	return func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		srv.SetKeepAlivesEnabled(false)
+		if err := srv.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			stresslog.Warn("[MONITOR] 关闭 HTTP 指标服务失败", zap.String("addr", addr), zap.Error(err))
+		}
+	}, nil
 }

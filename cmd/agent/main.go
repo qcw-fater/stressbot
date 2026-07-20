@@ -306,7 +306,9 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 	}
 	defer dialer.Stop()
 
-	mgr := robot.NewManager(mgrCfg, flow, factory, dialer, luaPool)
+	// 单机模式无任务级取消上下文，用 Background：Manager/Robot 的取消仍由 StopAll → m.cancel() 触发，
+	// 与改造前行为一致（H2 的任务取消链主要惠及 Agent/ramp-up 取消路径）。
+	mgr := robot.NewManager(context.Background(), mgrCfg, flow, factory, dialer, luaPool)
 
 	if err := mgr.StartAll(); err != nil {
 		stresslog.Fatal("启动机器人失败", zap.Error(err))
@@ -314,13 +316,19 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 
 	// 启动监控 Reporter 和 HTTP
 	var reporter *monitor.Reporter
+	var stopMonitorHTTP func()
 	if cfg.Monitor != nil {
 		reporter = monitor.NewReporter(monitor.Global(), 5*time.Second)
 		reporter.Start()
 
 		if cfg.Monitor.HTTP != nil {
 			monitor.RegisterHandlers(monitor.Global())
-			monitor.StartHTTPServer(cfg.Monitor.HTTP.Port)
+			stop, err := monitor.StartHTTPServer(cfg.Monitor.HTTP.Port)
+			if err != nil {
+				stresslog.Error("[MONITOR] 启动 HTTP 指标服务失败", zap.Error(err))
+			} else {
+				stopMonitorHTTP = stop
+			}
 		}
 	}
 
@@ -346,6 +354,9 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 
 	if reporter != nil {
 		reporter.Stop()
+	}
+	if stopMonitorHTTP != nil {
+		stopMonitorHTTP()
 	}
 
 	mgr.StopAll()

@@ -90,20 +90,6 @@ func (a *Agent) handleTaskAssign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.mu.Lock()
-	if a.currentTask != nil {
-		taskID := a.currentTask.TaskID
-		a.mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error":         "task already running",
-			"currentTaskId": taskID,
-		})
-		return
-	}
-	a.mu.Unlock()
-
 	stresslog.Info("[AGENT] 收到任务下发",
 		zap.String("taskID", task.TaskID),
 		zap.String("name", task.TaskName),
@@ -111,30 +97,52 @@ func (a *Agent) handleTaskAssign(w http.ResponseWriter, r *http.Request) {
 		zap.Int("startNumber", task.StartNumber),
 		zap.Int("startIndex", *task.StartIndex))
 
-	// 返回 202 Accepted，异步执行
-	w.WriteHeader(http.StatusAccepted)
-
-	// 在协程外 Add，避免与 shutdown 的 taskWG.Wait 形成竞态（
-	// "Add 完之前 Wait 已经在 0 上返回"的场景）。
-	a.taskWG.Add(1)
-	utils.GetWorkPool().Go(func() {
-		defer a.taskWG.Done()
-		a.executeTask(a.ctx, &task)
-	})
-}
-
-func (a *Agent) handleStop(w http.ResponseWriter, _ *http.Request) {
-	a.mu.Lock()
-	if a.currentTask == nil {
-		a.mu.Unlock()
-		http.Error(w, "no task running", http.StatusConflict)
+	// 原子预占 + 提交：校验空闲/关闭态、占用 currentTask、建 cancel、taskWG.Add、池提交
+	// 在 submitTask 内一致完成，消除 handler 检查与 executeTask 占用之间的 TOCTOU。
+	if err := a.submitTask(&task); err != nil {
+		var busy *taskBusyError
+		switch {
+		case errors.As(err, &busy):
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error":         "task already running",
+				"currentTaskId": busy.currentTaskID,
+			})
+		case errors.Is(err, errAgentShuttingDown):
+			http.Error(w, "agent 正在关闭，拒绝新任务", http.StatusServiceUnavailable)
+		default:
+			stresslog.Error("[AGENT] 任务下发失败", zap.String("taskID", task.TaskID), zap.Error(err))
+			http.Error(w, "agent 无法调度任务（协程池不可用）", http.StatusServiceUnavailable)
+		}
 		return
 	}
-	taskID := a.currentTask.TaskID
-	a.mu.Unlock()
 
-	stresslog.Info("[AGENT] 收到停止命令", zap.String("taskID", taskID))
-	a.cancelCurrentTask("Admin stop command")
+	// 提交成功，返回 202 Accepted，异步执行。
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func (a *Agent) handleStop(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		TaskID string `json:"taskId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.TaskID == "" {
+		http.Error(w, "taskId required", http.StatusBadRequest)
+		return
+	}
+
+	currentTaskID, canceled := a.cancelTask(request.TaskID, "Admin stop command")
+	if !canceled {
+		if currentTaskID != "" {
+			stresslog.Info("[AGENT] 忽略迟到的停止命令",
+				zap.String("requestedTaskID", request.TaskID),
+				zap.String("currentTaskID", currentTaskID))
+		}
+		http.Error(w, "task no longer running", http.StatusConflict)
+		return
+	}
+
+	stresslog.Info("[AGENT] 收到停止命令", zap.String("taskID", currentTaskID))
 	w.WriteHeader(http.StatusOK)
 }
 

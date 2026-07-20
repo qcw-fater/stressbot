@@ -81,8 +81,36 @@ func NewEventServer(adp adapter.Adapter, heartbeatInterval time.Duration) *Event
 	}
 }
 
-// OnOpen gnet 连接建立回调
+// dialPayload 由 DialContext 透传给 OnOpen 的连接上下文：携带绑定业务层 Connection 所需信息。
+// gnet 保证同一连接的 OnOpen 在任何 OnTraffic 之前处理，且 EnrollContext 会等 OnOpen 完成后
+// 才从 DialContext 返回，因此在 OnOpen 内完成 bind/register/StartPump 可彻底消除
+// "Dial 返回后、注册前首包到达被丢弃" 的竞态（H5）。
+type dialPayload struct {
+	conn  *Connection
+	adp   adapter.Adapter
+	isUDP bool
+}
+
+// OnOpen gnet 连接建立回调。
+//
+// 在此完成 bind + 注册 + StartPump：gnet 事件循环串行处理 openConn 与后续 packConn（traffic），
+// openConn 一定先于 traffic，故连接在首个 OnTraffic 触发前即已注册且 pump 就绪，首包不再被丢弃。
 func (es *EventServer) OnOpen(gconn gnet.Conn) ([]byte, gnet.Action) {
+	payload, ok := gconn.Context().(*dialPayload)
+	if !ok || payload == nil || payload.conn == nil {
+		// 非本 Dialer 经 DialContext 建立（无绑定信息）：无法关联业务 Connection，保持旧的空行为。
+		return nil, gnet.None
+	}
+	bindConn(gconn, payload.conn)
+	es.registry.register(gconn, payload.conn)
+	// StartPump 用 CAS 幂等 + 经协程池异步起 pump goroutine，从事件循环 goroutine 调用安全非阻塞。
+	if err := payload.conn.StartPump(payload.adp, payload.isUDP); err != nil {
+		stresslog.Error("[GNET] 启动连接 pump 失败，关闭连接",
+			zap.String("service", payload.conn.ServiceName()),
+			zap.String("robot", payload.conn.robotName),
+			zap.Error(err))
+		return nil, gnet.Close
+	}
 	return nil, gnet.None
 }
 
@@ -400,13 +428,21 @@ func (d *Dialer) dial(ctx context.Context, network, address string, conn *Connec
 			strings.ToUpper(network), address, network, serviceName)
 	}
 
-	// gnet.Client.Dial 在 EnrollContext 阶段会等待 eventloop 注册完成。任务停止后先通过
-	// ctx/closed 快速拒绝新拨号，并用 dialTokens 限制同一时刻卡在 Dial 内的 goroutine 数，
-	// 避免一次停止留下成千上万条拨号 goroutine 持有 Lua action 与 Robot 资源。
-	gconn, err := d.client.Dial(network, address)
+	// gnet.Client.DialContext 在 EnrollContext 阶段会等待 eventloop 处理完 OnOpen 才返回。
+	// 通过 ctx 透传 dialPayload：bind + register + StartPump 全部在 OnOpen 内完成，
+	// gnet 保证 OnOpen 先于该连接任何 OnTraffic，从而消除"注册前首包被丢弃"的竞态（H5）。
+	// 任务停止后先通过 ctx/closed 快速拒绝新拨号，并用 dialTokens 限制同一时刻卡在 Dial 内的
+	// goroutine 数，避免一次停止留下成千上万条拨号 goroutine 持有 Lua action 与 Robot 资源。
+	gconn, err := d.client.DialContext(network, address, &dialPayload{
+		conn:  conn,
+		adp:   adp,
+		isUDP: network == "udp",
+	})
 	if err != nil {
 		return nil, fmt.Errorf("%s 拨号失败 %s: %w", strings.ToUpper(network), address, err)
 	}
+	// OnOpen 已完成 bind/register/StartPump。若此刻发现已取消/关闭，则主动关闭连接：
+	// OnClose 会 unregister 并触发 Connection.onClose 停 pump，资源随之回收。
 	if err := ctx.Err(); err != nil {
 		_ = gconn.Close()
 		return nil, err
@@ -415,12 +451,6 @@ func (d *Dialer) dial(ctx context.Context, network, address string, conn *Connec
 		_ = gconn.Close()
 		return nil, context.Canceled
 	}
-
-	bindConn(gconn, conn)
-	d.server.registry.register(gconn, conn)
-	// 启动 connectionPump：必须在 register 之后立即启动，
-	// 否则首批 OnTraffic 到达时 inboundCh 还没准备好，会被 EnqueueRaw 拒绝。
-	conn.StartPump(adp, network == "udp")
 
 	if stresslog.DebugEnabled() {
 		stresslog.Debug("[GNET] 连接已建立",

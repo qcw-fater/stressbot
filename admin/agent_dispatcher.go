@@ -20,6 +20,20 @@ func normalizeAddr(addr string) string {
 	return addr
 }
 
+// drainAndClose 关闭响应体前先排空剩余字节，让 net/http 能把连接放回 keep-alive 空闲池复用。
+//
+// net/http 仅在响应体读到 EOF 后再 Close 才会复用底层 TCP；未读完就 Close 会直接丢弃连接。
+// Admin→Agent 是「任务下发/停止 + 版本查询」的高频同 host RPC，不复用会持续新建/关闭 TCP，
+// 浪费 FD 与 ephemeral port。用 LimitReader 兜底：控制面响应都很小，异常超大 body 放弃排空
+// （退化为不复用），不拖住调用方。
+func drainAndClose(resp *http.Response) {
+	if resp == nil || resp.Body == nil {
+		return
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+	_ = resp.Body.Close()
+}
+
 // AgentDispatcher Admin → Agent HTTP 通信。
 type AgentDispatcher struct {
 	httpClient *http.Client
@@ -52,7 +66,7 @@ func (d *AgentDispatcher) Version(addr string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer drainAndClose(resp)
 	var result struct {
 		Version string `json:"version"`
 	}
@@ -104,7 +118,7 @@ func (d *AgentDispatcher) post(addr, path string, body any, retries int) error {
 			}
 			continue
 		}
-		resp.Body.Close()
+		drainAndClose(resp)
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			return nil

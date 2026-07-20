@@ -577,23 +577,41 @@ func (c *Connection) GetListenResp(routeKey string) *Message {
 //
 // 必须在 Dial 成功且 conn 注册到 registry 之后、首次 OnTraffic 可能到达之前调用。
 // CAS 防止 reconnect 场景下重复启动。adp 由上层 Robot 经 CodecResolver.Resolve 在拨号前
-// 解析后注入（nil → 上层已 fail loud）；此后该连接 decode 全程用 c.adp，不再查 resolver。
+// 解析后注入（nil → 上层已 fail loud）；提交失败会回滚全部 pump 状态并返回错误，允许重试。
+// 提交成功后该连接 decode 全程用 c.adp，不再查 resolver。
 //
 // pump 是 network 内部调度，不泄漏到 flow/engine/Lua：外层只感知 RegisterListen /
 // GetListenResp / RegisterHeartbeat 这些已存在的接口。
-func (c *Connection) StartPump(adp adapter.Adapter, isUDP bool) {
-	if c == nil || adp == nil {
-		return
+func (c *Connection) StartPump(adp adapter.Adapter, isUDP bool) error {
+	return c.startPumpWithSubmit(adp, isUDP, utils.GetWorkPool().Submit)
+}
+
+func (c *Connection) startPumpWithSubmit(adp adapter.Adapter, isUDP bool, submit func(func()) error) error {
+	if c == nil {
+		return fmt.Errorf("connection 不能为空")
+	}
+	if adp == nil {
+		return fmt.Errorf("adapter 不能为空")
 	}
 	if !atomic.CompareAndSwapInt32(&c.pumpRun, 0, 1) {
-		return
+		return nil
 	}
 	c.adp = adp
 	c.isUDP = isUDP
 	c.inboundCh = make(chan inboundFrame, inboundChSize)
 	c.controlCh = make(chan pumpCmd, controlChSize)
-	c.pumpDone = make(chan struct{})
-	utils.GetWorkPool().Go(c.connectionPump)
+	pumpDone := make(chan struct{})
+	c.pumpDone = pumpDone
+	if err := submit(c.connectionPump); err != nil {
+		close(pumpDone)
+		c.adp = nil
+		c.inboundCh = nil
+		c.controlCh = nil
+		c.pumpDone = nil
+		atomic.StoreInt32(&c.pumpRun, 0)
+		return fmt.Errorf("提交 connection pump 失败: %w", err)
+	}
+	return nil
 }
 
 // connectionPump 是每条连接唯一的 owner goroutine，串行处理：

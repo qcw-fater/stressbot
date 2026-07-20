@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"sync/atomic"
 	"testing"
 
@@ -35,9 +36,10 @@ func TestDeclarativeIO_RoutesThroughCoopIO(t *testing.T) {
 	ae := &ActionExecutor{netSender: fake, store: state.NewStore()}
 
 	var coopCalls int32
-	ae.SetCooperativeIO(func(job func()) {
+	ae.SetCooperativeIO(func(job func()) error {
 		atomic.AddInt32(&coopCalls, 1)
 		job() // 模拟调度器：实际执行作业（真实实现里在后台 goroutine + drain mailbox）
+		return nil
 	})
 
 	if err := ae.execTCPConnect(&ActionDef{Name: "c", Service: "logic", Address: "127.0.0.1:1"}); err != nil {
@@ -65,5 +67,21 @@ func TestDeclarativeIO_RoutesThroughCoopIO(t *testing.T) {
 	}
 	if atomic.LoadInt32(&fake.connectTCP) != 2 {
 		t.Fatalf("无 coopIO 回退应仍调底层 ConnectTCP，实际 connectTCP=%d", fake.connectTCP)
+	}
+}
+
+func TestDeclarativeIOReturnsCooperativeSubmissionError(t *testing.T) {
+	fake := &fakeIONetSender{fakeNetSender: &fakeNetSender{}}
+	ae := &ActionExecutor{netSender: fake, store: state.NewStore()}
+	sentinel := errors.New("pool rejected")
+	ae.SetCooperativeIO(func(func()) error { return sentinel })
+
+	err := ae.execTCPConnect(&ActionDef{Name: "c", Service: "logic", Address: "127.0.0.1:1"})
+
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("execTCPConnect() error = %v, want %v", err, sentinel)
+	}
+	if got := atomic.LoadInt32(&fake.connectTCP); got != 0 {
+		t.Fatalf("pool rejection must not run the network call, connectTCP=%d", got)
 	}
 }

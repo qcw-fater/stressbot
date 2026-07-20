@@ -119,7 +119,7 @@ type ActionExecutor struct {
 	// udpConnect 的阻塞调用经它在后台 goroutine 执行，调用 goroutine 等待期间 drain Robot mailbox。
 	// 与 Lua await_*（share/http/connect）同源（同一 runIO 原语），声明式与脚本两条路径协作式语义一致。
 	// nil（engine 独立运行/测试）时直接同步调 job，保持 engine 对 robot 解耦。
-	coopIO func(job func())
+	coopIO func(job func()) error
 }
 
 // SetCooperativeSleeper 注入协作式休眠后端（Robot 调度器）。
@@ -132,19 +132,19 @@ func (ae *ActionExecutor) SetCooperativeSleeper(f func(ctx context.Context, d ti
 // SetCooperativeIO 注入协作式阻塞 I/O 后端（Robot 调度器 sched.runIO）。
 // 注入后声明式 httpRequest / tcpConnect / udpConnect 的阻塞调用不再裸阻塞执行器，而是在后台
 // goroutine 执行、等待期间 drain Robot mailbox——与 Lua await_*（share/http/connect）同一原语。
-func (ae *ActionExecutor) SetCooperativeIO(f func(job func())) {
+func (ae *ActionExecutor) SetCooperativeIO(f func(job func()) error) {
 	ae.coopIO = f
 }
 
 // runIO 协作式执行一次阻塞 I/O：注入了 coopIO 则走调度器（后台跑 + drain mailbox），否则直接
 // 同步调 job（engine 独立运行无 mailbox 可 drain）。job 的结果经其自身闭包捕获，调用方在 runIO
 // 返回后读取。
-func (ae *ActionExecutor) runIO(job func()) {
+func (ae *ActionExecutor) runIO(job func()) error {
 	if ae.coopIO != nil {
-		ae.coopIO(job)
-		return
+		return ae.coopIO(job)
 	}
 	job()
+	return nil
 }
 
 // sleep 协作式休眠 d：注入了 coopSleep 则走调度器（drain mailbox），否则裸 time.After + ctx。
@@ -744,7 +744,9 @@ func (ae *ActionExecutor) execTCPConnect(def *ActionDef) error {
 	}
 	// 协作式 Class B：拨号阻塞至连接建立，在后台 goroutine 执行，等待窗口内执行器 drain mailbox。
 	var err error
-	ae.runIO(func() { err = ae.netSender.ConnectTCP(def.Service, addr) })
+	if submitErr := ae.runIO(func() { err = ae.netSender.ConnectTCP(def.Service, addr) }); submitErr != nil {
+		return submitErr
+	}
 	if err != nil {
 		return err
 	}
@@ -760,7 +762,9 @@ func (ae *ActionExecutor) execUDPConnect(def *ActionDef) error {
 	}
 	// 协作式 Class B：拨号阻塞至连接建立，在后台 goroutine 执行，等待窗口内执行器 drain mailbox。
 	var err error
-	ae.runIO(func() { err = ae.netSender.ConnectUDP(def.Service, addr) })
+	if submitErr := ae.runIO(func() { err = ae.netSender.ConnectUDP(def.Service, addr) }); submitErr != nil {
+		return submitErr
+	}
 	if err != nil {
 		return err
 	}
@@ -875,7 +879,11 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, ActionTimin
 	// mailbox。后续 timing/store/parse 均在 runIO 返回后于执行器 goroutine 串行处理。
 	var exchange *HTTPExchange
 	var err error
-	ae.runIO(func() { exchange, err = ae.netSender.HTTPRequest(resolvedURL, method, contentType, body) })
+	if submitErr := ae.runIO(func() {
+		exchange, err = ae.netSender.HTTPRequest(resolvedURL, method, contentType, body)
+	}); submitErr != nil {
+		return 0, 0, ActionTiming{}, submitErr
+	}
 	if exchange == nil {
 		exchange = &HTTPExchange{}
 	}

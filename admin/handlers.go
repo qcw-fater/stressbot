@@ -278,6 +278,23 @@ func (s *AdminServer) handleAgentSystemReport(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// taskExpectedAgents 返回该任务合法完成上报的 Agent 集合：优先 SucceededAgents，
+// 为空时回退到 Assignments 的 Agent 列表（与完成阈值口径一致）。
+// 用于校验 handleAgentTaskDone 的报告来源，拒绝未分配 Agent 的伪造/迟到报告。
+func taskExpectedAgents(t *Task) map[string]struct{} {
+	set := make(map[string]struct{})
+	if len(t.SucceededAgents) > 0 {
+		for _, id := range t.SucceededAgents {
+			set[id] = struct{}{}
+		}
+		return set
+	}
+	for _, a := range t.Assignments {
+		set[a.AgentID] = struct{}{}
+	}
+	return set
+}
+
 func (s *AdminServer) handleAgentTaskDone(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 	taskID := r.PathValue("tid")
@@ -300,21 +317,23 @@ func (s *AdminServer) handleAgentTaskDone(w http.ResponseWriter, r *http.Request
 	//      进而触发 onAgentStatusChange 的"restarted"合成失败报告，整个任务被错误地标记为完成
 	s.agents.Touch(agentID, "")
 	isFinal := report.StageIndex <= 0
-	if isFinal {
-		// 仅最终报告才把节点 marked back to idle；这两个操作走 Touch + Heartbeat 路径，
-		// 必须在 tasks.Update 之外完成，避免 agents.mu 与 tasks.mu 的 AB-BA 死锁。
-		if err := s.agents.Heartbeat(agentID, HeartbeatRequest{
-			AgentID: agentID,
-			Status:  "idle",
-		}); err != nil {
-			// Agent 已被 admin 删除等场景，不影响 report 入库
-			stresslog.Warn("[ADMIN] handleAgentTaskDone Heartbeat 失败",
-				zap.String("agentID", agentID), zap.Error(err))
-		}
-	}
 
-	var needTransition TaskState // 零值表示不需要转换
+	var (
+		needTransition TaskState // 零值表示不需要转换
+		memberValid    bool      // 报告来自该任务分配的合法 Agent（SucceededAgents / Assignments）
+	)
 	err := s.tasks.Update(taskID, func(t *Task) {
+		// 校验来源：仅接受该任务合法 Agent 的报告（优先 SucceededAgents，空则回退 Assignments）。
+		// 未分配 Agent 的额外报告会顶满完成阈值提前结束任务，或污染 StageReports，一律忽略。
+		expected := taskExpectedAgents(t)
+		if _, ok := expected[agentID]; !ok {
+			stresslog.Warn("[ADMIN] 忽略非本任务 Agent 的完成报告",
+				zap.String("taskID", taskID), zap.String("agentID", agentID),
+				zap.Bool("final", isFinal))
+			return
+		}
+		memberValid = true
+
 		// reset 边界阶段段落报告：存入 StageReports，不触发状态转换。
 		// 幂等性：同一 (agentId, stageIndex) 已存在则覆盖（重试场景），不重复 append。
 		if !isFinal {
@@ -343,15 +362,16 @@ func (s *AdminServer) handleAgentTaskDone(w http.ResponseWriter, r *http.Request
 		}
 		t.Reports[agentID] = report
 
-		// 检查是否全部完成：只等实际成功的 Agent。
-		// 用 >= 而非 ==：若出现额外报告（如未计入 SucceededAgents 的 Agent 上报），
-		// == 会永远错过相等时刻导致任务卡在 running/stopping；>= 保证达到阈值即收尾，
-		// 且后续报告因 t.State 已非 running/stopping 不会重复触发 transition。
-		expected := len(t.SucceededAgents)
-		if expected == 0 {
-			expected = len(t.Assignments)
+		// 完成计数只统计合法 Agent 集合内的报告（交集），杜绝额外/未知报告顶满阈值提前收尾。
+		// 用 >= 而非 ==：即便集合与报告数因重试/边界短暂不一致，达到阈值即收尾，
+		// 后续报告因 t.State 已非 running/stopping 不再重复触发 transition。
+		completed := 0
+		for id := range t.Reports {
+			if _, ok := expected[id]; ok {
+				completed++
+			}
 		}
-		if expected > 0 && len(t.Reports) >= expected {
+		if len(expected) > 0 && completed >= len(expected) {
 			t.CleanupSummary = aggregateTaskCleanup(t)
 			if t.State == TaskRunning {
 				needTransition = TaskRunning
@@ -363,6 +383,21 @@ func (s *AdminServer) handleAgentTaskDone(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		writeError(w, err)
 		return
+	}
+
+	// 仅在报告来自合法 Agent 且为最终报告时，才尝试清理节点任务状态。
+	// CompleteTask 在 agents.mu 内校验 taskID，避免迟到的旧任务报告清空节点的新任务。
+	// 必须在 tasks.mu 之外调用，防止 agents.mu 与 tasks.mu 的 AB-BA 死锁。
+	if memberValid && isFinal {
+		completed, err := s.agents.CompleteTask(agentID, taskID)
+		if err != nil {
+			// Agent 已被 admin 删除等场景，不影响 report 入库
+			stresslog.Warn("[ADMIN] 清理已完成任务的节点状态失败",
+				zap.String("taskID", taskID), zap.String("agentID", agentID), zap.Error(err))
+		} else if !completed {
+			stresslog.Info("[ADMIN] 收到迟到的任务完成报告，保留节点当前任务状态",
+				zap.String("taskID", taskID), zap.String("agentID", agentID))
+		}
 	}
 
 	// Transition 必须在 Update 外部调用，避免死锁（两者都拿 ts.mu）。

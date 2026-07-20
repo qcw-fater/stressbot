@@ -39,6 +39,22 @@ func runFailed(msg string) RunResult {
 	return RunResult{Result: TaskFailed, ErrorMsg: msg, CleanupStatus: robot.UnknownCleanupStatus(robot.CleanupReasonStopWaitTimeout, "任务启动失败，未进入机器人清理阶段")}
 }
 
+type robotStopper interface {
+	StopAll() robot.CleanupStatus
+}
+
+func finishManagerStartFailure(ctx context.Context, stopper robotStopper, startErr error) RunResult {
+	cleanup := stopper.StopAll()
+	if ctx.Err() == context.Canceled || strings.Contains(startErr.Error(), context.Canceled.Error()) {
+		return RunResult{Result: TaskStopped, CleanupStatus: cleanup}
+	}
+	return RunResult{
+		Result:        TaskFailed,
+		ErrorMsg:      fmt.Sprintf("启动机器人失败: %v", startErr),
+		CleanupStatus: cleanup,
+	}
+}
+
 // TaskRunner 管理单次压测任务的执行：拉配置、写目录、起 Manager、等完成。
 type TaskRunner struct {
 	assignment *TaskAssignment
@@ -255,7 +271,9 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 			})
 		}
 	}
-	mgr := robot.NewManager(mgrCfg, flow, factory, dialer, luaPool)
+	// 传入任务级 ctx：Manager 及其 Robot 的生命周期上下文由它派生，任务取消（含 ramp-up 创建阶段
+	// 进行中）沿 task → manager → robot 链立即传播，StartWithRampUp 能尽快返回 context.Canceled。
+	mgr := robot.NewManager(ctx, mgrCfg, flow, factory, dialer, luaPool)
 	mgr.OnStageReset = r.OnStageReset
 	mgr.OnStageChange = func(current, total int) {
 		r.collector.SetRampUpStage(current, total)
@@ -269,14 +287,18 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 		startErr = mgr.StartAll()
 	}
 	if startErr != nil {
-		// 渐进式加压在 ctx cancel 后会从 StartWithRampUp 返回 context.Canceled，
-		// 这是"用户主动停止"而非"失败"，按 TaskStopped 上报，避免历史归档误判为失败。
-		if ctx.Err() == context.Canceled || strings.Contains(startErr.Error(), context.Canceled.Error()) {
+		result := finishManagerStartFailure(ctx, mgr, startErr)
+		if result.Result == TaskStopped {
+			// 渐进式加压在 ctx cancel 后会从 StartWithRampUp 返回 context.Canceled，
+			// 这是"用户主动停止"而非"失败"，按 TaskStopped 上报，避免历史归档误判为失败。
 			stresslog.Info("[TASK] 启动阶段被取消", zap.String("taskID", taskID), zap.Error(startErr))
-			cleanup := mgr.StopAll()
-			return RunResult{Result: TaskStopped, CleanupStatus: cleanup}
+		} else {
+			stresslog.Error("[TASK] 启动机器人失败，已停止已创建机器人",
+				zap.String("taskID", taskID),
+				zap.String("cleanup", string(result.CleanupStatus.Status)),
+				zap.Error(startErr))
 		}
-		return runFailed(fmt.Sprintf("启动机器人失败: %v", startErr))
+		return result
 	}
 	stresslog.Info("[TASK] 任务执行中",
 		zap.String("taskID", taskID),
@@ -358,17 +380,37 @@ func loadTaskFlow(path string) (*engine.TaskFlow, error) {
 // 机器人卡死时 gnet.Client.Stop() 可能长时间阻塞（等待事件循环排空），
 // 超时后强制返回，避免 Agent 因清理阻塞而无法接受新任务。
 func stopDialerWithTimeout(d *network.Dialer) {
+	stopDialerWithSubmit(d, utils.GetWorkPool().Submit)
+}
+
+type dialerStopper interface {
+	Stop() error
+}
+
+func stopDialerWithSubmit(d dialerStopper, submit func(func()) error) {
 	done := make(chan struct{})
-	// 走协程池而非裸 go：统一 recover 防止 d.Stop() panic 扩散，且纳入池化管理。
-	utils.GetWorkPool().Go(func() {
+	stop := func() {
 		defer close(done)
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				stresslog.DPanic("[TASK] 停止网络引擎时发生 panic", zap.Any("error", recovered))
+			}
+		}()
 		if err := d.Stop(); err != nil {
 			stresslog.Warn("[TASK] 停止网络引擎失败", zap.Error(err))
 		}
-	})
+	}
+	// 正常路径走协程池以保留超时保护；提交失败时必须实际执行清理，不能空等超时。
+	if err := submit(stop); err != nil {
+		stresslog.Warn("[TASK] 提交网络引擎清理任务失败，改为同步停止", zap.Error(err))
+		stop()
+		return
+	}
+	timer := time.NewTimer(taskCleanupTimeout)
+	defer timer.Stop()
 	select {
 	case <-done:
-	case <-time.After(taskCleanupTimeout):
+	case <-timer.C:
 		stresslog.Warn("[TASK] 停止网络引擎超时，强制返回（资源由 OS 回收）",
 			zap.Duration("timeout", taskCleanupTimeout))
 	}

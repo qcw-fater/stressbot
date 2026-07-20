@@ -1,6 +1,7 @@
 package network
 
 import (
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -27,8 +28,8 @@ func newFakeAdapter() *fakeAdapter {
 	return &fakeAdapter{decodeRouteKey: "test.route"}
 }
 
-func (a *fakeAdapter) HeaderSize() int                                 { return 4 }
-func (a *fakeAdapter) BodyLength(headerData []byte) int                { return 0 }
+func (a *fakeAdapter) HeaderSize() int                                     { return 4 }
+func (a *fakeAdapter) BodyLength(headerData []byte) int                    { return 0 }
 func (a *fakeAdapter) EncodeTCP(route any, body []byte, key []byte) []byte { return nil }
 func (a *fakeAdapter) EncodeUDP(route any, body []byte, key []byte) []byte { return nil }
 
@@ -63,8 +64,77 @@ func startPumpedConnection(t *testing.T, adp adapter.Adapter, isUDP bool) (*Conn
 		atomic.AddInt32(&sent, 1)
 		return nil
 	}
-	conn.StartPump(adp, isUDP)
+	if err := conn.StartPump(adp, isUDP); err != nil {
+		t.Fatalf("StartPump() error = %v", err)
+	}
 	return conn, &sent
+}
+
+func TestStartPumpRollsBackWhenPoolRejects(t *testing.T) {
+	conn := newTestConnection(t)
+	adp := newFakeAdapter()
+	sentinel := errors.New("pool rejected")
+	submissions := 0
+
+	err := conn.startPumpWithSubmit(adp, false, func(func()) error {
+		submissions++
+		return sentinel
+	})
+
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("startPumpWithSubmit() error = %v, want %v", err, sentinel)
+	}
+	if atomic.LoadInt32(&conn.pumpRun) != 0 {
+		t.Fatal("pumpRun was not rolled back")
+	}
+	if conn.inboundCh != nil || conn.controlCh != nil || conn.pumpDone != nil {
+		t.Fatalf("pump channels were not rolled back: inbound=%v control=%v done=%v",
+			conn.inboundCh != nil, conn.controlCh != nil, conn.pumpDone != nil)
+	}
+
+	_ = conn.startPumpWithSubmit(adp, false, func(func()) error {
+		submissions++
+		return sentinel
+	})
+	if submissions != 2 {
+		t.Fatalf("submissions = %d, want retry submission", submissions)
+	}
+}
+
+func TestStartPumpBuffersFirstFrameBeforeWorkerRuns(t *testing.T) {
+	conn := newTestConnection(t)
+	adp := newFakeAdapter()
+	var pumpTask func()
+
+	if err := conn.startPumpWithSubmit(adp, false, func(task func()) error {
+		pumpTask = task
+		return nil
+	}); err != nil {
+		t.Fatalf("startPumpWithSubmit() error = %v", err)
+	}
+	if pumpTask == nil {
+		t.Fatal("pump task was not submitted")
+	}
+
+	const routeKey = "test.route"
+	responseCh := make(chan *Message, 1)
+	conn.mu.Lock()
+	conn.responseMap[routeKey] = responseCh
+	conn.mu.Unlock()
+	if got := conn.EnqueueRaw([]byte("first"), time.Now()); got != EnqueueOK {
+		t.Fatalf("EnqueueRaw() = %v, want %v", got, EnqueueOK)
+	}
+
+	go pumpTask()
+	defer conn.Close()
+	select {
+	case msg := <-responseCh:
+		if string(msg.Data) != "first" {
+			t.Fatalf("first frame data = %q, want %q", msg.Data, "first")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("first frame was not dispatched after pump worker started")
+	}
 }
 
 // --- pump 消费 inbound → dispatch（request-response）---

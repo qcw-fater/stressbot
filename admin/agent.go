@@ -118,6 +118,27 @@ func (r *AgentRegistry) Heartbeat(agentID string, req HeartbeatRequest) error {
 	return nil
 }
 
+// CompleteTask 仅在 taskID 仍是节点当前任务时清理任务状态。
+// 返回 false 表示完成报告已经迟到，节点可能已开始执行其他任务。
+func (r *AgentRegistry) CompleteTask(agentID, taskID string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	node, ok := r.agents[agentID]
+	if !ok {
+		return false, ErrAgentNotFound
+	}
+	if node.CurrentTaskID != taskID {
+		return false, nil
+	}
+
+	node.CurrentTaskID = ""
+	node.CurrentBots = 0
+	node.LatestStress = nil
+	node.StressUpdatedAt = time.Time{}
+	return true, nil
+}
+
 // Touch 用于"任何 Agent 请求"路径上刷新心跳时间。
 func (r *AgentRegistry) Touch(agentID, appVersion string) {
 	r.mu.Lock()

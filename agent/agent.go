@@ -47,9 +47,14 @@ type Agent struct {
 	currentTask *TaskAssignment
 	taskCancel  context.CancelFunc
 
-	// 任务执行追踪。executeTask 启动前 Add(1)，结束 Done()；
+	// 任务执行追踪。submitTask 在 a.mu 内 Add(1)，executeTask 结束 Done()；
 	// shutdown 流程会等待 taskWG 归零，确保上报/清理完整完成。
 	taskWG sync.WaitGroup
+
+	// shuttingDown 标记 Agent 已进入关闭流程（由 a.mu 保护）。置位后 submitTask 一律拒绝新任务。
+	// shutdown 在 a.mu 内置位、在 taskWG.Wait 前完成，与 submitTask 的"预占+Add 同锁"互斥，
+	// 消除"计数为零时 Add 与 Wait 并发"的 WaitGroup 误用。
+	shuttingDown bool
 
 	// 上报循环
 	sysReporter    *SystemReporter
@@ -181,20 +186,28 @@ func (a *Agent) Status() AgentStatus {
 	return a.status
 }
 
-// cancelCurrentTask 取消当前正在执行的任务（如果有）。
-// 调用方持锁与否均可，本函数自行处理同步。
-func (a *Agent) cancelCurrentTask(reason string) (taskID string, canceled bool) {
+// cancelTask 仅在 expectedTaskID 为空或与当前任务一致时取消任务。
+// 返回的 taskID 是锁内观察到的当前任务，可用于识别迟到的停止命令。
+func (a *Agent) cancelTask(expectedTaskID, reason string) (taskID string, canceled bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.currentTask == nil || a.taskCancel == nil {
 		return "", false
 	}
 	taskID = a.currentTask.TaskID
+	if expectedTaskID != "" && taskID != expectedTaskID {
+		return taskID, false
+	}
 	a.taskCancel()
 	stresslog.Warn("[AGENT] 取消当前任务",
 		zap.String("taskID", taskID),
 		zap.String("reason", reason))
 	return taskID, true
+}
+
+// cancelCurrentTask 取消任意当前任务，供 Agent 自身关闭流程使用。
+func (a *Agent) cancelCurrentTask(reason string) (taskID string, canceled bool) {
+	return a.cancelTask("", reason)
 }
 
 // registerWithRetry 按配置的重连策略重试注册。
@@ -392,21 +405,82 @@ func (a *Agent) taskPollLoop(ctx context.Context) {
 			}
 			if task != nil {
 				stresslog.Info("[AGENT] 轮询到任务", zap.String("taskID", task.TaskID))
-				a.taskWG.Add(1)
-				utils.GetWorkPool().Go(func() {
-					defer a.taskWG.Done()
-					a.executeTask(ctx, task)
-				})
+				// 统一走 submitTask：原子预占 + Add + 提交，与 HTTP 下发共用同一入口，
+				// 避免各自维护 taskWG/currentTask 造成 TOCTOU 或提交失败泄漏。
+				if err := a.submitTask(task); err != nil {
+					stresslog.Warn("[AGENT] 轮询到的任务被拒绝",
+						zap.String("taskID", task.TaskID), zap.Error(err))
+				}
 			}
 		}
 	}
 }
 
-// executeTask 执行任务（异步）。
+// errAgentShuttingDown 表示 Agent 已进入关闭流程，拒绝接收新任务。
+var errAgentShuttingDown = errors.New("agent 正在关闭，拒绝新任务")
+
+// taskBusyError 表示已有任务在运行，携带当前任务 ID 供调用方回传 Admin。
+type taskBusyError struct{ currentTaskID string }
+
+func (e *taskBusyError) Error() string { return "已有任务运行: " + e.currentTaskID }
+
+// submitTask 原子预占并提交任务执行，供 HTTP 下发与轮询摄取共用（唯一任务入口）。
 //
-// 调用方负责 taskWG.Add(1)/Done()，本函数仅负责状态机迁移与 cleanup。
+// 校验（关闭中 / 已有任务）+ 预占（currentTask / status=Busy / taskCancel）+ taskWG.Add 全部
+// 在同一临界区（a.mu）内完成，消除两处历史缺陷：
+//   - TOCTOU：旧实现在 handler 里检查空闲后解锁，executeTask 才真正占用，并发下发会双双 202、
+//     其一被静默忽略；现在检查与占用不可分割。
+//   - 无法停止窗口：旧实现先置 status=Busy 再置 taskCancel，其间 cancelCurrentTask（需两者皆非 nil）
+//     无法取消；现在三者一起设置。
+//
+// taskWG.Add 在锁内、shutdown 置 shuttingDown 也在锁内且置位后再 Wait，二者互斥 →
+// 不存在"计数为零时 Add 与 Wait 并发"的 WaitGroup 误用，Wait 之后也不再有新 Add。
+func (a *Agent) submitTask(task *TaskAssignment) error {
+	return a.submitTaskWithSubmit(task, utils.GetWorkPool().Submit)
+}
+
+func (a *Agent) submitTaskWithSubmit(task *TaskAssignment, submit func(func()) error) error {
+	a.mu.Lock()
+	if a.shuttingDown {
+		a.mu.Unlock()
+		return errAgentShuttingDown
+	}
+	if a.currentTask != nil {
+		cur := a.currentTask.TaskID
+		a.mu.Unlock()
+		return &taskBusyError{currentTaskID: cur}
+	}
+	taskCtx, taskCancel := context.WithCancel(a.ctx)
+	a.currentTask = task
+	a.status = StatusBusy
+	a.taskCancel = taskCancel
+	a.taskWG.Add(1)
+	a.mu.Unlock()
+
+	if err := submit(func() {
+		defer a.taskWG.Done()
+		a.executeTask(taskCtx, taskCancel, task)
+	}); err != nil {
+		// 提交失败（池满/已关闭）：任务体不会执行，回滚预占 + 抵消 Add + 释放刚建的 ctx，
+		// 否则 currentTask 永占、taskWG 永不归零致 shutdown 挂死。
+		a.taskWG.Done()
+		a.mu.Lock()
+		a.currentTask = nil
+		a.status = StatusIdle
+		a.taskCancel = nil
+		a.mu.Unlock()
+		taskCancel()
+		return fmt.Errorf("提交任务执行协程失败: %w", err)
+	}
+	return nil
+}
+
+// executeTask 执行任务（异步，仅由 submitTask 调用）。
+//
+// 进入时 currentTask / status=Busy / taskCancel 已由 submitTask 原子预占；本函数只负责
+// 运行任务、上报，并在结束时释放 taskCtx、清理状态回到 idle。
 // 函数 defer 中保护性 recover：任务内 panic 不影响 Agent 主循环。
-func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
+func (a *Agent) executeTask(taskCtx context.Context, taskCancel context.CancelFunc, task *TaskAssignment) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			stresslog.Error("[AGENT] executeTask panic",
@@ -415,18 +489,6 @@ func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
 				zap.String("stack", string(debug.Stack())))
 		}
 	}()
-
-	a.mu.Lock()
-	if a.currentTask != nil {
-		a.mu.Unlock()
-		stresslog.Warn("[AGENT] 已存在任务，忽略新任务",
-			zap.String("newTaskID", task.TaskID),
-			zap.String("currentTaskID", a.currentTask.TaskID))
-		return
-	}
-	a.currentTask = task
-	a.status = StatusBusy
-	a.mu.Unlock()
 
 	startedAt := time.Now()
 	stresslog.Info("[AGENT] 任务开始执行",
@@ -439,7 +501,7 @@ func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
 		zap.String("from", string(StatusIdle)),
 		zap.String("to", string(StatusBusy)))
 
-	// 任务结束时清理状态
+	// 任务结束时清理状态并释放 taskCtx（预占在 submitTask 内完成）。
 	defer func() {
 		a.mu.Lock()
 		a.currentTask = nil
@@ -447,12 +509,6 @@ func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
 		a.status = StatusIdle
 		a.mu.Unlock()
 	}()
-
-	// 创建任务 context
-	taskCtx, taskCancel := context.WithCancel(parentCtx)
-	a.mu.Lock()
-	a.taskCancel = taskCancel
-	a.mu.Unlock()
 	defer taskCancel()
 
 	// 创建并启动 StressReporter
@@ -583,6 +639,13 @@ func (a *Agent) executeTask(parentCtx context.Context, task *TaskAssignment) {
 //  5. 注销（best-effort）→ 关闭 HTTP。
 func (a *Agent) shutdown() error {
 	stresslog.Info("[AGENT] 正在关闭...")
+
+	// 0. 关闭任务入口：在 a.mu 内置 shuttingDown。此后 submitTask（HTTP 下发 / 轮询摄取）一律被拒。
+	//    与 submitTask 的"预占 + taskWG.Add 同锁"互斥，保证下面的 taskWG.Wait 之后不再有并发 Add，
+	//    杜绝"计数为零时 Add 与 Wait 并发"的 WaitGroup 误用。
+	a.mu.Lock()
+	a.shuttingDown = true
+	a.mu.Unlock()
 
 	// 1. 停止当前任务，并等待 executeTask 自然结束（含 finalSnapshot 上报）
 	if taskID, canceled := a.cancelCurrentTask("agent shutdown"); canceled {

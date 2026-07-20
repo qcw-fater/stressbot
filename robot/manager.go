@@ -65,9 +65,12 @@ type Manager struct {
 	dialer  *network.Dialer
 	luaPool *script.RuntimePool
 	robots  []*Robot
-	mu      sync.RWMutex
-	ctx     context.Context
-	cancel  context.CancelFunc
+	// robotIdx：robot → 其在 robots 切片中的下标。onRobotDone 据此 O(1) swap-delete，
+	// 避免大规模机器人同时退出时逐个线性扫描 robots 造成 O(n²) 清理开销。
+	robotIdx map[*Robot]int
+	mu       sync.RWMutex
+	ctx      context.Context
+	cancel   context.CancelFunc
 
 	// 生命周期计数（替代旧 started/stopped 对，消除 ramp-up 竞态）：
 	//   - active：当前代存活 robot 数（startBatch 创建时 +1，onRobotDone -1）；
@@ -76,12 +79,14 @@ type Manager struct {
 	//   - creationDone：创建阶段是否结束（Manager 不再新建 robot）。
 	// doneCh 关闭的唯一条件：creationDone==true 且 active==0。这一条同时消灭
 	// "错过完成事件（永不结束）""阶段间瞬时归零（提前结束）""旧代回调污染计数"三类问题。
-	active         atomic.Int32
-	generation     atomic.Int32
-	creationDone   atomic.Bool
-	doneCh         chan struct{} // 创建阶段结束且所有机器人停止后关闭
-	stopOnce       sync.Once
-	cleanupMu      sync.Mutex
+	active       atomic.Int32
+	generation   atomic.Int32
+	creationDone atomic.Bool
+	doneCh       chan struct{} // 创建阶段结束且所有机器人停止后关闭
+	stopOnce     sync.Once
+	// cleanupSummary 由 m.mu 保护（与 robots 的快照/摘除同锁）：使"机器人仍在 robots 快照里、
+	// 未入 summary"与"已出 robots、已入 summary"两态互斥，消除 StopAll 的 prior+closeResult
+	// 之间对同一机器人的重复/漏计数。
 	cleanupSummary CleanupStatus
 
 	// OnStageReset 进入带 reset 的后续阶段前，上报 reset 前阶段段落指标。
@@ -95,21 +100,27 @@ type Manager struct {
 	OnStageChange func(current, total int)
 }
 
-// NewManager 创建机器人管理器
-func NewManager(cfg ManagerConfig, flow *engine.TaskFlow, factory *protox.Factory,
+// NewManager 创建机器人管理器。
+//
+// parent 是任务级上下文（Agent 模式为 taskCtx，单机模式为 app ctx）：Manager 的 ctx 由它派生，
+// 每个 Robot 的 ctx 又由 Manager.ctx 派生，形成 task → manager → robot 取消链。
+// 这样任务取消（含 ramp-up 创建阶段进行中）能立即沿链传播，让 startBatch/holdSec 尽快退出，
+// 不再依赖"跑完 ramp-up 才在外层 select 命中 ctx.Done"。
+func NewManager(parent context.Context, cfg ManagerConfig, flow *engine.TaskFlow, factory *protox.Factory,
 	dialer *network.Dialer, luaPool *script.RuntimePool) *Manager {
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parent)
 	return &Manager{
-		cfg:     cfg,
-		flow:    flow,
-		factory: factory,
-		dialer:  dialer,
-		luaPool: luaPool,
-		robots:  make([]*Robot, 0, cfg.Count),
-		ctx:     ctx,
-		cancel:  cancel,
-		doneCh:  make(chan struct{}),
+		cfg:      cfg,
+		flow:     flow,
+		factory:  factory,
+		dialer:   dialer,
+		luaPool:  luaPool,
+		robots:   make([]*Robot, 0, cfg.Count),
+		robotIdx: make(map[*Robot]int, cfg.Count),
+		ctx:      ctx,
+		cancel:   cancel,
+		doneCh:   make(chan struct{}),
 	}
 }
 
@@ -139,7 +150,7 @@ func (m *Manager) startBatch(fromIndex, count, conc int) (int, error) {
 
 		id, index, account := m.cfg.robotIdentity(fromIndex + i)
 
-		r, err := NewRobot(Config{
+		r, err := NewRobot(m.ctx, Config{
 			ID:             id,
 			Index:          index,
 			Account:        account,
@@ -158,15 +169,9 @@ func (m *Manager) startBatch(fromIndex, count, conc int) (int, error) {
 			continue
 		}
 
-		m.mu.Lock()
-		m.robots = append(m.robots, r)
-		m.mu.Unlock()
-
-		// 先登记 active 再 Start：杜绝 robot 秒退时 onRobotDone 的 -1 早于本处 +1，
-		// 否则会错过"最后一个完成"事件导致 doneCh 永不关闭。
-		m.active.Add(1)
-		r.onDone = func(rr *Robot, c CleanupStatus) { m.onRobotDone(gen, rr, c) }
-		r.Start()
+		if err := m.addAndStartRobot(gen, r, r.Start); err != nil {
+			return created, fmt.Errorf("启动机器人失败 id=%d account=%s: %w", id, account, err)
+		}
 		created++
 
 		// 仅在批次中间触发限速等待；最后一个 robot 启动后不再等，避免阶段切换时多等 1s。
@@ -182,6 +187,28 @@ func (m *Manager) startBatch(fromIndex, count, conc int) (int, error) {
 		}
 	}
 	return created, nil
+}
+
+// addAndStartRobot 先登记生命周期状态再启动 Robot；启动失败时原子撤销登记并返回错误。
+func (m *Manager) addAndStartRobot(gen int32, r *Robot, start func() error) error {
+	m.mu.Lock()
+	m.robots = append(m.robots, r)
+	m.robotIdx[r] = len(m.robots) - 1
+	m.mu.Unlock()
+
+	// 先登记 active 再 Start：杜绝 robot 秒退时 onRobotDone 的 -1 早于本处 +1。
+	m.active.Add(1)
+	r.onDone = func(rr *Robot, c CleanupStatus) { m.onRobotDone(gen, rr, c) }
+	if err := start(); err != nil {
+		cleanup := r.cleanup(CleanupReasonNatural, true)
+		m.mu.Lock()
+		m.removeRobotLocked(r)
+		m.recordCleanupLocked(cleanup)
+		m.mu.Unlock()
+		m.active.Add(-1)
+		return err
+	}
+	return nil
 }
 
 // StartAll 一次性创建全部机器人。
@@ -200,8 +227,7 @@ func (m *Manager) StartAll() error {
 	stresslog.Info("[MANAGER] 全部机器人已启动",
 		zap.Int("count", created),
 		zap.Int("requested", m.cfg.Count))
-	m.startDurationTimer()
-	return nil
+	return m.startDurationTimer()
 }
 
 // StartWithRampUp 分阶段创建机器人。
@@ -308,8 +334,7 @@ func (m *Manager) StartWithRampUp() error {
 	stresslog.Info("[MANAGER] 渐进式加压完成",
 		zap.Int("plannedOffset", offset),
 		zap.Int("activeBots", finalBots))
-	m.startDurationTimer()
-	return nil
+	return m.startDurationTimer()
 }
 
 // closeRobotsTimeout 整体并发关闭机器人的最长时间。
@@ -320,20 +345,26 @@ func (m *Manager) StartWithRampUp() error {
 const closeRobotsTimeout = 15 * time.Second
 
 // closeRobotsConcurrent 并发关闭一批机器人并等待全部完成。
-// 单个 robot 卡死不会阻塞其他 robot 的关闭，整体超过 closeRobotsTimeout 后强制返回。
+// 正常提交的任务整体超过 closeRobotsTimeout 后强制返回；协程池拒绝时改为同步清理，
+// 确保资源实际释放，不再等待超时后伪造未执行的清理结果。
 func closeRobotsConcurrent(robots []*Robot, reason CleanupReason) CleanupStatus {
+	return closeRobotsConcurrentWithSubmit(robots, reason, utils.GetWorkPool().Submit)
+}
+
+func closeRobotsConcurrentWithSubmit(robots []*Robot, reason CleanupReason, submit func(func()) error) CleanupStatus {
 	if len(robots) == 0 {
 		return emptyCleanupSummary(reason)
 	}
-	var wg sync.WaitGroup
 	results := make(chan CleanupStatus, len(robots))
 	for _, r := range robots {
 		r := r
-		wg.Add(1)
-		utils.GetWorkPool().Go(func() {
-			defer wg.Done()
+		if err := submit(func() {
 			results <- r.cleanup(reason, false)
-		})
+		}); err != nil {
+			stresslog.Warn("[MANAGER] 批量关闭任务提交失败，同步清理机器人",
+				zap.Int("id", r.id), zap.String("account", r.account), zap.Error(err))
+			results <- r.cleanup(reason, false)
+		}
 	}
 
 	statuses := make([]CleanupStatus, 0, len(robots))
@@ -376,12 +407,14 @@ func closeRobotsConcurrent(robots []*Robot, reason CleanupReason) CleanupStatus 
 // 因而尚未进入 m.cleanupSummary，两部分天然不重叠，避免重复计数。
 func (m *Manager) StopAll() CleanupStatus {
 	m.cancel()
-	m.mu.RLock()
+	// 快照 robots 与读取 prior 在同一把 m.mu 内完成：与 onRobotDone 的"摘除 + 记账同锁"配对，
+	// 保证快照内的机器人此刻一定尚未进入 cleanupSummary（prior），两部分对同一机器人不重复计数，
+	// 也不会漏计（每个机器人要么在 prior、要么在 closeResult）。
+	m.mu.Lock()
 	robots := make([]*Robot, len(m.robots))
 	copy(robots, m.robots)
-	m.mu.RUnlock()
-
-	prior := m.CleanupSummary()
+	prior := m.cleanupSummaryLocked()
+	m.mu.Unlock()
 
 	closeResult := closeRobotsConcurrent(robots, CleanupReasonAdminStop)
 	m.stopOnce.Do(func() { close(m.doneCh) })
@@ -409,6 +442,8 @@ func (m *Manager) resetBots() CleanupStatus {
 	robots := make([]*Robot, len(m.robots))
 	copy(robots, m.robots)
 	m.robots = m.robots[:0]
+	// 清空下标索引：被重置的旧代机器人已整体摘除，其 onRobotDone(旧代) 再 removeRobotLocked 即 no-op。
+	m.robotIdx = make(map[*Robot]int, m.cfg.Count)
 	m.mu.Unlock()
 
 	cleanup := closeRobotsConcurrent(robots, CleanupReasonRampReset)
@@ -423,17 +458,12 @@ func (m *Manager) resetBots() CleanupStatus {
 // onRobotDone 在单个 Robot 执行 goroutine 结束后回调（gen 为该 robot 创建时捕获的代号）。
 // 创建阶段结束且当前代所有 Robot 都结束时，关闭 doneCh，使 task_runner 的 select 退出。
 func (m *Manager) onRobotDone(gen int32, r *Robot, cleanup CleanupStatus) {
+	// 摘除 + 记账在同一临界区内完成（与 StopAll 的"快照 robots + 读 prior"同锁原子），
+	// 使该机器人对外只呈现两态之一：仍在 robots 快照且未入 summary，或已出 robots 且已入 summary。
 	m.mu.Lock()
-	for i, item := range m.robots {
-		if item == r {
-			copy(m.robots[i:], m.robots[i+1:])
-			m.robots[len(m.robots)-1] = nil
-			m.robots = m.robots[:len(m.robots)-1]
-			break
-		}
-	}
+	m.removeRobotLocked(r)
+	m.recordCleanupLocked(cleanup)
 	m.mu.Unlock()
-	m.recordCleanup(cleanup)
 
 	// 旧代回调：resetBots 已把该代整体清零并递增 generation，此处不得再改当前代 active
 	// 或关闭 doneCh，否则会污染新阶段计数。摘除+记账已在上方完成（对已截断的 robots 为 no-op）。
@@ -444,6 +474,24 @@ func (m *Manager) onRobotDone(gen int32, r *Robot, cleanup CleanupStatus) {
 	if m.active.Add(-1) == 0 && m.creationDone.Load() {
 		m.stopOnce.Do(func() { close(m.doneCh) })
 	}
+}
+
+// removeRobotLocked 从 robots 切片中 O(1) 摘除 r（swap-delete），并维护 robotIdx。
+// 调用方必须持有 m.mu 写锁。r 不在索引中（已被 resetBots 整体清空）时为 no-op。
+func (m *Manager) removeRobotLocked(r *Robot) {
+	idx, ok := m.robotIdx[r]
+	if !ok {
+		return
+	}
+	last := len(m.robots) - 1
+	if idx != last {
+		moved := m.robots[last]
+		m.robots[idx] = moved
+		m.robotIdx[moved] = idx
+	}
+	m.robots[last] = nil
+	m.robots = m.robots[:last]
+	delete(m.robotIdx, r)
 }
 
 // finishCreation 标记创建阶段结束（本 Manager 不再新建 robot），打开 doneCh 关闭门闩。
@@ -458,9 +506,8 @@ func (m *Manager) finishCreation() {
 	}
 }
 
-func (m *Manager) recordCleanup(cleanup CleanupStatus) {
-	m.cleanupMu.Lock()
-	defer m.cleanupMu.Unlock()
+// recordCleanupLocked 将单个机器人的清理结果并入汇总。调用方必须持有 m.mu 写锁。
+func (m *Manager) recordCleanupLocked(cleanup CleanupStatus) {
 	if m.cleanupSummary.Status == "" {
 		m.cleanupSummary = cleanup
 		return
@@ -468,13 +515,19 @@ func (m *Manager) recordCleanup(cleanup CleanupStatus) {
 	m.cleanupSummary = MergeCleanupStatus(cleanup.Reason, m.cleanupSummary, cleanup)
 }
 
-func (m *Manager) CleanupSummary() CleanupStatus {
-	m.cleanupMu.Lock()
-	defer m.cleanupMu.Unlock()
+// cleanupSummaryLocked 返回当前汇总。调用方必须持有 m.mu（读/写皆可，此处由写锁调用）。
+func (m *Manager) cleanupSummaryLocked() CleanupStatus {
 	if m.cleanupSummary.Status == "" {
 		return emptyCleanupSummary(CleanupReasonNatural)
 	}
 	return m.cleanupSummary
+}
+
+// CleanupSummary 返回当前累计的清理汇总（对外只读快照）。
+func (m *Manager) CleanupSummary() CleanupStatus {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.cleanupSummaryLocked()
 }
 
 // Done 返回一个 channel，所有机器人停止后关闭（定时到期或外部 StopAll 均会触发）。
@@ -483,17 +536,29 @@ func (m *Manager) Done() <-chan struct{} {
 }
 
 // startDurationTimer 启动运行时长定时器，到期后自动 StopAll。
-func (m *Manager) startDurationTimer() {
+func (m *Manager) startDurationTimer() error {
+	return m.startDurationTimerWithSubmit(utils.GetWorkPool().Submit)
+}
+
+func (m *Manager) startDurationTimerWithSubmit(submit func(func()) error) error {
 	if m.cfg.Duration <= 0 {
-		return
+		return nil
 	}
-	stresslog.Info("[MANAGER] 定时停止已设定", zap.Duration("duration", m.cfg.Duration))
-	utils.GetWorkPool().Go(func() {
+	if err := submit(func() {
+		timer := time.NewTimer(m.cfg.Duration)
+		defer timer.Stop()
 		select {
 		case <-m.doneCh:
-		case <-time.After(m.cfg.Duration):
+		case <-timer.C:
 			stresslog.Info("[MANAGER] 运行时长已到，自动停止")
 			m.StopAll()
 		}
-	})
+	}); err != nil {
+		stresslog.Error("[MANAGER] 提交定时停止任务失败",
+			zap.Duration("duration", m.cfg.Duration),
+			zap.Error(err))
+		return fmt.Errorf("提交定时停止任务失败: %w", err)
+	}
+	stresslog.Info("[MANAGER] 定时停止已设定", zap.Duration("duration", m.cfg.Duration))
+	return nil
 }

@@ -2,6 +2,7 @@ package robot
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -153,6 +154,19 @@ func TestAwaitIO_DispatchesAndDrains(t *testing.T) {
 	vals := out.IORender(L)
 	if len(vals) != 1 || vals[0].String() != "done" {
 		t.Fatalf("renderer 应产出 [\"done\"]，实际 %+v", vals)
+	}
+}
+
+func TestRunIOReturnsPoolSubmissionError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := newWaitRobot(ctx)
+	sentinel := errors.New("pool rejected")
+
+	err := r.sched.runIOWithSubmit(func() {}, func(func()) error { return sentinel })
+
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("runIOWithSubmit() error = %v, want %v", err, sentinel)
 	}
 }
 

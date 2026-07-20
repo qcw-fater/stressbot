@@ -1,6 +1,7 @@
 package robot
 
 import (
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -179,17 +180,20 @@ func (s *robotScheduler) awaitResponse(spec *script.WaitSpec) script.WaitOutcome
 // 不内联跑阻塞调用（会卡死执行器自身），也不放进 wait 的 timer/poll 模型（Class B 的唤醒事件
 // scheduler 观测不到）——这是 Class B 区别于 Class A 的核心。
 //
-// 为什么用协程池而非裸 go：① 项目规范禁止裸 go func（统一 recover + 追踪）；② 池容量为 0（无限），
-// 且执行器本身常驻占用池槽位（数量 ≥ Robot 数），故池必然 ≥ Robot 数，不会出现「执行器全 park 在
-// runIO 等作业、作业又抢不到池槽位」的死锁。
+// 为什么用协程池而非裸 go：项目规范要求统一 recover 与 goroutine 追踪。提交失败会立即返回错误，
+// 由声明式动作或 Lua Waiter 向上游传播，不能在没有后台作业的情况下继续等待 done。
 //
 // 不监听 ctx.Done 提前返回：job 的阻塞调用均受 ctx/超时约束（share 用派生 opCtx；http client
 // Timeout 10s + dial 5s；拨号受 ctx + OS connect 超时），ctx 取消时作业会很快返回。提前返回会
 // 让后台作业的结果无人接收（虽 done 缓冲 1 不泄漏），且声明式路径拿不到 Go 结果，故统一等作业完成。
 // job panic 由协程池 recover + 本地 recover 兜底，并始终 signal done，避免调用方永久阻塞。
-func (s *robotScheduler) runIO(job func()) {
+func (s *robotScheduler) runIO(job func()) error {
+	return s.runIOWithSubmit(job, utils.GetWorkPool().Submit)
+}
+
+func (s *robotScheduler) runIOWithSubmit(job func(), submit func(func()) error) error {
 	done := make(chan struct{}, 1) // 缓冲 1：即使调用方已放弃等待，后台 signal 也不阻塞/泄漏
-	utils.GetWorkPool().Go(func() {
+	if err := submit(func() {
 		defer func() { done <- struct{}{} }() // 始终 signal（含 panic 路径，defer LIFO 在 recover 之后）
 		defer func() {
 			if r := recover(); r != nil {
@@ -198,14 +202,20 @@ func (s *robotScheduler) runIO(job func()) {
 			}
 		}()
 		job()
-	})
+	}); err != nil {
+		stresslog.Error("[ROBOT] 提交 Class B I/O 作业失败",
+			zap.Int("id", s.robot.id),
+			zap.String("account", s.robot.account),
+			zap.Error(err))
+		return fmt.Errorf("提交 Class B I/O 作业失败: %w", err)
+	}
 
 	for {
 		select {
 		case t := <-s.taskCh:
 			t.exec() // 就地处理 listen 回调
 		case <-done:
-			return
+			return nil
 		}
 	}
 }
@@ -215,6 +225,6 @@ func (s *robotScheduler) runIO(job func()) {
 // 返回值）。job panic 时 renderer 为 nil → buildResumeVals 以空返回值 resume。
 func (s *robotScheduler) awaitIO(spec *script.WaitSpec) script.WaitOutcome {
 	var renderer script.IORenderer
-	s.runIO(func() { renderer = spec.IOJob() })
-	return script.WaitOutcome{IORender: renderer}
+	err := s.runIO(func() { renderer = spec.IOJob() })
+	return script.WaitOutcome{IORender: renderer, Err: err}
 }

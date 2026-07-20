@@ -98,7 +98,10 @@ type Config struct {
 // 返回 error 的场景：Lua 运行时池未提供 LState（pool 未初始化）。
 // codec 配置错误（Resolve nil）不在 NewRobot 暴露——拨号 / 首次 encode 时按 fail-loud 上报，
 // 便于定位到具体连接（service 串）而非整 Robot 创建失败。
-func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
+// parent 为 Manager 的上下文（其本身派生自任务级 ctx）：Robot 的生命周期 ctx 由它派生，
+// 形成 task → manager → robot 取消链，任务/Manager 取消能立即传播到每个 Robot（含正在拨号/
+// 执行 Lua 的机器人），而不仅依赖 StopAll 逐个 cancel。
+func NewRobot(parent context.Context, cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 	resolver adapter.CodecResolver,
 	dialer *network.Dialer, luaPool *script.RuntimePool) (*Robot, error) {
 
@@ -106,7 +109,7 @@ func NewRobot(cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
 		return nil, fmt.Errorf("NewRobot: resolver 不能为 nil（codec 未配置）")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parent)
 
 	// 读取 monitor 的 timingDetail 配置，传递给 network 和 engine 层。
 	var timingDetail monitor.TimingDetailLevel
@@ -189,13 +192,17 @@ func (r *Robot) GetClient() *network.Client { return r.client }
 // GetFactory 返回 proto 消息工厂。
 func (r *Robot) GetFactory() *protox.Factory { return r.factory }
 
-// Start 启动机器人
-func (r *Robot) Start() {
+// Start 启动机器人。协程池拒绝任务时返回错误，调用方不得把该 Robot 计为已启动。
+func (r *Robot) Start() error {
+	return r.startWithSubmit(utils.GetWorkPool().Submit)
+}
+
+func (r *Robot) startWithSubmit(submit func(func()) error) error {
 	if !r.running.CompareAndSwap(false, true) {
-		return
+		return nil
 	}
 
-	utils.GetWorkPool().GoWithStop(func(stopCh <-chan struct{}) {
+	err := submit(func() {
 		defer r.running.Store(false)
 		defer close(r.done)
 
@@ -228,25 +235,17 @@ func (r *Robot) Start() {
 		monitor.Global().RobotStarted()
 		monitor.Global().RobotRunning()
 
-		utils.GetWorkPool().Go(func() {
-			defer close(r.execDone)
-			if err := r.executor.Run(r.ctx); err != nil {
-				if r.ctx.Err() == nil {
-					stresslog.Error("[ROBOT] 流程异常退出", zap.Int("id", r.id), zap.Error(err))
-					monitor.Global().RobotErrored()
-				} else {
-					monitor.Global().RobotStopped()
-				}
+		execErr := r.executor.Run(r.ctx)
+		close(r.execDone)
+		if execErr != nil {
+			if r.ctx.Err() == nil {
+				stresslog.Error("[ROBOT] 流程异常退出", zap.Int("id", r.id), zap.Error(execErr))
+				monitor.Global().RobotErrored()
 			} else {
 				monitor.Global().RobotStopped()
 			}
-		})
-
-		select {
-		case <-r.execDone:
-		case <-stopCh:
-			r.cancel()
-			<-r.execDone
+		} else {
+			monitor.Global().RobotStopped()
 		}
 
 		cleanup := r.cleanup(CleanupReasonNatural, true)
@@ -255,6 +254,17 @@ func (r *Robot) Start() {
 			r.onDone(r, cleanup)
 		}
 	})
+	if err != nil {
+		// 任务体未运行，不触发 onDone；Manager 根据返回错误撤销 active/robots 登记。
+		stresslog.Error("[ROBOT] 启动失败：协程池提交被拒，执行收尾避免资源与计数泄漏",
+			zap.Int("id", r.id), zap.String("account", r.account), zap.Error(err))
+		close(r.execDone)
+		_ = r.cleanup(CleanupReasonNatural, true)
+		close(r.done)
+		r.running.Store(false)
+		return fmt.Errorf("提交机器人执行任务失败: %w", err)
+	}
+	return nil
 }
 
 // Stop 停止机器人
@@ -325,7 +335,8 @@ func (w *robotWaiter) Await(spec *script.WaitSpec) (script.WaitOutcome, error) {
 	case script.WaitResponse:
 		return w.robot.sched.awaitResponse(spec), nil
 	case script.WaitIO:
-		return w.robot.sched.awaitIO(spec), nil
+		outcome := w.robot.sched.awaitIO(spec)
+		return outcome, outcome.Err
 	default:
 		return script.WaitOutcome{}, fmt.Errorf("未知的 WaitSpec.Kind=%d", spec.Kind)
 	}
@@ -338,6 +349,10 @@ func (r *Robot) Close() CleanupStatus {
 }
 
 func (r *Robot) cleanup(reason CleanupReason, executorDone bool) CleanupStatus {
+	return r.cleanupWithSubmit(reason, executorDone, utils.GetWorkPool().Submit)
+}
+
+func (r *Robot) cleanupWithSubmit(reason CleanupReason, executorDone bool, submit func(func()) error) CleanupStatus {
 	var result CleanupStatus
 	r.cleanupOnce.Do(func() {
 		start := time.Now()
@@ -348,16 +363,20 @@ func (r *Robot) cleanup(reason CleanupReason, executorDone bool) CleanupStatus {
 		closeResult := network.CloseAllResult{Done: true}
 
 		closeCh := make(chan network.CloseAllResult, 1)
-		utils.GetWorkPool().Go(func() {
+		if err := submit(func() {
 			closeCh <- r.client.CloseAllWithTimeout(robotCloseTimeout)
-		})
+		}); err != nil {
+			// 协程池不可用（通常是进程 shutdown 阶段；Start 提交失败也会以 executorDone=true 走到这里）：
+			// 同步执行连接清理，不再依赖同一个已停的池——否则本函数会一直空等到 robotCloseTimeout
+			// 才隔离 LState、白白泄漏运行时。CloseAllWithTimeout 自带超时，同步调用有界。
+			stresslog.Warn("[ROBOT] 协程池不可用，同步执行连接清理",
+				zap.Int("id", r.id), zap.String("account", r.account), zap.Error(err))
+			closeCh <- r.client.CloseAllWithTimeout(robotCloseTimeout)
+		}
 
-		waitCh := make(chan struct{}, 1)
+		var execDoneCh <-chan struct{}
 		if !executorDone && r.execDone != nil {
-			utils.GetWorkPool().Go(func() {
-				<-r.execDone
-				waitCh <- struct{}{}
-			})
+			execDoneCh = r.execDone
 		} else {
 			waitDone = true
 		}
@@ -366,8 +385,9 @@ func (r *Robot) cleanup(reason CleanupReason, executorDone bool) CleanupStatus {
 		defer timer.Stop()
 		for !(waitDone && closeDone) {
 			select {
-			case <-waitCh:
+			case <-execDoneCh:
 				waitDone = true
+				execDoneCh = nil
 			case cr := <-closeCh:
 				closeDone = true
 				closeResult = cr

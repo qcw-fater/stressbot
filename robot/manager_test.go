@@ -1,6 +1,9 @@
 package robot
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // --- B1 ramp-up 生命周期计数（active/generation/creationDone → doneCh）单元测试 ---
 //
@@ -9,7 +12,7 @@ import "testing"
 // 覆盖：错过完成事件（永不结束）、关闭竞态两序、阶段间瞬时归零（提前结束）、旧代回调隔离。
 
 func newBookkeepManager() *Manager {
-	return NewManager(ManagerConfig{}, nil, nil, nil, nil)
+	return NewManager(context.Background(), ManagerConfig{}, nil, nil, nil, nil)
 }
 
 func doneClosed(m *Manager) bool {
@@ -29,6 +32,7 @@ func simCreate(m *Manager, n int) ([]*Robot, int32) {
 		r := &Robot{}
 		m.mu.Lock()
 		m.robots = append(m.robots, r)
+		m.robotIdx[r] = len(m.robots) - 1
 		m.mu.Unlock()
 		m.active.Add(1)
 		rs[i] = r
