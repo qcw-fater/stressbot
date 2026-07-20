@@ -171,18 +171,18 @@ func TestNavigatePath(t *testing.T) {
 }
 
 // TestSetPath_StoreResponseSim_GuildInfo 模拟 storeResponse 写入 playerData.guildInfo 的完整流程：
-//   1. 登录时 LoginPlayerDataS2C 不含 guildInfo（没战队），playerData 不含 guildInfo
-//   2. CreateGuild 成功，GuildCreateS2C.data 字段写入 playerData.guildInfo
-//   3. 条件 state:playerData.guildInfo != nil && playerData.guildInfo.guildId != 0 应为 true
-//   4. 子字段 playerData.guildInfo.mydata.position 可正确导航
+//  1. 登录时 LoginPlayerDataS2C 不含 guildInfo（没战队），playerData 不含 guildInfo
+//  2. CreateGuild 成功，GuildCreateS2C.data 字段写入 playerData.guildInfo
+//  3. 条件 state:playerData.guildInfo != nil && playerData.guildInfo.guildId != 0 应为 true
+//  4. 子字段 playerData.guildInfo.mydata.position 可正确导航
 func TestSetPath_StoreResponseSim_GuildInfo(t *testing.T) {
 	s := NewStore()
 
 	// --- 阶段 1：登录，LoginPlayerDataS2C 不含 guildInfo（proto3 未设置的 message 字段被跳过） ---
 	loginFieldMap := map[string]any{
-		"itemData":  []any{"sword", "shield"},
-		"funcList":  []any{map[string]any{"id": 1}},
-		"heroData":  "someHero",
+		"itemData": []any{"sword", "shield"},
+		"funcList": []any{map[string]any{"id": 1}},
+		"heroData": "someHero",
 		// 注意：没有 guildInfo 字段
 	}
 	s.Set("playerData", loginFieldMap)
@@ -195,11 +195,11 @@ func TestSetPath_StoreResponseSim_GuildInfo(t *testing.T) {
 	// --- 阶段 2：模拟 storeResponse 将 GuildCreateS2C.data 写入 playerData.guildInfo ---
 	// GuildCreateS2C.data 的类型是 GuildLoginInfo，结构如下：
 	guildLoginInfo := map[string]any{
-		"guildId":    int64(12345),
+		"guildId":       int64(12345),
 		"guildGamePlay": map[string]any{},
-		"baseInfo":   map[string]any{"name": "testGuild"},
-		"mydata":     map[string]any{"position": int32(0), "playerId": int32(100)},
-		"baseSetting": map[string]any{},
+		"baseInfo":      map[string]any{"name": "testGuild"},
+		"mydata":        map[string]any{"position": int32(0), "playerId": int32(100)},
+		"baseSetting":   map[string]any{},
 	}
 
 	// 这是 storeResponse 实际调用的: ae.store.SetPath(m.Setter, val)
@@ -249,9 +249,9 @@ func TestSetPath_StoreResponseSim_GuildInfo(t *testing.T) {
 
 	// --- 阶段 5：第二次写入（如 GetGuildInfo 更新战队信息）不应丢失其他 playerData 字段 ---
 	updatedGuildInfo := map[string]any{
-		"guildId":    int64(99999),
-		"mydata":     map[string]any{"position": int32(1), "playerId": int32(100)},
-		"baseInfo":   map[string]any{"name": "updatedGuild"},
+		"guildId":  int64(99999),
+		"mydata":   map[string]any{"position": int32(1), "playerId": int32(100)},
+		"baseInfo": map[string]any{"name": "updatedGuild"},
 	}
 	s.SetPath("playerData.guildInfo", updatedGuildInfo)
 
@@ -294,4 +294,59 @@ func TestSetPath_Concurrent(t *testing.T) {
 	if _, ok := m["other"]; !ok {
 		t.Error("shared.other should exist")
 	}
+}
+
+// TestGetPath_ConcurrentWithWriters 复刻 R9 崩溃场景：pump 侧写方（listen 回调 SetPath 就地改
+// 嵌套 map / 心跳 Increment）与主流程 GetPath 并发访问同一子树。GetPath 修复前在锁外导航嵌套
+// map，此测在 -race 下会报 data race 或直接 concurrent map read and map write 崩溃；修复后干净通过。
+func TestGetPath_ConcurrentWithWriters(t *testing.T) {
+	s := NewStore()
+	s.SetPath("root.branch.leaf", 0)
+
+	stop := make(chan struct{})
+	var writers sync.WaitGroup
+
+	// 写方 1：listen 回调式，就地改嵌套 map 的兄弟键（污染 root.branch 这张 map）。
+	writers.Add(1)
+	go func() {
+		defer writers.Done()
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+				s.SetPath("root.branch.sibling", i)
+			}
+		}
+	}()
+
+	// 写方 2：心跳式 stateCounter 自增（写 Store）。
+	writers.Add(1)
+	go func() {
+		defer writers.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				s.Increment("counter")
+			}
+		}
+	}()
+
+	// 读方：主流程条件求值式，深度遍历同一子树，固定圈数后结束。
+	var reader sync.WaitGroup
+	reader.Add(1)
+	go func() {
+		defer reader.Done()
+		for i := 0; i < 100000; i++ {
+			_ = s.GetPath("root.branch.leaf")
+			_ = s.GetPath("root.branch")
+			_ = s.GetPath("counter")
+		}
+	}()
+
+	reader.Wait()  // 读方跑满固定圈数
+	close(stop)    // 通知写方退出
+	writers.Wait() // 回收写方，避免测试结束后残留 goroutine
 }

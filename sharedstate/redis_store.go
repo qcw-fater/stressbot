@@ -151,10 +151,14 @@ func (s *RedisStore) Exists(ctx context.Context, key string) (bool, error) {
 //
 // 单条 EXPIRE 只能作用一个 key，故用 Lua 脚本在服务端遍历 4 个数据类型命名空间，
 // 把原先「每命名空间一次 RTT」（4 次）合并为单次脚本调用（1 次 RTT）。
-// 秒数用 int64(ttl/time.Second) 复刻 go-redis 原 Expire 的 formatSec 截断语义
-// （含 ttl<=0 时传非正秒数触发立即删除，与旧逐 key 调用行为一致）。
+// 秒数经 ttlSeconds 归一：契约规定 ttl<=0 表示「不设置过期」，此处按 no-op（不改动现有 TTL）
+// 返回 false，与写路径一致；直接把 0 传给 EXPIRE 会立即删 key，违反契约。
+// 正数 ttl 不足 1 秒按 1 秒，避免亚秒截断成 0 后误删。
 func (s *RedisStore) Expire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
-	n, err := expireScript.Run(ctx, s.rdb, s.dataKeys(key), int64(ttl/time.Second)).Int64()
+	if ttl <= 0 {
+		return false, nil
+	}
+	n, err := expireScript.Run(ctx, s.rdb, s.dataKeys(key), ttlSeconds(ttl)).Int64()
 	if err != nil {
 		return false, err
 	}
@@ -249,7 +253,11 @@ func (s *RedisStore) QueueLen(ctx context.Context, key string) (int64, error) {
 }
 
 func (s *RedisStore) QueueExpire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
-	return s.rdb.Expire(ctx, s.key(typeQueue, key), ttl).Result()
+	// 契约：ttl<=0 表示不设置过期 → no-op；直接传 0 给 EXPIRE 会立即删 key。正数亚秒按 1 秒。
+	if ttl <= 0 {
+		return false, nil
+	}
+	return s.rdb.Expire(ctx, s.key(typeQueue, key), time.Duration(ttlSeconds(ttl))*time.Second).Result()
 }
 
 // ── Hash ──────────────────────────────────────────────
@@ -318,7 +326,11 @@ func (s *RedisStore) HashIncr(ctx context.Context, key, field string, delta int6
 }
 
 func (s *RedisStore) HashExpire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
-	return s.rdb.Expire(ctx, s.key(typeHash, key), ttl).Result()
+	// 契约：ttl<=0 表示不设置过期 → no-op；直接传 0 给 EXPIRE 会立即删 key。正数亚秒按 1 秒。
+	if ttl <= 0 {
+		return false, nil
+	}
+	return s.rdb.Expire(ctx, s.key(typeHash, key), time.Duration(ttlSeconds(ttl))*time.Second).Result()
 }
 
 // ── 生命周期 ──────────────────────────────────────────

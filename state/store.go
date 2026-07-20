@@ -454,14 +454,46 @@ func (s *Store) GetPath(path string) any {
 	if len(segments) == 0 {
 		return nil
 	}
-	cur := s.Get(segments[0])
+	// 全程持 RLock 导航：与其它 reader 的锁纪律一致。navigateValue 逐段裸读嵌套 map/list，
+	// 若不在锁内，与 pump 侧已加锁的写方（listen 回调 SetPath / 心跳 Increment 就地改同一张
+	// 嵌套 map）并发时会触发 concurrent map read and map write 致命崩溃。
+	// 直接读 s.data 而非调 s.Get：避免同一 goroutine 递归 RLock，在写者等待时可能死锁。
+	// navigateValue 只做类型断言 + 索引/取键，不回调 Store，锁内执行无重入风险。
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	cur := s.data[segments[0]]
 	for i := 1; i < len(segments); i++ {
 		if cur == nil {
 			return nil
 		}
 		cur = navigateValue(cur, segments[i])
 	}
-	return cur
+	// 命中容器（map/slice）时返回深拷贝快照：GetPath 的结果会被 goValueToLua 等调用方在锁外
+	// 递归遍历，若返回内部引用，则与 pump goroutine 的 Go-store listen 回调 SetPath 就地改写
+	// 同一（嵌套）容器并发时会触发 concurrent map/slice 读写致命崩溃。深拷贝在读锁内完成，
+	// 与写入互斥、快照自洽；标量零拷贝直接返回（热路径 bindings/条件求值取叶子值不受影响）。
+	return deepCopyValue(cur)
+}
+
+// deepCopyValue 递归深拷贝 map[string]any / []any 容器，标量原样返回。
+// 供 GetPath 切断返回值与 Store 内部结构的别名（见 GetPath 注释）。
+func deepCopyValue(v any) any {
+	switch c := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(c))
+		for k, vv := range c {
+			out[k] = deepCopyValue(vv)
+		}
+		return out
+	case []any:
+		out := make([]any, len(c))
+		for i, vv := range c {
+			out[i] = deepCopyValue(vv)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // navigateValue 从单个值中按一段路径提取子值。

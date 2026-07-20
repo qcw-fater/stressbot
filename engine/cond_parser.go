@@ -79,6 +79,35 @@ func parseExpr(input string, s *state.Store) bool {
 	return false
 }
 
+// ValidateConditionSyntax 在流程加载期对条件表达式做纯结构（语法）校验，实现 fail-closed：
+// 词法错误、括号不匹配、缺操作数、多余 token 等在加载时即报错，而非运行时静默按 local-false
+// 吞掉（例如畸形 "!" 旧路径会被吞成 false/true，掩盖配置错误）。
+//
+// 只校验结构，不做求值：不访问 store（跳过 state 路径取值），也不做类型/除零等运行期检查——
+// 那些依赖运行时数据，非配置语法问题。传入的表达式应已剥离 state: 前缀。
+func ValidateConditionSyntax(expr string) error {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return nil
+	}
+	toks, err := tokenize(expr)
+	if err != nil {
+		return fmt.Errorf("词法错误: %w", err)
+	}
+	// skip=true 全程纯结构解析：parseFactor 对 path/number/string 只消费不取值，
+	// 括号/缺操作数/意外 token 仍会 setErrorf，comparison/arith 不触发类型或除零检查。
+	p := &parser{toks: toks, skip: true}
+	p.parseOr()
+	if !p.atEnd() {
+		t := p.peek()
+		return fmt.Errorf("存在多余 token %q（位置 %d）", t.lit, t.pos)
+	}
+	if p.firstErr != nil {
+		return p.firstErr
+	}
+	return nil
+}
+
 // parser 递归下降解释器。pos 始终指向当前 token（末尾保证指向 EOF 哨兵）。
 type parser struct {
 	toks     []token
@@ -89,7 +118,17 @@ type parser struct {
 }
 
 func (p *parser) peek() token { return p.toks[p.pos] }
-func (p *parser) next() token { t := p.toks[p.pos]; p.pos++; return t }
+
+// next 返回当前 token 并前移；到达 EOF 哨兵后不再前移（clamp），
+// 保证 p.pos 永不越过末尾哨兵。否则 parseFactor 默认分支对畸形输入（如单个 "("）
+// 递归到 EOF 时仍无条件 p.next() 前移，会让后续 peek 读到 p.toks[越界] 直接 panic。
+func (p *parser) next() token {
+	t := p.toks[p.pos]
+	if t.kind != tokEOF {
+		p.pos++
+	}
+	return t
+}
 func (p *parser) atEnd() bool { return p.toks[p.pos].kind == tokEOF }
 
 // recordErr 记录首个错误（只记一次）。

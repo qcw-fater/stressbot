@@ -463,3 +463,109 @@ func TestEvalCondition_StatePrefix(t *testing.T) {
 		t.Error("空表达式应返回 true")
 	}
 }
+
+// TestParseExpr_MalformedNoPanic 覆盖 R14：畸形/截断表达式绝不能 panic（配置 typo 曾让
+// 递归下降解析器在 EOF 越界，跑同一 flow 的所有 robot 集体崩溃）。本测试不约束返回值。
+func TestParseExpr_MalformedNoPanic(t *testing.T) {
+	s := newCondStore(map[string]any{"hp": int64(80)})
+	cases := []string{
+		"(",       // 触发原越界 panic 的最小输入
+		"((",      // 多层未闭合
+		"hp >",    // 比较缺右操作数
+		"hp > (",  // 右操作数为未闭合括号
+		"!",       // 一元缺操作数
+		"&&",      // 二元缺两侧
+		"hp &&",   // 缺右操作数
+		"(hp > 0", // 缺右括号
+		"hp > 0)", // 多余右括号（多余 token）
+		"- ",      // 负号缺操作数
+		") (",     // 顺序错乱
+		"1 +",     // 算术缺右操作数
+	}
+	// 核心保证是「不 panic」。返回值遵循既有 local-false 语义（错误操作数吸收为 false），
+	// 故个别输入如 "!" 会得到 !false==true——这属既有语义，不在本测断言范围内。
+	for _, expr := range cases {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("parseExpr(%q) 发生 panic：%v", expr, r)
+				}
+			}()
+			_ = parseExpr(expr, s)
+		}()
+	}
+}
+
+// TestValidateConditionSyntax 覆盖加载期 fail-closed：语法错误的条件表达式必须在加载校验时
+// 报错，而非运行时被 local-false 语义静默吞掉（畸形 "!" 曾被吞成 true/false 掩盖配置错误）。
+func TestValidateConditionSyntax(t *testing.T) {
+	// 结构合法：应通过（不访问 store，缺失 state 路径不算语法错误）。
+	valid := []string{
+		"",                        // 空表达式跳过
+		"  ",                      // 纯空白跳过
+		"hp > 0",                  // 基本比较
+		"hp > 0 && lvl >= 10",     // 逻辑与
+		"!(hp > 0) || alive",      // 一元 + 括号 + 逻辑或
+		"index % 2 == 0",          // 取模
+		"(a > 1) && (b < 2 || c)", // 嵌套括号
+		"missingKey > 0",          // 缺失 state 路径仍是合法语法
+	}
+	for _, expr := range valid {
+		if err := ValidateConditionSyntax(expr); err != nil {
+			t.Errorf("ValidateConditionSyntax(%q) 期望通过，却报错：%v", expr, err)
+		}
+	}
+
+	// 结构非法：应报错（fail-closed）。
+	invalid := []string{
+		"(",       // 未闭合括号
+		"((",      // 多层未闭合
+		"hp >",    // 比较缺右操作数
+		"hp > (",  // 右操作数为未闭合括号
+		"!",       // 一元缺操作数
+		"&&",      // 二元缺两侧
+		"hp &&",   // 缺右操作数
+		"(hp > 0", // 缺右括号
+		"hp > 0)", // 多余右括号
+		"1 +",     // 算术缺右操作数
+	}
+	for _, expr := range invalid {
+		if err := ValidateConditionSyntax(expr); err == nil {
+			t.Errorf("ValidateConditionSyntax(%q) 期望报错（fail-closed），却通过", expr)
+		}
+	}
+}
+
+// TestValidateStateActions_ConditionSyntax 覆盖 flow 加载期对节点/绑定条件的语法校验：
+// 带 state: 前缀的畸形条件必须让 ValidateStateActions 返回错误。
+func TestValidateStateActions_ConditionSyntax(t *testing.T) {
+	// 节点 condition 语法错误 → 报错。
+	badNode := &TaskFlow{
+		Nodes: map[string]*Node{
+			"n1": {Condition: "state:hp >"},
+		},
+	}
+	if err := ValidateStateActions(badNode); err == nil {
+		t.Error("节点 condition 语法错误应被 ValidateStateActions 拒绝")
+	}
+
+	// 合法 condition → 通过。
+	goodNode := &TaskFlow{
+		Nodes: map[string]*Node{
+			"n1": {Condition: "state:hp > 0 && lvl >= 1"},
+		},
+	}
+	if err := ValidateStateActions(goodNode); err != nil {
+		t.Errorf("合法节点 condition 不应报错：%v", err)
+	}
+
+	// 非 state: 前缀（如 lua:）不做语法校验 → 通过。
+	luaNode := &TaskFlow{
+		Nodes: map[string]*Node{
+			"n1": {Condition: "lua:check.lua"},
+		},
+	}
+	if err := ValidateStateActions(luaNode); err != nil {
+		t.Errorf("lua: 前缀条件不应被语法校验拒绝：%v", err)
+	}
+}
