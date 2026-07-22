@@ -76,7 +76,7 @@ function execute(r)
     end
     robot.set("session", resp.session)
 
-    -- 存储 lastZoneId（默认 1）
+    -- 存储 lastZoneId
     local zoneId = resp.lastZoneId or 1
     robot.set("zoneId", zoneId)
 
