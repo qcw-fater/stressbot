@@ -41,6 +41,7 @@ import {
 } from 'antd';
 import type { LogLevel, RampUpStage } from '@/types/api';
 import { AuthExtraEditor } from './AuthExtraEditor';
+import { TaskStartCommonFields } from './TaskStartCommonFields';
 import { BugOutlined, CheckCircleOutlined, DeleteOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -548,60 +549,15 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
         <Form.Item label="任务名" required>
           <Input value={taskName} onChange={(e) => setTaskName(e.target.value)} placeholder="例：200v200 v1.2" />
         </Form.Item>
-        {!rampUpEnabled && (
-          <Form.Item
-            label="集群总机器人数"
-            required
-            extra={
-              debugMode ? (
-                <span>
-                  <Tag color="purple" style={{ marginRight: 6 }}>
-                    调试
-                  </Tag>
-                  建议保持 1；集群总容量 {totalCapacity}
-                </span>
-              ) : (
-                `集群总容量 ${totalCapacity}`
-              )
-            }
-          >
-            <InputNumber
-              min={1}
-              max={totalCapacity}
-              value={totalBots}
-              onChange={(v) => setTotalBots(typeof v === 'number' ? v : 0)}
-              style={{ width: '100%' }}
-            />
-          </Form.Item>
-        )}
-        {rampUpEnabled && (
-          <Form.Item
-            label="集群总机器人数"
-            extra={
-              <span>
-                集群总容量 {totalCapacity}
-                {rampUpStages.some((s) => s.reset) && (
-                  <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
-                    · 峰值并发 {peakBots}
-                  </Typography.Text>
-                )}
-              </span>
-            }
-          >
-            <Typography.Text strong>{rampUpSum}</Typography.Text>
-            <Typography.Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
-              由各阶段机器人数自动累加
-            </Typography.Text>
-          </Form.Item>
-        )}
-        <Form.Item label="并发（每秒新建机器人数）">
-          <InputNumber
-            min={1}
-            value={robotConfig.concurrency}
-            onChange={(v) => setRobotConfig({ concurrency: typeof v === 'number' ? v : 1 })}
-            style={{ width: '100%' }}
-          />
-        </Form.Item>
+        <TaskStartCommonFields
+          totalBots={totalBots}
+          totalCapacity={totalCapacity}
+          rampUpEnabled={rampUpEnabled}
+          rampUpSum={rampUpSum}
+          robotConfig={robotConfig}
+          onTotalBotsChange={setTotalBots}
+          onRobotConfigChange={setRobotConfig}
+        />
         {!debugMode && (
           <Form.Item
             label={
@@ -787,25 +743,6 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
                   <AuthExtraEditor
                     value={robotConfig.stateExtra}
                     onChange={(v) => setRobotConfig({ stateExtra: v })}
-                  />
-                </Form.Item>
-                <Form.Item label="账号前缀" extra="如 bot_/qa_，默认 bot_">
-                  <Input
-                    value={robotConfig.accountPrefix ?? ''}
-                    onChange={(e) => setRobotConfig({ accountPrefix: e.target.value })}
-                    placeholder="bot_"
-                  />
-                </Form.Item>
-                <Form.Item
-                  label="账号编号起点"
-                  extra={`默认 0；账号格式 ${robotConfig.accountPrefix || 'bot_'}<startNumber + N>。已有 bot_0~bot_99 在线时可设 100 避免撞车。`}
-                >
-                  <InputNumber
-                    min={0}
-                    max={1_000_000}
-                    value={robotConfig.startNumber ?? 0}
-                    onChange={(v) => setRobotConfig({ startNumber: typeof v === 'number' ? v : 0 })}
-                    style={{ width: '100%' }}
                   />
                 </Form.Item>
                 <Form.Item label="主连接服务名" extra="主连接对应的服务标识，默认 logic">
