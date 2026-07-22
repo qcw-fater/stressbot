@@ -1,0 +1,59 @@
+.route-editor-inline {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: max-content;
+  white-space: nowrap;
+}
+
+.route-floating-editor {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+  scrollbar-gutter: stable;
+}
+
+.route-floating-editor::-webkit-scrollbar {
+  height: 4px;
+}
+
+.route-floating-editor::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-tertiary) 45%, transparent);
+  border-radius: 2px;
+}
+
+.route-floating-editor::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.route-editor-inline__warning {
+  color: var(--color-warning);
+}
+
+.route-editor-inline__field {
+  width: 120px;
+}
+
+.route-editor-inline__prefix {
+  display: inline-flex;
+  align-items: center;
+  align-self: stretch;
+  padding: 0 var(--space-sm);
+  color: var(--text-secondary);
+  background: var(--container-bg);
+  border: 1px solid var(--border-color);
+  border-right: 0;
+  border-radius: 6px 0 0 6px;
+}
+
+.route-editor-inline__field .ant-input {
+  min-width: 0;
+  flex: 1;
+  border-radius: 0 6px 6px 0;
+}

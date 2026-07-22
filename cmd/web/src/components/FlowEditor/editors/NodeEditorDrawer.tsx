@@ -7,7 +7,7 @@
 import { App as AntApp, Button, Form, Input, Popconfirm, Space, Tag, Tooltip } from 'antd';
 import { UndoOutlined } from '@ant-design/icons';
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { useEditorStore } from '../store/editorStore';
+import { EDITOR_PANEL_WIDTH, useEditorStore } from '../store/editorStore';
 import { useFlowStore } from '../store/flowStore';
 import { isValidNodeId } from '../utils/nodeIdGen';
 import { SequenceEditor } from './SequenceEditor';
@@ -143,7 +143,6 @@ export function NodeEditorDrawer() {
   };
 
   const titleNode = node;
-  const drawerWidth = titleNode?.type === 'action' ? 720 : 520;
 
   return (
     <FloatingWindow
@@ -158,7 +157,7 @@ export function NodeEditorDrawer() {
           '编辑节点'
         )
       }
-      defaultSize={{ width: drawerWidth, height: 560 }}
+      defaultSize={{ width: EDITOR_PANEL_WIDTH, height: 560 }}
       minSize={{ width: 400, height: 350 }}
       open={open}
       onClose={() => closePanel('nodeEdit')}

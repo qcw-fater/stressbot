@@ -30,6 +30,8 @@ const THEME_STORAGE_KEY = 'stressbot:theme';
 const DEBUG_MODE_STORAGE_KEY = 'stressbot:debugMode';
 const TASK_FORM_ADV_STORAGE_KEY = 'stressbot:taskForm:advancedExpanded';
 
+export const EDITOR_PANEL_WIDTH = 720;
+
 function readInitialTheme(): ThemeMode {
   try {
     const v = localStorage.getItem(THEME_STORAGE_KEY);
@@ -251,8 +253,8 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
 
 /** 各面板类型的默认窗口尺寸 */
 const DEFAULT_SIZES: Record<string, { width: number; height: number }> = {
-  nodeEdit: { width: 640, height: 500 },
-  listenEdit: { width: 680, height: 520 },
+  nodeEdit: { width: EDITOR_PANEL_WIDTH, height: 500 },
+  listenEdit: { width: EDITOR_PANEL_WIDTH, height: 520 },
   protoBrowser: { width: 780, height: 540 },
   listenPanel: { width: 440, height: 560 },
   jsonPreview: { width: 800, height: 560 },

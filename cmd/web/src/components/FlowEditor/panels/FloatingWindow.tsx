@@ -75,6 +75,7 @@ export function FloatingWindow({
   // ESC 关闭最顶层窗口
   const handleEsc = useCallback((e: KeyboardEvent) => {
     if (e.key !== 'Escape') return;
+    if (e.target instanceof Element && e.target.closest('[data-floating-window-escape-local]')) return;
     // 只响应自己是最顶层窗口的情况
     const windows = useFloatingWindowStore.getState().windows;
     const topEntry = Object.entries(windows).reduce<[string, number] | null>((acc, [id, w]) => {

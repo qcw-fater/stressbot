@@ -14,6 +14,7 @@ import type { ListenDef } from '@/types/listen';
 export interface ListenTemplateDefaultRef {
   server: string;
   route: unknown;
+  queueSize?: number;
 }
 
 // idb-keyval 的 createStore 在同一 DB 名下只能注册一个 objectStore（浏览器本地数据库限制）。

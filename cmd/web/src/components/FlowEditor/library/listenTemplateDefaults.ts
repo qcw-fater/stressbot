@@ -9,10 +9,12 @@ export interface InferListenDefaultRefResult {
 
 export function cloneListenDefaultRef(ref?: ListenTemplateDefaultRef): ListenTemplateDefaultRef | undefined {
   if (!ref) return undefined;
-  return {
+  const cloned: ListenTemplateDefaultRef = {
     server: ref.server,
     route: cloneJsonValue(ref.route),
   };
+  if (typeof ref.queueSize === 'number') cloned.queueSize = ref.queueSize;
+  return cloned;
 }
 
 export function inferListenDefaultRef(
@@ -26,7 +28,12 @@ export function inferListenDefaultRef(
       if (ref.listen !== listenName) continue;
       const server = ref.server?.trim();
       if (!server) continue;
-      refs.push({ server, route: cloneJsonValue(ref.route) });
+      const defaultRef: ListenTemplateDefaultRef = {
+        server,
+        route: cloneJsonValue(ref.route),
+      };
+      if (typeof ref.queueSize === 'number') defaultRef.queueSize = ref.queueSize;
+      refs.push(defaultRef);
     }
   }
 
@@ -43,7 +50,7 @@ export function defaultRefSummary(ref?: ListenTemplateDefaultRef): string | unde
 }
 
 function defaultRefKey(ref: ListenTemplateDefaultRef): string {
-  return `${ref.server}|${routeKey(ref.route)}`;
+  return `${ref.server}|${routeKey(ref.route)}|${ref.queueSize ?? 1}`;
 }
 
 function cloneJsonValue(value: unknown): unknown {

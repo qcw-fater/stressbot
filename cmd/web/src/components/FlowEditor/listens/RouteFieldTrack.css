@@ -1,0 +1,121 @@
+.route-field-track {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 26px;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+}
+
+.route-field-track__scroller {
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 3px 0 5px;
+  scrollbar-gutter: stable;
+  white-space: nowrap;
+}
+
+.route-field-track__scroller::-webkit-scrollbar {
+  height: 4px;
+}
+
+.route-field-track__scroller::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-tertiary) 45%, transparent);
+  border-radius: 2px;
+}
+
+.route-field-track__scroller::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.route-field-track__items {
+  display: inline-flex;
+  align-items: center;
+  min-width: max-content;
+}
+
+.route-field-track__item {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+
+.route-field-track__separator {
+  margin: 0 6px;
+  color: var(--text-tertiary);
+}
+
+.route-field-track__value {
+  display: inline-flex;
+  align-items: center;
+  max-width: 132px;
+  overflow: hidden;
+  padding: 1px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+  font-size: 12px;
+  line-height: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+}
+
+.route-field-track__value:hover,
+.route-field-track__value:focus-visible,
+.route-field-track__value:focus-within {
+  background: color-mix(in srgb, var(--text-tertiary) 10%, transparent);
+  outline: none;
+}
+
+.route-field-track__value--missing {
+  color: var(--color-warning);
+}
+
+.route-field-track__value--editing {
+  overflow: visible;
+  background: color-mix(in srgb, var(--color-blue) 12%, transparent);
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--color-blue) 55%, transparent);
+  text-overflow: clip;
+}
+
+.route-field-track__value--editing:focus-within {
+  background: color-mix(in srgb, var(--color-blue) 12%, transparent);
+}
+
+.route-field-track__value--editing.route-field-track__value--error,
+.route-field-track__value--editing.route-field-track__value--error:focus-within {
+  background: color-mix(in srgb, var(--color-error) 12%, transparent);
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--color-error) 55%, transparent);
+  color: var(--color-error);
+}
+
+.route-field-track__value-input {
+  box-sizing: content-box;
+  min-width: 1ch;
+  max-width: 96px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  caret-color: currentColor;
+}
+
+.route-field-track__warning {
+  flex: none;
+  margin-right: 6px;
+  color: var(--color-warning);
+}
+
+.route-field-track__expand {
+  width: 26px;
+  min-width: 26px;
+  padding-inline: 0;
+  color: var(--text-secondary);
+}

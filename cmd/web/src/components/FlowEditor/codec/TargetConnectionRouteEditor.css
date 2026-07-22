@@ -1,0 +1,29 @@
+.target-connection-select {
+  display: flex;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.target-connection-select--inline {
+  flex-direction: row;
+  align-items: center;
+}
+
+.target-connection-select--stacked {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.target-connection-select__warning,
+.target-connection-select__error {
+  color: var(--color-error);
+}
+
+.target-connection-select__warning {
+  flex: 0 0 auto;
+}
+
+.target-connection-select__error {
+  margin-top: var(--space-xs);
+  font-size: 11px;
+}

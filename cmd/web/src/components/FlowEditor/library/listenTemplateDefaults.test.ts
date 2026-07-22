@@ -73,4 +73,45 @@ describe('listenTemplateDefaults', () => {
     expect(cloned).toEqual({ server: 'tcp:logic', route });
     expect(cloned?.route).not.toBe(route);
   });
+
+  it('推断和克隆默认注册时保留 queueSize', () => {
+    const nodes: Record<string, FlowNode> = {
+      A: {
+        type: 'action',
+        action: 'A',
+        listenRefs: [
+          { server: 'tcp:logic', route: { cmd: 1 }, listen: 'listenA', queueSize: 128 },
+        ],
+      },
+    };
+
+    expect(inferListenDefaultRef(nodes, 'listenA')).toEqual({
+      ambiguous: false,
+      defaultRef: { server: 'tcp:logic', route: { cmd: 1 }, queueSize: 128 },
+    });
+    expect(cloneListenDefaultRef({ server: 'tcp:logic', route: {}, queueSize: 32 })).toEqual({
+      server: 'tcp:logic',
+      route: {},
+      queueSize: 32,
+    });
+  });
+
+  it('缺省容量与显式容量 1 不标记歧义', () => {
+    const nodes: Record<string, FlowNode> = {
+      A: {
+        type: 'action',
+        action: 'A',
+        listenRefs: [{ server: 'tcp:logic', route: {}, listen: 'listenA' }],
+      },
+      B: {
+        type: 'action',
+        action: 'B',
+        listenRefs: [
+          { server: 'tcp:logic', route: {}, listen: 'listenA', queueSize: 1 },
+        ],
+      },
+    };
+
+    expect(inferListenDefaultRef(nodes, 'listenA').ambiguous).toBe(false);
+  });
 });

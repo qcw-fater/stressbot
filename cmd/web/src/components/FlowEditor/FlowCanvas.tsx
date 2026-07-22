@@ -390,8 +390,16 @@ function FlowCanvasInner() {
         const list = (src.listenRefs ?? []).slice();
         if (!list.some((r) => r.listen === targetListenName)) {
           const defaultRef = useFlowStore.getState().listenDefaultRefs[targetListenName];
-          list.push(defaultRef
-            ? { route: cloneListenDefaultRef(defaultRef)?.route, server: defaultRef.server, listen: targetListenName }
+          const clonedDefaultRef = cloneListenDefaultRef(defaultRef);
+          list.push(clonedDefaultRef
+            ? {
+                route: clonedDefaultRef.route,
+                server: clonedDefaultRef.server,
+                listen: targetListenName,
+                ...(typeof clonedDefaultRef.queueSize === 'number'
+                  ? { queueSize: clonedDefaultRef.queueSize }
+                  : {}),
+              }
             : { route: null, server: '', listen: targetListenName });
         }
         updateNode(params.source, { listenRefs: list });

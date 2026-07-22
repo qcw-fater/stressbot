@@ -14,7 +14,7 @@ import { UndoOutlined, ApiOutlined } from '@ant-design/icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ListenDef } from '@/types/listen';
 import { classifyListen, type ListenKind } from '@/types/listen';
-import { useEditorStore } from '../store/editorStore';
+import { EDITOR_PANEL_WIDTH, useEditorStore } from '../store/editorStore';
 import { useFlowStore } from '../store/flowStore';
 import { ProtoBrowser } from '../proto/ProtoBrowser';
 import { StoreTable } from '../editors/ActionEditor/StoreTable';
@@ -121,7 +121,7 @@ export function ListenEditor() {
       }
       open={activePanel?.kind === 'listenEdit'}
       onClose={handleClose}
-      defaultSize={{ width: 680, height: 520 }}
+      defaultSize={{ width: EDITOR_PANEL_WIDTH, height: 520 }}
       minSize={{ width: 500, height: 400 }}
       footer={
         <Space>
