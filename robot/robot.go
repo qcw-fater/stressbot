@@ -1095,7 +1095,7 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 //
 // 解码失败 / 脚本失败均记 callback 失败指标，不向上传播——listen 回调是旁路推送，
 // 失败不应中断主流程。配置了 s2cProto 时解码后以字段表传给 on_message(r, msg)，
-// 否则传 nil（脚本可自行用 proto API 处理原始消息）。
+// 否则以二进制安全的 Lua string 传递原始消息体。
 func (h *robotActionHandler) runListenScript(cbName string, cbDef *engine.ListenDef, msg *network.Message) {
 	if h.robot.ctx.Err() != nil {
 		return
@@ -1123,7 +1123,7 @@ func (h *robotActionHandler) runListenScript(cbName string, cbDef *engine.Listen
 		}
 		runErr = h.robot.luaPool.RunListenScript(h.robot.l, cbDef.Script, respMsg)
 	} else {
-		runErr = h.robot.luaPool.RunListenScript(h.robot.l, cbDef.Script, nil)
+		runErr = h.robot.luaPool.RunListenScriptRaw(h.robot.l, cbDef.Script, msg.Data)
 	}
 
 	if runErr != nil {

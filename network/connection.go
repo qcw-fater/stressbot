@@ -544,7 +544,9 @@ func (c *Connection) dispatchListen(resp *Message) {
 			// 默认容量 1：从第 2 条起每条都会触发覆盖丢弃，保最新的消息。
 			stresslog.Warn("[NETWORK] 监听队列已满，覆盖丢弃最旧消息",
 				zap.String("service", c.serviceName),
-				zap.String("routeKey", resp.RouteKey))
+				zap.String("robot", c.robotName),
+				zap.String("routeKey", resp.RouteKey),
+				zap.Uint64("dropped", q.Dropped()))
 		}
 	}
 }

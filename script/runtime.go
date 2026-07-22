@@ -442,7 +442,7 @@ func (rp *RuntimePool) buildResumeVals(L *lua.LState, ctx *Context, spec *WaitSp
 //
 // Lua 脚本应定义 `function on_message(r, msg)`：
 //   - r   为 robot 句柄（与 execute(r) 同一句柄，可调用 robot/network/state 等 API）；
-//   - msg 为按 ListenDef.s2cProto 解码后的字段表；未配置 s2cProto 时为 nil。
+//   - msg 为按 ListenDef.s2cProto 解码后的字段表。
 //
 // 调用约束：本方法**必须**由 Robot 调度器在安全点（节点边界 / 等待窗口 drain，执行器
 // goroutine = 业务 LState 唯一所有者）串行调用，绝不能在网络 pump goroutine 内执行——
@@ -452,13 +452,22 @@ func (rp *RuntimePool) buildResumeVals(L *lua.LState, ctx *Context, spec *WaitSp
 // 回应推送），遇 await 时 yield，由 Waiter 协作式等待后 resume。嵌套（回调 await 期间 drain
 // 出另一回调）安全：resumeCoroutine 每次 resume 前重设 topThread。
 func (rp *RuntimePool) RunListenScript(L *lua.LState, scriptName string, respMsg proto.Message) error {
-	ctx := GetContext(L)
-
 	robotUD := createRobotUserData(L)
 	var msgVal lua.LValue = lua.LNil
 	if respMsg != nil {
 		msgVal = protoMessageToLuaTable(L, respMsg)
 	}
+	return rp.runListenScriptValue(L, scriptName, robotUD, msgVal)
+}
+
+// RunListenScriptRaw 执行未配置 s2cProto 的 listen 脚本回调，将原始消息体作为
+// 二进制安全的 Lua string 传给 on_message(r, msg)。
+func (rp *RuntimePool) RunListenScriptRaw(L *lua.LState, scriptName string, raw []byte) error {
+	return rp.runListenScriptValue(L, scriptName, createRobotUserData(L), lua.LString(string(raw)))
+}
+
+func (rp *RuntimePool) runListenScriptValue(L *lua.LState, scriptName string, robotUD, msgVal lua.LValue) error {
+	ctx := GetContext(L)
 
 	co, lerr := rp.startCoroutine(L, scriptName, "on_message", robotUD, msgVal)
 	if lerr != nil {

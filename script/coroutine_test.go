@@ -164,6 +164,29 @@ func TestRunListenScript_NoAwait(t *testing.T) {
 	}
 }
 
+// TestRunListenScriptRaw_PassesPayload 验证未配置 s2cProto 的持久监听会把原始消息体
+// 作为二进制安全的 Lua string 传给 on_message，而不是丢弃为 nil。
+func TestRunListenScriptRaw_PassesPayload(t *testing.T) {
+	rp := newTestPool(t, map[string]string{
+		"raw.lua": `function on_message(r, msg) received = msg end`,
+	})
+	L := rp.Acquire()
+	defer rp.Release(L)
+	SetContext(L, &Context{})
+
+	want := []byte{0x00, 0x7f, 0x80, 0xff}
+	if err := rp.RunListenScriptRaw(L, "raw.lua", want); err != nil {
+		t.Fatalf("不期望 error: %v", err)
+	}
+	got, ok := L.GetGlobal("received").(lua.LString)
+	if !ok {
+		t.Fatalf("received 类型 = %T，期望 lua.LString", L.GetGlobal("received"))
+	}
+	if string(got) != string(want) {
+		t.Fatalf("received = %v，期望 %v", []byte(got), want)
+	}
+}
+
 // TestRunListenScript_AwaitInCallback listen 回调改协程后，on_message 内可直接调用会等待的 API：
 // 应 yield 一次 WaitSleep 交给 Waiter，再 resume 跑完。
 func TestRunListenScript_AwaitInCallback(t *testing.T) {
