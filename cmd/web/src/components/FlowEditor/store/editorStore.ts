@@ -90,6 +90,9 @@ export type Clipboard =
 
 interface EditorState {
   selectedNodeId: string | null;
+  /** 校验报告"跳转"请求：画布把目标节点 pan 到中央并选中高亮。nonce 每次自增，连点同节点也触发。 */
+  focusRequestNodeId: string | null;
+  focusRequestNonce: number;
   selectedListenName: string | null;
   hoveredListen: string | null;
   /** 当前选中的边相关的节点 ID 集合（用于高亮显示） */
@@ -145,6 +148,7 @@ interface EditorState {
   bumpRouteKeyTemplatesVersion: () => void;
 
   setSelectedNode: (id: string | null) => void;
+  requestFocusNode: (nodeId: string) => void;
   setSelectedListen: (name: string | null) => void;
   setHoveredListen: (name: string | null) => void;
   setEdgeHighlightNodes: (ids: string[]) => void;
@@ -168,6 +172,8 @@ applyThemeAttr(initialTheme);
 
 export const useEditorStore = create<EditorState>()((set, get) => ({
   selectedNodeId: null,
+  focusRequestNodeId: null,
+  focusRequestNonce: 0,
   selectedListenName: null,
   hoveredListen: null,
   edgeHighlightNodeIds: [],
@@ -190,6 +196,7 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
   bumpRouteKeyTemplatesVersion: () => set((s) => ({ routeKeyTemplatesVersion: s.routeKeyTemplatesVersion + 1 })),
 
   setSelectedNode: (id) => set({ selectedNodeId: id }),
+  requestFocusNode: (nodeId) => set((s) => ({ focusRequestNodeId: nodeId, focusRequestNonce: s.focusRequestNonce + 1 })),
   setSelectedListen: (name) => set({ selectedListenName: name }),
   setHoveredListen: (name) => set({ hoveredListen: name }),
   setEdgeHighlightNodes: (ids) => set({ edgeHighlightNodeIds: ids }),

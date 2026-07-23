@@ -107,6 +107,23 @@ function FlowCanvasInner() {
     }
   }, [needsFitView, rfNodeIds, setCenter]);
 
+  // 校验报告"跳转"：把目标节点 pan 到中央 + RF 原生 selected 高亮（单选目标，取消其余）
+  const focusNodeId = useEditorStore((s) => s.focusRequestNodeId);
+  const focusNonce = useEditorStore((s) => s.focusRequestNonce);
+  useEffect(() => {
+    if (!focusNodeId) return;
+    const targetId = focusNodeId;
+    const store = useFlowStore.getState();
+    store.onNodesChange([
+      ...store.rfNodes.filter((n) => n.id !== targetId).map((n) => ({ id: n.id, type: 'select' as const, selected: false })),
+      { id: targetId, type: 'select' as const, selected: true },
+    ]);
+    const pos = store.layout.nodePositions[targetId];
+    if (pos && wrapperRef.current && wrapperRef.current.clientWidth > 0) {
+      setCenter(pos.x, pos.y, { zoom: 1, duration: 300 });
+    }
+  }, [focusNonce, focusNodeId, setCenter]);
+
   // dropEffect 必须与拖出端的 effectAllowed 兼容：
   //   - 普通节点类型：effectAllowed='move'  → dropEffect='move'
   //   - 模板（action/listen）：effectAllowed='copy'  → dropEffect='copy'

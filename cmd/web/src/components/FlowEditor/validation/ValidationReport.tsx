@@ -2,7 +2,7 @@
  * 校验报告浮动窗口：列出 errors / warnings / infos，点击跳转到对应节点 / action / listen。
  */
 
-import { Alert, Badge, Button, Empty, List, Space, Tabs, Tag } from 'antd';
+import { Alert, App as AntApp, Badge, Button, Empty, List, Space, Tabs, Tag } from 'antd';
 import { CloseCircleFilled, ExclamationCircleFilled, InfoCircleFilled, ReloadOutlined } from '@ant-design/icons';
 import { useFlowStore } from '../store/flowStore';
 import { useEditorStore } from '../store/editorStore';
@@ -19,13 +19,17 @@ export function ValidationReportDrawer({ open, onClose }: ValidationReportDrawer
   const nodes = useFlowStore((state) => state.nodes);
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
   const setSelectedNode = useEditorStore((s) => s.setSelectedNode);
+  const requestFocusNode = useEditorStore((s) => s.requestFocusNode);
+  const { message } = AntApp.useApp();
   const report = useValidationStore((state) => state.report);
 
   const goto = (issue: ValidationIssue) => {
     if (!issue.location) return;
     if (issue.location.kind === 'node') {
-      setSelectedNode(issue.location.id);
-      setActivePanel({ kind: 'nodeEdit', nodeId: issue.location.id });
+      const id = issue.location.id;
+      setSelectedNode(id);
+      requestFocusNode(id);
+      setActivePanel({ kind: 'nodeEdit', nodeId: id });
       return;
     }
     if (issue.location.kind === 'listen') {
@@ -33,15 +37,18 @@ export function ValidationReportDrawer({ open, onClose }: ValidationReportDrawer
       return;
     }
     if (issue.location.kind === 'action') {
-      // 找出第一个引用此 action 的 node，跳过去（ActionEditor 嵌入 NodeEditorDrawer）
+      // 找出第一个引用此 action 的 node，跳过去（pan + 高亮 + 开编辑面板）
       const actionName = issue.location.id;
       for (const [id, n] of Object.entries(nodes)) {
         if (n.type === 'action' && n.action === actionName) {
           setSelectedNode(id);
+          requestFocusNode(id);
           setActivePanel({ kind: 'nodeEdit', nodeId: id });
           return;
         }
       }
+      // 兜底：孤儿 action 没有引用节点，画布上无可跳转目标
+      message.info(`action "${actionName}" 未被任何节点引用，无法跳转`);
     }
   };
 
