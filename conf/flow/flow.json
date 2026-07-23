@@ -150,6 +150,14 @@
           },
           "server": "tcp:logic",
           "listen": "roomUpdateData"
+        },
+        {
+          "route": {
+            "cmd": 6,
+            "act": 1
+          },
+          "server": "tcp:logic",
+          "listen": "heroUpdate"
         }
       ]
     },
@@ -236,7 +244,7 @@
     "businessLoop": {
       "type": "loop",
       "description": "循环单排制造对局",
-      "body": "ladderModel",
+      "body": "ladder_wait",
       "loopCount": -1
     },
     "ladderModel": {
@@ -388,16 +396,16 @@
     "watchLoop": {
       "type": "loop",
       "description": "观战者：循环拉榜→取址→连 ob→观战",
-      "body": "watchRound",
+      "body": "ob_wait",
       "loopCount": -1
     },
     "watchRound": {
       "type": "sequence",
       "next": [
-        "closeStaleOb",
         "ObBattleList",
         "pickTarget",
-        "hasTarget"
+        "hasTarget",
+        "closeStaleOb"
       ]
     },
     "closeStaleOb": {
@@ -428,6 +436,7 @@
         "connectOb",
         "enterRoom",
         "watchLoading",
+        "resetObWatch",
         "watchEnd"
       ]
     },
@@ -490,21 +499,46 @@
       }
     },
     "watchEnd": {
-      "type": "action",
-      "description": "观战至战斗结束",
-      "action": "WatchObEnd",
-      "onError": {
-        "strategy": "skip"
-      }
+      "type": "loop",
+      "description": "观战：跑满自决帧数(loopCount) 或 收到战斗结束(32:2)",
+      "body": "WatchObTick",
+      "loopCount": 2000,
+      "breakCondition": "state:obBattleEnded == 1"
     },
-    "wait_game_start": {
-      "type": "wait",
-      "waitMs": 180000,
-      "then": "watchLoop"
+    "resetObWatch": {
+      "type": "action",
+      "description": "每轮观战前复位结束标志",
+      "action": "ResetObWatch"
+    },
+    "WatchObTick": {
+      "type": "action",
+      "description": "观战单帧轮询：非阻塞探 32:2 战斗结束",
+      "action": "WatchObTick",
+      "delayMs": -1
     },
     "GetActivityList": {
       "type": "action",
       "action": "GetActivityList"
+    },
+    "ob_wait": {
+      "type": "wait",
+      "description": "等待战斗组匹配成功",
+      "waitMin": 5000,
+      "waitMax": 60000,
+      "then": "watchRound"
+    },
+    "ladder_wait": {
+      "type": "wait",
+      "description": "随机等待错开时间匹配",
+      "waitMin": 500,
+      "waitMax": 30000,
+      "then": "ladderModel"
+    },
+    "wait_game_start": {
+      "type": "wait",
+      "description": "等待第一轮匹配",
+      "waitMs": 180000,
+      "then": "watchLoop"
     }
   },
   "actions": {
@@ -1113,14 +1147,19 @@
       ],
       "timeout": 30
     },
-    "WatchObEnd": {
-      "pattern": "tcpListen",
-      "service": "ob",
-      "route": {
-        "cmd": 32,
-        "act": 2
-      },
-      "timeout": 300
+    "WatchObTick": {
+      "pattern": "lua",
+      "script": "watch_ob_tick.lua"
+    },
+    "ResetObWatch": {
+      "pattern": "setState",
+      "bindings": [
+        {
+          "type": "fixed",
+          "field": "obBattleEnded",
+          "value": 0
+        }
+      ]
     },
     "CloseObserver": {
       "pattern": "tcpClose",
@@ -1151,13 +1190,13 @@
         }
       ]
     },
-    "heroUpdate": {},
+    "heroUpdate": {
+      "script": "hero_update.lua"
+    },
     "shopDataUpdate": {},
-    "teamUpdateInfo": {},
     "teamNotifyInvite": {},
     "teamJoin": {},
     "roomUpdateData": {},
-    "roomUpdateStatus": {},
     "frameData": {
       "script": "listen_frame_data.lua"
     },
