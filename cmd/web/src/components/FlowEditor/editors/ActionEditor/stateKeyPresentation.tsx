@@ -2,7 +2,7 @@
  * state key 候选项的统一展示组件与来源标签映射。
  *
  * - STATE_SOURCE_LABEL：来源类型 → { label, color }，覆盖 StateKeySourceType 全集
- *   （用户可见文本避免暴露实现技术：S2C→「响应」、Lua→「脚本」）。
+ *   （来源用可读名：S2C→「响应」、Lua→「Lua 脚本」）。
  * - StateKeyOptionLabel：AutoComplete / 下拉项使用的单行渲染。
  * 此前 StateKeyInput 与 shared/StateExprInput 各自维护一份来源标签映射（且 lua 标签不一致），
  * 现统一从此处导入。
@@ -17,7 +17,7 @@ export const STATE_SOURCE_LABEL = {
   stateExtra: { label: '启动', color: 'volcano' },
   storeAs: { label: '中间值', color: 'green' },
   setState: { label: '状态动作', color: 'geekblue' },
-  lua: { label: '脚本', color: 'purple' },
+  lua: { label: 'Lua 脚本', color: 'purple' },
   builtin: { label: '内置', color: 'cyan' },
 } satisfies Record<StateKeySourceType, { label: string; color: string }>;
 

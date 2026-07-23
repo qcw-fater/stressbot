@@ -456,7 +456,7 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
             <Fact label="超时" value={`${cs.timeoutSec}s`} />
             <Fact label="流程" value={`${cs.flowSizeKB}KB`} />
             <Fact label="Proto" value={`${cs.protoCount} 个`} />
-            <Fact label="脚本" value={`${cs.scriptCount} 个`} />
+            <Fact label="Lua 脚本" value={`${cs.scriptCount} 个`} />
             <Fact label="阶段" value={detail.stageCount && detail.stageCount > 0 ? `${detail.stageCount} 阶段` : '无'} />
             <Fact label="带宽" value={`${fmtBytes(finalBandwidth.totalSendBytes)} / ${fmtBytes(finalBandwidth.totalRecvBytes)}`} />
             <Fact label="开始" value={detail.startedAt ? dayjs(detail.startedAt).format('MM-DD HH:mm') : '—'} />

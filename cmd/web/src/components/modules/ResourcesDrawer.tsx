@@ -124,7 +124,7 @@ export function ResourcesDrawer({ open, onClose }: ResourcesDrawerProps) {
           defaultActiveKey="proto"
           items={[
             { key: 'proto', label: 'Proto', children: <ResourceTable kind="proto" /> },
-            { key: 'lua', label: '脚本', children: <ResourceTable kind="lua" /> },
+            { key: 'lua', label: 'Lua', children: <ResourceTable kind="lua" /> },
           ]}
         />
       </Drawer>
@@ -156,12 +156,12 @@ interface ResourceTableProps {
 
 const KIND_LABEL: Record<ResourceTableProps['kind'], string> = {
   proto: 'Proto',
-  lua: '脚本',
+  lua: 'Lua',
 };
 
 const KIND_DESC: Record<ResourceTableProps['kind'], string> = {
   proto: 'Proto 文件：定义消息结构与序列化格式，启动任务时随流程配置一起提交。',
-  lua: '脚本文件：实现复杂业务逻辑，由流程中的脚本动作引用。',
+  lua: 'Lua 脚本文件：实现复杂业务逻辑，由流程中的脚本动作引用。',
 };
 
 const KIND_EXT: Record<ResourceTableProps['kind'], string[]> = {

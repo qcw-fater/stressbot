@@ -157,7 +157,7 @@ function CoverSection({ detail, failed, cs }: { detail: HistoryDetail; failed: b
           </>
         )}
         <b>{detail.totalBots}</b> 机器人 · <b>{detail.activeAgentCount}/{detail.agentCount}</b> 节点 · 并发 <b>{cs.concurrency}</b> · 超时 <b>{cs.timeoutSec}s</b>
-        {' · '}流程 <b>{cs.flowSizeKB}KB</b> · <b>{cs.protoCount}</b> Proto · <b>{cs.scriptCount}</b> 脚本
+        {' · '}流程 <b>{cs.flowSizeKB}KB</b> · <b>{cs.protoCount}</b> Proto · <b>{cs.scriptCount}</b> Lua 脚本
       </div>
       {detail.errorMsg && (
         <div className="report-cover__error">{detail.errorMsg}</div>

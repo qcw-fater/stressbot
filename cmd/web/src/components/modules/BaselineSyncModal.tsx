@@ -32,7 +32,7 @@ export interface BaselineSyncModalProps {
 
 const TYPE_LABEL: Record<ResourceType, { text: string; color: string }> = {
   proto: { text: '协议', color: 'blue' },
-  script: { text: '脚本', color: 'purple' },
+  script: { text: 'Lua 脚本', color: 'purple' },
   adapter: { text: '连接配置', color: 'orange' },
 };
 

@@ -20,7 +20,7 @@ export const PATTERN_DESC: Record<ActionPattern, string> = {
   httpRequest: '发送 HTTP 请求',
   setState: '直接给 state 写入值（绑定列表）',
   clearState: '清空指定的 state key',
-  lua: '执行一段脚本实现复杂业务逻辑',
+  lua: '执行一段 Lua 脚本实现复杂业务逻辑',
 };
 
 export interface PatternSelectorProps {
@@ -33,7 +33,7 @@ const PATTERN_GROUPS: { label: string; patterns: ActionPattern[] }[] = [
   { label: '连接管理', patterns: ['tcpConnect', 'udpConnect', 'tcpClose', 'udpClose'] },
   { label: '监听', patterns: ['tcpListen', 'udpListen'] },
   { label: '状态操作', patterns: ['setState', 'clearState'] },
-  { label: '脚本', patterns: ['lua'] },
+  { label: 'Lua 脚本', patterns: ['lua'] },
 ];
 
 export function PatternSelector({ value, onChange }: PatternSelectorProps) {
