@@ -4,6 +4,7 @@ package Game;
 
 import "custom_sdc.proto";
 import "nohot_custom_battle.proto";
+import "common.proto";
 
 // ==================== 战备系统协议 ====================
 
@@ -14,6 +15,7 @@ message SdcGetPrepareDataC2S {}
 message SdcGetPrepareDataS2C {
     SDCPrepareData data     = 1; // 战备数据
     int32 errorCode         = 2; // 错误码
+    SDCSuitState suitState  = 3; // 当前套装使用状态
 }
 
 // 装配道具请求
@@ -80,6 +82,7 @@ message SdcSellItemS2C {
     int32 moneyType  = 3; // 出售货币类型
     int32 totalValue = 4; // 更新后的装配区域总价值
     int32 errorCode  = 5; // 错误码
+    repeated SDCPackSlot updatedPacks = 6; // 出售后发生变化的背包数据；背包被删除时仅携带packType
 }
 
 // 批量出售请求
@@ -98,6 +101,7 @@ message SdcBatchSellS2C {
     repeated int64 soldGuids                 = 1; // 成功出售的道具GUID列表
     repeated SdcSellCurrencyResult currencyResults = 2; // 各货币类型获得明细
     int32 errorCode                          = 3; // 错误码
+    repeated SDCPackSlot updatedPacks        = 4; // 出售后发生变化的背包数据；背包被删除时仅携带packType
 }
 
 // ==================== 仓库系统协议 ====================
@@ -114,7 +118,9 @@ message SdcGetWarehouseDataS2C {
 // ==================== 赛季系统协议 ====================
 
 // 请求赛季数据
-message SdcGetSeasonDataC2S {}
+message SdcGetSeasonDataC2S {
+    int32 playerId = 1; // 目标玩家ID，0表示自己
+}
 
 // 赛季数据响应
 message SdcGetSeasonDataS2C {
@@ -124,14 +130,14 @@ message SdcGetSeasonDataS2C {
 
 // 领取赛季奖励请求
 message SdcSeasonRewardC2S {
-    int32 tier = 1; // 段位
+    int32 rewardId = 1; // 奖励配置 ID（SDCSeasonReward.ID）
 }
 
 // 领取赛季奖励响应
 message SdcSeasonRewardS2C {
-    int32 tier                       = 1; // 段位
+    int32 rewardId                    = 1; // 奖励配置 ID（SDCSeasonReward.ID）
     repeated SDCWarehouseItem rewards = 2; // 奖励道具
-    int32 errorCode                  = 3; // 错误码
+    int32 errorCode                   = 3; // 错误码
 }
 
 // ==================== 成长系统协议 ====================
@@ -273,4 +279,418 @@ message SdcSwapItemS2C
     int32 errorCode                  = 7; // 错误码
     SDCHeroTalentAwakeInfo heroInfo  = 8; // 更新后的英雄天赋觉醒
     SDCPackSlot collectionPack       = 9; // 藏品背包数据
+}
+//赛季结算与继承展示数据
+message SdcSeasonSettleShowC2S
+{
+}
+//赛季结算与继承展示数据
+message SdcSeasonSettleShowS2C
+{
+    SDCSeasonSettleShowData data = 1; // 赛季结算展示数据
+    int32 errorCode              = 2; // 错误码
+}
+//历史赛季列表
+message SdcHistorySeasonListC2S
+{
+    int32 playerId = 1; // 目标玩家ID，0表示自己
+}
+//历史赛季列表
+message SdcHistorySeasonListS2C
+{
+    repeated SDCHistorySeasonData list = 1; // 历史赛季列表
+    int32 errorCode                      = 2; // 错误码
+}
+//历史赛季详情
+message SdcHistorySeasonDetailC2S
+{
+    int32 seasonId = 1; // 赛季 ID
+    int32 playerId = 2; // 目标玩家ID，0表示自己
+}
+//历史赛季详情
+message SdcHistorySeasonDetailS2C
+{
+    SDCHistorySeasonData data = 1; // 历史赛季详情
+    int32 errorCode           = 2; // 错误码
+}
+//设置排位功能开关（玩家勾选）
+message SdcSetRankEnabledC2S
+{
+    bool enabled = 1; // 是否开启排位
+}
+//设置排位功能开关（玩家勾选）
+message SdcSetRankEnabledS2C
+{
+    bool enabled    = 1; // 当前排位开关状态
+    int32 errorCode = 2; // 错误码
+}
+
+//图鉴数据查询
+message SdcGetCodexDataC2S {}
+//图鉴数据查询
+message SdcGetCodexDataS2C
+{
+    repeated SDCCodexEntryInfo entries = 1; // 全量条目信息（含状态、数量、奖励预览）
+    repeated SDCCodexIpInfo ipList     = 2; // IP 收藏册数据（按 IP 分组的条目+里程碑）
+}
+//图鉴激活（首次/重复）
+message SdcActivateCodexC2S
+{
+    int32 codexId = 1; // 要激活的条目 ID
+}
+//图鉴激活（首次/重复）
+message SdcActivateCodexS2C
+{
+    int32 codexId           = 1; // 激活的条目 ID
+    int64 firstActivateTime = 2; // 首次激活时间（首次激活时返回）
+    int32 repeatCount       = 3; // 当前重复激活次数
+    repeated SDCCodexRewardItem rewards = 4; // 本次获得的奖励
+    repeated SDCCodexRewardItem endRewards = 5; // 最终奖励（n=RepeatNum 时返回）
+    SDCCodexIpInfo affectedIpInfo = 6; // 受影响的 IP 收藏册数据（含更新后的里程碑状态）
+}
+//IP 里程碑领奖
+message SdcClaimCodexMilestoneC2S
+{
+    int32 milestoneId = 1; // 里程碑 ID
+}
+//IP 里程碑领奖
+message SdcClaimCodexMilestoneS2C
+{
+    int32 milestoneId       = 1; // 已领取的里程碑 ID
+    repeated SDCCodexRewardItem rewards = 2; // 领取的奖励
+    int32 status            = 3; // 领奖后状态（固定=2 已领取）
+}
+//一键入库请求
+message SdcQuickDepositC2S
+{
+}
+//一键入库响应
+message SdcQuickDepositS2C
+{
+    repeated int64 depositedGuids     = 1; // 已成功入库的道具GUID列表
+    SDCWarehouseData warehouseData    = 2; // 入库后的仓库数据
+    repeated SDCPackSlot updatedPacks = 3; // 入库后发生变化的背包数据
+    int32 totalValue                  = 4; // 更新后的装配区域总价值
+    int32 errorCode                   = 5; // 错误码
+    repeated SDCEquipSlot updatedSlots = 6; // 入库后发生变化的装配槽位数据，清空槽位仅保留slotType
+}
+//获取套装/预设界面数据
+message SdcGetSuitPresetDataC2S
+{
+}
+//获取套装/预设界面数据
+message SdcGetSuitPresetDataS2C
+{
+    SDCPrepareData prepareData        = 1; // 最新战备数据
+    SDCSuitState suitState            = 2; // 当前套装使用状态
+    repeated SDCSuitPlanDisplay plans = 3; // 当前套装方案展示定档
+    SDCPresetData lastPreset          = 4; // 上次配装
+    repeated SDCPresetData presets    = 5; // 我的方案列表
+}
+//手动刷新套装方案
+message SdcRefreshSuitPlanC2S
+{
+    int32 suitType = 1; // 套装券档位
+    int32 planId   = 2; // 方案ID
+}
+//手动刷新套装方案
+message SdcRefreshSuitPlanS2C
+{
+    SDCSuitPlanDisplay plan = 1; // 刷新后的方案展示
+    SDCSuitPlanState state       = 2; // 刷新后的定档状态
+}
+//使用套装
+message SdcUseSuitC2S
+{
+    int32 suitType = 1; // 套装券档位
+    int32 planId   = 2; // 方案ID
+}
+//使用套装
+message SdcUseSuitS2C
+{
+    SDCPrepareData prepareData = 1; // 使用套装后的战备数据
+    SDCSuitState suitState     = 2; // 使用后的套装状态
+    SDCWarehouseData warehouseData = 3; // 使用后的仓库数据
+}
+//取消套装
+message SdcCancelSuitC2S
+{
+}
+//取消套装
+message SdcCancelSuitS2C
+{
+    SDCPrepareData prepareData        = 1; // 恢复后的战备数据
+    SDCSuitState suitState            = 2; // 清理后的套装状态
+    repeated SDCSuitPlanDisplay plans = 3; // 取消后展示的最新定档
+}
+//保存/覆盖我的方案
+message SdcSavePresetC2S
+{
+    int32 slotIndex      = 1; // 我的方案槽位，从1开始
+    string name          = 2; // 方案名
+    SDCPresetData preset = 3; // 保存内容
+    bool overwrite       = 4; // 是否覆盖已有方案
+}
+//保存/覆盖我的方案
+message SdcSavePresetS2C
+{
+    SDCPresetData preset = 1; // 保存后的方案
+}
+//重命名我的方案
+message SdcRenamePresetC2S
+{
+    int32 slotIndex = 1; // 我的方案槽位
+    string name     = 2; // 新名称
+}
+//重命名我的方案
+message SdcRenamePresetS2C
+{
+    SDCPresetData preset = 1; // 改名后的方案
+}
+//使用方案
+message SdcUsePresetC2S
+{
+    int32 slotIndex = 1; // 方案槽位，0表示使用上次配装
+    SDCPresetData preset = 2; // 可选临时方案内容，非空时优先使用，不回写上次配装/我的方案
+}
+//使用方案
+message SdcUsePresetS2C
+{
+    SDCPrepareData prepareData = 1; // 使用后的战备数据
+    SDCPresetData preset       = 2; // 本次使用的方案
+    SDCWarehouseData warehouseData = 3; // 使用后的仓库数据
+}
+//一键购买补齐并使用方案
+message SdcBuyFillPresetC2S
+{
+    int32 slotIndex                   = 1; // 方案槽位，0表示临时/上次配装
+    repeated int32 itemIds            = 2; // 兼容旧字段：需要补齐的道具ID列表，重复次数表示数量
+    repeated SDCBuyFillItem fillItems = 3; // 需要补齐的道具和数量；非空时优先使用该字段
+    SDCPresetData preset              = 4; // 可选临时方案内容，非空时优先使用，不回写上次配装/我的方案
+}
+//一键购买补齐并使用方案
+message SdcBuyFillPresetS2C
+{
+    SDCPrepareData prepareData          = 1; // 补齐并装配后的战备数据
+    repeated SDCPurchaseFillInfo fills  = 2; // 实际购买补齐明细
+    repeated ShowReward rewards         = 3; // 购买获得展示
+    SDCWarehouseData warehouseData      = 4; // 补齐并装配后的仓库数据
+}
+//套装/预设数据变更推送
+message SdcSuitPresetUpdateS2C
+{
+    SDCPrepareData prepareData        = 1; // 最新战备数据，可为空
+    SDCSuitState suitState            = 2; // 最新套装状态，可为空
+    repeated SDCSuitPlanDisplay plans = 3; // 变化后的方案定档，可为空
+    SDCPresetData lastPreset          = 4; // 更新后的上次配装，可为空
+    repeated SDCPresetData presets    = 5; // 更新后的我的方案，可为空
+    repeated ShowReward rewards       = 6; // 自动分解等展示，可为空
+    int32 reason                      = 7; // 推送原因：1=手动操作 2=自动刷新 3=进战提交 4=奖励分解
+}
+//取消制作
+message SdcCancelCraftC2S
+{
+	int32 stationType = 1; // 制作台类型
+}
+//取消制作
+message SdcCancelCraftS2C
+{
+	SDCCraftSlot craftSlot = 1; // 制作台状态（已清空）
+	int32 errorCode        = 2;
+}
+//请求局外容器数据
+message SdcGetOutBattleContainerDataC2S
+{
+}
+//请求局外容器数据
+message SdcGetOutBattleContainerDataS2C
+{
+	repeated SDCOutBattleContainerState containers = 1; // 钥匙链、安全箱状态
+	SDCWarehouseData warehouseData                  = 2; // 当前仓库数据
+	int32 errorCode                                 = 3; // 错误码
+}
+//激活局外容器权限卡
+message SdcActivateOutBattleContainerC2S
+{
+	SDCPackType packType  = 1; // 激活目标类别
+	int32 sdcParameterId  = 2; // 激活目标等级
+	int64 itemGuid        = 3; // 仓库内权限卡GUID
+	int32 number          = 4; // 使用数量
+}
+//激活局外容器权限卡
+message SdcActivateOutBattleContainerS2C
+{
+	SDCOutBattleContainerState container = 1; // 激活后的目标容器状态
+	SDCWarehouseData warehouseData       = 2; // 扣除权限卡后的仓库数据
+	int32 errorCode                      = 3; // 错误码
+}
+//切换局外容器等级
+message SdcSwitchOutBattleContainerC2S
+{
+	SDCPackType packType = 1; // 切换类别
+	int32 sdcParameterId = 2; // 切换目标等级
+}
+//切换局外容器等级
+message SdcSwitchOutBattleContainerS2C
+{
+	SDCOutBattleContainerState container = 1; // 切换后的目标容器状态
+	SDCPackSlot packSlot                 = 2; // 当前容器格子数据
+	int32 errorCode                      = 3; // 错误码
+}
+//过期容器全部移出
+message SdcMoveOutBattleContainerAllC2S
+{
+	SDCPackType packType = 1; // 全部移出的容器类别
+}
+//过期容器全部移出
+message SdcMoveOutBattleContainerAllS2C
+{
+	SDCOutBattleContainerState container = 1; // 移出后的容器状态
+	SDCWarehouseData warehouseData       = 2; // 移出后的仓库数据
+	repeated SDCWarehouseItem movedItems = 3; // 本次成功移出的道具
+	repeated SDCWarehouseItem remainedItems = 4; // 仓库空间不足而仍留在原容器的道具
+	bool partial                         = 5; // 是否部分移出
+	int32 errorCode                      = 6; // 错误码
+}
+//局外容器状态推送
+message SdcOutBattleContainerUpdateS2C
+{
+	repeated SDCOutBattleContainerState containers = 1; // 发生变化的容器状态
+	SDCWarehouseData warehouseData                  = 2; // 如仓库变化则携带
+	SDCHeroTalentAwakeInfo heroInfo                 = 3; // 如临时卡被消费或返还导致加成变化则携带
+	SDCPackSlot collectionPack                      = 4; // 如藏品背包变化则携带
+}
+//搜打撤选择地图请求
+message SdcSelectMapC2S
+{
+	int32 sdcMapId = 1; // 当前选择的 SDCMap.ID
+	int32 modeId   = 2; // 当前选择的 GameBattleMode.ID
+}
+//搜打撤选择地图请求
+message SdcSelectMapS2C
+{
+	int32 sdcMapId      = 1; // 当前生效的 SDCMap.ID
+	int32 modeId        = 2; // 当前生效的 GameBattleMode.ID
+	int32 teamPlayerNum = 3; // GameBattleMode.TeamPlayerNum
+	bool fillTeammate   = 4; // 当前补齐队友开关
+}
+//请求SDC任务页数据
+message SdcTaskGetDataC2S
+{
+	int32 tabType = 1; // 1=主线 2=赛季阶段 3=收集者 4=赛季奖励
+	int32 stageId = 2; // 指定阶段ID，0表示服务端默认当前可见阶段
+}
+//请求SDC任务页数据
+message SdcTaskGetDataS2C
+{
+	SDCTaskPageData data = 1; // 指定页签数据
+}
+//领取主线/阶段SDCTask奖励
+message SdcTaskClaimRewardC2S
+{
+	int32 sdcTaskId = 1; // 主线/阶段 SDCTaskID
+}
+//领取主线/阶段SDCTask奖励
+message SdcTaskClaimRewardS2C
+{
+	SDCTaskView task = 1; // 领奖后的任务状态
+	repeated ShowReward rewards = 2; // 本次获得奖励展示
+	SDCTaskRedPointSummary redPoint = 3; // 红点摘要
+}
+//手动刷新收集者
+message SdcTaskCollectorRefreshC2S
+{
+}
+//手动刷新收集者
+message SdcTaskCollectorRefreshS2C
+{
+	SDCCollectorView collector = 1; // 刷新后的收集者数据
+	SDCTaskRedPointSummary redPoint = 2; // 红点摘要
+}
+//提交收集者道具
+message SdcTaskCollectorSubmitC2S
+{
+	int32 slotIndex = 1; // 提交槽位，固定 1/2/3
+	repeated int64 itemGuids = 2; // 提交的仓库道具 GUID
+}
+//提交收集者道具
+message SdcTaskCollectorSubmitS2C
+{
+	SDCCollectorView collector = 1; // 提交后的收集者数据
+	SDCWarehouseData warehouseData = 2; // 扣除后的仓库数据
+	SDCTaskRedPointSummary redPoint = 3; // 红点摘要
+}
+//锁定/解锁收集者
+message SdcTaskCollectorLockC2S
+{
+	int32 slotIndex = 1; // 槽位序号，固定 1/2/3
+	bool locked = 2; // true=锁定 false=解锁
+}
+//锁定/解锁收集者
+message SdcTaskCollectorLockS2C
+{
+	SDCCollectorSlotView slot = 1; // 锁定态变化后的槽位
+	SDCCollectorView collector = 2; // 锁定态变化后的收集者数据
+}
+//领取收集者次数累计奖励
+message SdcTaskCollectorMilestoneC2S
+{
+	int32 milestoneIndex = 1; // 累计奖励档位，下标从1开始
+}
+//领取收集者次数累计奖励
+message SdcTaskCollectorMilestoneS2C
+{
+	SDCCollectorView collector = 1; // 领取后的收集者数据
+	repeated ShowReward rewards = 2; // 本次获得奖励展示
+	SDCTaskRedPointSummary redPoint = 3; // 红点摘要
+}
+//领取任务系统赛季奖励
+message SdcTaskSeasonRewardC2S
+{
+	int32 sdcTaskId = 1; // 当前赛季唯一赛季奖励 SDCTaskID
+}
+//领取任务系统赛季奖励
+message SdcTaskSeasonRewardS2C
+{
+	SDCTaskView seasonReward = 1; // 领奖后的赛季奖励状态
+	repeated ShowReward rewards = 2; // 本次获得奖励展示
+	SDCTaskRedPointSummary redPoint = 3; // 红点摘要
+	repeated SDCTaskConditionView seasonRewardConditions = 4; // 领奖后的赛季奖励条件展示进度
+}
+//局内本局可完成任务列表
+message SdcTaskInBattleListC2S
+{
+	int32 sdcMapId = 1; // 当前对局 SDCMap.ID
+}
+//局内本局可完成任务列表
+message SdcTaskInBattleListS2C
+{
+	repeated SDCTaskView tasks = 1; // 本局可完成任务列表
+}
+//SDC任务进度/红点推送
+message SdcTaskProgressUpdateS2C
+{
+	repeated SDCTaskView tasks = 1; // 变化的任务列表
+	SDCCollectorView collector = 2; // 收集者变化，可为空
+	SDCTaskRedPointSummary redPoint = 3; // 红点摘要
+	repeated SDCTaskConditionView seasonRewardConditions = 4; // 赛季奖励条件变化，可为空
+}
+//局内任务进度弹窗推送
+message SdcTaskInBattleProgressS2C
+{
+	int32 sdcTaskId = 1; // SDCTaskID
+	int32 oldProgress = 2; // 变化前进度
+	int32 newProgress = 3; // 变化后进度
+	int32 target = 4; // 目标进度
+	int32 delta = 5; // 本次增量
+}
+//当前挂载SDC任务列表
+message SdcTaskCurrentListC2S
+{
+}
+//当前挂载SDC任务列表
+message SdcTaskCurrentListS2C
+{
+	repeated SDCTaskView tasks = 1; // 当前挂载的进行中和待领取主线/阶段任务
+	SDCTaskRedPointSummary redPoint = 2; // 红点摘要
 }

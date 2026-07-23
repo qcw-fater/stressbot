@@ -43,4 +43,6 @@ message PlayerBattleInfo {
     int32       isInterruptBattle   = 8; // 战斗是否中断（用于可以中途退出的战斗）
     int64       battleEndTime       = 9; // 战斗结束时间
     bytes       secretKey           = 10;// 秘钥
+    int64       battleId            = 11;// 战斗ID（观战回放/录像定位用）
+    int32       bsId                = 12;// 战斗服Id（observer 取帧路由用）
 }

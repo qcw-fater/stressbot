@@ -1,12 +1,14 @@
 syntax             = "proto3";
 option  go_package = ".;pb";
 package Game;
+import "common.proto";
 
 message PlayerBackHero {
     bool              flag      = 1; // 是否拥有领取英雄资格
     map<int32, int64> getList   = 2; // 已领取英雄列表 英雄ID-领取时间
     map<int32, bool>  oldHeroId = 3; // moda 时期代已拥有英雄列表 英雄ID-是否拥有
     int32             dayNum    = 4; // 每日领取次数
+    int32             endTime   = 5; // 活动结束时间,所有可领取角色领取完后才会赋值，时间戳
 }
 
 // 领取英雄
@@ -16,11 +18,12 @@ message BackHeroGetHeroC2S {
 
 // 领取英雄
 message BackHeroGetHeroS2C {
-    repeated int32    HeroId  = 1; // 英雄ID
-    map<int32, int64> getList = 2; // 已领取英雄列表 英雄ID-领取时间
+    repeated int32      HeroId     = 1; // 英雄ID
+    map<int32, int64>   getList    = 2; // 已领取英雄列表 英雄ID-领取时间
+    repeated ShowReward rewardList = 3; // 奖励道具
+    int32               endTime    = 4; // 活动结束时间,所有可领取角色领取完后才会赋值，时间戳
 }
-//领取英雄数据
-message BackHeroHeroDataS2C
-{
+// 领取英雄数据
+message BackHeroHeroDataS2C {
     PlayerBackHero data = 1; // 只返回每日领取次数
 }

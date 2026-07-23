@@ -52,6 +52,7 @@ message ChatInfo {
     int32           campChatType            = 10;  // 房间聊天 0：房间内聊天 1：阵营聊天
 	  int32           serverId                = 11;  // 区服id
     int64           guildId                 = 12; // 战队id
+    int64           squadId                 = 13; // 小队id(CT_Squad 频道路由与订阅过滤用,对齐 guildId 之于战队)
 }
 
 // 聊天信息列表

@@ -13,13 +13,18 @@ message RoomCreateRoomC2S {}
 
 // 创建房间
 message RoomCreateRoomS2C {
-    int64                   roomId          = 1; // 房间id
-    GameModel               model           = 2; // 游戏模式
-    GameType                gType           = 3; // 游戏类型
-    int32                   modeId          = 4; // 战斗模式id
-    repeated PlayerGameInfo members         = 5; // 成员数据
-    int32                   CaptainPlayerId = 6; // 房主id
-    repeated int32          modeIds         = 7; // 战斗模式id列表
+    int64                   roomId          = 1;  // 房间id
+    GameModel               model           = 2;  // 游戏模式
+    GameType                gType           = 3;  // 游戏类型
+    int32                   modeId          = 4;  // 战斗模式id
+    repeated PlayerGameInfo members         = 5;  // 成员数据
+    int32                   CaptainPlayerId = 6;  // 房主id
+    repeated int32          modeIds         = 7;  // 战斗模式id列表
+    repeated int32          AllowedDrafts   = 8;  // 当前玩法允许的征召类型枚举值列表
+    repeated int32          AllowedBOs      = 9;  // 当前玩法允许的赛制枚举值列表
+    LadderDraftType         DraftType       = 10; // 当前征召类型
+    BOType                  BO              = 11; // 当前赛制
+    bool                    AdvancedMode    = 12; // 是否开启高级赛制（征召+BO）
 }
 
 // 交换位置请求
@@ -65,12 +70,17 @@ message RoomJoinS2C {
 
 // 房间数据
 message RoomDataS2C {
-    repeated PlayerGameInfo playerList     = 1; // 房间内的玩家列表
-    LadderDraftType         draftType      = 2; // 征召类型
-    repeated PlayerGameInfo lookPlayerList = 3; // 观战席玩家列表
-    int32                   modeId         = 4; // 模式id
-    GameType                gType          = 5; // 游戏类型
-    repeated int32          affix          = 6; // 词缀
+    repeated PlayerGameInfo playerList      = 1;  // 房间内的玩家列表
+    LadderDraftType         draftType       = 2;  // 征召类型
+    repeated PlayerGameInfo lookPlayerList  = 3;  // 观战席玩家列表
+    int32                   modeId          = 4;  // 模式id
+    GameType                gType           = 5;  // 游戏类型
+    repeated int32          affix           = 6;  // 词缀
+    repeated int32          AllowedDrafts   = 7;  // 当前玩法允许的征召类型枚举值列表
+    repeated int32          AllowedBOs      = 8;  // 当前玩法允许的赛制枚举值列表
+    BOType                  BO              = 9;  // 当前赛制
+    bool                    AdvancedMode    = 10; // 是否开启高级赛制（征召+BO）
+    int32                   CaptainPlayerId = 11; // 房主id
 }
 
 // 开始游戏
@@ -78,9 +88,11 @@ message RoomStartC2S {}
 
 // 开始游戏
 message RoomStartS2C {
-    int64             overTime      = 1; // 选择英雄技能结束时间
-    int32             errParameter  = 2; // 错误参数
-    map<int32, int32> errHeroPlayer = 3; // 未开放英雄的玩家Key: 玩家index,value:英雄
+    int64             overTime         = 1; // 选择英雄技能结束时间
+    int32             errParameter     = 2; // 错误参数
+    map<int32, int32> errHeroPlayer    = 3; // 未开放英雄的玩家Key: 玩家index,value:英雄
+    repeated int32    errHeroCntPlayer = 4; // 英雄数量不足的玩家id（BUG-7209）
+    int32             needHeroCnt      = 5; // 需要的英雄数量（BUG-7209）
 }
 
 // 添加机器人
@@ -115,7 +127,7 @@ message RoomSucceedJoinS2C {
 // 玩家点赞
 message RoomPraiseC2S {
     int32 targetPlayerIndex = 1; // 目标index
-    int64 battleId = 2; // 本场战斗id
+    int64 battleId          = 2; // 本场战斗id
 }
 // 玩家点赞
 message RoomPraiseS2C {
@@ -129,8 +141,8 @@ message RoomPraiseS2C {
     int32 gameType            = 8;  // 游戏类型
     int32 targetPlayerIdIndex = 9;  // 目标角色index
     bool  targetIsDieMax      = 10; // 目标是否死亡最多
-    bool targetIsSameTeam    = 11; // 是否同一队伍  判断野人点赞的
-    int64 battleId           = 12; // 战斗id
+    bool  targetIsSameTeam    = 11; // 是否同一队伍  判断野人点赞的
+    int64 battleId            = 12; // 战斗id
 }
 // 检测加入自定义房间
 message RoomCheckJoinRoomS2C {}
@@ -167,13 +179,32 @@ message RoomWantRoadC2S {}
 message RoomWantRoadS2C {}
 // 切换开房间模式
 message RoomSwitchModeC2S {
-    bool            isDraft   = 1; // 是否征召模式(弃用)
-    LadderDraftType DraftType = 2; // 自定义房间征召类型
+    bool            isDraft      = 1; // 是否征召模式(弃用)
+    LadderDraftType DraftType    = 2; // 自定义房间征召类型
+    BOType          BO           = 3; // 赛制（BO几），BO_Invalid 表示不修改
+    bool            AdvancedMode = 4; // 是否开启高级赛制（征召+BO）
 }
 // 切换开房间模式
 message RoomSwitchModeS2C {
-    bool            isDraft   = 1; //(弃用)
-    LadderDraftType DraftType = 2; // 自定义房间征召类型
+    bool            isDraft       = 1; //(弃用)
+    LadderDraftType DraftType     = 2; // 自定义房间征召类型
+    BOType          BO            = 3; // 赛制（BO几）
+    bool            AdvancedMode  = 4; // 是否开启高级赛制（征召+BO）(弃用,从 RoomToggleAdvancedModeS2C 获取)
+    repeated int32  AllowedDrafts = 5; // 当前玩法允许的征召类型枚举值列表
+    repeated int32  AllowedBOs    = 6; // 当前玩法允许的赛制枚举值列表
+}
+
+// 切换自定义房间高级赛制开关（征召+BO 总开关，仅房主可操作）
+message RoomToggleAdvancedModeC2S {
+    bool AdvancedMode = 1; // 期望的开关状态
+}
+
+message RoomToggleAdvancedModeS2C {
+    bool            AdvancedMode  = 1; // 服务端最终状态
+    LadderDraftType DraftType     = 2; // 切换后的征召类型（开启时为默认值，关闭时为 LDT_Invalid）
+    BOType          BO            = 3; // 切换后的赛制
+    repeated int32  AllowedDrafts = 4; // 当前玩法允许的征召类型枚举值列表
+    repeated int32  AllowedBOs    = 5; // 当前玩法允许的赛制枚举值列表
 }
 // 房间内超时
 message RoomTimeoutS2C {
@@ -244,7 +275,12 @@ message RoomChangeGameModeIdC2S {
 }
 // 切换游戏模式Id
 message RoomChangeGameModeIdS2C {
-    int32 modeId = 1; // 模式Id
+    int32           modeId        = 1; // 模式Id
+    repeated int32  AllowedDrafts = 2; // 新玩法允许的征召类型枚举值列表
+    repeated int32  AllowedBOs    = 3; // 新玩法允许的赛制枚举值列表
+    LadderDraftType DraftType     = 4; // 降级后的当前征召类型
+    BOType          BO            = 5; // 降级后的当前赛制
+    bool            AdvancedMode  = 6; // 是否开启高级赛制（征召+BO）
 }
 
 // 切换英雄
@@ -264,8 +300,8 @@ message RoomChangeSummonerSpellC2S {
 }
 // 切换召唤师技能
 message RoomChangeSummonerSpellS2C {
-    int32          playerId       = 1; // 玩家ID
-    repeated int32 summonerSpell  = 2; // 召唤师技能
+    int32          playerId      = 1; // 玩家ID
+    repeated int32 summonerSpell = 2; // 召唤师技能
 }
 // 房间成员准备
 message RoomPrepareC2S {
@@ -447,8 +483,45 @@ message RoomPlayerUpdateDataS2C {
     int32      playerId   = 1; // 玩家id
     PlayerBase playerData = 2; // 玩家数据
 }
-//推送英雄选择异常
-message RoomHeroValidityS2C
-{
-  map<int32, int32> errHeroPlayer = 1; // 未开放英雄的玩家Key: 玩家index,value:英雄
+// 推送英雄选择异常
+message RoomHeroValidityS2C {
+    map<int32, int32> errHeroPlayer = 1; // 未开放英雄的玩家Key: 玩家index,value:英雄
+}
+// 帮禁请求
+message RoomHelpBanRequestC2S {
+    int32 heroId = 1; // 目标英雄ID
+}
+// 帮禁请求回复
+message RoomHelpBanRequestS2C {
+    int32 heroId         = 1; // 目标英雄ID
+    int32 requesterIndex = 2; // 请求者楼层
+}
+// 帮禁请求广播
+message RoomHelpBanRequestBroadcastS2C {
+    int32 heroId            = 1; // 目标英雄ID
+    int32 requesterIndex    = 2; // 请求者楼层
+    int32 requesterPlayerId = 3; // 请求者玩家ID
+}
+// 帮禁执行
+message RoomHelpBanExecuteC2S {
+    int32 requesterPlayerId = 1; // 请求者玩家ID
+    int32 heroId            = 2; // 目标英雄ID
+}
+// 帮禁执行回复
+message RoomHelpBanExecuteS2C {
+    int32 heroId            = 1; // 目标英雄ID
+    int32 executorIndex     = 2; // 执行者楼层
+    int32 requesterPlayerId = 3; // 被帮禁的请求者玩家ID
+}
+// 帮禁取消
+message RoomHelpBanCancelC2S {
+}
+// 帮禁取消回复
+message RoomHelpBanCancelS2C {
+    int32 requesterIndex = 1; // 取消者楼层
+}
+// 帮禁取消广播
+message RoomHelpBanCancelBroadcastS2C {
+    int32 requesterIndex    = 1; // 取消者楼层
+    int32 requesterPlayerId = 2; // 取消者玩家ID
 }

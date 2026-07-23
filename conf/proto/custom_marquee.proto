@@ -19,5 +19,6 @@ message Marquee
     string serverList = 12; //是指定区服id
     string channelList = 13; //是指定渠道
     string multiContent = 14;   // 多语言内容
+    repeated string storeList = 15; // SDK渠道(store)限制，空=不限
 }
 

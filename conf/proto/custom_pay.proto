@@ -56,7 +56,8 @@ message playerPayStatistics {
 message firstRewardFlag {
   reserved 1, 2;
   reserved "flag", "loginDay";
-  map<int32, gradeFlag> grades = 3; // key:档位ID(FirstPay.csv ID), value:该档位状态
+  map<int32, gradeFlag> grades   = 3; // key:档位ID(FirstPay.csv ID), value:该档位状态
+  int32                 globalDay = 4; // 全局首充天数(自首份首充购买日起算, 购买当日=1, 每次跨天+1, 封顶全局最大档位天数)
 }
 
 // 单个首充档位的领取状态

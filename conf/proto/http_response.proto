@@ -7,16 +7,18 @@ import "custom_auth.proto";
 
 // 登陆回执
 message LoginResponse {
-    int32                 error          = 1; // 错误码 0:成功
-    int64                 time           = 2; // 登录时间
-    string                session        = 3; // AUTH登陆校验session
-    string                account        = 4; // 登录账号
-    int32                 lastZoneId     = 5; // 上次登录的服务器id
-    repeated UserRoleInfo roles          = 6; // 账号角色列表
-    bool                  isUpLog        = 7; // 是否将客户单日志上传到cos
-    bool                  newGuildSwitch = 8; // 新手引导开关
-    map<int32, bool>      mobaHeroHero   = 9; // moba英雄解锁情况
+    int32                 error          = 1;  // 错误码 0:成功
+    int64                 time           = 2;  // 登录时间
+    string                session        = 3;  // AUTH登陆校验session
+    string                account        = 4;  // 登录账号
+    int32                 lastZoneId     = 5;  // 上次登录的服务器id
+    repeated UserRoleInfo roles          = 6;  // 账号角色列表
+    bool                  isUpLog        = 7;  // 是否将客户单日志上传到cos
+    bool                  newGuildSwitch = 8;  // 新手引导开关
+    map<int32, bool>      mobaHeroHero   = 9;  // moba英雄解锁情况
     bool                  mobaOldAccount = 10; // moba老账号
+    bool                  oldBackFlag    = 11; // 全服是否参与旧友回归活动 true：已经参与 false:未参与
+    int32                 heroBackAreaID = 12; // 角色返回活动绑定的区服id 0：没有绑定
 }
 
 // 创角回执

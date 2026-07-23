@@ -1,0 +1,336 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+import "common.proto";
+import "custom_squad.proto";
+import "player.proto";
+
+//创建小队
+message SquadCreateC2S
+{
+    string name        = 1; // 小队名字
+    int32  icon        = 2; // 小队图标(TeamIcon)
+    string declaration = 3; // 小队宣言
+}
+//创建小队
+message SquadCreateS2C
+{
+    SquadLoginInfo data = 1; // 我的小队数据
+}
+//加入列表
+message SquadListC2S
+{
+    int32 index = 1; // 分页下标
+}
+//加入列表
+message SquadListS2C
+{
+    repeated SquadListInfo list = 1; // 小队列表(人数未满,好友/强队排序)
+}
+//搜索小队
+message SquadSearchC2S
+{
+    string name = 1; // 搜索关键字
+}
+//搜索小队
+message SquadSearchS2C
+{
+    repeated SquadListInfo list = 1; // 搜索结果
+}
+//申请加入
+message SquadJoinRequestC2S
+{
+    int64  squadId = 1; // 目标小队id
+    string msg     = 2; // 申请留言
+}
+//申请加入
+message SquadJoinRequestS2C
+{
+    int64 squadId = 1; // 申请的小队id
+}
+//审批申请
+message SquadAuditC2S
+{
+    int32 playerId = 1; // 申请者id
+    bool  agree    = 2; // true=同意 false=拒绝
+}
+//审批申请
+message SquadAuditS2C
+{
+    int32 playerId = 1; // 被审批者id
+    bool  agree    = 2; // 审批结果
+}
+//踢人
+message SquadKickC2S
+{
+    int32 playerId = 1; // 被踢者id
+}
+//踢人
+message SquadKickS2C
+{
+    int32 playerId = 1; // 被踢者id
+}
+//转让队长
+message SquadAppointC2S
+{
+    int32 playerId = 1; // 转让目标id
+}
+//转让队长
+message SquadAppointS2C
+{
+    int32 newLeaderId = 1; // 新队长id
+}
+//退出/解散
+message SquadExitC2S
+{
+}
+//退出/解散
+message SquadExitS2C
+{
+    bool dissolve = 1; // true=小队已解散
+}
+//设置图标
+message SquadSetIconC2S
+{
+    int32 icon = 1; // 图标id(TeamIcon)
+}
+//设置图标
+message SquadSetIconS2C
+{
+    int32 icon = 1; // 新图标
+}
+//设置名字
+message SquadSetNameC2S
+{
+    string name = 1; // 新名字
+}
+//设置名字
+message SquadSetNameS2C
+{
+    string name = 1; // 新名字
+}
+//设置宣言
+message SquadSetDeclarationC2S
+{
+    string declaration = 1; // 新宣言
+}
+//设置宣言
+message SquadSetDeclarationS2C
+{
+    string declaration = 1; // 新宣言
+}
+//小队信息
+message SquadInfoC2S
+{
+    int64 squadId = 1; // 查询小队id(0=自己的)
+}
+//小队信息
+message SquadInfoS2C
+{
+    SquadLoginInfo             data          = 1; // 小队信息(squadId=0 自查时下发,含 mydata)
+    SquadListInfo              publicInfo    = 2; // v1.5 目标小队公开资料(squadId!=0 非成员查询时下发)
+    int32                      memberMax     = 3; // v1.5 人数上限(ClubBaseConf.MemberMax,公开查询时下发)
+    repeated SquadPublicMember publicMembers = 4; // v1.5 公开成员简要列表(公开查询时下发)
+    repeated SquadTaskProgress sharedTasks = 5; // 小队共享任务进度
+}
+//成员列表
+message SquadGetMembersC2S
+{
+}
+//成员列表
+message SquadGetMembersS2C
+{
+    repeated SquadMemberDB members = 1; // 成员列表
+    repeated SquadMemberView memberViews = 2; // 成员展示信息列表
+}
+//申请列表
+message SquadJoinApplyListC2S
+{
+}
+//申请列表
+message SquadJoinApplyListS2C
+{
+    repeated SquadJoinRequest list = 1; // 申请列表
+}
+//小队频道
+message SquadChatC2S
+{
+    string content   = 1; // 聊天内容
+    int32  languageId = 2; // 多语言id(content为空时用)
+}
+//小队频道
+message SquadChatS2C
+{
+}
+//邀请
+message SquadInviteC2S
+{
+    int32 playerId = 1; // 被邀请者id
+}
+//邀请
+message SquadInviteS2C
+{
+    int32 playerId = 1; // 被邀请者id
+}
+//邀请列表
+message SquadInviteListC2S
+{
+}
+//邀请列表
+message SquadInviteListS2C
+{
+    repeated SquadInviteDB list = 1; // 收到的邀请列表
+    repeated SquadInviteInfo detailList = 2; // 收到的邀请详情列表
+}
+//接受邀请
+message SquadInviteAcceptC2S
+{
+    int64 squadId = 1; // 接受的小队id
+}
+//接受邀请
+message SquadInviteAcceptS2C
+{
+    SquadLoginInfo data = 1; // 入队后我的小队数据
+}
+//一键拒绝邀请
+message SquadInviteRejectAllC2S
+{
+}
+//一键拒绝邀请
+message SquadInviteRejectAllS2C
+{
+}
+//签到
+message SquadSignC2S
+{
+}
+//签到
+message SquadSignS2C
+{
+    repeated RewardConfig rewards = 1; // 签到奖励
+}
+//领取小队任务奖励
+message SquadTaskRewardC2S
+{
+    int32 taskId = 1; // 任务id
+}
+//领取小队任务奖励
+message SquadTaskRewardS2C
+{
+    int32 taskId = 1; // 任务id
+    repeated RewardConfig rewards = 2; // 奖励
+}
+//小队日记
+message SquadDiaryC2S
+{
+}
+//小队日记
+message SquadDiaryS2C
+{
+    repeated SquadEventDB list = 1; // 日记事件列表
+}
+//称号设置
+message SquadTitleSetC2S
+{
+    int32 titleId = 1; // 称号id(Title.Type=小队称号)
+}
+//称号设置
+message SquadTitleSetS2C
+{
+    int32 titleId = 1; // 设置的称号id
+}
+//小队排行榜
+message SquadRankC2S
+{
+    int32 rankType = 1; // 榜单类型:0赛事全服榜,1赛事赛区榜,2小队积分榜,3小队活跃榜
+    int32 zoneId   = 2; // 赛区id(仅 rankType=1 赛区榜使用;客户端自由选赛区,取自赛区列表 TeamBattleZone.ID)
+}
+//小队排行榜
+message SquadRankS2C
+{
+    repeated SquadListInfo list = 1; // 排行榜列表
+}
+//添加新成员通知
+message SquadNotifyNewMemberS2C
+{
+    SquadMemberDB member = 1; // 新成员数据
+}
+//审批同意通知(下发申请人)
+message SquadAuditAgreeNotifyS2C
+{
+    SquadLoginInfo data = 1; // 入队后我的小队数据(与 SquadInviteAcceptS2C 对称)
+}
+//移除成员通知
+message SquadNotifyRemoveMemberS2C
+{
+    int32 playerId = 1; // 被移除成员id
+}
+//小队信息更新通知
+message SquadUpdateNotifyS2C
+{
+    SquadBaseInfoDB baseInfo = 1; // 最新基础信息
+    repeated SquadTaskProgress sharedTasks = 2; // 最新小队共享任务进度
+}
+//新申请通知
+message SquadNewApplyNotifyS2C
+{
+    SquadJoinRequest apply = 1; // 新申请
+}
+//删除申请通知
+message SquadRemoveApplyNotifyS2C
+{
+    int32 playerId = 1; // 被删申请者id
+}
+//邀请通知
+message SquadInviteNotifyS2C
+{
+    SquadInviteDB invite = 1; // 邀请详情
+}
+//成员信息更新通知
+message SquadMemberUpdateNotifyS2C
+{
+    SquadMemberDB member = 1; // 更新后的成员数据
+    PlayerBase base = 2; // 成员基础信息(段位/杯数/名字/头像等公开资料,外围变更整行刷新用)
+    int32 trophy = 3; // 成员奖杯数(=ShowLevel)
+    bool online = 4; // 成员是否在线
+}
+// 最强小队赛(CMD 48,SQUAD_BATTLE)的 message 见 generate_squad_battle.proto
+// 注:AutoGenerateProto 对多段 CMD 名(SQUAD_BATTLE)存在 message→文件前缀匹配 bug,
+//    SquadBattle* 会同时匹配 generate_squad(前缀squad)和 generate_squad_battle(前缀squad_battle),
+//    每次生成会重复追加到本文件,需在 protoc 前手动清理(根本修复待工具改用最长前缀匹配)
+//拒绝单条邀请
+message SquadInviteRejectC2S
+{
+    int64 squadId = 1; // 拒绝的小队邀请id
+}
+//拒绝单条邀请
+message SquadInviteRejectS2C
+{
+    int64 squadId = 1; // 已拒绝的小队邀请id
+}
+//小队频道系统广播(成员增减/每周任务/赛事预告/比赛时段)
+message SquadChannelBroadcastS2C
+{
+    int32           sysType  = 1; // 系统消息类型:1=成员加入 2=成员离开 3=每周任务开启 4=赛事预告 5=比赛时段
+    repeated string params   = 2; // 动态参数(1/2=玩家名;4=天数;5=开始时间,结束时间)
+    int32           playerId = 3; // 相关玩家id(1/2 成员增减时填)
+}
+//邀请候选推荐
+message SquadInviteRecommendC2S
+{
+}
+//邀请候选推荐
+message SquadInviteRecommendS2C
+{
+    repeated SquadInviteCandidate candidates = 1; // 可邀请的推荐玩家列表
+}
+//邀请候选搜索
+message SquadInviteSearchC2S
+{
+    string keyword = 1; // 玩家名称搜索关键字
+}
+//邀请候选搜索
+message SquadInviteSearchS2C
+{
+    repeated SquadInviteCandidate candidates = 1; // 可邀请的搜索结果列表
+}

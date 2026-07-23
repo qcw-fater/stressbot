@@ -118,6 +118,7 @@ message NoticeInfo
 	NoticeTimeType 	timeType   = 20; 				// 时间类型
 	int32   duration           = 21; 					// 持续时间（小时）
 	int64 ContentType 				 = 22; // 内容类型  1文字  2图片
+	repeated string storeList        = 23; // SDK渠道(store)限制，空=不限
 }
 
 // 服务器负载数据

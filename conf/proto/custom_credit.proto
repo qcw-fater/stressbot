@@ -102,3 +102,17 @@ message creditNotifyData {
 message creditLoginData {
   map<int32,int32> countMap = 1; // 信誉分每天增长次数  按类型分
 }
+
+//违规补偿明细（FEATURE-4575，一条=一个违规者，下发受补偿的非违规队友）
+message ViolationCompensateInfo {
+  int32       violatorPlayerId = 1; // 违规者玩家ID
+  int32       violatorHeroId   = 2; // 违规者本局英雄ID（客户端取头像）
+  string      violatorName     = 3; // 违规者名字
+  CreditEvent reason           = 4; // 违规类型（当前=CreditEvent_Hook 挂机）
+  int32       scoreDeduct      = 5; // 违规处罚：违规者被扣勇者积分
+  int32       compensateScore  = 6; // 本队友从该违规者获得的补偿分
+  int32       compensate       = 7; // 补偿礼包掉落ID（单个 DropMainID）
+  int32       violatorIcon     = 8; // 违规者头像（PlayerBase.Icon）
+  int32       violatorIFrame   = 9; // 违规者头像框（PlayerBase.IFrame）
+  int32       violatorTrophy   = 10; // 违规者总奖杯数（PlayerBase.ShowLevel）
+}

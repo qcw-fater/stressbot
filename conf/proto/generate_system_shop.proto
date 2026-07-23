@@ -9,7 +9,7 @@ message BuyGoodsData {
     int32 shopId           = 1; // 商店id
     int32 goodsId          = 2; // 商品id
     int32 buyNumber        = 3; // 购买数量
-    int32 costNumber       = 4; // 消耗货币数量，（客户端预估消耗值）
+    int64 costNumber       = 4; // 消耗货币数量，（客户端预估消耗值）
     bool  isAdditionalCost = 5; // 是否为替补货币购买
     int32 groupId          = 6; // 商品组id
     bool  isContinueBuy    = 7; // 是否继续购买下一个商品
@@ -103,6 +103,8 @@ message SystemShopVoucherBuyC2S {
     string cashGoodsId = 1; // 代金券商品id
     int32  buyNumber   = 2; // 购买数量
     int32  costNumber  = 3; // 消耗货币数量，（客户端预估消耗值）
+    int32  shopId      = 4; // 商店ID（限购校验与商店法币回调用，0=非商店入口/直购入口）
+    int32  goodsId     = 5; // 商店商品ID（同上，0=非商店入口/直购入口）
 }
 
 // 代金券购买直购商品

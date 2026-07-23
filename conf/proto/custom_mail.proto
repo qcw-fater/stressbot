@@ -90,4 +90,5 @@ message GMMail {
     map<int32, int32> playerIdLSkip = 11;  // 跳过的玩家Id
     int64 guildIdLimit              = 12;  // 公会id限制
     int64 ttl                       = 13;  // 存放到玩家身上过期时间
+    repeated string storeList       = 14;  // SDK渠道(store)限制，空=不限，如["APPLE","GOOGLE"]
 }

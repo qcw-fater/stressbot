@@ -1,9 +1,10 @@
-syntax             = "proto3"; //[proto2|proto3]
+syntax = "proto3"; //[proto2|proto3]
 
-option  go_package = ".;pb";
+option go_package = ".;pb";
 package Game;
 
 import "custom_season.proto";
+
 // 排位基础信息
 message LadderBase {
     int32             ladderLevel         = 1;  // 段位等级
@@ -12,19 +13,19 @@ message LadderBase {
     int32             currSeason          = 4;  // 当前版本
     bool              promotion           = 5;  // 晋级赛中
     int32             braveryScore        = 6;  // 勇者积分
-    map<int32, int32> seasonMaxLadder     = 7;  // 赛季最高段位:key:赛季id
+    map<int32, int32> seasonMaxLadder     = 7;  // 赛季最高段位，key:赛季id
     int32             maxLadder           = 8;  // 历史最高
     int32             consecutiveWinCount = 9;  // 连胜次数
     int64             titleValidityPeriod = 10; // 称号有效期
     bool              maxTitle            = 11; // 历史最大称号
-    map<int32, bool>  seasonMaxTitle      = 12; // 赛季最高段位:key:赛季id
+    map<int32, bool>  seasonMaxTitle      = 12; // 赛季最高段位称号，key:赛季id
 }
 
 // 排位补充数据
 message LadderSupplement {
-    double         rankValue   = 1; // 自己rank值
+    double         rankValue   = 1; // 自身rank值
     repeated int32 heroIdList  = 2; // 想玩英雄
-    int32          wantHeroSet = 3; // 0没有选  1是全能
+    int32          wantHeroSet = 3; // 0没有选 1是全能
     double         matchValue  = 4; // 匹配积分
 }
 
@@ -34,13 +35,14 @@ message PlayerSeasonInfo {
     repeated bool             ladderSwitchStep        = 2;  // 排位赛季切换步骤 0:新赛季说明 1:排位赛季展示
     map<int32, bool>          seasonBoxReward         = 3;  // 排位赛季宝箱
     map<int32, bool>          recreationBoxReward     = 4;  // 娱乐赛季宝箱
-    map<int32, TaskGUIDList>  recreationTask          = 5;  // 娱乐赛季任务UUID(已经完成的任务会删除),key: 所属玩法
-    map<int32, TaskCfgIdList> finishTask              = 6;  // 娱乐赛季已完成任务cfgID,key: 所属玩法
-    map<int32, SeasonRecord>  recordData              = 7;  // 赛季记录数据 key:赛季id
-    map<int32, int32>         addition                = 8;  // 赛季内加成使用次数 key: EntertainmentScoreConfig.ID , value: 已经使用次数
-    repeated bool             recreationSwitchStep    = 9;  // 娱乐赛季切换步骤0:新赛季说明 1:排位赛季展示
+    map<int32, TaskGUIDList>  recreationTask          = 5;  // 娱乐赛季任务UUID，key:所属玩法
+    map<int32, TaskCfgIdList> finishTask              = 6;  // 娱乐赛季已完成任务cfgID，key:所属玩法
+    map<int32, SeasonRecord>  recordData              = 7;  // 赛季记录数据，key:赛季id
+    map<int32, int32>         addition                = 8;  // 赛季内加成使用次数，key:EntertainmentScoreConfig.ID
+    repeated bool             recreationSwitchStep    = 9;  // 娱乐赛季切换步骤 0:新赛季说明 1:娱乐赛季展示
     int32                     createRecreationSeason  = 10; // 创建角色的娱乐赛季
     string                    recreationConfigVersion = 11; // 娱乐赛季配置版本
+    reserved 12;
 }
 
 message TaskGUIDList {

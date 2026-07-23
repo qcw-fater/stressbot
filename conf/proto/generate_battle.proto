@@ -1,6 +1,7 @@
 syntax             = "proto3";
 option  go_package = ".;pb";
 package Game;
+
 // 导入玩家数据
 import "player.proto";
 // 枚举
@@ -16,6 +17,7 @@ import "lbs.proto";
 import "custom_activity_battle.proto";
 import "custom_sdc.proto";
 import "custom_activity_battle_single.proto";
+import "custom_credit.proto"; // FEATURE-4575 违规补偿明细
 
 // 初始化注册消息(TCP)
 message BattleRegisterC2S {
@@ -102,6 +104,42 @@ message BattleRewardS2C {
     BattleLadder                 ladderChange     = 5; // 排位赛结算
     repeated LbsAddScoreDetails  lbsScoreDetails  = 6; // 战斗结算LBS积分详情
     BattleRecreation             recreationChange = 7; // 娱乐赛结算
+    SDCBattleSettleData          sdcSettleData    = 8; // SDC结算展示数据（Logic结算后回填）
+    PeakRankingBattleReward      peakRanking      = 9; // 巅峰赛中局推进信息
+    int32                        squadBattleScoreAdd = 10; // 本局为本小队实际结算的小队赛积分增量(不满足条件或未加分=0)
+    repeated ViolationCompensateInfo violationCompensate = 11; // FEATURE-4575 违规补偿明细（多条=多个违规者，下发非违规队友）
+}
+
+message PeakRankingBattleReward {
+    int32                    round           = 1; // 当前 BO3 局次
+    BattleResultNoticeS2C    roundResult     = 2; // 本小局战斗结果，客户端用于中局展示
+    bool                     final           = 3; // 是否 BO3 终局奖励
+    repeated PlayerBattleEnd roundBattleEnds = 4; // BO3 已产生小局完整结算，终局奖励时下发
+    PeakRankingBattleChange  peakRankingChange = 5; // 巅峰赛终局本局段位、积分、勇者积分变化
+}
+
+message PeakRankingBattleChange {
+    int32 rankLevel           = 1;  // 结算后巅峰赛段位
+    int32 oldRankLevel        = 2;  // 结算前巅峰赛段位
+    int32 score               = 3;  // 结算后巅峰赛积分
+    int32 oldScore            = 4;  // 结算前巅峰赛积分
+    int32 braveScore          = 5;  // 结算后巅峰赛勇者积分
+    int32 oldBraveScore       = 6;  // 结算前巅峰赛勇者积分
+    int32 noHookAddScore      = 7;  // 无挂机增加勇者积分
+    int32 scoreRank           = 8;  // 评分排名增加勇者积分
+    int32 winAddScore         = 9;  // 胜负增加勇者积分
+    int32 winStreakAddScore   = 10; // 连胜增加勇者积分
+    int32 costScore           = 11; // 触发保分/加分时消耗勇者积分
+    bool  isKeepScore         = 12; // 是否触发保分
+    bool  isAddScore          = 13; // 是否触发加分
+    int32 winCount            = 14; // 当前连胜次数
+    int32 mvpBraveScore       = 15; // MVP增加勇者积分
+    int32 svpBraveScore       = 16; // SVP增加勇者积分
+    LadderMedalType medalType = 17; // 最高奖牌类型，见 enum LadderMedalType
+    int32 medalBraveScore     = 18; // 最高奖牌增加勇者积分
+    int32 modelAddScore       = 19; // 游戏模式增加勇者积分
+    int32 creditBraveScore    = 20; // 队友违规补偿增加勇者积分
+    int32 rankGapBraveScore   = 21; // 失败段位差补偿增加勇者积分
 }
 
 // 娱乐赛结算
@@ -132,39 +170,47 @@ message BattleRecreationHeroAddition {
 
 // 排位赛结算
 message BattleLadder {
-    int32 ladderLevel       = 1;  // 段位
-    int32 starNum           = 2;  // 星星数
-    int32 oldStarNum        = 3;  // 旧星星数
-    int32 oldLadderLevel    = 4;  // 旧段位
-    bool  promotion         = 5;  // 晋级赛,下次战斗是否为晋级赛
-    int32 braveScore        = 6;  // 当前勇者积分
-    int32 noHookAddScore    = 7;  // 无挂机增加积分
-    int32 scoreRank         = 8;  // 评分第X名积分
-    int32 winAddScore       = 9;  // 胜利奖励积分
-    int32 winStreakAddScore = 10; // 连胜奖励积分
-    int32 costScore         = 11; // 消耗积分
-    bool  isKeepStar        = 12; // 是否保星
-    bool  isAddStar         = 13; // 是否增加星星
-    int32 winCount          = 14; // 当前连胜次数
-    int32 modelAddScore     = 15; // 游戏模式增加勇者积分
-    int32 mvpBraveScore     = 16; // mvp 加勇者积分
-    int32 svpBraveScore     = 17; // svp 加勇者积分
-    int32 creditBraveScore  = 18; // 队友违规 加勇者积分
+    int32           ladderLevel       = 1;  // 段位
+    int32           starNum           = 2;  // 星星数
+    int32           oldStarNum        = 3;  // 旧星星数
+    int32           oldLadderLevel    = 4;  // 旧段位
+    bool            promotion         = 5;  // 晋级赛,下次战斗是否为晋级赛
+    int32           braveScore        = 6;  // 当前勇者积分
+    int32           noHookAddScore    = 7;  // 无挂机增加积分
+    int32           scoreRank         = 8;  // 评分第X名积分
+    int32           winAddScore       = 9;  // 胜利奖励积分
+    int32           winStreakAddScore = 10; // 连胜奖励积分
+    int32           costScore         = 11; // 消耗积分
+    bool            isKeepStar        = 12; // 是否保星
+    bool            isAddStar         = 13; // 是否增加星星
+    int32           winCount          = 14; // 当前连胜次数
+    int32           modelAddScore     = 15; // 游戏模式增加勇者积分
+    int32           mvpBraveScore     = 16; // mvp 加勇者积分
+    int32           svpBraveScore     = 17; // svp 加勇者积分
+    int32           creditBraveScore  = 18; // 队友违规 加勇者积分
+    LadderMedalType medalType         = 19; // 最高奖牌类型，见 enum LadderMedalType
+    int32           medalBraveScore   = 20; // 最高奖牌增加勇者积分
+    int32           rankGapBraveScore = 21; // 失败段位差补偿增加勇者积分
 }
 
 // 战斗结算LBS积分详情
 message LbsAddScoreDetails {
-    int32       nowScore                        = 1;  // 当前积分
-    int32       diffScore                       = 2;  // 当前积分和上一场积分的差值
-    int32       addPerformanceBattlePower       = 3;  // 本场增加的排位赛表现战力
-    int32       performanceBattlePowerBaseScore = 4;  // 排位赛表现战力基础分
-    int32       mvpAddScore                     = 5;  // 个人表现
-    int32       gridingCoefficient              = 6;  // 段位加成（放大100倍）
-    int32       consecutiveWinCoefficient       = 7;  // 近期战绩（放大100倍）
-    int32       teamCoefficient                 = 8;  // 组队系数（放大100倍）
-    int32       avgCoefficient                  = 9;  // 平均分系数（放大100倍）
-    int32       heroId                          = 10; // 英雄Id
-    LbsData     nextLbsData                     = 11; // 下一级LBS数据
+    int32   nowScore                        = 1;  // 当前积分
+    int32   diffScore                       = 2;  // 当前积分和上一场积分的差值
+    int32   addPerformanceBattlePower       = 3;  // 本场增加的排位赛表现战力
+    int32   performanceBattlePowerBaseScore = 4;  // 排位赛表现战力基础分
+    int32   mvpAddScore                     = 5;  // 个人表现
+    int32   gridingCoefficient              = 6;  // 段位加成（放大100倍）
+    int32   consecutiveWinCoefficient       = 7;  // 近期战绩（放大100倍）
+    int32   teamCoefficient                 = 8;  // 组队系数（放大100倍）
+    int32   avgCoefficient                  = 9;  // 平均分系数（放大100倍）
+    int32   heroId                          = 10; // 英雄Id
+    LbsData nextLbsData                     = 11; // 下一级LBS数据
+    int32   performanceCoefficientX         = 12; // 个人表现系数X（放大100倍）
+    int32   teamCoefficientY                = 13; // 组队系数Y（放大100倍）
+    int32   catchUpCoefficient              = 14; // 追赶系数（放大100倍）
+    int32   maxLbsScore                     = 15; // 当前段位上限M
+    int32   currentLbsScore                 = 16; // 当前LBS积分S
 }
 
 // 英雄奖励
@@ -260,24 +306,26 @@ message RecordPlayerData {
 }
 // 战斗记录
 message Record {
-    int64                   RandSeed                  = 1;  // 随机种
-    GameType                GameType                  = 2;  // 游戏类型
-    int32                   battleModeId              = 3;  // 匹配类型
-    string                  address                   = 4;  // 战斗服地址
-    int32                   bsId                      = 5;  // 战斗服Id
-    repeated PlayerGameInfo FighterList               = 6;  // 玩家列表
-    repeated bytes          FrameData                 = 7;  // 帧数据
-    BattleResultNoticeS2C   Result                    = 8;  // 结算数据
-    string                  clientVersion             = 10; // 客户端登陆版本
-    string                  battleVersion             = 11; // 战斗版本
-    repeated uint32         crcList                   = 12; // crc记录（数组、所有数据）
-    GameModel               modelType                 = 13; // 匹配，排位，自定义房间等
-    repeated int32          affix                     = 14; // 词缀
-    LadderDraftType         DraftType                 = 15; // 征召类型
-    int32                   matchFlag                 = 16; // 匹配标志 0正常 1补偿局 2温暖局
-    repeated PlayerGameInfo lookPlayer                = 17; // 观战席玩家
-    int32                   hazardOpsDifficultyLevel  = 18; // 搜打撤难度等级
-    SDCDropData             sdcDropData               = 19; // SDC战场掉落数据（仅GM_HAZARD_OPS模式）
+    int64                   RandSeed                 = 1;  // 随机种
+    GameType                GameType                 = 2;  // 游戏类型
+    int32                   battleModeId             = 3;  // 匹配类型
+    string                  address                  = 4;  // 战斗服地址
+    int32                   bsId                     = 5;  // 战斗服Id
+    repeated PlayerGameInfo FighterList              = 6;  // 玩家列表
+    repeated bytes          FrameData                = 7;  // 帧数据
+    BattleResultNoticeS2C   Result                   = 8;  // 结算数据
+    string                  clientVersion            = 10; // 客户端登陆版本
+    string                  battleVersion            = 11; // 战斗版本
+    repeated uint32         crcList                  = 12; // crc记录（数组、所有数据）
+    GameModel               modelType                = 13; // 匹配，排位，自定义房间等
+    repeated int32          affix                    = 14; // 词缀
+    LadderDraftType         DraftType                = 15; // 征召类型
+    int32                   matchFlag                = 16; // 匹配标志 0正常 1补偿局 2温暖局
+    repeated PlayerGameInfo lookPlayer               = 17; // 观战席玩家
+    int32                   hazardOpsDifficultyLevel = 18; // 搜打撤难度等级
+    SDCDropData             sdcDropData              = 19; // SDC战场掉落数据（仅GM_HAZARD_OPS模式）
+    int32                   bo                       = 20; // 赛制（BO几：1/3/5），客户端据此决定打几回合
+    repeated BattleSquadLoadingTitle squadLoadingTitles = 21; // 阵营级小队Loading称号(每阵营最多1条,无有效称号阵营不含);漫斗3V3/排位下发,列车/吃鸡不发
 }
 
 // 开始加载(TCP)
@@ -341,29 +389,57 @@ message BattleCheckReconnectionS2C {
 
 // 玩家禁用英雄数据
 message MemberBanHero {
-    int32    heroId    = 1; // 禁用的英雄id
-    int32    playerId  = 2; // 玩家id
-    bool     isConfirm = 3; // 是否确认禁用
-    CampType camp      = 4; // 阵营
+    int32    heroId            = 1; // 禁用的英雄id
+    int32    playerId          = 2; // 玩家id
+    bool     isConfirm         = 3; // 是否确认禁用
+    CampType camp              = 4; // 阵营
+    int32    requesterPlayerId = 5; // 帮禁请求者玩家ID，普通禁用为0
 }
 
 // 房间重连数据
 message RoomReconnectionInfo {
-    int32                   captainPlayerId  = 1;  // 房主
-    RoomStatus              roomState        = 2;  // 房间状态
-    int64                   OverTime         = 3;  // 结束时间
-    int64                   roomId           = 4;  // 房间id
-    string                  address          = 5;  // 战斗服务器地址
-    int64                   randSeed         = 6;  // 随机种子
-    repeated MemberBanHero  banHeroList      = 7;  // 禁用英雄列表
-    Record                  record           = 8;  // 战斗记录数据
-    repeated int32          modeIds          = 9;  // 战斗模式id列表
-    int32                   draftStep        = 10; // 当前行动步骤
-    repeated int32          draftActionIndex = 11; // 当前行动者索引
-    int64                   draftActionTime  = 12; // 当前行动者开始时间
-    int64                   draftOverTime    = 13; // 当前行动者超时时间
-    repeated PlayerGameInfo lookPlayer       = 14; // 观战席玩家
-    repeated int32          affix            = 15; // 词缀
+    int32                       captainPlayerId  = 1;  // 房主
+    RoomStatus                  roomState        = 2;  // 房间状态
+    int64                       OverTime         = 3;  // 结束时间
+    int64                       roomId           = 4;  // 房间id
+    string                      address          = 5;  // 战斗服务器地址
+    int64                       randSeed         = 6;  // 随机种子
+    repeated MemberBanHero      banHeroList      = 7;  // 禁用英雄列表
+    Record                      record           = 8;  // 战斗记录数据
+    repeated int32              modeIds          = 9;  // 战斗模式id列表
+    int32                       draftStep        = 10; // 当前行动步骤
+    repeated int32              draftActionIndex = 11; // 当前行动者索引
+    int64                       draftActionTime  = 12; // 当前行动者开始时间
+    int64                       draftOverTime    = 13; // 当前行动者超时时间
+    repeated PlayerGameInfo     lookPlayer       = 14; // 观战席玩家
+    repeated int32              affix            = 15; // 词缀
+    PeakRankingReconnectionInfo peakRanking      = 16; // 巅峰赛重连数据
+}
+
+message PeakRankingReconnectionInfo {
+    map<int32, int32>                   anonymousId    = 1; // 匿名 ID 映射，key 为 playerId，value 为匿名编号
+    int32                               round          = 2; // 当前 BO3 局次
+    repeated PeakRankingRoundHeroPool   roundHeroPools = 3; // 每局每个玩家使用的英雄池信息
+    repeated PeakRankingBattleRoundInfo roundMaps      = 4; // 三轮地图和词缀计划
+    repeated BattleResultNoticeS2C      roundResults   = 5; // 已完成小局战斗结果，客户端重连后用于恢复 BO3 历史小局
+}
+
+message PeakRankingBattleRoundInfo {
+    int32          round  = 1; // BO3 局次
+    GameType       gType  = 2; // 游戏类型
+    int32          modeId = 3; // 地图/模式 ID
+    repeated int32 affix  = 4; // 词缀
+}
+
+message PeakRankingRoundHeroPool {
+    int32                          round          = 1; // BO3 局次
+    repeated PeakRankingPlayerHero playerHeroList = 2; // 本局玩家英雄记录
+}
+
+message PeakRankingPlayerHero {
+    int32    playerId = 1; // 玩家 ID
+    CampType camp     = 2; // 阵营
+    int32    heroId   = 3; // 本局最终使用英雄 ID
 }
 
 // 组队重连数据
@@ -374,6 +450,7 @@ message TeamReconnectionInfo {
     int32                   estimatedMatchTime = 4; // 预计匹配时间
     int32                   captainPlayerId    = 5; // 队长
     int64                   teamId             = 6; // 队伍id
+    int32                   sdcMapId           = 7; // 搜打撤当前 SDCMap.ID
 }
 
 // 局内聊天
@@ -786,15 +863,15 @@ message BattleAiStartLoadingS2C {
 
 // 战斗中途结算
 message BattleMidwaySettlementC2S {
-    BattleEndC2S   brData           = 1; // 结算数据
-    int32 settlementPlayerId = 2; // 结算玩家Id
-    int32          frameIndex       = 3; // 结算帧索引
+    BattleEndC2S brData             = 1; // 结算数据
+    int32        settlementPlayerId = 2; // 结算玩家Id
+    int32        frameIndex         = 3; // 结算帧索引
 }
 
 // 战斗中途结算
 message BattleMidwaySettlementS2C {
     int32 settlementPlayerId = 1; // 结算玩家Id
-    int32          frameIndex       = 2; // 结算帧索引
+    int32 frameIndex         = 2; // 结算帧索引
 }
 
 // 战斗中途退出
@@ -814,24 +891,36 @@ message BattleEndHeroAttr {
 
 // 玩家战斗结束消息  房间服务器发送给logic
 message PlayerBattleEnd {
-    int64                              battleId         = 1;  // 战斗ID
-    int64                              roomId           = 2;  // 房间id
-    BrawlBattleResultType              resultType       = 3;  // 结算类型
-    string                             MD5              = 4;  // 结算信息MD5
-    GameModel                          model            = 5;  // 游戏模式
-    GameType                           gType            = 6;  // 玩法类型
-    int32                              modeId           = 7;  // 模式id
-    string                             battleVersion    = 8;  // 战斗版本
-    int64                              beginTime        = 9;  // 比赛开始时间
-    int64                              endTime          = 10; // 比赛结束时间
-    BE_REASON                          settlementReason = 11; // 结算原因
-    map<int32, PlayerBattleStatistics> playerResult     = 12; // 个人比赛信息key:玩家id
-    midwayExitInfo                     midwayExit       = 13; // 中途结算
-    map<int32, BattleEndHeroAttr>      battleAttr       = 14; // 战斗属性数据
-    repeated RoundStatistics           bonStatisData    = 15; // 打点数据，bo3模式下所有玩家每回合的战斗数据 index:回合
-    int32                              addBraveScore    = 16; // 队友违规给自己的勇者积分
-    int32                              battleActivitySteo   = 17; // 活动赛阶段
-    SDCDropData                          sdcDropData          = 18; // SDC战场掉落数据（仅GM_HAZARD_OPS模式回传）
+    int64                              battleId           = 1;  // 战斗ID
+    int64                              roomId             = 2;  // 房间id
+    BrawlBattleResultType              resultType         = 3;  // 结算类型
+    string                             MD5                = 4;  // 结算信息MD5
+    GameModel                          model              = 5;  // 游戏模式
+    GameType                           gType              = 6;  // 玩法类型
+    int32                              modeId             = 7;  // 模式id
+    string                             battleVersion      = 8;  // 战斗版本
+    int64                              beginTime          = 9;  // 比赛开始时间
+    int64                              endTime            = 10; // 比赛结束时间
+    BE_REASON                          settlementReason   = 11; // 结算原因
+    map<int32, PlayerBattleStatistics> playerResult       = 12; // 个人比赛信息key:玩家id
+    midwayExitInfo                     midwayExit         = 13; // 中途结算
+    map<int32, BattleEndHeroAttr>      battleAttr         = 14; // 战斗属性数据
+    repeated RoundStatistics           bonStatisData      = 15; // 打点数据，bo3模式下所有玩家每回合的战斗数据 index:回合
+    int32                              addBraveScore      = 16; // 队友违规给自己的勇者积分
+    int32                              battleActivitySteo = 17; // 活动赛阶段
+    SDCDropData                        sdcDropData        = 18; // SDC战场掉落数据（仅GM_HAZARD_OPS模式回传）
+    PeakRankingBattleEnd               peakRanking        = 19; // 巅峰赛战斗结束分流信息
+    int32                              sdcMapId           = 20; // 搜打撤当前 SDCMap.ID，仅GM_HAZARD_OPS模式有效
+    int32                              sdcLobbyMmr        = 21; // 搜打撤成房时冻结的真人平均MMR，仅GM_HAZARD_OPS模式有效
+    map<int32, bool>                   sdcMmrEligible     = 22; // 搜打撤MMR结算资格，key=玩家ID value=是否参与MMR写回
+    map<int32, int64>                  sdcMatchId         = 23; // 搜打撤匹配ID，key=真人玩家ID value=玩家所属队伍本次matchUuid
+    repeated SDCWarehouseItem           sdcRobotInitialItems = 24; // 搜打撤机器人初始物品，仅Battle到Logic结算可信注册使用
+}
+
+message PeakRankingBattleEnd {
+    int32                    round           = 1; // 当前 BO3 局次
+    bool                     midway          = 2; // 是否 BO3 中局
+    repeated PlayerBattleEnd roundBattleEnds = 3; // BO3 终局时透传给 logic 的小局完整结算
 }
 
 // 服务器结算广播战斗结束消息(BattleTCP)
@@ -863,87 +952,68 @@ message BattleSDCPlayerExitC2S {
 }
 message BattleSDCPlayerExitS2C {
 }
-//活动赛获取数据
-message BattleActivityGetDataC2S
-{
+// 活动赛获取数据
+message BattleActivityGetDataC2S {
 }
-//活动赛获取数据
-message BattleActivityGetDataS2C
-{
-  ActivityBattleDbInfo data = 1; //活动赛数据
+// 活动赛获取数据
+message BattleActivityGetDataS2C {
+    ActivityBattleDbInfo data = 1; // 活动赛数据
 }
-//活动赛领奖
-message BattleActivityGetRewardC2S
-{
-  int32 id = 1; // 胜场配置id
+// 活动赛领奖
+message BattleActivityGetRewardC2S {
+    int32 id = 1; // 胜场配置id
 }
-//活动赛领奖
-message BattleActivityGetRewardS2C
-{
+// 活动赛领奖
+message BattleActivityGetRewardS2C {
 }
-//活动赛选择阶段
-message BattleActivitySelectStepC2S
-{
-  int32 step = 1; // 阶段
+// 活动赛选择阶段
+message BattleActivitySelectStepC2S {
+    int32 step = 1; // 阶段
 }
-//活动赛选择阶段
-message BattleActivitySelectStepS2C
-{
+// 活动赛选择阶段
+message BattleActivitySelectStepS2C {
 }
-//活动赛数据推送
-message BattleActivityDataS2C
-{
-  ActivityBattleDbInfo data = 1; //活动赛数据
+// 活动赛数据推送
+message BattleActivityDataS2C {
+    ActivityBattleDbInfo data = 1; // 活动赛数据
 }
-//活动赛购买失败次数
-message BattleActivityBuyFailNumC2S
-{
+// 活动赛购买失败次数
+message BattleActivityBuyFailNumC2S {
 }
-//活动赛购买失败次数
-message BattleActivityBuyFailNumS2C
-{
+// 活动赛购买失败次数
+message BattleActivityBuyFailNumS2C {
 }
-//训练营结算(TCP)
-message BattleTrainResultC2S
-{
+// 训练营结算(TCP)
+message BattleTrainResultC2S {
     PlayerBattleResult result = 1; // 训练营结算结果
 }
-//单模式活动赛获取数据
-message BattleActivitySingleGetDataC2S
-{
+// 单模式活动赛获取数据
+message BattleActivitySingleGetDataC2S {
 }
-//单模式活动赛获取数据
-message BattleActivitySingleGetDataS2C
-{
-    ActivityBattleSingleDbInfo data = 1; //单模式活动赛数据
+// 单模式活动赛获取数据
+message BattleActivitySingleGetDataS2C {
+    ActivityBattleSingleDbInfo data = 1; // 单模式活动赛数据
 }
-//单模式活动赛领奖
-message BattleActivitySingleGetRewardC2S
-{
-    int32 id = 1; //奖励配置id
+// 单模式活动赛领奖
+message BattleActivitySingleGetRewardC2S {
+    int32 id = 1; // 奖励配置id
 }
-//单模式活动赛领奖
-message BattleActivitySingleGetRewardS2C
-{
+// 单模式活动赛领奖
+message BattleActivitySingleGetRewardS2C {
 }
-//单模式活动赛数据推送
-message BattleActivitySingleDataS2C
-{
-    ActivityBattleSingleDbInfo data = 1; //单模式活动赛数据
+// 单模式活动赛数据推送
+message BattleActivitySingleDataS2C {
+    ActivityBattleSingleDbInfo data = 1; // 单模式活动赛数据
 }
-//单模式活动赛购买失败次数
-message BattleActivitySingleBuyFailNumC2S
-{
+// 单模式活动赛购买失败次数
+message BattleActivitySingleBuyFailNumC2S {
 }
-//单模式活动赛购买失败次数
-message BattleActivitySingleBuyFailNumS2C
-{
+// 单模式活动赛购买失败次数
+message BattleActivitySingleBuyFailNumS2C {
 }
-//SDC搜打撤玩家退出
-message BattleSdcPlayerExitC2S
-{
+// SDC搜打撤玩家退出
+message BattleSdcPlayerExitC2S {
 }
-//SDC搜打撤玩家退出
-message BattleSdcPlayerExitS2C
-{
+// SDC搜打撤玩家退出
+message BattleSdcPlayerExitS2C {
 }

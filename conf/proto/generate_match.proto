@@ -8,6 +8,7 @@ import "enum.proto";
 //导入玩家数据
 import "player.proto";
 import "generate_room.proto";
+import "generate_battle.proto";
 
 //匹配成功
 message MatchSucceedS2C {
@@ -21,6 +22,12 @@ message MatchSucceedS2C {
     LadderDraftType         DraftType 				 = 8;  // 征召类型
     RoomStatus              status    				 = 9;  // 房间当前阶段
     repeated int32 			affix              		 = 10; // 词缀
+    PeakRankingMatchInfo    peakRanking              = 11; // 巅峰赛匹配成功数据
+}
+
+message PeakRankingMatchInfo {
+    int32                                  round     = 1; // 当前 BO3 局次
+    repeated PeakRankingBattleRoundInfo   roundMaps = 2; // 三轮地图和词缀计划
 }
 
 //确认准备

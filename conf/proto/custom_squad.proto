@@ -1,0 +1,551 @@
+syntax            = "proto3";
+option go_package = ".;pb";
+package Game;
+import "enum.proto";
+import "enum_battle.proto";
+import "player.proto";
+import "custom_mail.proto";
+
+// 小队基础数据
+message SquadBaseInfoDB {
+    int64  uid          = 1; // 小队uid
+    string name         = 2; // 名字
+    int32  icon         = 3; // 图标(TeamIcon)
+    int32  level        = 4; // 小队等级(TeamLevel对照)
+    int32  leaderId     = 5; // 队长
+    string declaration  = 6; // 宣言
+    int32  totalScore   = 7; // 小队总积分(成员积分汇总,用于等级与排行)
+    int32  totalActive  = 8; // 小队活跃度
+    int32  titleId      = 9; // 小队称号(Title.Type=小队称号)
+}
+
+// 小队成员数据
+message SquadMemberDB {
+    int32             playerId      = 1;  // 玩家id
+    SquadPositionType position      = 2;  // 职位(队长/队员)
+    int64             joinTimestamp = 3;  // 加入时间
+    int32             memberScore   = 4;  // 成员积分快照
+    int32             active        = 5;  // 成员活跃度
+    int64             lastExitTime  = 6;  // 上次退出时间(再加入冷却判断)
+    int64             nextSignTime  = 7;  // 下次可签到时间
+    bool              weekSignDone  = 8;  // 本周签到是否完成(预留)
+    int64             squadUid      = 9;  // 所属小队id(仿GuildMemberDB.GuildUid,玩家归属与Lua原子检查)
+    int64             lastDecayTime = 10; // C-3:上次活跃度衰减时间(按 ID8 周期衰减/离线补扣)
+    int64             scoreBase     = 11; // C1:未乘活跃系数的成员积分基数(guild actor 直写唯一权威)
+}
+
+// 小队统计数据
+message SquadStatisticsDB {
+    int32 season = 1; // 当前赛季
+}
+
+// 小队时间记录
+message SquadTimeRecordDB {
+    int64 createTime         = 1; // 创建时间
+    int64 lastDayRstTime     = 2; // 上次天重置时间
+    int64 lastWeekRstTime    = 3; // 上次周重置时间
+    int64 lastChangeNameTime = 4; // 上次改名时间
+}
+
+// 小队日记事件
+message SquadEventDB {
+    int64           createTime = 1; // 创建时间
+    SquadEventId    type       = 2; // 事件类型
+    repeated string parameter = 3; // 消息参数
+    PlayerBase      baseData   = 4; // 玩家基础数据
+}
+
+message SquadEventInfo {
+    repeated SquadEventDB diaryList = 1; // 日记列表(超 DiaryRecordLimit 覆盖最旧)
+}
+
+// 最强小队赛数据(阶段二)
+message SquadBattleDB {
+    int32            battleTerm    = 1; // 所属届号
+    int32            zoneId        = 2; // 报名赛区(TeamBattleZone)
+    int32            totalScore    = 3; // 小队赛积分(总分快照,成员退出不回退)
+    bool             signedUp      = 4; // 是否已报名
+    SquadBattleStage stage         = 5; // 当前阶段(冗余,便于客户端展示)
+    int64            stageEndTime  = 6; // 当前阶段结束时间戳
+    int64            lastScoreTime = 7; // 上次积分产出时间(防重)
+    int64            rankTieUnixMilli = 8; // 同分排序时间戳(毫秒,越早排名越前)
+}
+
+// 小队主数据(DB)
+message SquadDB {
+    SquadBaseInfoDB   baseInfo   = 1; // 基础信息
+    map<int32, bool>  members    = 2; // 成员列表 playerId->true
+    SquadStatisticsDB statistics = 3; // 统计数据
+    SquadTimeRecordDB timeRecord = 4; // 时间记录
+    SquadEventInfo    diaryData  = 5; // 小队日记
+    SquadBattleDB     battleData = 6; // 最强小队赛数据
+    SquadTaskWeekDB   taskData   = 7; // 小队共享任务周数据
+    uint64            snapshotRevision = 8; // 影响快照数据的单调修订号
+}
+
+// C1:成员积分基数跨服 absolute 同步载荷(logic->guild INNER,无 durable outbox)
+message SquadMemberScoreSync {
+    int64 squadId         = 1; // 目标小队ID
+    int32 memberId        = 2; // 成员玩家ID
+    int64 membershipEpoch = 3; // 成员关系版本(JoinTimestamp),旧 epoch 直接拒绝
+    int64 scoreBase       = 4; // 未乘活跃系数的成员积分基数(当前 player 数据算得)
+}
+
+// 小队活跃事件来源
+enum SquadActiveSource {
+    SAS_Invalid         = 0; // 无效来源
+    SAS_Sign            = 1; // 小队签到
+    SAS_TeamBattle      = 2; // 同小队成员组队完赛
+    SAS_TaskFirstFinish = 3; // 小队任务首次完成
+    SAS_Decay           = 4; // 周期活跃衰减
+}
+
+// C2:活跃变化跨服 delta 载荷(logic->guild INNER,采用 guild at-most-once/actor 顺序语义)
+message SquadActiveChange {
+    int64             squadId          = 1; // 目标小队ID
+    int32             memberId         = 2; // 成员玩家ID
+    int32             delta            = 3; // 活跃变化量
+    SquadActiveSource source           = 4; // 活跃事件来源
+    int64             membershipEpoch  = 5; // 成员关系版本(JoinTimestamp),旧 epoch 直接丢弃
+    int64             createdAt        = 6; // 事件创建时间
+    int64             decayCursorAfter = 7; // 衰减后时间游标(仅衰减来源使用)
+}
+
+// 小队任务成员进度
+message SquadTaskMemberProgress {
+    int32  memberId            = 1; // 成员玩家ID
+    int64  membershipEpoch     = 2; // 成员关系版本(JoinTimestamp)
+    int64  rawAbsoluteProgress = 3; // 本周未封顶的个人原始累计进度
+    int64  rawJoinBaseline     = 4; // 加入当前小队时的本周原始累计基线
+    uint64 revision            = 5; // 已应用的个人进度版本
+}
+
+// 小队任务奖励资格成员
+message SquadTaskEligibleMember {
+    int32 memberId        = 1; // 成员玩家ID
+    int64 membershipEpoch = 2; // 首次完成时冻结的成员关系版本
+}
+
+// 小队任务共享进度持久化数据
+message SquadTaskProgressDB {
+    int32                                taskId          = 1; // Task任务配置ID
+    repeated SquadTaskMemberProgress    memberProgress  = 2; // 各成员进度水位
+    int64                                progress        = 3; // 小队共享原始进度
+    bool                                 finished        = 4; // 是否已首次达到当前目标
+    repeated SquadTaskEligibleMember    eligibleMembers = 5; // 首次完成时冻结的领奖资格成员
+    uint64                               finishRevision  = 7; // 共享完成版本(tag6 activityApplied 已删,首次完成活跃直调触发成员)
+}
+
+// 小队任务周数据
+message SquadTaskWeekDB {
+    int64                        weekKey = 1; // 周期标识
+    repeated SquadTaskProgressDB tasks   = 2; // 本周小队任务共享进度
+}
+
+// 小队任务客户端展示进度
+message SquadTaskProgress {
+    int32     taskId        = 1; // Task任务配置ID
+    int64     progress      = 2; // 小队共享展示进度
+    int32     target        = 3; // 当前Task配置目标值
+    TaskState state         = 4; // 当前玩家可见任务状态
+    bool      rewardClaimed = 5; // 当前玩家是否已领取奖励
+    bool      eligible      = 6; // 当前玩家是否具备领奖资格
+}
+
+// C3:小队任务进度跨服 absolute 同步载荷(logic->guild INNER,无 durable outbox/ACK)
+message SquadTaskProgressSync {
+    int64  squadId            = 1; // 目标小队ID
+    int64  weekKey            = 2; // 周期标识
+    int32  taskId             = 3; // Task任务配置ID
+    int32  memberId           = 4; // 成员玩家ID
+    int64  membershipEpoch    = 5; // 成员关系版本(JoinTimestamp),旧 epoch 丢弃
+    int64  rawAbsoluteProgress = 6; // 本周未封顶的个人原始累计进度
+    int64  rawJoinBaseline     = 7; // 加入当前小队时的本周原始累计基线
+    uint64 revision            = 8; // 个人进度生产版本,<=已应用值幂等忽略
+}
+
+// 小队列表条目(加入列表展示)
+message SquadListInfo {
+    SquadBaseInfoDB baseInfo   = 1; // 基础信息
+    int32           memberCnt  = 2; // 成员数量
+    bool            isApplied  = 3; // 是否已申请
+    PlayerBase      leaderInfo = 4; // 队长信息
+    bool            friendTag  = 5; // 标签:true=好友队(队中有我的好友),false=强队(队中无我的好友)
+    int32           rank       = 6; // 当前榜单名次,0=未上榜
+    int32           rankValue  = 7; // 当前榜单原始值(积分或活跃度)
+}
+
+// 小队公开成员简要(v1.5 非成员查看小队公开信息,不含积分/活跃度等敏感字段)
+message SquadPublicMember {
+    int32             playerId = 1; // 成员id
+    PlayerBase        base     = 2; // 公开基础信息(精简版:名字/头像/段位)
+    SquadPositionType position = 3; // 职位(队长/队员,由 leaderId 派生)
+    bool              online   = 4; // 在线状态
+    int32             trophy   = 5; // 奖杯数
+}
+
+// 小队登录信息(玩家登录下发)
+message SquadLoginInfo {
+    int64             squadId   = 1; // 我的小队id
+    SquadBaseInfoDB   baseInfo  = 2; // 小队基础信息
+    SquadMemberDB     mydata    = 3; // 我的成员数据
+    map<int64, int64> applyMap  = 4; // 已申请的小队id:到期时间(预留)
+    repeated SquadPermission permissions = 5; // 当前成员的有效权限列表
+}
+
+// 加入申请
+message SquadJoinRequestDB {
+    int32  playerId   = 1; // 申请者id
+    string msg        = 2; // 申请留言
+    int64  createTime = 3; // 创建时间
+}
+
+message SquadJoinRequest {
+    PlayerBase         info    = 1; // 申请者基础信息
+    SquadJoinRequestDB request = 2; // 申请详情
+}
+
+// 邀请记录
+message SquadInviteDB {
+    int32  inviterId  = 1; // 邀请人(小队成员)
+    int64  squadId    = 2; // 邀请方小队id
+    int64  createTime = 3; // 创建时间
+}
+
+// 玩家退出小队时的数据(冷却记录)
+message SquadExitData {
+    int64 squadUid      = 1; // 小队id
+    int64 exitTimestamp = 2; // 退出时间
+}
+
+// 玩家维度小队赛运行数据(存 {player.%d}.squadBattle,与 SquadMemberDB 解耦:退队不清)
+message PlayerSquadBattleData {
+    int32           dailyCount          = 1;  // 今日场次(预留,产出模型定后确认是否启用)
+    int32           weekCount           = 2;  // 本周累计下发场次(C-4:ID22 周上限判定)
+    int64           lastDailyRst        = 3;  // 上次日重置时间(D-3 点赞每日重置)
+    int64           lastWeekRst         = 4;  // 上次周重置点(C-4:weekCount 周累计重置)
+    map<int32,bool> sessionRewardTaken  = 5;  // 场次奖励领取记录 configId->true
+    map<int32,bool> rankRewardTaken     = 6;  // 排名奖励领取记录
+    map<int32,bool> scoreRewardTaken    = 7;  // 积分奖励领取记录
+    map<int64,bool> likedTarget         = 8;  // 已点赞目标 squadId->true
+    int32           beLikedCount        = 9;  // 被点赞数
+    int32           myScore             = 10; // 我的积分贡献快照(预留,快照模型下用)
+    int32           availableSession    = 11; // C-4:当前可用积分场次(下发+,产分-1)
+    int32           totalGainSession    = 12; // C-4:本届累计获得积分场次(场次奖励 RequireSessionCount 判定)
+    int64           lastSessionGrantDay = 13; // C-4:上次场次下发日重置点(独立于 lastDailyRst)
+    int32           sessionSeason       = 14; // C-4:场次数据所属届号(切届清空场次进度,需求 line295)
+    int32           personalBattleScore = 15; // D-4:本届个人累计小队赛贡献积分(ScoreType=个人 的 RequireScore 判定;复用 sessionSeason 届边界重置)
+    int64           lastPersonalBattleId = 16; // D-4:上次已累计个人贡献的 battleId(防重放重复累计,与小队总分 LastScoreTime 口径对齐)
+    repeated PendingSquadScore pendingBattleScore = 17; // D-7:推送小队总分失败(未投递)的待补记录,玩家活动时 flush 重试;切届清空
+    int64           likeRewardTakenDay = 18; // 最近已领取点赞奖励的日标识
+    repeated int64  pendingLikeRewardDays = 19; // 待补发点赞奖励的日标识列表
+}
+
+// 最强小队赛场次奖励状态
+enum SquadBattleSessionRewardStatus {
+    SBSRS_NotReached = 0; // 未达到领取条件
+    SBSRS_Claimable  = 1; // 本届累计场次达标且未领取
+    SBSRS_Claimed    = 2; // 当前届已领取
+}
+
+// 最强小队赛单档场次奖励状态
+message SquadBattleSessionRewardState {
+    int32                          configId    = 1; // TeamBattleSessionReward.ID
+    SquadBattleSessionRewardStatus status      = 2; // 当前状态
+    int32                          currentCount = 3; // 玩家本届累计场次
+    int32                          requireCount = 4; // 该档所需累计场次
+}
+
+// D-7 小队赛积分推送失败待补记录(error⟹未投递未累加,重试幂等安全)
+message PendingSquadScore {
+    int64 squadId  = 1; // 目标小队id(推送失败时玩家所在小队)
+    int32 score    = 2; // 该场贡献积分
+    int64 battleId = 3; // 该场 battleId(推送时作 scoreTime 防重)
+    BattleResultType result = 4; // 该场权威结算结果
+    int32 battleTerm = 5; // 产分所属届号
+    int64 scoreUnixMilli = 6; // 产分时间戳(毫秒)
+}
+
+// 最强小队赛积分墓碑状态
+enum SquadBattleScoreTombstoneState {
+    SBSTS_Invalid   = 0; // 无效状态
+    SBSTS_Intent    = 1; // 已写入删除意图
+    SBSTS_Committed = 2; // 删除意图已提交
+}
+
+// 最强小队赛积分墓碑
+message SquadBattleScoreTombstone {
+    int64                           squadId   = 1; // 小队ID
+    int32                           term      = 2; // 赛事届号
+    int32                           zoneId    = 3; // 报名赛区ID
+    int32                           totalScore = 4; // 墓碑提交时的小队赛事总积分
+    SquadBattleScoreTombstoneState state      = 5; // 当前墓碑状态
+    int64                           updatedAt  = 6; // 最近更新时间
+}
+
+// 最强小队赛赛区信息(下发客户端选择,TeamBattleZone 配置)
+message SquadBattleZoneInfo {
+    int32          zoneId         = 1; // 赛区id(TeamBattleZone.ID)
+    int32          zoneName       = 2; // 赛区名(多语言key,对应 TeamBattleZoneConfig.ZoneName)
+    repeated int32 includeRegions = 3; // 包含区服
+    bool           isDefault      = 4; // 是否默认赛区
+}
+
+// 最强小队赛榜单条目
+message SquadBattleRankInfo {
+    SquadBaseInfoDB squadBase    = 1; // 小队基础信息
+    int32           totalScore   = 2; // 小队赛积分
+    int32           rank         = 3; // 排名
+    int32           zoneId       = 4; // 所属赛区id(TeamBattleZone.ID),全服榜展示各小队赛区
+    int32           beLikedCount = 5; // 该小队当前被点赞数(进页面初值)
+}
+
+// 最强小队赛积分构成明细(展示用,预留,快照模型下用)
+message SquadBattleScoreDetail {
+    int32 ladderScore = 1; // 排位积分贡献
+    int32 mandouScore = 2; // 漫斗积分贡献
+    int32 peakScore   = 3; // 巅峰积分贡献
+    int32 heroScore   = 4; // 英雄战力贡献
+    int32 active      = 5; // 活跃度
+}
+
+// ============================ v1.1 最强小队赛往届快照 ============================
+// 往届最终排名快照:每届庆祝结束由 Leader 服务器抓取存档,按 TeamParameter ID27 滚动保留最近 N 届
+
+// 往届快照-成员构成(决策3折中:本期服务器仅填 playerId/position/contribScore;name/icon/ladderGrade 预留,由客户端按 playerId 实时拉取)
+message SnapMember {
+    int32             playerId     = 1; // 成员玩家id
+    SquadPositionType position     = 2; // 职位(队长/队员)
+    int32             contribScore = 3; // 当届个人累计小队赛贡献积分(PlayerSquadBattleData.personalBattleScore)
+    string            name         = 4; // 名字(预留,本期空;客户端按 playerId 拉,或未来切选项B服务器填)
+    int32             icon         = 5; // 头像(预留)
+    int32             ladderGrade  = 6; // 排位段位(预留)
+}
+
+// 往届快照-榜条目
+message SnapRankEntry {
+    int32               rank    = 1; // 名次
+    int64               squadId = 2; // 小队id
+    string              name    = 3; // 小队名(快照当届)
+    int32               icon    = 4; // 小队图标(快照当届)
+    int32               score   = 5; // 最强小队赛积分(快照当届最终值)
+    repeated SnapMember members = 6; // 成员构成
+}
+
+// 往届快照-赛区榜
+message ZoneRankSnap {
+    int32                  zoneId = 1; // 赛区id(TeamBattleZone.ID)
+    repeated SnapRankEntry ranks  = 2; // 该赛区最终排名
+}
+
+// 往届最终排名快照(存 Redis,届切换查询下发)
+message SquadBattleTermSnapshot {
+    int32                  term       = 1; // 届号
+    repeated SnapRankEntry globalRank = 2; // 全服榜最终排名
+    repeated ZoneRankSnap  zoneRanks  = 3; // 各赛区榜最终排名
+}
+
+// 小队赛阶段时间展示信息
+message SquadBattleStageTime {
+    SquadBattleStage stage = 1; // 小队赛阶段
+    int64 startTime = 2; // 阶段开始时间戳
+    int64 endTime = 3; // 阶段结束时间戳
+}
+
+// 小队赛成员积分展示信息
+message SquadBattleMemberScore {
+    int32 playerId = 1; // 成员玩家id
+    int32 score = 2; // 成员小队赛积分
+}
+
+// 小队成员完整展示信息
+message SquadMemberView {
+    SquadMemberDB member = 1; // 成员业务数据
+    PlayerBase base = 2; // 成员基础信息
+    int32 trophy = 3; // 成员奖杯数
+    bool online = 4; // 成员是否在线
+}
+
+// 小队邀请详情展示信息
+message SquadInviteInfo {
+    SquadInviteDB invite = 1; // 邀请记录
+    SquadBaseInfoDB squad = 2; // 邀请方小队信息
+    PlayerBase inviter = 3; // 邀请人基础信息
+}
+
+// 小队邀请候选人展示信息
+message SquadInviteCandidate {
+    PlayerBase base = 1; // 候选人基础信息
+    bool online = 2; // 候选人是否在线
+    bool invited = 3; // 当前小队是否已邀请
+}
+
+// 小队赛点赞待处理事件
+message PendingSquadLikeEvent {
+    int32  term          = 1; // 小队赛届号
+    int64  dayKey        = 2; // 点赞所属自然日标识
+    int64  targetSquadId = 3; // 被点赞小队ID
+    int32  playerId      = 4; // 点赞玩家ID
+    int32  state         = 5; // 处理状态:0待处理,1已计数,2已完成
+    string eventToken    = 6; // 跨Redis槽幂等事件标识
+    int64  createdAt     = 7; // 事件创建时间
+}
+
+// 小队奖励邮件幂等组
+message SquadRewardMailGroup {
+    string        businessToken = 1; // 业务幂等标识
+    repeated Mail mails         = 2; // 首次成功时实例化的完整邮件组
+    int64         createdAt     = 3; // 邮件组创建时间
+}
+
+// 小队赛收口里程碑类型
+enum SquadBattleMilestoneKind {
+    SBMK_Invalid       = 0; // 无效类型
+    SBMK_ScoreFlush    = 1; // 已持久化积分事实收口
+    SBMK_RankFreeze    = 2; // 最终榜冻结
+    SBMK_RankReward    = 3; // 排名奖励
+    SBMK_PlayerReissue = 4; // 玩家奖励补发
+    SBMK_SquadReissue  = 5; // 小队奖励补发
+    SBMK_LikeFlush     = 6; // 点赞事件收口
+    SBMK_SnapshotCommit = 7; // 往届快照提交
+    SBMK_Cleanup       = 8; // 临时事实清理
+}
+
+// 小队赛收口里程碑状态
+enum SquadBattleMilestoneStatus {
+    SBMS_Pending = 0; // 等待前置条件
+    SBMS_Running = 1; // 正在执行
+    SBMS_Done    = 2; // 已完成
+    SBMS_Blocked = 3; // 存在可定位阻断
+}
+
+// 小队赛服务角色
+enum SquadBattleServerRole {
+    SBSR_Invalid = 0; // 无效角色
+    SBSR_Guild   = 1; // Guild实例
+    SBSR_Logic   = 2; // Logic实例
+}
+
+// 小队赛冻结屏障状态
+enum SquadBattleFreezeBarrierState {
+    SBFBS_Invalid  = 0; // 无效状态
+    SBFBS_Draining = 1; // 拒绝新事实并等待处理中请求归零
+    SBFBS_Closed   = 2; // 所有期望实例已确认排空
+    SBFBS_Released = 3; // 收口完成后已释放
+}
+
+// 小队赛冻结屏障
+message SquadBattleFreezeBarrier {
+    int32                         term           = 1; // 小队赛届号
+    SquadBattleFreezeBarrierState state          = 2; // 当前屏障状态
+    string                        generation     = 3; // 本次收口代次
+    int32                         expectedCount  = 4; // Guild与Logic期望实例总数
+    string                        expectedDigest = 5; // 期望实例集合摘要
+    int64                         closedAt       = 6; // 屏障关闭时间
+    int64                         releasedAt     = 7; // 屏障释放时间
+}
+
+// 小队赛收口里程碑游标
+message SquadBattleMilestoneMeta {
+    int32                       term         = 1; // 小队赛届号
+    SquadBattleMilestoneKind    kind         = 2; // 里程碑类型
+    SquadBattleMilestoneStatus  status       = 3; // 当前执行状态
+    string                      generation   = 4; // 本次执行代次
+    int32                       cursorPage   = 5; // 当前工作页号
+    int32                       cursorOffset = 6; // 当前页内偏移
+    int64                       workTotal    = 7; // 固化工作项总数
+    string                      error        = 8; // Blocked时的稳定错误摘要
+    int64                       updatedAt    = 9; // 最近更新时间
+}
+
+// 分页存储清单
+message PagedStoreManifest {
+    int32  term       = 1; // 小队赛届号
+    string kind       = 2; // 存储类型标识
+    string generation = 3; // 构建代次
+    string state      = 4; // Building或Sealed
+    int32  pageCount  = 5; // 已发布页数
+    int64  total      = 6; // 工作项总数
+    string digest     = 7; // 已发布内容摘要
+    int64  updatedAt  = 8; // 最近更新时间
+}
+
+// 动态分页工作项
+message PagedTargetEntry {
+    string targetId = 1; // 分页内唯一目标标识
+    bytes  payload  = 2; // 目标业务载荷
+}
+
+// 动态分页工作页
+message PagedTargetPage {
+    int32                     pageNo       = 1; // 页号
+    repeated PagedTargetEntry entries      = 2; // 本页工作项
+    int32                     payloadBytes = 3; // 本页载荷字节数
+    bool                      sealed       = 4; // 本页是否已封页
+}
+
+// 最终榜冻结原始事实
+message RankFreezeFact {
+    int64               squadId         = 1; // 小队ID
+    int32               totalScore      = 2; // 冻结时原始赛事积分
+    int32               zoneId          = 3; // 冻结时赛区ID
+    int64               rankTieUnixMilli = 4; // 同分排序时间戳
+    SquadBaseInfoDB     baseInfo        = 5; // 冻结时小队基础信息
+    repeated SnapMember members         = 6; // 冻结时成员快照
+    uint64              captureRevision = 7; // 小队快照修订号
+}
+
+// 小队赛分页数据封存信息
+message SquadBattleSealMeta {
+    int32  term       = 1; // 小队赛届号
+    string state      = 2; // Building或Sealed
+    string generation = 3; // 构建代次
+    int64  count      = 4; // 冻结事实总数
+    string digest     = 5; // 冻结内容摘要
+    int64  updatedAt  = 6; // 最近更新时间
+}
+
+// 小队赛最终排名事实
+message FinalRankFact {
+    int64               squadId         = 1; // 小队ID
+    int32               totalScore      = 2; // 最终赛事积分
+    int32               zoneId          = 3; // 报名赛区ID
+    int32               globalRank      = 4; // 全服最终名次
+    int32               zoneRank        = 5; // 赛区最终名次
+    SquadBaseInfoDB     baseInfo        = 6; // 冻结的小队基础信息
+    repeated SnapMember members         = 7; // 冻结的成员信息
+    int64               rankTieUnixMilli = 8; // 同分排序时间戳
+}
+
+// 最终排名不可变分页
+message PagedFinalRankPage {
+    int32                  pageNo = 1; // 页号
+    repeated FinalRankFact ranks  = 2; // 本页最终排名事实
+}
+
+// 往届快照不可变分页
+message SquadBattleSnapshotPage {
+    int32                  pageNo = 1; // 页号
+    repeated FinalRankFact ranks  = 2; // 本页往届排名事实
+}
+
+// 往届快照提交收据
+message SnapshotCommitReceipt {
+    int32  term        = 1; // 小队赛届号
+    string status      = 2; // 固定为Done
+    int32  keepCount   = 3; // 提交时配置的快照保留届数
+    int32  pageCount   = 4; // 已发布快照页数
+    int64  total       = 5; // 已发布快照条目数
+    string digest      = 6; // 快照内容摘要
+    string generation  = 7; // 快照构建代次
+    int64  committedAt = 8; // 提交完成时间
+}
+
+// 整届业务收口收据
+message TermFinalizeReceipt {
+    int32  term                 = 1; // 小队赛届号
+    string status               = 2; // Cleaning或Done
+    string generation           = 3; // 收口代次
+    string completedKindsDigest = 4; // 七类业务完成事实摘要
+    int64  cleanupVerifiedAt    = 5; // 临时键验空完成时间
+}

@@ -1,5 +1,5 @@
-syntax            = "proto3";
-option go_package = ".;pb";
+syntax             = "proto3";
+option  go_package = ".;pb";
 package Game;
 
 import "global_operate_activity.proto";
@@ -10,107 +10,107 @@ message OperateGetListC2S {
 
 // 获取运营活动列表
 message OperateGetListS2C {
-    repeated Operate list = 1;  // 活动详细信息
+    repeated Operate list = 1; // 活动详细信息
 }
 
 // 添加运营活动
 message OperateNewS2C {
-    repeated Operate list = 1;  // 活动详细信息
+    repeated Operate list = 1; // 活动详细信息
 }
 
 // 更新运营活动内容
 message OperateUpdateS2C {
-    repeated OperateActivityDB detailed = 1;  // 更新内容
+    repeated OperateActivityDB detailed = 1; // 更新内容
 }
 
 // 删除运营活动
 message OperateDeleteS2C {
-    int64 activityId = 1;  // 活动Id
+    int64 activityId = 1; // 活动Id
 }
 
 // 领取运营任务奖励
 message OperateGetTaskRewardC2S {
-    int64 activityId          = 1;  // 活动Id
-    int32 tplIndex            = 2;  // 模板索引
-    repeated int32 taskIndexs = 3;  // 条目id
-    int32 tplDay              = 4;  // 哪天的模板
+    int64          activityId = 1; // 活动Id
+    int32          tplIndex   = 2; // 模板索引
+    repeated int32 taskIndexs = 3; // 条目id
+    int32          tplDay     = 4; // 哪天的模板
 }
 // 领取运营任务奖励
 message OperateGetTaskRewardS2C {
-    int64 activityId          = 1;  // 活动Id
-    int32 tplIndex            = 2;  // 模板索引
-    repeated int32 taskIndexs = 3;  // 条目id
-    int32 tplDay              = 4;  // 哪天的模板
+    int64          activityId = 1; // 活动Id
+    int32          tplIndex   = 2; // 模板索引
+    repeated int32 taskIndexs = 3; // 条目id
+    int32          tplDay     = 4; // 哪天的模板
 }
 
 // 签到
 message OperateSignC2S {
-    int64 activityId = 1;  // 活动Id
-    int32 tplIndex   = 2;  // 模板索引
-    int32 tplDay     = 3;  // 哪天的模板
+    int64 activityId = 1; // 活动Id
+    int32 tplIndex   = 2; // 模板索引
+    int32 tplDay     = 3; // 哪天的模板
 }
 // 签到
 message OperateSignS2C {
-    int64 activityId = 1;  // 活动Id
-    int32 tplIndex   = 2;  // 模板索引
-    int32 tplDay     = 3;  // 哪天的模板
+    int64 activityId = 1; // 活动Id
+    int32 tplIndex   = 2; // 模板索引
+    int32 tplDay     = 3; // 哪天的模板
 }
 
 // 补签
 message OperateRepairSignC2S {
-    int64 activityId = 1;  // 活动Id
-    int32 tplIndex   = 2;  // 模板索引
-    int32 tplDay     = 3;  // 哪天的模板
+    int64 activityId = 1; // 活动Id
+    int32 tplIndex   = 2; // 模板索引
+    int32 tplDay     = 3; // 哪天的模板
 }
 // 补签
 message OperateRepairSignS2C {
-    int64 activityId = 1;  // 活动Id
-    int32 tplIndex   = 2;  // 模板索引
-    int32 tplDay     = 3;  // 哪天的模板
+    int64 activityId = 1; // 活动Id
+    int32 tplIndex   = 2; // 模板索引
+    int32 tplDay     = 3; // 哪天的模板
 }
 
 // 签到领奖
 message OperateSignGetRewardC2S {
-    int64 activityId = 1;  // 活动Id
-    int32 tplDay     = 2;  // 哪天的模板
-    int32 tplIndex   = 3;  // 模板索引
-    int32 day        = 4;  // 领取那个奖励
+    int64 activityId = 1; // 活动Id
+    int32 tplDay     = 2; // 哪天的模板
+    int32 tplIndex   = 3; // 模板索引
+    int32 day        = 4; // 领取那个奖励
 }
 
 // 签到领奖
 message OperateSignGetRewardS2C {
-    int64 activityId = 1;  // 活动Id
-    int32 tplDay     = 2;  // 哪天的模板
-    int32 tplIndex   = 3;  // 模板索引
-    int32 day        = 4;  // 领取那个奖励
+    int64 activityId = 1; // 活动Id
+    int32 tplDay     = 2; // 哪天的模板
+    int32 tplIndex   = 3; // 模板索引
+    int32 day        = 4; // 领取那个奖励
 }
 
 // 购买商品
 message OperateShopBuyC2S {
-    int64 activityId = 1;  // 活动Id
-    int32 tplIndex   = 2;  // 模板索引
-    int32 goodsIndex = 3;  // 商品索引
-    int32 tplDay     = 4;  // 哪天的模板
-    int32 buyCnt     = 5;  // 购买数量
+    int64 activityId = 1; // 活动Id
+    int32 tplIndex   = 2; // 模板索引
+    int32 goodsIndex = 3; // 商品索引
+    int32 tplDay     = 4; // 哪天的模板
+    int32 buyCnt     = 5; // 购买数量
 }
 // 购买商品
 message OperateShopBuyS2C {
-    int64 activityId = 1;  // 活动Id
-    int32 tplIndex   = 2;  // 模板索引
-    int32 goodsIndex = 3;  // 商品索引
-    int32 tplDay     = 4;  // 哪天的模板
-    int32 buyCnt     = 5;  // 购买数量
+    int64 activityId = 1; // 活动Id
+    int32 tplIndex   = 2; // 模板索引
+    int32 goodsIndex = 3; // 商品索引
+    int32 tplDay     = 4; // 哪天的模板
+    int32 buyCnt     = 5; // 购买数量
 }
 
 // 获取积分奖励
 message OperateGetScoreRewardC2S {
-    int64 activityId = 1;  // 活动Id
-    int32 scoreIndex = 2;  // 积分索引
+    int64 activityId = 1; // 活动Id
+    int32 scoreIndex = 2; // 积分索引
 }
 // 获取积分奖励
 message OperateGetScoreRewardS2C {
-    int64 activityId = 1;  // 活动Id
-    int32 scoreIndex = 2;  // 积分索引
+    int64 activityId = 1; // 活动Id
+    int32 scoreIndex = 2; // 积分索引
 }
 // 获取自己排名
 message OperateGetSelfRankC2S {
@@ -119,171 +119,249 @@ message OperateGetSelfRankC2S {
 // 获取自己排名
 message OperateGetSelfRankS2C {
     int32 rankType = 1;
-    int32 rank     = 2;  // 排名
+    int32 rank     = 2; // 排名
 }
-//旧号回归
-message OperateGetRegressionRewardC2S
-{
-  int64 activityId = 1;  // 活动Id
+// 旧号回归
+message OperateGetRegressionRewardC2S {
+    int64 activityId = 1; // 活动Id
 }
-//旧号回归
-message OperateGetRegressionRewardS2C
-{
+// 旧号回归
+message OperateGetRegressionRewardS2C {
 }
-//毕业礼
-message OperateGetGraduationGiftRewardC2S
-{
-  int64 activityId = 1;  // 活动Id
+// 毕业礼
+message OperateGetGraduationGiftRewardC2S {
+    int64 activityId = 1; // 活动Id
 }
-//毕业礼
-message OperateGetGraduationGiftRewardS2C
-{
+// 毕业礼
+message OperateGetGraduationGiftRewardS2C {
 }
-//充值返利
-message OperateGetPaymentRefundRewardC2S
-{
-  int64 activityId = 1;  // 活动Id
+// 充值返利
+message OperateGetPaymentRefundRewardC2S {
+    int64 activityId = 1; // 活动Id
 }
-//充值返利
-message OperateGetPaymentRefundRewardS2C
-{
+// 充值返利
+message OperateGetPaymentRefundRewardS2C {
 }
 
-//任务宝箱进度奖励
-message OperateGetTaskBoxRewardC2S
-{
-  int64 activityId = 1;  // 活动Id
+// 任务宝箱进度奖励
+message OperateGetTaskBoxRewardC2S {
+    int64 activityId = 1; // 活动Id
 }
-//任务宝箱进度奖励
-message OperateGetTaskBoxRewardS2C
-{
-  int64 activityId = 1;  // 活动Id
-  int32 score = 2; // 当前积分
-  map<int32,bool> rewardFlag = 3; // 已经领取奖励标记
+// 任务宝箱进度奖励
+message OperateGetTaskBoxRewardS2C {
+    int64            activityId = 1; // 活动Id
+    int32            score      = 2; // 当前积分
+    map<int32, bool> rewardFlag = 3; // 已经领取奖励标记
 }
-//任务宝箱进度更新
-message OperateGetTaskBoxScoreUpdateS2C
-{
-  int64 activityId = 1;  // 活动Id
-  int32 score = 2; // 当前积分
+// 任务宝箱进度更新
+message OperateGetTaskBoxScoreUpdateS2C {
+    int64 activityId = 1; // 活动Id
+    int32 score      = 2; // 当前积分
 }
-//领取首次充值奖励
-message OperateGetFirstPayRewardC2S
-{
+// 领取首次充值奖励
+message OperateGetFirstPayRewardC2S {
 }
-//领取首次充值奖励
-message OperateGetFirstPayRewardS2C
-{
+// 领取首次充值奖励
+message OperateGetFirstPayRewardS2C {
 }
-//签到领奖
-message OperateSignNewGetRewardC2S
-{
-  int64 activityId = 1;  // 活动Id
+// 签到领奖
+message OperateSignNewGetRewardC2S {
+    int64 activityId = 1; // 活动Id
 }
-//签到领奖
-message OperateSignNewGetRewardS2C
-{
-  int64 activityId = 1;  // 活动Id
+// 签到领奖
+message OperateSignNewGetRewardS2C {
+    int64 activityId = 1; // 活动Id
 }
-//连锁礼包内购
-message OperateChainGiftBuyItemC2S
-{
-  int64 activityId = 1;  // 活动Id
-  int32 id = 2; // 礼包id
+// 连锁礼包内购
+message OperateChainGiftBuyItemC2S {
+    int64 activityId = 1; // 活动Id
+    int32 id         = 2; // 礼包id
 }
-//连锁礼包内购
-message OperateChainGiftBuyItemS2C
-{
+// 连锁礼包内购
+message OperateChainGiftBuyItemS2C {
 }
-//兑换商店
-message OperateExchangeShopBuyItemC2S
-{
-  int64 activityId = 1;  // 活动Id
-  int32 id = 2; // 礼包id
-  int32 num = 3; // 数量
+// 兑换商店
+message OperateExchangeShopBuyItemC2S {
+    int64 activityId = 1; // 活动Id
+    int32 id         = 2; // 礼包id
+    int32 num        = 3; // 数量
 }
-//兑换商店
-message OperateExchangeShopBuyItemS2C
-{
+// 兑换商店
+message OperateExchangeShopBuyItemS2C {
 }
 
 // 更新运营活动配置
-message OperateUpdateConfigS2C
-{
+message OperateUpdateConfigS2C {
     OperateActivity config = 1; // 活动配置信息
 }
 // 好友邀请-获取自己的邀请码（含申请绑定页主面板）
-message OperateInviteGetCodeC2S
-{
+message OperateInviteGetCodeC2S {
     int64 activityId = 1; // 活动Id
 }
 // 好友邀请-获取自己的邀请码 应答；详细进度通过 OperateUpdateS2C 推送
-message OperateInviteGetCodeS2C
-{
-    int64 activityId = 1; // 活动Id
+message OperateInviteGetCodeS2C {
+    int64  activityId = 1; // 活动Id
     string inviteCode = 2; // 自己的邀请码（10位 Crockford Base32）
 }
 
 // 好友邀请-提交邀请码绑定
-message OperateInviteBindCodeC2S
-{
-    int64 activityId = 1; // 活动Id
+message OperateInviteBindCodeC2S {
+    int64  activityId = 1; // 活动Id
     string inviteCode = 2; // 输入的 10 位邀请码
 }
 // 好友邀请-提交邀请码绑定 应答
-message OperateInviteBindCodeS2C
-{
+message OperateInviteBindCodeS2C {
     int64 activityId = 1; // 活动Id
 }
 
 // 好友邀请-领取邀请任务奖励 [V2 已废弃] 改用通用 TaskGetRewardC2S
-message OperateInviteClaimTaskC2S
-{
+message OperateInviteClaimTaskC2S {
     option deprecated = true;
-    int64 activityId = 1; // 活动Id
-    int32 taskId     = 2; // 任务Id（对应 InviteActivityTask.csv 行Id）
+    int64  activityId = 1; // 活动Id
+    int32  taskId     = 2; // 任务Id（对应 InviteActivityTask.csv 行Id）
 }
 // 好友邀请-领取邀请任务奖励 应答 [V2 已废弃]
-message OperateInviteClaimTaskS2C
-{
+message OperateInviteClaimTaskS2C {
     option deprecated = true;
-    int64 activityId = 1; // 活动Id
-    int32 taskId     = 2; // 任务Id
+    int64  activityId = 1; // 活动Id
+    int32  taskId     = 2; // 任务Id
 }
 
 // 好友邀请-领取充值档位奖励 [V2 已废弃] 改用通用 TaskGetRewardC2S
-message OperateInviteClaimRechargeC2S
-{
+message OperateInviteClaimRechargeC2S {
     option deprecated = true;
-    int64 activityId = 1; // 活动Id
-    int32 tierId     = 2; // 充值档位Id（对应 InviteActivityRechargeTask.csv 行Id）
+    int64  activityId = 1; // 活动Id
+    int32  tierId     = 2; // 充值档位Id（对应 InviteActivityRechargeTask.csv 行Id）
 }
 // 好友邀请-领取充值档位奖励 应答 [V2 已废弃]
-message OperateInviteClaimRechargeS2C
-{
+message OperateInviteClaimRechargeS2C {
     option deprecated = true;
-    int64 activityId = 1; // 活动Id
-    int32 tierId     = 2; // 充值档位Id
+    int64  activityId = 1; // 活动Id
+    int32  tierId     = 2; // 充值档位Id
 }
 
 // 好友邀请-领取终极奖励
-message OperateInviteClaimFinalC2S
-{
+message OperateInviteClaimFinalC2S {
     int64 activityId = 1; // 活动Id
 }
 // 好友邀请-领取终极奖励 应答
-message OperateInviteClaimFinalS2C
-{
+message OperateInviteClaimFinalS2C {
     int64 activityId = 1; // 活动Id
 }
 
 // 好友邀请-上报首次分享
-message OperateInviteFirstShareC2S
-{
+message OperateInviteFirstShareC2S {
     int64 activityId = 1; // 活动Id
 }
 // 好友邀请-上报首次分享 应答
-message OperateInviteFirstShareS2C
+message OperateInviteFirstShareS2C {
+    int64 activityId = 1; // 活动Id
+}
+// 活动抽奖
+message OperateActivityLotteryDrawC2S {
+    int64 activityId = 1; // 活动Id
+    int32 poolId     = 2; // 卡池ID
+    int32 drawCount  = 3; // 抽取次数
+    int32 costType   = 4; // 消耗类型：0=Cost，1=ExchangeCost1，2=ExchangeCost2
+}
+// 活动抽奖
+message OperateActivityLotteryDrawS2C {
+    int64             activityId   = 1; // 活动Id
+    int32             poolId       = 2; // 卡池ID
+    repeated ItemData reward       = 3; // 本次抽中奖励
+    repeated int32    unlockPoolId = 4; // 本次解锁的卡池
+}
+// 大富翁投掷骰子
+message OperateMonopolyRollDiceC2S {
+    int64 activityId = 1; // 活动Id
+    int32 rollCount  = 2; // 本次请求投掷次数
+}
+// 大富翁投掷骰子
+message OperateMonopolyRollDiceS2C {
+    int64                     activityId      = 1;  // 活动Id
+    int32                     actualRollCount = 2;  // 实际执行的投掷次数
+    repeated int32            diceList        = 3;  // 每次投掷的骰子点数
+    repeated int32            landGridIdList  = 4;  // 每次投掷的最终落点格子ID
+    repeated MonopolyRollStep stepList        = 5;  // 逐步明细
+    repeated ItemData         rewardList      = 6;  // 本次动作汇总奖励
+    int32                     eventBuffId     = 7;  // 最后一次命中事件格时的BUFF ID
+    int32                     eventBuffTipsId = 8;  // 最后一次命中事件格时的BUFF提示ID
+    int32                     newCircleCount  = 9;  // 本次结算后的累计圈数
+    int32                     newBoardId      = 10; // 本次结算后的当前棋盘ID
+    int32                     positionGridId  = 11; // 本次结算后的当前位置格子ID
+}
+// 大富翁领取圈数奖励
+message OperateMonopolyGetProgressRewardC2S {
+    int64 activityId = 1; // 活动Id
+    int32 progressId = 2; // 圈数奖励阶段ID
+}
+// 大富翁领取圈数奖励
+message OperateMonopolyGetProgressRewardS2C {
+    int64             activityId = 1; // 活动Id
+    int32             progressId = 2; // 已领取的圈数奖励阶段ID
+    repeated ItemData reward     = 3; // 本次领取的奖励
+}
+
+message MonopolyRollStep {
+    int32             dice            = 1; // 本步骰子点数
+    int32             landGridId      = 2; // 本步最终落点格子ID
+    repeated ItemData rewardList      = 3; // 本步获得奖励
+    int32             eventBuffId     = 4; // 本步触发的事件BUFF ID
+    int32             eventBuffTipsId = 5; // 本步触发的事件BUFF提示ID
+}
+//每日充值-领取额外礼包
+message OperateDailyRechargeClaimExtraC2S
 {
     int64 activityId = 1; // 活动Id
+}
+//每日充值-领取额外礼包
+message OperateDailyRechargeClaimExtraS2C
+{
+    int64             activityId = 1; // 活动Id
+    repeated ItemData reward     = 2; // 本次领取的额外礼包奖励
+}
+//登录签到领奖
+message OperateLoginSignGetRewardC2S
+{
+    int64 ActivityId = 1; // 活动ID
+}
+//登录签到领奖
+message OperateLoginSignGetRewardS2C
+{
+}
+//新世界-查询进度（单服+个人）
+message OperateWorldMapGetInfoC2S
+{
+	int64 ActivityId = 1; // 活动ID
+}
+//新世界-查询进度（单服+个人）
+message OperateWorldMapGetInfoS2C
+{
+	int64 ActivityId              = 1; // 活动ID
+	int32 ServerProgressPercent   = 2; // 单服进度百分比（0-100）
+	repeated int32 UnlockedMapIDs = 3; // 已解锁漫画图ID列表
+	int32 PersonalCurrencyCount   = 4; // 个人累计草帽币（=背包itemId数量）
+	map<int32, bool> ClaimedPersonalReward = 5; // 已领个人奖励标记（key=StageID）
+	repeated WorldMapServerStage ServerStages  = 6; // 单服阶段配置（下发供客户端展示）
+	repeated WorldMapPersonalStage PersonalStages = 7; // 个人阶段配置
+	int32 NextPreviewText         = 8; // 下一未解锁阶段预览文案ID（已全解锁则为0）
+}
+//新世界-领取个人进度奖励
+message OperateWorldMapGetRewardC2S
+{
+	int64 ActivityId = 1; // 活动ID
+	int32 StageID    = 2; // 领取的个人阶段ID
+}
+//新世界-领取个人进度奖励
+message OperateWorldMapGetRewardS2C
+{
+	int64 ActivityId = 1; // 活动ID
+	int32 StageID    = 2; // 领取的阶段ID
+}
+//新世界-单服进度更新推送
+message OperateWorldMapProgressS2C
+{
+	int64 ActivityId              = 1; // 活动ID
+	int32 ServerProgressPercent   = 2; // 最新单服进度百分比
+	repeated int32 UnlockedMapIDs = 3; // 最新已解锁漫画图列表
 }

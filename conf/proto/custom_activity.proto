@@ -5,6 +5,7 @@ package Game;
 
 import "custom_task.proto";
 import "common.proto";
+import "global_operate_activity.proto";
 
 // 周签到记录
 message WeekSignRecord {
@@ -89,6 +90,7 @@ message ActivityBaseInfo {
     int32          shopId         = 23; // 商店id
     int32          GoodsId         = 24; // 商店id
     GMActivityInfoExtra    position    = 25; //坐标信息
+    repeated SocialMediaEntry SocialMediaEntries = 26; // 社媒入口列表（社媒活动专用）
 }
 
 // 后台活动配置数据

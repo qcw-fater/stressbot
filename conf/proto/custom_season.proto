@@ -6,11 +6,19 @@ import "custom_recreation.proto";
 
 // 赛季保存的数据
 message SeasonRecord {
-    LadderSeasonRecord     ladderRecord     = 1;
-    RecreationSeasonRecord recreationRecord = 2;
+    LadderSeasonRecord      ladderRecord     = 1;
+    RecreationSeasonRecord  recreationRecord = 2;
+    PeakRankingSeasonRecord peakRanking      = 3; // 巅峰赛赛季记录数据
 }
 
 // 排位记录
+message PeakRankingSeasonRecord {
+    int32            rankLevel           = 1; // 巅峰赛段位
+    int32            score               = 2; // 巅峰赛积分
+    int32            historyMaxRankLevel = 3; // 赛季最高巅峰赛段位
+    int32            historyMaxScore     = 4; // 赛季最高巅峰赛积分
+}
+
 message LadderSeasonRecord {
     int32 ladderLevel = 1; // 段位等级
     int32 starNum     = 2; // 星星数量

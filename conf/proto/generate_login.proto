@@ -27,6 +27,7 @@ import "lbs.proto";
 import "custom_pay.proto";
 import "custom_adventure_gift.proto";
 import "custom_guild.proto";
+import "custom_squad.proto";
 import "custom_credit.proto";
 import "generate_back_hero.proto";
 import "custom_month_sign.proto";
@@ -101,6 +102,7 @@ message LoginPlayerDataS2C {
     ShareInfoDB                      shareInfo              = 32; // 分享数据
     ActivityBattleDbInfo             activityBattleData     = 33; //活动赛数据
     ActivityBattleSingleDbInfo       activityBattleSingleData = 34; //单模式活动赛数据
+    SquadLoginInfo                   squadInfo              = 35; // 我的小队信息(对齐 guildInfo)
 }
 
 // 充值统计数据

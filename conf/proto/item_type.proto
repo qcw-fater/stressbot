@@ -27,6 +27,14 @@ enum ItemSubType {
     IST_LotteryPoolReset = 6; // 卡池重置
 }
 
+// 搜打撤套装券二级子类型（Item.SubType2）
+enum SDCSuitTicketSubType {
+    SDC_SUIT_TICKET_UNKNOWN = 0; // 未知
+    SDC_SUIT_TICKET_BASIC   = 1; // 基础
+    SDC_SUIT_TICKET_ADV     = 2; // 进阶
+    SDC_SUIT_TICKET_ELITE   = 3; // 精锐
+}
+
 // 礼包子类型
 enum GiftSubType {
     GST_Normal      = 0; // 展示用品
@@ -60,6 +68,7 @@ enum PlayerDataSubType {
     PST_BattleNoticeBoardSkin = 10; // 战斗播报板皮肤
     PST_FirstReward           = 11; // 首充奖励
     PST_QuickChatSkin         = 12; // 快捷消息皮肤
+    PST_PeakRankTitle         = 13; // 巅峰赛称号
 }
 
 // 英雄数据子类型
@@ -97,15 +106,15 @@ enum SDCMedicineSubType {
 
 // 藏品二级子类型（sdcType=SDC_ITEM_TYPE_COLLECTION 时 sdcSubType 的有效值）
 enum SDCCollectionSubType {
-    SDC_COLL_INVALID      = 0; // 无效
-    SDC_COLL_NORMAL       = 1; // 普通藏品
-    SDC_COLL_TALENT_UP    = 2; // 天赋升级藏品
-    SDC_COLL_AWAKEN_UP    = 3; // 觉醒升级藏品
+    SDC_COLL_INVALID   = 0; // 无效
+    SDC_COLL_NORMAL    = 1; // 普通藏品
+    SDC_COLL_TALENT_UP = 2; // 天赋升级藏品
+    SDC_COLL_AWAKEN_UP = 3; // 觉醒升级藏品
 }
 
 // 钥匙二级子类型（sdcType=SDC_ITEM_TYPE_KEY 时 sdcSubType 的有效值）
 enum SDCKeySubType {
-    SDC_KEY_INVALID  = 0; // 无效
-    SDC_KEY_NORMAL   = 1; // 普通钥匙
-    SDC_KEY_MASTER   = 2; // 万能钥匙（可开启任意宝箱）
+    SDC_KEY_INVALID = 0; // 无效
+    SDC_KEY_NORMAL  = 1; // 普通钥匙
+    SDC_KEY_MASTER  = 2; // 万能钥匙（可开启任意宝箱）
 }

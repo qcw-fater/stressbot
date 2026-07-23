@@ -19,6 +19,33 @@ message MatchBattleDelay {
     int32  delayTime  = 2; // 平均延迟时间(毫秒)
 }
 
+// 搜打撤匹配诊断快照（仅服务器内部使用，循环内更新、终态或限频采样时写actionLog）
+message SDCMatchTrace {
+    int32  rankLeft             = 1;  // 当前段位锚点窗口左边界
+    int32  rankRight            = 2;  // 当前段位锚点窗口右边界
+    int32  valueLeft            = 3;  // 当前战前价值锚点窗口左边界
+    int32  valueRight           = 4;  // 当前战前价值锚点窗口右边界
+    int32  mmrLeft              = 5;  // 当前MMR锚点窗口左边界
+    int32  mmrRight             = 6;  // 当前MMR锚点窗口右边界
+    int32  indexedCandidateCount = 7;  // 三层索引命中的候选阵营数
+    int32  candidateCount       = 8;  // 通过房间规则的候选阵营数
+    int32  rejectedCount        = 9;  // 被房间规则拒绝的候选阵营数
+    string rejectReasonSummary  = 10; // 拒绝原因计数JSON
+    string decisionReason       = 11; // 最近一次撮合决策原因
+    bool   aiTimeout            = 12; // 是否达到普通AI填充时间
+    bool   aiMaxTimeout         = 13; // 是否达到最大AI填充时间
+    bool   mmrMaxExpanded       = 14; // MMR是否完成最大扩圈
+    int64  updateTime           = 15; // 快照更新时间（Unix秒）
+    int32  realCampCount        = 16; // 当前房间真人阵营数
+    int32  robotCampCount       = 17; // 当前房间机器人阵营数
+    int32  realPlayerCount      = 18; // 当前房间真人玩家数
+    int32  robotPlayerCount     = 19; // 当前房间机器人玩家数
+    bool   candidateLimitHit    = 20; // 是否达到候选扫描上限
+    int32  lastDecisionSeq      = 21; // 最近一次更新快照的匹配轮次
+    bool   terminalEmitted      = 22; // 是否已尝试写入成功或失败终态日志
+    string terminalResult       = 23; // 已占用的终态结果(success/fail)
+}
+
 // 存入池子的队伍数据
 message MatchTeamData {
     int64                     teamId               = 1;  // 队伍id
@@ -45,4 +72,11 @@ message MatchTeamData {
     int32                     levelAnchor          = 22; // 娱乐赛专精平均等级锚点Id
     int32                     scoreAnchor          = 23; // 娱乐赛专精平均积分
     repeated int32            excludeModeTypes     = 24; // 队伍内所有玩家上一把打过的模式类型列表
+    int32                     affix                = 25; // 开始匹配时冻结的基础词缀
+    int32                     sdcRankAnchor        = 26; // 搜打撤匹配段位锚点ID，仅GM_HAZARD_OPS模式使用
+    int32                     sdcValueAnchor       = 27; // 搜打撤匹配战前价值锚点ID，仅GM_HAZARD_OPS模式使用
+    int32                     sdcMmrAnchor         = 28; // 搜打撤匹配MMR锚点ID，仅GM_HAZARD_OPS模式使用
+    int32                     sdcMmrScore          = 29; // 搜打撤队伍平均MMR，仅服务器内部使用
+    bool                      fillTeammate         = 30; // 搜打撤是否允许补齐队友，仅双人图组阵营阶段消费
+    SDCMatchTrace             sdcMatchTrace        = 31; // 搜打撤最近一次撮合诊断快照，仅服务器内部使用
 }

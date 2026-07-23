@@ -20,8 +20,20 @@ message MatchMsgToTeam {
 
 // 匹配队伍追踪信息
 message MatchTeamTraceInfo {
-    int64 teamId    = 1; // 队伍ID
-    int64 matchUuid = 2; // 匹配Uuid
+    int64         teamId          = 1;  // 队伍ID
+    int64         matchUuid       = 2;  // 匹配Uuid
+    int32         teamMemberNum   = 3;  // 真人队伍成员数
+    bool          fillTeammate    = 4;  // 搜打撤是否允许补齐队友
+    int32         sdcRankAnchor   = 5;  // 搜打撤段位锚点
+    int32         sdcValueAnchor  = 6;  // 搜打撤战前价值锚点
+    int32         sdcMmrAnchor    = 7;  // 搜打撤MMR锚点
+    int32         sdcMmrScore     = 8;  // 搜打撤队伍平均MMR
+    int64         startMatchTime  = 9;  // 开始匹配时间（Unix秒）
+    int32         matchFlag       = 10; // 0正常 1补偿局 2温暖局
+    SDCMatchTrace sdcMatchTrace   = 11; // 搜打撤撮合终态诊断快照
+    string        matchProcess    = 12; // 匹配处理器名称
+    string        ruleSnapshot    = 13; // 规则名称快照
+    string        configSnapshot  = 14; // 关键匹配时间与人数配置JSON
 }
 
 // 匹配服到房间服务器 消息数据
@@ -37,6 +49,9 @@ message MatchMsgToRoom {
     int32                    matchFlag        = 9;  // 0正常 1补偿局 2温暖局
     int32                    activityStep     = 10; // 活动赛阶段
     repeated MatchTeamTraceInfo teamTraceList = 11; // 队伍匹配追踪信息
+    int32                      affix         = 12; // 开始匹配时冻结的基础词缀
+    int32                      sdcLobbyMmr   = 13; // 搜打撤成房时冻结的真人平均MMR，仅GM_HAZARD_OPS模式使用
+    map<int32, bool>           sdcMmrEligible = 14; // 搜打撤MMR结算资格，key=玩家ID value=是否参与MMR写回
 }
 
 // 匹配状况

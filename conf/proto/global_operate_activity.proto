@@ -12,30 +12,37 @@ enum OperateActivityTimeType {
 
 // 活动模板类型
 enum ActivityTemplateType {
-    ATP_INVALID         = 0;
-    IMAGE_LIST_TYPE     = 1;  // 多图片活动
-    IMAGE_TYPE          = 2;  // 单图片活动
-    TASK_TYPE           = 3;  // 任务(活动任务）
-    REGRESSION_TYPE     = 4;  // 回归
-    GRADUATION_GIFT     = 5;  // 测试毕业礼
-    PAYMENT_REFUND_TYPE = 6;  // 充值返利
-    DAY_TASK_BOX_TYPE   = 7;  // 持续X天，每天解锁新任务,带进度宝箱（新人集训）
-    FIRST_PAYMENT       = 8;  // 首次充值
-    TOTAL_PAYMENT       = 9;  // 累计充值
-    SIGN_IN_NEW_TYPE    = 10; // 新签到（英雄试炼签到）
-    DAILY_TASK_TYPE     = 11; // 每日任务（英雄试炼任务）
-    SHOP_TYPE           = 12; // 活动商店（英雄试炼商店）
-    CHAIN_GIFT          = 13; // 连锁礼包
-    EXCHANGE_SHOP       = 14; // 兑换商店
-    MYSTICAL_SHOP       = 15; // 神秘商店
-    INVITE_TYPE         = 16; // 好友邀请活动
-
-    SIGN_IN_TYPE        = 20; // 签到（舍弃）
-    CONDITION_TYPE      = 21; // 条件（舍弃）
-    CONSUMPTION_TYPE    = 22; // 消费（舍弃）
-    LOTTERY_TYPE        = 23; // 抽奖（舍弃）
-    SCORE_TYPE          = 25; // 积分（舍弃）
-    RANK_TYPE           = 26; // 排行榜（舍弃）
+    ATP_INVALID           = 0;
+    IMAGE_LIST_TYPE       = 1;  // 多图片活动
+    IMAGE_TYPE            = 2;  // 单图片活动
+    TASK_TYPE             = 3;  // 任务(活动任务）
+    REGRESSION_TYPE       = 4;  // 回归
+    GRADUATION_GIFT       = 5;  // 测试毕业礼
+    PAYMENT_REFUND_TYPE   = 6;  // 充值返利
+    DAY_TASK_BOX_TYPE     = 7;  // 持续X天，每天解锁新任务,带进度宝箱（新人集训）
+    FIRST_PAYMENT         = 8;  // 首次充值
+    TOTAL_PAYMENT         = 9;  // 累计充值
+    SIGN_IN_NEW_TYPE      = 10; // 新签到（英雄试炼签到）
+    DAILY_TASK_TYPE       = 11; // 每日任务（英雄试炼任务）
+    SHOP_TYPE             = 12; // 活动商店（英雄试炼商店）
+    CHAIN_GIFT            = 13; // 连锁礼包
+    EXCHANGE_SHOP         = 14; // 兑换商店
+    MYSTICAL_SHOP         = 15; // 神秘商店
+    INVITE_TYPE           = 16; // 好友邀请活动
+    IMAGE_BUTTON_TYPE     = 17; // 主题活动入口
+    ACTIVITY_LOTTERY_TYPE = 18; // 活动抽奖
+    SHOP_PAGE_TYPE        = 19; // 活动商店页
+    SIGN_IN_TYPE          = 20; // 签到（舍弃）
+    CONDITION_TYPE        = 21; // 条件（舍弃）
+    CONSUMPTION_TYPE      = 22; // 消费（舍弃）
+    LOTTERY_TYPE          = 23; // 抽奖（舍弃）
+    SCORE_TYPE            = 25; // 积分（舍弃）
+    RANK_TYPE             = 26; // 排行榜（舍弃）
+    SOCIAL_MEDIA_TYPE     = 27; // 社媒入口活动
+    MONOPOLY_TYPE         = 28; // 大富翁
+    DAILY_RECHARGE_TYPE   = 29; // 每日充值
+    LOGIN_SIGN_TYPE       = 30; // 登录签到活动（新手七日签到的活动框架版，被动登录触发）
+    WORLD_MAP_TYPE        = 31; // 新世界活动（解锁漫画图+双进度+任务）
 }
 
 // 任务刷新类型
@@ -106,7 +113,7 @@ message OperateActivity {
     string                    rule                = 30; // 活动规则
     int32                     shopId              = 31; // 商店id
     int32                     goodsId             = 32; // 商品id
-    GMActivityInfoExtra       position            = 33; //坐标信息
+    GMActivityInfoExtra       position            = 33; // 坐标信息
 }
 
 message ConditionGroup {
@@ -115,27 +122,142 @@ message ConditionGroup {
 
 // 活动模板数据
 message ActivityTemplate {
-    int64                  Id             = 1;  // 模板ID
-    string                 Name           = 2;  // 模板名称
-    ActivityTemplateType   TemplateType   = 3;  // 模板类型
+    int64                   Id              = 1;  // 模板ID
+    string                  Name            = 2;  // 模板名称
+    ActivityTemplateType    TemplateType    = 3;  // 模板类型
 
-    SignInTemplate         SignIn         = 4;  // 签到（舍弃）
-    ConditionTemplate      Condition      = 5;  // 条件
-    ConsumptionTemplate    Consumption    = 6;  // 消耗
-    LotteryTemplate        Lottery        = 7;  // 抽奖
-    RankTemplate           Rank           = 8;  // 排行奖励
-    ImageTemplate          Images         = 9;  // 图片活动
-    regressionTemplate     regression     = 10; // 回归
-    graduationGiftTemplate graduationGift = 11; // 测试毕业礼
-    paymentRefundTemplate  paymentRefund  = 12; // 充值返利
-    TaskTemplate           TaskData       = 13; // 任务
-    DayTaskBoxTemplate     BoxTask        = 14; // 进度宝箱任务
-    DailyTaskTemplate      DailyTask      = 15; // 每日刷新任务模版
-    ShopTemplate           Shop           = 16; // 活动商店
-    SignInNewTemplate      NewSignIn      = 17; // 签到
-    ChainGiftTemplate      ChainGift      = 18; // 连锁礼包
-    ExchangeShopTemplate   ExchangeShop   = 19; // 兑换商店
-    InviteTemplate         Invite         = 20; // 好友邀请活动
+    SignInTemplate          SignIn          = 4;  // 签到（舍弃）
+    ConditionTemplate       Condition       = 5;  // 条件
+    ConsumptionTemplate     Consumption     = 6;  // 消耗
+    LotteryTemplate         Lottery         = 7;  // 抽奖
+    RankTemplate            Rank            = 8;  // 排行奖励
+    ImageTemplate           Images          = 9;  // 图片活动
+    regressionTemplate      regression      = 10; // 回归
+    graduationGiftTemplate  graduationGift  = 11; // 测试毕业礼
+    paymentRefundTemplate   paymentRefund   = 12; // 充值返利
+    TaskTemplate            TaskData        = 13; // 任务
+    DayTaskBoxTemplate      BoxTask         = 14; // 进度宝箱任务
+    DailyTaskTemplate       DailyTask       = 15; // 每日刷新任务模版
+    ShopTemplate            Shop            = 16; // 活动商店
+    SignInNewTemplate       NewSignIn       = 17; // 签到
+    ChainGiftTemplate       ChainGift       = 18; // 连锁礼包
+    ExchangeShopTemplate    ExchangeShop    = 19; // 兑换商店
+    InviteTemplate          Invite          = 20; // 好友邀请活动
+    ActivityThemeTemplate   Theme           = 21; // 主题活动入口
+    ActivityLotteryTemplate ActivityLottery = 22; // 活动抽奖
+    ShopPageTemplate        ShopPage        = 23; // 活动商店页
+    SocialMediaTemplate     SocialMedia     = 24; // 社媒入口活动
+    MonopolyTemplate        Monopoly        = 25; // 大富翁活动
+    DailyRechargeTemplate   DailyRecharge   = 26; // 每日充值活动配置（v4 新增，下发客户端）
+    LoginSignTemplate       LoginSign       = 27; // 登录签到活动配置（ActivityNewPlayerCheckIn.csv）
+    WorldMapTemplate        WorldMap        = 28; // 新世界活动配置（解锁漫画图+双进度）
+}
+
+// 社媒入口活动（一个社媒活动 = 一组入口）
+message SocialMediaTemplate {
+    repeated SocialMediaEntry Entries = 1; // 社媒入口列表（2 级页签）
+}
+
+// 单个社媒入口
+message SocialMediaEntry {
+    string ImageUrl   = 1; // 宣传图片
+    string JumpUrl    = 2; // 跳转外链（空则客户端按钮置灰）
+    string ButtonText = 3; // 跳转按钮文案（GM 后台多语言机制）
+    string Name       = 4; // 入口名字（2 级页签名）
+    int32  Order      = 5; // 排序（升序）
+}
+
+message ActivityThemeTemplate {
+    repeated int32 ActivitySubID = 1; // 包含子活动
+    int32          subType       = 2; // 活动子类型（同一主题活动内的子活动如果需要区分显示，可以使用这个字段）
+}
+
+// 活动抽奖模板
+message ActivityLotteryTemplate {
+    repeated ActivityLotteryPoolConf PoolList = 1; // 卡池配置
+}
+
+message ActivityLotteryPoolConf {
+    int32                            GachaPoolId     = 1;  // 卡池ID
+    int32                            NextGachaPoolId = 2;  // 下一卡池ID
+    repeated ItemData                Cost            = 3;  // 单抽消耗
+    int32                            ExchangeCost1   = 4;  // 能量结晶兑换消耗
+    int32                            ExchangeCost2   = 5;  // 跃之星兑换消耗
+    repeated int32                   LotteryNum      = 6;  // 抽取次数阶梯
+    repeated string                  ItemWeight      = 7;  // 道具权重
+    repeated ActivityLotteryItemConf Items           = 8;  // 卡池道具
+    repeated int32                   TopId           = 9;  // top条显示资源
+    int32                            SubType         = 10; // 子类型
+    int32                            Name            = 11; // 卡池名称（文本 ID）
+    repeated int32                   Skip            = 12; // 道具不足跳转
+}
+
+message ActivityLotteryItemConf {
+    int32    ID           = 1; // 配置ID
+    ItemData Item         = 2; // 道具信息
+    int32    Num          = 3; // 道具总数
+    bool     IsFinalAward = 4; // 是否最终大奖
+    int32    Weight       = 5; // 权重
+    int32    JoinPoolDraw = 6; // 加入卡池抽数
+}
+
+// 大富翁活动模板
+message MonopolyTemplate {
+    repeated MonopolyBoardConf    Boards            = 1; // 棋盘配置
+    map<int32, MonopolyGridList>  BoardGridMap      = 2; // 棋盘格子配置 key=BoardId
+    repeated int32                DiceWeights       = 3; // 骰子点数权重，下标+1为点数
+    repeated MonopolyEventConf    EventBuffs        = 4; // 事件BUFF配置
+    repeated MonopolyProgressConf ProgressReward    = 5; // 圈数奖励配置
+    ItemData                      StartReward       = 6; // 完整棋盘轮回起点奖励
+    repeated int32                RelatedActivityID = 7; // 关联活动ID列表，来源于ActivityTheme.ActivitySubID
+}
+
+// 大富翁棋盘配置
+message MonopolyBoardConf {
+    int32          BoardId          = 1;  // 棋盘ID
+    int32          RoundCircleLimit = 2;  // 该棋盘持续圈数
+    int32          CostCurrency     = 3;  // 投掷消耗货币
+    int32          Cost             = 4;  // 单次投掷消耗
+    int32          MultiRollCount   = 5;  // 连投次数
+    int32          MultiRollCost    = 6;  // 连投总消耗
+    int32          ExchangeCost1    = 7;  // 兑换消耗1
+    int32          ExchangeCost2    = 8;  // 兑换消耗2
+    repeated int32 TopId            = 9;  // top条显示资源
+    repeated int32 Skip             = 10; // 道具不足跳转
+}
+
+// 大富翁棋盘格子列表
+message MonopolyGridList {
+    repeated MonopolyGridConf Grids = 1; // 格子列表
+}
+
+// 大富翁格子配置
+message MonopolyGridConf {
+    int32              GridId       = 1; // 格子ID
+    int32              GridIndex    = 2; // 格子顺序
+    int32              GridType     = 3; // 格子类型
+    MonopolyGridReward Reward       = 4; // 格子奖励
+    repeated int32     EventBuffIds = 5; // 事件BUFF子池
+}
+
+// 大富翁格子奖励
+message MonopolyGridReward {
+    ItemData Reward = 1; // 奖励，Num=0时按掉落ID解析
+    int32    Limit  = 2; // 可领取次数，0表示不限
+}
+
+// 大富翁事件BUFF配置
+message MonopolyEventConf {
+    int32 EventBuffId = 1; // 事件BUFF ID
+    int32 EffectId    = 2; // BUFF效果ID
+    int32 TipsId      = 3; // 提示文案ID
+}
+
+// 大富翁圈数奖励配置
+message MonopolyProgressConf {
+    int32             ProgressId    = 1; // 阶段ID
+    int32             RequireCircle = 2; // 所需累计圈数
+    repeated ItemData Reward        = 3; // 奖励
 }
 
 // 兑换商店
@@ -171,18 +293,22 @@ message ChainGiftTemplateConf {
 
 // 图片活动
 message ImageTemplate {
-    string Uid         = 1;  // 图片ID
-    string Name        = 2;  // 图片名字
-    string Status      = 3;  // 图片状态
-    string Url         = 4;  // 图片下载地址
-    int32  SortValue   = 5;  // 排序值
-    int32  UIGotoId    = 6;  // 跳转界面
-    int32  subId       = 7;  // 图片活动id
-    string Desc        = 8;  // 活动描述
-    int32  Visible     = 9;  // 可见条件
-    int32  FuncId      = 10; // 功能id
-    int32  UrlIsInside = 11; // 是否内链 0:外链 1:内链
-    string UrlGoTo     = 12; // 功能id
+    string Uid           = 1;  // 图片ID
+    string Name          = 2;  // 图片名字
+    string Status        = 3;  // 图片状态
+    string Url           = 4;  // 图片下载地址
+    int32  SortValue     = 5;  // 排序值
+    int32  UIGotoId      = 6;  // 跳转界面
+    int32  subId         = 7;  // 图片活动id
+    string Desc          = 8;  // 活动描述
+    int32  Visible       = 9;  // 可见条件
+    int32  FuncId        = 10; // 功能id
+    int32  UrlIsInside   = 11; // 是否内链 0:外链 1:内链
+    string UrlGoTo       = 12; // 功能id
+    int32  StartTimeType = 13; // 上架时间类型
+    int32  OutTimeType   = 14; // 下架时间类型
+    string StartTime     = 15; // 上架时间
+    string OutTime       = 16; // 下架时间
 }
 
 // 回归奖励
@@ -206,10 +332,10 @@ enum RegressionStageStatus {
 
 // 旧号回归 - 单阶段视图（仅下发客户端使用，不入库）
 message RegressionStageView {
-    int32                  rewardDay = 1; // 阶段编号（创角第几天解锁）
-    RegressionStageStatus  status    = 2; // 阶段状态
-    repeated ItemData      rewards   = 3; // 该阶段合并后的奖励列表（Type1+Type2）
-    int32                  remainDay = 4; // 距解锁剩余天数（已解锁=0）
+    int32                 rewardDay = 1; // 阶段编号（创角第几天解锁）
+    RegressionStageStatus status    = 2; // 阶段状态
+    repeated ItemData     rewards   = 3; // 该阶段合并后的奖励列表（Type1+Type2）
+    int32                 remainDay = 4; // 距解锁剩余天数（已解锁=0）
 }
 
 // 测试毕业礼
@@ -237,6 +363,8 @@ message paymentRefundTRow {
 // 任务
 message TaskTemplate {
     repeated int32 taskIdList = 1; // 任务id列表
+    int32          subType    = 2; // 活动子类型
+    int32          TitleDes   = 3; // 活动标题文本,累计充值任务活动使用
 }
 
 // 进度宝箱和X天解锁任务
@@ -261,6 +389,7 @@ message DayTaskBoxSubTemplate {
 message DailyTaskTemplate {
     DailyTaskInfo          DailyPool = 1; // 每日任务随机库
     repeated DailyTaskInfo OnceTask  = 2; // 一次性任务库
+    int32                  subType   = 3; // 活动子类型
 }
 
 // 每日刷新任务模版
@@ -269,12 +398,21 @@ message DailyTaskInfo {
     string         TaskName = 2; // 任务名称
     int32          TaskType = 3; // 任务类型
     int32          Order    = 4; // 页签排序
+    int32          SubType  = 5; // 活动子类型
 }
 
 // 活动商店模版
 message ShopTemplate {
-    repeated int32 Goods  = 1; // 商品id
-    int32          ShopId = 2; // 商店id
+    repeated int32 Goods   = 1; // 商品id
+    int32          ShopId  = 2; // 商店id
+    int32          SubType = 3; // 商店子类型
+}
+
+// 活动商店页模版
+message ShopPageTemplate {
+    repeated int32 Goods   = 1; // 商品id
+    repeated int32 ShopId  = 2; // 商店id数组
+    int32          SubType = 3; // 商店子类型
 }
 
 // 补签规则
@@ -302,6 +440,7 @@ message SignInTemplate {
 // 签到模板数据
 message SignInNewTemplate {
     repeated SignInTemplateSub SigInConf = 1; // 签到配置项数据
+    int32                      subType   = 2; // 活动子类型
 }
 
 message SignInTemplateSub {
@@ -401,29 +540,87 @@ message TaskGroup {
 }
 
 message ActivityTemplateDB {
-    SignInTemplateDB          SignInDB         = 1;
-    ConsumptionTemplateDB     ConsumptionDB    = 2;
-    ConditionTemplateDB       ConditionDB      = 3;
-    RegressionTemplateDB      RegressionDB     = 4;  // 旧号回归(true:回归用户可以领奖)
-    GraduationGiftTemplateDB  GraduationGiftDB = 5;  // 测试毕业礼
-    PaymentRefundTemplateDB   PaymentRefundDB  = 6;  // 充值返利
-    TaskTemplateDB            TaskDB           = 7;  // 任务数据
-    TaskBoxTemplateDB         TaskBoxDB        = 8;  // 进度类型任务数据
-    DailyTaskTemplateDB       DailyTaskDB      = 9;  // 每日任务
-    SignInNewTemplateDB       NewSignInDB      = 10; // 签到
-    ChainGiftNewTemplateDB    ChainGiftDB      = 11; // 连锁礼包购买数据
-    ExchangeShopNewTemplateDB ExchangeShopDB   = 12; // 兑换商店数据
-    InviteTemplateDB          InviteDB         = 13; // 好友邀请活动玩家进度
+    SignInTemplateDB          SignInDB          = 1;
+    ConsumptionTemplateDB     ConsumptionDB     = 2;
+    ConditionTemplateDB       ConditionDB       = 3;
+    RegressionTemplateDB      RegressionDB      = 4;  // 旧号回归(true:回归用户可以领奖)
+    GraduationGiftTemplateDB  GraduationGiftDB  = 5;  // 测试毕业礼
+    PaymentRefundTemplateDB   PaymentRefundDB   = 6;  // 充值返利
+    TaskTemplateDB            TaskDB            = 7;  // 任务数据
+    TaskBoxTemplateDB         TaskBoxDB         = 8;  // 进度类型任务数据
+    DailyTaskTemplateDB       DailyTaskDB       = 9;  // 每日任务
+    SignInNewTemplateDB       NewSignInDB       = 10; // 签到
+    ChainGiftNewTemplateDB    ChainGiftDB       = 11; // 连锁礼包购买数据
+    ExchangeShopNewTemplateDB ExchangeShopDB    = 12; // 兑换商店数据
+    InviteTemplateDB          InviteDB          = 13; // 好友邀请活动玩家进度
+    ActivityLotteryTemplateDB ActivityLotteryDB = 14; // 活动抽奖玩家进度
+    MonopolyTemplateDB        MonopolyDB        = 15; // 大富翁活动玩家进度
+    DailyRechargeTemplateDB   DailyRechargeDB   = 16; // 每日充值活动玩家进度
+    LoginSignTemplateDB       LoginSignDB       = 17; // 登录签到活动玩家进度
+    WorldMapTemplateDB        WorldMapDB        = 18; // 新世界活动玩家进度
+}
+
+message ActivityLotteryTemplateDB {
+    map<int32, ActivityLotteryPoolDB> Pool = 1; // key=GachaPoolId
+}
+
+message ActivityLotteryPoolDB {
+    bool              Unlocked        = 1; // 是否解锁
+    int32             DrawCount       = 2; // 当前卡池累计抽数
+    map<int32, int32> ItemRemain      = 3; // key=ActivityLotteryPool.ID value=剩余数量
+    bool              FinalAwardDrawn = 4; // 最终大奖是否已抽中
+}
+
+// 大富翁活动玩家进度
+message MonopolyTemplateDB {
+    int32             CurrentBoardId     = 1;  // 当前棋盘ID
+    int32             PositionGridId     = 2;  // 当前所在格子ID
+    int32             LastPositionGridId = 3;  // 上一次所在格子ID
+    int32             LastDice           = 4;  // 上一次骰子点数
+    int32             CircleCount        = 5;  // 累计圈数
+    map<int32, bool>  ClaimedProgress    = 6;  // 已领取圈数奖励 key=ProgressId
+    map<int32, int32> GridRewardRemain   = 7;  // 普通格奖励剩余次数 key=BoardId*1000+GridId
+    int32             EventBuffId        = 8;  // 当前待生效事件BUFF ID
+    int32             EventBuffEffectId  = 9;  // 当前待生效事件BUFF效果ID
+    int32             EventBuffTipsId    = 10; // 当前待生效事件BUFF提示ID
+    bool              Rolling            = 11; // 是否投掷中
+    int32             SettlementState    = 12; // 结算补发状态
+    repeated ItemData SettlementRewards  = 13; // 结算补发奖励快照
+    repeated int64    SettlementMailUids = 14; // 结算补发邮件UID
+}
+
+// 每日充值活动玩家进度
+message DailyRechargeTemplateDB {
+    int32 CurDay = 1;                         // 当前 Day（活动期间累计天数，封顶为配置最大 Day）
+    reserved 2;                               // 原 LastLoginDay（v4 重构后改用 OnNewDay 跨天钩子，复用 IsDiffHour 同日去重）
+    int32             RechargeDays       = 3; // 累计充值天数（每条 Day 任务完成 +1）
+    map<int32, int32> TaskStates         = 4; // key=Day, value=TaskState(0=未达成/1=待领取/2=已领取)，服务端内部状态，客户端展示以任务系统为准
+    bool              ExtraRewardClaimed = 5; // 额外礼包是否已领取
+    bool              MailRewarded       = 6; // 活动结束邮件补发是否已完成（幂等标记）
+    map<int32, int64> TaskUUIDs          = 7; // key=Day, value=taskUUID（持久化，避免重复注册任务）
+}
+
+// 每日充值活动配置（客户端展示用，通过 OperateGetListS2C.ActivityTemplate.DailyRecharge 下发）
+message DailyRechargeTemplate {
+    repeated DailyRechargeDayConf DayList         = 1; // 每日任务配置列表（按 Day 升序）
+    repeated RewardConfig         ExtraReward     = 2; // 额外礼包奖励
+    int32                         RechargeDayNeed = 3; // 领取额外奖励所需累计充值天数
+}
+
+// 每日充值单日配置
+message DailyRechargeDayConf {
+    int32 Day    = 1; // 第几天（1-based）
+    int32 TaskID = 2; // 关联的任务ID（客户端通过任务系统读 Task 表获取完成条件/描述/进度/奖励）
 }
 
 //    旧号回归(true:回归用户可以领奖)
 message RegressionTemplateDB {
-    RewardFlag flag                          = 1; // 旧号回归(0:不能领取1：回归用户可以领奖，2已经领取)
-    int32      payRewardCfgIndex             = 2; // 充值档位索引（保留兼容旧字段，仅 minDay 那组）
-    int32      loginDyRewardCfgIndex         = 3; // 登录天数档位索引（保留兼容旧字段，仅 minDay 那组）
-    map<int32,bool> rewardRecord             = 4; // 领取记录 key=RewardDay value=是否已领
-    int32 currentDay                         = 5; // 当前时间天数
-    repeated RegressionStageView stages      = 6; // 各阶段视图（仅下发使用，落库前需置空）
+    RewardFlag                   flag                  = 1; // 旧号回归(0:不能领取1：回归用户可以领奖，2已经领取)
+    int32                        payRewardCfgIndex     = 2; // 充值档位索引（保留兼容旧字段，仅 minDay 那组）
+    int32                        loginDyRewardCfgIndex = 3; // 登录天数档位索引（保留兼容旧字段，仅 minDay 那组）
+    map<int32, bool>             rewardRecord          = 4; // 领取记录 key=RewardDay value=是否已领
+    int32                        currentDay            = 5; // 当前时间天数
+    repeated RegressionStageView stages                = 6; // 各阶段视图（仅下发使用，落库前需置空）
 }
 
 // 测试毕业礼
@@ -488,6 +685,61 @@ message SignInNewTemplateDB {
     map<int32, bool> advanceFlag       = 5; // 进阶奖励已领取奖励 key: 已经领取的天数
 }
 
+// 登录签到模板配置（对应 ActivityNewPlayerCheckIn.csv，关联 LOGIN_SIGN_TYPE=30 活动）
+message LoginSignTemplate {
+    repeated LoginSignTemplateSub SignConf = 1; // 签到配置项（按 CheckInDays 升序）
+}
+
+// 登录签到单日配置项（对应 ActivityNewPlayerCheckIn.csv 一行）
+message LoginSignTemplateSub {
+    int32  CheckInDays = 1; // 累计登录天数（签到进度判定依据，对应CSV CheckInDays列）
+    int32  RewardId    = 2; // 奖励掉落组ID（对应CSV RewardId列）
+    int32  StyleType   = 3; // 样式类型（客户端展示，对应CSV StyleType列）
+    int32  Point       = 4; // 立绘更换节点（客户端展示，对应CSV Point列）
+    string TopShowPic  = 5; // 立绘图片（客户端展示，对应CSV TopShowPic列）
+    string Name        = 6; // 文本（客户端展示，对应CSV Name列）
+}
+
+// 登录签到玩家存档数据
+message LoginSignTemplateDB {
+    int32            SignedDay         = 1; // 已签到天数（累计登录天数，跨自然日 +1）
+    int64            LastSignTimestamp = 2; // 上次签到时间戳（isDifferDay 跨天判定依据）
+    map<int32, bool> Flag              = 3; // 已领取奖励 key:已领取的 CheckInDays
+}
+
+// 新世界活动模板配置（聚合 ActivityWorldMapThemeCfg + ServerProgress + PersonalProg 三表）
+message WorldMapTemplate {
+    int32                          CurrencyItemID          = 1; // 草帽币道具ID（来自ActivityWorldMapThemeCfg）
+    int32                          DailyIncreaseLimitTips  = 2; // 单日增长上限文案ID
+    int32                          ForceFinishAdvanceHours = 3; // 最后强制补满提前小时数
+    repeated WorldMapServerStage   ServerProgress          = 4; // 单服进度阶段列表（6档，按ProgressPercent升序）
+    repeated WorldMapPersonalStage PersonalProgress        = 5; // 个人进度阶段列表（5档，按StageID升序）
+    repeated int32                 ActivitySubID           = 6; // 关联活动ID列表，来源于ActivityTheme.ActivitySubID
+}
+
+// 新世界单服进度阶段（对应 ActivityWorldMapServerProgress.csv 一行）
+message WorldMapServerStage {
+    int32  MapID           = 1; // 漫画图ID（1-6）
+    int32  ProgressPercent = 2; // 单服进度阈值百分比（0/20/40/60/80/100）
+    int32  MapName         = 3; // 漫画图名称文案ID
+    int32  PreviewText     = 4; // 预览文案ID（参数占位符，客户端替换"全服进度达{0}%解锁"）
+    string Map             = 5; // 漫画图资源名
+    int32  TargetCoinTotal = 6; // 单服进度达到100%所需的活动币总量
+}
+
+// 新世界个人进度阶段（对应 ActivityWorldMapPersonalProg.csv 一行）
+message WorldMapPersonalStage {
+    int32        StageID           = 1; // 个人阶段ID（1-5）
+    int32        NeedCurrencyCount = 2; // 门槛草帽币数量
+    RewardConfig RewardList        = 3; // 奖励（ItemId+Number）
+}
+
+// 新世界玩家存档数据
+message WorldMapTemplateDB {
+    map<int32, bool> ClaimedPersonalReward = 1; // 已领取的个人阶段奖励标记（key=StageID）
+    int32            LastSyncCurrency      = 2; // 最近一次全局同步成功的背包草帽币量（观察镜像，不参与幂等差值计算）
+}
+
 message RepairCondition {
     repeated OperateTaskInfo tasks = 1; // 补签任务进度
 }
@@ -515,35 +767,35 @@ message ExchangeShopNewTemplateDB {
 
 // 好友邀请活动 - 全局配置（单条，对应 InviteActivityConfig.csv）
 message InviteGlobalConf {
-    int32 MaxBindPerCode               = 1; // 每个邀请码最多绑定的受邀者数（如 10）
-    int32 BindRewardMailId             = 2; // 绑定奖励邮件模板ID（默认 78）
-    int32 SettlementMailId             = 3; // 结算补发邮件模板ID（默认 79）
-    repeated RewardConfig FinalReward          = 4; // 终极奖励
-    repeated RewardConfig FirstShareReward     = 5; // 首次分享奖励
-    repeated RewardConfig BindRewardSelf       = 6; // 受邀者绑定后获得的奖励
-    repeated RewardConfig BindRewardInviter    = 7; // 邀请者绑定后获得的奖励（每绑定 1 个）
+    int32                 MaxBindPerCode    = 1; // 每个邀请码最多绑定的受邀者数（如 10）
+    int32                 BindRewardMailId  = 2; // 绑定奖励邮件模板ID（默认 78）
+    int32                 SettlementMailId  = 3; // 结算补发邮件模板ID（默认 79）
+    repeated RewardConfig FinalReward       = 4; // 终极奖励
+    repeated RewardConfig FirstShareReward  = 5; // 首次分享奖励
+    repeated RewardConfig BindRewardSelf    = 6; // 受邀者绑定后获得的奖励
+    repeated RewardConfig BindRewardInviter = 7; // 邀请者绑定后获得的奖励（每绑定 1 个）
 }
 
 // 好友邀请活动 - 邀请任务档位配置（多条，对应 InviteActivityTask.csv）
 message InviteTaskConf {
-    int32 TaskId                = 1; // 任务ID
-    int32 TargetCount           = 2; // 需要的受邀者数量（如 1/3/5）
-    int32 TargetCup             = 3; // 受邀者达到的奖杯阈值（0=不限）
-    repeated RewardConfig Reward = 4; // 奖励
+    int32                 TaskId      = 1; // 任务ID
+    int32                 TargetCount = 2; // 需要的受邀者数量（如 1/3/5）
+    int32                 TargetCup   = 3; // 受邀者达到的奖杯阈值（0=不限）
+    repeated RewardConfig Reward      = 4; // 奖励
 }
 
 // 好友邀请活动 - 充值档位配置（多条，对应 InviteActivityRechargeTask.csv）
 message InviteRechargeTierConf {
-    int32 TierId                = 1; // 档位ID
-    int32 ThresholdAmount       = 2; // 累计充值金额阈值（受邀者集合，绑定后统计）
-    repeated RewardConfig Reward = 3; // 奖励
+    int32                 TierId          = 1; // 档位ID
+    int32                 ThresholdAmount = 2; // 累计充值金额阈值（受邀者集合，绑定后统计）
+    repeated RewardConfig Reward          = 3; // 奖励
 }
 
 // 好友邀请活动 - 模板入口（V2 重构：仅保存 taskId 列表，任务数据由 PlayerTask 系统管理）
 message InviteTemplate {
-    InviteGlobalConf       Global             = 1; // 全局配置
-    repeated int32         InviteTaskIdList   = 2; // 邀请任务 ID 列表（指向 Task.csv，TriggerType=45 TT_InviteCount）
-    repeated int32         RechargeTierIdList = 3; // 充值档位任务 ID 列表（指向 Task.csv，TriggerType=46 TT_InviteRecharge）
+    InviteGlobalConf Global             = 1; // 全局配置
+    repeated int32   InviteTaskIdList   = 2; // 邀请任务 ID 列表（指向 Task.csv，TriggerType=45 TT_InviteCount）
+    repeated int32   RechargeTierIdList = 3; // 充值档位任务 ID 列表（指向 Task.csv，TriggerType=46 TT_InviteRecharge）
 }
 
 // 好友邀请活动 - 受邀者绑定信息（玩家持久化数据子结构）
@@ -554,18 +806,19 @@ message InviteeBindInfo {
 
 // 好友邀请活动 - 玩家进度持久化（V2 重构：reserved 3/4，新增 11/12 UUIDList）
 message InviteTemplateDB {
-    string InviteCode                   = 1;  // 自己的邀请码（10 位 Base32，4 位活动指纹+6 位 roleId）
-    repeated InviteeBindInfo BoundInvitees    = 2;  // 受邀者列表（最多 MaxBindPerCode）
-    reserved 3, 4;                            // V2 删除：原 InviteTaskClaimedIds / RechargeTierClaimedIds（任务领取状态由 PlayerTask 接管）
+    string                   InviteCode    = 1;  // 自己的邀请码（10 位 Base32，4 位活动指纹+6 位 roleId）
+    repeated InviteeBindInfo BoundInvitees = 2;  // 受邀者列表（最多 MaxBindPerCode）
+    reserved 3, 4;                               // V2 删除：原 InviteTaskClaimedIds / RechargeTierClaimedIds（任务领取状态由 PlayerTask 接管）
     reserved "InviteTaskClaimedIds", "RechargeTierClaimedIds";
-    int64 RechargeTotalAmount           = 5;  // 受邀者集合累计充值金额（绑定后统计）
-    bool  FinalRewardClaimed            = 6;  // 终极奖励是否已领
-    bool  FirstShareDone                = 7;  // 首次分享是否已完成
-    int32 InviterRoleId                 = 8;  // 自己绑定的邀请者 playerId（0=未绑定）
-    int64 BindTime                      = 9;  // 自己绑定的时刻
-    bool  BindRewardSent                = 10; // 自己的绑定奖励邮件是否已发
-    repeated int64 InviteTaskUUIDList   = 11; // V2 新增：PlayerTask 系统返回的邀请任务 UUID（与 Global.InviteTaskIdList 同序）
-    repeated int64 RechargeTierUUIDList = 12; // V2 新增：充值档位任务 UUID（与 Global.RechargeTierIdList 同序）
+    int64          RechargeTotalAmount     = 5;  // 受邀者集合累计充值金额（绑定后统计）
+    bool           FinalRewardClaimed      = 6;  // 终极奖励是否已领
+    bool           FirstShareDone          = 7;  // 首次分享是否已完成
+    int32          InviterRoleId           = 8;  // 自己绑定的邀请者 playerId（0=未绑定）
+    int64          BindTime                = 9;  // 自己绑定的时刻
+    bool           BindRewardSent          = 10; // 自己的绑定奖励邮件是否已发
+    repeated int64 InviteTaskUUIDList      = 11; // V2 新增：PlayerTask 系统返回的邀请任务 UUID（与 Global.InviteTaskIdList 同序）
+    repeated int64 RechargeTierUUIDList    = 12; // V2 新增：充值档位任务 UUID（与 Global.RechargeTierIdList 同序）
+    bool           AccountBoundInOtherArea = 13; // 该账号已在其他区服绑定过邀请码（创建活动数据时检测，true 时本区不允许再绑定）
 }
 
 //////////////////////////////////////////////////////////////////////////排行榜//////////////////////////////////////////////////////////////////////////////////

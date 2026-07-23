@@ -82,3 +82,19 @@ message PayRedeemCodeCheckS2C {
     string code  = 1; // 兑换码
     bool   check = 2; // true:可以使用 false:不能使用
 }
+// 直购购买前限购预检测
+message PayCheckLimitC2S {
+    int32 shopId      = 1; // 商店ID
+    int32 goodsId     = 2; // 商品ID
+    int32 cashGoodsId = 3; // 游戏内直购ID，对应CashGoodsConfig.RechargeID
+}
+// 直购购买前限购预检测
+message PayCheckLimitS2C {
+    int32 shopId      = 1; // 商店ID
+    int32 goodsId     = 2; // 商品ID
+    int32 cashGoodsId = 3; // 游戏内直购ID
+    bool  canBuy      = 4; // true=检测通过，失败场景走错误码
+    int32 limitType   = 5; // 限购类型，0表示不限购
+    int32 buyCount    = 6; // 当前已购买次数
+    int32 limitNumber = 7; // 限购上限
+}

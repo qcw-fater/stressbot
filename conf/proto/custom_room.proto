@@ -44,6 +44,10 @@ message RoomMsgToBattle
     LadderDraftType          draftType           = 19;   // 排位赛征召类型
     repeated int32           affix               = 20;   // 词缀
     SDCDropData              sdcDropData          = 21;   // SDC战场掉落数据（仅GM_HAZARD_OPS模式）
+    int32                    matchFlag            = 22;   // 匹配类型(0=正常 1=补偿局 2=温暖局)
+    int32                    sdcLobbyMmr          = 23;   // 搜打撤成房时冻结的真人平均MMR，仅GM_HAZARD_OPS模式使用
+    map<int32, bool>         sdcMmrEligible       = 24;   // 搜打撤MMR结算资格，key=玩家ID value=是否参与MMR写回
+    map<int32, int64>        sdcMatchId           = 25;   // 搜打撤匹配ID，key=真人玩家ID value=玩家所属队伍本次matchUuid
 }
 
 // 房间服到组队服消息

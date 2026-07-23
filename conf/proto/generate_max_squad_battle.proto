@@ -1,0 +1,134 @@
+syntax = "proto3";
+option go_package = ".;pb";
+package Game;
+import "common.proto";
+import "enum.proto";
+import "player.proto";
+import "custom_squad.proto";
+
+//小队赛信息(阶段/届号/积分/赛区)
+message MaxSquadBattleInfoC2S
+{
+}
+//小队赛信息(阶段/届号/积分/赛区)
+message MaxSquadBattleInfoS2C
+{
+    SquadBattleStage             stage        = 1; // 当前阶段
+    int32                        battleTerm   = 2; // 当前届号
+    SquadBattleDB                myBattle     = 3; // 我的小队赛数据(无小队时为空)
+    repeated SquadBattleZoneInfo zoneList     = 4; // 赛区列表(报名阶段展示)
+    repeated SquadBattleRankInfo rankList     = 5; // 积分榜(全服或赛区)
+    int32                        selfRank     = 6; // 我的排名,0=未上榜
+    int64                        stageEndTime = 7; // 当前阶段结束时间戳
+    int32                        myScore      = 8; // 我的积分贡献
+    repeated int64               likedTargetSquadIds = 9; // 当天已点赞目标小队id列表(恢复点赞按钮置灰)
+    int32                        selfGlobalRank = 10; // 我的全服排名,0=未上榜
+    int32                        selfZoneRank = 11; // 我的赛区排名,0=未上榜
+    repeated SquadBattleStageTime stageSchedule = 12; // 小队赛阶段时间表
+    repeated SquadBattleMemberScore memberScores = 13; // 小队成员积分列表
+    int32                        availableCount = 14; // 今日可用积分次数
+}
+//队长报名(选赛区)
+message MaxSquadBattleSignupC2S
+{
+    int32 zoneId = 1; // 报名赛区(TeamBattleZone.ID)
+}
+//队长报名(选赛区)
+message MaxSquadBattleSignupS2C
+{
+    int32 zoneId   = 1; // 报名赛区
+    bool  signedUp = 2; // 是否已报名
+}
+//积分场次信息
+message MaxSquadBattleScoreInfoC2S
+{
+}
+//积分场次信息
+message MaxSquadBattleScoreInfoS2C
+{
+    int32                  myScore     = 1; // 我的积分贡献
+    int32                  dailyCount  = 2; // 今日场次
+    int32                  dailyMax    = 3; // 每日场次上限(TeamParameter ID21)
+    int32                  weekCount   = 4; // 本周场次
+    int32                  weekMax     = 5; // 每周场次上限(TeamParameter ID22)
+    SquadBattleScoreDetail scoreDetail = 6; // 积分构成明细
+    repeated SquadBattleSessionRewardState sessionRewardStates = 7; // 当前届场次奖励状态,按门槛和配置id升序
+    int32                  availableCount = 8; // 当前可用场次
+}
+//领取场次奖励
+message MaxSquadBattleSessionRewardC2S
+{
+    int32 configId = 1; // 奖励配置id
+}
+//领取场次奖励
+message MaxSquadBattleSessionRewardS2C
+{
+    int32                 configId = 1; // 奖励配置id
+    repeated RewardConfig reward   = 2; // 奖励内容
+    SquadBattleSessionRewardStatus status = 3; // 领取成功后的最新状态,固定为已领取
+}
+//领取排名奖励
+message MaxSquadBattleRankRewardC2S
+{
+    int32 configId = 1; // 奖励配置id
+}
+//领取排名奖励
+message MaxSquadBattleRankRewardS2C
+{
+    int32                 configId = 1; // 奖励配置id
+    repeated RewardConfig reward   = 2; // 奖励内容
+}
+//领取积分奖励
+message MaxSquadBattleScoreRewardC2S
+{
+    int32 configId = 1; // 奖励配置id
+}
+//领取积分奖励
+message MaxSquadBattleScoreRewardS2C
+{
+    int32                 configId = 1; // 奖励配置id
+    repeated RewardConfig reward   = 2; // 奖励内容
+}
+//点赞
+message MaxSquadBattleLikeC2S
+{
+    int64 targetSquadId = 1; // 点赞目标小队id
+}
+//点赞
+message MaxSquadBattleLikeS2C
+{
+    int64 targetSquadId = 1; // 点赞目标小队id
+    int32 beLikedCount  = 2; // 目标被点赞数
+}
+//阶段变更通知(筹备→报名→比赛→庆祝)
+message MaxSquadBattleStageNotifyS2C
+{
+    SquadBattleStage stage        = 1; // 新阶段
+    int32            battleTerm   = 2; // 当前届号
+    int64            stageEndTime = 3; // 新阶段结束时间戳
+}
+//被点赞通知
+message MaxSquadBattleLikeNotifyS2C
+{
+    PlayerBase likerInfo    = 1; // 点赞者信息
+    int32      beLikedCount = 2; // 我被点赞总数
+}
+//v1.1往届列表(可查届号,按TeamParameterID27保留)
+message MaxSquadBattleTermListC2S
+{
+}
+//v1.1往届列表(可查届号,按TeamParameterID27保留)
+message MaxSquadBattleTermListS2C
+{
+    repeated int32 terms = 1; // 可查询的往届届号列表(降序,最多 TeamParameter ID27 届)
+}
+//v1.1往届快照榜(某届全服/赛区最终排名)
+message MaxSquadBattleTermRankC2S
+{
+    int32 term = 1; // 查询届号(取自 TermList 返回的可查届号)
+}
+//v1.1往届快照榜(某届全服/赛区最终排名)
+message MaxSquadBattleTermRankS2C
+{
+    SquadBattleTermSnapshot snapshot = 1; // 该届整届最终排名快照(全服榜+各赛区榜);届不存在时为空
+}

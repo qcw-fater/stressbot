@@ -6,6 +6,13 @@ package Game;
 // 导入枚举
 import "enum_battle.proto";
 
+// 战斗 Loading 阵营级小队称号(Record 用,每阵营最多1条,无有效称号阵营不含)
+message BattleSquadLoadingTitle {
+    CampType camp    = 1; // 阵营(红=CtCamp0,蓝=CtCamp1)
+    int32    titleId = 2; // 小队称号id(Title.csv)
+    int64    squadId = 3; // 小队id(排查用,客户端展示不依赖)
+}
+
 // ==================== SDC 战斗相关枚举 ====================
 
 // 背包类型
@@ -21,15 +28,19 @@ enum SDCPackType {
 
 // 搜打撤道具类型（对应 Item.csv SubType 字段）
 enum SDCItemType {
-    SDC_ITEM_TYPE_UNKNOWN    = 0; // 未知
-    SDC_ITEM_TYPE_ARMOR      = 1; // 护甲
-    SDC_ITEM_TYPE_CHIP       = 2; // 芯片
-    SDC_ITEM_TYPE_AMPLIFIER  = 3; // 增幅器
-    SDC_ITEM_TYPE_COLLECTION = 4; // 藏品
-    SDC_ITEM_TYPE_MEDICINE   = 5; // 药品
-    SDC_ITEM_TYPE_KEY        = 6; // 钥匙
-    SDC_ITEM_TYPE_BACKPACK   = 7; // 背包
-    SDC_ITEM_TYPE_SKILL      = 8; // 技能
+    SDC_ITEM_TYPE_UNKNOWN          = 0;  // 未知
+    SDC_ITEM_TYPE_ARMOR            = 1;  // 护甲
+    SDC_ITEM_TYPE_CHIP             = 2;  // 芯片
+    SDC_ITEM_TYPE_AMPLIFIER        = 3;  // 增幅器
+    SDC_ITEM_TYPE_COLLECTION       = 4;  // 藏品
+    SDC_ITEM_TYPE_MEDICINE         = 5;  // 药品
+    SDC_ITEM_TYPE_KEY              = 6;  // 钥匙
+    SDC_ITEM_TYPE_BACKPACK         = 7;  // 背包
+    SDC_ITEM_TYPE_SKILL            = 8;  // 技能
+    SDC_ITEM_TYPE_SUIT_TICKET      = 9;  // 套装券
+    SDC_ITEM_TYPE_TEMP_TALENT_CARD = 12; // 临时天赋计划卡
+    SDC_ITEM_TYPE_TEMP_AWAKE_CARD  = 13; // 临时觉醒激活卡
+    SDC_ITEM_TYPE_EXP               = 14; // 经验（奖励转换占位符，不产生仓库实例）
 }
 
 // 道具容器类型
@@ -44,13 +55,16 @@ enum SDCContainerType {
 // 搜打撤道具扩展信息（附加在ItemInfo上使用）
 // 护甲说明：护甲耐久度只能通过使用护甲药（sdcType=6, sdcSubType=2的药品）进行修复，自然不恢复
 message SDCItemExtInfo {
-    SDCItemType sdcType       = 1; // 搜打撤道具分类（对应SDCItemType枚举）
-    int32       sdcSubType    = 2; // 搜打撤子类型
-    int32       durability    = 3; // 耐久度/使用次数（初始值来自SDC_Item配置，局内消耗后减少；归零则道具消失）
-    int32       maxDurability = 4; // 最大耐久度/使用次数上限
-    int32       capacity      = 5; // 背包容量(仅背包类型)
-    int32       value         = 6; // 价值
-    int32       number        = 7; // 道具堆叠数量
+    SDCItemType    sdcType       = 1; // 搜打撤道具分类（对应SDCItemType枚举）
+    int32          sdcSubType    = 2; // 搜打撤子类型
+    int32          durability    = 3; // 耐久度/使用次数（初始值来自SDC_Item配置，局内消耗后减少；归零则道具消失）
+    int32          maxDurability = 4; // 最大耐久度/使用次数上限
+    int32          capacity      = 5; // 背包容量(仅背包类型)
+    int32          value         = 6; // 价值
+    int32          number        = 7; // 道具堆叠数量
+    repeated int32 affixIds      = 8; // 道具实例已生效词条ID列表
+    int32          bindHeroId    = 9; // 临时天赋/觉醒绑定的英雄ID，0表示旧数据未迁移
+    int32          originalValue = 10; // 实例创建时的普通货币价值，0表示旧实例未补种
 }
 
 // 仓库道具信息
@@ -93,29 +107,58 @@ message SDCHeroTalentAwakeInfo {
                                           // 0=该槽无SDC加成（玩家已自行激活 或 SDC道具未覆盖该槽）
 }
 
+// SDC对局徽章结构化数据
+message SDCBattleBadge {
+    int32 badgeId   = 1; // 徽章ID，客户端按配置渲染文案/ICON/描述
+    int32 badgeType = 2; // 徽章类型，客户端按配置解释
+}
+
 // 战斗结算数据（用于扩展PlayerBattleEnd）
 message SDCBattleSettleData {
-    int32                  result             = 1;  // SDC对局结果 (1-成功撤离 2-撤离失败)
-    int32                  killCount          = 2;  // 击杀玩家数（含人机玩家）
-    int32                  totalValue         = 3;  // 装配总价值（局外带入）
-    int32                  lootValue          = 4;  // 本局带出道具总价值（含安全箱保留的藏品，用于收益评级计算，持久化至赛季数据）
-    repeated int64         lostItemGuids      = 5;  // 丢失的道具GUID列表
-    repeated int64         keptItemGuids      = 6;  // 保留的道具GUID列表
-    repeated SDCPackSlot   finalPackSlots     = 7;  // 战斗结束时各背包最终状态
-    int32                  seasonCoin         = 8;  // 获得赛季币
-    int32                  monsterKillCount   = 9;  // 击杀怪物数
-    int32                  surviveTime        = 10; // 存活时长/撤离用时(秒)
-    int32                  rating             = 11; // 收益评级（对应SDCRating枚举：1=D 2=C 3=B 4=A 5=S，0=无效）
-    int32                  sdcLevel           = 12; // 结算后SDC等级
-    int32                  sdcExp             = 13; // 结算后当前经验
-    int32                  sdcExpMax          = 14; // 当前等级经验上限
-    int32                  sdcExpChange       = 15; // 本局获得经验
-    int32                  assistCount        = 16; // 助攻数（击败敌方时队友协助）
-    int32                  rescueCount        = 17; // 救助数（成功救助队友次数）
-    repeated SDCEquipSlot  finalEquipSlots    = 18; // 战斗结束时装配槽位最终状态（耐久消耗后）
-    SDCHeroTalentAwakeInfo heroInfo           = 19; // 战斗结束时天赋/觉醒加成快照（客户端结算界面展示用）
-    int32                  equipSlotValueDiff = 20; // 槽位价值差（战后FinalEquipSlots价值 - 战前装配槽位价值，负值表示损耗）
-    int32                  netLootValue       = 21; // 本局收益总价值（FinalPackSlots排除钥匙链 + FinalEquipSlots，不含战前带入道具）
+    int32                   result             = 1;  // SDC对局结果（0-尚未结算/仍在对局 1-成功撤离 2-撤离失败）
+    int32                   killCount          = 2;  // 击杀玩家数（含人机玩家）
+    int32                   totalValue         = 3;  // 装配总价值（局外带入）
+    int32                   lootValue          = 4;  // 本局评分价值（装备槽净收益+背包普通道具净收益，不含赛季道具）
+    repeated int64          lostItemGuids      = 5;  // 丢失的道具GUID列表
+    repeated int64          keptItemGuids      = 6;  // 保留的道具GUID列表
+    repeated SDCPackSlot    finalPackSlots     = 7;  // 战斗结束时各背包最终状态
+    int32                   seasonCoin         = 8;  // 获得赛季币
+    int32                   monsterKillCount   = 9;  // 击杀怪物数
+    int32                   surviveTime        = 10; // 存活时长/撤离用时(秒)
+    int32                   rating             = 11; // 收益评级（对应SDCRating枚举：1=D 2=C 3=B 4=A 5=S，0=无效）
+    int32                   sdcLevel           = 12; // 结算后SDC等级
+    int32                   sdcExp             = 13; // 结算后当前经验
+    int32                   sdcExpMax          = 14; // 当前等级经验上限
+    int32                   sdcExpChange       = 15; // 本局获得经验
+    int32                   assistCount        = 16; // 助攻数（击败敌方时队友协助）
+    int32                   rescueCount        = 17; // 救助数（成功救助队友次数）
+    repeated SDCEquipSlot   finalEquipSlots    = 18; // 战斗结束时装配槽位最终状态（耐久消耗后）
+    SDCHeroTalentAwakeInfo  heroInfo           = 19; // 战斗结束时天赋/觉醒加成快照（客户端结算界面展示用）
+    int32                   equipSlotValueDiff = 20; // 装备槽净收益（FinalEquipSlots中排除战前带入GUID后的新增装备价值）
+    int32                   netLootValue       = 21; // 本局评分价值兼容字段（装备槽净收益+背包普通道具净收益）
+    int32                   rankScoreChange    = 22; // 本局排位分变化（Logic 侧回填）
+    SDCRankChangeInfo       rankChangeInfo     = 23; // 段位变化详情（含变化前后段位/星数/保护类型等）
+    repeated int32          acquiredItemIds    = 24; // 本局拾取的道具itemId列表（Battle侧填充，不论是否带出）
+    int64                   lossAssetValue     = 25; // 本局损失资产价值，战前已有资产在本局结算中丢失的价值
+    repeated SDCBattleBadge battleBadges       = 26; // 本局对局徽章结构化ID/类型，服务器不维护展示文本
+    int32                  sdcLobbyMmr        = 27; // 搜打撤成房时冻结的真人平均MMR，Logic侧回填
+    bool                   sdcMmrEligible     = 28; // 搜打撤本玩家是否参与MMR写回，Logic侧回填
+    int32                  packNormalNetValue = 29; // 背包普通道具净收益（排除战前带入GUID和钥匙链）
+    int32                  packSeasonNetValue = 30; // 背包赛季道具净收益（排除战前带入GUID和钥匙链，不参与评分）
+}
+
+// 段位变化信息（用于结算响应与打点）
+message SDCRankChangeInfo {
+    int32 tierBefore         = 1;  // 变化前段位 ID
+    int32 tierAfter          = 2;  // 变化后段位 ID
+    int32 rankScoreBefore    = 3;  // 变化前排位分
+    int32 rankScoreAfter     = 4;  // 变化后排位分
+    int32 starBefore         = 5;  // 变化前星数（仅王者）
+    int32 starAfter          = 6;  // 变化后星数（仅王者）
+    int32 rankScoreChange    = 7;  // 排位分变化量
+    int32 protectType        = 8;  // 触发的保护类型（0=无 1=不掉分 2=不掉段 3=保护次数）
+    int32 protectCountBefore = 9;  // 保护次数（变化前）
+    int32 protectCountAfter  = 10; // 保护次数（变化后）
 }
 
 // 局内快捷发言数据
@@ -145,7 +188,7 @@ message PlayerBattleStatistics {
     BattleLadderInfo              battleLadderBase = 17; // 战斗内玩家排位简约数据
     int32                         addBraveScore    = 18; // 队友违规加勇者积分次数  可能有多个人违规
     SDCBattleSettleData           sdcSettleData    = 19; // SDC战斗结算数据（仅GM_HAZARD_OPS模式）
-    int32                         sdcRetractTime   = 20; // SDC撤离时间（秒），未撤离为0
+    int32                         sdcRetractTime   = 20; // SDC结算发生时的局内用时（秒），未结算为0，成功/失败均有值
     int32                         sdcLootValue     = 21; // SDC本局收益（带出道具总价值）
     int32                         sdcKillCount     = 22; // SDC击败真实玩家数
     int32                         sdcAssistCount   = 23; // SDC助攻数
@@ -160,6 +203,7 @@ message BattleLadderInfo {
     int32 recreationScore     = 4; // 娱乐赛积分
     int32 recreationLevel     = 5; // 娱乐赛等级
     int64 titleValidityPeriod = 6; // 排位赛称号有效期
+    int32 peakRankingScore    = 7; // 巅峰赛战前积分快照，用于终局 ELO 均分计算
 }
 
 message HeroBattleStatistics {
@@ -257,16 +301,41 @@ message MuyeTalentRecordInfo {
     int32 talentId = 2; // 天赋id
 }
 
+// SDC单局战绩展示数据
+message SDCStandingData {
+    int32                   result          = 1; // 撤离结果：1成功撤离，2撤离失败
+    int64                   lootAssetValue  = 2; // 本局带出资产价值
+    int32                   killCount       = 3; // 本局击败玩家数
+    bool                    ranked          = 4; // 是否排位对局，false时客户端不展示段位变化
+    int32                   tierAfter       = 5; // 结算后段位ID
+    int32                   rankScoreAfter  = 6; // 结算后排位分
+    int32                   rankScoreChange = 7; // 本局排位分变化
+    SDCRankChangeInfo       rankChangeInfo  = 8; // 排位变化详情
+    repeated SDCBattleBadge battleBadges    = 9; // 对局徽章结构化ID/类型
+}
+
+// SDC历史战绩中的玩家行数据，仅包含共同对局可见的战斗统计
+message SDCFighterStandingData {
+    int32 result         = 1; // 结算状态：0尚未结算，1成功撤离，2撤离失败
+    int32 retractTime    = 2; // 成功或失败结算发生时的局内用时，单位秒
+    int64 lootAssetValue = 3; // 本局带出资产价值
+    int32 killCount      = 4; // 本局击败真实玩家数
+    int32 assistCount    = 5; // 本局助攻数
+    int32 rescueCount    = 6; // 本局救助数
+}
+
 // 玩家战绩
 message PlayerStandings {
-    int64                     battleId              = 1; // 战斗ID
-    GameModel                 model                 = 2; // 玩法模式
-    GameType                  gType                 = 3; // 玩法类型
-    int32                     battleModeId          = 4; // 匹配类型
-    int64                     beginTime             = 5; // 比赛开始时间
-    int64                     endTime               = 6; // 比赛结束时间
-    repeated FighterStandings fighterList           = 7; // 战斗单位列表
-    int32                     recreationScoreChange = 8; // 娱乐赛积分变化值
+    int64                     battleId              = 1;  // 战斗ID
+    GameModel                 model                 = 2;  // 玩法模式
+    GameType                  gType                 = 3;  // 玩法类型
+    int32                     battleModeId          = 4;  // 匹配类型
+    int64                     beginTime             = 5;  // 比赛开始时间
+    int64                     endTime               = 6;  // 比赛结束时间
+    repeated FighterStandings fighterList           = 7;  // 战斗单位列表
+    int32                     recreationScoreChange = 8;  // 娱乐赛积分变化值
+    SDCStandingData           sdcStanding           = 9;  // SDC单局战绩数据，仅GM_HAZARD_OPS写入
+    int64                     roomId                = 10; // 房间id
 }
 
 // 战斗单位战绩
@@ -279,6 +348,7 @@ message FighterStandings {
     repeated HeroFighterStandings heroList         = 6; // 英雄列表
     bool                          Mvp              = 7; // 是否MVP
     BattleLadderInfo              playerLadderInfo = 8; // 玩家段位相关数据，战斗前数据
+    SDCFighterStandingData        sdcStanding      = 9; // SDC历史详情中的玩家行战绩，空表示旧记录或不可用
 }
 
 // 英雄战绩

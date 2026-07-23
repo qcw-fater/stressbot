@@ -54,6 +54,20 @@ enum TaskTriggerType {
     TT_InviteCount                              = 45; // 好友邀请活动 - X 个受邀者达到 Y 杯
     TT_InviteRecharge                           = 46; // 好友邀请活动 - 受邀者集合累计充值金额
     TT_FirstShareActivity                       = 47; // 首次分享活动
+    TT_SpecifiedTasksAllComplete                = 48; // 指定任务全部完成
+    TT_SDCGrowthUpgrade                         = 49; // 搜打撤基地升级
+    TT_SDCClaimCraftReward                      = 50; // 搜打撤领取制作奖励
+    TT_SDCSeasonStageAllComplete                = 51; // 搜打撤赛季阶段任务全部完成
+    TT_SDCCollectorTaskComplete                 = 52; // 搜打撤完成一条收集者任务
+}
+
+// 小队任务进度变更模式
+enum TaskProgressMode {
+    TPM_Invalid    = 0; // 无效模式
+    TPM_Add        = 1; // 按增量累加进度
+    TPM_Set        = 2; // 按绝对值单调更新进度
+    TPM_Dependency = 3; // 按已完成依赖任务去重累计进度
+    TPM_Satisfied  = 4; // 条件满足后将进度置为完成
 }
 
 // 任务数据
@@ -68,6 +82,14 @@ message TaskInfo {
     repeated int32 designatedGameModel = 8;  // 指定游戏模式(动态条件)
     repeated int32 randomMainTag       = 9;  // 随机职业(动态条件)
     repeated int32 randomComic         = 10; // 随机ip(动态条件)
+    repeated int32 countedDependencyTaskIds = 11; // 指定任务全部完成触发类型已计数的依赖任务ID
+    int64          squadId                    = 12; // 当前绑定的小队ID
+    int64          squadWeekKey               = 13; // 小队任务周标识
+    int64          squadMembershipEpoch       = 14; // 当前小队成员关系版本(JoinTimestamp)
+    int64          squadRawAbsoluteProgress   = 15; // 本周未封顶的个人原始累计进度
+    int64          squadRawJoinBaseline       = 16; // 加入当前小队时的本周原始累计基线
+    uint64         squadRevision              = 17; // 小队任务个人进度生产版本
+    bool           squadRewardClaimed         = 18; // 当前小队任务完成态奖励是否已领取(领奖直接读共享 finishRevision,无 tag19)
 }
 
 // 玩家任务

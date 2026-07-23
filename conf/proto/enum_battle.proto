@@ -16,7 +16,18 @@ enum CampType {
     CtCamp7   = 8;  // 阵营7
     CtCamp8   = 9;  // 阵营8
     CtCamp9   = 10; // 阵营9
-    JUDGE     = 11; // 裁判阵营 最大值，增加的时候往前增加
+    CtCamp10  = 11; // 阵营10
+    CtCamp11  = 12; // 阵营11
+    CtCamp12  = 13; // 阵营12
+    CtCamp13  = 14; // 阵营13
+    CtCamp14  = 15; // 阵营14
+    CtCamp15  = 16; // 阵营15
+    CtCamp16  = 17; // 阵营16
+    CtCamp17  = 18; // 阵营17
+    CtCamp18  = 19; // 阵营18
+    CtCamp19  = 20; // 阵营19
+    CtCamp20  = 21; // 阵营20
+    JUDGE     = 22; // 裁判阵营 最大值，增加的时候往前增加
 }
 
 enum JudgeIndex {
@@ -76,7 +87,8 @@ enum BattleSyncCmd {
     LFE_ITEM_CTL               = 30; // 搜打撤物品操作
     LFE_CHEST_CTL              = 31; // 搜打撤宝箱操作
     SKIN_BUFF_REGISTER         = 32; // 表现层BUFF注册
-    CMD_MAX                    = 33; // 最大指令
+    BattleInteraction          = 33; // 战斗互动
+    CMD_MAX                    = 34; // 最大指令
 }
 
 // 任务参数组枚举
@@ -159,16 +171,17 @@ enum ConfigIdDetailType {
 
 // 游戏模式
 enum GameModel {
-    GM_INVALID     = 0; // 无
-    GM_NORMAL      = 1; // 休闲玩法
-    GM_LADDER      = 2; // 排位赛
-    GM_CUSTOM      = 3; // 自定义房间
-    GM_TRAINING    = 4; // 训练模式
-    GM_RECREATION  = 5; // 娱乐模式
-    GM_BattleGuide = 6; // 战斗引导
-    GM_ACTIVITY    = 7; // 活动赛
-    GM_HAZARD_OPS  = 8; // 危险行动（搜打撤）
-    GM_ACTIVITY_SINGLE = 9; // 单模式活动赛
+    GM_INVALID         = 0;  // 无
+    GM_NORMAL          = 1;  // 休闲玩法
+    GM_LADDER          = 2;  // 排位赛
+    GM_CUSTOM          = 3;  // 自定义房间
+    GM_TRAINING        = 4;  // 训练模式
+    GM_RECREATION      = 5;  // 娱乐模式
+    GM_BattleGuide     = 6;  // 战斗引导
+    GM_ACTIVITY        = 7;  // 活动赛
+    GM_HAZARD_OPS      = 8;  // 危险行动（搜打撤）
+    GM_ACTIVITY_SINGLE = 9;  // 单模式活动赛
+    GM_PEAK_RANKING    = 10; // 赛季性巅峰赛
 }
 
 // 玩法类型
@@ -191,7 +204,8 @@ enum GameType {
     GT_DRAGONBALL_BATTLE       = 15;  // 3v3龙珠争夺
     GT_GOLD_BOX                = 16;  // 金库模式
     GT_HAZARD_OPS              = 17;  // 危险行动（搜打撤模式）
-    GT_MAX                     = 18;  // 有效游戏类型最大值
+    Gt_Star_Battle             = 18;  // 星星模式
+    GT_MAX                     = 19;  // 有效游戏类型最大值
 
     GT_AI_TRAINING             = 100; // AI单机训练模式
     GT_GUIDANCE_DRAGON_BALL    = 200; // 引导模式-龙珠
@@ -242,25 +256,25 @@ enum JoinTeamWay {
 
 // 收益评级
 enum SDCRating {
-  SDC_RATING_INVALID = 0; // 无效
-  SDC_RATING_D       = 1; // D级
-  SDC_RATING_C       = 2; // C级
-  SDC_RATING_B       = 3; // B级
-  SDC_RATING_A       = 4; // A级
-  SDC_RATING_S       = 5; // S级
+    SDC_RATING_INVALID = 0; // 无效
+    SDC_RATING_D       = 1; // D级
+    SDC_RATING_C       = 2; // C级
+    SDC_RATING_B       = 3; // B级
+    SDC_RATING_A       = 4; // A级
+    SDC_RATING_S       = 5; // S级
 }
 
 // 装配槽位类型
 enum SDCSlotType {
-  SDC_SLOT_TYPE_UNKNOWN            = 0; // 未知
-  SDC_SLOT_TYPE_ARMOR              = 1; // 护甲槽
-  SDC_SLOT_TYPE_SKILL              = 2; // 技能槽
-  SDC_SLOT_TYPE_BACKPACK           = 3; // 背包槽
-  SDC_SLOT_TYPE_NORMAL_AMPLIFIER   = 4; // 普攻增幅器槽
-  SDC_SLOT_TYPE_SKILL_AMPLIFIER    = 5; // 技能增幅器槽
-  SDC_SLOT_TYPE_ULTIMATE_AMPLIFIER = 6; // 大招增幅器槽
-  SDC_SLOT_TYPE_CHIP1              = 7; // 芯片槽1
-  SDC_SLOT_TYPE_CHIP2              = 8; // 芯片槽2
-  SDC_SLOT_TYPE_CHIP3              = 9; // 芯片槽3
-  SDC_SLOT_TYPE_MAX                = 10; // 最大装配槽位类型枚举值
+    SDC_SLOT_TYPE_UNKNOWN            = 0;  // 未知
+    SDC_SLOT_TYPE_ARMOR              = 1;  // 护甲槽
+    SDC_SLOT_TYPE_SKILL              = 2;  // 技能槽
+    SDC_SLOT_TYPE_BACKPACK           = 3;  // 背包槽
+    SDC_SLOT_TYPE_NORMAL_AMPLIFIER   = 4;  // 普攻增幅器槽
+    SDC_SLOT_TYPE_SKILL_AMPLIFIER    = 5;  // 技能增幅器槽
+    SDC_SLOT_TYPE_ULTIMATE_AMPLIFIER = 6;  // 大招增幅器槽
+    SDC_SLOT_TYPE_CHIP1              = 7;  // 芯片槽1
+    SDC_SLOT_TYPE_CHIP2              = 8;  // 芯片槽2
+    SDC_SLOT_TYPE_CHIP3              = 9;  // 芯片槽3
+    SDC_SLOT_TYPE_MAX                = 10; // 最大装配槽位类型枚举值
 }

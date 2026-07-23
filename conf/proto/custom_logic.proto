@@ -41,6 +41,8 @@ message LogicMsgToTeam {
     repeated BattleDelay battleAreaList     = 29; // 玩家战斗区域延迟信息
     int64                notReadyEndTime    = 30; // 未准备惩罚结束时间
     int32                battleActivityStep = 31; // 活动赛选择阶段
+    int32                sdcMapId           = 32; // 搜打撤当前 SDCMap.ID
+    int32                sdcMmrScore        = 33; // 搜打撤当前MMR，仅服务器内部匹配使用
 }
 
 // 逻辑服到房间服消息
@@ -82,6 +84,13 @@ message RoomChat {
     int64          sendTime    = 4; // 发送时间
 }
 
+// 逻辑服写入小队消息的权威成员上下文，由服务器生成且不接受客户端覆盖。
+message SquadLogicContext {
+    int64  memberScoreBase        = 1; // 未乘活跃系数的成员积分基数
+    uint64 scoreBaseRevision      = 2; // 成员积分基数生产版本
+    int64  membershipEpoch        = 3; // 当前成员关系版本(JoinTimestamp)
+}
+
 message LogicMsgToGuildMgr {
     int32           playerId = 1; // 玩家ID
     int32           lsId     = 2; // 所在的逻辑服Id
@@ -92,4 +101,5 @@ message LogicMsgToGuildMgr {
     int32           cmd      = 7;
     int32           act      = 8;
     int32           index    = 9;
+    SquadLogicContext squadContext = 10; // 逻辑服生成的小队成员权威上下文
 }

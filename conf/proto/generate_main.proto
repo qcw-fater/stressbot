@@ -139,6 +139,7 @@ message MainChangeSexS2C {
 // 战绩
 message MainStandingsListC2S {
     int32 playerId = 1;
+    int64 battleId = 2; // 0返回历史列表，>0返回指定单局详情
 }
 // 战绩
 message MainStandingsListS2C {

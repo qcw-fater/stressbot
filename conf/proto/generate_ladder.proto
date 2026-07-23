@@ -4,6 +4,7 @@ package Game;
 import "custom_ladder.proto";
 import "custom_recreation.proto";
 import "enum_battle.proto";
+import "player.proto";
 // 排位想玩英雄
 message LadderWantHeroC2S {
     repeated int32 wantHeroList = 1; // 想玩id
@@ -24,11 +25,13 @@ message LadderSeasonRewardS2C {
     int32            configId        = 1; // 奖励的配置id
     map<int32, bool> seasonBoxReward = 2; // 赛季宝箱
     GameModel        gameType        = 3; // 模式类型
+    map<int32, bool> peakRankingSeasonReward = 4; // 巅峰赛赛季奖励领取标记，key:PeakRankSeasonReward.ID
 }
 
 // 推送段位数据
 message LadderDataS2C {
-    LadderBase ladderBaseData = 1; // 段位基础信息
+    LadderBase             ladderBaseData         = 1; // 排位段位基础信息
+    PeakRankingSeasonBase  peakRankingSeasonBase = 2; // 巅峰赛当前赛季基础数据
 }
 // 客户端通知赛季切换完成
 message LadderSeasonFinishedC2S {
@@ -51,4 +54,9 @@ message LadderDragonS2C {
 message LadderRecreationDataS2C {
     RecreationBase    recreationBaseData = 1; // 娱乐赛基础信息
     map<int32, int32> addition           = 2; // 赛季内加成使用次数 key: EntertainmentScoreConfig.ID , value: 已经使用次数
+}
+//推送巅峰赛称号数据
+message LadderPeakRankTitleDataS2C
+{
+    PeakRankTitleData peakRankTitle = 1; // 巅峰赛称号数据
 }

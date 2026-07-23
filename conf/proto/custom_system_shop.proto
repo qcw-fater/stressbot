@@ -1,52 +1,53 @@
 
-syntax = "proto3";
-option go_package = ".;pb";
+syntax             = "proto3";
+option  go_package = ".;pb";
 package Game;
 
 import "common.proto";
 
-//商品数据
+// 商品数据
 message GoodsInfo {
-  int32           ID                  = 1;  // 商品id
-  int32           SortId              = 2;  // 排序id
-  int32           ItemID              = 3;  // 道具id
-  int32           Num                 = 4;  // 单份数量
-  int32           CostMoneyType       = 5;  // 出售货币道具id
-  int32           Price               = 6;  // 原始单价
-  int32           Discount            = 7;  // 折扣单价
-  string          DiscountPower       = 8;  // 折扣度
-  string          LimitOpenTime       = 9;  // 限时出售开启时间
-  int32           ContinueTime        = 10; // 限时出售持续时间小时
-  int32           LimitGroup          = 11; // 个人限购分组
-  int32           LimitType           = 12; // 个人限购方式
-  int32           LimitNumber         = 13; // 个人限购数量
-  int32           EveryBuyLimit       = 14; // 每次购买数量限制
-  repeated int32  Require             = 15; // 购买限制条件
-  repeated int32  RequireParm         = 16; // 购买限制条件参数
-  int32           GetWay              = 17; // 获取途径
-  int64           LimitBeginTime      = 19; // 限时出售开启时间 时间戳
-  int64           LimitEndTime        = 20; // 限时出售结束时间 时间戳
-  string          PushShelfTime       = 21; // 自动上架时间
-  string          DiscountTime        = 22; // 限时折扣
-  int32           DiscountContinue    = 23; // 限时折扣持续时长（小时）
-  int64           PushShelfBeginTime  = 24; // 自动上架时间时间戳
-  int64           DiscountEndTime     = 25; // 限时折扣结束时间戳
-  int64           DiscountBeginTime   = 26; // 限时折扣开始时间戳
-  int32           UIGoToID            = 27; // 跳转界面
-  int32           LabelID             = 28; // 特殊标签多语言ID
-  RewardConfig    AdditionalCost      = 29; // 新增消耗道具
-  int32           GoodsGroupId        = 30; // 线性推送组id
-  repeated int32           CashGoodsID         = 31; // 直购ID
+    int32          ID                 = 1;  // 商品id
+    int32          SortId             = 2;  // 排序id
+    int32          ItemID             = 3;  // 道具id
+    int32          Num                = 4;  // 单份数量
+    int32          CostMoneyType      = 5;  // 出售货币道具id
+    int32          Price              = 6;  // 原始单价
+    int32          Discount           = 7;  // 折扣单价
+    string         DiscountPower      = 8;  // 折扣度
+    string         LimitOpenTime      = 9;  // 限时出售开启时间
+    int32          ContinueTime       = 10; // 限时出售持续时间小时
+    int32          LimitGroup         = 11; // 个人限购分组
+    int32          LimitType          = 12; // 个人限购方式
+    int32          LimitNumber        = 13; // 个人限购数量
+    int32          EveryBuyLimit      = 14; // 每次购买数量限制
+    repeated int32 Require            = 15; // 购买限制条件
+    repeated int32 RequireParm        = 16; // 购买限制条件参数
+    int32          GetWay             = 17; // 获取途径
+    int64          LimitBeginTime     = 19; // 限时出售开启时间 时间戳
+    int64          LimitEndTime       = 20; // 限时出售结束时间 时间戳
+    string         PushShelfTime      = 21; // 自动上架时间
+    string         DiscountTime       = 22; // 限时折扣
+    int32          DiscountContinue   = 23; // 限时折扣持续时长（小时）
+    int64          PushShelfBeginTime = 24; // 自动上架时间时间戳
+    int64          DiscountEndTime    = 25; // 限时折扣结束时间戳
+    int64          DiscountBeginTime  = 26; // 限时折扣开始时间戳
+    int32          UIGoToID           = 27; // 跳转界面
+    int32          LabelID            = 28; // 特殊标签多语言ID
+    RewardConfig   AdditionalCost     = 29; // 新增消耗道具
+    int32          GoodsGroupId       = 30; // 线性推送组id
+    repeated int32 CashGoodsID        = 31; // 直购ID
+    int64          PushShelfEndTime   = 32; // 自动下架时间时间戳
 }
 
 // 商品组数据
 message GoodsGroupConf {
-  int32 id = 1; // 配置id
-  repeated  int32 goodsList = 2; // 商品，列表
+    int32          id        = 1; // 配置id
+    repeated int32 goodsList = 2; // 商品，列表
 }
 
 // 商店随机的权重
 message ShopWeight {
-  int32 sum = 1; // 权重和
-  repeated  int32 WeightList = 2; // 权重值
+    int32          sum        = 1; // 权重和
+    repeated int32 WeightList = 2; // 权重值
 }

@@ -47,6 +47,7 @@ message teamRoomInfo {
     repeated TeamMemberData     Members                 = 6;           //队伍成员信息
     TeamStatus                  status                  = 7;           // 队伍状态
     bool                        fill_teammate           = 8;           // 搜打撤：是否开启补齐队友（仅 GM_HAZARD_OPS 模式使用）
+    int32                       sdcMapId                = 9;           // 搜打撤当前 SDCMap.ID（仅 GM_HAZARD_OPS 模式使用）
 }
 
 //队伍管理器到逻辑服消息
@@ -128,6 +129,5 @@ message TeamRecruitData {
   ActivityBattleRecruitData activityBattleData = 13; // 活动赛数据
   ActivityBattleSingleRecruitData activityBattleSingleData = 14; // 单模式活动赛数据
 }
-
 
 

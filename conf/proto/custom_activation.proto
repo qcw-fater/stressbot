@@ -55,6 +55,7 @@ message GiftCodeBatchInfo {
     int32                   giftCodeType    = 10; // 礼包码类型 普通礼包码  通用礼包码
     int32                   group           = 11; // 分组
     bool                    valid           = 12; // 是否有效, true：有效 false：作废
+    repeated string         storeList       = 13; // SDK渠道(store)限制，空=不限
 }
 
 // 玩家礼包码使用记录

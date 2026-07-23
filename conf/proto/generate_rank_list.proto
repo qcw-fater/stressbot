@@ -25,6 +25,7 @@ message RankListGetC2S {
     int32 heroId        = 3;  // 英雄id
     int32 lbsId         = 4;  // LbsId
 	int32 jobId         = 5;  // 职业id
+	int32 seasonId      = 6;  // 赛季Id（巅峰赛荣耀殿堂查历史赛季用，0或未传表示当前赛季）
 }
 // 排行榜
 message RankListGetS2C {

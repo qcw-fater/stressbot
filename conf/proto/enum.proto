@@ -124,22 +124,43 @@ enum GMEventType {
     CreateGuild               = 83; // 创建战队
     ChangeCreditScore         = 84; // 改变信誉分
     AddRecreationScore        = 85; // 增加娱乐赛积分
+    SDCSeasonReset            = 86; // SDC搜打撤赛季重置（param[0]=新赛季ID）
+    SDCSetLevel               = 87; // SDC搜打撤设置主等级（param[0]=等级，param[1]=经验，可选）
+    SDCSetGrowthLevel         = 88; // SDC搜打撤设置成长子模块等级（param[0]=成长类型，param[1]=等级）
+    ActivityLotteryDrop       = 89; // 活动抽奖测试（param[0]=活动ID，param[1]=卡池ID，param[2]=次数；纯模拟，不消耗、入库、不发奖）
+    AddAllHeroCup             = 90; // 增加所有英雄奖杯（param[0]=每个英雄增加的奖杯数）
+    SquadBattleSeasonReset    = 91; // 最强小队赛切届(param[0]=新届号,自动设开赛时间=now进入筹备)
+    SDCSetRankScore           = 92; // SDC搜打撤设置当前排位分（param[0]=排位分）
+    SDCSetProtectCount        = 93; // SDC搜打撤设置大段位保护次数（param[0]=RankGroup，param[1]=次数）
+    SDCSetMmr                 = 94; // SDC搜打撤设置隐藏MMR（param[0]=MMR值）
+    SDCResetWarmup            = 95; // SDC搜打撤重置温暖局状态
+    SDCSetPreBattleValue      = 96; // SDC搜打撤设置战前价值测试覆盖（param[0]=战前价值）
+    SDCQueryWarmup            = 97; // SDC搜打撤查询温暖局状态
+    SDCCompleteCurrentStageTasks = 98; // SDC搜打撤完成当前已解锁阶段任务
 }
 
 // 排行榜类型
 enum RankType {
-    RT_Invalid         = 0;  // 无
-    RT_Player_Cup      = 1;  // 玩家等级排行榜
-    RT_Ladder          = 2;  // 天梯(排位)排行榜
-    RT_Hero_Cup        = 3;  // 英雄排行榜
-    RT_Hero_Lbs        = 4;  // 英雄LBS排行榜
-    RT_Achievement     = 5;  // 成就积分排行榜
-    RT_GuildActive     = 6;  // 战队活跃值排行榜
-    RT_GuildCup        = 7;  // 战队总奖杯排行榜
+    RT_Invalid = 0;  // 无
+    RT_Player_Cup = 1;  // 玩家等级排行榜
+    RT_Ladder = 2;  // 天梯(排位)排行榜
+    RT_Hero_Cup = 3;  // 英雄排行榜
+    RT_Hero_Lbs = 4;  // 英雄LBS排行榜
+    RT_Achievement = 5;  // 成就积分排行榜
+    RT_GuildActive = 6;  // 战队活跃值排行榜
+    RT_GuildCup = 7;  // 战队总奖杯排行榜
     RT_RecreationScore = 8;  // 娱乐赛积分排行榜
-    RT_RecreationGame  = 9;  // 娱乐赛玩法排行榜
-    RT_Job_Lbs         = 10; // Lbs职业排行榜
-    RT_Max             = 11; // 玩家排行榜最大值
+    RT_RecreationGame = 9;  // 娱乐赛玩法排行榜
+    RT_Job_Lbs = 10; // Lbs职业排行榜
+    RT_SDC_Rank = 11; // 搜打撤段位榜
+    RT_SDC_Loot = 12; // 搜打撤收益榜
+    RT_SDC_Kill = 13; // 搜打撤击杀榜
+    RT_PeakRankingSeason = 14; // 巅峰赛赛季排行榜
+    RT_SquadBattle_Score = 15; // 最强小队赛全服积分榜
+    RT_SquadBattle_Zone = 16; // 最强小队赛赛区积分榜
+    RT_Squad_Score = 17; // 小队积分排行榜(常态榜,按小队总积分排序,不随赛事清空,v1.1)
+    RT_Squad_Active = 18; // 小队活跃排行榜(常态榜,按小队总活跃排序,不随赛事清空)
+    RT_Max = 19; // 排行榜类型最大值(含小队赛榜,manager.go:defaultManagerConfig 自动配默认配置)}
 }
 
 // 邀请组队操作指令
@@ -193,7 +214,10 @@ enum TeamActPro {
     TAP_BATTLE_ACTIVITY_DATA        = 30; // 更新活动赛数据
     TAP_BATTLE_ACTIVITY_SELECT_STEP = 31; // 活动赛队长选择阶段
     TAP_BATTLE_ACTIVITY_SINGLE_DATA = 32; // 更新单模式活动赛数据
+    TAP_UPDATE_QUICK_CHAT           = 33; // 切玩法后 Logic 端推送新 modeId 下的快捷消息装备到 Team（复用 gameInfo.quickChatIds 字段，与 Room 端 MAP_UPDATE_QUICK_CHAT 对称）
     TAP_SDC_FILL_TEAMMATE           = 45; // 搜打撤补齐队友状态变更
+    TAP_SDC_SELECT_MAP              = 46; // 搜打撤选择地图状态变更
+    TAP_SYNC_QUICK_CHAT_EQUIP       = 47; // 玩家在桌面修改快捷消息装备后 Logic 同步全量 QuickChatEquipMap 到 Team（更新成员 gameInfo，仅写 EquipMap）
 }
 
 // 匹配操作指令
@@ -268,6 +292,12 @@ enum MatchActPro {
     MAP_SEND_STANDINGS                    = 67; // 房间内发送战绩
     MAP_HERO_UPDATE_DATA                  = 68; // 同步更新英雄数据
     MAP_PLAYER_UPDATE_DATA                = 69; // 同步更新玩家数据
+    MAP_CUSTOM_ROOM_TOGGLE_ADVANCED_MODE  = 70; // 自定义房间切换高级赛制开关
+    MAP_UPDATE_QUICK_CHAT                 = 71; // 切玩法后 Logic 端推送新 modeId 下的快捷消息装备到 Room（复用 gameInfo.quickChatIds 字段）
+    MAP_HELP_BAN_REQUEST                  = 72; // 帮禁请求
+    MAP_HELP_BAN_EXECUTE                  = 73; // 帮禁执行
+    MAP_HELP_BAN_CANCEL                   = 74; // 帮禁取消
+    MAP_SYNC_QUICK_CHAT_EQUIP             = 75; // 玩家在桌面修改快捷消息装备后 Logic 同步全量 QuickChatEquipMap 到 Room（更新对战 fighter，仅写 EquipMap）
 }
 
 // 房间服务器操作指令
@@ -419,6 +449,7 @@ enum AttrType {
     AT_DailyTaskScore            = 37; // 日常任务积分
     AT_DailyTaskRewardMask       = 38; // 日常任务奖励领取掩码
     AT_Voucher                   = 22; // 代金券
+    AT_SDCSeasonCoin             = 47; // 搜打撤赛季货币
 }
 
 // 属性值取值范围
@@ -460,7 +491,11 @@ enum PlayerTaskType {
     PTT_AdventureGift        = 9;  // 奇遇礼包任务
     PTT_RecreationSeasonTask = 10; // 娱乐赛季类型任务
     PTT_HeroLimitedTask      = 11; // 英雄限时任务
-    PTT_MAX                  = 12; // 最大类型
+    PTT_SDCMainTask          = 12; // 搜打撤主线任务
+    PTT_SDCSeasonStageTask   = 13; // 搜打撤赛季阶段任务
+    PTT_SDCSeasonRewardCond  = 14; // 搜打撤赛季奖励解锁条件
+    PTT_SquadTask            = 15; // 小队任务(C-6,成员个人达成汇总到小队)
+    PTT_MAX                  = 16; // 最大类型
 }
 
 // 玩家统计字段
@@ -483,14 +518,24 @@ enum PlayerStatisticsType {
     PST_CollectionsCount    = 15; // 藏品数量
 }
 
+// 排位赛结算奖牌类型
+enum LadderMedalType {
+    LMT_None    = 0; // 无奖牌
+    LMT_TopLane = 1; // 顶级分路
+    LMT_Gold    = 2; // 金牌
+    LMT_Silver  = 3; // 银牌
+    LMT_Bronze  = 4; // 铜牌
+}
+
 // 商品限购数据
 enum GoodsLimitType {
-    GLT_NORMAL  = 0;
-    GLT_FOREVER = 1; // 永久限购
-    GLT_DAY     = 2; // 每日限购
-    GLT_WEEK    = 3; // 每周限购
-    GLT_MONTH   = 4; // 每月限购
-    GLT_SEASON  = 5; // 赛季限购
+    GLT_NORMAL     = 0;
+    GLT_FOREVER    = 1; // 永久限购
+    GLT_DAY        = 2; // 每日限购
+    GLT_WEEK       = 3; // 每周限购
+    GLT_MONTH      = 4; // 每月限购
+    GLT_SEASON     = 5; // 赛季限购
+    GLT_SDC_SEASON = 6; // 搜打撤赛季限购
 }
 
 // 定时器事件id
@@ -535,6 +580,7 @@ enum ChatType {
     CT_Team      = 6; // 组队内聊天
     CT_Room      = 7; // 房间内聊天
     CT_Guild     = 8; // 战队聊天
+    CT_Squad     = 9; // 小队聊天
 }
 
 // 聊天内容类型
@@ -678,6 +724,43 @@ enum GuildPositionType {
     GPT_Member = 2; // 队员
 }
 
+// 小队职位
+enum SquadPositionType {
+    SPT_Leader = 0; // 队长
+    SPT_Member = 1; // 队员
+}
+
+// 小队权限
+enum SquadPermission {
+    SP_Invalid  = 0; // 无效权限
+    SP_Edit     = 1; // 编辑小队资料
+    SP_Audit    = 2; // 审批入队申请
+    SP_Transfer = 3; // 转让队长
+    SP_Kick     = 4; // 踢出成员
+    SP_Invite   = 5; // 邀请玩家
+    SP_Exit     = 6; // 退出或解散小队
+}
+
+// 小队日记事件类型
+enum SquadEventId {
+    SET_MemberJoin     = 0; // 成员加入
+    SET_MemberLeave    = 1; // 成员离开
+    SET_KickMember     = 2; // 踢出成员
+    SET_LeaderTransfer = 3; // 转让队长
+    SET_ScoreChange    = 4; // 积分变化
+    SET_LevelUp        = 5; // 等级提升
+    SET_LevelDown      = 6; // 等级降低
+}
+
+// 最强小队赛阶段(仿 GuildRouteStepType)
+enum SquadBattleStage {
+    SBS_Unknow    = 0; // 未开启/未到时间
+    SBS_Prepare   = 1; // 筹备阶段
+    SBS_Signup    = 2; // 报名阶段
+    SBS_Match     = 3; // 比赛阶段
+    SBS_Celebrate = 4; // 庆祝阶段
+}
+
 enum GiftCodeType {
     GCT_Normal  = 0;
     GCT_General = 1; // 普通礼包码
@@ -788,7 +871,7 @@ enum JLevelSource {
 
 enum SystemOpenId {
     SOI_NORMAL                 = 0;
-
+    SOI_MATCH                  = 3900;  // 匹配功能
     SOI_FIRST_REWARD           = 10000; // 首充
     SOI_PACK                   = 10200; // 背包
     SOI_DAY_TASK               = 10300; // 任务
@@ -820,6 +903,11 @@ enum SystemOpenId {
     SOI_BACK_HERO              = 13200; // 旧账号回归领取角色
     SOI_MONTH_SIGN             = 13300; // 月签到
     SOI_SDC                    = 13301; // 搜打撤
+    SOI_ACTIVITY_BATTLE        = 13500; // 阶段活动赛
+    SOI_ACTIVITY_SINGLE_BATTLE = 13501; // 单模式活动赛
+	SOI_PEAK_RANKING           = 13800; // 巅峰赛
+	SOI_SQUAD                  = 13900; // 小队
+    SOI_PAY_CHECK_LIMIT        = 14000; // 直购限购检测
 }
 
 enum SKinType {
@@ -1179,6 +1267,15 @@ enum LadderDraftType {
     LDT_Pick     = 1; // pick模式
     LDT_Ban_Pick = 2; // banPick模式
     LDT_Max      = 3; // 最大值
+}
+
+// 自定义房间赛制（打几局）
+// 枚举值直接等于实际需要打的局数，便于运算和配表
+enum BOType {
+    BO_Invalid = 0; // 无效/未设置
+    BO_One     = 1; // BO1（单局定胜负）
+    BO_Three   = 3; // BO3（三局两胜）
+    BO_Five    = 5; // BO5（五局三胜）
 }
 
 // 英雄cv检测条件

@@ -4,6 +4,7 @@ option go_package = ".;pb";
 package Game;
 
 import "nohot_custom_battle.proto";
+import "enum.proto";
 
 // ==================== 基础数据结构 ====================
 
@@ -20,6 +21,78 @@ message SDCPackSlotList {
     repeated SDCPackSlot packs = 1; // 背包列表
 }
 
+// 局外容器持久化列表（用于Redis存储）
+message SDCOutBattleContainerSaveDataList {
+    repeated SDCOutBattleContainerSaveData containers = 1; // 局外容器状态列表
+}
+
+// 临时英雄天赋/觉醒加成（用于Redis存储）
+message SDCTemporaryHeroBonus {
+    int32 heroId      = 1; // 目标英雄ID
+    int32 talentCount = 2; // 临时天赋计划卡数量
+    int32 awakeCount  = 3; // 临时觉醒激活卡数量
+}
+
+// 临时英雄天赋/觉醒加成列表（用于Redis存储）
+message SDCTemporaryHeroBonusState {
+    repeated SDCTemporaryHeroBonus bonuses = 1; // 按英雄保存的临时加成
+}
+
+// 搜打撤MMR持久化数据（用于Redis存储）
+message SDCMmrData {
+    int32 mmrScore           = 1; // 当前隐藏分，默认0
+    int64 lastSettleBattleId = 2; // 最近一次成功写回MMR的战斗ID，用于结算幂等
+    int64 updateTime         = 3; // 最近更新时间戳，秒
+}
+
+// 搜打撤温暖局统计状态（用于Redis存储）
+message SDCWarmBattleStatistics {
+    int32 loseStreak          = 1; // 连续失败撤离场次
+    int32 lowPerfStreak       = 2; // 连续低表现局数
+    int32 cooldownLeft        = 3; // 温暖局冷却剩余次数
+    int32 dailyCount          = 4; // 当日已触发温暖局次数
+    int32 dailyDate           = 5; // 当日计数日期，yyyyMMdd
+    int64 pendingMatchId      = 6; // 已判定待消费的温暖局matchUuid
+    int64 lastConsumedMatchId = 7; // 最近已消费的温暖局matchUuid
+}
+
+// 局外容器持久化状态
+message SDCOutBattleContainerSaveData {
+    SDCPackType packType             = 1; // 容器类别，仅钥匙链/安全箱
+    int32 currentSdcParameterId      = 2; // 当前生效等级配置ID
+    repeated SDCContainerLevelState levels = 3; // 已拥有等级状态
+}
+
+// 局外容器等级状态
+message SDCContainerLevelState {
+    int32 sdcParameterId = 1; // SDCParameter配置ID
+    int64 expireTime     = 2; // 到期Unix秒，0表示永久
+    bool isSeason        = 3; // 是否赛季型
+    bool isCurrent       = 4; // 是否当前生效
+    bool isExpired       = 5; // 是否已过期
+    int32 capacity       = 6; // 容量
+    int32 buttonState    = 7; // 1使用 2使用中 3激活 4去获得 5未拥有
+    repeated SDCContainerActivateCard availableCards = 8; // 可用于该等级的权限卡
+}
+
+// 局外容器权限卡展示信息
+message SDCContainerActivateCard {
+    int64 itemGuid       = 1; // 仓库内权限卡GUID
+    int32 itemId         = 2; // 权限卡Item.ID
+    int32 number         = 3; // 可用数量
+    int32 sdcParameterId = 4; // 目标等级
+    int32 durationSeconds = 5; // 单张增加时长
+    bool isSeason        = 6; // 是否赛季型
+}
+
+// 局外容器客户端/快照状态
+message SDCOutBattleContainerState {
+    SDCPackType packType             = 1; // 容器类别，仅钥匙链/安全箱
+    int32 currentSdcParameterId      = 2; // 当前生效等级配置ID
+    repeated SDCContainerLevelState levels = 3; // 等级状态
+    repeated int32 qualityLimits     = 4; // 安全箱品质数量限制，钥匙链为空
+}
+
 // ==================== 业务数据结构 ====================
 
 // 战备数据
@@ -31,7 +104,9 @@ message SDCPrepareData {
     SDCHeroTalentAwakeInfo heroInfo       = 5; // SDC道具天赋/觉醒加成（仅增量，基础值由客户端从英雄系统获取）
     bool fillTeammate                     = 6; // 是否开启补齐队友（持久化选项，界面回显用）
     int32 skinId                          = 7; // 当前选择皮肤ID
-    int32 modeId                          = 8; // 默认地图ID（来自SDCParameter ID=13）
+    int32 modeId                          = 8; // 当前 GameBattleMode.ID
+    repeated SDCOutBattleContainerState outBattleContainers = 9; // 局外容器状态
+    int32 sdcMapId                        = 10; // 当前 SDCMap.ID
 }
 
 // 仓库数据
@@ -79,22 +154,170 @@ message SDCSeasonData {
     int32 totalLootValue         = 8;  // 赛季累计收益总价值
     repeated int32 rewardedTiers = 9;  // 已领取奖励的段位列表
     int32 totalMonsterKills      = 10; // 总击杀怪物数
+    int32 rankScore              = 11; // 当前排位分
+    int32 highestTier            = 12; // 本赛季最高段位 ID（RankId）
+    int32 highestRankScore       = 13; // 本赛季最高排位分
+    map<int32, int32> protectCounts = 14; // 大段位保护次数（key=RankGroup, value=剩余次数）
+    bool shownSeasonSettle       = 15; // 是否已展示赛季结算界面
+    int32 assistCount            = 16; // 赛季累计真人助攻数
+    bool rankEnabled             = 17; // 排位功能开关（玩家进入搜打撤模式前勾选）
+    int64 seasonStartTime        = 18; // 当前赛季实际开始时间戳（秒）
+    int32 seasonDamage           = 19; // 当前赛季累计伤害
+    int32 seasonDeathCount       = 20; // 当前赛季累计死亡数
+    int32 maxSurviveTime         = 21; // 当前赛季单局最长存活时长（秒）
+    int32 maxLootValue           = 22; // 当前赛季单局最高收益
+    int64 totalSurviveTime       = 23; // 当前赛季累计游戏时长，累加surviveTime秒
+    int64 totalLootAssetValue    = 24; // 当前赛季累计带出资产价值，用于赚损比分子
+    int64 totalLossAssetValue    = 25; // 当前赛季累计损失资产价值，用于赚损比分母
+    int32 currentConsecutiveWinCount = 26; // 当前赛季当前连胜局数
+    int32 maxConsecutiveWinCount = 27; // 当前赛季最高连胜局数
+    int64 totalAssetValue        = 28; // 当前战备仓库总资产快照，战斗结算时刷新
 }
 
 // ==================== 任务数据 ====================
 
 // 任务信息
 message SDCTaskInfo {
-    int32 taskId   = 1; // 任务ID
-    int32 progress = 2; // 当前进度
-    int32 target   = 3; // 目标进度
-    int32 status   = 4; // 状态 (0-进行中 1-已完成 2-已领取)
+    int32 taskId                = 1; // 兼容旧字段：新语义为 SDCTaskID
+    int32 progress              = 2; // 当前进度
+    int32 target                = 3; // 目标进度
+    int32 status                = 4; // 状态 (0-进行中 1-已完成 2-已领取)
+    repeated int32 refTaskIds   = 5; // 关联 Task.csv 的任务ID列表，全部完成后本任务可领取
+    repeated int64 refDynamicTaskIds = 6; // 与refTaskIds按下标一一对应的独立TaskInfo.dynamicTaskId
+}
+
+// 收集者提交需求道具
+message SDCCollectorRequiredItem {
+    int32 itemId = 1; // 需提交的 SDC 道具ID
+    int32 count  = 2; // 需提交数量
+}
+
+// 收集者槽位数据
+message SDCCollectorSlot {
+    int32 slotIndex                            = 1; // 槽位序号，固定 1/2/3
+    int32 tierId                               = 2; // SDCCollectorTier.TierID
+    repeated SDCCollectorRequiredItem requiredItems = 3; // 需提交道具列表
+    int32 state                                = 4; // 状态：1=未提交 2=已提交
+    bool locked                                = 5; // 是否锁定，锁定后刷新不替换
+    int64 generatedAt                          = 6; // 生成时间戳，秒
+}
+
+// 收集者赛季数据
+message SDCCollectorData {
+    int32 seasonId                          = 1; // 当前收集者所属赛季ID
+    int32 completedCount                    = 2; // 本赛季收集者完成次数
+    int32 manualRefreshUsed                 = 3; // 当日手动刷新已用次数
+    int32 refreshDay                        = 4; // 刷新日期，yyyyMMdd
+    repeated SDCCollectorSlot slots         = 5; // 当前 3 个收集者槽位
+    repeated int32 claimedMilestoneIndexes  = 6; // 已领取累计奖励档位，下标从 1 开始
+}
+
+// SDC任务系统赛季奖励状态
+message SDCSeasonRewardState {
+    int32 seasonId  = 1; // 当前状态所属赛季ID
+    int32 sdcTaskId = 2; // SDCTask.TaskType=3 的 SDCTaskID
+    int32 state     = 3; // 状态：1=未解锁 2=待领取 3=已领取
+    repeated int64 refDynamicTaskIds = 4; // 与当前赛季奖励配置RefTaskID按下标一一对应
+}
+
+// SDC主线/赛季阶段解锁状态
+message SDCTaskStageState {
+    int32 seasonId = 1; // 状态所属赛季ID；主线填0
+    int32 stageId  = 2; // 当前已解锁阶段ID，从1开始；0按1兼容
 }
 
 // 任务数据
 message SDCTaskData {
-    repeated SDCTaskInfo tasks = 1; // 任务列表
-    int32 refreshTime          = 2; // 刷新时间
+    repeated SDCTaskInfo tasks           = 1; // 主线/阶段/赛季奖励展示任务列表
+    int32 refreshTime                    = 2; // 兼容旧字段；新收集者刷新信息使用 collector
+    SDCCollectorData collector           = 3; // 收集者任务池与累计奖励状态
+    SDCSeasonRewardState seasonReward    = 4; // 任务系统赛季奖励领取状态
+    SDCTaskStageState mainStage          = 5; // 主线当前解锁阶段
+    SDCTaskStageState seasonStage        = 6; // 当前赛季阶段任务当前解锁阶段
+}
+
+// SDC任务子任务展示数据
+message SDCTaskRefView {
+    int32 refTaskId       = 1; // SDCTask.RefTaskID 引用的 Task.csv.ID
+    int64 dynamicTaskId   = 2; // 当前通用任务实例 TaskInfo.dynamicTaskId，0表示暂未创建实例
+    int32 progress        = 3; // 当前子任务进度，目标由客户端按 refTaskId 查配置
+    TaskState status      = 4; // 当前子任务状态，沿用通用 TaskState
+}
+
+// SDC任务展示数据
+message SDCTaskView {
+    int32 sdcTaskId              = 1; // SDCTask.SDCTaskID
+    int32 taskType               = 2; // SDCTask.TaskType：1=主线 2=阶段 3=赛季奖励
+    int32 seasonId               = 3; // 所属赛季ID，主线可为0
+    int32 stageId                = 4; // 所属阶段ID
+    repeated int32 refTaskIds    = 5; // 关联 Task.csv 任务ID
+    int32 progress               = 6; // 当前进度
+    int32 target                 = 7; // 目标进度
+    int32 status                 = 8; // 状态：0=进行中 1=待领取 2=已领取
+    bool showInGame              = 9; // 是否局内展示
+    int32 resetRule              = 10; // 重置规则
+    int32 sdcMapId               = 11; // 限定 SDCMap.ID，0表示不限
+    repeated int32 location      = 12; // 局内标记坐标 x|y
+    int32 range                  = 13; // 局内标记范围
+    repeated SDCTaskRefView subTasks = 14; // 子任务实例明细，与 refTaskIds 按下标一一对应并保持相同数量
+}
+
+// 收集者槽位展示数据
+message SDCCollectorSlotView {
+    int32 slotIndex                              = 1; // 槽位序号，固定 1/2/3
+    int32 tierId                                 = 2; // SDCCollectorTier.TierID
+    repeated SDCCollectorRequiredItem requiredItems = 3; // 需提交道具列表
+    int32 state                                  = 4; // 状态：1=未提交 2=已提交
+    bool locked                                  = 5; // 是否锁定
+    int64 generatedAt                            = 6; // 生成时间戳，秒
+}
+
+// 收集者累计奖励展示数据
+message SDCCollectorMilestoneView {
+    int32 milestoneIndex = 1; // 档位下标，从1开始
+    int32 needCount      = 2; // 领取所需完成次数
+    int32 state          = 3; // 状态：1=未达成 2=待领取 3=已领取
+}
+
+// 收集者页展示数据
+message SDCCollectorView {
+    int32 seasonId                                = 1; // 当前赛季ID
+    int32 completedCount                          = 2; // 本赛季收集者完成次数
+    int32 manualRefreshUsed                       = 3; // 当日手动刷新已用次数
+    int32 manualRefreshLimit                      = 4; // 当日手动刷新上限
+    int32 refreshDay                              = 5; // 刷新日期，yyyyMMdd
+    repeated SDCCollectorSlotView slots           = 6; // 当前槽位
+    repeated SDCCollectorMilestoneView milestones = 7; // 累计奖励档位
+    int64 nextAutoRefreshTime                     = 8; // 收集者任务池下一次自动刷新时间戳，秒
+}
+
+// SDC任务红点摘要
+message SDCTaskRedPointSummary {
+    bool mainTask        = 1; // 主线任务是否有可领
+    bool seasonStageTask = 2; // 赛季阶段任务是否有可领
+    bool collector       = 3; // 收集者累计奖励是否有可领
+    bool seasonReward    = 4; // 任务系统赛季奖励是否有可领
+}
+
+// SDC任务条件展示数据
+message SDCTaskConditionView {
+    int32 conditionType = 1; // 条件类型：1=赛季阶段任务完成度 2=已完成收集者任务数
+    int32 refTaskId     = 2; // 对应的 Task.csv 条件任务ID
+    int32 progress      = 3; // 当前进度
+    int32 target        = 4; // 目标进度
+    int32 status        = 5; // 状态：0=未达成 1=已达成
+}
+
+// SDC任务页数据
+message SDCTaskPageData {
+    int32 tabType                       = 1; // 1=主线 2=赛季阶段 3=收集者 4=赛季奖励
+    int32 stageId                       = 2; // 当前展示阶段ID
+    repeated SDCTaskView tasks          = 3; // 当前页任务列表
+    SDCCollectorView collector          = 4; // 收集者页数据，可为空
+    SDCTaskView seasonReward            = 5; // 赛季奖励数据，可为空
+    SDCTaskRedPointSummary redPoint     = 6; // 红点摘要
+    int64 seasonEndTime                 = 7; // 当前赛季结束时间戳，秒
+    repeated SDCTaskConditionView seasonRewardConditions = 8; // 赛季奖励条件展示进度
 }
 
 // ==================== 成长数据 ====================
@@ -103,26 +326,23 @@ message SDCTaskData {
 message SDCGrowthData {
     int32 warehouseLevel      = 1; // 仓库等级
     int32 warehouseSlots      = 2; // 仓库格子数
-    int32 amplifierPackLevel  = 3; // 增幅器背包等级
-    int32 amplifierPackSlots  = 4; // 增幅器背包格子数
-    int32 medicinePackLevel   = 5; // 药品背包等级
-    int32 medicinePackSlots   = 6; // 药品背包格子数
-    int32 safeBoxSlots        = 7; // 安全箱格子数
-    int32 sdcLevel            = 8; // SDC等级
-    int32 sdcExp              = 9; // SDC当前经验
-    // --- 新增字段 ---
-    int32 battlePackLevel     = 10; // 战斗背包等级（统一管理增幅器+药品背包）
-    int32 shopLevel           = 11; // 商店等级
+    int32 amplifierPackSlots  = 3; // 增幅器背包格子数
+    int32 medicinePackSlots   = 4; // 药品背包格子数
+    int32 safeBoxSlots        = 5; // 安全箱格子数
+    int32 sdcLevel            = 6; // SDC等级
+    int32 sdcExp              = 7; // SDC当前经验
+    int32 battlePackLevel     = 8; // 战斗背包等级（统一管理增幅器+药品背包）
+    int32 shopLevel           = 9; // 商店等级
     // 4个制作台等级
-    int32 craftArmorLevel     = 12; // 护甲制作台等级
-    int32 craftAmplifierLevel = 13; // 增幅器制作台等级
-    int32 craftChipLevel      = 14; // 芯片制作台等级
-    int32 consumableLevel     = 15; // 消耗品制作台等级
+    int32 craftArmorLevel     = 10; // 护甲制作台等级
+    int32 craftAmplifierLevel = 11; // 增幅器制作台等级
+    int32 craftChipLevel      = 12; // 芯片制作台等级
+    int32 consumableLevel     = 13; // 消耗品制作台等级
     // 4个制作台当前制作状态
-    SDCCraftSlot craftArmorSlot       = 16; // 护甲制作台当前制作状态
-    SDCCraftSlot craftAmplifierSlot   = 17; // 增幅器制作台当前制作状态
-    SDCCraftSlot craftChipSlot        = 18; // 芯片制作台当前制作状态
-    SDCCraftSlot craftConsumableSlot  = 19; // 消耗品制作台当前制作状态
+    SDCCraftSlot craftArmorSlot       = 14; // 护甲制作台当前制作状态
+    SDCCraftSlot craftAmplifierSlot   = 15; // 增幅器制作台当前制作状态
+    SDCCraftSlot craftChipSlot        = 16; // 芯片制作台当前制作状态
+    SDCCraftSlot craftConsumableSlot  = 17; // 消耗品制作台当前制作状态
 }
 
 // ==================== 藏品数据 ====================
@@ -170,7 +390,98 @@ message SDCPrepareSnapshot {
     repeated SDCWarehouseItem itemDetails = 5; // 战备内所有道具的完整信息
     bool fillTeammate                    = 6; // 是否开启补齐队友匹配
     int32 skinId                         = 7; // 皮肤ID
-    int32 modeId                         = 8; // 默认地图ID（来自SDCParameter ID=13）
+    int32 modeId                         = 8; // 当前 GameBattleMode.ID
+    repeated SDCOutBattleContainerState outBattleContainers = 9; // 匹配开始时局外容器快照
+    SDCHeroTalentAwakeInfo heroInfo      = 10; // 匹配开始时英雄临时天赋/觉醒加成快照
+    int32 sdcMapId                       = 11; // 当前 SDCMap.ID
+}
+
+// ==================== 套装 / 预设数据 ====================
+
+// SDC轻量消耗结构
+message SDCRewardCost {
+    int32 itemId = 1; // 道具ID
+    int32 number = 2; // 数量
+}
+
+// 套装方案定档
+message SDCSuitPlanPick {
+    int32 planId        = 1; // 方案ID
+    int32 suitType      = 2; // 套装券档位：1=基础 2=进阶 3=精锐
+    int32 contentPoolId = 3; // 当前抽中的内容池ID
+    int64 refreshTime   = 4; // 本次定档刷新时间戳（秒）
+}
+
+// 套装方案定档状态
+message SDCSuitPlanState {
+    repeated SDCSuitPlanPick plans = 1; // 当前所有方案定档
+    int64 nextAutoRefreshTime      = 2; // 下一次自动刷新时间戳（秒）
+}
+
+// 套装方案展示数据
+message SDCSuitPlanDisplay {
+    int32 planId                      = 1; // 方案ID
+    int32 suitType                    = 2; // 套装券档位：1=基础 2=进阶 3=精锐
+    string planName                   = 3; // 方案名称
+    int32 showValue                   = 4; // 展示价值
+    int32 contentPoolId               = 5; // 当前抽中的内容池ID
+    repeated SDCEquipSlot equipSlots  = 6; // 套装覆盖的装配槽位
+    repeated SDCPackSlot packSlots    = 7; // 套装覆盖的背包内容
+    SDCHeroTalentAwakeInfo heroInfo   = 8; // 藏品道具带来的天赋/觉醒加成
+    repeated SDCRewardCost refreshCost = 9; // 手动刷新消耗
+}
+
+// 套装使用状态
+message SDCSuitState {
+    bool usingSuit                    = 1; // 是否正在使用套装
+    int32 suitType                    = 2; // 当前套装券档位
+    int32 planId                      = 3; // 当前使用的方案ID
+    int32 contentPoolId               = 4; // 当前使用的内容池ID
+    SDCPrepareSnapshot beforeSnapshot = 5; // 使用套装前战备快照，用于取消恢复
+    bool committed                    = 6; // 是否已进战提交，提交后不可取消
+    int64 useTime                     = 7; // 使用套装时间戳（秒）
+    int64 commitTime                  = 8; // 进战提交时间戳（秒）
+}
+
+// 预设槽位
+message SDCPresetSlot {
+    SDCContainerType containerType = 1; // 容器类型：装配槽/战备背包
+    int32 containerDetail          = 2; // 容器详情：装配槽为SDCSlotType，背包为SDCPackType
+    int32 itemId                   = 3; // 道具配置ID，0表示空槽
+    SDCItemExtInfo ext             = 4; // 保存时道具扩展信息
+    bool expired                   = 5; // 钥匙链等容器是否已失效
+}
+
+// 预设补齐购买信息
+message SDCPurchaseFillInfo {
+    int32 itemId      = 1; // 需补齐道具ID
+    int32 count       = 2; // 需补齐数量
+    int32 goodsId     = 3; // 唯一价格对应商品ID
+    SDCRewardCost cost = 4; // 购买消耗
+}
+
+// 预设补齐购买请求项
+message SDCBuyFillItem {
+    int32 itemId = 1; // 需补齐道具ID
+    int32 count  = 2; // 需补齐数量
+}
+
+// 预设数据
+message SDCPresetData {
+    int32 slotIndex                    = 1; // 方案槽位，0表示上次配装/临时方案，1起为我的方案
+    string name                        = 2; // 方案名
+    repeated SDCPresetSlot slots       = 3; // 保存的槽位内容
+    repeated SDCPurchaseFillInfo fills = 4; // 使用时可购买补齐列表
+    int64 saveTime                     = 5; // 保存时间戳（秒）
+    bool lastBattlePreset              = 6; // 是否为上次配装
+    int32 amplifierPackSlots           = 7; // 当前预设增幅器背包最大格子数
+    int32 medicinePackSlots            = 8; // 当前预设药品背包最大格子数
+    int32 keyChainPackSlots            = 9; // 当前预设钥匙链最大格子数
+}
+
+// 预设数据列表（用于Redis存储）
+message SDCPresetDataList {
+    repeated SDCPresetData presets = 1; // 预设列表
 }
 
 // SDC战场掉落宝箱（含道具实例）
@@ -192,11 +503,50 @@ message SDCDropTaskGroup {
     repeated SDCDropChest chests = 2;     // 该任务的奖励宝箱列表
 }
 
+// SDC野怪掉落宝箱组
+message SDCMonsterDropGroup {
+    int32 unitId = 1;                     // 野怪UnitID
+    repeated SDCDropChest chests = 2;     // 该UnitID按死亡顺序消费的预生成宝箱池
+}
+
+// SDC玩家额外掉落宝箱
+message SDCDynamicDropChest {
+    int32 sourceType = 1;                 // 来源类型：1=区域宝箱，2=任务宝箱
+    int32 areaIndex = 2;                  // 区域索引，sourceType=1时有效
+    string taskGuid = 3;                  // 任务GUID，sourceType=2时有效
+    int32 chestIndex = 4;                 // 所在chests列表下标
+    int32 chestId = 5;                    // 宝箱配置ID
+    int32 chestType = 6;                  // 宝箱类型
+    repeated SDCWarehouseItem items = 7;  // 额外产出的道具实例
+}
+
+// SDC单玩家额外掉落结果
+message SDCPlayerExtraDrop {
+    int32 playerId = 1;                         // 额外掉落归属玩家ID
+    repeated SDCDynamicDropChest chests = 2;     // 该玩家每个宝箱的额外产出
+}
+
 // SDC战场掉落数据（完整）
 message SDCDropData {
     int32 totalBudget = 1;                // 本局总价值预算
     repeated SDCDropAreaGroup areaGroups = 2;  // 区域掉落组列表
     repeated SDCDropTaskGroup taskGroups = 3;  // 任务奖励组列表（第一期为空）
+    repeated SDCPlayerExtraDrop playerExtraDrops = 4; // 玩家维度额外掉落结果
+    repeated SDCMonsterDropGroup monsterDropGroups = 5; // 野怪UnitID维度掉落宝箱池
+}
+
+// SDC近局收益记录
+message SDCRecentProfitRecord {
+    int64 battleId = 1;              // 战斗ID，用于去重
+    int64 settleTime = 2;            // 结算时间戳，秒
+    int32 lootValue = 3;             // Battle重算后的带出收益
+    int32 equipSlotValueDiff = 4;    // 装配槽位价值差
+    int32 netOutcomeValue = 5;       // 动态刷新净收益口径
+}
+
+// SDC近局收益数据
+message SDCRecentProfitData {
+    repeated SDCRecentProfitRecord records = 1; // 最近6局，按时间从旧到新
 }
 
 // ====== 成长系统扩展 ======
@@ -226,18 +576,17 @@ enum SDCGrowthUpgradeType {
 // 升级预览单项
 message SDCUpgradePreviewItem {
     int32 level          = 1; // 等级
-    repeated string texts = 2; // 该等级的展示文案数组
 }
 
 // 可制作道具信息
 message SDCCraftableItem {
     int32 itemId                    = 1; // 道具ID
     bool  unlocked                  = 2; // 是否已解锁
-    string unlockTip                = 3; // 未解锁提示
-    repeated int32 costItemIds      = 4; // 消耗道具ID列表
-    repeated int32 costItemNums     = 5; // 消耗数量列表
-    int32 craftTime                 = 6; // 制作耗时（分钟）
-    repeated int32 randomAffixIds   = 7; // 随机词条ID列表
+    repeated int32 costItemIds      = 3; // 消耗道具ID列表
+    repeated int32 costItemNums     = 4; // 消耗数量列表
+    int32 craftTime                 = 5; // 制作耗时（分钟）
+    repeated int32 randomAffixIds   = 6; // 随机词条ID列表
+    int32 unlockLevel               = 7; // 解锁所需制作台等级
 }
 
 // ==================== 冻结快照 ====================
@@ -256,3 +605,104 @@ message SDCFrozenSnapshot {
     int64 battleResultAt = 10;            // 战斗结果写入时间戳
 }
 
+// ==================== 段位系统数据结构 ====================
+
+// 历史赛季数据快照
+message SDCHistorySeasonData {
+    int32 seasonId              = 1;  // 赛季 ID
+    int32 finalTier             = 2;  // 最终段位 ID
+    int32 finalRankScore        = 3;  // 最终排位分
+    int32 highestTier           = 4;  // 最高段位 ID
+    int32 highestRankScore      = 5;  // 最高排位分
+    int32 totalGames            = 6;  // 总场次
+    int32 winGames              = 7;  // 胜场（用于计算撤离率）
+    int32 totalPlayerKills      = 8;  // 累计真人淘汰
+    int32 totalMonsterKills     = 9;  // 累计怪物击杀
+    int32 assistCount           = 10; // 累计真人助攻
+    int32 totalLootValue        = 11; // 累计收益
+    int32 maxLootValue          = 12; // 单局最高收益
+    int32 maxSurviveTime        = 13; // 单局最长存活时长（秒）
+    reserved 14, 15, 17;             // 已移除的历史预计算字段，禁止复用字段号
+    int32 totalDamage           = 16; // 赛季累计伤害
+    int64 seasonStartTime       = 18; // 赛季实际开始时间戳（秒）
+    int64 seasonEndTime         = 19; // 赛季实际结束时间戳（秒）
+    int64 totalSurviveTime      = 20; // 历史赛季累计游戏时长，累加surviveTime秒
+    int64 totalLootAssetValue   = 21; // 历史赛季累计带出资产价值，用于赚损比分子
+    int64 totalLossAssetValue   = 22; // 历史赛季累计损失资产价值，用于赚损比分母
+    int32 maxConsecutiveWinCount = 23; // 历史赛季最高连胜局数
+    int64 totalAssetValue        = 24; // 赛季结束时的战备仓库总资产快照
+    int32 totalDeathCount        = 25; // 历史赛季累计死亡数
+}
+
+// 赛季结算展示数据（待展示的上赛季结算与新赛季继承结果）
+message SDCSeasonSettleShowData {
+    int32 oldSeasonId        = 1; // 上赛季 ID
+    int32 oldFinalTier       = 2; // 上赛季最终段位 ID
+    int32 oldFinalRankScore  = 3; // 上赛季最终排位分
+    int32 oldHighestTier     = 4; // 上赛季最高段位 ID
+    int32 newSeasonId        = 5; // 新赛季 ID
+    int32 newInitialTier     = 6; // 新赛季继承后初始段位 ID
+    int32 newInitialScore    = 7; // 新赛季继承后初始排位分
+    int64 settleTime         = 8; // 赛季结算时间戳（秒）
+}
+
+// ==================== 图鉴数据 ====================
+
+// 图鉴条目进度
+message SDCCodexEntry {
+    int32 codexId          = 1; // 图鉴条目 ID（SDCCodexActivate.ID）
+    int64 firstActivateTime = 2; // 首次激活时间戳（秒），0=未激活
+    int32 repeatCount      = 3; // 重复激活已完成次数
+}
+
+// 图鉴数据（玩家维度）
+message SDCCodexData {
+    repeated SDCCodexEntry entries = 1; // 已激活/已进度的条目列表
+    repeated int32 claimedMilestones = 2; // 已领取的里程碑 ID 列表
+}
+
+// 奖励预览项
+message SDCCodexRewardItem {
+    int32 itemId = 1; // 道具 ID
+    int32 count  = 2; // 数量
+}
+
+// 条目详情（宝物收藏册用）
+message SDCCodexEntryInfo {
+    int32 codexId           = 1; // 条目 ID
+    int32 type              = 2; // 类型（1=宝物 2=装备）
+    int32 itemId            = 3; // 关联道具 ID
+    int64 firstActivateTime = 4; // 首次激活时间（0=未激活）
+    int32 repeatCount       = 5; // 重复激活次数
+    int32 ownedCount        = 6; // 持有数量（宝物类=仓库持有；装备类=局内累计获取）
+    int32 firstCondition    = 7; // 首次激活所需数量
+    int32 repeatCondition   = 8; // 每次重复激活所需数量
+    int32 repeatNum         = 9; // 重复激活次数上限
+    // field 10 removed: rewardPreview（客户端通过 codexId → SDCCodexActivate.csv → RewardID 自行获取 DropMainId 展开预览）
+    reserved 10;
+    repeated SDCCodexRewardItem endRewardPreview = 11; // 重复激活最终奖励（RepeatRewardEnd）
+}
+
+// IP 收藏册数据
+message SDCCodexIpInfo {
+    int32 comicId                          = 1; // IP ID
+    repeated SDCCodexIpEntry entries       = 2; // 该 IP 下条目列表
+    int32 activatedCount                   = 3; // 已激活条目数
+    int32 totalCount                       = 4; // 总条目数
+    repeated SDCCodexMilestoneInfo milestones = 5; // 里程碑列表
+}
+
+// IP 收藏册条目简要
+message SDCCodexIpEntry {
+    int32 codexId           = 1; // 条目 ID
+    int32 itemId            = 2; // 道具 ID
+    int64 firstActivateTime = 3; // 首次激活时间（0=未激活）
+}
+
+// 里程碑信息
+message SDCCodexMilestoneInfo {
+    int32 milestoneId       = 1; // 里程碑 ID
+    int32 needActivateCount = 2; // 达成所需激活数
+    int32 status            = 3; // 状态（0=未达成 1=可领取 2=已领取）
+    repeated SDCCodexRewardItem reward = 4; // 奖励内容
+}
