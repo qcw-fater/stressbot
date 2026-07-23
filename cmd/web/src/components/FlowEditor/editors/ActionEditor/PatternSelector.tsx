@@ -1,5 +1,5 @@
 /**
- * pattern 选择器：12 种 flow action pattern 的下拉，附带说明 tooltip。
+ * pattern 选择器：14 种 flow action pattern 的下拉，附带说明 tooltip。
  * 心跳不再是 action，改为协议连接配置中的 heartbeat。
  */
 
@@ -20,13 +20,7 @@ export const PATTERN_DESC: Record<ActionPattern, string> = {
   httpRequest: '发送 HTTP 请求',
   setState: '直接给 state 写入值（绑定列表）',
   clearState: '清空指定的 state key',
-  // 用户可见文本避免暴露实现技术：用「脚本」表述，不出现 Lua / function execute(r)。
   lua: '执行一段脚本实现复杂业务逻辑',
-};
-
-/** 下拉项展示名：默认用 pattern 原值，lua 统一展示为「脚本」避免暴露技术术语。 */
-const PATTERN_LABEL: Partial<Record<ActionPattern, string>> = {
-  lua: '脚本',
 };
 
 export interface PatternSelectorProps {
@@ -50,8 +44,8 @@ export function PatternSelector({ value, onChange }: PatternSelectorProps) {
       style={{ width: 240 }}
       options={PATTERN_GROUPS.map((g) => ({
         label: g.label,
-        // label 用展示名（lua → 脚本），既用于下拉项显示也用于选中态回显。
-        options: g.patterns.map((p) => ({ value: p, label: PATTERN_LABEL[p] ?? p })),
+        // label 直接用 pattern 原值，既用于下拉项显示也用于选中态回显。
+        options: g.patterns.map((p) => ({ value: p, label: p })),
       }))}
       // 下拉项额外带说明 Tooltip（不暴露实现细节）。
       optionRender={(option) => (
