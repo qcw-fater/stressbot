@@ -274,7 +274,7 @@ Executor 遍历节点图 → 命中 action 节点
 | `s2cProto`     | 期望的 S2C protobuf 全名 |
 | `bindings`     | C2S 字段绑定数组 |
 | `store`        | S2C 字段 → state 映射 |
-| `timeout`      | 超时秒数（listen / request 模式，默认 10/60） |
+| `timeout`      | 超时秒数（listen 默认 60；request 默认沿用连接 `requestTimeout` 配置值，显式设置则覆盖） |
 | `pollMs`       | 轮询间隔毫秒（listen 模式，默认 100） |
 | `keys`         | clearState 要删除的 key 列表 |
 | `url`          | HTTP 请求 URL（`httpRequest` 模式），支持 `state:` 前缀 |
@@ -484,7 +484,7 @@ FilterDef 共 5 个字段，比较运算符 **12 种**（每种均支持符号�
 
 `boolean` 节点、`switch` 分支、`loop` 的 `condition` / `breakCondition`，以及 FieldBind 的 `condition`，都是**字符串表达式**，支持两种前缀：
 
-- **内置**：`state:key op value`，如 `state:heroId > 0`。运算符：`>= <= != == > <`，右值支持字面量 `nil`。支持 `|| && !` 和括号嵌套（递归下降解析：`or → and → unary → atom → comparison`）。裸 key（无运算符）做真值判断；空表达式视为 `true`。
+- **内置**：`state:key op value`，如 `state:heroId > 0`。比较运算符 `== != > >= < <=`，算术运算符 `+ - * / %`（仅数值，`%` 仅整数，严格类型无隐式转换）。支持 `|| && !` 和括号嵌套（递归下降解析：`or → and → unary → comparison → arith → term → factor`）。裸 key（无运算符）仅对 **bool** 值做真值判断，数值/字符串裸用会 warn 并视为 false（须显式比较如 `count != 0`）；空表达式视为 `true`。字面量只有数字和带引号字符串——**无 `nil`/`true`/`false` 关键字**，裸标识符恒为 state 路径，判空须改用 filter 的 `isNil`/`notNil`。
 - **Lua**：`lua:script_name.lua`，执行 Lua boolean 脚本，`return true/false`（true 满足）。脚本执行失败或缺 `lua:` 前缀时按 `false` 处理。
 
 ---
@@ -543,9 +543,9 @@ Adapter 接口共 **9 方法**，实现已全 Go 化：`adapter/codec_resolver.g
 | 函数 | 说明 |
 | ------------------------------------------------------ | ---------------------------- |
 | `tcp_request(service, route, msg [, s2cProto [, timeout]])` | TCP 请求-响应，返回 err, data；WireBytes 自动计入监控 |
-| `tcp_request_route(service, requestRoute, responseRoute, msg [, s2cProto])` | TCP 请求-响应，请求路由用于编码，响应路由用于匹配 |
+| `tcp_request_route(service, requestRoute, responseRoute, msg [, s2cProto [, timeout]])` | TCP 请求-响应，请求路由用于编码，响应路由用于匹配 |
 | `udp_request(service, route, body [, s2cProto [, timeout]])` | UDP 请求-响应 |
-| `udp_request_route(service, requestRoute, responseRoute, body [, s2cProto])` | UDP 请求-响应，请求路由用于编码，响应路由用于匹配 |
+| `udp_request_route(service, requestRoute, responseRoute, body [, s2cProto [, timeout]])` | UDP 请求-响应，请求路由用于编码，响应路由用于匹配 |
 
 ### 单向发送
 
@@ -625,11 +625,11 @@ Adapter 接口共 **9 方法**，实现已全 Go 化：`adapter/codec_resolver.g
 | `random_int(n)`                          | `[0, n-1]` 随机整数 |
 | `rand_range(min, max)`                   | `[min, max]` 随机整数 |
 | `random_bool()`                          | 随机布尔 |
-| `random_string([length])`                | 随机字母数字串（默认 8） |
+| `random_string(length)`                 | 随机字母数字串（`length<=0` 时回退 8） |
 | `random_pick(table)`                     | 从数组随机选一个 |
 | `random_pick_n(table, n)`                | 从数组随机选 N 个 |
 | `weighted_pick(items, weights)`          | 加权随机，返回元素和索引 |
-| `rand_filter(items, count [, excludes])` | 排除后随机选 N 个 |
+| `rand_filter(items [, excludes [, count]])` | 排除后随机选 N 个（count 默认 1） |
 | `rand_filter_one(items [, excludes])`    | 排除后随机选 1 个 |
 | `shuffle(arr)`                           | 原地洗牌（Fisher-Yates） |
 | `pack_le(format, ...)`                   | 小端二进制打包（`u8/i8/u16/i16/u32/i32/u64/i64/f32/f64`） |
@@ -751,6 +751,7 @@ pending → starting → running → stopping → stopped
 - `pprof`：`port`（pprof 调试服务，省略 = 不启用）。
 - `standalone.bot`：`accountPrefix` / `startNumber` / `totalBots`（总数）/ `concurrency`（并发启动数，0=不限）/ `mainService`（主服务名，必填）。
 - `standalone.stateExtra`：注入所有机器人初始 state 的 `map[string]string`。
+- `standalone.duration`：运行时长（如 `"10m"`、`"1h"`），省略或 `0` = 一直运行直到手动停止。
 - `redis`：共享态配置（见 sharedstate），省略则 `share` 模块返回 `ErrNotEnabled`。
 
 ### Agent 模式示例
@@ -824,7 +825,7 @@ pending → starting → running → stopping → stopped
 }
 ```
 
-字段：`port`（HTTP 端口，默认 7718）/ `publicUrl` / `staticDir`（前端静态目录）/ `agentRegistry`（`unhealthyAfter` + `offlineAfter`）/ `mysql`（**顶层**，全局共享 `*sql.DB`）/ `redis` / `history`（仅 `retentionDays`，默认 90）/ `log` / `daemon`。
+字段：`port`（HTTP 端口，默认 7718）/ `publicUrl` / `staticDir`（前端静态目录）/ `agentRegistry`（`unhealthyAfter` + `offlineAfter`）/ `mysql`（**顶层**，全局共享 `*sql.DB`）/ `redis` / `history`（仅 `retentionDays`，默认 90）/ `log` / `pprof`（`port`，省略 = 不启用，默认 6060）/ `daemon`。
 
 ---
 
@@ -839,11 +840,10 @@ pending → starting → running → stopping → stopped
 | 声明式 codec 配置 | `conf/adapter/<proto>_<service>_codec.json` | 每连接一份；`CodecResolver` 按 `"<proto>:<service>"` 解析 |
 | 错误码描述 | `conf/adapter/errors.json` | 共享；`DescribeError` 读取此文件映射服务端错误码 |
 
-## 资源编辑器（前端 ResourcesDrawer）
+## 资源编辑器（前端）
 
-- **Proto tab**：上传 / 编辑 / 删除 / 清空 + Monaco 编辑器
-- **Lua tab**：同上
-- **Adapter tab**：按连接编辑多份 `<proto>_<service>_codec.json` + 共享 `errors.json`；结构化视图（帧布局 / 管线 / 路由键模板编辑器）+ 源码 Monaco 切换 + 预览（调后端真实 codec 引擎跑一次 encode/decode）+ schema 校验
+- **ResourcesDrawer**（Proto / Lua 两 tab）：上传 / 编辑 / 删除 / 清空 + Monaco 编辑器。顶部「拉取」按钮显式同步服务器基线，冲突走 BaselineSyncModal。
+- **协议配置编辑器**（独立 `ProtocolConfigEditor` 浮窗，RuntimeBar「协议」按钮入口）：按连接编辑多份 `<proto>_<service>_codec.json` + 共享 `errors.json`；结构化视图（帧布局 / 管线 / 路由键模板编辑器）+ 源码 Monaco 切换 + 预览（调后端真实 codec 引擎跑一次 encode/decode）+ schema 校验。
 
 ## 基线同步
 
@@ -892,6 +892,8 @@ gnet `OnTraffic`：peek header → `BodyLength()` 纯 Go 计算 → read frame �
 | `Get / Set` | 基础读写 |
 | `GetInt / GetInt32 / GetInt64 / GetString` | 类型化读取 |
 | `GetList / GetMap` | 列表/映射读取 |
+| `ListLen / PickFromList / PickMapKey / PickMapValue` | 列表/映射长度与零拷贝随机选取（供 `stateRandom`/`stateMapKey` 等 binding） |
+| `SetPath / GetPath / NavigatePath` | 嵌套路径写入/读取（支持 `a.b[0].c`） |
 | `Increment / IncrementInt64` | 原子自增 |
 | `Delete / Clear / Has / Keys` | 管理 |
 
@@ -901,7 +903,7 @@ gnet `OnTraffic`：peek header → `BodyLength()` 纯 Go 计算 → read frame �
 
 ### 条件解析器
 
-递归下降：`or → and → unary → atom → comparison`，支持 `|| && !`、括号嵌套、`nil` 字面量与裸 key 真值判断。
+递归下降：`or → and → unary → comparison → arith → term → factor`，支持 `|| && !`、括号嵌套、算术 `+ - * / %`；字面量仅数字/带引号字符串（无 `nil` 关键字），裸 key 仅对 bool 值为真。
 
 ## 机器人管理
 
@@ -912,11 +914,11 @@ gnet `OnTraffic`：peek header → `BodyLength()` 纯 Go 计算 → read frame �
 ### Manager 批量启动
 
 - `StartAll`：全量 + 限速（每 concurrency 个暂停 1 秒）
-- `StartWithRampUp`：分阶段（每阶段独立 count / concurrency / holdSec）
+- `StartWithRampUp`：分阶段（每阶段独立 `count` / `concurrency` / `holdSec` / `reset`；`holdSec` 配置 `< 30` 会被提升到 30；`reset: true` 表示进入本阶段前清空所有已有机器人）
 
 ### 优雅关闭
 
-`CloseAll` → 取消连接上下文并等待 connectionPump 退出 → 并行 Close + Wait。
+`CloseAll`：快照所有命名连接 → 对每条连接调 `Close()`（内部 cancel ctx + 停心跳 + 触发 `onClosed`）→ 分阶段等待所有 `connectionPump` 退出（decode/listen 已并入同一 pump，两轮等待等同一 `pumpDone`）。Manager 层 `StopAll` 在 robot 维度并发执行此流程。
 
 ---
 
@@ -1146,7 +1148,7 @@ RecordAction(name, result, timing, wallClock, sendBytes, recvBytes, err)
 | 11–20 | 协议层 | `EncodeFailed` / `ParseFailed` |
 | 21–30 | 构建层 | `CreateMsg` / `BindField` / `Serialize` / `ExecFailed` |
 | 31–40 | 监听层 | `ListenTimeout` / `ListenRegister` |
-| 41–50 | 配置层 | `AddrEmpty` / `URLEmpty` / `URLScheme` / `UnknownPattern` / `HTTPBuild` / `HTTPReadBody` / `MarshalBody` / `HTTPStatus` / `HeartbeatConfig` |
+| 41–50 | 配置层 | `AddrEmpty` / `URLEmpty` / `URLScheme` / `UnknownPattern` / `HTTPBuild` / `HTTPReadBody` / `MarshalBody` / `HTTPStatus` / `HeartbeatConfig` / `StateConfig` |
 | 51–60 | Lua 层 | `LuaNotInit` / `LuaNoScript` / `LuaExecFailed` / `LuaScriptCheck` |
 | 61–70 | 回调层 | `CallbackLua` / `CallbackParse` |
 

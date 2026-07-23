@@ -24,7 +24,7 @@ import (
 //	utils.random_pick(table)       → 从数组随机选一个
 //	utils.random_pick_n(table, 3)  → 从数组随机选 N 个
 //	utils.weighted_pick(items, weights) → 加权随机
-//	utils.rand_filter(items, count, excludes) → 排除后随机选 N 个
+//	utils.rand_filter(items, excludes, count) → 排除后随机选 N 个
 //	utils.rand_filter_one(items, excludes) → 排除后随机选 1 个
 //	utils.shuffle(arr)             → 原地随机打乱数组
 //	utils.pack_le(fmt, ...)        → 小端二进制打包
