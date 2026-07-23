@@ -54,6 +54,7 @@ import { useFlowStore } from '@/components/FlowEditor/store/flowStore';
 import { listFlows, type ManagedFlow } from '@/components/FlowEditor/store/flowManagerStore';
 import { getFlowTemplate } from '@/services/flowsApi';
 import type { FlowJson } from '@/components/FlowEditor/codec/flowToJson';
+import { useCodecConnections } from '@/components/FlowEditor/codec/useCodecConnections';
 import type { FlowLayout } from '@/types/editor';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
@@ -139,6 +140,18 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
       setAdvancedExpanded: s.setTaskFormAdvancedExpanded,
     })),
   );
+
+  // 主连接服务名候选：来自已声明的 TCP 连接（mainService 是 TCP 连接标识）。
+  const { connections: codecConnections, loading: connectionsLoading } = useCodecConnections();
+  const mainService = robotConfig.mainService ?? '';
+  const tcpServices = codecConnections.filter((c) => c.protocol === 'tcp').map((c) => c.service);
+  // 始终把当前值纳入选项：连接加载中 / 暂无 TCP 连接时，已填值也能正常显示与选中，不会显示空白。
+  const mainServiceOptionValues =
+    mainService !== '' && !tcpServices.includes(mainService) ? [mainService, ...tcpServices] : tcpServices;
+  const mainServiceOptions = mainServiceOptionValues.map((s) => ({ value: s, label: s }));
+  // 仅在确实有连接数据时才判定「不在 TCP 连接中」，避免加载中 / 空列表误报。
+  const mainServiceMissing =
+    codecConnections.length > 0 && mainService !== '' && !tcpServices.includes(mainService);
 
   const [protos, setProtos] = useState<ResourceFile[]>([]);
   const [scripts, setScripts] = useState<ResourceFile[]>([]);
@@ -745,10 +758,21 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
                     onChange={(v) => setRobotConfig({ stateExtra: v })}
                   />
                 </Form.Item>
-                <Form.Item label="主连接服务名" extra="主连接对应的服务标识，默认 logic">
-                  <Input
-                    value={robotConfig.mainService ?? ''}
-                    onChange={(e) => setRobotConfig({ mainService: e.target.value })}
+                <Form.Item
+                  label="主连接服务名"
+                  extra={
+                    mainServiceMissing
+                      ? '当前值不在已配置的 TCP 连接中，请确认服务名'
+                      : '主连接对应的服务标识（TCP），默认 logic'
+                  }
+                >
+                  <Select
+                    showSearch
+                    value={mainService || undefined}
+                    onChange={(v) => setRobotConfig({ mainService: v })}
+                    options={mainServiceOptions}
+                    loading={connectionsLoading}
+                    status={mainServiceMissing ? 'warning' : undefined}
                     placeholder="logic"
                   />
                 </Form.Item>
