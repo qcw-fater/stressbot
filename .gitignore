@@ -8,6 +8,7 @@
 *.prof
 
 # 模块缓存和依赖
+node_modules/
 vendor/
 pkg/mod/
 
@@ -34,10 +35,12 @@ data/
 bugs/
 metrics/
 
-# AI
+# AI 与工具产物
 .claude/
 .cursor/
 .learnings/
+.playwright-mcp/
+.superpowers/
 
 # 部署测试
 deploy/
