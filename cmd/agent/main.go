@@ -194,13 +194,19 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 		zap.String("adapter", paths.Adapter))
 
 	// 构造生产 CodecResolver：扫描 adapter 目录下 *_codec.json 推断「server 串 → 文件名」映射。
-	// 再加载共享 errors.json 并编译为 Go SchemaAdapter。
+	// 共享 errors.json 可选：缺失时打告警并传空串（loader 跳过加载，DescribeError 返回空串）。
 	// 业务 encode/decode/dial/心跳/listen/Lua 网络 API 均走 resolver，生产路径不构造 LuaAdapter。
 	codecMap, err := adapter.InferCodecMap(paths.Adapter)
 	if err != nil {
 		stresslog.Fatal("推断 codec 映射失败", zap.String("dir", paths.Adapter), zap.Error(err))
 	}
-	resolver, err := adapter.LoadCodecResolver(paths.Adapter, codecMap, "errors.json")
+	errorsFile := "errors.json"
+	if _, statErr := os.Stat(filepath.Join(paths.Adapter, errorsFile)); statErr != nil {
+		stresslog.Warn("[MAIN] 未找到 errors.json 错误码表，跳过加载，错误码将不显示中文描述",
+			zap.String("dir", paths.Adapter))
+		errorsFile = ""
+	}
+	resolver, err := adapter.LoadCodecResolver(paths.Adapter, codecMap, errorsFile)
 	if err != nil {
 		stresslog.Fatal("加载 CodecResolver 失败", zap.String("dir", paths.Adapter), zap.Error(err))
 	}

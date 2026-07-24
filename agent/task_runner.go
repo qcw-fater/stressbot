@@ -141,7 +141,8 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 		return runFailed("无配置文件可下载（configUrl 或 configFiles 为空）")
 	}
 
-	// 构造生产 CodecResolver：任务下发的 adapter 目录包含每连接 *_codec.json 与共享 errors.json。
+	// 构造生产 CodecResolver：任务下发的 adapter 目录包含每连接 *_codec.json，共享 errors.json 可选
+	// （未下发错误码表时跳过，DescribeError 返回空串，不影响流程执行）。
 	// 业务 encode/decode/dial/心跳/listen/Lua 网络 API 均走 resolver，生产路径不构造 LuaAdapter。
 	codecAdapterDir := filepath.Join(confDir, "adapter")
 	codecMap, err := adapter.InferCodecMap(codecAdapterDir)
@@ -149,7 +150,14 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 		stresslog.Error("[TASK] 推断 codec 映射失败", zap.String("taskID", taskID), zap.String("dir", codecAdapterDir), zap.Error(err))
 		return runFailed(fmt.Sprintf("推断 codec 映射失败: %v", err))
 	}
-	resolver, err := adapter.LoadCodecResolver(codecAdapterDir, codecMap, "errors.json")
+	// errors.json 错误码表可选：未下发时打告警并传空串（loader 跳过加载），不阻塞任务启动。
+	errorsFile := "errors.json"
+	if _, statErr := os.Stat(filepath.Join(codecAdapterDir, errorsFile)); statErr != nil {
+		stresslog.Warn("[TASK] 未下发 errors.json 错误码表，跳过加载，错误码将不显示中文描述",
+			zap.String("taskID", taskID), zap.String("dir", codecAdapterDir))
+		errorsFile = ""
+	}
+	resolver, err := adapter.LoadCodecResolver(codecAdapterDir, codecMap, errorsFile)
 	if err != nil {
 		stresslog.Error("[TASK] 加载 CodecResolver 失败", zap.String("taskID", taskID), zap.String("dir", codecAdapterDir), zap.Error(err))
 		return runFailed(fmt.Sprintf("加载 CodecResolver 失败: %v", err))

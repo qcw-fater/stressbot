@@ -123,7 +123,7 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
   // 2. 资源收集
   //   - 再次执行 flow 引用脚本 gap-fill 与缺失检测，作为启动前最终拦截
   //   - 收集本地存储内容作为 multipart payload
-  //   - 确保协议配置（*_codec.json / errors.json）存在
+  //   - 确保协议配置（*_codec.json）存在；errors.json 错误码表可选，未配置则不下发
   const sync = await syncFlowScriptsToIdb(flowJson);
   if (sync.missing.length > 0) {
     throw new ApiError(
