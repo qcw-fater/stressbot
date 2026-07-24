@@ -3,6 +3,7 @@ module stressbot
 go 1.26.0
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/bufbuild/protocompile v0.14.1
 	github.com/bytedance/sonic v1.15.2
 	github.com/go-sql-driver/mysql v1.10.0

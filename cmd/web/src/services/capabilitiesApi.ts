@@ -11,6 +11,8 @@ export interface CapabilitiesResponse {
   sharedState: boolean;
   /** Redis 地址（脱敏，主机已隐藏仅保留端口，如 ***:6379）；仅 sharedState=true 时有值。 */
   sharedAddr?: string;
+  /** 服务器是否已配置流程库（MySQL）。 */
+  flowLibrary: boolean;
 }
 
 /** 查询服务器能力。 */

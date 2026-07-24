@@ -105,6 +105,8 @@ func (s *AdminServer) registerRoutes() http.Handler {
 	// ── 流程模板库 ──
 	mux.HandleFunc("GET /sbot/flows", s.handleListFlows)
 	mux.HandleFunc("POST /sbot/flows", s.handleCreateFlow)
+	mux.HandleFunc("GET /sbot/flows/snapshot", s.handleGetFlowSnapshot)
+	mux.HandleFunc("PUT /sbot/flows/snapshot", s.handleReplaceFlowSnapshot)
 	mux.HandleFunc("GET /sbot/flows/{id}", s.handleGetFlow)
 	mux.HandleFunc("PUT /sbot/flows/{id}", s.handleUpdateFlow)
 	mux.HandleFunc("DELETE /sbot/flows/{id}", s.handleDeleteFlow)
@@ -147,12 +149,14 @@ type CapabilitiesResponse struct {
 	SharedState bool `json:"sharedState"`
 	// SharedAddr Redis 地址（脱敏展示，主机已隐藏，仅保留端口）。仅当 SharedState=true 时有值。
 	SharedAddr string `json:"sharedAddr,omitempty"`
+	// FlowLibrary 是否已启用服务器流程库。
+	FlowLibrary bool `json:"flowLibrary"`
 }
 
 // handleCapabilities 返回服务器能力（当前仅共享状态可用性），供前端展示与校验提示。
 // 出于安全考虑，不返回原始 Redis 地址，只返回脱敏后的展示地址。
 func (s *AdminServer) handleCapabilities(w http.ResponseWriter, r *http.Request) {
-	resp := CapabilitiesResponse{SharedState: s.cfg.RedisEnabled()}
+	resp := CapabilitiesResponse{SharedState: s.cfg.RedisEnabled(), FlowLibrary: s.flows != nil}
 	if resp.SharedState {
 		if resolved, err := s.cfg.Redis.Resolve(); err == nil {
 			resp.SharedAddr = resolved.AddrMasked()

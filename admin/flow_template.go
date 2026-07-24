@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	json "stressbot/utils/jsonx"
@@ -19,6 +20,7 @@ const flowTemplateNameMax = 80
 // 当全局 MySQL 未配置时 AdminServer.flows 为 nil，相关接口返回 FLOW_LIBRARY_DISABLED。
 type FlowTemplateStore struct {
 	db *sql.DB
+	mu sync.RWMutex
 }
 
 // NewFlowTemplateStore 创建流程模板库存储。db 必须非 nil。
@@ -85,6 +87,9 @@ func layoutArg(layout json.RawMessage) any {
 
 // Create 创建流程模板。
 func (s *FlowTemplateStore) Create(ctx context.Context, req FlowTemplateSaveRequest) (*FlowTemplateDetail, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	name, err := validateFlowTemplateName(req.Name)
 	if err != nil {
 		return nil, err
@@ -116,6 +121,9 @@ func (s *FlowTemplateStore) Create(ctx context.Context, req FlowTemplateSaveRequ
 
 // List 列出所有流程模板摘要（按更新时间倒序）。
 func (s *FlowTemplateStore) List(ctx context.Context) ([]FlowTemplateSummary, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, node_count, action_count, created_at, updated_at
 		FROM flow_template ORDER BY updated_at DESC
@@ -138,6 +146,12 @@ func (s *FlowTemplateStore) List(ctx context.Context) ([]FlowTemplateSummary, er
 
 // Get 查询单个流程模板完整内容。
 func (s *FlowTemplateStore) Get(ctx context.Context, id string) (*FlowTemplateDetail, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.get(ctx, id)
+}
+
+func (s *FlowTemplateStore) get(ctx context.Context, id string) (*FlowTemplateDetail, error) {
 	var (
 		d      FlowTemplateDetail
 		flow   []byte
@@ -163,6 +177,9 @@ func (s *FlowTemplateStore) Get(ctx context.Context, id string) (*FlowTemplateDe
 // Update 覆盖流程模板（name 必填）。flow 非空时连同 layout 一起覆盖并重新计数；
 // flow 为空时仅重命名。
 func (s *FlowTemplateStore) Update(ctx context.Context, id string, req FlowTemplateSaveRequest) (*FlowTemplateDetail, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	name, err := validateFlowTemplateName(req.Name)
 	if err != nil {
 		return nil, err
@@ -186,11 +203,14 @@ func (s *FlowTemplateStore) Update(ctx context.Context, id string, req FlowTempl
 		}
 	}
 	// UPDATE 命中 0 行（id 不存在）时由 Get 翻译为 FLOW_TEMPLATE_NOT_FOUND。
-	return s.Get(ctx, id)
+	return s.get(ctx, id)
 }
 
 // Delete 删除流程模板。模板删除只影响库本身，不级联历史（flow_template_id 为逻辑外键）。
 func (s *FlowTemplateStore) Delete(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	res, err := s.db.ExecContext(ctx, `DELETE FROM flow_template WHERE id=?`, id)
 	if err != nil {
 		return fmt.Errorf("delete flow_template: %w", err)

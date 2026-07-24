@@ -54,6 +54,7 @@ var (
 	ErrSharedUnavailable    = NewError("SHARED_STATE_UNAVAILABLE", http.StatusBadRequest)
 	ErrFlowLibraryDisabled  = NewError("FLOW_LIBRARY_DISABLED", http.StatusServiceUnavailable)
 	ErrFlowTemplateNotFound = NewError("FLOW_TEMPLATE_NOT_FOUND", http.StatusNotFound)
+	ErrFlowSnapshotConflict = NewError("FLOW_SNAPSHOT_CONFLICT", http.StatusConflict)
 )
 
 // writeJSON 向 response writer 写入 JSON。
