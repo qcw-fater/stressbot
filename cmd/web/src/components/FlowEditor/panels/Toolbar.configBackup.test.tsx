@@ -9,6 +9,9 @@ import { Toolbar } from './Toolbar';
 vi.mock('@/services/capabilitiesApi', () => ({
   getCapabilities: vi.fn(async () => ({ sharedState: false, flowLibrary: false })),
 }));
+vi.mock('@/services/runtimeStore', () => ({
+  useRuntimeStore: (selector: (state: { mode: 'edit' }) => unknown) => selector({ mode: 'edit' }),
+}));
 vi.mock('@/services/baselineApi', () => ({ fetchBaselineFlow: vi.fn() }));
 vi.mock('../store/undoRedo', () => ({ undo: vi.fn(), redo: vi.fn() }));
 vi.mock('../store/persistDraft', () => ({
@@ -62,11 +65,17 @@ vi.mock('@/components/modules/configTransfer/ConfigBackupModal', () => ({
     ? <div>配置备份弹窗已打开</div>
     : null,
 }));
+vi.mock('@/components/modules/configTransfer/ConfigRestoreModal', () => ({
+  ConfigRestoreModal: ({ open, runtimeMode }: { open: boolean; runtimeMode: string }) => open
+    ? <div>配置恢复弹窗已打开：{runtimeMode}</div>
+    : null,
+}));
 
 describe('Toolbar configuration backup entry', () => {
   const nativeGetComputedStyle = window.getComputedStyle.bind(window);
 
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => (
       nativeGetComputedStyle(element)
     ));
@@ -86,6 +95,21 @@ describe('Toolbar configuration backup entry', () => {
     await user.click(await screen.findByText('备份配置...'));
 
     expect(await screen.findByText('配置备份弹窗已打开')).toBeTruthy();
+    expect(getCapabilities).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens restore from the File menu with the current runtime mode', async () => {
+    const user = userEvent.setup();
+    render(
+      <AntApp>
+        <Toolbar />
+      </AntApp>,
+    );
+
+    await user.click(screen.getByRole('button', { name: /文件/ }));
+    await user.click(await screen.findByText('恢复配置...'));
+
+    expect(await screen.findByText('配置恢复弹窗已打开：edit')).toBeTruthy();
     expect(getCapabilities).toHaveBeenCalledTimes(1);
   });
 });

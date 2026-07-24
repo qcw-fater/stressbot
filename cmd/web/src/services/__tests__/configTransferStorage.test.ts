@@ -61,6 +61,7 @@ import {
 import {
   captureCurrentDraft,
   loadDraft,
+  refreshDraftSnapshot,
   saveDraftSnapshot,
   type DraftSnapshot,
 } from '@/components/FlowEditor/store/persistDraft';
@@ -227,5 +228,21 @@ describe('draft snapshots', () => {
       layout: { nodePositions: { start: { x: 10, y: 20 } }, showListenEdges: true },
       savedAt: 789,
     });
+  });
+
+  it('refreshes the in-memory editor from a restored snapshot or an empty draft', () => {
+    const snapshot: DraftSnapshot = {
+      flow: { defaultDelayMs: 7, nodes: {}, actions: {}, listens: {} },
+      layout: { nodePositions: {} },
+      savedAt: 123456,
+    };
+    const load = vi.spyOn(useFlowStore.getState(), 'loadFromTaskFlow');
+    const reset = vi.spyOn(useFlowStore.getState(), 'reset');
+
+    refreshDraftSnapshot(snapshot);
+    refreshDraftSnapshot(null);
+
+    expect(load).toHaveBeenCalledWith(snapshot.flow, snapshot.layout);
+    expect(reset).toHaveBeenCalledTimes(1);
   });
 });

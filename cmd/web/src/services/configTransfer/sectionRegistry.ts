@@ -11,6 +11,7 @@ import {
 } from '@/components/FlowEditor/library/templateStore';
 import {
   loadDraft,
+  refreshDraftSnapshot,
   saveDraftSnapshot,
   type DraftSnapshot,
 } from '@/components/FlowEditor/store/persistDraft';
@@ -78,6 +79,7 @@ export interface SectionRegistryDependencies {
   ) => Promise<ReplaceFlowSnapshotResponse>;
   loadDraft: () => DraftSnapshot | null;
   saveDraftSnapshot: (snapshot: DraftSnapshot | null) => void;
+  refreshDraftSnapshot: (snapshot: DraftSnapshot | null) => void;
   listProto: () => Promise<ResourceFile[]>;
   replaceProtoFiles: (files: readonly ResourceFile[]) => Promise<void>;
   listScript: () => Promise<ResourceFile[]>;
@@ -100,6 +102,7 @@ const defaultDependencies: SectionRegistryDependencies = {
   replaceFlowSnapshot,
   loadDraft,
   saveDraftSnapshot,
+  refreshDraftSnapshot,
   listProto,
   replaceProtoFiles,
   listScript,
@@ -437,6 +440,7 @@ export function createSectionRegistry(
       replace: async (value) => dependencies.saveDraftSnapshot(value),
       validate: assertDraft,
       count: singletonCount,
+      refresh: dependencies.refreshDraftSnapshot,
     },
     protoFiles: {
       key: 'protoFiles',

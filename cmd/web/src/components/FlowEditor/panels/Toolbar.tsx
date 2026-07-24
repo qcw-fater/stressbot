@@ -44,10 +44,15 @@ import { exportAllTemplates, importTemplates, type TemplateBundle } from '../lib
 import type { FlowJson } from '../codec/flowToJson';
 import { useValidationStore } from '../validation/validationStore';
 import { getCapabilities } from '@/services/capabilitiesApi';
+import { useRuntimeStore } from '@/services/runtimeStore';
 
 const ConfigBackupModal = lazy(async () => {
   const module = await import('@/components/modules/configTransfer/ConfigBackupModal');
   return { default: module.ConfigBackupModal };
+});
+const ConfigRestoreModal = lazy(async () => {
+  const module = await import('@/components/modules/configTransfer/ConfigRestoreModal');
+  return { default: module.ConfigRestoreModal };
 });
 
 export interface ToolbarProps {
@@ -71,9 +76,11 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
   const protoStatus = useProtoStore((s) => s.status);
   const protoFileCount = useProtoStore((s) => s.fileCount);
   const listenCount = useFlowStore((s) => Object.keys(s.listens).length);
+  const runtimeMode = useRuntimeStore((state) => state.mode);
 
   const [flowManagerOpen, setFlowManagerOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
+  const [restoreOpen, setRestoreOpen] = useState(false);
   const [flowLibrary, setFlowLibrary] = useState<boolean>();
 
   const validation = useValidationStore((state) => state.report);
@@ -122,6 +129,17 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
 
   const onOpenBackup = () => {
     setBackupOpen(true);
+    setFlowLibrary(undefined);
+    void getCapabilities()
+      .then((capabilities) => setFlowLibrary(capabilities.flowLibrary))
+      .catch((error) => {
+        setFlowLibrary(false);
+        message.warning(`无法确认流程库状态，已跳过已保存流程：${(error as Error).message}`);
+      });
+  };
+
+  const onOpenRestore = () => {
+    setRestoreOpen(true);
     setFlowLibrary(undefined);
     void getCapabilities()
       .then((capabilities) => setFlowLibrary(capabilities.flowLibrary))
@@ -182,6 +200,12 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
       icon: <SaveOutlined />,
       label: '备份配置...',
       onClick: onOpenBackup,
+    },
+    {
+      key: 'restore-config',
+      icon: <ImportOutlined />,
+      label: '恢复配置...',
+      onClick: onOpenRestore,
     },
   ];
 
@@ -335,6 +359,16 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
             onClose={() => setBackupOpen(false)}
             flowLibrary={flowLibrary}
             readDraft={readOnly ? loadDraft : captureCurrentDraft}
+          />
+        </Suspense>
+      )}
+      {restoreOpen && (
+        <Suspense fallback={null}>
+          <ConfigRestoreModal
+            open
+            runtimeMode={runtimeMode}
+            onClose={() => setRestoreOpen(false)}
+            flowLibrary={flowLibrary}
           />
         </Suspense>
       )}

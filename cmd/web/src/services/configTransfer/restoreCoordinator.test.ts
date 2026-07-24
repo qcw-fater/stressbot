@@ -6,6 +6,7 @@ import {
   fingerprintRestoreValue,
   preflightRestore,
   recoverPendingRestore,
+  resolveRestorePlanConflicts,
   RestoreExecutionError,
   RestoreTargetChangedError,
   type RestoreAdapter,
@@ -323,5 +324,45 @@ describe('preflightRestore', () => {
 
     await expect(preflightRestore(bundle, ['draft'], 'replace', 'overwrite', env))
       .rejects.toThrow('current snapshot invalid');
+  });
+
+  it('freezes conflict choices into an executable plan', async () => {
+    const calls: string[] = [];
+    const existing = [{ id: 'same', name: 'login.proto' }];
+    const incoming = [{ id: 'same', name: 'login.proto' }];
+    const protoAdapter: RestoreAdapter = {
+      key: 'protoFiles',
+      kind: 'collection',
+      read: vi.fn(async () => existing),
+      replace: vi.fn(async () => undefined),
+      validate: vi.fn(),
+      count: (value) => (value as unknown[]).length,
+      identity: {
+        id: (value) => (value as { id: string }).id,
+        name: (value) => (value as { name: string }).name,
+        clone: (value, id, name) => ({ ...(value as object), id, name }),
+        createId: () => 'copy-id',
+      },
+    };
+    const env = fakeEnvironment(calls, { adapters: { protoFiles: protoAdapter } });
+    const bundle: ConfigBackupBundle = {
+      kind: 'stressbot-config-backup',
+      schemaVersion: 1,
+      exportedAt: '2026-07-23T10:00:00.000Z',
+      manifest: { includedSections: ['protoFiles'], counts: { protoFiles: 1 } },
+      data: { protoFiles: incoming },
+    };
+    const pending = await preflightRestore(bundle, ['protoFiles'], 'merge', 'prompt', env);
+
+    const resolved = resolveRestorePlanConflicts(
+      pending,
+      { [pending.conflicts[0].id]: 'keep-copy' },
+      env,
+    );
+
+    expect(resolved.conflicts).toEqual([]);
+    expect(resolved.stats.protoFiles?.copied).toBe(1);
+    expect(resolved.sections.protoFiles?.after).toHaveLength(2);
+    expect(Object.isFrozen(resolved)).toBe(true);
   });
 });

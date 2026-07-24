@@ -51,6 +51,7 @@ function dependencies(): SectionRegistryDependencies {
     })),
     loadDraft: vi.fn(() => null),
     saveDraftSnapshot: vi.fn(),
+    refreshDraftSnapshot: vi.fn(),
     listProto: vi.fn(async () => []),
     replaceProtoFiles: vi.fn(async () => undefined),
     listScript: vi.fn(async () => []),
@@ -186,6 +187,20 @@ describe('section IO and backup parsing', () => {
       expectedRevision: 'sha256:one',
       items: [flow('id-2', '战斗流程')],
     });
+  });
+
+  it('refreshes the editor after restoring the draft section', async () => {
+    const deps = dependencies();
+    const adapter = createSectionRegistry(deps).draft;
+    const draft: DraftSnapshot = {
+      flow: validFlow,
+      layout: { nodePositions: {} },
+      savedAt: 123,
+    };
+
+    await adapter.refresh?.(draft);
+
+    expect(deps.refreshDraftSnapshot).toHaveBeenCalledWith(draft);
   });
 
   it('runs section validation while parsing a backup', () => {

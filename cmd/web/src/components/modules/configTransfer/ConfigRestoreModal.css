@@ -1,0 +1,90 @@
+.config-restore-modal .ant-modal-body {
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+}
+
+.config-restore__file-picker,
+.config-restore__header,
+.config-restore__selection-toolbar,
+.config-restore__mode-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.config-restore__file-picker,
+.config-restore__header,
+.config-restore__mode-row,
+.config-restore__alert,
+.config-restore__preview,
+.config-restore__conflicts {
+  margin-bottom: var(--space-lg);
+}
+
+.config-restore__header,
+.config-restore__selection-toolbar {
+  justify-content: space-between;
+}
+
+.config-restore__selection-list,
+.config-restore__conflict-list,
+.config-restore__stats {
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.config-restore__selection-row,
+.config-restore__stats-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-md);
+  min-height: 36px;
+}
+
+.config-restore__conflict-row {
+  display: grid;
+  gap: var(--space-sm);
+  padding: var(--space-md) 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.config-restore__conflict-copy {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.config-restore__stats-row {
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.config-restore__stats-values {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-sm) var(--space-md);
+  color: var(--text-secondary);
+}
+
+.config-restore__result .ant-result {
+  padding: var(--space-lg) 0;
+}
+
+@media (max-width: 520px) {
+  .config-restore__header,
+  .config-restore__selection-toolbar,
+  .config-restore__mode-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .config-restore__selection-row,
+  .config-restore__stats-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .config-restore__stats-values {
+    justify-content: flex-start;
+  }
+}

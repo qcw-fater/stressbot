@@ -13,10 +13,14 @@ import {
   type ConfigSectionRegistry,
 } from './sectionRegistry';
 import {
+  applyConflictChoices,
   planCollectionMerge,
   planCollectionReplace,
   planSingleton,
+  type CollectionPlan,
   type CollectionIdentity,
+  type PlannedConflict,
+  type SingletonPlan,
 } from './restorePlanner';
 import {
   recoveryJournal,
@@ -26,6 +30,7 @@ import {
 import {
   BACKUP_SECTIONS,
   type BackupSection,
+  type ConflictChoice,
   type ConfigBackupBundle,
   type MergeConflictPolicy,
   type RestoreConflict,
@@ -226,6 +231,70 @@ export async function preflightRestore(
     stats,
     flowExpectedRevision,
   });
+}
+
+export function resolveRestorePlanConflicts(
+  plan: RestorePlan,
+  choices: Readonly<Record<string, ConflictChoice>>,
+  environment: RestoreEnvironment = defaultRestoreEnvironment,
+): RestorePlan {
+  if (plan.conflicts.length === 0) return plan;
+
+  const sections: RestorePlan['sections'] = { ...plan.sections };
+  const stats: RestorePlan['stats'] = { ...plan.stats };
+  const conflicts: RestoreConflict[] = [];
+
+  for (const section of plan.selectedSections) {
+    const sectionPlan = plan.sections[section];
+    if (!sectionPlan) throw new Error(`恢复计划缺少内容 ${section}`);
+    const matchingConflicts = plan.conflicts.filter((conflict) => conflict.section === section);
+    const sectionConflicts = matchingConflicts as unknown as PlannedConflict<unknown>[];
+    if (sectionConflicts.length === 0) continue;
+
+    const adapter = environment.registry[section];
+    if (adapter.kind === 'collection') {
+      if (!Array.isArray(sectionPlan.before) || !Array.isArray(sectionPlan.after) || !adapter.identity) {
+        throw new Error(`集合内容 ${section} 的冲突计划无效`);
+      }
+      const pending: CollectionPlan<unknown> = {
+        kind: 'collection',
+        section,
+        currentItems: sectionPlan.before,
+        finalItems: sectionPlan.after,
+        conflicts: sectionConflicts,
+        stats: sectionPlan.stats,
+      };
+      const resolved = applyConflictChoices(pending, choices, adapter.identity);
+      sections[section] = {
+        ...sectionPlan,
+        after: resolved.finalItems,
+        stats: resolved.stats,
+      };
+      stats[section] = resolved.stats;
+      conflicts.push(...resolved.conflicts);
+      continue;
+    }
+
+    const pending: SingletonPlan<unknown> = {
+      kind: 'singleton',
+      section,
+      currentValue: sectionPlan.before ?? null,
+      incomingValue: sectionPlan.incoming ?? null,
+      finalValue: sectionPlan.after ?? null,
+      conflicts: sectionConflicts,
+      stats: sectionPlan.stats,
+    };
+    const resolved = applyConflictChoices(pending, choices);
+    sections[section] = {
+      ...sectionPlan,
+      after: resolved.finalValue,
+      stats: resolved.stats,
+    };
+    stats[section] = resolved.stats;
+    conflicts.push(...resolved.conflicts);
+  }
+
+  return deepFreeze({ ...plan, sections, stats, conflicts });
 }
 
 function orderedSections(selected: readonly BackupSection[]): BackupSection[] {

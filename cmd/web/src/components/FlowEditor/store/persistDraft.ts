@@ -82,6 +82,14 @@ export function saveDraftSnapshot(snapshot: DraftSnapshot | null): void {
   localStorage.setItem(KEY_LAYOUT, JSON.stringify(snapshot.layout));
 }
 
+export function refreshDraftSnapshot(snapshot: DraftSnapshot | null): void {
+  if (snapshot === null) {
+    useFlowStore.getState().reset();
+    return;
+  }
+  useFlowStore.getState().loadFromTaskFlow(snapshot.flow, snapshot.layout);
+}
+
 export function loadDraft(): DraftSnapshot | null {
   try {
     const flowStr = localStorage.getItem(KEY_FLOW);
