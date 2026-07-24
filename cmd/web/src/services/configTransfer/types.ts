@@ -30,6 +30,7 @@ export interface ConfigBackupBundle {
 }
 
 export type RestoreMode = 'merge' | 'replace';
+export type MergeConflictPolicy = 'overwrite' | 'prompt' | 'skip';
 export type ConflictChoice = 'overwrite' | 'keep-copy' | 'skip';
 
 export interface SectionStats {
