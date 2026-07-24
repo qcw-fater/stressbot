@@ -41,6 +41,13 @@ export type { TaskConflictHandler } from './errorHandler';
 export * as resourcesStore from './resourcesStore';
 export type { ResourceFile } from './resourcesStore';
 
+export * from './flowsApi';
+export * from './errorMapValidation';
+export * from './configTransfer/types';
+export * from './configTransfer/backupCodec';
+export * from './configTransfer/restorePlanner';
+export * from './configTransfer/sectionRegistry';
+
 export {
   collectFlowScriptNames,
   syncFlowScriptsToIdb,

@@ -32,6 +32,21 @@ export interface FlowTemplateSaveRequest {
   layout?: FlowLayout;
 }
 
+export interface FlowSnapshot {
+  revision: string;
+  items: FlowTemplateDetail[];
+}
+
+export interface ReplaceFlowSnapshotRequest {
+  expectedRevision: string;
+  items: FlowTemplateDetail[];
+}
+
+export interface ReplaceFlowSnapshotResponse {
+  revision: string;
+  count: number;
+}
+
 /** 列表（按更新时间倒序）。 */
 export function listFlowTemplates(): Promise<FlowTemplateSummary[]> {
   return getJson<FlowTemplateSummary[]>('/flows');
@@ -55,4 +70,14 @@ export function updateFlowTemplate(id: string, req: FlowTemplateSaveRequest): Pr
 /** 删除流程模板。 */
 export function deleteFlowTemplate(id: string): Promise<void> {
   return del<void>(`/flows/${encodeURIComponent(id)}`);
+}
+
+export function getFlowSnapshot(): Promise<FlowSnapshot> {
+  return getJson<FlowSnapshot>('/flows/snapshot');
+}
+
+export function replaceFlowSnapshot(
+  request: ReplaceFlowSnapshotRequest,
+): Promise<ReplaceFlowSnapshotResponse> {
+  return putJson<ReplaceFlowSnapshotResponse>('/flows/snapshot', request);
 }

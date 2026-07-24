@@ -6,6 +6,10 @@ import {
   type BackupSection,
   type ConfigBackupBundle,
 } from './types';
+import {
+  defaultSectionRegistry,
+  type ConfigSectionRegistry,
+} from './sectionRegistry';
 
 export type SectionValidator = (section: BackupSection, value: unknown) => void;
 
@@ -138,4 +142,13 @@ export function assertBackupFileSize(file: Pick<File, 'size'>): void {
   if (file.size > MAX_BACKUP_BYTES) {
     throw new Error('备份文件超过 100 MiB，无法导入');
   }
+}
+
+export function parseBackupWithRegistry(
+  text: string,
+  registry: ConfigSectionRegistry = defaultSectionRegistry,
+): ConfigBackupBundle {
+  return parseBackupText(text, (section, value) => {
+    registry[section].validate(value);
+  });
 }
