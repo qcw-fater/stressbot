@@ -2,11 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   assertBackupFileSize,
+  createBackupBundle,
   parseBackupText,
 } from './backupCodec';
+import type { ConfigSectionRegistry } from './sectionRegistry';
 import {
   BACKUP_KIND,
   BACKUP_SCHEMA_VERSION,
+  type BackupSection,
   MAX_BACKUP_BYTES,
 } from './types';
 
@@ -122,5 +125,68 @@ describe('assertBackupFileSize', () => {
     expect(() => assertBackupFileSize({ size: MAX_BACKUP_BYTES })).not.toThrow();
     expect(() => assertBackupFileSize({ size: MAX_BACKUP_BYTES + 1 }))
       .toThrow('备份文件超过 100 MiB，无法导入');
+  });
+});
+
+describe('createBackupBundle', () => {
+  it('reads only selected sections and keeps selected empty values explicit', async () => {
+    const reads = Object.fromEntries([
+      'flows',
+      'draft',
+      'protoFiles',
+      'luaFiles',
+      'codecFiles',
+      'errorMap',
+      'actionTemplates',
+      'listenTemplates',
+      'notepadFiles',
+    ].map((section) => [section, vi.fn(async () => section === 'draft' ? null : [])]));
+    const registry = Object.fromEntries(Object.entries(reads).map(([key, read]) => [key, {
+      key,
+      label: key,
+      kind: key === 'draft' || key === 'errorMap' ? 'singleton' : 'collection',
+      read,
+      replace: vi.fn(),
+      validate: vi.fn(),
+      count: (value: unknown) => Array.isArray(value) ? value.length : value === null ? 0 : 1,
+    }])) as unknown as ConfigSectionRegistry;
+
+    const bundle = await createBackupBundle(
+      ['draft', 'protoFiles'],
+      registry,
+      () => new Date('2026-07-23T10:00:00.000Z'),
+    );
+
+    expect(bundle.manifest).toEqual({
+      includedSections: ['draft', 'protoFiles'],
+      counts: { draft: 0, protoFiles: 0 },
+    });
+    expect(bundle.data).toEqual({ draft: null, protoFiles: [] });
+    expect(reads.draft).toHaveBeenCalledTimes(1);
+    expect(reads.protoFiles).toHaveBeenCalledTimes(1);
+    expect(reads.luaFiles).not.toHaveBeenCalled();
+  });
+
+  it('names the failing selected section and does not return a partial bundle', async () => {
+    const protoRead = vi.fn(async () => []);
+    const luaRead = vi.fn(async () => {
+      throw new Error('storage offline');
+    });
+    const adapter = (key: BackupSection, read: () => Promise<unknown>) => ({
+      key,
+      label: key === 'protoFiles' ? 'Proto 文件' : 'Lua 脚本',
+      kind: 'collection' as const,
+      read,
+      replace: vi.fn(),
+      validate: vi.fn(),
+      count: (value: unknown) => (value as unknown[]).length,
+    });
+    const registry = {
+      protoFiles: adapter('protoFiles', protoRead),
+      luaFiles: adapter('luaFiles', luaRead),
+    } as unknown as ConfigSectionRegistry;
+
+    await expect(createBackupBundle(['protoFiles', 'luaFiles'], registry))
+      .rejects.toThrow('Lua 脚本读取失败');
   });
 });

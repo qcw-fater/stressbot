@@ -24,12 +24,13 @@ import {
   NotificationOutlined,
   RedoOutlined,
   ReloadOutlined,
+  SaveOutlined,
   ThunderboltOutlined,
   UndoOutlined,
 } from '@ant-design/icons';
-import { useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useRef, useState, type ReactNode } from 'react';
 import { redo, undo } from '../store/undoRedo';
-import { clearDraft } from '../store/persistDraft';
+import { captureCurrentDraft, clearDraft, loadDraft } from '../store/persistDraft';
 import { useFlowReadOnly } from '../flowReadOnlyContext';
 import type { MenuProps } from 'antd';
 
@@ -42,6 +43,12 @@ import { useFlowFileIO } from './useFlowFileIO';
 import { exportAllTemplates, importTemplates, type TemplateBundle } from '../library/templateStore';
 import type { FlowJson } from '../codec/flowToJson';
 import { useValidationStore } from '../validation/validationStore';
+import { getCapabilities } from '@/services/capabilitiesApi';
+
+const ConfigBackupModal = lazy(async () => {
+  const module = await import('@/components/modules/configTransfer/ConfigBackupModal');
+  return { default: module.ConfigBackupModal };
+});
 
 export interface ToolbarProps {
   onOpenValidation?: () => void;
@@ -66,6 +73,8 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
   const listenCount = useFlowStore((s) => Object.keys(s.listens).length);
 
   const [flowManagerOpen, setFlowManagerOpen] = useState(false);
+  const [backupOpen, setBackupOpen] = useState(false);
+  const [flowLibrary, setFlowLibrary] = useState<boolean>();
 
   const validation = useValidationStore((state) => state.report);
   const errorCount = validation.errors.length;
@@ -109,6 +118,17 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
     } catch (e) {
       message.error(`加载失败：${(e as Error).message}`);
     }
+  };
+
+  const onOpenBackup = () => {
+    setBackupOpen(true);
+    setFlowLibrary(undefined);
+    void getCapabilities()
+      .then((capabilities) => setFlowLibrary(capabilities.flowLibrary))
+      .catch((error) => {
+        setFlowLibrary(false);
+        message.warning(`无法确认流程库状态，已跳过已保存流程：${(error as Error).message}`);
+      });
   };
 
   const fileMenuItems: MenuProps['items'] = [
@@ -155,6 +175,13 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
       icon: <DownloadOutlined />,
       label: '导出模板库',
       onClick: onExportTemplates,
+    },
+    { type: 'divider' as const },
+    {
+      key: 'backup-config',
+      icon: <SaveOutlined />,
+      label: '备份配置...',
+      onClick: onOpenBackup,
     },
   ];
 
@@ -301,6 +328,16 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
         }}
       />
       <FlowManagerModal open={flowManagerOpen} onClose={() => setFlowManagerOpen(false)} />
+      {backupOpen && (
+        <Suspense fallback={null}>
+          <ConfigBackupModal
+            open
+            onClose={() => setBackupOpen(false)}
+            flowLibrary={flowLibrary}
+            readDraft={readOnly ? loadDraft : captureCurrentDraft}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

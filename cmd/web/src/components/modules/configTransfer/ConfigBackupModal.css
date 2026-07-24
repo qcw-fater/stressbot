@@ -1,0 +1,63 @@
+.config-backup-modal__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.config-backup-modal__actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.config-backup-modal__alert {
+  margin-bottom: var(--space-md);
+}
+
+.config-backup-modal__groups {
+  display: grid;
+  gap: var(--space-lg);
+}
+
+.config-backup-modal__section-list {
+  display: grid;
+  gap: var(--space-xs);
+  margin-top: 6px;
+}
+
+.config-backup-modal__section-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(96px, 42%);
+  align-items: center;
+  min-height: 36px;
+  gap: var(--space-md);
+  padding: var(--space-xs) 0;
+}
+
+.config-backup-modal__section-status {
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.config-backup-modal__notice {
+  margin-top: var(--space-lg);
+  margin-bottom: 0;
+}
+
+@media (max-width: 480px) {
+  .config-backup-modal__summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .config-backup-modal__section-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .config-backup-modal__section-status {
+    margin-left: var(--space-xl);
+    text-align: left;
+  }
+}

@@ -16,6 +16,20 @@ export type SectionValidator = (section: BackupSection, value: unknown) => void;
 const SECTION_SET = new Set<string>(BACKUP_SECTIONS);
 const SINGLETON_SECTIONS = new Set<BackupSection>(['draft', 'errorMap']);
 
+interface RuntimeSectionAdapter {
+  label: string;
+  read: () => Promise<unknown>;
+  validate: (value: unknown) => void;
+  count: (value: unknown) => number;
+}
+
+function sectionAdapter(
+  registry: ConfigSectionRegistry,
+  section: BackupSection,
+): RuntimeSectionAdapter {
+  return registry[section] as unknown as RuntimeSectionAdapter;
+}
+
 function assertRecord(value: unknown, label: string): asserts value is Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`${label} 必须是对象`);
@@ -151,4 +165,90 @@ export function parseBackupWithRegistry(
   return parseBackupText(text, (section, value) => {
     registry[section].validate(value);
   });
+}
+
+export function buildBackupBundle(
+  data: ConfigBackupBundle['data'],
+  registry: ConfigSectionRegistry = defaultSectionRegistry,
+  now: () => Date = () => new Date(),
+): ConfigBackupBundle {
+  const includedSections = BACKUP_SECTIONS.filter((section) => Object.hasOwn(data, section));
+  const unknownSections = Object.keys(data).filter((section) => !SECTION_SET.has(section));
+  if (unknownSections.length > 0) {
+    throw new Error(`未知备份分区 ${unknownSections[0]}`);
+  }
+
+  const counts: ConfigBackupBundle['manifest']['counts'] = {};
+  for (const section of includedSections) {
+    const adapter = sectionAdapter(registry, section);
+    const value = data[section];
+    adapter.validate(value);
+    counts[section] = adapter.count(value);
+  }
+
+  return {
+    kind: BACKUP_KIND,
+    schemaVersion: BACKUP_SCHEMA_VERSION,
+    exportedAt: now().toISOString(),
+    manifest: { includedSections, counts },
+    data,
+  };
+}
+
+export async function createBackupBundle(
+  selectedSections: readonly BackupSection[],
+  registry: ConfigSectionRegistry = defaultSectionRegistry,
+  now: () => Date = () => new Date(),
+): Promise<ConfigBackupBundle> {
+  const selected = new Set(selectedSections);
+  if (selected.size !== selectedSections.length) {
+    throw new Error('备份分区不能重复');
+  }
+  const orderedSections = BACKUP_SECTIONS.filter((section) => selected.has(section));
+  if (orderedSections.length !== selectedSections.length) {
+    throw new Error('备份包含未知分区');
+  }
+
+  const entries = await Promise.all(orderedSections.map(async (section) => {
+    const adapter = sectionAdapter(registry, section);
+    try {
+      return [section, await adapter.read()] as const;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`${adapter.label}读取失败：${detail}`);
+    }
+  }));
+  const data = Object.fromEntries(entries) as ConfigBackupBundle['data'];
+  return buildBackupBundle(data, registry, now);
+}
+
+function padDatePart(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+export function backupFileName(exportedAt: string): string {
+  const date = new Date(exportedAt);
+  const day = [date.getFullYear(), padDatePart(date.getMonth() + 1), padDatePart(date.getDate())]
+    .join('');
+  const time = [date.getHours(), date.getMinutes(), date.getSeconds()]
+    .map(padDatePart)
+    .join('');
+  return `stressbot-config-backup-${day}-${time}.json`;
+}
+
+export function downloadBackupBundle(bundle: ConfigBackupBundle): void {
+  const blob = new Blob([JSON.stringify(bundle, null, 2)], {
+    type: 'application/json;charset=utf-8',
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  try {
+    anchor.href = url;
+    anchor.download = backupFileName(bundle.exportedAt);
+    document.body.appendChild(anchor);
+    anchor.click();
+  } finally {
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
 }
