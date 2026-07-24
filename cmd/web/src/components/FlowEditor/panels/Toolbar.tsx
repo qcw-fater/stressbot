@@ -62,7 +62,10 @@ export interface ToolbarProps {
 }
 
 const SECTION_DIVIDER = (
-  <Divider type="vertical" style={{ margin: '0 6px', height: 22, borderColor: 'var(--border-color)' }} />
+  <Divider
+    type="vertical"
+    style={{ margin: '0 6px', height: 22, borderColor: 'var(--border-color)' }}
+  />
 );
 
 export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
@@ -285,7 +288,10 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
           </Tooltip>
           <Tooltip title={protoTip}>
             <Badge status={protoBadgeStatus} offset={[-4, 4]}>
-              <Button icon={<ApiOutlined />} onClick={() => setActivePanel({ kind: 'protoBrowser' })}>
+              <Button
+                icon={<ApiOutlined />}
+                onClick={() => setActivePanel({ kind: 'protoBrowser' })}
+              >
                 Proto
               </Button>
             </Badge>
@@ -300,8 +306,21 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
               </Button>
             </Badge>
           </Tooltip>
-          <Tooltip title={errorCount > 0 ? `${errorCount} 处错误` : warnCount > 0 ? `${warnCount} 处警告` : '校验通过'}>
-            <Badge count={errorCount > 0 ? errorCount : warnCount} overflowCount={99} offset={[-4, 4]} color={errorCount > 0 ? undefined : 'orange'}>
+          <Tooltip
+            title={
+              errorCount > 0
+                ? `${errorCount} 处错误`
+                : warnCount > 0
+                  ? `${warnCount} 处警告`
+                  : '校验通过'
+            }
+          >
+            <Badge
+              count={errorCount > 0 ? errorCount : warnCount}
+              overflowCount={99}
+              offset={[-4, 4]}
+              color={errorCount > 0 ? undefined : 'orange'}
+            >
               <Button
                 icon={<CheckCircleOutlined />}
                 onClick={() => onOpenValidation?.()}
@@ -317,10 +336,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
 
         {/* 自动布局：作用于画布拓扑，归在编辑器侧；"适配器"已挪到 RuntimeBar 与"资源"同组（同属协议/资源准备） */}
         <Tooltip title="按拓扑自动布局节点">
-          <Button
-            icon={<DeploymentUnitOutlined />}
-            onClick={() => applyAutoLayout('LR')}
-          />
+          <Button icon={<DeploymentUnitOutlined />} onClick={() => applyAutoLayout('LR')} />
         </Tooltip>
       </Space>
 

@@ -63,7 +63,10 @@ export function createFlowTemplate(req: FlowTemplateSaveRequest): Promise<FlowTe
 }
 
 /** 覆盖流程模板：flow 非空时覆盖 flow/layout 并重新计数，flow 省略时仅重命名。 */
-export function updateFlowTemplate(id: string, req: FlowTemplateSaveRequest): Promise<FlowTemplateDetail> {
+export function updateFlowTemplate(
+  id: string,
+  req: FlowTemplateSaveRequest,
+): Promise<FlowTemplateDetail> {
   return putJson<FlowTemplateDetail>(`/flows/${encodeURIComponent(id)}`, req);
 }
 

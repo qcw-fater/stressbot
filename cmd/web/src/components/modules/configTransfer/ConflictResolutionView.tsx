@@ -21,7 +21,7 @@ interface DetailedConflict extends RestoreConflict {
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : undefined;
 }
 
@@ -42,9 +42,11 @@ function conflictMetadata(conflict: DetailedConflict): string | undefined {
 }
 
 function sameConflictType(left: RestoreConflict, right: RestoreConflict): boolean {
-  return left.section === right.section
-    && left.kind === right.kind
-    && left.allowedChoices.join('|') === right.allowedChoices.join('|');
+  return (
+    left.section === right.section &&
+    left.kind === right.kind &&
+    left.allowedChoices.join('|') === right.allowedChoices.join('|')
+  );
 }
 
 export interface ConflictResolutionViewProps {
@@ -121,10 +123,14 @@ export function ConflictResolutionView({
                   </div>
                   <Radio.Group
                     value={choices[conflict.id]}
-                    onChange={(event) => applyChoice(conflict, event.target.value as ConflictChoice)}
+                    onChange={(event) =>
+                      applyChoice(conflict, event.target.value as ConflictChoice)
+                    }
                   >
                     {conflict.allowedChoices.map((choice) => (
-                      <Radio key={choice} value={choice}>{CHOICE_LABELS[choice]}</Radio>
+                      <Radio key={choice} value={choice}>
+                        {CHOICE_LABELS[choice]}
+                      </Radio>
                     ))}
                   </Radio.Group>
                   <Checkbox

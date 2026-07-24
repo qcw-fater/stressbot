@@ -70,11 +70,11 @@ export function RecoveryGuard({ recover = recoverPendingRestore }: RecoveryGuard
       banner
       message="配置恢复未完成"
       description={description}
-      action={(
+      action={
         <Button size="small" type="link" loading={checking} onClick={() => void retry()}>
           重试恢复
         </Button>
-      )}
+      }
     />
   );
 }

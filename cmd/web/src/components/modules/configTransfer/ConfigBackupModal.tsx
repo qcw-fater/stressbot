@@ -3,18 +3,12 @@ import { Alert, Button, Checkbox, Modal, Spin, Typography } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 
 import { loadDraft, type DraftSnapshot } from '@/components/FlowEditor/store/persistDraft';
-import {
-  createBackupBundle,
-  downloadBackupBundle,
-} from '@/services/configTransfer/backupCodec';
+import { createBackupBundle, downloadBackupBundle } from '@/services/configTransfer/backupCodec';
 import {
   defaultSectionRegistry,
   type ConfigSectionRegistry,
 } from '@/services/configTransfer/sectionRegistry';
-import {
-  BACKUP_SECTIONS,
-  type BackupSection,
-} from '@/services/configTransfer/types';
+import { BACKUP_SECTIONS, type BackupSection } from '@/services/configTransfer/types';
 import './ConfigBackupModal.css';
 
 interface SectionSummary {
@@ -68,13 +62,16 @@ export function ConfigBackupModal({
   registry = defaultSectionRegistry,
   readDraft = loadDraft,
 }: ConfigBackupModalProps) {
-  const activeRegistry = useMemo<ConfigSectionRegistry>(() => ({
-    ...registry,
-    draft: {
-      ...registry.draft,
-      read: async () => readDraft(),
-    },
-  }), [readDraft, registry]);
+  const activeRegistry = useMemo<ConfigSectionRegistry>(
+    () => ({
+      ...registry,
+      draft: {
+        ...registry.draft,
+        read: async () => readDraft(),
+      },
+    }),
+    [readDraft, registry],
+  );
   const [selected, setSelected] = useState<BackupSection[]>([]);
   const [summaries, setSummaries] = useState<Partial<Record<BackupSection, SectionSummary>>>({});
   const [loading, setLoading] = useState(false);
@@ -93,22 +90,30 @@ export function ConfigBackupModal({
     setDownloadError(undefined);
     setLoading(true);
 
-    void Promise.all(availableSections.map(async (section) => {
-      const adapter = runtimeAdapter(activeRegistry, section);
-      try {
-        const value = await adapter.read();
-        return [section, {
-          count: adapter.count(value),
-          bytes: measureValue(value),
-        }] as const;
-      } catch (error) {
-        return [section, {
-          count: 0,
-          bytes: 0,
-          error: error instanceof Error ? error.message : String(error),
-        }] as const;
-      }
-    })).then((entries) => {
+    void Promise.all(
+      availableSections.map(async (section) => {
+        const adapter = runtimeAdapter(activeRegistry, section);
+        try {
+          const value = await adapter.read();
+          return [
+            section,
+            {
+              count: adapter.count(value),
+              bytes: measureValue(value),
+            },
+          ] as const;
+        } catch (error) {
+          return [
+            section,
+            {
+              count: 0,
+              bytes: 0,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          ] as const;
+        }
+      }),
+    ).then((entries) => {
       if (cancelled) return;
       setSummaries(Object.fromEntries(entries));
       setLoading(false);
@@ -120,9 +125,13 @@ export function ConfigBackupModal({
   }, [activeRegistry, availableSections, open]);
 
   const selectSection = (section: BackupSection, checked: boolean) => {
-    setSelected((current) => checked
-      ? BACKUP_SECTIONS.filter((candidate) => candidate === section || current.includes(candidate))
-      : current.filter((candidate) => candidate !== section));
+    setSelected((current) =>
+      checked
+        ? BACKUP_SECTIONS.filter(
+            (candidate) => candidate === section || current.includes(candidate),
+          )
+        : current.filter((candidate) => candidate !== section),
+    );
   };
 
   const handleDownload = async () => {
@@ -138,7 +147,10 @@ export function ConfigBackupModal({
     }
   };
 
-  const totalBytes = selected.reduce((total, section) => total + (summaries[section]?.bytes ?? 0), 0);
+  const totalBytes = selected.reduce(
+    (total, section) => total + (summaries[section]?.bytes ?? 0),
+    0,
+  );
 
   return (
     <Modal
@@ -147,7 +159,9 @@ export function ConfigBackupModal({
       width={600}
       onCancel={onClose}
       footer={[
-        <Button key="cancel" onClick={onClose}>取消</Button>,
+        <Button key="cancel" onClick={onClose}>
+          取消
+        </Button>,
         <Button
           key="download"
           type="primary"
@@ -195,10 +209,7 @@ export function ConfigBackupModal({
                   const summary = summaries[section];
                   const flowDisabled = section === 'flows' && flowLibrary !== true;
                   return (
-                    <div
-                      key={section}
-                      className="config-backup-modal__section-row"
-                    >
+                    <div key={section} className="config-backup-modal__section-row">
                       <Checkbox
                         checked={selected.includes(section)}
                         disabled={flowDisabled}
@@ -211,7 +222,9 @@ export function ConfigBackupModal({
                         className="config-backup-modal__section-status"
                       >
                         {flowDisabled
-                          ? flowLibrary === undefined ? '正在检查流程库' : '服务器未启用流程库'
+                          ? flowLibrary === undefined
+                            ? '正在检查流程库'
+                            : '服务器未启用流程库'
                           : summary?.error
                             ? `读取失败：${summary.error}`
                             : summary

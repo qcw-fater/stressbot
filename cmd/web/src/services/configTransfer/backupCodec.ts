@@ -6,10 +6,7 @@ import {
   type BackupSection,
   type ConfigBackupBundle,
 } from './types';
-import {
-  defaultSectionRegistry,
-  type ConfigSectionRegistry,
-} from './sectionRegistry';
+import { defaultSectionRegistry, type ConfigSectionRegistry } from './sectionRegistry';
 
 export type SectionValidator = (section: BackupSection, value: unknown) => void;
 
@@ -209,15 +206,17 @@ export async function createBackupBundle(
     throw new Error('备份包含未知分区');
   }
 
-  const entries = await Promise.all(orderedSections.map(async (section) => {
-    const adapter = sectionAdapter(registry, section);
-    try {
-      return [section, await adapter.read()] as const;
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      throw new Error(`${adapter.label}读取失败：${detail}`);
-    }
-  }));
+  const entries = await Promise.all(
+    orderedSections.map(async (section) => {
+      const adapter = sectionAdapter(registry, section);
+      try {
+        return [section, await adapter.read()] as const;
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(`${adapter.label}读取失败：${detail}`);
+      }
+    }),
+  );
   const data = Object.fromEntries(entries) as ConfigBackupBundle['data'];
   return buildBackupBundle(data, registry, now);
 }
@@ -228,11 +227,12 @@ function padDatePart(value: number): string {
 
 export function backupFileName(exportedAt: string): string {
   const date = new Date(exportedAt);
-  const day = [date.getFullYear(), padDatePart(date.getMonth() + 1), padDatePart(date.getDate())]
-    .join('');
-  const time = [date.getHours(), date.getMinutes(), date.getSeconds()]
-    .map(padDatePart)
-    .join('');
+  const day = [
+    date.getFullYear(),
+    padDatePart(date.getMonth() + 1),
+    padDatePart(date.getDate()),
+  ].join('');
+  const time = [date.getHours(), date.getMinutes(), date.getSeconds()].map(padDatePart).join('');
   return `stressbot-config-backup-${day}-${time}.json`;
 }
 

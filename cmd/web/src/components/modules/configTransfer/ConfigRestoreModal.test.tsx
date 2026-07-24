@@ -11,10 +11,7 @@ import type {
   RestoreResult,
   SectionStats,
 } from '@/services/configTransfer/types';
-import {
-  ConfigRestoreModal,
-  type ConfigRestoreServices,
-} from './ConfigRestoreModal';
+import { ConfigRestoreModal, type ConfigRestoreServices } from './ConfigRestoreModal';
 
 const EMPTY_STATS: SectionStats = {
   added: 0,
@@ -43,10 +40,15 @@ function planFor(selectedSections: BackupSection[] = ['protoFiles']): RestorePla
     selectedSections,
     sections: {},
     conflicts: [],
-    stats: Object.fromEntries(selectedSections.map((section) => [section, {
-      ...EMPTY_STATS,
-      added: 1,
-    }])),
+    stats: Object.fromEntries(
+      selectedSections.map((section) => [
+        section,
+        {
+          ...EMPTY_STATS,
+          added: 1,
+        },
+      ]),
+    ),
   };
 }
 
@@ -62,15 +64,20 @@ function registry(): ConfigSectionRegistry {
     listenTemplates: '监听模板',
     notepadFiles: '记事本文件',
   };
-  return Object.fromEntries(Object.entries(labels).map(([key, label]) => [key, {
-    key,
-    label,
-    kind: key === 'draft' || key === 'errorMap' ? 'singleton' : 'collection',
-    read: vi.fn(),
-    replace: vi.fn(),
-    validate: vi.fn(),
-    count: vi.fn(),
-  }])) as unknown as ConfigSectionRegistry;
+  return Object.fromEntries(
+    Object.entries(labels).map(([key, label]) => [
+      key,
+      {
+        key,
+        label,
+        kind: key === 'draft' || key === 'errorMap' ? 'singleton' : 'collection',
+        read: vi.fn(),
+        replace: vi.fn(),
+        validate: vi.fn(),
+        count: vi.fn(),
+      },
+    ]),
+  ) as unknown as ConfigSectionRegistry;
 }
 
 function restoreServices(overrides: Partial<ConfigRestoreServices> = {}): ConfigRestoreServices {
@@ -79,11 +86,13 @@ function restoreServices(overrides: Partial<ConfigRestoreServices> = {}): Config
     parse: vi.fn(() => bundle),
     preflight: vi.fn(async (_bundle, selected) => planFor([...selected])),
     resolve: vi.fn((plan) => plan),
-    execute: vi.fn(async (plan): Promise<RestoreResult> => ({
-      ok: true,
-      stats: plan.stats,
-      pendingSections: [],
-    })),
+    execute: vi.fn(
+      async (plan): Promise<RestoreResult> => ({
+        ok: true,
+        stats: plan.stats,
+        pendingSections: [],
+      }),
+    ),
     ...overrides,
   };
 }
@@ -123,9 +132,9 @@ describe('ConfigRestoreModal', () => {
   const nativeGetComputedStyle = window.getComputedStyle.bind(window);
 
   beforeEach(() => {
-    vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => (
-      nativeGetComputedStyle(element)
-    ));
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element) =>
+      nativeGetComputedStyle(element),
+    );
   });
 
   afterEach(() => vi.restoreAllMocks());
@@ -172,12 +181,9 @@ describe('ConfigRestoreModal', () => {
     expect(flows.disabled).toBe(true);
     expect(flows.checked).toBe(false);
     expect(proto.checked).toBe(true);
-    await waitFor(() => expect(services.preflight).toHaveBeenCalledWith(
-      bundle,
-      ['protoFiles'],
-      'merge',
-      'prompt',
-    ));
+    await waitFor(() =>
+      expect(services.preflight).toHaveBeenCalledWith(bundle, ['protoFiles'], 'merge', 'prompt'),
+    );
   });
 
   it('replans when the merge duplicate strategy changes', async () => {
@@ -188,12 +194,9 @@ describe('ConfigRestoreModal', () => {
 
     await user.click(screen.getByRole('radio', { name: '全部忽略' }));
 
-    await waitFor(() => expect(services.preflight).toHaveBeenLastCalledWith(
-      bundle,
-      ['protoFiles'],
-      'merge',
-      'skip',
-    ));
+    await waitFor(() =>
+      expect(services.preflight).toHaveBeenLastCalledWith(bundle, ['protoFiles'], 'merge', 'skip'),
+    );
   });
 
   it('shows the deletion warning only for full restore', async () => {
@@ -210,24 +213,28 @@ describe('ConfigRestoreModal', () => {
   it('updates preview counts from the resolved conflict choices', async () => {
     const user = userEvent.setup();
     const conflicted = planFor(['protoFiles']);
-    conflicted.conflicts = [{
-      id: 'proto:one',
-      section: 'protoFiles',
-      kind: 'duplicate',
-      sourceName: 'login.proto',
-      targetIds: ['login.proto'],
-      targetNames: ['login.proto'],
-      allowedChoices: ['overwrite', 'keep-copy', 'skip'],
-    }];
+    conflicted.conflicts = [
+      {
+        id: 'proto:one',
+        section: 'protoFiles',
+        kind: 'duplicate',
+        sourceName: 'login.proto',
+        targetIds: ['login.proto'],
+        targetNames: ['login.proto'],
+        allowedChoices: ['overwrite', 'keep-copy', 'skip'],
+      },
+    ];
     const services = restoreServices({
       preflight: vi.fn(async () => conflicted),
-      resolve: vi.fn((plan, choices) => choices['proto:one']
-        ? {
-            ...plan,
-            conflicts: [],
-            stats: { protoFiles: { ...EMPTY_STATS, copied: 1 } },
-          }
-        : plan),
+      resolve: vi.fn((plan, choices) =>
+        choices['proto:one']
+          ? {
+              ...plan,
+              conflicts: [],
+              stats: { protoFiles: { ...EMPTY_STATS, copied: 1 } },
+            }
+          : plan,
+      ),
     });
     renderModal(services, { flowLibrary: false });
     await selectValidBackup(user);
@@ -244,8 +251,9 @@ describe('ConfigRestoreModal', () => {
     await selectValidBackup(user);
 
     expect(screen.getByText('请先返回编辑模式')).toBeTruthy();
-    expect((screen.getByRole('button', { name: /开始恢复/ }) as HTMLButtonElement).disabled)
-      .toBe(true);
+    expect((screen.getByRole('button', { name: /开始恢复/ }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
   });
 
   it('executes after confirmation and renders per-content result counts', async () => {

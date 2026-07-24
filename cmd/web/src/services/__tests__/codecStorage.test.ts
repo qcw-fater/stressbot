@@ -32,6 +32,10 @@ vi.mock('idb-keyval', () => {
     del: vi.fn(async (key: unknown, store: unknown) => {
       storeMap(store).delete(key);
     }),
+    delMany: vi.fn(async (keys: unknown[], store: unknown) => {
+      const m = storeMap(store);
+      for (const key of keys) m.delete(key);
+    }),
     keys: vi.fn(async (store: unknown) => Array.from(storeMap(store).keys())),
     clear: vi.fn(async (store: unknown) => {
       storeMap(store).clear();

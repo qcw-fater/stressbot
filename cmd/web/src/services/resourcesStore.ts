@@ -13,11 +13,18 @@
  * 基线同步：本地/基线/服务器三方比较，只有双方都修改且内容不同时才需要用户处理冲突。
  */
 
-import { clear, createStore, del, get, keys, set, setMany } from 'idb-keyval';
+import { clear, createStore, del, delMany, get, keys, set, setMany } from 'idb-keyval';
 import { BASELINE_PREFIX } from './env';
 import { fetchBaselineCodecIndex, fetchBaselineCodec } from './baselineApi';
 import type { CodecSchema } from '@/types/codec';
-import type { BindingType, FieldBind, FilterDef, HeartbeatField, HeartbeatFieldSource, HeartbeatFieldType } from '@/types/action';
+import type {
+  BindingType,
+  FieldBind,
+  FilterDef,
+  HeartbeatField,
+  HeartbeatFieldSource,
+  HeartbeatFieldType,
+} from '@/types/action';
 import {
   ALL_BINDING_TYPES,
   ALL_HEARTBEAT_FIELD_SOURCES,
@@ -57,10 +64,16 @@ async function replaceResourceStore(
   store: ReturnType<typeof createStore>,
   files: readonly ResourceFile[],
 ): Promise<void> {
-  await clear(store);
+  const existingKeys = await keys(store);
   if (files.length > 0) {
-    await setMany(files.map((file) => [file.name, { ...file }]), store);
+    await setMany(
+      files.map((file) => [file.name, { ...file }]),
+      store,
+    );
   }
+  const nextNames = new Set(files.map((file) => file.name));
+  const obsoleteKeys = existingKeys.filter((key) => typeof key !== 'string' || !nextNames.has(key));
+  if (obsoleteKeys.length > 0) await delMany(obsoleteKeys, store);
 }
 
 export async function hashResourceContent(content: string): Promise<string> {
@@ -71,7 +84,12 @@ export async function hashResourceContent(content: string): Promise<string> {
   return `sha256:${hex}`;
 }
 
-async function localResourceFile(name: string, content: string, previous?: ResourceFile, uploadedAt = new Date().toISOString()): Promise<ResourceFile> {
+async function localResourceFile(
+  name: string,
+  content: string,
+  previous?: ResourceFile,
+  uploadedAt = new Date().toISOString(),
+): Promise<ResourceFile> {
   return {
     name,
     content,
@@ -81,7 +99,11 @@ async function localResourceFile(name: string, content: string, previous?: Resou
   };
 }
 
-async function serverResourceFile(name: string, content: string, uploadedAt = new Date().toISOString()): Promise<ResourceFile> {
+async function serverResourceFile(
+  name: string,
+  content: string,
+  uploadedAt = new Date().toISOString(),
+): Promise<ResourceFile> {
   return {
     name,
     content,
@@ -114,10 +136,12 @@ export async function addProtoFromBaseline(name: string, content: string): Promi
 export async function addProtos(files: Array<{ name: string; content: string }>): Promise<void> {
   if (files.length === 0) return;
   const now = new Date().toISOString();
-  const entries: Array<[string, ResourceFile]> = await Promise.all(files.map(async ({ name, content }) => [
-    name,
-    await localResourceFile(name, content, await getProto(name), now),
-  ]));
+  const entries: Array<[string, ResourceFile]> = await Promise.all(
+    files.map(async ({ name, content }) => [
+      name,
+      await localResourceFile(name, content, await getProto(name), now),
+    ]),
+  );
   await setMany(entries, protoStore);
   notify();
 }
@@ -172,10 +196,12 @@ export async function addScriptFromBaseline(name: string, content: string): Prom
 export async function addScripts(files: Array<{ name: string; content: string }>): Promise<void> {
   if (files.length === 0) return;
   const now = new Date().toISOString();
-  const entries: Array<[string, ResourceFile]> = await Promise.all(files.map(async ({ name, content }) => [
-    name,
-    await localResourceFile(name, content, await getScript(name), now),
-  ]));
+  const entries: Array<[string, ResourceFile]> = await Promise.all(
+    files.map(async ({ name, content }) => [
+      name,
+      await localResourceFile(name, content, await getScript(name), now),
+    ]),
+  );
   await setMany(entries, scriptStore);
   notify();
 }
@@ -241,7 +267,10 @@ export async function setCodecSchema(name: string, content: string): Promise<Res
   return file;
 }
 
-export async function setCodecSchemaFromBaseline(name: string, content: string): Promise<ResourceFile> {
+export async function setCodecSchemaFromBaseline(
+  name: string,
+  content: string,
+): Promise<ResourceFile> {
   assertCodecFileName(name);
   const file = await serverResourceFile(name, content);
   await set(name, file, adapterStore);
@@ -398,7 +427,9 @@ function validateHeader(s: CodecSchema, ec: ErrCollector): void {
       ec.add(`${prefix}：size 必须大于 0（当前 ${size}）`);
     }
     if (offset < 0 || offset + size > headerSize) {
-      ec.add(`${prefix}：物理区间 [offset=${offset}, offset+size=${offset + size}) 越界（headerSize=${headerSize}）`);
+      ec.add(
+        `${prefix}：物理区间 [offset=${offset}, offset+size=${offset + size}) 越界（headerSize=${headerSize}）`,
+      );
     }
     const t = typeof f.type === 'string' ? f.type : '';
     if (!isFieldTypeKnown(t)) {
@@ -495,21 +526,28 @@ function validateFlagBits(f: NonNullable<CodecSchema['header'][number]>, ec: Err
       ec.add(`flags 字段 "${f.name}" 的 bit ${bit} 超出 [0,${bitWidth})（bit 位非法）`);
     }
     if (seenBit.has(bit)) {
-      ec.add(`flags 字段 "${f.name}" 的 bit ${bit} 重复（与 "${seenBit.get(bit)}" 冲突，命名位不能重复）`);
+      ec.add(
+        `flags 字段 "${f.name}" 的 bit ${bit} 重复（与 "${seenBit.get(bit)}" 冲突，命名位不能重复）`,
+      );
     } else {
       seenBit.set(bit, bname);
     }
     if (!bname || bname.trim() === '') {
       ec.add(`flags 字段 "${f.name}" 的 bit ${bit} 名称为空`);
     } else if (seenName.has(bname)) {
-      ec.add(`flags 字段 "${f.name}" 的命名位 "${bname}" 重复（与 bit ${seenName.get(bname)} 冲突）`);
+      ec.add(
+        `flags 字段 "${f.name}" 的命名位 "${bname}" 重复（与 bit ${seenName.get(bname)} 冲突）`,
+      );
     } else {
       seenName.set(bname, bit);
     }
   }
 }
 
-function validateChecksumOut(f: NonNullable<CodecSchema['header'][number]>, ec: ErrCollector): void {
+function validateChecksumOut(
+  f: NonNullable<CodecSchema['header'][number]>,
+  ec: ErrCollector,
+): void {
   const from = typeof f.from === 'string' ? f.from : '';
   if (from === '') {
     ec.add(`checksumOut 字段 "${f.name}" 缺少 from（需 <step>.<output>）`);
@@ -520,7 +558,10 @@ function validateChecksumOut(f: NonNullable<CodecSchema['header'][number]>, ec: 
   }
 }
 
-function validateValueSource(f: NonNullable<CodecSchema['header'][number]>, ec: ErrCollector): void {
+function validateValueSource(
+  f: NonNullable<CodecSchema['header'][number]>,
+  ec: ErrCollector,
+): void {
   if (!f.source) {
     // v1 不强制：value 字段缺 source 仅提示性（与 Go schema.go 行为一致）
     return;
@@ -531,7 +572,9 @@ function validateValueSource(f: NonNullable<CodecSchema['header'][number]>, ec: 
     return;
   }
   if (!VALUE_SOURCE_KINDS_SUPPORTED[kind]) {
-    ec.add(`value 字段 "${f.name}" 的 source.kind="${kind}" 不支持：v1 不支持的头字段取值源 kind="${kind}"，留待 v1.1`);
+    ec.add(
+      `value 字段 "${f.name}" 的 source.kind="${kind}" 不支持：v1 不支持的头字段取值源 kind="${kind}"，留待 v1.1`,
+    );
   }
 }
 
@@ -600,7 +643,12 @@ function validateHeartbeat(s: CodecSchema, ec: ErrCollector): void {
   }
 }
 
-function validateFieldBindings(prefix: string, bindings: FieldBind[], ec: ErrCollector, isMapEntryValue = false): void {
+function validateFieldBindings(
+  prefix: string,
+  bindings: FieldBind[],
+  ec: ErrCollector,
+  isMapEntryValue = false,
+): void {
   const validTypes = new Set<string>(ALL_BINDING_TYPES);
   for (let i = 0; i < bindings.length; i++) {
     const b = bindings[i];
@@ -629,22 +677,26 @@ function validateFieldBindings(prefix: string, bindings: FieldBind[], ec: ErrCol
       case 'randomPick':
       case 'randomPickN':
         if (!b.values || b.values.length === 0) ec.add(`${label} type=${t} 缺少 values`);
-        if (t === 'randomPickN' && (!b.count || b.count <= 0)) ec.add(`${label} type=randomPickN count 必须 > 0`);
+        if (t === 'randomPickN' && (!b.count || b.count <= 0))
+          ec.add(`${label} type=randomPickN count 必须 > 0`);
         break;
       case 'randomPickMap':
         if (!b.values || b.values.length === 0) ec.add(`${label} type=randomPickMap 缺少 values`);
         if (!b.keySource) ec.add(`${label} type=randomPickMap 缺少 keySource`);
         break;
       case 'randomExclude':
-        if ((!b.values || b.values.length === 0) && !b.source) ec.add(`${label} type=randomExclude 缺少 values 和 source`);
+        if ((!b.values || b.values.length === 0) && !b.source)
+          ec.add(`${label} type=randomExclude 缺少 values 和 source`);
         break;
       case 'randomInt':
       case 'randomFloat':
-        if (b.min != null && b.max != null && b.min >= b.max) ec.add(`${label} type=${t} min 必须小于 max`);
+        if (b.min != null && b.max != null && b.min >= b.max)
+          ec.add(`${label} type=${t} min 必须小于 max`);
         break;
       case 'randomString':
         if (!b.length || b.length <= 0) ec.add(`${label} type=randomString length 必须 > 0`);
-        if (b.charset != null && b.charset.trim().length === 0) ec.add(`${label} type=randomString charset 不能为空`);
+        if (b.charset != null && b.charset.trim().length === 0)
+          ec.add(`${label} type=randomString charset 不能为空`);
         break;
       case 'map':
         if (!b.entries || b.entries.length === 0) {
@@ -653,7 +705,8 @@ function validateFieldBindings(prefix: string, bindings: FieldBind[], ec: ErrCol
           for (let ei = 0; ei < b.entries.length; ei++) {
             const entry = b.entries[ei];
             const entryLabel = `${label}.entries[${ei}]`;
-            if (entry.key === undefined || entry.key === null || entry.key === '') ec.add(`${entryLabel} 缺少 key`);
+            if (entry.key === undefined || entry.key === null || entry.key === '')
+              ec.add(`${entryLabel} 缺少 key`);
             if (!entry.value) {
               ec.add(`${entryLabel} 缺少 value`);
             } else if (entry.value.type === 'map') {
@@ -670,12 +723,33 @@ function validateFieldBindings(prefix: string, bindings: FieldBind[], ec: ErrCol
 }
 
 function validateCodecFilters(prefix: string, filters: FilterDef[], ec: ErrCollector): void {
-  const validOps = new Set(['', '==', '!=', '>', '>=', '<', '<=', 'eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'notContains', 'in', 'notIn', 'notNil', 'isNil']);
+  const validOps = new Set([
+    '',
+    '==',
+    '!=',
+    '>',
+    '>=',
+    '<',
+    '<=',
+    'eq',
+    'neq',
+    'gt',
+    'gte',
+    'lt',
+    'lte',
+    'contains',
+    'notContains',
+    'in',
+    'notIn',
+    'notNil',
+    'isNil',
+  ]);
   const validModes = new Set(['any', 'all', 'none']);
   for (let i = 0; i < filters.length; i++) {
     const f = filters[i];
     if (f.op && !validOps.has(f.op)) ec.add(`${prefix}.filters[${i}] 未知的 op "${f.op}"`);
-    if (f.mode && !validModes.has(f.mode)) ec.add(`${prefix}.filters[${i}] 未知的 mode "${f.mode}"`);
+    if (f.mode && !validModes.has(f.mode))
+      ec.add(`${prefix}.filters[${i}] 未知的 mode "${f.mode}"`);
   }
 }
 
@@ -693,11 +767,13 @@ function validateHeartbeatFields(fields: HeartbeatField[], ec: ErrCollector): vo
       continue;
     }
     const isFloat = (t as HeartbeatFieldType) === 'f32' || (t as HeartbeatFieldType) === 'f64';
-    if (isFloat && source !== 'fixed' && source !== 'state') ec.add(`${label} 浮点字段仅支持 fixed/state source`);
+    if (isFloat && source !== 'fixed' && source !== 'state')
+      ec.add(`${label} 浮点字段仅支持 fixed/state source`);
     switch (source as HeartbeatFieldSource) {
       case 'fixed':
         if (isFloat) {
-          if (f.floatValue === undefined || f.floatValue === null) ec.add(`${label} source=fixed 缺少 floatValue`);
+          if (f.floatValue === undefined || f.floatValue === null)
+            ec.add(`${label} source=fixed 缺少 floatValue`);
         } else if (f.value === undefined || f.value === null) {
           ec.add(`${label} source=fixed 缺少 value`);
         }
@@ -707,7 +783,8 @@ function validateHeartbeatFields(fields: HeartbeatField[], ec: ErrCollector): vo
         if (!f.key) ec.add(`${label} source=${source} 缺少 key`);
         break;
       case 'randomInt':
-        if (f.min === undefined || f.max === undefined) ec.add(`${label} source=randomInt 缺少 min/max`);
+        if (f.min === undefined || f.max === undefined)
+          ec.add(`${label} source=randomInt 缺少 min/max`);
         break;
     }
   }
@@ -741,7 +818,9 @@ function validatePipeline(s: CodecSchema, ec: ErrCollector): void {
     if (name === '') {
       ec.add(`pipeline 步骤 (index ${i}) 缺少 name`);
     } else if (stepNames.has(st!.name)) {
-      ec.add(`pipeline 步骤 name "${st!.name}" 重复（与 index ${stepNames.get(st!.name)} 冲突，name 必须唯一）`);
+      ec.add(
+        `pipeline 步骤 name "${st!.name}" 重复（与 index ${stepNames.get(st!.name)} 冲突，name 必须唯一）`,
+      );
     } else {
       stepNames.set(st!.name, i);
     }
@@ -769,7 +848,9 @@ function validatePipeline(s: CodecSchema, ec: ErrCollector): void {
         pn.add(p.name);
       }
       if (!(PRODUCE_REGIONS as readonly string[]).includes(p.region ?? '')) {
-        ec.add(`${prefix}：produces "${p.name}" 的 region "${p.region ?? ''}" 不合法（合法值：ciphered|bodyPlain|bodyFinal|header|frame）`);
+        ec.add(
+          `${prefix}：produces "${p.name}" 的 region "${p.region ?? ''}" 不合法（合法值：ciphered|bodyPlain|bodyFinal|header|frame）`,
+        );
       }
     }
     // offset（encrypt）
@@ -794,14 +875,18 @@ function validatePipeline(s: CodecSchema, ec: ErrCollector): void {
 
 function validateOver(ec: ErrCollector, prefix: string, o: OverSpecInput): void {
   if (!(OVER_KINDS as readonly string[]).includes(o.kind ?? '')) {
-    ec.add(`${prefix}：over.kind "${o.kind ?? ''}" 不合法（合法值：bodyPlain|bodyFinal|header|frame|range）`);
+    ec.add(
+      `${prefix}：over.kind "${o.kind ?? ''}" 不合法（合法值：bodyPlain|bodyFinal|header|frame|range）`,
+    );
     return;
   }
   if (o.kind === 'range') {
     const start = typeof o.rangeStart === 'number' ? o.rangeStart : 0;
     const end = typeof o.rangeEnd === 'number' ? o.rangeEnd : 0;
     if (start < 0 || end < 0 || end < start) {
-      ec.add(`${prefix}：over range 区间非法 [rangeStart=${start}, rangeEnd=${end}]（需 >=0 且 rangeEnd>=rangeStart）`);
+      ec.add(
+        `${prefix}：over range 区间非法 [rangeStart=${start}, rangeEnd=${end}]（需 >=0 且 rangeEnd>=rangeStart）`,
+      );
     }
   }
 }
@@ -826,7 +911,9 @@ function validateWhen(
   const guards = Array.isArray(w.guards) ? w.guards : [];
   for (const g of guards) {
     if (!(GUARD_OPS as readonly string[]).includes(g?.op ?? '')) {
-      ec.add(`${prefix}：guard (field="${g?.field ?? ''}") 的 op "${g?.op ?? ''}" 不合法（合法值：eq|neq|gt|gte|lt|lte）`);
+      ec.add(
+        `${prefix}：guard (field="${g?.field ?? ''}") 的 op "${g?.op ?? ''}" 不合法（合法值：eq|neq|gt|gte|lt|lte）`,
+      );
     }
   }
 }
@@ -852,11 +939,15 @@ function validatePipelineRefs(
   for (const st of pipeline) {
     if (!st?.flag || st.flag === '') continue;
     if (!flagNameToField.has(st.flag)) {
-      ec.add(`pipeline 步骤 "${st.name}" 的 flag "${st.flag}" 未在任何 role:"flags" 字段的命名位中声明`);
+      ec.add(
+        `pipeline 步骤 "${st.name}" 的 flag "${st.flag}" 未在任何 role:"flags" 字段的命名位中声明`,
+      );
       continue;
     }
     if (boundFlag.has(st.flag)) {
-      ec.add(`pipeline 步骤 "${st.name}" 的 flag "${st.flag}" 已被步骤 "${boundFlag.get(st.flag)}" 绑定（同一命名 flag 位至多被一个 step 绑定）`);
+      ec.add(
+        `pipeline 步骤 "${st.name}" 的 flag "${st.flag}" 已被步骤 "${boundFlag.get(st.flag)}" 绑定（同一命名 flag 位至多被一个 step 绑定）`,
+      );
     } else {
       boundFlag.set(st.flag, st.name);
     }
@@ -865,7 +956,9 @@ function validatePipelineRefs(
   // 凡带 when 的 step 必须绑定 flag
   for (const st of pipeline) {
     if (st?.when && (!st.flag || st.flag === '')) {
-      ec.add(`pipeline 步骤 "${st.name}" 带有 when 但未绑定 flag（带 when 的步骤必须绑定 flag，否则 decode 无法复现 encode 决策）`);
+      ec.add(
+        `pipeline 步骤 "${st.name}" 带有 when 但未绑定 flag（带 when 的步骤必须绑定 flag，否则 decode 无法复现 encode 决策）`,
+      );
     }
   }
 
@@ -890,7 +983,9 @@ function validatePipelineRefs(
       continue;
     }
     if (!produces.has(produceName)) {
-      ec.add(`checksumOut 字段 "${f.name}" 的 from "${f.from}" 指向 step "${stepName}" 中不存在的 produce "${produceName}"`);
+      ec.add(
+        `checksumOut 字段 "${f.name}" 的 from "${f.from}" 指向 step "${stepName}" 中不存在的 produce "${produceName}"`,
+      );
     }
   }
 }
@@ -961,7 +1056,10 @@ export function syncDiffIdentity(diff: SyncDiff): string {
   return `${diff.type}:${diff.name}`;
 }
 
-export function subtractSyncResult(base: BaselineSyncResult | null, handled: BaselineSyncResult): BaselineSyncResult | null {
+export function subtractSyncResult(
+  base: BaselineSyncResult | null,
+  handled: BaselineSyncResult,
+): BaselineSyncResult | null {
   if (!base) return null;
   const handledKeys = new Set([...handled.conflicts, ...handled.removed].map(syncDiffIdentity));
   const conflicts = base.conflicts.filter((it) => !handledKeys.has(syncDiffIdentity(it)));
@@ -985,7 +1083,10 @@ export interface ThreeWayDecision {
   serverHash: string | null;
 }
 
-export async function compareResourceThreeWay(local: ResourceFile, serverContent: string | null): Promise<ThreeWayDecision> {
+export async function compareResourceThreeWay(
+  local: ResourceFile,
+  serverContent: string | null,
+): Promise<ThreeWayDecision> {
   const localHash = await hashResourceContent(local.content);
   const serverHash = serverContent === null ? null : await hashResourceContent(serverContent);
   const baseHash = local.baseHash;
@@ -998,7 +1099,11 @@ export async function compareResourceThreeWay(local: ResourceFile, serverContent
   }
   if (serverHash === null) {
     if (baseHash === null) return { kind: 'localOnlyChanged', localHash, serverHash };
-    return { kind: baseHash === localHash ? 'serverRemovedOnly' : 'removedConflict', localHash, serverHash };
+    return {
+      kind: baseHash === localHash ? 'serverRemovedOnly' : 'removedConflict',
+      localHash,
+      serverHash,
+    };
   }
   if (baseHash === serverHash) {
     return { kind: 'localOnlyChanged', localHash, serverHash };
@@ -1015,7 +1120,11 @@ async function getResource(type: ResourceType, name: string): Promise<ResourceFi
   return name === ERRORS_JSON_KEY ? getErrorMap() : getCodecSchema(name);
 }
 
-async function writeBaselineResource(type: ResourceType, name: string, content: string): Promise<void> {
+async function writeBaselineResource(
+  type: ResourceType,
+  name: string,
+  content: string,
+): Promise<void> {
   if (type === 'proto') {
     await addProtoFromBaseline(name, content);
   } else if (type === 'script') {
@@ -1034,7 +1143,11 @@ async function deleteResource(type: ResourceType, name: string): Promise<void> {
   notify();
 }
 
-async function setResourceBaseHash(type: ResourceType, name: string, baseHash: string | null): Promise<void> {
+async function setResourceBaseHash(
+  type: ResourceType,
+  name: string,
+  baseHash: string | null,
+): Promise<void> {
   const existing = await getResource(type, name);
   if (!existing) return;
   const next: ResourceFile = { ...existing, baseHash };
@@ -1071,7 +1184,12 @@ export async function reconcileResourceWithServer(
       result.removed.push({ type, name, localContent: local.content, baselineContent: '' });
       return;
     case 'conflict':
-      result.conflicts.push({ type, name, localContent: local.content, baselineContent: serverContent ?? '' });
+      result.conflicts.push({
+        type,
+        name,
+        localContent: local.content,
+        baselineContent: serverContent ?? '',
+      });
       return;
   }
 }
@@ -1083,10 +1201,20 @@ export async function markResourcesAsBaselineSynced(input: {
   errorMap?: ResourceFile | null;
 }): Promise<void> {
   const writes: Array<Promise<void>> = [];
-  for (const f of input.protos ?? []) writes.push(setResourceBaseHash('proto', f.name, await hashResourceContent(f.content)));
-  for (const f of input.scripts ?? []) writes.push(setResourceBaseHash('script', f.name, await hashResourceContent(f.content)));
-  for (const f of input.codecs ?? []) writes.push(setResourceBaseHash('adapter', f.name, await hashResourceContent(f.content)));
-  if (input.errorMap) writes.push(setResourceBaseHash('adapter', ERRORS_JSON_KEY, await hashResourceContent(input.errorMap.content)));
+  for (const f of input.protos ?? [])
+    writes.push(setResourceBaseHash('proto', f.name, await hashResourceContent(f.content)));
+  for (const f of input.scripts ?? [])
+    writes.push(setResourceBaseHash('script', f.name, await hashResourceContent(f.content)));
+  for (const f of input.codecs ?? [])
+    writes.push(setResourceBaseHash('adapter', f.name, await hashResourceContent(f.content)));
+  if (input.errorMap)
+    writes.push(
+      setResourceBaseHash(
+        'adapter',
+        ERRORS_JSON_KEY,
+        await hashResourceContent(input.errorMap.content),
+      ),
+    );
   await Promise.all(writes);
   if (writes.length > 0) notify();
 }
@@ -1158,7 +1286,11 @@ export async function applyConflictResolution(decisions: ConflictDecision[]): Pr
   for (const d of decisions) {
     const baseline = await fetchResourceBaseline(d.type, d.name);
     if (d.keepLocal) {
-      await setResourceBaseHash(d.type, d.name, baseline === null ? null : await hashResourceContent(baseline));
+      await setResourceBaseHash(
+        d.type,
+        d.name,
+        baseline === null ? null : await hashResourceContent(baseline),
+      );
     } else if (baseline !== null) {
       await writeBaselineResource(d.type, d.name, baseline);
     } else {
@@ -1207,8 +1339,10 @@ async function fetchFileText(url: string): Promise<string | null> {
 }
 
 async function fetchResourceBaseline(type: ResourceType, name: string): Promise<string | null> {
-  if (type === 'proto') return fetchFileText(`${BASELINE_PREFIX}/proto/${encodeURIComponent(name)}`);
-  if (type === 'script') return fetchFileText(`${BASELINE_PREFIX}/scripts/${encodeURIComponent(name)}`);
+  if (type === 'proto')
+    return fetchFileText(`${BASELINE_PREFIX}/proto/${encodeURIComponent(name)}`);
+  if (type === 'script')
+    return fetchFileText(`${BASELINE_PREFIX}/scripts/${encodeURIComponent(name)}`);
   return fetchBaselineCodec(name);
 }
 
@@ -1220,9 +1354,7 @@ async function syncFileGroup(
   result: BaselineSyncResult,
 ): Promise<void> {
   // 收集本地存储中已有的所有 key
-  const idbKeys = new Set(
-    ((await keys(store)) as IDBValidKey[]).map(String),
-  );
+  const idbKeys = new Set(((await keys(store)) as IDBValidKey[]).map(String));
   const baselineSet = new Set(baselineNames);
 
   // 基线有 → 对比

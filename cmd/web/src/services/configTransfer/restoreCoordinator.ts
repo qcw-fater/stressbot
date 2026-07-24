@@ -8,10 +8,7 @@ import {
   type ReplaceFlowSnapshotRequest,
   type ReplaceFlowSnapshotResponse,
 } from '../flowsApi';
-import {
-  defaultSectionRegistry,
-  type ConfigSectionRegistry,
-} from './sectionRegistry';
+import { defaultSectionRegistry, type ConfigSectionRegistry } from './sectionRegistry';
 import {
   applyConflictChoices,
   planCollectionMerge,
@@ -103,7 +100,9 @@ function canonicalize(value: unknown): unknown {
   if (value !== null && typeof value === 'object') {
     const record = value as Record<string, unknown>;
     return Object.fromEntries(
-      Object.keys(record).sort().map((key) => [key, canonicalize(record[key])]),
+      Object.keys(record)
+        .sort()
+        .map((key) => [key, canonicalize(record[key])]),
     );
   }
   return value;
@@ -124,7 +123,10 @@ function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
   return Object.freeze(value);
 }
 
-function assertSelectedSections(bundle: ConfigBackupBundle, selected: readonly BackupSection[]): void {
+function assertSelectedSections(
+  bundle: ConfigBackupBundle,
+  selected: readonly BackupSection[],
+): void {
   const included = new Set(bundle.manifest.includedSections);
   const seen = new Set<BackupSection>();
   for (const section of selected) {
@@ -150,9 +152,10 @@ function planSection(
     if (!Array.isArray(current) || !Array.isArray(incoming) || !adapter.identity) {
       throw new Error(`集合分区 ${section} 的数据或身份规则无效`);
     }
-    const planned = mode === 'replace'
-      ? planCollectionReplace(current, incoming, adapter.identity, section)
-      : planCollectionMerge(current, incoming, adapter.identity, policy, section);
+    const planned =
+      mode === 'replace'
+        ? planCollectionReplace(current, incoming, adapter.identity, section)
+        : planCollectionMerge(current, incoming, adapter.identity, policy, section);
     return {
       sectionPlan: {
         before: current,
@@ -203,14 +206,7 @@ export async function preflightRestore(
     } else {
       current = await adapter.read();
     }
-    const planned = planSection(
-      section,
-      current,
-      bundle.data[section],
-      mode,
-      policy,
-      adapter,
-    );
+    const planned = planSection(section, current, bundle.data[section], mode, policy, adapter);
     sections[section] = planned.sectionPlan;
     stats[section] = planned.sectionPlan.stats;
     conflicts.push(...planned.conflicts);
@@ -253,7 +249,11 @@ export function resolveRestorePlanConflicts(
 
     const adapter = environment.registry[section];
     if (adapter.kind === 'collection') {
-      if (!Array.isArray(sectionPlan.before) || !Array.isArray(sectionPlan.after) || !adapter.identity) {
+      if (
+        !Array.isArray(sectionPlan.before) ||
+        !Array.isArray(sectionPlan.after) ||
+        !adapter.identity
+      ) {
         throw new Error(`集合内容 ${section} 的冲突计划无效`);
       }
       const pending: CollectionPlan<unknown> = {
@@ -339,8 +339,12 @@ function makeJournal(plan: RestorePlan): RecoveryJournal {
     selectedSections: [...plan.selectedSections],
     before,
     completedSections: [],
-    flowBefore: plan.flowExpectedRevision && Array.isArray(flowItems)
-      ? { revision: plan.flowExpectedRevision, items: flowItems as FlowTemplateDetail[] }
+    flowBefore:
+      plan.flowExpectedRevision && Array.isArray(flowItems)
+        ? { revision: plan.flowExpectedRevision, items: flowItems as FlowTemplateDetail[] }
+        : undefined,
+    flowAfterFingerprint: plan.sections.flows
+      ? fingerprintRestoreValue(plan.sections.flows.after)
       : undefined,
     pendingRollback: [],
   };
@@ -356,6 +360,10 @@ async function applyPlanSections(
   for (const section of orderedSections(plan.selectedSections)) {
     const sectionPlan = plan.sections[section];
     if (!sectionPlan) throw new Error(`恢复计划缺少分区 ${section}`);
+    if (!journal.pendingRollback.includes(section)) {
+      journal.pendingRollback.push(section);
+      await environment.journal.save(journal);
+    }
     if (section === 'flows') {
       if (!plan.flowExpectedRevision || !Array.isArray(sectionPlan.after)) {
         throw new Error('流程恢复计划缺少 revision 或流程列表');
@@ -389,11 +397,28 @@ async function rollbackOne(
   environment: RestoreEnvironment,
 ): Promise<void> {
   if (section === 'flows') {
-    if (!journal.flowBefore || !journal.flowAppliedRevision) {
-      throw new Error('流程回滚缺少恢复前快照或已应用 revision');
+    if (!journal.flowBefore) {
+      throw new Error('流程回滚缺少恢复前快照');
+    }
+    const current = await environment.getFlowSnapshot();
+    if (current.revision === journal.flowBefore.revision) return;
+
+    let expectedRevision = journal.flowAppliedRevision;
+    if (expectedRevision) {
+      if (current.revision !== expectedRevision) {
+        throw new RestoreTargetChangedError(section);
+      }
+    } else {
+      if (
+        !journal.flowAfterFingerprint ||
+        fingerprintRestoreValue(current.items) !== journal.flowAfterFingerprint
+      ) {
+        throw new RestoreTargetChangedError(section);
+      }
+      expectedRevision = current.revision;
     }
     await environment.replaceFlowSnapshot({
-      expectedRevision: journal.flowAppliedRevision,
+      expectedRevision,
       items: journal.flowBefore.items,
     });
     return;

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const stores = new Map<unknown, Map<unknown, unknown>>();
+const storageOperations: string[] = [];
 
 vi.mock('idb-keyval', () => {
   function storeMap(store: unknown): Map<unknown, unknown> {
@@ -19,14 +20,21 @@ vi.mock('idb-keyval', () => {
       storeMap(store).set(key, value);
     }),
     setMany: vi.fn(async (entries: Array<[unknown, unknown]>, store: unknown) => {
+      storageOperations.push('setMany');
       const values = storeMap(store);
       for (const [key, value] of entries) values.set(key, value);
+    }),
+    delMany: vi.fn(async (keys: unknown[], store: unknown) => {
+      storageOperations.push('delMany');
+      const values = storeMap(store);
+      for (const key of keys) values.delete(key);
     }),
     del: vi.fn(async (key: unknown, store: unknown) => {
       storeMap(store).delete(key);
     }),
     keys: vi.fn(async (store: unknown) => [...storeMap(store).keys()]),
     clear: vi.fn(async (store: unknown) => {
+      storageOperations.push('clear');
       storeMap(store).clear();
     }),
   };
@@ -79,6 +87,7 @@ function resource(name: string, content: string, baseHash: string): ResourceFile
 
 beforeEach(() => {
   stores.clear();
+  storageOperations.length = 0;
   localStorage.clear();
 });
 
@@ -111,6 +120,21 @@ describe('resource snapshots', () => {
 
     await replaceErrorMap(null);
     expect(await getErrorMap()).toBeUndefined();
+    expect(await listCodecFiles()).toEqual([codec]);
+  });
+
+  it('writes replacement codecs before deleting obsolete keys', async () => {
+    const errorMap = resource('errors.json', '{"100":"failed"}', 'sha256:errors');
+    const legacy = resource('tcp_legacy_codec.json', '{"version":1}', 'sha256:legacy');
+    const codec = resource('tcp_logic_codec.json', '{"version":2}', 'sha256:codec');
+    await replaceErrorMap(errorMap);
+    await replaceCodecFiles([legacy]);
+    storageOperations.length = 0;
+
+    await replaceCodecFiles([codec]);
+
+    expect(storageOperations).toEqual(['setMany', 'delMany']);
+    expect(await getErrorMap()).toEqual(errorMap);
     expect(await listCodecFiles()).toEqual([codec]);
   });
 });

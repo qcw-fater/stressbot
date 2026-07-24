@@ -90,6 +90,10 @@ func TestReplaceSnapshotUsesOneTransaction(t *testing.T) {
 		}).AddRow("old", "Old", 0, 0, now, now, []byte(`{"nodes":{},"actions":{}}`), nil))
 	mock.ExpectExec(`DELETE FROM flow_template`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?s)INSERT INTO flow_template`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`(?s)SELECT id, name, node_count.*FROM flow_template`).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "name", "node_count", "action_count", "created_at", "updated_at", "flow_json", "layout_json",
+		}).AddRow("new", "New", 0, 0, now, now, []byte(`{"nodes":{},"actions":{}}`), nil))
 	mock.ExpectCommit()
 
 	resp, err := store.ReplaceSnapshot(context.Background(), ReplaceFlowSnapshotRequest{
@@ -104,6 +108,63 @@ func TestReplaceSnapshotUsesOneTransaction(t *testing.T) {
 	}
 	if resp.Count != 1 {
 		t.Fatalf("count = %d", resp.Count)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReplaceSnapshotReturnsRevisionOfPersistedRows(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store := NewFlowTemplateStore(db)
+	currentTime := time.Date(2026, 7, 23, 10, 0, 0, 0, time.UTC)
+	requestTime := time.Date(2026, 7, 24, 11, 12, 13, 123456789, time.UTC)
+	persistedTime := requestTime.Truncate(time.Millisecond)
+	current := FlowTemplateDetail{
+		FlowTemplateSummary: FlowTemplateSummary{ID: "old", Name: "Old", CreatedAt: currentTime, UpdatedAt: currentTime},
+		Flow:                json.RawMessage(`{"nodes":{},"actions":{}}`),
+	}
+	before, err := computeFlowSnapshotRevision([]FlowTemplateDetail{current})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?s)SELECT id, name, node_count.*FROM flow_template`).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "name", "node_count", "action_count", "created_at", "updated_at", "flow_json", "layout_json",
+		}).AddRow("old", "Old", 0, 0, currentTime, currentTime, []byte(`{"nodes":{},"actions":{}}`), nil))
+	mock.ExpectExec(`DELETE FROM flow_template`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?s)INSERT INTO flow_template`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`(?s)SELECT id, name, node_count.*FROM flow_template`).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "name", "node_count", "action_count", "created_at", "updated_at", "flow_json", "layout_json",
+		}).AddRow("new", "New", 0, 0, persistedTime, persistedTime, []byte(`{"nodes":{},"actions":{}}`), nil))
+	mock.ExpectCommit()
+
+	resp, err := store.ReplaceSnapshot(context.Background(), ReplaceFlowSnapshotRequest{
+		ExpectedRevision: before,
+		Items: []FlowTemplateDetail{{
+			FlowTemplateSummary: FlowTemplateSummary{ID: "new", Name: "New", CreatedAt: requestTime, UpdatedAt: requestTime},
+			Flow:                json.RawMessage(`{"nodes":{},"actions":{}}`),
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := computeFlowSnapshotRevision([]FlowTemplateDetail{{
+		FlowTemplateSummary: FlowTemplateSummary{ID: "new", Name: "New", CreatedAt: persistedTime, UpdatedAt: persistedTime},
+		Flow:                json.RawMessage(`{"nodes":{},"actions":{}}`),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Revision != want {
+		t.Fatalf("revision = %q, want persisted revision %q", resp.Revision, want)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

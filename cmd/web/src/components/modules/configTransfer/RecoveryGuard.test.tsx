@@ -7,12 +7,14 @@ import { RecoveryGuard } from './RecoveryGuard';
 
 describe('RecoveryGuard', () => {
   it('automatically retries an unfinished rollback and stays hidden on success', async () => {
-    const recover = vi.fn(async (): Promise<RestoreResult> => ({
-      ok: true,
-      stats: {},
-      pendingSections: [],
-      rolledBack: true,
-    }));
+    const recover = vi.fn(
+      async (): Promise<RestoreResult> => ({
+        ok: true,
+        stats: {},
+        pendingSections: [],
+        rolledBack: true,
+      }),
+    );
 
     render(<RecoveryGuard recover={recover} />);
 
@@ -22,7 +24,8 @@ describe('RecoveryGuard', () => {
 
   it('keeps a persistent retry action while rollback is pending and clears after retry', async () => {
     const user = userEvent.setup();
-    const recover = vi.fn()
+    const recover = vi
+      .fn()
       .mockResolvedValueOnce({
         ok: false,
         stats: {},

@@ -14,6 +14,7 @@ export interface RecoveryJournal {
   before: Partial<Record<BackupSection, unknown>>;
   completedSections: BackupSection[];
   flowBefore?: FlowSnapshot;
+  flowAfterFingerprint?: string;
   flowAppliedRevision?: string;
   pendingRollback: BackupSection[];
 }

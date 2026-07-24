@@ -57,7 +57,9 @@ export interface ListenTemplate {
 }
 
 // ── Action ────────────────────────────────────────────────
-export async function saveActionTemplate(t: Omit<ActionTemplate, 'id' | 'createdAt'>): Promise<ActionTemplate> {
+export async function saveActionTemplate(
+  t: Omit<ActionTemplate, 'id' | 'createdAt'>,
+): Promise<ActionTemplate> {
   const tpl: ActionTemplate = { ...t, id: nanoid(8), createdAt: Date.now() };
   await set(tpl.id, tpl, actionStore);
   emitTemplateChange();
@@ -87,13 +89,18 @@ export async function removeActionTemplate(id: string): Promise<void> {
 export async function replaceActionTemplates(templates: readonly ActionTemplate[]): Promise<void> {
   await clear(actionStore);
   if (templates.length > 0) {
-    await setMany(templates.map((template) => [template.id, { ...template }]), actionStore);
+    await setMany(
+      templates.map((template) => [template.id, { ...template }]),
+      actionStore,
+    );
   }
   emitTemplateChange();
 }
 
 // ── Listen ────────────────────────────────────────────────
-export async function saveListenTemplate(t: Omit<ListenTemplate, 'id' | 'createdAt'>): Promise<ListenTemplate> {
+export async function saveListenTemplate(
+  t: Omit<ListenTemplate, 'id' | 'createdAt'>,
+): Promise<ListenTemplate> {
   const tpl: ListenTemplate = { ...t, id: nanoid(8), createdAt: Date.now() };
   await set(tpl.id, tpl, listenStore);
   emitTemplateChange();
@@ -123,7 +130,10 @@ export async function removeListenTemplate(id: string): Promise<void> {
 export async function replaceListenTemplates(templates: readonly ListenTemplate[]): Promise<void> {
   await clear(listenStore);
   if (templates.length > 0) {
-    await setMany(templates.map((template) => [template.id, { ...template }]), listenStore);
+    await setMany(
+      templates.map((template) => [template.id, { ...template }]),
+      listenStore,
+    );
   }
   emitTemplateChange();
 }
@@ -165,7 +175,9 @@ export async function exportAllTemplates(): Promise<TemplateBundle> {
   };
 }
 
-export async function importTemplates(bundle: TemplateBundle): Promise<{ actions: number; listens: number }> {
+export async function importTemplates(
+  bundle: TemplateBundle,
+): Promise<{ actions: number; listens: number }> {
   let aCount = 0;
   let lCount = 0;
   for (const a of bundle.actions ?? []) {

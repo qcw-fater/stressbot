@@ -50,10 +50,7 @@ export interface ConfigRestoreServices {
     mode: RestoreMode,
     policy: MergeConflictPolicy,
   ) => Promise<RestorePlan>;
-  resolve: (
-    plan: RestorePlan,
-    choices: Readonly<Record<string, ConflictChoice>>,
-  ) => RestorePlan;
+  resolve: (plan: RestorePlan, choices: Readonly<Record<string, ConflictChoice>>) => RestorePlan;
   execute: (plan: RestorePlan) => Promise<RestoreResultValue>;
 }
 
@@ -136,9 +133,11 @@ export function ConfigRestoreModal({
 
   useEffect(() => {
     if (!bundle) return;
-    setSelected(bundle.manifest.includedSections.filter((section) => (
-      section !== 'flows' || flowLibrary === true
-    )));
+    setSelected(
+      bundle.manifest.includedSections.filter(
+        (section) => section !== 'flows' || flowLibrary === true,
+      ),
+    );
   }, [bundle, flowLibrary]);
 
   useEffect(() => {
@@ -153,7 +152,8 @@ export function ConfigRestoreModal({
     setPlanningError(undefined);
     setChoices({});
     const policy = restoreMode === 'replace' ? 'overwrite' : conflictPolicy;
-    void activeServices.preflight(bundle, selected, restoreMode, policy)
+    void activeServices
+      .preflight(bundle, selected, restoreMode, policy)
       .then((nextPlan) => {
         if (!cancelled) setPlan(nextPlan);
       })
@@ -190,11 +190,13 @@ export function ConfigRestoreModal({
   };
 
   const toggleSection = (section: BackupSection, checked: boolean) => {
-    setSelected((current) => checked
-      ? BACKUP_SECTIONS.filter((candidate) => (
-        candidate === section || current.includes(candidate)
-      ))
-      : current.filter((candidate) => candidate !== section));
+    setSelected((current) =>
+      checked
+        ? BACKUP_SECTIONS.filter(
+            (candidate) => candidate === section || current.includes(candidate),
+          )
+        : current.filter((candidate) => candidate !== section),
+    );
   };
 
   const askForConfirmation = async (): Promise<boolean> => {
@@ -202,9 +204,10 @@ export function ConfigRestoreModal({
     return new Promise((resolve) => {
       modal.confirm({
         title: restoreMode === 'replace' ? '确认完整恢复' : '确认合并导入',
-        content: restoreMode === 'replace'
-          ? '选中内容将与备份保持一致，备份中不存在的配置会被删除。'
-          : '将按照预览结果合并选中的配置内容。',
+        content:
+          restoreMode === 'replace'
+            ? '选中内容将与备份保持一致，备份中不存在的配置会被删除。'
+            : '将按照预览结果合并选中的配置内容。',
         okText: '确认恢复',
         cancelText: '取消',
         onOk: () => resolve(true),
@@ -219,7 +222,7 @@ export function ConfigRestoreModal({
     const finalPlan = resolvedPreview;
     try {
       if (finalPlan.conflicts.length > 0) throw new Error('仍有重复内容未处理');
-      if (!await askForConfirmation()) return;
+      if (!(await askForConfirmation())) return;
       setExecuting(true);
       const nextResult = await activeServices.execute(finalPlan);
       setResult(nextResult);
@@ -238,30 +241,38 @@ export function ConfigRestoreModal({
   };
 
   const choicesComplete = resolvedPreview?.conflicts.length === 0;
-  const executeDisabled = runtimeMode !== 'edit'
-    || !plan
-    || planning
-    || selected.length === 0
-    || (plan.conflicts.length > 0 && !choicesComplete);
-  const availableIncluded = bundle?.manifest.includedSections.filter((section) => (
-    section !== 'flows' || flowLibrary === true
-  )) ?? [];
+  const executeDisabled =
+    runtimeMode !== 'edit' ||
+    !plan ||
+    planning ||
+    selected.length === 0 ||
+    (plan.conflicts.length > 0 && !choicesComplete);
+  const availableIncluded =
+    bundle?.manifest.includedSections.filter(
+      (section) => section !== 'flows' || flowLibrary === true,
+    ) ?? [];
 
   const footer = result
-    ? [<Button key="close" type="primary" onClick={onClose}>关闭</Button>]
+    ? [
+        <Button key="close" type="primary" onClick={onClose}>
+          关闭
+        </Button>,
+      ]
     : [
-      <Button key="cancel" disabled={executing} onClick={onClose}>取消</Button>,
-      <Button
-        key="restore"
-        type="primary"
-        icon={<ImportOutlined />}
-        disabled={executeDisabled}
-        loading={executing}
-        onClick={() => void handleExecute()}
-      >
-        开始恢复
-      </Button>,
-    ];
+        <Button key="cancel" disabled={executing} onClick={onClose}>
+          取消
+        </Button>,
+        <Button
+          key="restore"
+          type="primary"
+          icon={<ImportOutlined />}
+          disabled={executeDisabled}
+          loading={executing}
+          onClick={() => void handleExecute()}
+        >
+          开始恢复
+        </Button>,
+      ];
 
   return (
     <Modal
@@ -279,11 +290,7 @@ export function ConfigRestoreModal({
       destroyOnHidden
     >
       {result ? (
-        <RestoreResult
-          result={result}
-          errorMessage={executionError}
-          sectionLabel={sectionLabel}
-        />
+        <RestoreResult result={result} errorMessage={executionError} sectionLabel={sectionLabel} />
       ) : (
         <>
           <div className="config-restore__file-picker">
@@ -349,7 +356,9 @@ export function ConfigRestoreModal({
                       </Checkbox>
                       <Typography.Text type={flowDisabled ? 'danger' : 'secondary'}>
                         {flowDisabled
-                          ? flowLibrary === undefined ? '正在检查流程库' : '服务器未启用流程库'
+                          ? flowLibrary === undefined
+                            ? '正在检查流程库'
+                            : '服务器未启用流程库'
                           : `${bundle.manifest.counts[section] ?? 0} 项`}
                       </Typography.Text>
                     </div>
@@ -374,7 +383,9 @@ export function ConfigRestoreModal({
                   <Typography.Text strong>重复内容</Typography.Text>
                   <Radio.Group
                     value={conflictPolicy}
-                    onChange={(event) => setConflictPolicy(event.target.value as MergeConflictPolicy)}
+                    onChange={(event) =>
+                      setConflictPolicy(event.target.value as MergeConflictPolicy)
+                    }
                   >
                     <Radio value="overwrite">全部覆盖</Radio>
                     <Radio value="prompt">逐个处理</Radio>

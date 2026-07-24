@@ -18,23 +18,27 @@ const SECTION_LABELS: Record<BackupSection, string> = {
   notepadFiles: '记事本文件',
 };
 
-function registryWith(
-  values: Partial<Record<BackupSection, unknown>> = {},
-): ConfigSectionRegistry {
-  return Object.fromEntries(Object.entries(SECTION_LABELS).map(([key, label]) => {
-    const section = key as BackupSection;
-    const fallback = section === 'draft' || section === 'errorMap' ? null : [];
-    const value = Object.hasOwn(values, section) ? values[section] : fallback;
-    return [section, {
-      key: section,
-      label,
-      kind: section === 'draft' || section === 'errorMap' ? 'singleton' : 'collection',
-      read: vi.fn(async () => structuredClone(value)),
-      replace: vi.fn(async () => undefined),
-      validate: vi.fn(),
-      count: (current: unknown) => Array.isArray(current) ? current.length : current === null ? 0 : 1,
-    }];
-  })) as unknown as ConfigSectionRegistry;
+function registryWith(values: Partial<Record<BackupSection, unknown>> = {}): ConfigSectionRegistry {
+  return Object.fromEntries(
+    Object.entries(SECTION_LABELS).map(([key, label]) => {
+      const section = key as BackupSection;
+      const fallback = section === 'draft' || section === 'errorMap' ? null : [];
+      const value = Object.hasOwn(values, section) ? values[section] : fallback;
+      return [
+        section,
+        {
+          key: section,
+          label,
+          kind: section === 'draft' || section === 'errorMap' ? 'singleton' : 'collection',
+          read: vi.fn(async () => structuredClone(value)),
+          replace: vi.fn(async () => undefined),
+          validate: vi.fn(),
+          count: (current: unknown) =>
+            Array.isArray(current) ? current.length : current === null ? 0 : 1,
+        },
+      ];
+    }),
+  ) as unknown as ConfigSectionRegistry;
 }
 
 describe('ConfigBackupModal', () => {
@@ -44,9 +48,9 @@ describe('ConfigBackupModal', () => {
   let downloadName = '';
 
   beforeEach(() => {
-    vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => (
-      nativeGetComputedStyle(element)
-    ));
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element) =>
+      nativeGetComputedStyle(element),
+    );
     createObjectURL = vi.fn(() => 'blob:backup');
     revokeObjectURL = vi.fn();
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
@@ -74,31 +78,31 @@ describe('ConfigBackupModal', () => {
     );
 
     expect(await screen.findByText('服务器未启用流程库')).toBeTruthy();
-    expect((screen.getByRole('checkbox', { name: /已保存流程/ }) as HTMLInputElement).disabled)
-      .toBe(true);
-    expect((screen.getByRole('checkbox', { name: /已保存流程/ }) as HTMLInputElement).checked)
-      .toBe(false);
-    expect((screen.getByRole('checkbox', { name: /当前编辑稿/ }) as HTMLInputElement).checked)
-      .toBe(true);
-    expect((screen.getByRole('checkbox', { name: /记事本文件/ }) as HTMLInputElement).checked)
-      .toBe(true);
+    expect(
+      (screen.getByRole('checkbox', { name: /已保存流程/ }) as HTMLInputElement).disabled,
+    ).toBe(true);
+    expect((screen.getByRole('checkbox', { name: /已保存流程/ }) as HTMLInputElement).checked).toBe(
+      false,
+    );
+    expect((screen.getByRole('checkbox', { name: /当前编辑稿/ }) as HTMLInputElement).checked).toBe(
+      true,
+    );
+    expect((screen.getByRole('checkbox', { name: /记事本文件/ }) as HTMLInputElement).checked).toBe(
+      true,
+    );
   });
 
   it('does not allow a download when no section is selected', async () => {
     const user = userEvent.setup();
     render(
-      <ConfigBackupModal
-        open
-        onClose={() => undefined}
-        flowLibrary
-        registry={registryWith()}
-      />,
+      <ConfigBackupModal open onClose={() => undefined} flowLibrary registry={registryWith()} />,
     );
 
     await user.click(await screen.findByRole('button', { name: '清空' }));
 
-    expect((screen.getByRole('button', { name: /下载备份/ }) as HTMLButtonElement).disabled)
-      .toBe(true);
+    expect((screen.getByRole('button', { name: /下载备份/ }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
     expect(createObjectURL).not.toHaveBeenCalled();
   });
 
@@ -108,12 +112,7 @@ describe('ConfigBackupModal', () => {
       protoFiles: [{ name: 'login.proto', content: 'syntax = "proto3";' }],
     });
     render(
-      <ConfigBackupModal
-        open
-        onClose={() => undefined}
-        flowLibrary={false}
-        registry={registry}
-      />,
+      <ConfigBackupModal open onClose={() => undefined} flowLibrary={false} registry={registry} />,
     );
 
     await user.click(await screen.findByRole('button', { name: '清空' }));

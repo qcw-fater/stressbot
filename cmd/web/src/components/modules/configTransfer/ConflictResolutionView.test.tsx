@@ -64,15 +64,21 @@ describe('ConflictResolutionView', () => {
   });
 
   it('omits keep-copy for singleton conflicts', () => {
-    render(<ControlledConflicts conflicts={[{
-      id: 'draft:one',
-      section: 'draft',
-      kind: 'duplicate',
-      sourceName: '当前编辑稿',
-      targetIds: [],
-      targetNames: ['当前编辑稿'],
-      allowedChoices: ['overwrite', 'skip'],
-    }]} />);
+    render(
+      <ControlledConflicts
+        conflicts={[
+          {
+            id: 'draft:one',
+            section: 'draft',
+            kind: 'duplicate',
+            sourceName: '当前编辑稿',
+            targetIds: [],
+            targetNames: ['当前编辑稿'],
+            allowedChoices: ['overwrite', 'skip'],
+          },
+        ]}
+      />,
+    );
 
     const row = screen.getByTestId('conflict-draft:one');
     expect(within(row).queryByRole('radio', { name: '保留两份' })).toBeNull();

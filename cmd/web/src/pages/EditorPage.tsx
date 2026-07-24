@@ -58,7 +58,9 @@ const LazyNotepadTab = lazy(() =>
   import('@/components/modules/notepad/NotepadTab').then((m) => ({ default: m.NotepadTab })),
 );
 const LazyProtocolConfigEditor = lazy(() =>
-  import('@/components/modules/ProtocolConfigEditor').then((m) => ({ default: m.ProtocolConfigEditor })),
+  import('@/components/modules/ProtocolConfigEditor').then((m) => ({
+    default: m.ProtocolConfigEditor,
+  })),
 );
 const LazyActiveTaskGuardModal = lazy(() =>
   import('@/components/runtime/ActiveTaskGuardModal').then((m) => ({
@@ -68,12 +70,26 @@ const LazyActiveTaskGuardModal = lazy(() =>
 import type { TaskBrief } from '@/types/api';
 
 /** 只读重型视图关闭即卸载；有未提交草稿的编辑器可显式保活。 */
-function LazyMount({ visible, keepMounted = false, children }: { visible: boolean; keepMounted?: boolean; children: React.ReactNode }) {
+function LazyMount({
+  visible,
+  keepMounted = false,
+  children,
+}: {
+  visible: boolean;
+  keepMounted?: boolean;
+  children: React.ReactNode;
+}) {
   if (!keepMounted) return visible ? <>{children}</> : null;
   return <PersistentLazyMount visible={visible}>{children}</PersistentLazyMount>;
 }
 
-function PersistentLazyMount({ visible, children }: { visible: boolean; children: React.ReactNode }) {
+function PersistentLazyMount({
+  visible,
+  children,
+}: {
+  visible: boolean;
+  children: React.ReactNode;
+}) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     if (visible) setMounted(true);
@@ -122,30 +138,41 @@ function HomeShellInner() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  const { mode, activeTask, ownedTaskId, latestStress, onTaskFinished, setActiveTask, setDetachedActiveTask, setAgents, pushStress, pushSystem, setConnectionLost, appendAgentEvents, setAgentHealth } =
-    useRuntimeStore(
-      useShallow((s) => ({
-        mode: s.mode,
-        activeTask: s.activeTask,
-        ownedTaskId: s.ownedTaskId,
-        latestStress: s.latestStress,
-        onTaskFinished: s.onTaskFinished,
-        setActiveTask: s.setActiveTask,
-        setDetachedActiveTask: s.setDetachedActiveTask,
-        setAgents: s.setAgents,
-        pushStress: s.pushStress,
-        pushSystem: s.pushSystem,
-        setConnectionLost: s.setConnectionLost,
-        appendAgentEvents: s.appendAgentEvents,
-        setAgentHealth: s.setAgentHealth,
-      })),
-    );
+  const {
+    mode,
+    activeTask,
+    ownedTaskId,
+    latestStress,
+    onTaskFinished,
+    setActiveTask,
+    setDetachedActiveTask,
+    setAgents,
+    pushStress,
+    pushSystem,
+    setConnectionLost,
+    appendAgentEvents,
+    setAgentHealth,
+  } = useRuntimeStore(
+    useShallow((s) => ({
+      mode: s.mode,
+      activeTask: s.activeTask,
+      ownedTaskId: s.ownedTaskId,
+      latestStress: s.latestStress,
+      onTaskFinished: s.onTaskFinished,
+      setActiveTask: s.setActiveTask,
+      setDetachedActiveTask: s.setDetachedActiveTask,
+      setAgents: s.setAgents,
+      pushStress: s.pushStress,
+      pushSystem: s.pushSystem,
+      setConnectionLost: s.setConnectionLost,
+      appendAgentEvents: s.appendAgentEvents,
+      setAgentHealth: s.setAgentHealth,
+    })),
+  );
 
   // 业务侧 flow（节点 / actions / listens）+ 最新 stress snapshot → nodeId → ActionMetric
   // 这里订阅整个 flowStore 字段会触发频繁 re-render；用 useShallow 压平，仅在数据真变时触发。
-  const flowSlice = useFlowStore(
-    useShallow((s) => ({ nodes: s.nodes, listens: s.listens })),
-  );
+  const flowSlice = useFlowStore(useShallow((s) => ({ nodes: s.nodes, listens: s.listens })));
   const nodeMetrics = useMemo(() => {
     if (mode === 'edit') return undefined;
     const map = buildNodeMetricsMap(latestStress ?? undefined, flowSlice);
@@ -180,7 +207,6 @@ function HomeShellInner() {
     return () => registerTaskConflictHandler(null);
   }, []);
   useEffect(() => {
-
     if (bootRef.current) return;
     bootRef.current = true;
     (async () => {
@@ -203,8 +229,8 @@ function HomeShellInner() {
         // 3. 检测远端 active 任务
         const list = await tasksApi.listTasks();
         reportConnectionHealth('boot', false);
-        const active = list.items.find((t) =>
-          t.state === 'starting' || t.state === 'running' || t.state === 'stopping',
+        const active = list.items.find(
+          (t) => t.state === 'starting' || t.state === 'running' || t.state === 'stopping',
         );
         if (active) {
           setDetachedActiveTask(active);
@@ -343,7 +369,15 @@ function HomeShellInner() {
     // antd v5 要求 Spin 的 tip 必须配 nest 或 fullscreen 模式才会展示，
     // 这里包一层占位 div 形成 nest 模式，避免 "tip only work in nest or fullscreen" 警告。
     return (
-      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
         <Spin size="large" tip="正在连接服务器...">
           <div style={{ width: 120, height: 80 }} />
         </Spin>

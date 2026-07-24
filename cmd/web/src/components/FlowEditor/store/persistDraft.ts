@@ -96,7 +96,9 @@ export function loadDraft(): DraftSnapshot | null {
     if (!flowStr) return null;
     const draft = JSON.parse(flowStr) as PersistedDraft;
     const layoutStr = localStorage.getItem(KEY_LAYOUT);
-    const layout = layoutStr ? (JSON.parse(layoutStr) as FlowLayout) : { nodePositions: {}, viewport: { x: 0, y: 0, zoom: 1 } };
+    const layout = layoutStr
+      ? (JSON.parse(layoutStr) as FlowLayout)
+      : { nodePositions: {}, viewport: { x: 0, y: 0, zoom: 1 } };
     return {
       flow: {
         defaultDelayMs: draft.defaultDelayMs,

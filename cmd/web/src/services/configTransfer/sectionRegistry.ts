@@ -148,11 +148,7 @@ function assertArray(value: unknown, label: string): asserts value is unknown[] 
   if (!Array.isArray(value)) throw new Error(`${label} 必须是数组`);
 }
 
-function assertUnique<T>(
-  items: readonly T[],
-  key: (item: T) => string,
-  label: string,
-): void {
+function assertUnique<T>(items: readonly T[], key: (item: T) => string, label: string): void {
   const seen = new Set<string>();
   for (const item of items) {
     const value = key(item);
@@ -207,7 +203,6 @@ function assertFlowTemplates(value: unknown): asserts value is FlowTemplateDetai
   value.forEach(assertFlowTemplate);
   const items = value as FlowTemplateDetail[];
   assertUnique(items, (item) => item.id, '流程 ID');
-  assertUnique(items, (item) => item.name, '流程名称');
 }
 
 function assertDraft(value: unknown): asserts value is DraftSnapshot | null {
@@ -230,9 +225,9 @@ function assertResourceFile(value: unknown, label: string): asserts value is Res
   }
   assertTimestamp(value.uploadedAt, `${label}上传时间`);
   if (
-    value.baseHash !== undefined
-    && value.baseHash !== null
-    && typeof value.baseHash !== 'string'
+    value.baseHash !== undefined &&
+    value.baseHash !== null &&
+    typeof value.baseHash !== 'string'
   ) {
     throw new Error(`${label} baseHash 必须是字符串或 null`);
   }
@@ -254,11 +249,21 @@ function assertResourceFiles(
 }
 
 function assertProtoFiles(value: unknown): asserts value is ResourceFile[] {
-  assertResourceFiles(value, 'Proto 分区', (name) => name.endsWith('.proto'), 'Proto 文件名必须以 .proto 结尾');
+  assertResourceFiles(
+    value,
+    'Proto 分区',
+    (name) => name.endsWith('.proto'),
+    'Proto 文件名必须以 .proto 结尾',
+  );
 }
 
 function assertLuaFiles(value: unknown): asserts value is ResourceFile[] {
-  assertResourceFiles(value, 'Lua 分区', (name) => name.endsWith('.lua'), 'Lua 文件名必须以 .lua 结尾');
+  assertResourceFiles(
+    value,
+    'Lua 分区',
+    (name) => name.endsWith('.lua'),
+    'Lua 文件名必须以 .lua 结尾',
+  );
 }
 
 function assertCodecFiles(value: unknown): asserts value is ResourceFile[] {
@@ -326,7 +331,6 @@ function assertActionTemplates(value: unknown): asserts value is ActionTemplate[
   value.forEach(assertActionTemplate);
   const items = value as ActionTemplate[];
   assertUnique(items, (item) => item.id, '动作模板 ID');
-  assertUnique(items, (item) => item.name, '动作模板名称');
 }
 
 const LISTEN_KINDS = new Set(['silent', 'declarative', 'lua']);
@@ -364,7 +368,6 @@ function assertListenTemplates(value: unknown): asserts value is ListenTemplate[
   value.forEach(assertListenTemplate);
   const items = value as ListenTemplate[];
   assertUnique(items, (item) => item.id, '监听模板 ID');
-  assertUnique(items, (item) => item.name, '监听模板名称');
 }
 
 function assertNotepadFile(value: unknown, index: number): asserts value is NotepadFile {
@@ -383,7 +386,6 @@ function assertNotepadFiles(value: unknown): asserts value is NotepadFile[] {
   value.forEach(assertNotepadFile);
   const items = value as NotepadFile[];
   assertUnique(items, (item) => item.id, '记事本 ID');
-  assertUnique(items, (item) => item.name, '记事本名称');
 }
 
 function itemIdentity<T extends { id: string; name: string }>(
@@ -407,7 +409,7 @@ function resourceIdentity(createId: () => string): CollectionIdentity<ResourceFi
 }
 
 const collectionCount = <T>(value: readonly T[]): number => value.length;
-const singletonCount = <T>(value: T | null): number => value === null ? 0 : 1;
+const singletonCount = <T>(value: T | null): number => (value === null ? 0 : 1);
 
 export function createSectionRegistry(
   dependencies: SectionRegistryDependencies = defaultDependencies,

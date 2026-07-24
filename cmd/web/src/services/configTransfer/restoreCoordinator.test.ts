@@ -13,12 +13,7 @@ import {
   type RestoreEnvironment,
 } from './restoreCoordinator';
 import type { RecoveryJournal, RecoveryJournalStore } from './recoveryJournal';
-import {
-  BACKUP_SECTIONS,
-  type BackupSection,
-  type RestorePlan,
-  type SectionStats,
-} from './types';
+import { BACKUP_SECTIONS, type BackupSection, type RestorePlan, type SectionStats } from './types';
 
 const EMPTY_STATS: SectionStats = {
   added: 0,
@@ -33,7 +28,7 @@ function memoryJournal(initial: RecoveryJournal | null = null): RecoveryJournalS
 } {
   let value = initial ? structuredClone(initial) : null;
   return {
-    load: vi.fn(async () => value ? structuredClone(value) : null),
+    load: vi.fn(async () => (value ? structuredClone(value) : null)),
     save: vi.fn(async (next) => {
       value = structuredClone(next);
     }),
@@ -82,25 +77,30 @@ interface EnvironmentOptions {
 }
 
 function fakeEnvironment(calls: string[], options: EnvironmentOptions = {}): RestoreEnvironment {
-  const registry = Object.fromEntries(BACKUP_SECTIONS.map((section) => [
-    section,
-    options.adapters?.[section] ?? fakeAdapter(section, calls),
-  ])) as Record<BackupSection, RestoreAdapter>;
+  const registry = Object.fromEntries(
+    BACKUP_SECTIONS.map((section) => [
+      section,
+      options.adapters?.[section] ?? fakeAdapter(section, calls),
+    ]),
+  ) as Record<BackupSection, RestoreAdapter>;
   const journal = options.journal ?? memoryJournal();
+  let flowRevision = 'flow-before';
 
   return {
     registry,
     journal,
-    getFlowSnapshot: vi.fn(async () => ({ revision: 'flow-before', items: [] })),
+    getFlowSnapshot: vi.fn(async () => ({ revision: flowRevision, items: [] })),
     replaceFlowSnapshot: vi.fn(async (request) => {
       if (request.expectedRevision === 'flow-before') {
         calls.push('apply:flows');
         if (options.flowApplyError) throw options.flowApplyError;
+        flowRevision = 'flow-applied';
         return { revision: 'flow-applied', count: request.items.length };
       }
       calls.push('rollback:flows');
       if (options.flowRollbackError) throw options.flowRollbackError;
-      return { revision: 'flow-restored', count: request.items.length };
+      flowRevision = 'flow-before';
+      return { revision: 'flow-before', count: request.items.length };
     }),
     createOperationId: () => 'operation-1',
     now: () => new Date('2026-07-23T10:00:00.000Z'),
@@ -135,6 +135,27 @@ function planFor(...sections: BackupSection[]): RestorePlan {
 }
 
 describe('executeRestorePlan', () => {
+  it('arms each section for rollback before applying it', async () => {
+    const calls: string[] = [];
+    const journal = memoryJournal();
+    let pendingAtApply: BackupSection[] = [];
+    const adapter = fakeAdapter('protoFiles', calls);
+    adapter.replace = vi.fn(async (value) => {
+      if (value === 'after-protoFiles') {
+        pendingAtApply = journal.peek()?.pendingRollback ?? [];
+        calls.push('apply:protoFiles');
+      }
+    });
+    const env = fakeEnvironment(calls, {
+      adapters: { protoFiles: adapter },
+      journal,
+    });
+
+    await executeRestorePlan(planFor('protoFiles'), env);
+
+    expect(pendingAtApply).toEqual(['protoFiles']);
+  });
+
   it('applies flows first, clears the journal, and returns statistics', async () => {
     const calls: string[] = [];
     const env = fakeEnvironment(calls);
@@ -150,8 +171,9 @@ describe('executeRestorePlan', () => {
     const calls: string[] = [];
     const env = fakeEnvironment(calls, { flowApplyError: new Error('flow failed') });
 
-    await expect(executeRestorePlan(planFor('flows', 'protoFiles'), env))
-      .rejects.toBeInstanceOf(RestoreExecutionError);
+    await expect(executeRestorePlan(planFor('flows', 'protoFiles'), env)).rejects.toBeInstanceOf(
+      RestoreExecutionError,
+    );
 
     expect(calls).toEqual(['apply:flows']);
     expect(await env.journal.load()).toBeNull();
@@ -165,15 +187,15 @@ describe('executeRestorePlan', () => {
       },
     });
 
-    await expect(executeRestorePlan(
-      planFor('protoFiles', 'luaFiles', 'codecFiles'),
-      env,
-    )).rejects.toThrow('codecFiles');
+    await expect(
+      executeRestorePlan(planFor('protoFiles', 'luaFiles', 'codecFiles'), env),
+    ).rejects.toThrow('codecFiles');
 
     expect(calls).toEqual([
       'apply:protoFiles',
       'apply:luaFiles',
       'apply:codecFiles',
+      'rollback:codecFiles',
       'rollback:luaFiles',
       'rollback:protoFiles',
     ]);
@@ -188,10 +210,16 @@ describe('executeRestorePlan', () => {
       },
     });
 
-    await expect(executeRestorePlan(planFor('flows', 'protoFiles'), env))
-      .rejects.toBeInstanceOf(RestoreExecutionError);
+    await expect(executeRestorePlan(planFor('flows', 'protoFiles'), env)).rejects.toBeInstanceOf(
+      RestoreExecutionError,
+    );
 
-    expect(calls).toEqual(['apply:flows', 'apply:protoFiles', 'rollback:flows']);
+    expect(calls).toEqual([
+      'apply:flows',
+      'apply:protoFiles',
+      'rollback:protoFiles',
+      'rollback:flows',
+    ]);
     expect(env.replaceFlowSnapshot).toHaveBeenLastCalledWith({
       expectedRevision: 'flow-applied',
       items: [],
@@ -206,8 +234,9 @@ describe('executeRestorePlan', () => {
       },
     });
 
-    await expect(executeRestorePlan(planFor('protoFiles'), env))
-      .rejects.toBeInstanceOf(RestoreTargetChangedError);
+    await expect(executeRestorePlan(planFor('protoFiles'), env)).rejects.toBeInstanceOf(
+      RestoreTargetChangedError,
+    );
 
     expect(calls).toEqual([]);
     expect(await env.journal.load()).toBeNull();
@@ -215,6 +244,57 @@ describe('executeRestorePlan', () => {
 });
 
 describe('recoverPendingRestore', () => {
+  it('treats an already restored flow snapshot as a completed rollback', async () => {
+    const calls: string[] = [];
+    const journal = memoryJournal({
+      operationId: 'operation-1',
+      startedAt: '2026-07-23T10:00:00.000Z',
+      phase: 'rollingBack',
+      selectedSections: ['flows'],
+      before: { flows: [] },
+      completedSections: ['flows'],
+      flowBefore: { revision: 'flow-before', items: [] },
+      flowAppliedRevision: 'flow-applied',
+      pendingRollback: ['flows'],
+    });
+    const env = fakeEnvironment(calls, { journal });
+
+    const result = await recoverPendingRestore(env);
+
+    expect(result).toMatchObject({ ok: true, pendingSections: [], rolledBack: true });
+    expect(env.replaceFlowSnapshot).not.toHaveBeenCalled();
+    expect(await env.journal.load()).toBeNull();
+  });
+
+  it('restores a flow applied before its response revision was journaled', async () => {
+    const calls: string[] = [];
+    const afterItems = [{ id: 'flow-after' }] as never[];
+    const journal = memoryJournal({
+      operationId: 'operation-1',
+      startedAt: '2026-07-23T10:00:00.000Z',
+      phase: 'applying',
+      selectedSections: ['flows'],
+      before: { flows: [] },
+      completedSections: [],
+      flowBefore: { revision: 'flow-before', items: [] },
+      pendingRollback: ['flows'],
+      flowAfterFingerprint: fingerprintRestoreValue(afterItems),
+    } as RecoveryJournal & { flowAfterFingerprint: string });
+    const env = fakeEnvironment(calls, { journal });
+    env.getFlowSnapshot = vi.fn(async () => ({
+      revision: 'flow-after-without-response',
+      items: afterItems,
+    }));
+
+    const result = await recoverPendingRestore(env);
+
+    expect(result).toMatchObject({ ok: true, pendingSections: [], rolledBack: true });
+    expect(env.replaceFlowSnapshot).toHaveBeenCalledWith({
+      expectedRevision: 'flow-after-without-response',
+      items: [],
+    });
+  });
+
   it('keeps the journal when flow compensation revision conflicts', async () => {
     const calls: string[] = [];
     const journal = memoryJournal({
@@ -233,6 +313,7 @@ describe('recoverPendingRestore', () => {
       status: 409,
     });
     const env = fakeEnvironment(calls, { journal, flowRollbackError: conflict });
+    env.getFlowSnapshot = vi.fn(async () => ({ revision: 'flow-applied', items: [] }));
 
     const result = await recoverPendingRestore(env);
 
@@ -292,13 +373,7 @@ describe('preflightRestore', () => {
       data: { protoFiles: incoming },
     };
 
-    const plan = await preflightRestore(
-      bundle,
-      ['protoFiles'],
-      'merge',
-      'prompt',
-      env,
-    );
+    const plan = await preflightRestore(bundle, ['protoFiles'], 'merge', 'prompt', env);
 
     expect(plan.conflicts).toHaveLength(1);
     expect(Object.isFrozen(plan)).toBe(true);
@@ -322,8 +397,9 @@ describe('preflightRestore', () => {
       data: { draft: 'incoming' },
     };
 
-    await expect(preflightRestore(bundle, ['draft'], 'replace', 'overwrite', env))
-      .rejects.toThrow('current snapshot invalid');
+    await expect(preflightRestore(bundle, ['draft'], 'replace', 'overwrite', env)).rejects.toThrow(
+      'current snapshot invalid',
+    );
   });
 
   it('freezes conflict choices into an executable plan', async () => {

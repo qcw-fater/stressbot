@@ -108,10 +108,12 @@ export async function flushAllPendingSaves(): Promise<void> {
 export async function exportNotepadFiles(): Promise<NotepadFile[]> {
   await flushAllPendingSaves();
   const files = await loadIndex();
-  return Promise.all(files.map(async (meta) => ({
-    ...meta,
-    content: await loadFileContent(meta.id),
-  })));
+  return Promise.all(
+    files.map(async (meta) => ({
+      ...meta,
+      content: await loadFileContent(meta.id),
+    })),
+  );
 }
 
 export async function replaceNotepadFiles(files: readonly NotepadFile[]): Promise<void> {
@@ -221,7 +223,14 @@ export const useNotepadStore = create<NotepadState>()((set, get) => ({
 
   renameFile: async (id, newName) => {
     const files = get().files.map((f) =>
-      f.id === id ? { ...f, name: newName, language: detectLanguage(newName), updatedAt: new Date().toISOString() } : f,
+      f.id === id
+        ? {
+            ...f,
+            name: newName,
+            language: detectLanguage(newName),
+            updatedAt: new Date().toISOString(),
+          }
+        : f,
     );
     await saveIndex(files);
     set({ files });

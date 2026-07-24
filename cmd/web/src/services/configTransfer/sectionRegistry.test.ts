@@ -7,10 +7,7 @@ import type { NotepadFile } from '@/components/modules/notepad/notepadStore';
 import type { FlowTemplateDetail } from '../flowsApi';
 import type { ResourceFile } from '../resourcesStore';
 import { parseBackupWithRegistry } from './backupCodec';
-import {
-  createSectionRegistry,
-  type SectionRegistryDependencies,
-} from './sectionRegistry';
+import { createSectionRegistry, type SectionRegistryDependencies } from './sectionRegistry';
 
 const validFlow: FlowJson = {
   defaultDelayMs: 0,
@@ -99,18 +96,30 @@ describe('section validation', () => {
     expect(() => registry.flows.validate([flow()])).not.toThrow();
     expect(() => registry.draft.validate(draft)).not.toThrow();
     expect(() => registry.draft.validate(null)).not.toThrow();
-    expect(() => registry.flows.validate([{ ...flow(), flow: { ...validFlow, nodes: {} } }]))
-      .toThrow('流程校验失败');
+    expect(() =>
+      registry.flows.validate([{ ...flow(), flow: { ...validFlow, nodes: {} } }]),
+    ).toThrow('流程校验失败');
+  });
+
+  it('allows duplicate display names but rejects duplicate primary ids', () => {
+    const registry = createSectionRegistry(dependencies());
+
+    expect(() =>
+      registry.flows.validate([flow('id-1', 'Same name'), flow('id-2', 'Same name')]),
+    ).not.toThrow();
+    expect(() =>
+      registry.flows.validate([flow('same-id', 'First'), flow('same-id', 'Second')]),
+    ).toThrow('ID');
   });
 
   it('validates resource metadata and section-specific filenames', () => {
     const registry = createSectionRegistry(dependencies());
 
     expect(() => registry.protoFiles.validate([resource()])).not.toThrow();
-    expect(() => registry.protoFiles.validate([resource('login.lua')]))
-      .toThrow('Proto 文件名');
-    expect(() => registry.luaFiles.validate([{ ...resource('login.lua'), size: -1 }]))
-      .toThrow('size');
+    expect(() => registry.protoFiles.validate([resource('login.lua')])).toThrow('Proto 文件名');
+    expect(() => registry.luaFiles.validate([{ ...resource('login.lua'), size: -1 }])).toThrow(
+      'size',
+    );
   });
 
   it('validates action and listen template ids, names, timestamps, and data', () => {
@@ -132,18 +141,25 @@ describe('section validation', () => {
 
     expect(() => registry.actionTemplates.validate([action])).not.toThrow();
     expect(() => registry.listenTemplates.validate([listen])).not.toThrow();
-    expect(() => registry.actionTemplates.validate([{ ...action, id: '' }]))
-      .toThrow('ID');
-    expect(() => registry.actionTemplates.validate([{
-      ...action,
-      pattern: 'lua',
-      data: { pattern: 'lua' },
-    }])).toThrow('动作模板校验失败');
-    expect(() => registry.listenTemplates.validate([{
-      ...listen,
-      kind: 'lua',
-      data: {},
-    }])).toThrow('监听模板校验失败');
+    expect(() => registry.actionTemplates.validate([{ ...action, id: '' }])).toThrow('ID');
+    expect(() =>
+      registry.actionTemplates.validate([
+        {
+          ...action,
+          pattern: 'lua',
+          data: { pattern: 'lua' },
+        },
+      ]),
+    ).toThrow('动作模板校验失败');
+    expect(() =>
+      registry.listenTemplates.validate([
+        {
+          ...listen,
+          kind: 'lua',
+          data: {},
+        },
+      ]),
+    ).toThrow('监听模板校验失败');
   });
 
   it('validates notepad contents and timestamps', () => {
@@ -158,8 +174,9 @@ describe('section validation', () => {
     };
 
     expect(() => registry.notepadFiles.validate([note])).not.toThrow();
-    expect(() => registry.notepadFiles.validate([{ ...note, updatedAt: 'today' }]))
-      .toThrow('更新时间');
+    expect(() => registry.notepadFiles.validate([{ ...note, updatedAt: 'today' }])).toThrow(
+      '更新时间',
+    );
   });
 
   it('accepts an absent error map and rejects reserved or empty descriptions', () => {
@@ -167,11 +184,13 @@ describe('section validation', () => {
     const invalidContent = '{"1":"reserved","100":""}';
 
     expect(() => registry.errorMap.validate(null)).not.toThrow();
-    expect(() => registry.errorMap.validate({
-      ...resource('errors.json'),
-      content: invalidContent,
-      size: new Blob([invalidContent]).size,
-    })).toThrow('错误码配置无效');
+    expect(() =>
+      registry.errorMap.validate({
+        ...resource('errors.json'),
+        content: invalidContent,
+        size: new Blob([invalidContent]).size,
+      }),
+    ).toThrow('错误码配置无效');
   });
 });
 

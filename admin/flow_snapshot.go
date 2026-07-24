@@ -126,15 +126,19 @@ func (s *FlowTemplateStore) ReplaceSnapshot(ctx context.Context, req ReplaceFlow
 			return nil, fmt.Errorf("insert flow snapshot: %w", err)
 		}
 	}
+	persisted, err := listFlowDetails(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	revision, err := computeFlowSnapshotRevision(persisted)
+	if err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit flow snapshot: %w", err)
 	}
 
-	revision, err := computeFlowSnapshotRevision(items)
-	if err != nil {
-		return nil, err
-	}
-	return &ReplaceFlowSnapshotResponse{Revision: revision, Count: len(items)}, nil
+	return &ReplaceFlowSnapshotResponse{Revision: revision, Count: len(persisted)}, nil
 }
 
 func computeFlowSnapshotRevision(items []FlowTemplateDetail) (string, error) {

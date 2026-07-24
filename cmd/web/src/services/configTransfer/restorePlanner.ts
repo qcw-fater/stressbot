@@ -72,12 +72,10 @@ export function findDuplicate<T>(
 ): DuplicateMatch<T> {
   const incomingID = identity.id(incoming);
   const incomingName = identity.name(incoming);
-  const byID = incomingID === ''
-    ? undefined
-    : current.find((item) => identity.id(item) === incomingID);
-  const byName = incomingName === ''
-    ? undefined
-    : current.find((item) => identity.name(item) === incomingName);
+  const byID =
+    incomingID === '' ? undefined : current.find((item) => identity.id(item) === incomingID);
+  const byName =
+    incomingName === '' ? undefined : current.find((item) => identity.name(item) === incomingName);
   const matches = [...new Set([byID, byName].filter((value): value is T => value !== undefined))];
 
   if (matches.length === 0) return { kind: 'none', matches };
@@ -85,7 +83,12 @@ export function findDuplicate<T>(
   return { kind: 'ambiguous', matches };
 }
 
-function conflictID(section: BackupSection, sourceID: string, sourceName: string, index: number): string {
+function conflictID(
+  section: BackupSection,
+  sourceID: string,
+  sourceName: string,
+  index: number,
+): string {
   return `${section}:${sourceID}:${sourceName}:${index}`;
 }
 
@@ -109,9 +112,8 @@ function makeConflict<T>(
     sourceName,
     targetIds: targets.map(identity.id),
     targetNames: targets.map(identity.name),
-    allowedChoices: kind === 'ambiguous'
-      ? ['keep-copy', 'skip']
-      : ['overwrite', 'keep-copy', 'skip'],
+    allowedChoices:
+      kind === 'ambiguous' ? ['keep-copy', 'skip'] : ['overwrite', 'keep-copy', 'skip'],
   };
 }
 
@@ -154,14 +156,16 @@ export function planCollectionMerge<T>(
       stats.overwritten++;
       return;
     }
-    conflicts.push(makeConflict(
-      section,
-      source,
-      duplicate.matches,
-      identity,
-      index,
-      duplicate.kind === 'ambiguous' ? 'ambiguous' : 'duplicate',
-    ));
+    conflicts.push(
+      makeConflict(
+        section,
+        source,
+        duplicate.matches,
+        identity,
+        index,
+        duplicate.kind === 'ambiguous' ? 'ambiguous' : 'duplicate',
+      ),
+    );
   });
 
   conflicts.sort(compareConflicts);
@@ -187,12 +191,12 @@ export function planCollectionReplace<T>(
   for (const source of incoming) {
     const sourceID = identity.id(source);
     const sourceName = identity.name(source);
-    let match = [...unmatched].find((index) => (
-      sourceID !== '' && identity.id(current[index]) === sourceID
-    ));
-    match ??= [...unmatched].find((index) => (
-      sourceName !== '' && identity.name(current[index]) === sourceName
-    ));
+    let match = [...unmatched].find(
+      (index) => sourceID !== '' && identity.id(current[index]) === sourceID,
+    );
+    match ??= [...unmatched].find(
+      (index) => sourceName !== '' && identity.name(current[index]) === sourceName,
+    );
     if (match === undefined) {
       stats.added++;
     } else {
@@ -300,8 +304,16 @@ export function applyConflictChoices<T>(
     }
     assertChoiceAllowed(conflict, choice);
     if (choice === 'overwrite') {
-      replaceTarget(finalItems, conflict.targets[0], conflict.source);
-      stats.overwritten++;
+      const duplicate = findDuplicate(finalItems, conflict.source, identity);
+      if (duplicate.kind === 'none') {
+        finalItems.push(conflict.source);
+        stats.added++;
+      } else if (duplicate.kind === 'one') {
+        replaceTarget(finalItems, duplicate.matches[0], conflict.source);
+        stats.overwritten++;
+      } else {
+        throw new Error(`冲突 ${conflict.sourceName} 在处理期间变为多项匹配`);
+      }
     } else if (choice === 'keep-copy') {
       const usedNames = new Set(finalItems.map(identity.name));
       const sourceName = identity.name(conflict.source);
@@ -360,16 +372,18 @@ export function planSingleton<T>(
     return plan;
   }
 
-  plan.conflicts = [{
-    id: conflictID(section, '', section, 0),
-    section,
-    kind: 'duplicate',
-    source: incoming,
-    targets: [current],
-    sourceName: section,
-    targetIds: [],
-    targetNames: [section],
-    allowedChoices: ['overwrite', 'skip'],
-  }];
+  plan.conflicts = [
+    {
+      id: conflictID(section, '', section, 0),
+      section,
+      kind: 'duplicate',
+      source: incoming,
+      targets: [current],
+      sourceName: section,
+      targetIds: [],
+      targetNames: [section],
+      allowedChoices: ['overwrite', 'skip'],
+    },
+  ];
   return plan;
 }
