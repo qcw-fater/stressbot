@@ -6,7 +6,7 @@
  * 设计文档 §11：用户保存常用 action / listen，跨流程复用。
  */
 
-import { createStore, get, set, del, keys } from 'idb-keyval';
+import { clear, createStore, get, set, del, keys, setMany } from 'idb-keyval';
 import { nanoid } from 'nanoid';
 import type { ActionDef } from '@/types/action';
 import type { ListenDef } from '@/types/listen';
@@ -84,6 +84,14 @@ export async function removeActionTemplate(id: string): Promise<void> {
   emitTemplateChange();
 }
 
+export async function replaceActionTemplates(templates: readonly ActionTemplate[]): Promise<void> {
+  await clear(actionStore);
+  if (templates.length > 0) {
+    await setMany(templates.map((template) => [template.id, { ...template }]), actionStore);
+  }
+  emitTemplateChange();
+}
+
 // ── Listen ────────────────────────────────────────────────
 export async function saveListenTemplate(t: Omit<ListenTemplate, 'id' | 'createdAt'>): Promise<ListenTemplate> {
   const tpl: ListenTemplate = { ...t, id: nanoid(8), createdAt: Date.now() };
@@ -109,6 +117,14 @@ export async function listListenTemplates(): Promise<ListenTemplate[]> {
 
 export async function removeListenTemplate(id: string): Promise<void> {
   await del(id, listenStore);
+  emitTemplateChange();
+}
+
+export async function replaceListenTemplates(templates: readonly ListenTemplate[]): Promise<void> {
+  await clear(listenStore);
+  if (templates.length > 0) {
+    await setMany(templates.map((template) => [template.id, { ...template }]), listenStore);
+  }
   emitTemplateChange();
 }
 

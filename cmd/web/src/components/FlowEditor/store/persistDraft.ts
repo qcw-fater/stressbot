@@ -14,11 +14,17 @@ import { useFlowStore } from './flowStore';
 const KEY_FLOW = 'stressbot-editor-draft-flow-v2';
 const KEY_LAYOUT = 'stressbot-editor-draft-layout-v2';
 
-interface Draft {
+interface PersistedDraft {
   defaultDelayMs: number;
   nodes: Record<string, FlowNode>;
   actions: Record<string, ActionDef>;
   listens: Record<string, ListenDef>;
+  savedAt: number;
+}
+
+export interface DraftSnapshot {
+  flow: FlowJson;
+  layout: FlowLayout;
   savedAt: number;
 }
 
@@ -27,16 +33,7 @@ let timer: number | null = null;
 /** 立即写盘（同步）。供卸载/关闭页面时调用，避免 debounce 内的修改丢失。 */
 function flushNow(): void {
   try {
-    const s = useFlowStore.getState();
-    const draft: Draft = {
-      defaultDelayMs: s.defaultDelayMs,
-      nodes: s.nodes,
-      actions: s.actions,
-      listens: s.listens,
-      savedAt: Date.now(),
-    };
-    localStorage.setItem(KEY_FLOW, JSON.stringify(draft));
-    localStorage.setItem(KEY_LAYOUT, JSON.stringify(s.layout));
+    saveDraftSnapshot(captureCurrentDraft());
   } catch (e) {
     console.warn('[persistDraft] 写入失败：', (e as Error).message);
   }
@@ -67,11 +64,29 @@ export function startAutoPersist(): () => void {
   };
 }
 
-export function loadDraft(): { flow: FlowJson; layout: FlowLayout; savedAt: number } | null {
+export function captureCurrentDraft(): DraftSnapshot {
+  const state = useFlowStore.getState();
+  return {
+    flow: state.toTaskFlow(),
+    layout: structuredClone(state.layout),
+    savedAt: Date.now(),
+  };
+}
+
+export function saveDraftSnapshot(snapshot: DraftSnapshot | null): void {
+  if (!snapshot) {
+    clearDraft();
+    return;
+  }
+  localStorage.setItem(KEY_FLOW, JSON.stringify({ ...snapshot.flow, savedAt: snapshot.savedAt }));
+  localStorage.setItem(KEY_LAYOUT, JSON.stringify(snapshot.layout));
+}
+
+export function loadDraft(): DraftSnapshot | null {
   try {
     const flowStr = localStorage.getItem(KEY_FLOW);
     if (!flowStr) return null;
-    const draft = JSON.parse(flowStr) as Draft;
+    const draft = JSON.parse(flowStr) as PersistedDraft;
     const layoutStr = localStorage.getItem(KEY_LAYOUT);
     const layout = layoutStr ? (JSON.parse(layoutStr) as FlowLayout) : { nodePositions: {}, viewport: { x: 0, y: 0, zoom: 1 } };
     return {

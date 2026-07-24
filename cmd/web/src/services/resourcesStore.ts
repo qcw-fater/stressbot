@@ -53,6 +53,16 @@ const protoStore = createStore(PROTO_DB, 'data');
 const scriptStore = createStore(SCRIPT_DB, 'data');
 const adapterStore = createStore(ADAPTER_DB, 'data');
 
+async function replaceResourceStore(
+  store: ReturnType<typeof createStore>,
+  files: readonly ResourceFile[],
+): Promise<void> {
+  await clear(store);
+  if (files.length > 0) {
+    await setMany(files.map((file) => [file.name, { ...file }]), store);
+  }
+}
+
 export async function hashResourceContent(content: string): Promise<string> {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
   const hex = Array.from(new Uint8Array(buf))
@@ -137,6 +147,11 @@ export async function clearProto(): Promise<void> {
   notify();
 }
 
+export async function replaceProtoFiles(files: readonly ResourceFile[]): Promise<void> {
+  await replaceResourceStore(protoStore, files);
+  notify();
+}
+
 // === Script (Lua) ===
 
 export async function addScript(name: string, content: string): Promise<ResourceFile> {
@@ -187,6 +202,11 @@ export async function removeScript(name: string): Promise<void> {
 
 export async function clearScript(): Promise<void> {
   await clear(scriptStore);
+  notify();
+}
+
+export async function replaceScriptFiles(files: readonly ResourceFile[]): Promise<void> {
+  await replaceResourceStore(scriptStore, files);
   notify();
 }
 
@@ -249,6 +269,12 @@ export async function listCodecFiles(): Promise<ResourceFile[]> {
   return items;
 }
 
+export async function replaceCodecFiles(files: readonly ResourceFile[]): Promise<void> {
+  const errorMap = await getErrorMap();
+  await replaceResourceStore(adapterStore, errorMap ? [...files, errorMap] : files);
+  notify();
+}
+
 // === 共享错误表 errors.json（单份，key = 'errors.json'）===
 
 export async function getErrorMap(): Promise<ResourceFile | undefined> {
@@ -272,6 +298,15 @@ export async function setErrorMapFromBaseline(content: string): Promise<Resource
 
 export async function clearErrorMap(): Promise<void> {
   await del(ERRORS_JSON_KEY, adapterStore);
+  notify();
+}
+
+export async function replaceErrorMap(file: ResourceFile | null): Promise<void> {
+  if (file) {
+    await set(ERRORS_JSON_KEY, { ...file }, adapterStore);
+  } else {
+    await del(ERRORS_JSON_KEY, adapterStore);
+  }
   notify();
 }
 

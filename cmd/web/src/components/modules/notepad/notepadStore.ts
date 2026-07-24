@@ -78,19 +78,55 @@ async function saveFileContent(id: string, content: string): Promise<void> {
 
 // ── Debounce map ──
 
-const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+interface PendingSave {
+  timer: ReturnType<typeof setTimeout>;
+  content: string;
+}
+
+const saveTimers = new Map<string, PendingSave>();
 
 function debounceSave(id: string, content: string, cb: () => void, ms = 300): void {
   const existing = saveTimers.get(id);
-  if (existing) clearTimeout(existing);
-  saveTimers.set(
-    id,
-    setTimeout(async () => {
-      saveTimers.delete(id);
-      await saveFileContent(id, content);
-      cb();
-    }, ms),
-  );
+  if (existing) clearTimeout(existing.timer);
+  const timer = setTimeout(async () => {
+    saveTimers.delete(id);
+    await saveFileContent(id, content);
+    cb();
+  }, ms);
+  saveTimers.set(id, { timer, content });
+}
+
+export async function flushAllPendingSaves(): Promise<void> {
+  const pending = [...saveTimers.entries()];
+  if (pending.length === 0) return;
+  saveTimers.clear();
+  for (const [, value] of pending) clearTimeout(value.timer);
+  await Promise.all(pending.map(([id, value]) => saveFileContent(id, value.content)));
+  await saveIndex(useNotepadStore.getState().files);
+}
+
+export async function exportNotepadFiles(): Promise<NotepadFile[]> {
+  await flushAllPendingSaves();
+  const files = await loadIndex();
+  return Promise.all(files.map(async (meta) => ({
+    ...meta,
+    content: await loadFileContent(meta.id),
+  })));
+}
+
+export async function replaceNotepadFiles(files: readonly NotepadFile[]): Promise<void> {
+  await flushAllPendingSaves();
+  const existing = await loadIndex();
+  await Promise.all(existing.map((meta) => del(`file:${meta.id}`, notepadStore)));
+  await Promise.all(files.map((file) => saveFileContent(file.id, file.content)));
+  const metadata = files.map(({ content: _content, ...meta }) => ({ ...meta }));
+  await saveIndex(metadata);
+  useNotepadStore.setState({
+    files: metadata,
+    activeFileId: null,
+    activeContent: '',
+    contentLoaded: false,
+  });
 }
 
 // ── Zustand Store ──
@@ -206,12 +242,11 @@ export const useNotepadStore = create<NotepadState>()((set, get) => ({
   setSearchQuery: (q) => set({ searchQuery: q }),
 
   flushPendingSave: async (id) => {
-    const timer = saveTimers.get(id);
-    if (timer) {
-      clearTimeout(timer);
+    const pending = saveTimers.get(id);
+    if (pending) {
+      clearTimeout(pending.timer);
       saveTimers.delete(id);
-      const { activeContent } = get();
-      await saveFileContent(id, activeContent);
+      await saveFileContent(id, pending.content);
       await saveIndex(get().files);
     }
   },
