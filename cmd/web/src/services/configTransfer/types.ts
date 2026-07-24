@@ -55,7 +55,9 @@ export interface RestoreConflict {
 
 export interface RestoreSectionPlan {
   before: unknown;
+  incoming: unknown;
   after: unknown;
+  beforeFingerprint: string;
   stats: SectionStats;
 }
 
