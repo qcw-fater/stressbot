@@ -37,6 +37,7 @@ import { RuntimeBar } from '@/components/runtime/RuntimeBar';
 import { MonitorDock } from '@/components/monitoring/MonitorDock';
 import { FloatingWindow } from '@/components/FlowEditor/panels/FloatingWindow';
 import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
+import { RecoveryGuard } from '@/components/modules/configTransfer/RecoveryGuard';
 
 const LazyResourcesDrawer = lazy(() =>
   import('@/components/modules/ResourcesDrawer').then((m) => ({ default: m.ResourcesDrawer })),
@@ -83,8 +84,19 @@ function PersistentLazyMount({ visible, children }: { visible: boolean; children
 
 export function EditorPage() {
   return (
-    <AntApp style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
-      <HomeShellInner />
+    <AntApp
+      style={{
+        width: '100%',
+        height: '100%',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
+      <RecoveryGuard />
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <HomeShellInner />
+      </div>
     </AntApp>
   );
 }

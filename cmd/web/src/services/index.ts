@@ -47,6 +47,8 @@ export * from './configTransfer/types';
 export * from './configTransfer/backupCodec';
 export * from './configTransfer/restorePlanner';
 export * from './configTransfer/sectionRegistry';
+export * from './configTransfer/restoreCoordinator';
+export * from './configTransfer/recoveryJournal';
 
 export {
   collectFlowScriptNames,
