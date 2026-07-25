@@ -968,22 +968,24 @@ func (ae *ActionExecutor) parseAndStoreResponse(def *ActionDef, respBody []byte)
 
 // storeResponseProto 从 proto 响应消息按 store 映射取值并写入 state。
 //
-// 相比旧的 GetFieldMap（整树展开成嵌套 map/slice）+ navigatePath 逐个挑值，本方法对
 // Field != "" 的映射直接 GetFieldForStore 按路径取值，不展开无关的大字段（如未被引用的
-// repeated 列表），显著降低大响应下的分配与 CPU。仅当存在 Field == "" 的整存映射时
-// 才展开一次整树并复用。GetFieldForStore 与 navigatePath(GetFieldMap) 语义等价（见其 godoc
-// 及 TestGetFieldForStoreEquivalence）。
+// repeated 列表），目标子树保持可变 map（支持配置子路径覆写与脚本改写）。
+// GetFieldForStore 与 navigatePath(GetFieldMap) 语义等价（见其 godoc 及
+// TestGetFieldForStoreEquivalence）。
+//
+// Field == "" 的整存映射存不可变 protox.Frozen 引用（P1a）：不再 GetFieldMap 展开成
+// map[string]any 装箱树常驻 state（大消息 × 数千机器人 = GB 级常驻），路径读取经
+// state.PathNavigator 惰性取值，Lua robot.get 在边界现场转真 table（脚本语义不变）。
+// respMsg 解码后仅经本方法存入 state、无后续写方，满足 Freeze 的不可变契约。
 func (ae *ActionExecutor) storeResponseProto(mappings []StoreMapping, respMsg proto.Message) {
 	debugOn := stresslog.DebugEnabled()
-	var fullMap map[string]any
-	fullBuilt := false
+	var frozen *protox.Frozen
 	for _, m := range mappings {
 		if m.Field == "" {
-			if !fullBuilt {
-				fullMap = ae.factory.GetFieldMap(respMsg)
-				fullBuilt = true
+			if frozen == nil {
+				frozen = protox.Freeze(respMsg)
 			}
-			ae.store.SetPath(m.Setter, fullMap)
+			ae.store.SetPath(m.Setter, frozen)
 			continue
 		}
 		val, ok := ae.factory.GetFieldForStore(respMsg, m.Field)

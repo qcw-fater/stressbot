@@ -11,6 +11,25 @@ import (
 	"sync"
 )
 
+// PathNavigator 让不透明值参与 GetPath / NavigatePath 的路径导航。
+//
+// 典型实现：protox.Frozen——整存 proto 消息的不可变引用（P1a 状态表示），
+// 路径访问在底层消息上惰性取值，state 不再为整存消息常驻 map[string]any 装箱树。
+//
+// 契约：
+//   - segs 为剩余路径段（同 SplitPath 的分段格式），实现一次性消费全部段；
+//   - found=false 表示路径不存在，与 map/list 导航返回 nil 语义一致；
+//   - 返回值必须与实现内部结构无可变别名（标量 / 不可变引用 / 现场新建容器），
+//     调用方会在锁外遍历；
+//   - 实现必须并发只读安全（不可变值天然满足）。
+//
+// 写路径（SetPath）不支持导航进 PathNavigator 内部：整存值只能整体替换
+// （中间段遇到非 map/list 时沿用既有"覆盖为新 map"语义）。当前所有整存键
+// （loginResp / systemShopData）经审计无子路径写入。
+type PathNavigator interface {
+	NavigateSegs(segs []string) (any, bool)
+}
+
 // Store 泛型状态存储。
 // 并发安全，用于 Robot 运行时存储登录响应、战斗状态、好友列表等中间数据。
 // 每秒可能被多个协程访问（主流程 + listen 回调），因此使用 RWMutex。
@@ -249,15 +268,24 @@ func (s *Store) SetPath(path string, value any) {
 }
 
 // NavigatePath 从任意值中按点分路径提取子值（公开版本，供 engine/robot 包复用）。
-// 路径格式同 SplitPath，从 v 开始逐段导航 map/list。
+// 路径格式同 SplitPath，从 v 开始逐段导航 map/list；遇到 PathNavigator
+// （如整存的 protox.Frozen）时把剩余路径段整体交给它惰性取值。
 // v 为 nil 或路径不匹配时返回 nil。
 func NavigatePath(v any, path string) any {
 	cur := v
-	for _, seg := range splitPathCached(path) {
+	segs := splitPathCached(path)
+	for i := 0; i < len(segs); i++ {
 		if cur == nil {
 			return nil
 		}
-		cur = navigateValue(cur, seg)
+		if nav, ok := cur.(PathNavigator); ok {
+			out, found := nav.NavigateSegs(segs[i:])
+			if !found {
+				return nil
+			}
+			return out
+		}
+		cur = navigateValue(cur, segs[i])
 	}
 	return cur
 }
@@ -465,6 +493,15 @@ func (s *Store) GetPath(path string) any {
 	for i := 1; i < len(segments); i++ {
 		if cur == nil {
 			return nil
+		}
+		// 不透明导航值（如整存的 protox.Frozen）：把剩余路径段整体交给它惰性取值。
+		// 产物为标量 / 不可变引用 / 现场新建容器，与 Store 内部无可变别名，无需深拷贝。
+		if nav, ok := cur.(PathNavigator); ok {
+			out, found := nav.NavigateSegs(segments[i:])
+			if !found {
+				return nil
+			}
+			return out
 		}
 		cur = navigateValue(cur, segments[i])
 	}

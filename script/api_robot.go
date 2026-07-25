@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 
+	"stressbot/protox"
+
 	lua "github.com/yuin/gopher-lua"
 	"google.golang.org/protobuf/proto"
 )
@@ -370,6 +372,12 @@ func goValueToLua(L *lua.LState, val any) lua.LValue {
 			tb.RawSetString(k, goValueToLua(L, elem))
 		}
 		return tb
+	case *protox.Frozen:
+		// 整存 proto 引用（P1a）：现场转真 Lua table。protoMessageToLuaTable 与
+		// GetFieldMap 同一套跳过/默认值规则，脚本看到的 table 与旧的展开 map 版逐字一致
+		// （type(v)=="table"、proto3 默认值字段在场、可自由遍历/改写副本）。
+		// 转换产物是临时 Lua 对象，Go 侧不再为整存消息常驻装箱树。
+		return protoMessageToLuaTable(L, v.Message())
 	default:
 		return lua.LString(fmt.Sprintf("%v", val))
 	}

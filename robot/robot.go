@@ -1071,17 +1071,18 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 			return
 		}
 
-		// 按需取值：Field != "" 直接 GetFieldForStore（不展开整树），仅整存映射(Field=="")
-		// 才 GetFieldMap 一次。与 GetFieldMap+NavigatePath 语义等价（见 factory 侧 godoc）。
-		var fieldMap map[string]any
-		fullBuilt := false
+		// 按需取值：Field != "" 直接 GetFieldForStore（不展开整树，目标子树保持可变 map，
+		// 支持配置子路径覆写与脚本改写）；整存映射(Field=="") 存不可变 Frozen 引用（P1a）——
+		// 不再 GetFieldMap 展开成装箱树常驻，路径读取经 state.PathNavigator 惰性取值，
+		// Lua robot.get 在边界现场转真 table（脚本语义不变）。
+		// respMsg 由本回调独占解码、存入后无写方，满足 Freeze 的不可变契约。
+		var frozen *protox.Frozen
 		for _, m := range cbDef.Store {
 			if m.Field == "" {
-				if !fullBuilt {
-					fieldMap = h.robot.factory.GetFieldMap(respMsg)
-					fullBuilt = true
+				if frozen == nil {
+					frozen = protox.Freeze(respMsg)
 				}
-				h.robot.state.SetPath(m.Setter, fieldMap)
+				h.robot.state.SetPath(m.Setter, frozen)
 			} else if val, ok := h.robot.factory.GetFieldForStore(respMsg, m.Field); ok {
 				h.robot.state.SetPath(m.Setter, val)
 			}
