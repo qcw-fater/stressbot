@@ -955,28 +955,18 @@ func (ae *ActionExecutor) parseAndStoreResponse(def *ActionDef, respBody []byte)
 		return nil
 	}
 
-	// 大消息走广播去重（同 Go-store / listen / await_listen 路径）：字节相同的响应
-	// （对局结果、全服一致的查询结果等）全进程只解码一份。整存映射直接复用共享
-	// Frozen；路径映射只对消息做只读取值，共享安全。逐机器人唯一的大响应（如登录）
-	// 只在 LRU 缓存里短暂占位后被逐出，代价为一次哈希，可忽略。
-	var respMsg proto.Message
-	var frozen *protox.Frozen
-	var err error
-	if len(respBody) >= protox.DedupMinBytes {
-		frozen, err = ae.factory.ParseFrozenShared(def.S2CProto, respBody)
-		if err == nil {
-			respMsg = frozen.Message()
-		}
-	} else {
-		respMsg, err = ae.factory.Parse(def.S2CProto, respBody)
-	}
+	// 动作响应不走广播去重：请求-响应的内容逐机器人唯一（登录、各类查询带自身数据），
+	// 进共享缓存必然 miss——不仅白付哈希 + 字节快照，还以每秒几十条的速率把真正会
+	// 复用的广播条目（MatchSucceedS2C 等）从 LRU 挤出去（线上 018→019 实测缓存污染）。
+	// 独占解码即可，整存映射由 storeResponseProto 就地 Freeze。
+	respMsg, err := ae.factory.Parse(def.S2CProto, respBody)
 	if err != nil {
 		return NewActionError(errcode.ErrParseFailed, "action="+def.Name+" proto="+def.S2CProto, err)
 	}
 
 	stresslog.Debug("[ACTION] TCPResponseProto", zap.String("proto", def.S2CProto), zap.Int("bodyLen", len(respBody)))
 
-	ae.storeResponseProto(def.Store, respMsg, frozen)
+	ae.storeResponseProto(def.Store, respMsg)
 	return nil
 }
 
@@ -990,12 +980,10 @@ func (ae *ActionExecutor) parseAndStoreResponse(def *ActionDef, respBody []byte)
 // Field == "" 的整存映射存不可变 protox.Frozen 引用（P1a）：不再 GetFieldMap 展开成
 // map[string]any 装箱树常驻 state（大消息 × 数千机器人 = GB 级常驻），路径读取经
 // state.PathNavigator 惰性取值，Lua robot.get 在边界现场转真 table（脚本语义不变）。
-//
-// frozen 非 nil 时为去重缓存的共享实例（P1a 契约保证全程只读），直接复用；
-// 为 nil（小消息独占解码）时按需 Freeze——respMsg 仅经本方法存入 state、
-// 无后续写方，满足 Freeze 的不可变契约。
-func (ae *ActionExecutor) storeResponseProto(mappings []StoreMapping, respMsg proto.Message, frozen *protox.Frozen) {
+// respMsg 解码后仅经本方法存入 state、无后续写方，满足 Freeze 的不可变契约。
+func (ae *ActionExecutor) storeResponseProto(mappings []StoreMapping, respMsg proto.Message) {
 	debugOn := stresslog.DebugEnabled()
+	var frozen *protox.Frozen
 	for _, m := range mappings {
 		if m.Field == "" {
 			if frozen == nil {

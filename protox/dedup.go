@@ -64,16 +64,19 @@ type FrozenCache struct {
 	maxBytes   int
 	hits       uint64
 	misses     uint64
+	evictions  uint64
 }
 
 // NewFrozenCache 创建缓存。maxEntries/maxBytes 任一超限即从 LRU 尾部驱逐。
 func NewFrozenCache(maxEntries, maxBytes int) *FrozenCache {
-	return &FrozenCache{
+	c := &FrozenCache{
 		buckets:    make(map[uint64][]*dedupEntry),
 		lru:        list.New(),
 		maxEntries: maxEntries,
 		maxBytes:   maxBytes,
 	}
+	registerCacheForStats(c)
+	return c
 }
 
 func dedupHash(protoName string, data []byte) uint64 {
@@ -145,6 +148,7 @@ func (c *FrozenCache) evictOldest() {
 	}
 	victim := back.Value.(*dedupEntry)
 	c.lru.Remove(back)
+	c.evictions++
 	c.curBytes -= len(victim.raw)
 	hash := dedupHash(victim.protoName, victim.raw)
 	bucket := c.buckets[hash]
@@ -162,11 +166,26 @@ func (c *FrozenCache) evictOldest() {
 	}
 }
 
-// Stats 返回命中/未命中计数与当前占用（观测去重是否生效、是否被独占推送污染）。
-func (c *FrozenCache) Stats() (hits, misses uint64, entries, rawBytes int) {
+// DedupStats 一次快照（观测去重是否生效、是否被独占推送污染）。
+type DedupStats struct {
+	Hits      uint64 `json:"hits"`
+	Misses    uint64 `json:"misses"`
+	Evictions uint64 `json:"evictions"`
+	Entries   int    `json:"entries"`
+	RawBytes  int    `json:"rawBytes"`
+}
+
+// Stats 返回命中/未命中/驱逐计数与当前占用。
+func (c *FrozenCache) Stats() DedupStats {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.hits, c.misses, c.lru.Len(), c.curBytes
+	return DedupStats{
+		Hits:      c.hits,
+		Misses:    c.misses,
+		Evictions: c.evictions,
+		Entries:   c.lru.Len(),
+		RawBytes:  c.curBytes,
+	}
 }
 
 // ParseFrozenShared 内容寻址解析：与 Parse 语义等价，但相同 (name, data) 跨调用方

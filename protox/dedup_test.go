@@ -43,7 +43,8 @@ func TestDedupSharesIdenticalContent(t *testing.T) {
 		t.Fatal("?????????? *Frozen ??")
 	}
 
-	hits, misses, entries, _ := f.frozenCache.Stats()
+	st := f.frozenCache.Stats()
+	hits, misses, entries := st.Hits, st.Misses, st.Entries
 	if hits != 1 || misses != 1 || entries != 1 {
 		t.Fatalf("hits=%d misses=%d entries=%d?want 1/1/1", hits, misses, entries)
 	}
@@ -112,7 +113,7 @@ func TestDedupEviction(t *testing.T) {
 	if _, err := cache.getOrParse(f, "storetest.Bag", rawC); err != nil {
 		t.Fatalf("C: %v", err) // ?? C ??????? A
 	}
-	if _, _, entries, _ := cache.Stats(); entries != 2 {
+	if entries := cache.Stats().Entries; entries != 2 {
 		t.Fatalf("entries=%d?want 2", entries)
 	}
 
@@ -146,7 +147,8 @@ func TestDedupByteBound(t *testing.T) {
 	if _, err := cache.getOrParse(f, "storetest.Bag", rawB); err != nil {
 		t.Fatalf("B: %v", err)
 	}
-	_, _, entries, rawBytes := cache.Stats()
+	bst := cache.Stats()
+	entries, rawBytes := bst.Entries, bst.RawBytes
 	if entries != 1 {
 		t.Fatalf("entries=%d?want 1????????", entries)
 	}
@@ -199,7 +201,8 @@ func TestDedupConcurrent(t *testing.T) {
 	if len(distinct) != 2 {
 		t.Fatalf("??????????? 2 ?????? %d", len(distinct))
 	}
-	hits, misses, entries, _ := cache.Stats()
+	cst := cache.Stats()
+	hits, misses, entries := cst.Hits, cst.Misses, cst.Entries
 	if entries != 2 {
 		t.Fatalf("entries=%d?want 2", entries)
 	}
