@@ -14,6 +14,7 @@ import (
 
 	lua "github.com/yuin/gopher-lua"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"stressbot/adapter"
 	"stressbot/codec"
@@ -1054,7 +1055,20 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 			return
 		}
 
-		respMsg, err := h.robot.factory.Parse(cbDef.S2CProto, msg.Data)
+		// 大消息走广播去重（protox.FrozenCache）：同一条广播（字节相同）全进程只解码
+		// 一份、全部机器人共享同一个不可变 *Frozen——留存塌缩为单份，命中时解码本身
+		// 也省掉。小消息（< DedupMinBytes）重复留存可忽略，不值得哈希+快照，走原解码。
+		var respMsg proto.Message
+		var frozen *protox.Frozen
+		var err error
+		if len(msg.Data) >= protox.DedupMinBytes {
+			frozen, err = h.robot.factory.ParseFrozenShared(cbDef.S2CProto, msg.Data)
+			if err == nil {
+				respMsg = frozen.Message()
+			}
+		} else {
+			respMsg, err = h.robot.factory.Parse(cbDef.S2CProto, msg.Data)
+		}
 		if err != nil {
 			callbackErr := engine.NewActionError(errcode.ErrCallbackParse, "proto="+cbDef.S2CProto, err)
 			stresslog.Error("[ROBOT] 解析推送消息失败",
@@ -1071,12 +1085,12 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 			return
 		}
 
-		// 按需取值：Field != "" 直接 GetFieldForStore（不展开整树，目标子树保持可变 map，
-		// 支持配置子路径覆写与脚本改写）；整存映射(Field=="") 存不可变 Frozen 引用（P1a）——
-		// 不再 GetFieldMap 展开成装箱树常驻，路径读取经 state.PathNavigator 惰性取值，
-		// Lua robot.get 在边界现场转真 table（脚本语义不变）。
-		// respMsg 由本回调独占解码、存入后无写方，满足 Freeze 的不可变契约。
-		var frozen *protox.Frozen
+		// 按需取值：Field != "" 直接 GetFieldForStore（不展开整树，产物是现场新建的
+		// 可变 map，支持配置子路径覆写与脚本改写，读消息本身只读，共享安全）；
+		// 整存映射(Field=="") 存不可变 Frozen 引用（P1a）——不展开成装箱树常驻，
+		// 路径读取经 state.PathNavigator 惰性取值，Lua robot.get 在边界现场转真 table。
+		// 不可变契约：独占解码的 respMsg 存入后无写方；共享 Frozen 由 P1a 契约保证
+		// 全程只读，两种来源均满足 Freeze 要求。
 		for _, m := range cbDef.Store {
 			if m.Field == "" {
 				if frozen == nil {
