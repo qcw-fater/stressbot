@@ -1,7 +1,7 @@
 /**
  * Lua 脚本编辑器（mode='action' / 'listen' / 'boolean' 三用）。
  *
- * - 选择脚本文件（从基线 scripts 索引列出）
+ * - 选择脚本文件（从本地存储列出，订阅资源变更实时刷新）
  * - Monaco 全功能 Lua 编辑
  * - 入口签名：
  *   action  模式 : function execute(r) ... return nil / err table end
@@ -26,8 +26,8 @@ import { useEditorStore } from '../../store/editorStore';
 import { registerLuaProviders } from '../../lua/luaProviders';
 import { checkLuaSyntax, type SyntaxIssue } from '../../lua/luaSyntaxClient';
 import { LuaApiPopover } from '../../lua/LuaApiPopover';
-import { addScript, getScript } from '@/services/resourcesStore';
-import { fetchBaselineScriptIndex, fetchBaselineScript } from '@/services/baselineApi';
+import { addScript, getScript, listScript, subscribe } from '@/services/resourcesStore';
+import { fetchBaselineScript } from '@/services/baselineApi';
 
 export type LuaMode = 'action' | 'listen' | 'boolean';
 
@@ -102,14 +102,18 @@ export function LuaForm({ mode, script, onChangeScript, onDirtyChange }: LuaForm
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
 
-  // 拉取脚本列表
+  // 拉取脚本列表（本地存储，订阅资源变更实时刷新）
   useEffect(() => {
     let cancel = false;
-    fetchBaselineScriptIndex()
-      .then((list) => { if (!cancel) setFiles(list ?? []); })
-      .catch(() => undefined);
+    const load = async () => {
+      const list = await listScript();
+      if (!cancel) setFiles(list.map((f) => f.name));
+    };
+    load();
+    const unsub = subscribe(() => load());
     return () => {
       cancel = true;
+      unsub();
     };
   }, []);
 

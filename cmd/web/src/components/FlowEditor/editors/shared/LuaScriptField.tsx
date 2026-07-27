@@ -13,7 +13,7 @@ import { useEffect, useState } from 'react';
 import type { LuaMode } from '../ActionEditor/LuaForm';
 import { LuaForm } from '../ActionEditor/LuaForm';
 import { useFloatingWindowStore } from '../../store/floatingWindowStore';
-import { fetchBaselineScriptIndex } from '@/services/baselineApi';
+import { listScript, subscribe } from '@/services/resourcesStore';
 
 export interface LuaScriptFieldProps {
   mode: LuaMode;
@@ -61,10 +61,16 @@ export function LuaScriptField({ mode, value, onChange, helpText }: LuaScriptFie
 
   useEffect(() => {
     let cancel = false;
-    fetchBaselineScriptIndex()
-      .then((list) => { if (!cancel) setFiles(list ?? []); })
-      .catch(() => undefined);
-    return () => { cancel = true; };
+    const load = async () => {
+      const list = await listScript();
+      if (!cancel) setFiles(list.map((f) => f.name));
+    };
+    load();
+    const unsub = subscribe(() => load());
+    return () => {
+      cancel = true;
+      unsub();
+    };
   }, []);
 
   const closeEditor = () => {
