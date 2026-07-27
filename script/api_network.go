@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"stressbot/engine"
 	"stressbot/errcode"
+	"stressbot/protox"
 	stresslog "stressbot/utils/log"
 	"time"
 
@@ -791,6 +792,21 @@ func listenResultValues(L *lua.LState, ctx *Context, spec *WaitSpec, outcome Wai
 		}
 	}
 	if spec.S2CProto != "" && ctx.Factory != nil && len(respBody) > 0 {
+		// 大消息走广播去重（protox.FrozenCache，与 Go-store 监听同一缓存）：监听推送
+		// 常为同场次/全服广播（如 MatchSucceedS2C / BattleStartLoadingS2C 对同场 60 人
+		// 字节完全相同），逐机器人独立解码曾占进程总分配的近半（线上 profile 实测
+		// 29 分钟 144GB churn）。命中共享时零解码零留存；共享消息以 *Frozen 包进
+		// userdata，proto API 读透传、set_field fail-loud 拒绝（见 api_proto.go）。
+		if len(respBody) >= protox.DedupMinBytes {
+			frozen, err := ctx.Factory.ParseFrozenShared(spec.S2CProto, respBody)
+			if err != nil {
+				return []lua.LValue{
+					newErrTable(L, int(errcode.ErrParseFailed), "service="+spec.Service+" route="+spec.RouteKey),
+					lua.LNil,
+				}
+			}
+			return []lua.LValue{lua.LNil, wrapFrozenMessage(L, frozen)}
+		}
 		respMsg, err := ctx.Factory.Parse(spec.S2CProto, respBody)
 		if err != nil {
 			return []lua.LValue{

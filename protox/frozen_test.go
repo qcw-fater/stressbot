@@ -137,7 +137,7 @@ func TestFrozenLazyRepresentation(t *testing.T) {
 }
 
 // TestFrozenStateIntegration 校验整存 Frozen 后 state 层的读路径：
-// GetPath 穿透导航、Get 返回同一引用（零拷贝直通 deepCopyValue）、NavigatePath 等价。
+// GetPath 穿透导航、Get 返回同一引用（不可变值按引用直通）、NavigatePath 等价。
 func TestFrozenStateIntegration(t *testing.T) {
 	f := newStoreTestFactory(t)
 	bag := buildStoreTestBag(t, f)
@@ -162,7 +162,7 @@ func TestFrozenStateIntegration(t *testing.T) {
 	if got := st.GetPath("loginResp.empty.id"); got != nil {
 		t.Fatalf("loginResp.empty.id=%#v want nil", got)
 	}
-	// 整键读取：返回同一 *Frozen 引用（不可变，deepCopyValue 直通）
+	// 整键读取：返回同一 *Frozen 引用（不可变，按引用直通）
 	if got := st.GetPath("loginResp"); got != any(fz) {
 		t.Fatalf("GetPath(loginResp) 应返回同一 *Frozen 引用，实际 %#v", got)
 	}

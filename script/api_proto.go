@@ -3,6 +3,8 @@ package script
 import (
 	"strconv"
 
+	"stressbot/protox"
+
 	lua "github.com/yuin/gopher-lua"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -59,19 +61,31 @@ func protoMsgIndex(L *lua.LState) int {
 	return 1
 }
 
-// checkProtoMsg 从栈中获取 proto.Message（跳过 self 参数）
+// checkProtoMsg 从栈中获取 proto.Message（跳过 self 参数）。
+// 共享只读消息（*protox.Frozen）透传底层消息——仅供读访问器使用。
 func checkProtoMsg(L *lua.LState) proto.Message {
+	msg, _ := checkProtoMsgRO(L)
+	return msg
+}
+
+// checkProtoMsgRO 从栈中获取 proto 消息及其只读性（跳过 self 参数）。
+// readonly=true 表示消息来自广播去重的共享 *Frozen（多机器人共享同一份解码结果），
+// 调用方返回其子消息时必须保持只读传播（继续包 Frozen），绝不能交出可变包装。
+func checkProtoMsgRO(L *lua.LState) (proto.Message, bool) {
 	top := L.GetTop()
 	for i := 1; i <= top; i++ {
 		v := L.Get(i)
 		if ud, ok := v.(*lua.LUserData); ok {
-			if msg, ok := ud.Value.(proto.Message); ok {
-				return msg
+			switch m := ud.Value.(type) {
+			case *protox.Frozen:
+				return m.Message(), true
+			case proto.Message:
+				return m, false
 			}
 		}
 	}
 	L.RaiseError("expected proto message (userdata)")
-	return nil
+	return nil, false
 }
 
 // protoMsgMetatableKey proto 消息共享元表在 registry 中的键。
@@ -97,6 +111,18 @@ func protoMsgMetatable(L *lua.LState) *lua.LTable {
 func wrapProtoMessage(L *lua.LState, msg proto.Message) *lua.LUserData {
 	ud := L.NewUserData()
 	ud.Value = msg
+	L.SetMetatable(ud, protoMsgMetatable(L))
+	return ud
+}
+
+// wrapFrozenMessage 将共享只读消息（*protox.Frozen，广播去重产物）包装为与普通
+// proto 消息同元表的 LUserData：读访问器（get_field/get_path/list_*/serialize/
+// get_field_map）经 checkProtoMsgRO 透传底层消息；set_field 检测到 Frozen 直接
+// RaiseError（fail-loud，防止改写污染其他机器人共享的同一份解码结果）；
+// list_get/iter_list 返回的子消息继续包 Frozen，只读性全树传播。
+func wrapFrozenMessage(L *lua.LState, fz *protox.Frozen) *lua.LUserData {
+	ud := L.NewUserData()
+	ud.Value = fz
 	L.SetMetatable(ud, protoMsgMetatable(L))
 	return ud
 }
@@ -129,6 +155,18 @@ func protoSetField(L *lua.LState) int {
 	if ctx == nil || ctx.Factory == nil {
 		L.RaiseError("proto factory not available")
 		return 0
+	}
+
+	// 共享只读消息（广播去重的 *Frozen）禁止参与 set_field：既不能作为改写目标
+	//（污染其他机器人共享的解码结果），也不能作为嵌套赋值的 value（会让共享消息
+	// 获得可变父级，间接失去只读保障）。fail-loud，需要可写副本请用 proto.parse。
+	for i := 1; i <= L.GetTop(); i++ {
+		if ud, ok := L.Get(i).(*lua.LUserData); ok {
+			if _, isFrozen := ud.Value.(*protox.Frozen); isFrozen {
+				L.RaiseError("proto.set_field: 消息为共享只读（广播去重），禁止修改；需要可写副本请用 proto.parse 重新解析")
+				return 0
+			}
+		}
 	}
 
 	msg := checkProtoMsg(L)
@@ -306,7 +344,7 @@ func protoIterList(L *lua.LState) int {
 		L.Push(lua.LNil)
 		return 1
 	}
-	msg := checkProtoMsg(L)
+	msg, readonly := checkProtoMsgRO(L)
 	if msg == nil {
 		L.Push(lua.LNil)
 		return 1
@@ -332,9 +370,9 @@ func protoIterList(L *lua.LState) int {
 		item := list[idx]
 		idx++
 		L.Push(lua.LNumber(idx))
-		// 嵌套 proto 消息保留为 userdata
+		// 嵌套 proto 消息保留为 userdata；共享只读消息的子消息保持只读传播
 		if pm, ok := item.(proto.Message); ok {
-			L.Push(wrapProtoMessage(L, pm))
+			L.Push(wrapChildMessage(L, pm, readonly))
 		} else {
 			L.Push(goValueToLua(L, item))
 		}
@@ -373,7 +411,7 @@ func protoListGet(L *lua.LState) int {
 		L.Push(lua.LNil)
 		return 1
 	}
-	msg := checkProtoMsg(L)
+	msg, readonly := checkProtoMsgRO(L)
 	if msg == nil {
 		L.Push(lua.LNil)
 		return 1
@@ -399,11 +437,21 @@ func protoListGet(L *lua.LState) int {
 		return 1
 	}
 	if pm, ok := item.(proto.Message); ok {
-		L.Push(wrapProtoMessage(L, pm))
+		L.Push(wrapChildMessage(L, pm, readonly))
 	} else {
 		L.Push(goValueToLua(L, item))
 	}
 	return 1
+}
+
+// wrapChildMessage 包装从父消息取出的子消息：父为共享只读（Frozen）时子消息
+// 继续包 Frozen（只读性全树传播，堵住"经子消息 set_field 改写共享树"的旁路），
+// 否则按普通可变消息包装。
+func wrapChildMessage(L *lua.LState, pm proto.Message, readonly bool) *lua.LUserData {
+	if readonly {
+		return wrapFrozenMessage(L, protox.Freeze(pm))
+	}
+	return wrapProtoMessage(L, pm)
 }
 
 // findFirstStringArg 从参数列表中找第一个字符串参数（跳过 userdata）

@@ -16,6 +16,14 @@ import (
 // （取默认值的字段不上线，验证边界转换保留 proto3 默认值）。
 func newFrozenTestMessage(t *testing.T) proto.Message {
 	t.Helper()
+	_, msg := newFrozenTestFactoryMessage(t)
+	return msg
+}
+
+// newFrozenTestFactoryMessage 同 newFrozenTestMessage，但把构造消息用的 Factory
+// 一并返回（proto API 测试需要 ctx.Factory）。
+func newFrozenTestFactoryMessage(t *testing.T) (*protox.Factory, proto.Message) {
+	t.Helper()
 	dir := t.TempDir()
 	protoContent := `syntax = "proto3";
 
@@ -69,7 +77,7 @@ message Bag {
 	if err != nil {
 		t.Fatalf("Parse 失败: %v", err)
 	}
-	return parsed
+	return f, parsed
 }
 
 // TestRobotGetFrozen 校验整存 Frozen 后 Lua 边界语义不变：

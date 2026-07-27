@@ -23,9 +23,11 @@ import (
 // 结构上不存在按哈希误共享的可能。
 //
 // 非广播（每机器人内容不同）的消息会一直 miss：代价是每条一次哈希 + 一份原始字节
-// 快照（随 LRU 很快驱逐）。接入点用 DedupMinBytes 门槛把小消息挡在缓存外；
-// 大而独占的推送在当前 listen Go-store 业务里不存在，若未来出现，Stats 的命中率
-// 会直接暴露（hits≈0 且 misses 高速增长）。
+// 快照（随 LRU 很快驱逐）。接入点用 DedupMinBytes 门槛把小消息挡在缓存外。
+// 接入点：Go-store 监听（robot.createListenCallback）、监听脚本解码（runListenScript）、
+// Lua await_listen 结果（script.listenResultValues，共享实例以 *Frozen 包 userdata，
+// proto API 只读防护见 script/api_proto.go）。大而独占的推送若未来出现，
+// Stats 的命中率会直接暴露（hits≈0 且 misses 高速增长）。
 
 const (
 	// DedupMinBytes 接入方参与去重的消息体下限：小消息即使重复，留存也可忽略，
@@ -34,9 +36,11 @@ const (
 
 	// dedupMaxEntries / dedupMaxBytes 缓存双上界。字节上界按**原始消息体**计
 	//（解码后消息约为原始的 2-4 倍，Frozen 被缓存钉住的解码体上界随之有界）。
-	// 稳态下相异的广播内容只有几十种（配置版本数量级），32MB ≈ 70 条 450KB 广播，余量充足。
-	dedupMaxEntries = 128
-	dedupMaxBytes   = 32 << 20
+	// 除全局广播（配置类，相异内容几十种）外，listen/监听脚本接入后还需容纳
+	// 按场次相异的对局广播（MatchSucceedS2C / BattleStartLoadingS2C：2000 人 ÷ 60 人/场
+	// ≈ 33 并发场 × 2 类 × 数百 KB）。256 条 / 64MB 覆盖两类负载，仍是有界小头。
+	dedupMaxEntries = 256
+	dedupMaxBytes   = 64 << 20
 )
 
 var dedupSeed = maphash.MakeSeed()

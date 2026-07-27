@@ -22,7 +22,7 @@ import (
 // Message() 仅供边界只读消费（Lua table 化 / 序列化 / 字段导航），调用方不得调用任何
 // setter（包括 factory.SetField / Lua proto.set_field，两者签名均不接受 *Frozen，
 // 类型系统天然挡住）。不可变性使 Frozen 可被多个 goroutine 无锁并发读，
-// 也使 state.deepCopyValue 对其零拷贝直通（default 分支原样返回）。
+// state.GetPath 对其按引用直通（不可变值无需任何拷贝防护）。
 type Frozen struct {
 	msg proto.Message
 }

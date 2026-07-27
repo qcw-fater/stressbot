@@ -296,9 +296,11 @@ func TestSetPath_Concurrent(t *testing.T) {
 	}
 }
 
-// TestGetPath_ConcurrentWithWriters 复刻 R9 崩溃场景：pump 侧写方（listen 回调 SetPath 就地改
-// 嵌套 map / 心跳 Increment）与主流程 GetPath 并发访问同一子树。GetPath 修复前在锁外导航嵌套
-// map，此测在 -race 下会报 data race 或直接 concurrent map read and map write 崩溃；修复后干净通过。
+// TestGetPath_ConcurrentWithWriters 校验 GetPath 的锁内导航纪律：并发写方（就地改嵌套 map 的
+// SetPath / 心跳式 Increment）与 GetPath 读方同时访问同一子树时，导航全程持读锁不崩溃、无 race。
+// 注：P1b 单写方化后，生产环境嵌套容器写只发生在执行器 goroutine，GetPath 返回值为内部别名
+// 仅供执行器消费；本测的跨 goroutine 写方保留，仍覆盖"导航与写并发"这一锁纪律（读方不遍历
+// 返回值，只做锁内导航——与 pump 侧顶层标量访问 vs 执行器写的真实并发形态一致）。
 func TestGetPath_ConcurrentWithWriters(t *testing.T) {
 	s := NewStore()
 	s.SetPath("root.branch.leaf", 0)

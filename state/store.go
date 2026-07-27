@@ -30,9 +30,20 @@ type PathNavigator interface {
 	NavigateSegs(segs []string) (any, bool)
 }
 
-// Store 泛型状态存储。
-// 并发安全，用于 Robot 运行时存储登录响应、战斗状态、好友列表等中间数据。
-// 每秒可能被多个协程访问（主流程 + listen 回调），因此使用 RWMutex。
+// Store 泛型状态存储，用于 Robot 运行时存储登录响应、战斗状态、好友列表等中间数据。
+//
+// 并发契约（P1b 单写方化后）：
+//   - 嵌套容器（map/list）的写入只发生在执行器 goroutine——脚本 robot.set、声明式
+//     store、Go-store 监听（后者物化后经 Robot 任务队列投递执行器执行 SetPath）；
+//   - pump goroutine 只做顶层标量访问：心跳 bindings 读（Get/GetInt64/GetString）与
+//     stateCounter 自增（IncrementInt64），均在锁内完成、不触碰嵌套容器内部；
+//   - GetPath 返回的容器是内部结构的别名（免深拷贝），仅供执行器 goroutine 消费——
+//     执行器是嵌套容器唯一写方，自己读自己写无并发；导航全程持读锁，与 pump 的
+//     顶层标量写互斥。
+//
+// RWMutex 保留：它保护 pump 侧标量访问与执行器写的互斥（心跳有硬时序要求，不能改投
+// 执行器队列）。单写方化消除的是"容器读需深拷贝切别名"这一层（GetPath 深拷贝 churn），
+// 而非锁本身——无争用 RWMutex 的开销可忽略。
 type Store struct {
 	mu   sync.RWMutex
 	data map[string]any
@@ -95,10 +106,10 @@ func (s *Store) GetString(key string) string {
 
 // GetList 获取列表（any 切片）的顶层浅拷贝副本。
 //
-// 返回副本而非内部引用：Go-store 型 listen 回调在 connectionPump goroutine 内调用
-// SetPath 就地改写状态容器，与执行器 goroutine 通过本方法读取同一切片并发，若返回内部
-// 引用会触发 "concurrent map/slice 读写" 致命崩溃。拷贝在读锁内完成，保证与写入互斥、
-// 快照自洽。元素为浅拷贝（嵌套容器仍共享底层），调用方对返回值只做只读遍历/随机选取。
+// 保留顶层浅拷贝：本方法同时服务执行器（action bindings）与 pump（心跳 BuildProtoBody
+// bindings）两侧读者。执行器写方替换顶层切片（SetPath 单段=整体替换）时，pump 读者持有
+// 的旧副本仍自洽；拷贝在读锁内完成，与写入互斥。元素为浅拷贝（嵌套容器仍共享底层），
+// 调用方对返回值只做只读遍历/随机选取。低频调用，拷贝开销可忽略。
 func (s *Store) GetList(key string) []any {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -112,7 +123,7 @@ func (s *Store) GetList(key string) []any {
 
 // GetMap 获取映射的顶层浅拷贝副本。
 //
-// 返回副本而非内部引用，原因同 GetList：避免与 SetPath 的并发就地写导致致命崩溃。
+// 保留顶层浅拷贝，原因同 GetList（双侧读者、低频调用）。
 // 拷贝在读锁内完成；值为浅拷贝（嵌套容器仍共享），调用方只做只读访问。
 func (s *Store) GetMap(key string) map[string]any {
 	s.mu.RLock()
@@ -483,8 +494,8 @@ func (s *Store) GetPath(path string) any {
 		return nil
 	}
 	// 全程持 RLock 导航：与其它 reader 的锁纪律一致。navigateValue 逐段裸读嵌套 map/list，
-	// 若不在锁内，与 pump 侧已加锁的写方（listen 回调 SetPath / 心跳 Increment 就地改同一张
-	// 嵌套 map）并发时会触发 concurrent map read and map write 致命崩溃。
+	// 若不在锁内，与已加锁的写方（pump 侧心跳 IncrementInt64 写顶层槽 / 执行器 SetPath）
+	// 并发时会触发 concurrent map read and map write 致命崩溃。
 	// 直接读 s.data 而非调 s.Get：避免同一 goroutine 递归 RLock，在写者等待时可能死锁。
 	// navigateValue 只做类型断言 + 索引/取键，不回调 Store，锁内执行无重入风险。
 	s.mu.RLock()
@@ -505,32 +516,12 @@ func (s *Store) GetPath(path string) any {
 		}
 		cur = navigateValue(cur, segments[i])
 	}
-	// 命中容器（map/slice）时返回深拷贝快照：GetPath 的结果会被 goValueToLua 等调用方在锁外
-	// 递归遍历，若返回内部引用，则与 pump goroutine 的 Go-store listen 回调 SetPath 就地改写
-	// 同一（嵌套）容器并发时会触发 concurrent map/slice 读写致命崩溃。深拷贝在读锁内完成，
-	// 与写入互斥、快照自洽；标量零拷贝直接返回（热路径 bindings/条件求值取叶子值不受影响）。
-	return deepCopyValue(cur)
-}
-
-// deepCopyValue 递归深拷贝 map[string]any / []any 容器，标量原样返回。
-// 供 GetPath 切断返回值与 Store 内部结构的别名（见 GetPath 注释）。
-func deepCopyValue(v any) any {
-	switch c := v.(type) {
-	case map[string]any:
-		out := make(map[string]any, len(c))
-		for k, vv := range c {
-			out[k] = deepCopyValue(vv)
-		}
-		return out
-	case []any:
-		out := make([]any, len(c))
-		for i, vv := range c {
-			out[i] = deepCopyValue(vv)
-		}
-		return out
-	default:
-		return v
-	}
+	// 命中容器（map/slice）时直接返回内部引用（别名），不再深拷贝（P1b）：
+	// GetPath 的调用方（robot.get_path→goValueToLua / cond_parser 条件求值）全部在执行器
+	// goroutine，而嵌套容器的唯一写方也是执行器自身（Go-store 监听已改投任务队列）——
+	// 自己读自己写无并发，别名安全。pump 侧仅做顶层标量访问，不会遍历此别名。
+	// 深拷贝曾是 pump 就地写年代的护栏，单写方化后成为纯 churn（GC 压力），故删除。
+	return cur
 }
 
 // navigateValue 从单个值中按一段路径提取子值。

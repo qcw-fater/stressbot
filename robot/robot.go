@@ -1019,8 +1019,8 @@ func parseServer(server string) (proto, service string, ok bool) {
 //   - cbDef.Script 配置：协作式 listen 脚本回调。返回的闭包在 pump goroutine 内只复制消息
 //   - 投递 Robot 任务队列；Lua on_message 由执行器 goroutine 在节点边界串行执行（见
 //     runListenScript），绝不在 pump 内碰业务 LState。
-//   - cbDef.S2CProto 与 cbDef.Store 均配置：返回 Go 闭包，按 proto 解析后写 state（纯 Go，
-//     pump goroutine 内安全执行）。
+//   - cbDef.S2CProto 与 cbDef.Store 均配置：返回 Go 闭包，pump 内解析（含广播去重）并
+//     物化待写值，state 写入投递 Robot 任务队列由执行器 goroutine 执行（P1b 单写方）。
 //   - 否则（纯缓存 listen，如 frameData）：返回 nil，消息仅入 listen queue 供主流程消费。
 //
 // store 与 script 互斥由 validateListenDef 在注册前 fail-loud 保证，故此处分支无歧义。
@@ -1054,6 +1054,7 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 			monitor.Global().RecordCallback(cbName, monitor.ResultSuccess, monitor.ActionTiming{}, time.Since(start), 0, msg.WireBytes, nil)
 			return
 		}
+		wireBytes := msg.WireBytes
 
 		// 大消息走广播去重（protox.FrozenCache）：同一条广播（字节相同）全进程只解码
 		// 一份、全部机器人共享同一个不可变 *Frozen——留存塌缩为单份，命中时解码本身
@@ -1091,18 +1092,42 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 		// 路径读取经 state.PathNavigator 惰性取值，Lua robot.get 在边界现场转真 table。
 		// 不可变契约：独占解码的 respMsg 存入后无写方；共享 Frozen 由 P1a 契约保证
 		// 全程只读，两种来源均满足 Freeze 要求。
+		//
+		// P1b 单写方化：取值仍在 pump（读消息只读、产物为新建容器/不可变引用，跨
+		// goroutine 移交所有权安全），SetPath 改投执行器任务队列——state 嵌套容器的
+		// 写方由此收敛为执行器 goroutine 单点（state.Store 免深拷贝读的前提契约）。
+		// pump 不再持有对 msg 的引用，闭包只带物化后的键值对。
+		puts := make([]storePut, 0, len(cbDef.Store))
 		for _, m := range cbDef.Store {
 			if m.Field == "" {
 				if frozen == nil {
 					frozen = protox.Freeze(respMsg)
 				}
-				h.robot.state.SetPath(m.Setter, frozen)
+				puts = append(puts, storePut{setter: m.Setter, value: frozen})
 			} else if val, ok := h.robot.factory.GetFieldForStore(respMsg, m.Field); ok {
-				h.robot.state.SetPath(m.Setter, val)
+				puts = append(puts, storePut{setter: m.Setter, value: val})
 			}
 		}
-		monitor.Global().RecordCallback(cbName, monitor.ResultSuccess, monitor.ActionTiming{}, time.Since(start), 0, msg.WireBytes, nil)
+		h.robot.sched.enqueue(pendingTask{
+			name: cbName,
+			exec: func() {
+				if h.robot.ctx.Err() != nil {
+					return
+				}
+				for _, p := range puts {
+					h.robot.state.SetPath(p.setter, p.value)
+				}
+				// 时长含队列等待：反映"推送到达 → 状态可见"的真实延迟（解析在 pump 已完成）。
+				monitor.Global().RecordCallback(cbName, monitor.ResultSuccess, monitor.ActionTiming{}, time.Since(start), 0, wireBytes, nil)
+			},
+		})
 	}
+}
+
+// storePut Go-store 监听回调物化出的单条待写键值（pump 取值 → 执行器 SetPath）。
+type storePut struct {
+	setter string
+	value  any
 }
 
 // runListenScript 在执行器 goroutine（业务 LState 唯一所有者）内执行一条 listen 脚本回调。
@@ -1119,7 +1144,19 @@ func (h *robotActionHandler) runListenScript(cbName string, cbDef *engine.Listen
 
 	var runErr error
 	if cbDef.S2CProto != "" && len(msg.Data) > 0 {
-		respMsg, perr := h.robot.factory.Parse(cbDef.S2CProto, msg.Data)
+		// 大消息走广播去重（同 Go-store / await_listen 路径）：RunListenScript 只做
+		// 只读的整表 Lua 化，消息本体不逃逸，共享解码结果安全。
+		var respMsg proto.Message
+		var perr error
+		if len(msg.Data) >= protox.DedupMinBytes {
+			var frozen *protox.Frozen
+			frozen, perr = h.robot.factory.ParseFrozenShared(cbDef.S2CProto, msg.Data)
+			if perr == nil {
+				respMsg = frozen.Message()
+			}
+		} else {
+			respMsg, perr = h.robot.factory.Parse(cbDef.S2CProto, msg.Data)
+		}
 		if perr != nil {
 			cbErr := engine.NewActionError(errcode.ErrCallbackParse, "proto="+cbDef.S2CProto, perr)
 			stresslog.Error("[ROBOT] 解析监听推送失败",

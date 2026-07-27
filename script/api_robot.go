@@ -433,8 +433,13 @@ func luaToGoValue(v lua.LValue) any {
 		return m
 	case lua.LTUserData:
 		if ud, ok := v.(*lua.LUserData); ok {
-			if pm, ok := ud.Value.(proto.Message); ok {
-				return pm
+			switch m := ud.Value.(type) {
+			case *protox.Frozen:
+				// 共享只读消息：robot.set 存 Frozen 引用本身（与 P1a 整存形态一致，
+				// state 免展开、跨机器人共享零拷贝，路径读取走 PathNavigator 惰性取值）。
+				return m
+			case proto.Message:
+				return m
 			}
 		}
 		return nil
