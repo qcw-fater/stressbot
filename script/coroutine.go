@@ -1,7 +1,6 @@
 package script
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -81,25 +80,37 @@ type Waiter interface {
 	Await(spec *WaitSpec) (WaitOutcome, error)
 }
 
-// coroutine 封装一次 Lua 脚本执行的子线程协程（action 脚本 execute 或 listen 回调 on_message）。
+// coroutine 封装一次 Lua 脚本任务（action 脚本 execute 或 listen 回调 on_message）
+// 在长驻蹦床 thread（P2，见 trampoline.go）上的执行。
 type coroutine struct {
-	parent   *lua.LState        // 创建该线程的父 LState（= Robot 独占 LState），Resume 的接收者
-	thread   *lua.LState        // 子线程，脚本在其上运行
-	cancel   context.CancelFunc // NewThread 派生的子 ctx 的取消函数，结束时必须调用以释放
-	fn       *lua.LFunction     // 入口函数（execute / on_message）
-	initArgs []lua.LValue       // 首次 Resume 喂入的入口实参（如 robot 句柄、msg）
-	started  bool               // 是否已首次 Resume
-	name     string             // 脚本名（日志/错误）
+	parent   *lua.LState    // Robot 独占的根 LState，Resume 的接收者
+	tramp    *trampThread   // 承载本任务的长驻蹦床 thread（缓存复用或新建）
+	trampFn  *lua.LFunction // 蹦床主函数（bootstrap Resume 用）
+	sentinel *lua.LUserData // DONE 哨兵（任务完成 yield 的首值，指针相等判定）
+	ctx      *Context       // 收尾时归还 thread 缓存的目的地（nil = 直接弃用）
+	fn       *lua.LFunction // 入口函数（execute / on_message）
+	initArgs []lua.LValue   // 任务实参（execute(r) → [r]；on_message(r,msg) → [r,msg]）
+	started  bool           // 本任务是否已投递（首次 Resume 已完成）
+	doneOK   bool           // 以 DONE-yield 干净收尾（thread 停在蹦床顶部，可归还）
+	name     string         // 脚本名（日志/错误）
 }
 
+// close 按收尾状态处置 thread：干净完成 → 归还缓存复用；
+// 错误/裸 yield/await 中途放弃（栈停在半途）→ 弃用（下次惰性重建）。
 func (co *coroutine) close() {
-	if co != nil && co.cancel != nil {
-		co.cancel()
+	if co == nil || co.tramp == nil {
+		return
 	}
+	if co.doneOK {
+		releaseTrampThread(co.ctx, co.tramp)
+	} else {
+		co.tramp.stop()
+	}
+	co.tramp = nil
 }
 
-// startCoroutine 加载脚本指定入口函数并创建子线程协程（尚未 Resume）。
-// initArgs 为首次 Resume 喂入入口的实参（execute(r) → [r]；on_message(r,msg) → [r,msg]）。
+// startCoroutine 加载脚本指定入口函数并把任务绑定到一条蹦床 thread（尚未 Resume）。
+// initArgs 为任务实参（execute(r) → [r]；on_message(r,msg) → [r,msg]）。
 func (rp *RuntimePool) startCoroutine(L *lua.LState, scriptName, entry string, initArgs ...lua.LValue) (*coroutine, error) {
 	fnv, err := rp.loadScriptFn(L, scriptName, entry)
 	if err != nil {
@@ -109,8 +120,21 @@ func (rp *RuntimePool) startCoroutine(L *lua.LState, scriptName, entry string, i
 	if !ok {
 		return nil, fmt.Errorf("脚本 %s 的 %s 不是函数", scriptName, entry)
 	}
-	thread, cancel := L.NewThread()
-	return &coroutine{parent: L, thread: thread, cancel: cancel, fn: fn, initArgs: initArgs, name: scriptName}, nil
+	trampFn, err := rp.trampMainFn(L)
+	if err != nil {
+		return nil, err
+	}
+	ctx := GetContext(L)
+	return &coroutine{
+		parent:   L,
+		tramp:    acquireTrampThread(L, ctx),
+		trampFn:  trampFn,
+		sentinel: trampSentinel(L),
+		ctx:      ctx,
+		fn:       fn,
+		initArgs: initArgs,
+		name:     scriptName,
+	}, nil
 }
 
 // startActionCoroutine 加载脚本 execute 入口（实参为 robot 句柄）并创建协程。
@@ -126,15 +150,52 @@ type resumeResult struct {
 	wait    *WaitSpec    // 未结束时 yield 出的等待规格
 }
 
-// resumeCoroutine 推进一次协程：首次喂入 co.initArgs（如 execute(r) / on_message(r,msg)），
-// 后续喂入 await 返回值。
+// resumeCoroutine 推进一次任务：首次投递任务（bootstrap 喂 (sentinel, fn, args...)，
+// 复用 thread 则 handoff 喂 (fn, args...)），后续喂入 await 返回值。
 //
-// 在 Resume 前把 ctx.topThread 置为本协程线程，供 await_* 运行时校验顶层协程身份。
-// 该字段每次 resume 前重设，故协作式嵌套（回调 await 期间 drain 出另一回调）也能正确归位。
-func (rp *RuntimePool) resumeCoroutine(co *coroutine, ctx *Context, resumeVals []lua.LValue) (resumeResult, error) {
+// 在 Resume 前把 ctx.topThread 置为本任务的蹦床线程，供 await_* 运行时校验顶层协程
+// 身份。该字段每次 resume 前重设，故协作式嵌套（回调 await 期间 drain 出另一回调）
+// 也能正确归位。
+//
+// ResumeYield 三分支判定（顺序即优先级）：
+//  1. 首值 == DONE 哨兵 → 任务完成，thread 停在蹦床顶部（close() 归还复用）；
+//  2. 含 WaitSpec → await_*，走 Waiter 协作式等待（协议与蹦床化前完全一致）；
+//  3. 其他 → 脚本裸 coroutine.yield，fail-loud，thread 栈停在脚本内部（close() 弃用）。
+func (rp *RuntimePool) resumeCoroutine(co *coroutine, ctx *Context, resumeVals []lua.LValue) (res resumeResult, retErr error) {
 	if ctx != nil {
-		ctx.topThread = co.thread
+		ctx.topThread = co.tramp.thread
 	}
+
+	// panic 兜底：腐坏协程的 panic 会穿透 Resume 边界。典型场景是 await_* 被 pcall 吞掉——
+	// gopher-lua 的 yield 被 pcall 的 Go 递归 mainLoop 拦截后，线程已腐坏（Parent 被清空、
+	// WaitSpec 被推到父栈、执行却继续），随后蹦床的 DONE-yield 在腐坏线程上触发
+	// "can not yield from outside of a coroutine" panic 并穿出 Resume（蹦床化前该腐坏
+	// "恰好"表现为 ResumeOK 带出 WaitSpec，由下方 default 分支拦截；蹦床多了一次 yield，
+	// 表现升级为 panic，故必须在此兜住）。恢复动作：按父栈残留判定场景还原精确错误、
+	// 清理父栈，doneOK 保持 false → close() 弃用该线程。
+	savedTop := co.parent.GetTop()
+	defer func() {
+		if rcv := recover(); rcv != nil {
+			swallowed := false
+			for i := savedTop + 1; i <= co.parent.GetTop(); i++ {
+				if ud, ok := co.parent.Get(i).(*lua.LUserData); ok {
+					if _, isSpec := ud.Value.(*WaitSpec); isSpec {
+						swallowed = true
+						break
+					}
+				}
+			}
+			co.parent.SetTop(savedTop) // 清掉吞 yield 在父栈上的残留，父 LState 可继续使用
+			res = resumeResult{done: true}
+			if swallowed {
+				retErr = fmt.Errorf(
+					"脚本 %s 的 await_* 被 pcall/coroutine 吞掉（yield 未到达调度器）；"+
+						"await_* 只能在动作脚本顶层直接调用，不可置于 pcall/xpcall 或 coroutine.create 内", co.name)
+			} else {
+				retErr = fmt.Errorf("执行脚本 %s 时协程 panic: %v", co.name, rcv)
+			}
+		}
+	}()
 
 	var (
 		st   lua.ResumeState
@@ -143,34 +204,63 @@ func (rp *RuntimePool) resumeCoroutine(co *coroutine, ctx *Context, resumeVals [
 	)
 	if !co.started {
 		co.started = true
-		st, err, vals = co.parent.Resume(co.thread, co.fn, co.initArgs...)
+		if !co.tramp.booted {
+			// bootstrap：蹦床主函数首次进入，实参 (sentinel, fn, args...)。
+			co.tramp.booted = true
+			args := make([]lua.LValue, 0, len(co.initArgs)+2)
+			args = append(args, lua.LValue(co.sentinel), lua.LValue(co.fn))
+			args = append(args, co.initArgs...)
+			st, err, vals = co.parent.Resume(co.tramp.thread, co.trampFn, args...)
+		} else {
+			// handoff：thread 停在蹦床顶部的 yield 处，喂入 (fn, args...) 作为其返回值。
+			args := make([]lua.LValue, 0, len(co.initArgs)+1)
+			args = append(args, lua.LValue(co.fn))
+			args = append(args, co.initArgs...)
+			st, err, vals = co.parent.Resume(co.tramp.thread, nil, args...)
+		}
 	} else {
-		st, err, vals = co.parent.Resume(co.thread, nil, resumeVals...)
+		st, err, vals = co.parent.Resume(co.tramp.thread, nil, resumeVals...)
 	}
 
 	switch st {
 	case lua.ResumeError:
+		// 蹦床内无 pcall，脚本错误直接穿出 → thread 已死，close() 走弃用路径。
 		return resumeResult{done: true}, fmt.Errorf("执行脚本 %s 失败: %w", co.name, err)
 	case lua.ResumeYield:
-		spec := extractWaitSpec(vals)
-		if spec == nil {
-			return resumeResult{done: true}, fmt.Errorf(
-				"脚本 %s 非法 yield：仅允许经 await_* API 让出（不可直接 coroutine.yield）", co.name)
+		// 分支 1：DONE 哨兵 → 任务完成，vals[1:] 为脚本返回值。
+		if len(vals) > 0 {
+			if ud, ok := vals[0].(*lua.LUserData); ok && ud == co.sentinel {
+				rets := vals[1:]
+				// 静默陷阱拦截：await_* 被 pcall 吞掉时 WaitSpec 会成为脚本"返回值"带出。
+				if extractWaitSpec(rets) != nil {
+					return resumeResult{done: true}, fmt.Errorf(
+						"脚本 %s 的 await_* 被 pcall/coroutine 吞掉（yield 未到达调度器）；"+
+							"await_* 只能在动作脚本顶层直接调用，不可置于 pcall/xpcall 或 coroutine.create 内", co.name)
+				}
+				co.doneOK = true
+				var ret lua.LValue = lua.LNil
+				if len(rets) > 0 {
+					ret = rets[0]
+				}
+				return resumeResult{done: true, ret: ret, retVals: rets}, nil
+			}
 		}
-		return resumeResult{wait: spec}, nil
-	default: // ResumeOK：协程结束
-		// 静默陷阱拦截：await_* 被 pcall 吞掉时，协程以 OK 结束并把 WaitSpec 当返回值带出。
+		// 分支 2：await_*。
+		if spec := extractWaitSpec(vals); spec != nil {
+			return resumeResult{wait: spec}, nil
+		}
+		// 分支 3：裸 yield。
+		return resumeResult{done: true}, fmt.Errorf(
+			"脚本 %s 非法 yield：仅允许经 await_* API 让出（不可直接 coroutine.yield）", co.name)
+	default: // ResumeOK：蹦床主函数退出——蹦床是无限循环，正常不可达，仅异常路径。
+		// 静默陷阱拦截：await_* 被 pcall 吞掉且把整个协程终结时，WaitSpec 随返回值带出。
 		if spec := extractWaitSpec(vals); spec != nil {
 			_ = spec
 			return resumeResult{done: true}, fmt.Errorf(
 				"脚本 %s 的 await_* 被 pcall/coroutine 吞掉（yield 未到达调度器）；"+
 					"await_* 只能在动作脚本顶层直接调用，不可置于 pcall/xpcall 或 coroutine.create 内", co.name)
 		}
-		var ret lua.LValue = lua.LNil
-		if len(vals) > 0 {
-			ret = vals[0]
-		}
-		return resumeResult{done: true, ret: ret, retVals: vals}, nil
+		return resumeResult{done: true}, fmt.Errorf("脚本 %s 蹦床协程异常退出（协程被外部终结）", co.name)
 	}
 }
 

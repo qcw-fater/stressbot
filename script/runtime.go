@@ -71,6 +71,12 @@ type Context struct {
 	// 协程）即 fail-loud。仅执行器 goroutine 单线程读写，无需加锁。
 	topThread *lua.LState
 
+	// trampThreads 本 Robot 的长驻蹦床协程空闲缓存（P2，见 trampoline.go）：
+	// 任务以 DONE-yield 干净收尾的 thread 停在栈顶回到这里复用，消除每次脚本执行
+	// NewThread 的 registry/调用栈分配炒翻。仅执行器 goroutine 访问，无需加锁；
+	// Robot 归还 LState（RuntimePool.Release）时统一关闭。
+	trampThreads []*trampThread
+
 	metricsMu        sync.Mutex
 	currentTiming    engine.ActionTiming
 	currentSendBytes int
@@ -170,6 +176,7 @@ type RuntimePool struct {
 	pool        sync.Pool
 	precompiled map[string]*lua.FunctionProto // scriptName -> 预编译函数
 	scriptDir   string                        // 脚本根目录
+	trampProto  *lua.FunctionProto            // 蹦床 chunk（P2，进程级编译一次）
 }
 
 // NewRuntimePool 创建 Lua 运行时池
@@ -177,6 +184,7 @@ func NewRuntimePool(scriptDir string) *RuntimePool {
 	rp := &RuntimePool{
 		precompiled: make(map[string]*lua.FunctionProto),
 		scriptDir:   scriptDir,
+		trampProto:  compileTrampoline(),
 	}
 	rp.pool.New = func() any {
 		// 默认 lua.NewState 会预分配 RegistrySize(5120) 的数据栈和 CallStackSize(256)
@@ -205,6 +213,11 @@ func (rp *RuntimePool) Acquire() *lua.LState {
 // Release 将 LState 归还到池中。
 // 调用前应清除绑定的 Context。
 func (rp *RuntimePool) Release(L *lua.LState) {
+	// 关闭本 Robot 的蹦床协程缓存：缓存的 thread 持有从当前 Robot ctx 派生的子 ctx，
+	// 不可带给池内下一个 Robot（thread 本体交给 GC）。
+	if ctx := GetContext(L); ctx != nil {
+		ctx.closeTrampThreads()
+	}
 	// 清除脚本上下文
 	L.SetField(L.Get(lua.RegistryIndex), registryCtxKey, lua.LNil)
 	// 清理本次 Robot 在脚本运行期写入全局表的"运行时全局"，避免被池内下一个 Robot
