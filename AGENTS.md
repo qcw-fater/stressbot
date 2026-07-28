@@ -137,6 +137,18 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 - 前端 UI 文本禁止暴露技术术语（Agent→节点、Admin→服务器、IDB→本地存储）。
 - 数据库只用逻辑外键，不用 FOREIGN KEY，级联删除由应用层处理。
 
+## 内存优化约束与已证实结论（2026-07 压测调优）
+
+**硬约束**：
+- 业务脚本（`conf/scripts/*.lua`）的**逻辑不可改**——包括"存哪些数据"（不允许按访问面裁剪留存字段）；**用法可以改**（等价 API 替换），但必须保持语义与留存数据集合不变。
+- 不设置 `GOMEMLIMIT` 等运行时环境变量作为"架构方案"（可作为运维手段单独讨论）。
+
+**已被线上剖面证实的结论**（勿重复尝试）：
+- 把 `playerData`（`LoginPlayerDataS2C`，map/repeated 重度、每机器人独有）从"get_field_map 展开 map 存储"改为"存 `protox.Frozen` 解码消息引用"是**净退化**：同相位对比 live +217MB @5000 人（dynamicpb 每条目固定开销 ≥ `map[string]any` 装箱）。已还原。
+- 每机器人独有的大消息，任何**解码态**表示（dynamicpb / Go map / Lua table）都 ~600KB/机器人；唯一小一个数量级的形态是 **wire 字节本身**（约 1/5~1/10）。要压这块只能走"持字节 + 按需 wire 扫描解码"的惰性视图。
+- 广播类消息（同内容多接收方）用内容寻址去重（`protox.FrozenCache`）有效；去重缓存体积上界必须按**解码体积估算**计（`estimateDecodedCost`），按原始字节计会钉住 ~50 倍的解码树。独占推送（动作响应）不得进去重缓存（污染+换血）。
+- Lua 线程用 trampoline 长驻复用（`script/trampoline.go`）后，`newLState/newRegistry` churn 已消除；`RSS ≈ 2× live` 是 GOGC=100 的正常余量，压 RSS 先压 live。
+
 ## 验证流程
 
 每次对代码进行修改后，按以下步骤验证：
