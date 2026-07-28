@@ -174,3 +174,106 @@ func TestFrozenStateIntegration(t *testing.T) {
 		t.Fatalf("NavigatePath(fz, main.id)=%#v want int64(7)", got)
 	}
 }
+
+// TestFrozenShallowMap 校验 ShallowMap 的浅层物化形态：
+// 键集合与 messageToMap 一致（同跳过规则），值物化后逐字等价，
+// 嵌套 message 保持 *Frozen 引用（不递归展开）。
+func TestFrozenShallowMap(t *testing.T) {
+	f := newStoreTestFactory(t)
+	bag := buildStoreTestBag(t, f)
+	fz := Freeze(bag)
+
+	shallow := fz.ShallowMap()
+	full := messageToMap(bag.ProtoReflect())
+
+	if len(shallow) != len(full) {
+		t.Fatalf("键数不一致：ShallowMap=%d messageToMap=%d", len(shallow), len(full))
+	}
+	for k, want := range full {
+		got, ok := shallow[k]
+		if !ok {
+			t.Errorf("键 %q 缺失", k)
+			continue
+		}
+		if !reflect.DeepEqual(materializeFrozen(got), want) {
+			t.Errorf("键 %q: ShallowMap(物化)=%#v want %#v", k, materializeFrozen(got), want)
+		}
+	}
+
+	// 嵌套 message 为 *Frozen（惰性），标量为原值
+	if _, isFrozen := shallow["main"].(*Frozen); !isFrozen {
+		t.Fatalf("main 应为 *Frozen，实际 %T", shallow["main"])
+	}
+	if shallow["uid"] != int64(42) {
+		t.Fatalf("uid=%#v want int64(42)", shallow["uid"])
+	}
+	// 未设置 message 不出现
+	if _, ok := shallow["empty"]; ok {
+		t.Fatal("未设置的 empty 不应出现在 ShallowMap 中")
+	}
+
+	// nil 安全
+	if got := (*Frozen)(nil).ShallowMap(); len(got) != 0 {
+		t.Fatalf("nil Frozen 的 ShallowMap 应为空 map，实际 %#v", got)
+	}
+}
+
+// TestFrozenSetPathCOW 校验整存 Frozen 后的嵌套路径写入（写时物化）：
+// 只物化写路径书脊，兄弟子树保留 Frozen 引用共享，底层消息不被改写。
+func TestFrozenSetPathCOW(t *testing.T) {
+	f := newStoreTestFactory(t)
+	bag := buildStoreTestBag(t, f)
+	fz := Freeze(bag)
+
+	st := state.NewStore()
+	st.Set("playerData", fz)
+
+	// 二级路径写入：顶层 Frozen 物化为 map，main 物化为 map，id 改写
+	st.SetPath("playerData.main.id", int64(99))
+
+	if got := st.GetPath("playerData.main.id"); got != int64(99) {
+		t.Fatalf("main.id=%#v want int64(99)", got)
+	}
+	// 同级未写字段保留（main.name 默认 ""）
+	if got := st.GetPath("playerData.main.name"); got != "" {
+		t.Fatalf("main.name=%#v want \"\"", got)
+	}
+	// 兄弟子树保留且仍可导航
+	if got := st.GetPath("playerData.uid"); got != int64(42) {
+		t.Fatalf("uid=%#v want int64(42)（COW 不应清掉兄弟字段）", got)
+	}
+	if got := st.GetPath("playerData.items[1].name"); got != "y" {
+		t.Fatalf("items[1].name=%#v want \"y\"", got)
+	}
+	// 底层共享消息未被改写（COW 隔离：可能被去重缓存共享给其他机器人）
+	if v, err := f.GetField(bag, "main.id"); err != nil || v != int64(7) {
+		t.Fatalf("底层消息 main.id=(%#v,%v) want (7,nil)——COW 不得改写共享消息", v, err)
+	}
+
+	// 顶层已替换为可变 map，且未触碰的嵌套 message 仍是 *Frozen（无级联展开）
+	top, ok := st.Get("playerData").(map[string]any)
+	if !ok {
+		t.Fatalf("playerData 应已物化为 map[string]any，实际 %T", st.Get("playerData"))
+	}
+	if _, isFrozen := top["shelf"].(map[string]any)["s1"].(*Frozen); !isFrozen {
+		t.Fatalf("shelf.s1 应保持 *Frozen 引用，实际 %T", top["shelf"].(map[string]any)["s1"])
+	}
+
+	// 列表元素内的写入：[N] 段导航到 *Frozen 元素后同样物化
+	st.SetPath("playerData.items[0].id", int64(100))
+	if got := st.GetPath("playerData.items[0].id"); got != int64(100) {
+		t.Fatalf("items[0].id=%#v want int64(100)", got)
+	}
+	if got := st.GetPath("playerData.items[0].name"); got != "x" {
+		t.Fatalf("items[0].name=%#v want \"x\"（元素物化不应丢兄弟字段）", got)
+	}
+	if _, isFrozen := top["items"].([]any)[1].(*Frozen); !isFrozen {
+		t.Fatalf("items[1] 应保持 *Frozen，实际 %T", top["items"].([]any)[1])
+	}
+
+	// 终端整体覆盖：目标位置是 Frozen 时直接替换（不物化终端）
+	st.SetPath("playerData.main", "replaced")
+	if got := st.GetPath("playerData.main"); got != "replaced" {
+		t.Fatalf("main=%#v want \"replaced\"", got)
+	}
+}

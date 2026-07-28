@@ -28,7 +28,7 @@ type Factory struct {
 func NewFactory(registry *Registry) *Factory {
 	return &Factory{
 		registry:    registry,
-		frozenCache: NewFrozenCache(dedupMaxEntries, dedupMaxBytes),
+		frozenCache: NewFrozenCache(dedupMaxEntries, dedupMaxCost),
 	}
 }
 

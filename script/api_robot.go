@@ -125,7 +125,7 @@ func robotSet(L *lua.LState) int {
 	}
 
 	key := lua.LVAsString(L.Get(base))
-	value := luaToGoValue(L.Get(base + 1))
+	value := luaToGoStoreValue(L.Get(base + 1))
 	ctx.Store.Set(key, value)
 	return 0
 }
@@ -257,7 +257,7 @@ func robotSetPath(L *lua.LState) int {
 		return 0
 	}
 	path := lua.LVAsString(L.Get(base))
-	value := luaToGoValue(L.Get(base + 1))
+	value := luaToGoStoreValue(L.Get(base + 1))
 	ctx.Store.SetPath(path, value)
 	return 0
 }
@@ -381,6 +381,23 @@ func goValueToLua(L *lua.LState, val any) lua.LValue {
 	default:
 		return lua.LString(fmt.Sprintf("%v", val))
 	}
+}
+
+// luaToGoStoreValue 是 robot.set / robot.set_path 专用的入口转换：与 luaToGoValue
+// 唯一的差别是 proto 消息 userdata 存为不可变 *protox.Frozen 引用而非裸消息——
+// 裸消息在 state 里无法路径导航，Frozen 走 PathNavigator 惰性取值、SetPath 写时物化
+// （COW），且免去 get_field_map 整树展开常驻（LoginPlayerDataS2C × 数千机器人 = GB 级）。
+//
+// 语义注意：存表是快照（深转换），存消息是**引用**——脚本此后对同一消息 userdata 调
+// proto.set_field 会直接反映到 state（读到新值）。现有脚本无"set 后继续改写原消息"
+// 的用法；proto.set_field 仍走 luaToGoValue，消息作为字段值的合法用例不受影响。
+func luaToGoStoreValue(v lua.LValue) any {
+	if ud, ok := v.(*lua.LUserData); ok {
+		if msg, ok := ud.Value.(proto.Message); ok {
+			return protox.Freeze(msg)
+		}
+	}
+	return luaToGoValue(v)
 }
 
 // luaToGoValue 将 Lua 值转换为 Go 值

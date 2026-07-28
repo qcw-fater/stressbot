@@ -43,6 +43,35 @@ func (fz *Frozen) Message() proto.Message {
 	return fz.msg
 }
 
+// ShallowMap 把冻结消息浅层物化为 map[string]any，实现 state.PathMaterializer，
+// 供 SetPath 写时物化（COW）：脚本对整存键做嵌套路径写入时，只把写路径书脊上的
+// 节点物化为可变 map，未触碰的兄弟子树保持子 *Frozen 引用（共享底层消息，零展开）。
+//
+// 字段规则与 messageToMap 逐字一致（键 = fd.Name()；保留 proto3 标量/枚举默认值；
+// 跳过未设置的 message 与空 repeated/map），差别仅在值的表示是惰性的
+// （同 frozenFieldValue：嵌套 message → 子 *Frozen，repeated/map 浅层物化）。
+// 产出容器为现场新建，调用方（state 写锁内）可安全持有与改写。
+func (fz *Frozen) ShallowMap() map[string]any {
+	if fz == nil || fz.msg == nil {
+		return map[string]any{}
+	}
+	ref := fz.msg.ProtoReflect()
+	fields := ref.Descriptor().Fields()
+	out := make(map[string]any, fields.Len())
+	for i := 0; i < fields.Len(); i++ {
+		fd := fields.Get(i)
+		// 复刻 messageToMap 跳过规则：未设置的 message、空 repeated/map 不进展开树。
+		if fd.Kind() == protoreflect.MessageKind && !fd.IsList() && !fd.IsMap() && !ref.Has(fd) {
+			continue
+		}
+		if (fd.IsList() || fd.IsMap()) && !ref.Has(fd) {
+			continue
+		}
+		out[string(fd.Name())] = frozenFieldValue(fd, ref.Get(fd))
+	}
+	return out
+}
+
 // NavigateSegs 在冻结消息上按已拆分的路径段惰性取值，实现 state.PathNavigator。
 // 路径存在性语义与 navigatePath(GetFieldMap(msg), segs) 逐字一致（复刻 messageToMap
 // 的跳过规则：未设置的 message、空 repeated/map 视为不存在；类型不匹配返回未找到），

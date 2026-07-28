@@ -5,6 +5,9 @@ import (
 	"container/list"
 	"hash/maphash"
 	"sync"
+
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // ── 广播去重：内容寻址的共享 Frozen 缓存 ─────────────────────────
@@ -34,23 +37,30 @@ const (
 	// 不值得哈希 + 快照；大消息（广播配置类）才是重复留存的主体。
 	DedupMinBytes = 1024
 
-	// dedupMaxEntries / dedupMaxBytes 缓存双上界。字节上界按**原始消息体**计
-	//（解码后消息约为原始的 2-4 倍，Frozen 被缓存钉住的解码体上界随之有界）。
-	// 除全局广播（配置类，相异内容几十种）外，listen/监听脚本接入后还需容纳
-	// 按场次相异的对局广播（MatchSucceedS2C / BattleStartLoadingS2C：2000 人 ÷ 60 人/场
-	// ≈ 33 并发场 × 2 类 × 数百 KB）。256 条 / 64MB 覆盖两类负载，仍是有界小头。
+	// dedupMaxEntries / dedupMaxCost 缓存双上界。
+	//
+	// 体积上界按**解码后体积估算**计（estimateDecodedCost），不按原始字节：
+	// map/repeated 重度消息（MatchSucceedS2C 携带的 PlayerGameInfo 等）的 dynamicpb
+	// 解码树实测可达原始字节的 ~50 倍——按原始字节设界（旧 64MB）时缓存满载可钉住
+	// GB 级解码树，其中大半是已被全部接收方消费完、纯等 LRU 驱逐的对局广播（线上
+	// 020→022 剖面证实）。改按解码估算后钉住量直接有界于 dedupMaxCost。
+	//
+	// 命中周期长的条目（商城配置：每机器人登录都命中）被 LRU 天然保护；
+	// 被挤出的主要是一次性对局广播（6 个接收方毫秒级消费完毕，无需长驻）。
 	dedupMaxEntries = 256
-	dedupMaxBytes   = 64 << 20
+	dedupMaxCost    = 256 << 20
 )
 
 var dedupSeed = maphash.MakeSeed()
 
 // dedupEntry 一条缓存记录。raw 是消息体的独立快照（pump 会复用网络缓冲区底层数组，
 // 不能直接留存入参切片），同时充当碰撞防御的比对基准。
+// cost 是解码树的常驻体积估算（estimateDecodedCost），缓存体积上界按它累计。
 type dedupEntry struct {
 	protoName string
 	raw       []byte
 	frozen    *Frozen
+	cost      int
 	elem      *list.Element // 在 lru 中的位置（Value 指回本 entry）
 }
 
@@ -59,21 +69,21 @@ type FrozenCache struct {
 	mu         sync.Mutex
 	buckets    map[uint64][]*dedupEntry // hash → 碰撞链（几乎恒为单元素）
 	lru        *list.List               // Front = 最近使用
-	curBytes   int
+	curCost    int                      // Σ entry.cost（解码体积估算）
 	maxEntries int
-	maxBytes   int
+	maxCost    int
 	hits       uint64
 	misses     uint64
 	evictions  uint64
 }
 
-// NewFrozenCache 创建缓存。maxEntries/maxBytes 任一超限即从 LRU 尾部驱逐。
-func NewFrozenCache(maxEntries, maxBytes int) *FrozenCache {
+// NewFrozenCache 创建缓存。maxEntries/maxCost（解码体积估算）任一超限即从 LRU 尾部驱逐。
+func NewFrozenCache(maxEntries, maxCost int) *FrozenCache {
 	c := &FrozenCache{
 		buckets:    make(map[uint64][]*dedupEntry),
 		lru:        list.New(),
 		maxEntries: maxEntries,
-		maxBytes:   maxBytes,
+		maxCost:    maxCost,
 	}
 	registerCacheForStats(c)
 	return c
@@ -122,6 +132,7 @@ func (c *FrozenCache) getOrParse(f *Factory, protoName string, data []byte) (*Fr
 		protoName: protoName,
 		raw:       append([]byte(nil), data...),
 		frozen:    Freeze(msg),
+		cost:      estimateDecodedCost(msg),
 	}
 
 	c.mu.Lock()
@@ -133,8 +144,8 @@ func (c *FrozenCache) getOrParse(f *Factory, protoName string, data []byte) (*Fr
 	c.misses++
 	entry.elem = c.lru.PushFront(entry)
 	c.buckets[hash] = append(c.buckets[hash], entry)
-	c.curBytes += len(entry.raw)
-	for (c.lru.Len() > c.maxEntries || c.curBytes > c.maxBytes) && c.lru.Len() > 1 {
+	c.curCost += entry.cost
+	for (c.lru.Len() > c.maxEntries || c.curCost > c.maxCost) && c.lru.Len() > 1 {
 		c.evictOldest()
 	}
 	return entry.frozen, nil
@@ -149,7 +160,7 @@ func (c *FrozenCache) evictOldest() {
 	victim := back.Value.(*dedupEntry)
 	c.lru.Remove(back)
 	c.evictions++
-	c.curBytes -= len(victim.raw)
+	c.curCost -= victim.cost
 	hash := dedupHash(victim.protoName, victim.raw)
 	bucket := c.buckets[hash]
 	for i, e := range bucket {
@@ -167,12 +178,13 @@ func (c *FrozenCache) evictOldest() {
 }
 
 // DedupStats 一次快照（观测去重是否生效、是否被独占推送污染）。
+// CostBytes 为缓存当前钉住的解码树体积估算（estimateDecodedCost 累计）。
 type DedupStats struct {
 	Hits      uint64 `json:"hits"`
 	Misses    uint64 `json:"misses"`
 	Evictions uint64 `json:"evictions"`
 	Entries   int    `json:"entries"`
-	RawBytes  int    `json:"rawBytes"`
+	CostBytes int    `json:"costBytes"`
 }
 
 // Stats 返回命中/未命中/驱逐计数与当前占用。
@@ -184,8 +196,63 @@ func (c *FrozenCache) Stats() DedupStats {
 		Misses:    c.misses,
 		Evictions: c.evictions,
 		Entries:   c.lru.Len(),
-		RawBytes:  c.curBytes,
+		CostBytes: c.curCost,
 	}
+}
+
+// estimateDecodedCost 粗估解码后消息树的常驻字节数（数量级精度，供缓存体积上界用）。
+// 只遍历已设置字段（Range），与 dynamicpb 的实际留存形态一致：每消息一个对象 +
+// 已设字段槽位，string/bytes 计入内容长度，list/map/子消息递归累计。
+// 常数为经验值，不追求精确——目标是让缓存上界与真实钉住量同数量级。
+func estimateDecodedCost(msg proto.Message) int {
+	if msg == nil {
+		return 0
+	}
+	return estimateMessageCost(msg.ProtoReflect())
+}
+
+func estimateMessageCost(ref protoreflect.Message) int {
+	cost := 128 // dynamicpb.Message 本体 + known 字段表基础开销
+	ref.Range(func(fd protoreflect.FieldDescriptor, val protoreflect.Value) bool {
+		cost += 48 // 字段槽（表条目 + Value 装箱）
+		switch {
+		case fd.IsList():
+			list := val.List()
+			cost += 24 + list.Len()*16
+			switch fd.Kind() {
+			case protoreflect.MessageKind, protoreflect.GroupKind:
+				for i := 0; i < list.Len(); i++ {
+					cost += estimateMessageCost(list.Get(i).Message())
+				}
+			case protoreflect.StringKind:
+				for i := 0; i < list.Len(); i++ {
+					cost += len(list.Get(i).String())
+				}
+			case protoreflect.BytesKind:
+				for i := 0; i < list.Len(); i++ {
+					cost += len(list.Get(i).Bytes())
+				}
+			}
+		case fd.IsMap():
+			m := val.Map()
+			cost += 48 + m.Len()*64
+			valFd := fd.MapValue()
+			if valFd.Kind() == protoreflect.MessageKind {
+				m.Range(func(_ protoreflect.MapKey, v protoreflect.Value) bool {
+					cost += estimateMessageCost(v.Message())
+					return true
+				})
+			}
+		case fd.Kind() == protoreflect.MessageKind || fd.Kind() == protoreflect.GroupKind:
+			cost += estimateMessageCost(val.Message())
+		case fd.Kind() == protoreflect.StringKind:
+			cost += len(val.String())
+		case fd.Kind() == protoreflect.BytesKind:
+			cost += len(val.Bytes())
+		}
+		return true
+	})
+	return cost
 }
 
 // ParseFrozenShared 内容寻址解析：与 Parse 语义等价，但相同 (name, data) 跨调用方

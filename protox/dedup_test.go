@@ -130,30 +130,43 @@ func TestDedupEviction(t *testing.T) {
 	}
 }
 
-// TestDedupByteBound ???????????
-func TestDedupByteBound(t *testing.T) {
+// TestDedupCostBound ???????????????maxCost ???????????
+// ?????????????????????? 1 ???
+func TestDedupCostBound(t *testing.T) {
 	f := newStoreTestFactory(t)
 	raw := marshalStoreBag(t, f, nil)
-	cache := NewFrozenCache(1024, len(raw)+1) // ??????
+
+	// ??????????????????"??? 1 ????? 2 ?"???
+	probe, err := f.Parse("storetest.Bag", raw)
+	if err != nil {
+		t.Fatalf("probe parse: %v", err)
+	}
+	oneCost := estimateDecodedCost(probe)
+	if oneCost <= 0 {
+		t.Fatalf("estimateDecodedCost=%d?????", oneCost)
+	}
+	cache := NewFrozenCache(1024, oneCost+oneCost/2)
 
 	if _, err := cache.getOrParse(f, "storetest.Bag", raw); err != nil {
 		t.Fatalf("A: %v", err)
 	}
 	rawB := marshalStoreBag(t, f, func(msg proto.Message) {
-		if err := f.SetField(msg, "title", "??????"); err != nil {
-			t.Fatalf("?????: %v", err)
+		if err := f.SetField(msg, "title", "another-title-content"); err != nil {
+			t.Fatalf("set title: %v", err)
 		}
 	})
 	if _, err := cache.getOrParse(f, "storetest.Bag", rawB); err != nil {
 		t.Fatalf("B: %v", err)
 	}
 	bst := cache.Stats()
-	entries, rawBytes := bst.Entries, bst.RawBytes
-	if entries != 1 {
-		t.Fatalf("entries=%d?want 1????????", entries)
+	if bst.Entries != 1 {
+		t.Fatalf("entries=%d?want 1???????????", bst.Entries)
 	}
-	if rawBytes > len(raw)+len(rawB) {
-		t.Fatalf("rawBytes=%d ????", rawBytes)
+	if bst.CostBytes <= 0 || bst.CostBytes > oneCost*2 {
+		t.Fatalf("costBytes=%d ???????????=%d?", bst.CostBytes, oneCost)
+	}
+	if bst.Evictions != 1 {
+		t.Fatalf("evictions=%d?want 1", bst.Evictions)
 	}
 }
 
@@ -167,7 +180,7 @@ func TestDedupConcurrent(t *testing.T) {
 			t.Fatalf("?????: %v", err)
 		}
 	})
-	cache := NewFrozenCache(dedupMaxEntries, dedupMaxBytes)
+	cache := NewFrozenCache(dedupMaxEntries, dedupMaxCost)
 
 	const workers, rounds = 8, 200
 	results := make([][]*Frozen, workers)
