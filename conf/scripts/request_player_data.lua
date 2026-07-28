@@ -25,14 +25,21 @@ function execute(r)
         return err
     end
 
-    -- 存储完整玩家数据：直接存消息（框架侧以不可变引用常驻，免整树展开；
-    -- 读路径 robot.get_path 惰性取值，嵌套写 robot.set_path 走写时物化）
-    robot.set("playerData", resp)
+    -- 提取英雄列表（同时用于 heroIds 提取和 playerData 留存）
+    -- 路径: loginHeroData -> HeroData -> heroList -> [].heroId
+    local heroList = proto.get_path(resp, "loginHeroData.HeroData.heroList")
+
+    -- 只保留后续脚本/flow 实际访问的两个子树（全量审计结论：仅 guildInfo.* 与
+    -- loginHeroData.HeroData.heroList 被读写，其余 30+ 顶层字段——背包/邮件/聊天/
+    -- 任务/战令等——无任何访问方）。整条 LoginPlayerDataS2C 无论以何种形式常驻
+    -- 都是 ~600KB/机器人的死重（5000 人 ≈ 3GB）；resp 本体在脚本返回后即被回收。
+    robot.set("playerData", {
+        guildInfo = proto.get_path(resp, "guildInfo"),
+        loginHeroData = { HeroData = { heroList = heroList } },
+    })
 
     -- 提取英雄 ID 列表
-    -- 路径: loginHeroData -> HeroData -> heroList -> [].heroId
     local heroIds = {}
-    local heroList = proto.get_path(resp, "loginHeroData.HeroData.heroList")
     if type(heroList) == "table" then
         for _, hero in ipairs(heroList) do
             if hero.possess then
