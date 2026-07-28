@@ -15,7 +15,7 @@ const SECTION_LABELS: Record<BackupSection, string> = {
   errorMap: '错误码',
   actionTemplates: 'Action 模板',
   listenTemplates: 'Listen 模板',
-  notepadFiles: '记事本文件',
+  notepadFiles: '笔记文件',
 };
 
 function registryWith(values: Partial<Record<BackupSection, unknown>> = {}): ConfigSectionRegistry {
@@ -87,7 +87,7 @@ describe('ConfigBackupModal', () => {
     expect((screen.getByRole('checkbox', { name: /当前编辑稿/ }) as HTMLInputElement).checked).toBe(
       true,
     );
-    expect((screen.getByRole('checkbox', { name: /记事本文件/ }) as HTMLInputElement).checked).toBe(
+    expect((screen.getByRole('checkbox', { name: /笔记文件/ }) as HTMLInputElement).checked).toBe(
       true,
     );
   });

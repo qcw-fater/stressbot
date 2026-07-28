@@ -1,5 +1,5 @@
 /**
- * 记事本 — FloatingWindow 内容：左右分栏（文件列表 + Monaco 编辑器）。
+ * 笔记 — FloatingWindow 内容：左右分栏（文件列表 + Monaco 编辑器）。
  */
 
 import { useEffect } from 'react';

@@ -446,9 +446,9 @@ export function RuntimeBar({
             日志
           </Button>
         </Tooltip>
-        <Tooltip title="记事本：编辑笔记、导入定义文件、快速查找路由">
+        <Tooltip title="笔记：编辑笔记、导入定义文件、快速查找路由">
           <Button icon={<FileTextOutlined />} onClick={onOpenNotepad}>
-            记事本
+            笔记
           </Button>
         </Tooltip>
         <Tooltip title={codecSchemaErrors && codecSchemaErrors.length > 0 ? `协议配置有 ${codecSchemaErrors.length} 处问题` : '协议配置：按连接管理帧布局与错误码映射'}>

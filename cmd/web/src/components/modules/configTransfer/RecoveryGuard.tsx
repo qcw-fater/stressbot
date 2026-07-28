@@ -14,7 +14,7 @@ const SECTION_LABELS: Record<BackupSection, string> = {
   errorMap: '错误码',
   actionTemplates: '动作模板',
   listenTemplates: '监听模板',
-  notepadFiles: '记事本文件',
+  notepadFiles: '笔记文件',
 };
 
 interface RecoveryIssue {

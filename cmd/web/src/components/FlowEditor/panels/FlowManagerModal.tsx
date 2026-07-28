@@ -1,5 +1,5 @@
 /**
- * 流程管理面板。
+ * 流程面板。
  *
  * 已保存流程存放在服务器流程模板库（后端 MySQL），不再使用浏览器本地存储。
  */
@@ -254,7 +254,7 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
 
   return (
     <Modal
-      title="流程管理"
+      title="流程"
       open={open}
       onCancel={handleModalClose}
       footer={null}

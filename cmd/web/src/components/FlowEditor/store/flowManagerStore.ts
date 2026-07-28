@@ -19,7 +19,7 @@ import {
   type FlowTemplateSummary,
 } from '@/services/flowsApi';
 
-/** 流程管理列表条目（与后端 FlowTemplateSummary 对齐，不含 flow/layout）。 */
+/** 流程列表条目（与后端 FlowTemplateSummary 对齐，不含 flow/layout）。 */
 export interface ManagedFlow {
   id: string;
   name: string;

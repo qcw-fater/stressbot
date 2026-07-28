@@ -1,5 +1,5 @@
 /**
- * 记事本文件管理（本地存储 + Zustand）。
+ * 笔记文件管理（本地存储 + Zustand）。
  *
  * 设计要点：
  * - 使用 idb-keyval 的 createStore 模式（与 resourcesStore.ts 一致）；

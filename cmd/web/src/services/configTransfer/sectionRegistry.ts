@@ -371,7 +371,7 @@ function assertListenTemplates(value: unknown): asserts value is ListenTemplate[
 }
 
 function assertNotepadFile(value: unknown, index: number): asserts value is NotepadFile {
-  const label = `第 ${index + 1} 个记事本文件`;
+  const label = `第 ${index + 1} 个笔记文件`;
   assertRecord(value, label);
   assertNonEmptyString(value.id, `${label} ID`);
   assertNonEmptyString(value.name, `${label}名称`);
@@ -382,10 +382,10 @@ function assertNotepadFile(value: unknown, index: number): asserts value is Note
 }
 
 function assertNotepadFiles(value: unknown): asserts value is NotepadFile[] {
-  assertArray(value, '记事本分区');
+  assertArray(value, '笔记分区');
   value.forEach(assertNotepadFile);
   const items = value as NotepadFile[];
-  assertUnique(items, (item) => item.id, '记事本 ID');
+  assertUnique(items, (item) => item.id, '笔记 ID');
 }
 
 function itemIdentity<T extends { id: string; name: string }>(
@@ -505,7 +505,7 @@ export function createSectionRegistry(
     },
     notepadFiles: {
       key: 'notepadFiles',
-      label: '记事本文件',
+      label: '笔记文件',
       kind: 'collection',
       read: dependencies.exportNotepadFiles,
       replace: dependencies.replaceNotepadFiles,

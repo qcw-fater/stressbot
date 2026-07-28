@@ -453,7 +453,7 @@ function HomeShellInner() {
         <FloatingWindow
           keepMounted
           windowId="notepad"
-          title="记事本"
+          title="笔记"
           defaultSize={{ width: 960, height: 600 }}
           minSize={{ width: 640, height: 400 }}
           open={notepadOpen}

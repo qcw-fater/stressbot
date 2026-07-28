@@ -274,7 +274,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
           </Button>
         </Dropdown>
         <Button icon={<FolderOpenOutlined />} onClick={() => setFlowManagerOpen(true)}>
-          流程管理
+          流程
         </Button>
 
         {SECTION_DIVIDER}
