@@ -487,6 +487,18 @@ func collectPathCorpus(md protoreflect.MessageDescriptor, tree map[string]any) [
 	return out
 }
 
+// unmarshalGuarded 带 panic 防护的 oracle 解码（损坏字节可能触发 protobuf-go
+// 上游 panic 而非 error，见调用处注释）。
+func unmarshalGuarded(md protoreflect.MessageDescriptor, data []byte) (err error, panicked bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			panicked = true
+		}
+	}()
+	probe := dynamicpb.NewMessage(md)
+	return proto.Unmarshal(data, probe), false
+}
+
 // TestWireDifferentialFuzz 随机消息（含 wire 级拼接变异）全路径语料双侧比对，
 // 附带 MaterializeValue 与 messageToMap 的整树等价、损坏字节的合法性判定等价。
 func TestWireDifferentialFuzz(t *testing.T) {
@@ -554,8 +566,13 @@ func TestWireDifferentialFuzz(t *testing.T) {
 			for j := 0; j < 1+rnd.Intn(3); j++ {
 				corrupt[rnd.Intn(len(corrupt))] ^= byte(1 << rnd.Intn(8))
 			}
-			probe := dynamicpb.NewMessage(md)
-			oracleErr := proto.Unmarshal(corrupt, probe)
+			oracleErr, panicked := unmarshalGuarded(md, corrupt)
+			if panicked {
+				// protobuf-go 上游 bug：个别损坏的 map entry 会让 dynamicpb 解码
+				// panic（Value.MapKey on nil，decode.go unmarshalMap）而非报错。
+				// oracle 自身行为未定义，无从比对，跳过该样本。
+				continue
+			}
 			gotErr := ValidateWire(md, corrupt)
 			if (oracleErr != nil) != (gotErr != nil) {
 				t.Fatalf("iter %d: 损坏字节判定不一致 oracle=%v validate=%v raw=%x",

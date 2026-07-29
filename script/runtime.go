@@ -473,6 +473,19 @@ func (rp *RuntimePool) RunListenScript(L *lua.LState, scriptName string, respMsg
 	return rp.runListenScriptValue(L, scriptName, robotUD, msgVal)
 }
 
+// RunListenScriptWire 以 wire 单遍直转表执行 listen 脚本回调（D2）：on_message 拿到
+// 的 Lua table 与 RunListenScript（解码 + 整表 Lua 化）逐字一致，但 dynamicpb
+// 解码树整个消失——脚本收表本就是每机器人一份，直转后广播去重缓存（FrozenCache）
+// 在这条路上不再必要。返回 handled=false 表示直转被拒（影子采样失配 / 降级竞态 /
+// 结构异常），调用方回落解码路径。
+func (rp *RuntimePool) RunListenScriptWire(L *lua.LState, scriptName string, wv *protox.WireValue) (bool, error) {
+	msgVal, ok := wireValueToLuaTable(L, wv)
+	if !ok {
+		return false, nil
+	}
+	return true, rp.runListenScriptValue(L, scriptName, createRobotUserData(L), msgVal)
+}
+
 // RunListenScriptRaw 执行未配置 s2cProto 的 listen 脚本回调，将原始消息体作为
 // 二进制安全的 Lua string 传给 on_message(r, msg)。
 func (rp *RuntimePool) RunListenScriptRaw(L *lua.LState, scriptName string, raw []byte) error {

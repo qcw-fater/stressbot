@@ -155,6 +155,16 @@ func (c *FrozenCache) evictOldest() {
 	}
 }
 
+// purge 清空全部条目（Factory.Close 调用）。已被脚本/协程持有的 *Frozen 引用
+// 不受影响（GC 按引用计存活）；purge 后缓存仍可安全使用，只是从零开始。
+func (c *FrozenCache) purge() {
+	c.mu.Lock()
+	c.buckets = make(map[uint64][]*frozenEntry)
+	c.lru = list.New()
+	c.curCost = 0
+	c.mu.Unlock()
+}
+
 // FrozenDedupStats 解码缓存一次快照。CostBytes 为当前钉住的解码树体积估算累计。
 type FrozenDedupStats struct {
 	Hits      uint64 `json:"hits"`

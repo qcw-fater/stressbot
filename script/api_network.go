@@ -789,13 +789,28 @@ func listenResultValues(L *lua.LState, ctx *Context, spec *WaitSpec, outcome Wai
 		}
 	}
 	if spec.S2CProto != "" && ctx.Factory != nil && len(respBody) > 0 {
-		// 大消息走广播消费去重（protox.FrozenCache）：监听推送常为同场次/全服广播
-		// （如同场战斗 60 人的帧数据字节完全相同），逐机器人独占解码是双重灾难——
-		// 解码 churn 放大 60 倍，且帧循环脚本挂起在 await_tcp_listen 时协程局部变量
-		// 钉着自己那份解码树（wire-first 首版曾改独占瞬态，029→031 剖面实测 live
-		// 单调 +1.15GB、区间 dynamicpb churn ~1.3TB，已复盘回归共享）。
-		// 共享消息以 *Frozen 包 userdata：proto API 读透传、set_field fail-loud。
+		// 大消息走 wire 惰性视图（D2，wire-first 消费侧）：脚本拿到持字节的只读
+		// userdata，proto.get_field/get_path 按需 wire 扫描，整包解码消失——
+		// 帧循环脚本每帧只读两三个字段，此前为此整树解码是消费侧最大 churn 源。
+		// 历史脉络：独占瞬态解码已被证伪（029→031 剖面，churn 放大 60 倍 +
+		// 协程钉解码树 +1.15GB）；共享解码（FrozenCache）解决了 churn 但仍常驻
+		// 解码树（268MB）且单人局命中率仅 6%。视图形态无解码树，两个问题同时消失；
+		// 协程挂起钉住的只是共享 wire 快照本身。
+		// 字节本身经 WireShared 内容寻址去重（同帧 60 接收方共享同一 *WireValue
+		// 快照），与留存侧同一套缓存——留存/消费两侧形态自此统一为 wire。
+		// schema 降级回落共享解码路径（正确性优先于形态）。
 		if len(respBody) >= protox.DedupMinBytes {
+			if md, ok := ctx.Factory.MessageDescriptor(spec.S2CProto); ok && !protox.WireDegraded(md) {
+				wv, err := ctx.Factory.WireShared(spec.S2CProto, respBody)
+				if err != nil {
+					// 校验失败 ≡ 解码必失败（差分 fuzz 保证等价）：按解析失败报错。
+					return []lua.LValue{
+						newErrTable(L, int(errcode.ErrParseFailed), "service="+spec.Service+" route="+spec.RouteKey),
+						lua.LNil,
+					}
+				}
+				return []lua.LValue{lua.LNil, wrapWireView(L, wv)}
+			}
 			frozen, err := ctx.Factory.ParseFrozenShared(spec.S2CProto, respBody)
 			if err != nil {
 				return []lua.LValue{

@@ -139,6 +139,10 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 
 ## 内存优化约束与已证实结论（2026-07 压测调优）
 
+**设计原则（用户明确要求，长期有效）**：
+- **数据面改造必须"留存侧 + 消费侧"同步落地**。除非不对称本身是明确设计并写下理由，否则不允许只改一侧：wire-first 首版只做了留存侧（state 存 `WireValue`），消费侧（robot.get 转 Lua 表、listen 解码）仍走 dynamicpb 整树，结果 8000 人剖面上消费侧成为 CPU/分配主源（整读转换 14.8% + 帧解码 6.9% + 由此拉动的 GC 26%），又追加一轮改造才补齐。同类改造（缓存策略、编码形态、生命周期）一律先画出该数据的**全部读写路径**，逐一确认新形态覆盖或显式豁免。
+- 优先设计层修复，而非业务脚本改写或运维参数（GOGC 等）兜底。
+
 **硬约束**：
 - 业务脚本（`conf/scripts/*.lua`）的**逻辑不可改**——包括"存哪些数据"（不允许按访问面裁剪留存字段）；**用法可以改**（等价 API 替换），但必须保持语义与留存数据集合不变。
 - 不设置 `GOMEMLIMIT` 等运行时环境变量作为"架构方案"（可作为运维手段单独讨论）。
@@ -146,7 +150,9 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 **已被线上剖面证实的结论**（勿重复尝试）：
 - 把 `playerData`（`LoginPlayerDataS2C`，map/repeated 重度、每机器人独有）从"get_field_map 展开 map 存储"改为"存 `protox.Frozen` 解码消息引用"是**净退化**：同相位对比 live +217MB @5000 人（dynamicpb 每条目固定开销 ≥ `map[string]any` 装箱）。已还原。
 - 每机器人独有的大消息，任何**解码态**表示（dynamicpb / Go map / Lua table）都 ~600KB/机器人；唯一小一个数量级的形态是 **wire 字节本身**（约 1/5~1/10）。要压这块只能走"持字节 + 按需 wire 扫描解码"的惰性视图。
-- 广播类消息（同内容多接收方）用内容寻址去重有效，且**留存与消费要分别去重、缺一不可**：留存用 `protox.WireCache`（存 `*WireValue` 字节，容量按原始字节硬上界即真实钉住量）；脚本消费（listen 脚本 / await_listen）必须走 `protox.FrozenCache` 共享解码（容量按 `estimateDecodedCost` 解码体积估算计，按原始字节会失真 ~50 倍）。**"脚本消费改独占瞬态解码"已被证伪**（wire-first 首版，029→031 剖面）：同场 60 人相同帧数据逐机器人解码使 churn 放大 60 倍（区间 ~1.3TB dynamicpb 分配），且帧循环脚本挂起在 await 时协程局部变量钉着自己那份解码树，5000 人陆续进战斗 → live 单调 +1.15GB。独占推送（动作响应）不得进任何去重缓存（污染+换血）。
+- 广播类消息（同内容多接收方）用内容寻址去重有效：留存与消费（2026-07-29 D2 起）统一走 `protox.WireCache` 共享 wire 字节（容量按原始字节硬上界即真实钉住量）。**"脚本消费改独占瞬态解码"已被证伪**（wire-first 首版，029→031 剖面）：同场 60 人相同帧数据逐机器人解码使 churn 放大 60 倍（区间 ~1.3TB dynamicpb 分配），且帧循环脚本挂起在 await 时协程局部变量钉着自己那份解码树，5000 人陆续进战斗 → live 单调 +1.15GB。注意 wire 惰性视图**不是**独占解码——60 接收方共享同一 `WireShared` 字节、无解码树可钉，不触犯该结论。独占推送（动作响应）不得进任何去重缓存（污染+换血）。
+- 消费侧 wire-first（2026-07-29 D1/D2）：`robot.get` 整读、listen 脚本 `on_message` 表、`get_field_map` 走 wire→Lua 单遍直转（`protox.WalkWire`，零 dynamicpb 中间树）；`await_listen` 大消息给脚本 wire 惰性视图 userdata（`proto.get_field/get_path/list_*` 按需 wire 扫描，语义逐字对齐 `Factory.GetField`——含"缺席 message 按默认值实例下钻"这一与 `Navigate` 不同的历史语义）。`protox.FrozenCache` 共享解码仅作 schema 降级回落路径。正确性三层防线：离线差分 fuzz（`wirediff/wirewalk/wireview_test.go`）+ 线上影子采样（`/debug/wire`，失配自动降级该 schema 回解码路径）。
+- 调优观测端点（挂 pprof 端口）：`/debug/sched`（Go 调度延迟分位数，量化施压机负载对 Apdex/P99 的污染，压测中看 `sinceLast` 组）、`/debug/statekeys`（`robot.get/get_path` 按 key 计数，`tables`/`wireDecodes` 列定位整读热点，`?reset=1` 分窗口）、`/debug/dedup`、`/debug/wire`。
 - Lua 线程用 trampoline 长驻复用（`script/trampoline.go`）后，`newLState/newRegistry` churn 已消除；`RSS ≈ 2× live` 是 GOGC=100 的正常余量，压 RSS 先压 live。
 
 ## 验证流程

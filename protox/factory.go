@@ -25,6 +25,8 @@ type Factory struct {
 	// frozenCache 广播消费去重缓存（见 dedup_frozen.go）：ParseFrozenShared 按内容
 	// 寻址共享解码结果，供 listen 脚本 / await_listen 的只读消费。
 	frozenCache *FrozenCache
+	// closeOnce 保证 Close 幂等。
+	closeOnce sync.Once
 }
 
 // NewFactory 创建动态消息工厂
@@ -34,6 +36,20 @@ func NewFactory(registry *Registry) *Factory {
 		wireCache:   NewWireCache(dedupMaxEntries, dedupMaxBytes),
 		frozenCache: NewFrozenCache(frozenMaxEntries, frozenMaxCost),
 	}
+}
+
+// Close 释放 Factory 持有的任务级资源：清空两个去重缓存并从 /debug/dedup 统计
+// 列表反注册。任务（TaskRunner）级 Factory 必须在任务结束时调用——统计列表是
+// 包级全局，不反注册会把缓存连同全部条目（解码树 + wire 字节 + descriptor）
+// 跨任务钉住，每轮任务累积泄漏数百 MB。幂等，可安全多次调用；Close 后 Factory
+// 仍可用（缓存只是清空重新计），但按约定不应再被使用。
+func (f *Factory) Close() {
+	f.closeOnce.Do(func() {
+		f.wireCache.purge()
+		unregisterCacheForStats(f.wireCache)
+		f.frozenCache.purge()
+		unregisterFrozenCacheForStats(f.frozenCache)
+	})
 }
 
 // MessageDescriptor 按消息名（全名或短名）查描述符，供 wire-first 存储点构造 WireValue。
@@ -476,10 +492,12 @@ func (f *Factory) GetField(msg proto.Message, fieldPath string) (any, error) {
 	if len(parts) == 0 {
 		return nil, fmt.Errorf("fieldPath 为空")
 	}
-	return f.getNestedField(msg.ProtoReflect(), parts)
+	return getNestedFieldValue(msg.ProtoReflect(), parts)
 }
 
-func (f *Factory) getNestedField(ref protoreflect.Message, parts []string) (any, error) {
+// getNestedFieldValue 按路径段读取字段（GetField 的实现体）。
+// 自由函数：wire 惰性视图的影子验证（wireview.go）以它为 oracle。
+func getNestedFieldValue(ref protoreflect.Message, parts []string) (any, error) {
 	desc := ref.Descriptor()
 	part := parts[0]
 
@@ -518,13 +536,13 @@ func (f *Factory) getNestedField(ref protoreflect.Message, parts []string) (any,
 		}
 
 		if field.Kind() == protoreflect.MessageKind {
-			return f.getNestedField(elem.Message(), parts[2:])
+			return getNestedFieldValue(elem.Message(), parts[2:])
 		}
 		return nil, fmt.Errorf("字段 %s 不是 message 类型，无法嵌套", part)
 	}
 
 	if field.Kind() == protoreflect.MessageKind && !field.IsList() && !field.IsMap() {
-		return f.getNestedField(ref.Get(field).Message(), parts[1:])
+		return getNestedFieldValue(ref.Get(field).Message(), parts[1:])
 	}
 
 	return nil, fmt.Errorf("字段 %s 不是 message 类型，无法嵌套", part)

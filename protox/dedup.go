@@ -178,6 +178,16 @@ type DedupStats struct {
 	RawBytes  int    `json:"rawBytes"`
 }
 
+// purge 清空全部条目（Factory.Close 调用）。已被机器人持有的 *WireValue 引用
+// 不受影响（GC 按引用计存活）；purge 后缓存仍可安全使用，只是从零开始。
+func (c *WireCache) purge() {
+	c.mu.Lock()
+	c.buckets = make(map[uint64][]*dedupEntry)
+	c.lru = list.New()
+	c.curBytes = 0
+	c.mu.Unlock()
+}
+
 // Stats 返回命中/未命中/驱逐计数与当前占用。
 func (c *WireCache) Stats() DedupStats {
 	c.mu.Lock()

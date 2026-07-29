@@ -36,6 +36,30 @@ func registerFrozenCacheForStats(c *FrozenCache) {
 	statsMu.Unlock()
 }
 
+// unregisterCacheForStats 从统计列表按身份移除（Factory.Close 调用）。
+// 不移除的话包级切片会钉住缓存及其全部条目，跨任务累积泄漏。
+func unregisterCacheForStats(c *WireCache) {
+	statsMu.Lock()
+	for i, x := range statsCaches {
+		if x == c {
+			statsCaches = append(statsCaches[:i], statsCaches[i+1:]...)
+			break
+		}
+	}
+	statsMu.Unlock()
+}
+
+func unregisterFrozenCacheForStats(c *FrozenCache) {
+	statsMu.Lock()
+	for i, x := range statsFrozenCaches {
+		if x == c {
+			statsFrozenCaches = append(statsFrozenCaches[:i], statsFrozenCaches[i+1:]...)
+			break
+		}
+	}
+	statsMu.Unlock()
+}
+
 func init() {
 	http.HandleFunc("/debug/dedup", func(w http.ResponseWriter, _ *http.Request) {
 		statsMu.Lock()

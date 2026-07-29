@@ -95,6 +95,50 @@ func shadowShouldVerify(desc protoreflect.MessageDescriptor, segs []string) bool
 	return dc.Add(1)%shadowSampleEvery == 0
 }
 
+// MaterializeAllowed 决定这次全量物化能否走 wire 直转（WalkWire）：
+//   - schema 已降级 → false（回落解码路径）；
+//   - 影子采样命中（整树伪路径 "*"，首 K 次全查 + 稳态抽样）→ 现场双读比对，
+//     失配记录并降级后返回 false；
+//   - 其余 → true。
+func (wv *WireValue) MaterializeAllowed() bool {
+	if wv == nil || wv.desc == nil {
+		return false
+	}
+	if WireDegraded(wv.desc) {
+		return false
+	}
+	if shadowShouldVerify(wv.desc, shadowWholeTreeSegs) {
+		return shadowVerifyMaterialize(wv)
+	}
+	return true
+}
+
+// shadowWholeTreeSegs 整树物化在影子计数体系里的伪路径。
+var shadowWholeTreeSegs = []string{"*"}
+
+// shadowVerifyMaterialize 直转整树 vs dynamicpb 解码整树的双读比对。
+// 失配（或直转失败）记录并降级 schema，返回 false 让调用方回落解码路径。
+func shadowVerifyMaterialize(wv *WireValue) bool {
+	shadowChecks.Add(1)
+	sink := newMapTreeSink()
+	if err := wv.Walk(sink); err != nil {
+		recordWireMismatch(wv, shadowWholeTreeSegs, "直转失败: "+err.Error())
+		return false
+	}
+	msg, err := wv.Message()
+	if err != nil {
+		recordWireMismatch(wv, shadowWholeTreeSegs, "oracle 解码失败: "+err.Error())
+		return false
+	}
+	oracle := messageToMap(msg.ProtoReflect())
+	if !plainEqual(sink.m, oracle) {
+		recordWireMismatch(wv, shadowWholeTreeSegs, fmt.Sprintf("wire=%v oracle=%v",
+			summarizeValue(sink.m), summarizeValue(oracle)))
+		return false
+	}
+	return true
+}
+
 // shadowVerifyNavigate 执行一次双读比对；失配时以 oracle 结果返回并降级该 schema。
 func shadowVerifyNavigate(wv *WireValue, segs []string, got any, found bool) (any, bool) {
 	shadowChecks.Add(1)

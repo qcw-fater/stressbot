@@ -85,6 +85,14 @@ func unwrapProtoUD(v lua.LValue) (proto.Message, bool, *respHandle) {
 		return m.msg, false, m
 	case *protox.Frozen:
 		return m.Message(), true, nil
+	case *protox.WireValue:
+		// wire 视图的解码兜底：只在无 wire 分支的访问器（或 schema 降级）走到，
+		// 现场解码为只读消息（视图语义等价 Frozen）。
+		msg, err := m.Message()
+		if err != nil {
+			return nil, false, nil
+		}
+		return msg, true, nil
 	case proto.Message:
 		return m, false, nil
 	}
@@ -168,6 +176,37 @@ func wrapFrozenMessage(L *lua.LState, fz *protox.Frozen) *lua.LUserData {
 	return ud
 }
 
+// wrapWireView 将 wire 惰性视图（*protox.WireValue）包装为与普通 proto 消息
+// 同元表的 LUserData（D2）：listen 消费不再整包解码，读访问器按需 wire 扫描
+//（get_field/get_path → GetFieldCompat，list_* → List*Compat，get_field_map →
+// 直转器，serialize → 原始字节）；set_field 与 Frozen 同款 fail-loud。
+// list_get/iter_list 的 message 元素继续包视图，只读性全树传播。
+// schema 降级后视图自动回落：unwrapProtoUD 现场解码为只读消息走原反射路径。
+func wrapWireView(L *lua.LState, wv *protox.WireValue) *lua.LUserData {
+	ud := L.NewUserData()
+	ud.Value = wv
+	L.SetMetatable(ud, protoMsgMetatable(L))
+	return ud
+}
+
+// findWireView 在栈上找未降级的 wire 视图（各读访问器的 wire 分支入口）。
+// 降级 schema 的视图返回 nil——调用方落到 checkProtoMsg 路径，由 unwrapProtoUD
+// 现场解码走原反射实现（正确性优先于形态）。
+func findWireView(L *lua.LState) *protox.WireValue {
+	top := L.GetTop()
+	for i := 1; i <= top; i++ {
+		if ud, ok := L.Get(i).(*lua.LUserData); ok {
+			if wv, ok2 := ud.Value.(*protox.WireValue); ok2 {
+				if protox.WireDegraded(wv.Desc()) {
+					return nil
+				}
+				return wv
+			}
+		}
+	}
+	return nil
+}
+
 // protoCreate proto.create(name) — 创建动态 proto 消息
 func protoCreate(L *lua.LState) int {
 	ctx := GetContext(L)
@@ -198,13 +237,15 @@ func protoSetField(L *lua.LState) int {
 		return 0
 	}
 
-	// 共享只读消息（广播去重的 *Frozen）禁止参与 set_field：既不能作为改写目标
-	//（污染其他机器人共享的解码结果），也不能作为嵌套赋值的 value（会让共享消息
-	// 获得可变父级，间接失去只读保障）。fail-loud，需要可写副本请用 proto.parse。
+	// 共享只读消息（广播去重的 *Frozen / wire 惰性视图 *WireValue）禁止参与
+	// set_field：既不能作为改写目标（污染共享数据 / 破坏视图不可变契约），也不能
+	// 作为嵌套赋值的 value（会让共享消息获得可变父级，间接失去只读保障）。
+	// fail-loud，需要可写副本请用 proto.parse。
 	for i := 1; i <= L.GetTop(); i++ {
 		if ud, ok := L.Get(i).(*lua.LUserData); ok {
-			if _, isFrozen := ud.Value.(*protox.Frozen); isFrozen {
-				L.RaiseError("proto.set_field: 消息为共享只读（广播去重），禁止修改；需要可写副本请用 proto.parse 重新解析")
+			switch ud.Value.(type) {
+			case *protox.Frozen, *protox.WireValue:
+				L.RaiseError("proto.set_field: 消息为共享只读（广播去重/wire 视图），禁止修改；需要可写副本请用 proto.parse 重新解析")
 				return 0
 			}
 		}
@@ -254,6 +295,22 @@ func protoGetField(L *lua.LState) int {
 		return 1
 	}
 
+	// wire 视图：按需扫描（GetFieldCompat 语义 ≡ Factory.GetField，含错误行为）。
+	if wv := findWireView(L); wv != nil {
+		fieldName := findFirstStringArg(L)
+		if fieldName == "" {
+			L.RaiseError("proto.get_field requires (msg, field)")
+			return 0
+		}
+		val, err := wv.GetFieldCompat(fieldName)
+		if err != nil {
+			L.RaiseError("get field %s failed: %v", fieldName, err)
+			return 0
+		}
+		L.Push(goValueToLua(L, val))
+		return 1
+	}
+
 	msg := checkProtoMsg(L)
 	if msg == nil {
 		L.Push(lua.LNil)
@@ -292,6 +349,13 @@ func protoSerialize(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.Factory == nil {
 		L.Push(lua.LNil)
+		return 1
+	}
+
+	// wire 视图：直接返回原始字节（免解码免重编码；解码后重编码与原始字节
+	// 语义等价——两者 Unmarshal 结果一致）。
+	if wv := findWireView(L); wv != nil {
+		L.Push(lua.LString(string(wv.Raw())))
 		return 1
 	}
 
@@ -361,6 +425,15 @@ func protoGetFieldMap(L *lua.LState) int {
 		return 1
 	}
 
+	// wire 视图：直转器整树建表（零 dynamicpb 中间树）；被拒（采样失配/损坏）
+	// 落到 checkProtoMsg 的解码兜底。
+	if wv := findWireView(L); wv != nil {
+		if result, ok := wireValueToLuaTable(L, wv); ok {
+			L.Push(result)
+			return 1
+		}
+	}
+
 	msg := checkProtoMsg(L)
 	if msg == nil {
 		L.Push(lua.LNil)
@@ -382,6 +455,36 @@ func protoIterList(L *lua.LState) int {
 		L.Push(lua.LNil)
 		return 1
 	}
+	var list []any
+	if wv := findWireView(L); wv != nil {
+		// wire 视图：GetFieldCompat 与 GetField 同形产物（message 元素为 map 树）。
+		fieldName := findFirstStringArg(L)
+		if fieldName == "" {
+			L.RaiseError("proto.iter_list requires (msg, field)")
+			return 0
+		}
+		val, err := wv.GetFieldCompat(fieldName)
+		if err != nil {
+			L.Push(lua.LNil)
+			return 1
+		}
+		list, _ = val.([]any)
+		idx := 0
+		iter := L.NewFunction(func(L *lua.LState) int {
+			if idx >= len(list) {
+				L.Push(lua.LNil)
+				return 1
+			}
+			item := list[idx]
+			idx++
+			L.Push(lua.LNumber(idx))
+			L.Push(goValueToLua(L, item))
+			return 2
+		})
+		L.Push(iter)
+		return 1
+	}
+
 	msg, readonly, handle := checkProtoMsgFull(L)
 	if msg == nil {
 		L.Push(lua.LNil)
@@ -397,7 +500,7 @@ func protoIterList(L *lua.LState) int {
 		L.Push(lua.LNil)
 		return 1
 	}
-	list, _ := val.([]any)
+	list, _ = val.([]any)
 
 	idx := 0
 	iter := L.NewFunction(func(L *lua.LState) int {
@@ -427,6 +530,17 @@ func protoListSize(L *lua.LState) int {
 		L.Push(lua.LNumber(0))
 		return 1
 	}
+	// wire 视图：单遍扫描计数，不展开元素。
+	if wv := findWireView(L); wv != nil {
+		n, err := wv.ListLenCompat(findFirstStringArg(L))
+		if err != nil {
+			L.Push(lua.LNumber(0))
+			return 1
+		}
+		L.Push(lua.LNumber(n))
+		return 1
+	}
+
 	msg := checkProtoMsg(L)
 	if msg == nil {
 		L.Push(lua.LNumber(0))
@@ -449,25 +563,28 @@ func protoListGet(L *lua.LState) int {
 		L.Push(lua.LNil)
 		return 1
 	}
+	// wire 视图：message 元素返回子视图（字节段共享父快照，只读性全树传播）。
+	if wv := findWireView(L); wv != nil {
+		fieldName, idx := findStringAndIndexArgs(L)
+		item, err := wv.ListItemCompat(fieldName, idx-1)
+		if err != nil {
+			L.Push(lua.LNil)
+			return 1
+		}
+		if sub, ok := item.(*protox.WireValue); ok {
+			L.Push(wrapWireView(L, sub))
+		} else {
+			L.Push(goValueToLua(L, item))
+		}
+		return 1
+	}
+
 	msg, readonly, handle := checkProtoMsgFull(L)
 	if msg == nil {
 		L.Push(lua.LNil)
 		return 1
 	}
-	// 收集非 userdata 参数
-	var fieldName string
-	var idx int = -1
-	for i := 1; i <= L.GetTop(); i++ {
-		v := L.Get(i)
-		if _, ok := v.(*lua.LUserData); ok {
-			continue
-		}
-		if fieldName == "" {
-			fieldName = lua.LVAsString(v)
-		} else if idx < 0 {
-			idx = int(lua.LVAsNumber(v))
-		}
-	}
+	fieldName, idx := findStringAndIndexArgs(L)
 	i := idx - 1
 	item, err := ctx.Factory.GetListItem(msg, fieldName, i)
 	if err != nil {
@@ -480,6 +597,24 @@ func protoListGet(L *lua.LState) int {
 		L.Push(goValueToLua(L, item))
 	}
 	return 1
+}
+
+// findStringAndIndexArgs 收集非 userdata 参数里的 (字段名, 下标)（list_get 用）。
+func findStringAndIndexArgs(L *lua.LState) (string, int) {
+	var fieldName string
+	idx := -1
+	for i := 1; i <= L.GetTop(); i++ {
+		v := L.Get(i)
+		if _, ok := v.(*lua.LUserData); ok {
+			continue
+		}
+		if fieldName == "" {
+			fieldName = lua.LVAsString(v)
+		} else if idx < 0 {
+			idx = int(lua.LVAsNumber(v))
+		}
+	}
+	return fieldName, idx
 }
 
 // wrapChildMessage 包装从父消息取出的子消息：父为共享只读（Frozen）时子消息

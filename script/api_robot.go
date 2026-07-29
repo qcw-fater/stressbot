@@ -108,6 +108,7 @@ func robotGet(L *lua.LState) int {
 
 	key := L.CheckString(L.GetTop())
 	val := ctx.Store.Get(key)
+	recordStateKeyGet("get", key, val)
 	L.Push(goValueToLua(L, val))
 	return 1
 }
@@ -242,6 +243,7 @@ func robotGetPath(L *lua.LState) int {
 	}
 	path := lua.LVAsString(L.Get(base))
 	val := ctx.Store.GetPath(path)
+	recordStateKeyGet("get_path", path, val)
 	L.Push(goValueToLua(L, val))
 	return 1
 }
@@ -380,8 +382,12 @@ func goValueToLua(L *lua.LState, val any) lua.LValue {
 		// 转换产物是临时 Lua 对象，Go 侧不再为整存消息常驻装箱树。
 		return protoMessageToLuaTable(L, v.Message())
 	case *protox.WireValue:
-		// wire-first 整存值：整读时现场解码 → 直转 Lua table（瞬态，不常驻 Go 侧）。
-		// 解码失败理论不可达（存储点已结构校验），防御性返回 nil。
+		// wire-first 整存值：默认 wire 单遍直转 Lua table（WalkWire，零 dynamicpb
+		// 中间树）；schema 降级 / 影子采样失配 / 结构损坏回落解码路径。
+		// 解码也失败理论不可达（存储点已结构校验），防御性返回 nil。
+		if lv, ok := wireValueToLuaTable(L, v); ok {
+			return lv
+		}
 		msg, err := v.Message()
 		if err != nil {
 			return lua.LNil
@@ -415,6 +421,10 @@ func luaToGoStoreValue(v lua.LValue) any {
 		case *respHandle:
 			return respHandleStoreValue(m)
 		case *protox.Frozen:
+			return m
+		case *protox.WireValue:
+			// wire 惰性视图（listen 消费）→ 原样存引用：字节不可变、可安全共享，
+			// 留存形态即 wire-first 目标形态（零转换零复制）。
 			return m
 		case proto.Message:
 			return protox.Freeze(m)

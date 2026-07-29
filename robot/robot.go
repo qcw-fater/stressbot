@@ -1190,37 +1190,23 @@ func (h *robotActionHandler) runListenScript(cbName string, cbDef *engine.Listen
 
 	var runErr error
 	if cbDef.S2CProto != "" && len(msg.Data) > 0 {
-		// 大消息走广播消费去重（protox.FrozenCache，与 await_listen 同一缓存）：
-		// RunListenScript 只做只读的整表 Lua 化，消息本体不逃逸，共享解码结果安全；
-		// 同一条广播全进程只解码一份，churn 摊薄为 1/接收方数。小消息独占解码。
-		var respMsg proto.Message
-		var perr error
-		if len(msg.Data) >= protox.DedupMinBytes {
-			var frozen *protox.Frozen
-			frozen, perr = h.robot.factory.ParseFrozenShared(cbDef.S2CProto, msg.Data)
-			if perr == nil {
-				respMsg = frozen.Message()
+		// 首选 wire 直转（D2）：on_message 收到的 Lua table 每机器人本就独立一份，
+		// 解码树只是转表跳板——直转后跳板消失（零 dynamicpb、零 FrozenCache 依赖）。
+		// ValidateWire 失败 ≡ 解码必失败（差分 fuzz 保证等价），落到解码路径报
+		// callback-parse 错误；schema 降级 / 影子采样拒绝同样回落。
+		handled := false
+		if md, ok := h.robot.factory.MessageDescriptor(cbDef.S2CProto); ok &&
+			!protox.WireDegraded(md) && protox.ValidateWire(md, msg.Data) == nil {
+			// msg 已是 pump 外的深拷贝快照（Copy()），字节所有权可安全移交。
+			wv := protox.NewWireValue(md, msg.Data)
+			handled, runErr = h.robot.luaPool.RunListenScriptWire(h.robot.l, cbDef.Script, wv)
+		}
+		if !handled {
+			runErr = h.runListenScriptDecoded(cbName, cbDef, msg, start)
+			if runErr == errListenParseFailed {
+				return // 解析失败已记指标
 			}
-		} else {
-			respMsg, perr = h.robot.factory.Parse(cbDef.S2CProto, msg.Data)
 		}
-		if perr != nil {
-			cbErr := engine.NewActionError(errcode.ErrCallbackParse, "proto="+cbDef.S2CProto, perr)
-			stresslog.Error("[ROBOT] 解析监听推送失败",
-				zap.Int("id", h.robot.id),
-				zap.String("account", h.robot.account),
-				zap.String("listen", cbName),
-				zap.String("script", cbDef.Script),
-				zap.String("proto", cbDef.S2CProto),
-				zap.String("routeKey", msg.RouteKey),
-				zap.Int("bodyLen", len(msg.Data)),
-				zap.Int("wireBytes", msg.WireBytes),
-				zap.Uint64("headerErr", msg.HeaderErr),
-				zap.Error(perr))
-			monitor.Global().RecordCallback(cbName, monitor.ResultFailure, monitor.ActionTiming{}, time.Since(start), 0, msg.WireBytes, cbErr)
-			return
-		}
-		runErr = h.robot.luaPool.RunListenScript(h.robot.l, cbDef.Script, respMsg)
 	} else {
 		runErr = h.robot.luaPool.RunListenScriptRaw(h.robot.l, cbDef.Script, msg.Data)
 	}
@@ -1242,6 +1228,43 @@ func (h *robotActionHandler) runListenScript(cbName string, cbDef *engine.Listen
 		return
 	}
 	monitor.Global().RecordCallback(cbName, monitor.ResultSuccess, monitor.ActionTiming{}, time.Since(start), 0, msg.WireBytes, nil)
+}
+
+// errListenParseFailed runListenScriptDecoded 的哨兵：解析失败（指标已记录，调用方直接返回）。
+var errListenParseFailed = errors.New("listen 推送解析失败")
+
+// runListenScriptDecoded 解码路径的 listen 脚本执行（wire 直转的回落分支）：
+// 大消息走广播消费去重（protox.FrozenCache，与 await_listen 降级路径同一缓存），
+// 小消息独占解码。解析失败记 callback 失败指标并返回哨兵错误。
+func (h *robotActionHandler) runListenScriptDecoded(cbName string, cbDef *engine.ListenDef, msg *network.Message, start time.Time) error {
+	var respMsg proto.Message
+	var perr error
+	if len(msg.Data) >= protox.DedupMinBytes {
+		var frozen *protox.Frozen
+		frozen, perr = h.robot.factory.ParseFrozenShared(cbDef.S2CProto, msg.Data)
+		if perr == nil {
+			respMsg = frozen.Message()
+		}
+	} else {
+		respMsg, perr = h.robot.factory.Parse(cbDef.S2CProto, msg.Data)
+	}
+	if perr != nil {
+		cbErr := engine.NewActionError(errcode.ErrCallbackParse, "proto="+cbDef.S2CProto, perr)
+		stresslog.Error("[ROBOT] 解析监听推送失败",
+			zap.Int("id", h.robot.id),
+			zap.String("account", h.robot.account),
+			zap.String("listen", cbName),
+			zap.String("script", cbDef.Script),
+			zap.String("proto", cbDef.S2CProto),
+			zap.String("routeKey", msg.RouteKey),
+			zap.Int("bodyLen", len(msg.Data)),
+			zap.Int("wireBytes", msg.WireBytes),
+			zap.Uint64("headerErr", msg.HeaderErr),
+			zap.Error(perr))
+		monitor.Global().RecordCallback(cbName, monitor.ResultFailure, monitor.ActionTiming{}, time.Since(start), 0, msg.WireBytes, cbErr)
+		return errListenParseFailed
+	}
+	return h.robot.luaPool.RunListenScript(h.robot.l, cbDef.Script, respMsg)
 }
 
 // netSenderAdapter 将 Robot 适配为 engine.NetSender 接口，

@@ -176,6 +176,11 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 
 	registry := protox.NewRegistry(files)
 	factory := protox.NewFactory(registry)
+	// 任务级 Factory 必须在任务结束时释放：清空去重缓存并从 /debug/dedup 反注册，
+	// 否则包级统计列表把缓存条目跨任务钉住，每轮任务泄漏数百 MB（8000 人实测两组
+	// frozenDecoded 各钉 ~268MB）。defer 在此注册（早于 dialer 停止的 defer），
+	// LIFO 保证它在网络 pump 停止之后才执行。
+	defer factory.Close()
 
 	// 5. 加载流程配置
 	flow, err := loadTaskFlow(filepath.Join(confDir, "flow", "flow.json"))
