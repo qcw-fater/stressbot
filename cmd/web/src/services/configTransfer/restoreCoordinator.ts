@@ -1,14 +1,10 @@
 import { nanoid } from 'nanoid';
 
 import {
-  getFlowSnapshot,
-  replaceFlowSnapshot,
-  type FlowSnapshot,
-  type FlowTemplateDetail,
-  type ReplaceFlowSnapshotRequest,
-  type ReplaceFlowSnapshotResponse,
-} from '../flowsApi';
-import { defaultSectionRegistry, type ConfigSectionRegistry } from './sectionRegistry';
+  defaultSectionRegistry,
+  type ConfigSectionRegistry,
+  type VersionedSectionIO,
+} from './sectionRegistry';
 import {
   applyConflictChoices,
   planCollectionMerge,
@@ -46,15 +42,12 @@ export interface RestoreAdapter {
   count: (value: unknown) => number;
   identity?: CollectionIdentity<unknown>;
   refresh?: (value: unknown) => Promise<void> | void;
+  versioned?: VersionedSectionIO<unknown>;
 }
 
 export interface RestoreEnvironment {
   registry: Record<BackupSection, RestoreAdapter>;
   journal: RecoveryJournalStore;
-  getFlowSnapshot: () => Promise<FlowSnapshot>;
-  replaceFlowSnapshot: (
-    request: ReplaceFlowSnapshotRequest,
-  ) => Promise<ReplaceFlowSnapshotResponse>;
   createOperationId: () => string;
   now: () => Date;
 }
@@ -66,8 +59,6 @@ function runtimeRegistry(registry: ConfigSectionRegistry): Record<BackupSection,
 export const defaultRestoreEnvironment: RestoreEnvironment = {
   registry: runtimeRegistry(defaultSectionRegistry),
   journal: recoveryJournal,
-  getFlowSnapshot,
-  replaceFlowSnapshot,
   createOperationId: () => nanoid(16),
   now: () => new Date(),
 };
@@ -194,15 +185,15 @@ export async function preflightRestore(
   const sections: RestorePlan['sections'] = {};
   const stats: RestorePlan['stats'] = {};
   const conflicts: RestoreConflict[] = [];
-  let flowExpectedRevision: string | undefined;
+  const expectedRevisions: RestorePlan['expectedRevisions'] = {};
 
   for (const section of selectedSections) {
     const adapter = environment.registry[section];
     let current: unknown;
-    if (section === 'flows') {
-      const snapshot = await environment.getFlowSnapshot();
-      current = snapshot.items;
-      flowExpectedRevision = snapshot.revision;
+    if (adapter.versioned) {
+      const snapshot = await adapter.versioned.read();
+      current = snapshot.value;
+      expectedRevisions[section] = snapshot.revision;
     } else {
       current = await adapter.read();
     }
@@ -225,7 +216,7 @@ export async function preflightRestore(
     sections,
     conflicts,
     stats,
-    flowExpectedRevision,
+    expectedRevisions,
   });
 }
 
@@ -297,28 +288,43 @@ export function resolveRestorePlanConflicts(
   return deepFreeze({ ...plan, sections, stats, conflicts });
 }
 
-function orderedSections(selected: readonly BackupSection[]): BackupSection[] {
+function orderedSections(
+  selected: readonly BackupSection[],
+  environment: RestoreEnvironment,
+): BackupSection[] {
   const set = new Set(selected);
-  return BACKUP_SECTIONS.filter((section) => set.has(section)).sort((left, right) => {
-    if (left === 'flows') return -1;
-    if (right === 'flows') return 1;
-    return 0;
-  });
+  const ordered = BACKUP_SECTIONS.filter((section) => set.has(section));
+  return [
+    ...ordered.filter((section) => environment.registry[section].versioned !== undefined),
+    ...ordered.filter((section) => environment.registry[section].versioned === undefined),
+  ];
+}
+
+function sectionFingerprint(
+  adapter: RestoreAdapter,
+  value: unknown,
+  mode: RestoreMode,
+): string {
+  return adapter.versioned?.fingerprint?.(value, mode) ?? fingerprintRestoreValue(value);
 }
 
 async function assertTargetsUnchanged(
   plan: RestorePlan,
   environment: RestoreEnvironment,
 ): Promise<void> {
-  for (const section of orderedSections(plan.selectedSections)) {
-    if (section === 'flows') {
-      const snapshot = await environment.getFlowSnapshot();
-      if (!plan.flowExpectedRevision || snapshot.revision !== plan.flowExpectedRevision) {
+  for (const section of orderedSections(plan.selectedSections, environment)) {
+    const adapter = environment.registry[section];
+    if (adapter.versioned) {
+      const snapshot = await adapter.versioned.read();
+      if (
+        !plan.expectedRevisions[section]
+        || snapshot.revision !== plan.expectedRevisions[section]
+      ) {
         throw new RestoreTargetChangedError(section);
       }
       continue;
     }
-    const current = await environment.registry[section].read();
+    const current = await adapter.read();
     const expected = plan.sections[section]?.beforeFingerprint;
     if (expected === undefined || fingerprintRestoreValue(current) !== expected) {
       throw new RestoreTargetChangedError(section);
@@ -326,26 +332,32 @@ async function assertTargetsUnchanged(
   }
 }
 
-function makeJournal(plan: RestorePlan): RecoveryJournal {
+function makeJournal(plan: RestorePlan, environment: RestoreEnvironment): RecoveryJournal {
   const before: RecoveryJournal['before'] = {};
+  const versionedBefore: RecoveryJournal['versionedBefore'] = {};
+  const afterFingerprints: RecoveryJournal['afterFingerprints'] = {};
   for (const section of plan.selectedSections) {
-    before[section] = plan.sections[section]?.before;
+    const sectionPlan = plan.sections[section];
+    before[section] = sectionPlan?.before;
+    const revision = plan.expectedRevisions[section];
+    const adapter = environment.registry[section];
+    if (adapter.versioned && revision && sectionPlan) {
+      versionedBefore[section] = { revision, value: sectionPlan.before };
+      afterFingerprints[section] = sectionFingerprint(adapter, sectionPlan.after, plan.mode);
+    }
   }
-  const flowItems = plan.sections.flows?.before;
   return {
+    version: 2,
     operationId: plan.operationId,
     startedAt: plan.createdAt,
     phase: 'prepared',
+    mode: plan.mode,
     selectedSections: [...plan.selectedSections],
     before,
     completedSections: [],
-    flowBefore:
-      plan.flowExpectedRevision && Array.isArray(flowItems)
-        ? { revision: plan.flowExpectedRevision, items: flowItems as FlowTemplateDetail[] }
-        : undefined,
-    flowAfterFingerprint: plan.sections.flows
-      ? fingerprintRestoreValue(plan.sections.flows.after)
-      : undefined,
+    versionedBefore,
+    afterFingerprints,
+    appliedRevisions: {},
     pendingRollback: [],
   };
 }
@@ -354,40 +366,53 @@ async function applyPlanSections(
   plan: RestorePlan,
   journal: RecoveryJournal,
   environment: RestoreEnvironment,
-): Promise<void> {
+): Promise<Partial<Record<BackupSection, unknown>>> {
+  const appliedValues: Partial<Record<BackupSection, unknown>> = {};
   journal.phase = 'applying';
   await environment.journal.save(journal);
-  for (const section of orderedSections(plan.selectedSections)) {
+  for (const section of orderedSections(plan.selectedSections, environment)) {
     const sectionPlan = plan.sections[section];
     if (!sectionPlan) throw new Error(`恢复计划缺少分区 ${section}`);
     if (!journal.pendingRollback.includes(section)) {
       journal.pendingRollback.push(section);
       await environment.journal.save(journal);
     }
-    if (section === 'flows') {
-      if (!plan.flowExpectedRevision || !Array.isArray(sectionPlan.after)) {
-        throw new Error('流程恢复计划缺少 revision 或流程列表');
+    const adapter = environment.registry[section];
+    if (adapter.versioned) {
+      const expectedRevision = plan.expectedRevisions[section];
+      if (!expectedRevision) {
+        throw new Error(`服务器分区 ${section} 的恢复计划缺少 revision`);
       }
-      const result = await environment.replaceFlowSnapshot({
-        expectedRevision: plan.flowExpectedRevision,
-        items: sectionPlan.after as FlowTemplateDetail[],
+      const result = await adapter.versioned.replace({
+        expectedRevision,
+        value: sectionPlan.after,
+        mode: plan.mode,
       });
-      journal.flowAppliedRevision = result.revision;
+      appliedValues[section] = result.value;
+      journal.appliedRevisions[section] = result.revision;
+      journal.afterFingerprints[section] = sectionFingerprint(adapter, result.value, plan.mode);
     } else {
-      await environment.registry[section].replace(sectionPlan.after);
+      await adapter.replace(sectionPlan.after);
+      appliedValues[section] = sectionPlan.after;
     }
     journal.completedSections.push(section);
     await environment.journal.save(journal);
   }
+  return appliedValues;
 }
 
 async function refreshPlanSections(
   plan: RestorePlan,
+  appliedValues: Partial<Record<BackupSection, unknown>>,
   environment: RestoreEnvironment,
 ): Promise<void> {
-  for (const section of orderedSections(plan.selectedSections)) {
+  for (const section of orderedSections(plan.selectedSections, environment)) {
     const sectionPlan = plan.sections[section];
-    if (sectionPlan) await environment.registry[section].refresh?.(sectionPlan.after);
+    if (sectionPlan) {
+      await environment.registry[section].refresh?.(
+        Object.hasOwn(appliedValues, section) ? appliedValues[section] : sectionPlan.after,
+      );
+    }
   }
 }
 
@@ -396,39 +421,39 @@ async function rollbackOne(
   journal: RecoveryJournal,
   environment: RestoreEnvironment,
 ): Promise<void> {
-  if (section === 'flows') {
-    if (!journal.flowBefore) {
-      throw new Error('流程回滚缺少恢复前快照');
-    }
-    const current = await environment.getFlowSnapshot();
-    if (current.revision === journal.flowBefore.revision) return;
+  const adapter = environment.registry[section];
+  if (adapter.versioned) {
+    const before = journal.versionedBefore[section];
+    if (!before) throw new Error(`服务器分区 ${section} 回滚缺少恢复前快照`);
+    const current = await adapter.versioned.read();
+    if (current.revision === before.revision) return;
 
-    let expectedRevision = journal.flowAppliedRevision;
+    let expectedRevision = journal.appliedRevisions[section];
     if (expectedRevision) {
       if (current.revision !== expectedRevision) {
         throw new RestoreTargetChangedError(section);
       }
     } else {
-      if (
-        !journal.flowAfterFingerprint ||
-        fingerprintRestoreValue(current.items) !== journal.flowAfterFingerprint
-      ) {
+      const intended = journal.afterFingerprints[section];
+      if (!intended || sectionFingerprint(adapter, current.value, journal.mode) !== intended) {
         throw new RestoreTargetChangedError(section);
       }
       expectedRevision = current.revision;
     }
-    await environment.replaceFlowSnapshot({
+    const result = await adapter.versioned.replace({
       expectedRevision,
-      items: journal.flowBefore.items,
+      value: before.value,
+      mode: 'replace',
     });
+    await adapter.refresh?.(result.value);
     return;
   }
   if (!Object.hasOwn(journal.before, section)) {
     throw new Error(`恢复日志缺少分区 ${section} 的原始快照`);
   }
   const before = journal.before[section];
-  await environment.registry[section].replace(before);
-  await environment.registry[section].refresh?.(before);
+  await adapter.replace(before);
+  await adapter.refresh?.(before);
 }
 
 async function rollbackCompleted(
@@ -465,11 +490,11 @@ export async function executeRestorePlan(
   }
   await assertTargetsUnchanged(plan, environment);
 
-  const journal = makeJournal(plan);
+  const journal = makeJournal(plan, environment);
   await environment.journal.save(journal);
   try {
-    await applyPlanSections(plan, journal, environment);
-    await refreshPlanSections(plan, environment);
+    const appliedValues = await applyPlanSections(plan, journal, environment);
+    await refreshPlanSections(plan, appliedValues, environment);
     await environment.journal.clear();
     return { ok: true, stats: plan.stats, pendingSections: [] };
   } catch (error) {

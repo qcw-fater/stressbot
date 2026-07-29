@@ -1,5 +1,5 @@
 /**
- * 模板编辑器（独立 Drawer）：直接编辑本地模板库中的模板本体（不触碰 flow.actions/listens）。
+ * 模板编辑器（独立 Drawer）：直接编辑服务器共享模板库中的模板本体（不触碰 flow.actions/listens）。
  *
  * 触发：在 NodePalette 中双击模板，或右键菜单选择「编辑模板」。
  *
@@ -7,7 +7,7 @@
  *   - action 模板：PatternSelector + DeclarativeForm / LuaForm
  *   - listen 模板：Tabs(silent / declarative / lua)
  *
- * 保存：updateActionTemplate / updateListenTemplate，写回本地模板库并广播 template-change。
+ * 保存：updateActionTemplate / updateListenTemplate，写回共享模板库并广播 template-change。
  */
 
 import { useEffect, useState } from 'react';
@@ -35,9 +35,12 @@ import { FloatingWindow } from '../panels/FloatingWindow';
 import { cloneListenDefaultRef } from './listenTemplateDefaults';
 import { TargetConnectionRouteEditor } from '../codec/TargetConnectionRouteEditor';
 import { useCodecConnections, useCodecRouteSpecs } from '../codec/useCodecConnections';
+import { useTemplateLibraryCapability } from './useTemplateLibraryCapability';
+import { showApiError } from '@/services/errorHandler';
 
 export function TemplateEditorDrawer() {
   const { message } = AntApp.useApp();
+  const { templateLibrary } = useTemplateLibraryCapability();
   const { activePanel, closePanel } = useEditorStore(
     useShallow((s) => ({ activePanel: s.activePanel.templateEdit, closePanel: s.closePanel })),
   );
@@ -58,27 +61,30 @@ export function TemplateEditorDrawer() {
       setTpl(null);
       return;
     }
+    if (templateLibrary !== true) return;
     const fetcher = templateKind === 'action' ? getActionTemplate : getListenTemplate;
-    void fetcher(templateId).then((t) => {
-      if (!t) {
-        message.error('模板不存在或已被删除');
-        closePanel('templateEdit');
-        return;
-      }
-      setTpl(t);
-      setName(t.name);
-      setDescription(t.description ?? '');
-      if (templateKind === 'action') {
-        setActionDef((t as ActionTemplate).data);
-      } else {
-        const listenTpl = t as ListenTemplate;
-        const cb = listenTpl.data;
-        setListenDef(cb);
-        setListenKind(classifyListen(cb));
-        setListenDefaultRef(cloneListenDefaultRef(listenTpl.defaultRef));
-      }
-    });
-  }, [open, templateKind, templateId, closePanel, message]);
+    void fetcher(templateId)
+      .then((t) => {
+        if (!t) {
+          message.error('模板不存在或已被删除');
+          closePanel('templateEdit');
+          return;
+        }
+        setTpl(t);
+        setName(t.name);
+        setDescription(t.description ?? '');
+        if (templateKind === 'action') {
+          setActionDef((t as ActionTemplate).data);
+        } else {
+          const listenTpl = t as ListenTemplate;
+          const cb = listenTpl.data;
+          setListenDef(cb);
+          setListenKind(classifyListen(cb));
+          setListenDefaultRef(cloneListenDefaultRef(listenTpl.defaultRef));
+        }
+      })
+      .catch(showApiError);
+  }, [open, templateKind, templateId, templateLibrary, closePanel, message]);
 
   const onSwitchListenKind = (next: ListenKind) => {
     if (next === listenKind) return;
@@ -91,28 +97,32 @@ export function TemplateEditorDrawer() {
   };
 
   const onSave = async () => {
-    if (!tpl || !templateKind) return;
+    if (!tpl || !templateKind || templateLibrary !== true) return;
     const trimName = name.trim() || tpl.name;
-    if (templateKind === 'action' && actionDef) {
-      await updateActionTemplate({
-        ...(tpl as ActionTemplate),
-        name: trimName,
-        description: description.trim() || undefined,
-        pattern: actionDef.pattern,
-        data: actionDef,
-      });
-    } else if (templateKind === 'listen' && listenDef) {
-      await updateListenTemplate({
-        ...(tpl as ListenTemplate),
-        name: trimName,
-        description: description.trim() || undefined,
-        kind: listenKind,
-        data: listenDef,
-        defaultRef: cloneListenDefaultRef(listenDefaultRef),
-      });
+    try {
+      if (templateKind === 'action' && actionDef) {
+        await updateActionTemplate({
+          ...(tpl as ActionTemplate),
+          name: trimName,
+          description: description.trim() || undefined,
+          pattern: actionDef.pattern,
+          data: actionDef,
+        });
+      } else if (templateKind === 'listen' && listenDef) {
+        await updateListenTemplate({
+          ...(tpl as ListenTemplate),
+          name: trimName,
+          description: description.trim() || undefined,
+          kind: listenKind,
+          data: listenDef,
+          defaultRef: cloneListenDefaultRef(listenDefaultRef),
+        });
+      }
+      message.success('已保存');
+      closePanel('templateEdit');
+    } catch (error) {
+      showApiError(error);
     }
-    message.success('已保存');
-    closePanel('templateEdit');
   };
 
   return (
@@ -137,12 +147,15 @@ export function TemplateEditorDrawer() {
       footer={
         <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
           <Button onClick={() => closePanel('templateEdit')}>取消</Button>
-          <Button type="primary" onClick={onSave} disabled={!tpl}>
+          <Button type="primary" onClick={onSave} disabled={!tpl || templateLibrary !== true}>
             保存
           </Button>
         </Space>
       }
     >
+      {templateLibrary === false && (
+        <Alert type="warning" showIcon message="共享模板库未启用，请联系管理员" />
+      )}
       {tpl && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <Alert

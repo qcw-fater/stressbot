@@ -37,9 +37,11 @@ type AdminServer struct {
 
 	logsProxyClient *http.Client // Agent 日志代理（5s 超时）
 
-	history *HistoryStore      // 可选
-	flows   *FlowTemplateStore // 可选（流程模板库，依赖全局 MySQL）
-	sampler *Sampler           // 可选
+	history         *HistoryStore        // 可选
+	flows           *FlowTemplateStore   // 可选（流程模板库，依赖全局 MySQL）
+	actionTemplates *ActionTemplateStore // 可选（共享动作模板库，依赖全局 MySQL）
+	listenTemplates *ListenTemplateStore // 可选（共享监听模板库，依赖全局 MySQL）
+	sampler         *Sampler             // 可选
 
 	db *sql.DB // 全局共享 MySQL 连接池（HistoryStore 复用，由 AdminServer 统一 Close）
 
@@ -102,6 +104,8 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 		s.db = db // 由 AdminServer 统一 Close（Shutdown）
 		// 流程模板库依赖全局 MySQL，与 history 相互独立：未配 history 时流程库仍可用。
 		s.flows = NewFlowTemplateStore(db)
+		s.actionTemplates = NewActionTemplateStore(db)
+		s.listenTemplates = NewListenTemplateStore(db)
 	} else {
 		stresslog.Info("[ADMIN] MySQL 未配置：历史归档模块未启用，" +
 			"所有 /api/history* 接口将返回 HISTORY_DISABLED")

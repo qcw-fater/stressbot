@@ -42,6 +42,7 @@ export * as resourcesStore from './resourcesStore';
 export type { ResourceFile } from './resourcesStore';
 
 export * from './flowsApi';
+export * from './templatesApi';
 export * from './errorMapValidation';
 export * from './configTransfer/types';
 export * from './configTransfer/backupCodec';

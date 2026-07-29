@@ -59,8 +59,30 @@ function dependencies(): SectionRegistryDependencies {
     replaceErrorMap: vi.fn(async () => undefined),
     listActionTemplates: vi.fn(async () => []),
     replaceActionTemplates: vi.fn(async () => undefined),
+    getActionTemplateSnapshot: vi.fn(async () => ({ revision: 'action-r1', items: [] })),
+    replaceActionTemplateSnapshot: vi.fn(async (request) => ({
+      revision: 'action-r2',
+      count: request.items.length,
+      items: request.items.map((item: ActionTemplate, index: number) => ({
+        ...item,
+        id: item.id || `server-action-${index}`,
+        createdAt: item.createdAt || 100,
+        updatedAt: item.updatedAt || 101,
+      })),
+    })),
     listListenTemplates: vi.fn(async () => []),
     replaceListenTemplates: vi.fn(async () => undefined),
+    getListenTemplateSnapshot: vi.fn(async () => ({ revision: 'listen-r7', items: [] })),
+    replaceListenTemplateSnapshot: vi.fn(async (request) => ({
+      revision: 'listen-r8',
+      count: request.items.length,
+      items: request.items.map((item: ListenTemplate, index: number) => ({
+        ...item,
+        id: item.id || `server-listen-${index}`,
+        createdAt: item.createdAt || 200,
+        updatedAt: item.updatedAt || 201,
+      })),
+    })),
     exportNotepadFiles: vi.fn(async () => []),
     replaceNotepadFiles: vi.fn(async () => undefined),
     createId: vi.fn(() => 'copy-id'),
@@ -81,6 +103,36 @@ describe('section identities', () => {
 
     expect(adapter.identity?.name(resource('Login.proto'))).toBe('Login.proto');
     expect(adapter.identity?.name(resource('login.proto'))).not.toBe('Login.proto');
+  });
+
+  it('动作和监听模板按精确名称合并并交由服务器生成新增身份', () => {
+    const registry = createSectionRegistry(dependencies());
+    const source: ActionTemplate = {
+      id: 'imported',
+      name: 'Login',
+      pattern: 'setState',
+      data: { pattern: 'setState' },
+      createdAt: 20,
+      updatedAt: 21,
+    };
+    const target: ActionTemplate = { ...source, id: 'target', createdAt: 10, updatedAt: 11 };
+    const identity = registry.actionTemplates.identity!;
+
+    expect(identity.matchBy).toBe('name');
+    expect(identity.prepareAdd?.(source)).toMatchObject({ id: '', createdAt: 0, updatedAt: 0 });
+    expect(identity.prepareOverwrite?.(target, source)).toEqual({
+      ...source,
+      id: 'target',
+      createdAt: 10,
+      updatedAt: 0,
+    });
+    expect(identity.prepareCopy?.(source, 'Login（副本）')).toMatchObject({
+      id: '',
+      name: 'Login（副本）',
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    expect(registry.listenTemplates.identity?.matchBy).toBe('name');
   });
 });
 
@@ -130,6 +182,7 @@ describe('section validation', () => {
       pattern: 'setState',
       data: { pattern: 'setState' },
       createdAt: 10,
+      updatedAt: 10,
     };
     const listen: ListenTemplate = {
       id: 'listen-1',
@@ -137,6 +190,7 @@ describe('section validation', () => {
       kind: 'silent',
       data: {},
       createdAt: 20,
+      updatedAt: 20,
     };
 
     expect(() => registry.actionTemplates.validate([action])).not.toThrow();
@@ -233,5 +287,90 @@ describe('section IO and backup parsing', () => {
     });
 
     expect(() => parseBackupWithRegistry(text, registry)).toThrow('Proto 文件名');
+  });
+
+  it('动作和监听模板通过独立服务器快照备份与恢复', async () => {
+    const deps = dependencies();
+    const action: ActionTemplate = {
+      id: 'action-imported',
+      name: '登录',
+      pattern: 'setState',
+      data: { pattern: 'setState' },
+      createdAt: 10,
+      updatedAt: 11,
+    };
+    const listen: ListenTemplate = {
+      id: 'listen-imported',
+      name: '推送',
+      kind: 'silent',
+      data: {},
+      createdAt: 20,
+      updatedAt: 21,
+    };
+    vi.mocked(deps.getActionTemplateSnapshot).mockResolvedValue({
+      revision: 'action-r1',
+      items: [action],
+    });
+    vi.mocked(deps.getListenTemplateSnapshot).mockResolvedValue({
+      revision: 'listen-r7',
+      items: [listen],
+    });
+    const registry = createSectionRegistry(deps);
+
+    await expect(registry.actionTemplates.versioned?.read()).resolves.toEqual({
+      revision: 'action-r1',
+      value: [action],
+    });
+    await expect(registry.listenTemplates.versioned?.read()).resolves.toEqual({
+      revision: 'listen-r7',
+      value: [listen],
+    });
+
+    const replaced = await registry.actionTemplates.versioned?.replace({
+      expectedRevision: 'action-r1',
+      value: [action],
+      mode: 'replace',
+    });
+    expect(deps.replaceActionTemplateSnapshot).toHaveBeenCalledWith({
+      expectedRevision: 'action-r1',
+      idPolicy: 'preserve',
+      items: [action],
+    });
+    expect(replaced?.value).toEqual([action]);
+
+    const generated = { ...listen, id: '', createdAt: 0, updatedAt: 0 };
+    const merged = await registry.listenTemplates.versioned?.replace({
+      expectedRevision: 'listen-r7',
+      value: [generated],
+      mode: 'merge',
+    });
+    expect(deps.replaceListenTemplateSnapshot).toHaveBeenCalledWith({
+      expectedRevision: 'listen-r7',
+      idPolicy: 'generate-missing',
+      items: [generated],
+    });
+    expect(merged?.value[0]).toMatchObject({ id: 'server-listen-0', createdAt: 200, updatedAt: 201 });
+  });
+
+  it('合并恢复指纹忽略服务器生成的身份，完整恢复指纹保留全部元数据', () => {
+    const registry = createSectionRegistry(dependencies());
+    const planned: ActionTemplate[] = [{
+      id: '',
+      name: '登录',
+      pattern: 'setState',
+      data: { pattern: 'setState' },
+      createdAt: 0,
+      updatedAt: 0,
+    }];
+    const persisted: ActionTemplate[] = [{
+      ...planned[0],
+      id: 'server-generated',
+      createdAt: 100,
+      updatedAt: 101,
+    }];
+    const fingerprint = registry.actionTemplates.versioned?.fingerprint;
+
+    expect(fingerprint?.(planned, 'merge')).toBe(fingerprint?.(persisted, 'merge'));
+    expect(fingerprint?.(planned, 'replace')).not.toBe(fingerprint?.(persisted, 'replace'));
   });
 });

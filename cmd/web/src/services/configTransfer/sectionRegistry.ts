@@ -4,10 +4,17 @@ import type { FlowJson } from '@/components/FlowEditor/codec/flowToJson';
 import {
   listActionTemplates,
   listListenTemplates,
+  getActionTemplateSnapshot,
+  getListenTemplateSnapshot,
+  replaceActionTemplateSnapshot,
+  replaceListenTemplateSnapshot,
   replaceActionTemplates,
   replaceListenTemplates,
   type ActionTemplate,
+  type ComponentTemplateSnapshot,
   type ListenTemplate,
+  type ReplaceComponentTemplateSnapshotRequest,
+  type ReplaceComponentTemplateSnapshotResponse,
 } from '@/components/FlowEditor/library/templateStore';
 import {
   loadDraft,
@@ -45,8 +52,18 @@ import {
   type ResourceFile,
 } from '../resourcesStore';
 import { parseErrorMap, validateErrorMap } from '../errorMapValidation';
-import type { BackupSection } from './types';
+import type { BackupSection, RestoreMode } from './types';
 import type { CollectionIdentity } from './restorePlanner';
+
+export interface VersionedSectionIO<T> {
+  read: () => Promise<{ revision: string; value: T }>;
+  replace: (input: {
+    expectedRevision: string;
+    value: T;
+    mode: RestoreMode;
+  }) => Promise<{ revision: string; value: T }>;
+  fingerprint?: (value: T, mode: RestoreMode) => string;
+}
 
 export interface ConfigSectionAdapter<T> {
   key: BackupSection;
@@ -58,6 +75,7 @@ export interface ConfigSectionAdapter<T> {
   count: (value: T) => number;
   identity?: T extends readonly (infer Item)[] ? CollectionIdentity<Item> : never;
   refresh?: (value: T) => Promise<void> | void;
+  versioned?: VersionedSectionIO<T>;
 }
 
 export interface ConfigSectionRegistry {
@@ -90,8 +108,16 @@ export interface SectionRegistryDependencies {
   replaceErrorMap: (file: ResourceFile | null) => Promise<void>;
   listActionTemplates: () => Promise<ActionTemplate[]>;
   replaceActionTemplates: (templates: readonly ActionTemplate[]) => Promise<void>;
+  getActionTemplateSnapshot: () => Promise<ComponentTemplateSnapshot<ActionTemplate>>;
+  replaceActionTemplateSnapshot: (
+    request: ReplaceComponentTemplateSnapshotRequest<ActionTemplate>,
+  ) => Promise<ReplaceComponentTemplateSnapshotResponse<ActionTemplate>>;
   listListenTemplates: () => Promise<ListenTemplate[]>;
   replaceListenTemplates: (templates: readonly ListenTemplate[]) => Promise<void>;
+  getListenTemplateSnapshot: () => Promise<ComponentTemplateSnapshot<ListenTemplate>>;
+  replaceListenTemplateSnapshot: (
+    request: ReplaceComponentTemplateSnapshotRequest<ListenTemplate>,
+  ) => Promise<ReplaceComponentTemplateSnapshotResponse<ListenTemplate>>;
   exportNotepadFiles: () => Promise<NotepadFile[]>;
   replaceNotepadFiles: (files: readonly NotepadFile[]) => Promise<void>;
   createId: () => string;
@@ -113,8 +139,12 @@ const defaultDependencies: SectionRegistryDependencies = {
   replaceErrorMap,
   listActionTemplates,
   replaceActionTemplates,
+  getActionTemplateSnapshot,
+  replaceActionTemplateSnapshot,
   listListenTemplates,
   replaceListenTemplates,
+  getListenTemplateSnapshot,
+  replaceListenTemplateSnapshot,
   exportNotepadFiles,
   replaceNotepadFiles,
   createId: () => nanoid(12),
@@ -321,6 +351,7 @@ function assertActionTemplate(value: unknown, index: number): asserts value is A
     throw new Error(`${label}动作模板校验失败：${actionErrors[0].message}`);
   }
   assertFiniteNumber(value.createdAt, `${label}创建时间`);
+  assertFiniteNumber(value.updatedAt, `${label}更新时间`);
   if (value.description !== undefined && typeof value.description !== 'string') {
     throw new Error(`${label} description 必须是字符串`);
   }
@@ -331,6 +362,7 @@ function assertActionTemplates(value: unknown): asserts value is ActionTemplate[
   value.forEach(assertActionTemplate);
   const items = value as ActionTemplate[];
   assertUnique(items, (item) => item.id, '动作模板 ID');
+  assertUnique(items, (item) => item.name, '动作模板名称');
 }
 
 const LISTEN_KINDS = new Set(['silent', 'declarative', 'lua']);
@@ -358,6 +390,7 @@ function assertListenTemplate(value: unknown, index: number): asserts value is L
     throw new Error(`${label}监听模板校验失败：${listenErrors[0].message}`);
   }
   assertFiniteNumber(value.createdAt, `${label}创建时间`);
+  assertFiniteNumber(value.updatedAt, `${label}更新时间`);
   if (value.description !== undefined && typeof value.description !== 'string') {
     throw new Error(`${label} description 必须是字符串`);
   }
@@ -368,6 +401,7 @@ function assertListenTemplates(value: unknown): asserts value is ListenTemplate[
   value.forEach(assertListenTemplate);
   const items = value as ListenTemplate[];
   assertUnique(items, (item) => item.id, '监听模板 ID');
+  assertUnique(items, (item) => item.name, '监听模板名称');
 }
 
 function assertNotepadFile(value: unknown, index: number): asserts value is NotepadFile {
@@ -408,6 +442,53 @@ function resourceIdentity(createId: () => string): CollectionIdentity<ResourceFi
   };
 }
 
+function templateIdentity<T extends { id: string; name: string; createdAt: number; updatedAt: number }>(
+  createId: () => string,
+): CollectionIdentity<T> {
+  return {
+    ...itemIdentity<T>(createId),
+    matchBy: 'name',
+    prepareAdd: (source) => ({ ...source, id: '', createdAt: 0, updatedAt: 0 }),
+    prepareOverwrite: (target, source) => ({
+      ...source,
+      id: target.id,
+      createdAt: target.createdAt,
+      updatedAt: 0,
+    }),
+    prepareCopy: (source, name) => ({
+      ...source,
+      id: '',
+      name,
+      createdAt: 0,
+      updatedAt: 0,
+    }),
+  };
+}
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value !== null && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.keys(record).sort().map((key) => [key, canonicalize(record[key])]),
+    );
+  }
+  return value;
+}
+
+function templateFingerprint<
+  T extends { id: string; name: string; createdAt: number; updatedAt: number },
+>(items: T[], mode: RestoreMode): string {
+  const stable = [...items]
+    .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0)
+    .map((item) => {
+      if (mode === 'replace') return item;
+      const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...semantic } = item;
+      return semantic;
+    });
+  return JSON.stringify(canonicalize(stable));
+}
+
 const collectionCount = <T>(value: readonly T[]): number => value.length;
 const singletonCount = <T>(value: T | null): number => (value === null ? 0 : 1);
 
@@ -416,8 +497,8 @@ export function createSectionRegistry(
 ): ConfigSectionRegistry {
   const flowIdentity = itemIdentity<FlowTemplateDetail>(dependencies.createId);
   const fileIdentity = resourceIdentity(dependencies.createId);
-  const actionIdentity = itemIdentity<ActionTemplate>(dependencies.createId);
-  const listenIdentity = itemIdentity<ListenTemplate>(dependencies.createId);
+  const actionIdentity = templateIdentity<ActionTemplate>(dependencies.createId);
+  const listenIdentity = templateIdentity<ListenTemplate>(dependencies.createId);
   const notepadIdentity = itemIdentity<NotepadFile>(dependencies.createId);
 
   return {
@@ -433,6 +514,19 @@ export function createSectionRegistry(
       validate: assertFlowTemplates,
       count: collectionCount,
       identity: flowIdentity,
+      versioned: {
+        read: async () => {
+          const snapshot = await dependencies.getFlowSnapshot();
+          return { revision: snapshot.revision, value: snapshot.items };
+        },
+        replace: async ({ expectedRevision, value }) => {
+          const result = await dependencies.replaceFlowSnapshot({
+            expectedRevision,
+            items: value,
+          });
+          return { revision: result.revision, value };
+        },
+      },
     },
     draft: {
       key: 'draft',
@@ -487,21 +581,65 @@ export function createSectionRegistry(
       key: 'actionTemplates',
       label: '动作模板',
       kind: 'collection',
-      read: dependencies.listActionTemplates,
-      replace: dependencies.replaceActionTemplates,
+      read: async () => (await dependencies.getActionTemplateSnapshot()).items,
+      replace: async (items) => {
+        const current = await dependencies.getActionTemplateSnapshot();
+        await dependencies.replaceActionTemplateSnapshot({
+          expectedRevision: current.revision,
+          idPolicy: 'preserve',
+          items,
+        });
+      },
       validate: assertActionTemplates,
       count: collectionCount,
       identity: actionIdentity,
+      versioned: {
+        read: async () => {
+          const snapshot = await dependencies.getActionTemplateSnapshot();
+          return { revision: snapshot.revision, value: snapshot.items };
+        },
+        replace: async ({ expectedRevision, value, mode }) => {
+          const result = await dependencies.replaceActionTemplateSnapshot({
+            expectedRevision,
+            idPolicy: mode === 'replace' ? 'preserve' : 'generate-missing',
+            items: value,
+          });
+          return { revision: result.revision, value: result.items };
+        },
+        fingerprint: templateFingerprint,
+      },
     },
     listenTemplates: {
       key: 'listenTemplates',
       label: '监听模板',
       kind: 'collection',
-      read: dependencies.listListenTemplates,
-      replace: dependencies.replaceListenTemplates,
+      read: async () => (await dependencies.getListenTemplateSnapshot()).items,
+      replace: async (items) => {
+        const current = await dependencies.getListenTemplateSnapshot();
+        await dependencies.replaceListenTemplateSnapshot({
+          expectedRevision: current.revision,
+          idPolicy: 'preserve',
+          items,
+        });
+      },
       validate: assertListenTemplates,
       count: collectionCount,
       identity: listenIdentity,
+      versioned: {
+        read: async () => {
+          const snapshot = await dependencies.getListenTemplateSnapshot();
+          return { revision: snapshot.revision, value: snapshot.items };
+        },
+        replace: async ({ expectedRevision, value, mode }) => {
+          const result = await dependencies.replaceListenTemplateSnapshot({
+            expectedRevision,
+            idPolicy: mode === 'replace' ? 'preserve' : 'generate-missing',
+            items: value,
+          });
+          return { revision: result.revision, value: result.items };
+        },
+        fingerprint: templateFingerprint,
+      },
     },
     notepadFiles: {
       key: 'notepadFiles',

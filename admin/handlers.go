@@ -111,6 +111,22 @@ func (s *AdminServer) registerRoutes() http.Handler {
 	mux.HandleFunc("PUT /sbot/flows/{id}", s.handleUpdateFlow)
 	mux.HandleFunc("DELETE /sbot/flows/{id}", s.handleDeleteFlow)
 
+	// ── Action/Listen 模板库 ──
+	mux.HandleFunc("GET /sbot/action-templates", s.handleListActionTemplates)
+	mux.HandleFunc("POST /sbot/action-templates", s.handleCreateActionTemplate)
+	mux.HandleFunc("GET /sbot/action-templates/snapshot", s.handleGetActionTemplateSnapshot)
+	mux.HandleFunc("PUT /sbot/action-templates/snapshot", s.handleReplaceActionTemplateSnapshot)
+	mux.HandleFunc("GET /sbot/action-templates/{id}", s.handleGetActionTemplate)
+	mux.HandleFunc("PUT /sbot/action-templates/{id}", s.handleUpdateActionTemplate)
+	mux.HandleFunc("DELETE /sbot/action-templates/{id}", s.handleDeleteActionTemplate)
+	mux.HandleFunc("GET /sbot/listen-templates", s.handleListListenTemplates)
+	mux.HandleFunc("POST /sbot/listen-templates", s.handleCreateListenTemplate)
+	mux.HandleFunc("GET /sbot/listen-templates/snapshot", s.handleGetListenTemplateSnapshot)
+	mux.HandleFunc("PUT /sbot/listen-templates/snapshot", s.handleReplaceListenTemplateSnapshot)
+	mux.HandleFunc("GET /sbot/listen-templates/{id}", s.handleGetListenTemplate)
+	mux.HandleFunc("PUT /sbot/listen-templates/{id}", s.handleUpdateListenTemplate)
+	mux.HandleFunc("DELETE /sbot/listen-templates/{id}", s.handleDeleteListenTemplate)
+
 	// ── 服务器能力 ──
 	mux.HandleFunc("GET /sbot/capabilities", s.handleCapabilities)
 
@@ -151,12 +167,18 @@ type CapabilitiesResponse struct {
 	SharedAddr string `json:"sharedAddr,omitempty"`
 	// FlowLibrary 是否已启用服务器流程库。
 	FlowLibrary bool `json:"flowLibrary"`
+	// TemplateLibrary 是否已启用共享 Action/Listen 模板库；两类存储均可用时才为 true。
+	TemplateLibrary bool `json:"templateLibrary"`
 }
 
 // handleCapabilities 返回服务器能力（当前仅共享状态可用性），供前端展示与校验提示。
 // 出于安全考虑，不返回原始 Redis 地址，只返回脱敏后的展示地址。
 func (s *AdminServer) handleCapabilities(w http.ResponseWriter, r *http.Request) {
-	resp := CapabilitiesResponse{SharedState: s.cfg.RedisEnabled(), FlowLibrary: s.flows != nil}
+	resp := CapabilitiesResponse{
+		SharedState:     s.cfg.RedisEnabled(),
+		FlowLibrary:     s.flows != nil,
+		TemplateLibrary: s.actionTemplates != nil && s.listenTemplates != nil,
+	}
 	if resp.SharedState {
 		if resolved, err := s.cfg.Redis.Resolve(); err == nil {
 			resp.SharedAddr = resolved.AddrMasked()

@@ -8,8 +8,9 @@
  * 模板项可拖入画布：拖入时同时插入 ActionDef/ListenDef 到 flow 并建立对应节点。
  */
 
-import { App as AntApp, Empty, Input, Tooltip } from 'antd';
-import { useEffect, useMemo, useState } from 'react';
+import { App as AntApp, Button, Empty, Input, Tooltip } from 'antd';
+import { ReloadOutlined } from '@ant-design/icons';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { NodeType } from '@/types/flow';
 import {
@@ -25,6 +26,8 @@ import { cloneListenDefaultRef, defaultRefSummary } from '../library/listenTempl
 import { useEditorStore } from '../store/editorStore';
 import { classifyListen } from '@/types/listen';
 import './NodePalette.css';
+import { useTemplateLibraryCapability } from '../library/useTemplateLibraryCapability';
+import { showApiError } from '@/services/errorHandler';
 
 interface NodeMeta {
   /** 'listen' 是特殊伪类型：拖入画布会创建一个 silent ListenDef + ListenCard，
@@ -56,6 +59,12 @@ interface ContextMenuState {
 
 export function NodePalette() {
   const { message } = AntApp.useApp();
+  const {
+    templateLibrary,
+    loading: capabilityLoading,
+    error: capabilityError,
+    refresh: refreshCapability,
+  } = useTemplateLibraryCapability();
   const onDragStart = (e: React.DragEvent, type: NodeType | 'listen') => {
     if (type === 'listen') {
       // listen 不是 FlowNode；走独立的 dataTransfer key，由 FlowCanvas onDrop 识别后创建空 silent listen
@@ -72,22 +81,49 @@ export function NodePalette() {
   const [actionFilter, setActionFilter] = useState('');
   const [listenFilter, setListenFilter] = useState('');
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
   const setClipboard = useEditorStore((s) => s.setClipboard);
 
-  const refresh = async () => {
-    const [a, c] = await Promise.all([listActionTemplates(), listListenTemplates()]);
-    setActions(a);
-    setListens(c);
-  };
+  const refresh = useCallback(async () => {
+    if (templateLibrary !== true) return;
+    setRefreshing(true);
+    try {
+      const [a, c] = await Promise.all([listActionTemplates(), listListenTemplates()]);
+      setActions(a);
+      setListens(c);
+    } catch (error) {
+      message.warning(`模板库刷新失败，继续显示上次数据：${(error as Error).message}`);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [message, templateLibrary]);
 
   useEffect(() => {
+    if (templateLibrary !== true) return undefined;
     void refresh();
     // 订阅模板变更，自动刷新
-    return onTemplateChange(() => {
+    const unsubscribe = onTemplateChange(() => {
       void refresh();
     });
-  }, []);
+    const onFocus = () => { void refresh(); };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [refresh, templateLibrary]);
+
+  useEffect(() => {
+    if (capabilityError && templateLibrary === true) {
+      message.warning(`暂时无法确认模板库状态，继续显示上次数据：${capabilityError.message}`);
+    }
+  }, [capabilityError, message, templateLibrary]);
+
+  const onManualRefresh = async () => {
+    await refreshCapability();
+    if (templateLibrary === true) await refresh();
+  };
 
   // 关闭右键菜单
   useEffect(() => {
@@ -194,10 +230,37 @@ export function NodePalette() {
 
       {/* 模板库：占据剩余高度，分为 Action / Listen 两段，各自独立滚动 */}
       <div className="palette-templates">
+        {templateLibrary !== true ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={capabilityLoading
+              ? '正在确认共享模板库状态'
+              : '共享模板库未启用，请联系管理员'}
+          >
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              onClick={() => { void onManualRefresh(); }}
+              loading={capabilityLoading}
+              aria-label="刷新模板库"
+            >
+              重试
+            </Button>
+          </Empty>
+        ) : (
+          <>
         {/* Action 模板段 */}
         <section className="palette-section">
           <div className="palette-section-header">
             <span className="palette-section-title">Action 模板（{actions.length}）</span>
+            <Button
+              type="text"
+              size="small"
+              icon={<ReloadOutlined />}
+              loading={refreshing}
+              onClick={() => { void onManualRefresh(); }}
+              aria-label="刷新模板库"
+            />
           </div>
           <Input.Search
             size="small"
@@ -278,6 +341,8 @@ export function NodePalette() {
             )}
           </div>
         </section>
+          </>
+        )}
       </div>
 
       {/* 右键菜单 */}
@@ -310,12 +375,16 @@ export function NodePalette() {
           <div
             className="palette-context-item palette-context-danger"
             onClick={async () => {
-              if (menu.kind === 'action') {
-                await removeActionTemplate(menu.template.id);
-              } else {
-                await removeListenTemplate(menu.template.id);
+              try {
+                if (menu.kind === 'action') {
+                  await removeActionTemplate(menu.template.id);
+                } else {
+                  await removeListenTemplate(menu.template.id);
+                }
+                setMenu(null);
+              } catch (error) {
+                showApiError(error);
               }
-              setMenu(null);
             }}
           >
             删除模板

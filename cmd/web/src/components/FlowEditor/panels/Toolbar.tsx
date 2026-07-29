@@ -40,11 +40,11 @@ import { useProtoStore } from '../proto/protoStore';
 import { fetchBaselineFlow } from '@/services/baselineApi';
 import { FlowManagerModal } from './FlowManagerModal';
 import { useFlowFileIO } from './useFlowFileIO';
-import { exportAllTemplates, importTemplates, type TemplateBundle } from '../library/templateStore';
 import type { FlowJson } from '../codec/flowToJson';
 import { useValidationStore } from '../validation/validationStore';
 import { getCapabilities } from '@/services/capabilitiesApi';
 import { useRuntimeStore } from '@/services/runtimeStore';
+import { useTemplateLibraryCapability } from '../library/useTemplateLibraryCapability';
 
 const ConfigBackupModal = lazy(async () => {
   const module = await import('@/components/modules/configTransfer/ConfigBackupModal');
@@ -80,6 +80,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
   const protoFileCount = useProtoStore((s) => s.fileCount);
   const listenCount = useFlowStore((s) => Object.keys(s.listens).length);
   const runtimeMode = useRuntimeStore((state) => state.mode);
+  const { templateLibrary } = useTemplateLibraryCapability();
 
   const [flowManagerOpen, setFlowManagerOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
@@ -92,31 +93,6 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
 
   // 隐藏的 input[type=file]，由"文件 → 导入"菜单项触发
   const importInputRef = useRef<HTMLInputElement>(null);
-  const templateImportRef = useRef<HTMLInputElement>(null);
-
-  const onExportTemplates = async () => {
-    const bundle = await exportAllTemplates();
-    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'stressbot-templates.json';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const onImportTemplates = async (file: File) => {
-    try {
-      const bundle = JSON.parse(await file.text()) as TemplateBundle;
-      const r = await importTemplates(bundle);
-      message.success(`导入模板：${r.actions} action + ${r.listens} listen`);
-    } catch (e) {
-      message.error(`导入模板失败：${(e as Error).message}`);
-    }
-    return false;
-  };
 
   const onLoadDefault = async () => {
     try {
@@ -183,19 +159,6 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
       icon: <DownloadOutlined />,
       label: '导出流程 JSON',
       onClick: exportFlow,
-    },
-    { type: 'divider' as const },
-    {
-      key: 'import-templates',
-      icon: <ImportOutlined />,
-      label: '导入模板库…',
-      onClick: () => templateImportRef.current?.click(),
-    },
-    {
-      key: 'export-templates',
-      icon: <DownloadOutlined />,
-      label: '导出模板库',
-      onClick: onExportTemplates,
     },
     { type: 'divider' as const },
     {
@@ -355,18 +318,6 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
           e.target.value = '';
         }}
       />
-      {/* 隐藏 input：文件菜单"导入模板库"触发 */}
-      <input
-        ref={templateImportRef}
-        type="file"
-        accept="application/json,.json"
-        style={{ display: 'none' }}
-        onChange={async (e) => {
-          const f = e.target.files?.[0];
-          if (f) await onImportTemplates(f);
-          e.target.value = '';
-        }}
-      />
       <FlowManagerModal open={flowManagerOpen} onClose={() => setFlowManagerOpen(false)} />
       {backupOpen && (
         <Suspense fallback={null}>
@@ -374,6 +325,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
             open
             onClose={() => setBackupOpen(false)}
             flowLibrary={flowLibrary}
+            templateLibrary={templateLibrary}
             readDraft={readOnly ? loadDraft : captureCurrentDraft}
           />
         </Suspense>
@@ -385,6 +337,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
             runtimeMode={runtimeMode}
             onClose={() => setRestoreOpen(false)}
             flowLibrary={flowLibrary}
+            templateLibrary={templateLibrary}
           />
         </Suspense>
       )}

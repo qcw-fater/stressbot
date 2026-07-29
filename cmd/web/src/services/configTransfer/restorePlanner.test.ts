@@ -198,6 +198,114 @@ describe('planCollectionMerge', () => {
   });
 });
 
+describe('template collection identity hooks', () => {
+  interface TemplateItem extends Item {
+    createdAt: number;
+    updatedAt: number;
+  }
+
+  const template = (id: string, name: string, value: string, createdAt = 10): TemplateItem => ({
+    id,
+    name,
+    value,
+    createdAt,
+    updatedAt: createdAt + 1,
+  });
+
+  const templateIdentity: CollectionIdentity<TemplateItem> = {
+    id: (value) => value.id,
+    name: (value) => value.name,
+    clone: (value, id, name) => ({ ...value, id, name }),
+    createId: () => `copy-${++nextID}`,
+    matchBy: 'name',
+    prepareAdd: (source) => ({ ...source, id: '', createdAt: 0, updatedAt: 0 }),
+    prepareOverwrite: (target, source) => ({
+      ...source,
+      id: target.id,
+      createdAt: target.createdAt,
+      updatedAt: 0,
+    }),
+    prepareCopy: (source, name) => ({
+      ...source,
+      id: '',
+      name,
+      createdAt: 0,
+      updatedAt: 0,
+    }),
+  };
+
+  it('只按区分大小写的精确名称判重，不按 ID 判重', () => {
+    const current = [template('target', 'Login', 'old')];
+
+    expect(findDuplicate(current, template('other', 'Login', 'new'), templateIdentity)).toMatchObject({
+      kind: 'one',
+      matches: [current[0]],
+    });
+    expect(findDuplicate(current, template('target', 'Renamed', 'new'), templateIdentity)).toMatchObject({ kind: 'none' });
+    expect(findDuplicate(current, template('other', 'login', 'new'), templateIdentity)).toMatchObject({ kind: 'none' });
+  });
+
+  it('覆盖保留目标身份，跳过保持目标不变，新增清空服务器身份字段', () => {
+    const current = [template('target', 'Login', 'old', 100)];
+    const incoming = [template('imported', 'Login', 'new', 200)];
+
+    const overwritten = planCollectionMerge(current, incoming, templateIdentity, 'overwrite', 'actionTemplates');
+    expect(overwritten.finalItems).toEqual([{
+      ...incoming[0],
+      id: 'target',
+      createdAt: 100,
+      updatedAt: 0,
+    }]);
+
+    const skipped = planCollectionMerge(current, incoming, templateIdentity, 'skip', 'actionTemplates');
+    expect(skipped.finalItems).toEqual(current);
+
+    const added = planCollectionMerge(
+      current,
+      [template('target', 'Renamed', 'new', 200)],
+      templateIdentity,
+      'overwrite',
+      'actionTemplates',
+    );
+    expect(added.finalItems[1]).toMatchObject({ id: '', name: 'Renamed', createdAt: 0, updatedAt: 0 });
+  });
+
+  it('逐项保留副本时清空身份元数据并生成唯一名称', () => {
+    const current = [template('target', 'Login', 'old', 100)];
+    const pending = planCollectionMerge(
+      current,
+      [template('imported', 'Login', 'new', 200)],
+      templateIdentity,
+      'prompt',
+      'listenTemplates',
+    );
+    const resolved = applyConflictChoices(
+      pending,
+      { [pending.conflicts[0].id]: 'keep-copy' },
+      templateIdentity,
+    );
+
+    expect(resolved.finalItems[1]).toMatchObject({
+      id: '',
+      name: 'Login（副本）',
+      createdAt: 0,
+      updatedAt: 0,
+      value: 'new',
+    });
+  });
+
+  it('完整恢复原样保留导入 ID 和时间', () => {
+    const incoming = [template('imported', 'Login', 'new', 200)];
+    const plan = planCollectionReplace(
+      [template('target', 'Login', 'old', 100)],
+      incoming,
+      templateIdentity,
+      'actionTemplates',
+    );
+    expect(plan.finalItems).toEqual(incoming);
+  });
+});
+
 describe('planCollectionReplace', () => {
   it('removes target-only items during complete restore', () => {
     const plan = planCollectionReplace([item('old', 'Old')], [item('new', 'New')], identity);
