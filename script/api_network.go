@@ -789,9 +789,23 @@ func listenResultValues(L *lua.LState, ctx *Context, spec *WaitSpec, outcome Wai
 		}
 	}
 	if spec.S2CProto != "" && ctx.Factory != nil && len(respBody) > 0 {
-		// 独占瞬态解码（wire-first）：去重缓存改为只服务「留存」（Go-store 整存的
-		// WireValue 字节共享），脚本消费的解码产物用完即弃、GC 快速回收，不再经
-		// 解码态共享缓存（解码树常驻是旧路径的主要钉扎源）。消息可写（历史行为），
+		// 大消息走广播消费去重（protox.FrozenCache）：监听推送常为同场次/全服广播
+		// （如同场战斗 60 人的帧数据字节完全相同），逐机器人独占解码是双重灾难——
+		// 解码 churn 放大 60 倍，且帧循环脚本挂起在 await_tcp_listen 时协程局部变量
+		// 钉着自己那份解码树（wire-first 首版曾改独占瞬态，029→031 剖面实测 live
+		// 单调 +1.15GB、区间 dynamicpb churn ~1.3TB，已复盘回归共享）。
+		// 共享消息以 *Frozen 包 userdata：proto API 读透传、set_field fail-loud。
+		if len(respBody) >= protox.DedupMinBytes {
+			frozen, err := ctx.Factory.ParseFrozenShared(spec.S2CProto, respBody)
+			if err != nil {
+				return []lua.LValue{
+					newErrTable(L, int(errcode.ErrParseFailed), "service="+spec.Service+" route="+spec.RouteKey),
+					lua.LNil,
+				}
+			}
+			return []lua.LValue{lua.LNil, wrapFrozenMessage(L, frozen)}
+		}
+		// 小消息独占解码（重复留存可忽略，不值得哈希+快照）；消息可写（历史行为），
 		// 未改写时 robot.set(resp) 经句柄携带的 body 快照零成本转 WireValue。
 		respMsg, err := ctx.Factory.Parse(spec.S2CProto, respBody)
 		if err != nil {

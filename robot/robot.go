@@ -14,6 +14,7 @@ import (
 
 	lua "github.com/yuin/gopher-lua"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"stressbot/adapter"
 	"stressbot/codec"
@@ -1189,9 +1190,20 @@ func (h *robotActionHandler) runListenScript(cbName string, cbDef *engine.Listen
 
 	var runErr error
 	if cbDef.S2CProto != "" && len(msg.Data) > 0 {
-		// 独占瞬态解码：wire-first 后去重缓存只服务「留存」（Go-store 整存），脚本消费
-		// 解码产物在 RunListenScript 整表 Lua 化后即弃（不常驻），瞬态分配由 GC 快速回收。
-		respMsg, perr := h.robot.factory.Parse(cbDef.S2CProto, msg.Data)
+		// 大消息走广播消费去重（protox.FrozenCache，与 await_listen 同一缓存）：
+		// RunListenScript 只做只读的整表 Lua 化，消息本体不逃逸，共享解码结果安全；
+		// 同一条广播全进程只解码一份，churn 摊薄为 1/接收方数。小消息独占解码。
+		var respMsg proto.Message
+		var perr error
+		if len(msg.Data) >= protox.DedupMinBytes {
+			var frozen *protox.Frozen
+			frozen, perr = h.robot.factory.ParseFrozenShared(cbDef.S2CProto, msg.Data)
+			if perr == nil {
+				respMsg = frozen.Message()
+			}
+		} else {
+			respMsg, perr = h.robot.factory.Parse(cbDef.S2CProto, msg.Data)
+		}
 		if perr != nil {
 			cbErr := engine.NewActionError(errcode.ErrCallbackParse, "proto="+cbDef.S2CProto, perr)
 			stresslog.Error("[ROBOT] 解析监听推送失败",

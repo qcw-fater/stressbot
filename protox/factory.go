@@ -19,16 +19,20 @@ type Factory struct {
 	// 字段路径集合由配置固定、数量有界（写一次读多次），Factory 跨全部 Robot 共享，
 	// 故用 sync.Map：热路径 SetField/GetField 不再每次 splitPath 分配 []string。
 	pathCache sync.Map
-	// wireCache 广播去重缓存（见 dedup.go）：WireShared 按内容寻址共享
+	// wireCache 广播留存去重缓存（见 dedup.go）：WireShared 按内容寻址共享
 	// wire 字节。Factory 跨全部 Robot 共享，缓存天然覆盖全进程。
 	wireCache *WireCache
+	// frozenCache 广播消费去重缓存（见 dedup_frozen.go）：ParseFrozenShared 按内容
+	// 寻址共享解码结果，供 listen 脚本 / await_listen 的只读消费。
+	frozenCache *FrozenCache
 }
 
 // NewFactory 创建动态消息工厂
 func NewFactory(registry *Registry) *Factory {
 	return &Factory{
-		registry:  registry,
-		wireCache: NewWireCache(dedupMaxEntries, dedupMaxBytes),
+		registry:    registry,
+		wireCache:   NewWireCache(dedupMaxEntries, dedupMaxBytes),
+		frozenCache: NewFrozenCache(frozenMaxEntries, frozenMaxCost),
 	}
 }
 
