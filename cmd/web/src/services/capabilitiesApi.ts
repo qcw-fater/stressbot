@@ -13,6 +13,8 @@ export interface CapabilitiesResponse {
   sharedAddr?: string;
   /** 服务器是否已配置流程库（MySQL）。 */
   flowLibrary: boolean;
+  /** 服务器是否已启用共享 Action/Listen 模板库（MySQL）。 */
+  templateLibrary: boolean;
 }
 
 /** 查询服务器能力。 */

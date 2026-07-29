@@ -51,6 +51,7 @@ export interface ConfigBackupModalProps {
   open: boolean;
   onClose: () => void;
   flowLibrary: boolean | undefined;
+  templateLibrary: boolean | undefined;
   registry?: ConfigSectionRegistry;
   readDraft?: () => DraftSnapshot | null;
 }
@@ -59,6 +60,7 @@ export function ConfigBackupModal({
   open,
   onClose,
   flowLibrary,
+  templateLibrary,
   registry = defaultSectionRegistry,
   readDraft = loadDraft,
 }: ConfigBackupModalProps) {
@@ -79,8 +81,14 @@ export function ConfigBackupModal({
   const [downloadError, setDownloadError] = useState<string>();
 
   const availableSections = useMemo(
-    () => BACKUP_SECTIONS.filter((section) => section !== 'flows' || flowLibrary === true),
-    [flowLibrary],
+    () => BACKUP_SECTIONS.filter((section) => {
+      if (section === 'flows') return flowLibrary === true;
+      if (section === 'actionTemplates' || section === 'listenTemplates') {
+        return templateLibrary === true;
+      }
+      return true;
+    }),
+    [flowLibrary, templateLibrary],
   );
 
   useEffect(() => {
@@ -208,23 +216,34 @@ export function ConfigBackupModal({
                   const adapter = runtimeAdapter(activeRegistry, section);
                   const summary = summaries[section];
                   const flowDisabled = section === 'flows' && flowLibrary !== true;
+                  const templateDisabled =
+                    (section === 'actionTemplates' || section === 'listenTemplates') &&
+                    templateLibrary !== true;
+                  const disabled = flowDisabled || templateDisabled;
+                  const unavailableText = flowDisabled
+                    ? flowLibrary === undefined
+                      ? '正在检查流程库'
+                      : '服务器未启用流程库'
+                    : templateDisabled
+                      ? templateLibrary === undefined
+                        ? '正在检查共享模板库'
+                        : '服务器未启用共享模板库'
+                      : undefined;
                   return (
                     <div key={section} className="config-backup-modal__section-row">
                       <Checkbox
                         checked={selected.includes(section)}
-                        disabled={flowDisabled}
+                        disabled={disabled}
                         onChange={(event) => selectSection(section, event.target.checked)}
                       >
                         {adapter.label}
                       </Checkbox>
                       <Typography.Text
-                        type={summary?.error || flowDisabled ? 'danger' : 'secondary'}
+                        type={summary?.error || disabled ? 'danger' : 'secondary'}
                         className="config-backup-modal__section-status"
                       >
-                        {flowDisabled
-                          ? flowLibrary === undefined
-                            ? '正在检查流程库'
-                            : '服务器未启用流程库'
+                        {unavailableText
+                          ? unavailableText
                           : summary?.error
                             ? `读取失败：${summary.error}`
                             : summary

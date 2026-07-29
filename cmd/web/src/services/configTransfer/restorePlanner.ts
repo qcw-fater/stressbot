@@ -12,11 +12,16 @@ export interface CollectionIdentity<T> {
   name: (item: T) => string;
   clone: (item: T, nextId: string, nextName: string) => T;
   createId: () => string;
+  matchBy?: 'id-or-name' | 'name';
+  prepareAdd?: (source: T) => T;
+  prepareOverwrite?: (target: T, source: T) => T;
+  prepareCopy?: (source: T, newName: string) => T;
 }
 
 interface IdentityReader<T> {
   id: (item: T) => string;
   name: (item: T) => string;
+  matchBy?: 'id-or-name' | 'name';
 }
 
 export interface DuplicateMatch<T> {
@@ -72,8 +77,9 @@ export function findDuplicate<T>(
 ): DuplicateMatch<T> {
   const incomingID = identity.id(incoming);
   const incomingName = identity.name(incoming);
-  const byID =
-    incomingID === '' ? undefined : current.find((item) => identity.id(item) === incomingID);
+  const byID = identity.matchBy === 'name' || incomingID === ''
+    ? undefined
+    : current.find((item) => identity.id(item) === incomingID);
   const byName =
     incomingName === '' ? undefined : current.find((item) => identity.name(item) === incomingName);
   const matches = [...new Set([byID, byName].filter((value): value is T => value !== undefined))];
@@ -143,7 +149,7 @@ export function planCollectionMerge<T>(
   incoming.forEach((source, index) => {
     const duplicate = findDuplicate(finalItems, source, identity);
     if (duplicate.kind === 'none') {
-      finalItems.push(source);
+      finalItems.push(identity.prepareAdd?.(source) ?? source);
       stats.added++;
       return;
     }
@@ -152,7 +158,8 @@ export function planCollectionMerge<T>(
       return;
     }
     if (policy === 'overwrite' && duplicate.kind === 'one') {
-      replaceTarget(finalItems, duplicate.matches[0], source);
+      const target = duplicate.matches[0];
+      replaceTarget(finalItems, target, identity.prepareOverwrite?.(target, source) ?? source);
       stats.overwritten++;
       return;
     }
@@ -306,10 +313,15 @@ export function applyConflictChoices<T>(
     if (choice === 'overwrite') {
       const duplicate = findDuplicate(finalItems, conflict.source, identity);
       if (duplicate.kind === 'none') {
-        finalItems.push(conflict.source);
+        finalItems.push(identity.prepareAdd?.(conflict.source) ?? conflict.source);
         stats.added++;
       } else if (duplicate.kind === 'one') {
-        replaceTarget(finalItems, duplicate.matches[0], conflict.source);
+        const target = duplicate.matches[0];
+        replaceTarget(
+          finalItems,
+          target,
+          identity.prepareOverwrite?.(target, conflict.source) ?? conflict.source,
+        );
         stats.overwritten++;
       } else {
         throw new Error(`冲突 ${conflict.sourceName} 在处理期间变为多项匹配`);
@@ -317,11 +329,10 @@ export function applyConflictChoices<T>(
     } else if (choice === 'keep-copy') {
       const usedNames = new Set(finalItems.map(identity.name));
       const sourceName = identity.name(conflict.source);
-      const copy = identity.clone(
-        conflict.source,
-        nextCopyID(finalItems, identity),
-        usedNames.has(sourceName) ? nextCopyName(sourceName, usedNames) : sourceName,
-      );
+      const copyName = usedNames.has(sourceName) ? nextCopyName(sourceName, usedNames) : sourceName;
+      const copy = identity.prepareCopy
+        ? identity.prepareCopy(conflict.source, copyName)
+        : identity.clone(conflict.source, nextCopyID(finalItems, identity), copyName);
       finalItems.push(copy);
       stats.copied++;
     } else {

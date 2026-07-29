@@ -1,29 +1,29 @@
 /**
- * 本地模板库（idb-keyval 实现）：
- *   - actions/{id}     ActionTemplate
- *   - listens/{id}     ListenTemplate
+ * Action / Listen 模板库的组件门面。
  *
- * 设计文档 §11：用户保存常用 action / listen，跨流程复用。
+ * 组件继续使用毫秒时间戳和既有函数名；实际数据统一由服务器 MySQL 模板库保存。
+ * 旧 IndexedDB 数据不会被删除，但正常读写路径不再访问它。
  */
-
-import { clear, createStore, get, set, del, keys, setMany } from 'idb-keyval';
-import { nanoid } from 'nanoid';
 import type { ActionDef } from '@/types/action';
 import type { ListenDef } from '@/types/listen';
+import {
+  actionTemplatesApi,
+  listenTemplatesApi,
+  type ActionTemplateDto,
+  type ActionTemplateSaveDto,
+  type ActionTemplateSnapshotInputDto,
+  type ListenTemplateDefaultRefDto,
+  type ListenTemplateDto,
+  type ListenTemplateSaveDto,
+  type ListenTemplateSnapshotInputDto,
+  type ReplaceTemplateSnapshotRequest,
+  type ReplaceTemplateSnapshotResponse,
+  type TemplateIdPolicy,
+  type TemplateSnapshot,
+} from '@/services/templatesApi';
 
-export interface ListenTemplateDefaultRef {
-  server: string;
-  route: unknown;
-  queueSize?: number;
-}
+export interface ListenTemplateDefaultRef extends ListenTemplateDefaultRefDto {}
 
-// idb-keyval 的 createStore 在同一 DB 名下只能注册一个 objectStore（浏览器本地数据库限制）。
-// 用两个独立 DB 隔离 action / listen 模板，避免 NotFoundError。
-const actionStore = createStore('stressbot-action-templates', 'data');
-const listenStore = createStore('stressbot-listen-templates', 'data');
-
-// ── 变更通知 ────────────────────────────────────────────
-// 当模板增删时通过 EventTarget 广播，订阅者（NodePalette）自动刷新。
 const templateBus = new EventTarget();
 const TEMPLATE_CHANGE_EVENT = 'template-change';
 
@@ -33,7 +33,7 @@ export function onTemplateChange(handler: () => void): () => void {
   return () => templateBus.removeEventListener(TEMPLATE_CHANGE_EVENT, wrapped);
 }
 
-function emitTemplateChange() {
+function emitTemplateChange(): void {
   templateBus.dispatchEvent(new Event(TEMPLATE_CHANGE_EVENT));
 }
 
@@ -44,6 +44,7 @@ export interface ActionTemplate {
   pattern: string;
   data: ActionDef;
   createdAt: number;
+  updatedAt: number;
 }
 
 export interface ListenTemplate {
@@ -54,140 +55,197 @@ export interface ListenTemplate {
   data: ListenDef;
   defaultRef?: ListenTemplateDefaultRef;
   createdAt: number;
+  updatedAt: number;
 }
 
-// ── Action ────────────────────────────────────────────────
+export interface ComponentTemplateSnapshot<T> {
+  revision: string;
+  items: T[];
+}
+
+export interface ReplaceComponentTemplateSnapshotRequest<T> {
+  expectedRevision: string;
+  idPolicy: TemplateIdPolicy;
+  items: readonly T[];
+}
+
+export interface ReplaceComponentTemplateSnapshotResponse<T> {
+  revision: string;
+  count: number;
+  items: T[];
+}
+
+function fromActionDto(template: ActionTemplateDto): ActionTemplate {
+  return {
+    ...template,
+    createdAt: Date.parse(template.createdAt),
+    updatedAt: Date.parse(template.updatedAt),
+  };
+}
+
+function fromListenDto(template: ListenTemplateDto): ListenTemplate {
+  return {
+    ...template,
+    createdAt: Date.parse(template.createdAt),
+    updatedAt: Date.parse(template.updatedAt),
+  };
+}
+
+function actionSave(template: Omit<ActionTemplate, 'id' | 'createdAt' | 'updatedAt'>): ActionTemplateSaveDto {
+  return {
+    name: template.name,
+    ...(template.description ? { description: template.description } : {}),
+    pattern: template.pattern,
+    data: template.data,
+  };
+}
+
+function listenSave(template: Omit<ListenTemplate, 'id' | 'createdAt' | 'updatedAt'>): ListenTemplateSaveDto {
+  return {
+    name: template.name,
+    ...(template.description ? { description: template.description } : {}),
+    kind: template.kind,
+    data: template.data,
+    ...(template.defaultRef ? { defaultRef: template.defaultRef } : {}),
+  };
+}
+
+function wireTime(value: number): string | undefined {
+  return value > 0 ? new Date(value).toISOString() : undefined;
+}
+
+function actionSnapshotInput(template: ActionTemplate): ActionTemplateSnapshotInputDto {
+  return {
+    ...actionSave(template),
+    ...(template.id ? { id: template.id } : {}),
+    ...(wireTime(template.createdAt) ? { createdAt: wireTime(template.createdAt) } : {}),
+    ...(wireTime(template.updatedAt) ? { updatedAt: wireTime(template.updatedAt) } : {}),
+  };
+}
+
+function listenSnapshotInput(template: ListenTemplate): ListenTemplateSnapshotInputDto {
+  return {
+    ...listenSave(template),
+    ...(template.id ? { id: template.id } : {}),
+    ...(wireTime(template.createdAt) ? { createdAt: wireTime(template.createdAt) } : {}),
+    ...(wireTime(template.updatedAt) ? { updatedAt: wireTime(template.updatedAt) } : {}),
+  };
+}
+
 export async function saveActionTemplate(
-  t: Omit<ActionTemplate, 'id' | 'createdAt'>,
+  template: Omit<ActionTemplate, 'id' | 'createdAt' | 'updatedAt'>,
 ): Promise<ActionTemplate> {
-  const tpl: ActionTemplate = { ...t, id: nanoid(8), createdAt: Date.now() };
-  await set(tpl.id, tpl, actionStore);
+  const saved = fromActionDto(await actionTemplatesApi.create(actionSave(template)));
   emitTemplateChange();
-  return tpl;
+  return saved;
 }
 
-export async function updateActionTemplate(t: ActionTemplate): Promise<void> {
-  await set(t.id, t, actionStore);
+export async function updateActionTemplate(template: ActionTemplate): Promise<void> {
+  await actionTemplatesApi.update(template.id, actionSave(template));
   emitTemplateChange();
 }
 
 export async function listActionTemplates(): Promise<ActionTemplate[]> {
-  const ks = await keys(actionStore);
-  const list: ActionTemplate[] = [];
-  for (const k of ks) {
-    const v = await get<ActionTemplate>(k as string, actionStore);
-    if (v) list.push(v);
-  }
-  return list.sort((a, b) => b.createdAt - a.createdAt);
+  return (await actionTemplatesApi.list()).map(fromActionDto);
 }
 
 export async function removeActionTemplate(id: string): Promise<void> {
-  await del(id, actionStore);
+  await actionTemplatesApi.delete(id);
   emitTemplateChange();
+}
+
+export async function getActionTemplate(id: string): Promise<ActionTemplate | undefined> {
+  return fromActionDto(await actionTemplatesApi.get(id));
+}
+
+export async function findActionTemplateByName(name: string): Promise<ActionTemplate | undefined> {
+  return (await listActionTemplates()).find((template) => template.name === name);
+}
+
+export async function getActionTemplateSnapshot(): Promise<ComponentTemplateSnapshot<ActionTemplate>> {
+  const snapshot: TemplateSnapshot<ActionTemplateDto> = await actionTemplatesApi.getSnapshot();
+  return { revision: snapshot.revision, items: snapshot.items.map(fromActionDto) };
+}
+
+export async function replaceActionTemplateSnapshot(
+  request: ReplaceComponentTemplateSnapshotRequest<ActionTemplate>,
+): Promise<ReplaceComponentTemplateSnapshotResponse<ActionTemplate>> {
+  const wireRequest: ReplaceTemplateSnapshotRequest<ActionTemplateSnapshotInputDto> = {
+    expectedRevision: request.expectedRevision,
+    idPolicy: request.idPolicy,
+    items: request.items.map(actionSnapshotInput),
+  };
+  const response: ReplaceTemplateSnapshotResponse<ActionTemplateDto> = (
+    await actionTemplatesApi.replaceSnapshot(wireRequest)
+  );
+  emitTemplateChange();
+  return { ...response, items: response.items.map(fromActionDto) };
 }
 
 export async function replaceActionTemplates(templates: readonly ActionTemplate[]): Promise<void> {
-  await clear(actionStore);
-  if (templates.length > 0) {
-    await setMany(
-      templates.map((template) => [template.id, { ...template }]),
-      actionStore,
-    );
-  }
-  emitTemplateChange();
+  const current = await getActionTemplateSnapshot();
+  await replaceActionTemplateSnapshot({
+    expectedRevision: current.revision,
+    idPolicy: 'preserve',
+    items: templates,
+  });
 }
 
-// ── Listen ────────────────────────────────────────────────
 export async function saveListenTemplate(
-  t: Omit<ListenTemplate, 'id' | 'createdAt'>,
+  template: Omit<ListenTemplate, 'id' | 'createdAt' | 'updatedAt'>,
 ): Promise<ListenTemplate> {
-  const tpl: ListenTemplate = { ...t, id: nanoid(8), createdAt: Date.now() };
-  await set(tpl.id, tpl, listenStore);
+  const saved = fromListenDto(await listenTemplatesApi.create(listenSave(template)));
   emitTemplateChange();
-  return tpl;
+  return saved;
 }
 
-export async function updateListenTemplate(t: ListenTemplate): Promise<void> {
-  await set(t.id, t, listenStore);
+export async function updateListenTemplate(template: ListenTemplate): Promise<void> {
+  await listenTemplatesApi.update(template.id, listenSave(template));
   emitTemplateChange();
 }
 
 export async function listListenTemplates(): Promise<ListenTemplate[]> {
-  const ks = await keys(listenStore);
-  const list: ListenTemplate[] = [];
-  for (const k of ks) {
-    const v = await get<ListenTemplate>(k as string, listenStore);
-    if (v) list.push(v);
-  }
-  return list.sort((a, b) => b.createdAt - a.createdAt);
+  return (await listenTemplatesApi.list()).map(fromListenDto);
 }
 
 export async function removeListenTemplate(id: string): Promise<void> {
-  await del(id, listenStore);
+  await listenTemplatesApi.delete(id);
   emitTemplateChange();
-}
-
-export async function replaceListenTemplates(templates: readonly ListenTemplate[]): Promise<void> {
-  await clear(listenStore);
-  if (templates.length > 0) {
-    await setMany(
-      templates.map((template) => [template.id, { ...template }]),
-      listenStore,
-    );
-  }
-  emitTemplateChange();
-}
-
-// ── 单条读取（编辑模板时用） ────────────────────────────────────────
-export async function getActionTemplate(id: string): Promise<ActionTemplate | undefined> {
-  return get<ActionTemplate>(id, actionStore);
 }
 
 export async function getListenTemplate(id: string): Promise<ListenTemplate | undefined> {
-  return get<ListenTemplate>(id, listenStore);
-}
-
-// ── 按名称查找（覆盖保存前检测） ────────────────────────────────────
-export async function findActionTemplateByName(name: string): Promise<ActionTemplate | undefined> {
-  const list = await listActionTemplates();
-  return list.find((t) => t.name === name);
+  return fromListenDto(await listenTemplatesApi.get(id));
 }
 
 export async function findListenTemplateByName(name: string): Promise<ListenTemplate | undefined> {
-  const list = await listListenTemplates();
-  return list.find((t) => t.name === name);
+  return (await listListenTemplates()).find((template) => template.name === name);
 }
 
-// ── 整体导入/导出 ────────────────────────────────────────────
-export interface TemplateBundle {
-  version: 1;
-  exportedAt: number;
-  actions: ActionTemplate[];
-  listens: ListenTemplate[];
+export async function getListenTemplateSnapshot(): Promise<ComponentTemplateSnapshot<ListenTemplate>> {
+  const snapshot: TemplateSnapshot<ListenTemplateDto> = await listenTemplatesApi.getSnapshot();
+  return { revision: snapshot.revision, items: snapshot.items.map(fromListenDto) };
 }
 
-export async function exportAllTemplates(): Promise<TemplateBundle> {
-  return {
-    version: 1,
-    exportedAt: Date.now(),
-    actions: await listActionTemplates(),
-    listens: await listListenTemplates(),
+export async function replaceListenTemplateSnapshot(
+  request: ReplaceComponentTemplateSnapshotRequest<ListenTemplate>,
+): Promise<ReplaceComponentTemplateSnapshotResponse<ListenTemplate>> {
+  const wireRequest: ReplaceTemplateSnapshotRequest<ListenTemplateSnapshotInputDto> = {
+    expectedRevision: request.expectedRevision,
+    idPolicy: request.idPolicy,
+    items: request.items.map(listenSnapshotInput),
   };
+  const response: ReplaceTemplateSnapshotResponse<ListenTemplateDto> = (
+    await listenTemplatesApi.replaceSnapshot(wireRequest)
+  );
+  emitTemplateChange();
+  return { ...response, items: response.items.map(fromListenDto) };
 }
 
-export async function importTemplates(
-  bundle: TemplateBundle,
-): Promise<{ actions: number; listens: number }> {
-  let aCount = 0;
-  let lCount = 0;
-  for (const a of bundle.actions ?? []) {
-    await set(a.id, a, actionStore);
-    aCount++;
-  }
-  for (const c of bundle.listens ?? []) {
-    await set(c.id, c, listenStore);
-    lCount++;
-  }
-  emitTemplateChange();
-  return { actions: aCount, listens: lCount };
+export async function replaceListenTemplates(templates: readonly ListenTemplate[]): Promise<void> {
+  const current = await getListenTemplateSnapshot();
+  await replaceListenTemplateSnapshot({
+    expectedRevision: current.revision,
+    idPolicy: 'preserve',
+    items: templates,
+  });
 }

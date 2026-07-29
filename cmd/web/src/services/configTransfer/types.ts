@@ -69,7 +69,7 @@ export interface RestorePlan {
   sections: Partial<Record<BackupSection, RestoreSectionPlan>>;
   conflicts: RestoreConflict[];
   stats: Partial<Record<BackupSection, SectionStats>>;
-  flowExpectedRevision?: string;
+  expectedRevisions: Partial<Record<BackupSection, string>>;
 }
 
 export interface RestoreResult {

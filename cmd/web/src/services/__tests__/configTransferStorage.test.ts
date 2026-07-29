@@ -2,6 +2,44 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const stores = new Map<unknown, Map<unknown, unknown>>();
 const storageOperations: string[] = [];
+const templateServer = vi.hoisted(() => ({
+  actions: [] as Array<Record<string, unknown>>,
+  listens: [] as Array<Record<string, unknown>>,
+  actionRevision: 0,
+  listenRevision: 0,
+}));
+
+function snapshotApi(kind: 'action' | 'listen') {
+  const itemsKey = kind === 'action' ? 'actions' : 'listens';
+  const revisionKey = kind === 'action' ? 'actionRevision' : 'listenRevision';
+  return {
+    list: vi.fn(async () => structuredClone(templateServer[itemsKey])),
+    getSnapshot: vi.fn(async () => ({
+      revision: `${kind}-${templateServer[revisionKey]}`,
+      items: structuredClone(templateServer[itemsKey]),
+    })),
+    replaceSnapshot: vi.fn(async (request: {
+      items: Array<Record<string, unknown>>;
+    }) => {
+      templateServer[itemsKey] = structuredClone(request.items).map((item) => ({
+        ...item,
+        createdAt: item.createdAt ?? '2026-01-01T00:00:00.000Z',
+        updatedAt: item.updatedAt ?? '2026-01-01T00:00:00.000Z',
+      }));
+      templateServer[revisionKey] += 1;
+      return {
+        revision: `${kind}-${templateServer[revisionKey]}`,
+        count: templateServer[itemsKey].length,
+        items: structuredClone(templateServer[itemsKey]),
+      };
+    }),
+  };
+}
+
+vi.mock('@/services/templatesApi', () => ({
+  actionTemplatesApi: snapshotApi('action'),
+  listenTemplatesApi: snapshotApi('listen'),
+}));
 
 vi.mock('idb-keyval', () => {
   function storeMap(store: unknown): Map<unknown, unknown> {
@@ -88,6 +126,10 @@ function resource(name: string, content: string, baseHash: string): ResourceFile
 beforeEach(() => {
   stores.clear();
   storageOperations.length = 0;
+  templateServer.actions = [];
+  templateServer.listens = [];
+  templateServer.actionRevision = 0;
+  templateServer.listenRevision = 0;
   localStorage.clear();
 });
 
@@ -140,13 +182,14 @@ describe('resource snapshots', () => {
 });
 
 describe('template snapshots', () => {
-  it('replaces one template section exactly and emits one batch notification', async () => {
+  it('replaces one server template section exactly and emits one batch notification', async () => {
     const listen: ListenTemplate = {
       id: 'listen-1',
       name: 'Push',
       kind: 'silent',
       data: {},
       createdAt: 10,
+      updatedAt: 10,
     };
     const action: ActionTemplate = {
       id: 'action-1',
@@ -154,6 +197,7 @@ describe('template snapshots', () => {
       pattern: 'setState',
       data: { pattern: 'setState' },
       createdAt: 20,
+      updatedAt: 20,
     };
     await replaceListenTemplates([listen]);
     await replaceActionTemplates([{ ...action, id: 'legacy', name: 'Legacy' }]);

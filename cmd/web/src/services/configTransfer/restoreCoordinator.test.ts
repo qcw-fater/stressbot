@@ -12,7 +12,11 @@ import {
   type RestoreAdapter,
   type RestoreEnvironment,
 } from './restoreCoordinator';
-import type { RecoveryJournal, RecoveryJournalStore } from './recoveryJournal';
+import {
+  normalizeRecoveryJournal,
+  type RecoveryJournal,
+  type RecoveryJournalStore,
+} from './recoveryJournal';
 import { BACKUP_SECTIONS, type BackupSection, type RestorePlan, type SectionStats } from './types';
 
 const EMPTY_STATS: SectionStats = {
@@ -23,10 +27,10 @@ const EMPTY_STATS: SectionStats = {
   copied: 0,
 };
 
-function memoryJournal(initial: RecoveryJournal | null = null): RecoveryJournalStore & {
+function memoryJournal(initial: unknown = null): RecoveryJournalStore & {
   peek: () => RecoveryJournal | null;
 } {
-  let value = initial ? structuredClone(initial) : null;
+  let value = initial ? normalizeRecoveryJournal(structuredClone(initial)) : null;
   return {
     load: vi.fn(async () => (value ? structuredClone(value) : null)),
     save: vi.fn(async (next) => {
@@ -76,32 +80,74 @@ interface EnvironmentOptions {
   journal?: ReturnType<typeof memoryJournal>;
 }
 
-function fakeEnvironment(calls: string[], options: EnvironmentOptions = {}): RestoreEnvironment {
+type TestEnvironment = RestoreEnvironment & {
+  getFlowSnapshot: ReturnType<typeof vi.fn>;
+  replaceFlowSnapshot: ReturnType<typeof vi.fn>;
+  setFlowSnapshot: (snapshot: { revision: string; items: unknown[] }) => void;
+};
+
+function fakeEnvironment(calls: string[], options: EnvironmentOptions = {}): TestEnvironment {
+  const journal = options.journal ?? memoryJournal();
+  let flowRevision = 'flow-before';
+  let flowItems: unknown[] = [];
+  const getFlowSnapshot = vi.fn(async () => ({ revision: flowRevision, items: structuredClone(flowItems) }));
+  const replaceFlowSnapshot = vi.fn(async (request: { expectedRevision: string; items: unknown[] }) => {
+    if (request.expectedRevision === 'flow-before') {
+      calls.push('apply:flows');
+      if (options.flowApplyError) throw options.flowApplyError;
+      flowRevision = 'flow-applied';
+      flowItems = structuredClone(request.items);
+      return { revision: 'flow-applied', count: request.items.length };
+    }
+    calls.push('rollback:flows');
+    if (options.flowRollbackError) throw options.flowRollbackError;
+    flowRevision = 'flow-before';
+    flowItems = structuredClone(request.items);
+    return { revision: 'flow-before', count: request.items.length };
+  });
+  const flowAdapter: RestoreAdapter = {
+    key: 'flows',
+    kind: 'collection',
+    read: vi.fn(async () => structuredClone(flowItems)),
+    replace: vi.fn(async () => undefined),
+    validate: vi.fn(),
+    count: (value) => (value as unknown[]).length,
+    identity: {
+      id: (value) => String((value as { id?: unknown }).id ?? ''),
+      name: (value) => String((value as { name?: unknown }).name ?? ''),
+      clone: (value, id, name) => ({ ...(value as object), id, name }),
+      createId: () => 'flow-copy',
+    },
+    versioned: {
+      read: async () => {
+        const snapshot = await getFlowSnapshot();
+        return { revision: snapshot.revision, value: snapshot.items };
+      },
+      replace: async ({ expectedRevision, value }) => {
+        const result = await replaceFlowSnapshot({
+          expectedRevision,
+          items: value as unknown[],
+        });
+        return { revision: result.revision, value };
+      },
+    },
+  };
   const registry = Object.fromEntries(
     BACKUP_SECTIONS.map((section) => [
       section,
-      options.adapters?.[section] ?? fakeAdapter(section, calls),
+      options.adapters?.[section] ?? (section === 'flows' ? flowAdapter : fakeAdapter(section, calls)),
     ]),
   ) as Record<BackupSection, RestoreAdapter>;
-  const journal = options.journal ?? memoryJournal();
-  let flowRevision = 'flow-before';
 
   return {
     registry,
     journal,
-    getFlowSnapshot: vi.fn(async () => ({ revision: flowRevision, items: [] })),
-    replaceFlowSnapshot: vi.fn(async (request) => {
-      if (request.expectedRevision === 'flow-before') {
-        calls.push('apply:flows');
-        if (options.flowApplyError) throw options.flowApplyError;
-        flowRevision = 'flow-applied';
-        return { revision: 'flow-applied', count: request.items.length };
-      }
-      calls.push('rollback:flows');
-      if (options.flowRollbackError) throw options.flowRollbackError;
-      flowRevision = 'flow-before';
-      return { revision: 'flow-before', count: request.items.length };
-    }),
+    getFlowSnapshot,
+    replaceFlowSnapshot,
+    setFlowSnapshot: (snapshot) => {
+      flowRevision = snapshot.revision;
+      flowItems = structuredClone(snapshot.items);
+    },
     createOperationId: () => 'operation-1',
     now: () => new Date('2026-07-23T10:00:00.000Z'),
   };
@@ -130,7 +176,7 @@ function planFor(...sections: BackupSection[]): RestorePlan {
     sections: plans,
     conflicts: [],
     stats,
-    flowExpectedRevision: sections.includes('flows') ? 'flow-before' : undefined,
+    expectedRevisions: sections.includes('flows') ? { flows: 'flow-before' } : {},
   };
 }
 
@@ -279,12 +325,12 @@ describe('recoverPendingRestore', () => {
       flowBefore: { revision: 'flow-before', items: [] },
       pendingRollback: ['flows'],
       flowAfterFingerprint: fingerprintRestoreValue(afterItems),
-    } as RecoveryJournal & { flowAfterFingerprint: string });
+    });
     const env = fakeEnvironment(calls, { journal });
-    env.getFlowSnapshot = vi.fn(async () => ({
+    env.setFlowSnapshot({
       revision: 'flow-after-without-response',
       items: afterItems,
-    }));
+    });
 
     const result = await recoverPendingRestore(env);
 
@@ -313,7 +359,7 @@ describe('recoverPendingRestore', () => {
       status: 409,
     });
     const env = fakeEnvironment(calls, { journal, flowRollbackError: conflict });
-    env.getFlowSnapshot = vi.fn(async () => ({ revision: 'flow-applied', items: [] }));
+    env.setFlowSnapshot({ revision: 'flow-applied', items: [] });
 
     const result = await recoverPendingRestore(env);
 
@@ -440,5 +486,185 @@ describe('preflightRestore', () => {
     expect(resolved.stats.protoFiles?.copied).toBe(1);
     expect(resolved.sections.protoFiles?.after).toHaveLength(2);
     expect(Object.isFrozen(resolved)).toBe(true);
+  });
+});
+
+describe('generic versioned sections', () => {
+  function versionedAdapter(
+    section: BackupSection,
+    calls: string[],
+    initialRevision: string,
+    initialValue: unknown,
+  ): RestoreAdapter & {
+    setRevision: (revision: string) => void;
+  } {
+    let revision = initialRevision;
+    let value = structuredClone(initialValue);
+    return {
+      key: section,
+      kind: 'singleton',
+      read: vi.fn(async () => structuredClone(value)),
+      replace: vi.fn(async (next) => {
+        calls.push(`local:${section}`);
+        value = structuredClone(next);
+      }),
+      validate: vi.fn(),
+      count: () => 1,
+      versioned: {
+        read: vi.fn(async () => ({ revision, value: structuredClone(value) })),
+        replace: vi.fn(async (input: { expectedRevision: string; value: unknown }) => {
+          calls.push(`versioned:${section}:${input.expectedRevision}`);
+          if (input.expectedRevision !== revision) throw new Error(`${section} stale`);
+          value = structuredClone(input.value);
+          revision = `${section}-r${Number(revision.at(-1) ?? '1') + 1}`;
+          return { revision, value: structuredClone(value) };
+        }),
+      },
+      setRevision: (next) => { revision = next; },
+    } as RestoreAdapter & { setRevision: (revision: string) => void };
+  }
+
+  function bundleFor(data: Partial<Record<BackupSection, unknown>>): ConfigBackupBundle {
+    const includedSections = Object.keys(data) as BackupSection[];
+    return {
+      kind: 'stressbot-config-backup',
+      schemaVersion: 1,
+      exportedAt: '2026-07-23T10:00:00.000Z',
+      manifest: { includedSections, counts: {} },
+      data,
+    };
+  }
+
+  it('预检为每个服务器分区保存独立 revision', async () => {
+    const calls: string[] = [];
+    const action = versionedAdapter('actionTemplates', calls, 'action-r1', 'action-before');
+    const listen = versionedAdapter('listenTemplates', calls, 'listen-r7', 'listen-before');
+    const env = fakeEnvironment(calls, {
+      adapters: { actionTemplates: action, listenTemplates: listen },
+    });
+
+    const plan = await preflightRestore(
+      bundleFor({ actionTemplates: 'action-after', listenTemplates: 'listen-after' }),
+      ['actionTemplates', 'listenTemplates'],
+      'replace',
+      'overwrite',
+      env,
+    );
+
+    expect(plan.expectedRevisions).toEqual({
+      actionTemplates: 'action-r1',
+      listenTemplates: 'listen-r7',
+    });
+  });
+
+  it('任一服务器分区 revision 变化时在所有写入前终止', async () => {
+    const calls: string[] = [];
+    const action = versionedAdapter('actionTemplates', calls, 'action-r1', 'action-before');
+    const listen = versionedAdapter('listenTemplates', calls, 'listen-r1', 'listen-before');
+    const env = fakeEnvironment(calls, {
+      adapters: { actionTemplates: action, listenTemplates: listen },
+    });
+    const plan = await preflightRestore(
+      bundleFor({ actionTemplates: 'action-after', listenTemplates: 'listen-after' }),
+      ['actionTemplates', 'listenTemplates'],
+      'replace',
+      'overwrite',
+      env,
+    );
+    listen.setRevision('listen-r2');
+
+    await expect(executeRestorePlan(plan, env)).rejects.toBeInstanceOf(RestoreTargetChangedError);
+    expect(calls).toEqual([]);
+  });
+
+  it('先按固定顺序写服务器分区，再写本地分区；失败后使用各自最新 revision 逆序回滚', async () => {
+    const calls: string[] = [];
+    const action = versionedAdapter('actionTemplates', calls, 'action-r1', 'action-before');
+    const listen = versionedAdapter('listenTemplates', calls, 'listen-r1', 'listen-before');
+    const draft = fakeAdapter('draft', calls, { before: 'draft-before', after: 'draft-after' });
+    draft.replace = vi.fn(async (value) => {
+      calls.push(value === 'draft-after' ? 'apply:draft' : 'rollback:draft');
+      if (value === 'draft-after') throw new Error('draft failed');
+    });
+    const env = fakeEnvironment(calls, {
+      adapters: { actionTemplates: action, listenTemplates: listen, draft },
+    });
+    const plan = await preflightRestore(
+      bundleFor({ draft: 'draft-after', actionTemplates: 'action-after', listenTemplates: 'listen-after' }),
+      ['draft', 'actionTemplates', 'listenTemplates'],
+      'replace',
+      'overwrite',
+      env,
+    );
+
+    await expect(executeRestorePlan(plan, env)).rejects.toBeInstanceOf(RestoreExecutionError);
+    expect(calls).toEqual([
+      'versioned:actionTemplates:action-r1',
+      'versioned:listenTemplates:listen-r1',
+      'apply:draft',
+      'rollback:draft',
+      'versioned:listenTemplates:listenTemplates-r2',
+      'versioned:actionTemplates:actionTemplates-r2',
+    ]);
+    expect(await env.journal.load()).toBeNull();
+  });
+
+  it('响应前中断时以语义指纹识别服务器生成 ID，并安全回滚', async () => {
+    const calls: string[] = [];
+    const before = [{ id: 'old', name: '旧模板', createdAt: 1, updatedAt: 1 }];
+    const intended = [{ id: '', name: '新模板', createdAt: 0, updatedAt: 0 }];
+    let revision = 'action-r1';
+    let value = structuredClone(before);
+    let firstApply = true;
+    const semantic = (items: unknown) => JSON.stringify(
+      (items as Array<{ name: string }>).map((item) => ({ name: item.name })),
+    );
+    const adapter: RestoreAdapter = {
+      key: 'actionTemplates',
+      kind: 'collection',
+      read: vi.fn(async () => structuredClone(value)),
+      replace: vi.fn(async () => undefined),
+      validate: vi.fn(),
+      count: (items) => (items as unknown[]).length,
+      identity: {
+        id: (item) => (item as { id: string }).id,
+        name: (item) => (item as { name: string }).name,
+        clone: (item, id, name) => ({ ...(item as object), id, name }),
+        createId: () => '',
+      },
+      versioned: {
+        read: vi.fn(async () => ({ revision, value: structuredClone(value) })),
+        fingerprint: semantic,
+        replace: vi.fn(async ({ expectedRevision, value: next }) => {
+          calls.push(`replace:${expectedRevision}`);
+          if (expectedRevision !== revision) throw new Error('stale');
+          if (firstApply) {
+            firstApply = false;
+            value = [{ ...(next as Array<Record<string, unknown>>)[0], id: 'server-id', createdAt: 100, updatedAt: 101 }] as typeof before;
+            revision = 'action-r2';
+            throw new Error('响应前连接中断');
+          }
+          value = structuredClone(next as typeof before);
+          revision = 'action-r3';
+          return { revision, value: structuredClone(value) };
+        }),
+      },
+    };
+    const env = fakeEnvironment(calls, { adapters: { actionTemplates: adapter } });
+    const plan = planFor('actionTemplates');
+    plan.mode = 'merge';
+    plan.sections.actionTemplates = {
+      before,
+      incoming: intended,
+      after: intended,
+      beforeFingerprint: fingerprintRestoreValue(before),
+      stats: { ...EMPTY_STATS },
+    };
+    plan.expectedRevisions = { actionTemplates: 'action-r1' };
+
+    await expect(executeRestorePlan(plan, env)).rejects.toBeInstanceOf(RestoreExecutionError);
+    expect(calls).toEqual(['replace:action-r1', 'replace:action-r2']);
+    expect(value).toEqual(before);
+    expect(await env.journal.load()).toBeNull();
   });
 });

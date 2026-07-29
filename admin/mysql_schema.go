@@ -162,6 +162,35 @@ CREATE TABLE IF NOT EXISTS flow_template (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `
 
+const ddlActionTemplate = `
+CREATE TABLE IF NOT EXISTS action_template (
+    id           VARCHAR(32)  NOT NULL PRIMARY KEY,
+    name         VARCHAR(80)  CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+    description  VARCHAR(500) NULL,
+    pattern      VARCHAR(32)  NOT NULL,
+    data_json    MEDIUMBLOB   NOT NULL,
+    created_at   DATETIME(3)  NOT NULL,
+    updated_at   DATETIME(3)  NOT NULL,
+    UNIQUE INDEX uq_action_template_name (name),
+    INDEX idx_action_template_updated (updated_at DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+`
+
+const ddlListenTemplate = `
+CREATE TABLE IF NOT EXISTS listen_template (
+    id                VARCHAR(32)  NOT NULL PRIMARY KEY,
+    name              VARCHAR(80)  CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+    description       VARCHAR(500) NULL,
+    kind              VARCHAR(32)  NOT NULL,
+    data_json         MEDIUMBLOB   NOT NULL,
+    default_ref_json  MEDIUMBLOB   NULL,
+    created_at        DATETIME(3)  NOT NULL,
+    updated_at        DATETIME(3)  NOT NULL,
+    UNIQUE INDEX uq_listen_template_name (name),
+    INDEX idx_listen_template_updated (updated_at DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+`
+
 var allDDL = []string{
 	ddlTaskHistory,
 	ddlTaskAssignment,
@@ -172,4 +201,6 @@ var allDDL = []string{
 	ddlTaskAgentEvents,
 	ddlTaskMeta,
 	ddlFlowTemplate,
+	ddlActionTemplate,
+	ddlListenTemplate,
 }

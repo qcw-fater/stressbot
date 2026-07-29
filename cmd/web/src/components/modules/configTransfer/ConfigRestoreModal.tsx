@@ -75,6 +75,7 @@ export interface ConfigRestoreModalProps {
   runtimeMode: RuntimeMode;
   onClose: () => void;
   flowLibrary: boolean | undefined;
+  templateLibrary: boolean | undefined;
   registry?: ConfigSectionRegistry;
   services?: ConfigRestoreServices;
   confirmRestore?: (mode: RestoreMode) => Promise<boolean>;
@@ -85,6 +86,7 @@ export function ConfigRestoreModal({
   runtimeMode,
   onClose,
   flowLibrary,
+  templateLibrary,
   registry = defaultSectionRegistry,
   services,
   confirmRestore,
@@ -135,10 +137,16 @@ export function ConfigRestoreModal({
     if (!bundle) return;
     setSelected(
       bundle.manifest.includedSections.filter(
-        (section) => section !== 'flows' || flowLibrary === true,
+        (section) => {
+          if (section === 'flows') return flowLibrary === true;
+          if (section === 'actionTemplates' || section === 'listenTemplates') {
+            return templateLibrary === true;
+          }
+          return true;
+        },
       ),
     );
-  }, [bundle, flowLibrary]);
+  }, [bundle, flowLibrary, templateLibrary]);
 
   useEffect(() => {
     if (!bundle || selected.length === 0) {
@@ -249,7 +257,13 @@ export function ConfigRestoreModal({
     (plan.conflicts.length > 0 && !choicesComplete);
   const availableIncluded =
     bundle?.manifest.includedSections.filter(
-      (section) => section !== 'flows' || flowLibrary === true,
+      (section) => {
+        if (section === 'flows') return flowLibrary === true;
+        if (section === 'actionTemplates' || section === 'listenTemplates') {
+          return templateLibrary === true;
+        }
+        return true;
+      },
     ) ?? [];
 
   const footer = result
@@ -345,20 +359,31 @@ export function ConfigRestoreModal({
               <div className="config-restore__selection-list">
                 {bundle.manifest.includedSections.map((section) => {
                   const flowDisabled = section === 'flows' && flowLibrary !== true;
+                  const templateDisabled =
+                    (section === 'actionTemplates' || section === 'listenTemplates') &&
+                    templateLibrary !== true;
+                  const disabled = flowDisabled || templateDisabled;
+                  const unavailableText = flowDisabled
+                    ? flowLibrary === undefined
+                      ? '正在检查流程库'
+                      : '服务器未启用流程库'
+                    : templateDisabled
+                      ? templateLibrary === undefined
+                        ? '正在检查共享模板库'
+                        : '服务器未启用共享模板库'
+                      : undefined;
                   return (
                     <div key={section} className="config-restore__selection-row">
                       <Checkbox
                         checked={selected.includes(section)}
-                        disabled={flowDisabled}
+                        disabled={disabled}
                         onChange={(event) => toggleSection(section, event.target.checked)}
                       >
                         {sectionLabel(section)}
                       </Checkbox>
-                      <Typography.Text type={flowDisabled ? 'danger' : 'secondary'}>
-                        {flowDisabled
-                          ? flowLibrary === undefined
-                            ? '正在检查流程库'
-                            : '服务器未启用流程库'
+                      <Typography.Text type={disabled ? 'danger' : 'secondary'}>
+                        {unavailableText
+                          ? unavailableText
                           : `${bundle.manifest.counts[section] ?? 0} 项`}
                       </Typography.Text>
                     </div>

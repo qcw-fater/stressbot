@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { assertBackupFileSize, createBackupBundle, parseBackupText } from './backupCodec';
+import {
+  assertBackupFileSize,
+  createBackupBundle,
+  parseBackupText,
+  parseBackupWithRegistry,
+} from './backupCodec';
 import type { ConfigSectionRegistry } from './sectionRegistry';
 import { BACKUP_KIND, BACKUP_SCHEMA_VERSION, type BackupSection, MAX_BACKUP_BYTES } from './types';
 
@@ -154,6 +159,26 @@ describe('parseBackupText', () => {
         ),
       ),
     ).toThrow('protoFiles 数量与实际内容不一致');
+  });
+
+  it('完整配置备份要求模板包含当前格式的 updatedAt', () => {
+    const text = JSON.stringify(backup({
+      manifest: {
+        includedSections: ['actionTemplates'],
+        counts: { actionTemplates: 1 },
+      },
+      data: {
+        actionTemplates: [{
+          id: 'a1',
+          name: '登录',
+          pattern: 'setState',
+          data: { pattern: 'setState' },
+          createdAt: 123,
+        }],
+      },
+    }));
+
+    expect(() => parseBackupWithRegistry(text)).toThrow(/更新时间/);
   });
 });
 

@@ -73,6 +73,7 @@ describe('ConfigBackupModal', () => {
         open
         onClose={() => undefined}
         flowLibrary={false}
+        templateLibrary={false}
         registry={registryWith()}
       />,
     );
@@ -90,12 +91,15 @@ describe('ConfigBackupModal', () => {
     expect((screen.getByRole('checkbox', { name: /笔记文件/ }) as HTMLInputElement).checked).toBe(
       true,
     );
+    expect((screen.getByRole('checkbox', { name: /Action 模板/ }) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole('checkbox', { name: /Listen 模板/ }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.getAllByText('服务器未启用共享模板库')).toHaveLength(2);
   });
 
   it('does not allow a download when no section is selected', async () => {
     const user = userEvent.setup();
     render(
-      <ConfigBackupModal open onClose={() => undefined} flowLibrary registry={registryWith()} />,
+      <ConfigBackupModal open onClose={() => undefined} flowLibrary templateLibrary registry={registryWith()} />,
     );
 
     await user.click(await screen.findByRole('button', { name: '清空' }));
@@ -112,7 +116,7 @@ describe('ConfigBackupModal', () => {
       protoFiles: [{ name: 'login.proto', content: 'syntax = "proto3";' }],
     });
     render(
-      <ConfigBackupModal open onClose={() => undefined} flowLibrary={false} registry={registry} />,
+      <ConfigBackupModal open onClose={() => undefined} flowLibrary={false} templateLibrary registry={registry} />,
     );
 
     await user.click(await screen.findByRole('button', { name: '清空' }));

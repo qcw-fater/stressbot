@@ -6,8 +6,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getCapabilities } from '@/services/capabilitiesApi';
 import { Toolbar } from './Toolbar';
 
+const capability = vi.hoisted(() => ({ templateLibrary: false }));
+
 vi.mock('@/services/capabilitiesApi', () => ({
-  getCapabilities: vi.fn(async () => ({ sharedState: false, flowLibrary: false })),
+  getCapabilities: vi.fn(async () => ({ sharedState: false, flowLibrary: false, templateLibrary: false })),
+}));
+vi.mock('../library/useTemplateLibraryCapability', () => ({
+  useTemplateLibraryCapability: () => ({
+    templateLibrary: capability.templateLibrary,
+    loading: false,
+    error: undefined,
+    refresh: vi.fn(),
+  }),
 }));
 vi.mock('@/services/runtimeStore', () => ({
   useRuntimeStore: (selector: (state: { mode: 'edit' }) => unknown) => selector({ mode: 'edit' }),
@@ -56,10 +66,6 @@ vi.mock('./useFlowFileIO', () => ({
   }),
 }));
 vi.mock('./FlowManagerModal', () => ({ FlowManagerModal: () => null }));
-vi.mock('../library/templateStore', () => ({
-  exportAllTemplates: vi.fn(),
-  importTemplates: vi.fn(),
-}));
 vi.mock('@/components/modules/configTransfer/ConfigBackupModal', () => ({
   ConfigBackupModal: ({ open }: { open: boolean }) => open
     ? <div>配置备份弹窗已打开</div>
@@ -76,6 +82,7 @@ describe('Toolbar configuration backup entry', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    capability.templateLibrary = false;
     vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => (
       nativeGetComputedStyle(element)
     ));
@@ -111,5 +118,16 @@ describe('Toolbar configuration backup entry', () => {
 
     expect(await screen.findByText('配置恢复弹窗已打开：edit')).toBeTruthy();
     expect(getCapabilities).toHaveBeenCalledTimes(1);
+  });
+
+  it('文件菜单只保留统一的配置备份和恢复入口', async () => {
+    const user = userEvent.setup();
+    render(<AntApp><Toolbar /></AntApp>);
+
+    await user.click(screen.getByRole('button', { name: /文件/ }));
+    expect(await screen.findByText('备份配置...')).toBeTruthy();
+    expect(screen.getByText('恢复配置...')).toBeTruthy();
+    expect(screen.queryByText(/导入模板库/)).toBeNull();
+    expect(screen.queryByText(/导出模板库/)).toBeNull();
   });
 });
