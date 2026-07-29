@@ -25,21 +25,18 @@ function execute(r)
         return err
     end
 
-    -- 存储完整玩家数据
-    local fieldMap = proto.get_field_map(resp)
-    robot.set("playerData", fieldMap)
+    -- 存储完整玩家数据（wire-first：未改写的响应以原始字节入库，
+    -- 免全量展开 field map，读取按路径惰性取值）
+    robot.set("playerData", resp)
 
-    -- 提取英雄 ID 列表
+    -- 提取英雄 ID 列表（按路径惰性读取，只物化 heroList 子树）
     -- 路径: loginHeroData -> HeroData -> heroList -> [].heroId
     local heroIds = {}
-    local loginHero = fieldMap.loginHeroData
-    if loginHero then
-        local heroGetData = loginHero.HeroData
-        if heroGetData and heroGetData.heroList then
-            for _, hero in ipairs(heroGetData.heroList) do
-                if hero.possess then
-                    table.insert(heroIds, hero.heroId)
-                end
+    local heroList = robot.get_path("playerData.loginHeroData.HeroData.heroList")
+    if heroList then
+        for _, hero in ipairs(heroList) do
+            if hero.possess then
+                table.insert(heroIds, hero.heroId)
             end
         end
     end

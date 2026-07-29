@@ -717,6 +717,12 @@ func navigatePathValues(v any, path string) []any {
 				if err == nil && idx >= 0 && idx < len(c) {
 					next = append(next, c[idx])
 				}
+			case state.PathNavigator:
+				// 惰性导航值（wire-first 存储的 *protox.WireValue / Overlay 等）：
+				// 逐段消费，保持与 map 分支一致的"存在才推进"语义。
+				if val, found := c.NavigateSegs([]string{key}); found {
+					next = append(next, val)
+				}
 			}
 		}
 		if len(next) == 0 {
@@ -940,7 +946,19 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, ActionTimin
 	return exchange.SendWireBytes, exchange.RecvWireBytes, timing, nil
 }
 
-// parseAndStoreResponse 解析 S2C 响应消息并存储字段
+// parseAndStoreResponse 校验 S2C 响应字节并按 store 映射存储字段。
+//
+// wire-first（M1/M4）：不再为存储解码整条消息——留存形态是原始 wire 字节：
+//   - 结构校验（protox.ValidateWire）取代「解码即校验」，保持与 proto.Unmarshal
+//     相同的合法性判定（非法字节仍报 ErrParseFailed）；
+//   - 整存映射（Field==""）存 *protox.WireValue（字节快照 + 惰性导航视图）；
+//   - 路径映射（Field!=""）在 wire 上导航取值（语义与 GetFieldForStore 等价，
+//     由影子验证守护），message 终端产出子 WireValue，经保留规划（PlanWireRetention）
+//     决定复制小 span 还是共享整包快照；
+//   - 影子验证失配的 schema 自动降级回旧解码路径（parseAndStoreDecoded）。
+//
+// 动作响应不走广播去重：请求-响应的内容逐机器人唯一（登录、各类查询带自身数据），
+// 进共享缓存必然 miss 且会把真正复用的广播条目从 LRU 挤出去（线上 018→019 实测污染）。
 func (ae *ActionExecutor) parseAndStoreResponse(def *ActionDef, respBody []byte) error {
 	if len(def.Store) == 0 {
 		return nil
@@ -955,19 +973,78 @@ func (ae *ActionExecutor) parseAndStoreResponse(def *ActionDef, respBody []byte)
 		return nil
 	}
 
-	// 动作响应不走广播去重：请求-响应的内容逐机器人唯一（登录、各类查询带自身数据），
-	// 进共享缓存必然 miss——不仅白付哈希 + 字节快照，还以每秒几十条的速率把真正会
-	// 复用的广播条目（MatchSucceedS2C 等）从 LRU 挤出去（线上 018→019 实测缓存污染）。
-	// 独占解码即可，整存映射由 storeResponseProto 就地 Freeze。
-	respMsg, err := ae.factory.Parse(def.S2CProto, respBody)
-	if err != nil {
+	md, ok := ae.factory.MessageDescriptor(def.S2CProto)
+	if !ok {
+		return NewActionError(errcode.ErrParseFailed, "action="+def.Name+" proto="+def.S2CProto+" 未找到消息类型")
+	}
+	if protox.WireDegraded(md) {
+		return ae.parseAndStoreDecoded(def, respBody)
+	}
+
+	// respBody 可能是网络缓冲区视图，留存前必须独立快照（与旧路径 Parse 的读取时序等价安全）。
+	snapshot := protox.WireSnapshot(respBody)
+	if err := protox.ValidateWire(md, snapshot); err != nil {
 		return NewActionError(errcode.ErrParseFailed, "action="+def.Name+" proto="+def.S2CProto, err)
 	}
 
 	stresslog.Debug("[ACTION] TCPResponseProto", zap.String("proto", def.S2CProto), zap.Int("bodyLen", len(respBody)))
 
+	ae.storeResponseWire(def.Store, protox.NewWireValue(md, snapshot))
+	return nil
+}
+
+// parseAndStoreDecoded 旧解码存储路径：影子验证失配降级的 schema 走这里
+// （解码整条消息，整存 Freeze、路径 GetFieldForStore）。
+func (ae *ActionExecutor) parseAndStoreDecoded(def *ActionDef, respBody []byte) error {
+	respMsg, err := ae.factory.Parse(def.S2CProto, respBody)
+	if err != nil {
+		return NewActionError(errcode.ErrParseFailed, "action="+def.Name+" proto="+def.S2CProto, err)
+	}
 	ae.storeResponseProto(def.Store, respMsg)
 	return nil
+}
+
+// storeResponseWire 从 wire 值按 store 映射取值并写入 state。
+//
+// 整存映射直接存 wv；路径映射经 wv 惰性导航（存在性/取值语义与解码路径等价）。
+// 路径产物先过保留规划：无整存映射时，若全部子 span 字节和小于整包，逐个复制为
+// 独立缓冲（不钉整包快照）；有整存映射时共享同一快照（本就常驻）。
+func (ae *ActionExecutor) storeResponseWire(mappings []StoreMapping, wv *protox.WireValue) {
+	debugOn := stresslog.DebugEnabled()
+	hasWhole := false
+	var pathSetters []string
+	var pathVals []any
+	for _, m := range mappings {
+		if m.Field == "" {
+			hasWhole = true
+			continue
+		}
+		val, ok := wv.Navigate(m.Field)
+		if !ok {
+			if debugOn {
+				stresslog.Debug("[ACTION] storeResponse 字段未找到",
+					zap.String("field", m.Field), zap.String("setter", m.Setter))
+			}
+			continue
+		}
+		pathSetters = append(pathSetters, m.Setter)
+		pathVals = append(pathVals, val)
+	}
+	protox.PlanWireRetention(pathVals, len(wv.Raw()), hasWhole)
+	for i, setter := range pathSetters {
+		ae.store.SetPath(setter, pathVals[i])
+		if debugOn {
+			stresslog.Debug("[ACTION] storeResponse 存储",
+				zap.String("setter", setter), zap.String("type", fmt.Sprintf("%T", pathVals[i])))
+		}
+	}
+	if hasWhole {
+		for _, m := range mappings {
+			if m.Field == "" {
+				ae.store.SetPath(m.Setter, wv)
+			}
+		}
+	}
 }
 
 // storeResponseProto 从 proto 响应消息按 store 映射取值并写入 state。

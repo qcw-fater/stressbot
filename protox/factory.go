@@ -19,17 +19,22 @@ type Factory struct {
 	// 字段路径集合由配置固定、数量有界（写一次读多次），Factory 跨全部 Robot 共享，
 	// 故用 sync.Map：热路径 SetField/GetField 不再每次 splitPath 分配 []string。
 	pathCache sync.Map
-	// frozenCache 广播去重缓存（见 dedup.go）：ParseFrozenShared 按内容寻址共享
-	// 解码结果。Factory 跨全部 Robot 共享，缓存天然覆盖全进程。
-	frozenCache *FrozenCache
+	// wireCache 广播去重缓存（见 dedup.go）：WireShared 按内容寻址共享
+	// wire 字节。Factory 跨全部 Robot 共享，缓存天然覆盖全进程。
+	wireCache *WireCache
 }
 
 // NewFactory 创建动态消息工厂
 func NewFactory(registry *Registry) *Factory {
 	return &Factory{
-		registry:    registry,
-		frozenCache: NewFrozenCache(dedupMaxEntries, dedupMaxCost),
+		registry:  registry,
+		wireCache: NewWireCache(dedupMaxEntries, dedupMaxBytes),
 	}
+}
+
+// MessageDescriptor 按消息名（全名或短名）查描述符，供 wire-first 存储点构造 WireValue。
+func (f *Factory) MessageDescriptor(name string) (protoreflect.MessageDescriptor, bool) {
+	return f.registry.Lookup(name)
 }
 
 // splitPathCached 返回 path 的分段结果，命中缓存则复用同一 []string。

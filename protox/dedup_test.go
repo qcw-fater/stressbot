@@ -8,8 +8,8 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// marshalStoreBag ???????????????"????"?
-// mutate ??????????????????????
+// marshalStoreBag ???? Bag ????? wire ???
+// mutate ? nil ???????????????????
 func marshalStoreBag(t *testing.T, f *Factory, mutate func(msg proto.Message)) []byte {
 	t.Helper()
 	bag := buildStoreTestBag(t, f)
@@ -23,131 +23,135 @@ func marshalStoreBag(t *testing.T, f *Factory, mutate func(msg proto.Message)) [
 	return raw
 }
 
-// TestDedupSharesIdenticalContent ?? (protoName, ??) ??????? *Frozen
+// TestDedupSharesIdenticalContent ?? (protoName, ??) ????? *WireValue?
 // ???????????????????
 func TestDedupSharesIdenticalContent(t *testing.T) {
 	f := newStoreTestFactory(t)
 	raw := marshalStoreBag(t, f, nil)
 
-	fz1, err := f.ParseFrozenShared("storetest.Bag", raw)
+	wv1, err := f.WireShared("storetest.Bag", raw)
 	if err != nil {
-		t.Fatalf("????: %v", err)
+		t.Fatalf("??: %v", err)
 	}
-	// ???????????????????????????????????
+	// ?????????????????????????????????????
 	raw2 := append([]byte(nil), raw...)
-	fz2, err := f.ParseFrozenShared("storetest.Bag", raw2)
+	wv2, err := f.WireShared("storetest.Bag", raw2)
 	if err != nil {
-		t.Fatalf("????: %v", err)
+		t.Fatalf("??: %v", err)
 	}
-	if fz1 != fz2 {
-		t.Fatal("?????????? *Frozen ??")
-	}
-
-	st := f.frozenCache.Stats()
-	hits, misses, entries := st.Hits, st.Misses, st.Entries
-	if hits != 1 || misses != 1 || entries != 1 {
-		t.Fatalf("hits=%d misses=%d entries=%d?want 1/1/1", hits, misses, entries)
+	if wv1 != wv2 {
+		t.Fatal("????????? *WireValue ??")
 	}
 
-	// ????????????????????????
+	st := f.wireCache.Stats()
+	if st.Hits != 1 || st.Misses != 1 || st.Entries != 1 {
+		t.Fatalf("hits=%d misses=%d entries=%d?want 1/1/1", st.Hits, st.Misses, st.Entries)
+	}
+	if st.RawBytes != len(raw) {
+		t.Fatalf("rawBytes=%d?want %d???????????", st.RawBytes, len(raw))
+	}
+
+	// ?????????????????
 	direct, err := f.Parse("storetest.Bag", raw)
 	if err != nil {
 		t.Fatalf("????: %v", err)
 	}
 	wantV, wantOK := Freeze(direct).NavigateSegs([]string{"title"})
-	gotV, gotOK := fz1.NavigateSegs([]string{"title"})
+	gotV, gotOK := wv1.NavigateSegs([]string{"title"})
 	if gotOK != wantOK || gotV != wantV {
-		t.Fatalf("?????? title=(%v,%v)?????=(%v,%v)", gotV, gotOK, wantV, wantOK)
+		t.Fatalf("????? title=(%v,%v)?????=(%v,%v)", gotV, gotOK, wantV, wantOK)
 	}
 }
 
-// TestDedupDistinctContent ???????????????????????????
+// TestDedupDistinctContent ???????????????????
 func TestDedupDistinctContent(t *testing.T) {
 	f := newStoreTestFactory(t)
 	rawA := marshalStoreBag(t, f, nil)
 	rawB := marshalStoreBag(t, f, func(msg proto.Message) {
 		if err := f.SetField(msg, "title", "??B"); err != nil {
-			t.Fatalf("?????: %v", err)
+			t.Fatalf("????: %v", err)
 		}
 	})
 
-	fzA, err := f.ParseFrozenShared("storetest.Bag", rawA)
+	wvA, err := f.WireShared("storetest.Bag", rawA)
 	if err != nil {
 		t.Fatalf("A: %v", err)
 	}
-	fzB, err := f.ParseFrozenShared("storetest.Bag", rawB)
+	wvB, err := f.WireShared("storetest.Bag", rawB)
 	if err != nil {
 		t.Fatalf("B: %v", err)
 	}
-	if fzA == fzB {
-		t.Fatal("??????????")
+	if wvA == wvB {
+		t.Fatal("????????")
 	}
-	titleB, ok := fzB.NavigateSegs([]string{"title"})
+	titleB, ok := wvB.NavigateSegs([]string{"title"})
 	if !ok || titleB != "??B" {
 		t.Fatalf("B ? title=(%v,%v)?want ??B", titleB, ok)
 	}
 }
 
-// TestDedupEviction ???????? LRU ???????????????? miss
-//??????????????????????
+// TestDedupInvalidBytes ?????????????????????????
+func TestDedupInvalidBytes(t *testing.T) {
+	f := newStoreTestFactory(t)
+	if _, err := f.WireShared("storetest.Bag", []byte{0xFF, 0xFF, 0xFF}); err == nil {
+		t.Fatal("???????")
+	}
+	if entries := f.wireCache.Stats().Entries; entries != 0 {
+		t.Fatalf("entries=%d??????????", entries)
+	}
+}
+
+// TestDedupEviction ?????? LRU ????????????? miss?
+// ??????????????????
 func TestDedupEviction(t *testing.T) {
 	f := newStoreTestFactory(t)
-	cache := NewFrozenCache(2, 1<<30)
+	f.wireCache = NewWireCache(2, 1<<30)
 
 	variant := func(title string) []byte {
 		return marshalStoreBag(t, f, func(msg proto.Message) {
 			if err := f.SetField(msg, "title", title); err != nil {
-				t.Fatalf("?????: %v", err)
+				t.Fatalf("????: %v", err)
 			}
 		})
 	}
 	rawA, rawB, rawC := variant("A"), variant("B"), variant("C")
 
-	fzA1, err := cache.getOrParse(f, "storetest.Bag", rawA)
+	wvA1, err := f.WireShared("storetest.Bag", rawA)
 	if err != nil {
 		t.Fatalf("A: %v", err)
 	}
-	if _, err := cache.getOrParse(f, "storetest.Bag", rawB); err != nil {
+	if _, err := f.WireShared("storetest.Bag", rawB); err != nil {
 		t.Fatalf("B: %v", err)
 	}
-	if _, err := cache.getOrParse(f, "storetest.Bag", rawC); err != nil {
-		t.Fatalf("C: %v", err) // ?? C ??????? A
+	if _, err := f.WireShared("storetest.Bag", rawC); err != nil {
+		t.Fatalf("C: %v", err) // ?? C ?????? A
 	}
-	if entries := cache.Stats().Entries; entries != 2 {
+	if entries := f.wireCache.Stats().Entries; entries != 2 {
 		t.Fatalf("entries=%d?want 2", entries)
 	}
 
-	fzA2, err := cache.getOrParse(f, "storetest.Bag", rawA)
+	wvA2, err := f.WireShared("storetest.Bag", rawA)
 	if err != nil {
 		t.Fatalf("A ??: %v", err)
 	}
-	if fzA1 == fzA2 {
-		t.Fatal("A ???????????????")
+	if wvA1 == wvA2 {
+		t.Fatal("A ??????????????")
 	}
 	// ??????????????????????????
-	if v, ok := fzA1.NavigateSegs([]string{"title"}); !ok || v != "A" {
-		t.Fatalf("??????????=(%v,%v)?want A", v, ok)
+	if v, ok := wvA1.NavigateSegs([]string{"title"}); !ok || v != "A" {
+		t.Fatalf("?????????=(%v,%v)?want A", v, ok)
 	}
 }
 
-// TestDedupCostBound ???????????????maxCost ???????????
-// ?????????????????????? 1 ???
-func TestDedupCostBound(t *testing.T) {
+// TestDedupByteBound ???????curBytes ?? maxBytes ?? LRU ?????
+func TestDedupByteBound(t *testing.T) {
 	f := newStoreTestFactory(t)
 	raw := marshalStoreBag(t, f, nil)
 
-	// ??????????????????"??? 1 ????? 2 ?"???
-	probe, err := f.Parse("storetest.Bag", raw)
-	if err != nil {
-		t.Fatalf("probe parse: %v", err)
-	}
-	oneCost := estimateDecodedCost(probe)
-	if oneCost <= 0 {
-		t.Fatalf("estimateDecodedCost=%d?????", oneCost)
-	}
-	cache := NewFrozenCache(1024, oneCost+oneCost/2)
+	// ???? 1.5 ??????? 1 ????? 2 ??
+	f.wireCache = NewWireCache(1024, len(raw)+len(raw)/2)
 
-	if _, err := cache.getOrParse(f, "storetest.Bag", raw); err != nil {
+	if _, err := f.WireShared("storetest.Bag", raw); err != nil {
 		t.Fatalf("A: %v", err)
 	}
 	rawB := marshalStoreBag(t, f, func(msg proto.Message) {
@@ -155,71 +159,70 @@ func TestDedupCostBound(t *testing.T) {
 			t.Fatalf("set title: %v", err)
 		}
 	})
-	if _, err := cache.getOrParse(f, "storetest.Bag", rawB); err != nil {
+	if _, err := f.WireShared("storetest.Bag", rawB); err != nil {
 		t.Fatalf("B: %v", err)
 	}
-	bst := cache.Stats()
+	bst := f.wireCache.Stats()
 	if bst.Entries != 1 {
 		t.Fatalf("entries=%d?want 1???????????", bst.Entries)
 	}
-	if bst.CostBytes <= 0 || bst.CostBytes > oneCost*2 {
-		t.Fatalf("costBytes=%d ???????????=%d?", bst.CostBytes, oneCost)
+	if bst.RawBytes != len(rawB) {
+		t.Fatalf("rawBytes=%d?want %d", bst.RawBytes, len(rawB))
 	}
 	if bst.Evictions != 1 {
 		t.Fatalf("evictions=%d?want 1", bst.Evictions)
 	}
 }
 
-// TestDedupConcurrent ? goroutine????? pump??????????
-// ??????????????????????
+// TestDedupConcurrent ? goroutine???? pump??????????
+// ????????????????
 func TestDedupConcurrent(t *testing.T) {
 	f := newStoreTestFactory(t)
 	rawA := marshalStoreBag(t, f, nil)
 	rawB := marshalStoreBag(t, f, func(msg proto.Message) {
 		if err := f.SetField(msg, "title", "??B"); err != nil {
-			t.Fatalf("?????: %v", err)
+			t.Fatalf("????: %v", err)
 		}
 	})
-	cache := NewFrozenCache(dedupMaxEntries, dedupMaxCost)
 
 	const workers, rounds = 8, 200
-	results := make([][]*Frozen, workers)
+	results := make([][]*WireValue, workers)
 	var wg sync.WaitGroup
 	for w := 0; w < workers; w++ {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			results[w] = make([]*Frozen, 0, rounds)
+			results[w] = make([]*WireValue, 0, rounds)
 			for i := 0; i < rounds; i++ {
 				raw := rawA
 				if (w+i)%2 == 1 {
 					raw = rawB
 				}
-				fz, err := cache.getOrParse(f, "storetest.Bag", raw)
+				wv, err := f.WireShared("storetest.Bag", raw)
 				if err != nil {
 					panic(fmt.Sprintf("worker%d round%d: %v", w, i, err))
 				}
-				results[w] = append(results[w], fz)
+				results[w] = append(results[w], wv)
 			}
 		}(w)
 	}
 	wg.Wait()
 
-	distinct := map[*Frozen]bool{}
+	distinct := map[*WireValue]bool{}
 	for _, rs := range results {
-		for _, fz := range rs {
-			distinct[fz] = true
+		for _, wv := range rs {
+			distinct[wv] = true
 		}
 	}
+	// ?? miss ??????????????????? 2 ????
 	if len(distinct) != 2 {
-		t.Fatalf("??????????? 2 ?????? %d", len(distinct))
+		t.Fatalf("??????????? 2??? %d", len(distinct))
 	}
-	cst := cache.Stats()
-	hits, misses, entries := cst.Hits, cst.Misses, cst.Entries
-	if entries != 2 {
-		t.Fatalf("entries=%d?want 2", entries)
+	cst := f.wireCache.Stats()
+	if cst.Entries != 2 {
+		t.Fatalf("entries=%d?want 2", cst.Entries)
 	}
-	if hits+misses != workers*rounds {
-		t.Fatalf("hits+misses=%d?want %d", hits+misses, workers*rounds)
+	if cst.Hits+cst.Misses != workers*rounds {
+		t.Fatalf("hits+misses=%d?want %d", cst.Hits+cst.Misses, workers*rounds)
 	}
 }

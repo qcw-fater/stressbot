@@ -14,7 +14,6 @@ import (
 
 	lua "github.com/yuin/gopher-lua"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 
 	"stressbot/adapter"
 	"stressbot/codec"
@@ -1056,20 +1055,17 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 		}
 		wireBytes := msg.WireBytes
 
-		// 大消息走广播去重（protox.FrozenCache）：同一条广播（字节相同）全进程只解码
-		// 一份、全部机器人共享同一个不可变 *Frozen——留存塌缩为单份，命中时解码本身
-		// 也省掉。小消息（< DedupMinBytes）重复留存可忽略，不值得哈希+快照，走原解码。
-		var respMsg proto.Message
-		var frozen *protox.Frozen
-		var err error
-		if len(msg.Data) >= protox.DedupMinBytes {
-			frozen, err = h.robot.factory.ParseFrozenShared(cbDef.S2CProto, msg.Data)
-			if err == nil {
-				respMsg = frozen.Message()
-			}
-		} else {
-			respMsg, err = h.robot.factory.Parse(cbDef.S2CProto, msg.Data)
-		}
+		// wire-first（M1/M3/M4）：留存形态是原始 wire 字节，pump 内不再解码整树——
+		//   - 大消息（≥ DedupMinBytes，广播主体）走内容寻址去重（protox.WireCache）：
+		//     同一条广播全进程只留一份字节快照，全部机器人共享同一个 *WireValue；
+		//   - 小消息独立快照（结构校验一次，msg.Data 是 pump 复用缓冲区的视图，必须快照）；
+		//   - 整存映射（Field==""）存 *WireValue，路径映射在 wire 上惰性导航取值，
+		//     message 终端产出子 WireValue，经保留规划决定复制小 span 还是共享快照；
+		//   - 影子验证失配的 schema 自动降级回旧解码路径（storeListenDecoded）。
+		//
+		// P1b 单写方化不变：取值在 pump（产物为新建容器/不可变引用，跨 goroutine 移交
+		// 所有权安全），SetPath 投执行器任务队列。pump 不再持有对 msg 的引用。
+		puts, err := h.buildListenStorePuts(cbDef, msg.Data)
 		if err != nil {
 			callbackErr := engine.NewActionError(errcode.ErrCallbackParse, "proto="+cbDef.S2CProto, err)
 			stresslog.Error("[ROBOT] 解析推送消息失败",
@@ -1084,29 +1080,6 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 				zap.Error(err))
 			monitor.Global().RecordCallback(cbName, monitor.ResultFailure, monitor.ActionTiming{}, time.Since(start), 0, msg.WireBytes, callbackErr)
 			return
-		}
-
-		// 按需取值：Field != "" 直接 GetFieldForStore（不展开整树，产物是现场新建的
-		// 可变 map，支持配置子路径覆写与脚本改写，读消息本身只读，共享安全）；
-		// 整存映射(Field=="") 存不可变 Frozen 引用（P1a）——不展开成装箱树常驻，
-		// 路径读取经 state.PathNavigator 惰性取值，Lua robot.get 在边界现场转真 table。
-		// 不可变契约：独占解码的 respMsg 存入后无写方；共享 Frozen 由 P1a 契约保证
-		// 全程只读，两种来源均满足 Freeze 要求。
-		//
-		// P1b 单写方化：取值仍在 pump（读消息只读、产物为新建容器/不可变引用，跨
-		// goroutine 移交所有权安全），SetPath 改投执行器任务队列——state 嵌套容器的
-		// 写方由此收敛为执行器 goroutine 单点（state.Store 免深拷贝读的前提契约）。
-		// pump 不再持有对 msg 的引用，闭包只带物化后的键值对。
-		puts := make([]storePut, 0, len(cbDef.Store))
-		for _, m := range cbDef.Store {
-			if m.Field == "" {
-				if frozen == nil {
-					frozen = protox.Freeze(respMsg)
-				}
-				puts = append(puts, storePut{setter: m.Setter, value: frozen})
-			} else if val, ok := h.robot.factory.GetFieldForStore(respMsg, m.Field); ok {
-				puts = append(puts, storePut{setter: m.Setter, value: val})
-			}
 		}
 		h.robot.sched.enqueue(pendingTask{
 			name: cbName,
@@ -1130,6 +1103,78 @@ type storePut struct {
 	value  any
 }
 
+// buildListenStorePuts 在 pump 内从推送字节物化 Go-store 待写键值（wire-first）。
+// 返回错误 = 消息字节非法（等价旧路径解码失败）。
+func (h *robotActionHandler) buildListenStorePuts(cbDef *engine.ListenDef, data []byte) ([]storePut, error) {
+	md, ok := h.robot.factory.MessageDescriptor(cbDef.S2CProto)
+	if !ok {
+		return nil, fmt.Errorf("未找到消息类型: %s", cbDef.S2CProto)
+	}
+	if protox.WireDegraded(md) {
+		return h.buildListenStorePutsDecoded(cbDef, data)
+	}
+
+	var wv *protox.WireValue
+	if len(data) >= protox.DedupMinBytes {
+		shared, err := h.robot.factory.WireShared(cbDef.S2CProto, data)
+		if err != nil {
+			return nil, err
+		}
+		wv = shared
+	} else {
+		snapshot := protox.WireSnapshot(data)
+		if err := protox.ValidateWire(md, snapshot); err != nil {
+			return nil, err
+		}
+		wv = protox.NewWireValue(md, snapshot)
+	}
+
+	puts := make([]storePut, 0, len(cbDef.Store))
+	hasWhole := false
+	var pathVals []any
+	var pathIdx []int
+	for _, m := range cbDef.Store {
+		if m.Field == "" {
+			hasWhole = true
+			puts = append(puts, storePut{setter: m.Setter, value: wv})
+			continue
+		}
+		if val, found := wv.Navigate(m.Field); found {
+			puts = append(puts, storePut{setter: m.Setter, value: val})
+			pathIdx = append(pathIdx, len(puts)-1)
+			pathVals = append(pathVals, val)
+		}
+	}
+	// 保留规划：整存在场（或共享缓存条目本就常驻）时共享快照；否则小 span 复制独立缓冲。
+	protox.PlanWireRetention(pathVals, len(wv.Raw()), hasWhole)
+	for i, idx := range pathIdx {
+		puts[idx].value = pathVals[i]
+	}
+	return puts, nil
+}
+
+// buildListenStorePutsDecoded 旧解码路径（影子验证失配降级的 schema）：
+// 解码整条消息，整存 Freeze、路径 GetFieldForStore。
+func (h *robotActionHandler) buildListenStorePutsDecoded(cbDef *engine.ListenDef, data []byte) ([]storePut, error) {
+	respMsg, err := h.robot.factory.Parse(cbDef.S2CProto, data)
+	if err != nil {
+		return nil, err
+	}
+	var frozen *protox.Frozen
+	puts := make([]storePut, 0, len(cbDef.Store))
+	for _, m := range cbDef.Store {
+		if m.Field == "" {
+			if frozen == nil {
+				frozen = protox.Freeze(respMsg)
+			}
+			puts = append(puts, storePut{setter: m.Setter, value: frozen})
+		} else if val, ok := h.robot.factory.GetFieldForStore(respMsg, m.Field); ok {
+			puts = append(puts, storePut{setter: m.Setter, value: val})
+		}
+	}
+	return puts, nil
+}
+
 // runListenScript 在执行器 goroutine（业务 LState 唯一所有者）内执行一条 listen 脚本回调。
 // 在等待窗口的 select 内就地串行调用（由 listen 回调的 exec 闭包触发），因此可安全访问 r.l。
 //
@@ -1144,19 +1189,9 @@ func (h *robotActionHandler) runListenScript(cbName string, cbDef *engine.Listen
 
 	var runErr error
 	if cbDef.S2CProto != "" && len(msg.Data) > 0 {
-		// 大消息走广播去重（同 Go-store / await_listen 路径）：RunListenScript 只做
-		// 只读的整表 Lua 化，消息本体不逃逸，共享解码结果安全。
-		var respMsg proto.Message
-		var perr error
-		if len(msg.Data) >= protox.DedupMinBytes {
-			var frozen *protox.Frozen
-			frozen, perr = h.robot.factory.ParseFrozenShared(cbDef.S2CProto, msg.Data)
-			if perr == nil {
-				respMsg = frozen.Message()
-			}
-		} else {
-			respMsg, perr = h.robot.factory.Parse(cbDef.S2CProto, msg.Data)
-		}
+		// 独占瞬态解码：wire-first 后去重缓存只服务「留存」（Go-store 整存），脚本消费
+		// 解码产物在 RunListenScript 整表 Lua 化后即弃（不常驻），瞬态分配由 GC 快速回收。
+		respMsg, perr := h.robot.factory.Parse(cbDef.S2CProto, msg.Data)
 		if perr != nil {
 			cbErr := engine.NewActionError(errcode.ErrCallbackParse, "proto="+cbDef.S2CProto, perr)
 			stresslog.Error("[ROBOT] 解析监听推送失败",

@@ -147,8 +147,8 @@ func extractNetArgs(L *lua.LState) (service string, route lua.LValue, msg proto.
 	argIdx := 0
 	for i := 1; i <= L.GetTop(); i++ {
 		v := L.Get(i)
-		if ud, ok := v.(*lua.LUserData); ok {
-			if pm, ok := ud.Value.(proto.Message); ok {
+		if _, ok := v.(*lua.LUserData); ok {
+			if pm, _, _ := unwrapProtoUD(v); pm != nil {
 				msg = pm
 			}
 			continue
@@ -359,7 +359,9 @@ func requestResultValues(L *lua.LState, ctx *Context, spec *WaitSpec, outcome Wa
 				lua.LString(string(respBody)),
 			}
 		}
-		return []lua.LValue{lua.LNil, wrapProtoMessage(L, respMsg)}
+		// 携带 body 独立快照（wire-first）：脚本 robot.set(resp) 未改写时直接以该快照
+		// 存 WireValue，免重编码免解码树常驻。respBody 可能是网络缓冲区视图，必须复制。
+		return []lua.LValue{lua.LNil, wrapRespMessage(L, respMsg, protox.WireSnapshot(respBody))}
 	}
 	return []lua.LValue{lua.LNil, lua.LString(string(respBody))}
 }
@@ -482,13 +484,8 @@ func networkAwaitTCPRequestRoute(L *lua.LState) int {
 	service := L.CheckString(1)
 	requestRoute := L.Get(2)
 	responseRoute := L.Get(3)
-	ud, ok := L.Get(4).(*lua.LUserData)
-	if !ok {
-		L.RaiseError("network.tcp_request_route requires proto message at arg 4")
-		return 0
-	}
-	msg, ok := ud.Value.(proto.Message)
-	if !ok {
+	msg, _, _ := unwrapProtoUD(L.Get(4))
+	if msg == nil {
 		L.RaiseError("network.tcp_request_route requires proto message at arg 4")
 		return 0
 	}
@@ -792,21 +789,10 @@ func listenResultValues(L *lua.LState, ctx *Context, spec *WaitSpec, outcome Wai
 		}
 	}
 	if spec.S2CProto != "" && ctx.Factory != nil && len(respBody) > 0 {
-		// 大消息走广播去重（protox.FrozenCache，与 Go-store 监听同一缓存）：监听推送
-		// 常为同场次/全服广播（如 MatchSucceedS2C / BattleStartLoadingS2C 对同场 60 人
-		// 字节完全相同），逐机器人独立解码曾占进程总分配的近半（线上 profile 实测
-		// 29 分钟 144GB churn）。命中共享时零解码零留存；共享消息以 *Frozen 包进
-		// userdata，proto API 读透传、set_field fail-loud 拒绝（见 api_proto.go）。
-		if len(respBody) >= protox.DedupMinBytes {
-			frozen, err := ctx.Factory.ParseFrozenShared(spec.S2CProto, respBody)
-			if err != nil {
-				return []lua.LValue{
-					newErrTable(L, int(errcode.ErrParseFailed), "service="+spec.Service+" route="+spec.RouteKey),
-					lua.LNil,
-				}
-			}
-			return []lua.LValue{lua.LNil, wrapFrozenMessage(L, frozen)}
-		}
+		// 独占瞬态解码（wire-first）：去重缓存改为只服务「留存」（Go-store 整存的
+		// WireValue 字节共享），脚本消费的解码产物用完即弃、GC 快速回收，不再经
+		// 解码态共享缓存（解码树常驻是旧路径的主要钉扎源）。消息可写（历史行为），
+		// 未改写时 robot.set(resp) 经句柄携带的 body 快照零成本转 WireValue。
 		respMsg, err := ctx.Factory.Parse(spec.S2CProto, respBody)
 		if err != nil {
 			return []lua.LValue{
@@ -814,7 +800,7 @@ func listenResultValues(L *lua.LState, ctx *Context, spec *WaitSpec, outcome Wai
 				lua.LNil,
 			}
 		}
-		return []lua.LValue{lua.LNil, wrapProtoMessage(L, respMsg)}
+		return []lua.LValue{lua.LNil, wrapRespMessage(L, respMsg, protox.WireSnapshot(respBody))}
 	}
 	return []lua.LValue{lua.LNil, lua.LString(string(respBody))}
 }

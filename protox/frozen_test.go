@@ -175,51 +175,28 @@ func TestFrozenStateIntegration(t *testing.T) {
 	}
 }
 
-// TestFrozenShallowMap 校验 ShallowMap 的浅层物化形态：
-// 键集合与 messageToMap 一致（同跳过规则），值物化后逐字等价，
-// 嵌套 message 保持 *Frozen 引用（不递归展开）。
-func TestFrozenShallowMap(t *testing.T) {
+// TestFrozenMaterializeValue 校验全量物化：与 messageToMap 逐字一致，nil 安全。
+func TestFrozenMaterializeValue(t *testing.T) {
 	f := newStoreTestFactory(t)
 	bag := buildStoreTestBag(t, f)
 	fz := Freeze(bag)
 
-	shallow := fz.ShallowMap()
-	full := messageToMap(bag.ProtoReflect())
-
-	if len(shallow) != len(full) {
-		t.Fatalf("键数不一致：ShallowMap=%d messageToMap=%d", len(shallow), len(full))
+	got, ok := fz.MaterializeValue().(map[string]any)
+	if !ok {
+		t.Fatalf("MaterializeValue 应返回 map[string]any，实际 %T", fz.MaterializeValue())
 	}
-	for k, want := range full {
-		got, ok := shallow[k]
-		if !ok {
-			t.Errorf("键 %q 缺失", k)
-			continue
-		}
-		if !reflect.DeepEqual(materializeFrozen(got), want) {
-			t.Errorf("键 %q: ShallowMap(物化)=%#v want %#v", k, materializeFrozen(got), want)
-		}
+	want := messageToMap(bag.ProtoReflect())
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("MaterializeValue=%#v want %#v", got, want)
 	}
-
-	// 嵌套 message 为 *Frozen（惰性），标量为原值
-	if _, isFrozen := shallow["main"].(*Frozen); !isFrozen {
-		t.Fatalf("main 应为 *Frozen，实际 %T", shallow["main"])
-	}
-	if shallow["uid"] != int64(42) {
-		t.Fatalf("uid=%#v want int64(42)", shallow["uid"])
-	}
-	// 未设置 message 不出现
-	if _, ok := shallow["empty"]; ok {
-		t.Fatal("未设置的 empty 不应出现在 ShallowMap 中")
-	}
-
-	// nil 安全
-	if got := (*Frozen)(nil).ShallowMap(); len(got) != 0 {
-		t.Fatalf("nil Frozen 的 ShallowMap 应为空 map，实际 %#v", got)
+	if got := (*Frozen)(nil).MaterializeValue().(map[string]any); len(got) != 0 {
+		t.Fatalf("nil Frozen 的 MaterializeValue 应为空 map，实际 %#v", got)
 	}
 }
 
-// TestFrozenSetPathCOW 校验整存 Frozen 后的嵌套路径写入（写时物化）：
-// 只物化写路径书脊，兄弟子树保留 Frozen 引用共享，底层消息不被改写。
+// TestFrozenSetPathCOW 校验整存导航值（Frozen/WireValue 同一机制）的嵌套路径写入：
+// SetPath 把导航值包进 Overlay（写时物化），只物化写路径书脊，
+// 兄弟子树保留基座惰性形态，底层消息不被改写。
 func TestFrozenSetPathCOW(t *testing.T) {
 	f := newStoreTestFactory(t)
 	bag := buildStoreTestBag(t, f)
@@ -228,13 +205,13 @@ func TestFrozenSetPathCOW(t *testing.T) {
 	st := state.NewStore()
 	st.Set("playerData", fz)
 
-	// 二级路径写入：顶层 Frozen 物化为 map，main 物化为 map，id 改写
+	// 二级路径写入：顶层 Frozen 包 Overlay，main 子节点继续包 Overlay，id 写入覆盖层
 	st.SetPath("playerData.main.id", int64(99))
 
 	if got := st.GetPath("playerData.main.id"); got != int64(99) {
 		t.Fatalf("main.id=%#v want int64(99)", got)
 	}
-	// 同级未写字段保留（main.name 默认 ""）
+	// 同级未写字段回落基座（main.name 默认 ""）
 	if got := st.GetPath("playerData.main.name"); got != "" {
 		t.Fatalf("main.name=%#v want \"\"", got)
 	}
@@ -250,16 +227,16 @@ func TestFrozenSetPathCOW(t *testing.T) {
 		t.Fatalf("底层消息 main.id=(%#v,%v) want (7,nil)——COW 不得改写共享消息", v, err)
 	}
 
-	// 顶层已替换为可变 map，且未触碰的嵌套 message 仍是 *Frozen（无级联展开）
-	top, ok := st.Get("playerData").(map[string]any)
-	if !ok {
-		t.Fatalf("playerData 应已物化为 map[string]any，实际 %T", st.Get("playerData"))
+	// 顶层是 Overlay（基座 + 覆盖层），未触碰的兄弟字段不在覆盖层里（无级联展开）
+	if _, isOverlay := st.Get("playerData").(*state.Overlay); !isOverlay {
+		t.Fatalf("playerData 应为 *state.Overlay，实际 %T", st.Get("playerData"))
 	}
-	if _, isFrozen := top["shelf"].(map[string]any)["s1"].(*Frozen); !isFrozen {
-		t.Fatalf("shelf.s1 应保持 *Frozen 引用，实际 %T", top["shelf"].(map[string]any)["s1"])
+	// 未触碰的 map 字段仍经基座惰性导航
+	if got := st.GetPath("playerData.shelf.s1.id"); got != int64(9) {
+		t.Fatalf("shelf.s1.id=%#v want int64(9)", got)
 	}
 
-	// 列表元素内的写入：[N] 段导航到 *Frozen 元素后同样物化
+	// 列表元素内的写入：[N] 段导航到 *Frozen 元素后同样包 Overlay
 	st.SetPath("playerData.items[0].id", int64(100))
 	if got := st.GetPath("playerData.items[0].id"); got != int64(100) {
 		t.Fatalf("items[0].id=%#v want int64(100)", got)
@@ -267,13 +244,30 @@ func TestFrozenSetPathCOW(t *testing.T) {
 	if got := st.GetPath("playerData.items[0].name"); got != "x" {
 		t.Fatalf("items[0].name=%#v want \"x\"（元素物化不应丢兄弟字段）", got)
 	}
-	if _, isFrozen := top["items"].([]any)[1].(*Frozen); !isFrozen {
-		t.Fatalf("items[1] 应保持 *Frozen，实际 %T", top["items"].([]any)[1])
-	}
 
-	// 终端整体覆盖：目标位置是 Frozen 时直接替换（不物化终端）
+	// 终端整体覆盖：目标位置是导航值时直接替换（不物化终端）
 	st.SetPath("playerData.main", "replaced")
 	if got := st.GetPath("playerData.main"); got != "replaced" {
 		t.Fatalf("main=%#v want \"replaced\"", got)
+	}
+
+	// 全量物化：基座 + 覆盖层合成纯 map 树
+	m, ok := st.Get("playerData").(*state.Overlay).MaterializeValue().(map[string]any)
+	if !ok {
+		t.Fatal("Overlay.MaterializeValue 应返回 map[string]any")
+	}
+	if m["main"] != "replaced" {
+		t.Fatalf("物化后 main=%#v want \"replaced\"", m["main"])
+	}
+	if m["uid"] != int64(42) {
+		t.Fatalf("物化后 uid=%#v want int64(42)", m["uid"])
+	}
+	items, _ := m["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("物化后 items 长度=%d want 2", len(items))
+	}
+	first, _ := items[0].(map[string]any)
+	if first["id"] != int64(100) || first["name"] != "x" {
+		t.Fatalf("物化后 items[0]=%#v want id=100 name=x", first)
 	}
 }

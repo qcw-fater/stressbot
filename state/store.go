@@ -23,23 +23,21 @@ import (
 //     调用方会在锁外遍历；
 //   - 实现必须并发只读安全（不可变值天然满足）。
 //
-// 写路径（SetPath）对同时实现 PathMaterializer 的值支持写时物化（COW），
-// 见 PathMaterializer；仅实现 PathNavigator 的值沿用既有"覆盖为新 map"语义。
+// 写路径（SetPath）对 PathNavigator 值统一走 Overlay 写时物化（COW），见 overlay.go：
+// 嵌套路径写入把该值包进 Overlay（基座只读 + 覆盖层可变），未触碰的兄弟子树
+// 保持基座惰性形态，不会被整键清掉。
 type PathNavigator interface {
 	NavigateSegs(segs []string) (any, bool)
 }
 
-// PathMaterializer 让不透明值参与 SetPath 的写时物化（COW）。
+// ValueMaterializer 让不透明值在 state 边界全量物化为纯 Go 树
+// （map[string]any / []any / 标量）。
 //
-// 典型实现：protox.Frozen。脚本对整存消息（如 playerData）做嵌套路径写入时，
-// SetPath 把写路径书脊上的 Frozen 就地物化为可变 map 并替换回父容器，再继续下探；
-// 物化是浅层的——未触碰的兄弟子树保持子 Frozen 引用（共享底层消息，不展开）。
-// 这取代了旧的"整键覆盖"语义（会静默清掉整存消息的其余数据）。
-//
-// 契约：ShallowMap 产出的 map 为现场新建（键/值与实现内部无可变别名，值可为
-// 标量、子 PathNavigator 引用或新建容器），调用方在写锁内接管所有权。
-type PathMaterializer interface {
-	ShallowMap() map[string]any
+// 典型实现：protox.WireValue（解码 + messageToMap）、protox.Frozen（messageToMap）、
+// Overlay（基座物化 + 覆盖层合并）。供 robot.get 整读转 Lua table、GetMap 等
+// 需要完整容器视图的调用方使用。产物为现场新建，调用方接管所有权。
+type ValueMaterializer interface {
+	MaterializeValue() any
 }
 
 // Store 泛型状态存储，用于 Robot 运行时存储登录响应、战斗状态、好友列表等中间数据。
@@ -130,6 +128,12 @@ func (s *Store) GetList(key string) []any {
 		copy(out, list)
 		return out
 	}
+	// 惰性值（WireValue/Overlay 等）：全量物化后若是列表则直通（产物现场新建，免拷贝）。
+	if mz, ok := s.data[key].(ValueMaterializer); ok {
+		if list, ok2 := mz.MaterializeValue().([]any); ok2 {
+			return list
+		}
+	}
 	return nil
 }
 
@@ -146,6 +150,13 @@ func (s *Store) GetMap(key string) map[string]any {
 			out[k] = v
 		}
 		return out
+	}
+	// 惰性值（WireValue/Overlay 等）：全量物化后若是 map 则直通（产物现场新建，免拷贝）。
+	// 覆盖「路径存 message 终端后按 map 消费」的既有用法（旧路径存的是展开 map）。
+	if mz, ok := s.data[key].(ValueMaterializer); ok {
+		if m, ok2 := mz.MaterializeValue().(map[string]any); ok2 {
+			return m
+		}
 	}
 	return nil
 }
@@ -188,6 +199,12 @@ func (s *Store) PickMapKey(key string, pick func(n int) int) (string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	m, ok := s.data[key].(map[string]any)
+	if !ok {
+		// 惰性值：物化后按 map 选取（低频路径；覆盖「路径存 message 后随机取键」用法）。
+		if mz, isMz := s.data[key].(ValueMaterializer); isMz {
+			m, ok = mz.MaterializeValue().(map[string]any)
+		}
+	}
 	if !ok || len(m) == 0 {
 		return "", false
 	}
@@ -211,6 +228,11 @@ func (s *Store) PickMapValue(key string, pick func(n int) int) (any, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	m, ok := s.data[key].(map[string]any)
+	if !ok {
+		if mz, isMz := s.data[key].(ValueMaterializer); isMz {
+			m, ok = mz.MaterializeValue().(map[string]any)
+		}
+	}
 	if !ok || len(m) == 0 {
 		return nil, false
 	}
@@ -230,9 +252,9 @@ func (s *Store) PickMapValue(key string, pick func(n int) int) (any, bool) {
 
 // SetPath 按点分路径设置嵌套值，与 GetPath 对称。
 // 路径格式同 SplitPath："key.sub.field" 或 "list[0].field"。
-// 中间 map 不存在时自动创建（类似 mkdir -p）；已存在但非 map 时覆盖为新 map，
-// 但 PathMaterializer（整存的 protox.Frozen）例外——就地浅层物化后继续下探（COW），
-// 未触碰的兄弟子树保留共享引用，不会被整键清掉。
+// 中间 map 不存在时自动创建（类似 mkdir -p）；已存在但非容器时覆盖为新 map，
+// 但 PathNavigator（整存的 protox.WireValue / protox.Frozen）例外——包进 Overlay
+// 继续下探（COW，见 overlay.go），未触碰的兄弟子树保留基座惰性形态，不会被整键清掉。
 // 遇到 [N] 数组索引段时要求对应位置已是 []any 且长度足够，否则跳过不设置。
 // 单段路径等价于 Set，空路径不操作。
 func (s *Store) SetPath(path string, value any) {
@@ -249,16 +271,16 @@ func (s *Store) SetPath(path string, value any) {
 		return
 	}
 
-	// 第一段：从 data 取值或创建；PathMaterializer 写时物化；其余非 map/list 覆盖为新 map
+	// 第一段：从 data 取值或创建；PathNavigator 包 Overlay；其余非容器覆盖为新 map
 	cur, ok := s.data[segments[0]]
 	if !ok {
 		cur = make(map[string]any)
 		s.data[segments[0]] = cur
 	} else {
 		switch v := cur.(type) {
-		case map[string]any, []any:
-		case PathMaterializer:
-			cur = v.ShallowMap()
+		case map[string]any, []any, *Overlay:
+		case PathNavigator:
+			cur = NewOverlay(v)
 			s.data[segments[0]] = cur
 		default:
 			cur = make(map[string]any)
@@ -266,9 +288,17 @@ func (s *Store) SetPath(path string, value any) {
 		}
 	}
 
-	// 中间段 [1..n-2]：导航或创建；PathMaterializer 物化后替换回父容器再下探
+	// 中间段 [1..n-2]：导航或创建；PathNavigator 包 Overlay 后替换回父容器再下探
 	for i := 1; i < len(segments)-1; i++ {
 		seg := segments[i]
+		if ov, isOverlay := cur.(*Overlay); isOverlay {
+			next, writable := ov.childForWrite(seg)
+			if !writable {
+				return
+			}
+			cur = next
+			continue
+		}
 		next := navigateValue(cur, seg)
 		if next == nil {
 			if isArrayIndex(seg) {
@@ -278,10 +308,10 @@ func (s *Store) SetPath(path string, value any) {
 			setInValue(cur, seg, next)
 		} else {
 			switch v := next.(type) {
-			case map[string]any, []any:
+			case map[string]any, []any, *Overlay:
 				// 可继续导航
-			case PathMaterializer:
-				next = v.ShallowMap()
+			case PathNavigator:
+				next = NewOverlay(v)
 				setInValue(cur, seg, next)
 			default:
 				if isArrayIndex(seg) {
@@ -294,8 +324,8 @@ func (s *Store) SetPath(path string, value any) {
 		cur = next
 	}
 
-	// 最后一段：写入值。父容器已是可变 map/list；若目标位置本身是 Frozen 则被整体替换，
-	// 与"终端赋值"语义一致（不物化终端——写入就是要覆盖它）。
+	// 最后一段：写入值。父容器已是可变 map/list/Overlay；若目标位置本身是导航值
+	// 则被整体替换，与"终端赋值"语义一致（不物化终端——写入就是要覆盖它）。
 	setInValue(cur, segments[len(segments)-1], value)
 }
 
@@ -328,8 +358,12 @@ func isArrayIndex(seg string) bool {
 }
 
 // setInValue 在 cur 的指定段写入 val。
-// cur 必须为 map[string]any 或 []any；数组索引越界时跳过。
+// cur 必须为 map[string]any、[]any 或 *Overlay；数组索引越界时跳过。
 func setInValue(cur any, seg string, val any) {
+	if o, ok := cur.(*Overlay); ok {
+		o.setChild(seg, val)
+		return
+	}
 	if isArrayIndex(seg) {
 		idx, err := strconv.Atoi(seg[1 : len(seg)-1])
 		if err != nil {

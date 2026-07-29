@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"stressbot/protox"
+	"stressbot/state"
 
 	lua "github.com/yuin/gopher-lua"
 	"google.golang.org/protobuf/proto"
@@ -378,26 +379,67 @@ func goValueToLua(L *lua.LState, val any) lua.LValue {
 		// （type(v)=="table"、proto3 默认值字段在场、可自由遍历/改写副本）。
 		// 转换产物是临时 Lua 对象，Go 侧不再为整存消息常驻装箱树。
 		return protoMessageToLuaTable(L, v.Message())
+	case *protox.WireValue:
+		// wire-first 整存值：整读时现场解码 → 直转 Lua table（瞬态，不常驻 Go 侧）。
+		// 解码失败理论不可达（存储点已结构校验），防御性返回 nil。
+		msg, err := v.Message()
+		if err != nil {
+			return lua.LNil
+		}
+		return protoMessageToLuaTable(L, msg)
+	case state.ValueMaterializer:
+		// Overlay（wire 基座 + 脚本覆盖写）等惰性容器：全量物化为纯 Go 树后转 table。
+		return goValueToLua(L, v.MaterializeValue())
 	default:
 		return lua.LString(fmt.Sprintf("%v", val))
 	}
 }
 
 // luaToGoStoreValue 是 robot.set / robot.set_path 专用的入口转换：与 luaToGoValue
-// 唯一的差别是 proto 消息 userdata 存为不可变 *protox.Frozen 引用而非裸消息——
-// 裸消息在 state 里无法路径导航，Frozen 走 PathNavigator 惰性取值、SetPath 写时物化
-// （COW），且免去 get_field_map 整树展开常驻（LoginPlayerDataS2C × 数千机器人 = GB 级）。
+// 的差别是 proto 消息 userdata 存为 state 可导航的紧凑形态而非裸消息：
 //
-// 语义注意：存表是快照（深转换），存消息是**引用**——脚本此后对同一消息 userdata 调
-// proto.set_field 会直接反映到 state（读到新值）。现有脚本无"set 后继续改写原消息"
-// 的用法；proto.set_field 仍走 luaToGoValue，消息作为字段值的合法用例不受影响。
+//   - 响应句柄（*respHandle，网络层解码产物）→ *protox.WireValue（wire-first 核心收益）：
+//     未改写（dirty=false）时直接复用响应的原始 body 快照，零重编码零解码树常驻；
+//     已被 set_field 改写时 proto.Marshal 重编码为当前内容的 wire 字节。
+//     每机器人独有的大消息（如 playerData）常驻由 ~600KB 解码树塌缩为 ~74KB 字节。
+//   - 影子验证降级的 schema / 编码失败 → 回落 *protox.Frozen（解码引用）。
+//   - 共享只读消息（*protox.Frozen）→ 原样存引用。
+//   - 其它裸 proto.Message（proto.create/parse 产物）→ Frozen 引用（行为不变）。
+//
+// 语义注意：存表是快照（深转换），存消息按「存入时内容」固化——WireValue 是字节快照，
+// 脚本此后对同一 userdata 调 proto.set_field 不会反映到 state（现有脚本无此用法；
+// 旧 Frozen 引用形态在此用法下行为本就未定义）。
 func luaToGoStoreValue(v lua.LValue) any {
 	if ud, ok := v.(*lua.LUserData); ok {
-		if msg, ok := ud.Value.(proto.Message); ok {
-			return protox.Freeze(msg)
+		switch m := ud.Value.(type) {
+		case *respHandle:
+			return respHandleStoreValue(m)
+		case *protox.Frozen:
+			return m
+		case proto.Message:
+			return protox.Freeze(m)
 		}
 	}
 	return luaToGoValue(v)
+}
+
+// respHandleStoreValue 把响应句柄转为 state 存储形态（见 luaToGoStoreValue）。
+func respHandleStoreValue(h *respHandle) any {
+	if h.msg == nil {
+		return nil
+	}
+	desc := h.msg.ProtoReflect().Descriptor()
+	if protox.WireDegraded(desc) {
+		return protox.Freeze(h.msg)
+	}
+	if h.raw != nil && h.dirty != nil && !*h.dirty {
+		return protox.NewWireValue(desc, h.raw)
+	}
+	data, err := proto.Marshal(h.msg)
+	if err != nil {
+		return protox.Freeze(h.msg)
+	}
+	return protox.NewWireValue(desc, data)
 }
 
 // luaToGoValue 将 Lua 值转换为 Go 值
@@ -455,6 +497,9 @@ func luaToGoValue(v lua.LValue) any {
 				// 共享只读消息：robot.set 存 Frozen 引用本身（与 P1a 整存形态一致，
 				// state 免展开、跨机器人共享零拷贝，路径读取走 PathNavigator 惰性取值）。
 				return m
+			case *respHandle:
+				// 响应句柄：通用值语义透传底层消息（proto.set_field 的嵌套赋值等）。
+				return m.msg
 			case proto.Message:
 				return m
 			}

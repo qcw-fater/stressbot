@@ -146,7 +146,7 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 **已被线上剖面证实的结论**（勿重复尝试）：
 - 把 `playerData`（`LoginPlayerDataS2C`，map/repeated 重度、每机器人独有）从"get_field_map 展开 map 存储"改为"存 `protox.Frozen` 解码消息引用"是**净退化**：同相位对比 live +217MB @5000 人（dynamicpb 每条目固定开销 ≥ `map[string]any` 装箱）。已还原。
 - 每机器人独有的大消息，任何**解码态**表示（dynamicpb / Go map / Lua table）都 ~600KB/机器人；唯一小一个数量级的形态是 **wire 字节本身**（约 1/5~1/10）。要压这块只能走"持字节 + 按需 wire 扫描解码"的惰性视图。
-- 广播类消息（同内容多接收方）用内容寻址去重（`protox.FrozenCache`）有效；去重缓存体积上界必须按**解码体积估算**计（`estimateDecodedCost`），按原始字节计会钉住 ~50 倍的解码树。独占推送（动作响应）不得进去重缓存（污染+换血）。
+- 广播类消息（同内容多接收方）用内容寻址去重有效。去重缓存现为 **wire-only**（`protox.WireCache`，条目存 `*WireValue` 字节而非解码树）：条目占用即字节数本身，容量按原始字节硬上界（旧 `FrozenCache` 存解码 `*Frozen` 时曾需按解码体积估算防 ~50 倍失真，wire-only 后该问题不存在）。独占推送（动作响应）不得进去重缓存（污染+换血）。脚本消费的解码产物独占瞬态、用完即弃，不入共享缓存。
 - Lua 线程用 trampoline 长驻复用（`script/trampoline.go`）后，`newLState/newRegistry` churn 已消除；`RSS ≈ 2× live` 是 GOGC=100 的正常余量，压 RSS 先压 live。
 
 ## 验证流程

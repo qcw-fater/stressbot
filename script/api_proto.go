@@ -61,10 +61,40 @@ func protoMsgIndex(L *lua.LState) int {
 	return 1
 }
 
+// respHandle 网络响应消息的 Lua 包装载荷（wire-first）：解码消息 + 原始 wire 快照 + 脏标记。
+//
+// raw 是响应 body 的独立快照：脚本对未改写的响应做 robot.set(resp) 时，
+// luaToGoStoreValue 直接用 raw 构造 *protox.WireValue 存入 state（零重编码）。
+// dirty 由全部同根包装（含 list_get/iter_list 取出的子消息包装）共享：任何一处
+// set_field 都会置脏，置脏后 raw 不再可信，存储回落 proto.Marshal 重编码。
+type respHandle struct {
+	msg   proto.Message
+	raw   []byte // 原始 body 独立快照；nil 表示不可用（子包装 / 无 body）
+	dirty *bool  // 同根共享；nil 等价恒脏（防御）
+}
+
+// unwrapProtoUD 解出 userdata 里的 proto 消息形态。
+// 返回 (底层消息, 只读性, 响应句柄)；句柄仅 respHandle 包装非 nil。
+func unwrapProtoUD(v lua.LValue) (proto.Message, bool, *respHandle) {
+	ud, ok := v.(*lua.LUserData)
+	if !ok {
+		return nil, false, nil
+	}
+	switch m := ud.Value.(type) {
+	case *respHandle:
+		return m.msg, false, m
+	case *protox.Frozen:
+		return m.Message(), true, nil
+	case proto.Message:
+		return m, false, nil
+	}
+	return nil, false, nil
+}
+
 // checkProtoMsg 从栈中获取 proto.Message（跳过 self 参数）。
-// 共享只读消息（*protox.Frozen）透传底层消息——仅供读访问器使用。
+// 共享只读消息（*protox.Frozen）与响应句柄（*respHandle）透传底层消息。
 func checkProtoMsg(L *lua.LState) proto.Message {
-	msg, _ := checkProtoMsgRO(L)
+	msg, _, _ := checkProtoMsgFull(L)
 	return msg
 }
 
@@ -72,20 +102,20 @@ func checkProtoMsg(L *lua.LState) proto.Message {
 // readonly=true 表示消息来自广播去重的共享 *Frozen（多机器人共享同一份解码结果），
 // 调用方返回其子消息时必须保持只读传播（继续包 Frozen），绝不能交出可变包装。
 func checkProtoMsgRO(L *lua.LState) (proto.Message, bool) {
+	msg, readonly, _ := checkProtoMsgFull(L)
+	return msg, readonly
+}
+
+// checkProtoMsgFull 从栈中获取 proto 消息、只读性与响应句柄（跳过 self 参数）。
+func checkProtoMsgFull(L *lua.LState) (proto.Message, bool, *respHandle) {
 	top := L.GetTop()
 	for i := 1; i <= top; i++ {
-		v := L.Get(i)
-		if ud, ok := v.(*lua.LUserData); ok {
-			switch m := ud.Value.(type) {
-			case *protox.Frozen:
-				return m.Message(), true
-			case proto.Message:
-				return m, false
-			}
+		if msg, readonly, h := unwrapProtoUD(L.Get(i)); msg != nil {
+			return msg, readonly, h
 		}
 	}
 	L.RaiseError("expected proto message (userdata)")
-	return nil, false
+	return nil, false, nil
 }
 
 // protoMsgMetatableKey proto 消息共享元表在 registry 中的键。
@@ -111,6 +141,17 @@ func protoMsgMetatable(L *lua.LState) *lua.LTable {
 func wrapProtoMessage(L *lua.LState, msg proto.Message) *lua.LUserData {
 	ud := L.NewUserData()
 	ud.Value = msg
+	L.SetMetatable(ud, protoMsgMetatable(L))
+	return ud
+}
+
+// wrapRespMessage 将网络响应消息连同原始 body 快照包装为 LUserData（wire-first）。
+// raw 必须是独立快照（调用方负责复制）；后续 robot.set(resp) 未改写时直接以 raw
+// 存 WireValue。dirty 标记现场新建，同根子包装共享。
+func wrapRespMessage(L *lua.LState, msg proto.Message, raw []byte) *lua.LUserData {
+	ud := L.NewUserData()
+	dirty := false
+	ud.Value = &respHandle{msg: msg, raw: raw, dirty: &dirty}
 	L.SetMetatable(ud, protoMsgMetatable(L))
 	return ud
 }
@@ -169,7 +210,7 @@ func protoSetField(L *lua.LState) int {
 		}
 	}
 
-	msg := checkProtoMsg(L)
+	msg, _, handle := checkProtoMsgFull(L)
 	if msg == nil {
 		return 0
 	}
@@ -177,32 +218,29 @@ func protoSetField(L *lua.LState) int {
 	// 找到 msg 在栈中的位置，然后按相对位置取参数
 	msgIdx := 0
 	for i := 1; i <= L.GetTop(); i++ {
-		v := L.Get(i)
-		if ud, ok := v.(*lua.LUserData); ok {
-			if _, ok2 := ud.Value.(proto.Message); ok2 {
-				msgIdx = i
-				break
-			}
+		if m, _, _ := unwrapProtoUD(L.Get(i)); m != nil {
+			msgIdx = i
+			break
 		}
 	}
 
 	fieldName := L.CheckString(msgIdx + 1)
 	fieldValue := L.CheckAny(msgIdx + 2)
 
-	// 如果 value 是 LUserData 且包含 proto.Message，直接传递（用于嵌套消息）
+	// 如果 value 是 LUserData 且包含 proto 消息，直接传递（用于嵌套消息）
 	var goVal any
-	if ud, ok := fieldValue.(*lua.LUserData); ok {
-		if subMsg, ok2 := ud.Value.(proto.Message); ok2 {
-			goVal = subMsg
-		} else {
-			goVal = luaToGoValue(fieldValue)
-		}
+	if subMsg, _, _ := unwrapProtoUD(fieldValue); subMsg != nil {
+		goVal = subMsg
 	} else {
 		goVal = luaToGoValue(fieldValue)
 	}
 
 	if err := ctx.Factory.SetField(msg, fieldName, goVal); err != nil {
 		L.RaiseError("set field %s failed: %v", fieldName, err)
+	}
+	// 响应句柄被改写：置脏（同根共享），此后存储不得再复用原始 raw 快照。
+	if handle != nil && handle.dirty != nil {
+		*handle.dirty = true
 	}
 
 	return 0
@@ -344,7 +382,7 @@ func protoIterList(L *lua.LState) int {
 		L.Push(lua.LNil)
 		return 1
 	}
-	msg, readonly := checkProtoMsgRO(L)
+	msg, readonly, handle := checkProtoMsgFull(L)
 	if msg == nil {
 		L.Push(lua.LNil)
 		return 1
@@ -372,7 +410,7 @@ func protoIterList(L *lua.LState) int {
 		L.Push(lua.LNumber(idx))
 		// 嵌套 proto 消息保留为 userdata；共享只读消息的子消息保持只读传播
 		if pm, ok := item.(proto.Message); ok {
-			L.Push(wrapChildMessage(L, pm, readonly))
+			L.Push(wrapChildMessage(L, pm, readonly, handle))
 		} else {
 			L.Push(goValueToLua(L, item))
 		}
@@ -411,7 +449,7 @@ func protoListGet(L *lua.LState) int {
 		L.Push(lua.LNil)
 		return 1
 	}
-	msg, readonly := checkProtoMsgRO(L)
+	msg, readonly, handle := checkProtoMsgFull(L)
 	if msg == nil {
 		L.Push(lua.LNil)
 		return 1
@@ -437,7 +475,7 @@ func protoListGet(L *lua.LState) int {
 		return 1
 	}
 	if pm, ok := item.(proto.Message); ok {
-		L.Push(wrapChildMessage(L, pm, readonly))
+		L.Push(wrapChildMessage(L, pm, readonly, handle))
 	} else {
 		L.Push(goValueToLua(L, item))
 	}
@@ -445,11 +483,19 @@ func protoListGet(L *lua.LState) int {
 }
 
 // wrapChildMessage 包装从父消息取出的子消息：父为共享只读（Frozen）时子消息
-// 继续包 Frozen（只读性全树传播，堵住"经子消息 set_field 改写共享树"的旁路），
+// 继续包 Frozen（只读性全树传播，堵住"经子消息 set_field 改写共享树"的旁路）；
+// 父为响应句柄时子消息共享父的脏标记（子消息 set_field 会改写同一底层树，
+// 必须让父句柄的 raw 快照同步失效），且不携带 raw（子消息无独立字节段）；
 // 否则按普通可变消息包装。
-func wrapChildMessage(L *lua.LState, pm proto.Message, readonly bool) *lua.LUserData {
+func wrapChildMessage(L *lua.LState, pm proto.Message, readonly bool, parent *respHandle) *lua.LUserData {
 	if readonly {
 		return wrapFrozenMessage(L, protox.Freeze(pm))
+	}
+	if parent != nil {
+		ud := L.NewUserData()
+		ud.Value = &respHandle{msg: pm, raw: nil, dirty: parent.dirty}
+		L.SetMetatable(ud, protoMsgMetatable(L))
+		return ud
 	}
 	return wrapProtoMessage(L, pm)
 }
