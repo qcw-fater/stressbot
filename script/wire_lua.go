@@ -25,6 +25,9 @@ func wireValueToLuaTable(L *lua.LState, wv *protox.WireValue) (lua.LValue, bool)
 	}
 	root := newLuaTreeSink(L, wv.Desc())
 	if err := wv.Walk(root); err != nil {
+		// ValidateWire 通过的字节上 Walk 失败 = 扫描器 bug：留证据日志并降级，
+		// 绝不静默回退（否则 bug 无从排查）。
+		wv.ReportWireFailure("lua-materialize", err)
 		return lua.LNil, false
 	}
 	return root.tb, true

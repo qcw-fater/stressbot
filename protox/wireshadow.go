@@ -2,6 +2,7 @@ package protox
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -157,16 +158,41 @@ func shadowVerifyNavigate(wv *WireValue, segs []string, got any, found bool) (an
 	return got, found
 }
 
+// mismatchDumpCap 失配日志里 wire 字节 hex 转储的上限（超出部分截断，rawLen 给全长）。
+const mismatchDumpCap = 4096
+
 // recordWireMismatch 记录失配并把 schema 降级。
+// 日志必须携带离线复现所需的全部要素：schema 全名、访问路径、两侧产物摘要、
+// 以及原始 wire 字节的 hex 转储（截断到 mismatchDumpCap）——拿到日志即可写出
+// 复现用例（NewWireValue(desc, hexDecode(rawHex)) 后重放同一路径）。
 func recordWireMismatch(wv *WireValue, segs []string, detail string) {
 	shadowMismatch.Add(1)
 	name := wv.ProtoName()
 	degradedSchemas.LoadOrStore(name, detail)
+	dump := wv.raw
+	truncated := false
+	if len(dump) > mismatchDumpCap {
+		dump = dump[:mismatchDumpCap]
+		truncated = true
+	}
 	stresslog.Error("[WIRE] 影子验证失配，schema 降级回解码路径",
 		zap.String("proto", name),
 		zap.String("path", strings.Join(segs, ".")),
+		zap.String("detail", detail),
 		zap.Int("rawLen", len(wv.raw)),
-		zap.String("detail", detail))
+		zap.Bool("rawTruncated", truncated),
+		zap.String("rawHex", hex.EncodeToString(dump)))
+}
+
+// ReportWireFailure 把 wire 直转/扫描的**意外失败**按失配上报：记完整证据日志并
+// 降级该 schema。供无采样保护的回退点调用（MaterializeValue / Lua 直转的 Walk
+// 失败）——这些失败发生在 ValidateWire 已通过的字节上，必然是扫描器 bug，静默
+// 回退会把 bug 藏起来；降级还能阻止同 schema 反复失败刷日志。
+func (wv *WireValue) ReportWireFailure(stage string, err error) {
+	if wv == nil || wv.desc == nil || err == nil {
+		return
+	}
+	recordWireMismatch(wv, []string{stage}, "直转失败: "+err.Error())
 }
 
 // materializePlain 把导航产物物化为纯 Go 值（*WireValue/*Frozen → messageToMap 树），

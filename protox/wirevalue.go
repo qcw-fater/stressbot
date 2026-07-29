@@ -99,9 +99,13 @@ func (wv *WireValue) Message() (proto.Message, error) {
 func (wv *WireValue) MaterializeValue() any {
 	if wv.MaterializeAllowed() {
 		sink := newMapTreeSink()
-		if err := wv.Walk(sink); err == nil {
+		err := wv.Walk(sink)
+		if err == nil {
 			return sink.m
 		}
+		// ValidateWire 通过的字节上 Walk 失败 = 扫描器 bug：留证据日志并降级，
+		// 绝不静默回退（否则 bug 无从排查）。
+		wv.ReportWireFailure("materialize", err)
 	}
 	msg, err := wv.Message()
 	if err != nil {

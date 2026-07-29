@@ -153,6 +153,8 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 - 广播类消息（同内容多接收方）用内容寻址去重有效：留存与消费（2026-07-29 D2 起）统一走 `protox.WireCache` 共享 wire 字节（容量按原始字节硬上界即真实钉住量）。**"脚本消费改独占瞬态解码"已被证伪**（wire-first 首版，029→031 剖面）：同场 60 人相同帧数据逐机器人解码使 churn 放大 60 倍（区间 ~1.3TB dynamicpb 分配），且帧循环脚本挂起在 await 时协程局部变量钉着自己那份解码树，5000 人陆续进战斗 → live 单调 +1.15GB。注意 wire 惰性视图**不是**独占解码——60 接收方共享同一 `WireShared` 字节、无解码树可钉，不触犯该结论。独占推送（动作响应）不得进任何去重缓存（污染+换血）。
 - 消费侧 wire-first（2026-07-29 D1/D2）：`robot.get` 整读、listen 脚本 `on_message` 表、`get_field_map` 走 wire→Lua 单遍直转（`protox.WalkWire`，零 dynamicpb 中间树）；`await_listen` 大消息给脚本 wire 惰性视图 userdata（`proto.get_field/get_path/list_*` 按需 wire 扫描，语义逐字对齐 `Factory.GetField`——含"缺席 message 按默认值实例下钻"这一与 `Navigate` 不同的历史语义）。`protox.FrozenCache` 共享解码仅作 schema 降级回落路径。正确性三层防线：离线差分 fuzz（`wirediff/wirewalk/wireview_test.go`）+ 线上影子采样（`/debug/wire`，失配自动降级该 schema 回解码路径）。
 - 调优观测端点（挂 pprof 端口）：`/debug/sched`（Go 调度延迟分位数，量化施压机负载对 Apdex/P99 的污染，压测中看 `sinceLast` 组）、`/debug/statekeys`（`robot.get/get_path` 按 key 计数，`tables`/`wireDecodes` 列定位整读热点，`?reset=1` 分窗口）、`/debug/dedup`、`/debug/wire`。
+- **降级回落机制的退役计划**（2026-07-29 记，用户已确认方向）：wire 消费路径（直转器+惰性视图）经**数轮生产规模压测**且 `/debug/wire` 持续零失配、影子验证按计划稳态关闭后，可整体退役「schema 降级回落」——删除 `FrozenCache`、`Frozen` 消费路径与各访问器的解码分支，失配语义从 fail-safe 改为 fail-stop（直接报错停测）。这是信心问题而非技术问题；退役前 FrozenCache 常态为空、成本近零，**不要提前删**（回落必须落在共享解码上，独占解码回落已被 029→031 剖面证伪）。
+- 影子验证失配日志（`[WIRE] 影子验证失配`）携带离线复现全要素：schema 全名、访问路径、两侧产物摘要、wire 字节 hex 转储（截断 4KB，`rawLen` 给全长）。直转 Walk 在已过校验字节上的意外失败同样走失配上报（`ReportWireFailure`），**任何 wire 路径的回退都必须留日志，禁止静默回退**。
 - Lua 线程用 trampoline 长驻复用（`script/trampoline.go`）后，`newLState/newRegistry` churn 已消除；`RSS ≈ 2× live` 是 GOGC=100 的正常余量，压 RSS 先压 live。
 
 ## 验证流程
