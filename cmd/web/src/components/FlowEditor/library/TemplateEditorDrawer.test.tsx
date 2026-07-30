@@ -65,7 +65,7 @@ describe('TemplateEditorDrawer', () => {
     mocks.capability.templateLibrary = false;
     render(<AntApp><TemplateEditorDrawer /></AntApp>);
     expect(screen.getByRole('button', { name: /保\s*存/ }).hasAttribute('disabled')).toBe(true);
-    expect(await screen.findByText('共享模板库未启用，请联系管理员')).toBeTruthy();
+    expect(await screen.findByText('共享模板库功能未启用，请检查服务器配置')).toBeTruthy();
   });
 
   it('保存失败时保留编辑值和窗口，并显示统一错误', async () => {

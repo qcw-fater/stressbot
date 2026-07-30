@@ -14,7 +14,7 @@ import (
 )
 
 func snapshotAction(id, name string, createdAt, updatedAt time.Time) ActionTemplate {
-	return ActionTemplate{ID: id, Name: name, Pattern: "tcpRequest", Data: json.RawMessage(`{"pattern":"tcpRequest","service":"logic"}`), CreatedAt: createdAt, UpdatedAt: updatedAt}
+	return ActionTemplate{ID: id, Name: name, Pattern: "tcpRequest", Data: json.RawMessage(`{"pattern":"tcpRequest","service":"logic","route":{"cmd":1},"s2cProto":"LoginS2C"}`), CreatedAt: createdAt, UpdatedAt: updatedAt}
 }
 
 func TestTemplateSnapshotRevisionIsOrderIndependent(t *testing.T) {
@@ -107,7 +107,7 @@ func TestTemplateSnapshotRejectsStaleRevisionWithoutDelete(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery(`(?s)SELECT id, name, description, pattern.*FROM action_template`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "description", "pattern", "data_json", "created_at", "updated_at"}).
-			AddRow("a", "A", nil, "tcpRequest", []byte(`{"pattern":"tcpRequest","service":"logic"}`), now, now))
+			AddRow("a", "A", nil, "tcpRequest", []byte(`{"pattern":"tcpRequest","service":"logic","route":{"cmd":1},"s2cProto":"LoginS2C"}`), now, now))
 	mock.ExpectRollback()
 	_, err = NewActionTemplateStore(db).ReplaceSnapshot(context.Background(), ReplaceTemplateSnapshotRequest[ActionTemplate]{ExpectedRevision: "sha256:stale", IDPolicy: TemplateIDPreserve, Items: []ActionTemplate{snapshotAction("a", "A", now, now)}})
 	var apiErr *Error

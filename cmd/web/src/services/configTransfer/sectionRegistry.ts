@@ -174,6 +174,34 @@ function assertFiniteNumber(value: unknown, label: string): asserts value is num
   }
 }
 
+function assertTemplateTimestamp(value: unknown, label: string): asserts value is number {
+  assertFiniteNumber(value, label);
+  if (value <= 0 || Number.isNaN(new Date(value).getTime())) {
+    throw new Error(`${label}无效`);
+  }
+}
+
+function assertTemplateMetadata(value: Record<string, unknown>, label: string): void {
+  assertNonEmptyString(value.id, `${label} ID`);
+  if (new TextEncoder().encode(value.id).length > 32) {
+    throw new Error(`${label} ID 不能超过 32 个字节`);
+  }
+  assertNonEmptyString(value.name, `${label}名称`);
+  if ([...value.name.trim()].length > 80) {
+    throw new Error(`${label}名称不能超过 80 个字符`);
+  }
+  if (value.description !== undefined) {
+    if (typeof value.description !== 'string') {
+      throw new Error(`${label} description 必须是字符串`);
+    }
+    if ([...value.description].length > 500) {
+      throw new Error(`${label}描述不能超过 500 个字符`);
+    }
+  }
+  assertTemplateTimestamp(value.createdAt, `${label}创建时间`);
+  assertTemplateTimestamp(value.updatedAt, `${label}更新时间`);
+}
+
 function assertArray(value: unknown, label: string): asserts value is unknown[] {
   if (!Array.isArray(value)) throw new Error(`${label} 必须是数组`);
 }
@@ -327,8 +355,7 @@ function assertErrorMap(value: unknown): asserts value is ResourceFile | null {
 function assertActionTemplate(value: unknown, index: number): asserts value is ActionTemplate {
   const label = `第 ${index + 1} 个动作模板`;
   assertRecord(value, label);
-  assertNonEmptyString(value.id, `${label} ID`);
-  assertNonEmptyString(value.name, `${label}名称`);
+  assertTemplateMetadata(value, label);
   assertNonEmptyString(value.pattern, `${label} pattern`);
   assertRecord(value.data, `${label} data`);
   if (!ALL_ACTION_PATTERNS.includes((value.data as unknown as ActionDef).pattern)) {
@@ -350,11 +377,6 @@ function assertActionTemplate(value: unknown, index: number): asserts value is A
   if (actionErrors.length > 0) {
     throw new Error(`${label}动作模板校验失败：${actionErrors[0].message}`);
   }
-  assertFiniteNumber(value.createdAt, `${label}创建时间`);
-  assertFiniteNumber(value.updatedAt, `${label}更新时间`);
-  if (value.description !== undefined && typeof value.description !== 'string') {
-    throw new Error(`${label} description 必须是字符串`);
-  }
 }
 
 function assertActionTemplates(value: unknown): asserts value is ActionTemplate[] {
@@ -370,8 +392,7 @@ const LISTEN_KINDS = new Set(['silent', 'declarative', 'lua']);
 function assertListenTemplate(value: unknown, index: number): asserts value is ListenTemplate {
   const label = `第 ${index + 1} 个监听模板`;
   assertRecord(value, label);
-  assertNonEmptyString(value.id, `${label} ID`);
-  assertNonEmptyString(value.name, `${label}名称`);
+  assertTemplateMetadata(value, label);
   if (typeof value.kind !== 'string' || !LISTEN_KINDS.has(value.kind)) {
     throw new Error(`${label} kind 无效`);
   }
@@ -389,10 +410,19 @@ function assertListenTemplate(value: unknown, index: number): asserts value is L
   if (listenErrors.length > 0) {
     throw new Error(`${label}监听模板校验失败：${listenErrors[0].message}`);
   }
-  assertFiniteNumber(value.createdAt, `${label}创建时间`);
-  assertFiniteNumber(value.updatedAt, `${label}更新时间`);
-  if (value.description !== undefined && typeof value.description !== 'string') {
-    throw new Error(`${label} description 必须是字符串`);
+  if (value.defaultRef !== undefined) {
+    const defaultRef = value.defaultRef;
+    assertRecord(defaultRef, `${label} defaultRef`);
+    assertNonEmptyString(defaultRef.server, `${label} defaultRef.server`);
+    if (!Object.prototype.hasOwnProperty.call(defaultRef, 'route') || defaultRef.route === null) {
+      throw new Error(`${label} defaultRef.route 不能为空`);
+    }
+    if (
+      defaultRef.queueSize !== undefined &&
+      (!Number.isInteger(defaultRef.queueSize) || (defaultRef.queueSize as number) <= 0)
+    ) {
+      throw new Error(`${label} defaultRef.queueSize 必须是正整数`);
+    }
   }
 }
 

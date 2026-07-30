@@ -154,7 +154,7 @@ export function TemplateEditorDrawer() {
       }
     >
       {templateLibrary === false && (
-        <Alert type="warning" showIcon message="共享模板库未启用，请联系管理员" />
+        <Alert type="warning" showIcon message="共享模板库功能未启用，请检查服务器配置" />
       )}
       {tpl && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

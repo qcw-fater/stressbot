@@ -120,14 +120,14 @@ describe('Toolbar configuration backup entry', () => {
     expect(getCapabilities).toHaveBeenCalledTimes(1);
   });
 
-  it('文件菜单只保留统一的配置备份和恢复入口', async () => {
+  it('文件菜单只通过统一备份恢复入口迁移模板库', async () => {
     const user = userEvent.setup();
     render(<AntApp><Toolbar /></AntApp>);
 
     await user.click(screen.getByRole('button', { name: /文件/ }));
     expect(await screen.findByText('备份配置...')).toBeTruthy();
     expect(screen.getByText('恢复配置...')).toBeTruthy();
-    expect(screen.queryByText(/导入模板库/)).toBeNull();
-    expect(screen.queryByText(/导出模板库/)).toBeNull();
+    expect(screen.queryByText('导入模板库…')).toBeNull();
+    expect(screen.queryByText('导出模板库')).toBeNull();
   });
 });

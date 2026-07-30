@@ -44,7 +44,6 @@ import type { FlowJson } from '../codec/flowToJson';
 import { useValidationStore } from '../validation/validationStore';
 import { getCapabilities } from '@/services/capabilitiesApi';
 import { useRuntimeStore } from '@/services/runtimeStore';
-import { useTemplateLibraryCapability } from '../library/useTemplateLibraryCapability';
 
 const ConfigBackupModal = lazy(async () => {
   const module = await import('@/components/modules/configTransfer/ConfigBackupModal');
@@ -80,12 +79,12 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
   const protoFileCount = useProtoStore((s) => s.fileCount);
   const listenCount = useFlowStore((s) => Object.keys(s.listens).length);
   const runtimeMode = useRuntimeStore((state) => state.mode);
-  const { templateLibrary } = useTemplateLibraryCapability();
 
   const [flowManagerOpen, setFlowManagerOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [flowLibrary, setFlowLibrary] = useState<boolean>();
+  const [templateLibrary, setTemplateLibrary] = useState<boolean>();
 
   const validation = useValidationStore((state) => state.report);
   const errorCount = validation.errors.length;
@@ -109,22 +108,32 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
   const onOpenBackup = () => {
     setBackupOpen(true);
     setFlowLibrary(undefined);
+    setTemplateLibrary(undefined);
     void getCapabilities()
-      .then((capabilities) => setFlowLibrary(capabilities.flowLibrary))
+      .then((capabilities) => {
+        setFlowLibrary(capabilities.flowLibrary);
+        setTemplateLibrary(capabilities.templateLibrary);
+      })
       .catch((error) => {
         setFlowLibrary(false);
-        message.warning(`无法确认流程库状态，已跳过已保存流程：${(error as Error).message}`);
+        setTemplateLibrary(false);
+        message.warning(`无法确认服务器配置能力：${(error as Error).message}`);
       });
   };
 
   const onOpenRestore = () => {
     setRestoreOpen(true);
     setFlowLibrary(undefined);
+    setTemplateLibrary(undefined);
     void getCapabilities()
-      .then((capabilities) => setFlowLibrary(capabilities.flowLibrary))
+      .then((capabilities) => {
+        setFlowLibrary(capabilities.flowLibrary);
+        setTemplateLibrary(capabilities.templateLibrary);
+      })
       .catch((error) => {
         setFlowLibrary(false);
-        message.warning(`无法确认流程库状态，已跳过已保存流程：${(error as Error).message}`);
+        setTemplateLibrary(false);
+        message.warning(`无法确认服务器配置能力：${(error as Error).message}`);
       });
   };
 

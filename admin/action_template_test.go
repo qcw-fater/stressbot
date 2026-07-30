@@ -17,7 +17,7 @@ import (
 var validActionTemplateSave = ActionTemplateSaveRequest{
 	Name:    "登录请求",
 	Pattern: engine.PatternTCPRequest,
-	Data:    json.RawMessage(`{"pattern":"tcpRequest","service":"logic"}`),
+	Data:    json.RawMessage(`{"pattern":"tcpRequest","service":"logic","route":{"cmd":1},"s2cProto":"LoginS2C"}`),
 }
 
 func TestValidateActionTemplate(t *testing.T) {
@@ -37,6 +37,35 @@ func TestValidateActionTemplate(t *testing.T) {
 			req := validActionTemplateSave
 			tt.mutate(&req)
 			if _, err := validateActionTemplateSave(req); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+
+	invalidBodies := []struct {
+		name    string
+		pattern string
+		data    string
+	}{
+		{name: "missing service", pattern: engine.PatternTCPRequest, data: `{"pattern":"tcpRequest","route":{},"s2cProto":"LoginS2C"}`},
+		{name: "missing route", pattern: engine.PatternTCPRequest, data: `{"pattern":"tcpRequest","service":"logic","s2cProto":"LoginS2C"}`},
+		{name: "missing address", pattern: engine.PatternTCPConnect, data: `{"pattern":"tcpConnect","service":"logic"}`},
+		{name: "missing c2s proto", pattern: engine.PatternTCPSend, data: `{"pattern":"tcpSend","service":"logic","route":{}}`},
+		{name: "missing s2c proto", pattern: engine.PatternTCPRequest, data: `{"pattern":"tcpRequest","service":"logic","route":{}}`},
+		{name: "blank lua script", pattern: engine.PatternLua, data: `{"pattern":"lua","script":"  "}`},
+		{name: "missing clear state keys", pattern: engine.PatternClearState, data: `{"pattern":"clearState","keys":[]}`},
+		{name: "missing http url", pattern: engine.PatternHTTPRequest, data: `{"pattern":"httpRequest"}`},
+		{name: "invalid http method", pattern: engine.PatternHTTPRequest, data: `{"pattern":"httpRequest","url":"https://example.com","method":"PUT"}`},
+		{name: "invalid http content type", pattern: engine.PatternHTTPRequest, data: `{"pattern":"httpRequest","url":"https://example.com","contentType":"xml"}`},
+	}
+	for _, tt := range invalidBodies {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := validateActionTemplateSave(ActionTemplateSaveRequest{
+				Name:    "无效模板",
+				Pattern: tt.pattern,
+				Data:    json.RawMessage(tt.data),
+			})
+			if err == nil {
 				t.Fatal("expected validation error")
 			}
 		})

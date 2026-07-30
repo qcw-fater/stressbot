@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,6 +38,23 @@ var validActionPatterns = map[string]struct{}{
 	engine.PatternClearState: {}, engine.PatternLua: {},
 }
 
+var actionPatternsRequireService = map[string]struct{}{
+	engine.PatternTCPSend: {}, engine.PatternTCPRequest: {}, engine.PatternTCPConnect: {},
+	engine.PatternTCPClose: {}, engine.PatternTCPListen: {}, engine.PatternUDPSend: {},
+	engine.PatternUDPRequest: {}, engine.PatternUDPConnect: {}, engine.PatternUDPClose: {},
+	engine.PatternUDPListen: {},
+}
+
+var actionPatternsRequireRoute = map[string]struct{}{
+	engine.PatternTCPSend: {}, engine.PatternTCPRequest: {}, engine.PatternTCPListen: {},
+	engine.PatternUDPSend: {}, engine.PatternUDPRequest: {}, engine.PatternUDPListen: {},
+}
+
+func actionPatternIn(pattern string, patterns map[string]struct{}) bool {
+	_, ok := patterns[pattern]
+	return ok
+}
+
 func validateActionTemplateSave(req ActionTemplateSaveRequest) (ActionTemplateSaveRequest, error) {
 	name, err := normalizeTemplateName(req.Name)
 	if err != nil {
@@ -58,6 +76,40 @@ func validateActionTemplateSave(req ActionTemplateSaveRequest) (ActionTemplateSa
 	}
 	if action.Pattern != req.Pattern {
 		return req, ErrInvalidArgument.WithMessage("动作模板 pattern 与 data.pattern 不一致")
+	}
+	if actionPatternIn(action.Pattern, actionPatternsRequireService) && strings.TrimSpace(action.Service) == "" {
+		return req, ErrInvalidArgument.WithMessage("动作模板 service 不能为空")
+	}
+	if actionPatternIn(action.Pattern, actionPatternsRequireRoute) && action.Route == nil {
+		return req, ErrInvalidArgument.WithMessage("动作模板 route 不能为空")
+	}
+	if (action.Pattern == engine.PatternTCPConnect || action.Pattern == engine.PatternUDPConnect) && strings.TrimSpace(action.Address) == "" {
+		return req, ErrInvalidArgument.WithMessage("动作模板 address 不能为空")
+	}
+	if (action.Pattern == engine.PatternTCPSend || action.Pattern == engine.PatternUDPSend) && strings.TrimSpace(action.C2SProto) == "" {
+		return req, ErrInvalidArgument.WithMessage("动作模板 c2sProto 不能为空")
+	}
+	if (action.Pattern == engine.PatternTCPRequest || action.Pattern == engine.PatternUDPRequest) && strings.TrimSpace(action.S2CProto) == "" {
+		return req, ErrInvalidArgument.WithMessage("动作模板 s2cProto 不能为空")
+	}
+	if action.Pattern == engine.PatternLua && strings.TrimSpace(action.Script) == "" {
+		return req, ErrInvalidArgument.WithMessage("Lua 动作模板 script 不能为空")
+	}
+	if action.Pattern == engine.PatternClearState && len(action.Keys) == 0 {
+		return req, ErrInvalidArgument.WithMessage("清除状态动作模板 keys 不能为空")
+	}
+	if action.Pattern == engine.PatternHTTPRequest {
+		if strings.TrimSpace(action.URL) == "" {
+			return req, ErrInvalidArgument.WithMessage("HTTP 动作模板 url 不能为空")
+		}
+		method := strings.ToUpper(strings.TrimSpace(action.Method))
+		if method != "" && method != http.MethodGet && method != http.MethodPost {
+			return req, ErrInvalidArgument.WithMessage("HTTP 动作模板 method 仅支持 GET 或 POST")
+		}
+		contentType := strings.TrimSpace(action.ContentType)
+		if contentType != "" && contentType != engine.ContentJSON && contentType != engine.ContentForm {
+			return req, ErrInvalidArgument.WithMessage("HTTP 动作模板 contentType 仅支持 json 或 form")
+		}
 	}
 	req.Name, req.Description = name, description
 	return req, nil

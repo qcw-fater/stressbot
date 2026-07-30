@@ -155,6 +155,12 @@ export function assertBackupFileSize(file: Pick<File, 'size'>): void {
   }
 }
 
+export function assertBackupPayloadSize(size: number): void {
+  if (size > MAX_BACKUP_BYTES) {
+    throw new Error('备份文件超过 100 MiB，请减少选择内容');
+  }
+}
+
 export function parseBackupWithRegistry(
   text: string,
   registry: ConfigSectionRegistry = defaultSectionRegistry,
@@ -240,6 +246,7 @@ export function downloadBackupBundle(bundle: ConfigBackupBundle): void {
   const blob = new Blob([JSON.stringify(bundle, null, 2)], {
     type: 'application/json;charset=utf-8',
   });
+  assertBackupPayloadSize(blob.size);
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   try {

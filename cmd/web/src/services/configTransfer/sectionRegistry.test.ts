@@ -216,6 +216,58 @@ describe('section validation', () => {
     ).toThrow('监听模板校验失败');
   });
 
+  it('rejects template metadata that the server cannot store', () => {
+    const registry = createSectionRegistry(dependencies());
+    const action: ActionTemplate = {
+      id: 'action-1',
+      name: 'Action',
+      description: 'Description',
+      pattern: 'setState',
+      data: { pattern: 'setState' },
+      createdAt: 10,
+      updatedAt: 10,
+    };
+
+    expect(() =>
+      registry.actionTemplates.validate([{ ...action, id: 'x'.repeat(33) }]),
+    ).toThrow();
+    expect(() =>
+      registry.actionTemplates.validate([{ ...action, name: 'x'.repeat(81) }]),
+    ).toThrow();
+    expect(() =>
+      registry.actionTemplates.validate([{ ...action, description: 'x'.repeat(501) }]),
+    ).toThrow();
+    expect(() =>
+      registry.actionTemplates.validate([{ ...action, createdAt: Number.MAX_VALUE }]),
+    ).toThrow();
+  });
+
+  it('validates listen template default references before restore', () => {
+    const registry = createSectionRegistry(dependencies());
+    const listen: ListenTemplate = {
+      id: 'listen-1',
+      name: 'Push',
+      kind: 'silent',
+      data: {},
+      createdAt: 20,
+      updatedAt: 20,
+    };
+
+    expect(() =>
+      registry.listenTemplates.validate([{ ...listen, defaultRef: { server: '', route: {} } }]),
+    ).toThrow();
+    expect(() =>
+      registry.listenTemplates.validate([
+        { ...listen, defaultRef: { server: 'tcp:logic', route: null } },
+      ]),
+    ).toThrow();
+    expect(() =>
+      registry.listenTemplates.validate([
+        { ...listen, defaultRef: { server: 'tcp:logic', route: {}, queueSize: 0 } },
+      ]),
+    ).toThrow();
+  });
+
   it('validates notepad contents and timestamps', () => {
     const registry = createSectionRegistry(dependencies());
     const note: NotepadFile = {

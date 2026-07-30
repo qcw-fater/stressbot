@@ -62,6 +62,9 @@ func validateListenTemplateSave(req ListenTemplateSaveRequest) (ListenTemplateSa
 	if req.Kind != derived {
 		return req, ErrInvalidArgument.WithMessage("监听模板 kind 与 data 内容形态不一致")
 	}
+	if derived == "lua" && strings.TrimSpace(listen.Script) == "" {
+		return req, ErrInvalidArgument.WithMessage("Lua 监听模板 script 不能为空")
+	}
 	if len(strings.TrimSpace(string(req.DefaultRef))) > 0 {
 		object, err := requireJSONObject(req.DefaultRef, "监听模板 defaultRef")
 		if err != nil {

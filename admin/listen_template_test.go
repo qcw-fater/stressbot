@@ -29,6 +29,10 @@ func TestValidateListenTemplate(t *testing.T) {
 		{name: "non object", mutate: func(r *ListenTemplateSaveRequest) { r.Data = json.RawMessage(`null`) }},
 		{name: "invalid kind", mutate: func(r *ListenTemplateSaveRequest) { r.Kind = "other" }},
 		{name: "mismatched kind", mutate: func(r *ListenTemplateSaveRequest) { r.Kind = "lua" }},
+		{name: "blank lua script", mutate: func(r *ListenTemplateSaveRequest) {
+			r.Kind = "lua"
+			r.Data = json.RawMessage(`{"script":"  "}`)
+		}},
 		{name: "non object default ref", mutate: func(r *ListenTemplateSaveRequest) { r.DefaultRef = json.RawMessage(`[]`) }},
 		{name: "blank default server", mutate: func(r *ListenTemplateSaveRequest) { r.DefaultRef = json.RawMessage(`{"server":"","route":{"cmd":1}}`) }},
 		{name: "missing route", mutate: func(r *ListenTemplateSaveRequest) { r.DefaultRef = json.RawMessage(`{"server":"tcp:logic"}`) }},

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   assertBackupFileSize,
+  assertBackupPayloadSize,
   createBackupBundle,
   parseBackupText,
   parseBackupWithRegistry,
@@ -187,6 +188,15 @@ describe('assertBackupFileSize', () => {
     expect(() => assertBackupFileSize({ size: MAX_BACKUP_BYTES })).not.toThrow();
     expect(() => assertBackupFileSize({ size: MAX_BACKUP_BYTES + 1 })).toThrow(
       '备份文件超过 100 MiB，无法导入',
+    );
+  });
+});
+
+describe('assertBackupPayloadSize', () => {
+  it('allows the import limit and rejects an export that cannot be restored', () => {
+    expect(() => assertBackupPayloadSize(MAX_BACKUP_BYTES)).not.toThrow();
+    expect(() => assertBackupPayloadSize(MAX_BACKUP_BYTES + 1)).toThrow(
+      '备份文件超过 100 MiB，请减少选择内容',
     );
   });
 });

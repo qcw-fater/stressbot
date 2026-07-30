@@ -10,7 +10,7 @@
 
 import { App as AntApp, Button, Empty, Input, Tooltip } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { NodeType } from '@/types/flow';
 import {
@@ -63,7 +63,6 @@ export function NodePalette() {
     templateLibrary,
     loading: capabilityLoading,
     error: capabilityError,
-    refresh: refreshCapability,
   } = useTemplateLibraryCapability();
   const onDragStart = (e: React.DragEvent, type: NodeType | 'listen') => {
     if (type === 'listen') {
@@ -82,20 +81,24 @@ export function NodePalette() {
   const [listenFilter, setListenFilter] = useState('');
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const refreshRequestRef = useRef(0);
   const setActivePanel = useEditorStore((s) => s.setActivePanel);
   const setClipboard = useEditorStore((s) => s.setClipboard);
 
   const refresh = useCallback(async () => {
     if (templateLibrary !== true) return;
+    const request = ++refreshRequestRef.current;
     setRefreshing(true);
     try {
       const [a, c] = await Promise.all([listActionTemplates(), listListenTemplates()]);
+      if (request !== refreshRequestRef.current) return;
       setActions(a);
       setListens(c);
     } catch (error) {
+      if (request !== refreshRequestRef.current) return;
       message.warning(`模板库刷新失败，继续显示上次数据：${(error as Error).message}`);
     } finally {
-      setRefreshing(false);
+      if (request === refreshRequestRef.current) setRefreshing(false);
     }
   }, [message, templateLibrary]);
 
@@ -109,6 +112,7 @@ export function NodePalette() {
     const onFocus = () => { void refresh(); };
     window.addEventListener('focus', onFocus);
     return () => {
+      refreshRequestRef.current += 1;
       unsubscribe();
       window.removeEventListener('focus', onFocus);
     };
@@ -121,8 +125,7 @@ export function NodePalette() {
   }, [capabilityError, message, templateLibrary]);
 
   const onManualRefresh = async () => {
-    await refreshCapability();
-    if (templateLibrary === true) await refresh();
+    await refresh();
   };
 
   // 关闭右键菜单
@@ -235,18 +238,8 @@ export function NodePalette() {
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             description={capabilityLoading
               ? '正在确认共享模板库状态'
-              : '共享模板库未启用，请联系管理员'}
-          >
-            <Button
-              size="small"
-              icon={<ReloadOutlined />}
-              onClick={() => { void onManualRefresh(); }}
-              loading={capabilityLoading}
-              aria-label="刷新模板库"
-            >
-              重试
-            </Button>
-          </Empty>
+              : '共享模板库功能未启用，请检查服务器配置'}
+          />
         ) : (
           <>
         {/* Action 模板段 */}

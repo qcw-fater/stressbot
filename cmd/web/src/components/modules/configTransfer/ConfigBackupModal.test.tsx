@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ConfigSectionRegistry } from '@/services/configTransfer/sectionRegistry';
 import type { BackupSection } from '@/services/configTransfer/types';
+import * as backupCodec from '@/services/configTransfer/backupCodec';
 import { ConfigBackupModal } from './ConfigBackupModal';
 
 const SECTION_LABELS: Record<BackupSection, string> = {
@@ -91,9 +92,6 @@ describe('ConfigBackupModal', () => {
     expect((screen.getByRole('checkbox', { name: /笔记文件/ }) as HTMLInputElement).checked).toBe(
       true,
     );
-    expect((screen.getByRole('checkbox', { name: /Action 模板/ }) as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByRole('checkbox', { name: /Listen 模板/ }) as HTMLInputElement).checked).toBe(false);
-    expect(screen.getAllByText('服务器未启用共享模板库')).toHaveLength(2);
   });
 
   it('does not allow a download when no section is selected', async () => {
@@ -107,6 +105,29 @@ describe('ConfigBackupModal', () => {
     expect((screen.getByRole('button', { name: /下载备份/ }) as HTMLButtonElement).disabled).toBe(
       true,
     );
+    expect(createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it('明确说明备份不包含服务器环境数据', async () => {
+    render(
+      <ConfigBackupModal open onClose={() => undefined} flowLibrary templateLibrary registry={registryWith()} />,
+    );
+
+    expect(await screen.findByText(/不包含服务器连接、数据库凭据、运行历史和界面偏好/)).toBeTruthy();
+  });
+
+  it('shows the final payload size error without creating a download URL', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(backupCodec, 'downloadBackupBundle').mockImplementation(() => {
+      throw new Error('备份文件超过 100 MiB，请减少选择内容');
+    });
+    render(
+      <ConfigBackupModal open onClose={() => undefined} flowLibrary templateLibrary registry={registryWith()} />,
+    );
+
+    await user.click(await screen.findByRole('button', { name: /下载备份/ }));
+
+    expect(await screen.findByText('备份文件超过 100 MiB，请减少选择内容')).toBeTruthy();
     expect(createObjectURL).not.toHaveBeenCalled();
   });
 

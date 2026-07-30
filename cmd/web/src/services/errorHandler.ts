@@ -55,7 +55,7 @@ const TOAST_MAP: Record<string, (err: ApiError) => string> = {
   HISTORY_NOT_FOUND: () => '历史记录不存在或已被删除',
   HISTORY_STARRED: () => '已收藏的记录不能删除（请先取消收藏，或使用强制删除）',
   HISTORY_DISABLED: () => '历史记录功能未启用，请联系管理员',
-  TEMPLATE_LIBRARY_DISABLED: () => '共享模板库未启用，请联系管理员',
+  TEMPLATE_LIBRARY_DISABLED: () => '共享模板库功能未启用，请检查服务器配置',
   ACTION_TEMPLATE_NOT_FOUND: () => '动作模板不存在或已被删除',
   LISTEN_TEMPLATE_NOT_FOUND: () => '监听模板不存在或已被删除',
   TEMPLATE_NAME_CONFLICT: () => '同类模板名称已存在',

@@ -11,7 +11,7 @@ afterEach(() => {
 
 describe('模板库错误提示', () => {
   it.each([
-    ['TEMPLATE_LIBRARY_DISABLED', '共享模板库未启用，请联系管理员'],
+    ['TEMPLATE_LIBRARY_DISABLED', '共享模板库功能未启用，请检查服务器配置'],
     ['ACTION_TEMPLATE_NOT_FOUND', '动作模板不存在或已被删除'],
     ['LISTEN_TEMPLATE_NOT_FOUND', '监听模板不存在或已被删除'],
     ['TEMPLATE_NAME_CONFLICT', '同类模板名称已存在'],

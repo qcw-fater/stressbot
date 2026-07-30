@@ -42,7 +42,7 @@ export function SaveTemplateButton(props: ActionProps | ListenProps) {
   const unavailableReason = loading
     ? '正在确认共享模板库状态'
     : templateLibrary === false
-      ? '共享模板库未启用，请联系管理员'
+      ? '共享模板库功能未启用，请检查服务器配置'
       : undefined;
 
   const onSave = async () => {

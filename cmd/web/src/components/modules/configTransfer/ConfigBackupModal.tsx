@@ -260,7 +260,7 @@ export function ConfigBackupModal({
       </Spin>
 
       <Typography.Paragraph type="secondary" className="config-backup-modal__notice">
-        备份文件可能包含业务协议、脚本和笔记内容，请妥善保管。
+        备份文件可能包含业务协议、脚本和笔记内容，请妥善保管；不包含服务器连接、数据库凭据、运行历史和界面偏好。
       </Typography.Paragraph>
     </Modal>
   );

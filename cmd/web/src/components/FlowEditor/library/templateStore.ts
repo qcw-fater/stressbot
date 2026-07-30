@@ -249,23 +249,3 @@ export async function replaceListenTemplates(templates: readonly ListenTemplate[
     items: templates,
   });
 }
-
-/** 模板导入/导出包（动作 + 监听）。供工具栏「导出/导入模板」与配置备份使用。 */
-export interface TemplateBundle {
-  actions: ActionTemplate[];
-  listens: ListenTemplate[];
-}
-
-/** 导出全部动作 + 监听模板为一个 bundle。 */
-export async function exportAllTemplates(): Promise<TemplateBundle> {
-  const [actions, listens] = await Promise.all([listActionTemplates(), listListenTemplates()]);
-  return { actions, listens };
-}
-
-/** 从 bundle 整体替换导入动作 + 监听模板，返回导入数量。 */
-export async function importTemplates(bundle: TemplateBundle): Promise<{ actions: number; listens: number }> {
-  const actions = Array.isArray(bundle?.actions) ? bundle.actions : [];
-  const listens = Array.isArray(bundle?.listens) ? bundle.listens : [];
-  await Promise.all([replaceActionTemplates(actions), replaceListenTemplates(listens)]);
-  return { actions: actions.length, listens: listens.length };
-}

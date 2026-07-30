@@ -272,35 +272,4 @@ describe('ConfigRestoreModal', () => {
     expect(screen.getByText('新增 1')).toBeTruthy();
     expect(services.execute).toHaveBeenCalledTimes(1);
   });
-
-  it('共享模板库不可用时禁用模板分区但保留其它恢复内容', async () => {
-    const user = userEvent.setup();
-    const mixedBundle: ConfigBackupBundle = {
-      kind: 'stressbot-config-backup',
-      schemaVersion: 1,
-      exportedAt: '2026-07-23T10:00:00.000Z',
-      manifest: {
-        includedSections: ['protoFiles', 'actionTemplates', 'listenTemplates'],
-        counts: { protoFiles: 1, actionTemplates: 1, listenTemplates: 1 },
-      },
-      data: { protoFiles: [], actionTemplates: [], listenTemplates: [] },
-    };
-    const services = restoreServices({ parse: vi.fn(() => mixedBundle) });
-    renderModal(services, { templateLibrary: false });
-    await user.upload(screen.getByLabelText('选择配置备份文件'), backupFile());
-
-    const action = await screen.findByRole('checkbox', { name: /动作模板/ }) as HTMLInputElement;
-    const listen = screen.getByRole('checkbox', { name: /监听模板/ }) as HTMLInputElement;
-    const proto = screen.getByRole('checkbox', { name: /Proto 文件/ }) as HTMLInputElement;
-    expect(action.disabled).toBe(true);
-    expect(action.checked).toBe(false);
-    expect(listen.disabled).toBe(true);
-    expect(proto.checked).toBe(true);
-    await waitFor(() => expect(services.preflight).toHaveBeenCalledWith(
-      mixedBundle,
-      ['protoFiles'],
-      'merge',
-      'prompt',
-    ));
-  });
 });

@@ -46,7 +46,7 @@ describe('SaveTemplateButton', () => {
     const button = screen.getByRole('button', { name: /加入模板库/ });
     expect(button.hasAttribute('disabled')).toBe(true);
     await user.hover(button);
-    expect(await screen.findByText('共享模板库未启用，请联系管理员')).toBeTruthy();
+    expect(await screen.findByText('共享模板库功能未启用，请检查服务器配置')).toBeTruthy();
   });
 
   it('保存失败交给统一错误处理且不产生未处理拒绝', async () => {
