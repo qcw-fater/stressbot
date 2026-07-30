@@ -76,6 +76,12 @@ func (s *robotScheduler) enqueue(t pendingTask) {
 // ctx 取消立即返回 Canceled。
 func (s *robotScheduler) wait(deadline time.Time, pollMs int, check func() *engine.NetExchange) script.WaitOutcome {
 	ctx := s.robot.ctx
+	var timer *time.Timer
+	defer func() {
+		if timer != nil {
+			utils.PutTimer(timer)
+		}
+	}()
 	for {
 		if ctx.Err() != nil {
 			return script.WaitOutcome{Canceled: true}
@@ -102,13 +108,18 @@ func (s *robotScheduler) wait(deadline time.Time, pollMs int, check func() *engi
 				w = tick
 			}
 		}
-		timer := time.NewTimer(w)
+		// 池化 timer 跨 poll 轮复用（帧循环每轮一只 NewTimer 是剖面上的分配主源）。
+		// t.exec() 前必 Stop：回调里嵌套 wait/awaitResponse 会再从池取，互不干扰。
+		if timer == nil {
+			timer = utils.GetTimer(w)
+		} else {
+			timer.Reset(w)
+		}
 		select {
 		case t := <-s.taskCh:
 			timer.Stop()
 			t.exec() // 就地处理 → loop 回顶重查 check / deadline
 		case <-ctx.Done():
-			timer.Stop()
 			return script.WaitOutcome{Canceled: true}
 		case <-timer.C:
 			// poll 到点重查 ready / sleep 到时 → loop 回顶
@@ -138,9 +149,9 @@ func (s *robotScheduler) awaitResponse(spec *script.WaitSpec) script.WaitOutcome
 	}
 	defer pr.Close()
 
-	// 单一 timer 计满整个超时窗口。
-	timer := time.NewTimer(pr.Timeout())
-	defer timer.Stop()
+	// 单一池化 timer 计满整个超时窗口（每请求一只 NewTimer 的分配消除）。
+	timer := utils.GetTimer(pr.Timeout())
+	defer utils.PutTimer(timer)
 	for {
 		if ctx.Err() != nil {
 			return script.WaitOutcome{Canceled: true}

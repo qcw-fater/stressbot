@@ -44,10 +44,8 @@ const (
 var (
 	wireShadowOn atomic.Bool
 
-	// shadowPathSeen (schemaFullName + "\x00" + path) → *atomic.Int32（已全查次数）。
-	shadowPathSeen sync.Map
-	// shadowDescCount schemaFullName → *atomic.Int64（导航计数，驱动 L3 采样）。
-	shadowDescCount sync.Map
+	// 首 K / 稳态采样计数已并入导航驻留表（wirenav.go navResolve），
+	// 与预解析 fd 链共用一次查表，热路径零分配。
 
 	// degradedSchemas schemaFullName → 首次失配原因（string）。
 	degradedSchemas sync.Map
@@ -73,29 +71,6 @@ func WireDegraded(desc protoreflect.MessageDescriptor) bool {
 	return bad
 }
 
-// shadowShouldVerify 决定这次导航是否触发影子校验。
-func shadowShouldVerify(desc protoreflect.MessageDescriptor, segs []string) bool {
-	shadowNavigates.Add(1)
-	if !wireShadowOn.Load() {
-		return false
-	}
-	name := string(desc.FullName())
-
-	// L2：(schema, 路径) 首 K 次全查。
-	key := name + "\x00" + strings.Join(segs, ".")
-	cntAny, _ := shadowPathSeen.LoadOrStore(key, new(atomic.Int32))
-	cnt := cntAny.(*atomic.Int32)
-	if cnt.Load() < shadowFirstK {
-		cnt.Add(1)
-		return true
-	}
-
-	// L3：per-schema 采样。
-	dcAny, _ := shadowDescCount.LoadOrStore(name, new(atomic.Int64))
-	dc := dcAny.(*atomic.Int64)
-	return dc.Add(1)%shadowSampleEvery == 0
-}
-
 // MaterializeAllowed 决定这次全量物化能否走 wire 直转（WalkWire）：
 //   - schema 已降级 → false（回落解码路径）；
 //   - 影子采样命中（整树伪路径 "*"，首 K 次全查 + 稳态抽样）→ 现场双读比对，
@@ -108,7 +83,7 @@ func (wv *WireValue) MaterializeAllowed() bool {
 	if WireDegraded(wv.desc) {
 		return false
 	}
-	if shadowShouldVerify(wv.desc, shadowWholeTreeSegs) {
+	if _, verify := navResolve(wv.desc, shadowWholeTreeSegs); verify {
 		return shadowVerifyMaterialize(wv)
 	}
 	return true
@@ -298,8 +273,7 @@ func SnapshotWireShadowStats() WireShadowStats {
 
 // resetWireShadowForTest 清空影子验证全局状态（仅测试用）。
 func resetWireShadowForTest() {
-	shadowPathSeen = sync.Map{}
-	shadowDescCount = sync.Map{}
+	navResetAll()
 	degradedSchemas = sync.Map{}
 	shadowNavigates.Store(0)
 	shadowChecks.Store(0)

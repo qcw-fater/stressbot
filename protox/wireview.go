@@ -41,7 +41,9 @@ func (wv *WireValue) GetFieldCompat(path string) (any, error) {
 		return nil, fmt.Errorf("fieldPath 为空")
 	}
 	got, gerr := wireGetNested(wv.desc, wv.raw, parts)
-	if shadowShouldVerify(wv.desc, parts) {
+	// fd 链暂未接入 wireGetNested（其层级推进含「缺席按默认值实例下钻」的
+	// GetField 历史语义，与 wireNavigate 不同轨）；这里只复用影子采样判定。
+	if _, verify := navResolve(wv.desc, parts); verify {
 		return shadowVerifyGetField(wv, parts, got, gerr)
 	}
 	return got, gerr
@@ -89,11 +91,15 @@ func wireGetNested(md protoreflect.MessageDescriptor, b []byte, parts []string) 
 			return nil, fmt.Errorf("字段 %s 不是 repeated，但路径包含数组索引 %s", part, nextPart)
 		}
 		idx := sscanfIndex(nextPart)
-		elems, ok := wireCollectList(b, fd)
+		if idx < 0 {
+			return nil, fmt.Errorf("数组索引越界: %s", nextPart)
+		}
+		// 下标访问只扫到第 idx+1 个元素即停（前缀即定值，见 wireCollectList）。
+		elems, ok := wireCollectList(b, fd, idx+1)
 		if !ok {
 			return nil, fmt.Errorf("字段 %s wire 结构损坏", fd.FullName())
 		}
-		if idx < 0 || idx >= len(elems) {
+		if idx >= len(elems) {
 			return nil, fmt.Errorf("数组索引越界: %s", nextPart)
 		}
 		e := elems[idx]
@@ -148,7 +154,7 @@ func wireFieldTerminal(md protoreflect.MessageDescriptor, b []byte, fd protorefl
 		return out, nil
 
 	case fd.IsList():
-		elems, ok := wireCollectList(b, fd)
+		elems, ok := wireCollectList(b, fd, 0)
 		if !ok {
 			return nil, fmt.Errorf("字段 %s wire 结构损坏", fd.FullName())
 		}
@@ -226,7 +232,8 @@ func sscanfIndex(seg string) int {
 
 // wireListField 复刻 getListField 的路径行为：中间段必须是单数 message
 //（缺席 ≡ 空字节继续），终端返回字段与其元素。
-func wireListField(md protoreflect.MessageDescriptor, b []byte, parts []string) (protoreflect.FieldDescriptor, []wireElem, error) {
+// limit 语义同 wireCollectList：>0 时收集到至少 limit 个元素即停，<=0 收全量。
+func wireListField(md protoreflect.MessageDescriptor, b []byte, parts []string, limit int) (protoreflect.FieldDescriptor, []wireElem, error) {
 	if len(parts) == 0 {
 		return nil, nil, fmt.Errorf("fieldPath 为空")
 	}
@@ -256,7 +263,7 @@ func wireListField(md protoreflect.MessageDescriptor, b []byte, parts []string) 
 	if !fd.IsList() {
 		return fd, nil, nil
 	}
-	elems, ok := wireCollectList(b, fd)
+	elems, ok := wireCollectList(b, fd, limit)
 	if !ok {
 		return nil, nil, fmt.Errorf("字段 %s wire 结构损坏", fd.FullName())
 	}
@@ -305,7 +312,7 @@ func (wv *WireValue) ListCursorCompat(path string) (*WireListCursor, error) {
 	if wv == nil || wv.desc == nil {
 		return nil, fmt.Errorf("WireValue 为空")
 	}
-	fd, elems, err := wireListField(wv.desc, wv.raw, navSplitCached(path))
+	fd, elems, err := wireListField(wv.desc, wv.raw, navSplitCached(path), 0)
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +331,7 @@ func (wv *WireValue) ListLenCompat(path string) (int, error) {
 	if wv == nil || wv.desc == nil {
 		return 0, fmt.Errorf("WireValue 为空")
 	}
-	fd, elems, err := wireListField(wv.desc, wv.raw, navSplitCached(path))
+	fd, elems, err := wireListField(wv.desc, wv.raw, navSplitCached(path), 0)
 	if err != nil {
 		return 0, err
 	}
@@ -340,14 +347,18 @@ func (wv *WireValue) ListItemCompat(path string, idx int) (any, error) {
 	if wv == nil || wv.desc == nil {
 		return nil, fmt.Errorf("WireValue 为空")
 	}
-	fd, elems, err := wireListField(wv.desc, wv.raw, navSplitCached(path))
+	if idx < 0 {
+		return nil, fmt.Errorf("数组索引越界: %d", idx)
+	}
+	// 只扫到第 idx+1 个元素即停（前缀即定值，见 wireCollectList）。
+	fd, elems, err := wireListField(wv.desc, wv.raw, navSplitCached(path), idx+1)
 	if err != nil {
 		return nil, err
 	}
 	if !fd.IsList() {
 		return nil, fmt.Errorf("字段 %s 不是 repeated", fd.Name())
 	}
-	if idx < 0 || idx >= len(elems) {
+	if idx >= len(elems) {
 		return nil, fmt.Errorf("数组索引越界: %d", idx)
 	}
 	e := elems[idx]

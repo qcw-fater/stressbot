@@ -477,6 +477,48 @@ func TestXxteaOffset(t *testing.T) {
 	}
 }
 
+// TestDecryptInPlaceParity 原地解密与复制版 Decrypt 逐字对拍：
+// 对实现 CipherInPlace 的流密码，任意 key（含触发"原样返回"分支的非法长度）、
+// 任意 offset 下，DecryptInPlace 后的 data 必须与 Decrypt 返回值一致。
+func TestDecryptInPlaceParity(t *testing.T) {
+	cases := []struct {
+		name string
+		keys [][]byte
+	}{
+		{"none", [][]byte{nil, []byte("k")}},
+		{"xor", [][]byte{nil, []byte("k"), randBytes(7, 3)}},
+		{"xor_carry_rol", [][]byte{nil, randBytes(31, 4), randBytes(32, 5)}},
+		{"rc4", [][]byte{nil, randBytes(16, 6)}},
+	}
+	params := map[string]any{"rol": 3}
+	for _, tc := range cases {
+		ciph, ok := LookupCipher(tc.name)
+		if !ok {
+			t.Fatalf("LookupCipher(%s) 未命中", tc.name)
+		}
+		ipc, ok := ciph.(CipherInPlace)
+		if !ok {
+			t.Fatalf("%s 应实现 CipherInPlace", tc.name)
+		}
+		for _, key := range tc.keys {
+			for _, off := range []int{0, 4, 999} {
+				data := randBytes(64, 9)
+				want, err := ciph.Decrypt(data, key, off, params)
+				if err != nil {
+					t.Fatalf("%s Decrypt 失败: %v", tc.name, err)
+				}
+				got := append([]byte{}, data...)
+				if err := ipc.DecryptInPlace(got, key, off, params); err != nil {
+					t.Fatalf("%s DecryptInPlace 失败: %v", tc.name, err)
+				}
+				if !bytes.Equal(got, want) {
+					t.Errorf("%s key=%d off=%d 原地解密与复制版不一致", tc.name, len(key), off)
+				}
+			}
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // compressor: none / gzip
 // ---------------------------------------------------------------------------
@@ -528,6 +570,32 @@ func TestGzipDecompressInvalid(t *testing.T) {
 	_, err := c.Decompress([]byte("not gzip"))
 	if err == nil {
 		t.Error("gzip 解压非法数据应报错")
+	}
+}
+
+// TestGzipDecompressMultiMember 多成员拼接流：ISIZE trailer 只描述末一个成员，
+// 定长读的尺寸提示必然偏短，覆盖 readAllSized 的探针追加路径；
+// 语义须与 io.ReadAll 时代一致（gzip.Reader 多成员模式读全部成员）。
+func TestGzipDecompressMultiMember(t *testing.T) {
+	c, _ := LookupCompressor("gzip")
+	a := bytes.Repeat([]byte("first-member. "), 500)
+	b := bytes.Repeat([]byte("x"), 7)
+	compA, err := c.Compress(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compB, err := c.Compress(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := append(append([]byte{}, compA...), compB...)
+	dec, err := c.Decompress(joined)
+	if err != nil {
+		t.Fatalf("多成员解压失败: %v", err)
+	}
+	want := append(append([]byte{}, a...), b...)
+	if !bytes.Equal(dec, want) {
+		t.Errorf("多成员解压结果不符：got %d 字节 want %d 字节", len(dec), len(want))
 	}
 }
 

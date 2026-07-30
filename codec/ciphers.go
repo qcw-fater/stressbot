@@ -231,6 +231,10 @@ func (noneCipher) Decrypt(data, key []byte, offset int, params map[string]any) (
 	return out, nil
 }
 
+func (noneCipher) DecryptInPlace(data, key []byte, offset int, params map[string]any) error {
+	return nil // 直通：原地即恒等
+}
+
 // xorCipher 纯 XOR 流（key 任意长度，循环异或）。
 type xorCipher struct{}
 
@@ -251,6 +255,15 @@ func (c xorCipher) Encrypt(data, key []byte, offset int, params map[string]any) 
 
 func (c xorCipher) Decrypt(data, key []byte, offset int, params map[string]any) ([]byte, error) {
 	return c.apply(data, key, offset), nil
+}
+
+func (c xorCipher) DecryptInPlace(data, key []byte, offset int, params map[string]any) error {
+	if len(key) == 0 || len(data) == 0 {
+		return nil
+	}
+	off := clampOffset(offset, len(data))
+	encryptXor(data[off:], key)
+	return nil
 }
 
 // xorCarryRolCipher XOR+carry+ROL8（现协议）。key 必须 32 字节，否则返回原数据。
@@ -309,6 +322,15 @@ func (c xorCarryRolCipher) Decrypt(data, key []byte, offset int, params map[stri
 	return out, nil
 }
 
+func (c xorCarryRolCipher) DecryptInPlace(data, key []byte, offset int, params map[string]any) error {
+	if len(key) != 32 || len(data) == 0 {
+		return nil // 与 Decrypt 的"key 非 32 字节原样返回"一致：不动 data
+	}
+	off := clampOffset(offset, len(data))
+	decryptXorCarryRol(data[off:], key, c.rolFromParams(params))
+	return nil
+}
+
 // rc4Cipher RC4 流密码。RC4 自反，encrypt==decrypt。key 长度 1~256。
 type rc4Cipher struct{}
 
@@ -329,6 +351,15 @@ func (c rc4Cipher) Encrypt(data, key []byte, offset int, params map[string]any) 
 
 func (c rc4Cipher) Decrypt(data, key []byte, offset int, params map[string]any) ([]byte, error) {
 	return c.apply(data, key, offset), nil
+}
+
+func (c rc4Cipher) DecryptInPlace(data, key []byte, offset int, params map[string]any) error {
+	if len(key) == 0 || len(data) == 0 {
+		return nil
+	}
+	off := clampOffset(offset, len(data))
+	applyRC4(data[off:], key)
+	return nil
 }
 
 // aesEcbCipher AES-ECB + PKCS#7。params 无；key 16/24/32。

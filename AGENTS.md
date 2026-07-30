@@ -165,8 +165,19 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 - 观测：`/debug/statekeys` 中 `view:` 前缀计数 `get_view` 调用；迁移某热点 key 后应看到其 `get:` 行的 `tables/wireDecodes` 掉零、`view:` 行上量。
 - 直转器 scratch 池化（2026-07-30 P2）：`walkWireLevel` 的字段累计切片走 `sync.Pool`（瞬态 scratch，GC 周期自动清空、常驻 ∝ 并发转换数，不属于"内存换 CPU"的缓存交易，不触内存红线）。**归还前必须逐元素 clear**——scratch 引用共享 wire 快照字节，只截断 len 会经池钉住大缓冲（029→031 钉扎形态）；隔离契约由 `TestWalkWireAccsPoolNoContamination` + 差分 fuzz 守护。产物形态（Lua 表/Go map，归调用方所有）**不可池化**，这块的解法是视图（P1）而非池。
 - Lua 线程用 trampoline 长驻复用（`script/trampoline.go`）后，`newLState/newRegistry` churn 已消除；`RSS ≈ 2× live` 是 GOGC=100 的正常余量，压 RSS 先压 live。
+- 全局 timer 池（2026-07-30 P3，`utils/timerpool.go`）：高频等待点（`robotScheduler.wait` 帧循环 poll、`awaitResponse`/`RequestResponse` 每请求超时窗）统一 `utils.GetTimer/PutTimer`，消除每次 `time.NewTimer` 分配。正确性依赖 Go 1.23+ timer 语义（无缓冲通道、Stop/Reset 保证无旧触发），**归还后不得再引用**；嵌套等待（listen 回调里再 wait）各取各的，天然安全。低频点（连接关闭、心跳注册）不必接。
+- 收包解码路径零分配化（2026-07-30 P4，`codec/`）：① gzip 解压 `readAllSized` 按 trailer ISIZE 定长一次分配（替代 `io.ReadAll` 512B 起步倍增；提示短则截断、长则追加兜底，多成员流有回归测试）；② 流密码实现 `CipherInPlace` 原地解密（decode 的 work 是私有副本；**实现约束：报错前不得改写 data**，块密码不实现）；③ decode 头字段暂存用栈上定长数组替代每帧 routeMap/checksumOut 两个临时 map，routeKey 用 `strconv.AppendInt` 栈上拼接。全部有与复制版/旧行为的对拍测试。encode 侧 `stash` 嵌套 map 未动（摊到进程生命周期分配占比低，对拍风险不值）。
+- 解压去重缓存（2026-07-30 P5，`codec/inflate_cache.go`，显式内存换 CPU）：大广播帧推给全部机器人时逐连接重复 gunzip，按压缩字节内容寻址共享解压产物。**二见登记**防污染（018→019 教训机制化）：首见只记 8 字节哈希标记，第二次见到才存条目——逐机器人唯一的响应永远停在标记层，无需知道路由类型。共享安全前提：产物只读流转（已审计）+ `inflateShareSafe` 保证 compress 是 decode 最后执行步（其后再有原地改写步则禁用共享）。双上界 LRU（1024 条 / 48MB），观测 `/debug/inflate`（hits≈0 且 misses 高涨 = 负载无重复大帧，缓存空转）。
+- routeKey 驻留（2026-07-30 P5，`codec/intern.go`）：解码/编码路由键改为 COW 表驻留（读侧原子 Load + 无分配 map 查找），消除每帧一个小字符串分配。表容量上限 4096 防损坏帧撑爆，超限退化为普通分配。
+- 压缩帧 work 缓冲池化（2026-07-30 P5，`codec/engine.go`）：flags 判定要解压的帧，其 body 副本是纯瞬态 scratch → `sync.Pool` 租借。**归还纪律：只有 work 被解压/共享/复制解密产物顶替后才归还**；任何可能让缓冲作为 body 外泄的路径（解压失败 keep、提前 return）一律不归还、交给 GC——宁可放弃复用也不冒池污染风险。
+- 导航路径驻留表（2026-07-30 P6，`protox/wirenav.go`）：wire 读路径（`NavigateSegs`/`GetFieldCompat`/`MaterializeAllowed`）的影子采样判定与 fd 解析合并为一次查表——`maphash(schema全名+路径段) → 条目`（COW 表，容量上限 8192），条目携带首 K 计数、per-schema 采样计数指针、按 `wireNavigate` 层级推进规则预解析的 fd 链。替代旧 `shadowShouldVerify` 每次导航拼 key + 双 `sync.Map` LoadOrStore（4 次堆分配）与逐层 `ByName`。条目按描述符**身份**（指针）校验：proto 重载后自动替换并重新首 K 全查（比旧的按名计数更严格）；`Factory.Close()` 清整表解除描述符钉扎。哈希碰撞/表满 → 不驻留，跳过首 K 仅参与 per-schema 稳态采样（旧表反而无界，动态 map-key 路径会撑爆它）。fd 链槽位为 nil（非字段段/编译终止）时运行时回退 `ByName`，行为不变；对拍测试 `wirenav_test.go` + 既有差分 fuzz。
+- 列表下标早退（2026-07-30 P6，`wireCollectList(b, fd, limit)`）：`xs[i]` 下标访问（`NavigateSegs`/`ListItemCompat`/`GetFieldCompat`）只扫到第 i+1 个元素即停，不再全量收集解码（repeated 元素只追加不覆盖，前缀即定值；packed 整块解出可能略多于 limit）。层级结构在 `WireValue` 构造点已全量校验，早退跳过尾部不损失防线。注意**单数字段/map 不可早退**——标量 last-wins、单数 message 多段拼接、map 重复 key 替换都要求扫完整层，这是 protobuf 合并语义的硬约束。终端整列表读（`robot.get_path("...heroList")`）与游标遍历天然需要全量，无早退空间。
 
 ## 验证流程
+
+- Windows 下使用 `rg` 时禁止把含 `*`/`?` 的路径作为位置参数；应传目录字面路径并用 `-g '<pattern>'` 过滤，动态模块目录先枚举出实际路径。
+- PowerShell 中检索包含 `|`、括号或引号的源码片段时优先拆成多个 `rg -F` 固定字符串查询；禁止在外层双引号命令中叠加复杂 `rg` 正则转义。
+- 在受限 Windows 工作区运行 Go 构建、测试或 pprof 命令时，将 `GOCACHE` 指向仓库内可写且已忽略的临时目录，避免默认用户缓存清理失败使成功结果返回非零。
 
 每次对代码进行修改后，按以下步骤验证：
 

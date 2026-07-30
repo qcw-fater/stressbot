@@ -153,8 +153,9 @@ func (wv *WireValue) NavigateSegs(segs []string) (any, bool) {
 	if wv == nil || wv.desc == nil || len(segs) == 0 {
 		return nil, false
 	}
-	got, found := wireNavigate(wv.desc, wv.raw, segs)
-	if shadowShouldVerify(wv.desc, segs) {
+	fds, verify := navResolve(wv.desc, segs)
+	got, found := wireNavigate(wv.desc, wv.raw, segs, fds)
+	if verify {
 		return shadowVerifyNavigate(wv, segs, got, found)
 	}
 	return got, found
@@ -162,12 +163,20 @@ func (wv *WireValue) NavigateSegs(segs []string) (any, bool) {
 
 // wireNavigate 在 message 层级的字节上消费一个字段名段并按需继续下探。
 // 结构复刻 frozenNavigate（存在性/类型不匹配语义逐字一致），取值改为 wire 扫描。
-func wireNavigate(md protoreflect.MessageDescriptor, b []byte, parts []string) (any, bool) {
+// fds 为驻留表预解析的 fd 链（wirenav.go），与 parts 同步推进；槽位为 nil
+//（非字段段/未驻留）时回退 Fields().ByName，行为不变。
+func wireNavigate(md protoreflect.MessageDescriptor, b []byte, parts []string, fds []protoreflect.FieldDescriptor) (any, bool) {
 	seg := parts[0]
 	if isIndexSeg(seg) {
 		return nil, false
 	}
-	fd := md.Fields().ByName(protoreflect.Name(seg))
+	var fd protoreflect.FieldDescriptor
+	if len(fds) > 0 {
+		fd = fds[0]
+	}
+	if fd == nil {
+		fd = md.Fields().ByName(protoreflect.Name(seg))
+	}
 	if fd == nil {
 		return nil, false
 	}
@@ -198,31 +207,37 @@ func wireNavigate(md protoreflect.MessageDescriptor, b []byte, parts []string) (
 			return e.terminalValue(valFd), true
 		}
 		if valFd.Kind() == protoreflect.MessageKind {
-			return wireNavigate(valFd.Message(), concatSpans(e.spans), parts[2:])
+			return wireNavigate(valFd.Message(), concatSpans(e.spans), parts[2:], fdsTail(fds, 2))
 		}
 		return nil, false
 
 	case fd.IsList():
-		elems, ok := wireCollectList(b, fd)
-		if !ok || len(elems) == 0 {
-			return nil, false // 空 repeated 视为不存在
-		}
 		if len(parts) == 1 {
+			elems, ok := wireCollectList(b, fd, 0)
+			if !ok || len(elems) == 0 {
+				return nil, false // 空 repeated 视为不存在
+			}
 			out := make([]any, 0, len(elems))
 			for _, e := range elems {
 				out = append(out, e.terminalValue(fd))
 			}
 			return out, true
 		}
+		// 带下标访问：只扫到第 idx+1 个元素即停（repeated 元素按出现序追加，
+		// 前缀即定值，早退不改变语义；层级结构在构造点已全量校验）。
 		idx, iok := parseIndexSeg(parts[1])
-		if !iok || idx < 0 || idx >= len(elems) {
+		if !iok || idx < 0 {
 			return nil, false
+		}
+		elems, ok := wireCollectList(b, fd, idx+1)
+		if !ok || idx >= len(elems) {
+			return nil, false // 含空 repeated 视为不存在
 		}
 		if len(parts) == 2 {
 			return elems[idx].terminalValue(fd), true
 		}
 		if fd.Kind() == protoreflect.MessageKind {
-			return wireNavigate(fd.Message(), elems[idx].span, parts[2:])
+			return wireNavigate(fd.Message(), elems[idx].span, parts[2:], fdsTail(fds, 2))
 		}
 		return nil, false
 
@@ -236,7 +251,7 @@ func wireNavigate(md protoreflect.MessageDescriptor, b []byte, parts []string) (
 		if len(parts) == 1 {
 			return &WireValue{desc: fd.Message(), raw: sub}, true
 		}
-		return wireNavigate(fd.Message(), sub, parts[1:])
+		return wireNavigate(fd.Message(), sub, parts[1:], fdsTail(fds, 1))
 
 	case fd.Kind() == protoreflect.GroupKind:
 		// proto3 无 group；不支持（差分 fuzz 的 schema 也不含 group）。
@@ -278,7 +293,7 @@ func concatSpans(spans [][]byte) []byte {
 // ── 层级扫描 ────────────────────────────────────────────────────
 
 // scanLevel 顺序遍历一个 message 层级的全部字段出现。
-// visit 返回 false 表示提前终止（当前无调用方使用；保留扩展位）。
+// visit 返回 false 表示提前终止（下标早退 / packed 解码失败），扫描返回 true。
 // 返回 false 表示 wire 结构损坏（构造点已校验，导航中理论不可达）。
 func scanLevel(b []byte, visit func(num protowire.Number, typ protowire.Type, u uint64, bs []byte) bool) bool {
 	for len(b) > 0 {
@@ -405,8 +420,11 @@ func (e wireElem) terminalValue(fd protoreflect.FieldDescriptor) any {
 	return e.scalar
 }
 
-// wireCollectList 单遍扫描收集 repeated 字段全部元素（出现序，packed/非 packed 混排）。
-func wireCollectList(b []byte, fd protoreflect.FieldDescriptor) ([]wireElem, bool) {
+// wireCollectList 单遍扫描收集 repeated 字段元素（出现序，packed/非 packed 混排）。
+// limit > 0 时收集到至少 limit 个元素即提前终止扫描（packed 块整块解出，可能
+// 略多于 limit）——repeated 元素只追加不覆盖，前缀即定值，早退不改变取值语义；
+// 层级结构在 WireValue 构造点已全量校验，跳过尾部不损失防线。limit <= 0 收全量。
+func wireCollectList(b []byte, fd protoreflect.FieldDescriptor, limit int) ([]wireElem, bool) {
 	var elems []wireElem
 	kind := fd.Kind()
 	native := nativeWireType(kind)
@@ -436,7 +454,7 @@ func wireCollectList(b []byte, fd protoreflect.FieldDescriptor) ([]wireElem, boo
 		default:
 			// 错误 wire type → 未知字段，忽略
 		}
-		return true
+		return limit <= 0 || len(elems) < limit
 	})
 	return elems, structOK && decodeOK
 }

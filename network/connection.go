@@ -225,11 +225,11 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 	if len(timeoutOverride) > 0 && timeoutOverride[0] > 0 {
 		timeout = timeoutOverride[0]
 	}
-	// 用 NewTimer + Stop 而非 time.After：响应通常在毫秒级到达即提前返回，
+	// 池化 timer 而非 time.After：响应通常在毫秒级到达即提前返回，
 	// time.After 的底层 timer 要到 timeout（默认 60s）才回收，高 QPS 下会堆积
-	// 数十万个悬挂 timer，徒增堆占用与 GC 压力。
-	timeoutTimer := time.NewTimer(timeout)
-	defer timeoutTimer.Stop()
+	// 数十万个悬挂 timer；池化后连每请求一次的 timer 分配也一并消除。
+	timeoutTimer := utils.GetTimer(timeout)
+	defer utils.PutTimer(timeoutTimer)
 	select {
 	case <-c.ctx.Done():
 		// ACK 可能先于 ctx cancel 入队但 select 随机选到了此分支，drain channel。

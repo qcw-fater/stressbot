@@ -21,6 +21,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"strconv"
+	"sync"
+	"sync/atomic"
 )
 
 // ---------------------------------------------------------------------------
@@ -63,7 +66,9 @@ func (c *SchemaCodec) BodyLength(header []byte) int {
 // 路由字段数值按 math.Floor 截断取整（对齐 codec.lua math.floor(route.cmd or 0)）。
 func (c *SchemaCodec) ExpectedRouteKey(route any) string {
 	rmap := routeAsMap(route)
-	var b []byte
+	// 栈上暂存 + AppendInt：本函数在发送路径每包调用，避免 Sprintf 小分配。
+	var kb [64]byte
+	b := kb[:0]
 	for _, seg := range c.routeKeySegs {
 		switch seg.segKind {
 		case segKindLiteral:
@@ -72,13 +77,13 @@ func (c *SchemaCodec) ExpectedRouteKey(route any) string {
 			// fieldIdx 指向 c.fields 中某 route 字段；其 name 即 route map key。
 			if seg.fieldIdx >= 0 && seg.fieldIdx < len(c.fields) {
 				fname := c.fields[seg.fieldIdx].name
-				b = append(b, formatRouteInt(routeMapFloorInt(rmap, fname))...)
+				b = strconv.AppendInt(b, routeMapFloorInt(rmap, fname), 10)
 			} else {
 				b = append(b, '0')
 			}
 		}
 	}
-	return string(b)
+	return internRouteKey(b)
 }
 
 // ---------------------------------------------------------------------------
@@ -356,11 +361,6 @@ func routeMapFloorInt(rmap map[string]any, name string) int64 {
 	}
 }
 
-// formatRouteInt 把 int64 路由值格式化为十进制字符串（codec.lua 用 `tostring(math.floor(...))`）。
-func formatRouteInt(v int64) []byte {
-	return []byte(fmt.Sprintf("%d", v))
-}
-
 // evalValueSource 求 role:value 字段的取值（v1：const | route）。
 func (c *SchemaCodec) evalValueSource(f *compiledField, rmap map[string]any) uint64 {
 	switch f.source.kind {
@@ -594,10 +594,18 @@ func (c *SchemaCodec) decode(data, key []byte) (string, []byte, uint64, string) 
 	header := data[:c.headerSize]
 
 	var headerErr uint64
-	routeMap := make(map[string]any, 4)
 	flags := uint64(0)
-	// checksumOut 字段名 → 头里读出的原值（供 encrypt 步 bcc 校验比对）。
-	checksumOut := make(map[string]uint64)
+	// 字段值按 fields 下标记入栈上定长数组（替代旧实现每消息 routeMap/checksumOut
+	// 两个临时 map——收包热路径每帧两次 map 分配 + 哈希；字段数编译期已知且很小）。
+	var routeArr, chkArr [maxHeaderScratch]uint64
+	var chkSetArr [maxHeaderScratch]bool
+	routeVals, chkVals, chkSet := routeArr[:], chkArr[:], chkSetArr[:]
+	if n := len(c.fields); n > maxHeaderScratch {
+		routeVals = make([]uint64, n)
+		chkVals = make([]uint64, n)
+		chkSet = make([]bool, n)
+	}
+	chkCount := 0
 
 	for i := range c.fields {
 		f := &c.fields[i]
@@ -610,19 +618,41 @@ func (c *SchemaCodec) decode(data, key []byte) (string, []byte, uint64, string) 
 		case roleErrorCode:
 			headerErr = raw
 		case roleRoute:
-			routeMap[f.name] = raw
+			routeVals[i] = raw
 		case roleFlags:
 			// 现协议单 flags 字段：raw 即整 flags；多 flags 字段拼接亦兼容。
 			flags |= raw
 		case roleChecksumOut:
-			checksumOut[f.name] = raw
+			chkVals[i] = raw
+			chkSet[i] = true
+			chkCount++
 		}
 	}
 
 	// ---- 2. body ----
+	// 压缩帧的 work 只是解压的输入（解压产物顶替它），是纯瞬态 scratch → 从池租借；
+	// 非压缩帧的 work 会作为最终 body 外泄（Message.Data 长期持有）→ 必须独立分配。
+	// flags 在读头阶段已知，租借决策先于复制。
 	bodyEnd := len(data) - c.trailerSize
-	work := make([]byte, bodyEnd-c.headerSize)
+	n := bodyEnd - c.headerSize
+	var workBuf *[]byte // 非 nil = work 当前仍是租借缓冲
+	var work []byte
+	if c.willInflate(flags) {
+		workBuf = getWorkBuf(n)
+		work = *workBuf
+	} else {
+		work = make([]byte, n)
+	}
 	copy(work, data[c.headerSize:bodyEnd])
+	// releaseWork 仅在 work 被新缓冲**顶替**后调用（旧租借缓冲确定死亡才归还）。
+	// 错误/keep 路径不归还：租借缓冲可能作为 body 外泄，直接交给 GC（无污染风险，
+	// 只是放弃一次复用）。
+	releaseWork := func() {
+		if workBuf != nil {
+			putWorkBuf(workBuf)
+			workBuf = nil
+		}
+	}
 
 	// ---- 3. 管线反序执行 ----
 	// 反序：encode 是 gz(先压)→enc(后密)；decode 反过来 enc(decrypt)→gz(decompress)。
@@ -646,16 +676,28 @@ func (c *SchemaCodec) decode(data, key []byte) (string, []byte, uint64, string) 
 				}
 				continue // keep：保留当前 work（密文），继续后续步骤
 			}
-			decOut, err := ciph.Decrypt(work, key, step.decOffset, step.params)
-			if err != nil {
-				if step.onError == onErrorFail {
-					return "", nil, headerErr, fmt.Sprintf("encrypt(step %d): 解密失败: %v", i, err)
+			// work 是本函数私有副本：流密码走原地解密免整体复制（收包热路径）。
+			// 失败语义与复制版一致（in-place 实现约束：报错前不动 data → keep 仍是密文）。
+			if ipc, ok := step.impl.(CipherInPlace); ok {
+				if err := ipc.DecryptInPlace(work, key, step.decOffset, step.params); err != nil {
+					if step.onError == onErrorFail {
+						return "", nil, headerErr, fmt.Sprintf("encrypt(step %d): 解密失败: %v", i, err)
+					}
+					continue // keep：保留当前 work
 				}
-				continue // keep：保留当前 work
+			} else {
+				decOut, err := ciph.Decrypt(work, key, step.decOffset, step.params)
+				if err != nil {
+					if step.onError == onErrorFail {
+						return "", nil, headerErr, fmt.Sprintf("encrypt(step %d): 解密失败: %v", i, err)
+					}
+					continue // keep：保留当前 work
+				}
+				releaseWork() // 复制版解密顶替了 work，旧租借缓冲死亡
+				work = decOut
 			}
-			work = decOut
 			// bcc 校验：若该步 produces 被 checksumOut 字段引用，重算并比对头里值。
-			if c.verifyProducesAfterDecrypt(i, work, checksumOut) {
+			if c.verifyProducesAfterDecrypt(i, work, chkVals, chkSet, chkCount) {
 				if step.onError == onErrorFail {
 					return "", nil, headerErr, fmt.Sprintf("encrypt(step %d): bcc 校验失败", i)
 				}
@@ -667,6 +709,16 @@ func (c *SchemaCodec) decode(data, key []byte) (string, []byte, uint64, string) 
 			if !ok {
 				continue
 			}
+			// 解压去重（内存换 CPU）：大帧且解压产物此后不再被改写时按内容寻址共享。
+			// 命中免解压；未命中解压后二见登记（详见 inflate_cache.go 防污染说明）。
+			shareable := len(work) >= inflateDedupMinBytes && c.inflateShareSafe(i, flags)
+			if shareable {
+				if out := sharedInflateCache.get(work); out != nil {
+					releaseWork() // 共享产物顶替 work
+					work = out
+					continue
+				}
+			}
 			decOut, err := comp.Decompress(work)
 			if err != nil {
 				if step.onError == onErrorFail {
@@ -674,6 +726,10 @@ func (c *SchemaCodec) decode(data, key []byte) (string, []byte, uint64, string) 
 				}
 				continue // keep：保留当前 work（未解压的 gzip 流）
 			}
+			if shareable {
+				sharedInflateCache.put(work, decOut) // put 内部快照 work，不留存租借缓冲
+			}
+			releaseWork()
 			work = decOut
 
 		case opChecksum, opHash:
@@ -683,8 +739,74 @@ func (c *SchemaCodec) decode(data, key []byte) (string, []byte, uint64, string) 
 	}
 
 	// ---- 4. routeKey 拼接 ----
-	routeKey := c.buildDecodeRouteKey(routeMap)
+	routeKey := c.buildDecodeRouteKey(routeVals)
 	return routeKey, work, headerErr, ""
+}
+
+// maxHeaderScratch decode 头部字段暂存数组的栈上容量；字段更多的罕见 schema 回退堆分配。
+const maxHeaderScratch = 16
+
+// willInflate 判断本帧 decode 是否会执行解压步（flags 已知即可判定，
+// 供 decode 在复制 body 前决定 work 缓冲租借自池还是独立分配）。
+func (c *SchemaCodec) willInflate(flags uint64) bool {
+	for i := range c.steps {
+		step := &c.steps[i]
+		if step.op != opCompress {
+			continue
+		}
+		if step.flagMask != 0 && flags&step.flagMask == 0 {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// inflateShareSafe 判断 compress 步（下标 stepIdx）的解压产物是否可跨消息共享：
+// decode 反序执行，若更低下标还有会执行的 encrypt/compress 步，解压产物随后会被
+// 原地改写/顶替——共享会污染其他持有者，必须禁用。现协议 compress 恒为 decode
+// 的最后执行步（encode 先压后密），恒可共享；本判定保证任意 schema 下的正确性。
+func (c *SchemaCodec) inflateShareSafe(stepIdx int, flags uint64) bool {
+	for j := stepIdx - 1; j >= 0; j-- {
+		step := &c.steps[j]
+		if step.flagMask != 0 && flags&step.flagMask == 0 {
+			continue
+		}
+		switch step.op {
+		case opEncrypt, opCompress:
+			return false
+		}
+	}
+	return true
+}
+
+// ── 压缩帧 work 缓冲池 ─────────────────────────────────────────
+//
+// 瞬态 scratch 池化（与 walkWireLevel 的 accs 池同性质，非"内存换 CPU"缓存交易）：
+// 池内常驻 ∝ 并发解码数，GC 周期自动清空。**归还纪律**：只有 work 被解压产物 /
+// 共享产物 / 复制版解密产物顶替后才归还；任何可能让缓冲作为 body 外泄的路径
+//（解压失败 keep、提前 return）一律不归还，缓冲降级为普通堆分配交给 GC。
+
+var workBufPool sync.Pool
+
+// workBufReuses 复用命中计数（/debug/inflate 观测池化是否生效）。
+var workBufReuses atomic.Uint64
+
+func getWorkBuf(n int) *[]byte {
+	if v := workBufPool.Get(); v != nil {
+		p := v.(*[]byte)
+		if cap(*p) >= n {
+			*p = (*p)[:n]
+			workBufReuses.Add(1)
+			return p
+		}
+	}
+	b := make([]byte, n)
+	return &b
+}
+
+func putWorkBuf(p *[]byte) {
+	workBufPool.Put(p)
 }
 
 // verifyProducesAfterDecrypt 重算 encrypt 步 produces 的 checksumOut 产物并比对头里的值。
@@ -705,8 +827,8 @@ func (c *SchemaCodec) decode(data, key []byte) (string, []byte, uint64, string) 
 //
 // 即：TCP（对称）路径下 engine 比 codec.lua 严（可检测篡改 bcc），UDP（非对称）路径下
 // 与 codec.lua 一致（均不校验 bcc）。
-func (c *SchemaCodec) verifyProducesAfterDecrypt(stepIdx int, work []byte, checksumOut map[string]uint64) bool {
-	if len(checksumOut) == 0 {
+func (c *SchemaCodec) verifyProducesAfterDecrypt(stepIdx int, work []byte, chkVals []uint64, chkSet []bool, chkCount int) bool {
+	if chkCount == 0 {
 		return false
 	}
 	step := &c.steps[stepIdx]
@@ -725,10 +847,10 @@ func (c *SchemaCodec) verifyProducesAfterDecrypt(stepIdx int, work []byte, check
 		if f.checksumRef.stepIdx != stepIdx {
 			continue
 		}
-		want, hasHeader := checksumOut[f.name]
-		if !hasHeader {
+		if fIdx >= len(chkSet) || !chkSet[fIdx] {
 			continue
 		}
+		want := chkVals[fIdx]
 		// 找到对应的 produce。
 		var prod *compiledProduce
 		for p := range step.produces {
@@ -781,43 +903,25 @@ func truncateUintToSize(v uint64, size int) uint64 {
 
 // buildDecodeRouteKey 按模板拼 routeKey（routeMap 字段值来自头）。
 // 与 ExpectedRouteKey 同源；routeMap 数值已是 uint64（readUint），格式化为十进制。
-func (c *SchemaCodec) buildDecodeRouteKey(routeMap map[string]any) string {
-	var b []byte
+func (c *SchemaCodec) buildDecodeRouteKey(routeVals []uint64) string {
+	// 栈上暂存 + strconv.AppendInt：替代旧 map 取值 + Sprintf（每帧多次小分配）。
+	// routeVals 按字段下标存 readUint 原值（uint64），转 int64 与旧
+	// decodeRouteFieldInt 的 uint64 分支一致；缺失字段值为 0（与 map miss 一致）。
+	var kb [64]byte
+	b := kb[:0]
 	for _, seg := range c.routeKeySegs {
 		switch seg.segKind {
 		case segKindLiteral:
 			b = append(b, seg.literal...)
 		case segKindField:
-			if seg.fieldIdx >= 0 && seg.fieldIdx < len(c.fields) {
-				fname := c.fields[seg.fieldIdx].name
-				b = append(b, formatRouteInt(decodeRouteFieldInt(routeMap, fname))...)
+			if seg.fieldIdx >= 0 && seg.fieldIdx < len(c.fields) && seg.fieldIdx < len(routeVals) {
+				b = strconv.AppendInt(b, int64(routeVals[seg.fieldIdx]), 10)
 			} else {
 				b = append(b, '0')
 			}
 		}
 	}
-	return string(b)
-}
-
-// decodeRouteFieldInt 从 decode route map 中取字段值并取整。
-// readUint 已存为 uint64，这里直接转 int64（与 routeMapFloorInt 对齐 math.Floor 行为）。
-func decodeRouteFieldInt(routeMap map[string]any, name string) int64 {
-	v, ok := routeMap[name]
-	if !ok {
-		return 0
-	}
-	switch x := v.(type) {
-	case uint64:
-		return int64(x)
-	case int64:
-		return x
-	case int:
-		return int64(x)
-	case float64:
-		return int64(x)
-	default:
-		return 0
-	}
+	return internRouteKey(b)
 }
 
 // ---------------------------------------------------------------------------

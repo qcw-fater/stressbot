@@ -49,6 +49,9 @@ func (f *Factory) Close() {
 		unregisterCacheForStats(f.wireCache)
 		f.frozenCache.purge()
 		unregisterFrozenCacheForStats(f.frozenCache)
+		// 导航驻留表按 desc 身份持有条目，清空以解除对本任务描述符树的钉扎；
+		// 下个任务的路径按需重编译并重新首 K 全查（一次性成本，方向安全）。
+		navResetAll()
 	})
 }
 

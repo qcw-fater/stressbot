@@ -31,6 +31,19 @@ type Cipher interface {
 	Decrypt(data, key []byte, offset int, params map[string]any) (out []byte, err error)
 }
 
+// CipherInPlace 流密码的原地解密扩展（可选实现）。
+//
+// decode 管线里 work 已是解码器的私有副本，原地改写可免去 Decrypt 的整体
+// 复制（收包热路径每消息一次，剖面周期 17.7GB 分配）。产物语义必须与
+// Decrypt 逐字一致（含 key 不合法时"原样返回"的分支——原地版对应"不动 data"）。
+//
+// 实现约束：**返回 error 前不得改写 data**（decode 的 onError=keep 语义要求
+// 失败时保留原密文），因此只有校验先行、处理必成功的流密码适合实现本接口；
+// 会改变长度的块密码（AES-ECB/CBC、XXTEA）不实现。
+type CipherInPlace interface {
+	DecryptInPlace(data, key []byte, offset int, params map[string]any) error
+}
+
 // Compressor 无损压缩；Compress/Decompress 须可往返（round-trip）。
 type Compressor interface {
 	Compress(data []byte) ([]byte, error)
