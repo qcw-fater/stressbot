@@ -486,9 +486,15 @@ proto.list_get(msg, "listField", idx) -- repeated 索引访问
 **robot 模块**：
 ```
 robot.get(key) / robot.set(key, value) / robot.delete(key) / robot.has(key)
+robot.get_view(key)  -- 消息类 key 的只读惰性视图（userdata），大消息只读首选
 robot.get_id() / robot.get_account() / robot.increment(key)  -- 原子自增返新值
 robot.clear() / robot.keys() / robot.get_path("a.b[0].c")
 ```
+
+**get 与 get_view 的选择**（不可混用，误用会报错指路）：
+- 整份数据要拿来自由加工/修改 → `robot.get`（独立 Lua 表，整树物化，成本 ∝ 树大小）；
+- 大消息只读挑着看 → `robot.get_view`（零物化，只能用 `proto.get_field/get_path/list_size/list_get/iter_list/serialize` 窄读，不支持 `view.foo` 表语法）；
+- 视图只读且是借出时数据的快照；key 为标量/Lua 表/被 `set_path` 改写过时 `get_view` 报错。范例：`conf/scripts/system_shop_buy.lua`。
 
 **utils 模块**：
 ```

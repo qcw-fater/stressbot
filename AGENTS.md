@@ -155,6 +155,15 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 - 调优观测端点（挂 pprof 端口）：`/debug/sched`（Go 调度延迟分位数，量化施压机负载对 Apdex/P99 的污染，压测中看 `sinceLast` 组）、`/debug/statekeys`（`robot.get/get_path` 按 key 计数，`tables`/`wireDecodes` 列定位整读热点，`?reset=1` 分窗口）、`/debug/dedup`、`/debug/wire`。
 - **降级回落机制的退役计划**（2026-07-29 记，用户已确认方向）：wire 消费路径（直转器+惰性视图）经**数轮生产规模压测**且 `/debug/wire` 持续零失配、影子验证按计划稳态关闭后，可整体退役「schema 降级回落」——删除 `FrozenCache`、`Frozen` 消费路径与各访问器的解码分支，失配语义从 fail-safe 改为 fail-stop（直接报错停测）。这是信心问题而非技术问题；退役前 FrozenCache 常态为空、成本近零，**不要提前删**（回落必须落在共享解码上，独占解码回落已被 029→031 剖面证伪）。
 - 影子验证失配日志（`[WIRE] 影子验证失配`）携带离线复现全要素：schema 全名、访问路径、两侧产物摘要、wire 字节 hex 转储（截断 4KB，`rawLen` 给全长）。直转 Walk 在已过校验字节上的意外失败同样走失配上报（`ReportWireFailure`），**任何 wire 路径的回退都必须留日志，禁止静默回退**。
+
+**`robot.get` 与 `robot.get_view` 的使用边界（2026-07-30 P1，脚本作者契约）**：
+- 一句话决策：**整份数据要拿来自由加工/修改 → `get`；大消息只读挑着看 → `get_view`**。`get` 返回独立 Lua 表（整树物化，成本 ∝ 树大小，改它不影响 state）；`get_view` 返回 wire 惰性视图 userdata（与 `await_listen` 给脚本的是同一种东西），零物化，只能经 `proto.get_field/get_path/list_size/list_get/iter_list/serialize` 窄读。范例脚本：`conf/scripts/system_shop_buy.lua`。
+- 两者**不可能混用出错值**：表与 userdata 语法互斥，误用即刻报错且报错文案指路正确 API（视图上 `view.foo`/`view.foo = v`/表原语 → 教学报错；`get_view` 用在标量、脚本存的 Lua 表、被 `set_path` 改写出 `Overlay` 的 key → 报错指路 `robot.get`）。key 不存在时二者都返回 nil。
+- 视图是借出时那份不可变字节的快照引用：key 被覆盖不影响已借出视图，无失效协议；跨 await 挂起持有安全（共享 `WireShared` 字节，不钉解码树，不触犯 029→031 结论）。
+- 写侧不受影响、无需新 API：`robot.set(key, 视图/响应)` 原样存 wire 引用（零转换）；`robot.set_path` 走 `Overlay` 写覆盖层（不解码不重编码）；视图永远只读。
+- `proto.iter_list` 语义（2026-07-30 起，改版前全仓零使用方）：两侧分支统一产出——message 元素为 userdata（wire 侧子视图 / 解码侧子消息包装，≡ `list_get`），标量元素装箱值；未知字段/非法路径 → nil，非 repeated 字段 → 空迭代。wire 侧为游标实现（`protox.WireListCursor`，一遍收集元素跨度、逐元素惰性产出子视图），顺序遍历整链 O(n)，替代逐下标 `list_get` 的 O(n²)。**降级回落时脚本可见形态不得漂移**是此处（也是所有消费 API）的硬约束。
+- 观测：`/debug/statekeys` 中 `view:` 前缀计数 `get_view` 调用；迁移某热点 key 后应看到其 `get:` 行的 `tables/wireDecodes` 掉零、`view:` 行上量。
+- 直转器 scratch 池化（2026-07-30 P2）：`walkWireLevel` 的字段累计切片走 `sync.Pool`（瞬态 scratch，GC 周期自动清空、常驻 ∝ 并发转换数，不属于"内存换 CPU"的缓存交易，不触内存红线）。**归还前必须逐元素 clear**——scratch 引用共享 wire 快照字节，只截断 len 会经池钉住大缓冲（029→031 钉扎形态）；隔离契约由 `TestWalkWireAccsPoolNoContamination` + 差分 fuzz 守护。产物形态（Lua 表/Go map，归调用方所有）**不可池化**，这块的解法是视图（P1）而非池。
 - Lua 线程用 trampoline 长驻复用（`script/trampoline.go`）后，`newLState/newRegistry` churn 已消除；`RSS ≈ 2× live` 是 GOGC=100 的正常余量，压 RSS 先压 live。
 
 ## 验证流程

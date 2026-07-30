@@ -2,6 +2,7 @@ package protox
 
 import (
 	"fmt"
+	"sync"
 
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -60,6 +61,49 @@ type wireFieldAcc struct {
 	keys      []string
 }
 
+// reset 清空累计状态但保留内部切片/map 容量（供池化复用摊掉 append 扩容）。
+// 必须逐元素 clear：spans/elems/entries 引用共享 wire 快照字节，只截断 len
+// 不清元素会让池子经残留引用钉住大缓冲（029→031 剖面证伪过的钉扎形态）。
+func (a *wireFieldAcc) reset() {
+	a.hasScalar = false
+	a.scalar = nil
+	clear(a.spans)
+	a.spans = a.spans[:0]
+	clear(a.elems)
+	a.elems = a.elems[:0]
+	if a.entries != nil {
+		clear(a.entries)
+	}
+	clear(a.keys)
+	a.keys = a.keys[:0]
+}
+
+// wireAccsPool 池化 walkWireLevel 的字段累计切片（P2 常数级优化）：
+// 整树直转每个 message 层级一次 make + 内部切片增长，heroList 级整读一次
+// 递归几百层，是转换侧分配主源之一。池为瞬态 scratch（GC 周期自动清空、
+// 常驻 ∝ 并发转换数），不属于"内存换 CPU"的缓存交易。
+//
+// 静止不变量：池内切片 [0:cap) 的全部元素均处于 reset 态（新分配的零值也
+// 满足）——putWireAccs 归还前 reset 用过的 [0:len)，未用区间从未被写过。
+var wireAccsPool = sync.Pool{New: func() any { return new([]wireFieldAcc) }}
+
+func getWireAccs(n int) *[]wireFieldAcc {
+	p := wireAccsPool.Get().(*[]wireFieldAcc)
+	if cap(*p) < n {
+		*p = make([]wireFieldAcc, n)
+	}
+	*p = (*p)[:n]
+	return p
+}
+
+func putWireAccs(p *[]wireFieldAcc) {
+	s := *p
+	for i := range s {
+		s[i].reset()
+	}
+	wireAccsPool.Put(p)
+}
+
 // wireWalkRecursionLimit 直转递归上限（与 ValidateWire 同源）。
 const wireWalkRecursionLimit = protowire.DefaultRecursionLimit
 
@@ -78,7 +122,9 @@ func walkWireLevel(md protoreflect.MessageDescriptor, b []byte, sink WireTreeSin
 		return fmt.Errorf("wire 嵌套超过递归上限")
 	}
 	fields := md.Fields()
-	accs := make([]wireFieldAcc, fields.Len())
+	accsPtr := getWireAccs(fields.Len())
+	defer putWireAccs(accsPtr)
+	accs := *accsPtr
 	var oneofWinner map[protoreflect.OneofDescriptor]int // oneof → 当前胜出字段 index
 
 	collectErr := error(nil)

@@ -582,11 +582,12 @@ Adapter 接口共 **9 方法**，实现已全 Go 化：`adapter/codec_resolver.g
 
 > 旧的 Lua 心跳注册接口已移除；请在对应连接的 `*_codec.json` 中配置可选 `heartbeat` 对象。
 
-## robot（14 函数）
+## robot（15 函数）
 
 | 函数 | 说明 |
 | ----------------------------------------- | -------------------------------------- |
-| `get(key)`                                | 读取 state 值 |
+| `get(key)`                                | 读取 state 值（独立 Lua 表/标量，可自由加工；消息类 key 整树物化） |
+| `get_view(key)`                           | 借出消息类 key 的只读惰性视图 userdata（零物化，用 `proto.*` 窄读；大消息只读首选，误用报错指路） |
 | `set(key, value)`                         | 写入 state |
 | `has(key)`                                | 检查 key 是否存在 |
 | `delete(key)`                             | 删除单个 key |
@@ -612,7 +613,7 @@ Adapter 接口共 **9 方法**，实现已全 Go 化：`adapter/codec_resolver.g
 | `get_field_map(msg)`          | 获取所有字段为 Lua table |
 | `serialize(msg)`              | 序列化为二进制 |
 | `parse(name, data)`           | 从二进制解析消息 |
-| `iter_list(msg, field)`       | 迭代 repeated 字段（for idx, item in） |
+| `iter_list(msg, field)`       | 顺序迭代 repeated 字段（for idx, item in；message 元素为 userdata，wire 视图上为 O(n) 游标） |
 | `list_size(msg, field)`       | repeated 字段长度 |
 | `list_get(msg, field, idx)`   | 获取 repeated 字段元素（1-based） |
 

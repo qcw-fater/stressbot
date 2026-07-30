@@ -50,8 +50,20 @@ const robotModule: LuaModule = {
       module: 'robot',
       params: [{ name: 'key', type: 'string', doc: '状态键名' }],
       returns: 'any | nil',
-      summary: '读取状态键',
+      summary: '读取状态键（返回独立 Lua 表/标量，可自由加工）',
+      detail:
+        '消息类 key 整树物化为 Lua 表，成本与树大小成正比。整份数据要拿来加工/修改用 get；大消息只读挑着看请用 get_view。',
       example: `local v = robot.get("playerId")`,
+    },
+    {
+      name: 'get_view',
+      module: 'robot',
+      params: [{ name: 'key', type: 'string', doc: '状态键名（消息形态）' }],
+      returns: 'userdata | nil',
+      summary: '借出消息类状态的只读惰性视图（零物化，大消息只读首选）',
+      detail:
+        '返回与 await_listen 相同的 wire 视图 userdata，只能用 proto.get_field/get_path/list_size/list_get/iter_list/serialize 窄读，不支持 view.foo 表语法（误用会报错指路）。视图只读且是借出时数据的快照；key 为标量、脚本存的 Lua 表或被 set_path 改写过时报错，请改用 robot.get。范例：conf/scripts/system_shop_buy.lua。',
+      example: `local view = robot.get_view("systemShopData")\nlocal n = proto.list_size(view, "shopData")`,
     },
     {
       name: 'set',
@@ -483,8 +495,10 @@ const protoModule: LuaModule = {
         { name: 'field', type: 'string', doc: 'list 字段名' },
       ],
       returns: 'iterator',
-      summary: '遍历 repeated 字段',
-      example: `for i, item in proto.iter_list(msg, "items") do print(i, item) end`,
+      summary: '顺序遍历 repeated 字段（大列表首选，wire 视图上为 O(n) 游标）',
+      detail:
+        'message 元素产出为 userdata（继续用 proto.get_field 等读取），标量元素为值。字段不存在返回 nil，非 repeated 字段空迭代。',
+      example: `for i, item in proto.iter_list(msg, "items") do\n  local id = proto.get_field(item, "id")\nend`,
     },
     {
       name: 'list_size',

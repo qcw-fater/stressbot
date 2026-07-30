@@ -37,9 +37,9 @@ func TestFrozenProtoAPI_ReadAccessors(t *testing.T) {
 		local item2 = proto.list_get(fmsg, "items", 2)
 		item2Name = proto.get_field(item2, "name")
 		iterNames = ""
-		-- iter_list 元素为展开后的 table（值拷贝，与共享消息无别名，天然安全）
+		-- iter_list 元素统一为 userdata（2026-07-30 起，≡ list_get）：继续用 proto 读访问器
 		for _, it in proto.iter_list(fmsg, "items") do
-			iterNames = iterNames .. tostring(it.name) .. ";"
+			iterNames = iterNames .. tostring(proto.get_field(it, "name")) .. ";"
 		end
 		local fieldMap = proto.get_field_map(fmsg)
 		mapUid = fieldMap.uid

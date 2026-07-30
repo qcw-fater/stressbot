@@ -38,9 +38,8 @@ var (
 	stateKeyCount atomic.Int64
 )
 
-// recordStateKeyGet 埋点：robot.get(kind="get", name=key) / robot.get_path(kind="get_path", name=path)。
-// val 为 Store 返回的原始值（转换前），按类型归类成本。
-func recordStateKeyGet(kind, name string, val any) {
+// stateKeyStatFor 取/建 key 的计数槽；超过跟踪上限归入该 kind 的 __overflow__。
+func stateKeyStatFor(kind, name string) *stateKeyStat {
 	key := kind + ":" + name
 	v, ok := stateKeyStats.Load(key)
 	if !ok {
@@ -57,7 +56,13 @@ func recordStateKeyGet(kind, name string, val any) {
 			}
 		}
 	}
-	st := v.(*stateKeyStat)
+	return v.(*stateKeyStat)
+}
+
+// recordStateKeyGet 埋点：robot.get(kind="get", name=key) / robot.get_path(kind="get_path", name=path)。
+// val 为 Store 返回的原始值（转换前），按类型归类成本。
+func recordStateKeyGet(kind, name string, val any) {
+	st := stateKeyStatFor(kind, name)
 	st.calls.Add(1)
 	switch val.(type) {
 	case nil, bool, int, int32, int64, uint, uint32, uint64, float32, float64, string:
@@ -72,6 +77,12 @@ func recordStateKeyGet(kind, name string, val any) {
 		// map/slice/Frozen 等容器形态：建表但无 wire 解码。
 		st.tables.Add(1)
 	}
+}
+
+// recordStateKeyView 埋点：robot.get_view(key)。视图零物化，只计 calls——
+// 复测时对照整读计数即可验证"该走视图的 key 是否已迁移"。
+func recordStateKeyView(name string) {
+	stateKeyStatFor("view", name).calls.Add(1)
 }
 
 type stateKeyRow struct {

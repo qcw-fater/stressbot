@@ -36,6 +36,7 @@ func loadRobotModule(L *lua.LState) int {
 
 	// 读写
 	L.SetField(mod, "get", L.NewFunction(robotGet))
+	L.SetField(mod, "get_view", L.NewFunction(robotGetView))
 	L.SetField(mod, "set", L.NewFunction(robotSet))
 	L.SetField(mod, "has", L.NewFunction(robotHas))
 	L.SetField(mod, "delete", L.NewFunction(robotDelete))
@@ -62,6 +63,8 @@ func robotIndex(L *lua.LState) int {
 	switch method {
 	case "get":
 		L.Push(L.NewFunction(robotGet))
+	case "get_view":
+		L.Push(L.NewFunction(robotGetView))
 	case "set":
 		L.Push(L.NewFunction(robotSet))
 	case "has":
@@ -110,6 +113,46 @@ func robotGet(L *lua.LState) int {
 	val := ctx.Store.Get(key)
 	recordStateKeyGet("get", key, val)
 	L.Push(goValueToLua(L, val))
+	return 1
+}
+
+// robotGetView robot.get_view(key) — 以只读惰性视图"借阅"消息形态的状态值。
+//
+// 与 robot.get 的分工（也是给脚本作者的使用边界）：
+//   - get：给你一棵独立 Lua 表，任何 Lua 语法随便用，可加工后 set 回——
+//     成本是整树物化（∝ 树大小），适合"整份拿来加工/修改"；
+//   - get_view：返回 wire 惰性视图 userdata（与 await_listen 给脚本的同一种
+//     东西），proto.get_path/list_size/list_get/iter_list/serialize 按需扫描，
+//     零物化零分配——适合"大消息只读挑着看"。视图永远只读，是当时那份不可变
+//     字节的快照引用，key 被覆盖不影响已借出的视图。
+//
+// 形态不符（标量、脚本 set 的 Lua 表、被 set_path 改写出 Overlay 的 key）
+// 一律大声报错指路，不静默给错形态。key 不存在返回 nil（与 get 一致，可判空）。
+func robotGetView(L *lua.LState) int {
+	ctx := GetContext(L)
+	if ctx == nil || ctx.Store == nil {
+		L.Push(lua.LNil)
+		return 1
+	}
+
+	key := L.CheckString(L.GetTop())
+	val := ctx.Store.Get(key)
+	recordStateKeyView(key)
+	switch v := val.(type) {
+	case nil:
+		L.Push(lua.LNil)
+	case *protox.WireValue:
+		// schema 降级时视图仍可用：各访问器经 findWireView 检测降级后
+		// 自动落到解码路径（现有机制），脚本无感知。
+		L.Push(wrapWireView(L, v))
+	case *protox.Frozen:
+		L.Push(wrapFrozenMessage(L, v))
+	default:
+		L.RaiseError(
+			"robot.get_view: key %q 的存储形态是 %T,不是可借阅的消息字节。"+
+				"整表加工请用 robot.get(key);被 set_path 改写过(存在写覆盖层)的 key 同样请用 robot.get",
+			key, val)
+	}
 	return 1
 }
 

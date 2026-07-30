@@ -56,9 +56,22 @@ func protoMsgIndex(L *lua.LState) int {
 	case "get_field_map":
 		L.Push(L.NewFunction(protoGetFieldMap))
 	default:
-		L.RaiseError("unknown proto message method: %s", method)
+		// 教学报错：误把消息/视图当 Lua 表点字段（view.foo）时指路，而不是
+		// 只报"未知方法"。pairs/ipairs/# 等表原语对 userdata 同样不可用。
+		L.RaiseError(
+			"proto 消息/wire 视图不支持表语法访问 %q。只读挑字段请用 proto.get_path(msg, \"a.b\")、"+
+				"列表请用 proto.list_size/list_get/iter_list;需要整表加工请改用 robot.get(key)",
+			method)
 	}
 	return 1
+}
+
+// protoMsgNewIndex __newindex 元方法：消息/视图 userdata 禁止赋值语法。
+func protoMsgNewIndex(L *lua.LState) int {
+	L.RaiseError(
+		"proto 消息/wire 视图不支持赋值语法(msg.field = v)。可写消息请用 proto.set_field;" +
+			"wire 视图只读——修改状态请 robot.get 取表加工后 robot.set 回,或 robot.set_path 精确改点")
+	return 0
 }
 
 // respHandle 网络响应消息的 Lua 包装载荷（wire-first）：解码消息 + 原始 wire 快照 + 脏标记。
@@ -141,6 +154,7 @@ func protoMsgMetatable(L *lua.LState) *lua.LTable {
 	}
 	mt := L.NewTable()
 	L.SetField(mt, "__index", L.NewFunction(protoMsgIndex))
+	L.SetField(mt, "__newindex", L.NewFunction(protoMsgNewIndex))
 	L.SetField(reg, protoMsgMetatableKey, mt)
 	return mt
 }
@@ -455,30 +469,34 @@ func protoIterList(L *lua.LState) int {
 		L.Push(lua.LNil)
 		return 1
 	}
-	var list []any
 	if wv := findWireView(L); wv != nil {
-		// wire 视图：GetFieldCompat 与 GetField 同形产物（message 元素为 map 树）。
+		// wire 视图：列表游标——一遍收集元素跨度，message 元素惰性产出子视图
+		//（零解码，脚本读哪个字段才扫哪个字段），与 list_get 的子视图语义对齐。
+		// 出错推 nil、非 list 字段空迭代，行为与解码分支一致。
 		fieldName := findFirstStringArg(L)
 		if fieldName == "" {
 			L.RaiseError("proto.iter_list requires (msg, field)")
 			return 0
 		}
-		val, err := wv.GetFieldCompat(fieldName)
+		cur, err := wv.ListCursorCompat(fieldName)
 		if err != nil {
 			L.Push(lua.LNil)
 			return 1
 		}
-		list, _ = val.([]any)
 		idx := 0
 		iter := L.NewFunction(func(L *lua.LState) int {
-			if idx >= len(list) {
+			if idx >= cur.Len() {
 				L.Push(lua.LNil)
 				return 1
 			}
-			item := list[idx]
+			item := cur.Item(idx)
 			idx++
 			L.Push(lua.LNumber(idx))
-			L.Push(goValueToLua(L, item))
+			if sub, ok := item.(*protox.WireValue); ok {
+				L.Push(wrapWireView(L, sub))
+			} else {
+				L.Push(goValueToLua(L, item))
+			}
 			return 2
 		})
 		L.Push(iter)
@@ -495,21 +513,29 @@ func protoIterList(L *lua.LState) int {
 		L.RaiseError("proto.iter_list requires (msg, field)")
 		return 0
 	}
-	val, err := ctx.Factory.GetField(msg, fieldName)
+	// 解码路径与 wire 游标语义逐字对齐（含 schema 降级回落时，脚本可见形态
+	// 不得漂移）：message 元素产出 userdata（≡ list_get），只读性随父传播；
+	// 未知字段/非法路径 → nil；非 repeated（标量/map）→ 空迭代。
+	n, err := ctx.Factory.GetListLen(msg, fieldName)
 	if err != nil {
-		L.Push(lua.LNil)
-		return 1
-	}
-	list, _ = val.([]any)
-
-	idx := 0
-	iter := L.NewFunction(func(L *lua.LState) int {
-		if idx >= len(list) {
+		if _, ferr := ctx.Factory.GetField(msg, fieldName); ferr != nil {
 			L.Push(lua.LNil)
 			return 1
 		}
-		item := list[idx]
+		n = 0 // 字段可读但非 repeated → 空迭代（iter_list 历史行为）
+	}
+	idx := 0
+	iter := L.NewFunction(func(L *lua.LState) int {
+		if idx >= n {
+			L.Push(lua.LNil)
+			return 1
+		}
+		item, ierr := ctx.Factory.GetListItem(msg, fieldName, idx)
 		idx++
+		if ierr != nil {
+			L.Push(lua.LNil)
+			return 1
+		}
 		L.Push(lua.LNumber(idx))
 		// 嵌套 proto 消息保留为 userdata；共享只读消息的子消息保持只读传播
 		if pm, ok := item.(proto.Message); ok {

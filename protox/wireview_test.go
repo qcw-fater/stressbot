@@ -142,9 +142,22 @@ func TestWireViewCompatDifferentialFuzz(t *testing.T) {
 			if (gerr != nil) != (werr != nil) || nGot != nWant {
 				t.Fatalf("iter %d %s: 长度不一致 wire=(%d,%v) oracle=(%d,%v)", it, name, nGot, gerr, nWant, werr)
 			}
+			// 游标与逐下标读语义逐项一致（游标是 list_get 循环的 O(n) 等价物）。
+			cur, cerr := wv.ListCursorCompat(name)
+			if cerr != nil {
+				t.Fatalf("iter %d %s: ListCursorCompat 失败: %v", it, name, cerr)
+			}
+			if cur.Len() != nGot {
+				t.Fatalf("iter %d %s: 游标长度不一致 cursor=%d len=%d", it, name, cur.Len(), nGot)
+			}
 			for j := 0; j < nGot; j++ {
 				gi, gerr := wv.ListItemCompat(name, j)
 				wi, werr := f.GetListItem(oracle, name, j)
+				ci := cur.Item(j)
+				if gerr == nil && !wireItemEqual(ci, gi) {
+					t.Fatalf("iter %d %s[%d]: 游标产物与 ListItemCompat 不一致\n cursor=%#v\n item  =%#v",
+						it, name, j, ci, gi)
+				}
 				if (gerr != nil) != (werr != nil) {
 					t.Fatalf("iter %d %s[%d]: 错误性不一致 wire=%v oracle=%v", it, name, j, gerr, werr)
 				}
@@ -165,6 +178,64 @@ func TestWireViewCompatDifferentialFuzz(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// wireItemEqual 游标元素与 ListItemCompat 元素的等价判定：
+// message 元素双方都是 *WireValue 子视图，比 desc + 物化产物；标量直接比。
+func wireItemEqual(a, b any) bool {
+	av, aok := a.(*WireValue)
+	bv, bok := b.(*WireValue)
+	if aok != bok {
+		return false
+	}
+	if aok {
+		return av.Desc() == bv.Desc() && plainEqual(av.MaterializeValue(), bv.MaterializeValue())
+	}
+	return plainEqual(a, b)
+}
+
+// TestWireListCursorSemantics 游标的定向语义用例：
+// 标量列表逐项产出、message 列表产出子视图、非 repeated 字段空迭代（对齐
+// iter_list 经 GetField 的历史行为）、未知字段报错、缺席中间段空列表、越界 nil。
+func TestWireListCursorSemantics(t *testing.T) {
+	f := newWireTestFactory(t)
+	disableShadow(t)
+
+	msg := buildEverything(t, f, func(m proto.Message) {
+		setF(t, f, m, "str", "cursor")
+		setF(t, f, m, "rints", []any{int64(7), int64(8), int64(9)})
+	})
+	wv := wireOf(t, f, "wiretest.Everything", mustMarshal(t, msg))
+
+	cur, err := wv.ListCursorCompat("rints")
+	if err != nil || cur.Len() != 3 {
+		t.Fatalf("ListCursorCompat(rints)=(len %d, %v) want (3, nil)", cur.Len(), err)
+	}
+	for i, want := range []int64{7, 8, 9} {
+		if got := cur.Item(i); got != want {
+			t.Fatalf("Item(%d)=%v want %d", i, got, want)
+		}
+	}
+	if cur.Item(3) != nil || cur.Item(-1) != nil {
+		t.Fatal("越界 Item 应返回 nil")
+	}
+
+	// 非 repeated → 空游标（历史上 iter_list 对标量字段就是空迭代，不报错）。
+	cur, err = wv.ListCursorCompat("str")
+	if err != nil || cur.Len() != 0 {
+		t.Fatalf("非 repeated 字段应得空游标: (len %d, %v)", cur.Len(), err)
+	}
+
+	// 未知字段 → error。
+	if _, err := wv.ListCursorCompat("no_such_field"); err == nil {
+		t.Fatal("未知字段 ListCursorCompat 应报错")
+	}
+
+	// 缺席单数 message 中间段 → 空列表语义。
+	cur, err = wv.ListCursorCompat("node.leaves")
+	if err != nil || cur.Len() != 0 {
+		t.Fatalf("缺席中间段应得空游标: (len %d, %v)", cur.Len(), err)
 	}
 }
 

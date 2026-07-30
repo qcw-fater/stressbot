@@ -263,6 +263,62 @@ func wireListField(md protoreflect.MessageDescriptor, b []byte, parts []string) 
 	return fd, elems, nil
 }
 
+// WireListCursor 列表游标：一遍收集全部元素跨度后逐个产出。
+//
+// 动机：脚本顺序遍历列表若用 ListItemCompat 逐下标取，每次调用都要
+// wireCollectList 重扫父层级定位全部元素，整链 O(n²)；游标把收集压成一遍
+//（message 元素只存字节跨度引用，零解码零复制），Item 按需产出，整链 O(n)。
+// 元素语义与 ListItemCompat(path, i) 逐项一致（message → *WireValue 子视图）。
+//
+// elems 的跨度引用父快照字节；WireValue 不可变，游标跨协程挂起、跨 key 覆盖
+// 均安全，无失效协议。
+type WireListCursor struct {
+	msgDesc protoreflect.MessageDescriptor // 元素为 message 时非 nil
+	elems   []wireElem
+}
+
+// Len 元素个数。
+func (c *WireListCursor) Len() int {
+	if c == nil {
+		return 0
+	}
+	return len(c.elems)
+}
+
+// Item 取第 i 个元素（0-based）：message 元素返回 *WireValue 子视图（只读性
+// 全树传播），标量元素返回收集时装箱的值。越界返回 nil（调用方按 Len 迭代）。
+func (c *WireListCursor) Item(i int) any {
+	if c == nil || i < 0 || i >= len(c.elems) {
+		return nil
+	}
+	e := c.elems[i]
+	if e.isMsg {
+		return &WireValue{desc: c.msgDesc, raw: e.span}
+	}
+	return e.scalar
+}
+
+// ListCursorCompat 构造 path 所指列表的游标。
+// fd 非 repeated 时返回空游标（nil error）——对齐 iter_list 经 GetField 读标量
+// 字段时"空迭代"的历史行为；结构损坏 / 路径非法返回 error。
+func (wv *WireValue) ListCursorCompat(path string) (*WireListCursor, error) {
+	if wv == nil || wv.desc == nil {
+		return nil, fmt.Errorf("WireValue 为空")
+	}
+	fd, elems, err := wireListField(wv.desc, wv.raw, navSplitCached(path))
+	if err != nil {
+		return nil, err
+	}
+	if !fd.IsList() {
+		return &WireListCursor{}, nil
+	}
+	c := &WireListCursor{elems: elems}
+	if fd.Kind() == protoreflect.MessageKind {
+		c.msgDesc = fd.Message()
+	}
+	return c, nil
+}
+
 // ListLenCompat GetListLen 的 wire 版。
 func (wv *WireValue) ListLenCompat(path string) (int, error) {
 	if wv == nil || wv.desc == nil {

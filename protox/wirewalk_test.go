@@ -82,6 +82,31 @@ func TestWalkWireSemanticsMatrix(t *testing.T) {
 	assertTreeEqual(t, f, "wiretest.Everything", raw)
 }
 
+// TestWalkWireAccsPoolNoContamination 池化 scratch 的复用隔离（P2 契约）：
+// 满负载消息（激活全部字段形态）走一遍后，紧跟的空消息/另一形态消息产物
+// 必须与解码 oracle 逐字一致——若归还前 reset 有漏（残留 spans/elems/entries），
+// 这里会以字段串扰形式暴露。串行循环多轮保证命中池内复用而非新分配。
+func TestWalkWireAccsPoolNoContamination(t *testing.T) {
+	f := newWireTestFactory(t)
+	disableShadow(t)
+
+	full := buildEverything(t, f, func(m proto.Message) {
+		setF(t, f, m, "str", "full")
+		setF(t, f, m, "rints", []any{int64(1), int64(2), int64(3)})
+		setF(t, f, m, "node.leaf.id", int64(5))
+		setF(t, f, m, "mstr", map[any]any{"k": int64(1)})
+		setF(t, f, m, "choice_str", "picked")
+	})
+	empty := buildEverything(t, f, nil)
+	sparse := buildEverything(t, f, func(m proto.Message) { setF(t, f, m, "i32", int64(9)) })
+
+	for i := 0; i < 8; i++ {
+		assertTreeEqual(t, f, "wiretest.Everything", mustMarshal(t, full))
+		assertTreeEqual(t, f, "wiretest.Everything", mustMarshal(t, empty))
+		assertTreeEqual(t, f, "wiretest.Everything", mustMarshal(t, sparse))
+	}
+}
+
 // TestMaterializeDegradedFallsBack 降级 schema 的 MaterializeValue 回落解码路径且产物不变。
 func TestMaterializeDegradedFallsBack(t *testing.T) {
 	f := newWireTestFactory(t)
