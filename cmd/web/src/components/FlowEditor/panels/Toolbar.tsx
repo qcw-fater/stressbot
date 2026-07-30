@@ -25,7 +25,6 @@ import {
   RedoOutlined,
   ReloadOutlined,
   SaveOutlined,
-  ThunderboltOutlined,
   UndoOutlined,
 } from '@ant-design/icons';
 import { lazy, Suspense, useRef, useState, type ReactNode } from 'react';
@@ -40,6 +39,7 @@ import { useProtoStore } from '../proto/protoStore';
 import { fetchBaselineFlow } from '@/services/baselineApi';
 import { FlowManagerModal } from './FlowManagerModal';
 import { useFlowFileIO } from './useFlowFileIO';
+import logoUrl from '@/assets/logo/rimeplume-128x128.png';
 import type { FlowJson } from '../codec/flowToJson';
 import { useValidationStore } from '../validation/validationStore';
 import { getCapabilities } from '@/services/capabilitiesApi';
@@ -212,7 +212,7 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
       <Space size={4} align="center">
         {/* Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 4 }}>
-          <ThunderboltOutlined style={{ color: 'var(--color-orange)', fontSize: 18 }} />
+          <img src={logoUrl} alt="stressbot" style={{ height: 22, width: 'auto', display: 'block' }} />
           <strong style={{ fontSize: 16, color: 'var(--text-primary)' }}>stressbot</strong>
         </div>
 
