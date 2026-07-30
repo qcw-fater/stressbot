@@ -71,9 +71,8 @@ type Connection struct {
 	secretKey atomic.Value
 
 	responseMap      map[string]chan *Message  // routeKey → 临时响应通道（RequestResponse 用）
-	listenResp       map[string]ListenCallBack // routeKey → 持久化推送回调
-	listenQueues     map[string]*listenQueue   // routeKey → 缓存队列（轮询模式，回调为 nil 时）
-	mu               sync.Mutex                // 保护 responseMap / listenResp / listenQueues map 键 / 回调字段（各 listenQueue 自带 mu 串行化 Push/Pop）
+	listenRoutes     map[string]*listenBinding // routeKey → 监听绑定（回调 + 缓存队列，注册时定型）
+	mu               sync.Mutex                // 保护 responseMap / listenRoutes map 键 + binding.cb / 回调字段（各 listenQueue 自带 mu 串行化 Push/Pop）
 	ctx              context.Context           // 连接生命周期上下文
 	cancel           context.CancelFunc        // 取消函数，关闭时调用
 	isClose          int32                     // 原子标记：0=活跃，1=已关闭
@@ -122,14 +121,30 @@ type inboundFrame struct {
 	RecvFrameAt time.Time
 }
 
+// listenBinding 一个 routeKey 的监听绑定：回调 + 缓存队列，注册时一次性定型。
+//
+// 合表动机（收包路由分派）：旧实现把回调与队列分放 listenResp / listenQueues 两张
+// map，每条推送要查 3~4 次字符串 map、加 2~3 次 c.mu——OnReceive 查一次 listenResp
+// 判断「是不是监听」却丢掉查到的回调，dispatchListen 再加锁重查一次拿回调，缓存模式
+// 还要第三次加锁查队列。绑定合成一条后，pump 在 OnReceive 的同一次持锁期内一次查找
+// 就取齐回调与队列，分发路径不再回查 map。
+//
+// 并发约定：
+//   - cb 由 c.mu 保护（RegisterListen 幂等重注册会写回最新值，pump 在持锁期内拷出局部变量）；
+//   - queue 在 binding 发布进 map 之前创建，之后只读；队列自身的 Push/Pop 由 per-queue mu
+//     串行化，故 pump 在释放 c.mu 之后再 Push，与主流程 GetListenResp 的 Pop 无死锁（沿用现状）。
+type listenBinding struct {
+	cb    ListenCallBack // nil = 缓存模式（消息进 queue，由 GetListenResp 消费）；非 nil = 回调模式
+	queue *listenQueue   // 注册时按 queueSize 预创建，恒非 nil
+}
+
 // NewConnection 创建新的网络连接。
 func NewConnection(serviceName, robotName string, requestTimeout time.Duration, timingDetail monitor.TimingDetailLevel) *Connection {
 	conn := &Connection{
 		serviceName:    serviceName,
 		robotName:      robotName,
 		responseMap:    make(map[string]chan *Message),
-		listenResp:     make(map[string]ListenCallBack),
-		listenQueues:   make(map[string]*listenQueue),
+		listenRoutes:   make(map[string]*listenBinding),
 		requestTimeout: requestTimeout,
 		sendFunc:       nil,
 		timingDetail:   timingDetail,
@@ -426,17 +441,18 @@ func (c *Connection) Send(data []byte) (int, error) {
 //   - queueSize: 缓存队列容量（>=1，cap<1 由 newListenQueue panic）。首次注册时预创建队列。
 //
 // 语义：
-//   - 新注册：写入 listenResp，预创建 listenQueues[routeKey]（容量 queueSize），返回 nil。
-//   - 幂等：同 routeKey 再注册且（queueSize 一致 && cb 是否为 nil 一致）→ 不重建队列、不报错（重写 listenResp[routeKey]=cb 为最新值，队列与 queueSize 不变；nil-cb 即纯 no-op），返回 nil。
+//   - 新注册：写入 listenRoutes[routeKey]（回调 + 预创建容量 queueSize 的队列），返回 nil。
+//   - 幂等：同 routeKey 再注册且（queueSize 一致 && cb 是否为 nil 一致）→ 不重建队列、不报错（回写 binding.cb 为最新值，队列与 queueSize 不变；nil-cb 即纯 no-op），返回 nil。
 //   - 冲突 fail-loud：同 routeKey 但 queueSize 或 cb 模式不一致 → 返回中文 error。
 //
-// 2-C3 起：listen 分发已并入 connectionPump，注册只是「写两张 map + 预创建队列」的一次性纯 map
-// 操作，**不再启动独立 listenLoop goroutine**。pump 在 decode 后命中 listenResp 时直接调
-// dispatchListen（cb!=nil 跑回调 / cb==nil 写 listenQueues）；GetListenResp 仍由主流程
+// 2-C3 起：listen 分发已并入 connectionPump，注册只是「写一张 map + 预创建队列」的一次性纯 map
+// 操作，**不再启动独立 listenLoop goroutine**。pump 在 decode 后命中 listenRoutes 时直接调
+// dispatchListen（cb!=nil 跑回调 / cb==nil 写队列）；GetListenResp 仍由主流程
 // 直接 FIFO Pop（per-queue mu 串行化，与 pump 的 Push 无死锁）。
 //
-// c.mu 保护 listenResp / listenQueues 两个 map 的读-改 + 冲突判断（与 pump dispatchListen /
-// GetListenResp 同样的锁粒度，沿用现状）。
+// c.mu 保护 listenRoutes 的读-改 + 冲突判断 + binding.cb 的回写（与 pump dispatchListen /
+// GetListenResp 同样的锁粒度，沿用现状）。回调与队列同属一个 binding 后，
+// 「有回调却没队列」这种旧双表可能的偏斜状态在结构上不再存在。
 func (c *Connection) RegisterListen(routeKey string, cb ListenCallBack, queueSize int) error {
 	if c == nil {
 		return fmt.Errorf("监听注册失败：连接为 nil（routeKey=%q）", routeKey)
@@ -446,32 +462,28 @@ func (c *Connection) RegisterListen(routeKey string, cb ListenCallBack, queueSiz
 	}
 
 	c.mu.Lock()
-	existingCb, hasCb := c.listenResp[routeKey]
-	existingQ, hasQ := c.listenQueues[routeKey]
-
-	if hasCb || hasQ {
+	if b, exist := c.listenRoutes[routeKey]; exist {
 		// 冲突检测：同 routeKey 跨次注册。
-		if hasQ && existingQ.capacity != queueSize {
+		if b.queue.capacity != queueSize {
 			c.mu.Unlock()
 			return fmt.Errorf("监听注册冲突：service=%q routeKey=%q 已注册（queueSize=%d），与本次（queueSize=%d）不一致",
-				c.serviceName, routeKey, existingQ.capacity, queueSize)
+				c.serviceName, routeKey, b.queue.capacity, queueSize)
 		}
-		existingCbIsNil := existingCb == nil
+		existingCbIsNil := b.cb == nil
 		newCbIsNil := cb == nil
 		if existingCbIsNil != newCbIsNil {
 			c.mu.Unlock()
 			return fmt.Errorf("监听注册冲突：service=%q routeKey=%q 已注册（回调=%v），与本次（回调=%v）模式不一致",
 				c.serviceName, routeKey, !existingCbIsNil, !newCbIsNil)
 		}
-		// 幂等 no-op：保持一致写回 cb（无副作用），不重复建队列。
-		c.listenResp[routeKey] = cb
+		// 幂等 no-op：保持一致回写 cb（无副作用），不重复建队列。
+		b.cb = cb
 		c.mu.Unlock()
 		return nil
 	}
 
-	// 新注册：写入回调 + 预创建队列。
-	c.listenResp[routeKey] = cb
-	c.listenQueues[routeKey] = newListenQueue(queueSize)
+	// 新注册：绑定回调 + 预创建队列（队列在发布进 map 前建好，此后只读）。
+	c.listenRoutes[routeKey] = &listenBinding{cb: cb, queue: newListenQueue(queueSize)}
 	c.mu.Unlock()
 	return nil
 }
@@ -518,36 +530,35 @@ func (c *Connection) WaitListenDoneTimeout(timeout time.Duration) bool {
 	}
 }
 
-func (c *Connection) dispatchListen(resp *Message) {
-	c.mu.Lock()
-	cb, exist := c.listenResp[resp.RouteKey]
-	c.mu.Unlock()
-
-	if !exist {
-		return
-	}
-
+// dispatchListen 把已解码消息交给该 routeKey 的监听绑定。
+//
+// cb / q 由调用方（OnReceive）在同一次 c.mu 持有期内从 binding 取出后传入：分发路径
+// 不再回查 map、不再二次加锁。旧实现在这里重查一次 listenResp（OnReceive 刚查过却
+// 丢掉了结果），缓存模式还要第三次加锁查队列——每条推送 2 次多余的锁往返 + 字符串
+// map 查找，在广播密集的压测里是纯开销。
+//
+// Push 在 c.mu 之外进行（per-queue mu 串行化），与主流程 GetListenResp 的 Pop 无死锁。
+func (c *Connection) dispatchListen(resp *Message, cb ListenCallBack, q *listenQueue) {
 	if cb != nil {
 		cb(resp)
-	} else {
-		// 缓存 listen：按需为 routeKey 创建默认容量队列并 Push。
-		// c.mu 仅保护 listenQueues map 键的查找/创建；Push 在 c.mu 释放后进行，
-		// 由 per-queue mu 串行化，与 GetListenResp 的 Pop 无死锁。
-		c.mu.Lock()
-		q, ok := c.listenQueues[resp.RouteKey]
-		if !ok {
-			q = newListenQueue(defaultListenQueueSize)
-			c.listenQueues[resp.RouteKey] = q
-		}
-		c.mu.Unlock()
-		if q.Push(resp) {
-			// 默认容量 1：从第 2 条起每条都会触发覆盖丢弃，保最新的消息。
-			stresslog.Warn("[NETWORK] 监听队列已满，覆盖丢弃最旧消息",
-				zap.String("service", c.serviceName),
-				zap.String("robot", c.robotName),
-				zap.String("routeKey", resp.RouteKey),
-				zap.Uint64("dropped", q.Dropped()))
-		}
+		return
+	}
+	if q == nil {
+		// 队列在注册时预创建，绑定存在即队列存在；真出现只能是簿记被写坏，
+		// 不静默丢弃，报出来。
+		stresslog.Warn("[NETWORK] 监听绑定缺队列，丢弃推送消息",
+			zap.String("service", c.serviceName),
+			zap.String("robot", c.robotName),
+			zap.String("routeKey", resp.RouteKey))
+		return
+	}
+	if q.Push(resp) {
+		// 默认容量 1：从第 2 条起每条都会触发覆盖丢弃，保最新的消息。
+		stresslog.Warn("[NETWORK] 监听队列已满，覆盖丢弃最旧消息",
+			zap.String("service", c.serviceName),
+			zap.String("robot", c.robotName),
+			zap.String("routeKey", resp.RouteKey),
+			zap.Uint64("dropped", q.Dropped()))
 	}
 }
 
@@ -560,12 +571,12 @@ func (c *Connection) GetListenResp(routeKey string) *Message {
 		return nil
 	}
 	c.mu.Lock()
-	q, ok := c.listenQueues[routeKey]
+	b, ok := c.listenRoutes[routeKey]
 	c.mu.Unlock()
 	if !ok {
 		return nil
 	}
-	m, _ := q.Pop()
+	m, _ := b.queue.Pop()
 	return m
 }
 
@@ -629,7 +640,7 @@ func (c *Connection) startPumpWithSubmit(adp adapter.Adapter, isUDP bool, submit
 //     强制回外层 select 给 heartbeatTimer/controlCh/ctx.Done 机会，防止一直 drain inbound。
 //
 // 并发安全：c.adp 是 Go SchemaAdapter（无可变状态，并发安全）；pump 是 inbound decode 的
-// 唯一执行者（单 goroutine 串行，天然有序）；listenQueues 各 route queue 自带 mu，与主流程
+// 唯一执行者（单 goroutine 串行，天然有序）；各监听绑定的 queue 自带 mu，与主流程
 // 的 GetListenResp Pop 无死锁；responseMap 由 c.mu 保护（与 RequestResponse 同锁粒度）。
 //
 // 退出时（defer）：drain inboundCh 归还 buffer 池避免泄漏；停止心跳 timer；关闭 pumpDone
@@ -1044,9 +1055,12 @@ func (c *Connection) Close() {
 // OnReceive 收到网络消息时分发到 request-response 通道或持久监听回调。
 //
 // 2-C3 起：本方法在 connectionPump goroutine 内被 decodeAndDispatch 同步调用（pump 是 inbound
-// decode 的唯一执行者）。命中 listenResp 时不再投递到独立的 listenCh（listenLoop 已删除），
-// 而是**同步直接调用 dispatchListen**——cb!=nil 跑回调、cb==nil 写 listenQueues。
+// decode 的唯一执行者）。命中监听绑定时不再投递到独立的 listenCh（listenLoop 已删除），
+// 而是**同步直接调用 dispatchListen**——cb!=nil 跑回调、cb==nil 进缓存队列。
 // 这样 listen 分发与 decode 共享同一 pump goroutine，彻底消灭旧的 listenCh/listenLoop 链路。
+//
+// 分派代价：一次持锁 + 至多两次 map 查找（responseMap 常为空表，Go 对空 map 查找有快路径），
+// 命中监听时回调与队列在同一次查找中取齐，分发不再回查。
 //
 // 热路径：每个入站包都会走一次。高频 Debug 日志构造前先做 atomic level 检查，
 // 避免在 info 级别下白白构造 zap.Field 切片（每包 4 个 string field，
@@ -1066,11 +1080,13 @@ func (c *Connection) OnReceive(routeKey string, body []byte, headerErr uint64, w
 			zap.Uint64("headerErr", headerErr))
 	}
 
-	resp := NewMessage(routeKey, body, headerErr, wireBytes, timing)
-
+	// 路由分派：一次持锁内决出「等待中的请求 / 监听绑定 / 无人认领」，
+	// 命中监听时把回调与队列一并取出（dispatchListen 不再回查 map）。
+	// Message 在确定有消费方之后才构造——无人认领的广播不再白白分配。
 	c.mu.Lock()
 	ch, exists := c.responseMap[routeKey]
 	if exists {
+		resp := NewMessage(routeKey, body, headerErr, wireBytes, timing)
 		// 在锁内发送，防止 RequestResponse 的 defer 在 unlock 和 send 之间 close(ch) 导致 panic。
 		if monitor.TimingDetailAtLeast(c.timingDetail, monitor.TimingFullDetail) {
 			resp.Timing.DispatchStart = time.Now()
@@ -1090,16 +1106,24 @@ func (c *Connection) OnReceive(routeKey string, body []byte, headerErr uint64, w
 		return
 	}
 
-	_, isListen := c.listenResp[routeKey]
+	var (
+		cb ListenCallBack
+		q  *listenQueue
+	)
+	b, isListen := c.listenRoutes[routeKey]
+	if isListen {
+		cb, q = b.cb, b.queue
+	}
 	c.mu.Unlock()
 
 	if isListen {
+		resp := NewMessage(routeKey, body, headerErr, wireBytes, timing)
 		if monitor.TimingDetailAtLeast(c.timingDetail, monitor.TimingFullDetail) {
 			resp.Timing.DispatchStart = time.Now()
 		}
-		// 同步分发：cb!=nil 跑回调，cb==nil 写 listenQueues（per-queue mu 串行化）。
+		// 同步分发：cb!=nil 跑回调，cb==nil 进队列（per-queue mu 串行化）。
 		// pump goroutine 独占执行，与主流程 GetListenResp 的 Pop 无死锁。
-		c.dispatchListen(resp)
+		c.dispatchListen(resp, cb, q)
 		return
 	}
 

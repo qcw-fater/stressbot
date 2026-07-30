@@ -21,16 +21,32 @@ func TestMain(m *testing.M) {
 }
 
 // newTestConnection 构造一个最小可用的 *Connection 供 network 包白盒测试使用。
-// 不依赖 gnet/Dialer，只用到 listenResp / listenQueues / dispatchListen / GetListenResp。
+// 不依赖 gnet/Dialer，只用到 listenRoutes / dispatchListen / GetListenResp。
 func newTestConnection(t *testing.T) *Connection {
 	t.Helper()
 	return NewConnection("test-svc", "test-robot", time.Second, monitor.TimingDetailLevel(""))
 }
 
-// dispatchListenForTest 直接驱动 dispatchListen（包内可见），绕开 listenCh/listenLoop，
+// dispatchListenForTest 直接驱动 dispatchListen（包内可见），绕开 pump，
 // 使缓存 listen 行为可被单线程断言。等价于「服务端推送一条到达 dispatchListen」。
+//
+// 回调与队列的取出方式与 OnReceive 一致：同一次持锁内查一次 listenRoutes 取齐两者，
+// 未注册的 routeKey 静默返回（与改造前 dispatchListen 查不到绑定即 return 等价）。
 func dispatchListenForTest(c *Connection, m *Message) {
-	c.dispatchListen(m)
+	c.mu.Lock()
+	b, ok := c.listenRoutes[m.RouteKey]
+	var (
+		cb ListenCallBack
+		q  *listenQueue
+	)
+	if ok {
+		cb, q = b.cb, b.queue
+	}
+	c.mu.Unlock()
+	if !ok {
+		return
+	}
+	c.dispatchListen(m, cb, q)
 }
 
 // --- 缓存 listen：容量 1 等价单槽 ---
@@ -311,5 +327,114 @@ func TestConnection_RegisterListen_Closed(t *testing.T) {
 	conn.Close()
 	if err := conn.RegisterListen("k", nil, 1); err == nil {
 		t.Fatal("已关闭连接 RegisterListen 应返回 error，实际 nil")
+	}
+}
+
+// --- OnReceive 路由分派（回调/队列合表后）---
+
+// TestConnection_OnReceive_ResponseMapWinsOverListen 验证：同一 routeKey 既有等待中的请求
+// 又有监听绑定时，消息投给请求通道（一发一收优先），不进监听队列。
+func TestConnection_OnReceive_ResponseMapWinsOverListen(t *testing.T) {
+	conn := newTestConnection(t)
+	defer conn.Close()
+
+	const routeKey = "S2C.Both"
+	if err := conn.RegisterListen(routeKey, nil, 1); err != nil {
+		t.Fatalf("RegisterListen 失败: %v", err)
+	}
+	ch := make(chan *Message, 1)
+	conn.mu.Lock()
+	conn.responseMap[routeKey] = ch
+	conn.mu.Unlock()
+
+	conn.OnReceive(routeKey, []byte{'R'}, 0, 1, MessageTiming{})
+
+	select {
+	case m := <-ch:
+		if len(m.Data) != 1 || m.Data[0] != 'R' {
+			t.Fatalf("请求通道收到 %v，want ['R']", m.Data)
+		}
+	default:
+		t.Fatal("请求通道未收到消息（分派优先级被破坏）")
+	}
+	if m := conn.GetListenResp(routeKey); m != nil {
+		t.Fatalf("命中请求通道时不应同时进监听队列，实际 %v", m)
+	}
+}
+
+// TestConnection_OnReceive_ListenCallbackAndQueue 验证：OnReceive 在一次查找里取齐
+// 回调与队列——回调模式直接调 cb，缓存模式进队列。
+func TestConnection_OnReceive_ListenCallbackAndQueue(t *testing.T) {
+	conn := newTestConnection(t)
+	defer conn.Close()
+
+	got := make(chan *Message, 2)
+	if err := conn.RegisterListen("S2C.Cb2", func(m *Message) { got <- m }, 1); err != nil {
+		t.Fatalf("RegisterListen(cb) 失败: %v", err)
+	}
+	if err := conn.RegisterListen("S2C.Q2", nil, 2); err != nil {
+		t.Fatalf("RegisterListen(queue) 失败: %v", err)
+	}
+
+	conn.OnReceive("S2C.Cb2", []byte{'c'}, 0, 1, MessageTiming{})
+	conn.OnReceive("S2C.Q2", []byte{'q'}, 0, 1, MessageTiming{})
+
+	select {
+	case m := <-got:
+		if len(m.Data) != 1 || m.Data[0] != 'c' {
+			t.Fatalf("回调收到 %v，want ['c']", m.Data)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("回调模式未收到消息")
+	}
+	if m := conn.GetListenResp("S2C.Q2"); m == nil || m.Data[0] != 'q' {
+		t.Fatalf("缓存模式 GetListenResp = %v，want ['q']", m)
+	}
+	// 回调模式不进队列。
+	if m := conn.GetListenResp("S2C.Cb2"); m != nil {
+		t.Fatalf("回调模式不应进队列，实际 %v", m)
+	}
+}
+
+// TestConnection_OnReceive_UnmatchedRoute 验证：既无请求等待也无监听绑定的路由被安静丢弃
+// （不 panic、不误入任何队列）。
+func TestConnection_OnReceive_UnmatchedRoute(t *testing.T) {
+	conn := newTestConnection(t)
+	defer conn.Close()
+
+	if err := conn.RegisterListen("S2C.Other", nil, 1); err != nil {
+		t.Fatalf("RegisterListen 失败: %v", err)
+	}
+	conn.OnReceive("S2C.Nobody", []byte{'n'}, 0, 1, MessageTiming{})
+
+	if m := conn.GetListenResp("S2C.Other"); m != nil {
+		t.Fatalf("无人认领的消息串到了别的路由：%v", m)
+	}
+}
+
+// TestConnection_OnReceive_CallbackReplacedByReregister 验证：幂等重注册会把绑定上的回调
+// 换成最新的一个，之后 OnReceive 分派到新回调（绑定内 cb 的读写都在 c.mu 下，无竞态）。
+func TestConnection_OnReceive_CallbackReplacedByReregister(t *testing.T) {
+	conn := newTestConnection(t)
+	defer conn.Close()
+
+	const routeKey = "S2C.Replace"
+	oldHits := make(chan *Message, 1)
+	newHits := make(chan *Message, 1)
+	if err := conn.RegisterListen(routeKey, func(m *Message) { oldHits <- m }, 1); err != nil {
+		t.Fatalf("首次 RegisterListen 失败: %v", err)
+	}
+	if err := conn.RegisterListen(routeKey, func(m *Message) { newHits <- m }, 1); err != nil {
+		t.Fatalf("幂等重注册失败: %v", err)
+	}
+
+	conn.OnReceive(routeKey, []byte{'z'}, 0, 1, MessageTiming{})
+
+	select {
+	case <-newHits:
+	case <-oldHits:
+		t.Fatal("重注册后仍分派到旧回调")
+	case <-time.After(time.Second):
+		t.Fatal("重注册后没有任何回调被调用")
 	}
 }

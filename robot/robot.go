@@ -1676,6 +1676,12 @@ func (ns *netSenderAdapter) startPendingHeartbeatAfterSecretKey(transport, servi
 //  2. 取 conn 当前 secretKey；
 //  3. adp.EncodeTCP/UDP(route, body, key) → packet；
 //  4. 仅 raw-binary 模式递增 privateCounters（counter 源按 Step 推进；proto 模式无私有计数器）。
+//
+// 注册时编译（心跳是本进程最高频的 Go 侧循环，常量工作一律前移）：
+//   - raw-binary 布局 → engine.CompileHeartbeatPlan：宽度/偏移定型、fixed 槽位预填、
+//     body 缓冲跨 tick 复用；编译失败回落 BuildHeartbeatBody（保留每 tick 报错的可见性）；
+//   - 私有计数器推进表 → engine.CompileHeartbeatCounters：不再每 tick 全字段扫描找 counter 源；
+//   - resolver key 字符串 + 解析结果 → 定型/缓存：不再每 tick 拼串 + 查表。
 func (ns *netSenderAdapter) installHeartbeat(cfg engine.HeartbeatConfig) error {
 	if ns.robot.ctx.Err() != nil {
 		return engine.NewActionError(errcode.ErrActionCanceled, "service="+cfg.Service)
@@ -1719,6 +1725,33 @@ func (ns *netSenderAdapter) installHeartbeat(cfg engine.HeartbeatConfig) error {
 	skipWhenMissing := cfg.SkipWhenMissing
 	transport := cfg.Transport
 
+	// 私有计数器推进表：counter 源注册后不变，编译一次，省掉每 tick 的全字段扫描。
+	counterSteps := engine.CompileHeartbeatCounters(fields)
+
+	// raw-binary 布局编译（注册时一次）：成功 → 每 tick 只覆写动态槽位 + 复用 body 缓冲
+	// （零 map 查找 / 零分配 / fixed 槽位不重算，见 engine/heartbeat_plan.go）。
+	// 编译失败 → 回落 BuildHeartbeatBody，保持原「每 tick Warn」可见性：坏配置不能因为
+	// 多了一层编译就悄悄消失。plan 只被本连接 pump 单 goroutine 串行调用，与
+	// privateCounters 同一并发约定。
+	var hbPlan *engine.HeartbeatPlan
+	if c2sProto == "" && len(fields) > 0 {
+		p, cerr := engine.CompileHeartbeatPlan(fields)
+		if cerr != nil {
+			stresslog.Warn("[ROBOT] 心跳布局编译失败，回落逐 tick 打包",
+				zap.String("transport", cfg.Transport),
+				zap.String("service", cfg.Service),
+				zap.Error(cerr))
+		} else {
+			hbPlan = p
+		}
+	}
+
+	// resolver key 注册时定型：省掉每 tick 一次字符串拼接（分配）+ map 查找。
+	// adapter 在任务生命周期内不变，首次解析成功后缓存；nil 不缓存，保留原
+	// 「每 tick 重试 + Warn」语义（codec 映射可能晚于心跳安装就绪）。
+	resolveKey := transport + ":" + cfg.Service
+	var cachedAdp adapter.Adapter
+
 	// proto 模式复用同一执行器：goBuilder 由本连接 pump 单 goroutine 串行调用，
 	// 无并发，避免每 tick 新建临时 ActionExecutor（仅承载 store+factory，与旧临时实例等价）。
 	hbExec := engine.NewActionExecutor(st, nil, factory, nil, 0)
@@ -1741,6 +1774,18 @@ func (ns *netSenderAdapter) installHeartbeat(cfg engine.HeartbeatConfig) error {
 				return nil
 			}
 			body, skip = b, skipB
+		} else if hbPlan != nil {
+			// 编译布局快路径：body 是 plan 的复用缓冲，encode 会把它拷进新分配的整包，
+			// 本 tick 之外不得引用。
+			b, skipB, err := hbPlan.Build(st, privateCounters, skipWhenMissing)
+			if err != nil {
+				stresslog.Warn("[ROBOT] 心跳 body 构建失败",
+					zap.String("transport", transport),
+					zap.String("service", cfg.Service),
+					zap.Error(err))
+				return nil
+			}
+			body, skip = b, skipB
 		} else if len(fields) > 0 {
 			b, skipB, err := engine.BuildHeartbeatBody(fields, st, privateCounters, skipWhenMissing)
 			if err != nil {
@@ -1759,12 +1804,16 @@ func (ns *netSenderAdapter) installHeartbeat(cfg engine.HeartbeatConfig) error {
 		key := conn.GetSecretKey()
 		// T2-C2：按 "<transport>:<service>" Resolve 出该连接的 Go SchemaAdapter 后 encode。
 		// 单 tick encode 失败不应终止整条心跳 goroutine。
-		adp := resolver.Resolve(transport + ":" + cfg.Service)
+		adp := cachedAdp
 		if adp == nil {
-			stresslog.Warn("[ROBOT] 心跳 encode 失败：codec 未映射（resolver nil），跳过本 tick",
-				zap.String("transport", transport),
-				zap.String("service", cfg.Service))
-			return nil
+			adp = resolver.Resolve(resolveKey)
+			if adp == nil {
+				stresslog.Warn("[ROBOT] 心跳 encode 失败：codec 未映射（resolver nil），跳过本 tick",
+					zap.String("transport", transport),
+					zap.String("service", cfg.Service))
+				return nil
+			}
+			cachedAdp = adp
 		}
 		var packet []byte
 		if transport == "udp" {
@@ -1773,16 +1822,7 @@ func (ns *netSenderAdapter) installHeartbeat(cfg engine.HeartbeatConfig) error {
 			packet = adp.EncodeTCP(route, body, key)
 		}
 		// 构建成功 → 递增私有计数器（仅 raw-binary 模式的 counter 源按 Step 推进；proto 模式无计数器概念）。
-		for i := range fields {
-			f := &fields[i]
-			if f.Source == engine.HeartbeatSourceCounter {
-				step := int64(1)
-				if f.Step != nil {
-					step = *f.Step
-				}
-				privateCounters[i] += step
-			}
-		}
+		engine.AdvanceHeartbeatCounters(counterSteps, privateCounters)
 		return packet
 	}
 
@@ -1794,7 +1834,9 @@ func (ns *netSenderAdapter) installHeartbeat(cfg engine.HeartbeatConfig) error {
 		zap.String("transport", cfg.Transport),
 		zap.String("service", cfg.Service),
 		zap.Int("intervalMs", cfg.IntervalMs),
-		zap.Int("fieldCount", len(cfg.Fields)))
+		zap.Int("fieldCount", len(cfg.Fields)),
+		zap.Bool("layoutCompiled", hbPlan != nil),
+		zap.Int("bodySize", hbPlan.Size()))
 	return nil
 }
 

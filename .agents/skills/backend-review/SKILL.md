@@ -665,6 +665,9 @@ pending → starting → running → stopping → stopped
 - [错误码分段] 严格按层分段，不跨层占用
 - [错误码聚合] 只按 `code` 单维聚合；`Kind` 已删除，展示层按 `code < 100` 推导框架/业务标签
 - [回调验证] 新增回调逻辑时检查 if 体非空，避免"检查了 nil 但没调用"的模式
+- [Actor 所有权] 全局时间轮/共享 worker 只能给 Robot owner 入队或置就绪，禁止直接执行涉及业务 LState、嵌套 state 或多步状态事务的动作；`state.Store` 的锁只能消除 Go data race，不能保证「消费事件→更新多字段→发包」的顺序语义。
+- [异步发送所有权] 交给 gnet `AsyncWrite` 的最终 packet 在异步写完成前必须保持不可变；仅当 Adapter 明确把 body 拷贝进独立 packet 时，模板的 body scratch 才可在 Encode 返回后复用。
+- [剖面归因] CPU pprof 的 cumulative 占比包含完整子树，不能当作可消除收益；跨 Lua 脚本共享调用栈时先加脚本/action 标签或做等价微基准，再为单项优化设收益目标。
 
 ---
 

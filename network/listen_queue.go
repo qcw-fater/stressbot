@@ -12,10 +12,11 @@ import (
 // 并在 dropped 字段累计丢弃数。
 //
 // 并发模型（关键）：
-//   - listenLoop goroutine → dispatchListen → Push
+//   - connectionPump goroutine → OnReceive → dispatchListen → Push
 //   - 主流程 goroutine → GetListenResp → Pop
 //   - 二者并发：本队列自带 sync.Mutex 串行化 Push/Pop/Clear/Dropped，
-//     不依赖 Connection.mu（Connection.mu 仅保护 listenQueues 这个 map 的键操作）。
+//     不依赖 Connection.mu（Connection.mu 仅保护 listenRoutes 这个 map 的键操作，
+//     队列指针在绑定发布进 map 前就已确定，之后只读）。
 //     Push/Pop 均在 Connection.mu 释放后执行，无锁序交叉、无死锁。
 //
 // 写入位置统一用 (head+size)%capacity 派生，不单独存 tail；Push/Pop 各 O(1)。

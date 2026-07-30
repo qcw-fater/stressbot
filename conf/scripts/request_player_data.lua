@@ -29,14 +29,15 @@ function execute(r)
     -- 免全量展开 field map，读取按路径惰性取值）
     robot.set("playerData", resp)
 
-    -- 提取英雄 ID 列表（按路径惰性读取，只物化 heroList 子树）
-    -- 路径: loginHeroData -> HeroData -> heroList -> [].heroId
+    -- 提取英雄 ID 列表：直接在手上的响应里游标遍历，只读 possess/heroId 两个字段。
+    -- 不走 robot.get_path——那会把整个 heroList 物化成 Lua 表（每英雄全字段建表），
+    -- 而这里只要两个字段。路径: loginHeroData -> HeroData(大写 H) -> heroList
     local heroIds = {}
-    local heroList = robot.get_path("playerData.loginHeroData.HeroData.heroList")
-    if heroList then
-        for _, hero in ipairs(heroList) do
-            if hero.possess then
-                table.insert(heroIds, hero.heroId)
+    local heroes = proto.iter_list(resp, "loginHeroData.HeroData.heroList")
+    if heroes then
+        for _, hero in heroes do
+            if proto.get_field(hero, "possess") then
+                table.insert(heroIds, proto.get_field(hero, "heroId"))
             end
         end
     end
