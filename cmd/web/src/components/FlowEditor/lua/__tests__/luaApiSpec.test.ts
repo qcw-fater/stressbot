@@ -98,13 +98,39 @@ describe('renderSignature / renderDoc', () => {
     expect(doc).toContain('**示例**');
     expect(doc).toContain('proto.create');
   });
+
+  it('robot.get_view 文档固定只读惰性视图的使用边界', () => {
+    const fn = getLuaFunction('robot', 'get_view')!;
+    const doc = renderDoc(fn);
+
+    expect(renderSignature(fn)).toBe('(key)');
+    expect(fn.returns).toBe('userdata | nil');
+    expect(doc).toContain('只读惰性视图');
+    expect(doc).toContain('proto.get_field');
+    expect(doc).toContain('iter_list');
+    expect(doc).toContain('robot.get');
+    expect(doc).toContain('robot.get_view');
+  });
+
+  it('proto.iter_list 文档固定 message 与标量元素形态', () => {
+    const fn = getLuaFunction('proto', 'iter_list')!;
+    const doc = renderDoc(fn);
+
+    expect(renderSignature(fn)).toBe('(msg, field)');
+    expect(fn.returns).toBe('iterator');
+    expect(doc).toContain('message 元素产出为 userdata');
+    expect(doc).toContain('标量元素为值');
+    expect(doc).toContain('字段不存在返回 nil');
+    expect(doc).toContain('非 repeated 字段空迭代');
+    expect(doc).toContain('proto.get_field');
+  });
 });
 
 describe('coverage：所有 stressbot 已暴露的核心 Lua API 都被记录', () => {
   it('robot 模块覆盖关键函数', () => {
     const m = getLuaModule('robot')!;
     const names = m.functions.map((f) => f.name);
-    for (const expected of ['get', 'set', 'has', 'delete', 'clear', 'increment', 'get_path', 'set_path', 'get_id', 'get_index', 'get_account', 'get_context', 'keys']) {
+    for (const expected of ['get', 'get_view', 'set', 'has', 'delete', 'clear', 'increment', 'get_path', 'set_path', 'get_id', 'get_index', 'get_account', 'get_context', 'keys']) {
       expect(names, `robot.${expected}`).toContain(expected);
     }
   });
