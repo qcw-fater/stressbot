@@ -109,7 +109,7 @@ func TestRecordActionSyntheticCanceledExcludesTimingSamples(t *testing.T) {
 		t.Fatalf("synthetic canceled timing counts: total=%d client=%d, want 0/0",
 			action.TotalDurationSampleCount, action.ClientCostCount)
 	}
-	if action.TotalDuration.Count != 0 || action.TotalDurationApdex != 0 {
+	if action.TotalDuration.Count != 0 {
 		t.Fatalf("synthetic canceled polluted duration metrics: %+v", action.TotalDuration)
 	}
 }

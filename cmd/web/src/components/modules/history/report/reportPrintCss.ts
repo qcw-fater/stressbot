@@ -229,6 +229,15 @@ body {
 .c-blue { color: #1677ff; }
 .c-purple { color: #722ed1; }
 
+/* ── 动作类别配色 ──
+ * 报告是脱离应用样式的独立 HTML，取不到 --node-* 变量，这里写死 tokens.css 的
+ * 亮色值（报告永远白底）：往返 #713f12 / 监听 #9a3412 / 发送 #1e40af / 本地 #115e59。
+ */
+.k-networked { color: #713f12; }
+.k-listen { color: #9a3412; }
+.k-send { color: #1e40af; }
+.k-local { color: #115e59; }
+
 /* ── 系统资源卡片 ── */
 .sys-grid {
   display: grid;

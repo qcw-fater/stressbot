@@ -60,7 +60,7 @@ func startPumpedConnection(t *testing.T, adp adapter.Adapter, isUDP bool) (*Conn
 	t.Helper()
 	conn := newTestConnection(t)
 	var sent int32
-	conn.sendFunc = func(data []byte) error {
+	conn.sendFunc = func(data []byte, _ WriteDoneFunc) error {
 		atomic.AddInt32(&sent, 1)
 		return nil
 	}

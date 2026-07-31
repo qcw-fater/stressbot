@@ -35,7 +35,15 @@ type ClientTiming struct {
 // ActionTiming 单次 action 执行的耗时拆解。
 type ActionTiming struct {
 	Requests []RequestTiming
-	Client   ClientTiming
+	// FailedRequests 「发出去但没等回响应帧」的请求数（超时 / 断连 / 发送失败）。
+	// 算不出 WireRTT，但按 frustrated 计入 RTT Apdex 分母，详见 engine.ActionTiming。
+	FailedRequests int
+	// ListenWaits 监听命中的等待时长样本；ListenReady 命中时消息已在队列（不可测）；
+	// ListenTimeouts 监听超时。三者详见 engine.ActionTiming。
+	ListenWaits    []time.Duration
+	ListenReady    int
+	ListenTimeouts int
+	Client         ClientTiming
 }
 
 func (t *ActionTiming) wireRTTSum() time.Duration {
@@ -115,13 +123,13 @@ type actionMetrics struct {
 	canceledCount                atomic.Int64      // 取消次数（ctx 取消）
 	executing                    atomic.Int64      // 当前正在执行中的并发数
 	rtt                          *LatencyHistogram // RTT 直方图：纯网络往返（仅成功且有 WireRTT 样本）
+	listenWait                   *LatencyHistogram // 监听等待直方图：开始等待 → 帧被内核收到
 	totalDuration                *LatencyHistogram // 总耗时直方图：单次 action wallClock
 	sendBytes                    atomic.Int64      // 发送字节数（per-action，用于 ↑avg 列）
 	recvBytes                    atomic.Int64      // 接收字节数（per-action，用于 ↓avg 列）
 	apdexSatisfied               atomic.Int64      // RTT Apdex 满意样本：响应时间 < T
 	apdexTolerating              atomic.Int64      // RTT Apdex 容忍样本：响应时间 >= T 且 < 4T
-	totalDurationApdexSatisfied  atomic.Int64      // 总耗时 Apdex 满意样本：总耗时 < T
-	totalDurationApdexTolerating atomic.Int64      // 总耗时 Apdex 容忍样本：总耗时 >= T 且 < 4T
+	rttFailedCount               atomic.Int64      // 无响应帧的请求数（超时/断连/发送失败）：进 RTT Apdex 分母记 frustrated
 	errors                       sync.Map          // errKey → *errorBucket，按 code 单维聚合的错误分布
 
 	// 客户端开销、RTT 样本与总耗时样本计数：
@@ -142,11 +150,18 @@ type actionMetrics struct {
 	parseStoreSum            atomic.Int64
 	rttSampleCount           atomic.Int64
 	totalDurationSampleCount atomic.Int64
+
+	// 监听类计数。等待时长与 RTT 分开统计：前者含服务端业务时长（匹配、等队友，秒级），
+	// 后者是单请求处理延迟（毫秒级）。混进同一分布，两个数都会失去意义。
+	listenWaitCount   atomic.Int64 // 等待时长样本数（listenWait 直方图分母）
+	listenReadyCount  atomic.Int64 // 命中时消息已在队列：等待时长不可测，只计次
+	listenTimeoutHits atomic.Int64 // 监听超时次数，单独成率，不进直方图
 }
 
 func newActionMetrics() *actionMetrics {
 	return &actionMetrics{
 		rtt:           newLatencyHistogram(),
+		listenWait:    newLatencyHistogram(),
 		totalDuration: newLatencyHistogram(),
 	}
 }
@@ -369,17 +384,11 @@ func (c *MetricsCollector) recordAction(
 			am.clientCostSum.Add(clientCost.Nanoseconds())
 		}
 		am.clientCostCount.Add(1)
-		// 记录 wallClock
+		// wallClock 只留直方图作诊断，不再打 Apdex：它是「施压机排队 + 故意 sleep +
+		// 服务端响应」的混合量，施压机越忙这个数越大，用它评分等于把施压机自身的
+		// 负载算成服务端的账。评分统一由 RTT 承担（见下方 Requests 循环）。
 		am.totalDuration.Record(wallClock)
 		am.totalDurationSampleCount.Add(1)
-		T := int64(c.apdexT.Load())
-		ms := wallClock.Milliseconds()
-		switch {
-		case ms < T:
-			am.totalDurationApdexSatisfied.Add(1)
-		case ms < 4*T:
-			am.totalDurationApdexTolerating.Add(1)
-		}
 		addDuration := func(dst *atomic.Int64, d time.Duration) {
 			if d > 0 {
 				dst.Add(d.Nanoseconds())
@@ -407,6 +416,28 @@ func (c *MetricsCollector) recordAction(
 		case ms < 4*T:
 			am.apdexTolerating.Add(1)
 		}
+	}
+	// 无响应帧的请求只进 Apdex 分母（frustrated），不进 RTT 直方图——
+	// 它们没有可用的时延值，混进直方图会污染 P50/P99；但从分母里漏掉它们，
+	// 会让「服务端超时越多、RTT Apdex 越高」这种反向失真发生。
+	if timing.FailedRequests > 0 {
+		am.rttFailedCount.Add(int64(timing.FailedRequests))
+	}
+	// 监听等待自成一列，不与 RTT 合流、也不打 Apdex：这段时长的主体是服务端业务
+	// （匹配、等队友、等开局），秒级且没有普遍阈值，用毫秒级的 T 去评必然全 frustrated。
+	// 要看的是它的分布（P50/P99）而不是一个被压死的分数。
+	for _, wait := range timing.ListenWaits {
+		if wait <= 0 {
+			continue
+		}
+		am.listenWait.Record(wait)
+		am.listenWaitCount.Add(1)
+	}
+	if timing.ListenReady > 0 {
+		am.listenReadyCount.Add(int64(timing.ListenReady))
+	}
+	if timing.ListenTimeouts > 0 {
+		am.listenTimeoutHits.Add(int64(timing.ListenTimeouts))
 	}
 
 	if sendBytes > 0 {

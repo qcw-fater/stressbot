@@ -168,8 +168,9 @@ func buildHistoryTrendPoint(sampledAt time.Time, elapsed int, stress *StressAggr
 	point.SendKBps = snap.Bandwidth.SendMBps * 1024
 	point.RecvKBps = snap.Bandwidth.RecvMBps * 1024
 
-	var rttWeight, totalDurationWeight float64
+	var rttWeight, totalDurationWeight, listenWaitWeight float64
 	var rttAvg, rttP95, rttP99, totalDurationAvg, totalDurationP95, totalDurationP99 float64
+	var listenWaitP99 float64
 	var clientAvg, encodeAvg, decodeAvg float64
 	var clientWeight float64
 	for _, action := range snap.Actions {
@@ -182,9 +183,13 @@ func buildHistoryTrendPoint(sampledAt time.Time, elapsed int, stress *StressAggr
 			rttP99 += action.RTT.P99Ms * weight
 			rttWeight += weight
 		}
+		if action.ListenWaitSampleCount > 0 {
+			weight := float64(action.ListenWaitSampleCount)
+			listenWaitP99 += action.ListenWait.P99Ms * weight
+			listenWaitWeight += weight
+		}
 		if action.TotalDurationSampleCount > 0 {
 			weight := float64(action.TotalDurationSampleCount)
-			point.TotalDurationApdex += action.TotalDurationApdex * weight
 			totalDurationAvg += action.TotalDuration.AvgMs * weight
 			totalDurationP95 += action.TotalDuration.P95Ms * weight
 			totalDurationP99 += action.TotalDuration.P99Ms * weight
@@ -204,8 +209,10 @@ func buildHistoryTrendPoint(sampledAt time.Time, elapsed int, stress *StressAggr
 		point.RTTP95Ms = rttP95 / rttWeight
 		point.RTTP99Ms = rttP99 / rttWeight
 	}
+	if listenWaitWeight > 0 {
+		point.ListenWaitP99Ms = listenWaitP99 / listenWaitWeight
+	}
 	if totalDurationWeight > 0 {
-		point.TotalDurationApdex = point.TotalDurationApdex / totalDurationWeight
 		point.TotalDurationAvgMs = totalDurationAvg / totalDurationWeight
 		point.TotalDurationP95Ms = totalDurationP95 / totalDurationWeight
 		point.TotalDurationP99Ms = totalDurationP99 / totalDurationWeight
@@ -217,7 +224,7 @@ func buildHistoryTrendPoint(sampledAt time.Time, elapsed int, stress *StressAggr
 	}
 	point.TotalQPS = math.Round(point.TotalQPS*100) / 100
 	point.RTTApdex = math.Round(point.RTTApdex*10000) / 10000
-	point.TotalDurationApdex = math.Round(point.TotalDurationApdex*10000) / 10000
+	point.ListenWaitP99Ms = math.Round(point.ListenWaitP99Ms*100) / 100
 	point.SendKBps = math.Round(point.SendKBps*100) / 100
 	point.RecvKBps = math.Round(point.RecvKBps*100) / 100
 	point.AvgMemPercent = math.Round(point.AvgMemPercent*100) / 100

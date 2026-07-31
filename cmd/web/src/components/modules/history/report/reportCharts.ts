@@ -21,6 +21,7 @@ import type {
   HistoryTrendPoint,
 } from '@/types/api';
 import { classifyApdex } from '@/services/metricsBinding';
+import { resolveKind } from '@/components/monitoring/shared/ActionMetricsTable';
 
 echarts.use([
   BarChart,
@@ -109,37 +110,22 @@ export function buildApdexTrendOption(
   if (points.length === 0) return null;
 
   const x = points.map((p) => `${p.elapsedSec}s`);
-  const hasTotalDurationApdex = points.some((p) => p.totalDurationApdex !== null && Number.isFinite(p.totalDurationApdex));
+  // Apdex 只有 RTT 一种口径：监听等待是 ms 量纲、且没有普遍阈值，同轴画在 0~1 上无意义。
   const hasRttApdex = points.some((p) => p.rttApdex !== null && Number.isFinite(p.rttApdex));
+  if (!hasRttApdex) return null;
   const series = [
-    hasTotalDurationApdex
-      ? {
-          name: '总耗时 Apdex',
-          type: 'line' as const,
-          smooth: true,
-          symbol: 'none',
-          connectNulls: false,
-          data: points.map((p) => p.totalDurationApdex !== null && Number.isFinite(p.totalDurationApdex) ? p.totalDurationApdex : null),
-          itemStyle: { color: COLORS.green },
-          areaStyle: { opacity: 0.08 },
-          lineStyle: { width: 2 },
-        }
-      : null,
-    hasRttApdex
-      ? {
-          name: 'RTT Apdex',
-          type: 'line' as const,
-          smooth: true,
-          symbol: 'none',
-          connectNulls: false,
-          data: points.map((p) => p.rttApdex !== null && Number.isFinite(p.rttApdex) ? p.rttApdex : null),
-          itemStyle: { color: COLORS.red },
-          areaStyle: { opacity: 0.04 },
-          lineStyle: { width: 2 },
-        }
-      : null,
-  ].filter((s): s is NonNullable<typeof s> => s !== null);
-  if (series.length === 0) return null;
+    {
+      name: 'RTT Apdex',
+      type: 'line' as const,
+      smooth: true,
+      symbol: 'none',
+      connectNulls: false,
+      data: points.map((p) => p.rttApdex !== null && Number.isFinite(p.rttApdex) ? p.rttApdex : null),
+      itemStyle: { color: COLORS.red },
+      areaStyle: { opacity: 0.08 },
+      lineStyle: { width: 2 },
+    },
+  ];
 
   return {
     animation: false,
@@ -381,9 +367,10 @@ const APDEX_COLORS: Record<string, string> = {
 export function buildApdexOption(
   actions: HistoryActionMetric[],
 ): EChartsOption | null {
+  // 只排往返类：其余类别没有 Apdex，混进来会以 0 分霸占「最差」的位置。
   const sorted = [...actions]
-    .filter((a) => !a.name.startsWith('callback:') && (a.totalDurationSampleCount ?? 0) > 0)
-    .sort((a, b) => a.totalDurationApdex - b.totalDurationApdex);
+    .filter((a) => !a.name.startsWith('callback:') && resolveKind(a) === 'networked' && (a.rttSampleCount ?? 0) > 0)
+    .sort((a, b) => a.rttApdex - b.rttApdex);
   if (sorted.length === 0) return null;
 
   const names = sorted.map((a) => a.name.length > 18 ? a.name.slice(0, 16) + '…' : a.name);
@@ -397,8 +384,8 @@ export function buildApdexOption(
     series: [{
       type: 'bar',
       data: sorted.map((a) => ({
-        value: a.totalDurationApdex,
-        itemStyle: { color: APDEX_COLORS[classifyApdex(a.totalDurationApdex)] },
+        value: a.rttApdex,
+        itemStyle: { color: APDEX_COLORS[classifyApdex(a.rttApdex)] },
       })),
       barMaxWidth: 24,
     }],

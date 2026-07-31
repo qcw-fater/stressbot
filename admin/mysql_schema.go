@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS task_timeseries (
     stage_index         INT          NOT NULL DEFAULT -1,
     total_qps           DOUBLE       NOT NULL DEFAULT 0,
     rtt_apdex           DOUBLE       NOT NULL DEFAULT 0,
-    total_duration_apdex DOUBLE      NOT NULL DEFAULT 0,
+    listen_wait_p99_ms  DOUBLE       NOT NULL DEFAULT 0,
     rtt_avg_ms          DOUBLE       NOT NULL DEFAULT 0,
     rtt_p95_ms          DOUBLE       NOT NULL DEFAULT 0,
     rtt_p99_ms          DOUBLE       NOT NULL DEFAULT 0,

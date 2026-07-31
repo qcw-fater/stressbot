@@ -103,13 +103,11 @@ export function TrendsTab() {
       }
       return weight > 0 ? +(sum / weight).toFixed(3) : null;
     });
-    const totalDuration = weighted((a) => a.totalDurationApdex, (a) => a.totalDurationSampleCount);
+    // 只画 RTT Apdex。监听 / 发送 / 本地类没有可比的统一阈值，它们的耗时看
+    // 「RTT 与等待」图里的分位数，不硬凑成一个分。
     const rtt = weighted((a) => a.rttApdex, (a) => a.rttSampleCount);
-    const series = [
-      totalDuration.some((v) => v !== null) ? { name: '总耗时 Apdex', data: totalDuration, color: COLORS.green() } : null,
-      rtt.some((v) => v !== null) ? { name: 'RTT Apdex', data: rtt, color: COLORS.red() } : null,
-    ].filter((s): s is { name: string; data: Array<number | null>; color: string } => s !== null);
-    return series.length > 0 ? lineOption('Apdex', x, series, 1) : null;
+    if (!rtt.some((v) => v !== null)) return null;
+    return lineOption('RTT Apdex', x, [{ name: 'RTT Apdex', data: rtt, color: COLORS.red() }], 1);
   }, [stressHistory]);
 
   const cpuOption = useMemo(() => {
@@ -144,8 +142,9 @@ export function TrendsTab() {
         }
         return weight > 0 ? +(sum / weight).toFixed(2) : 0;
       });
-    return lineOption('RTT 与客户端成本', x, [
+    return lineOption('RTT / 监听等待 与客户端成本', x, [
       { name: 'RTT p95', data: weighted((a) => a.rtt.p95Ms, (a) => a.rttSampleCount), color: COLORS.red() },
+      { name: '监听等待 p95', data: weighted((a) => a.listenWait.p95Ms, (a) => a.listenWaitSampleCount), color: COLORS.green() },
       { name: 'client', data: weighted((a) => a.clientAvgMs, (a) => a.sampleCount), color: COLORS.blue() },
       { name: 'encode', data: weighted((a) => a.encodeAvgMs, (a) => a.sampleCount), color: COLORS.yellow() },
       { name: 'decode', data: weighted((a) => a.decodeAvgMs, (a) => a.rttSampleCount), color: COLORS.purple() },

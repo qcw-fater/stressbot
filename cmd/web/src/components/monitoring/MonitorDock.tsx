@@ -296,7 +296,7 @@ function ThroughputQualityCard({ model }: { model: ReturnType<typeof buildLivePa
 
 function LatencyConnectionCard({ model }: { model: ReturnType<typeof buildLivePanelModel> }) {
   return (
-    <MetricGroup title="耗时 / 连接" subtitle={`总 Apdex ${fmtScore(model.quality.totalDurationApdex)} · RTT Apdex ${fmtScore(model.quality.rttApdex)}`}>
+    <MetricGroup title="耗时 / 连接" subtitle={`RTT Apdex ${fmtScore(model.quality.rttApdex)}`}>
       <div className="md-kpi-grid md-kpi-grid--three">
         <MetricCell label="总 avg" value={fmtMs(model.latency.totalDurationAvgMs ?? 0)} unit="ms" />
         <MetricCell label="总 p95" value={fmtMs(model.latency.totalDurationP95Ms ?? 0)} unit="ms" />

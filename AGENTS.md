@@ -57,7 +57,11 @@ cd cmd/web && npm run test                 # Vitest
 - **`adapter/` — 协议适配器接口（9 方法）。热路径帧解析（`HeaderSize`/`BodyLength`）纯 Go 缓存，编解码由 `CodecResolver` 按 `"<proto>:<service>"` 解析、`SchemaAdapter` 包装 `codec/` Go 引擎驱动，配置来自 `conf/adapter/<proto>_<service>_codec.json`（每连接一份）。
 - **`admin/` — Admin 服务器（16 文件）。任务调度（TaskStore 状态机 + 单例约束 + 持久化）、Agent 管理（注册/心跳/健康检查/unhealthy→offline/离线清理）、指标聚合（MergeSnapshots）、时序采样（Sampler）、历史归档（MySQL 6 表）、任务分配（proportional/debug-single）、Agent RPC 调度、前端静态托管。60 个 HTTP API 端点（前缀 `/sbot/`）。
 - **`agent/` — Agent 节点（8 文件）。注册到 Admin（指数退避）→ 心跳循环 → 任务轮询 → TaskRunner 执行（下载配置 → 加载适配器 → 编译 proto → 构建流程 → Manager → 启动机器人）→ 指标上报 + 系统资源上报。本地 HTTP API（前缀 `/agent/v1/`：task/stop/shutdown/version/status/logs + `/healthz`）。
-- **`monitor/` — 指标采集。原子计数器（热路径零锁：成功/失败/超时/取消/执行中/字节数）、延迟直方图（16 桶 1ms~60s+，P50/P90/P95/P99，**仅纯网络往返**，不含客户端构建/解析）、Apdex 评分（阈值 T 可配，分母为 netSampleCount）、客户端开销独立列（`ClientAvgMs`）、分布式聚合。`RecordAction(name, result, timing, wallClock, sendBytes, recvBytes, err)`：`result` ∈ Success/Failure/Timeout/Canceled，`timing` 携带 RTT 与各编解码阶段耗时；纯客户端动作（无 RTT 样本）不进直方图但 successCount 仍计数。错误按 `code` 单维聚合（展示按 `code < 100` 推导框架/业务标签），保留最近 3 条详情。导出：Console / HTTP JSON / CSV / pprof。
+- **`monitor/` — 指标采集。原子计数器（热路径零锁：成功/失败/超时/取消/执行中/字节数）、延迟直方图（16 桶 1ms~60s+，P50/P90/P95/P99）、Apdex 评分、客户端开销独立列（`ClientAvgMs`）、分布式聚合。`RecordAction(name, result, timing, wallClock, sendBytes, recvBytes, err)`：`result` ∈ Success/Failure/Timeout/Canceled，`timing` 携带 RTT、监听等待与各编解码阶段耗时。错误按 `code` 单维聚合（展示按 `code < 100` 推导框架/业务标签），保留最近 3 条详情。导出：Console / HTTP JSON / CSV / pprof。
+  - **动作分类（`ActionSnapshot.Kind`）** 按运行时实际发生的网络行为定型，取最强语义：有 RTT 样本 → `networked`（往返）；否则有监听命中 → `listen`（监听）；否则有发送字节 → `send`（发送）；都没有 → `local`（本地）。前端按 kind 选主指标列。
+  - **Apdex 只对 `networked` 打分**，样本是 RTT。监听/发送/本地类在快照里带 kind，UI 显示「不适用」——这三类的耗时主体是服务端业务时长或客户端执行时长，没有可比的统一阈值，掺进总分会让分数随动作构成漂移。分母是「发起过请求的样本数」：超时与连接中断记 frustrated（拿不到 RTT 但确实是坏体验），业务错误按真实 RTT 正常打分（服务端正确处理了请求）。
+  - **监听等待**（`ListenWait` 直方图）单列，从 `NetExchange.RecvFrameAt`（帧在内核可读的时刻）算起而非轮询唤醒时刻，避开协作式调度的量化误差。已在队列里的消息记 `ListenReady` 计数而不产生 0ms 样本，超时记 `ListenTimeoutCount` 并单独出成率。
+  - **总耗时（wallClock）只留直方图作诊断，不再打 Apdex**：它含 Lua 里的 sleep 和客户端调度延迟，高 CPU 下会把施压机自身的拥塞读成服务端劣化。
 - **`logview/` — 日志环形缓冲区。O(1) 写入 + cursor 分页查询，供前端实时日志面板使用。
 - **`errcode/` — 统一错误码。`ErrorCode`（uint64）单一维度 + 码段契约（< 100 框架保留段，工具自产、由 `codeRegistry` 分配 / ≥ 100 业务段，服务器返回）+ 29 个框架错误码常量（Network 6 / Protocol 2 / Build 4 / Listen 2 / Config 9 / Lua 4 / Callback 2）。`ActionError` 携带 `{Code, Detail}`（无 Kind）；monitor 按 code 单维聚合，展示按 `code < 100` 推导框架/业务标签。`errors.json` 加载期对 < 100 撞码硬报错。
 - **`utils/` — `work_pool.go`（协程池 + recover 防止 panic 扩散）、`duration.go`、`utils/log/`（结构化日志 zap + lumberjack 轮转 + 企业微信 webhook 告警）。
@@ -67,6 +71,8 @@ cd cmd/web && npm run test                 # Vitest
 1. `Executor` 遍历流程图 → 命中 `action` 节点 → 调用 `ActionHandler.ExecuteAction(actionDef)`
 2. 声明式动作：`ActionExecutor` 构建 protobuf 消息（从 state/随机源解析字段绑定）→ 序列化 → adapter 编码消息头 → gnet 发送 → 接收响应 → adapter 解码 → 解析 S2C proto → 存储字段到 state
 3. Lua 动作（`pattern: "lua"`）：当前 Robot 主流程通过 `RuntimePool` 同步执行脚本 → `execute(r)` 返回 nil 表示成功，err table `{code, detail}` 表示失败（`robot.error(code, detail)` 构造）；等待网络/休眠时只阻塞该主流程，连接收包与连接级心跳由 connectionPump 独立推进
+
+RTT 的两个测点都取在贴近内核的位置，避免协作式调度把施压机自身的排队算进服务端延迟：起点是 `AsyncWrite` 的写完成回调（数据真正交给内核，而非入队时刻），终点是 `RecvFrameAt`（帧在 gnet 入站缓冲里可读的时刻，而非 Robot 被唤醒读到它的时刻）。
 
 ### 前端技术栈
 

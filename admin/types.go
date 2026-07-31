@@ -665,9 +665,12 @@ type HistoryActionSummary struct {
 	SuccessRate              float64                 `json:"successRate"`
 	AvgSendBytes             float64                 `json:"avgSendBytes"`
 	AvgRecvBytes             float64                 `json:"avgRecvBytes"`
+	Kind                     monitor.ActionKind      `json:"kind"`
 	RTTApdex                 float64                 `json:"rttApdex"`
-	TotalDurationApdex       float64                 `json:"totalDurationApdex"`
 	RTT                      HistoryHistogramSummary `json:"rtt"`
+	ListenWait               HistoryHistogramSummary `json:"listenWait"`
+	ListenWaitSampleCount    int64                   `json:"listenWaitSampleCount"`
+	ListenTimeoutRate        float64                 `json:"listenTimeoutRate"`
 	TotalDuration            HistoryHistogramSummary `json:"totalDuration"`
 	ClientAvgMs              float64                 `json:"clientAvgMs"`
 	EncodeAvgMs              float64                 `json:"encodeAvgMs"`
@@ -811,11 +814,16 @@ type HistoryCompareSnapshot struct {
 type HistoryCompareAction struct {
 	Name                     string                  `json:"name"`
 	SampleCount              int64                   `json:"sampleCount"`
+	Kind                     monitor.ActionKind      `json:"kind"`
 	RTTApdex                 float64                 `json:"rttApdex"`
-	TotalDurationApdex       float64                 `json:"totalDurationApdex"`
 	RTT                      HistoryHistogramSummary `json:"rtt"`
+	RTTSampleCount           int64                   `json:"rttSampleCount"`
+	ListenWait               HistoryHistogramSummary `json:"listenWait"`
+	ListenWaitSampleCount    int64                   `json:"listenWaitSampleCount"`
 	TotalDuration            HistoryHistogramSummary `json:"totalDuration"`
 	TotalDurationSampleCount int64                   `json:"totalDurationSampleCount"`
+	// AvgSendBytes 仅用于给缺 Kind 的老归档就地推断类别（有发送字节即发送类）。
+	AvgSendBytes float64 `json:"avgSendBytes"`
 }
 
 // CompareDiff 历史任务对比差异。
@@ -836,10 +844,11 @@ type HistoryTrendPoint struct {
 	StageIndex int `json:"stageIndex"`
 	// TotalQPS 集群总 QPS。
 	TotalQPS float64 `json:"totalQps"`
-	// RTTApdex 按 RTT 样本数加权后的 Apdex。
+	// RTTApdex 按 RTT 样本数加权后的 Apdex。压测的唯一评分指标。
 	RTTApdex float64 `json:"rttApdex"`
-	// TotalDurationApdex 按总耗时样本数加权后的 Apdex。
-	TotalDurationApdex float64 `json:"totalDurationApdex"`
+	// ListenWaitP99Ms 按等待样本数加权后的监听等待 P99。
+	// 监听类不打 Apdex（等待时长的主体是服务端业务，没有普遍阈值），看分位数。
+	ListenWaitP99Ms float64 `json:"listenWaitP99Ms"`
 	// RTTAvgMs 平均 RTT。
 	RTTAvgMs float64 `json:"rttAvgMs"`
 	// RTTP95Ms P95 RTT。
@@ -899,8 +908,8 @@ type HistoryTrendPointResponse struct {
 	TotalQPS float64 `json:"totalQps"`
 	// RTTApdex 按 RTT 样本数加权后的 Apdex；旧数据完成迁移前可能为空。
 	RTTApdex *float64 `json:"rttApdex"`
-	// TotalDurationApdex 按总耗时样本数加权后的 Apdex；旧数据未采集总耗时时为空。
-	TotalDurationApdex *float64 `json:"totalDurationApdex"`
+	// ListenWaitP99Ms 按等待样本数加权后的监听等待 P99；旧数据未采集时为空。
+	ListenWaitP99Ms *float64 `json:"listenWaitP99Ms"`
 	// RTTAvgMs 平均 RTT。
 	RTTAvgMs float64 `json:"rttAvgMs"`
 	// RTTP95Ms P95 RTT。

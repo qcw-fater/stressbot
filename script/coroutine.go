@@ -71,6 +71,11 @@ type WaitOutcome struct {
 	Canceled bool                // ctx 取消导致提前返回
 	Err      error               // WaitResponse 的请求错误（发送失败 / 超时 / 断连），listen 不用
 	IORender IORenderer          // WaitIO：后台作业完成后返回的 renderer（nil = 作业被放弃/panic）
+
+	// ListenWait / ListenWaitKind：WaitListen 命中时的等待时长与其可测性。
+	// 由 Waiter 判定后带回——只有它知道等待的起点，脚本层拿不到。
+	ListenWait     time.Duration
+	ListenWaitKind engine.ListenWaitKind
 }
 
 // Waiter 协作式等待后端，由 Robot 实现。

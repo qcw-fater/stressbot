@@ -15,6 +15,7 @@ import { historyApi, showApiError } from '@/services';
 import type { CompareTarget } from '@/services/historyApi';
 import type { HistoryCompareTask } from '@/types/api';
 import { ApdexCell } from '@/components/monitoring/shared/ApdexCell';
+import { resolveKind } from '@/components/monitoring/shared/ActionMetricsTable';
 import { formatStageLabel } from './stageLabel';
 import './HistoryPanel.css';
 
@@ -104,7 +105,8 @@ export function HistoryCompareView({ targets }: HistoryCompareViewProps) {
       for (const d of data) {
         const a = d.finalSnapshot.actions.find((x) => x.name === name);
         samples.push(a?.sampleCount);
-        apdexes.push(a && a.totalDurationSampleCount > 0 ? a.totalDurationApdex : undefined);
+        // 只有往返类有 Apdex；其余类别留空，避免 0 分被读成「很差」。
+        apdexes.push(a && resolveKind(a) === 'networked' ? a.rttApdex : undefined);
         p99s.push(a?.rtt?.p99Ms);
       }
       out.push({ name, samples, apdexes, p99s });

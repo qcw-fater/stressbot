@@ -29,12 +29,40 @@ type BandwidthSnapshot struct {
 	RecvMBps       float64 `json:"recvMBps"`       // 平均接收速率（MB/s）
 }
 
+// ActionKind 动作的网络语义分类，决定「哪个耗时指标才是它的主指标」。
+//
+// 由运行期事实判定，不依赖配置：声明式和 Lua 动作都按它实际发生过什么来定型，
+// 因为 Lua 脚本里做了什么只有跑起来才知道。判定优先级
+// networked > listen > send > local——只要发生过往返，它就是往返类。
+type ActionKind string
+
+const (
+	// ActionKindNetworked 往返类：发起过请求-响应（成功或失败）。主指标是 RTT，打 Apdex。
+	ActionKindNetworked ActionKind = "networked"
+	// ActionKindListen 监听类：只等服务端推送，不发起请求。主指标是等待时长
+	// （开始等待 → 帧被内核收到），出分布不打分。
+	//
+	// 不打 Apdex 是因为这段时长的主体是服务端业务（匹配、等队友、等开局），秒级且
+	// 每个动作的合理值天差地别，套一个全局毫秒级 T 只会让它们齐刷刷 frustrated——
+	// 那个分数不携带任何信息。要看的是 P50/P99 和超时率。
+	ActionKindListen ActionKind = "listen"
+	// ActionKindSend 发送类：只发不等（即发即忘）。主指标是执行耗时，无服务端成分，不打分。
+	ActionKindSend ActionKind = "send"
+	// ActionKindLocal 本地类：无网络行为（setState、纯计算）。主指标是执行耗时，不打分。
+	//
+	// 本地动作必然 satisfied，若参与 Apdex 会系统性抬高总分——动作越多分越高，
+	// 与服务端表现无关。
+	ActionKindLocal ActionKind = "local"
+)
+
 // ActionSnapshot per-action 完整快照（只读，用于 JSON/CSV/控制台输出）。
 //
 // RTT 字段含义说明（参见 plans/rtt-timing-breakdown.md）：
 //   - RTT 直方图记录的是"纯网络往返"耗时（不含客户端 proto 构建/解析等开销）。
 //   - 只统计有完整响应帧且 WireRTT > 0 的 request 样本；服务端 headerErr/失败响应也计入，
 //     超时、发送失败、取消且未收到响应帧的分支不产生 RTT 样本。
+//   - 但 RTT Apdex 的分母额外含 RTTFailedCount（无响应帧的请求，按 frustrated 计）：
+//     直方图要干净（没有时延值就不能进），计分要完整（最慢的样本不能缺席）。
 //   - 因此 avg/p50/p95/p99 的分母是 RTTSampleCount，而不是 action 成功数或总样本数。
 //   - 纯客户端动作（如 lua 内仅做 connect/set_secret_key/set_state）RTTSampleCount=0，
 //     此时 RTT.Count=0，前端 ActionsTab 应显示 "—"。
@@ -52,10 +80,14 @@ type ActionSnapshot struct {
 	SuccessRate               float64           `json:"successRate"`               // 成功率（0~1）
 	AvgSendBytes              float64           `json:"avgSendBytes"`              // 平均每次完成/记录的发送 WireBytes
 	AvgRecvBytes              float64           `json:"avgRecvBytes"`              // 平均每次完成/记录的接收 WireBytes
-	RTTApdex                  float64           `json:"rttApdex"`                  // RTT Apdex 评分（0~1）
-	TotalDurationApdex        float64           `json:"totalDurationApdex"`        // 总耗时 Apdex 评分（0~1）
+	Kind                      ActionKind        `json:"kind"`                      // 动作分类，决定哪个耗时是主指标；仅 networked 打 Apdex
+	RTTApdex                  float64           `json:"rttApdex"`                  // RTT Apdex 评分（0~1），仅 Kind=networked 时有意义
 	RTT                       HistogramSnapshot `json:"rtt"`                       // RTT 直方图快照（WireRTT）
-	TotalDuration             HistogramSnapshot `json:"totalDuration"`             // action 总耗时直方图快照（wallClock）
+	ListenWait                HistogramSnapshot `json:"listenWait"`                // 监听等待直方图（开始等待 → 帧被内核收到），Kind=listen 的主指标
+	ListenReadyCount          int64             `json:"listenReadyCount"`          // 命中时消息已在队列的次数：等待时长不可测，不进分布
+	ListenTimeoutCount        int64             `json:"listenTimeoutCount"`        // 监听超时次数（不进分布，单独成率）
+	ListenTimeoutRate         float64           `json:"listenTimeoutRate"`         // 监听超时率 = 超时 /（命中 + 已就绪 + 超时）
+	TotalDuration             HistogramSnapshot `json:"totalDuration"`             // action 总耗时直方图快照（wallClock），仅作诊断
 	TimeoutAvgMs              float64           `json:"timeoutAvgMs"`              // 平均超时延迟（毫秒）
 	ClientAvgMs               float64           `json:"clientAvgMs"`               // 客户端平均耗时（毫秒）
 	BuildAvgMs                float64           `json:"buildAvgMs"`                // 构建平均耗时（毫秒）
@@ -66,6 +98,7 @@ type ActionSnapshot struct {
 	DispatchToActionWaitAvgMs float64           `json:"dispatchToActionWaitAvgMs"` // 分发到 action 平均等待（毫秒）
 	ParseStoreAvgMs           float64           `json:"parseStoreAvgMs"`           // 解析和状态写入平均耗时（毫秒）
 	RTTSampleCount            int64             `json:"rttSampleCount"`            // 有完整响应帧且 WireRTT > 0 的 request 数
+	ListenWaitSampleCount     int64             `json:"listenWaitSampleCount"`     // 等待时长可测的监听命中数
 	TotalDurationSampleCount  int64             `json:"totalDurationSampleCount"`  // 总耗时 action 样本数
 	AvgQPS                    float64           `json:"avgQps"`                    // 全周期平均 QPS
 	PeriodQPS                 float64           `json:"periodQps"`                 // 上次快照到当前的区间 QPS
@@ -76,10 +109,11 @@ type ActionSnapshot struct {
 	RTTBucketCounts              []int64 `json:"rttBucketCounts,omitempty"`              // RTT 直方图桶计数，用于分布式合并
 	ApdexSatisfied               int64   `json:"apdexSatisfied,omitempty"`               // RTT Apdex 满意样本数，用于分布式合并
 	ApdexTolerating              int64   `json:"apdexTolerating,omitempty"`              // RTT Apdex 容忍样本数，用于分布式合并
+	RTTFailedCount               int64   `json:"rttFailedCount,omitempty"`               // 无响应帧的请求数（frustrated），用于分布式合并
+	ListenWaitSumNs              int64   `json:"listenWaitSumNs,omitempty"`              // 监听等待总和（纳秒），用于分布式合并
+	ListenWaitBucketCounts       []int64 `json:"listenWaitBucketCounts,omitempty"`       // 监听等待直方图桶计数，用于分布式合并
 	TotalDurationSumNs           int64   `json:"totalDurationSumNs,omitempty"`           // 总耗时总和（纳秒），用于分布式合并
 	TotalDurationBucketCounts    []int64 `json:"totalDurationBucketCounts,omitempty"`    // 总耗时直方图桶计数，用于分布式合并
-	TotalDurationApdexSatisfied  int64   `json:"totalDurationApdexSatisfied,omitempty"`  // 总耗时 Apdex 满意样本数，用于分布式合并
-	TotalDurationApdexTolerating int64   `json:"totalDurationApdexTolerating,omitempty"` // 总耗时 Apdex 容忍样本数，用于分布式合并
 	TotalSendBytes               int64   `json:"totalSendBytes,omitempty"`               // 累计发送字节数，用于分布式合并
 	TotalRecvBytes               int64   `json:"totalRecvBytes,omitempty"`               // 累计接收字节数，用于分布式合并
 	ClientCostSumNs              int64   `json:"clientCostSumNs,omitempty"`              // 客户端开销累计（纳秒），用于分布式合并
@@ -196,9 +230,11 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 
 		satisfied := am.apdexSatisfied.Load()
 		tolerating := am.apdexTolerating.Load()
-		totalDurationSatisfied := am.totalDurationApdexSatisfied.Load()
-		totalDurationTolerating := am.totalDurationApdexTolerating.Load()
 		rttSamples := am.rttSampleCount.Load()
+		rttFailed := am.rttFailedCount.Load()
+		listenWaitSamples := am.listenWaitCount.Load()
+		listenReady := am.listenReadyCount.Load()
+		listenTimeouts := am.listenTimeoutHits.Load()
 		totalDurationSamples := am.totalDurationSampleCount.Load()
 		clientCostSum := am.clientCostSum.Load()
 		clientCostCount := am.clientCostCount.Load()
@@ -218,16 +254,21 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 		dispatchWaitAvgMs := avgMs(am.dispatchWaitSum.Load(), clientCostCount)
 		parseStoreAvgMs := avgMs(am.parseStoreSum.Load(), clientCostCount)
 
-		// RTT Apdex 分母用 rttSamples：纯客户端动作（rttSamples=0）不参与，
-		// 避免大量“成功但无网络往返”的样本把 RTT Apdex 拉到不真实的高位。
+		// RTT Apdex 分母 = 有响应帧的样本 + 无响应帧的失败请求（后者按 frustrated 计）。
+		//   - 纯客户端动作（两者皆 0）不参与，避免大量「成功但无网络往返」的样本把分数虚抬；
+		//   - 失败请求必须在分母里：它们是服务端表现最差的那批，从分母漏掉会让指标反向失真
+		//     （超时越多、分数越高）。
+		rttApdexSamples := rttSamples + rttFailed
 		var rttApdex float64
-		if rttSamples > 0 {
-			rttApdex = (float64(satisfied) + float64(tolerating)*0.5) / float64(rttSamples)
+		if rttApdexSamples > 0 {
+			rttApdex = (float64(satisfied) + float64(tolerating)*0.5) / float64(rttApdexSamples)
 		}
-		var totalDurationApdex float64
-		if totalDurationSamples > 0 {
-			totalDurationApdex = (float64(totalDurationSatisfied) + float64(totalDurationTolerating)*0.5) / float64(totalDurationSamples)
+		listenTotal := listenWaitSamples + listenReady + listenTimeouts
+		var listenTimeoutRate float64
+		if listenTotal > 0 {
+			listenTimeoutRate = float64(listenTimeouts) / float64(listenTotal)
 		}
+		kind := classifyActionKind(rttApdexSamples, listenTotal, am.sendBytes.Load())
 
 		var successRate float64
 		if total > 0 {
@@ -243,6 +284,7 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 		}
 
 		rttSnap := am.rtt.Snapshot()
+		listenWaitSnap := am.listenWait.Snapshot()
 		totalDurationSnap := am.totalDuration.Snapshot()
 
 		var avgQPS, periodQPS float64
@@ -280,14 +322,19 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 			DispatchToActionWaitAvgMs:    dispatchWaitAvgMs,
 			ParseStoreAvgMs:              parseStoreAvgMs,
 			RTTSampleCount:               rttSamples,
+			ListenWaitSampleCount:        listenWaitSamples,
 			TotalDurationSampleCount:     totalDurationSamples,
 			Executing:                    exec,
 			SuccessRate:                  successRate,
 			AvgSendBytes:                 avgSend,
 			AvgRecvBytes:                 avgRecv,
+			Kind:                         kind,
 			RTTApdex:                     rttApdex,
-			TotalDurationApdex:           totalDurationApdex,
 			RTT:                          rttSnap,
+			ListenWait:                   listenWaitSnap,
+			ListenReadyCount:             listenReady,
+			ListenTimeoutCount:           listenTimeouts,
+			ListenTimeoutRate:            listenTimeoutRate,
 			TotalDuration:                totalDurationSnap,
 			AvgQPS:                       avgQPS,
 			PeriodQPS:                    periodQPS,
@@ -296,10 +343,11 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 			RTTBucketCounts:              rttSnap.BucketCounts,
 			ApdexSatisfied:               satisfied,
 			ApdexTolerating:              tolerating,
+			RTTFailedCount:               rttFailed,
+			ListenWaitSumNs:              listenWaitSnap.SumNs,
+			ListenWaitBucketCounts:       listenWaitSnap.BucketCounts,
 			TotalDurationSumNs:           totalDurationSnap.SumNs,
 			TotalDurationBucketCounts:    totalDurationSnap.BucketCounts,
-			TotalDurationApdexSatisfied:  totalDurationSatisfied,
-			TotalDurationApdexTolerating: totalDurationTolerating,
 			TotalSendBytes:               totalSendBytes,
 			TotalRecvBytes:               totalRecvBytes,
 			ClientCostSumNs:              clientCostSum,
@@ -315,6 +363,23 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 		snap.Actions = []ActionSnapshot{}
 	}
 	return snap
+}
+
+// classifyActionKind 按运行期发生过的网络行为给动作定型。
+//
+// 优先级 networked > listen > send > local：一个动作可能兼有多种行为（Lua 脚本里
+// 先请求再监听很常见），按「最强的语义」归类，保证它的主指标不会被弱语义盖掉。
+func classifyActionKind(roundTrips, listenEvents, sendBytes int64) ActionKind {
+	switch {
+	case roundTrips > 0:
+		return ActionKindNetworked
+	case listenEvents > 0:
+		return ActionKindListen
+	case sendBytes > 0:
+		return ActionKindSend
+	default:
+		return ActionKindLocal
+	}
 }
 
 // MergeSnapshots 合并多个 CollectorSnapshot，用于分布式场景下聚合多 Agent 指标。
@@ -390,7 +455,6 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 		ma.Name = name
 
 		var rttSatisfied, rttTolerating int64
-		var totalDurationSatisfied, totalDurationTolerating int64
 		for _, a := range agg.snaps {
 			ma.SampleCount += a.SampleCount
 			ma.SuccessCount += a.SuccessCount
@@ -400,11 +464,13 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 			ma.Executing += a.Executing
 			rttSatisfied += a.ApdexSatisfied
 			rttTolerating += a.ApdexTolerating
-			totalDurationSatisfied += a.TotalDurationApdexSatisfied
-			totalDurationTolerating += a.TotalDurationApdexTolerating
 			ma.TotalSendBytes += a.TotalSendBytes
 			ma.TotalRecvBytes += a.TotalRecvBytes
 			ma.RTTSampleCount += a.RTTSampleCount
+			ma.RTTFailedCount += a.RTTFailedCount
+			ma.ListenWaitSampleCount += a.ListenWaitSampleCount
+			ma.ListenReadyCount += a.ListenReadyCount
+			ma.ListenTimeoutCount += a.ListenTimeoutCount
 			ma.TotalDurationSampleCount += a.TotalDurationSampleCount
 			ma.ClientCostSumNs += a.ClientCostSumNs
 			ma.ClientCostCount += a.ClientCostCount
@@ -412,9 +478,11 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 
 		// 合并延迟直方图
 		rttSnaps := make([]HistogramSnapshot, len(agg.snaps))
+		listenWaitSnaps := make([]HistogramSnapshot, len(agg.snaps))
 		totalDurationSnaps := make([]HistogramSnapshot, len(agg.snaps))
 		for i, a := range agg.snaps {
 			rttSnaps[i] = a.RTT
+			listenWaitSnaps[i] = a.ListenWait
 			totalDurationSnaps[i] = a.TotalDuration
 		}
 		ma.RTT = MergeHistograms(rttSnaps)
@@ -422,22 +490,26 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 		ma.RTTBucketCounts = ma.RTT.BucketCounts
 		ma.ApdexSatisfied = rttSatisfied
 		ma.ApdexTolerating = rttTolerating
+		ma.ListenWait = MergeHistograms(listenWaitSnaps)
+		ma.ListenWaitSumNs = ma.ListenWait.SumNs
+		ma.ListenWaitBucketCounts = ma.ListenWait.BucketCounts
 		ma.TotalDuration = MergeHistograms(totalDurationSnaps)
 		ma.TotalDurationSumNs = ma.TotalDuration.SumNs
 		ma.TotalDurationBucketCounts = ma.TotalDuration.BucketCounts
-		ma.TotalDurationApdexSatisfied = totalDurationSatisfied
-		ma.TotalDurationApdexTolerating = totalDurationTolerating
 
 		if ma.SampleCount > 0 {
 			ma.SuccessRate = float64(ma.SuccessCount) / float64(ma.SampleCount)
 		}
-		// RTT Apdex 分母用合并后的 RTTSampleCount，与单机模式保持一致语义。
-		if ma.RTTSampleCount > 0 {
-			ma.RTTApdex = (float64(rttSatisfied) + float64(rttTolerating)*0.5) / float64(ma.RTTSampleCount)
+		// RTT Apdex 分母 = 有响应帧的样本 + 无响应帧的失败请求，与单机模式同口径。
+		rttApdexSamples := ma.RTTSampleCount + ma.RTTFailedCount
+		if rttApdexSamples > 0 {
+			ma.RTTApdex = (float64(rttSatisfied) + float64(rttTolerating)*0.5) / float64(rttApdexSamples)
 		}
-		if ma.TotalDurationSampleCount > 0 {
-			ma.TotalDurationApdex = (float64(totalDurationSatisfied) + float64(totalDurationTolerating)*0.5) / float64(ma.TotalDurationSampleCount)
+		listenTotal := ma.ListenWaitSampleCount + ma.ListenReadyCount + ma.ListenTimeoutCount
+		if listenTotal > 0 {
+			ma.ListenTimeoutRate = float64(ma.ListenTimeoutCount) / float64(listenTotal)
 		}
+		ma.Kind = classifyActionKind(rttApdexSamples, listenTotal, ma.TotalSendBytes)
 		byteSamples := ma.SuccessCount + ma.FailureCount + ma.TimeoutCount + ma.CanceledCount
 		if byteSamples > 0 {
 			ma.AvgSendBytes = float64(ma.TotalSendBytes) / float64(byteSamples)

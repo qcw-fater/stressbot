@@ -58,17 +58,18 @@ function classifySuccessRate(rate: number): ApdexLevel {
 
 /** 节点边框染色：综合 Apdex 和成功率，取较差值。
  *  - 未执行（sampleCount=0）→ unknown（无染色）
- *  - 网络动作：Apdex 等级 vs 成功率等级，取较差
- *  - 非网络动作：仅看成功率 */
+ *  - 往返类：RTT Apdex 等级 vs 成功率等级，取较差
+ *  - 其余类别：仅看成功率——它们没有 Apdex，用总耗时凑一个分只会把
+ *    「脚本里故意 sleep 60ms」染成红色 */
 export function getNodeApdexLevel(m: ActionMetric | undefined): ApdexLevel {
   if (!m || m.sampleCount === 0) return 'unknown';
 
   const srLevel = classifySuccessRate(m.successRate);
 
-  if (m.totalDurationSampleCount === 0) {
+  if (m.kind !== 'networked' || m.rttSampleCount === 0) {
     return srLevel;
   }
-  return worseLevel(classifyApdex(m.totalDurationApdex), srLevel);
+  return worseLevel(classifyApdex(m.rttApdex), srLevel);
 }
 
 const APDEX_COLOR: Record<ApdexLevel, string> = {
@@ -87,17 +88,23 @@ export interface MetricsBadgeProps {
 export function MetricsBadge({ metric: m }: MetricsBadgeProps) {
   if (!m) return null;
 
-  const hasTotalDuration = m.totalDurationSampleCount > 0;
-  const hasNet = m.rttSampleCount > 0;
-  const showP99 = hasTotalDuration && m.totalDuration.count > 0;
-  const apdexLevel = hasTotalDuration ? classifyApdex(m.totalDurationApdex) : 'unknown';
+  // 主指标按动作类别选：往返类看 RTT，监听类看等待时长，其余看 wallClock。
+  // 同一个徽章位置显示不同口径，所以标签必须跟着变，否则读的人无从判断这个 p99 是什么。
+  const primary = m.kind === 'listen'
+    ? { label: '等待', hist: m.listenWait, count: m.listenWaitSampleCount }
+    : m.kind === 'networked'
+      ? { label: 'RTT', hist: m.rtt, count: m.rttSampleCount }
+      : { label: '耗时', hist: m.totalDuration, count: m.totalDurationSampleCount };
+  const showP99 = primary.count > 0 && primary.hist.count > 0;
+
+  // Apdex 只对往返类打分；其余类别的徽章位置改用成功计数（样式统一，文本诚实）。
+  const isNetworked = m.kind === 'networked' && m.rttSampleCount > 0;
+  const apdexLevel = isNetworked ? classifyApdex(m.rttApdex) : 'unknown';
   const apdexColor = APDEX_COLOR[apdexLevel];
-  // 健康等级用于无总耗时样本动作徽章颜色（综合成功率）
-  const healthLevel = (m.sampleCount > 0 && !hasTotalDuration) ? classifySuccessRate(m.successRate) : 'unknown';
+  const healthLevel = (m.sampleCount > 0 && !isNetworked) ? classifySuccessRate(m.successRate) : 'unknown';
   const healthColor = APDEX_COLOR[healthLevel];
-  // 有总耗时样本的动作显示总耗时 Apdex；否则显示成功计数（样式统一，文本诚实）
-  const showApdex = hasTotalDuration && apdexLevel !== 'unknown';
-  const showLocalBadge = !hasTotalDuration && m.sampleCount > 0;
+  const showApdex = isNetworked && apdexLevel !== 'unknown';
+  const showLocalBadge = !isNetworked && m.sampleCount > 0;
   const showErrors = (m.errors?.length ?? 0) > 0;
   const topErr = showErrors ? m.errors![0] : undefined;
 
@@ -134,18 +141,18 @@ export function MetricsBadge({ metric: m }: MetricsBadgeProps) {
       }}
     >
       {showP99 && (
-        <Tooltip title={`总耗时 avg ${m.totalDuration.avgMs.toFixed(1)} · p95 ${m.totalDuration.p95Ms.toFixed(1)} · p99 ${m.totalDuration.p99Ms.toFixed(1)} · max ${m.totalDuration.maxMs.toFixed(1)} (ms)${hasNet ? ` · RTT p99 ${m.rtt.p99Ms.toFixed(1)}ms` : ''}`}>
+        <Tooltip title={`${primary.label} avg ${primary.hist.avgMs.toFixed(1)} · p95 ${primary.hist.p95Ms.toFixed(1)} · p99 ${primary.hist.p99Ms.toFixed(1)} · max ${primary.hist.maxMs.toFixed(1)} (ms) · 总耗时 p99 ${m.totalDuration.p99Ms.toFixed(1)}ms`}>
           <span className="pattern-badge" style={{ color: 'var(--node-continue)', borderColor: 'var(--node-continue)', background: 'color-mix(in srgb, var(--node-continue) 12%, transparent)' }}>
-            p99 {formatMs(m.totalDuration.p99Ms)}
+            {primary.label} p99 {formatMs(primary.hist.p99Ms)}
           </span>
         </Tooltip>
       )}
       {showApdex && (
         <Tooltip
-          title={`总耗时 Apdex ${m.totalDurationApdex.toFixed(3)}${hasNet ? ` · RTT Apdex ${m.rttApdex.toFixed(3)}` : ''} · 成功率 ${(m.successRate * 100).toFixed(1)}% · 平均 QPS ${m.avgQps.toFixed(1)} · 样本数 ${m.sampleCount}`}
+          title={`RTT Apdex ${m.rttApdex.toFixed(3)} · 成功率 ${(m.successRate * 100).toFixed(1)}% · 平均 QPS ${m.avgQps.toFixed(1)} · 样本数 ${m.sampleCount}`}
         >
           <span className="pattern-badge" style={{ color: apdexColor, borderColor: apdexColor, background: `color-mix(in srgb, ${apdexColor} 12%, transparent)` }}>
-            Apdex {m.totalDurationApdex.toFixed(2)}
+            Apdex {m.rttApdex.toFixed(2)}
           </span>
         </Tooltip>
       )}

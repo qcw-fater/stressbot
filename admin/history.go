@@ -723,11 +723,15 @@ func (h *HistoryStore) GetCompareTask(ctx context.Context, id string, stageIndex
 		actions = append(actions, HistoryCompareAction{
 			Name:                     a.Name,
 			SampleCount:              a.SampleCount,
+			Kind:                     a.Kind,
 			RTTApdex:                 a.RTTApdex,
-			TotalDurationApdex:       a.TotalDurationApdex,
 			RTT:                      projectHistogram(a.RTT),
+			RTTSampleCount:           a.RTTSampleCount,
+			ListenWait:               projectHistogram(a.ListenWait),
+			ListenWaitSampleCount:    a.ListenWaitSampleCount,
 			TotalDuration:            projectHistogram(a.TotalDuration),
 			TotalDurationSampleCount: a.TotalDurationSampleCount,
+			AvgSendBytes:             a.AvgSendBytes,
 		})
 	}
 
@@ -860,7 +864,7 @@ func (h *HistoryStore) GetTimeseries(ctx context.Context, id string, maxPoints, 
 	maxPoints = normalizeTimeseriesMaxPoints(maxPoints)
 
 	query := `
-		SELECT sampled_at, elapsed_sec, stage_index, total_qps, rtt_apdex, total_duration_apdex,
+		SELECT sampled_at, elapsed_sec, stage_index, total_qps, rtt_apdex, listen_wait_p99_ms,
 			rtt_avg_ms, rtt_p95_ms, rtt_p99_ms,
 			total_duration_avg_ms, total_duration_p95_ms, total_duration_p99_ms,
 			client_avg_ms, encode_avg_ms, decode_avg_ms,
@@ -884,9 +888,9 @@ func (h *HistoryStore) GetTimeseries(ctx context.Context, id string, maxPoints, 
 	points := []HistoryTrendPointResponse{}
 	for rows.Next() {
 		var p HistoryTrendPointResponse
-		var rttApdex, totalDurationApdex sql.NullFloat64
+		var rttApdex, listenWaitP99 sql.NullFloat64
 		if err := rows.Scan(
-			&p.SampledAt, &p.ElapsedSec, &p.StageIndex, &p.TotalQPS, &rttApdex, &totalDurationApdex,
+			&p.SampledAt, &p.ElapsedSec, &p.StageIndex, &p.TotalQPS, &rttApdex, &listenWaitP99,
 			&p.RTTAvgMs, &p.RTTP95Ms, &p.RTTP99Ms,
 			&p.TotalDurationAvgMs, &p.TotalDurationP95Ms, &p.TotalDurationP99Ms,
 			&p.ClientAvgMs, &p.EncodeAvgMs, &p.DecodeAvgMs,
@@ -899,8 +903,8 @@ func (h *HistoryStore) GetTimeseries(ctx context.Context, id string, maxPoints, 
 		if rttApdex.Valid {
 			p.RTTApdex = &rttApdex.Float64
 		}
-		if totalDurationApdex.Valid {
-			p.TotalDurationApdex = &totalDurationApdex.Float64
+		if listenWaitP99.Valid {
+			p.ListenWaitP99Ms = &listenWaitP99.Float64
 		}
 		points = append(points, p)
 	}
@@ -976,9 +980,12 @@ func projectActionSnapshot(a monitor.ActionSnapshot) HistoryActionSummary {
 		SuccessRate:              a.SuccessRate,
 		AvgSendBytes:             a.AvgSendBytes,
 		AvgRecvBytes:             a.AvgRecvBytes,
+		Kind:                     a.Kind,
 		RTTApdex:                 a.RTTApdex,
-		TotalDurationApdex:       a.TotalDurationApdex,
 		RTT:                      projectHistogram(a.RTT),
+		ListenWait:               projectHistogram(a.ListenWait),
+		ListenWaitSampleCount:    a.ListenWaitSampleCount,
+		ListenTimeoutRate:        a.ListenTimeoutRate,
 		TotalDuration:            projectHistogram(a.TotalDuration),
 		ClientAvgMs:              a.ClientAvgMs,
 		EncodeAvgMs:              a.EncodeAvgMs,
@@ -1317,7 +1324,7 @@ func (h *HistoryStore) AppendTimeseries(ctx context.Context, taskID string, poin
 	}
 	_, err := h.db.ExecContext(ctx, `
 		INSERT INTO task_timeseries (
-			task_id, sampled_at, elapsed_sec, stage_index, total_qps, rtt_apdex, total_duration_apdex,
+			task_id, sampled_at, elapsed_sec, stage_index, total_qps, rtt_apdex, listen_wait_p99_ms,
 			rtt_avg_ms, rtt_p95_ms, rtt_p99_ms,
 			total_duration_avg_ms, total_duration_p95_ms, total_duration_p99_ms,
 			client_avg_ms, encode_avg_ms, decode_avg_ms,
@@ -1325,7 +1332,7 @@ func (h *HistoryStore) AppendTimeseries(ctx context.Context, taskID string, poin
 			send_kbps, recv_kbps, avg_cpu_percent, max_cpu_percent, avg_mem_percent, max_mem_percent,
 			goroutines, threads, fds, online_count, offline_count
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, taskID, point.SampledAt, point.ElapsedSec, stageIndex, point.TotalQPS, point.RTTApdex, point.TotalDurationApdex,
+	`, taskID, point.SampledAt, point.ElapsedSec, stageIndex, point.TotalQPS, point.RTTApdex, point.ListenWaitP99Ms,
 		point.RTTAvgMs, point.RTTP95Ms, point.RTTP99Ms,
 		point.TotalDurationAvgMs, point.TotalDurationP95Ms, point.TotalDurationP99Ms,
 		point.ClientAvgMs, point.EncodeAvgMs, point.DecodeAvgMs,

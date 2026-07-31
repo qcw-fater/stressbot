@@ -72,7 +72,28 @@ type ClientTiming struct {
 // ActionTiming 单次 action 执行的耗时拆解。
 type ActionTiming struct {
 	Requests []RequestTiming
-	Client   ClientTiming
+	// FailedRequests 本 action 内「发出去但没等回响应帧」的请求数（超时 / 连接断开 /
+	// 发送失败）。这类请求算不出 WireRTT，但它们恰恰是服务端表现最差的那批样本——
+	// 若不单独记，它们就从 RTT Apdex 的分母里彻底消失，导致服务端越是超时、Apdex 越高。
+	// 计分时按 frustrated 计入分母，见 monitor.RecordAction。
+	//
+	// 不含两类：客户端主动取消（ctx cancel，与服务端无关）；服务端正常回了业务错误码
+	// （HeaderErr——响应帧到了，WireRTT 有效，按正常样本分档）。
+	FailedRequests int
+	// ListenWaits 监听类命中的等待时长样本：开始等待 → 帧被内核收到。
+	//
+	// 与 Requests 分开统计，因为两者是不同的物理量：请求-响应测的是服务端处理单个
+	// 请求的延迟（毫秒级，有公认阈值，可打 Apdex）；监听等待测的是服务端业务时长
+	// （匹配、等队友，秒级，没有普遍阈值，打 Apdex 是伪精度）。混进同一个分布或
+	// 共用同一个 T，两个数都会失去意义。
+	ListenWaits []time.Duration
+	// ListenReady 命中时消息已在队列中的次数——等待时长不可测，只计次不产样本。
+	// 计成 0ms 样本会把 P50 拉向 0，正是低估的来源。
+	ListenReady int
+	// ListenTimeouts 监听超时次数。不进等待时长分布（没有时延值，且会把 P99 顶到
+	// 超时上限并掩盖真实分布），单独成率。
+	ListenTimeouts int
+	Client         ClientTiming
 }
 
 // AddRequest 追加一次 request-response 样本。
@@ -85,6 +106,52 @@ func (t *ActionTiming) AddRequest(req RequestTiming) {
 	t.Client.DecodeWait += req.DecodeWait
 	t.Client.DecodeCost += req.DecodeCost
 	t.Client.DispatchWait += req.DispatchToActionWait
+}
+
+// AddFailedRequest 记一次「无响应帧」的请求失败（超时 / 断连 / 发送失败）。
+func (t *ActionTiming) AddFailedRequest() {
+	t.FailedRequests++
+}
+
+// AddListenHit 按等待时长的可测性记一次监听命中。
+func (t *ActionTiming) AddListenHit(wait time.Duration, kind ListenWaitKind) {
+	switch kind {
+	case ListenWaitMeasured:
+		t.ListenWaits = append(t.ListenWaits, wait)
+	case ListenWaitReady:
+		t.ListenReady++
+	}
+}
+
+// AddListenTimeout 记一次监听超时。
+func (t *ActionTiming) AddListenTimeout() {
+	t.ListenTimeouts++
+}
+
+// ListenWaitKind 一次监听命中的等待时长可测性。
+type ListenWaitKind int
+
+const (
+	// ListenWaitUnknown 没有帧到达时刻（网络层未透传 / 测试桩），不产样本也不计次。
+	ListenWaitUnknown ListenWaitKind = iota
+	// ListenWaitReady 帧在开始等待之前就已到达，等待时长不可测。
+	ListenWaitReady
+	// ListenWaitMeasured 等待时长可测。
+	ListenWaitMeasured
+)
+
+// ClassifyListenWait 判定一次监听命中的等待时长。
+//
+// 三态而非「算不出就记 0」：记 0 会把「消息早就在队列里」和「服务端瞬间响应」混为一谈，
+// 而这两者对压测的含义完全相反——前者说明测量起点选错了，后者才是服务端快。
+func ClassifyListenWait(waitStart, recvFrameAt time.Time) (time.Duration, ListenWaitKind) {
+	if waitStart.IsZero() || recvFrameAt.IsZero() {
+		return 0, ListenWaitUnknown
+	}
+	if !recvFrameAt.After(waitStart) {
+		return 0, ListenWaitReady
+	}
+	return recvFrameAt.Sub(waitStart), ListenWaitMeasured
 }
 
 // WireRTTSum 返回本 action 内所有 RTT 样本总和。
@@ -178,6 +245,12 @@ type NetExchange struct {
 	SendWireBytes int
 	RecvWireBytes int
 	Timing        RequestTiming
+	// RecvFrameAt 响应帧被内核收到的时刻，由网络层原样透传（零值表示该路径未提供）。
+	//
+	// 监听类动作的等待时长必须用它算，不能用动作的 wallClock：监听队列会缓存消息，
+	// 动作开始等待时消息可能早就到了，用 wallClock 会把等待测成接近 0，
+	// 匹配、进场这类耗时会被系统性低估。见 ClassifyListenWait。
+	RecvFrameAt time.Time
 }
 
 // HTTPExchange 单次 HTTP 请求得到的交换结果。
@@ -1416,6 +1489,9 @@ func (ae *ActionExecutor) execRequest(protocol string, def *ActionDef) (int, int
 	timing.Client.EncodeCost += encodeCost
 	timing.AddRequest(exchange.Timing)
 	if err != nil {
+		// 请求层失败（超时 / 断连 / 发送失败）：没有响应帧就没有 WireRTT，
+		// 但必须进 RTT Apdex 的分母记 frustrated，否则最慢的样本集体缺席。
+		timing.AddFailedRequest()
 		return exchange.SendWireBytes, exchange.RecvWireBytes, timing, err
 	}
 
@@ -1482,6 +1558,9 @@ func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *
 		if exchange != nil {
 			respBody := exchange.Body
 			var timing ActionTiming
+			// 等待时长以帧被内核收到的时刻为终点，而非本轮轮询发现它的时刻——
+			// 否则测出来的是「轮询间隔的取整」，pollMs 越大偏得越多。
+			timing.AddListenHit(ClassifyListenWait(start, exchange.RecvFrameAt))
 			if exchange.HeaderErr != 0 {
 				return exchange.RecvWireBytes, timing, ae.handleHeaderError(protocol, def, exchange.HeaderErr, routeKey, respBody)
 			}
@@ -1513,7 +1592,9 @@ func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *
 	}
 
 	elapsed := time.Since(start)
-	return 0, ActionTiming{}, NewActionError(errcode.ErrListenTimeout,
+	var timeoutTiming ActionTiming
+	timeoutTiming.AddListenTimeout()
+	return 0, timeoutTiming, NewActionError(errcode.ErrListenTimeout,
 		"action="+def.Name+" service="+def.Service+" route="+routeKey+
 			fmt.Sprintf(" timeout=%ds polls=%d elapsed=%v", timeout, pollCount, elapsed)+
 			"；route 未通过 listenRefs 预注册，请在前驱节点添加 listenRefs 并设置 listen=null")

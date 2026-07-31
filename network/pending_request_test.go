@@ -12,10 +12,14 @@ func newSendableConn(t *testing.T) (*Connection, *atomic.Value) {
 	t.Helper()
 	conn := newTestConnection(t)
 	var sent atomic.Value
-	conn.sendFunc = func(data []byte) error {
+	conn.sendFunc = func(data []byte, onWritten WriteDoneFunc) error {
 		cp := make([]byte, len(data))
 		copy(cp, data)
 		sent.Store(cp)
+		// 模拟事件循环：数据交给内核后回调写完成时刻。
+		if onWritten != nil {
+			onWritten(time.Now())
+		}
 		return nil
 	}
 	return conn, &sent

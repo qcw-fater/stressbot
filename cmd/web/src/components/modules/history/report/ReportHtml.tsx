@@ -10,6 +10,7 @@ import type {
   HistorySystemSummary,
 } from '@/types/api';
 import { computeWeightedMetrics, classifyApdex } from '@/services/metricsBinding';
+import { resolveKind } from '@/components/monitoring/shared/ActionMetricsTable';
 import { fmtMs, fmtBytesPlain } from '@/components/monitoring/shared/formats';
 import { formatStageLabel } from '../stageLabel';
 import type { ChartImages } from './reportCharts';
@@ -374,7 +375,7 @@ function DetailTableSection({ actions }: { actions: HistoryActionMetric[] }) {
             <th className="num">超时</th>
             <th className="num">Apdex</th>
             <th className="num">成功率</th>
-            <th className="num">RTT avg</th>
+            <th className="num">主指标 avg</th>
             <th className="num">p50</th>
             <th className="num">p95</th>
             <th className="num">p99</th>
@@ -388,28 +389,36 @@ function DetailTableSection({ actions }: { actions: HistoryActionMetric[] }) {
         </thead>
         <tbody>
           {sorted.map((a) => {
-            const hasTotalDuration = (a.totalDurationSampleCount ?? 0) > 0;
-            const level = hasTotalDuration ? classifyApdex(a.totalDurationApdex) : 'unknown';
+            const kind = resolveKind(a);
+            // Apdex 只对往返类打分；其余类别跟没有数据一样留 —，写 0 会被读成"很差"。
+            const isNetworked = kind === 'networked' && (a.rttSampleCount ?? 0) > 0;
+            const level = isNetworked ? classifyApdex(a.rttApdex) : 'unknown';
             const apdexColor = level === 'excellent' || level === 'good' ? 'c-success'
               : level === 'fair' ? 'c-warning'
               : level === 'unknown' ? ''
               : 'c-error';
             const rate = a.sampleCount > 0 ? (a.successRate * 100).toFixed(1) : '0';
-            // rttSampleCount=0 时延迟列显示 — 避免误把 0ms 当真实数据
-            const hasNet = (a.rttSampleCount ?? 0) > 0;
+            // 主指标按类别取，样本数为 0 时整行显示 — 避免误把 0ms 当真实数据。
+            // 类别不单独占列，靠动作名的颜色表达，色板与流程编辑器的 pattern 徽章一致。
+            const primary = kind === 'listen'
+              ? { hist: a.listenWait, count: a.listenWaitSampleCount ?? 0 }
+              : kind === 'networked'
+                ? { hist: a.rtt, count: a.rttSampleCount ?? 0 }
+                : { hist: a.totalDuration, count: a.totalDurationSampleCount ?? 0 };
+            const hasPrimary = primary.count > 0 && !!primary.hist;
             return (
               <tr key={a.name}>
-                <td><code>{a.name}</code></td>
+                <td><code className={`k-${kind}`}>{a.name}</code></td>
                 <td className="num">{a.sampleCount.toLocaleString()}</td>
                 <td className={`num${a.failureCount > 0 ? ' c-error' : ''}`}>{a.failureCount}</td>
                 <td className={`num${a.timeoutCount > 0 ? ' c-warning' : ''}`}>{a.timeoutCount}</td>
-                <td className={`num ${apdexColor}`}>{hasTotalDuration ? a.totalDurationApdex.toFixed(3) : '—'}</td>
+                <td className={`num ${apdexColor}`}>{isNetworked ? a.rttApdex.toFixed(3) : '—'}</td>
                 <td className="num">{rate}%</td>
-                <td className="num">{hasNet && a.rtt ? fmtMs(a.rtt.avgMs) : '—'}</td>
-                <td className="num">{hasNet && a.rtt ? fmtMs(a.rtt.p50Ms) : '—'}</td>
-                <td className="num">{hasNet && a.rtt ? fmtMs(a.rtt.p95Ms) : '—'}</td>
-                <td className="num">{hasNet && a.rtt ? fmtMs(a.rtt.p99Ms) : '—'}</td>
-                <td className="num">{hasNet && a.rtt ? fmtMs(a.rtt.maxMs) : '—'}</td>
+                <td className="num">{hasPrimary ? fmtMs(primary.hist.avgMs) : '—'}</td>
+                <td className="num">{hasPrimary ? fmtMs(primary.hist.p50Ms) : '—'}</td>
+                <td className="num">{hasPrimary ? fmtMs(primary.hist.p95Ms) : '—'}</td>
+                <td className="num">{hasPrimary ? fmtMs(primary.hist.p99Ms) : '—'}</td>
+                <td className="num">{hasPrimary ? fmtMs(primary.hist.maxMs) : '—'}</td>
                 <td className="num">{fmtMs(a.clientAvgMs ?? 0)}</td>
                 <td className="num">{fmtMs(a.encodeAvgMs ?? 0)}</td>
                 <td className="num">{fmtMs(a.decodeAvgMs ?? 0)}</td>

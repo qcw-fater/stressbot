@@ -336,6 +336,10 @@ func requestResultValues(L *lua.LState, ctx *Context, spec *WaitSpec, outcome Wa
 		}
 	}
 	if outcome.Err != nil {
+		// 请求层失败（超时 / 断连 / 发送失败）：没有响应帧就没有 WireRTT，
+		// 但必须进 RTT Apdex 的分母记 frustrated，否则最慢的样本集体缺席。
+		// 上面的 Canceled 分支已提前返回——客户端主动取消与服务端表现无关，不计。
+		ctx.recordRequestFailure()
 		return []lua.LValue{errTableFromActionErr(L, outcome.Err), lua.LNil}
 	}
 	if ex.HeaderErr != 0 {
@@ -772,6 +776,8 @@ func listenResultValues(L *lua.LState, ctx *Context, spec *WaitSpec, outcome Wai
 		}
 	}
 	if outcome.TimedOut {
+		// 超时不产等待时长样本（没有时延值，且会把 P99 顶到超时上限、掩盖真实分布），单独成率。
+		ctx.recordListenTimeout()
 		timeoutSec := int(spec.Duration / time.Second)
 		stresslog.Debug("[SCRIPT] "+spec.Proto+"_listen 超时",
 			zap.String("service", spec.Service), zap.String("routeKey", spec.RouteKey), zap.Int("timeout", timeoutSec),
@@ -782,6 +788,9 @@ func listenResultValues(L *lua.LState, ctx *Context, spec *WaitSpec, outcome Wai
 			lua.LNil,
 		}
 	}
+	// 命中即记等待时长——HeaderErr（服务端回了业务错误）同样算命中：帧到了，
+	// 等待时长有效，服务端确实是这么快响应的，不该因为业务判定为失败就丢掉这个样本。
+	ctx.recordListenHit(outcome.ListenWait, outcome.ListenWaitKind)
 	if exchange.HeaderErr != 0 {
 		return []lua.LValue{
 			newErrTable(L, int(exchange.HeaderErr), headerErrDetail(ctx, spec.Service, exchange.HeaderErr, spec.Service, spec.RouteKey)),

@@ -9,7 +9,7 @@ import { historyApi, showApiError } from '@/services';
 import type { CleanupStatus, HistoryActionMetric, HistoryAgentReport, HistoryConfigSummary, HistoryDetail, HistoryTrendPoint } from '@/types/api';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
-import { ActionMetricsTable } from '@/components/monitoring/shared/ActionMetricsTable';
+import { ActionMetricsTable, resolveKind } from '@/components/monitoring/shared/ActionMetricsTable';
 import { fmtBytes, fmtMs } from '@/components/monitoring/shared/formats';
 import { useReportCapture } from './report/useReportCapture';
 import { formatStageLabel } from './stageLabel';
@@ -47,7 +47,6 @@ interface DerivedSummary {
   totalErrors: number;
   successRate: number;
   rttApdex: number | null;
-  totalDurationApdex: number | null;
   avgQps: number;
   peakQps: number;
   peakCpu: number;
@@ -254,7 +253,7 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
       <section className="hp-report-kpis">
         <MetricTile label="累计动作" value={finalSnap.totalActions.toLocaleString()} sub={`${finalActions.length} 类动作`} tone="blue" />
         <MetricTile label="整体成功率" value={fmtPercent(summary.successRate)} sub={`${summary.totalSuccess.toLocaleString()} 成功 / ${summary.totalSamples.toLocaleString()} 样本`} tone={summary.successRate >= 0.95 ? 'good' : summary.successRate >= 0.8 ? 'warn' : 'bad'} />
-        <MetricTile label="总耗时 Apdex" value={fmtScore(summary.totalDurationApdex)} sub={`阈值 T=${finalSnap.apdexT}ms`} tone={(summary.totalDurationApdex ?? 0) >= 0.9 ? 'good' : (summary.totalDurationApdex ?? 0) >= 0.75 ? 'warn' : 'bad'} />
+        <MetricTile label="RTT Apdex" value={fmtScore(summary.rttApdex)} sub={`阈值 T=${finalSnap.apdexT}ms`} tone={(summary.rttApdex ?? 0) >= 0.9 ? 'good' : (summary.rttApdex ?? 0) >= 0.75 ? 'warn' : 'bad'} />
         <MetricTile label="峰值 QPS" value={summary.peakQps.toFixed(1)} sub={`全程均值 ${summary.avgQps.toFixed(1)}`} tone="purple" />
         <MetricTile label="机器人" value={`${finalRobots.running}/${finalRobots.started}`} sub={`异常 ${Math.max(finalRobots.errored, summary.peakBotsErrored)}`} tone={Math.max(finalRobots.errored, summary.peakBotsErrored) > 0 ? 'bad' : 'good'} />
         <MetricTile label="连接" value={finalConnections.established.toLocaleString()} sub={`失败 ${finalConnections.failed} / 断开 ${finalConnections.dropped}`} tone={finalConnections.failed + finalConnections.dropped > 0 ? 'warn' : 'good'} />
@@ -268,18 +267,24 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
 
       <ReportSection title="负载与性能趋势" subtitle="从历史采样中复盘压测过程、阶段推进与延迟变化">
         <div className="hp-report-grid hp-report-grid--charts">
-          <TrendCard title="机器人" option={chartOptions.loadOption} value={`峰值 ${summary.peakBotsRunning.toLocaleString()}`} />
+          {/* 固定 8 格。监听等待占掉了原「节点在线」的位置——那张图的信息量本来就
+              只有"有没有掉过节点"，并进机器人卡的角标即可，不值一格。 */}
+          <TrendCard
+            title="机器人"
+            option={chartOptions.loadOption}
+            value={`峰值 ${summary.peakBotsRunning.toLocaleString()} · ${summary.offlinePoints > 0 ? `${summary.offlinePoints} 个采样节点异常` : '节点全程在线'}`}
+          />
           <TrendCard title="QPS" option={chartOptions.qpsOption} value={`峰值 ${summary.peakQps.toFixed(1)}`} />
-          <TrendCard title="Apdex" option={chartOptions.apdexOption} value={`总耗时 ${fmtScore(summary.totalDurationApdex)}`} />
+          <TrendCard title="RTT Apdex" option={chartOptions.apdexOption} value={fmtScore(summary.rttApdex)} />
+          <TrendCard title="监听等待" option={chartOptions.listenWaitOption} value="P99" />
           <TrendCard title="客户端成本" option={chartOptions.costOption} value="编码 / 解码" />
           <TrendCard title="CPU" option={chartOptions.cpuOption} value={`最高节点 ${summary.peakCpu.toFixed(1)}%`} />
           <TrendCard title="MEM" option={chartOptions.memOption} value={`最高节点 ${summary.peakMaxMem.toFixed(1)}%`} />
           <TrendCard title="带宽" option={chartOptions.bandwidthOption} value={`${fmtKBpsPeak(timeseries?.points ?? [], 'sendKBps')} 峰值`} />
-          <TrendCard title="节点在线" option={chartOptions.nodeOption} value={summary.offlinePoints > 0 ? `${summary.offlinePoints} 个采样异常` : '全程在线'} />
         </div>
       </ReportSection>
 
-      <ReportSection title="动作分析" subtitle="最终动作快照聚合，表格支持总耗时/RTT 切换与高级诊断">
+      <ReportSection title="动作分析" subtitle="最终动作快照聚合，表格支持主指标/总耗时切换与高级诊断">
         {actionInsights.length > 0 && (
           <div className="hp-insight-strip">
             {actionInsights.map((item) => (
@@ -682,14 +687,16 @@ function buildChartOptions(points: HistoryTrendPoint[], theme: string, stageMark
 
   const point = (v: number | null | undefined, digits = 2): number | null =>
     typeof v === 'number' && Number.isFinite(v) ? +v.toFixed(digits) : null;
-  const totalDurationApdex = points.map((p) => point(p.totalDurationApdex, 3));
   const rttApdex = points.map((p) => point(p.rttApdex, 3));
   return {
     qpsOption: hasPoints ? line([{ name: 'QPS', data: points.map((p) => point(p.totalQps)), color: palette.blue, area: 0.06 }]) : null,
+    // Apdex 只有 RTT 一种口径。监听等待另出分位数图——它是 ms 量纲，与 0~1 的分数同轴无意义。
     apdexOption: hasPoints ? line([
-      { name: '总耗时', data: totalDurationApdex, color: palette.green, area: 0.055 },
-      { name: 'RTT', data: rttApdex, color: palette.cyan, dashed: true },
+      { name: 'RTT Apdex', data: rttApdex, color: palette.cyan, area: 0.055 },
     ], 1) : null,
+    listenWaitOption: hasPoints ? line([
+      { name: '监听等待 P99', data: points.map((p) => point(p.listenWaitP99Ms)), color: palette.green, area: 0.055 },
+    ]) : null,
     loadOption: hasPoints ? line([
       { name: '运行', data: points.map((p) => point(p.botsRunning, 0)), color: palette.blue, area: 0.055 },
       { name: '异常', data: points.map((p) => point(p.botsErrored, 0)), color: palette.red, dashed: true },
@@ -711,10 +718,6 @@ function buildChartOptions(points: HistoryTrendPoint[], theme: string, stageMark
       { name: '集群使用率', data: points.map((p) => point(p.avgMemPercent)), color: palette.lime, area: 0.045 },
       { name: '最高节点', data: points.map((p) => point(p.maxMemPercent)), color: palette.purple, dashed: true },
     ], 100) : null,
-    nodeOption: hasPoints ? line([
-      { name: '在线', data: points.map((p) => point(p.onlineCount, 0)), color: palette.green, area: 0.05 },
-      { name: '离线', data: points.map((p) => point(p.offlineCount, 0)), color: palette.red, dashed: true },
-    ]) : null,
   };
 }
 
@@ -737,7 +740,6 @@ function deriveSummary(detail: HistoryDetail, points: HistoryTrendPoint[]): Deri
     totalErrors,
     successRate: totalOutcomes > 0 ? totalSuccess / totalOutcomes : 0,
     rttApdex: weighted(actions, (a) => a.rttApdex, (a) => a.rttSampleCount),
-    totalDurationApdex: weighted(actions, (a) => a.totalDurationApdex, (a) => a.totalDurationSampleCount),
     avgQps: sum(actions, (a) => a.avgQps),
     peakQps: max(points, (p) => p.totalQps),
     peakCpu: Math.max(detail.finalSystem.maxCpuPercent, max(points, (p) => p.maxCpuPercent || p.avgCpuPercent)),
@@ -749,7 +751,8 @@ function deriveSummary(detail: HistoryDetail, points: HistoryTrendPoint[]): Deri
     cleanupIssueCount: detail.agentReports.filter((r) => r.cleanupStatus && r.cleanupStatus.status && r.cleanupStatus.status !== 'ok').length,
     failedAgents: detail.agentReports.filter((r) => r.result === 'failed').length,
     slowestAction: maxBy(actions.filter((a) => a.totalDurationSampleCount > 0), (a) => a.totalDuration.p99Ms),
-    worstApdexAction: minBy(actions.filter((a) => a.totalDurationSampleCount > 0), (a) => a.totalDurationApdex),
+    // 「最差 Apdex」只在往返类里找：其余类别没有分，参与比较等于拿 0 分去当最差。
+    worstApdexAction: minBy(actions.filter((a) => resolveKind(a) === 'networked' && a.rttSampleCount > 0), (a) => a.rttApdex),
     mostFailedAction: maxBy(actions.filter((a) => actionErrorScore(a) > 0), actionErrorScore),
     busiestAction: maxBy(actions, (a) => a.sampleCount),
   };
@@ -758,7 +761,7 @@ function deriveSummary(detail: HistoryDetail, points: HistoryTrendPoint[]): Deri
 function buildActionInsights(summary: DerivedSummary): ActionInsight[] {
   const out: ActionInsight[] = [];
   if (summary.slowestAction) out.push({ label: '最慢动作', name: summary.slowestAction.name, value: `P99 ${fmtMs(summary.slowestAction.totalDuration.p99Ms)}`, tone: 'warn' });
-  if (summary.worstApdexAction) out.push({ label: '最差 Apdex', name: summary.worstApdexAction.name, value: fmtScore(summary.worstApdexAction.totalDurationApdex), tone: summary.worstApdexAction.totalDurationApdex < 0.75 ? 'bad' : 'warn' });
+  if (summary.worstApdexAction) out.push({ label: '最差 RTT Apdex', name: summary.worstApdexAction.name, value: fmtScore(summary.worstApdexAction.rttApdex), tone: summary.worstApdexAction.rttApdex < 0.75 ? 'bad' : 'warn' });
   if (summary.mostFailedAction) out.push({ label: '错误最多', name: summary.mostFailedAction.name, value: `${summary.mostFailedAction.failureCount + summary.mostFailedAction.timeoutCount + (summary.mostFailedAction.canceledCount ?? 0)} 次`, tone: 'bad' });
   if (summary.busiestAction) out.push({ label: '样本最多', name: summary.busiestAction.name, value: summary.busiestAction.sampleCount.toLocaleString(), tone: 'blue' });
   return out;

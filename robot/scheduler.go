@@ -76,6 +76,9 @@ func (s *robotScheduler) enqueue(t pendingTask) {
 // ctx 取消立即返回 Canceled。
 func (s *robotScheduler) wait(deadline time.Time, pollMs int, check func() *engine.NetExchange) script.WaitOutcome {
 	ctx := s.robot.ctx
+	// 监听等待的起点。终点取帧被内核收到的时刻（非本轮轮询发现它的时刻），
+	// 否则测出来的是轮询间隔的取整，pollMs 越大偏得越多。
+	waitStart := time.Now()
 	var timer *time.Timer
 	defer func() {
 		if timer != nil {
@@ -88,7 +91,8 @@ func (s *robotScheduler) wait(deadline time.Time, pollMs int, check func() *engi
 		}
 		if check != nil {
 			if ex := check(); ex != nil {
-				return script.WaitOutcome{Exchange: ex}
+				wait, kind := engine.ClassifyListenWait(waitStart, ex.RecvFrameAt)
+				return script.WaitOutcome{Exchange: ex, ListenWait: wait, ListenWaitKind: kind}
 			}
 		}
 		remaining := time.Until(deadline)

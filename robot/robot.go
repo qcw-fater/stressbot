@@ -694,6 +694,10 @@ func (h *robotActionHandler) normalizeActionCancel(ctx context.Context, err erro
 // 堆出大量"假失败"，掩盖了真实的服务端业务错误。
 func toMonitorTiming(t engine.ActionTiming) monitor.ActionTiming {
 	out := monitor.ActionTiming{
+		FailedRequests: t.FailedRequests,
+		ListenWaits:    t.ListenWaits,
+		ListenReady:    t.ListenReady,
+		ListenTimeouts: t.ListenTimeouts,
 		Client: monitor.ClientTiming{
 			BuildCost:      t.Client.BuildCost,
 			EncodeCost:     t.Client.EncodeCost,
@@ -1508,7 +1512,10 @@ func (ns *netSenderAdapter) GetTCPListenResp(service string, routeKey string) *e
 	if msg == nil {
 		return nil
 	}
-	return &engine.NetExchange{Body: msg.Data, HeaderErr: msg.HeaderErr, RecvWireBytes: msg.WireBytes}
+	return &engine.NetExchange{
+		Body: msg.Data, HeaderErr: msg.HeaderErr, RecvWireBytes: msg.WireBytes,
+		RecvFrameAt: msg.Timing.RecvFrameAt,
+	}
 }
 
 // GetUDPListenResp 获取 UDP 连接的监听响应数据。
@@ -1521,7 +1528,10 @@ func (ns *netSenderAdapter) GetUDPListenResp(service string, routeKey string) *e
 	if msg == nil {
 		return nil
 	}
-	return &engine.NetExchange{Body: msg.Data, HeaderErr: msg.HeaderErr, RecvWireBytes: msg.WireBytes}
+	return &engine.NetExchange{
+		Body: msg.Data, HeaderErr: msg.HeaderErr, RecvWireBytes: msg.WireBytes,
+		RecvFrameAt: msg.Timing.RecvFrameAt,
+	}
 }
 
 // GetTCPSecretKey 获取 TCP 连接的加密密钥。

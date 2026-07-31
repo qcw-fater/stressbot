@@ -78,7 +78,7 @@ type Connection struct {
 	isClose          int32                     // 原子标记：0=活跃，1=已关闭
 	intentionalClose int32                     // 原子标记：1=主动 Close() 触发，不触发 onDisconnect
 	requestTimeout   time.Duration             // RequestResponse 默认超时
-	sendFunc         func(data []byte) error   // 底层发送函数（由 Dialer 注入）
+	sendFunc         sendBackend               // 底层发送函数（由 Dialer 注入）
 	closeFunc        func() error              // 底层关闭函数（由 Dialer 注入）
 	onDisconnect     func()                    // 意外断开回调（非主动 Close 触发，业务用于停 robot）
 	onClosed         func()                    // 关闭回调（主动/被动均触发，监控用，与 ConnEstablished 配对）
@@ -222,10 +222,11 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 		close(ch)
 	}()
 
+	var stamp writeStamp
 	sendStart := time.Now()
-	n, sendErr := c.Send(sendData)
-	sendDone := time.Now()
-	timing.SendCost = safeSub(sendDone, sendStart)
+	n, sendErr := c.sendTimed(sendData, stamp.mark)
+	stamp.enqueuedAt = time.Now()
+	timing.SendCost = safeSub(stamp.enqueuedAt, sendStart)
 	if sendErr != nil {
 		stresslog.Error("[NETWORK] RequestResponse 发送失败",
 			zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
@@ -251,14 +252,14 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 		select {
 		case resp := <-ch:
 			actionUnblocked := time.Now()
-			timing.WireRTT = safeSub(resp.Timing.RecvFrameAt, sendDone)
+			timing.WireRTT = safeSub(resp.Timing.RecvFrameAt, stamp.start())
 			timing.DecodeWait = safeSub(resp.Timing.DecodeStart, resp.Timing.RecvFrameAt)
 			timing.DecodeCost = safeSub(resp.Timing.DecodeEnd, resp.Timing.DecodeStart)
 			timing.DispatchToActionWait = safeSub(actionUnblocked, resp.Timing.DispatchStart)
 			return resp, timing, nil
 		default:
 		}
-		elapsed := safeSub(time.Now(), sendDone)
+		elapsed := safeSub(time.Now(), stamp.enqueuedAt)
 		if atomic.LoadInt32(&c.intentionalClose) == 1 {
 			stresslog.Debug("[NETWORK] RequestResponse 因本地关闭被取消",
 				zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
@@ -280,7 +281,7 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 		return nil, timing, engine.NewActionError(errcode.ErrConnDropped, detail)
 	case resp := <-ch:
 		actionUnblocked := time.Now()
-		timing.WireRTT = safeSub(resp.Timing.RecvFrameAt, sendDone)
+		timing.WireRTT = safeSub(resp.Timing.RecvFrameAt, stamp.start())
 		timing.DecodeWait = safeSub(resp.Timing.DecodeStart, resp.Timing.RecvFrameAt)
 		timing.DecodeCost = safeSub(resp.Timing.DecodeEnd, resp.Timing.DecodeStart)
 		timing.DispatchToActionWait = safeSub(actionUnblocked, resp.Timing.DispatchStart)
@@ -310,7 +311,7 @@ type PendingRequest struct {
 	routeKey  string
 	ch        chan *Message
 	sendCost  time.Duration
-	sendDone  time.Time
+	stamp     writeStamp // WireRTT 计时起点：写完成时刻，回调未到则回退入队时刻
 	timeout   time.Duration
 	closeOnce sync.Once
 }
@@ -337,9 +338,9 @@ func (c *Connection) SendRequest(sendData []byte, routeKey string, timeout time.
 	pr := &PendingRequest{conn: c, routeKey: routeKey, ch: ch, timeout: timeout}
 
 	sendStart := time.Now()
-	_, sendErr := c.Send(sendData)
-	pr.sendDone = time.Now()
-	pr.sendCost = safeSub(pr.sendDone, sendStart)
+	_, sendErr := c.sendTimed(sendData, pr.stamp.mark)
+	pr.stamp.enqueuedAt = time.Now()
+	pr.sendCost = safeSub(pr.stamp.enqueuedAt, sendStart)
 	if sendErr != nil {
 		stresslog.Error("[NETWORK] SendRequest 发送失败",
 			zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
@@ -378,7 +379,7 @@ func (pr *PendingRequest) Timing(resp *Message) RequestTiming {
 		return t
 	}
 	actionUnblocked := time.Now()
-	t.WireRTT = safeSub(resp.Timing.RecvFrameAt, pr.sendDone)
+	t.WireRTT = safeSub(resp.Timing.RecvFrameAt, pr.stamp.start())
 	t.DecodeWait = safeSub(resp.Timing.DecodeStart, resp.Timing.RecvFrameAt)
 	t.DecodeCost = safeSub(resp.Timing.DecodeEnd, resp.Timing.DecodeStart)
 	t.DispatchToActionWait = safeSub(actionUnblocked, resp.Timing.DispatchStart)
@@ -402,8 +403,23 @@ func (pr *PendingRequest) Close() {
 	})
 }
 
-// Send 异步发送数据。
+// sendBackend 底层发送函数。onWritten 非 nil 时，在数据真正交给内核后以写完成时刻回调。
+//
+// 即发即忘路径（心跳、帧同步、tcpSend）传 nil：它们不需要 RTT 起点，也就不必为每次发送
+// 多付一个闭包分配——这条路径的量级是每秒十万级，请求-响应路径是每秒千级。
+type sendBackend func(data []byte, onWritten WriteDoneFunc) error
+
+// Send 异步发送数据（不登记写完成时刻）。
 func (c *Connection) Send(data []byte) (int, error) {
+	return c.send(data, nil)
+}
+
+// sendTimed 异步发送并登记写完成时刻，供请求-响应路径计算 WireRTT。
+func (c *Connection) sendTimed(data []byte, onWritten WriteDoneFunc) (int, error) {
+	return c.send(data, onWritten)
+}
+
+func (c *Connection) send(data []byte, onWritten WriteDoneFunc) (int, error) {
 	if c == nil {
 		return 0, engine.NewActionError(errcode.ErrConnNotFound, "")
 	}
@@ -419,7 +435,7 @@ func (c *Connection) Send(data []byte) (int, error) {
 	}
 
 	n := len(data)
-	err := c.sendFunc(data)
+	err := c.sendFunc(data, onWritten)
 	if err != nil {
 		stresslog.Error("[NETWORK] Send 发送失败",
 			zap.String("service", c.serviceName),

@@ -43,8 +43,8 @@ export interface LivePanelModel {
     canceledCount: number;
     executing: number;
     successRate: number | null;
+    /** RTT Apdex（唯一评分指标，只由往返类贡献） */
     rttApdex: number | null;
-    totalDurationApdex: number | null;
   };
   latency: {
     rttAvgMs: number | null;
@@ -150,8 +150,6 @@ function deriveQuality(actions: StressSnapshot['actions']): LivePanelModel['qual
   let executing = 0;
   let rttSamples = 0;
   let rttApdex = 0;
-  let totalDurationSamples = 0;
-  let totalDurationApdex = 0;
 
   for (const action of actions) {
     const samples = safe(action.sampleCount);
@@ -162,13 +160,11 @@ function deriveQuality(actions: StressSnapshot['actions']): LivePanelModel['qual
     canceledCount += safe(action.canceledCount);
     executing += safe(action.executing);
 
+    // 只有往返类贡献 Apdex：其余类别没有可比的统一阈值，掺进来会让总分
+    // 随「动作构成」漂移，而不是随服务端表现变化。
     const rttCount = safe(action.rttSampleCount);
     rttSamples += rttCount;
     rttApdex += safe(action.rttApdex) * rttCount;
-
-    const totalCount = safe(action.totalDurationSampleCount);
-    totalDurationSamples += totalCount;
-    totalDurationApdex += safe(action.totalDurationApdex) * totalCount;
   }
 
   return {
@@ -180,7 +176,6 @@ function deriveQuality(actions: StressSnapshot['actions']): LivePanelModel['qual
     executing,
     successRate: sampleCount > 0 ? successCount / sampleCount : null,
     rttApdex: rttSamples > 0 ? rttApdex / rttSamples : null,
-    totalDurationApdex: totalDurationSamples > 0 ? totalDurationApdex / totalDurationSamples : null,
   };
 }
 

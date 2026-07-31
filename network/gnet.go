@@ -295,9 +295,19 @@ func (es *EventServer) OnTick() (delay time.Duration, action gnet.Action) {
 }
 
 // bindConn 将 gnet 连接的发送/关闭函数注入到业务层 Connection。
+//
+// onWritten 非 nil 时挂 gnet 写完成回调，取得数据真正交给内核的时刻作为 WireRTT 起点
+// （AsyncWrite 返回时数据还在待写队列里，见 writetime.go）。回调在事件循环 goroutine 上
+// 执行，只做一次原子写，不引入额外等待。
 func bindConn(gconn gnet.Conn, conn *Connection) {
-	conn.sendFunc = func(data []byte) error {
-		return gconn.AsyncWrite(data, nil)
+	conn.sendFunc = func(data []byte, onWritten WriteDoneFunc) error {
+		if onWritten == nil {
+			return gconn.AsyncWrite(data, nil)
+		}
+		return gconn.AsyncWrite(data, func(gnet.Conn, error) error {
+			onWritten(time.Now())
+			return nil
+		})
 	}
 	conn.closeFunc = func() error {
 		return gconn.Close()

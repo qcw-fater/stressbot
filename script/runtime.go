@@ -120,6 +120,38 @@ func (c *Context) recordRequest(req engine.RequestTiming) {
 	c.metricsMu.Unlock()
 }
 
+// recordRequestFailure 记一次「发出去但没等回响应帧」的请求（超时 / 断连 / 发送失败）。
+// 供 api_network 在请求层失败分支调用；客户端主动取消不算，服务端回了业务错误码也不算
+// （那种有响应帧、WireRTT 有效，走 recordRequest）。
+func (c *Context) recordRequestFailure() {
+	if c == nil {
+		return
+	}
+	c.metricsMu.Lock()
+	c.currentTiming.AddFailedRequest()
+	c.metricsMu.Unlock()
+}
+
+// recordListenHit 记一次监听命中的等待时长（可测性由 Waiter 判定，见 engine.ClassifyListenWait）。
+func (c *Context) recordListenHit(wait time.Duration, kind engine.ListenWaitKind) {
+	if c == nil || kind == engine.ListenWaitUnknown {
+		return
+	}
+	c.metricsMu.Lock()
+	c.currentTiming.AddListenHit(wait, kind)
+	c.metricsMu.Unlock()
+}
+
+// recordListenTimeout 记一次监听超时（不产等待时长样本，单独成率）。
+func (c *Context) recordListenTimeout() {
+	if c == nil {
+		return
+	}
+	c.metricsMu.Lock()
+	c.currentTiming.AddListenTimeout()
+	c.metricsMu.Unlock()
+}
+
 func (c *Context) recordClientTiming(timing engine.ClientTiming) {
 	if c == nil {
 		return
@@ -143,8 +175,13 @@ func (c *Context) metrics() (send int, recv int, timing engine.ActionTiming) {
 	c.metricsMu.Lock()
 	defer c.metricsMu.Unlock()
 	out := c.currentTiming
+	// 切片字段必须深拷贝：currentTiming 下次 resetMetrics 后会被复用，
+	// 直接共享底层数组会让上一次 action 的样本被下一次覆写。
 	if len(c.currentTiming.Requests) > 0 {
 		out.Requests = append([]engine.RequestTiming(nil), c.currentTiming.Requests...)
+	}
+	if len(c.currentTiming.ListenWaits) > 0 {
+		out.ListenWaits = append([]time.Duration(nil), c.currentTiming.ListenWaits...)
 	}
 	return c.currentSendBytes, c.currentRecvBytes, out
 }

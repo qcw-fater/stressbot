@@ -284,8 +284,14 @@ export interface ActionMetric {
   canceledCount: number;
   executing: number;
   successRate: number;
+  /**
+   * 动作分类，决定哪个耗时是它的主指标：
+   * networked=往返类(RTT，打 Apdex) / listen=监听类(等待时长，出分布不打分)
+   * / send=发送类 / local=本地类。
+   */
+  kind: ActionKind;
+  /** RTT Apdex。仅 kind=networked 有意义，其余类别应显示 — 而非 0 分 */
   rttApdex: number;
-  totalDurationApdex: number;
   avgQps: number;
   avgSendBytes: number;
   avgRecvBytes: number;
@@ -301,14 +307,27 @@ export interface ActionMetric {
   parseStoreAvgMs: number;
   /** 进入 RTT 直方图的样本数。0 表示该 action 没有 request-response RTT，RTT 列应显示 — */
   rttSampleCount: number;
+  /** 等待时长可测的监听命中数。0 表示 listenWait 列应显示 — */
+  listenWaitSampleCount: number;
   /** 进入总耗时直方图的 action 样本数。0 表示该 action 没有总耗时样本 */
   totalDurationSampleCount: number;
   /** RTT 直方图（WireRTT） */
   rtt: HistogramView;
-  /** action 总耗时直方图（wallClock） */
+  /** 监听等待直方图（开始等待 → 帧被内核收到），kind=listen 的主指标 */
+  listenWait: HistogramView;
+  /** 命中时消息已在队列的次数：等待时长不可测，不进分布 */
+  listenReadyCount: number;
+  /** 监听超时次数（不进分布，单独成率） */
+  listenTimeoutCount: number;
+  /** 监听超时率 = 超时 /（命中 + 已就绪 + 超时） */
+  listenTimeoutRate: number;
+  /** action 总耗时直方图（wallClock）。含施压机排队与故意 sleep，仅作诊断，不用于评分 */
   totalDuration: HistogramView;
   errors?: ErrorEntry[];
 }
+
+/** 动作的网络语义分类，由运行期实际发生的行为判定。 */
+export type ActionKind = 'networked' | 'listen' | 'send' | 'local';
 
 export interface ClusterInfo {
   agentCount: number;
@@ -511,9 +530,12 @@ export interface HistoryActionMetric {
   successRate: number;
   avgSendBytes: number;
   avgRecvBytes: number;
+  kind: ActionKind;
   rttApdex: number;
-  totalDurationApdex: number;
   rtt: HistoryHistogramSummary;
+  listenWait: HistoryHistogramSummary;
+  listenWaitSampleCount: number;
+  listenTimeoutRate: number;
   totalDuration: HistoryHistogramSummary;
   clientAvgMs: number;
   encodeAvgMs: number;
@@ -589,7 +611,7 @@ export interface HistoryTrendPoint {
   stageIndex: number;
   totalQps: number;
   rttApdex: number | null;
-  totalDurationApdex: number | null;
+  listenWaitP99Ms: number | null;
   rttAvgMs: number;
   rttP95Ms: number;
   rttP99Ms: number;
@@ -653,11 +675,16 @@ export interface HistoryCompareTask {
     actions: Array<{
       name: string;
       sampleCount: number;
+      kind: ActionKind;
       rttApdex: number;
-      totalDurationApdex: number;
       rtt: HistoryHistogramSummary;
+      rttSampleCount: number;
+      listenWait: HistoryHistogramSummary;
+      listenWaitSampleCount: number;
       totalDuration: HistoryHistogramSummary;
       totalDurationSampleCount: number;
+      /** 仅用于给缺 kind 的老归档就地推断类别 */
+      avgSendBytes: number;
     }>;
   };
 }

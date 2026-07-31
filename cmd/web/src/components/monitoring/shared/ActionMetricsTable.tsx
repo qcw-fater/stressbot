@@ -6,7 +6,17 @@ import type { ErrorEntry } from '@/types/api';
 import { ApdexCell } from './ApdexCell';
 import { fmtBytes, fmtMs, NUMERIC_STYLE } from './formats';
 
-export type ActionLatencyMode = 'totalDuration' | 'rtt';
+/**
+ * primary=按动作类别显示它的主指标（往返类看 RTT、监听类看等待时长、其余看执行耗时）；
+ * totalDuration=一律看 wallClock，仅作诊断。
+ *
+ * 之所以不是「RTT / 总耗时」二选一：不同类别的动作根本没有可比的同一个数。
+ * 强行让监听类显示 RTT 只会得到一整列 —，让往返类显示总耗时则混进了施压机排队时间。
+ */
+export type ActionLatencyMode = 'primary' | 'totalDuration';
+
+/** 动作的网络语义分类，由后端按运行期实际行为判定。 */
+export type ActionKindLike = 'networked' | 'listen' | 'send' | 'local';
 
 export interface ActionHistogramLike {
   maxMs: number;
@@ -30,13 +40,18 @@ export interface ActionMetricsTableRow {
   avgQps: number;
   errors?: ErrorEntry[];
 
+  kind?: ActionKindLike;
+
   rtt?: ActionHistogramLike;
   rttSampleCount?: number;
   rttApdex?: number;
 
+  listenWait?: ActionHistogramLike;
+  listenWaitSampleCount?: number;
+  listenTimeoutRate?: number;
+
   totalDuration?: ActionHistogramLike;
   totalDurationSampleCount?: number;
-  totalDurationApdex?: number;
 
   clientAvgMs?: number;
   encodeAvgMs?: number;
@@ -70,14 +85,65 @@ export interface ActionMetricsTableProps<T extends ActionMetricsTableRow> {
 interface SelectedLatencyMetric {
   histogram?: ActionHistogramLike;
   sampleCount: number;
-  apdex?: number;
+  /** 该指标的口径标签，用于列头与 CSV 表头 */
+  label: string;
+}
+
+/**
+ * 类别不单独占一列，而是给动作名染色——色板沿用流程编辑器 pattern 徽章的语义分组
+ * （tcpRequest 金黄 / tcpListen 橙 / tcpSend 蓝 / setState 青），两处对同一个动作同色。
+ */
+const KIND_META: Record<ActionKindLike, { label: string; color: string; hint: string }> = {
+  networked: { label: '往返', color: 'var(--node-boolean-border-active)', hint: '往返类：发起过请求-响应。主指标是 RTT，打 Apdex。' },
+  listen: { label: '监听', color: 'var(--node-break-border-active)', hint: '监听类：只等服务端推送。主指标是等待时长（开始等待 → 帧被内核收到），不打 Apdex——这段时长的主体是服务端业务，没有普遍阈值。' },
+  send: { label: '发送', color: 'var(--node-sequence-border-active)', hint: '发送类：只发不等（即发即忘）。主指标是执行耗时，不含服务端成分，不打 Apdex。' },
+  local: { label: '本地', color: 'var(--node-continue-border-active)', hint: '本地类：无网络行为。主指标是执行耗时，不打 Apdex。' },
+};
+
+/**
+ * 取行的类别。kind 是后端新增字段，改造之前归档的历史快照里没有，
+ * 缺失时按与后端 classifyActionKind 相同的判据就地推断——否则老报告会整表退化成
+ * 无色 + 主指标一律显示 wallClock，连本来有 RTT 的往返动作也看不到 RTT。
+ */
+export function resolveKind(row: {
+  kind?: ActionKindLike;
+  rttSampleCount?: number;
+  listenWaitSampleCount?: number;
+  avgSendBytes: number;
+}): ActionKindLike {
+  if (row.kind) return row.kind;
+  if ((row.rttSampleCount ?? 0) > 0) return 'networked';
+  if ((row.listenWaitSampleCount ?? 0) > 0) return 'listen';
+  if (row.avgSendBytes > 0) return 'send';
+  return 'local';
+}
+
+/** 动作名的 tooltip：名字 + 该类别的口径说明（监听类补上超时率）。 */
+function kindHint(row: ActionMetricsTableRow): string {
+  const kind = resolveKind(row);
+  const meta = KIND_META[kind];
+  return kind === 'listen' && row.listenTimeoutRate != null
+    ? `${meta.hint} 超时率 ${(row.listenTimeoutRate * 100).toFixed(1)}%。`
+    : meta.hint;
+}
+
+/** 按动作类别取它的主指标口径。 */
+function selectPrimaryMetric(row: ActionMetricsTableRow): SelectedLatencyMetric {
+  switch (resolveKind(row)) {
+    case 'networked':
+      return { histogram: row.rtt, sampleCount: row.rttSampleCount ?? 0, label: 'RTT' };
+    case 'listen':
+      return { histogram: row.listenWait, sampleCount: row.listenWaitSampleCount ?? 0, label: '等待' };
+    default:
+      return { histogram: row.totalDuration, sampleCount: row.totalDurationSampleCount ?? 0, label: '执行' };
+  }
 }
 
 function selectLatencyMetric(row: ActionMetricsTableRow, mode: ActionLatencyMode): SelectedLatencyMetric {
-  if (mode === 'rtt') {
-    return { histogram: row.rtt, sampleCount: row.rttSampleCount ?? 0, apdex: row.rttApdex };
+  if (mode === 'totalDuration') {
+    return { histogram: row.totalDuration, sampleCount: row.totalDurationSampleCount ?? 0, label: '总耗时' };
   }
-  return { histogram: row.totalDuration, sampleCount: row.totalDurationSampleCount ?? 0, apdex: row.totalDurationApdex };
+  return selectPrimaryMetric(row);
 }
 
 function latencySortValue(row: ActionMetricsTableRow, mode: ActionLatencyMode, key: keyof ActionHistogramLike): number {
@@ -87,10 +153,10 @@ function latencySortValue(row: ActionMetricsTableRow, mode: ActionLatencyMode, k
 }
 
 function latencyTooltip(mode: ActionLatencyMode) {
-  if (mode === 'rtt') {
-    return 'RTT：从客户端请求发送完成，到客户端收到完整响应帧；不包含客户端解码、解析和状态写入耗时';
+  if (mode === 'totalDuration') {
+    return '总耗时：动作从开始执行到结束的 wallClock，含施压机排队与脚本内故意 sleep，仅作诊断，不用于评分';
   }
-  return '总耗时：动作从开始执行到结束的耗时，包含请求 RTT、编码/解码、监听等待、脚本逻辑、解析与状态写入等';
+  return '主指标按动作类别选取：往返类=RTT（发送完成 → 收到完整响应帧）；监听类=等待时长（开始等待 → 帧被内核收到）；发送/本地类=执行耗时';
 }
 
 export function ActionMetricsTable<T extends ActionMetricsTableRow>({
@@ -113,7 +179,7 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
   showCsvExport = false,
   searchWidth,
 }: ActionMetricsTableProps<T>) {
-  const [innerMode, setInnerMode] = useState<ActionLatencyMode>('totalDuration');
+  const [innerMode, setInnerMode] = useState<ActionLatencyMode>('primary');
   const [search, setSearch] = useState('');
   const [actionsOnly, setActionsOnly] = useState(false);
   const [advancedDiagnostics, setAdvancedDiagnostics] = useState(false);
@@ -159,7 +225,12 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
     if (showCanceledColumn && advancedDiagnostics) {
       csvCols.push({ header: '取消', getValue: (r) => String(r.canceledCount ?? 0) });
     }
-    const avgHeader = mode === 'rtt' ? 'RTT avg(ms)' : '总耗时 avg(ms)';
+    // 表格里类别靠动作名的颜色表达，CSV 没有颜色这个通道，只能单出一列，
+    // 否则「主指标」列里混着 RTT / 等待 / 执行三种口径而无从分辨。
+    const avgHeader = mode === 'totalDuration' ? '总耗时 avg(ms)' : '主指标 avg(ms)';
+    if (mode !== 'totalDuration') {
+      csvCols.push({ header: '类别', getValue: (r) => KIND_META[resolveKind(r)].label });
+    }
     csvCols.push(
       { header: avgHeader, getValue: (r) => latencyCsv(r, 'avgMs') },
       { header: 'p50(ms)', getValue: (r) => latencyCsv(r, 'p50Ms') },
@@ -187,12 +258,10 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
     if (showQpsColumn) {
       csvCols.push({ header: 'QPS', getValue: (r) => r.avgQps.toFixed(1) });
     }
+    // Apdex 只对往返类有意义；其余类别留空而非 0，避免被当成差分。
     csvCols.push({
-      header: 'Apdex',
-      getValue: (r) => {
-        const sel = selectLatencyMetric(r, mode);
-        return sel.apdex != null ? sel.apdex.toFixed(2) : '—';
-      },
+      header: 'Apdex(RTT)',
+      getValue: (r) => (resolveKind(r) === 'networked' && r.rttApdex != null ? r.rttApdex.toFixed(2) : ''),
     });
     // 错误列不导出
 
@@ -210,7 +279,7 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
     URL.revokeObjectURL(url);
   }, [dataSource, mode, advancedDiagnostics, showCanceledColumn, showClientBreakdown, showBandwidthColumns, showExecutingColumn, showQpsColumn, latencyCsv]);
 
-  const latencyTitle = mode === 'rtt' ? 'RTT avg(ms)' : '总耗时 avg(ms)';
+  const latencyTitle = mode === 'totalDuration' ? '总耗时 avg(ms)' : '主指标 avg(ms)';
   const nameWidth = compact ? 160 : 200;
   const countWidth = compact ? 60 : 70;
   const latencyWidth = compact ? 64 : 76;
@@ -226,14 +295,15 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
       {
         title: '动作', dataIndex: 'name', key: 'name', width: nameWidth, fixed: 'left', ellipsis: true,
         sorter: (a, b) => a.name.localeCompare(b.name),
-        render: (v: string) => {
+        render: (v: string, r) => {
           const isCallback = v.startsWith('callback:');
           const display = isCallback ? v.slice('callback:'.length) : v;
+          // 类别只体现为动作名的颜色，省掉一整列；口径说明并进名字的 tooltip。
           return (
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               {isCallback && <Tag color="orange" style={{ marginInlineEnd: 0 }}>推送</Tag>}
-              <Tooltip title={display} mouseEnterDelay={0.4}>
-                <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{display}</code>
+              <Tooltip title={<>{display}<br />{kindHint(r)}</>} mouseEnterDelay={0.4}>
+                <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: KIND_META[resolveKind(r)].color }}>{display}</code>
               </Tooltip>
             </div>
           );
@@ -280,10 +350,18 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
     if (showExecutingColumn) cols.push({ title: '并发', dataIndex: 'executing', key: 'executing', width: compact ? 52 : 64, sorter: (a, b) => a.executing - b.executing, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> });
     if (showQpsColumn) cols.push({ title: 'QPS', dataIndex: 'avgQps', key: 'avgQps', width: compact ? 60 : 78, sorter: (a, b) => a.avgQps - b.avgQps, render: (v: number) => <span style={NUMERIC_STYLE}>{v.toFixed(1)}</span> });
 
-    cols.push({ title: 'Apdex', key: 'apdex', width: compact ? 68 : 80, sorter: (a, b) => (selectLatencyMetric(a, mode).apdex ?? -1) - (selectLatencyMetric(b, mode).apdex ?? -1), render: (_, r) => {
-      const selected = selectLatencyMetric(r, mode);
-      return <ApdexCell value={selected.apdex} sampleCount={selected.sampleCount} />;
-    } });
+    // Apdex 只对往返类打分。其余类别走 sampleCount=0 那条分支，渲染成和「无样本」
+    // 完全一样的灰底 — 标签：都是"这里没有分"，没必要让读者分辨两种没有。
+    const apdexScore = (r: T) => (resolveKind(r) === 'networked' ? r.rttApdex ?? -1 : -1);
+    cols.push({
+      title: <Tooltip title="RTT Apdex，仅往返类适用。监听/发送/本地类没有可比的统一阈值，看各自的主指标分布。">Apdex</Tooltip>,
+      key: 'apdex', width: compact ? 68 : 80,
+      sorter: (a, b) => apdexScore(a) - apdexScore(b),
+      render: (_, r) => {
+        const scored = resolveKind(r) === 'networked';
+        return <ApdexCell value={scored ? r.rttApdex : undefined} sampleCount={scored ? r.rttSampleCount ?? 0 : 0} />;
+      },
+    });
 
     if (showErrorsColumn) {
       cols.push({
@@ -337,7 +415,7 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
               <Segmented<ActionLatencyMode>
                 size={size === 'small' ? 'small' : 'middle'}
                 value={mode}
-                options={[{ label: '总耗时', value: 'totalDuration' }, { label: 'RTT', value: 'rtt' }]}
+                options={[{ label: '主指标', value: 'primary' }, { label: '总耗时', value: 'totalDuration' }]}
                 onChange={(v) => setMode(v)}
               />
             )}
