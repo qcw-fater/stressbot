@@ -178,7 +178,7 @@ func buildPacket(ctx *Context, service string, route lua.LValue, msgData []byte)
 	if ctx == nil || ctx.Resolver == nil {
 		return nil
 	}
-	adp := ctx.Resolver.Resolve("tcp:" + service)
+	adp := ctx.ResolveAdapter("tcp", service)
 	if adp == nil {
 		return nil
 	}
@@ -404,7 +404,7 @@ func doAwaitTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute
 	if packet == nil {
 		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), "service="+service), lua.LNil)
 	}
-	tcpAdp := ctx.Resolver.Resolve("tcp:" + service)
+	tcpAdp := ctx.ResolveAdapter("tcp", service)
 	if tcpAdp == nil {
 		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), "service="+service+" routeKey 解析失败（codec 未映射）"), lua.LNil)
 	}
@@ -443,7 +443,7 @@ func networkAwaitUDPRequest(L *lua.LState) int {
 }
 
 func doAwaitUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute, responseRoute lua.LValue, body []byte, s2cProto string, timeout int) int {
-	udpAdp := ctx.Resolver.Resolve("udp:" + service)
+	udpAdp := ctx.ResolveAdapter("udp", service)
 	if udpAdp == nil {
 		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), "service="+service+" codec 未映射（resolver.Resolve(udp:"+service+") nil）"), lua.LNil)
 	}
@@ -688,7 +688,7 @@ func networkUDPSend(L *lua.LState) int {
 
 	// encode 走 resolver.Resolve("udp:"+service) 出的 Go SchemaAdapter。
 	// Resolve nil → fail loud（ErrEncodeFailed，detail 带 service 串）。
-	adp := ctx.Resolver.Resolve("udp:" + service)
+	adp := ctx.ResolveAdapter("udp", service)
 	if adp == nil {
 		return pushErr(L, int(errcode.ErrEncodeFailed), "service="+service+" codec 未映射（resolver.Resolve(udp:"+service+") nil）")
 	}
@@ -735,7 +735,7 @@ func networkUDPSend(L *lua.LState) int {
 // ok=false，调用方据此直接返回 (ErrEncodeFailed, nil)。
 func listenParams(L *lua.LState, ctx *Context, protocol string) (service, routeKey, s2cProto string, timeout, pollMs int, ok bool) {
 	service = L.CheckString(1)
-	adp := ctx.Resolver.Resolve(protocol + ":" + service)
+	adp := ctx.ResolveAdapter(protocol, service)
 	if adp == nil {
 		return service, "", "", 0, 0, false
 	}
@@ -908,7 +908,7 @@ func networkTryListen(L *lua.LState, protocol string) int {
 	// routeKey 走 resolver.Resolve("<proto>:"+service) 出的 Go SchemaAdapter。
 	// Resolve nil → fail loud（与阻塞版 networkListen 一致；try_* 虽是 drain 原语，
 	// 但 routeKey 计算依赖 codec，缺 codec 必须暴露配置错误而非静默返回 timeout）。
-	adp := ctx.Resolver.Resolve(protocol + ":" + service)
+	adp := ctx.ResolveAdapter(protocol, service)
 	if adp == nil {
 		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), "service="+service+" codec 未映射（resolver.Resolve("+protocol+":"+service+") nil）"), lua.LNil)
 	}

@@ -24,8 +24,18 @@ import (
 //
 // 计数为全进程聚合（跨全部机器人），atomic 自增零锁；key 集合由脚本字面量决定、
 // 天然有界，防御性上限 4096 之后归入 __overflow__。?reset=1 读后清零（分窗口对比）。
+//
+// 默认关闭（?enable=1 打开，?enable=0 关闭）。
+// 关闭的理由是实测数据而非洁癖：埋点要按 kind+":"+name 现拼 map 键，这次拼接是一次
+// 堆分配，摊在 robot.get / get_path 每一次调用上。基准（BenchmarkLuaAPI_*，每次调用）
+// 显示 get 比只有调用前缀的 get_id 多出整整 1 次分配，差值即此。10000 机器人稳态下
+// 这些分配同时吃 CPU 和 GC，而它只是一个定位热点用的诊断工具——需要时打开即可，
+// 不该让常态压测替它买单。
 
 const stateKeyMaxTracked = 4096
+
+// stateKeyTracking 埋点总开关。默认关闭，经 /debug/statekeys?enable=1 打开。
+var stateKeyTracking atomic.Bool
 
 type stateKeyStat struct {
 	calls       atomic.Uint64
@@ -62,6 +72,9 @@ func stateKeyStatFor(kind, name string) *stateKeyStat {
 // recordStateKeyGet 埋点：robot.get(kind="get", name=key) / robot.get_path(kind="get_path", name=path)。
 // val 为 Store 返回的原始值（转换前），按类型归类成本。
 func recordStateKeyGet(kind, name string, val any) {
+	if !stateKeyTracking.Load() {
+		return
+	}
 	st := stateKeyStatFor(kind, name)
 	st.calls.Add(1)
 	switch val.(type) {
@@ -82,6 +95,9 @@ func recordStateKeyGet(kind, name string, val any) {
 // recordStateKeyView 埋点：robot.get_view(key)。视图零物化，只计 calls——
 // 复测时对照整读计数即可验证"该走视图的 key 是否已迁移"。
 func recordStateKeyView(name string) {
+	if !stateKeyTracking.Load() {
+		return
+	}
 	stateKeyStatFor("view", name).calls.Add(1)
 }
 
@@ -92,9 +108,24 @@ type stateKeyRow struct {
 	WireDecodes uint64 `json:"wireDecodes"`
 }
 
+// stateKeyReport 端点响应。带上 enabled 是必要的：埋点默认关闭，
+// 若只返回空数组，读者无法区分「没开埋点」和「真的没有 key 访问」。
+type stateKeyReport struct {
+	Enabled bool          `json:"enabled"`
+	Rows    []stateKeyRow `json:"rows"`
+}
+
 func init() {
 	http.HandleFunc("/debug/statekeys", func(w http.ResponseWriter, r *http.Request) {
-		reset := r.URL.Query().Get("reset") == "1"
+		q := r.URL.Query()
+		switch q.Get("enable") {
+		case "1":
+			stateKeyTracking.Store(true)
+		case "0":
+			stateKeyTracking.Store(false)
+		}
+
+		reset := q.Get("reset") == "1"
 		rows := make([]stateKeyRow, 0, 64)
 		stateKeyStats.Range(func(k, v any) bool {
 			st := v.(*stateKeyStat)
@@ -123,6 +154,6 @@ func init() {
 		w.Header().Set("Content-Type", "application/json")
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
-		_ = enc.Encode(rows)
+		_ = enc.Encode(stateKeyReport{Enabled: stateKeyTracking.Load(), Rows: rows})
 	})
 }

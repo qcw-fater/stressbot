@@ -23,7 +23,17 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const registryCtxKey = "__stressbot_ctx__"
+// ctxRegistrySlot Context 在 LState registry 表中的整数槽位。
+//
+// 用整数槽而非字符串键是热路径优化：registry 的整数索引直落 LTable 的 array 部分
+// （一次切片索引），字符串键要走 strdict 的哈希查表。GetContext 是每一个 Lua→Go
+// API 函数的第一行，这一次哈希摊在全部 API 调用上——BenchmarkGetContext 实测字符串
+// 键约 25ns/次，而 BenchmarkLuaAPI_GetID 显示一次最简 API 调用总共才约 200ns。
+//
+// 槽位无冲突：gopher-lua 自身从不写 registry 的整数部分（只在 Get/Replace 里整表
+// 存取），项目内其余 registry 访问（脚本入口缓存、robot 元表、全局 baseline）也全是
+// 字符串键，两者分居 array 与 strdict，互不干扰。
+const ctxRegistrySlot = 1
 
 // Context Lua 脚本执行上下文。
 //
@@ -46,6 +56,10 @@ type Context struct {
 	Resolver  adapter.CodecResolver
 	NetSender engine.NetSender
 	Ctx       context.Context
+
+	// adapterCache Resolve 结果的每机器人缓存，见 ResolveAdapter。
+	// 仅执行器 goroutine 访问（与 topThread / trampThreads 同一约束），无需加锁。
+	adapterCache map[adapterCacheKey]adapter.Adapter
 
 	// Shared 任务级共享状态后端（Redis）。多个 Robot 共享同一实例。
 	// 未启用共享状态（无 Redis 配置 / 任务未使用 share）时为 nil，
@@ -81,6 +95,40 @@ type Context struct {
 	currentTiming    engine.ActionTiming
 	currentSendBytes int
 	currentRecvBytes int
+}
+
+// adapterCacheKey Resolve 缓存键。用结构体而非拼好的字符串：结构体键查表不分配，
+// 而拼接本身就是要消除的那次分配。
+type adapterCacheKey struct {
+	proto   string
+	service string
+}
+
+// ResolveAdapter 取 <proto>:<service> 对应的 Go SchemaAdapter，结果按机器人缓存。
+//
+// CodecResolver.Resolve 的入参是拼好的 "<proto>:<service>" 串，这次拼接是一次堆分配，
+// 摊在每次 udp_send / tcp_request / listen 上——CPU 剖面里 networkUDPSend 占 2.86%，
+// 其中就有它。codec 映射在任务启动时定型、运行期不变，缓存安全。
+//
+// 未命中（Resolve 返回 nil）不入缓存：那是配置错误的 fail-loud 路径，本就罕见，
+// 缓存它反而会让运行期补上的映射永远看不见。
+func (c *Context) ResolveAdapter(proto, service string) adapter.Adapter {
+	if c == nil || c.Resolver == nil {
+		return nil
+	}
+	key := adapterCacheKey{proto: proto, service: service}
+	if adp, ok := c.adapterCache[key]; ok {
+		return adp
+	}
+	adp := c.Resolver.Resolve(proto + ":" + service)
+	if adp == nil {
+		return nil
+	}
+	if c.adapterCache == nil {
+		c.adapterCache = make(map[adapterCacheKey]adapter.Adapter, 8)
+	}
+	c.adapterCache[key] = adp
+	return adp
 }
 
 // resetMetrics 在每次 action 脚本开始前清零累加器。
@@ -190,20 +238,30 @@ func (c *Context) metrics() (send int, recv int, timing engine.ActionTiming) {
 func SetContext(L *lua.LState, ctx *Context) {
 	ud := L.NewUserData()
 	ud.Value = ctx
-	L.SetField(L.Get(lua.RegistryIndex), registryCtxKey, ud)
+	if reg, ok := L.Get(lua.RegistryIndex).(*lua.LTable); ok {
+		reg.RawSetInt(ctxRegistrySlot, ud)
+	}
+}
+
+// clearContext 解除绑定（LState 归还池前调用），槽位置 LNil 后 GetContext 返回 nil。
+func clearContext(L *lua.LState) {
+	if reg, ok := L.Get(lua.RegistryIndex).(*lua.LTable); ok {
+		reg.RawSetInt(ctxRegistrySlot, lua.LNil)
+	}
 }
 
 // GetContext 从 LState 的 registry 获取脚本上下文
 func GetContext(L *lua.LState) *Context {
-	reg := L.Get(lua.RegistryIndex)
-	if reg == lua.LNil {
+	reg, ok := L.Get(lua.RegistryIndex).(*lua.LTable)
+	if !ok {
 		return nil
 	}
-	val := L.GetField(reg, registryCtxKey)
-	if ud, ok := val.(*lua.LUserData); ok {
-		return ud.Value.(*Context)
+	ud, ok := reg.RawGetInt(ctxRegistrySlot).(*lua.LUserData)
+	if !ok {
+		return nil
 	}
-	return nil
+	ctx, _ := ud.Value.(*Context)
+	return ctx
 }
 
 // RuntimePool Lua 运行时池。
@@ -256,7 +314,7 @@ func (rp *RuntimePool) Release(L *lua.LState) {
 		ctx.closeTrampThreads()
 	}
 	// 清除脚本上下文
-	L.SetField(L.Get(lua.RegistryIndex), registryCtxKey, lua.LNil)
+	clearContext(L)
 	// 清理本次 Robot 在脚本运行期写入全局表的"运行时全局"，避免被池内下一个 Robot
 	// 复用时读到上一个 Robot 的残留状态（脚本顶层定义的全局已并入 baseline 受保护）。
 	resetRuntimeGlobals(L)

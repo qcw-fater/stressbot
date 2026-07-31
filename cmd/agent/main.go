@@ -167,6 +167,11 @@ func runAgentMode(cfg *Config) {
 		monCfg = *cfg.Monitor
 	}
 	monitor.Init(monCfg)
+	// /metrics 与 /metrics/summary 挂 DefaultServeMux，与 pprof 同端口对外。
+	// Agent 模式同样注册：指标虽然会随心跳上报给 master，但排查施压机自身问题
+	// （decode 排队、分发唤醒延迟等每动作细分）时需要在机器上直接取当前快照，
+	// 没有这个口就只能为了看一个数重跑一轮压测。
+	monitor.RegisterHandlers(monitor.Global())
 
 	a, err := agent.New(resolved, monitor.Global())
 	if err != nil {

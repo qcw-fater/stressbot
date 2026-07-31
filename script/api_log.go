@@ -5,6 +5,7 @@ import (
 
 	lua "github.com/yuin/gopher-lua"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // loadLogModule 加载 log 命名空间模块。
@@ -25,23 +26,31 @@ func loadLogModule(L *lua.LState) int {
 	return 1
 }
 
-// logFields 生成机器人上下文的 zap 结构化字段
-func logFields(ctx *Context) []zap.Field {
-	if ctx == nil {
-		return nil
-	}
-	return []zap.Field{zap.Int("robotID", ctx.RobotID), zap.String("account", ctx.Account)}
-}
-
 // logAtLevel 通用日志函数，避免 4 个函数的重复代码。
-func logAtLevel(L *lua.LState, logFn func(string, ...zap.Field)) {
+//
+// 等级判断必须在构造字段之前：交给 zap 内部去判断意味着字段切片已经分配完才被丢弃。
+// 旧实现分配两次（logFields 建 len=2 切片，append 追加 msg 时再扩容一次），
+// 现在等级关闭直接返回、开启时按变参一次成型。
+//
+// 能省的只有 Go 侧。脚本里 log.info("roleId=" .. tostring(id)) 的 tostring 与拼接
+// 发生在调用本函数之前，由 Lua VM 承担，无从在此干预——要省那部分只能改脚本。
+func logAtLevel(L *lua.LState, lvl zapcore.Level, logFn func(string, ...zap.Field)) {
+	if !stresslog.LevelEnabled(lvl) {
+		return
+	}
+	msg := L.CheckString(1)
 	ctx := GetContext(L)
-	fields := logFields(ctx)
-	fields = append(fields, zap.String("msg", L.CheckString(1)))
-	logFn("[SCRIPT]", fields...)
+	if ctx == nil {
+		logFn("[SCRIPT]", zap.String("msg", msg))
+		return
+	}
+	logFn("[SCRIPT]",
+		zap.Int("robotID", ctx.RobotID),
+		zap.String("account", ctx.Account),
+		zap.String("msg", msg))
 }
 
-func logDebug(L *lua.LState) int { logAtLevel(L, stresslog.Debug); return 0 }
-func logInfo(L *lua.LState) int  { logAtLevel(L, stresslog.Info); return 0 }
-func logWarn(L *lua.LState) int  { logAtLevel(L, stresslog.Warn); return 0 }
-func logError(L *lua.LState) int { logAtLevel(L, stresslog.Error); return 0 }
+func logDebug(L *lua.LState) int { logAtLevel(L, zapcore.DebugLevel, stresslog.Debug); return 0 }
+func logInfo(L *lua.LState) int  { logAtLevel(L, zapcore.InfoLevel, stresslog.Info); return 0 }
+func logWarn(L *lua.LState) int  { logAtLevel(L, zapcore.WarnLevel, stresslog.Warn); return 0 }
+func logError(L *lua.LState) int { logAtLevel(L, zapcore.ErrorLevel, stresslog.Error); return 0 }

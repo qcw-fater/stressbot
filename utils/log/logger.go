@@ -282,10 +282,17 @@ func LevelEnabler() zapcore.LevelEnabler {
 //	    stresslog.Debug("msg", zap.String(...), ...)
 //	}
 func DebugEnabled() bool {
+	return LevelEnabled(zapcore.DebugLevel)
+}
+
+// LevelEnabled 判断任意等级是否启用（atomic load，纳秒级）。
+// 与 DebugEnabled 同用途，供热路径在构造昂贵字段前提前短路——
+// 把判断交给 zap 内部意味着字段切片已经分配完才被丢弃。
+func LevelEnabled(lvl zapcore.Level) bool {
 	if logger == nil {
 		return false
 	}
-	return loglevel.Enabled(zapcore.DebugLevel)
+	return loglevel.Enabled(lvl)
 }
 
 // StrToLevel 日志等级装换
