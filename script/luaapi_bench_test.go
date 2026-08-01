@@ -46,7 +46,7 @@ end`
 	}
 
 	rp := NewRuntimePool("")
-	rp.precompiled["bench.lua"] = fn.Proto
+	rp.registerPrecompiledScript("bench.lua", fn.Proto)
 
 	st := state.NewStore()
 	st.Set("scalar", 42)

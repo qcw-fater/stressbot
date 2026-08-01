@@ -7,6 +7,156 @@ import (
 	lua "github.com/yuin/gopher-lua"
 )
 
+func TestRegisterPrecompiledScriptReusesSlots(t *testing.T) {
+	rp := NewRuntimePool("")
+	first := compileTestProto(t, `function execute(r) return nil end`)
+	second := compileTestProto(t, `function execute(r) return true end`)
+
+	rp.registerPrecompiledScript("same.lua", first)
+	got := rp.precompiled["same.lua"]
+	executeSlot, onMessageSlot := got.executeSlot, got.onMessageSlot
+	nextSlot := rp.nextScriptFnSlot
+
+	rp.registerPrecompiledScript("same.lua", second)
+	got = rp.precompiled["same.lua"]
+	if got.proto != second || got.executeSlot != executeSlot || got.onMessageSlot != onMessageSlot {
+		t.Fatal("同名脚本重新注册时必须只替换 proto 并复用入口槽")
+	}
+	if rp.nextScriptFnSlot != nextSlot {
+		t.Fatalf("nextScriptFnSlot=%d want %d", rp.nextScriptFnSlot, nextSlot)
+	}
+}
+
+func TestLoadScriptFnCacheHitZeroAlloc(t *testing.T) {
+	rp := newTestPool(t, map[string]string{
+		"both.lua": `
+function execute(r) return nil end
+function on_message(r, msg) return nil end`,
+	})
+	L := rp.Acquire()
+	defer rp.Release(L)
+
+	if _, err := rp.loadScriptFn(L, "both.lua", scriptEntryExecute); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rp.loadScriptFn(L, "both.lua", scriptEntryOnMessage); err != nil {
+		t.Fatal(err)
+	}
+	allocs := testing.AllocsPerRun(1000, func() {
+		if _, err := rp.loadScriptFn(L, "both.lua", scriptEntryExecute); err != nil {
+			panic(err)
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("缓存命中 allocations=%v want 0", allocs)
+	}
+}
+
+func TestRunActionScriptSteadyStateAllocationBudget(t *testing.T) {
+	rp := newTestPool(t, map[string]string{
+		"bench.lua": `function execute(r) return nil end`,
+	})
+	L := rp.Acquire()
+	defer rp.Release(L)
+	SetContext(L, &Context{})
+	if _, _, _, err := rp.RunActionScript(L, "bench.lua"); err != nil {
+		t.Fatal(err)
+	}
+	allocs := testing.AllocsPerRun(100, func() {
+		if _, _, _, err := rp.RunActionScript(L, "bench.lua"); err != nil {
+			panic(err)
+		}
+	})
+	if allocs > 10 {
+		t.Fatalf("稳态 allocations=%v want <= 10", allocs)
+	}
+}
+
+func TestTrampMixedArityDoesNotLeakArgs(t *testing.T) {
+	rp := newTestPool(t, map[string]string{
+		"action.lua": `function execute(...)
+  if select("#", ...) ~= 1 then error("execute argc") end
+  return nil
+end`,
+		"listen.lua": `function on_message(...)
+  if select("#", ...) ~= 2 then error("on_message argc") end
+  local _, msg = ...
+  if msg ~= "payload" then error("on_message payload") end
+end`,
+	})
+	L := rp.Acquire()
+	defer rp.Release(L)
+	ctx := &Context{}
+	SetContext(L, ctx)
+
+	if _, _, _, err := rp.RunActionScript(L, "action.lua"); err != nil {
+		t.Fatal(err)
+	}
+	if err := rp.RunListenScriptRaw(L, "listen.lua", []byte("payload")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := rp.RunActionScript(L, "action.lua"); err != nil {
+		t.Fatal(err)
+	}
+	if len(ctx.trampThreads) != 1 || ctx.trampThreads[0].tasks != 3 {
+		t.Fatalf("混合参数任务必须复用同一 thread: %+v", ctx.trampThreads)
+	}
+}
+
+func TestTrampOnMessageOneArgCompatible(t *testing.T) {
+	rp := newTestPool(t, map[string]string{
+		"one.lua": `function on_message(...)
+  return select("#", ...), select(1, ...)
+end`,
+	})
+	L := rp.Acquire()
+	defer rp.Release(L)
+	ctx := &Context{}
+	SetContext(L, ctx)
+
+	co, err := rp.startCoroutine(L, "one.lua", scriptEntryOnMessage, 1, lua.LString("only"), lua.LNil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer co.close()
+	res, err := rp.resumeCoroutine(co, ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.done || len(res.retVals) != 2 || res.retVals[0] != lua.LNumber(1) || res.retVals[1] != lua.LString("only") {
+		t.Fatalf("单参数 on_message 返回值异常: %#v", res.retVals)
+	}
+}
+
+func TestTrampPreservesReturnNilHoles(t *testing.T) {
+	rp := newTestPool(t, map[string]string{
+		"holes.lua": `function execute(r) return "a", nil, "c", nil end`,
+	})
+	L := rp.Acquire()
+	defer rp.Release(L)
+	ctx := &Context{}
+	SetContext(L, ctx)
+
+	co, err := rp.startCoroutine(L, "holes.lua", scriptEntryExecute, 1, lua.LNil, lua.LNil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer co.close()
+	res, err := rp.resumeCoroutine(co, ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []lua.LValue{lua.LString("a"), lua.LNil, lua.LString("c"), lua.LNil}
+	if !res.done || len(res.retVals) != len(want) {
+		t.Fatalf("返回值数量=%d want %d", len(res.retVals), len(want))
+	}
+	for i := range want {
+		if res.retVals[i] != want[i] {
+			t.Fatalf("retVals[%d]=%v want %v", i, res.retVals[i], want[i])
+		}
+	}
+}
+
 // TestTrampThreadReuse 同一 Robot 连续执行多个脚本应复用同一条蹦床 thread（稳态零新建）。
 func TestTrampThreadReuse(t *testing.T) {
 	rp := newTestPool(t, map[string]string{
@@ -135,7 +285,7 @@ func TestTrampErrorDiscardsThread(t *testing.T) {
 }
 
 // TestTrampRogueYieldDiscards 脚本裸 coroutine.yield 必须 fail-loud 且弃用 thread
-//（栈停在脚本内部，不可复用）。
+// （栈停在脚本内部，不可复用）。
 func TestTrampRogueYieldDiscards(t *testing.T) {
 	rp := newTestPool(t, map[string]string{
 		"rogue.lua": `function execute(r) coroutine.yield(1) return nil end`,
@@ -253,12 +403,12 @@ func BenchmarkNewThreadPerTask(b *testing.B) {
 	if err != nil {
 		b.Fatalf("编译失败: %v", err)
 	}
-	rp.precompiled["bench.lua"] = fn.Proto
+	rp.registerPrecompiledScript("bench.lua", fn.Proto)
 
 	L := rp.Acquire()
 	defer rp.Release(L)
 	SetContext(L, &Context{})
-	fnv, err := rp.loadScriptFn(L, "bench.lua", "execute")
+	fnv, err := rp.loadScriptFn(L, "bench.lua", scriptEntryExecute)
 	if err != nil {
 		b.Fatalf("加载入口失败: %v", err)
 	}
@@ -288,7 +438,7 @@ func BenchmarkRunActionScript(b *testing.B) {
 	if err != nil {
 		b.Fatalf("编译失败: %v", err)
 	}
-	rp.precompiled["bench.lua"] = fn.Proto
+	rp.registerPrecompiledScript("bench.lua", fn.Proto)
 
 	L := rp.Acquire()
 	defer rp.Release(L)

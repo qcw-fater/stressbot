@@ -23,17 +23,21 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// ctxRegistrySlot Context 在 LState registry 表中的整数槽位。
+// LState registry 整数槽。热路径缓存全部放在 array 部分，避免字符串键拼接与哈希查找。
 //
 // 用整数槽而非字符串键是热路径优化：registry 的整数索引直落 LTable 的 array 部分
 // （一次切片索引），字符串键要走 strdict 的哈希查表。GetContext 是每一个 Lua→Go
 // API 函数的第一行，这一次哈希摊在全部 API 调用上——BenchmarkGetContext 实测字符串
 // 键约 25ns/次，而 BenchmarkLuaAPI_GetID 显示一次最简 API 调用总共才约 200ns。
 //
-// 槽位无冲突：gopher-lua 自身从不写 registry 的整数部分（只在 Get/Replace 里整表
-// 存取），项目内其余 registry 访问（脚本入口缓存、robot 元表、全局 baseline）也全是
-// 字符串键，两者分居 array 与 strdict，互不干扰。
-const ctxRegistrySlot = 1
+// gopher-lua 自身不写 registry 的整数部分。固定槽之后由每个脚本的 execute/on_message
+// 两个入口槽顺序增长，整个 RuntimePool 生命周期内稳定且不复用。
+const (
+	ctxRegistrySlot = iota + 1
+	trampFnRegistrySlot
+	trampSentinelRegistrySlot
+	firstScriptFnRegistrySlot
+)
 
 // Context Lua 脚本执行上下文。
 //
@@ -264,22 +268,59 @@ func GetContext(L *lua.LState) *Context {
 	return ctx
 }
 
+type scriptEntry uint8
+
+const (
+	scriptEntryExecute scriptEntry = iota + 1
+	scriptEntryOnMessage
+)
+
+func (e scriptEntry) globalName() (string, bool) {
+	switch e {
+	case scriptEntryExecute:
+		return "execute", true
+	case scriptEntryOnMessage:
+		return "on_message", true
+	default:
+		return "", false
+	}
+}
+
+type precompiledScript struct {
+	proto         *lua.FunctionProto
+	executeSlot   int
+	onMessageSlot int
+}
+
+func (s *precompiledScript) slot(entry scriptEntry) (int, bool) {
+	switch entry {
+	case scriptEntryExecute:
+		return s.executeSlot, true
+	case scriptEntryOnMessage:
+		return s.onMessageSlot, true
+	default:
+		return 0, false
+	}
+}
+
 // RuntimePool Lua 运行时池。
 // 管理 LState 实例池和预编译的 FunctionProto。
 // 每个 Robot 在生命周期内独占一个 LState，结束时归还。
 type RuntimePool struct {
-	pool        sync.Pool
-	precompiled map[string]*lua.FunctionProto // scriptName -> 预编译函数
-	scriptDir   string                        // 脚本根目录
-	trampProto  *lua.FunctionProto            // 蹦床 chunk（P2，进程级编译一次）
+	pool             sync.Pool
+	precompiled      map[string]*precompiledScript // scriptName -> 预编译函数及入口槽
+	nextScriptFnSlot int                           // 下一个可分配的 registry 整数槽
+	scriptDir        string                        // 脚本根目录
+	trampProto       *lua.FunctionProto            // 蹦床 chunk（P2，进程级编译一次）
 }
 
 // NewRuntimePool 创建 Lua 运行时池
 func NewRuntimePool(scriptDir string) *RuntimePool {
 	rp := &RuntimePool{
-		precompiled: make(map[string]*lua.FunctionProto),
-		scriptDir:   scriptDir,
-		trampProto:  compileTrampoline(),
+		precompiled:      make(map[string]*precompiledScript),
+		nextScriptFnSlot: firstScriptFnRegistrySlot,
+		scriptDir:        scriptDir,
+		trampProto:       compileTrampoline(),
 	}
 	rp.pool.New = func() any {
 		// 默认 lua.NewState 会预分配 RegistrySize(5120) 的数据栈和 CallStackSize(256)
@@ -297,6 +338,22 @@ func NewRuntimePool(scriptDir string) *RuntimePool {
 		return L
 	}
 	return rp
+}
+
+// registerPrecompiledScript 注册预编译脚本并为两个入口分配稳定的连续整数槽。
+// 同名脚本重复注册只替换 proto，避免测试或重复预编译让槽号无界增长。
+func (rp *RuntimePool) registerPrecompiledScript(name string, proto *lua.FunctionProto) {
+	if current, ok := rp.precompiled[name]; ok {
+		current.proto = proto
+		return
+	}
+	compiled := &precompiledScript{
+		proto:         proto,
+		executeSlot:   rp.nextScriptFnSlot,
+		onMessageSlot: rp.nextScriptFnSlot + 1,
+	}
+	rp.nextScriptFnSlot += 2
+	rp.precompiled[name] = compiled
 }
 
 // Acquire 从池中获取一个 LState。
@@ -337,32 +394,34 @@ func (rp *RuntimePool) Release(L *lua.LState) {
 // 注意：脚本顶层副作用由"每次动作"变为"每个 LState 首次加载一次"。正常脚本顶层只有
 // 函数定义 / require，无影响；把可变状态写在顶层裸全局当作每次重置的写法属反模式，
 // 应改用 robot.set/get。
-const (
-	scriptFnCachePrefix = "__sbfn_"          // 入口函数缓存键前缀
-	globalBaselineKey   = "__sb_gbaseline__" // 全局表 baseline 集合键
-)
-
-func scriptFnCacheKey(scriptName, fnName string) string {
-	return scriptFnCachePrefix + scriptName + "#" + fnName
-}
+const globalBaselineKey = "__sb_gbaseline__" // 全局表 baseline 集合键
 
 // loadScriptFn 惰性加载脚本入口函数并缓存到当前 LState 的 registry。
-// 首次命中时运行一次 chunk 捕获指定入口函数（fnName），随后从全局表移除，
+// 首次命中时运行一次 chunk 捕获指定入口函数，随后从全局表移除，
 // 并把 chunk 顶层产生的全局并入 baseline 受保护。后续调用直接返回缓存函数。
-func (rp *RuntimePool) loadScriptFn(L *lua.LState, scriptName, fnName string) (lua.LValue, error) {
-	reg := L.Get(lua.RegistryIndex)
-	cacheKey := scriptFnCacheKey(scriptName, fnName)
-	if v := L.GetField(reg, cacheKey); v != lua.LNil {
-		return v, nil
-	}
-
+func (rp *RuntimePool) loadScriptFn(L *lua.LState, scriptName string, entry scriptEntry) (lua.LValue, error) {
 	compiled, ok := rp.precompiled[scriptName]
 	if !ok {
 		return nil, fmt.Errorf("脚本未预编译: %s", scriptName)
 	}
+	fnName, ok := entry.globalName()
+	if !ok {
+		return nil, fmt.Errorf("脚本 %s 的入口类型无效: %d", scriptName, entry)
+	}
+	slot, ok := compiled.slot(entry)
+	if !ok {
+		return nil, fmt.Errorf("脚本 %s 的入口槽无效: %d", scriptName, entry)
+	}
+	reg, ok := L.Get(lua.RegistryIndex).(*lua.LTable)
+	if !ok {
+		return nil, fmt.Errorf("Lua registry 类型异常")
+	}
+	if v := reg.RawGetInt(slot); v != lua.LNil {
+		return v, nil
+	}
 
 	savedTop := L.GetTop()
-	fn := L.NewFunctionFromProto(compiled)
+	fn := L.NewFunctionFromProto(compiled.proto)
 	L.Push(fn)
 	if err := L.PCall(0, 0, nil); err != nil {
 		L.SetTop(savedTop)
@@ -375,7 +434,7 @@ func (rp *RuntimePool) loadScriptFn(L *lua.LState, scriptName, fnName string) (l
 		return nil, fmt.Errorf("脚本 %s 未定义 %s 函数", scriptName, fnName)
 	}
 	L.SetGlobal(fnName, lua.LNil) // 入口函数移出全局表，避免污染
-	L.SetField(reg, cacheKey, target)
+	reg.RawSetInt(slot, target)
 	rememberGlobalBaseline(L) // chunk 顶层全局并入 baseline，Release 时不清理
 	return target, nil
 }
@@ -451,7 +510,7 @@ func (rp *RuntimePool) PrecompileScripts(dirs []string) error {
 				rel = path
 			}
 			scriptName := filepath.ToSlash(rel)
-			rp.precompiled[scriptName] = fn.Proto
+			rp.registerPrecompiledScript(scriptName, fn.Proto)
 
 			return nil
 		})
@@ -590,7 +649,7 @@ func (rp *RuntimePool) RunListenScriptRaw(L *lua.LState, scriptName string, raw 
 func (rp *RuntimePool) runListenScriptValue(L *lua.LState, scriptName string, robotUD, msgVal lua.LValue) error {
 	ctx := GetContext(L)
 
-	co, lerr := rp.startCoroutine(L, scriptName, "on_message", robotUD, msgVal)
+	co, lerr := rp.startCoroutine(L, scriptName, scriptEntryOnMessage, 2, robotUD, msgVal)
 	if lerr != nil {
 		return lerr
 	}

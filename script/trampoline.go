@@ -23,8 +23,6 @@ import (
 // drain 出的 listen 回调会取到另一条（或新建），互不干扰；topThread 校验逻辑不变。
 
 const (
-	trampFnKey       = "__sb_tramp_fn__"   // 蹦床主函数值缓存键（per LState registry）
-	trampSentinelKey = "__sb_tramp_done__" // DONE 哨兵 userdata 键（per LState registry）
 
 	// maxIdleTrampThreads 每 Robot 缓存的空闲 thread 上限：主流程 1 条 + 嵌套
 	//（主脚本 await 期间 drain 出的 listen 回调）常见 1-2 条，4 覆盖极端嵌套；
@@ -41,22 +39,25 @@ const (
 // 每个根 LState 实例化一次函数值，每条长驻 thread 以它为协程主函数。
 //
 // 协议：
-//   - bootstrap（首次 Resume）：实参 (sentinel, fn, args...) → 立即执行首个任务；
+//   - bootstrap（首次 Resume）：实参 (sentinel, fn, argc, a1, a2) → 立即执行首个任务；
 //   - 任务完成：yield(sentinel, 结果...) 停在栈顶；
-//   - handoff（后续 Resume）：喂入 (fn, args...) 作为 yield 返回值 → 执行下一个任务；
+//   - handoff（后续 Resume）：喂入 (fn, argc, a1, a2) 作为 yield 返回值 → 执行下一个任务；
 //   - 任务内 await_*：脚本经 awaitYield 直接 yield WaitSpec（不带哨兵），蹦床无感知；
 //   - 脚本 error：蹦床内无 pcall（yield 不可穿越保护边界），错误直接穿出 →
 //     ResumeError，thread 死亡由 Go 侧弃用。
 //
-// 注：nxt/rets 局部表会把上一任务的入参/结果钉到下一任务边界，属可接受的小残留
-//（通常是句柄/标量）；Lua 5.1 无 table.pack，用 select("#") 手工 pack 保 nil 洞。
-const trampolineSource = `return function(sentinel, fn, ...)
-    local pack = function(...) return { n = select("#", ...), ... } end
-    local yield, unpack = coroutine.yield, unpack
-    local rets = pack(fn(...))
+// argc 当前只允许 1/2。业务函数调用处位于 yield 的最后一个实参位置，Lua 会直接展开
+// 全部返回值并保留 nil 洞，无需 pack/unpack，也不再为每个任务创建交接表。
+const trampolineSource = `return function(sentinel, fn, argc, a1, a2)
+    local yield = coroutine.yield
     while true do
-        local nxt = pack(yield(sentinel, unpack(rets, 1, rets.n)))
-        rets = pack(nxt[1](unpack(nxt, 2, nxt.n)))
+        if argc == 1 then
+            fn, argc, a1, a2 = yield(sentinel, fn(a1))
+        elseif argc == 2 then
+            fn, argc, a1, a2 = yield(sentinel, fn(a1, a2))
+        else
+            error("蹦床不支持参数数量: " .. tostring(argc))
+        end
     end
 end`
 
@@ -122,8 +123,11 @@ func (c *Context) closeTrampThreads() {
 // trampMainFn 取当前 LState 的蹦床主函数（首次实例化后缓存进 registry，
 // 同一 L 的所有 thread 共享该函数值——执行状态在 thread 栈上，函数值无状态）。
 func (rp *RuntimePool) trampMainFn(L *lua.LState) (*lua.LFunction, error) {
-	reg := L.Get(lua.RegistryIndex)
-	if fn, ok := L.GetField(reg, trampFnKey).(*lua.LFunction); ok {
+	reg, ok := L.Get(lua.RegistryIndex).(*lua.LTable)
+	if !ok {
+		return nil, fmt.Errorf("Lua registry 类型异常")
+	}
+	if fn, ok := reg.RawGetInt(trampFnRegistrySlot).(*lua.LFunction); ok {
 		return fn, nil
 	}
 	savedTop := L.GetTop()
@@ -137,20 +141,23 @@ func (rp *RuntimePool) trampMainFn(L *lua.LState) (*lua.LFunction, error) {
 	if !ok {
 		return nil, fmt.Errorf("蹦床 chunk 未返回函数")
 	}
-	L.SetField(reg, trampFnKey, fn)
+	reg.RawSetInt(trampFnRegistrySlot, fn)
 	return fn, nil
 }
 
 // trampSentinel 取当前 LState 的 DONE 哨兵：唯一 userdata，指针相等判定任务完成，
 // 脚本无法伪造（userdata 不可在 Lua 侧构造出同一指针）。
-func trampSentinel(L *lua.LState) *lua.LUserData {
-	reg := L.Get(lua.RegistryIndex)
-	if ud, ok := L.GetField(reg, trampSentinelKey).(*lua.LUserData); ok {
-		return ud
+func trampSentinel(L *lua.LState) (*lua.LUserData, error) {
+	reg, ok := L.Get(lua.RegistryIndex).(*lua.LTable)
+	if !ok {
+		return nil, fmt.Errorf("Lua registry 类型异常")
+	}
+	if ud, ok := reg.RawGetInt(trampSentinelRegistrySlot).(*lua.LUserData); ok {
+		return ud, nil
 	}
 	ud := L.NewUserData()
-	L.SetField(reg, trampSentinelKey, ud)
-	return ud
+	reg.RawSetInt(trampSentinelRegistrySlot, ud)
+	return ud, nil
 }
 
 // compileTrampoline 编译蹦床 chunk（进程级一次）。源为包内常量，编译失败属编程错误，

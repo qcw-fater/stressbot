@@ -39,9 +39,20 @@ func newTestPool(t *testing.T, scripts map[string]string) *RuntimePool {
 		if err != nil {
 			t.Fatalf("编译脚本 %s 失败: %v", name, err)
 		}
-		rp.precompiled[name] = fn.Proto
+		rp.registerPrecompiledScript(name, fn.Proto)
 	}
 	return rp
+}
+
+func compileTestProto(t *testing.T, src string) *lua.FunctionProto {
+	t.Helper()
+	compiler := lua.NewState()
+	defer compiler.Close()
+	fn, err := compiler.LoadString(src)
+	if err != nil {
+		t.Fatalf("编译测试脚本失败: %v", err)
+	}
+	return fn.Proto
 }
 
 func runScript(t *testing.T, rp *RuntimePool, ctx *Context, name string) error {

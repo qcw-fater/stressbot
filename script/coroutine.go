@@ -60,7 +60,7 @@ type WaitSpec struct {
 	Packet   []byte // WaitResponse：已编码的请求包，由 Waiter 发送
 
 	// WaitIO 专用：
-	IOName string          // 作业名（日志/错误），如 "share.get" / "network.http_request"
+	IOName string            // 作业名（日志/错误），如 "share.get" / "network.http_request"
 	IOJob  func() IORenderer // 后台 goroutine 执行的阻塞 I/O；返回在执行器 goroutine 上产出 Lua 值的 renderer
 }
 
@@ -94,7 +94,9 @@ type coroutine struct {
 	sentinel *lua.LUserData // DONE 哨兵（任务完成 yield 的首值，指针相等判定）
 	ctx      *Context       // 收尾时归还 thread 缓存的目的地（nil = 直接弃用）
 	fn       *lua.LFunction // 入口函数（execute / on_message）
-	initArgs []lua.LValue   // 任务实参（execute(r) → [r]；on_message(r,msg) → [r,msg]）
+	argc     uint8          // 任务实参数量；当前协议仅允许 1 或 2
+	arg1     lua.LValue     // execute/on_message 的第一个实参
+	arg2     lua.LValue     // on_message 的第二个实参；argc=1 时固定为 nil
 	started  bool           // 本任务是否已投递（首次 Resume 已完成）
 	doneOK   bool           // 以 DONE-yield 干净收尾（thread 停在蹦床顶部，可归还）
 	name     string         // 脚本名（日志/错误）
@@ -103,29 +105,42 @@ type coroutine struct {
 // close 按收尾状态处置 thread：干净完成 → 归还缓存复用；
 // 错误/裸 yield/await 中途放弃（栈停在半途）→ 弃用（下次惰性重建）。
 func (co *coroutine) close() {
-	if co == nil || co.tramp == nil {
+	if co == nil {
 		return
 	}
-	if co.doneOK {
-		releaseTrampThread(co.ctx, co.tramp)
-	} else {
-		co.tramp.stop()
+	if co.tramp != nil {
+		if co.doneOK {
+			releaseTrampThread(co.ctx, co.tramp)
+		} else {
+			co.tramp.stop()
+		}
+		co.tramp = nil
 	}
-	co.tramp = nil
+	co.fn = nil
+	co.arg1 = lua.LNil
+	co.arg2 = lua.LNil
 }
 
 // startCoroutine 加载脚本指定入口函数并把任务绑定到一条蹦床 thread（尚未 Resume）。
-// initArgs 为任务实参（execute(r) → [r]；on_message(r,msg) → [r,msg]）。
-func (rp *RuntimePool) startCoroutine(L *lua.LState, scriptName, entry string, initArgs ...lua.LValue) (*coroutine, error) {
+// argc/arg1/arg2 为固定任务实参（execute(r) 为 1 个；on_message(r,msg) 为 2 个）。
+func (rp *RuntimePool) startCoroutine(L *lua.LState, scriptName string, entry scriptEntry, argc uint8, arg1, arg2 lua.LValue) (*coroutine, error) {
+	if argc != 1 && argc != 2 {
+		return nil, fmt.Errorf("脚本 %s 的入口参数数量 %d 不受支持", scriptName, argc)
+	}
 	fnv, err := rp.loadScriptFn(L, scriptName, entry)
 	if err != nil {
 		return nil, err
 	}
 	fn, ok := fnv.(*lua.LFunction)
 	if !ok {
-		return nil, fmt.Errorf("脚本 %s 的 %s 不是函数", scriptName, entry)
+		fnName, _ := entry.globalName()
+		return nil, fmt.Errorf("脚本 %s 的 %s 不是函数", scriptName, fnName)
 	}
 	trampFn, err := rp.trampMainFn(L)
+	if err != nil {
+		return nil, err
+	}
+	sentinel, err := trampSentinel(L)
 	if err != nil {
 		return nil, err
 	}
@@ -134,17 +149,19 @@ func (rp *RuntimePool) startCoroutine(L *lua.LState, scriptName, entry string, i
 		parent:   L,
 		tramp:    acquireTrampThread(L, ctx),
 		trampFn:  trampFn,
-		sentinel: trampSentinel(L),
+		sentinel: sentinel,
 		ctx:      ctx,
 		fn:       fn,
-		initArgs: initArgs,
+		argc:     argc,
+		arg1:     arg1,
+		arg2:     arg2,
 		name:     scriptName,
 	}, nil
 }
 
 // startActionCoroutine 加载脚本 execute 入口（实参为 robot 句柄）并创建协程。
 func (rp *RuntimePool) startActionCoroutine(L *lua.LState, scriptName string) (*coroutine, error) {
-	return rp.startCoroutine(L, scriptName, "execute", createRobotUserData(L))
+	return rp.startCoroutine(L, scriptName, scriptEntryExecute, 1, createRobotUserData(L), lua.LNil)
 }
 
 // resumeResult 描述一次 Resume 的结果。
@@ -210,18 +227,27 @@ func (rp *RuntimePool) resumeCoroutine(co *coroutine, ctx *Context, resumeVals [
 	if !co.started {
 		co.started = true
 		if !co.tramp.booted {
-			// bootstrap：蹦床主函数首次进入，实参 (sentinel, fn, args...)。
+			// bootstrap：蹦床主函数首次进入，实参 (sentinel, fn, argc, arg1, arg2)。
 			co.tramp.booted = true
-			args := make([]lua.LValue, 0, len(co.initArgs)+2)
-			args = append(args, lua.LValue(co.sentinel), lua.LValue(co.fn))
-			args = append(args, co.initArgs...)
-			st, err, vals = co.parent.Resume(co.tramp.thread, co.trampFn, args...)
+			st, err, vals = co.parent.Resume(
+				co.tramp.thread,
+				co.trampFn,
+				co.sentinel,
+				co.fn,
+				lua.LNumber(co.argc),
+				co.arg1,
+				co.arg2,
+			)
 		} else {
-			// handoff：thread 停在蹦床顶部的 yield 处，喂入 (fn, args...) 作为其返回值。
-			args := make([]lua.LValue, 0, len(co.initArgs)+1)
-			args = append(args, lua.LValue(co.fn))
-			args = append(args, co.initArgs...)
-			st, err, vals = co.parent.Resume(co.tramp.thread, nil, args...)
+			// handoff：thread 停在蹦床顶部的 yield 处，喂入 (fn, argc, arg1, arg2)。
+			st, err, vals = co.parent.Resume(
+				co.tramp.thread,
+				nil,
+				co.fn,
+				lua.LNumber(co.argc),
+				co.arg1,
+				co.arg2,
+			)
 		}
 	} else {
 		st, err, vals = co.parent.Resume(co.tramp.thread, nil, resumeVals...)
