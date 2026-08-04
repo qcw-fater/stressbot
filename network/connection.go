@@ -82,6 +82,8 @@ type Connection struct {
 	closeFunc        func() error              // 底层关闭函数（由 Dialer 注入）
 	onDisconnect     func()                    // 意外断开回调（非主动 Close 触发，业务用于停 robot）
 	onClosed         func()                    // 关闭回调（主动/被动均触发，监控用，与 ConnEstablished 配对）
+	disconnectEvent  lifecycleEvent            // 允许事件先于回调注册发生，且全生命周期只交付一次
+	closedEvent      lifecycleEvent            // 主动/被动关闭共享的终态事件
 
 	// connectionPump（每连接一个）替代旧的 decodeLoop + listenLoop + 心跳 goroutine。
 	// 详见 connectionPump godoc。pump goroutine 是 inbound decode / listen 分发 / 心跳
@@ -119,6 +121,11 @@ type inboundFrame struct {
 	Data        []byte
 	WireBytes   int
 	RecvFrameAt time.Time
+}
+
+type lifecycleEvent struct {
+	occurred  bool
+	delivered bool
 }
 
 // listenBinding 一个 routeKey 的监听绑定：回调 + 缓存队列，注册时一次性定型。
@@ -162,14 +169,56 @@ func (c *Connection) ServiceName() string { return c.serviceName }
 func (c *Connection) SetOnDisconnect(fn func()) {
 	c.mu.Lock()
 	c.onDisconnect = fn
+	call := fn != nil && c.disconnectEvent.occurred && !c.disconnectEvent.delivered
+	if call {
+		c.disconnectEvent.delivered = true
+	}
 	c.mu.Unlock()
+	if call {
+		fn()
+	}
 }
 
 // SetOnClosed 设置连接关闭回调（主动/被动均触发，用于监控计数）。
 func (c *Connection) SetOnClosed(fn func()) {
 	c.mu.Lock()
 	c.onClosed = fn
+	call := fn != nil && c.closedEvent.occurred && !c.closedEvent.delivered
+	if call {
+		c.closedEvent.delivered = true
+	}
 	c.mu.Unlock()
+	if call {
+		fn()
+	}
+}
+
+func (c *Connection) publishDisconnected() {
+	c.mu.Lock()
+	c.disconnectEvent.occurred = true
+	fn := c.onDisconnect
+	call := fn != nil && !c.disconnectEvent.delivered
+	if call {
+		c.disconnectEvent.delivered = true
+	}
+	c.mu.Unlock()
+	if call {
+		fn()
+	}
+}
+
+func (c *Connection) publishClosed() {
+	c.mu.Lock()
+	c.closedEvent.occurred = true
+	fn := c.onClosed
+	call := fn != nil && !c.closedEvent.delivered
+	if call {
+		c.closedEvent.delivered = true
+	}
+	c.mu.Unlock()
+	if call {
+		fn()
+	}
 }
 
 // SetSecretKey 设置通信加密密钥。
@@ -227,6 +276,7 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 	n, sendErr := c.sendTimed(sendData, stamp.mark)
 	stamp.enqueuedAt = time.Now()
 	timing.SendCost = safeSub(stamp.enqueuedAt, sendStart)
+	timing.Observed |= engine.TimingStageSend
 	if sendErr != nil {
 		stresslog.Error("[NETWORK] RequestResponse 发送失败",
 			zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
@@ -253,9 +303,16 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 		case resp := <-ch:
 			actionUnblocked := time.Now()
 			timing.WireRTT = safeSub(resp.Timing.RecvFrameAt, stamp.start())
+			timing.Observed |= engine.TimingStageRTT
 			timing.DecodeWait = safeSub(resp.Timing.DecodeStart, resp.Timing.RecvFrameAt)
 			timing.DecodeCost = safeSub(resp.Timing.DecodeEnd, resp.Timing.DecodeStart)
+			if monitor.TimingDetailAtLeast(c.timingDetail, monitor.TimingCodecDetail) {
+				timing.Observed |= engine.TimingStageDecodeWait | engine.TimingStageDecode
+			}
 			timing.DispatchToActionWait = safeSub(actionUnblocked, resp.Timing.DispatchStart)
+			if monitor.TimingDetailAtLeast(c.timingDetail, monitor.TimingFullDetail) {
+				timing.Observed |= engine.TimingStageDispatchWait
+			}
 			return resp, timing, nil
 		default:
 		}
@@ -282,9 +339,16 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 	case resp := <-ch:
 		actionUnblocked := time.Now()
 		timing.WireRTT = safeSub(resp.Timing.RecvFrameAt, stamp.start())
+		timing.Observed |= engine.TimingStageRTT
 		timing.DecodeWait = safeSub(resp.Timing.DecodeStart, resp.Timing.RecvFrameAt)
 		timing.DecodeCost = safeSub(resp.Timing.DecodeEnd, resp.Timing.DecodeStart)
+		if monitor.TimingDetailAtLeast(c.timingDetail, monitor.TimingCodecDetail) {
+			timing.Observed |= engine.TimingStageDecodeWait | engine.TimingStageDecode
+		}
 		timing.DispatchToActionWait = safeSub(actionUnblocked, resp.Timing.DispatchStart)
+		if monitor.TimingDetailAtLeast(c.timingDetail, monitor.TimingFullDetail) {
+			timing.Observed |= engine.TimingStageDispatchWait
+		}
 		if stresslog.DebugEnabled() {
 			stresslog.Debug("[NETWORK] RequestResponse 收到响应",
 				zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
@@ -375,14 +439,22 @@ func (pr *PendingRequest) Timing(resp *Message) RequestTiming {
 		return t
 	}
 	t.SendCost = pr.sendCost
+	t.Observed |= engine.TimingStageSend
 	if resp == nil {
 		return t
 	}
 	actionUnblocked := time.Now()
 	t.WireRTT = safeSub(resp.Timing.RecvFrameAt, pr.stamp.start())
+	t.Observed |= engine.TimingStageRTT
 	t.DecodeWait = safeSub(resp.Timing.DecodeStart, resp.Timing.RecvFrameAt)
 	t.DecodeCost = safeSub(resp.Timing.DecodeEnd, resp.Timing.DecodeStart)
+	if monitor.TimingDetailAtLeast(pr.conn.timingDetail, monitor.TimingCodecDetail) {
+		t.Observed |= engine.TimingStageDecodeWait | engine.TimingStageDecode
+	}
 	t.DispatchToActionWait = safeSub(actionUnblocked, resp.Timing.DispatchStart)
+	if monitor.TimingDetailAtLeast(pr.conn.timingDetail, monitor.TimingFullDetail) {
+		t.Observed |= engine.TimingStageDispatchWait
+	}
 	return t
 }
 
@@ -1030,20 +1102,12 @@ func (c *Connection) onClose(reason string) {
 	}
 	c.doClose()
 
-	// 在 mu 下读取回调函数指针，避免与 SetOnDisconnect/SetOnClosed 的数据竞争
-	c.mu.Lock()
-	disconnectFn := c.onDisconnect
-	closedFn := c.onClosed
-	c.mu.Unlock()
-
 	// 业务"意外断开"回调：仅非主动关闭时触发（用于 robot 主连接断开 → 停 robot）
-	if atomic.LoadInt32(&c.intentionalClose) == 0 && disconnectFn != nil {
-		disconnectFn()
+	if atomic.LoadInt32(&c.intentionalClose) == 0 {
+		c.publishDisconnected()
 	}
 	// 监控"关闭"回调：主动/被动均触发；与 ConnEstablished 配对，保证 active = open - close 准确
-	if closedFn != nil {
-		closedFn()
-	}
+	c.publishClosed()
 
 	stresslog.Debug("[NETWORK] 连接资源已清理", zap.String("service", c.serviceName), zap.String("robot", c.robotName))
 }
@@ -1058,13 +1122,8 @@ func (c *Connection) Close() {
 		_ = c.closeFunc()
 	}
 	c.doClose()
-	// CAS 保证 onClosed 只触发一次
-	c.mu.Lock()
-	closedFn := c.onClosed
-	c.mu.Unlock()
-	if closedFn != nil {
-		closedFn()
-	}
+	// CAS 保证关闭事件只发布一次；事件状态允许回调稍后注册时补交付。
+	c.publishClosed()
 	stresslog.Debug("[NETWORK] 连接资源已清理", zap.String("service", c.serviceName), zap.String("robot", c.robotName))
 }
 

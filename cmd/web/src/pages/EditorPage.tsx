@@ -319,7 +319,7 @@ function HomeShellInner() {
     onSuccess: (agg) => {
       reportConnectionHealth('boot', false);
       pushStress(agg.snapshot);
-      setAgentHealth(agg.reportingAgents, agg.totalAgents, agg.offlineAgents, agg.assignedAgents);
+      setAgentHealth(agg.freshAgents, agg.totalAgents, agg.offlineAgents, agg.assignedAgents);
     },
     onConnectionLost: () => reportConnectionHealth('stress', true),
     onConnectionRestored: () => reportConnectionHealth('stress', false),

@@ -216,6 +216,7 @@ func (c *Context) recordClientTiming(timing engine.ClientTiming) {
 	c.currentTiming.Client.DecodeCost += timing.DecodeCost
 	c.currentTiming.Client.DispatchWait += timing.DispatchWait
 	c.currentTiming.Client.ParseStoreCost += timing.ParseStoreCost
+	c.currentTiming.Client.Observed |= timing.Observed
 	c.metricsMu.Unlock()
 }
 

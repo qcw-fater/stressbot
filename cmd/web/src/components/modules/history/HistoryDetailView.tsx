@@ -1,12 +1,27 @@
 import { App, Button, Empty, Input, Spin, Table, Tag, Timeline, Tooltip } from 'antd';
-import { BugOutlined, CheckCircleOutlined, CopyOutlined, DownloadOutlined, FileTextOutlined, StarFilled, StarOutlined } from '@ant-design/icons';
+import {
+  BugOutlined,
+  CheckCircleOutlined,
+  CopyOutlined,
+  DownloadOutlined,
+  FileTextOutlined,
+  StarFilled,
+  StarOutlined,
+} from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { EChartsReact } from '@/components/monitoring/shared/EChartsReact';
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { EChartsOption } from 'echarts';
 import { historyApi, showApiError } from '@/services';
-import type { CleanupStatus, HistoryActionMetric, HistoryAgentReport, HistoryConfigSummary, HistoryDetail, HistoryTrendPoint } from '@/types/api';
+import type {
+  CleanupStatus,
+  HistoryActionMetric,
+  HistoryAgentReport,
+  HistoryConfigSummary,
+  HistoryDetail,
+  HistoryTrendPoint,
+} from '@/types/api';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
 import { useFloatingWindowStore } from '@/components/FlowEditor/store/floatingWindowStore';
 import { ActionMetricsTable, resolveKind } from '@/components/monitoring/shared/ActionMetricsTable';
@@ -63,11 +78,20 @@ interface DerivedSummary {
   busiestAction?: HistoryActionMetric;
 }
 
-export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: HistoryDetailViewProps) {
+export function HistoryDetailView({
+  id,
+  stageIndex,
+  stageLabel,
+  onChange,
+}: HistoryDetailViewProps) {
   const { message } = App.useApp();
   const isStageView = (stageIndex ?? -1) > 0;
   const [detail, setDetail] = useState<HistoryDetail | null>(null);
-  const [timeseries, setTimeseries] = useState<{ points: HistoryTrendPoint[]; sampled: boolean; originalCount: number } | null>(null);
+  const [timeseries, setTimeseries] = useState<{
+    points: HistoryTrendPoint[];
+    sampled: boolean;
+    originalCount: number;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState('');
   const [tags, setTags] = useState<string[]>([]);
@@ -86,7 +110,11 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
     ])
       .then(([d, t]) => {
         setDetail(d);
-        setTimeseries({ points: t?.points ?? [], sampled: t?.sampled ?? false, originalCount: t?.originalCount ?? 0 });
+        setTimeseries({
+          points: t?.points ?? [],
+          sampled: t?.sampled ?? false,
+          originalCount: t?.originalCount ?? 0,
+        });
         setNote(d.note ?? '');
         setTags(d.tags ?? []);
         setTagInput('');
@@ -100,12 +128,19 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
   useEffect(() => {
     setConfigInfo(null);
     setStagesExpanded(false);
-    historyApi.getHistoryConfig(id).then(setConfigInfo).catch(() => {});
+    historyApi
+      .getHistoryConfig(id)
+      .then(setConfigInfo)
+      .catch(() => {});
   }, [id]);
 
   const persistMeta = async (nextNote: string, nextTags: string[]) => {
     try {
-      const updated = await historyApi.updateHistory(id, { note: nextNote, tags: nextTags }, stageIndex);
+      const updated = await historyApi.updateHistory(
+        id,
+        { note: nextNote, tags: nextTags },
+        stageIndex,
+      );
       setDetail(updated);
       setNote(updated.note ?? '');
       setTags(updated.tags ?? []);
@@ -169,12 +204,13 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
   const theme = useEditorStore((s) => s.theme);
   const popupZ = useFloatingWindowStore((s) => s._nextZ) + 100;
   const stageMarks = useMemo(
-    () => computeStageLines(
-      timeseries?.points ?? [],
-      configInfo?.robotConfig?.rampUp ?? null,
-      isStageView,
-      { from: detail?.stageFrom, to: detail?.stageTo },
-    ),
+    () =>
+      computeStageLines(
+        timeseries?.points ?? [],
+        configInfo?.robotConfig?.rampUp ?? null,
+        isStageView,
+        { from: detail?.stageFrom, to: detail?.stageTo },
+      ),
     [timeseries, configInfo, isStageView, detail?.stageFrom, detail?.stageTo],
   );
   const chartOptions = useMemo(
@@ -189,8 +225,18 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
   const finalSys = detail.finalSystem;
   const finalActions = finalSnap.actions;
   const finalConnections = finalSnap.connections;
-  const finalRobots = finalSnap.robots || { started: detail.totalBots, running: 0, stopped: 0, errored: 0 };
-  const finalBandwidth = finalSnap.bandwidth || { totalSendBytes: 0, totalRecvBytes: 0, sendMBps: 0, recvMBps: 0 };
+  const finalRobots = finalSnap.robots || {
+    started: detail.totalBots,
+    running: 0,
+    stopped: 0,
+    errored: 0,
+  };
+  const finalBandwidth = finalSnap.bandwidth || {
+    totalSendBytes: 0,
+    totalRecvBytes: 0,
+    sendMBps: 0,
+    recvMBps: 0,
+  };
   const cs = detail.configSummary;
   const failed = detail.state === 'failed';
   const summary = deriveSummary(detail, timeseries?.points ?? []);
@@ -204,7 +250,9 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
       <section className={`hp-report-hero hp-glass${failed ? ' hp-report-hero--failed' : ''}`}>
         <div className="hp-report-hero__main">
           <div className="hp-report-hero__eyebrow">
-            <span className={`hp-report-state hp-report-state--${failed ? 'bad' : 'good'}`}>{failed ? '失败' : '完成'}</span>
+            <span className={`hp-report-state hp-report-state--${failed ? 'bad' : 'good'}`}>
+              {failed ? '失败' : '完成'}
+            </span>
             <Tag
               className={`hp-report-mode-badge hp-report-mode-badge--${detail.debugMode ? 'debug' : 'test'}`}
               icon={detail.debugMode ? <BugOutlined /> : <CheckCircleOutlined />}
@@ -217,30 +265,65 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
                 {formatStageLabel(stageLabel || detail.stageLabel, stageIndex)}
               </Tag>
             )}
-            <span>{detail.startedAt ? dayjs(detail.startedAt).format('YYYY-MM-DD HH:mm') : '未记录开始时间'}</span>
+            <span>
+              {detail.startedAt
+                ? dayjs(detail.startedAt).format('YYYY-MM-DD HH:mm')
+                : '未记录开始时间'}
+            </span>
             <span>耗时 {formatDuration(detail.durationSec)}</span>
           </div>
           <div className="hp-report-hero__title">{detail.name}</div>
           <div className="hp-report-hero__summary">
-            总动作 {finalSnap.totalActions.toLocaleString()} · 成功率 {fmtPercent(summary.successRate)} · QPS {summary.avgQps.toFixed(1)} · 失败 {summary.totalErrors.toLocaleString()} · CPU {finalSys.avgCpuPercent.toFixed(1)}% / {summary.peakCpu.toFixed(1)}%
+            总动作 {finalSnap.totalActions.toLocaleString()} · 成功率{' '}
+            {fmtPercent(summary.successRate)} · QPS {summary.avgQps.toFixed(1)} · 失败{' '}
+            {summary.totalErrors.toLocaleString()} · CPU {finalSys.avgCpuPercent.toFixed(1)}% /{' '}
+            {summary.peakCpu.toFixed(1)}%
           </div>
         </div>
         <div className="hp-report-hero__actions">
-          <Tooltip title={detail.starred ? (isStageView ? '取消收藏本段' : '取消收藏') : (isStageView ? '收藏本段' : '收藏')}>
+          <Tooltip
+            title={
+              detail.starred
+                ? isStageView
+                  ? '取消收藏本段'
+                  : '取消收藏'
+                : isStageView
+                  ? '收藏本段'
+                  : '收藏'
+            }
+          >
             <Button
               size="small"
-              icon={detail.starred ? <StarFilled style={{ color: 'var(--color-warning)' }} /> : <StarOutlined />}
+              icon={
+                detail.starred ? (
+                  <StarFilled style={{ color: 'var(--color-warning)' }} />
+                ) : (
+                  <StarOutlined />
+                )
+              }
               onClick={toggleStar}
             />
           </Tooltip>
           <Tooltip title="生成压测报告（在新标签页打开，可保存为 PDF）">
-            <Button size="small" type="primary" ghost icon={<FileTextOutlined />} onClick={generateReport}>报告</Button>
+            <Button
+              size="small"
+              type="primary"
+              ghost
+              icon={<FileTextOutlined />}
+              onClick={generateReport}
+            >
+              报告
+            </Button>
           </Tooltip>
           <Tooltip title="下载完整任务配置归档 JSON（含全部阶段）">
-            <Button size="small" icon={<DownloadOutlined />} onClick={downloadConfig}>下载</Button>
+            <Button size="small" icon={<DownloadOutlined />} onClick={downloadConfig}>
+              下载
+            </Button>
           </Tooltip>
           <Tooltip title="将完整任务配置（含全部阶段）克隆为新任务">
-            <Button size="small" icon={<CopyOutlined />} onClick={cloneTask}>克隆</Button>
+            <Button size="small" icon={<CopyOutlined />} onClick={cloneTask}>
+              克隆
+            </Button>
           </Tooltip>
         </div>
         {detail.errorMsg && (
@@ -251,18 +334,66 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
       </section>
 
       <section className="hp-report-kpis">
-        <MetricTile label="累计动作" value={finalSnap.totalActions.toLocaleString()} sub={`${finalActions.length} 类动作`} tone="blue" />
-        <MetricTile label="整体成功率" value={fmtPercent(summary.successRate)} sub={`${summary.totalSuccess.toLocaleString()} 成功 / ${summary.totalSamples.toLocaleString()} 样本`} tone={summary.successRate >= 0.95 ? 'good' : summary.successRate >= 0.8 ? 'warn' : 'bad'} />
-        <MetricTile label="RTT Apdex" value={fmtScore(summary.rttApdex)} sub={`阈值 T=${finalSnap.apdexT}ms`} tone={(summary.rttApdex ?? 0) >= 0.9 ? 'good' : (summary.rttApdex ?? 0) >= 0.75 ? 'warn' : 'bad'} />
-        <MetricTile label="峰值 QPS" value={summary.peakQps.toFixed(1)} sub={`全程均值 ${summary.avgQps.toFixed(1)}`} tone="purple" />
-        <MetricTile label="机器人" value={`${finalRobots.running}/${finalRobots.started}`} sub={`异常 ${Math.max(finalRobots.errored, summary.peakBotsErrored)}`} tone={Math.max(finalRobots.errored, summary.peakBotsErrored) > 0 ? 'bad' : 'good'} />
-        <MetricTile label="连接" value={finalConnections.established.toLocaleString()} sub={`失败 ${finalConnections.failed} / 断开 ${finalConnections.dropped}`} tone={finalConnections.failed + finalConnections.dropped > 0 ? 'warn' : 'good'} />
-        <MetricTile label="CPU" value={`均值 ${finalSys.avgCpuPercent.toFixed(1)}%`} sub={`最高节点 ${summary.peakCpu.toFixed(1)}%`} tone={summary.peakCpu >= 80 ? 'bad' : summary.peakCpu >= 60 ? 'warn' : 'blue'} />
-        <MetricTile label="MEM" value={`集群 ${summary.peakAvgMem.toFixed(1)}%`} sub={`最高节点 ${summary.peakMaxMem.toFixed(1)}%`} tone={summary.peakMaxMem >= 85 ? 'bad' : summary.peakMaxMem >= 70 ? 'warn' : 'blue'} />
+        <MetricTile
+          label="累计动作"
+          value={finalSnap.totalActions.toLocaleString()}
+          sub={`${finalActions.length} 类动作`}
+          tone="blue"
+        />
+        <MetricTile
+          label="整体成功率"
+          value={fmtPercent(summary.successRate)}
+          sub={`${summary.totalSuccess.toLocaleString()} 成功 / ${summary.totalSamples.toLocaleString()} 样本`}
+          tone={summary.successRate >= 0.95 ? 'good' : summary.successRate >= 0.8 ? 'warn' : 'bad'}
+        />
+        <MetricTile
+          label="RTT Apdex"
+          value={fmtScore(summary.rttApdex)}
+          sub={`阈值 T=${finalSnap.apdexT}ms`}
+          tone={
+            (summary.rttApdex ?? 0) >= 0.9
+              ? 'good'
+              : (summary.rttApdex ?? 0) >= 0.75
+                ? 'warn'
+                : 'bad'
+          }
+        />
+        <MetricTile
+          label="峰值 QPS"
+          value={summary.peakQps.toFixed(1)}
+          sub={`全程均值 ${summary.avgQps.toFixed(1)}`}
+          tone="purple"
+        />
+        <MetricTile
+          label="机器人"
+          value={`${finalRobots.running}/${finalRobots.started}`}
+          sub={`异常 ${Math.max(finalRobots.errored, summary.peakBotsErrored)}`}
+          tone={Math.max(finalRobots.errored, summary.peakBotsErrored) > 0 ? 'bad' : 'good'}
+        />
+        <MetricTile
+          label="连接"
+          value={finalConnections.established.toLocaleString()}
+          sub={`失败 ${finalConnections.failed} / 断开 ${finalConnections.dropped}`}
+          tone={finalConnections.failed + finalConnections.dropped > 0 ? 'warn' : 'good'}
+        />
+        <MetricTile
+          label="CPU"
+          value={`均值 ${finalSys.avgCpuPercent.toFixed(1)}%`}
+          sub={`最高节点 ${summary.peakCpu.toFixed(1)}%`}
+          tone={summary.peakCpu >= 80 ? 'bad' : summary.peakCpu >= 60 ? 'warn' : 'blue'}
+        />
+        <MetricTile
+          label="MEM"
+          value={`集群 ${summary.peakAvgMem.toFixed(1)}%`}
+          sub={`最高节点 ${summary.peakMaxMem.toFixed(1)}%`}
+          tone={summary.peakMaxMem >= 85 ? 'bad' : summary.peakMaxMem >= 70 ? 'warn' : 'blue'}
+        />
       </section>
 
       {timeseries?.sampled && (
-        <div className="hp-sampled-note">趋势图已降采样展示：{timeseries.points.length} / {timeseries.originalCount} 个采样点</div>
+        <div className="hp-sampled-note">
+          趋势图已降采样展示：{timeseries.points.length} / {timeseries.originalCount} 个采样点
+        </div>
       )}
 
       <ReportSection title="负载与性能趋势" subtitle="从历史采样中复盘压测过程、阶段推进与延迟变化">
@@ -274,17 +405,40 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
             option={chartOptions.loadOption}
             value={`峰值 ${summary.peakBotsRunning.toLocaleString()} · ${summary.offlinePoints > 0 ? `${summary.offlinePoints} 个采样节点异常` : '节点全程在线'}`}
           />
-          <TrendCard title="QPS" option={chartOptions.qpsOption} value={`峰值 ${summary.peakQps.toFixed(1)}`} />
-          <TrendCard title="RTT Apdex" option={chartOptions.apdexOption} value={fmtScore(summary.rttApdex)} />
+          <TrendCard
+            title="QPS"
+            option={chartOptions.qpsOption}
+            value={`峰值 ${summary.peakQps.toFixed(1)}`}
+          />
+          <TrendCard
+            title="RTT Apdex"
+            option={chartOptions.apdexOption}
+            value={fmtScore(summary.rttApdex)}
+          />
           <TrendCard title="监听等待" option={chartOptions.listenWaitOption} value="P99" />
           <TrendCard title="客户端成本" option={chartOptions.costOption} value="编码 / 解码" />
-          <TrendCard title="CPU" option={chartOptions.cpuOption} value={`最高节点 ${summary.peakCpu.toFixed(1)}%`} />
-          <TrendCard title="MEM" option={chartOptions.memOption} value={`最高节点 ${summary.peakMaxMem.toFixed(1)}%`} />
-          <TrendCard title="带宽" option={chartOptions.bandwidthOption} value={`${fmtKBpsPeak(timeseries?.points ?? [], 'sendKBps')} 峰值`} />
+          <TrendCard
+            title="CPU"
+            option={chartOptions.cpuOption}
+            value={`最高节点 ${summary.peakCpu.toFixed(1)}%`}
+          />
+          <TrendCard
+            title="MEM"
+            option={chartOptions.memOption}
+            value={`最高节点 ${summary.peakMaxMem.toFixed(1)}%`}
+          />
+          <TrendCard
+            title="带宽"
+            option={chartOptions.bandwidthOption}
+            value={`${fmtKBpsPeak(timeseries?.points ?? [], 'sendKBps')} 峰值`}
+          />
         </div>
       </ReportSection>
 
-      <ReportSection title="动作分析" subtitle="最终动作快照聚合，表格支持主指标/总耗时切换与高级诊断">
+      <ReportSection
+        title="动作分析"
+        subtitle="最终动作快照聚合，表格支持主指标/总耗时切换与耗时拆分"
+      >
         {actionInsights.length > 0 && (
           <div className="hp-insight-strip">
             {actionInsights.map((item) => (
@@ -308,14 +462,21 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
             popupZIndex={popupZ}
             showClientBreakdown
             showCsvExport
+            timingDetail={finalSnap.timingDetail}
           />
         )}
       </ReportSection>
 
-      <ReportSection title="错误与稳定性" subtitle="从错误分布、连接、节点事件与清理结果中提取风险信号">
+      <ReportSection
+        title="错误与稳定性"
+        subtitle="从错误分布、连接、节点事件与清理结果中提取风险信号"
+      >
         <div className="hp-finding-list">
           {diagnostics.map((item) => (
-            <div key={`${item.label}:${item.value}`} className={`hp-finding-item hp-finding-item--${item.tone}`}>
+            <div
+              key={`${item.label}:${item.value}`}
+              className={`hp-finding-item hp-finding-item--${item.tone}`}
+            >
               <span className="hp-finding-item__label">{item.label}</span>
               <span className="hp-finding-item__value">{item.value}</span>
             </div>
@@ -323,24 +484,55 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
         </div>
       </ReportSection>
 
-      <ReportSection title="节点健康" subtitle={`${agentReports.length} 个节点结果，${agentEvents.length} 条节点事件`}>
+      <ReportSection
+        title="节点健康"
+        subtitle={`${agentReports.length} 个节点结果，${agentEvents.length} 条节点事件`}
+      >
         <div className="hp-health-grid">
-          <MetricTile label="节点完成" value={`${agentReports.filter((r) => r.result === 'completed').length}/${agentReports.length}`} sub={`失败 ${summary.failedAgents}`} tone={summary.failedAgents > 0 ? 'bad' : 'good'} />
-          <MetricTile label="清理异常" value={`${summary.cleanupIssueCount}`} sub="资源回收状态" tone={summary.cleanupIssueCount > 0 ? 'warn' : 'good'} />
-          <MetricTile label="离线事件" value={`${agentEvents.filter((e) => e.type === 'offline').length}`} sub="运行期间节点变化" tone={agentEvents.some((e) => e.type === 'offline') ? 'bad' : 'good'} />
+          <MetricTile
+            label="节点完成"
+            value={`${agentReports.filter((r) => r.result === 'completed').length}/${agentReports.length}`}
+            sub={`失败 ${summary.failedAgents}`}
+            tone={summary.failedAgents > 0 ? 'bad' : 'good'}
+          />
+          <MetricTile
+            label="清理异常"
+            value={`${summary.cleanupIssueCount}`}
+            sub="资源回收状态"
+            tone={summary.cleanupIssueCount > 0 ? 'warn' : 'good'}
+          />
+          <MetricTile
+            label="离线事件"
+            value={`${agentEvents.filter((e) => e.type === 'offline').length}`}
+            sub="运行期间节点变化"
+            tone={agentEvents.some((e) => e.type === 'offline') ? 'bad' : 'good'}
+          />
         </div>
         {agentEvents.length > 0 && (
           <Timeline
             className="hp-agent-timeline"
             items={agentEvents.map((evt, i) => ({
               key: i,
-              color: evt.type === 'offline' || evt.type === 'restarted' ? 'red' : evt.type === 'reconnected' ? 'green' : 'gray',
+              color:
+                evt.type === 'offline' || evt.type === 'restarted'
+                  ? 'red'
+                  : evt.type === 'reconnected'
+                    ? 'green'
+                    : 'gray',
               children: (
                 <span style={{ fontSize: 12 }}>
-                  <Tag color={eventColor(evt.type)} style={{ marginInlineEnd: 4 }}>{eventLabel(evt.type)}</Tag>
+                  <Tag color={eventColor(evt.type)} style={{ marginInlineEnd: 4 }}>
+                    {eventLabel(evt.type)}
+                  </Tag>
                   <strong>{evt.agentName || evt.agentId}</strong>
-                  <span style={{ color: 'var(--text-tertiary)', marginLeft: 8 }}>{dayjs(evt.timestamp).format('HH:mm:ss')}</span>
-                  {evt.detail && <span style={{ color: 'var(--text-tertiary)', marginLeft: 8 }}>({evt.detail})</span>}
+                  <span style={{ color: 'var(--text-tertiary)', marginLeft: 8 }}>
+                    {dayjs(evt.timestamp).format('HH:mm:ss')}
+                  </span>
+                  {evt.detail && (
+                    <span style={{ color: 'var(--text-tertiary)', marginLeft: 8 }}>
+                      ({evt.detail})
+                    </span>
+                  )}
                 </span>
               ),
             }))}
@@ -353,19 +545,47 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
             dataSource={agentReports.map((r, i) => ({ ...r, key: i }))}
             pagination={false}
             columns={[
-              { title: '节点', dataIndex: 'agentName', key: 'agentName', width: 180, render: (v: string, r) => v || r.agentId },
               {
-                title: '结果', dataIndex: 'result', key: 'result', width: 100,
+                title: '节点',
+                dataIndex: 'agentName',
+                key: 'agentName',
+                width: 180,
+                render: (v: string, r) => v || r.agentId,
+              },
+              {
+                title: '结果',
+                dataIndex: 'result',
+                key: 'result',
+                width: 100,
                 render: (v: string) => <Tag color={resultColor(v)}>{resultLabel(v)}</Tag>,
               },
-              { title: '完成时间', dataIndex: 'finishedAt', key: 'finishedAt', width: 140, render: (v: string) => v ? dayjs(v).format('HH:mm:ss') : '—' },
               {
-                title: '清理状态', dataIndex: 'cleanupStatus', key: 'cleanupStatus', width: 130,
+                title: '完成时间',
+                dataIndex: 'finishedAt',
+                key: 'finishedAt',
+                width: 140,
+                render: (v: string) => (v ? dayjs(v).format('HH:mm:ss') : '—'),
+              },
+              {
+                title: '清理状态',
+                dataIndex: 'cleanupStatus',
+                key: 'cleanupStatus',
+                width: 130,
                 render: (cleanup: CleanupStatus | undefined) => renderCleanup(cleanup),
               },
               {
-                title: '错误信息', dataIndex: 'errorMsg', key: 'errorMsg', ellipsis: true,
-                render: (v: string) => v ? <Tooltip title={v}><span style={{ color: 'var(--color-error)' }}>{v}</span></Tooltip> : '—',
+                title: '错误信息',
+                dataIndex: 'errorMsg',
+                key: 'errorMsg',
+                ellipsis: true,
+                render: (v: string) =>
+                  v ? (
+                    <Tooltip title={v}>
+                      <span style={{ color: 'var(--color-error)' }}>{v}</span>
+                    </Tooltip>
+                  ) : (
+                    '—'
+                  ),
               },
             ]}
           />
@@ -445,7 +665,9 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
             onChange={(e) => setNote(e.target.value)}
             style={{ marginTop: 10 }}
           />
-          <Button type="primary" size="small" onClick={saveMeta} style={{ marginTop: 8 }}>保存</Button>
+          <Button type="primary" size="small" onClick={saveMeta} style={{ marginTop: 8 }}>
+            保存
+          </Button>
         </section>
 
         <section className="hp-glass hp-glass-thin hp-info-card hp-report-section">
@@ -462,42 +684,74 @@ export function HistoryDetailView({ id, stageIndex, stageLabel, onChange }: Hist
             <Fact label="流程" value={`${cs.flowSizeKB}KB`} />
             <Fact label="Proto" value={`${cs.protoCount} 个`} />
             <Fact label="Lua 脚本" value={`${cs.scriptCount} 个`} />
-            <Fact label="阶段" value={detail.stageCount && detail.stageCount > 0 ? `${detail.stageCount} 阶段` : '无'} />
-            <Fact label="带宽" value={`${fmtBytes(finalBandwidth.totalSendBytes)} / ${fmtBytes(finalBandwidth.totalRecvBytes)}`} />
-            <Fact label="开始" value={detail.startedAt ? dayjs(detail.startedAt).format('MM-DD HH:mm') : '—'} />
-            <Fact label="结束" value={detail.stoppedAt ? dayjs(detail.stoppedAt).format('MM-DD HH:mm') : '—'} />
+            <Fact
+              label="阶段"
+              value={
+                detail.stageCount && detail.stageCount > 0 ? `${detail.stageCount} 阶段` : '无'
+              }
+            />
+            <Fact
+              label="带宽"
+              value={`${fmtBytes(finalBandwidth.totalSendBytes)} / ${fmtBytes(finalBandwidth.totalRecvBytes)}`}
+            />
+            <Fact
+              label="开始"
+              value={detail.startedAt ? dayjs(detail.startedAt).format('MM-DD HH:mm') : '—'}
+            />
+            <Fact
+              label="结束"
+              value={detail.stoppedAt ? dayjs(detail.stoppedAt).format('MM-DD HH:mm') : '—'}
+            />
           </div>
 
-          {configInfo?.robotConfig?.rampUp && (() => {
-            const stages = configInfo.robotConfig.rampUp.stages;
-            const total = stages.reduce((s, st) => s + (st.count || 0), 0);
-            return (
-              <div className="hp-rampup-section">
-                <div className="hp-rampup-header" onClick={() => setStagesExpanded(!stagesExpanded)}>
-                  <span className="hp-section-title" style={{ marginBottom: 0 }}>
-                    渐进式加压 · {stages.length} 阶段 · 总计 {total} 机器人
-                  </span>
-                  <span className={`hp-rampup-chevron${stagesExpanded ? ' expanded' : ''}`}>▸</span>
-                </div>
-                {stagesExpanded && (
-                  <div className="hp-rampup-timeline">
-                    {stages.map((stage, i) => (
-                      <div key={i} className="hp-rampup-stage">
-                        <div className="hp-rampup-dot">{i + 1}</div>
-                        {i < stages.length - 1 && <div className="hp-rampup-line" />}
-                        <div className="hp-rampup-stage-info">
-                          <span className="hp-rampup-count">增量 {stage.count} 机器人</span>
-                          {stage.concurrency ? <span>并发 {stage.concurrency}</span> : null}
-                          {stage.holdSec ? <span>保持 {stage.holdSec}s</span> : null}
-                          {stage.reset && <Tag color="warning" style={{ marginInlineEnd: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>重置</Tag>}
-                        </div>
-                      </div>
-                    ))}
+          {configInfo?.robotConfig?.rampUp &&
+            (() => {
+              const stages = configInfo.robotConfig.rampUp.stages;
+              const total = stages.reduce((s, st) => s + (st.count || 0), 0);
+              return (
+                <div className="hp-rampup-section">
+                  <div
+                    className="hp-rampup-header"
+                    onClick={() => setStagesExpanded(!stagesExpanded)}
+                  >
+                    <span className="hp-section-title" style={{ marginBottom: 0 }}>
+                      渐进式加压 · {stages.length} 阶段 · 总计 {total} 机器人
+                    </span>
+                    <span className={`hp-rampup-chevron${stagesExpanded ? ' expanded' : ''}`}>
+                      ▸
+                    </span>
                   </div>
-                )}
-              </div>
-            );
-          })()}
+                  {stagesExpanded && (
+                    <div className="hp-rampup-timeline">
+                      {stages.map((stage, i) => (
+                        <div key={i} className="hp-rampup-stage">
+                          <div className="hp-rampup-dot">{i + 1}</div>
+                          {i < stages.length - 1 && <div className="hp-rampup-line" />}
+                          <div className="hp-rampup-stage-info">
+                            <span className="hp-rampup-count">增量 {stage.count} 机器人</span>
+                            {stage.concurrency ? <span>并发 {stage.concurrency}</span> : null}
+                            {stage.holdSec ? <span>保持 {stage.holdSec}s</span> : null}
+                            {stage.reset && (
+                              <Tag
+                                color="warning"
+                                style={{
+                                  marginInlineEnd: 0,
+                                  fontSize: 10,
+                                  lineHeight: '16px',
+                                  padding: '0 4px',
+                                }}
+                              >
+                                重置
+                              </Tag>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
         </section>
       </div>
     </div>
@@ -514,7 +768,15 @@ function MetricTile({ label, value, sub, tone = 'blue' }: MetricTileProps) {
   );
 }
 
-function ReportSection({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {
+function ReportSection({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
+}) {
   return (
     <section className="hp-glass hp-glass-thin hp-report-section">
       <div className="hp-report-section__header">
@@ -528,14 +790,26 @@ function ReportSection({ title, subtitle, children }: { title: string; subtitle?
   );
 }
 
-function TrendCard({ title, option, value }: { title: string; option: EChartsOption | null; value?: string }) {
+function TrendCard({
+  title,
+  option,
+  value,
+}: {
+  title: string;
+  option: EChartsOption | null;
+  value?: string;
+}) {
   return (
     <div className="hp-chart-card">
       <div className="hp-chart-card__header">
         <span>{title}</span>
         {value && <code>{value}</code>}
       </div>
-      {option ? <EChartsReact option={option} style={{ height: 170 }} notMerge lazyUpdate /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无数据" />}
+      {option ? (
+        <EChartsReact option={option} style={{ height: 170 }} notMerge lazyUpdate />
+      ) : (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无数据" />
+      )}
     </div>
   );
 }
@@ -630,7 +904,11 @@ function computeStageLines(
   return [];
 }
 
-function buildChartOptions(points: HistoryTrendPoint[], theme: string, stageMarks: StageMark[] = []) {
+function buildChartOptions(
+  points: HistoryTrendPoint[],
+  theme: string,
+  stageMarks: StageMark[] = [],
+) {
   const hasPoints = points.length > 0;
   const x = points.map((p) => `${p.elapsedSec}s`);
   const isDark = theme === 'dark';
@@ -642,7 +920,12 @@ function buildChartOptions(points: HistoryTrendPoint[], theme: string, stageMark
   const tipBg = isDark ? 'rgba(20,20,28,0.92)' : 'rgba(255,255,255,0.96)';
   const tipBorder = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.09)';
   const tipText = isDark ? '#e0e0e0' : '#333';
-  const tooltip = { trigger: 'axis' as const, backgroundColor: tipBg, borderColor: tipBorder, textStyle: { color: tipText, fontSize: 11 } };
+  const tooltip = {
+    trigger: 'axis' as const,
+    backgroundColor: tipBg,
+    borderColor: tipBorder,
+    textStyle: { color: tipText, fontSize: 11 },
+  };
   const palette = {
     blue: css('--chart-blue', '#1677ff'),
     cyan: css('--chart-cyan', '#13c2c2'),
@@ -660,16 +943,39 @@ function buildChartOptions(points: HistoryTrendPoint[], theme: string, stageMark
         data: stageMarks.map((m) => ({
           xAxis: m.x,
           label: { formatter: m.label, fontSize: 9, color: m.reset ? resetClr : labelClr },
-          lineStyle: { color: m.reset ? resetClr : axisLine, type: 'dashed' as const, width: m.reset ? 1.5 : 1 },
+          lineStyle: {
+            color: m.reset ? resetClr : axisLine,
+            type: 'dashed' as const,
+            width: m.reset ? 1.5 : 1,
+          },
         })),
       }
     : undefined;
-  const line = (series: Array<{ name: string; data: Array<number | null>; color: string; dashed?: boolean; area?: number }>, yMax?: number): EChartsOption => ({
+  const line = (
+    series: Array<{
+      name: string;
+      data: Array<number | null>;
+      color: string;
+      dashed?: boolean;
+      area?: number;
+    }>,
+    yMax?: number,
+  ): EChartsOption => ({
     tooltip,
     legend: { right: 0, top: 0, textStyle: { fontSize: 10, color: labelClr } },
     grid: { left: 34, right: 8, top: 26, bottom: 22 },
-    xAxis: { type: 'category', data: x, axisLabel: { fontSize: 10, color: labelClr }, axisLine: { lineStyle: { color: axisLine } } },
-    yAxis: { type: 'value', max: yMax, axisLabel: { fontSize: 10, color: labelClr }, splitLine: { lineStyle: { color: splitClr } } },
+    xAxis: {
+      type: 'category',
+      data: x,
+      axisLabel: { fontSize: 10, color: labelClr },
+      axisLine: { lineStyle: { color: axisLine } },
+    },
+    yAxis: {
+      type: 'value',
+      max: yMax,
+      axisLabel: { fontSize: 10, color: labelClr },
+      splitLine: { lineStyle: { color: splitClr } },
+    },
     series: series.map((s, i) => ({
       name: s.name,
       type: 'line',
@@ -689,48 +995,139 @@ function buildChartOptions(points: HistoryTrendPoint[], theme: string, stageMark
     typeof v === 'number' && Number.isFinite(v) ? +v.toFixed(digits) : null;
   const rttApdex = points.map((p) => point(p.rttApdex, 3));
   return {
-    qpsOption: hasPoints ? line([{ name: 'QPS', data: points.map((p) => point(p.totalQps)), color: palette.blue, area: 0.06 }]) : null,
+    qpsOption: hasPoints
+      ? line([
+          {
+            name: 'QPS',
+            data: points.map((p) => point(p.totalQps)),
+            color: palette.blue,
+            area: 0.06,
+          },
+        ])
+      : null,
     // Apdex 只有 RTT 一种口径。监听等待另出分位数图——它是 ms 量纲，与 0~1 的分数同轴无意义。
-    apdexOption: hasPoints ? line([
-      { name: 'RTT Apdex', data: rttApdex, color: palette.cyan, area: 0.055 },
-    ], 1) : null,
-    listenWaitOption: hasPoints ? line([
-      { name: '监听等待 P99', data: points.map((p) => point(p.listenWaitP99Ms)), color: palette.green, area: 0.055 },
-    ]) : null,
-    loadOption: hasPoints ? line([
-      { name: '运行', data: points.map((p) => point(p.botsRunning, 0)), color: palette.blue, area: 0.055 },
-      { name: '异常', data: points.map((p) => point(p.botsErrored, 0)), color: palette.red, dashed: true },
-    ]) : null,
-    costOption: hasPoints ? line([
-      { name: '客户端', data: points.map((p) => point(p.clientAvgMs)), color: palette.purple, area: 0.05 },
-      { name: '编码', data: points.map((p) => point(p.encodeAvgMs)), color: palette.orange, dashed: true },
-      { name: '解码', data: points.map((p) => point(p.decodeAvgMs)), color: palette.cyan, dashed: true },
-    ]) : null,
-    bandwidthOption: hasPoints ? line([
-      { name: '↑发送', data: points.map((p) => point(p.sendKBps)), color: palette.cyan, area: 0.055 },
-      { name: '↓接收', data: points.map((p) => point(p.recvKBps)), color: palette.purple, area: 0.035 },
-    ]) : null,
-    cpuOption: hasPoints ? line([
-      { name: '集群均值', data: points.map((p) => point(p.avgCpuPercent)), color: palette.orange, area: 0.045 },
-      { name: '最高节点', data: points.map((p) => point(p.maxCpuPercent)), color: palette.red, dashed: true },
-    ], 100) : null,
-    memOption: hasPoints ? line([
-      { name: '集群使用率', data: points.map((p) => point(p.avgMemPercent)), color: palette.lime, area: 0.045 },
-      { name: '最高节点', data: points.map((p) => point(p.maxMemPercent)), color: palette.purple, dashed: true },
-    ], 100) : null,
+    apdexOption: hasPoints
+      ? line([{ name: 'RTT Apdex', data: rttApdex, color: palette.cyan, area: 0.055 }], 1)
+      : null,
+    listenWaitOption: hasPoints
+      ? line([
+          {
+            name: '监听等待 P99',
+            data: points.map((p) => point(p.listenWaitP99Ms)),
+            color: palette.green,
+            area: 0.055,
+          },
+        ])
+      : null,
+    loadOption: hasPoints
+      ? line([
+          {
+            name: '运行',
+            data: points.map((p) => point(p.botsRunning, 0)),
+            color: palette.blue,
+            area: 0.055,
+          },
+          {
+            name: '异常',
+            data: points.map((p) => point(p.botsErrored, 0)),
+            color: palette.red,
+            dashed: true,
+          },
+        ])
+      : null,
+    costOption: hasPoints
+      ? line([
+          {
+            name: '客户端',
+            data: points.map((p) => point(p.nonRTTAvgMs)),
+            color: palette.purple,
+            area: 0.05,
+          },
+          {
+            name: '编码',
+            data: points.map((p) => point(p.encodeAvgMs)),
+            color: palette.orange,
+            dashed: true,
+          },
+          {
+            name: '解码',
+            data: points.map((p) => point(p.decodeAvgMs)),
+            color: palette.cyan,
+            dashed: true,
+          },
+        ])
+      : null,
+    bandwidthOption: hasPoints
+      ? line([
+          {
+            name: '↑发送',
+            data: points.map((p) => point(p.sendKBps)),
+            color: palette.cyan,
+            area: 0.055,
+          },
+          {
+            name: '↓接收',
+            data: points.map((p) => point(p.recvKBps)),
+            color: palette.purple,
+            area: 0.035,
+          },
+        ])
+      : null,
+    cpuOption: hasPoints
+      ? line(
+          [
+            {
+              name: '集群均值',
+              data: points.map((p) => point(p.avgCpuPercent)),
+              color: palette.orange,
+              area: 0.045,
+            },
+            {
+              name: '最高节点',
+              data: points.map((p) => point(p.maxCpuPercent)),
+              color: palette.red,
+              dashed: true,
+            },
+          ],
+          100,
+        )
+      : null,
+    memOption: hasPoints
+      ? line(
+          [
+            {
+              name: '集群使用率',
+              data: points.map((p) => point(p.avgMemPercent)),
+              color: palette.lime,
+              area: 0.045,
+            },
+            {
+              name: '最高节点',
+              data: points.map((p) => point(p.maxMemPercent)),
+              color: palette.purple,
+              dashed: true,
+            },
+          ],
+          100,
+        )
+      : null,
   };
 }
 
 function deriveSummary(detail: HistoryDetail, points: HistoryTrendPoint[]): DerivedSummary {
   const actions = detail.finalSnapshot.actions;
-  const totalSuccess = sum(actions, (a) => a.successCount);
-  const totalFailures = sum(actions, (a) => a.failureCount);
-  const totalTimeouts = sum(actions, (a) => a.timeoutCount);
-  const totalCanceled = sum(actions, (a) => a.canceledCount ?? 0);
-  const totalSamples = sum(actions, (a) => a.sampleCount);
-  const totalOutcomes = totalSuccess + totalFailures + totalTimeouts + totalCanceled;
+  const metrics = detail.finalSnapshot.summary;
+  const totalSuccess = metrics.successCount;
+  const totalFailures = metrics.failureCount;
+  const totalTimeouts = metrics.timeoutCount;
+  const totalCanceled = metrics.canceledCount;
+  const totalSamples = metrics.sampleCount;
   const totalErrors = totalFailures + totalTimeouts + totalCanceled;
-  const actionErrorScore = (a: HistoryActionMetric) => (a.failureCount || 0) + (a.timeoutCount || 0) + (a.canceledCount || 0) + sum(a.errors ?? [], (e) => e.count);
+  const actionErrorScore = (a: HistoryActionMetric) =>
+    (a.failureCount || 0) +
+    (a.timeoutCount || 0) +
+    (a.canceledCount || 0) +
+    sum(a.errors ?? [], (e) => e.count);
   return {
     totalSamples,
     totalSuccess,
@@ -738,51 +1135,135 @@ function deriveSummary(detail: HistoryDetail, points: HistoryTrendPoint[]): Deri
     totalTimeouts,
     totalCanceled,
     totalErrors,
-    successRate: totalOutcomes > 0 ? totalSuccess / totalOutcomes : 0,
-    rttApdex: weighted(actions, (a) => a.rttApdex, (a) => a.rttSampleCount),
-    avgQps: sum(actions, (a) => a.avgQps),
+    successRate: totalSamples > 0 ? metrics.successRate : 0,
+    rttApdex: metrics.rttApdexSampleCount > 0 ? metrics.rttApdex : null,
+    avgQps: metrics.avgQps,
     peakQps: max(points, (p) => p.totalQps),
-    peakCpu: Math.max(detail.finalSystem.maxCpuPercent, max(points, (p) => p.maxCpuPercent || p.avgCpuPercent)),
-    peakAvgMem: Math.max(detail.finalSystem.avgMemPercent || 0, max(points, (p) => p.avgMemPercent)),
-    peakMaxMem: Math.max(detail.finalSystem.maxMemPercent || 0, max(points, (p) => p.maxMemPercent || p.avgMemPercent)),
-    peakBotsRunning: Math.max(detail.finalSnapshot.robots?.running ?? 0, max(points, (p) => p.botsRunning)),
-    peakBotsErrored: Math.max(detail.finalSnapshot.robots?.errored ?? 0, max(points, (p) => p.botsErrored)),
+    peakCpu: Math.max(
+      detail.finalSystem.maxCpuPercent,
+      max(points, (p) => p.maxCpuPercent || p.avgCpuPercent),
+    ),
+    peakAvgMem: Math.max(
+      detail.finalSystem.avgMemPercent || 0,
+      max(points, (p) => p.avgMemPercent),
+    ),
+    peakMaxMem: Math.max(
+      detail.finalSystem.maxMemPercent || 0,
+      max(points, (p) => p.maxMemPercent || p.avgMemPercent),
+    ),
+    peakBotsRunning: Math.max(
+      detail.finalSnapshot.robots?.running ?? 0,
+      max(points, (p) => p.botsRunning),
+    ),
+    peakBotsErrored: Math.max(
+      detail.finalSnapshot.robots?.errored ?? 0,
+      max(points, (p) => p.botsErrored),
+    ),
     offlinePoints: points.filter((p) => p.offlineCount > 0).length,
-    cleanupIssueCount: detail.agentReports.filter((r) => r.cleanupStatus && r.cleanupStatus.status && r.cleanupStatus.status !== 'ok').length,
+    cleanupIssueCount: detail.agentReports.filter(
+      (r) => r.cleanupStatus && r.cleanupStatus.status && r.cleanupStatus.status !== 'ok',
+    ).length,
     failedAgents: detail.agentReports.filter((r) => r.result === 'failed').length,
-    slowestAction: maxBy(actions.filter((a) => a.totalDurationSampleCount > 0), (a) => a.totalDuration.p99Ms),
+    slowestAction: maxBy(
+      actions.filter((a) => a.totalDurationSampleCount > 0 && a.totalDuration.p99Ms != null),
+      (a) => a.totalDuration.p99Ms ?? -1,
+    ),
     // 「最差 Apdex」只在往返类里找：其余类别没有分，参与比较等于拿 0 分去当最差。
-    worstApdexAction: minBy(actions.filter((a) => resolveKind(a) === 'networked' && a.rttSampleCount > 0), (a) => a.rttApdex),
-    mostFailedAction: maxBy(actions.filter((a) => actionErrorScore(a) > 0), actionErrorScore),
+    worstApdexAction: minBy(
+      actions.filter((a) => resolveKind(a) === 'networked' && a.rttApdexSampleCount > 0),
+      (a) => a.rttApdex,
+    ),
+    mostFailedAction: maxBy(
+      actions.filter((a) => actionErrorScore(a) > 0),
+      actionErrorScore,
+    ),
     busiestAction: maxBy(actions, (a) => a.sampleCount),
   };
 }
 
 function buildActionInsights(summary: DerivedSummary): ActionInsight[] {
   const out: ActionInsight[] = [];
-  if (summary.slowestAction) out.push({ label: '最慢动作', name: summary.slowestAction.name, value: `P99 ${fmtMs(summary.slowestAction.totalDuration.p99Ms)}`, tone: 'warn' });
-  if (summary.worstApdexAction) out.push({ label: '最差 RTT Apdex', name: summary.worstApdexAction.name, value: fmtScore(summary.worstApdexAction.rttApdex), tone: summary.worstApdexAction.rttApdex < 0.75 ? 'bad' : 'warn' });
-  if (summary.mostFailedAction) out.push({ label: '错误最多', name: summary.mostFailedAction.name, value: `${summary.mostFailedAction.failureCount + summary.mostFailedAction.timeoutCount + (summary.mostFailedAction.canceledCount ?? 0)} 次`, tone: 'bad' });
-  if (summary.busiestAction) out.push({ label: '样本最多', name: summary.busiestAction.name, value: summary.busiestAction.sampleCount.toLocaleString(), tone: 'blue' });
+  if (summary.slowestAction)
+    out.push({
+      label: '最慢动作',
+      name: summary.slowestAction.name,
+      value: `P99 ${fmtMs(summary.slowestAction.totalDuration.p99Ms!)}`,
+      tone: 'warn',
+    });
+  if (summary.worstApdexAction)
+    out.push({
+      label: '最差 RTT Apdex',
+      name: summary.worstApdexAction.name,
+      value: fmtScore(summary.worstApdexAction.rttApdex),
+      tone: summary.worstApdexAction.rttApdex < 0.75 ? 'bad' : 'warn',
+    });
+  if (summary.mostFailedAction)
+    out.push({
+      label: '错误最多',
+      name: summary.mostFailedAction.name,
+      value: `${summary.mostFailedAction.failureCount + summary.mostFailedAction.timeoutCount + (summary.mostFailedAction.canceledCount ?? 0)} 次`,
+      tone: 'bad',
+    });
+  if (summary.busiestAction)
+    out.push({
+      label: '样本最多',
+      name: summary.busiestAction.name,
+      value: summary.busiestAction.sampleCount.toLocaleString(),
+      tone: 'blue',
+    });
   return out;
 }
 
-function buildDiagnostics(detail: HistoryDetail, summary: DerivedSummary, points: HistoryTrendPoint[]) {
+function buildDiagnostics(
+  detail: HistoryDetail,
+  summary: DerivedSummary,
+  points: HistoryTrendPoint[],
+) {
   const items: Array<{ label: string; value: string; tone: 'good' | 'warn' | 'bad' | 'blue' }> = [];
-  if (summary.totalErrors > 0) items.push({ label: '失败/超时/取消', value: `${summary.totalErrors.toLocaleString()} 次`, tone: summary.totalErrors > 100 ? 'bad' : 'warn' });
-  if (detail.finalSnapshot.connections.failed + detail.finalSnapshot.connections.dropped > 0) items.push({ label: '连接异常', value: `失败 ${detail.finalSnapshot.connections.failed} / 断开 ${detail.finalSnapshot.connections.dropped}`, tone: 'warn' });
-  if (summary.peakCpu >= 80) items.push({ label: 'CPU 高水位', value: `${summary.peakCpu.toFixed(1)}%`, tone: 'bad' });
-  if (summary.peakMaxMem >= 85) items.push({ label: 'MEM 高水位', value: `${summary.peakMaxMem.toFixed(1)}%`, tone: 'bad' });
-  if (summary.offlinePoints > 0) items.push({ label: '节点离线采样', value: `${summary.offlinePoints} 个点`, tone: 'bad' });
-  if (summary.cleanupIssueCount > 0) items.push({ label: '清理异常', value: `${summary.cleanupIssueCount} 个节点`, tone: 'warn' });
-  if (summary.slowestAction && summary.slowestAction.totalDuration.p99Ms > 1000) items.push({ label: '慢动作', value: `${summary.slowestAction.name} P99 ${fmtMs(summary.slowestAction.totalDuration.p99Ms)}`, tone: 'warn' });
-  if (detail.agentEvents?.some((e) => e.type === 'restarted')) items.push({ label: '节点重启', value: `${detail.agentEvents.filter((e) => e.type === 'restarted').length} 次`, tone: 'bad' });
-  if (items.length === 0) items.push({ label: '稳定性', value: points.length > 0 ? '未发现明显异常' : '无采样异常', tone: 'good' });
+  if (summary.totalErrors > 0)
+    items.push({
+      label: '失败/超时/取消',
+      value: `${summary.totalErrors.toLocaleString()} 次`,
+      tone: summary.totalErrors > 100 ? 'bad' : 'warn',
+    });
+  if (detail.finalSnapshot.connections.failed + detail.finalSnapshot.connections.dropped > 0)
+    items.push({
+      label: '连接异常',
+      value: `失败 ${detail.finalSnapshot.connections.failed} / 断开 ${detail.finalSnapshot.connections.dropped}`,
+      tone: 'warn',
+    });
+  if (summary.peakCpu >= 80)
+    items.push({ label: 'CPU 高水位', value: `${summary.peakCpu.toFixed(1)}%`, tone: 'bad' });
+  if (summary.peakMaxMem >= 85)
+    items.push({ label: 'MEM 高水位', value: `${summary.peakMaxMem.toFixed(1)}%`, tone: 'bad' });
+  if (summary.offlinePoints > 0)
+    items.push({ label: '节点离线采样', value: `${summary.offlinePoints} 个点`, tone: 'bad' });
+  if (summary.cleanupIssueCount > 0)
+    items.push({ label: '清理异常', value: `${summary.cleanupIssueCount} 个节点`, tone: 'warn' });
+  if (summary.slowestAction && (summary.slowestAction.totalDuration.p99Ms ?? 0) > 1000)
+    items.push({
+      label: '慢动作',
+      value: `${summary.slowestAction.name} P99 ${fmtMs(summary.slowestAction.totalDuration.p99Ms!)}`,
+      tone: 'warn',
+    });
+  if (detail.agentEvents?.some((e) => e.type === 'restarted'))
+    items.push({
+      label: '节点重启',
+      value: `${detail.agentEvents.filter((e) => e.type === 'restarted').length} 次`,
+      tone: 'bad',
+    });
+  if (items.length === 0)
+    items.push({
+      label: '稳定性',
+      value: points.length > 0 ? '未发现明显异常' : '无采样异常',
+      tone: 'good',
+    });
   return items;
 }
 
 function renderCleanup(cleanup: CleanupStatus | undefined) {
-  if (!cleanup || !cleanup.status) return <span style={{ color: 'var(--text-tertiary)' }}>未记录</span>;
+  if (!cleanup || !cleanup.status)
+    return <span style={{ color: 'var(--text-tertiary)' }}>未记录</span>;
   const map: Record<string, { color: string; label: string }> = {
     ok: { color: 'success', label: '清理完成' },
     partial: { color: 'warning', label: '部分清理' },
@@ -794,7 +1275,11 @@ function renderCleanup(cleanup: CleanupStatus | undefined) {
   if (cleanup.message) detailLines.push(cleanup.message);
   if (cleanup.timeoutRobots) detailLines.push(`超时机器人 ${cleanup.timeoutRobots}`);
   if (cleanup.luaSkipped) detailLines.push(`脚本运行时未归还 ${cleanup.luaSkipped}`);
-  return <Tooltip title={detailLines.join('；') || info.label}><Tag color={info.color}>{info.label}</Tag></Tooltip>;
+  return (
+    <Tooltip title={detailLines.join('；') || info.label}>
+      <Tag color={info.color}>{info.label}</Tag>
+    </Tooltip>
+  );
 }
 
 function fmtKBpsPeak(points: HistoryTrendPoint[], key: 'sendKBps' | 'recvKBps') {
@@ -816,7 +1301,10 @@ function sum<T>(items: T[], pick: (item: T) => number) {
 }
 
 function max<T>(items: T[], pick: (item: T) => number) {
-  return items.reduce((acc, item) => Math.max(acc, Number.isFinite(pick(item)) ? pick(item) : 0), 0);
+  return items.reduce(
+    (acc, item) => Math.max(acc, Number.isFinite(pick(item)) ? pick(item) : 0),
+    0,
+  );
 }
 
 function maxBy<T>(items: T[], pick: (item: T) => number): T | undefined {
@@ -843,20 +1331,6 @@ function minBy<T>(items: T[], pick: (item: T) => number): T | undefined {
     }
   }
   return best;
-}
-
-function weighted<T>(items: T[], value: (item: T) => number, weight: (item: T) => number) {
-  let totalWeight = 0;
-  let total = 0;
-  for (const item of items) {
-    const w = weight(item);
-    const v = value(item);
-    if (w > 0 && Number.isFinite(v)) {
-      total += v * w;
-      totalWeight += w;
-    }
-  }
-  return totalWeight > 0 ? total / totalWeight : null;
 }
 
 function eventLabel(type: string) {

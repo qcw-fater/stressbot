@@ -19,7 +19,25 @@ type RequestTiming struct {
 	DecodeWait           time.Duration
 	DecodeCost           time.Duration
 	DispatchToActionWait time.Duration
+	Observed             TimingStage
 }
+
+// TimingStage 区分“没有采集”与“实际测得 0ns”。
+type TimingStage uint16
+
+const (
+	StageRTT TimingStage = 1 << iota
+	StageListenWait
+	StageBuild
+	StageEncode
+	StageSend
+	StageDecodeWait
+	StageDecode
+	StageDispatchWait
+	StageParseStore
+)
+
+func (s TimingStage) Has(stage TimingStage) bool { return s&stage != 0 }
 
 // ClientTiming 单次 action 的客户端侧耗时拆解。
 type ClientTiming struct {
@@ -30,6 +48,7 @@ type ClientTiming struct {
 	DecodeCost     time.Duration
 	DispatchWait   time.Duration
 	ParseStoreCost time.Duration
+	Observed       TimingStage
 }
 
 // ActionTiming 单次 action 执行的耗时拆解。
@@ -114,23 +133,24 @@ type CodedError interface {
 	ErrorDetail() string // 返回错误详情（用于环形缓冲存储）
 }
 
-// actionMetrics per-action 指标，全部使用原子操作保证无锁热路径安全。
+// actionMetrics per-action 指标。同名动作由 mu 保证一致快照，不同动作并行记录。
 type actionMetrics struct {
-	successCount                 atomic.Int64      // 成功次数
-	failureCount                 atomic.Int64      // 失败次数（非超时）
-	timeoutCount                 atomic.Int64      // 超时次数
-	timeoutTotalMs               atomic.Int64      // 超时样本累计延迟（毫秒），用于计算平均超时延迟
-	canceledCount                atomic.Int64      // 取消次数（ctx 取消）
-	executing                    atomic.Int64      // 当前正在执行中的并发数
-	rtt                          *LatencyHistogram // RTT 直方图：纯网络往返（仅成功且有 WireRTT 样本）
-	listenWait                   *LatencyHistogram // 监听等待直方图：开始等待 → 帧被内核收到
-	totalDuration                *LatencyHistogram // 总耗时直方图：单次 action wallClock
-	sendBytes                    atomic.Int64      // 发送字节数（per-action，用于 ↑avg 列）
-	recvBytes                    atomic.Int64      // 接收字节数（per-action，用于 ↓avg 列）
-	apdexSatisfied               atomic.Int64      // RTT Apdex 满意样本：响应时间 < T
-	apdexTolerating              atomic.Int64      // RTT Apdex 容忍样本：响应时间 >= T 且 < 4T
-	rttFailedCount               atomic.Int64      // 无响应帧的请求数（超时/断连/发送失败）：进 RTT Apdex 分母记 frustrated
-	errors                       sync.Map          // errKey → *errorBucket，按 code 单维聚合的错误分布
+	mu              sync.Mutex
+	successCount    atomic.Int64      // 成功次数
+	failureCount    atomic.Int64      // 失败次数（非超时）
+	timeoutCount    atomic.Int64      // 超时次数
+	timeoutTotalNs  atomic.Int64      // 超时样本累计延迟（纳秒），用于精确计算平均超时延迟
+	canceledCount   atomic.Int64      // 取消次数（ctx 取消）
+	executing       atomic.Int64      // 当前正在执行中的并发数
+	rtt             *LatencyHistogram // RTT 直方图：纯网络往返（仅成功且有 WireRTT 样本）
+	listenWait      *LatencyHistogram // 监听等待直方图：开始等待 → 帧被内核收到
+	totalDuration   *LatencyHistogram // 总耗时直方图：单次 action wallClock
+	sendBytes       atomic.Int64      // 发送字节数（per-action，用于 ↑avg 列）
+	recvBytes       atomic.Int64      // 接收字节数（per-action，用于 ↓avg 列）
+	apdexSatisfied  atomic.Int64      // RTT Apdex 满意样本：响应时间 < T
+	apdexTolerating atomic.Int64      // RTT Apdex 容忍样本：响应时间 >= T 且 < 4T
+	rttFailedCount  atomic.Int64      // 无响应帧的请求数（超时/断连/发送失败）：进 RTT Apdex 分母记 frustrated
+	errors          sync.Map          // errKey → *errorBucket，按 code 单维聚合的错误分布
 
 	// 客户端开销、RTT 样本与总耗时样本计数：
 	//   - clientCostSum/Count：累计客户端构建/解析开销（纳秒），用于 ClientAvgMs
@@ -148,8 +168,16 @@ type actionMetrics struct {
 	decodeCostSum            atomic.Int64
 	dispatchWaitSum          atomic.Int64
 	parseStoreSum            atomic.Int64
+	buildCostCount           atomic.Int64
+	encodeCostCount          atomic.Int64
+	sendCostCount            atomic.Int64
+	decodeWaitCount          atomic.Int64
+	decodeCostCount          atomic.Int64
+	dispatchWaitCount        atomic.Int64
+	parseStoreCount          atomic.Int64
 	rttSampleCount           atomic.Int64
 	totalDurationSampleCount atomic.Int64
+	byteSampleCount          atomic.Int64
 
 	// 监听类计数。等待时长与 RTT 分开统计：前者含服务端业务时长（匹配、等队友，秒级），
 	// 后者是单请求处理延迟（毫秒级）。混进同一分布，两个数都会失去意义。
@@ -205,12 +233,16 @@ type HTTPConfig struct {
 // MetricsCollector 全局指标收集器（单例）。
 // enabled=false 时所有方法均为 no-op，压测核心路径零开销。
 type MetricsCollector struct {
-	enabled      bool              // 是否启用
-	cfg          CollectorConfig   // 运行期配置副本（除 ApdexThresholdMs 外）
-	cfgMu        sync.RWMutex      // 保护 cfg 非热路径字段
-	apdexT       atomic.Int32      // Apdex T 阈值（毫秒）热路径独立原子读写，与 cfgMu 解耦
-	timingDetail TimingDetailLevel // 计时细分级别
-	startTime    atomic.Int64      // 收集器启动时间（UnixNano）；Reset 写、Uptime 读，用原子避免 time.Time 多字结构撕裂
+	enabled         bool              // 是否启用
+	cfg             CollectorConfig   // 运行期配置副本（除 ApdexThresholdMs 外）
+	cfgMu           sync.RWMutex      // 保护 cfg 非热路径字段
+	apdexT          atomic.Int32      // Apdex T 阈值（毫秒）热路径独立原子读写，与 cfgMu 解耦
+	timingDetail    TimingDetailLevel // 计时细分级别
+	windowOnly      bool              // true 表示活动区间子收集器，禁止递归创建 window
+	transitionMu    sync.RWMutex      // Record 持读锁；TakeReportSnapshot 持写锁切换窗口
+	window          atomic.Pointer[MetricsCollector]
+	collectionEpoch atomic.Uint64 // 累计指标代次；Reset 后递增，允许 Admin 识别合法清零
+	startTime       atomic.Int64  // 收集器启动时间（UnixNano）；Reset 写、Uptime 读，用原子避免 time.Time 多字结构撕裂
 
 	actions sync.Map   // string → *actionMetrics，按 action 名称索引
 	namesMu sync.Mutex // 保护 names 切片的追加
@@ -223,11 +255,14 @@ type MetricsCollector struct {
 	totalActions  atomic.Int64 // 累计执行的动作总数（含回调）
 
 	connEstablished atomic.Int64 // 成功建立的连接数
+	connActive      atomic.Int64 // 当前活跃连接数
+	connClosed      atomic.Int64 // 累计关闭连接数（主动 + 异常）
 	connFailed      atomic.Int64 // 连接建立失败数
 	connDropped     atomic.Int64 // 连接意外断开数（服务端关闭/网络异常）
 
-	totalSendBytes atomic.Int64 // 全局累计发送字节数（由 network 层上报，含心跳等全部流量）
-	totalRecvBytes atomic.Int64 // 全局累计接收字节数
+	totalSendBytes       atomic.Int64 // 全局累计发送字节数（由 network 层上报，含心跳等全部流量）
+	totalRecvBytes       atomic.Int64 // 全局累计接收字节数
+	invalidMetricSamples atomic.Int64 // 被拒绝的负耗时或 DDSketch Add 失败样本
 
 	rampUpCurrentStage atomic.Int32 // 渐进加压当前阶段（1-based，0 = 未启用或未开始）
 	rampUpTotalStages  atomic.Int32 // 渐进加压总阶段数（0 = 未启用或未开始）
@@ -264,19 +299,26 @@ func Init(cfg CollectorConfig) {
 			stresslog.Warn("[MONITOR] monitor.timingDetail 配置无效，使用默认值", zap.String("configured", cfg.TimingDetail), zap.String("timingDetail", string(level)))
 			cfg.TimingDetail = string(level)
 		}
-		global = &MetricsCollector{
-			enabled:      true,
-			cfg:          cfg,
-			timingDetail: level,
-		}
-		global.startTime.Store(time.Now().UnixNano())
-		t := cfg.ApdexThresholdMs
-		if t <= 0 {
-			t = 100
-		}
-		global.cfg.ApdexThresholdMs = t
-		global.apdexT.Store(int32(t))
+		global = NewCollector(cfg)
 	})
+}
+
+// NewCollector 创建独立收集器。分布式任务和测试可显式持有实例，避免依赖全局单例。
+func NewCollector(cfg CollectorConfig) *MetricsCollector {
+	level := NormalizeTimingDetail(cfg.TimingDetail)
+	c := &MetricsCollector{enabled: true, cfg: cfg, timingDetail: level}
+	now := time.Now()
+	c.collectionEpoch.Store(1)
+	c.startTime.Store(now.UnixNano())
+	t := cfg.ApdexThresholdMs
+	if t <= 0 {
+		t = 100
+	}
+	c.cfg.ApdexThresholdMs = t
+	c.cfg.TimingDetail = string(level)
+	c.apdexT.Store(int32(t))
+	c.window.Store(c.newWindowCollector(now))
+	return c
 }
 
 // Global 返回全局单例。
@@ -284,10 +326,45 @@ func Global() *MetricsCollector {
 	return global
 }
 
+func (c *MetricsCollector) newWindowCollector(start time.Time) *MetricsCollector {
+	w := &MetricsCollector{
+		enabled:      c.enabled,
+		cfg:          c.cfg,
+		timingDetail: c.timingDetail,
+		windowOnly:   true,
+	}
+	w.startTime.Store(start.UnixNano())
+	w.collectionEpoch.Store(c.collectionEpoch.Load())
+	w.apdexT.Store(c.apdexT.Load())
+	return w
+}
+
+func (c *MetricsCollector) currentWindowCollector() *MetricsCollector {
+	if c.windowOnly {
+		return nil
+	}
+	if w := c.window.Load(); w != nil {
+		return w
+	}
+	w := c.newWindowCollector(time.Now())
+	if c.window.CompareAndSwap(nil, w) {
+		return w
+	}
+	return c.window.Load()
+}
+
 // Reset 重置所有计数器，用于新任务开始前清零。
 func (c *MetricsCollector) Reset() {
-	stresslog.Info("[MONITOR] 指标收集器已重置")
-	c.startTime.Store(time.Now().UnixNano())
+	if !c.windowOnly {
+		c.transitionMu.Lock()
+		defer c.transitionMu.Unlock()
+	}
+	if stresslog.GetLogger() != nil {
+		stresslog.Info("[MONITOR] 指标收集器已重置")
+	}
+	now := time.Now()
+	c.startTime.Store(now.UnixNano())
+	c.collectionEpoch.Add(1)
 	c.actions.Clear()
 	c.namesMu.Lock()
 	c.names = c.names[:0]
@@ -298,12 +375,18 @@ func (c *MetricsCollector) Reset() {
 	c.robotsErrored.Store(0)
 	c.totalActions.Store(0)
 	c.connEstablished.Store(0)
+	c.connActive.Store(0)
+	c.connClosed.Store(0)
 	c.connFailed.Store(0)
 	c.connDropped.Store(0)
 	c.totalSendBytes.Store(0)
 	c.totalRecvBytes.Store(0)
+	c.invalidMetricSamples.Store(0)
 	c.rampUpCurrentStage.Store(0)
 	c.rampUpTotalStages.Store(0)
+	if !c.windowOnly {
+		c.window.Store(c.newWindowCollector(now))
+	}
 }
 
 // SetApdexT 任务级调整 Apdex T 值（毫秒），≤0 不修改。
@@ -317,6 +400,9 @@ func (c *MetricsCollector) SetApdexT(t int) {
 	c.cfgMu.Lock()
 	c.cfg.ApdexThresholdMs = t
 	c.cfgMu.Unlock()
+	if w := c.window.Load(); w != nil {
+		w.apdexT.Store(int32(t))
+	}
 }
 
 // RecordActionStart 记录动作开始执行（递增 executing 计数）。
@@ -325,7 +411,28 @@ func (c *MetricsCollector) RecordActionStart(name string) {
 		return
 	}
 	am := c.getOrCreateAction(name)
+	am.mu.Lock()
 	am.executing.Add(1)
+	am.mu.Unlock()
+}
+
+// RecordPendingCanceled 记录由于上游分支中止而从未开始执行的动作。
+// 它只增加取消数，不进入吞吐、字节、错误、Apdex 或 executing。
+func (c *MetricsCollector) RecordPendingCanceled(name string) {
+	if c == nil || !c.enabled {
+		return
+	}
+	if !c.windowOnly {
+		c.transitionMu.RLock()
+		defer c.transitionMu.RUnlock()
+	}
+	am := c.getOrCreateAction(name)
+	am.mu.Lock()
+	am.canceledCount.Add(1)
+	am.mu.Unlock()
+	if !c.windowOnly {
+		c.currentWindowCollector().RecordPendingCanceled(name)
+	}
 }
 
 // AddBandwidth 累计全局收发字节数（由 network 层调用，含心跳/监听等全部流量）。
@@ -333,15 +440,22 @@ func (c *MetricsCollector) AddBandwidth(send, recv int64) {
 	if c == nil || !c.enabled {
 		return
 	}
+	if !c.windowOnly {
+		c.transitionMu.RLock()
+		defer c.transitionMu.RUnlock()
+	}
 	if send > 0 {
 		c.totalSendBytes.Add(send)
 	}
 	if recv > 0 {
 		c.totalRecvBytes.Add(recv)
 	}
+	if !c.windowOnly {
+		c.currentWindowCollector().AddBandwidth(send, recv)
+	}
 }
 
-// RecordAction 记录一次动作执行结果（热路径，纯原子操作）。
+// RecordAction 记录一次动作执行结果。不同动作并行，同名动作仅持有短时聚合锁。
 func (c *MetricsCollector) RecordAction(
 	name string, result ActionResult,
 	timing ActionTiming, wallClock time.Duration,
@@ -359,8 +473,16 @@ func (c *MetricsCollector) recordAction(
 	if c == nil || !c.enabled {
 		return
 	}
-	c.totalActions.Add(1)
+	if !c.windowOnly {
+		c.transitionMu.RLock()
+		defer c.transitionMu.RUnlock()
+	}
 	am := c.getOrCreateAction(name)
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	if result != ResultCanceled {
+		c.totalActions.Add(1)
+	}
 	if trackExecuting {
 		am.executing.Add(-1)
 	}
@@ -387,33 +509,47 @@ func (c *MetricsCollector) recordAction(
 		// wallClock 只留直方图作诊断，不再打 Apdex：它是「施压机排队 + 故意 sleep +
 		// 服务端响应」的混合量，施压机越忙这个数越大，用它评分等于把施压机自身的
 		// 负载算成服务端的账。评分统一由 RTT 承担（见下方 Requests 循环）。
-		am.totalDuration.Record(wallClock)
-		am.totalDurationSampleCount.Add(1)
-		addDuration := func(dst *atomic.Int64, d time.Duration) {
+		if err := am.totalDuration.Record(wallClock); err != nil {
+			c.invalidMetricSamples.Add(1)
+		} else {
+			am.totalDurationSampleCount.Add(1)
+		}
+		addDuration := func(dst, count *atomic.Int64, observed TimingStage, stage TimingStage, d time.Duration) {
+			if !observed.Has(stage) && d == 0 {
+				return
+			}
+			if d < 0 {
+				c.invalidMetricSamples.Add(1)
+				return
+			}
 			if d > 0 {
 				dst.Add(d.Nanoseconds())
 			}
+			count.Add(1)
 		}
-		addDuration(&am.buildCostSum, timing.Client.BuildCost)
-		addDuration(&am.encodeCostSum, timing.Client.EncodeCost)
-		addDuration(&am.sendCostSum, timing.Client.SendCost)
-		addDuration(&am.decodeWaitSum, timing.Client.DecodeWait)
-		addDuration(&am.decodeCostSum, timing.Client.DecodeCost)
-		addDuration(&am.dispatchWaitSum, timing.Client.DispatchWait)
-		addDuration(&am.parseStoreSum, timing.Client.ParseStoreCost)
+		observed := timing.Client.Observed
+		addDuration(&am.buildCostSum, &am.buildCostCount, observed, StageBuild, timing.Client.BuildCost)
+		addDuration(&am.encodeCostSum, &am.encodeCostCount, observed, StageEncode, timing.Client.EncodeCost)
+		addDuration(&am.sendCostSum, &am.sendCostCount, observed, StageSend, timing.Client.SendCost)
+		addDuration(&am.decodeWaitSum, &am.decodeWaitCount, observed, StageDecodeWait, timing.Client.DecodeWait)
+		addDuration(&am.decodeCostSum, &am.decodeCostCount, observed, StageDecode, timing.Client.DecodeCost)
+		addDuration(&am.dispatchWaitSum, &am.dispatchWaitCount, observed, StageDispatchWait, timing.Client.DispatchWait)
+		addDuration(&am.parseStoreSum, &am.parseStoreCount, observed, StageParseStore, timing.Client.ParseStoreCost)
 	}
 	for _, req := range timing.Requests {
-		if req.WireRTT <= 0 {
+		if !req.Observed.Has(StageRTT) && req.WireRTT == 0 {
 			continue
 		}
-		am.rtt.Record(req.WireRTT)
+		if err := am.rtt.Record(req.WireRTT); err != nil {
+			c.invalidMetricSamples.Add(1)
+			continue
+		}
 		am.rttSampleCount.Add(1)
-		T := int64(c.apdexT.Load())
-		ms := req.WireRTT.Milliseconds()
+		threshold := time.Duration(c.apdexT.Load()) * time.Millisecond
 		switch {
-		case ms < T:
+		case req.WireRTT < threshold:
 			am.apdexSatisfied.Add(1)
-		case ms < 4*T:
+		case req.WireRTT < 4*threshold:
 			am.apdexTolerating.Add(1)
 		}
 	}
@@ -430,8 +566,11 @@ func (c *MetricsCollector) recordAction(
 		if wait <= 0 {
 			continue
 		}
-		am.listenWait.Record(wait)
-		am.listenWaitCount.Add(1)
+		if err := am.listenWait.Record(wait); err != nil {
+			c.invalidMetricSamples.Add(1)
+		} else {
+			am.listenWaitCount.Add(1)
+		}
 	}
 	if timing.ListenReady > 0 {
 		am.listenReadyCount.Add(int64(timing.ListenReady))
@@ -446,6 +585,7 @@ func (c *MetricsCollector) recordAction(
 	if recvBytes > 0 {
 		am.recvBytes.Add(int64(recvBytes))
 	}
+	am.byteSampleCount.Add(1)
 
 	switch result {
 	case ResultSuccess:
@@ -458,13 +598,16 @@ func (c *MetricsCollector) recordAction(
 	case ResultTimeout:
 		am.timeoutCount.Add(1)
 		if wallClock > 0 {
-			am.timeoutTotalMs.Add(wallClock.Milliseconds())
+			am.timeoutTotalNs.Add(wallClock.Nanoseconds())
 		}
 		if err != nil {
 			c.recordError(am, err)
 		}
 	case ResultCanceled:
 		am.canceledCount.Add(1)
+	}
+	if !c.windowOnly {
+		c.currentWindowCollector().recordAction(name, result, timing, wallClock, sendBytes, recvBytes, err, false)
 	}
 }
 
@@ -537,6 +680,13 @@ func (c *MetricsCollector) RampUpStage() (current, total int) {
 func (c *MetricsCollector) ConnEstablished() {
 	if c != nil && c.enabled {
 		c.connEstablished.Add(1)
+		c.connActive.Add(1)
+	}
+}
+func (c *MetricsCollector) ConnClosed() {
+	if c != nil && c.enabled {
+		c.connActive.Add(-1)
+		c.connClosed.Add(1)
 	}
 }
 func (c *MetricsCollector) ConnFailed() {

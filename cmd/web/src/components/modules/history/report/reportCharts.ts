@@ -233,13 +233,13 @@ export function buildRankingOption(
   actions: HistoryActionMetric[],
 ): EChartsOption | null {
   const top = [...actions]
-    .filter((a) => !a.name.startsWith('callback:') && (a.rttSampleCount ?? 0) > 0 && a.rtt)
-    .sort((a, b) => a.rtt.p99Ms - b.rtt.p99Ms)
+    .filter((a) => !a.name.startsWith('callback:') && (a.rttSampleCount ?? 0) > 0 && a.rtt.p99Ms != null)
+    .sort((a, b) => (a.rtt.p99Ms ?? -1) - (b.rtt.p99Ms ?? -1))
     .slice(-15);
   if (top.length === 0) return null;
 
   const names = top.map((a) => a.name.length > 22 ? a.name.slice(0, 20) + '…' : a.name);
-  const values = top.map((a) => a.rtt.p99Ms);
+  const values = top.map((a) => a.rtt.p99Ms!);
   const colors = values.map((v) =>
     v < 100 ? COLORS.green : v < 500 ? COLORS.yellow : COLORS.red,
   );
@@ -277,8 +277,11 @@ export function buildLatencyOption(
   actions: HistoryActionMetric[],
 ): EChartsOption | null {
   const top = [...actions]
-    .filter((a) => !a.name.startsWith('callback:') && (a.rttSampleCount ?? 0) > 0 && a.rtt)
-    .sort((a, b) => b.rtt.p99Ms - a.rtt.p99Ms)
+    .filter((a) =>
+      !a.name.startsWith('callback:') && (a.rttSampleCount ?? 0) > 0 &&
+      a.rtt.p50Ms != null && a.rtt.p95Ms != null && a.rtt.p99Ms != null,
+    )
+    .sort((a, b) => (b.rtt.p99Ms ?? -1) - (a.rtt.p99Ms ?? -1))
     .slice(0, 10);
   if (top.length === 0) return null;
 
@@ -292,9 +295,9 @@ export function buildLatencyOption(
     xAxis: { type: 'category', data: names, axisLabel: { fontSize: 9, rotate: 20 } },
     yAxis: { type: 'value', name: 'ms', axisLabel: { fontSize: 10 } },
     series: [
-      { name: 'p50', type: 'bar', data: top.map((a) => a.rtt.p50Ms), itemStyle: { color: COLORS.green }, barMaxWidth: 14 },
-      { name: 'p95', type: 'bar', data: top.map((a) => a.rtt.p95Ms), itemStyle: { color: COLORS.yellow }, barMaxWidth: 14 },
-      { name: 'p99', type: 'bar', data: top.map((a) => a.rtt.p99Ms), itemStyle: { color: COLORS.red }, barMaxWidth: 14 },
+      { name: 'p50', type: 'bar', data: top.map((a) => a.rtt.p50Ms!), itemStyle: { color: COLORS.green }, barMaxWidth: 14 },
+      { name: 'p95', type: 'bar', data: top.map((a) => a.rtt.p95Ms!), itemStyle: { color: COLORS.yellow }, barMaxWidth: 14 },
+      { name: 'p99', type: 'bar', data: top.map((a) => a.rtt.p99Ms!), itemStyle: { color: COLORS.red }, barMaxWidth: 14 },
     ],
   };
 }

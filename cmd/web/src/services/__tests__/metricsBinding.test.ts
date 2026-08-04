@@ -6,7 +6,6 @@ import { describe, expect, it } from 'vitest';
 import {
   buildNodeMetricsMap,
   classifyApdex,
-  computeWeightedMetrics,
   makeMetricsProvider,
   type FlowSlice,
 } from '../metricsBinding';
@@ -24,11 +23,13 @@ function action(name: string, overrides: Partial<ActionMetric> = {}): ActionMetr
     successRate: 0.95,
     kind: 'networked',
     rttApdex: 0.92,
+    rttApdexSampleCount: 100,
     avgQps: 10,
     avgSendBytes: 100,
     avgRecvBytes: 200,
     timeoutAvgMs: 0,
-    clientAvgMs: 1.5,
+    nonRTTAvgMs: 1.5,
+    clientCostCount: 100,
     buildAvgMs: 0,
     encodeAvgMs: 0,
     sendAvgMs: 0,
@@ -36,6 +37,15 @@ function action(name: string, overrides: Partial<ActionMetric> = {}): ActionMetr
     decodeAvgMs: 0,
     dispatchToActionWaitAvgMs: 0,
     parseStoreAvgMs: 0,
+	buildSampleCount: 0,
+	encodeSampleCount: 0,
+	sendSampleCount: 0,
+	decodeWaitSampleCount: 0,
+	decodeSampleCount: 0,
+	dispatchWaitSampleCount: 0,
+	parseStoreSampleCount: 0,
+	byteSampleCount: 100,
+	periodQps: 10,
     rttSampleCount: 95,
     listenWaitSampleCount: 0,
     listenReadyCount: 0,
@@ -43,8 +53,17 @@ function action(name: string, overrides: Partial<ActionMetric> = {}): ActionMetr
     listenTimeoutRate: 0,
     totalDurationSampleCount: 100,
     rtt: { count: 95, minMs: 1, maxMs: 100, avgMs: 20, p50Ms: 18, p90Ms: 50, p95Ms: 70, p99Ms: 90 },
-    listenWait: { count: 0, minMs: 0, maxMs: 0, avgMs: 0, p50Ms: 0, p90Ms: 0, p95Ms: 0, p99Ms: 0 },
-    totalDuration: { count: 100, minMs: 2, maxMs: 130, avgMs: 28, p50Ms: 24, p90Ms: 65, p95Ms: 85, p99Ms: 120 },
+    listenWait: { count: 0, minMs: null, maxMs: null, avgMs: null, p50Ms: null, p90Ms: null, p95Ms: null, p99Ms: null },
+    totalDuration: {
+      count: 100,
+      minMs: 2,
+      maxMs: 130,
+      avgMs: 28,
+      p50Ms: 24,
+      p90Ms: 65,
+      p95Ms: 85,
+      p99Ms: 120,
+    },
     ...overrides,
   };
 }
@@ -52,14 +71,67 @@ function action(name: string, overrides: Partial<ActionMetric> = {}): ActionMetr
 function snapshot(actions: ActionMetric[]): StressSnapshot {
   return {
     timestamp: new Date().toISOString(),
+    collectionEpoch: 1,
     uptimeSeconds: 60,
     totalActions: actions.reduce((sum, a) => sum + a.sampleCount, 0),
     apdexT: 100,
+    timingDetail: 'rtt',
+    summary: {
+      sampleCount: 0,
+      successCount: 0,
+      failureCount: 0,
+      timeoutCount: 0,
+      canceledCount: 0,
+      executing: 0,
+      successRate: 0,
+      rttApdex: 0,
+      rttApdexSampleCount: 0,
+      rtt: { count: 0, minMs: null, maxMs: null, avgMs: null, p50Ms: null, p90Ms: null, p95Ms: null, p99Ms: null },
+      listenWait: {
+        count: 0,
+        minMs: null,
+        maxMs: null,
+        avgMs: null,
+        p50Ms: null,
+        p90Ms: null,
+        p95Ms: null,
+        p99Ms: null,
+      },
+      totalDuration: {
+        count: 0,
+        minMs: null,
+        maxMs: null,
+        avgMs: null,
+        p50Ms: null,
+        p90Ms: null,
+        p95Ms: null,
+        p99Ms: null,
+      },
+      nonRTTAvgMs: 0,
+      clientCostCount: 0,
+      buildAvgMs: 0,
+      encodeAvgMs: 0,
+      sendAvgMs: 0,
+      decodeWaitAvgMs: 0,
+      decodeAvgMs: 0,
+      dispatchToActionWaitAvgMs: 0,
+      parseStoreAvgMs: 0,
+	  buildSampleCount: 0,
+	  encodeSampleCount: 0,
+	  sendSampleCount: 0,
+	  decodeWaitSampleCount: 0,
+	  decodeSampleCount: 0,
+	  dispatchWaitSampleCount: 0,
+	  parseStoreSampleCount: 0,
+      avgQps: 0,
+    },
     robots: { started: 100, running: 100, stopped: 0, errored: 0 },
     rampUp: { currentStage: 0, totalStages: 0 },
-    connections: { established: 100, failed: 0, dropped: 0 },
+    connections: { established: 100, active: 100, closed: 0, failed: 0, dropped: 0 },
     bandwidth: { totalSendBytes: 0, totalRecvBytes: 0, sendMBps: 0, recvMBps: 0 },
     actions,
+	invalidMetricSamples: 0,
+	window: null,
   };
 }
 
@@ -116,28 +188,6 @@ describe('buildNodeMetricsMap', () => {
     const provider = makeMetricsProvider(map);
     expect(provider('n1')?.executing).toBe(7);
     expect(provider('nonexistent')).toBeUndefined();
-  });
-});
-
-describe('computeWeightedMetrics', () => {
-  it('按 RTT 样本数加权 Apdex，成功率按总样本数加权', () => {
-    const a = action('A', { sampleCount: 10, successRate: 0.8, rttSampleCount: 10, rttApdex: 0.5 });
-    const b = action('B', { sampleCount: 30, successRate: 1, rttSampleCount: 30, rttApdex: 1 });
-    const result = computeWeightedMetrics([a, b]);
-    expect(result.apdex).toBeCloseTo(0.875);
-    expect(result.successRate).toBeCloseTo(0.95);
-  });
-
-  // 监听 / 发送 / 本地类没有可比的统一阈值。若它们参与加权，总分会随「动作构成」
-  // 漂移而不是随服务端表现变化——加一个纯本地动作就能把分数抬上去。
-  it('无 RTT 样本的动作不参与 Apdex 加权', () => {
-    const networked = action('A', { sampleCount: 10, rttSampleCount: 10, rttApdex: 0.5 });
-    const listen = action('B', {
-      kind: 'listen', sampleCount: 90, rttSampleCount: 0, rttApdex: 0,
-      listenWaitSampleCount: 90,
-    });
-    const result = computeWeightedMetrics([networked, listen]);
-    expect(result.apdex).toBeCloseTo(0.5);
   });
 });
 

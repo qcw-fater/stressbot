@@ -6,13 +6,13 @@
 
 ## 1. 概述
 
-`monitor` 包提供零锁热路径的指标采集系统。核心特性：
+`monitor` 包提供准确性优先、可分布式合并的指标采集系统。核心特性：
 
-- **所有计数器使用原子操作**，无 mutex/channel/外部依赖
+- **计数器使用原子操作，DDSketch 由 per-action 短临界区保护**
 - **`enabled=false` 时所有公共方法为空操作**，零性能开销
-- **延迟使用固定桶直方图**（16 桶，覆盖 0ms ~ 60s+），全局累积
+- **延迟使用 DDSketch**（1% 相对精度、最多 2048 bins），同时精确保存 count/sum/min/max
 - **错误按 `code` 单维聚合**（展示时按 code<100 推导"框架"/code≥100 推导"业务"标签），环形缓冲保留最近 3 条 Detail
-- **RTT Apdex(T) 评分**，T 可配置（默认 100ms），按 RTT 样本数计算
+- **RTT Apdex(T) 评分**，T 可配置（默认 100ms），无响应帧的失败请求进入分母记 frustrated
 - **支持分布式聚合**，MergeSnapshots 合并多 Agent 指标
 - **声明式动作和 Lua 脚本动作统一自动采集**，用户无感知
 
@@ -20,12 +20,12 @@
 
 | 指标 | 旧工具 | stressbot |
 |------|--------|-----------|
-| min/max/P50/P90/P95/P99 | 窗口值（最近 ~10240 样本） | **全局**（固定桶累积计数） |
+| min/max/P50/P90/P95/P99 | 窗口值（最近 ~10240 样本） | **累计 + 顺序上报窗口**（DDSketch） |
 | Avg | 窗口值 | **全局**（sum/count） |
-| Apdex | 窗口值，`sample500Less` 命名有歧义 | **全局 RTT Apdex(T)**，T 可配置，分母为 RTT 样本数 |
-| 内存/action | ~80KB（10240 x 8B） | **~200B**（固定桶 + 原子计数器） |
-| 锁/channel | channel 传批次 | **无锁**，纯原子操作 |
-| 外部依赖 | `go-metrics` | **无** |
+| Apdex | 窗口值，`sample500Less` 命名有歧义 | **全局 RTT Apdex(T)**，T 可配置，分母为发起过的 request 样本数 |
+| 内存/action | ~80KB（10240 x 8B） | **有界**（每个分布最多 2048 bins） |
+| 锁/channel | channel 传批次 | 计数原子操作，分布更新使用短 mutex |
+| 外部依赖 | `go-metrics` | `DataDog/sketches-go` |
 | 系统资源 | 无 | goroutines/mem/GC |
 | 连接健康 | 无 | 建立/失败/断连计数 |
 | 全局带宽 | 无 | 发送/接收 MB/s |
@@ -81,7 +81,7 @@ ExecuteAction(actionDef)
 | 维度 | 含义 | 入直方图？ | 字段 |
 |------|------|----------|------|
 | `NetLatency` | 纯网络往返（send→recv 窗口） | ✅ 仅 `netSamples > 0` 时进 | `latency.{avg,p50,p95,p99,max}Ms` |
-| `ClientCost` | 客户端 proto 构建/序列化/解析/state 写入 | ❌ 不进直方图 | `clientAvgMs` |
+| `ClientCost` | 客户端 proto 构建/序列化/解析/state 写入 | ❌ 不进直方图 | `nonRTTAvgMs` |
 | `NetSamples` | 本次贡献给 `NetLatency` 的网络调用次数 | — | `netSampleCount` |
 
 各 pattern 的 `NetSamples` 约定：
@@ -101,9 +101,9 @@ Lua 动作由 `robotActionHandler.executeLuaAction` 处理，声明式动作由 
 func (ae *ActionExecutor) Execute(ctx context.Context, def *ActionDef) (sendBytes, recvBytes int, timing ActionTiming, err error)
 ```
 
-### 3.2 固定桶延迟直方图
+### 3.2 DDSketch 延迟直方图
 
-16 个预定义桶（详见第 6 节），覆盖 0ms ~ 60s+。全局累积，不淘汰旧样本。每次 `Record(duration)` 纯原子操作。百分位通过桶计数前缀和 + 线性插值计算。
+延迟以纳秒加入 DDSketch，相对精度为 1%，store 最多 2048 bins；同时精确累计 count/sum/min/max。每次 Agent 上报会原子切换活动窗口，累计面和窗口面都保留可合并分布。
 
 ### 3.3 错误按 code 单维聚合
 
@@ -115,7 +115,7 @@ func (ae *ActionExecutor) Execute(ctx context.Context, def *ActionDef) (sendByte
 
 | 文件 | 职责 |
 |------|------|
-| `monitor/histogram.go` | `LatencyHistogram`（16 桶固定桶，纯原子操作）+ `HistogramSnapshot` + `MergeHistograms` |
+| `monitor/histogram.go` | `LatencyHistogram`（DDSketch + 精确 count/sum/min/max）+ `HistogramSnapshot` + 严格 `MergeHistograms` |
 | `monitor/collector.go` | `MetricsCollector` 全局单例 + `actionMetrics` + `ActionResult` + `CodedError` 接口 + `ErrorEntry` + `errorBucket` + 连接/带宽/回调钩子 |
 | `monitor/snapshot.go` | `CollectorSnapshot` + `ActionSnapshot` + `RobotSnapshot` + `ConnectionSnapshot` + `BandwidthSnapshot` + `SystemSnapshot` + `Snapshot()` + `MergeSnapshots()` |
 | `monitor/reporter.go` | 定时控制台报告（维护 prevCounts 计算 PeriodQPS） |
@@ -218,142 +218,51 @@ func (c *MetricsCollector) SetApdexT(t int)
 
 ```go
 type LatencyHistogram struct {
-    count   atomic.Int64          // 采样总数
-    sumNs   atomic.Int64          // 延迟总和（纳秒）
-    minMs   atomic.Int64          // 全局最小延迟（毫秒），初始化为 math.MaxInt64
-    maxMs   atomic.Int64          // 全局最大延迟（毫秒）
-    buckets [numBuckets]atomic.Int64  // 16 个桶的计数
+    mu     sync.Mutex
+    sketch *ddsketch.DDSketch
+    count  int64
+    sumNs  int64
+    minNs  int64
+    maxNs  int64
 }
 ```
 
-每个 action 约 136 字节（16 个 `atomic.Int64` + 4 个独立计数器）。
+DDSketch 使用 `LogCollapsingLowestDenseDDSketch(0.01, 2048)`：相对精度 1%，单个 store 最多 2048 bins。值以纳秒存入 sketch，避免亚毫秒值在入库前损失精度。
 
-### 6.2 桶边界 — BucketBoundsMs
-
-```go
-const NumBuckets = 16
-
-var BucketBoundsMs = [NumBuckets - 1]float64{
-    1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 30000, 60000,
-}
-```
-
-**完整区间列表**：
-
-| 桶索引 | 区间 | 含义 |
-|--------|------|------|
-| 0 | [0, 1ms) | 亚毫秒 |
-| 1 | [1ms, 2ms) | 极快 |
-| 2 | [2ms, 5ms) | 很快 |
-| 3 | [5ms, 10ms) | 快 |
-| 4 | [10ms, 20ms) | 正常偏低 |
-| 5 | [20ms, 50ms) | 正常 |
-| 6 | [50ms, 100ms) | 正常偏高 |
-| 7 | [100ms, 200ms) | 较慢 |
-| 8 | [200ms, 500ms) | 慢 |
-| 9 | [500ms, 1s) | 很慢 |
-| 10 | [1s, 2s) | 极慢 |
-| 11 | [2s, 5s) | 超时边缘 |
-| 12 | [5s, 10s) | 严重超时 |
-| 13 | [10s, 30s) | 极端 |
-| 14 | [30s, 60s) | 异常 |
-| 15 | [60s, +inf) | 溢出桶 |
-
-**`buckets[i]` 记录落在 `(boundsMs[i-1], boundsMs[i]]` 区间的样本数**。`buckets[0]` 记录 == 0ms 的样本（极少见）。最后一个桶（index 15）为 > 60000ms 的溢出桶。
-
-### 6.3 Record 操作
+### 6.2 Record 操作
 
 ```go
-func (h *LatencyHistogram) Record(d time.Duration)
+func (h *LatencyHistogram) Record(d time.Duration) error
 ```
 
-每次调用：
-1. `count.Add(1)` — 采样数
-2. `sumNs.Add(d.Nanoseconds())` — 延迟总和，用于计算 avg
-3. 原子 CAS 循环更新全局 min/max — **不丢失**
-4. 遍历桶找归属区间，`buckets[i].Add(1)` — O(16)
+负耗时被拒绝并增加 `invalidMetricSamples`。有效样本在同一临界区内加入 sketch，并更新精确 count/sum/min/max；因此快照不会出现 sketch 与精确计数来自不同时间点的撕裂状态。
 
-**全部操作无 mutex，纯原子操作。**
-
-### 6.4 minMs 初始化
-
-`atomic.Int64` 零值为 0，但 min 应为 `MaxInt64`。**必须**通过 `newLatencyHistogram()` 构造：
-
-```go
-func newLatencyHistogram() *LatencyHistogram {
-    h := &LatencyHistogram{}
-    h.minMs.Store(math.MaxInt64)
-    return h
-}
-```
-
-### 6.5 HistogramSnapshot
+### 6.3 HistogramSnapshot
 
 ```go
 type HistogramSnapshot struct {
-    Count int64   `json:"count"`
-    MinMs float64 `json:"minMs"`
-    MaxMs float64 `json:"maxMs"`
-    AvgMs float64 `json:"avgMs"`
-    P50Ms float64 `json:"p50Ms"`
-    P90Ms float64 `json:"p90Ms"`
-    P95Ms float64 `json:"p95Ms"`
-    P99Ms float64 `json:"p99Ms"`
-
-    // 跨节点聚合所需原始数据（omitempty 向后兼容单机模式）
-    SumNs        int64   `json:"sumNs,omitempty"`
-    BucketCounts []int64 `json:"bucketCounts,omitempty"`
+    Count int64    `json:"count"`
+    MinMs *float64 `json:"minMs"`
+    MaxMs *float64 `json:"maxMs"`
+    AvgMs *float64 `json:"avgMs"`
+    P50Ms *float64 `json:"p50Ms"`
+    P90Ms *float64 `json:"p90Ms"`
+    P95Ms *float64 `json:"p95Ms"`
+    P99Ms *float64 `json:"p99Ms"`
+    SumNs int64    `json:"sumNs,omitempty"`
+    Sketch []byte  `json:"sketch,omitempty"`
 }
 ```
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `Count` | int64 | 采样数（= 成功次数） |
-| `MinMs` | float64 | 全局最小延迟 ms |
-| `MaxMs` | float64 | 全局最大延迟 ms |
-| `AvgMs` | float64 | 全局平均延迟 ms（= sumNs / count / 1e6） |
-| `P50Ms` | float64 | P50 ms（桶计数前缀和 + 线性插值） |
-| `P90Ms` | float64 | P90 ms |
-| `P95Ms` | float64 | P95 ms |
-| `P99Ms` | float64 | P99 ms |
-| `SumNs` | int64 | 延迟总和纳秒（用于分布式合并） |
-| `BucketCounts` | []int64 | 16 桶计数数组（用于分布式合并） |
+`Count/SumNs/MinMs/MaxMs` 是精确值；分位数从 DDSketch 读取，并限制在精确 Min/Max 边界内。`Count == 0` 时七个展示值全部是 `null`，明确表示没有样本。`Sketch` 只允许出现在 Agent 到 Admin 的内部报告，公共 API 通过 `PublicCopy()` 移除。
 
-### 6.6 百分位计算 — percentileFromBuckets
+### 6.4 MergeHistograms — 分布式合并
 
 ```go
-func percentileFromBuckets(counts [numBuckets]int64, total int64, p float64) float64
+func MergeHistograms(snaps []HistogramSnapshot) (HistogramSnapshot, error)
 ```
 
-桶计数前缀和 + 线性插值估算百分位（毫秒），O(16)。
-
-算法：
-1. 计算 `rank = ceil(p * total)`
-2. 从第一个桶开始累加计数
-3. 当累计计数 >= rank 时，在当前桶内线性插值：
-   ```
-   fraction = (rank - prevSum) / inBucket
-   result = lo + fraction * (hi - lo)
-   ```
-4. `lo` / `hi` 为桶的上下边界
-
-**为什么选固定桶而非排序样本？**
-
-旧工具维护 10240 个样本的排序窗口，超出后淘汰。2 小时压测后 P99 只反映最后约 5 分钟。固定桶的 P99 代表整个生命周期的第 99 百分位。精度约 +/- 20%（由桶边界决定），对压测完全可接受。
-
-### 6.7 MergeHistograms — 分布式合并
-
-```go
-func MergeHistograms(snaps []HistogramSnapshot) HistogramSnapshot
-```
-
-合并多个直方图快照：
-1. Count、SumNs 累加
-2. MinMs 取各节点最小值
-3. MaxMs 取各节点最大值
-4. BucketCounts 逐桶累加
-5. AvgMs 重新计算
-6. P50/P90/P95/P99 从合并后的桶计数重新计算
+非空分布必须同时携带完整展示值和有效 sketch，且 sketch 内样本数必须等于 `Count`；任何损坏都返回错误，不回退到估算值。合并时累加 Count/SumNs、取精确 Min/Max，并调用 DDSketch `MergeWith` 后重新计算 P50/P90/P95/P99。
 
 ---
 
@@ -398,33 +307,35 @@ func classifyResult(err error) monitor.ActionResult {
 
 判断优先级：nil → Canceled → Timeout → Failure。
 
-### 7.3 各结果的指标归属
+### 7.3 请求结果的指标归属
 
-| 结果 | 延迟直方图 | Apdex | QPS (sampleCount) | 错误分布 | executing |
-|------|-----------|-------|-------------------|---------|-----------|
-| Success | **记录** | satisfied 或 tolerating | 计入 | - | -1 |
-| Failure | 不记录 | 隐式 frustrated | 计入 | **按 code 记录** | -1 |
-| Timeout | 不记录 | 隐式 frustrated | 计入 | - | -1 |
-| Canceled | 不记录 | **不计入** | **不计入** | - | -1 |
+| 运行时事实 | RTT 直方图 | RTT Apdex | QPS (sampleCount) |
+|------|-----------|-------|-------------------|
+| 收到完整响应帧（含业务错误） | **按真实 WireRTT 记录** | 按 RTT 分类 | 计入 |
+| 已发起请求但无响应帧 | 不记录（没有可用时延值） | **进入分母，记 frustrated** | 失败/超时结果计入 |
+| 监听/单向发送/本地动作 | 不适用 | 不参与 | 按动作结果计入 |
+| 任务取消且未形成失败请求 | 不记录 | 不参与 | 不计入 |
 
 **关键说明**：
-- **延迟仅记录 Success**：失败/超时的耗时无意义
-- **`latency.count <= sampleCount`**：前端需知延迟仅含成功请求
+- **RTT 记录响应帧而不是业务成功**：服务器返回业务错误时仍有真实 RTT，正常进入直方图和 Apdex
+- **`rtt.count <= rttApdexSampleCount`**：无响应帧请求只影响评分分母，不污染分位数
 - **Canceled 不计入样本数**：取消 = 任务被用户主动停止，不代表服务器能力
 - **sampleCount = successCount + failureCount + timeoutCount**（不含 canceledCount）
 
 ### 7.4 RTT Apdex(T) 公式
 
 ```
-RTT Apdex = (satisfied + tolerating * 0.5) / rttSampleCount
+RTT Apdex = (satisfied + tolerating * 0.5) / rttApdexSampleCount
 
 其中 rttSampleCount = 有完整响应帧且 WireRTT > 0 的 request 数
+      rttFailedCount = 已发起但没有完整响应帧的失败 request 数
+      rttApdexSampleCount = rttSampleCount + rttFailedCount
       satisfied     = WireRTT < T（默认 100ms）
       tolerating    = T <= WireRTT < 4T（默认 100ms ~ 400ms）
       frustrated    = WireRTT >= 4T（隐式 0 分，不单独计数）
 ```
 
-RTT Apdex 只评价网络 RTT 样本；纯客户端动作、超时、发送失败、取消且未收到响应帧的分支不进入分母。失败/超时对整体质量的影响通过 `failureCount`、`timeoutCount`、`successRate` 和错误分布单独展示。
+RTT Apdex 只评价 `networked` 动作。无响应帧失败请求进入分母记 frustrated，但不进入 RTT 直方图；监听、单向发送和本地动作不参与评分。
 
 **关键**：`float64(tolerating) * 0.5`，不是 `tolerating / 2`（Go 整数除法会丢精度）。
 
@@ -445,6 +356,7 @@ for _, req := range timing.Requests {
         am.apdexTolerating.Add(1)
     }
 }
+am.rttFailedCount.Add(int64(timing.FailedRequests))
 ```
 
 ### 7.5 QPS 计算
@@ -670,7 +582,7 @@ func (c *MetricsCollector) RecordAction(...) {
 **关键设计**：
 - per-action 字节统计（`sendBytes`/`recvBytes`）仅记录成功样本，用于 ActionsTab 的平均列
 - 全局带宽（`totalSendBytes`/`totalRecvBytes`）由 network 层的 `AddBandwidth` 统一统计，不在 RecordAction 中累加（避免双计）
-- canceledCount 不参与 sampleCount/SuccessRate 计算；只有产生 WireRTT 的 request 才参与 RTT Apdex
+- canceledCount 不参与 sampleCount/SuccessRate；RTT Apdex 评价发起过的 request，有 WireRTT 时按真实值分类，无响应帧失败时记 frustrated
 
 ### 10.3 RecordActionStart
 
@@ -736,6 +648,8 @@ type CollectorSnapshot struct {
     UptimeSec    float64            `json:"uptimeSeconds"`
     TotalActions int64              `json:"totalActions"`
     ApdexT       int                `json:"apdexT"`
+    TimingDetail TimingDetailLevel  `json:"timingDetail"`
+    Summary      SnapshotSummary    `json:"summary"`
     System       SystemSnapshot     `json:"system"`
     Robots       RobotSnapshot      `json:"robots"`
     Connections  ConnectionSnapshot `json:"connections"`
@@ -743,6 +657,10 @@ type CollectorSnapshot struct {
     Actions      []ActionSnapshot   `json:"actions"`
 }
 ```
+
+`Summary` 是实时总览和历史采样的唯一跨动作指标来源。它包含结果计数、成功率、RTT Apdex 及完整分母、合并后的 RTT/监听等待/总耗时直方图、客户端阶段均值和总 QPS。跨动作 P95/P99 由 DDSketch 合并后重算，不平均单动作百分位。
+
+`TimingDetail` 只控制额外客户端阶段计时：`rtt`（RTT + 发送）、`codec`（追加编码/解码）、`full`（再追加构建、排队、分发等待、解析/状态写入）。它不改变 Apdex 计算。
 
 ### 12.2 SystemSnapshot — 系统资源
 
@@ -795,7 +713,7 @@ type BandwidthSnapshot struct {
 
 带宽由 network 层的 `AddBandwidth` 统一统计（含心跳/监听等全部流量），不在 RecordAction 中累加。
 
-### 12.6 ActionSnapshot — Per-Action 完整快照
+### 12.6 ActionSnapshot — Per-Action 关键字段
 
 ```go
 type ActionSnapshot struct {
@@ -809,20 +727,42 @@ type ActionSnapshot struct {
     SuccessRate   float64           `json:"successRate"`
     AvgSendBytes  float64           `json:"avgSendBytes"`
     AvgRecvBytes  float64           `json:"avgRecvBytes"`
-    Apdex         float64           `json:"apdex"`
-    Latency       HistogramSnapshot `json:"latency"`
+    Kind          ActionKind        `json:"kind"`
+    RTTApdex      float64           `json:"rttApdex"`
+    RTTApdexSampleCount int64       `json:"rttApdexSampleCount"`
+    RTT           HistogramSnapshot `json:"rtt"`
+    RTTSampleCount int64            `json:"rttSampleCount"`
+    ListenWait    HistogramSnapshot `json:"listenWait"`
+    TotalDuration HistogramSnapshot `json:"totalDuration"`
+    ClientAvgMs   float64           `json:"nonRTTAvgMs"`
+    ClientCostCount int64           `json:"clientCostCount"`
+    BuildAvgMs    float64           `json:"buildAvgMs"`
+    EncodeAvgMs   float64           `json:"encodeAvgMs"`
+    SendAvgMs     float64           `json:"sendAvgMs"`
+    DecodeWaitAvgMs float64         `json:"decodeWaitAvgMs"`
+    DecodeAvgMs   float64           `json:"decodeAvgMs"`
+    DispatchToActionWaitAvgMs float64 `json:"dispatchToActionWaitAvgMs"`
+    ParseStoreAvgMs float64         `json:"parseStoreAvgMs"`
     TimeoutAvgMs  float64           `json:"timeoutAvgMs"`
     AvgQPS        float64           `json:"avgQps"`
     PeriodQPS     float64           `json:"periodQps"`
     Errors        []ErrorEntry      `json:"errors,omitempty"`
 
-    // 跨节点聚合所需的原始数据（omitempty 向后兼容单机模式）
-    LatencySumNs        int64   `json:"latencySumNs,omitempty"`
-    LatencyBucketCounts []int64 `json:"latencyBucketCounts,omitempty"`
+    // 跨节点聚合所需的原始计数；分布原始数据位于 HistogramSnapshot.Sketch
     ApdexSatisfied      int64   `json:"apdexSatisfied,omitempty"`
     ApdexTolerating     int64   `json:"apdexTolerating,omitempty"`
+    RTTFailedCount      int64   `json:"rttFailedCount,omitempty"`
     TotalSendBytes      int64   `json:"totalSendBytes,omitempty"`
     TotalRecvBytes      int64   `json:"totalRecvBytes,omitempty"`
+    TimeoutTotalNs      int64   `json:"timeoutTotalNs,omitempty"`
+    ClientCostSumNs     int64   `json:"clientCostSumNs,omitempty"`
+    BuildCostSumNs      int64   `json:"buildCostSumNs,omitempty"`
+    EncodeCostSumNs     int64   `json:"encodeCostSumNs,omitempty"`
+    SendCostSumNs       int64   `json:"sendCostSumNs,omitempty"`
+    DecodeWaitSumNs     int64   `json:"decodeWaitSumNs,omitempty"`
+    DecodeCostSumNs     int64   `json:"decodeCostSumNs,omitempty"`
+    DispatchWaitSumNs   int64   `json:"dispatchWaitSumNs,omitempty"`
+    ParseStoreSumNs     int64   `json:"parseStoreSumNs,omitempty"`
 }
 ```
 
@@ -832,7 +772,8 @@ type ActionSnapshot struct {
 |------|------|
 | `SampleCount` | `successCount + failureCount + timeoutCount`（不含 canceledCount） |
 | `SuccessRate` | `float64(successCount) / float64(sampleCount)` |
-| `Apdex` | `(float64(satisfied) + float64(tolerating) * 0.5) / float64(sampleCount)` |
+| `RTTApdex` | `(satisfied + tolerating * 0.5) / rttApdexSampleCount` |
+| `RTTApdexSampleCount` | `rttSampleCount + rttFailedCount` |
 | `AvgSendBytes` | `float64(totalSendBytes) / float64(successCount + failureCount + timeoutCount + canceledCount)` |
 | `AvgRecvBytes` | `float64(totalRecvBytes) / float64(successCount + failureCount + timeoutCount + canceledCount)` |
 | `AvgQPS` | `float64(sampleCount) / uptimeSec` |
@@ -847,10 +788,11 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 
 1. 读取系统资源（`runtime.ReadMemStats`）
 2. 计算全局带宽（`totalSendBytes / uptimeSec` → MBps）
-3. 读取当前 ApdexT（RLock）
+3. 读取当前 ApdexT 与 TimingDetail
 4. 遍历 `ActionNames()` 生成每个 action 的 `ActionSnapshot`
 5. 错误分布仅在 `failureCount > 0 || timeoutCount > 0` 时采集
-6. `prevCounts` 由 Reporter 维护，传 nil 则 periodQPS = 0
+6. 调用 `BuildSnapshotSummary(actions)` 生成跨动作统一汇总
+7. `prevCounts` 由 Reporter 维护，传 nil 则 periodQPS = 0
 
 ---
 
@@ -868,6 +810,7 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot
 |------|---------|
 | `Timestamp` | 取当前时间（合并时刻） |
 | `ApdexT` | 取第一个 snapshot 的值（所有 Agent 使用相同配置） |
+| `TimingDetail` | 取所有有效 snapshot 的最低级别 |
 | `UptimeSec` | 取所有 snapshot 中的**最大值** |
 | `TotalActions` | 累加 |
 | `Robots.*` | 全部累加（Started/Running/Stopped/Errored） |
@@ -887,16 +830,18 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot
 | `TimeoutCount` | 累加 |
 | `CanceledCount` | 累加 |
 | `Executing` | 累加（各 Agent 当前并发数之和） |
-| `LatencySumNs` | 累加 |
+| 各直方图 `Count/SumNs` | 累加 |
 | `ApdexSatisfied` | 累加 |
 | `ApdexTolerating` | 累加 |
 | `TotalSendBytes/TotalRecvBytes` | 累加 |
-| `Latency` | `MergeHistograms`（逐桶累加 + 重新计算百分位） |
+| `RTT` / `ListenWait` / `TotalDuration` | `MergeHistograms`（合并 DDSketch + 重新计算百分位） |
 | `SuccessRate` | 重新计算（`totalSuccess / totalSample`） |
-| `Apdex` | 重新计算（标准公式） |
+| `RTTApdex` | 按 `RTTSampleCount + RTTFailedCount` 重新计算 |
 | `AvgSendBytes/AvgRecvBytes` | 重新计算（`totalBytes / (success + failure + timeout + canceled)`） |
 | `AvgQPS` | 重新计算（`totalSample / maxUptime`） |
 | `TimeoutAvgMs` | 重新计算（加权平均：`sum(timeoutAvgMs * timeoutCount) / totalTimeout`） |
+
+动作合并结束后再次调用同一个 `BuildSnapshotSummary`。实时前端与 Admin Sampler 只读取该 `summary`，不再从 action 数组加权 Apdex 或百分位数。
 
 ### 13.4 错误合并
 
@@ -1189,31 +1134,9 @@ sampleCount = successCount + failureCount + timeoutCount
 
 - 不含 `canceledCount`（取消不算样本）
 - 不含 skippedCount（当前实现中无此字段）
-- 历史口径保持不变，改造前后数据可比较
 
 ### 21.4 全局带宽 vs per-action 字节
 
 - **全局带宽**（`totalSendBytes`/`totalRecvBytes`）：由 network 层的 `AddBandwidth` 统计，含心跳/监听等全部流量
 - **per-action 字节**（`am.sendBytes`/`am.recvBytes`）：由 `RecordAction`/`RecordCallback` 统计，所有已记录结果分支按实际发生的 WireBytes 累计
 - 两者不重叠：RecordAction 中不再累加全局带宽
-
----
-
-## 22. 与计划的差异
-
-| 章节 | 计划 | 实际 |
-|------|------|------|
-| 桶数量 | 17 个桶 | **16 个桶**（`NumBuckets = 16`），15 个边界值 + 1 个溢出桶 |
-| `skippedCount` | ActionSnapshot 含此字段 | **未实现**。ActionResult 中无 ResultSkipped，classifyResult 只有 4 个分支 |
-| 错误聚合 | string → *atomic.Int64 | **errKey → *errorBucket**，按 code 单维聚合 + 环形缓冲 |
-| ErrorEntry | `{msg, count}` | **`{code, codeName, msgs, count}`**，结构化替代字符串 |
-| RecordAction 签名 | `(name, result, duration, send, recv, errMsg string)` | `(name, result, duration, send, recv, err error)` |
-| CanceledCount | 未提及 | **已实现**。ActionSnapshot 含 CanceledCount，不参与 sampleCount |
-| Callback 监控 | 未提及 | **已实现**。RecordCallbackSuccess / RecordCallbackError |
-| TimeoutAvgMs | 未提及 | **已实现**。actionMetrics 含 timeoutTotalMs，ActionSnapshot 含 TimeoutAvgMs |
-| 控制台错误格式 | `动作→错误消息(次数)` | `动作→[框架/业务 CodeName或#code]×Count msg (+N more)`（标签由 code 推导） |
-| CSV 表头 | 含"跳过次数"列 | **不含"跳过次数"列** |
-| `totalSendBytes/totalRecvBytes` | 在 RecordAction 中累加 | **由 network 层的 AddBandwidth 统计**，RecordAction 中不累加（避免双计） |
-| LatencyHistogram minMs 初始化 | 文档提及 | **已正确实现**（newLatencyHistogram 中 Store(math.MaxInt64)） |
-| 分布式聚合 | 未提及 | **已实现**。MergeSnapshots + MergeHistograms，含完整错误合并规则 |
-| ApdexT 运行期调整 | 未提及 | **已实现**。SetApdexT 方法，cfgMu 读写锁保护 |

@@ -2,10 +2,11 @@ package admin
 
 import (
 	"context"
-	"math"
+	"fmt"
 	"sync"
 	"time"
 
+	"stressbot/monitor"
 	"stressbot/utils"
 	stresslog "stressbot/utils/log"
 
@@ -16,7 +17,8 @@ import (
 type Sampler struct {
 	interval   time.Duration
 	aggregator *MetricsAggregator
-	history    *HistoryStore
+	history    historyWriter
+	windows    *MetricsWindowStore
 	registry   *AgentRegistry
 	tasks      *TaskStore
 
@@ -24,17 +26,23 @@ type Sampler struct {
 	current *samplerJob
 }
 
+type historyWriter interface {
+	AppendTimeseries(context.Context, string, HistoryTrendPoint) error
+}
+
 type samplerJob struct {
 	taskID    string
 	startedAt time.Time
 	cancel    context.CancelFunc
+	done      chan struct{}
 }
 
-func NewSampler(interval time.Duration, agg *MetricsAggregator, hist *HistoryStore, reg *AgentRegistry, tasks *TaskStore) *Sampler {
+func NewSampler(interval time.Duration, agg *MetricsAggregator, hist historyWriter, reg *AgentRegistry, tasks *TaskStore, windows *MetricsWindowStore) *Sampler {
 	return &Sampler{
 		interval:   interval,
 		aggregator: agg,
 		history:    hist,
+		windows:    windows,
 		registry:   reg,
 		tasks:      tasks,
 	}
@@ -49,23 +57,71 @@ func (s *Sampler) Start(taskID string) error {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	s.current = &samplerJob{
+	job := &samplerJob{
 		taskID:    taskID,
 		startedAt: time.Now(),
 		cancel:    cancel,
+		done:      make(chan struct{}),
 	}
-	utils.GetWorkPool().GoWithStop(func(stopCh <-chan struct{}) { s.loop(ctx, taskID, s.current.startedAt, stopCh) })
+	s.current = job
+	utils.GetWorkPool().GoWithStop(func(stopCh <-chan struct{}) {
+		defer close(job.done)
+		s.loop(ctx, taskID, job.startedAt, stopCh)
+	})
 	return nil
 }
 
 func (s *Sampler) Stop(taskID string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.current != nil && s.current.taskID == taskID {
-		s.current.cancel()
-		s.current = nil
+	job := s.current
+	if job == nil || job.taskID != taskID {
+		s.mu.Unlock()
+		return
 	}
+	job.cancel()
+	s.current = nil
+	s.mu.Unlock()
+
+	select {
+	case <-job.done:
+	case <-time.After(5 * time.Second):
+		stresslog.Warn("[SAMPLER] 等待采样循环退出超时", zap.String("taskID", taskID))
+	}
+
+	now := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	_, err := s.sampleOnce(ctx, taskID, now, int(now.Sub(job.startedAt).Seconds()))
+	cancel()
+	if err != nil {
+		stresslog.Warn("[SAMPLER] 终态指标冲刷失败，进入后台重试", zap.String("taskID", taskID), zap.Error(err))
+		s.retryFinalFlush(taskID, job.startedAt)
+	}
+}
+
+func (s *Sampler) retryFinalFlush(taskID string, startedAt time.Time) {
+	utils.GetWorkPool().GoWithStop(func(stopCh <-chan struct{}) {
+		backoff := time.Second
+		for {
+			now := time.Now()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			_, err := s.sampleOnce(ctx, taskID, now, int(now.Sub(startedAt).Seconds()))
+			cancel()
+			if err == nil {
+				return
+			}
+			stresslog.Warn("[SAMPLER] 终态指标后台冲刷失败",
+				zap.String("taskID", taskID), zap.Duration("backoff", backoff), zap.Error(err))
+			select {
+			case <-stopCh:
+				return
+			case <-time.After(backoff):
+			}
+			backoff *= 2
+			if backoff > 30*time.Second {
+				backoff = 30 * time.Second
+			}
+		}
+	})
 }
 
 func (s *Sampler) loop(ctx context.Context, taskID string, startedAt time.Time, stopCh <-chan struct{}) {
@@ -85,18 +141,161 @@ func (s *Sampler) loop(ctx context.Context, taskID string, startedAt time.Time, 
 				continue
 			}
 
-			stress := s.aggregator.AggregateStress(taskID)
-			sys := s.aggregator.AggregateSystem()
-			point := buildHistoryTrendPoint(t, elapsed, stress, sys)
-			point.StageIndex = s.currentStageIndex(taskID)
-			if err := s.history.AppendTimeseries(context.Background(), taskID, point); err != nil {
+			saved, err := s.sampleOnce(context.Background(), taskID, t, elapsed)
+			if err != nil {
 				stresslog.Warn("[SAMPLER] 时序趋势数据写入失败",
 					zap.String("taskID", taskID), zap.Error(err))
 				continue
 			}
-			lastSavedElapsed = elapsed
+			if saved {
+				lastSavedElapsed = elapsed
+			}
 		}
 	}
+}
+
+func (s *Sampler) sampleOnce(ctx context.Context, taskID string, sampledAt time.Time, elapsed int) (bool, error) {
+	if s.windows == nil || s.history == nil {
+		return false, nil
+	}
+	batch, ok := s.windows.PeekHistory(taskID)
+	if !ok {
+		return false, nil
+	}
+	stress, err := aggregateHistoryBatch(batch)
+	if err != nil {
+		return false, err
+	}
+	var system ClusterSystemSnapshot
+	if s.aggregator != nil {
+		live, err := s.aggregator.AggregateStress(taskID)
+		if err != nil {
+			return false, err
+		}
+		stress.AssignedAgents = live.AssignedAgents
+		stress.TotalAgents = live.TotalAgents
+		stress.OfflineAgents = live.OfflineAgents
+		stress.CoverageRatio = 0
+		if stress.AssignedAgents > 0 {
+			stress.CoverageRatio = float64(stress.ReportingAgents) / float64(stress.AssignedAgents)
+		}
+		var systemAgentIDs []string
+		if task, ok := s.tasks.Get(taskID); ok {
+			systemAgentIDs = taskSystemAgentIDs(task)
+		} else {
+			systemAgentIDs = []string{}
+		}
+		system = s.aggregator.AggregateSystem(systemAgentIDs)
+	}
+	if stress.AssignedAgents == 0 {
+		stress.AssignedAgents = s.taskAssignedAgentCount(taskID)
+		stress.CoverageRatio = 0
+		if stress.AssignedAgents > 0 {
+			stress.CoverageRatio = float64(stress.ReportingAgents) / float64(stress.AssignedAgents)
+		}
+	}
+	point := buildHistoryTrendPoint(sampledAt, elapsed, stress, system)
+	point.StageIndex = s.currentStageIndex(taskID)
+	point.HistoryBatchToken = append([]byte(nil), batch.Token[:]...)
+	if err := s.history.AppendTimeseries(ctx, taskID, point); err != nil {
+		return false, err
+	}
+	if !s.windows.AckHistory(taskID, batch.Token) {
+		return false, fmt.Errorf("确认历史指标批次失败")
+	}
+	return true, nil
+}
+
+func (s *Sampler) taskAssignedAgentCount(taskID string) int {
+	if s.tasks == nil {
+		return 0
+	}
+	task, ok := s.tasks.Get(taskID)
+	if !ok {
+		return 0
+	}
+	if len(task.SucceededAgents) > 0 {
+		return len(task.SucceededAgents)
+	}
+	return len(task.Assignments)
+}
+
+func aggregateHistoryBatch(batch MetricHistoryBatch) (*StressAggregate, error) {
+	parts := make([]*monitor.CollectorSnapshot, 0, len(batch.Windows))
+	type agentRate struct {
+		samples              int64
+		duration             float64
+		sendBytes, recvBytes int64
+		latestSequence       uint64
+		robots               monitor.RobotSnapshot
+		connections          monitor.ConnectionSnapshot
+	}
+	rates := make(map[string]*agentRate)
+	var startedAt, endedAt time.Time
+	for _, item := range batch.Windows {
+		window := item.Window
+		parts = append(parts, &monitor.CollectorSnapshot{
+			ApdexT:               item.ApdexT,
+			TimingDetail:         item.TimingDetail,
+			UptimeSec:            window.DurationSeconds,
+			Actions:              window.Actions,
+			InvalidMetricSamples: window.InvalidMetricSamples,
+		})
+		rate := rates[item.AgentID]
+		if rate == nil {
+			rate = &agentRate{}
+			rates[item.AgentID] = rate
+		}
+		for _, action := range window.Actions {
+			rate.samples += action.SampleCount
+		}
+		rate.duration += window.DurationSeconds
+		rate.sendBytes += window.Bandwidth.SendBytes
+		rate.recvBytes += window.Bandwidth.RecvBytes
+		if window.Sequence >= rate.latestSequence {
+			rate.latestSequence = window.Sequence
+			rate.robots = item.Robots
+			rate.connections = item.Connections
+		}
+		if startedAt.IsZero() || window.StartedAt.Before(startedAt) {
+			startedAt = window.StartedAt
+		}
+		if window.EndedAt.After(endedAt) {
+			endedAt = window.EndedAt
+		}
+	}
+	merged, err := monitor.MergeSnapshots(parts)
+	if err != nil {
+		return nil, err
+	}
+	var qps, sendMBps, recvMBps float64
+	for _, rate := range rates {
+		if rate.duration > 0 {
+			qps += float64(rate.samples) / rate.duration
+			sendMBps += float64(rate.sendBytes) / 1024 / 1024 / rate.duration
+			recvMBps += float64(rate.recvBytes) / 1024 / 1024 / rate.duration
+		}
+		merged.Robots.Running += rate.robots.Running
+		merged.Connections.Active += rate.connections.Active
+		merged.Connections.Closed += rate.connections.Closed
+		merged.Connections.Dropped += rate.connections.Dropped
+	}
+	merged.Summary.AvgQPS = qps
+	merged.TotalActions = merged.Summary.SampleCount
+	merged.Bandwidth.SendMBps = sendMBps
+	merged.Bandwidth.RecvMBps = recvMBps
+	merged.Window = &monitor.ReportWindow{
+		StartedAt:       startedAt,
+		EndedAt:         endedAt,
+		DurationSeconds: endedAt.Sub(startedAt).Seconds(),
+		Summary:         merged.Summary,
+		Bandwidth: monitor.WindowBandwidthSnapshot{
+			SendMBps: sendMBps,
+			RecvMBps: recvMBps,
+		},
+		Actions: merged.Actions,
+	}
+	return &StressAggregate{Snapshot: merged, ReportingAgents: len(rates)}, nil
 }
 
 // currentStageIndex 返回采样时刻活跃任务所属的阶段段落号。
@@ -148,16 +347,16 @@ func buildHistoryTrendPoint(sampledAt time.Time, elapsed int, stress *StressAggr
 	point := HistoryTrendPoint{
 		SampledAt:     sampledAt,
 		ElapsedSec:    elapsed,
-		AvgCPUPercent: sys.AvgCPUPercent,
-		MaxCPUPercent: sys.MaxCPUPercent,
-		Goroutines:    sys.TotalGoroutines,
-		Threads:       int(sys.TotalThreads),
-		FDs:           int(sys.TotalFDs),
+		AvgCPUPercent: float64Value(sys.AvgHostCPUPercent),
+		MaxCPUPercent: float64Value(sys.MaxHostCPUPercent),
+		Goroutines:    intValue(sys.TotalProcessGoroutines),
+		Threads:       int(int32Value(sys.TotalProcessThreads)),
+		FDs:           int(int32Value(sys.TotalProcessFDs)),
 		OnlineCount:   sys.OnlineCount,
 		OfflineCount:  sys.OfflineCount,
 	}
-	point.AvgMemPercent = sys.AvgMemPercent
-	point.MaxMemPercent = sys.MaxMemPercent
+	point.AvgMemPercent = float64Value(sys.AvgHostMemPercent)
+	point.MaxMemPercent = float64Value(sys.MaxHostMemPercent)
 	if stress == nil || stress.Snapshot == nil {
 		return point
 	}
@@ -165,69 +364,64 @@ func buildHistoryTrendPoint(sampledAt time.Time, elapsed int, stress *StressAggr
 	snap := stress.Snapshot
 	point.BotsRunning = int(snap.Robots.Running)
 	point.BotsErrored = int(snap.Robots.Errored)
-	point.SendKBps = snap.Bandwidth.SendMBps * 1024
-	point.RecvKBps = snap.Bandwidth.RecvMBps * 1024
+	if snap.Window == nil {
+		return point
+	}
+	window := snap.Window
+	point.WindowFrom = window.StartedAt
+	point.WindowTo = window.EndedAt
+	point.SampleCount = window.Summary.SampleCount
+	point.SendKBps = window.Bandwidth.SendMBps * 1024
+	point.RecvKBps = window.Bandwidth.RecvMBps * 1024
+	sendBytesPerSec := window.Bandwidth.SendMBps * 1024 * 1024
+	recvBytesPerSec := window.Bandwidth.RecvMBps * 1024 * 1024
+	point.NetSendBytesPerSec = &sendBytesPerSec
+	point.NetRecvBytesPerSec = &recvBytesPerSec
+	active := snap.Connections.Active
+	closed := snap.Connections.Closed
+	dropped := snap.Connections.Dropped
+	point.ActiveConnections = &active
+	point.ClosedConnections = &closed
+	point.DroppedConnections = &dropped
+	assigned := stress.AssignedAgents
+	reporting := stress.ReportingAgents
+	coverage := stress.CoverageRatio
+	point.AssignedAgents = &assigned
+	point.ReportingAgents = &reporting
+	point.ReportingCoverage = &coverage
 
-	var rttWeight, totalDurationWeight, listenWaitWeight float64
-	var rttAvg, rttP95, rttP99, totalDurationAvg, totalDurationP95, totalDurationP99 float64
-	var listenWaitP99 float64
-	var clientAvg, encodeAvg, decodeAvg float64
-	var clientWeight float64
-	for _, action := range snap.Actions {
-		point.TotalQPS += action.AvgQPS
-		if action.RTTSampleCount > 0 {
-			weight := float64(action.RTTSampleCount)
-			point.RTTApdex += action.RTTApdex * weight
-			rttAvg += action.RTT.AvgMs * weight
-			rttP95 += action.RTT.P95Ms * weight
-			rttP99 += action.RTT.P99Ms * weight
-			rttWeight += weight
-		}
-		if action.ListenWaitSampleCount > 0 {
-			weight := float64(action.ListenWaitSampleCount)
-			listenWaitP99 += action.ListenWait.P99Ms * weight
-			listenWaitWeight += weight
-		}
-		if action.TotalDurationSampleCount > 0 {
-			weight := float64(action.TotalDurationSampleCount)
-			totalDurationAvg += action.TotalDuration.AvgMs * weight
-			totalDurationP95 += action.TotalDuration.P95Ms * weight
-			totalDurationP99 += action.TotalDuration.P99Ms * weight
-			totalDurationWeight += weight
-		}
-		if action.SampleCount > 0 {
-			weight := float64(action.SampleCount)
-			clientAvg += action.ClientAvgMs * weight
-			encodeAvg += action.EncodeAvgMs * weight
-			decodeAvg += action.DecodeAvgMs * weight
-			clientWeight += weight
-		}
+	summary := window.Summary
+	point.TotalQPS = summary.AvgQPS
+	if summary.RTTApdexSampleCount > 0 {
+		rttApdex := summary.RTTApdex
+		point.RTTApdex = &rttApdex
 	}
-	if rttWeight > 0 {
-		point.RTTApdex = point.RTTApdex / rttWeight
-		point.RTTAvgMs = rttAvg / rttWeight
-		point.RTTP95Ms = rttP95 / rttWeight
-		point.RTTP99Ms = rttP99 / rttWeight
+	if summary.RTT.Count > 0 {
+		point.RTTAvgMs = summary.RTT.AvgMs
+		point.RTTP50Ms = summary.RTT.P50Ms
+		point.RTTP90Ms = summary.RTT.P90Ms
+		point.RTTP95Ms = summary.RTT.P95Ms
+		point.RTTP99Ms = summary.RTT.P99Ms
 	}
-	if listenWaitWeight > 0 {
-		point.ListenWaitP99Ms = listenWaitP99 / listenWaitWeight
+	if summary.ListenWait.Count > 0 {
+		point.ListenWaitP99Ms = summary.ListenWait.P99Ms
 	}
-	if totalDurationWeight > 0 {
-		point.TotalDurationAvgMs = totalDurationAvg / totalDurationWeight
-		point.TotalDurationP95Ms = totalDurationP95 / totalDurationWeight
-		point.TotalDurationP99Ms = totalDurationP99 / totalDurationWeight
+	if summary.TotalDuration.Count > 0 {
+		point.TotalDurationAvgMs = summary.TotalDuration.AvgMs
+		point.TotalDurationP95Ms = summary.TotalDuration.P95Ms
+		point.TotalDurationP99Ms = summary.TotalDuration.P99Ms
 	}
-	if clientWeight > 0 {
-		point.ClientAvgMs = clientAvg / clientWeight
-		point.EncodeAvgMs = encodeAvg / clientWeight
-		point.DecodeAvgMs = decodeAvg / clientWeight
+	if summary.ClientCostCount > 0 {
+		clientAvg := summary.ClientAvgMs
+		point.ClientAvgMs = &clientAvg
 	}
-	point.TotalQPS = math.Round(point.TotalQPS*100) / 100
-	point.RTTApdex = math.Round(point.RTTApdex*10000) / 10000
-	point.ListenWaitP99Ms = math.Round(point.ListenWaitP99Ms*100) / 100
-	point.SendKBps = math.Round(point.SendKBps*100) / 100
-	point.RecvKBps = math.Round(point.RecvKBps*100) / 100
-	point.AvgMemPercent = math.Round(point.AvgMemPercent*100) / 100
-	point.MaxMemPercent = math.Round(point.MaxMemPercent*100) / 100
+	if summary.EncodeSampleCount > 0 {
+		encodeAvg := summary.EncodeAvgMs
+		point.EncodeAvgMs = &encodeAvg
+	}
+	if summary.DecodeSampleCount > 0 {
+		decodeAvg := summary.DecodeAvgMs
+		point.DecodeAvgMs = &decodeAvg
+	}
 	return point
 }

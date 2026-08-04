@@ -39,7 +39,12 @@ export function useNodeMetrics(nodeId: string): ActionMetric | undefined {
 }
 
 const LEVEL_ORDER: Record<ApdexLevel, number> = {
-  unknown: 0, danger: 1, poor: 2, fair: 3, good: 4, excellent: 5,
+  unknown: 0,
+  danger: 1,
+  poor: 2,
+  fair: 3,
+  good: 4,
+  excellent: 5,
 };
 
 /** 取两个等级中较差的那个 */
@@ -51,8 +56,8 @@ function worseLevel(a: ApdexLevel, b: ApdexLevel): ApdexLevel {
 function classifySuccessRate(rate: number): ApdexLevel {
   if (rate >= 0.94) return 'excellent';
   if (rate >= 0.85) return 'good';
-  if (rate >= 0.70) return 'fair';
-  if (rate >= 0.50) return 'poor';
+  if (rate >= 0.7) return 'fair';
+  if (rate >= 0.5) return 'poor';
   return 'danger';
 }
 
@@ -66,7 +71,7 @@ export function getNodeApdexLevel(m: ActionMetric | undefined): ApdexLevel {
 
   const srLevel = classifySuccessRate(m.successRate);
 
-  if (m.kind !== 'networked' || m.rttSampleCount === 0) {
+  if (m.kind !== 'networked' || m.rttApdexSampleCount === 0) {
     return srLevel;
   }
   return worseLevel(classifyApdex(m.rttApdex), srLevel);
@@ -90,18 +95,24 @@ export function MetricsBadge({ metric: m }: MetricsBadgeProps) {
 
   // 主指标按动作类别选：往返类看 RTT，监听类看等待时长，其余看 wallClock。
   // 同一个徽章位置显示不同口径，所以标签必须跟着变，否则读的人无从判断这个 p99 是什么。
-  const primary = m.kind === 'listen'
-    ? { label: '等待', hist: m.listenWait, count: m.listenWaitSampleCount }
-    : m.kind === 'networked'
-      ? { label: 'RTT', hist: m.rtt, count: m.rttSampleCount }
-      : { label: '耗时', hist: m.totalDuration, count: m.totalDurationSampleCount };
-  const showP99 = primary.count > 0 && primary.hist.count > 0;
+  const primary =
+    m.kind === 'listen'
+      ? { label: '等待', hist: m.listenWait, count: m.listenWaitSampleCount }
+      : m.kind === 'networked'
+        ? { label: 'RTT', hist: m.rtt, count: m.rttSampleCount }
+        : { label: '耗时', hist: m.totalDuration, count: m.totalDurationSampleCount };
+  const primaryP99 = primary.hist.p99Ms;
+  const showP99 =
+    primary.count > 0 && primary.hist.count > 0 &&
+    primary.hist.avgMs != null && primary.hist.p95Ms != null &&
+    primaryP99 != null && primary.hist.maxMs != null && m.totalDuration.p99Ms != null;
 
   // Apdex 只对往返类打分；其余类别的徽章位置改用成功计数（样式统一，文本诚实）。
-  const isNetworked = m.kind === 'networked' && m.rttSampleCount > 0;
+  const isNetworked = m.kind === 'networked' && m.rttApdexSampleCount > 0;
   const apdexLevel = isNetworked ? classifyApdex(m.rttApdex) : 'unknown';
   const apdexColor = APDEX_COLOR[apdexLevel];
-  const healthLevel = (m.sampleCount > 0 && !isNetworked) ? classifySuccessRate(m.successRate) : 'unknown';
+  const healthLevel =
+    m.sampleCount > 0 && !isNetworked ? classifySuccessRate(m.successRate) : 'unknown';
   const healthColor = APDEX_COLOR[healthLevel];
   const showApdex = isNetworked && apdexLevel !== 'unknown';
   const showLocalBadge = !isNetworked && m.sampleCount > 0;
@@ -113,10 +124,22 @@ export function MetricsBadge({ metric: m }: MetricsBadgeProps) {
     <div style={{ maxWidth: 360 }}>
       {m.errors!.slice(0, 6).map((e, i) => (
         <div key={`e${i}`} style={{ marginTop: i > 0 ? 3 : 0, fontSize: 11, lineHeight: '16px' }}>
-          <span style={{ color: 'var(--color-error)', fontWeight: 700, fontSize: 10, fontVariantNumeric: 'tabular-nums', marginRight: 6 }}>×{e.count}</span>
+          <span
+            style={{
+              color: 'var(--color-error)',
+              fontWeight: 700,
+              fontSize: 10,
+              fontVariantNumeric: 'tabular-nums',
+              marginRight: 6,
+            }}
+          >
+            ×{e.count}
+          </span>
           <span style={{ fontWeight: 500 }}>{e.codeName || `#${e.code}`}</span>
           {e.msgs.length > 0 && (
-            <div style={{ color: 'var(--text-tertiary)', marginLeft: 14, marginTop: 1 }}>{e.msgs.join('; ')}</div>
+            <div style={{ color: 'var(--text-tertiary)', marginLeft: 14, marginTop: 1 }}>
+              {e.msgs.join('; ')}
+            </div>
           )}
         </div>
       ))}
@@ -141,9 +164,18 @@ export function MetricsBadge({ metric: m }: MetricsBadgeProps) {
       }}
     >
       {showP99 && (
-        <Tooltip title={`${primary.label} avg ${primary.hist.avgMs.toFixed(1)} · p95 ${primary.hist.p95Ms.toFixed(1)} · p99 ${primary.hist.p99Ms.toFixed(1)} · max ${primary.hist.maxMs.toFixed(1)} (ms) · 总耗时 p99 ${m.totalDuration.p99Ms.toFixed(1)}ms`}>
-          <span className="pattern-badge" style={{ color: 'var(--node-continue)', borderColor: 'var(--node-continue)', background: 'color-mix(in srgb, var(--node-continue) 12%, transparent)' }}>
-            {primary.label} p99 {formatMs(primary.hist.p99Ms)}
+        <Tooltip
+          title={`${primary.label} avg ${primary.hist.avgMs!.toFixed(1)} · p95 ${primary.hist.p95Ms!.toFixed(1)} · p99 ${primaryP99!.toFixed(1)} · max ${primary.hist.maxMs!.toFixed(1)} (ms) · 总耗时 p99 ${m.totalDuration.p99Ms!.toFixed(1)}ms`}
+        >
+          <span
+            className="pattern-badge"
+            style={{
+              color: 'var(--node-continue)',
+              borderColor: 'var(--node-continue)',
+              background: 'color-mix(in srgb, var(--node-continue) 12%, transparent)',
+            }}
+          >
+            {primary.label} p99 {formatMs(primaryP99!)}
           </span>
         </Tooltip>
       )}
@@ -151,21 +183,44 @@ export function MetricsBadge({ metric: m }: MetricsBadgeProps) {
         <Tooltip
           title={`RTT Apdex ${m.rttApdex.toFixed(3)} · 成功率 ${(m.successRate * 100).toFixed(1)}% · 平均 QPS ${m.avgQps.toFixed(1)} · 样本数 ${m.sampleCount}`}
         >
-          <span className="pattern-badge" style={{ color: apdexColor, borderColor: apdexColor, background: `color-mix(in srgb, ${apdexColor} 12%, transparent)` }}>
+          <span
+            className="pattern-badge"
+            style={{
+              color: apdexColor,
+              borderColor: apdexColor,
+              background: `color-mix(in srgb, ${apdexColor} 12%, transparent)`,
+            }}
+          >
             Apdex {m.rttApdex.toFixed(2)}
           </span>
         </Tooltip>
       )}
       {showLocalBadge && (
-        <Tooltip title={`成功 ${m.successCount} 次 · 成功率 ${(m.successRate * 100).toFixed(1)}% · 平均 QPS ${m.avgQps.toFixed(1)}`}>
-          <span className="pattern-badge" style={{ color: healthColor, borderColor: healthColor, background: `color-mix(in srgb, ${healthColor} 12%, transparent)` }}>
+        <Tooltip
+          title={`成功 ${m.successCount} 次 · 成功率 ${(m.successRate * 100).toFixed(1)}% · 平均 QPS ${m.avgQps.toFixed(1)}`}
+        >
+          <span
+            className="pattern-badge"
+            style={{
+              color: healthColor,
+              borderColor: healthColor,
+              background: `color-mix(in srgb, ${healthColor} 12%, transparent)`,
+            }}
+          >
             ✓ {m.successCount}
           </span>
         </Tooltip>
       )}
       {showErrors && topErr && (
         <Tooltip title={errorTooltipContent}>
-          <span className="pattern-badge" style={{ color: 'var(--color-error)', borderColor: 'var(--color-error)', background: 'color-mix(in srgb, var(--color-error) 12%, transparent)' }}>
+          <span
+            className="pattern-badge"
+            style={{
+              color: 'var(--color-error)',
+              borderColor: 'var(--color-error)',
+              background: 'color-mix(in srgb, var(--color-error) 12%, transparent)',
+            }}
+          >
             <WarningOutlined style={{ marginRight: 4 }} /> {topErr.count}
           </span>
         </Tooltip>

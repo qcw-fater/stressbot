@@ -9,9 +9,10 @@ import { App as AntApp, Button, Empty, Progress, Space, Tooltip } from 'antd';
 import { DeleteOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons';
 import { useEffect, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { agentsApi, computeWeightedMetrics, metricsApi, showApiError, useRuntimeStore } from '@/services';
+import { agentsApi, metricsApi, showApiError, useRuntimeStore } from '@/services';
 import { FloatingWindow } from '@/components/FlowEditor/panels/FloatingWindow';
 import { ApdexCell } from '@/components/monitoring/shared/ApdexCell';
+import { fmtByteSize } from '@/components/monitoring/shared/formats';
 import type { AgentBrief, AgentStatus, PerAgentMetricsItem } from '@/types/api';
 import './AgentsPanel.css';
 
@@ -45,7 +46,7 @@ const STATUS_BADGE_COLOR: Record<AgentStatus, string> = {
   offline: 'var(--text-tertiary)',
 };
 
-function gaugeColor(v?: number): string {
+function gaugeColor(v?: number | null): string {
   if (v == null) return 'var(--color-blue)';
   if (v > 80) return 'var(--color-error)';
   if (v > 60) return 'var(--color-warning)';
@@ -155,7 +156,7 @@ export function AgentsPanel({ open, onClose }: AgentsPanelProps) {
   };
 
   const safeAgents = agents ?? [];
-  const onlineCount = safeAgents.filter((a) => a.status !== 'offline').length;
+  const onlineCount = safeAgents.filter((a) => a.status === 'idle' || a.status === 'busy').length;
   const hasOnline = onlineCount > 0;
   const perAgentMap = new Map(perAgentMetrics.map((it) => [it.agentId, it]));
 
@@ -163,7 +164,7 @@ export function AgentsPanel({ open, onClose }: AgentsPanelProps) {
     const oa = STATUS_ORDER[a.status] ?? 9;
     const ob = STATUS_ORDER[b.status] ?? 9;
     if (oa !== ob) return oa - ob;
-    return (b.cpuPercent ?? 0) - (a.cpuPercent ?? 0);
+    return (b.hostCpuPercent ?? -1) - (a.hostCpuPercent ?? -1);
   });
 
   return (
@@ -229,18 +230,25 @@ function AgentMetricCard({
 }) {
   const { message } = AntApp.useApp();
   const isOffline = agent.status === 'offline';
-  const cpu = agent.cpuPercent;
-  const mem = agent.memPercent;
+  const cpu = agent.hostCpuPercent;
+  const mem = agent.hostMemPercent;
   const uptime = formatUptime(agent.staticInfo.startedAt);
 
-  const stressActions = stressMetrics?.snapshot?.actions ?? [];
-  const { totalSamples: stressSamples, apdex: stressApdex, successRate: stressSuccess } = computeWeightedMetrics(stressActions);
+  const stressSummary = stressMetrics?.snapshot?.summary;
+  const stressSamples = stressSummary?.sampleCount ?? 0;
+  const stressApdex =
+    (stressSummary?.rttApdexSampleCount ?? 0) > 0 ? stressSummary?.rttApdex : null;
+  const stressSuccess = stressSummary?.successRate ?? 0;
   const stressTotalActions = stressMetrics?.snapshot?.totalActions ?? 0;
   const hasStressData = stressSamples > 0;
 
-  const successColor = !hasStressData ? 'var(--text-tertiary)'
-    : stressSuccess >= 0.95 ? 'var(--color-success)'
-    : stressSuccess >= 0.8 ? 'var(--color-warning)' : 'var(--color-error)';
+  const successColor = !hasStressData
+    ? 'var(--text-tertiary)'
+    : stressSuccess >= 0.95
+      ? 'var(--color-success)'
+      : stressSuccess >= 0.8
+        ? 'var(--color-warning)'
+        : 'var(--color-error)';
 
   const handleDelete = () => {
     if (!isOffline) {
@@ -252,8 +260,12 @@ function AgentMetricCard({
 
   const staticTooltip = (
     <div style={{ fontSize: 11, lineHeight: 1.8 }}>
-      <div>系统: {agent.staticInfo.os}/{agent.staticInfo.arch}</div>
-      <div>核心: {agent.staticInfo.numCpu} 核 · 内存: {(agent.staticInfo.memTotalMB / 1024).toFixed(1)} GB</div>
+      <div>
+        系统: {agent.staticInfo.os}/{agent.staticInfo.arch}
+      </div>
+      <div>
+        核心: {agent.staticInfo.numCpu} 核 · 内存: {fmtByteSize(agent.staticInfo.memTotalBytes)}
+      </div>
       <div>内核: {agent.staticInfo.kernelVer}</div>
       <div>运行时: {agent.staticInfo.goVersion}</div>
     </div>
@@ -298,7 +310,7 @@ function AgentMetricCard({
       <div className="agent-card__body">
         <div className="agent-card__gauges">
           <div className="agent-card__gauge">
-            <span className="agent-card__gauge-label">CPU</span>
+            <span className="agent-card__gauge-label">主机 CPU</span>
             <Progress
               type="circle"
               percent={cpu ?? 0}
@@ -312,7 +324,7 @@ function AgentMetricCard({
             />
           </div>
           <div className="agent-card__gauge">
-            <span className="agent-card__gauge-label">MEM</span>
+            <span className="agent-card__gauge-label">主机内存</span>
             <Progress
               type="circle"
               percent={mem ?? 0}
@@ -348,10 +360,8 @@ function AgentMetricCard({
               </span>
             </div>
             <div className="agent-card__info-row">
-              <span className="agent-card__info-label">协程</span>
-              <span className="agent-card__info-value">
-                {agent.numGoroutine ?? '—'}
-              </span>
+              <span className="agent-card__info-label">进程协程</span>
+              <span className="agent-card__info-value">{agent.processGoroutines ?? '—'}</span>
             </div>
             <div className="agent-card__info-row">
               <span className="agent-card__info-label">累计动作</span>
@@ -368,7 +378,11 @@ function AgentMetricCard({
             <div className="agent-card__info-row">
               <span className="agent-card__info-label">Apdex</span>
               <span className="agent-card__info-value">
-                {hasStressData ? <ApdexCell value={stressApdex} /> : '—'}
+                {hasStressData && stressApdex != null ? (
+                  <ApdexCell value={stressApdex} sampleCount={stressSummary?.rttApdexSampleCount} />
+                ) : (
+                  '—'
+                )}
               </span>
             </div>
           </div>
@@ -379,7 +393,9 @@ function AgentMetricCard({
             </div>
             <div className="agent-card__info-row">
               <span className="agent-card__info-label">心跳</span>
-              <span className="agent-card__info-value">{formatHeartbeat(agent.lastHeartbeatAt)}</span>
+              <span className="agent-card__info-value">
+                {formatHeartbeat(agent.lastHeartbeatAt)}
+              </span>
             </div>
             <div className="agent-card__info-row">
               <span className="agent-card__info-label">系统</span>
@@ -390,7 +406,13 @@ function AgentMetricCard({
             <div className="agent-card__info-row agent-card__info-row--actions">
               {!isOffline && (
                 <Tooltip title="关闭此节点进程">
-                  <Button type="text" size="small" danger icon={<StopOutlined />} onClick={() => onShutdown(agent)}>
+                  <Button
+                    type="text"
+                    size="small"
+                    danger
+                    icon={<StopOutlined />}
+                    onClick={() => onShutdown(agent)}
+                  >
                     关闭
                   </Button>
                 </Tooltip>

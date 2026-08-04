@@ -41,6 +41,18 @@ const (
 	randomStringCharsetAlphanum = randomStringCharsetAlpha + randomStringCharsetNumeric
 )
 
+const (
+	TimingStageRTT uint16 = 1 << iota
+	TimingStageListenWait
+	TimingStageBuild
+	TimingStageEncode
+	TimingStageSend
+	TimingStageDecodeWait
+	TimingStageDecode
+	TimingStageDispatchWait
+	TimingStageParseStore
+)
+
 var randomStringCharsetAliases = map[string]string{
 	"lower":    randomStringCharsetLower,
 	"upper":    randomStringCharsetUpper,
@@ -56,6 +68,7 @@ type RequestTiming struct {
 	DecodeWait           time.Duration
 	DecodeCost           time.Duration
 	DispatchToActionWait time.Duration
+	Observed             uint16
 }
 
 // ClientTiming 单次 action 的客户端侧耗时拆解。
@@ -67,6 +80,7 @@ type ClientTiming struct {
 	DecodeCost     time.Duration
 	DispatchWait   time.Duration
 	ParseStoreCost time.Duration
+	Observed       uint16
 }
 
 // ActionTiming 单次 action 执行的耗时拆解。
@@ -98,7 +112,7 @@ type ActionTiming struct {
 
 // AddRequest 追加一次 request-response 样本。
 func (t *ActionTiming) AddRequest(req RequestTiming) {
-	if req.WireRTT <= 0 {
+	if req.WireRTT <= 0 && req.Observed&TimingStageRTT == 0 {
 		return
 	}
 	t.Requests = append(t.Requests, req)
@@ -106,6 +120,7 @@ func (t *ActionTiming) AddRequest(req RequestTiming) {
 	t.Client.DecodeWait += req.DecodeWait
 	t.Client.DecodeCost += req.DecodeCost
 	t.Client.DispatchWait += req.DispatchToActionWait
+	t.Client.Observed |= req.Observed & (TimingStageSend | TimingStageDecodeWait | TimingStageDecode | TimingStageDispatchWait)
 }
 
 // AddFailedRequest 记一次「无响应帧」的请求失败（超时 / 断连 / 发送失败）。
@@ -969,7 +984,7 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, ActionTimin
 	respBody := exchange.Body
 	var timing ActionTiming
 	if exchange.NetLatency > 0 {
-		timing.AddRequest(RequestTiming{WireRTT: exchange.NetLatency})
+		timing.AddRequest(RequestTiming{WireRTT: exchange.NetLatency, Observed: TimingStageRTT})
 	}
 	if err != nil {
 		return exchange.SendWireBytes, exchange.RecvWireBytes, timing, err
@@ -1389,9 +1404,18 @@ func (ae *ActionExecutor) protocolListenResp(protocol, service, routeKey string)
 
 // execSend sends a message without waiting for response.
 func (ae *ActionExecutor) execSend(protocol string, def *ActionDef) (int, ActionTiming, error) {
+	var buildStart time.Time
+	if ae.timingLevel >= TimingLevelFull {
+		buildStart = time.Now()
+	}
 	body, err := ae.buildBody(def)
+	var timing ActionTiming
+	if ae.timingLevel >= TimingLevelFull {
+		timing.Client.BuildCost = time.Since(buildStart)
+		timing.Client.Observed |= TimingStageBuild
+	}
 	if err != nil {
-		return 0, ActionTiming{}, err
+		return 0, timing, err
 	}
 
 	routeKey := ae.expectedRouteKey(protocol, def.Service, def.Route)
@@ -1401,9 +1425,9 @@ func (ae *ActionExecutor) execSend(protocol string, def *ActionDef) (int, Action
 		encodeStart = time.Now()
 	}
 	packet := ae.protocolEncode(protocol, def.Service, def.Route, body, secretKey)
-	var timing ActionTiming
 	if ae.timingLevel >= TimingLevelCodec && !encodeStart.IsZero() {
 		timing.Client.EncodeCost = time.Since(encodeStart)
+		timing.Client.Observed |= TimingStageEncode
 	}
 	if packet == nil {
 		return 0, timing, NewActionError(errcode.ErrEncodeFailed,
@@ -1414,6 +1438,7 @@ func (ae *ActionExecutor) execSend(protocol string, def *ActionDef) (int, Action
 	sendStart := time.Now()
 	n, err := ae.protocolSend(protocol, def.Service, packet)
 	timing.Client.SendCost = time.Since(sendStart)
+	timing.Client.Observed |= TimingStageSend
 	if err != nil {
 		return 0, timing, err
 	}
@@ -1442,8 +1467,12 @@ func (ae *ActionExecutor) execRequest(protocol string, def *ActionDef) (int, int
 	if ae.timingLevel >= TimingLevelFull && !buildStart.IsZero() {
 		buildCost = time.Since(buildStart)
 	}
+	buildObserved := uint16(0)
+	if ae.timingLevel >= TimingLevelFull {
+		buildObserved = TimingStageBuild
+	}
 	if err != nil {
-		return 0, 0, ActionTiming{Client: ClientTiming{BuildCost: buildCost}}, err
+		return 0, 0, ActionTiming{Client: ClientTiming{BuildCost: buildCost, Observed: buildObserved}}, err
 	}
 
 	routeKey := ae.expectedRouteKey(protocol, def.Service, def.Route)
@@ -1469,8 +1498,12 @@ func (ae *ActionExecutor) execRequest(protocol string, def *ActionDef) (int, int
 	if ae.timingLevel >= TimingLevelCodec && !encodeStart.IsZero() {
 		encodeCost = time.Since(encodeStart)
 	}
+	encodeObserved := uint16(0)
+	if ae.timingLevel >= TimingLevelCodec {
+		encodeObserved = TimingStageEncode
+	}
 	if packet == nil {
-		return 0, 0, ActionTiming{Client: ClientTiming{BuildCost: buildCost, EncodeCost: encodeCost}}, NewActionError(errcode.ErrEncodeFailed,
+		return 0, 0, ActionTiming{Client: ClientTiming{BuildCost: buildCost, EncodeCost: encodeCost, Observed: buildObserved | encodeObserved}}, NewActionError(errcode.ErrEncodeFailed,
 			"action="+def.Name+" service="+def.Service+" route="+routeKey+
 				"；codec 未映射（resolver.Resolve("+protocol+":"+def.Service+") nil）")
 	}
@@ -1487,6 +1520,7 @@ func (ae *ActionExecutor) execRequest(protocol string, def *ActionDef) (int, int
 	var timing ActionTiming
 	timing.Client.BuildCost += buildCost
 	timing.Client.EncodeCost += encodeCost
+	timing.Client.Observed |= buildObserved | encodeObserved
 	timing.AddRequest(exchange.Timing)
 	if err != nil {
 		// 请求层失败（超时 / 断连 / 发送失败）：没有响应帧就没有 WireRTT，
@@ -1503,11 +1537,13 @@ func (ae *ActionExecutor) execRequest(protocol string, def *ActionDef) (int, int
 	if ae.timingLevel >= TimingLevelFull {
 		parseStart = time.Now()
 	}
-	if err := ae.parseAndStoreResponse(def, respBody); err != nil {
-		return exchange.SendWireBytes, exchange.RecvWireBytes, timing, err
-	}
+	parseErr := ae.parseAndStoreResponse(def, respBody)
 	if ae.timingLevel >= TimingLevelFull && !parseStart.IsZero() {
 		timing.Client.ParseStoreCost += time.Since(parseStart)
+		timing.Client.Observed |= TimingStageParseStore
+	}
+	if parseErr != nil {
+		return exchange.SendWireBytes, exchange.RecvWireBytes, timing, parseErr
 	}
 
 	if stresslog.DebugEnabled() {
@@ -1568,11 +1604,13 @@ func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *
 			if ae.timingLevel >= TimingLevelFull {
 				parseStart = time.Now()
 			}
-			if err := ae.parseAndStoreResponse(def, respBody); err != nil {
-				return exchange.RecvWireBytes, timing, err
-			}
+			parseErr := ae.parseAndStoreResponse(def, respBody)
 			if ae.timingLevel >= TimingLevelFull && !parseStart.IsZero() {
 				timing.Client.ParseStoreCost += time.Since(parseStart)
+				timing.Client.Observed |= TimingStageParseStore
+			}
+			if parseErr != nil {
+				return exchange.RecvWireBytes, timing, parseErr
 			}
 			if stresslog.DebugEnabled() {
 				stresslog.Debug("[ACTION] 监听成功",

@@ -52,6 +52,12 @@ export interface RuntimeState {
   latestStress: StressSnapshot | null;
   latestSystem: ClusterSystemSnapshot | null;
   agents: AgentBrief[];
+  /**
+   * 是否已成功拉到过至少一次 agents 列表。initial=false、未持久化。
+   * 用于区分 agents===[] 的两种含义：「还没拿到数据」vs「拿到了、集群确实空」——
+   * 前者不能显示成权威的「在线 0 · 总容量 0」（刷新后端未起时会先假显示再变红牌）。
+   */
+  agentsLoaded: boolean;
 
   /** 历史滑窗，时间正序（最新在末尾） */
   stressHistory: StressSnapshot[];
@@ -147,6 +153,7 @@ const initialState = {
   latestStress: null as StressSnapshot | null,
   latestSystem: null as ClusterSystemSnapshot | null,
   agents: [] as AgentBrief[],
+  agentsLoaded: false,
   stressHistory: [] as StressSnapshot[],
   systemHistory: [] as ClusterSystemSnapshot[],
   connectionLost: false,
@@ -215,7 +222,7 @@ export const useRuntimeStore = create<RuntimeState>()(
             systemHistory: pushWithLimit(s.systemHistory, snap),
           };
         }),
-      setAgents: (items) => set({ agents: items }),
+      setAgents: (items) => set({ agents: items, agentsLoaded: true }),
       setConnectionLost: (lost) => set({ connectionLost: lost }),
       setAgentHealth: (reporting, total, offline, assigned) =>
         set({ reportingAgents: reporting, totalAgents: total, offlineAgents: offline, assignedAgents: assigned }),

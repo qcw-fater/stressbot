@@ -15,10 +15,10 @@
 package admin
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"stressbot/codec"
+	json "stressbot/utils/jsonx"
 )
 
 // codecPreviewRequest 是 POST /sbot/codec/preview 的请求体。

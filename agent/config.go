@@ -131,14 +131,12 @@ func resolveReconnectRetries(v int) int {
 // CollectStaticInfo 采集本机静态信息。
 func CollectStaticInfo() StaticInfo {
 	hostname, _ := os.Hostname() // 同上
-	var memTotalMB uint64
 	return StaticInfo{
-		Hostname:   hostname,
-		OS:         runtime.GOOS,
-		Arch:       runtime.GOARCH,
-		NumCPU:     runtime.NumCPU(),
-		MemTotalMB: memTotalMB,
-		GoVersion:  runtime.Version(),
-		StartedAt:  time.Now(),
+		Hostname:  hostname,
+		OS:        runtime.GOOS,
+		Arch:      runtime.GOARCH,
+		NumCPU:    runtime.NumCPU(),
+		GoVersion: runtime.Version(),
+		StartedAt: time.Now(),
 	}
 }

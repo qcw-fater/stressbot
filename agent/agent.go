@@ -14,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/shirou/gopsutil/v4/mem"
 	"stressbot/monitor"
 	"stressbot/utils"
 	stresslog "stressbot/utils/log"
@@ -73,11 +72,6 @@ func New(cfg *ResolvedConfig, collector *monitor.MetricsCollector) (*Agent, erro
 	sysmon, err := NewSystemMonitor(cfg.MetricsInterval, static)
 	if err != nil {
 		return nil, fmt.Errorf("创建 SystemMonitor 失败: %w", err)
-	}
-
-	// 用 gopsutil 补充更精确的内存值
-	if vm, err := mem.VirtualMemory(); err == nil {
-		static.MemTotalMB = vm.Total / 1024 / 1024
 	}
 
 	httpCli := NewAdminClient(cfg.AdminUrl, id, cfg.RequestTimeout, cfg.HeartbeatTimeout)

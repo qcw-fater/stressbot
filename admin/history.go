@@ -226,7 +226,10 @@ func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *mon
 		}
 		emptySysJSON, _ := json.Marshal(ClusterSystemSnapshot{})
 		for segNo, snaps := range segSnaps {
-			merged := monitor.MergeSnapshots(snaps)
+			merged, err := monitor.MergeSnapshots(snaps)
+			if err != nil {
+				return fmt.Errorf("merge stage %d metrics: %w", segNo, err)
+			}
 			mergedJSON, _ := json.Marshal(merged)
 			if err := insertTaskAggregated(tx, task.ID, segNo, mergedJSON, emptySysJSON); err != nil {
 				return fmt.Errorf("insert task_aggregated (stage): %w", err)
@@ -864,8 +867,12 @@ func (h *HistoryStore) GetTimeseries(ctx context.Context, id string, maxPoints, 
 	maxPoints = normalizeTimeseriesMaxPoints(maxPoints)
 
 	query := `
-		SELECT sampled_at, elapsed_sec, stage_index, total_qps, rtt_apdex, listen_wait_p99_ms,
-			rtt_avg_ms, rtt_p95_ms, rtt_p99_ms,
+		SELECT sampled_at, elapsed_sec, stage_index, window_from, window_to, sample_count,
+			total_qps, rtt_apdex, listen_wait_p99_ms,
+			rtt_avg_ms, rtt_p50_ms, rtt_p90_ms, rtt_p95_ms, rtt_p99_ms,
+			active_connections, closed_connections, dropped_connections,
+			net_send_bytes_per_sec, net_recv_bytes_per_sec,
+			assigned_agents, reporting_agents, reporting_coverage,
 			total_duration_avg_ms, total_duration_p95_ms, total_duration_p99_ms,
 			client_avg_ms, encode_avg_ms, decode_avg_ms,
 			bots_running, bots_errored, send_kbps, recv_kbps,
@@ -890,8 +897,12 @@ func (h *HistoryStore) GetTimeseries(ctx context.Context, id string, maxPoints, 
 		var p HistoryTrendPointResponse
 		var rttApdex, listenWaitP99 sql.NullFloat64
 		if err := rows.Scan(
-			&p.SampledAt, &p.ElapsedSec, &p.StageIndex, &p.TotalQPS, &rttApdex, &listenWaitP99,
-			&p.RTTAvgMs, &p.RTTP95Ms, &p.RTTP99Ms,
+			&p.SampledAt, &p.ElapsedSec, &p.StageIndex, &p.WindowFrom, &p.WindowTo, &p.SampleCount,
+			&p.TotalQPS, &rttApdex, &listenWaitP99,
+			&p.RTTAvgMs, &p.RTTP50Ms, &p.RTTP90Ms, &p.RTTP95Ms, &p.RTTP99Ms,
+			&p.ActiveConnections, &p.ClosedConnections, &p.DroppedConnections,
+			&p.NetSendBytesPerSec, &p.NetRecvBytesPerSec,
+			&p.AssignedAgents, &p.ReportingAgents, &p.ReportingCoverage,
 			&p.TotalDurationAvgMs, &p.TotalDurationP95Ms, &p.TotalDurationP99Ms,
 			&p.ClientAvgMs, &p.EncodeAvgMs, &p.DecodeAvgMs,
 			&p.BotsRunning, &p.BotsErrored, &p.SendKBps, &p.RecvKBps,
@@ -961,6 +972,8 @@ func projectStressSnapshot(s monitor.CollectorSnapshot) HistoryStressSnapshotSum
 		UptimeSec:    s.UptimeSec,
 		TotalActions: s.TotalActions,
 		ApdexT:       s.ApdexT,
+		TimingDetail: s.TimingDetail,
+		Summary:      projectMetricsSummary(s.Summary),
 		Robots:       s.Robots,
 		Connections:  s.Connections,
 		Bandwidth:    s.Bandwidth,
@@ -968,41 +981,75 @@ func projectStressSnapshot(s monitor.CollectorSnapshot) HistoryStressSnapshotSum
 	}
 }
 
+func projectMetricsSummary(s monitor.SnapshotSummary) HistoryMetricsSummary {
+	return HistoryMetricsSummary{
+		SampleCount:               s.SampleCount,
+		SuccessCount:              s.SuccessCount,
+		FailureCount:              s.FailureCount,
+		TimeoutCount:              s.TimeoutCount,
+		CanceledCount:             s.CanceledCount,
+		Executing:                 s.Executing,
+		SuccessRate:               s.SuccessRate,
+		RTTApdex:                  s.RTTApdex,
+		RTTApdexSampleCount:       s.RTTApdexSampleCount,
+		RTT:                       projectHistogram(s.RTT),
+		ListenWait:                projectHistogram(s.ListenWait),
+		TotalDuration:             projectHistogram(s.TotalDuration),
+		ClientAvgMs:               s.ClientAvgMs,
+		BuildAvgMs:                s.BuildAvgMs,
+		EncodeAvgMs:               s.EncodeAvgMs,
+		SendAvgMs:                 s.SendAvgMs,
+		DecodeWaitAvgMs:           s.DecodeWaitAvgMs,
+		DecodeAvgMs:               s.DecodeAvgMs,
+		DispatchToActionWaitAvgMs: s.DispatchToActionWaitAvgMs,
+		ParseStoreAvgMs:           s.ParseStoreAvgMs,
+		AvgQPS:                    s.AvgQPS,
+	}
+}
+
 func projectActionSnapshot(a monitor.ActionSnapshot) HistoryActionSummary {
 	return HistoryActionSummary{
-		Name:                     a.Name,
-		SampleCount:              a.SampleCount,
-		SuccessCount:             a.SuccessCount,
-		FailureCount:             a.FailureCount,
-		TimeoutCount:             a.TimeoutCount,
-		CanceledCount:            a.CanceledCount,
-		Executing:                a.Executing,
-		SuccessRate:              a.SuccessRate,
-		AvgSendBytes:             a.AvgSendBytes,
-		AvgRecvBytes:             a.AvgRecvBytes,
-		Kind:                     a.Kind,
-		RTTApdex:                 a.RTTApdex,
-		RTT:                      projectHistogram(a.RTT),
-		ListenWait:               projectHistogram(a.ListenWait),
-		ListenWaitSampleCount:    a.ListenWaitSampleCount,
-		ListenTimeoutRate:        a.ListenTimeoutRate,
-		TotalDuration:            projectHistogram(a.TotalDuration),
-		ClientAvgMs:              a.ClientAvgMs,
-		EncodeAvgMs:              a.EncodeAvgMs,
-		DecodeAvgMs:              a.DecodeAvgMs,
-		ParseStoreAvgMs:          a.ParseStoreAvgMs,
-		RTTSampleCount:           a.RTTSampleCount,
-		TotalDurationSampleCount: a.TotalDurationSampleCount,
-		AvgQPS:                   a.AvgQPS,
-		Errors:                   a.Errors,
+		Name:                      a.Name,
+		SampleCount:               a.SampleCount,
+		SuccessCount:              a.SuccessCount,
+		FailureCount:              a.FailureCount,
+		TimeoutCount:              a.TimeoutCount,
+		CanceledCount:             a.CanceledCount,
+		Executing:                 a.Executing,
+		SuccessRate:               a.SuccessRate,
+		AvgSendBytes:              a.AvgSendBytes,
+		AvgRecvBytes:              a.AvgRecvBytes,
+		Kind:                      a.Kind,
+		RTTApdex:                  a.RTTApdex,
+		RTTApdexSampleCount:       a.RTTApdexSampleCount,
+		RTT:                       projectHistogram(a.RTT),
+		ListenWait:                projectHistogram(a.ListenWait),
+		ListenWaitSampleCount:     a.ListenWaitSampleCount,
+		ListenTimeoutRate:         a.ListenTimeoutRate,
+		TotalDuration:             projectHistogram(a.TotalDuration),
+		ClientAvgMs:               a.ClientAvgMs,
+		BuildAvgMs:                a.BuildAvgMs,
+		EncodeAvgMs:               a.EncodeAvgMs,
+		SendAvgMs:                 a.SendAvgMs,
+		DecodeWaitAvgMs:           a.DecodeWaitAvgMs,
+		DecodeAvgMs:               a.DecodeAvgMs,
+		DispatchToActionWaitAvgMs: a.DispatchToActionWaitAvgMs,
+		ParseStoreAvgMs:           a.ParseStoreAvgMs,
+		RTTSampleCount:            a.RTTSampleCount,
+		TotalDurationSampleCount:  a.TotalDurationSampleCount,
+		AvgQPS:                    a.AvgQPS,
+		Errors:                    a.Errors,
 	}
 }
 
 func projectHistogram(h monitor.HistogramSnapshot) HistoryHistogramSummary {
 	return HistoryHistogramSummary{
+		Count: h.Count,
+		MinMs: h.MinMs,
 		MaxMs: h.MaxMs,
 		AvgMs: h.AvgMs,
 		P50Ms: h.P50Ms,
+		P90Ms: h.P90Ms,
 		P95Ms: h.P95Ms,
 		P99Ms: h.P99Ms,
 	}
@@ -1010,20 +1057,56 @@ func projectHistogram(h monitor.HistogramSnapshot) HistoryHistogramSummary {
 
 func projectSystemSnapshot(s ClusterSystemSnapshot) HistorySystemSummary {
 	return HistorySystemSummary{
-		AvgCPUPercent:    s.AvgCPUPercent,
-		MaxCPUPercent:    s.MaxCPUPercent,
-		HotAgentName:     s.HotAgentName,
-		AvgMemPercent:    s.AvgMemPercent,
-		MaxMemPercent:    s.MaxMemPercent,
-		HotMemAgentName:  s.HotMemAgentName,
-		TotalMemMB:       s.TotalMemMB,
-		UsedMemMB:        s.UsedMemMB,
-		TotalNetSendKBps: s.TotalNetSendKBps,
-		TotalNetRecvKBps: s.TotalNetRecvKBps,
-		TotalGoroutines:  s.TotalGoroutines,
-		TotalThreads:     s.TotalThreads,
-		TotalFDs:         s.TotalFDs,
+		AvgCPUPercent:    float64Value(s.AvgHostCPUPercent),
+		MaxCPUPercent:    float64Value(s.MaxHostCPUPercent),
+		HotAgentName:     s.HotHostCPUAgentName,
+		AvgMemPercent:    float64Value(s.AvgHostMemPercent),
+		MaxMemPercent:    float64Value(s.MaxHostMemPercent),
+		HotMemAgentName:  s.HotHostMemAgentName,
+		TotalMemMB:       bytesToMBValue(s.TotalHostMemBytes),
+		UsedMemMB:        bytesToMBValue(s.UsedHostMemBytes),
+		TotalNetSendKBps: bytesPerSecondToKB(s.TotalHostNetSendBytesPerSec),
+		TotalNetRecvKBps: bytesPerSecondToKB(s.TotalHostNetRecvBytesPerSec),
+		TotalGoroutines:  intValue(s.TotalProcessGoroutines),
+		TotalThreads:     int32Value(s.TotalProcessThreads),
+		TotalFDs:         int32Value(s.TotalProcessFDs),
 	}
+}
+
+func float64Value(value *float64) float64 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func intValue(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func int32Value(value *int32) int32 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func bytesToMBValue(value *uint64) uint64 {
+	if value == nil {
+		return 0
+	}
+	return *value / 1024 / 1024
+}
+
+func bytesPerSecondToKB(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	converted := *value / 1024
+	return &converted
 }
 
 // AllTags 返回所有去重标签。
@@ -1186,8 +1269,8 @@ func (h *HistoryStore) loadStageMetaBatch(ctx context.Context, ids []string) map
 type stageAggMetrics struct {
 	totalActions int64
 	successRate  float64
-	avgRttMs     float64
-	p95RttMs     float64
+	avgRttMs     *float64
+	p95RttMs     *float64
 }
 
 // loadStageAggBatch 批量读取阶段段落的聚合指标（task_aggregated.stage_index>0），
@@ -1232,28 +1315,12 @@ func (h *HistoryStore) loadStageAggBatch(ctx context.Context, ids []string) map[
 
 // extractStageSummary 从聚合快照提取阶段段落展示摘要。
 func extractStageSummary(snap monitor.CollectorSnapshot) stageAggMetrics {
-	m := stageAggMetrics{}
-	var sampleTotal, successTotal int64
-	rttSnaps := make([]monitor.HistogramSnapshot, 0, len(snap.Actions))
-	for _, a := range snap.Actions {
-		sampleTotal += a.SampleCount
-		successTotal += a.SuccessCount
-		if a.RTTSampleCount > 0 {
-			rttSnaps = append(rttSnaps, a.RTT)
-		}
+	return stageAggMetrics{
+		totalActions: snap.Summary.SampleCount,
+		successRate:  snap.Summary.SuccessRate,
+		avgRttMs:     snap.Summary.RTT.AvgMs,
+		p95RttMs:     snap.Summary.RTT.P95Ms,
 	}
-	if sampleTotal == 0 {
-		m.totalActions = snap.TotalActions
-		return m
-	}
-	m.totalActions = sampleTotal
-	m.successRate = float64(successTotal) / float64(sampleTotal)
-	if len(rttSnaps) > 0 {
-		merged := monitor.MergeHistograms(rttSnaps)
-		m.avgRttMs = merged.AvgMs
-		m.p95RttMs = merged.P95Ms
-	}
-	return m
 }
 
 // Delete 删除历史记录。starred 的需要 force=true。
@@ -1324,16 +1391,25 @@ func (h *HistoryStore) AppendTimeseries(ctx context.Context, taskID string, poin
 	}
 	_, err := h.db.ExecContext(ctx, `
 		INSERT INTO task_timeseries (
-			task_id, sampled_at, elapsed_sec, stage_index, total_qps, rtt_apdex, listen_wait_p99_ms,
-			rtt_avg_ms, rtt_p95_ms, rtt_p99_ms,
+			task_id, sampled_at, elapsed_sec, stage_index, window_from, window_to,
+			history_batch_token, sample_count, total_qps, rtt_apdex, listen_wait_p99_ms,
+			rtt_avg_ms, rtt_p50_ms, rtt_p90_ms, rtt_p95_ms, rtt_p99_ms,
+			active_connections, closed_connections, dropped_connections,
+			net_send_bytes_per_sec, net_recv_bytes_per_sec,
+			assigned_agents, reporting_agents, reporting_coverage,
 			total_duration_avg_ms, total_duration_p95_ms, total_duration_p99_ms,
 			client_avg_ms, encode_avg_ms, decode_avg_ms,
 			bots_running, bots_errored,
 			send_kbps, recv_kbps, avg_cpu_percent, max_cpu_percent, avg_mem_percent, max_mem_percent,
 			goroutines, threads, fds, online_count, offline_count
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, taskID, point.SampledAt, point.ElapsedSec, stageIndex, point.TotalQPS, point.RTTApdex, point.ListenWaitP99Ms,
-		point.RTTAvgMs, point.RTTP95Ms, point.RTTP99Ms,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE history_batch_token = VALUES(history_batch_token)
+	`, taskID, point.SampledAt, point.ElapsedSec, stageIndex, point.WindowFrom, point.WindowTo,
+		point.HistoryBatchToken, point.SampleCount, point.TotalQPS, point.RTTApdex, point.ListenWaitP99Ms,
+		point.RTTAvgMs, point.RTTP50Ms, point.RTTP90Ms, point.RTTP95Ms, point.RTTP99Ms,
+		point.ActiveConnections, point.ClosedConnections, point.DroppedConnections,
+		point.NetSendBytesPerSec, point.NetRecvBytesPerSec,
+		point.AssignedAgents, point.ReportingAgents, point.ReportingCoverage,
 		point.TotalDurationAvgMs, point.TotalDurationP95Ms, point.TotalDurationP99Ms,
 		point.ClientAvgMs, point.EncodeAvgMs, point.DecodeAvgMs,
 		point.BotsRunning, point.BotsErrored,

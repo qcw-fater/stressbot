@@ -198,7 +198,7 @@ export interface StaticInfo {
   os: OS;
   arch: Arch;
   numCpu: number;
-  memTotalMB: number;
+  memTotalBytes: number;
   goVersion: string;
   kernelVer: string;
   startedAt: string;
@@ -217,9 +217,13 @@ export interface AgentBrief {
   lastHeartbeatAt: string;
   stressUpdatedAt?: string;
   systemUpdatedAt?: string;
-  cpuPercent?: number;
-  memPercent?: number;
-  numGoroutine?: number;
+  systemStale?: boolean;
+  systemSnapshotAgeSeconds?: number | null;
+  hostCpuPercent?: number | null;
+  hostMemPercent?: number | null;
+  processCpuPercent?: number | null;
+  processRssBytes?: number | null;
+  processGoroutines?: number;
 }
 
 export interface AgentDetail extends AgentBrief {
@@ -240,6 +244,8 @@ export interface RobotsView {
 
 export interface ConnectionsView {
   established: number;
+  active: number;
+  closed: number;
   failed: number;
   dropped: number;
 }
@@ -253,13 +259,13 @@ export interface BandwidthView {
 
 export interface HistogramView {
   count: number;
-  minMs: number;
-  maxMs: number;
-  avgMs: number;
-  p50Ms: number;
-  p90Ms: number;
-  p95Ms: number;
-  p99Ms: number;
+  minMs: number | null;
+  maxMs: number | null;
+  avgMs: number | null;
+  p50Ms: number | null;
+  p90Ms: number | null;
+  p95Ms: number | null;
+  p99Ms: number | null;
 }
 
 export interface ErrorEntry {
@@ -292,12 +298,15 @@ export interface ActionMetric {
   kind: ActionKind;
   /** RTT Apdex。仅 kind=networked 有意义，其余类别应显示 — 而非 0 分 */
   rttApdex: number;
+  /** RTT Apdex 完整分母，包含无响应帧且按 frustrated 计的失败请求 */
+  rttApdexSampleCount: number;
   avgQps: number;
   avgSendBytes: number;
   avgRecvBytes: number;
   timeoutAvgMs: number;
   /** 客户端平均耗时（毫秒），所有结果分支累计 */
-  clientAvgMs: number;
+  nonRTTAvgMs: number;
+  clientCostCount: number;
   buildAvgMs: number;
   encodeAvgMs: number;
   sendAvgMs: number;
@@ -305,6 +314,15 @@ export interface ActionMetric {
   decodeAvgMs: number;
   dispatchToActionWaitAvgMs: number;
   parseStoreAvgMs: number;
+  buildSampleCount: number;
+  encodeSampleCount: number;
+  sendSampleCount: number;
+  decodeWaitSampleCount: number;
+  decodeSampleCount: number;
+  dispatchWaitSampleCount: number;
+  parseStoreSampleCount: number;
+  byteSampleCount: number;
+  periodQps: number;
   /** 进入 RTT 直方图的样本数。0 表示该 action 没有 request-response RTT，RTT 列应显示 — */
   rttSampleCount: number;
   /** 等待时长可测的监听命中数。0 表示 listenWait 列应显示 — */
@@ -329,6 +347,58 @@ export interface ActionMetric {
 /** 动作的网络语义分类，由运行期实际发生的行为判定。 */
 export type ActionKind = 'networked' | 'listen' | 'send' | 'local';
 
+export type TimingDetailLevel = 'rtt' | 'codec' | 'full';
+
+export interface SnapshotMetricsSummary {
+  sampleCount: number;
+  successCount: number;
+  failureCount: number;
+  timeoutCount: number;
+  canceledCount: number;
+  executing: number;
+  successRate: number;
+  rttApdex: number;
+  rttApdexSampleCount: number;
+  rtt: HistogramView;
+  listenWait: HistogramView;
+  totalDuration: HistogramView;
+  nonRTTAvgMs: number;
+  clientCostCount: number;
+  buildAvgMs: number;
+  encodeAvgMs: number;
+  sendAvgMs: number;
+  decodeWaitAvgMs: number;
+  decodeAvgMs: number;
+  dispatchToActionWaitAvgMs: number;
+  parseStoreAvgMs: number;
+  buildSampleCount: number;
+  encodeSampleCount: number;
+  sendSampleCount: number;
+  decodeWaitSampleCount: number;
+  decodeSampleCount: number;
+  dispatchWaitSampleCount: number;
+  parseStoreSampleCount: number;
+  avgQps: number;
+}
+
+export interface WindowBandwidthView {
+  sendBytes: number;
+  recvBytes: number;
+  sendMBps: number;
+  recvMBps: number;
+}
+
+export interface ReportWindowView {
+  startedAt: string;
+  endedAt: string;
+  durationSeconds: number;
+  expectedIntervalSeconds: number;
+  summary: SnapshotMetricsSummary;
+  bandwidth: WindowBandwidthView;
+  actions: ActionMetric[];
+  invalidMetricSamples: number;
+}
+
 export interface ClusterInfo {
   agentCount: number;
   agentIds: string[];
@@ -341,23 +411,32 @@ export interface StressAggregate {
   totalAgents: number;
   offlineAgents: number;
   assignedAgents: number;
+  freshAgents: number;
+  staleAgents: number;
+  coverageRatio: number;
+  asOf: string;
 }
 
 export interface RampUpSnapshot {
   currentStage: number; // 当前阶段（1-based，0 = 未启用）
-  totalStages: number;  // 总阶段数（0 = 未启用）
+  totalStages: number; // 总阶段数（0 = 未启用）
 }
 
 export interface StressSnapshot {
   timestamp: string;
+  collectionEpoch: number;
   uptimeSeconds: number;
   totalActions: number;
   apdexT: number;
+  timingDetail: TimingDetailLevel;
+  summary: SnapshotMetricsSummary;
   robots: RobotsView;
   rampUp: RampUpSnapshot;
   connections: ConnectionsView;
   bandwidth: BandwidthView;
   actions: ActionMetric[];
+  invalidMetricSamples: number;
+  window: ReportWindowView | null;
   clusterInfo?: ClusterInfo;
 }
 
@@ -375,59 +454,93 @@ export interface PerAgentMetrics {
 // === System 指标 ===
 export interface SystemSnapshot {
   timestamp: string;
-  cpuPercent: number;
-  cpuPerCore: number[];
-  loadAvg1: number;
-  loadAvg5: number;
-  loadAvg15: number;
-  memTotalMB: number;
-  memUsedMB: number;
-  memPercent: number;
-  swapUsedMB: number;
-  processRssMB: number;
-  processHeapMB: number;
-  processSysMB: number;
-  numGoroutine: number;
-  numThread: number;
-  numFd: number;
-  netSendKBps: number;
-  netRecvKBps: number;
-  gcCount: number;
-  gcPauseAvgMs: number;
+  sequence: number;
+  hostCpuPercent: number | null;
+  hostMemTotalBytes: number | null;
+  hostMemUsedBytes: number | null;
+  hostMemPercent: number | null;
+  hostNetSendBytesPerSec: number | null;
+  hostNetRecvBytesPerSec: number | null;
+  processCpuPercent: number | null;
+  processRssBytes: number | null;
+  processHeapBytes: number;
+  processGoroutines: number;
+  processThreads: number | null;
+  processFds: number | null;
 }
 
 export interface AgentSystemBrief {
   agentId: string;
   name: string;
   status: AgentStatus | string;
-  cpuPercent: number;
-  memPercent: number;
-  numGoroutine: number;
-  netSendKBps: number;
-  netRecvKBps: number;
-  lastSeen: number;
+  isStale: boolean;
+  sampledAt: string | null;
+  receivedAt: string | null;
+  snapshotAgeSeconds: number | null;
+  lastHeartbeatAt: string;
+  hostCpuPercent: number | null;
+  hostMemPercent: number | null;
+  hostNetSendBytesPerSec: number | null;
+  hostNetRecvBytesPerSec: number | null;
+  processCpuPercent: number | null;
+  processRssBytes: number | null;
+  processHeapBytes: number | null;
+  processGoroutines: number | null;
+  processThreads: number | null;
+  processFds: number | null;
 }
 
 export interface ClusterSystemSnapshot {
   timestamp: string;
   agentCount: number;
   onlineCount: number;
+  unhealthyCount: number;
   offlineCount: number;
-  totalMemMB: number;
-  usedMemMB: number;
-  avgCpuPercent: number;
-  maxCpuPercent: number;
-  avgMemPercent: number;
-  maxMemPercent: number;
-  totalNetSendKBps: number;
-  totalNetRecvKBps: number;
-  totalGoroutines: number;
-  totalThreads: number;
-  totalFds: number;
-  hotAgentId?: string;
-  hotAgentName?: string;
-  hotMemAgentId?: string;
-  hotMemAgentName?: string;
+  reportingAgents: number;
+  staleAgents: number;
+  missingAgents: number;
+  coverageRatio: number;
+
+  hostCpuReportingAgents: number;
+  avgHostCpuPercent: number | null;
+  maxHostCpuPercent: number | null;
+  hotHostCpuAgentId?: string;
+  hotHostCpuAgentName?: string;
+
+  hostMemoryReportingAgents: number;
+  avgHostMemPercent: number | null;
+  maxHostMemPercent: number | null;
+  hotHostMemAgentId?: string;
+  hotHostMemAgentName?: string;
+  totalHostMemBytes: number | null;
+  usedHostMemBytes: number | null;
+
+  hostNetSendReportingAgents: number;
+  hostNetRecvReportingAgents: number;
+  totalHostNetSendBytesPerSec: number | null;
+  totalHostNetRecvBytesPerSec: number | null;
+
+  processCpuReportingAgents: number;
+  avgProcessCpuPercent: number | null;
+  maxProcessCpuPercent: number | null;
+  hotProcessCpuAgentId?: string;
+  hotProcessCpuAgentName?: string;
+
+  processRssReportingAgents: number;
+  totalProcessRssBytes: number | null;
+  maxProcessRssBytes: number | null;
+  hotProcessRssAgentId?: string;
+  hotProcessRssAgentName?: string;
+  totalProcessHeapBytes: number | null;
+  totalProcessGoroutines: number | null;
+
+  processThreadsReportingAgents: number;
+  totalProcessThreads: number | null;
+  processFdsReportingAgents: number;
+  totalProcessFds: number | null;
+  maxProcessFds: number | null;
+  hotProcessFdsAgentId?: string;
+  hotProcessFdsAgentName?: string;
   agents: AgentSystemBrief[];
 }
 
@@ -512,11 +625,14 @@ export interface HistoryAgentReport {
 }
 
 export interface HistoryHistogramSummary {
-  maxMs: number;
-  avgMs: number;
-  p50Ms: number;
-  p95Ms: number;
-  p99Ms: number;
+  count: number;
+  minMs: number | null;
+  maxMs: number | null;
+  avgMs: number | null;
+  p50Ms: number | null;
+  p90Ms: number | null;
+  p95Ms: number | null;
+  p99Ms: number | null;
 }
 
 export interface HistoryActionMetric {
@@ -532,14 +648,19 @@ export interface HistoryActionMetric {
   avgRecvBytes: number;
   kind: ActionKind;
   rttApdex: number;
+  rttApdexSampleCount: number;
   rtt: HistoryHistogramSummary;
   listenWait: HistoryHistogramSummary;
   listenWaitSampleCount: number;
   listenTimeoutRate: number;
   totalDuration: HistoryHistogramSummary;
-  clientAvgMs: number;
+  nonRTTAvgMs: number;
+  buildAvgMs: number;
   encodeAvgMs: number;
+  sendAvgMs: number;
+  decodeWaitAvgMs: number;
   decodeAvgMs: number;
+  dispatchToActionWaitAvgMs: number;
   parseStoreAvgMs: number;
   rttSampleCount: number;
   totalDurationSampleCount: number;
@@ -552,6 +673,8 @@ export interface HistorySnapshotSummary {
   uptimeSeconds: number;
   totalActions: number;
   apdexT: number;
+  timingDetail: TimingDetailLevel;
+  summary: SnapshotMetricsSummary;
   robots: RobotsView;
   connections: ConnectionsView;
   bandwidth: BandwidthView;
@@ -565,8 +688,8 @@ export interface HistorySystemSummary {
   maxCpuPercent: number;
   avgMemPercent: number;
   maxMemPercent: number;
-  totalNetSendKBps: number;
-  totalNetRecvKBps: number;
+  totalNetSendKBps: number | null;
+  totalNetRecvKBps: number | null;
   totalGoroutines: number;
   totalThreads: number;
   totalFds: number;
@@ -609,18 +732,31 @@ export interface HistoryTrendPoint {
   sampledAt: string;
   elapsedSec: number;
   stageIndex: number;
+  windowFrom: string;
+  windowTo: string;
+  sampleCount: number;
   totalQps: number;
   rttApdex: number | null;
   listenWaitP99Ms: number | null;
-  rttAvgMs: number;
-  rttP95Ms: number;
-  rttP99Ms: number;
-  totalDurationAvgMs: number;
-  totalDurationP95Ms: number;
-  totalDurationP99Ms: number;
-  clientAvgMs: number;
-  encodeAvgMs: number;
-  decodeAvgMs: number;
+  rttAvgMs: number | null;
+  rttP50Ms: number | null;
+  rttP90Ms: number | null;
+  rttP95Ms: number | null;
+  rttP99Ms: number | null;
+  totalDurationAvgMs: number | null;
+  totalDurationP95Ms: number | null;
+  totalDurationP99Ms: number | null;
+  nonRTTAvgMs: number | null;
+  encodeAvgMs: number | null;
+  decodeAvgMs: number | null;
+  activeConnections: number | null;
+  closedConnections: number | null;
+  droppedConnections: number | null;
+  netSendBytesPerSec: number | null;
+  netRecvBytesPerSec: number | null;
+  assignedAgents: number | null;
+  reportingAgents: number | null;
+  reportingCoverage: number | null;
   botsRunning: number;
   botsErrored: number;
   sendKBps: number;
@@ -692,7 +828,7 @@ export interface HistoryCompareTask {
 export interface HistoryCompareResponse {
   tasks: HistoryCompareTask[];
   diff: {
-    actions: Record<string, number[]>;
+    actions: Record<string, Array<number | null>>;
   };
 }
 

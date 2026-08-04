@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"fmt"
 	"runtime"
 	"slices"
 	"time"
@@ -17,6 +18,8 @@ type SystemSnapshot struct {
 // ConnectionSnapshot 连接指标快照。
 type ConnectionSnapshot struct {
 	Established int64 `json:"established"` // 累计成功建立的连接数
+	Active      int64 `json:"active"`      // 当前活跃连接数
+	Closed      int64 `json:"closed"`      // 累计关闭连接数
 	Failed      int64 `json:"failed"`      // 累计连接建立失败数
 	Dropped     int64 `json:"dropped"`     // 累计连接意外断开数
 }
@@ -80,6 +83,7 @@ type ActionSnapshot struct {
 	SuccessRate               float64           `json:"successRate"`               // 成功率（0~1）
 	AvgSendBytes              float64           `json:"avgSendBytes"`              // 平均每次完成/记录的发送 WireBytes
 	AvgRecvBytes              float64           `json:"avgRecvBytes"`              // 平均每次完成/记录的接收 WireBytes
+	ByteSampleCount           int64             `json:"byteSampleCount"`           // 实际开始并形成记录的动作数
 	Kind                      ActionKind        `json:"kind"`                      // 动作分类，决定哪个耗时是主指标；仅 networked 打 Apdex
 	RTTApdex                  float64           `json:"rttApdex"`                  // RTT Apdex 评分（0~1），仅 Kind=networked 时有意义
 	RTT                       HistogramSnapshot `json:"rtt"`                       // RTT 直方图快照（WireRTT）
@@ -89,7 +93,7 @@ type ActionSnapshot struct {
 	ListenTimeoutRate         float64           `json:"listenTimeoutRate"`         // 监听超时率 = 超时 /（命中 + 已就绪 + 超时）
 	TotalDuration             HistogramSnapshot `json:"totalDuration"`             // action 总耗时直方图快照（wallClock），仅作诊断
 	TimeoutAvgMs              float64           `json:"timeoutAvgMs"`              // 平均超时延迟（毫秒）
-	ClientAvgMs               float64           `json:"clientAvgMs"`               // 客户端平均耗时（毫秒）
+	ClientAvgMs               float64           `json:"nonRTTAvgMs"`               // 非 RTT 平均耗时（毫秒）
 	BuildAvgMs                float64           `json:"buildAvgMs"`                // 构建平均耗时（毫秒）
 	EncodeAvgMs               float64           `json:"encodeAvgMs"`               // 编码平均耗时（毫秒）
 	SendAvgMs                 float64           `json:"sendAvgMs"`                 // 发送平均耗时（毫秒）
@@ -97,27 +101,71 @@ type ActionSnapshot struct {
 	DecodeAvgMs               float64           `json:"decodeAvgMs"`               // 解码平均耗时（毫秒）
 	DispatchToActionWaitAvgMs float64           `json:"dispatchToActionWaitAvgMs"` // 分发到 action 平均等待（毫秒）
 	ParseStoreAvgMs           float64           `json:"parseStoreAvgMs"`           // 解析和状态写入平均耗时（毫秒）
-	RTTSampleCount            int64             `json:"rttSampleCount"`            // 有完整响应帧且 WireRTT > 0 的 request 数
-	ListenWaitSampleCount     int64             `json:"listenWaitSampleCount"`     // 等待时长可测的监听命中数
-	TotalDurationSampleCount  int64             `json:"totalDurationSampleCount"`  // 总耗时 action 样本数
-	AvgQPS                    float64           `json:"avgQps"`                    // 全周期平均 QPS
-	PeriodQPS                 float64           `json:"periodQps"`                 // 上次快照到当前的区间 QPS
-	Errors                    []ErrorEntry      `json:"errors,omitempty"`          // 错误分布（仅失败/超时时有值）
+	BuildSampleCount          int64             `json:"buildSampleCount"`
+	EncodeSampleCount         int64             `json:"encodeSampleCount"`
+	SendSampleCount           int64             `json:"sendSampleCount"`
+	DecodeWaitSampleCount     int64             `json:"decodeWaitSampleCount"`
+	DecodeSampleCount         int64             `json:"decodeSampleCount"`
+	DispatchWaitSampleCount   int64             `json:"dispatchWaitSampleCount"`
+	ParseStoreSampleCount     int64             `json:"parseStoreSampleCount"`
+	RTTSampleCount            int64             `json:"rttSampleCount"`           // 有完整响应帧且 WireRTT > 0 的 request 数
+	RTTApdexSampleCount       int64             `json:"rttApdexSampleCount"`      // RTT Apdex 分母：有响应帧样本 + 无响应帧失败请求
+	ListenWaitSampleCount     int64             `json:"listenWaitSampleCount"`    // 等待时长可测的监听命中数
+	TotalDurationSampleCount  int64             `json:"totalDurationSampleCount"` // 总耗时 action 样本数
+	AvgQPS                    float64           `json:"avgQps"`                   // 全周期平均 QPS
+	PeriodQPS                 float64           `json:"periodQps"`                // 上次快照到当前的区间 QPS
+	Errors                    []ErrorEntry      `json:"errors,omitempty"`         // 错误分布（仅失败/超时时有值）
 
-	// 跨节点聚合所需的原始数据（omitempty 向后兼容单机模式）
-	RTTSumNs                     int64   `json:"rttSumNs,omitempty"`                     // RTT 延迟总和（纳秒），用于分布式合并
-	RTTBucketCounts              []int64 `json:"rttBucketCounts,omitempty"`              // RTT 直方图桶计数，用于分布式合并
-	ApdexSatisfied               int64   `json:"apdexSatisfied,omitempty"`               // RTT Apdex 满意样本数，用于分布式合并
-	ApdexTolerating              int64   `json:"apdexTolerating,omitempty"`              // RTT Apdex 容忍样本数，用于分布式合并
-	RTTFailedCount               int64   `json:"rttFailedCount,omitempty"`               // 无响应帧的请求数（frustrated），用于分布式合并
-	ListenWaitSumNs              int64   `json:"listenWaitSumNs,omitempty"`              // 监听等待总和（纳秒），用于分布式合并
-	ListenWaitBucketCounts       []int64 `json:"listenWaitBucketCounts,omitempty"`       // 监听等待直方图桶计数，用于分布式合并
-	TotalDurationSumNs           int64   `json:"totalDurationSumNs,omitempty"`           // 总耗时总和（纳秒），用于分布式合并
-	TotalDurationBucketCounts    []int64 `json:"totalDurationBucketCounts,omitempty"`    // 总耗时直方图桶计数，用于分布式合并
-	TotalSendBytes               int64   `json:"totalSendBytes,omitempty"`               // 累计发送字节数，用于分布式合并
-	TotalRecvBytes               int64   `json:"totalRecvBytes,omitempty"`               // 累计接收字节数，用于分布式合并
-	ClientCostSumNs              int64   `json:"clientCostSumNs,omitempty"`              // 客户端开销累计（纳秒），用于分布式合并
-	ClientCostCount              int64   `json:"clientCostCount,omitempty"`              // 客户端开销样本数，用于分布式合并
+	// 跨节点聚合所需的原始计数。延迟原始分布直接位于各 HistogramSnapshot.Sketch。
+	ApdexSatisfied    int64 `json:"apdexSatisfied,omitempty"`
+	ApdexTolerating   int64 `json:"apdexTolerating,omitempty"`
+	RTTFailedCount    int64 `json:"rttFailedCount,omitempty"`
+	TotalSendBytes    int64 `json:"totalSendBytes,omitempty"`
+	TotalRecvBytes    int64 `json:"totalRecvBytes,omitempty"`
+	TimeoutTotalNs    int64 `json:"timeoutTotalNs,omitempty"`
+	ClientCostSumNs   int64 `json:"clientCostSumNs,omitempty"`
+	ClientCostCount   int64 `json:"clientCostCount"`
+	BuildCostSumNs    int64 `json:"buildCostSumNs,omitempty"`
+	EncodeCostSumNs   int64 `json:"encodeCostSumNs,omitempty"`
+	SendCostSumNs     int64 `json:"sendCostSumNs,omitempty"`
+	DecodeWaitSumNs   int64 `json:"decodeWaitSumNs,omitempty"`
+	DecodeCostSumNs   int64 `json:"decodeCostSumNs,omitempty"`
+	DispatchWaitSumNs int64 `json:"dispatchWaitSumNs,omitempty"`
+	ParseStoreSumNs   int64 `json:"parseStoreSumNs,omitempty"`
+}
+
+// SnapshotSummary 是跨动作的统一汇总指标。百分位数由原始直方图合并后重算，
+// Apdex 由原始满意/容忍计数和完整请求分母计算；展示层不得再从单动作指标二次聚合。
+type SnapshotSummary struct {
+	SampleCount               int64             `json:"sampleCount"`
+	SuccessCount              int64             `json:"successCount"`
+	FailureCount              int64             `json:"failureCount"`
+	TimeoutCount              int64             `json:"timeoutCount"`
+	CanceledCount             int64             `json:"canceledCount"`
+	Executing                 int64             `json:"executing"`
+	SuccessRate               float64           `json:"successRate"`
+	RTTApdex                  float64           `json:"rttApdex"`
+	RTTApdexSampleCount       int64             `json:"rttApdexSampleCount"`
+	RTT                       HistogramSnapshot `json:"rtt"`
+	ListenWait                HistogramSnapshot `json:"listenWait"`
+	TotalDuration             HistogramSnapshot `json:"totalDuration"`
+	ClientAvgMs               float64           `json:"nonRTTAvgMs"`
+	ClientCostCount           int64             `json:"clientCostCount"`
+	BuildAvgMs                float64           `json:"buildAvgMs"`
+	EncodeAvgMs               float64           `json:"encodeAvgMs"`
+	SendAvgMs                 float64           `json:"sendAvgMs"`
+	DecodeWaitAvgMs           float64           `json:"decodeWaitAvgMs"`
+	DecodeAvgMs               float64           `json:"decodeAvgMs"`
+	DispatchToActionWaitAvgMs float64           `json:"dispatchToActionWaitAvgMs"`
+	ParseStoreAvgMs           float64           `json:"parseStoreAvgMs"`
+	BuildSampleCount          int64             `json:"buildSampleCount"`
+	EncodeSampleCount         int64             `json:"encodeSampleCount"`
+	SendSampleCount           int64             `json:"sendSampleCount"`
+	DecodeWaitSampleCount     int64             `json:"decodeWaitSampleCount"`
+	DecodeSampleCount         int64             `json:"decodeSampleCount"`
+	DispatchWaitSampleCount   int64             `json:"dispatchWaitSampleCount"`
+	ParseStoreSampleCount     int64             `json:"parseStoreSampleCount"`
+	AvgQPS                    float64           `json:"avgQps"`
 }
 
 // RobotSnapshot 机器人状态快照。
@@ -136,25 +184,132 @@ type RampUpSnapshot struct {
 
 // CollectorSnapshot 全局指标快照，包含系统、机器人、连接、带宽和所有 action 的聚合数据。
 type CollectorSnapshot struct {
-	Timestamp    time.Time          `json:"timestamp"`     // 快照时间
-	Uptime       time.Duration      `json:"uptime"`        // 运行时长
-	UptimeSec    float64            `json:"uptimeSeconds"` // 运行时长（秒）
-	TotalActions int64              `json:"totalActions"`  // 累计动作总数
-	ApdexT       int                `json:"apdexT"`        // 当前 Apdex T 阈值（毫秒）
-	System       SystemSnapshot     `json:"system"`        // 系统资源快照
-	Robots       RobotSnapshot      `json:"robots"`        // 机器人状态快照
-	RampUp       RampUpSnapshot     `json:"rampUp"`        // 渐进加压阶段快照
-	Connections  ConnectionSnapshot `json:"connections"`   // 连接指标快照
-	Bandwidth    BandwidthSnapshot  `json:"bandwidth"`     // 带宽快照
-	Actions      []ActionSnapshot   `json:"actions"`       // 所有 action 的快照列表
+	Timestamp            time.Time          `json:"timestamp"`       // 快照时间
+	CollectionEpoch      uint64             `json:"collectionEpoch"` // 累计指标代次，Reset 后递增
+	Uptime               time.Duration      `json:"uptime"`          // 运行时长
+	UptimeSec            float64            `json:"uptimeSeconds"`   // 运行时长（秒）
+	TotalActions         int64              `json:"totalActions"`    // 累计动作总数
+	ApdexT               int                `json:"apdexT"`          // 当前 Apdex T 阈值（毫秒）
+	TimingDetail         TimingDetailLevel  `json:"timingDetail"`    // 实际计时细分级别：rtt / codec / full
+	Summary              SnapshotSummary    `json:"summary"`         // 跨动作统一汇总，前端和历史采样的唯一总指标来源
+	System               SystemSnapshot     `json:"system"`          // 系统资源快照
+	Robots               RobotSnapshot      `json:"robots"`          // 机器人状态快照
+	RampUp               RampUpSnapshot     `json:"rampUp"`          // 渐进加压阶段快照
+	Connections          ConnectionSnapshot `json:"connections"`     // 连接指标快照
+	Bandwidth            BandwidthSnapshot  `json:"bandwidth"`       // 带宽快照
+	Actions              []ActionSnapshot   `json:"actions"`         // 所有 action 的快照列表
+	InvalidMetricSamples int64              `json:"invalidMetricSamples"`
+	Window               *ReportWindow      `json:"window"`
+}
+
+type ReportMeta struct {
+	Sequence                uint64
+	StartedAt               time.Time
+	EndedAt                 time.Time
+	ExpectedIntervalSeconds float64
+}
+
+type WindowBandwidthSnapshot struct {
+	SendBytes int64   `json:"sendBytes"`
+	RecvBytes int64   `json:"recvBytes"`
+	SendMBps  float64 `json:"sendMBps"`
+	RecvMBps  float64 `json:"recvMBps"`
+}
+
+type ReportWindow struct {
+	Sequence                uint64                  `json:"sequence,omitempty"`
+	StartedAt               time.Time               `json:"startedAt"`
+	EndedAt                 time.Time               `json:"endedAt"`
+	DurationSeconds         float64                 `json:"durationSeconds"`
+	ExpectedIntervalSeconds float64                 `json:"expectedIntervalSeconds"`
+	Summary                 SnapshotSummary         `json:"summary"`
+	Bandwidth               WindowBandwidthSnapshot `json:"bandwidth"`
+	Actions                 []ActionSnapshot        `json:"actions"`
+	InvalidMetricSamples    int64                   `json:"invalidMetricSamples"`
+}
+
+// PublicCopy returns a snapshot suitable for public HTTP and UI responses.
+// DDSketch payloads are an internal Agent/Admin merge format and must not be
+// exposed or accidentally retained by presentation consumers.
+func (s *CollectorSnapshot) PublicCopy() *CollectorSnapshot {
+	if s == nil {
+		return nil
+	}
+	public := *s
+	public.Summary = publicSummaryCopy(s.Summary)
+	public.Actions = publicActionCopies(s.Actions)
+	if s.Window != nil {
+		window := *s.Window
+		window.Sequence = 0
+		window.Summary = publicSummaryCopy(s.Window.Summary)
+		window.Actions = publicActionCopies(s.Window.Actions)
+		public.Window = &window
+	}
+	return &public
+}
+
+func publicSummaryCopy(summary SnapshotSummary) SnapshotSummary {
+	summary.RTT.Sketch = nil
+	summary.RTT.SumNs = 0
+	summary.ListenWait.Sketch = nil
+	summary.ListenWait.SumNs = 0
+	summary.TotalDuration.Sketch = nil
+	summary.TotalDuration.SumNs = 0
+	return summary
+}
+
+func publicActionCopies(actions []ActionSnapshot) []ActionSnapshot {
+	if actions == nil {
+		return nil
+	}
+	public := make([]ActionSnapshot, len(actions))
+	for i := range actions {
+		public[i] = actions[i]
+		public[i].RTT.Sketch = nil
+		public[i].RTT.SumNs = 0
+		public[i].ListenWait.Sketch = nil
+		public[i].ListenWait.SumNs = 0
+		public[i].TotalDuration.Sketch = nil
+		public[i].TotalDuration.SumNs = 0
+		public[i].ApdexSatisfied = 0
+		public[i].ApdexTolerating = 0
+		public[i].RTTFailedCount = 0
+		public[i].TotalSendBytes = 0
+		public[i].TotalRecvBytes = 0
+		public[i].TimeoutTotalNs = 0
+		public[i].ClientCostSumNs = 0
+		public[i].BuildCostSumNs = 0
+		public[i].EncodeCostSumNs = 0
+		public[i].SendCostSumNs = 0
+		public[i].DecodeWaitSumNs = 0
+		public[i].DecodeCostSumNs = 0
+		public[i].DispatchWaitSumNs = 0
+		public[i].ParseStoreSumNs = 0
+		if actions[i].Errors != nil {
+			public[i].Errors = make([]ErrorEntry, len(actions[i].Errors))
+			for j := range actions[i].Errors {
+				public[i].Errors[j] = actions[i].Errors[j]
+				public[i].Errors[j].Messages = slices.Clone(actions[i].Errors[j].Messages)
+			}
+		}
+	}
+	return public
 }
 
 // Snapshot 生成当前全局快照。
 // prevCounts 由调用方（Reporter）维护，用于计算 periodQPS。传 nil 表示不计算。
 func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float64) *CollectorSnapshot {
+	if !c.windowOnly {
+		c.transitionMu.RLock()
+		defer c.transitionMu.RUnlock()
+	}
+	return c.snapshotUnlocked(prevCounts, periodSec)
+}
+
+func (c *MetricsCollector) snapshotUnlocked(prevCounts map[string]int64, periodSec float64) *CollectorSnapshot {
 	if !c.enabled {
 		// 即使监控关闭，Actions 字段也保证非 nil 以满足契约
-		return &CollectorSnapshot{Actions: []ActionSnapshot{}}
+		return &CollectorSnapshot{CollectionEpoch: c.collectionEpoch.Load(), TimingDetail: c.timingDetail, Actions: []ActionSnapshot{}}
 	}
 	uptime := c.Uptime()
 	uptimeSec := uptime.Seconds()
@@ -180,12 +335,15 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 
 	apdexT := int(c.apdexT.Load())
 	snap := &CollectorSnapshot{
-		Timestamp:    time.Now(),
-		Uptime:       uptime,
-		UptimeSec:    uptimeSec,
-		TotalActions: c.totalActions.Load(),
-		ApdexT:       apdexT,
-		System:       sys,
+		Timestamp:            time.Now(),
+		CollectionEpoch:      c.collectionEpoch.Load(),
+		Uptime:               uptime,
+		UptimeSec:            uptimeSec,
+		TotalActions:         c.totalActions.Load(),
+		ApdexT:               apdexT,
+		TimingDetail:         c.timingDetail,
+		InvalidMetricSamples: c.invalidMetricSamples.Load(),
+		System:               sys,
 		Robots: RobotSnapshot{
 			Started: c.robotsStarted.Load(),
 			Running: c.robotsRunning.Load(),
@@ -198,6 +356,8 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 		},
 		Connections: ConnectionSnapshot{
 			Established: c.connEstablished.Load(),
+			Active:      c.connActive.Load(),
+			Closed:      c.connClosed.Load(),
 			Failed:      c.connFailed.Load(),
 			Dropped:     c.connDropped.Load(),
 		},
@@ -215,6 +375,7 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 			continue
 		}
 		am := v.(*actionMetrics)
+		am.mu.Lock()
 
 		succ := am.successCount.Load()
 		fail := am.failureCount.Load()
@@ -223,9 +384,10 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 		exec := am.executing.Load()
 		total := succ + fail + tout
 
+		timeoutTotalNs := am.timeoutTotalNs.Load()
 		var timeoutAvgMs float64
 		if tout > 0 {
-			timeoutAvgMs = float64(am.timeoutTotalMs.Load()) / float64(tout)
+			timeoutAvgMs = float64(timeoutTotalNs) / float64(tout) / 1e6
 		}
 
 		satisfied := am.apdexSatisfied.Load()
@@ -246,13 +408,27 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 			return float64(sum) / float64(count) / 1e6
 		}
 		clientAvgMs := avgMs(clientCostSum, clientCostCount)
-		buildAvgMs := avgMs(am.buildCostSum.Load(), clientCostCount)
-		encodeAvgMs := avgMs(am.encodeCostSum.Load(), clientCostCount)
-		sendAvgMs := avgMs(am.sendCostSum.Load(), clientCostCount)
-		decodeWaitAvgMs := avgMs(am.decodeWaitSum.Load(), clientCostCount)
-		decodeAvgMs := avgMs(am.decodeCostSum.Load(), clientCostCount)
-		dispatchWaitAvgMs := avgMs(am.dispatchWaitSum.Load(), clientCostCount)
-		parseStoreAvgMs := avgMs(am.parseStoreSum.Load(), clientCostCount)
+		buildSamples := am.buildCostCount.Load()
+		encodeSamples := am.encodeCostCount.Load()
+		sendSamples := am.sendCostCount.Load()
+		decodeWaitSamples := am.decodeWaitCount.Load()
+		decodeSamples := am.decodeCostCount.Load()
+		dispatchWaitSamples := am.dispatchWaitCount.Load()
+		parseStoreSamples := am.parseStoreCount.Load()
+		buildCostSum := am.buildCostSum.Load()
+		encodeCostSum := am.encodeCostSum.Load()
+		sendCostSum := am.sendCostSum.Load()
+		decodeWaitSum := am.decodeWaitSum.Load()
+		decodeCostSum := am.decodeCostSum.Load()
+		dispatchWaitSum := am.dispatchWaitSum.Load()
+		parseStoreSum := am.parseStoreSum.Load()
+		buildAvgMs := avgMs(buildCostSum, buildSamples)
+		encodeAvgMs := avgMs(encodeCostSum, encodeSamples)
+		sendAvgMs := avgMs(sendCostSum, sendSamples)
+		decodeWaitAvgMs := avgMs(decodeWaitSum, decodeWaitSamples)
+		decodeAvgMs := avgMs(decodeCostSum, decodeSamples)
+		dispatchWaitAvgMs := avgMs(dispatchWaitSum, dispatchWaitSamples)
+		parseStoreAvgMs := avgMs(parseStoreSum, parseStoreSamples)
 
 		// RTT Apdex 分母 = 有响应帧的样本 + 无响应帧的失败请求（后者按 frustrated 计）。
 		//   - 纯客户端动作（两者皆 0）不参与，避免大量「成功但无网络往返」的样本把分数虚抬；
@@ -277,7 +453,7 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 		var avgSend, avgRecv float64
 		totalSendBytes := am.sendBytes.Load()
 		totalRecvBytes := am.recvBytes.Load()
-		byteSamples := succ + fail + tout + canceled
+		byteSamples := am.byteSampleCount.Load()
 		if byteSamples > 0 {
 			avgSend = float64(totalSendBytes) / float64(byteSamples)
 			avgRecv = float64(totalRecvBytes) / float64(byteSamples)
@@ -306,53 +482,65 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 		}
 
 		snap.Actions = append(snap.Actions, ActionSnapshot{
-			Name:                         name,
-			SampleCount:                  total,
-			SuccessCount:                 succ,
-			FailureCount:                 fail,
-			TimeoutCount:                 tout,
-			CanceledCount:                canceled,
-			TimeoutAvgMs:                 timeoutAvgMs,
-			ClientAvgMs:                  clientAvgMs,
-			BuildAvgMs:                   buildAvgMs,
-			EncodeAvgMs:                  encodeAvgMs,
-			SendAvgMs:                    sendAvgMs,
-			DecodeWaitAvgMs:              decodeWaitAvgMs,
-			DecodeAvgMs:                  decodeAvgMs,
-			DispatchToActionWaitAvgMs:    dispatchWaitAvgMs,
-			ParseStoreAvgMs:              parseStoreAvgMs,
-			RTTSampleCount:               rttSamples,
-			ListenWaitSampleCount:        listenWaitSamples,
-			TotalDurationSampleCount:     totalDurationSamples,
-			Executing:                    exec,
-			SuccessRate:                  successRate,
-			AvgSendBytes:                 avgSend,
-			AvgRecvBytes:                 avgRecv,
-			Kind:                         kind,
-			RTTApdex:                     rttApdex,
-			RTT:                          rttSnap,
-			ListenWait:                   listenWaitSnap,
-			ListenReadyCount:             listenReady,
-			ListenTimeoutCount:           listenTimeouts,
-			ListenTimeoutRate:            listenTimeoutRate,
-			TotalDuration:                totalDurationSnap,
-			AvgQPS:                       avgQPS,
-			PeriodQPS:                    periodQPS,
-			Errors:                       errs,
-			RTTSumNs:                     rttSnap.SumNs,
-			RTTBucketCounts:              rttSnap.BucketCounts,
-			ApdexSatisfied:               satisfied,
-			ApdexTolerating:              tolerating,
-			RTTFailedCount:               rttFailed,
-			ListenWaitSumNs:              listenWaitSnap.SumNs,
-			ListenWaitBucketCounts:       listenWaitSnap.BucketCounts,
-			TotalDurationSumNs:           totalDurationSnap.SumNs,
-			TotalDurationBucketCounts:    totalDurationSnap.BucketCounts,
-			TotalSendBytes:               totalSendBytes,
-			TotalRecvBytes:               totalRecvBytes,
-			ClientCostSumNs:              clientCostSum,
-			ClientCostCount:              clientCostCount,
+			Name:                      name,
+			SampleCount:               total,
+			SuccessCount:              succ,
+			FailureCount:              fail,
+			TimeoutCount:              tout,
+			CanceledCount:             canceled,
+			TimeoutAvgMs:              timeoutAvgMs,
+			ClientAvgMs:               clientAvgMs,
+			BuildAvgMs:                buildAvgMs,
+			EncodeAvgMs:               encodeAvgMs,
+			SendAvgMs:                 sendAvgMs,
+			DecodeWaitAvgMs:           decodeWaitAvgMs,
+			DecodeAvgMs:               decodeAvgMs,
+			DispatchToActionWaitAvgMs: dispatchWaitAvgMs,
+			ParseStoreAvgMs:           parseStoreAvgMs,
+			BuildSampleCount:          buildSamples,
+			EncodeSampleCount:         encodeSamples,
+			SendSampleCount:           sendSamples,
+			DecodeWaitSampleCount:     decodeWaitSamples,
+			DecodeSampleCount:         decodeSamples,
+			DispatchWaitSampleCount:   dispatchWaitSamples,
+			ParseStoreSampleCount:     parseStoreSamples,
+			RTTSampleCount:            rttSamples,
+			RTTApdexSampleCount:       rttApdexSamples,
+			ListenWaitSampleCount:     listenWaitSamples,
+			TotalDurationSampleCount:  totalDurationSamples,
+			Executing:                 exec,
+			SuccessRate:               successRate,
+			AvgSendBytes:              avgSend,
+			AvgRecvBytes:              avgRecv,
+			ByteSampleCount:           byteSamples,
+			Kind:                      kind,
+			RTTApdex:                  rttApdex,
+			RTT:                       rttSnap,
+			ListenWait:                listenWaitSnap,
+			ListenReadyCount:          listenReady,
+			ListenTimeoutCount:        listenTimeouts,
+			ListenTimeoutRate:         listenTimeoutRate,
+			TotalDuration:             totalDurationSnap,
+			AvgQPS:                    avgQPS,
+			PeriodQPS:                 periodQPS,
+			Errors:                    errs,
+			ApdexSatisfied:            satisfied,
+			ApdexTolerating:           tolerating,
+			RTTFailedCount:            rttFailed,
+			TotalSendBytes:            totalSendBytes,
+			TotalRecvBytes:            totalRecvBytes,
+			TimeoutTotalNs:            timeoutTotalNs,
+			ClientCostSumNs:           clientCostSum,
+			ClientCostCount:           clientCostCount,
+			BuildCostSumNs:            buildCostSum,
+			EncodeCostSumNs:           encodeCostSum,
+			SendCostSumNs:             sendCostSum,
+			DecodeWaitSumNs:           decodeWaitSum,
+			DecodeCostSumNs:           decodeCostSum,
+			DispatchWaitSumNs:         dispatchWaitSum,
+			ParseStoreSumNs:           parseStoreSum,
 		})
+		am.mu.Unlock()
 	}
 	// 契约保证：Actions 字段在 JSON 中始终是数组，不是 null。
 	// 历史 bug：stopping 阶段或刚启动还没动作时，Actions 是 nil slice →
@@ -362,7 +550,157 @@ func (c *MetricsCollector) Snapshot(prevCounts map[string]int64, periodSec float
 	if snap.Actions == nil {
 		snap.Actions = []ActionSnapshot{}
 	}
+	snap.Summary = BuildSnapshotSummary(snap.Actions)
 	return snap
+}
+
+// TakeReportSnapshot 在一个记录边界上切换活动区间，并返回同一时刻的累计快照。
+func (c *MetricsCollector) TakeReportSnapshot(meta ReportMeta) *CollectorSnapshot {
+	if c == nil || !c.enabled {
+		return &CollectorSnapshot{Actions: []ActionSnapshot{}, Window: &ReportWindow{Actions: []ActionSnapshot{}}}
+	}
+	duration := meta.EndedAt.Sub(meta.StartedAt).Seconds()
+	if duration <= 0 {
+		duration = meta.ExpectedIntervalSeconds
+	}
+	if duration <= 0 {
+		duration = 1
+	}
+
+	c.transitionMu.Lock()
+	oldWindow := c.currentWindowCollector()
+	c.window.Store(c.newWindowCollector(meta.EndedAt))
+	cumulative := c.snapshotUnlocked(nil, 0)
+	c.transitionMu.Unlock()
+
+	interval := oldWindow.snapshotUnlocked(nil, 0)
+	for i := range interval.Actions {
+		interval.Actions[i].AvgQPS = float64(interval.Actions[i].SampleCount) / duration
+		interval.Actions[i].PeriodQPS = interval.Actions[i].AvgQPS
+	}
+	interval.Summary = BuildSnapshotSummary(interval.Actions)
+	interval.Summary.AvgQPS = float64(interval.Summary.SampleCount) / duration
+	sendMBps := float64(interval.Bandwidth.TotalSendBytes) / 1024 / 1024 / duration
+	recvMBps := float64(interval.Bandwidth.TotalRecvBytes) / 1024 / 1024 / duration
+	cumulative.Window = &ReportWindow{
+		Sequence:                meta.Sequence,
+		StartedAt:               meta.StartedAt,
+		EndedAt:                 meta.EndedAt,
+		DurationSeconds:         duration,
+		ExpectedIntervalSeconds: meta.ExpectedIntervalSeconds,
+		Summary:                 interval.Summary,
+		Bandwidth: WindowBandwidthSnapshot{
+			SendBytes: interval.Bandwidth.TotalSendBytes,
+			RecvBytes: interval.Bandwidth.TotalRecvBytes,
+			SendMBps:  sendMBps,
+			RecvMBps:  recvMBps,
+		},
+		Actions:              interval.Actions,
+		InvalidMetricSamples: interval.InvalidMetricSamples,
+	}
+	return cumulative
+}
+
+// BuildSnapshotSummary 从动作原始计数和直方图构建跨动作汇总。
+func BuildSnapshotSummary(actions []ActionSnapshot) SnapshotSummary {
+	summary, err := buildSnapshotSummary(actions)
+	if err != nil {
+		panic("监控内部延迟分布损坏: " + err.Error())
+	}
+	return summary
+}
+
+func buildSnapshotSummary(actions []ActionSnapshot) (SnapshotSummary, error) {
+	var summary SnapshotSummary
+	rttSnaps := make([]HistogramSnapshot, 0, len(actions))
+	listenWaitSnaps := make([]HistogramSnapshot, 0, len(actions))
+	totalDurationSnaps := make([]HistogramSnapshot, 0, len(actions))
+	var apdexPoints float64
+	var clientWeight, clientSumNs int64
+	var buildSumNs, encodeSumNs, sendSumNs, decodeWaitSumNs, decodeSumNs, dispatchSumNs, parseStoreSumNs int64
+
+	for _, action := range actions {
+		summary.SampleCount += action.SampleCount
+		summary.SuccessCount += action.SuccessCount
+		summary.FailureCount += action.FailureCount
+		summary.TimeoutCount += action.TimeoutCount
+		summary.CanceledCount += action.CanceledCount
+		summary.Executing += action.Executing
+		summary.AvgQPS += action.AvgQPS
+
+		denominator := action.RTTApdexSampleCount
+		summary.RTTApdexSampleCount += denominator
+		apdexPoints += float64(action.ApdexSatisfied) + float64(action.ApdexTolerating)*0.5
+
+		if action.RTT.Count > 0 {
+			rttSnaps = append(rttSnaps, action.RTT)
+		}
+		if action.ListenWait.Count > 0 {
+			listenWaitSnaps = append(listenWaitSnaps, action.ListenWait)
+		}
+		if action.TotalDuration.Count > 0 {
+			totalDurationSnaps = append(totalDurationSnaps, action.TotalDuration)
+		}
+
+		weight := action.ClientCostCount
+		if weight > 0 {
+			clientWeight += weight
+			clientSumNs += action.ClientCostSumNs
+		}
+		summary.BuildSampleCount += action.BuildSampleCount
+		summary.EncodeSampleCount += action.EncodeSampleCount
+		summary.SendSampleCount += action.SendSampleCount
+		summary.DecodeWaitSampleCount += action.DecodeWaitSampleCount
+		summary.DecodeSampleCount += action.DecodeSampleCount
+		summary.DispatchWaitSampleCount += action.DispatchWaitSampleCount
+		summary.ParseStoreSampleCount += action.ParseStoreSampleCount
+		buildSumNs += action.BuildCostSumNs
+		encodeSumNs += action.EncodeCostSumNs
+		sendSumNs += action.SendCostSumNs
+		decodeWaitSumNs += action.DecodeWaitSumNs
+		decodeSumNs += action.DecodeCostSumNs
+		dispatchSumNs += action.DispatchWaitSumNs
+		parseStoreSumNs += action.ParseStoreSumNs
+	}
+
+	if summary.SampleCount > 0 {
+		summary.SuccessRate = float64(summary.SuccessCount) / float64(summary.SampleCount)
+	}
+	if summary.RTTApdexSampleCount > 0 {
+		summary.RTTApdex = apdexPoints / float64(summary.RTTApdexSampleCount)
+	}
+	var err error
+	summary.RTT, err = MergeHistograms(rttSnaps)
+	if err != nil {
+		return SnapshotSummary{}, fmt.Errorf("合并 RTT 分布: %w", err)
+	}
+	summary.ListenWait, err = MergeHistograms(listenWaitSnaps)
+	if err != nil {
+		return SnapshotSummary{}, fmt.Errorf("合并监听等待分布: %w", err)
+	}
+	summary.TotalDuration, err = MergeHistograms(totalDurationSnaps)
+	if err != nil {
+		return SnapshotSummary{}, fmt.Errorf("合并总耗时分布: %w", err)
+	}
+	if clientWeight > 0 {
+		summary.ClientAvgMs = divideMetricSumNs(clientSumNs, clientWeight)
+	}
+	summary.ClientCostCount = clientWeight
+	summary.BuildAvgMs = divideMetricSumNs(buildSumNs, summary.BuildSampleCount)
+	summary.EncodeAvgMs = divideMetricSumNs(encodeSumNs, summary.EncodeSampleCount)
+	summary.SendAvgMs = divideMetricSumNs(sendSumNs, summary.SendSampleCount)
+	summary.DecodeWaitAvgMs = divideMetricSumNs(decodeWaitSumNs, summary.DecodeWaitSampleCount)
+	summary.DecodeAvgMs = divideMetricSumNs(decodeSumNs, summary.DecodeSampleCount)
+	summary.DispatchToActionWaitAvgMs = divideMetricSumNs(dispatchSumNs, summary.DispatchWaitSampleCount)
+	summary.ParseStoreAvgMs = divideMetricSumNs(parseStoreSumNs, summary.ParseStoreSampleCount)
+	return summary, nil
+}
+
+func divideMetricSumNs(sumNs, count int64) float64 {
+	if count == 0 {
+		return 0
+	}
+	return float64(sumNs) / float64(count) / 1e6
 }
 
 // classifyActionKind 按运行期发生过的网络行为给动作定型。
@@ -386,33 +724,55 @@ func classifyActionKind(roundTrips, listenEvents, sendBytes int64) ActionKind {
 //
 // 契约保证：返回的 *CollectorSnapshot 的 Actions 字段始终非 nil（最少是空切片），
 // 避免前端 JSON 解析后调 for...of 抛 "actions is not iterable"。
-func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
-	if len(snaps) == 0 {
-		return &CollectorSnapshot{Actions: []ActionSnapshot{}}
+func MergeSnapshots(snaps []*CollectorSnapshot) (*CollectorSnapshot, error) {
+	valid := make([]*CollectorSnapshot, 0, len(snaps))
+	for _, snap := range snaps {
+		if snap != nil {
+			valid = append(valid, snap)
+		}
 	}
-	if len(snaps) == 1 {
-		out := snaps[0]
-		if out != nil && out.Actions == nil {
+	if len(valid) == 0 {
+		return &CollectorSnapshot{TimingDetail: TimingRTTOnly, Actions: []ActionSnapshot{}}, nil
+	}
+	if len(valid) == 1 {
+		out := *valid[0]
+		if out.Actions == nil {
 			out.Actions = []ActionSnapshot{}
 		}
-		return out
+		out.TimingDetail = NormalizeTimingDetail(string(out.TimingDetail))
+		var err error
+		out.Summary, err = buildSnapshotSummary(out.Actions)
+		if err != nil {
+			return nil, err
+		}
+		return &out, nil
 	}
 
 	merged := &CollectorSnapshot{
-		Timestamp: time.Now(),
-		ApdexT:    snaps[0].ApdexT,
+		Timestamp:    time.Now(),
+		ApdexT:       valid[0].ApdexT,
+		TimingDetail: NormalizeTimingDetail(string(valid[0].TimingDetail)),
 	}
 
 	var maxUptime float64
-	merged.RampUp.TotalStages = snaps[0].RampUp.TotalStages // 所有 Agent 阶段数相同
+	merged.RampUp.TotalStages = valid[0].RampUp.TotalStages // 所有 Agent 阶段数相同
 	first := true
-	for _, s := range snaps {
+	for _, s := range valid {
+		if s.CollectionEpoch > merged.CollectionEpoch {
+			merged.CollectionEpoch = s.CollectionEpoch
+		}
+		if timingDetailRank(NormalizeTimingDetail(string(s.TimingDetail))) < timingDetailRank(merged.TimingDetail) {
+			merged.TimingDetail = NormalizeTimingDetail(string(s.TimingDetail))
+		}
 		merged.TotalActions += s.TotalActions
+		merged.InvalidMetricSamples += s.InvalidMetricSamples
 		merged.Robots.Started += s.Robots.Started
 		merged.Robots.Running += s.Robots.Running
 		merged.Robots.Stopped += s.Robots.Stopped
 		merged.Robots.Errored += s.Robots.Errored
 		merged.Connections.Established += s.Connections.Established
+		merged.Connections.Active += s.Connections.Active
+		merged.Connections.Closed += s.Connections.Closed
 		merged.Connections.Failed += s.Connections.Failed
 		merged.Connections.Dropped += s.Connections.Dropped
 		merged.Bandwidth.TotalSendBytes += s.Bandwidth.TotalSendBytes
@@ -439,7 +799,7 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 	}
 	actionMap := make(map[string]*actionAgg)
 	var order []string
-	for _, s := range snaps {
+	for _, s := range valid {
 		for _, a := range s.Actions {
 			if _, ok := actionMap[a.Name]; !ok {
 				actionMap[a.Name] = &actionAgg{}
@@ -466,6 +826,8 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 			rttTolerating += a.ApdexTolerating
 			ma.TotalSendBytes += a.TotalSendBytes
 			ma.TotalRecvBytes += a.TotalRecvBytes
+			ma.TimeoutTotalNs += a.TimeoutTotalNs
+			ma.ByteSampleCount += a.ByteSampleCount
 			ma.RTTSampleCount += a.RTTSampleCount
 			ma.RTTFailedCount += a.RTTFailedCount
 			ma.ListenWaitSampleCount += a.ListenWaitSampleCount
@@ -474,6 +836,20 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 			ma.TotalDurationSampleCount += a.TotalDurationSampleCount
 			ma.ClientCostSumNs += a.ClientCostSumNs
 			ma.ClientCostCount += a.ClientCostCount
+			ma.BuildCostSumNs += a.BuildCostSumNs
+			ma.EncodeCostSumNs += a.EncodeCostSumNs
+			ma.SendCostSumNs += a.SendCostSumNs
+			ma.DecodeWaitSumNs += a.DecodeWaitSumNs
+			ma.DecodeCostSumNs += a.DecodeCostSumNs
+			ma.DispatchWaitSumNs += a.DispatchWaitSumNs
+			ma.ParseStoreSumNs += a.ParseStoreSumNs
+			ma.BuildSampleCount += a.BuildSampleCount
+			ma.EncodeSampleCount += a.EncodeSampleCount
+			ma.SendSampleCount += a.SendSampleCount
+			ma.DecodeWaitSampleCount += a.DecodeWaitSampleCount
+			ma.DecodeSampleCount += a.DecodeSampleCount
+			ma.DispatchWaitSampleCount += a.DispatchWaitSampleCount
+			ma.ParseStoreSampleCount += a.ParseStoreSampleCount
 		}
 
 		// 合并延迟直方图
@@ -485,23 +861,28 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 			listenWaitSnaps[i] = a.ListenWait
 			totalDurationSnaps[i] = a.TotalDuration
 		}
-		ma.RTT = MergeHistograms(rttSnaps)
-		ma.RTTSumNs = ma.RTT.SumNs
-		ma.RTTBucketCounts = ma.RTT.BucketCounts
+		var err error
+		ma.RTT, err = MergeHistograms(rttSnaps)
+		if err != nil {
+			return nil, fmt.Errorf("合并动作 %q RTT 分布: %w", name, err)
+		}
 		ma.ApdexSatisfied = rttSatisfied
 		ma.ApdexTolerating = rttTolerating
-		ma.ListenWait = MergeHistograms(listenWaitSnaps)
-		ma.ListenWaitSumNs = ma.ListenWait.SumNs
-		ma.ListenWaitBucketCounts = ma.ListenWait.BucketCounts
-		ma.TotalDuration = MergeHistograms(totalDurationSnaps)
-		ma.TotalDurationSumNs = ma.TotalDuration.SumNs
-		ma.TotalDurationBucketCounts = ma.TotalDuration.BucketCounts
+		ma.ListenWait, err = MergeHistograms(listenWaitSnaps)
+		if err != nil {
+			return nil, fmt.Errorf("合并动作 %q 监听等待分布: %w", name, err)
+		}
+		ma.TotalDuration, err = MergeHistograms(totalDurationSnaps)
+		if err != nil {
+			return nil, fmt.Errorf("合并动作 %q 总耗时分布: %w", name, err)
+		}
 
 		if ma.SampleCount > 0 {
 			ma.SuccessRate = float64(ma.SuccessCount) / float64(ma.SampleCount)
 		}
 		// RTT Apdex 分母 = 有响应帧的样本 + 无响应帧的失败请求，与单机模式同口径。
 		rttApdexSamples := ma.RTTSampleCount + ma.RTTFailedCount
+		ma.RTTApdexSampleCount = rttApdexSamples
 		if rttApdexSamples > 0 {
 			ma.RTTApdex = (float64(rttSatisfied) + float64(rttTolerating)*0.5) / float64(rttApdexSamples)
 		}
@@ -510,40 +891,26 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 			ma.ListenTimeoutRate = float64(ma.ListenTimeoutCount) / float64(listenTotal)
 		}
 		ma.Kind = classifyActionKind(rttApdexSamples, listenTotal, ma.TotalSendBytes)
-		byteSamples := ma.SuccessCount + ma.FailureCount + ma.TimeoutCount + ma.CanceledCount
+		byteSamples := ma.ByteSampleCount
 		if byteSamples > 0 {
 			ma.AvgSendBytes = float64(ma.TotalSendBytes) / float64(byteSamples)
 			ma.AvgRecvBytes = float64(ma.TotalRecvBytes) / float64(byteSamples)
 		}
 		if ma.ClientCostCount > 0 {
-			var buildSum, encodeSum, sendSum, decodeWaitSum, decodeSum, dispatchSum, parseStoreSum float64
-			for _, a := range agg.snaps {
-				buildSum += a.BuildAvgMs * float64(a.ClientCostCount)
-				encodeSum += a.EncodeAvgMs * float64(a.ClientCostCount)
-				sendSum += a.SendAvgMs * float64(a.ClientCostCount)
-				decodeWaitSum += a.DecodeWaitAvgMs * float64(a.ClientCostCount)
-				decodeSum += a.DecodeAvgMs * float64(a.ClientCostCount)
-				dispatchSum += a.DispatchToActionWaitAvgMs * float64(a.ClientCostCount)
-				parseStoreSum += a.ParseStoreAvgMs * float64(a.ClientCostCount)
-			}
 			ma.ClientAvgMs = float64(ma.ClientCostSumNs) / float64(ma.ClientCostCount) / 1e6
-			ma.BuildAvgMs = buildSum / float64(ma.ClientCostCount)
-			ma.EncodeAvgMs = encodeSum / float64(ma.ClientCostCount)
-			ma.SendAvgMs = sendSum / float64(ma.ClientCostCount)
-			ma.DecodeWaitAvgMs = decodeWaitSum / float64(ma.ClientCostCount)
-			ma.DecodeAvgMs = decodeSum / float64(ma.ClientCostCount)
-			ma.DispatchToActionWaitAvgMs = dispatchSum / float64(ma.ClientCostCount)
-			ma.ParseStoreAvgMs = parseStoreSum / float64(ma.ClientCostCount)
 		}
+		ma.BuildAvgMs = divideMetricSumNs(ma.BuildCostSumNs, ma.BuildSampleCount)
+		ma.EncodeAvgMs = divideMetricSumNs(ma.EncodeCostSumNs, ma.EncodeSampleCount)
+		ma.SendAvgMs = divideMetricSumNs(ma.SendCostSumNs, ma.SendSampleCount)
+		ma.DecodeWaitAvgMs = divideMetricSumNs(ma.DecodeWaitSumNs, ma.DecodeWaitSampleCount)
+		ma.DecodeAvgMs = divideMetricSumNs(ma.DecodeCostSumNs, ma.DecodeSampleCount)
+		ma.DispatchToActionWaitAvgMs = divideMetricSumNs(ma.DispatchWaitSumNs, ma.DispatchWaitSampleCount)
+		ma.ParseStoreAvgMs = divideMetricSumNs(ma.ParseStoreSumNs, ma.ParseStoreSampleCount)
 		if maxUptime > 0 {
 			ma.AvgQPS = float64(ma.SampleCount) / maxUptime
 		}
 		if ma.TimeoutCount > 0 {
-			var totalTimeoutMs int64
-			for _, a := range agg.snaps {
-				totalTimeoutMs += int64(a.TimeoutAvgMs * float64(a.TimeoutCount))
-			}
-			ma.TimeoutAvgMs = float64(totalTimeoutMs) / float64(ma.TimeoutCount)
+			ma.TimeoutAvgMs = divideMetricSumNs(ma.TimeoutTotalNs, ma.TimeoutCount)
 		}
 
 		// 合并错误 — 按 code 聚合，Messages 取并集去重
@@ -581,5 +948,10 @@ func MergeSnapshots(snaps []*CollectorSnapshot) *CollectorSnapshot {
 	if merged.Actions == nil {
 		merged.Actions = []ActionSnapshot{}
 	}
-	return merged
+	var err error
+	merged.Summary, err = buildSnapshotSummary(merged.Actions)
+	if err != nil {
+		return nil, err
+	}
+	return merged, nil
 }

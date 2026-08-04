@@ -8,8 +8,10 @@ import type {
   HistoryDetail,
   HistoryTrendPoint,
   HistorySystemSummary,
+  SnapshotMetricsSummary,
+  TimingDetailLevel,
 } from '@/types/api';
-import { computeWeightedMetrics, classifyApdex } from '@/services/metricsBinding';
+import { classifyApdex } from '@/services/metricsBinding';
 import { resolveKind } from '@/components/monitoring/shared/ActionMetricsTable';
 import { fmtMs, fmtBytesPlain } from '@/components/monitoring/shared/formats';
 import { formatStageLabel } from '../stageLabel';
@@ -27,21 +29,27 @@ export function ReportHtml({ detail, charts }: ReportHtmlProps) {
   const cs = detail.configSummary;
   const failed = detail.state === 'failed';
   const conn = detail.finalSnapshot?.connections ?? { established: 0, failed: 0, dropped: 0 };
-  const wm = computeWeightedMetrics(actions);
-  const totalQps = actions.reduce((s, a) => s + a.avgQps, 0);
+  const metrics = detail.finalSnapshot.summary;
 
   return (
     <div>
       {/* 打印提示 */}
       <div className="print-hint no-print">
-        <span>报告已生成，按 <kbd>Ctrl+P</kbd> 保存为 PDF</span>
+        <span>
+          报告已生成，按 <kbd>Ctrl+P</kbd> 保存为 PDF
+        </span>
       </div>
 
       {/* Section 1: 封面 */}
       <CoverSection detail={detail} failed={failed} cs={cs} />
 
       {/* Section 2: KPI */}
-      <KpiSection actions={actions} sys={sys} conn={conn} wm={wm} totalQps={totalQps} />
+      <KpiSection
+        totalActions={detail.finalSnapshot.totalActions}
+        sys={sys}
+        conn={conn}
+        metrics={metrics}
+      />
 
       {/* Section 3: 趋势 2×2 */}
       <div className="report-section">
@@ -102,20 +110,16 @@ export function ReportHtml({ detail, charts }: ReportHtmlProps) {
       <ChartSection title="Apdex 分布" image={charts.apdexBar} empty="无动作数据" />
 
       {/* Section 8: 错误分析 */}
-      {charts.errors && (
-        <ErrorSection actions={actions} errorChart={charts.errors} />
-      )}
+      {charts.errors && <ErrorSection actions={actions} errorChart={charts.errors} />}
 
       {/* Section 9: 集群状态 */}
       <SystemSection sys={sys} />
 
       {/* Section 10: 节点结果 */}
-      {detail.agentReports && detail.agentReports.length > 0 && (
-        <AgentSection detail={detail} />
-      )}
+      {detail.agentReports && detail.agentReports.length > 0 && <AgentSection detail={detail} />}
 
       {/* Section 11: 动作详表 */}
-      <DetailTableSection actions={actions} />
+      <DetailTableSection actions={actions} timingDetail={detail.finalSnapshot.timingDetail} />
 
       {/* Footer */}
       <div className="report-footer">
@@ -130,7 +134,15 @@ export function ReportHtml({ detail, charts }: ReportHtmlProps) {
 
 /* ── 子组件 ── */
 
-function CoverSection({ detail, failed, cs }: { detail: HistoryDetail; failed: boolean; cs: HistoryDetail['configSummary'] }) {
+function CoverSection({
+  detail,
+  failed,
+  cs,
+}: {
+  detail: HistoryDetail;
+  failed: boolean;
+  cs: HistoryDetail['configSummary'];
+}) {
   return (
     <div className="report-section report-cover">
       <div className="report-cover__logo">stressbot 压测报告</div>
@@ -157,35 +169,49 @@ function CoverSection({ detail, failed, cs }: { detail: HistoryDetail; failed: b
             <br />
           </>
         )}
-        <b>{detail.totalBots}</b> 机器人 · <b>{detail.activeAgentCount}/{detail.agentCount}</b> 节点 · 并发 <b>{cs.concurrency}</b> · 超时 <b>{cs.timeoutSec}s</b>
-        {' · '}流程 <b>{cs.flowSizeKB}KB</b> · <b>{cs.protoCount}</b> Proto · <b>{cs.scriptCount}</b> Lua 脚本
+        <b>{detail.totalBots}</b> 机器人 ·{' '}
+        <b>
+          {detail.activeAgentCount}/{detail.agentCount}
+        </b>{' '}
+        节点 · 并发 <b>{cs.concurrency}</b> · 超时 <b>{cs.timeoutSec}s</b>
+        {' · '}流程 <b>{cs.flowSizeKB}KB</b> · <b>{cs.protoCount}</b> Proto ·{' '}
+        <b>{cs.scriptCount}</b> Lua 脚本
       </div>
-      {detail.errorMsg && (
-        <div className="report-cover__error">{detail.errorMsg}</div>
-      )}
+      {detail.errorMsg && <div className="report-cover__error">{detail.errorMsg}</div>}
     </div>
   );
 }
 
 function KpiSection({
-  actions, sys, conn, wm, totalQps,
+  totalActions,
+  sys,
+  conn,
+  metrics,
 }: {
-  actions: HistoryActionMetric[];
+  totalActions: number;
   sys: HistorySystemSummary | null;
   conn: { established: number; failed: number; dropped: number };
-  wm: { totalSamples: number; apdex: number; successRate: number };
-  totalQps: number;
+  metrics: SnapshotMetricsSummary;
 }) {
-  const totalActions = actions.reduce((s, a) => s + a.sampleCount, 0);
-  const memPct = sys && sys.totalMemMB > 0 ? ((sys.usedMemMB / sys.totalMemMB) * 100).toFixed(1) : '—';
+  const memPct =
+    sys && sys.totalMemMB > 0 ? ((sys.usedMemMB / sys.totalMemMB) * 100).toFixed(1) : '—';
 
   const kpis = [
     { value: totalActions.toLocaleString(), label: '累计动作' },
-    { value: wm.apdex.toFixed(3), label: '整体 Apdex' },
-    { value: (wm.successRate * 100).toFixed(1) + '%', label: '成功率' },
-    { value: totalQps.toFixed(1), label: '总 QPS' },
+    {
+      value: metrics.rttApdexSampleCount > 0 ? metrics.rttApdex.toFixed(3) : '—',
+      label: '整体 Apdex',
+    },
+    {
+      value: metrics.sampleCount > 0 ? (metrics.successRate * 100).toFixed(1) + '%' : '—',
+      label: '成功率',
+    },
+    { value: metrics.avgQps.toFixed(1), label: '总 QPS' },
     { value: conn.established.toLocaleString(), label: '建连数' },
-    { value: conn.failed > 0 ? `${conn.failed} / ${conn.dropped}` : `${conn.failed}`, label: '错误连接' },
+    {
+      value: conn.failed > 0 ? `${conn.failed} / ${conn.dropped}` : `${conn.failed}`,
+      label: '错误连接',
+    },
     { value: sys ? `${sys.avgCpuPercent.toFixed(1)}%` : '—', label: '平均 CPU' },
     { value: memPct + '%', label: '内存使用' },
   ];
@@ -205,7 +231,15 @@ function KpiSection({
   );
 }
 
-function ChartSection({ title, image, empty }: { title: string; image: string | null; empty: string }) {
+function ChartSection({
+  title,
+  image,
+  empty,
+}: {
+  title: string;
+  image: string | null;
+  empty: string;
+}) {
   return (
     <div className="report-section">
       <div className="section-title">{title}</div>
@@ -217,9 +251,7 @@ function ChartSection({ title, image, empty }: { title: string; image: string | 
 }
 
 function FailureSummaryTable({ actions }: { actions: HistoryActionMetric[] }) {
-  const problemActions = actions.filter(
-    (a) => a.failureCount > 0 || a.timeoutCount > 0,
-  );
+  const problemActions = actions.filter((a) => a.failureCount > 0 || a.timeoutCount > 0);
   if (problemActions.length === 0) {
     return (
       <div style={{ flex: 1 }}>
@@ -243,10 +275,13 @@ function FailureSummaryTable({ actions }: { actions: HistoryActionMetric[] }) {
         </thead>
         <tbody>
           {problemActions.slice(0, 10).map((a) => {
-            const rate = a.sampleCount > 0 ? ((a.failureCount / a.sampleCount) * 100).toFixed(1) : '0';
+            const rate =
+              a.sampleCount > 0 ? ((a.failureCount / a.sampleCount) * 100).toFixed(1) : '0';
             return (
               <tr key={a.name}>
-                <td><code>{a.name}</code></td>
+                <td>
+                  <code>{a.name}</code>
+                </td>
                 <td className="num c-error">{a.failureCount}</td>
                 <td className="num c-warning">{a.timeoutCount}</td>
                 <td className="num">{rate}%</td>
@@ -259,7 +294,13 @@ function FailureSummaryTable({ actions }: { actions: HistoryActionMetric[] }) {
   );
 }
 
-function ErrorSection({ actions, errorChart }: { actions: HistoryActionMetric[]; errorChart: string }) {
+function ErrorSection({
+  actions,
+  errorChart,
+}: {
+  actions: HistoryActionMetric[];
+  errorChart: string;
+}) {
   const allErrors: Array<{ action: string; name: string; msg: string; count: number }> = [];
   for (const a of actions) {
     for (const e of a.errors ?? []) {
@@ -294,10 +335,16 @@ function SystemSection({ sys }: { sys: HistorySystemSummary | null }) {
 
   const items = [
     { label: 'CPU 平均', value: `${sys.avgCpuPercent.toFixed(1)}%` },
-    { label: 'CPU 最大', value: `${sys.maxCpuPercent.toFixed(1)}%${sys.hotAgentName ? ` (${sys.hotAgentName})` : ''}` },
-    { label: '内存', value: `${(sys.usedMemMB / 1024).toFixed(1)} / ${(sys.totalMemMB / 1024).toFixed(1)} GB` },
-    { label: '网络↑', value: fmtBytesPlain(sys.totalNetSendKBps * 1024) + '/s' },
-    { label: '网络↓', value: fmtBytesPlain(sys.totalNetRecvKBps * 1024) + '/s' },
+    {
+      label: 'CPU 最大',
+      value: `${sys.maxCpuPercent.toFixed(1)}%${sys.hotAgentName ? ` (${sys.hotAgentName})` : ''}`,
+    },
+    {
+      label: '内存',
+      value: `${(sys.usedMemMB / 1024).toFixed(1)} / ${(sys.totalMemMB / 1024).toFixed(1)} GB`,
+    },
+    { label: '网络↑', value: sys.totalNetSendKBps == null ? '—' : fmtBytesPlain(sys.totalNetSendKBps * 1024) + '/s' },
+    { label: '网络↓', value: sys.totalNetRecvKBps == null ? '—' : fmtBytesPlain(sys.totalNetRecvKBps * 1024) + '/s' },
     { label: 'Goroutine', value: sys.totalGoroutines.toLocaleString() },
     { label: 'Thread', value: sys.totalThreads.toLocaleString() },
     { label: 'FD', value: sys.totalFds.toLocaleString() },
@@ -358,10 +405,18 @@ function AgentSection({ detail }: { detail: HistoryDetail }) {
   );
 }
 
-function DetailTableSection({ actions }: { actions: HistoryActionMetric[] }) {
+function DetailTableSection({
+  actions,
+  timingDetail,
+}: {
+  actions: HistoryActionMetric[];
+  timingDetail: TimingDetailLevel;
+}) {
   if (actions.length === 0) return null;
 
   const sorted = [...actions].sort((a, b) => b.sampleCount - a.sampleCount);
+  const showCodec = timingDetail === 'codec' || timingDetail === 'full';
+  const showFull = timingDetail === 'full';
 
   return (
     <div className="report-section">
@@ -380,10 +435,14 @@ function DetailTableSection({ actions }: { actions: HistoryActionMetric[] }) {
             <th className="num">p95</th>
             <th className="num">p99</th>
             <th className="num">max</th>
-            <th className="num">client</th>
-            <th className="num">encode</th>
-            <th className="num">decode</th>
-            <th className="num">parse/store</th>
+            <th className="num">非 RTT</th>
+            <th className="num">send</th>
+            {showCodec && <th className="num">encode</th>}
+            {showCodec && <th className="num">decode</th>}
+            {showFull && <th className="num">build</th>}
+            {showFull && <th className="num">decode 等待</th>}
+            {showFull && <th className="num">分发等待</th>}
+            {showFull && <th className="num">parse/store</th>}
             <th className="num">QPS</th>
           </tr>
         </thead>
@@ -391,38 +450,49 @@ function DetailTableSection({ actions }: { actions: HistoryActionMetric[] }) {
           {sorted.map((a) => {
             const kind = resolveKind(a);
             // Apdex 只对往返类打分；其余类别跟没有数据一样留 —，写 0 会被读成"很差"。
-            const isNetworked = kind === 'networked' && (a.rttSampleCount ?? 0) > 0;
+            const isNetworked = kind === 'networked' && (a.rttApdexSampleCount ?? 0) > 0;
             const level = isNetworked ? classifyApdex(a.rttApdex) : 'unknown';
-            const apdexColor = level === 'excellent' || level === 'good' ? 'c-success'
-              : level === 'fair' ? 'c-warning'
-              : level === 'unknown' ? ''
-              : 'c-error';
+            const apdexColor =
+              level === 'excellent' || level === 'good'
+                ? 'c-success'
+                : level === 'fair'
+                  ? 'c-warning'
+                  : level === 'unknown'
+                    ? ''
+                    : 'c-error';
             const rate = a.sampleCount > 0 ? (a.successRate * 100).toFixed(1) : '0';
             // 主指标按类别取，样本数为 0 时整行显示 — 避免误把 0ms 当真实数据。
             // 类别不单独占列，靠动作名的颜色表达，色板与流程编辑器的 pattern 徽章一致。
-            const primary = kind === 'listen'
-              ? { hist: a.listenWait, count: a.listenWaitSampleCount ?? 0 }
-              : kind === 'networked'
-                ? { hist: a.rtt, count: a.rttSampleCount ?? 0 }
-                : { hist: a.totalDuration, count: a.totalDurationSampleCount ?? 0 };
+            const primary =
+              kind === 'listen'
+                ? { hist: a.listenWait, count: a.listenWaitSampleCount ?? 0 }
+                : kind === 'networked'
+                  ? { hist: a.rtt, count: a.rttSampleCount ?? 0 }
+                  : { hist: a.totalDuration, count: a.totalDurationSampleCount ?? 0 };
             const hasPrimary = primary.count > 0 && !!primary.hist;
             return (
               <tr key={a.name}>
-                <td><code className={`k-${kind}`}>{a.name}</code></td>
+                <td>
+                  <code className={`k-${kind}`}>{a.name}</code>
+                </td>
                 <td className="num">{a.sampleCount.toLocaleString()}</td>
                 <td className={`num${a.failureCount > 0 ? ' c-error' : ''}`}>{a.failureCount}</td>
                 <td className={`num${a.timeoutCount > 0 ? ' c-warning' : ''}`}>{a.timeoutCount}</td>
                 <td className={`num ${apdexColor}`}>{isNetworked ? a.rttApdex.toFixed(3) : '—'}</td>
                 <td className="num">{rate}%</td>
-                <td className="num">{hasPrimary ? fmtMs(primary.hist.avgMs) : '—'}</td>
-                <td className="num">{hasPrimary ? fmtMs(primary.hist.p50Ms) : '—'}</td>
-                <td className="num">{hasPrimary ? fmtMs(primary.hist.p95Ms) : '—'}</td>
-                <td className="num">{hasPrimary ? fmtMs(primary.hist.p99Ms) : '—'}</td>
-                <td className="num">{hasPrimary ? fmtMs(primary.hist.maxMs) : '—'}</td>
-                <td className="num">{fmtMs(a.clientAvgMs ?? 0)}</td>
-                <td className="num">{fmtMs(a.encodeAvgMs ?? 0)}</td>
-                <td className="num">{fmtMs(a.decodeAvgMs ?? 0)}</td>
-                <td className="num">{fmtMs(a.parseStoreAvgMs ?? 0)}</td>
+                  <td className="num">{hasPrimary && primary.hist.avgMs != null ? fmtMs(primary.hist.avgMs) : '—'}</td>
+                  <td className="num">{hasPrimary && primary.hist.p50Ms != null ? fmtMs(primary.hist.p50Ms) : '—'}</td>
+                  <td className="num">{hasPrimary && primary.hist.p95Ms != null ? fmtMs(primary.hist.p95Ms) : '—'}</td>
+                  <td className="num">{hasPrimary && primary.hist.p99Ms != null ? fmtMs(primary.hist.p99Ms) : '—'}</td>
+                  <td className="num">{hasPrimary && primary.hist.maxMs != null ? fmtMs(primary.hist.maxMs) : '—'}</td>
+                <td className="num">{fmtMs(a.nonRTTAvgMs ?? 0)}</td>
+                <td className="num">{fmtMs(a.sendAvgMs ?? 0)}</td>
+                {showCodec && <td className="num">{fmtMs(a.encodeAvgMs ?? 0)}</td>}
+                {showCodec && <td className="num">{fmtMs(a.decodeAvgMs ?? 0)}</td>}
+                {showFull && <td className="num">{fmtMs(a.buildAvgMs ?? 0)}</td>}
+                {showFull && <td className="num">{fmtMs(a.decodeWaitAvgMs ?? 0)}</td>}
+                {showFull && <td className="num">{fmtMs(a.dispatchToActionWaitAvgMs ?? 0)}</td>}
+                {showFull && <td className="num">{fmtMs(a.parseStoreAvgMs ?? 0)}</td>}
                 <td className="num">{a.avgQps.toFixed(1)}</td>
               </tr>
             );

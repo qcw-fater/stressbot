@@ -11,21 +11,21 @@ import (
 
 // Reporter 定时向控制台输出指标摘要。
 type Reporter struct {
-	collector  *MetricsCollector // 指标收集器引用
-	interval   time.Duration     // 报告间隔
-	prevCounts map[string]int64  // 上次快照时各 action 的样本数，用于计算 periodQPS
-	prevTime   time.Time         // 上次报告时间，用于计算区间 QPS
-	stopCh     chan struct{}     // 停止信号通道
-	stopOnce   sync.Once         // 保证 stopCh 只关闭一次
+	collector    *MetricsCollector // 指标收集器引用
+	interval     time.Duration     // 报告间隔
+	prevTime     time.Time         // 上次报告时间，用于计算区间 QPS
+	nextSequence uint64
+	stopCh       chan struct{} // 停止信号通道
+	stopOnce     sync.Once     // 保证 stopCh 只关闭一次
 }
 
 // NewReporter 创建定时控制台报告器。
 func NewReporter(c *MetricsCollector, interval time.Duration) *Reporter {
 	return &Reporter{
-		collector:  c,
-		interval:   interval,
-		prevCounts: make(map[string]int64),
-		stopCh:     make(chan struct{}),
+		collector:    c,
+		interval:     interval,
+		nextSequence: 1,
+		stopCh:       make(chan struct{}),
 	}
 }
 
@@ -55,10 +55,21 @@ func (r *Reporter) Stop() {
 
 func (r *Reporter) report() {
 	now := time.Now()
-	periodSec := now.Sub(r.prevTime).Seconds()
+	startedAt := r.prevTime
 	r.prevTime = now
-
-	snap := r.collector.Snapshot(r.prevCounts, periodSec)
+	snap := r.collector.TakeReportSnapshot(ReportMeta{
+		Sequence:                r.nextSequence,
+		StartedAt:               startedAt,
+		EndedAt:                 now,
+		ExpectedIntervalSeconds: r.interval.Seconds(),
+	})
+	r.nextSequence++
+	windowQPS := make(map[string]float64)
+	if snap.Window != nil {
+		for _, action := range snap.Window.Actions {
+			windowQPS[action.Name] = action.AvgQPS
+		}
+	}
 	uptime := snap.Uptime.Round(time.Second)
 
 	fmt.Printf("[MONITOR] %s | goroutines=%d | mem=%.1fMB | gc=%d | total=%d\n",
@@ -85,14 +96,14 @@ func (r *Reporter) report() {
 		rttAvg := "    --ms"
 		rttP95 := "    --ms"
 		if a.RTTSampleCount > 0 {
-			rttAvg = fmt.Sprintf("%6.0fms", a.RTT.AvgMs)
-			rttP95 = fmt.Sprintf("%6.0fms", a.RTT.P95Ms)
+			rttAvg = fmt.Sprintf("%6.0fms", histogramValue(a.RTT.AvgMs))
+			rttP95 = fmt.Sprintf("%6.0fms", histogramValue(a.RTT.P95Ms))
 		}
 		fmt.Printf("[MONITOR] %-22s %4d %4d %4d %8s %8s %6.0fms %5.2f %4d %5.1f",
 			a.Name,
 			a.SuccessCount, a.FailureCount, a.TimeoutCount,
 			rttAvg, rttP95, a.ClientAvgMs,
-			a.RTTApdex, a.Executing, a.PeriodQPS)
+			a.RTTApdex, a.Executing, windowQPS[a.Name])
 		if a.TimeoutCount > 0 && a.TimeoutAvgMs > 0 {
 			fmt.Printf(" tout=%.0fms", a.TimeoutAvgMs)
 		}

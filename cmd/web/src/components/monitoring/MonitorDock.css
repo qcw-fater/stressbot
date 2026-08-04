@@ -61,7 +61,7 @@
   display: grid;
   grid-template-columns: minmax(245px, 0.9fr) minmax(360px, 1.25fr) minmax(360px, 1.25fr) minmax(360px, 1.28fr);
   gap: 6px;
-  height: 116px;
+  height: 148px;
 }
 
 .monitor-dock__top--empty {
@@ -208,6 +208,44 @@
   font-size: 9px;
   font-weight: 700;
   color: var(--text-tertiary);
+}
+
+.md-resource-hotline {
+  min-width: 0;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 9px;
+  color: var(--text-tertiary);
+}
+
+.md-resource-hotline b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.md-resource-grid {
+  gap: 3px;
+}
+
+.md-resource-grid .md-kpi-cell {
+  height: 20px;
+  padding-block: 2px;
+}
+
+.md-resource-grid .md-kpi-cell__label {
+  font-size: 9px;
+}
+
+.md-resource-grid .md-kpi-cell__value {
+  font-size: 11px;
 }
 
 .md-load-card {
@@ -461,7 +499,7 @@
 
 @media (max-width: 1180px) {
   .monitor-dock__top--runtime {
-    height: 148px;
+    height: 302px;
     grid-template-columns: repeat(2, minmax(320px, 1fr));
   }
 }

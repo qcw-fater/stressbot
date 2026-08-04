@@ -107,7 +107,7 @@ export function HistoryCompareView({ targets }: HistoryCompareViewProps) {
         samples.push(a?.sampleCount);
         // 只有往返类有 Apdex；其余类别留空，避免 0 分被读成「很差」。
         apdexes.push(a && resolveKind(a) === 'networked' ? a.rttApdex : undefined);
-        p99s.push(a?.rtt?.p99Ms);
+        p99s.push(a?.rtt?.p99Ms ?? undefined);
       }
       out.push({ name, samples, apdexes, p99s });
     }

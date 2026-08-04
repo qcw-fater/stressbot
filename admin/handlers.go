@@ -272,7 +272,7 @@ func (s *AdminServer) handleAgentStressReport(w http.ResponseWriter, r *http.Req
 	if agent, ok := s.agents.Get(report.AgentID); ok {
 		currentTaskID = agent.CurrentTaskID
 	}
-	if currentTaskID == "" || (report.TaskID != "" && report.TaskID != currentTaskID) {
+	if currentTaskID == "" || report.TaskID != currentTaskID {
 		// 旧任务的延迟报告 / agent 已 idle，直接丢弃，避免 LatestStress 被串。
 		stresslog.Debug("丢弃过期 stress 报告",
 			zap.String("agentID", report.AgentID),
@@ -281,12 +281,45 @@ func (s *AdminServer) handleAgentStressReport(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusOK, map[string]string{"status": "stale"})
 		return
 	}
-	reportedAt := report.ReportedAt
-	if reportedAt.IsZero() {
-		reportedAt = time.Now()
+	agent, ok := s.agents.Get(report.AgentID)
+	if !ok {
+		writeError(w, ErrAgentNotFound)
+		return
 	}
-	s.agents.UpdateStress(report.AgentID, report.Snapshot, reportedAt)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	expectedEvery, err := time.ParseDuration(agent.StressInterval)
+	if err != nil || expectedEvery <= 0 {
+		stresslog.Error("节点指标上报周期无效",
+			zap.String("agentID", report.AgentID),
+			zap.String("stressInterval", agent.StressInterval))
+		writeError(w, ErrInternal.WithMessage("节点指标上报周期无效"))
+		return
+	}
+	active := s.tasks.ActiveTask()
+	if active == nil || active.ID != currentTaskID {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "stale"})
+		return
+	}
+	apdexT := active.Config.RobotConfig.ApdexT
+	if apdexT <= 0 {
+		apdexT = 100
+	}
+	accepted, err := s.metricsWindows.Accept(report, currentTaskID, expectedEvery, time.Duration(apdexT)*time.Millisecond)
+	if err != nil {
+		sequence := uint64(0)
+		if report.Snapshot != nil && report.Snapshot.Window != nil {
+			sequence = report.Snapshot.Window.Sequence
+		}
+		stresslog.Warn("拒绝无效压测指标窗口",
+			zap.String("agentID", report.AgentID),
+			zap.String("taskID", report.TaskID),
+			zap.Uint64("sequence", sequence),
+			zap.Error(err))
+		writeError(w, ErrInvalidArgument.WithMessage(err.Error()))
+		return
+	}
+	state, _ := s.metricsWindows.AgentState(currentTaskID, report.AgentID)
+	s.agents.UpdateStress(report.AgentID, report.Snapshot, state.ReceivedAt)
+	writeJSON(w, http.StatusOK, map[string]string{"status": string(accepted.Status)})
 }
 
 func (s *AdminServer) handleAgentSystemReport(w http.ResponseWriter, r *http.Request) {
@@ -296,11 +329,8 @@ func (s *AdminServer) handleAgentSystemReport(w http.ResponseWriter, r *http.Req
 		return
 	}
 	s.agents.Touch(report.AgentID, "")
-	reportedAt := report.ReportedAt
-	if reportedAt.IsZero() {
-		reportedAt = time.Now()
-	}
-	s.agents.UpdateSystem(report.AgentID, &report.Snapshot, reportedAt)
+	// 新鲜度只信任 Admin 的接收时间，避免 Agent 时钟漂移或伪造时间戳。
+	s.agents.UpdateSystem(report.AgentID, &report.Snapshot, time.Now())
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -1160,39 +1190,60 @@ func (s *AdminServer) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 
 func (s *AdminServer) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	agents := s.agents.List()
-
-	items := make([]map[string]any, 0, len(agents))
+	now := time.Now()
+	items := make([]AgentListItem, 0, len(agents))
 	for _, a := range agents {
-		brief := map[string]any{
-			"agentId":         a.ID,
-			"name":            a.Name,
-			"address":         a.Address,
-			"appVersion":      a.AppVersion,
-			"maxBots":         a.MaxBots,
-			"status":          a.Status,
-			"currentTaskId":   a.CurrentTaskID,
-			"currentBots":     a.CurrentBots,
-			"staticInfo":      a.StaticInfo,
-			"lastHeartbeatAt": a.LastHeartbeatAt,
-		}
-		if !a.StressUpdatedAt.IsZero() {
-			brief["stressUpdatedAt"] = a.StressUpdatedAt
-		}
-		if !a.SystemUpdatedAt.IsZero() {
-			brief["systemUpdatedAt"] = a.SystemUpdatedAt
-		}
-		// 系统指标摘要
-		if a.LatestSystem != nil {
-			brief["cpuPercent"] = a.LatestSystem.CPUPercent
-			brief["memPercent"] = a.LatestSystem.MemPercent
-			brief["numGoroutine"] = a.LatestSystem.NumGoroutine
-		}
-		items = append(items, brief)
+		items = append(items, buildAgentListItem(a, now))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items": items,
 	})
+}
+
+func buildAgentListItem(agent *AgentNode, now time.Time) AgentListItem {
+	item := AgentListItem{
+		AgentID:         agent.ID,
+		Name:            agent.Name,
+		Address:         agent.Address,
+		AppVersion:      agent.AppVersion,
+		MaxBots:         agent.MaxBots,
+		Status:          agent.Status,
+		CurrentTaskID:   agent.CurrentTaskID,
+		CurrentBots:     agent.CurrentBots,
+		StaticInfo:      agent.StaticInfo,
+		LastHeartbeatAt: agent.LastHeartbeatAt,
+	}
+	if !agent.StressUpdatedAt.IsZero() {
+		item.StressUpdatedAt = timePointer(agent.StressUpdatedAt)
+	}
+	if agent.LatestSystem == nil || agent.SystemUpdatedAt.IsZero() {
+		return item
+	}
+
+	item.SystemUpdatedAt = timePointer(agent.SystemUpdatedAt)
+	age := now.Sub(agent.SystemUpdatedAt)
+	if age >= 0 {
+		item.SystemSnapshotAgeSeconds = float64Pointer(age.Seconds())
+	}
+	fresh := (agent.Status == AgentIdle || agent.Status == AgentBusy) &&
+		age >= 0 && age <= systemSnapshotFreshFor(agent.SystemInterval)
+	item.SystemStale = !fresh
+	if !fresh {
+		return item
+	}
+
+	snapshot := agent.LatestSystem
+	item.HostCPUPercent = validPercent(snapshot.HostCPUPercent)
+	if _, _, percent, ok := validHostMemory(snapshot); ok {
+		item.HostMemPercent = float64Pointer(percent)
+	}
+	item.ProcessCPUPercent = validPercent(snapshot.ProcessCPUPercent)
+	if snapshot.ProcessRSSBytes != nil {
+		item.ProcessRSSBytes = uint64Pointer(*snapshot.ProcessRSSBytes)
+	}
+	item.ProcessGoroutines = intPointer(snapshot.ProcessGoroutines)
+	return item
 }
 
 func (s *AdminServer) handleGetAgent(w http.ResponseWriter, r *http.Request) {
@@ -1271,13 +1322,21 @@ func (s *AdminServer) handleShutdownAllAgents(w http.ResponseWriter, _ *http.Req
 func (s *AdminServer) handleGetMetrics(w http.ResponseWriter, r *http.Request) {
 	active := s.tasks.ActiveTask()
 	if active == nil {
-		// Actions 显式初始化为空切片：与 monitor.Snapshot / MergeSnapshots 的契约一致，
-		// 保证 JSON 中 "actions": [] 而非 null，前端 for...of 不会崩。
-		writeJSON(w, http.StatusOK, &monitor.CollectorSnapshot{Actions: []monitor.ActionSnapshot{}})
+		writeJSON(w, http.StatusOK, &StressAggregate{
+			Snapshot: &monitor.CollectorSnapshot{TimingDetail: monitor.TimingRTTOnly, Actions: []monitor.ActionSnapshot{}},
+			AsOf:     time.Now(),
+		})
 		return
 	}
-	agg := s.aggregator.AggregateStress(active.ID)
-	writeJSON(w, http.StatusOK, agg)
+	agg, err := s.aggregator.AggregateStress(active.ID)
+	if err != nil {
+		stresslog.Error("聚合压测指标失败", zap.String("taskID", active.ID), zap.Error(err))
+		writeError(w, ErrInternal.WithMessage("压测指标聚合失败"))
+		return
+	}
+	public := *agg
+	public.Snapshot = agg.Snapshot.PublicCopy()
+	writeJSON(w, http.StatusOK, &public)
 }
 
 // handleGetMetricsSummary 文本摘要。
@@ -1288,14 +1347,26 @@ func (s *AdminServer) handleGetMetricsSummary(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	agg := s.aggregator.AggregateStress(active.ID)
+	agg, err := s.aggregator.AggregateStress(active.ID)
+	if err != nil {
+		stresslog.Error("聚合压测指标摘要失败", zap.String("taskID", active.ID), zap.Error(err))
+		writeError(w, ErrInternal.WithMessage("压测指标聚合失败"))
+		return
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "Task: %s (%s)\n", active.Name, active.ID)
 	fmt.Fprintf(&b, "Total Actions: %d\n", agg.Snapshot.TotalActions)
 	if len(agg.Snapshot.Actions) > 0 {
 		for _, a := range agg.Snapshot.Actions {
-			fmt.Fprintf(&b, "  %s: count=%d success=%.1f%% p50=%.1fms p99=%.1fms\n",
-				a.Name, a.SampleCount, a.SuccessRate*100, a.RTT.P50Ms, a.RTT.P99Ms)
+			p50, p99 := "—", "—"
+			if a.RTT.P50Ms != nil {
+				p50 = fmt.Sprintf("%.1fms", *a.RTT.P50Ms)
+			}
+			if a.RTT.P99Ms != nil {
+				p99 = fmt.Sprintf("%.1fms", *a.RTT.P99Ms)
+			}
+			fmt.Fprintf(&b, "  %s: count=%d success=%.1f%% p50=%s p99=%s\n",
+				a.Name, a.SampleCount, a.SuccessRate*100, p50, p99)
 		}
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -1310,7 +1381,7 @@ func (s *AdminServer) handleGetAgentMetrics(w http.ResponseWriter, r *http.Reque
 			items = append(items, map[string]any{
 				"agentId":   a.ID,
 				"agentName": a.Name,
-				"snapshot":  a.LatestStress,
+				"snapshot":  a.LatestStress.PublicCopy(),
 				"updatedAt": a.StressUpdatedAt,
 			})
 		}
@@ -1331,11 +1402,12 @@ func (s *AdminServer) handleGetSingleAgentMetrics(w http.ResponseWriter, r *http
 		writeJSON(w, http.StatusOK, map[string]string{"message": "no stress data"})
 		return
 	}
-	writeJSON(w, http.StatusOK, agent.LatestStress)
+	writeJSON(w, http.StatusOK, agent.LatestStress.PublicCopy())
 }
 
 func (s *AdminServer) handleGetSystem(w http.ResponseWriter, r *http.Request) {
-	snap := s.aggregator.AggregateSystem()
+	active := s.tasks.ActiveTask()
+	snap := s.aggregator.AggregateSystem(taskSystemAgentIDs(active))
 	writeJSON(w, http.StatusOK, snap)
 }
 
@@ -1355,7 +1427,8 @@ func (s *AdminServer) handleGetSystemAgents(w http.ResponseWriter, r *http.Reque
 		if a.LatestSystem != nil {
 			item["snapshot"] = a.LatestSystem
 			item["updatedAt"] = a.SystemUpdatedAt
-			item["isStale"] = now.Sub(a.SystemUpdatedAt) > 30*time.Second
+			age := now.Sub(a.SystemUpdatedAt)
+			item["isStale"] = age < 0 || age > systemSnapshotFreshFor(a.SystemInterval)
 		}
 		items = append(items, item)
 	}

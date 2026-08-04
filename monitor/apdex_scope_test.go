@@ -180,7 +180,10 @@ func TestMergeSnapshotsMergesListenMetrics(t *testing.T) {
 		}
 	}
 
-	merged := MergeSnapshots([]*CollectorSnapshot{mk(3, 1, 1), mk(3, 1, 1)})
+	merged, err := MergeSnapshots([]*CollectorSnapshot{mk(3, 1, 1), mk(3, 1, 1)})
+	if err != nil {
+		t.Fatalf("MergeSnapshots() error = %v", err)
+	}
 	a := findMonitorTestAction(t, merged, "MatchSucceed")
 
 	if a.Kind != ActionKindListen {
@@ -210,7 +213,10 @@ func TestMergeSnapshotsRTTApdexSameDenominator(t *testing.T) {
 		}
 	}
 
-	merged := MergeSnapshots([]*CollectorSnapshot{mk(1, 1, 1), mk(1, 1, 1)})
+	merged, err := MergeSnapshots([]*CollectorSnapshot{mk(1, 1, 1), mk(1, 1, 1)})
+	if err != nil {
+		t.Fatalf("MergeSnapshots() error = %v", err)
+	}
 	a := findMonitorTestAction(t, merged, "probe")
 
 	if a.RTTFailedCount != 2 {
@@ -223,4 +229,87 @@ func TestMergeSnapshotsRTTApdexSameDenominator(t *testing.T) {
 	if a.Kind != ActionKindNetworked {
 		t.Fatalf("Kind = %q, want %q", a.Kind, ActionKindNetworked)
 	}
+	if a.RTTApdexSampleCount != 4 {
+		t.Fatalf("RTTApdexSampleCount = %d, want 4", a.RTTApdexSampleCount)
+	}
+}
+
+// TestMergeSnapshotsBuildsOneCrossActionSummary 验证跨动作总指标仍使用后端原始分母和
+// 合并后的直方图。前端不能从单动作分数或单动作百分位再次加权得到这些值。
+func TestMergeSnapshotsBuildsOneCrossActionSummary(t *testing.T) {
+	rttA := histogramForMonitorSummaryTest(1, 1)
+	rttB := histogramForMonitorSummaryTest(100, 15)
+	totalA := histogramForMonitorSummaryTest(100, 2)
+	totalB := histogramForMonitorSummaryTest(100, 10)
+
+	merged, err := MergeSnapshots([]*CollectorSnapshot{
+		{
+			ApdexT:       100,
+			TimingDetail: TimingFullDetail,
+			Actions: []ActionSnapshot{{
+				Name:                     "mostly-failed",
+				SampleCount:              100,
+				SuccessCount:             1,
+				FailureCount:             99,
+				RTTSampleCount:           1,
+				RTTFailedCount:           99,
+				ApdexSatisfied:           1,
+				RTT:                      rttA,
+				TotalDuration:            totalA,
+				TotalDurationSampleCount: 100,
+			}},
+		},
+		{
+			ApdexT:       100,
+			TimingDetail: TimingCodecDetail,
+			Actions: []ActionSnapshot{{
+				Name:                     "healthy",
+				SampleCount:              100,
+				SuccessCount:             100,
+				RTTSampleCount:           100,
+				ApdexSatisfied:           100,
+				RTT:                      rttB,
+				TotalDuration:            totalB,
+				TotalDurationSampleCount: 100,
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("MergeSnapshots() error = %v", err)
+	}
+
+	if merged.TimingDetail != TimingCodecDetail {
+		t.Fatalf("TimingDetail = %q, want %q", merged.TimingDetail, TimingCodecDetail)
+	}
+	if merged.Summary.RTTApdexSampleCount != 200 {
+		t.Fatalf("summary denominator = %d, want 200", merged.Summary.RTTApdexSampleCount)
+	}
+	if merged.Summary.RTTApdex != 0.505 {
+		t.Fatalf("summary RTT Apdex = %v, want 0.505", merged.Summary.RTTApdex)
+	}
+	wantRTT, err := MergeHistograms([]HistogramSnapshot{rttA, rttB})
+	if err != nil {
+		t.Fatalf("merge RTT: %v", err)
+	}
+	if metricValue(t, merged.Summary.RTT.P99Ms) != metricValue(t, wantRTT.P99Ms) {
+		t.Fatalf("summary RTT p99 = %v, want merged histogram %v", merged.Summary.RTT.P99Ms, wantRTT.P99Ms)
+	}
+	wantTotal, err := MergeHistograms([]HistogramSnapshot{totalA, totalB})
+	if err != nil {
+		t.Fatalf("merge total duration: %v", err)
+	}
+	if metricValue(t, merged.Summary.TotalDuration.P95Ms) != metricValue(t, wantTotal.P95Ms) {
+		t.Fatalf("summary total p95 = %v, want merged histogram %v", merged.Summary.TotalDuration.P95Ms, wantTotal.P95Ms)
+	}
+}
+
+func histogramForMonitorSummaryTest(count int64, bucket int) HistogramSnapshot {
+	h := newLatencyHistogram()
+	value := time.Duration(bucket+1) * time.Millisecond
+	for range count {
+		if err := h.Record(value); err != nil {
+			panic(err)
+		}
+	}
+	return h.Snapshot()
 }

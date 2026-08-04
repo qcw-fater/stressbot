@@ -153,23 +153,23 @@ export function AgentsDrawer({ open, onClose }: AgentsDrawerProps) {
       render: (_, a) => `${a.currentBots} / ${a.maxBots}`,
     },
     {
-      title: 'CPU%',
-      dataIndex: 'cpuPercent',
-      key: 'cpuPercent',
+      title: '主机 CPU',
+      dataIndex: 'hostCpuPercent',
+      key: 'hostCpuPercent',
       width: 80,
-      render: (v: number | undefined) =>
-        v === undefined ? '—' : (
+      render: (v: number | null | undefined) =>
+        v == null ? '—' : (
           <span style={{ color: v > 80 ? 'var(--color-error)' : v > 60 ? 'var(--color-warning)' : undefined }}>
             {v.toFixed(1)}%
           </span>
         ),
     },
     {
-      title: 'MEM%',
-      dataIndex: 'memPercent',
-      key: 'memPercent',
+      title: '主机内存',
+      dataIndex: 'hostMemPercent',
+      key: 'hostMemPercent',
       width: 80,
-      render: (v: number | undefined) => (v === undefined ? '—' : `${v.toFixed(1)}%`),
+      render: (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(1)}%`),
     },
     {
       title: '主机',
@@ -180,7 +180,7 @@ export function AgentsDrawer({ open, onClose }: AgentsDrawerProps) {
           title={
             <div style={{ fontSize: 11 }}>
               <div>OS: {a.staticInfo.os}/{a.staticInfo.arch}</div>
-              <div>CPU: {a.staticInfo.numCpu} cores · MEM: {(a.staticInfo.memTotalMB / 1024).toFixed(1)} GB</div>
+              <div>CPU: {a.staticInfo.numCpu} cores · MEM: {(a.staticInfo.memTotalBytes / 1024 / 1024 / 1024).toFixed(1)} GB</div>
               <div>运行时: {a.staticInfo.goVersion}</div>
               <div>Kernel: {a.staticInfo.kernelVer}</div>
               <div>启动: {dayjs(a.staticInfo.startedAt).format('MM-DD HH:mm')}</div>

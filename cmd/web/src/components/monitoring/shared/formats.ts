@@ -1,5 +1,5 @@
 /**
- * 监控相关的数值格式化工具，供 ActionsTab、HistoryDetailView、SystemTab 等多处复用。
+ * 监控相关的数值格式化工具，供 MonitorDock、HistoryDetailView、SystemTab 等多处复用。
  *
  * 格式约定：
  *   - 字节数（fmtBytes）：自适应单位 B / KB / MB，**自身带后缀**，用于"单位由数值大小决定"
@@ -84,4 +84,19 @@ export function fmtBandwidthKBps(kbps: number | null | undefined): string {
   if (kbps == null || !Number.isFinite(kbps) || kbps <= 0) return '—';
   if (kbps >= 1024) return `${(kbps / 1024).toFixed(2)} MB/s`;
   return `${kbps.toFixed(1)} KB/s`;
+}
+
+export function fmtBandwidthBytesPerSec(bytes: number | null | undefined): string {
+  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return '—';
+  if (bytes < 1024) return `${bytes.toFixed(0)} B/s`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB/s`;
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB/s`;
+}
+
+export function fmtByteSize(bytes: number | null | undefined): string {
+  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return '—';
+  if (bytes < 1024) return `${bytes.toFixed(0)} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }

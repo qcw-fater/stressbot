@@ -69,9 +69,8 @@ type StressReport struct {
 
 // SystemReport 系统指标上报。
 type SystemReport struct {
-	AgentID    string         `json:"agentId"`
-	ReportedAt time.Time      `json:"reportedAt"`
-	Snapshot   SystemSnapshot `json:"snapshot"`
+	AgentID  string         `json:"agentId"`
+	Snapshot SystemSnapshot `json:"snapshot"`
 }
 
 // TaskCompletionReport 任务完成报告。
@@ -167,47 +166,36 @@ type AgentStatusResponse struct {
 // SystemSnapshot 系统指标快照。
 type SystemSnapshot struct {
 	Timestamp time.Time `json:"timestamp"`
+	Sequence  uint64    `json:"sequence"`
 
-	// CPU
-	CPUPercent float64   `json:"cpuPercent"`
-	CPUPerCore []float64 `json:"cpuPerCore"`
-	LoadAvg1   float64   `json:"loadAvg1"`
-	LoadAvg5   float64   `json:"loadAvg5"`
-	LoadAvg15  float64   `json:"loadAvg15"`
+	// 主机指标描述整台机器。nil 表示本轮采集失败，或差分指标尚未建立基线。
+	HostCPUPercent         *float64 `json:"hostCpuPercent"`
+	HostMemTotalBytes      *uint64  `json:"hostMemTotalBytes"`
+	HostMemUsedBytes       *uint64  `json:"hostMemUsedBytes"`
+	HostMemPercent         *float64 `json:"hostMemPercent"`
+	HostNetSendBytesPerSec *float64 `json:"hostNetSendBytesPerSec"`
+	HostNetRecvBytesPerSec *float64 `json:"hostNetRecvBytesPerSec"`
 
-	// 内存
-	MemTotalMB uint64  `json:"memTotalMB"`
-	MemUsedMB  uint64  `json:"memUsedMB"`
-	MemPercent float64 `json:"memPercent"`
-	SwapUsedMB uint64  `json:"swapUsedMB"`
-
-	// 进程
-	ProcessRssMB  uint64 `json:"processRssMB"`
-	ProcessHeapMB uint64 `json:"processHeapMB"`
-	ProcessSysMB  uint64 `json:"processSysMB"`
-	NumGoroutine  int    `json:"numGoroutine"`
-	NumThread     int32  `json:"numThread"`
-	NumFD         int32  `json:"numFd"`
-
-	// 网络速率（差分计算）
-	NetSendKBps float64 `json:"netSendKBps"`
-	NetRecvKBps float64 `json:"netRecvKBps"`
-
-	// GC
-	GCCount      uint32  `json:"gcCount"`
-	GCPauseAvgMs float64 `json:"gcPauseAvgMs"`
+	// ProcessCPUPercent 归一化为整台主机容量（0~100），不是按单核累计的 top 口径。
+	ProcessCPUPercent *float64 `json:"processCpuPercent"`
+	ProcessRSSBytes   *uint64  `json:"processRssBytes"`
+	ProcessHeapBytes  uint64   `json:"processHeapBytes"`
+	ProcessGoroutines int      `json:"processGoroutines"`
+	ProcessThreads    *int32   `json:"processThreads"`
+	// Windows 下 gopsutil 的 NumFDs 返回当前进程句柄数。
+	ProcessFDs *int32 `json:"processFds"`
 }
 
 // StaticInfo 启动时一次性采集的静态信息。
 type StaticInfo struct {
-	Hostname   string    `json:"hostname"`
-	OS         string    `json:"os"`
-	Arch       string    `json:"arch"`
-	NumCPU     int       `json:"numCpu"`
-	MemTotalMB uint64    `json:"memTotalMB"`
-	GoVersion  string    `json:"goVersion"`
-	KernelVer  string    `json:"kernelVer"`
-	StartedAt  time.Time `json:"startedAt"`
+	Hostname      string    `json:"hostname"`
+	OS            string    `json:"os"`
+	Arch          string    `json:"arch"`
+	NumCPU        int       `json:"numCpu"`
+	MemTotalBytes uint64    `json:"memTotalBytes"`
+	GoVersion     string    `json:"goVersion"`
+	KernelVer     string    `json:"kernelVer"`
+	StartedAt     time.Time `json:"startedAt"`
 }
 
 // --- 通用 ---

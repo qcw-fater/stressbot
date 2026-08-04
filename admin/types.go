@@ -302,8 +302,8 @@ type StaticInfo struct {
 	Arch string `json:"arch"`
 	// NumCPU CPU 核心数。
 	NumCPU int `json:"numCpu"`
-	// MemTotalMB 总内存（MB）。
-	MemTotalMB uint64 `json:"memTotalMB"`
+	// MemTotalBytes 总内存精确字节数。
+	MemTotalBytes uint64 `json:"memTotalBytes"`
 	// GoVersion Go 版本。
 	GoVersion string `json:"goVersion"`
 	// KernelVer 内核版本。
@@ -330,8 +330,6 @@ type StressReport struct {
 type SystemReport struct {
 	// AgentID Agent 唯一标识。
 	AgentID string `json:"agentId"`
-	// ReportedAt 上报时间。
-	ReportedAt time.Time `json:"reportedAt"`
 	// Snapshot 系统指标快照。
 	Snapshot SystemSnapshot `json:"snapshot"`
 }
@@ -417,116 +415,130 @@ type HeartbeatRequest struct {
 type SystemSnapshot struct {
 	// Timestamp 采集时间。
 	Timestamp time.Time `json:"timestamp"`
+	// Sequence Agent 进程内单调递增的采样序号，用于拒绝重复快照刷新新鲜度。
+	Sequence uint64 `json:"sequence"`
 
-	// CPUPercent 总 CPU 使用率（0~100）。
-	CPUPercent float64 `json:"cpuPercent"`
-	// CPUPerCore 每核 CPU 使用率。
-	CPUPerCore []float64 `json:"cpuPerCore,omitempty"`
-	// LoadAvg1 1 分钟平均负载。
-	LoadAvg1 float64 `json:"loadAvg1,omitempty"`
-	// LoadAvg5 5 分钟平均负载。
-	LoadAvg5 float64 `json:"loadAvg5,omitempty"`
-	// LoadAvg15 15 分钟平均负载。
-	LoadAvg15 float64 `json:"loadAvg15,omitempty"`
+	HostCPUPercent         *float64 `json:"hostCpuPercent"`
+	HostMemTotalBytes      *uint64  `json:"hostMemTotalBytes"`
+	HostMemUsedBytes       *uint64  `json:"hostMemUsedBytes"`
+	HostMemPercent         *float64 `json:"hostMemPercent"`
+	HostNetSendBytesPerSec *float64 `json:"hostNetSendBytesPerSec"`
+	HostNetRecvBytesPerSec *float64 `json:"hostNetRecvBytesPerSec"`
 
-	// MemTotalMB 总内存（MB）。
-	MemTotalMB uint64 `json:"memTotalMB"`
-	// MemUsedMB 已用内存（MB）。
-	MemUsedMB uint64 `json:"memUsedMB"`
-	// MemPercent 内存使用率（0~100）。
-	MemPercent float64 `json:"memPercent"`
-	// SwapUsedMB 已用 Swap（MB）。
-	SwapUsedMB uint64 `json:"swapUsedMB,omitempty"`
-	// ProcessRssMB 进程 RSS（MB）。
-	ProcessRssMB uint64 `json:"processRssMB"`
-	// ProcessHeapMB 进程堆内存（MB）。
-	ProcessHeapMB uint64 `json:"processHeapMB"`
-	// ProcessSysMB 进程系统内存（MB）。
-	ProcessSysMB uint64 `json:"processSysMB"`
-
-	// NumGoroutine goroutine 数量。
-	NumGoroutine int `json:"numGoroutine"`
-	// NumThread OS 线程数量。
-	NumThread int32 `json:"numThread"`
-	// NumFD 打开的文件描述符数。
-	NumFD int32 `json:"numFd,omitempty"`
-	// GCCount GC 次数。
-	GCCount uint32 `json:"gcCount"`
-	// GCPauseAvgMs GC 平均暂停时间（ms）。
-	GCPauseAvgMs float64 `json:"gcPauseAvgMs,omitempty"`
-
-	// NetSendKBps 网络发送速率（KB/s）。
-	NetSendKBps float64 `json:"netSendKBps"`
-	// NetRecvKBps 网络接收速率（KB/s）。
-	NetRecvKBps float64 `json:"netRecvKBps"`
+	ProcessCPUPercent *float64 `json:"processCpuPercent"`
+	ProcessRSSBytes   *uint64  `json:"processRssBytes"`
+	ProcessHeapBytes  uint64   `json:"processHeapBytes"`
+	ProcessGoroutines int      `json:"processGoroutines"`
+	ProcessThreads    *int32   `json:"processThreads"`
+	ProcessFDs        *int32   `json:"processFds"`
 }
 
 // ── 聚合快照 ─────────────────────────────────────────
 
 // ClusterSystemSnapshot 集群系统资源聚合快照。
 type ClusterSystemSnapshot struct {
-	// Timestamp 聚合时间。
 	Timestamp time.Time `json:"timestamp"`
-	// AgentCount 已注册 Agent 总数。
-	AgentCount int `json:"agentCount"`
-	// OnlineCount 在线 Agent 数。
-	OnlineCount int `json:"onlineCount"`
-	// OfflineCount 离线 Agent 数。
-	OfflineCount int `json:"offlineCount"`
-	// AvgCPUPercent 集群平均 CPU 使用率。
-	AvgCPUPercent float64 `json:"avgCpuPercent"`
-	// MaxCPUPercent 集群最大 CPU 使用率。
-	MaxCPUPercent float64 `json:"maxCpuPercent"`
-	// HotAgentID CPU 最高的 Agent ID。
-	HotAgentID string `json:"hotAgentId,omitempty"`
-	// HotAgentName CPU 最高的 Agent 名称。
-	HotAgentName string `json:"hotAgentName,omitempty"`
-	// AvgMemPercent 集群内存使用率（按总内存加权）。
-	AvgMemPercent float64 `json:"avgMemPercent"`
-	// MaxMemPercent 集群最大内存使用率。
-	MaxMemPercent float64 `json:"maxMemPercent"`
-	// HotMemAgentID 内存使用率最高的 Agent ID。
-	HotMemAgentID string `json:"hotMemAgentId,omitempty"`
-	// HotMemAgentName 内存使用率最高的 Agent 名称。
-	HotMemAgentName string `json:"hotMemAgentName,omitempty"`
-	// TotalMemMB 集群总内存（MB）。
-	TotalMemMB uint64 `json:"totalMemMB"`
-	// UsedMemMB 集群已用内存（MB）。
-	UsedMemMB uint64 `json:"usedMemMB"`
-	// TotalNetSendKBps 集群总发送速率。
-	TotalNetSendKBps float64 `json:"totalNetSendKBps"`
-	// TotalNetRecvKBps 集群总接收速率。
-	TotalNetRecvKBps float64 `json:"totalNetRecvKBps"`
-	// TotalGoroutines 集群总 goroutine 数。
-	TotalGoroutines int `json:"totalGoroutines"`
-	// TotalThreads 集群总线程数。
-	TotalThreads int32 `json:"totalThreads"`
-	// TotalFDs 集群总文件描述符数。
-	TotalFDs int32 `json:"totalFds"`
-	// Agents 各 Agent 的系统资源摘要。
+
+	AgentCount      int     `json:"agentCount"`
+	OnlineCount     int     `json:"onlineCount"`
+	UnhealthyCount  int     `json:"unhealthyCount"`
+	OfflineCount    int     `json:"offlineCount"`
+	ReportingAgents int     `json:"reportingAgents"`
+	StaleAgents     int     `json:"staleAgents"`
+	MissingAgents   int     `json:"missingAgents"`
+	CoverageRatio   float64 `json:"coverageRatio"`
+
+	HostCPUReportingAgents int      `json:"hostCpuReportingAgents"`
+	AvgHostCPUPercent      *float64 `json:"avgHostCpuPercent"`
+	MaxHostCPUPercent      *float64 `json:"maxHostCpuPercent"`
+	HotHostCPUAgentID      string   `json:"hotHostCpuAgentId,omitempty"`
+	HotHostCPUAgentName    string   `json:"hotHostCpuAgentName,omitempty"`
+
+	HostMemoryReportingAgents int      `json:"hostMemoryReportingAgents"`
+	AvgHostMemPercent         *float64 `json:"avgHostMemPercent"`
+	MaxHostMemPercent         *float64 `json:"maxHostMemPercent"`
+	HotHostMemAgentID         string   `json:"hotHostMemAgentId,omitempty"`
+	HotHostMemAgentName       string   `json:"hotHostMemAgentName,omitempty"`
+	TotalHostMemBytes         *uint64  `json:"totalHostMemBytes"`
+	UsedHostMemBytes          *uint64  `json:"usedHostMemBytes"`
+
+	HostNetSendReportingAgents  int      `json:"hostNetSendReportingAgents"`
+	HostNetRecvReportingAgents  int      `json:"hostNetRecvReportingAgents"`
+	TotalHostNetSendBytesPerSec *float64 `json:"totalHostNetSendBytesPerSec"`
+	TotalHostNetRecvBytesPerSec *float64 `json:"totalHostNetRecvBytesPerSec"`
+
+	ProcessCPUReportingAgents int      `json:"processCpuReportingAgents"`
+	AvgProcessCPUPercent      *float64 `json:"avgProcessCpuPercent"`
+	MaxProcessCPUPercent      *float64 `json:"maxProcessCpuPercent"`
+	HotProcessCPUAgentID      string   `json:"hotProcessCpuAgentId,omitempty"`
+	HotProcessCPUAgentName    string   `json:"hotProcessCpuAgentName,omitempty"`
+
+	ProcessRSSReportingAgents int     `json:"processRssReportingAgents"`
+	TotalProcessRSSBytes      *uint64 `json:"totalProcessRssBytes"`
+	MaxProcessRSSBytes        *uint64 `json:"maxProcessRssBytes"`
+	HotProcessRSSAgentID      string  `json:"hotProcessRssAgentId,omitempty"`
+	HotProcessRSSAgentName    string  `json:"hotProcessRssAgentName,omitempty"`
+	TotalProcessHeapBytes     *uint64 `json:"totalProcessHeapBytes"`
+	TotalProcessGoroutines    *int    `json:"totalProcessGoroutines"`
+
+	ProcessThreadsReportingAgents int    `json:"processThreadsReportingAgents"`
+	TotalProcessThreads           *int32 `json:"totalProcessThreads"`
+	ProcessFDsReportingAgents     int    `json:"processFdsReportingAgents"`
+	TotalProcessFDs               *int32 `json:"totalProcessFds"`
+	MaxProcessFDs                 *int32 `json:"maxProcessFds"`
+	HotProcessFDsAgentID          string `json:"hotProcessFdsAgentId,omitempty"`
+	HotProcessFDsAgentName        string `json:"hotProcessFdsAgentName,omitempty"`
+
 	Agents []AgentSystemBrief `json:"agents"`
 }
 
 // AgentSystemBrief 单个 Agent 的系统资源摘要。
 type AgentSystemBrief struct {
-	// AgentID Agent 唯一标识。
-	AgentID string `json:"agentId"`
-	// Name 显示名称。
-	Name string `json:"name"`
-	// Status 在线状态。
-	Status string `json:"status"`
-	// CPUPercent CPU 使用率。
-	CPUPercent float64 `json:"cpuPercent"`
-	// MemPercent 内存使用率。
-	MemPercent float64 `json:"memPercent"`
-	// NumGoroutine goroutine 数量。
-	NumGoroutine int `json:"numGoroutine"`
-	// NetSendKBps 网络发送速率。
-	NetSendKBps float64 `json:"netSendKBps"`
-	// NetRecvKBps 网络接收速率。
-	NetRecvKBps float64 `json:"netRecvKBps"`
-	// LastSeen 最后心跳距今秒数。
-	LastSeen int64 `json:"lastSeen"`
+	AgentID            string     `json:"agentId"`
+	Name               string     `json:"name"`
+	Status             string     `json:"status"`
+	IsStale            bool       `json:"isStale"`
+	SampledAt          *time.Time `json:"sampledAt"`
+	ReceivedAt         *time.Time `json:"receivedAt"`
+	SnapshotAgeSeconds *float64   `json:"snapshotAgeSeconds"`
+	LastHeartbeatAt    time.Time  `json:"lastHeartbeatAt"`
+
+	HostCPUPercent         *float64 `json:"hostCpuPercent"`
+	HostMemPercent         *float64 `json:"hostMemPercent"`
+	HostNetSendBytesPerSec *float64 `json:"hostNetSendBytesPerSec"`
+	HostNetRecvBytesPerSec *float64 `json:"hostNetRecvBytesPerSec"`
+	ProcessCPUPercent      *float64 `json:"processCpuPercent"`
+	ProcessRSSBytes        *uint64  `json:"processRssBytes"`
+	ProcessHeapBytes       *uint64  `json:"processHeapBytes"`
+	ProcessGoroutines      *int     `json:"processGoroutines"`
+	ProcessThreads         *int32   `json:"processThreads"`
+	ProcessFDs             *int32   `json:"processFds"`
+}
+
+// AgentListItem is the list-facing Agent projection. Resource values are only
+// populated while the latest system snapshot is fresh by the Admin clock.
+type AgentListItem struct {
+	AgentID       string      `json:"agentId"`
+	Name          string      `json:"name"`
+	Address       string      `json:"address"`
+	AppVersion    string      `json:"appVersion"`
+	MaxBots       int         `json:"maxBots"`
+	Status        AgentStatus `json:"status"`
+	CurrentTaskID string      `json:"currentTaskId"`
+	CurrentBots   int         `json:"currentBots"`
+	StaticInfo    StaticInfo  `json:"staticInfo"`
+
+	LastHeartbeatAt          time.Time  `json:"lastHeartbeatAt"`
+	StressUpdatedAt          *time.Time `json:"stressUpdatedAt"`
+	SystemUpdatedAt          *time.Time `json:"systemUpdatedAt"`
+	SystemStale              bool       `json:"systemStale"`
+	SystemSnapshotAgeSeconds *float64   `json:"systemSnapshotAgeSeconds"`
+
+	HostCPUPercent    *float64 `json:"hostCpuPercent"`
+	HostMemPercent    *float64 `json:"hostMemPercent"`
+	ProcessCPUPercent *float64 `json:"processCpuPercent"`
+	ProcessRSSBytes   *uint64  `json:"processRssBytes"`
+	ProcessGoroutines *int     `json:"processGoroutines"`
 }
 
 // ── 历史归档 ─────────────────────────────────────────
@@ -594,9 +606,9 @@ type HistoryRecord struct {
 	// SuccessRate 阶段段落整体成功率（0-1）。
 	SuccessRate float64 `json:"successRate,omitempty"`
 	// AvgRttMs 阶段段落加权平均 RTT（毫秒）。
-	AvgRttMs float64 `json:"avgRttMs,omitempty"`
+	AvgRttMs *float64 `json:"avgRttMs,omitempty"`
 	// P95RttMs 阶段段落加权平均 P95 RTT（毫秒）。
-	P95RttMs float64 `json:"p95RttMs,omitempty"`
+	P95RttMs *float64 `json:"p95RttMs,omitempty"`
 }
 
 // ConfigSummary 历史任务的配置摘要。
@@ -647,65 +659,100 @@ type HistoryStressSnapshotSummary struct {
 	UptimeSec    float64                    `json:"uptimeSeconds"`
 	TotalActions int64                      `json:"totalActions"`
 	ApdexT       int                        `json:"apdexT"`
+	TimingDetail monitor.TimingDetailLevel  `json:"timingDetail"`
+	Summary      HistoryMetricsSummary      `json:"summary"`
 	Robots       monitor.RobotSnapshot      `json:"robots"`
 	Connections  monitor.ConnectionSnapshot `json:"connections"`
 	Bandwidth    monitor.BandwidthSnapshot  `json:"bandwidth"`
 	Actions      []HistoryActionSummary     `json:"actions"`
 }
 
+// HistoryMetricsSummary 是历史详情保留的跨动作统一汇总。
+type HistoryMetricsSummary struct {
+	SampleCount               int64                   `json:"sampleCount"`
+	SuccessCount              int64                   `json:"successCount"`
+	FailureCount              int64                   `json:"failureCount"`
+	TimeoutCount              int64                   `json:"timeoutCount"`
+	CanceledCount             int64                   `json:"canceledCount"`
+	Executing                 int64                   `json:"executing"`
+	SuccessRate               float64                 `json:"successRate"`
+	RTTApdex                  float64                 `json:"rttApdex"`
+	RTTApdexSampleCount       int64                   `json:"rttApdexSampleCount"`
+	RTT                       HistoryHistogramSummary `json:"rtt"`
+	ListenWait                HistoryHistogramSummary `json:"listenWait"`
+	TotalDuration             HistoryHistogramSummary `json:"totalDuration"`
+	ClientAvgMs               float64                 `json:"nonRTTAvgMs"`
+	BuildAvgMs                float64                 `json:"buildAvgMs"`
+	EncodeAvgMs               float64                 `json:"encodeAvgMs"`
+	SendAvgMs                 float64                 `json:"sendAvgMs"`
+	DecodeWaitAvgMs           float64                 `json:"decodeWaitAvgMs"`
+	DecodeAvgMs               float64                 `json:"decodeAvgMs"`
+	DispatchToActionWaitAvgMs float64                 `json:"dispatchToActionWaitAvgMs"`
+	ParseStoreAvgMs           float64                 `json:"parseStoreAvgMs"`
+	AvgQPS                    float64                 `json:"avgQps"`
+}
+
 // HistoryActionSummary 历史 action 表格和报告使用的展示字段。
 type HistoryActionSummary struct {
-	Name                     string                  `json:"name"`
-	SampleCount              int64                   `json:"sampleCount"`
-	SuccessCount             int64                   `json:"successCount"`
-	FailureCount             int64                   `json:"failureCount"`
-	TimeoutCount             int64                   `json:"timeoutCount"`
-	CanceledCount            int64                   `json:"canceledCount"`
-	Executing                int64                   `json:"executing"`
-	SuccessRate              float64                 `json:"successRate"`
-	AvgSendBytes             float64                 `json:"avgSendBytes"`
-	AvgRecvBytes             float64                 `json:"avgRecvBytes"`
-	Kind                     monitor.ActionKind      `json:"kind"`
-	RTTApdex                 float64                 `json:"rttApdex"`
-	RTT                      HistoryHistogramSummary `json:"rtt"`
-	ListenWait               HistoryHistogramSummary `json:"listenWait"`
-	ListenWaitSampleCount    int64                   `json:"listenWaitSampleCount"`
-	ListenTimeoutRate        float64                 `json:"listenTimeoutRate"`
-	TotalDuration            HistoryHistogramSummary `json:"totalDuration"`
-	ClientAvgMs              float64                 `json:"clientAvgMs"`
-	EncodeAvgMs              float64                 `json:"encodeAvgMs"`
-	DecodeAvgMs              float64                 `json:"decodeAvgMs"`
-	ParseStoreAvgMs          float64                 `json:"parseStoreAvgMs"`
-	RTTSampleCount           int64                   `json:"rttSampleCount"`
-	TotalDurationSampleCount int64                   `json:"totalDurationSampleCount"`
-	AvgQPS                   float64                 `json:"avgQps"`
-	Errors                   []monitor.ErrorEntry    `json:"errors,omitempty"`
+	Name                      string                  `json:"name"`
+	SampleCount               int64                   `json:"sampleCount"`
+	SuccessCount              int64                   `json:"successCount"`
+	FailureCount              int64                   `json:"failureCount"`
+	TimeoutCount              int64                   `json:"timeoutCount"`
+	CanceledCount             int64                   `json:"canceledCount"`
+	Executing                 int64                   `json:"executing"`
+	SuccessRate               float64                 `json:"successRate"`
+	AvgSendBytes              float64                 `json:"avgSendBytes"`
+	AvgRecvBytes              float64                 `json:"avgRecvBytes"`
+	Kind                      monitor.ActionKind      `json:"kind"`
+	RTTApdex                  float64                 `json:"rttApdex"`
+	RTTApdexSampleCount       int64                   `json:"rttApdexSampleCount"`
+	RTT                       HistoryHistogramSummary `json:"rtt"`
+	ListenWait                HistoryHistogramSummary `json:"listenWait"`
+	ListenWaitSampleCount     int64                   `json:"listenWaitSampleCount"`
+	ListenTimeoutRate         float64                 `json:"listenTimeoutRate"`
+	TotalDuration             HistoryHistogramSummary `json:"totalDuration"`
+	ClientAvgMs               float64                 `json:"nonRTTAvgMs"`
+	BuildAvgMs                float64                 `json:"buildAvgMs"`
+	EncodeAvgMs               float64                 `json:"encodeAvgMs"`
+	SendAvgMs                 float64                 `json:"sendAvgMs"`
+	DecodeWaitAvgMs           float64                 `json:"decodeWaitAvgMs"`
+	DecodeAvgMs               float64                 `json:"decodeAvgMs"`
+	DispatchToActionWaitAvgMs float64                 `json:"dispatchToActionWaitAvgMs"`
+	ParseStoreAvgMs           float64                 `json:"parseStoreAvgMs"`
+	RTTSampleCount            int64                   `json:"rttSampleCount"`
+	TotalDurationSampleCount  int64                   `json:"totalDurationSampleCount"`
+	AvgQPS                    float64                 `json:"avgQps"`
+	Errors                    []monitor.ErrorEntry    `json:"errors,omitempty"`
 }
 
 // HistoryHistogramSummary 历史界面需要的 RTT 分位摘要。
 type HistoryHistogramSummary struct {
-	MaxMs float64 `json:"maxMs"`
-	AvgMs float64 `json:"avgMs"`
-	P50Ms float64 `json:"p50Ms"`
-	P95Ms float64 `json:"p95Ms"`
-	P99Ms float64 `json:"p99Ms"`
+	Count int64    `json:"count"`
+	MinMs *float64 `json:"minMs"`
+	MaxMs *float64 `json:"maxMs"`
+	AvgMs *float64 `json:"avgMs"`
+	P50Ms *float64 `json:"p50Ms"`
+	P90Ms *float64 `json:"p90Ms"`
+	P95Ms *float64 `json:"p95Ms"`
+	P99Ms *float64 `json:"p99Ms"`
 }
 
 // HistorySystemSummary 历史详情页使用的集群系统资源摘要。
 type HistorySystemSummary struct {
-	AvgCPUPercent    float64 `json:"avgCpuPercent"`
-	MaxCPUPercent    float64 `json:"maxCpuPercent"`
-	HotAgentName     string  `json:"hotAgentName,omitempty"`
-	AvgMemPercent    float64 `json:"avgMemPercent"`
-	MaxMemPercent    float64 `json:"maxMemPercent"`
-	HotMemAgentName  string  `json:"hotMemAgentName,omitempty"`
-	TotalMemMB       uint64  `json:"totalMemMB"`
-	UsedMemMB        uint64  `json:"usedMemMB"`
-	TotalNetSendKBps float64 `json:"totalNetSendKBps"`
-	TotalNetRecvKBps float64 `json:"totalNetRecvKBps"`
-	TotalGoroutines  int     `json:"totalGoroutines"`
-	TotalThreads     int32   `json:"totalThreads"`
-	TotalFDs         int32   `json:"totalFds"`
+	AvgCPUPercent    float64  `json:"avgCpuPercent"`
+	MaxCPUPercent    float64  `json:"maxCpuPercent"`
+	HotAgentName     string   `json:"hotAgentName,omitempty"`
+	AvgMemPercent    float64  `json:"avgMemPercent"`
+	MaxMemPercent    float64  `json:"maxMemPercent"`
+	HotMemAgentName  string   `json:"hotMemAgentName,omitempty"`
+	TotalMemMB       uint64   `json:"totalMemMB"`
+	UsedMemMB        uint64   `json:"usedMemMB"`
+	TotalNetSendKBps *float64 `json:"totalNetSendKBps"`
+	TotalNetRecvKBps *float64 `json:"totalNetRecvKBps"`
+	TotalGoroutines  int      `json:"totalGoroutines"`
+	TotalThreads     int32    `json:"totalThreads"`
+	TotalFDs         int32    `json:"totalFds"`
 }
 
 // HistoryAgentReport 单个 Agent 的历史完成报告。
@@ -829,7 +876,7 @@ type HistoryCompareAction struct {
 // CompareDiff 历史任务对比差异。
 type CompareDiff struct {
 	// Actions action 名称 → 各任务的 P99 延迟数组。
-	Actions map[string][]float64 `json:"actions"`
+	Actions map[string][]*float64 `json:"actions"`
 }
 
 // ── 时序采样 ─────────────────────────────────────────
@@ -841,32 +888,46 @@ type HistoryTrendPoint struct {
 	// ElapsedSec 距任务启动的秒数。
 	ElapsedSec int `json:"elapsedSec"`
 	// StageIndex 采样点所属阶段段落号。-1 非阶段；> 0 有 reset 任务的连续 1-based 段落号。
-	StageIndex int `json:"stageIndex"`
+	StageIndex        int       `json:"stageIndex"`
+	WindowFrom        time.Time `json:"windowFrom"`
+	WindowTo          time.Time `json:"windowTo"`
+	SampleCount       int64     `json:"sampleCount"`
+	HistoryBatchToken []byte    `json:"-"`
 	// TotalQPS 集群总 QPS。
 	TotalQPS float64 `json:"totalQps"`
 	// RTTApdex 按 RTT 样本数加权后的 Apdex。压测的唯一评分指标。
-	RTTApdex float64 `json:"rttApdex"`
+	RTTApdex *float64 `json:"rttApdex"`
 	// ListenWaitP99Ms 按等待样本数加权后的监听等待 P99。
 	// 监听类不打 Apdex（等待时长的主体是服务端业务，没有普遍阈值），看分位数。
-	ListenWaitP99Ms float64 `json:"listenWaitP99Ms"`
+	ListenWaitP99Ms *float64 `json:"listenWaitP99Ms"`
 	// RTTAvgMs 平均 RTT。
-	RTTAvgMs float64 `json:"rttAvgMs"`
+	RTTAvgMs *float64 `json:"rttAvgMs"`
+	RTTP50Ms *float64 `json:"rttP50Ms"`
+	RTTP90Ms *float64 `json:"rttP90Ms"`
 	// RTTP95Ms P95 RTT。
-	RTTP95Ms float64 `json:"rttP95Ms"`
+	RTTP95Ms *float64 `json:"rttP95Ms"`
 	// RTTP99Ms P99 RTT。
-	RTTP99Ms float64 `json:"rttP99Ms"`
+	RTTP99Ms           *float64 `json:"rttP99Ms"`
+	ActiveConnections  *int64   `json:"activeConnections"`
+	ClosedConnections  *int64   `json:"closedConnections"`
+	DroppedConnections *int64   `json:"droppedConnections"`
+	NetSendBytesPerSec *float64 `json:"netSendBytesPerSec"`
+	NetRecvBytesPerSec *float64 `json:"netRecvBytesPerSec"`
+	AssignedAgents     *int     `json:"assignedAgents"`
+	ReportingAgents    *int     `json:"reportingAgents"`
+	ReportingCoverage  *float64 `json:"reportingCoverage"`
 	// TotalDurationAvgMs 平均总耗时。
-	TotalDurationAvgMs float64 `json:"totalDurationAvgMs"`
+	TotalDurationAvgMs *float64 `json:"totalDurationAvgMs"`
 	// TotalDurationP95Ms P95 总耗时。
-	TotalDurationP95Ms float64 `json:"totalDurationP95Ms"`
+	TotalDurationP95Ms *float64 `json:"totalDurationP95Ms"`
 	// TotalDurationP99Ms P99 总耗时。
-	TotalDurationP99Ms float64 `json:"totalDurationP99Ms"`
+	TotalDurationP99Ms *float64 `json:"totalDurationP99Ms"`
 	// ClientAvgMs 客户端平均耗时。
-	ClientAvgMs float64 `json:"clientAvgMs"`
+	ClientAvgMs *float64 `json:"nonRTTAvgMs"`
 	// EncodeAvgMs 编码平均耗时。
-	EncodeAvgMs float64 `json:"encodeAvgMs"`
+	EncodeAvgMs *float64 `json:"encodeAvgMs"`
 	// DecodeAvgMs 解码平均耗时。
-	DecodeAvgMs float64 `json:"decodeAvgMs"`
+	DecodeAvgMs *float64 `json:"decodeAvgMs"`
 	// BotsRunning 运行中机器人数量。
 	BotsRunning int `json:"botsRunning"`
 	// BotsErrored 异常机器人数量。
@@ -903,31 +964,44 @@ type HistoryTrendPointResponse struct {
 	ElapsedSec int `json:"elapsedSec"`
 	// StageIndex 采样点所属阶段/阶段段落索引。
 	// -1：非渐进式或未记录；> 0：有 reset 任务中该采样点所属的连续 1-based 段落号。
-	StageIndex int `json:"stageIndex"`
+	StageIndex  int       `json:"stageIndex"`
+	WindowFrom  time.Time `json:"windowFrom"`
+	WindowTo    time.Time `json:"windowTo"`
+	SampleCount int64     `json:"sampleCount"`
 	// TotalQPS 集群总 QPS。
 	TotalQPS float64 `json:"totalQps"`
-	// RTTApdex 按 RTT 样本数加权后的 Apdex；旧数据完成迁移前可能为空。
+	// RTTApdex 按 RTT 样本数计算；当前窗口没有 Apdex 样本时为空。
 	RTTApdex *float64 `json:"rttApdex"`
-	// ListenWaitP99Ms 按等待样本数加权后的监听等待 P99；旧数据未采集时为空。
+	// ListenWaitP99Ms 由合并后的等待分布计算；当前窗口没有等待样本时为空。
 	ListenWaitP99Ms *float64 `json:"listenWaitP99Ms"`
 	// RTTAvgMs 平均 RTT。
-	RTTAvgMs float64 `json:"rttAvgMs"`
+	RTTAvgMs *float64 `json:"rttAvgMs"`
+	RTTP50Ms *float64 `json:"rttP50Ms"`
+	RTTP90Ms *float64 `json:"rttP90Ms"`
 	// RTTP95Ms P95 RTT。
-	RTTP95Ms float64 `json:"rttP95Ms"`
+	RTTP95Ms *float64 `json:"rttP95Ms"`
 	// RTTP99Ms P99 RTT。
-	RTTP99Ms float64 `json:"rttP99Ms"`
+	RTTP99Ms           *float64 `json:"rttP99Ms"`
+	ActiveConnections  *int64   `json:"activeConnections"`
+	ClosedConnections  *int64   `json:"closedConnections"`
+	DroppedConnections *int64   `json:"droppedConnections"`
+	NetSendBytesPerSec *float64 `json:"netSendBytesPerSec"`
+	NetRecvBytesPerSec *float64 `json:"netRecvBytesPerSec"`
+	AssignedAgents     *int     `json:"assignedAgents"`
+	ReportingAgents    *int     `json:"reportingAgents"`
+	ReportingCoverage  *float64 `json:"reportingCoverage"`
 	// TotalDurationAvgMs 平均总耗时。
-	TotalDurationAvgMs float64 `json:"totalDurationAvgMs"`
+	TotalDurationAvgMs *float64 `json:"totalDurationAvgMs"`
 	// TotalDurationP95Ms P95 总耗时。
-	TotalDurationP95Ms float64 `json:"totalDurationP95Ms"`
+	TotalDurationP95Ms *float64 `json:"totalDurationP95Ms"`
 	// TotalDurationP99Ms P99 总耗时。
-	TotalDurationP99Ms float64 `json:"totalDurationP99Ms"`
+	TotalDurationP99Ms *float64 `json:"totalDurationP99Ms"`
 	// ClientAvgMs 客户端平均耗时。
-	ClientAvgMs float64 `json:"clientAvgMs"`
+	ClientAvgMs *float64 `json:"nonRTTAvgMs"`
 	// EncodeAvgMs 编码平均耗时。
-	EncodeAvgMs float64 `json:"encodeAvgMs"`
+	EncodeAvgMs *float64 `json:"encodeAvgMs"`
 	// DecodeAvgMs 解码平均耗时。
-	DecodeAvgMs float64 `json:"decodeAvgMs"`
+	DecodeAvgMs *float64 `json:"decodeAvgMs"`
 	// BotsRunning 运行中机器人数量。
 	BotsRunning int `json:"botsRunning"`
 	// BotsErrored 异常机器人数量。

@@ -26,22 +26,27 @@ const P_COLOR: Record<string, string> = {
 };
 
 export function LatencyHistogram({ hist, maxMs, width = 160 }: LatencyHistogramProps) {
-  if (hist.count === 0) {
+  const { minMs, maxMs: histogramMaxMs, avgMs, p50Ms, p90Ms, p95Ms, p99Ms } = hist;
+  if (
+    hist.count === 0 ||
+    minMs == null || histogramMaxMs == null || avgMs == null ||
+    p50Ms == null || p90Ms == null || p95Ms == null || p99Ms == null
+  ) {
     return <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>—</span>;
   }
-  const max = maxMs ?? Math.max(hist.p99Ms, 1);
+  const max = maxMs ?? Math.max(p99Ms, 1);
   const points: Array<{ key: keyof HistogramView; label: string; ms: number }> = [
-    { key: 'p50Ms', label: 'p50', ms: hist.p50Ms },
-    { key: 'p90Ms', label: 'p90', ms: hist.p90Ms },
-    { key: 'p95Ms', label: 'p95', ms: hist.p95Ms },
-    { key: 'p99Ms', label: 'p99', ms: hist.p99Ms },
+    { key: 'p50Ms', label: 'p50', ms: p50Ms },
+    { key: 'p90Ms', label: 'p90', ms: p90Ms },
+    { key: 'p95Ms', label: 'p95', ms: p95Ms },
+    { key: 'p99Ms', label: 'p99', ms: p99Ms },
   ];
 
   return (
     <Tooltip
       title={
         <div style={{ fontSize: 11 }}>
-          <div>min: {hist.minMs.toFixed(1)}ms · max: {hist.maxMs.toFixed(1)}ms · avg: {hist.avgMs.toFixed(1)}ms</div>
+          <div>min: {minMs.toFixed(1)}ms · max: {histogramMaxMs.toFixed(1)}ms · avg: {avgMs.toFixed(1)}ms</div>
           {points.map((p) => (
             <div key={p.label}>
               {p.label}: {p.ms.toFixed(1)}ms

@@ -509,10 +509,11 @@ func (r *Robot) ConnectTCP(serviceName, address string) bool {
 
 	// onClosed：主动/被动关闭都触发，仅用于监控 -1（与 ConnEstablished 配对，保证当前连接数准确）
 	conn.SetOnClosed(func() {
-		monitor.Global().ConnDropped()
+		monitor.Global().ConnClosed()
 	})
 	// onDisconnect：仅意外断开触发，用于"主连接挂了就停 robot"业务判定
 	conn.SetOnDisconnect(func() {
+		monitor.Global().ConnDropped()
 		if serviceName == r.mainService {
 			stresslog.Warn("[ROBOT] 主连接意外断开，停止机器人",
 				zap.Int("id", r.id), zap.String("account", r.account), zap.String("service", serviceName))
@@ -572,9 +573,10 @@ func (r *Robot) ConnectUDP(serviceName, address string) bool {
 	}
 
 	conn.SetOnClosed(func() {
-		monitor.Global().ConnDropped()
+		monitor.Global().ConnClosed()
 	})
 	conn.SetOnDisconnect(func() {
+		monitor.Global().ConnDropped()
 		stresslog.Debug("[ROBOT] UDP 连接断开",
 			zap.Int("id", r.id), zap.String("account", r.account), zap.String("service", serviceName))
 	})
@@ -706,6 +708,7 @@ func toMonitorTiming(t engine.ActionTiming) monitor.ActionTiming {
 			DecodeCost:     t.Client.DecodeCost,
 			DispatchWait:   t.Client.DispatchWait,
 			ParseStoreCost: t.Client.ParseStoreCost,
+			Observed:       monitor.TimingStage(t.Client.Observed),
 		},
 	}
 	if len(t.Requests) > 0 {
@@ -717,6 +720,7 @@ func toMonitorTiming(t engine.ActionTiming) monitor.ActionTiming {
 				DecodeWait:           req.DecodeWait,
 				DecodeCost:           req.DecodeCost,
 				DispatchToActionWait: req.DispatchToActionWait,
+				Observed:             monitor.TimingStage(req.Observed),
 			})
 		}
 	}

@@ -272,6 +272,9 @@ func (r *AgentRegistry) UpdateSystem(agentID string, snap *SystemSnapshot, at ti
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if node, ok := r.agents[agentID]; ok {
+		if snap == nil || (node.LatestSystem != nil && snap.Sequence <= node.LatestSystem.Sequence) {
+			return
+		}
 		node.LatestSystem = snap
 		node.SystemUpdatedAt = at
 	}

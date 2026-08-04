@@ -17,6 +17,7 @@ type RequestTiming struct {
 	DecodeWait           time.Duration
 	DecodeCost           time.Duration
 	DispatchToActionWait time.Duration
+	Observed             uint16
 }
 
 // Message 网络消息。

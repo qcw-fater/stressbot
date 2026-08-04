@@ -2,7 +2,7 @@ import { Button, Input, Popover, Segmented, Space, Switch, Table, Tag, Tooltip }
 import { DownloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useCallback, useMemo, useState } from 'react';
-import type { ErrorEntry } from '@/types/api';
+import type { ErrorEntry, TimingDetailLevel } from '@/types/api';
 import { ApdexCell } from './ApdexCell';
 import { fmtBytes, fmtMs, NUMERIC_STYLE } from './formats';
 
@@ -19,11 +19,11 @@ export type ActionLatencyMode = 'primary' | 'totalDuration';
 export type ActionKindLike = 'networked' | 'listen' | 'send' | 'local';
 
 export interface ActionHistogramLike {
-  maxMs: number;
-  avgMs: number;
-  p50Ms: number;
-  p95Ms: number;
-  p99Ms: number;
+  maxMs: number | null;
+  avgMs: number | null;
+  p50Ms: number | null;
+  p95Ms: number | null;
+  p99Ms: number | null;
 }
 
 export interface ActionMetricsTableRow {
@@ -44,6 +44,7 @@ export interface ActionMetricsTableRow {
 
   rtt?: ActionHistogramLike;
   rttSampleCount?: number;
+  rttApdexSampleCount?: number;
   rttApdex?: number;
 
   listenWait?: ActionHistogramLike;
@@ -53,9 +54,13 @@ export interface ActionMetricsTableRow {
   totalDuration?: ActionHistogramLike;
   totalDurationSampleCount?: number;
 
-  clientAvgMs?: number;
+  nonRTTAvgMs?: number;
+  buildAvgMs?: number;
   encodeAvgMs?: number;
+  sendAvgMs?: number;
+  decodeWaitAvgMs?: number;
   decodeAvgMs?: number;
+  dispatchToActionWaitAvgMs?: number;
   parseStoreAvgMs?: number;
 }
 
@@ -80,7 +85,56 @@ export interface ActionMetricsTableProps<T extends ActionMetricsTableRow> {
   showErrorsColumn?: boolean;
   showCsvExport?: boolean;
   searchWidth?: number;
+  timingDetail?: TimingDetailLevel;
 }
+
+export type TimingBreakdownField =
+  | 'nonRTTAvgMs'
+  | 'sendAvgMs'
+  | 'encodeAvgMs'
+  | 'decodeAvgMs'
+  | 'buildAvgMs'
+  | 'decodeWaitAvgMs'
+  | 'dispatchToActionWaitAvgMs'
+  | 'parseStoreAvgMs';
+
+export function getTimingBreakdownFields(level: TimingDetailLevel): TimingBreakdownField[] {
+  const fields: TimingBreakdownField[] = ['nonRTTAvgMs', 'sendAvgMs'];
+  if (level === 'codec' || level === 'full') fields.push('encodeAvgMs', 'decodeAvgMs');
+  if (level === 'full')
+    fields.push('buildAvgMs', 'decodeWaitAvgMs', 'dispatchToActionWaitAvgMs', 'parseStoreAvgMs');
+  return fields;
+}
+
+const TIMING_FIELD_META: Record<
+  TimingBreakdownField,
+  { title: string; hint: string; width: number }
+> = {
+  nonRTTAvgMs: {
+    title: '非RTT(ms)',
+    hint: '动作总耗时扣除已记录 RTT 后的平均剩余耗时。',
+    width: 92,
+  },
+  sendAvgMs: { title: 'send(ms)', hint: '发送阶段平均耗时。', width: 84 },
+  encodeAvgMs: { title: 'encode(ms)', hint: '协议编码平均耗时。', width: 92 },
+  decodeAvgMs: {
+    title: 'decode(ms)',
+    hint: '收到完整响应帧后的协议解码平均耗时，不计入 RTT。',
+    width: 92,
+  },
+  buildAvgMs: { title: 'build(ms)', hint: '请求消息构建平均耗时。', width: 88 },
+  decodeWaitAvgMs: {
+    title: 'decode等待(ms)',
+    hint: '收到帧后进入协议解码前的平均排队耗时。',
+    width: 112,
+  },
+  dispatchToActionWaitAvgMs: {
+    title: '分发等待(ms)',
+    hint: '网络分发完成到动作恢复执行之间的平均等待耗时。',
+    width: 112,
+  },
+  parseStoreAvgMs: { title: 'parse/store(ms)', hint: '响应解析与状态写入平均耗时。', width: 120 },
+};
 
 interface SelectedLatencyMetric {
   histogram?: ActionHistogramLike;
@@ -94,10 +148,26 @@ interface SelectedLatencyMetric {
  * （tcpRequest 金黄 / tcpListen 橙 / tcpSend 蓝 / setState 青），两处对同一个动作同色。
  */
 const KIND_META: Record<ActionKindLike, { label: string; color: string; hint: string }> = {
-  networked: { label: '往返', color: 'var(--node-boolean-border-active)', hint: '往返类：发起过请求-响应。主指标是 RTT，打 Apdex。' },
-  listen: { label: '监听', color: 'var(--node-break-border-active)', hint: '监听类：只等服务端推送。主指标是等待时长（开始等待 → 帧被内核收到），不打 Apdex——这段时长的主体是服务端业务，没有普遍阈值。' },
-  send: { label: '发送', color: 'var(--node-sequence-border-active)', hint: '发送类：只发不等（即发即忘）。主指标是执行耗时，不含服务端成分，不打 Apdex。' },
-  local: { label: '本地', color: 'var(--node-continue-border-active)', hint: '本地类：无网络行为。主指标是执行耗时，不打 Apdex。' },
+  networked: {
+    label: '往返',
+    color: 'var(--node-boolean-border-active)',
+    hint: '往返类：发起过请求-响应。主指标是 RTT，打 Apdex。',
+  },
+  listen: {
+    label: '监听',
+    color: 'var(--node-break-border-active)',
+    hint: '监听类：只等服务端推送。主指标是等待时长（开始等待 → 帧被内核收到），不打 Apdex——这段时长的主体是服务端业务，没有普遍阈值。',
+  },
+  send: {
+    label: '发送',
+    color: 'var(--node-sequence-border-active)',
+    hint: '发送类：只发不等（即发即忘）。主指标是执行耗时，不含服务端成分，不打 Apdex。',
+  },
+  local: {
+    label: '本地',
+    color: 'var(--node-continue-border-active)',
+    hint: '本地类：无网络行为。主指标是执行耗时，不打 Apdex。',
+  },
 };
 
 /**
@@ -108,10 +178,12 @@ const KIND_META: Record<ActionKindLike, { label: string; color: string; hint: st
 export function resolveKind(row: {
   kind?: ActionKindLike;
   rttSampleCount?: number;
+  rttApdexSampleCount?: number;
   listenWaitSampleCount?: number;
   avgSendBytes: number;
 }): ActionKindLike {
   if (row.kind) return row.kind;
+  if ((row.rttApdexSampleCount ?? 0) > 0) return 'networked';
   if ((row.rttSampleCount ?? 0) > 0) return 'networked';
   if ((row.listenWaitSampleCount ?? 0) > 0) return 'listen';
   if (row.avgSendBytes > 0) return 'send';
@@ -133,23 +205,42 @@ function selectPrimaryMetric(row: ActionMetricsTableRow): SelectedLatencyMetric 
     case 'networked':
       return { histogram: row.rtt, sampleCount: row.rttSampleCount ?? 0, label: 'RTT' };
     case 'listen':
-      return { histogram: row.listenWait, sampleCount: row.listenWaitSampleCount ?? 0, label: '等待' };
+      return {
+        histogram: row.listenWait,
+        sampleCount: row.listenWaitSampleCount ?? 0,
+        label: '等待',
+      };
     default:
-      return { histogram: row.totalDuration, sampleCount: row.totalDurationSampleCount ?? 0, label: '执行' };
+      return {
+        histogram: row.totalDuration,
+        sampleCount: row.totalDurationSampleCount ?? 0,
+        label: '执行',
+      };
   }
 }
 
-function selectLatencyMetric(row: ActionMetricsTableRow, mode: ActionLatencyMode): SelectedLatencyMetric {
+function selectLatencyMetric(
+  row: ActionMetricsTableRow,
+  mode: ActionLatencyMode,
+): SelectedLatencyMetric {
   if (mode === 'totalDuration') {
-    return { histogram: row.totalDuration, sampleCount: row.totalDurationSampleCount ?? 0, label: '总耗时' };
+    return {
+      histogram: row.totalDuration,
+      sampleCount: row.totalDurationSampleCount ?? 0,
+      label: '总耗时',
+    };
   }
   return selectPrimaryMetric(row);
 }
 
-function latencySortValue(row: ActionMetricsTableRow, mode: ActionLatencyMode, key: keyof ActionHistogramLike): number {
+function latencySortValue(
+  row: ActionMetricsTableRow,
+  mode: ActionLatencyMode,
+  key: keyof ActionHistogramLike,
+): number {
   const selected = selectLatencyMetric(row, mode);
   if (selected.sampleCount <= 0 || !selected.histogram) return -1;
-  return selected.histogram[key];
+  return selected.histogram[key] ?? -1;
 }
 
 function latencyTooltip(mode: ActionLatencyMode) {
@@ -178,14 +269,17 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
   showErrorsColumn = true,
   showCsvExport = false,
   searchWidth,
+  timingDetail = 'rtt',
 }: ActionMetricsTableProps<T>) {
   const [innerMode, setInnerMode] = useState<ActionLatencyMode>('primary');
   const [search, setSearch] = useState('');
   const [actionsOnly, setActionsOnly] = useState(false);
-  const [advancedDiagnostics, setAdvancedDiagnostics] = useState(false);
 
   const mode = latencyMode === undefined ? innerMode : latencyMode;
-  const hasAdvancedDiagnostics = showCanceledColumn || showClientBreakdown;
+  const timingBreakdownFields = useMemo(
+    () => getTimingBreakdownFields(timingDetail),
+    [timingDetail],
+  );
   const setMode = (next: ActionLatencyMode) => {
     if (latencyMode === undefined) setInnerMode(next);
     onLatencyModeChange?.(next);
@@ -208,10 +302,14 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
     }
     return v;
   }
-  const latencyCsv = useCallback((row: T, key: keyof ActionHistogramLike): string => {
-    const sel = selectLatencyMetric(row, mode);
-    return sel.sampleCount > 0 && sel.histogram ? fmtMs(sel.histogram[key]) : '—';
-  }, [mode]);
+  const latencyCsv = useCallback(
+    (row: T, key: keyof ActionHistogramLike): string => {
+      const sel = selectLatencyMetric(row, mode);
+      const value = sel.histogram?.[key];
+      return sel.sampleCount > 0 && value != null ? fmtMs(value) : '—';
+    },
+    [mode],
+  );
 
   const exportCsv = useCallback(() => {
     // 根据当前可见列状态构建 CSV 列定义
@@ -222,7 +320,7 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
       { header: '失败', getValue: (r) => String(r.failureCount) },
       { header: '超时', getValue: (r) => String(r.timeoutCount) },
     ];
-    if (showCanceledColumn && advancedDiagnostics) {
+    if (showCanceledColumn) {
       csvCols.push({ header: '取消', getValue: (r) => String(r.canceledCount ?? 0) });
     }
     // 表格里类别靠动作名的颜色表达，CSV 没有颜色这个通道，只能单出一列，
@@ -238,13 +336,13 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
       { header: 'p99(ms)', getValue: (r) => latencyCsv(r, 'p99Ms') },
       { header: 'max(ms)', getValue: (r) => latencyCsv(r, 'maxMs') },
     );
-    if (showClientBreakdown && advancedDiagnostics) {
-      csvCols.push(
-        { header: '非RTT(ms)', getValue: (r) => fmtMs(r.clientAvgMs ?? 0) },
-        { header: 'encode(ms)', getValue: (r) => fmtMs(r.encodeAvgMs ?? 0) },
-        { header: 'decode(ms)', getValue: (r) => fmtMs(r.decodeAvgMs ?? 0) },
-        { header: 'parse/store(ms)', getValue: (r) => fmtMs(r.parseStoreAvgMs ?? 0) },
-      );
+    if (showClientBreakdown) {
+      for (const field of timingBreakdownFields) {
+        csvCols.push({
+          header: TIMING_FIELD_META[field].title,
+          getValue: (r) => fmtMs(r[field] ?? 0),
+        });
+      }
     }
     if (showBandwidthColumns) {
       csvCols.push(
@@ -261,7 +359,10 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
     // Apdex 只对往返类有意义；其余类别留空而非 0，避免被当成差分。
     csvCols.push({
       header: 'Apdex(RTT)',
-      getValue: (r) => (resolveKind(r) === 'networked' && r.rttApdex != null ? r.rttApdex.toFixed(2) : ''),
+      getValue: (r) =>
+        resolveKind(r) === 'networked' && (r.rttApdexSampleCount ?? 0) > 0 && r.rttApdex != null
+          ? r.rttApdex.toFixed(2)
+          : '',
     });
     // 错误列不导出
 
@@ -277,7 +378,17 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }, [dataSource, mode, advancedDiagnostics, showCanceledColumn, showClientBreakdown, showBandwidthColumns, showExecutingColumn, showQpsColumn, latencyCsv]);
+  }, [
+    dataSource,
+    mode,
+    showCanceledColumn,
+    showClientBreakdown,
+    showBandwidthColumns,
+    showExecutingColumn,
+    showQpsColumn,
+    latencyCsv,
+    timingBreakdownFields,
+  ]);
 
   const latencyTitle = mode === 'totalDuration' ? '总耗时 avg(ms)' : '主指标 avg(ms)';
   const nameWidth = compact ? 160 : 200;
@@ -285,15 +396,26 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
   const latencyWidth = compact ? 64 : 76;
 
   const columns: ColumnsType<T> = useMemo(() => {
-    const latencyValue = (row: T, key: keyof ActionHistogramLike) => latencySortValue(row, mode, key);
+    const latencyValue = (row: T, key: keyof ActionHistogramLike) =>
+      latencySortValue(row, mode, key);
     const renderLatency = (row: T, key: keyof ActionHistogramLike) => {
       const selected = selectLatencyMetric(row, mode);
-      return <span style={NUMERIC_STYLE}>{selected.sampleCount > 0 && selected.histogram ? fmtMs(selected.histogram[key]) : '—'}</span>;
+      const value = selected.histogram?.[key];
+      return (
+        <span style={NUMERIC_STYLE}>
+          {selected.sampleCount > 0 && value != null ? fmtMs(value) : '—'}
+        </span>
+      );
     };
 
     const cols: ColumnsType<T> = [
       {
-        title: '动作', dataIndex: 'name', key: 'name', width: nameWidth, fixed: 'left', ellipsis: true,
+        title: '动作',
+        dataIndex: 'name',
+        key: 'name',
+        width: nameWidth,
+        fixed: 'left',
+        ellipsis: true,
         sorter: (a, b) => a.name.localeCompare(b.name),
         render: (v: string, r) => {
           const isCallback = v.startsWith('callback:');
@@ -301,107 +423,314 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
           // 类别只体现为动作名的颜色，省掉一整列；口径说明并进名字的 tooltip。
           return (
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              {isCallback && <Tag color="orange" style={{ marginInlineEnd: 0 }}>推送</Tag>}
-              <Tooltip title={<>{display}<br />{kindHint(r)}</>} mouseEnterDelay={0.4}>
-                <code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: KIND_META[resolveKind(r)].color }}>{display}</code>
+              {isCallback && (
+                <Tag color="orange" style={{ marginInlineEnd: 0 }}>
+                  推送
+                </Tag>
+              )}
+              <Tooltip
+                title={
+                  <>
+                    {display}
+                    <br />
+                    {kindHint(r)}
+                  </>
+                }
+                mouseEnterDelay={0.4}
+              >
+                <code
+                  style={{
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    color: KIND_META[resolveKind(r)].color,
+                  }}
+                >
+                  {display}
+                </code>
               </Tooltip>
             </div>
           );
         },
       },
-      { title: '样本', dataIndex: 'sampleCount', key: 'sampleCount', width: countWidth, sorter: (a, b) => a.sampleCount - b.sampleCount, defaultSortOrder: 'descend' as const, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> },
-      { title: '成功', dataIndex: 'successCount', key: 'successCount', width: countWidth, sorter: (a, b) => a.successCount - b.successCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: 'var(--color-success)' }}>{v}</span> },
-      { title: '失败', dataIndex: 'failureCount', key: 'failureCount', width: compact ? 52 : 70, sorter: (a, b) => a.failureCount - b.failureCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-error)' : 'var(--text-tertiary)' }}>{v}</span> },
-      { title: '超时', dataIndex: 'timeoutCount', key: 'timeoutCount', width: compact ? 52 : 70, sorter: (a, b) => a.timeoutCount - b.timeoutCount, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: v > 0 ? 'var(--color-orange)' : 'var(--text-tertiary)' }}>{v}</span> },
+      {
+        title: '样本',
+        dataIndex: 'sampleCount',
+        key: 'sampleCount',
+        width: countWidth,
+        sorter: (a, b) => a.sampleCount - b.sampleCount,
+        defaultSortOrder: 'descend' as const,
+        render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span>,
+      },
+      {
+        title: '成功',
+        dataIndex: 'successCount',
+        key: 'successCount',
+        width: countWidth,
+        sorter: (a, b) => a.successCount - b.successCount,
+        render: (v: number) => (
+          <span style={{ ...NUMERIC_STYLE, color: 'var(--color-success)' }}>{v}</span>
+        ),
+      },
+      {
+        title: '失败',
+        dataIndex: 'failureCount',
+        key: 'failureCount',
+        width: compact ? 52 : 70,
+        sorter: (a, b) => a.failureCount - b.failureCount,
+        render: (v: number) => (
+          <span
+            style={{
+              ...NUMERIC_STYLE,
+              color: v > 0 ? 'var(--color-error)' : 'var(--text-tertiary)',
+            }}
+          >
+            {v}
+          </span>
+        ),
+      },
+      {
+        title: '超时',
+        dataIndex: 'timeoutCount',
+        key: 'timeoutCount',
+        width: compact ? 52 : 70,
+        sorter: (a, b) => a.timeoutCount - b.timeoutCount,
+        render: (v: number) => (
+          <span
+            style={{
+              ...NUMERIC_STYLE,
+              color: v > 0 ? 'var(--color-orange)' : 'var(--text-tertiary)',
+            }}
+          >
+            {v}
+          </span>
+        ),
+      },
     ];
 
-    if (showCanceledColumn && advancedDiagnostics) {
-      cols.push({ title: '取消', dataIndex: 'canceledCount', key: 'canceledCount', width: 70, sorter: (a, b) => (a.canceledCount || 0) - (b.canceledCount || 0), render: (v: number | undefined) => <span style={NUMERIC_STYLE}>{typeof v === 'number' ? v : 0}</span> });
+    if (showCanceledColumn) {
+      cols.push({
+        title: '取消',
+        dataIndex: 'canceledCount',
+        key: 'canceledCount',
+        width: 70,
+        sorter: (a, b) => (a.canceledCount || 0) - (b.canceledCount || 0),
+        render: (v: number | undefined) => (
+          <span style={NUMERIC_STYLE}>{typeof v === 'number' ? v : 0}</span>
+        ),
+      });
     }
 
     cols.push(
       {
         title: <Tooltip title={latencyTooltip(mode)}>{latencyTitle}</Tooltip>,
-        key: 'avgMs', width: compact ? 68 : 92,
+        key: 'avgMs',
+        width: compact ? 68 : 92,
         sorter: (a, b) => latencyValue(a, 'avgMs') - latencyValue(b, 'avgMs'),
         render: (_, r) => renderLatency(r, 'avgMs'),
       },
-      { title: 'p50(ms)', key: 'p50Ms', width: latencyWidth, sorter: (a, b) => latencyValue(a, 'p50Ms') - latencyValue(b, 'p50Ms'), render: (_, r) => renderLatency(r, 'p50Ms') },
-      { title: 'p95(ms)', key: 'p95Ms', width: latencyWidth, sorter: (a, b) => latencyValue(a, 'p95Ms') - latencyValue(b, 'p95Ms'), render: (_, r) => renderLatency(r, 'p95Ms') },
-      { title: 'p99(ms)', key: 'p99Ms', width: latencyWidth, sorter: (a, b) => latencyValue(a, 'p99Ms') - latencyValue(b, 'p99Ms'), render: (_, r) => renderLatency(r, 'p99Ms') },
-      { title: 'max(ms)', key: 'maxMs', width: latencyWidth, sorter: (a, b) => latencyValue(a, 'maxMs') - latencyValue(b, 'maxMs'), render: (_, r) => renderLatency(r, 'maxMs') },
+      {
+        title: 'p50(ms)',
+        key: 'p50Ms',
+        width: latencyWidth,
+        sorter: (a, b) => latencyValue(a, 'p50Ms') - latencyValue(b, 'p50Ms'),
+        render: (_, r) => renderLatency(r, 'p50Ms'),
+      },
+      {
+        title: 'p95(ms)',
+        key: 'p95Ms',
+        width: latencyWidth,
+        sorter: (a, b) => latencyValue(a, 'p95Ms') - latencyValue(b, 'p95Ms'),
+        render: (_, r) => renderLatency(r, 'p95Ms'),
+      },
+      {
+        title: 'p99(ms)',
+        key: 'p99Ms',
+        width: latencyWidth,
+        sorter: (a, b) => latencyValue(a, 'p99Ms') - latencyValue(b, 'p99Ms'),
+        render: (_, r) => renderLatency(r, 'p99Ms'),
+      },
+      {
+        title: 'max(ms)',
+        key: 'maxMs',
+        width: latencyWidth,
+        sorter: (a, b) => latencyValue(a, 'maxMs') - latencyValue(b, 'maxMs'),
+        render: (_, r) => renderLatency(r, 'maxMs'),
+      },
     );
 
-    if (showClientBreakdown && advancedDiagnostics) {
-      cols.push(
-        { title: <Tooltip title="非 RTT 平均耗时，约等于动作总耗时扣除已记录 RTT 后的剩余耗时。">非RTT(ms)</Tooltip>, dataIndex: 'clientAvgMs', key: 'clientAvgMs', width: 92, sorter: (a, b) => (a.clientAvgMs || 0) - (b.clientAvgMs || 0), render: (v: number | undefined) => <span style={NUMERIC_STYLE}>{fmtMs(v || 0)}</span> },
-        { title: <Tooltip title="协议编码平均耗时。">encode(ms)</Tooltip>, dataIndex: 'encodeAvgMs', key: 'encodeAvgMs', width: 92, sorter: (a, b) => (a.encodeAvgMs || 0) - (b.encodeAvgMs || 0), render: (v: number | undefined) => <span style={NUMERIC_STYLE}>{fmtMs(v || 0)}</span> },
-        { title: <Tooltip title="收到完整响应帧后的协议解码平均耗时，不计入 RTT。">decode(ms)</Tooltip>, dataIndex: 'decodeAvgMs', key: 'decodeAvgMs', width: 92, sorter: (a, b) => (a.decodeAvgMs || 0) - (b.decodeAvgMs || 0), render: (v: number | undefined) => <span style={NUMERIC_STYLE}>{fmtMs(v || 0)}</span> },
-        { title: <Tooltip title="响应 protobuf 解析与状态写入平均耗时。">parse/store(ms)</Tooltip>, dataIndex: 'parseStoreAvgMs', key: 'parseStoreAvgMs', width: 120, sorter: (a, b) => (a.parseStoreAvgMs || 0) - (b.parseStoreAvgMs || 0), render: (v: number | undefined) => <span style={NUMERIC_STYLE}>{fmtMs(v || 0)}</span> },
-      );
+    if (showClientBreakdown) {
+      for (const field of timingBreakdownFields) {
+        const meta = TIMING_FIELD_META[field];
+        cols.push({
+          title: <Tooltip title={meta.hint}>{meta.title}</Tooltip>,
+          dataIndex: field,
+          key: field,
+          width: meta.width,
+          sorter: (a, b) => (a[field] ?? 0) - (b[field] ?? 0),
+          render: (v: number | undefined) => <span style={NUMERIC_STYLE}>{fmtMs(v ?? 0)}</span>,
+        });
+      }
     }
 
     if (showBandwidthColumns) {
       cols.push(
-        { title: <Tooltip title="平均每次成功发送的字节数">↑发送(均)</Tooltip>, dataIndex: 'avgSendBytes', key: 'avgSendBytes', width: compact ? 72 : 80, sorter: (a, b) => a.avgSendBytes - b.avgSendBytes, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: 'var(--chart-cyan)' }}>{fmtBytes(v)}</span> },
-        { title: <Tooltip title="平均每次成功接收的字节数">↓接收(均)</Tooltip>, dataIndex: 'avgRecvBytes', key: 'avgRecvBytes', width: compact ? 72 : 80, sorter: (a, b) => a.avgRecvBytes - b.avgRecvBytes, render: (v: number) => <span style={{ ...NUMERIC_STYLE, color: 'var(--chart-purple)' }}>{fmtBytes(v)}</span> },
+        {
+          title: <Tooltip title="平均每次成功发送的字节数">↑发送(均)</Tooltip>,
+          dataIndex: 'avgSendBytes',
+          key: 'avgSendBytes',
+          width: compact ? 72 : 80,
+          sorter: (a, b) => a.avgSendBytes - b.avgSendBytes,
+          render: (v: number) => (
+            <span style={{ ...NUMERIC_STYLE, color: 'var(--chart-cyan)' }}>{fmtBytes(v)}</span>
+          ),
+        },
+        {
+          title: <Tooltip title="平均每次成功接收的字节数">↓接收(均)</Tooltip>,
+          dataIndex: 'avgRecvBytes',
+          key: 'avgRecvBytes',
+          width: compact ? 72 : 80,
+          sorter: (a, b) => a.avgRecvBytes - b.avgRecvBytes,
+          render: (v: number) => (
+            <span style={{ ...NUMERIC_STYLE, color: 'var(--chart-purple)' }}>{fmtBytes(v)}</span>
+          ),
+        },
       );
     }
-    if (showExecutingColumn) cols.push({ title: '并发', dataIndex: 'executing', key: 'executing', width: compact ? 52 : 64, sorter: (a, b) => a.executing - b.executing, render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span> });
-    if (showQpsColumn) cols.push({ title: 'QPS', dataIndex: 'avgQps', key: 'avgQps', width: compact ? 60 : 78, sorter: (a, b) => a.avgQps - b.avgQps, render: (v: number) => <span style={NUMERIC_STYLE}>{v.toFixed(1)}</span> });
+    if (showExecutingColumn)
+      cols.push({
+        title: '并发',
+        dataIndex: 'executing',
+        key: 'executing',
+        width: compact ? 52 : 64,
+        sorter: (a, b) => a.executing - b.executing,
+        render: (v: number) => <span style={NUMERIC_STYLE}>{v}</span>,
+      });
+    if (showQpsColumn)
+      cols.push({
+        title: 'QPS',
+        dataIndex: 'avgQps',
+        key: 'avgQps',
+        width: compact ? 60 : 78,
+        sorter: (a, b) => a.avgQps - b.avgQps,
+        render: (v: number) => <span style={NUMERIC_STYLE}>{v.toFixed(1)}</span>,
+      });
 
     // Apdex 只对往返类打分。其余类别走 sampleCount=0 那条分支，渲染成和「无样本」
     // 完全一样的灰底 — 标签：都是"这里没有分"，没必要让读者分辨两种没有。
-    const apdexScore = (r: T) => (resolveKind(r) === 'networked' ? r.rttApdex ?? -1 : -1);
+    const apdexScore = (r: T) =>
+      resolveKind(r) === 'networked' && (r.rttApdexSampleCount ?? 0) > 0 ? (r.rttApdex ?? -1) : -1;
     cols.push({
-      title: <Tooltip title="RTT Apdex，仅往返类适用。监听/发送/本地类没有可比的统一阈值，看各自的主指标分布。">Apdex</Tooltip>,
-      key: 'apdex', width: compact ? 68 : 80,
+      title: (
+        <Tooltip title="RTT Apdex，仅往返类适用。监听/发送/本地类没有可比的统一阈值，看各自的主指标分布。">
+          Apdex
+        </Tooltip>
+      ),
+      key: 'apdex',
+      width: compact ? 68 : 80,
       sorter: (a, b) => apdexScore(a) - apdexScore(b),
       render: (_, r) => {
         const scored = resolveKind(r) === 'networked';
-        return <ApdexCell value={scored ? r.rttApdex : undefined} sampleCount={scored ? r.rttSampleCount ?? 0 : 0} />;
+        return (
+          <ApdexCell
+            value={scored ? r.rttApdex : undefined}
+            sampleCount={scored ? (r.rttApdexSampleCount ?? 0) : 0}
+          />
+        );
       },
     });
 
     if (showErrorsColumn) {
       cols.push({
-        title: '错误', key: 'errors', width: compact ? 52 : 70, fixed: 'right', sorter: (a, b) => (a.errors?.length || 0) - (b.errors?.length || 0),
+        title: '错误',
+        key: 'errors',
+        width: compact ? 52 : 70,
+        fixed: 'right',
+        sorter: (a, b) => (a.errors?.length || 0) - (b.errors?.length || 0),
         render: (_, r) => {
           if (!r.errors?.length) return <span style={{ color: 'var(--text-tertiary)' }}>—</span>;
           return (
             <Popover
               overlayStyle={popupZIndex ? { zIndex: popupZIndex } : undefined}
-              content={(
+              content={
                 <div style={{ maxWidth: 360 }}>
                   {r.errors.map((e) => {
                     const isFramework = e.code < 100;
                     return (
                       <div key={e.code} style={{ marginTop: 3, fontSize: 11, lineHeight: '16px' }}>
-                        <span style={{ color: 'var(--color-error)', fontWeight: 700, fontSize: 10, fontVariantNumeric: 'tabular-nums', marginRight: 6 }}>×{e.count}</span>
-                        <Tag color={isFramework ? 'default' : 'blue'} style={{ fontSize: 10, marginInlineEnd: 4 }}>{isFramework ? '框架' : '业务'}</Tag>
+                        <span
+                          style={{
+                            color: 'var(--color-error)',
+                            fontWeight: 700,
+                            fontSize: 10,
+                            fontVariantNumeric: 'tabular-nums',
+                            marginRight: 6,
+                          }}
+                        >
+                          ×{e.count}
+                        </span>
+                        <Tag
+                          color={isFramework ? 'default' : 'blue'}
+                          style={{ fontSize: 10, marginInlineEnd: 4 }}
+                        >
+                          {isFramework ? '框架' : '业务'}
+                        </Tag>
                         <span style={{ fontWeight: 500 }}>{e.codeName || `#${e.code}`}</span>
-                        {e.msgs.length > 0 && <span style={{ color: 'var(--text-tertiary)', marginLeft: 6 }}>{e.msgs.join('; ')}</span>}
+                        {e.msgs.length > 0 && (
+                          <span style={{ color: 'var(--text-tertiary)', marginLeft: 6 }}>
+                            {e.msgs.join('; ')}
+                          </span>
+                        )}
                       </div>
                     );
                   })}
                 </div>
-              )}
+              }
               title={<span style={{ fontSize: 12 }}>错误明细</span>}
               mouseEnterDelay={0.3}
             >
-              <Tag color="error" style={{ marginInlineEnd: 0, cursor: 'pointer' }}>{r.errors.length}</Tag>
+              <Tag color="error" style={{ marginInlineEnd: 0, cursor: 'pointer' }}>
+                {r.errors.length}
+              </Tag>
             </Popover>
           );
         },
       });
     }
     return cols;
-  }, [advancedDiagnostics, compact, latencyTitle, latencyWidth, mode, nameWidth, countWidth, popupZIndex, showBandwidthColumns, showCanceledColumn, showClientBreakdown, showErrorsColumn, showExecutingColumn, showQpsColumn]);
+  }, [
+    compact,
+    latencyTitle,
+    latencyWidth,
+    mode,
+    nameWidth,
+    countWidth,
+    popupZIndex,
+    showBandwidthColumns,
+    showCanceledColumn,
+    showClientBreakdown,
+    showErrorsColumn,
+    showExecutingColumn,
+    showQpsColumn,
+    timingBreakdownFields,
+  ]);
 
   return (
-    <div className="action-metrics-table" style={{ width: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div
+      className="action-metrics-table"
+      style={{ width: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 8 }}
+    >
       {showToolbar && (
-        <div className="action-metrics-table__toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <div
+          className="action-metrics-table__toolbar"
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 8,
+          }}
+        >
           <Space size={12} wrap>
             <Input.Search
               placeholder="按动作名搜索"
@@ -415,25 +744,28 @@ export function ActionMetricsTable<T extends ActionMetricsTableRow>({
               <Segmented<ActionLatencyMode>
                 size={size === 'small' ? 'small' : 'middle'}
                 value={mode}
-                options={[{ label: '主指标', value: 'primary' }, { label: '总耗时', value: 'totalDuration' }]}
+                options={[
+                  { label: '主指标', value: 'primary' },
+                  { label: '总耗时', value: 'totalDuration' },
+                ]}
                 onChange={(v) => setMode(v)}
               />
             )}
-            <span style={{ fontSize: compact ? 11 : 12, color: 'var(--text-tertiary)' }}>{dataSource.length} 条</span>
+            <span style={{ fontSize: compact ? 11 : 12, color: 'var(--text-tertiary)' }}>
+              {dataSource.length} 条
+            </span>
           </Space>
           <Space size={12}>
             <Space size={6}>
-              <span style={{ fontSize: compact ? 11 : 12, color: 'var(--text-secondary)' }}>隐藏推送</span>
+              <span style={{ fontSize: compact ? 11 : 12, color: 'var(--text-secondary)' }}>
+                隐藏推送
+              </span>
               <Switch checked={actionsOnly} onChange={setActionsOnly} size="small" />
             </Space>
-            {hasAdvancedDiagnostics && (
-              <Space size={6}>
-                <span style={{ fontSize: compact ? 11 : 12, color: 'var(--text-secondary)' }}>高级诊断</span>
-                <Switch checked={advancedDiagnostics} onChange={setAdvancedDiagnostics} size="small" />
-              </Space>
-            )}
             {showCsvExport && (
-              <Button type="text" size="small" icon={<DownloadOutlined />} onClick={exportCsv}>导出 CSV</Button>
+              <Button type="text" size="small" icon={<DownloadOutlined />} onClick={exportCsv}>
+                导出 CSV
+              </Button>
             )}
           </Space>
         </div>

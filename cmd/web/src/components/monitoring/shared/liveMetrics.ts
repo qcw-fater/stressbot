@@ -3,6 +3,7 @@ import type {
   ClusterSystemSnapshot,
   RampUpSnapshot,
   StressSnapshot,
+  TimingDetailLevel,
 } from '@/types/api';
 
 export type NodeTone = 'idle' | 'busy' | 'unhealthy' | 'offline' | 'stale';
@@ -20,6 +21,7 @@ export interface LiveNodeItem {
 }
 
 export interface LivePanelModel {
+  timingDetail: TimingDetailLevel;
   load: {
     runningRobots: number;
     startedRobots: number;
@@ -32,8 +34,8 @@ export interface LivePanelModel {
     intervalQps: number | null;
     lifetimeQps: number | null;
     totalActions: number;
-    sendKBps: number | null;
-    recvKBps: number | null;
+    actionSendBytesPerSec: number | null;
+    actionRecvBytesPerSec: number | null;
   };
   quality: {
     sampleCount: number;
@@ -53,30 +55,51 @@ export interface LivePanelModel {
     totalDurationAvgMs: number | null;
     totalDurationP95Ms: number | null;
     totalDurationP99Ms: number | null;
-    clientAvgMs: number | null;
+    nonRTTAvgMs: number | null;
   };
   connections: {
     active: number;
     established: number;
+    closed: number;
     failed: number;
     dropped: number;
   };
   resources: {
-    avgCpuPercent: number | null;
-    maxCpuPercent: number | null;
-    avgMemPercent: number | null;
-    maxMemPercent: number | null;
-    hotCpuNode?: string;
-    hotMemNode?: string;
-    goroutines: number;
-    threads: number;
-    fds: number;
+    avgHostCpuPercent: number | null;
+    maxHostCpuPercent: number | null;
+    avgHostMemPercent: number | null;
+    maxHostMemPercent: number | null;
+    hotHostCpuNode?: string;
+    hotHostMemNode?: string;
+    hostSendBytesPerSec: number | null;
+    hostRecvBytesPerSec: number | null;
+    hostSendReportingAgents: number;
+    hostRecvReportingAgents: number;
+    avgProcessCpuPercent: number | null;
+    maxProcessCpuPercent: number | null;
+    processCpuReportingAgents: number;
+    totalProcessRssBytes: number | null;
+    maxProcessRssBytes: number | null;
+    processRssReportingAgents: number;
+    maxProcessFds: number | null;
+    processFdsReportingAgents: number;
+    hotProcessCpuNode?: string;
+    hotProcessRssNode?: string;
+    hotProcessFdsNode?: string;
+    totalProcessGoroutines: number | null;
+    totalProcessThreads: number | null;
+    totalProcessFds: number | null;
   };
   nodes: {
-    reporting: number;
+    stressReporting: number;
     assigned: number;
+    resourceReporting: number;
+    resourceScope: number;
+    resourceStale: number;
+    resourceMissing: number;
     online: number;
     total: number;
+    unhealthy: number;
     offline: number;
     capacityCurrent: number;
     capacityMax: number;
@@ -87,7 +110,6 @@ export interface LivePanelModel {
 export interface BuildLivePanelModelInput {
   latestStress: StressSnapshot | null;
   latestSystem: ClusterSystemSnapshot | null;
-  stressHistory: StressSnapshot[];
   agents: AgentBrief[];
   reportingAgents: number;
   totalAgents: number;
@@ -97,12 +119,13 @@ export interface BuildLivePanelModelInput {
 
 export function buildLivePanelModel(input: BuildLivePanelModelInput): LivePanelModel {
   const stress = input.latestStress;
-  const actions = stress?.actions ?? [];
   const robots = stress?.robots ?? { started: 0, running: 0, stopped: 0, errored: 0 };
-  const connections = stress?.connections ?? { established: 0, failed: 0, dropped: 0 };
-  const quality = deriveQuality(actions);
+  const connections = stress?.connections ?? { established: 0, active: 0, closed: 0, failed: 0, dropped: 0 };
+  const liveSummary = stress?.window?.summary;
+  const quality = deriveQuality(liveSummary);
 
   return {
+    timingDetail: stress?.timingDetail ?? 'rtt',
     load: {
       runningRobots: robots.running,
       startedRobots: robots.started,
@@ -112,17 +135,22 @@ export function buildLivePanelModel(input: BuildLivePanelModelInput): LivePanelM
       rampUp: deriveRampUp(stress?.rampUp),
     },
     throughput: {
-      intervalQps: deriveIntervalQps(input.stressHistory),
-      lifetimeQps: stress && stress.uptimeSeconds > 0 ? stress.totalActions / stress.uptimeSeconds : null,
+      intervalQps: liveSummary ? finiteOrNull(liveSummary.avgQps) : null,
+      lifetimeQps: stress ? finiteOrNull(stress.summary.avgQps) : null,
       totalActions: stress?.totalActions ?? 0,
-      sendKBps: stress?.bandwidth ? finiteOrNull(stress.bandwidth.sendMBps * 1024) : null,
-      recvKBps: stress?.bandwidth ? finiteOrNull(stress.bandwidth.recvMBps * 1024) : null,
+      actionSendBytesPerSec: stress?.window
+        ? finiteOrNull(stress.window.bandwidth.sendMBps * 1024 * 1024)
+        : null,
+      actionRecvBytesPerSec: stress?.window
+        ? finiteOrNull(stress.window.bandwidth.recvMBps * 1024 * 1024)
+        : null,
     },
     quality,
-    latency: deriveLatency(actions),
+    latency: deriveLatency(liveSummary),
     connections: {
-      active: Math.max(0, connections.established - connections.dropped),
+      active: connections.active,
       established: connections.established,
+      closed: connections.closed,
       failed: connections.failed,
       dropped: connections.dropped,
     },
@@ -131,121 +159,71 @@ export function buildLivePanelModel(input: BuildLivePanelModelInput): LivePanelM
   };
 }
 
-export function deriveIntervalQps(history: StressSnapshot[]): number | null {
-  if (history.length < 2) return null;
-  const prev = history[history.length - 2];
-  const next = history[history.length - 1];
-  const deltaActions = next.totalActions - prev.totalActions;
-  const deltaMs = Date.parse(next.timestamp) - Date.parse(prev.timestamp);
-  if (!Number.isFinite(deltaActions) || !Number.isFinite(deltaMs) || deltaActions < 0 || deltaMs <= 0) return null;
-  return deltaActions / (deltaMs / 1000);
-}
-
-function deriveQuality(actions: StressSnapshot['actions']): LivePanelModel['quality'] {
-  let sampleCount = 0;
-  let successCount = 0;
-  let failureCount = 0;
-  let timeoutCount = 0;
-  let canceledCount = 0;
-  let executing = 0;
-  let rttSamples = 0;
-  let rttApdex = 0;
-
-  for (const action of actions) {
-    const samples = safe(action.sampleCount);
-    sampleCount += samples;
-    successCount += safe(action.successCount);
-    failureCount += safe(action.failureCount);
-    timeoutCount += safe(action.timeoutCount);
-    canceledCount += safe(action.canceledCount);
-    executing += safe(action.executing);
-
-    // 只有往返类贡献 Apdex：其余类别没有可比的统一阈值，掺进来会让总分
-    // 随「动作构成」漂移，而不是随服务端表现变化。
-    const rttCount = safe(action.rttSampleCount);
-    rttSamples += rttCount;
-    rttApdex += safe(action.rttApdex) * rttCount;
-  }
-
+function deriveQuality(summary: StressSnapshot['summary'] | undefined): LivePanelModel['quality'] {
   return {
-    sampleCount,
-    successCount,
-    failureCount,
-    timeoutCount,
-    canceledCount,
-    executing,
-    successRate: sampleCount > 0 ? successCount / sampleCount : null,
-    rttApdex: rttSamples > 0 ? rttApdex / rttSamples : null,
+    sampleCount: safe(summary?.sampleCount),
+    successCount: safe(summary?.successCount),
+    failureCount: safe(summary?.failureCount),
+    timeoutCount: safe(summary?.timeoutCount),
+    canceledCount: safe(summary?.canceledCount),
+    executing: safe(summary?.executing),
+    successRate: safe(summary?.sampleCount) > 0 ? safe(summary?.successRate) : null,
+    rttApdex: safe(summary?.rttApdexSampleCount) > 0 ? safe(summary?.rttApdex) : null,
   };
 }
 
-function deriveLatency(actions: StressSnapshot['actions']): LivePanelModel['latency'] {
-  let rttSamples = 0;
-  let rttAvg = 0;
-  let rttP95 = 0;
-  let rttP99 = 0;
-  let totalDurationSamples = 0;
-  let totalDurationAvg = 0;
-  let totalDurationP95 = 0;
-  let totalDurationP99 = 0;
-  let clientSamples = 0;
-  let clientAvg = 0;
-
-  for (const action of actions) {
-    const rttCount = safe(action.rttSampleCount);
-    rttSamples += rttCount;
-    rttAvg += safe(action.rtt?.avgMs) * rttCount;
-    rttP95 += safe(action.rtt?.p95Ms) * rttCount;
-    rttP99 += safe(action.rtt?.p99Ms) * rttCount;
-
-    const totalCount = safe(action.totalDurationSampleCount);
-    totalDurationSamples += totalCount;
-    totalDurationAvg += safe(action.totalDuration?.avgMs) * totalCount;
-    totalDurationP95 += safe(action.totalDuration?.p95Ms) * totalCount;
-    totalDurationP99 += safe(action.totalDuration?.p99Ms) * totalCount;
-
-    const samples = safe(action.sampleCount);
-    clientSamples += samples;
-    clientAvg += safe(action.clientAvgMs) * samples;
-  }
-
+function deriveLatency(summary: StressSnapshot['summary'] | undefined): LivePanelModel['latency'] {
+  const hasRTT = safe(summary?.rtt?.count) > 0;
+  const hasTotal = safe(summary?.totalDuration?.count) > 0;
   return {
-    rttAvgMs: rttSamples > 0 ? rttAvg / rttSamples : null,
-    rttP95Ms: rttSamples > 0 ? rttP95 / rttSamples : null,
-    rttP99Ms: rttSamples > 0 ? rttP99 / rttSamples : null,
-    totalDurationAvgMs: totalDurationSamples > 0 ? totalDurationAvg / totalDurationSamples : null,
-    totalDurationP95Ms: totalDurationSamples > 0 ? totalDurationP95 / totalDurationSamples : null,
-    totalDurationP99Ms: totalDurationSamples > 0 ? totalDurationP99 / totalDurationSamples : null,
-    clientAvgMs: clientSamples > 0 ? clientAvg / clientSamples : null,
+    rttAvgMs: hasRTT ? finiteOrNull(summary?.rtt.avgMs) : null,
+    rttP95Ms: hasRTT ? finiteOrNull(summary?.rtt.p95Ms) : null,
+    rttP99Ms: hasRTT ? finiteOrNull(summary?.rtt.p99Ms) : null,
+    totalDurationAvgMs: hasTotal ? finiteOrNull(summary?.totalDuration.avgMs) : null,
+    totalDurationP95Ms: hasTotal ? finiteOrNull(summary?.totalDuration.p95Ms) : null,
+    totalDurationP99Ms: hasTotal ? finiteOrNull(summary?.totalDuration.p99Ms) : null,
+    nonRTTAvgMs: safe(summary?.clientCostCount) > 0 ? finiteOrNull(summary?.nonRTTAvgMs) : null,
   };
 }
 
 function deriveNodes(input: BuildLivePanelModelInput): LivePanelModel['nodes'] {
-  const online = input.agents.filter((a) => a.status !== 'offline').length;
+  const system = input.latestSystem;
+  const online = system
+    ? safe(system.onlineCount)
+    : input.agents.filter((a) => a.status === 'idle' || a.status === 'busy').length;
   const capacityCurrent = input.agents.reduce((sum, a) => sum + safe(a.currentBots), 0);
   const capacityMax = input.agents.reduce((sum, a) => sum + safe(a.maxBots), 0);
 
   const items = input.agents.map<LiveNodeItem>((agent) => {
-    const stale = isStale(agent.stressUpdatedAt) || isStale(agent.systemUpdatedAt);
+    const stale = agent.systemStale === true;
     return {
       id: agent.agentId,
       name: agent.name || agent.agentId,
       status: agent.status,
       currentBots: safe(agent.currentBots),
       maxBots: safe(agent.maxBots),
-      cpuPercent: finiteOrNull(agent.cpuPercent),
-      memPercent: finiteOrNull(agent.memPercent),
+      cpuPercent: finiteOrNull(agent.hostCpuPercent),
+      memPercent: finiteOrNull(agent.hostMemPercent),
       updatedAt: agent.systemUpdatedAt ?? agent.stressUpdatedAt ?? agent.lastHeartbeatAt,
       tone: stale && agent.status !== 'offline' ? 'stale' : normalizeNodeTone(agent.status),
     };
   });
 
   return {
-    reporting: input.reportingAgents,
-    assigned: input.assignedAgents,
+    stressReporting: safe(input.reportingAgents),
+    assigned: safe(input.assignedAgents),
+    resourceReporting: safe(system?.reportingAgents),
+    resourceScope: safe(system?.agentCount),
+    resourceStale: safe(system?.staleAgents),
+    resourceMissing: safe(system?.missingAgents),
     online,
-    total: input.agents.length || input.totalAgents,
-    offline: input.offlineAgents || input.agents.filter((a) => a.status === 'offline').length,
+    total: system ? safe(system.agentCount) : input.agents.length || safe(input.totalAgents),
+    unhealthy: system
+      ? safe(system.unhealthyCount)
+      : input.agents.filter((a) => a.status === 'unhealthy').length,
+    offline: system
+      ? safe(system.offlineCount)
+      : safe(input.offlineAgents) || input.agents.filter((a) => a.status === 'offline').length,
     capacityCurrent,
     capacityMax,
     items,
@@ -254,15 +232,30 @@ function deriveNodes(input: BuildLivePanelModelInput): LivePanelModel['nodes'] {
 
 function deriveResources(system: ClusterSystemSnapshot | null): LivePanelModel['resources'] {
   return {
-    avgCpuPercent: finiteOrNull(system?.avgCpuPercent),
-    maxCpuPercent: finiteOrNull(system?.maxCpuPercent),
-    avgMemPercent: finiteOrNull(system?.avgMemPercent),
-    maxMemPercent: finiteOrNull(system?.maxMemPercent),
-    hotCpuNode: system?.hotAgentName,
-    hotMemNode: system?.hotMemAgentName,
-    goroutines: safe(system?.totalGoroutines),
-    threads: safe(system?.totalThreads),
-    fds: safe(system?.totalFds),
+    avgHostCpuPercent: finiteOrNull(system?.avgHostCpuPercent),
+    maxHostCpuPercent: finiteOrNull(system?.maxHostCpuPercent),
+    avgHostMemPercent: finiteOrNull(system?.avgHostMemPercent),
+    maxHostMemPercent: finiteOrNull(system?.maxHostMemPercent),
+    hotHostCpuNode: system?.hotHostCpuAgentName,
+    hotHostMemNode: system?.hotHostMemAgentName,
+    hostSendBytesPerSec: finiteOrNull(system?.totalHostNetSendBytesPerSec),
+    hostRecvBytesPerSec: finiteOrNull(system?.totalHostNetRecvBytesPerSec),
+    hostSendReportingAgents: safe(system?.hostNetSendReportingAgents),
+    hostRecvReportingAgents: safe(system?.hostNetRecvReportingAgents),
+    avgProcessCpuPercent: finiteOrNull(system?.avgProcessCpuPercent),
+    maxProcessCpuPercent: finiteOrNull(system?.maxProcessCpuPercent),
+    processCpuReportingAgents: safe(system?.processCpuReportingAgents),
+    totalProcessRssBytes: finiteOrNull(system?.totalProcessRssBytes),
+    maxProcessRssBytes: finiteOrNull(system?.maxProcessRssBytes),
+    processRssReportingAgents: safe(system?.processRssReportingAgents),
+    maxProcessFds: finiteOrNull(system?.maxProcessFds),
+    processFdsReportingAgents: safe(system?.processFdsReportingAgents),
+    hotProcessCpuNode: system?.hotProcessCpuAgentName,
+    hotProcessRssNode: system?.hotProcessRssAgentName,
+    hotProcessFdsNode: system?.hotProcessFdsAgentName,
+    totalProcessGoroutines: finiteOrNull(system?.totalProcessGoroutines),
+    totalProcessThreads: finiteOrNull(system?.totalProcessThreads),
+    totalProcessFds: finiteOrNull(system?.totalProcessFds),
   };
 }
 
@@ -279,13 +272,6 @@ function normalizeNodeTone(status: string): NodeTone {
   if (status === 'unhealthy') return 'unhealthy';
   if (status === 'busy') return 'busy';
   return 'idle';
-}
-
-function isStale(value?: string): boolean {
-  if (!value) return false;
-  const ts = Date.parse(value);
-  if (!Number.isFinite(ts)) return false;
-  return Date.now() - ts > 30_000;
 }
 
 function finiteOrNull(value: number | null | undefined): number | null {

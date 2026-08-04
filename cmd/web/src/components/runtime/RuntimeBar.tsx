@@ -28,6 +28,7 @@ import {
   FileTextOutlined,
   HistoryOutlined,
   EyeOutlined,
+  LoadingOutlined,
   PlayCircleOutlined,
   SettingOutlined,
   StopOutlined,
@@ -99,6 +100,7 @@ export function RuntimeBar({
     detachedActiveTask,
     ownedTaskId,
     agents,
+    agentsLoaded,
     connectionLost,
     agentEvents,
   } = useRuntimeStore(
@@ -108,6 +110,7 @@ export function RuntimeBar({
       detachedActiveTask: s.detachedActiveTask,
       ownedTaskId: s.ownedTaskId,
       agents: s.agents,
+      agentsLoaded: s.agentsLoaded,
       connectionLost: s.connectionLost,
       agentEvents: s.agentEvents,
     })),
@@ -138,7 +141,13 @@ export function RuntimeBar({
     .filter((a) => a.status !== 'offline')
     .reduce((sum, a) => sum + a.maxBots, 0);
   const startDisabled = onlineAgents === 0;
-  const startDisabledTip = onlineAgents === 0 ? '没有在线的节点，无法启动' : '';
+  // agentsLoaded=false（首屏未回包）时 onlineAgents 也是 0，但此刻是「还不知道」而非「没有节点」，
+  // 提示文案需区分，避免误导成「没有在线的节点」。
+  const startDisabledTip = !agentsLoaded
+    ? '正在获取节点状态…'
+    : onlineAgents === 0
+      ? '没有在线的节点，无法启动'
+      : '';
   const modeIcon = debugMode ? <BugOutlined /> : <CheckCircleOutlined />;
   const modeText = debugMode ? '调试' : '测试';
   const modeColor = debugMode ? 'var(--mode-debug-color)' : 'var(--mode-test-color)';
@@ -284,7 +293,12 @@ export function RuntimeBar({
       {connectionLost && <Tag color="error">服务器连接异常</Tag>}
 
       {/* === 状态徽章组 === */}
-      {mode === 'edit' && (
+      {/* 容量徽章三态（agents===[] 无法区分「还没拿到」与「拿到了确实空」，故用 agentsLoaded 显式区分）：
+          - connectionLost：隐藏，红牌「服务器连接异常」已表明状态未知；
+          - 未断连但 agentsLoaded=false（首屏/刷新后尚未收到任何回包）：显示「连接中…」，
+            不能把"还没拿到数据"显示成权威的「在线 0 · 总容量 0」；
+          - agentsLoaded=true：显示真实在线/总容量。 */}
+      {mode === 'edit' && !connectionLost && agentsLoaded && (
         <Tooltip title={`在线节点 ${onlineAgents} · 总容量 ${totalCapacity}`}>
           <Tag
             icon={<ThunderboltOutlined />}
@@ -294,6 +308,11 @@ export function RuntimeBar({
             在线 {onlineAgents} · 总容量 {totalCapacity}
           </Tag>
         </Tooltip>
+      )}
+      {mode === 'edit' && !connectionLost && !agentsLoaded && (
+        <Tag icon={<LoadingOutlined />} color="default" style={{ margin: 0 }}>
+          连接中…
+        </Tag>
       )}
       {mode === 'edit' && detachedActiveTask && (
         <Space size={4}>

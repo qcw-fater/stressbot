@@ -106,6 +106,25 @@ func TestInitMySQLSchemaReturnsCreateTableError(t *testing.T) {
 	}
 }
 
+func TestTimeseriesDDLContainsWindowAccuracyContract(t *testing.T) {
+	normalized := strings.ToLower(strings.Join(strings.Fields(ddlTaskTimeseries), " "))
+	for _, fragment := range []string{
+		"window_from datetime(6) not null",
+		"window_to datetime(6) not null",
+		"history_batch_token binary(32) not null",
+		"sample_count bigint not null",
+		"rtt_p50_ms double null",
+		"rtt_p90_ms double null",
+		"active_connections bigint null",
+		"net_send_bytes_per_sec double null",
+		"unique key uq_task_history_batch (task_id, history_batch_token)",
+	} {
+		if !strings.Contains(normalized, fragment) {
+			t.Errorf("task_timeseries DDL missing %q", fragment)
+		}
+	}
+}
+
 func TestTaskConfigArchiveUpsertUpdatesEveryConfigColumn(t *testing.T) {
 	normalized := strings.ToLower(strings.Join(strings.Fields(upsertTaskConfigArchiveSQL), " "))
 	for _, column := range []string{

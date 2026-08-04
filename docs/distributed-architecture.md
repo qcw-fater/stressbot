@@ -551,35 +551,26 @@ type StressAggregate struct {
 | 机器人状态（started/running/stopped/errored） | **求和** |
 | 连接指标（established/failed/dropped） | **求和** |
 | 带宽（sendBytes/recvBytes） | **求和** |
-| 延迟直方图 | **合并桶计数** -> 重算百分位 |
+| 延迟直方图 | **合并 DDSketch** -> 重算百分位 |
 | Apdex | 用合并后的 satisfied/tolerating **重新计算** |
 | 错误分布 | 相同 `code` 的计数**相加**，Messages 取并集去重（上限 5 条） |
 
 ### 7.4 延迟直方图
 
-`LatencyHistogram` 使用 **16 个固定桶**，桶边界（毫秒）：
-
-```
-[0,1) [1,2) [2,5) [5,10) [10,20) [20,50) [50,100) [100,200)
-[200,500) [500,1000) [1000,2000) [2000,5000) [5000,10000)
-[10000,30000) [30000,60000) [60000,+inf)
-```
-
-**HistogramSnapshot** 新增两个 `omitempty` 字段支持分布式合并：
+`LatencyHistogram` 使用 DataDog DDSketch，相对精度为 1%，每个 store 最多 2048 bins。**HistogramSnapshot** 的内部合并结构为：
 
 ```go
 type HistogramSnapshot struct {
     Count int64   `json:"count"`
-    MinMs float64 `json:"minMs"`
-    MaxMs float64 `json:"maxMs"`
-    AvgMs float64 `json:"avgMs"`
-    P50Ms float64 `json:"p50Ms"`
-    P90Ms float64 `json:"p90Ms"`
-    P95Ms float64 `json:"p95Ms"`
-    P99Ms float64 `json:"p99Ms"`
-
-    SumNs        int64   `json:"sumNs,omitempty"`        // 延迟总和（纳秒）
-    BucketCounts []int64 `json:"bucketCounts,omitempty"` // 16 个桶的计数
+    MinMs *float64 `json:"minMs"`
+    MaxMs *float64 `json:"maxMs"`
+    AvgMs *float64 `json:"avgMs"`
+    P50Ms *float64 `json:"p50Ms"`
+    P90Ms *float64 `json:"p90Ms"`
+    P95Ms *float64 `json:"p95Ms"`
+    P99Ms *float64 `json:"p99Ms"`
+    SumNs int64    `json:"sumNs,omitempty"`
+    Sketch []byte  `json:"sketch,omitempty"`
 }
 ```
 
@@ -587,11 +578,11 @@ type HistogramSnapshot struct {
 
 1. 合并各快照的 `Count`、`SumNs`
 2. 取全局 Min/Max
-3. 对应桶计数相加
-4. 用合并后的桶计数通过 `percentileFromBuckets`（前缀和 + 线性插值）重算 P50/P90/P95/P99
+3. 严格校验并合并 DDSketch
+4. 从合并后的 sketch 重算 P50/P90/P95/P99
 5. 用合并后的 `SumNs / Count / 1e6` 计算 AvgMs
 
-**精度保证**：所有 Agent 使用相同的 16 个固定桶，合并桶计数后百分位精度与单节点一致。
+**精度保证**：所有 Agent 使用相同的 DDSketch 配置，分布式合并保持 1% 相对精度；Count/Sum/Min/Max 仍是精确值。空分布的展示字段为 null。
 
 ### 7.5 CollectorSnapshot 合并
 

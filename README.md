@@ -1117,20 +1117,23 @@ RecordAction(name, result, timing, wallClock, sendBytes, recvBytes, err)
 
 ### 延迟直方图
 
-16 个桶（由 15 个上界切点定义）：`1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 30000, 60000` ms，末桶为 `>60000ms` 溢出。
+延迟分布使用 DataDog DDSketch：相对精度 1%，每个分布最多 2048 个 bin。`count/sum/min/max` 精确保存，P50/P90/P95/P99 从 sketch 计算；Agent、时间窗口和跨动作汇总都先合并 sketch 再计算分位数，不平均各节点的 P99。
 
-百分位：P50 / P90 / P95 / P99。
+内部 Agent/Admin 报告携带 sketch 字节，公共 HTTP 与历史详情只暴露计算结果。空分布的 min/max/avg/P50/P90/P95/P99 为 `null`，不能解释成 0ms。
 
 ### Apdex 评分
 
-- 当前主指标为 **RTT Apdex**，基于有完整响应帧且 `WireRTT > 0` 的网络 RTT 样本计算。
+- 当前主指标为 **RTT Apdex**，只评价实际发起过 request-response 的 `networked` 动作。
 - `RTT < T` 计为满意，`T <= RTT < 4T` 计为容忍，`RTT >= 4T` 计为不满意。
-- 分母为 RTT 样本数；纯客户端动作、超时、发送失败、取消且未收到响应帧的分支不进入 RTT Apdex 分母。
+- 分母 `rttApdexSampleCount = rttSampleCount + rttFailedCount`：有完整响应帧的请求按真实 RTT 打分；无响应帧的失败请求仍进入分母并记为 frustrated，但不进入 RTT 直方图。
+- 监听、单向发送和本地动作没有统一可比阈值，不参与 Apdex；总耗时只作诊断。
 - T 阈值通过 `monitor.apdexThresholdMs` 配置（默认 100ms）。
+
+`monitor.timingDetail` 与 Apdex 算法无关，它只控制额外的客户端阶段计时开销：`rtt`（默认，RTT + 发送）、`codec`（追加编码/解码）、`full`（再追加构建、排队、分发等待、解析/状态写入）。默认 `rtt` 下 Apdex 仍完整计算。
 
 ## 分布式聚合
 
-`MergeSnapshots`：跨 Agent 计数求和 + 直方图合并 + 百分位重算 + 错误合并。
+`MergeSnapshots`：跨 Agent 计数求和 + 直方图合并 + 百分位重算 + 错误合并。`CollectorSnapshot.summary` 是跨动作总指标的唯一来源；实时页和历史采样不再平均单动作 Apdex/P95/P99。分布式 `timingDetail` 取所有节点实际具备的最低采集级别。
 
 ### 错误码体系
 
@@ -1153,7 +1156,7 @@ RecordAction(name, result, timing, wallClock, sendBytes, recvBytes, err)
 | 51–60 | Lua 层 | `LuaNotInit` / `LuaNoScript` / `LuaExecFailed` / `LuaScriptCheck` |
 | 61–70 | 回调层 | `CallbackLua` / `CallbackParse` |
 
-监控错误分布按 `code` 单维聚合，不再按消息字符串。前端 `ErrorsTab` 按 `code < 100` 推导"框架"/"业务"标签展示，业务码可通过共享 `errors.json` 映射为可读描述。
+监控错误分布按 `code` 单维聚合，不再按消息字符串。前端动作表的错误明细按 `code < 100` 推导"框架"/"业务"标签，业务码可通过共享 `errors.json` 映射为可读描述。
 
 #### errors.json 码段契约
 
@@ -1164,9 +1167,10 @@ RecordAction(name, result, timing, wallClock, sendBytes, recvBytes, err)
 
 ## 前端监控面板
 
-- **实时指标**（MonitorDock）：动作表 — 成功率 / 延迟 / Apdex / QPS / 错误分布
+- **实时指标**（MonitorDock）：顶部总览直接展示后端 `summary`；动作表展示成功率 / 主指标分布 / Apdex / QPS / 错误分布
+- **耗时拆分**：按快照 `timingDetail` 只显示实际采集的客户端阶段，未采集字段不伪装成 0
 - **系统资源**（SystemTab）：CPU / MEM 仪表盘 + goroutine + 网络
-- **趋势图**（TrendsTab）：时序变化
+- **历史趋势**：由 Admin Sampler 直接持久化后端 `summary` 中的 Apdex 和合并分位数
 
 ## 导出
 

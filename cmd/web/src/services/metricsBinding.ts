@@ -12,7 +12,7 @@
  * 与 jsonToFlow 内 React Flow 节点 ID 命名保持一致。
  */
 
-import type { ActionMetric, HistoryActionMetric, StressSnapshot } from '@/types/api';
+import type { ActionMetric, StressSnapshot } from '@/types/api';
 import type { ListenDef } from '@/types/listen';
 import type { FlowNode } from '@/types/flow';
 
@@ -81,29 +81,4 @@ export function classifyApdex(apdex: number | undefined): ApdexLevel {
   if (apdex >= 0.7) return 'fair';
   if (apdex >= 0.5) return 'poor';
   return 'danger';
-}
-
-/** 加权计算一组动作的聚合 Apdex 和成功率。
- *
- *  Apdex 只由往返类贡献，按 rttSampleCount 加权。监听 / 发送 / 本地类不参与：
- *  它们没有可比的统一阈值，掺进来只会让总分随「动作构成」漂移而非随服务端表现变化。
- *  成功率权重仍用 sampleCount，反映整体请求成功率。 */
-export function computeWeightedMetrics(actions: Array<ActionMetric | HistoryActionMetric>) {
-  let totalSamples = 0;
-  let apdexWeight = 0;
-  let weightedApdex = 0;
-  let weightedSuccess = 0;
-  for (const a of actions) {
-    totalSamples += a.sampleCount;
-    weightedSuccess += a.successRate * a.sampleCount;
-    if (a.rttSampleCount > 0) {
-      apdexWeight += a.rttSampleCount;
-      weightedApdex += a.rttApdex * a.rttSampleCount;
-    }
-  }
-  return {
-    totalSamples,
-    apdex: apdexWeight > 0 ? weightedApdex / apdexWeight : 0,
-    successRate: totalSamples > 0 ? weightedSuccess / totalSamples : 0,
-  };
 }

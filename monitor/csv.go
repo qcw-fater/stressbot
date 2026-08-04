@@ -51,14 +51,14 @@ func ExportCSV(c *MetricsCollector, path string) error {
 			fmt.Sprintf("%d", a.FailureCount),
 			fmt.Sprintf("%d", a.RTTSampleCount),
 			fmt.Sprintf("%.4f", a.SuccessRate),
-			fmt.Sprintf("%.2f", a.RTT.AvgMs),
+			formatHistogramCSV(a.RTT.AvgMs),
 			fmt.Sprintf("%.2f", a.ClientAvgMs),
-			fmt.Sprintf("%.2f", a.RTT.MinMs),
-			fmt.Sprintf("%.2f", a.RTT.MaxMs),
-			fmt.Sprintf("%.2f", a.RTT.P50Ms),
-			fmt.Sprintf("%.2f", a.RTT.P90Ms),
-			fmt.Sprintf("%.2f", a.RTT.P95Ms),
-			fmt.Sprintf("%.2f", a.RTT.P99Ms),
+			formatHistogramCSV(a.RTT.MinMs),
+			formatHistogramCSV(a.RTT.MaxMs),
+			formatHistogramCSV(a.RTT.P50Ms),
+			formatHistogramCSV(a.RTT.P90Ms),
+			formatHistogramCSV(a.RTT.P95Ms),
+			formatHistogramCSV(a.RTT.P99Ms),
 			fmt.Sprintf("%.4f", a.RTTApdex),
 			fmt.Sprintf("%.1f", a.AvgSendBytes),
 			fmt.Sprintf("%.1f", a.AvgRecvBytes),
@@ -67,4 +67,11 @@ func ExportCSV(c *MetricsCollector, path string) error {
 		})
 	}
 	return nil
+}
+
+func formatHistogramCSV(value *float64) string {
+	if value == nil {
+		return ""
+	}
+	return fmt.Sprintf("%.2f", *value)
 }

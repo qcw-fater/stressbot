@@ -115,8 +115,8 @@ func TestRobotActionHandlerCancelSideEffectRecordsCanceled(t *testing.T) {
 
 	snap := mc.Snapshot(nil, 0)
 	action := findRobotActionSnapshot(t, snap, "cancel_side_effect")
-	if snap.TotalActions != 1 {
-		t.Fatalf("TotalActions=%d，期望 1", snap.TotalActions)
+	if snap.TotalActions != 0 {
+		t.Fatalf("取消动作不应进入 TotalActions，实际 %d", snap.TotalActions)
 	}
 	if action.Executing != 0 {
 		t.Fatalf("Executing=%d，期望 0", action.Executing)

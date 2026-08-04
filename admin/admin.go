@@ -29,11 +29,12 @@ import (
 type AdminServer struct {
 	cfg Config
 
-	tasks      *TaskStore
-	agents     *AgentRegistry
-	aggregator *MetricsAggregator
-	dispatcher *AgentDispatcher
-	assigner   *Assigner
+	tasks          *TaskStore
+	agents         *AgentRegistry
+	aggregator     *MetricsAggregator
+	metricsWindows *MetricsWindowStore
+	dispatcher     *AgentDispatcher
+	assigner       *Assigner
 
 	logsProxyClient *http.Client // Agent 日志代理（5s 超时）
 
@@ -66,7 +67,8 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 	s.agents = NewAgentRegistry(cfg.AgentRegistry, s.onAgentStatusChange)
 
 	// 3. MetricsAggregator
-	s.aggregator = NewMetricsAggregator(s.agents)
+	s.metricsWindows = NewMetricsWindowStore(time.Now)
+	s.aggregator = NewMetricsAggregator(s.agents, s.metricsWindows, time.Now)
 
 	// 4. AgentDispatcher
 	s.dispatcher = NewAgentDispatcher()
@@ -97,7 +99,7 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 			s.history = NewHistoryStore(db, cfg.History)
 			sampler := NewSampler(
 				10*time.Second,
-				s.aggregator, s.history, s.agents, s.tasks,
+				s.aggregator, s.history, s.agents, s.tasks, s.metricsWindows,
 			)
 			s.sampler = sampler
 		}
@@ -229,16 +231,31 @@ func (s *AdminServer) onTaskTerminal(task *Task) {
 
 	// 异步归档
 	if s.history == nil {
+		if s.metricsWindows != nil {
+			s.metricsWindows.DropTask(task.ID)
+		}
 		return
 	}
 	taskID := task.ID
 	utils.GetWorkPool().Go(func() {
-		// 优先用 agent 终止报告聚合，兜底用心跳聚合
-		finalStress := buildFinalStressFromReports(task)
-		if finalStress == nil || len(finalStress.Actions) == 0 {
-			finalStress = s.aggregator.AggregateStress(taskID).Snapshot
+		if s.metricsWindows != nil {
+			defer s.metricsWindows.MarkTaskTerminal(taskID)
 		}
-		finalSys := s.aggregator.AggregateSystem()
+		// 优先用 agent 终止报告聚合，兜底用心跳聚合
+		finalStress, mergeErr := buildFinalStressFromReports(task)
+		if mergeErr != nil {
+			stresslog.Error("合并任务最终指标失败", zap.String("taskID", taskID), zap.Error(mergeErr))
+			return
+		}
+		if finalStress == nil || len(finalStress.Actions) == 0 {
+			aggregated, err := s.aggregator.AggregateStress(taskID)
+			if err != nil {
+				stresslog.Error("聚合任务最终指标失败", zap.String("taskID", taskID), zap.Error(err))
+				return
+			}
+			finalStress = aggregated.Snapshot
+		}
+		finalSys := s.aggregator.AggregateSystem(taskSystemAgentIDs(task))
 		if err := s.history.Archive(context.Background(), task, finalStress, finalSys); err != nil {
 			stresslog.Error("任务归档失败",
 				zap.String("taskID", taskID),
@@ -267,9 +284,9 @@ func (s *AdminServer) cleanupSharedState(task *Task) {
 }
 
 // buildFinalStressFromReports 从 agent 终止报告聚合最终快照（优先于心跳聚合）。
-func buildFinalStressFromReports(task *Task) *monitor.CollectorSnapshot {
+func buildFinalStressFromReports(task *Task) (*monitor.CollectorSnapshot, error) {
 	if task == nil || len(task.Reports) == 0 {
-		return nil
+		return nil, nil
 	}
 	snaps := make([]*monitor.CollectorSnapshot, 0, len(task.Reports))
 	for _, r := range task.Reports {
@@ -283,7 +300,7 @@ func buildFinalStressFromReports(task *Task) *monitor.CollectorSnapshot {
 		snaps = append(snaps, r.FinalSnapshot)
 	}
 	if len(snaps) == 0 {
-		return nil
+		return nil, nil
 	}
 	return monitor.MergeSnapshots(snaps)
 }

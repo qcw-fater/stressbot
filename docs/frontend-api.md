@@ -436,11 +436,13 @@ GET /sbot/metrics/summary
 
 ### 6.5 指标计算说明
 
-**Apdex**：当前展示的是 RTT Apdex，`(satisfied + tolerating * 0.5) / rttSampleCount`。其中 satisfied = `WireRTT < T`，tolerating = `T <= WireRTT < 4T`，`WireRTT >= 4T` 计为不满意；纯客户端动作、超时、发送失败、取消且未收到响应帧的分支不进入 RTT Apdex 分母。
+**Apdex**：当前展示的是 RTT Apdex，`(satisfied + tolerating * 0.5) / rttApdexSampleCount`。其中 `rttApdexSampleCount = rttSampleCount + rttFailedCount`；无响应帧的失败请求记 frustrated，进入 Apdex 分母但不进入 RTT 直方图。监听、单向发送和本地动作不打分。
 
-**QPS**：`avgQps = sampleCount / uptime`（全程平均）。瞬时 QPS 由前端差分计算。
+**QPS**：累计 `summary.avgQps` 是全周期平均；当前 QPS 直接读取后端 `window.summary.avgQps`。前端不做计数差分，也不自行判定窗口过期。
 
-**分位数**：由后端固定桶直方图插值计算。集群聚合是合并后重算，非简单平均。
+**分位数**：由后端 DDSketch 计算。集群与跨动作总指标都先合并 sketch 再重算，非简单平均。前端直接读取 `StressSnapshot.summary` / `window.summary`，不计算 P50/P90/P95/P99；空分布字段为 `null` 并显示为 `—`。
+
+**计时级别**：`timingDetail` 只控制额外客户端阶段计时，取值 `rtt` / `codec` / `full`；它不改变 Apdex 算法。界面耗时拆分按该字段隐藏未采集阶段。
 
 ---
 
@@ -844,17 +846,16 @@ interface BandwidthView {
 
 interface HistogramView {
   count: number;
-  minMs: number;
-  maxMs: number;
-  avgMs: number;
-  p50Ms: number;
-  p90Ms: number;
-  p95Ms: number;
-  p99Ms: number;
+  minMs: number | null;
+  maxMs: number | null;
+  avgMs: number | null;
+  p50Ms: number | null;
+  p90Ms: number | null;
+  p95Ms: number | null;
+  p99Ms: number | null;
 }
 
 interface ErrorEntry {
-  kind: ErrorKind;
   code: number;
   codeName: string;
   msgs: string[];
@@ -870,37 +871,72 @@ interface ActionMetric {
   canceledCount: number;
   executing: number;
   successRate: number;
-  apdex: number;
+  kind: 'networked' | 'listen' | 'send' | 'local';
+  rttApdex: number;
+  rttApdexSampleCount: number;
+  rttSampleCount: number;
+  rtt: HistogramView;
+  listenWait: HistogramView;
+  listenWaitSampleCount: number;
+  totalDuration: HistogramView;
+  totalDurationSampleCount: number;
+  nonRTTAvgMs: number;
+  buildAvgMs: number;
+  encodeAvgMs: number;
+  sendAvgMs: number;
+  decodeWaitAvgMs: number;
+  decodeAvgMs: number;
+  dispatchToActionWaitAvgMs: number;
+  parseStoreAvgMs: number;
   avgQps: number;
   avgSendBytes: number; // 平均每次已记录动作发送的 WireBytes
   avgRecvBytes: number; // 平均每次已记录动作接收的 WireBytes
   timeoutAvgMs: number;
-  latency: HistogramView;
   errors?: ErrorEntry[];
 }
 
-interface ClusterInfo {
-  agentCount: number;
-  agentIds: string[];
-  staleAgentIds: string[];
+interface SnapshotMetricsSummary {
+  sampleCount: number;
+  successCount: number;
+  failureCount: number;
+  timeoutCount: number;
+  canceledCount: number;
+  successRate: number;
+  rttApdex: number;
+  rttApdexSampleCount: number;
+  rtt: HistogramView;
+  listenWait: HistogramView;
+  totalDuration: HistogramView;
+  nonRTTAvgMs: number;
+  clientCostCount: number;
+  avgQps: number;
 }
 
 interface StressSnapshot {
   timestamp: string;
+  collectionEpoch: number;
   uptimeSeconds: number;
   totalActions: number;
   apdexT: number;
+  timingDetail: 'rtt' | 'codec' | 'full';
+  summary: SnapshotMetricsSummary;
   robots: RobotsView;
   connections: ConnectionsView;
   bandwidth: BandwidthView;
   actions: ActionMetric[];
-  clusterInfo?: ClusterInfo;
+  window: ReportWindowView | null;
 }
 
 interface StressAggregate {
   snapshot: StressSnapshot;
   reportingAgents: number;
   totalAgents: number;
+  offlineAgents: number;
+  assignedAgents: number;
+  freshAgents: number;
+  staleAgents: number;
+  coverageRatio: number;
+  asOf: string;
 }
 
 interface PerAgentMetricsItem {

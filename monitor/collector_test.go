@@ -33,6 +33,21 @@ func findMonitorTestAction(t *testing.T, snap *CollectorSnapshot, name string) A
 	return ActionSnapshot{}
 }
 
+func TestCollectorConnectionLifecycleCounters(t *testing.T) {
+	c := newMonitorTestCollector()
+	c.ConnEstablished()
+	c.ConnClosed()
+	c.ConnEstablished()
+	c.ConnDropped()
+	c.ConnClosed()
+
+	got := c.Snapshot(nil, 0).Connections
+	if got.Active != 0 || got.Established != 2 || got.Closed != 2 || got.Dropped != 1 {
+		t.Fatalf("连接计数 active/established/closed/dropped = %d/%d/%d/%d, want 0/2/2/1",
+			got.Active, got.Established, got.Closed, got.Dropped)
+	}
+}
+
 func TestRecordActionStartAndRecordActionPairExecuting(t *testing.T) {
 	c := newMonitorTestCollector()
 
@@ -60,8 +75,8 @@ func TestRecordActionCanceledDoesNotRecordErrorDistribution(t *testing.T) {
 
 	snap := c.Snapshot(nil, 0)
 	action := findMonitorTestAction(t, snap, "cancel")
-	if snap.TotalActions != 1 {
-		t.Fatalf("TotalActions=%d，期望 1", snap.TotalActions)
+	if snap.TotalActions != 0 {
+		t.Fatalf("取消不应进入 TotalActions，实际 %d", snap.TotalActions)
 	}
 	if action.Executing != 0 {
 		t.Fatalf("Executing=%d，期望 0", action.Executing)
@@ -98,8 +113,7 @@ func TestRecordActionRealCanceledKeepsTimingSamples(t *testing.T) {
 func TestRecordActionSyntheticCanceledExcludesTimingSamples(t *testing.T) {
 	c := newMonitorTestCollector()
 
-	c.RecordActionStart("synthetic-cancel")
-	c.RecordAction("synthetic-cancel", ResultCanceled, ActionTiming{}, 0, 0, 0, nil)
+	c.RecordPendingCanceled("synthetic-cancel")
 
 	action := findMonitorTestAction(t, c.Snapshot(nil, 0), "synthetic-cancel")
 	if action.CanceledCount != 1 {
@@ -176,5 +190,61 @@ func TestRecordActionFailureRecordsCodedErrorsOnly(t *testing.T) {
 	}
 	if len(coded.Errors) != 1 || coded.Errors[0].Code != 12 || coded.Errors[0].Count != 1 {
 		t.Fatalf("coded error 应进入错误分布，实际 %+v", coded.Errors)
+	}
+}
+
+func TestObservedTimingStagesUseIndependentSampleCounts(t *testing.T) {
+	c := newMonitorTestCollector()
+	timing := ActionTiming{Client: ClientTiming{
+		Observed:   StageBuild | StageEncode,
+		BuildCost:  0,
+		EncodeCost: 0,
+	}}
+
+	c.RecordActionStart("observed-zero")
+	c.RecordAction("observed-zero", ResultSuccess, timing, 0, 0, 0, nil)
+
+	action := findMonitorTestAction(t, c.Snapshot(nil, 0), "observed-zero")
+	if action.BuildSampleCount != 1 || action.EncodeSampleCount != 1 {
+		t.Fatalf("observed zero stages lost: build=%d encode=%d", action.BuildSampleCount, action.EncodeSampleCount)
+	}
+	if action.SendSampleCount != 0 || action.DecodeSampleCount != 0 {
+		t.Fatalf("unobserved stages counted: send=%d decode=%d", action.SendSampleCount, action.DecodeSampleCount)
+	}
+	if action.BuildAvgMs != 0 || action.EncodeAvgMs != 0 {
+		t.Fatalf("zero-duration stage average must remain zero: build=%g encode=%g", action.BuildAvgMs, action.EncodeAvgMs)
+	}
+}
+
+func TestPendingCanceledDoesNotPolluteThroughputOrByteDenominator(t *testing.T) {
+	c := newMonitorTestCollector()
+
+	c.RecordActionStart("request")
+	c.RecordAction("request", ResultSuccess, ActionTiming{}, time.Millisecond, 100, 200, nil)
+	c.RecordPendingCanceled("request")
+
+	snap := c.Snapshot(nil, 0)
+	action := findMonitorTestAction(t, snap, "request")
+	if action.SampleCount != 1 || snap.TotalActions != 1 || action.CanceledCount != 1 {
+		t.Fatalf("pending cancel polluted result counts: sample=%d total=%d canceled=%d", action.SampleCount, snap.TotalActions, action.CanceledCount)
+	}
+	if action.ByteSampleCount != 1 || action.AvgSendBytes != 100 || action.AvgRecvBytes != 200 {
+		t.Fatalf("pending cancel polluted byte denominator: count=%d send=%g recv=%g", action.ByteSampleCount, action.AvgSendBytes, action.AvgRecvBytes)
+	}
+}
+
+func TestRealCanceledKeepsActualBytesButNotThroughput(t *testing.T) {
+	c := newMonitorTestCollector()
+
+	c.RecordActionStart("request")
+	c.RecordAction("request", ResultCanceled, ActionTiming{}, time.Millisecond, 30, 40, nil)
+
+	snap := c.Snapshot(nil, 0)
+	action := findMonitorTestAction(t, snap, "request")
+	if action.SampleCount != 0 || snap.TotalActions != 0 || action.CanceledCount != 1 {
+		t.Fatalf("real cancel result counts: sample=%d total=%d canceled=%d", action.SampleCount, snap.TotalActions, action.CanceledCount)
+	}
+	if action.ByteSampleCount != 1 || action.AvgSendBytes != 30 || action.AvgRecvBytes != 40 {
+		t.Fatalf("real cancel bytes lost: count=%d send=%g recv=%g", action.ByteSampleCount, action.AvgSendBytes, action.AvgRecvBytes)
 	}
 }

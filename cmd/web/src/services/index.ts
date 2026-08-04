@@ -17,25 +17,13 @@ export type { CapabilitiesResponse } from './capabilitiesApi';
 export { usePolling } from './usePolling';
 export type { UsePollingOptions } from './usePolling';
 
-export {
-  useRuntimeStore,
-  pollingPolicy,
-} from './runtimeStore';
+export { useRuntimeStore, pollingPolicy } from './runtimeStore';
 export type { RuntimeMode, RuntimeState } from './runtimeStore';
 
-export {
-  buildNodeMetricsMap,
-  makeMetricsProvider,
-  classifyApdex,
-  computeWeightedMetrics,
-} from './metricsBinding';
+export { buildNodeMetricsMap, makeMetricsProvider, classifyApdex } from './metricsBinding';
 export type { ApdexLevel, FlowSlice, NodeMetricsMap } from './metricsBinding';
 
-export {
-  showApiError,
-  registerTaskConflictHandler,
-  setMessageApi,
-} from './errorHandler';
+export { showApiError, registerTaskConflictHandler, setMessageApi } from './errorHandler';
 export type { TaskConflictHandler } from './errorHandler';
 
 export * as resourcesStore from './resourcesStore';
@@ -51,10 +39,7 @@ export * from './configTransfer/sectionRegistry';
 export * from './configTransfer/restoreCoordinator';
 export * from './configTransfer/recoveryJournal';
 
-export {
-  collectFlowScriptNames,
-  syncFlowScriptsToIdb,
-} from './scriptSync';
+export { collectFlowScriptNames, syncFlowScriptsToIdb } from './scriptSync';
 export type { ScriptSyncResult } from './scriptSync';
 
 export {

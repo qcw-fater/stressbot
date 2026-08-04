@@ -288,7 +288,6 @@ func awaitConnect(L *lua.LState, ctx *Context, proto, service, address string) i
 
 // networkCloseTCP 关闭 TCP 连接。
 // 签名：network.close_tcp(service)
-//
 func networkCloseTCP(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -301,7 +300,6 @@ func networkCloseTCP(L *lua.LState) int {
 
 // networkCloseUDP 关闭 UDP 连接。
 // 签名：network.close_udp(service)
-//
 func networkCloseUDP(L *lua.LState) int {
 	ctx := GetContext(L)
 	if ctx == nil || ctx.NetSender == nil {
@@ -355,7 +353,7 @@ func requestResultValues(L *lua.LState, ctx *Context, spec *WaitSpec, outcome Wa
 		}
 		respMsg, err := ctx.Factory.Parse(spec.S2CProto, respBody)
 		if ctx.TimingLevel >= engine.TimingLevelFull && !parseStart.IsZero() {
-			ctx.recordClientTiming(engine.ClientTiming{ParseStoreCost: time.Since(parseStart)})
+			ctx.recordClientTiming(engine.ClientTiming{ParseStoreCost: time.Since(parseStart), Observed: engine.TimingStageParseStore})
 		}
 		if err != nil {
 			return []lua.LValue{
@@ -399,7 +397,7 @@ func doAwaitTCPRequest(L *lua.LState, ctx *Context, service string, requestRoute
 	}
 	packet := buildPacket(ctx, service, requestRoute, msgData)
 	if ctx.TimingLevel >= engine.TimingLevelCodec && !encodeStart.IsZero() {
-		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart)})
+		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart), Observed: engine.TimingStageEncode})
 	}
 	if packet == nil {
 		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), "service="+service), lua.LNil)
@@ -455,7 +453,7 @@ func doAwaitUDPRequest(L *lua.LState, ctx *Context, service string, requestRoute
 	}
 	packet := udpAdp.EncodeUDP(luaValueToRoute(requestRoute), body, udpKey)
 	if ctx.TimingLevel >= engine.TimingLevelCodec && !encodeStart.IsZero() {
-		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart)})
+		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart), Observed: engine.TimingStageEncode})
 	}
 	if packet == nil {
 		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), "service="+service), lua.LNil)
@@ -597,7 +595,7 @@ func networkHTTPRequest(L *lua.LState) int {
 			if exchange == nil {
 				exchange = &engine.HTTPExchange{}
 			}
-			ctx.recordRequest(engine.RequestTiming{WireRTT: exchange.NetLatency})
+			ctx.recordRequest(engine.RequestTiming{WireRTT: exchange.NetLatency, Observed: engine.TimingStageRTT})
 			ctx.recordBytes(exchange.SendWireBytes, exchange.RecvWireBytes)
 			if err != nil {
 				return []lua.LValue{errTableFromActionErr(L, err), lua.LNumber(0), lua.LString("")}
@@ -642,7 +640,7 @@ func networkTCPSend(L *lua.LState) int {
 	}
 	packet := buildPacket(ctx, service, route, msgData)
 	if ctx.TimingLevel >= engine.TimingLevelCodec && !encodeStart.IsZero() {
-		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart)})
+		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart), Observed: engine.TimingStageEncode})
 	}
 	if packet == nil {
 		return pushErr(L, int(errcode.ErrEncodeFailed), "service="+service)
@@ -654,7 +652,7 @@ func networkTCPSend(L *lua.LState) int {
 	}
 	n, err := ctx.NetSender.TCPSend(service, packet)
 	if ctx.TimingLevel >= engine.TimingLevelRTTOnly && !sendStart.IsZero() {
-		ctx.recordClientTiming(engine.ClientTiming{SendCost: time.Since(sendStart)})
+		ctx.recordClientTiming(engine.ClientTiming{SendCost: time.Since(sendStart), Observed: engine.TimingStageSend})
 	}
 	if err == nil {
 		ctx.recordBytes(n, 0)
@@ -700,7 +698,7 @@ func networkUDPSend(L *lua.LState) int {
 	}
 	packet := adp.EncodeUDP(goRoute, body, udpKey)
 	if ctx.TimingLevel >= engine.TimingLevelCodec && !encodeStart.IsZero() {
-		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart)})
+		ctx.recordClientTiming(engine.ClientTiming{EncodeCost: time.Since(encodeStart), Observed: engine.TimingStageEncode})
 	}
 	if packet == nil {
 		return pushErr(L, int(errcode.ErrEncodeFailed), "service="+service)
@@ -711,7 +709,7 @@ func networkUDPSend(L *lua.LState) int {
 	}
 	n, err := ctx.NetSender.UDPSend(service, packet)
 	if ctx.TimingLevel >= engine.TimingLevelRTTOnly && !sendStart.IsZero() {
-		ctx.recordClientTiming(engine.ClientTiming{SendCost: time.Since(sendStart)})
+		ctx.recordClientTiming(engine.ClientTiming{SendCost: time.Since(sendStart), Observed: engine.TimingStageSend})
 	}
 	if err == nil {
 		ctx.recordBytes(n, 0)

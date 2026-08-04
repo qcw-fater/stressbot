@@ -1,7 +1,7 @@
 /**
  * Apdex 单元格：按 §7.5 阈值表染色 + 数值显示。
  *
- * 用于 ActionsTab / PerAgentTab 表格列。
+ * 用于 MonitorDock、历史动作表和节点指标。
  */
 
 import { Tag } from 'antd';
@@ -33,12 +33,22 @@ export interface ApdexCellProps {
 
 export function ApdexCell({ value, sampleCount, showLabel = false }: ApdexCellProps) {
   if (sampleCount !== undefined && sampleCount === 0) {
-    return <Tag color="default" style={{ fontVariantNumeric: 'tabular-nums', minWidth: 56, textAlign: 'center' }}>—</Tag>;
+    return (
+      <Tag
+        color="default"
+        style={{ fontVariantNumeric: 'tabular-nums', minWidth: 56, textAlign: 'center' }}
+      >
+        —
+      </Tag>
+    );
   }
   const level = classifyApdex(value);
   const text = value === undefined || Number.isNaN(value) ? '—' : value.toFixed(3);
   return (
-    <Tag color={COLOR[level]} style={{ fontVariantNumeric: 'tabular-nums', minWidth: 56, textAlign: 'center' }}>
+    <Tag
+      color={COLOR[level]}
+      style={{ fontVariantNumeric: 'tabular-nums', minWidth: 56, textAlign: 'center' }}
+    >
       {showLabel ? `${LABEL[level]} ${text}` : text}
     </Tag>
   );

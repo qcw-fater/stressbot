@@ -18,7 +18,7 @@ import (
 // pprof 由 utils.StartPprofServer 独立管理，不与此模块耦合。
 func RegisterHandlers(c *MetricsCollector) {
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		snap := c.Snapshot(nil, 0)
+		snap := c.Snapshot(nil, 0).PublicCopy()
 		w.Header().Set("Content-Type", "application/json")
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
@@ -33,7 +33,7 @@ func RegisterHandlers(c *MetricsCollector) {
 		for _, a := range snap.Actions {
 			fmt.Fprintf(w, "%s: samples=%d success=%d timeout=%d failure=%d avg=%.1fms p99=%.1fms apdex=%.3f qps=%.2f\n",
 				a.Name, a.SampleCount, a.SuccessCount, a.TimeoutCount, a.FailureCount,
-				a.RTT.AvgMs, a.RTT.P99Ms, a.RTTApdex, a.AvgQPS)
+				histogramValue(a.RTT.AvgMs), histogramValue(a.RTT.P99Ms), a.RTTApdex, a.AvgQPS)
 		}
 	})
 }
