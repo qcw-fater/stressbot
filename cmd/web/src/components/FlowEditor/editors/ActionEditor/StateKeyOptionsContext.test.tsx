@@ -7,9 +7,16 @@ import { useFlowStore } from '../../store/flowStore';
 // 必须用提升（hoisted）的 vi.mock 拦截 resourcesStore.getScript —— useStateKeyOptions
 // 在模块顶层静态 import getScript，vi.doMock 对已加载的 ESM 模块无效。
 const getScriptMock = vi.fn();
+let resourceListener: (() => void) | undefined;
+const subscribeMock = vi.fn((listener: () => void) => {
+  resourceListener = listener;
+  return () => {
+    if (resourceListener === listener) resourceListener = undefined;
+  };
+});
 vi.mock('@/services/resourcesStore', () => ({
   getScript: (...args: unknown[]) => getScriptMock(...args),
-  subscribe: () => () => {},
+  subscribe: (listener: () => void) => subscribeMock(listener),
 }));
 
 // 造一个引用脚本 'demo.lua' 的 lua action，使 collectUsedScriptNames 返回 { 'demo.lua' }。
@@ -33,6 +40,8 @@ describe('StateKeyOptionsProvider', () => {
   beforeEach(() => {
     getScriptMock.mockReset();
     getScriptMock.mockResolvedValue({ name: 'demo.lua', content: 'robot.set("demoKey", 1)' });
+    subscribeMock.mockClear();
+    resourceListener = undefined;
     seedScriptAction();
   });
 
@@ -60,6 +69,27 @@ describe('StateKeyOptionsProvider', () => {
     await waitFor(() => expect(ref.current?.ready).toBe(true));
     expect(getScriptMock).toHaveBeenCalledTimes(1); // 单消费方回退也加载一次
     expect(ref.current?.keys.map((k) => (k as { key: string }).key)).toContain('demoKey');
+  });
+
+  it('资源拉取后即使脚本引用名不变也重新加载状态键', async () => {
+    getScriptMock.mockResolvedValue({ name: 'demo.lua', content: '-- old content' });
+    const ref = React.createRef<{ keys: unknown[]; ready: boolean }>();
+    render(
+      <StateKeyOptionsProvider>
+        <Consumer ref={ref} />
+      </StateKeyOptionsProvider>,
+    );
+
+    await waitFor(() => expect(ref.current?.ready).toBe(true));
+    expect(ref.current?.keys.map((k) => (k as { key: string }).key)).not.toContain('pulledKey');
+    expect(subscribeMock).toHaveBeenCalledOnce();
+
+    getScriptMock.mockResolvedValue({ name: 'demo.lua', content: 'robot.set("pulledKey", 1)' });
+    await act(async () => resourceListener?.());
+
+    await waitFor(() => {
+      expect(ref.current?.keys.map((k) => (k as { key: string }).key)).toContain('pulledKey');
+    });
   });
 
   it('动作普通字段变化不重新加载脚本，脚本引用变化时才加载', async () => {

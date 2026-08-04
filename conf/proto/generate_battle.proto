@@ -866,12 +866,14 @@ message BattleMidwaySettlementC2S {
     BattleEndC2S brData             = 1; // 结算数据
     int32        settlementPlayerId = 2; // 结算玩家Id
     int32        frameIndex         = 3; // 结算帧索引
+    int32        settlementFighterIndex = 4; // SDC结算目标的服务器战斗索引
 }
 
 // 战斗中途结算
 message BattleMidwaySettlementS2C {
     int32 settlementPlayerId = 1; // 结算玩家Id
     int32 frameIndex         = 2; // 结算帧索引
+    int32 settlementFighterIndex = 3; // SDC结算目标的服务器战斗索引
 }
 
 // 战斗中途退出
@@ -1016,4 +1018,11 @@ message BattleSdcPlayerExitC2S {
 }
 // SDC搜打撤玩家退出
 message BattleSdcPlayerExitS2C {
+}
+
+// 战斗中途结算后统一退出观战
+message BattleMidwaySettlementExitC2S {
+}
+// 战斗中途结算后统一退出观战
+message BattleMidwaySettlementExitS2C {
 }

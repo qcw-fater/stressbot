@@ -13,7 +13,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { FieldBind } from '@/types/action';
 import { useRuntimeStore } from '@/services/runtimeStore';
-import { getScript } from '@/services/resourcesStore';
+import { getScript, subscribe } from '@/services/resourcesStore';
 import { useFlowStore } from '../../store/flowStore';
 import { collectStateKeys, collectUsedScriptNames, type StateKeyInfo } from './stateRegistry';
 
@@ -45,6 +45,12 @@ const StateKeyOptionsContext = createContext<SharedStateKeys | null>(null);
  * 消费方短路），保证遵守 Rules of Hooks（始终调用本钩子），同时在 Provider 下零重复加载。
  */
 function useLoadedStateKeyScripts(enabled: boolean): LoadedScripts {
+  const [resourceVersion, setResourceVersion] = useState(0);
+  useEffect(() => {
+    if (!enabled) return;
+    return subscribe(() => setResourceVersion((version) => version + 1));
+  }, [enabled]);
+
   const scriptNameSignature = useFlowStore((state) => {
     if (!enabled) return '';
     return [...collectUsedScriptNames(state.actions, state.listens, state.nodes)].sort().join('\u0000');
@@ -81,7 +87,7 @@ function useLoadedStateKeyScripts(enabled: boolean): LoadedScripts {
       setReady(true);
     });
     return () => { cancelled = true; };
-  }, [enabled, scriptNameSignature, scriptNames]);
+  }, [enabled, scriptNameSignature, scriptNames, resourceVersion]);
 
   return { scripts, ready };
 }
