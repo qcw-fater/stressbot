@@ -35,7 +35,7 @@ export function SystemTab() {
       <div className="system-tab__dashboard">
         <div className="system-tab__gauges">
           <div className="system-tab__gauge">
-            <span className="system-tab__gauge-title">主机 CPU</span>
+            <span className="system-tab__gauge-title">CPU</span>
             <Progress
               type="circle"
               percent={hostCPU ?? 0}
@@ -55,7 +55,7 @@ export function SystemTab() {
           </div>
 
           <div className="system-tab__gauge">
-            <span className="system-tab__gauge-title">主机内存</span>
+            <span className="system-tab__gauge-title">内存</span>
             <Progress
               type="circle"
               percent={hostMemory ?? 0}
@@ -91,13 +91,13 @@ export function SystemTab() {
             </span>
           </div>
           <div className="system-tab__summary-row">
-            <span className="system-tab__summary-label">主机网卡发送</span>
+            <span className="system-tab__summary-label">网卡发送</span>
             <span className="system-tab__summary-value">
               {fmtBandwidthBytesPerSec(latestSystem.totalHostNetSendBytesPerSec)}
             </span>
           </div>
           <div className="system-tab__summary-row">
-            <span className="system-tab__summary-label">主机网卡接收</span>
+            <span className="system-tab__summary-label">网卡接收</span>
             <span className="system-tab__summary-value">
               {fmtBandwidthBytesPerSec(latestSystem.totalHostNetRecvBytesPerSec)}
             </span>
@@ -112,19 +112,19 @@ export function SystemTab() {
       <div className="system-tab__process-row">
         <Tooltip title={`当前最高 ${latestSystem.hotProcessCpuAgentName || '—'} · ${fmtPercentValue(latestSystem.maxProcessCpuPercent)}`}>
           <div className="system-tab__process-stat">
-            <Statistic title="节点进程 CPU 均值" value={fmtPercentValue(latestSystem.avgProcessCpuPercent)} valueStyle={{ fontSize: 16, fontWeight: 600 }} />
+            <Statistic title="CPU 均值" value={fmtPercentValue(latestSystem.avgProcessCpuPercent)} valueStyle={{ fontSize: 16, fontWeight: 600 }} />
           </div>
         </Tooltip>
         <div className="system-tab__divider-sm" />
         <Tooltip title={`当前最高 ${latestSystem.hotProcessRssAgentName || '—'} · ${fmtByteSize(latestSystem.maxProcessRssBytes)}`}>
           <div className="system-tab__process-stat">
-            <Statistic title="节点进程 RSS 总计" value={fmtByteSize(latestSystem.totalProcessRssBytes)} valueStyle={{ fontSize: 16, fontWeight: 600 }} />
+            <Statistic title="RSS 总计" value={fmtByteSize(latestSystem.totalProcessRssBytes)} valueStyle={{ fontSize: 16, fontWeight: 600 }} />
           </div>
         </Tooltip>
         <div className="system-tab__divider-sm" />
         <Tooltip title={`当前最高 ${latestSystem.hotProcessFdsAgentName || '—'} · 总计 ${fmtCompactNumber(latestSystem.totalProcessFds)}`}>
           <div className="system-tab__process-stat">
-            <Statistic title="单节点句柄 / FD 最高" value={fmtCompactNumber(latestSystem.maxProcessFds)} valueStyle={{ fontSize: 16, fontWeight: 600 }} />
+            <Statistic title="FD 最高" value={fmtCompactNumber(latestSystem.maxProcessFds)} valueStyle={{ fontSize: 16, fontWeight: 600 }} />
           </div>
         </Tooltip>
         <div className="system-tab__divider-sm" />

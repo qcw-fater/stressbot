@@ -418,66 +418,57 @@ function LatencyConnectionCard({ model }: { model: ReturnType<typeof buildLivePa
 
 function ResourceNodeCard({ model }: { model: ReturnType<typeof buildLivePanelModel> }) {
   const resourceCoverage = compactRatio(model.nodes.resourceReporting, model.nodes.resourceScope);
+  const onlineCoverage = compactRatio(model.nodes.online, model.nodes.resourceScope);
+  const capacity = compactRatio(model.nodes.capacityCurrent, model.nodes.capacityMax);
+  const subtitle = `资源采样 ${resourceCoverage} · 在线 ${onlineCoverage} · 容量 ${capacity}`;
   return (
     <MetricGroup
       title="资源 / 节点"
-      subtitle={`资源采样 ${resourceCoverage} · 在线 ${compactRatio(model.nodes.online, model.nodes.resourceScope)}`}
+      subtitle={subtitle}
     >
-      <div className="md-resource-hotline">
-        <span>当前最高节点</span>
-        <b>CPU {model.resources.hotHostCpuNode || '—'}</b>
-        <b>内存 {model.resources.hotHostMemNode || '—'}</b>
-      </div>
-      <div className="md-kpi-grid md-kpi-grid--three md-resource-grid">
-        <MetricCell label="主机 CPU 均值" value={fmtPercentValue(model.resources.avgHostCpuPercent)} />
+      <div className="md-kpi-grid md-kpi-grid--three">
         <MetricCell
-          label="主机 CPU 最高"
+          label="CPU 均值"
+          value={fmtPercentValue(model.resources.avgHostCpuPercent)}
+        />
+        <MetricCell
+          label="CPU 最高"
           value={fmtPercentValue(model.resources.maxHostCpuPercent)}
           title={model.resources.hotHostCpuNode}
         />
-        <MetricCell label="主机内存均值" value={fmtPercentValue(model.resources.avgHostMemPercent)} />
         <MetricCell
-          label="主机内存最高"
+          label="内存均值"
+          value={fmtPercentValue(model.resources.avgHostMemPercent)}
+        />
+        <MetricCell
+          label="内存最高"
           value={fmtPercentValue(model.resources.maxHostMemPercent)}
           title={model.resources.hotHostMemNode}
         />
         <MetricCell
-          label="主机网卡发送"
+          label="网卡发送"
           value={fmtBandwidthBytesPerSec(model.resources.hostSendBytesPerSec)}
           title={`全部网络接口合计 · 有效节点 ${model.resources.hostSendReportingAgents}/${model.nodes.resourceReporting || '—'}`}
         />
         <MetricCell
-          label="主机网卡接收"
+          label="网卡接收"
           value={fmtBandwidthBytesPerSec(model.resources.hostRecvBytesPerSec)}
           title={`全部网络接口合计 · 有效节点 ${model.resources.hostRecvReportingAgents}/${model.nodes.resourceReporting || '—'}`}
         />
         <MetricCell
-          label="节点进程 CPU 均值"
+          label="CPU 均值"
           value={fmtPercentValue(model.resources.avgProcessCpuPercent)}
           title={`当前最高 ${model.resources.hotProcessCpuNode || '—'} · ${fmtPercentValue(model.resources.maxProcessCpuPercent)}`}
         />
         <MetricCell
-          label="节点进程 RSS 总计"
+          label="RSS 总计"
           value={fmtByteSize(model.resources.totalProcessRssBytes)}
           title={`当前最高 ${model.resources.hotProcessRssNode || '—'} · ${fmtByteSize(model.resources.maxProcessRssBytes)}`}
         />
         <MetricCell
-          label="单节点句柄 / FD 最高"
+          label="FD 最高"
           value={fmtCompactNumber(model.resources.maxProcessFds)}
           title={`当前最高 ${model.resources.hotProcessFdsNode || '—'} · 总计 ${fmtCompactNumber(model.resources.totalProcessFds)}`}
-        />
-        <MetricCell
-          label="集群容量"
-          value={compactRatio(model.nodes.capacityCurrent, model.nodes.capacityMax)}
-        />
-        <MetricCell
-          label="异常 / 离线"
-          value={`${fmtCompactNumber(model.nodes.unhealthy)} / ${fmtCompactNumber(model.nodes.offline)}`}
-        />
-        <MetricCell
-          label="资源缺采样"
-          value={fmtCompactNumber(model.nodes.resourceMissing)}
-          title={`过期 ${fmtCompactNumber(model.nodes.resourceStale)} · 协程 ${fmtCompactNumber(model.resources.totalProcessGoroutines)} · 线程 ${fmtCompactNumber(model.resources.totalProcessThreads)}`}
         />
       </div>
     </MetricGroup>
