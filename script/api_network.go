@@ -32,8 +32,8 @@ import (
 //	network.udp_send(service, route, body)
 //	network.tcp_listen(service, route [, s2c [, timeout [, poll]]])
 //	network.udp_listen(service, route [, s2c [, timeout [, poll]]])
-//	network.try_tcp_listen(service, route) → code, raw_body  (非阻塞单次 pop)
-//	network.try_udp_listen(service, route) → code, raw_body  (非阻塞单次 pop)
+//	network.try_tcp_listen(service, route) → err, data  (非阻塞单次 pop)
+//	network.try_udp_listen(service, route) → err, data  (非阻塞单次 pop)
 //	network.set_tcp_secret_key(service, key)
 //	network.set_udp_secret_key(service, key)
 //	network.get_tcp_secret_key(service)
@@ -872,10 +872,10 @@ func awaitNetworkListen(L *lua.LState, protocol string) int {
 // networkTryTCPListen 非阻塞获取最近一条 TCP 监听消息（不解析 proto，返回原始 body）。
 // 签名：network.try_tcp_listen(service, route)
 //
-// 返回：code(number), data(string|nil)
-//   - code=0：取到一条消息，data 为原始 body 字符串（**不解析 proto**，需要解析请用阻塞版 tcp_listen）。
-//   - code=31（ErrListenTimeout）：队列空、无新消息，data=nil。
-//   - 其他非零：服务端 HeaderErr，data 为原始 body 字符串。
+// 返回：err(nil|table), data(string|nil)
+//   - err=nil + data=string：取到一条消息的原始 body（**不解析 proto**，需要解析请用阻塞版 tcp_listen）。
+//   - err=nil + data=nil：队列空、无新消息（非错误路径，不进失败统计）。
+//   - err table：codec 未映射（code=ErrEncodeFailed）或服务端 HeaderErr（code=HeaderErr），data 为原始 body 字符串或 nil。
 //
 // 与阻塞版 tcp_listen 的差异：**单次非阻塞 pop**，不轮询、不 sleep。适用于高频 sync loop 「保最新」消费场景
 // （如 battleAck 追踪：队列容量 1，每轮 pop 最新 ack 写 state）。

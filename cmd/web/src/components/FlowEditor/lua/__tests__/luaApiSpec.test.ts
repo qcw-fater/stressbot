@@ -83,6 +83,17 @@ describe('renderSignature / renderDoc', () => {
     }
   });
 
+  it('*_request 文档固定 s2c_proto 决定 data 形态', () => {
+    for (const name of ['tcp_request', 'tcp_request_route', 'udp_request', 'udp_request_route']) {
+      const fn = getLuaFunction('network', name)!;
+      const doc = renderDoc(fn);
+      expect(doc, `network.${name}`).toContain('s2c_proto');
+      expect(doc, `network.${name}`).toContain('proto.get_field');
+      expect(doc, `network.${name}`).toContain('字节串');
+      expect(doc, `network.${name}`).toContain('nil 占位');
+    }
+  });
+
   it('renderDoc 包含函数签名、summary、参数和返回值', () => {
     const fn = getLuaFunction('robot', 'set')!;
     const doc = renderDoc(fn);

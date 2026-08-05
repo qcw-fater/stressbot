@@ -16,6 +16,7 @@ const MODULE_COLOR: Record<string, string> = {
   utils: 'orange',
   json: 'cyan',
   log: 'default',
+  share: 'magenta',
 };
 
 function FnCard({ fn }: { fn: LuaFunction }) {

@@ -52,7 +52,7 @@ cd cmd/web && npm run test                 # Vitest
 - **`robot/`** — `Robot` 是单个压测客户端实例，持有独立的 state、网络连接、Lua 运行时和执行器。`Manager` 负责批量创建（`StartAll`）和渐进加压（`StartWithRampUp`，分阶段增加机器人数量和并发度）。`robotActionHandler` 实现 `engine.ActionHandler`，桥接 engine 层与 network 层。
 - **`network/`** — 基于 gnet 的 TCP/UDP 连接层。`Client` 管理多服务命名连接池。`Connection` 处理收发、请求-响应匹配（responseMap + buffered channel + 超时 select）、持久化监听队列/Go 回调分发、per-connection 声明式心跳。`Dialer` 封装 gnet 事件循环。
 - **`protox/`** — 动态 protobuf 加载与反射。`Loader` 发现 .proto 文件，`Registry` 编译，`Factory` 按全名在运行时创建/序列化/解析消息。
-- **`script/`** — Lua 运行时池（`gopher-lua`）。每个 Robot 获取独占 `LState`，由主流程同步执行业务 Lua；阻塞型 Lua API 只暂停当前 Robot 主流程，connectionPump 与连接级心跳继续独立运行。7 个模块共 86 个函数：`network`（21）、`robot`（14）、`utils`（15）、`proto`（10）、`json`（2）、`log`（4）、`share`（20）。
+- **`script/`** — Lua 运行时池（`gopher-lua`）。每个 Robot 获取独占 `LState`，由主流程同步执行业务 Lua；阻塞型 Lua API 只暂停当前 Robot 主流程，connectionPump 与连接级心跳继续独立运行。7 个模块共 87 个函数：`network`（21）、`robot`（15）、`utils`（15）、`proto`（10）、`json`（2）、`log`（4）、`share`（20）。
 - **`state/` — 线程安全的键值状态存储（RWMutex）。保存服务器响应字段（通过 `store` 映射），支持 list/map 操作用于随机选取。`CompareValues` 支持 10 种过滤运算符。
 - **`adapter/` — 协议适配器接口（9 方法）。热路径帧解析（`HeaderSize`/`BodyLength`）纯 Go 缓存，编解码由 `CodecResolver` 按 `"<proto>:<service>"` 解析、`SchemaAdapter` 包装 `codec/` Go 引擎驱动，配置来自 `conf/adapter/<proto>_<service>_codec.json`（每连接一份）。
 - **`admin/` — Admin 服务器（16 文件）。任务调度（TaskStore 状态机 + 单例约束 + 持久化）、Agent 管理（注册/心跳/健康检查/unhealthy→offline/离线清理）、指标聚合（MergeSnapshots）、时序采样（Sampler）、历史归档（MySQL 6 表）、任务分配（proportional/debug-single）、Agent RPC 调度、前端静态托管。60 个 HTTP API 端点（前缀 `/sbot/`）。
