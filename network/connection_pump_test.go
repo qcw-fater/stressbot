@@ -19,7 +19,7 @@ import (
 // 测试直接投递 inboundCh 绕过 OnTraffic）。
 type fakeAdapter struct {
 	mu          sync.Mutex
-	decodeCalls int32
+	decodeCalls atomic.Int32
 	// decodeRouteKey / decodeBody 控制下一次 decode 返回值；默认返回 ("test.route", body, 0)。
 	decodeRouteKey string
 }
@@ -34,14 +34,14 @@ func (a *fakeAdapter) EncodeTCP(route any, body []byte, key []byte) []byte { ret
 func (a *fakeAdapter) EncodeUDP(route any, body []byte, key []byte) []byte { return nil }
 
 func (a *fakeAdapter) DecodeTCP(data []byte, key []byte) (string, []byte, uint64) {
-	atomic.AddInt32(&a.decodeCalls, 1)
+	a.decodeCalls.Add(1)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.decodeRouteKey, data, 0
 }
 
 func (a *fakeAdapter) DecodeUDP(data []byte, key []byte) (string, []byte, uint64) {
-	atomic.AddInt32(&a.decodeCalls, 1)
+	a.decodeCalls.Add(1)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.decodeRouteKey, data, 0
@@ -84,7 +84,7 @@ func TestStartPumpRollsBackWhenPoolRejects(t *testing.T) {
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("startPumpWithSubmit() error = %v, want %v", err, sentinel)
 	}
-	if atomic.LoadInt32(&conn.pumpRun) != 0 {
+	if conn.pumpRun.Load() != 0 {
 		t.Fatal("pumpRun was not rolled back")
 	}
 	if conn.inboundCh != nil || conn.controlCh != nil || conn.pumpDone != nil {
@@ -240,9 +240,9 @@ func TestPump_Control_RegisterHeartbeat(t *testing.T) {
 	conn, sent := startPumpedConnection(t, adp, false)
 	defer conn.Close()
 
-	var builderCalls int32
+	var builderCalls atomic.Int32
 	builder := func() []byte {
-		atomic.AddInt32(&builderCalls, 1)
+		builderCalls.Add(1)
 		return []byte("ping")
 	}
 	conn.RegisterHeartbeat(HeartbeatConfig{Interval: 30 * time.Millisecond, Builder: builder})
@@ -250,12 +250,12 @@ func TestPump_Control_RegisterHeartbeat(t *testing.T) {
 	// 等 2 个 interval，期望至少发送一次心跳。
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		if atomic.LoadInt32(sent) >= 1 && atomic.LoadInt32(&builderCalls) >= 1 {
+		if atomic.LoadInt32(sent) >= 1 && builderCalls.Load() >= 1 {
 			break
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	if got := atomic.LoadInt32(&builderCalls); got < 1 {
+	if got := builderCalls.Load(); got < 1 {
 		t.Fatalf("builder 调用次数 = %d, want >= 1（pump 未触发心跳到期）", got)
 	}
 	if got := atomic.LoadInt32(sent); got < 1 {
@@ -339,7 +339,7 @@ func TestPump_BoundedBatch_DoesNotStarveHeartbeat(t *testing.T) {
 	// 用 fakeAdapter.decodeRouteKey = "test.route"，但未注册该 routeKey 的 listen/responseMap，
 	// 所以 decode 后走 OnReceive 的「未匹配」分支丢弃——但仍消耗 pump CPU（decode+查 map）。
 	const frames = 200
-	for i := 0; i < frames; i++ {
+	for i := range frames {
 		conn.inboundCh <- inboundFrame{Data: []byte{byte(i)}, WireBytes: 1, RecvFrameAt: time.Now()}
 	}
 
@@ -353,7 +353,7 @@ func TestPump_BoundedBatch_DoesNotStarveHeartbeat(t *testing.T) {
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		// 等待 fakeAdapter.decodeCalls 接近 frames，说明 pump 已处理完大部分。
-		if atomic.LoadInt32(&adp.decodeCalls) >= int32(frames) {
+		if adp.decodeCalls.Load() >= int32(frames) {
 			break
 		}
 		time.Sleep(time.Millisecond)

@@ -188,12 +188,12 @@ func TestDedupConcurrent(t *testing.T) {
 	const workers, rounds = 8, 200
 	results := make([][]*WireValue, workers)
 	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
 			results[w] = make([]*WireValue, 0, rounds)
-			for i := 0; i < rounds; i++ {
+			for i := range rounds {
 				raw := rawA
 				if (w+i)%2 == 1 {
 					raw = rawB

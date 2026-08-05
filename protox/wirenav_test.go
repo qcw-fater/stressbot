@@ -11,7 +11,7 @@ import (
 )
 
 // TestNavProgramParity 预解析 fd 链与逐层 ByName 的导航结果逐字一致
-//（随机消息 + 全路径语料，含 [0..2]/[99] 下标段——同时覆盖列表下标早退与
+// （随机消息 + 全路径语料，含 [0..2]/[99] 下标段——同时覆盖列表下标早退与
 // 全量收集两条分支）。三方对拍：程序化导航 ≡ 无程序导航 ≡ Frozen oracle。
 func TestNavProgramParity(t *testing.T) {
 	f := newWireTestFactory(t)
@@ -20,7 +20,7 @@ func TestNavProgramParity(t *testing.T) {
 	md, _ := f.MessageDescriptor("wiretest.Everything")
 
 	rnd := rand.New(rand.NewSource(20260730))
-	for it := 0; it < 50; it++ {
+	for it := range 50 {
 		msg := dynamicpb.NewMessage(md)
 		randFill(rnd, msg.ProtoReflect(), 3)
 		raw, err := proto.Marshal(msg)
@@ -105,14 +105,14 @@ func TestNavResolveShadowCadence(t *testing.T) {
 	md, _ := f.MessageDescriptor("wiretest.Everything")
 	segs := []string{"str"}
 
-	for i := 0; i < shadowFirstK; i++ {
+	for i := range shadowFirstK {
 		if _, verify := navResolve(md, segs); !verify {
 			t.Fatalf("第 %d 次应触发首 K 全查", i+1)
 		}
 	}
 	// 稳态：远小于采样周期的窗口内不应连续命中。
 	hits := 0
-	for i := 0; i < 64; i++ {
+	for range 64 {
 		if _, verify := navResolve(md, segs); verify {
 			hits++
 		}

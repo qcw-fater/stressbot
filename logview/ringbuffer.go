@@ -125,7 +125,7 @@ func (rb *RingBuffer) Query(params QueryParams) QueryResult {
 	collected := 0
 	hasMore := false
 
-	for i := 0; i < count; i++ {
+	for i := range count {
 		idx := (start + i) % size
 		item := &rb.buf[idx]
 

@@ -5,6 +5,7 @@ package state
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"strconv"
 	"strings"
@@ -146,9 +147,7 @@ func (s *Store) GetMap(key string) map[string]any {
 	defer s.mu.RUnlock()
 	if m, ok := s.data[key].(map[string]any); ok {
 		out := make(map[string]any, len(m))
-		for k, v := range m {
-			out[k] = v
-		}
+		maps.Copy(out, m)
 		return out
 	}
 	// 惰性值（WireValue/Overlay 等）：全量物化后若是 map 则直通（产物现场新建，免拷贝）。
@@ -336,7 +335,7 @@ func (s *Store) SetPath(path string, value any) {
 func NavigatePath(v any, path string) any {
 	cur := v
 	segs := splitPathCached(path)
-	for i := 0; i < len(segs); i++ {
+	for i := range segs {
 		if cur == nil {
 			return nil
 		}

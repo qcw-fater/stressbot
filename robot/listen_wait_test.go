@@ -1,7 +1,6 @@
 package robot
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -14,8 +13,7 @@ import (
 // 回归的是轮询取整误差：若以「发现时刻」为终点，测出来的是 pollMs 的整数倍，
 // 轮询间隔越大偏得越多，服务端推送的真实延迟被埋掉。
 func TestWaitMeasuresListenWaitFromFrameArrival(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	r := newWaitRobot(ctx)
 
 	// 帧在等待开始后 40ms 到达，但轮询间隔 200ms——发现它至少要等到 200ms。
@@ -40,8 +38,7 @@ func TestWaitMeasuresListenWaitFromFrameArrival(t *testing.T) {
 // TestWaitMarksAlreadyQueuedMessageAsReady 消息在开始等待前就已在队列里时，
 // 等待时长不可测，标记为 Ready 而不是产出一个接近 0 的样本。
 func TestWaitMarksAlreadyQueuedMessageAsReady(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	r := newWaitRobot(ctx)
 
 	arrived := time.Now().Add(-3 * time.Second)
@@ -61,8 +58,7 @@ func TestWaitMarksAlreadyQueuedMessageAsReady(t *testing.T) {
 
 // TestWaitWithoutFrameTimestampIsUnknown 网络层没给到达时刻时不臆造样本。
 func TestWaitWithoutFrameTimestampIsUnknown(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	r := newWaitRobot(ctx)
 
 	check := func() *engine.NetExchange {

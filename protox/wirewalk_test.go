@@ -100,7 +100,7 @@ func TestWalkWireAccsPoolNoContamination(t *testing.T) {
 	empty := buildEverything(t, f, nil)
 	sparse := buildEverything(t, f, func(m proto.Message) { setF(t, f, m, "i32", int64(9)) })
 
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		assertTreeEqual(t, f, "wiretest.Everything", mustMarshal(t, full))
 		assertTreeEqual(t, f, "wiretest.Everything", mustMarshal(t, empty))
 		assertTreeEqual(t, f, "wiretest.Everything", mustMarshal(t, sparse))
@@ -142,7 +142,7 @@ func TestMaterializeShadowSamplingVerifies(t *testing.T) {
 	wv := wireOf(t, f, "wiretest.Everything", mustMarshal(t, msg))
 
 	before := SnapshotWireShadowStats()
-	for i := 0; i < shadowFirstK+2; i++ {
+	for range shadowFirstK + 2 {
 		if _, ok := wv.MaterializeValue().(map[string]any); !ok {
 			t.Fatal("MaterializeValue 应产出 map")
 		}

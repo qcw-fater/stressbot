@@ -71,7 +71,7 @@ func loadBenchSchemaCodec(b *testing.B) *codec.SchemaCodec {
 	if err != nil {
 		// 回溯找仓库根（兼容从根目录 go test ./...）。
 		dir, _ := os.Getwd()
-		for i := 0; i < 8; i++ {
+		for range 8 {
 			p := filepath.Join(dir, "codec", "testdata", "tcp_logic_codec.json")
 			if _, statErr := os.Stat(p); statErr == nil {
 				s, err = codec.LoadSchema(p)
@@ -111,7 +111,7 @@ func findBenchRoot(b *testing.B) string {
 	if err != nil {
 		b.Fatalf("Getwd: %v", err)
 	}
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		if _, err := os.Stat(filepath.Join(dir, "conf", "adapter", "codec.lua")); err == nil {
 			return dir
 		}

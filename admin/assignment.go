@@ -87,7 +87,7 @@ func (a *Assigner) proportionalAssign(task *Task, agents []*AgentNode, startNumb
 
 	// 余数按最大剩余小数分配
 	remainder := task.TotalBots - assigned
-	for i := 0; i < remainder; i++ {
+	for range remainder {
 		bestIdx := 0
 		bestFrac := -1.0
 		for j, ag := range agents {

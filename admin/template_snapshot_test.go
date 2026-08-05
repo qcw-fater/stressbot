@@ -110,8 +110,8 @@ func TestTemplateSnapshotRejectsStaleRevisionWithoutDelete(t *testing.T) {
 			AddRow("a", "A", nil, "tcpRequest", []byte(`{"pattern":"tcpRequest","service":"logic","route":{"cmd":1},"s2cProto":"LoginS2C"}`), now, now))
 	mock.ExpectRollback()
 	_, err = NewActionTemplateStore(db).ReplaceSnapshot(context.Background(), ReplaceTemplateSnapshotRequest[ActionTemplate]{ExpectedRevision: "sha256:stale", IDPolicy: TemplateIDPreserve, Items: []ActionTemplate{snapshotAction("a", "A", now, now)}})
-	var apiErr *Error
-	if !errors.As(err, &apiErr) || apiErr.Code != ErrTemplateSnapshotConflict.Code {
+	apiErr, ok := errors.AsType[*Error](err)
+	if !ok || apiErr.Code != ErrTemplateSnapshotConflict.Code {
 		t.Fatalf("error = %#v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

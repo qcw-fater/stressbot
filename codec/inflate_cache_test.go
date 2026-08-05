@@ -114,7 +114,7 @@ func TestDecodeInflateDedupE2E(t *testing.T) {
 	}
 
 	before := sharedInflateCache.stats()
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		_, got, _ := c.DecodeTCP(frame, key)
 		if !bytes.Equal(got, body) {
 			t.Fatalf("第 %d 次 decode body 不一致", i+1)
@@ -130,9 +130,9 @@ func TestDecodeInflateDedupE2E(t *testing.T) {
 
 	// 并发段：8 goroutine × 25 次同帧 decode，全部结果正确（共享产物只读契约）。
 	done := make(chan error, 8)
-	for g := 0; g < 8; g++ {
+	for range 8 {
 		go func() {
-			for i := 0; i < 25; i++ {
+			for range 25 {
 				_, got, _ := c.DecodeTCP(frame, key)
 				if !bytes.Equal(got, body) {
 					done <- bytes.ErrTooLarge // 任意非 nil 哨兵
@@ -142,7 +142,7 @@ func TestDecodeInflateDedupE2E(t *testing.T) {
 			done <- nil
 		}()
 	}
-	for g := 0; g < 8; g++ {
+	for range 8 {
 		if err := <-done; err != nil {
 			t.Fatal("并发 decode 结果不一致")
 		}

@@ -1,7 +1,6 @@
 package network
 
 import (
-	"sync/atomic"
 	"time"
 
 	stresslog "stressbot/utils/log"
@@ -51,7 +50,7 @@ type heartbeatRuntime struct {
 // 必须在 StartPump 之后调用（pump 未启动时 controlCh 为 nil，本方法降级为直接写 c.hb + 启动
 // 临时 timer 的兼容路径——但生产路径 dial 总是先 StartPump 后注册心跳，故该降级路径仅用于测试）。
 func (c *Connection) RegisterHeartbeat(cfg HeartbeatConfig) {
-	if c == nil || atomic.LoadInt32(&c.isClose) == 1 {
+	if c == nil || c.isClose.Load() == 1 {
 		return
 	}
 	if cfg.Interval <= 0 || cfg.Builder == nil {

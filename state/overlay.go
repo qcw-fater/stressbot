@@ -52,7 +52,7 @@ func (o *Overlay) NavigateSegs(segs []string) (any, bool) {
 // navigateFrom 在任意值上逐段导航（GetPath 内层循环的无锁版本，供覆盖层内值使用）。
 func navigateFrom(v any, segs []string) (any, bool) {
 	cur := v
-	for i := 0; i < len(segs); i++ {
+	for i := range segs {
 		if cur == nil {
 			return nil, false
 		}

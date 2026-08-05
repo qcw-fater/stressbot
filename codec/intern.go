@@ -10,6 +10,8 @@
 // 帧产出无界垃圾键把表撑爆——超限后直接返回新分配串，不再驻留（正确性无损）。
 package codec
 
+import "maps"
+
 import "sync/atomic"
 
 // internMaxEntries routeKey 驻留表容量上限（正常负载几十条；上限只防损坏帧）。
@@ -38,9 +40,7 @@ func internRouteKey(b []byte) string {
 			return canon // 竞争者先插入
 		}
 		nm := make(map[string]string, len(oldM)+1)
-		for k, v := range oldM {
-			nm[k] = v
-		}
+		maps.Copy(nm, oldM)
 		nm[s] = s
 		if routeKeyTable.CompareAndSwap(old, &nm) {
 			return s

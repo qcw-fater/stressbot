@@ -40,12 +40,12 @@ type WorkPool struct {
 
 	stopped   atomic.Bool
 	stopCh    chan struct{}
-	waiting   atomic.Int64 // 等待执行的任务数
-	submitted atomic.Int64 // 已提交的任务数
-	completed atomic.Int64 // 已完成的任务数
-	failed    atomic.Int64 // 失败的任务数
-	goID      uint32       // goroutine ID 计数器
-	goCount   atomic.Int32 // 当前运行中的 goroutine 数
+	waiting   atomic.Int64  // 等待执行的任务数
+	submitted atomic.Int64  // 已提交的任务数
+	completed atomic.Int64  // 已完成的任务数
+	failed    atomic.Int64  // 失败的任务数
+	goID      atomic.Uint32 // goroutine ID 计数器
+	goCount   atomic.Int32  // 当前运行中的 goroutine 数
 
 	cfg *PoolConfig
 }
@@ -77,7 +77,7 @@ func InitWorkPool(cfg *PoolConfig) {
 			PreAlloc:         cfg.PreAlloc,
 			MaxBlockingTasks: cfg.MaxBlockingTasks,
 			Nonblocking:      cfg.Nonblocking,
-			PanicHandler: func(err interface{}) {
+			PanicHandler: func(err any) {
 				log.DPanic("goroutine pool panic", zap.Any("error", err))
 			},
 		}
@@ -146,7 +146,7 @@ func (p *WorkPool) submit(task func(stopCh <-chan struct{})) error {
 		caller string
 	)
 	if debugOn {
-		id = atomic.AddUint32(&p.goID, 1)
+		id = p.goID.Add(1)
 		count = p.goCount.Load()
 		caller = p.getCaller()
 		p.goroutines.Store(id, &goroutineInfo{
@@ -256,7 +256,7 @@ func (p *WorkPool) Shutdown() {
 
 // printLeakedGoroutines 打印泄漏的 goroutine 信息
 func (p *WorkPool) printLeakedGoroutines() {
-	p.goroutines.Range(func(key, value interface{}) bool {
+	p.goroutines.Range(func(key, value any) bool {
 		info := value.(*goroutineInfo)
 		log.Error("leaked goroutine",
 			zap.Uint32("id", info.id),

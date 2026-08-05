@@ -28,6 +28,7 @@ package protox
 
 import (
 	"hash/maphash"
+	"maps"
 	"sync/atomic"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -91,9 +92,7 @@ func navSchemaCntFor(name string) *atomic.Int64 {
 			}
 		}
 		nm := make(map[string]*atomic.Int64, len(m)+1)
-		for k, v := range m {
-			nm[k] = v
-		}
+		maps.Copy(nm, m)
 		c := new(atomic.Int64)
 		nm[name] = c
 		if navSchemaCnt.CompareAndSwap(old, &nm) {
@@ -143,9 +142,7 @@ func navInfoFor(desc protoreflect.MessageDescriptor, segs []string) *navPathInfo
 			}
 		}
 		nm := make(map[uint64]*navPathInfo, len(m)+1)
-		for k, v := range m {
-			nm[k] = v
-		}
+		maps.Copy(nm, m)
 		nm[h] = info
 		if navInfoTable.CompareAndSwap(old, &nm) {
 			return info

@@ -75,8 +75,8 @@ type Connection struct {
 	mu               sync.Mutex                // 保护 responseMap / listenRoutes map 键 + binding.cb / 回调字段（各 listenQueue 自带 mu 串行化 Push/Pop）
 	ctx              context.Context           // 连接生命周期上下文
 	cancel           context.CancelFunc        // 取消函数，关闭时调用
-	isClose          int32                     // 原子标记：0=活跃，1=已关闭
-	intentionalClose int32                     // 原子标记：1=主动 Close() 触发，不触发 onDisconnect
+	isClose          atomic.Int32              // 原子标记：0=活跃，1=已关闭
+	intentionalClose atomic.Int32              // 原子标记：1=主动 Close() 触发，不触发 onDisconnect
 	requestTimeout   time.Duration             // RequestResponse 默认超时
 	sendFunc         sendBackend               // 底层发送函数（由 Dialer 注入）
 	closeFunc        func() error              // 底层关闭函数（由 Dialer 注入）
@@ -94,7 +94,7 @@ type Connection struct {
 	inboundCh chan inboundFrame // 待解码的 raw msg buffer（OnTraffic 投递→pump 消费）
 	controlCh chan pumpCmd      // pump 控制通道（注册/停止心跳、stop）
 	pumpDone  chan struct{}     // pump goroutine 退出信号，供 WaitPumpDone/WaitDecodeDone/WaitListenDone 等待
-	pumpRun   int32             // 原子标记：1 表示 pump 已启动（CAS 防重复启动）
+	pumpRun   atomic.Int32      // 原子标记：1 表示 pump 已启动（CAS 防重复启动）
 	// hbMu 保护 hb 字段的替换（RegisterHeartbeat/StopHeartbeat 投递 controlCh 前/后读取）。
 	// pump goroutine 内部读写 hb 不需要这把锁（pump 是唯一执行者）；这把锁只保护
 	// 「pump 外部 goroutine 在投递 controlCh 前快速判断当前是否已注册心跳」这类只读快照。
@@ -224,7 +224,7 @@ func (c *Connection) publishClosed() {
 // SetSecretKey 设置通信加密密钥。
 // 复制传入的 key 后整体替换（immutable），后续不再修改已存储的切片。
 func (c *Connection) SetSecretKey(key []byte) {
-	if c == nil || atomic.LoadInt32(&c.isClose) == 1 {
+	if c == nil || c.isClose.Load() == 1 {
 		return
 	}
 	if len(key) == 0 {
@@ -254,7 +254,7 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 	if c == nil {
 		return nil, timing, engine.NewActionError(errcode.ErrConnNotFound, "routeKey="+routeKey)
 	}
-	if atomic.LoadInt32(&c.isClose) == 1 {
+	if c.isClose.Load() == 1 {
 		stresslog.Warn("[NETWORK] RequestResponse 连接已关闭", zap.String("service", c.serviceName), zap.String("routeKey", routeKey), zap.String("robot", c.robotName))
 		return nil, timing, engine.NewActionError(errcode.ErrConnClosed, c.serviceName+" routeKey="+routeKey)
 	}
@@ -317,7 +317,7 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 		default:
 		}
 		elapsed := safeSub(time.Now(), stamp.enqueuedAt)
-		if atomic.LoadInt32(&c.intentionalClose) == 1 {
+		if c.intentionalClose.Load() == 1 {
 			stresslog.Debug("[NETWORK] RequestResponse 因本地关闭被取消",
 				zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
 				zap.String("robot", c.robotName),
@@ -387,7 +387,7 @@ func (c *Connection) SendRequest(sendData []byte, routeKey string, timeout time.
 	if c == nil {
 		return nil, engine.NewActionError(errcode.ErrConnNotFound, "routeKey="+routeKey)
 	}
-	if atomic.LoadInt32(&c.isClose) == 1 {
+	if c.isClose.Load() == 1 {
 		return nil, engine.NewActionError(errcode.ErrConnClosed, c.serviceName+" routeKey="+routeKey)
 	}
 	if timeout <= 0 {
@@ -495,7 +495,7 @@ func (c *Connection) send(data []byte, onWritten WriteDoneFunc) (int, error) {
 	if c == nil {
 		return 0, engine.NewActionError(errcode.ErrConnNotFound, "")
 	}
-	if atomic.LoadInt32(&c.isClose) == 1 {
+	if c.isClose.Load() == 1 {
 		return 0, engine.NewActionError(errcode.ErrConnClosed, c.serviceName)
 	}
 	if c.sendFunc == nil {
@@ -545,7 +545,7 @@ func (c *Connection) RegisterListen(routeKey string, cb ListenCallBack, queueSiz
 	if c == nil {
 		return fmt.Errorf("监听注册失败：连接为 nil（routeKey=%q）", routeKey)
 	}
-	if atomic.LoadInt32(&c.isClose) == 1 {
+	if c.isClose.Load() == 1 {
 		return fmt.Errorf("监听注册失败：连接已关闭（service=%q routeKey=%q）", c.serviceName, routeKey)
 	}
 
@@ -655,7 +655,7 @@ func (c *Connection) dispatchListen(resp *Message, cb ListenCallBack, q *listenQ
 // c.mu 仅查 map；Pop 走队列自身 mu。默认容量 1 时与旧「读 listenMsg[k] + delete」
 // 行为一致：返回最近一条 Push 并清空。
 func (c *Connection) GetListenResp(routeKey string) *Message {
-	if c == nil || atomic.LoadInt32(&c.isClose) == 1 {
+	if c == nil || c.isClose.Load() == 1 {
 		return nil
 	}
 	c.mu.Lock()
@@ -694,7 +694,7 @@ func (c *Connection) startPumpWithSubmit(adp adapter.Adapter, isUDP bool, submit
 	if adp == nil {
 		return fmt.Errorf("adapter 不能为空")
 	}
-	if !atomic.CompareAndSwapInt32(&c.pumpRun, 0, 1) {
+	if !c.pumpRun.CompareAndSwap(0, 1) {
 		return nil
 	}
 	c.adp = adp
@@ -709,7 +709,7 @@ func (c *Connection) startPumpWithSubmit(adp adapter.Adapter, isUDP bool, submit
 		c.inboundCh = nil
 		c.controlCh = nil
 		c.pumpDone = nil
-		atomic.StoreInt32(&c.pumpRun, 0)
+		c.pumpRun.Store(0)
 		return fmt.Errorf("提交 connection pump 失败: %w", err)
 	}
 	return nil
@@ -860,7 +860,7 @@ func (c *Connection) sendHeartbeatLocked() {
 	if c.hb == nil {
 		return
 	}
-	if atomic.LoadInt32(&c.isClose) == 1 {
+	if c.isClose.Load() == 1 {
 		return
 	}
 	packet := c.hb.cfg.Builder()
@@ -982,7 +982,7 @@ func (c *Connection) EnqueueRaw(msgBuf []byte, recvFrameAt time.Time) EnqueueRes
 	if c == nil {
 		return EnqueueClosed
 	}
-	if atomic.LoadInt32(&c.isClose) == 1 {
+	if c.isClose.Load() == 1 {
 		return EnqueueClosed
 	}
 	if c.inboundCh == nil {
@@ -1092,7 +1092,7 @@ func (c *Connection) doClose() {
 // reason 来自 gnet OnClose 给的 error 字符串（"EOF" / "wsarecv: ... forcibly closed" / "" 等），
 // 在 cancel ctx 之前写入 closeReason，让 inflight RequestResponse 命中 ctx.Done() 时能拿到归因。
 func (c *Connection) onClose(reason string) {
-	if !atomic.CompareAndSwapInt32(&c.isClose, 0, 1) {
+	if !c.isClose.CompareAndSwap(0, 1) {
 		return
 	}
 	// 关键顺序：先写 closeReason 再 cancel，保证 RequestResponse 在 ctx.Done()
@@ -1103,7 +1103,7 @@ func (c *Connection) onClose(reason string) {
 	c.doClose()
 
 	// 业务"意外断开"回调：仅非主动关闭时触发（用于 robot 主连接断开 → 停 robot）
-	if atomic.LoadInt32(&c.intentionalClose) == 0 {
+	if c.intentionalClose.Load() == 0 {
 		c.publishDisconnected()
 	}
 	// 监控"关闭"回调：主动/被动均触发；与 ConnEstablished 配对，保证 active = open - close 准确
@@ -1114,10 +1114,10 @@ func (c *Connection) onClose(reason string) {
 
 // Close 主动关闭连接。触发 onClosed 但不触发 onDisconnect（主动关闭不算意外断开）。
 func (c *Connection) Close() {
-	if c == nil || !atomic.CompareAndSwapInt32(&c.isClose, 0, 1) {
+	if c == nil || !c.isClose.CompareAndSwap(0, 1) {
 		return
 	}
-	atomic.StoreInt32(&c.intentionalClose, 1)
+	c.intentionalClose.Store(1)
 	if c.closeFunc != nil {
 		_ = c.closeFunc()
 	}
@@ -1141,7 +1141,7 @@ func (c *Connection) Close() {
 // 避免在 info 级别下白白构造 zap.Field 切片（每包 4 个 string field，
 // 10000 连接 × 5 包/s 下能省下数百微秒 CPU/s）。
 func (c *Connection) OnReceive(routeKey string, body []byte, headerErr uint64, wireBytes int, timing MessageTiming) {
-	if atomic.LoadInt32(&c.isClose) == 1 {
+	if c.isClose.Load() == 1 {
 		return
 	}
 

@@ -96,10 +96,7 @@ func MergeCleanupStatus(reason CleanupReason, statuses ...CleanupStatus) Cleanup
 			out.DurationMs = s.DurationMs
 		}
 		if len(out.Issues) < 20 {
-			remain := 20 - len(out.Issues)
-			if len(s.Issues) < remain {
-				remain = len(s.Issues)
-			}
+			remain := min(len(s.Issues), 20-len(out.Issues))
 			out.Issues = append(out.Issues, s.Issues[:remain]...)
 		}
 		switch s.Status {

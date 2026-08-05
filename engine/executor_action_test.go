@@ -160,8 +160,7 @@ func TestExecutorExecuteActionAbortWrapsErrExecFailed(t *testing.T) {
 		OnError: &OnErrorDef{Strategy: StrategyAbort},
 		DelayMs: 1,
 	})
-	var actionErr *ActionError
-	if !errors.As(err, &actionErr) || actionErr.Code != errcode.ErrExecFailed {
+	if actionErr, ok := errors.AsType[*ActionError](err); !ok || actionErr.Code != errcode.ErrExecFailed {
 		t.Fatalf("失败路径应按 abort 包装 ErrExecFailed，实际 %v", err)
 	}
 	if handler.sleepCalls != 1 {
@@ -396,8 +395,7 @@ func TestExecutorExecuteActionListenRegisterFailureDoesNotRetry(t *testing.T) {
 		ListenRefs: []ListenRef{{Server: "tcp:logic", Listen: "push"}},
 		DelayMs:    -1,
 	})
-	var actionErr *ActionError
-	if !errors.As(err, &actionErr) || actionErr.Code != errcode.ErrListenRegister {
+	if actionErr, ok := errors.AsType[*ActionError](err); !ok || actionErr.Code != errcode.ErrListenRegister {
 		t.Fatalf("监听注册失败应按 ErrListenRegister abort，实际 %v", err)
 	}
 	if got := countActionCalls(handler.actionNames, "a"); got != 1 {

@@ -38,7 +38,7 @@ func loadSchemaForPreview(t *testing.T) *codec.CodecSchema {
 	}
 	// 回溯找仓库根。
 	dir, _ := os.Getwd()
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		p := filepath.Join(dir, "codec", "testdata", "tcp_logic_codec.json")
 		if _, err := os.Stat(p); err == nil {
 			s, err := codec.LoadSchema(p)

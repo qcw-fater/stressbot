@@ -36,8 +36,7 @@ func wantCode(t *testing.T, err error, want errcode.ErrorCode) {
 
 // TestAwaitResponse_ConnNotFound ?????? service ? Err ? ErrConnNotFound?
 func TestAwaitResponse_ConnNotFound(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	r := newResponseRobot(ctx)
 
 	out := r.sched.awaitResponse(&script.WaitSpec{
@@ -56,8 +55,7 @@ func TestAwaitResponse_ConnNotFound(t *testing.T) {
 
 // TestAwaitResponse_SendFailed ???????? sendFunc??????? ???? Err?
 func TestAwaitResponse_SendFailed(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	r := newResponseRobot(ctx)
 	r.client.ConnectTCP("logic") // ???????sendFunc=nil?
 
@@ -77,8 +75,7 @@ func TestAwaitResponse_SendFailed(t *testing.T) {
 
 // TestAwaitResponse_UDPConnNotFound UDP ??????????? ErrConnNotFound??? proto ????
 func TestAwaitResponse_UDPConnNotFound(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	r := newResponseRobot(ctx)
 
 	out := r.sched.awaitResponse(&script.WaitSpec{

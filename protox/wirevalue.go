@@ -3,6 +3,7 @@ package protox
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"sync"
 	"unicode/utf8"
@@ -658,7 +659,7 @@ func decodeScalarWire(fd protoreflect.FieldDescriptor, u uint64, bs []byte) any 
 	case protoreflect.StringKind:
 		return string(bs)
 	case protoreflect.BytesKind:
-		return append([]byte{}, bs...)
+		return slices.Clone(bs)
 	case protoreflect.EnumKind:
 		return int64(int32(u))
 	default:

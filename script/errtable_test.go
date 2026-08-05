@@ -97,8 +97,8 @@ func TestErrTableFromActionErrPreservesWrappedActionError(t *testing.T) {
 func TestBuildActionError(t *testing.T) {
 	// 框架码
 	err := buildActionError(int(errcode.ErrRecvTimeout), "service=logic route=1:2", "match_succeed.lua")
-	var ae *engine.ActionError
-	if !errors.As(err, &ae) {
+	ae, ok := errors.AsType[*engine.ActionError](err)
+	if !ok {
 		t.Fatalf("err 不是 *ActionError: %T", err)
 	}
 	if ae.Code != errcode.ErrRecvTimeout {
@@ -109,7 +109,8 @@ func TestBuildActionError(t *testing.T) {
 	}
 	// 业务码
 	err = buildActionError(1004, "队伍已满: route=CreateTeam", "guild_join.lua")
-	if !errors.As(err, &ae) {
+	ae, ok = errors.AsType[*engine.ActionError](err)
+	if !ok {
 		t.Fatal("业务码 err 不是 *ActionError")
 	}
 	if ae.Code != errcode.ErrorCode(1004) {

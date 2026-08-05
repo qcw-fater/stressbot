@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"runtime/metrics"
+	"slices"
 	"sync"
 )
 
@@ -84,8 +85,8 @@ func summarizeSchedHistogram(counts []uint64, buckets []float64) SchedLatencySum
 	out.P90Ms = quantile(0.90)
 	out.P99Ms = quantile(0.99)
 	out.P999Ms = quantile(0.999)
-	for i := len(counts) - 1; i >= 0; i-- {
-		if counts[i] > 0 {
+	for i, count := range slices.Backward(counts) {
+		if count > 0 {
 			out.MaxMs = upperMs(i)
 			break
 		}

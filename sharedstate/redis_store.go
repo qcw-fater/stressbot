@@ -2,6 +2,7 @@ package sharedstate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -120,7 +121,7 @@ func (s *RedisStore) Set(ctx context.Context, key string, value any, ttl time.Du
 func (s *RedisStore) Get(ctx context.Context, key string) (any, bool, error) {
 	k := s.key(typeKV, key)
 	raw, err := s.rdb.Get(ctx, k).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return nil, false, nil
 	}
 	if err != nil {
@@ -200,7 +201,7 @@ func (s *RedisStore) Release(ctx context.Context, key, owner string) (bool, erro
 func (s *RedisStore) Owner(ctx context.Context, key string) (string, bool, error) {
 	k := s.key(typeClaim, key)
 	v, err := s.rdb.Get(ctx, k).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return "", false, nil
 	}
 	if err != nil {
@@ -235,7 +236,7 @@ func (s *RedisStore) QueuePush(ctx context.Context, key string, value any, ttl t
 func (s *RedisStore) QueuePop(ctx context.Context, key string) (any, bool, error) {
 	k := s.key(typeQueue, key)
 	raw, err := s.rdb.LPop(ctx, k).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return nil, false, nil
 	}
 	if err != nil {
@@ -274,7 +275,7 @@ func (s *RedisStore) HashSet(ctx context.Context, key, field string, value any, 
 func (s *RedisStore) HashGet(ctx context.Context, key, field string) (any, bool, error) {
 	k := s.key(typeHash, key)
 	raw, err := s.rdb.HGet(ctx, k, field).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return nil, false, nil
 	}
 	if err != nil {

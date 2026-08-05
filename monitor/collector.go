@@ -498,10 +498,7 @@ func (c *MetricsCollector) recordAction(
 	// 否则会出现"分子含取消样本、分母不含"的均值偏高（snapshot 按 clientCostCount 求均值）。
 	// canceledCount 仍在下方单独累加，字节数照常计，取消事件不丢失。
 	if result != ResultCanceled || wallClock > 0 {
-		clientCost := wallClock - timing.wireRTTSum()
-		if clientCost < 0 {
-			clientCost = 0
-		}
+		clientCost := max(wallClock-timing.wireRTTSum(), 0)
 		if clientCost > 0 {
 			am.clientCostSum.Add(clientCost.Nanoseconds())
 		}
@@ -613,8 +610,8 @@ func (c *MetricsCollector) recordAction(
 
 // recordError 记录错误到分布 map，按 code 聚合。
 func (c *MetricsCollector) recordError(am *actionMetrics, err error) {
-	var ce CodedError
-	if !errors.As(err, &ce) {
+	ce, ok := errors.AsType[CodedError](err)
+	if !ok {
 		return
 	}
 	key := errKey{Code: ce.ErrorCode()}

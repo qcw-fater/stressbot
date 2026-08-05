@@ -2,7 +2,7 @@ package monitor
 
 import (
 	"math"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -61,7 +61,7 @@ func TestLatencyHistogramDDSketchQuantilesStayAccurateAndBounded(t *testing.T) {
 	}
 
 	sorted := append([]time.Duration(nil), values...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	slices.Sort(sorted)
 	for name, got := range map[string]float64{
 		"p50": p50,
 		"p90": p90,

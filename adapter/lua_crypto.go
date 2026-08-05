@@ -288,10 +288,11 @@ func decryptXor(data, key []byte) { encryptXor(data, key) }
 // encryptXorCarry XOR + carry 加法反馈流加密。
 //
 // 对每个字节：
-//   x = data[i] ^ key[i % 32]
-//   x = x + carry
-//   data[i] = x
-//   carry = x
+//
+//	x = data[i] ^ key[i % 32]
+//	x = x + carry
+//	data[i] = x
+//	carry = x
 //
 // carry 形成链式依赖，每个字节的密文依赖前面所有明文，比纯 XOR 更难破译。
 func encryptXorCarry(data, key []byte) {
@@ -307,11 +308,12 @@ func encryptXorCarry(data, key []byte) {
 // decryptXorCarry XOR + carry 加法反馈流解密。
 //
 // 逆运算：
-//   enc = data[i]
-//   x = enc - carry
-//   x = x ^ key[i % 32]
-//   data[i] = x
-//   carry = enc
+//
+//	enc = data[i]
+//	x = enc - carry
+//	x = x ^ key[i % 32]
+//	data[i] = x
+//	carry = enc
 //
 // 注意 carry 取的是加密后的密文字节 enc，不是解密后的明文字节。
 func decryptXorCarry(data, key []byte) {
@@ -328,11 +330,12 @@ func decryptXorCarry(data, key []byte) {
 // encryptXorCarryRol XOR + carry + ROL8 流加密。
 //
 // 对每个字节：
-//   x = data[i] ^ key[i % 32]
-//   x = x + carry
-//   x = ROL8(x, rolBits)
-//   data[i] = x
-//   carry = x
+//
+//	x = data[i] ^ key[i % 32]
+//	x = x + carry
+//	x = ROL8(x, rolBits)
+//	data[i] = x
+//	carry = x
 //
 // 这是当前游戏服务器使用的 NetEncrypt 算法（rolBits=3）。
 // ROL8 增加扩散性，使相邻明文字节的差异在密文中迅速扩散到所有位。
@@ -350,12 +353,13 @@ func encryptXorCarryRol(data, key []byte, rolBits uint) {
 // decryptXorCarryRol XOR + carry + ROL8 流解密。
 //
 // 逆运算：
-//   enc = data[i]
-//   x = ROR8(enc, rolBits)
-//   x = x - carry
-//   x = x ^ key[i % 32]
-//   data[i] = x
-//   carry = enc
+//
+//	enc = data[i]
+//	x = ROR8(enc, rolBits)
+//	x = x - carry
+//	x = x ^ key[i % 32]
+//	data[i] = x
+//	carry = enc
 //
 // 解密顺序是加密的精确逆序：先反旋转，再减 carry，再 XOR key。
 func decryptXorCarryRol(data, key []byte, rolBits uint) {
@@ -634,13 +638,13 @@ func encryptXXTEA(data []byte, key [4]uint32) []byte {
 
 	rounds := 6 + 52/n
 	sum := uint32(0)
-	for i := 0; i < rounds; i++ {
+	for range rounds {
 		sum += xxteaDelta
 		e := (sum >> 2) & 3
-		for p := 0; p < n; p++ {
+		for p := range n {
 			left := v[(p+n-1)%n]
 			right := v[(p+1)%n]
-			z := ((right >> 5 ^ left << 2) + (left >> 3 ^ right << 4)) ^ ((sum ^ right) + (key[uint32(p)&3^e] ^ left))
+			z := ((right>>5 ^ left<<2) + (left>>3 ^ right<<4)) ^ ((sum ^ right) + (key[uint32(p)&3^e] ^ left))
 			v[p] += z
 		}
 	}
@@ -658,12 +662,12 @@ func decryptXXTEA(data []byte, key [4]uint32) []byte {
 
 	rounds := 6 + 52/n
 	sum := uint32(rounds) * xxteaDelta
-	for i := 0; i < rounds; i++ {
+	for range rounds {
 		e := (sum >> 2) & 3
 		for p := n - 1; ; p-- {
 			right := v[(p+1)%n]
 			left := v[(p+n-1)%n]
-			z := ((right >> 5 ^ left << 2) + (left >> 3 ^ right << 4)) ^ ((sum ^ right) + (key[uint32(p)&3^e] ^ left))
+			z := ((right>>5 ^ left<<2) + (left>>3 ^ right<<4)) ^ ((sum ^ right) + (key[uint32(p)&3^e] ^ left))
 			v[p] -= z
 			if p == 0 {
 				break
@@ -677,7 +681,7 @@ func decryptXXTEA(data []byte, key [4]uint32) []byte {
 // bytesToUint32s 将字节切片转为小端序 uint32 切片。
 func bytesToUint32s(data []byte, n int) []uint32 {
 	v := make([]uint32, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		v[i] = binary.LittleEndian.Uint32(data[i*4:])
 	}
 	return v
@@ -749,7 +753,7 @@ func crc16CCITT(data []byte) uint16 {
 	crc := uint16(0xFFFF)
 	for _, b := range data {
 		crc ^= uint16(b) << 8
-		for i := 0; i < 8; i++ {
+		for range 8 {
 			if crc&0x8000 != 0 {
 				crc = (crc << 1) ^ 0x1021
 			} else {

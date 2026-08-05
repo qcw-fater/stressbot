@@ -282,10 +282,7 @@ func (h *HistoryStore) List(ctx context.Context, filter HistoryFilter) (*History
 	if filter.Limit > 0 && filter.Limit <= 100 {
 		limit = filter.Limit
 	}
-	offset := filter.Offset
-	if offset < 0 {
-		offset = 0
-	}
+	offset := max(filter.Offset, 0)
 
 	const fromJoin = " FROM task_history th LEFT JOIN task_meta m ON m.task_id = th.id AND m.stage_index = -1"
 
@@ -453,7 +450,7 @@ func (h *HistoryStore) getHistoryRecord(ctx context.Context, id string) (*Histor
 		&r.CreatedAt, &startedAt, &stoppedAt,
 		&r.DurationSec, &r.ErrorMsg, &r.Starred, &tagsBytes, &r.Note, &r.DebugMode, &summaryBytes, &r.StageCount,
 	)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrHistoryNotFound
 	}
 	if err != nil {
@@ -650,7 +647,7 @@ func (h *HistoryStore) queryReportSummaries(ctx context.Context, taskID string, 
 func (h *HistoryStore) queryAggregated(ctx context.Context, taskID string, r *HistoryDetail) {
 	var stressBytes, sysBytes []byte
 	err := h.db.QueryRowContext(ctx, `SELECT final_stress, final_system FROM task_aggregated WHERE task_id = ? AND stage_index = -1`, taskID).Scan(&stressBytes, &sysBytes)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		stresslog.Warn("[ADMIN] 查询聚合指标失败", zap.String("taskID", taskID), zap.Error(err))
 		return
 	}
@@ -666,7 +663,7 @@ func (h *HistoryStore) queryAggregatedSummary(ctx context.Context, taskID string
 	}
 	var stressBytes, sysBytes []byte
 	err := h.db.QueryRowContext(ctx, `SELECT final_stress, final_system FROM task_aggregated WHERE task_id = ? AND stage_index = ?`, taskID, stageIndex).Scan(&stressBytes, &sysBytes)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		stresslog.Warn("[ADMIN] 查询聚合指标摘要失败", zap.String("taskID", taskID), zap.Error(err))
 		return projectStressSnapshot(monitor.CollectorSnapshot{}), HistorySystemSummary{}
 	}
@@ -715,7 +712,7 @@ func (h *HistoryStore) GetCompareTask(ctx context.Context, id string, stageIndex
 	}
 	var stressBytes []byte
 	err = h.db.QueryRowContext(ctx, `SELECT final_stress FROM task_aggregated WHERE task_id = ? AND stage_index = ?`, id, queryStage).Scan(&stressBytes)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("get compare stress: %w", err)
 	}
 
@@ -779,7 +776,7 @@ func (h *HistoryStore) GetConfig(ctx context.Context, id string) (*TaskConfig, e
 		SELECT flow_json, proto_files, lua_scripts, codecs, error_map, robot_config
 		FROM task_config_archive WHERE task_id = ?
 	`, id).Scan(&flowJSON, &protoJSON, &luaJSON, &codecsJSON, &errorMap, &robotJSON)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrHistoryNotFound
 	}
 	if err != nil {
@@ -805,7 +802,7 @@ func (h *HistoryStore) GetConfigSummary(ctx context.Context, id string) (*Histor
 
 	var robotJSON []byte
 	err = h.db.QueryRowContext(ctx, `SELECT robot_config FROM task_config_archive WHERE task_id = ?`, id).Scan(&robotJSON)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrHistoryNotFound
 	}
 	if err != nil {
@@ -892,6 +889,8 @@ func (h *HistoryStore) GetTimeseries(ctx context.Context, id string, maxPoints, 
 	}
 	defer rows.Close()
 
+	// 保留空切片字面量而非 var：Points 字段无 omitempty，nil 会序列化成 "points":null，
+	// 前端趋势图按数组处理会出错。modernize 的空切片→var 在此处不适用。
 	points := []HistoryTrendPointResponse{}
 	for rows.Next() {
 		var p HistoryTrendPointResponse
@@ -951,7 +950,7 @@ func sampleHistoryTrendPoints(points []HistoryTrendPointResponse, maxPoints int)
 
 	result := make([]HistoryTrendPointResponse, 0, maxPoints)
 	lastIdx := -1
-	for i := 0; i < maxPoints; i++ {
+	for i := range maxPoints {
 		idx := int(float64(i) * float64(len(points)-1) / float64(maxPoints-1))
 		if idx == lastIdx {
 			continue
@@ -1462,7 +1461,7 @@ func (h *HistoryStore) PruneExpired(ctx context.Context, now time.Time) (int, er
 	}
 	placeholders := strings.Repeat("?,", len(ids))
 	placeholders = placeholders[:len(placeholders)-1]
-	args := make([]interface{}, len(ids))
+	args := make([]any, len(ids))
 	for i, id := range ids {
 		args[i] = id
 	}

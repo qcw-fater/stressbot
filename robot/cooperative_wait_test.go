@@ -23,19 +23,18 @@ func newWaitRobot(ctx context.Context) *Robot {
 // TestCooperativeWait_SleepDrainsTasks sleep 等待窗口内应 drain 已投递的任务（listen 回调），
 // 而不是等到窗口结束才执行——这是协作式调度解决长阻塞饿死的核心行为。
 func TestCooperativeWait_SleepDrainsTasks(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	r := newWaitRobot(ctx)
 
-	var ran int32
-	r.sched.enqueue(pendingTask{name: "cb", exec: func() { atomic.AddInt32(&ran, 1) }})
+	var ran atomic.Int32
+	r.sched.enqueue(pendingTask{name: "cb", exec: func() { ran.Add(1) }})
 
 	start := time.Now()
 	out := r.sched.wait(time.Now().Add(40*time.Millisecond), 0, nil)
 	if out.Canceled || out.TimedOut || out.Exchange != nil {
 		t.Fatalf("sleep 应返回空 outcome，实际 %+v", out)
 	}
-	if got := atomic.LoadInt32(&ran); got != 1 {
+	if got := ran.Load(); got != 1 {
 		t.Fatalf("等待窗口内任务未被 drain：ran=%d", got)
 	}
 	if elapsed := time.Since(start); elapsed < 30*time.Millisecond {
@@ -57,14 +56,13 @@ func TestCooperativeWait_Canceled(t *testing.T) {
 
 // TestCooperativeWait_ListenHit listen 轮询命中即返回对应 Exchange。
 func TestCooperativeWait_ListenHit(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	r := newWaitRobot(ctx)
 
 	want := &engine.NetExchange{Body: []byte("hit")}
-	var calls int32
+	var calls atomic.Int32
 	check := func() *engine.NetExchange {
-		if atomic.AddInt32(&calls, 1) >= 2 {
+		if calls.Add(1) >= 2 {
 			return want
 		}
 		return nil
@@ -83,13 +81,13 @@ func TestCooperativeSleep_DrainsAndCancels(t *testing.T) {
 	r := newWaitRobot(ctx)
 	h := &robotActionHandler{robot: r}
 
-	var ran int32
-	r.sched.enqueue(pendingTask{name: "cb", exec: func() { atomic.AddInt32(&ran, 1) }})
+	var ran atomic.Int32
+	r.sched.enqueue(pendingTask{name: "cb", exec: func() { ran.Add(1) }})
 	if err := h.CooperativeSleep(ctx, 30*time.Millisecond); err != nil {
 		t.Fatalf("正常休眠不应返回 error: %v", err)
 	}
-	if atomic.LoadInt32(&ran) != 1 {
-		t.Fatalf("休眠期间任务未被 drain：ran=%d", atomic.LoadInt32(&ran))
+	if ran.Load() != 1 {
+		t.Fatalf("休眠期间任务未被 drain：ran=%d", ran.Load())
 	}
 
 	cancel()
@@ -104,8 +102,7 @@ func TestCooperativeSleep_DrainsAndCancels(t *testing.T) {
 
 // TestCooperativeWait_ListenTimeout listen 始终未命中则到时返回 TimedOut。
 func TestCooperativeWait_ListenTimeout(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	r := newWaitRobot(ctx)
 
 	check := func() *engine.NetExchange { return nil }
@@ -118,19 +115,18 @@ func TestCooperativeWait_ListenTimeout(t *testing.T) {
 // TestAwaitIO_DispatchesAndDrains Class B 协作式 I/O：作业在后台协程跑阻塞调用，等待窗口内
 // 执行器仍 drain 任务队列（listen 回调不被饿死），作业完成后返回其 IORenderer。
 func TestAwaitIO_DispatchesAndDrains(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	r := newWaitRobot(ctx)
 
-	var ran int32
-	r.sched.enqueue(pendingTask{name: "cb", exec: func() { atomic.AddInt32(&ran, 1) }})
+	var ran atomic.Int32
+	r.sched.enqueue(pendingTask{name: "cb", exec: func() { ran.Add(1) }})
 
-	var jobRan int32
+	var jobRan atomic.Int32
 	spec := &script.WaitSpec{
 		Kind:   script.WaitIO,
 		IOName: "test.io",
 		IOJob: func() script.IORenderer {
-			atomic.AddInt32(&jobRan, 1)
+			jobRan.Add(1)
 			time.Sleep(20 * time.Millisecond) // 模拟阻塞 I/O 往返
 			return func(L *lua.LState) []lua.LValue {
 				return []lua.LValue{lua.LString("done")}
@@ -142,11 +138,11 @@ func TestAwaitIO_DispatchesAndDrains(t *testing.T) {
 	if out.IORender == nil {
 		t.Fatal("awaitIO 应返回作业的 IORenderer")
 	}
-	if atomic.LoadInt32(&jobRan) != 1 {
-		t.Fatalf("后台作业应执行一次，实际 %d", atomic.LoadInt32(&jobRan))
+	if jobRan.Load() != 1 {
+		t.Fatalf("后台作业应执行一次，实际 %d", jobRan.Load())
 	}
-	if atomic.LoadInt32(&ran) != 1 {
-		t.Fatalf("等待 I/O 期间应 drain 任务队列，实际 ran=%d", atomic.LoadInt32(&ran))
+	if ran.Load() != 1 {
+		t.Fatalf("等待 I/O 期间应 drain 任务队列，实际 ran=%d", ran.Load())
 	}
 
 	L := lua.NewState()
@@ -158,8 +154,7 @@ func TestAwaitIO_DispatchesAndDrains(t *testing.T) {
 }
 
 func TestRunIOReturnsPoolSubmissionError(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	r := newWaitRobot(ctx)
 	sentinel := errors.New("pool rejected")
 
@@ -175,20 +170,19 @@ func TestRunIOReturnsPoolSubmissionError(t *testing.T) {
 // 旧实现（drain 批 + boundary check）会把整批跑完（ran≈N）才命中；内联版每处理完一个任务即
 // 回 loop 顶 check，命中的时候只 drain 了极少数（ran≪N）。
 func TestCooperativeWait_ListenHitMidTaskBatch(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	r := newWaitRobot(ctx)
 
 	const batch = 30
-	var ran int32
-	for i := 0; i < batch; i++ {
-		r.sched.enqueue(pendingTask{name: "cb", exec: func() { atomic.AddInt32(&ran, 1) }})
+	var ran atomic.Int32
+	for range batch {
+		r.sched.enqueue(pendingTask{name: "cb", exec: func() { ran.Add(1) }})
 	}
 
 	want := &engine.NetExchange{Body: []byte("hit")}
-	var calls int32
+	var calls atomic.Int32
 	check := func() *engine.NetExchange {
-		if atomic.AddInt32(&calls, 1) >= 2 {
+		if calls.Add(1) >= 2 {
 			return want // 第二次起视为就绪（模拟消息在首批任务处理后到达）
 		}
 		return nil
@@ -198,7 +192,7 @@ func TestCooperativeWait_ListenHitMidTaskBatch(t *testing.T) {
 	if out.Exchange != want {
 		t.Fatalf("应返回命中的 Exchange，实际 %+v", out)
 	}
-	if got := atomic.LoadInt32(&ran); got >= batch {
+	if got := ran.Load(); got >= batch {
 		t.Fatalf("listen 命中前不应 drain 整批任务：ran=%d（旧实现会 drain 完 %d 个才在边界命中）", got, batch)
 	}
 }

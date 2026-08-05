@@ -176,7 +176,7 @@ func TestTrampThreadReuse(t *testing.T) {
 	}
 	first := ctx.trampThreads[0].thread
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		if _, _, _, err := rp.RunActionScript(L, "b.lua"); err != nil {
 			t.Fatalf("b.lua 第 %d 次: %v", i, err)
 		}
@@ -238,7 +238,7 @@ end`,
 	ctx := &Context{Waiter: w}
 	SetContext(L, ctx)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, _, _, err := rp.RunActionScript(L, "sleep.lua"); err != nil {
 			t.Fatalf("第 %d 次: %v", i, err)
 		}
@@ -355,7 +355,7 @@ func TestTrampThreadRetirement(t *testing.T) {
 	ctx := &Context{}
 	SetContext(L, ctx)
 
-	for i := 0; i < maxTasksPerTrampThread; i++ {
+	for i := range maxTasksPerTrampThread {
 		if _, _, _, err := rp.RunActionScript(L, "ok.lua"); err != nil {
 			t.Fatalf("第 %d 次: %v", i, err)
 		}

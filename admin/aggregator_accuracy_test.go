@@ -10,7 +10,7 @@ import (
 func aggregatorTestReport(t *testing.T, agentID string, sequence uint64, start, end time.Time, count int, latency time.Duration) StressReport {
 	t.Helper()
 	collector := monitor.NewCollector(monitor.CollectorConfig{ApdexThresholdMs: 100, TimingDetail: "rtt"})
-	for i := 0; i < count; i++ {
+	for range count {
 		collector.RecordActionStart("login")
 		collector.RecordAction("login", monitor.ResultSuccess, monitor.ActionTiming{
 			Requests: []monitor.RequestTiming{{WireRTT: latency, Observed: monitor.StageRTT}},
@@ -168,26 +168,29 @@ func systemSnapshotValues(hostCPU float64, totalMemory, usedMemory uint64, proce
 	memoryPercent := float64(usedMemory) / float64(totalMemory) * 100
 	threads := int32(3)
 	return SystemSnapshot{
-		HostCPUPercent:         adminFloatPointer(hostCPU),
-		HostMemTotalBytes:      adminUint64Pointer(totalMemory),
-		HostMemUsedBytes:       adminUint64Pointer(usedMemory),
-		HostMemPercent:         adminFloatPointer(memoryPercent),
-		HostNetSendBytesPerSec: adminFloatPointer(send),
-		HostNetRecvBytesPerSec: adminFloatPointer(recv),
-		ProcessCPUPercent:      adminFloatPointer(processCPU),
-		ProcessRSSBytes:        adminUint64Pointer(rss),
+		HostCPUPercent:         new(hostCPU),
+		HostMemTotalBytes:      new(totalMemory),
+		HostMemUsedBytes:       new(usedMemory),
+		HostMemPercent:         new(memoryPercent),
+		HostNetSendBytesPerSec: new(send),
+		HostNetRecvBytesPerSec: new(recv),
+		ProcessCPUPercent:      new(processCPU),
+		ProcessRSSBytes:        new(rss),
 		ProcessHeapBytes:       50,
 		ProcessGoroutines:      7,
 		ProcessThreads:         &threads,
-		ProcessFDs:             adminInt32Pointer(fds),
+		ProcessFDs:             new(fds),
 	}
 }
 
-func adminFloatPointer(value float64) *float64 { return &value }
+//go:fix inline
+func adminFloatPointer(value float64) *float64 { return new(value) }
 
-func adminUint64Pointer(value uint64) *uint64 { return &value }
+//go:fix inline
+func adminUint64Pointer(value uint64) *uint64 { return new(value) }
 
-func adminInt32Pointer(value int32) *int32 { return &value }
+//go:fix inline
+func adminInt32Pointer(value int32) *int32 { return new(value) }
 
 func assertAdminFloatPointer(t *testing.T, name string, got *float64, want float64) {
 	t.Helper()

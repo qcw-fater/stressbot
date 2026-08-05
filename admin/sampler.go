@@ -314,10 +314,7 @@ func (s *Sampler) currentStageIndex(taskID string) int {
 	if !plan.HasReset {
 		return -1
 	}
-	seg := distinctResetCount(task.StageReports) + 1
-	if seg > len(plan.Segments) {
-		seg = len(plan.Segments)
-	}
+	seg := min(distinctResetCount(task.StageReports)+1, len(plan.Segments))
 	return seg
 }
 

@@ -158,10 +158,10 @@ func encryptXXTEA(data []byte, key [4]uint32) []byte {
 	v := bytesToUint32s(data, n)
 	rounds := 6 + 52/n
 	sum := uint32(0)
-	for i := 0; i < rounds; i++ {
+	for range rounds {
 		sum += xxteaDelta
 		e := (sum >> 2) & 3
-		for p := 0; p < n; p++ {
+		for p := range n {
 			left := v[(p+n-1)%n]
 			right := v[(p+1)%n]
 			z := ((right>>5 ^ left<<2) + (left>>3 ^ right<<4)) ^ ((sum ^ right) + (key[uint32(p)&3^e] ^ left))
@@ -180,7 +180,7 @@ func decryptXXTEA(data []byte, key [4]uint32) []byte {
 	v := bytesToUint32s(data, n)
 	rounds := 6 + 52/n
 	sum := uint32(rounds) * xxteaDelta
-	for i := 0; i < rounds; i++ {
+	for range rounds {
 		e := (sum >> 2) & 3
 		for p := n - 1; ; p-- {
 			right := v[(p+1)%n]
@@ -198,7 +198,7 @@ func decryptXXTEA(data []byte, key [4]uint32) []byte {
 
 func bytesToUint32s(data []byte, n int) []uint32 {
 	v := make([]uint32, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		v[i] = binary.LittleEndian.Uint32(data[i*4:])
 	}
 	return v

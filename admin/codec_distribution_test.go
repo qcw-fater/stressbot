@@ -17,6 +17,7 @@ import (
 	"net/textproto"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -236,13 +237,7 @@ func TestCodecDist_ConfigFilesListsMultiCodec(t *testing.T) {
 
 	// 必须含期望的 4 个 adapter 文件
 	for _, w := range expectedCodecConfigFiles() {
-		found := false
-		for _, f := range files {
-			if f == w {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(files, w)
 		if !found {
 			t.Fatalf("configFiles missing %s; got %v", w, files)
 		}

@@ -309,9 +309,7 @@ func TestGetPath_ConcurrentWithWriters(t *testing.T) {
 	var writers sync.WaitGroup
 
 	// 写方 1：listen 回调式，就地改嵌套 map 的兄弟键（污染 root.branch 这张 map）。
-	writers.Add(1)
-	go func() {
-		defer writers.Done()
+	writers.Go(func() {
 		for i := 0; ; i++ {
 			select {
 			case <-stop:
@@ -320,12 +318,10 @@ func TestGetPath_ConcurrentWithWriters(t *testing.T) {
 				s.SetPath("root.branch.sibling", i)
 			}
 		}
-	}()
+	})
 
 	// 写方 2：心跳式 stateCounter 自增（写 Store）。
-	writers.Add(1)
-	go func() {
-		defer writers.Done()
+	writers.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -334,19 +330,17 @@ func TestGetPath_ConcurrentWithWriters(t *testing.T) {
 				s.Increment("counter")
 			}
 		}
-	}()
+	})
 
 	// 读方：主流程条件求值式，深度遍历同一子树，固定圈数后结束。
 	var reader sync.WaitGroup
-	reader.Add(1)
-	go func() {
-		defer reader.Done()
-		for i := 0; i < 100000; i++ {
+	reader.Go(func() {
+		for range 100000 {
 			_ = s.GetPath("root.branch.leaf")
 			_ = s.GetPath("root.branch")
 			_ = s.GetPath("counter")
 		}
-	}()
+	})
 
 	reader.Wait()  // 读方跑满固定圈数
 	close(stop)    // 通知写方退出

@@ -112,10 +112,7 @@ func (d *AgentDispatcher) post(addr, path string, body any, retries int) error {
 				zap.Duration("backoff", backoff),
 				zap.Error(err))
 			time.Sleep(backoff)
-			backoff = backoff * 2
-			if backoff > 10*time.Second {
-				backoff = 10 * time.Second
-			}
+			backoff = min(backoff*2, 10*time.Second)
 			continue
 		}
 		drainAndClose(resp)
@@ -131,10 +128,7 @@ func (d *AgentDispatcher) post(addr, path string, body any, retries int) error {
 			zap.Int("attempt", i+1),
 			zap.Int("status", resp.StatusCode))
 		time.Sleep(backoff)
-		backoff = backoff * 2
-		if backoff > 10*time.Second {
-			backoff = 10 * time.Second
-		}
+		backoff = min(backoff*2, 10*time.Second)
 	}
 	return fmt.Errorf("unreachable")
 }

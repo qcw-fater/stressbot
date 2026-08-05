@@ -505,9 +505,9 @@ func TestDecode_ConcurrentSafe(t *testing.T) {
 	frame := ut.EncodeTCP(route, body, key)
 
 	done := make(chan struct{}, 8)
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		go func() {
-			for j := 0; j < 50; j++ {
+			for range 50 {
 				r, b, _ := ut.DecodeTCP(frame, key)
 				_ = r
 				_ = b
@@ -515,7 +515,7 @@ func TestDecode_ConcurrentSafe(t *testing.T) {
 			done <- struct{}{}
 		}()
 	}
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		<-done
 	}
 }

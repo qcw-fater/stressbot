@@ -83,8 +83,8 @@ func TestResolveMapBindingRequiredNilEntryReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("resolveFieldValueStrict expected error for required nil entry")
 	}
-	var actionErr *ActionError
-	if !errors.As(err, &actionErr) {
+	actionErr, ok := errors.AsType[*ActionError](err)
+	if !ok {
 		t.Fatalf("err = %T, want *ActionError", err)
 	}
 	if actionErr.Code != errcode.ErrBindField {
@@ -139,8 +139,8 @@ func TestResolveMapBindingNonComparableKeyReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("resolveFieldValueStrict expected error for non-comparable key")
 	}
-	var actionErr *ActionError
-	if !errors.As(err, &actionErr) {
+	actionErr, ok := errors.AsType[*ActionError](err)
+	if !ok {
 		t.Fatalf("err = %T, want *ActionError", err)
 	}
 	if actionErr.Code != errcode.ErrBindField {
@@ -176,8 +176,8 @@ func TestResolveMapBindingNestedMapReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("resolveFieldValueStrict expected error for nested map")
 	}
-	var actionErr *ActionError
-	if !errors.As(err, &actionErr) {
+	actionErr, ok := errors.AsType[*ActionError](err)
+	if !ok {
 		t.Fatalf("err = %T, want *ActionError", err)
 	}
 	if actionErr.Code != errcode.ErrBindField {

@@ -138,7 +138,7 @@ func (m *Manager) startBatch(fromIndex, count, conc int) (int, error) {
 	created := 0
 	// 本批全部归属同一代：generation 只在 resetBots 于阶段之间递增，单次 startBatch 内不变。
 	gen := m.generation.Load()
-	for i := 0; i < count; i++ {
+	for i := range count {
 		if m.ctx.Err() != nil {
 			stresslog.Warn("[MANAGER] 批次创建被取消",
 				zap.Int("fromIndex", fromIndex),
@@ -276,10 +276,7 @@ func (m *Manager) StartWithRampUp() error {
 		if stage.Concurrency > 0 {
 			conc = stage.Concurrency
 		}
-		holdSec := stage.HoldSec
-		if holdSec < 30 {
-			holdSec = 30
-		}
+		holdSec := max(stage.HoldSec, 30)
 
 		stresslog.Info("[MANAGER] 启动阶段",
 			zap.Int("stage", i+1),
@@ -357,7 +354,6 @@ func closeRobotsConcurrentWithSubmit(robots []*Robot, reason CleanupReason, subm
 	}
 	results := make(chan CleanupStatus, len(robots))
 	for _, r := range robots {
-		r := r
 		if err := submit(func() {
 			results <- r.cleanup(reason, false)
 		}); err != nil {
@@ -380,7 +376,7 @@ func closeRobotsConcurrentWithSubmit(robots []*Robot, reason CleanupReason, subm
 				zap.Int("done", len(statuses)),
 				zap.Duration("timeout", closeRobotsTimeout))
 			missing := len(robots) - len(statuses)
-			for i := 0; i < missing; i++ {
+			for range missing {
 				statuses = append(statuses, CleanupStatus{
 					Status:        CleanupTimeout,
 					Reason:        reason,

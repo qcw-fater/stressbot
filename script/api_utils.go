@@ -184,10 +184,7 @@ func utilsWeightedPick(L *lua.LState) int {
 	total := 0
 	ws := make([]int, n)
 	for i := 1; i <= n; i++ {
-		w := int(lua.LVAsNumber(weights.RawGetInt(i)))
-		if w < 0 {
-			w = 0
-		}
+		w := max(int(lua.LVAsNumber(weights.RawGetInt(i))), 0)
 		ws[i-1] = w
 		total += w
 	}
@@ -199,7 +196,7 @@ func utilsWeightedPick(L *lua.LState) int {
 	}
 	r := rand.Intn(total)
 	acc := 0
-	for i := 0; i < n; i++ {
+	for i := range n {
 		acc += ws[i]
 		if r < acc {
 			L.Push(items.RawGetInt(i + 1))

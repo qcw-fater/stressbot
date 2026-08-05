@@ -42,7 +42,7 @@ func findAdapterRepoRoot(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
 	}
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		if _, err := os.Stat(filepath.Join(dir, "codec", "testdata", "tcp_logic_codec.json")); err == nil {
 			return dir
 		}

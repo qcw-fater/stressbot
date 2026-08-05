@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/binary"
+	"errors"
 	"io"
 	"sync"
 )
@@ -127,7 +128,7 @@ func readAllSized(r io.Reader, hint int) ([]byte, error) {
 	}
 	out := make([]byte, hint)
 	n, err := io.ReadFull(r, out)
-	if err == io.ErrUnexpectedEOF || err == io.EOF {
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
 		return out[:n], nil // 实际比提示短：截断即全部数据
 	}
 	if err != nil {

@@ -49,7 +49,7 @@ func findRepoRoot(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
 	}
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		if _, err := os.Stat(filepath.Join(dir, "conf", "adapter", "codec.lua")); err == nil {
 			return dir
 		}
@@ -576,15 +576,15 @@ func TestEncode_ConcurrentSafe(t *testing.T) {
 	route := map[string]any{"cmd": float64(100), "act": float64(7)}
 
 	done := make(chan struct{}, 8)
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		go func() {
-			for j := 0; j < 50; j++ {
+			for range 50 {
 				_ = ut.EncodeTCP(route, body, key)
 			}
 			done <- struct{}{}
 		}()
 	}
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		<-done
 	}
 }

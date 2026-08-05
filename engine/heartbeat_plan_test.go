@@ -13,8 +13,11 @@ import (
 // 对拍原则：BuildHeartbeatBody（逐 tick 打包）是 oracle，CompileHeartbeatPlan+Build
 // 是被验证的快路径。oracle 保持原样不复用新代码（putLE），否则对拍失去意义。
 
-func i64p(v int64) *int64     { return &v }
-func f64p(v float64) *float64 { return &v }
+//go:fix inline
+func i64p(v int64) *int64 { return new(v) }
+
+//go:fix inline
+func f64p(v float64) *float64 { return new(v) }
 
 // newHBStore 造一份带初值的 store（两份独立实例用于 plan/oracle 各自跑，
 // 避免 stateCounter 自增的副作用互相污染）。
@@ -41,7 +44,7 @@ func deterministicFields() []HeartbeatField {
 		{Type: "u64", Source: HeartbeatSourceState, Key: "battleId"},
 		{Type: "i64", Source: HeartbeatSourceCounter, Start: i64p(1), Step: i64p(3)},
 		{Type: "f32", Source: HeartbeatSourceState, Key: "rttFloat"},
-		{Type: "f64", Source: HeartbeatSourceFixed, FloatValue: f64p(-0.25)},
+		{Type: "f64", Source: HeartbeatSourceFixed, FloatValue: new(-0.25)},
 		{Type: "u8", Source: HeartbeatSourceCounter}, // Start/Step 缺省 0/1
 	}
 }
@@ -61,7 +64,7 @@ func TestHeartbeatPlanParity(t *testing.T) {
 	cntOracle := initCounters(fields)
 	stepsPlan := CompileHeartbeatCounters(fields)
 
-	for tick := 0; tick < 5; tick++ {
+	for tick := range 5 {
 		gotBody, gotSkip, gotErr := plan.Build(stPlan, cntPlan, false)
 		wantBody, wantSkip, wantErr := BuildHeartbeatBody(fields, stOracle, cntOracle, false)
 		if gotErr != nil || wantErr != nil {
@@ -264,7 +267,7 @@ func TestHeartbeatPlanBufferReuseZeroAlloc(t *testing.T) {
 // TestHeartbeatPlanFloatBitPattern f32/f64 的 IEEE754 位模式与 oracle 一致。
 func TestHeartbeatPlanFloatBitPattern(t *testing.T) {
 	fields := []HeartbeatField{
-		{Type: "f32", Source: HeartbeatSourceFixed, FloatValue: f64p(1.5)},
+		{Type: "f32", Source: HeartbeatSourceFixed, FloatValue: new(1.5)},
 		{Type: "f64", Source: HeartbeatSourceState, Key: "rttFloat"},
 	}
 	plan, err := CompileHeartbeatPlan(fields)

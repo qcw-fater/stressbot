@@ -399,10 +399,7 @@ func stashStep(stash map[int]map[string]uint64, stepIdx int, step *compiledStep,
 		switch prod.region {
 		case regionCiphered:
 			// work 是该步执行后的 body；ciphered region = work[step.encOffset:]。
-			off := step.encOffset
-			if off < 0 {
-				off = 0
-			}
+			off := max(step.encOffset, 0)
 			if off > len(work) {
 				off = len(work)
 			}
@@ -460,10 +457,7 @@ func bytesToUint64(b []byte) uint64 {
 		return 0
 	}
 	var buf [8]byte
-	n := len(b)
-	if n > 8 {
-		n = 8
-	}
+	n := min(len(b), 8)
 	copy(buf[:n], b[:n])
 	return binary.LittleEndian.Uint64(buf[:])
 }
@@ -882,10 +876,7 @@ func (c *SchemaCodec) verifyProducesAfterDecrypt(stepIdx int, work []byte, chkVa
 
 // decodeCipheredRegion 返回 decrypt 后 work[decOffset:]（钳位）。
 func decodeCipheredRegion(step *compiledStep, work []byte) []byte {
-	off := step.decOffset
-	if off < 0 {
-		off = 0
-	}
+	off := max(step.decOffset, 0)
 	if off > len(work) {
 		off = len(work)
 	}

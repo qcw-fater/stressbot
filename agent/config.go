@@ -75,10 +75,7 @@ func (c *Config) Resolve() (*ResolvedConfig, error) {
 	// 心跳单次请求超时：默认 5s（短于通用 RequestTimeout=30s）。
 	// 心跳是状态探测，快失败快重试；用 30s 会让一次失败卡 30s 才返回，
 	// agent 长时间无感知 Admin 状态。
-	heartbeatTimeout := utils.ParseDurationDefault(c.HeartbeatTimeout, 5*time.Second, "agent.heartbeatTimeout")
-	if heartbeatTimeout > requestTimeout {
-		heartbeatTimeout = requestTimeout
-	}
+	heartbeatTimeout := min(utils.ParseDurationDefault(c.HeartbeatTimeout, 5*time.Second, "agent.heartbeatTimeout"), requestTimeout)
 
 	// 心跳失败容忍阈值：默认 3 次。一次心跳失败立刻 cancel 任务太激进——
 	// 测试场景本地多开 agent 共用 127.0.0.1 时，ephemeral port 会规律性瞬时抖动

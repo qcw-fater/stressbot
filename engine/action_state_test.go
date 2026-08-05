@@ -36,8 +36,7 @@ func TestClearStateProtectedKeyIsAtomic(t *testing.T) {
 	if err == nil {
 		t.Fatal("包含内置状态的 clearState 应失败")
 	}
-	var actionErr *ActionError
-	if !errors.As(err, &actionErr) || actionErr.Code != errcode.ErrStateConfig {
+	if actionErr, ok := errors.AsType[*ActionError](err); !ok || actionErr.Code != errcode.ErrStateConfig {
 		t.Fatalf("err=%v want ErrStateConfig", err)
 	}
 	if !store.Has("battleId") || !store.Has("id") {

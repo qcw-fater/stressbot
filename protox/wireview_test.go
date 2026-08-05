@@ -44,19 +44,19 @@ func TestWireViewCompatSemantics(t *testing.T) {
 
 	// 缺席 message 的默认值语义（GetField ≠ Navigate 的关键差异）。
 	for _, p := range []string{
-		"node",              // 缺席 message → 默认值整表
-		"node.name",         // 缺席 message 下钻标量 → ""
-		"node.leaf.id",      // 两层缺席下钻 → 0
-		"choice_num",        // oneof 落选标量 → 默认 0
-		"choice_node",       // oneof 落选 message → 默认值整表
-		"opt_i",             // 未设置 optional → 默认 0
-		"str", "rints",      // 已设置字段
-		"rints[0]", "mstr",  // 下标 / 空 map
-		"rints[9]",          // 越界 → error
-		"no_such_field",     // 未知字段 → error
-		"mstr.k",            // map 不可下钻 → error
-		"str.x",             // 标量不可嵌套 → error
-		"[0]",               // 下标开头 → error
+		"node",         // 缺席 message → 默认值整表
+		"node.name",    // 缺席 message 下钻标量 → ""
+		"node.leaf.id", // 两层缺席下钻 → 0
+		"choice_num",   // oneof 落选标量 → 默认 0
+		"choice_node",  // oneof 落选 message → 默认值整表
+		"opt_i",        // 未设置 optional → 默认 0
+		"str", "rints", // 已设置字段
+		"rints[0]", "mstr", // 下标 / 空 map
+		"rints[9]",      // 越界 → error
+		"no_such_field", // 未知字段 → error
+		"mstr.k",        // map 不可下钻 → error
+		"str.x",         // 标量不可嵌套 → error
+		"[0]",           // 下标开头 → error
 	} {
 		assertGetFieldCompat(t, f, wv, oracle, p)
 	}
@@ -94,7 +94,7 @@ func TestWireViewCompatDifferentialFuzz(t *testing.T) {
 	const iterations = 120
 	rnd := rand.New(rand.NewSource(20260730))
 
-	for it := 0; it < iterations; it++ {
+	for it := range iterations {
 		msg := dynamicpb.NewMessage(md)
 		randFill(rnd, msg.ProtoReflect(), 3)
 		raw, err := proto.Marshal(msg)
@@ -150,7 +150,7 @@ func TestWireViewCompatDifferentialFuzz(t *testing.T) {
 			if cur.Len() != nGot {
 				t.Fatalf("iter %d %s: 游标长度不一致 cursor=%d len=%d", it, name, cur.Len(), nGot)
 			}
-			for j := 0; j < nGot; j++ {
+			for j := range nGot {
 				gi, gerr := wv.ListItemCompat(name, j)
 				wi, werr := f.GetListItem(oracle, name, j)
 				ci := cur.Item(j)
@@ -250,7 +250,7 @@ func TestWireViewCompatShadowSampling(t *testing.T) {
 	wv := wireOf(t, f, "wiretest.Everything", mustMarshal(t, msg))
 
 	before := SnapshotWireShadowStats()
-	for i := 0; i < shadowFirstK+2; i++ {
+	for range shadowFirstK + 2 {
 		if _, err := wv.GetFieldCompat("str"); err != nil {
 			t.Fatalf("GetFieldCompat 失败: %v", err)
 		}

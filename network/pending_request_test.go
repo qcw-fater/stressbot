@@ -134,12 +134,10 @@ func TestPendingRequest_ConcurrentClose(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 16; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 16 {
+		wg.Go(func() {
 			pr.Close()
-		}()
+		})
 	}
 	wg.Wait() // 若非并发安全会 panic close of closed channel
 

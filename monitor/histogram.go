@@ -120,13 +120,13 @@ func histogramSnapshotFromSketch(
 	}
 	return HistogramSnapshot{
 		Count:  count,
-		MinMs:  float64Pointer(minMs),
-		MaxMs:  float64Pointer(maxMs),
-		AvgMs:  float64Pointer(float64(sumNs) / float64(count) / float64(time.Millisecond)),
-		P50Ms:  float64Pointer(clamp(values[0])),
-		P90Ms:  float64Pointer(clamp(values[1])),
-		P95Ms:  float64Pointer(clamp(values[2])),
-		P99Ms:  float64Pointer(clamp(values[3])),
+		MinMs:  new(minMs),
+		MaxMs:  new(maxMs),
+		AvgMs:  new(float64(sumNs) / float64(count) / float64(time.Millisecond)),
+		P50Ms:  new(clamp(values[0])),
+		P90Ms:  new(clamp(values[1])),
+		P95Ms:  new(clamp(values[2])),
+		P99Ms:  new(clamp(values[3])),
 		SumNs:  sumNs,
 		Sketch: append([]byte(nil), encoded...),
 	}, nil
@@ -181,7 +181,8 @@ func MergeHistograms(snaps []HistogramSnapshot) (HistogramSnapshot, error) {
 	return histogramSnapshotFromSketch(mergedSketch, count, sumNs, minNs, maxNs, encoded)
 }
 
-func float64Pointer(value float64) *float64 { return &value }
+//go:fix inline
+func float64Pointer(value float64) *float64 { return new(value) }
 
 func histogramValue(value *float64) float64 {
 	if value == nil {

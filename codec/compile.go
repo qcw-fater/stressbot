@@ -18,6 +18,7 @@ package codec
 import (
 	"encoding/binary"
 	"fmt"
+	"maps"
 	"strings"
 )
 
@@ -603,9 +604,7 @@ func NewSchemaCodec(schema *CodecSchema, errorMap map[uint64]string) (*SchemaCod
 	} else {
 		// 浅拷贝以隔离可变性（调用方后续修改入参不应影响编译产物）。
 		c.errorMap = make(map[uint64]string, len(errorMap))
-		for k, v := range errorMap {
-			c.errorMap[k] = v
-		}
+		maps.Copy(c.errorMap, errorMap)
 	}
 
 	return c, nil

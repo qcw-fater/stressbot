@@ -205,57 +205,57 @@ func Fatal(msg string, fields ...zap.Field) {
 }
 
 // DebugS KV形式日志接口
-func DebugS(msg string, keysAndValues ...interface{}) {
+func DebugS(msg string, keysAndValues ...any) {
 	sugarLogger.Debugw(msg, keysAndValues...)
 }
 
 // InfoS 关键信息日志接口
-func InfoS(msg string, keysAndValues ...interface{}) {
+func InfoS(msg string, keysAndValues ...any) {
 	sugarLogger.Infow(msg, keysAndValues...)
 }
 
 // WarnS 警告信息日志接口
-func WarnS(msg string, keysAndValues ...interface{}) {
+func WarnS(msg string, keysAndValues ...any) {
 	sugarLogger.Warnw(msg, keysAndValues...)
 }
 
 // ErrorS 错误信息日志接口
-func ErrorS(msg string, keysAndValues ...interface{}) {
+func ErrorS(msg string, keysAndValues ...any) {
 	sugarLogger.Errorw(msg, keysAndValues...)
 }
 
 // DPanicS Panic日志接口, 在生产环境中触发Panic后不退出,产生堆栈信息 (该接口可设置运行环境)
-func DPanicS(msg string, keysAndValues ...interface{}) {
+func DPanicS(msg string, keysAndValues ...any) {
 	sugarLogger.DPanicw(msg, keysAndValues...)
 }
 
 // DebugF 非结构化日志接口
-func DebugF(template string, args ...interface{}) {
+func DebugF(template string, args ...any) {
 	sugarLogger.Debugf(template, args...)
 }
 
 // InfoF 非结构化日志接口
-func InfoF(template string, args ...interface{}) {
+func InfoF(template string, args ...any) {
 	sugarLogger.Infof(template, args...)
 }
 
 // WarnF 非结构化日志接口
-func WarnF(template string, args ...interface{}) {
+func WarnF(template string, args ...any) {
 	sugarLogger.Warnf(template, args...)
 }
 
 // ErrorF 非结构化日志接口
-func ErrorF(template string, args ...interface{}) {
+func ErrorF(template string, args ...any) {
 	sugarLogger.Errorf(template, args...)
 }
 
 // DPanicF 非结构化日志接口
-func DPanicF(template string, args ...interface{}) {
+func DPanicF(template string, args ...any) {
 	sugarLogger.DPanicf(template, args...)
 }
 
 // FatalF 非结构化日志接口，触发Fatal日志后程序退出
-func FatalF(template string, args ...interface{}) {
+func FatalF(template string, args ...any) {
 	sugarLogger.Fatalf(template, args...)
 }
 

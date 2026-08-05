@@ -108,8 +108,7 @@ func TestRobotActionHandlerCancelSideEffectRecordsCanceled(t *testing.T) {
 		Name:    "cancel_side_effect",
 		Pattern: "badPattern",
 	})
-	var actionErr *engine.ActionError
-	if !errors.As(err, &actionErr) || actionErr.Code != errcode.ErrActionCanceled {
+	if actionErr, ok := errors.AsType[*engine.ActionError](err); !ok || actionErr.Code != errcode.ErrActionCanceled {
 		t.Fatalf("取消期副作用错误应归一化为 ErrActionCanceled，实际 %v", err)
 	}
 

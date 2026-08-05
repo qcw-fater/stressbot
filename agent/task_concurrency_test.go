@@ -20,7 +20,7 @@ func TestSubmitTaskConcurrentOnlyOneReservation(t *testing.T) {
 	var wg sync.WaitGroup
 
 	const attempts = 64
-	for i := 0; i < attempts; i++ {
+	for i := range attempts {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -57,7 +57,7 @@ func TestSubmitTaskConcurrentOnlyOneReservation(t *testing.T) {
 func TestCancelOldTaskConcurrentWithReplacementNeverCancelsNewTask(t *testing.T) {
 	stresslog.ReplaceLogger(zap.NewNop())
 
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		_, oldCancel := context.WithCancel(context.Background())
 		newCtx, newCancel := context.WithCancel(context.Background())
 		a := &Agent{

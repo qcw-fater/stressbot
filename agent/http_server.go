@@ -100,9 +100,9 @@ func (a *Agent) handleTaskAssign(w http.ResponseWriter, r *http.Request) {
 	// 原子预占 + 提交：校验空闲/关闭态、占用 currentTask、建 cancel、taskWG.Add、池提交
 	// 在 submitTask 内一致完成，消除 handler 检查与 executeTask 占用之间的 TOCTOU。
 	if err := a.submitTask(&task); err != nil {
-		var busy *taskBusyError
+		busy, isBusy := errors.AsType[*taskBusyError](err)
 		switch {
-		case errors.As(err, &busy):
+		case isBusy:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)
 			json.NewEncoder(w).Encode(map[string]string{
@@ -228,7 +228,7 @@ func (a *Agent) shutdownHTTPServer(ctx context.Context) {
 	}
 }
 
-func writeJSONError(w http.ResponseWriter, code int, format string, args ...interface{}) {
+func writeJSONError(w http.ResponseWriter, code int, format string, args ...any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(ErrorResponse{

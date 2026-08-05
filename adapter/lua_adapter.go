@@ -34,10 +34,7 @@ const defaultPoolCap = 128
 // SuggestedPoolSize 推荐的 LState 池大小：max(1, min(NumCPU * defaultPoolMultiplier, defaultPoolCap))。
 // 调用方在不显式指定 poolSize 时应使用此值。
 func SuggestedPoolSize() int {
-	n := runtime.NumCPU() * defaultPoolMultiplier
-	if n < 1 {
-		n = 1
-	}
+	n := max(runtime.NumCPU()*defaultPoolMultiplier, 1)
 	if n > defaultPoolCap {
 		n = defaultPoolCap
 	}

@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -161,7 +162,7 @@ func (s *FlowTemplateStore) get(ctx context.Context, id string) (*FlowTemplateDe
 		SELECT id, name, node_count, action_count, created_at, updated_at, flow_json, layout_json
 		FROM flow_template WHERE id = ?
 	`, id).Scan(&d.ID, &d.Name, &d.NodeCount, &d.ActionCount, &d.CreatedAt, &d.UpdatedAt, &flow, &layout)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrFlowTemplateNotFound
 	}
 	if err != nil {

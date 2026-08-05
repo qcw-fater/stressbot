@@ -160,8 +160,8 @@ func (m *SystemMonitor) collect() {
 
 	if total, available, err := m.probe.hostMemory(); err == nil && total > 0 && available <= total {
 		used := total - available
-		snapshot.HostMemTotalBytes = uint64Pointer(total)
-		snapshot.HostMemUsedBytes = uint64Pointer(used)
+		snapshot.HostMemTotalBytes = new(total)
+		snapshot.HostMemUsedBytes = new(used)
 		snapshot.HostMemPercent = boundedPercent(float64(used) / float64(total) * 100)
 	}
 
@@ -173,13 +173,13 @@ func (m *SystemMonitor) collect() {
 		}
 	}
 	if value, err := m.probe.processRSSBytes(); err == nil {
-		snapshot.ProcessRSSBytes = uint64Pointer(value)
+		snapshot.ProcessRSSBytes = new(value)
 	}
 	if value, err := m.probe.processThreads(); err == nil {
-		snapshot.ProcessThreads = int32Pointer(value)
+		snapshot.ProcessThreads = new(value)
 	}
 	if value, err := m.probe.processFDs(); err == nil {
-		snapshot.ProcessFDs = int32Pointer(value)
+		snapshot.ProcessFDs = new(value)
 	}
 
 	var stats runtime.MemStats
@@ -213,9 +213,11 @@ func boundedPercent(value float64) *float64 {
 	return &value
 }
 
-func uint64Pointer(value uint64) *uint64 { return &value }
+//go:fix inline
+func uint64Pointer(value uint64) *uint64 { return new(value) }
 
-func int32Pointer(value int32) *int32 { return &value }
+//go:fix inline
+func int32Pointer(value int32) *int32 { return new(value) }
 
 func counterRate(current, previous uint64, elapsed time.Duration) *float64 {
 	if elapsed <= 0 || current < previous {

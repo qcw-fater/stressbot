@@ -35,9 +35,9 @@ func TestDeclarativeIO_RoutesThroughCoopIO(t *testing.T) {
 	fake := &fakeIONetSender{fakeNetSender: &fakeNetSender{}}
 	ae := &ActionExecutor{netSender: fake, store: state.NewStore()}
 
-	var coopCalls int32
+	var coopCalls atomic.Int32
 	ae.SetCooperativeIO(func(job func()) error {
-		atomic.AddInt32(&coopCalls, 1)
+		coopCalls.Add(1)
 		job() // 模拟调度器：实际执行作业（真实实现里在后台 goroutine + drain mailbox）
 		return nil
 	})
@@ -52,7 +52,7 @@ func TestDeclarativeIO_RoutesThroughCoopIO(t *testing.T) {
 		t.Fatalf("execHTTPRequest err: %v", err)
 	}
 
-	if got := atomic.LoadInt32(&coopCalls); got != 3 {
+	if got := coopCalls.Load(); got != 3 {
 		t.Fatalf("声明式 http/connect 应全部经 coopIO，实际 %d/3", got)
 	}
 	if atomic.LoadInt32(&fake.connectTCP) != 1 || atomic.LoadInt32(&fake.connectUDP) != 1 || atomic.LoadInt32(&fake.httpReq) != 1 {

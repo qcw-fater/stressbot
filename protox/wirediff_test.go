@@ -509,7 +509,7 @@ func TestWireDifferentialFuzz(t *testing.T) {
 	const iterations = 200
 	rnd := rand.New(rand.NewSource(20260729))
 
-	for it := 0; it < iterations; it++ {
+	for it := range iterations {
 		msg := dynamicpb.NewMessage(md)
 		randFill(rnd, msg.ProtoReflect(), 3)
 		raw, err := proto.Marshal(msg)

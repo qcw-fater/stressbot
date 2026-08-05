@@ -20,6 +20,7 @@ package adapter
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -122,9 +123,7 @@ func NewCodecResolver(byServer map[string]Adapter) CodecResolver {
 func NewCodecResolverWithHeartbeat(byServer map[string]Adapter, heartbeat map[string]*codec.HeartbeatConfigDef) CodecResolver {
 	// 防御性拷贝：避免上层后续修改影响 resolver 内部状态（resolver 构造后应只读）。
 	copied := make(map[string]Adapter, len(byServer))
-	for k, v := range byServer {
-		copied[k] = v
-	}
+	maps.Copy(copied, byServer)
 	hbCopied := make(map[string]*codec.HeartbeatConfigDef, len(heartbeat))
 	for k, v := range heartbeat {
 		if v != nil {

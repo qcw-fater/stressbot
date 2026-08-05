@@ -136,12 +136,10 @@ func mapTemplateWriteError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var apiErr *Error
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*Error](err); ok {
 		return apiErr
 	}
-	var mysqlErr *mysql.MySQLError
-	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+	if mysqlErr, ok := errors.AsType[*mysql.MySQLError](err); ok && mysqlErr.Number == 1062 {
 		return ErrTemplateNameConflict
 	}
 	stresslog.Error("[ADMIN] 模板库数据库操作失败", zap.Error(err))
@@ -150,7 +148,7 @@ func mapTemplateWriteError(err error) error {
 
 func writeTemplateStoreError(w http.ResponseWriter, err error) {
 	err = mapTemplateWriteError(err)
-	if apiErr, ok := err.(*Error); ok && apiErr.Code == ErrTemplateNameConflict.Code {
+	if apiErr, ok := errors.AsType[*Error](err); ok && apiErr.Code == ErrTemplateNameConflict.Code {
 		err = apiErr.WithMessage("同类模板名称已存在")
 	}
 	writeError(w, err)

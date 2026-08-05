@@ -46,7 +46,7 @@ func TestChunkCachedAcrossCalls(t *testing.T) {
 	L := rp.Acquire()
 	defer L.Close()
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if _, _, _, err := rp.RunActionScript(L, "a.lua"); err != nil {
 			t.Fatalf("run %d: err=%v", i, err)
 		}
@@ -127,8 +127,8 @@ func TestRunActionScript_ReturnErrTable(t *testing.T) {
 	if err == nil {
 		t.Fatalf("return err table 应产生 error")
 	}
-	var ae *engine.ActionError
-	if !errors.As(err, &ae) {
+	ae, ok := errors.AsType[*engine.ActionError](err)
+	if !ok {
 		t.Fatalf("error 应为 *engine.ActionError，实际 %T: %v", err, err)
 	}
 	if ae.Code != errcode.ErrLuaScriptCheck {
@@ -152,8 +152,7 @@ func TestRunActionScript_ReturnNumber_FailLoud(t *testing.T) {
 		t.Fatalf("return number 应 fail loud，实际 nil")
 	}
 	// 应为框架错误（ErrLuaExecFailed 包装），非 ActionError 透传的脚本业务错误。
-	var ae *engine.ActionError
-	if errors.As(err, &ae) {
+	if ae, ok := errors.AsType[*engine.ActionError](err); ok {
 		t.Fatalf("旧式 return number 应包装为框架错误，不应透传 *ActionError（code=%d）", ae.Code)
 	}
 }

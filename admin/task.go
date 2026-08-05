@@ -2,6 +2,7 @@ package admin
 
 import (
 	"fmt"
+	"maps"
 	"sync"
 	"time"
 
@@ -98,9 +99,7 @@ func cloneForRead(t *Task) *Task {
 	cp := *t
 	if t.Reports != nil {
 		cp.Reports = make(map[string]TaskCompletionReport, len(t.Reports))
-		for k, v := range t.Reports {
-			cp.Reports[k] = v
-		}
+		maps.Copy(cp.Reports, t.Reports)
 	}
 	if t.Assignments != nil {
 		cp.Assignments = append([]Assignment(nil), t.Assignments...)
