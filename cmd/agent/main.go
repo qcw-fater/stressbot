@@ -288,10 +288,10 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 			stresslog.Fatal("连接共享状态(Redis)失败", zap.Error(serr))
 		}
 		sharedStore = store
-		stresslog.Info("[MAIN] 共享状态已启用",
-			zap.String("addr", resolved.AddrMasked()), zap.Int("dbIndex", resolved.DBIndex), zap.String("runId", runID))
+		stresslog.Info("[MAIN] Redis 共享状态已启用",
+			zap.String("addr", fmt.Sprintf("%s:%d", resolved.Host, resolved.Port)), zap.Int("dbIndex", resolved.DBIndex), zap.String("runId", runID))
 	} else {
-		stresslog.Info("[MAIN] 共享状态未启用（脚本未使用 share）")
+		stresslog.Info("[MAIN] Redis 共享状态未启用（脚本未使用 share）")
 	}
 
 	mgrCfg := robot.ManagerConfig{

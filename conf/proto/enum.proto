@@ -137,6 +137,8 @@ enum GMEventType {
     SDCSetPreBattleValue      = 96; // SDC搜打撤设置战前价值测试覆盖（param[0]=战前价值）
     SDCQueryWarmup            = 97; // SDC搜打撤查询温暖局状态
     SDCCompleteCurrentStageTasks = 98; // SDC搜打撤完成当前已解锁阶段任务
+    TestRefundBan = 99; // 测试退款封号(param[0]=扣除的躍之星数量，必须为正数；FEATURE-5046 调试用)
+    RoomTrainingSwitch = 100; // 自定义房间养成数据开关(param[0]=1 启用真实养成 / param[0]=0 回到满英雄，默认满英雄；BATTLE-5739)
 }
 
 // 排行榜类型

@@ -188,6 +188,10 @@ message ActivityLotteryConfig
 	int32 SubType = 9; //活动子类型
 	int32 Name = 10; //卡池名称
 	repeated int32 Skip = 11; //道具不足跳转
+	repeated int32 OptionalFinalAward = 12; //自选大奖
+	repeated int32 EndAward = 13; //最终大奖
+	repeated int32 Rate = 14; //累计进度
+	repeated int32 RateAward = 15; //累计进度奖励
 }
 
 //ActivityLotteryPool.csv
@@ -329,7 +333,18 @@ message ActivityThemeConfig
 message ActivityTotalRechargeTaskConfig
 {
 	int32 ActivityID = 1; //活动ID
-	int32 TitleDes = 2; //活动标题文本
+	int32 SubType = 2; //
+	int32 TitleDes = 3; //活动标题文本
+}
+
+//ActivityTransform.csv
+message ActivityTransformConfig
+{
+	int32 ActivityID = 1; //活动ID
+	repeated int32 ItemID = 2; //活动结束后需要转化的道具ID
+	repeated int32 ExchangeItemID = 3; //活动结束后转化为的道具ID
+	repeated int32 ExchangeRate = 4; //转化比列
+	int32 MailID = 5; //发送邮件ID
 }
 
 //ActivityWorldMapPersonalProg.csv
@@ -1196,6 +1211,26 @@ message CollectionConfig
 	string GoToGameUIID = 11; //跳转界面
 	int32 GoToParam = 12; //跳转参数
 	int32 JlvEXPReward = 13; //Jlv经验获得
+}
+
+//ComicStickerLevel.csv
+message ComicStickerLevelConfig
+{
+	int32 ID = 1; //ID
+	int32 ActicityID = 2; //活动ID
+	int32 Level = 3; //等级
+	int32 UpgradeExp = 4; //升级经验
+	repeated int32 GoodsPool = 5; //商品池
+	repeated int32 GoodsExp = 6; //购买商品经验
+}
+
+//ComicStickerTask.csv
+message ComicStickerTaskConfig
+{
+	int32 ID = 1; //ID
+	int32 ActivityID = 2; //活动ID
+	int32 RefreshRule = 3; //刷新规则
+	repeated int32 RefTaskPool = 4; //关联任务池
 }
 
 //CommonAIEvaluateValue.csv
@@ -3523,19 +3558,20 @@ message LuckyGiftConfig
 {
 	int32 ID = 1; //仅序号
 	string Name = 2; //礼包名称
-	repeated int32 TaskID = 3; //弹出任务ID
-	string TaskLogical = 4; //任务间逻辑
-	int32 Type = 5; //礼包类型
-	int32 Time = 6; //时限
-	int32 GroupID = 7; //组ID
-	int32 GroupShowTimes = 8; //组弹出次数
-	int32 ShowTimes = 9; //弹出次数
-	int32 IntervalTime = 10; //弹出冷却时间
-	int32 CashID = 11; //直购ID
-	repeated RewardConfig Item = 12; //商品内容
+	int32 CashID = 3; //直购ID
+	repeated RewardConfig Item = 4; //商品内容
+	repeated int32 TaskID = 5; //弹出任务ID
+	string TaskLogical = 6; //任务间逻辑
+	int32 Type = 7; //礼包类型
+	int32 Time = 8; //时限
+	int32 GroupID = 9; //组ID
+	int32 GroupShowTimes = 10; //组弹出次数
+	int32 ShowTimes = 11; //弹出次数
+	int32 IntervalTime = 12; //弹出冷却时间
 	repeated RewardConfig Price = 13; //售价
 	repeated RewardConfig OriginalPrice = 14; //原价
 	string Tag = 15; //性价比标志
+	string PopupUI = 16; //弹出界面
 }
 
 //MailMain.csv
@@ -4120,38 +4156,39 @@ message PeakRankLevelConfig
 	int32 BraveScoreMvp = 17; //勇者积分MVP加分
 	int32 BraveScoreSvp = 18; //勇者积分SVP加分
 	int32 BraveScoreCompensation = 19; //勇者积分补偿
-	int32 ExtraPoints = 20; //顶上战争额外勇者加分
-	repeated int32 TopLane = 21; //顶级评分要求|加分数
-	repeated int32 GoldMedal = 22; //金牌评分要求|加分数
-	repeated int32 SilverMedal = 23; //银牌评分要求|加分数
-	repeated int32 BronzeMedal = 24; //铜牌评分要求|加分数
-	repeated int32 BraveScore = 25; //职业规则
-	repeated string RankGap = 26; //段位差（对面平均段位-我的段位）|额外加分
-	int32 Demotion = 27; //是否允许降级
-	int32 LevelScore = 28; //段位分
-	int32 MinRankScore = 29; //最低rank值
-	int32 MaxRankScore = 30; //最高rank值
-	repeated int32 EssenceRankObtain = 31; //发放专精数量(名次)
-	int32 EssenceRankDraw = 32; //排位平局发放专精奖励
-	int32 MaxLbsScore = 33; //最大分数
-	int32 LbsScoreWin = 34; //胜场分
-	int32 LbsScoreLose = 35; //败场分
-	int32 LbsScoreDraw = 36; //平局分
-	int32 LadderPerformanceBattlePowerLimit = 37; //排位表现战力段位上限
-	int32 LadderPerformanceBattlePowerLimitMin = 38; //排位表现战力段位下限
-	int32 LadderRankCoefficientEx = 39; //排位战力额外系数（*10000）
-	int32 VictoryRankAverageMaxEx = 40; //胜利平均分系数（*10000）
-	int32 VictoryRankAverageMinEx = 41; //胜利平均分系数（*10000）
-	int32 DefaultRankAverageMaxEx = 42; //失败平均分系数（*10000）
-	int32 DefaultRankAverageMinEx = 43; //失败平均分系数（*10000）
-	repeated int32 GameModeType = 44; //模式id
-	repeated string GameMapType = 45; //类型和地图ID
-	repeated string GameTypeRate = 46; //类型和地图权重
-	repeated string GameEvent = 47; //词缀
-	repeated string GameEventRate = 48; //词缀权重
-	int32 BanNumber = 49; //禁用人数
-	string RankSound = 50; //升段音效
-	string FMODRankSound = 51; //升段音效
+	int32 ExtraPoints = 20; //打满三局加分
+	int32 PowerfulRival = 21; //强大对手加分
+	repeated int32 TopLane = 22; //顶级评分要求|加分数
+	repeated int32 GoldMedal = 23; //金牌评分要求|加分数
+	repeated int32 SilverMedal = 24; //银牌评分要求|加分数
+	repeated int32 BronzeMedal = 25; //铜牌评分要求|加分数
+	repeated int32 BraveScore = 26; //职业规则
+	repeated string RankGap = 27; //段位差（对面平均段位-我的段位）|额外加分
+	int32 Demotion = 28; //是否允许降级
+	int32 LevelScore = 29; //段位分
+	int32 MinRankScore = 30; //最低rank值
+	int32 MaxRankScore = 31; //最高rank值
+	repeated int32 EssenceRankObtain = 32; //发放专精数量(名次)
+	int32 EssenceRankDraw = 33; //排位平局发放专精奖励
+	int32 MaxLbsScore = 34; //最大分数
+	int32 LbsScoreWin = 35; //胜场分
+	int32 LbsScoreLose = 36; //败场分
+	int32 LbsScoreDraw = 37; //平局分
+	int32 LadderPerformanceBattlePowerLimit = 38; //排位表现战力段位上限
+	int32 LadderPerformanceBattlePowerLimitMin = 39; //排位表现战力段位下限
+	int32 LadderRankCoefficientEx = 40; //排位战力额外系数（*10000）
+	int32 VictoryRankAverageMaxEx = 41; //胜利平均分系数（*10000）
+	int32 VictoryRankAverageMinEx = 42; //胜利平均分系数（*10000）
+	int32 DefaultRankAverageMaxEx = 43; //失败平均分系数（*10000）
+	int32 DefaultRankAverageMinEx = 44; //失败平均分系数（*10000）
+	repeated int32 GameModeType = 45; //模式id
+	repeated string GameMapType = 46; //类型和地图ID
+	repeated string GameTypeRate = 47; //类型和地图权重
+	repeated string GameEvent = 48; //词缀
+	repeated string GameEventRate = 49; //词缀权重
+	int32 BanNumber = 50; //禁用人数
+	string RankSound = 51; //升段音效
+	string FMODRankSound = 52; //升段音效
 }
 
 //PeakRankParameter.csv
@@ -4237,12 +4274,12 @@ message PlayerBraveScoreConfig
 {
 	int32 BraveScoreID = 1; //规则ID
 	int32 MainTagID = 2; //职业ID
-	int32 Kills = 3; //击杀大于等于
-	int32 Deaths = 4; //死亡小于等于
-	int32 Assists = 5; //助攻大于等于
-	int32 HeroDamage = 6; //伤害大于等于
-	int32 Healing = 7; //治疗大于等于
-	int32 DamageTaken = 8; //承伤大于等于
+	repeated int32 Kills = 3; //击杀大于等于
+	repeated int32 Deaths = 4; //死亡小于等于
+	repeated int32 Assists = 5; //助攻大于等于
+	repeated int32 HeroDamage = 6; //伤害大于等于
+	repeated int32 Healing = 7; //治疗大于等于
+	repeated int32 DamageTaken = 8; //承伤大于等于
 }
 
 //PlayerLevel.csv
@@ -4767,11 +4804,11 @@ message SDCChestConfig
 	int32 ID = 1; //宝箱ID
 	string Name = 2; //宝箱名字
 	int32 ChestType = 3; //宝箱类型
-	repeated int32 QualityValueRatio = 4; //品质概率
+	repeated string QualityValueRatio = 4; //品质概率
 	repeated int32 ItemIds = 5; //可产出的道具ID列表
 	repeated int32 Weights = 6; //道具基础权重(与 ItemIds -一对应，同品质内竞争权重)
-	repeated int32 FallbackQualities = 7; //兜底品质列表(当宝箱预算耗尽仍无道具时，从此列表随机一个品质进行保底)
-	int32 MaxFallbackQuantity = 8; //每个宝箱实例独立从 1~MaxFallbackQuantity 随机本局最少道具数量
+	repeated string FallbackQualities = 7; //兜底品质列表(当宝箱预算耗尽仍无道具时，从此列表随机一个品质进行保底)
+	repeated int32 MaxFallbackQuantity = 8; //每个宝箱实例独立从 1~MaxFallbackQuantity 随机本局最少道具数量
 	int32 KeyItemId = 9; //钥匙宝箱所需道具ID
 	int32 IsHighValueChest = 10; //是否是高级宝箱
 	string IconName = 11; //小地图显示图标
@@ -4782,6 +4819,7 @@ message SDCChestConfig
 	int32 AlarmWaitTimeMS = 16; //报警宝箱首次触发后等待开放时长，单位毫秒。
 	int32 AlarmProtectionTimeMS = 17; //报警宝箱开放后的个人保护时长，单位毫秒；0 表示不按时间自动公共化
 	string AlarmScriptPath = 18; //报警宝箱首次触发脚本路径
+	int32 OpenAudioPoolId = 19; //宝箱打开的音效（AudioPlayFmodPool）
 }
 
 //SDCChipConfig.csv
@@ -4918,13 +4956,14 @@ message SDCItemConfig
 	int32 SeasonValue = 3; //赛季价值
 	int32 LossParameter = 4; //损耗系数（万分比）
 	int32 MinValue = 5; //损耗后最低价值
-	string Prefab = 6; //预制体
-	int32 DropItemID = 7; //局内效果（映射DropItem）
-	int32 DetailConfigID = 8; //效果表映射
-	int32 CastTime = 9; //引导时间
-	string CastGnodePath = 10; //引导过程中触发的Gnode效果
-	repeated int32 Attribute = 11; //道具属性
-	int32 IPID = 12; //IP
+	int32 RepairCosts = 6; //修理消耗
+	string Prefab = 7; //预制体
+	int32 DropItemID = 8; //局内效果（映射DropItem）
+	int32 DetailConfigID = 9; //效果表映射
+	int32 CastTime = 10; //引导时间
+	string CastGnodePath = 11; //引导过程中触发的Gnode效果
+	repeated int32 Attribute = 12; //道具属性
+	int32 IPID = 13; //IP
 }
 
 //SDCKeysConfig.csv
@@ -4932,6 +4971,7 @@ message SDCKeysConfigConfig
 {
 	int32 ID = 1; //id
 	int32 Durability = 2; //耐久
+	repeated int32 Cast = 3; //消耗
 }
 
 //SDCMMRparameter.csv
@@ -5041,6 +5081,7 @@ message SDCRankLevelConfig
 	int32 ProtectCount = 13; //大段位保护次数
 	int32 ProtectType = 14; //保护方式
 	int32 ExtendLadder = 15; //赛季继承段位
+	string FMODRankSound = 16; //升段音效
 }
 
 //SDCRankScore.csv
@@ -5152,10 +5193,10 @@ message SDCTaskConfig
 	int32 SeasonID = 3; //归属赛季数；主线任务填 0
 	int32 StageID = 4; //归属阶段
 	repeated int32 RefTaskID = 5; //引用TaskID
-	repeated RewardConfig ItemReward = 6; //完成发放的道具奖励；单个奖励 itemid，count，多个用 | 分隔；可空，空表示不发道具。赛季奖励（TaskType=3）的奖励内容写入此字段
+	repeated RewardConfig ItemReward = 6; //任务奖励
 	int32 IsShowInGame = 7; //是否在局内触发【局内任务进度弹窗】：1=触发、0=不触发（仅在主界面更新进度 / 红点）。赛季奖励（TaskType=3）统一填 0
 	int32 ResetRule = 8; //进度重置规则
-	int32 SDCMapID = 9; //引用SDCMap中ID，用以判断任务所属地图
+	repeated int32 SDCMapID = 9; //引用SDCMap中ID，用以判断任务所属地图
 	string Location = 10; //任务坐标
 	repeated int32 Range = 11; //任务半径
 }

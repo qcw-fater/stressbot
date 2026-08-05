@@ -270,6 +270,11 @@ message OperateActivityLotteryDrawS2C {
     int32             poolId       = 2; // 卡池ID
     repeated ItemData reward       = 3; // 本次抽中奖励
     repeated int32    unlockPoolId = 4; // 本次解锁的卡池
+    repeated ActivityLotteryItemConf drawnItems       = 5; // 本次抽中的卡池项
+    bool                             finalAwardHit    = 6; // 本次是否命中最终大奖
+    int32                            poolRemainCount  = 7; // 抽后当前池剩余数量
+    int32                            totalDrawCount   = 8; // 活动累计抽取次数
+    repeated int32                   canClaimRate     = 9; // 本次抽奖后可领取的累计阈值
 }
 // 大富翁投掷骰子
 message OperateMonopolyRollDiceC2S {
@@ -364,4 +369,50 @@ message OperateWorldMapProgressS2C
 	int64 ActivityId              = 1; // 活动ID
 	int32 ServerProgressPercent   = 2; // 最新单服进度百分比
 	repeated int32 UnlockedMapIDs = 3; // 最新已解锁漫画图列表
+}
+//活动抽奖选择最终大奖
+message OperateActivityLotterySelectFinalAwardC2S
+{
+	int64 ActivityId       = 1; // 活动Id
+	int32 PoolId           = 2; // 卡池ID
+	int32 FinalAwardItemId = 3; // 选择的大奖itemId
+}
+//活动抽奖选择最终大奖
+message OperateActivityLotterySelectFinalAwardS2C
+{
+	int64             ActivityId            = 1; // 活动Id
+	int32             PoolId                = 2; // 卡池ID
+	ItemData          SelectedFinalAward    = 3; // 已选大奖
+	map<int32, int32> PoolItemRemain        = 4; // 当前池剩余
+	repeated int32    SelectedFinalAwardIds = 5; // 已选择大奖itemId
+	repeated int32    DrawnFinalAwardIds    = 6; // 已获得大奖itemId
+}
+//活动抽奖领取本轮抽完奖励
+message OperateActivityLotteryClaimEndAwardC2S
+{
+	int64 ActivityId = 1; // 活动Id
+	int32 PoolId     = 2; // 卡池ID
+}
+//活动抽奖领取本轮抽完奖励
+message OperateActivityLotteryClaimEndAwardS2C
+{
+	int64             ActivityId      = 1; // 活动Id
+	int32             PoolId          = 2; // 卡池ID
+	repeated ItemData Reward          = 3; // 领取奖励
+	bool              EndAwardClaimed = 4; // 是否已领取
+}
+//活动抽奖领取累计奖励
+message OperateActivityLotteryClaimProgressRewardC2S
+{
+	int64 ActivityId = 1; // 活动Id
+	int32 Rate       = 2; // 累计抽取阈值
+}
+//活动抽奖领取累计奖励
+message OperateActivityLotteryClaimProgressRewardS2C
+{
+	int64            ActivityId            = 1; // 活动Id
+	int32            Rate                  = 2; // 累计抽取阈值
+	repeated ItemData Reward               = 3; // 领取奖励
+	int32            TotalDrawCount        = 4; // 活动累计抽取次数
+	map<int32, bool> ProgressRewardClaimed = 5; // 累计奖励领取状态
 }

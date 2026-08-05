@@ -669,6 +669,10 @@ pending → starting → running → stopping → stopped
 - [异步发送所有权] 交给 gnet `AsyncWrite` 的最终 packet 在异步写完成前必须保持不可变；仅当 Adapter 明确把 body 拷贝进独立 packet 时，模板的 body scratch 才可在 Encode 返回后复用。
 - [剖面归因] CPU pprof 的 cumulative 占比包含完整子树，不能当作可消除收益；跨 Lua 脚本共享调用栈时先加脚本/action 标签或做等价微基准，再为单项优化设收益目标。
 
+- [Heap 差分归因] 相邻 heap 的 `inuse_space` 小幅正差不能单独判定泄漏；必须同时核对 `inuse_objects`、调用树与业务相位。若同一分配点出现“字节增加但对象数下降”，优先按采样估算/GC 相位波动处理，再用连续强制 GC 快照验证斜率。
+- [协程与连接预热] `newRegistry → acquireTrampThread` 的存活量要结合每 Robot idle thread 上限和 callback 嵌套深度判断；`startPumpWithSubmit` 的 alloc churn 要结合 flow 中连接反复建立/关闭判断，不能把有界 trampoline 缓存或战斗连接周转误报为泄漏。
+- [高频 Lua 数据面] 将动作 QPS 与脚本源码对齐：若同一脚本每秒执行上万次并重复做常量路由表物化、逐字段二进制打包、state 字符串查找和 Lua→Go 调用，应优先编译为每 Robot 复用的 Go 数据面计划；不要先给 gopher-lua 的所有表增加通用缓存。计划复用 body scratch 的前提仍是 Adapter Encode 在返回前复制 body。
+
 ---
 
 ## 验证流程

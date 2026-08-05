@@ -120,16 +120,16 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 	if cfg.RedisEnabled() {
 		resolved, rerr := cfg.Redis.Resolve()
 		if rerr != nil {
-			return nil, fmt.Errorf("共享状态配置无效: %w", rerr)
+			return nil, fmt.Errorf("Redis 共享状态配置无效: %w", rerr)
 		}
 		// 启动时 PING 验证 Redis 连通性（不持久占用连接）
 		pingStore, perr := sharedstate.NewRedisStore(resolved, "admin-ping")
 		if perr != nil {
-			return nil, fmt.Errorf("连接共享状态(Redis)失败 (addr=%s): %w", resolved.AddrMasked(), perr)
+			return nil, fmt.Errorf("连接 Redis 共享状态失败 (addr=%s): %w", fmt.Sprintf("%s:%d", resolved.Host, resolved.Port), perr)
 		}
 		_ = pingStore.Close()
-		stresslog.Info("[ADMIN] 共享状态已启用",
-			zap.String("addr", resolved.AddrMasked()),
+		stresslog.Info("[ADMIN] Redis 共享状态已启用",
+			zap.String("addr", fmt.Sprintf("%s:%d", resolved.Host, resolved.Port)),
 			zap.Int("dbIndex", resolved.DBIndex),
 			zap.String("keyPrefix", resolved.KeyPrefix))
 		s.sharedCleanup = newSharedCleanupQueue("data")
@@ -667,13 +667,13 @@ func (s *AdminServer) autoStopTask(taskID string, reason string) {
 	}
 }
 
-var idCounter uint64
+var idCounter atomic.Uint64
 
 func generateID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		binary.BigEndian.PutUint64(b, uint64(time.Now().UnixNano()))
-		binary.BigEndian.PutUint64(b[8:], atomic.AddUint64(&idCounter, 1))
+		binary.BigEndian.PutUint64(b[8:], idCounter.Add(1))
 	}
 	return hex.EncodeToString(b)
 }

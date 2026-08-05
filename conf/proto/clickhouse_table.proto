@@ -1103,6 +1103,20 @@ message ch_player_battle_area_delay_log {
     LcxSdkCommon sdkCommon    = 12; // LCX的SDK公共字段
 }
 
+message ch_battle_area_selection_summary_log {
+    int64 uuid = 1; // 日志ID 必填 Hidden
+    int64 writeTime = 2; // 日志记录时间 必填 DateTime
+    string version = 3; // 版本号 必填
+    string match_uuid = 4; // 匹配ID
+    int32 selection_version = 5; // 选择算法版本
+    string legacy_probe_area = 6; // 旧算法Probe结果
+    string v2_area = 7; // 新算法结果
+    string production_area = 8; // 生产实际区域
+    string selection_reason = 9; // 首个决胜维度
+    bool shadow_enabled = 10; // 是否开启影子计算
+    string area_selection_summary = 11; // 区域质量向量摘要JSON
+}
+
 // 赛事奖励
 message ch_player_arena_reward_log {
     int64                      uuid                       = 1;  // 日志ID 必填 Hidden
@@ -1302,6 +1316,10 @@ message ch_player_lbs_log {
     int32        rank_level            = 30; // 当前称号等级
     string       old_title_key         = 31; // 旧称号key
     int32        title_index           = 32; // 称号槽位
+    int32        ladder_level          = 33; // 本局开始时排位段位(LadderLevel)
+    int32        season_id             = 34; // 排位赛季ID
+    int32        game_mode             = 35; // 游戏模式(GameModel枚举)
+    int32        battle_result         = 36; // 本局胜负(BattleResultType枚举:1=胜,2=负,3=平)
 }
 
 // LBS结算事件日志
@@ -1721,6 +1739,10 @@ message ch_activity_lottery_draw_log {
     repeated int32           addItemId     = 11; // 产出道具id
     repeated int32           addItemNumber = 12; // 产出道具数量
     repeated LogResourceInfo resourceInfo  = 13; // 道具产耗
+    int32                    finalAwardItemId = 14; // 本池已选最终大奖itemId
+    bool                     finalAwardHit    = 15; // 本次是否命中最终大奖
+    int32                    poolRemainCount  = 16; // 抽后当前池剩余数量
+    int32                    totalDrawCount   = 17; // 活动累计抽取次数
 }
 
 // 活动抽奖卡池解锁
@@ -1734,6 +1756,40 @@ message ch_activity_lottery_pool_unlock_log {
     LcxSdkCommon   sdkCommon  = 6; // LCX的SDK公共字段
     int32          activityId = 7; // 活动id
     repeated int32 poolId     = 8; // 解锁卡池id
+}
+
+// 活动抽奖选择最终大奖
+message ch_activity_lottery_final_award_select_log {
+    // PRIMARY KEY:activityId,poolId
+    int64          uuid                  = 1;  // 日志ID 必填 Hidden
+    int64          writeTime             = 2;  // 日志记录时间 必填 DateTime
+    string         version               = 3;  // 版本号       必填
+    Common         common                = 4;  // 公共字段
+    RoleCommon     roleCommon            = 5;  // 角色公共字段
+    LcxSdkCommon   sdkCommon             = 6;  // LCX的SDK公共字段
+    int32          activityId            = 7;  // 活动id
+    int32          poolId                = 8;  // 卡池id
+    int32          finalAwardItemId      = 9;  // 选择的最终大奖itemId
+    repeated int32 selectedFinalAwardIds = 10; // 已选择过的大奖itemId
+    repeated int32 drawnFinalAwardIds    = 11; // 已获得的大奖itemId
+}
+
+// 活动抽奖奖励领取
+message ch_activity_lottery_reward_claim_log {
+    // PRIMARY KEY:activityId,rewardType,poolId,rate
+    int64          uuid             = 1;  // 日志ID 必填 Hidden
+    int64          writeTime        = 2;  // 日志记录时间 必填 DateTime
+    string         version          = 3;  // 版本号       必填
+    Common         common           = 4;  // 公共字段
+    RoleCommon     roleCommon       = 5;  // 角色公共字段
+    LcxSdkCommon   sdkCommon        = 6;  // LCX的SDK公共字段
+    int32          activityId       = 7;  // 活动id
+    int32          rewardType       = 8;  // 奖励类型:1本轮抽完奖励 2累计抽取奖励
+    int32          poolId           = 9;  // 卡池id
+    int32          rate             = 10; // 累计抽取阈值
+    repeated int32 rewardItemId     = 11; // 奖励道具id
+    repeated int32 rewardItemNumber = 12; // 奖励道具数量
+    bool           isMailSettlement = 13; // 是否活动结束邮件补发
 }
 
 //  英雄试炼进阶花费
@@ -2215,7 +2271,7 @@ message ch_player_sdc_prepare_log {
     string     version               = 3;  // 版本号
     Common     common                = 4;  // 公共字段
     RoleCommon roleCommon            = 5;  // 角色公共字段
-    int32      log_type              = 6;  // 操作类型: 0=进战冻结快照 1=装配 2=卸下 3=移动 4=出售 5=批量出售 6=使用藏品 7=设置补齐队友 8=替换 9=使用套装 10=取消套装
+    int32      log_type              = 6;  // 操作类型: 0=进战冻结快照 1=装配 2=卸下 3=移动 4=出售 5=批量出售 6=使用藏品 7=设置补齐队友 8=替换 9=使用套装 10=取消套装 17=修理护甲
     int32      result                = 7;  // 操作结果: 0=失败 1=成功
     string     error_code            = 8;  // 失败时的错误码
     int32      sdc_level             = 9;  // SDC等级
@@ -2262,6 +2318,67 @@ message ch_player_sdc_prepare_log {
     int32      cost_result                       = 50; // 扣费结果:0=未扣费1=成功2=失败
     string     preset_slots_before_json          = 51; // 操作前预设或战备槽位完整快照JSON
     string     preset_slots_after_json           = 52; // 操作后预设或战备槽位完整快照JSON
+    int32      item_type                         = 53; // 实际道具一级类型
+    int32      item_sub_type                     = 54; // 实际道具二级类型
+    int32      item_sub_type2                    = 55; // 实际道具三级类型
+    int32      item_count_before                 = 56; // 操作前实例堆叠数量
+    int32      item_count_after                  = 57; // 操作后实例堆叠数量
+    string     effect_before_json                = 58; // 操作前服务器计算的英雄临时效果JSON
+    string     effect_after_json                 = 59; // 操作后服务器计算的英雄临时效果JSON
+    int32      durability_before                 = 60; // 修理前护甲耐久
+    int32      durability_after                  = 61; // 修理后护甲耐久
+    int32      max_durability                    = 62; // 护甲最大耐久
+    int32      repair_cost_per_point             = 63; // 每点耐久修理消耗
+    int64      repair_cost_total                 = 64; // 本次修理总消耗
+}
+
+// SDC道具资产流水
+message ch_player_sdc_item_flow_log {
+    // PRIMARY KEY:role_id,item_guid,flow_id
+    int64 uuid = 1; // 日志ID Hidden
+    int64 writeTime = 2; // 日志记录时间 DateTime
+    string version = 3; // 版本号
+    Common common = 4; // 公共字段
+    RoleCommon roleCommon = 5; // 角色公共字段
+    LcxSdkCommon sdkCommon = 6; // LCX的SDK公共字段
+    int64 flow_id = 7; // 同一业务事务的流水组ID
+    string action = 8; // 资产动作:add/delete/update
+    string reason_code = 9; // 稳定一级原因编码
+    int32 reason_id = 10; // common.Reason稳定ID
+    string reason_desc = 11; // 原因说明
+    string sub_reason = 12; // 二级原因
+    int32 season_id = 13; // 事务开始时SDC赛季ID
+    int64 battle_id = 14; // 关联战斗ID
+    string source_type = 15; // 关联业务类型
+    int64 source_id = 16; // 关联业务标识
+    int64 item_guid = 17; // 道具实例GUID
+    int32 item_id = 18; // 查询用道具ID
+    int32 before_item_id = 19; // 变更前道具ID
+    int32 after_item_id = 20; // 变更后道具ID
+    int32 before_number = 21; // 变更前有效数量
+    int32 after_number = 22; // 变更后有效数量
+    int64 before_value = 23; // 变更前当前价值
+    int64 after_value = 24; // 变更后当前价值
+    int64 before_original_value = 25; // 变更前原始价值
+    int64 after_original_value = 26; // 变更后原始价值
+    int32 before_durability = 27; // 变更前耐久
+    int32 after_durability = 28; // 变更后耐久
+    int32 before_max_durability = 29; // 变更前最大耐久
+    int32 after_max_durability = 30; // 变更后最大耐久
+    int32 before_capacity = 31; // 变更前容量
+    int32 after_capacity = 32; // 变更后容量
+    int32 before_sdc_type = 33; // 变更前SDC类型
+    int32 after_sdc_type = 34; // 变更后SDC类型
+    int32 before_sdc_sub_type = 35; // 变更前SDC子类型
+    int32 after_sdc_sub_type = 36; // 变更后SDC子类型
+    repeated int32 before_affix_ids = 37; // 变更前规范化词条ID
+    repeated int32 after_affix_ids = 38; // 变更后规范化词条ID
+    int32 before_bind_hero_id = 39; // 变更前绑定英雄ID
+    int32 after_bind_hero_id = 40; // 变更后绑定英雄ID
+    int32 before_container_type = 41; // 变更前容器类型
+    int32 after_container_type = 42; // 变更后容器类型
+    int32 before_container_detail = 43; // 变更前容器详情
+    int32 after_container_detail = 44; // 变更后容器详情
 }
 
 // SDC局外容器操作日志
@@ -2286,6 +2403,13 @@ message ch_player_sdc_out_battle_container_log {
     string request_items_json = 17; // 请求物品JSON
     string actual_items_json = 18; // 实际物品JSON
     int32 save_result = 19; // 持久化结果
+    int64 item_guid = 20; // 激活卡实例GUID
+    int32 item_id = 21; // 激活卡道具配置ID
+    int32 use_number = 22; // 实际请求使用数量
+    int32 current_parameter_before = 23; // 操作前服务器生效参数ID
+    int32 current_parameter_after = 24; // 操作后服务器生效参数ID
+    int64 expire_time_before = 25; // 目标参数操作前有效期
+    int64 expire_time_after = 26; // 目标参数操作后有效期
 }
 
 // SDC制作生命周期日志
@@ -2359,6 +2483,14 @@ message ch_player_sdc_task_action_log {
     int32 refresh_count = 18; // 刷新次数
     int32 lock_count = 19; // 锁定次数
     int32 tx_commit_result = 20; // 事务提交结果
+    int32 task_type = 21; // 服务器任务类型
+    int32 slot_index = 22; // 收集者槽位索引
+    int32 milestone_index = 23; // 累计奖励档位
+    bool locked_before = 24; // 操作前锁定状态
+    bool locked_after = 25; // 操作后锁定状态
+    string request_item_guids_json = 26; // 实际提交道具GUID列表JSON
+    string task_ids_json = 27; // 实际领取任务ID列表JSON
+    string index_ids_json = 28; // 实际领取档位列表JSON
 }
 
 // SDC图鉴操作日志
@@ -2381,6 +2513,7 @@ message ch_player_sdc_codex_action_log {
     int32 repeat_count_after = 15; // 操作后重复次数
     string reward_json = 16; // 奖励JSON
     int32 save_result = 17; // 持久化结果
+    int32 activated_count = 18; // 操作后收藏册已激活条目数
 }
 
 // SDC收藏品生命周期日志
@@ -2435,6 +2568,28 @@ message ch_player_sdc_match_lifecycle_log {
     int32 team_status_before = 23; // 队伍操作前状态
     int32 team_status_after = 24; // 队伍操作后状态
     int32 captain_player_id = 25; // 队长玩家ID
+    int64 start_match_time = 26; // 本轮匹配开始时间戳
+    int32 match_duration = 27; // 从开始匹配到当前终态的秒数
+    int32 map_type = 28; // 服务器地图类型
+    bool fill_teammate = 29; // 是否开启补齐队友
+    string team_snapshot_json = 30; // 入池时冻结的队伍成员摘要JSON
+    int64 room_id = 31; // 匹配成功后的房间ID
+}
+
+// SDC主等级升级日志
+message ch_player_sdc_main_level_up_log {
+    // PRIMARY KEY:role_id,battle_id
+    int64 uuid = 1; // 日志ID Hidden
+    int64 writeTime = 2; // 日志记录时间 DateTime
+    string version = 3; // 版本号
+    Common common = 4; // 公共字段
+    RoleCommon roleCommon = 5; // 角色公共字段
+    int64 battle_id = 6; // 关联战斗ID
+    int64 match_uuid = 7; // 关联匹配UUID
+    int32 level_before = 8; // 升级前主等级
+    int32 level_after = 9; // 升级后主等级
+    int32 exp_change = 10; // 本次服务器计算经验变化
+    int32 exp_after = 11; // 升级后剩余经验
 }
 
 // SDC掉落数据日志

@@ -676,3 +676,7 @@ message MainFirstShareActivityC2S {
 // 首次分享活动
 message MainFirstShareActivityS2C {
 }
+//通知客户端上传日志到cos(YOU-520)
+message MainNotifyClientUpLogS2C
+{
+}

@@ -57,7 +57,7 @@ cd cmd/web && npm run test                 # Vitest
 - **`adapter/` — 协议适配器接口（9 方法）。热路径帧解析（`HeaderSize`/`BodyLength`）纯 Go 缓存，编解码由 `CodecResolver` 按 `"<proto>:<service>"` 解析、`SchemaAdapter` 包装 `codec/` Go 引擎驱动，配置来自 `conf/adapter/<proto>_<service>_codec.json`（每连接一份）。
 - **`admin/` — Admin 服务器（16 文件）。任务调度（TaskStore 状态机 + 单例约束 + 持久化）、Agent 管理（注册/心跳/健康检查/unhealthy→offline/离线清理）、指标聚合（MergeSnapshots）、时序采样（Sampler）、历史归档（MySQL 6 表）、任务分配（proportional/debug-single）、Agent RPC 调度、前端静态托管。60 个 HTTP API 端点（前缀 `/sbot/`）。
 - **`agent/` — Agent 节点（8 文件）。注册到 Admin（指数退避）→ 心跳循环 → 任务轮询 → TaskRunner 执行（下载配置 → 加载适配器 → 编译 proto → 构建流程 → Manager → 启动机器人）→ 指标上报 + 系统资源上报。本地 HTTP API（前缀 `/agent/v1/`：task/stop/shutdown/version/status/logs + `/healthz`）。
-- **`monitor/` — 指标采集。原子计数器（热路径零锁：成功/失败/超时/取消/执行中/字节数）、延迟直方图（16 桶 1ms~60s+，P50/P90/P95/P99）、Apdex 评分、客户端开销独立列（`ClientAvgMs`）、分布式聚合。`RecordAction(name, result, timing, wallClock, sendBytes, recvBytes, err)`：`result` ∈ Success/Failure/Timeout/Canceled，`timing` 携带 RTT、监听等待与各编解码阶段耗时。错误按 `code` 单维聚合（展示按 `code < 100` 推导框架/业务标签），保留最近 3 条详情。导出：Console / HTTP JSON / CSV / pprof。
+- **`monitor/` — 指标采集。原子计数器 + per-action 短临界区、DDSketch 延迟分布（1% 相对精度、最多 2048 bins，P50/P90/P95/P99 可严格合并）、Apdex 评分、非 RTT 客户端开销独立列、累计面 + 顺序区间窗口。`RecordAction(name, result, timing, wallClock, sendBytes, recvBytes, err)`：`result` ∈ Success/Failure/Timeout/Canceled，`timing` 携带 RTT、监听等待与各编解码阶段耗时。错误按 `code` 单维聚合（展示按 `code < 100` 推导框架/业务标签），保留最近 3 条详情。内部 Agent/Admin 报告携带 sketch，公共 API 必须剥离；空延迟分布展示值为 null。导出：Console / HTTP JSON / CSV / pprof。
   - **动作分类（`ActionSnapshot.Kind`）** 按运行时实际发生的网络行为定型，取最强语义：有 RTT 样本 → `networked`（往返）；否则有监听命中 → `listen`（监听）；否则有发送字节 → `send`（发送）；都没有 → `local`（本地）。前端按 kind 选主指标列。
   - **Apdex 只对 `networked` 打分**，样本是 RTT。监听/发送/本地类在快照里带 kind，UI 显示「不适用」——这三类的耗时主体是服务端业务时长或客户端执行时长，没有可比的统一阈值，掺进总分会让分数随动作构成漂移。分母是「发起过请求的样本数」：超时与连接中断记 frustrated（拿不到 RTT 但确实是坏体验），业务错误按真实 RTT 正常打分（服务端正确处理了请求）。
   - **监听等待**（`ListenWait` 直方图）单列，从 `NetExchange.RecvFrameAt`（帧在内核可读的时刻）算起而非轮询唤醒时刻，避开协作式调度的量化误差。已在队列里的消息记 `ListenReady` 计数而不产生 0ms 样本，超时记 `ListenTimeoutCount` 并单独出成率。
@@ -185,7 +185,9 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 
 - Windows 下使用 `rg` 时禁止把含 `*`/`?` 的路径作为位置参数；应传目录字面路径并用 `-g '<pattern>'` 过滤，动态模块目录先枚举出实际路径。
 - PowerShell 中检索包含 `|`、括号或引号的源码片段时优先拆成多个 `rg -F` 固定字符串查询；禁止在外层双引号命令中叠加复杂 `rg` 正则转义。
+- 预期可能零匹配的 `rg` 必须单独执行，不得与文件读取或其他已有有效输出捆绑；`rg` 的零匹配返回码 1 不能被误判为前序操作失败。
 - 在受限 Windows 工作区运行 Go 构建、测试或 pprof 命令时，将 `GOCACHE` 指向仓库内可写且已忽略的临时目录，避免默认用户缓存清理失败使成功结果返回非零。
+- 异步业务动作的超时必须覆盖服务端最大业务窗口；上游请求失败后不得继续执行依赖请求制造级联超时，必须进入显式恢复与清理分支。
 
 每次对代码进行修改后，按以下步骤验证：
 

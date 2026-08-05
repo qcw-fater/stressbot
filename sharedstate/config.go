@@ -115,19 +115,6 @@ func (c RedisConfig) Resolve() (ResolvedRedisConfig, error) {
 	return out, nil
 }
 
-// AddrMasked 返回脱敏后的地址（用于 capabilities 展示）。
-func (c ResolvedRedisConfig) AddrMasked() string {
-	return MaskHostPort(c.Host, c.Port)
-}
-
-// MaskHostPort 对 host+port 脱敏：隐藏主机（避免泄露内网细节），仅保留端口。
-func MaskHostPort(host string, port int) string {
-	if host == "" {
-		return ""
-	}
-	return fmt.Sprintf("***:%d", port)
-}
-
 func parseDurationDefault(s string, def time.Duration) (time.Duration, error) {
 	if s == "" {
 		return def, nil

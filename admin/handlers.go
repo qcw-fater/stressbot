@@ -163,7 +163,7 @@ func recoverMiddleware(next http.Handler) http.Handler {
 type CapabilitiesResponse struct {
 	// SharedState 是否已配置共享状态（Redis）。前端据此提示脚本是否可用 share。
 	SharedState bool `json:"sharedState"`
-	// SharedAddr Redis 地址（脱敏展示，主机已隐藏，仅保留端口）。仅当 SharedState=true 时有值。
+	// SharedAddr Redis 地址。仅当 SharedState=true 时有值。
 	SharedAddr string `json:"sharedAddr,omitempty"`
 	// FlowLibrary 是否已启用服务器流程库。
 	FlowLibrary bool `json:"flowLibrary"`
@@ -181,7 +181,7 @@ func (s *AdminServer) handleCapabilities(w http.ResponseWriter, r *http.Request)
 	}
 	if resp.SharedState {
 		if resolved, err := s.cfg.Redis.Resolve(); err == nil {
-			resp.SharedAddr = resolved.AddrMasked()
+			resp.SharedAddr = fmt.Sprintf("%s:%d", resolved.Host, resolved.Port)
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -798,8 +798,8 @@ func (s *AdminServer) handleGetTaskConfig(w http.ResponseWriter, r *http.Request
 
 	default:
 		// adapter/*_codec.json（按 basename 匹配 Codecs）或 adapter/errors.json
-		if strings.HasPrefix(path, "adapter/") {
-			name := strings.TrimPrefix(path, "adapter/")
+		if after, ok0 := strings.CutPrefix(path, "adapter/"); ok0 {
+			name := after
 			if name == "errors.json" {
 				if len(task.Config.ErrorMap) == 0 {
 					http.NotFound(w, r)
@@ -828,8 +828,8 @@ func (s *AdminServer) handleGetTaskConfig(w http.ResponseWriter, r *http.Request
 		}
 		// 尝试去掉 proto/ 或 scripts/ 前缀匹配
 		baseName := path
-		if idx := strings.Index(path, "/"); idx >= 0 {
-			baseName = path[idx+1:]
+		if _, after, ok := strings.Cut(path, "/"); ok {
+			baseName = after
 		}
 		if data, found := task.Config.ProtoFiles[baseName]; found {
 			w.Header().Set("Content-Type", "application/octet-stream")
@@ -969,7 +969,6 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 	resultCh := make(chan pushResult, len(assignments))
 	taskStartNumber := assignments[0].StartNumber
 	for _, a := range assignments {
-		a := a // 捕获循环变量
 		agent, ok := s.agents.Get(a.AgentID)
 		if !ok {
 			resultCh <- pushResult{agentID: a.AgentID, err: fmt.Errorf("agent not found")}
@@ -1007,7 +1006,7 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 
 	var failed []string
 	var succeeded []string
-	for i := 0; i < len(assignments); i++ {
+	for range assignments {
 		r := <-resultCh
 		if r.err != nil {
 			failed = append(failed, r.agentID)
@@ -1105,7 +1104,6 @@ func (s *AdminServer) handleStopTask(w http.ResponseWriter, r *http.Request) {
 	var failedCount atomic.Int64
 	var skippedCount atomic.Int64
 	for _, agentID := range targets {
-		agentID := agentID
 		agent, ok := s.agents.Get(agentID)
 		if !ok {
 			skippedCount.Add(1)
@@ -1215,16 +1213,16 @@ func buildAgentListItem(agent *AgentNode, now time.Time) AgentListItem {
 		LastHeartbeatAt: agent.LastHeartbeatAt,
 	}
 	if !agent.StressUpdatedAt.IsZero() {
-		item.StressUpdatedAt = timePointer(agent.StressUpdatedAt)
+		item.StressUpdatedAt = new(agent.StressUpdatedAt)
 	}
 	if agent.LatestSystem == nil || agent.SystemUpdatedAt.IsZero() {
 		return item
 	}
 
-	item.SystemUpdatedAt = timePointer(agent.SystemUpdatedAt)
+	item.SystemUpdatedAt = new(agent.SystemUpdatedAt)
 	age := now.Sub(agent.SystemUpdatedAt)
 	if age >= 0 {
-		item.SystemSnapshotAgeSeconds = float64Pointer(age.Seconds())
+		item.SystemSnapshotAgeSeconds = new(age.Seconds())
 	}
 	fresh := (agent.Status == AgentIdle || agent.Status == AgentBusy) &&
 		age >= 0 && age <= systemSnapshotFreshFor(agent.SystemInterval)
@@ -1236,13 +1234,13 @@ func buildAgentListItem(agent *AgentNode, now time.Time) AgentListItem {
 	snapshot := agent.LatestSystem
 	item.HostCPUPercent = validPercent(snapshot.HostCPUPercent)
 	if _, _, percent, ok := validHostMemory(snapshot); ok {
-		item.HostMemPercent = float64Pointer(percent)
+		item.HostMemPercent = new(percent)
 	}
 	item.ProcessCPUPercent = validPercent(snapshot.ProcessCPUPercent)
 	if snapshot.ProcessRSSBytes != nil {
-		item.ProcessRSSBytes = uint64Pointer(*snapshot.ProcessRSSBytes)
+		item.ProcessRSSBytes = new(*snapshot.ProcessRSSBytes)
 	}
-	item.ProcessGoroutines = intPointer(snapshot.ProcessGoroutines)
+	item.ProcessGoroutines = new(snapshot.ProcessGoroutines)
 	return item
 }
 
@@ -1901,10 +1899,7 @@ func splitGlobalValues(global, totalBots int, assignments []Assignment) map[stri
 			continue
 		}
 		exact := float64(global) * float64(a.TotalBots) / float64(totalBots)
-		floor := int(math.Floor(exact))
-		if floor < 1 {
-			floor = 1
-		}
+		floor := max(int(math.Floor(exact)), 1)
 		out[a.AgentID] = floor
 		used += floor
 		fracs[i] = exact - math.Floor(exact)
@@ -1977,20 +1972,17 @@ func scaleRampUp(cfg *RampUpConfig, totalBots, assignedBots int, assignments []A
 	used := 0
 	for i, s := range cfg.Stages {
 		exact := float64(s.Count) * float64(assignedBots) / float64(totalBots)
-		floor := int(math.Floor(exact))
-		if floor < 0 {
-			floor = 0
-		}
+		floor := max(int(math.Floor(exact)), 0)
 		counts[i] = floor
 		fracs[i] = exact - float64(floor)
 		used += floor
 	}
 	// 把剩余的 bot 按余量从大到小补到各 stage，确保总和等于 assignedBots
 	remainder := assignedBots - used
-	for k := 0; k < remainder; k++ {
+	for range remainder {
 		bestIdx := -1
 		bestFrac := -1.0
-		for i := 0; i < n; i++ {
+		for i := range n {
 			if fracs[i] > bestFrac {
 				bestFrac = fracs[i]
 				bestIdx = i

@@ -160,6 +160,7 @@ message SdcGrowthUpgradeC2S {
 message SdcGrowthUpgradeS2C {
     SDCGrowthData data = 1; // 升级后的完整成长数据
     int32 errorCode    = 2; // 错误码
+    SDCWarehouseData warehouseData = 3; // 升级事务提交后的完整仓库数据
 }
 
 // ==================== 藏品系统协议 ====================
@@ -579,6 +580,7 @@ message SdcTaskGetDataC2S
 {
 	int32 tabType = 1; // 1=主线 2=赛季阶段 3=收集者 4=赛季奖励
 	int32 stageId = 2; // 指定阶段ID，0表示服务端默认当前可见阶段
+	repeated int32 stageIds = 3; // 批量阶段ID，非空时优先于stageId，最多32个唯一阶段
 }
 //请求SDC任务页数据
 message SdcTaskGetDataS2C
@@ -593,9 +595,10 @@ message SdcTaskClaimRewardC2S
 //领取主线/阶段SDCTask奖励
 message SdcTaskClaimRewardS2C
 {
+	reserved 3;
+	reserved "redPoint";
 	SDCTaskView task = 1; // 领奖后的任务状态
 	repeated ShowReward rewards = 2; // 本次获得奖励展示
-	SDCTaskRedPointSummary redPoint = 3; // 红点摘要
 }
 //手动刷新收集者
 message SdcTaskCollectorRefreshC2S
@@ -604,8 +607,9 @@ message SdcTaskCollectorRefreshC2S
 //手动刷新收集者
 message SdcTaskCollectorRefreshS2C
 {
+	reserved 2;
+	reserved "redPoint";
 	SDCCollectorView collector = 1; // 刷新后的收集者数据
-	SDCTaskRedPointSummary redPoint = 2; // 红点摘要
 }
 //提交收集者道具
 message SdcTaskCollectorSubmitC2S
@@ -616,9 +620,10 @@ message SdcTaskCollectorSubmitC2S
 //提交收集者道具
 message SdcTaskCollectorSubmitS2C
 {
+	reserved 3;
+	reserved "redPoint";
 	SDCCollectorView collector = 1; // 提交后的收集者数据
 	SDCWarehouseData warehouseData = 2; // 扣除后的仓库数据
-	SDCTaskRedPointSummary redPoint = 3; // 红点摘要
 }
 //锁定/解锁收集者
 message SdcTaskCollectorLockC2S
@@ -640,9 +645,10 @@ message SdcTaskCollectorMilestoneC2S
 //领取收集者次数累计奖励
 message SdcTaskCollectorMilestoneS2C
 {
+	reserved 3;
+	reserved "redPoint";
 	SDCCollectorView collector = 1; // 领取后的收集者数据
 	repeated ShowReward rewards = 2; // 本次获得奖励展示
-	SDCTaskRedPointSummary redPoint = 3; // 红点摘要
 }
 //领取任务系统赛季奖励
 message SdcTaskSeasonRewardC2S
@@ -652,9 +658,10 @@ message SdcTaskSeasonRewardC2S
 //领取任务系统赛季奖励
 message SdcTaskSeasonRewardS2C
 {
+	reserved 3;
+	reserved "redPoint";
 	SDCTaskView seasonReward = 1; // 领奖后的赛季奖励状态
 	repeated ShowReward rewards = 2; // 本次获得奖励展示
-	SDCTaskRedPointSummary redPoint = 3; // 红点摘要
 	repeated SDCTaskConditionView seasonRewardConditions = 4; // 领奖后的赛季奖励条件展示进度
 }
 //局内本局可完成任务列表
@@ -667,12 +674,13 @@ message SdcTaskInBattleListS2C
 {
 	repeated SDCTaskView tasks = 1; // 本局可完成任务列表
 }
-//SDC任务进度/红点推送
+//SDC任务域权威状态更新推送
 message SdcTaskProgressUpdateS2C
 {
+	reserved 3;
+	reserved "redPoint";
 	repeated SDCTaskView tasks = 1; // 变化的任务列表
 	SDCCollectorView collector = 2; // 收集者变化，可为空
-	SDCTaskRedPointSummary redPoint = 3; // 红点摘要
 	repeated SDCTaskConditionView seasonRewardConditions = 4; // 赛季奖励条件变化，可为空
 }
 //局内任务进度弹窗推送
@@ -691,6 +699,49 @@ message SdcTaskCurrentListC2S
 //当前挂载SDC任务列表
 message SdcTaskCurrentListS2C
 {
+	reserved 2;
+	reserved "redPoint";
 	repeated SDCTaskView tasks = 1; // 当前挂载的进行中和待领取主线/阶段任务
-	SDCTaskRedPointSummary redPoint = 2; // 红点摘要
+}
+//结算面板安全箱/藏品背包一键入库
+message SdcSettleQuickDepositC2S
+{
+}
+//结算面板安全箱/藏品背包一键入库
+message SdcSettleQuickDepositS2C
+{
+    repeated int64 depositedGuids = 1; // 已成功入库的道具 GUID，顺序与服务端处理顺序一致
+    repeated SDCSettleQuickDepositFailedItem failedItems = 2; // 未入库道具及逐项原因
+    SDCWarehouseData warehouseData = 3; // 操作后的完整仓库数据
+    repeated SDCPackSlot updatedPacks = 4; // 藏品背包和安全箱的最新完整状态
+    int32 errorCode = 5; // 错误码，成功为 0
+    int32 packNormalNetValue = 6; // 操作后藏品背包和安全箱内剩余普通道具总价值
+    int32 packSeasonNetValue = 7; // 操作后藏品背包和安全箱内剩余赛季道具总价值
+}
+//修理指定护甲
+message SdcRepairArmorC2S
+{
+    int64 itemGuid = 1; // 客户端当前展示的护甲 GUID，服务端在装备槽、仓库和战备背包中唯一定位
+}
+//修理指定护甲
+message SdcRepairArmorS2C
+{
+    SDCEquipSlot armor = 1; // 装备槽目标成功时的修理后护甲
+    int64 repairCost = 2; // 本次实际扣除的搜打撤货币
+    int32 totalValue = 3; // 修理后的战备总价值
+    SDCWarehouseData warehouseData = 4; // 仓库目标成功时的完整仓库数据
+    SDCPackSlot pack = 5; // 背包目标成功时的完整目标背包
+}
+//一键领取全部可领取收集者累计奖励
+message SdcTaskCollectorMilestoneClaimAllC2S
+{
+}
+//一键领取全部可领取收集者累计奖励
+message SdcTaskCollectorMilestoneClaimAllS2C
+{
+    reserved 4;
+    reserved "redPoint";
+    SDCCollectorView collector = 1; // 领取后的完整收集者数据
+    repeated int32 claimedMilestoneIndexes = 2; // 本次实际领取档位，下标从1开始并按配置顺序升序
+    repeated ShowReward rewards = 3; // 本次实际入账奖励，相同道具合并
 }

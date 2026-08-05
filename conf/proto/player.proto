@@ -250,6 +250,7 @@ message playerMatchInfo {
     int64                      notReadyEndTime            = 17; // 玩家匹配未准备惩罚结束时间
     ActivityBattleDbInfo       activityBattleDbInfo       = 18; // 活动赛数据
     ActivityBattleSingleDbInfo activityBattleSingleDbInfo = 19; // 单模式活动赛数据
+    int64                      bo3ParticipantId           = 20; // BO3内稳定且唯一的参与者标识，仅巅峰赛有效
 }
 
 // 任务数据
@@ -315,10 +316,13 @@ message PlayerGameInfo {
     int32                          sdcLevel                = 29;  // 搜打撤等级（组队/房间成员展示）
     bool                           obTopPercentEligible    = 30;  // FEATURE-4302 观战上榜前X%准入透传：本人匹配时在其分区服段位榜前X%内，由 logic 填充，room 开服期降级准入使用；不下发客户端（PackRecordPlayerGameInfo 白名单不收录）
     bool                           obLadderNoOneQualified  = 31;  // FEATURE-4302 观战上榜前X%准入透传：本人所在分区服段位榜无人达上榜段位门槛（开服期标志），由 logic 填充，room 准入按本玩家自己的标志判定（跨服精确）；不下发客户端（PackRecordPlayerGameInfo 白名单不收录）
+    int32                          obSelectHeroCup         = 32;  // 观战展示：所选英雄杯数（selectHeroes[0] 对应 HeroInfo.cupNumber），由 room packObBriefPlayer 填充，供 logic obBaseToClient / observer ObBeginLoadingS2C 下发客户端；不进 PackRecordPlayerGameInfo 白名单，不下发战斗 record
     SDCPrepareSnapshot             sdcSnapshot             = 100; // 搜打撤战备快照
     SDCDynamicDropInput            sdcDynamicDropInput     = 101; // 仅服务器内部用于Room生成额外掉落，不下发客户端
     SdcLoadingInfo                 sdcLoadingInfo          = 102; // 搜打撤 Loading 展示数据
     SquadLoadingInfo               squadLoadingInfo        = 103; // 小队 Loading 信息(logic 填充,room 聚合为阵营称号;不下发客户端)
+    int32                          sdcLifetimeTotalGames   = 104; // 搜打撤账号终身正常结算场次，仅服务器内部匹配使用，不下发客户端
+    bool                           sdcLifetimeTotalGamesKnown = 105; // 终身场次是否读取成功；false 时 Team 关闭新手局
 }
 
 // 搜打撤 Loading 展示数据
@@ -417,6 +421,38 @@ message BattleDelay {
     int32  MinDelayTime = 4; // 最小延迟时间(毫秒)
     int32  PingSendCnt  = 5; // ping发送包
     int32  PingRecvCnt  = 6; // ping接收包
+}
+
+// 战斗区域网络反馈，仅服务器内部使用
+message BattleAreaNetworkFeedback {
+    string area            = 1;  // 规范化区域
+    int64  sampleTime      = 2;  // Battle服务器Unix秒
+    int32  avgLatency      = 3;  // 平均延迟，毫秒
+    int32  upLossPercent   = 4;  // 上行丢包整数百分比
+    int32  downLossPercent = 5;  // 下行丢包整数百分比
+    int64  rttSampleCount  = 6;  // 服务端RTT采样数
+    int32  p95Latency      = 7;  // RTT P95延迟，毫秒
+    int32  ewmaJitter      = 8;  // RTT EWMA抖动，毫秒
+    int32  stdDevJitter    = 9;  // RTT抖动标准差，毫秒
+    int32  qualityMetricsVersion = 10; // 稳定性指标版本，0表示旧数据不可用于V3
+}
+
+// 单场战斗区域网络快照，仅服务器内部使用
+message BattleAreaBattleSnapshot {
+    int64                     battleId = 1; // 战斗ID
+    BattleAreaNetworkFeedback feedback = 2; // 网络反馈
+}
+
+// 玩家实战网络历史持久化结构，仅服务器内部使用
+message BattleAreaNetworkHistoryData {
+    repeated BattleAreaBattleSnapshot snapshots = 1; // 每区域最近5场有效实战网络快照
+}
+
+// 玩家战斗区域画像，仅服务器内部使用
+message BattleAreaPlayerProfile {
+    int32                             playerId        = 1; // 玩家ID
+    repeated BattleDelay              probes          = 2; // 当前登录会话Probe
+    repeated BattleAreaBattleSnapshot battleSnapshots = 3; // 合并后的每区域有效实战网络样本（跨登录历史+当前会话）
 }
 
 // 匹配战斗区域延迟时间

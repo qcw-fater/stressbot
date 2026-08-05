@@ -52,6 +52,7 @@ message MatchMsgToRoom {
     int32                      affix         = 12; // 开始匹配时冻结的基础词缀
     int32                      sdcLobbyMmr   = 13; // 搜打撤成房时冻结的真人平均MMR，仅GM_HAZARD_OPS模式使用
     map<int32, bool>           sdcMmrEligible = 14; // 搜打撤MMR结算资格，key=玩家ID value=是否参与MMR写回
+    bool                       strictBattleAreaRoute = 15; // Match 成房时冻结的 BattleArea 严格同区路由契约
 }
 
 // 匹配状况

@@ -175,6 +175,12 @@ message ActivityThemeTemplate {
 // 活动抽奖模板
 message ActivityLotteryTemplate {
     repeated ActivityLotteryPoolConf PoolList = 1; // 卡池配置
+    repeated ActivityLotteryProgressRewardConf ProgressReward = 2; // 累计抽取奖励
+}
+
+message ActivityLotteryProgressRewardConf {
+    int32             Rate   = 1; // 累计抽取阈值
+    repeated ItemData Reward = 2; // 阈值奖励
 }
 
 message ActivityLotteryPoolConf {
@@ -190,6 +196,8 @@ message ActivityLotteryPoolConf {
     int32                            SubType         = 10; // 子类型
     int32                            Name            = 11; // 卡池名称（文本 ID）
     repeated int32                   Skip            = 12; // 道具不足跳转
+    repeated ItemData                OptionalFinalAward = 13; // 候选最终大奖
+    repeated ItemData                EndAward           = 14; // 本轮抽完奖励
 }
 
 message ActivityLotteryItemConf {
@@ -562,6 +570,14 @@ message ActivityTemplateDB {
 
 message ActivityLotteryTemplateDB {
     map<int32, ActivityLotteryPoolDB> Pool = 1; // key=GachaPoolId
+    repeated int32                    SelectedFinalAwardIds = 2; // 已选择过的大奖 itemId
+    repeated int32                    DrawnFinalAwardIds    = 3; // 已获得的大奖 itemId
+    int32                             TotalDrawCount        = 4; // 活动累计抽取次数
+    map<int32, bool>                  ProgressRewardClaimed = 5; // key=Rate value=已领取
+    bool                              MailRewarded          = 6; // 活动结束补发幂等
+    repeated ItemData                 SettlementRewards     = 7; // 活动结束补发奖励快照
+    repeated int64                    SettlementMailUids    = 8; // 活动结束补发固定邮件uid
+    int32                             SettlementState       = 9; // 结算状态:0未开始 1待发送 2已完成
 }
 
 message ActivityLotteryPoolDB {
@@ -569,6 +585,8 @@ message ActivityLotteryPoolDB {
     int32             DrawCount       = 2; // 当前卡池累计抽数
     map<int32, int32> ItemRemain      = 3; // key=ActivityLotteryPool.ID value=剩余数量
     bool              FinalAwardDrawn = 4; // 最终大奖是否已抽中
+    ItemData          SelectedFinalAward = 5; // 当前池已选最终大奖
+    bool              EndAwardClaimed    = 6; // 本轮抽完奖励是否已领取
 }
 
 // 大富翁活动玩家进度

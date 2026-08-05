@@ -287,9 +287,9 @@ type AgentNode struct {
 	// LatestSystem 最新系统指标快照（不序列化到前端列表）。
 	LatestSystem *SystemSnapshot `json:"-"`
 	// StressUpdatedAt 压测指标最后更新时间。
-	StressUpdatedAt time.Time `json:"stressUpdatedAt,omitempty"`
+	StressUpdatedAt time.Time `json:"stressUpdatedAt"`
 	// SystemUpdatedAt 系统指标最后更新时间。
-	SystemUpdatedAt time.Time `json:"systemUpdatedAt,omitempty"`
+	SystemUpdatedAt time.Time `json:"systemUpdatedAt"`
 }
 
 // StaticInfo Agent 节点的静态硬件与环境信息。
@@ -655,7 +655,7 @@ type HistoryDetailResponse struct {
 
 // HistoryStressSnapshotSummary 历史详情页使用的压测指标摘要。
 type HistoryStressSnapshotSummary struct {
-	Timestamp    time.Time                  `json:"timestamp,omitempty"`
+	Timestamp    time.Time                  `json:"timestamp"`
 	UptimeSec    float64                    `json:"uptimeSeconds"`
 	TotalActions int64                      `json:"totalActions"`
 	ApdexT       int                        `json:"apdexT"`

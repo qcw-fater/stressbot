@@ -5,11 +5,28 @@ package Game;
 
 import "nohot_custom_battle.proto";
 import "enum.proto";
+import "enum_battle.proto";
 
 // ==================== 基础数据结构 ====================
 
 
 // ==================== Redis存储用结构 ====================
+
+// SDC战斗级共享结算行，按serverFightIndex定位，允许机器人playerId为0。
+message SDCBattleSettlementFighter {
+    int32 fighterIndex = 1; // serverFightIndex
+    int32 playerId = 2; // 真人玩家ID，机器人为0
+    CampType camp = 3; // 战斗阵营
+    SDCFighterStandingData standing = 4; // 历史详情投影数据
+    bool final = 5; // 是否已形成最终结算行
+}
+
+// SDC战斗级共享结算快照，仅由Battle写入、Logic历史详情只读。
+message SDCBattleSettlementSnapshot {
+    int64 battleId = 1; // 战斗ID
+    repeated SDCBattleSettlementFighter fighterList = 2; // 本局完整战斗单位名册与结算行
+    bool frozen = 3; // 600秒强制结算后不允许迟到报告覆盖
+}
 
 // 装配槽位列表（用于Redis存储）
 message SDCEquipSlotList {
@@ -256,7 +273,7 @@ message SDCTaskView {
     int32 status                 = 8; // 状态：0=进行中 1=待领取 2=已领取
     bool showInGame              = 9; // 是否局内展示
     int32 resetRule              = 10; // 重置规则
-    int32 sdcMapId               = 11; // 限定 SDCMap.ID，0表示不限
+    int32 sdcMapId               = 11; // 单地图兼容值；0表示无可用单地图限定，本局任务以 ACT148 返回为准
     repeated int32 location      = 12; // 局内标记坐标 x|y
     int32 range                  = 13; // 局内标记范围
     repeated SDCTaskRefView subTasks = 14; // 子任务实例明细，与 refTaskIds 按下标一一对应并保持相同数量
@@ -291,12 +308,10 @@ message SDCCollectorView {
     int64 nextAutoRefreshTime                     = 8; // 收集者任务池下一次自动刷新时间戳，秒
 }
 
-// SDC任务红点摘要
+// SDC任务红点摘要墓碑，红点已改由客户端根据权威状态计算
 message SDCTaskRedPointSummary {
-    bool mainTask        = 1; // 主线任务是否有可领
-    bool seasonStageTask = 2; // 赛季阶段任务是否有可领
-    bool collector       = 3; // 收集者累计奖励是否有可领
-    bool seasonReward    = 4; // 任务系统赛季奖励是否有可领
+    reserved 1, 2, 3, 4;
+    reserved "mainTask", "seasonStageTask", "collector", "seasonReward";
 }
 
 // SDC任务条件展示数据
@@ -308,16 +323,24 @@ message SDCTaskConditionView {
     int32 status        = 5; // 状态：0=未达成 1=已达成
 }
 
+// SDC任务阶段页数据
+message SDCTaskStagePage {
+    int32 stageId              = 1; // 阶段ID
+    repeated SDCTaskView tasks = 2; // 该阶段真实已挂载任务
+}
+
 // SDC任务页数据
 message SDCTaskPageData {
+    reserved 6;
+    reserved "redPoint";
     int32 tabType                       = 1; // 1=主线 2=赛季阶段 3=收集者 4=赛季奖励
     int32 stageId                       = 2; // 当前展示阶段ID
     repeated SDCTaskView tasks          = 3; // 当前页任务列表
     SDCCollectorView collector          = 4; // 收集者页数据，可为空
     SDCTaskView seasonReward            = 5; // 赛季奖励数据，可为空
-    SDCTaskRedPointSummary redPoint     = 6; // 红点摘要
     int64 seasonEndTime                 = 7; // 当前赛季结束时间戳，秒
     repeated SDCTaskConditionView seasonRewardConditions = 8; // 赛季奖励条件展示进度
+    repeated SDCTaskStagePage stagePages = 9; // 主线/赛季阶段批量任务页
 }
 
 // ==================== 成长数据 ====================
@@ -542,6 +565,7 @@ message SDCRecentProfitRecord {
     int32 lootValue = 3;             // Battle重算后的带出收益
     int32 equipSlotValueDiff = 4;    // 装配槽位价值差
     int32 netOutcomeValue = 5;       // 动态刷新净收益口径
+    repeated int64 acquiredItemGuids = 6; // 本局结算后最终归属于玩家、且不在战前容器中的道具GUID
 }
 
 // SDC近局收益数据
@@ -674,7 +698,7 @@ message SDCCodexEntryInfo {
     int32 itemId            = 3; // 关联道具 ID
     int64 firstActivateTime = 4; // 首次激活时间（0=未激活）
     int32 repeatCount       = 5; // 重复激活次数
-    int32 ownedCount        = 6; // 持有数量（宝物类=仓库持有；装备类=局内累计获取）
+    int32 ownedCount        = 6; // 持有数量（藏品类=仓库+藏品背包+安全箱当前持有总数；装备类=局内累计获取）
     int32 firstCondition    = 7; // 首次激活所需数量
     int32 repeatCondition   = 8; // 每次重复激活所需数量
     int32 repeatNum         = 9; // 重复激活次数上限
@@ -705,4 +729,15 @@ message SDCCodexMilestoneInfo {
     int32 needActivateCount = 2; // 达成所需激活数
     int32 status            = 3; // 状态（0=未达成 1=可领取 2=已领取）
     repeated SDCCodexRewardItem reward = 4; // 奖励内容
+}
+// 结算面板一键入库单项失败原因。
+enum SDCSettleQuickDepositFailReason {
+    SDC_SETTLE_QUICK_DEPOSIT_FAIL_REASON_UNKNOWN = 0; // 未知原因（保留值）
+    SDC_SETTLE_QUICK_DEPOSIT_FAIL_REASON_WAREHOUSE_FULL = 1; // 仓库无空格且不可合并到既有堆叠
+}
+
+// 结算面板一键入库未入库道具结果。
+message SDCSettleQuickDepositFailedItem {
+    int64 guid = 1; // 未入库道具 GUID
+    SDCSettleQuickDepositFailReason reason = 2; // 未入库原因
 }

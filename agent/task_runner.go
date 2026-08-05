@@ -235,17 +235,17 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 	if r.assignment.Shared != nil && r.assignment.Shared.Redis.Enabled() {
 		resolved, rerr := r.assignment.Shared.Redis.Resolve()
 		if rerr != nil {
-			return runFailed(fmt.Sprintf("共享状态配置无效: %v", rerr))
+			return runFailed(fmt.Sprintf("Redis 共享状态配置无效: %v", rerr))
 		}
 		store, serr := sharedstate.NewRedisStore(resolved, r.assignment.Shared.RunID)
 		if serr != nil {
-			return runFailed(fmt.Sprintf("连接共享状态(Redis)失败: %v", serr))
+			return runFailed(fmt.Sprintf("连接 Redis 共享状态失败: %v", serr))
 		}
 		sharedStore = store
 		defer func() { _ = sharedStore.Close() }()
-		stresslog.Info("[TASK] 共享状态已启用",
+		stresslog.Info("[TASK] Redis 共享状态已启用",
 			zap.String("taskID", taskID),
-			zap.String("addr", resolved.AddrMasked()),
+			zap.String("addr", fmt.Sprintf("%s:%d", resolved.Host, resolved.Port)),
 			zap.Int("dbIndex", resolved.DBIndex),
 			zap.String("runId", r.assignment.Shared.RunID))
 	} else {

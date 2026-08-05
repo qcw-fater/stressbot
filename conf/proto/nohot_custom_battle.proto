@@ -53,7 +53,7 @@ enum SDCContainerType {
 // ==================== SDC 战斗相关消息 ====================
 
 // 搜打撤道具扩展信息（附加在ItemInfo上使用）
-// 护甲说明：护甲耐久度只能通过使用护甲药（sdcType=6, sdcSubType=2的药品）进行修复，自然不恢复
+// 护甲说明：护甲耐久度可通过护甲药或战备货币修理恢复，自然不恢复
 message SDCItemExtInfo {
     SDCItemType    sdcType       = 1; // 搜打撤道具分类（对应SDCItemType枚举）
     int32          sdcSubType    = 2; // 搜打撤子类型
@@ -193,6 +193,7 @@ message PlayerBattleStatistics {
     int32                         sdcKillCount     = 22; // SDC击败真实玩家数
     int32                         sdcAssistCount   = 23; // SDC助攻数
     int32                         sdcRescueCount   = 24; // SDC救助数
+    int64                         bo3ParticipantId = 25; // BO3内稳定且唯一的参与者标识
 }
 
 // 战斗内玩家排位简约数据(战斗前数据)
@@ -204,6 +205,7 @@ message BattleLadderInfo {
     int32 recreationLevel     = 5; // 娱乐赛等级
     int64 titleValidityPeriod = 6; // 排位赛称号有效期
     int32 peakRankingScore    = 7; // 巅峰赛战前积分快照，用于终局 ELO 均分计算
+    int32 peakRankingRankLevel = 8; // 巅峰赛战前段位快照，用于机器人积分折算
 }
 
 message HeroBattleStatistics {
@@ -322,6 +324,7 @@ message SDCFighterStandingData {
     int32 killCount      = 4; // 本局击败真实玩家数
     int32 assistCount    = 5; // 本局助攻数
     int32 rescueCount    = 6; // 本局救助数
+    bool statisticsValid = 7; // 击败、助攻、救助统计是否有效
 }
 
 // 玩家战绩

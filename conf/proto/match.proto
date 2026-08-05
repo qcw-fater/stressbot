@@ -11,6 +11,7 @@ message MatchPlayerInfo {
     bool                 isRobot         = 2; // 是否机器人
     PlayerGameInfo       gameInfo        = 3; // 玩家数据
     repeated BattleDelay battleDelayList = 4; // 战斗区域延迟
+    BattleAreaPlayerProfile battleAreaProfile = 5; // 冻结战斗区域画像，仅服务器内部使用
 }
 
 // 战斗区域延迟

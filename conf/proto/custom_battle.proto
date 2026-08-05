@@ -19,6 +19,8 @@ message BattleMsgToRoom {
     uint32                      error           = 8;    // 错误码
     int32                       playerId        = 9;    // 玩家id
     uint32                      msgIndex        = 10;   // 消息index
+    bool                        sdcRecoveryProbe = 11;  // SDC 登录补偿主动恢复探针
+    int64                       battleId        = 12;   // SDC 恢复探针关联的战斗ID
 }
 
 //战斗结算通知管理器

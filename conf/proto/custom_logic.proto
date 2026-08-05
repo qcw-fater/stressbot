@@ -43,6 +43,7 @@ message LogicMsgToTeam {
     int32                battleActivityStep = 31; // 活动赛选择阶段
     int32                sdcMapId           = 32; // 搜打撤当前 SDCMap.ID
     int32                sdcMmrScore        = 33; // 搜打撤当前MMR，仅服务器内部匹配使用
+    BattleAreaPlayerProfile battleAreaProfile = 34; // 玩家战斗区域画像，仅服务器内部使用
 }
 
 // 逻辑服到房间服消息
@@ -75,6 +76,9 @@ message LogicMsgToRoom {
     PlayerBase      playerData        = 26; // 玩家数据
     PlayerGameInfo  gameInfo          = 27; // 玩家数据
     repeated int32  summonerSpell     = 28; // 召唤师技能
+    int64           battleId          = 29; // 结算确认或 SDC 恢复探针关联的战斗ID
+    int32           battleServerId    = 30; // SDC 恢复探针直查战斗服ID
+    bool            sdcRecoveryProbe  = 31; // SDC 登录补偿主动恢复探针
 }
 
 message RoomChat {

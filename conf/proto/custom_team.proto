@@ -36,6 +36,7 @@ message TeamMemberData {
     string                      clientVersion   = 7;     // 客户端版本号
     bool                        offline         = 8;     // 是否离线
     repeated  BattleDelay       battleAreaList  = 9;     // 玩家战斗区域延迟信息
+    BattleAreaPlayerProfile     battleAreaProfile = 10;  // 玩家战斗区域画像，仅服务器内部使用
 }
 
 message teamRoomInfo {

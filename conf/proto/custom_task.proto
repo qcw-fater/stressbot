@@ -59,6 +59,7 @@ enum TaskTriggerType {
     TT_SDCClaimCraftReward                      = 50; // 搜打撤领取制作奖励
     TT_SDCSeasonStageAllComplete                = 51; // 搜打撤赛季阶段任务全部完成
     TT_SDCCollectorTaskComplete                 = 52; // 搜打撤完成一条收集者任务
+    TT_ShopBuyItem                              = 53; // 商店按道具ID购买事件
 }
 
 // 小队任务进度变更模式
