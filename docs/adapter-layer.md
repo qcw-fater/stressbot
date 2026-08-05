@@ -4,7 +4,7 @@
 
 stressbot 采用 **Network / Adapter / Business** 三层架构。生产运行时通过声明式 `*_codec.json` 加载协议编解码规则，由 `CodecResolver` 按 `<proto>:<service>` 连接串解析到对应的 `SchemaAdapter`（Go codec），使 Go 引擎协议无关，支持多连接使用不同协议编解码配置。
 
-**消息体序列化格式**：本工具固定使用 Protobuf（通过 `protox` 动态加载 `.proto` 文件）。协议头、路由键、加解密和错误码描述由每个连接绑定的声明式 codec 负责；`codec.lua` / `LuaAdapter` 不再参与生产编解码，仅作为测试真值与历史迁移参考保留。
+**消息体序列化格式**：本工具固定使用 Protobuf（通过 `protox` 动态加载 `.proto` 文件）。协议头、路由键、加解密和错误码描述由每个连接绑定的声明式 codec（`*_codec.json` + `errors.json`）负责，纯 Go `codec/` 引擎驱动。
 
 ### 1.1 重构目标
 
@@ -48,7 +48,7 @@ cmd/agent  ->  robot/  ->  engine/  ->  state/
                            ->  engine/
 ```
 
-`adapter/` 包依赖 `codec/` 和标准库组装生产 `SchemaAdapter`/`CodecResolver`；历史 `LuaAdapter` 文件仅供测试对拍与迁移参考使用，不在生产加载路径中。
+`adapter/` 包依赖 `codec/` 和标准库组装生产 `SchemaAdapter`/`CodecResolver`。
 
 ### 2.3 数据流（发送）
 
@@ -162,9 +162,7 @@ JSON 中的数值被 Go 反序列化为 `float64`，`SchemaCodec` 按 codec sche
 
 ## 4. 生产适配器实现（CodecResolver + SchemaAdapter）
 
-生产运行时不再加载 `LuaAdapter` / `codec.lua`。启动流程通过 `adapter.InferCodecMap` 扫描 `conf/adapter/*_codec.json`，再由 `adapter.LoadCodecResolver(codecDir, codecs, "errors.json")` 为每个 `<proto>:<service>` 连接构建 `SchemaAdapter`。同一 codec 文件被多个连接引用时会编译一次并复用同一个无状态 Adapter 实例。
-
-`adapter/lua_adapter.go` 保留为测试 oracle 与历史迁移参考：单元测试用它和 `codec.lua` 做字节级对拍，确认声明式 Go codec 与迁移前行为一致；生产 main/task runner 不应调用 `NewLuaAdapter`。
+生产运行时通过 `adapter.InferCodecMap` 扫描 `conf/adapter/*_codec.json`，再由 `adapter.LoadCodecResolver(codecDir, codecs, "errors.json")` 为每个 `<proto>:<service>` 连接构建 `SchemaAdapter`。同一 codec 文件被多个连接引用时会编译一次并复用同一个无状态 Adapter 实例。
 
 ### 4.1 CodecResolver
 
@@ -230,16 +228,6 @@ LoadCodecResolver(codecDir, codecs, errorsFile)
 | `DescribeError(code)` | 查询共享 `errors.json` 编译出的 code→desc map | headerErr 描述 |
 | `Close()` | no-op | 接口一致性 |
 
-### 4.5 LuaAdapter 的保留范围
-
-`LuaAdapter` / `codec.lua` 当前只用于：
-
-1. **测试 oracle**：`adapter/schema_adapter_test.go` 用旧 Lua 编码结果与 `SchemaAdapter` 字节级对拍。
-2. **迁移审计**：`codec/migration_test.go` 用 `error.lua` 条目数/抽样描述校验迁移后的 `errors.json` 覆盖率。
-3. **历史文档/回溯**：解释声明式 codec 的迁移来源。
-
-生产路径使用 `LoadCodecResolver` + `SchemaAdapter`，不得以 `NewLuaAdapter` 作为运行时兜底。
-
 ## 5. BodyLength 元信息 -- 消息体长度解析
 
 声明式 codec schema 中定义。
@@ -302,8 +290,6 @@ LoadCodecResolver(codecDir, codecs, errorsFile)
 | XOR | 支持按 offset 部分加解密，UDP 可保留前 N 字节明文 |
 | BCC | 对 header/body 执行协议要求的异或校验 |
 | header 读写 | 按 schema 声明的 offset/type 写入或读取字段 |
-
-Lua 侧 `bit` / `zlib` 模块仍随 `LuaAdapter` 文件保留，仅用于测试 oracle 运行旧 `codec.lua`。
 
 ## 8. Network 层
 
@@ -799,15 +785,15 @@ UDP schema 可独立声明 encode/decode offset，例如保留前 N 字节明文
 - header 中 `role: "errorCode"` 的字段作为 headerErr 返回。
 - `errors.json` 是共享错误码描述表，由 `LoadCodecResolver` 加载后注入所有 `SchemaAdapter`。
 
-## 13. 历史迁移产物
+## 13. 历史迁移产物（已移除）
 
-以下 Lua 相关文件/概念已退出生产编解码路径，仅作为迁移参考或测试 oracle 保留：
+声明式 codec 迁移完成后，以下 Lua 相关文件/概念已**全部移除**，编解码统一由声明式
+`*_codec.json` + `errors.json` 驱动纯 Go `codec/` 引擎：
 
-| 文件/概念 | 当前状态 |
-|-----------|----------|
-| `adapter/lua_adapter.go` | 仅测试对拍/历史迁移参考，不作为生产 Adapter 加载 |
-| `conf/adapter/codec.lua` | 旧实现真值，用于确认声明式 codec 字节级一致 |
-| `conf/adapter/error.lua` | 旧错误码真值，迁移后由 `errors.json` 承载生产映射 |
+| 文件/概念 | 终态 |
+|-----------|------|
+| `adapter/lua_adapter.go` / `lua_crypto.go` / `lua_zlib.go` | 已删除（原 T1 字节级对拍 oracle） |
+| `conf/adapter/codec.lua` / `error.lua` | 已删除（原旧实现真值/错误码真值，由 `*_codec.json` + `errors.json` 承载） |
 | `network/protocol.go` / middleware 旧架构 | 已移除，协议处理收敛到 Adapter 接口 |
 
 ## 14. 设计决策

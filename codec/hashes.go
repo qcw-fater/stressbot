@@ -1,18 +1,13 @@
-// Package codec — hash/HMAC 算法实现（迁移自 adapter/lua_crypto.go + 标准库）。
+// Package codec — hash/HMAC 算法实现。
 //
-// 接口语义（与 brief 逐字）：Hasher.Hash(data, key, params) []byte；
+// 接口语义：Hasher.Hash(data, key, params) []byte；
 //   - key 为空 → 走原始哈希；
 //   - key 非空 → 走 HMAC 变体（crypto/hmac）。
 //
 // 返回原始摘要字节（非 hex）——比 hex 字符串更通用；engine 在写入 bytes 字段时
-// 可按需 hex/base64 编码。lua_crypto.go 的 Lua 入口返回 hex 字符串，那是对 Lua 友好的
-// 一层包装；本层是更底层的 Go 接口，返回原始摘要。
+// 可按需 hex/base64 编码。
 //
-// 迁移来源行号：
-//   - md5/sha1/sha256: lua_crypto.go:790/798/806
-//   - hmac_md5/hmac_sha256: lua_crypto.go:818/828
-//   - 通用化：所有 hash 都支持 key 非空走 HMAC（lua_crypto 只有 md5/sha256 的 HMAC
-//     入口，本层补齐 sha1 的 HMAC，逻辑同构）。
+// 注册的哈希算法：md5、sha1、sha256（key 非空时自动走对应 HMAC）。
 package codec
 
 import (

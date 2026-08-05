@@ -590,8 +590,7 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		name := strings.TrimPrefix(key, "adapter/")
-		if name == "" || name == "codec.lua" || name == "error.lua" {
-			// 历史 Lua adapter 文件已被声明式 codec 模型替代，admin 不再接收。
+		if name == "" {
 			continue
 		}
 		for _, fh := range files {
@@ -791,10 +790,6 @@ func (s *AdminServer) handleGetTaskConfig(w http.ResponseWriter, r *http.Request
 		})
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(configJSON)
-
-	case "adapter/codec.lua", "adapter/error.lua":
-		// 历史 Lua adapter 文件不再分发。
-		http.NotFound(w, r)
 
 	default:
 		// adapter/*_codec.json（按 basename 匹配 Codecs）或 adapter/errors.json
@@ -1729,7 +1724,7 @@ func (s *AdminServer) writeBaselineFiles(cfg *TaskConfig, flowData []byte) {
 }
 
 // buildConfigFiles 构建任务下发的配置文件清单（供分发逻辑与测试共用同一份规则）。
-// adapter 下分发各 *_codec.json + errors.json，不列历史 codec.lua/error.lua。
+// adapter 下分发各 *_codec.json + errors.json。
 func buildConfigFiles(cfg *TaskConfig) []string {
 	var files []string
 	if cfg.FlowJSON != nil {

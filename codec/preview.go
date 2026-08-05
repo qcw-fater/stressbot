@@ -11,7 +11,7 @@
 //   - **transport 入参保留但当前不影响单 codec 计算**：codec 单 transport，encrypt offset
 //     已在 schema 里固化；保留 transport 仅为 T3/T4 语义清晰（未来若 codec 多 transport
 //     再接线）。
-//   - route 字段值支持 int/float/string（数值化：math.Floor 截断取整，对齐 codec.lua）。
+//   - route 字段值支持 int/float/string（数值化：math.Floor 截断取整）。
 package codec
 
 import (
@@ -103,8 +103,7 @@ func previewEncode(res PreviewResult, c *SchemaCodec, schema *CodecSchema, route
 		res.Error = fmt.Sprintf("bodyHex 非法：%v", err)
 		return res
 	}
-	// route 字段值数值化（支持 int/float/string；string 经 routePreviewFloorInt 转整数），
-	// 与 codec.lua math.floor(route.cmd or 0) 行为对齐。
+	// route 字段值数值化（支持 int/float/string；string 经 routePreviewFloorInt 转整数）。
 	normalized := normalizeRouteMap(route)
 	// codec 单 transport；EncodeTCP/EncodeUDP 同管线（offset 已固化在 schema）。
 	// 这里走 EncodeTCP（transport 入参当前不影响计算，见 Preview godoc）。

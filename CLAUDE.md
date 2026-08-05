@@ -80,7 +80,7 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 - `conf/agent-config.json` — Agent 模式精简配置：仅 `log`/`monitor`/`agent`（无 standalone 段，运行时由 Admin 下发）
 - `conf/admin-config.json` — Admin 服务器配置：`port`、`publicUrl`、`staticDir`、`agentRegistry`、`mysql`（顶层，全局共享 `*sql.DB`）、`redis`、`history`（`retentionDays`）、`log`、`daemon`
 - `conf/flow/flow.json` — 流程图（`defaultDelayMs` + `nodes` + `actions` + `listens`）— 主要配置产物
-- `conf/adapter/<proto>_<service>_codec.json` — 每连接一份的声明式 codec 配置；共享 `errors.json` 提供错误码描述。`codec.lua`/`error.lua` 仅保留为 T1 一致性测试的 oracle，非生产路径。
+- `conf/adapter/<proto>_<service>_codec.json` — 每连接一份的声明式 codec 配置；共享 `errors.json` 提供错误码描述。编解码统一由纯 Go `codec/` 引擎驱动，无 Lua codec 路径。
 - `conf/proto/` — 启动时动态加载的 `.proto` 文件
 - `conf/scripts/` — 复杂行为的 Lua 脚本
 
@@ -136,6 +136,7 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 - 前端请求收拢到 `services/api.ts` + `services/baselineApi.ts`，组件禁止直接 fetch。
 - 前端 UI 文本禁止暴露技术术语（Agent→节点、Admin→服务器、IDB→本地存储）。
 - 数据库只用逻辑外键，不用 FOREIGN KEY，级联删除由应用层处理。
+- `sharedstate`（Redis 共享状态）的 key 形如 `<prefix>:{<runID>}:<type>:<userKey>`，`{runID}` 是 Redis Cluster hashtag：同一 run 的数据 key 与索引集合 key 共用 hashtag → 落同一 slot，EVAL 的多 KEYS（数据 key + 索引集合 key）不会触发 CROSSSLOT。客户端类型**自动探测、零配置**：`NewRedisStore` 启动时 `PING` 后发 `CLUSTER INFO`，响应 `cluster_enabled:1` 则切 `ClusterClient`，否则单机 `Client`（含云上 proxy 模式集群）。`runID` 不得含 `{`/`}`（会截断 hashtag，拨号前 fail-fast）。
 
 ## 验证流程
 

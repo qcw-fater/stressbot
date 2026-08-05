@@ -5,7 +5,7 @@
 //
 // 设计要点（与 plans/declarative-codec 总纲 §3.1 / T1 brief 对齐）：
 //   - 不 import gopher-lua；与 adapter/ 完全解耦。
-//   - 不做任何 codec.lua 兼容；畸形配置必须以中文错误显式失败。
+//   - 畸形配置必须以中文错误显式失败。
 //   - Validate 聚合多条错误后一次性返回，方便前端展示。
 package codec
 
@@ -241,7 +241,7 @@ var checksumFromRe = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A
 
 // ---------- LoadSchema ----------
 
-// LoadSchema 读取 codec.json，json.Unmarshal 后调用 Validate。不做任何 codec.lua 兼容。
+// LoadSchema 读取 codec.json，json.Unmarshal 后调用 Validate。
 func LoadSchema(path string) (*CodecSchema, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {

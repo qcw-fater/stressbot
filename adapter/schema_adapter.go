@@ -1,13 +1,12 @@
 // Package adapter — SchemaAdapter：声明式 codec 引擎（codec.SchemaCodec）的 Adapter 薄包装。
 //
-// 这是 Track 1 的产出封口：codec/ 包已提供 encode + decode + 访问器 + DescribeError 全套，
-// 本文件把它们组装成现成的 adapter.Adapter 实现，使 codec.SchemaCodec 可直接替换 LuaAdapter。
+// codec/ 包提供 encode + decode + 访问器 + DescribeError 全套，本文件把它们组装成现成的
+// adapter.Adapter 实现。
 //
-// 设计要点（与 T1.5 brief + 总纲 §3.2 一致）：
+// 设计要点：
 //   - 仅 import codec 包（**不 import gopher-lua**）——生产代码无 Lua 依赖。
-//   - 不修改 adapter 现有文件（lua_adapter.go 等留给 T2/T4 删除）。
 //   - 9 方法逐字匹配 adapter.Adapter 接口；编译期断言 var _ Adapter = (*SchemaAdapter)(nil)。
-//   - LoadSchema / LoadErrorMap 由调用方（T4 loader）先做，NewSchemaAdapter 收 *CodecSchema + errorMap。
+//   - LoadSchema / LoadErrorMap 由调用方（loader）先做，NewSchemaAdapter 收 *CodecSchema + errorMap。
 //   - Close 是幂等 no-op（codec.SchemaCodec 无资源需释放，编译产物无锁无状态）。
 package adapter
 

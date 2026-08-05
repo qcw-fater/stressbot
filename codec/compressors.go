@@ -1,12 +1,12 @@
-// Package codec — 压缩算法实现（迁移自 adapter/lua_zlib.go）。
+// Package codec — 压缩算法实现。
 //
 // 本层只做无阈值 gzip——压缩触发阈值由 engine 的 `when` 决定，本层不感知。
-// gzip 实现（含 sync.Pool 复用 Writer/Reader）逐字迁移自 lua_zlib.go，仅去掉 Lua
-// 入口包装，改为 Compressor 接口的 Go 方法。
+// gzip 实现由标准库 compress/gzip 驱动，sync.Pool 复用 *gzip.Writer / *gzip.Reader，
+// 对外暴露为 Compressor 接口的 Go 方法。
 //
-// 迁移来源行号：
-//   - gzipWriterPool / luaGzipCompress: lua_zlib.go:25/31
-//   - gzipReaderPool / luaGzipDecompress: lua_zlib.go:59/61
+// 注册的压缩算法：
+//   - none：透传不压缩。
+//   - gzip：标准库 gzip，仅当压缩后变小时采用（onlySmaller）。
 package codec
 
 import (
@@ -18,14 +18,14 @@ import (
 	"sync"
 )
 
-// gzipWriterPool 复用 *gzip.Writer（迁移自 lua_zlib.go:25）。
+// gzipWriterPool 复用 *gzip.Writer。
 var gzipWriterPool = sync.Pool{
 	New: func() any {
 		return gzip.NewWriter(io.Discard)
 	},
 }
 
-// gzipReaderPool 复用 *gzip.Reader（迁移自 lua_zlib.go:59）。
+// gzipReaderPool 复用 *gzip.Reader。
 var gzipReaderPool = sync.Pool{}
 
 // noneCompressor 直通。
@@ -86,7 +86,6 @@ func (gzipCompressor) Decompress(data []byte) ([]byte, error) {
 	out, err := readAllSized(r, gzipSizeHint(data))
 	closeErr := r.Close()
 	// 仅在读与关闭均成功时归还 reader；任一失败则丢弃（reader 状态不确定）。
-	// 与原 lua_zlib.go 行为对齐（原实现总是归还），但更稳妥。
 	if err == nil && closeErr == nil {
 		gzipReaderPool.Put(r)
 	}

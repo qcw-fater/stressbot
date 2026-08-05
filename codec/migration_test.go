@@ -1,26 +1,21 @@
-// Package codec_test 校验声明式 codec 迁移产物。
+// Package codec_test 校验声明式 codec 生产产物。
 //
 // 验收对象：conf/adapter/ 下三份生产 *_codec.json + 共享 errors.json。
-// 不再使用 codec/testdata/ 下的 fixture，而是直接 LoadSchema/NewSchemaCodec
-// 生产位置的 conf/adapter/*_codec.json，证明实际加载的文件经引擎编译/验证通过。
+// 直接 LoadSchema/NewSchemaCodec 生产位置的 conf/adapter/*_codec.json，证明实际加载的
+// 文件经引擎编译/验证通过。
 //
-// 关于 encOffset/decOffset 断言：compiledStep.encOffset/decOffset 为未导出字段，
-// 本任务约束「不改 codec/ 或 adapter/ 代码」，故不为此加访问器。改为**行为级**断言——
-// UDP encOffset=11 在 EncodeUDP 输出上必然表现为「body 前 11 字节明文保留」
-// （见 engine_test.go TestEncodeUDP_PlaintextPrefix_Preserved 同款断言），decOffset=0
-// 表现为 decode 能正确还原 UDP 加密帧。这比读字段值更强，直接证字节级行为。
-// TCP 两份 encOffset=0/decOffset=0 表现为「整 body 加密 + decode 还原」。
+// 关于 encOffset/decOffset 断言：compiledStep.encOffset/decOffset 为未导出字段，改为
+// **行为级**断言——UDP encOffset=11 在 EncodeUDP 输出上必然表现为「body 前 11 字节明文
+// 保留」，decOffset=0 表现为 decode 能正确还原 UDP 加密帧。TCP 两份 encOffset=0/decOffset=0
+// 表现为「整 body 加密 + decode 还原」。
 package codec_test
 
 import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"testing"
 
-	"stressbot/adapter"
 	"stressbot/codec"
 )
 
@@ -144,9 +139,8 @@ func TestMigration_TCP_OffsetZero_TCPLogicAndBattleIdentical(t *testing.T) {
 // TestMigration_UDP_EncOffset11_DecOffset0 验证 udp_battle_codec.json 的
 // encOffset=11/decOffset=0 行为。
 //
-// 重要语义说明（已逐行核对 codec.lua:189 `decode_udp = decode_tcp`）：
-// UDP 的 encode/decode **故意非对称**——encode 用 offset 11（前 11 明文供服务端
-// 查密钥表），decode 恒用 offset 0（codec.lua decode_tcp 的 net_decrypt 偏移）。
+// 重要语义说明：UDP 的 encode/decode **故意非对称**——encode 用 offset 11（前 11 明文供
+// 服务端查密钥表），decode 恒用 offset 0。配置见 udp_battle_codec.json 的 encrypt.offset。
 // 这意味着**客户端用 UDP encode 出去的帧，客户端自己用 decode 是无法还原的**
 // （流密码 keystream 位置不对齐），服务端用其专属 decode 路径处理。故 UDP 不做
 // encode→decode 自环；只验证 encode 行为（encOffset=11）+ decode 对 offset-0
@@ -203,197 +197,5 @@ func TestMigration_UDP_EncOffset11_DecOffset0(t *testing.T) {
 	if !bytes.Equal(decBody, body) {
 		t.Errorf("UDP decode（decOffset=0）还原 offset-0 加密帧失败\n got=%v\n want=%v",
 			decBody, body)
-	}
-}
-
-// TestMigration_ErrorMap_Coverage 验证 errors.json 覆盖 error.lua 的全部 code→desc 对。
-//
-// 不使用 LuaAdapter.DescribeError 作 oracle：该路径在未初始化 zap logger 的测试环境
-// 下会触发 nil panic（utils/log 包的 logger 为 nil，callDescribeError 失败时调
-// stresslog.Error），与 errors.json 迁移正确性无关，属 oracle 自身限制。改为：
-//  1. 结构校验：所有 key 为合法数字、所有 value 非空（不漏描述）；
-//  2. 计数对齐：errors.json 条目数 == error.lua 中 `[N] =` 形式条目数（不漏不重，
-//     LoadErrorMap 已保证 key 唯一，Go map 重复 key 覆盖即重会被计数差异暴露）；
-//  3. 抽样核对：curated 一批跨区段 code→desc，与 error.lua 真值逐字一致。
-func TestMigration_ErrorMap_Coverage(t *testing.T) {
-	dir := findConfAdapterDir(t)
-	em, err := codec.LoadErrorMap(filepath.Join(dir, "errors.json"))
-	if err != nil {
-		t.Fatalf("LoadErrorMap 失败: %v", err)
-	}
-
-	// 1. 结构校验。
-	for code, desc := range em {
-		if desc == "" {
-			t.Errorf("code=%d 描述为空", code)
-		}
-	}
-
-	// 2. 计数对齐：grep error.lua 中 `[N] =` 条目数。
-	errorLuaBytes, err := os.ReadFile(filepath.Join(dir, "error.lua"))
-	if err != nil {
-		t.Fatalf("读 error.lua 失败: %v", err)
-	}
-	luaEntryRe := regexp.MustCompile(`(?m)^\s*\[\d+\]\s*=`)
-	luaCount := len(luaEntryRe.FindAll(errorLuaBytes, -1))
-	if len(em) != luaCount {
-		t.Fatalf("errors.json 条目数=%d 与 error.lua 条目数=%d 不一致（漏或重）",
-			len(em), luaCount)
-	}
-
-	// 3. 抽样核对（跨区段：登录/战队/充值/搜打撤/快捷消息 等；< 100 的服务端系统码
-	//    不作为业务结果返回，已从 errors.json/error.lua 清理，故不在此断言）。
-	curated := map[uint64]string{
-		256:  "区服没有找到",
-		700:  "已申请过当前战队，不可重复申请",
-		707:  "您当前是会长，需传位后才能离开战队",
-		1080: "订单内数据未找到data数据",
-		1800: "搜打撤模式未开放",
-		2016: "快捷消息重复装备",
-	}
-	for code, want := range curated {
-		got, ok := em[code]
-		if !ok {
-			t.Errorf("抽样 code=%d 在 errors.json 中缺失", code)
-			continue
-		}
-		if got != want {
-			t.Errorf("抽样 code=%d 描述不一致：got=%q want=%q", code, got, want)
-		}
-	}
-}
-
-// TestMigration_TCPLogic_ParityWithLuaAdapter 对生产 tcp_logic_codec.json
-// 跑一次 encode 字节级对拍，证明生产文件与旧 LuaAdapter oracle 字节一致。
-func TestMigration_TCPLogic_ParityWithLuaAdapter(t *testing.T) {
-	dir := findConfAdapterDir(t)
-	ut, _ := loadProdCodec(t, "tcp_logic_codec.json")
-
-	codecLua := filepath.Join(dir, "codec.lua")
-	errorLua := filepath.Join(dir, "error.lua")
-	oracle, err := adapter.NewLuaAdapter(2, codecLua, errorLua)
-	if err != nil {
-		t.Fatalf("NewLuaAdapter 失败: %v", err)
-	}
-	t.Cleanup(oracle.Close)
-
-	key := make([]byte, 32)
-	for i := range key {
-		key[i] = byte(i*7 + 1)
-	}
-
-	cases := []struct {
-		name  string
-		route map[string]any
-		body  []byte
-	}{
-		{"encrypted_small", map[string]any{"cmd": float64(100), "act": float64(7)}, genBodyMig(64)},
-		{"encrypted_medium", map[string]any{"cmd": float64(100), "act": float64(7)}, genBodyMig(1024)},
-		{"encrypted_compressible",
-			map[string]any{"cmd": float64(100), "act": float64(7)}, bytes.Repeat([]byte{0x41}, 4096)},
-		{"no_key", map[string]any{"cmd": float64(100), "act": float64(7)}, genBodyMig(64)},
-		{"cmd0_with_key", map[string]any{"cmd": float64(0), "act": float64(7)}, genBodyMig(64)},
-		{"empty_body", map[string]any{"cmd": float64(100), "act": float64(7)}, nil},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			k := key
-			if tc.name == "no_key" {
-				k = nil
-			}
-			want := oracle.EncodeTCP(tc.route, tc.body, k)
-			got := ut.EncodeTCP(tc.route, tc.body, k)
-			if !bytes.Equal(got, want) {
-				t.Fatalf("TCP 对拍失败 name=%s\n got=%x\n want=%x", tc.name, got, want)
-			}
-		})
-	}
-}
-
-// genBodyMig 生成长度 n 的可复现伪随机 body（xorshift32）。
-func genBodyMig(n int) []byte {
-	b := make([]byte, n)
-	state := uint32(0x12345678)
-	for i := range b {
-		state ^= state << 13
-		state ^= state >> 17
-		state ^= state << 5
-		b[i] = byte(state)
-	}
-	return b
-}
-
-// TestMigration_ErrorMap_FullVerbatimVsErrorLua 对 errors.json 全部 639 对 code→desc
-// 与 error.lua 真值做 verbatim 比对（T1.7 carry-over c，闭环 T1.6 仅抽样的缺口）。
-//
-// 不依赖 LuaAdapter（其 DescribeError 路径在未初始化 zap logger 时会 nil panic，与迁移
-// 正确性无关）；改用纯文本解析 error.lua 的 `errors = {...}` 表——按行匹配
-// `^\s*\[(\d+)\]\s*=\s*"(.*)"\s*,?$`，提取 (code, desc) 对。error.lua 已确认全部 639
-// 条目均符合该格式（无转义引号、无多行字符串），解析无歧义。
-//
-// 断言：
-//  1. 双方条目数相等（639），不漏不重（LoadErrorMap 已保证 key 唯一）；
-//  2. 每对 code→desc 在 errors.json 与 error.lua 间 verbatim 一致（string==）。
-func TestMigration_ErrorMap_FullVerbatimVsErrorLua(t *testing.T) {
-	dir := findConfAdapterDir(t)
-
-	// 1. 加载 errors.json。
-	em, err := codec.LoadErrorMap(filepath.Join(dir, "errors.json"))
-	if err != nil {
-		t.Fatalf("LoadErrorMap 失败: %v", err)
-	}
-
-	// 2. 纯文本解析 error.lua 的 errors 表。
-	luaBytes, err := os.ReadFile(filepath.Join(dir, "error.lua"))
-	if err != nil {
-		t.Fatalf("读 error.lua 失败: %v", err)
-	}
-	// 按行匹配 `[code] = "desc"`。error.lua 全部条目均符合此格式（已人工核对）。
-	// desc 不含转义引号，正则贪婪到行尾引号即可。
-	entryRe := regexp.MustCompile(`(?m)^\s*\[(\d+)\]\s*=\s*"(.*)"\s*,?\s*$`)
-	matches := entryRe.FindAllSubmatch(luaBytes, -1)
-	if len(matches) == 0 {
-		t.Fatalf("error.lua 未解析出任何条目（正则失配？）")
-	}
-	lua := make(map[uint64]string, len(matches))
-	for _, m := range matches {
-		code, parseErr := strconv.ParseUint(string(m[1]), 10, 64)
-		if parseErr != nil {
-			t.Fatalf("error.lua code %q 解析失败: %v", string(m[1]), parseErr)
-		}
-		lua[code] = string(m[2])
-	}
-
-	// 3. 条目数对齐。
-	if len(em) != len(lua) {
-		t.Fatalf("条目数不一致：errors.json=%d error.lua=%d", len(em), len(lua))
-	}
-	if len(em) != 639 {
-		t.Errorf("条目数=%d，期望 639（若 error.lua 故意增减，请同步更新此断言）", len(em))
-	}
-
-	// 4. 逐对 verbatim 比对。
-	var mismatch, missingInJSON, missingInLua int
-	for code, wantDesc := range lua {
-		gotDesc, ok := em[code]
-		if !ok {
-			missingInJSON++
-			t.Errorf("code=%d 在 errors.json 中缺失（error.lua 有）", code)
-			continue
-		}
-		if gotDesc != wantDesc {
-			mismatch++
-			t.Errorf("code=%d 描述不一致\n errors.json=%q\n error.lua =%q", code, gotDesc, wantDesc)
-		}
-	}
-	for code := range em {
-		if _, ok := lua[code]; !ok {
-			missingInLua++
-			t.Errorf("code=%d 在 error.lua 中缺失（errors.json 多出）", code)
-		}
-	}
-	if mismatch != 0 || missingInJSON != 0 || missingInLua != 0 {
-		t.Fatalf("全量比对失败：mismatch=%d missingInJSON=%d missingInLua=%d",
-			mismatch, missingInJSON, missingInLua)
 	}
 }

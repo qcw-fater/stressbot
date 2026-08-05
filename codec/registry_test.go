@@ -3,9 +3,8 @@
 // 测试策略（TDD）：
 //   - 每个 cipher 覆盖 Encrypt→Decrypt 往返（含 offset>0，断言前缀字节不变 + len(out)==len(data)
 //     对流密码；块密码验证 len 约束与去填充后等价）；
-//   - xor_carry_rol 与 adapter/lua_crypto_test.go 的已知向量对拍（TestXorCarryRolEquivalence
-//     的手动计算值）；
-//   - xor8 与 computeBcc(0x55,0xAA)=0xFF 对拍（TestBcc）；
+//   - xor_carry_rol 已知向量往返（TestXorCarryRolEquivalence 的手动计算值）；
+//   - xor8 已知向量 (0x55,0xAA)=0xFF；
 //   - crc16("123456789")=0x29B1、crc32("123456789")=0xCBF43926 已知向量；
 //   - md5(""/"abc")、sha1("abc")、sha256("") 已知向量 + HMAC 输出长度；
 //   - gzip 往返；
@@ -206,7 +205,7 @@ func TestXorCarryRolRoundTrip(t *testing.T) {
 	}
 }
 
-// 对拍 adapter/lua_crypto_test.go 的 TestXorCarryRolEquivalence 手动向量化值。
+// 手动向量化值，对照本文件 TestXorCarryRolEquivalence。
 func TestXorCarryRolKnownVector(t *testing.T) {
 	c, _ := LookupCipher("xor_carry_rol")
 	data := []byte{0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80}
@@ -214,7 +213,7 @@ func TestXorCarryRolKnownVector(t *testing.T) {
 	for i := range key {
 		key[i] = byte(i * 7)
 	}
-	// 手动计算期望（模拟原始 Lua net_encrypt / rol=3），与 lua_crypto_test 完全一致。
+	// 手动计算期望（rol=3 的 XOR+carry+ROL8 流加密）。
 	expected := make([]byte, len(data))
 	carry := byte(0)
 	for i := range data {
@@ -253,7 +252,7 @@ func TestXorCarryRolDefaultRol(t *testing.T) {
 	}
 }
 
-// xor_carry_rol 非法 key（非 32 字节）返回原数据，与 lua_crypto 行为一致。
+// xor_carry_rol 非法 key（非 32 字节）返回原数据。
 func TestXorCarryRolInvalidKey(t *testing.T) {
 	c, _ := LookupCipher("xor_carry_rol")
 	data := []byte{1, 2, 3, 4}
@@ -267,7 +266,7 @@ func TestXorCarryRolInvalidKey(t *testing.T) {
 	}
 }
 
-// xor_carry_rol offset=11 时前缀明文不变（对拍 lua_crypto_test TestXorOffset）。
+// xor_carry_rol offset=11 时前缀明文不变。
 func TestXorCarryRolOffsetPrefix(t *testing.T) {
 	c, _ := LookupCipher("xor_carry_rol")
 	data := make([]byte, 64)
@@ -301,7 +300,7 @@ func TestRc4RoundTrip(t *testing.T) {
 	}
 }
 
-// rc4 key 长度 1/16/256 均可往返（对拍 lua_crypto_test TestRC4KeyLengths）。
+// rc4 key 长度 1/16/256 均可往返。
 func TestRc4KeyLengths(t *testing.T) {
 	c, _ := LookupCipher("rc4")
 	data := randBytes(64, 6)
@@ -610,7 +609,7 @@ func TestNoneChecksum(t *testing.T) {
 	}
 }
 
-// xor8 对拍 lua_crypto_test TestBcc: computeBcc(0x55,0xAA)=0xFF。
+// xor8 已知向量：xor8(0x55,0xAA)=0xFF。
 func TestXor8BccVector(t *testing.T) {
 	c, _ := LookupChecksum("xor8")
 	got := c.Sum([]byte{0x55, 0xAA}, nil)
@@ -640,7 +639,7 @@ func TestSum8(t *testing.T) {
 	}
 }
 
-// crc16 对拍 lua_crypto_test TestCrc16: crc16("123456789")=0x29B1。
+// crc16 已知向量：crc16("123456789")=0x29B1。
 func TestCrc16KnownVector(t *testing.T) {
 	c, _ := LookupChecksum("crc16")
 	got := c.Sum([]byte("123456789"), nil)
@@ -649,7 +648,7 @@ func TestCrc16KnownVector(t *testing.T) {
 	}
 }
 
-// crc32 对拍 lua_crypto_test TestCrc32: crc32("123456789")=0xCBF43926。
+// crc32 已知向量：crc32("123456789")=0xCBF43926。
 func TestCrc32KnownVector(t *testing.T) {
 	c, _ := LookupChecksum("crc32")
 	got := c.Sum([]byte("123456789"), nil)
@@ -676,7 +675,7 @@ func TestCrc32cKnownVector(t *testing.T) {
 // hash: md5 / sha1 / sha256（含 HMAC）
 // ---------------------------------------------------------------------------
 
-// md5 对拍 lua_crypto_test TestMd5: md5("") 的 hex。
+// md5 已知向量：md5("") 的 hex。
 func TestMd5Vector(t *testing.T) {
 	c, _ := LookupHasher("md5")
 	got := c.Hash([]byte(""), nil, nil)
@@ -689,7 +688,7 @@ func TestMd5Vector(t *testing.T) {
 	}
 }
 
-// sha1 对拍 lua_crypto_test TestSha1: sha1("abc") 的 hex。
+// sha1 已知向量：sha1("abc") 的 hex。
 func TestSha1Vector(t *testing.T) {
 	c, _ := LookupHasher("sha1")
 	got := c.Hash([]byte("abc"), nil, nil)
@@ -702,7 +701,7 @@ func TestSha1Vector(t *testing.T) {
 	}
 }
 
-// sha256 对拍 lua_crypto_test TestSha256: sha256("") 的 hex。
+// sha256 已知向量：sha256("") 的 hex。
 func TestSha256Vector(t *testing.T) {
 	c, _ := LookupHasher("sha256")
 	got := c.Hash([]byte(""), nil, nil)

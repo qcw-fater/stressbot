@@ -1,83 +1,16 @@
-// Package codec_test — encode 引擎对拍测试（外部测试包，避免 codec↔adapter 循环）。
+// Package codec_test — encode 引擎测试（纯 Go SchemaCodec，外部测试包）。
 //
-// 验收核心：字节级对拍 conf/adapter/codec.lua 经旧 adapter.LuaAdapter 的 encode 输出。
-// 测试在此 import adapter 包仅用于构造真值 oracle（gopher-lua 经 adapter 传递引入，
-// 仅测试代码、不影响 codec 包生产依赖；go build ./codec 仍保持零 gopher-lua）。
-//
-// 本文件位于外部测试包 codec_test（而非内部 package codec）：因 adapter/schema_adapter.go
-// 反向 import 了 codec，构成 codec(test)→adapter→codec(production) 的循环；外部测试包
-// 编译为独立包，可同时 import codec 与 adapter 而不形成循环。codec 内部测试包
-// （compile_test.go / registry_test.go / schema_test.go，需访问未导出符号）保留不变。
-//
-// 组合覆盖矩阵：
-//   - TCP encode：offset 0、加密/不加密、压缩/不压缩、空 body、cmd=0
-//   - UDP encode：offset 11（前 11 明文 + bcc 排除前缀）
-//   - BodyLength / ExpectedRouteKey 行为与 helpers / lua_adapter 对齐
-//   - 头部零初始化：checksumOut 未执行的帧对应字节为 0
+// 覆盖 TCP/UDP encode 行为：offset 0/11、加密/压缩组合、空 body、cmd=0、
+// 头部零初始化、flags 语义、bcc 区域、BodyLength/ExpectedRouteKey 访问器、并发安全。
 package codec_test
 
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
-	"stressbot/adapter"
 	"stressbot/codec"
 )
-
-// ---------------------------------------------------------------------------
-// 真值 oracle：旧 LuaAdapter（codec.lua + error.lua）
-// ---------------------------------------------------------------------------
-
-// adapterPaths 返回 worktree 根下的 conf/adapter/codec.lua / error.lua 绝对路径。
-// 测试可从 codec/ 目录运行（go test ./codec），故向上回溯一级。
-func adapterPaths(t *testing.T) (codecPath, errorPath string) {
-	t.Helper()
-	root := findRepoRoot(t)
-	return filepath.Join(root, "conf", "adapter", "codec.lua"),
-		filepath.Join(root, "conf", "adapter", "error.lua")
-}
-
-// findRepoRoot 从测试 CWD 向上查找含 conf/adapter/codec.lua 的目录。
-func findRepoRoot(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	for range 8 {
-		if _, err := os.Stat(filepath.Join(dir, "conf", "adapter", "codec.lua")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	t.Fatalf("未找到含 conf/adapter/codec.lua 的仓库根目录")
-	return ""
-}
-
-// newLuaOracle 构造旧 LuaAdapter 作为 encode 真值 oracle。
-//
-// 池大小用 2：poolSize=1 时 NewLuaAdapter 在初始化期持有一个 LState，加载
-// error.lua 时再次 acquire 会耗尽池并超时；这是旧 Lua oracle 的初始化限制，
-// 与 codec 包无关。poolSize=2 验证可正常构造；codec 测试串行调用无需更大池。
-func newLuaOracle(t *testing.T) *adapter.LuaAdapter {
-	t.Helper()
-	codecPath, errorPath := adapterPaths(t)
-	a, err := adapter.NewLuaAdapter(2, codecPath, errorPath)
-	if err != nil {
-		t.Fatalf("NewLuaAdapter 失败: %v", err)
-	}
-	t.Cleanup(a.Close)
-	return a
-}
 
 // newSchemaCodecUT 加载 testdata/tcp_logic_codec.json 并构造被测 SchemaCodec。
 func newSchemaCodecUT(t *testing.T) *codec.SchemaCodec {
@@ -94,7 +27,7 @@ func newSchemaCodecUT(t *testing.T) *codec.SchemaCodec {
 }
 
 // newSchemaCodecUDP 与 newSchemaCodecUT 相同 schema，但把 enc 步的 offset 改为
-// udp:battle 语义 {encode:11, decode:0}，用于 UDP 对拍。
+// udp:battle 语义 {encode:11, decode:0}，用于 UDP 测试。
 func newSchemaCodecUDP(t *testing.T) *codec.SchemaCodec {
 	t.Helper()
 	s, err := codec.LoadSchema("testdata/tcp_logic_codec.json")
@@ -126,10 +59,10 @@ func genKey() []byte {
 	return k
 }
 
-// genBody 生成长度 n 的可复现高熵 body（xorshift128 伪随机，gzip 难以压缩）。
+// genBody 生成长度 n 的可复现高熵 body（xorshift32 伪随机，gzip 难以压缩）。
 func genBody(n int) []byte {
 	b := make([]byte, n)
-	// xorshift32 状态，确保高熵以便 gzip 压缩后变大（用于 onlySmaller 对拍分支）。
+	// xorshift32 状态，确保高熵以便 gzip 压缩后变大（用于 CompressionRejectedWhenLarger 分支）。
 	state := uint32(0x12345678)
 	for i := range b {
 		state ^= state << 13
@@ -152,126 +85,7 @@ func hexStr(b []byte) string {
 }
 
 // ---------------------------------------------------------------------------
-// TCP 对拍矩阵
-// ---------------------------------------------------------------------------
-
-func TestEncodeTCP_Parity_LuaAdapter(t *testing.T) {
-	oracle := newLuaOracle(t)
-	ut := newSchemaCodecUT(t)
-	key := genKey()
-
-	// 路由：与 codec.lua math.floor 行为对齐（数值经 JSON 反序列化为 float64）。
-	route := map[string]any{"cmd": float64(100), "act": float64(7)}
-
-	cases := []struct {
-		name  string
-		route map[string]any
-		body  []byte
-		key   []byte // nil = 不传 key
-	}{
-		// 加密 + 不压缩（body < 2048）。
-		{"small_encrypted", route, genBody(64), key},
-		// 加密 + 不压缩，中等 body。
-		{"medium_encrypted", route, genBody(1024), key},
-		// 加密 + 压缩（body >= 2048，随机字节通常压缩后变大→不压缩；用低熵 body 保证压缩变小）。
-		// 低熵 body：单字节重复，gzip 必然变小。
-		{"large_compressible_encrypted", route, bytes.Repeat([]byte{0x41}, 4096), key},
-		// 加密 + 高熵大 body（>= 2048，但压缩后变大→应丢弃压缩结果，flag 不置 compressed）。
-		{"large_incompressible_encrypted", route, genBody(4096), key},
-		// 不加密（无 key）：cmd!=0 但无合法 key → codec.lua 不加密。
-		{"small_no_key", route, genBody(64), nil},
-		// cmd=0：guard neq 0 不满足 → 不加密（即使有 key）。
-		{"cmd0_with_key", map[string]any{"cmd": float64(0), "act": float64(7)}, genBody(64), key},
-		// cmd=0 + 无 key。
-		{"cmd0_no_key", map[string]any{"cmd": float64(0), "act": float64(7)}, genBody(64), nil},
-		// 空 body：codec.lua #data==0 → 不压缩、不加密。
-		{"empty_body_encrypted", route, nil, key},
-		{"empty_body_no_key", route, nil, nil},
-		// 单字节 body。
-		{"one_byte_encrypted", route, []byte{0x42}, key},
-		// route nil（cmd=act=0）。
-		{"nil_route", nil, genBody(32), key},
-		// route act=0 cmd!=0：仍加密（guard 只看 cmd）。
-		{"act0_encrypted", map[string]any{"cmd": float64(50), "act": float64(0)}, genBody(100), key},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			k := tc.key
-			var expected []byte
-			if k == nil {
-				expected = oracle.EncodeTCP(tc.route, tc.body, nil)
-			} else {
-				expected = oracle.EncodeTCP(tc.route, tc.body, k)
-			}
-			if expected == nil {
-				t.Fatalf("oracle encode 返回 nil（脚本错误）")
-			}
-			got := ut.EncodeTCP(tc.route, tc.body, k)
-			if !bytes.Equal(got, expected) {
-				t.Fatalf("TCP encode 不一致\n name=%s\n got=%s\n want=%s",
-					tc.name, hexStr(got), hexStr(expected))
-			}
-		})
-	}
-}
-
-// ---------------------------------------------------------------------------
-// UDP 对拍矩阵（offset 11）
-// ---------------------------------------------------------------------------
-
-func TestEncodeUDP_Parity_LuaAdapter(t *testing.T) {
-	oracle := newLuaOracle(t)
-	ut := newSchemaCodecUDP(t) // encOffset=11
-	key := genKey()
-
-	route := map[string]any{"cmd": float64(100), "act": float64(7)}
-
-	cases := []struct {
-		name  string
-		route map[string]any
-		body  []byte
-		key   []byte
-	}{
-		// body 必须大于 11 才能让 offset 11 的明文前缀真正出现。
-		{"udp_small_encrypted_offset11", route, genBody(64), key},
-		{"udp_medium_encrypted_offset11", route, genBody(256), key},
-		{"udp_compressible_encrypted_offset11", route, bytes.Repeat([]byte{0x41}, 4096), key},
-		{"udp_no_key", route, genBody(64), nil},
-		{"udp_cmd0_with_key", map[string]any{"cmd": float64(0), "act": float64(7)}, genBody(64), key},
-		// body 短于 offset 11：codec.lua net_encrypt 在 offset>=len 时处理空段，flag 仍置位、bcc=0。
-		{"udp_body_shorter_than_offset", route, genBody(8), key},
-		// 空 body：UDP offset 11 但 body 为空 → 不加密。
-		{"udp_empty_body", route, nil, key},
-		// 恰好 11 字节：处理区域为空。
-		{"udp_body_equals_offset", route, genBody(11), key},
-		// 12 字节：处理区域 1 字节。
-		{"udp_body_one_byte_after_offset", route, genBody(12), key},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			k := tc.key
-			var expected []byte
-			if k == nil {
-				expected = oracle.EncodeUDP(tc.route, tc.body, nil)
-			} else {
-				expected = oracle.EncodeUDP(tc.route, tc.body, k)
-			}
-			if expected == nil {
-				t.Fatalf("oracle encode 返回 nil")
-			}
-			got := ut.EncodeUDP(tc.route, tc.body, k)
-			if !bytes.Equal(got, expected) {
-				t.Fatalf("UDP encode 不一致\n name=%s\n got=%s\n want=%s",
-					tc.name, hexStr(got), hexStr(expected))
-			}
-		})
-	}
-}
-
-// ---------------------------------------------------------------------------
-// TCP 与 UDP 在 offset 0 / 11 上的对比（结构性断言，非对拍）
+// TCP/UDP encode 结构性断言
 // ---------------------------------------------------------------------------
 
 // UDP offset 11 时：前 11 字节明文必须与 body 前 11 字节相等。
@@ -416,18 +230,6 @@ func TestBodyLength(t *testing.T) {
 	if got := ut.BodyLength(short); got != 0 {
 		t.Errorf("短 header BodyLength = %d, want 0", got)
 	}
-
-	// 与 LuaAdapter BodyLength 对齐。
-	oracle := newLuaOracle(t)
-	for _, n := range []int{0, 1, 255, 1024, 65535, 1 << 20} {
-		h := make([]byte, 12)
-		binary.LittleEndian.PutUint32(h[0:], uint32(n))
-		got := ut.BodyLength(h)
-		want := oracle.BodyLength(h)
-		if got != want {
-			t.Errorf("BodyLength(n=%d)：got=%d want(oracle)=%d", n, got, want)
-		}
-	}
 }
 
 // BodyLength 与 encode 自洽：encode 后用 BodyLength 切帧应拿到正确 body 长。
@@ -450,7 +252,6 @@ func TestBodyLength_RoundtripWithEncode(t *testing.T) {
 
 func TestExpectedRouteKey(t *testing.T) {
 	ut := newSchemaCodecUT(t)
-	oracle := newLuaOracle(t)
 
 	cases := []struct {
 		name  string
@@ -469,26 +270,16 @@ func TestExpectedRouteKey(t *testing.T) {
 			if got != tc.want {
 				t.Errorf("ExpectedRouteKey(%v) = %q, want %q", tc.route, got, tc.want)
 			}
-			// 与 oracle 对齐。
-			wantOracle := oracle.ExpectedRouteKey(tc.route)
-			if got != wantOracle {
-				t.Errorf("ExpectedRouteKey 与 oracle 不一致：got=%q oracle=%q", got, wantOracle)
-			}
 		})
 	}
 }
 
-// math.floor 对齐：codec.lua 用 math.floor(route.cmd)，本实现应一致（截断小数）。
+// route.cmd 经 math.floor 截断取整（数值经 JSON 反序列化为 float64）。
 func TestExpectedRouteKey_FloorAlignment(t *testing.T) {
 	ut := newSchemaCodecUT(t)
-	oracle := newLuaOracle(t)
 	// 非整数 float64 → math.floor 截断。
 	route := map[string]any{"cmd": float64(99.7), "act": float64(3.9)}
 	got := ut.ExpectedRouteKey(route)
-	want := oracle.ExpectedRouteKey(route)
-	if got != want {
-		t.Errorf("math.floor 对齐失败：got=%q want(oracle)=%q", got, want)
-	}
 	if got != "99:3" {
 		t.Errorf("ExpectedRouteKey(99.7,3.9) = %q, want 99:3", got)
 	}
@@ -497,8 +288,8 @@ func TestExpectedRouteKey_FloorAlignment(t *testing.T) {
 // ---------------------------------------------------------------------------
 // bcc 语义断言：xor8(plaintext body[encOffset:])
 // ---------------------------------------------------------------------------
-// 注：codec.lua 经 lua_crypto.go:227 在加密**之前**对明文区域计算 bcc
-// （computeBcc(data[offset:])，data 为加密前明文）。故 bcc = xor8(plaintext[encOffset:])。
+// 注：enc 步在加密之前对明文区域计算 bcc = xor8(plaintext[encOffset:])，
+// 故 bcc 只取决于明文区域，与加密后字节无关。
 
 // TCP offset 0：bcc = xor8(整 plaintext body)。
 func TestBCC_TCP_XorOverPlaintextRegion(t *testing.T) {
@@ -539,21 +330,6 @@ func TestBCC_UDP_ExcludesPlaintextPrefix(t *testing.T) {
 	}
 }
 
-// bcc 对拍：与 oracle 在头部 bcc 字节一致（已被 EncodeTCP_Parity 覆盖，这里单独显式断言）。
-func TestBCC_ParityWithOracle(t *testing.T) {
-	oracle := newLuaOracle(t)
-	ut := newSchemaCodecUT(t)
-	key := genKey()
-	body := genBody(128)
-	route := map[string]any{"cmd": float64(100), "act": float64(7)}
-
-	gotFrame := ut.EncodeTCP(route, body, key)
-	wantFrame := oracle.EncodeTCP(route, body, key)
-	if gotFrame[11] != wantFrame[11] {
-		t.Errorf("bcc 字节不一致：got=%d want=%d", gotFrame[11], wantFrame[11])
-	}
-}
-
 // ---------------------------------------------------------------------------
 // HeaderSize 访问器回归
 // ---------------------------------------------------------------------------
@@ -587,26 +363,4 @@ func TestEncode_ConcurrentSafe(t *testing.T) {
 	for range 8 {
 		<-done
 	}
-}
-
-// 辅助：把失败诊断信息打印成可读形式（调试时手动启用）。
-func TestDebug_PrintOneFrame(t *testing.T) {
-	if !debugEnabled() {
-		t.Skip()
-	}
-	ut := newSchemaCodecUT(t)
-	oracle := newLuaOracle(t)
-	key := genKey()
-	body := genBody(16)
-	route := map[string]any{"cmd": float64(100), "act": float64(7)}
-	got := ut.EncodeTCP(route, body, key)
-	want := oracle.EncodeTCP(route, body, key)
-	fmt.Printf("GOT : %s\nWANT: %s\n", hexStr(got), hexStr(want))
-	if !bytes.Equal(got, want) {
-		t.Errorf("不一致")
-	}
-}
-
-func debugEnabled() bool {
-	return strings.HasPrefix(os.Getenv("CODEC_DEBUG"), "1")
 }

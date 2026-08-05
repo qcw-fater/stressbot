@@ -143,7 +143,7 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 
 	// 构造生产 CodecResolver：任务下发的 adapter 目录包含每连接 *_codec.json，共享 errors.json 可选
 	// （未下发错误码表时跳过，DescribeError 返回空串，不影响流程执行）。
-	// 业务 encode/decode/dial/心跳/listen/Lua 网络 API 均走 resolver，生产路径不构造 LuaAdapter。
+	// 业务 encode/decode/dial/心跳/listen/Lua 网络 API 均走 resolver（CodecResolver→SchemaAdapter）。
 	codecAdapterDir := filepath.Join(confDir, "adapter")
 	codecMap, err := adapter.InferCodecMap(codecAdapterDir)
 	if err != nil {
@@ -246,7 +246,6 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 		stresslog.Info("[TASK] Redis 共享状态已启用",
 			zap.String("taskID", taskID),
 			zap.String("addr", fmt.Sprintf("%s:%d", resolved.Host, resolved.Port)),
-			zap.Int("dbIndex", resolved.DBIndex),
 			zap.String("runId", r.assignment.Shared.RunID))
 	} else {
 		stresslog.Info("[TASK] 共享状态未启用",

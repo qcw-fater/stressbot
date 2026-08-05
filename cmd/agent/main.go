@@ -200,7 +200,7 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 
 	// 构造生产 CodecResolver：扫描 adapter 目录下 *_codec.json 推断「server 串 → 文件名」映射。
 	// 共享 errors.json 可选：缺失时打告警并传空串（loader 跳过加载，DescribeError 返回空串）。
-	// 业务 encode/decode/dial/心跳/listen/Lua 网络 API 均走 resolver，生产路径不构造 LuaAdapter。
+	// 业务 encode/decode/dial/心跳/listen/Lua 网络 API 均走 resolver（CodecResolver→SchemaAdapter）。
 	codecMap, err := adapter.InferCodecMap(paths.Adapter)
 	if err != nil {
 		stresslog.Fatal("推断 codec 映射失败", zap.String("dir", paths.Adapter), zap.Error(err))
@@ -289,7 +289,7 @@ func runStandalone(cfg *Config, paths standalonePaths) {
 		}
 		sharedStore = store
 		stresslog.Info("[MAIN] Redis 共享状态已启用",
-			zap.String("addr", fmt.Sprintf("%s:%d", resolved.Host, resolved.Port)), zap.Int("dbIndex", resolved.DBIndex), zap.String("runId", runID))
+			zap.String("addr", fmt.Sprintf("%s:%d", resolved.Host, resolved.Port)), zap.String("runId", runID))
 	} else {
 		stresslog.Info("[MAIN] Redis 共享状态未启用（脚本未使用 share）")
 	}

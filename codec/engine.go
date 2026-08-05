@@ -2,8 +2,7 @@
 //
 // 本文件在编译产物 *SchemaCodec 上实现帧访问、路由键计算、TCP/UDP encode/decode。
 //
-// 迁移/回归契约：Go SchemaCodec 在既有协议样例上需与旧 conf/adapter/codec.lua oracle
-// 字节级对拍；生产输入为声明式 *_codec.json。
+// 生产输入为声明式 *_codec.json（每连接一份）+ 共享 errors.json。
 //   - encode 管线按 c.steps 正序执行：compress（onlySmaller 先压后判）→ encrypt（guards/minBodyLen/requireKey）。
 //   - bcc = xor8(body[encOffset:])（UDP 排除前 11 明文字节）—— encrypt 步 produces 的 ciphered region。
 //   - 头部整体零初始化：make([]byte, headerSize) 后只写字段；未写字节恒 0；
@@ -63,7 +62,7 @@ func (c *SchemaCodec) BodyLength(header []byte) int {
 // ExpectedRouteKey 按 routeKeySegs 拼：literal 段原样 + field 段取 route 字段值
 // （route==nil 或字段缺失 → 取 0），与 decode 同源。
 //
-// 路由字段数值按 math.Floor 截断取整（对齐 codec.lua math.floor(route.cmd or 0)）。
+// 路由字段数值按 math.Floor 截断取整（route.cmd/act 经 JSON 反序列化为 float64）。
 func (c *SchemaCodec) ExpectedRouteKey(route any) string {
 	rmap := routeAsMap(route)
 	// 栈上暂存 + AppendInt：本函数在发送路径每包调用，避免 Sprintf 小分配。
@@ -101,7 +100,7 @@ func (c *SchemaCodec) EncodeUDP(route any, body []byte, secretKey []byte) []byte
 }
 
 // ---------------------------------------------------------------------------
-// encode 管线核心（逐字节复刻 codec.lua _do_encode）
+// encode 管线核心：按 pipeline 步骤顺序处理 body，逐步累加 flags 并写头。
 // ---------------------------------------------------------------------------
 
 // encode 执行完整 encode 管线并返回 header ++ body (++ trailer)。
@@ -153,7 +152,7 @@ func (c *SchemaCodec) encode(route any, body []byte, key []byte) []byte {
 			}
 			compressed, err := comp.Compress(work)
 			if err != nil {
-				// 压缩失败：与 codec.lua pcall 失败一致——不采用、applied=false、不置 flag。
+				// 压缩失败：不采用、applied=false、不置 flag。
 				continue
 			}
 			// onlySmaller 特判：仅当 !onlySmaller || len(compressed)<len(work) 才采用。
@@ -175,20 +174,16 @@ func (c *SchemaCodec) encode(route any, body []byte, key []byte) []byte {
 			if !ok {
 				continue
 			}
-			// requireKey/keyLen 校验：codec.lua 等价 `#secret_key == 32`。
+			// requireKey/keyLen 校验：requireKey 为真时 key 须非空。
 			if step.encodeWhen.requireKey && !keyLenSatisfied(step, key) {
 				continue
 			}
 			// 产物计算（**必须在加密前**）：region "ciphered" 的语义是「本步即将处理的明文区域」，
-			// 即 xor8(plaintext[encOffset:])。这与 codec.lua 经 lua_crypto.go:227
-			// `bcc := computeBcc(data[offset:])`（data 为加密前明文）逐字一致——
-			// bcc 在加密**之前**对明文区域计算（注释 lua_crypto.go:116-117「加密前对明文部分调用一次」）。
-			// brief 中「加密后的 body 的 [encOffset:]」措辞与 codec.lua 实际行为冲突；
-			// 以对拍为准（parity 为核心验收）。
+			// 即 xor8(plaintext[encOffset:])——bcc 在加密之前对明文区域计算。
 			stashStep(stash, i, step, work, bodyPlain)
 			encOut, err := ciph.Encrypt(work, key, step.encOffset, step.params)
 			if err != nil {
-				// 加密失败：codec.lua 不会到这（net_encrypt 不报错）；保持 applied=false。
+				// 加密失败：保持 applied=false（本步产物不生效）。
 				// 已写入 stash 的产物需要撤回（applied=false）。
 				delete(stash, i)
 				continue
@@ -280,11 +275,10 @@ func (c *SchemaCodec) encode(route any, body []byte, key []byte) []byte {
 // encode 辅助
 // ---------------------------------------------------------------------------
 
-// keySatisfies 判定 key 是否满足 step 的 requireKey（与 codec.lua `secret_key and #secret_key==32` 等价：非空）。
+// keySatisfies 判定 key 是否满足 step 的 requireKey（仅看 key 是否存在/非空）。
 //
 // 注意：keyLen 的精确长度校验在 encrypt 分支由 keyLenSatisfied 单独判定；applies() 内的
-// requireKey 仅看 key 是否存在（非空）。这与 codec.lua 行为一致：
-//   - `if cmd ~= 0 and #data > 0 and secret_key and #secret_key == 32` 同时检查存在 + 长度。
+// requireKey 仅看 key 是否存在（非空）。
 func keySatisfies(step *compiledStep, key []byte) bool {
 	return len(key) > 0
 }
@@ -294,11 +288,10 @@ func keySatisfies(step *compiledStep, key []byte) bool {
 // 从 compiledStep.keyLen（编译期由 PipelineStep.KeyLen 填充）读取，
 // 替换早期固定 `len(key)==32` 的假设。
 //   - step.keyLen == 0：不校验长度（仅 requireKey 看存在性）。
-//   - step.keyLen > 0：要求 len(key) >= step.keyLen（与 codec.lua `#secret_key == 32`
-//     等价；用 >= 兼容变长 key 算法，xor_carry_rol schema 声明 keyLen=32）。
+//   - step.keyLen > 0：要求 len(key) >= step.keyLen（用 >= 兼容变长 key 算法，
+//     如 xor_carry_rol schema 声明 keyLen=32）。
 //
-// 现协议（xor_carry_rol, keyLen=32）行为与旧 oracle 一致，对拍不回归；
-// 非默认 schema（如 aes_ecb keyLen=16）也可正确触发加密分支。
+// 非默认 schema（如 aes_ecb keyLen=16）可正确触发加密分支。
 func keyLenSatisfied(step *compiledStep, key []byte) bool {
 	if step.keyLen <= 0 {
 		return true // schema 未声明 keyLen，不校验
@@ -326,7 +319,7 @@ func routeMapValue(rmap map[string]any, name string) any {
 	return rmap[name]
 }
 
-// routeMapFloorInt 从 route map 中取字段值并 math.Floor 取整（对齐 codec.lua）。
+// routeMapFloorInt 从 route map 中取字段值并 math.Floor 取整。
 func routeMapFloorInt(rmap map[string]any, name string) int64 {
 	v := routeMapValue(rmap, name)
 	switch x := v.(type) {
@@ -376,11 +369,9 @@ func (c *SchemaCodec) evalValueSource(f *compiledField, rmap map[string]any) uin
 
 // stashStep 把 step 的所有 produces 计算并写入 stash。
 //
-// 各 region 的取值口径（对拍 codec.lua / lua_crypto.go:227 行为修正后）：
+// 各 region 的取值口径：
 //   - ciphered：本步**即将处理**的明文区域 = work[step.encOffset:]（**加密前**的 work）。
-//     调用方须在调用 Encrypt 之前调用本函数；这与 codec.lua 经 lua_crypto.go:227
-//     `bcc := computeBcc(data[offset:])`（data 为加密前明文）逐字一致
-//     （注释 lua_crypto.go:116-117「加密前对明文部分调用一次」）。
+//     调用方须在调用 Encrypt 之前调用本函数；bcc = xor8(plaintext[encOffset:]) 在加密前计算。
 //   - bodyPlain：管线执行**前**的原始 body 快照（bodyPlain 入参）。
 //   - bodyFinal：管线**当前**的 work（即该步执行后的 body；checksum/hash 步的 over 用）。
 //   - header/frame：写头后才可取——v1 现协议不用，本函数按空区域处理（产 0）。
@@ -463,7 +454,7 @@ func bytesToUint64(b []byte) uint64 {
 }
 
 // ---------------------------------------------------------------------------
-// 字段读写 helper（与 codec.lua 的 write_uint* 对齐）
+// 字段读写 helper（按 schema 的 field 位宽/偏移读写小端整数）。
 // ---------------------------------------------------------------------------
 
 // writeFieldUint 把 v 按 field 的 endian/kind/size 写入 buf 的 [offset:offset+size]。
@@ -572,7 +563,7 @@ func (c *SchemaCodec) DecodeUDPWithReason(data, secretKey []byte) (routeKey stri
 	return c.decode(data, secretKey)
 }
 
-// decode 执行完整 decode 管线（逐字节对拍 codec.lua decode_tcp/udp）。
+// decode 执行完整 decode 管线：按 pipeline 步骤逆序处理，解密/解压还原 body。
 //
 // 步骤（与 T1.5 brief「decode 算法」逐条对应）：
 //  1. 长度校验；读头：errorCode→headerErr、route 字段→route map、flags→命名位累计值、checksumOut 原值；
@@ -808,19 +799,15 @@ func putWorkBuf(p *[]byte) {
 // 解密后对每个 produces（region: ciphered → work[step.decOffset:]）用 produces 算法
 // （xor8 等）重算；若结果与头里 checksumOut 字段值不等 → 返回 true（校验失败）。
 //
-// **codec.lua decode 完全不校验 bcc**（decode_tcp/decode_udp 只 net_decrypt + pcall 解压，
-// 无 checksum 路径——codec.lua:170-185）。本 engine 在 `encOffset == decOffset` 时**额外**
-// 校验 bcc（比 codec.lua 更严）：bcc 在 encode 侧对明文 `body[encOffset:]` 计算
-// （lua_crypto.go:227 `computeBcc(data[offset:])` 在加密前），写入头里 checksumOut 字段；
-// decode 侧解密后对 `work[decOffset:]` 重算并比对，结果不等 → 按 step.onError (fail/keep) 处理。
+// 本 engine 在 `encOffset == decOffset` 时**额外**校验 bcc：bcc 在 encode 侧对明文
+// `body[encOffset:]` 计算，写入头里 checksumOut 字段；decode 侧解密后对 `work[decOffset:]`
+// 重算并比对，结果不等 → 按 step.onError (fail/keep) 处理。
 // 偏移对称时这两个区域描述同一段字节（明文前后自洽），校验才有意义。
 //
 // **偏移不对称时（现协议 UDP：encOffset=11 / decOffset=0）数学上无法校验**：encode 侧的
-// `body[11:]` 与 decode 侧的 `work[0:]` 不是同一段字节，重算值必然不等——此处跳过校验，
-// 与 codec.lua decode（不校验 bcc）行为一致，保证 UDP 对拍通过。
+// `body[11:]` 与 decode 侧的 `work[0:]` 不是同一段字节，重算值必然不等——此处跳过校验。
 //
-// 即：TCP（对称）路径下 engine 比 codec.lua 严（可检测篡改 bcc），UDP（非对称）路径下
-// 与 codec.lua 一致（均不校验 bcc）。
+// 即：TCP（对称）路径下 engine 校验 bcc（可检测篡改），UDP（非对称）路径下跳过校验。
 func (c *SchemaCodec) verifyProducesAfterDecrypt(stepIdx int, work []byte, chkVals []uint64, chkSet []bool, chkCount int) bool {
 	if chkCount == 0 {
 		return false
@@ -829,7 +816,7 @@ func (c *SchemaCodec) verifyProducesAfterDecrypt(stepIdx int, work []byte, chkVa
 	if len(step.produces) == 0 {
 		return false
 	}
-	// 偏移不对称 → 跳过校验（与 codec.lua decode 不校验 bcc 一致，保证 UDP 对拍通过）。
+	// 偏移不对称 → 跳过校验（数学上无法比对，见上方说明）。
 	if step.encOffset != step.decOffset {
 		return false
 	}

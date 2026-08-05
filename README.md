@@ -519,7 +519,7 @@ Adapter 接口共 **9 方法**，实现已全 Go 化：`adapter/codec_resolver.g
 - `heartbeat`：可选连接级心跳（见第一部分「心跳」）。
 - 共享 `errors.json`：`DescribeError` 读取，把服务端错误码映射为中文描述。
 
-> 旧版 `codec.lua`（7 个必需函数）/ `error.lua` 仅保留为 T1 一致性测试的 oracle，不再参与生产编解码路径。
+> 协议头、路由键、加解密、校验与错误码描述由声明式 `*_codec.json` + `errors.json` 配置，纯 Go `codec/` 引擎驱动（无 Lua 编解码路径）。
 
 ---
 

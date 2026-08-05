@@ -86,7 +86,7 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 - `conf/agent-config.json` — Agent 模式精简配置：仅 `log`/`monitor`/`agent`（无 standalone 段，运行时由 Admin 下发）
 - `conf/admin-config.json` — Admin 服务器配置：`port`、`publicUrl`、`staticDir`、`agentRegistry`、`mysql`（顶层，全局共享 `*sql.DB`）、`redis`、`history`（`retentionDays`）、`log`、`daemon`
 - `conf/flow/flow.json` — 流程图（`defaultDelayMs` + `nodes` + `actions` + `listens`）— 主要配置产物
-- `conf/adapter/<proto>_<service>_codec.json` — 每连接一份的声明式 codec 配置；共享 `errors.json` 提供错误码描述。`codec.lua`/`error.lua` 仅保留为 T1 一致性测试的 oracle，非生产路径。
+- `conf/adapter/<proto>_<service>_codec.json` — 每连接一份的声明式 codec 配置；共享 `errors.json` 提供错误码描述。编解码统一由纯 Go `codec/` 引擎驱动，无 Lua codec 路径。
 - `conf/proto/` — 启动时动态加载的 `.proto` 文件
 - `conf/scripts/` — 复杂行为的 Lua 脚本
 

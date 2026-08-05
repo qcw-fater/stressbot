@@ -1,15 +1,9 @@
-// Package codec — cipher 算法实现（迁移自 adapter/lua_crypto.go）。
+// Package codec — cipher 算法实现。
 //
-// 本文件的算法逻辑逐字节复制自 adapter/lua_crypto.go 的 Go 实现（非 Lua 入口），
-// 仅在外层包了一层 offset 适配（前 offset 字节明文保留 + 对 data[offset:] 做核心变换），
-// 核心变换（encryptXorCarryRol 等）保持原样不变。
+// 每个 cipher 在外层做 offset 适配（前 offset 字节明文保留 + 对 data[offset:] 做核心变换），
+// 核心变换（encryptXorCarryRol 等）为各算法的加密/解密本体。
 //
-// 迁移来源行号（截至 T1.2 启动时）：
-//   - rol8/ror8/computeBcc/encryptXorCarryRol/decryptXorCarryRol: lua_crypto.go:111/114/118/339/361
-//   - EncryptXorCarryRol/DecryptXorCarryRol: lua_crypto.go:846/864
-//   - applyRC4: lua_crypto.go:408
-//   - pkcs7Pad/pkcs7Unpad + AES-ECB/CBC: lua_crypto.go:465/476/496/558
-//   - encryptXXTEA/decryptXXTEA: lua_crypto.go:628/652
+// 注册的加密算法：xor、xor_carry_rol、rc4、aes_cbc、aes_ctr、aes_ecb、xxtea。
 //
 // 包内约定（与 brief §cipher 的 offset 语义一致）：
 //   - Encrypt/Decrypt(data, key, offset, params) → out, err
@@ -26,7 +20,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// 通用工具（逐字迁移自 lua_crypto.go）
+// 通用工具
 // ---------------------------------------------------------------------------
 
 // rol8 对单个字节做循环左移（rotate left）。
@@ -48,10 +42,10 @@ func clampOffset(offset, dataLen int) int {
 }
 
 // ---------------------------------------------------------------------------
-// 核心变换（与 lua_crypto.go 逐字一致，不引入 offset）
+// 核心变换（不引入 offset）
 // ---------------------------------------------------------------------------
 
-// encryptXorCarryRol XOR + carry + ROL8 流加密（迁移自 lua_crypto.go:339）。
+// encryptXorCarryRol XOR + carry + ROL8 流加密。
 //
 // 对每个字节：x = data[i] ^ key[i%32]; x += carry; x = ROL8(x, rolBits); data[i]=x; carry=x。
 // 注意：此函数假设 key 长度 == 32（由调用方 EncryptXorCarryRol 校验后保证）。
@@ -66,7 +60,7 @@ func encryptXorCarryRol(data, key []byte, rolBits uint) {
 	}
 }
 
-// decryptXorCarryRol XOR + carry + ROL8 流解密（迁移自 lua_crypto.go:361）。
+// decryptXorCarryRol XOR + carry + ROL8 流解密。
 //
 // 逆运算：x = ROR8(enc, rolBits); x -= carry; x ^= key[i%32]; data[i]=x; carry=enc。
 func decryptXorCarryRol(data, key []byte, rolBits uint) {
@@ -91,7 +85,7 @@ func encryptXor(data, key []byte) {
 // decryptXor 与 encryptXor 相同（XOR 对称）。
 func decryptXor(data, key []byte) { encryptXor(data, key) }
 
-// applyRC4 RC4 流加密/解密（对称操作，迁移自 lua_crypto.go:408）。
+// applyRC4 RC4 流加密/解密（对称操作）。
 //
 // KSA 初始化 S-box + PRGA 逐字节生成密钥流并 XOR。
 func applyRC4(data, key []byte) {
@@ -116,7 +110,7 @@ func applyRC4(data, key []byte) {
 // errInvalidPadding PKCS#7 填充校验失败时返回的错误。
 var errInvalidPadding = errors.New("invalid pkcs7 padding")
 
-// pkcs7Pad PKCS#7 填充（迁移自 lua_crypto.go:465）。块对齐时额外填充一个完整块。
+// pkcs7Pad PKCS#7 填充。块对齐时额外填充一个完整块。
 func pkcs7Pad(data []byte, blockSize int) []byte {
 	n := blockSize - len(data)%blockSize
 	pad := make([]byte, n)
@@ -126,7 +120,7 @@ func pkcs7Pad(data []byte, blockSize int) []byte {
 	return append(data, pad...)
 }
 
-// pkcs7Unpad 移除 PKCS#7 填充（迁移自 lua_crypto.go:476）。
+// pkcs7Unpad 移除 PKCS#7 填充。
 func pkcs7Unpad(data []byte) ([]byte, error) {
 	if len(data) == 0 {
 		return nil, errInvalidPadding
@@ -149,7 +143,7 @@ const xxteaDelta uint32 = 0x9E3779B9
 // xxteaKeyLen XXTEA 密钥要求的字节数（4 个小端 uint32）。
 const xxteaKeyLen = 16
 
-// encryptXXTEA XXTEA 加密（迁移自 lua_crypto.go:628）。
+// encryptXXTEA XXTEA 加密。
 func encryptXXTEA(data []byte, key [4]uint32) []byte {
 	n := len(data) / 4
 	if n < 2 {
@@ -171,7 +165,7 @@ func encryptXXTEA(data []byte, key [4]uint32) []byte {
 	return uint32sToBytes(v)
 }
 
-// decryptXXTEA XXTEA 解密（迁移自 lua_crypto.go:652）。
+// decryptXXTEA XXTEA 解密。
 func decryptXXTEA(data []byte, key [4]uint32) []byte {
 	n := len(data) / 4
 	if n < 2 {
@@ -294,7 +288,7 @@ func (xorCarryRolCipher) rolFromParams(params map[string]any) uint {
 }
 
 func (c xorCarryRolCipher) Encrypt(data, key []byte, offset int, params map[string]any) ([]byte, error) {
-	// 与 lua_crypto.go:846 EncryptXorCarryRol 行为一致：key 非 32 字节或 data 为空返回原数据。
+	// key 非 32 字节或 data 为空时返回原数据副本。
 	if len(key) != 32 || len(data) == 0 {
 		out := make([]byte, len(data))
 		copy(out, data)
@@ -483,7 +477,7 @@ func (c aesCbcCipher) Decrypt(data, key []byte, offset int, params map[string]an
 // aesCtrCipher AES-CTR（流模式，无填充）。params["iv"]（[]byte 或 string）必需，16 字节。
 //
 // CTR 是流密码语义：len(out)==len(data) 自然满足（仅 data[offset:] 变换）。
-// lua_crypto.go 原无 CTR 实现——本文件用 stdlib crypto/cipher.NewCTR 补齐（不引第三方依赖）。
+// 用 stdlib crypto/cipher.NewCTR 实现（不引第三方依赖）。
 type aesCtrCipher struct{}
 
 func (aesCtrCipher) iv(params map[string]any) ([]byte, error) {
@@ -551,7 +545,7 @@ func (c xxteaCipher) Encrypt(data, key []byte, offset int, params map[string]any
 	}
 	off := clampOffset(offset, len(data))
 	body := data[off:]
-	// 补齐到 4 字节对齐（迁移自 lua_crypto.go:709）。
+	// 补齐到 4 字节对齐。
 	if rem := len(body) % 4; rem != 0 {
 		padded := make([]byte, len(body)+4-rem)
 		copy(padded, body)

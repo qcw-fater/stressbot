@@ -1,10 +1,9 @@
-// Package adapter — T1.5 SchemaAdapter wrapper 委托测试。
+// Package adapter — SchemaAdapter wrapper 委托测试。
 //
 // 验证 adapter.NewSchemaAdapter 包装 *codec.SchemaCodec 后，9 方法逐个正确委托：
 //   - 编译期断言 var _ Adapter = (*SchemaAdapter)(nil)（接口完整性，编译即验证）；
 //   - HeaderSize / BodyLength / ExpectedRouteKey / EncodeTCP / EncodeUDP /
-//     DecodeTCP / DecodeUDP / DescribeError / Close 行为与直接调 codec.SchemaCodec 一致；
-//   - 与旧 LuaAdapter（codec.lua 真值）在 encode/decode 上字节级一致（端到端对拍）。
+//     DecodeTCP / DecodeUDP / DescribeError / Close 行为与直接调 codec.SchemaCodec 一致。
 package adapter
 
 import (
@@ -142,56 +141,4 @@ func TestSchemaAdapter_DelegatesAllMethods(t *testing.T) {
 	// Close 幂等（多次调用不 panic）。
 	a.Close()
 	a.Close()
-}
-
-// TestSchemaAdapter_ParityWithLuaAdapter 端到端：wrapper 与旧 LuaAdapter 在 encode/decode
-// 上字节级一致（证明 NewSchemaAdapter 产出的 Adapter 可直接替换 LuaAdapter）。
-func TestSchemaAdapter_ParityWithLuaAdapter(t *testing.T) {
-	root := findAdapterRepoRoot(t)
-	schema, em := loadSchemaCodecForTest(t)
-	a, err := NewSchemaAdapter(schema, em)
-	if err != nil {
-		t.Fatalf("NewSchemaAdapter: %v", err)
-	}
-	t.Cleanup(a.Close)
-
-	// 旧 LuaAdapter 作真值。
-	lua, err := NewLuaAdapter(2,
-		filepath.Join(root, "conf", "adapter", "codec.lua"),
-		filepath.Join(root, "conf", "adapter", "error.lua"))
-	if err != nil {
-		t.Fatalf("NewLuaAdapter: %v", err)
-	}
-	t.Cleanup(lua.Close)
-
-	key := make([]byte, 32)
-	for i := range key {
-		key[i] = byte(i*7 + 1)
-	}
-	route := map[string]any{"cmd": float64(100), "act": float64(7)}
-	body := make([]byte, 64)
-	for i := range body {
-		body[i] = byte(i)
-	}
-
-	// encode 对拍。
-	wantFrame := lua.EncodeTCP(route, body, key)
-	gotFrame := a.EncodeTCP(route, body, key)
-	if !bytes.Equal(gotFrame, wantFrame) {
-		t.Errorf("wrapper EncodeTCP 与 LuaAdapter 不一致")
-	}
-
-	// decode 对拍（用 lua encode 的帧）。
-	lr, lb, le := lua.DecodeTCP(wantFrame, key)
-	gr, gb, ge := a.DecodeTCP(wantFrame, key)
-	if lr != gr || !bytes.Equal(lb, gb) || le != ge {
-		t.Errorf("wrapper DecodeTCP 与 LuaAdapter 不一致: lua=(%q,%v,%d) wrap=(%q,%v,%d)",
-			lr, lb, le, gr, gb, ge)
-	}
-
-	// DescribeError 对拍（用业务码 256：testdata errors.json 与旧 LuaAdapter oracle 的
-	// error.lua 均命中；生产路径使用 errors.json，且业务码需 >= 100）。
-	if got, want := a.DescribeError(256), lua.DescribeError(256); got != want {
-		t.Errorf("DescribeError(256): wrap=%q lua=%q", got, want)
-	}
 }

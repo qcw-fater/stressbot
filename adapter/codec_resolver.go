@@ -39,7 +39,7 @@ const codecFileSuffix = "_codec.json"
 // 例如 `tcp_logic_codec.json` → "tcp:logic"，`udp_battle_codec.json` → "udp:battle"。
 //
 // 行为：
-//   - 仅匹配后缀 `_codec.json`（errors.json / codec.lua / error.lua / 其它文件不会被收）。
+//   - 仅匹配后缀 `_codec.json`（errors.json 及其它非 codec 配置文件不会被收）。
 //   - 文件名去 `_codec.json` 后缀后，按**首个** `_` 拆 `<proto>` 与 `<service>`。
 //     service 内部允许包含下划线（如 `tcp_rank_team_codec.json` → "tcp:rank_team"）。
 //   - proto 或 service 为空（拆不出）→ 返回中文 error，带文件名（配置错误 fail loud）。
