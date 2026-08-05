@@ -27,7 +27,6 @@
     "port": 6379,
     "username": "",
     "password": "",
-    "dbIndex": 0,
     "keyPrefix": "stressbot",
     "dialTimeout": "5s",
     "readTimeout": "2s",

@@ -32,7 +32,6 @@ type RedisConfig struct {
 	Port            int    `json:"port"`
 	Username        string `json:"username"`
 	Password        string `json:"password"`
-	DBIndex         int    `json:"dbIndex"`
 	KeyPrefix       string `json:"keyPrefix"`
 	DefaultClaimTTL string `json:"defaultClaimTTL"`
 	OpTimeout       string `json:"opTimeout"`
@@ -50,7 +49,6 @@ type ResolvedRedisConfig struct {
 	Port            int
 	Username        string
 	Password        string
-	DBIndex         int
 	KeyPrefix       string
 	DefaultClaimTTL time.Duration
 	OpTimeout       time.Duration
@@ -84,7 +82,6 @@ func (c RedisConfig) Resolve() (ResolvedRedisConfig, error) {
 		Port:         port,
 		Username:     c.Username,
 		Password:     c.Password,
-		DBIndex:      c.DBIndex,
 		KeyPrefix:    c.KeyPrefix,
 		MaxOpenConns: c.MaxOpenConns,
 		MaxIdleConns: c.MaxIdleConns,

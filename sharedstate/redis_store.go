@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -30,24 +31,92 @@ var dataTypes = []string{typeKV, typeCounter, typeQueue, typeHash}
 // 一个 RedisStore 对应一个任务运行实例（runID）。同一进程内所有 Robot 共享一个实例；
 // 分布式下不同 Agent 各持有自己的实例但 runID 相同，从而落在同一命名空间。
 type RedisStore struct {
-	rdb      *redis.Client
-	cfg      ResolvedRedisConfig
-	runID    string
-	indexKey string
+	rdb   redis.UniversalClient
+	cfg   ResolvedRedisConfig
+	runID string
 }
 
 var _ Store = (*RedisStore)(nil)
 
 // NewRedisStore 创建并连通 Redis。会做一次 PING 验证连接，失败返回错误。
+// NewRedisStore 创建并连通 Redis，自动适配单机/集群形态。会做一次 PING + CLUSTER INFO
+// 探测，失败返回错误。
+//
+// runID 须为不含花括号的稳定 token：它作为 {runID} hashtag 决定本 run 所有 key 的
+// slot（Cluster 下保证数据 key 与索引集合 key 同 slot）。含 { 或 } 会截断 hashtag，
+// 故在此 fail-fast。
 func NewRedisStore(cfg ResolvedRedisConfig, runID string) (*RedisStore, error) {
 	if runID == "" {
 		return nil, fmt.Errorf("sharedstate: runID 不能为空")
 	}
+	if strings.ContainsAny(runID, "{}") {
+		return nil, fmt.Errorf("sharedstate: runID %q 含花括号，会截断 {runID} hashtag 导致 Cluster 跨 slot", runID)
+	}
+	rdb, err := dialRedis(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &RedisStore{rdb: rdb, cfg: cfg, runID: runID}, nil
+}
+
+// dialRedis 连接 Redis 并探测部署形态，自动选择客户端类型（零配置）：
+//   - CLUSTER INFO 响应 cluster_enabled:1 → 集群 → ClusterClient（单一入口地址自动发现拓扑）。
+//   - 否则 → 单机 Client（含云上 proxy 模式集群：proxy 内部路由）。
+//
+// hashtag {runID} 在两种形态下都保证 EVAL 的多 KEYS 落同一 slot：
+//   - 真集群：ClusterClient 跨节点路由，hashtag 防 CROSSSLOT；单机客户端此时会在 MOVED 上失败，故必须切换。
+//   - 单机/proxy：单机客户端直连或经 proxy，hashtag 对单机无害、对 proxy 后的集群防 CROSSSLOT。
+func dialRedis(cfg ResolvedRedisConfig) (redis.UniversalClient, error) {
+	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+	single := redis.NewClient(singleClientOpts(addr, cfg))
+
+	pingCtx, cancel := context.WithTimeout(context.Background(), cfg.DialTimeout)
+	defer cancel()
+	if err := single.Ping(pingCtx).Err(); err != nil {
+		_ = single.Close()
+		return nil, fmt.Errorf("sharedstate: 连接 Redis 失败 (host=%s port=%d): %w", cfg.Host, cfg.Port, err)
+	}
+
+	if detectClusterMode(single) {
+		_ = single.Close()
+		copts := &redis.ClusterOptions{
+			Addrs:           []string{addr},
+			Username:        cfg.Username,
+			Password:        cfg.Password,
+			DialTimeout:     cfg.DialTimeout,
+			ReadTimeout:     cfg.ReadTimeout,
+			WriteTimeout:    cfg.WriteTimeout,
+			ConnMaxLifetime: cfg.ConnMaxLifetime,
+		}
+		if cfg.MaxOpenConns > 0 {
+			copts.PoolSize = cfg.MaxOpenConns
+		}
+		if cfg.MaxIdleConns > 0 {
+			copts.MaxIdleConns = cfg.MaxIdleConns
+		}
+		return redis.NewClusterClient(copts), nil
+	}
+	return single, nil
+}
+
+// detectClusterMode 通过 CLUSTER INFO 探测是否为集群。
+// 集群节点返回 cluster_enabled:1；单机节点对该命令返回 ERR（不识别 cluster 子命令）。
+func detectClusterMode(c *redis.Client) bool {
+	res, err := c.ClusterInfo(context.Background()).Result()
+	return isClusterInfoReply(res, err)
+}
+
+// isClusterInfoReply 判读 CLUSTER INFO 响应是否表示集群已启用。拆为纯函数便于单元测试。
+func isClusterInfoReply(res string, err error) bool {
+	return err == nil && strings.Contains(res, "cluster_enabled:1")
+}
+
+// singleClientOpts 构造单机客户端选项（探测与最终单机连接共用）。
+func singleClientOpts(addr string, cfg ResolvedRedisConfig) *redis.Options {
 	opts := &redis.Options{
-		Addr:         fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+		Addr:         addr,
 		Username:     cfg.Username,
 		Password:     cfg.Password,
-		DB:           cfg.DBIndex,
 		DialTimeout:  cfg.DialTimeout,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
@@ -61,26 +130,21 @@ func NewRedisStore(cfg ResolvedRedisConfig, runID string) (*RedisStore, error) {
 	if cfg.ConnMaxLifetime > 0 {
 		opts.ConnMaxLifetime = cfg.ConnMaxLifetime
 	}
-	rdb := redis.NewClient(opts)
-
-	pingCtx, cancel := context.WithTimeout(context.Background(), cfg.DialTimeout)
-	defer cancel()
-	if err := rdb.Ping(pingCtx).Err(); err != nil {
-		_ = rdb.Close()
-		return nil, fmt.Errorf("sharedstate: 连接 Redis 失败 (host=%s port=%d dbIndex=%d): %w", cfg.Host, cfg.Port, cfg.DBIndex, err)
-	}
-
-	s := &RedisStore{
-		rdb:      rdb,
-		cfg:      cfg,
-		runID:    runID,
-		indexKey: fmt.Sprintf("%s:%s:keys", cfg.KeyPrefix, runID),
-	}
-	return s, nil
+	return opts
 }
 
+// key 构造数据 key：<prefix>:{<runID>}:<type>:<userKey>。
+// {runID} 是 Redis Cluster hashtag：本 run 所有数据 key 与索引集合 key 共用同一
+// hashtag → 落同一 slot → EVAL 的多 KEYS（数据 key + 索引 key）不会 CROSSSLOT。
+// 单机模式下 hashtag 被视为普通字符，行为不受影响。
 func (s *RedisStore) key(typ, userKey string) string {
-	return fmt.Sprintf("%s:%s:%s:%s", s.cfg.KeyPrefix, s.runID, typ, userKey)
+	return fmt.Sprintf("%s:{%s}:%s:%s", s.cfg.KeyPrefix, s.runID, typ, userKey)
+}
+
+// indexKey 返回任务级 key 索引集合的 Redis key，供 Cleanup 定位本 run 写入的所有 key。
+// 与 key() 共用 {runID} hashtag，Cluster 下与所有数据 key 同 slot。
+func (s *RedisStore) indexKey() string {
+	return fmt.Sprintf("%s:{%s}:keys", s.cfg.KeyPrefix, s.runID)
 }
 
 // dataKeys 返回某个用户 key 在所有数据类型命名空间下的真实 Redis key。
@@ -115,7 +179,7 @@ func (s *RedisStore) Set(ctx context.Context, key string, value any, ttl time.Du
 		return err
 	}
 	k := s.key(typeKV, key)
-	return setScript.Run(ctx, s.rdb, []string{k, s.indexKey}, enc, ttlSeconds(ttl)).Err()
+	return setScript.Run(ctx, s.rdb, []string{k, s.indexKey()}, enc, ttlSeconds(ttl)).Err()
 }
 
 func (s *RedisStore) Get(ctx context.Context, key string) (any, bool, error) {
@@ -172,7 +236,7 @@ func (s *RedisStore) Expire(ctx context.Context, key string, ttl time.Duration) 
 // 这里不改写 delta=0，使「+0 读取当前值」成为合法用法。
 func (s *RedisStore) Incr(ctx context.Context, key string, delta int64, ttl time.Duration) (int64, error) {
 	k := s.key(typeCounter, key)
-	return incrScript.Run(ctx, s.rdb, []string{k, s.indexKey}, delta, ttlSeconds(ttl)).Int64()
+	return incrScript.Run(ctx, s.rdb, []string{k, s.indexKey()}, delta, ttlSeconds(ttl)).Int64()
 }
 
 // ── Claim / Lock ──────────────────────────────────────
@@ -182,7 +246,7 @@ func (s *RedisStore) Claim(ctx context.Context, key, owner string, ttl time.Dura
 		ttl = s.cfg.DefaultClaimTTL
 	}
 	k := s.key(typeClaim, key)
-	n, err := claimScript.Run(ctx, s.rdb, []string{k, s.indexKey}, owner, ttlSeconds(ttl)).Int64()
+	n, err := claimScript.Run(ctx, s.rdb, []string{k, s.indexKey()}, owner, ttlSeconds(ttl)).Int64()
 	if err != nil {
 		return false, err
 	}
@@ -230,7 +294,7 @@ func (s *RedisStore) QueuePush(ctx context.Context, key string, value any, ttl t
 		return err
 	}
 	k := s.key(typeQueue, key)
-	return queuePushScript.Run(ctx, s.rdb, []string{k, s.indexKey}, enc, ttlSeconds(ttl)).Err()
+	return queuePushScript.Run(ctx, s.rdb, []string{k, s.indexKey()}, enc, ttlSeconds(ttl)).Err()
 }
 
 func (s *RedisStore) QueuePop(ctx context.Context, key string) (any, bool, error) {
@@ -269,7 +333,7 @@ func (s *RedisStore) HashSet(ctx context.Context, key, field string, value any, 
 		return err
 	}
 	k := s.key(typeHash, key)
-	return hashSetScript.Run(ctx, s.rdb, []string{k, s.indexKey}, field, enc, ttlSeconds(ttl)).Err()
+	return hashSetScript.Run(ctx, s.rdb, []string{k, s.indexKey()}, field, enc, ttlSeconds(ttl)).Err()
 }
 
 func (s *RedisStore) HashGet(ctx context.Context, key, field string) (any, bool, error) {
@@ -323,7 +387,7 @@ func (s *RedisStore) HashDelete(ctx context.Context, key, field string) error {
 // HashIncr 原子增减 hash 字段并返回新值。delta 由调用方决定（Lua 层负责缺省值）。
 func (s *RedisStore) HashIncr(ctx context.Context, key, field string, delta int64, ttl time.Duration) (int64, error) {
 	k := s.key(typeHash, key)
-	return hashIncrScript.Run(ctx, s.rdb, []string{k, s.indexKey}, field, delta, ttlSeconds(ttl)).Int64()
+	return hashIncrScript.Run(ctx, s.rdb, []string{k, s.indexKey()}, field, delta, ttlSeconds(ttl)).Int64()
 }
 
 func (s *RedisStore) HashExpire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
@@ -353,7 +417,7 @@ func (s *RedisStore) Cleanup(ctx context.Context) error {
 	}
 
 	for {
-		keys, next, err := s.rdb.SScan(ctx, s.indexKey, cursor, "", int64(cleanupBatchSize)).Result()
+		keys, next, err := s.rdb.SScan(ctx, s.indexKey(), cursor, "", int64(cleanupBatchSize)).Result()
 		if err != nil {
 			return fmt.Errorf("sharedstate: SSCAN 索引失败 (runId=%s): %w", s.runID, err)
 		}
@@ -373,7 +437,7 @@ func (s *RedisStore) Cleanup(ctx context.Context) error {
 	if err := flush(); err != nil {
 		return fmt.Errorf("sharedstate: 批量删除失败 (runId=%s): %w", s.runID, err)
 	}
-	if err := s.rdb.Del(ctx, s.indexKey).Err(); err != nil {
+	if err := s.rdb.Del(ctx, s.indexKey()).Err(); err != nil {
 		return fmt.Errorf("sharedstate: 删除索引集合失败 (runId=%s): %w", s.runID, err)
 	}
 	return nil
