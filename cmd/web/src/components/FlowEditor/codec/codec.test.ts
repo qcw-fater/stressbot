@@ -49,7 +49,7 @@ describe('codec round-trip', () => {
     expect(report.errors).toEqual([]);
   });
 
-  it('jsonToFlow 生成的边能覆盖所有 sequence next / boolean trueNext / weighted options', () => {
+  it('jsonToFlow 生成的边能覆盖所有 sequence / boolean / switch / weighted 分支', () => {
     const { rfEdges } = jsonToFlow(raw);
     let expectedSeq = 0;
     let expectedBranch = 0;
@@ -58,6 +58,10 @@ describe('codec round-trip', () => {
     for (const node of Object.values(raw.nodes)) {
       if (node.type === 'sequence') expectedSeq += node.next?.length ?? 0;
       else if (node.type === 'boolean') expectedBranch += (node.trueNext ? 1 : 0) + (node.falseNext ? 1 : 0);
+      else if (node.type === 'switch') {
+        expectedBranch += (node.cases ?? []).filter((item) => item.next).length;
+        expectedBranch += node.defaultNext ? 1 : 0;
+      }
       else if (node.type === 'weighted') expectedWeight += node.options?.length ?? 0;
       else if (node.type === 'loop' && node.body) expectedLoopBody += 1;
     }

@@ -90,7 +90,6 @@ export interface ActionMetricsTableProps<T extends ActionMetricsTableRow> {
 
 export type TimingBreakdownField =
   | 'nonRTTAvgMs'
-  | 'sendAvgMs'
   | 'encodeAvgMs'
   | 'decodeAvgMs'
   | 'buildAvgMs'
@@ -99,7 +98,7 @@ export type TimingBreakdownField =
   | 'parseStoreAvgMs';
 
 export function getTimingBreakdownFields(level: TimingDetailLevel): TimingBreakdownField[] {
-  const fields: TimingBreakdownField[] = ['nonRTTAvgMs', 'sendAvgMs'];
+  const fields: TimingBreakdownField[] = ['nonRTTAvgMs'];
   if (level === 'codec' || level === 'full') fields.push('encodeAvgMs', 'decodeAvgMs');
   if (level === 'full')
     fields.push('buildAvgMs', 'decodeWaitAvgMs', 'dispatchToActionWaitAvgMs', 'parseStoreAvgMs');
@@ -115,7 +114,6 @@ const TIMING_FIELD_META: Record<
     hint: '动作总耗时扣除已记录 RTT 后的平均剩余耗时。',
     width: 92,
   },
-  sendAvgMs: { title: 'send(ms)', hint: '发送阶段平均耗时。', width: 84 },
   encodeAvgMs: { title: 'encode(ms)', hint: '协议编码平均耗时。', width: 92 },
   decodeAvgMs: {
     title: 'decode(ms)',
