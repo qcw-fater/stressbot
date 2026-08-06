@@ -19,6 +19,7 @@ import * as tasksApi from './tasksApi';
 import { getCapabilities } from './capabilitiesApi';
 import { listProto, listScript, listCodecFiles, getErrorMap, markResourcesAsBaselineSynced } from './resourcesStore';
 import { syncFlowScriptsToIdb, collectFlowScriptNames } from './scriptSync';
+import { syncProtosToIdb, missingProtoImports } from './protoSync';
 import { collectFlowCodecConnections, findMissingCodecConnections } from './taskResourceDiff';
 import { useRuntimeStore } from './runtimeStore';
 import { ApiError } from './api';
@@ -108,7 +109,14 @@ export interface StartTaskOptions {
 export async function startTask(opts: StartTaskOptions): Promise<string> {
   const flowJson = opts.flow;
 
-  // 1. 业务校验（FlowJson 与 TaskFlow 同构，可直接校验）
+  // 1. proto 资源就绪：基线 gap-fill 补齐 IDB 缺失；若拉回新文件则重载注册表，
+  //    确保后续业务校验基于完整 proto 集合，不因残缺注册表误报 C2S/S2C proto 缺失。
+  const protoSync = await syncProtosToIdb();
+  if (protoSync.added.length > 0) {
+    await useProtoStore.getState().reload();
+  }
+
+  // 2. 业务校验（FlowJson 与 TaskFlow 同构，可直接校验）
   const report = validateFlow(flowJson);
   if (report.errors.length > 0) {
     throw new ApiError(
@@ -120,8 +128,9 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
     );
   }
 
-  // 2. 资源收集
-  //   - 再次执行 flow 引用脚本 gap-fill 与缺失检测，作为启动前最终拦截
+  // 3. 资源收集
+  //   - flow 引用脚本 gap-fill 与缺失检测，作为启动前最终拦截
+  //   - proto import 依赖完整性校验（残缺即拦截，不把缺依赖的任务下发；gap-fill 已在步骤 1）
   //   - 收集本地存储内容作为 multipart payload
   //   - 确保协议配置（*_codec.json）存在；errors.json 错误码表可选，未配置则不下发
   const sync = await syncFlowScriptsToIdb(flowJson);
@@ -137,9 +146,26 @@ export async function startTask(opts: StartTaskOptions): Promise<string> {
       400,
     );
   }
+
   const [protos, scripts, codecs, errorMapRes] = await Promise.all([listProto(), listScript(), listCodecFiles(), getErrorMap()]);
 
-  // 只提交 flow 引用到的脚本；proto 文件无法从 message 全名静态映射到文件名，全量提交
+  // proto 依赖完整性校验：任一 import 目标不在本地集合即残缺，硬拦截。
+  // 避免把缺依赖的任务下发到 Agent 才编译失败（如 custom_activity.proto 找不到 custom_task.proto）。
+  const missingProtos = missingProtoImports(protos);
+  if (missingProtos.length > 0) {
+    throw new ApiError(
+      {
+        code: 'INVALID_ARGUMENT',
+        message:
+          `proto 依赖不完整，缺少：${missingProtos.join(', ')}。` +
+          `请在「资源管理」上传，或从基线拉取（资源管理 → 拉取）。`,
+        details: { missingProtos },
+      },
+      400,
+    );
+  }
+
+  // 只提交 flow 引用到的脚本；proto 经上方完整性校验后全量提交
   const scriptNames = new Set(collectFlowScriptNames(flowJson));
   const usedScripts = scripts.filter((s) => scriptNames.has(s.name));
   if (codecs.length === 0) {

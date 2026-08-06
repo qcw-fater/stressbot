@@ -50,6 +50,7 @@ import { showApiError, startTask, useRuntimeStore } from '@/services';
 import { hasSyncDiff, listProto, listScript, subtractSyncResult, type BaselineSyncResult, type ResourceFile } from '@/services/resourcesStore';
 import { checkTaskResourcesAgainstBaseline } from '@/services/taskResourceDiff';
 import { syncFlowScriptsToIdb, collectFlowScriptNames } from '@/services/scriptSync';
+import { syncProtosToIdb, missingProtoImports } from '@/services/protoSync';
 import { useFlowStore } from '@/components/FlowEditor/store/flowStore';
 import { listFlows, type ManagedFlow } from '@/components/FlowEditor/store/flowManagerStore';
 import { getFlowTemplate } from '@/services/flowsApi';
@@ -160,6 +161,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
   const [refScriptCount, setRefScriptCount] = useState(0);
   /** flow 引用了但既不在本地存储也拉不到默认基线的脚本名（启动会失败） */
   const [missingScripts, setMissingScripts] = useState<string[]>([]);
+  const [missingProtos, setMissingProtos] = useState<string[]>([]);
   /** 资源同步进行中，给 UI 一个轻量 loading 态 */
   const [syncing, setSyncing] = useState(false);
   const [taskDiffResult, setTaskDiffResult] = useState<BaselineSyncResult | null>(null);
@@ -220,11 +222,14 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
         if (!sel) {
           setRefScriptCount(0);
           setMissingScripts([]);
+          setMissingProtos([]);
           return;
         }
         const refNames = collectFlowScriptNames(sel.flow);
         // flow 引用脚本 gap-fill
         const scriptSync = await syncFlowScriptsToIdb(sel.flow);
+        // proto 全量基线 gap-fill（best-effort）
+        await syncProtosToIdb();
         // 收集本地资源全集
         const [p, s] = await Promise.all([listProto(), listScript()]);
         if (cancelled) return;
@@ -232,10 +237,12 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
         setScripts(s);
         setRefScriptCount(refNames.length);
         setMissingScripts(scriptSync.missing);
+        setMissingProtos(missingProtoImports(p));
       } catch {
         // 已保存流程读取失败（如服务器未启用）：清空统计，启动时再报真实错误。
         setRefScriptCount(0);
         setMissingScripts([]);
+        setMissingProtos([]);
       } finally {
         if (!cancelled) setSyncing(false);
       }
@@ -310,6 +317,7 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
     capacityWarn ||
     noAgentBlock ||
     missingScripts.length > 0 ||
+    missingProtos.length > 0 ||
     syncing ||
     !taskName.trim() ||
     peakBots <= 0 ||
@@ -371,6 +379,13 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
       setMissingScripts(scriptSync.missing);
       if (scriptSync.missing.length > 0) {
         throw new Error(`缺少脚本：${scriptSync.missing.join(', ')}。请在资源管理上传，或在动作编辑器中直接编写。`);
+      }
+      // proto gap-fill + 依赖完整性（与 startTask 同款拦截，这里提前在弹窗报错）
+      await syncProtosToIdb();
+      const protoMissing = missingProtoImports(await listProto());
+      setMissingProtos(protoMissing);
+      if (protoMissing.length > 0) {
+        throw new Error(`proto 依赖不完整，缺少：${protoMissing.join(', ')}。请在资源管理上传或拉取基线。`);
       }
       const diff = await checkTaskResourcesAgainstBaseline(sel.flow);
       if (hasSyncDiff(diff)) {
@@ -865,7 +880,19 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
 
       <Descriptions size="small" column={2} style={{ marginTop: 8 }}>
         <Descriptions.Item label="Proto 文件">
-          {protos.length === 0 ? <Tag color="default">无</Tag> : <Tag color="blue">{protos.length} 个</Tag>}
+          <Tooltip
+            title={
+              protos.length === 0
+                ? '未上传的协议文件由服务器提供默认值'
+                : `本地 ${protos.length} 个；依赖缺失 ${missingProtos.length} 个`
+            }
+          >
+            <Space size={4} wrap>
+              {syncing && <Tag color="processing">同步中…</Tag>}
+              {protos.length === 0 ? <Tag color="default">无</Tag> : <Tag color="blue">{protos.length} 个</Tag>}
+              {missingProtos.length > 0 && <Tag color="red">缺失 {missingProtos.length}</Tag>}
+            </Space>
+          </Tooltip>
         </Descriptions.Item>
         <Descriptions.Item label="Lua 脚本">
           <Tooltip
@@ -903,6 +930,23 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
               <div style={{ marginBottom: 4 }}>{missingScripts.join(', ')}</div>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 请到「资源管理」上传，或在动作里直接编辑（编辑器写完会自动入库）。
+              </Typography.Text>
+            </>
+          }
+        />
+      )}
+
+      {missingProtos.length > 0 && (
+        <Alert
+          type="error"
+          showIcon
+          style={{ marginTop: 12 }}
+          message={`proto 依赖不完整，缺少 ${missingProtos.length} 个文件，启动会失败`}
+          description={
+            <>
+              <div style={{ marginBottom: 4 }}>{missingProtos.join(', ')}</div>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                请到「资源管理」上传，或点「拉取」从基线同步完整集合。
               </Typography.Text>
             </>
           }

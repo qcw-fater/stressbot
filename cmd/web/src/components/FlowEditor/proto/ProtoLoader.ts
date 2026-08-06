@@ -17,6 +17,7 @@
 import * as protobuf from 'protobufjs';
 import { listProto } from '@/services/resourcesStore';
 import { fetchBaselineProtoIndex, fetchBaselineProtoContent } from '@/services/baselineApi';
+import { missingProtoImports } from '@/services/protoSync';
 
 // 关键：路径相对当前文件 (web/src/components/FlowEditor/proto/ProtoLoader.ts) 到 stressbot/conf/proto。
 // 必须是字面量，不能动态拼接（vite 编译期解析）。
@@ -66,8 +67,26 @@ async function loadFromInline(): Promise<LoadResult> {
         sources[f.name] = f.content;
         files.push(f.name);
       }
+      // IDB 非空但 import 不自洽（缺依赖文件）→ 从基线补齐缺失文件到本次内存解析集。
+      // 不写 IDB（保持加载路径只读）；持久化由 startTask 的 gap-fill 负责。
+      // 不补的话残缺集会让 resolveAll 中断、注册表部分可用，校验就会误报字段/proto 缺失
+      // （如 GMAddItem 的 GM.type 因 GMEventType 链解析不全而报「字段不存在」）。
+      const missing = missingProtoImports(userProtos);
+      let gapFilled = 0;
+      for (const name of missing) {
+        if (name in sources) continue;
+        const text = await fetchBaselineProtoContent(name);
+        if (text !== null) {
+          sources[name] = text;
+          files.push(name);
+          gapFilled++;
+        }
+      }
       files.sort();
-      console.log(`[ProtoLoader] 通过 本地存储 加载（${files.length} 个文件）`);
+      console.log(
+        `[ProtoLoader] 通过 本地存储 加载（${userProtos.length} 个文件` +
+          `${gapFilled > 0 ? `，基线补齐 ${gapFilled} 个缺失 import` : ''}）`,
+      );
       return parseAll(sources, files);
     }
   } catch (e) {
