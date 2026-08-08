@@ -18,9 +18,9 @@
   "standalone": {
     "bot": {
       "accountPrefix": "bot_",
-      "startNumber": 70175,
-      "totalBots": 7,
-      "concurrency": 7,
+      "startNumber": 1090000,
+      "totalBots": 200,
+      "concurrency": 20,
       "mainService": "logic"
     },
     "stateExtra": {
@@ -42,11 +42,11 @@
     "dialTimeout": "5s",
     "readTimeout": "2s",
     "writeTimeout": "2s",
-    "maxOpenConns": 10,
-    "maxIdleConns": 5,
+    "maxOpenConns": 128,
+    "maxIdleConns": 16,
     "connMaxLifetime": "1h",
     "defaultClaimTTL": "30s",
-    "opTimeout": "2s"
+    "opTimeout": "5s"
   },
   "daemon": false
 }

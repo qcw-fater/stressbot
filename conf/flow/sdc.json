@@ -999,7 +999,7 @@
       ]
     },
     "MatchSucceed": { "pattern": "lua", "script": "match_succeed.lua" },
-    "ListenStartLoading": { "pattern": "lua", "script": "listen_sdc_start_loading.lua" },
+    "ListenStartLoading": { "pattern": "lua", "script": "listen_start_loading.lua" },
     "RegisterBattle": { "pattern": "lua", "script": "register_battle.lua" },
     "LoadProgress": { "pattern": "lua", "script": "load_progress.lua" },
     "BattleLoadOK": {
