@@ -129,7 +129,7 @@ function execute(r)
     proto.set_field(msg, "settlementFighterIndex", selfIndex)
 
     local err, resp = network.tcp_request("battle", {cmd = 4, act = 69}, msg,
-        "Game.BattleMidwaySettlementS2C", 90)
+        "Game.BattleMidwaySettlementS2C", 180)
     if err then return err end
     local summary = robot.get("sdcSettlementSummary") or {}
     robot.set("sdcSettleResult", summary)

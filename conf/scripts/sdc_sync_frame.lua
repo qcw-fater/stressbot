@@ -30,7 +30,7 @@ function execute(r)
         .. utils.pack_le("u8", 4)                               -- Cmd = BASE_ATTACK
         .. string.char(1, 2, 3, 4, 5, 6)                        -- dummy data (6 bytes)
 
-    local err = network.udp_send("sdc_battle", {cmd=4, act=11}, frameData)
+    local err = network.udp_send("sdcbattle", {cmd=4, act=11}, frameData)
     if err then
         log.warn("搜打撤 SyncFrame 发送失败: frame=" .. tostring(frameCount)
             .. " packageIndex=" .. tostring(packageIndex)

@@ -4,7 +4,7 @@ local network = require("network")
 local robot = require("robot")
 local log = require("log")
 
-local SERVICE = "sdc_battle"
+local SERVICE = "sdcbattle"
 
 function execute(r)
     local battleAddress = robot.get("battleAddress")
