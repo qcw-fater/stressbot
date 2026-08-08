@@ -376,7 +376,8 @@
       "next": ["SdcListenBattleReward", "SdcValidateRewardIdentity", "SdcValidateRewardOutcome", "SdcExitBattle", "CloseBattleUDP", "CloseBattleTCP", "GameOver", "SdcReturnedLobby"]
     },
     "SdcListenBattleReward": { "type": "action", "action": "SdcListenBattleReward", "onError": { "handler": "SdcRewardFailureRecovery", "strategy": "skip" } },
-    "SdcRewardFailureRecovery": { "type": "sequence", "next": ["SdcLogRewardTimeout", "CloseBattleUDP", "CloseBattleTCP", "SdcMarkRecoveryNeeded"] },
+    "SdcRewardFailureRecovery": { "type": "sequence", "next": ["SdcLogRewardTimeout", "CloseBattleUDP", "CloseBattleTCP", "SdcRewardCooldownWait", "SdcMarkRecoveryNeeded"] },
+    "SdcRewardCooldownWait": { "type": "wait", "description": "4:72超时后给服务端SDC结算lease(5分钟TTL)释放留时间，避免下一轮撞lease busy", "waitMs": 30000 },
     "SdcLogRewardTimeout": { "type": "action", "action": "SdcLogRewardTimeout" },
     "SdcValidateRewardIdentity": { "type": "action", "action": "SdcValidateRewardIdentity", "onError": { "strategy": "resume" } },
     "SdcValidateRewardOutcome": { "type": "action", "action": "SdcValidateRewardOutcome", "onError": { "strategy": "resume" } },
@@ -1024,7 +1025,7 @@
     },
     "SdcListenBattleReward": {
       "pattern": "tcpListen", "service": "logic", "route": { "cmd": 4, "act": 72 },
-      "s2cProto": "Game.BattleRewardS2C", "timeout": 180, "pollMs": 500,
+      "s2cProto": "Game.BattleRewardS2C", "timeout": 30, "pollMs": 500,
       "store": [
         { "field": "battleId", "setter": "sdcRewardBattleId" },
         { "field": "sdcSettleData", "setter": "sdcRewardSettleData" },
