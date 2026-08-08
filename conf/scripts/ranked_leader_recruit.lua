@@ -73,10 +73,10 @@ function execute(r)
     local need = targetSize - 1
     local invited = 0
     local seen = {}
-    local waited = 0
+    local deadline = utils.time_ms() + RECRUIT_MS
     local now = utils.time_ms()
 
-    while invited < need and waited < RECRUIT_MS do
+    while invited < need and utils.time_ms() < deadline do
         local entry, ok = share.queue_pop(PREFIX .. ":waiting")
         if ok and entry and type(entry) == "string" then
             local mRoleId, mAccount, token, enqueueMs = entry:match("^([^|]+)|([^|]*)|([^|]+)|([^|]+)$")
@@ -104,7 +104,6 @@ function execute(r)
             end
         end
         utils.sleep(POLL_MS)
-        waited = waited + POLL_MS
     end
 
     share.hash_set(hashKey, "invitedCount", tostring(invited), TEAM_TTL)

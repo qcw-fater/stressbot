@@ -18,8 +18,8 @@ function execute(r)
         log.warn("排位队员等匹配: teamKey 为空，跳过")
         return nil
     end
-    local waited = 0
-    while waited < WAIT_MS do
+    local deadline = utils.time_ms() + WAIT_MS
+    while utils.time_ms() < deadline do
         local status = share.hash_get(TEAM_PREFIX .. tostring(tk), "status")
         if status == "matching" then
             robot.set("rankedMatchStarted", true)
@@ -32,7 +32,6 @@ function execute(r)
             return nil
         end
         utils.sleep(POLL_MS)
-        waited = waited + POLL_MS
     end
     robot.set("rankedRoundFailed", "member_match_timeout")
     log.warn("排位队员等匹配: 超时，跳过")

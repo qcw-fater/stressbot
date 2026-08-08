@@ -27,11 +27,10 @@ function execute(r)
         return robot.error(54, "RankedLeaderWaitJoin 缺少 teamKey")
     end
     local expected = tonumber(robot.get("rankedTeamSize") or 1)
-    local waited = 0
-    while waited < WAIT_MS do
+    local deadline = utils.time_ms() + WAIT_MS
+    while utils.time_ms() < deadline do
         if countJoined(tk) >= expected then break end
         utils.sleep(POLL_MS)
-        waited = waited + POLL_MS
     end
     local actual = countJoined(tk)
     if actual <= 1 then

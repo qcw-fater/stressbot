@@ -60,8 +60,8 @@ function execute(r)
         return robot.error(54, "RankedMemberWaitJoin 缺少 roleId")
     end
     robot.delete("teamJoinCode")
-    local waited = 0
-    while waited < WAIT_MS do
+    local deadline = utils.time_ms() + WAIT_MS
+    while utils.time_ms() < deadline do
         local joined, failed = drainJoin(roleId, account)
         if joined then
             log.info("排位队员入队成功: roleId=" .. tostring(roleId) .. " teamId=" .. tostring(robot.get("teamId")))
@@ -73,7 +73,6 @@ function execute(r)
             return robot.error(54, "RankedMemberWaitJoin 入队被拒")
         end
         utils.sleep(POLL_MS)
-        waited = waited + POLL_MS
     end
     share.hash_set(waitMarkKey(roleId), "status", "join_timeout", 30)
     log.warn("排位队员等入队超时，跳过本轮: roleId=" .. tostring(roleId) .. " code=" .. tostring(robot.get("teamJoinCode")))

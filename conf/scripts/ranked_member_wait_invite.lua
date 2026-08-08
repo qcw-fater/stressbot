@@ -55,9 +55,9 @@ function execute(r)
     if not roleId then
         return robot.error(54, "RankedMemberWaitInvite 缺少 roleId")
     end
-    local waited = 0
+    local deadline = utils.time_ms() + WAIT_MS
     local invite = nil
-    while waited < WAIT_MS do
+    while utils.time_ms() < deadline do
         local claim = readClaim(roleId, token)
         if claim then
             robot.set("rankedTeamKey", claim.teamKey)
@@ -71,7 +71,6 @@ function execute(r)
             return robot.error(54, "RankedMemberWaitInvite 邀请失败")
         end
         utils.sleep(POLL_MS)
-        waited = waited + POLL_MS
     end
     if not invite then
         share.hash_set(waitMarkKey(roleId), "status", "invite_timeout", WAIT_MARK_TTL)

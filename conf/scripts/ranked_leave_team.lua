@@ -2,7 +2,7 @@
 -- 核心修复"人数越跑越少"：服务端 TeamLeave 强校验 teamId（错/空返回 308，无接口盲退），
 -- 一旦本地丢失 teamId 就永久卡队。故本脚本铁律——**退队未确认成功绝不清 teamId**：
 --   - 成功（code 0）→ 清 teamId/teamData
---   - 311 匹配/战斗中 → 队长/单排先取消匹配再退一次；仍失败则保留 teamId 下轮重试
+--   - 288/311 匹配状态未清 → 队长/单排先取消匹配再退一次；仍失败则保留 teamId 下轮重试
 --   - 308 teamId 失配/不在队 → 保留 teamId（TeamCreate 成功会覆盖；真卡队则下轮继续）
 --   - 其它（网络等）→ 保留 teamId 下轮重试
 -- 永不返回 err、永不 skip（清理节点必须总执行）。
@@ -61,8 +61,9 @@ function execute(r)
     end
 
     local code = tonumber(err.code)
-    if code == 311 then
-        -- 匹配/战斗中：队长/单排可取消匹配后再退；队员无权取消，保留 teamId 等队长取消或下轮重试
+    if code == 311 or code == 288 then
+        -- 逻辑服可能先以 288 拦截 PS_Matching，团队服则返回 311；两者都先取消匹配。
+        -- 队长/单排可取消后再退；队员无权取消，保留 teamId 等队长清理或下轮重试。
         local role = robot.get("rankedTeamRole")
         if role == "leader" or role == "solo" then
             cancelMatch()
@@ -75,7 +76,8 @@ function execute(r)
             log.warn("排位退队仍失败(保留teamId): teamId=" .. tostring(teamId)
                 .. " code=" .. tostring(err2.code))
         else
-            log.warn("排位队员退队匹配中(保留teamId): teamId=" .. tostring(teamId))
+            log.warn("排位队员退队匹配中(保留teamId): teamId=" .. tostring(teamId)
+                .. " code=" .. tostring(code))
         end
         return nil
     end
@@ -88,7 +90,7 @@ function execute(r)
         return nil
     end
 
-    -- 其它错误（288 状态不对 / 网络等）：保留 teamId 下轮重试
+    -- 其它错误（网络等）：保留 teamId 下轮重试
     log.warn("排位退队失败(保留teamId): teamId=" .. tostring(teamId) .. " code=" .. tostring(code))
     return nil
 end

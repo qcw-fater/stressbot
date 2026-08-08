@@ -25,11 +25,10 @@ function execute(r)
     end
     share.hash_set("ranked:v2:team:" .. tostring(tk) .. ":ready", roleId, "1", TEAM_TTL)
     local expected = tonumber(robot.get("rankedTeamSize") or 1)
-    local waited = 0
-    while waited < WAIT_MS do
+    local deadline = utils.time_ms() + WAIT_MS
+    while utils.time_ms() < deadline do
         if readyCount(tk) >= expected then break end
         utils.sleep(POLL_MS)
-        waited = waited + POLL_MS
     end
     if readyCount(tk) < expected then
         share.hash_set("ranked:v2:team:" .. tostring(tk), "status", "failed", TEAM_TTL)
