@@ -33,13 +33,16 @@ function execute(r)
             end
         end
     end
-    local sellGuid = utils.random_pick(current)
+    -- 背包里有几件就最多卖几件，上限 2 件（避免久跑后背包只进不出被填满）。
+    local sellCount = math.min(#current, 2)
+    local sellGuids = sellCount > 0 and utils.random_pick_n(current, sellCount) or {}
     robot.set("sdcOutBattlePackMaxSlots", maxSlots)
     robot.set("sdcOutBattlePackUsedSlots", usedSlots)
     robot.set("sdcOutBattlePackFreeSlots", math.max(maxSlots - usedSlots, 0))
     robot.set("sdcOutBattleNewItemGuids", newItems)
-    robot.set("sdcOutBattleRandomSellGuid", valid_guid(sellGuid) and sellGuid or "")
+    robot.set("sdcOutBattleRandomSellGuid", sellGuids)
+    robot.set("sdcOutBattleSellCount", #sellGuids)
     log.info("搜打撤回大厅战备摘要完成: current=" .. tostring(#current)
-        .. " new=" .. tostring(#newItems) .. " randomSellGuid=" .. tostring(sellGuid))
+        .. " new=" .. tostring(#newItems) .. " sellCount=" .. tostring(#sellGuids))
     return nil
 end

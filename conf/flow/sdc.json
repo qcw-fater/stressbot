@@ -28,7 +28,8 @@
       "listenRefs": [
         { "route": { "cmd": 3, "act": 1 }, "server": "tcp:logic", "listen": "matchPoll" },
         { "route": { "cmd": 4, "act": 6 }, "server": "tcp:logic", "listen": "loadingPoll" },
-        { "route": { "cmd": 4, "act": 72 }, "server": "tcp:logic", "listen": "rewardPoll" }
+        { "route": { "cmd": 4, "act": 72 }, "server": "tcp:logic", "listen": "rewardPoll" },
+        { "route": { "cmd": 2, "act": 10 }, "server": "tcp:logic", "listen": "backLobbyPoll" }
       ]
     },
     "PlayerLogin": { "type": "action", "action": "PlayerLogin", "onError": { "strategy": "abort" } },
@@ -50,13 +51,12 @@
     },
     "initNewRole": {
       "type": "sequence",
-      "next": ["gmCommands", "GMAddHero", "unlockBasicFunction", "LbsPositioning"]
+      "next": ["gmCommands", "unlockBasicFunction", "LbsPositioning"]
     },
     "gmCommands": {
       "type": "sequence",
       "next": ["GMAddItem", "GMAddHeroCup", "GMFinishAllNewUserGuide"]
     },
-    "GMAddHero": { "type": "action", "action": "GMAddHero" },
     "GMAddItem": { "type": "action", "action": "GMAddItem" },
     "GMAddHeroCup": { "type": "action", "action": "GMAddHeroCup" },
     "GMFinishAllNewUserGuide": { "type": "action", "action": "GMFinishAllNewUserGuide" },
@@ -84,22 +84,9 @@
     },
     "SdcRecoveryAttempt": {
       "type": "sequence",
-      "description": "重连登录并读取服务端战斗重连标记；未恢复时保持连接等待服务端补偿",
-      "next": ["CloseBattleUDP", "CloseBattleTCP", "CloseLogicTCP", "SdcRecoveryReconnectDelay", "SdcRecoveryConnectLogic", "SdcRecoveryPlayerLogin", "SdcRecoveryRequestPlayerData", "SdcReadBattleReconnection", "SdcRecoveryDecision"]
+      "description": "复用现有逻辑服连接读取服务端战斗重连标记；未恢复时保持连接等待服务端补偿",
+      "next": ["CloseBattleUDP", "CloseBattleTCP", "SdcRecoveryRequestPlayerData", "SdcReadBattleReconnection", "SdcRecoveryDecision"]
     },
-    "CloseLogicTCP": { "type": "action", "action": "CloseLogicTCP", "delayMs": -1, "onError": { "strategy": "resume" } },
-    "SdcRecoveryReconnectDelay": { "type": "wait", "waitMs": 2000 },
-    "SdcRecoveryConnectLogic": {
-      "type": "action",
-      "action": "ConnectLogicTCP",
-      "onError": { "handler": "SdcRecoveryPendingWait", "strategy": "skip" },
-      "listenRefs": [
-        { "route": { "cmd": 3, "act": 1 }, "server": "tcp:logic", "listen": "matchPoll" },
-        { "route": { "cmd": 4, "act": 6 }, "server": "tcp:logic", "listen": "loadingPoll" },
-        { "route": { "cmd": 4, "act": 72 }, "server": "tcp:logic", "listen": "rewardPoll" }
-      ]
-    },
-    "SdcRecoveryPlayerLogin": { "type": "action", "action": "PlayerLogin", "onError": { "handler": "SdcRecoveryPendingWait", "strategy": "skip" } },
     "SdcRecoveryRequestPlayerData": { "type": "action", "action": "RequestPlayerData", "onError": { "handler": "SdcRecoveryPendingWait", "strategy": "skip" } },
     "SdcRecoveryDecision": {
       "type": "boolean",
@@ -278,7 +265,7 @@
 
     "startBattle": {
       "type": "sequence",
-      "next": ["ConnectBattleTCP", "ConnectBattleUDP", "RegisterBattle", "loadLoop", "BattleLoadOK", "ResetLoadState", "StartGame", "SdcInitBattle", "sdcSyncLoop", "SdcFinalSyncFrame", "SdcOutcomeBranch", "SdcBattleEnd", "CloseBattleUDP", "SdcAfterSettlement"]
+      "next": ["ConnectBattleTCP", "ConnectBattleUDP", "RegisterBattle", "loadLoop", "BattleLoadOK", "ResetLoadState", "StartGame", "SdcInitBattle", "sdcSyncLoop", "SdcFinalSyncFrame", "SdcOutcomeBranch", "SdcBattleEnd", "SdcAfterSettlement"]
     },
     "ConnectBattleTCP": {
       "type": "action",
@@ -369,12 +356,12 @@
     },
     "SdcSettlementConfirmedPath": {
       "type": "sequence",
-      "next": ["SdcExitBattle", "CloseBattleTCP", "BattleReward"]
+      "next": ["SdcExitBattle", "BattleReward"]
     },
     "SdcBattleRequestFailureRecovery": {
       "type": "sequence",
       "description": "上游战斗请求失败后关闭连接并标记恢复；未确认服务端大厅态前不再调用依赖接口",
-      "next": ["CloseBattleTCP", "SdcMarkRecoveryNeeded"]
+      "next": ["CloseBattleUDP", "CloseBattleTCP", "SdcMarkRecoveryNeeded"]
     },
     "SdcExitBattle": {
       "type": "action",
@@ -386,14 +373,14 @@
     "BattleReward": {
       "type": "sequence",
       "description": "声明式等待结算回执，再分别校验战斗身份与结局收益",
-      "next": ["SdcListenBattleReward", "SdcValidateRewardIdentity", "SdcValidateRewardOutcome", "GameOver", "SdcReturnedLobby"]
+      "next": ["SdcListenBattleReward", "SdcValidateRewardIdentity", "SdcValidateRewardOutcome", "CloseBattleUDP", "CloseBattleTCP", "GameOver", "SdcReturnedLobby"]
     },
     "SdcListenBattleReward": { "type": "action", "action": "SdcListenBattleReward", "onError": { "handler": "SdcRewardFailureRecovery", "strategy": "skip" } },
-    "SdcRewardFailureRecovery": { "type": "sequence", "next": ["SdcLogRewardTimeout", "SdcMarkRecoveryNeeded"] },
+    "SdcRewardFailureRecovery": { "type": "sequence", "next": ["SdcLogRewardTimeout", "CloseBattleUDP", "CloseBattleTCP", "SdcMarkRecoveryNeeded"] },
     "SdcLogRewardTimeout": { "type": "action", "action": "SdcLogRewardTimeout" },
     "SdcValidateRewardIdentity": { "type": "action", "action": "SdcValidateRewardIdentity", "onError": { "strategy": "resume" } },
     "SdcValidateRewardOutcome": { "type": "action", "action": "SdcValidateRewardOutcome", "onError": { "strategy": "resume" } },
-    "GameOver": { "type": "action", "action": "GameOver", "onError": { "handler": "SdcMarkRecoveryNeeded", "strategy": "skip" } },
+    "GameOver": { "type": "action", "action": "GameOver", "onError": { "ignoreCodes": [308], "handler": "SdcMarkRecoveryNeeded", "strategy": "skip" } },
     "SdcReturnedLobby": {
       "type": "sequence",
       "next": ["SdcMarkReturnedLobby", "SdcClearTeamState", "SdcOutBattlePhase"]
@@ -441,7 +428,7 @@
     "SdcResetSoldItems": { "type": "action", "action": "SdcResetSoldItems" },
     "SdcHasRandomSellItem": {
       "type": "boolean",
-      "condition": "state:sdcOutBattleRandomSellGuid != \"\"",
+      "condition": "state:sdcOutBattleSellCount > 0",
       "trueNext": "SdcExecuteRandomSell"
     },
     "SdcExecuteRandomSell": { "type": "sequence", "next": ["SdcBatchSellRequest", "SdcValidateSellResult"] },
@@ -504,7 +491,6 @@
     },
     "SdcReadBattleReconnection": { "pattern": "lua", "script": "sdc_read_battle_reconnection.lua" },
     "SdcCheckTeamCleared": { "pattern": "lua", "script": "sdc_check_team_cleared.lua" },
-    "CloseLogicTCP": { "pattern": "tcpClose", "service": "logic" },
     "SdcClearTeamState": {
       "pattern": "clearState",
       "keys": ["teamId"]
@@ -554,14 +540,6 @@
         { "type": "fixed", "field": "battleDelayList[1].PingSendCnt", "value": 10 },
         { "type": "fixed", "field": "battleDelayList[1].PingRecvCnt", "value": 10 }
       ]
-    },
-    "GMAddHero": {
-      "pattern": "tcpRequest",
-      "service": "logic",
-      "route": { "cmd": 9, "act": 1 },
-      "c2sProto": "Game.GmEventC2S",
-      "s2cProto": "Game.GmEventS2C",
-      "bindings": [ { "type": "fixed", "field": "GM.type", "value": 70 } ]
     },
     "GMAddItem": {
       "pattern": "tcpRequest",
@@ -657,7 +635,7 @@
         { "type": "fixed", "field": "sdcReturnedLobby", "value": false }
       ]
     },
-    "SdcLeaveTeam": { "pattern": "lua", "script": "ranked_leave_team.lua" },
+    "SdcLeaveTeam": { "pattern": "lua", "script": "sdc_leave_team.lua" },
     "SdcInitPrepareManagement": {
       "pattern": "setState",
       "bindings": [
@@ -829,7 +807,7 @@
       "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 6 },
       "c2sProto": "Game.SdcBatchSellC2S", "s2cProto": "Game.SdcBatchSellS2C",
       "bindings": [
-        { "type": "state", "field": "itemGuids", "source": "sdcOutBattleRandomSellGuid", "wrap": true, "required": true }
+        { "type": "state", "field": "itemGuids", "source": "sdcOutBattleRandomSellGuid", "required": true }
       ],
       "store": [
         { "field": "errorCode", "setter": "sdcOutBattleSellErrorCode" },
@@ -949,14 +927,12 @@
       "pattern": "setState",
       "bindings": [ { "type": "fixed", "field": "sdcSetupReady", "value": true } ]
     },
-    "CloseBattleUDP": { "pattern": "udpClose", "service": "sdc_battle" },
+    "CloseBattleUDP": { "pattern": "udpClose", "service": "sdcbattle" },
     "SdcExitBattle": {
-      "pattern": "tcpRequest",
+      "pattern": "tcpSend",
       "service": "battle",
       "route": { "cmd": 4, "act": 87 },
-      "c2sProto": "Game.BattleMidwaySettlementExitC2S",
-      "s2cProto": "Game.BattleMidwaySettlementExitS2C",
-      "timeout": 90
+      "c2sProto": "Game.BattleMidwaySettlementExitC2S"
     },
     "CloseBattleTCP": { "pattern": "tcpClose", "service": "battle" },
     "SdcMarkReturnedLobby": {
@@ -998,6 +974,7 @@
       "pattern": "tcpRequest",
       "service": "logic",
       "route": { "cmd": 5, "act": 1 },
+      "timeout": 180,
       "c2sProto": "Game.TeamCreateC2S",
       "s2cProto": "Game.TeamCreateS2C",
       "bindings": [ { "type": "fixed", "field": "model", "value": 8 } ],
@@ -1047,7 +1024,7 @@
     },
     "SdcListenBattleReward": {
       "pattern": "tcpListen", "service": "logic", "route": { "cmd": 4, "act": 72 },
-      "s2cProto": "Game.BattleRewardS2C", "timeout": 90, "pollMs": 500,
+      "s2cProto": "Game.BattleRewardS2C", "timeout": 180, "pollMs": 500,
       "store": [
         { "field": "battleId", "setter": "sdcRewardBattleId" },
         { "field": "sdcSettleData", "setter": "sdcRewardSettleData" },
@@ -1072,6 +1049,7 @@
     "matchPoll": {},
     "loadingPoll": {},
     "rewardPoll": {},
+    "backLobbyPoll": {},
     "battleStartGame": {}
   }
 }

@@ -1,9 +1,17 @@
 -- 搜打撤专用开始加载：提取通用入局信息，并保存服务器下发的本局原始快照。
 -- 此阶段只保存“可用资源”，不选择道具、不修改背包、不计算收益。
+-- 注意：服务端 logic 在 commitSDCSuitPresetStartLoading 失败（套装提交/冻结快照/落盘/券校验）时
+-- 会吞掉 4:6 并改发 2:10(MainBackLobby) 把玩家拉回大厅。这里不能死等 4:6，需在轮询间隙
+-- 检查 2:10 缓存队列，一旦收到返回大厅就立即失败走恢复，避免 180s 超时卡住整轮。
 local network = require("network")
 local robot = require("robot")
 local proto = require("proto")
+local utils = require("utils")
 local log = require("log")
+
+local TOTAL_WAIT_MS = 180 * 1000
+local POLL_SLICE_SEC = 5
+local POLL_SLICE_MS = POLL_SLICE_SEC * 1000
 
 local function first_path(msg, paths)
     for _, path in ipairs(paths) do
@@ -15,12 +23,50 @@ local function first_path(msg, paths)
     return nil
 end
 
+-- 非阻塞检查服务端是否已下发返回大厅(2:10)。返回 true 表示已收到，本轮加载被服务端中止。
+local function serverReturnedToLobby()
+    local err, raw = network.try_tcp_listen("logic", {cmd=2, act=10})
+    if err ~= nil and tonumber(err.code) ~= 31 then
+        log.warn("检查返回大厅推送失败: code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+    end
+    return raw ~= nil and raw ~= ""
+end
+
+-- 轮询等待开始加载(4:6)，每个切片结束后检查 2:10 返回大厅；收到则立即以业务错误返回。
+local function waitForStartLoading(roleId)
+    local deadlineMs = utils.time_ms() + TOTAL_WAIT_MS
+    while true do
+        local remainingMs = deadlineMs - utils.time_ms()
+        if remainingMs <= 0 then
+            return robot.error(31, "等待搜打撤开始加载超时: roleId=" .. tostring(roleId)
+                .. " timeout=" .. tostring(TOTAL_WAIT_MS) .. "ms")
+        end
+        local sliceSec = math.ceil(remainingMs / 1000)
+        if sliceSec > POLL_SLICE_SEC then sliceSec = POLL_SLICE_SEC end
+
+        local err, resp = network.tcp_listen("logic", {cmd=4, act=6},
+            "Game.BattleStartLoadingS2C", sliceSec, 500)
+        if err == nil then
+            return nil, resp
+        end
+        -- code 31 = 本切片超时，继续下一轮检查；其它错误直接透传
+        if tonumber(err.code) ~= 31 then
+            log.error("等待搜打撤开始加载失败: roleId=" .. tostring(roleId)
+                .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
+            return err
+        end
+
+        if serverReturnedToLobby() then
+            return robot.error(54, "服务端在开始加载阶段把玩家拉回大厅(2:10)，本轮战斗未启动: roleId="
+                .. tostring(roleId) .. "（常见于套装提交/冻结快照/落盘失败）")
+        end
+    end
+end
+
 function execute(r)
     local roleId = robot.get("roleId") or robot.get("playerId")
-    local err, resp = network.tcp_listen("logic", {cmd=4, act=6}, "Game.BattleStartLoadingS2C", 180, 500)
+    local err, resp = waitForStartLoading(roleId)
     if err then
-        log.error("等待搜打撤开始加载失败: roleId=" .. tostring(roleId)
-            .. " code=" .. tostring(err.code) .. " detail=" .. tostring(err.detail))
         return err
     end
 
