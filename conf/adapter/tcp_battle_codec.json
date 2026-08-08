@@ -23,7 +23,7 @@
       "onError": "fail" }
   ],
   "heartbeat": {
-    "intervalMs": 10000,
+    "intervalMs": 5000,
     "requireSecretKey": true,
     "route": { "cmd": 4, "act": 2 },
     "heartbeatFields": [
