@@ -356,7 +356,7 @@
     },
     "SdcSettlementConfirmedPath": {
       "type": "sequence",
-      "next": ["SdcExitBattle", "BattleReward"]
+      "next": ["BattleReward"]
     },
     "SdcBattleRequestFailureRecovery": {
       "type": "sequence",
@@ -373,7 +373,7 @@
     "BattleReward": {
       "type": "sequence",
       "description": "声明式等待结算回执，再分别校验战斗身份与结局收益",
-      "next": ["SdcListenBattleReward", "SdcValidateRewardIdentity", "SdcValidateRewardOutcome", "CloseBattleUDP", "CloseBattleTCP", "GameOver", "SdcReturnedLobby"]
+      "next": ["SdcListenBattleReward", "SdcValidateRewardIdentity", "SdcValidateRewardOutcome", "SdcExitBattle", "CloseBattleUDP", "CloseBattleTCP", "GameOver", "SdcReturnedLobby"]
     },
     "SdcListenBattleReward": { "type": "action", "action": "SdcListenBattleReward", "onError": { "handler": "SdcRewardFailureRecovery", "strategy": "skip" } },
     "SdcRewardFailureRecovery": { "type": "sequence", "next": ["SdcLogRewardTimeout", "CloseBattleUDP", "CloseBattleTCP", "SdcMarkRecoveryNeeded"] },
