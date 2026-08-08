@@ -82,14 +82,18 @@ function execute(r)
     local battleLootValue = tonumber(robot.get("sdcBattleLootValue")) or 0
     local settleLootValue = success and battleLootValue or retainedLootValue
     local surviveTime = math.floor((tonumber(robot.get("sdcDwellTargetMs")) or 0) / 1000)
+    -- 结算数据不提交背包/装备明细(finalPackSlots/finalEquipSlots)和 GUID 列表(lost/kept)。
+    -- 服务端 ValidateSettlementCandidate 会用 ItemRegistry（匹配快照构建）逐个校验道具 binding，
+    -- 客户端战前数据(45:1)与匹配快照(4:6)不一致时投票被拒绝→4:72 永远不发→超时。
+    -- 空列表能通过结构校验，服务端用 registry 重算 lootValue/rating，不依赖客户端明细。
     local settle = {
         result = tonumber(robot.get("sdcExpectedSettleResult")) or 1,
         killCount = 0, totalValue = tonumber(prepare.totalValue) or 0,
-        lootValue = settleLootValue, lostItemGuids = lost, keptItemGuids = kept,
-        finalPackSlots = finalPacks, seasonCoin = 0, monsterKillCount = 0,
+        lootValue = settleLootValue, lostItemGuids = {}, keptItemGuids = {},
+        finalPackSlots = {}, seasonCoin = 0, monsterKillCount = 0,
         surviveTime = surviveTime,
         rating = rating_for(settleLootValue, tonumber(robot.get("sdcLoadingDropBudget")) or 0),
-        assistCount = 0, rescueCount = 0, finalEquipSlots = finalEquips,
+        assistCount = 0, rescueCount = 0, finalEquipSlots = {},
         heroInfo = prepare.heroInfo, equipSlotValueDiff = 0, netLootValue = settleLootValue,
         acquiredItemIds = acquiredItemIds, lossAssetValue = lossAssetValue,
         packNormalNetValue = settleLootValue, packSeasonNetValue = 0,
