@@ -181,48 +181,46 @@ function execute(r)
                 return robot.error(54, "排位开始加载阶段服务端返回大厅(2:10): roleId="
                     .. tostring(roleId))
             end
-            -- 继续下一个切片
-            goto nextSlice
-        end
-
-        local ok, candidate = pcall(parse_candidate, resp, roleId)
-        if not ok then
-            log.error("ListenStartLoading 解析失败: roleId=" .. tostring(roleId)
-                .. " expectedSession=" .. tostring(expectedBattleSession)
-                .. " err=" .. tostring(candidate))
-            return robot.error(12, "ListenStartLoading 解析失败: roleId=" .. tostring(roleId)
-                .. " expectedSession=" .. tostring(expectedBattleSession)
-                .. " err=" .. tostring(candidate))
-        end
-
-        if same_id(candidate.battleSession, expectedBattleSession) then
-            local invalidReason = candidate_error(candidate, roleId)
-            if invalidReason ~= nil then
-                log.error("当前轮开始加载关键字段缺失: roleId=" .. tostring(roleId)
-                    .. " reason=" .. invalidReason
-                    .. " battleId=" .. tostring(candidate.battleId)
-                    .. " fighterIndex=" .. tostring(candidate.fighterIndex)
-                    .. " fighterCount=" .. tostring(candidate.fighterCount))
-                return robot.error(54, "当前轮开始加载关键字段缺失: roleId="
-                    .. tostring(roleId) .. " reason=" .. invalidReason)
+            -- 本切片超时且未收到 2:10，继续下一个切片（while 自然回顶）
+        else
+            local ok, candidate = pcall(parse_candidate, resp, roleId)
+            if not ok then
+                log.error("ListenStartLoading 解析失败: roleId=" .. tostring(roleId)
+                    .. " expectedSession=" .. tostring(expectedBattleSession)
+                    .. " err=" .. tostring(candidate))
+                return robot.error(12, "ListenStartLoading 解析失败: roleId=" .. tostring(roleId)
+                    .. " expectedSession=" .. tostring(expectedBattleSession)
+                    .. " err=" .. tostring(candidate))
             end
 
-            store_candidate(candidate)
-            log.info("开始加载: roleId=" .. tostring(roleId)
-                .. " battleAddress=" .. tostring(candidate.battleAddress)
-                .. " fighterIndex=" .. tostring(candidate.fighterIndex)
-                .. " battleId=" .. tostring(candidate.battleId)
-                .. " battleSession=" .. tostring(candidate.battleSession)
-                .. " fighterCount=" .. tostring(candidate.fighterCount)
-                .. " hasSecretKey=true")
-            return nil
-        end
+            if same_id(candidate.battleSession, expectedBattleSession) then
+                local invalidReason = candidate_error(candidate, roleId)
+                if invalidReason ~= nil then
+                    log.error("当前轮开始加载关键字段缺失: roleId=" .. tostring(roleId)
+                        .. " reason=" .. invalidReason
+                        .. " battleId=" .. tostring(candidate.battleId)
+                        .. " fighterIndex=" .. tostring(candidate.fighterIndex)
+                        .. " fighterCount=" .. tostring(candidate.fighterCount))
+                    return robot.error(54, "当前轮开始加载关键字段缺失: roleId="
+                        .. tostring(roleId) .. " reason=" .. invalidReason)
+                end
 
-        log.warn("丢弃旧 BattleStartLoading: roleId=" .. tostring(roleId)
-            .. " expectedSession=" .. tostring(expectedBattleSession)
-            .. " candidateSession=" .. tostring(candidate.battleSession)
-            .. " candidateBattleId=" .. tostring(candidate.battleId)
-            .. " fighterCount=" .. tostring(candidate.fighterCount))
-        ::nextSlice::
+                store_candidate(candidate)
+                log.info("开始加载: roleId=" .. tostring(roleId)
+                    .. " battleAddress=" .. tostring(candidate.battleAddress)
+                    .. " fighterIndex=" .. tostring(candidate.fighterIndex)
+                    .. " battleId=" .. tostring(candidate.battleId)
+                    .. " battleSession=" .. tostring(candidate.battleSession)
+                    .. " fighterCount=" .. tostring(candidate.fighterCount)
+                    .. " hasSecretKey=true")
+                return nil
+            end
+
+            log.warn("丢弃旧 BattleStartLoading: roleId=" .. tostring(roleId)
+                .. " expectedSession=" .. tostring(expectedBattleSession)
+                .. " candidateSession=" .. tostring(candidate.battleSession)
+                .. " candidateBattleId=" .. tostring(candidate.battleId)
+                .. " fighterCount=" .. tostring(candidate.fighterCount))
+        end
     end
 end
