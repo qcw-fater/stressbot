@@ -300,11 +300,11 @@ func TestInferCodecMap_RealAdapterDir(t *testing.T) {
 		t.Fatalf("InferCodecMap 失败: %v", err)
 	}
 	want := map[string]string{
-		"tcp:logic":      "tcp_logic_codec.json",
-		"tcp:battle":     "tcp_battle_codec.json",
-		"tcp:ob":         "tcp_ob_codec.json",
-		"udp:battle":     "udp_battle_codec.json",
-		"udp:sdc_battle": "udp_sdc_battle_codec.json",
+		"tcp:logic":     "tcp_logic_codec.json",
+		"tcp:battle":    "tcp_battle_codec.json",
+		"tcp:ob":        "tcp_ob_codec.json",
+		"udp:battle":    "udp_battle_codec.json",
+		"udp:sdcbattle": "udp_sdcbattle_codec.json",
 	}
 	for server, file := range want {
 		got, ok := m[server]
@@ -331,7 +331,7 @@ func TestInferCodecMap_RoundTripWithLoader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCodecResolver 失败: %v", err)
 	}
-	for _, server := range []string{"tcp:logic", "tcp:battle", "udp:battle", "udp:sdc_battle"} {
+	for _, server := range []string{"tcp:logic", "tcp:battle", "udp:battle", "udp:sdcbattle"} {
 		if r.Resolve(server) == nil {
 			t.Errorf("Resolve(%q) 返回 nil，期望非 nil", server)
 		}

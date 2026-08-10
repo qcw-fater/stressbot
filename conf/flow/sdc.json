@@ -3,46 +3,151 @@
   "nodes": {
     "main": {
       "type": "sequence",
-      "next": ["authLogin", "logicLogin", "checkNewRole", "sdcBusinessLoop"]
+      "next": [
+        "authLogin",
+        "logicLogin",
+        "checkNewRole",
+        "sdcBusinessLoop"
+      ]
     },
     "authLogin": {
       "type": "sequence",
-      "next": ["RequestZoneList", "RequestOutsideNotice", "RequestNotice", "PostLogin", "hasRole", "SelectRole"]
+      "next": [
+        "RequestZoneList",
+        "RequestOutsideNotice",
+        "RequestNotice",
+        "PostLogin",
+        "hasRole",
+        "SelectRole"
+      ]
     },
-    "RequestZoneList": { "type": "action", "action": "RequestZoneList", "onError": { "strategy": "abort" } },
-    "RequestOutsideNotice": { "type": "action", "action": "RequestOutsideNotice" },
-    "RequestNotice": { "type": "action", "action": "RequestNotice" },
-    "PostLogin": { "type": "action", "action": "PostLogin", "onError": { "strategy": "abort" } },
-    "hasRole": { "type": "boolean", "condition": "lua:check_role.lua", "falseNext": "createNewRole" },
-    "createNewRole": { "type": "action", "action": "NewRole", "onError": { "strategy": "abort" } },
-    "SelectRole": { "type": "action", "action": "SelectRole", "onError": { "strategy": "abort" } },
-
+    "RequestZoneList": {
+      "type": "action",
+      "action": "RequestZoneList",
+      "onError": {
+        "strategy": "abort"
+      }
+    },
+    "RequestOutsideNotice": {
+      "type": "action",
+      "action": "RequestOutsideNotice"
+    },
+    "RequestNotice": {
+      "type": "action",
+      "action": "RequestNotice"
+    },
+    "PostLogin": {
+      "type": "action",
+      "action": "PostLogin",
+      "onError": {
+        "strategy": "abort"
+      }
+    },
+    "hasRole": {
+      "type": "boolean",
+      "condition": "lua:check_role.lua",
+      "falseNext": "createNewRole"
+    },
+    "createNewRole": {
+      "type": "action",
+      "action": "NewRole",
+      "onError": {
+        "strategy": "abort"
+      }
+    },
+    "SelectRole": {
+      "type": "action",
+      "action": "SelectRole",
+      "onError": {
+        "strategy": "abort"
+      }
+    },
     "logicLogin": {
       "type": "sequence",
-      "next": ["ConnectLogicTCP", "PlayerLogin", "RequestPlayerData", "SdcInitRecoveryFlags", "SdcReadBattleReconnection", "SdcInitialRecoveryDecision", "ReportBattleDelay"]
+      "next": [
+        "ConnectLogicTCP",
+        "PlayerLogin",
+        "RequestPlayerData",
+        "SdcInitRecoveryFlags",
+        "SdcReadBattleReconnection",
+        "SdcInitialRecoveryDecision",
+        "ReportBattleDelay"
+      ]
     },
     "ConnectLogicTCP": {
       "type": "action",
       "action": "ConnectLogicTCP",
-      "onError": { "strategy": "abort" },
+      "onError": {
+        "strategy": "abort"
+      },
       "listenRefs": [
-        { "route": { "cmd": 3, "act": 1 }, "server": "tcp:logic", "listen": "matchPoll" },
-        { "route": { "cmd": 4, "act": 6 }, "server": "tcp:logic", "listen": "loadingPoll" },
-        { "route": { "cmd": 4, "act": 72 }, "server": "tcp:logic", "listen": "rewardPoll" },
-        { "route": { "cmd": 2, "act": 10 }, "server": "tcp:logic", "listen": "backLobbyPoll" }
+        {
+          "route": {
+            "cmd": 3,
+            "act": 1
+          },
+          "server": "tcp:logic",
+          "listen": "matchPoll"
+        },
+        {
+          "route": {
+            "cmd": 4,
+            "act": 6
+          },
+          "server": "tcp:logic",
+          "listen": "loadingPoll"
+        },
+        {
+          "route": {
+            "cmd": 4,
+            "act": 72
+          },
+          "server": "tcp:logic",
+          "listen": "rewardPoll"
+        },
+        {
+          "route": {
+            "cmd": 2,
+            "act": 10
+          },
+          "server": "tcp:logic",
+          "listen": "backLobbyPoll"
+        }
       ]
     },
-    "PlayerLogin": { "type": "action", "action": "PlayerLogin", "onError": { "strategy": "abort" } },
-    "RequestPlayerData": { "type": "action", "action": "RequestPlayerData", "onError": { "strategy": "abort" } },
-    "SdcInitRecoveryFlags": { "type": "action", "action": "SdcInitRecoveryFlags", "delayMs": -1 },
-    "SdcReadBattleReconnection": { "type": "action", "action": "SdcReadBattleReconnection", "delayMs": -1 },
+    "PlayerLogin": {
+      "type": "action",
+      "action": "PlayerLogin",
+      "onError": {
+        "strategy": "abort"
+      }
+    },
+    "RequestPlayerData": {
+      "type": "action",
+      "action": "RequestPlayerData",
+      "onError": {
+        "strategy": "abort"
+      }
+    },
+    "SdcInitRecoveryFlags": {
+      "type": "action",
+      "action": "SdcInitRecoveryFlags",
+      "delayMs": -1
+    },
+    "SdcReadBattleReconnection": {
+      "type": "action",
+      "action": "SdcReadBattleReconnection",
+      "delayMs": -1
+    },
     "SdcInitialRecoveryDecision": {
       "type": "boolean",
       "condition": "state:sdcLoginBattleReconnection",
       "trueNext": "SdcMarkRecoveryNeeded"
     },
-    "ReportBattleDelay": { "type": "action", "action": "ReportBattleDelay" },
-
+    "ReportBattleDelay": {
+      "type": "action",
+      "action": "ReportBattleDelay"
+    },
     "checkNewRole": {
       "type": "boolean",
       "condition": "state:isNewRole",
@@ -51,24 +156,61 @@
     },
     "initNewRole": {
       "type": "sequence",
-      "next": ["gmCommands", "unlockBasicFunction", "LbsPositioning"]
+      "next": [
+        "gmCommands",
+        "unlockBasicFunction",
+        "LbsPositioning"
+      ]
     },
     "gmCommands": {
       "type": "sequence",
-      "next": ["GMAddItem", "GMAddHeroCup", "GMFinishAllNewUserGuide"]
+      "next": [
+        "GMAddItem",
+        "GMAddHeroCup",
+        "GMFinishAllNewUserGuide"
+      ]
     },
-    "GMAddItem": { "type": "action", "action": "GMAddItem" },
-    "GMAddHeroCup": { "type": "action", "action": "GMAddHeroCup" },
-    "GMFinishAllNewUserGuide": { "type": "action", "action": "GMFinishAllNewUserGuide" },
-    "unlockBasicFunction": { "type": "action", "description": "解锁基础功能", "action": "unlockBasicFunction" },
-    "LbsPositioning": { "type": "action", "description": "Lbs定位", "action": "LbsPositioning" },
-    "GetActivityList": { "type": "action", "action": "GetActivityList" },
-
-    "sdcBusinessLoop": { "type": "loop", "body": "sdcModel", "loopCount": -1 },
-
+    "GMAddItem": {
+      "type": "action",
+      "action": "GMAddItem"
+    },
+    "GMAddHeroCup": {
+      "type": "action",
+      "action": "GMAddHeroCup"
+    },
+    "GMFinishAllNewUserGuide": {
+      "type": "action",
+      "action": "GMFinishAllNewUserGuide"
+    },
+    "unlockBasicFunction": {
+      "type": "action",
+      "description": "解锁基础功能",
+      "action": "unlockBasicFunction"
+    },
+    "LbsPositioning": {
+      "type": "action",
+      "description": "Lbs定位",
+      "action": "LbsPositioning"
+    },
+    "GetActivityList": {
+      "type": "action",
+      "action": "GetActivityList"
+    },
+    "sdcBusinessLoop": {
+      "type": "loop",
+      "body": "sdcModel",
+      "loopCount": -1
+    },
     "sdcModel": {
       "type": "sequence",
-      "next": ["SdcRecoveryGate", "SdcRoundInit", "SdcLeaveTeam", "SdcCheckTeamCleared", "SdcTeamClearedGate", "sdcRoundCooldown"]
+      "next": [
+        "SdcRecoveryGate",
+        "SdcRoundInit",
+        "SdcLeaveTeam",
+        "SdcCheckTeamCleared",
+        "SdcTeamClearedGate",
+        "sdcRoundCooldown"
+      ]
     },
     "SdcRecoveryGate": {
       "type": "boolean",
@@ -85,9 +227,22 @@
     "SdcRecoveryAttempt": {
       "type": "sequence",
       "description": "复用现有逻辑服连接读取服务端战斗重连标记；未恢复时保持连接等待服务端补偿",
-      "next": ["CloseBattleUDP", "CloseBattleTCP", "SdcRecoveryRequestPlayerData", "SdcReadBattleReconnection", "SdcRecoveryDecision"]
+      "next": [
+        "CloseBattleUDP",
+        "CloseBattleTCP",
+        "SdcRecoveryRequestPlayerData",
+        "SdcReadBattleReconnection",
+        "SdcRecoveryDecision"
+      ]
     },
-    "SdcRecoveryRequestPlayerData": { "type": "action", "action": "RequestPlayerData", "onError": { "handler": "SdcRecoveryPendingWait", "strategy": "skip" } },
+    "SdcRecoveryRequestPlayerData": {
+      "type": "action",
+      "action": "RequestPlayerData",
+      "onError": {
+        "handler": "SdcRecoveryPendingWait",
+        "strategy": "skip"
+      }
+    },
     "SdcRecoveryDecision": {
       "type": "boolean",
       "condition": "state:sdcLoginBattleReconnection",
@@ -97,7 +252,11 @@
     "SdcRecoveryLobbyCleanup": {
       "type": "sequence",
       "description": "战斗重连标记清除后继续以服务端退队结果确认大厅态",
-      "next": ["SdcLeaveTeam", "SdcCheckTeamCleared", "SdcRecoveryTeamClearedGate"]
+      "next": [
+        "SdcLeaveTeam",
+        "SdcCheckTeamCleared",
+        "SdcRecoveryTeamClearedGate"
+      ]
     },
     "SdcRecoveryTeamClearedGate": {
       "type": "boolean",
@@ -112,19 +271,50 @@
     },
     "SdcCompleteRecovery": {
       "type": "sequence",
-      "next": ["SdcClearTeamState", "SdcMarkRecoveryComplete"]
+      "next": [
+        "SdcClearTeamState",
+        "SdcMarkRecoveryComplete"
+      ]
     },
-    "SdcClearTeamState": { "type": "action", "action": "SdcClearTeamState", "delayMs": -1 },
-    "SdcMarkRecoveryNeeded": { "type": "action", "action": "SdcMarkRecoveryNeeded", "delayMs": -1 },
-    "SdcMarkRecoveryComplete": { "type": "action", "action": "SdcMarkRecoveryComplete", "delayMs": -1 },
+    "SdcClearTeamState": {
+      "type": "action",
+      "action": "SdcClearTeamState",
+      "delayMs": -1
+    },
+    "SdcMarkRecoveryNeeded": {
+      "type": "action",
+      "action": "SdcMarkRecoveryNeeded",
+      "delayMs": -1
+    },
+    "SdcMarkRecoveryComplete": {
+      "type": "action",
+      "action": "SdcMarkRecoveryComplete",
+      "delayMs": -1
+    },
     "SdcRoundInit": {
       "type": "sequence",
-      "next": ["SdcClearRoundTransient", "SdcInitRoundFlags"]
+      "next": [
+        "SdcClearRoundTransient",
+        "SdcInitRoundFlags"
+      ]
     },
-    "SdcClearRoundTransient": { "type": "action", "action": "SdcClearRoundTransient" },
-    "SdcInitRoundFlags": { "type": "action", "action": "SdcInitRoundFlags" },
-    "SdcLeaveTeam": { "type": "action", "action": "SdcLeaveTeam" },
-    "SdcCheckTeamCleared": { "type": "action", "action": "SdcCheckTeamCleared", "delayMs": -1 },
+    "SdcClearRoundTransient": {
+      "type": "action",
+      "action": "SdcClearRoundTransient"
+    },
+    "SdcInitRoundFlags": {
+      "type": "action",
+      "action": "SdcInitRoundFlags"
+    },
+    "SdcLeaveTeam": {
+      "type": "action",
+      "action": "SdcLeaveTeam"
+    },
+    "SdcCheckTeamCleared": {
+      "type": "action",
+      "action": "SdcCheckTeamCleared",
+      "delayMs": -1
+    },
     "SdcTeamClearedGate": {
       "type": "boolean",
       "description": "退队未确认时禁止进入战备和建队，转入下一轮恢复入口",
@@ -134,19 +324,35 @@
     },
     "SdcRoundExecution": {
       "type": "sequence",
-      "next": ["sdcSoloSetup", "sdcAfterSetup", "SdcTeamCleanup"]
+      "next": [
+        "sdcSoloSetup",
+        "sdcAfterSetup",
+        "SdcTeamCleanup"
+      ]
     },
-
     "sdcSoloSetup": {
       "type": "sequence",
-      "next": ["SdcManagePrepare", "SdcGetPrepareData", "SelectHero", "SdcCreateTeam", "SdcTeamPrepare", "SdcMarkSetupReady"]
+      "next": [
+        "SdcManagePrepare",
+        "SdcGetPrepareData",
+        "SelectHero",
+        "SdcCreateTeam",
+        "SdcTeamPrepare",
+        "SdcMarkSetupReady"
+      ]
     },
     "SdcManagePrepare": {
       "type": "sequence",
       "description": "基于实时服务端快照随机执行1~2个合法战备动作",
-      "next": ["SdcInitPrepareManagement", "SdcPrepareManagementLoop"]
+      "next": [
+        "SdcInitPrepareManagement",
+        "SdcPrepareManagementLoop"
+      ]
     },
-    "SdcInitPrepareManagement": { "type": "action", "action": "SdcInitPrepareManagement" },
+    "SdcInitPrepareManagement": {
+      "type": "action",
+      "action": "SdcInitPrepareManagement"
+    },
     "SdcPrepareManagementLoop": {
       "type": "loop",
       "body": "SdcPrepareManagementIteration",
@@ -155,164 +361,606 @@
     },
     "SdcPrepareManagementIteration": {
       "type": "sequence",
-      "next": ["SdcLoadPrepareSnapshots", "SdcSelectPrepareAction", "SdcResetPrepareActionError", "SdcPrepareActionSwitch"]
+      "next": [
+        "SdcLoadPrepareSnapshots",
+        "SdcSelectPrepareAction",
+        "SdcResetPrepareActionError",
+        "SdcPrepareActionSwitch"
+      ]
     },
     "SdcLoadPrepareSnapshots": {
       "type": "sequence",
-      "next": ["SdcRequestPrepareSnapshot", "SdcRequestWarehouseData", "SdcRequestContainerData", "SdcRequestSuitPresetData"]
+      "next": [
+        "SdcRequestPrepareSnapshot",
+        "SdcRequestWarehouseData",
+        "SdcRequestContainerData",
+        "SdcRequestSuitPresetData"
+      ]
     },
-    "SdcRequestPrepareSnapshot": { "type": "action", "action": "SdcRequestPrepareSnapshot", "onError": { "strategy": "skip" } },
-    "SdcRequestWarehouseData": { "type": "action", "action": "SdcRequestWarehouseData", "onError": { "strategy": "skip" } },
-    "SdcRequestContainerData": { "type": "action", "action": "SdcRequestContainerData", "onError": { "strategy": "skip" } },
-    "SdcRequestSuitPresetData": { "type": "action", "action": "SdcRequestSuitPresetData", "onError": { "strategy": "skip" } },
-    "SdcSelectPrepareAction": { "type": "action", "action": "SdcSelectPrepareAction", "onError": { "strategy": "skip" } },
-    "SdcResetPrepareActionError": { "type": "action", "action": "SdcResetPrepareActionError" },
+    "SdcRequestPrepareSnapshot": {
+      "type": "action",
+      "action": "SdcRequestPrepareSnapshot",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcRequestWarehouseData": {
+      "type": "action",
+      "action": "SdcRequestWarehouseData",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcRequestContainerData": {
+      "type": "action",
+      "action": "SdcRequestContainerData",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcRequestSuitPresetData": {
+      "type": "action",
+      "action": "SdcRequestSuitPresetData",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcSelectPrepareAction": {
+      "type": "action",
+      "action": "SdcSelectPrepareAction",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcResetPrepareActionError": {
+      "type": "action",
+      "action": "SdcResetPrepareActionError"
+    },
     "SdcPrepareActionSwitch": {
       "type": "switch",
       "cases": [
-        { "condition": "state:sdcPrepareActionKind == \"equip\"", "next": "SdcDoEquipItem" },
-        { "condition": "state:sdcPrepareActionKind == \"unequip\"", "next": "SdcDoUnequipItem" },
-        { "condition": "state:sdcPrepareActionKind == \"move\"", "next": "SdcDoMoveItem" },
-        { "condition": "state:sdcPrepareActionKind == \"pack_use\"", "next": "SdcDoPackUse" },
-        { "condition": "state:sdcPrepareActionKind == \"swap\"", "next": "SdcDoSwapItem" },
-        { "condition": "state:sdcPrepareActionKind == \"container_activate\"", "next": "SdcDoActivateContainer" },
-        { "condition": "state:sdcPrepareActionKind == \"container_switch\"", "next": "SdcDoSwitchContainer" },
-        { "condition": "state:sdcPrepareActionKind == \"container_move_all\"", "next": "SdcDoMoveContainerAll" },
-        { "condition": "state:sdcPrepareActionKind == \"suit_use\"", "next": "SdcDoUseSuit" },
-        { "condition": "state:sdcPrepareActionKind == \"suit_cancel\"", "next": "SdcDoCancelSuit" },
-        { "condition": "state:sdcPrepareActionKind == \"preset_save\"", "next": "SdcDoSavePreset" },
-        { "condition": "state:sdcPrepareActionKind == \"preset_use\"", "next": "SdcDoUsePreset" }
+        {
+          "condition": "state:sdcPrepareActionKind == \"equip\"",
+          "next": "SdcDoEquipItem"
+        },
+        {
+          "condition": "state:sdcPrepareActionKind == \"unequip\"",
+          "next": "SdcDoUnequipItem"
+        },
+        {
+          "condition": "state:sdcPrepareActionKind == \"move\"",
+          "next": "SdcDoMoveItem"
+        },
+        {
+          "condition": "state:sdcPrepareActionKind == \"pack_use\"",
+          "next": "SdcDoPackUse"
+        },
+        {
+          "condition": "state:sdcPrepareActionKind == \"swap\"",
+          "next": "SdcDoSwapItem"
+        },
+        {
+          "condition": "state:sdcPrepareActionKind == \"container_activate\"",
+          "next": "SdcDoActivateContainer"
+        },
+        {
+          "condition": "state:sdcPrepareActionKind == \"container_switch\"",
+          "next": "SdcDoSwitchContainer"
+        },
+        {
+          "condition": "state:sdcPrepareActionKind == \"container_move_all\"",
+          "next": "SdcDoMoveContainerAll"
+        },
+        {
+          "condition": "state:sdcPrepareActionKind == \"suit_use\"",
+          "next": "SdcDoUseSuit"
+        },
+        {
+          "condition": "state:sdcPrepareActionKind == \"suit_cancel\"",
+          "next": "SdcDoCancelSuit"
+        },
+        {
+          "condition": "state:sdcPrepareActionKind == \"preset_save\"",
+          "next": "SdcDoSavePreset"
+        },
+        {
+          "condition": "state:sdcPrepareActionKind == \"preset_use\"",
+          "next": "SdcDoUsePreset"
+        }
       ],
       "defaultNext": "SdcNoPrepareAction"
     },
-    "SdcDoEquipItem": { "type": "sequence", "next": ["SdcEquipItemRequest", "SdcValidatePrepareAction", "SdcRecordPrepareAction"] },
-    "SdcDoUnequipItem": { "type": "sequence", "next": ["SdcUnequipItemRequest", "SdcValidatePrepareAction", "SdcRecordPrepareAction"] },
-    "SdcDoMoveItem": { "type": "sequence", "next": ["SdcMoveItemRequest", "SdcValidatePrepareAction", "SdcRecordPrepareAction"] },
-    "SdcDoPackUse": { "type": "sequence", "next": ["SdcPackUseRequest", "SdcValidatePrepareAction", "SdcRecordPrepareAction"] },
-    "SdcDoSwapItem": { "type": "sequence", "next": ["SdcSwapItemRequest", "SdcValidatePrepareAction", "SdcRecordPrepareAction"] },
-    "SdcDoActivateContainer": { "type": "sequence", "next": ["SdcActivateContainerRequest", "SdcValidatePrepareAction", "SdcRecordPrepareAction"] },
-    "SdcDoSwitchContainer": { "type": "sequence", "next": ["SdcSwitchContainerRequest", "SdcValidatePrepareAction", "SdcRecordPrepareAction"] },
-    "SdcDoMoveContainerAll": { "type": "sequence", "next": ["SdcMoveContainerAllRequest", "SdcValidatePrepareAction", "SdcRecordPrepareAction"] },
-    "SdcDoUseSuit": { "type": "sequence", "next": ["SdcUseSuitRequest", "SdcValidatePrepareAction", "SdcRecordPrepareAction"] },
-    "SdcDoCancelSuit": { "type": "sequence", "next": ["SdcCancelSuitRequest", "SdcValidatePrepareAction", "SdcRecordPrepareAction"] },
-    "SdcDoSavePreset": { "type": "sequence", "next": ["SdcSavePreset", "SdcValidatePrepareAction", "SdcRecordPrepareAction"] },
-    "SdcDoUsePreset": { "type": "sequence", "next": ["SdcUsePresetRequest", "SdcValidatePrepareAction", "SdcRecordPrepareAction"] },
-    "SdcEquipItemRequest": { "type": "action", "action": "SdcEquipItemRequest", "onError": { "strategy": "skip" } },
-    "SdcUnequipItemRequest": { "type": "action", "action": "SdcUnequipItemRequest", "onError": { "strategy": "skip" } },
-    "SdcMoveItemRequest": { "type": "action", "action": "SdcMoveItemRequest", "onError": { "strategy": "skip" } },
-    "SdcPackUseRequest": { "type": "action", "action": "SdcPackUseRequest", "onError": { "strategy": "skip" } },
-    "SdcSwapItemRequest": { "type": "action", "action": "SdcSwapItemRequest", "onError": { "strategy": "skip" } },
-    "SdcActivateContainerRequest": { "type": "action", "action": "SdcActivateContainerRequest", "onError": { "strategy": "skip" } },
-    "SdcSwitchContainerRequest": { "type": "action", "action": "SdcSwitchContainerRequest", "onError": { "strategy": "skip" } },
-    "SdcMoveContainerAllRequest": { "type": "action", "action": "SdcMoveContainerAllRequest", "onError": { "strategy": "skip" } },
-    "SdcUseSuitRequest": { "type": "action", "action": "SdcUseSuitRequest", "onError": { "strategy": "skip" } },
-    "SdcCancelSuitRequest": { "type": "action", "action": "SdcCancelSuitRequest", "onError": { "strategy": "skip" } },
-    "SdcSavePreset": { "type": "action", "action": "SdcSavePreset", "onError": { "strategy": "skip" } },
-    "SdcUsePresetRequest": { "type": "action", "action": "SdcUsePresetRequest", "onError": { "strategy": "skip" } },
-    "SdcValidatePrepareAction": { "type": "action", "action": "SdcValidatePrepareAction", "onError": { "strategy": "skip" } },
-    "SdcRecordPrepareAction": { "type": "action", "action": "SdcRecordPrepareAction" },
-    "SdcNoPrepareAction": { "type": "action", "action": "SdcMarkPrepareManagementDone" },
+    "SdcDoEquipItem": {
+      "type": "sequence",
+      "next": [
+        "SdcEquipItemRequest",
+        "SdcValidatePrepareAction",
+        "SdcRecordPrepareAction"
+      ]
+    },
+    "SdcDoUnequipItem": {
+      "type": "sequence",
+      "next": [
+        "SdcUnequipItemRequest",
+        "SdcValidatePrepareAction",
+        "SdcRecordPrepareAction"
+      ]
+    },
+    "SdcDoMoveItem": {
+      "type": "sequence",
+      "next": [
+        "SdcMoveItemRequest",
+        "SdcValidatePrepareAction",
+        "SdcRecordPrepareAction"
+      ]
+    },
+    "SdcDoPackUse": {
+      "type": "sequence",
+      "next": [
+        "SdcPackUseRequest",
+        "SdcValidatePrepareAction",
+        "SdcRecordPrepareAction"
+      ]
+    },
+    "SdcDoSwapItem": {
+      "type": "sequence",
+      "next": [
+        "SdcSwapItemRequest",
+        "SdcValidatePrepareAction",
+        "SdcRecordPrepareAction"
+      ]
+    },
+    "SdcDoActivateContainer": {
+      "type": "sequence",
+      "next": [
+        "SdcActivateContainerRequest",
+        "SdcValidatePrepareAction",
+        "SdcRecordPrepareAction"
+      ]
+    },
+    "SdcDoSwitchContainer": {
+      "type": "sequence",
+      "next": [
+        "SdcSwitchContainerRequest",
+        "SdcValidatePrepareAction",
+        "SdcRecordPrepareAction"
+      ]
+    },
+    "SdcDoMoveContainerAll": {
+      "type": "sequence",
+      "next": [
+        "SdcMoveContainerAllRequest",
+        "SdcValidatePrepareAction",
+        "SdcRecordPrepareAction"
+      ]
+    },
+    "SdcDoUseSuit": {
+      "type": "sequence",
+      "next": [
+        "SdcUseSuitRequest",
+        "SdcValidatePrepareAction",
+        "SdcRecordPrepareAction"
+      ]
+    },
+    "SdcDoCancelSuit": {
+      "type": "sequence",
+      "next": [
+        "SdcCancelSuitRequest",
+        "SdcValidatePrepareAction",
+        "SdcRecordPrepareAction"
+      ]
+    },
+    "SdcDoSavePreset": {
+      "type": "sequence",
+      "next": [
+        "SdcSavePreset",
+        "SdcValidatePrepareAction",
+        "SdcRecordPrepareAction"
+      ]
+    },
+    "SdcDoUsePreset": {
+      "type": "sequence",
+      "next": [
+        "SdcUsePresetRequest",
+        "SdcValidatePrepareAction",
+        "SdcRecordPrepareAction"
+      ]
+    },
+    "SdcEquipItemRequest": {
+      "type": "action",
+      "action": "SdcEquipItemRequest",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcUnequipItemRequest": {
+      "type": "action",
+      "action": "SdcUnequipItemRequest",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcMoveItemRequest": {
+      "type": "action",
+      "action": "SdcMoveItemRequest",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcPackUseRequest": {
+      "type": "action",
+      "action": "SdcPackUseRequest",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcSwapItemRequest": {
+      "type": "action",
+      "action": "SdcSwapItemRequest",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcActivateContainerRequest": {
+      "type": "action",
+      "action": "SdcActivateContainerRequest",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcSwitchContainerRequest": {
+      "type": "action",
+      "action": "SdcSwitchContainerRequest",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcMoveContainerAllRequest": {
+      "type": "action",
+      "action": "SdcMoveContainerAllRequest",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcUseSuitRequest": {
+      "type": "action",
+      "action": "SdcUseSuitRequest",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcCancelSuitRequest": {
+      "type": "action",
+      "action": "SdcCancelSuitRequest",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcSavePreset": {
+      "type": "action",
+      "action": "SdcSavePreset",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcUsePresetRequest": {
+      "type": "action",
+      "action": "SdcUsePresetRequest",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcValidatePrepareAction": {
+      "type": "action",
+      "action": "SdcValidatePrepareAction",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcRecordPrepareAction": {
+      "type": "action",
+      "action": "SdcRecordPrepareAction"
+    },
+    "SdcNoPrepareAction": {
+      "type": "action",
+      "action": "SdcMarkPrepareManagementDone"
+    },
     "SdcGetPrepareData": {
       "type": "sequence",
       "description": "声明式拉取战前战备并生成本局资产摘要",
-      "next": ["SdcRequestPrepareData", "SdcSummarizePrepareData"]
+      "next": [
+        "SdcRequestPrepareData",
+        "SdcSummarizePrepareData"
+      ]
     },
-    "SdcRequestPrepareData": { "type": "action", "action": "SdcRequestPrepareData", "onError": { "strategy": "skip" } },
-    "SdcSummarizePrepareData": { "type": "action", "action": "SdcSummarizePrepareData", "onError": { "strategy": "skip" } },
-    "SelectHero": { "type": "action", "action": "SelectHero" },
-    "SdcCreateTeam": { "type": "action", "description": "创建搜打撤队伍(Model=GM_HAZARD_OPS=8)", "action": "SdcCreateTeam", "onError": { "handler": "SdcMarkRecoveryNeeded", "strategy": "skip" } },
-    "SdcTeamPrepare": { "type": "action", "action": "SdcTeamPrepare", "onError": { "strategy": "skip" } },
-    "SdcMarkSetupReady": { "type": "action", "action": "SdcMarkSetupReady" },
+    "SdcRequestPrepareData": {
+      "type": "action",
+      "action": "SdcRequestPrepareData",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcSummarizePrepareData": {
+      "type": "action",
+      "action": "SdcSummarizePrepareData",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SelectHero": {
+      "type": "action",
+      "action": "SelectHero"
+    },
+    "SdcCreateTeam": {
+      "type": "action",
+      "description": "创建搜打撤队伍(Model=GM_HAZARD_OPS=8)",
+      "action": "SdcCreateTeam",
+      "onError": {
+        "handler": "SdcMarkRecoveryNeeded",
+        "strategy": "skip"
+      }
+    },
+    "SdcTeamPrepare": {
+      "type": "action",
+      "action": "SdcTeamPrepare",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcMarkSetupReady": {
+      "type": "action",
+      "action": "SdcMarkSetupReady"
+    },
     "sdcAfterSetup": {
       "type": "boolean",
       "condition": "state:sdcSetupReady",
       "trueNext": "SdcMatchPhase"
     },
-
     "SdcMatchPhase": {
       "type": "sequence",
-      "next": ["SdcStartMatch", "sdcAfterMatchStart"]
+      "next": [
+        "SdcStartMatch",
+        "sdcAfterMatchStart"
+      ]
     },
     "SdcStartMatch": {
       "type": "sequence",
       "description": "声明式发起单排匹配(5:20)",
-      "next": ["SdcResetMatchStarted", "SdcStartMatchRequest", "SdcMarkMatchStarted"]
+      "next": [
+        "SdcResetMatchStarted",
+        "SdcStartMatchRequest",
+        "SdcMarkMatchStarted"
+      ]
     },
-    "SdcResetMatchStarted": { "type": "action", "action": "SdcResetMatchStarted" },
+    "SdcResetMatchStarted": {
+      "type": "action",
+      "action": "SdcResetMatchStarted"
+    },
     "SdcStartMatchRequest": {
       "type": "action",
       "action": "SdcStartMatchRequest",
-      "onError": { "retry": { "maxRetries": 1, "retryDelayMs": 5000 }, "strategy": "skip" }
+      "onError": {
+        "retry": {
+          "maxRetries": 1,
+          "retryDelayMs": 5000
+        },
+        "strategy": "skip"
+      }
     },
-    "SdcMarkMatchStarted": { "type": "action", "action": "SdcMarkMatchStarted" },
+    "SdcMarkMatchStarted": {
+      "type": "action",
+      "action": "SdcMarkMatchStarted"
+    },
     "sdcAfterMatchStart": {
       "type": "boolean",
       "condition": "state:sdcMatchStarted",
       "trueNext": "sdcBattlePhase"
     },
-
     "sdcBattlePhase": {
       "type": "sequence",
-      "next": ["MatchSucceed", "ListenStartLoading", "sdcCanEnterBattle"]
+      "next": [
+        "MatchSucceed",
+        "ListenStartLoading",
+        "sdcCanEnterBattle"
+      ]
     },
-    "MatchSucceed": { "type": "action", "action": "MatchSucceed", "onError": { "strategy": "skip" } },
-    "ListenStartLoading": { "type": "action", "description": "等待开始加载(4:6)，提取战斗服地址/fighterIndex/battleId/密钥", "action": "ListenStartLoading", "onError": { "strategy": "skip" } },
+    "MatchSucceed": {
+      "type": "action",
+      "action": "MatchSucceed",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "ListenStartLoading": {
+      "type": "action",
+      "description": "等待开始加载(4:6)，提取战斗服地址/fighterIndex/battleId/密钥",
+      "action": "ListenStartLoading",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
     "sdcCanEnterBattle": {
       "type": "boolean",
       "condition": "lua:sdc_can_enter.lua",
       "trueNext": "startBattle"
     },
-
     "startBattle": {
       "type": "sequence",
-      "next": ["ConnectBattleTCP", "ConnectBattleUDP", "RegisterBattle", "loadLoop", "BattleLoadOK", "ResetLoadState", "StartGame", "SdcInitBattle", "sdcSyncLoop", "SdcFinalSyncFrame", "SdcOutcomeBranch", "SdcBattleEnd", "SdcAfterSettlement"]
+      "next": [
+        "ConnectBattleTCP",
+        "ConnectBattleUDP",
+        "RegisterBattle",
+        "loadLoop",
+        "BattleLoadOK",
+        "ResetLoadState",
+        "StartGame",
+        "SdcInitBattle",
+        "sdcSyncLoop",
+        "SdcFinalSyncFrame",
+        "SdcOutcomeBranch",
+        "SdcBattleEnd",
+        "SdcAfterSettlement"
+      ]
     },
     "ConnectBattleTCP": {
       "type": "action",
       "action": "ConnectBattleTCP",
-      "onError": { "strategy": "skip" },
-      "listenRefs": [ { "route": { "cmd": 4, "act": 10 }, "server": "tcp:battle", "listen": "battleStartGame" } ]
+      "onError": {
+        "strategy": "skip"
+      },
+      "listenRefs": [
+        {
+          "route": {
+            "cmd": 4,
+            "act": 10
+          },
+          "server": "tcp:battle",
+          "listen": "battleStartGame"
+        }
+      ]
     },
     "ConnectBattleUDP": {
       "type": "action",
       "action": "ConnectBattleUDP",
-      "onError": { "strategy": "skip" }
+      "onError": {
+        "strategy": "skip"
+      }
     },
-    "RegisterBattle": { "type": "action", "action": "RegisterBattle", "onError": { "strategy": "skip" } },
-    "loadLoop": { "type": "loop", "body": "LoadProgress", "loopCount": -1, "breakCondition": "state:loadProgress>=100" },
-    "LoadProgress": { "type": "action", "action": "LoadProgress", "delayMs": -1 },
-    "BattleLoadOK": { "type": "action", "action": "BattleLoadOK", "onError": { "strategy": "skip" } },
-    "ResetLoadState": { "type": "action", "action": "ResetLoadState" },
-    "StartGame": { "type": "action", "action": "StartGame", "onError": { "strategy": "skip" } },
+    "RegisterBattle": {
+      "type": "action",
+      "action": "RegisterBattle",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "loadLoop": {
+      "type": "loop",
+      "body": "LoadProgress",
+      "loopCount": -1,
+      "breakCondition": "state:loadProgress>=100"
+    },
+    "LoadProgress": {
+      "type": "action",
+      "action": "LoadProgress",
+      "delayMs": -1
+    },
+    "BattleLoadOK": {
+      "type": "action",
+      "action": "BattleLoadOK",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "ResetLoadState": {
+      "type": "action",
+      "action": "ResetLoadState"
+    },
+    "StartGame": {
+      "type": "action",
+      "action": "StartGame",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
     "SdcInitBattle": {
       "type": "sequence",
       "description": "StartGame 后按状态、计时、库存三个职责初始化局内数据",
-      "next": ["SdcInitBattleState", "SdcInitBattleTiming", "SdcInitBattleInventory"]
+      "next": [
+        "SdcInitBattleState",
+        "SdcInitBattleTiming",
+        "SdcInitBattleInventory"
+      ]
     },
-    "SdcInitBattleState": { "type": "action", "action": "SdcInitBattleState", "delayMs": -1 },
-    "SdcInitBattleTiming": { "type": "action", "action": "SdcInitBattleTiming", "delayMs": -1, "onError": { "strategy": "skip" } },
-    "SdcInitBattleInventory": { "type": "action", "action": "SdcInitBattleInventory", "delayMs": -1, "onError": { "strategy": "skip" } },
-    "sdcSyncLoop": { "type": "loop", "body": "sdcBattleTick", "loopCount": -1, "breakCondition": "state:sdcDwellDone" },
-    "sdcBattleTick": { "type": "sequence", "next": ["SdcSyncFrame", "SdcFrameInterval", "SdcUpdateDwellState", "SdcLootEvent"] },
-    "SdcSyncFrame": { "type": "action", "description": "发送一次搜打撤上行帧", "action": "SdcSyncFrame", "delayMs": -1 },
+    "SdcInitBattleState": {
+      "type": "action",
+      "action": "SdcInitBattleState",
+      "delayMs": -1
+    },
+    "SdcInitBattleTiming": {
+      "type": "action",
+      "action": "SdcInitBattleTiming",
+      "onError": {
+        "strategy": "skip"
+      },
+      "delayMs": -1
+    },
+    "SdcInitBattleInventory": {
+      "type": "action",
+      "action": "SdcInitBattleInventory",
+      "onError": {
+        "strategy": "skip"
+      },
+      "delayMs": -1
+    },
+    "sdcSyncLoop": {
+      "type": "loop",
+      "body": "sdcBattleTick",
+      "loopCount": -1,
+      "breakCondition": "state:sdcDwellDone"
+    },
+    "sdcBattleTick": {
+      "type": "sequence",
+      "next": [
+        "SdcSyncFrame",
+        "SdcFrameInterval",
+        "SdcUpdateDwellState",
+        "SdcLootEvent"
+      ]
+    },
+    "SdcSyncFrame": {
+      "type": "action",
+      "description": "发送一次搜打撤上行帧",
+      "action": "SdcSyncFrame",
+      "delayMs": -1
+    },
     "SdcFrameInterval": {
       "type": "weighted",
       "options": [
-        { "node": "SdcFrameWait5s", "weight": 1 },
-        { "node": "SdcFrameWait5500ms", "weight": 1 },
-        { "node": "SdcFrameWait6s", "weight": 1 }
+        {
+          "node": "SdcFrameWait5s",
+          "weight": 1
+        },
+        {
+          "node": "SdcFrameWait5500ms",
+          "weight": 1
+        },
+        {
+          "node": "SdcFrameWait6s",
+          "weight": 1
+        }
       ]
     },
-    "SdcFrameWait5s": { "type": "wait", "waitMs": 5000 },
-    "SdcFrameWait5500ms": { "type": "wait", "waitMs": 5500 },
-    "SdcFrameWait6s": { "type": "wait", "waitMs": 6000 },
-    "SdcUpdateDwellState": { "type": "action", "description": "检查随机停留是否结束", "action": "SdcUpdateDwellState", "delayMs": -1 },
+    "SdcFrameWait5s": {
+      "type": "wait",
+      "waitMs": 5000
+    },
+    "SdcFrameWait5500ms": {
+      "type": "wait",
+      "waitMs": 5500
+    },
+    "SdcFrameWait6s": {
+      "type": "wait",
+      "waitMs": 6000
+    },
+    "SdcUpdateDwellState": {
+      "type": "action",
+      "description": "检查随机停留是否结束",
+      "action": "SdcUpdateDwellState",
+      "delayMs": -1
+    },
     "SdcLootEvent": {
       "type": "sequence",
       "description": "到达随机时刻后选择真实宝箱并进入开箱分支",
-      "next": ["SdcSelectChest", "SdcHasSelectedChest"]
+      "next": [
+        "SdcSelectChest",
+        "SdcHasSelectedChest"
+      ]
     },
-    "SdcSelectChest": { "type": "action", "action": "SdcSelectChest", "delayMs": -1, "onError": { "strategy": "resume" } },
+    "SdcSelectChest": {
+      "type": "action",
+      "action": "SdcSelectChest",
+      "delayMs": -1
+    },
     "SdcHasSelectedChest": {
       "type": "boolean",
       "condition": "state:sdcChestSelected",
@@ -320,33 +968,93 @@
     },
     "SdcOpenSelectedChest": {
       "type": "sequence",
-      "next": ["SdcConsumeChestKey", "SdcCollectChestLoot", "SdcCompleteChestOpen"]
+      "next": [
+        "SdcConsumeChestKey",
+        "SdcCollectChestLoot",
+        "SdcCompleteChestOpen"
+      ]
     },
-    "SdcConsumeChestKey": { "type": "action", "action": "SdcConsumeChestKey", "delayMs": -1, "onError": { "strategy": "resume" } },
-    "SdcCollectChestLoot": { "type": "action", "action": "SdcCollectChestLoot", "delayMs": -1, "onError": { "strategy": "resume" } },
-    "SdcCompleteChestOpen": { "type": "action", "action": "SdcCompleteChestOpen", "delayMs": -1, "onError": { "strategy": "resume" } },
-    "SdcFinalSyncFrame": { "type": "action", "action": "SdcSyncFrame", "delayMs": -1 },
-    "CloseBattleUDP": { "type": "action", "action": "CloseBattleUDP" },
+    "SdcConsumeChestKey": {
+      "type": "action",
+      "action": "SdcConsumeChestKey",
+      "delayMs": -1
+    },
+    "SdcCollectChestLoot": {
+      "type": "action",
+      "action": "SdcCollectChestLoot",
+      "delayMs": -1
+    },
+    "SdcCompleteChestOpen": {
+      "type": "action",
+      "action": "SdcCompleteChestOpen",
+      "delayMs": -1
+    },
+    "SdcFinalSyncFrame": {
+      "type": "action",
+      "action": "SdcSyncFrame",
+      "delayMs": -1
+    },
+    "CloseBattleUDP": {
+      "type": "action",
+      "action": "CloseBattleUDP"
+    },
     "SdcOutcomeBranch": {
       "type": "weighted",
       "description": "随机选择成功撤离、撤离失败或死亡结局",
       "options": [
-        { "node": "SdcOutcomeSuccess", "weight": 60 },
-        { "node": "SdcOutcomeEvacuationFailed", "weight": 20 },
-        { "node": "SdcOutcomeDeath", "weight": 20 }
+        {
+          "node": "SdcOutcomeSuccess",
+          "weight": 60
+        },
+        {
+          "node": "SdcOutcomeEvacuationFailed",
+          "weight": 20
+        },
+        {
+          "node": "SdcOutcomeDeath",
+          "weight": 20
+        }
       ]
     },
-    "SdcOutcomeSuccess": { "type": "action", "action": "SdcSetOutcomeSuccess" },
-    "SdcOutcomeEvacuationFailed": { "type": "action", "action": "SdcSetOutcomeEvacuationFailed" },
-    "SdcOutcomeDeath": { "type": "action", "action": "SdcSetOutcomeDeath" },
+    "SdcOutcomeSuccess": {
+      "type": "action",
+      "action": "SdcSetOutcomeSuccess"
+    },
+    "SdcOutcomeEvacuationFailed": {
+      "type": "action",
+      "action": "SdcSetOutcomeEvacuationFailed"
+    },
+    "SdcOutcomeDeath": {
+      "type": "action",
+      "action": "SdcSetOutcomeDeath"
+    },
     "SdcBattleEnd": {
       "type": "sequence",
       "description": "先分类最终资产，再构造并提交中途结算(4:69)",
-      "next": ["SdcClassifySettlement", "SdcSendSettlement", "SdcMarkSettlementConfirmed"]
+      "next": [
+        "SdcClassifySettlement",
+        "SdcSendSettlement",
+        "SdcMarkSettlementConfirmed"
+      ]
     },
-    "SdcClassifySettlement": { "type": "action", "action": "SdcClassifySettlement", "onError": { "strategy": "skip" } },
-    "SdcSendSettlement": { "type": "action", "action": "SdcSendSettlement", "onError": { "strategy": "skip" } },
-    "SdcMarkSettlementConfirmed": { "type": "action", "action": "SdcMarkSettlementConfirmed" },
+    "SdcClassifySettlement": {
+      "type": "action",
+      "action": "SdcClassifySettlement",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcSendSettlement": {
+      "type": "action",
+      "action": "SdcSendSettlement",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcMarkSettlementConfirmed": {
+      "type": "action",
+      "action": "SdcMarkSettlementConfirmed"
+    },
     "SdcAfterSettlement": {
       "type": "boolean",
       "description": "仅在 4:69 已确认时继续退出和领奖；失败时等待服务端完成战斗回收",
@@ -356,55 +1064,145 @@
     },
     "SdcSettlementConfirmedPath": {
       "type": "sequence",
-      "next": ["BattleReward"]
+      "next": [
+        "BattleReward"
+      ]
     },
     "SdcBattleRequestFailureRecovery": {
       "type": "sequence",
       "description": "上游战斗请求失败后关闭连接并标记恢复；未确认服务端大厅态前不再调用依赖接口",
-      "next": ["CloseBattleUDP", "CloseBattleTCP", "SdcMarkRecoveryNeeded"]
+      "next": [
+        "CloseBattleUDP",
+        "CloseBattleTCP",
+        "SdcMarkRecoveryNeeded"
+      ]
     },
     "SdcExitBattle": {
       "type": "action",
       "description": "SDC 撤离结算后退出战斗(4:87)",
       "action": "SdcExitBattle",
-      "onError": { "handler": "SdcBattleRequestFailureRecovery", "strategy": "skip" }
+      "onError": {
+        "handler": "SdcBattleRequestFailureRecovery",
+        "strategy": "skip"
+      }
     },
-    "CloseBattleTCP": { "type": "action", "action": "CloseBattleTCP" },
+    "CloseBattleTCP": {
+      "type": "action",
+      "action": "CloseBattleTCP"
+    },
     "BattleReward": {
       "type": "sequence",
       "description": "声明式等待结算回执，再分别校验战斗身份与结局收益",
-      "next": ["SdcListenBattleReward", "SdcValidateRewardIdentity", "SdcValidateRewardOutcome", "SdcExitBattle", "CloseBattleUDP", "CloseBattleTCP", "GameOver", "SdcReturnedLobby"]
+      "next": [
+        "SdcListenBattleReward",
+        "SdcValidateRewardIdentity",
+        "SdcValidateRewardOutcome",
+        "SdcExitBattle",
+        "CloseBattleUDP",
+        "CloseBattleTCP",
+        "GameOver",
+        "SdcReturnedLobby"
+      ]
     },
-    "SdcListenBattleReward": { "type": "action", "action": "SdcListenBattleReward", "onError": { "handler": "SdcRewardFailureRecovery", "strategy": "skip" } },
-    "SdcRewardFailureRecovery": { "type": "sequence", "next": ["SdcLogRewardTimeout", "CloseBattleUDP", "CloseBattleTCP", "SdcRewardCooldownWait", "SdcMarkRecoveryNeeded"] },
-    "SdcRewardCooldownWait": { "type": "wait", "description": "4:72超时后给服务端SDC结算lease(5分钟TTL)释放留时间，避免下一轮撞lease busy", "waitMs": 30000 },
-    "SdcLogRewardTimeout": { "type": "action", "action": "SdcLogRewardTimeout" },
-    "SdcValidateRewardIdentity": { "type": "action", "action": "SdcValidateRewardIdentity", "onError": { "strategy": "resume" } },
-    "SdcValidateRewardOutcome": { "type": "action", "action": "SdcValidateRewardOutcome", "onError": { "strategy": "resume" } },
-    "GameOver": { "type": "action", "action": "GameOver", "onError": { "ignoreCodes": [308], "handler": "SdcMarkRecoveryNeeded", "strategy": "skip" } },
+    "SdcListenBattleReward": {
+      "type": "action",
+      "action": "SdcListenBattleReward",
+      "onError": {
+        "handler": "SdcRewardFailureRecovery",
+        "strategy": "skip"
+      }
+    },
+    "SdcRewardFailureRecovery": {
+      "type": "sequence",
+      "next": [
+        "SdcLogRewardTimeout",
+        "CloseBattleUDP",
+        "CloseBattleTCP",
+        "SdcRewardCooldownWait",
+        "SdcMarkRecoveryNeeded"
+      ]
+    },
+    "SdcRewardCooldownWait": {
+      "type": "wait",
+      "description": "4:72超时后给服务端SDC结算lease(5分钟TTL)释放留时间，避免下一轮撞lease busy",
+      "waitMs": 30000
+    },
+    "SdcLogRewardTimeout": {
+      "type": "action",
+      "action": "SdcLogRewardTimeout"
+    },
+    "SdcValidateRewardIdentity": {
+      "type": "action",
+      "action": "SdcValidateRewardIdentity"
+    },
+    "SdcValidateRewardOutcome": {
+      "type": "action",
+      "action": "SdcValidateRewardOutcome"
+    },
+    "GameOver": {
+      "type": "action",
+      "action": "GameOver",
+      "onError": {
+        "ignoreCodes": [
+          308
+        ],
+        "handler": "SdcMarkRecoveryNeeded",
+        "strategy": "skip"
+      }
+    },
     "SdcReturnedLobby": {
       "type": "sequence",
-      "next": ["SdcMarkReturnedLobby", "SdcClearTeamState", "SdcOutBattlePhase"]
+      "next": [
+        "SdcMarkReturnedLobby",
+        "SdcClearTeamState",
+        "SdcOutBattlePhase"
+      ]
     },
-    "SdcMarkReturnedLobby": { "type": "action", "action": "SdcMarkReturnedLobby" },
+    "SdcMarkReturnedLobby": {
+      "type": "action",
+      "action": "SdcMarkReturnedLobby"
+    },
     "SdcOutBattlePhase": {
       "type": "sequence",
-      "next": ["SdcRefreshOutBattlePrepare", "SdcVerifyOutcomeAssets", "SdcOutBattleOutcomeBranch"]
+      "next": [
+        "SdcRefreshOutBattlePrepare",
+        "SdcVerifyOutcomeAssets",
+        "SdcOutBattleOutcomeBranch"
+      ]
     },
     "SdcRefreshOutBattlePrepare": {
       "type": "sequence",
       "description": "声明式刷新服务端战备后计算背包摘要",
-      "next": ["SdcRefreshPrepareRequest", "SdcSummarizeOutBattlePrepare"]
+      "next": [
+        "SdcRefreshPrepareRequest",
+        "SdcSummarizeOutBattlePrepare"
+      ]
     },
     "SdcRefreshPrepareRequest": {
-      "type": "action", "action": "SdcRefreshPrepareRequest",
-      "onError": { "retry": { "maxRetries": 1, "retryDelayMs": 500 }, "strategy": "skip" }
+      "type": "action",
+      "action": "SdcRefreshPrepareRequest",
+      "onError": {
+        "retry": {
+          "maxRetries": 1,
+          "retryDelayMs": 500
+        },
+        "strategy": "skip"
+      }
     },
-    "SdcSummarizeOutBattlePrepare": { "type": "action", "action": "SdcSummarizeOutBattlePrepare", "onError": { "strategy": "skip" } },
+    "SdcSummarizeOutBattlePrepare": {
+      "type": "action",
+      "action": "SdcSummarizeOutBattlePrepare",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
     "SdcVerifyOutcomeAssets": {
       "type": "sequence",
       "description": "重拉战备与仓库后按结局核对资产",
-      "next": ["SdcRequestVerifySnapshots", "SdcValidateOutcomeAssets"]
+      "next": [
+        "SdcRequestVerifySnapshots",
+        "SdcValidateOutcomeAssets"
+      ]
     },
     "SdcOutBattleOutcomeBranch": {
       "type": "boolean",
@@ -414,7 +1212,11 @@
     },
     "SdcSuccessOutBattlePhase": {
       "type": "sequence",
-      "next": ["SdcSellRandomOutBattleItem", "SdcQuickDepositOutBattle", "SdcVerifyOutBattleAssets"]
+      "next": [
+        "SdcSellRandomOutBattleItem",
+        "SdcQuickDepositOutBattle",
+        "SdcVerifyOutBattleAssets"
+      ]
     },
     "SdcNoSuccessOutBattleAssets": {
       "type": "action",
@@ -424,626 +1226,1921 @@
     "SdcSellRandomOutBattleItem": {
       "type": "sequence",
       "description": "每次回大厅从服务端背包随机出售1件道具",
-      "next": ["SdcResetSoldItems", "SdcHasRandomSellItem"]
+      "next": [
+        "SdcResetSoldItems",
+        "SdcHasRandomSellItem"
+      ]
     },
-    "SdcResetSoldItems": { "type": "action", "action": "SdcResetSoldItems" },
+    "SdcResetSoldItems": {
+      "type": "action",
+      "action": "SdcResetSoldItems"
+    },
     "SdcHasRandomSellItem": {
       "type": "boolean",
       "condition": "state:sdcOutBattleSellCount > 0",
       "trueNext": "SdcExecuteRandomSell"
     },
-    "SdcExecuteRandomSell": { "type": "sequence", "next": ["SdcBatchSellRequest", "SdcValidateSellResult"] },
-    "SdcBatchSellRequest": { "type": "action", "action": "SdcBatchSellRequest", "onError": { "strategy": "skip" } },
-    "SdcValidateSellResult": { "type": "action", "action": "SdcValidateSellResult", "onError": { "strategy": "skip" } },
+    "SdcExecuteRandomSell": {
+      "type": "sequence",
+      "next": [
+        "SdcBatchSellRequest",
+        "SdcValidateSellResult"
+      ]
+    },
+    "SdcBatchSellRequest": {
+      "type": "action",
+      "action": "SdcBatchSellRequest",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcValidateSellResult": {
+      "type": "action",
+      "action": "SdcValidateSellResult",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
     "SdcQuickDepositOutBattle": {
       "type": "sequence",
       "description": "随机出售后将剩余可入库战利品一键入库",
-      "next": ["SdcResetDepositedItems", "SdcQuickDepositRequest", "SdcValidateQuickDeposit"]
+      "next": [
+        "SdcResetDepositedItems",
+        "SdcQuickDepositRequest",
+        "SdcValidateQuickDeposit"
+      ]
     },
-    "SdcResetDepositedItems": { "type": "action", "action": "SdcResetDepositedItems" },
-    "SdcQuickDepositRequest": { "type": "action", "action": "SdcQuickDepositRequest", "onError": { "strategy": "skip" } },
-    "SdcValidateQuickDeposit": { "type": "action", "action": "SdcValidateQuickDeposit", "onError": { "strategy": "skip" } },
+    "SdcResetDepositedItems": {
+      "type": "action",
+      "action": "SdcResetDepositedItems"
+    },
+    "SdcQuickDepositRequest": {
+      "type": "action",
+      "action": "SdcQuickDepositRequest",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
+    "SdcValidateQuickDeposit": {
+      "type": "action",
+      "action": "SdcValidateQuickDeposit",
+      "onError": {
+        "strategy": "skip"
+      }
+    },
     "SdcVerifyOutBattleAssets": {
       "type": "sequence",
       "description": "重新拉取战备和仓库校验出售及入库结果",
-      "next": ["SdcRequestVerifySnapshots", "SdcValidateOutBattleAssets"]
+      "next": [
+        "SdcRequestVerifySnapshots",
+        "SdcValidateOutBattleAssets"
+      ]
     },
-    "SdcRequestVerifySnapshots": { "type": "sequence", "next": ["SdcVerifyPrepareRequest", "SdcVerifyWarehouseRequest"] },
+    "SdcRequestVerifySnapshots": {
+      "type": "sequence",
+      "next": [
+        "SdcVerifyPrepareRequest",
+        "SdcVerifyWarehouseRequest"
+      ]
+    },
     "SdcVerifyPrepareRequest": {
-      "type": "action", "action": "SdcVerifyPrepareRequest",
-      "onError": { "retry": { "maxRetries": 1, "retryDelayMs": 500 }, "strategy": "skip" }
+      "type": "action",
+      "action": "SdcVerifyPrepareRequest",
+      "onError": {
+        "retry": {
+          "maxRetries": 1,
+          "retryDelayMs": 500
+        },
+        "strategy": "skip"
+      }
     },
     "SdcVerifyWarehouseRequest": {
-      "type": "action", "action": "SdcVerifyWarehouseRequest",
-      "onError": { "retry": { "maxRetries": 1, "retryDelayMs": 500 }, "strategy": "skip" }
+      "type": "action",
+      "action": "SdcVerifyWarehouseRequest",
+      "onError": {
+        "retry": {
+          "maxRetries": 1,
+          "retryDelayMs": 500
+        },
+        "strategy": "skip"
+      }
     },
-    "SdcValidateOutcomeAssets": { "type": "action", "action": "SdcValidateOutcomeAssets", "onError": { "strategy": "resume" } },
-    "SdcValidateOutBattleAssets": { "type": "action", "action": "SdcValidateOutBattleAssets", "onError": { "strategy": "resume" } },
-
+    "SdcValidateOutcomeAssets": {
+      "type": "action",
+      "action": "SdcValidateOutcomeAssets"
+    },
+    "SdcValidateOutBattleAssets": {
+      "type": "action",
+      "action": "SdcValidateOutBattleAssets"
+    },
     "SdcTeamCleanup": {
       "type": "sequence",
-      "next": ["CloseBattleUDP", "CloseBattleTCP", "SdcLeaveTeam", "SdcCheckTeamCleared", "SdcMarkRecoveryIfTeamRemains", "SdcClearState"]
+      "next": [
+        "CloseBattleUDP",
+        "CloseBattleTCP",
+        "SdcLeaveTeam",
+        "SdcCheckTeamCleared",
+        "SdcMarkRecoveryIfTeamRemains",
+        "SdcClearState"
+      ]
     },
     "SdcMarkRecoveryIfTeamRemains": {
       "type": "boolean",
       "condition": "state:sdcTeamCleared",
       "falseNext": "SdcMarkRecoveryNeeded"
     },
-    "SdcClearState": { "type": "action", "action": "SdcClearState" },
-    "sdcRoundCooldown": { "type": "wait", "waitMin": 2000, "waitMax": 4000 }
+    "SdcClearState": {
+      "type": "action",
+      "action": "SdcClearState"
+    },
+    "sdcRoundCooldown": {
+      "type": "wait",
+      "waitMin": 2000,
+      "waitMax": 4000
+    }
   },
   "actions": {
-    "RequestZoneList": { "pattern": "lua", "script": "request_zone_list.lua" },
-    "RequestOutsideNotice": { "pattern": "lua", "script": "request_outside_notice.lua" },
-    "RequestNotice": { "pattern": "lua", "script": "request_notice.lua" },
-    "PostLogin": { "pattern": "lua", "script": "post_login.lua" },
-    "NewRole": { "pattern": "lua", "script": "new_role.lua" },
-    "SelectRole": { "pattern": "lua", "script": "select_role.lua" },
-    "ConnectLogicTCP": { "pattern": "lua", "script": "connect_logic.lua" },
-    "ConnectBattleTCP": { "pattern": "lua", "script": "connect_battle_tcp.lua" },
-    "ConnectBattleUDP": { "pattern": "lua", "script": "connect_sdc_battle_udp.lua" },
-    "RequestPlayerData": { "pattern": "lua", "script": "request_player_data.lua" },
+    "RequestZoneList": {
+      "pattern": "lua",
+      "script": "request_zone_list.lua"
+    },
+    "RequestOutsideNotice": {
+      "pattern": "lua",
+      "script": "request_outside_notice.lua"
+    },
+    "RequestNotice": {
+      "pattern": "lua",
+      "script": "request_notice.lua"
+    },
+    "PostLogin": {
+      "pattern": "lua",
+      "script": "post_login.lua"
+    },
+    "NewRole": {
+      "pattern": "lua",
+      "script": "new_role.lua"
+    },
+    "SelectRole": {
+      "pattern": "lua",
+      "script": "select_role.lua"
+    },
+    "ConnectLogicTCP": {
+      "pattern": "lua",
+      "script": "connect_logic.lua"
+    },
+    "ConnectBattleTCP": {
+      "pattern": "lua",
+      "script": "connect_battle_tcp.lua"
+    },
+    "ConnectBattleUDP": {
+      "pattern": "lua",
+      "script": "connect_sdc_battle_udp.lua"
+    },
+    "RequestPlayerData": {
+      "pattern": "lua",
+      "script": "request_player_data.lua"
+    },
     "SdcInitRecoveryFlags": {
       "pattern": "setState",
       "bindings": [
-        { "type": "fixed", "field": "sdcRecoveryNeeded", "value": false },
-        { "type": "fixed", "field": "sdcRecoveryComplete", "value": false }
+        {
+          "type": "fixed",
+          "field": "sdcRecoveryNeeded",
+          "value": false
+        },
+        {
+          "type": "fixed",
+          "field": "sdcRecoveryComplete",
+          "value": false
+        }
       ]
     },
-    "SdcReadBattleReconnection": { "pattern": "lua", "script": "sdc_read_battle_reconnection.lua" },
-    "SdcCheckTeamCleared": { "pattern": "lua", "script": "sdc_check_team_cleared.lua" },
+    "SdcReadBattleReconnection": {
+      "pattern": "lua",
+      "script": "sdc_read_battle_reconnection.lua"
+    },
+    "SdcCheckTeamCleared": {
+      "pattern": "lua",
+      "script": "sdc_check_team_cleared.lua"
+    },
     "SdcClearTeamState": {
       "pattern": "clearState",
-      "keys": ["teamId"]
+      "keys": [
+        "teamId"
+      ]
     },
     "SdcMarkRecoveryNeeded": {
       "pattern": "setState",
       "bindings": [
-        { "type": "fixed", "field": "sdcRecoveryNeeded", "value": true },
-        { "type": "fixed", "field": "sdcRecoveryComplete", "value": false }
+        {
+          "type": "fixed",
+          "field": "sdcRecoveryNeeded",
+          "value": true
+        },
+        {
+          "type": "fixed",
+          "field": "sdcRecoveryComplete",
+          "value": false
+        }
       ]
     },
     "SdcMarkRecoveryComplete": {
       "pattern": "setState",
       "bindings": [
-        { "type": "fixed", "field": "sdcRecoveryNeeded", "value": false },
-        { "type": "fixed", "field": "sdcRecoveryComplete", "value": true }
+        {
+          "type": "fixed",
+          "field": "sdcRecoveryNeeded",
+          "value": false
+        },
+        {
+          "type": "fixed",
+          "field": "sdcRecoveryComplete",
+          "value": true
+        }
       ]
     },
     "PlayerLogin": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": { "cmd": 1, "act": 1 },
+      "route": {
+        "cmd": 1,
+        "act": 1
+      },
       "c2sProto": "Game.LoginPlayerC2S",
       "s2cProto": "Game.LoginPlayerS2C",
       "bindings": [
-        { "type": "state", "field": "playerId", "source": "roleId" },
-        { "type": "state", "field": "session", "source": "session" },
-        { "type": "state", "field": "version", "source": "version" },
-        { "type": "state", "field": "battleVersion", "source": "battleVersion" },
-        { "type": "state", "field": "account", "source": "account" },
-        { "type": "state", "field": "zoneId", "source": "zoneId" }
+        {
+          "type": "state",
+          "field": "playerId",
+          "source": "roleId"
+        },
+        {
+          "type": "state",
+          "field": "session",
+          "source": "session"
+        },
+        {
+          "type": "state",
+          "field": "version",
+          "source": "version"
+        },
+        {
+          "type": "state",
+          "field": "battleVersion",
+          "source": "battleVersion"
+        },
+        {
+          "type": "state",
+          "field": "account",
+          "source": "account"
+        },
+        {
+          "type": "state",
+          "field": "zoneId",
+          "source": "zoneId"
+        }
       ],
-      "store": [ { "setter": "loginResp" } ]
+      "store": [
+        {
+          "setter": "loginResp"
+        }
+      ]
     },
     "ReportBattleDelay": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": { "cmd": 2, "act": 29 },
+      "route": {
+        "cmd": 2,
+        "act": 29
+      },
       "c2sProto": "Game.MainBattleDelayC2S",
       "bindings": [
-        { "type": "fixed", "field": "battleDelayList[0].BattleArea", "value": "ap.hongkong" },
-        { "type": "randomInt", "field": "battleDelayList[0].DelayTime", "min": 30, "max": 100 },
-        { "type": "fixed", "field": "battleDelayList[0].PingSendCnt", "value": 10 },
-        { "type": "fixed", "field": "battleDelayList[0].PingRecvCnt", "value": 10 },
-        { "type": "fixed", "field": "battleDelayList[1].BattleArea", "value": "ap.taibei" },
-        { "type": "randomInt", "field": "battleDelayList[1].DelayTime", "min": 30, "max": 100 },
-        { "type": "fixed", "field": "battleDelayList[1].PingSendCnt", "value": 10 },
-        { "type": "fixed", "field": "battleDelayList[1].PingRecvCnt", "value": 10 }
+        {
+          "type": "fixed",
+          "field": "battleDelayList[0].BattleArea",
+          "value": "ap.hongkong"
+        },
+        {
+          "type": "randomInt",
+          "field": "battleDelayList[0].DelayTime",
+          "min": 30,
+          "max": 100
+        },
+        {
+          "type": "fixed",
+          "field": "battleDelayList[0].PingSendCnt",
+          "value": 10
+        },
+        {
+          "type": "fixed",
+          "field": "battleDelayList[0].PingRecvCnt",
+          "value": 10
+        },
+        {
+          "type": "fixed",
+          "field": "battleDelayList[1].BattleArea",
+          "value": "ap.taibei"
+        },
+        {
+          "type": "randomInt",
+          "field": "battleDelayList[1].DelayTime",
+          "min": 30,
+          "max": 100
+        },
+        {
+          "type": "fixed",
+          "field": "battleDelayList[1].PingSendCnt",
+          "value": 10
+        },
+        {
+          "type": "fixed",
+          "field": "battleDelayList[1].PingRecvCnt",
+          "value": 10
+        }
       ]
     },
     "GMAddItem": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": { "cmd": 9, "act": 1 },
+      "route": {
+        "cmd": 9,
+        "act": 1
+      },
       "c2sProto": "Game.GmEventC2S",
       "s2cProto": "Game.GmEventS2C",
       "bindings": [
-        { "type": "fixed", "field": "GM.type", "value": 4 },
-        { "type": "fixed", "field": "GM.param", "value": [1, 2147483647, 2, 2147483647, 5, 2147483647, 6, 2147483647, 7, 2147483647, 8, 2147483647, 10, 2147483647, 14, 2147483647, 32, 2147483647, 33, 2147483647, 7200001, 1, 7200002, 1, 7200003, 1, 7200004, 1, 7300001, 1, 7300003, 1, 7300004, 1, 7300005, 1, 7300006, 1, 7090001, 1, 7090002, 1, 7090005, 1, 7110001, 1, 7110002, 1, 7110003, 1, 7110004, 1, 7110005, 1, 7110006, 1, 7110007, 1, 7110008, 1, 7110009, 1, 7120001, 1, 7120002, 1, 7120003, 1, 7120004, 1, 7120005, 1, 7040001, 100000] }
+        {
+          "type": "fixed",
+          "field": "GM.type",
+          "value": 4
+        },
+        {
+          "type": "fixed",
+          "field": "GM.param",
+          "value": [
+            1,
+            2147483647,
+            2,
+            2147483647,
+            5,
+            2147483647,
+            6,
+            2147483647,
+            7,
+            2147483647,
+            8,
+            2147483647,
+            10,
+            2147483647,
+            14,
+            2147483647,
+            32,
+            2147483647,
+            33,
+            2147483647,
+            7200001,
+            1,
+            7200002,
+            1,
+            7200003,
+            1,
+            7200004,
+            1,
+            7300001,
+            1,
+            7300003,
+            1,
+            7300004,
+            1,
+            7300005,
+            1,
+            7300006,
+            1,
+            7090001,
+            1,
+            7090002,
+            1,
+            7090005,
+            1,
+            7110001,
+            1,
+            7110002,
+            1,
+            7110003,
+            1,
+            7110004,
+            1,
+            7110005,
+            1,
+            7110006,
+            1,
+            7110007,
+            1,
+            7110008,
+            1,
+            7110009,
+            1,
+            7120001,
+            1,
+            7120002,
+            1,
+            7120003,
+            1,
+            7120004,
+            1,
+            7120005,
+            1,
+            7040001,
+            100000
+          ]
+        }
       ]
     },
     "GMAddHeroCup": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": { "cmd": 9, "act": 1 },
+      "route": {
+        "cmd": 9,
+        "act": 1
+      },
       "c2sProto": "Game.GmEventC2S",
       "s2cProto": "Game.GmEventS2C",
       "bindings": [
-        { "type": "fixed", "field": "GM.type", "value": 13 },
-        { "type": "fixed", "field": "GM.param", "value": [109, 1000] }
+        {
+          "type": "fixed",
+          "field": "GM.type",
+          "value": 13
+        },
+        {
+          "type": "fixed",
+          "field": "GM.param",
+          "value": [
+            109,
+            1000
+          ]
+        }
       ]
     },
     "GMFinishAllNewUserGuide": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": { "cmd": 9, "act": 1 },
+      "route": {
+        "cmd": 9,
+        "act": 1
+      },
       "c2sProto": "Game.GmEventC2S",
       "s2cProto": "Game.GmEventS2C",
-      "bindings": [ { "type": "fixed", "field": "GM.type", "value": 52 } ]
+      "bindings": [
+        {
+          "type": "fixed",
+          "field": "GM.type",
+          "value": 52
+        }
+      ]
     },
     "GetActivityList": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": { "cmd": 22, "act": 1 },
+      "route": {
+        "cmd": 22,
+        "act": 1
+      },
       "c2sProto": "Game.OperateGetListC2S",
       "s2cProto": "Game.OperateGetListS2C"
     },
-    "unlockBasicFunction": { "pattern": "lua", "script": "unlock_basic_functions.lua" },
+    "unlockBasicFunction": {
+      "pattern": "lua",
+      "script": "unlock_basic_functions.lua"
+    },
     "LbsPositioning": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": { "cmd": 40, "act": 2 },
+      "route": {
+        "cmd": 40,
+        "act": 2
+      },
       "c2sProto": "Game.LbsPositioningC2S",
       "bindings": [
         {
           "type": "randomPick",
           "field": "lbsId",
-          "values": [10003001, 10003002, 10003003, 10003004, 10003005, 10003006, 10003007, 10003008, 10003009, 10003010, 10003011, 10003012, 10003013, 10005001, 10005002, 10005003, 10005004, 10005005, 10005006, 10005007, 10005008, 10005009, 10005010, 10005011, 10005012, 10005013, 10005014, 10005015, 10005016, 10005017, 10005018, 10005019, 10005020, 10005021, 10005022, 10005023, 10005024, 10005025, 10005026, 10005027, 10005028, 10005029, 10005030, 10005031, 10005032, 10005033, 10005034, 10005035, 10005036, 10005037, 20005001, 20005002, 20005003, 20005004, 20005005, 30001001, 30001002, 30001003, 30001004, 30001005]
+          "values": [
+            10003001,
+            10003002,
+            10003003,
+            10003004,
+            10003005,
+            10003006,
+            10003007,
+            10003008,
+            10003009,
+            10003010,
+            10003011,
+            10003012,
+            10003013,
+            10005001,
+            10005002,
+            10005003,
+            10005004,
+            10005005,
+            10005006,
+            10005007,
+            10005008,
+            10005009,
+            10005010,
+            10005011,
+            10005012,
+            10005013,
+            10005014,
+            10005015,
+            10005016,
+            10005017,
+            10005018,
+            10005019,
+            10005020,
+            10005021,
+            10005022,
+            10005023,
+            10005024,
+            10005025,
+            10005026,
+            10005027,
+            10005028,
+            10005029,
+            10005030,
+            10005031,
+            10005032,
+            10005033,
+            10005034,
+            10005035,
+            10005036,
+            10005037,
+            20005001,
+            20005002,
+            20005003,
+            20005004,
+            20005005,
+            30001001,
+            30001002,
+            30001003,
+            30001004,
+            30001005
+          ]
         }
       ]
     },
-
     "SdcClearRoundTransient": {
       "pattern": "clearState",
       "keys": [
-        "sdcSetupReady", "sdcMatchStarted", "sdcRoundFailed", "sdcSettleResult", "sdcSettlementConfirmed", "sdcReturnedLobby",
-        "sdcDwellTargetMs", "sdcDwellStartMs", "sdcDwellDone",
-        "sdcPrepareData", "sdcInitialItemGuids", "sdcPrepareTotalValue", "sdcPrepareErrorCode",
-        "sdcPrepareTargetCount", "sdcPrepareManagementDone", "sdcPrepareManagementActions",
-        "sdcPrepareUsedKinds", "sdcPrepareActionKind", "sdcPrepareActionParams", "sdcPrepareActionErrorCode",
-        "sdcPrepareSnapshot", "sdcPrepareSnapshotErrorCode", "sdcWarehouseSnapshot", "sdcWarehouseSnapshotErrorCode",
-        "sdcContainerSnapshot", "sdcContainerSnapshotErrorCode", "sdcSuitPresetSnapshot", "sdcSuitPresetSnapshotErrorCode",
-        "sdcLoadingSnapshotWire", "sdcLoadingDropBudget",
-        "sdcBattlePackData", "sdcBattleEquipData", "sdcBattleAcquiredItems", "sdcBattleLootValue",
-        "sdcChestOpenTarget", "sdcChestOpenCount", "sdcNextChestOpenAtMs", "sdcLootEventDone",
-        "sdcLootChestId", "sdcOpenedChestKeys", "sdcChestOpenEvents", "sdcKeyUseRecords",
-        "sdcChestSelected", "sdcSelectedChest", "sdcChestElapsedMs", "sdcCurrentKeyUseMode",
-        "sdcChestRequestedLootCount", "sdcChestSelectedLootCount", "sdcChestAddedValue",
-        "sdcOutcome", "sdcExpectedSettleResult", "sdcExpectedBattleResult",
-        "sdcExpectedLostGuids", "sdcExpectedKeptGuids", "sdcOutBattleNoSuccessAssets",
-        "sdcSettlementData", "sdcSettlementSummary", "sdcRewardBattleId", "sdcRewardResult",
-        "sdcRewardSettleData", "sdcRewardLootValue", "sdcRewardNetLootValue", "sdcRewardKeptCount", "sdcRewardAcquiredCount",
-        "sdcOutBattlePackMaxSlots", "sdcOutBattlePackUsedSlots", "sdcOutBattlePackFreeSlots",
-        "sdcOutBattleNewItemGuids", "sdcOutBattleRandomSellGuid", "sdcOutBattleSoldGuids",
-        "sdcOutBattleDepositedGuids", "sdcOutBattlePrepareSnapshot", "sdcOutBattlePrepareErrorCode",
-        "sdcOutBattleSellErrorCode", "sdcOutBattleDepositErrorCode", "sdcOutBattleDepositTotalValue",
-        "sdcVerifyPrepareData", "sdcVerifyPrepareErrorCode", "sdcVerifyWarehouseData", "sdcVerifyWarehouseErrorCode",
+        "sdcSetupReady",
+        "sdcMatchStarted",
+        "sdcRoundFailed",
+        "sdcSettleResult",
+        "sdcSettlementConfirmed",
+        "sdcReturnedLobby",
+        "sdcDwellTargetMs",
+        "sdcDwellStartMs",
+        "sdcDwellDone",
+        "sdcPrepareData",
+        "sdcInitialItemGuids",
+        "sdcPrepareTotalValue",
+        "sdcPrepareErrorCode",
+        "sdcPrepareTargetCount",
+        "sdcPrepareManagementDone",
+        "sdcPrepareManagementActions",
+        "sdcPrepareUsedKinds",
+        "sdcPrepareActionKind",
+        "sdcPrepareActionParams",
+        "sdcPrepareActionErrorCode",
+        "sdcPrepareSnapshot",
+        "sdcPrepareSnapshotErrorCode",
+        "sdcWarehouseSnapshot",
+        "sdcWarehouseSnapshotErrorCode",
+        "sdcContainerSnapshot",
+        "sdcContainerSnapshotErrorCode",
+        "sdcSuitPresetSnapshot",
+        "sdcSuitPresetSnapshotErrorCode",
+        "sdcLoadingSnapshotWire",
+        "sdcLoadingDropBudget",
+        "sdcBattlePackData",
+        "sdcBattleEquipData",
+        "sdcBattleAcquiredItems",
+        "sdcBattleLootValue",
+        "sdcChestOpenTarget",
+        "sdcChestOpenCount",
+        "sdcNextChestOpenAtMs",
+        "sdcLootEventDone",
+        "sdcLootChestId",
+        "sdcOpenedChestKeys",
+        "sdcChestOpenEvents",
+        "sdcKeyUseRecords",
+        "sdcChestSelected",
+        "sdcSelectedChest",
+        "sdcChestElapsedMs",
+        "sdcCurrentKeyUseMode",
+        "sdcChestRequestedLootCount",
+        "sdcChestSelectedLootCount",
+        "sdcChestAddedValue",
+        "sdcOutcome",
+        "sdcExpectedSettleResult",
+        "sdcExpectedBattleResult",
+        "sdcExpectedLostGuids",
+        "sdcExpectedKeptGuids",
+        "sdcOutBattleNoSuccessAssets",
+        "sdcSettlementData",
+        "sdcSettlementSummary",
+        "sdcRewardBattleId",
+        "sdcRewardResult",
+        "sdcRewardSettleData",
+        "sdcRewardLootValue",
+        "sdcRewardNetLootValue",
+        "sdcRewardKeptCount",
+        "sdcRewardAcquiredCount",
+        "sdcOutBattlePackMaxSlots",
+        "sdcOutBattlePackUsedSlots",
+        "sdcOutBattlePackFreeSlots",
+        "sdcOutBattleNewItemGuids",
+        "sdcOutBattleRandomSellGuid",
+        "sdcOutBattleSoldGuids",
+        "sdcOutBattleDepositedGuids",
+        "sdcOutBattlePrepareSnapshot",
+        "sdcOutBattlePrepareErrorCode",
+        "sdcOutBattleSellErrorCode",
+        "sdcOutBattleDepositErrorCode",
+        "sdcOutBattleDepositTotalValue",
+        "sdcVerifyPrepareData",
+        "sdcVerifyPrepareErrorCode",
+        "sdcVerifyWarehouseData",
+        "sdcVerifyWarehouseErrorCode",
         "sdcMatchedModeId",
-        "battleId", "battleAddress", "battleSecretKey", "battleSession", "battleArea",
-        "battleGameType", "fighterIndex", "fighterListData", "packageIndex", "battleAck",
-        "loadProgress", "frameCount"
+        "battleId",
+        "battleAddress",
+        "battleSecretKey",
+        "battleSession",
+        "battleArea",
+        "battleGameType",
+        "fighterIndex",
+        "fighterListData",
+        "packageIndex",
+        "battleAck",
+        "loadProgress",
+        "frameCount"
       ]
     },
     "SdcInitRoundFlags": {
       "pattern": "setState",
       "bindings": [
-        { "type": "fixed", "field": "sdcSetupReady", "value": false },
-        { "type": "fixed", "field": "sdcMatchStarted", "value": false },
-        { "type": "fixed", "field": "sdcRoundFailed", "value": false },
-        { "type": "fixed", "field": "sdcDwellDone", "value": false },
-        { "type": "fixed", "field": "sdcSettlementConfirmed", "value": 0 },
-        { "type": "fixed", "field": "sdcReturnedLobby", "value": false }
+        {
+          "type": "fixed",
+          "field": "sdcSetupReady",
+          "value": false
+        },
+        {
+          "type": "fixed",
+          "field": "sdcMatchStarted",
+          "value": false
+        },
+        {
+          "type": "fixed",
+          "field": "sdcRoundFailed",
+          "value": false
+        },
+        {
+          "type": "fixed",
+          "field": "sdcDwellDone",
+          "value": false
+        },
+        {
+          "type": "fixed",
+          "field": "sdcSettlementConfirmed",
+          "value": 0
+        },
+        {
+          "type": "fixed",
+          "field": "sdcReturnedLobby",
+          "value": false
+        }
       ]
     },
-    "SdcLeaveTeam": { "pattern": "lua", "script": "sdc_leave_team.lua" },
+    "SdcLeaveTeam": {
+      "pattern": "lua",
+      "script": "sdc_leave_team.lua"
+    },
     "SdcInitPrepareManagement": {
       "pattern": "setState",
       "bindings": [
-        { "type": "randomInt", "field": "sdcPrepareTargetCount", "min": 1, "max": 2 },
-        { "type": "fixed", "field": "sdcPrepareManagementDone", "value": false },
-        { "type": "fixed", "field": "sdcPrepareManagementActions", "value": [] },
-        { "type": "fixed", "field": "sdcPrepareUsedKinds", "value": {} },
-        { "type": "fixed", "field": "sdcPrepareActionKind", "value": "none" }
+        {
+          "type": "randomInt",
+          "field": "sdcPrepareTargetCount",
+          "min": 1,
+          "max": 2
+        },
+        {
+          "type": "fixed",
+          "field": "sdcPrepareManagementDone",
+          "value": false
+        },
+        {
+          "type": "fixed",
+          "field": "sdcPrepareManagementActions",
+          "value": []
+        },
+        {
+          "type": "fixed",
+          "field": "sdcPrepareUsedKinds",
+          "value": {}
+        },
+        {
+          "type": "fixed",
+          "field": "sdcPrepareActionKind",
+          "value": "none"
+        }
       ]
     },
     "SdcMarkPrepareManagementDone": {
       "pattern": "setState",
-      "bindings": [ { "type": "fixed", "field": "sdcPrepareManagementDone", "value": true } ]
-    },
-    "SdcRequestPrepareData": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 1 },
-      "c2sProto": "Game.SdcGetPrepareDataC2S", "s2cProto": "Game.SdcGetPrepareDataS2C",
-      "store": [
-        { "field": "errorCode", "setter": "sdcPrepareErrorCode" },
-        { "field": "data", "setter": "sdcPrepareData" }
+      "bindings": [
+        {
+          "type": "fixed",
+          "field": "sdcPrepareManagementDone",
+          "value": true
+        }
       ]
     },
-    "SdcSummarizePrepareData": { "pattern": "lua", "script": "sdc_summarize_prepare_data.lua" },
-    "SdcRequestPrepareSnapshot": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 1 },
-      "c2sProto": "Game.SdcGetPrepareDataC2S", "s2cProto": "Game.SdcGetPrepareDataS2C",
+    "SdcRequestPrepareData": {
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 45,
+        "act": 1
+      },
+      "c2sProto": "Game.SdcGetPrepareDataC2S",
+      "s2cProto": "Game.SdcGetPrepareDataS2C",
       "store": [
-        { "field": "errorCode", "setter": "sdcPrepareSnapshotErrorCode" },
-        { "field": "data", "setter": "sdcPrepareSnapshot" }
+        {
+          "setter": "sdcPrepareErrorCode",
+          "field": "errorCode"
+        },
+        {
+          "setter": "sdcPrepareData",
+          "field": "data"
+        }
+      ]
+    },
+    "SdcSummarizePrepareData": {
+      "pattern": "lua",
+      "script": "sdc_summarize_prepare_data.lua"
+    },
+    "SdcRequestPrepareSnapshot": {
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 45,
+        "act": 1
+      },
+      "c2sProto": "Game.SdcGetPrepareDataC2S",
+      "s2cProto": "Game.SdcGetPrepareDataS2C",
+      "store": [
+        {
+          "setter": "sdcPrepareSnapshotErrorCode",
+          "field": "errorCode"
+        },
+        {
+          "setter": "sdcPrepareSnapshot",
+          "field": "data"
+        }
       ]
     },
     "SdcRequestWarehouseData": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 21 },
-      "c2sProto": "Game.SdcGetWarehouseDataC2S", "s2cProto": "Game.SdcGetWarehouseDataS2C",
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 45,
+        "act": 21
+      },
+      "c2sProto": "Game.SdcGetWarehouseDataC2S",
+      "s2cProto": "Game.SdcGetWarehouseDataS2C",
       "store": [
-        { "field": "errorCode", "setter": "sdcWarehouseSnapshotErrorCode" },
-        { "field": "data", "setter": "sdcWarehouseSnapshot" }
+        {
+          "setter": "sdcWarehouseSnapshotErrorCode",
+          "field": "errorCode"
+        },
+        {
+          "setter": "sdcWarehouseSnapshot",
+          "field": "data"
+        }
       ]
     },
     "SdcRequestContainerData": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 12 },
-      "c2sProto": "Game.SdcGetOutBattleContainerDataC2S", "s2cProto": "Game.SdcGetOutBattleContainerDataS2C",
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 45,
+        "act": 12
+      },
+      "c2sProto": "Game.SdcGetOutBattleContainerDataC2S",
+      "s2cProto": "Game.SdcGetOutBattleContainerDataS2C",
       "store": [
-        { "field": "errorCode", "setter": "sdcContainerSnapshotErrorCode" },
-        { "field": "containers", "setter": "sdcContainerSnapshot" }
+        {
+          "setter": "sdcContainerSnapshotErrorCode",
+          "field": "errorCode"
+        },
+        {
+          "setter": "sdcContainerSnapshot",
+          "field": "containers"
+        }
       ]
     },
     "SdcRequestSuitPresetData": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 121 },
-      "c2sProto": "Game.SdcGetSuitPresetDataC2S", "s2cProto": "Game.SdcGetSuitPresetDataS2C",
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 45,
+        "act": 121
+      },
+      "c2sProto": "Game.SdcGetSuitPresetDataC2S",
+      "s2cProto": "Game.SdcGetSuitPresetDataS2C",
       "store": [
-        { "field": "errorCode", "setter": "sdcSuitPresetSnapshotErrorCode" },
-        { "setter": "sdcSuitPresetSnapshot" }
+        {
+          "setter": "sdcSuitPresetSnapshotErrorCode",
+          "field": "errorCode"
+        },
+        {
+          "setter": "sdcSuitPresetSnapshot"
+        }
       ]
     },
-    "SdcSelectPrepareAction": { "pattern": "lua", "script": "sdc_select_prepare_action.lua" },
+    "SdcSelectPrepareAction": {
+      "pattern": "lua",
+      "script": "sdc_select_prepare_action.lua"
+    },
     "SdcResetPrepareActionError": {
       "pattern": "setState",
-      "bindings": [ { "type": "fixed", "field": "sdcPrepareActionErrorCode", "value": 0 } ]
-    },
-    "SdcValidatePrepareAction": { "pattern": "lua", "script": "sdc_validate_prepare_action.lua" },
-    "SdcRecordPrepareAction": { "pattern": "lua", "script": "sdc_record_prepare_action.lua" },
-    "SdcEquipItemRequest": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 2 },
-      "c2sProto": "Game.SdcEquipItemC2S", "s2cProto": "Game.SdcEquipItemS2C",
       "bindings": [
-        { "type": "state", "field": "itemGuid", "source": "sdcPrepareActionParams", "path": "itemGuid", "required": true },
-        { "type": "state", "field": "slotType", "source": "sdcPrepareActionParams", "path": "slotType", "required": true }
+        {
+          "type": "fixed",
+          "field": "sdcPrepareActionErrorCode",
+          "value": 0
+        }
+      ]
+    },
+    "SdcValidatePrepareAction": {
+      "pattern": "lua",
+      "script": "sdc_validate_prepare_action.lua"
+    },
+    "SdcRecordPrepareAction": {
+      "pattern": "lua",
+      "script": "sdc_record_prepare_action.lua"
+    },
+    "SdcEquipItemRequest": {
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 45,
+        "act": 2
+      },
+      "c2sProto": "Game.SdcEquipItemC2S",
+      "s2cProto": "Game.SdcEquipItemS2C",
+      "bindings": [
+        {
+          "type": "state",
+          "field": "itemGuid",
+          "source": "sdcPrepareActionParams",
+          "path": "itemGuid",
+          "required": true
+        },
+        {
+          "type": "state",
+          "field": "slotType",
+          "source": "sdcPrepareActionParams",
+          "path": "slotType",
+          "required": true
+        }
       ],
-      "store": [ { "field": "errorCode", "setter": "sdcPrepareActionErrorCode" } ]
+      "store": [
+        {
+          "setter": "sdcPrepareActionErrorCode",
+          "field": "errorCode"
+        }
+      ]
     },
     "SdcUnequipItemRequest": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 3 },
-      "c2sProto": "Game.SdcUnequipItemC2S", "s2cProto": "Game.SdcUnequipItemS2C",
-      "bindings": [ { "type": "state", "field": "slotType", "source": "sdcPrepareActionParams", "path": "slotType", "required": true } ],
-      "store": [ { "field": "errorCode", "setter": "sdcPrepareActionErrorCode" } ]
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 45,
+        "act": 3
+      },
+      "c2sProto": "Game.SdcUnequipItemC2S",
+      "s2cProto": "Game.SdcUnequipItemS2C",
+      "bindings": [
+        {
+          "type": "state",
+          "field": "slotType",
+          "source": "sdcPrepareActionParams",
+          "path": "slotType",
+          "required": true
+        }
+      ],
+      "store": [
+        {
+          "setter": "sdcPrepareActionErrorCode",
+          "field": "errorCode"
+        }
+      ]
     },
     "SdcMoveItemRequest": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 4 },
-      "c2sProto": "Game.SdcMoveItemC2S", "s2cProto": "Game.SdcMoveItemS2C",
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 45,
+        "act": 4
+      },
+      "c2sProto": "Game.SdcMoveItemC2S",
+      "s2cProto": "Game.SdcMoveItemS2C",
       "bindings": [
-        { "type": "state", "field": "itemGuid", "source": "sdcPrepareActionParams", "path": "itemGuid", "required": true },
-        { "type": "state", "field": "fromPackType", "source": "sdcPrepareActionParams", "path": "fromPackType", "required": true },
-        { "type": "state", "field": "toPackType", "source": "sdcPrepareActionParams", "path": "toPackType", "required": true }
+        {
+          "type": "state",
+          "field": "itemGuid",
+          "source": "sdcPrepareActionParams",
+          "path": "itemGuid",
+          "required": true
+        },
+        {
+          "type": "state",
+          "field": "fromPackType",
+          "source": "sdcPrepareActionParams",
+          "path": "fromPackType",
+          "required": true
+        },
+        {
+          "type": "state",
+          "field": "toPackType",
+          "source": "sdcPrepareActionParams",
+          "path": "toPackType",
+          "required": true
+        }
       ],
-      "store": [ { "field": "errorCode", "setter": "sdcPrepareActionErrorCode" } ]
+      "store": [
+        {
+          "setter": "sdcPrepareActionErrorCode",
+          "field": "errorCode"
+        }
+      ]
     },
     "SdcPackUseRequest": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 9 },
-      "c2sProto": "Game.SdcPackUseC2S", "s2cProto": "Game.SdcPackUseS2C",
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 45,
+        "act": 9
+      },
+      "c2sProto": "Game.SdcPackUseC2S",
+      "s2cProto": "Game.SdcPackUseS2C",
       "bindings": [
-        { "type": "state", "field": "itemGuid", "source": "sdcPrepareActionParams", "path": "itemGuid", "required": true },
-        { "type": "state", "field": "number", "source": "sdcPrepareActionParams", "path": "number", "required": true }
+        {
+          "type": "state",
+          "field": "itemGuid",
+          "source": "sdcPrepareActionParams",
+          "path": "itemGuid",
+          "required": true
+        },
+        {
+          "type": "state",
+          "field": "number",
+          "source": "sdcPrepareActionParams",
+          "path": "number",
+          "required": true
+        }
       ],
-      "store": [ { "field": "errorCode", "setter": "sdcPrepareActionErrorCode" } ]
+      "store": [
+        {
+          "setter": "sdcPrepareActionErrorCode",
+          "field": "errorCode"
+        }
+      ]
     },
     "SdcSwapItemRequest": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 10 },
-      "c2sProto": "Game.SdcSwapItemC2S", "s2cProto": "Game.SdcSwapItemS2C",
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 45,
+        "act": 10
+      },
+      "c2sProto": "Game.SdcSwapItemC2S",
+      "s2cProto": "Game.SdcSwapItemS2C",
       "bindings": [
-        { "type": "state", "field": "sourceItemGuid", "source": "sdcPrepareActionParams", "path": "sourceItemGuid", "required": true },
-        { "type": "state", "field": "sourcePackType", "source": "sdcPrepareActionParams", "path": "sourcePackType", "required": true },
-        { "type": "fixed", "field": "swapType", "value": 1 },
-        { "type": "state", "field": "targetItemGuid", "source": "sdcPrepareActionParams", "path": "targetItemGuid", "required": true }
+        {
+          "type": "state",
+          "field": "sourceItemGuid",
+          "source": "sdcPrepareActionParams",
+          "path": "sourceItemGuid",
+          "required": true
+        },
+        {
+          "type": "state",
+          "field": "sourcePackType",
+          "source": "sdcPrepareActionParams",
+          "path": "sourcePackType",
+          "required": true
+        },
+        {
+          "type": "fixed",
+          "field": "swapType",
+          "value": 1
+        },
+        {
+          "type": "state",
+          "field": "targetItemGuid",
+          "source": "sdcPrepareActionParams",
+          "path": "targetItemGuid",
+          "required": true
+        }
       ],
-      "store": [ { "field": "errorCode", "setter": "sdcPrepareActionErrorCode" } ]
+      "store": [
+        {
+          "setter": "sdcPrepareActionErrorCode",
+          "field": "errorCode"
+        }
+      ]
     },
     "SdcActivateContainerRequest": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 13 },
-      "c2sProto": "Game.SdcActivateOutBattleContainerC2S", "s2cProto": "Game.SdcActivateOutBattleContainerS2C",
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 45,
+        "act": 13
+      },
+      "c2sProto": "Game.SdcActivateOutBattleContainerC2S",
+      "s2cProto": "Game.SdcActivateOutBattleContainerS2C",
       "bindings": [
-        { "type": "state", "field": "packType", "source": "sdcPrepareActionParams", "path": "packType", "required": true },
-        { "type": "state", "field": "sdcParameterId", "source": "sdcPrepareActionParams", "path": "sdcParameterId", "required": true },
-        { "type": "state", "field": "itemGuid", "source": "sdcPrepareActionParams", "path": "itemGuid", "required": true },
-        { "type": "state", "field": "number", "source": "sdcPrepareActionParams", "path": "number", "required": true }
+        {
+          "type": "state",
+          "field": "packType",
+          "source": "sdcPrepareActionParams",
+          "path": "packType",
+          "required": true
+        },
+        {
+          "type": "state",
+          "field": "sdcParameterId",
+          "source": "sdcPrepareActionParams",
+          "path": "sdcParameterId",
+          "required": true
+        },
+        {
+          "type": "state",
+          "field": "itemGuid",
+          "source": "sdcPrepareActionParams",
+          "path": "itemGuid",
+          "required": true
+        },
+        {
+          "type": "state",
+          "field": "number",
+          "source": "sdcPrepareActionParams",
+          "path": "number",
+          "required": true
+        }
       ],
-      "store": [ { "field": "errorCode", "setter": "sdcPrepareActionErrorCode" } ]
+      "store": [
+        {
+          "setter": "sdcPrepareActionErrorCode",
+          "field": "errorCode"
+        }
+      ]
     },
     "SdcSwitchContainerRequest": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 14 },
-      "c2sProto": "Game.SdcSwitchOutBattleContainerC2S", "s2cProto": "Game.SdcSwitchOutBattleContainerS2C",
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 45,
+        "act": 14
+      },
+      "c2sProto": "Game.SdcSwitchOutBattleContainerC2S",
+      "s2cProto": "Game.SdcSwitchOutBattleContainerS2C",
       "bindings": [
-        { "type": "state", "field": "packType", "source": "sdcPrepareActionParams", "path": "packType", "required": true },
-        { "type": "state", "field": "sdcParameterId", "source": "sdcPrepareActionParams", "path": "sdcParameterId", "required": true }
+        {
+          "type": "state",
+          "field": "packType",
+          "source": "sdcPrepareActionParams",
+          "path": "packType",
+          "required": true
+        },
+        {
+          "type": "state",
+          "field": "sdcParameterId",
+          "source": "sdcPrepareActionParams",
+          "path": "sdcParameterId",
+          "required": true
+        }
       ],
-      "store": [ { "field": "errorCode", "setter": "sdcPrepareActionErrorCode" } ]
+      "store": [
+        {
+          "setter": "sdcPrepareActionErrorCode",
+          "field": "errorCode"
+        }
+      ]
     },
     "SdcMoveContainerAllRequest": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 15 },
-      "c2sProto": "Game.SdcMoveOutBattleContainerAllC2S", "s2cProto": "Game.SdcMoveOutBattleContainerAllS2C",
-      "bindings": [ { "type": "state", "field": "packType", "source": "sdcPrepareActionParams", "path": "packType", "required": true } ],
-      "store": [ { "field": "errorCode", "setter": "sdcPrepareActionErrorCode" } ]
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 45,
+        "act": 15
+      },
+      "c2sProto": "Game.SdcMoveOutBattleContainerAllC2S",
+      "s2cProto": "Game.SdcMoveOutBattleContainerAllS2C",
+      "bindings": [
+        {
+          "type": "state",
+          "field": "packType",
+          "source": "sdcPrepareActionParams",
+          "path": "packType",
+          "required": true
+        }
+      ],
+      "store": [
+        {
+          "setter": "sdcPrepareActionErrorCode",
+          "field": "errorCode"
+        }
+      ]
     },
     "SdcUseSuitRequest": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 123 },
-      "c2sProto": "Game.SdcUseSuitC2S", "s2cProto": "Game.SdcUseSuitS2C",
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 45,
+        "act": 123
+      },
+      "c2sProto": "Game.SdcUseSuitC2S",
+      "s2cProto": "Game.SdcUseSuitS2C",
       "bindings": [
-        { "type": "state", "field": "suitType", "source": "sdcPrepareActionParams", "path": "suitType", "required": true },
-        { "type": "state", "field": "planId", "source": "sdcPrepareActionParams", "path": "planId", "required": true }
+        {
+          "type": "state",
+          "field": "suitType",
+          "source": "sdcPrepareActionParams",
+          "path": "suitType",
+          "required": true
+        },
+        {
+          "type": "state",
+          "field": "planId",
+          "source": "sdcPrepareActionParams",
+          "path": "planId",
+          "required": true
+        }
       ],
-      "store": [ { "field": "errorCode", "setter": "sdcPrepareActionErrorCode" } ]
+      "store": [
+        {
+          "setter": "sdcPrepareActionErrorCode",
+          "field": "errorCode"
+        }
+      ]
     },
     "SdcCancelSuitRequest": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 124 },
-      "c2sProto": "Game.SdcCancelSuitC2S", "s2cProto": "Game.SdcCancelSuitS2C",
-      "store": [ { "field": "errorCode", "setter": "sdcPrepareActionErrorCode" } ]
-    },
-    "SdcSavePreset": { "pattern": "lua", "script": "sdc_save_prepare_preset.lua" },
-    "SdcUsePresetRequest": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 127 },
-      "c2sProto": "Game.SdcUsePresetC2S", "s2cProto": "Game.SdcUsePresetS2C",
-      "bindings": [ { "type": "state", "field": "slotIndex", "source": "sdcPrepareActionParams", "path": "slotIndex", "required": true } ],
-      "store": [ { "field": "errorCode", "setter": "sdcPrepareActionErrorCode" } ]
-    },
-    "SdcRefreshPrepareRequest": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 1 },
-      "c2sProto": "Game.SdcGetPrepareDataC2S", "s2cProto": "Game.SdcGetPrepareDataS2C",
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 45,
+        "act": 124
+      },
+      "c2sProto": "Game.SdcCancelSuitC2S",
+      "s2cProto": "Game.SdcCancelSuitS2C",
       "store": [
-        { "field": "errorCode", "setter": "sdcOutBattlePrepareErrorCode" },
-        { "field": "data", "setter": "sdcOutBattlePrepareSnapshot" }
+        {
+          "setter": "sdcPrepareActionErrorCode",
+          "field": "errorCode"
+        }
       ]
     },
-    "SdcSummarizeOutBattlePrepare": { "pattern": "lua", "script": "sdc_summarize_out_battle_prepare.lua" },
-    "SdcResetSoldItems": {
-      "pattern": "setState",
-      "bindings": [ { "type": "fixed", "field": "sdcOutBattleSoldGuids", "value": [] } ]
+    "SdcSavePreset": {
+      "pattern": "lua",
+      "script": "sdc_save_prepare_preset.lua"
     },
-    "SdcBatchSellRequest": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 6 },
-      "c2sProto": "Game.SdcBatchSellC2S", "s2cProto": "Game.SdcBatchSellS2C",
+    "SdcUsePresetRequest": {
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 45,
+        "act": 127
+      },
+      "c2sProto": "Game.SdcUsePresetC2S",
+      "s2cProto": "Game.SdcUsePresetS2C",
       "bindings": [
-        { "type": "state", "field": "itemGuids", "source": "sdcOutBattleRandomSellGuid", "required": true }
+        {
+          "type": "state",
+          "field": "slotIndex",
+          "source": "sdcPrepareActionParams",
+          "path": "slotIndex",
+          "required": true
+        }
       ],
       "store": [
-        { "field": "errorCode", "setter": "sdcOutBattleSellErrorCode" },
-        { "field": "soldGuids", "setter": "sdcOutBattleSoldGuids" }
+        {
+          "setter": "sdcPrepareActionErrorCode",
+          "field": "errorCode"
+        }
       ]
     },
-    "SdcValidateSellResult": { "pattern": "lua", "script": "sdc_validate_sell_result.lua" },
+    "SdcRefreshPrepareRequest": {
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 45,
+        "act": 1
+      },
+      "c2sProto": "Game.SdcGetPrepareDataC2S",
+      "s2cProto": "Game.SdcGetPrepareDataS2C",
+      "store": [
+        {
+          "setter": "sdcOutBattlePrepareErrorCode",
+          "field": "errorCode"
+        },
+        {
+          "setter": "sdcOutBattlePrepareSnapshot",
+          "field": "data"
+        }
+      ]
+    },
+    "SdcSummarizeOutBattlePrepare": {
+      "pattern": "lua",
+      "script": "sdc_summarize_out_battle_prepare.lua"
+    },
+    "SdcResetSoldItems": {
+      "pattern": "setState",
+      "bindings": [
+        {
+          "type": "fixed",
+          "field": "sdcOutBattleSoldGuids",
+          "value": []
+        }
+      ]
+    },
+    "SdcBatchSellRequest": {
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 45,
+        "act": 6
+      },
+      "c2sProto": "Game.SdcBatchSellC2S",
+      "s2cProto": "Game.SdcBatchSellS2C",
+      "bindings": [
+        {
+          "type": "state",
+          "field": "itemGuids",
+          "source": "sdcOutBattleRandomSellGuid",
+          "required": true
+        }
+      ],
+      "store": [
+        {
+          "setter": "sdcOutBattleSellErrorCode",
+          "field": "errorCode"
+        },
+        {
+          "setter": "sdcOutBattleSoldGuids",
+          "field": "soldGuids"
+        }
+      ]
+    },
+    "SdcValidateSellResult": {
+      "pattern": "lua",
+      "script": "sdc_validate_sell_result.lua"
+    },
     "SdcResetDepositedItems": {
       "pattern": "setState",
-      "bindings": [ { "type": "fixed", "field": "sdcOutBattleDepositedGuids", "value": [] } ]
-    },
-    "SdcQuickDepositRequest": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 11 },
-      "c2sProto": "Game.SdcQuickDepositC2S", "s2cProto": "Game.SdcQuickDepositS2C",
-      "store": [
-        { "field": "errorCode", "setter": "sdcOutBattleDepositErrorCode" },
-        { "field": "depositedGuids", "setter": "sdcOutBattleDepositedGuids" },
-        { "field": "totalValue", "setter": "sdcOutBattleDepositTotalValue" }
+      "bindings": [
+        {
+          "type": "fixed",
+          "field": "sdcOutBattleDepositedGuids",
+          "value": []
+        }
       ]
     },
-    "SdcValidateQuickDeposit": { "pattern": "lua", "script": "sdc_validate_quick_deposit.lua" },
-    "SdcVerifyPrepareRequest": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 1 },
-      "c2sProto": "Game.SdcGetPrepareDataC2S", "s2cProto": "Game.SdcGetPrepareDataS2C",
+    "SdcQuickDepositRequest": {
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 45,
+        "act": 11
+      },
+      "c2sProto": "Game.SdcQuickDepositC2S",
+      "s2cProto": "Game.SdcQuickDepositS2C",
       "store": [
-        { "field": "errorCode", "setter": "sdcVerifyPrepareErrorCode" },
-        { "field": "data", "setter": "sdcVerifyPrepareData" }
+        {
+          "setter": "sdcOutBattleDepositErrorCode",
+          "field": "errorCode"
+        },
+        {
+          "setter": "sdcOutBattleDepositedGuids",
+          "field": "depositedGuids"
+        },
+        {
+          "setter": "sdcOutBattleDepositTotalValue",
+          "field": "totalValue"
+        }
+      ]
+    },
+    "SdcValidateQuickDeposit": {
+      "pattern": "lua",
+      "script": "sdc_validate_quick_deposit.lua"
+    },
+    "SdcVerifyPrepareRequest": {
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 45,
+        "act": 1
+      },
+      "c2sProto": "Game.SdcGetPrepareDataC2S",
+      "s2cProto": "Game.SdcGetPrepareDataS2C",
+      "store": [
+        {
+          "setter": "sdcVerifyPrepareErrorCode",
+          "field": "errorCode"
+        },
+        {
+          "setter": "sdcVerifyPrepareData",
+          "field": "data"
+        }
       ]
     },
     "SdcVerifyWarehouseRequest": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 45, "act": 21 },
-      "c2sProto": "Game.SdcGetWarehouseDataC2S", "s2cProto": "Game.SdcGetWarehouseDataS2C",
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 45,
+        "act": 21
+      },
+      "c2sProto": "Game.SdcGetWarehouseDataC2S",
+      "s2cProto": "Game.SdcGetWarehouseDataS2C",
       "store": [
-        { "field": "errorCode", "setter": "sdcVerifyWarehouseErrorCode" },
-        { "field": "data", "setter": "sdcVerifyWarehouseData" }
+        {
+          "setter": "sdcVerifyWarehouseErrorCode",
+          "field": "errorCode"
+        },
+        {
+          "setter": "sdcVerifyWarehouseData",
+          "field": "data"
+        }
       ]
     },
-    "SdcValidateOutBattleAssets": { "pattern": "lua", "script": "sdc_verify_out_battle_assets.lua" },
-    "SdcValidateOutcomeAssets": { "pattern": "lua", "script": "sdc_verify_outcome_assets.lua" },
+    "SdcValidateOutBattleAssets": {
+      "pattern": "lua",
+      "script": "sdc_verify_out_battle_assets.lua"
+    },
+    "SdcValidateOutcomeAssets": {
+      "pattern": "lua",
+      "script": "sdc_verify_outcome_assets.lua"
+    },
     "SdcMarkNoSuccessAssets": {
       "pattern": "setState",
-      "bindings": [ { "type": "fixed", "field": "sdcOutBattleNoSuccessAssets", "value": true } ]
+      "bindings": [
+        {
+          "type": "fixed",
+          "field": "sdcOutBattleNoSuccessAssets",
+          "value": true
+        }
+      ]
     },
     "SdcResetMatchStarted": {
       "pattern": "setState",
-      "bindings": [ { "type": "fixed", "field": "sdcMatchStarted", "value": false } ]
+      "bindings": [
+        {
+          "type": "fixed",
+          "field": "sdcMatchStarted",
+          "value": false
+        }
+      ]
     },
     "SdcStartMatchRequest": {
-      "pattern": "tcpRequest", "service": "logic", "route": { "cmd": 5, "act": 20 },
-      "c2sProto": "Game.TeamStartMatchC2S", "s2cProto": "Game.TeamStartMatchS2C",
-      "store": [ { "field": "modeId", "setter": "sdcMatchedModeId" } ]
+      "pattern": "tcpRequest",
+      "service": "logic",
+      "route": {
+        "cmd": 5,
+        "act": 20
+      },
+      "c2sProto": "Game.TeamStartMatchC2S",
+      "s2cProto": "Game.TeamStartMatchS2C",
+      "store": [
+        {
+          "setter": "sdcMatchedModeId",
+          "field": "modeId"
+        }
+      ]
     },
     "SdcMarkMatchStarted": {
       "pattern": "setState",
       "bindings": [
-        { "type": "fixed", "field": "sdcMatchStarted", "value": true },
-        { "type": "fixed", "field": "sdcRoundFailed", "value": false }
+        {
+          "type": "fixed",
+          "field": "sdcMatchStarted",
+          "value": true
+        },
+        {
+          "type": "fixed",
+          "field": "sdcRoundFailed",
+          "value": false
+        }
       ]
     },
     "SdcInitBattleState": {
       "pattern": "setState",
       "bindings": [
-        { "type": "randomInt", "field": "sdcDwellTargetMs", "min": 5000, "max": 29000 },
-        { "type": "randomInt", "field": "sdcChestOpenTarget", "min": 1, "max": 3 },
-        { "type": "fixed", "field": "sdcDwellDone", "value": false },
-        { "type": "fixed", "field": "sdcChestOpenCount", "value": 0 },
-        { "type": "fixed", "field": "sdcLootEventDone", "value": false },
-        { "type": "fixed", "field": "sdcLootChestId", "value": 0 },
-        { "type": "fixed", "field": "sdcChestSelected", "value": false },
-        { "type": "fixed", "field": "sdcSelectedChest", "value": {} },
-        { "type": "fixed", "field": "sdcOpenedChestKeys", "value": {} },
-        { "type": "fixed", "field": "sdcChestOpenEvents", "value": [] },
-        { "type": "fixed", "field": "sdcKeyUseRecords", "value": [] },
-        { "type": "fixed", "field": "sdcBattleAcquiredItems", "value": [] },
-        { "type": "fixed", "field": "sdcBattleLootValue", "value": 0 }
+        {
+          "type": "randomInt",
+          "field": "sdcDwellTargetMs",
+          "min": 5000,
+          "max": 29000
+        },
+        {
+          "type": "randomInt",
+          "field": "sdcChestOpenTarget",
+          "min": 1,
+          "max": 3
+        },
+        {
+          "type": "fixed",
+          "field": "sdcDwellDone",
+          "value": false
+        },
+        {
+          "type": "fixed",
+          "field": "sdcChestOpenCount",
+          "value": 0
+        },
+        {
+          "type": "fixed",
+          "field": "sdcLootEventDone",
+          "value": false
+        },
+        {
+          "type": "fixed",
+          "field": "sdcLootChestId",
+          "value": 0
+        },
+        {
+          "type": "fixed",
+          "field": "sdcChestSelected",
+          "value": false
+        },
+        {
+          "type": "fixed",
+          "field": "sdcSelectedChest",
+          "value": {}
+        },
+        {
+          "type": "fixed",
+          "field": "sdcOpenedChestKeys",
+          "value": {}
+        },
+        {
+          "type": "fixed",
+          "field": "sdcChestOpenEvents",
+          "value": []
+        },
+        {
+          "type": "fixed",
+          "field": "sdcKeyUseRecords",
+          "value": []
+        },
+        {
+          "type": "fixed",
+          "field": "sdcBattleAcquiredItems",
+          "value": []
+        },
+        {
+          "type": "fixed",
+          "field": "sdcBattleLootValue",
+          "value": 0
+        }
       ]
     },
-    "SdcInitBattleTiming": { "pattern": "lua", "script": "sdc_init_battle_timing.lua" },
-    "SdcInitBattleInventory": { "pattern": "lua", "script": "sdc_init_battle_inventory.lua" },
-    "SdcSyncFrame": { "pattern": "lua", "script": "sdc_sync_frame.lua" },
-    "SdcUpdateDwellState": { "pattern": "lua", "script": "sdc_update_dwell_state.lua" },
-    "SdcSelectChest": { "pattern": "lua", "script": "sdc_select_chest.lua" },
-    "SdcConsumeChestKey": { "pattern": "lua", "script": "sdc_consume_chest_key.lua" },
-    "SdcCollectChestLoot": { "pattern": "lua", "script": "sdc_collect_chest_loot.lua" },
-    "SdcCompleteChestOpen": { "pattern": "lua", "script": "sdc_complete_chest_open.lua" },
-    "SdcClassifySettlement": { "pattern": "lua", "script": "sdc_classify_settlement.lua" },
-    "SdcSendSettlement": { "pattern": "lua", "script": "sdc_send_settlement.lua" },
+    "SdcInitBattleTiming": {
+      "pattern": "lua",
+      "script": "sdc_init_battle_timing.lua"
+    },
+    "SdcInitBattleInventory": {
+      "pattern": "lua",
+      "script": "sdc_init_battle_inventory.lua"
+    },
+    "SdcSyncFrame": {
+      "pattern": "lua",
+      "script": "sdc_sync_frame.lua"
+    },
+    "SdcUpdateDwellState": {
+      "pattern": "lua",
+      "script": "sdc_update_dwell_state.lua"
+    },
+    "SdcSelectChest": {
+      "pattern": "lua",
+      "script": "sdc_select_chest.lua"
+    },
+    "SdcConsumeChestKey": {
+      "pattern": "lua",
+      "script": "sdc_consume_chest_key.lua"
+    },
+    "SdcCollectChestLoot": {
+      "pattern": "lua",
+      "script": "sdc_collect_chest_loot.lua"
+    },
+    "SdcCompleteChestOpen": {
+      "pattern": "lua",
+      "script": "sdc_complete_chest_open.lua"
+    },
+    "SdcClassifySettlement": {
+      "pattern": "lua",
+      "script": "sdc_classify_settlement.lua"
+    },
+    "SdcSendSettlement": {
+      "pattern": "lua",
+      "script": "sdc_send_settlement.lua"
+    },
     "SdcMarkSettlementConfirmed": {
       "pattern": "setState",
-      "bindings": [ { "type": "fixed", "field": "sdcSettlementConfirmed", "value": 1 } ]
+      "bindings": [
+        {
+          "type": "fixed",
+          "field": "sdcSettlementConfirmed",
+          "value": 1
+        }
+      ]
     },
     "SdcSetOutcomeSuccess": {
       "pattern": "setState",
       "bindings": [
-        { "type": "fixed", "field": "sdcOutcome", "value": "success" },
-        { "type": "fixed", "field": "sdcExpectedSettleResult", "value": 1 },
-        { "type": "fixed", "field": "sdcExpectedBattleResult", "value": 1 }
+        {
+          "type": "fixed",
+          "field": "sdcOutcome",
+          "value": "success"
+        },
+        {
+          "type": "fixed",
+          "field": "sdcExpectedSettleResult",
+          "value": 1
+        },
+        {
+          "type": "fixed",
+          "field": "sdcExpectedBattleResult",
+          "value": 1
+        }
       ]
     },
     "SdcSetOutcomeEvacuationFailed": {
       "pattern": "setState",
       "bindings": [
-        { "type": "fixed", "field": "sdcOutcome", "value": "evacuation_failed" },
-        { "type": "fixed", "field": "sdcExpectedSettleResult", "value": 2 },
-        { "type": "fixed", "field": "sdcExpectedBattleResult", "value": 2 }
+        {
+          "type": "fixed",
+          "field": "sdcOutcome",
+          "value": "evacuation_failed"
+        },
+        {
+          "type": "fixed",
+          "field": "sdcExpectedSettleResult",
+          "value": 2
+        },
+        {
+          "type": "fixed",
+          "field": "sdcExpectedBattleResult",
+          "value": 2
+        }
       ]
     },
     "SdcSetOutcomeDeath": {
       "pattern": "setState",
       "bindings": [
-        { "type": "fixed", "field": "sdcOutcome", "value": "death" },
-        { "type": "fixed", "field": "sdcExpectedSettleResult", "value": 2 },
-        { "type": "fixed", "field": "sdcExpectedBattleResult", "value": 2 }
+        {
+          "type": "fixed",
+          "field": "sdcOutcome",
+          "value": "death"
+        },
+        {
+          "type": "fixed",
+          "field": "sdcExpectedSettleResult",
+          "value": 2
+        },
+        {
+          "type": "fixed",
+          "field": "sdcExpectedBattleResult",
+          "value": 2
+        }
       ]
     },
     "SdcMarkSetupReady": {
       "pattern": "setState",
-      "bindings": [ { "type": "fixed", "field": "sdcSetupReady", "value": true } ]
+      "bindings": [
+        {
+          "type": "fixed",
+          "field": "sdcSetupReady",
+          "value": true
+        }
+      ]
     },
-    "CloseBattleUDP": { "pattern": "udpClose", "service": "sdcbattle" },
+    "CloseBattleUDP": {
+      "pattern": "udpClose",
+      "service": "sdcbattle"
+    },
     "SdcExitBattle": {
       "pattern": "tcpSend",
       "service": "battle",
-      "route": { "cmd": 4, "act": 87 },
+      "route": {
+        "cmd": 4,
+        "act": 87
+      },
       "c2sProto": "Game.BattleMidwaySettlementExitC2S"
     },
-    "CloseBattleTCP": { "pattern": "tcpClose", "service": "battle" },
+    "CloseBattleTCP": {
+      "pattern": "tcpClose",
+      "service": "battle"
+    },
     "SdcMarkReturnedLobby": {
       "pattern": "setState",
-      "bindings": [ { "type": "fixed", "field": "sdcReturnedLobby", "value": true } ]
+      "bindings": [
+        {
+          "type": "fixed",
+          "field": "sdcReturnedLobby",
+          "value": true
+        }
+      ]
     },
     "SdcClearState": {
       "pattern": "clearState",
       "keys": [
-        "sdcSetupReady", "sdcMatchStarted", "sdcRoundFailed", "sdcSettleResult", "sdcReturnedLobby",
-        "sdcDwellTargetMs", "sdcDwellStartMs", "sdcDwellDone",
-        "sdcPrepareData", "sdcInitialItemGuids", "sdcPrepareTotalValue", "sdcPrepareErrorCode",
-        "sdcPrepareTargetCount", "sdcPrepareManagementDone", "sdcPrepareManagementActions",
-        "sdcPrepareUsedKinds", "sdcPrepareActionKind", "sdcPrepareActionParams", "sdcPrepareActionErrorCode",
-        "sdcPrepareSnapshot", "sdcPrepareSnapshotErrorCode", "sdcWarehouseSnapshot", "sdcWarehouseSnapshotErrorCode",
-        "sdcContainerSnapshot", "sdcContainerSnapshotErrorCode", "sdcSuitPresetSnapshot", "sdcSuitPresetSnapshotErrorCode",
-        "sdcLoadingSnapshotWire", "sdcLoadingDropBudget",
-        "sdcBattlePackData", "sdcBattleEquipData", "sdcBattleAcquiredItems", "sdcBattleLootValue",
-        "sdcChestOpenTarget", "sdcChestOpenCount", "sdcNextChestOpenAtMs", "sdcLootEventDone",
-        "sdcLootChestId", "sdcOpenedChestKeys", "sdcChestOpenEvents", "sdcKeyUseRecords",
-        "sdcChestSelected", "sdcSelectedChest", "sdcChestElapsedMs", "sdcCurrentKeyUseMode",
-        "sdcChestRequestedLootCount", "sdcChestSelectedLootCount", "sdcChestAddedValue",
-        "sdcOutcome", "sdcExpectedSettleResult", "sdcExpectedBattleResult",
-        "sdcExpectedLostGuids", "sdcExpectedKeptGuids", "sdcOutBattleNoSuccessAssets",
-        "sdcSettlementData", "sdcSettlementSummary", "sdcRewardBattleId", "sdcRewardResult",
-        "sdcRewardSettleData", "sdcRewardLootValue", "sdcRewardNetLootValue", "sdcRewardKeptCount", "sdcRewardAcquiredCount",
-        "sdcOutBattlePackMaxSlots", "sdcOutBattlePackUsedSlots", "sdcOutBattlePackFreeSlots",
-        "sdcOutBattleNewItemGuids", "sdcOutBattleRandomSellGuid", "sdcOutBattleSoldGuids",
-        "sdcOutBattleDepositedGuids", "sdcOutBattlePrepareSnapshot", "sdcOutBattlePrepareErrorCode",
-        "sdcOutBattleSellErrorCode", "sdcOutBattleDepositErrorCode", "sdcOutBattleDepositTotalValue",
-        "sdcVerifyPrepareData", "sdcVerifyPrepareErrorCode", "sdcVerifyWarehouseData", "sdcVerifyWarehouseErrorCode",
+        "sdcSetupReady",
+        "sdcMatchStarted",
+        "sdcRoundFailed",
+        "sdcSettleResult",
+        "sdcReturnedLobby",
+        "sdcDwellTargetMs",
+        "sdcDwellStartMs",
+        "sdcDwellDone",
+        "sdcPrepareData",
+        "sdcInitialItemGuids",
+        "sdcPrepareTotalValue",
+        "sdcPrepareErrorCode",
+        "sdcPrepareTargetCount",
+        "sdcPrepareManagementDone",
+        "sdcPrepareManagementActions",
+        "sdcPrepareUsedKinds",
+        "sdcPrepareActionKind",
+        "sdcPrepareActionParams",
+        "sdcPrepareActionErrorCode",
+        "sdcPrepareSnapshot",
+        "sdcPrepareSnapshotErrorCode",
+        "sdcWarehouseSnapshot",
+        "sdcWarehouseSnapshotErrorCode",
+        "sdcContainerSnapshot",
+        "sdcContainerSnapshotErrorCode",
+        "sdcSuitPresetSnapshot",
+        "sdcSuitPresetSnapshotErrorCode",
+        "sdcLoadingSnapshotWire",
+        "sdcLoadingDropBudget",
+        "sdcBattlePackData",
+        "sdcBattleEquipData",
+        "sdcBattleAcquiredItems",
+        "sdcBattleLootValue",
+        "sdcChestOpenTarget",
+        "sdcChestOpenCount",
+        "sdcNextChestOpenAtMs",
+        "sdcLootEventDone",
+        "sdcLootChestId",
+        "sdcOpenedChestKeys",
+        "sdcChestOpenEvents",
+        "sdcKeyUseRecords",
+        "sdcChestSelected",
+        "sdcSelectedChest",
+        "sdcChestElapsedMs",
+        "sdcCurrentKeyUseMode",
+        "sdcChestRequestedLootCount",
+        "sdcChestSelectedLootCount",
+        "sdcChestAddedValue",
+        "sdcOutcome",
+        "sdcExpectedSettleResult",
+        "sdcExpectedBattleResult",
+        "sdcExpectedLostGuids",
+        "sdcExpectedKeptGuids",
+        "sdcOutBattleNoSuccessAssets",
+        "sdcSettlementData",
+        "sdcSettlementSummary",
+        "sdcRewardBattleId",
+        "sdcRewardResult",
+        "sdcRewardSettleData",
+        "sdcRewardLootValue",
+        "sdcRewardNetLootValue",
+        "sdcRewardKeptCount",
+        "sdcRewardAcquiredCount",
+        "sdcOutBattlePackMaxSlots",
+        "sdcOutBattlePackUsedSlots",
+        "sdcOutBattlePackFreeSlots",
+        "sdcOutBattleNewItemGuids",
+        "sdcOutBattleRandomSellGuid",
+        "sdcOutBattleSoldGuids",
+        "sdcOutBattleDepositedGuids",
+        "sdcOutBattlePrepareSnapshot",
+        "sdcOutBattlePrepareErrorCode",
+        "sdcOutBattleSellErrorCode",
+        "sdcOutBattleDepositErrorCode",
+        "sdcOutBattleDepositTotalValue",
+        "sdcVerifyPrepareData",
+        "sdcVerifyPrepareErrorCode",
+        "sdcVerifyWarehouseData",
+        "sdcVerifyWarehouseErrorCode",
         "sdcMatchedModeId",
-        "battleId", "battleAddress", "battleSecretKey", "battleSession", "battleArea",
-        "battleGameType", "fighterIndex", "fighterListData", "packageIndex", "battleAck",
-        "loadProgress", "frameCount"
+        "battleId",
+        "battleAddress",
+        "battleSecretKey",
+        "battleSession",
+        "battleArea",
+        "battleGameType",
+        "fighterIndex",
+        "fighterListData",
+        "packageIndex",
+        "battleAck",
+        "loadProgress",
+        "frameCount"
       ]
     },
     "SdcCreateTeam": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": { "cmd": 5, "act": 1 },
-      "timeout": 180,
+      "route": {
+        "cmd": 5,
+        "act": 1
+      },
       "c2sProto": "Game.TeamCreateC2S",
       "s2cProto": "Game.TeamCreateS2C",
-      "bindings": [ { "type": "fixed", "field": "model", "value": 8 } ],
-      "store": [ { "field": "teamId", "setter": "teamId" } ]
+      "bindings": [
+        {
+          "type": "fixed",
+          "field": "model",
+          "value": 8
+        }
+      ],
+      "store": [
+        {
+          "setter": "teamId",
+          "field": "teamId"
+        }
+      ],
+      "timeout": 180
     },
     "SdcTeamPrepare": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": { "cmd": 5, "act": 12 },
+      "route": {
+        "cmd": 5,
+        "act": 12
+      },
       "c2sProto": "Game.TeamPrepareC2S",
-      "bindings": [ { "type": "fixed", "field": "isPrepare", "value": true } ]
+      "bindings": [
+        {
+          "type": "fixed",
+          "field": "isPrepare",
+          "value": true
+        }
+      ]
     },
     "SelectHero": {
       "pattern": "tcpSend",
       "service": "logic",
-      "route": { "cmd": 5, "act": 14 },
+      "route": {
+        "cmd": 5,
+        "act": 14
+      },
       "c2sProto": "Game.TeamChangeHeroC2S",
       "bindings": [
-        { "type": "stateRandomN", "source": "heroIdList", "count": 3, "storeAs": "currentHeroIds" },
-        { "type": "state", "field": "selectHeroes", "source": "currentHeroIds" },
-        { "type": "state", "field": "selectSkins", "source": "currentHeroIds" }
+        {
+          "type": "stateRandomN",
+          "source": "heroIdList",
+          "count": 3,
+          "storeAs": "currentHeroIds"
+        },
+        {
+          "type": "state",
+          "field": "selectHeroes",
+          "source": "currentHeroIds"
+        },
+        {
+          "type": "state",
+          "field": "selectSkins",
+          "source": "currentHeroIds"
+        }
       ]
     },
-    "MatchSucceed": { "pattern": "lua", "script": "match_succeed.lua" },
-    "ListenStartLoading": { "pattern": "lua", "script": "listen_start_loading.lua" },
-    "RegisterBattle": { "pattern": "lua", "script": "register_battle.lua" },
-    "LoadProgress": { "pattern": "lua", "script": "load_progress.lua" },
+    "MatchSucceed": {
+      "pattern": "lua",
+      "script": "match_succeed.lua"
+    },
+    "ListenStartLoading": {
+      "pattern": "lua",
+      "script": "listen_start_loading.lua"
+    },
+    "RegisterBattle": {
+      "pattern": "lua",
+      "script": "register_battle.lua"
+    },
+    "LoadProgress": {
+      "pattern": "lua",
+      "script": "load_progress.lua"
+    },
     "BattleLoadOK": {
       "pattern": "tcpSend",
       "service": "battle",
-      "route": { "cmd": 4, "act": 9 },
+      "route": {
+        "cmd": 4,
+        "act": 9
+      },
       "c2sProto": "Game.BattleLoadOkC2S"
     },
     "ResetLoadState": {
       "pattern": "setState",
       "bindings": [
-        { "type": "fixed", "field": "loadProgress", "value": 0 },
-        { "type": "fixed", "field": "packageIndex", "value": 0 }
+        {
+          "type": "fixed",
+          "field": "loadProgress",
+          "value": 0
+        },
+        {
+          "type": "fixed",
+          "field": "packageIndex",
+          "value": 0
+        }
       ]
     },
     "StartGame": {
       "pattern": "tcpListen",
       "service": "battle",
-      "route": { "cmd": 4, "act": 10 },
+      "route": {
+        "cmd": 4,
+        "act": 10
+      },
       "s2cProto": "Game.BattleStartGameS2C",
       "timeout": 180
     },
     "SdcListenBattleReward": {
-      "pattern": "tcpListen", "service": "logic", "route": { "cmd": 4, "act": 72 },
-      "s2cProto": "Game.BattleRewardS2C", "timeout": 30, "pollMs": 500,
+      "pattern": "tcpListen",
+      "service": "logic",
+      "route": {
+        "cmd": 4,
+        "act": 72
+      },
+      "s2cProto": "Game.BattleRewardS2C",
       "store": [
-        { "field": "battleId", "setter": "sdcRewardBattleId" },
-        { "field": "sdcSettleData", "setter": "sdcRewardSettleData" },
-        { "field": "sdcSettleData.result", "setter": "sdcRewardResult" },
-        { "field": "sdcSettleData.lootValue", "setter": "sdcRewardLootValue" },
-        { "field": "sdcSettleData.netLootValue", "setter": "sdcRewardNetLootValue" }
-      ]
+        {
+          "setter": "sdcRewardBattleId",
+          "field": "battleId"
+        },
+        {
+          "setter": "sdcRewardSettleData",
+          "field": "sdcSettleData"
+        },
+        {
+          "setter": "sdcRewardResult",
+          "field": "sdcSettleData.result"
+        },
+        {
+          "setter": "sdcRewardLootValue",
+          "field": "sdcSettleData.lootValue"
+        },
+        {
+          "setter": "sdcRewardNetLootValue",
+          "field": "sdcSettleData.netLootValue"
+        }
+      ],
+      "timeout": 30,
+      "pollMs": 500
     },
-    "SdcLogRewardTimeout": { "pattern": "lua", "script": "sdc_log_reward_timeout.lua" },
-    "SdcValidateRewardIdentity": { "pattern": "lua", "script": "sdc_validate_reward_identity.lua" },
-    "SdcValidateRewardOutcome": { "pattern": "lua", "script": "sdc_validate_reward_outcome.lua" },
+    "SdcLogRewardTimeout": {
+      "pattern": "lua",
+      "script": "sdc_log_reward_timeout.lua"
+    },
+    "SdcValidateRewardIdentity": {
+      "pattern": "lua",
+      "script": "sdc_validate_reward_identity.lua"
+    },
+    "SdcValidateRewardOutcome": {
+      "pattern": "lua",
+      "script": "sdc_validate_reward_outcome.lua"
+    },
     "GameOver": {
       "pattern": "tcpRequest",
       "service": "logic",
-      "route": { "cmd": 2, "act": 62 },
+      "route": {
+        "cmd": 2,
+        "act": 62
+      },
       "c2sProto": "Game.MainGameOverC2S",
       "s2cProto": "Game.MainGameOverS2C",
-      "bindings": [ { "type": "fixed", "field": "operation", "value": 0 } ]
+      "bindings": [
+        {
+          "type": "fixed",
+          "field": "operation",
+          "value": 0
+        }
+      ]
     }
   },
   "listens": {

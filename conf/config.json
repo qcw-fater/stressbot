@@ -18,8 +18,8 @@
   "standalone": {
     "bot": {
       "accountPrefix": "bot_",
-      "startNumber": 1090000,
-      "totalBots": 200,
+      "startNumber": 1140000,
+      "totalBots": 100,
       "concurrency": 20,
       "mainService": "logic"
     },
