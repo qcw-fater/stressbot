@@ -2,10 +2,10 @@ package protox
 
 import (
 	"bytes"
-	"container/list"
 	"fmt"
 	"hash/maphash"
-	"sync"
+
+	"stressbot/internal/lru"
 )
 
 // ── 广播去重：内容寻址的共享 WireValue 缓存 ─────────────────────
@@ -25,7 +25,8 @@ import (
 // 不影响已持有引用的机器人（GC 按引用计存活）。
 //
 // 碰撞防御：哈希只用作桶索引，命中判定必须 protoName 相等 + 全量 bytes.Equal，
-// 结构上不存在按哈希误共享的可能。
+// 结构上不存在按哈希误共享的可能。identity key = protoName + \x00 分隔符 + data，
+// 使不同 protoName + 相同 data 字节不会误命中。
 //
 // 接入点：Go-store 监听整存（robot.createListenCallback）。动作响应（请求-响应）
 // 逐机器人唯一，不进缓存（历史 018→019 实测污染教训）；listen 脚本 / await_listen
@@ -45,39 +46,6 @@ const (
 
 var dedupSeed = maphash.MakeSeed()
 
-// dedupEntry 一条缓存记录。wire.Raw() 是消息体的独立快照（pump 会复用网络缓冲区
-// 底层数组，不能直接留存入参切片），同时充当碰撞防御的比对基准。
-type dedupEntry struct {
-	protoName string
-	wire      *WireValue
-	elem      *list.Element // 在 lru 中的位置（Value 指回本 entry）
-}
-
-// WireCache 内容寻址的共享 WireValue 缓存。全 goroutine 安全（pump 并发调用）。
-type WireCache struct {
-	mu         sync.Mutex
-	buckets    map[uint64][]*dedupEntry // hash → 碰撞链（几乎恒为单元素）
-	lru        *list.List               // Front = 最近使用
-	curBytes   int                      // Σ len(entry.wire.Raw())
-	maxEntries int
-	maxBytes   int
-	hits       uint64
-	misses     uint64
-	evictions  uint64
-}
-
-// NewWireCache 创建缓存。maxEntries/maxBytes 任一超限即从 LRU 尾部驱逐。
-func NewWireCache(maxEntries, maxBytes int) *WireCache {
-	c := &WireCache{
-		buckets:    make(map[uint64][]*dedupEntry),
-		lru:        list.New(),
-		maxEntries: maxEntries,
-		maxBytes:   maxBytes,
-	}
-	registerCacheForStats(c)
-	return c
-}
-
 func dedupHash(protoName string, data []byte) uint64 {
 	var h maphash.Hash
 	h.SetSeed(dedupSeed)
@@ -86,15 +54,29 @@ func dedupHash(protoName string, data []byte) uint64 {
 	return h.Sum64()
 }
 
-// lookup 在锁内查找命中项并前移 LRU。
-func (c *WireCache) lookup(hash uint64, protoName string, data []byte) *dedupEntry {
-	for _, e := range c.buckets[hash] {
-		if e.protoName == protoName && bytes.Equal(e.wire.Raw(), data) {
-			c.lru.MoveToFront(e.elem)
-			return e
-		}
-	}
-	return nil
+// wireKey 是 WireCache/FrozenCache 的 key 类型（值类型结构体，栈上传递零堆分配）。
+// data 字段只拷贝 slice header（24 字节），不拷贝底层数组——lookup 时直接用入参 data。
+// entry 存储时 data 会被独立快照（见 wireShared/getOrParse 里的 key 构造）。
+type wireKey struct {
+	name string
+	data []byte
+}
+
+// wireKeyEqual 碰撞防御：protoName 相等 + 全量 bytes.Equal。
+func wireKeyEqual(a, b wireKey) bool {
+	return a.name == b.name && bytes.Equal(a.data, b.data)
+}
+
+// WireCache 内容寻址的共享 WireValue 缓存。全 goroutine 安全（pump 并发调用）。
+type WireCache struct {
+	store *lru.ContentLRU[wireKey, *WireValue]
+}
+
+// NewWireCache 创建缓存。maxEntries/maxBytes 任一超限即从 LRU 尾部驱逐。
+func NewWireCache(maxEntries, maxBytes int) *WireCache {
+	c := &WireCache{store: lru.New[wireKey, *WireValue](maxEntries, maxBytes, wireKeyEqual)}
+	registerCacheForStats(c)
+	return c
 }
 
 // getShared 命中返回共享 WireValue（跳过校验与快照）；未命中结构校验 + 快照后登记。
@@ -109,63 +91,21 @@ func (f *Factory) wireShared(protoName string, data []byte) (*WireValue, error) 
 	c := f.wireCache
 	hash := dedupHash(protoName, data)
 
-	c.mu.Lock()
-	if e := c.lookup(hash, protoName, data); e != nil {
-		c.hits++
-		c.mu.Unlock()
-		return e.wire, nil
+	// 第一次 lookup（锁内）。key 是栈上结构体，零堆分配。
+	if wv, ok := c.store.Lookup(hash, wireKey{protoName, data}); ok {
+		return wv, nil
 	}
-	c.mu.Unlock()
 
+	// 锁外重活：结构校验
 	snapshot := WireSnapshot(data)
 	if err := ValidateWire(md, snapshot); err != nil {
 		return nil, fmt.Errorf("校验 %s wire 失败: %w", protoName, err)
 	}
-	entry := &dedupEntry{
-		protoName: protoName,
-		wire:      NewWireValue(md, snapshot),
-	}
+	wire := NewWireValue(md, snapshot)
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if e := c.lookup(hash, protoName, data); e != nil {
-		c.hits++
-		return e.wire, nil
-	}
-	c.misses++
-	entry.elem = c.lru.PushFront(entry)
-	c.buckets[hash] = append(c.buckets[hash], entry)
-	c.curBytes += len(snapshot)
-	for (c.lru.Len() > c.maxEntries || c.curBytes > c.maxBytes) && c.lru.Len() > 1 {
-		c.evictOldest()
-	}
-	return entry.wire, nil
-}
-
-// evictOldest 移除 LRU 尾部条目（锁内调用）。
-func (c *WireCache) evictOldest() {
-	back := c.lru.Back()
-	if back == nil {
-		return
-	}
-	victim := back.Value.(*dedupEntry)
-	c.lru.Remove(back)
-	c.evictions++
-	c.curBytes -= len(victim.wire.Raw())
-	hash := dedupHash(victim.protoName, victim.wire.Raw())
-	bucket := c.buckets[hash]
-	for i, e := range bucket {
-		if e == victim {
-			bucket[i] = bucket[len(bucket)-1]
-			bucket = bucket[:len(bucket)-1]
-			break
-		}
-	}
-	if len(bucket) == 0 {
-		delete(c.buckets, hash)
-	} else {
-		c.buckets[hash] = bucket
-	}
+	// double-check + 插入（锁内）。key 的 data 做独立快照（pump 会复用网络缓冲区底层数组）。
+	key := wireKey{protoName, append([]byte(nil), data...)}
+	return c.store.Insert(key, hash, wire, len(snapshot)), nil
 }
 
 // DedupStats 一次快照（观测去重是否生效、是否被独占推送污染）。
@@ -181,23 +121,18 @@ type DedupStats struct {
 // purge 清空全部条目（Factory.Close 调用）。已被机器人持有的 *WireValue 引用
 // 不受影响（GC 按引用计存活）；purge 后缓存仍可安全使用，只是从零开始。
 func (c *WireCache) purge() {
-	c.mu.Lock()
-	c.buckets = make(map[uint64][]*dedupEntry)
-	c.lru = list.New()
-	c.curBytes = 0
-	c.mu.Unlock()
+	c.store.Purge()
 }
 
 // Stats 返回命中/未命中/驱逐计数与当前占用。
 func (c *WireCache) Stats() DedupStats {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	s := c.store.Stats()
 	return DedupStats{
-		Hits:      c.hits,
-		Misses:    c.misses,
-		Evictions: c.evictions,
-		Entries:   c.lru.Len(),
-		RawBytes:  c.curBytes,
+		Hits:      s.Hits,
+		Misses:    s.Misses,
+		Evictions: s.Evictions,
+		Entries:   s.Entries,
+		RawBytes:  s.Cost,
 	}
 }
 

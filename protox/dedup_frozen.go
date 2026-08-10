@@ -1,9 +1,7 @@
 package protox
 
 import (
-	"bytes"
-	"container/list"
-	"sync"
+	"stressbot/internal/lru"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -30,7 +28,8 @@ import (
 // 钉住 GB 级（线上 020→022 剖面证实）。这与 WireCache 按原始字节设界不矛盾——
 // 两个缓存钉的东西不同。
 //
-// 碰撞防御：哈希只用作桶索引，命中判定必须 protoName 相等 + 全量 bytes.Equal。
+// 碰撞防御：哈希只用作桶索引，命中判定必须 protoName 相等 + 全量 bytes.Equal
+// （identity key = protoName + \x00 分隔符 + data，见 dedupIdentity）。
 
 const (
 	// frozenMaxEntries / frozenMaxCost 解码缓存双上界。
@@ -40,50 +39,16 @@ const (
 	frozenMaxCost    = 256 << 20
 )
 
-// frozenEntry 一条解码缓存记录。raw 是消息体的独立快照（pump 复用网络缓冲区
-// 底层数组，不能留存入参切片），同时充当碰撞防御的比对基准。
-type frozenEntry struct {
-	protoName string
-	raw       []byte
-	frozen    *Frozen
-	cost      int
-	elem      *list.Element
-}
-
 // FrozenCache 内容寻址的共享解码缓存。全 goroutine 安全（pump 并发调用）。
 type FrozenCache struct {
-	mu         sync.Mutex
-	buckets    map[uint64][]*frozenEntry
-	lru        *list.List // Front = 最近使用
-	curCost    int        // Σ entry.cost（解码体积估算）
-	maxEntries int
-	maxCost    int
-	hits       uint64
-	misses     uint64
-	evictions  uint64
+	store *lru.ContentLRU[wireKey, *Frozen]
 }
 
 // NewFrozenCache 创建缓存。maxEntries/maxCost（解码体积估算）任一超限即从 LRU 尾部驱逐。
 func NewFrozenCache(maxEntries, maxCost int) *FrozenCache {
-	c := &FrozenCache{
-		buckets:    make(map[uint64][]*frozenEntry),
-		lru:        list.New(),
-		maxEntries: maxEntries,
-		maxCost:    maxCost,
-	}
+	c := &FrozenCache{store: lru.New[wireKey, *Frozen](maxEntries, maxCost, wireKeyEqual)}
 	registerFrozenCacheForStats(c)
 	return c
-}
-
-// lookup 在锁内查找命中项并前移 LRU。
-func (c *FrozenCache) lookup(hash uint64, protoName string, data []byte) *frozenEntry {
-	for _, e := range c.buckets[hash] {
-		if e.protoName == protoName && bytes.Equal(e.raw, data) {
-			c.lru.MoveToFront(e.elem)
-			return e
-		}
-	}
-	return nil
 }
 
 // getOrParse 命中返回共享 Frozen（跳过解码）；未命中经 f.Parse 解码后登记。
@@ -93,76 +58,27 @@ func (c *FrozenCache) lookup(hash uint64, protoName string, data []byte) *frozen
 func (c *FrozenCache) getOrParse(f *Factory, protoName string, data []byte) (*Frozen, error) {
 	hash := dedupHash(protoName, data)
 
-	c.mu.Lock()
-	if e := c.lookup(hash, protoName, data); e != nil {
-		c.hits++
-		c.mu.Unlock()
-		return e.frozen, nil
+	// 第一次 lookup（锁内）。key 是栈上结构体，零堆分配。
+	if fz, ok := c.store.Lookup(hash, wireKey{protoName, data}); ok {
+		return fz, nil
 	}
-	c.mu.Unlock()
 
+	// 锁外重活：解码
 	msg, err := f.Parse(protoName, data)
 	if err != nil {
 		return nil, err
 	}
-	entry := &frozenEntry{
-		protoName: protoName,
-		raw:       append([]byte(nil), data...),
-		frozen:    Freeze(msg),
-		cost:      estimateDecodedCost(msg),
-	}
+	frozen := Freeze(msg)
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if e := c.lookup(hash, protoName, data); e != nil {
-		c.hits++
-		return e.frozen, nil
-	}
-	c.misses++
-	entry.elem = c.lru.PushFront(entry)
-	c.buckets[hash] = append(c.buckets[hash], entry)
-	c.curCost += entry.cost
-	for (c.lru.Len() > c.maxEntries || c.curCost > c.maxCost) && c.lru.Len() > 1 {
-		c.evictOldest()
-	}
-	return entry.frozen, nil
-}
-
-// evictOldest 移除 LRU 尾部条目（锁内调用）。
-// 驱逐只影响后续命中率，不影响已持有引用的机器人（GC 按引用计存活）。
-func (c *FrozenCache) evictOldest() {
-	back := c.lru.Back()
-	if back == nil {
-		return
-	}
-	victim := back.Value.(*frozenEntry)
-	c.lru.Remove(back)
-	c.evictions++
-	c.curCost -= victim.cost
-	hash := dedupHash(victim.protoName, victim.raw)
-	bucket := c.buckets[hash]
-	for i, e := range bucket {
-		if e == victim {
-			bucket[i] = bucket[len(bucket)-1]
-			bucket = bucket[:len(bucket)-1]
-			break
-		}
-	}
-	if len(bucket) == 0 {
-		delete(c.buckets, hash)
-	} else {
-		c.buckets[hash] = bucket
-	}
+	// double-check + 插入（锁内）。key 的 data 做独立快照（pump 会复用网络缓冲区底层数组）。
+	key := wireKey{protoName, append([]byte(nil), data...)}
+	return c.store.Insert(key, hash, frozen, estimateDecodedCost(msg)), nil
 }
 
 // purge 清空全部条目（Factory.Close 调用）。已被脚本/协程持有的 *Frozen 引用
 // 不受影响（GC 按引用计存活）；purge 后缓存仍可安全使用，只是从零开始。
 func (c *FrozenCache) purge() {
-	c.mu.Lock()
-	c.buckets = make(map[uint64][]*frozenEntry)
-	c.lru = list.New()
-	c.curCost = 0
-	c.mu.Unlock()
+	c.store.Purge()
 }
 
 // FrozenDedupStats 解码缓存一次快照。CostBytes 为当前钉住的解码树体积估算累计。
@@ -176,14 +92,13 @@ type FrozenDedupStats struct {
 
 // Stats 返回命中/未命中/驱逐计数与当前占用。
 func (c *FrozenCache) Stats() FrozenDedupStats {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	s := c.store.Stats()
 	return FrozenDedupStats{
-		Hits:      c.hits,
-		Misses:    c.misses,
-		Evictions: c.evictions,
-		Entries:   c.lru.Len(),
-		CostBytes: c.curCost,
+		Hits:      s.Hits,
+		Misses:    s.Misses,
+		Evictions: s.Evictions,
+		Entries:   s.Entries,
+		CostBytes: s.Cost,
 	}
 }
 

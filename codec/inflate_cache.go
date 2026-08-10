@@ -22,11 +22,12 @@ package codec
 
 import (
 	"bytes"
-	"container/list"
 	"encoding/json"
 	"hash/maphash"
 	"net/http"
 	"sync"
+
+	"stressbot/internal/lru"
 )
 
 const (
@@ -53,113 +54,53 @@ func inflateHash(data []byte) uint64 {
 	return h.Sum64()
 }
 
-// inflateEntry 一条真条目。comp 是压缩字节的独立快照（decode 的 work 可能来自
-// 池化缓冲，不能留存入参切片），同时充当碰撞防御的比对基准；out 是共享解压产物
-//（只读契约，多个 Message.Data 共享同一底层数组）。
-type inflateEntry struct {
-	comp []byte
-	out  []byte
-	elem *list.Element
-}
-
+// inflateCache 二见登记 + 双上界 LRU。存储层由 lru.ContentLRU 承载，
+// 二见登记（markers）是本缓存独有的接入层防污染逻辑。
 type inflateCache struct {
-	mu         sync.Mutex
-	buckets    map[uint64][]*inflateEntry
-	markers    map[uint64]struct{} // 首见哈希标记（二见登记的第一级）
-	lru        *list.List          // Front = 最近使用
-	curBytes   int                 // Σ len(comp)+len(out)
-	maxEntries int
-	maxBytes   int
-	hits       uint64
-	misses     uint64
-	evictions  uint64
+	store   *lru.ContentLRU[[]byte, []byte] // K=压缩字节, V=解压产物（共享只读）
+	mu      sync.Mutex              // 保护 markers（二见登记）
+	markers map[uint64]struct{}     // 首见哈希标记（二见登记的第一级）
 }
 
 func newInflateCache(maxEntries, maxBytes int) *inflateCache {
 	return &inflateCache{
-		buckets:    make(map[uint64][]*inflateEntry),
-		markers:    make(map[uint64]struct{}),
-		lru:        list.New(),
-		maxEntries: maxEntries,
-		maxBytes:   maxBytes,
+		store:   lru.New[[]byte, []byte](maxEntries, maxBytes, bytes.Equal),
+		markers: make(map[uint64]struct{}),
 	}
 }
 
-// sharedInflateCache 进程级共享实例（pump 并发调用，锁内只做哈希/比对/链表操作）。
+// sharedInflateCache 进程级共享实例（pump 并发调用）。
 var sharedInflateCache = newInflateCache(inflateCacheMaxEntries, inflateCacheMaxBytes)
 
 // get 命中返回共享解压产物（调用方只读），未命中返回 nil。
 func (c *inflateCache) get(comp []byte) []byte {
-	h := inflateHash(comp)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for _, e := range c.buckets[h] {
-		if bytes.Equal(e.comp, comp) {
-			c.lru.MoveToFront(e.elem)
-			c.hits++
-			return e.out
-		}
+	out, ok := c.store.Lookup(inflateHash(comp), comp)
+	if !ok {
+		return nil
 	}
-	c.misses++
-	return nil
+	return out
 }
 
 // put 二见登记：首见只记哈希标记；再见快照压缩字节并登记真条目。
-// out 自登记起即为共享只读；并发双 miss 双 put 时以先登记者为准。
+// out 自登记起即为共享只读；并发双 miss 双 put 时 Insert 的 double-check 保证以先登记者为准。
 func (c *inflateCache) put(comp, out []byte) {
 	h := inflateHash(comp)
+	// 二见登记（接入层防污染，不进存储引擎）
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	for _, e := range c.buckets[h] {
-		if bytes.Equal(e.comp, comp) {
-			return // 并发竞争先手已登记
-		}
-	}
+	// 并发竞争先手已登记（store 里已有）则跳过 markers
 	if _, seen := c.markers[h]; !seen {
 		if len(c.markers) >= inflateMarkerCap {
 			clear(c.markers)
 		}
 		c.markers[h] = struct{}{}
+		c.mu.Unlock()
 		return
 	}
 	delete(c.markers, h)
-	entry := &inflateEntry{
-		comp: append([]byte(nil), comp...),
-		out:  out,
-	}
-	entry.elem = c.lru.PushFront(entry)
-	c.buckets[h] = append(c.buckets[h], entry)
-	c.curBytes += len(entry.comp) + len(entry.out)
-	for (c.lru.Len() > c.maxEntries || c.curBytes > c.maxBytes) && c.lru.Len() > 1 {
-		c.evictOldest()
-	}
-}
-
-// evictOldest 移除 LRU 尾部条目（锁内调用）。已被下游持有的共享 out 不受影响
-//（GC 按引用计存活），驱逐只影响后续命中率。
-func (c *inflateCache) evictOldest() {
-	back := c.lru.Back()
-	if back == nil {
-		return
-	}
-	victim := back.Value.(*inflateEntry)
-	c.lru.Remove(back)
-	c.evictions++
-	c.curBytes -= len(victim.comp) + len(victim.out)
-	h := inflateHash(victim.comp)
-	bucket := c.buckets[h]
-	for i, e := range bucket {
-		if e == victim {
-			bucket[i] = bucket[len(bucket)-1]
-			bucket = bucket[:len(bucket)-1]
-			break
-		}
-	}
-	if len(bucket) == 0 {
-		delete(c.buckets, h)
-	} else {
-		c.buckets[h] = bucket
-	}
+	c.mu.Unlock()
+	// 二见确认，登记真条目。comp 做独立快照（decode 的 work 可能来自池化缓冲）。
+	compSnap := append([]byte(nil), comp...)
+	c.store.Insert(compSnap, h, out, len(compSnap)+len(out))
 }
 
 // InflateDedupStats 观测快照。判读：hits/(hits+misses) 为命中率；
@@ -175,15 +116,17 @@ type InflateDedupStats struct {
 }
 
 func (c *inflateCache) stats() InflateDedupStats {
+	s := c.store.Stats()
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	markers := len(c.markers)
+	c.mu.Unlock()
 	return InflateDedupStats{
-		Hits:      c.hits,
-		Misses:    c.misses,
-		Evictions: c.evictions,
-		Entries:   c.lru.Len(),
-		Markers:   len(c.markers),
-		Bytes:     c.curBytes,
+		Hits:      s.Hits,
+		Misses:    s.Misses,
+		Evictions: s.Evictions,
+		Entries:   s.Entries,
+		Markers:   markers,
+		Bytes:     s.Cost,
 	}
 }
 
