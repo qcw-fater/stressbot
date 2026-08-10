@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"net"
@@ -18,6 +17,7 @@ import (
 	"stressbot/utils"
 	stresslog "stressbot/utils/log"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
@@ -708,15 +708,12 @@ func buildAddress(port int) string {
 	return fmt.Sprintf("http://%s:%d", ip, port)
 }
 
-// generateUUID 生成 v4 UUID（不依赖外部库）。
+// generateUUID 生成 v4 UUID，crypto/rand 不可用时回退到时间戳-pid。
 func generateUUID() string {
-	var buf [16]byte
-	if _, err := rand.Read(buf[:]); err != nil {
-		// fallback to timestamp-based
+	u, err := uuid.NewRandom()
+	if err != nil {
+		// rand 读失败（极罕见，如系统熵耗尽），保持原有时间戳兜底
 		return fmt.Sprintf("%d-%d", time.Now().UnixNano(), os.Getpid())
 	}
-	buf[6] = (buf[6] & 0x0f) | 0x40 // version 4
-	buf[8] = (buf[8] & 0x3f) | 0x80 // variant 10
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-		buf[0:4], buf[4:6], buf[6:8], buf[8:10], buf[10:16])
+	return u.String()
 }

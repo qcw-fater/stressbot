@@ -8,6 +8,7 @@ require (
 	github.com/bufbuild/protocompile v0.14.1
 	github.com/bytedance/sonic v1.15.2
 	github.com/go-sql-driver/mysql v1.10.0
+	github.com/google/uuid v1.6.0
 	github.com/panjf2000/ants/v2 v2.12.1
 	github.com/panjf2000/gnet/v2 v2.10.0
 	github.com/redis/go-redis/v9 v9.22.0
