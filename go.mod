@@ -7,6 +7,7 @@ require (
 	github.com/DataDog/sketches-go v1.4.8
 	github.com/bufbuild/protocompile v0.14.1
 	github.com/bytedance/sonic v1.15.2
+	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/google/uuid v1.6.0
 	github.com/panjf2000/ants/v2 v2.12.1

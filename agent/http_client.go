@@ -8,9 +8,10 @@ import (
 	"io"
 	"net"
 	"net/http"
+	json "stressbot/utils/jsonx"
 	"time"
 
-	json "stressbot/utils/jsonx"
+	"github.com/cenkalti/backoff/v4"
 )
 
 // errNotRegistered Admin 返回 404 时表示 Agent 未注册（可能 Admin 重启了）。
@@ -291,12 +292,13 @@ func (c *AdminClient) doPost(ctx context.Context, path string, body []byte) (*ht
 	return c.client.Do(req)
 }
 
-// RetryWithRetriesAndBackoff 在 RetryWithBackoff 之上额外支持"最大重试次数"。
+// RetryWithRetriesAndBackoff 用 cenkalti/backoff 做带 jitter 的指数退避重试。
 //   - maxRetries < 0  ：无限重试（直到 ctx 取消）
-//   - maxRetries == 0 ：当成 1 次（仅尝试一次，不重试）
+//   - maxRetries == 0 ：仅尝试一次，不重试
 //   - maxRetries > 0  ：最多重试 maxRetries 次（即总共最多 maxRetries+1 次尝试）
 //
-// initial / max 控制指数退避区间。返回最后一次失败的错误。
+// initial / max 控制指数退避区间。退避带 ±50% jitter（RandomizationFactor=0.5），
+// 防止多 Agent 同步重连造成的惊群。返回最后一次失败的错误。
 func RetryWithRetriesAndBackoff(ctx context.Context, op func() error, initial, max time.Duration, maxRetries int, desc string) error {
 	if initial <= 0 {
 		initial = time.Second
@@ -304,44 +306,21 @@ func RetryWithRetriesAndBackoff(ctx context.Context, op func() error, initial, m
 	if max <= 0 {
 		max = 60 * time.Second
 	}
-	backoff := time.Duration(0)
-	attempt := 0
-	for {
-		err := op()
-		if err == nil {
-			return nil
-		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		// maxRetries: <0 无限；其他比较"已重试次数"
-		if maxRetries >= 0 && attempt >= maxRetries {
-			return fmt.Errorf("%s: 已达最大重试次数 %d: %w", desc, maxRetries, err)
-		}
-		attempt++
-		if backoff == 0 {
-			backoff = initial
-		} else {
-			backoff *= 2
-			if backoff > max {
-				backoff = max
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(backoff):
-		}
+	// 构造退避策略：先 MaxRetries 再 Context，backoff.getContext 能穿透两层包装提取 ctx
+	var policy backoff.BackOff = newExponentialBackoff(initial, max)
+	if maxRetries >= 0 {
+		policy = backoff.WithMaxRetries(policy, uint64(maxRetries))
 	}
-}
+	policy = backoff.WithContext(policy, ctx)
 
-func nextBackoff(current, max time.Duration) time.Duration {
-	if current == 0 {
-		return time.Second
+	err := backoff.Retry(op, policy)
+	if err == nil {
+		return nil
 	}
-	next := current * 2
-	if next > max {
-		return max
+	// ctx 取消时 backoff.Retry 返回 ctx.Err()，直接透传（保留 %w 让调用方 errors.Is 判别）
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
 	}
-	return next
+	// 正常耗尽重试次数，加 desc 前缀便于排查
+	return fmt.Errorf("%s: 已达最大重试次数 %d: %w", desc, maxRetries, err)
 }

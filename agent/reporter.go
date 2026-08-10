@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"stressbot/monitor"
 	"stressbot/utils"
 	stresslog "stressbot/utils/log"
@@ -86,39 +87,37 @@ func (r *StressReporter) Stop() {
 	})
 }
 
+// reportUntilAcknowledged 重试上报直到 Admin 确认（202/200）或 ctx 取消。
+// 退避带 jitter：50ms 起、500ms 上限。ctx 取消时返回 ctx.Err()
+// （原手写实现返回最后一次 op err，行为微调——Stop 只用 5s timeout，
+// 超时返回什么都只 warn 日志，不影响任务结束流程）。
 func (r *StressReporter) reportUntilAcknowledged(ctx context.Context, now time.Time) error {
-	backoff := 50 * time.Millisecond
-	for {
-		err := r.reportOnce(ctx, now)
-		if err == nil {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return err
-		case <-time.After(backoff):
-		}
-		backoff *= 2
-		if backoff > 500*time.Millisecond {
-			backoff = 500 * time.Millisecond
-		}
-	}
+	b := backoff.WithContext(
+		newExponentialBackoff(50*time.Millisecond, 500*time.Millisecond),
+		ctx,
+	)
+	return backoff.Retry(func() error {
+		return r.reportOnce(ctx, now)
+	}, b)
 }
 
 func (r *StressReporter) run(ctx context.Context) {
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
 
-	var backoff time.Duration
+	// 退避策略：失败时指数退避（1s→30s 带 jitter），成功后回到正常 ticker 节奏。
+	// nextWait > 0 表示处于退避态，用 time.After(nextWait) 等待而非 ticker。
+	var nextWait time.Duration
+	var bo *backoff.ExponentialBackOff
 
 	for {
-		if backoff > 0 {
+		if nextWait > 0 {
 			select {
 			case <-ctx.Done():
 				return
 			case <-r.stopCh:
 				return
-			case <-time.After(backoff):
+			case <-time.After(nextWait):
 			}
 		} else {
 			select {
@@ -131,14 +130,22 @@ func (r *StressReporter) run(ctx context.Context) {
 		}
 
 		if err := r.reportOnce(ctx, time.Now()); err != nil {
-			backoff = nextBackoff(backoff, 30*time.Second)
+			if bo == nil {
+				bo = newExponentialBackoff(time.Second, 30*time.Second)
+			}
+			d := bo.NextBackOff()
+			if d == backoff.Stop { // MaxElapsedTime=0 时不会触发，兜底防御
+				d = 30 * time.Second
+			}
+			nextWait = d
 			stresslog.Warn("[AGENT] 压测指标上报失败",
 				zap.String("agentID", r.agentID),
 				zap.String("taskID", r.taskID),
-				zap.Duration("backoff", backoff),
+				zap.Duration("backoff", nextWait),
 				zap.Error(err))
 		} else {
-			backoff = 0
+			bo = nil
+			nextWait = 0
 		}
 	}
 }
@@ -209,16 +216,18 @@ func (r *SystemReporter) run(ctx context.Context) {
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
 
-	var backoff time.Duration
+	// 退避策略同 StressReporter.run：失败时指数退避（1s→30s 带 jitter），成功后回 ticker。
+	var nextWait time.Duration
+	var bo *backoff.ExponentialBackOff
 
 	for {
-		if backoff > 0 {
+		if nextWait > 0 {
 			select {
 			case <-ctx.Done():
 				return
 			case <-r.stopCh:
 				return
-			case <-time.After(backoff):
+			case <-time.After(nextWait):
 			}
 		} else {
 			select {
@@ -236,13 +245,21 @@ func (r *SystemReporter) run(ctx context.Context) {
 			Snapshot: snap,
 		}
 		if err := r.cli.PostSystem(ctx, report); err != nil {
-			backoff = nextBackoff(backoff, 30*time.Second)
+			if bo == nil {
+				bo = newExponentialBackoff(time.Second, 30*time.Second)
+			}
+			d := bo.NextBackOff()
+			if d == backoff.Stop {
+				d = 30 * time.Second
+			}
+			nextWait = d
 			stresslog.Warn("[AGENT] 系统指标上报失败",
 				zap.String("agentID", r.agentID),
-				zap.Duration("backoff", backoff),
+				zap.Duration("backoff", nextWait),
 				zap.Error(err))
 		} else {
-			backoff = 0
+			bo = nil
+			nextWait = 0
 		}
 	}
 }

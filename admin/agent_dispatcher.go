@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	json "stressbot/utils/jsonx"
 	stresslog "stressbot/utils/log"
 
@@ -77,63 +78,86 @@ func (d *AgentDispatcher) Version(addr string) (string, error) {
 }
 
 func (d *AgentDispatcher) post(addr, path string, body any, retries int) error {
-	backoff := 1 * time.Second
 	url := fmt.Sprintf("http://%s%s", normalizeAddr(addr), path)
 
-	for i := 0; i <= retries; i++ {
-		var bodyReader io.Reader
-		if body != nil {
-			data, err := json.Marshal(body)
-			if err != nil {
-				return fmt.Errorf("marshal body: %w", err)
-			}
-			bodyReader = bytes.NewReader(data)
+	// 序列化 body 一次（每次重试复用同一份字节，避免重复 marshal）
+	var bodyBytes []byte
+	if body != nil {
+		var err error
+		bodyBytes, err = json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("marshal body: %w", err)
 		}
+	}
 
+	// 退避策略：1s→10s 带 jitter，最多重试 retries 次。
+	// 原手写实现对所有非 2xx（含 4xx）都重试——4xx 是永久性错误（请求格式错/路径错/未授权），
+	// 重试只是浪费时间并掩盖配置 bug，故用 backoff.Permanent 标记后立即停止。
+	b := backoff.WithMaxRetries(newDispatcherBackoff(1*time.Second, 10*time.Second), uint64(retries))
+	var attempt int
+
+	notify := func(err error, wait time.Duration) {
+		stresslog.Warn("[DISPATCHER] POST 失败，将重试",
+			zap.String("addr", addr),
+			zap.String("path", path),
+			zap.String("url", url),
+			zap.Int("attempt", attempt),
+			zap.Int("maxRetries", retries),
+			zap.Duration("backoff", wait),
+			zap.Error(err))
+	}
+
+	err := backoff.RetryNotify(func() error {
+		attempt++
+		var bodyReader io.Reader
+		if bodyBytes != nil {
+			bodyReader = bytes.NewReader(bodyBytes)
+		}
 		req, err := http.NewRequest("POST", url, bodyReader)
 		if err != nil {
-			return fmt.Errorf("create request: %w", err)
+			// 请求构造失败是永久性错误（URL 格式错等），不重试
+			return backoff.Permanent(fmt.Errorf("create request: %w", err))
 		}
-		if body != nil {
+		if bodyBytes != nil {
 			req.Header.Set("Content-Type", "application/json")
 		}
 
 		resp, err := d.httpClient.Do(req)
 		if err != nil {
-			if i == retries {
-				return fmt.Errorf("after %d retries: %w", retries, err)
-			}
-			stresslog.Warn("[DISPATCHER] POST 失败，将重试",
-				zap.String("addr", addr),
-				zap.String("path", path),
-				zap.String("url", url),
-				zap.Int("attempt", i+1),
-				zap.Int("maxRetries", retries),
-				zap.Duration("backoff", backoff),
-				zap.Error(err))
-			time.Sleep(backoff)
-			backoff = min(backoff*2, 10*time.Second)
-			continue
+			// 网络错误（连接拒绝/超时）：Agent 可能正在重启，值得重试
+			return fmt.Errorf("post %s: %w", url, err)
 		}
 		drainAndClose(resp)
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			return nil
 		}
-		if i == retries {
-			return fmt.Errorf("agent returned status %d", resp.StatusCode)
+		// 4xx 是永久性错误（请求格式错/路径不存在/未授权），重试无意义，立即停止。
+		// 5xx 是服务端临时故障，正常返回（可重试）。
+		httpErr := fmt.Errorf("agent returned status %d", resp.StatusCode)
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			return backoff.Permanent(httpErr)
 		}
-		stresslog.Warn("[DISPATCHER] POST 失败，将重试",
-			zap.String("url", url),
-			zap.Int("attempt", i+1),
-			zap.Int("status", resp.StatusCode))
-		time.Sleep(backoff)
-		backoff = min(backoff*2, 10*time.Second)
-	}
-	return fmt.Errorf("unreachable")
+		return httpErr
+	}, b, notify)
+
+	return err
 }
 
 func (d *AgentDispatcher) get(addr, path string) (*http.Response, error) {
 	url := fmt.Sprintf("http://%s%s", normalizeAddr(addr), path)
 	return d.httpClient.Get(url)
+}
+
+// newDispatcherBackoff 构造 Admin→Agent RPC 的指数退避（带 jitter）。
+// 与 agent.newExponentialBackoff 同构，但分属两个包各自维护（admin 不依赖 agent）。
+func newDispatcherBackoff(initial, max time.Duration) *backoff.ExponentialBackOff {
+	b := backoff.NewExponentialBackOff(
+		backoff.WithInitialInterval(initial),
+		backoff.WithMaxInterval(max),
+	)
+	b.MaxElapsedTime = 0
+	b.RandomizationFactor = 0.5
+	b.Multiplier = 2.0
+	return b
 }
