@@ -78,25 +78,47 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 		shutdownPool:    func() { utils.GetWorkPool().Shutdown() },
 		controlPlaneTLS: serverTLS,
 	}
+	assembled := false
+	defer func() {
+		if !assembled && s.db != nil {
+			_ = s.db.Close()
+		}
+	}()
 
-	// 1. TaskStore
+	// 1. MySQL 必须在装配任何运行时 store 和开放 listener 前完成前向迁移与结构复核。
+	// 任一步失败都关闭连接并让进程以非零状态退出，不提供半健康 HTTP 服务。
+	if cfg.MySQL != nil {
+		db, err := openDB(*cfg.MySQL)
+		if err != nil {
+			return nil, fmt.Errorf("connect mysql: %w", err)
+		}
+		s.db = db
+		if err := runMySQLMigrations(context.Background(), db, MigrationAuto, nil); err != nil {
+			return nil, fmt.Errorf("migrate mysql schema: %w", err)
+		}
+		stresslog.Info("[ADMIN] MySQL 已连接且迁移检查通过",
+			zap.String("addr", fmt.Sprintf("%s:%d", cfg.MySQL.Host, cfg.MySQL.Port)),
+			zap.String("database", cfg.MySQL.Database))
+	}
+
+	// 2. TaskStore
 	tasks, err := NewTaskStore("data")
 	if err != nil {
 		return nil, fmt.Errorf("init task store: %w", err)
 	}
 	s.tasks = tasks
 
-	// 2. AgentRegistry
+	// 3. AgentRegistry
 	s.agents = NewAgentRegistry(cfg.AgentRegistry, s.onAgentStatusChange)
 
-	// 3. MetricsAggregator
+	// 4. MetricsAggregator
 	s.metricsWindows = NewMetricsWindowStore(time.Now)
 	s.aggregator = NewMetricsAggregator(s.agents, s.metricsWindows, time.Now)
 
-	// 4. AgentDispatcher
+	// 5. AgentDispatcher
 	s.dispatcher = NewAgentDispatcherWithTLS(clientTLS)
 
-	// 5. Logs proxy client
+	// 6. Logs proxy client
 	s.logsProxyClient = &http.Client{
 		Timeout:   5 * time.Second,
 		Transport: newAgentHTTPTransport(clientTLS),
@@ -106,47 +128,32 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 		Transport: newAgentHTTPTransport(clientTLS),
 	}
 
-	// 6. Assigner
+	// 7. Assigner
 	s.assigner = NewAssigner()
 
-	// 7. HistoryStore（可选）+ 共享全局 MySQL 连接池
-	//    MySQL 由 Config.MySQL 统一配置，HistoryStore 不再自管 *sql.DB 生命周期。
-	//    装配顺序：openDB → initMySQLSchema → NewHistoryStore(db, cfg)。
-	if cfg.MySQL != nil {
-		db, err := openDB(*cfg.MySQL)
-		if err != nil {
-			return nil, fmt.Errorf("connect mysql: %w", err)
-		}
-		if err := initMySQLSchema(db); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("init mysql schema: %w", err)
-		}
-		stresslog.Info("[ADMIN] MySQL 已连接",
-			zap.String("addr", fmt.Sprintf("%s:%d", cfg.MySQL.Host, cfg.MySQL.Port)),
-			zap.String("database", cfg.MySQL.Database))
-
+	// 8. HistoryStore（可选）及模板 store 复用已迁移完成的全局 MySQL 连接池。
+	if s.db != nil {
 		if cfg.History != nil {
-			s.history = NewHistoryStore(db, cfg.History)
+			s.history = NewHistoryStore(s.db, cfg.History)
 			sampler := NewSampler(
 				10*time.Second,
 				s.aggregator, s.history, s.agents, s.tasks, s.metricsWindows,
 			)
 			s.sampler = sampler
 		}
-		s.db = db // 由 AdminServer 统一 Close（Shutdown）
 		// 流程模板库依赖全局 MySQL，与 history 相互独立：未配 history 时流程库仍可用。
-		s.flows = NewFlowTemplateStore(db)
-		s.actionTemplates = NewActionTemplateStore(db)
-		s.listenTemplates = NewListenTemplateStore(db)
+		s.flows = NewFlowTemplateStore(s.db)
+		s.actionTemplates = NewActionTemplateStore(s.db)
+		s.listenTemplates = NewListenTemplateStore(s.db)
 	} else {
 		stresslog.Info("[ADMIN] MySQL 未配置：历史归档模块未启用，" +
 			"所有 /api/history* 接口将返回 HISTORY_DISABLED")
 	}
 
-	// 8. 终态回调
+	// 9. 终态回调
 	s.tasks.SetOnTerminal(s.onTaskTerminal)
 
-	// 9. 共享状态（Redis）：验证连通性 + 初始化待清理队列
+	// 10. 共享状态（Redis）：验证连通性 + 初始化待清理队列
 	if cfg.RedisEnabled() {
 		resolved, rerr := cfg.Redis.Resolve()
 		if rerr != nil {
@@ -167,6 +174,7 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 			"脚本中使用 require(\"share\") 将报错")
 	}
 
+	assembled = true
 	return s, nil
 }
 

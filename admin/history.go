@@ -95,18 +95,6 @@ func openDB(cfg MySQLConfig) (*sql.DB, error) {
 	return db, nil
 }
 
-// initMySQLSchema 初始化所有 MySQL 表（幂等，CREATE IF NOT EXISTS）。
-// 由 AdminServer 装配时调用一次。
-func initMySQLSchema(db *sql.DB) error {
-	ctx := context.Background()
-	for _, ddl := range allDDL {
-		if _, err := db.ExecContext(ctx, ddl); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // Archive 将终态任务归档到 MySQL（事务写入 6 张表）。
 func (h *HistoryStore) Archive(ctx context.Context, task *Task, finalStress *monitor.CollectorSnapshot, finalSys ClusterSystemSnapshot) error {
 	if h.db == nil {

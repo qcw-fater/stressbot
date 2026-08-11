@@ -6,6 +6,7 @@ autostart=true
 autorestart=unexpected
 exitcodes=0
 startsecs=5
+# 数据库迁移连续失败三次后进入 FATAL；人工排障并执行 -migration status/up 后再手工启动。
 startretries=3
 stopsignal=TERM
 stopwaitsecs=20

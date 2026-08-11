@@ -12,6 +12,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/panjf2000/ants/v2 v2.12.1
 	github.com/panjf2000/gnet/v2 v2.10.0
+	github.com/pressly/goose/v3 v3.27.2
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/shirou/gopsutil/v4 v4.26.7
 	github.com/yuin/gopher-lua v1.1.2
@@ -30,7 +31,9 @@ require (
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20260802145828-341c2f0c90b5 // indirect
+	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/power-devops/perfstat v0.0.0-20260805114148-88456608a4f6 // indirect
+	github.com/sethvargo/go-retry v0.3.0 // indirect
 	github.com/tklauser/go-sysconf v0.4.0 // indirect
 	github.com/tklauser/numcpus v0.12.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect

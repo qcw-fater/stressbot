@@ -407,7 +407,7 @@ M1 出口：浏览器只能从认证代理访问管理面；Admin/Agent 错误�
 - Delete after cutover: `admin/mysql_schema.go`
 - Replace: `admin/history_schema_test.go`
 
-- [ ] **Step 1: 固定 Goose 版本并写 provider 构造失败测试**
+- [x] **Step 1: 固定 Goose 版本并写 provider 构造失败测试**
 
 ```powershell
 go get github.com/pressly/goose/v3@v3.27.2
@@ -415,13 +415,13 @@ go get github.com/pressly/goose/v3@v3.27.2
 
 测试必须验证 embedded FS 缺 migration、重复 version、未知 dialect 时构造失败；Provider 使用实例注册，不使用全局 registry。
 
-- [ ] **Step 2: 把当前 schema 原样搬入基线 migration**
+- [x] **Step 2: 把当前 schema 原样搬入基线 migration**
 
 `00001_current_schema.sql` 使用顺序版本号，逐字搬入 `admin/mysql_schema.go:7-206` 当前 11 张表的完整 `CREATE TABLE IF NOT EXISTS`，顺序保持 `allDDL` 当前顺序。文件首行是 `-- +goose Up`，末尾是 `-- +goose Down` 和 `SELECT 1;`；迁移搬运 PR 通过规范化 SQL 测试逐表比较旧常量与新文件，确保列、默认值、索引、字符集零漂移。
 
 生产禁止自动 down，所以基线 Down 明确为空操作；所有真实破坏性回退依赖备份恢复。
 
-- [ ] **Step 3: 嵌入 migration 并构造 Provider**
+- [x] **Step 3: 嵌入 migration 并构造 Provider**
 
 ```go
 //go:embed *.sql
@@ -438,7 +438,7 @@ provider, err := goose.NewProvider(
 
 Provider 的 `Up(ctx)` 结果逐条写结构化日志：version、source、duration、direction；错误日志不输出 DSN。
 
-- [ ] **Step 4: 实现 MySQL advisory lock**
+- [x] **Step 4: 实现 MySQL advisory lock**
 
 锁必须持有专用 `*sql.Conn`，获取和释放在同一 session：
 
@@ -449,11 +449,11 @@ SELECT RELEASE_LOCK('stressbot_schema_migration');
 
 锁超时默认 30 秒。返回 0 是超时，返回 NULL 是 MySQL 错误；无论 Provider 成功失败都 defer release 和 close。Goose 官方 Provider 默认不替 MySQL 加锁，因此此锁不是可省略项。
 
-- [ ] **Step 5: 在 Admin 开放端口前运行 migration**
+- [x] **Step 5: 在 Admin 开放端口前运行 migration**
 
 `NewAdminServer` 装配顺序改为 `openDB → acquire lock → provider.Up → postCheck → stores`。任一步失败都关闭 DB 并返回错误，`cmd/admin/main.go` 保持 exit 1；不得启动一个“数据库不可用但 HTTP 仍可用”的半健康 Admin。
 
-- [ ] **Step 6: 用 SQL mock 验证失败传播和锁释放**
+- [x] **Step 6: 用 SQL mock 验证失败传播和锁释放**
 
 ```powershell
 $env:GOCACHE='D:\Gitee\stressbot\.tmp\gocache'
@@ -462,7 +462,7 @@ go test ./admin -run 'TestMigrator|TestMigrationLock' -v
 
 Expected: migration 第 N 步失败、post-check 失败、context cancel、锁超时四种路径均释放锁和连接；Admin server 未创建。
 
-- [ ] **Step 7: 提交 Goose 基线**
+- [x] **Step 7: 提交 Goose 基线**
 
 ```powershell
 git add go.mod go.sum admin/migrations admin/migrator.go admin/migration_lock.go admin/migrator_test.go admin/admin.go admin/history.go
@@ -484,11 +484,11 @@ git commit -m "feat: introduce versioned Goose migrations"
 - Delete: `admin/mysql_schema.go`
 - Rewrite: `admin/history_schema_test.go`
 
-- [ ] **Step 1: 从真实旧 schema 快照写失败测试**
+- [x] **Step 1: 从真实旧 schema 快照写失败测试**
 
 测试库至少覆盖三种起点：空数据库；只有早期 6 张历史表且缺 `active_agent_count/window_from/history_batch_token`；已有模板表但缺二进制唯一索引。每种起点执行两次 `Up`，第二次必须无变更且成功。
 
-- [ ] **Step 2: 编写可重入 Go migrations**
+- [x] **Step 2: 编写可重入 Go migrations**
 
 每个 DDL 动作先查 `information_schema.columns/statistics/tables`，只在缺失时执行一个 `ALTER TABLE`。每个 migration 只修一组紧密相关的表；执行错误立即返回。不要把 `ALTER TABLE` 包装成“事务回滚一定有效”的假象。
 
@@ -501,27 +501,29 @@ func addColumnIfMissing(ctx context.Context, db *sql.DB, table, column, ddl stri
 }
 ```
 
-- [ ] **Step 3: 增加 schema post-check**
+- [x] **Step 3: 增加 schema post-check**
 
 post-check 固定验证运行时必需列、主键和唯一索引，不只检查 Goose version。至少验证 `task_timeseries.uq_task_history_batch`、`task_meta` 复合主键、模板名称二进制唯一索引、`task_history.flow_template_id`。
 
-- [ ] **Step 4: 增加运维命令**
+- [x] **Step 4: 增加运维命令**
 
 `cmd/admin` 增加 `-migration status|up|up-by-one|auto`。`auto` 是正常启动；其余命令只连接数据库、获取锁、输出结果后退出，不启动 HTTP。生产不提供 `down/reset` 快捷入口。
 
-- [ ] **Step 5: 写失败注入集成测试**
+- [x] **Step 5: 写失败注入集成测试**
 
 使用环境变量 `STRESSBOT_TEST_MYSQL_DSN` 指向专用测试库；测试不得输出该值。通过一条专用测试 migration 在第一条 DDL 后返回 sentinel error，断言：Admin 未监听；Goose 未把该 version 标为完成；已经提交的 DDL 被 post-check 识别；修正版 migration 可再次前向完成。
 
-- [ ] **Step 6: 写恢复 runbook**
+- [x] **Step 6: 写恢复 runbook**
 
 `docs/runbooks/mysql-migration.md` 固定以下顺序：停止自动重启 → 保存 Admin 日志和 `-migration status` → 判断是锁、权限、磁盘、DDL 还是 post-check → 修正环境或发布前向 migration → staging 恢复演练 → 再启动。上线前使用 `mysqldump --single-transaction --routines --triggers` 或云数据库快照；涉及大表 ALTER 时先做容量和锁时长评估，改为发布前独立作业。
 
-- [ ] **Step 7: 限制 Supervisor 启动重试**
+- [x] **Step 7: 限制 Supervisor 启动重试**
 
 示例设置 `startretries=3`；迁移失败连续三次后进入 FATAL，避免无限重启反复执行 DDL。人工修复后再 `supervisorctl start stressbot-admin`。
 
 - [ ] **Step 8: 跑四类迁移演练**
+
+当前开发环境未提供 MySQL，且 Docker 服务不可用；集成用例已编译并因缺少 `STRESSBOT_TEST_MYSQL_DSN` 明确跳过，真实演练保留为发布前门禁，禁止记作已通过。
 
 ```powershell
 go test ./admin -run 'TestMigrationIntegration' -v
@@ -531,7 +533,7 @@ go build ./...
 
 Expected: 空库、旧库、失败恢复、两个 Admin 并发启动均通过；并发场景只有一个持锁迁移者。
 
-- [ ] **Step 9: 删除启动期手写 DDL 并提交**
+- [x] **Step 9: 删除启动期手写 DDL 并提交**
 
 ```powershell
 git add admin cmd/admin docs/runbooks deploy/supervisor go.mod go.sum

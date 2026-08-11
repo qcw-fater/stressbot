@@ -1,113 +1,58 @@
 package admin
 
 import (
-	"context"
-	"database/sql"
-	"database/sql/driver"
-	"errors"
-	"fmt"
+	"io/fs"
 	"net/http"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
+
+	"stressbot/admin/migrations"
 )
 
-var schemaDriverSequence atomic.Uint64
-
-type schemaRecordingDriver struct {
-	mu      sync.Mutex
-	queries []string
-	failAt  int
-	failErr error
+func normalizeDDL(sqlText string) string {
+	sqlText = strings.TrimSuffix(strings.TrimSpace(sqlText), ";")
+	return strings.ToLower(strings.Join(strings.Fields(sqlText), " "))
 }
 
-func (d *schemaRecordingDriver) Open(string) (driver.Conn, error) {
-	return &schemaRecordingConn{driver: d}, nil
-}
-
-func (d *schemaRecordingDriver) snapshot() []string {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return append([]string(nil), d.queries...)
-}
-
-type schemaRecordingConn struct {
-	driver *schemaRecordingDriver
-}
-
-func (c *schemaRecordingConn) Prepare(string) (driver.Stmt, error) {
-	return nil, errors.New("prepare is not supported")
-}
-
-func (c *schemaRecordingConn) Close() error {
-	return nil
-}
-
-func (c *schemaRecordingConn) Begin() (driver.Tx, error) {
-	return nil, errors.New("transactions are not supported")
-}
-
-func (c *schemaRecordingConn) ExecContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Result, error) {
-	c.driver.mu.Lock()
-	defer c.driver.mu.Unlock()
-
-	c.driver.queries = append(c.driver.queries, query)
-	if c.driver.failAt > 0 && len(c.driver.queries) == c.driver.failAt {
-		return nil, c.driver.failErr
-	}
-	return driver.RowsAffected(0), nil
-}
-
-func openSchemaRecordingDB(t *testing.T, recorder *schemaRecordingDriver) *sql.DB {
+func baselineDDL(t *testing.T) ([]string, map[string]string) {
 	t.Helper()
-	driverName := fmt.Sprintf("stressbot_schema_test_%d", schemaDriverSequence.Add(1))
-	sql.Register(driverName, recorder)
-	db, err := sql.Open(driverName, "")
+	raw, err := fs.ReadFile(migrations.Files, "00001_current_schema.sql")
 	if err != nil {
-		t.Fatalf("sql.Open() error = %v", err)
+		t.Fatalf("read baseline migration: %v", err)
 	}
-	t.Cleanup(func() {
-		_ = db.Close()
-	})
-	return db
-}
-
-func TestInitMySQLSchemaOnlyCreatesTables(t *testing.T) {
-	recorder := &schemaRecordingDriver{}
-	db := openSchemaRecordingDB(t, recorder)
-
-	if err := initMySQLSchema(db); err != nil {
-		t.Fatalf("initMySQLSchema() error = %v", err)
-	}
-
-	queries := recorder.snapshot()
-	if len(queries) != len(allDDL) {
-		t.Fatalf("executed %d statements, want %d CREATE TABLE statements", len(queries), len(allDDL))
-	}
-	for i, query := range queries {
-		if !strings.HasPrefix(strings.ToUpper(strings.TrimSpace(query)), "CREATE TABLE") {
-			t.Errorf("statement %d is not CREATE TABLE: %q", i, query)
+	up := strings.SplitN(string(raw), "-- +goose Down", 2)[0]
+	var ordered []string
+	byTable := make(map[string]string)
+	for _, statement := range strings.Split(up, ";") {
+		statement = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(statement), "-- +goose Up"))
+		if strings.HasPrefix(strings.ToUpper(statement), "CREATE TABLE") {
+			normalized := normalizeDDL(statement)
+			fields := strings.Fields(normalized)
+			if len(fields) < 6 {
+				t.Fatalf("invalid baseline CREATE TABLE: %s", normalized)
+			}
+			table := fields[5]
+			ordered = append(ordered, table)
+			byTable[table] = normalized
 		}
 	}
+	return ordered, byTable
 }
 
-func TestInitMySQLSchemaReturnsCreateTableError(t *testing.T) {
-	sentinel := errors.New("create table failed")
-	recorder := &schemaRecordingDriver{failAt: 2, failErr: sentinel}
-	db := openSchemaRecordingDB(t, recorder)
-
-	err := initMySQLSchema(db)
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("initMySQLSchema() error = %v, want %v", err, sentinel)
+func TestBaselineMigrationContainsCurrentTablesInStableOrder(t *testing.T) {
+	ordered, _ := baselineDDL(t)
+	want := []string{
+		"task_history", "task_assignment", "task_report", "task_aggregated", "task_timeseries",
+		"task_config_archive", "task_agent_events", "task_meta", "flow_template", "action_template", "listen_template",
 	}
-	if got := len(recorder.snapshot()); got != 2 {
-		t.Fatalf("executed %d statements after failure, want 2", got)
+	if strings.Join(ordered, ",") != strings.Join(want, ",") {
+		t.Fatalf("baseline table order = %v, want %v", ordered, want)
 	}
 }
 
 func TestTimeseriesDDLContainsWindowAccuracyContract(t *testing.T) {
-	normalized := strings.ToLower(strings.Join(strings.Fields(ddlTaskTimeseries), " "))
+	_, tables := baselineDDL(t)
+	normalized := tables["task_timeseries"]
 	for _, fragment := range []string{
 		"window_from datetime(6) not null",
 		"window_to datetime(6) not null",
@@ -143,9 +88,10 @@ func TestTaskConfigArchiveUpsertUpdatesEveryConfigColumn(t *testing.T) {
 }
 
 func TestTemplateDDLUsesIndependentBinaryUniqueNames(t *testing.T) {
+	_, tables := baselineDDL(t)
 	for name, ddl := range map[string]string{
-		"action": ddlActionTemplate,
-		"listen": ddlListenTemplate,
+		"action": tables["action_template"],
+		"listen": tables["listen_template"],
 	} {
 		normalized := strings.ToLower(strings.Join(strings.Fields(ddl), " "))
 		for _, fragment := range []string{
