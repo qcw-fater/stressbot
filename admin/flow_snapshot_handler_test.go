@@ -47,7 +47,7 @@ func TestFlowSnapshotRouteReturnsSnapshot(t *testing.T) {
 		}))
 	s := &AdminServer{cfg: Config{StaticDir: t.TempDir()}, flows: NewFlowTemplateStore(db)}
 	rr := httptest.NewRecorder()
-	s.registerRoutes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/sbot/flows/snapshot", nil))
+	s.registerManagementRoutes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/sbot/flows/snapshot", nil))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s", rr.Code, rr.Body.String())

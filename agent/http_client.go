@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -42,6 +43,10 @@ type AdminClient struct {
 //     场景偏紧；调大池子让 keep-alive 真正生效，减少不必要的 connect/close 抖动。
 //     （本地多开 agent 互相争抢 ephemeral port 是测试环境问题，工具本身做好该做的。）
 func NewAdminClient(baseURL, agentID string, timeout, hbReqTimeout time.Duration) *AdminClient {
+	return NewAdminClientWithTLS(baseURL, agentID, timeout, hbReqTimeout, nil)
+}
+
+func NewAdminClientWithTLS(baseURL, agentID string, timeout, hbReqTimeout time.Duration, tlsConfig *tls.Config) *AdminClient {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
@@ -51,13 +56,13 @@ func NewAdminClient(baseURL, agentID string, timeout, hbReqTimeout time.Duration
 	return &AdminClient{
 		base:       baseURL,
 		agentID:    agentID,
-		client:     &http.Client{Timeout: timeout, Transport: newAdminTransport()},
+		client:     &http.Client{Timeout: timeout, Transport: newAdminTransport(tlsConfig)},
 		hbReqLimit: hbReqTimeout,
 	}
 }
 
 // newAdminTransport 构造 agent → admin 专用 HTTP transport。
-func newAdminTransport() *http.Transport {
+func newAdminTransport(tlsConfig *tls.Config) *http.Transport {
 	return &http.Transport{
 		Proxy: nil, // 跳过 proxy lookup（本机通信无需走代理）
 		DialContext: (&net.Dialer{
@@ -70,8 +75,10 @@ func newAdminTransport() *http.Transport {
 		MaxConnsPerHost:       0,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 		DisableCompression:    true,
+		TLSClientConfig:       tlsConfig,
 	}
 }
 

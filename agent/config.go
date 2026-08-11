@@ -2,28 +2,31 @@ package agent
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"runtime"
 	"time"
 
+	"stressbot/controlplane"
 	"stressbot/utils"
 )
 
 // Config Agent 配置（JSON 反序列化形态）。
 // 仅保留用户需要关心的字段，其余内部参数硬编码在 Resolve() 中。
 type Config struct {
-	Enabled                bool   `json:"enabled"`                // 模式开关：是否启用 Agent 模式
-	AdminUrl               string `json:"adminUrl"`               // Admin 服务器地址（如 http://192.168.1.100:7718）
-	PublicURL              string `json:"publicUrl"`              // Agent 对外可达地址（如 http://192.168.1.200:7719），不填自动获取本机 IP
-	Port                   int    `json:"port"`                   // 本地 HTTP 监听端口（默认 7719，Admin 通过此端口回调 Agent）
-	MaxBots                int    `json:"maxBots"`                // 单节点最大机器人数量（默认 5000）
-	HeartbeatInterval      string `json:"heartbeatInterval"`      // 心跳发送间隔（默认 10s）
-	HeartbeatTimeout       string `json:"heartbeatTimeout"`       // 单次心跳请求超时（默认 5s，快失败快重试）
-	HeartbeatFailThreshold int    `json:"heartbeatFailThreshold"` // 任务运行中连续心跳失败多少次才放弃任务（默认 3）
-	RequestTimeout         string `json:"requestTimeout"`         // 单次 HTTP 请求超时（默认 30s）
-	ReconnectMaxRetries    int    `json:"reconnectMaxRetries"`    // 最大重连次数，-1=持续重连（默认 -1）
-	MetricsInterval        string `json:"metricsInterval"`        // 指标上报间隔（压力 + 系统同步，默认 5s）
-	AppVersion             string `json:"-"`                      // 编译时注入，不从 JSON 读取
+	Enabled                bool                   `json:"enabled"`                // 模式开关：是否启用 Agent 模式
+	AdminUrl               string                 `json:"adminUrl"`               // Admin 服务器地址（如 http://192.168.1.100:7718）
+	PublicURL              string                 `json:"publicUrl"`              // Agent 对外可达地址（如 http://192.168.1.200:7719），不填自动获取本机 IP
+	Port                   int                    `json:"port"`                   // 本地 HTTP 监听端口（默认 7719，Admin 通过此端口回调 Agent）
+	MaxBots                int                    `json:"maxBots"`                // 单节点最大机器人数量（默认 5000）
+	HeartbeatInterval      string                 `json:"heartbeatInterval"`      // 心跳发送间隔（默认 10s）
+	HeartbeatTimeout       string                 `json:"heartbeatTimeout"`       // 单次心跳请求超时（默认 5s，快失败快重试）
+	HeartbeatFailThreshold int                    `json:"heartbeatFailThreshold"` // 任务运行中连续心跳失败多少次才放弃任务（默认 3）
+	RequestTimeout         string                 `json:"requestTimeout"`         // 单次 HTTP 请求超时（默认 30s）
+	ReconnectMaxRetries    int                    `json:"reconnectMaxRetries"`    // 最大重连次数，-1=持续重连（默认 -1）
+	MetricsInterval        string                 `json:"metricsInterval"`        // 指标上报间隔（压力 + 系统同步，默认 5s）
+	TLS                    controlplane.TLSConfig `json:"tls"`                    // Admin-Agent 双向 TLS
+	AppVersion             string                 `json:"-"`                      // 编译时注入，不从 JSON 读取
 }
 
 // ResolvedConfig Agent 运行期配置（所有参数已解析为最终值）。
@@ -45,6 +48,7 @@ type ResolvedConfig struct {
 	ReconnectMaxInterval   time.Duration // 重连指数退避上限
 	ReconnectMaxRetries    int           // 最大重连次数（-1=持续重连）
 	TaskReportTimeout      time.Duration // 任务完成上报总超时
+	ControlPlaneTLS        controlplane.TLSConfig
 }
 
 // Resolve 将 Config 解析为 ResolvedConfig，校验必填项。
@@ -54,6 +58,27 @@ func (c *Config) Resolve() (*ResolvedConfig, error) {
 	}
 
 	hostname, _ := os.Hostname() // hostname 可选，获取失败不影响功能
+	if err := validateHTTPBaseURL("agent.adminUrl", c.AdminUrl); err != nil {
+		return nil, err
+	}
+	if c.PublicURL != "" {
+		if err := validateHTTPBaseURL("agent.publicUrl", c.PublicURL); err != nil {
+			return nil, err
+		}
+	}
+	if c.TLS.Enabled() {
+		adminURL, _ := url.Parse(c.AdminUrl)
+		if adminURL.Scheme != "https" {
+			return nil, fmt.Errorf("agent.adminUrl 启用 TLS 时必须使用 https")
+		}
+		if c.PublicURL != "" {
+			publicURL, _ := url.Parse(c.PublicURL)
+			if publicURL.Scheme != "https" {
+				return nil, fmt.Errorf("agent.publicUrl 启用 TLS 时必须使用 https")
+			}
+		}
+	}
+
 	if hostname == "" {
 		hostname = "unknown"
 	}
@@ -114,10 +139,25 @@ func (c *Config) Resolve() (*ResolvedConfig, error) {
 		ReconnectMaxInterval:   60 * time.Second,
 		ReconnectMaxRetries:    resolveReconnectRetries(c.ReconnectMaxRetries),
 		TaskReportTimeout:      30 * time.Second,
+		ControlPlaneTLS:        c.TLS,
 	}, nil
 }
 
 // resolveReconnectRetries 处理 reconnectMaxRetries：JSON 零值(0)视为未配置，回退 -1（持续重连）。
+func validateHTTPBaseURL(field, raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("%s 解析失败: %w", field, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("%s scheme 必须是 http 或 https", field)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("%s 缺少 host", field)
+	}
+	return nil
+}
+
 func resolveReconnectRetries(v int) int {
 	if v == 0 {
 		return -1

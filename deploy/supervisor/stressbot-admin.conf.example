@@ -1,0 +1,17 @@
+[program:stressbot-admin]
+command=/opt/stressbot/admin -config /etc/stressbot/admin-config.json
+directory=/opt/stressbot
+user=stressbot
+autostart=true
+autorestart=unexpected
+exitcodes=0
+startsecs=5
+startretries=3
+stopsignal=TERM
+stopwaitsecs=20
+stopasgroup=true
+killasgroup=true
+redirect_stderr=true
+stdout_logfile=/var/log/stressbot/admin-supervisor.log
+stdout_logfile_maxbytes=50MB
+stdout_logfile_backups=5

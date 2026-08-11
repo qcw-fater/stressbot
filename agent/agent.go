@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -35,10 +36,11 @@ type Agent struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 
-	sysmon    *SystemMonitor
-	collector *monitor.MetricsCollector
-	httpSrv   *http.Server
-	httpCli   *AdminClient
+	sysmon          *SystemMonitor
+	collector       *monitor.MetricsCollector
+	httpSrv         *http.Server
+	httpCli         *AdminClient
+	controlPlaneTLS *tls.Config
 
 	// 任务状态
 	mu          sync.Mutex
@@ -67,6 +69,18 @@ type Agent struct {
 // New 创建 Agent 实例。
 func New(cfg *ResolvedConfig, collector *monitor.MetricsCollector) (*Agent, error) {
 	id := generateUUID()
+	var serverTLS, clientTLS *tls.Config
+	if cfg.ControlPlaneTLS.Enabled() {
+		var err error
+		serverTLS, err = cfg.ControlPlaneTLS.Server()
+		if err != nil {
+			return nil, fmt.Errorf("加载 Agent 控制面服务端 TLS: %w", err)
+		}
+		clientTLS, err = cfg.ControlPlaneTLS.Client()
+		if err != nil {
+			return nil, fmt.Errorf("加载 Agent 控制面客户端 TLS: %w", err)
+		}
+	}
 
 	static := CollectStaticInfo()
 	sysmon, err := NewSystemMonitor(cfg.MetricsInterval, static)
@@ -74,17 +88,18 @@ func New(cfg *ResolvedConfig, collector *monitor.MetricsCollector) (*Agent, erro
 		return nil, fmt.Errorf("创建 SystemMonitor 失败: %w", err)
 	}
 
-	httpCli := NewAdminClient(cfg.AdminUrl, id, cfg.RequestTimeout, cfg.HeartbeatTimeout)
+	httpCli := NewAdminClientWithTLS(cfg.AdminUrl, id, cfg.RequestTimeout, cfg.HeartbeatTimeout, clientTLS)
 
 	return &Agent{
-		id:        id,
-		cfg:       cfg,
-		started:   time.Now(),
-		sysmon:    sysmon,
-		collector: collector,
-		httpCli:   httpCli,
-		status:    StatusIdle,
-		stopCh:    make(chan struct{}),
+		id:              id,
+		cfg:             cfg,
+		started:         time.Now(),
+		sysmon:          sysmon,
+		collector:       collector,
+		httpCli:         httpCli,
+		controlPlaneTLS: serverTLS,
+		status:          StatusIdle,
+		stopCh:          make(chan struct{}),
 	}, nil
 }
 
@@ -109,6 +124,9 @@ func (a *Agent) Run() (err error) {
 		zap.Duration("reconnectInterval", a.cfg.ReconnectInterval),
 		zap.Duration("reconnectMaxInterval", a.cfg.ReconnectMaxInterval),
 		zap.Int("reconnectMaxRetries", a.cfg.ReconnectMaxRetries))
+	if a.controlPlaneTLS == nil {
+		stresslog.Warn("[AGENT] 控制面仍使用 HTTP 兼容模式，请完成证书发布后切换 mTLS")
+	}
 
 	// 1. 启动系统监控
 	a.sysmon.Start(a.stopCh)

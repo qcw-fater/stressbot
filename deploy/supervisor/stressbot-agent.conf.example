@@ -1,0 +1,17 @@
+[program:stressbot-agent]
+command=/opt/stressbot/agent -config /etc/stressbot/agent-config.json
+directory=/opt/stressbot
+user=stressbot
+autostart=true
+autorestart=unexpected
+exitcodes=0
+startsecs=5
+startretries=3
+stopsignal=TERM
+stopwaitsecs=30
+stopasgroup=true
+killasgroup=true
+redirect_stderr=true
+stdout_logfile=/var/log/stressbot/agent-supervisor.log
+stdout_logfile_maxbytes=50MB
+stdout_logfile_backups=5

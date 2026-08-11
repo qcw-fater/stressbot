@@ -11,33 +11,11 @@
  */
 
 import luaparse from 'luaparse';
-
-export type LuaCheckMode = 'action' | 'boolean' | 'listen' | 'free';
-
-export interface SyntaxIssue {
-  line: number;
-  column: number;
-  endLine: number;
-  endColumn: number;
-  severity: 'error' | 'warning' | 'info';
-  message: string;
-  source: 'syntax' | 'entry';
-}
-
-export interface ParseRequest {
-  type: 'parse';
-  code: string;
-  mode: LuaCheckMode;
-}
-
-export interface ParseResponse {
-  type: 'result';
-  issues: SyntaxIssue[];
-}
+import type { ParseRequest, ParseResponse, SyntaxIssue } from './luaSyntaxProtocol';
 
 self.onmessage = (e: MessageEvent<ParseRequest>) => {
   if (e.data?.type !== 'parse') return;
-  const { code, mode } = e.data;
+  const { requestId, code, mode } = e.data;
   const issues: SyntaxIssue[] = [];
 
   let ast: unknown = null;
@@ -94,7 +72,7 @@ self.onmessage = (e: MessageEvent<ParseRequest>) => {
     }
   }
 
-  const resp: ParseResponse = { type: 'result', issues };
+  const resp: ParseResponse = { type: 'result', requestId, issues };
   (self as unknown as { postMessage: (m: ParseResponse) => void }).postMessage(resp);
 };
 

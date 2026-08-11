@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -37,14 +38,21 @@ func (a *Agent) startHTTPServer() error {
 	})
 
 	a.httpSrv = &http.Server{
-		Addr:    fmt.Sprintf(":%d", a.cfg.Port),
-		Handler: recoverMiddleware(mux),
+		Addr:              fmt.Sprintf(":%d", a.cfg.Port),
+		Handler:           recoverMiddleware(mux),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	// 先尝试绑定端口，确保端口可用后再启动 goroutine
 	listener, err := net.Listen("tcp", a.httpSrv.Addr)
 	if err != nil {
 		return fmt.Errorf("端口 %d 绑定失败: %w", a.cfg.Port, err)
+	}
+
+	if a.controlPlaneTLS != nil {
+		listener = tls.NewListener(listener, a.controlPlaneTLS)
 	}
 
 	utils.GetWorkPool().Go(func() {

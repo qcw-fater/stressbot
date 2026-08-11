@@ -1,7 +1,15 @@
 {
   "port": 7718,
+  "listenHost": "127.0.0.1",
   "publicUrl": "http://127.0.0.1:7718",
   "staticDir": "cmd/web/dist",
+
+  "controlPlane": {
+    "listenHost": "0.0.0.0",
+    "port": 7720,
+    "publicUrl": "http://127.0.0.1:7720",
+    "tls": {}
+  },
 
   "agentRegistry": {
     "unhealthyAfter": "30s",

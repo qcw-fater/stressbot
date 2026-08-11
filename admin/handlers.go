@@ -25,21 +25,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// registerRoutes 注册所有 HTTP 路由。
+// registerManagementRoutes 注册浏览器管理 API 与静态资源路由。
 //
 // 顶层用 recoverMiddleware 包裹，确保 handler panic 不会断开连接，
 // 而是返回标准 500 JSON 并把 stack trace 写入应用日志。
-func (s *AdminServer) registerRoutes() http.Handler {
+func (s *AdminServer) registerManagementRoutes() http.Handler {
 	mux := http.NewServeMux()
-
-	// ── Agent 上行 ──
-	mux.HandleFunc("POST /sbot/agent/register", s.handleAgentRegister)
-	mux.HandleFunc("POST /sbot/agent/{id}/heartbeat", s.handleAgentHeartbeat)
-	mux.HandleFunc("POST /sbot/agent/{id}/deregister", s.handleAgentDeregister)
-	mux.HandleFunc("POST /sbot/agent/stress", s.handleAgentStressReport)
-	mux.HandleFunc("POST /sbot/agent/system", s.handleAgentSystemReport)
-	mux.HandleFunc("POST /sbot/agent/{id}/task/{tid}/done", s.handleAgentTaskDone)
-	mux.HandleFunc("GET /sbot/agent/{id}/pending-task", s.handleAgentPendingTask)
 
 	// ── 前端-资源基线 ──
 	// ── 前端-任务 ──
@@ -1515,8 +1506,18 @@ func (s *AdminServer) handleGetAgentLogs(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	url := fmt.Sprintf("http://%s/agent/v1/logs?%s", normalizeAddr(agent.Address), r.URL.RawQuery)
-	proxyReq, err := http.NewRequestWithContext(r.Context(), "GET", url, nil)
+	endpoint, err := agentEndpoint(agent.Address, "/agent/v1/logs")
+	if err != nil {
+		writeError(w, ErrInvalidArgument.WithMessage("节点地址无效: "+err.Error()))
+		return
+	}
+	endpointURL, err := url.Parse(endpoint)
+	if err != nil {
+		writeError(w, ErrInvalidArgument.WithMessage("节点日志地址无效"))
+		return
+	}
+	endpointURL.RawQuery = r.URL.RawQuery
+	proxyReq, err := http.NewRequestWithContext(r.Context(), "GET", endpointURL.String(), nil)
 	if err != nil {
 		writeError(w, ErrInvalidArgument.WithMessage("invalid proxy request"))
 		return
@@ -1574,8 +1575,12 @@ func (s *AdminServer) handleListAgentLogFiles(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	url := fmt.Sprintf("http://%s/agent/v1/logs/files", normalizeAddr(agent.Address))
-	proxyReq, err := http.NewRequestWithContext(r.Context(), "GET", url, nil)
+	endpoint, err := agentEndpoint(agent.Address, "/agent/v1/logs/files")
+	if err != nil {
+		writeError(w, ErrInvalidArgument.WithMessage("节点地址无效: "+err.Error()))
+		return
+	}
+	proxyReq, err := http.NewRequestWithContext(r.Context(), "GET", endpoint, nil)
 	if err != nil {
 		writeError(w, ErrInvalidArgument.WithMessage("invalid proxy request"))
 		return
@@ -1613,15 +1618,18 @@ func (s *AdminServer) handleDownloadAgentLogFile(w http.ResponseWriter, r *http.
 		return
 	}
 
-	url := fmt.Sprintf("http://%s/agent/v1/logs/files/%s", normalizeAddr(agent.Address), url.PathEscape(name))
-	proxyReq, err := http.NewRequestWithContext(r.Context(), "GET", url, nil)
+	endpoint, err := agentEndpoint(agent.Address, "/agent/v1/logs/files", name)
+	if err != nil {
+		writeError(w, ErrInvalidArgument.WithMessage("节点地址无效: "+err.Error()))
+		return
+	}
+	proxyReq, err := http.NewRequestWithContext(r.Context(), "GET", endpoint, nil)
 	if err != nil {
 		writeError(w, ErrInvalidArgument.WithMessage("invalid proxy request"))
 		return
 	}
 
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(proxyReq)
+	resp, err := s.logsDownloadClient.Do(proxyReq)
 	if err != nil {
 		writeError(w, ErrAgentOffline.WithMessage("agent unreachable: "+err.Error()))
 		return

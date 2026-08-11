@@ -2,10 +2,11 @@ package admin
 
 import (
 	"bytes"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
+	"net/url"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -15,10 +16,18 @@ import (
 	"go.uber.org/zap"
 )
 
-func normalizeAddr(addr string) string {
-	addr = strings.TrimPrefix(addr, "http://")
-	addr = strings.TrimPrefix(addr, "https://")
-	return addr
+func agentEndpoint(baseURL string, path ...string) (string, error) {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("解析节点地址: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("节点地址 scheme 必须是 http 或 https")
+	}
+	if u.Host == "" {
+		return "", fmt.Errorf("节点地址缺少 host")
+	}
+	return u.JoinPath(path...).String(), nil
 }
 
 // drainAndClose 关闭响应体前先排空剩余字节，让 net/http 能把连接放回 keep-alive 空闲池复用。
@@ -41,9 +50,24 @@ type AgentDispatcher struct {
 }
 
 func NewAgentDispatcher() *AgentDispatcher {
+	return NewAgentDispatcherWithTLS(nil)
+}
+
+func NewAgentDispatcherWithTLS(tlsConfig *tls.Config) *AgentDispatcher {
+	transport := newAgentHTTPTransport(tlsConfig)
 	return &AgentDispatcher{
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: &http.Client{Timeout: 30 * time.Second, Transport: transport},
 	}
+}
+
+func newAgentHTTPTransport(tlsConfig *tls.Config) *http.Transport {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSHandshakeTimeout = 5 * time.Second
+	transport.ResponseHeaderTimeout = 15 * time.Second
+	transport.MaxIdleConns = 64
+	transport.MaxIdleConnsPerHost = 32
+	transport.TLSClientConfig = tlsConfig
+	return transport
 }
 
 // AssignTask 向 Agent 推送任务分配。
@@ -78,7 +102,10 @@ func (d *AgentDispatcher) Version(addr string) (string, error) {
 }
 
 func (d *AgentDispatcher) post(addr, path string, body any, retries int) error {
-	url := fmt.Sprintf("http://%s%s", normalizeAddr(addr), path)
+	endpoint, err := agentEndpoint(addr, path)
+	if err != nil {
+		return err
+	}
 
 	// 序列化 body 一次（每次重试复用同一份字节，避免重复 marshal）
 	var bodyBytes []byte
@@ -100,20 +127,20 @@ func (d *AgentDispatcher) post(addr, path string, body any, retries int) error {
 		stresslog.Warn("[DISPATCHER] POST 失败，将重试",
 			zap.String("addr", addr),
 			zap.String("path", path),
-			zap.String("url", url),
+			zap.String("url", endpoint),
 			zap.Int("attempt", attempt),
 			zap.Int("maxRetries", retries),
 			zap.Duration("backoff", wait),
 			zap.Error(err))
 	}
 
-	err := backoff.RetryNotify(func() error {
+	err = backoff.RetryNotify(func() error {
 		attempt++
 		var bodyReader io.Reader
 		if bodyBytes != nil {
 			bodyReader = bytes.NewReader(bodyBytes)
 		}
-		req, err := http.NewRequest("POST", url, bodyReader)
+		req, err := http.NewRequest("POST", endpoint, bodyReader)
 		if err != nil {
 			// 请求构造失败是永久性错误（URL 格式错等），不重试
 			return backoff.Permanent(fmt.Errorf("create request: %w", err))
@@ -125,7 +152,7 @@ func (d *AgentDispatcher) post(addr, path string, body any, retries int) error {
 		resp, err := d.httpClient.Do(req)
 		if err != nil {
 			// 网络错误（连接拒绝/超时）：Agent 可能正在重启，值得重试
-			return fmt.Errorf("post %s: %w", url, err)
+			return fmt.Errorf("post %s: %w", endpoint, err)
 		}
 		drainAndClose(resp)
 
@@ -145,8 +172,11 @@ func (d *AgentDispatcher) post(addr, path string, body any, retries int) error {
 }
 
 func (d *AgentDispatcher) get(addr, path string) (*http.Response, error) {
-	url := fmt.Sprintf("http://%s%s", normalizeAddr(addr), path)
-	return d.httpClient.Get(url)
+	endpoint, err := agentEndpoint(addr, path)
+	if err != nil {
+		return nil, err
+	}
+	return d.httpClient.Get(endpoint)
 }
 
 // newDispatcherBackoff 构造 Admin→Agent RPC 的指数退避（带 jitter）。

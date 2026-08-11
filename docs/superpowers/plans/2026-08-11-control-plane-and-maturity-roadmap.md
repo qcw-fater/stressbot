@@ -136,7 +136,7 @@ git commit -m "docs: establish modernization rollout baseline"
 - Modify: `cmd/web/src/components/FlowEditor/lua/luaSyntaxClient.ts`
 - Modify: `cmd/web/src/components/FlowEditor/lua/luaSyntaxWorker.ts`
 
-- [ ] **Step 1: 写乱序响应失败测试**
+- [x] **Step 1: 写乱序响应失败测试**
 
 测试注入 fake Worker，连续发出两次 `check`，按第二次、第一次顺序返回，断言两个 Promise 各自拿到自己的 issues；再触发 `onerror`，断言所有 pending 都完成且 Map 清空。
 
@@ -153,7 +153,7 @@ it('correlates out-of-order worker responses', async () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认当前实现失败**
+- [x] **Step 2: 运行测试确认当前实现失败**
 
 ```powershell
 Set-Location cmd\web
@@ -162,7 +162,7 @@ npx vitest run src/components/FlowEditor/lua/luaSyntaxClient.test.ts
 
 Expected: FAIL，表现为第一个 Promise 不完成或拿到第二个响应。
 
-- [ ] **Step 3: 引入 requestId 协议和 pending Map**
+- [x] **Step 3: 引入 requestId 协议和 pending Map**
 
 ```ts
 export interface ParseRequest {
@@ -181,7 +181,7 @@ export interface ParseResponse {
 
 客户端使用递增 `requestId` 和 `Map<number, Resolve>`；Worker 原样回传 `requestId`。Worker 崩溃时完成并清空全部 pending，保持当前“语法检查不可用不阻塞编辑”的行为。
 
-- [ ] **Step 4: 运行 Lua 与全前端测试**
+- [x] **Step 4: 运行 Lua 与全前端测试**
 
 ```powershell
 npx vitest run src/components/FlowEditor/lua/luaSyntaxClient.test.ts src/components/FlowEditor/lua/__tests__/luaApiSpec.test.ts
@@ -191,7 +191,7 @@ npx tsc -b
 
 Expected: 全部 PASS。
 
-- [ ] **Step 5: 提交独立修复**
+- [x] **Step 5: 提交独立修复**
 
 ```powershell
 git add cmd/web/src/components/FlowEditor/lua
@@ -208,7 +208,7 @@ git commit -m "fix: correlate concurrent Lua worker checks"
 - Modify: `agent/http_client.go`
 - Modify: `agent/config.go`
 
-- [ ] **Step 1: 写 URL 兼容测试**
+- [x] **Step 1: 写 URL 兼容测试**
 
 覆盖 `http://agent:7719`、`https://agent.example:7719/base`、无 scheme、非法 scheme 四种输入。明确目标：配置必须带 `http` 或 `https`；路径使用 `url.JoinPath`，不得字符串删 scheme 后再强制拼 `http://`。
 
@@ -220,7 +220,7 @@ func TestAgentEndpointPreservesHTTPS(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认当前实现失败**
+- [x] **Step 2: 运行测试确认当前实现失败**
 
 ```powershell
 $env:GOCACHE='D:\Gitee\stressbot\.tmp\gocache'
@@ -229,7 +229,7 @@ go test ./admin -run 'TestAgentEndpoint' -v
 
 Expected: HTTPS 用例 FAIL，证明当前 `normalizeAddr` 丢失 scheme。
 
-- [ ] **Step 3: 使用 `net/url` 构造端点**
+- [x] **Step 3: 使用 `net/url` 构造端点**
 
 ```go
 func agentEndpoint(baseURL, path string) (string, error) {
@@ -245,11 +245,11 @@ func agentEndpoint(baseURL, path string) (string, error) {
 
 Agent 的 `AdminUrl` 和 `PublicURL` 在 `Resolve()` 阶段做相同校验；错误信息使用中文。
 
-- [ ] **Step 4: 为两端 `http.Server` 增加边界参数**
+- [x] **Step 4: 为两端 `http.Server` 增加边界参数**
 
 Agent server 增加 `ReadHeaderTimeout: 10s`、`IdleTimeout: 120s`、`MaxHeaderBytes: 1<<20`。Admin/Agent 客户端显式设置 `Transport` 的 `TLSHandshakeTimeout`、`ResponseHeaderTimeout`、`MaxIdleConnsPerHost`，请求继续使用已有总超时。
 
-- [ ] **Step 5: 验证并提交**
+- [x] **Step 5: 验证并提交**
 
 ```powershell
 go test ./admin ./agent -run 'Endpoint|HTTP|Dispatcher' -v
@@ -270,11 +270,11 @@ git commit -m "fix: preserve control plane URL schemes"
 - Modify: `admin/admin.go:28-54,143-218`
 - Modify: `admin/config.go`
 
-- [ ] **Step 1: 写路由隔离测试**
+- [x] **Step 1: 写路由隔离测试**
 
 分别构造 management handler 和 control-plane handler：前者访问 `/sbot/agent/register` 必须 404，后者访问 `/sbot/tasks` 和 `/` 必须 404；对应合法端点不能返回 404。
 
-- [ ] **Step 2: 拆分路由注册函数**
+- [x] **Step 2: 拆分路由注册函数**
 
 ```go
 func (s *AdminServer) registerControlPlaneRoutes() http.Handler
@@ -283,7 +283,7 @@ func (s *AdminServer) registerManagementRoutes() http.Handler
 
 `registerControlPlaneRoutes` 只包含 7 个 `/sbot/agent/...` 上行端点；`registerManagementRoutes` 包含任务、节点、指标、历史、日志、资源、模板、codec、能力和静态文件。两者都包 `recoverMiddleware`。
 
-- [ ] **Step 3: 增加明确配置**
+- [x] **Step 3: 增加明确配置**
 
 ```go
 type ControlPlaneConfig struct {
@@ -303,11 +303,11 @@ type Config struct {
 
 管理面 `ListenHost` 的生产配置写 `127.0.0.1`；内部控制面默认端口 7720，`PublicURL` 必须是 `https://...`。
 
-- [ ] **Step 4: 启动两个 server，统一关闭**
+- [x] **Step 4: 启动两个 server，统一关闭**
 
 `AdminServer` 保存 `managementSrv` 与 `controlPlaneSrv`。`Run()` 先完成数据库和依赖初始化，再并行监听；任一非 `ErrServerClosed` 错误都触发统一 Shutdown。所有后台启动走 `utils.GetWorkPool().Go()`。
 
-- [ ] **Step 5: 运行隔离与关闭测试**
+- [x] **Step 5: 运行隔离与关闭测试**
 
 ```powershell
 go test ./admin -run 'TestManagementRoutes|TestControlPlaneRoutes|TestShutdown' -v
@@ -316,7 +316,7 @@ go build ./...
 
 Expected: 路由隔离、重复 Shutdown 和信号关闭全部 PASS。
 
-- [ ] **Step 6: 提交监听器拆分**
+- [x] **Step 6: 提交监听器拆分**
 
 ```powershell
 git add admin/admin.go admin/config.go admin/handlers.go admin/control_plane_server.go admin/management_server.go admin/server_routes_test.go
@@ -344,11 +344,11 @@ git commit -m "refactor: isolate admin control plane listener"
 - Modify: `conf/agent-config.json`
 - Modify: `conf/config.json`
 
-- [ ] **Step 1: 写 TLS 构造器失败测试**
+- [x] **Step 1: 写 TLS 构造器失败测试**
 
 覆盖缺 cert、缺 key、错误 CA、过低 TLS 版本、Admin CA 证书连接 Agent、Agent CA 证书连接 Admin。生成临时 CA/证书时给 server 证书写入实际 DNS/IP SAN，不依赖 Common Name。
 
-- [ ] **Step 2: 实现共用 TLS 配置**
+- [x] **Step 2: 实现共用 TLS 配置**
 
 ```go
 type TLSConfig struct {
@@ -363,15 +363,15 @@ func (c TLSConfig) Client() (*tls.Config, error)
 
 两者固定 `MinVersion: tls.VersionTLS13`；Server 使用 `RequireAndVerifyClientCert`，Client 设置自己的证书和 `RootCAs`，不提供 `InsecureSkipVerify` 配置。
 
-- [ ] **Step 3: 接入两端 server/client**
+- [x] **Step 3: 接入两端 server/client**
 
 Admin 内部 listener 使用 `tls.NewListener`；Admin dispatcher 和日志代理使用同一个带 mTLS 的 `http.Transport`；Agent server 使用 mTLS；Agent 注册、心跳、指标、任务完成上报使用带 mTLS 的 client。管理 listener 仍只绑定回环地址，由反向代理终止公网 TLS。
 
-- [ ] **Step 4: 添加 mTLS 集成测试**
+- [x] **Step 4: 添加 mTLS 集成测试**
 
 使用 `httptest.NewUnstartedServer` 验证：无证书、错误 CA、过期证书连接失败；合法 Admin/Agent 双向调用成功；HTTPS URL 在 dispatcher 中保持 HTTPS。
 
-- [ ] **Step 5: 写 Caddy 与 Supervisor 示例**
+- [x] **Step 5: 写 Caddy 与 Supervisor 示例**
 
 `Caddyfile.example` 只把认证后的流量代理到 `127.0.0.1:7718`，`/sbot/agent/*` 不转发。Supervisor 示例使用 `autorestart=unexpected`、`startretries=3`、`stopsignal=TERM`、`stopasgroup=true`、`killasgroup=true`，证明进程托管不绑定 systemd。
 
@@ -379,7 +379,7 @@ Admin 内部 listener 使用 `tls.NewListener`；Admin dispatcher 和日志代�
 
 发布 A：二进制支持新配置，旧 HTTP 配置仍可运行但每次启动输出一次明确警告。给全部 Agent 下发证书和 HTTPS URL。发布 B：生产配置切到 mTLS，管理端只监听回环；验证一周后删除生产 HTTP 配置，不在代码中加入 HTTPS 失败后自动降级 HTTP 的逻辑。
 
-- [ ] **Step 7: 验证与提交**
+- [x] **Step 7: 验证与提交**
 
 ```powershell
 go test ./controlplane ./admin ./agent -run 'TLS|ControlPlane|Dispatcher' -v

@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"database/sql"
 	"encoding/binary"
 	"encoding/hex"
@@ -36,7 +37,9 @@ type AdminServer struct {
 	dispatcher     *AgentDispatcher
 	assigner       *Assigner
 
-	logsProxyClient *http.Client // Agent 日志代理（5s 超时）
+	logsProxyClient    *http.Client // Agent 日志代理（5s 超时）
+	logsDownloadClient *http.Client
+	controlPlaneTLS    *tls.Config
 
 	history         *HistoryStore        // 可选
 	flows           *FlowTemplateStore   // 可选（流程模板库，依赖全局 MySQL）
@@ -48,13 +51,33 @@ type AdminServer struct {
 
 	sharedCleanup *sharedCleanupQueue // 共享状态待清理队列（可选）
 
-	httpSrv *http.Server
-	stopCh  chan struct{}
-	wg      sync.WaitGroup
+	managementSrv   *http.Server
+	controlPlaneSrv *http.Server
+	stopCh          chan struct{}
+	shutdownOnce    sync.Once
+	shutdownErr     error
+	shutdownPool    func()
 }
 
 func NewAdminServer(cfg Config) (*AdminServer, error) {
-	s := &AdminServer{cfg: cfg, stopCh: make(chan struct{})}
+	var serverTLS, clientTLS *tls.Config
+	if cfg.ControlPlane.TLS.Enabled() {
+		var err error
+		serverTLS, err = cfg.ControlPlane.TLS.Server()
+		if err != nil {
+			return nil, fmt.Errorf("加载 Admin 控制面服务端 TLS: %w", err)
+		}
+		clientTLS, err = cfg.ControlPlane.TLS.Client()
+		if err != nil {
+			return nil, fmt.Errorf("加载 Admin 控制面客户端 TLS: %w", err)
+		}
+	}
+	s := &AdminServer{
+		cfg:             cfg,
+		stopCh:          make(chan struct{}),
+		shutdownPool:    func() { utils.GetWorkPool().Shutdown() },
+		controlPlaneTLS: serverTLS,
+	}
 
 	// 1. TaskStore
 	tasks, err := NewTaskStore("data")
@@ -71,10 +94,17 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 	s.aggregator = NewMetricsAggregator(s.agents, s.metricsWindows, time.Now)
 
 	// 4. AgentDispatcher
-	s.dispatcher = NewAgentDispatcher()
+	s.dispatcher = NewAgentDispatcherWithTLS(clientTLS)
 
 	// 5. Logs proxy client
-	s.logsProxyClient = &http.Client{Timeout: 5 * time.Second}
+	s.logsProxyClient = &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: newAgentHTTPTransport(clientTLS),
+	}
+	s.logsDownloadClient = &http.Client{
+		Timeout:   60 * time.Second,
+		Transport: newAgentHTTPTransport(clientTLS),
+	}
 
 	// 6. Assigner
 	s.assigner = NewAssigner()
@@ -169,53 +199,52 @@ func (s *AdminServer) Run() error {
 	//   - IdleTimeout 让长期空闲的 keep-alive 连接主动关闭，
 	//     防止 agent → admin 的 client-side 池保留大量已不再使用的连接；
 	//   - ReadTimeout/WriteTimeout 故意不设：history 导出/日志下载可能很长。
-	s.httpSrv = &http.Server{
-		Addr:              fmt.Sprintf(":%d", s.cfg.Port),
-		Handler:           s.registerRoutes(),
-		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       120 * time.Second,
-	}
+	s.managementSrv = s.newManagementServer()
+	s.controlPlaneSrv = s.newControlPlaneServer()
 
 	stresslog.Info("admin 启动",
-		zap.Int("port", s.cfg.Port),
+		zap.String("managementAddr", s.managementSrv.Addr),
+		zap.String("controlPlaneAddr", s.controlPlaneSrv.Addr),
 		zap.Bool("history", s.history != nil),
 		zap.Bool("redis", s.cfg.RedisEnabled()))
+	if s.controlPlaneTLS == nil {
+		stresslog.Warn("[ADMIN] 控制面仍使用 HTTP 兼容模式，请完成证书发布后切换 mTLS")
+	}
 
 	// 信号处理
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	utils.GetWorkPool().Go(func() {
-		<-sigCh
-		stresslog.Info("收到退出信号，开始关闭...")
-		s.Shutdown(context.Background())
-	})
-
-	if err := s.httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("http server: %w", err)
-	}
-	return nil
+	defer signal.Stop(sigCh)
+	return s.serveHTTPServers(sigCh)
 }
 
 // Shutdown 优雅关闭。
 func (s *AdminServer) Shutdown(ctx context.Context) error {
-	if s.httpSrv != nil {
-		// 先禁用 keep-alive，让空闲连接自行关闭，减少 Windows 上 Closesocket 竞争窗口
-		s.httpSrv.SetKeepAlivesEnabled(false)
-		shutdownCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		s.httpSrv.Shutdown(shutdownCtx)
-	}
+	s.shutdownOnce.Do(func() {
+		s.shutdownErr = s.shutdown(ctx)
+	})
+	return s.shutdownErr
+}
+
+func (s *AdminServer) shutdown(ctx context.Context) error {
+	shutdownErr := s.shutdownHTTPServers(ctx)
 	if s.history != nil {
 		s.history.Close()
 	}
 	// 全局共享 MySQL 连接池：HistoryStore 不再 Close，由 AdminServer 统一关闭。
 	if s.db != nil {
-		_ = s.db.Close()
+		if err := s.db.Close(); err != nil {
+			shutdownErr = errors.Join(shutdownErr, err)
+		}
 	}
-	utils.GetWorkPool().Shutdown()
-	close(s.stopCh)
-	return nil
+	if s.shutdownPool != nil {
+		s.shutdownPool()
+	}
+	if s.stopCh != nil {
+		close(s.stopCh)
+	}
+	return shutdownErr
 }
 
 func (s *AdminServer) onTaskTerminal(task *Task) {

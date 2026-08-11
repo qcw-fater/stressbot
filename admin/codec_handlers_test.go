@@ -301,7 +301,7 @@ func TestCodecAlgorithms_RouteRegistered(t *testing.T) {
 	// 端点必须注册到 /sbot/ 路由表。用零值 AdminServer 取 mux 后发请求——未注册的
 	// /sbot/codec/algorithms 会落到静态文件 fallback 返回 404，命中 handler 才是 200。
 	s := &AdminServer{}
-	mux := s.registerRoutes()
+	mux := s.registerManagementRoutes()
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/sbot/codec/algorithms", nil))
 	if rec.Code != http.StatusOK {
@@ -311,7 +311,7 @@ func TestCodecAlgorithms_RouteRegistered(t *testing.T) {
 
 func TestCodecPreview_RouteRegistered(t *testing.T) {
 	s := &AdminServer{}
-	mux := s.registerRoutes()
+	mux := s.registerManagementRoutes()
 	rec := httptest.NewRecorder()
 	// 用合法请求体确保命中 handler（不返回 404 即证明已注册）。
 	body := bytes.NewBufferString(`{"schema":{"version":1},"mode":"encode","transport":"tcp","bodyHex":"00"}`)

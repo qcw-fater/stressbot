@@ -1,42 +1,73 @@
-/**
- * Lua 语法 Worker 的客户端封装（主线程使用）。
- *
- * 单例 Worker，多个 LuaForm 实例共享。每次 check() 会取消上次未完成的请求。
- * Vite 的 `?worker` import 自动构建为独立 chunk。
- */
+/** Lua 语法 Worker 的主线程封装。 */
 
 import LuaWorker from './luaSyntaxWorker?worker';
-import type { LuaCheckMode, ParseRequest, ParseResponse, SyntaxIssue } from './luaSyntaxWorker';
+import type {
+  LuaCheckMode,
+  LuaWorkerLike,
+  ParseRequest,
+  ParseResponse,
+  SyntaxIssue,
+} from './luaSyntaxProtocol';
 
-let worker: Worker | null = null;
-let pending: ((issues: SyntaxIssue[]) => void) | null = null;
-
-function ensureWorker(): Worker {
-  if (worker) return worker;
-  worker = new LuaWorker();
-  worker.onmessage = (e: MessageEvent<ParseResponse>) => {
-    if (e.data?.type === 'result' && pending) {
-      pending(e.data.issues);
-      pending = null;
-    }
-  };
-  worker.onerror = () => {
-    if (pending) {
-      pending([]);
-      pending = null;
-    }
-  };
-  return worker;
+export interface LuaSyntaxClient {
+  check(code: string, mode: LuaCheckMode): Promise<SyntaxIssue[]>;
+  dispose(): void;
 }
 
+export function createLuaSyntaxClient(factory: () => LuaWorkerLike): LuaSyntaxClient {
+  let worker: LuaWorkerLike | null = null;
+  let nextRequestId = 1;
+  const pending = new Map<number, (issues: SyntaxIssue[]) => void>();
+
+  const settlePending = (): void => {
+    for (const resolve of pending.values()) resolve([]);
+    pending.clear();
+  };
+
+  const stopWorker = (): void => {
+    const current = worker;
+    worker = null;
+    if (current) {
+      current.onmessage = null;
+      current.onerror = null;
+      current.terminate();
+    }
+    settlePending();
+  };
+
+  const ensureWorker = (): LuaWorkerLike => {
+    if (worker) return worker;
+    const created = factory();
+    worker = created;
+    created.onmessage = (event: MessageEvent<ParseResponse>) => {
+      if (event.data?.type !== 'result') return;
+      const resolve = pending.get(event.data.requestId);
+      if (!resolve) return;
+      pending.delete(event.data.requestId);
+      resolve(event.data.issues);
+    };
+    created.onerror = stopWorker;
+    return created;
+  };
+
+  return {
+    check(code: string, mode: LuaCheckMode): Promise<SyntaxIssue[]> {
+      const requestId = nextRequestId++;
+      const current = ensureWorker();
+      return new Promise<SyntaxIssue[]>((resolve) => {
+        pending.set(requestId, resolve);
+        const request: ParseRequest = { type: 'parse', requestId, code, mode };
+        current.postMessage(request);
+      });
+    },
+    dispose: stopWorker,
+  };
+}
+
+const defaultClient = createLuaSyntaxClient(() => new LuaWorker() as LuaWorkerLike);
+
 export function checkLuaSyntax(code: string, mode: LuaCheckMode): Promise<SyntaxIssue[]> {
-  const w = ensureWorker();
-  return new Promise<SyntaxIssue[]>((resolve) => {
-    // 替换 pending：上一次请求会被无声丢弃（仍在 Worker 里跑，结果到达后被忽略）
-    pending = resolve;
-    const req: ParseRequest = { type: 'parse', code, mode };
-    w.postMessage(req);
-  });
+  return defaultClient.check(code, mode);
 }
 
 export type { LuaCheckMode, SyntaxIssue };

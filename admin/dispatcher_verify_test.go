@@ -33,7 +33,7 @@ func TestDispatcherPost4xxNoRetry(t *testing.T) {
 	defer srv.Close()
 
 	d := NewAgentDispatcher()
-	err := d.post(srv.Listener.Addr().String(), "/test", map[string]string{"k": "v"}, 3)
+	err := d.post(srv.URL, "/test", map[string]string{"k": "v"}, 3)
 	if err == nil {
 		t.Fatal("期望返回错误")
 	}
@@ -56,7 +56,7 @@ func TestDispatcherPost5xxRetries(t *testing.T) {
 	defer srv.Close()
 
 	d := NewAgentDispatcher()
-	err := d.post(srv.Listener.Addr().String(), "/test", nil, 2)
+	err := d.post(srv.URL, "/test", nil, 2)
 	if err == nil {
 		t.Fatal("期望返回错误")
 	}
@@ -80,7 +80,7 @@ func TestDispatcherPost2xxSuccess(t *testing.T) {
 	defer srv.Close()
 
 	d := NewAgentDispatcher()
-	err := d.post(srv.Listener.Addr().String(), "/test", nil, 3)
+	err := d.post(srv.URL, "/test", nil, 3)
 	if err != nil {
 		t.Fatalf("意外错误: %v", err)
 	}

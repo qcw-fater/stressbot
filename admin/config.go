@@ -2,19 +2,23 @@ package admin
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
 
+	"stressbot/controlplane"
 	"stressbot/sharedstate"
-	stresslog "stressbot/utils/log"
 	json "stressbot/utils/jsonx"
+	stresslog "stressbot/utils/log"
 )
 
 // Config Admin 服务端配置。
 type Config struct {
 	Port          int                      `json:"port"`          // HTTP 监听端口（默认 7718）
+	ListenHost    string                   `json:"listenHost"`    // 管理面监听地址（默认 127.0.0.1）
 	PublicURL     string                   `json:"publicUrl"`     // 外部可达 URL（Agent 用来连接 Admin，如 http://192.168.1.100:7718）
+	ControlPlane  ControlPlaneConfig       `json:"controlPlane"`  // Admin-Agent 内部控制面
 	StaticDir     string                   `json:"staticDir"`     // 前端静态文件目录（默认 cmd/web/dist）
 	AgentRegistry RegistryConfig           `json:"agentRegistry"` // Agent 注册与健康管理
 	MySQL         *MySQLConfig             `json:"mysql"`         // MySQL 连接配置（全局共享 *sql.DB）
@@ -23,6 +27,14 @@ type Config struct {
 	Log           stresslog.Config         `json:"log"`           // 日志
 	Pprof         *PprofConfig             `json:"pprof"`         // pprof 调试服务（nil 时不启用）
 	Daemon        bool                     `json:"daemon"`        // 以守护进程模式运行（仅 Linux）
+}
+
+// ControlPlaneConfig 定义 Admin-Agent 内部控制面的独立监听器。
+type ControlPlaneConfig struct {
+	ListenHost string                 `json:"listenHost"`
+	Port       int                    `json:"port"`
+	PublicURL  string                 `json:"publicUrl"`
+	TLS        controlplane.TLSConfig `json:"tls"`
 }
 
 // RedisEnabled 返回服务器是否配置了 Redis（host 非空）。
@@ -95,8 +107,14 @@ func (c MySQLConfig) DSN() string {
 // DefaultConfig 返回填充了默认值的配置。
 func DefaultConfig() Config {
 	return Config{
-		Port:      7718,
-		StaticDir: "cmd/web/dist",
+		Port:       7718,
+		ListenHost: "127.0.0.1",
+		StaticDir:  "cmd/web/dist",
+		ControlPlane: ControlPlaneConfig{
+			ListenHost: "0.0.0.0",
+			Port:       7720,
+			PublicURL:  "http://127.0.0.1:7720",
+		},
 		AgentRegistry: RegistryConfig{
 			UnhealthyAfter: "30s",
 			OfflineAfter:   "60s",
@@ -141,8 +159,30 @@ func validateConfig(cfg *Config) error {
 	if cfg.Port <= 0 {
 		return fmt.Errorf("port is required and must be > 0")
 	}
+	if cfg.ControlPlane.Port <= 0 {
+		return fmt.Errorf("controlPlane.port is required and must be > 0")
+	}
+	if cfg.ListenHost == "" {
+		return fmt.Errorf("listenHost is required")
+	}
+	if cfg.ControlPlane.ListenHost == "" {
+		return fmt.Errorf("controlPlane.listenHost is required")
+	}
 	if cfg.PublicURL == "" {
 		return fmt.Errorf("publicUrl is required")
+	}
+	if cfg.ControlPlane.PublicURL == "" {
+		return fmt.Errorf("controlPlane.publicUrl is required")
+	}
+	controlPlaneURL, err := url.Parse(cfg.ControlPlane.PublicURL)
+	if err != nil || controlPlaneURL.Host == "" {
+		return fmt.Errorf("controlPlane.publicUrl is invalid")
+	}
+	if controlPlaneURL.Scheme != "http" && controlPlaneURL.Scheme != "https" {
+		return fmt.Errorf("controlPlane.publicUrl scheme must be http or https")
+	}
+	if cfg.ControlPlane.TLS.Enabled() && controlPlaneURL.Scheme != "https" {
+		return fmt.Errorf("controlPlane.publicUrl must use https when TLS is enabled")
 	}
 	if _, err := time.ParseDuration(cfg.AgentRegistry.UnhealthyAfter); cfg.AgentRegistry.UnhealthyAfter != "" && err != nil {
 		return fmt.Errorf("invalid agentRegistry.unhealthyAfter: %w", err)

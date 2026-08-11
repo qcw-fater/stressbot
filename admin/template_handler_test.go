@@ -65,7 +65,7 @@ func TestTemplateLibraryDisabled(t *testing.T) {
 	server := &AdminServer{cfg: Config{StaticDir: t.TempDir()}}
 	for _, path := range []string{"/sbot/action-templates", "/sbot/listen-templates"} {
 		rr := httptest.NewRecorder()
-		server.registerRoutes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+		server.registerManagementRoutes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
 		if rr.Code != http.StatusServiceUnavailable || !strings.Contains(rr.Body.String(), "TEMPLATE_LIBRARY_DISABLED") {
 			t.Fatalf("path=%s status=%d body=%s", path, rr.Code, rr.Body.String())
 		}
@@ -92,7 +92,7 @@ func TestTemplateSnapshotDisabled(t *testing.T) {
 	server := &AdminServer{cfg: Config{StaticDir: t.TempDir()}}
 	for _, path := range []string{"/sbot/action-templates/snapshot", "/sbot/listen-templates/snapshot"} {
 		rr := httptest.NewRecorder()
-		server.registerRoutes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+		server.registerManagementRoutes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
 		if rr.Code != http.StatusServiceUnavailable || !strings.Contains(rr.Body.String(), "TEMPLATE_LIBRARY_DISABLED") {
 			t.Fatalf("path=%s status=%d body=%s", path, rr.Code, rr.Body.String())
 		}
