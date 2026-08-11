@@ -3,7 +3,7 @@
  *
  * 设计要点：
  * - mode 是单向状态机，由方法（startTask/attachToActive/onTaskFinished/detachFromActive/reset）驱动；
- * - latestStress / latestSystem 由 HomeShell 的 usePolling 写入，store 仅维护数据结构与滑窗；
+ * - latestStress / latestSystem 由 HomeShell 的 TanStack Query 适配层写入，store 仅维护数据结构与滑窗；
  * - stressHistory / systemHistory 默认保留 60 个点（5s × 60 = 5min），上限可调；
  * - 状态机只保存运行态与监控快照；启动/挂载任务的业务编排在 taskActions 中完成。
  *
@@ -63,7 +63,7 @@ export interface RuntimeState {
   stressHistory: StressSnapshot[];
   systemHistory: ClusterSystemSnapshot[];
 
-  /** 连接服务器失败 banner（usePolling 触发） */
+  /** 连接服务器失败 banner（连续查询失败触发） */
   connectionLost: boolean;
 
   /** 任务期间节点事件（离线/重连/注销） */
@@ -344,7 +344,7 @@ export const useRuntimeStore = create<RuntimeState>()(
   ),
 );
 
-/** 便捷：按当前 mode 派生轮询参数（HomeShell 使用） */
+/** 便捷：按当前 mode 派生 TanStack Query 轮询参数（HomeShell 使用） */
 export function pollingPolicy(
   mode: RuntimeMode,
 ): {

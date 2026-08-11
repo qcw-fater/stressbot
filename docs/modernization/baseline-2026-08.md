@@ -45,7 +45,17 @@ Vitest 自身报告的执行时间为 143.36s；上表墙钟时间还包含 npm 
 | 前端 60 秒请求次数 | 未测；Admin 未运行，不能得到真实 observer/轮询行为 | M5 前在预发布环境分别记录 idle、running、finalReport 三种模式 |
 | MySQL 表、列、索引快照 | 未测；3306 未监听 | 首次 Goose 预发布演练前从 `information_schema` 导出不含数据和凭据的结构快照 |
 
-这些缺口不阻止 M1–M5 的测试驱动开发，但会关闭相应的发布门禁：没有补齐真实数据库快照，不允许在生产启用 Goose `auto`；没有浏览器请求计数，不允许删除 `usePolling`；M6 的三个项目仍需单独讨论和量化签字。
+M5 本地补测已用浏览器 fake timer 运行完整 60 秒，并由真实浏览器打开无数据库/Redis 的本地 Admin 页面做冒烟检查：
+
+| 模式 | 60 秒请求调度结果 |
+|---|---|
+| `edit` | `/agents` 7 次、`/system` 7 次；task/stress 0 次 |
+| `running` | task/stress/system/agents 各 13 次（首次立即请求 + 每 5 秒一次） |
+| `finalReport` | 四组请求均为 0 次 |
+
+同一 query 的并发读取合并测试、切换 taskId/disabled 的 AbortSignal 测试、节点面板无第二个 interval 的代码检查均通过。本地真实浏览器页面无 console warning/error。以上结果足以验证前端调度实现，但不冒充预发布流量基线；旧 `usePolling.ts` 因此保留为未导出、零引用的回滚参考。
+
+这些缺口不阻止 M1–M5 的测试驱动开发，但会关闭相应的发布门禁：没有补齐真实数据库快照，不允许在生产启用 Goose `auto`；没有预发布真实浏览器请求计数和完整观察窗口，不物理删除旧 `usePolling.ts`；M6 的三个项目仍需单独讨论和量化签字。
 
 ## 4. 统一回滚原则
 

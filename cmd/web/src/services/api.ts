@@ -35,7 +35,10 @@ export class ApiError extends Error {
 /** AbortError 是调用方主动取消，不应伪装成网络故障。 */
 export function isAbortError(error: unknown): boolean {
   return (
-    typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError'
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    (error.name === 'AbortError' || error.name === 'CancelledError')
   );
 }
 

@@ -12,13 +12,23 @@ export interface LogQueryParams {
   limit?: number;
 }
 
-export function getAdminLogs(params: LogQueryParams = {}): Promise<LogQueryResult> {
-  return getJson<LogQueryResult>('/logs/admin' + buildQuery(params as Record<string, unknown>));
+export function getAdminLogs(
+  params: LogQueryParams = {},
+  signal?: AbortSignal,
+): Promise<LogQueryResult> {
+  return getJson<LogQueryResult>('/logs/admin' + buildQuery(params as Record<string, unknown>), {
+    signal,
+  });
 }
 
-export function getAgentLogs(agentId: string, params: LogQueryParams = {}): Promise<LogQueryResult> {
+export function getAgentLogs(
+  agentId: string,
+  params: LogQueryParams = {},
+  signal?: AbortSignal,
+): Promise<LogQueryResult> {
   return getJson<LogQueryResult>(
-    `/logs/agents/${encodeURIComponent(agentId)}${buildQuery(params as Record<string, unknown>)}`
+    `/logs/agents/${encodeURIComponent(agentId)}${buildQuery(params as Record<string, unknown>)}`,
+    { signal },
   );
 }
 

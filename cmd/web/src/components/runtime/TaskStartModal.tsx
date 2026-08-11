@@ -44,15 +44,22 @@ import { AuthExtraEditor } from './AuthExtraEditor';
 import { TaskStartCommonFields } from './TaskStartCommonFields';
 import { BugOutlined, CheckCircleOutlined, DeleteOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useShallow } from 'zustand/react/shallow';
-import { showApiError, startTask, useRuntimeStore } from '@/services';
+import {
+  cancelInactiveQuery,
+  flowListQueryOptions,
+  queryKeys,
+  showApiError,
+  startTask,
+  useRuntimeStore,
+} from '@/services';
 import { hasSyncDiff, listProto, listScript, subtractSyncResult, type BaselineSyncResult, type ResourceFile } from '@/services/resourcesStore';
 import { checkTaskResourcesAgainstBaseline } from '@/services/taskResourceDiff';
 import { syncFlowScriptsToIdb, collectFlowScriptNames } from '@/services/scriptSync';
 import { syncProtosToIdb, missingProtoImports } from '@/services/protoSync';
 import { useFlowStore } from '@/components/FlowEditor/store/flowStore';
-import { listFlows, type ManagedFlow } from '@/components/FlowEditor/store/flowManagerStore';
 import { getFlowTemplate } from '@/services/flowsApi';
 import type { FlowJson } from '@/components/FlowEditor/codec/flowToJson';
 import { useCodecConnections } from '@/components/FlowEditor/codec/useCodecConnections';
@@ -169,8 +176,14 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
   const [diffResolveOpen, setDiffResolveOpen] = useState(false);
   // 流程来源：当前画布 / 已保存流程（服务器流程模板库）
   const [flowSource, setFlowSource] = useState<'canvas' | 'saved'>('canvas');
-  const [savedFlows, setSavedFlows] = useState<ManagedFlow[]>([]);
   const [selectedFlowId, setSelectedFlowId] = useState<string | undefined>(undefined);
+  const queryClient = useQueryClient();
+  const savedFlowsQuery = useQuery({ ...flowListQueryOptions(), enabled: open });
+  const savedFlows = useMemo(() => savedFlowsQuery.data ?? [], [savedFlowsQuery.data]);
+
+  useEffect(() => {
+    if (!open) void cancelInactiveQuery(queryClient, queryKeys.flows.all);
+  }, [open, queryClient]);
 
   // 解析当前选中的流程：当前画布直接取 flowStore；已保存流程从服务器读详情。
   // 返回 null 表示未选中（已保存流程但还没选），调用方据此拦截。
@@ -189,25 +202,13 @@ export function TaskStartModal({ open, onClose, onStarted }: TaskStartModalProps
     return { flow: detail.flow, layout: detail.layout, flowTemplateId: detail.id };
   };
 
-  // 弹窗打开 → 加载已保存流程列表（流程模板库）。
+  // 弹窗打开 → 从共享查询缓存读取流程列表；失效时由 Query 统一取消旧请求。
   useEffect(() => {
     if (!open) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const data = await listFlows();
-        if (cancelled) return;
-        setSavedFlows(data);
-        // 保留已选；若失效则默认第一个
-        setSelectedFlowId((cur) => (cur && data.some((f) => f.id === cur) ? cur : data[0]?.id));
-      } catch {
-        if (!cancelled) setSavedFlows([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
+    setSelectedFlowId((current) => (
+      current && savedFlows.some((flow) => flow.id === current) ? current : savedFlows[0]?.id
+    ));
+  }, [open, savedFlows]);
 
   // 弹窗打开 / 切换流程来源 / 选择已保存流程 → flow 引用脚本 gap-fill + 收集本地资源列表。
   // 注意：与服务器基线的差异检查不在打开时做，而是在点击启动时（handleSubmit →

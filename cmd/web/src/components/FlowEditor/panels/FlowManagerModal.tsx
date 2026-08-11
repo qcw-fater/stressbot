@@ -6,10 +6,12 @@
 
 import { App as AntApp, Button, Input, Modal, Space, Table, Popconfirm, Tooltip } from 'antd';
 import { DeleteOutlined, DownloadOutlined, FolderOpenOutlined, ImportOutlined, SaveOutlined, SyncOutlined } from '@ant-design/icons';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
-import { FLOW_NAME_MAX_LENGTH, getFlow, listFlows, saveFlow, deleteFlow, renameFlow, type ManagedFlow } from '../store/flowManagerStore';
+import { FLOW_NAME_MAX_LENGTH, getFlow, saveFlow, deleteFlow, renameFlow, type ManagedFlow } from '../store/flowManagerStore';
+import { cancelInactiveQuery, flowListQueryOptions, queryKeys } from '@/services';
 import { useFlowStore } from '../store/flowStore';
 import { useFlowFileIO } from './useFlowFileIO';
 import { validateLatestFlow } from '../validation/validationStore';
@@ -21,8 +23,9 @@ export interface FlowManagerModalProps {
 
 export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
   const { message } = AntApp.useApp();
-  const [flows, setFlows] = useState<ManagedFlow[]>([]);
-  const [loading, setLoading] = useState(false);
+  const queryClient = useQueryClient();
+  const flowsQuery = useQuery({ ...flowListQueryOptions(), enabled: open });
+  const flows = flowsQuery.data ?? [];
   const [saveName, setSaveName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -36,29 +39,26 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
 
   const loadFromTaskFlow = useFlowStore((s) => s.loadFromTaskFlow);
 
-  const fetchFlows = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await listFlows();
-      setFlows(data);
-    } catch (e) {
-      // 服务器未启用流程库等错误：给出提示并置空，避免残留旧列表。
-      message.error(`加载流程列表失败：${(e as Error).message}`);
-      setFlows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [message]);
+  const invalidateFlows = () => queryClient.invalidateQueries({ queryKey: queryKeys.flows.all });
+  const notifiedErrorAtRef = useRef(0);
+  useEffect(() => {
+    if (!open || !flowsQuery.error || flowsQuery.errorUpdatedAt === notifiedErrorAtRef.current) return;
+    notifiedErrorAtRef.current = flowsQuery.errorUpdatedAt;
+    message.error(`加载流程列表失败：${flowsQuery.error.message}`);
+  }, [flowsQuery.error, flowsQuery.errorUpdatedAt, message, open]);
 
   useEffect(() => {
     if (open) {
-      fetchFlows();
       setSaveName(`未命名流程 ${dayjs().format('MMDD_HHmm')}`);
       setRenamingId(null);
       setRenameValue('');
       committingRenameRef.current = false;
     }
-  }, [fetchFlows, open]);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) void cancelInactiveQuery(queryClient, queryKeys.flows.all);
+  }, [open, queryClient]);
 
   const startRename = (record: ManagedFlow) => {
     setRenamingId(record.id);
@@ -91,7 +91,7 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
       await renameFlow(renamingId, nextName);
       message.success(`已重命名为「${nextName}」`);
       cancelRename();
-      fetchFlows();
+      await invalidateFlows();
     } catch (e) {
       message.error(`重命名失败：${(e as Error).message}`);
       committingRenameRef.current = false;
@@ -123,7 +123,7 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
       await saveFlow(saveName, flow, layout);
       message.success(`已保存流程 "${saveName}"`);
       setSaveName('');
-      fetchFlows();
+      await invalidateFlows();
     } catch (e) {
       message.error(`保存失败：${(e as Error).message}`);
     } finally {
@@ -150,7 +150,7 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
     try {
       await deleteFlow(id);
       message.success(`已删除流程 "${name}"`);
-      fetchFlows();
+      await invalidateFlows();
     } catch (e) {
       message.error(`删除失败：${(e as Error).message}`);
     }
@@ -168,7 +168,7 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
       const layout = state.layout;
       await saveFlow(name, flow, layout, id);
       message.success(`已覆盖流程 "${name}"`);
-      fetchFlows();
+      await invalidateFlows();
     } catch (e) {
       message.error(`覆盖失败：${(e as Error).message}`);
     }
@@ -289,7 +289,7 @@ export function FlowManagerModal({ open, onClose }: FlowManagerModalProps) {
         rowKey="id"
         columns={columns}
         dataSource={flows}
-        loading={loading}
+        loading={flowsQuery.isFetching}
         size="small"
         pagination={{ pageSize: 10 }}
         locale={{ emptyText: '暂无保存的流程' }}

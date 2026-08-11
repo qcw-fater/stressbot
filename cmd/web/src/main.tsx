@@ -1,11 +1,13 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ConfigProvider, theme as antdTheme } from 'antd';
+import { QueryClientProvider } from '@tanstack/react-query';
 import zhCN from 'antd/locale/zh_CN';
 
 import { App } from './App';
 import { useEditorStore } from './components/FlowEditor/store/editorStore';
 import * as services from './services';
+import { appQueryClient } from './services/queryClient';
 import './styles/global.css';
 import '@xyflow/react/dist/style.css';
 
@@ -25,7 +27,9 @@ function ThemedApp() {
         algorithm: mode === 'dark' ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
       }}
     >
-      <App />
+      <QueryClientProvider client={appQueryClient}>
+        <App />
+      </QueryClientProvider>
     </ConfigProvider>
   );
 }

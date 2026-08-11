@@ -7,9 +7,17 @@
 
 import { App as AntApp, Button, Empty, Progress, Space, Tooltip } from 'antd';
 import { DeleteOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useShallow } from 'zustand/react/shallow';
-import { agentsApi, metricsApi, showApiError, useRuntimeStore } from '@/services';
+import {
+  agentListQueryOptions,
+  agentsApi,
+  perAgentMetricsQueryOptions,
+  queryKeys,
+  showApiError,
+  useRuntimeStore,
+} from '@/services';
 import { FloatingWindow } from '@/components/FlowEditor/panels/FloatingWindow';
 import { ApdexCell } from '@/components/monitoring/shared/ApdexCell';
 import { fmtByteSize } from '@/components/monitoring/shared/formats';
@@ -59,39 +67,46 @@ export interface AgentsPanelProps {
 }
 
 export function AgentsPanel({ open, onClose }: AgentsPanelProps) {
-  const { agents, setAgents } = useRuntimeStore(
-    useShallow((s) => ({ agents: s.agents, setAgents: s.setAgents })),
+  const { agents, activeTaskId, setAgents } = useRuntimeStore(
+    useShallow((s) => ({
+      agents: s.agents,
+      activeTaskId: s.activeTask?.id,
+      setAgents: s.setAgents,
+    })),
   );
   const { message, modal } = AntApp.useApp();
-  const [loading, setLoading] = useState(false);
-  const [shuttingDown, setShuttingDown] = useState(false);
-  const [perAgentMetrics, setPerAgentMetrics] = useState<PerAgentMetricsItem[]>([]);
+  const queryClient = useQueryClient();
+  const agentsQuery = useQuery({ ...agentListQueryOptions(), enabled: open });
+  const perAgentQuery = useQuery({
+    ...perAgentMetricsQueryOptions(activeTaskId),
+    enabled: open,
+  });
+  const perAgentMetrics: PerAgentMetricsItem[] = perAgentQuery.data?.items ?? [];
 
   const refresh = async () => {
-    setLoading(true);
     try {
-      const [agentResp, perAgentResp] = await Promise.all([
-        agentsApi.listAgents(),
-        metricsApi.getPerAgentMetrics().catch(() => ({ items: [] as PerAgentMetricsItem[] })),
+      await Promise.all([
+        agentsQuery.refetch({ throwOnError: true }),
+        perAgentQuery.refetch({ throwOnError: true }).catch(() => undefined),
       ]);
-      setAgents(agentResp.items);
-      setPerAgentMetrics(perAgentResp.items);
     } catch (err) {
       showApiError(err);
-    } finally {
-      setLoading(false);
     }
   };
 
-  const refreshRef = useRef(refresh);
-  refreshRef.current = refresh;
-
   useEffect(() => {
-    if (!open) return;
-    refreshRef.current();
-    const timer = setInterval(() => refreshRef.current(), 5000);
-    return () => clearInterval(timer);
-  }, [open]);
+    if (agentsQuery.data) setAgents(agentsQuery.data.items);
+  }, [agentsQuery.data, setAgents]);
+
+  const invalidateAgents = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.all }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.metricsRoot }),
+    ]);
+  };
+  const shutdownAllMutation = useMutation({ mutationFn: agentsApi.shutdownAllAgents });
+  const shutdownOneMutation = useMutation({ mutationFn: agentsApi.shutdownAgent });
+  const deleteMutation = useMutation({ mutationFn: agentsApi.deleteAgent });
 
   const onShutdownAll = () => {
     modal.confirm({
@@ -100,9 +115,8 @@ export function AgentsPanel({ open, onClose }: AgentsPanelProps) {
       okType: 'danger',
       okText: '全部关闭',
       onOk: async () => {
-        setShuttingDown(true);
         try {
-          const result = await agentsApi.shutdownAllAgents();
+          const result = await shutdownAllMutation.mutateAsync();
           const succeeded = result.succeeded ?? [];
           const failed = result.failed ?? [];
           if (failed.length > 0) {
@@ -110,11 +124,9 @@ export function AgentsPanel({ open, onClose }: AgentsPanelProps) {
           } else {
             message.success(`${succeeded.length} 个节点已发送关闭信号`);
           }
-          refresh();
+          await invalidateAgents();
         } catch (err) {
           showApiError(err);
-        } finally {
-          setShuttingDown(false);
         }
       },
     });
@@ -128,9 +140,9 @@ export function AgentsPanel({ open, onClose }: AgentsPanelProps) {
       okText: '关闭',
       onOk: async () => {
         try {
-          await agentsApi.shutdownAgent(a.agentId);
+          await shutdownOneMutation.mutateAsync(a.agentId);
           message.success('已发送关闭信号');
-          refresh();
+          await invalidateAgents();
         } catch (err) {
           showApiError(err);
         }
@@ -145,9 +157,9 @@ export function AgentsPanel({ open, onClose }: AgentsPanelProps) {
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
-          await agentsApi.deleteAgent(a.agentId);
+          await deleteMutation.mutateAsync(a.agentId);
           message.success('已删除');
-          refresh();
+          await invalidateAgents();
         } catch (err) {
           showApiError(err);
         }
@@ -180,7 +192,12 @@ export function AgentsPanel({ open, onClose }: AgentsPanelProps) {
           <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
             在线 {onlineCount} / 总 {safeAgents.length}
           </span>
-          <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={refresh}>
+          <Button
+            size="small"
+            icon={<ReloadOutlined />}
+            loading={agentsQuery.isFetching || perAgentQuery.isFetching}
+            onClick={refresh}
+          >
             刷新
           </Button>
           <Tooltip title={hasOnline ? '关闭所有在线节点' : '没有在线节点'}>
@@ -189,7 +206,7 @@ export function AgentsPanel({ open, onClose }: AgentsPanelProps) {
               size="small"
               icon={<StopOutlined />}
               disabled={!hasOnline}
-              loading={shuttingDown}
+              loading={shutdownAllMutation.isPending}
               onClick={onShutdownAll}
             >
               全部关闭

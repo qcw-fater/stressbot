@@ -12,8 +12,10 @@
 import Editor, { type Monaco } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 import { Button, Input, Modal, Select, Space, Switch, Table } from 'antd';
+import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { agentsApi, logsApi, usePolling, useRuntimeStore } from '@/services';
+import { agentListQueryOptions, isAbortError, logsApi, useRuntimeStore } from '@/services';
+import { LatestRequestGate } from '@/services/latestRequestGate';
 import { API_PREFIX } from '@/services/env';
 import type { LogEntry, LogFileInfo } from '@/types/api';
 import { useEditorStore } from '@/components/FlowEditor/store/editorStore';
@@ -115,15 +117,16 @@ export function LogsTab({ open }: { open: boolean }) {
   const renderedEntriesRef = useRef<LogViewEntry[]>([]);
   // 用户主动滚动到底部标记，避免 layout/isEditorAtBottom 误判
   const userAtBottomRef = useRef(true);
-  // seekToLatest 期间标记，跳过正常轮询
-  const seekingRef = useRef(false);
   const [seeking, setSeeking] = useState(false);
+  const targetRef = useRef(target);
+  targetRef.current = target;
+  const seekGateRef = useRef(new LatestRequestGate());
   // 等级或关键词变化后执行一次完整替换，后续轮询继续增量追加。
   const needsFullReplaceRef = useRef(false);
 
   // === seekToLatest：切换 target 时跳到最新，不逐批渲染 ===
   const seekToLatest = useCallback(async (tgt: string) => {
-    seekingRef.current = true;
+    const request = seekGateRef.current.begin(tgt);
     setSeeking(true);
     let afterSeq = 0;
     let lastEntries: LogViewEntry[] = [];
@@ -132,8 +135,8 @@ export function LogsTab({ open }: { open: boolean }) {
     try {
       for (;;) {
         const res = tgt === 'admin'
-          ? await logsApi.getAdminLogs({ afterSeq, limit: 500 })
-          : await logsApi.getAgentLogs(tgt, { afterSeq, limit: 500 });
+          ? await logsApi.getAdminLogs({ afterSeq, limit: 500 }, request.signal)
+          : await logsApi.getAgentLogs(tgt, { afterSeq, limit: 500 }, request.signal);
 
         if (res.entries && res.entries.length > 0) {
           lastEntries = res.entries.map((e: LogEntry) => ({
@@ -148,11 +151,12 @@ export function LogsTab({ open }: { open: boolean }) {
         // 中间批次丢弃，只推进 cursor
         afterSeq = res.nextSeq;
       }
-    } catch {
+    } catch (error) {
+      if (isAbortError(error)) return;
       // 网络错误：显示已拿到的最后一批
     }
 
-    seekingRef.current = false;
+    if (!seekGateRef.current.isCurrent(request, targetRef.current)) return;
     setSeeking(false);
     setEntries(lastEntries);
     nextSeqRef.current = lastNextSeq;
@@ -161,6 +165,14 @@ export function LogsTab({ open }: { open: boolean }) {
     setPollingInterval(3000);
   }, []);
 
+  useEffect(() => {
+    if (open) return;
+    seekGateRef.current.cancel();
+    setSeeking(false);
+  }, [open]);
+
+  useEffect(() => () => seekGateRef.current.cancel(), []);
+
   // === 保存设置 ===
   const stateRef = useRef({ target, level, filterText, polling });
   stateRef.current = { target, level, filterText, polling };
@@ -168,24 +180,21 @@ export function LogsTab({ open }: { open: boolean }) {
     saveState(stateRef.current);
   }, []);
 
-  // === 窗口重新可见时刷新 Monaco 布局，并同步最新节点列表 ===
+  const agentsQuery = useQuery({
+    ...agentListQueryOptions(),
+    enabled: open,
+  });
+  useEffect(() => {
+    if (agentsQuery.data) setAgents(agentsQuery.data.items);
+  }, [agentsQuery.data, setAgents]);
+
+  // === 窗口重新可见时刷新 Monaco 布局 ===
   useEffect(() => {
     if (!open) return;
 
     const ed = editorRef.current;
     if (ed) requestAnimationFrame(() => ed.layout());
-
-    let cancelled = false;
-    agentsApi.listAgents()
-      .then((resp) => {
-        if (!cancelled) setAgents(resp.items);
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open, setAgents]);
+  }, [open]);
 
   // === 日志文件下载 ===
   const [fileModalOpen, setFileModalOpen] = useState(false);
@@ -216,6 +225,7 @@ export function LogsTab({ open }: { open: boolean }) {
 
   // === Handlers ===
   const handleTargetChange = (val: string) => {
+    targetRef.current = val;
     setTarget(val);
     setEntries([]);
     renderedEntriesRef.current = [];
@@ -246,48 +256,66 @@ export function LogsTab({ open }: { open: boolean }) {
   // enabled = open && polling：弹窗关闭时暂停，打开时恢复
   // 首次挂载时 open=true 且 polling=true → 立即拉取第一批（500 条）
   // hasMore 时 100ms 追赶，直到追平后切回 3000ms 常规轮询
-  const fetchLogs = useCallback(async () => {
+  const fetchLogs = useCallback(async (signal?: AbortSignal) => {
     const currentTarget = target;
     const afterSeq = nextSeqRef.current;
     const params = { afterSeq, limit: 500 };
     let res;
     if (currentTarget === 'admin') {
-      res = await logsApi.getAdminLogs(params);
+      res = await logsApi.getAdminLogs(params, signal);
     } else {
-      res = await logsApi.getAgentLogs(currentTarget, params);
+      res = await logsApi.getAgentLogs(currentTarget, params, signal);
     }
     return { res, capturedTarget: currentTarget, isReset: afterSeq === 0 };
   }, [target]);
 
-  usePolling({
-    fetcher: fetchLogs,
-    intervalMs: pollingInterval,
-    enabled: open && polling && !seekingRef.current,
-    onSuccess: ({ res, capturedTarget, isReset }) => {
-      if (capturedTarget !== target) return;
-      if (res.entries && res.entries.length > 0) {
-        setEntries((prev) => {
-          let newList = isReset ? [] : prev;
-          const formatted = res.entries.map((e: LogEntry) => ({
-            level: (e.level || 'info').toLowerCase(),
-            message: e.message,
-            text: formatEntry(e),
-          }));
-          newList = [...newList, ...formatted];
-          if (newList.length > maxEntries) {
-            newList = newList.slice(-maxEntries);
-          }
-          return newList;
-        });
-        nextSeqRef.current = res.nextSeq;
-      } else if (isReset) {
-        setEntries([]);
-        nextSeqRef.current = 0;
+  const pollingIntervalRef = useRef(pollingInterval);
+  pollingIntervalRef.current = pollingInterval;
+  useEffect(() => {
+    if (!open || !polling || seeking) return;
+
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let controller: AbortController | undefined;
+    const tick = async (): Promise<void> => {
+      controller = new AbortController();
+      try {
+        const { res, capturedTarget, isReset } = await fetchLogs(controller.signal);
+        if (stopped || capturedTarget !== target) return;
+        if (res.entries && res.entries.length > 0) {
+          setEntries((previous) => {
+            const formatted = res.entries.map((entry: LogEntry) => ({
+              level: (entry.level || 'info').toLowerCase(),
+              message: entry.message,
+              text: formatEntry(entry),
+            }));
+            const combined = [...(isReset ? [] : previous), ...formatted];
+            return combined.length > maxEntries ? combined.slice(-maxEntries) : combined;
+          });
+          nextSeqRef.current = res.nextSeq;
+        } else if (isReset) {
+          setEntries([]);
+          nextSeqRef.current = 0;
+        }
+        const nextInterval = res.hasMore ? 100 : 3000;
+        pollingIntervalRef.current = nextInterval;
+        setPollingInterval(nextInterval);
+      } catch (error) {
+        if (!isAbortError(error)) {
+          // 日志查看保留已加载内容，下一拍继续尝试。
+        }
+      } finally {
+        if (!stopped) timer = setTimeout(tick, pollingIntervalRef.current);
       }
-      setPollingInterval(res.hasMore ? 100 : 3000);
-    },
-    onError: () => {},
-  });
+    };
+
+    void tick();
+    return () => {
+      stopped = true;
+      controller?.abort();
+      if (timer) clearTimeout(timer);
+    };
+  }, [fetchLogs, maxEntries, open, polling, seeking, target]);
 
   const filteredEntries = useMemo(
     () => filterLogEntries(entries, level, filterText),

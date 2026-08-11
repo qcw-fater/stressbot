@@ -21,8 +21,13 @@ export interface MetricsParams {
 /**
  * 后端始终返回完整聚合结果；实时指标只存在于 snapshot.window。
  */
-export async function getClusterMetrics(params: MetricsParams = {}): Promise<StressAggregate> {
-  const value = await getJson<unknown>('/metrics' + buildQuery(params as Record<string, unknown>));
+export async function getClusterMetrics(
+  params: MetricsParams = {},
+  signal?: AbortSignal,
+): Promise<StressAggregate> {
+  const value = await getJson<unknown>('/metrics' + buildQuery(params as Record<string, unknown>), {
+    signal,
+  });
   return parseStressAggregate(value);
 }
 
@@ -48,15 +53,19 @@ export function parseStressAggregate(value: unknown): StressAggregate {
  * 后端 per-node metrics API 返回 `[]{agentId, snapshot, updatedAt}`，
  * 前端包装为 `{items}` 并将 agentName 兜底为 agentId。
  */
-export async function getPerAgentMetrics(params: MetricsParams = {}): Promise<PerAgentMetrics> {
+export async function getPerAgentMetrics(
+  params: MetricsParams = {},
+  signal?: AbortSignal,
+): Promise<PerAgentMetrics> {
   return getJson<PerAgentMetrics>(
     '/metrics/agents' + buildQuery(params as Record<string, unknown>),
+    { signal },
   );
 }
 
 // === 系统指标 ===
-export async function getClusterSystem(): Promise<ClusterSystemSnapshot> {
-  return parseClusterSystemSnapshot(await getJson<unknown>('/system'));
+export async function getClusterSystem(signal?: AbortSignal): Promise<ClusterSystemSnapshot> {
+  return parseClusterSystemSnapshot(await getJson<unknown>('/system', { signal }));
 }
 
 const SYSTEM_COUNT_FIELDS = [

@@ -22,13 +22,18 @@ export interface TasksListParams {
 /**
  * 后端目前直接返回 `[]TaskBrief`，前端在此包装为 `{items, total}`。
  */
-export async function listTasks(params: TasksListParams = {}): Promise<TasksListResponse> {
-  const resp = await getJson<unknown>('/tasks' + buildQuery(params as Record<string, unknown>));
+export async function listTasks(
+  params: TasksListParams = {},
+  signal?: AbortSignal,
+): Promise<TasksListResponse> {
+  const resp = await getJson<unknown>('/tasks' + buildQuery(params as Record<string, unknown>), {
+    signal,
+  });
   return adaptList<TaskBrief>(resp);
 }
 
-export function getTask(id: string): Promise<TaskDetail> {
-  return getJson<TaskDetail>(`/tasks/${encodeURIComponent(id)}`);
+export function getTask(id: string, signal?: AbortSignal): Promise<TaskDetail> {
+  return getJson<TaskDetail>(`/tasks/${encodeURIComponent(id)}`, { signal });
 }
 
 /**

@@ -929,11 +929,11 @@ M4 出口：OpenAPI 生成物在 CI 无漂移；所有固定 HTTP DTO 单一来�
 - Modify: `cmd/web/src/components/FlowEditor/panels/FlowManagerModal.tsx`
 - Modify: `cmd/web/src/components/runtime/TaskStartModal.tsx`
 
-- [ ] **Step 1: 增加 QueryClient 测试壳**
+- [x] **Step 1: 增加 QueryClient 测试壳**
 
 测试 client 默认 `retry: false`、`gcTime` 有界、window focus 不会在压测中造成意外请求；生产 client 对只读接口允许最多 2 次指数重试，对 mutation 不自动重试。
 
-- [ ] **Step 2: 安装并挂 Provider**
+- [x] **Step 2: 安装并挂 Provider**
 
 ```powershell
 Set-Location cmd\web
@@ -942,7 +942,7 @@ npm install --save-exact @tanstack/react-query
 
 `main.tsx` 在 antd `ConfigProvider` 内挂 `QueryClientProvider`。测试 helper 每个用例创建全新 QueryClient，避免 cache 跨测试污染。
 
-- [ ] **Step 3: 定义稳定 query keys**
+- [x] **Step 3: 定义稳定 query keys**
 
 ```ts
 export const queryKeys = {
@@ -955,15 +955,15 @@ export const queryKeys = {
 
 所有动态参数都进入 key；禁止组件手写字符串 key。
 
-- [ ] **Step 4: 让 services 接受 AbortSignal**
+- [x] **Step 4: 让 services 接受 AbortSignal**
 
 OpenAPI generated client 和遗留 `getJson` 都把 signal 传给 fetch。`ApiError` 包装时识别 `AbortError`，取消不计为连接失败，也不弹 toast。
 
-- [ ] **Step 5: 迁移 flows/capabilities 等低频读取**
+- [x] **Step 5: 迁移 flows/capabilities 等低频读取**
 
 先替换 FlowManagerModal、TaskStartModal 的 `useEffect + cancelled`。保存、重命名、删除 mutation 成功后精确 invalidate `queryKeys.flows.all`；服务端错误继续走 `showApiError`。
 
-- [ ] **Step 6: 验证 cache、取消和 mutation invalidation**
+- [x] **Step 6: 验证 cache、取消和 mutation invalidation**
 
 ```powershell
 npx vitest run src/services/queryOptions.test.tsx src/components/FlowEditor/panels/FlowManagerModal.test.tsx
@@ -971,7 +971,7 @@ npx tsc -b
 npm run test
 ```
 
-- [ ] **Step 7: 提交基础设施**
+- [x] **Step 7: 提交基础设施**
 
 ```powershell
 git add package.json package-lock.json src/main.tsx src/services src/components/FlowEditor/panels/FlowManagerModal.tsx src/components/runtime/TaskStartModal.tsx
@@ -990,23 +990,23 @@ git commit -m "feat: introduce TanStack Query server state"
 - Modify: `cmd/web/src/services/runtimeStore.ts`
 - Delete after cutover: `cmd/web/src/services/usePolling.ts`
 
-- [ ] **Step 1: 把现有轮询语义写成 fake-timer 测试**
+- [x] **Step 1: 把现有轮询语义写成 fake-timer 测试**
 
 覆盖：同一 query 不并发；连续 3 次失败才 lost；成功一次 restored；disabled 立即停止；切 taskId 取消旧请求；终态只触发一次 cleanup notification；metrics/system 每个 `dataUpdatedAt` 只 push 一次；AbortError 不增加失败计数。
 
-- [ ] **Step 2: 用 refetchInterval 表达 policy**
+- [x] **Step 2: 用 refetchInterval 表达 policy**
 
 task、stress、system、agents 各自使用稳定 key；`enabled` 和 `refetchInterval` 由现有 runtime policy 计算。运行态统一由 `EditorPage` 持有轮询 observer，其他组件读取相同 cache 时不再创建第二个 interval。
 
-- [ ] **Step 3: 建立 Query→runtimeStore 适配器**
+- [x] **Step 3: 建立 Query→runtimeStore 适配器**
 
 `useRuntimeQueries` 用 `dataUpdatedAt` effect 把 cluster metrics/system push 到有限窗口，把 task detail/agents 写入现有 store；用 `failureCount` 和成功时间戳调用 `reportConnectionHealth`。Query cache 是服务端快照事实源，runtimeStore 是 UI 状态机和趋势缓冲，职责不混合。
 
-- [ ] **Step 4: 迁移 AgentsPanel**
+- [x] **Step 4: 迁移 AgentsPanel**
 
 Panel 打开时 `refetchQueries`，展示 Query cache 的 agents/per-agent metrics；shutdown mutation 成功后 invalidate agents 和 per-agent metrics。若 EditorPage 正在轮询，不再建立 `setInterval`。
 
-- [ ] **Step 5: 保留日志 cursor 路径**
+- [x] **Step 5: 保留日志 cursor 路径**
 
 日志分页继续使用现有 cursor API，不改成 infinite query；它的丢页/截断/游标推进语义与普通列表 cache 不同。
 
@@ -1014,7 +1014,9 @@ Panel 打开时 `refetchQueries`，展示 Query cache 的 agents/per-agent metri
 
 浏览器运行 60 秒，idle、running、finalReport 三种模式的请求数分别与 M0 基线对比。相同 endpoint 不得出现两个独立 timer；任务切换后旧 task 请求应被 AbortSignal 取消。
 
-- [ ] **Step 7: 完整前端验证与提交**
+本地 60 秒调度计数和 AbortSignal/去重测试已通过；M0 没有预发布真实流量基线，因此按发布门禁暂不物理删除未导出、零引用的 `usePolling.ts`。此项待预发布观察窗口完成后关闭。
+
+- [x] **Step 7: 完整前端验证与提交**
 
 ```powershell
 npx vitest run src/services/useRuntimeQueries.test.tsx
@@ -1024,6 +1026,8 @@ npm run build
 git add src/pages/EditorPage.tsx src/components/modules/AgentsPanel.tsx src/services
 git commit -m "refactor: move runtime polling to TanStack Query"
 ```
+
+定向 Query/运行态测试、完整前端 86 个测试文件（649 项）、`tsc -b`、Vite production build、`go test ./...` 与 `go build ./...` 均通过。运行态轮询采用本地 60 秒 fake-timer 计数完成对比；真实预发布观察窗口仍属于 Step 6 发布门禁，不在本地结果中冒充完成。独立复核发现并关闭了跨 taskId 失败累计、共享 observer 健康漏计、逐节点指标停止刷新、弹窗关闭不取消和日志 seek 跨目标污染等边界问题。
 
 M5 出口：断线/恢复、终态、指标趋势和节点列表行为与迁移前一致；重复轮询为零；取消请求不显示网络错误。
 

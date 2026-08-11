@@ -11,8 +11,8 @@ import type { AgentBrief, AgentsListResponse } from '@/types/api';
 /**
  * 后端目前直接返回 `[]AgentBrief`，前端包装为 `{items}`。
  */
-export async function listAgents(): Promise<AgentsListResponse> {
-  const resp = await getJson<unknown>('/agents');
+export async function listAgents(signal?: AbortSignal): Promise<AgentsListResponse> {
+  const resp = await getJson<unknown>('/agents', { signal });
   return { items: adaptList<AgentBrief>(resp).items };
 }
 

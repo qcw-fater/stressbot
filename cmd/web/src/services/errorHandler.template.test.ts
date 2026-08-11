@@ -29,4 +29,10 @@ describe('模板库错误提示', () => {
     showApiError(new ApiError({ code: 'UNKNOWN_TEMPLATE_ERROR', message: '原始错误' }, 500));
     expect(error).toHaveBeenCalledWith('原始错误');
   });
+
+  it.each(['AbortError', 'CancelledError'])('主动取消 %s 不显示错误提示', (name) => {
+    setMessageApi({ message: { error } as never });
+    showApiError(Object.assign(new Error('已取消'), { name }));
+    expect(error).not.toHaveBeenCalled();
+  });
 });

@@ -48,8 +48,8 @@ export interface ReplaceFlowSnapshotResponse {
 }
 
 /** 列表（按更新时间倒序）。 */
-export function listFlowTemplates(): Promise<FlowTemplateSummary[]> {
-  return getJson<FlowTemplateSummary[]>('/flows');
+export function listFlowTemplates(signal?: AbortSignal): Promise<FlowTemplateSummary[]> {
+  return getJson<FlowTemplateSummary[]>('/flows', { signal });
 }
 
 /** 读取完整流程模板。 */

@@ -6,7 +6,7 @@
  *   未注入时回退静态 `message`/`Modal`（会触发 "Static function can not consume context" 警告）；
  * - `TASK_CONFLICT` 单独走 modal.confirm，需要让用户决定"查看运行中"或"留在编辑态"；
  *   该决策需访问 runtimeStore，故由调用方传 `onAttachActive` 回调进来，避免 services 反向依赖 store；
- * - 网络抖动单错误（NETWORK_ERROR）默认静默；usePolling 会聚合 ≥3 次失败统一提示。
+ * - 网络抖动单错误（NETWORK_ERROR）默认静默；运行态查询会聚合 ≥3 次失败统一提示。
  *
  * 单一事实源：docs/api-monitor.md §14。
  */
@@ -14,7 +14,7 @@
 import { Modal as StaticModal, message as staticMessage } from 'antd';
 import type { MessageInstance } from 'antd/es/message/interface';
 import type { ModalStaticFunctions } from 'antd/es/modal/confirm';
-import { ApiError } from './api';
+import { ApiError, isAbortError } from './api';
 import type { TaskConflictDetails } from '@/types/api';
 
 type MessageLike = Pick<MessageInstance, 'error' | 'warning' | 'info' | 'success'>;
@@ -91,6 +91,7 @@ export function registerTaskConflictHandler(handler: TaskConflictHandler | null)
  *               false 表示只是显示了 toast，调用方可决定是否继续业务逻辑。
  */
 export function showApiError(err: unknown): boolean {
+  if (isAbortError(err)) return true;
   if (err instanceof ApiError && err.code === 'TASK_CONFLICT') {
     showTaskConflict(err);
     return true;

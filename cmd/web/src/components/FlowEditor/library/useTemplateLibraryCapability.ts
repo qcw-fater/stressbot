@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { getCapabilities } from '@/services/capabilitiesApi';
+import { useCallback, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { capabilitiesQueryOptions } from '@/services/queryOptions';
 
 export interface TemplateLibraryCapabilityState {
   /** undefined 表示尚未取得过服务器状态。 */
@@ -14,39 +15,25 @@ export interface TemplateLibraryCapabilityState {
  * 刷新失败会保留最近一次成功值，避免短暂网络抖动清空已显示的模板。
  */
 export function useTemplateLibraryCapability(): TemplateLibraryCapabilityState {
-  const [templateLibrary, setTemplateLibrary] = useState<boolean>();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error>();
-  const mountedRef = useRef(false);
-  const requestRef = useRef(0);
+  const query = useQuery(capabilitiesQueryOptions());
+  const { refetch } = query;
 
   const refresh = useCallback(async (): Promise<void> => {
-    const request = ++requestRef.current;
-    if (mountedRef.current) setLoading(true);
-    try {
-      const capabilities = await getCapabilities();
-      if (!mountedRef.current || request !== requestRef.current) return;
-      setTemplateLibrary(capabilities.templateLibrary);
-      setError(undefined);
-    } catch (value) {
-      if (!mountedRef.current || request !== requestRef.current) return;
-      setError(value instanceof Error ? value : new Error(String(value)));
-    } finally {
-      if (mountedRef.current && request === requestRef.current) setLoading(false);
-    }
-  }, []);
+    await refetch();
+  }, [refetch]);
 
   useEffect(() => {
-    mountedRef.current = true;
-    void refresh();
-    const onFocus = () => { void refresh(); };
-    window.addEventListener('focus', onFocus);
-    return () => {
-      mountedRef.current = false;
-      requestRef.current += 1;
-      window.removeEventListener('focus', onFocus);
+    const onFocus = () => {
+      void refresh();
     };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
   }, [refresh]);
 
-  return { templateLibrary, loading, error, refresh };
+  return {
+    templateLibrary: query.data?.templateLibrary,
+    loading: query.isPending,
+    error: query.error ?? undefined,
+    refresh,
+  };
 }

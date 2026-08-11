@@ -14,8 +14,21 @@ export * as logsApi from './logsApi';
 export * as capabilitiesApi from './capabilitiesApi';
 export type { CapabilitiesResponse } from './capabilitiesApi';
 
-export { usePolling } from './usePolling';
-export type { UsePollingOptions } from './usePolling';
+export {
+  appQueryClient,
+  cancelInactiveQuery,
+  createAppQueryClient,
+  createTestQueryClient,
+} from './queryClient';
+export { queryKeys } from './queryKeys';
+export {
+  agentListQueryOptions,
+  capabilitiesQueryOptions,
+  flowListQueryOptions,
+  perAgentMetricsQueryOptions,
+} from './queryOptions';
+export { useRuntimeQueries } from './useRuntimeQueries';
+export type { UseRuntimeQueriesOptions } from './useRuntimeQueries';
 
 export { useRuntimeStore, pollingPolicy } from './runtimeStore';
 export type { RuntimeMode, RuntimeState } from './runtimeStore';
