@@ -16,6 +16,7 @@
 import { clear, createStore, del, delMany, get, keys, set, setMany } from 'idb-keyval';
 import { BASELINE_PREFIX } from './env';
 import { fetchBaselineCodecIndex, fetchBaselineCodec } from './baselineApi';
+import { validateCodecStructure } from './schemaValidator';
 import type { CodecSchema } from '@/types/codec';
 import type {
   BindingType,
@@ -370,6 +371,9 @@ export function validateCodecSchema(content: string): string[] {
   const ec = new ErrCollector();
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return ['codec 配置不是合法 JSON 对象'];
+  }
+  for (const issue of validateCodecStructure(parsed)) {
+    ec.add(`codec ${issue.path}：${issue.message}`);
   }
   const s = parsed as CodecSchema;
   validateBase(s, ec);

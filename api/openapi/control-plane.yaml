@@ -1,0 +1,402 @@
+openapi: 3.0.3
+info:
+  title: stressbot internal control plane
+  version: 1.0.0
+  description: Admin 与节点之间的双向内部控制面契约。
+security:
+  - mutualTLS: []
+paths:
+  /sbot/agent/register:
+    post:
+      operationId: registerAgent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '200':
+          description: 注册成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegisterResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/ServerError' }
+  /sbot/agent/{id}/heartbeat:
+    post:
+      operationId: heartbeatAgent
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HeartbeatRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/StatusOK' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/ServerError' }
+  /sbot/agent/{id}/deregister:
+    post:
+      operationId: deregisterAgent
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      responses:
+        '200': { $ref: '#/components/responses/StatusOK' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/ServerError' }
+  /sbot/agent/stress:
+    post:
+      operationId: reportAgentStress
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StressReport' }
+      responses:
+        '200': { $ref: '#/components/responses/StatusOK' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/ServerError' }
+  /sbot/agent/system:
+    post:
+      operationId: reportAgentSystem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SystemReport' }
+      responses:
+        '200': { $ref: '#/components/responses/StatusOK' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/ServerError' }
+  /sbot/agent/{id}/task/{tid}/done:
+    post:
+      operationId: completeAgentTask
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskCompletionReport' }
+      responses:
+        '200': { $ref: '#/components/responses/StatusOK' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/ServerError' }
+  /sbot/agent/{id}/pending-task:
+    get:
+      operationId: getPendingAgentTask
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      responses:
+        '200':
+          description: 待执行任务
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskAssignment' }
+        '204': { description: 当前没有待执行任务 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/ServerError' }
+  /agent/v1/task:
+    post:
+      operationId: assignTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskAssignment' }
+      responses:
+        '202': { description: 已接收任务 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/ServerError' }
+  /agent/v1/stop:
+    post:
+      operationId: stopTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StopRequest' }
+      responses:
+        '200': { description: 任务已停止 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/ServerError' }
+  /agent/v1/shutdown:
+    post:
+      operationId: shutdownAgent
+      responses:
+        '202':
+          description: 正在关闭
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/ServerError' }
+  /agent/v1/version:
+    get:
+      operationId: getAgentVersion
+      responses:
+        '200':
+          description: 节点版本
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VersionResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/ServerError' }
+  /agent/v1/status:
+    get:
+      operationId: getAgentStatus
+      responses:
+        '200':
+          description: 节点状态
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentStatusResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/ServerError' }
+  /agent/v1/logs:
+    get:
+      operationId: queryAgentLogs
+      parameters:
+        - name: afterSeq
+          in: query
+          schema: { type: integer, format: uint64, minimum: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 200 }
+      responses:
+        '200':
+          description: 日志游标页
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LogQueryResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/ServerError' }
+  /agent/v1/logs/files:
+    get:
+      operationId: listAgentLogFiles
+      responses:
+        '200':
+          description: 日志文件列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LogFileInfo' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/ServerError' }
+  /agent/v1/logs/files/{name}:
+    get:
+      operationId: downloadAgentLogFile
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: 日志文件内容
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/ServerError' }
+  /healthz:
+    get:
+      operationId: getAgentHealth
+      responses:
+        '200': { description: 健康 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/ServerError' }
+components:
+  securitySchemes:
+    mutualTLS:
+      type: apiKey
+      in: header
+      name: X-Stressbot-mTLS-Verified
+      x-mutual-tls: true
+      description: 文档占位 header，不应由客户端发送；Admin 与节点的独立 CA 双向认证由 TLS listener 在 HTTP 前完成。
+  parameters:
+    AgentId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+    TaskId:
+      name: tid
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+  responses:
+    StatusOK:
+      description: 操作成功
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/StatusResponse' }
+    BadRequest:
+      description: 请求不合法
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    Conflict:
+      description: 当前状态冲突
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    ServerError:
+      description: 内部错误
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+  schemas:
+    ApiError:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        details: {}
+    StatusResponse:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string }
+      additionalProperties: false
+    StaticInfo:
+      type: object
+      required: [hostname, os, arch, numCpu, memTotalBytes, goVersion, kernelVer, startedAt]
+      properties:
+        hostname: { type: string }
+        os: { type: string }
+        arch: { type: string }
+        numCpu: { type: integer, minimum: 1 }
+        memTotalBytes: { type: integer, format: uint64, minimum: 0 }
+        goVersion: { type: string }
+        kernelVer: { type: string }
+        startedAt: { type: string, format: date-time }
+      additionalProperties: false
+    RegisterRequest:
+      type: object
+      required: [agentId, name, address, appVersion, maxBots, stressInterval, systemInterval, staticInfo]
+      properties:
+        agentId: { type: string, minLength: 1 }
+        name: { type: string }
+        address: { type: string, minLength: 1 }
+        appVersion: { type: string }
+        maxBots: { type: integer, minimum: 0 }
+        stressInterval: { type: string, minLength: 1 }
+        systemInterval: { type: string, minLength: 1 }
+        staticInfo: { $ref: '#/components/schemas/StaticInfo' }
+      additionalProperties: false
+    RegisterResponse:
+      type: object
+      required: [agentId, heartbeatTtl, stressEndpoint, systemEndpoint]
+      properties:
+        agentId: { type: string }
+        heartbeatTtl: { type: string }
+        stressEndpoint: { type: string }
+        systemEndpoint: { type: string }
+      additionalProperties: false
+    HeartbeatRequest:
+      type: object
+      required: [timestamp, status, currentBots, appVersion]
+      properties:
+        agentId: { type: string }
+        timestamp: { type: string }
+        status: { type: string, enum: [idle, busy] }
+        currentTaskId: { type: string }
+        currentBots: { type: integer, minimum: 0 }
+        appVersion: { type: string }
+      additionalProperties: false
+    StressReport:
+      type: object
+      required: [agentId, taskId, reportedAt, snapshot]
+      properties:
+        agentId: { type: string, minLength: 1 }
+        taskId: { type: string, minLength: 1 }
+        reportedAt: { type: string, format: date-time }
+        snapshot: { type: object, additionalProperties: true }
+      additionalProperties: false
+    SystemReport:
+      type: object
+      required: [agentId, snapshot]
+      properties:
+        agentId: { type: string, minLength: 1 }
+        snapshot: { type: object, additionalProperties: true }
+      additionalProperties: false
+    TaskCompletionReport:
+      type: object
+      required: [result, finishedAt]
+      properties:
+        agentId: { type: string }
+        taskId: { type: string }
+        result: { type: string, enum: [completed, stopped, failed] }
+        errorMsg: { type: string }
+        finishedAt: { type: string, format: date-time }
+        finalSnapshot: { type: object, nullable: true, additionalProperties: true }
+        stageIndex: { type: integer }
+        cleanupStatus: { type: object, nullable: true, additionalProperties: true }
+      additionalProperties: false
+    TaskAssignment:
+      type: object
+      required: [taskId, taskName, startNumber, startIndex, totalBots, accountPrefix, concurrentNum, mainService, stateExtra, heartbeatInterval, tcpTimeout, httpTimeout, apdexT, configUrl, configFiles]
+      properties:
+        taskId: { type: string, minLength: 1 }
+        taskName: { type: string }
+        startNumber: { type: integer }
+        startIndex: { type: integer, minimum: 0 }
+        totalBots: { type: integer, minimum: 0 }
+        accountPrefix: { type: string }
+        concurrentNum: { type: integer, minimum: 1 }
+        mainService: { type: string, minLength: 1 }
+        stateExtra:
+          type: object
+          additionalProperties: { type: string }
+        heartbeatInterval: { type: string }
+        tcpTimeout: { type: string }
+        httpTimeout: { type: string }
+        apdexT: { type: integer, minimum: 0 }
+        logLevel: { type: string, enum: ['', debug, info, warn, error] }
+        configUrl: { type: string }
+        configFiles:
+          type: array
+          items: { type: string }
+        rampUp: { type: object, nullable: true, additionalProperties: true }
+        shared: { type: object, nullable: true, additionalProperties: true }
+      additionalProperties: false
+    StopRequest:
+      type: object
+      required: [taskId]
+      properties:
+        taskId: { type: string, minLength: 1 }
+      additionalProperties: false
+    VersionResponse:
+      type: object
+      required: [version]
+      properties:
+        version: { type: string }
+      additionalProperties: false
+    AgentStatusResponse:
+      type: object
+      required: [agentId, status, appVersion, uptime]
+      properties:
+        agentId: { type: string }
+        status: { type: string }
+        currentTaskId: { type: string }
+        appVersion: { type: string }
+        uptime: { type: string }
+      additionalProperties: false
+    LogQueryResponse:
+      type: object
+      additionalProperties: true
+    LogFileInfo:
+      type: object
+      required: [name, size, modTime]
+      properties:
+        name: { type: string }
+        size: { type: integer, format: int64, minimum: 0 }
+        modTime: { type: string }
+      additionalProperties: false

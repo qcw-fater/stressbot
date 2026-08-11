@@ -59,7 +59,7 @@ func readCodecDistFile(t *testing.T, rel string) []byte {
 }
 
 // newCodecDistMultipart 构造 multipart body：
-//   - flow.json（最小占位）
+//   - flow.json（最小合法结构）
 //   - adapter/<每个 *_codec.json>（按文件名作为 form field）
 //   - adapter/errors.json
 //
@@ -86,7 +86,7 @@ func newCodecDistMultipart(t *testing.T) (*bytes.Buffer, string) {
 	if err != nil {
 		t.Fatalf("create flow.json part: %v", err)
 	}
-	if _, err := partFlow.Write([]byte("{}")); err != nil {
+	if _, err := partFlow.Write([]byte(`{"nodes":{},"actions":{}}`)); err != nil {
 		t.Fatalf("write flow.json: %v", err)
 	}
 

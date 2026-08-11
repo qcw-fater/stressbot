@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stressbot.local/schemas/codec.schema.json",
+  "title": "stressbot declarative codec",
+  "type": "object",
+  "required": ["version", "endianDefault", "frame", "header", "routeKeyTemplate"],
+  "properties": {
+    "version": { "const": 1 },
+    "endianDefault": { "enum": ["le", "be"] },
+    "frame": { "$ref": "#/$defs/frame" },
+    "header": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/field" } },
+    "routeKeyTemplate": { "type": "string", "minLength": 1 },
+    "pipeline": { "type": "array", "items": { "$ref": "#/$defs/step" } },
+    "heartbeat": { "$ref": "#/$defs/heartbeat" }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "frame": {
+      "type": "object",
+      "required": ["headerSize"],
+      "properties": {
+        "headerSize": { "type": "integer", "minimum": 1 },
+        "trailerSize": { "type": "integer", "minimum": 0 },
+        "lengthIncludesHeader": { "type": "boolean" },
+        "lengthIncludesTrailer": { "type": "boolean" }
+      },
+      "unevaluatedProperties": false
+    },
+    "field": {
+      "type": "object",
+      "required": ["name", "type", "offset", "size", "role"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "type": { "enum": ["u8", "u16", "u24", "u32", "u64", "i8", "i16", "i24", "i32", "i64", "f32", "f64", "bytes"] },
+        "endian": { "enum": ["", "le", "be"] },
+        "offset": { "type": "integer", "minimum": 0 },
+        "size": { "type": "integer", "minimum": 1 },
+        "role": { "enum": ["length", "route", "errorCode", "flags", "checksumOut", "value", "reserved"] },
+        "bits": { "type": "array", "items": { "$ref": "#/$defs/flagBit" } },
+        "from": { "type": "string" },
+        "source": { "$ref": "#/$defs/valueSource" },
+        "repr": { "enum": ["", "hex", "base64", "ascii"] }
+      },
+      "unevaluatedProperties": false
+    },
+    "flagBit": {
+      "type": "object",
+      "required": ["name", "bit"],
+      "properties": { "name": { "type": "string", "minLength": 1 }, "bit": { "type": "integer", "minimum": 0 } },
+      "unevaluatedProperties": false
+    },
+    "valueSource": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["const", "route", "state", "counter", "timestamp"] },
+        "value": { "type": "integer" },
+        "key": { "type": "string" },
+        "start": { "type": "integer" },
+        "step": { "type": "integer" },
+        "wrap": { "type": "integer" },
+        "unit": { "enum": ["", "s", "ms"] }
+      },
+      "unevaluatedProperties": false
+    },
+    "step": {
+      "type": "object",
+      "required": ["op", "name", "algo"],
+      "properties": {
+        "op": { "enum": ["compress", "encrypt", "checksum", "hash"] },
+        "name": { "type": "string", "minLength": 1 },
+        "algo": { "type": "string", "minLength": 1 },
+        "flag": { "type": "string" },
+        "params": { "type": "object", "additionalProperties": true },
+        "keyLen": { "type": "integer", "minimum": 0 },
+        "offset": { "$ref": "#/$defs/offset" },
+        "produces": { "type": "array", "items": { "$ref": "#/$defs/produce" } },
+        "over": { "$ref": "#/$defs/over" },
+        "onError": { "enum": ["", "fail", "keep"] },
+        "when": { "$ref": "#/$defs/condition" }
+      },
+      "unevaluatedProperties": false
+    },
+    "offset": {
+      "type": "object",
+      "properties": {
+        "encode": { "type": "integer", "minimum": 0 },
+        "decode": { "type": "integer", "minimum": 0 }
+      },
+      "unevaluatedProperties": false
+    },
+    "produce": {
+      "type": "object",
+      "required": ["name", "algo", "region"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "algo": { "type": "string", "minLength": 1 },
+        "region": { "enum": ["ciphered", "bodyPlain", "bodyFinal", "header", "frame"] }
+      },
+      "unevaluatedProperties": false
+    },
+    "over": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["bodyPlain", "bodyFinal", "header", "frame", "range"] },
+        "rangeStart": { "type": "integer", "minimum": 0 },
+        "rangeEnd": { "type": "integer", "minimum": 0 }
+      },
+      "unevaluatedProperties": false
+    },
+    "condition": {
+      "type": "object",
+      "properties": {
+        "minBodyLen": { "type": "integer", "minimum": 0 },
+        "onlySmaller": { "type": "boolean" },
+        "requireKey": { "type": "boolean" },
+        "appliesWith": { "type": "string" },
+        "guards": { "type": "array", "items": { "$ref": "#/$defs/guard" } }
+      },
+      "unevaluatedProperties": false
+    },
+    "guard": {
+      "type": "object",
+      "required": ["field", "op", "value"],
+      "properties": {
+        "field": { "type": "string", "minLength": 1 },
+        "op": { "enum": ["eq", "neq", "gt", "gte", "lt", "lte"] },
+        "value": { "type": "integer" }
+      },
+      "unevaluatedProperties": false
+    },
+    "heartbeat": {
+      "type": "object",
+      "required": ["intervalMs"],
+      "properties": {
+        "intervalMs": { "type": "integer", "minimum": 1 },
+        "route": {},
+        "c2sProto": { "type": "string" },
+        "bindings": { "type": "array", "items": { "$ref": "https://stressbot.local/schemas/flow.schema.json#/$defs/binding" } },
+        "heartbeatFields": { "type": "array", "items": { "$ref": "#/$defs/heartbeatField" } },
+        "skipWhenMissing": { "type": "boolean" },
+        "requireSecretKey": { "type": "boolean" }
+      },
+      "unevaluatedProperties": false
+    },
+    "heartbeatField": {
+      "type": "object",
+      "required": ["type", "source"],
+      "properties": {
+        "type": { "enum": ["u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64", "f32", "f64"] },
+        "source": { "enum": ["fixed", "state", "counter", "stateCounter", "timestamp", "randomInt"] },
+        "value": { "type": "integer" },
+        "floatValue": { "type": "number" },
+        "key": { "type": "string" },
+        "min": { "type": "integer" },
+        "max": { "type": "integer" },
+        "start": { "type": "integer" },
+        "step": { "type": "integer" },
+        "unit": { "enum": ["", "s", "ms"] }
+      },
+      "unevaluatedProperties": false
+    }
+  }
+}

@@ -18,6 +18,7 @@ import (
 	"stressbot/errcode"
 	"stressbot/logview"
 	"stressbot/monitor"
+	configschema "stressbot/schema"
 	"stressbot/utils"
 	json "stressbot/utils/jsonx"
 	stresslog "stressbot/utils/log"
@@ -129,7 +130,7 @@ func (s *AdminServer) registerManagementRoutes() http.Handler {
 	fs := http.FileServer(http.Dir(s.cfg.StaticDir))
 	mux.Handle("/", fs)
 
-	return recoverMiddleware(mux)
+	return recoverMiddleware(managementOpenAPIValidator(mux))
 }
 
 // recoverMiddleware 捕获 handler panic 并写入应用日志，返回标准 500 JSON。
@@ -518,6 +519,10 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, ErrInvalidArgument.WithMessage("failed to read flow.json"))
 		return
 	}
+	if err := configschema.ValidateFlow(flowData); err != nil {
+		writeError(w, ErrInvalidArgument.WithMessage(err.Error()))
+		return
+	}
 	cfg.FlowJSON = json.RawMessage(flowData)
 
 	// proto 文件
@@ -604,6 +609,10 @@ func (s *AdminServer) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 				stresslog.Warn("[ADMIN] adapter 目录下非 *_codec.json/errors.json 文件已忽略",
 					zap.String("name", name))
 				continue
+			}
+			if err := configschema.ValidateCodec(data); err != nil {
+				writeError(w, ErrInvalidArgument.WithMessage(fmt.Sprintf("%s: %v", name, err)))
+				return
 			}
 			cfg.Codecs[name] = data
 		}

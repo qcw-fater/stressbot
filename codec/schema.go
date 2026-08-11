@@ -16,6 +16,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	configschema "stressbot/schema"
 )
 
 // CodecSchema 是 codec.json 的根类型。
@@ -246,6 +248,9 @@ func LoadSchema(path string) (*CodecSchema, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("读取 codec schema 文件失败 %q: %w", path, err)
+	}
+	if err := configschema.ValidateCodec(raw); err != nil {
+		return nil, fmt.Errorf("codec schema 结构校验失败 %q: %w", path, err)
 	}
 	var s CodecSchema
 	if err := json.Unmarshal(raw, &s); err != nil {

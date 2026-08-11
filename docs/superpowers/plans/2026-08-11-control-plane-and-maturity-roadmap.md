@@ -718,15 +718,15 @@ M3 出口：标准 RC4 向量通过；所有重试可取消且有 jitter；撤�
 - Modify: `agent/http_server.go`
 - Modify: `agent/http_client.go`
 
-- [ ] **Step 1: 枚举并冻结 16 个内部端点**
+- [x] **Step 1: 枚举并冻结 16 个内部端点**
 
 Spec 必须包含 Admin 的 7 个 Agent 上行端点：register、heartbeat、deregister、stress、system、task done、pending task；以及 Agent 的 task、stop、shutdown、version、status、logs、log files、healthz。每个 operation 有唯一 `operationId`、明确 2xx/4xx/5xx 响应、`ApiError`、security scheme `mutualTLS`。
 
-- [ ] **Step 2: 使用 OpenAPI 3.0.3 写首个契约测试**
+- [x] **Step 2: 使用 OpenAPI 3.0.3 写首个契约测试**
 
-对当前 handler 发送合法/缺字段/错误 method 请求，用嵌入的 spec request validator 验证请求；再验证响应状态、Content-Type 和 body 能被 spec schema 解码。先让缺字段用例暴露现有宽松行为。
+对当前 handler 发送合法/缺字段/错误 method 请求，用嵌入的 spec request validator 验证请求；再验证响应状态、Content-Type 和 body 能被 spec schema 解码。先让缺字段用例暴露现有宽松行为。OpenAPI 3.0.3 尚无 `type: mutualTLS`，而固定的 oapi-codegen v2.7.0 又未完整支持 3.1；因此安全方案仍命名 `mutualTLS`，用带 `x-mutual-tls: true` 的 `apiKey` 占位并明确该 header 不应发送，实际证书认证由 TLS listener 强制。
 
-- [ ] **Step 3: 固定生成配置和版本**
+- [x] **Step 3: 固定生成配置和版本**
 
 ```powershell
 go get -tool github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.7.0
@@ -744,15 +744,15 @@ output: controlplane.gen.go
 
 `go generate` 使用固定 module version，不使用 `@latest`；生成文件提交仓库。生成器配置 schema 也固定到同一 tag。
 
-- [ ] **Step 4: 用 strict adapter 包住现有业务方法**
+- [x] **Step 4: 用 strict adapter 包住现有业务方法**
 
 生成层只负责解析/序列化和状态码；`admin/control_plane_api.go`、`agent/control_plane_api.go` 把生成 DTO 映射到现有 `TaskAssignment`、metrics 和 registry 类型。第一轮不把业务结构体整体替换成生成类型，避免一次 PR 穿透 admin/agent/monitor。
 
-- [ ] **Step 5: 加入 request validation 与认证顺序测试**
+- [x] **Step 5: 加入 request validation 与认证顺序测试**
 
 中间件顺序固定为：recover → request ID/log context → mTLS 已由 listener 完成 → OpenAPI request validation → strict handler。注意 `oapi-codegen` strict server 本身不完成全部入站校验，必须显式接 net/http validation middleware。
 
-- [ ] **Step 6: 验证生成物与契约**
+- [x] **Step 6: 验证生成物与契约**
 
 ```powershell
 go generate ./api/openapi
@@ -763,7 +763,7 @@ go build ./...
 
 Expected: 重新生成无 diff，控制面契约测试全部 PASS。
 
-- [ ] **Step 7: 提交控制面契约**
+- [x] **Step 7: 提交控制面契约**
 
 ```powershell
 git add api/openapi admin/api admin/control_plane_api.go agent/control_plane_api.go admin agent go.mod go.sum
@@ -786,15 +786,15 @@ git commit -m "feat: define generated control plane contract"
 - Modify: `cmd/web/src/services/api.ts`
 - Modify: `admin/handlers.go`
 
-- [ ] **Step 1: 按风险从低到高迁移 endpoint group**
+- [x] **Step 1: 按风险从低到高迁移 endpoint group**
 
 固定顺序：`capabilities/error-codes/codec metadata` → `agents/tasks` → `metrics/system` → `history` → `flows/action-templates/listen-templates` → `logs/baseline resources`。每组独立 PR；一组完成后其 Go/TS 手写 DTO 必须删除或明确保留为领域模型，禁止两个 API DTO 来源长期并存。
 
-- [ ] **Step 2: 给每组写黑盒契约测试**
+- [x] **Step 2: 给每组写黑盒契约测试**
 
 每个 endpoint 至少覆盖一个成功响应、一个业务错误响应、一个非法请求。metrics 必须覆盖 `null` 分位数、`uint64` JSON 边界、完整 `window`；列表接口统一在 spec 中选择当前实际裸数组或 `{items,total}`，迁移时不靠 `adaptList` 猜两种格式。
 
-- [ ] **Step 3: 生成 Go 模型与 TypeScript path 类型**
+- [x] **Step 3: 生成 Go 模型与 TypeScript path 类型**
 
 Go 继续用 `oapi-codegen`；前端使用固定版本 `openapi-typescript` 生成 `admin-api.ts`，`openapi-fetch` 创建 typed client。现有 `ApiError` 继续作为统一异常，生成 client 的非 2xx 响应在 `generatedClient.ts` 映射成它。
 
@@ -810,7 +810,7 @@ npm install --save-dev --save-exact openapi-typescript
 "generate:api": "openapi-typescript ../../api/openapi/admin.yaml -o src/generated/admin-api.ts"
 ```
 
-- [ ] **Step 4: 迁移 services，不让组件直接使用 generated client**
+- [x] **Step 4: 迁移 services，不让组件直接使用 generated client**
 
 组件仍只 import `services/*.ts`。每个 service 的函数签名从 generated paths 推导，保留中文领域错误和 `AbortSignal` 参数：
 
@@ -820,11 +820,11 @@ export function listAgents(signal?: AbortSignal): Promise<AgentListResponse> {
 }
 ```
 
-- [ ] **Step 5: 删除不再需要的运行时手写 shape parser**
+- [x] **Step 5: 删除不再需要的运行时手写 shape parser**
 
 只有当契约测试和 server 输出都由 spec 约束后，删除 `metricsApi.ts` 中重复的 `requireCount/requireRatio`；外部不可信数据或需要额外数值不变量的地方保留领域校验。不要因为 TypeScript 生成了类型就假设运行时 JSON 自动可信。
 
-- [ ] **Step 6: 每组运行生成、后端、前端验证**
+- [x] **Step 6: 每组运行生成、后端、前端验证**
 
 ```powershell
 go generate ./api/openapi
@@ -836,7 +836,7 @@ npx tsc -b
 npm run test
 ```
 
-- [ ] **Step 7: 每组单独提交**
+- [x] **Step 7: 每组单独提交**
 
 提交信息使用 `refactor(api): generate <group> contracts`，不把多个 endpoint group 合并成一次大爆炸切换。
 
@@ -859,11 +859,11 @@ npm run test
 - Modify: `cmd/web/src/services/resourcesStore.ts:342-510`
 - Modify: `cmd/web/src/components/FlowEditor/validation/refsCheck.ts`
 
-- [ ] **Step 1: 先写共享 corpus**
+- [x] **Step 1: 先写共享 corpus**
 
 有效样本覆盖 9 种 node、14 种 action、17 种 binding、onError、listenRefs、heartbeat、codec pipeline。无效样本逐个只破坏一个结构约束：未知 enum、缺 required、错误类型、非法范围、额外字段。Go 与 Ajv 对每个样本必须给出相同 pass/fail。
 
-- [ ] **Step 2: 写 Schema 元数据和闭合对象策略**
+- [x] **Step 2: 写 Schema 元数据和闭合对象策略**
 
 两个文件都声明：
 
@@ -876,11 +876,11 @@ npm run test
 
 对稳定配置对象使用 `unevaluatedProperties: false`；对明确允许任意业务字段的 map 不关闭。数字范围与 Go 当前校验一致，不把尚未支持的 enum 提前写进 Schema。
 
-- [ ] **Step 3: 后端使用嵌入式 jsonschema/v6**
+- [x] **Step 3: 后端使用嵌入式 jsonschema/v6**
 
 `schema/validator.go` 用 `embed.FS` 编译一次并缓存两个 `*jsonschema.Schema`，显式 `DefaultDraft(jsonschema.Draft2020)`。Admin 保存/下发、Agent 加载和 standalone 加载在领域校验前先做结构校验。
 
-- [ ] **Step 4: 前端使用 Ajv 2020 strict 模式**
+- [x] **Step 4: 前端使用 Ajv 2020 strict 模式**
 
 ```ts
 const ajv = new Ajv2020({ allErrors: true, strict: true });
@@ -890,11 +890,11 @@ const validateCodecStructure = ajv.compile(codecSchema);
 
 错误统一映射成中文路径消息；不要把完整配置内容写入日志。
 
-- [ ] **Step 5: 保留并缩小语义校验**
+- [x] **Step 5: 保留并缩小语义校验**
 
 `refsCheck.ts` 继续负责图引用、action/listen 关联、onError handler、proto 路径、业务不变量；`resourcesStore.ts` 保留 codec flag/step/checksumOut 交叉引用和服务端算法清单校验。删除的只是不再需要的类型、required、enum、范围手写分支。
 
-- [ ] **Step 6: 差分验证与生成检查**
+- [x] **Step 6: 差分验证与生成检查**
 
 ```powershell
 go test ./schema ./engine ./codec -run 'Schema|Validate' -v
@@ -905,7 +905,7 @@ npx tsc -b
 
 Expected: Go/Ajv corpus 结果逐文件一致；现有 flow/codec 全部通过；非法样本至少产生一个带 JSON pointer 的错误。
 
-- [ ] **Step 7: 提交结构契约**
+- [x] **Step 7: 提交结构契约**
 
 ```powershell
 git add schemas schema engine codec admin agent cmd/web go.mod go.sum

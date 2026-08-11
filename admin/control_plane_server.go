@@ -4,19 +4,17 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
+
+	"stressbot/controlplane"
 )
 
 // registerControlPlaneRoutes 只暴露 Agent 上行端点。
 func (s *AdminServer) registerControlPlaneRoutes() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /sbot/agent/register", s.handleAgentRegister)
-	mux.HandleFunc("POST /sbot/agent/{id}/heartbeat", s.handleAgentHeartbeat)
-	mux.HandleFunc("POST /sbot/agent/{id}/deregister", s.handleAgentDeregister)
-	mux.HandleFunc("POST /sbot/agent/stress", s.handleAgentStressReport)
-	mux.HandleFunc("POST /sbot/agent/system", s.handleAgentSystemReport)
-	mux.HandleFunc("POST /sbot/agent/{id}/task/{tid}/done", s.handleAgentTaskDone)
-	mux.HandleFunc("GET /sbot/agent/{id}/pending-task", s.handleAgentPendingTask)
-	return recoverMiddleware(mux)
+	handler := controlplane.NewOpenAPIHandler(&adminControlPlaneAPI{server: s}, func(r *http.Request) bool {
+		return strings.HasPrefix(r.URL.Path, "/sbot/agent/")
+	})
+	return recoverMiddleware(handler)
 }
 
 func (s *AdminServer) newControlPlaneServer() *http.Server {

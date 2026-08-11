@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	adminapi "stressbot/admin/api"
 	"stressbot/utils"
 	json "stressbot/utils/jsonx"
 	"time"
@@ -30,6 +31,8 @@ type AdminClient struct {
 	base       string // "http://admin:7718"
 	agentID    string
 	client     *http.Client
+	control    *adminapi.ClientWithResponses
+	controlErr error
 	hbReqLimit time.Duration // 心跳单次请求超时上限（取 min(HeartbeatTimeout, Timeout)）
 }
 
@@ -54,10 +57,14 @@ func NewAdminClientWithTLS(baseURL, agentID string, timeout, hbReqTimeout time.D
 	if hbReqTimeout <= 0 || hbReqTimeout > timeout {
 		hbReqTimeout = timeout
 	}
+	httpClient := &http.Client{Timeout: timeout, Transport: newAdminTransport(tlsConfig)}
+	control, controlErr := adminapi.NewClientWithResponses(baseURL, adminapi.WithHTTPClient(httpClient))
 	return &AdminClient{
 		base:       baseURL,
 		agentID:    agentID,
-		client:     &http.Client{Timeout: timeout, Transport: newAdminTransport(tlsConfig)},
+		client:     httpClient,
+		control:    control,
+		controlErr: controlErr,
 		hbReqLimit: hbReqTimeout,
 	}
 }
@@ -95,25 +102,24 @@ func (c *AdminClient) AgentID() string {
 
 // Register 向 Admin 注册。
 func (c *AdminClient) Register(ctx context.Context, req RegisterRequest) (*RegisterResponse, error) {
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("marshal register request: %w", err)
-	}
-
-	resp, err := c.doPost(ctx, "/sbot/agent/register", body)
+	client, err := c.controlClient()
 	if err != nil {
 		return nil, err
 	}
-	defer drainAndClose(resp)
-
-	if resp.StatusCode != 200 {
-		respBody, _ := io.ReadAll(resp.Body) // HTTP 错误响应体，ReadAll 失败不影响错误返回
-		return nil, fmt.Errorf("register failed: status=%d body=%s", resp.StatusCode, string(respBody))
+	dto, err := controlDTO[adminapi.RegisterRequest](req)
+	if err != nil {
+		return nil, fmt.Errorf("映射注册请求: %w", err)
 	}
-
-	var result RegisterResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode register response: %w", err)
+	resp, err := client.RegisterAgentWithResponse(ctx, dto)
+	if err != nil {
+		return nil, err
+	}
+	if resp.JSON200 == nil {
+		return nil, controlResponseError("register", resp.StatusCode(), resp.Body)
+	}
+	result, err := controlDTO[RegisterResponse](*resp.JSON200)
+	if err != nil {
+		return nil, fmt.Errorf("映射注册响应: %w", err)
 	}
 	return &result, nil
 }
@@ -126,26 +132,27 @@ func (c *AdminClient) Register(ctx context.Context, req RegisterRequest) (*Regis
 //
 // 仍共用同一个 http.Client / Transport，避免多一个 keep-alive 池占额外 FD。
 func (c *AdminClient) Heartbeat(ctx context.Context, req HeartbeatRequest) error {
-	body, err := json.Marshal(req)
+	client, err := c.controlClient()
 	if err != nil {
-		return fmt.Errorf("marshal heartbeat: %w", err)
+		return err
+	}
+	dto, err := controlDTO[adminapi.HeartbeatRequest](req)
+	if err != nil {
+		return fmt.Errorf("映射心跳请求: %w", err)
 	}
 
 	hbCtx, cancel := context.WithTimeout(ctx, c.hbReqLimit)
 	defer cancel()
 
-	resp, err := c.doPost(hbCtx, "/sbot/agent/"+c.agentID+"/heartbeat", body)
+	resp, err := client.HeartbeatAgentWithResponse(hbCtx, c.agentID, dto)
 	if err != nil {
 		return err
 	}
-	defer drainAndClose(resp)
-
-	if resp.StatusCode != 200 {
-		respBody, _ := io.ReadAll(resp.Body) // HTTP 错误响应体，ReadAll 失败不影响错误返回
-		if resp.StatusCode == http.StatusNotFound {
+	if resp.StatusCode() != http.StatusOK {
+		if resp.StatusCode() == http.StatusNotFound {
 			return errNotRegistered
 		}
-		return fmt.Errorf("heartbeat failed: status=%d body=%s", resp.StatusCode, string(respBody))
+		return controlResponseError("heartbeat", resp.StatusCode(), resp.Body)
 	}
 	return nil
 }
@@ -157,15 +164,16 @@ func (c *AdminClient) PostStress(ctx context.Context, report StressReport) error
 		return fmt.Errorf("marshal stress report: %w", err)
 	}
 
-	resp, err := c.doPost(ctx, "/sbot/agent/stress", body)
+	client, err := c.controlClient()
 	if err != nil {
 		return err
 	}
-	defer drainAndClose(resp)
-
-	if resp.StatusCode != 200 && resp.StatusCode != 202 {
-		respBody, _ := io.ReadAll(resp.Body) // HTTP 错误响应体，ReadAll 失败不影响错误返回
-		return fmt.Errorf("post stress failed: status=%d body=%s", resp.StatusCode, string(respBody))
+	resp, err := client.ReportAgentStressWithBodyWithResponse(ctx, "application/json", bytesReader(body))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode() != http.StatusOK && resp.StatusCode() != http.StatusAccepted {
+		return controlResponseError("post stress", resp.StatusCode(), resp.Body)
 	}
 	return nil
 }
@@ -177,45 +185,39 @@ func (c *AdminClient) PostSystem(ctx context.Context, report SystemReport) error
 		return fmt.Errorf("marshal system report: %w", err)
 	}
 
-	resp, err := c.doPost(ctx, "/sbot/agent/system", body)
+	client, err := c.controlClient()
 	if err != nil {
 		return err
 	}
-	defer drainAndClose(resp)
-
-	if resp.StatusCode != 200 && resp.StatusCode != 202 {
-		respBody, _ := io.ReadAll(resp.Body) // HTTP 错误响应体，ReadAll 失败不影响错误返回
-		return fmt.Errorf("post system failed: status=%d body=%s", resp.StatusCode, string(respBody))
+	resp, err := client.ReportAgentSystemWithBodyWithResponse(ctx, "application/json", bytesReader(body))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode() != http.StatusOK && resp.StatusCode() != http.StatusAccepted {
+		return controlResponseError("post system", resp.StatusCode(), resp.Body)
 	}
 	return nil
 }
 
 // FetchPendingTask 拉取待执行任务（回退通道）。
 func (c *AdminClient) FetchPendingTask(ctx context.Context) (*TaskAssignment, error) {
-	url := c.base + "/sbot/agent/" + c.agentID + "/pending-task"
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	client, err := c.controlClient()
 	if err != nil {
 		return nil, err
 	}
-
-	resp, err := c.client.Do(req)
+	resp, err := client.GetPendingAgentTaskWithResponse(ctx, c.agentID)
 	if err != nil {
 		return nil, err
 	}
-	defer drainAndClose(resp)
-
-	if resp.StatusCode == 204 {
+	if resp.StatusCode() == http.StatusNoContent {
 		return nil, nil // 无任务
 	}
-	if resp.StatusCode != 200 {
-		respBody, _ := io.ReadAll(resp.Body) // HTTP 错误响应体，ReadAll 失败不影响错误返回
-		return nil, fmt.Errorf("fetch pending task failed: status=%d body=%s", resp.StatusCode, string(respBody))
+	if resp.JSON200 == nil {
+		return nil, controlResponseError("fetch pending task", resp.StatusCode(), resp.Body)
 	}
-
-	var task TaskAssignment
-	if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
-		return nil, fmt.Errorf("decode pending task: %w", err)
+	task, err := controlDTO[TaskAssignment](*resp.JSON200)
+	if err != nil {
+		return nil, fmt.Errorf("映射待执行任务: %w", err)
 	}
 	if err := task.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid pending task: %w", err)
@@ -230,30 +232,33 @@ func (c *AdminClient) ReportTaskDone(ctx context.Context, report TaskCompletionR
 		return fmt.Errorf("marshal task done: %w", err)
 	}
 
-	url := fmt.Sprintf("/sbot/agent/%s/task/%s/done", c.agentID, report.TaskID)
-	resp, err := c.doPost(ctx, url, body)
+	client, err := c.controlClient()
 	if err != nil {
 		return err
 	}
-	defer drainAndClose(resp)
-
-	if resp.StatusCode != 200 && resp.StatusCode != 202 {
-		respBody, _ := io.ReadAll(resp.Body) // HTTP 错误响应体，ReadAll 失败不影响错误返回
-		return fmt.Errorf("report task done failed: status=%d body=%s", resp.StatusCode, string(respBody))
+	resp, err := client.CompleteAgentTaskWithBodyWithResponse(ctx, c.agentID, report.TaskID, "application/json", bytesReader(body))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode() != http.StatusOK && resp.StatusCode() != http.StatusAccepted {
+		return controlResponseError("report task done", resp.StatusCode(), resp.Body)
 	}
 	return nil
 }
 
 // Deregister 注销（best-effort，不重试）。
 func (c *AdminClient) Deregister(ctx context.Context) error {
-	body, _ := json.Marshal(DeregisterRequest{AgentID: c.agentID}) // 简单 struct 序列化不会失败
-	url := "/sbot/agent/" + c.agentID + "/deregister"
-
-	resp, err := c.doPost(ctx, url, body)
+	client, err := c.controlClient()
 	if err != nil {
-		return err // 不重试
+		return err
 	}
-	drainAndClose(resp)
+	resp, err := client.DeregisterAgentWithResponse(ctx, c.agentID)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode() != http.StatusOK {
+		return controlResponseError("deregister", resp.StatusCode(), resp.Body)
+	}
 	return nil
 }
 
@@ -290,14 +295,34 @@ func drainAndClose(resp *http.Response) {
 	_ = resp.Body.Close()
 }
 
-func (c *AdminClient) doPost(ctx context.Context, path string, body []byte) (*http.Response, error) {
-	url := c.base + path
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
+func (c *AdminClient) controlClient() (*adminapi.ClientWithResponses, error) {
+	if c.controlErr != nil {
+		return nil, fmt.Errorf("初始化控制面客户端: %w", c.controlErr)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	return c.client.Do(req)
+	if c.control == nil {
+		return nil, errors.New("控制面客户端未初始化")
+	}
+	return c.control, nil
+}
+
+func controlDTO[T any](value any) (T, error) {
+	var target T
+	data, err := json.Marshal(value)
+	if err != nil {
+		return target, err
+	}
+	if err := json.Unmarshal(data, &target); err != nil {
+		return target, err
+	}
+	return target, nil
+}
+
+func controlResponseError(operation string, status int, body []byte) error {
+	return fmt.Errorf("%s failed: status=%d body=%s", operation, status, string(body))
+}
+
+func bytesReader(data []byte) io.Reader {
+	return bytes.NewReader(data)
 }
 
 // RetryWithRetriesAndBackoff 用 cenkalti/backoff 做带 jitter 的指数退避重试。

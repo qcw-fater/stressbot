@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stressbot.local/schemas/flow.schema.json",
+  "title": "stressbot flow",
+  "type": "object",
+  "required": ["nodes", "actions"],
+  "properties": {
+    "defaultDelayMs": { "type": "integer" },
+    "nodes": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/node" }
+    },
+    "actions": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/action" }
+    },
+    "listens": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/listen" }
+    }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "stringArray": { "type": "array", "items": { "type": "string" } },
+    "node": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["sequence", "action", "loop", "boolean", "switch", "weighted", "wait", "break", "continue"] },
+        "description": { "type": "string" },
+        "next": { "$ref": "#/$defs/stringArray" },
+        "body": { "type": "string" },
+        "loopCount": { "type": "integer" },
+        "condition": { "type": "string" },
+        "breakCondition": { "type": "string" },
+        "trueNext": { "type": "string" },
+        "falseNext": { "type": "string" },
+        "cases": { "type": "array", "items": { "$ref": "#/$defs/switchCase" } },
+        "defaultNext": { "type": "string" },
+        "action": { "type": "string" },
+        "onError": { "$ref": "#/$defs/onError" },
+        "listenRefs": { "type": "array", "items": { "$ref": "#/$defs/listenRef" } },
+        "options": { "type": "array", "items": { "$ref": "#/$defs/weightedOption" } },
+        "waitMs": { "type": "integer" },
+        "waitMin": { "type": "integer" },
+        "waitMax": { "type": "integer" },
+        "then": { "type": "string" },
+        "delayMs": { "type": "integer" }
+      },
+      "unevaluatedProperties": false
+    },
+    "switchCase": {
+      "type": "object",
+      "required": ["condition", "next"],
+      "properties": { "condition": { "type": "string" }, "next": { "type": "string" } },
+      "unevaluatedProperties": false
+    },
+    "weightedOption": {
+      "type": "object",
+      "required": ["node", "weight"],
+      "properties": { "node": { "type": "string" }, "weight": { "type": "integer", "minimum": 0 } },
+      "unevaluatedProperties": false
+    },
+    "retry": {
+      "type": "object",
+      "properties": {
+        "maxRetries": { "type": "integer", "minimum": 0 },
+        "retryDelayMs": { "type": "integer", "minimum": 0 }
+      },
+      "unevaluatedProperties": false
+    },
+    "onError": {
+      "type": "object",
+      "properties": {
+        "ignoreCodes": { "type": "array", "items": { "type": "integer", "minimum": 1 } },
+        "handler": { "type": "string" },
+        "retry": { "$ref": "#/$defs/retry" },
+        "strategy": { "enum": ["", "resume", "skip", "abort"] }
+      },
+      "unevaluatedProperties": false
+    },
+    "listenRef": {
+      "type": "object",
+      "required": ["route", "server"],
+      "properties": {
+        "route": {},
+        "server": { "type": "string", "minLength": 1 },
+        "listen": { "type": "string" },
+        "queueSize": { "type": "integer", "minimum": 1 }
+      },
+      "unevaluatedProperties": false
+    },
+    "action": {
+      "type": "object",
+      "required": ["pattern"],
+      "properties": {
+        "pattern": { "enum": ["tcpRequest", "udpRequest", "tcpListen", "udpListen", "tcpConnect", "udpConnect", "tcpClose", "udpClose", "tcpSend", "udpSend", "httpRequest", "setState", "clearState", "lua"] },
+        "service": { "type": "string" },
+        "route": {},
+        "script": { "type": "string" },
+        "address": { "type": "string" },
+        "c2sProto": { "type": "string" },
+        "s2cProto": { "type": "string" },
+        "bindings": { "type": "array", "items": { "$ref": "#/$defs/binding" } },
+        "store": { "type": "array", "items": { "$ref": "#/$defs/store" } },
+        "timeout": { "type": "integer", "minimum": 0 },
+        "pollMs": { "type": "integer", "minimum": 0 },
+        "keys": { "$ref": "#/$defs/stringArray" },
+        "url": { "type": "string" },
+        "method": { "enum": ["", "GET", "POST"] },
+        "contentType": { "enum": ["", "json", "form"] }
+      },
+      "unevaluatedProperties": false
+    },
+    "binding": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "field": { "type": "string" },
+        "type": { "enum": ["fixed", "state", "stateFirst", "stateRandom", "stateRandomN", "stateMapKey", "stateMapValue", "randomPick", "randomPickN", "randomPickMap", "randomExclude", "randomInt", "randomFloat", "randomBool", "randomString", "listSize", "map"] },
+        "value": {},
+        "source": { "type": "string" },
+        "path": { "type": "string" },
+        "values": { "type": "array" },
+        "entries": { "type": "array", "items": { "$ref": "#/$defs/mapEntry" } },
+        "required": { "type": "boolean" },
+        "filters": { "type": "array", "items": { "$ref": "#/$defs/filter" } },
+        "min": { "type": "integer" },
+        "max": { "type": "integer" },
+        "precision": { "type": "integer", "minimum": 0 },
+        "length": { "type": "integer", "minimum": 0 },
+        "count": { "type": "integer", "minimum": 0 },
+        "charset": { "type": "string" },
+        "excludeSource": { "type": "string" },
+        "optional": { "type": "boolean" },
+        "wrap": { "type": "boolean" },
+        "storeAs": { "type": "string" },
+        "keySource": { "type": "string" },
+        "condition": { "type": "string" }
+      },
+      "unevaluatedProperties": false
+    },
+    "mapEntry": {
+      "type": "object",
+      "required": ["key", "value"],
+      "properties": { "key": {}, "value": { "$ref": "#/$defs/binding" } },
+      "unevaluatedProperties": false
+    },
+    "filter": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "op": { "enum": ["", "eq", "neq", "gt", "gte", "lt", "lte", "contains", "notContains", "in", "notIn", "notNil", "isNil", "==", "!=", ">", ">=", "<", "<="] },
+        "value": {},
+        "source": { "type": "string" },
+        "mode": { "enum": ["", "any", "all", "none"] }
+      },
+      "unevaluatedProperties": false
+    },
+    "store": {
+      "type": "object",
+      "required": ["setter"],
+      "properties": { "field": { "type": "string" }, "setter": { "type": "string", "minLength": 1 } },
+      "unevaluatedProperties": false
+    },
+    "listen": {
+      "type": "object",
+      "properties": {
+        "s2cProto": { "type": "string" },
+        "store": { "type": "array", "items": { "$ref": "#/$defs/store" } },
+        "script": { "type": "string" }
+      },
+      "unevaluatedProperties": false
+    }
+  }
+}

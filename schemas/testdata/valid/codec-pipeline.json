@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "endianDefault": "le",
+  "frame": { "headerSize": 12, "trailerSize": 0, "lengthIncludesHeader": false, "lengthIncludesTrailer": false },
+  "header": [
+    { "name": "bodyLen", "type": "u32", "endian": "le", "offset": 0, "size": 4, "role": "length" },
+    { "name": "cmd", "type": "u8", "offset": 4, "size": 1, "role": "route" },
+    { "name": "flags", "type": "u8", "offset": 5, "size": 1, "role": "flags", "bits": [{ "name": "compressed", "bit": 0 }, { "name": "encrypted", "bit": 1 }] },
+    { "name": "seq", "type": "u16", "offset": 6, "size": 2, "role": "value", "source": { "kind": "const", "value": 0 } },
+    { "name": "checksum", "type": "u8", "offset": 8, "size": 1, "role": "checksumOut", "from": "enc.bcc" },
+    { "name": "reserved", "type": "bytes", "offset": 9, "size": 3, "role": "reserved", "repr": "hex" }
+  ],
+  "routeKeyTemplate": "{cmd}",
+  "pipeline": [
+    { "op": "compress", "name": "zip", "algo": "gzip", "flag": "compressed", "when": { "minBodyLen": 64, "onlySmaller": true }, "onError": "fail" },
+    { "op": "encrypt", "name": "enc", "algo": "xor_carry_rol", "flag": "encrypted", "params": { "rol": 3 }, "keyLen": 32, "offset": { "encode": 0, "decode": 0 }, "produces": [{ "name": "bcc", "algo": "xor8", "region": "ciphered" }], "when": { "requireKey": true, "guards": [{ "field": "cmd", "op": "neq", "value": 0 }] } },
+    { "op": "checksum", "name": "sum", "algo": "xor8", "over": { "kind": "range", "rangeStart": 0, "rangeEnd": 8 }, "onError": "keep" },
+    { "op": "hash", "name": "digest", "algo": "md5", "over": { "kind": "bodyFinal" } }
+  ],
+  "heartbeat": {
+    "intervalMs": 5000,
+    "route": { "cmd": 2 },
+    "heartbeatFields": [
+      { "type": "u32", "source": "counter", "start": 1, "step": 1 },
+      { "type": "i64", "source": "timestamp", "unit": "ms" },
+      { "type": "u16", "source": "randomInt", "min": 1, "max": 10 }
+    ],
+    "skipWhenMissing": true,
+    "requireSecretKey": true
+  }
+}

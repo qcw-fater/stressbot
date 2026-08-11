@@ -13,6 +13,7 @@ import { buildRefsGraph } from '../listens/refsGraph';
 import { resolveRouteKeyForServer } from '../listens/routeKeyResolver';
 import { resolveRandomStringCharset } from '../editors/ActionEditor/randomStringCharset';
 import { isBuiltinStateKey, type StateKeyInfo } from '../editors/ActionEditor/stateRegistry';
+import { validateFlowStructure } from '@/services/schemaValidator';
 
 export type Severity = 'error' | 'warning' | 'info';
 
@@ -68,6 +69,14 @@ export interface FlowValidationContext {
 
 export function validateFlow(flow: TaskFlow, context: FlowValidationContext = {}): ValidationReport {
   const issues: ValidationIssue[] = [];
+  const structuralIssues = validateFlowStructure(flow);
+  if (structuralIssues.length > 0) {
+    issues.push(...structuralIssues.map((issue) => ({
+      severity: 'error' as const,
+      code: 'FLOW_SCHEMA_INVALID',
+      message: `${issue.path}：${issue.message}`,
+    })));
+  }
   const nodes = flow.nodes ?? {};
   const actions = flow.actions ?? {};
   const listens = flow.listens ?? {};

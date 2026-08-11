@@ -35,6 +35,13 @@ func TestComputeFlowSnapshotRevisionIsOrderIndependent(t *testing.T) {
 	}
 }
 
+func TestCountFlowNodesActionsRejectsInvalidStructure(t *testing.T) {
+	_, _, err := countFlowNodesActions([]byte(`{"nodes":{"main":{"type":"parallel"}},"actions":{}}`))
+	if err == nil || !strings.Contains(err.Error(), "flow 配置结构校验失败") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestValidateFlowSnapshotItemsRejectsDuplicateID(t *testing.T) {
 	now := time.Date(2026, 7, 23, 10, 0, 0, 0, time.UTC)
 	items := []FlowTemplateDetail{

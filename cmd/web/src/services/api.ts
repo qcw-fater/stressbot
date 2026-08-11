@@ -32,6 +32,13 @@ export class ApiError extends Error {
   }
 }
 
+/** AbortError 是调用方主动取消，不应伪装成网络故障。 */
+export function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError'
+  );
+}
+
 /** API 前缀；Vite dev server 会代理到后端服务器，生产由服务器同源托管。 */
 
 /** 内部统一入口：所有方法走它。 */
@@ -42,6 +49,7 @@ async function request<T>(method: string, path: string, init?: RequestInit): Pro
   try {
     res = await fetch(url, { method, ...init });
   } catch (e) {
+    if (isAbortError(e)) throw e;
     // 网络断开 / CORS / 浏览器拒绝 → 统一包装为 NETWORK_ERROR，避免上层各自处理 TypeError
     throw new ApiError(
       { code: 'NETWORK_ERROR', message: (e as Error).message ?? 'network error' },
@@ -70,7 +78,10 @@ async function request<T>(method: string, path: string, init?: RequestInit): Pro
 
 /** GET JSON */
 export function getJson<T>(path: string, init?: RequestInit): Promise<T> {
-  return request<T>('GET', path, { ...init, headers: { Accept: 'application/json', ...(init?.headers ?? {}) } });
+  return request<T>('GET', path, {
+    ...init,
+    headers: { Accept: 'application/json', ...(init?.headers ?? {}) },
+  });
 }
 
 /** POST JSON 请求体 */
@@ -125,6 +136,7 @@ export async function getText(path: string, init?: RequestInit): Promise<string>
   try {
     res = await fetch(url, { method: 'GET', ...init });
   } catch (e) {
+    if (isAbortError(e)) throw e;
     throw new ApiError(
       { code: 'NETWORK_ERROR', message: (e as Error).message ?? 'network error' },
       0,

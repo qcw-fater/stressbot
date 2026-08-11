@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"stressbot/controlplane"
 	"stressbot/logview"
 	"stressbot/utils"
 	json "stressbot/utils/jsonx"
@@ -24,22 +25,13 @@ import (
 
 // startHTTPServer 启动 Agent HTTP 服务器，接收 Admin 推送的命令。
 func (a *Agent) startHTTPServer() error {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/agent/v1/task", a.handleTaskAssign)
-	mux.HandleFunc("/agent/v1/stop", a.handleStop)
-	mux.HandleFunc("/agent/v1/shutdown", a.handleShutdown)
-	mux.HandleFunc("/agent/v1/version", a.handleVersion)
-	mux.HandleFunc("/agent/v1/status", a.handleStatus)
-	mux.HandleFunc("/agent/v1/logs", a.handleLogs)
-	mux.HandleFunc("/agent/v1/logs/files", a.handleListLogFiles)
-	mux.HandleFunc("/agent/v1/logs/files/", a.handleDownloadLogFile)
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
+	handler := controlplane.NewOpenAPIHandler(&agentControlPlaneAPI{agent: a}, func(r *http.Request) bool {
+		return r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, "/agent/v1/")
 	})
 
 	a.httpSrv = &http.Server{
 		Addr:              fmt.Sprintf(":%d", a.cfg.Port),
-		Handler:           recoverMiddleware(mux),
+		Handler:           recoverMiddleware(handler),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    1 << 20,
@@ -64,6 +56,10 @@ func (a *Agent) startHTTPServer() error {
 	return nil
 }
 
+func (a *Agent) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusOK)
+}
+
 // recoverMiddleware 捕获 handler panic 并写入应用日志，返回标准 500 JSON。
 // 避免依赖 net/http 默认 per-request recover（仅写 stderr 且会断开连接而非返回 500）。
 func recoverMiddleware(next http.Handler) http.Handler {
@@ -84,17 +80,17 @@ func recoverMiddleware(next http.Handler) http.Handler {
 
 func (a *Agent) handleTaskAssign(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
 	var task TaskAssignment
 	if err := json.NewDecoder(r.Body).Decode(&task); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if err := task.Validate(); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "%s", err.Error())
 		return
 	}
 
@@ -111,17 +107,14 @@ func (a *Agent) handleTaskAssign(w http.ResponseWriter, r *http.Request) {
 		busy, isBusy := errors.AsType[*taskBusyError](err)
 		switch {
 		case isBusy:
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]string{
-				"error":         "task already running",
+			writeJSONErrorWithDetails(w, http.StatusConflict, "task already running", map[string]string{
 				"currentTaskId": busy.currentTaskID,
 			})
 		case errors.Is(err, errAgentShuttingDown):
-			http.Error(w, "agent 正在关闭，拒绝新任务", http.StatusServiceUnavailable)
+			writeJSONError(w, http.StatusServiceUnavailable, "agent 正在关闭，拒绝新任务")
 		default:
 			stresslog.Error("[AGENT] 任务下发失败", zap.String("taskID", task.TaskID), zap.Error(err))
-			http.Error(w, "agent 无法调度任务（协程池不可用）", http.StatusServiceUnavailable)
+			writeJSONError(w, http.StatusServiceUnavailable, "agent 无法调度任务（协程池不可用）")
 		}
 		return
 	}
@@ -135,7 +128,7 @@ func (a *Agent) handleStop(w http.ResponseWriter, r *http.Request) {
 		TaskID string `json:"taskId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.TaskID == "" {
-		http.Error(w, "taskId required", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "taskId required")
 		return
 	}
 
@@ -146,7 +139,7 @@ func (a *Agent) handleStop(w http.ResponseWriter, r *http.Request) {
 				zap.String("requestedTaskID", request.TaskID),
 				zap.String("currentTaskID", currentTaskID))
 		}
-		http.Error(w, "task no longer running", http.StatusConflict)
+		writeJSONError(w, http.StatusConflict, "task no longer running")
 		return
 	}
 
@@ -193,9 +186,7 @@ func (a *Agent) handleStatus(w http.ResponseWriter, _ *http.Request) {
 func (a *Agent) handleLogs(w http.ResponseWriter, r *http.Request) {
 	rb := logview.GetRingBuffer()
 	if rb == nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]string{"error": "log ring buffer not enabled"})
+		writeJSONError(w, http.StatusServiceUnavailable, "log ring buffer not enabled")
 		return
 	}
 
@@ -237,11 +228,20 @@ func (a *Agent) shutdownHTTPServer(ctx context.Context) {
 }
 
 func writeJSONError(w http.ResponseWriter, code int, format string, args ...any) {
+	writeJSONErrorWithDetails(w, code, fmt.Sprintf(format, args...), nil)
+}
+
+func writeJSONErrorWithDetails(w http.ResponseWriter, code int, message string, details any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
+	var raw json.RawMessage
+	if details != nil {
+		raw, _ = json.Marshal(details)
+	}
 	json.NewEncoder(w).Encode(ErrorResponse{
 		Code:    fmt.Sprintf("STATUS_%d", code),
-		Message: fmt.Sprintf(format, args...),
+		Message: message,
+		Details: raw,
 	})
 }
 
@@ -308,14 +308,14 @@ func (a *Agent) handleDownloadLogFile(w http.ResponseWriter, r *http.Request) {
 	path := filepath.Join(filepath.Dir(logPath), name)
 	f, err := os.Open(path)
 	if err != nil {
-		http.Error(w, "log file not found", http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "log file not found")
 		return
 	}
 	defer f.Close()
 
 	stat, err := f.Stat()
 	if err != nil {
-		http.Error(w, "stat failed", http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "stat failed")
 		return
 	}
 

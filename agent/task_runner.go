@@ -15,6 +15,7 @@ import (
 	"stressbot/network"
 	"stressbot/protox"
 	"stressbot/robot"
+	configschema "stressbot/schema"
 	"stressbot/script"
 	"stressbot/sharedstate"
 	"stressbot/utils"
@@ -374,6 +375,9 @@ func loadTaskFlow(path string) (*engine.TaskFlow, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("读取流程配置失败: %w", err)
+	}
+	if err := configschema.ValidateFlow(data); err != nil {
+		return nil, fmt.Errorf("校验流程配置结构失败: %w", err)
 	}
 
 	flow := &engine.TaskFlow{}

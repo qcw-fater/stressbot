@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	configschema "stressbot/schema"
 	json "stressbot/utils/jsonx"
 )
 
@@ -68,6 +69,9 @@ func validateFlowTemplateName(name string) (string, error) {
 // countFlowNodesActions 从 flow_json 统计 node/action 数量。
 // flow 结构：{ nodes: {id:...}, actions: {id:...}, ... }，nodes/actions 为 map。
 func countFlowNodesActions(flowJSON []byte) (nodeCount, actionCount int, err error) {
+	if err := configschema.ValidateFlow(flowJSON); err != nil {
+		return 0, 0, ErrInvalidArgument.WithMessage(err.Error())
+	}
 	var parsed struct {
 		Nodes   map[string]json.RawMessage `json:"nodes"`
 		Actions map[string]json.RawMessage `json:"actions"`

@@ -26,7 +26,7 @@ export default defineConfig({
       },
     },
     fs: {
-      allow: ['..'],
+      allow: ['../..'],
     },
   },
   build: {

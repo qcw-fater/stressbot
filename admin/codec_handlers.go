@@ -18,6 +18,7 @@ import (
 	"net/http"
 
 	"stressbot/codec"
+	configschema "stressbot/schema"
 	json "stressbot/utils/jsonx"
 )
 
@@ -56,6 +57,10 @@ func (s *AdminServer) handleCodecPreview(w http.ResponseWriter, r *http.Request)
 	// schema 为空 → 400（编辑器至少需提供 schema 对象）。
 	if len(req.Schema) == 0 {
 		writeError(w, ErrInvalidArgument.WithMessage("schema required"))
+		return
+	}
+	if err := configschema.ValidateCodec(req.Schema); err != nil {
+		writeError(w, ErrInvalidArgument.WithMessage("invalid schema: "+err.Error()))
 		return
 	}
 

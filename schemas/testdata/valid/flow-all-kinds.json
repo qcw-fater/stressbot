@@ -1,0 +1,68 @@
+{
+  "defaultDelayMs": 1000,
+  "nodes": {
+    "main": { "type": "sequence", "next": ["act", "loop", "branch", "switch", "weighted", "wait", "break", "continue"] },
+    "act": {
+      "type": "action",
+      "action": "tcpRequest",
+      "delayMs": -1,
+      "listenRefs": [{ "route": { "cmd": 1, "act": 2 }, "server": "tcp:logic", "listen": "push", "queueSize": 8 }],
+      "onError": { "ignoreCodes": [12, 100], "handler": "continue", "retry": { "maxRetries": 2, "retryDelayMs": 100 }, "strategy": "resume" }
+    },
+    "loop": { "type": "loop", "body": "act", "loopCount": 2, "condition": "state:enabled eq true", "breakCondition": "state:done eq true" },
+    "branch": { "type": "boolean", "condition": "state:enabled eq true", "trueNext": "act", "falseNext": "wait" },
+    "switch": { "type": "switch", "cases": [{ "condition": "state:mode eq 1", "next": "act" }], "defaultNext": "wait" },
+    "weighted": { "type": "weighted", "options": [{ "node": "act", "weight": 1 }] },
+    "wait": { "type": "wait", "waitMs": 10, "waitMin": 0, "waitMax": 0, "then": "continue" },
+    "break": { "type": "break" },
+    "continue": { "type": "continue" }
+  },
+  "actions": {
+    "tcpRequest": {
+      "pattern": "tcpRequest",
+      "service": "tcp:logic",
+      "route": { "cmd": 1, "act": 2 },
+      "c2sProto": "demo.C2S",
+      "s2cProto": "demo.S2C",
+      "timeout": 3,
+      "pollMs": 100,
+      "bindings": [
+        { "field": "a", "type": "fixed", "value": 1 },
+        { "field": "b", "type": "state", "source": "b" },
+        { "field": "c", "type": "stateFirst", "source": "items" },
+        { "field": "d", "type": "stateRandom", "source": "items", "filters": [{ "path": "id", "op": "gte", "value": 1, "mode": "any" }] },
+        { "field": "e", "type": "stateRandomN", "source": "items", "count": 2 },
+        { "field": "f", "type": "stateMapKey", "source": "items" },
+        { "field": "g", "type": "stateMapValue", "source": "items", "path": "id" },
+        { "field": "h", "type": "randomPick", "values": [1, 2] },
+        { "field": "i", "type": "randomPickN", "values": [1, 2], "count": 1 },
+        { "field": "j", "type": "randomPickMap", "values": [{ "key": "a", "values": [1] }], "keySource": "kind" },
+        { "field": "k", "type": "randomExclude", "values": [1, 2], "excludeSource": "used" },
+        { "field": "l", "type": "randomInt", "min": 1, "max": 9 },
+        { "field": "m", "type": "randomFloat", "min": 1, "max": 9, "precision": 2 },
+        { "field": "n", "type": "randomBool" },
+        { "field": "o", "type": "randomString", "length": 8, "charset": "alphanum" },
+        { "field": "p", "type": "listSize", "source": "items" },
+        { "field": "q", "type": "map", "entries": [{ "key": "one", "value": { "field": "", "type": "fixed", "value": 1 } }], "optional": true, "required": false, "wrap": false, "storeAs": "built", "condition": "state:enabled eq true" }
+      ],
+      "store": [{ "field": "player.id", "setter": "playerId" }]
+    },
+    "udpRequest": { "pattern": "udpRequest" },
+    "tcpListen": { "pattern": "tcpListen" },
+    "udpListen": { "pattern": "udpListen" },
+    "tcpConnect": { "pattern": "tcpConnect", "address": "127.0.0.1:9000" },
+    "udpConnect": { "pattern": "udpConnect", "address": "127.0.0.1:9001" },
+    "tcpClose": { "pattern": "tcpClose" },
+    "udpClose": { "pattern": "udpClose" },
+    "tcpSend": { "pattern": "tcpSend" },
+    "udpSend": { "pattern": "udpSend" },
+    "httpRequest": { "pattern": "httpRequest", "url": "http://127.0.0.1", "method": "POST", "contentType": "json" },
+    "setState": { "pattern": "setState" },
+    "clearState": { "pattern": "clearState", "keys": ["temporary"] },
+    "lua": { "pattern": "lua", "script": "main.lua" }
+  },
+  "listens": {
+    "push": { "s2cProto": "demo.Push", "store": [{ "field": "payload", "setter": "push" }] },
+    "scriptPush": { "s2cProto": "demo.Push", "script": "on_push.lua" }
+  }
+}

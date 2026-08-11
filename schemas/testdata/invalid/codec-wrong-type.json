@@ -1,0 +1,1 @@
+{"version":1,"endianDefault":"le","frame":{"headerSize":"one","trailerSize":0,"lengthIncludesHeader":false,"lengthIncludesTrailer":false},"header":[{"name":"len","type":"u8","offset":0,"size":1,"role":"length"}],"routeKeyTemplate":"{cmd}","pipeline":[]}
