@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"stressbot/utils"
 	json "stressbot/utils/jsonx"
 	"time"
 
@@ -313,20 +314,22 @@ func RetryWithRetriesAndBackoff(ctx context.Context, op func() error, initial, m
 	if max <= 0 {
 		max = 60 * time.Second
 	}
-	// 构造退避策略：先 MaxRetries 再 Context，backoff.getContext 能穿透两层包装提取 ctx
-	var policy backoff.BackOff = newExponentialBackoff(initial, max)
+	var policy backoff.BackOff = utils.NewExponentialBackOff(utils.RetryPolicy{
+		Initial: initial,
+		Max:     max,
+		Factor:  2,
+		Jitter:  0.5,
+	})
 	if maxRetries >= 0 {
 		policy = backoff.WithMaxRetries(policy, uint64(maxRetries))
 	}
-	policy = backoff.WithContext(policy, ctx)
 
-	err := backoff.Retry(op, policy)
+	err := utils.RetryWithStop(ctx.Done(), op, nil, policy)
 	if err == nil {
 		return nil
 	}
-	// ctx 取消时 backoff.Retry 返回 ctx.Err()，直接透传（保留 %w 让调用方 errors.Is 判别）
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return err
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
 	}
 	// 正常耗尽重试次数，加 desc 前缀便于排查
 	return fmt.Errorf("%s: 已达最大重试次数 %d: %w", desc, maxRetries, err)

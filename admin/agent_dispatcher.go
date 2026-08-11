@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"stressbot/utils"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -120,7 +121,12 @@ func (d *AgentDispatcher) post(addr, path string, body any, retries int) error {
 	// 退避策略：1s→10s 带 jitter，最多重试 retries 次。
 	// 原手写实现对所有非 2xx（含 4xx）都重试——4xx 是永久性错误（请求格式错/路径错/未授权），
 	// 重试只是浪费时间并掩盖配置 bug，故用 backoff.Permanent 标记后立即停止。
-	b := backoff.WithMaxRetries(newDispatcherBackoff(1*time.Second, 10*time.Second), uint64(retries))
+	b := backoff.WithMaxRetries(utils.NewExponentialBackOff(utils.RetryPolicy{
+		Initial: time.Second,
+		Max:     10 * time.Second,
+		Factor:  2,
+		Jitter:  0.5,
+	}), uint64(retries))
 	var attempt int
 
 	notify := func(err error, wait time.Duration) {
@@ -134,7 +140,7 @@ func (d *AgentDispatcher) post(addr, path string, body any, retries int) error {
 			zap.Error(err))
 	}
 
-	err = backoff.RetryNotify(func() error {
+	err = utils.RetryWithStop(nil, func() error {
 		attempt++
 		var bodyReader io.Reader
 		if bodyBytes != nil {
@@ -166,7 +172,7 @@ func (d *AgentDispatcher) post(addr, path string, body any, retries int) error {
 			return backoff.Permanent(httpErr)
 		}
 		return httpErr
-	}, b, notify)
+	}, notify, b)
 
 	return err
 }
@@ -177,17 +183,4 @@ func (d *AgentDispatcher) get(addr, path string) (*http.Response, error) {
 		return nil, err
 	}
 	return d.httpClient.Get(endpoint)
-}
-
-// newDispatcherBackoff 构造 Admin→Agent RPC 的指数退避（带 jitter）。
-// 与 agent.newExponentialBackoff 同构，但分属两个包各自维护（admin 不依赖 agent）。
-func newDispatcherBackoff(initial, max time.Duration) *backoff.ExponentialBackOff {
-	b := backoff.NewExponentialBackOff(
-		backoff.WithInitialInterval(initial),
-		backoff.WithMaxInterval(max),
-	)
-	b.MaxElapsedTime = 0
-	b.RandomizationFactor = 0.5
-	b.Multiplier = 2.0
-	return b
 }

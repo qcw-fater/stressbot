@@ -9,7 +9,11 @@ import { Toolbar } from './Toolbar';
 const capability = vi.hoisted(() => ({ templateLibrary: false }));
 
 vi.mock('@/services/capabilitiesApi', () => ({
-  getCapabilities: vi.fn(async () => ({ sharedState: false, flowLibrary: false, templateLibrary: false })),
+  getCapabilities: vi.fn(async () => ({
+    sharedState: false,
+    flowLibrary: false,
+    templateLibrary: false,
+  })),
 }));
 vi.mock('../library/useTemplateLibraryCapability', () => ({
   useTemplateLibraryCapability: () => ({
@@ -23,40 +27,45 @@ vi.mock('@/services/runtimeStore', () => ({
   useRuntimeStore: (selector: (state: { mode: 'edit' }) => unknown) => selector({ mode: 'edit' }),
 }));
 vi.mock('@/services/baselineApi', () => ({ fetchBaselineFlow: vi.fn() }));
-vi.mock('../store/undoRedo', () => ({ undo: vi.fn(), redo: vi.fn() }));
+vi.mock('../store/flowHistory', () => ({ undo: vi.fn(), redo: vi.fn() }));
 vi.mock('../store/persistDraft', () => ({
   clearDraft: vi.fn(),
   captureCurrentDraft: vi.fn(),
   loadDraft: vi.fn(() => null),
 }));
 vi.mock('../store/flowStore', () => ({
-  useFlowStore: (selector: (state: {
-    loadFromTaskFlow: () => void;
-    reset: () => void;
-    applyAutoLayout: () => void;
-    listens: Record<string, unknown>;
-  }) => unknown) => selector({
-    loadFromTaskFlow: vi.fn(),
-    reset: vi.fn(),
-    applyAutoLayout: vi.fn(),
-    listens: {},
-  }),
+  useFlowStore: (
+    selector: (state: {
+      loadFromTaskFlow: () => void;
+      reset: () => void;
+      applyAutoLayout: () => void;
+      listens: Record<string, unknown>;
+    }) => unknown,
+  ) =>
+    selector({
+      loadFromTaskFlow: vi.fn(),
+      reset: vi.fn(),
+      applyAutoLayout: vi.fn(),
+      listens: {},
+    }),
 }));
 vi.mock('../store/editorStore', () => ({
-  useEditorStore: (selector: (state: { setActivePanel: () => void }) => unknown) => selector({
-    setActivePanel: vi.fn(),
-  }),
+  useEditorStore: (selector: (state: { setActivePanel: () => void }) => unknown) =>
+    selector({
+      setActivePanel: vi.fn(),
+    }),
 }));
 vi.mock('../proto/protoStore', () => ({
-  useProtoStore: (selector: (state: { status: string; fileCount: number }) => unknown) => selector({
-    status: 'idle',
-    fileCount: 0,
-  }),
+  useProtoStore: (selector: (state: { status: string; fileCount: number }) => unknown) =>
+    selector({
+      status: 'idle',
+      fileCount: 0,
+    }),
 }));
 vi.mock('../validation/validationStore', () => ({
-  useValidationStore: (selector: (state: {
-    report: { errors: unknown[]; warnings: unknown[] };
-  }) => unknown) => selector({ report: { errors: [], warnings: [] } }),
+  useValidationStore: (
+    selector: (state: { report: { errors: unknown[]; warnings: unknown[] } }) => unknown,
+  ) => selector({ report: { errors: [], warnings: [] } }),
 }));
 vi.mock('./useFlowFileIO', () => ({
   useFlowFileIO: () => ({
@@ -67,14 +76,11 @@ vi.mock('./useFlowFileIO', () => ({
 }));
 vi.mock('./FlowManagerModal', () => ({ FlowManagerModal: () => null }));
 vi.mock('@/components/modules/configTransfer/ConfigBackupModal', () => ({
-  ConfigBackupModal: ({ open }: { open: boolean }) => open
-    ? <div>配置备份弹窗已打开</div>
-    : null,
+  ConfigBackupModal: ({ open }: { open: boolean }) => (open ? <div>配置备份弹窗已打开</div> : null),
 }));
 vi.mock('@/components/modules/configTransfer/ConfigRestoreModal', () => ({
-  ConfigRestoreModal: ({ open, runtimeMode }: { open: boolean; runtimeMode: string }) => open
-    ? <div>配置恢复弹窗已打开：{runtimeMode}</div>
-    : null,
+  ConfigRestoreModal: ({ open, runtimeMode }: { open: boolean; runtimeMode: string }) =>
+    open ? <div>配置恢复弹窗已打开：{runtimeMode}</div> : null,
 }));
 
 describe('Toolbar configuration backup entry', () => {
@@ -83,9 +89,9 @@ describe('Toolbar configuration backup entry', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     capability.templateLibrary = false;
-    vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => (
-      nativeGetComputedStyle(element)
-    ));
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element) =>
+      nativeGetComputedStyle(element),
+    );
   });
 
   afterEach(() => vi.restoreAllMocks());
@@ -122,7 +128,11 @@ describe('Toolbar configuration backup entry', () => {
 
   it('文件菜单只通过统一备份恢复入口迁移模板库', async () => {
     const user = userEvent.setup();
-    render(<AntApp><Toolbar /></AntApp>);
+    render(
+      <AntApp>
+        <Toolbar />
+      </AntApp>,
+    );
 
     await user.click(screen.getByRole('button', { name: /文件/ }));
     expect(await screen.findByText('备份配置...')).toBeTruthy();

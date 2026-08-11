@@ -6,6 +6,8 @@
  */
 
 import { create } from 'zustand';
+import type { StateCreator } from 'zustand';
+import { temporal } from 'zundo';
 import { applyEdgeChanges, applyNodeChanges } from '@xyflow/react';
 import type { Edge, EdgeChange, Node as RFNode, NodeChange } from '@xyflow/react';
 
@@ -21,7 +23,7 @@ import { jsonToFlow } from '../codec/jsonToFlow';
 import { flowToJson, type FlowJson } from '../codec/flowToJson';
 import { normalizeOnError } from '../utils/onError';
 
-interface FlowState {
+export interface FlowState {
   // ── 业务数据（与 flow.json 1:1） ────────
   defaultDelayMs: number;
   nodes: Record<string, FlowNode>;
@@ -91,7 +93,9 @@ interface FlowState {
   syncDerived: () => void;
 }
 
-export const useFlowStore = create<FlowState>()((set, get) => ({
+export type FlowHistoryState = Pick<FlowState, 'defaultDelayMs' | 'nodes' | 'actions' | 'listens'>;
+
+const flowStateCreator: StateCreator<FlowState, [['temporal', unknown]], []> = (set, get) => ({
   defaultDelayMs: 1000,
   nodes: {},
   actions: {},
@@ -105,69 +109,76 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
   needsFitView: false,
 
   loadFromTaskFlow: (flow, layout) => {
-    const { rfNodes, rfEdges, listenRefCount, nodesByListen } = jsonToFlow({
-      defaultDelayMs: flow.defaultDelayMs,
-      nodes: flow.nodes,
-      actions: flow.actions,
-      listens: flow.listens,
-    });
-    let positions: Record<string, { x: number; y: number }>;
-    if (layout?.nodePositions && Object.keys(layout.nodePositions).length > 0) {
-      positions = Object.fromEntries(
-        Object.entries(layout.nodePositions).map(([id, m]) => [id, { x: m.x, y: m.y }]),
-      );
-    } else {
-      positions = dagreLayout(rfNodes, rfEdges, { direction: 'LR' });
-      // 给 ListenCard 一个事件区独立排布（画布右侧竖排）
-      const cardX = computeCardX(positions);
-      let cardY = 0;
-      for (const n of rfNodes) {
-        if (n.type === 'listenCard') {
-          positions[n.id] = { x: cardX, y: cardY };
-          cardY += 90;
+    resetFlowHistory(() => {
+      const { rfNodes, rfEdges, listenRefCount, nodesByListen } = jsonToFlow({
+        defaultDelayMs: flow.defaultDelayMs,
+        nodes: flow.nodes,
+        actions: flow.actions,
+        listens: flow.listens,
+      });
+      let positions: Record<string, { x: number; y: number }>;
+      if (layout?.nodePositions && Object.keys(layout.nodePositions).length > 0) {
+        positions = Object.fromEntries(
+          Object.entries(layout.nodePositions).map(([id, m]) => [id, { x: m.x, y: m.y }]),
+        );
+      } else {
+        positions = dagreLayout(rfNodes, rfEdges, { direction: 'LR' });
+        // 给 ListenCard 一个事件区独立排布（画布右侧竖排）
+        const cardX = computeCardX(positions);
+        let cardY = 0;
+        for (const n of rfNodes) {
+          if (n.type === 'listenCard') {
+            positions[n.id] = { x: cardX, y: cardY };
+            cardY += 90;
+          }
         }
       }
-    }
-    const positioned = rfNodes.map((n) => ({ ...n, position: positions[n.id] ?? { x: 0, y: 0 } }));
-    set({
-      defaultDelayMs: flow.defaultDelayMs,
-      nodes: flow.nodes,
-      actions: flow.actions,
-      listens: flow.listens,
-      listenDefaultRefs: {},
-      rfNodes: positioned,
-      rfEdges,
-      listenRefCount,
-      nodesByListen,
-      needsFitView: true,
-      layout: layout ?? {
-        ...emptyFlowLayout(),
-        nodePositions: Object.fromEntries(
-          Object.entries(positions).map(([id, p]) => [id, { x: p.x, y: p.y }]),
-        ),
-      },
+      const positioned = rfNodes.map((n) => ({
+        ...n,
+        position: positions[n.id] ?? { x: 0, y: 0 },
+      }));
+      set({
+        defaultDelayMs: flow.defaultDelayMs,
+        nodes: flow.nodes,
+        actions: flow.actions,
+        listens: flow.listens,
+        listenDefaultRefs: {},
+        rfNodes: positioned,
+        rfEdges,
+        listenRefCount,
+        nodesByListen,
+        needsFitView: true,
+        layout: layout ?? {
+          ...emptyFlowLayout(),
+          nodePositions: Object.fromEntries(
+            Object.entries(positions).map(([id, p]) => [id, { x: p.x, y: p.y }]),
+          ),
+        },
+      });
     });
   },
 
   reset: (center?: { x: number; y: number }) => {
-    const pos = center ?? { x: 300, y: 300 };
-    set({
-      defaultDelayMs: 1000,
-      nodes: { main: { type: 'sequence', next: [], description: '入口节点' } },
-      actions: {},
-      listens: {},
-      listenDefaultRefs: {},
-      rfNodes: [],
-      rfEdges: [],
-      layout: {
-        ...emptyFlowLayout(),
-        nodePositions: { main: pos },
-      },
-      listenRefCount: {},
-      nodesByListen: {},
-      needsFitView: true,
+    resetFlowHistory(() => {
+      const pos = center ?? { x: 300, y: 300 };
+      set({
+        defaultDelayMs: 1000,
+        nodes: { main: { type: 'sequence', next: [], description: '入口节点' } },
+        actions: {},
+        listens: {},
+        listenDefaultRefs: {},
+        rfNodes: [],
+        rfEdges: [],
+        layout: {
+          ...emptyFlowLayout(),
+          nodePositions: { main: pos },
+        },
+        listenRefCount: {},
+        nodesByListen: {},
+        needsFitView: true,
+      });
+      get().syncDerived();
     });
-    get().syncDerived();
   },
 
   toTaskFlow: () => {
@@ -219,7 +230,10 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
           cardY += 90;
         }
       }
-      const positioned = s.rfNodes.map((n) => ({ ...n, position: positions[n.id] ?? n.position }));
+      const positioned = s.rfNodes.map((n) => ({
+        ...n,
+        position: positions[n.id] ?? n.position,
+      }));
       const layout = {
         ...s.layout,
         nodePositions: Object.fromEntries(
@@ -324,7 +338,12 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
       }
       // action 节点：重命名时同步 action key
       let actions = s.actions;
-      if (oldNode.type === 'action' && oldNode.action && s.actions[oldNode.action] && !(newId in s.actions)) {
+      if (
+        oldNode.type === 'action' &&
+        oldNode.action &&
+        s.actions[oldNode.action] &&
+        !(newId in s.actions)
+      ) {
         const oldAct = oldNode.action;
         actions = {};
         for (const [k, v] of Object.entries(s.actions)) {
@@ -395,7 +414,10 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
     set((s) => {
       const listens = { ...s.listens, [name]: def };
       if (position) {
-        const nodePositions = { ...s.layout.nodePositions, [`__cb__${name}`]: { x: position.x, y: position.y } };
+        const nodePositions = {
+          ...s.layout.nodePositions,
+          [`__cb__${name}`]: { x: position.x, y: position.y },
+        };
         return { listens, layout: { ...s.layout, nodePositions } };
       }
       return { listens };
@@ -450,7 +472,9 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
       const nodePositions = { ...s.layout.nodePositions };
       delete nodePositions[cbId];
       const layout = { ...s.layout, nodePositions };
-      return touched ? { listens, nodes, listenDefaultRefs, layout } : { listens, listenDefaultRefs, layout };
+      return touched
+        ? { listens, nodes, listenDefaultRefs, layout }
+        : { listens, listenDefaultRefs, layout };
     });
     get().syncDerived();
   },
@@ -546,7 +570,35 @@ export const useFlowStore = create<FlowState>()((set, get) => ({
     });
     set({ rfNodes: positioned, rfEdges, listenRefCount, nodesByListen });
   },
-}));
+});
+
+export const useFlowStore = create<FlowState>()(
+  temporal(flowStateCreator, {
+    limit: 50,
+    partialize: (state): FlowHistoryState => ({
+      defaultDelayMs: state.defaultDelayMs,
+      nodes: state.nodes,
+      actions: state.actions,
+      listens: state.listens,
+    }),
+    equality: (past, current) =>
+      past.defaultDelayMs === current.defaultDelayMs &&
+      past.nodes === current.nodes &&
+      past.actions === current.actions &&
+      past.listens === current.listens,
+  }),
+);
+
+function resetFlowHistory(apply: () => void): void {
+  const history = useFlowStore.temporal.getState();
+  history.pause();
+  try {
+    apply();
+  } finally {
+    history.clear();
+    history.resume();
+  }
+}
 
 const TOPOLOGY_FIELDS = new Set<keyof FlowNode>([
   'type',
@@ -599,16 +651,16 @@ function patchActionNodes(
       .map(([id]) => id),
   );
   if (affected.size === 0) return rfNodes;
-  return rfNodes.map((rfNode) => affected.has(rfNode.id)
-    ? { ...rfNode, data: { ...rfNode.data, action } }
-    : rfNode);
+  return rfNodes.map((rfNode) =>
+    affected.has(rfNode.id) ? { ...rfNode, data: { ...rfNode.data, action } } : rfNode,
+  );
 }
 
 function patchListenCard(rfNodes: RFNode[], name: string, listen: ListenDef): RFNode[] {
   const id = `__cb__${name}`;
-  return rfNodes.map((rfNode) => rfNode.id === id
-    ? { ...rfNode, data: { ...rfNode.data, listen } }
-    : rfNode);
+  return rfNodes.map((rfNode) =>
+    rfNode.id === id ? { ...rfNode, data: { ...rfNode.data, listen } } : rfNode,
+  );
 }
 
 /**

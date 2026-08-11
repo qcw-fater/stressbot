@@ -28,7 +28,7 @@ import {
   UndoOutlined,
 } from '@ant-design/icons';
 import { lazy, Suspense, useRef, useState, type ReactNode } from 'react';
-import { redo, undo } from '../store/undoRedo';
+import { redo, undo } from '../store/flowHistory';
 import { captureCurrentDraft, clearDraft, loadDraft } from '../store/persistDraft';
 import { useFlowReadOnly } from '../flowReadOnlyContext';
 import type { MenuProps } from 'antd';
@@ -221,7 +221,11 @@ export function Toolbar({ onOpenValidation, extra }: ToolbarProps) {
       <Space size={4} align="center">
         {/* Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 4 }}>
-          <img src={logoUrl} alt="stressbot" style={{ height: 22, width: 'auto', display: 'block' }} />
+          <img
+            src={logoUrl}
+            alt="stressbot"
+            style={{ height: 22, width: 'auto', display: 'block' }}
+          />
           <strong style={{ fontSize: 16, color: 'var(--text-primary)' }}>stressbot</strong>
         </div>
 

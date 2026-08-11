@@ -92,13 +92,19 @@ func (r *StressReporter) Stop() {
 // （原手写实现返回最后一次 op err，行为微调——Stop 只用 5s timeout，
 // 超时返回什么都只 warn 日志，不影响任务结束流程）。
 func (r *StressReporter) reportUntilAcknowledged(ctx context.Context, now time.Time) error {
-	b := backoff.WithContext(
-		newExponentialBackoff(50*time.Millisecond, 500*time.Millisecond),
-		ctx,
-	)
-	return backoff.Retry(func() error {
+	b := utils.NewExponentialBackOff(utils.RetryPolicy{
+		Initial: 50 * time.Millisecond,
+		Max:     500 * time.Millisecond,
+		Factor:  2,
+		Jitter:  0.5,
+	})
+	err := utils.RetryWithStop(ctx.Done(), func() error {
 		return r.reportOnce(ctx, now)
-	}, b)
+	}, nil, b)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	return err
 }
 
 func (r *StressReporter) run(ctx context.Context) {
@@ -112,12 +118,8 @@ func (r *StressReporter) run(ctx context.Context) {
 
 	for {
 		if nextWait > 0 {
-			select {
-			case <-ctx.Done():
+			if !waitReporterRetry(ctx, r.stopCh, nextWait) {
 				return
-			case <-r.stopCh:
-				return
-			case <-time.After(nextWait):
 			}
 		} else {
 			select {
@@ -131,7 +133,12 @@ func (r *StressReporter) run(ctx context.Context) {
 
 		if err := r.reportOnce(ctx, time.Now()); err != nil {
 			if bo == nil {
-				bo = newExponentialBackoff(time.Second, 30*time.Second)
+				bo = utils.NewExponentialBackOff(utils.RetryPolicy{
+					Initial: time.Second,
+					Max:     30 * time.Second,
+					Factor:  2,
+					Jitter:  0.5,
+				})
 			}
 			d := bo.NextBackOff()
 			if d == backoff.Stop { // MaxElapsedTime=0 时不会触发，兜底防御
@@ -222,12 +229,8 @@ func (r *SystemReporter) run(ctx context.Context) {
 
 	for {
 		if nextWait > 0 {
-			select {
-			case <-ctx.Done():
+			if !waitReporterRetry(ctx, r.stopCh, nextWait) {
 				return
-			case <-r.stopCh:
-				return
-			case <-time.After(nextWait):
 			}
 		} else {
 			select {
@@ -246,7 +249,12 @@ func (r *SystemReporter) run(ctx context.Context) {
 		}
 		if err := r.cli.PostSystem(ctx, report); err != nil {
 			if bo == nil {
-				bo = newExponentialBackoff(time.Second, 30*time.Second)
+				bo = utils.NewExponentialBackOff(utils.RetryPolicy{
+					Initial: time.Second,
+					Max:     30 * time.Second,
+					Factor:  2,
+					Jitter:  0.5,
+				})
 			}
 			d := bo.NextBackOff()
 			if d == backoff.Stop {
@@ -261,5 +269,18 @@ func (r *SystemReporter) run(ctx context.Context) {
 			bo = nil
 			nextWait = 0
 		}
+	}
+}
+
+func waitReporterRetry(ctx context.Context, stop <-chan struct{}, delay time.Duration) bool {
+	timer := utils.GetTimer(delay)
+	defer utils.PutTimer(timer)
+	select {
+	case <-ctx.Done():
+		return false
+	case <-stop:
+		return false
+	case <-timer.C:
+		return true
 	}
 }

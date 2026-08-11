@@ -15,9 +15,11 @@ import (
 	"bytes"
 	"crypto/hmac"
 	"crypto/md5"
+	"crypto/rc4"
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"hash/crc32"
 	"testing"
 )
@@ -310,6 +312,53 @@ func TestRc4KeyLengths(t *testing.T) {
 			key[i] = byte(i + kl)
 		}
 		cipherRoundTrip(t, "rc4", c, data, key, 0, nil)
+	}
+}
+
+func TestRC4KnownVector(t *testing.T) {
+	c, _ := LookupCipher("rc4")
+	got, err := c.Encrypt([]byte("Plaintext"), []byte("Key"), 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if encoded := hex.EncodeToString(got); encoded != "bbf316e8d940af0ad3" {
+		t.Fatalf("RC4 known vector = %s, want bbf316e8d940af0ad3", encoded)
+	}
+}
+
+func TestRC4RejectsOversizedKeyBeforeMutatingInPlace(t *testing.T) {
+	c, _ := LookupCipher("rc4")
+	inPlace, ok := c.(CipherInPlace)
+	if !ok {
+		t.Fatal("rc4 must support in-place decryption")
+	}
+	key := make([]byte, 257)
+	data := []byte("must stay unchanged")
+	want := bytes.Clone(data)
+
+	err := inPlace.DecryptInPlace(data, key, 0, nil)
+	var keySizeErr rc4.KeySizeError
+	if !errors.As(err, &keySizeErr) {
+		t.Fatalf("DecryptInPlace() error = %v, want rc4.KeySizeError", err)
+	}
+	if !bytes.Equal(data, want) {
+		t.Fatalf("DecryptInPlace() modified data before error: got %x want %x", data, want)
+	}
+
+	if _, err := c.Encrypt(want, key, 0, nil); !errors.As(err, &keySizeErr) {
+		t.Fatalf("Encrypt() error = %v, want rc4.KeySizeError", err)
+	}
+}
+
+func TestRC4EmptyKeyKeepsCompatibilityNoOp(t *testing.T) {
+	c, _ := LookupCipher("rc4")
+	data := []byte("legacy empty key")
+	got, err := c.Encrypt(data, nil, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, data) {
+		t.Fatalf("empty key result = %x, want unchanged %x", got, data)
 	}
 }
 

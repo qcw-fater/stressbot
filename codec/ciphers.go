@@ -14,6 +14,7 @@ package codec
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rc4"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -84,28 +85,6 @@ func encryptXor(data, key []byte) {
 
 // decryptXor 与 encryptXor 相同（XOR 对称）。
 func decryptXor(data, key []byte) { encryptXor(data, key) }
-
-// applyRC4 RC4 流加密/解密（对称操作）。
-//
-// KSA 初始化 S-box + PRGA 逐字节生成密钥流并 XOR。
-func applyRC4(data, key []byte) {
-	s := [256]byte{}
-	for i := range s {
-		s[i] = byte(i)
-	}
-	var j byte
-	for i := range s {
-		j = j + s[i] + key[i%len(key)]
-		s[i], s[j] = s[j], s[i]
-	}
-	var si, sj byte
-	for i := range data {
-		si++
-		sj = sj + s[si]
-		s[si], s[sj] = s[sj], s[si]
-		data[i] ^= s[(s[si]+s[sj])&0xFF]
-	}
-}
 
 // errInvalidPadding PKCS#7 填充校验失败时返回的错误。
 var errInvalidPadding = errors.New("invalid pkcs7 padding")
@@ -325,34 +304,43 @@ func (c xorCarryRolCipher) DecryptInPlace(data, key []byte, offset int, params m
 	return nil
 }
 
-// rc4Cipher RC4 流密码。RC4 自反，encrypt==decrypt。key 长度 1~256。
+// rc4Cipher RC4 流密码。RC4 自反，encrypt==decrypt，key 长度 1~256。
+// RC4 仅用于兼容既有游戏协议，禁止用于新的安全设计。
 type rc4Cipher struct{}
 
-func (rc4Cipher) apply(data, key []byte, offset int) []byte {
+func (rc4Cipher) apply(data, key []byte, offset int) ([]byte, error) {
 	out := make([]byte, len(data))
 	copy(out, data)
 	if len(key) == 0 || len(data) == 0 {
-		return out
+		return out, nil
+	}
+	stream, err := rc4.NewCipher(key)
+	if err != nil {
+		return out, err
 	}
 	off := clampOffset(offset, len(data))
-	applyRC4(out[off:], key)
-	return out
+	stream.XORKeyStream(out[off:], out[off:])
+	return out, nil
 }
 
 func (c rc4Cipher) Encrypt(data, key []byte, offset int, params map[string]any) ([]byte, error) {
-	return c.apply(data, key, offset), nil
+	return c.apply(data, key, offset)
 }
 
 func (c rc4Cipher) Decrypt(data, key []byte, offset int, params map[string]any) ([]byte, error) {
-	return c.apply(data, key, offset), nil
+	return c.apply(data, key, offset)
 }
 
 func (c rc4Cipher) DecryptInPlace(data, key []byte, offset int, params map[string]any) error {
 	if len(key) == 0 || len(data) == 0 {
 		return nil
 	}
+	stream, err := rc4.NewCipher(key)
+	if err != nil {
+		return err
+	}
 	off := clampOffset(offset, len(data))
-	applyRC4(data[off:], key)
+	stream.XORKeyStream(data[off:], data[off:])
 	return nil
 }
 

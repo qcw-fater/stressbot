@@ -100,27 +100,22 @@ func (s *Sampler) Stop(taskID string) {
 
 func (s *Sampler) retryFinalFlush(taskID string, startedAt time.Time) {
 	utils.GetWorkPool().GoWithStop(func(stopCh <-chan struct{}) {
-		backoff := time.Second
-		for {
+		policy := utils.NewExponentialBackOff(utils.RetryPolicy{
+			Initial: time.Second,
+			Max:     30 * time.Second,
+			Factor:  2,
+			Jitter:  0.5,
+		})
+		_ = utils.RetryWithStop(stopCh, func() error {
 			now := time.Now()
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			_, err := s.sampleOnce(ctx, taskID, now, int(now.Sub(startedAt).Seconds()))
 			cancel()
-			if err == nil {
-				return
-			}
+			return err
+		}, func(err error, wait time.Duration) {
 			stresslog.Warn("[SAMPLER] 终态指标后台冲刷失败",
-				zap.String("taskID", taskID), zap.Duration("backoff", backoff), zap.Error(err))
-			select {
-			case <-stopCh:
-				return
-			case <-time.After(backoff):
-			}
-			backoff *= 2
-			if backoff > 30*time.Second {
-				backoff = 30 * time.Second
-			}
-		}
+				zap.String("taskID", taskID), zap.Duration("backoff", wait), zap.Error(err))
+		}, policy)
 	})
 }
 

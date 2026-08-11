@@ -550,7 +550,7 @@ M2 出口：备份和恢复演练有记录；旧生产快照能升级；失败�
 - Modify: `codec/ciphers.go:88-108,328-356`
 - Modify: `codec/registry_test.go:294-313`
 
-- [ ] **Step 1: 写标准向量和错误前不修改测试**
+- [x] **Step 1: 写标准向量和错误前不修改测试**
 
 ```go
 func TestRC4KnownVector(t *testing.T) {
@@ -563,17 +563,17 @@ func TestRC4KnownVector(t *testing.T) {
 
 另测 257 字节 key 返回 `rc4.KeySizeError`，`DecryptInPlace` 在返回错误前保持 data 不变；空 key 继续按现有协议语义原样返回。
 
-- [ ] **Step 2: 运行测试确认新增非法 key 用例失败**
+- [x] **Step 2: 运行测试确认新增非法 key 用例失败**
 
 ```powershell
 go test ./codec -run 'TestRC4' -v
 ```
 
-- [ ] **Step 3: 调用 `crypto/rc4`**
+- [x] **Step 3: 调用 `crypto/rc4`**
 
 删除 `applyRC4` 的手写 S-box；复制版先复制前缀和 body，再 `rc4.NewCipher(key)`、`XORKeyStream(out[off:], out[off:])`。原地版先构造 Cipher，成功后才修改 data。
 
-- [ ] **Step 4: 全 codec 对拍并提交**
+- [x] **Step 4: 全 codec 对拍并提交**
 
 ```powershell
 go test ./codec -v
@@ -595,11 +595,13 @@ RC4 仅为兼容既有游戏协议；文档保留“不可用于新安全设计�
 - Modify: `admin/agent_dispatcher.go`
 - Modify: `admin/sampler.go:101-124`
 
-- [ ] **Step 1: 写可取消和 jitter 测试**
+- [x] **Step 1: 写可取消和 jitter 测试**
 
 测试固定随机源/Clock，验证 1s→2s→4s、上限 30s、stop 立即返回、永久错误不重试、成功后停止。不要用真实 sleep。
 
-- [ ] **Step 2: 提取统一 policy**
+`cenkalti/backoff` 未暴露随机源注入点，因此精确序列用 `Jitter=0` 做确定性断言，另以固定上下界循环验证 `Jitter=0.5`；重试循环使用零延迟脚本 BackOff，不依赖真实 sleep。
+
+- [x] **Step 2: 提取统一 policy**
 
 ```go
 type RetryPolicy struct {
@@ -615,11 +617,13 @@ func RetryWithStop(stop <-chan struct{}, op func() error, notify func(error, tim
 
 `RetryWithStop` 使用项目 `utils.GetTimer/PutTimer` 等待下次尝试；收到 stop 后不得再执行一次 operation。
 
-- [ ] **Step 3: 替换三处策略**
+- [x] **Step 3: 替换三处策略**
 
 Agent 注册、Admin dispatcher 和 Sampler final flush 统一使用 helper；各自保留最大重试次数、永久 4xx、无限 final flush 的业务差异。删除 `agent.newExponentialBackoff` 和 `admin.newDispatcherBackoff` 的重复实现。
 
-- [ ] **Step 4: 验证无 goroutine/timer 泄漏并提交**
+- [x] **Step 4: 验证无 goroutine/timer 泄漏并提交**
+
+Windows 下组合 race 命令先被 120 秒总时限截断（已完成的 `utils -race` 通过），随后拆分执行 `utils`、`agent`、`admin` 三包 race 检查，均通过；重复 20 次的定向测试也通过。
 
 ```powershell
 go test ./utils ./agent ./admin -run 'Backoff|Retry|FinalFlush|Dispatcher' -count=20
@@ -640,18 +644,18 @@ git commit -m "refactor: centralize cancellable retry backoff"
 - Modify: `cmd/web/src/components/FlowEditor/index.tsx:124-132`
 - Modify: `cmd/web/src/components/FlowEditor/panels/Toolbar.tsx:31`
 
-- [ ] **Step 1: 把当前行为写成兼容测试**
+- [x] **Step 1: 把当前行为写成兼容测试**
 
 覆盖：只追踪 `defaultDelayMs/nodes/actions/listens`；位置、layout、选中和派生数据不入历史；undo 后 `rfNodes/rfEdges/listenRefCount/nodesByListen` 与业务数据同步；load/reset 清空历史；上限 50；新修改清空 future。
 
-- [ ] **Step 2: 运行测试确认 Zundo 尚未接入**
+- [x] **Step 2: 运行测试确认 Zundo 尚未接入**
 
 ```powershell
 Set-Location cmd\web
 npx vitest run src/components/FlowEditor/store/flowHistory.test.ts
 ```
 
-- [ ] **Step 3: 为 flowStore 包装 `temporal`**
+- [x] **Step 3: 为 flowStore 包装 `temporal`**
 
 ```ts
 type TrackedFlowState = Pick<FlowState, 'defaultDelayMs' | 'nodes' | 'actions' | 'listens'>;
@@ -676,15 +680,15 @@ export const useFlowStore = create<FlowState>()(
 );
 ```
 
-- [ ] **Step 4: 用受控 wrapper 保持派生状态和布尔返回值**
+- [x] **Step 4: 用受控 wrapper 保持派生状态和布尔返回值**
 
 `undoFlow()`/`redoFlow()` 先检查 past/future 长度，调用 temporal，再调用 `syncDerived()`，返回是否发生变化。`loadFromTaskFlow` 和 `reset` 在 pause/resume 之间写入，并在完成后 `clear()`，保证打开另一个流程不能撤销回上一个流程。
 
-- [ ] **Step 5: 删除手写全局快照栈**
+- [x] **Step 5: 删除手写全局快照栈**
 
 移除 `startHistory` useEffect；`undoRedo.ts` 删除，Toolbar 和快捷键改用 `flowHistory.ts`。不把 Zundo temporal store 暴露给普通组件。
 
-- [ ] **Step 6: 前端验证并提交**
+- [x] **Step 6: 前端验证并提交**
 
 ```powershell
 npx vitest run src/components/FlowEditor/store/flowHistory.test.ts src/components/FlowEditor/store/flowStore.test.ts

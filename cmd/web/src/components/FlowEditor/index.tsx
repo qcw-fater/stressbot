@@ -16,7 +16,7 @@ import { ListenPanel } from './listens/ListenPanel';
 import { ValidationReportDrawer } from './validation/ValidationReport';
 import { TemplateEditorDrawer } from './library/TemplateEditorDrawer';
 import { startAutoPersist, loadDraft } from './store/persistDraft';
-import { startHistory, undo, redo } from './store/undoRedo';
+import { undo, redo } from './store/flowHistory';
 import { useMetricsStore } from './nodes/shared/MetricsBadge';
 import type { ActionMetric } from '@/types/api';
 import { FlowReadOnlyContext } from './flowReadOnlyContext';
@@ -24,7 +24,10 @@ import { App as AntApp, ConfigProvider } from 'antd';
 import { useFlowStore } from './store/flowStore';
 import { useFloatingWindowStore } from './store/floatingWindowStore';
 import { useProtoStore } from './proto/protoStore';
-import { collectCodecSchemaErrors, subscribe as subscribeResources } from '@/services/resourcesStore';
+import {
+  collectCodecSchemaErrors,
+  subscribe as subscribeResources,
+} from '@/services/resourcesStore';
 import { refreshRouteKeyTemplates } from './listens/routeKeyResolver';
 import { fetchBaselineFlow } from '@/services/baselineApi';
 import { useEditorStore } from './store/editorStore';
@@ -106,7 +109,9 @@ function FlowEditorInner({
         // 静默
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // routeKey 模板缓存（§3.7）：mount 时加载所有 codec 的 routeKeyTemplate，
@@ -117,17 +122,17 @@ function FlowEditorInner({
   useEffect(() => {
     const bump = useEditorStore.getState().bumpRouteKeyTemplatesVersion;
     void refreshRouteKeyTemplates().then(bump);
-    const unsub = subscribeResources(() => { void refreshRouteKeyTemplates().then(bump); });
+    const unsub = subscribeResources(() => {
+      void refreshRouteKeyTemplates().then(bump);
+    });
     return unsub;
   }, []);
 
   useEffect(() => {
-    // 启动持久化 + Undo/Redo 历史栈
+    // 启动草稿持久化；Undo/Redo 由 flowStore 的 Zundo middleware 维护。
     const stopPersist = startAutoPersist();
-    const stopHistory = startHistory();
     return () => {
       stopPersist();
-      stopHistory();
     };
   }, []);
 
@@ -142,7 +147,11 @@ function FlowEditorInner({
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) return;
       const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      )
+        return;
       // Monaco 编辑器渲染为 .monaco-editor 容器（无 INPUT/TEXTAREA 在 activeElement），单独识别。
       if (target?.closest('.monaco-editor')) return;
       if (readOnly) return;
@@ -200,7 +209,15 @@ function FlowEditorInner({
     <FlowReadOnlyContext.Provider value={readOnly}>
       <StateKeyOptionsProvider>
         <FlowValidationCoordinator />
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', position: 'relative' }}>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            height: '100%',
+            width: '100%',
+            position: 'relative',
+          }}
+        >
           <Toolbar onOpenValidation={() => setValidationOpen(true)} extra={topbarExtra} />
           <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
             {/* 只读模式（运行 / 查看 / finalReport）下完全隐藏 NodePalette：
