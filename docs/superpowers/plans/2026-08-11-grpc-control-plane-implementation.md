@@ -61,15 +61,7 @@ service AgentTelemetryService {
 - [ ] Define `Command.oneof` with `StartTask`, `StopTask`, `Shutdown`; include `command_id`, monotonically increasing `sequence`, `agent_id`, `task_id`, `created_at_unix_nano`.
 - [ ] Define explicit DTOs for task assignment, ramp-up, Redis runtime settings, cleanup status, static/system information and all monitor snapshot fields. `HistogramSnapshot.sketch` is raw DDSketch bytes; nullable metric values use `optional` scalar fields. Do not add JSON blobs, `Any`, `Struct`, or map-based generic payloads.
 - [ ] Define Bundle descriptor/request/chunk fields: SHA-256 bytes, total size, offset and chunk bytes. Set the application chunk constant outside generated code to `256 << 10`.
-- [ ] Generate and format Go stubs; do not hand-edit generated files.
-
-**Checks:**
-
-```powershell
-buf lint
-buf generate
-buf build
-```
+- [ ] Generate and format Go stubs; do not hand-edit generated files. The generated Go files are committed with the protocol source; choose and document a repository-wide generation toolchain before regenerating them.
 
 ## Task 2: Add lossless protobuf/domain conversion boundaries
 
