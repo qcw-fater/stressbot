@@ -536,17 +536,17 @@ func TestValidateConditionSyntax(t *testing.T) {
 	}
 }
 
-// TestValidateStateActions_ConditionSyntax 覆盖 flow 加载期对节点/绑定条件的语法校验：
-// 带 state: 前缀的畸形条件必须让 ValidateStateActions 返回错误。
-func TestValidateStateActions_ConditionSyntax(t *testing.T) {
+// TestPrepareTaskFlow_ConditionSyntax 覆盖 flow 加载期对节点/绑定条件的编译：
+// 带 state: 前缀的畸形条件必须让 PrepareTaskFlow 返回错误。
+func TestPrepareTaskFlow_ConditionSyntax(t *testing.T) {
 	// 节点 condition 语法错误 → 报错。
 	badNode := &TaskFlow{
 		Nodes: map[string]*Node{
 			"n1": {Condition: "state:hp >"},
 		},
 	}
-	if err := ValidateStateActions(badNode); err == nil {
-		t.Error("节点 condition 语法错误应被 ValidateStateActions 拒绝")
+	if err := PrepareTaskFlow(badNode); err == nil {
+		t.Error("节点 condition 语法错误应被 PrepareTaskFlow 拒绝")
 	}
 
 	// 合法 condition → 通过。
@@ -555,7 +555,7 @@ func TestValidateStateActions_ConditionSyntax(t *testing.T) {
 			"n1": {Condition: "state:hp > 0 && lvl >= 1"},
 		},
 	}
-	if err := ValidateStateActions(goodNode); err != nil {
+	if err := PrepareTaskFlow(goodNode); err != nil {
 		t.Errorf("合法节点 condition 不应报错：%v", err)
 	}
 
@@ -565,7 +565,7 @@ func TestValidateStateActions_ConditionSyntax(t *testing.T) {
 			"n1": {Condition: "lua:check.lua"},
 		},
 	}
-	if err := ValidateStateActions(luaNode); err != nil {
+	if err := PrepareTaskFlow(luaNode); err != nil {
 		t.Errorf("lua: 前缀条件不应被语法校验拒绝：%v", err)
 	}
 }

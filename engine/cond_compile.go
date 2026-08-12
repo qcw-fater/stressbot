@@ -73,6 +73,27 @@ type CompiledCondition struct {
 	program *conditionProgram
 }
 
+type conditionCompiler struct {
+	conditions map[string]*CompiledCondition
+}
+
+func newConditionCompiler() *conditionCompiler {
+	return &conditionCompiler{conditions: make(map[string]*CompiledCondition)}
+}
+
+func (c *conditionCompiler) compile(source string) (*CompiledCondition, error) {
+	source = strings.TrimSpace(source)
+	if condition := c.conditions[source]; condition != nil {
+		return condition, nil
+	}
+	condition, err := compileCondition(source)
+	if err != nil {
+		return nil, err
+	}
+	c.conditions[source] = condition
+	return condition, nil
+}
+
 // Source 返回去除首尾空白后的原始条件文本。
 func (c *CompiledCondition) Source() string {
 	if c == nil {

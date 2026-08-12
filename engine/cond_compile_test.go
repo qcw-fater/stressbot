@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"stressbot/state"
@@ -108,5 +109,97 @@ func TestCompiledConditionKeepsLuaReferenceOutOfStateProgram(t *testing.T) {
 	}
 	if script, ok := condition.LuaScript(); !ok || script != "check_ready.lua" {
 		t.Fatalf("LuaScript() = %q, %v", script, ok)
+	}
+}
+
+func TestPrepareTaskFlowCompilesEveryConditionAndDeduplicates(t *testing.T) {
+	flow := &TaskFlow{
+		Nodes: map[string]*Node{
+			"main": {
+				Condition:      "state:ready",
+				BreakCondition: "state:done",
+				Cases:          []SwitchCase{{Condition: "state:ready"}},
+			},
+		},
+		Actions: map[string]*ActionDef{
+			"send": {
+				Bindings: []FieldBind{{
+					Condition: "state:ready",
+					Entries: []MapEntryBind{{
+						Value: FieldBind{Condition: "state:nested"},
+					}},
+				}},
+			},
+		},
+	}
+	if err := PrepareTaskFlow(flow); err != nil {
+		t.Fatal(err)
+	}
+
+	node := flow.Nodes["main"]
+	binding := &flow.Actions["send"].Bindings[0]
+	if node.compiledCondition == nil ||
+		node.compiledBreakCondition == nil ||
+		node.Cases[0].compiledCondition == nil ||
+		binding.compiledCondition == nil ||
+		binding.Entries[0].Value.compiledCondition == nil {
+		t.Fatal("not every condition location was prepared")
+	}
+	if node.compiledCondition != node.Cases[0].compiledCondition ||
+		node.compiledCondition != binding.compiledCondition {
+		t.Fatal("identical expressions must share one compiled condition")
+	}
+}
+
+func TestPreparedConditionRejectsChangedSource(t *testing.T) {
+	flow := &TaskFlow{Nodes: map[string]*Node{
+		"main": {Type: NodeBoolean, Condition: "state:ready"},
+	}}
+	if err := PrepareTaskFlow(flow); err != nil {
+		t.Fatal(err)
+	}
+	node := flow.Nodes["main"]
+	if node.preparedCondition() == nil {
+		t.Fatal("prepared condition is missing")
+	}
+
+	node.Condition = "state:other"
+	if node.preparedCondition() != nil {
+		t.Fatal("changed source must not execute stale AST")
+	}
+}
+
+func TestPrepareFieldBindingsCompilesNestedEntries(t *testing.T) {
+	bindings := []FieldBind{{
+		Condition: "state:enabled",
+		Entries: []MapEntryBind{{
+			Value: FieldBind{Condition: "state:enabled"},
+		}},
+	}}
+	if err := PrepareFieldBindings(bindings); err != nil {
+		t.Fatal(err)
+	}
+	root := bindings[0].preparedCondition()
+	nested := bindings[0].Entries[0].Value.preparedCondition()
+	if root == nil || nested == nil {
+		t.Fatal("nested field binding condition was not prepared")
+	}
+	if root != nested {
+		t.Fatal("identical nested binding conditions must share one program")
+	}
+}
+
+func TestPrepareTaskFlowReportsConditionLocation(t *testing.T) {
+	flow := &TaskFlow{Actions: map[string]*ActionDef{
+		"send": {Bindings: []FieldBind{{
+			Entries: []MapEntryBind{{Value: FieldBind{Condition: "state:hp >"}}},
+		}}},
+	}}
+	err := PrepareTaskFlow(flow)
+	if err == nil {
+		t.Fatal("malformed nested condition must fail preparation")
+	}
+	if got := err.Error(); !strings.Contains(got, `action "send" bindings[0] entries[0]`) {
+		t.Fatalf("error lacks binding location: %s", got)
 	}
 }

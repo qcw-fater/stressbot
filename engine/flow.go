@@ -65,6 +65,9 @@ type Node struct {
 
 	// ── 通用（action 节点有效）────────────────────────────
 	DelayMs int `json:"delayMs"` // > 0: 使用此值；= 0: 使用 TaskFlow.DefaultDelayMs；< 0: 禁用延迟
+
+	compiledCondition      *CompiledCondition
+	compiledBreakCondition *CompiledCondition
 }
 
 // WeightedOption 加权选项，用于 weighted 节点。
@@ -91,6 +94,8 @@ type RetryDef struct {
 type SwitchCase struct {
 	Condition string `json:"condition"` // 条件表达式，语法同 boolean/loop
 	Next      string `json:"next"`      // 条件命中后执行的节点 ID
+
+	compiledCondition *CompiledCondition
 }
 
 // ListenRef 监听引用，定义在节点上。
@@ -252,6 +257,8 @@ type FieldBind struct {
 	StoreAs       string         `json:"storeAs"`       // 将解析结果存入 state 的 key（中间变量，供后续 binding 通过 source 引用）
 	KeySource     string         `json:"keySource"`     // randomPickMap: 从 state 读取 map 的 key 列表
 	Condition     string         `json:"condition"`     // 可选条件表达式：不满足时跳过本绑定（state: 或 lua: 前缀）
+
+	compiledCondition *CompiledCondition
 }
 
 // isRequired 判断字段绑定是否为必需（缺失时触发动作跳过或报错）。

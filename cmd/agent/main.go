@@ -522,7 +522,7 @@ func loadFlow(path string) (*engine.TaskFlow, error) {
 		return nil, fmt.Errorf("解析流程配置失败: %w", err)
 	}
 
-	if err := engine.ValidateStateActions(flow); err != nil {
+	if err := engine.PrepareTaskFlow(flow); err != nil {
 		return nil, fmt.Errorf("校验流程配置失败: %w", err)
 	}
 

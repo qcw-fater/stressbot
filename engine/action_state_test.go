@@ -9,13 +9,13 @@ import (
 	"stressbot/state"
 )
 
-func TestValidateStateActionsRejectsProtectedClearKey(t *testing.T) {
+func TestPrepareTaskFlowRejectsProtectedClearKey(t *testing.T) {
 	for _, key := range []string{"id", "index", "account"} {
 		t.Run(key, func(t *testing.T) {
 			flow := &TaskFlow{Actions: map[string]*ActionDef{
 				"clear": {Pattern: PatternClearState, Keys: []string{"battleId", key}},
 			}}
-			if err := ValidateStateActions(flow); err == nil {
+			if err := PrepareTaskFlow(flow); err == nil {
 				t.Fatalf("clearState 清除 %s 应失败", key)
 			}
 		})
@@ -29,9 +29,9 @@ func TestClearStateProtectedKeyIsAtomic(t *testing.T) {
 	ae := NewActionExecutor(store, nil, nil, nil, 0)
 
 	_, _, _, err := ae.Execute(context.Background(), &ActionDef{
-		Name: "clear",
+		Name:    "clear",
 		Pattern: PatternClearState,
-		Keys: []string{"battleId", "id"},
+		Keys:    []string{"battleId", "id"},
 	})
 	if err == nil {
 		t.Fatal("包含内置状态的 clearState 应失败")
@@ -51,9 +51,9 @@ func TestClearStateDeletesNormalKeys(t *testing.T) {
 	ae := NewActionExecutor(store, nil, nil, nil, 0)
 
 	_, _, _, err := ae.Execute(context.Background(), &ActionDef{
-		Name: "clear",
+		Name:    "clear",
 		Pattern: PatternClearState,
-		Keys: []string{"battleId", "battleSession", "battleId"},
+		Keys:    []string{"battleId", "battleSession", "battleId"},
 	})
 	if err != nil {
 		t.Fatalf("普通状态清除失败: %v", err)

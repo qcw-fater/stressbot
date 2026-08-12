@@ -26,11 +26,12 @@ func validateClearStateKeys(actionName string, keys []string) error {
 	return nil
 }
 
-// ValidateStateActions checks state-action invariants immediately after flow decoding.
-func ValidateStateActions(flow *TaskFlow) error {
+// PrepareTaskFlow 在流程反序列化后检查状态动作约束，并编译所有条件表达式。
+func PrepareTaskFlow(flow *TaskFlow) error {
 	if flow == nil {
 		return nil
 	}
+	compiler := newConditionCompiler()
 	for name, def := range flow.Actions {
 		if def == nil {
 			continue
@@ -40,26 +41,30 @@ func ValidateStateActions(flow *TaskFlow) error {
 				return err
 			}
 		}
-		// 校验动作字段绑定上的条件表达式语法（fail-closed）。
 		for i := range def.Bindings {
-			if err := validateBindingCondition(fmt.Sprintf("action %q bindings[%d]", name, i), &def.Bindings[i]); err != nil {
+			where := fmt.Sprintf("action %q bindings[%d]", name, i)
+			if err := compiler.prepareBinding(where, &def.Bindings[i]); err != nil {
 				return err
 			}
 		}
 	}
-	// 校验控制流节点上的条件表达式语法（loop/boolean 的 condition、loop 的 breakCondition、switch 的 cases）。
 	for id, node := range flow.Nodes {
 		if node == nil {
 			continue
 		}
-		if err := validateFlowCondition(fmt.Sprintf("节点 %q condition", id), node.Condition); err != nil {
+		if err := compiler.prepare(
+			fmt.Sprintf("节点 %q condition", id), node.Condition, &node.compiledCondition,
+		); err != nil {
 			return err
 		}
-		if err := validateFlowCondition(fmt.Sprintf("节点 %q breakCondition", id), node.BreakCondition); err != nil {
+		if err := compiler.prepare(
+			fmt.Sprintf("节点 %q breakCondition", id), node.BreakCondition, &node.compiledBreakCondition,
+		); err != nil {
 			return err
 		}
 		for i := range node.Cases {
-			if err := validateFlowCondition(fmt.Sprintf("节点 %q cases[%d]", id, i), node.Cases[i].Condition); err != nil {
+			where := fmt.Sprintf("节点 %q cases[%d]", id, i)
+			if err := compiler.prepare(where, node.Cases[i].Condition, &node.Cases[i].compiledCondition); err != nil {
 				return err
 			}
 		}
@@ -67,34 +72,66 @@ func ValidateStateActions(flow *TaskFlow) error {
 	return nil
 }
 
-// validateFlowCondition 对单个条件表达式做加载期语法校验。
-// 仅校验 state: 前缀表达式（内置比较文法）；lua: 前缀引用脚本、其它前缀交由运行时处理；空条件跳过。
-func validateFlowCondition(where, cond string) error {
-	cond = strings.TrimSpace(cond)
-	if cond == "" {
-		return nil
-	}
-	if !strings.HasPrefix(cond, PrefixState) {
-		return nil
-	}
-	if err := ValidateConditionSyntax(cond[len(PrefixState):]); err != nil {
-		return fmt.Errorf("%s 条件表达式语法错误 %q: %w", where, cond, err)
-	}
-	return nil
-}
-
-// validateBindingCondition 递归校验字段绑定（含 map 类型的 entries）上的条件表达式语法。
-func validateBindingCondition(where string, fb *FieldBind) error {
-	if fb == nil {
-		return nil
-	}
-	if err := validateFlowCondition(where, fb.Condition); err != nil {
-		return err
-	}
-	for i := range fb.Entries {
-		if err := validateBindingCondition(fmt.Sprintf("%s entries[%d]", where, i), &fb.Entries[i].Value); err != nil {
+// PrepareFieldBindings 编译不属于 TaskFlow 的字段绑定，例如 codec 心跳绑定。
+func PrepareFieldBindings(bindings []FieldBind) error {
+	compiler := newConditionCompiler()
+	for i := range bindings {
+		if err := compiler.prepareBinding(fmt.Sprintf("bindings[%d]", i), &bindings[i]); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (c *conditionCompiler) prepare(where, source string, target **CompiledCondition) error {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		*target = nil
+		return nil
+	}
+	condition, err := c.compile(source)
+	if err != nil {
+		return fmt.Errorf("%s 条件表达式语法错误 %q: %w", where, source, err)
+	}
+	*target = condition
+	return nil
+}
+
+func (c *conditionCompiler) prepareBinding(where string, binding *FieldBind) error {
+	if binding == nil {
+		return nil
+	}
+	if err := c.prepare(where, binding.Condition, &binding.compiledCondition); err != nil {
+		return err
+	}
+	for i := range binding.Entries {
+		childWhere := fmt.Sprintf("%s entries[%d]", where, i)
+		if err := c.prepareBinding(childWhere, &binding.Entries[i].Value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func matchingCondition(source string, compiled *CompiledCondition) *CompiledCondition {
+	if compiled == nil || compiled.Source() != strings.TrimSpace(source) {
+		return nil
+	}
+	return compiled
+}
+
+func (n *Node) preparedCondition() *CompiledCondition {
+	return matchingCondition(n.Condition, n.compiledCondition)
+}
+
+func (n *Node) preparedBreakCondition() *CompiledCondition {
+	return matchingCondition(n.BreakCondition, n.compiledBreakCondition)
+}
+
+func (c *SwitchCase) preparedCondition() *CompiledCondition {
+	return matchingCondition(c.Condition, c.compiledCondition)
+}
+
+func (b *FieldBind) preparedCondition() *CompiledCondition {
+	return matchingCondition(b.Condition, b.compiledCondition)
 }
