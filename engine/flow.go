@@ -199,7 +199,7 @@ type ActionDef struct {
 	S2CProto    string         `json:"s2cProto"`    // 服务器响应 proto 全名
 	Bindings    []FieldBind    `json:"bindings"`    // C2S 字段绑定
 	Store       []StoreMapping `json:"store"`       // S2C 响应字段 -> 状态存储映射
-	Timeout     int            `json:"timeout"`     // 超时秒数（listen 模式）
+	Timeout     int            `json:"timeout"`     // 超时秒数（request/listen 模式）
 	Keys        []string       `json:"keys"`        // clearState 要清除的 key 列表
 	URL         string         `json:"url"`         // HTTP 请求 URL（httpRequest 模式），支持 state: 前缀
 	Method      string         `json:"method"`      // HTTP 方法（httpRequest 模式）：POST(默认) / GET

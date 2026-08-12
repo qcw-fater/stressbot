@@ -63,7 +63,7 @@ func loadNetworkModule(L *lua.LState) int {
 	// 监听：协作式实现（等待窗口内调度器 drain mailbox）。无独立"阻塞版"，故无 await_ 前缀别名。
 	L.SetField(mod, "tcp_listen", L.NewFunction(networkAwaitTCPListen))
 	L.SetField(mod, "udp_listen", L.NewFunction(networkAwaitUDPListen))
-	// 非阻塞单次 pop（不轮询、不 sleep）：取最近一条缓存消息的原始 body
+	// 非阻塞单次 pop：取最近一条缓存消息的原始 body
 	L.SetField(mod, "try_tcp_listen", L.NewFunction(networkTryTCPListen))
 	L.SetField(mod, "try_udp_listen", L.NewFunction(networkTryUDPListen))
 	// 密钥
@@ -369,7 +369,7 @@ func requestResultValues(L *lua.LState, ctx *Context, spec *WaitSpec, outcome Wa
 }
 
 // networkAwaitTCPRequest 实现 network.tcp_request（协作式 TCP 请求-响应）：构建请求包后 yield，
-// 等待窗口内调度器可 drain 任务队列；响应到达经通道 select 即时唤醒（不轮询，RTT 测量准确）。
+// 等待窗口内调度器可 drain 任务队列；响应到达经通道 select 即时唤醒，RTT 使用底层消息时间戳。
 // 签名：network.tcp_request(service, route, msg [, s2c_proto [, timeout_sec]])
 func networkAwaitTCPRequest(L *lua.LState) int {
 	ctx := GetContext(L)
@@ -868,11 +868,11 @@ func awaitNetworkListen(L *lua.LState, protocol string) int {
 // 签名：network.try_tcp_listen(service, route)
 //
 // 返回：err(nil|table), data(string|nil)
-//   - err=nil + data=string：取到一条消息的原始 body（**不解析 proto**，需要解析请用阻塞版 tcp_listen）。
+//   - err=nil + data=string：取到一条消息的原始 body（**不解析 proto**，需要解析请用等待版 tcp_listen）。
 //   - err=nil + data=nil：队列空、无新消息（非错误路径，不进失败统计）。
 //   - err table：codec 未映射（code=ErrEncodeFailed）或服务端 HeaderErr（code=HeaderErr），data 为原始 body 字符串或 nil。
 //
-// 与阻塞版 tcp_listen 的差异：**单次非阻塞 pop**，不轮询、不 sleep。适用于高频 sync loop 「保最新」消费场景
+// 与等待版 tcp_listen 的差异：**单次非阻塞 pop**并立即返回。适用于高频 sync loop 「保最新」消费场景
 // （如 battleAck 追踪：队列容量 1，每轮 pop 最新 ack 写 state）。
 func networkTryTCPListen(L *lua.LState) int { return networkTryListen(L, "tcp") }
 
@@ -886,7 +886,7 @@ func networkTryUDPListen(L *lua.LState) int { return networkTryListen(L, "udp") 
 //
 // 设计要点：
 //   - 单次非阻塞 pop（GetTCP/UDPListenResp 内部走 per-queue 锁），无阻塞等待。
-//   - 不解析 proto：try_* 是「原始 drain」原语，需 proto 解析的消费请用阻塞版 listen。
+//   - 不解析 proto：try_* 是「原始 drain」原语，需 proto 解析的消费请用等待版 listen。
 //   - queue 空时返回 (nil, nil)：非错误路径，脚本据此判定「无新消息」。
 //   - 服务端 HeaderErr 返回 (err table, body)：err.code = HeaderErr。
 //   - 接收 WireBytes 仍由 Context 累计（与 tcp_listen 一致）。
@@ -899,7 +899,7 @@ func networkTryListen(L *lua.LState, protocol string) int {
 
 	service := L.CheckString(1)
 	// routeKey 走 resolver.Resolve("<proto>:"+service) 出的 Go SchemaAdapter。
-	// Resolve nil → fail loud（与阻塞版 networkListen 一致；try_* 虽是 drain 原语，
+	// Resolve nil → fail loud（与 network.tcp_listen / udp_listen 一致；try_* 虽是 drain 原语，
 	// 但 routeKey 计算依赖 codec，缺 codec 必须暴露配置错误而非静默返回 timeout）。
 	adp := ctx.ResolveAdapter(protocol, service)
 	if adp == nil {

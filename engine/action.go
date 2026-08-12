@@ -22,7 +22,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// 声明式动作默认超时与轮询间隔。
+// 声明式动作默认超时与心跳间隔。
 const (
 	DefaultRequestTimeoutSec = 10   // tcpRequest / udpRequest 默认超时（秒）
 	DefaultListenTimeoutSec  = 60   // tcpListen / udpListen 默认超时（秒）

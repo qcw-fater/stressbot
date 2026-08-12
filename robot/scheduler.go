@@ -111,7 +111,7 @@ func (s *robotScheduler) wait(ctx context.Context, deadline time.Time, wake <-ch
 			return script.WaitOutcome{TimedOut: true} // listen 超时
 		}
 
-		// timer 只覆盖整个剩余 deadline；listen 到达由 wake 唤醒，不再周期轮询。
+		// timer 只覆盖整个剩余 deadline；listen 到达由 wake 唤醒。
 		// t.exec() 前必 Stop：回调里嵌套 wait 会再从池取，互不干扰。
 		if timer == nil {
 			timer = utils.GetTimer(remaining)
@@ -137,7 +137,7 @@ func (s *robotScheduler) wait(ctx context.Context, deadline time.Time, wake <-ch
 
 // awaitResponse 协作式请求-响应：发送 spec.Packet 并注册响应通道，select 通道 + taskCh。
 // taskCh 与响应通道在同一个 select 里公平竞争：响应经通道即时命中（不被 drain 批次挡），
-// 保证 WireRTT 测量不被轮询间隔污染。命中 / 超时 / 取消 / 发送失败分别返回带 Exchange / Err /
+// WireRTT 使用底层消息时间戳计算。命中 / 超时 / 取消 / 发送失败分别返回带 Exchange / Err /
 // Canceled 的 WaitOutcome，由 drive-loop 的 requestResultValues 转 Lua 值。
 func (s *robotScheduler) awaitResponse(spec *script.WaitSpec) script.WaitOutcome {
 	ctx := s.robot.ctx
@@ -196,7 +196,7 @@ func (s *robotScheduler) awaitResponse(spec *script.WaitSpec) script.WaitOutcome
 // 原语**，保证两条路径同一协作式语义——「任何阻塞点都不裸阻塞」的统一约束覆盖声明式与脚本。
 // job 内**绝不可访问业务 LState / state**（只能用线程安全句柄：ctx.Shared / httpClient / client）。
 //
-// 不内联跑阻塞调用（会卡死执行器自身），也不放进 wait 的 timer/poll 模型（Class B 的唤醒事件
+// 不内联跑阻塞调用（会卡死执行器自身），也不放进 wait 的事件/截止时间模型（Class B 的唤醒事件
 // scheduler 观测不到）——这是 Class B 区别于 Class A 的核心。
 //
 // 为什么用协程池而非裸 go：项目规范要求统一 recover 与 goroutine 追踪。提交失败会立即返回错误，

@@ -50,8 +50,8 @@ type Context struct {
 	Store   *state.Store
 	Factory *protox.Factory
 	// Resolver 按「server 串 <proto>:<service>」解析每条连接的 Go SchemaAdapter
-	// 取代旧 Context.Adapter。业务 Lua API（buildPacket / doTCPRequest /
-	// networkUDPSend / networkListen / headerErrDetail 等）通过 ctx.Resolver.Resolve
+	// 取代旧 Context.Adapter。业务 Lua API（buildPacket / networkUDPSend /
+	// awaitNetworkListen / headerErrDetail 等）通过 ctx.Resolver.Resolve
 	// （"<proto>:<service>"）取该连接的 adapter 后调 Encode/ExpectedRouteKey/DescribeError；
 	// Resolve nil 由调用方 fail loud（不静默兜底）。
 	//
@@ -585,11 +585,11 @@ func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (send, 
 	}
 }
 
-// buildResumeVals 把 Waiter 的等待结果转成喂回协程的 Lua 返回值（成为 await_* 的返回值）。
+// buildResumeVals 把 Waiter 的等待结果转成喂回协程的 Lua API 返回值。
 func (rp *RuntimePool) buildResumeVals(L *lua.LState, ctx *Context, spec *WaitSpec, outcome WaitOutcome) []lua.LValue {
 	switch spec.Kind {
 	case WaitSleep:
-		return nil // await_sleep 无返回值
+		return nil // utils.sleep 无返回值
 	case WaitListen:
 		return listenResultValues(L, ctx, spec, outcome)
 	case WaitResponse:
@@ -616,8 +616,8 @@ func (rp *RuntimePool) buildResumeVals(L *lua.LState, ctx *Context, spec *WaitSp
 // goroutine = 业务 LState 唯一所有者）串行调用，绝不能在网络 pump goroutine 内执行——
 // 否则会与主流程并发抢占同一 LState 导致栈损坏。返回值忽略；失败返回 error 供调用方记指标。
 //
-// 与 action 脚本一致跑在子线程协程上：on_message 内可直接调用 await_*（如 await_tcp_request
-// 回应推送），遇 await 时 yield，由 Waiter 协作式等待后 resume。嵌套（回调 await 期间 drain
+// 与 action 脚本一致跑在子线程协程上：on_message 内可直接调用 network.tcp_request 等
+// 协作式 API 回应推送；调用时 yield，由 Waiter 等待后 resume。嵌套等待期间 drain
 // 出另一回调）安全：resumeCoroutine 每次 resume 前重设 topThread。
 func (rp *RuntimePool) RunListenScript(L *lua.LState, scriptName string, respMsg proto.Message) error {
 	robotUD := createRobotUserData(L)

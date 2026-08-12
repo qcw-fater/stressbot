@@ -1281,7 +1281,7 @@ func (ns *netSenderAdapter) TCPSend(service string, packet []byte) (int, error) 
 }
 
 // TCPRequest 发送 TCP 请求并协作式等待响应（声明式 tcpRequest 动作用）。
-// 经 sched.awaitResponse 与 Lua await_tcp_request 同源：发送 + 等待窗口内 drain mailbox，
+// 经 sched.awaitResponse 与 Lua network.tcp_request 同源：发送 + 等待窗口内 drain mailbox，
 // 故声明式请求期间 listen 回调不被饿死。返回 SendWireBytes=已编码请求包长，RecvWireBytes=入站帧长。
 //
 // 唯一调用方是 engine.ActionExecutor.execRequest（执行器 goroutine = 业务 LState 唯一所有者），

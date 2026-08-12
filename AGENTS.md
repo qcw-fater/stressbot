@@ -136,6 +136,7 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 - 任务状态机：`pending → starting → running → stopping → stopped / failed`。单例约束：同一时刻只能有一个活跃任务。
 - Agent 心跳连续失败 `heartbeatFailThreshold` 次（默认 3）后放弃当前任务。Admin 重启后活跃任务自动重置为 `failed`。
 - 日志和错误信息使用中文。
+- 废弃字段或能力必须从前后端类型、表单、序列化、Schema、配置样例和当前源码注释中物理删除；不得保留 disabled 控件、兼容解析、注释掉的旧代码或过时说明。历史设计文档可保留当时状态。
 - Go 字段名与 JSON tag 一致：`Listens`/`listens`、`ListenRefs`/`listenRefs`、`Listen`/`listen`。`ListenDef` 是监听定义类型，`ListenCallBack`（network 包）是回调函数类型。`listen` 是外层概念，`callback` 是 listen 内部的处理机制。
 - 后端 goroutine 统一走 `utils/work_pool.go` 协程池（自带 recover）。
 - 前端请求收拢到 `services/api.ts` + `services/baselineApi.ts`，组件禁止直接 fetch。

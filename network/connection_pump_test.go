@@ -185,7 +185,7 @@ func TestPump_InboundDispatch_ListenQueue(t *testing.T) {
 	conn.inboundCh <- inboundFrame{Data: []byte("A"), WireBytes: 1, RecvFrameAt: time.Now()}
 	conn.inboundCh <- inboundFrame{Data: []byte("B"), WireBytes: 1, RecvFrameAt: time.Now()}
 
-	// 等 pump 处理完（轮询 GetListenResp 直到拿到 B）。
+	// 测试侧等待 pump 处理完，直到 GetListenResp 取到 B。
 	want := []byte{'A', 'B'}
 	for i, w := range want {
 		var got *Message

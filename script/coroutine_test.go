@@ -75,7 +75,7 @@ func TestRunActionScript_NoYield(t *testing.T) {
 	}
 }
 
-// TestAwaitSleep_YieldsAndResumes 验证 await_sleep yield 出 WaitSleep、被 Waiter 接管、
+// TestAwaitSleep_YieldsAndResumes 验证 utils.sleep yield 出 WaitSleep、被 Waiter 接管、
 // 再 resume 回脚本并跑到 return nil（成功）。
 func TestAwaitSleep_YieldsAndResumes(t *testing.T) {
 	rp := newTestPool(t, map[string]string{

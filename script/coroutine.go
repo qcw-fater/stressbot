@@ -24,14 +24,14 @@ import (
 type WaitKind int
 
 const (
-	// WaitSleep 纯计时等待（await_sleep），无唤醒条件，到时即 resume。
+	// WaitSleep 是 utils.sleep 的纯计时等待，无唤醒条件，到时即 resume。
 	WaitSleep WaitKind = iota + 1
-	// WaitListen 等待某 routeKey 的推送消息（await_tcp_listen / await_udp_listen），
-	// 由 Waiter 轮询监听队列 + drain 任务，命中或超时后 resume。
+	// WaitListen 等待 network.tcp_listen / network.udp_listen 对应 routeKey 的推送消息，
+	// Waiter 同时等待队列通知并处理 Robot mailbox，命中或超时后 resume。
 	WaitListen
-	// WaitResponse 等待一次请求的响应（await_tcp_request / await_udp_request）。
+	// WaitResponse 等待 network.tcp_request / network.udp_request 的响应。
 	// Waiter 发送 Packet 并注册响应通道，select 通道 + drain 任务，命中/超时/取消后 resume。
-	// 用通道 select（非轮询）唤醒，保证 WireRTT 测量不被轮询间隔污染。
+	// 响应到达后由通道直接唤醒，WireRTT 使用底层消息时间戳计算。
 	WaitResponse
 	// WaitIO 一次 Class B 主动阻塞 I/O（share.* Redis / http_request / connect_*）。
 	// scheduler 观测不到其唤醒事件，故由 Waiter 把 WaitSpec.IOJob 投递到后台 goroutine 实际

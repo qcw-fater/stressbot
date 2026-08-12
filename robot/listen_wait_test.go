@@ -11,9 +11,7 @@ import (
 )
 
 // TestWaitMeasuresListenWaitFromFrameArrival 监听等待的终点是帧被内核收到的时刻，
-// 而不是本轮轮询发现它的时刻。
-//
-// 回归的是调度误差：计时终点必须取帧到达时刻，而不是 owner 被事件唤醒后的时刻。
+// 而不是 Robot owner 被事件唤醒后的时刻，避免把调度延迟计入监听等待。
 func TestWaitMeasuresListenWaitFromFrameArrival(t *testing.T) {
 	ctx := t.Context()
 	r := newWaitRobot(ctx)
@@ -36,7 +34,7 @@ func TestWaitMeasuresListenWaitFromFrameArrival(t *testing.T) {
 		t.Fatalf("ListenWaitKind = %v, want Measured", out.ListenWaitKind)
 	}
 	if out.ListenWait <= 0 || out.ListenWait > 150*time.Millisecond {
-		t.Fatalf("ListenWait = %v，应接近帧到达耗时(~40ms)而非轮询间隔(200ms)", out.ListenWait)
+		t.Fatalf("ListenWait = %v，应接近帧到达耗时(~40ms)", out.ListenWait)
 	}
 }
 

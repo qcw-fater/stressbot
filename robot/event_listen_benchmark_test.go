@@ -13,7 +13,7 @@ import (
 )
 
 // BenchmarkEventListen10000Idle 验证 1 万个空闲 listener 在 120ms 窗口内只做边界检查，
-// 不会按旧 50ms poll 周期反复唤醒。使用 -benchtime=1x 作为固定规模性能门禁。
+// 期间没有消息事件就保持休眠。使用 -benchtime=1x 作为固定规模性能门禁。
 func BenchmarkEventListen10000Idle(b *testing.B) {
 	const listeners = 10_000
 	for range b.N {
