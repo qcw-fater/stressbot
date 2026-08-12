@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -54,16 +53,10 @@ func main() {
 
 	configPath := flag.String("config", "conf/admin-config.json", "Admin 配置文件路径")
 	daemonFlag := flag.Bool("d", false, "以守护进程模式运行")
-	migrationFlag := flag.String("migration", "auto", "数据库迁移模式：auto|status|up|up-by-one")
 	flag.Parse()
-	migrationCommand, err := admin.ParseMigrationCommand(*migrationFlag)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		exitProcess(1)
-	}
 
 	// -d 模式：fork 子进程后父进程退出
-	if migrationCommand == admin.MigrationAuto && *daemonFlag {
+	if *daemonFlag {
 		utils.Daemon("-d")
 		return
 	}
@@ -75,7 +68,7 @@ func main() {
 	}
 
 	// 配置中启用守护进程且当前不是守护进程子进程
-	if migrationCommand == admin.MigrationAuto && cfg.Daemon && os.Getppid() != 1 {
+	if cfg.Daemon && os.Getppid() != 1 {
 		utils.Daemon()
 		return
 	}
@@ -92,15 +85,14 @@ func main() {
 	closeLog = stresslog.InitLog(cfg.Log.Path, "admin", logConf, "")
 
 	stresslog.Info("[MAIN] Admin 服务器启动", zap.String("version", Version))
-	if migrationCommand != admin.MigrationAuto {
-		if err := admin.RunMigrationCommand(context.Background(), *cfg, migrationCommand, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "数据库迁移命令失败: %v\n", err)
-			exitProcess(1)
-		}
-		return
+
+	srv, err := admin.NewAdminServer(*cfg)
+	if err != nil {
+		stresslog.Error("[MAIN] 初始化 Admin 服务器失败", zap.Error(err))
+		exitProcess(1)
 	}
 
-	// pprof 调试服务（独立端口，不依赖 monitor）
+	// pprof 调试服务（独立端口，不依赖 monitor），数据库迁移成功后才开放。
 	var stopPprof func()
 	if cfg.Pprof != nil {
 		pprofPort := cfg.Pprof.Port
@@ -108,12 +100,6 @@ func main() {
 			pprofPort = 6060
 		}
 		stopPprof = utils.StartPprofServer(pprofPort)
-	}
-
-	srv, err := admin.NewAdminServer(*cfg)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "初始化 Admin 服务器失败: %v\n", err)
-		exitProcess(1)
 	}
 
 	if err := srv.Run(); err != nil {

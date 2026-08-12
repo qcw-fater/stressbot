@@ -647,7 +647,7 @@ func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments [
 		}
 		return
 	}
-	stresslog.Info("[ADMIN] gRPC 启动命令已持久化并调度", zap.String("taskID", taskID), zap.Int("agents", len(succeeded)))
+	stresslog.Info("[ADMIN] gRPC 启动命令已创建并调度", zap.String("taskID", taskID), zap.Int("agents", len(succeeded)))
 }
 
 func (s *AdminServer) handleStopTask(w http.ResponseWriter, r *http.Request) {

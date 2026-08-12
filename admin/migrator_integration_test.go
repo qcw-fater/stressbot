@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"io"
 	"os"
 	"strings"
 	"sync"
@@ -134,7 +133,7 @@ func createLegacyTemplateSchema(t *testing.T, db *sql.DB) {
 func assertMigrationsIdempotent(t *testing.T, db *sql.DB) {
 	t.Helper()
 	for attempt := 1; attempt <= 2; attempt++ {
-		if err := runMySQLMigrations(context.Background(), db, MigrationUp, io.Discard); err != nil {
+		if err := runMySQLMigrations(context.Background(), db); err != nil {
 			t.Fatalf("migration attempt %d: %v", attempt, err)
 		}
 	}
@@ -209,7 +208,7 @@ func TestMigrationIntegration(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				errs <- runMySQLMigrations(context.Background(), db, MigrationUp, io.Discard)
+				errs <- runMySQLMigrations(context.Background(), db)
 			}()
 		}
 		wg.Wait()

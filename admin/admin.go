@@ -90,7 +90,7 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 			return nil, fmt.Errorf("connect mysql: %w", err)
 		}
 		s.db = db
-		if err := runMySQLMigrations(context.Background(), db, MigrationAuto, nil); err != nil {
+		if err := runMySQLMigrations(context.Background(), db); err != nil {
 			return nil, fmt.Errorf("migrate mysql schema: %w", err)
 		}
 		stresslog.Info("[ADMIN] MySQL 已连接且迁移检查通过",
@@ -110,15 +110,7 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 	}
 	s.bundles = bundles
 	s.sessions = NewSessionRegistry()
-	if s.db != nil {
-		s.commandStore = NewMySQLCommandStore(s.db)
-	} else {
-		s.commandStore = NewMemoryCommandStore(100_000)
-		stresslog.Warn("[ADMIN] MySQL 未配置：命令日志使用有界内存，Admin 重启后待投递命令不可恢复")
-	}
-	if err := s.commandStore.CancelPendingTaskCommands(context.Background(), "Admin 重启：旧任务已终止"); err != nil {
-		return nil, fmt.Errorf("cancel stale task commands: %w", err)
-	}
+	s.commandStore = NewMemoryCommandStore(100_000)
 	s.commandBus = NewCommandBus(s.commandStore, s.sessions, 8192)
 
 	// 3. AgentRegistry
@@ -254,9 +246,6 @@ func (s *AdminServer) shutdown(ctx context.Context) error {
 	}
 
 	// 后台任务全部退出后再释放其可能使用的存储资源。
-	if s.commandStore != nil {
-		shutdownErr = errors.Join(shutdownErr, s.commandStore.Close())
-	}
 	if s.history != nil {
 		shutdownErr = errors.Join(shutdownErr, s.history.Close())
 	}

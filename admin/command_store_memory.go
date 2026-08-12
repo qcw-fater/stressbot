@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"container/list"
 	"context"
 	"fmt"
 	"sort"
@@ -18,17 +19,24 @@ type memoryCommand struct {
 }
 
 type MemoryCommandStore struct {
-	mu       sync.RWMutex
-	commands map[string]*memoryCommand
-	next     uint64
-	capacity int
+	mu               sync.RWMutex
+	commands         map[string]*memoryCommand
+	pendingByAgent   map[string][]*memoryCommand
+	terminalCommands *list.List
+	next             uint64
+	capacity         int
 }
 
 func NewMemoryCommandStore(capacity int) *MemoryCommandStore {
 	if capacity <= 0 {
 		capacity = 100_000
 	}
-	return &MemoryCommandStore{commands: make(map[string]*memoryCommand), capacity: capacity}
+	return &MemoryCommandStore{
+		commands:         make(map[string]*memoryCommand),
+		pendingByAgent:   make(map[string][]*memoryCommand),
+		terminalCommands: list.New(),
+		capacity:         capacity,
+	}
 }
 
 func (s *MemoryCommandStore) CreateBatch(ctx context.Context, commands []*controlv1.Command) error {
@@ -37,10 +45,6 @@ func (s *MemoryCommandStore) CreateBatch(ctx context.Context, commands []*contro
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.makeRoomLocked(len(commands))
-	if len(s.commands)+len(commands) > s.capacity {
-		return ErrCommandStoreFull
-	}
 	seen := make(map[string]struct{}, len(commands))
 	for _, command := range commands {
 		if command == nil || command.CommandId == "" || command.AgentId == "" {
@@ -57,35 +61,41 @@ func (s *MemoryCommandStore) CreateBatch(ctx context.Context, commands []*contro
 		}
 		seen[command.CommandId] = struct{}{}
 	}
+	if !s.makeRoomLocked(len(commands)) {
+		return ErrCommandStoreFull
+	}
+	now := time.Now().UnixNano()
 	for _, command := range commands {
 		s.next++
 		command.Sequence = s.next
 		if command.CreatedAtUnixNano == 0 {
-			command.CreatedAtUnixNano = time.Now().UnixNano()
+			command.CreatedAtUnixNano = now
 		}
-		s.commands[command.CommandId] = &memoryCommand{
+		record := &memoryCommand{
 			command: proto.Clone(command).(*controlv1.Command),
 			state:   "pending",
 		}
+		s.commands[command.CommandId] = record
+		s.pendingByAgent[command.AgentId] = append(s.pendingByAgent[command.AgentId], record)
 	}
 	return nil
 }
 
-func (s *MemoryCommandStore) makeRoomLocked(needed int) {
+func (s *MemoryCommandStore) makeRoomLocked(needed int) bool {
 	overflow := len(s.commands) + needed - s.capacity
 	if overflow <= 0 {
-		return
+		return true
 	}
-	candidates := make([]*memoryCommand, 0, len(s.commands))
-	for _, record := range s.commands {
-		if record.state != "pending" {
-			candidates = append(candidates, record)
-		}
+	if overflow > s.terminalCommands.Len() {
+		return false
 	}
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].command.Sequence < candidates[j].command.Sequence })
-	for i := 0; i < overflow && i < len(candidates); i++ {
-		delete(s.commands, candidates[i].command.CommandId)
+	for range overflow {
+		oldest := s.terminalCommands.Front()
+		record := oldest.Value.(*memoryCommand)
+		delete(s.commands, record.command.CommandId)
+		s.terminalCommands.Remove(oldest)
 	}
+	return true
 }
 
 func (s *MemoryCommandStore) Get(ctx context.Context, id string) (*controlv1.Command, error) {
@@ -110,15 +120,14 @@ func (s *MemoryCommandStore) Pending(ctx context.Context, agentID string, after 
 	if limit <= 0 || limit > commandReplayBatchSize {
 		limit = commandReplayBatchSize
 	}
-	out := make([]*controlv1.Command, 0, min(limit, len(s.commands)))
-	for _, record := range s.commands {
-		if record.state == "pending" && record.command.AgentId == agentID && record.command.Sequence > after {
-			out = append(out, proto.Clone(record.command).(*controlv1.Command))
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Sequence < out[j].Sequence })
-	if len(out) > limit {
-		out = out[:limit]
+	records := s.pendingByAgent[agentID]
+	start := sort.Search(len(records), func(i int) bool {
+		return records[i].command.Sequence > after
+	})
+	count := min(limit, len(records)-start)
+	out := make([]*controlv1.Command, 0, count)
+	for _, record := range records[start : start+count] {
+		out = append(out, proto.Clone(record.command).(*controlv1.Command))
 	}
 	return out, nil
 }
@@ -139,22 +148,27 @@ func (s *MemoryCommandStore) Acknowledge(ctx context.Context, id string, status 
 	}
 	if record.state == "pending" {
 		record.state = state
+		s.removePendingLocked(record)
+		s.terminalCommands.PushBack(record)
 	}
 	return nil
 }
 
-func (s *MemoryCommandStore) CancelPendingTaskCommands(ctx context.Context, _ string) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, record := range s.commands {
-		if record.state == "pending" && record.command.TaskId != "" {
-			record.state = "rejected"
+func (s *MemoryCommandStore) removePendingLocked(target *memoryCommand) {
+	agentID := target.command.AgentId
+	records := s.pendingByAgent[agentID]
+	for i, record := range records {
+		if record != target {
+			continue
 		}
+		copy(records[i:], records[i+1:])
+		records[len(records)-1] = nil
+		records = records[:len(records)-1]
+		if len(records) == 0 {
+			delete(s.pendingByAgent, agentID)
+		} else {
+			s.pendingByAgent[agentID] = records
+		}
+		return
 	}
-	return nil
 }
-
-func (s *MemoryCommandStore) Close() error { return nil }

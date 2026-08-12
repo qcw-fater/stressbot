@@ -19,8 +19,6 @@ type CommandStore interface {
 	Get(context.Context, string) (*controlv1.Command, error)
 	Pending(context.Context, string, uint64, int) ([]*controlv1.Command, error)
 	Acknowledge(context.Context, string, controlv1.CommandAckStatus, string) error
-	CancelPendingTaskCommands(context.Context, string) error
-	Close() error
 }
 
 func commandKind(command *controlv1.Command) (string, error) {

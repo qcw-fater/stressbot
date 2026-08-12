@@ -934,7 +934,7 @@ gnet `OnTraffic`：peek header → `BodyLength()` 纯 Go 计算 → read frame �
 | AgentRegistry | Agent 注册 / 心跳 / 健康检查 / 离线清理 |
 | MetricsAggregator | 分布式指标聚合（MergeSnapshots） |
 | SessionRegistry / CommandBus | gRPC 会话管理 + 可靠命令投递 |
-| CommandStore | 命令日志与确认状态持久化 |
+| CommandStore | 有界内存命令日志与确认状态 |
 | BundleStore | 按 SHA-256 流式下发任务资源包 |
 | TelemetryIngestor | 有界 latest-wins 指标接入 |
 | HistoryStore | MySQL 历史归档 |
