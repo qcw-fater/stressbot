@@ -519,7 +519,6 @@ type ActionDef struct {
     Bindings    []FieldBind    `json:"bindings"`    // C2S 字段绑定
     Store       []StoreMapping `json:"store"`       // S2C 响应字段 -> 状态存储映射
     Timeout     int            `json:"timeout"`     // 超时秒数（listen 模式）
-    PollMs      int            `json:"pollMs"`      // 轮询间隔毫秒（listen 模式）
     Keys        []string       `json:"keys"`        // clearState 要清除的 key 列表
     URL         string         `json:"url"`         // HTTP 请求 URL
     Method      string         `json:"method"`      // HTTP 方法（POST 默认 / GET）
@@ -596,13 +595,13 @@ type ActionDef struct {
 1. 调用 `netSender.CloseTCP/UDP(service)` 关闭连接
 
 **tcpListen / udpListen**：
-1. 计算超时（默认 `DefaultListenTimeoutSec = 60` 秒）和轮询间隔（默认 `DefaultPollMs = 100` 毫秒）
+1. 计算超时（默认 `DefaultListenTimeoutSec = 60` 秒）
 2. 计算路由键
-3. 轮询循环（不自行注册监听，依赖前驱节点 listenRefs 预注册）：
-   - 检查 context 取消
-   - 调用 `netSender.GetTCPListenResp/UDPListenResp` 非阻塞获取已缓存响应
+3. 通过队列事件等待已预注册监听（等待期间继续处理 Robot mailbox）：
+   - 队列已有消息时立即返回
+   - 新消息入队时由容量 1 的边沿通知唤醒
+   - 同时监听 context 取消和 deadline
    - 收到响应后：检查 headerErr、解析存储、返回
-   - 等待 pollMs 后重试
 4. 超时时返回 `NewActionError(ErrListenTimeout, ...)`
 
 **httpRequest**：
@@ -762,7 +761,7 @@ type StoreMapping struct {
 type ListenRef struct {
     Route  any    `json:"route"`  // 不透明路由
     Server string `json:"server"` // 连接名，格式：协议:服务名（如 "tcp:logic"）
-    Listen string `json:"listen"` // 监听定义名称，空 = 仅轮询不回调
+    Listen string `json:"listen"` // 监听定义名称，空 = 仅缓存不回调
 }
 ```
 
@@ -776,14 +775,16 @@ type ListenRef struct {
 type ListenDef struct {
     S2CProto string         `json:"s2cProto"` // 解析推送消息的 proto 全名
     Store    []StoreMapping `json:"store"`    // 响应字段到 StateStore 的映射
-    Script   string         `json:"script"`   // 已废弃；配置非空会在注册时返回错误
+    Script   string         `json:"script"`   // Lua listen 回调脚本；与 Store 互斥
 }
 ```
 
 当前判别：
-- `Script` 非空 -> 配置错误，listen 脚本回调已移除
+- `Script` 非空 -> 协作式 Lua 回调（由 Robot mailbox 串行执行，不在网络 pump 中执行 Lua）
 - `S2CProto` 非空且 `Store` 非空 -> Go-store 回调（解析 proto + 存储字段）
-- 否则 -> 仅缓存到监听队列，供主流程轮询消费
+- 否则 -> 仅缓存到监听队列，由主流程事件等待消费
+
+`Script` 与 `Store` 同时非空会在注册阶段直接报配置错误，避免同一推送双写 state。
 
 ## 14. 条件解析器
 
@@ -981,7 +982,6 @@ type ActionError struct {
 |------|----|------|
 | `DefaultRequestTimeoutSec` | 10 | tcpRequest/udpRequest 默认超时（秒） |
 | `DefaultListenTimeoutSec` | 60 | tcpListen/udpListen 默认超时（秒） |
-| `DefaultPollMs` | 100 | 轮询间隔（毫秒） |
 | `DefaultHeartbeatMs` | 3000 | 心跳默认间隔（毫秒） |
 
 ## 18. 与计划的差异汇总

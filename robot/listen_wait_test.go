@@ -1,31 +1,36 @@
 package robot
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"stressbot/engine"
+	"stressbot/monitor"
+	"stressbot/network"
 )
 
 // TestWaitMeasuresListenWaitFromFrameArrival 监听等待的终点是帧被内核收到的时刻，
 // 而不是本轮轮询发现它的时刻。
 //
-// 回归的是轮询取整误差：若以「发现时刻」为终点，测出来的是 pollMs 的整数倍，
-// 轮询间隔越大偏得越多，服务端推送的真实延迟被埋掉。
+// 回归的是调度误差：计时终点必须取帧到达时刻，而不是 owner 被事件唤醒后的时刻。
 func TestWaitMeasuresListenWaitFromFrameArrival(t *testing.T) {
 	ctx := t.Context()
 	r := newWaitRobot(ctx)
 
-	// 帧在等待开始后 40ms 到达，但轮询间隔 200ms——发现它至少要等到 200ms。
+	wake := make(chan struct{}, 1)
+	var ready atomic.Pointer[engine.NetExchange]
 	frameAt := time.Now().Add(40 * time.Millisecond)
 	check := func() *engine.NetExchange {
-		if time.Now().Before(frameAt) {
-			return nil
-		}
-		return &engine.NetExchange{Body: []byte("hit"), RecvFrameAt: frameAt}
+		return ready.Load()
 	}
+	timer := time.AfterFunc(time.Until(frameAt), func() {
+		ready.Store(&engine.NetExchange{Body: []byte("hit"), RecvFrameAt: frameAt})
+		wake <- struct{}{}
+	})
+	defer timer.Stop()
 
-	out := r.sched.wait(time.Now().Add(2*time.Second), 200, check)
+	out := r.sched.wait(ctx, time.Now().Add(2*time.Second), wake, check)
 
 	if out.ListenWaitKind != engine.ListenWaitMeasured {
 		t.Fatalf("ListenWaitKind = %v, want Measured", out.ListenWaitKind)
@@ -46,7 +51,7 @@ func TestWaitMarksAlreadyQueuedMessageAsReady(t *testing.T) {
 		return &engine.NetExchange{Body: []byte("cached"), RecvFrameAt: arrived}
 	}
 
-	out := r.sched.wait(time.Now().Add(time.Second), 5, check)
+	out := r.sched.wait(ctx, time.Now().Add(time.Second), nil, check)
 
 	if out.ListenWaitKind != engine.ListenWaitReady {
 		t.Fatalf("ListenWaitKind = %v, want Ready", out.ListenWaitKind)
@@ -65,9 +70,36 @@ func TestWaitWithoutFrameTimestampIsUnknown(t *testing.T) {
 		return &engine.NetExchange{Body: []byte("no-timestamp")}
 	}
 
-	out := r.sched.wait(time.Now().Add(time.Second), 5, check)
+	out := r.sched.wait(ctx, time.Now().Add(time.Second), nil, check)
 
 	if out.ListenWaitKind != engine.ListenWaitUnknown {
 		t.Fatalf("ListenWaitKind = %v, want Unknown", out.ListenWaitKind)
+	}
+}
+
+func TestNetSenderTCPListenUsesConnectionNotification(t *testing.T) {
+	ctx := t.Context()
+	r := newWaitRobot(ctx)
+	r.client = network.NewClient("event-listen-test", time.Second, monitor.TimingRTTOnly)
+	if !r.client.ConnectTCP("logic") {
+		t.Fatal("创建 TCP 连接占位失败")
+	}
+	conn := r.client.GetTCPConn("logic")
+	if err := conn.RegisterListen("push", nil, 4); err != nil {
+		t.Fatalf("RegisterListen() error = %v", err)
+	}
+
+	frameAt := time.Now().Add(20 * time.Millisecond)
+	timer := time.AfterFunc(time.Until(frameAt), func() {
+		conn.OnReceive("push", []byte("payload"), 0, 11, network.MessageTiming{RecvFrameAt: frameAt})
+	})
+	defer timer.Stop()
+
+	exchange, err := (&netSenderAdapter{robot: r}).TCPListen(ctx, "logic", "push", time.Second)
+	if err != nil {
+		t.Fatalf("TCPListen() error = %v", err)
+	}
+	if exchange == nil || string(exchange.Body) != "payload" || exchange.RecvWireBytes != 11 {
+		t.Fatalf("TCPListen() exchange = %+v", exchange)
 	}
 }

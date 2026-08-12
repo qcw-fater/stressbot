@@ -307,10 +307,9 @@ const networkModule: LuaModule = {
         { name: 'route', type: 'table', doc: '路由（用于计算响应键）' },
         { name: 's2c_proto', type: 'string', optional: true, doc: '响应 proto 全名；传则解析 data，不传则 data 为字节串' },
         { name: 'timeout_sec', type: 'number', optional: true, doc: '超时秒数（默认 60）' },
-        { name: 'poll_ms', type: 'number', optional: true, doc: '轮询间隔毫秒（默认 100）' },
       ],
       returns: 'err, data : (nil|table, ...|nil)',
-      summary: '等待 UDP 服务端推送（轮询 ListenRefs 预缓存）',
+      summary: '事件等待 UDP 服务端推送（由 ListenRefs 预缓存队列唤醒）',
       detail: 'err=nil 成功；err table 失败（code=31 超时 / 6 取消 / 12 解析失败 / 其他=服务端 HeaderErr，含 detail）。data 形态由 s2c_proto 决定：传了 → 只读 proto 视图对象（用 proto.get_field/get_path/list_size 等窄读，零拷贝）；不传 → 字节串（string）；解析失败 → data=nil。需先调用 ensure_udp_listener() 注册监听占位。',
     },
     {
@@ -334,10 +333,9 @@ const networkModule: LuaModule = {
         { name: 'route', type: 'table', doc: '路由（用于计算响应键）' },
         { name: 's2c_proto', type: 'string', optional: true, doc: '响应 proto 全名；传则解析 data，不传则 data 为字节串' },
         { name: 'timeout_sec', type: 'number', optional: true, doc: '超时秒数（默认 60）' },
-        { name: 'poll_ms', type: 'number', optional: true, doc: '轮询间隔毫秒（默认 100）' },
       ],
       returns: 'err, data : (nil|table, ...|nil)',
-      summary: '等待 TCP 服务端推送（轮询 ListenRefs 预缓存）',
+      summary: '事件等待 TCP 服务端推送（由 ListenRefs 预缓存队列唤醒）',
       detail: 'err=nil 成功；err table 失败（code=31 超时 / 6 取消 / 12 解析失败 / 其他=服务端 HeaderErr，含 detail）。data 形态由 s2c_proto 决定：传了 → 只读 proto 视图对象（用 proto.get_field/get_path/list_size 等窄读，零拷贝）；不传 → 字节串（string）；解析失败 → data=nil。需先调用 ensure_tcp_listener() 注册监听占位。等待期间只阻塞当前机器人主流程；连接收包与声明式心跳会继续独立运行。',
     },
     {

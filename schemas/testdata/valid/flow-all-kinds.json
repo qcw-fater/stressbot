@@ -25,7 +25,6 @@
       "c2sProto": "demo.C2S",
       "s2cProto": "demo.S2C",
       "timeout": 3,
-      "pollMs": 100,
       "bindings": [
         { "field": "a", "type": "fixed", "value": 1 },
         { "field": "b", "type": "state", "source": "b" },

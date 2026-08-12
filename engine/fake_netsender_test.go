@@ -1,6 +1,9 @@
 package engine
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // fakeNetSender 为 engine 单元测试提供 NetSender 空实现；各测试按需覆盖单个方法。
 type fakeNetSender struct{}
@@ -11,6 +14,12 @@ func (f *fakeNetSender) TCPRequest(string, []byte, string, ...time.Duration) (*N
 	return nil, nil
 }
 func (f *fakeNetSender) UDPRequest(string, []byte, string, ...time.Duration) (*NetExchange, error) {
+	return nil, nil
+}
+func (f *fakeNetSender) TCPListen(context.Context, string, string, time.Duration) (*NetExchange, error) {
+	return nil, nil
+}
+func (f *fakeNetSender) UDPListen(context.Context, string, string, time.Duration) (*NetExchange, error) {
 	return nil, nil
 }
 func (f *fakeNetSender) ConnectTCP(string, string) error { return nil }

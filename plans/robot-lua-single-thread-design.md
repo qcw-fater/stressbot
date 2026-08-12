@@ -135,11 +135,11 @@ panic 栈最终停在 `[G]: in function 'type'`，即 `type(v)` 本身崩溃。�
 
 ### 4.2 三类顾虑的取舍解法
 
-#### 顾虑一：listen 的 `script` 比 `tcpListen` 「即时」（无轮询延迟），如何取舍？
+#### 顾虑一：listen 的 `script` 与 `tcpListen` 如何保证即时性？
 
-**关键澄清：B ≠ tcpListen。** tcpListen 的延迟来自「主流程得**主动去 buffer 里捞**，频率受 pollMs 限制」。B 的推送分发**保持推送驱动、消息到达即处理**，只是把「到达即跑 Lua」换成「到达即用 Go 原生写 state」。因此：
+`tcpListen` 与 B 都由推送事件直接唤醒；B 只是把「到达即跑 Lua」换成「到达即用 Go 原生写 state」。因此：
 
-- **数据落地是即时的**（与现在 listen script 同样即时，优于 tcpListen）。
+- **数据落地由消息事件直接触发**（与 listen script、tcpListen 都不受定时检查间隔限制）。
 - 唯一挪走的是「到达即跑 Lua 逻辑」，挪进主流程。
 
 **而这次挪动实际上零延迟损失**：现在回调「即时」产出的标志位/Redis 值，下游消费本就是**轮询**的（队员主流程在 `utils.sleep` 循环里轮询 join 结果；队长在 `waitForJoinedCount` 里轮询 Redis）。所以「即时回调」从来不是端到端即时——它喂给的是个轮询消费者。B 把「写标志位」从回调挪到主流程自己的轮询循环里：推送到达 → state 瞬间写好（Go 原生）→ 主流程下一轮 poll 读到 → 单线程内安全地写 Redis/置标志。**端到端延迟与现在完全一致**（都卡在下游 poll），却消除了 VM 并发。

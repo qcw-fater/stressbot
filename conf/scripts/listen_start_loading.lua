@@ -10,7 +10,6 @@ local utils = require("utils")
 local log = require("log")
 
 local START_LOADING_TIMEOUT_MS = 180 * 1000
-local POLL_MS = 500
 local POLL_SLICE_SEC = 5
 
 local function same_id(left, right)
@@ -163,7 +162,7 @@ function execute(r)
         if timeoutSec > POLL_SLICE_SEC then timeoutSec = POLL_SLICE_SEC end
 
         local err, resp = network.tcp_listen(
-            "logic", {cmd=4, act=6}, "Game.BattleStartLoadingS2C", timeoutSec, POLL_MS)
+            "logic", {cmd=4, act=6}, "Game.BattleStartLoadingS2C", timeoutSec)
         if err then
             if tonumber(err.code) ~= 31 then
                 log.error("ListenStartLoading 等待开始加载失败: service=logic route=4:6 "

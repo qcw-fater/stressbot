@@ -3,6 +3,7 @@ package network
 import (
 	"sync"
 	"testing"
+	"time"
 )
 
 // mkMsg 是测试辅助：构造一个仅带 RouteKey 与可区分 Data 的 *Message。
@@ -286,5 +287,96 @@ func TestListenQueue_ConcurrentSmoke_Capacity1(t *testing.T) {
 	}
 	if _, ok := q.Pop(); ok {
 		t.Fatal("容量 1 pop 后再 Pop 应 ok=false")
+	}
+}
+
+// --- 事件通知：channel 只做边沿唤醒，队列仍是唯一消息源 ---
+
+func TestListenQueue_NotifyPushCoalescesAndDrains(t *testing.T) {
+	q := newListenQueue(3)
+	notify := q.Notify()
+
+	select {
+	case <-notify:
+		t.Fatal("空队列不应存在通知")
+	default:
+	}
+
+	q.Push(mkMsg("k", 'A'))
+	select {
+	case <-notify:
+	case <-time.After(time.Second):
+		t.Fatal("Push 后未收到通知")
+	}
+
+	// 消费首个通知后继续 Push 两条：容量 1 的通知最多保留一个唤醒提示，
+	// 消息本身仍全部留在容量 3 的 FIFO 队列里。
+	q.Push(mkMsg("k", 'B'))
+	q.Push(mkMsg("k", 'C'))
+	select {
+	case <-notify:
+	case <-time.After(time.Second):
+		t.Fatal("后续 Push 未补充通知")
+	}
+	select {
+	case <-notify:
+		t.Fatal("连续 Push 的通知应合并为一个")
+	default:
+	}
+
+	for _, want := range []byte{'A', 'B', 'C'} {
+		got, ok := q.Pop()
+		if !ok || msgPayload(got) != want {
+			t.Fatalf("Pop = %q(ok=%v), want %q", msgPayload(got), ok, want)
+		}
+	}
+	select {
+	case <-notify:
+		t.Fatal("队列清空后不应残留陈旧通知")
+	default:
+	}
+}
+
+func TestListenQueue_NotifyClearRemovesSignal(t *testing.T) {
+	q := newListenQueue(1)
+	notify := q.Notify()
+	q.Push(mkMsg("k", 'A'))
+	q.Clear()
+
+	select {
+	case <-notify:
+		t.Fatal("Clear 后不应残留通知")
+	default:
+	}
+	if _, ok := q.Pop(); ok {
+		t.Fatal("Clear 后队列应为空")
+	}
+}
+
+func TestListenQueue_NotifyNoLostWakeAfterEmptyPop(t *testing.T) {
+	q := newListenQueue(1)
+	notify := q.Notify()
+	checkedEmpty := make(chan struct{})
+	result := make(chan *Message, 1)
+
+	go func() {
+		if _, ok := q.Pop(); ok {
+			result <- nil
+			return
+		}
+		close(checkedEmpty)
+		select {
+		case <-notify:
+			m, _ := q.Pop()
+			result <- m
+		case <-time.After(time.Second):
+			result <- nil
+		}
+	}()
+
+	<-checkedEmpty
+	q.Push(mkMsg("k", 'Z'))
+	if got := <-result; got == nil || msgPayload(got) != 'Z' {
+		t.Fatalf("空检查与等待之间的 Push 丢失：got=%v", got)
 	}
 }

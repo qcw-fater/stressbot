@@ -14,7 +14,6 @@ describe('pruneActionByPattern', () => {
       bindings: [{ type: 'fixed', field: 'id', value: 1 }],
       store: [{ field: 'id', setter: 'id' }],
       timeout: 10,
-      pollMs: 100,
     };
 
     expect(pruneActionByPattern(action)).toEqual({

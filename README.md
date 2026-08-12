@@ -250,12 +250,12 @@ Executor 遍历节点图 → 命中 action 节点
 | `tcpRequest`        | TCP 请求-响应（一发一收 + 超时） |
 | `tcpConnect`        | 建立 TCP 连接（`service` + `address`，支持 `state:` 前缀取地址） |
 | `tcpClose`          | 关闭 TCP 连接（`service`） |
-| `tcpListen`         | 消费 TCP 推送（需 listenRefs 预注册，超时 `timeout` 秒，轮询间隔 `pollMs`） |
+| `tcpListen`         | 事件等待 TCP 推送（需 listenRefs 预注册，超时 `timeout` 秒） |
 | `udpSend`           | UDP 发送 protobuf（使用 `c2sProto` + bindings） |
 | `udpRequest`        | UDP 请求-响应（一发一收 + 超时） |
 | `udpConnect`        | 建立 UDP 连接（`service` + `address`） |
 | `udpClose`          | 关闭 UDP 连接（`service`） |
-| `udpListen`         | 消费 UDP 推送（需 listenRefs 预注册，超时 `timeout` 秒，轮询间隔 `pollMs`） |
+| `udpListen`         | 事件等待 UDP 推送（需 listenRefs 预注册，超时 `timeout` 秒） |
 | `httpRequest`       | HTTP 请求（`url` + `method` + `contentType` + body） |
 | `setState`          | 从 bindings 写入 state |
 | `clearState`        | 清除 state（`keys` 列表） |
@@ -275,7 +275,6 @@ Executor 遍历节点图 → 命中 action 节点
 | `bindings`     | C2S 字段绑定数组 |
 | `store`        | S2C 字段 → state 映射 |
 | `timeout`      | 超时秒数（listen 默认 60；request 默认沿用连接 `requestTimeout` 配置值，显式设置则覆盖） |
-| `pollMs`       | 轮询间隔毫秒（listen 模式，默认 100） |
 | `keys`         | clearState 要删除的 key 列表 |
 | `url`          | HTTP 请求 URL（`httpRequest` 模式），支持 `state:` 前缀 |
 | `method`       | HTTP 方法（`httpRequest`，默认 POST） |
@@ -384,7 +383,7 @@ Executor 遍历节点图 → 命中 action 节点
 
 - **声明式**：`s2cProto` + `store`，推送到达后自动解析并存入 state（纯 Go，无 Lua）。
 - **Lua 回调**：`script` 指定脚本，与 `store` 互斥；回调被投递到机器人任务队列，由执行器在等待窗口串行执行（不在网络 pump goroutine 内碰 LState）。
-- **空 `{}`**：仅轮询消费推送、不触发任何回调（用于 `tcpListen`/`udpListen` 动作取数据）。
+- **空 `{}`**：仅缓存推送、不触发任何回调（用于 `tcpListen`/`udpListen` 事件等待取数据）。
 
 在 action 节点上通过 `listenRefs` 注册（`listen` 引用 `listens` 表的 key）：
 
@@ -401,7 +400,7 @@ Executor 遍历节点图 → 命中 action 节点
 
 - `route`：不透明路由，运行时由 `adapter.ExpectedRouteKey(route)` 计算实际 routeKey。
 - `server`：连接名，格式 `<协议>:<服务名>`（如 `tcp:logic`、`udp:battle`）。
-- `listen`：引用 `listens` 表的 key；空 = 仅轮询不回调。
+- `listen`：引用 `listens` 表的 key；空 = 仅缓存，不执行回调。
 - `queueSize`：监听缓存队列容量。未写 → 默认 1；显式 `> 0` → 按该值；显式 `≤ 0` → 注册时报错（不静默 clamp）。
 
 ## filters — 过滤器
@@ -555,12 +554,12 @@ Adapter 接口共 **9 方法**，实现已全 Go 化：`adapter/codec_resolver.g
 | `udp_send(service, route, body)`                        | UDP 发送 |
 | `http_request(url [, method [, contentType [, body]]])` | HTTP 请求，返回 err, status, body；HTTP bytes 自动计入监控 |
 
-### 监听轮询
+### 监听等待
 
 | 函数 | 说明 |
 | ------------------------------------------------------ | ---------------------------- |
-| `tcp_listen(service, route [, s2cProto [, timeout [, pollMs]]])` | 阻塞等待 TCP 推送（需先 ensure_tcp_listener 预注册） |
-| `udp_listen(service, route [, s2cProto [, timeout [, pollMs]]])` | 阻塞等待 UDP 推送（需先 ensure_udp_listener 预注册） |
+| `tcp_listen(service, route [, s2cProto [, timeout]])` | 事件等待 TCP 推送（需先 ensure_tcp_listener 预注册） |
+| `udp_listen(service, route [, s2cProto [, timeout]])` | 事件等待 UDP 推送（需先 ensure_udp_listener 预注册） |
 | `try_tcp_listen(service, route)`                        | **非阻塞**单取最新 TCP 推送（无则返回 nil） |
 | `try_udp_listen(service, route)`                        | **非阻塞**单取最新 UDP 推送（无则返回 nil） |
 

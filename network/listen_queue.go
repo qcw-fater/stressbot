@@ -22,10 +22,11 @@ import (
 // 写入位置统一用 (head+size)%capacity 派生，不单独存 tail；Push/Pop 各 O(1)。
 type listenQueue struct {
 	buf      []*Message
-	head     int    // 最旧元素下标（下一个出队位置）
-	size     int    // 当前元素数
-	capacity int    // 固定容量，构造后不变；前置条件：capacity >= 1
-	dropped  uint64 // 队满覆盖累计丢弃数（不被 Clear 重置，累计指标）
+	head     int           // 最旧元素下标（下一个出队位置）
+	size     int           // 当前元素数
+	capacity int           // 固定容量，构造后不变；前置条件：capacity >= 1
+	dropped  uint64        // 队满覆盖累计丢弃数（不被 Clear 重置，累计指标）
+	notify   chan struct{} // 容量 1 的边沿唤醒提示；消息仍以 buf 为唯一事实源
 	mu       sync.Mutex
 }
 
@@ -41,6 +42,27 @@ func newListenQueue(capacity int) *listenQueue {
 	return &listenQueue{
 		buf:      make([]*Message, capacity),
 		capacity: capacity,
+		notify:   make(chan struct{}, 1),
+	}
+}
+
+// Notify 返回只读唤醒通道。通知只表示“队列可能非空”，不携带消息；
+// 消费者被唤醒后必须重新调用 Pop，并允许合并多次 Push。
+func (q *listenQueue) Notify() <-chan struct{} {
+	return q.notify
+}
+
+func (q *listenQueue) signalLocked() {
+	select {
+	case q.notify <- struct{}{}:
+	default:
+	}
+}
+
+func (q *listenQueue) clearSignalLocked() {
+	select {
+	case <-q.notify:
+	default:
 	}
 }
 
@@ -54,12 +76,14 @@ func (q *listenQueue) Push(m *Message) (dropped bool) {
 		// 未满：写入 (head+size)%capacity，size++。
 		q.buf[(q.head+q.size)%q.capacity] = m
 		q.size++
+		q.signalLocked()
 		return false
 	}
 	// 已满：覆盖 head（最旧），head 前进一格，新消息位于 (head-1+capacity)%capacity（最新）。
 	q.buf[q.head] = m
 	q.head = (q.head + 1) % q.capacity
 	q.dropped++
+	q.signalLocked()
 	return true
 }
 
@@ -75,6 +99,9 @@ func (q *listenQueue) Pop() (*Message, bool) {
 	q.buf[q.head] = nil // 助 GC，避免悬挂引用
 	q.head = (q.head + 1) % q.capacity
 	q.size--
+	if q.size == 0 {
+		q.clearSignalLocked()
+	}
 	return m, true
 }
 
@@ -96,4 +123,5 @@ func (q *listenQueue) Clear() {
 	}
 	q.head = 0
 	q.size = 0
+	q.clearSignalLocked()
 }

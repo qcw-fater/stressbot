@@ -694,12 +694,11 @@ describe('switch node validation', () => {
     ]);
   });
 
-  it('ACTION_TIMEOUT_NON_INTEGER / ACTION_POLLMS_NON_INTEGER：超时/轮询小数报错', () => {
+  it('ACTION_TIMEOUT_NON_INTEGER：超时小数报错', () => {
     const r = validateFlow(baseFlow({
-      actions: { A1: { pattern: 'tcpListen', service: 'logic', route: { cmd: 1 }, timeout: 1.5, pollMs: 2.5 } },
+      actions: { A1: { pattern: 'tcpListen', service: 'logic', route: { cmd: 1 }, timeout: 1.5 } },
     }));
     expect(r.errors.find((e) => e.code === 'ACTION_TIMEOUT_NON_INTEGER')).toBeTruthy();
-    expect(r.errors.find((e) => e.code === 'ACTION_POLLMS_NON_INTEGER')).toBeTruthy();
   });
 
   it('HTTP_METHOD_INVALID / HTTP_CONTENT_TYPE_INVALID：非法 method/contentType 报错', () => {

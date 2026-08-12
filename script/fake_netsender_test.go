@@ -93,6 +93,14 @@ func (f *fakeNetSender) UDPRequest(string, []byte, string, ...time.Duration) (*e
 	return f.udpReqExchange, f.udpReqErr
 }
 
+func (f *fakeNetSender) TCPListen(context.Context, string, string, time.Duration) (*engine.NetExchange, error) {
+	return f.listenResp, nil
+}
+
+func (f *fakeNetSender) UDPListen(context.Context, string, string, time.Duration) (*engine.NetExchange, error) {
+	return f.listenResp, nil
+}
+
 func (f *fakeNetSender) ConnectTCP(service, address string) error {
 	f.connectTCPCalls++
 	f.lastConnectTCPService = service

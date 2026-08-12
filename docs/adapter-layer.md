@@ -321,7 +321,7 @@ listenResp  map[int]ListenCallBack  // 同上
 ```
 responseMap map[string]chan *Message   // 字符串路由键（如 "3:1"）
 listenResp  map[string]ListenCallBack  // 同上
-listenMsg   map[string]*Message        // 缓存消息（轮询模式）
+listenMsg   map[string]*Message        // 缓存消息（事件等待模式）
 ```
 
 路由键格式由连接对应的 codec schema 确定，典型格式为 `"{cmd}:{act}"`（如 `"3:1"`）。Go 引擎不假设任何特定格式。
@@ -338,7 +338,7 @@ type Connection struct {
 
     responseMap      map[string]chan *Message  // routeKey -> 临时响应通道
     listenResp       map[string]ListenCallBack // routeKey -> 持久化推送回调
-    listenQueues     map[string]*listenQueue   // routeKey -> 缓存队列（轮询模式）
+    listenQueues     map[string]*listenQueue   // routeKey -> 缓存队列（事件等待模式）
     mu               sync.Mutex
     ctx              context.Context
     cancel           context.CancelFunc
@@ -388,11 +388,11 @@ type Connection struct {
 
 **RegisterListen(routeKey, cb, queueSize)**：
 
-注册单个持久化推送监听，预创建 routeKey 对应的缓存队列。重复注册同 routeKey 会更新回调和队列容量，供主流程轮询消费。
+注册单个持久化推送监听，预创建 routeKey 对应的缓存队列和事件通知。重复注册同 routeKey 会更新回调和队列容量，供主流程事件等待消费。
 
 **GetListenResp(routeKey)**：
 
-轮询获取缓存的监听消息。找到后从 `listenQueues[routeKey]` 中弹出一条消息。
+非阻塞获取缓存的监听消息。找到后从 `listenQueues[routeKey]` 中弹出一条消息；阻塞等待由队列事件通知唤醒，不定时检查该接口。
 
 **Close() / onClose()**：
 
@@ -666,7 +666,7 @@ type Context struct {
 }
 ```
 
-`Context` 不再持有旧的 adapter 指针或脚本互斥锁。业务 Lua API 需要编解码时通过 `Resolver.Resolve("<proto>:<service>")` 获取当前连接的 `SchemaAdapter`；Lua 脚本仍运行在该 Robot 独占的脚本运行时中。阻塞型 Lua API（例如 `network.tcp_request`、`network.udp_request`、listen 轮询）只阻塞当前 Robot 的主流程，不会阻塞 codec 编解码或其他 Robot。
+`Context` 不再持有旧的 adapter 指针或脚本互斥锁。业务 Lua API 需要编解码时通过 `Resolver.Resolve("<proto>:<service>")` 获取当前连接的 `SchemaAdapter`；Lua 脚本仍运行在该 Robot 独占的脚本运行时中。阻塞型 Lua API（例如 `network.tcp_request`、`network.udp_request`、listen 事件等待）只阻塞当前 Robot 的主流程，不会阻塞 codec 编解码或其他 Robot。
 
 ### 10.3 netSenderAdapter
 
@@ -714,7 +714,7 @@ func (ns *netSenderAdapter) GetTCPListenResp(...) ([]byte, uint64) {
 type ListenRef struct {
     Route  any    `json:"route"`  // 不透明路由
     Server string `json:"server"` // "tcp:logic" 或 "udp:udp" 格式
-    Listen string `json:"listen"` // 监听定义名称，空 = 仅轮询
+    Listen string `json:"listen"` // 监听定义名称，空 = 仅缓存
 }
 ```
 
@@ -726,8 +726,8 @@ type ListenRef struct {
 2. 对每个 ref：
    - 通过 `resolver.Resolve(ref.Server)` 获取该连接的 SchemaAdapter
    - 调用 `adapter.ExpectedRouteKey(ref.Route)` 计算路由键
-   - `ref.Listen == ""` -> 注册 nil 回调（轮询模式）
-   - `ref.Listen != ""` -> 查找 ListenDef，创建 Go-store 回调函数；未找到时按 nil 回调注册，仅缓存供轮询
+   - `ref.Listen == ""` -> 注册 nil 回调（事件缓存模式）
+   - `ref.Listen != ""` -> 查找 ListenDef，创建 Go-store 回调函数；未找到时按 nil 回调注册，仅缓存供事件等待
 3. 按组注册到对应 Connection：
    - `proto == "udp"` -> `client.GetUDPConn(service)`
    - `proto == "tcp"` -> `client.GetTCPConn(service)`
@@ -745,9 +745,10 @@ func parseServer(server string) (proto, service string, ok bool)
 
 ### 11.4 回调类型
 
-**已废弃脚本回调**（ListenDef.Script 非空）：
-- listen 脚本回调已移除
-- 注册阶段返回配置错误，要求改为主流程轮询或 Go-store 回调
+**协作式脚本回调**（ListenDef.Script 非空）：
+- 网络 pump 仅复制消息并投递 Robot mailbox
+- Lua `on_message` 由 Robot owner goroutine 串行执行，不跨 goroutine 访问 LState
+- `Script` 与 `Store` 同时配置会在注册阶段直接报错
 
 **Go-store 回调**（ListenDef.S2CProto + Store 非空）：
 - 解析推送消息 `factory.Parse(s2cProto, msg.Data)`
@@ -755,7 +756,7 @@ func parseServer(server string) (proto, service string, ok bool)
 - 成功/失败通过 `RecordCallback` 计入监控
 
 **静默回调**（以上都不满足）：
-- 返回 nil 回调函数，消息仅缓存供轮询
+- 返回 nil 回调函数，消息仅缓存供事件等待
 
 ## 12. 声明式 codec schema 架构
 

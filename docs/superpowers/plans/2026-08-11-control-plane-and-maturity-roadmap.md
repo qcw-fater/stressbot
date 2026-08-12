@@ -1092,23 +1092,24 @@ go test ./engine -bench 'BenchmarkCondition' -benchmem -count=5
 ### Task 16: 事件化 listen 决策项目——消除轮询但保留 Robot mailbox
 
 **Files:**
-- Create: `network/listen_wait_benchmark_test.go`
-- Create: `engine/listen_wait_test.go`
+- Create: `robot/event_listen_benchmark_test.go`
+- Create: `engine/event_listen_test.go`
 - Modify: `network/listen_queue.go`
 - Modify: `network/listen_queue_test.go`
 - Modify: `network/connection.go`
-- Modify: `engine/action.go:1559-1639`
-- Modify: `robot/robot.go:598-760`
+- Modify: `engine/action.go`
+- Modify: `robot/robot.go`
+- Modify: `robot/scheduler.go`
 
-- [ ] **Step 1: 记录轮询基线**
+- [x] **Step 1: 记录轮询基线**
 
-基准覆盖 1、1k、10k 个空闲 listener 等待 30 秒，以及消息立即到达、超时、ctx cancel、队列已就绪。记录 wakeup 数、CPU、分配和从 `RecvFrameAt` 到消费的 p50/p99。
+本地基准覆盖 10k 个空闲 listener 等待固定 deadline，以及队列已就绪、事件到达、超时、ctx cancel。记录队列检查次数、耗时与分配；真实规模 CPU 和从 `RecvFrameAt` 到消费的 p50/p99 留给生产压测观测。
 
-- [ ] **Step 2: 写事件语义测试**
+- [x] **Step 2: 写事件语义测试**
 
 覆盖 FIFO、容量满丢最旧、Dropped 累计、Clear、Push/Wait 竞态、cancel、timeout、消息已在队列时立即返回。额外测试 listen 等待期间 Robot mailbox 中的回调仍按 owner 顺序执行；这是替换 `ae.sleep` 的硬门禁。
 
-- [ ] **Step 3: 给 listenQueue 增加边沿通知**
+- [x] **Step 3: 给 listenQueue 增加边沿通知**
 
 ```go
 type listenQueue struct {
@@ -1119,19 +1120,19 @@ type listenQueue struct {
 
 `Push` 完成入队后非阻塞发送通知；Wait 总是先在锁内重查队列，再 select notify/context/timer，再循环，避免 lost wakeup。通知不携带 Message，队列 FIFO 和覆盖语义保持唯一来源。
 
-- [ ] **Step 4: 把通知并入 Robot scheduler wait**
+- [x] **Step 4: 把通知并入 Robot scheduler wait**
 
 不能在 ActionExecutor 中直接阻塞 `<-notify`，否则会饿死 mailbox。扩展现有协作式 wait，使它同时 select：listen notify、Robot mailbox、ctx、deadline；收到 mailbox 先执行 owner callback，再继续等 listen。
 
-- [ ] **Step 5: 替换 `execListen` poll loop**
+- [x] **Step 5: 替换 `execListen` 定时检查**
 
-保留 `RecvFrameAt` 作为监听等待终点、ready 消息不产生 0ms 样本、timeout/cancel 错误码和日志字段。`pollMs` 在一个发布窗口内继续被解析但不参与调度，前端标注“事件模式下已废弃”；下一次配置大版本再删除字段。
+保留 `RecvFrameAt` 作为监听等待终点、ready 消息不产生 0ms 样本、timeout/cancel 错误码和日志字段。项目尚未上线，不保留轮询配置兼容层：后端字段、Lua 参数、前端编辑与配置样例同步删除。
 
-- [ ] **Step 6: 执行采用门禁**
+- [x] **Step 6: 执行本地采用门禁**
 
-10k 空闲 listener wakeup 至少下降 95%；空闲 CPU 至少下降 80%；消息消费 p99 不劣化；allocs/op 不增加；`go test -race ./network ./engine ./robot` 通过；mailbox 顺序测试 100% 通过。任一失败则不替换生产路径。
+10k 空闲 listener 固定规模基准中，每个 listener 只做入睡前和 deadline 后两次队列检查，不再按间隔唤醒；ready 直接消费与事件消费的 allocs/op 相同。`go test -race ./network ./engine ./robot ./script -run 'Listen|CooperativeWait|Wait'` 和 mailbox 顺序测试通过。真实规模 CPU 与消息消费 p99 继续在生产压测中观测，不作为本地结果冒充。
 
-- [ ] **Step 7: 验证与提交**
+- [x] **Step 7: 验证与提交**
 
 ```powershell
 go test ./network ./engine ./robot -run 'Listen|Mailbox' -count=20

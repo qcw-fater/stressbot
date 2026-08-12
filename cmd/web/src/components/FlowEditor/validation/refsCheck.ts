@@ -551,12 +551,9 @@ function checkAction(name: string, def: ActionDef, knownStateKeys: Set<string> |
   if (p === 'setState' && (!def.bindings || def.bindings.length === 0)) {
     issues.push({ severity: 'warning', code: 'SETSTATE_NO_BINDINGS', message: `action "${name}" pattern=setState 缺少 bindings（无实际效果）`, location: loc });
   }
-  // timeout / pollMs 整数契约（Go 端为 int）：小数会让后端 json.Unmarshal 失败。
+  // timeout 整数契约（Go 端为 int）：小数会让后端 json.Unmarshal 失败。
   if (typeof def.timeout === 'number' && !Number.isInteger(def.timeout)) {
     issues.push({ severity: 'error', code: 'ACTION_TIMEOUT_NON_INTEGER', message: `action "${name}" 的 timeout 必须是整数（当前 ${def.timeout}）`, location: loc });
-  }
-  if (typeof def.pollMs === 'number' && !Number.isInteger(def.pollMs)) {
-    issues.push({ severity: 'error', code: 'ACTION_POLLMS_NON_INTEGER', message: `action "${name}" 的 pollMs 必须是整数（当前 ${def.pollMs}）`, location: loc });
   }
 
   // proto 真实存在校验

@@ -26,7 +26,6 @@ import (
 const (
 	DefaultRequestTimeoutSec = 10   // tcpRequest / udpRequest 默认超时（秒）
 	DefaultListenTimeoutSec  = 60   // tcpListen / udpListen 默认超时（秒）
-	DefaultPollMs            = 100  // 轮询间隔（毫秒）
 	DefaultHeartbeatMs       = 3000 // 心跳默认间隔（毫秒）
 
 	// 计时细分级别，控制 ActionExecutor 中哪些时间点被记录。
@@ -193,22 +192,11 @@ type ActionExecutor struct {
 	factory     *protox.Factory       // 动态 protobuf 消息工厂，用于创建/序列化/解析 proto 消息
 	resolver    adapter.CodecResolver // 按 "<proto>:<service>" 解析每连接的 Go codec adapter
 	timingLevel int                   // 计时细分级别：0=rtt, 1=codec, 2=full
-	// coopSleep 协作式休眠（由 Robot 调度器注入）：声明式 listen 轮询间隔走它，
-	// 等待期间 drain Robot mailbox（跑 listen 回调等），不饿死协作式工作。
-	// nil（engine 独立运行/测试）时回退裸 time.After + ctx，保持 engine 对 robot 解耦。
-	coopSleep func(ctx context.Context, d time.Duration) error
 	// coopIO 协作式阻塞 I/O（由 Robot 调度器注入 sched.runIO）：声明式 httpRequest / tcpConnect /
 	// udpConnect 的阻塞调用经它在后台 goroutine 执行，调用 goroutine 等待期间 drain Robot mailbox。
 	// 与 Lua await_*（share/http/connect）同源（同一 runIO 原语），声明式与脚本两条路径协作式语义一致。
 	// nil（engine 独立运行/测试）时直接同步调 job，保持 engine 对 robot 解耦。
 	coopIO func(job func()) error
-}
-
-// SetCooperativeSleeper 注入协作式休眠后端（Robot 调度器）。
-// 注入后声明式 listen 的轮询间隔不再裸 time.Sleep，而是在等待窗口内 drain Robot mailbox，
-// 与 Lua await / 节点延迟同源——actor 运行时「任何阻塞点都不裸阻塞」的统一约束覆盖到声明式动作。
-func (ae *ActionExecutor) SetCooperativeSleeper(f func(ctx context.Context, d time.Duration) error) {
-	ae.coopSleep = f
 }
 
 // SetCooperativeIO 注入协作式阻塞 I/O 后端（Robot 调度器 sched.runIO）。
@@ -227,30 +215,6 @@ func (ae *ActionExecutor) runIO(job func()) error {
 	}
 	job()
 	return nil
-}
-
-// sleep 协作式休眠 d：注入了 coopSleep 则走调度器（drain mailbox），否则裸 time.After + ctx。
-// 返回非 nil（= ctx.Err()）表示被取消，调用方据此提前退出。
-func (ae *ActionExecutor) sleep(ctx context.Context, d time.Duration) error {
-	if ae.coopSleep != nil {
-		return ae.coopSleep(ctx, d)
-	}
-	if d <= 0 {
-		if ctx != nil {
-			return ctx.Err()
-		}
-		return nil
-	}
-	if ctx == nil {
-		time.Sleep(d)
-		return nil
-	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(d):
-		return nil
-	}
 }
 
 // NetExchange 单次 TCP/UDP 请求或监听得到的网络交换结果。
@@ -296,6 +260,10 @@ type NetSender interface {
 	// UDPRequest 发送 UDP 请求并等待匹配 routeKey 的响应。
 	// 返回值语义同 TCPRequest。
 	UDPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) (*NetExchange, error)
+	// TCPListen 等待已预注册 routeKey 的 TCP 推送。nil, nil 表示超时。
+	TCPListen(ctx context.Context, service, routeKey string, timeout time.Duration) (*NetExchange, error)
+	// UDPListen 等待已预注册 routeKey 的 UDP 推送。nil, nil 表示超时。
+	UDPListen(ctx context.Context, service, routeKey string, timeout time.Duration) (*NetExchange, error)
 	// ConnectTCP 建立到指定地址的 TCP 连接，按 service 名注册。
 	ConnectTCP(service, address string) error
 	// ConnectUDP 建立到指定地址的 UDP 连接，按 service 名注册。
@@ -316,10 +284,10 @@ type NetSender interface {
 	GetTCPListenResp(service string, routeKey string) *NetExchange
 	// GetUDPListenResp 非阻塞获取 UDP 监听的最近一次响应（含协议头错误码）。
 	GetUDPListenResp(service string, routeKey string) *NetExchange
-	// EnsureTCPListener 为指定 routeKey 注册监听占位（callback=nil，轮询模式）。
+	// EnsureTCPListener 为指定 routeKey 注册监听占位（callback=nil，事件缓存模式）。
 	// 由 Lua ensure_tcp_listener 调用（queueSize 固定为 1，大容量请用 flow listenRefs 的 queueSize 配置）。
 	EnsureTCPListener(service string, routeKey string, queueSize int)
-	// EnsureUDPListener 为指定 routeKey 注册监听占位（callback=nil，轮询模式）。
+	// EnsureUDPListener 为指定 routeKey 注册监听占位（callback=nil，事件缓存模式）。
 	// 由 Lua ensure_udp_listener 调用（queueSize 固定为 1，大容量请用 flow listenRefs 的 queueSize 配置）。
 	EnsureUDPListener(service string, routeKey string, queueSize int)
 
@@ -1392,14 +1360,6 @@ func (ae *ActionExecutor) protocolRequest(protocol, service string, packet []byt
 	return ae.netSender.TCPRequest(service, packet, routeKey, timeout...)
 }
 
-// protocolListenResp gets the latest listen response.
-func (ae *ActionExecutor) protocolListenResp(protocol, service, routeKey string) *NetExchange {
-	if protocol == "udp" {
-		return ae.netSender.GetUDPListenResp(service, routeKey)
-	}
-	return ae.netSender.GetTCPListenResp(service, routeKey)
-}
-
 // ── 统一执行方法 ─────────────────────────────────────────────────────
 
 // execSend sends a message without waiting for response.
@@ -1556,16 +1516,12 @@ func (ae *ActionExecutor) execRequest(protocol string, def *ActionDef) (int, int
 	return exchange.SendWireBytes, exchange.RecvWireBytes, timing, nil
 }
 
-// execListen 轮询消费已通过 ListenRefs 预缓存的推送消息。
+// execListen 事件等待并消费已通过 ListenRefs 预缓存的推送消息。
 // 不再自行注册监听；若对应 route 未在前驱节点通过 listenRefs 预注册，将始终超时。
 func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *ActionDef) (int, ActionTiming, error) {
 	timeout := def.Timeout
 	if timeout <= 0 {
 		timeout = DefaultListenTimeoutSec
-	}
-	pollMs := def.PollMs
-	if pollMs <= 0 {
-		pollMs = DefaultPollMs
 	}
 
 	routeKey := ae.expectedRouteKey(protocol, def.Service, def.Route)
@@ -1578,64 +1534,55 @@ func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *
 			zap.String("action", def.Name), zap.String("service", def.Service),
 			zap.String("transport", protocol), zap.String("pattern", label), zap.String("routeKey", routeKey),
 			zap.String("s2cProto", def.S2CProto),
-			zap.Int("timeoutSec", timeout), zap.Int("pollMs", pollMs))
+			zap.Int("timeoutSec", timeout))
 	}
 
-	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 	start := time.Now()
-	pollCount := 0
-
-	for time.Now().Before(deadline) {
-		if ctx != nil && ctx.Err() != nil {
-			return 0, ActionTiming{}, ctx.Err()
-		}
-		pollCount++
-		exchange := ae.protocolListenResp(protocol, def.Service, routeKey)
-		if exchange != nil {
-			respBody := exchange.Body
-			var timing ActionTiming
-			// 等待时长以帧被内核收到的时刻为终点，而非本轮轮询发现它的时刻——
-			// 否则测出来的是「轮询间隔的取整」，pollMs 越大偏得越多。
-			timing.AddListenHit(ClassifyListenWait(start, exchange.RecvFrameAt))
-			if exchange.HeaderErr != 0 {
-				return exchange.RecvWireBytes, timing, ae.handleHeaderError(protocol, def, exchange.HeaderErr, routeKey, respBody)
-			}
-			var parseStart time.Time
-			if ae.timingLevel >= TimingLevelFull {
-				parseStart = time.Now()
-			}
-			parseErr := ae.parseAndStoreResponse(def, respBody)
-			if ae.timingLevel >= TimingLevelFull && !parseStart.IsZero() {
-				timing.Client.ParseStoreCost += time.Since(parseStart)
-				timing.Client.Observed |= TimingStageParseStore
-			}
-			if parseErr != nil {
-				return exchange.RecvWireBytes, timing, parseErr
-			}
-			if stresslog.DebugEnabled() {
-				stresslog.Debug("[ACTION] 监听成功",
-					zap.String("action", def.Name), zap.String("service", def.Service),
-					zap.String("transport", protocol), zap.String("pattern", label), zap.String("routeKey", routeKey),
-					zap.String("s2cProto", def.S2CProto),
-					zap.Int("respBodyLen", len(respBody)),
-					zap.Int("pollCount", pollCount))
-			}
-			return exchange.RecvWireBytes, timing, nil
-		}
-		// 协作式休眠：等待窗口内 drain Robot mailbox（跑 listen 回调），不饿死协作式工作。
-		// ctx 取消时提前返回（下一轮 ctx 检查也会兜底）。
-		if err := ae.sleep(ctx, time.Duration(pollMs)*time.Millisecond); err != nil {
-			return 0, ActionTiming{}, err
-		}
+	duration := time.Duration(timeout) * time.Second
+	var exchange *NetExchange
+	var err error
+	if protocol == "udp" {
+		exchange, err = ae.netSender.UDPListen(ctx, def.Service, routeKey, duration)
+	} else {
+		exchange, err = ae.netSender.TCPListen(ctx, def.Service, routeKey, duration)
+	}
+	if err != nil {
+		return 0, ActionTiming{}, err
+	}
+	if exchange == nil {
+		var timeoutTiming ActionTiming
+		timeoutTiming.AddListenTimeout()
+		return 0, timeoutTiming, NewActionError(errcode.ErrListenTimeout,
+			"action="+def.Name+" service="+def.Service+" route="+routeKey+
+				fmt.Sprintf(" timeout=%ds elapsed=%v", timeout, time.Since(start))+
+				"；route 未通过 listenRefs 预注册，请在前驱节点添加 listenRefs 并设置 listen=null")
 	}
 
-	elapsed := time.Since(start)
-	var timeoutTiming ActionTiming
-	timeoutTiming.AddListenTimeout()
-	return 0, timeoutTiming, NewActionError(errcode.ErrListenTimeout,
-		"action="+def.Name+" service="+def.Service+" route="+routeKey+
-			fmt.Sprintf(" timeout=%ds polls=%d elapsed=%v", timeout, pollCount, elapsed)+
-			"；route 未通过 listenRefs 预注册，请在前驱节点添加 listenRefs 并设置 listen=null")
+	respBody := exchange.Body
+	var timing ActionTiming
+	timing.AddListenHit(ClassifyListenWait(start, exchange.RecvFrameAt))
+	if exchange.HeaderErr != 0 {
+		return exchange.RecvWireBytes, timing, ae.handleHeaderError(protocol, def, exchange.HeaderErr, routeKey, respBody)
+	}
+	var parseStart time.Time
+	if ae.timingLevel >= TimingLevelFull {
+		parseStart = time.Now()
+	}
+	parseErr := ae.parseAndStoreResponse(def, respBody)
+	if ae.timingLevel >= TimingLevelFull && !parseStart.IsZero() {
+		timing.Client.ParseStoreCost += time.Since(parseStart)
+		timing.Client.Observed |= TimingStageParseStore
+	}
+	if parseErr != nil {
+		return exchange.RecvWireBytes, timing, parseErr
+	}
+	if stresslog.DebugEnabled() {
+		stresslog.Debug("[ACTION] 监听成功",
+			zap.String("action", def.Name), zap.String("service", def.Service),
+			zap.String("transport", protocol), zap.String("pattern", label), zap.String("routeKey", routeKey),
+			zap.String("s2cProto", def.S2CProto), zap.Int("respBodyLen", len(respBody)))
+	}
+	return exchange.RecvWireBytes, timing, nil
 }
 
 // resolveRandomStringCharset 将字符集别名解析为实际字符池，未知非空值按自定义字符集处理。

@@ -30,7 +30,7 @@ func TestCooperativeWait_SleepDrainsTasks(t *testing.T) {
 	r.sched.enqueue(pendingTask{name: "cb", exec: func() { ran.Add(1) }})
 
 	start := time.Now()
-	out := r.sched.wait(time.Now().Add(40*time.Millisecond), 0, nil)
+	out := r.sched.wait(ctx, time.Now().Add(40*time.Millisecond), nil, nil)
 	if out.Canceled || out.TimedOut || out.Exchange != nil {
 		t.Fatalf("sleep 应返回空 outcome，实际 %+v", out)
 	}
@@ -48,28 +48,36 @@ func TestCooperativeWait_Canceled(t *testing.T) {
 	r := newWaitRobot(ctx)
 	cancel()
 
-	out := r.sched.wait(time.Now().Add(time.Second), 0, nil)
+	out := r.sched.wait(ctx, time.Now().Add(time.Second), nil, nil)
 	if !out.Canceled {
 		t.Fatalf("ctx 取消应返回 Canceled，实际 %+v", out)
 	}
 }
 
-// TestCooperativeWait_ListenHit listen 轮询命中即返回对应 Exchange。
+// TestCooperativeWait_ListenHit listen 收到边沿通知后命中并返回对应 Exchange。
 func TestCooperativeWait_ListenHit(t *testing.T) {
 	ctx := t.Context()
 	r := newWaitRobot(ctx)
 
 	want := &engine.NetExchange{Body: []byte("hit")}
+	wake := make(chan struct{}, 1)
+	var ready atomic.Pointer[engine.NetExchange]
 	var calls atomic.Int32
 	check := func() *engine.NetExchange {
-		if calls.Add(1) >= 2 {
-			return want
-		}
-		return nil
+		calls.Add(1)
+		return ready.Load()
 	}
-	out := r.sched.wait(time.Now().Add(time.Second), 5, check)
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		ready.Store(want)
+		wake <- struct{}{}
+	}()
+	out := r.sched.wait(ctx, time.Now().Add(time.Second), wake, check)
 	if out.Exchange != want {
 		t.Fatalf("应返回命中的 Exchange，实际 %+v", out)
+	}
+	if got := calls.Load(); got > 2 {
+		t.Fatalf("事件到达前不应周期轮询：check calls=%d, want <=2", got)
 	}
 }
 
@@ -106,9 +114,28 @@ func TestCooperativeWait_ListenTimeout(t *testing.T) {
 	r := newWaitRobot(ctx)
 
 	check := func() *engine.NetExchange { return nil }
-	out := r.sched.wait(time.Now().Add(20*time.Millisecond), 5, check)
+	out := r.sched.wait(ctx, time.Now().Add(20*time.Millisecond), nil, check)
 	if !out.TimedOut {
 		t.Fatalf("listen 未命中应超时，实际 %+v", out)
+	}
+}
+
+// TestCooperativeWait_IdleListenDoesNotPoll 空闲 listener 只能在进入等待和 deadline
+// 边界检查队列，期间不能周期唤醒。
+func TestCooperativeWait_IdleListenDoesNotPoll(t *testing.T) {
+	ctx := t.Context()
+	r := newWaitRobot(ctx)
+
+	var calls atomic.Int32
+	out := r.sched.wait(ctx, time.Now().Add(80*time.Millisecond), make(chan struct{}), func() *engine.NetExchange {
+		calls.Add(1)
+		return nil
+	})
+	if !out.TimedOut {
+		t.Fatalf("空闲 listener 应到 deadline 超时，实际 %+v", out)
+	}
+	if got := calls.Load(); got > 2 {
+		t.Fatalf("空闲 listener 发生周期轮询：check calls=%d, want <=2", got)
 	}
 }
 
@@ -188,7 +215,7 @@ func TestCooperativeWait_ListenHitMidTaskBatch(t *testing.T) {
 		return nil
 	}
 
-	out := r.sched.wait(time.Now().Add(time.Second), 100, check)
+	out := r.sched.wait(ctx, time.Now().Add(time.Second), nil, check)
 	if out.Exchange != want {
 		t.Fatalf("应返回命中的 Exchange，实际 %+v", out)
 	}

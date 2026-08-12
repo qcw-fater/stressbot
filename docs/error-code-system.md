@@ -109,7 +109,7 @@ type CodeInfo struct {
 
 | Code | 常量 | 名称 | 含义 |
 |------|------|------|------|
-| 31 | `ErrListenTimeout` | `LISTEN_TIMEOUT` | TCP/UDP Listen 轮询超时（超时时间内未收到匹配的推送） |
+| 31 | `ErrListenTimeout` | `LISTEN_TIMEOUT` | TCP/UDP Listen 等待超时（超时时间内未收到匹配的推送） |
 | 32 | `ErrListenRegister` | `LISTEN_REGISTER` | 注册持久监听失败 |
 
 ### 3.5 配置层（41-50）
@@ -354,7 +354,7 @@ errcode（顶层包，无业务依赖）
 | execUDPConnect | 地址为空 | `NewActionError(ErrAddrEmpty, "service=...")` |
 | execUDPConnect | 连接失败 | 透传 ConnectUDP 返回的 ActionError |
 | execTCPListen | headerErr != 0 | `NewActionError(headerErr, ...)`（业务码统一入口） |
-| execTCPListen | 轮询超时 | `NewActionError(ErrListenTimeout, "service=... timeout=...")` |
+| execTCPListen | 事件等待超时 | `NewActionError(ErrListenTimeout, "service=... timeout=...")` |
 | execUDPSend | encode 返回 nil | `NewActionError(ErrEncodeFailed, ...)` |
 | execUDPSend | 发送失败 | 透传底层 ActionError |
 | execUDPRequest | encode/!ok/headerErr | 同 TCPRequest 模式 |

@@ -3110,8 +3110,7 @@
           "field": "sdcSettleData.netLootValue"
         }
       ],
-      "timeout": 30,
-      "pollMs": 500
+      "timeout": 30
     },
     "SdcLogRewardTimeout": {
       "pattern": "lua",

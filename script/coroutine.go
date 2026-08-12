@@ -52,7 +52,6 @@ type IORenderer func(L *lua.LState) []lua.LValue
 type WaitSpec struct {
 	Kind     WaitKind
 	Duration time.Duration // WaitSleep：休眠时长；WaitListen/WaitResponse：总超时
-	PollMs   int           // WaitListen：轮询间隔（毫秒）
 	Proto    string        // "tcp" / "udp"
 	Service  string
 	RouteKey string

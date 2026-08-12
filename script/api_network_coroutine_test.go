@@ -16,16 +16,16 @@ import (
 // fakeAdapter 测试用 adapter.Adapter 桩：encode 返回 encodeBytes（nil 模拟编码失败），
 // ExpectedRouteKey 返回 routeKey，DescribeError 返回 errDesc。
 type fakeAdapter struct {
-	encodeBytes   []byte   // EncodeTCP/EncodeUDP 返回值；nil 模拟编码失败
-	routeKey      string   // ExpectedRouteKey 返回值
-	errDesc       string   // DescribeError 返回值
+	encodeBytes   []byte // EncodeTCP/EncodeUDP 返回值；nil 模拟编码失败
+	routeKey      string // ExpectedRouteKey 返回值
+	errDesc       string // DescribeError 返回值
 	headerSize    int
 	bodyLen       int
 	encodeCalls   int
 	routeKeyCalls int
 }
 
-func (a *fakeAdapter) HeaderSize() int { return a.headerSize }
+func (a *fakeAdapter) HeaderSize() int       { return a.headerSize }
 func (a *fakeAdapter) BodyLength([]byte) int { return a.bodyLen }
 func (a *fakeAdapter) EncodeTCP(route any, body []byte, secretKey []byte) []byte {
 	a.encodeCalls++
@@ -45,7 +45,7 @@ func (a *fakeAdapter) ExpectedRouteKey(route any) string {
 	a.routeKeyCalls++
 	return a.routeKey
 }
-func (a *fakeAdapter) Close() {}
+func (a *fakeAdapter) Close()                      {}
 func (a *fakeAdapter) DescribeError(uint64) string { return a.errDesc }
 
 var _ adapter.Adapter = (*fakeAdapter)(nil)
@@ -324,6 +324,20 @@ func TestUDPSend_SendErr(t *testing.T) {
 // codec 未映射、headerErr、正常消息 4 个分支。
 // ---------------------------------------------------------------------------
 
+func TestTCPListenRejectsRemovedFifthArgument(t *testing.T) {
+	resolver := &fakeResolver{adp: &fakeAdapter{routeKey: "3:1"}}
+	L := newTestState(t, context.Background(), &fakeNetSender{}, resolver)
+	defer L.Close()
+
+	err := doNet(t, L, `return network.tcp_listen('logic', '3:1', '', 10, 100)`)
+	if err == nil {
+		t.Fatal("事件化 listen 应拒绝已删除的第 5 个参数")
+	}
+	if !strings.Contains(err.Error(), "仅支持 4 个参数") {
+		t.Fatalf("error=%q, want 参数数量错误", err.Error())
+	}
+}
+
 // TestTryTCPListen_QueueEmpty GetTCPListenResp 返回 nil → (nil, nil)（非错误路径）。
 func TestTryTCPListen_QueueEmpty(t *testing.T) {
 	adp := &fakeAdapter{routeKey: "3:1"}
@@ -514,7 +528,7 @@ func TestHTTPRequest_FrameworkErr(t *testing.T) {
 		local network = require("network")
 		local e, status, body = network.http_request("http://x/")
 		if type(e) ~= "table" then error("e 应为 err table，实际 " .. type(e)) end
-		if e.code ~= ` + errCodeLua(errcode.ErrConnNotFound) + ` then error("code 错") end
+		if e.code ~= `+errCodeLua(errcode.ErrConnNotFound)+` then error("code 错") end
 		if status ~= 0 then error("status 应为 0，实际 " .. tostring(status)) end
 		if body ~= "" then error("body 应为空串，实际 " .. tostring(body)) end
 		return nil
@@ -563,7 +577,7 @@ func TestConnectTCP_PreCanceled(t *testing.T) {
 		local network = require("network")
 		local e = network.connect_tcp("logic", "127.0.0.1:8080")
 		if type(e) ~= "table" then error("预取消应返回 err table，实际 " .. type(e)) end
-		if e.code ~= ` + errCodeLua(errcode.ErrActionCanceled) + ` then
+		if e.code ~= `+errCodeLua(errcode.ErrActionCanceled)+` then
 			error("code 应为 ErrActionCanceled，实际 " .. tostring(e.code))
 		end
 		return nil
@@ -588,7 +602,7 @@ func TestConnectTCP_DialErr(t *testing.T) {
 		local network = require("network")
 		local e = network.connect_tcp("logic", "127.0.0.1:8080")
 		if type(e) ~= "table" then error("拨号失败应返回 err table，实际 " .. type(e)) end
-		if e.code ~= ` + errCodeLua(errcode.ErrConnClosed) + ` then
+		if e.code ~= `+errCodeLua(errcode.ErrConnClosed)+` then
 			error("code 应为 ErrConnClosed，实际 " .. tostring(e.code))
 		end
 		return nil

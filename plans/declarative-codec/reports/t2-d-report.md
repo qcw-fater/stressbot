@@ -38,9 +38,8 @@ goroutine 触碰的 VM**（async Lua 入口 #4：业务阻塞 Lua 自身——�
 
 - 删 `withReleasedMu` helper（+ `sync` import），9 处调用（connect/close/request/listen/HTTP）改为
   当前 Robot 主流程 goroutine 直接阻塞调用底层 `NetSender` 方法。
-- `networkListen` 轮询改写（**改进**）：原 `time.Sleep(pollMs)` 后查 `ctx.Err()`（最多 pollMs 取消延迟）
-  → `select { <-time.After(pollMs) | <-ctx.Done() }`，取消即时唤醒；`timedOut` 仅在未取消时置位
-  （区分 timeout 与 cancel，比旧实现更准）。
+- `networkListen` 等待改为同时监听消息事件、`ctx.Done()` 与 deadline，取消即时唤醒；`timedOut`
+  仅在未取消时置位（区分 timeout 与 cancel，比旧实现更准）。
 - try_*_listen 注释清理（去 luaMu 描述，语义不变）。
 
 ### 3.2 `script/api_share.go` — 20 处 `withReleasedMu` → 直调

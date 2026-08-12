@@ -163,7 +163,6 @@ export interface ActionDef {
   bindings?: FieldBind[];
   store?: StoreMapping[];
   timeout?: number;
-  pollMs?: number;
   url?: string;           // httpRequest: 请求 URL
   method?: 'POST' | 'GET'; // httpRequest: HTTP 方法
   contentType?: 'json' | 'form'; // httpRequest: Content-Type

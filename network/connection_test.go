@@ -100,6 +100,57 @@ func TestConnection_CachedListen_NoListener(t *testing.T) {
 	}
 }
 
+func TestConnection_ListenNotifyCachedRoute(t *testing.T) {
+	conn := newTestConnection(t)
+	defer conn.Close()
+
+	const routeKey = "S2C.Notify"
+	if err := conn.RegisterListen(routeKey, nil, 1); err != nil {
+		t.Fatalf("RegisterListen 失败: %v", err)
+	}
+	notify := conn.ListenNotify(routeKey)
+	if notify == nil {
+		t.Fatal("缓存监听应暴露通知通道")
+	}
+
+	dispatchListenForTest(conn, NewMessage(routeKey, []byte{'N'}, 0, 1, MessageTiming{}))
+	select {
+	case <-notify:
+	case <-time.After(time.Second):
+		t.Fatal("监听消息入队后未收到通知")
+	}
+	if got := conn.GetListenResp(routeKey); got == nil || got.Data[0] != 'N' {
+		t.Fatalf("通知后队列消息错误: %v", got)
+	}
+}
+
+func TestConnection_ListenNotifyUnavailableRoutesReturnNil(t *testing.T) {
+	var nilConn *Connection
+	if got := nilConn.ListenNotify("missing"); got != nil {
+		t.Fatal("nil Connection 应返回 nil 通知")
+	}
+
+	conn := newTestConnection(t)
+	if got := conn.ListenNotify("missing"); got != nil {
+		t.Fatal("未注册 route 应返回 nil 通知")
+	}
+
+	if err := conn.RegisterListen("callback", func(*Message) {}, 1); err != nil {
+		t.Fatalf("注册 callback 监听失败: %v", err)
+	}
+	if got := conn.ListenNotify("callback"); got != nil {
+		t.Fatal("callback 模式不缓存消息，应返回 nil 通知")
+	}
+
+	if err := conn.RegisterListen("cached", nil, 1); err != nil {
+		t.Fatalf("注册缓存监听失败: %v", err)
+	}
+	conn.Close()
+	if got := conn.ListenNotify("cached"); got != nil {
+		t.Fatal("已关闭连接应返回 nil 通知")
+	}
+}
+
 // TestConnection_CachedListen_NonNilCallback 验证：注册非 nil 回调时不走缓存，
 // 由回调直接消费，GetListenResp 无缓存可取。
 func TestConnection_CachedListen_NonNilCallback(t *testing.T) {

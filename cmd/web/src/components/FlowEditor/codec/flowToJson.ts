@@ -139,7 +139,6 @@ function cleanAction(a: ActionDef): ActionDef {
   if (pruned.bindings?.length) out.bindings = pruned.bindings.map(cleanFieldBind);
   if (pruned.store?.length) out.store = pruned.store.map(cleanStoreMapping);
   if (typeof pruned.timeout === 'number' && pruned.timeout > 0) out.timeout = Math.trunc(pruned.timeout);
-  if (typeof pruned.pollMs === 'number' && pruned.pollMs > 0) out.pollMs = Math.trunc(pruned.pollMs);
   if (pruned.url) out.url = pruned.url;
   if (pruned.method) out.method = pruned.method;
   if (pruned.contentType) out.contentType = pruned.contentType;

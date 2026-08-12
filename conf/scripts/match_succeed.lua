@@ -8,7 +8,6 @@ local utils = require("utils")
 local log = require("log")
 
 local MATCH_TIMEOUT_MS = 1860 * 1000
-local POLL_MS = 1000
 
 local function same_id(left, right)
     if left == nil or right == nil then
@@ -89,7 +88,7 @@ function execute(r)
         end
 
         local err, resp = network.tcp_listen(
-            "logic", {cmd=3, act=1}, "Game.MatchSucceedS2C", timeoutSec, POLL_MS)
+            "logic", {cmd=3, act=1}, "Game.MatchSucceedS2C", timeoutSec)
         if err then
             log.error("匹配成功消息等待失败: service=logic route=3:1 proto=Game.MatchSucceedS2C roleId="
                 .. tostring(roleId) .. " teamId=" .. tostring(currentTeamId)

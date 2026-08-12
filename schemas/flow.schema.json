@@ -104,7 +104,6 @@
         "bindings": { "type": "array", "items": { "$ref": "#/$defs/binding" } },
         "store": { "type": "array", "items": { "$ref": "#/$defs/store" } },
         "timeout": { "type": "integer", "minimum": 0 },
-        "pollMs": { "type": "integer", "minimum": 0 },
         "keys": { "$ref": "#/$defs/stringArray" },
         "url": { "type": "string" },
         "method": { "enum": ["", "GET", "POST"] },

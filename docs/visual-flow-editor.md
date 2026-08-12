@@ -284,7 +284,6 @@ interface ActionDef {
   bindings?: FieldBind[];
   store?: StoreMapping[];
   timeout?: number;
-  pollMs?: number;
   url?: string;              // httpRequest
   method?: 'POST' | 'GET';   // httpRequest
   contentType?: 'json' | 'form'; // httpRequest
@@ -628,12 +627,12 @@ interface ManagedFlow {
 | tcpRequest | 可选 | 可选 | 可选 | 可选 | 可选 | 可选 | timeout |
 | tcpConnect | - | - | - | - | - | - | address |
 | tcpClose | - | - | - | - | - | - | - |
-| tcpListen | 可选 | 可选 | - | 可选 | - | 可选 | timeout, pollMs |
+| tcpListen | 可选 | 可选 | - | 可选 | - | 可选 | timeout |
 | udpSend | 可选 | 可选 | 可选 | - | 可选 | - | - |
 | udpRequest | 可选 | 可选 | 可选 | 可选 | 可选 | 可选 | timeout |
 | udpConnect | - | - | - | - | - | - | address |
 | udpClose | - | - | - | - | - | - | - |
-| udpListen | 可选 | 可选 | - | 可选 | - | 可选 | timeout, pollMs |
+| udpListen | 可选 | 可选 | - | 可选 | - | 可选 | timeout |
 | httpRequest | - | - | - | - | - | - | url, method, contentType |
 | setState | - | - | - | - | 可选 | - | - |
 | clearState | - | - | - | - | - | - | keys |

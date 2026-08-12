@@ -650,7 +650,7 @@ func (c *Connection) dispatchListen(resp *Message, cb ListenCallBack, q *listenQ
 	}
 }
 
-// GetListenResp 轮询获取缓存的监听消息（FIFO pop）。
+// GetListenResp 非阻塞获取缓存的监听消息（FIFO pop）。
 //
 // c.mu 仅查 map；Pop 走队列自身 mu。默认容量 1 时与旧「读 listenMsg[k] + delete」
 // 行为一致：返回最近一条 Push 并清空。
@@ -666,6 +666,25 @@ func (c *Connection) GetListenResp(routeKey string) *Message {
 	}
 	m, _ := b.queue.Pop()
 	return m
+}
+
+// ListenNotify 返回缓存监听 routeKey 的只读唤醒通道。
+//
+// 通道只做边沿通知，消息仍必须通过 GetListenResp 从环形队列消费。未注册、回调模式、
+// nil 或已关闭连接返回 nil；select nil channel 会自然禁用该分支并等待 ctx/deadline。
+func (c *Connection) ListenNotify(routeKey string) <-chan struct{} {
+	if c == nil || c.isClose.Load() == 1 {
+		return nil
+	}
+	c.mu.Lock()
+	b, ok := c.listenRoutes[routeKey]
+	if !ok || b.cb != nil || b.queue == nil {
+		c.mu.Unlock()
+		return nil
+	}
+	notify := b.queue.Notify()
+	c.mu.Unlock()
+	return notify
 }
 
 // StartPump 启动 connectionPump（每连接一个），统一接管 inbound decode / listen 分发 /

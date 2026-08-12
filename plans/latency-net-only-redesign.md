@@ -46,7 +46,7 @@ duration = t1 - t0   ← 当前传给 monitor 的值
 |---|---|---|
 | `tcpRequest` / `udpRequest` | `Connection.Send` 完成 → 收到匹配 routeKey 的 `*Message` | 中等：proto 构建/序列化/解析、加密编码 |
 | `tcpSend` / `udpSend` | 无响应，**无 RTT 概念**，最多算 OS write 时间 | 几乎全部都是客户端开销 |
-| `tcpListen` / `udpListen` | 服务端推送到达 listenLoop → 被 poll 拿走（受 `pollMs` 量化误差，默认 100ms） | 客户端 poll 间隔决定下限 |
+| `tcpListen` / `udpListen` | 开始等待 → 服务端推送帧到达（由队列事件唤醒） | 仅包含真实等待窗口 |
 | `httpRequest` | `http.Client.Do` 全量耗时（含 body 读完） | 中等：URL/body marshal、resp body 读 + parse |
 | `tcpConnect` / `udpConnect` | 建连时长（TCP 握手）；当前已被算进 wall-clock | 客户端调度可见 |
 | `setState` / `clearState` / `tcpClose` / `udpClose` | **纯客户端**，无网络含义 | 100% |
@@ -71,7 +71,7 @@ duration = t1 - t0   ← 当前传给 monitor 的值
 
 1. **主指标 `latency` 含义变更为"纯网络往返时间"（Network RTT）**：从消息字节进入网卡到响应字节从网卡返回的窗口。
 2. **客户端构建/解析开销作为辅助字段保留**：方便用户诊断"高 RTT 是服务端慢还是客户端慢"。
-3. **特殊 pattern 平稳处理**：纯客户端动作（setState / clearState / connect / close 等）不污染 RTT 统计；listen 类动作用 poll 颗粒度记录但需文档明示。
+3. **特殊 pattern 平稳处理**：纯客户端动作（setState / clearState / connect / close 等）不污染 RTT 统计；listen 类动作按帧到达时刻记录。
 4. **Lua 动作支持纯 RTT 累计**：脚本里多次 `tcp_request / udp_request / http_request / tcp_listen / udp_listen` 应分别累加 net time，上抛给 monitor。
 5. **可观测性提升**：调试时可看到"端到端 wall-clock"和"纯 RTT"两个值的对比。
 
@@ -88,7 +88,7 @@ duration = t1 - t0   ← 当前传给 monitor 的值
 // ActionTiming 单次 action 执行的耗时拆解。
 //   - NetLatency：纯网络往返时间。
 //     ▸ request 类：Send 完成到收到响应的窗口
-//     ▸ listen 类：开始 poll 到拿到响应（受 pollMs 量化）
+//     ▸ listen 类：开始等待到推送帧到达
 //     ▸ http 类：http.Client.Do + body 读完的总时长
 //     ▸ send-only / connect / close / setState / clearState：始终为 0
 //   - SamplesNet：贡献到 NetLatency 的网络调用次数。
@@ -294,19 +294,14 @@ func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *
 ) {
     // ... 注册 listener ...
     start := time.Now()
-    for time.Now().Before(deadline) {
-        // ...
-        respBody, headerErr := ae.protocolListenResp(...)
-        if respBody != nil {
-            timing.NetLatency = time.Since(start)
-            timing.SamplesNet = 1
-            // ...
-            return len(respBody), timing, nil
-        }
-        time.Sleep(pollMs)
+    exchange, err := netSender.TCPListen(ctx, service, routeKey, timeout)
+    if err != nil || exchange == nil {
+        // 超时分支：SamplesNet=0，netLatency 不上抛
+        return 0, ActionTiming{}, NewTimeoutError(...)
     }
-    // 超时分支：SamplesNet=0，netLatency 不上抛
-    return 0, ActionTiming{}, NewTimeoutError(...)
+    timing.NetLatency = exchange.RecvFrameAt.Sub(start)
+    timing.SamplesNet = 1
+    return exchange.RecvWireBytes, timing, nil
 }
 ```
 
@@ -610,7 +605,7 @@ case 0 < netSampleCount < successCount  (lua 内部分支只有部分调用网�
 
 | 风险 | 等级 | 缓解 |
 |---|---|---|
-| listen 类 RTT 数字被 pollMs 量化失真，用户误读 | 中 | 文档明示 + tooltip 提示，建议生产环境用低 pollMs（如 50ms）做精细测量 |
+| listen 队列中已有消息时等待时长不可测 | 中 | 单独记录 ready 次数，不生成 0ms 延迟样本 |
 | HTTP keepalive 复用让首请求 netLatency 偏大（TCP 握手 + TLS） | 中 | 文档提示，建议预热 |
 | Apdex T 用户已校准过的值在新口径下偏严或偏松 | 中 | 文档说明 + ApdexT 可运行期调整（SetApdexT 已支持） |
 | 前端用户对 "—" 展示不理解 | 低 | tooltip 明确说明"此动作不参与网络往返度量"，并指向 clientAvgMs 列 |

@@ -43,7 +43,7 @@ Admin 后端是模板数据的最终写入边界。普通创建、更新和快�
 - Action 的 pattern 必须合法并与 `data.pattern` 一致。
 - 需要连接的 Action 必须提供 service；需要 route、address、c2sProto 或 s2cProto 的 pattern 必须提供对应字段。
 - Lua Action 必须提供非空脚本，clearState 必须提供至少一个 key，HTTP Action 必须提供 URL，并限制支持的方法和内容类型。
-- timeout 和 pollMs 必须是整数。
+- timeout 必须是整数。
 - Listen 的 kind 必须与内容形态一致；Lua Listen 的脚本不能为空。
 - defaultRef 必须是对象，server 非空，route 非 null，queueSize 大于零。
 

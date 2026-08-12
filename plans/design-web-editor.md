@@ -326,7 +326,6 @@ export interface ActionDef {
   bindings?: FieldBind[];
   store?: StoreMapping[];
   timeout?: number;
-  pollMs?: number;
   target?: 'tcp' | 'udp';
   keys?: string[];
   optional?: boolean;
@@ -584,7 +583,7 @@ ActionEditor 是整个编辑器中信息密度最高、动态性最强的部分�
 | `exchangeKey` | ✅ | (可选) | – | – | – | – | `secretArg` |
 | `close` | ✅ | – | – | – | – | – | `target: tcp\|udp` |
 | `clearState` | – | – | – | – | – | – | `keys: []string` |
-| `waitListen` | ✅ | ✅ | – | ✅ | – | ✅ | `timeout`, `pollMs`, `optional` |
+| `waitListen` | ✅ | ✅ | – | ✅ | – | ✅ | `timeout`, `optional` |
 | `setState` | – | – | – | – | ✅ | – | – |
 | `lua` | – | – | – | – | – | – | `script` |
 
@@ -1611,7 +1610,7 @@ export interface FlowEditorProps {
 | `address` | 文本（支持 `state:key`） | connect/connectUDP |
 | `target` | 单选（tcp/udp） | close |
 | `keys` | TagInput | clearState |
-| `timeout` / `pollMs` | 数字 | waitListen |
+| `timeout` | 数字 | waitListen |
 | `optional` | 开关 | waitListen |
 | `secretArg` | 文本 | exchangeKey |
 | `script` | LuaForm（mode='action'） | lua |

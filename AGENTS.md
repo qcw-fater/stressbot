@@ -100,7 +100,7 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 ### 动作 pattern（14 种）
 
 - **请求-响应**：`tcpRequest` / `udpRequest` — channel 一发一收 + 超时
-- **监听**：`tcpListen` / `udpListen` — 消费 ListenRefs 预缓存的推送消息（轮询 + 超时 + pollMs）
+- **监听**：`tcpListen` / `udpListen` — 事件等待 ListenRefs 预缓存的推送消息（队列边沿通知 + 超时）
 - **连接管理**：`tcpConnect` / `udpConnect` / `tcpClose` / `udpClose`
 - **发送**：`tcpSend` / `udpSend` / `httpRequest`（支持 JSON/form body）
 - **状态与辅助**：`setState` / `clearState` / `lua`
@@ -186,6 +186,7 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 - PowerShell 中检索包含 `|`、括号或引号的源码片段时优先拆成多个 `rg -F` 固定字符串查询；禁止在外层双引号命令中叠加复杂 `rg` 正则转义。
 - 预期可能零匹配的 `rg` 必须单独执行，不得与文件读取或其他已有有效输出捆绑；`rg` 的零匹配返回码 1 不能被误判为前序操作失败。
 - 在受限 Windows 工作区运行 Go 构建、测试或 pprof 命令时，将 `GOCACHE` 指向仓库内可写且已忽略的临时目录，避免默认用户缓存清理失败使成功结果返回非零。
+- Windows PowerShell 运行前端命令时使用 `npm.cmd` / `npx.cmd`，避免执行策略拦截同名 `.ps1` shim。
 - 异步业务动作的超时必须覆盖服务端最大业务窗口；上游请求失败后不得继续执行依赖请求制造级联超时，必须进入显式恢复与清理分支。
 
 每次对代码进行修改后，按以下步骤验证：

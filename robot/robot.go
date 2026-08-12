@@ -168,8 +168,6 @@ func NewRobot(parent context.Context, cfg Config, flow *engine.TaskFlow, factory
 	}
 
 	r.actionExec = engine.NewActionExecutor(r.state, &netSenderAdapter{robot: r}, r.factory, r.resolver, engineTimingLevel)
-	// 注入协作式休眠：声明式 listen 轮询间隔走调度器（drain mailbox），与 Lua await / 节点延迟同源。
-	r.actionExec.SetCooperativeSleeper(r.cooperativeSleep)
 	// 注入协作式阻塞 I/O：声明式 httpRequest / tcpConnect / udpConnect 走调度器 runIO（后台跑 +
 	// drain mailbox），与 Lua await_*（share/http/connect）同一原语，两条路径协作式语义统一。
 	r.actionExec.SetCooperativeIO(r.sched.runIO)
@@ -307,9 +305,6 @@ type pendingTask struct {
 	exec func() // 实际工作，在执行器 goroutine 内执行
 }
 
-// defaultAwaitPollMs await 监听轮询的兜底间隔（spec.PollMs<=0 时用）。
-const defaultAwaitPollMs = 50
-
 // robotWaiter 实现 script.Waiter：action 协程在 await_* 处 yield 后，由 drive-loop 调本类型
 // 在执行器 goroutine 内协作式等待。等待窗口内 drain Robot 任务队列（跑 listen 回调等），
 // 故长 sleep / listen 期间其他协作式工作不被饿死（计划 §9 的解法）。
@@ -318,21 +313,15 @@ type robotWaiter struct {
 	netSender *netSenderAdapter
 }
 
-// Await 解释一条 WaitSpec：WaitSleep 纯计时等待；WaitListen 轮询监听队列。
+// Await 解释一条 WaitSpec：WaitSleep 纯计时等待；WaitListen 等待监听队列事件。
 // 两者等待期间都 drain 任务队列。ctx 取消经 WaitOutcome.Canceled 表达（不返回 error）。
 func (w *robotWaiter) Await(spec *script.WaitSpec) (script.WaitOutcome, error) {
 	deadline := time.Now().Add(spec.Duration)
 	switch spec.Kind {
 	case script.WaitSleep:
-		return w.robot.sched.wait(deadline, 0, nil), nil
+		return w.robot.sched.wait(w.robot.ctx, deadline, nil, nil), nil
 	case script.WaitListen:
-		check := func() *engine.NetExchange {
-			if spec.Proto == "udp" {
-				return w.netSender.GetUDPListenResp(spec.Service, spec.RouteKey)
-			}
-			return w.netSender.GetTCPListenResp(spec.Service, spec.RouteKey)
-		}
-		return w.robot.sched.wait(deadline, spec.PollMs, check), nil
+		return w.netSender.waitListen(w.robot.ctx, spec.Proto, spec.Service, spec.RouteKey, spec.Duration), nil
 	case script.WaitResponse:
 		return w.robot.sched.awaitResponse(spec), nil
 	case script.WaitIO:
@@ -865,13 +854,12 @@ func (h *robotActionHandler) CooperativeSleep(ctx context.Context, d time.Durati
 // cooperativeSleep 协作式休眠 d：复用调度器统一等待 pump（sched.wait，check==nil 即纯计时），
 // 休眠期间持续 drain 任务队列。ctx 取消时返回 ctx.Err()。
 //
-// 三处共用：节点延迟 / wait 节点（engine.ActionHandler.CooperativeSleep）、声明式 listen 轮询
-// 间隔（注入 ActionExecutor.coopSleep）—— 统一约束「任何阻塞点都不裸阻塞」。
+// 节点延迟、wait 节点和 onError 重试间隔共用，统一保证等待期间不饿死 mailbox。
 func (r *Robot) cooperativeSleep(ctx context.Context, d time.Duration) error {
 	if d <= 0 {
 		return ctx.Err()
 	}
-	if r.sched.wait(time.Now().Add(d), 0, nil).Canceled {
+	if r.sched.wait(ctx, time.Now().Add(d), nil, nil).Canceled {
 		return ctx.Err()
 	}
 	return nil
@@ -1281,6 +1269,8 @@ type netSenderAdapter struct {
 	robot *Robot // 关联的机器人实例
 }
 
+var _ engine.NetSender = (*netSenderAdapter)(nil)
+
 // TCPSend 通过 TCP 发送数据包。
 func (ns *netSenderAdapter) TCPSend(service string, packet []byte) (int, error) {
 	conn := ns.robot.client.GetTCPConn(service)
@@ -1303,6 +1293,36 @@ func (ns *netSenderAdapter) TCPRequest(service string, packet []byte, routeKey s
 // UDPRequest 发送 UDP 请求并协作式等待响应（与 TCPRequest 同源，经 sched.awaitResponse）。
 func (ns *netSenderAdapter) UDPRequest(service string, packet []byte, routeKey string, timeout ...time.Duration) (*engine.NetExchange, error) {
 	return ns.cooperativeRequest("udp", service, packet, routeKey, timeout...)
+}
+
+// TCPListen 通过队列边沿通知等待 TCP 推送；nil, nil 表示到达 deadline 仍未命中。
+func (ns *netSenderAdapter) TCPListen(ctx context.Context, service, routeKey string, timeout time.Duration) (*engine.NetExchange, error) {
+	return ns.cooperativeListen(ctx, "tcp", service, routeKey, timeout)
+}
+
+// UDPListen 与 TCPListen 语义一致，共用同一个事件调度原语。
+func (ns *netSenderAdapter) UDPListen(ctx context.Context, service, routeKey string, timeout time.Duration) (*engine.NetExchange, error) {
+	return ns.cooperativeListen(ctx, "udp", service, routeKey, timeout)
+}
+
+func (ns *netSenderAdapter) cooperativeListen(ctx context.Context, proto, service, routeKey string, timeout time.Duration) (*engine.NetExchange, error) {
+	outcome := ns.waitListen(ctx, proto, service, routeKey, timeout)
+	switch {
+	case outcome.Err != nil:
+		return outcome.Exchange, outcome.Err
+	case outcome.Canceled:
+		if ctx != nil && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if ns.robot.ctx != nil && ns.robot.ctx.Err() != nil {
+			return nil, ns.robot.ctx.Err()
+		}
+		return nil, context.Canceled
+	case outcome.TimedOut:
+		return nil, nil
+	default:
+		return outcome.Exchange, nil
+	}
 }
 
 // cooperativeRequest 声明式请求-响应的协作式实现：构建 WaitSpec → sched.awaitResponse
@@ -1536,6 +1556,25 @@ func (ns *netSenderAdapter) GetUDPListenResp(service string, routeKey string) *e
 		Body: msg.Data, HeaderErr: msg.HeaderErr, RecvWireBytes: msg.WireBytes,
 		RecvFrameAt: msg.Timing.RecvFrameAt,
 	}
+}
+
+// waitListen 统一声明式与 Lua listen 的事件等待路径。队列保存数据，容量为 1 的 wake
+// 仅用于把 Robot owner 从 park 中唤醒；因此即使通知发生合并，也不会丢失队列里的消息。
+func (ns *netSenderAdapter) waitListen(ctx context.Context, proto, service, routeKey string, timeout time.Duration) script.WaitOutcome {
+	var wake <-chan struct{}
+	var check func() *engine.NetExchange
+	if proto == "udp" {
+		if conn := ns.robot.client.GetUDPConn(service); conn != nil {
+			wake = conn.ListenNotify(routeKey)
+		}
+		check = func() *engine.NetExchange { return ns.GetUDPListenResp(service, routeKey) }
+	} else {
+		if conn := ns.robot.client.GetTCPConn(service); conn != nil {
+			wake = conn.ListenNotify(routeKey)
+		}
+		check = func() *engine.NetExchange { return ns.GetTCPListenResp(service, routeKey) }
+	}
+	return ns.robot.sched.wait(ctx, time.Now().Add(timeout), wake, check)
 }
 
 // GetTCPSecretKey 获取 TCP 连接的加密密钥。

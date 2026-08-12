@@ -1,6 +1,7 @@
 package robot
 
 import (
+	"context"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -73,11 +74,18 @@ func (s *robotScheduler) enqueue(t pendingTask) {
 //
 // park 期间直接 select taskCh：来一个 listen 回调任务就地处理一个，每处理完回 loop 顶
 // 重查 check / deadline——天然实现 per-callback 的就绪检查（取代旧的批 drain + boundary check）。
-// ctx 取消立即返回 Canceled。
-func (s *robotScheduler) wait(deadline time.Time, pollMs int, check func() *engine.NetExchange) script.WaitOutcome {
-	ctx := s.robot.ctx
-	// 监听等待的起点。终点取帧被内核收到的时刻（非本轮轮询发现它的时刻），
-	// 否则测出来的是轮询间隔的取整，pollMs 越大偏得越多。
+// wake 是容量 1 的边沿提示；ctx 或 Robot 生命周期取消时立即返回 Canceled。
+func (s *robotScheduler) wait(ctx context.Context, deadline time.Time, wake <-chan struct{}, check func() *engine.NetExchange) script.WaitOutcome {
+	var callerDone <-chan struct{}
+	if ctx != nil {
+		callerDone = ctx.Done()
+	}
+	var robotDone <-chan struct{}
+	if s.robot.ctx != nil {
+		robotDone = s.robot.ctx.Done()
+	}
+
+	// 监听等待的起点。终点取帧被内核收到的时刻，而不是 owner 被唤醒的时刻。
 	waitStart := time.Now()
 	var timer *time.Timer
 	defer func() {
@@ -86,7 +94,7 @@ func (s *robotScheduler) wait(deadline time.Time, pollMs int, check func() *engi
 		}
 	}()
 	for {
-		if ctx.Err() != nil {
+		if (ctx != nil && ctx.Err() != nil) || (s.robot.ctx != nil && s.robot.ctx.Err() != nil) {
 			return script.WaitOutcome{Canceled: true}
 		}
 		if check != nil {
@@ -102,31 +110,27 @@ func (s *robotScheduler) wait(deadline time.Time, pollMs int, check func() *engi
 			}
 			return script.WaitOutcome{TimedOut: true} // listen 超时
 		}
-		w := remaining
-		if check != nil {
-			tick := time.Duration(pollMs) * time.Millisecond
-			if tick <= 0 {
-				tick = defaultAwaitPollMs * time.Millisecond
-			}
-			if tick < w {
-				w = tick
-			}
-		}
-		// 池化 timer 跨 poll 轮复用（帧循环每轮一只 NewTimer 是剖面上的分配主源）。
-		// t.exec() 前必 Stop：回调里嵌套 wait/awaitResponse 会再从池取，互不干扰。
+
+		// timer 只覆盖整个剩余 deadline；listen 到达由 wake 唤醒，不再周期轮询。
+		// t.exec() 前必 Stop：回调里嵌套 wait 会再从池取，互不干扰。
 		if timer == nil {
-			timer = utils.GetTimer(w)
+			timer = utils.GetTimer(remaining)
 		} else {
-			timer.Reset(w)
+			timer.Reset(remaining)
 		}
 		select {
 		case t := <-s.taskCh:
 			timer.Stop()
-			t.exec() // 就地处理 → loop 回顶重查 check / deadline
-		case <-ctx.Done():
+			t.exec() // 就地处理 → loop 回顶重查队列 / deadline
+		case <-wake:
+			timer.Stop()
+			// wake 只是提示，队列才是事实源；回顶后通过 check 消费。
+		case <-callerDone:
+			return script.WaitOutcome{Canceled: true}
+		case <-robotDone:
 			return script.WaitOutcome{Canceled: true}
 		case <-timer.C:
-			// poll 到点重查 ready / sleep 到时 → loop 回顶
+			// deadline 边界回顶重查一次队列，避免到达与超时的边界竞态。
 		}
 	}
 }

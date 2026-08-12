@@ -25,13 +25,13 @@ import (
 //	network.close_udp(service)                → 关闭 UDP 连接
 //	network.tcp_request(service, route, msg [, s2c])
 //	network.tcp_request_route(service, request_route, response_route, msg [, s2c])
-//	network.udp_request(service, route, body [, s2c [, timeout [, poll]]])
+//	network.udp_request(service, route, body [, s2c [, timeout]])
 //	network.udp_request_route(service, request_route, response_route, body [, s2c])
 //	network.http_request(url [, method [, content_type [, body]]])
 //	network.tcp_send(service, route, msg)
 //	network.udp_send(service, route, body)
-//	network.tcp_listen(service, route [, s2c [, timeout [, poll]]])
-//	network.udp_listen(service, route [, s2c [, timeout [, poll]]])
+//	network.tcp_listen(service, route [, s2c [, timeout]])
+//	network.udp_listen(service, route [, s2c [, timeout]])
 //	network.try_tcp_listen(service, route) → err, data  (非阻塞单次 pop)
 //	network.try_udp_listen(service, route) → err, data  (非阻塞单次 pop)
 //	network.set_tcp_secret_key(service, key)
@@ -727,34 +727,30 @@ func networkUDPSend(L *lua.LState) int {
 
 // listenParams 解析 *_listen / await_*_listen 系列的公共入参并计算 routeKey。
 //
-// 入参约定：(service, route [, s2cProto [, timeout秒 [, pollMs]]])。
+// 入参约定：(service, route [, s2cProto [, timeout秒]])。
 // routeKey 走 resolver.Resolve("<proto>:"+service) 出的 Go SchemaAdapter 计算
 // （与 engine robotActionHandler.RegisterListen 同源）。codec 未映射时记框架错误并返回
 // ok=false，调用方据此直接返回 (ErrEncodeFailed, nil)。
-func listenParams(L *lua.LState, ctx *Context, protocol string) (service, routeKey, s2cProto string, timeout, pollMs int, ok bool) {
+func listenParams(L *lua.LState, ctx *Context, protocol string) (service, routeKey, s2cProto string, timeout int, ok bool) {
+	if L.GetTop() > 4 {
+		L.ArgError(5, "事件化 listen 仅支持 4 个参数")
+	}
 	service = L.CheckString(1)
 	adp := ctx.ResolveAdapter(protocol, service)
 	if adp == nil {
-		return service, "", "", 0, 0, false
+		return service, "", "", 0, false
 	}
 	route := luaValueToRoute(L.Get(2))
 	routeKey = adp.ExpectedRouteKey(route)
 
 	timeout = engine.DefaultListenTimeoutSec
-	pollMs = engine.DefaultPollMs
 	if L.GetTop() >= 3 {
 		s2cProto = L.CheckString(3)
 	}
 	if L.GetTop() >= 4 {
 		timeout = L.CheckInt(4)
 	}
-	if L.GetTop() >= 5 {
-		pollMs = L.CheckInt(5)
-	}
-	if pollMs <= 0 {
-		pollMs = engine.DefaultPollMs
-	}
-	return service, routeKey, s2cProto, timeout, pollMs, true
+	return service, routeKey, s2cProto, timeout, true
 }
 
 // listenResultValues 把一次监听等待的结果（命中/超时/取消）转成 Lua 返回值 (err, data)。
@@ -782,7 +778,7 @@ func listenResultValues(L *lua.LState, ctx *Context, spec *WaitSpec, outcome Wai
 			zap.String("hint", "请先调用 ensure_"+spec.Proto+"_listener() 预注册监听"))
 		return []lua.LValue{
 			newErrTable(L, int(errcode.ErrListenTimeout),
-				fmt.Sprintf("service=%s route=%s timeout=%ds pollMs=%d", spec.Service, spec.RouteKey, timeoutSec, spec.PollMs)),
+				fmt.Sprintf("service=%s route=%s timeout=%ds", spec.Service, spec.RouteKey, timeoutSec)),
 			lua.LNil,
 		}
 	}
@@ -852,7 +848,7 @@ func awaitNetworkListen(L *lua.LState, protocol string) int {
 		L.RaiseError("network not available")
 		return 0
 	}
-	service, routeKey, s2cProto, timeout, pollMs, ok := listenParams(L, ctx, protocol)
+	service, routeKey, s2cProto, timeout, ok := listenParams(L, ctx, protocol)
 	if !ok {
 		// codec 未映射：直接返回错误，不进入协作式等待（无须 yield）。
 		return pushResult(L, newErrTable(L, int(errcode.ErrEncodeFailed), "service="+service+" codec 未映射（resolver.Resolve("+protocol+":"+service+") nil）"), lua.LNil)
@@ -860,7 +856,6 @@ func awaitNetworkListen(L *lua.LState, protocol string) int {
 	spec := &WaitSpec{
 		Kind:     WaitListen,
 		Duration: time.Duration(timeout) * time.Second,
-		PollMs:   pollMs,
 		Proto:    protocol,
 		Service:  service,
 		RouteKey: routeKey,

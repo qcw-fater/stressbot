@@ -99,7 +99,7 @@ type SwitchCase struct {
 type ListenRef struct {
 	Route  any    `json:"route"`  // 不透明路由（与 ActionDef.Route 格式一致）
 	Server string `json:"server"` // 连接名，格式：协议:服务名（如 "tcp:logic"、"udp:udp"）
-	Listen string `json:"listen"` // 监听定义名称（引用 listens 表），空 = 仅轮询不回调
+	Listen string `json:"listen"` // 监听定义名称（引用 listens 表），空 = 仅缓存不回调
 	// QueueSize 监听缓存队列容量。
 	//   - 未写（nil）→ 默认 1，与历史单槽语义逐字节等价；
 	//   - 显式 > 0 → 按该值预创建环形队列；
@@ -114,12 +114,12 @@ const (
 	PatternTCPRequest  = "tcpRequest"  // TCP 请求-响应
 	PatternTCPConnect  = "tcpConnect"  // TCP 连接建立
 	PatternTCPClose    = "tcpClose"    // TCP 连接关闭
-	PatternTCPListen   = "tcpListen"   // TCP 推送消息消费（轮询 ListenRefs 预缓存）
+	PatternTCPListen   = "tcpListen"   // TCP 推送消息消费（事件等待 ListenRefs 预缓存）
 	PatternUDPSend     = "udpSend"     // UDP 单向发送
 	PatternUDPRequest  = "udpRequest"  // UDP 请求-响应
 	PatternUDPConnect  = "udpConnect"  // UDP 连接建立
 	PatternUDPClose    = "udpClose"    // UDP 连接关闭
-	PatternUDPListen   = "udpListen"   // UDP 推送消息消费（轮询 ListenRefs 预缓存）
+	PatternUDPListen   = "udpListen"   // UDP 推送消息消费（事件等待 ListenRefs 预缓存）
 	PatternHTTPRequest = "httpRequest" // HTTP 请求
 	PatternSetState    = "setState"    // 设置状态变量
 	PatternClearState  = "clearState"  // 清除状态变量
@@ -200,7 +200,6 @@ type ActionDef struct {
 	Bindings    []FieldBind    `json:"bindings"`    // C2S 字段绑定
 	Store       []StoreMapping `json:"store"`       // S2C 响应字段 -> 状态存储映射
 	Timeout     int            `json:"timeout"`     // 超时秒数（listen 模式）
-	PollMs      int            `json:"pollMs"`      // 轮询间隔毫秒（listen 模式，默认 100）
 	Keys        []string       `json:"keys"`        // clearState 要清除的 key 列表
 	URL         string         `json:"url"`         // HTTP 请求 URL（httpRequest 模式），支持 state: 前缀
 	Method      string         `json:"method"`      // HTTP 方法（httpRequest 模式）：POST(默认) / GET

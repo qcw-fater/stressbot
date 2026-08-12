@@ -42,7 +42,6 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
   const showBindings = patternHas(pattern, ['bindings']);
   const showStore = patternHas(pattern, ['store']);
   const showTimeout = pattern === 'tcpListen' || pattern === 'udpListen' || pattern === 'tcpRequest' || pattern === 'udpRequest';
-  const showPollMs = pattern === 'tcpListen' || pattern === 'udpListen';
   const showURL = pattern === 'httpRequest';
   const showMethod = pattern === 'httpRequest';
   const showContentType = pattern === 'httpRequest';
@@ -205,30 +204,13 @@ export function DeclarativeForm({ action, onChange }: DeclarativeFormProps) {
               />
               <span style={{ display: 'flex', alignItems: 'center', padding: '0 8px', background: 'var(--container-bg)', border: '1px solid var(--border-color)', borderRadius: '0 6px 6px 0', fontSize: 13 }}>s</span>
             </Space.Compact>
-            {showPollMs && (
-              <>
-                <span>轮询间隔</span>
-                <Space.Compact>
-                  <InputNumber
-                    min={0}
-                    precision={0}
-                    step={1}
-                    placeholder="100"
-                    value={action.pollMs}
-                    onChange={(v) => set({ pollMs: (v as number) ?? undefined })}
-                    style={{ width: 120 }}
-                  />
-                  <span style={{ display: 'flex', alignItems: 'center', padding: '0 8px', background: 'var(--container-bg)', border: '1px solid var(--border-color)', borderRadius: '0 6px 6px 0', fontSize: 13 }}>ms</span>
-                </Space.Compact>
-              </>
-            )}
           </Space>
         </Form.Item>
       )}
 
       {(pattern === 'tcpListen' || pattern === 'udpListen') && (
         <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: -8, marginBottom: 16 }}>
-          此 route 必须在之前节点的 listenRefs 中预注册（listen=null），否则运行时会超时
+          listen 由消息事件直接唤醒；此 route 必须在之前节点的 listenRefs 中预注册（listen=null），否则运行时会超时
         </div>
       )}
 
