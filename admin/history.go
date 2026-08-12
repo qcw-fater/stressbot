@@ -58,11 +58,11 @@ const upsertTaskConfigArchiveSQL = `
 
 // NewHistoryStore 创建历史归档存储。
 // db 必须非 nil（由 AdminServer 装配时传入共享 *sql.DB）。
-// cfg 可为 nil（表示不启用历史归档，retentionDays 用默认 90）。
-func NewHistoryStore(db *sql.DB, cfg *HistoryConfig) *HistoryStore {
-	retention := 90
-	if cfg != nil && cfg.RetentionDays > 0 {
-		retention = cfg.RetentionDays
+// retentionDays <= 0 时用默认 90。
+func NewHistoryStore(db *sql.DB, retentionDays int) *HistoryStore {
+	retention := retentionDays
+	if retention <= 0 {
+		retention = 90
 	}
 	return &HistoryStore{
 		db:            db,
@@ -77,13 +77,13 @@ func openDB(cfg MySQLConfig) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if cfg.MaxOpenConns > 0 {
-		db.SetMaxOpenConns(cfg.MaxOpenConns)
+	if cfg.Pool.MaxOpenConns > 0 {
+		db.SetMaxOpenConns(cfg.Pool.MaxOpenConns)
 	}
-	if cfg.MaxIdleConns > 0 {
-		db.SetMaxIdleConns(cfg.MaxIdleConns)
+	if cfg.Pool.MaxIdleConns > 0 {
+		db.SetMaxIdleConns(cfg.Pool.MaxIdleConns)
 	}
-	if d, err := time.ParseDuration(cfg.ConnMaxLifetime); err == nil && d > 0 {
+	if d, err := time.ParseDuration(cfg.Pool.ConnMaxLifetime); err == nil && d > 0 {
 		db.SetConnMaxLifetime(d)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

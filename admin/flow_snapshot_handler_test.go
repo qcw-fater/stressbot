@@ -45,7 +45,7 @@ func TestFlowSnapshotRouteReturnsSnapshot(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "name", "node_count", "action_count", "created_at", "updated_at", "flow_json", "layout_json",
 		}))
-	s := &AdminServer{cfg: Config{StaticDir: t.TempDir()}, flows: NewFlowTemplateStore(db)}
+	s := &AdminServer{cfg: Config{Server: ServerConfig{StaticDir: t.TempDir()}}, flows: NewFlowTemplateStore(db)}
 	rr := httptest.NewRecorder()
 	s.registerManagementRoutes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/sbot/flows/snapshot", nil))
 

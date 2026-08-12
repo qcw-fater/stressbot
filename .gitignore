@@ -46,3 +46,4 @@ metrics/
 
 # 部署测试
 deploy/
+.gcache/

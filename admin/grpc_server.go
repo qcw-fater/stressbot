@@ -39,7 +39,7 @@ func (s *AdminServer) heartbeatInterval() time.Duration {
 }
 
 func (s *AdminServer) leaseDuration() time.Duration {
-	duration, err := time.ParseDuration(s.cfg.AgentRegistry.UnhealthyAfter)
+	duration, err := time.ParseDuration(s.cfg.ControlPlane.UnhealthyAfter)
 	if err != nil || duration <= 0 {
 		return 30 * time.Second
 	}

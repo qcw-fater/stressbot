@@ -11,9 +11,10 @@ import (
 	"github.com/DataDog/sketches-go/ddsketch/store"
 )
 
+// DDSketch 默认精度参数。CollectorConfig.Sketch 为零值时使用。
 const (
-	latencyRelativeAccuracy = 0.01
-	latencyMaxBins          = 2048
+	defaultSketchRelativeAccuracy = 0.01
+	defaultSketchMaxBins          = 2048
 )
 
 var ErrInvalidMetricSample = errors.New("无效监控耗时样本")
@@ -29,8 +30,21 @@ type LatencyHistogram struct {
 	maxNs  int64
 }
 
+// newLatencyHistogram 用默认精度参数创建直方图（供测试和回退使用）。
 func newLatencyHistogram() *LatencyHistogram {
-	sketch, err := ddsketch.LogCollapsingLowestDenseDDSketch(latencyRelativeAccuracy, latencyMaxBins)
+	return newLatencyHistogramWith(defaultSketchRelativeAccuracy, defaultSketchMaxBins)
+}
+
+// newLatencyHistogramWith 用指定 DDSketch 精度参数创建直方图。
+// relativeAccuracy 越小越精确（默认 0.01 = 1%），maxBins 越大覆盖范围越广（默认 2048）。
+func newLatencyHistogramWith(relativeAccuracy float64, maxBins int) *LatencyHistogram {
+	if relativeAccuracy <= 0 {
+		relativeAccuracy = defaultSketchRelativeAccuracy
+	}
+	if maxBins <= 0 {
+		maxBins = defaultSketchMaxBins
+	}
+	sketch, err := ddsketch.LogCollapsingLowestDenseDDSketch(relativeAccuracy, maxBins)
 	if err != nil {
 		panic(fmt.Sprintf("初始化 DDSketch 失败: %v", err))
 	}

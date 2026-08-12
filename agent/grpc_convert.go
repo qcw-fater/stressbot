@@ -8,6 +8,7 @@ import (
 	"stressbot/controlplane/controlv1"
 	"stressbot/robot"
 	"stressbot/sharedstate"
+	"stressbot/utils"
 )
 
 func taskAssignmentFromProto(src *controlv1.TaskAssignment, bundle *controlv1.BundleDescriptor) (*TaskAssignment, error) {
@@ -80,12 +81,14 @@ func sharedAssignmentFromProto(src *controlv1.SharedRuntimeAssignment) *SharedRu
 			KeyPrefix:       src.Redis.KeyPrefix,
 			DefaultClaimTTL: src.Redis.DefaultClaimTtl,
 			OpTimeout:       src.Redis.OperationTimeout,
-			DialTimeout:     src.Redis.DialTimeout,
-			ReadTimeout:     src.Redis.ReadTimeout,
-			WriteTimeout:    src.Redis.WriteTimeout,
-			MaxOpenConns:    int(src.Redis.MaxOpenConnections),
-			MaxIdleConns:    int(src.Redis.MaxIdleConnections),
-			ConnMaxLifetime: src.Redis.ConnectionMaxLifetime,
+			Pool: utils.ConnPoolConfig{
+				DialTimeout:     src.Redis.DialTimeout,
+				ReadTimeout:     src.Redis.ReadTimeout,
+				WriteTimeout:    src.Redis.WriteTimeout,
+				MaxOpenConns:    int(src.Redis.MaxOpenConnections),
+				MaxIdleConns:    int(src.Redis.MaxIdleConnections),
+				ConnMaxLifetime: src.Redis.ConnectionMaxLifetime,
+			},
 		},
 	}
 }

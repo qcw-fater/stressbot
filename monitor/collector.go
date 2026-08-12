@@ -186,11 +186,11 @@ type actionMetrics struct {
 	listenTimeoutHits atomic.Int64 // 监听超时次数，单独成率，不进直方图
 }
 
-func newActionMetrics() *actionMetrics {
+func newActionMetrics(relativeAccuracy float64, maxBins int) *actionMetrics {
 	return &actionMetrics{
-		rtt:           newLatencyHistogram(),
-		listenWait:    newLatencyHistogram(),
-		totalDuration: newLatencyHistogram(),
+		rtt:           newLatencyHistogramWith(relativeAccuracy, maxBins),
+		listenWait:    newLatencyHistogramWith(relativeAccuracy, maxBins),
+		totalDuration: newLatencyHistogramWith(relativeAccuracy, maxBins),
 	}
 }
 
@@ -220,14 +220,23 @@ func TimingDetailAtLeast(current, required TimingDetailLevel) bool {
 
 // CollectorConfig 监控配置。
 type CollectorConfig struct {
-	ApdexThresholdMs int         `json:"apdexThresholdMs"` // Apdex T 阈值（毫秒），默认 100
-	TimingDetail     string      `json:"timingDetail"`     // 计时细分级别：rtt / codec / full，默认 rtt
-	HTTP             *HTTPConfig `json:"http"`             // nil = 不启用 HTTP JSON 端点
+	ApdexThresholdMs int           `toml:"apdexThresholdMs" json:"apdexThresholdMs"` // Apdex T 阈值（毫秒），默认 100
+	TimingDetail     string        `toml:"timingDetail"     json:"timingDetail"`     // 计时细分级别：rtt / codec / full，默认 rtt
+	ReportInterval   string        `toml:"reportInterval"   json:"reportInterval"`   // 监控指标上报间隔（如 "5s"），仅单机模式用
+	HTTP             *HTTPConfig   `toml:"http"             json:"http"`             // nil = 不启用 HTTP JSON 端点
+	Sketch           SketchConfig  `toml:"sketch"           json:"sketch"`           // DDSketch 延迟分布精度参数
+}
+
+// SketchConfig DDSketch 延迟分布精度配置。
+// 注意：DDSketch 合并要求两侧精度参数一致，Admin 与所有 Agent 必须使用相同值。
+type SketchConfig struct {
+	RelativeAccuracy float64 `toml:"relativeAccuracy" json:"relativeAccuracy"` // 相对误差（默认 0.01 = 1%），越小越精确越耗内存
+	MaxBins          int     `toml:"maxBins"          json:"maxBins"`          // 最大桶数（默认 2048），越大覆盖范围越广
 }
 
 // HTTPConfig 监控 HTTP JSON 端点配置。
 type HTTPConfig struct {
-	Port int `json:"port"` // HTTP 端口号
+	Port int `toml:"port" json:"port"` // HTTP 端口号
 }
 
 // MetricsCollector 全局指标收集器（单例）。
@@ -720,7 +729,7 @@ func (c *MetricsCollector) getOrCreateAction(name string) *actionMetrics {
 	if v, ok := c.actions.Load(name); ok {
 		return v.(*actionMetrics)
 	}
-	am := newActionMetrics()
+	am := newActionMetrics(c.cfg.Sketch.RelativeAccuracy, c.cfg.Sketch.MaxBins)
 	actual, loaded := c.actions.LoadOrStore(name, am)
 	if !loaded {
 		c.namesMu.Lock()

@@ -8,7 +8,7 @@ import (
 )
 
 func TestManagementRoutesExcludeControlPlane(t *testing.T) {
-	server := &AdminServer{cfg: Config{StaticDir: t.TempDir()}}
+	server := &AdminServer{cfg: Config{Server: ServerConfig{StaticDir: t.TempDir()}}}
 	handler := server.registerManagementRoutes()
 
 	assertStatus(t, handler, http.MethodPost, "/sbot/agent/register", http.StatusNotFound)
@@ -28,8 +28,10 @@ func TestManagementRoutesExcludeControlPlane(t *testing.T) {
 
 func TestAdminManagementListenerAddress(t *testing.T) {
 	server := &AdminServer{cfg: Config{
-		ListenHost: "127.0.0.1",
-		Port:       7718,
+		Server: ServerConfig{
+			ListenHost: "127.0.0.1",
+			Port:       7718,
+		},
 		ControlPlane: ControlPlaneConfig{
 			ListenHost: "10.0.0.2",
 			Port:       7720,

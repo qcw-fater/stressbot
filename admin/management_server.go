@@ -24,7 +24,7 @@ const (
 
 func (s *AdminServer) newManagementServer() *http.Server {
 	return &http.Server{
-		Addr:              net.JoinHostPort(s.cfg.ListenHost, strconv.Itoa(s.cfg.Port)),
+		Addr:              net.JoinHostPort(s.cfg.Server.ListenHost, strconv.Itoa(s.cfg.Server.Port)),
 		Handler:           s.registerManagementRoutes(),
 		ReadHeaderTimeout: managementReadHeaderTimeout,
 		IdleTimeout:       managementIdleTimeout,

@@ -12,20 +12,25 @@ stressbot 是一个可配置化通用游戏服务器压测工具，用 Go 编写
 
 ```bash
 # 编译（单机 + Agent 共用一个二进制）
-go build -o stressbot.exe ./cmd/agent
+go build -o stressbot.exe ./cmd/stressbot  # 单机
+go build -o agent.exe ./cmd/agent          # Agent 节点
+go build -o admin.exe ./cmd/admin          # Admin 服务器
 
-# 单机压测（agent.enabled 默认 false）
-go run ./cmd/agent -config conf/config.json
+# 单机压测（独立二进制，配置文件为 TOML）
+go run ./cmd/stressbot -config conf/stressbot.toml
 # 单机模式可选 flag：覆盖资源路径（空值回退到 <config 所在目录> 下默认）
 #   -flow <file>     流程配置（默认 <conf>/flow/flow.json）
 #   -proto <dir>     proto 目录（默认 <conf>/proto）
 #   -scripts <dir>   Lua 脚本目录（默认 <conf>/scripts）
 #   -adapter <dir>   适配器目录，含各 *_codec.json 与可选 errors.json（默认 <conf>/adapter）
 # 示例：切换压测场景无需挪文件
-go run ./cmd/agent -config conf/config.json -flow conf/flow/rank.json
+go run ./cmd/stressbot -config conf/stressbot.toml -flow conf/flow/rank.json
+
+# Agent 节点（分布式）
+go run ./cmd/agent -config conf/agent.toml
 
 # Admin 服务器
-go run ./cmd/admin -config conf/admin-config.json
+go run ./cmd/admin -config conf/admin.toml
 
 # 前端开发
 cd cmd/web && npm install && npm run dev   # http://localhost:5173
@@ -35,14 +40,14 @@ cd cmd/web && npm run test                 # Vitest
 
 ## 运行模式
 
-### 单机模式（standalone）
-`agent.enabled=false`，单个进程完成全部工作：加载配置 → 声明式 codec 配置（`*_codec.json` + `errors.json`）→ .proto 文件 → 流程配置 → 启动 gnet 网络引擎 → 创建 Lua 运行时池 → 创建 Robot Manager → 批量启动机器人。
+### 单机模式（standalone，`cmd/stressbot`）
+独立二进制，配置文件 `conf/stressbot.toml`。单个进程完成全部工作：加载配置 → 声明式 codec 配置（`*_codec.json` + `errors.json`）→ .proto 文件 → 流程配置 → 启动 gnet 网络引擎 → 创建 Lua 运行时池 → 创建 Robot Manager → 批量或渐进加压启动机器人。支持可选的渐进加压配置（`[standalone.rampUp.stages]`）。
 
-### Agent 模式（distributed）
-`agent.enabled=true`，Agent 注册到 Admin → 接收任务 → 下载配置 → 执行。Admin 负责任务调度、Agent 管理、指标聚合、历史归档。
+### Agent 模式（distributed，`cmd/agent`）
+独立二进制，配置文件 `conf/agent.toml`。Agent 注册到 Admin → 接收任务 → 下载配置 → 执行。Admin 负责任务调度、Agent 管理、指标聚合、历史归档。
 
-### Admin 模式
-独立服务器进程，提供 Web UI + 60 个 HTTP API 端点（前缀 `/sbot/`），管理多个 Agent 节点的任务下发和指标收集。
+### Admin 模式（`cmd/admin`）
+独立二进制，配置文件 `conf/admin.toml`。提供 Web UI + HTTP API 端点（前缀 `/sbot/`），管理多个 Agent 节点的任务下发和指标收集。
 
 ## 架构
 
@@ -81,9 +86,9 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 
 ## 配置文件
 
-- `conf/config.json` — 运行配置：`log`/`monitor`/`pprof`（共享）+ `standalone`（单机模式：`bot`/`stateExtra`）+ `agent`（Agent 模式）+ 可选 `redis`/`daemon`；资源路径（`flow`/`proto`/`scripts`/`adapter`）为 CLI flag（默认回退 `<conf>` 下子目录）
-- `conf/agent-config.json` — Agent 模式精简配置：仅 `log`/`monitor`/`agent`（无 standalone 段，运行时由 Admin 下发）
-- `conf/admin-config.json` — Admin 服务器配置：`port`、`publicUrl`、`staticDir`、`agentRegistry`、`mysql`（顶层，全局共享 `*sql.DB`）、`redis`、`history`（`retentionDays`）、`log`、`daemon`
+- `conf/stressbot.toml` — 单机模式运行配置：`log`/`monitor`/`pprof`/`standalone`（`bot`/`stateExtra`/`rampUp`）+ 可选 `redis`/`network`/`daemon`；资源路径（`flow`/`proto`/`scripts`/`adapter`）为 CLI flag（默认回退 `<conf>` 下子目录）。TOML 格式，支持注释和环境变量展开（`${VAR}`/`${VAR:-default}`）。
+- `conf/agent.toml` — Agent 节点配置：`log`/`monitor`/`pprof`/`agent`（含 `reconnect` 子段）/`daemon`
+- `conf/admin.toml` — Admin 服务器配置：`server`（HTTP 管理面）/`controlPlane`（gRPC 控制面 + Agent 健康判定）/`mysql`（含 `retentionDays` 和 `pool`）/`redis`/`log`/`pprof`/`daemon`
 - `conf/flow/flow.json` — 流程图（`defaultDelayMs` + `nodes` + `actions` + `listens`）— 主要配置产物
 - `conf/adapter/<proto>_<service>_codec.json` — 每连接一份的声明式 codec 配置；共享 `errors.json` 提供错误码描述。编解码统一由纯 Go `codec/` 引擎驱动，无 Lua codec 路径。
 - `conf/proto/` — 启动时动态加载的 `.proto` 文件

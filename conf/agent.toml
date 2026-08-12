@@ -1,0 +1,120 @@
+# stressbot Agent 节点配置（分布式模式）
+# ─────────────────────────────────────────────────────
+# 用法: go run ./cmd/agent -config conf/agent.toml
+#
+# Agent 主动连接 Admin 控制面，接收任务、下载配置、执行压测、上报指标。
+# Agent 本身不开放 HTTP 控制面，所有管理操作通过 Admin 进行。
+#
+# 环境变量展开：
+#   ${VAR}          展开，未定义则启动报错
+#   ${VAR:-default} 展开，未定义则用 default
+#   $$              转义为字面 $
+#
+# 严格模式：拼写错误的字段名会导致启动失败。
+
+# ─── 顶层标量（必须在所有 [section] 之前）────────────
+# daemon 是否以守护进程模式运行（仅 Linux，Windows 下忽略）。
+# 也可通过命令行 -d flag 覆盖。
+daemon = false
+
+# ─── 日志 ──────────────────────────────────────────────
+[log]
+# path 日志文件路径（相对进程工作目录）。
+path = "log/agent.log"
+
+# level 日志级别: debug / info / warn / error。
+level = "info"
+
+# printConsole 是否同时输出到控制台。
+printConsole = true
+
+# maxSizeMB 单个日志文件最大体积（MB），超过后轮转。
+maxSizeMB = 100
+
+# maxBackups 轮转后保留的旧文件数量。
+maxBackups = 5
+
+# maxAge 旧文件最大保留天数。
+maxAge = 7
+
+# localTime 轮转文件名是否使用本地时区。
+localTime = true
+
+# compress 是否 gzip 压缩旧日志文件。
+compress = true
+
+# ─── 监控 ──────────────────────────────────────────────
+[monitor]
+# apdexThresholdMs Apdex T 阈值（毫秒）。Agent 端采集的指标会随心跳上报给 Admin 汇总。
+# 任务运行期可被 Admin 下发的 apdexT 覆盖（Admin 创建任务时可指定）。
+apdexThresholdMs = 100
+
+# timingDetail 计时细分级别: rtt / codec / full。
+# Agent 模式建议 rtt（开销最小），深度排查施压机自身问题时临时调高。
+timingDetail = "rtt"
+
+# Agent 模式不启用 monitor HTTP 端点（指标经 gRPC 上报给 Admin，不需要本地 HTTP）。
+# 如需在 Agent 机器上直接查看当前快照，pprof 端口上仍注册了 /metrics 路由。
+
+  # monitor.sketch DDSketch 延迟分布精度。
+  # 注意：必须与 Admin 的 monitor.sketch 保持一致，否则 Admin 合并 sketch 时结果错误。
+  [monitor.sketch]
+  # relativeAccuracy 相对误差（0.01 = 1%）。
+  relativeAccuracy = 0.01
+
+  # maxBins 最大桶数。
+  maxBins = 2048
+
+# ─── pprof 调试 ────────────────────────────────────────
+# 启用后 http://localhost:<port>/debug/pprof 可获取 Go runtime profile。
+# 同时 /metrics 路由也挂在此端口，用于在 Agent 机器上直接查看指标快照。
+[pprof]
+# port pprof HTTP 监听端口。
+port = 6060
+
+# ─── Agent 节点参数 ────────────────────────────────────
+[agent]
+# id 节点 ID（必填，全局唯一）。用于 Admin 识别和管理此 Agent。
+# 多个 Agent 连接同一 Admin 时，ID 不能重复。
+id = "agent-001"
+
+# adminAddress Admin 控制面 gRPC 地址（必填，格式 host:port）。
+# 对应 admin.toml 中 controlPlane.port 配置的监听地址。
+adminAddress = "127.0.0.1:7720"
+
+# name 节点显示名称。留空则自动取操作系统 hostname，再空则用 id。
+# 前端 UI 和 Admin 日志中展示此名称。
+name = "agent-001"
+
+# maxBots 此 Agent 允许运行的最大机器人数。
+# Admin 分配任务时会参考此上限，不会超配。<= 0 时默认 5000。
+maxBots = 5000
+
+# heartbeatInterval 心跳上报间隔。Agent 定期向 Admin 发送心跳表明存活。
+# 必须明显小于 Admin 的 controlPlane.unhealthyAfter，否则会被误判离线。
+heartbeatInterval = "10s"
+
+# metricsInterval 压力/系统指标上报间隔。Agent 按此频率将采集的指标流式上报给 Admin。
+metricsInterval = "5s"
+
+# reconnectMaxRetries gRPC 连接断开后的最大重连次数。
+# -1 = 无限重连（默认行为）。0 也会被解释为 -1。
+# 正整数 = 最多重连 N 次，超过后放弃当前任务。
+reconnectMaxRetries = -1
+
+# taskWorkDir 任务工作目录（下载的资源包解压、bundle 缓存的根目录）。
+# 留空 = 使用系统临时目录（os.TempDir()）。
+# 生产环境建议指定持久化目录，避免系统重启清理临时目录导致缓存丢失。
+taskWorkDir = ""
+
+  # agent.reconnect gRPC 重连退避参数（高级调优）。
+  [agent.reconnect]
+  # initialInterval 首次重连的等待时间。后续重连按指数退避递增（×2）。
+  initialInterval = "5s"
+
+  # maxInterval 指数退避的上限。重连间隔从 initialInterval 倍增到此值后封顶。
+  maxInterval = "30s"
+
+  # taskReportTimeout 任务结束后最终报告的确认超时。
+  # Agent 完成任务后会向 Admin 发送最终报告并等待确认，超时则放弃确认。
+  taskReportTimeout = "30s"

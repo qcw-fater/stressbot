@@ -115,7 +115,7 @@ func (s *AdminServer) registerManagementRoutes() http.Handler {
 	mux.HandleFunc("GET /sbot/codec/algorithms", s.handleCodecAlgorithms)
 
 	// ── 静态资源 ──
-	fs := http.FileServer(http.Dir(s.cfg.StaticDir))
+	fs := http.FileServer(http.Dir(s.cfg.Server.StaticDir))
 	mux.Handle("/", fs)
 
 	return recoverMiddleware(managementOpenAPIValidator(mux))
@@ -1134,7 +1134,7 @@ func (s *AdminServer) handleBaselineFlow(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *AdminServer) handleBaselineConfig(w http.ResponseWriter, r *http.Request) {
-	http.ServeFile(w, r, "conf/config.json")
+	http.ServeFile(w, r, "conf/stressbot.toml")
 }
 
 // listDirFiles 列出 dir 中后缀为 ext 的文件名（不含路径）。

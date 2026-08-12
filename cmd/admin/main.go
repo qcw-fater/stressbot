@@ -51,7 +51,7 @@ func main() {
 		}
 	}()
 
-	configPath := flag.String("config", "conf/admin-config.json", "Admin 配置文件路径")
+	configPath := flag.String("config", "conf/admin.toml", "Admin 配置文件路径")
 	daemonFlag := flag.Bool("d", false, "以守护进程模式运行")
 	flag.Parse()
 
@@ -73,16 +73,8 @@ func main() {
 		return
 	}
 
-	// 初始化日志
-	logConf := &stresslog.Config{
-		PrintConsole: true,
-		LogLevel:     cfg.Log.LogLevel,
-		MaxSize:      cfg.Log.MaxSize,
-		MaxBackups:   cfg.Log.MaxBackups,
-		MaxAge:       30,
-		Compress:     true,
-	}
-	closeLog = stresslog.InitLog(cfg.Log.Path, "admin", logConf, "")
+	// 初始化日志（直接使用配置文件全字段，不再手动重建丢失 MaxAge/Compress 等）
+	closeLog = stresslog.InitLog(cfg.Log.Path, "admin", &cfg.Log, "")
 
 	stresslog.Info("[MAIN] Admin 服务器启动", zap.String("version", Version))
 

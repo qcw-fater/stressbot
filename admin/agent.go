@@ -25,7 +25,7 @@ type AgentRegistry struct {
 	mu        sync.RWMutex
 	agents    map[string]*AgentNode
 	instances map[string]agentInstance
-	cfg       RegistryConfig
+	cfg       ControlPlaneConfig
 	onChange  func(agentID string, from, to AgentStatus)
 	onRestart func(agentID, taskID string)
 
@@ -33,9 +33,9 @@ type AgentRegistry struct {
 	offlineThreshold   time.Duration
 }
 
-func NewAgentRegistry(cfg RegistryConfig, onChange func(string, AgentStatus, AgentStatus)) *AgentRegistry {
-	unhealthy := utils.ParseDurationDefault(cfg.UnhealthyAfter, 30*time.Second, "agentRegistry.unhealthyAfter")
-	offline := utils.ParseDurationDefault(cfg.OfflineAfter, 60*time.Second, "agentRegistry.offlineAfter")
+func NewAgentRegistry(cfg ControlPlaneConfig, onChange func(string, AgentStatus, AgentStatus)) *AgentRegistry {
+	unhealthy := utils.ParseDurationDefault(cfg.UnhealthyAfter, 30*time.Second, "controlPlane.unhealthyAfter")
+	offline := utils.ParseDurationDefault(cfg.OfflineAfter, 60*time.Second, "controlPlane.offlineAfter")
 
 	return &AgentRegistry{
 		agents:             make(map[string]*AgentNode),

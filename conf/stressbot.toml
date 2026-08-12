@@ -1,0 +1,227 @@
+# stressbot 单机模式配置
+# ─────────────────────────────────────────────────────
+# 用法: go run ./cmd/stressbot -config conf/stressbot.toml
+#
+# 单机模式在本进程内完成全部压测工作，不需要 Admin 或 Agent 节点。
+# 配置文件格式为 TOML，支持 # 注释。
+#
+# 环境变量展开：
+#   ${VAR}          展开，未定义则启动报错（避免密码静默为空）
+#   ${VAR:-default} 展开，未定义则用 default
+#   $$              转义为字面 $
+# 示例: password = "${STRESSBOT_REDIS_PASSWORD:-}"
+#
+# 严格模式：拼写错误的字段名会导致启动失败，不会静默忽略。
+
+# ─── 顶层标量（必须在所有 [section] 之前）────────────
+# daemon 是否以守护进程模式运行（仅 Linux，Windows 下忽略）。
+# 也可通过命令行 -d flag 覆盖。
+daemon = false
+
+# ─── 日志 ──────────────────────────────────────────────
+[log]
+# path 日志文件路径（相对进程工作目录）。
+path = "log/stressbot.log"
+
+# level 日志级别，从低到高: debug / info / warn / error。
+# 低于此级别的日志不会被写入。压测调试期建议 debug，生产建议 info。
+level = "info"
+
+# printConsole 是否同时输出到控制台（stdout）。
+# 后台运行（daemon）时建议 false，避免控制台输出丢失。
+printConsole = true
+
+# maxSizeMB 单个日志文件最大体积（MB），超过后触发 lumberjack 轮转。
+maxSizeMB = 100
+
+# maxBackups 轮转后保留的旧文件数量，超出则删除最旧的。
+maxBackups = 5
+
+# maxAge 旧文件最大保留天数，超出则删除（与 maxBackups 同时生效，先到先删）。
+maxAge = 7
+
+# localTime 轮转文件名是否使用本地时区（false 则用 UTC）。
+localTime = true
+
+# compress 是否 gzip 压缩旧日志文件（省磁盘，略增 CPU）。
+compress = true
+
+# weChatToken 企业微信机器人 webhook token（环境变量注入，留空=不告警）。
+# 仅在发生 DPanic 级别严重错误（如 goroutine panic）时推送告警。
+# 完整 webhook URL 由框架内部拼接，这里只填 token 部分。
+# weChatToken = "${STRESSBOT_WECHAT_TOKEN:-}"
+
+# ─── 监控 ──────────────────────────────────────────────
+[monitor]
+# apdexThresholdMs Apdex T 阈值，单位毫秒。
+# RTT < T 记为 satisfied（满意），T ≤ RTT < 4T 记为 tolerating（可容忍），≥ 4T 记为 frustrated。
+# 仅对 networked 类动作（有真实网络往返的请求）评分。
+# 注意：分布式模式下任务运行期可被 Admin 下发的 apdexT 覆盖。
+apdexThresholdMs = 100
+
+# timingDetail 计时细分级别，控制每个动作记录多细的耗时分解:
+#   rtt  — 仅记录总往返耗时（RTT），开销最小
+#   codec— 额外记录编解码各阶段（encode/decode/gzip 等）耗时
+#   full — 额外记录所有阶段（含帧解析、状态存储等），开销最大，仅深度排查时用
+timingDetail = "rtt"
+
+# reportInterval 监控指标向控制台（stdout）打印摘要的间隔。
+# 仅影响本地控制台输出频率，不影响内部采集精度。
+reportInterval = "5s"
+
+  # monitor.http 监控 HTTP JSON 端点（整段省略=不启用）。
+  # 启用后可通过 http://localhost:<port>/metrics 获取实时指标 JSON，
+  # 便于外部采集系统（Prometheus 拉取等）对接。
+  [monitor.http]
+  port = 6061
+
+  # monitor.sketch DDSketch 延迟分布精度（高级调优）。
+  # DDSketch 是可合并的延迟分布数据结构，用于计算 P50/P90/P95/P99 分位数。
+  [monitor.sketch]
+  # relativeAccuracy 相对误差（0~1 之间）。
+  # 0.01 表示记录值与真实值的相对误差 ≤ 1%。越小越精确，内存开销越大。
+  # 注意：分布式模式下 Admin 与所有 Agent 必须使用相同值，否则 sketch 合并结果错误。
+  relativeAccuracy = 0.01
+
+  # maxBins 最大桶数。
+  # 决定可覆盖的延迟范围。桶用尽后极端值会被折叠到边界桶。
+  # 2048 在毫秒到小时级延迟范围内精度充足。
+  maxBins = 2048
+
+# ─── pprof 调试 ────────────────────────────────────────
+# 整段省略 = 不启用。
+# 启用后可通过 http://localhost:<port>/debug/pprof 获取 Go runtime profile。
+[pprof]
+# port pprof HTTP 监听端口。
+port = 6060
+
+# ─── 单机压测参数 ──────────────────────────────────────
+[standalone]
+# duration 运行时长（Go duration 格式，如 "10m"、"1h30m"）。
+# "0" 或空字符串 = 一直运行，直到收到 SIGINT/SIGTERM 或手动停止。
+duration = "0"
+
+  # standalone.bot 机器人批量参数。
+  [standalone.bot]
+  # accountPrefix 账号名前缀，与 startNumber 拼接生成完整账号名（如 bot_1140000）。
+  accountPrefix = "bot_"
+
+  # startNumber 起始编号，机器人账号从该编号递增。
+  startNumber = 1140000
+
+  # totalBots 机器人总数。渐进加压模式下，各阶段 count 之和必须等于此值。
+  totalBots = 100
+
+  # concurrency 并发启动数（同时创建机器人的并发度）。
+  # 0 = 不限并发（一次性全部创建）。值过大可能导致拨号阶段 CPU/内存尖峰。
+  concurrency = 20
+
+  # mainService 主服务名（必填）。对应网络层连接标识，机器人首先连接此服务。
+  # 必须与 flow.json 中 connection 声明的服务名一致。
+  mainService = "logic"
+
+  # standalone.stateExtra 初始状态注入。
+  # 这里的键值对会注入每个 Robot 的初始 state，可在 Lua 脚本中通过 robot.get("key") 读取。
+  # 典型用途：传递认证地址、客户端版本号、渠道号等非机器人编号类参数。
+  [standalone.stateExtra]
+  authAddr = "http://127.0.0.1:20000"
+  version = "0.31.49.171222"
+  channel = "mine"
+  platform = "1000"
+
+  # standalone.rampUp 渐进加压配置（可选）。
+  # 配置则分阶段创建机器人；省略全部 [[standalone.rampUp.stages]] = 一次性全部启动（StartAll）。
+  # 场景：模拟真实玩家逐步涌入，避免瞬间打满服务端连接造成假性过载。
+  #
+  # 每个 [[standalone.rampUp.stages]] 是一个加压阶段，按声明顺序执行:
+  [[standalone.rampUp.stages]]
+  # count 本阶段新增的机器人数量。
+  count = 20
+
+  # holdSec 本阶段结束后等待的秒数（让服务端稳定后再进入下一阶段）。
+  # 最后一个阶段通常设 0（无需等待）。
+  holdSec = 30
+
+  # concurrency 覆盖全局并发数（可选，留空=用 standalone.bot.concurrency）。
+  # concurrency = 10
+
+  # reset 开始本阶段前是否清空所有已有机器人（可选，默认 false）。
+  # 用于模拟「一波玩家退场后另一波进场」的场景。
+  # reset = false
+
+  [[standalone.rampUp.stages]]
+  count = 30
+  holdSec = 60
+
+  [[standalone.rampUp.stages]]
+  # 各阶段 count 之和必须等于 standalone.bot.totalBots，否则启动报错。
+  count = 50
+  holdSec = 0
+
+# ─── Redis 共享状态（脚本用 require("share") 时必填）──
+# host 留空 = 不启用。
+# 单机模式下，若脚本使用了 share 模块但未配置 Redis，启动会直接失败。
+[redis]
+# host Redis 主机地址。留空表示不启用共享状态。
+host = "127.0.0.1"
+
+# port Redis 端口号。
+port = 6379
+
+# username Redis 用户名（Redis 6+ ACL，留空=无认证用户名）。
+# username = ""
+
+# password Redis 密码（环境变量注入，留空=无密码）。
+# password = "${STRESSBOT_REDIS_PASSWORD:-}"
+
+# keyPrefix Redis key 前缀，所有共享状态 key 自动添加此前缀。
+# 多套压测环境共用同一 Redis 时可用不同前缀隔离。
+keyPrefix = "stressbot"
+
+# defaultClaimTTL Claim（分布式锁）默认持有时长。Lua 脚本 share.claim() 不传 TTL 时用此值。
+defaultClaimTTL = "30s"
+
+# opTimeout 单次 Redis 操作超时。超时后操作返回错误，不阻塞压测主流程。
+opTimeout = "5s"
+
+  # redis.pool Redis 连接池参数（高级调优）。
+  [redis.pool]
+  # dialTimeout 建立 TCP 连接的超时。
+  dialTimeout = "5s"
+
+  # readTimeout 单次读取（接收 Redis 响应）的超时。
+  readTimeout = "2s"
+
+  # writeTimeout 单次写入（发送 Redis 命令）的超时。
+  writeTimeout = "2s"
+
+  # maxOpenConns 最大打开连接数（对应 go-redis PoolSize）。
+  # 高并发共享状态操作时酌情调大。
+  maxOpenConns = 128
+
+  # maxIdleConns 最大空闲连接数。
+  maxIdleConns = 16
+
+  # connMaxLifetime 连接最大存活时间，超过后自动关闭重建（避免长连接泄漏）。
+  # "0" = 不限制。
+  connMaxLifetime = "1h"
+
+# ─── 高级：gnet 网络引擎调优 ────────────────────────────
+# 一般无需修改。仅在万级以上并发或超大协议包场景下酌情调整。
+[network]
+# readBufferCap gnet 读缓冲区容量（字节）。gnet 事件循环读取网络数据时的缓冲区大小。
+readBufferCap = 32768
+
+# writeBufferCap gnet 写缓冲区容量（字节）。
+writeBufferCap = 32768
+
+# numEventLoop gnet 事件循环（event loop）数量。
+# 0 = 自动取 runtime.NumCPU()（CPU 核数）。一般无需手动设置。
+numEventLoop = 0
+
+# maxConcurrentDials 同一时刻允许阻塞在拨号阶段的连接数上限。
+# 超出此上限的拨号请求会被阻塞排队，防止瞬时大量连接打爆系统。
+maxConcurrentDials = 512
+
+# maxBodyLen 单个协议包最大 body 字节数。超过此大小的包会被拒绝解析（防损坏帧撑爆内存）。
+maxBodyLen = 16777216

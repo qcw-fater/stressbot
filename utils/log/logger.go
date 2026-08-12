@@ -27,15 +27,15 @@ var activeFileSink atomic.Pointer[fileLogSink]
 
 // Config 是日志配置。
 type Config struct {
-	Path         string `json:"path" yaml:"path"`
-	PrintConsole bool   `json:"printConsole" yaml:"printConsole"`
-	LogLevel     string `json:"level" yaml:"logLevel"`
-	MaxSize      int    `json:"maxSizeMB" yaml:"maxSizeMB"`
-	MaxBackups   int    `json:"maxBackups" yaml:"maxBackups"`
-	MaxAge       int    `json:"maxAge" yaml:"maxAge"`
-	LocalTime    bool   `json:"localTime" yaml:"localTime"`
-	Compress     bool   `json:"compress" yaml:"compress"`
-	WeChatToken  string `json:"weChatToken" yaml:"weChatToken"`
+	Path         string `toml:"path"         json:"path"         yaml:"path"`
+	PrintConsole bool   `toml:"printConsole" json:"printConsole" yaml:"printConsole"`
+	LogLevel     string `toml:"level"        json:"level"        yaml:"logLevel"`
+	MaxSize      int    `toml:"maxSizeMB"    json:"maxSizeMB"    yaml:"maxSizeMB"`
+	MaxBackups   int    `toml:"maxBackups"   json:"maxBackups"   yaml:"maxBackups"`
+	MaxAge       int    `toml:"maxAge"       json:"maxAge"       yaml:"maxAge"`
+	LocalTime    bool   `toml:"localTime"    json:"localTime"    yaml:"localTime"`
+	Compress     bool   `toml:"compress"     json:"compress"     yaml:"compress"`
+	WeChatToken  string `toml:"weChatToken"  json:"weChatToken"  yaml:"weChatToken"`
 }
 
 type fileLogSink struct {

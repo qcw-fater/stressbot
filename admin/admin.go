@@ -114,7 +114,7 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 	s.commandBus = NewCommandBus(s.commandStore, s.sessions, 8192)
 
 	// 3. AgentRegistry
-	s.agents = NewAgentRegistry(cfg.AgentRegistry, s.onAgentStatusChange)
+	s.agents = NewAgentRegistry(cfg.ControlPlane, s.onAgentStatusChange)
 	s.agents.SetOnRestart(s.onAgentRestart)
 
 	// 4. MetricsAggregator
@@ -127,8 +127,8 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 
 	// 8. HistoryStore（可选）及模板 store 复用已迁移完成的全局 MySQL 连接池。
 	if s.db != nil {
-		if cfg.History != nil {
-			s.history = NewHistoryStore(s.db, cfg.History)
+		if cfg.MySQL != nil {
+			s.history = NewHistoryStore(s.db, cfg.MySQL.RetentionDays)
 			sampler := NewSampler(
 				10*time.Second,
 				s.aggregator, s.history, s.agents, s.tasks, s.metricsWindows,
@@ -175,7 +175,7 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 // Run 启动 Admin 服务器（阻塞）。
 func (s *AdminServer) Run() error {
 	// 初始化协程池
-	utils.InitWorkPool(nil)
+	utils.InitWorkPool()
 
 	// 启动心跳检测
 	ctx := s.runtimeCtx

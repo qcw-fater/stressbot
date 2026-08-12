@@ -71,12 +71,12 @@ func sharedAssignmentToProto(src *SharedRuntimeAssignment) *controlv1.SharedRunt
 			KeyPrefix:             src.Redis.KeyPrefix,
 			DefaultClaimTtl:       src.Redis.DefaultClaimTTL,
 			OperationTimeout:      src.Redis.OpTimeout,
-			DialTimeout:           src.Redis.DialTimeout,
-			ReadTimeout:           src.Redis.ReadTimeout,
-			WriteTimeout:          src.Redis.WriteTimeout,
-			MaxOpenConnections:    int32(src.Redis.MaxOpenConns),
-			MaxIdleConnections:    int32(src.Redis.MaxIdleConns),
-			ConnectionMaxLifetime: src.Redis.ConnMaxLifetime,
+			DialTimeout:           src.Redis.Pool.DialTimeout,
+			ReadTimeout:           src.Redis.Pool.ReadTimeout,
+			WriteTimeout:          src.Redis.Pool.WriteTimeout,
+			MaxOpenConnections:    int32(src.Redis.Pool.MaxOpenConns),
+			MaxIdleConnections:    int32(src.Redis.Pool.MaxIdleConns),
+			ConnectionMaxLifetime: src.Redis.Pool.ConnMaxLifetime,
 		},
 	}
 }

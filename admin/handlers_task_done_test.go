@@ -30,7 +30,7 @@ func TestAcceptTaskReportDoesNotClearNewTask(t *testing.T) {
 		t.Fatalf("Create() error = %v", err)
 	}
 
-	agents := NewAgentRegistry(RegistryConfig{}, nil)
+	agents := NewAgentRegistry(ControlPlaneConfig{}, nil)
 	if err := agents.Register(&AgentNode{
 		ID:            "agent-1",
 		Status:        AgentBusy,
@@ -61,7 +61,7 @@ func TestAcceptTaskReportDoesNotClearNewTask(t *testing.T) {
 
 func TestAgentRegistryCompleteTaskClearsMatchingTask(t *testing.T) {
 	stresslog.ReplaceLogger(zap.NewNop())
-	agents := NewAgentRegistry(RegistryConfig{}, nil)
+	agents := NewAgentRegistry(ControlPlaneConfig{}, nil)
 	if err := agents.Register(&AgentNode{
 		ID:            "agent-1",
 		Status:        AgentBusy,

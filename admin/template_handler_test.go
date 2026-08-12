@@ -62,7 +62,7 @@ func TestCapabilitiesTemplateLibraryEnabledWithBothStores(t *testing.T) {
 }
 
 func TestTemplateLibraryDisabled(t *testing.T) {
-	server := &AdminServer{cfg: Config{StaticDir: t.TempDir()}}
+	server := &AdminServer{cfg: Config{Server: ServerConfig{StaticDir: t.TempDir()}}}
 	for _, path := range []string{"/sbot/action-templates", "/sbot/listen-templates"} {
 		rr := httptest.NewRecorder()
 		server.registerManagementRoutes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
@@ -89,7 +89,7 @@ func TestTemplateCRUDRouteRejectsBodyOverLimit(t *testing.T) {
 }
 
 func TestTemplateSnapshotDisabled(t *testing.T) {
-	server := &AdminServer{cfg: Config{StaticDir: t.TempDir()}}
+	server := &AdminServer{cfg: Config{Server: ServerConfig{StaticDir: t.TempDir()}}}
 	for _, path := range []string{"/sbot/action-templates/snapshot", "/sbot/listen-templates/snapshot"} {
 		rr := httptest.NewRecorder()
 		server.registerManagementRoutes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))

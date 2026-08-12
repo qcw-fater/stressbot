@@ -10,6 +10,8 @@ package sharedstate
 import (
 	"fmt"
 	"time"
+
+	"stressbot/utils"
 )
 
 // 默认值常量。
@@ -21,29 +23,23 @@ const (
 	defaultReadWriteTimout = 2 * time.Second
 )
 
-// Config 共享状态总配置。对应 config.json / admin-config.json 的 shared 段。
-type Config struct {
-	Redis RedisConfig `json:"redis"`
-}
-
-// RedisConfig Redis 连接配置（原始字符串形态，duration 用字符串便于配置文件书写）。
+// RedisConfig Redis 连接配置（配置文件原始形态，duration 用字符串便于书写）。
+//
+// 对应 TOML [redis] 段；连接池参数在 [redis.pool] 子表中。
+// host 为空表示不启用 Redis。
 type RedisConfig struct {
-	Host            string `json:"host"`
-	Port            int    `json:"port"`
-	Username        string `json:"username"`
-	Password        string `json:"password"`
-	KeyPrefix       string `json:"keyPrefix"`
-	DefaultClaimTTL string `json:"defaultClaimTTL"`
-	OpTimeout       string `json:"opTimeout"`
-	DialTimeout     string `json:"dialTimeout"`
-	ReadTimeout     string `json:"readTimeout"`
-	WriteTimeout    string `json:"writeTimeout"`
-	MaxOpenConns    int    `json:"maxOpenConns"`
-	MaxIdleConns    int    `json:"maxIdleConns"`
-	ConnMaxLifetime string `json:"connMaxLifetime"`
+	Host            string             `toml:"host"             json:"host"`             // 主机地址（空=不启用）
+	Port            int                `toml:"port"             json:"port"`             // 端口号（默认 6379）
+	Username        string             `toml:"username"         json:"username"`         // 用户名（可选）
+	Password        string             `toml:"password"         json:"password"`         // 密码（可选）
+	KeyPrefix       string             `toml:"keyPrefix"        json:"keyPrefix"`        // key 前缀（默认 stressbot）
+	DefaultClaimTTL string             `toml:"defaultClaimTTL"  json:"defaultClaimTTL"`  // Claim 默认持有时长（默认 30s）
+	OpTimeout       string             `toml:"opTimeout"        json:"opTimeout"`        // 单次操作超时（默认 2s）
+	Pool            utils.ConnPoolConfig `toml:"pool"          json:"pool"`             // 连接池参数
 }
 
 // ResolvedRedisConfig 已解析（duration 转 time.Duration、填充默认值）的配置。
+// 连接池字段保持平铺，供 redis_store.go 直接消费。
 type ResolvedRedisConfig struct {
 	Host            string
 	Port            int
@@ -83,8 +79,8 @@ func (c RedisConfig) Resolve() (ResolvedRedisConfig, error) {
 		Username:     c.Username,
 		Password:     c.Password,
 		KeyPrefix:    c.KeyPrefix,
-		MaxOpenConns: c.MaxOpenConns,
-		MaxIdleConns: c.MaxIdleConns,
+		MaxOpenConns: c.Pool.MaxOpenConns,
+		MaxIdleConns: c.Pool.MaxIdleConns,
 	}
 	if out.KeyPrefix == "" {
 		out.KeyPrefix = defaultKeyPrefix
@@ -97,17 +93,17 @@ func (c RedisConfig) Resolve() (ResolvedRedisConfig, error) {
 	if out.OpTimeout, err = parseDurationDefault(c.OpTimeout, defaultOpTimeout); err != nil {
 		return ResolvedRedisConfig{}, fmt.Errorf("sharedstate: 解析 opTimeout 失败: %w", err)
 	}
-	if out.DialTimeout, err = parseDurationDefault(c.DialTimeout, defaultDialTimeout); err != nil {
-		return ResolvedRedisConfig{}, fmt.Errorf("sharedstate: 解析 dialTimeout 失败: %w", err)
+	if out.DialTimeout, err = parseDurationDefault(c.Pool.DialTimeout, defaultDialTimeout); err != nil {
+		return ResolvedRedisConfig{}, fmt.Errorf("sharedstate: 解析 pool.dialTimeout 失败: %w", err)
 	}
-	if out.ReadTimeout, err = parseDurationDefault(c.ReadTimeout, defaultReadWriteTimout); err != nil {
-		return ResolvedRedisConfig{}, fmt.Errorf("sharedstate: 解析 readTimeout 失败: %w", err)
+	if out.ReadTimeout, err = parseDurationDefault(c.Pool.ReadTimeout, defaultReadWriteTimout); err != nil {
+		return ResolvedRedisConfig{}, fmt.Errorf("sharedstate: 解析 pool.readTimeout 失败: %w", err)
 	}
-	if out.WriteTimeout, err = parseDurationDefault(c.WriteTimeout, defaultReadWriteTimout); err != nil {
-		return ResolvedRedisConfig{}, fmt.Errorf("sharedstate: 解析 writeTimeout 失败: %w", err)
+	if out.WriteTimeout, err = parseDurationDefault(c.Pool.WriteTimeout, defaultReadWriteTimout); err != nil {
+		return ResolvedRedisConfig{}, fmt.Errorf("sharedstate: 解析 pool.writeTimeout 失败: %w", err)
 	}
-	if out.ConnMaxLifetime, err = parseDurationDefault(c.ConnMaxLifetime, 0); err != nil {
-		return ResolvedRedisConfig{}, fmt.Errorf("sharedstate: 解析 connMaxLifetime 失败: %w", err)
+	if out.ConnMaxLifetime, err = parseDurationDefault(c.Pool.ConnMaxLifetime, 0); err != nil {
+		return ResolvedRedisConfig{}, fmt.Errorf("sharedstate: 解析 pool.connMaxLifetime 失败: %w", err)
 	}
 	return out, nil
 }

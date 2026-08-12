@@ -15,15 +15,14 @@ import (
 	"go.uber.org/zap"
 )
 
-// PoolConfig 协程池配置
-type PoolConfig struct {
-	Cap              int           `mapstructure:"cap"`                // 协程池容量，0 表示无限制
-	ExpiryDuration   time.Duration `mapstructure:"expiry_duration"`    // 空闲 goroutine 存活时间
-	PreAlloc         bool          `mapstructure:"pre_alloc"`          // 是否预分配 goroutine
-	MaxBlockingTasks int           `mapstructure:"max_blocking_tasks"` // 最大阻塞任务数
-	Nonblocking      bool          `mapstructure:"nonblocking"`        // 是否非阻塞模式
-	ShutdownTimeout  time.Duration `mapstructure:"shutdown_timeout"`   // 优雅关闭超时时间
-}
+// 协程池硬编码默认参数。
+// 原 PoolConfig 配置项已被移除（mapstructure tag 无法被 TOML 解析、唯一调用点永远传 nil，
+// 形同虚设）。如需调优，修改以下常量。
+const (
+	poolCap             = 0                    // 0 = 无限制
+	poolExpiryDuration  = 60 * time.Second     // 空闲 goroutine 存活时间
+	poolShutdownTimeout = 5 * time.Second      // 优雅关闭超时
+)
 
 // goroutineInfo 存储 goroutine 追踪信息
 type goroutineInfo struct {
@@ -46,8 +45,6 @@ type WorkPool struct {
 	failed    atomic.Int64  // 失败的任务数
 	goID      atomic.Uint32 // goroutine ID 计数器
 	goCount   atomic.Int32  // 当前运行中的 goroutine 数
-
-	cfg *PoolConfig
 }
 
 // 错误定义
@@ -61,28 +58,18 @@ var (
 	workPoolOnce sync.Once
 )
 
-// InitWorkPool 初始化协程池（单例模式）
-func InitWorkPool(cfg *PoolConfig) {
+// InitWorkPool 初始化协程池（单例模式）。
+// 参数已移除：原 PoolConfig 永远传 nil，现使用包级常量 poolCap/poolExpiryDuration/poolShutdownTimeout。
+func InitWorkPool() {
 	workPoolOnce.Do(func() {
-		if cfg == nil {
-			cfg = &PoolConfig{
-				Cap:             0,
-				ExpiryDuration:  60 * time.Second,
-				ShutdownTimeout: 5 * time.Second,
-			}
-		}
-
 		opts := ants.Options{
-			ExpiryDuration:   cfg.ExpiryDuration,
-			PreAlloc:         cfg.PreAlloc,
-			MaxBlockingTasks: cfg.MaxBlockingTasks,
-			Nonblocking:      cfg.Nonblocking,
+			ExpiryDuration: poolExpiryDuration,
 			PanicHandler: func(err any) {
 				log.DPanic("goroutine pool panic", zap.Any("error", err))
 			},
 		}
 
-		pool, err := ants.NewPool(cfg.Cap, ants.WithOptions(opts))
+		pool, err := ants.NewPool(poolCap, ants.WithOptions(opts))
 		if err != nil {
 			panic(err)
 		}
@@ -90,18 +77,17 @@ func InitWorkPool(cfg *PoolConfig) {
 		workPool = &WorkPool{
 			pool:   pool,
 			stopCh: make(chan struct{}),
-			cfg:    cfg,
 		}
 		log.Info("work pool initialized",
 			zap.Int("cap", pool.Cap()),
-			zap.Duration("expiry_duration", cfg.ExpiryDuration))
+			zap.Duration("expiry_duration", poolExpiryDuration))
 	})
 }
 
 // GetWorkPool 获取协程池实例
 func GetWorkPool() *WorkPool {
 	if workPool == nil {
-		InitWorkPool(nil)
+		InitWorkPool()
 	}
 	return workPool
 }
@@ -225,7 +211,7 @@ func (p *WorkPool) Shutdown() {
 		return
 	}
 
-	timeout := p.cfg.ShutdownTimeout
+	timeout := poolShutdownTimeout
 	if timeout == 0 {
 		timeout = 5 * time.Second
 	}
