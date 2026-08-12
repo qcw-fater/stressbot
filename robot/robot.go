@@ -807,13 +807,12 @@ func appendActionDetail(detail, actionName string) string {
 	return detail + "action=" + actionName
 }
 
-// ExecuteBoolean 执行条件判断
-func (h *robotActionHandler) ExecuteBoolean(expression string) bool {
-	if strings.HasPrefix(expression, engine.PrefixLua) {
-		return h.executeLuaBoolean(expression[len(engine.PrefixLua):])
+// ExecuteCondition 执行加载期已准备的条件判断。
+func (h *robotActionHandler) ExecuteCondition(condition *engine.CompiledCondition) bool {
+	if script, ok := condition.LuaScript(); ok {
+		return h.executeLuaBoolean(script)
 	}
-
-	return engine.EvalCondition(expression, h.robot.state)
+	return condition.EvalState(h.robot.state)
 }
 
 // executeLuaBoolean 执行 Lua 条件脚本，脚本必须 return true/false。
@@ -1660,13 +1659,17 @@ func (ns *netSenderAdapter) RegisterCodecHeartbeat(transport, service string) er
 	if hb == nil {
 		return nil
 	}
+	bindings, err := codecFieldBindsToEngine(hb.Bindings)
+	if err != nil {
+		return fmt.Errorf("编译连接级心跳字段条件失败: %w", err)
+	}
 	cfg := engine.HeartbeatConfig{
 		Transport:        transport,
 		Service:          service,
 		IntervalMs:       hb.IntervalMs,
 		Route:            hb.Route,
 		C2SProto:         hb.C2SProto,
-		Bindings:         codecFieldBindsToEngine(hb.Bindings),
+		Bindings:         bindings,
 		Fields:           codecHeartbeatFieldsToEngine(hb.HeartbeatFields),
 		SkipWhenMissing:  hb.SkipWhenMissing,
 		RequireSecretKey: hb.RequireSecretKey,
@@ -1893,7 +1896,15 @@ func (ns *netSenderAdapter) installHeartbeat(cfg engine.HeartbeatConfig) error {
 	return nil
 }
 
-func codecFieldBindsToEngine(in []codec.FieldBind) []engine.FieldBind {
+func codecFieldBindsToEngine(in []codec.FieldBind) ([]engine.FieldBind, error) {
+	out := codecFieldBindsToEngineRaw(in)
+	if err := engine.PrepareFieldBindings(out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func codecFieldBindsToEngineRaw(in []codec.FieldBind) []engine.FieldBind {
 	if len(in) == 0 {
 		return nil
 	}
@@ -1906,7 +1917,7 @@ func codecFieldBindsToEngine(in []codec.FieldBind) []engine.FieldBind {
 			Source:        in[i].Source,
 			Path:          in[i].Path,
 			Values:        append([]any(nil), in[i].Values...),
-			Entries:       codecMapEntryBindsToEngine(in[i].Entries),
+			Entries:       codecMapEntryBindsToEngineRaw(in[i].Entries),
 			Required:      in[i].Required,
 			Filters:       codecFilterDefsToEngine(in[i].Filters),
 			Min:           in[i].Min,
@@ -1926,14 +1937,14 @@ func codecFieldBindsToEngine(in []codec.FieldBind) []engine.FieldBind {
 	return out
 }
 
-func codecMapEntryBindsToEngine(in []codec.MapEntryBind) []engine.MapEntryBind {
+func codecMapEntryBindsToEngineRaw(in []codec.MapEntryBind) []engine.MapEntryBind {
 	if len(in) == 0 {
 		return nil
 	}
 	out := make([]engine.MapEntryBind, len(in))
 	for i := range in {
 		out[i] = engine.MapEntryBind{Key: in[i].Key}
-		converted := codecFieldBindsToEngine([]codec.FieldBind{in[i].Value})
+		converted := codecFieldBindsToEngineRaw([]codec.FieldBind{in[i].Value})
 		out[i].Value = converted[0]
 	}
 	return out

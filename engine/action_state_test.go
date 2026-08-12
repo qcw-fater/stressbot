@@ -62,3 +62,14 @@ func TestClearStateDeletesNormalKeys(t *testing.T) {
 		t.Fatal("普通状态应全部删除")
 	}
 }
+
+func TestBindingConditionDoesNotParseUnpreparedSource(t *testing.T) {
+	store := state.NewStore()
+	store.Set("enabled", true)
+	actionExecutor := NewActionExecutor(store, nil, nil, nil, 0)
+	binding := &FieldBind{Condition: "state:enabled"}
+
+	if actionExecutor.bindingConditionSatisfied(binding) {
+		t.Fatal("unprepared binding condition must fail closed")
+	}
+}

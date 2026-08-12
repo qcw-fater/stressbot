@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"slices"
+	"strings"
 	"time"
 
 	"stressbot/errcode"
@@ -19,9 +20,10 @@ import (
 // errSkip 是 onError.strategy=skip 的内部信号：被 sequence/loop/boolean/switch/weighted 捕获后，
 // 视为当前分支完成，不继续传播为失败。
 var (
-	errBreak    = errors.New("break")
-	errContinue = errors.New("continue")
-	errSkip     = errors.New("skip")
+	errBreak                = errors.New("break")
+	errContinue             = errors.New("continue")
+	errSkip                 = errors.New("skip")
+	errConditionNotPrepared = errors.New("条件表达式尚未准备")
 )
 
 // Executor 流程执行器，每个 Robot 持有一个独立实例。
@@ -38,10 +40,8 @@ type ActionHandler interface {
 	// ExecuteAction 执行声明式动作或 Lua 脚本，返回 nil 表示成功。
 	// ctx 来自当前流程执行上下文，供声明式 / Lua 动作外壳共享同一取消语义。
 	ExecuteAction(ctx context.Context, actionDef *ActionDef) error
-	// ExecuteBoolean 对条件表达式求值，返回 true/false。
-	// 表达式支持 state: 前缀（声明式表达式：比较/算术/逻辑，严格类型，见 cond_parser.go）
-	// 和 lua: 前缀（调用 Lua 脚本，须 return true/false）。
-	ExecuteBoolean(expression string) bool
+	// ExecuteCondition 执行加载期已经准备的 state 或 Lua 条件。
+	ExecuteCondition(condition *CompiledCondition) bool
 	// RegisterListen 批量注册持久化推送监听（注册本身不阻塞流程）。推送到达后的处理分两路，
 	// 均不在网络 pump goroutine 内碰业务 LState：① script 回调——pump 只把回调**投递到 Robot
 	// 任务队列**，由执行器 goroutine 在 await / 等待窗口的 select 内就地**串行**执行；② 声明式
@@ -203,7 +203,7 @@ func (e *Executor) executeLoop(ctx context.Context, node *Node) error {
 
 		// 前置条件检查（对应 Go: for condition { }）
 		if node.Condition != "" {
-			if !e.handler.ExecuteBoolean(node.Condition) {
+			if !e.evaluatePreparedCondition(node.Condition, node.preparedCondition()) {
 				stresslog.Debug("[ENGINE] loop 前置条件不满足，退出循环",
 					zap.String("caller", e.caller), zap.Int("iteration", i))
 				break
@@ -214,7 +214,8 @@ func (e *Executor) executeLoop(ctx context.Context, node *Node) error {
 		// 提成闭包：continue 分支也必须评估，否则依赖 breakCondition 退出的无限 loop
 		// 一旦命中 continue 就跳过退出判断 → 永不退出。
 		checkBreak := func() bool {
-			return node.BreakCondition != "" && e.handler.ExecuteBoolean(node.BreakCondition)
+			return node.BreakCondition != "" &&
+				e.evaluatePreparedCondition(node.BreakCondition, node.preparedBreakCondition())
 		}
 
 		// 执行循环体（单个节点）
@@ -481,7 +482,7 @@ func applyOnErrorStrategy(strategy string, abortErr func() error) error {
 
 // executeBoolean 条件分支节点。
 func (e *Executor) executeBoolean(ctx context.Context, node *Node) error {
-	result := e.handler.ExecuteBoolean(node.Condition)
+	result := e.evaluatePreparedCondition(node.Condition, node.preparedCondition())
 
 	stresslog.Debug("[ENGINE] boolean 条件判断",
 		zap.String("caller", e.caller), zap.Bool("result", result), zap.String("next", func() string {
@@ -516,23 +517,24 @@ func (e *Executor) executeBoolean(ctx context.Context, node *Node) error {
 //
 // 子流程内的失败由 executeAction 自行 warn，此处不重复。
 func (e *Executor) executeSwitch(ctx context.Context, node *Node) error {
-	for i, c := range node.Cases {
+	for i := range node.Cases {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if !e.handler.ExecuteBoolean(c.Condition) {
+		conditionCase := &node.Cases[i]
+		if !e.evaluatePreparedCondition(conditionCase.Condition, conditionCase.preparedCondition()) {
 			continue
 		}
 		// 命中第 i 条 case
-		if c.Next == "" {
+		if conditionCase.Next == "" {
 			stresslog.Debug("[ENGINE] switch 命中 case 但 next 为空，结束分支",
-				zap.String("caller", e.caller), zap.Int("case", i), zap.String("condition", c.Condition))
+				zap.String("caller", e.caller), zap.Int("case", i), zap.String("condition", conditionCase.Condition))
 			return nil
 		}
 		stresslog.Debug("[ENGINE] switch 命中 case",
 			zap.String("caller", e.caller), zap.Int("case", i),
-			zap.String("condition", c.Condition), zap.String("next", c.Next))
-		err := e.executeNode(ctx, c.Next)
+			zap.String("condition", conditionCase.Condition), zap.String("next", conditionCase.Next))
+		err := e.executeNode(ctx, conditionCase.Next)
 		if errors.Is(err, errSkip) {
 			return nil
 		}
@@ -554,6 +556,19 @@ func (e *Executor) executeSwitch(ctx context.Context, node *Node) error {
 		return nil
 	}
 	return err
+}
+
+func (e *Executor) evaluatePreparedCondition(source string, condition *CompiledCondition) bool {
+	if strings.TrimSpace(source) == "" {
+		return true
+	}
+	if condition == nil {
+		stresslog.Error("[ENGINE] 条件表达式尚未准备",
+			zap.String("caller", e.caller), zap.String("condition", source),
+			zap.Error(errConditionNotPrepared))
+		return false
+	}
+	return e.handler.ExecuteCondition(condition)
 }
 
 // executeWeighted 加权随机节点：按权重随机选择一个 option 执行。

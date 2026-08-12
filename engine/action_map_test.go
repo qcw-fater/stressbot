@@ -102,14 +102,18 @@ func TestResolveMapBindingSkipsConditionFalseEntry(t *testing.T) {
 	s.Set("enabled", false)
 	ae := &ActionExecutor{store: s}
 
-	fb := &FieldBind{
+	bindings := []FieldBind{{
 		Field: "params",
 		Type:  BindMap,
 		Entries: []MapEntryBind{
 			{Key: 1, Value: FieldBind{Type: BindFixed, Value: 9, Condition: "state:enabled"}},
 			{Key: 2, Value: FieldBind{Type: BindFixed, Value: 7}},
 		},
+	}}
+	if err := PrepareFieldBindings(bindings); err != nil {
+		t.Fatal(err)
 	}
+	fb := &bindings[0]
 
 	got, err := ae.resolveFieldValueStrict(fb, "GuildEditInfo", "params")
 	if err != nil {

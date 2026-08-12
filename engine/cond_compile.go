@@ -265,12 +265,12 @@ func (p *conditionParser) parseComparison() (conditionNodeIndex, error) {
 		return noConditionNode, err
 	}
 	token := p.peek()
-	if token.kind != tokOp || !isCompOp(token.lit) {
+	if token.kind != tokOp {
 		return left, nil
 	}
 	op, ok := comparisonOperator(token.lit)
 	if !ok {
-		return noConditionNode, fmt.Errorf("未知比较运算符 %s", token.lit)
+		return left, nil
 	}
 	p.next()
 	right, err := p.parseArithmetic()

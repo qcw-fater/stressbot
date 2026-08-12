@@ -27,9 +27,13 @@ func BenchmarkConditionEvaluation(b *testing.B) {
 
 	for _, tc := range cases {
 		b.Run(tc.name, func(b *testing.B) {
+			condition, err := compileCondition(tc.expr)
+			if err != nil {
+				b.Fatal(err)
+			}
 			b.ReportAllocs()
 			for b.Loop() {
-				if !EvalCondition(tc.expr, store) {
+				if !condition.EvalState(store) {
 					b.Fatal("condition unexpectedly false")
 				}
 			}

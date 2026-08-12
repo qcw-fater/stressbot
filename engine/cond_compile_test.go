@@ -32,23 +32,24 @@ func TestCompiledConditionReadsCurrentStore(t *testing.T) {
 	}
 }
 
-func TestCompiledConditionMatchesInterpreter(t *testing.T) {
+func TestCompiledConditionPreservesSemantics(t *testing.T) {
 	tests := []struct {
 		expr string
 		data map[string]any
+		want bool
 	}{
-		{"index % 2 == 0", map[string]any{"index": 4}},
-		{"7 / 2 == 3", nil},
-		{"-5 % 3 == -2", nil},
-		{"!a == b", map[string]any{"a": true, "b": false}},
-		{"missing || fallback", map[string]any{"fallback": true}},
-		{"pid == 9007199254740993", map[string]any{"pid": uint64(9007199254740993)}},
-		{"count", map[string]any{"count": int64(3)}},
-		{"alive || 9223372036854775808 > 0", map[string]any{"alive": true}},
-		{"missing && fallback", map[string]any{"fallback": true}},
+		{"index % 2 == 0", map[string]any{"index": 4}, true},
+		{"7 / 2 == 3", nil, true},
+		{"-5 % 3 == -2", nil, true},
+		{"!a == b", map[string]any{"a": true, "b": false}, true},
+		{"missing || fallback", map[string]any{"fallback": true}, true},
+		{"pid == 9007199254740993", map[string]any{"pid": uint64(9007199254740993)}, true},
+		{"count", map[string]any{"count": int64(3)}, false},
+		{"alive || 9223372036854775808 > 0", map[string]any{"alive": true}, true},
+		{"missing && fallback", map[string]any{"fallback": true}, false},
 		{"hp > 0 && (alive || admin)", map[string]any{
 			"hp": int64(80), "alive": true, "admin": false,
-		}},
+		}, true},
 	}
 
 	for _, test := range tests {
@@ -58,9 +59,8 @@ func TestCompiledConditionMatchesInterpreter(t *testing.T) {
 				t.Fatal(err)
 			}
 			store := newCondStore(test.data)
-			want := parseExpr(test.expr, store)
-			if got := condition.EvalState(store); got != want {
-				t.Fatalf("compiled result = %v, interpreter = %v", got, want)
+			if got := condition.EvalState(store); got != test.want {
+				t.Fatalf("compiled result = %v, want %v", got, test.want)
 			}
 		})
 	}

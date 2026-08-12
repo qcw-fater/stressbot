@@ -14,27 +14,43 @@ func newCondStore(data map[string]any) *state.Store {
 	return s
 }
 
+func evalCompiledCondition(expression string, store *state.Store) bool {
+	condition, err := compileCondition(PrefixState + expression)
+	if err != nil {
+		return false
+	}
+	return condition.EvalState(store)
+}
+
+func evalFullCompiledCondition(expression string, store *state.Store) bool {
+	condition, err := compileCondition(expression)
+	if err != nil {
+		return false
+	}
+	return condition.EvalState(store)
+}
+
 func TestParseExpr_SingleKey(t *testing.T) {
 	s := newCondStore(map[string]any{"alive": true})
-	if !parseExpr("alive", s) {
+	if !evalCompiledCondition("alive", s) {
 		t.Error("alive=true should be true")
 	}
 
 	s2 := newCondStore(map[string]any{"alive": false})
-	if parseExpr("alive", s2) {
+	if evalCompiledCondition("alive", s2) {
 		t.Error("alive=false should be false")
 	}
 }
 
 func TestParseExpr_SingleComparison(t *testing.T) {
 	s := newCondStore(map[string]any{"hp": int64(50)})
-	if !parseExpr("hp > 0", s) {
+	if !evalCompiledCondition("hp > 0", s) {
 		t.Error("hp=50 > 0 should be true")
 	}
-	if parseExpr("hp > 100", s) {
+	if evalCompiledCondition("hp > 100", s) {
 		t.Error("hp=50 > 100 should be false")
 	}
-	if !parseExpr("hp >= 50", s) {
+	if !evalCompiledCondition("hp >= 50", s) {
 		t.Error("hp=50 >= 50 should be true")
 	}
 }
@@ -42,7 +58,7 @@ func TestParseExpr_SingleComparison(t *testing.T) {
 func TestParseExpr_SingleKey_Nil(t *testing.T) {
 	// missing key → 错误（warn）+ false
 	s := newCondStore(map[string]any{})
-	if parseExpr("missing", s) {
+	if evalCompiledCondition("missing", s) {
 		t.Error("missing key should be false")
 	}
 }
@@ -51,87 +67,87 @@ func TestParseExpr_SingleKey_Nil(t *testing.T) {
 func TestParseExpr_SingleKey_IntRequiresExplicitCompare(t *testing.T) {
 	// count=3 裸用 → 非布尔上下文 → false
 	s := newCondStore(map[string]any{"count": int64(3)})
-	if parseExpr("count", s) {
+	if evalCompiledCondition("count", s) {
 		t.Error("count=3 bare should be false (非布尔上下文)")
 	}
 	// 显式比较才合法
-	if !parseExpr("count != 0", s) {
+	if !evalCompiledCondition("count != 0", s) {
 		t.Error("count=3 != 0 should be true")
 	}
 
 	// count=0
 	s2 := newCondStore(map[string]any{"count": int64(0)})
-	if !parseExpr("count == 0", s2) {
+	if !evalCompiledCondition("count == 0", s2) {
 		t.Error("count=0 == 0 should be true")
 	}
-	if parseExpr("count != 0", s2) {
+	if evalCompiledCondition("count != 0", s2) {
 		t.Error("count=0 != 0 should be false")
 	}
 }
 
 func TestParseExpr_And(t *testing.T) {
 	s := newCondStore(map[string]any{"a": true, "b": true})
-	if !parseExpr("a && b", s) {
+	if !evalCompiledCondition("a && b", s) {
 		t.Error("a && b (both true) should be true")
 	}
 
 	s2 := newCondStore(map[string]any{"a": true, "b": false})
-	if parseExpr("a && b", s2) {
+	if evalCompiledCondition("a && b", s2) {
 		t.Error("a && b (b=false) should be false")
 	}
 }
 
 func TestParseExpr_Or(t *testing.T) {
 	s := newCondStore(map[string]any{"a": false, "b": true})
-	if !parseExpr("a || b", s) {
+	if !evalCompiledCondition("a || b", s) {
 		t.Error("a || b (b=true) should be true")
 	}
 
 	s2 := newCondStore(map[string]any{"a": false, "b": false})
-	if parseExpr("a || b", s2) {
+	if evalCompiledCondition("a || b", s2) {
 		t.Error("a || b (both false) should be false")
 	}
 }
 
 func TestParseExpr_AndOr(t *testing.T) {
 	s := newCondStore(map[string]any{"a": true, "b": true, "c": false})
-	if !parseExpr("a && b || c", s) {
+	if !evalCompiledCondition("a && b || c", s) {
 		t.Error("a && b || c should be true")
 	}
 
 	s2 := newCondStore(map[string]any{"a": false, "b": true, "c": false})
-	if parseExpr("a && b || c", s2) {
+	if evalCompiledCondition("a && b || c", s2) {
 		t.Error("a && b || c (a=false,c=false) should be false")
 	}
 }
 
 func TestParseExpr_Parens(t *testing.T) {
 	s := newCondStore(map[string]any{"a": true, "b": false, "c": false})
-	if !parseExpr("a || (b && c)", s) {
+	if !evalCompiledCondition("a || (b && c)", s) {
 		t.Error("a || (b && c) should be true")
 	}
 
 	s2 := newCondStore(map[string]any{"a": false, "b": true, "c": true})
-	if !parseExpr("(a || b) && c", s2) {
+	if !evalCompiledCondition("(a || b) && c", s2) {
 		t.Error("(a || b) && c should be true")
 	}
 }
 
 func TestParseExpr_Not(t *testing.T) {
 	s := newCondStore(map[string]any{"dead": true})
-	if parseExpr("!dead", s) {
+	if evalCompiledCondition("!dead", s) {
 		t.Error("!dead (dead=true) should be false")
 	}
 
 	s2 := newCondStore(map[string]any{"dead": false})
-	if !parseExpr("!dead", s2) {
+	if !evalCompiledCondition("!dead", s2) {
 		t.Error("!dead (dead=false) should be true")
 	}
 }
 
 func TestParseExpr_NotWithComparison(t *testing.T) {
 	s := newCondStore(map[string]any{"hp": int64(0)})
-	if !parseExpr("!(hp > 0)", s) {
+	if !evalCompiledCondition("!(hp > 0)", s) {
 		t.Error("!(hp > 0) with hp=0 should be true")
 	}
 }
@@ -143,42 +159,42 @@ func TestParseExpr_Complex(t *testing.T) {
 		"admin": false,
 		"level": int64(10),
 	})
-	if !parseExpr("hp > 0 && (alive || admin)", s) {
+	if !evalCompiledCondition("hp > 0 && (alive || admin)", s) {
 		t.Error("complex expr 1 should be true")
 	}
-	if !parseExpr("level >= 10 || (alive && admin)", s) {
+	if !evalCompiledCondition("level >= 10 || (alive && admin)", s) {
 		t.Error("complex expr 2 should be true")
 	}
-	if !parseExpr("!admin && hp > 50", s) {
+	if !evalCompiledCondition("!admin && hp > 50", s) {
 		t.Error("complex expr 3 should be true")
 	}
 }
 
 func TestParseExpr_Empty(t *testing.T) {
 	s := newCondStore(map[string]any{})
-	if !parseExpr("", s) {
+	if !evalCompiledCondition("", s) {
 		t.Error("empty expr should be true")
 	}
-	if !parseExpr("  ", s) {
+	if !evalCompiledCondition("  ", s) {
 		t.Error("whitespace-only expr should be true")
 	}
 }
 
 func TestParseExpr_MultipleAnd(t *testing.T) {
 	s := newCondStore(map[string]any{"a": true, "b": true, "c": true})
-	if !parseExpr("a && b && c", s) {
+	if !evalCompiledCondition("a && b && c", s) {
 		t.Error("a && b && c (all true) should be true")
 	}
 
 	s2 := newCondStore(map[string]any{"a": true, "b": true, "c": false})
-	if parseExpr("a && b && c", s2) {
+	if evalCompiledCondition("a && b && c", s2) {
 		t.Error("a && b && c (c=false) should be false")
 	}
 }
 
 func TestParseExpr_MultipleOr(t *testing.T) {
 	s := newCondStore(map[string]any{"a": false, "b": false, "c": true})
-	if !parseExpr("a || b || c", s) {
+	if !evalCompiledCondition("a || b || c", s) {
 		t.Error("a || b || c (c=true) should be true")
 	}
 }
@@ -187,10 +203,10 @@ func TestParseExpr_MultipleOr(t *testing.T) {
 
 func TestParseExpr_ArithmeticPrecedence(t *testing.T) {
 	s := newCondStore(map[string]any{"n": int64(5)})
-	if !parseExpr("n + 2 * 3 == 11", s) { // 5 + 6
+	if !evalCompiledCondition("n + 2 * 3 == 11", s) { // 5 + 6
 		t.Error("n + 2*3 == 11 should be true")
 	}
-	if !parseExpr("(n + 2) * 3 == 21", s) { // 7 * 3
+	if !evalCompiledCondition("(n + 2) * 3 == 21", s) { // 7 * 3
 		t.Error("(n+2)*3 == 21 should be true")
 	}
 }
@@ -198,10 +214,10 @@ func TestParseExpr_ArithmeticPrecedence(t *testing.T) {
 func TestParseExpr_Modulo(t *testing.T) {
 	even := newCondStore(map[string]any{"index": int64(4)})
 	odd := newCondStore(map[string]any{"index": int64(5)})
-	if !parseExpr("index % 2 == 0", even) {
+	if !evalCompiledCondition("index % 2 == 0", even) {
 		t.Error("4 % 2 == 0 should be true")
 	}
-	if parseExpr("index % 2 == 0", odd) {
+	if evalCompiledCondition("index % 2 == 0", odd) {
 		t.Error("5 % 2 == 0 should be false")
 	}
 }
@@ -211,54 +227,54 @@ func TestParseExpr_Modulo(t *testing.T) {
 func TestParseExpr_BuiltinIntIndex(t *testing.T) {
 	even := newCondStore(map[string]any{"index": 4}) // 原生 int
 	odd := newCondStore(map[string]any{"index": 5})
-	if !parseExpr("index % 2 == 0", even) {
+	if !evalCompiledCondition("index % 2 == 0", even) {
 		t.Error("index(原生 int) % 2 == 0 应为 true")
 	}
-	if parseExpr("index % 2 == 0", odd) {
+	if evalCompiledCondition("index % 2 == 0", odd) {
 		t.Error("index(原生 int)=5 % 2 == 0 应为 false")
 	}
 	s := newCondStore(map[string]any{"index": 7})
-	if !parseExpr("index > 0", s) {
+	if !evalCompiledCondition("index > 0", s) {
 		t.Error("index(原生 int) > 0 应为 true")
 	}
-	if !parseExpr("index == 7", s) {
+	if !evalCompiledCondition("index == 7", s) {
 		t.Error("index(原生 int) == 7 应为 true")
 	}
-	if !parseExpr("-index < 0", s) {
+	if !evalCompiledCondition("-index < 0", s) {
 		t.Error("-index(原生 int) < 0 应为 true")
 	}
 }
 
 func TestParseExpr_Division_IntVsFloat(t *testing.T) {
 	// 字面量整除
-	if !parseExpr("7 / 2 == 3", newCondStore(nil)) {
+	if !evalCompiledCondition("7 / 2 == 3", newCondStore(nil)) {
 		t.Error("7 / 2 == 3 (整除) should be true")
 	}
-	if parseExpr("7 / 2 == 3.5", newCondStore(nil)) {
+	if evalCompiledCondition("7 / 2 == 3.5", newCondStore(nil)) {
 		t.Error("7 / 2 == 3.5 should be false (整除得 3)")
 	}
 	// 任一浮点 → 浮点除
-	if !parseExpr("7.0 / 2 == 3.5", newCondStore(nil)) {
+	if !evalCompiledCondition("7.0 / 2 == 3.5", newCondStore(nil)) {
 		t.Error("7.0 / 2 == 3.5 (浮点除) should be true")
 	}
 }
 
 func TestParseExpr_UnaryMinus(t *testing.T) {
 	s := newCondStore(map[string]any{"hp": int64(5)})
-	if !parseExpr("-hp < 0", s) {
+	if !evalCompiledCondition("-hp < 0", s) {
 		t.Error("-hp < 0 (hp=5) should be true")
 	}
-	if !parseExpr("-5 == -5", newCondStore(nil)) {
+	if !evalCompiledCondition("-5 == -5", newCondStore(nil)) {
 		t.Error("-5 == -5 should be true")
 	}
 }
 
 func TestParseExpr_NegativeDivMod(t *testing.T) {
 	// Go 语义：整除向零截断、取模取被除数符号
-	if !parseExpr("-7 / 2 == -3", newCondStore(nil)) {
+	if !evalCompiledCondition("-7 / 2 == -3", newCondStore(nil)) {
 		t.Error("-7 / 2 == -3 (向零截断) should be true")
 	}
-	if !parseExpr("-5 % 3 == -2", newCondStore(nil)) {
+	if !evalCompiledCondition("-5 % 3 == -2", newCondStore(nil)) {
 		t.Error("-5 % 3 == -2 should be true")
 	}
 }
@@ -267,13 +283,13 @@ func TestParseExpr_NegativeDivMod(t *testing.T) {
 
 func TestParseExpr_StringLiteral(t *testing.T) {
 	s := newCondStore(map[string]any{"role": "member", "empty": ""})
-	if !parseExpr("role == \"member\"", s) {
+	if !evalCompiledCondition("role == \"member\"", s) {
 		t.Error("role == \"member\" should be true")
 	}
-	if !parseExpr("role != \"guest\"", s) {
+	if !evalCompiledCondition("role != \"guest\"", s) {
 		t.Error("role != \"guest\" should be true")
 	}
-	if !parseExpr("empty == \"\"", s) {
+	if !evalCompiledCondition("empty == \"\"", s) {
 		t.Error("empty == \"\" should be true")
 	}
 }
@@ -294,7 +310,7 @@ func TestParseExpr_TypeMismatch(t *testing.T) {
 	}
 	for _, c := range cases {
 		s := newCondStore(c.data)
-		if parseExpr(c.expr, s) {
+		if evalCompiledCondition(c.expr, s) {
 			t.Errorf("%s: %q should be false (类型不匹配)", c.name, c.expr)
 		}
 	}
@@ -304,10 +320,10 @@ func TestParseExpr_TypeMismatch(t *testing.T) {
 
 func TestParseExpr_MissingKey(t *testing.T) {
 	s := newCondStore(map[string]any{})
-	if parseExpr("missing == 0", s) {
+	if evalCompiledCondition("missing == 0", s) {
 		t.Error("missing == 0 should be false (key 不存在)")
 	}
-	if parseExpr("missing != \"\"", s) {
+	if evalCompiledCondition("missing != \"\"", s) {
 		t.Error("missing != \"\" should be false (key 不存在)")
 	}
 }
@@ -316,13 +332,13 @@ func TestParseExpr_MissingKey(t *testing.T) {
 
 func TestParseExpr_ArithmeticErrors(t *testing.T) {
 	s := newCondStore(map[string]any{"hp": int64(5)})
-	if parseExpr("hp / 0 == 0", s) {
+	if evalCompiledCondition("hp / 0 == 0", s) {
 		t.Error("hp / 0 (除零) should be false")
 	}
-	if parseExpr("hp % 0 == 0", s) {
+	if evalCompiledCondition("hp % 0 == 0", s) {
 		t.Error("hp % 0 (取模零) should be false")
 	}
-	if parseExpr("1.5 % 2 == 0", newCondStore(nil)) {
+	if evalCompiledCondition("1.5 % 2 == 0", newCondStore(nil)) {
 		t.Error("1.5 % 2 (浮点取模) should be false")
 	}
 }
@@ -333,10 +349,10 @@ func TestParseExpr_Uint64Exactness(t *testing.T) {
 	// 2^53+1 作为 float64 会 round 到 2^53；必须按整数精确比较。
 	pid := uint64(9007199254740993) // 2^53 + 1
 	s := newCondStore(map[string]any{"pid": pid})
-	if !parseExpr("pid == 9007199254740993", s) {
+	if !evalCompiledCondition("pid == 9007199254740993", s) {
 		t.Error("uint64 精确比较失败（浮点会失真）")
 	}
-	if parseExpr("pid == 9007199254740992", s) {
+	if evalCompiledCondition("pid == 9007199254740992", s) {
 		t.Error("pid 不应等于 2^53")
 	}
 }
@@ -346,10 +362,10 @@ func TestParseExpr_Uint64Exactness(t *testing.T) {
 func TestParseExpr_ParensArithmetic(t *testing.T) {
 	x3 := newCondStore(map[string]any{"x": int64(3)})
 	x4 := newCondStore(map[string]any{"x": int64(4)})
-	if !parseExpr("(x + 1) % 2 == 0", x3) { // 4 % 2
+	if !evalCompiledCondition("(x + 1) % 2 == 0", x3) { // 4 % 2
 		t.Error("(3+1)%2 == 0 should be true")
 	}
-	if parseExpr("(x + 1) % 2 == 0", x4) { // 5 % 2
+	if evalCompiledCondition("(x + 1) % 2 == 0", x4) { // 5 % 2
 		t.Error("(4+1)%2 == 0 should be false")
 	}
 }
@@ -362,7 +378,7 @@ func TestParseExpr_PathArrayIndex(t *testing.T) {
 			map[string]any{"count": int64(10)},
 		},
 	})
-	if !parseExpr("items[0].count > 5", s) {
+	if !evalCompiledCondition("items[0].count > 5", s) {
 		t.Error("items[0].count > 5 should be true")
 	}
 }
@@ -382,7 +398,7 @@ func TestParseExpr_Malformed(t *testing.T) {
 	}
 	for _, e := range cases {
 		s := newCondStore(map[string]any{"hp": int64(5)})
-		if parseExpr(e, s) {
+		if evalCompiledCondition(e, s) {
 			t.Errorf("malformed %q should be false", e)
 		}
 	}
@@ -392,7 +408,7 @@ func TestParseExpr_Malformed(t *testing.T) {
 
 func TestParseExpr_NoWhitespace(t *testing.T) {
 	s := newCondStore(map[string]any{"hp": int64(50), "alive": true, "admin": false})
-	if !parseExpr("hp>0&&(alive||admin)", s) {
+	if !evalCompiledCondition("hp>0&&(alive||admin)", s) {
 		t.Error("无空格表达式应与带空格等价")
 	}
 }
@@ -401,19 +417,19 @@ func TestParseExpr_NoWhitespace(t *testing.T) {
 func TestParseExpr_NotPrecedence(t *testing.T) {
 	// a=true, b=false: !(a==b) = !(true==false) = !false = true
 	s := newCondStore(map[string]any{"a": true, "b": false})
-	if !parseExpr("!a == b", s) {
+	if !evalCompiledCondition("!a == b", s) {
 		t.Error("!a == b (a=true,b=false) 应为 true（等价 !(a==b)）")
 	}
 	// a=true, b=true: !(true==true) = !true = false
 	s2 := newCondStore(map[string]any{"a": true, "b": true})
-	if parseExpr("!a == b", s2) {
+	if evalCompiledCondition("!a == b", s2) {
 		t.Error("!a == b (a=true,b=true) 应为 false")
 	}
 }
 
 // 链式比较不合法（多余 token）。
 func TestParseExpr_ChainedComparisonRejected(t *testing.T) {
-	if parseExpr("1 < 2 < 3", newCondStore(nil)) {
+	if evalCompiledCondition("1 < 2 < 3", newCondStore(nil)) {
 		t.Error("1 < 2 < 3 应被拒绝（多余 token）")
 	}
 }
@@ -421,7 +437,7 @@ func TestParseExpr_ChainedComparisonRejected(t *testing.T) {
 // 裸算术在顶层（非布尔结果）→ false。
 func TestParseExpr_BareArithmeticTopLevel(t *testing.T) {
 	s := newCondStore(map[string]any{"x": int64(3)})
-	if parseExpr("x + 1", s) {
+	if evalCompiledCondition("x + 1", s) {
 		t.Error("x + 1 顶层裸算术应为 false（结果非布尔）")
 	}
 }
@@ -429,11 +445,11 @@ func TestParseExpr_BareArithmeticTopLevel(t *testing.T) {
 // 非标量操作数（list / []byte）→ false。
 func TestParseExpr_NonScalarOperand(t *testing.T) {
 	list := newCondStore(map[string]any{"items": []any{int64(1)}})
-	if parseExpr("items == 0", list) {
+	if evalCompiledCondition("items == 0", list) {
 		t.Error("list == 0 应为 false（非标量）")
 	}
 	bytes := newCondStore(map[string]any{"data": []byte("x")})
-	if parseExpr("data == \"x\"", bytes) {
+	if evalCompiledCondition("data == \"x\"", bytes) {
 		t.Error("[]byte == \"x\" 应为 false（非标量，不隐式转字符串）")
 	}
 }
@@ -441,25 +457,25 @@ func TestParseExpr_NonScalarOperand(t *testing.T) {
 // local-false 语义：missing || fallback，fallback 为真 → 结果 true（同时 warn missing）。
 func TestParseExpr_LocalFalseOrFallback(t *testing.T) {
 	s := newCondStore(map[string]any{"fallback": true})
-	if !parseExpr("missing || fallback", s) {
+	if !evalCompiledCondition("missing || fallback", s) {
 		t.Error("missing || fallback (fallback=true) 应为 true（local-false 语义）")
 	}
 }
 
-// ─── EvalCondition（state: 前缀公开入口）────────────────
+// ─── 完整条件文本编译入口（含 state: 前缀）────────────────
 
-func TestEvalCondition_StatePrefix(t *testing.T) {
+func TestCompileCondition_StatePrefix(t *testing.T) {
 	s := newCondStore(map[string]any{"hp": int64(80), "index": int64(4)})
-	if !EvalCondition("state:hp > 0", s) {
+	if !evalFullCompiledCondition("state:hp > 0", s) {
 		t.Error("state:hp > 0 should be true")
 	}
-	if !EvalCondition("state:index % 2 == 0", s) {
+	if !evalFullCompiledCondition("state:index % 2 == 0", s) {
 		t.Error("state:index % 2 == 0 should be true")
 	}
-	if EvalCondition("hp > 0", s) {
+	if evalFullCompiledCondition("hp > 0", s) {
 		t.Error("缺少 state: 前缀应返回 false")
 	}
-	if !EvalCondition("  ", s) {
+	if !evalFullCompiledCondition("  ", s) {
 		t.Error("空表达式应返回 true")
 	}
 }
@@ -488,17 +504,17 @@ func TestParseExpr_MalformedNoPanic(t *testing.T) {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					t.Errorf("parseExpr(%q) 发生 panic：%v", expr, r)
+					t.Errorf("evalCompiledCondition(%q) 发生 panic：%v", expr, r)
 				}
 			}()
-			_ = parseExpr(expr, s)
+			_ = evalCompiledCondition(expr, s)
 		}()
 	}
 }
 
-// TestValidateConditionSyntax 覆盖加载期 fail-closed：语法错误的条件表达式必须在加载校验时
+// TestCompileConditionSyntax 覆盖加载期 fail-closed：语法错误的条件表达式必须在加载时
 // 报错，而非运行时被 local-false 语义静默吞掉（畸形 "!" 曾被吞成 true/false 掩盖配置错误）。
-func TestValidateConditionSyntax(t *testing.T) {
+func TestCompileConditionSyntax(t *testing.T) {
 	// 结构合法：应通过（不访问 store，缺失 state 路径不算语法错误）。
 	valid := []string{
 		"",                        // 空表达式跳过
@@ -511,8 +527,8 @@ func TestValidateConditionSyntax(t *testing.T) {
 		"missingKey > 0",          // 缺失 state 路径仍是合法语法
 	}
 	for _, expr := range valid {
-		if err := ValidateConditionSyntax(expr); err != nil {
-			t.Errorf("ValidateConditionSyntax(%q) 期望通过，却报错：%v", expr, err)
+		if _, err := compileCondition(PrefixState + expr); err != nil {
+			t.Errorf("compileCondition(%q) 期望通过，却报错：%v", expr, err)
 		}
 	}
 
@@ -530,8 +546,8 @@ func TestValidateConditionSyntax(t *testing.T) {
 		"1 +",     // 算术缺右操作数
 	}
 	for _, expr := range invalid {
-		if err := ValidateConditionSyntax(expr); err == nil {
-			t.Errorf("ValidateConditionSyntax(%q) 期望报错（fail-closed），却通过", expr)
+		if _, err := compileCondition(PrefixState + expr); err == nil {
+			t.Errorf("compileCondition(%q) 期望报错（fail-closed），却通过", expr)
 		}
 	}
 }

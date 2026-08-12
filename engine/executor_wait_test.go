@@ -20,7 +20,7 @@ func (h *waitTestHandler) ExecuteAction(_ context.Context, actionDef *ActionDef)
 	return nil
 }
 
-func (h *waitTestHandler) ExecuteBoolean(string) bool { return false }
+func (h *waitTestHandler) ExecuteCondition(*CompiledCondition) bool { return false }
 
 func (h *waitTestHandler) RegisterListen([]ListenRef) error { return nil }
 

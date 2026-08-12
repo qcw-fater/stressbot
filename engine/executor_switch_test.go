@@ -46,7 +46,7 @@ type switchTestHandler struct {
 	booleanCalls   []string
 	actionErrors   map[string]error
 	sleepCalls     int
-	onBoolean      func() // 每次 ExecuteBoolean 的副作用钩子（测试用，如求值时取消 ctx）
+	onBoolean      func() // 每次 ExecuteCondition 的副作用钩子（测试用，如求值时取消 ctx）
 }
 
 func (h *switchTestHandler) ExecuteAction(_ context.Context, actionDef *ActionDef) error {
@@ -57,10 +57,11 @@ func (h *switchTestHandler) ExecuteAction(_ context.Context, actionDef *ActionDe
 	return nil
 }
 
-func (h *switchTestHandler) ExecuteBoolean(expression string) bool {
+func (h *switchTestHandler) ExecuteCondition(condition *CompiledCondition) bool {
 	if h.onBoolean != nil {
 		h.onBoolean()
 	}
+	expression := condition.Source()
 	h.booleanCalls = append(h.booleanCalls, expression)
 	return h.booleanResults[expression]
 }
@@ -73,7 +74,7 @@ func (h *switchTestHandler) CooperativeSleep(ctx context.Context, _ time.Duratio
 }
 
 func newSwitchTestExecutor(handler *switchTestHandler, switchNode *Node) *Executor {
-	return NewExecutor(&TaskFlow{
+	flow := &TaskFlow{
 		DefaultDelayMs: -1,
 		Nodes: map[string]*Node{
 			"main":     switchNode,
@@ -86,7 +87,26 @@ func newSwitchTestExecutor(handler *switchTestHandler, switchNode *Node) *Execut
 			"normal":   {Name: "normal", Pattern: PatternClearState},
 			"fallback": {Name: "fallback", Pattern: PatternClearState},
 		},
-	}, handler, "switch-test")
+	}
+	if err := PrepareTaskFlow(flow); err != nil {
+		panic(err)
+	}
+	return NewExecutor(flow, handler, "switch-test")
+}
+
+func TestExecutorDoesNotParseUnpreparedCondition(t *testing.T) {
+	handler := &switchTestHandler{booleanResults: map[string]bool{"state:ready": true}}
+	flow := &TaskFlow{Nodes: map[string]*Node{
+		"main": {Type: NodeBoolean, Condition: "state:ready", TrueNext: "yes"},
+		"yes":  {Type: NodeSequence},
+	}}
+	executor := NewExecutor(flow, handler, "test")
+	if err := executor.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(handler.booleanCalls) != 0 {
+		t.Fatal("unprepared condition must fail before reaching handler")
+	}
 }
 
 func TestExecuteSwitchRunsFirstMatchingCase(t *testing.T) {

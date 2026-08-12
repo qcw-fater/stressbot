@@ -44,7 +44,7 @@ func (h *executorActionTestHandler) ExecuteAction(ctx context.Context, actionDef
 	return h.err
 }
 
-func (h *executorActionTestHandler) ExecuteBoolean(string) bool { return true }
+func (h *executorActionTestHandler) ExecuteCondition(*CompiledCondition) bool { return true }
 
 func (h *executorActionTestHandler) RegisterListen([]ListenRef) error {
 	h.registerCalls++

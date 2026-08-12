@@ -435,7 +435,7 @@ func (ae *ActionExecutor) bindFields(msg proto.Message, bindings []FieldBind, ac
 		fb := &bindings[i]
 
 		// 1) condition 为 false 时跳过
-		if !ae.evaluateCondition(fb.Condition) {
+		if !ae.bindingConditionSatisfied(fb) {
 			continue
 		}
 
@@ -485,7 +485,7 @@ func (ae *ActionExecutor) resolveMapValueStrict(fb *FieldBind, actionName, field
 		if !isComparableMapKey(entry.Key) {
 			return nil, NewActionError(errcode.ErrBindField, fmt.Sprintf("action=%s field=%s mapKey=%v key 不可比较", actionName, fieldName, entry.Key))
 		}
-		if !ae.evaluateCondition(entry.Value.Condition) {
+		if !ae.bindingConditionSatisfied(&entry.Value) {
 			continue
 		}
 		if entry.Value.Type == BindMap {
@@ -865,7 +865,7 @@ func (ae *ActionExecutor) execSetState(def *ActionDef) error {
 	for i := range def.Bindings {
 		fb := &def.Bindings[i]
 
-		if !ae.evaluateCondition(fb.Condition) {
+		if !ae.bindingConditionSatisfied(fb) {
 			continue
 		}
 
@@ -901,7 +901,7 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, ActionTimin
 			bodyMap := make(map[string]any)
 			for i := range def.Bindings {
 				fb := &def.Bindings[i]
-				if !ae.evaluateCondition(fb.Condition) {
+				if !ae.bindingConditionSatisfied(fb) {
 					continue
 				}
 				val := ae.resolveFieldValue(fb)
@@ -921,7 +921,7 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, ActionTimin
 			formData := make(url.Values)
 			for i := range def.Bindings {
 				fb := &def.Bindings[i]
-				if !ae.evaluateCondition(fb.Condition) {
+				if !ae.bindingConditionSatisfied(fb) {
 					continue
 				}
 				val := ae.resolveFieldValue(fb)
@@ -1257,12 +1257,18 @@ func matchFilterValues(values []any, targetVal any, op string, mode string) bool
 	}
 }
 
-// evaluateCondition 评估条件表达式（仅 state: 前缀）。返回 true 表示条件满足（或无条件）。
-func (ae *ActionExecutor) evaluateCondition(cond string) bool {
-	if cond == "" {
+// bindingConditionSatisfied 执行加载期已准备的字段绑定条件。
+func (ae *ActionExecutor) bindingConditionSatisfied(binding *FieldBind) bool {
+	if binding == nil || strings.TrimSpace(binding.Condition) == "" {
 		return true
 	}
-	return EvalCondition(cond, ae.store)
+	condition := binding.preparedCondition()
+	if condition == nil {
+		stresslog.Error("[ENGINE] 字段绑定条件尚未准备",
+			zap.String("condition", binding.Condition), zap.Error(errConditionNotPrepared))
+		return false
+	}
+	return condition.EvalState(ae.store)
 }
 
 // pickN 从列表中随机选择 N 个不重复元素
