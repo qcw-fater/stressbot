@@ -32,7 +32,7 @@ tmp/
 dist/
 
 # 日志和数据
-log/
+/log/
 data/
 bugs/
 metrics/

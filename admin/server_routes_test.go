@@ -13,18 +13,20 @@ func TestManagementRoutesExcludeControlPlane(t *testing.T) {
 
 	assertStatus(t, handler, http.MethodPost, "/sbot/agent/register", http.StatusNotFound)
 	assertNotStatus(t, handler, http.MethodGet, "/sbot/capabilities", http.StatusNotFound)
+
+	for _, path := range []string{
+		"/sbot/logs/admin",
+		"/sbot/logs/agents/agent-1",
+		"/sbot/logs/admin/files",
+		"/sbot/logs/admin/files/admin.log",
+		"/sbot/logs/agents/agent-1/files",
+		"/sbot/logs/agents/agent-1/files/agent.log",
+	} {
+		assertStatus(t, handler, http.MethodGet, path, http.StatusNotFound)
+	}
 }
 
-func TestControlPlaneRoutesExcludeManagement(t *testing.T) {
-	server := &AdminServer{}
-	handler := server.registerControlPlaneRoutes()
-
-	assertStatus(t, handler, http.MethodGet, "/sbot/tasks", http.StatusNotFound)
-	assertStatus(t, handler, http.MethodGet, "/", http.StatusNotFound)
-	assertNotStatus(t, handler, http.MethodPost, "/sbot/agent/register", http.StatusNotFound)
-}
-
-func TestAdminServerListenersUseSeparateAddresses(t *testing.T) {
+func TestAdminManagementListenerAddress(t *testing.T) {
 	server := &AdminServer{cfg: Config{
 		ListenHost: "127.0.0.1",
 		Port:       7718,
@@ -37,9 +39,6 @@ func TestAdminServerListenersUseSeparateAddresses(t *testing.T) {
 	if got := server.newManagementServer().Addr; got != "127.0.0.1:7718" {
 		t.Fatalf("management Addr = %q", got)
 	}
-	if got := server.newControlPlaneServer().Addr; got != "10.0.0.2:7720" {
-		t.Fatalf("control plane Addr = %q", got)
-	}
 }
 
 func TestAdminServerShutdownIsIdempotent(t *testing.T) {
@@ -47,6 +46,31 @@ func TestAdminServerShutdownIsIdempotent(t *testing.T) {
 	if err := server.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	if err := server.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAdminServerShutdownStopsRuntimeBeforeWaitingForWorkPool(t *testing.T) {
+	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
+	server := &AdminServer{
+		runtimeCtx:    runtimeCtx,
+		runtimeCancel: runtimeCancel,
+		stopCh:        make(chan struct{}),
+	}
+	server.shutdownPool = func() {
+		select {
+		case <-runtimeCtx.Done():
+		default:
+			t.Error("等待工作池前未取消 Admin 运行时上下文")
+		}
+		select {
+		case <-server.stopCh:
+		default:
+			t.Error("等待工作池前未发出 Admin 停止信号")
+		}
+	}
+
 	if err := server.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
 	}

@@ -2,178 +2,81 @@ package agent
 
 import (
 	"fmt"
-	"net/url"
+	"net"
 	"os"
 	"runtime"
 	"time"
 
-	"stressbot/controlplane"
 	"stressbot/utils"
 )
 
-// Config Agent 配置（JSON 反序列化形态）。
-// 仅保留用户需要关心的字段，其余内部参数硬编码在 Resolve() 中。
 type Config struct {
-	Enabled                bool                   `json:"enabled"`                // 模式开关：是否启用 Agent 模式
-	AdminUrl               string                 `json:"adminUrl"`               // Admin 服务器地址（如 http://192.168.1.100:7718）
-	PublicURL              string                 `json:"publicUrl"`              // Agent 对外可达地址（如 http://192.168.1.200:7719），不填自动获取本机 IP
-	Port                   int                    `json:"port"`                   // 本地 HTTP 监听端口（默认 7719，Admin 通过此端口回调 Agent）
-	MaxBots                int                    `json:"maxBots"`                // 单节点最大机器人数量（默认 5000）
-	HeartbeatInterval      string                 `json:"heartbeatInterval"`      // 心跳发送间隔（默认 10s）
-	HeartbeatTimeout       string                 `json:"heartbeatTimeout"`       // 单次心跳请求超时（默认 5s，快失败快重试）
-	HeartbeatFailThreshold int                    `json:"heartbeatFailThreshold"` // 任务运行中连续心跳失败多少次才放弃任务（默认 3）
-	RequestTimeout         string                 `json:"requestTimeout"`         // 单次 HTTP 请求超时（默认 30s）
-	ReconnectMaxRetries    int                    `json:"reconnectMaxRetries"`    // 最大重连次数，-1=持续重连（默认 -1）
-	MetricsInterval        string                 `json:"metricsInterval"`        // 指标上报间隔（压力 + 系统同步，默认 5s）
-	TLS                    controlplane.TLSConfig `json:"tls"`                    // Admin-Agent 双向 TLS
-	AppVersion             string                 `json:"-"`                      // 编译时注入，不从 JSON 读取
+	Enabled             bool   `json:"enabled"`
+	ID                  string `json:"id"`
+	AdminAddress        string `json:"adminAddress"`
+	Name                string `json:"name"`
+	MaxBots             int    `json:"maxBots"`
+	HeartbeatInterval   string `json:"heartbeatInterval"`
+	ReconnectMaxRetries int    `json:"reconnectMaxRetries"`
+	MetricsInterval     string `json:"metricsInterval"`
+	AppVersion          string `json:"-"`
 }
 
-// ResolvedConfig Agent 运行期配置（所有参数已解析为最终值）。
 type ResolvedConfig struct {
-	AdminUrl               string        // Admin 服务器地址
-	Name                   string        // 节点名称（主机名）
-	Address                string        // Agent 对外可达地址（如 http://192.168.1.200:7719）
-	Port                   int           // 本地 HTTP 监听端口
-	MaxBots                int           // 单节点最大机器人数量
-	AppVersion             string        // 应用版本号
-	TaskWorkDir            string        // 任务工作目录（系统临时目录）
-	MetricsInterval        time.Duration // 指标上报间隔（压力 + 系统同步）
-	HeartbeatInterval      time.Duration // 心跳发送间隔
-	HeartbeatFailInterval  time.Duration // 心跳失败后重试间隔
-	HeartbeatTimeout       time.Duration // 单次心跳请求超时（独立于通用 RequestTimeout）
-	HeartbeatFailThreshold int           // 任务运行中连续心跳失败多少次才放弃任务
-	RequestTimeout         time.Duration // 单次 HTTP 请求超时
-	ReconnectInterval      time.Duration // 注册重连初始间隔
-	ReconnectMaxInterval   time.Duration // 重连指数退避上限
-	ReconnectMaxRetries    int           // 最大重连次数（-1=持续重连）
-	TaskReportTimeout      time.Duration // 任务完成上报总超时
-	ControlPlaneTLS        controlplane.TLSConfig
+	ID                   string
+	AdminAddress         string
+	Name                 string
+	MaxBots              int
+	AppVersion           string
+	TaskWorkDir          string
+	MetricsInterval      time.Duration
+	HeartbeatInterval    time.Duration
+	ReconnectInterval    time.Duration
+	ReconnectMaxInterval time.Duration
+	ReconnectMaxRetries  int
+	TaskReportTimeout    time.Duration
 }
 
-// Resolve 将 Config 解析为 ResolvedConfig，校验必填项。
 func (c *Config) Resolve() (*ResolvedConfig, error) {
-	if c.AdminUrl == "" {
-		return nil, fmt.Errorf("agent.adminUrl 不能为空")
+	if c.ID == "" {
+		return nil, fmt.Errorf("agent.id 不能为空")
 	}
-
-	hostname, _ := os.Hostname() // hostname 可选，获取失败不影响功能
-	if err := validateHTTPBaseURL("agent.adminUrl", c.AdminUrl); err != nil {
-		return nil, err
+	if c.AdminAddress == "" {
+		return nil, fmt.Errorf("agent.adminAddress 不能为空")
 	}
-	if c.PublicURL != "" {
-		if err := validateHTTPBaseURL("agent.publicUrl", c.PublicURL); err != nil {
-			return nil, err
-		}
+	if _, _, err := net.SplitHostPort(c.AdminAddress); err != nil {
+		return nil, fmt.Errorf("agent.adminAddress 必须是 host:port: %w", err)
 	}
-	if c.TLS.Enabled() {
-		adminURL, _ := url.Parse(c.AdminUrl)
-		if adminURL.Scheme != "https" {
-			return nil, fmt.Errorf("agent.adminUrl 启用 TLS 时必须使用 https")
-		}
-		if c.PublicURL != "" {
-			publicURL, _ := url.Parse(c.PublicURL)
-			if publicURL.Scheme != "https" {
-				return nil, fmt.Errorf("agent.publicUrl 启用 TLS 时必须使用 https")
-			}
-		}
+	hostname, _ := os.Hostname()
+	name := c.Name
+	if name == "" {
+		name = hostname
 	}
-
-	if hostname == "" {
-		hostname = "unknown"
+	if name == "" {
+		name = c.ID
 	}
-
 	maxBots := c.MaxBots
 	if maxBots <= 0 {
 		maxBots = 5000
 	}
-
-	port := c.Port
-	if port <= 0 {
-		port = 7719
-	}
-
-	metricsInterval := utils.ParseDurationDefault(c.MetricsInterval, 5*time.Second, "agent.metricsInterval")
-	heartbeatInterval := utils.ParseDurationDefault(c.HeartbeatInterval, 10*time.Second, "agent.heartbeatInterval")
-	requestTimeout := utils.ParseDurationDefault(c.RequestTimeout, 30*time.Second, "agent.requestTimeout")
-
-	// 心跳单次请求超时：默认 5s（短于通用 RequestTimeout=30s）。
-	// 心跳是状态探测，快失败快重试；用 30s 会让一次失败卡 30s 才返回，
-	// agent 长时间无感知 Admin 状态。
-	heartbeatTimeout := min(utils.ParseDurationDefault(c.HeartbeatTimeout, 5*time.Second, "agent.heartbeatTimeout"), requestTimeout)
-
-	// 心跳失败容忍阈值：默认 3 次。一次心跳失败立刻 cancel 任务太激进——
-	// 测试场景本地多开 agent 共用 127.0.0.1 时，ephemeral port 会规律性瞬时抖动
-	// （admin 自身一直在线，但 dial 偶发 10~20s 不通），需要给一个容忍窗口。
-	// 容忍时长 = HeartbeatFailThreshold × HeartbeatFailInterval；默认 3 × 10s = 30s。
-	//
-	// 联动约束：必须 ≤ admin.unhealthyAfter（默认 30s），且 admin.offlineAfter
-	// > admin.unhealthyAfter。否则 admin 已把节点标 unhealthy/删除，agent 任务还在跑，
-	// 导致状态错乱（任务回调被触发但 agent 端任务并未结束）。
-	hbFailThreshold := c.HeartbeatFailThreshold
-	if hbFailThreshold <= 0 {
-		hbFailThreshold = 3
-	}
-
-	// 解析 Agent 对外地址：用户配置优先，否则自动获取本机 IP
-	address := c.PublicURL
-	if address == "" {
-		address = buildAddress(port)
-	}
-
 	return &ResolvedConfig{
-		AdminUrl:               c.AdminUrl,
-		Name:                   hostname,
-		Address:                address,
-		Port:                   port,
-		MaxBots:                maxBots,
-		AppVersion:             c.AppVersion,
-		TaskWorkDir:            os.TempDir(),
-		MetricsInterval:        metricsInterval,
-		HeartbeatInterval:      heartbeatInterval,
-		HeartbeatFailInterval:  heartbeatInterval, // 失败重试间隔与心跳间隔一致
-		HeartbeatTimeout:       heartbeatTimeout,
-		HeartbeatFailThreshold: hbFailThreshold,
-		RequestTimeout:         requestTimeout,
-		ReconnectInterval:      5 * time.Second,
-		ReconnectMaxInterval:   60 * time.Second,
-		ReconnectMaxRetries:    resolveReconnectRetries(c.ReconnectMaxRetries),
-		TaskReportTimeout:      30 * time.Second,
-		ControlPlaneTLS:        c.TLS,
+		ID: c.ID, AdminAddress: c.AdminAddress, Name: name, MaxBots: maxBots, AppVersion: c.AppVersion,
+		TaskWorkDir:       os.TempDir(),
+		MetricsInterval:   utils.ParseDurationDefault(c.MetricsInterval, 5*time.Second, "agent.metricsInterval"),
+		HeartbeatInterval: utils.ParseDurationDefault(c.HeartbeatInterval, 10*time.Second, "agent.heartbeatInterval"),
+		ReconnectInterval: 5 * time.Second, ReconnectMaxInterval: 30 * time.Second,
+		ReconnectMaxRetries: resolveReconnectRetries(c.ReconnectMaxRetries), TaskReportTimeout: 30 * time.Second,
 	}, nil
 }
 
-// resolveReconnectRetries 处理 reconnectMaxRetries：JSON 零值(0)视为未配置，回退 -1（持续重连）。
-func validateHTTPBaseURL(field, raw string) error {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return fmt.Errorf("%s 解析失败: %w", field, err)
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("%s scheme 必须是 http 或 https", field)
-	}
-	if u.Host == "" {
-		return fmt.Errorf("%s 缺少 host", field)
-	}
-	return nil
-}
-
-func resolveReconnectRetries(v int) int {
-	if v == 0 {
+func resolveReconnectRetries(value int) int {
+	if value == 0 {
 		return -1
 	}
-	return v
+	return value
 }
 
-// CollectStaticInfo 采集本机静态信息。
 func CollectStaticInfo() StaticInfo {
-	hostname, _ := os.Hostname() // 同上
-	return StaticInfo{
-		Hostname:  hostname,
-		OS:        runtime.GOOS,
-		Arch:      runtime.GOARCH,
-		NumCPU:    runtime.NumCPU(),
-		GoVersion: runtime.Version(),
-		StartedAt: time.Now(),
-	}
+	hostname, _ := os.Hostname()
+	return StaticInfo{Hostname: hostname, OS: runtime.GOOS, Arch: runtime.GOARCH, NumCPU: runtime.NumCPU(), GoVersion: runtime.Version(), StartedAt: time.Now()}
 }

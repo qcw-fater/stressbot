@@ -3,15 +3,16 @@ package admin
 import (
 	"context"
 	"crypto/rand"
-	"crypto/tls"
 	"database/sql"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -24,9 +25,10 @@ import (
 	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
-// AdminServer Admin HTTP 服务器。
+// AdminServer 同时承载浏览器管理面与 Admin-Agent gRPC 控制面。
 type AdminServer struct {
 	cfg Config
 
@@ -34,12 +36,12 @@ type AdminServer struct {
 	agents         *AgentRegistry
 	aggregator     *MetricsAggregator
 	metricsWindows *MetricsWindowStore
-	dispatcher     *AgentDispatcher
 	assigner       *Assigner
-
-	logsProxyClient    *http.Client // Agent 日志代理（5s 超时）
-	logsDownloadClient *http.Client
-	controlPlaneTLS    *tls.Config
+	bundles        *BundleStore
+	sessions       *SessionRegistry
+	commandStore   CommandStore
+	commandBus     *CommandBus
+	telemetry      *TelemetryIngestor
 
 	history         *HistoryStore        // 可选
 	flows           *FlowTemplateStore   // 可选（流程模板库，依赖全局 MySQL）
@@ -51,37 +53,32 @@ type AdminServer struct {
 
 	sharedCleanup *sharedCleanupQueue // 共享状态待清理队列（可选）
 
-	managementSrv   *http.Server
-	controlPlaneSrv *http.Server
-	stopCh          chan struct{}
-	shutdownOnce    sync.Once
-	shutdownErr     error
-	shutdownPool    func()
+	managementSrv *http.Server
+	grpcSrv       *grpc.Server
+	runtimeCtx    context.Context
+	runtimeCancel context.CancelFunc
+	stopCh        chan struct{}
+	shutdownOnce  sync.Once
+	shutdownErr   error
+	shutdownPool  func()
 }
 
 func NewAdminServer(cfg Config) (*AdminServer, error) {
-	var serverTLS, clientTLS *tls.Config
-	if cfg.ControlPlane.TLS.Enabled() {
-		var err error
-		serverTLS, err = cfg.ControlPlane.TLS.Server()
-		if err != nil {
-			return nil, fmt.Errorf("加载 Admin 控制面服务端 TLS: %w", err)
-		}
-		clientTLS, err = cfg.ControlPlane.TLS.Client()
-		if err != nil {
-			return nil, fmt.Errorf("加载 Admin 控制面客户端 TLS: %w", err)
-		}
-	}
+	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
 	s := &AdminServer{
-		cfg:             cfg,
-		stopCh:          make(chan struct{}),
-		shutdownPool:    func() { utils.GetWorkPool().Shutdown() },
-		controlPlaneTLS: serverTLS,
+		cfg:           cfg,
+		runtimeCtx:    runtimeCtx,
+		runtimeCancel: runtimeCancel,
+		stopCh:        make(chan struct{}),
+		shutdownPool:  func() { utils.GetWorkPool().Shutdown() },
 	}
 	assembled := false
 	defer func() {
-		if !assembled && s.db != nil {
-			_ = s.db.Close()
+		if !assembled {
+			runtimeCancel()
+			if s.db != nil {
+				_ = s.db.Close()
+			}
 		}
 	}()
 
@@ -107,26 +104,31 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 		return nil, fmt.Errorf("init task store: %w", err)
 	}
 	s.tasks = tasks
+	bundles, err := NewBundleStore("data/bundles", 128)
+	if err != nil {
+		return nil, err
+	}
+	s.bundles = bundles
+	s.sessions = NewSessionRegistry()
+	if s.db != nil {
+		s.commandStore = NewMySQLCommandStore(s.db)
+	} else {
+		s.commandStore = NewMemoryCommandStore(100_000)
+		stresslog.Warn("[ADMIN] MySQL 未配置：命令日志使用有界内存，Admin 重启后待投递命令不可恢复")
+	}
+	if err := s.commandStore.CancelPendingTaskCommands(context.Background(), "Admin 重启：旧任务已终止"); err != nil {
+		return nil, fmt.Errorf("cancel stale task commands: %w", err)
+	}
+	s.commandBus = NewCommandBus(s.commandStore, s.sessions, 8192)
 
 	// 3. AgentRegistry
 	s.agents = NewAgentRegistry(cfg.AgentRegistry, s.onAgentStatusChange)
+	s.agents.SetOnRestart(s.onAgentRestart)
 
 	// 4. MetricsAggregator
 	s.metricsWindows = NewMetricsWindowStore(time.Now)
 	s.aggregator = NewMetricsAggregator(s.agents, s.metricsWindows, time.Now)
-
-	// 5. AgentDispatcher
-	s.dispatcher = NewAgentDispatcherWithTLS(clientTLS)
-
-	// 6. Logs proxy client
-	s.logsProxyClient = &http.Client{
-		Timeout:   5 * time.Second,
-		Transport: newAgentHTTPTransport(clientTLS),
-	}
-	s.logsDownloadClient = &http.Client{
-		Timeout:   60 * time.Second,
-		Transport: newAgentHTTPTransport(clientTLS),
-	}
+	s.telemetry = NewTelemetryIngestor(s)
 
 	// 7. Assigner
 	s.assigner = NewAssigner()
@@ -184,8 +186,11 @@ func (s *AdminServer) Run() error {
 	utils.InitWorkPool(nil)
 
 	// 启动心跳检测
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := s.runtimeCtx
+	defer s.runtimeCancel()
+	if err := s.telemetry.Start(ctx); err != nil {
+		return fmt.Errorf("启动遥测摄取器失败: %w", err)
+	}
 	s.agents.StartHealthChecker(ctx)
 
 	// 启动定时清理（可选）
@@ -208,23 +213,20 @@ func (s *AdminServer) Run() error {
 	//     防止 agent → admin 的 client-side 池保留大量已不再使用的连接；
 	//   - ReadTimeout/WriteTimeout 故意不设：history 导出/日志下载可能很长。
 	s.managementSrv = s.newManagementServer()
-	s.controlPlaneSrv = s.newControlPlaneServer()
+	s.grpcSrv = s.newGRPCServer()
 
 	stresslog.Info("admin 启动",
 		zap.String("managementAddr", s.managementSrv.Addr),
-		zap.String("controlPlaneAddr", s.controlPlaneSrv.Addr),
+		zap.String("controlPlaneAddr", net.JoinHostPort(s.cfg.ControlPlane.ListenHost, strconv.Itoa(s.cfg.ControlPlane.Port))),
 		zap.Bool("history", s.history != nil),
 		zap.Bool("redis", s.cfg.RedisEnabled()))
-	if s.controlPlaneTLS == nil {
-		stresslog.Warn("[ADMIN] 控制面仍使用 HTTP 兼容模式，请完成证书发布后切换 mTLS")
-	}
 
 	// 信号处理
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	defer signal.Stop(sigCh)
-	return s.serveHTTPServers(sigCh)
+	return s.serveServers(sigCh)
 }
 
 // Shutdown 优雅关闭。
@@ -236,21 +238,33 @@ func (s *AdminServer) Shutdown(ctx context.Context) error {
 }
 
 func (s *AdminServer) shutdown(ctx context.Context) error {
-	shutdownErr := s.shutdownHTTPServers(ctx)
+	// 先停止所有由 Run 启动的长生命周期任务，再等待全局工作池。
+	// 若把 cancel 留在 Run 的 defer 中，Shutdown 会先等待遥测 worker，
+	// 而 worker 又只能在 Shutdown 返回后收到 cancel，形成关闭死锁。
+	if s.runtimeCancel != nil {
+		s.runtimeCancel()
+	}
+	if s.stopCh != nil {
+		close(s.stopCh)
+	}
+
+	shutdownErr := s.shutdownServers(ctx)
+	if s.shutdownPool != nil {
+		s.shutdownPool()
+	}
+
+	// 后台任务全部退出后再释放其可能使用的存储资源。
+	if s.commandStore != nil {
+		shutdownErr = errors.Join(shutdownErr, s.commandStore.Close())
+	}
 	if s.history != nil {
-		s.history.Close()
+		shutdownErr = errors.Join(shutdownErr, s.history.Close())
 	}
 	// 全局共享 MySQL 连接池：HistoryStore 不再 Close，由 AdminServer 统一关闭。
 	if s.db != nil {
 		if err := s.db.Close(); err != nil {
 			shutdownErr = errors.Join(shutdownErr, err)
 		}
-	}
-	if s.shutdownPool != nil {
-		s.shutdownPool()
-	}
-	if s.stopCh != nil {
-		close(s.stopCh)
 	}
 	return shutdownErr
 }
@@ -361,45 +375,6 @@ func (s *AdminServer) onAgentStatusChange(agentID string, from, to AgentStatus) 
 		return
 	}
 
-	// 已分配节点重新注册（busy → idle / unhealthy → idle 等异常路径）：
-	// 视为 Agent 进程重启，任务在该节点上已丢失（用户需求 §2.3：重连后是新连接，不再补档）。
-	// 立即为该 Agent 合成 failed report，避免任务因等待"永远不会到来的"完成上报而卡死。
-	if (from == AgentBusy || from == AgentUnhealthy) && to == AgentIdle {
-		s.tasks.Update(task.ID, func(t *Task) {
-			t.AgentEvents = append(t.AgentEvents, AgentEvent{
-				AgentID:   agentID,
-				AgentName: agentName,
-				Type:      "restarted",
-				Timestamp: time.Now(),
-				Detail:    "Agent 重新注册，已分配任务在该节点丢失",
-			})
-			if t.Reports == nil {
-				t.Reports = make(map[string]TaskCompletionReport)
-			}
-			if _, exists := t.Reports[agentID]; !exists {
-				cleanup := robot.UnknownCleanupStatus(robot.CleanupReasonOfflineSynthetic, "节点重新注册，清理状态未知")
-				t.Reports[agentID] = TaskCompletionReport{
-					AgentID:       agentID,
-					TaskID:        t.ID,
-					Result:        ResultFailed,
-					ErrorMsg:      "Agent 重新注册，任务已丢失",
-					FinishedAt:    time.Now(),
-					CleanupStatus: &cleanup,
-				}
-			}
-		})
-		stresslog.Warn("[ADMIN] 分配节点重新注册，任务在该节点已丢失",
-			zap.String("taskID", task.ID),
-			zap.String("agentID", agentID),
-			zap.String("agentName", agentName),
-			zap.String("from", string(from)))
-
-		// 检查是否所有分配节点都已"失效"（offline 或已合成 report），
-		// 是则触发 autoStopTask；否则任务继续。
-		s.checkAndStopIfAllLost(task.ID)
-		return
-	}
-
 	// 节点恢复（offline → idle/busy）：记录 reconnected 事件
 	if from == AgentOffline && (to == AgentIdle || to == AgentBusy) {
 		s.tasks.Update(task.ID, func(t *Task) {
@@ -470,6 +445,38 @@ func (s *AdminServer) onAgentStatusChange(agentID string, from, to AgentStatus) 
 
 	// 任务 running 时节点离线 → 检查是否所有分配节点都已失效（offline 或已合成 report）
 	s.checkAndStopIfAllLost(task.ID)
+}
+
+func (s *AdminServer) onAgentRestart(agentID, lostTaskID string) {
+	task := s.tasks.ActiveTask()
+	if task == nil || task.ID != lostTaskID {
+		return
+	}
+	assignment, ok := taskExpectedAssignment(task, agentID)
+	if !ok {
+		return
+	}
+	_ = s.tasks.Update(task.ID, func(t *Task) {
+		t.AgentEvents = append(t.AgentEvents, AgentEvent{AgentID: agentID, AgentName: assignment.AgentName, Type: "restarted", Timestamp: time.Now(), Detail: "节点进程实例已变化，原任务已丢失"})
+		if t.Reports == nil {
+			t.Reports = make(map[string]TaskCompletionReport)
+		}
+		if _, exists := t.Reports[agentID]; !exists {
+			cleanup := robot.UnknownCleanupStatus(robot.CleanupReasonOfflineSynthetic, "节点进程重启，清理状态未知")
+			t.Reports[agentID] = TaskCompletionReport{AgentID: agentID, TaskID: t.ID, Result: ResultFailed, ErrorMsg: "节点进程重启，任务已丢失", FinishedAt: time.Now(), CleanupStatus: &cleanup}
+		}
+	})
+	stresslog.Warn("[ADMIN] 节点进程重启，任务在该节点已丢失", zap.String("taskID", task.ID), zap.String("agentID", agentID), zap.String("agentName", assignment.AgentName))
+	s.checkAndStopIfAllLost(task.ID)
+}
+
+func taskExpectedAssignment(task *Task, agentID string) (Assignment, bool) {
+	for _, assignment := range task.Assignments {
+		if assignment.AgentID == agentID {
+			return assignment, true
+		}
+	}
+	return Assignment{}, false
 }
 
 // aggregateTaskCleanup 把任务所有节点的 report.CleanupStatus 合并为任务级清理摘要。
@@ -661,15 +668,11 @@ func (s *AdminServer) autoStopTask(taskID string, reason string) {
 			targets = append(targets, a.AgentID)
 		}
 	}
-	for _, agentID := range targets {
-		node, ok := s.agents.Get(agentID)
-		if ok && node.Status != AgentOffline {
-			if err := s.dispatcher.Stop(node.Address, taskID); err != nil {
-				stresslog.Warn("[ADMIN] 停止节点任务失败",
-					zap.String("agentID", agentID), zap.Error(err))
-			}
-		}
+	ctx, cancel := commandContext()
+	if err := s.scheduleStopCommands(ctx, taskID, targets, reason); err != nil {
+		stresslog.Warn("[ADMIN] 创建自动停止命令失败", zap.String("taskID", taskID), zap.Error(err))
 	}
+	cancel()
 
 	s.tasks.Update(taskID, func(t *Task) {
 		if t.Reports == nil {

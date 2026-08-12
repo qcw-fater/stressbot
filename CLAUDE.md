@@ -55,12 +55,11 @@ cd cmd/web && npm run test                 # Vitest
 - **`script/`** — Lua 运行时池（`gopher-lua`）。每个 Robot 获取独占 `LState`，由主流程同步执行业务 Lua；阻塞型 Lua API 只暂停当前 Robot 主流程，connectionPump 与连接级心跳继续独立运行。7 个模块共 87 个函数：`network`（21）、`robot`（15）、`utils`（15）、`proto`（10）、`json`（2）、`log`（4）、`share`（20）。
 - **`state/` — 线程安全的键值状态存储（RWMutex）。保存服务器响应字段（通过 `store` 映射），支持 list/map 操作用于随机选取。`CompareValues` 支持 10 种过滤运算符。
 - **`adapter/` — 协议适配器接口（9 方法）。热路径帧解析（`HeaderSize`/`BodyLength`）纯 Go 缓存，编解码由 `CodecResolver` 按 `"<proto>:<service>"` 解析、`SchemaAdapter` 包装 `codec/` Go 引擎驱动，配置来自 `conf/adapter/<proto>_<service>_codec.json`（每连接一份）。
-- **`admin/` — Admin 服务器（16 文件）。任务调度（TaskStore 状态机 + 单例约束 + 持久化）、Agent 管理（注册/心跳/健康检查/unhealthy→offline/离线清理）、指标聚合（MergeSnapshots）、时序采样（Sampler）、历史归档（MySQL 6 表）、任务分配（proportional/debug-single）、Agent RPC 调度、前端静态托管。60 个 HTTP API 端点（前缀 `/sbot/`）。
-- **`agent/` — Agent 节点（8 文件）。注册到 Admin（指数退避）→ 心跳循环 → 任务轮询 → TaskRunner 执行（下载配置 → 加载适配器 → 编译 proto → 构建流程 → Manager → 启动机器人）→ 指标上报 + 系统资源上报。本地 HTTP API（前缀 `/agent/v1/`：task/stop/shutdown/version/status/logs + `/healthz`）。
+- **`admin/` — Admin 服务器。浏览器管理面继续使用 HTTP（前缀 `/sbot/`）；Admin-Agent 控制面使用 `grpc-go`，包含双向会话/命令、资源包流式下载和指标客户端流。内部负责 TaskStore 状态机、AgentRegistry、SessionRegistry/CommandStore/CommandBus、BundleStore、TelemetryIngestor、任务分配、指标聚合、MySQL 历史归档和前端静态托管。
+- **`agent/` — Agent 节点。主动建立到 Admin 的 gRPC 长连接（指数退避）→ Hello/心跳与租约 → 接收可靠命令 → 下载内容寻址资源包 → TaskRunner 执行 → 流式上报压力/系统指标 → 最终报告确认。Agent 不开放本地 HTTP 控制面。
 - **`monitor/` — 指标采集。原子计数器（热路径零锁：成功/失败/超时/取消/执行中/字节数）、延迟直方图（16 桶 1ms~60s+，P50/P90/P95/P99，**仅纯网络往返**，不含客户端构建/解析）、Apdex 评分（阈值 T 可配，分母为 netSampleCount）、客户端开销独立列（`ClientAvgMs`）、分布式聚合。`RecordAction(name, result, timing, wallClock, sendBytes, recvBytes, err)`：`result` ∈ Success/Failure/Timeout/Canceled，`timing` 携带 RTT 与各编解码阶段耗时；纯客户端动作（无 RTT 样本）不进直方图但 successCount 仍计数。错误按 `code` 单维聚合（展示按 `code < 100` 推导框架/业务标签），保留最近 3 条详情。导出：Console / HTTP JSON / CSV / pprof。
-- **`logview/` — 日志环形缓冲区。O(1) 写入 + cursor 分页查询，供前端实时日志面板使用。
 - **`errcode/` — 统一错误码。`ErrorCode`（uint64）单一维度 + 码段契约（< 100 框架保留段，工具自产、由 `codeRegistry` 分配 / ≥ 100 业务段，服务器返回）+ 29 个框架错误码常量（Network 6 / Protocol 2 / Build 4 / Listen 2 / Config 9 / Lua 4 / Callback 2）。`ActionError` 携带 `{Code, Detail}`（无 Kind）；monitor 按 code 单维聚合，展示按 `code < 100` 推导框架/业务标签。`errors.json` 加载期对 < 100 撞码硬报错。
-- **`utils/` — `work_pool.go`（协程池 + recover 防止 panic 扩散）、`duration.go`、`utils/log/`（结构化日志 zap + lumberjack 轮转 + 企业微信 webhook 告警）。
+- **`utils/` — `work_pool.go`（协程池 + recover 防止 panic 扩散）、`duration.go`、`utils/log/`（稳定 JSON Lines + zap + 256 KiB/1s 有界缓冲 + lumberjack 轮转 + 企业微信 webhook 告警）。Admin/Agent 只写本地文件，不提供日志查询/代理 API；生产采集与查询交给外部日志栈。
 
 ### 单次动作数据流
 
@@ -72,7 +71,7 @@ cd cmd/web && npm run test                 # Vitest
 
 React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Editor / Zustand + Zundo（撤销重做）/ ECharts 6 / idb-keyval（IndexedDB）/ protobufjs / Vitest。
 
-主要功能模块：可视化流程编辑器（FlowEditor）、资源管理（Proto/Lua/Adapter 的上传/编辑/同步/下发）、任务管理（创建/启动/停止）、实时监控面板（MonitorDock：动作表/趋势图/系统资源）、日志查看（Monaco）、历史归档面板、Agent 管理面板。
+主要功能模块：可视化流程编辑器（FlowEditor）、资源管理（Proto/Lua/Adapter 的上传/编辑/同步/下发）、任务管理（创建/启动/停止）、实时监控面板（MonitorDock：动作表/趋势图/系统资源）、历史归档面板、Agent 管理面板。
 
 ## 配置文件
 

@@ -48,9 +48,6 @@ const LazyAgentsPanel = lazy(() =>
 const LazySystemTab = lazy(() =>
   import('@/components/monitoring/tabs/SystemTab').then((m) => ({ default: m.SystemTab })),
 );
-const LazyLogsTab = lazy(() =>
-  import('@/components/monitoring/tabs/LogsTab').then((m) => ({ default: m.LogsTab })),
-);
 const LazyNotepadTab = lazy(() =>
   import('@/components/modules/notepad/NotepadTab').then((m) => ({ default: m.NotepadTab })),
 );
@@ -160,7 +157,6 @@ function HomeShellInner() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [systemOpen, setSystemOpen] = useState(false);
-  const [logsOpen, setLogsOpen] = useState(false);
   const [notepadOpen, setNotepadOpen] = useState(false);
   const [protocolConfigOpen, setProtocolConfigOpen] = useState(false);
   const [guardTask, setGuardTask] = useState<TaskBrief | null>(null);
@@ -301,7 +297,6 @@ function HomeShellInner() {
               onOpenHistory={() => setHistoryOpen(true)}
               onOpenAgents={() => setAgentsOpen(true)}
               onOpenSystem={() => setSystemOpen(true)}
-              onOpenLogs={() => setLogsOpen(true)}
               onOpenNotepad={() => setNotepadOpen(true)}
               onOpenProtocolConfig={() => setProtocolConfigOpen(true)}
             />
@@ -335,20 +330,6 @@ function HomeShellInner() {
         >
           <Suspense fallback={<Spin />}>
             <LazySystemTab />
-          </Suspense>
-        </FloatingWindow>
-      </LazyMount>
-      <LazyMount visible={logsOpen}>
-        <FloatingWindow
-          windowId="logs"
-          title="运行日志"
-          defaultSize={{ width: 1000, height: 600 }}
-          minSize={{ width: 600, height: 400 }}
-          open={logsOpen}
-          onClose={() => setLogsOpen(false)}
-        >
-          <Suspense fallback={<Spin />}>
-            <LazyLogsTab open={logsOpen} />
           </Suspense>
         </FloatingWindow>
       </LazyMount>

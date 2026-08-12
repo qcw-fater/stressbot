@@ -68,13 +68,13 @@ func TestMetricsWindowStoreAcceptIsIdempotentAndUsesReceiveTime(t *testing.T) {
 	}
 }
 
-func TestMetricsWindowStoreRejectsSequenceGapAndTaskMismatch(t *testing.T) {
+func TestMetricsWindowStoreAcceptsSequenceGapAndRejectsTaskMismatch(t *testing.T) {
 	clock := &metricStoreTestClock{now: time.Unix(100, 0)}
 	store := NewMetricsWindowStore(clock.Now)
 
 	gap := metricStoreTestReport(t, "task-1", "agent-1", 2, time.Unix(90, 0), time.Unix(95, 0))
-	if _, err := store.Accept(gap, "task-1", 5*time.Second, 100*time.Millisecond); err == nil {
-		t.Fatal("首个窗口 sequence=2 应被拒绝")
+	if result, err := store.Accept(gap, "task-1", 5*time.Second, 100*time.Millisecond); err != nil || result.Status != MetricWindowAccepted {
+		t.Fatalf("首个可见窗口 sequence=2 应被接受: result=%+v err=%v", result, err)
 	}
 
 	mismatch := metricStoreTestReport(t, "task-old", "agent-1", 1, time.Unix(90, 0), time.Unix(95, 0))

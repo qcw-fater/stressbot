@@ -5,18 +5,14 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"stressbot/errcode"
-	"stressbot/logview"
 	"stressbot/monitor"
 	configschema "stressbot/schema"
 	"stressbot/utils"
@@ -71,14 +67,6 @@ func (s *AdminServer) registerManagementRoutes() http.Handler {
 	mux.HandleFunc("GET /sbot/history/{id}/timeseries", s.handleGetHistoryTimeseries)
 	mux.HandleFunc("POST /sbot/history/{id}/clone", s.handleCloneHistory)
 	mux.HandleFunc("GET /sbot/history/compare", s.handleCompareHistory)
-
-	// ── 日志 ──
-	mux.HandleFunc("GET /sbot/logs/admin", s.handleGetAdminLogs)
-	mux.HandleFunc("GET /sbot/logs/agents/{id}", s.handleGetAgentLogs)
-	mux.HandleFunc("GET /sbot/logs/admin/files", s.handleListAdminLogFiles)
-	mux.HandleFunc("GET /sbot/logs/admin/files/{name}", s.handleDownloadAdminLogFile)
-	mux.HandleFunc("GET /sbot/logs/agents/{id}/files", s.handleListAgentLogFiles)
-	mux.HandleFunc("GET /sbot/logs/agents/{id}/files/{name}", s.handleDownloadAgentLogFile)
 
 	// ── 基线资源读取 ──
 	mux.HandleFunc("GET /sbot/baseline/proto/index.json", s.handleBaselineProtoIndex)
@@ -179,156 +167,9 @@ func (s *AdminServer) handleCapabilities(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// ── Agent 上行 ──
-
-// handleAgentRegister 处理 Agent 注册。
-//
-// 用户需求 §5：运行任务期间允许 Agent 注册，因为 Agent 异常重启走重连流程
-// 等同于"新注册"；不允许会导致行为不一致。
-//
-// 用户需求 §2.2：Agent 进程重启的语义就是"丢弃当前任务并重新加入集群"，
-// 因此对已分配槽位的 Agent，注册成功后任务侧仅记录 offline 事件不主动恢复任务，
-// 任务调度逻辑会通过心跳超时安全网正常处理。
-func (s *AdminServer) handleAgentRegister(w http.ResponseWriter, r *http.Request) {
-	var req RegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, ErrInvalidArgument.WithMessage("invalid json"))
-		return
-	}
-	if req.AgentID == "" {
-		writeError(w, ErrInvalidArgument.WithMessage("agentId required"))
-		return
-	}
-
-	node := &AgentNode{
-		ID:              req.AgentID,
-		Name:            req.Name,
-		Address:         req.Address,
-		AppVersion:      req.AppVersion,
-		MaxBots:         req.MaxBots,
-		StressInterval:  req.StressInterval,
-		SystemInterval:  req.SystemInterval,
-		StaticInfo:      req.StaticInfo,
-		Status:          AgentIdle,
-		LastHeartbeatAt: time.Now(),
-	}
-	if err := s.agents.Register(node); err != nil {
-		writeError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, RegisterResponse{
-		AgentID:        req.AgentID,
-		HeartbeatTTL:   s.cfg.AgentRegistry.UnhealthyAfter,
-		StressEndpoint: "/sbot/agent/stress",
-		SystemEndpoint: "/sbot/agent/system",
-	})
-}
-
-func (s *AdminServer) handleAgentHeartbeat(w http.ResponseWriter, r *http.Request) {
-	agentID := r.PathValue("id")
-	var req HeartbeatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, ErrInvalidArgument)
-		return
-	}
-	req.AgentID = agentID
-
-	if err := s.agents.Heartbeat(agentID, req); err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func (s *AdminServer) handleAgentDeregister(w http.ResponseWriter, r *http.Request) {
-	agentID := r.PathValue("id")
-	if err := s.agents.Deregister(agentID); err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// handleAgentStressReport 丢弃过期 stress 报告，避免跨任务串数据。
-//
-// 用户需求 §6.1：任意 Agent 请求都视为 keepalive，刷新 LastHeartbeatAt。
-func (s *AdminServer) handleAgentStressReport(w http.ResponseWriter, r *http.Request) {
-	var report StressReport
-	if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
-		writeError(w, ErrInvalidArgument)
-		return
-	}
-	s.agents.Touch(report.AgentID, "")
-	var currentTaskID string
-	if agent, ok := s.agents.Get(report.AgentID); ok {
-		currentTaskID = agent.CurrentTaskID
-	}
-	if currentTaskID == "" || report.TaskID != currentTaskID {
-		// 旧任务的延迟报告 / agent 已 idle，直接丢弃，避免 LatestStress 被串。
-		stresslog.Debug("丢弃过期 stress 报告",
-			zap.String("agentID", report.AgentID),
-			zap.String("reportTaskId", report.TaskID),
-			zap.String("currentTaskID", currentTaskID))
-		writeJSON(w, http.StatusOK, map[string]string{"status": "stale"})
-		return
-	}
-	agent, ok := s.agents.Get(report.AgentID)
-	if !ok {
-		writeError(w, ErrAgentNotFound)
-		return
-	}
-	expectedEvery, err := time.ParseDuration(agent.StressInterval)
-	if err != nil || expectedEvery <= 0 {
-		stresslog.Error("节点指标上报周期无效",
-			zap.String("agentID", report.AgentID),
-			zap.String("stressInterval", agent.StressInterval))
-		writeError(w, ErrInternal.WithMessage("节点指标上报周期无效"))
-		return
-	}
-	active := s.tasks.ActiveTask()
-	if active == nil || active.ID != currentTaskID {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "stale"})
-		return
-	}
-	apdexT := active.Config.RobotConfig.ApdexT
-	if apdexT <= 0 {
-		apdexT = 100
-	}
-	accepted, err := s.metricsWindows.Accept(report, currentTaskID, expectedEvery, time.Duration(apdexT)*time.Millisecond)
-	if err != nil {
-		sequence := uint64(0)
-		if report.Snapshot != nil && report.Snapshot.Window != nil {
-			sequence = report.Snapshot.Window.Sequence
-		}
-		stresslog.Warn("拒绝无效压测指标窗口",
-			zap.String("agentID", report.AgentID),
-			zap.String("taskID", report.TaskID),
-			zap.Uint64("sequence", sequence),
-			zap.Error(err))
-		writeError(w, ErrInvalidArgument.WithMessage(err.Error()))
-		return
-	}
-	state, _ := s.metricsWindows.AgentState(currentTaskID, report.AgentID)
-	s.agents.UpdateStress(report.AgentID, report.Snapshot, state.ReceivedAt)
-	writeJSON(w, http.StatusOK, map[string]string{"status": string(accepted.Status)})
-}
-
-func (s *AdminServer) handleAgentSystemReport(w http.ResponseWriter, r *http.Request) {
-	var report SystemReport
-	if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
-		writeError(w, ErrInvalidArgument)
-		return
-	}
-	s.agents.Touch(report.AgentID, "")
-	// 新鲜度只信任 Admin 的接收时间，避免 Agent 时钟漂移或伪造时间戳。
-	s.agents.UpdateSystem(report.AgentID, &report.Snapshot, time.Now())
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
 // taskExpectedAgents 返回该任务合法完成上报的 Agent 集合：优先 SucceededAgents，
 // 为空时回退到 Assignments 的 Agent 列表（与完成阈值口径一致）。
-// 用于校验 handleAgentTaskDone 的报告来源，拒绝未分配 Agent 的伪造/迟到报告。
+// 用于校验 gRPC 最终报告来源，拒绝未分配节点的伪造或迟到报告。
 func taskExpectedAgents(t *Task) map[string]struct{} {
 	set := make(map[string]struct{})
 	if len(t.SucceededAgents) > 0 {
@@ -341,146 +182,6 @@ func taskExpectedAgents(t *Task) map[string]struct{} {
 		set[a.AgentID] = struct{}{}
 	}
 	return set
-}
-
-func (s *AdminServer) handleAgentTaskDone(w http.ResponseWriter, r *http.Request) {
-	agentID := r.PathValue("id")
-	taskID := r.PathValue("tid")
-
-	var report TaskCompletionReport
-	if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
-		writeError(w, ErrInvalidArgument)
-		return
-	}
-	report.AgentID = agentID
-	report.TaskID = taskID
-
-	// 用户需求 §6.1：任意 Agent 请求都视为 keepalive。
-	// 阶段报告（StageIndex > 0）只刷新心跳时间，**不能**清空 CurrentTaskID/LatestStress：
-	// 任务仍在运行，清空会导致：
-	//   1) 聚合器 AggregateStress 因 currentTaskID 不匹配而排除该节点
-	//   2) 后续 stress 报告被 handleAgentStressReport 当成 stale 丢弃
-	//   3) checkAndStopIfAllLost 把节点视为"已失效"误触发自动停止
-	//   4) 若节点恰好处于 unhealthy，touchLocked 会因 CurrentTaskID="" 把 Status 回到 idle，
-	//      进而触发 onAgentStatusChange 的"restarted"合成失败报告，整个任务被错误地标记为完成
-	s.agents.Touch(agentID, "")
-	isFinal := report.StageIndex <= 0
-
-	var (
-		needTransition TaskState // 零值表示不需要转换
-		memberValid    bool      // 报告来自该任务分配的合法 Agent（SucceededAgents / Assignments）
-	)
-	err := s.tasks.Update(taskID, func(t *Task) {
-		// 校验来源：仅接受该任务合法 Agent 的报告（优先 SucceededAgents，空则回退 Assignments）。
-		// 未分配 Agent 的额外报告会顶满完成阈值提前结束任务，或污染 StageReports，一律忽略。
-		expected := taskExpectedAgents(t)
-		if _, ok := expected[agentID]; !ok {
-			stresslog.Warn("[ADMIN] 忽略非本任务 Agent 的完成报告",
-				zap.String("taskID", taskID), zap.String("agentID", agentID),
-				zap.Bool("final", isFinal))
-			return
-		}
-		memberValid = true
-
-		// reset 边界阶段段落报告：存入 StageReports，不触发状态转换。
-		// 幂等性：同一 (agentId, stageIndex) 已存在则覆盖（重试场景），不重复 append。
-		if !isFinal {
-			replaced := false
-			for i := range t.StageReports {
-				if t.StageReports[i].AgentID == agentID && t.StageReports[i].StageIndex == report.StageIndex {
-					t.StageReports[i] = report
-					replaced = true
-					break
-				}
-			}
-			if !replaced {
-				t.StageReports = append(t.StageReports, report)
-			}
-			stresslog.Info("[ADMIN] 收到 reset 边界阶段段落报告",
-				zap.String("taskID", taskID),
-				zap.String("agentID", agentID),
-				zap.Int("stageIndex", report.StageIndex),
-				zap.Bool("dedup", replaced))
-			return
-		}
-
-		// 最终完成报告
-		if t.Reports == nil {
-			t.Reports = make(map[string]TaskCompletionReport)
-		}
-		t.Reports[agentID] = report
-
-		// 完成计数只统计合法 Agent 集合内的报告（交集），杜绝额外/未知报告顶满阈值提前收尾。
-		// 用 >= 而非 ==：即便集合与报告数因重试/边界短暂不一致，达到阈值即收尾，
-		// 后续报告因 t.State 已非 running/stopping 不再重复触发 transition。
-		completed := 0
-		for id := range t.Reports {
-			if _, ok := expected[id]; ok {
-				completed++
-			}
-		}
-		if len(expected) > 0 && completed >= len(expected) {
-			t.CleanupSummary = aggregateTaskCleanup(t)
-			if t.State == TaskRunning {
-				needTransition = TaskRunning
-			} else if t.State == TaskStopping {
-				needTransition = TaskStopping
-			}
-		}
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-
-	// 仅在报告来自合法 Agent 且为最终报告时，才尝试清理节点任务状态。
-	// CompleteTask 在 agents.mu 内校验 taskID，避免迟到的旧任务报告清空节点的新任务。
-	// 必须在 tasks.mu 之外调用，防止 agents.mu 与 tasks.mu 的 AB-BA 死锁。
-	if memberValid && isFinal {
-		completed, err := s.agents.CompleteTask(agentID, taskID)
-		if err != nil {
-			// Agent 已被 admin 删除等场景，不影响 report 入库
-			stresslog.Warn("[ADMIN] 清理已完成任务的节点状态失败",
-				zap.String("taskID", taskID), zap.String("agentID", agentID), zap.Error(err))
-		} else if !completed {
-			stresslog.Info("[ADMIN] 收到迟到的任务完成报告，保留节点当前任务状态",
-				zap.String("taskID", taskID), zap.String("agentID", agentID))
-		}
-	}
-
-	// Transition 必须在 Update 外部调用，避免死锁（两者都拿 ts.mu）。
-	// 错误必须检查：状态转换非法属于内部一致性问题，需要日志记录。
-	if needTransition == TaskRunning {
-		if _, err := s.tasks.Transition(taskID, TaskRunning, TaskStopped); err != nil {
-			stresslog.Warn("[ADMIN] 状态转换失败 running→stopped",
-				zap.String("taskID", taskID), zap.Error(err))
-		}
-	} else if needTransition == TaskStopping {
-		if _, err := s.tasks.Transition(taskID, TaskStopping, TaskStopped); err != nil {
-			stresslog.Warn("[ADMIN] 状态转换失败 stopping→stopped",
-				zap.String("taskID", taskID), zap.Error(err))
-		}
-	}
-
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func (s *AdminServer) handleAgentPendingTask(w http.ResponseWriter, r *http.Request) {
-	agentID := r.PathValue("id")
-	node, ok := s.agents.Get(agentID)
-	if !ok {
-		writeError(w, ErrAgentNotFound)
-		return
-	}
-	currentTaskID := node.CurrentTaskID
-	s.agents.Touch(agentID, "")
-	if currentTaskID == "" {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{
-		"taskId": currentTaskID,
-	})
 }
 
 // ── 前端-任务 ──
@@ -920,144 +621,33 @@ func (s *AdminServer) handleStartTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *AdminServer) startTaskBackground(taskID, taskName string, assignments []Assignment) {
-	// 读取任务配置填充 TaskAssignment
 	task, ok := s.tasks.Get(taskID)
 	if !ok || task == nil {
-		// 任务在异步路径里已被删除 / 不存在：把任务标记为 failed 并清理 sampler
 		stresslog.Error("[ADMIN] 任务不存在，取消下发", zap.String("taskID", taskID))
-		if _, err := s.tasks.Transition(taskID, TaskStarting, TaskFailed); err != nil {
-			stresslog.Warn("[ADMIN] 状态转换失败 starting→failed",
-				zap.String("taskID", taskID), zap.Error(err))
-		}
 		if s.sampler != nil {
 			s.sampler.Stop(taskID)
 		}
 		return
 	}
-	rc := task.Config.RobotConfig
-	taskTotalBots := task.TotalBots
-	concurrencyByAgent := splitGlobalValues(rc.Concurrency, taskTotalBots, assignments)
-
-	// 共享状态运行时下发：所有 Agent 用同一 runId（= taskID），落在同一命名空间。
-	var sharedAssign *SharedRuntimeAssignment
-	if task.SharedUsed && s.cfg.RedisEnabled() {
-		runID := task.SharedRunID
-		if runID == "" {
-			runID = taskID
-		}
-		sharedAssign = &SharedRuntimeAssignment{
-			RunID: runID,
-			Redis: *s.cfg.Redis,
+	ctx, cancel := commandContext()
+	succeeded, err := s.scheduleStartCommands(ctx, task, assignments)
+	cancel()
+	if err == nil {
+		_ = s.tasks.Update(taskID, func(current *Task) { current.SucceededAgents = succeeded })
+		_, err = s.tasks.Transition(taskID, TaskStarting, TaskRunning)
+		if err == nil {
+			s.finishTaskIfFullyReported(taskID)
 		}
 	}
-
-	// 构建配置文件清单
-	configFiles := buildConfigFiles(&task.Config)
-
-	// 并行下发到所有 Agent：避免单一慢节点（30s 超时 * 3 次重试 ≈ 90s）阻塞其他节点的启动，
-	// 也避免"只有第一个 Agent 收到任务"的视感。每个节点独立成功/失败收敛后再做状态转换。
-	type pushResult struct {
-		agentID string
-		err     error
-		bots    int
-	}
-	resultCh := make(chan pushResult, len(assignments))
-	taskStartNumber := assignments[0].StartNumber
-	for _, a := range assignments {
-		agent, ok := s.agents.Get(a.AgentID)
-		if !ok {
-			resultCh <- pushResult{agentID: a.AgentID, err: fmt.Errorf("agent not found")}
-			continue
+	if err != nil {
+		stresslog.Error("[ADMIN] 创建 gRPC 启动命令失败", zap.String("taskID", taskID), zap.String("taskName", taskName), zap.Error(err))
+		_, _ = s.tasks.Transition(taskID, TaskStarting, TaskFailed)
+		if s.sampler != nil {
+			s.sampler.Stop(taskID)
 		}
-		assignedConcurrency := concurrencyByAgent[a.AgentID]
-		cfg := TaskAssignment{
-			TaskID:            taskID,
-			TaskName:          taskName,
-			StartNumber:       taskStartNumber,
-			StartIndex:        assignmentStartIndex(a, taskStartNumber),
-			TotalBots:         a.TotalBots,
-			AccountPrefix:     stringOr(rc.AccountPrefix, "bot_", "robotConfig.accountPrefix"),
-			MainService:       rc.MainService,
-			StateExtra:        rc.StateExtra,
-			ConcurrentNum:     assignedConcurrency,
-			HeartbeatInterval: secsOr(rc.HeartbeatSec, 5, "robotConfig.heartbeatSec"),
-			TCPTimeout:        secsOr(rc.TimeoutSec, 60, "robotConfig.timeoutSec"),
-			HTTPTimeout:       secsOr(rc.HTTPTimeoutSec, 10, "robotConfig.httpTimeoutSec"),
-			ApdexT:            intOr(rc.ApdexT, 100, "robotConfig.apdexT"),
-			LogLevel:          rc.LogLevel,
-			ConfigURL:         fmt.Sprintf("%s/sbot/tasks/%s/config", s.cfg.PublicURL, taskID),
-			ConfigFiles:       configFiles,
-			RampUp:            scaleRampUp(rc.RampUp, taskTotalBots, a.TotalBots, assignments, a.AgentID),
-			Shared:            sharedAssign,
-		}
-		addr := agent.Address
-		agentID := a.AgentID
-		bots := a.TotalBots
-		utils.GetWorkPool().Go(func() {
-			err := s.dispatcher.AssignTask(addr, cfg)
-			resultCh <- pushResult{agentID: agentID, err: err, bots: bots}
-		})
+		return
 	}
-
-	var failed []string
-	var succeeded []string
-	for range assignments {
-		r := <-resultCh
-		if r.err != nil {
-			failed = append(failed, r.agentID)
-			stresslog.Error("推送任务失败",
-				zap.String("agentID", r.agentID),
-				zap.Error(r.err))
-			continue
-		}
-		succeeded = append(succeeded, r.agentID)
-		s.agents.Heartbeat(r.agentID, HeartbeatRequest{
-			AgentID:       r.agentID,
-			Status:        "busy",
-			CurrentTaskID: taskID,
-			CurrentBots:   r.bots,
-		})
-	}
-
-	if len(failed) > 0 {
-		stresslog.Warn("部分 Agent 推送任务失败",
-			zap.String("taskID", taskID),
-			zap.Strings("failedAgents", failed),
-			zap.Strings("succeededAgents", succeeded))
-
-		if len(succeeded) == 0 {
-			// 全部失败 → 标记任务 failed
-			if _, err := s.tasks.Transition(taskID, TaskStarting, TaskFailed); err != nil {
-				stresslog.Warn("[ADMIN] 状态转换失败 starting→failed",
-					zap.String("taskID", taskID), zap.Error(err))
-			}
-			if s.sampler != nil {
-				s.sampler.Stop(taskID)
-			}
-			stresslog.Error("任务启动失败，无 Agent 成功",
-				zap.String("taskID", taskID),
-				zap.Strings("failedAgents", failed))
-			return
-		}
-		// 部分成功 → 继续执行
-		stresslog.Warn("任务将以部分 Agent 继续执行",
-			zap.String("taskID", taskID),
-			zap.Int("expectedAgents", len(assignments)),
-			zap.Int("actualAgents", len(succeeded)))
-	}
-
-	// 记录实际成功的 Agent 列表，用于完成判定
-	s.tasks.Update(taskID, func(t *Task) {
-		t.SucceededAgents = succeeded
-	})
-
-	if _, err := s.tasks.Transition(taskID, TaskStarting, TaskRunning); err != nil {
-		stresslog.Warn("[ADMIN] 状态转换失败 starting→running",
-			zap.String("taskID", taskID), zap.Error(err))
-	}
-	stresslog.Info("任务启动成功",
-		zap.String("taskID", taskID),
-		zap.Int("agents", len(succeeded)))
+	stresslog.Info("[ADMIN] gRPC 启动命令已持久化并调度", zap.String("taskID", taskID), zap.Int("agents", len(succeeded)))
 }
 
 func (s *AdminServer) handleStopTask(w http.ResponseWriter, r *http.Request) {
@@ -1083,90 +673,34 @@ func (s *AdminServer) handleStopTask(w http.ResponseWriter, r *http.Request) {
 		zap.String("remoteAddr", r.RemoteAddr),
 		zap.String("state", string(task.State)))
 
-	// 向实际运行任务的节点发送 stop。
-	// 并行下发：单个 Agent stop RPC 可能因为节点 IO 阻塞而耗时（HTTP 客户端超时 ~30s），
-	// 串行会让"第二个节点"额外等待第一个节点的超时，给用户造成"只对一个 Agent 生效"的错觉。
-	targets := task.SucceededAgents
-	if len(targets) == 0 {
-		targets = make([]string, 0, len(task.Assignments))
-		for _, a := range task.Assignments {
-			targets = append(targets, a.AgentID)
-		}
-	}
-
-	var wg sync.WaitGroup
-	var sentCount atomic.Int64
-	var failedCount atomic.Int64
-	var skippedCount atomic.Int64
-	for _, agentID := range targets {
-		agent, ok := s.agents.Get(agentID)
-		if !ok {
-			skippedCount.Add(1)
-			stresslog.Warn("停止跳过：节点未找到",
-				zap.String("taskID", id),
-				zap.String("agentID", agentID))
-			continue
-		}
-		if agent.Status == AgentOffline {
-			skippedCount.Add(1)
-			stresslog.Warn("停止跳过：节点离线",
-				zap.String("taskID", id),
-				zap.String("agentID", agentID),
-				zap.String("addr", agent.Address))
-			continue
-		}
-		addr := agent.Address
-		wg.Add(1)
-		utils.GetWorkPool().Go(func() {
-			defer wg.Done()
-			if err := s.dispatcher.Stop(addr, id); err != nil {
-				failedCount.Add(1)
-				stresslog.Warn("停止命令发送失败",
-					zap.String("taskID", id),
-					zap.String("agentID", agentID),
-					zap.String("addr", addr),
-					zap.Error(err))
-			} else {
-				sentCount.Add(1)
-				stresslog.Info("停止命令已发送",
-					zap.String("taskID", id),
-					zap.String("agentID", agentID),
-					zap.String("addr", addr))
+	{
+		grpcTargets := append([]string(nil), task.SucceededAgents...)
+		if len(grpcTargets) == 0 {
+			for _, assignment := range task.Assignments {
+				grpcTargets = append(grpcTargets, assignment.AgentID)
 			}
-		})
-	}
-	wg.Wait()
-	stresslog.Info("[ADMIN] 停止命令下发完成",
-		zap.String("taskID", id),
-		zap.Int("targetCount", len(targets)),
-		zap.Int64("sentCount", sentCount.Load()),
-		zap.Int64("failedCount", failedCount.Load()),
-		zap.Int64("skippedCount", skippedCount.Load()))
-
-	// 立刻为已离线且未上报的节点合成 stopped report（Admin 已知它们不可能再上报了）
-	allReported := s.synthesizeOfflineReports(id)
-
-	// 如果全部节点都已有 report（例如所有节点早已离线），直接转 stopped
-	if allReported {
-		if _, err := s.tasks.Transition(id, TaskStopping, TaskStopped); err != nil {
-			stresslog.Warn("[ADMIN] 状态转换失败 stopping→stopped",
-				zap.String("taskID", id), zap.Error(err))
 		}
-	} else {
-		// 安全网：stopWaitTimeout（60s）后如果还在 stopping（在线节点未响应），强制完成
-		s.startStopTimeout(id)
+		ctx, cancel := commandContext()
+		err := s.scheduleStopCommands(ctx, id, grpcTargets, "用户停止任务")
+		cancel()
+		if err != nil {
+			_, _ = s.tasks.Transition(id, TaskStopping, TaskRunning)
+			writeError(w, ErrInternal.WithMessage("创建停止命令失败: "+err.Error()))
+			return
+		}
+		allReported := s.synthesizeOfflineReports(id)
+		if allReported {
+			_, _ = s.tasks.Transition(id, TaskStopping, TaskStopped)
+		} else {
+			s.startStopTimeout(id)
+		}
+		updated, _ := s.tasks.Get(id)
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"id": id, "name": updated.Name, "state": updated.State, "totalBots": updated.TotalBots,
+			"agentCount": len(updated.Assignments), "activeAgentCount": len(updated.SucceededAgents), "createdAt": updated.CreatedAt,
+		})
+		return
 	}
-
-	updated, _ := s.tasks.Get(id) // 同上
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"id":               id,
-		"name":             updated.Name,
-		"state":            updated.State,
-		"totalBots":        updated.TotalBots,
-		"agentCount":       len(updated.Assignments),
-		"activeAgentCount": len(updated.SucceededAgents),
-		"createdAt":        updated.CreatedAt,
-	})
 }
 
 func (s *AdminServer) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
@@ -1279,9 +813,12 @@ func (s *AdminServer) handleShutdownAgent(w http.ResponseWriter, r *http.Request
 		writeError(w, ErrAgentOffline.WithMessage("agent is offline, cannot send shutdown"))
 		return
 	}
-	if err := s.dispatcher.Shutdown(agent.Address); err != nil {
+	ctx, cancel := commandContext()
+	err := s.scheduleShutdownCommands(ctx, []string{id}, "管理员关闭节点")
+	cancel()
+	if err != nil {
 		stresslog.Warn("关闭命令发送失败", zap.String("agentID", id), zap.Error(err))
-		writeError(w, ErrAgentOffline.WithMessage("agent unreachable: "+err.Error()))
+		writeError(w, ErrInternal.WithMessage("创建关闭命令失败: "+err.Error()))
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "shutdown_sent"})
@@ -1296,12 +833,15 @@ func (s *AdminServer) handleShutdownAllAgents(w http.ResponseWriter, _ *http.Req
 		if a.Status == AgentOffline {
 			continue
 		}
-		if err := s.dispatcher.Shutdown(a.Address); err != nil {
-			failed = append(failed, a.ID)
-			stresslog.Warn("关闭命令发送失败", zap.String("agentID", a.ID), zap.Error(err))
-		} else {
-			succeeded = append(succeeded, a.ID)
-		}
+		succeeded = append(succeeded, a.ID)
+	}
+	ctx, cancel := commandContext()
+	err := s.scheduleShutdownCommands(ctx, succeeded, "管理员批量关闭节点")
+	cancel()
+	if err != nil {
+		failed = append(failed, succeeded...)
+		succeeded = succeeded[:0]
+		stresslog.Warn("批量关闭命令创建失败", zap.Error(err))
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"status":    "shutdown_sent",
@@ -1490,220 +1030,6 @@ func parseTagsFromQuery(r *http.Request, key string) []string {
 	return tags
 }
 
-// ── 日志 ──
-
-func (s *AdminServer) handleGetAdminLogs(w http.ResponseWriter, r *http.Request) {
-	rb := logview.GetRingBuffer()
-	if rb == nil {
-		writeJSON(w, http.StatusOK, logview.QueryResult{})
-		return
-	}
-	params := parseLogQueryParams(r)
-	result := rb.Query(params)
-	writeJSON(w, http.StatusOK, result)
-}
-
-func (s *AdminServer) handleGetAgentLogs(w http.ResponseWriter, r *http.Request) {
-	agentID := r.PathValue("id")
-	agent, ok := s.agents.Get(agentID)
-	if !ok {
-		writeError(w, ErrAgentNotFound)
-		return
-	}
-	if agent.Status == AgentOffline {
-		writeError(w, ErrAgentOffline.WithMessage("agent is offline, logs unavailable"))
-		return
-	}
-
-	endpoint, err := agentEndpoint(agent.Address, "/agent/v1/logs")
-	if err != nil {
-		writeError(w, ErrInvalidArgument.WithMessage("节点地址无效: "+err.Error()))
-		return
-	}
-	endpointURL, err := url.Parse(endpoint)
-	if err != nil {
-		writeError(w, ErrInvalidArgument.WithMessage("节点日志地址无效"))
-		return
-	}
-	endpointURL.RawQuery = r.URL.RawQuery
-	proxyReq, err := http.NewRequestWithContext(r.Context(), "GET", endpointURL.String(), nil)
-	if err != nil {
-		writeError(w, ErrInvalidArgument.WithMessage("invalid proxy request"))
-		return
-	}
-
-	resp, err := s.logsProxyClient.Do(proxyReq)
-	if err != nil {
-		writeError(w, ErrAgentOffline.WithMessage("agent unreachable: "+err.Error()))
-		return
-	}
-	defer resp.Body.Close()
-
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(resp.StatusCode)
-	if _, err := io.Copy(w, resp.Body); err != nil {
-		io.Copy(io.Discard, resp.Body) // 确保响应体被完全消耗，允许连接复用
-	}
-}
-
-// LogFileInfo 日志文件信息。
-type LogFileInfo struct {
-	Name    string `json:"name"`
-	Size    int64  `json:"size"`
-	ModTime string `json:"modTime"`
-}
-
-func (s *AdminServer) handleListAdminLogFiles(w http.ResponseWriter, r *http.Request) {
-	files, err := listLogFiles(stresslog.GetLogFilePath())
-	if err != nil {
-		writeError(w, ErrInternal.WithMessage(err.Error()))
-		return
-	}
-	writeJSON(w, http.StatusOK, files)
-}
-
-func (s *AdminServer) handleDownloadAdminLogFile(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	if strings.Contains(name, "/") || strings.Contains(name, "\\") || name == ".." {
-		writeError(w, ErrInvalidArgument.WithMessage("invalid file name"))
-		return
-	}
-	dir := filepath.Dir(stresslog.GetLogFilePath())
-	serveLogFile(w, r, dir, name)
-}
-
-func (s *AdminServer) handleListAgentLogFiles(w http.ResponseWriter, r *http.Request) {
-	agentID := r.PathValue("id")
-	agent, ok := s.agents.Get(agentID)
-	if !ok {
-		writeError(w, ErrAgentNotFound)
-		return
-	}
-	if agent.Status == AgentOffline {
-		writeError(w, ErrAgentOffline)
-		return
-	}
-
-	endpoint, err := agentEndpoint(agent.Address, "/agent/v1/logs/files")
-	if err != nil {
-		writeError(w, ErrInvalidArgument.WithMessage("节点地址无效: "+err.Error()))
-		return
-	}
-	proxyReq, err := http.NewRequestWithContext(r.Context(), "GET", endpoint, nil)
-	if err != nil {
-		writeError(w, ErrInvalidArgument.WithMessage("invalid proxy request"))
-		return
-	}
-
-	resp, err := s.logsProxyClient.Do(proxyReq)
-	if err != nil {
-		writeError(w, ErrAgentOffline.WithMessage("agent unreachable: "+err.Error()))
-		return
-	}
-	defer resp.Body.Close()
-
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(resp.StatusCode)
-	if _, err := io.Copy(w, resp.Body); err != nil {
-		io.Copy(io.Discard, resp.Body) // 确保响应体被完全消耗，允许连接复用
-	}
-}
-
-func (s *AdminServer) handleDownloadAgentLogFile(w http.ResponseWriter, r *http.Request) {
-	agentID := r.PathValue("id")
-	agent, ok := s.agents.Get(agentID)
-	if !ok {
-		writeError(w, ErrAgentNotFound)
-		return
-	}
-	if agent.Status == AgentOffline {
-		writeError(w, ErrAgentOffline)
-		return
-	}
-
-	name := r.PathValue("name")
-	if strings.Contains(name, "/") || strings.Contains(name, "\\") || name == ".." {
-		writeError(w, ErrInvalidArgument.WithMessage("invalid file name"))
-		return
-	}
-
-	endpoint, err := agentEndpoint(agent.Address, "/agent/v1/logs/files", name)
-	if err != nil {
-		writeError(w, ErrInvalidArgument.WithMessage("节点地址无效: "+err.Error()))
-		return
-	}
-	proxyReq, err := http.NewRequestWithContext(r.Context(), "GET", endpoint, nil)
-	if err != nil {
-		writeError(w, ErrInvalidArgument.WithMessage("invalid proxy request"))
-		return
-	}
-
-	resp, err := s.logsDownloadClient.Do(proxyReq)
-	if err != nil {
-		writeError(w, ErrAgentOffline.WithMessage("agent unreachable: "+err.Error()))
-		return
-	}
-	defer resp.Body.Close()
-
-	for k, vv := range resp.Header {
-		for _, v := range vv {
-			w.Header().Add(k, v)
-		}
-	}
-	w.WriteHeader(resp.StatusCode)
-	if _, err := io.Copy(w, resp.Body); err != nil {
-		io.Copy(io.Discard, resp.Body) // 确保响应体被完全消耗，允许连接复用
-	}
-}
-
-func listLogFiles(logPath string) ([]LogFileInfo, error) {
-	dir := filepath.Dir(logPath)
-	base := filepath.Base(logPath)
-	prefix := strings.TrimSuffix(base, filepath.Ext(base))
-
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("read log dir: %w", err)
-	}
-
-	var files []LogFileInfo
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		files = append(files, LogFileInfo{
-			Name:    e.Name(),
-			Size:    info.Size(),
-			ModTime: info.ModTime().Format("2006-01-02 15:04:05"),
-		})
-	}
-	return files, nil
-}
-
-func serveLogFile(w http.ResponseWriter, r *http.Request, dir, name string) {
-	path := filepath.Join(dir, name)
-	f, err := os.Open(path)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "log file not found"})
-		return
-	}
-	defer f.Close()
-
-	stat, err := f.Stat()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stat failed"})
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, name))
-	http.ServeContent(w, r, name, stat.ModTime(), f)
-}
-
 // writeBaselineFiles 将上传的 flow/proto/scripts/adapter 写入磁盘基线目录，
 // 使前端下次同步时 IDB 与基线一致，不再误报冲突。
 func (s *AdminServer) writeBaselineFiles(cfg *TaskConfig, flowData []byte) {
@@ -1738,28 +1064,6 @@ func (s *AdminServer) writeBaselineFiles(cfg *TaskConfig, flowData []byte) {
 				zap.Error(err))
 		}
 	}
-}
-
-// buildConfigFiles 构建任务下发的配置文件清单（供分发逻辑与测试共用同一份规则）。
-// adapter 下分发各 *_codec.json + errors.json。
-func buildConfigFiles(cfg *TaskConfig) []string {
-	var files []string
-	if cfg.FlowJSON != nil {
-		files = append(files, "flow/flow.json")
-	}
-	for name := range cfg.ProtoFiles {
-		files = append(files, "proto/"+name)
-	}
-	for name := range cfg.LuaScripts {
-		files = append(files, "scripts/"+name)
-	}
-	for name := range cfg.Codecs {
-		files = append(files, "adapter/"+name)
-	}
-	if len(cfg.ErrorMap) > 0 {
-		files = append(files, "adapter/errors.json")
-	}
-	return files
 }
 
 // safeWriteFile 将 data 写入 dir/name，自动创建目录，防止路径穿越。
@@ -1803,7 +1107,7 @@ func (s *AdminServer) handleBaselineScriptFile(w http.ResponseWriter, r *http.Re
 }
 
 // handleBaselineCodecIndex 列出 adapter 基线目录下的 codec/errors 文件名（T3 前端基线同步枚举用）。
-// 目录契约：conf/adapter 下只有 *_codec.json 与 errors.json（写入侧 buildConfigFiles 已拒绝其它）。
+// 目录契约：conf/adapter 下只有 *_codec.json 与 errors.json（上传写入侧已拒绝其它）。
 // handler 只按 .json 后缀如实列目录，不二次过滤文件名（前端按 errors.json/其余分类）。
 func (s *AdminServer) handleBaselineCodecIndex(w http.ResponseWriter, r *http.Request) {
 	files, err := listDirFiles("conf/adapter", ".json")

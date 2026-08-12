@@ -217,10 +217,6 @@ type TaskAssignment struct {
 	ApdexT int `json:"apdexT"`
 	// LogLevel 临时日志等级。
 	LogLevel string `json:"logLevel,omitempty"`
-	// ConfigURL 配置文件下载基础 URL。
-	ConfigURL string `json:"configUrl"`
-	// ConfigFiles 需要下载的配置文件相对路径列表。
-	ConfigFiles []string `json:"configFiles"`
 	// RampUp 渐进式加压配置（已按比例缩放）。
 	RampUp *RampUpConfig `json:"rampUp,omitempty"`
 	// Shared 共享状态运行时下发（含 Redis 连接与任务 runId）。
@@ -231,8 +227,7 @@ type TaskAssignment struct {
 // SharedRuntimeAssignment Admin → Agent 下发的共享状态运行时配置。
 // RunID 由 Admin 统一生成（= 任务 ID），保证同一任务所有 Agent 落在同一命名空间。
 //
-// 注意：Redis.Password 会随该结构通过内网 HTTP 明文下发给 Agent，部署时应保证 Admin↔Agent
-// 链路处于可信内网（与现有 MySQL 密码下发约束一致）。
+// Redis.Password 随内网 gRPC 控制面下发；部署必须保证控制端口只在受控私网可达。
 type SharedRuntimeAssignment struct {
 	RunID string                  `json:"runId"`
 	Redis sharedstate.RedisConfig `json:"redis"`
@@ -326,14 +321,6 @@ type StressReport struct {
 	Snapshot *monitor.CollectorSnapshot `json:"snapshot"`
 }
 
-// SystemReport Agent 上报的系统资源指标。
-type SystemReport struct {
-	// AgentID Agent 唯一标识。
-	AgentID string `json:"agentId"`
-	// Snapshot 系统指标快照。
-	Snapshot SystemSnapshot `json:"snapshot"`
-}
-
 // TaskCompletionReport Agent 任务完成报告。
 type TaskCompletionReport struct {
 	// AgentID Agent 唯一标识。
@@ -359,41 +346,7 @@ type TaskCompletionReport struct {
 	CleanupStatus *robot.CleanupStatus `json:"cleanupStatus,omitempty"`
 }
 
-// ── 注册 / 心跳 ──────────────────────────────────────
-
-// RegisterRequest Agent 注册请求。
-type RegisterRequest struct {
-	// AgentID Agent 唯一标识（客户端生成）。
-	AgentID string `json:"agentId"`
-	// Name 显示名称。
-	Name string `json:"name"`
-	// Address HTTP 地址。
-	Address string `json:"address"`
-	// AppVersion 应用版本号。
-	AppVersion string `json:"appVersion"`
-	// MaxBots 最大可承载 bot 数。
-	MaxBots int `json:"maxBots"`
-	// StressInterval 压测指标上报间隔。
-	StressInterval string `json:"stressInterval"`
-	// SystemInterval 系统指标上报间隔。
-	SystemInterval string `json:"systemInterval"`
-	// StaticInfo 静态硬件信息。
-	StaticInfo StaticInfo `json:"staticInfo"`
-}
-
-// RegisterResponse Agent 注册响应。
-type RegisterResponse struct {
-	// AgentID 回传的 Agent ID。
-	AgentID string `json:"agentId"`
-	// HeartbeatTTL 心跳超时阈值。
-	HeartbeatTTL string `json:"heartbeatTtl"`
-	// StressEndpoint 压测指标上报路径。
-	StressEndpoint string `json:"stressEndpoint"`
-	// SystemEndpoint 系统指标上报路径。
-	SystemEndpoint string `json:"systemEndpoint"`
-}
-
-// HeartbeatRequest Agent 心跳请求。
+// HeartbeatRequest 是 gRPC Heartbeat 转换后的内部模型。
 type HeartbeatRequest struct {
 	// AgentID Agent 唯一标识。
 	AgentID string `json:"agentId"`

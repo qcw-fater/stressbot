@@ -1,39 +1,74 @@
 package log
 
 import (
+	"errors"
 	"io"
 	"os"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-// 只能输出结构化日志，但是性能要高于 SugaredLogger
-var logger *zap.Logger
+const (
+	fileBufferSize  = 256 * 1024
+	fileFlushPeriod = time.Second
+)
 
-// 可以输出 结构化日志、非结构化日志 性能差于 zap.Logger
+// logger 负责高性能结构化日志；sugarLogger 兼容少量格式化调用。
+var logger *zap.Logger
 var sugarLogger *zap.SugaredLogger
 
 var loglevel = zap.NewAtomicLevelAt(zapcore.InfoLevel)
+var activeFileSink atomic.Pointer[fileLogSink]
 
-var defaultConf *Config
-
-// logFilePath 记录 InitLog 传入的日志文件路径，供日志下载 endpoint 使用。
-var logFilePath string
-
-// Config 日志配置的结构体
+// Config 是日志配置。
 type Config struct {
-	Path         string `json:"path" yaml:"path"`                 // 日志文件路径
-	PrintConsole bool   `json:"printConsole" yaml:"printConsole"` // 是否控制台输出
-	LogLevel     string `json:"level" yaml:"logLevel"`            // 日志等级[debug, info, warn, error]
-	MaxSize      int    `json:"maxSizeMB" yaml:"maxSizeMB"`       // 日志文件大小，超过则切割，单位M
-	MaxBackups   int    `json:"maxBackups" yaml:"maxBackups"`     // 日志文件最大保留个数
-	MaxAge       int    `json:"maxAge" yaml:"maxAge"`             // 日志文件最大保存天数
-	LocalTime    bool   `json:"localTime" yaml:"localTime"`       // 是否使用服务器本地时间
-	Compress     bool   `json:"compress" yaml:"compress"`         // 日志是否压缩
-	WeChatToken  string `json:"weChatToken" yaml:"weChatToken"`   // 企微Hook密钥
+	Path         string `json:"path" yaml:"path"`
+	PrintConsole bool   `json:"printConsole" yaml:"printConsole"`
+	LogLevel     string `json:"level" yaml:"logLevel"`
+	MaxSize      int    `json:"maxSizeMB" yaml:"maxSizeMB"`
+	MaxBackups   int    `json:"maxBackups" yaml:"maxBackups"`
+	MaxAge       int    `json:"maxAge" yaml:"maxAge"`
+	LocalTime    bool   `json:"localTime" yaml:"localTime"`
+	Compress     bool   `json:"compress" yaml:"compress"`
+	WeChatToken  string `json:"weChatToken" yaml:"weChatToken"`
 }
+
+type fileLogSink struct {
+	buffered *zapcore.BufferedWriteSyncer
+	roller   *lumberjack.Logger
+	once     sync.Once
+	err      error
+}
+
+func (s *fileLogSink) Sync() error {
+	if s == nil {
+		return nil
+	}
+	return s.buffered.Sync()
+}
+
+func (s *fileLogSink) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.once.Do(func() {
+		s.err = errors.Join(s.buffered.Stop(), s.roller.Close())
+	})
+	return s.err
+}
+
+// noSyncWriter 避免 logger.Sync 对 stdout 调用 fsync。在 Windows 控制台和管道中，
+// fsync 经常返回无意义的 invalid handle；文件 sink 仍由 BufferedWriteSyncer 正常刷新。
+type noSyncWriter struct {
+	io.Writer
+}
+
+func (w noSyncWriter) Sync() error { return nil }
 
 func defaultConfig() *Config {
 	return &Config{
@@ -48,86 +83,102 @@ func defaultConfig() *Config {
 	}
 }
 
-// 修剪日志路径，保留最后的文件名和行号
-func trimmedPath(str string) string {
-	short := str
-	for i := len(str) - 1; i > 0; i-- {
-		if str[i] == '/' {
-			short = str[i+1:]
+func normalizedConfig(conf *Config, buildLogLevel string) Config {
+	effective := *defaultConfig()
+	if conf != nil {
+		effective = *conf
+		if effective.LogLevel == "" {
+			effective.LogLevel = "debug"
+		}
+		if effective.MaxSize == 0 {
+			effective.MaxSize = 500
+		}
+		if effective.MaxBackups == 0 {
+			effective.MaxBackups = 1
+		}
+		if effective.MaxAge == 0 {
+			effective.MaxAge = 7
+		}
+	}
+	if buildLogLevel != "" {
+		effective.LogLevel = buildLogLevel
+	}
+	return effective
+}
+
+func trimmedPath(path string) string {
+	short := path
+	for i := len(path) - 1; i > 0; i-- {
+		if path[i] == '/' || path[i] == '\\' {
+			short = path[i+1:]
 			break
 		}
 	}
 	return short
 }
 
-// 重写zap.CallerEncoder方法，将文件路径转换为短路径
 func callerEncoder(caller zapcore.EntryCaller, enc zapcore.PrimitiveArrayEncoder) {
 	enc.AppendString(trimmedPath(caller.String()))
 }
 
-// InitLog 初始化日志 logger
-func InitLog(logPath, serviceName string, conf *Config, buildLogLevel string) {
-	logFilePath = logPath
-	// 填充零值默认
-	if conf == nil {
-		conf = defaultConfig()
-	} else {
-		def := defaultConfig()
-		if conf.LogLevel == "" {
-			conf.LogLevel = def.LogLevel
-		}
-		if conf.MaxSize == 0 {
-			conf.MaxSize = def.MaxSize
-		}
-		if conf.MaxBackups == 0 {
-			conf.MaxBackups = def.MaxBackups
-		}
-		if conf.MaxAge == 0 {
-			conf.MaxAge = def.MaxAge
-		}
+func utcRFC3339NanoTimeEncoder(value time.Time, enc zapcore.PrimitiveArrayEncoder) {
+	enc.AppendString(value.UTC().Format(time.RFC3339Nano))
+}
+
+func fileEncoderConfig() zapcore.EncoderConfig {
+	return zapcore.EncoderConfig{
+		MessageKey:     "message",
+		LevelKey:       "level",
+		TimeKey:        "timestamp",
+		CallerKey:      "caller",
+		NameKey:        "logger",
+		StacktraceKey:  "stacktrace",
+		LineEnding:     zapcore.DefaultLineEnding,
+		EncodeLevel:    zapcore.LowercaseLevelEncoder,
+		EncodeTime:     utcRFC3339NanoTimeEncoder,
+		EncodeDuration: zapcore.SecondsDurationEncoder,
+		EncodeCaller:   callerEncoder,
 	}
-	defaultConf = conf
-	// 装配企业微信告警 Hook 密钥：DPanic 及以上级别经 zap.Hooks 推送。
-	// 未配置（空串）时 postQYWXMsg 直接返回，等价于关闭告警。
-	SetWechatToken(conf.WeChatToken)
-	if buildLogLevel != "" {
-		conf.LogLevel = buildLogLevel
+}
+
+func consoleEncoderConfig() zapcore.EncoderConfig {
+	config := fileEncoderConfig()
+	config.EncodeLevel = zapcore.LowercaseColorLevelEncoder
+	config.EncodeTime = zapcore.TimeEncoderOfLayout("2006/01/02 15:04:05.000000Z0700")
+	return config
+}
+
+// InitLog 初始化日志并返回幂等关闭函数。关闭会刷新缓冲并关闭轮转文件。
+// 调用方应在完成初始化后立即 defer 返回的函数。
+func InitLog(logPath, serviceName string, conf *Config, buildLogLevel string) func() error {
+	effective := normalizedConfig(conf, buildLogLevel)
+	SetWechatToken(effective.WeChatToken)
+	loglevel = zap.NewAtomicLevelAt(StrToLevel(effective.LogLevel))
+
+	roller := &lumberjack.Logger{
+		Filename:   logPath,
+		MaxSize:    effective.MaxSize,
+		MaxBackups: effective.MaxBackups,
+		MaxAge:     effective.MaxAge,
+		LocalTime:  effective.LocalTime,
+		Compress:   effective.Compress,
 	}
-	// 初始化日志等级
-	lv := StrToLevel(conf.LogLevel)
-	// 初始化zap配置
-	config := zapcore.EncoderConfig{
-		MessageKey:     "M",                                                            // 结构化（json）输出：msg的key
-		LevelKey:       "L",                                                            // 结构化（json）输出：日志级别的key（INFO，WARN，ERROR等）
-		TimeKey:        "T",                                                            // 结构化（json）输出：时间的key
-		CallerKey:      "C",                                                            // 结构化（json）输出：打印日志的文件对应的Key
-		NameKey:        "N",                                                            // 结构化（json）输出: 日志名
-		StacktraceKey:  "S",                                                            // 结构化（json）输出: 堆栈
-		LineEnding:     zapcore.DefaultLineEnding,                                      // 换行符
-		EncodeLevel:    zapcore.LowercaseLevelEncoder,                                  // 将日志级别转换成大写（INFO，WARN，ERROR等）
-		EncodeTime:     zapcore.TimeEncoderOfLayout("2006/01/02 15:04:05.000000Z0700"), // 日志时间的输出样式
-		EncodeDuration: zapcore.SecondsDurationEncoder,                                 // 消耗时间的输出样式
-		EncodeCaller:   zapcore.ShortCallerEncoder,                                     // 采用短文件路径编码输出（test/main.go:14 ）
+	buffered := &zapcore.BufferedWriteSyncer{
+		WS:            zapcore.AddSync(roller),
+		Size:          fileBufferSize,
+		FlushInterval: fileFlushPeriod,
+	}
+	sink := &fileLogSink{buffered: buffered, roller: roller}
+
+	cores := []zapcore.Core{
+		zapcore.NewCore(zapcore.NewJSONEncoder(fileEncoderConfig()), buffered, loglevel),
+	}
+	if effective.PrintConsole {
+		console := zapcore.AddSync(noSyncWriter{Writer: os.Stdout})
+		cores = append(cores, zapcore.NewCore(zapcore.NewConsoleEncoder(consoleEncoderConfig()), console, loglevel))
 	}
 
-	loglevel = zap.NewAtomicLevelAt(lv)
-
-	// 获取io.Writer的实现
-	loggerWriter := GetLoggerWriter(logPath)
-	// 实现多个输出
-	var cores []zapcore.Core
-	// 将info及以下写入logPath，NewConsoleEncoder 是非结构化输出
-	cores = append(cores, zapcore.NewCore(zapcore.NewJSONEncoder(config), zapcore.AddSync(loggerWriter), loglevel))
-	if defaultConf.PrintConsole {
-		// 同时将日志输出到控制台，NewJSONEncoder 是结构化输出
-		config.EncodeCaller = callerEncoder
-		config.EncodeLevel = zapcore.LowercaseColorLevelEncoder
-		c := zapcore.NewCore(zapcore.NewConsoleEncoder(config), zapcore.NewMultiWriteSyncer(zapcore.AddSync(os.Stdout)), loglevel)
-		cores = append(cores, c)
-	}
-	mulCore := zapcore.NewTee(cores...)
-	// 设置初始化字段
-	var options = []zap.Option{
+	options := []zap.Option{
 		zap.AddCaller(),
 		zap.AddStacktrace(zap.DPanicLevel),
 		zap.AddCallerSkip(1),
@@ -137,165 +188,87 @@ func InitLog(logPath, serviceName string, conf *Config, buildLogLevel string) {
 			}
 			return nil
 		}),
-		zap.Fields(zap.String("SR", serviceName)),
+		zap.Fields(zap.String("service", serviceName)),
 	}
-	// info := strings.Split(serviceName, "_")
-	// if len(info) > 0 {
-	// 	options = append(options, zap.Fields(zap.String("ST", info[0])))
-	// }
-	logger = zap.New(mulCore, options...)
+	logger = zap.New(zapcore.NewTee(cores...), options...)
 	sugarLogger = logger.Sugar()
+
+	if previous := activeFileSink.Swap(sink); previous != nil {
+		_ = previous.Close()
+	}
+
+	return func() error {
+		activeFileSink.CompareAndSwap(sink, nil)
+		return sink.Close()
+	}
 }
 
 func GetLogger() *zap.Logger {
 	return logger
 }
 
-// GetLogFilePath 返回 InitLog 配置的日志文件路径。
-func GetLogFilePath() string {
-	return logFilePath
+// ReplaceLogger 为测试提供无输出 logger 注入能力。
+func ReplaceLogger(replacement *zap.Logger) {
+	logger = replacement
+	sugarLogger = replacement.Sugar()
 }
 
-// ReplaceLogger 替换内部 logger 实例（供 logview.AttachRingBuffer 后同步）。
-func ReplaceLogger(l *zap.Logger) {
-	logger = l
-	sugarLogger = l.Sugar()
-}
-
-func GetLoggerWriter(filename string) io.Writer {
-	var writer = &lumberjack.Logger{
-		Filename:   filename,
-		MaxSize:    defaultConf.MaxSize,    // 最大M数，超过则切割
-		MaxBackups: defaultConf.MaxBackups, // 最大文件保留数，超过就删除最老的日志文件
-		MaxAge:     defaultConf.MaxAge,     // 保存30天
-		LocalTime:  defaultConf.LocalTime,  // 本地时间
-		Compress:   defaultConf.Compress,   // 是否压缩
+func syncFile() {
+	if sink := activeFileSink.Load(); sink != nil {
+		_ = sink.Sync()
 	}
-	return writer
 }
 
-// Debug 调试日志接口
-func Debug(msg string, fields ...zap.Field) {
-	logger.Debug(msg, fields...)
-}
-
-// Info 关键信息日志接口
-func Info(msg string, fields ...zap.Field) {
-	logger.Info(msg, fields...)
-}
-
-// Warn 警告信息日志接口
-func Warn(msg string, fields ...zap.Field) {
-	logger.Warn(msg, fields...)
-}
-
-// Error 错误信息日志接口
+func Debug(msg string, fields ...zap.Field) { logger.Debug(msg, fields...) }
+func Info(msg string, fields ...zap.Field)  { logger.Info(msg, fields...) }
+func Warn(msg string, fields ...zap.Field)  { logger.Warn(msg, fields...) }
 func Error(msg string, fields ...zap.Field) {
 	logger.Error(msg, fields...)
+	syncFile()
 }
-
-// DPanic Panic日志接口, 在生产环境中触发Panic后不退出,产生堆栈信息 (该接口可设置运行环境)
 func DPanic(msg string, fields ...zap.Field) {
 	logger.DPanic(msg, fields...)
+	syncFile()
 }
+func Fatal(msg string, fields ...zap.Field) { logger.Fatal(msg, fields...) }
 
-// Fatal 触发Fatal日志，程序退出（用于配置加载）
-func Fatal(msg string, fields ...zap.Field) {
-	logger.Fatal(msg, fields...)
-}
-
-// DebugS KV形式日志接口
-func DebugS(msg string, keysAndValues ...any) {
-	sugarLogger.Debugw(msg, keysAndValues...)
-}
-
-// InfoS 关键信息日志接口
-func InfoS(msg string, keysAndValues ...any) {
-	sugarLogger.Infow(msg, keysAndValues...)
-}
-
-// WarnS 警告信息日志接口
-func WarnS(msg string, keysAndValues ...any) {
-	sugarLogger.Warnw(msg, keysAndValues...)
-}
-
-// ErrorS 错误信息日志接口
+func DebugS(msg string, keysAndValues ...any) { sugarLogger.Debugw(msg, keysAndValues...) }
+func InfoS(msg string, keysAndValues ...any)  { sugarLogger.Infow(msg, keysAndValues...) }
+func WarnS(msg string, keysAndValues ...any)  { sugarLogger.Warnw(msg, keysAndValues...) }
 func ErrorS(msg string, keysAndValues ...any) {
 	sugarLogger.Errorw(msg, keysAndValues...)
+	syncFile()
 }
-
-// DPanicS Panic日志接口, 在生产环境中触发Panic后不退出,产生堆栈信息 (该接口可设置运行环境)
 func DPanicS(msg string, keysAndValues ...any) {
 	sugarLogger.DPanicw(msg, keysAndValues...)
+	syncFile()
 }
 
-// DebugF 非结构化日志接口
-func DebugF(template string, args ...any) {
-	sugarLogger.Debugf(template, args...)
-}
-
-// InfoF 非结构化日志接口
-func InfoF(template string, args ...any) {
-	sugarLogger.Infof(template, args...)
-}
-
-// WarnF 非结构化日志接口
-func WarnF(template string, args ...any) {
-	sugarLogger.Warnf(template, args...)
-}
-
-// ErrorF 非结构化日志接口
+func DebugF(template string, args ...any) { sugarLogger.Debugf(template, args...) }
+func InfoF(template string, args ...any)  { sugarLogger.Infof(template, args...) }
+func WarnF(template string, args ...any)  { sugarLogger.Warnf(template, args...) }
 func ErrorF(template string, args ...any) {
 	sugarLogger.Errorf(template, args...)
+	syncFile()
 }
-
-// DPanicF 非结构化日志接口
 func DPanicF(template string, args ...any) {
 	sugarLogger.DPanicf(template, args...)
+	syncFile()
 }
+func FatalF(template string, args ...any) { sugarLogger.Fatalf(template, args...) }
 
-// FatalF 非结构化日志接口，触发Fatal日志后程序退出
-func FatalF(template string, args ...any) {
-	sugarLogger.Fatalf(template, args...)
-}
+func SetLogLevel(level zapcore.Level) { loglevel.SetLevel(level) }
+func GetLogLevel() zapcore.Level      { return loglevel.Level() }
 
-// SetLogLevel 设置日志等级接口
-func SetLogLevel(logLevel zapcore.Level) {
-	loglevel.SetLevel(logLevel)
-}
+func DebugEnabled() bool { return LevelEnabled(zapcore.DebugLevel) }
 
-// GetLogLevel 获取日志等级接口
-func GetLogLevel() zapcore.Level {
-	return loglevel.Level()
-}
-
-// LevelEnabler 返回全局日志等级过滤器（AtomicLevel）。
-// 供 logview.AttachRingBuffer 复用同一等级门槛，随 SetLogLevel 动态变化。
-func LevelEnabler() zapcore.LevelEnabler {
-	return loglevel
-}
-
-// DebugEnabled 快速判断 Debug 级别是否启用（atomic load，纳秒级）。
-// 用于高频热路径在构造昂贵字段前提前短路，避免无效计算：
-//
-//	if stresslog.DebugEnabled() {
-//	    stresslog.Debug("msg", zap.String(...), ...)
-//	}
-func DebugEnabled() bool {
-	return LevelEnabled(zapcore.DebugLevel)
-}
-
-// LevelEnabled 判断任意等级是否启用（atomic load，纳秒级）。
-// 与 DebugEnabled 同用途，供热路径在构造昂贵字段前提前短路——
-// 把判断交给 zap 内部意味着字段切片已经分配完才被丢弃。
-func LevelEnabled(lvl zapcore.Level) bool {
+func LevelEnabled(level zapcore.Level) bool {
 	if logger == nil {
 		return false
 	}
-	return loglevel.Enabled(lvl)
+	return loglevel.Enabled(level)
 }
 
-// StrToLevel 日志等级装换
 func StrToLevel(level string) zapcore.Level {
 	switch level {
 	case "debug":

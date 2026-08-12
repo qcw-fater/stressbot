@@ -120,13 +120,16 @@ func TestBaselineMigrationParsesAndExecutesThroughGoose(t *testing.T) {
 		mock.ExpectExec(`CREATE TABLE IF NOT EXISTS`).WillReturnResult(sqlmock.NewResult(0, 0))
 	}
 	mock.ExpectCommit()
+	mock.ExpectBegin()
+	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS agent_commands`).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
 
 	results, err := provider.Up(context.Background())
 	if err != nil {
 		t.Fatalf("Provider.Up() error = %v", err)
 	}
-	if len(results) != 1 || results[0].Source.Version != 1 {
-		t.Fatalf("Provider.Up() results = %#v, want baseline version 1", results)
+	if len(results) != 2 || results[0].Source.Version != 1 || results[1].Source.Version != 4 {
+		t.Fatalf("Provider.Up() results = %#v, want SQL migration versions [1, 4]", results)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

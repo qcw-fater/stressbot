@@ -82,22 +82,6 @@ paths:
       operationId: cloneHistory
       requestBody: { $ref: '#/components/requestBodies/OptionalJsonObject' }
       responses: { '201': { $ref: '#/components/responses/JsonCreated' }, '400': { $ref: '#/components/responses/BadRequest' }, '404': { $ref: '#/components/responses/NotFound' }, '500': { $ref: '#/components/responses/ServerError' } }
-  /sbot/logs/admin:
-    get: { operationId: getAdminLogs, responses: { '200': { $ref: '#/components/responses/JsonOK' }, '500': { $ref: '#/components/responses/ServerError' } } }
-  /sbot/logs/agents/{id}:
-    parameters: [{ $ref: '#/components/parameters/Id' }]
-    get: { operationId: getManagedAgentLogs, responses: { '200': { $ref: '#/components/responses/JsonOK' }, '404': { $ref: '#/components/responses/NotFound' }, '500': { $ref: '#/components/responses/ServerError' } } }
-  /sbot/logs/admin/files:
-    get: { operationId: listAdminLogFiles, responses: { '200': { $ref: '#/components/responses/JsonOK' }, '500': { $ref: '#/components/responses/ServerError' } } }
-  /sbot/logs/admin/files/{name}:
-    parameters: [{ $ref: '#/components/parameters/Name' }]
-    get: { operationId: downloadAdminLogFile, responses: { '200': { $ref: '#/components/responses/FileOK' }, '400': { $ref: '#/components/responses/BadRequest' }, '404': { $ref: '#/components/responses/NotFound' }, '500': { $ref: '#/components/responses/ServerError' } } }
-  /sbot/logs/agents/{id}/files:
-    parameters: [{ $ref: '#/components/parameters/Id' }]
-    get: { operationId: listManagedAgentLogFiles, responses: { '200': { $ref: '#/components/responses/JsonOK' }, '404': { $ref: '#/components/responses/NotFound' }, '500': { $ref: '#/components/responses/ServerError' } } }
-  /sbot/logs/agents/{id}/files/{name}:
-    parameters: [{ $ref: '#/components/parameters/Id' }, { $ref: '#/components/parameters/Name' }]
-    get: { operationId: downloadManagedAgentLogFile, responses: { '200': { $ref: '#/components/responses/FileOK' }, '400': { $ref: '#/components/responses/BadRequest' }, '404': { $ref: '#/components/responses/NotFound' }, '500': { $ref: '#/components/responses/ServerError' } } }
   /sbot/baseline/proto/index.json:
     get: { operationId: getBaselineProtoIndex, responses: { '200': { $ref: '#/components/responses/JsonOK' }, '500': { $ref: '#/components/responses/ServerError' } } }
   /sbot/baseline/proto/{name}:

@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,9 +59,7 @@ func finishManagerStartFailure(ctx context.Context, stopper robotStopper, startE
 type TaskRunner struct {
 	assignment *TaskAssignment
 	cfg        *ResolvedConfig
-	cli        *AdminClient
 	collector  *monitor.MetricsCollector
-	httpCli    *http.Client
 	workDir    string
 
 	// OnStageReset reset 边界阶段段落上报回调，由调用方（Agent.executeTask）注入。
@@ -72,13 +69,11 @@ type TaskRunner struct {
 }
 
 // NewTaskRunner 创建任务执行器。
-func NewTaskRunner(assignment *TaskAssignment, cfg *ResolvedConfig, cli *AdminClient, collector *monitor.MetricsCollector) *TaskRunner {
+func NewTaskRunner(assignment *TaskAssignment, cfg *ResolvedConfig, collector *monitor.MetricsCollector) *TaskRunner {
 	return &TaskRunner{
 		assignment: assignment,
 		cfg:        cfg,
-		cli:        cli,
 		collector:  collector,
-		httpCli:    &http.Client{Timeout: 5 * time.Minute},
 	}
 }
 
@@ -109,38 +104,14 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 		}
 	}
 
-	// 1. 创建临时目录
-	r.workDir = filepath.Join(r.cfg.TaskWorkDir, "stressbot-task-"+taskID)
-	confDir := filepath.Join(r.workDir, "conf")
+	// 1. 资源包已经由 gRPC 命令执行器下载、校验并原子发布。
+	confDir := r.assignment.BundleDir
+	if confDir == "" {
+		return runFailed("任务资源包目录为空")
+	}
 	protoDir := filepath.Join(confDir, "proto")
 	scriptsDir := filepath.Join(confDir, "scripts")
-	if err := os.MkdirAll(protoDir, 0o755); err != nil {
-		return runFailed(fmt.Sprintf("创建临时目录失败: %v", err))
-	}
-	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
-		return runFailed(fmt.Sprintf("创建脚本目录失败: %v", err))
-	}
-
-	stresslog.Info("[TASK] 临时目录已创建", zap.String("dir", r.workDir))
-
-	// 2. 从 Admin 下载配置文件
-	if r.assignment.ConfigURL != "" && len(r.assignment.ConfigFiles) > 0 {
-		configURL := strings.TrimRight(r.assignment.ConfigURL, "/")
-		for _, relPath := range r.assignment.ConfigFiles {
-			url := configURL + "/" + relPath
-			targetPath := filepath.Join(confDir, relPath)
-			if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-				return runFailed(fmt.Sprintf("创建目录 %s 失败: %v", filepath.Dir(targetPath), err))
-			}
-			if err := r.downloadFile(ctx, url, targetPath); err != nil {
-				return runFailed(fmt.Sprintf("下载 %s 失败: %v", relPath, err))
-			}
-			stresslog.Info("[TASK] 配置文件已下载", zap.String("path", relPath))
-		}
-		stresslog.Info("[TASK] 所有配置文件已下载", zap.Int("count", len(r.assignment.ConfigFiles)))
-	} else {
-		return runFailed("无配置文件可下载（configUrl 或 configFiles 为空）")
-	}
+	stresslog.Info("[TASK] 使用已校验资源包", zap.String("dir", confDir))
 
 	// 构造生产 CodecResolver：任务下发的 adapter 目录包含每连接 *_codec.json，共享 errors.json 可选
 	// （未下发错误码表时跳过，DescribeError 返回空串，不影响流程执行）。
@@ -344,31 +315,6 @@ func (r *TaskRunner) Cleanup() {
 	} else {
 		stresslog.Info("[TASK] 临时目录已清理", zap.String("dir", r.workDir))
 	}
-}
-
-func (r *TaskRunner) downloadFile(ctx context.Context, url, dstPath string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := r.httpCli.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-
-	f, err := os.Create(dstPath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	_, err = f.ReadFrom(resp.Body)
-	return err
 }
 
 func loadTaskFlow(path string) (*engine.TaskFlow, error) {

@@ -2,12 +2,10 @@ package admin
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"strings"
 	"time"
 
-	"stressbot/controlplane"
 	"stressbot/sharedstate"
 	json "stressbot/utils/jsonx"
 	stresslog "stressbot/utils/log"
@@ -17,8 +15,7 @@ import (
 type Config struct {
 	Port          int                      `json:"port"`          // HTTP 监听端口（默认 7718）
 	ListenHost    string                   `json:"listenHost"`    // 管理面监听地址（默认 127.0.0.1）
-	PublicURL     string                   `json:"publicUrl"`     // 外部可达 URL（Agent 用来连接 Admin，如 http://192.168.1.100:7718）
-	ControlPlane  ControlPlaneConfig       `json:"controlPlane"`  // Admin-Agent 内部控制面
+	ControlPlane  ControlPlaneConfig       `json:"controlPlane"`  // Admin-Agent 内网 gRPC 控制面
 	StaticDir     string                   `json:"staticDir"`     // 前端静态文件目录（默认 cmd/web/dist）
 	AgentRegistry RegistryConfig           `json:"agentRegistry"` // Agent 注册与健康管理
 	MySQL         *MySQLConfig             `json:"mysql"`         // MySQL 连接配置（全局共享 *sql.DB）
@@ -29,12 +26,11 @@ type Config struct {
 	Daemon        bool                     `json:"daemon"`        // 以守护进程模式运行（仅 Linux）
 }
 
-// ControlPlaneConfig 定义 Admin-Agent 内部控制面的独立监听器。
+// ControlPlaneConfig 定义 Admin-Agent gRPC 控制面的独立监听器。
 type ControlPlaneConfig struct {
-	ListenHost string                 `json:"listenHost"`
-	Port       int                    `json:"port"`
-	PublicURL  string                 `json:"publicUrl"`
-	TLS        controlplane.TLSConfig `json:"tls"`
+	ListenHost        string `json:"listenHost"`
+	Port              int    `json:"port"`
+	HeartbeatInterval string `json:"heartbeatInterval"`
 }
 
 // RedisEnabled 返回服务器是否配置了 Redis（host 非空）。
@@ -49,8 +45,8 @@ type PprofConfig struct {
 
 // RegistryConfig Agent 注册与健康管理配置。
 //
-// 联动约束（与 agent.heartbeatFailThreshold × agent.heartbeatInterval）：
-//   - UnhealthyAfter 必须 ≥ agent 端容忍窗口（默认 3 × 10s = 30s）
+// 联动约束（与 Agent 心跳和租约）：
+//   - UnhealthyAfter 同时作为任务租约时长，必须明显大于 HeartbeatInterval
 //   - OfflineAfter   必须 > UnhealthyAfter
 //
 // 否则会出现"admin 已把节点标 unhealthy/删除，但 agent 任务还在跑"的状态错乱。
@@ -111,9 +107,9 @@ func DefaultConfig() Config {
 		ListenHost: "127.0.0.1",
 		StaticDir:  "cmd/web/dist",
 		ControlPlane: ControlPlaneConfig{
-			ListenHost: "0.0.0.0",
-			Port:       7720,
-			PublicURL:  "http://127.0.0.1:7720",
+			ListenHost:        "127.0.0.1",
+			Port:              7720,
+			HeartbeatInterval: "10s",
 		},
 		AgentRegistry: RegistryConfig{
 			UnhealthyAfter: "30s",
@@ -168,27 +164,26 @@ func validateConfig(cfg *Config) error {
 	if cfg.ControlPlane.ListenHost == "" {
 		return fmt.Errorf("controlPlane.listenHost is required")
 	}
-	if cfg.PublicURL == "" {
-		return fmt.Errorf("publicUrl is required")
+	heartbeat, err := time.ParseDuration(cfg.ControlPlane.HeartbeatInterval)
+	if err != nil {
+		return fmt.Errorf("invalid controlPlane.heartbeatInterval: %w", err)
 	}
-	if cfg.ControlPlane.PublicURL == "" {
-		return fmt.Errorf("controlPlane.publicUrl is required")
+	if heartbeat <= 0 {
+		return fmt.Errorf("controlPlane.heartbeatInterval must be > 0")
 	}
-	controlPlaneURL, err := url.Parse(cfg.ControlPlane.PublicURL)
-	if err != nil || controlPlaneURL.Host == "" {
-		return fmt.Errorf("controlPlane.publicUrl is invalid")
-	}
-	if controlPlaneURL.Scheme != "http" && controlPlaneURL.Scheme != "https" {
-		return fmt.Errorf("controlPlane.publicUrl scheme must be http or https")
-	}
-	if cfg.ControlPlane.TLS.Enabled() && controlPlaneURL.Scheme != "https" {
-		return fmt.Errorf("controlPlane.publicUrl must use https when TLS is enabled")
-	}
-	if _, err := time.ParseDuration(cfg.AgentRegistry.UnhealthyAfter); cfg.AgentRegistry.UnhealthyAfter != "" && err != nil {
+	lease, err := time.ParseDuration(cfg.AgentRegistry.UnhealthyAfter)
+	if err != nil {
 		return fmt.Errorf("invalid agentRegistry.unhealthyAfter: %w", err)
 	}
-	if _, err := time.ParseDuration(cfg.AgentRegistry.OfflineAfter); cfg.AgentRegistry.OfflineAfter != "" && err != nil {
+	if lease <= heartbeat {
+		return fmt.Errorf("agentRegistry.unhealthyAfter must be greater than controlPlane.heartbeatInterval")
+	}
+	offline, err := time.ParseDuration(cfg.AgentRegistry.OfflineAfter)
+	if err != nil {
 		return fmt.Errorf("invalid agentRegistry.offlineAfter: %w", err)
+	}
+	if offline <= lease {
+		return fmt.Errorf("agentRegistry.offlineAfter must be greater than agentRegistry.unhealthyAfter")
 	}
 	if cfg.RedisEnabled() {
 		if _, err := cfg.Redis.Resolve(); err != nil {

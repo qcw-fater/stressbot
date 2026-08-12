@@ -7,7 +7,6 @@ import (
 	"stressbot/monitor"
 	"stressbot/robot"
 	"stressbot/sharedstate"
-	json "stressbot/utils/jsonx"
 )
 
 // AgentStatus Agent 运行状态。
@@ -27,52 +26,6 @@ const (
 	TaskFailed    TaskResult = "failed"
 )
 
-// --- Agent → Admin 请求 ---
-
-// RegisterRequest 注册请求。
-type RegisterRequest struct {
-	AgentID        string     `json:"agentId"`
-	Name           string     `json:"name"`
-	Address        string     `json:"address"`
-	AppVersion     string     `json:"appVersion"`
-	MaxBots        int        `json:"maxBots"`
-	StressInterval string     `json:"stressInterval"`
-	SystemInterval string     `json:"systemInterval"`
-	StaticInfo     StaticInfo `json:"staticInfo"`
-}
-
-// RegisterResponse 注册响应。
-type RegisterResponse struct {
-	AgentID        string `json:"agentId"`
-	HeartbeatTTL   string `json:"heartbeatTtl"`
-	StressEndpoint string `json:"stressEndpoint"`
-	SystemEndpoint string `json:"systemEndpoint"`
-}
-
-// HeartbeatRequest 心跳请求。
-type HeartbeatRequest struct {
-	AgentID       string `json:"agentId"`
-	Timestamp     string `json:"timestamp"`
-	Status        string `json:"status"`        // idle | busy
-	CurrentTaskID string `json:"currentTaskId"` // status=busy 时存在
-	CurrentBots   int    `json:"currentBots"`
-	AppVersion    string `json:"appVersion"`
-}
-
-// StressReport 压测指标上报。
-type StressReport struct {
-	AgentID    string                     `json:"agentId"`
-	TaskID     string                     `json:"taskId"`
-	ReportedAt time.Time                  `json:"reportedAt"`
-	Snapshot   *monitor.CollectorSnapshot `json:"snapshot"`
-}
-
-// SystemReport 系统指标上报。
-type SystemReport struct {
-	AgentID  string         `json:"agentId"`
-	Snapshot SystemSnapshot `json:"snapshot"`
-}
-
 // TaskCompletionReport 任务完成报告。
 type TaskCompletionReport struct {
 	AgentID       string                     `json:"agentId"`
@@ -85,11 +38,6 @@ type TaskCompletionReport struct {
 	// 值为即将进入的配置阶段下标（0-based），由 Admin 归档时映射为连续 1-based 段落号。
 	StageIndex    int                  `json:"stageIndex,omitempty"`
 	CleanupStatus *robot.CleanupStatus `json:"cleanupStatus,omitempty"`
-}
-
-// DeregisterRequest 注销请求（best-effort）。
-type DeregisterRequest struct {
-	AgentID string `json:"agentId"`
 }
 
 // --- Admin → Agent 请求 ---
@@ -112,10 +60,11 @@ type TaskAssignment struct {
 	// LogLevel 可选值 debug/info/warn/error。
 	// 任务执行期间临时切换 Agent 进程日志等级，结束后自动恢复。
 	// 空字符串 = 沿用 Agent 启动时 agent-config.json 中的等级。
-	LogLevel    string        `json:"logLevel,omitempty"`
-	ConfigURL   string        `json:"configUrl"`
-	ConfigFiles []string      `json:"configFiles"`
-	RampUp      *RampUpConfig `json:"rampUp,omitempty"`
+	LogLevel     string        `json:"logLevel,omitempty"`
+	BundleDigest []byte        `json:"-"`
+	BundleSize   int64         `json:"-"`
+	BundleDir    string        `json:"-"`
+	RampUp       *RampUpConfig `json:"rampUp,omitempty"`
 	// Shared 共享状态运行时下发（含已解析的 Redis 连接信息与任务 runId）。
 	// 仅当 Admin 检测到脚本使用 share 模块且服务器配置了 Redis 时才下发，否则为 nil。
 	Shared *SharedRuntimeAssignment `json:"shared,omitempty"`
@@ -150,15 +99,6 @@ type RampUpStage struct {
 	Concurrency int  `json:"concurrency,omitempty"`
 	HoldSec     int  `json:"holdSec,omitempty"`
 	Reset       bool `json:"reset,omitempty"`
-}
-
-// AgentStatusResponse Agent 状态查询响应。
-type AgentStatusResponse struct {
-	AgentID       string `json:"agentId"`
-	Status        string `json:"status"`
-	CurrentTaskID string `json:"currentTaskId,omitempty"`
-	AppVersion    string `json:"appVersion"`
-	Uptime        string `json:"uptime"`
 }
 
 // --- 系统监控 ---
@@ -199,10 +139,3 @@ type StaticInfo struct {
 }
 
 // --- 通用 ---
-
-// ErrorResponse Admin 错误响应。
-type ErrorResponse struct {
-	Code    string          `json:"code"`
-	Message string          `json:"message"`
-	Details json.RawMessage `json:"details,omitempty"`
-}

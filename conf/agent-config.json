@@ -16,17 +16,13 @@
   "pprof": { "port": 6060 },
   "agent": {
     "enabled": true,
-    "adminUrl": "http://127.0.0.1:7720",
-    "publicUrl": "http://127.0.0.1:7719",
-    "port": 7719,
+    "id": "agent-001",
+    "adminAddress": "127.0.0.1:7720",
+    "name": "agent-001",
     "maxBots": 5000,
     "heartbeatInterval": "10s",
-    "heartbeatTimeout": "5s",
-    "heartbeatFailThreshold": 3,
-    "requestTimeout": "30s",
     "reconnectMaxRetries": -1,
-    "metricsInterval": "5s",
-    "tls": {}
+    "metricsInterval": "5s"
   },
   "daemon": false
 }

@@ -26,12 +26,13 @@ type MetricWindowAcceptResult struct {
 // AgentMetricState is the last committed cumulative/window pair for one task Agent.
 // ReceivedAt always comes from the Admin clock and is the only freshness timestamp.
 type AgentMetricState struct {
-	AgentID       string
-	LastSequence  uint64
-	ReceivedAt    time.Time
-	ExpectedEvery time.Duration
-	Cumulative    monitor.CollectorSnapshot
-	LatestWindow  monitor.ReportWindow
+	AgentID          string
+	LastSequence     uint64
+	DroppedIntervals uint64
+	ReceivedAt       time.Time
+	ExpectedEvery    time.Duration
+	Cumulative       monitor.CollectorSnapshot
+	LatestWindow     monitor.ReportWindow
 }
 
 type MetricHistoryWindow struct {
@@ -48,10 +49,22 @@ type MetricHistoryBatch struct {
 	Windows []MetricHistoryWindow
 }
 
+const metricStateShardCount = 64
+
+type metricStateKey struct {
+	taskID  string
+	agentID string
+}
+
+type metricStateShard struct {
+	mu     sync.RWMutex
+	states map[metricStateKey]*AgentMetricState
+}
+
 // MetricsWindowStore commits sequenced Agent windows exactly once.
 type MetricsWindowStore struct {
 	mu              sync.RWMutex
-	byTask          map[string]map[string]*AgentMetricState
+	stateShards     [metricStateShardCount]metricStateShard
 	pendingHistory  map[string][]MetricHistoryWindow
 	historyInFlight map[string]*MetricHistoryBatch
 	terminalTasks   map[string]struct{}
@@ -62,13 +75,16 @@ func NewMetricsWindowStore(now func() time.Time) *MetricsWindowStore {
 	if now == nil {
 		now = time.Now
 	}
-	return &MetricsWindowStore{
-		byTask:          make(map[string]map[string]*AgentMetricState),
+	store := &MetricsWindowStore{
 		pendingHistory:  make(map[string][]MetricHistoryWindow),
 		historyInFlight: make(map[string]*MetricHistoryBatch),
 		terminalTasks:   make(map[string]struct{}),
 		now:             now,
 	}
+	for i := range store.stateShards {
+		store.stateShards[i].states = make(map[metricStateKey]*AgentMetricState)
+	}
+	return store
 }
 
 func (s *MetricsWindowStore) Accept(
@@ -76,6 +92,16 @@ func (s *MetricsWindowStore) Accept(
 	expectedTaskID string,
 	expectedEvery time.Duration,
 	expectedApdexT time.Duration,
+) (MetricWindowAcceptResult, error) {
+	return s.AcceptWithDrops(report, expectedTaskID, expectedEvery, expectedApdexT, 0)
+}
+
+func (s *MetricsWindowStore) AcceptWithDrops(
+	report StressReport,
+	expectedTaskID string,
+	expectedEvery time.Duration,
+	expectedApdexT time.Duration,
+	droppedIntervals uint64,
 ) (MetricWindowAcceptResult, error) {
 	if report.AgentID == "" {
 		return MetricWindowAcceptResult{}, fmt.Errorf("指标上报缺少节点 ID")
@@ -91,39 +117,36 @@ func (s *MetricsWindowStore) Accept(
 		return MetricWindowAcceptResult{}, fmt.Errorf("指标窗口序列号必须从 1 开始")
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	taskStates := s.byTask[report.TaskID]
-	if taskStates == nil {
-		taskStates = make(map[string]*AgentMetricState)
-		s.byTask[report.TaskID] = taskStates
-	}
-	previous := taskStates[report.AgentID]
-	if previous != nil && window.Sequence <= previous.LastSequence {
-		return MetricWindowAcceptResult{Status: MetricWindowDuplicate}, nil
-	}
-	expectedSequence := uint64(1)
-	if previous != nil {
-		expectedSequence = previous.LastSequence + 1
-	}
-	if window.Sequence != expectedSequence {
-		return MetricWindowAcceptResult{}, fmt.Errorf(
-			"指标窗口序列不连续: 节点=%s 收到=%d 期望=%d",
-			report.AgentID, window.Sequence, expectedSequence,
-		)
-	}
+	// Validate the full DTO and DDSketch payload before taking shared state
+	// locks. This is the expensive part of accepting a window.
 	if err := validateMetricReport(report.Snapshot, expectedEvery, expectedApdexT); err != nil {
 		return MetricWindowAcceptResult{}, err
+	}
+	key := metricStateKey{taskID: report.TaskID, agentID: report.AgentID}
+	shard := s.metricShard(key)
+	shard.mu.Lock()
+	previous := shard.states[key]
+	if previous != nil && window.Sequence <= previous.LastSequence {
+		shard.mu.Unlock()
+		return MetricWindowAcceptResult{Status: MetricWindowDuplicate}, nil
+	}
+	if previous != nil {
+		if droppedIntervals < previous.DroppedIntervals {
+			shard.mu.Unlock()
+			return MetricWindowAcceptResult{}, fmt.Errorf("指标丢弃计数回退: 节点=%s report=%d current=%d", report.AgentID, droppedIntervals, previous.DroppedIntervals)
+		}
 	}
 	if previous != nil {
 		switch {
 		case report.Snapshot.CollectionEpoch < previous.Cumulative.CollectionEpoch:
+			shard.mu.Unlock()
 			return MetricWindowAcceptResult{}, fmt.Errorf(
 				"节点 %s 指标代次回退: report=%d current=%d",
 				report.AgentID, report.Snapshot.CollectionEpoch, previous.Cumulative.CollectionEpoch,
 			)
 		case report.Snapshot.CollectionEpoch == previous.Cumulative.CollectionEpoch:
 			if err := validateCumulativeMonotonic(&previous.Cumulative, report.Snapshot); err != nil {
+				shard.mu.Unlock()
 				return MetricWindowAcceptResult{}, fmt.Errorf("节点 %s 累计指标回退: %w", report.AgentID, err)
 			}
 		}
@@ -132,14 +155,18 @@ func (s *MetricsWindowStore) Accept(
 	cumulative := *report.Snapshot
 	cumulative.Window = nil
 	state := &AgentMetricState{
-		AgentID:       report.AgentID,
-		LastSequence:  window.Sequence,
-		ReceivedAt:    s.now(),
-		ExpectedEvery: expectedEvery,
-		Cumulative:    cumulative,
-		LatestWindow:  *window,
+		AgentID:          report.AgentID,
+		LastSequence:     window.Sequence,
+		DroppedIntervals: droppedIntervals,
+		ReceivedAt:       s.now(),
+		ExpectedEvery:    expectedEvery,
+		Cumulative:       cumulative,
+		LatestWindow:     *window,
 	}
-	taskStates[report.AgentID] = state
+	shard.states[key] = state
+	shard.mu.Unlock()
+
+	s.mu.Lock()
 	s.pendingHistory[report.TaskID] = append(s.pendingHistory[report.TaskID], MetricHistoryWindow{
 		AgentID:      report.AgentID,
 		ApdexT:       report.Snapshot.ApdexT,
@@ -148,7 +175,20 @@ func (s *MetricsWindowStore) Accept(
 		Connections:  report.Snapshot.Connections,
 		Window:       *window,
 	})
+	s.mu.Unlock()
 	return MetricWindowAcceptResult{Status: MetricWindowAccepted}, nil
+}
+
+func (s *MetricsWindowStore) metricShard(key metricStateKey) *metricStateShard {
+	hash := uint64(1469598103934665603)
+	for i := 0; i < len(key.taskID); i++ {
+		hash = (hash ^ uint64(key.taskID[i])) * 1099511628211
+	}
+	hash = (hash ^ 0xff) * 1099511628211
+	for i := 0; i < len(key.agentID); i++ {
+		hash = (hash ^ uint64(key.agentID[i])) * 1099511628211
+	}
+	return &s.stateShards[hash&(metricStateShardCount-1)]
 }
 
 func validateMetricReport(snapshot *monitor.CollectorSnapshot, expectedEvery, expectedApdexT time.Duration) error {
@@ -462,7 +502,16 @@ func (s *MetricsWindowStore) cleanupTerminalTaskLocked(taskID string) {
 }
 
 func (s *MetricsWindowStore) dropTaskLocked(taskID string) {
-	delete(s.byTask, taskID)
+	for i := range s.stateShards {
+		shard := &s.stateShards[i]
+		shard.mu.Lock()
+		for key := range shard.states {
+			if key.taskID == taskID {
+				delete(shard.states, key)
+			}
+		}
+		shard.mu.Unlock()
+	}
 	delete(s.pendingHistory, taskID)
 	delete(s.historyInFlight, taskID)
 	delete(s.terminalTasks, taskID)
@@ -511,22 +560,28 @@ func metricHistoryBatchToken(windows []MetricHistoryWindow) [sha256.Size]byte {
 }
 
 func (s *MetricsWindowStore) AgentState(taskID, agentID string) (AgentMetricState, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	taskStates := s.byTask[taskID]
-	if taskStates == nil || taskStates[agentID] == nil {
+	key := metricStateKey{taskID: taskID, agentID: agentID}
+	shard := s.metricShard(key)
+	shard.mu.RLock()
+	defer shard.mu.RUnlock()
+	state := shard.states[key]
+	if state == nil {
 		return AgentMetricState{}, false
 	}
-	return *taskStates[agentID], true
+	return *state, true
 }
 
 func (s *MetricsWindowStore) States(taskID string) []AgentMetricState {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	taskStates := s.byTask[taskID]
-	states := make([]AgentMetricState, 0, len(taskStates))
-	for _, state := range taskStates {
-		states = append(states, *state)
+	states := make([]AgentMetricState, 0)
+	for i := range s.stateShards {
+		shard := &s.stateShards[i]
+		shard.mu.RLock()
+		for key, state := range shard.states {
+			if key.taskID == taskID {
+				states = append(states, *state)
+			}
+		}
+		shard.mu.RUnlock()
 	}
 	return states
 }

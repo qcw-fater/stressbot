@@ -15,7 +15,6 @@ import (
 	"stressbot/adapter"
 	"stressbot/agent"
 	"stressbot/engine"
-	"stressbot/logview"
 	"stressbot/monitor"
 	"stressbot/network"
 	"stressbot/protox"
@@ -70,13 +69,31 @@ type Config struct {
 }
 
 func main() {
+	var closeLog func() error
+	exitProcess := func(code int) {
+		if closeLog != nil {
+			_ = closeLog()
+		}
+		os.Exit(code)
+	}
+
 	defer func() {
 		if rec := recover(); rec != nil {
 			fmt.Fprintf(os.Stderr, "[AGENT] 顶层 panic: %v\n%s\n", rec, debug.Stack())
-			stresslog.Error("[AGENT] 顶层 panic",
-				zap.Any("panic", rec),
-				zap.String("stack", string(debug.Stack())))
+			if stresslog.GetLogger() != nil {
+				stresslog.Error("[AGENT] 顶层 panic",
+					zap.Any("panic", rec),
+					zap.String("stack", string(debug.Stack())))
+			}
+			if closeLog != nil {
+				_ = closeLog()
+			}
 			os.Exit(2)
+		}
+		if closeLog != nil {
+			if err := closeLog(); err != nil {
+				fmt.Fprintf(os.Stderr, "关闭 Agent 日志失败: %v\n", err)
+			}
 		}
 	}()
 
@@ -99,14 +116,14 @@ func main() {
 	configAbs, err := filepath.Abs(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "解析配置路径失败: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 	confDir := filepath.Dir(configAbs)
 
 	cfg, err := loadConfig(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	// 配置中启用守护进程且当前不是守护进程子进程
@@ -122,12 +139,10 @@ func main() {
 		logPath = "log/agent.log"
 		logTag = "agent"
 	}
-	stresslog.InitLog(logPath, logTag, cfg.Log, "")
-	newLogger := logview.AttachRingBuffer(stresslog.GetLogger(), 50000, stresslog.LevelEnabler(), zap.String("SR", logTag))
-	stresslog.ReplaceLogger(newLogger)
+	closeLog = stresslog.InitLog(logPath, logTag, cfg.Log, "")
 
 	if cfg.Agent.Enabled {
-		stresslog.Info("[MAIN] Agent 模式启动", zap.String("adminUrl", cfg.Agent.AdminUrl))
+		stresslog.Info("[MAIN] Agent 模式启动", zap.String("adminAddress", cfg.Agent.AdminAddress))
 		runAgentMode(cfg)
 	} else {
 		botCount := 0

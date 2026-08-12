@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -21,10 +22,12 @@ type statusChange struct {
 
 // AgentRegistry Agent 注册表。
 type AgentRegistry struct {
-	mu       sync.RWMutex
-	agents   map[string]*AgentNode
-	cfg      RegistryConfig
-	onChange func(agentID string, from, to AgentStatus)
+	mu        sync.RWMutex
+	agents    map[string]*AgentNode
+	instances map[string]agentInstance
+	cfg       RegistryConfig
+	onChange  func(agentID string, from, to AgentStatus)
+	onRestart func(agentID, taskID string)
 
 	unhealthyThreshold time.Duration
 	offlineThreshold   time.Duration
@@ -36,6 +39,7 @@ func NewAgentRegistry(cfg RegistryConfig, onChange func(string, AgentStatus, Age
 
 	return &AgentRegistry{
 		agents:             make(map[string]*AgentNode),
+		instances:          make(map[string]agentInstance),
 		cfg:                cfg,
 		onChange:           onChange,
 		unhealthyThreshold: unhealthy,
@@ -60,12 +64,20 @@ func (r *AgentRegistry) fireOnChange(changes []statusChange) {
 func (r *AgentRegistry) Register(node *AgentNode) error {
 	r.mu.Lock()
 	existing, exists := r.agents[node.ID]
+	previousInstance, hadInstance := r.instances[node.ID]
 	from := AgentStatus("")
 	if exists {
 		from = existing.Status
 	}
 	r.agents[node.ID] = node
+	r.instances[node.ID] = agentInstance{startedAt: node.StaticInfo.StartedAt, taskID: node.CurrentTaskID}
 	needCallback := exists && r.onChange != nil && from != node.Status
+	restartedTaskID := ""
+	if hadInstance && !previousInstance.startedAt.IsZero() && !node.StaticInfo.StartedAt.IsZero() &&
+		!previousInstance.startedAt.Equal(node.StaticInfo.StartedAt) && previousInstance.taskID != "" {
+		restartedTaskID = previousInstance.taskID
+	}
+	onRestart := r.onRestart
 
 	if exists {
 		stresslog.Warn("agent 重新注册",
@@ -91,6 +103,9 @@ func (r *AgentRegistry) Register(node *AgentNode) error {
 	if needCallback {
 		r.onChange(node.ID, from, node.Status)
 	}
+	if restartedTaskID != "" && onRestart != nil {
+		onRestart(node.ID, restartedTaskID)
+	}
 	return nil
 }
 
@@ -109,11 +124,70 @@ func (r *AgentRegistry) Heartbeat(agentID string, req HeartbeatRequest) error {
 	}
 	node.CurrentTaskID = req.CurrentTaskID
 	node.CurrentBots = req.CurrentBots
+	requested, err := heartbeatAgentStatus(req.Status, req.CurrentTaskID)
+	if err != nil {
+		r.mu.Unlock()
+		return err
+	}
+	from := node.Status
+	node.Status = requested
+	r.instances[agentID] = agentInstance{startedAt: node.StaticInfo.StartedAt, taskID: req.CurrentTaskID}
 	change := r.touchLocked(node, req.AppVersion)
+	if change == nil && from != node.Status {
+		change = &statusChange{agentID: node.ID, from: from, to: node.Status}
+	}
 	r.mu.Unlock()
 
 	if change != nil {
 		r.fireOnChange([]statusChange{*change})
+	}
+	return nil
+}
+
+type agentInstance struct {
+	startedAt time.Time
+	taskID    string
+}
+
+func heartbeatAgentStatus(value, taskID string) (AgentStatus, error) {
+	switch value {
+	case "busy":
+		if taskID == "" {
+			return "", fmt.Errorf("busy 心跳缺少 currentTaskId")
+		}
+		return AgentBusy, nil
+	case "idle":
+		if taskID != "" {
+			return "", fmt.Errorf("idle 心跳不能携带 currentTaskId")
+		}
+		return AgentIdle, nil
+	default:
+		return "", fmt.Errorf("未知节点状态 %q", value)
+	}
+}
+
+func (r *AgentRegistry) SetOnRestart(fn func(agentID, taskID string)) {
+	r.mu.Lock()
+	r.onRestart = fn
+	r.mu.Unlock()
+}
+
+// StartTask synchronizes the registry as soon as a Start ACK is committed, so
+// the first telemetry window does not have to wait for the next heartbeat.
+func (r *AgentRegistry) StartTask(agentID, taskID string, bots int) error {
+	r.mu.Lock()
+	node, ok := r.agents[agentID]
+	if !ok {
+		r.mu.Unlock()
+		return ErrAgentNotFound
+	}
+	from := node.Status
+	node.Status, node.CurrentTaskID, node.CurrentBots = AgentBusy, taskID, bots
+	r.instances[agentID] = agentInstance{startedAt: node.StaticInfo.StartedAt, taskID: taskID}
+	node.LastHeartbeatAt = time.Now()
+	r.mu.Unlock()
+	if from != AgentBusy {
+		r.fireOnChange([]statusChange{{agentID: agentID, from: from, to: AgentBusy}})
 	}
 	return nil
 }
@@ -134,6 +208,8 @@ func (r *AgentRegistry) CompleteTask(agentID, taskID string) (bool, error) {
 
 	node.CurrentTaskID = ""
 	node.CurrentBots = 0
+	node.Status = AgentIdle
+	r.instances[agentID] = agentInstance{startedAt: node.StaticInfo.StartedAt}
 	node.LatestStress = nil
 	node.StressUpdatedAt = time.Time{}
 	return true, nil

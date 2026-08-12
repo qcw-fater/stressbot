@@ -831,31 +831,3 @@ export interface HistoryCompareResponse {
     actions: Record<string, Array<number | null>>;
   };
 }
-
-// === Logs ===
-
-export interface LogField {
-  key: string;
-  value: string;
-}
-
-export interface LogEntry {
-  level: string;
-  time: string;
-  caller?: string;
-  message: string;
-  service?: string;
-  fields?: LogField[];
-}
-
-export interface LogQueryResult {
-  entries: LogEntry[];
-  hasMore: boolean;
-  nextSeq: number;
-}
-
-export interface LogFileInfo {
-  name: string;
-  size: number;
-  modTime: string;
-}

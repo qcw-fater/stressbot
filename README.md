@@ -22,7 +22,6 @@ stressbot/
 ├── admin/                Admin 服务器（分布式调度、历史归档、前端托管）
 ├── agent/                Agent 节点（注册到 Admin、执行下发任务）
 ├── engine/               流程执行引擎（节点图遍历、动作模式、字段绑定、条件解析）
-├── logview/              日志环形缓冲区（实时查询 API）
 ├── monitor/              指标采集（原子计数器、延迟直方图、Apdex、CSV/HTTP 导出）
 ├── network/              TCP/UDP 连接、声明式心跳（基于 gnet）
 ├── protox/               动态 protobuf 加载与反射
@@ -98,14 +97,15 @@ Executor 遍历节点图 → 命中 action 节点
 ### 分布式架构总览
 
 ```
-浏览器 ←→ Admin (:7718) ←→ 多 Agent (:7719) → 目标游戏服务器
-                │                  │
-                ├── MySQL 归档     ├── Manager + N Robot
-                ├── 前端静态托管   ├── 指标上报
-                └── 任务调度       └── 系统监控
+浏览器 ←HTTP→ Admin 管理面 (:7718)
+                    ├── MySQL 归档 / 前端静态托管 / 任务调度
+                    └── gRPC 控制面 (:7720) ← Agent 主动长连接 → 目标游戏服务器
+                                               ├── Manager + N Robot
+                                               ├── 流式指标上报
+                                               └── 本地结构化文件日志
 ```
 
-> 默认端口：Admin `7718`、Agent 本地 HTTP `7719`（均可通过配置覆盖）。
+> 默认端口：Admin 浏览器管理面 `7718`、Admin-Agent gRPC 控制面 `7720`；Agent 不再开放本地 HTTP 控制端口。
 
 ---
 
@@ -934,7 +934,10 @@ gnet `OnTraffic`：peek header → `BodyLength()` 纯 Go 计算 → read frame �
 | TaskStore | 任务 CRUD + 状态机 + 单例约束 |
 | AgentRegistry | Agent 注册 / 心跳 / 健康检查 / 离线清理 |
 | MetricsAggregator | 分布式指标聚合（MergeSnapshots） |
-| AgentDispatcher | 任务分配 + 配置下发 |
+| SessionRegistry / CommandBus | gRPC 会话管理 + 可靠命令投递 |
+| CommandStore | 命令日志与确认状态持久化 |
+| BundleStore | 按 SHA-256 流式下发任务资源包 |
+| TelemetryIngestor | 有界 latest-wins 指标接入 |
 | HistoryStore | MySQL 历史归档 |
 | Sampler | 周期采样时序数据 |
 
@@ -950,21 +953,9 @@ gnet `OnTraffic`：peek header → `BodyLength()` 纯 Go 计算 → read frame �
 | `proportional` | 按 Agent maxBots 比例分配 |
 | `debug-single` | 全部分配给单个 Agent（调试用） |
 
-### HTTP API
+### HTTP 管理 API
 
-> 所有 Admin API 统一前缀 **`/sbot/`**（仅错误码目录保留字面 `/api/`）。共 60 个端点。
-
-**Agent 上行：**
-
-| 方法 | 路径 | 说明 |
-|--------|------|------|
-| POST | `/sbot/agent/register` | Agent 注册 |
-| POST | `/sbot/agent/{id}/heartbeat` | Agent 心跳 |
-| POST | `/sbot/agent/{id}/deregister` | Agent 注销 |
-| POST | `/sbot/agent/stress` | 压测指标上报 |
-| POST | `/sbot/agent/system` | 系统指标上报 |
-| POST | `/sbot/agent/{id}/task/{tid}/done` | 任务完成上报 |
-| GET  | `/sbot/agent/{id}/pending-task` | 获取待执行任务 |
+> 浏览器管理 API 统一前缀 **`/sbot/`**（仅错误码目录保留字面 `/api/`）。Agent 上行控制、资源下载与指标上报已经迁移到独立 gRPC 控制面。
 
 **任务管理：**
 
@@ -1016,16 +1007,7 @@ gnet `OnTraffic`：peek header → `BodyLength()` 纯 Go 计算 → read frame �
 | POST | `/sbot/history/{id}/clone` | 克隆为新任务 |
 | GET | `/sbot/history/compare` | P99 对比（2~5 条） |
 
-**日志：**
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/sbot/logs/admin` | Admin 日志查询 |
-| GET | `/sbot/logs/admin/files` | Admin 日志文件列表 |
-| GET | `/sbot/logs/admin/files/{name}` | 下载 Admin 日志文件 |
-| GET | `/sbot/logs/agents/{id}` | Agent 日志（代理） |
-| GET | `/sbot/logs/agents/{id}/files` | Agent 日志文件列表 |
-| GET | `/sbot/logs/agents/{id}/files/{name}` | 下载 Agent 日志文件 |
+Admin 不提供日志查询、代理或下载 API。Admin/Agent 只写本地 JSON Lines 文件，生产环境由外部日志采集器统一收集。
 
 **资源基线（只读 GET）：**
 
@@ -1063,7 +1045,7 @@ gnet `OnTraffic`：peek header → `BodyLength()` 纯 Go 计算 → read frame �
 
 ### 生命周期
 
-注册（指数退避）→ 心跳循环 → 任务轮询 → 执行 → 优雅退出。
+建立 gRPC 长连接（指数退避）→ Hello/心跳与租约 → 接收命令 → 执行 → 最终报告确认 → 优雅退出。
 
 ### 任务执行（TaskRunner）
 
@@ -1074,24 +1056,18 @@ gnet `OnTraffic`：peek header → `BodyLength()` 纯 Go 计算 → read frame �
 - `StressReporter`：任务期间按 `metricsInterval` 上报压测指标
 - `SystemReporter`：始终运行，上报系统资源
 
-### 本地 HTTP API（前缀 `/agent/v1/`）
+### gRPC 控制面
 
-| 路径 | 说明 |
+| 服务 | 说明 |
 |------|------|
-| `POST /agent/v1/task` | 获取/分配当前任务（返回 202） |
-| `POST /agent/v1/stop` | 停止任务（幂等） |
-| `POST /agent/v1/shutdown` | 关闭 Agent |
-| `GET /agent/v1/version` | 版本信息 |
-| `GET /agent/v1/status` | Agent 状态 |
-| `GET /agent/v1/logs` | 日志查询（支持 `limit` / `afterSeq`） |
-| `GET /agent/v1/logs/files` | 日志文件列表 |
-| `GET /agent/v1/logs/files/{name}` | 下载日志文件 |
-| `GET /healthz` | 健康检查 |
+| `AgentControlService.Session` | 双向流：会话、心跳、租约、命令、命令确认和最终报告 |
+| `AgentBundleService.DownloadBundle` | 支持 offset 续传的任务资源包服务端流 |
+| `AgentTelemetryService.Report` | 压测指标和系统指标客户端流 |
 
 ## 集群部署
 
 ```
-Admin (:7718) ← 多 Agent (:7719) → 目标游戏服务器
+浏览器 → Admin HTTP (:7718)；多 Agent → Admin gRPC (:7720)；Agent → 目标游戏服务器
 ```
 
 - MySQL 历史归档：6 表 + 周期采样 + 自动裁剪
@@ -1185,15 +1161,13 @@ RecordAction(name, result, timing, wallClock, sendBytes, recvBytes, err)
 
 ### 结构化日志
 
-zap + lumberjack 轮转（`maxSizeMB` / `maxBackups` / `maxAge` / `localTime` / `compress`）。
+zap + lumberjack 轮转（`maxSizeMB` / `maxBackups` / `maxAge` / `localTime` / `compress`）。文件采用一行一个 JSON 对象，稳定字段为 `timestamp`、`level`、`message`、`caller`、`stacktrace`、`service`；时间统一使用 UTC RFC3339Nano。
 
-### 实时日志查看
+文件 sink 使用 256 KiB 有界缓冲并每秒刷新；正常退出会显式刷新和关闭，Error/DPanic/Fatal 与顶层 panic 路径会在进程结束前同步落盘。
 
-`logview` 环形缓冲区：O(1) 写入 + cursor 分页查询 API。
+### 外部日志采集
 
-### 前端日志面板
-
-Monaco 日志查看器 + 轮询 + 文件下载。
+stressbot 不内置日志环形缓冲、日志 HTTP API 或前端日志面板。Admin 与 Agent 只负责写本地文件；部署时可由 Vector/Filebeat 等采集器接入 Kafka，并按需写入 Loki、ClickHouse 或 Elasticsearch，查询界面交给 Grafana/Kibana。
 
 ### 告警
 

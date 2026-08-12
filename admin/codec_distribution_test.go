@@ -1,8 +1,7 @@
-// Package admin 覆盖多 codec 分发测试（上传/configFiles/baseline/下载）。
+// Package admin 覆盖多 codec 上传、基线与浏览器下载测试。
 //
 // 覆盖：
 //   - multipart 上传多份 adapter/*_codec.json + adapter/errors.json → TaskConfig.Codecs 含各文件、ErrorMap 非空。
-//   - configFiles 清单含各 adapter/*_codec.json + adapter/errors.json，不含 codec.lua/error.lua。
 //   - writeBaselineFiles 落盘各 *_codec.json + errors.json；baseline HTTP 可读各文件。
 //   - handleGetTaskConfig 下载端点能取到多个 adapter/*_codec.json 与 adapter/errors.json。
 //
@@ -17,8 +16,6 @@ import (
 	"net/textproto"
 	"os"
 	"path/filepath"
-	"slices"
-	"sort"
 	"strings"
 	"testing"
 
@@ -191,62 +188,13 @@ func TestCodecDist_UploadPopulatesMultiCodec(t *testing.T) {
 	}
 }
 
-// expectedCodecConfigFiles 返回 brief 要求出现在 configFiles 清单中的 adapter 条目（已排序）。
+// expectedCodecConfigFiles 返回浏览器配置下载应提供的 adapter 条目。
 func expectedCodecConfigFiles() []string {
 	return []string{
 		"adapter/tcp_logic_codec.json",
 		"adapter/tcp_battle_codec.json",
 		"adapter/udp_battle_codec.json",
 		"adapter/errors.json",
-	}
-}
-
-// configFilesForTask 复用实现侧的 buildConfigFiles，确保测试与分发逻辑一致。
-func configFilesForTask(t *testing.T, cfg *TaskConfig) []string {
-	t.Helper()
-	return buildConfigFiles(cfg)
-}
-
-// TestCodecDist_ConfigFilesListsMultiCodec configFiles 清单含各 adapter/*_codec.json +
-// adapter/errors.json，且不含 adapter/codec.lua、adapter/error.lua。
-func TestCodecDist_ConfigFilesListsMultiCodec(t *testing.T) {
-	srv, _, cleanup := setupCodecDistServer(t)
-	defer cleanup()
-
-	body, ct := newCodecDistMultipart(t)
-	req := httptest.NewRequest(http.MethodPost, "/sbot/tasks", body)
-	req.Header.Set("Content-Type", ct)
-	rec := httptest.NewRecorder()
-	srv.handleCreateTask(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d, body=%s", rec.Code, rec.Body.String())
-	}
-	var resp struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode create response: %v", err)
-	}
-	task, ok := srv.tasks.Get(resp.ID)
-	if !ok {
-		t.Fatalf("task not found")
-	}
-
-	files := configFilesForTask(t, &task.Config)
-	sort.Strings(files)
-
-	// 必须含期望的 4 个 adapter 文件
-	for _, w := range expectedCodecConfigFiles() {
-		found := slices.Contains(files, w)
-		if !found {
-			t.Fatalf("configFiles missing %s; got %v", w, files)
-		}
-	}
-	// 不得含历史 Lua adapter 产物
-	for _, f := range files {
-		if f == "adapter/codec.lua" || f == "adapter/error.lua" {
-			t.Fatalf("configFiles must not contain legacy %s; got %v", f, files)
-		}
 	}
 }
 

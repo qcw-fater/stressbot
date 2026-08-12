@@ -18,6 +18,7 @@ var requiredSchemaColumns = map[string][]string{
 	"flow_template":       {"id", "flow_json"},
 	"action_template":     {"id", "name", "data_json"},
 	"listen_template":     {"id", "name", "data_json"},
+	"agent_commands":      {"command_id", "sequence", "agent_id", "task_id", "kind", "payload", "state", "created_at_unix_nano", "acknowledged_at_unix_nano", "rejection_reason"},
 }
 
 type schemaIndex struct {
@@ -81,12 +82,17 @@ func validateSchemaSnapshot(snapshot schemaSnapshot) error {
 		{"task_aggregated", "PRIMARY", []string{"task_id", "stage_index"}},
 		{"action_template", "uq_action_template_name", []string{"name"}},
 		{"listen_template", "uq_listen_template_name", []string{"name"}},
+		{"agent_commands", "uq_agent_commands_sequence", []string{"sequence"}},
 	} {
 		index, ok := snapshot.indexes[contract.table][contract.name]
 		if !ok || !index.unique || !slices.Equal(index.columns, contract.columns) {
 			problems = append(problems, fmt.Sprintf(
 				"索引 %s.%s 不符合唯一列契约 %v", contract.table, contract.name, contract.columns))
 		}
+	}
+	replay, ok := snapshot.indexes["agent_commands"]["idx_agent_commands_replay"]
+	if !ok || replay.unique || !slices.Equal(replay.columns, []string{"agent_id", "state", "sequence"}) {
+		problems = append(problems, "索引 agent_commands.idx_agent_commands_replay 不符合重放契约")
 	}
 
 	for _, table := range []string{"action_template", "listen_template"} {

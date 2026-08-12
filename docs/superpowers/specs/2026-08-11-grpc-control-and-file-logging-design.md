@@ -4,7 +4,7 @@
 
 本轮只完成两个架构阶段：
 
-1. 使用原生 `grpc-go` 和 mTLS 一次性替换 Admin 与 Agent 之间的 HTTP 控制面。
+1. 使用原生 `grpc-go` 一次性替换 Admin 与 Agent 之间的 HTTP 控制面。
 2. 删除内置日志环形缓冲、日志查询/下载 API 和 stressbot 前端日志界面，使 Admin、Agent 只输出结构化文件日志。
 
 浏览器访问 Admin 的 HTTPS 管理面继续保留，仍使用 REST/OpenAPI。Kafka、Vector、Filebeat、Loki、Elasticsearch、ClickHouse、Grafana 和 Kibana 均不进入本轮代码或部署配置。CEL、事件化 listen、sqlc 作为旧 M6 内容完整保留，等待后续单独讨论。
@@ -16,7 +16,7 @@
 Admin 暴露两个相互隔离的入口：
 
 - 管理面：现有 HTTPS REST API 和静态前端，只服务浏览器和管理者。
-- 控制面：独立 gRPC 监听端口，只服务 Agent，强制 mTLS。
+- 控制面：独立的内网明文 gRPC 监听端口，只服务 Agent，不经过浏览器管理面的 Nginx/HTTPS 入口。
 
 Agent 不再监听任何控制 HTTP 端口，也不向 Admin 轮询任务。Agent 根据配置中的固定 Admin 地址主动建立一个长期复用的 `grpc.ClientConn`。单 Admin 架构不需要 go-zero、etcd、服务发现或负载均衡。
 
@@ -51,7 +51,9 @@ service AgentTelemetryService {
 - Agent 软件版本和能力集合
 - 当前任务 ID、状态和最近确认的命令序号
 
-Admin 校验证书身份、声明的 Agent ID 和协议版本。校验成功后建立带递增 `generation` 的会话并发送 `welcome`；同一 Agent 的新会话替换旧会话，旧流的迟到消息因 generation 不匹配被丢弃。证书无效、Agent ID 不匹配或协议版本不同均返回明确 gRPC 状态并关闭流。
+Admin 校验声明的 Agent ID 和协议版本。校验成功后建立带递增 `generation` 的会话并发送 `welcome`；同一 Agent 的新会话替换旧会话，旧流的迟到消息因 generation 不匹配被丢弃。Agent ID 为空或协议版本不同均返回明确 gRPC 状态并关闭流。
+
+本轮明确接受以下信任边界：Agent ID 是逻辑标识，不提供密码学身份认证；能够进入控制面内网并访问 gRPC 端口的主机可以尝试冒充 Agent。部署必须让控制面只绑定受控私网地址，并由主机或网络防火墙仅放行 Agent 网段，禁止将该端口发布到公网。若未来出现跨公网、跨不可信网络或内部零信任需求，再单独引入 mTLS、每 Agent Token 或网络层身份方案；当前实现不保留证书配置和隐式安全模式切换。
 
 Admin 的会话注册表只保存在线状态、最后心跳、流发送队列和 generation。每次心跳只更新内存并返回携带新租约截止时间的 `heartbeatAck`，不写数据库。心跳确认使用单槽覆盖语义，避免网络拥塞时累计过期 ACK；控制流发送 owner 保证租约确认不会被普通命令长期饿死。现有 unhealthy/offline 阈值继续生效；状态发生变化时才持久化。
 
@@ -163,6 +165,7 @@ gRPC 阶段删除：
 - `agent/http_client.go`、`agent/http_server.go` 及相关测试。
 - Admin Agent 上行 HTTP 路由和 pending-task 路由。
 - Agent 控制 `port`、`publicUrl`、HTTP TLS 和 HTTP fallback 配置。
+- Admin/Agent 控制面的 `certFile`、`keyFile`、`peerCaFile` 配置及证书身份绑定代码。
 
 保留浏览器管理 OpenAPI；只删除其中不再存在的日志管理端点。Agent 不再开放 `/healthz`，Admin 通过 gRPC 会话和应用心跳判断 Agent 健康。
 
@@ -170,7 +173,6 @@ gRPC 阶段删除：
 
 - gRPC `Canceled`：正常停止，不输出 Error。
 - gRPC `Unavailable`：进入退避重连；运行任务受租约保护。
-- `Unauthenticated`/`PermissionDenied`：证书或身份错误，记录 Error，停止快速重试。
 - `FailedPrecondition`：协议版本不匹配，fail loud，不降级 HTTP。
 - Bundle `NotFound`/摘要失败：拒绝任务并 ACK rejected，不启动不完整配置。
 - Telemetry 拥塞：覆盖旧采样并计数，不升级为任务失败。
@@ -200,6 +202,7 @@ gRPC 阶段删除：
 ## 13. 明确不做
 
 - 不引入 go-zero、etcd、服务注册中心或消息队列。
+- 不为 Admin↔Agent 控制面启用 TLS/mTLS；其网络隔离由私网监听和防火墙承担。
 - 不实现 Kafka/Loki/Elasticsearch/ClickHouse/Grafana/Kibana 部署配置。
 - 不在 stressbot 前端保留日志入口或跳转占位。
 - 不保留旧 HTTP 控制面、日志 API 或配置兼容层。

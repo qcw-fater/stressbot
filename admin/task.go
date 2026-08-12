@@ -317,7 +317,9 @@ func validTransition(from, to TaskState) bool {
 	case TaskRunning:
 		return to == TaskStopping || to == TaskStopped || to == TaskFailed
 	case TaskStopping:
-		return to == TaskStopped || to == TaskFailed
+		// stopping -> running is the narrow rollback used when the durable Stop
+		// command could not be created; no Agent has been instructed to stop.
+		return to == TaskRunning || to == TaskStopped || to == TaskFailed
 	default:
 		return false
 	}

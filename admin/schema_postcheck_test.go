@@ -19,6 +19,8 @@ func validSchemaSnapshot() schemaSnapshot {
 	snapshot.addIndex("task_aggregated", "PRIMARY", true, "task_id", "stage_index")
 	snapshot.addIndex("action_template", "uq_action_template_name", true, "name")
 	snapshot.addIndex("listen_template", "uq_listen_template_name", true, "name")
+	snapshot.addIndex("agent_commands", "uq_agent_commands_sequence", true, "sequence")
+	snapshot.addIndex("agent_commands", "idx_agent_commands_replay", false, "agent_id", "state", "sequence")
 	return snapshot
 }
 

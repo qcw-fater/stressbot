@@ -34,9 +34,20 @@ import {
   StopOutlined,
   ThunderboltOutlined,
   DashboardOutlined,
-  AlignLeftOutlined,
 } from '@ant-design/icons';
-import { App as AntApp, Badge, Button, Divider, Popover, Segmented, Space, Switch, Tag, Tooltip, Typography } from 'antd';
+import {
+  App as AntApp,
+  Badge,
+  Button,
+  Divider,
+  Popover,
+  Segmented,
+  Space,
+  Switch,
+  Tag,
+  Tooltip,
+  Typography,
+} from 'antd';
 import { useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import {
@@ -56,13 +67,15 @@ export interface RuntimeBarProps {
   onOpenHistory?: () => void;
   onOpenAgents?: () => void;
   onOpenSystem?: () => void;
-  onOpenLogs?: () => void;
   onOpenNotepad?: () => void;
   onOpenProtocolConfig?: () => void;
 }
 
 const SECTION_DIVIDER = (
-  <Divider type="vertical" style={{ margin: '0 6px', height: 22, borderColor: 'var(--divider-bg)' }} />
+  <Divider
+    type="vertical"
+    style={{ margin: '0 6px', height: 22, borderColor: 'var(--divider-bg)' }}
+  />
 );
 
 const STATE_COLOR: Record<TaskBrief['state'], string> = {
@@ -88,7 +101,6 @@ export function RuntimeBar({
   onOpenHistory,
   onOpenAgents,
   onOpenSystem,
-  onOpenLogs,
   onOpenNotepad,
   onOpenProtocolConfig,
 }: RuntimeBarProps) {
@@ -117,7 +129,17 @@ export function RuntimeBar({
   );
 
   // 设置 Popover 用到的 UI 状态
-  const { theme, setTheme, showListenEdges, toggleListenEdges, debugMode, setDebugMode, historyEnabled, pendingSyncResult, codecSchemaErrors } = useEditorStore(
+  const {
+    theme,
+    setTheme,
+    showListenEdges,
+    toggleListenEdges,
+    debugMode,
+    setDebugMode,
+    historyEnabled,
+    pendingSyncResult,
+    codecSchemaErrors,
+  } = useEditorStore(
     useShallow((s) => ({
       theme: s.theme,
       setTheme: s.setTheme,
@@ -216,7 +238,9 @@ export function RuntimeBar({
 
   const settingsContent = (
     <Space direction="vertical" size={10} style={{ minWidth: 240 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+      <div
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
+      >
         <Space size={6}>
           <BgColorsOutlined style={{ color: 'var(--text-secondary)' }} />
           <span>主题</span>
@@ -228,7 +252,9 @@ export function RuntimeBar({
           unCheckedChildren="浅色"
         />
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+      <div
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
+      >
         <Space size={6}>
           <BranchesOutlined style={{ color: 'var(--text-secondary)' }} />
           <span>显示监听边</span>
@@ -260,7 +286,12 @@ export function RuntimeBar({
           options={[
             {
               label: (
-                <span style={{ color: !debugMode ? 'var(--mode-test-color)' : undefined, fontWeight: !debugMode ? 600 : undefined }}>
+                <span
+                  style={{
+                    color: !debugMode ? 'var(--mode-test-color)' : undefined,
+                    fontWeight: !debugMode ? 600 : undefined,
+                  }}
+                >
                   <CheckCircleOutlined style={{ marginRight: 4 }} />
                   测试
                 </span>
@@ -269,7 +300,12 @@ export function RuntimeBar({
             },
             {
               label: (
-                <span style={{ color: debugMode ? 'var(--mode-debug-color)' : undefined, fontWeight: debugMode ? 600 : undefined }}>
+                <span
+                  style={{
+                    color: debugMode ? 'var(--mode-debug-color)' : undefined,
+                    fontWeight: debugMode ? 600 : undefined,
+                  }}
+                >
                   <BugOutlined style={{ marginRight: 4 }} />
                   调试
                 </span>
@@ -329,34 +365,37 @@ export function RuntimeBar({
             {STATE_LABEL[activeTask.state]}
           </Tag>
           {modeTag}
-          {agentEvents.some((e) => e.type === 'offline' || e.type === 'restarted') && (() => {
-            const offlineIds = new Set(
-              agentEvents.filter((e) => e.type === 'offline').map((e) => e.agentId),
-            );
-            const restartedIds = new Set(
-              agentEvents.filter((e) => e.type === 'restarted').map((e) => e.agentId),
-            );
-            const reconnectedIds = new Set(
-              agentEvents.filter((e) => e.type === 'reconnected').map((e) => e.agentId),
-            );
-            const stillOffline = [...offlineIds].filter((id) => !reconnectedIds.has(id));
-            const restartedOnly = [...restartedIds].filter((id) => !stillOffline.includes(id));
-            const problems = [...stillOffline, ...restartedOnly];
-            return problems.length > 0 ? (
-              <Tooltip
-                title={
-                  <>
-                    {stillOffline.length > 0 && <div>离线节点：{stillOffline.join('、')}</div>}
-                    {restartedOnly.length > 0 && <div>重启丢任务：{restartedOnly.join('、')}</div>}
-                  </>
-                }
-              >
-                <Tag color="warning" style={{ margin: 0 }}>
-                  {problems.length} 节点异常
-                </Tag>
-              </Tooltip>
-            ) : null;
-          })()}
+          {agentEvents.some((e) => e.type === 'offline' || e.type === 'restarted') &&
+            (() => {
+              const offlineIds = new Set(
+                agentEvents.filter((e) => e.type === 'offline').map((e) => e.agentId),
+              );
+              const restartedIds = new Set(
+                agentEvents.filter((e) => e.type === 'restarted').map((e) => e.agentId),
+              );
+              const reconnectedIds = new Set(
+                agentEvents.filter((e) => e.type === 'reconnected').map((e) => e.agentId),
+              );
+              const stillOffline = [...offlineIds].filter((id) => !reconnectedIds.has(id));
+              const restartedOnly = [...restartedIds].filter((id) => !stillOffline.includes(id));
+              const problems = [...stillOffline, ...restartedOnly];
+              return problems.length > 0 ? (
+                <Tooltip
+                  title={
+                    <>
+                      {stillOffline.length > 0 && <div>离线节点：{stillOffline.join('、')}</div>}
+                      {restartedOnly.length > 0 && (
+                        <div>重启丢任务：{restartedOnly.join('、')}</div>
+                      )}
+                    </>
+                  }
+                >
+                  <Tag color="warning" style={{ margin: 0 }}>
+                    {problems.length} 节点异常
+                  </Tag>
+                </Tooltip>
+              ) : null;
+            })()}
         </Space>
       )}
       {mode === 'finalReport' && (
@@ -380,7 +419,9 @@ export function RuntimeBar({
             if (summary.luaSkipped) detailLines.push(`脚本运行时未归还 ${summary.luaSkipped}`);
             return (
               <Tooltip title={detailLines.join('；') || info.label}>
-                <Tag color={info.color} style={{ margin: 0 }}>{info.label}</Tag>
+                <Tag color={info.color} style={{ margin: 0 }}>
+                  {info.label}
+                </Tag>
               </Tooltip>
             );
           })()}
@@ -422,7 +463,12 @@ export function RuntimeBar({
       )}
       {(mode === 'running' || mode === 'viewActive') && activeTask && (
         <Space size={4}>
-          <Button type="primary" icon={<EditOutlined />} onClick={detachToEditWithRestore} style={startButtonStyle}>
+          <Button
+            type="primary"
+            icon={<EditOutlined />}
+            onClick={detachToEditWithRestore}
+            style={startButtonStyle}
+          >
             返回编辑
           </Button>
           <Tooltip
@@ -460,17 +506,18 @@ export function RuntimeBar({
             系统
           </Button>
         </Tooltip>
-        <Tooltip title="运行日志：查看服务器与节点输出的文本日志">
-          <Button icon={<AlignLeftOutlined />} onClick={onOpenLogs}>
-            日志
-          </Button>
-        </Tooltip>
         <Tooltip title="笔记：编辑笔记、导入定义文件、快速查找路由">
           <Button icon={<FileTextOutlined />} onClick={onOpenNotepad}>
             笔记
           </Button>
         </Tooltip>
-        <Tooltip title={codecSchemaErrors && codecSchemaErrors.length > 0 ? `协议配置有 ${codecSchemaErrors.length} 处问题` : '协议配置：按连接管理帧布局与错误码映射'}>
+        <Tooltip
+          title={
+            codecSchemaErrors && codecSchemaErrors.length > 0
+              ? `协议配置有 ${codecSchemaErrors.length} 处问题`
+              : '协议配置：按连接管理帧布局与错误码映射'
+          }
+        >
           <Badge
             count={codecSchemaErrors && codecSchemaErrors.length > 0 ? codecSchemaErrors.length : 0}
             overflowCount={99}
@@ -483,7 +530,11 @@ export function RuntimeBar({
         </Tooltip>
         <Tooltip title="资源管理：编辑定义文件与脚本，并在启动任务时下发到节点">
           <Badge
-            count={pendingSyncResult ? pendingSyncResult.conflicts.length + pendingSyncResult.removed.length : 0}
+            count={
+              pendingSyncResult
+                ? pendingSyncResult.conflicts.length + pendingSyncResult.removed.length
+                : 0
+            }
             overflowCount={99}
             offset={[-4, 4]}
             color="orange"
@@ -520,12 +571,7 @@ export function RuntimeBar({
       {SECTION_DIVIDER}
 
       {/* === 设置 Popover === */}
-      <Popover
-        content={settingsContent}
-        title="界面设置"
-        trigger="click"
-        placement="bottomRight"
-      >
+      <Popover content={settingsContent} title="界面设置" trigger="click" placement="bottomRight">
         <Tooltip title="主题 / 监听边显示">
           <Button icon={<SettingOutlined />} />
         </Tooltip>

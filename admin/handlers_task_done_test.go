@@ -1,9 +1,6 @@
 package admin
 
 import (
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	stresslog "stressbot/utils/log"
@@ -11,7 +8,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestHandleAgentTaskDoneDoesNotClearNewTask(t *testing.T) {
+func TestAcceptTaskReportDoesNotClearNewTask(t *testing.T) {
 	originalLogger := stresslog.GetLogger()
 	stresslog.ReplaceLogger(zap.NewNop())
 	if originalLogger != nil {
@@ -44,19 +41,8 @@ func TestHandleAgentTaskDoneDoesNotClearNewTask(t *testing.T) {
 	}
 
 	server := &AdminServer{tasks: tasks, agents: agents}
-	request := httptest.NewRequest(
-		http.MethodPost,
-		"/sbot/agent/agent-1/task/old-task/done",
-		strings.NewReader(`{"result":"completed"}`),
-	)
-	request.SetPathValue("id", "agent-1")
-	request.SetPathValue("tid", "old-task")
-	recorder := httptest.NewRecorder()
-
-	server.handleAgentTaskDone(recorder, request)
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body = %s", recorder.Code, http.StatusOK, recorder.Body.String())
+	if err := server.acceptTaskReport(TaskCompletionReport{AgentID: "agent-1", TaskID: "old-task", Result: ResultCompleted}); err != nil {
+		t.Fatalf("acceptTaskReport() error = %v", err)
 	}
 	node, ok := agents.Get("agent-1")
 	if !ok {

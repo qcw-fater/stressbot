@@ -8,7 +8,6 @@ import (
 	"runtime/debug"
 
 	"stressbot/admin"
-	"stressbot/logview"
 	"stressbot/utils"
 	stresslog "stressbot/utils/log"
 
@@ -22,16 +21,34 @@ import (
 var Version = "dev"
 
 func main() {
+	var closeLog func() error
+	exitProcess := func(code int) {
+		if closeLog != nil {
+			_ = closeLog()
+		}
+		os.Exit(code)
+	}
+
 	// 进程级顶层 recover：防止任何未捕获的 panic 直接让进程崩溃，
 	// 同时尽量把 stack trace 写入日志而不是仅 stderr。
 	defer func() {
 		if rec := recover(); rec != nil {
 			// 日志系统可能还没初始化，两路都写一份
 			fmt.Fprintf(os.Stderr, "[ADMIN] 顶层 panic: %v\n%s\n", rec, debug.Stack())
-			stresslog.Error("[ADMIN] 顶层 panic",
-				zap.Any("panic", rec),
-				zap.String("stack", string(debug.Stack())))
+			if stresslog.GetLogger() != nil {
+				stresslog.Error("[ADMIN] 顶层 panic",
+					zap.Any("panic", rec),
+					zap.String("stack", string(debug.Stack())))
+			}
+			if closeLog != nil {
+				_ = closeLog()
+			}
 			os.Exit(2)
+		}
+		if closeLog != nil {
+			if err := closeLog(); err != nil {
+				fmt.Fprintf(os.Stderr, "关闭 Admin 日志失败: %v\n", err)
+			}
 		}
 	}()
 
@@ -42,7 +59,7 @@ func main() {
 	migrationCommand, err := admin.ParseMigrationCommand(*migrationFlag)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	// -d 模式：fork 子进程后父进程退出
@@ -54,7 +71,7 @@ func main() {
 	cfg, err := admin.LoadConfig(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	// 配置中启用守护进程且当前不是守护进程子进程
@@ -72,15 +89,13 @@ func main() {
 		MaxAge:       30,
 		Compress:     true,
 	}
-	stresslog.InitLog(cfg.Log.Path, "admin", logConf, "")
-	newLogger := logview.AttachRingBuffer(stresslog.GetLogger(), 5000, stresslog.LevelEnabler(), zap.String("SR", "admin"))
-	stresslog.ReplaceLogger(newLogger)
+	closeLog = stresslog.InitLog(cfg.Log.Path, "admin", logConf, "")
 
 	stresslog.Info("[MAIN] Admin 服务器启动", zap.String("version", Version))
 	if migrationCommand != admin.MigrationAuto {
 		if err := admin.RunMigrationCommand(context.Background(), *cfg, migrationCommand, os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "数据库迁移命令失败: %v\n", err)
-			os.Exit(1)
+			exitProcess(1)
 		}
 		return
 	}
@@ -98,12 +113,12 @@ func main() {
 	srv, err := admin.NewAdminServer(*cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "初始化 Admin 服务器失败: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 
 	if err := srv.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Admin 服务器退出: %v\n", err)
-		os.Exit(1)
+		exitProcess(1)
 	}
 	if stopPprof != nil {
 		stopPprof()
