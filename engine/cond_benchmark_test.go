@@ -31,6 +31,7 @@ func BenchmarkConditionEvaluation(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
+			b.ResetTimer()
 			b.ReportAllocs()
 			for b.Loop() {
 				if !condition.EvalState(store) {

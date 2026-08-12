@@ -10,6 +10,15 @@
 
 ---
 
+## 实施结果（2026-08-12）
+
+- 五组条件热路径均为 `0 B/op`、`0 allocs/op`；最终五轮单次求值范围由改造前的约 `380–1397 ns/op` 降至 `67–373 ns/op`（多数样本为 `67–245 ns/op`）。
+- `go build ./...`、`go test ./...`、相关包 `go test -race`、`go vet`、前端 TypeScript 编译及 647 个 Vitest 用例通过。
+- 当前 `conf/flow/flow.json` 在编辑器中无校验错误（4 处既有警告）；standalone 使用该配置运行 180 秒，条件未准备、AST 异常、panic、fatal 均为零。
+- 运行日志包含现有业务返回码与监听队列覆盖警告，未将这些外部/业务告警误记为本改造通过项。
+
+---
+
 ## 文件结构
 
 - Create: `engine/cond_compile.go` — AST 节点、编译器和表达式去重器。
@@ -29,7 +38,7 @@
 **Files:**
 - Create: `engine/cond_benchmark_test.go`
 
-- [ ] **Step 1: 写入改造前 Benchmark**
+- [x] **Step 1: 写入改造前 Benchmark**
 
 创建固定 Store 和五类表达式，计时循环中只调用当前 `EvalCondition`：
 
@@ -61,7 +70,7 @@ func BenchmarkConditionEvaluation(b *testing.B) {
 }
 ```
 
-- [ ] **Step 2: 运行并记录基线**
+- [x] **Step 2: 运行并记录基线**
 
 Run:
 
@@ -72,7 +81,7 @@ go test ./engine -run '^$' -bench '^BenchmarkConditionEvaluation$' -benchmem -co
 
 Expected: 五个子基准全部完成并输出 `ns/op`、`B/op`、`allocs/op`。完整结果保留在任务记录中，Task 5 使用同一命令比较。
 
-- [ ] **Step 3: 提交基准**
+- [x] **Step 3: 提交基准**
 
 ```powershell
 git add engine/cond_benchmark_test.go
@@ -88,7 +97,7 @@ git commit -m "test: benchmark condition interpretation"
 - Create: `engine/cond_compile_test.go`
 - Modify: `engine/cond_compare.go`
 
-- [ ] **Step 1: 写编译一次、重复读取实时 state 的失败测试**
+- [x] **Step 1: 写编译一次、重复读取实时 state 的失败测试**
 
 ```go
 func TestCompiledConditionReadsCurrentStore(t *testing.T) {
@@ -105,13 +114,13 @@ func TestCompiledConditionReadsCurrentStore(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认 API 尚不存在**
+- [x] **Step 2: 运行测试确认 API 尚不存在**
 
 Run: `go test ./engine -run '^TestCompiledConditionReadsCurrentStore$'`
 
 Expected: FAIL，错误指向 `compileCondition` 或 `CompiledCondition` 未定义。
 
-- [ ] **Step 3: 定义编译产物和紧凑节点**
+- [x] **Step 3: 定义编译产物和紧凑节点**
 
 在 `engine/cond_compile.go` 定义：
 
@@ -181,7 +190,7 @@ func (c *CompiledCondition) LuaScript() (string, bool) {
 
 `compileCondition` 整体 `TrimSpace`；`state:` 使用现有 tokenizer 和递归下降优先级编译为节点索引；`lua:` 保存脚本名；未知前缀生成 `conditionUnsupported`。数字字面量在编译期解析，溢出生成 `conditionNodeRuntimeError`，仍在实际执行到该节点时失败。`conditionCompiler.compile(source)` 先按规范化 source 查询 `conditions`，未命中才调用 `compileCondition` 并保存结果。
 
-- [ ] **Step 4: 实现局部求值上下文**
+- [x] **Step 4: 实现局部求值上下文**
 
 在 `engine/cond_program.go` 定义：
 
@@ -207,17 +216,17 @@ func (c *CompiledCondition) EvalState(store *state.Store) bool {
 
 逻辑节点显式短路；其他二元节点先求左侧，左侧失败时不读右侧。比较、算术和负号继续调用 `strictCompare`、`evalArith`、`negate`，保持大 `uint64` 和整数除法语义。
 
-- [ ] **Step 5: 增加完整语义和并发测试**
+- [x] **Step 5: 增加完整语义和并发测试**
 
 表驱动用例必须包含：`index % 2`、`7 / 2`、负数取模、`!a == b`、`missing || fallback`、`uint64(9007199254740993)`、顶层非 bool、短路跳过错误节点。另用多个 goroutine 共享一个 CompiledCondition、各用独立 Store 求值，证明程序无共享可变状态。
 
-- [ ] **Step 6: 运行 AST 测试**
+- [x] **Step 6: 运行 AST 测试**
 
 Run: `go test ./engine -run '^(TestCompiledCondition|TestCompileCondition)'`
 
 Expected: PASS，无 panic。
 
-- [ ] **Step 7: 提交 AST 核心**
+- [x] **Step 7: 提交 AST 核心**
 
 ```powershell
 git add engine/cond_compile.go engine/cond_program.go engine/cond_compile_test.go engine/cond_compare.go
@@ -234,7 +243,7 @@ git commit -m "feat: compile state conditions to immutable AST"
 - Modify: `engine/action_state_test.go`
 - Modify: `engine/cond_parser_test.go`
 
-- [ ] **Step 1: 写递归准备和去重失败测试**
+- [x] **Step 1: 写递归准备和去重失败测试**
 
 ```go
 func TestPrepareTaskFlowCompilesEveryConditionAndDeduplicates(t *testing.T) {
@@ -262,13 +271,13 @@ func TestPrepareTaskFlowCompilesEveryConditionAndDeduplicates(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认准备 API 尚不存在**
+- [x] **Step 2: 运行测试确认准备 API 尚不存在**
 
 Run: `go test ./engine -run '^TestPrepareTaskFlowCompilesEveryConditionAndDeduplicates$'`
 
 Expected: FAIL，缺少 `PrepareTaskFlow` 或私有编译字段。
 
-- [ ] **Step 3: 给条件拥有者增加私有字段**
+- [x] **Step 3: 给条件拥有者增加私有字段**
 
 在 `Node`、`SwitchCase` 和 `FieldBind` 三个既有结构体末尾分别追加对应私有字段；不要改动其 JSON 字段：
 
@@ -284,7 +293,7 @@ compiledCondition *CompiledCondition
 compiledCondition *CompiledCondition
 ```
 
-- [ ] **Step 4: 实现统一准备入口**
+- [x] **Step 4: 实现统一准备入口**
 
 ```go
 func PrepareTaskFlow(flow *TaskFlow) error {
@@ -353,7 +362,7 @@ func (c *conditionCompiler) prepareBinding(where string, binding *FieldBind) err
 
 `conditionCompiler.prepare` 对空字符串把 target 置 nil；非空时调用去重编译器并用 `fmt.Errorf("%s 条件表达式语法错误 %q: %w", where, source, err)` 包装错误。`prepareBinding` 先准备当前 binding，再递归处理 `Entries[i].Value`。删除 `ValidateStateActions`，不保留兼容别名。
 
-- [ ] **Step 5: 测试准备后文本被修改时 fail-closed**
+- [x] **Step 5: 测试准备后文本被修改时 fail-closed**
 
 增加通用匹配函数及四个拥有者访问器：
 
@@ -378,7 +387,7 @@ func (b *FieldBind) preparedCondition() *CompiledCondition {
 
 测试把 `Condition` 从 `state:ready` 改成 `state:other`，断言访问器返回 nil；不重编译。
 
-- [ ] **Step 6: 运行准备阶段测试并提交**
+- [x] **Step 6: 运行准备阶段测试并提交**
 
 Run: `go test ./engine -run '^(TestPrepareTaskFlow|TestPreparedCondition)'`
 
@@ -401,7 +410,7 @@ git commit -m "feat: prepare flow conditions at load time"
 - Delete: `engine/cond_eval.go`
 - Delete/replace: `engine/cond_parser.go`
 
-- [ ] **Step 1: 写未准备条件不回退解析的失败测试**
+- [x] **Step 1: 写未准备条件不回退解析的失败测试**
 
 ```go
 func TestExecutorDoesNotParseUnpreparedCondition(t *testing.T) {
@@ -420,7 +429,7 @@ func TestExecutorDoesNotParseUnpreparedCondition(t *testing.T) {
 
 当前字符串接口会调用 handler，因此测试应先失败。
 
-- [ ] **Step 2: 修改 ActionHandler 与控制流**
+- [x] **Step 2: 修改 ActionHandler 与控制流**
 
 ```go
 type ActionHandler interface {
@@ -433,7 +442,7 @@ type ActionHandler interface {
 
 loop、boolean、switch 先取条件拥有者的 `preparedCondition()`；非空字符串没有匹配程序时记录错误并返回 false，不调用 handler。测试 handler 改为记录 `condition.Source()`。
 
-- [ ] **Step 3: 修改 Robot handler**
+- [x] **Step 3: 修改 Robot handler**
 
 ```go
 func (h *robotActionHandler) ExecuteCondition(condition *engine.CompiledCondition) bool {
@@ -444,7 +453,7 @@ func (h *robotActionHandler) ExecuteCondition(condition *engine.CompiledConditio
 }
 ```
 
-- [ ] **Step 4: 修改 FieldBind 热路径**
+- [x] **Step 4: 修改 FieldBind 热路径**
 
 `ActionExecutor` 所有普通 binding 和 map entry 调用点改为传入 `*FieldBind`，并使用：
 
@@ -461,11 +470,11 @@ func (ae *ActionExecutor) bindingConditionSatisfied(binding *FieldBind) bool {
 }
 ```
 
-- [ ] **Step 5: 接入生产加载入口和 codec 心跳绑定**
+- [x] **Step 5: 接入生产加载入口和 codec 心跳绑定**
 
 `cmd/agent/main.go`、`agent/task_runner.go` 改调 `PrepareTaskFlow`。`codecFieldBindsToEngine` 改为 `([]engine.FieldBind, error)`，递归转换后调用 `PrepareFieldBindings`；注册心跳前处理错误，不增加懒编译。
 
-- [ ] **Step 6: 迁移既有条件测试并删除旧入口**
+- [x] **Step 6: 迁移既有条件测试并删除旧入口**
 
 现有 parser 测试 helper 改为先 `compileCondition("state:"+expr)` 再 `EvalState(store)`，原断言不删。物理删除 `EvalCondition` 和 inline 求值 parser。
 
@@ -481,7 +490,7 @@ rg -n -F "parseExpr(" engine robot agent cmd
 
 Expected: 两次均零匹配；`rg` exit 1 在这里表示通过。
 
-- [ ] **Step 7: 运行相关测试并提交**
+- [x] **Step 7: 运行相关测试并提交**
 
 Run: `go test ./engine ./robot ./agent ./cmd/agent`
 
@@ -500,7 +509,7 @@ git commit -m "perf: execute precompiled flow conditions"
 - Modify: `engine/cond_benchmark_test.go`
 - Modify: `docs/superpowers/plans/2026-08-12-condition-ast-implementation.md`
 
-- [ ] **Step 1: Benchmark 改为循环外编译**
+- [x] **Step 1: Benchmark 改为循环外编译**
 
 ```go
 condition, err := compileCondition(tc.expr)
@@ -512,7 +521,7 @@ for b.Loop() {
 }
 ```
 
-- [ ] **Step 2: 运行相同 Benchmark 五次并比较 Task 1**
+- [x] **Step 2: 运行相同 Benchmark 五次并比较 Task 1**
 
 ```powershell
 $env:GOCACHE = Join-Path (Get-Location) '.gocache'
@@ -521,11 +530,11 @@ go test ./engine -run '^$' -bench '^BenchmarkConditionEvaluation$' -benchmem -co
 
 Expected: 全部子基准不慢于解释执行；成功热路径不再包含 tokenize/parser 分配。若有分配，使用 memprofile 只定位并修复 AST 自身造成的分配。
 
-- [ ] **Step 3: 按 backend-review 检查结构与性能**
+- [x] **Step 3: 按 backend-review 检查结构与性能**
 
 确认 AST 构造后只读、无全局缓存、不保存 Store/Robot/LState、所有 state 运行时读取、map entries 和心跳无遗漏、热路径无新增 goroutine/锁/对象池。
 
-- [ ] **Step 4: 后端编译和完整 Go 测试**
+- [x] **Step 4: 后端编译和完整 Go 测试**
 
 ```powershell
 $env:GOCACHE = Join-Path (Get-Location) '.gocache'
@@ -535,7 +544,7 @@ go test ./...
 
 Expected: 两条命令 exit 0。
 
-- [ ] **Step 5: 前端类型检查和 Vitest**
+- [x] **Step 5: 前端类型检查和 Vitest**
 
 ```powershell
 Push-Location cmd/web
@@ -546,7 +555,7 @@ Pop-Location
 
 Expected: TypeScript 编译和 Vitest 全部通过。
 
-- [ ] **Step 6: 配置校验与本地运行**
+- [x] **Step 6: 配置校验与本地运行**
 
 本阶段不改 `conf/flow/flow.json`，仍在前端编辑器打开并确认校验报告无错误。随后启动 standalone Agent：
 
@@ -559,7 +568,7 @@ $agentProcess = Start-Process -FilePath "go" -ArgumentList @(
 
 每 30 秒分别运行 `Get-Process -Id $agentProcess.Id` 和日志尾部检查，累计至少 2 分钟；每次等待单独执行，禁止一次阻塞超过 60 秒。结束时只运行 `Stop-Process -Id $agentProcess.Id`，不得按进程名批量终止。
 
-- [ ] **Step 7: 日志审查**
+- [x] **Step 7: 日志审查**
 
 ```powershell
 Select-String -Path log\stressbot.log -Pattern 'error|warn|失败' -CaseSensitive:$false |
@@ -568,7 +577,7 @@ Select-String -Path log\stressbot.log -Pattern 'error|warn|失败' -CaseSensitiv
 
 Expected: 无 AST 准备、未编译条件、panic 或新增异常。业务环境外部错误必须单独列出，不能声称为通过。
 
-- [ ] **Step 8: 检查最终差异并提交验证结果**
+- [x] **Step 8: 检查最终差异并提交验证结果**
 
 `git status --short` 和精确路径 diff 不得包含用户已有的 `conf/flow/flow.json`、事件化 listen 或前端业务修改。只暂存 benchmark 与已勾选计划记录并提交：
 
@@ -578,6 +587,6 @@ git diff --cached
 git commit -m "test: verify compiled condition performance"
 ```
 
-- [ ] **Step 9: 最终提交检查**
+- [x] **Step 9: 最终提交检查**
 
 `git log -6 --oneline` 应显示基准、AST 核心、加载准备、运行切换、最终性能验证分阶段提交；`git status --short` 只保留本阶段开始前已有的用户修改和不相关未跟踪文件。
