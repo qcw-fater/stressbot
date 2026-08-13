@@ -11,6 +11,14 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TARGETS: >-
+        linux/amd64
+        linux/arm64
+        windows/amd64
+        windows/arm64
+        darwin/amd64
+        darwin/arm64
     steps:
       - uses: actions/checkout@v6
 
@@ -27,42 +35,63 @@ jobs:
       - name: Build frontend
         run: cd cmd/web && npm ci && npm run build
 
-      - name: Build Linux amd64
+      - name: Build release binaries
         env:
           CGO_ENABLED: 0
-          GOOS: linux
-          GOARCH: amd64
         run: |
-          mkdir -p build/staging
-          go build -trimpath -ldflags "-X main.Version=${{ github.ref_name }}" -o build/staging/agent ./cmd/agent
-          go build -trimpath -ldflags "-X main.Version=${{ github.ref_name }}" -o build/staging/admin ./cmd/admin
+          for target in $RELEASE_TARGETS; do
+            IFS=/ read -r goos goarch <<< "$target"
+            staging="build/staging/$goos-$goarch"
+            mkdir -p "$staging"
+            GOOS="$goos" GOARCH="$goarch" go build \
+              -trimpath -ldflags "-X main.Version=${{ github.ref_name }}" \
+              -o "$staging/" ./cmd/stressbot ./cmd/agent ./cmd/admin
+          done
 
-      - name: Build Windows amd64
-        env:
-          GOOS: windows
-          GOARCH: amd64
+      - name: Package release archives
         run: |
-          mkdir -p build/staging-win
-          go build -trimpath -ldflags "-X main.Version=${{ github.ref_name }}" -o build/staging-win/agent.exe ./cmd/agent
-          go build -trimpath -ldflags "-X main.Version=${{ github.ref_name }}" -o build/staging-win/admin.exe ./cmd/admin
+          for target in $RELEASE_TARGETS; do
+            IFS=/ read -r goos goarch <<< "$target"
+            staging="build/staging/$goos-$goarch"
+            pkgname="stressbot-${{ github.ref_name }}-$goos-$goarch"
+            suffix=""
+            if [ "$goos" = "windows" ]; then
+              suffix=".exe"
+            fi
 
-      - name: Package Linux
-        run: |
-          pkgname="stressbot-${{ github.ref_name }}-linux-amd64"
-          mkdir -p "build/$pkgname/conf"
-          cp build/staging/agent build/staging/admin "build/$pkgname/"
-          cp conf/admin-config.json conf/agent-config.json conf/config.json cmd/web/nginx.conf "build/$pkgname/conf/"
-          cp -r cmd/web/dist "build/$pkgname/dist"
-          tar -czf "build/$pkgname.tar.gz" -C build "$pkgname"
+            mkdir -p "build/$pkgname/cmd/web"
+            cp "$staging/stressbot$suffix" "$staging/agent$suffix" "$staging/admin$suffix" "build/$pkgname/"
+            cp -r conf "build/$pkgname/conf"
+            cp -r cmd/web/dist "build/$pkgname/cmd/web/dist"
+            cp cmd/web/nginx.conf "build/$pkgname/nginx.conf"
 
-      - name: Package Windows
-        run: |
-          pkgname="stressbot-${{ github.ref_name }}-windows-amd64"
-          mkdir -p "build/$pkgname/conf"
-          cp build/staging-win/agent.exe build/staging-win/admin.exe "build/$pkgname/"
-          cp conf/admin-config.json conf/agent-config.json conf/config.json cmd/web/nginx.conf "build/$pkgname/conf/"
-          cp -r cmd/web/dist "build/$pkgname/dist"
-          cd build && zip -r "$pkgname.zip" "$pkgname"
+            if [ "$goos" = "windows" ]; then
+              test -f "build/$pkgname/stressbot.exe"
+              test -f "build/$pkgname/agent.exe"
+              test -f "build/$pkgname/admin.exe"
+            else
+              test -x "build/$pkgname/stressbot"
+              test -x "build/$pkgname/agent"
+              test -x "build/$pkgname/admin"
+            fi
+            test -f "build/$pkgname/conf/stressbot.toml"
+            test -f "build/$pkgname/conf/agent.toml"
+            test -f "build/$pkgname/conf/admin.toml"
+            test -d "build/$pkgname/conf/flow"
+            test -d "build/$pkgname/conf/proto"
+            test -d "build/$pkgname/conf/scripts"
+            test -d "build/$pkgname/conf/adapter"
+            test -f "build/$pkgname/cmd/web/dist/index.html"
+            test -f "build/$pkgname/nginx.conf"
+
+            if [ "$goos" = "windows" ]; then
+              (cd build && zip -qr "$pkgname.zip" "$pkgname")
+              test -f "build/$pkgname.zip"
+            else
+              tar -czf "build/$pkgname.tar.gz" -C build "$pkgname"
+              test -f "build/$pkgname.tar.gz"
+            fi
+          done
 
       - name: Create Release
         uses: softprops/action-gh-release@v3
