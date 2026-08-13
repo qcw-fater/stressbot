@@ -1,5 +1,7 @@
 # 动作错误码体系 — 技术文档
 
+> **历史说明（2026-08-13）**：本文保留错误码体系的演进记录，部分源码路径属于重构前布局。现行规则以 `AGENTS.md` 与 `errcode/` 实现为准。
+
 > 本文档基于 `plans/design-error-codes.md` 设计方案，对照实际代码（`errcode/codes.go`、`engine/errors.go`、`monitor/collector.go`、`robot/robot.go`、`adapter/lua_adapter.go`）编写。反映已实施状态。
 
 ---

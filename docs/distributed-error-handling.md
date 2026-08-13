@@ -1,5 +1,7 @@
 # 分布式异常处理机制
 
+> **历史说明（2026-08-13）**：本文基于旧 HTTP 控制面和重构前文件路径，仅供追溯。现行控制面契约与包布局请以 `controlplane/proto/control.proto`、`AGENTS.md` 和 `docs/superpowers/specs/2026-08-13-package-architecture-design.md` 为准。
+
 > 本文档描述 stressbot 在分布式（1 个 Admin + N 个 Agent）部署下的完整异常处理实现。
 > 全部以代码为准，不写"应该怎样"，只写"实际怎样"。每处行为描述均标注源码文件与关键函数，便于对照阅读。
 

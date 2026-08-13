@@ -1,5 +1,7 @@
 # Agent 节点技术文档
 
+> **历史说明（2026-08-13）**：本文记录重构前 Agent 实现，仅供追溯，不再作为当前实现契约。现行架构与控制面请以 `README.md`、`AGENTS.md`、`controlplane/proto/control.proto` 和 `docs/superpowers/specs/2026-08-13-package-architecture-design.md` 为准。
+
 > **角色定位**：Agent 是分布式压测系统的**执行节点**，负责注册到 Admin、接收任务、驱动机器人压测、采集压测/系统指标并上报 Admin。
 > **本文档目标读者**：负责 `agent/` 包及 `cmd/agent/` 入口的开发者。
 > **前置阅读**：`docs/admin-implementation.md`（Admin 端协议契约可双向交叉验证）。

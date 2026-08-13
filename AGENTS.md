@@ -53,22 +53,23 @@ cd cmd/web && npm run test                 # Vitest
 
 ### 核心分层（依赖顺序）
 
-- **`engine/`** — 流程执行引擎。`TaskFlow`（节点 DAG）、`ActionDef`（14 种 pattern 的声明式动作）、`Executor`（节点图遍历）、`ActionExecutor`（消息构建/发送/接收/存储）、条件解析器（`cond_eval.go` + `cond_parser.go`，支持 `&&`/`||`/`!`/括号嵌套）。`Executor` 通过 `ActionHandler` 接口委托实际工作，与 network/robot 层解耦。
+- **`flow/` + `binding/` + `engine/`** — `flow` 保存节点 DAG、动作、监听、onError 与条件模型，`binding` 保存字段取值和过滤规则，`engine` 只负责图遍历与动作执行。`Executor` 通过 `ActionHandler` 接口委托实际工作，与 network/robot 层解耦。
+- **`config/validation/`** — 负责 flow/codec JSON Schema 配置契约校验，领域解码与业务不变量校验仍由各调用方负责。
 - **`robot/`** — `Robot` 是单个压测客户端实例，持有独立的 state、网络连接、Lua 运行时和执行器。`Manager` 负责批量创建（`StartAll`）和渐进加压（`StartWithRampUp`，分阶段增加机器人数量和并发度）。`robotActionHandler` 实现 `engine.ActionHandler`，桥接 engine 层与 network 层。
 - **`network/`** — 基于 gnet 的 TCP/UDP 连接层。`Client` 管理多服务命名连接池。`Connection` 处理收发、请求-响应匹配（responseMap + buffered channel + 超时 select）、持久化监听队列/Go 回调分发、per-connection 声明式心跳。`Dialer` 封装 gnet 事件循环。
-- **`protox/`** — 动态 protobuf 加载与反射。`Loader` 发现 .proto 文件，`Registry` 编译，`Factory` 按全名在运行时创建/序列化/解析消息。
+- **`protocol/`** — 游戏协议处理总包：根包保存适配器接口、`CodecResolver` 和 `SchemaAdapter`，`protocol/codec/` 保存声明式编解码引擎，`protocol/protox/` 保存动态 protobuf 加载与反射。
 - **`script/`** — Lua 运行时池（`gopher-lua`）。每个 Robot 获取独占 `LState`，由主流程同步执行业务 Lua；阻塞型 Lua API 只暂停当前 Robot 主流程，connectionPump 与连接级心跳继续独立运行。7 个模块共 86 个函数：`network`（21）、`robot`（14）、`utils`（15）、`proto`（10）、`json`（2）、`log`（4）、`share`（20）。
-- **`state/` — 线程安全的键值状态存储（RWMutex）。保存服务器响应字段（通过 `store` 映射），支持 list/map 操作用于随机选取。`CompareValues` 支持 10 种过滤运算符。
-- **`adapter/` — 协议适配器接口（9 方法）。热路径帧解析（`HeaderSize`/`BodyLength`）纯 Go 缓存，编解码由 `CodecResolver` 按 `"<proto>:<service>"` 解析、`SchemaAdapter` 包装 `codec/` Go 引擎驱动，配置来自 `conf/adapter/<proto>_<service>_codec.json`（每连接一份）。
-- **`admin/` — Admin 服务器。浏览器管理面继续使用 HTTP（前缀 `/sbot/`）；Admin-Agent 控制面使用 `grpc-go`，包含双向会话/命令、资源包流式下载和指标客户端流。内部负责 TaskStore 状态机、AgentRegistry、SessionRegistry/CommandStore/CommandBus、BundleStore、TelemetryIngestor、任务分配、指标聚合、MySQL 历史归档和前端静态托管。
-- **`agent/` — Agent 节点。主动建立到 Admin 的 gRPC 长连接（指数退避）→ Hello/心跳与租约 → 接收可靠命令 → 下载内容寻址资源包 → TaskRunner 执行 → 流式上报压力/系统指标 → 最终报告确认。Agent 不开放本地 HTTP 控制面。
+- **`state/`** — 单机器人线程安全键值状态；Redis 跨节点共享状态位于 `state/shared/`。
+- **`admin/`** — Admin 应用装配。专属实现按职责直接位于 `admin/{task,agent,command,bundle,metrics,history,template,httpapi,grpcapi,mysql}`；浏览器管理面继续使用 HTTP（前缀 `/sbot/`），Admin-Agent 控制面使用 `grpc-go`。`admin/mysql/schema_definition.go` 以内置 Go DDL 定义首版当前结构，不维护数据库迁移版本。
+- **`agent/`** — Agent 应用装配，专属会话、命令、资源包、任务与指标实现直接位于 `agent/{session,command,bundle,task,metrics}`。主动建立到 Admin 的 gRPC 长连接并执行下发任务；Agent 不开放本地 HTTP 控制面。
 - **`monitor/` — 指标采集。原子计数器 + per-action 短临界区、DDSketch 延迟分布（1% 相对精度、最多 2048 bins，P50/P90/P95/P99 可严格合并）、Apdex 评分、非 RTT 客户端开销独立列、累计面 + 顺序区间窗口。`RecordAction(name, result, timing, wallClock, sendBytes, recvBytes, err)`：`result` ∈ Success/Failure/Timeout/Canceled，`timing` 携带 RTT、监听等待与各编解码阶段耗时。错误按 `code` 单维聚合（展示按 `code < 100` 推导框架/业务标签），保留最近 3 条详情。内部 Agent/Admin 报告携带 sketch，公共 API 必须剥离；空延迟分布展示值为 null。导出：Console / HTTP JSON / CSV / pprof。
   - **动作分类（`ActionSnapshot.Kind`）** 按运行时实际发生的网络行为定型，取最强语义：有 RTT 样本 → `networked`（往返）；否则有监听命中 → `listen`（监听）；否则有发送字节 → `send`（发送）；都没有 → `local`（本地）。前端按 kind 选主指标列。
   - **Apdex 只对 `networked` 打分**，样本是 RTT。监听/发送/本地类在快照里带 kind，UI 显示「不适用」——这三类的耗时主体是服务端业务时长或客户端执行时长，没有可比的统一阈值，掺进总分会让分数随动作构成漂移。分母是「发起过请求的样本数」：超时与连接中断记 frustrated（拿不到 RTT 但确实是坏体验），业务错误按真实 RTT 正常打分（服务端正确处理了请求）。
   - **监听等待**（`ListenWait` 直方图）单列，从 `NetExchange.RecvFrameAt`（帧在内核可读的时刻）算起而非轮询唤醒时刻，避开协作式调度的量化误差。已在队列里的消息记 `ListenReady` 计数而不产生 0ms 样本，超时记 `ListenTimeoutCount` 并单独出成率。
   - **总耗时（wallClock）只留直方图作诊断，不再打 Apdex**：它含 Lua 里的 sleep 和客户端调度延迟，高 CPU 下会把施压机自身的拥塞读成服务端劣化。
 - **`errcode/` — 统一错误码。`ErrorCode`（uint64）单一维度 + 码段契约（< 100 框架保留段，工具自产、由 `codeRegistry` 分配 / ≥ 100 业务段，服务器返回）+ 29 个框架错误码常量（Network 6 / Protocol 2 / Build 4 / Listen 2 / Config 9 / Lua 4 / Callback 2）。`ActionError` 携带 `{Code, Detail}`（无 Kind）；monitor 按 code 单维聚合，展示按 `code < 100` 推导框架/业务标签。`errors.json` 加载期对 < 100 撞码硬报错。
-- **`utils/` — `work_pool.go`（协程池 + recover 防止 panic 扩散）、`duration.go`、`utils/log/`（稳定 JSON Lines + zap + 256 KiB/1s 有界缓冲 + lumberjack 轮转 + 企业微信 webhook 告警）。Admin/Agent 只写本地文件，不提供日志查询/代理 API；生产采集与查询交给外部日志栈。
+- **`runner/` + `standalone/`** — `runner` 提供单机与 Agent 共用的资源加载、运行和清理；`standalone` 管理单机模式配置与生命周期。
+- **`internal/`** — 进程内部基础设施：`daemon/debughttp/jsonx/lru/retry/stresslog/timerpool/workpool`。
 
 ### 单次动作数据流
 
@@ -90,7 +91,7 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 - `conf/agent.toml` — Agent 节点配置：`log`/`monitor`/`pprof`/`agent`（含 `reconnect` 子段）/`daemon`
 - `conf/admin.toml` — Admin 服务器配置：`server`（HTTP 管理面）/`controlPlane`（gRPC 控制面 + Agent 健康判定）/`mysql`（含 `retentionDays` 和 `pool`）/`redis`/`log`/`pprof`/`daemon`
 - `conf/flow/flow.json` — 流程图（`defaultDelayMs` + `nodes` + `actions` + `listens`）— 主要配置产物
-- `conf/adapter/<proto>_<service>_codec.json` — 每连接一份的声明式 codec 配置；共享 `errors.json` 提供错误码描述。编解码统一由纯 Go `codec/` 引擎驱动，无 Lua codec 路径。
+- `conf/adapter/<proto>_<service>_codec.json` — 每连接一份的声明式 codec 配置；共享 `errors.json` 提供错误码描述。编解码统一由纯 Go `protocol/codec/` 引擎驱动，无 Lua codec 路径。
 - `conf/proto/` — 启动时动态加载的 `.proto` 文件
 - `conf/scripts/` — 复杂行为的 Lua 脚本
 
@@ -139,11 +140,11 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 - 默认节点延迟由 `TaskFlow.DefaultDelayMs` 控制。`delayMs: -1` 禁用，`delayMs: 0` 使用 defaultDelayMs。
 - `onError` 控制 action 失败后的错误链路：`ignoreCodes` 命中后 warn 并继续流程但 monitor 保留失败样本；`handler` 是普通节点调用边（不写入 next）；`retry.maxRetries` 是当前 action 的额外重试次数；`strategy` 支持空/`resume` 继续、`skip` 结束当前分支/层级（由 sequence/loop/boolean/weighted 捕获）、`abort` 中断流程。
 - 任务状态机：`pending → starting → running → stopping → stopped / failed`。单例约束：同一时刻只能有一个活跃任务。
-- Agent 心跳连续失败 `heartbeatFailThreshold` 次（默认 3）后放弃当前任务。Admin 重启后活跃任务自动重置为 `failed`。
+- Agent 控制会话断开或任务租约失效后取消当前任务。Admin 重启后活跃任务自动重置为 `failed`。
 - 日志和错误信息使用中文。
 - 废弃字段或能力必须从前后端类型、表单、序列化、Schema、配置样例和当前源码注释中物理删除；不得保留 disabled 控件、兼容解析、注释掉的旧代码或过时说明。历史设计文档可保留当时状态。
 - Go 字段名与 JSON tag 一致：`Listens`/`listens`、`ListenRefs`/`listenRefs`、`Listen`/`listen`。`ListenDef` 是监听定义类型，`ListenCallBack`（network 包）是回调函数类型。`listen` 是外层概念，`callback` 是 listen 内部的处理机制。
-- 后端 goroutine 统一走 `utils/work_pool.go` 协程池（自带 recover）。
+- 后端 goroutine 统一走 `internal/workpool` 协程池（自带 recover）。
 - 前端请求收拢到 `services/api.ts` + `services/baselineApi.ts`，组件禁止直接 fetch。
 - 前端 UI 文本禁止暴露技术术语（Agent→节点、Admin→服务器、IDB→本地存储）。
 - 数据库只用逻辑外键，不用 FOREIGN KEY，级联删除由应用层处理。
@@ -176,12 +177,12 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 - 观测：`/debug/statekeys` 中 `view:` 前缀计数 `get_view` 调用；迁移某热点 key 后应看到其 `get:` 行的 `tables/wireDecodes` 掉零、`view:` 行上量。
 - 直转器 scratch 池化（2026-07-30 P2）：`walkWireLevel` 的字段累计切片走 `sync.Pool`（瞬态 scratch，GC 周期自动清空、常驻 ∝ 并发转换数，不属于"内存换 CPU"的缓存交易，不触内存红线）。**归还前必须逐元素 clear**——scratch 引用共享 wire 快照字节，只截断 len 会经池钉住大缓冲（029→031 钉扎形态）；隔离契约由 `TestWalkWireAccsPoolNoContamination` + 差分 fuzz 守护。产物形态（Lua 表/Go map，归调用方所有）**不可池化**，这块的解法是视图（P1）而非池。
 - Lua 线程用 trampoline 长驻复用（`script/trampoline.go`）后，`newLState/newRegistry` churn 已消除；`RSS ≈ 2× live` 是 GOGC=100 的正常余量，压 RSS 先压 live。
-- 全局 timer 池（2026-07-30 P3，`utils/timerpool.go`）：高频等待点（`robotScheduler.wait` 帧循环 poll、`awaitResponse`/`RequestResponse` 每请求超时窗）统一 `utils.GetTimer/PutTimer`，消除每次 `time.NewTimer` 分配。正确性依赖 Go 1.23+ timer 语义（无缓冲通道、Stop/Reset 保证无旧触发），**归还后不得再引用**；嵌套等待（listen 回调里再 wait）各取各的，天然安全。低频点（连接关闭、心跳注册）不必接。
-- 收包解码路径零分配化（2026-07-30 P4，`codec/`）：① gzip 解压 `readAllSized` 按 trailer ISIZE 定长一次分配（替代 `io.ReadAll` 512B 起步倍增；提示短则截断、长则追加兜底，多成员流有回归测试）；② 流密码实现 `CipherInPlace` 原地解密（decode 的 work 是私有副本；**实现约束：报错前不得改写 data**，块密码不实现）；③ decode 头字段暂存用栈上定长数组替代每帧 routeMap/checksumOut 两个临时 map，routeKey 用 `strconv.AppendInt` 栈上拼接。全部有与复制版/旧行为的对拍测试。encode 侧 `stash` 嵌套 map 未动（摊到进程生命周期分配占比低，对拍风险不值）。
-- 解压去重缓存（2026-07-30 P5，`codec/inflate_cache.go`，显式内存换 CPU）：大广播帧推给全部机器人时逐连接重复 gunzip，按压缩字节内容寻址共享解压产物。**二见登记**防污染（018→019 教训机制化）：首见只记 8 字节哈希标记，第二次见到才存条目——逐机器人唯一的响应永远停在标记层，无需知道路由类型。共享安全前提：产物只读流转（已审计）+ `inflateShareSafe` 保证 compress 是 decode 最后执行步（其后再有原地改写步则禁用共享）。双上界 LRU（1024 条 / 48MB），观测 `/debug/inflate`（hits≈0 且 misses 高涨 = 负载无重复大帧，缓存空转）。
-- routeKey 驻留（2026-07-30 P5，`codec/intern.go`）：解码/编码路由键改为 COW 表驻留（读侧原子 Load + 无分配 map 查找），消除每帧一个小字符串分配。表容量上限 4096 防损坏帧撑爆，超限退化为普通分配。
-- 压缩帧 work 缓冲池化（2026-07-30 P5，`codec/engine.go`）：flags 判定要解压的帧，其 body 副本是纯瞬态 scratch → `sync.Pool` 租借。**归还纪律：只有 work 被解压/共享/复制解密产物顶替后才归还**；任何可能让缓冲作为 body 外泄的路径（解压失败 keep、提前 return）一律不归还、交给 GC——宁可放弃复用也不冒池污染风险。
-- 导航路径驻留表（2026-07-30 P6，`protox/wirenav.go`）：wire 读路径（`NavigateSegs`/`GetFieldCompat`/`MaterializeAllowed`）的影子采样判定与 fd 解析合并为一次查表——`maphash(schema全名+路径段) → 条目`（COW 表，容量上限 8192），条目携带首 K 计数、per-schema 采样计数指针、按 `wireNavigate` 层级推进规则预解析的 fd 链。替代旧 `shadowShouldVerify` 每次导航拼 key + 双 `sync.Map` LoadOrStore（4 次堆分配）与逐层 `ByName`。条目按描述符**身份**（指针）校验：proto 重载后自动替换并重新首 K 全查（比旧的按名计数更严格）；`Factory.Close()` 清整表解除描述符钉扎。哈希碰撞/表满 → 不驻留，跳过首 K 仅参与 per-schema 稳态采样（旧表反而无界，动态 map-key 路径会撑爆它）。fd 链槽位为 nil（非字段段/编译终止）时运行时回退 `ByName`，行为不变；对拍测试 `wirenav_test.go` + 既有差分 fuzz。
+- 全局 timer 池（2026-07-30 P3，`internal/timerpool`）：高频等待点（`robotScheduler.wait` 帧循环 poll、`awaitResponse`/`RequestResponse` 每请求超时窗）统一 `timerpool.Get/Put`，消除每次 `time.NewTimer` 分配。正确性依赖 Go 1.23+ timer 语义；**归还后不得再引用**。
+- 收包解码路径零分配化（2026-07-30 P4，`protocol/codec/`）：① gzip 解压 `readAllSized` 按 trailer ISIZE 定长一次分配；② 流密码实现 `CipherInPlace` 原地解密；③ decode 头字段暂存用栈上定长数组。全部有与复制版/旧行为的对拍测试。
+- 解压去重缓存（2026-07-30 P5，`protocol/codec/inflate_cache.go`，显式内存换 CPU）：大广播帧按压缩字节内容寻址共享解压产物，使用二见登记防污染和双上界 LRU。
+- routeKey 驻留（2026-07-30 P5，`protocol/codec/intern.go`）：解码/编码路由键使用有界 COW 表驻留。
+- 压缩帧 work 缓冲池化（2026-07-30 P5，`protocol/codec/engine.go`）：body 瞬态副本由 `sync.Pool` 租借，并遵守不外泄才归还的纪律。
+- 导航路径驻留表（2026-07-30 P6，`protocol/protox/wirenav.go`）：wire 读路径的影子采样判定与 fd 解析合并为有界 COW 查表，并按描述符身份处理重载。
 - 心跳注册时编译布局（2026-07-30 P7，`engine/heartbeat_plan.go`）：raw-binary 心跳每 tick 打的是同一份定长小端流，宽度/偏移/哪些槽恒定在注册那刻已定。`CompileHeartbeatPlan` 把布局定型为「总长 + 动态槽位表」，fixed 槽编译期预填，每 tick 只覆写动态槽（零 `heartbeatTypeWidth` 查表、零 `append` 增长、body 缓冲跨 tick 复用）。同批前移的还有私有计数器推进表（`CompileHeartbeatCounters`，不再每 tick 全字段扫）与 resolver key 字符串 + 解析结果（不再每 tick 拼串查表）。**缓冲复用的安全前提**：`codec` encode 把 body `copy` 进新分配的整包、各 cipher `Encrypt` 一律 make+copy 不原地改写入参——这条一旦被破坏，心跳会发出上一 tick 的密文残留。**编译失败不静默吞**：回落 `BuildHeartbeatBody` 保持原「每 tick Warn」可见性（坏配置不能因为多一层编译就消失），故 `BuildHeartbeatBody` 作为 oracle 保留且不复用快路径代码，对拍见 `heartbeat_plan_test.go`（多 tick 逐字节 + 同 key 读/自增交错序 + skip/错误语义 + 零分配）。plan 持有复用缓冲**非并发安全**，每连接一份、仅由该连接 pump 串行调用（与 `privateCounters` 同一约定）。
 - 收包路由分派合表（2026-07-30 P7，`network/connection.go`）：`listenResp`（回调）+ `listenQueues`（队列）合成 `listenRoutes map[string]*listenBinding`，`OnReceive` 一次持锁内查一次即取齐回调与队列传给 `dispatchListen`。旧路径每条推送要 3~4 次字符串 map 查找 + 2~3 次 `c.mu`（OnReceive 查到回调却丢掉、dispatchListen 加锁重查、缓存模式再加锁查队列）。并发约定：`binding.cb` 的读写都在 `c.mu` 下（幂等重注册会回写最新回调），`queue` 在绑定发布进 map 前建好、之后只读，Push/Pop 仍在 `c.mu` 之外由 per-queue mu 串行化。顺带把 `NewMessage` 挪到「确定有消费方之后」——无人认领的广播不再白白分配。合表后「有回调却没队列」这种旧双表可能的偏斜状态在结构上不再存在。
 - 列表下标早退（2026-07-30 P6，`wireCollectList(b, fd, limit)`）：`xs[i]` 下标访问（`NavigateSegs`/`ListItemCompat`/`GetFieldCompat`）只扫到第 i+1 个元素即停，不再全量收集解码（repeated 元素只追加不覆盖，前缀即定值；packed 整块解出可能略多于 limit）。层级结构在 `WireValue` 构造点已全量校验，早退跳过尾部不损失防线。注意**单数字段/map 不可早退**——标量 last-wins、单数 message 多段拼接、map 重复 key 替换都要求扫完整层，这是 protobuf 合并语义的硬约束。终端整列表读（`robot.get_path("...heroList")`）与游标遍历天然需要全量，无早退空间。
@@ -201,5 +202,5 @@ React 18 / Vite 8 / TypeScript 5.6 / Ant Design 5 / React Flow 12 / Monaco Edito
 2. **前端编译**：`cd cmd/web && npx tsc -b` 确保无类型错误
 3. **单元测试**：`cd cmd/web && npm run test`（Vitest）
 4. **配置校验**：在前端编辑器中打开 flow.json，查看校验报告，确保无错误
-5. **运行验证**（涉及后端改动时）：`rm -f log/stressbot.log`，启动 `go run ./cmd/agent -config conf/config.json`，运行 2~5 分钟
-6. **日志审查**：`grep -i "error\|warn\|失败" log/stressbot.log | grep -v "headError"` 应无异常输出
+5. **运行验证**（涉及后端改动时）：按改动范围使用 `go run ./cmd/stressbot -config conf/stressbot.toml`，或分别启动 `go run ./cmd/admin -config conf/admin.toml` 与 `go run ./cmd/agent -config conf/agent.toml`，运行 2~5 分钟
+6. **日志审查**：审查对应 `log/*.log` 中的 `error` / `warn` / `失败`，排除已知业务噪声后应无异常输出

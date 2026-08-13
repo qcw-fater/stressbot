@@ -13,26 +13,32 @@
 ```
 stressbot/
 ├── cmd/
-│   ├── agent/            主程序入口（单机模式 / Agent 模式，共用一个二进制）
-│   ├── admin/            Admin 服务器入口
+│   ├── stressbot/        单机模式薄入口
+│   ├── agent/            Agent 节点薄入口
+│   ├── admin/            Admin 服务器薄入口
 │   └── web/              前端可视化编辑器（React + Vite）
-├── adapter/              协议适配器接口 + CodecResolver/SchemaAdapter（按连接解析声明式 codec）
-├── codec/                声明式 codec Go 引擎（帧分割 / pipeline 编解码 / 偏移加密 / 错误码映射）
-├── errcode/              统一错误码定义（框架码 < 100 + 业务码 ≥ 100，单一 code 维度）
-├── admin/                Admin 服务器（分布式调度、历史归档、前端托管）
-├── agent/                Agent 节点（注册到 Admin、执行下发任务）
-├── engine/               流程执行引擎（节点图遍历、动作模式、字段绑定、条件解析）
+├── admin/                Admin 应用装配及 task/agent/httpapi/grpcapi/mysql 等功能包
+├── agent/                Agent 应用装配及 session/command/bundle/task/metrics 功能包
+├── standalone/           单机模式应用生命周期
+├── runner/               单机与 Agent 共用的资源加载、启动和清理
+├── flow/                 流程图、动作、监听、onError 与条件模型
+├── binding/              字段绑定与过滤规则
+├── engine/               流程执行与动作执行
+├── protocol/             协议适配器，含 codec/ 与 protox/
+├── controlplane/         控制面；proto/ 为源文件，pb/ 为生成代码
+├── api/admin/            浏览器管理 API 的唯一 OpenAPI 契约
+├── config/               TOML 加载、公共配置和 validation/（flow/codec JSON Schema 配置契约校验）
+├── errcode/              统一错误码定义（框架码 < 100 + 业务码 ≥ 100）
 ├── monitor/              指标采集（原子计数器、延迟直方图、Apdex、CSV/HTTP 导出）
 ├── network/              TCP/UDP 连接、声明式心跳（基于 gnet）
-├── protox/               动态 protobuf 加载与反射
 ├── robot/                机器人实例、Manager、ActionHandler
 ├── script/               Lua 运行时池（7 模块 86 函数）
-├── sharedstate/          Redis 共享态配置（跨机器人/节点 KV/计数/锁/队列/Hash）
-├── state/                线程安全的键值状态存储 + 条件解析器
+├── state/                单机器人状态；shared/ 为 Redis 跨节点共享状态
+├── internal/             daemon/debughttp/jsonx/lru/retry/stresslog/timerpool/workpool
 └── conf/
-    ├── config.json       单机运行配置（bot / stateExtra / monitor / log / redis）
-    ├── agent-config.json Agent 模式运行配置
-    ├── admin-config.json Admin 服务器配置（port / mysql / redis / history / agentRegistry）
+    ├── stressbot.toml    单机运行配置
+    ├── agent.toml        Agent 节点配置
+    ├── admin.toml        Admin 服务器配置
     ├── flow/
     │   └── flow.json     流程图与动作（声明式）
     ├── adapter/
@@ -49,21 +55,21 @@ stressbot/
 ## 快速开始
 
 ```bash
-# 单机模式（agent.enabled 默认 false）
-go run ./cmd/agent -config conf/config.json
+# 单机模式
+go run ./cmd/stressbot -config conf/stressbot.toml
 
 # 切换压测场景无需挪文件（资源路径 flag 留空则回退到 <config 所在目录> 下默认）：
 #   -flow <file>     流程配置（默认 <conf>/flow/flow.json）
 #   -proto <dir>     proto 目录（默认 <conf>/proto）
 #   -scripts <dir>   Lua 脚本目录（默认 <conf>/scripts）
 #   -adapter <dir>   适配器目录，含 *_codec.json 与 errors.json（默认 <conf>/adapter）
-go run ./cmd/agent -config conf/config.json -flow conf/flow/guild.json
+go run ./cmd/stressbot -config conf/stressbot.toml -flow conf/flow/guild.json
 
-# Agent 模式（config.json 中 agent.enabled: true，或用 agent-config.json）
-go run ./cmd/agent -config conf/agent-config.json
+# Agent 模式
+go run ./cmd/agent -config conf/agent.toml
 
 # Admin 服务器
-go run ./cmd/admin -config conf/admin-config.json
+go run ./cmd/admin -config conf/admin.toml
 
 # 前端开发
 cd cmd/web && npm install && npm run dev   # http://localhost:5173
@@ -76,12 +82,12 @@ cd cmd/web && npm install && npm run dev   # http://localhost:5173
 ### 分层依赖
 
 ```
-cmd/agent → robot → engine → (ActionHandler 接口)
-                 → network (gnet)
-                 → script  (Lua 运行时池)
-                 → protox  (动态 protobuf)
-                 → state   (键值存储)
-                 → adapter (协议编解码)
+cmd/{admin,agent,stressbot} → 对应应用包
+agent / standalone → runner → flow → engine → robot
+                                      ├── network (gnet)
+                                      ├── script  (Lua 运行时池)
+                                      ├── protocol/{codec,protox}
+                                      └── state + state/shared
 ```
 
 ### 单次动作数据流
@@ -492,7 +498,7 @@ FilterDef 共 5 个字段，比较运算符 **12 种**（每种均支持符号�
 
 ## Adapter 接口
 
-Adapter 接口共 **9 方法**，实现已全 Go 化：`adapter/codec_resolver.go` 的 `CodecResolver` 按 `"<proto>:<service>"` 解析到对应 `SchemaAdapter`，后者包装 `codec/` 引擎读写声明式 schema。
+Adapter 接口共 **9 方法**，实现已全 Go 化：`protocol/codec_resolver.go` 的 `CodecResolver` 按 `"<proto>:<service>"` 解析到对应 `SchemaAdapter`，后者包装 `protocol/codec/` 引擎读写声明式 schema。
 
 | 方法 | 说明 |
 | -------------------------------- | ----------------------------------------------------------------------- |
@@ -508,7 +514,7 @@ Adapter 接口共 **9 方法**，实现已全 Go 化：`adapter/codec_resolver.g
 
 ## 声明式 codec 配置（`<proto>_<service>_codec.json`）
 
-每条命名连接对应一份 codec 配置，由 `CodecResolver` 按 `"<proto>:<service>"` 解析、`SchemaAdapter` 包装 `codec/` Go 引擎驱动编解码。核心字段：
+每条命名连接对应一份 codec 配置，由 `CodecResolver` 按 `"<proto>:<service>"` 解析、`SchemaAdapter` 包装 `protocol/codec/` Go 引擎驱动编解码。核心字段：
 
 - `header`：消息头字段布局，每个字段带 `name` / `size` / `role`（如 `route` / `length` / `flags` / `checksumOut` / `value` / `errorCode` / `reserved`）。
 - `frame`：帧参数（`lengthIncludesHeader` / `lengthIncludesTrailer` 等），决定 `length` 字段的字节范围。
@@ -518,7 +524,7 @@ Adapter 接口共 **9 方法**，实现已全 Go 化：`adapter/codec_resolver.g
 - `heartbeat`：可选连接级心跳（见第一部分「心跳」）。
 - 共享 `errors.json`：`DescribeError` 读取，把服务端错误码映射为中文描述。
 
-> 协议头、路由键、加解密、校验与错误码描述由声明式 `*_codec.json` + `errors.json` 配置，纯 Go `codec/` 引擎驱动（无 Lua 编解码路径）。
+> 协议头、路由键、加解密、校验与错误码描述由声明式 `*_codec.json` + `errors.json` 配置，纯 Go `protocol/codec/` 引擎驱动（无 Lua 编解码路径）。
 
 ---
 
@@ -656,7 +662,7 @@ Adapter 接口共 **9 方法**，实现已全 Go 化：`adapter/codec_resolver.g
 
 ## share（20 函数）
 
-Redis 支撑的跨机器人/跨节点共享态。需在 config.json 配置 `redis` 段；未配置时所有调用返回 `ErrNotEnabled`。全部协作式（等待网络时仅暂停当前机器人主流程）。
+Redis 支撑的跨机器人/跨节点共享态。单机在 `stressbot.toml`、Admin 在 `admin.toml` 配置 `[redis]`；未配置时所有调用返回 `ErrNotEnabled`。实现位于 `state/shared`，全部协作式（等待网络时仅暂停当前机器人主流程）。
 
 返回约定：写/判定类返回 `(value_or_ok, err)`；读类返回 `(value, ok, err)`，`ok=false` 用于区分「缺失」与「存了 nil」。
 
@@ -680,13 +686,17 @@ Redis 支撑的跨机器人/跨节点共享态。需在 config.json 配置 `redi
 
 ## 运行模式
 
-### 单机模式（`agent.enabled: false`）
+### 单机模式（`cmd/stressbot`）
 
-直接运行完整启动序列：加载配置 → 声明式 codec（`*_codec.json` + `errors.json`）→ proto → 流程 → gnet 网络引擎 → Lua 池 → Manager → 批量启动机器人。
+使用 `conf/stressbot.toml`，在一个进程内完成：加载配置 → 声明式 codec（`*_codec.json` + `errors.json`）→ proto → 流程 → gnet 网络引擎 → Lua 池 → Manager → 批量或渐进启动机器人。不连接 Admin。
 
-### Agent 模式（`agent.enabled: true`）
+### Agent 模式（`cmd/agent`）
 
-注册到 Admin → 接收任务 → 下载配置 → 执行压测 → 上报指标。
+使用 `conf/agent.toml`，主动建立到 Admin 的 gRPC 长连接，接收任务、下载内容寻址资源包、执行压测并流式上报指标。Agent 不开放本地 HTTP 控制面。
+
+### Admin 模式（`cmd/admin`）
+
+使用 `conf/admin.toml`。浏览器管理面使用 HTTP，Admin-Agent 控制面使用独立 gRPC 端口；Admin 负责任务调度、节点管理、指标聚合、历史归档和前端静态托管。
 
 ## 任务生命周期
 
@@ -701,84 +711,60 @@ pending → starting → running → stopping → stopped
 - **停止**：优雅关闭（等待 Agent 完成 → 归档历史）
 - 单例约束：同一时刻只能有一个活跃任务（starting / running / stopping）
 
-## config.json
+## TOML 配置
 
-`cmd/agent` 的 `Config` 顶层字段：`log` / `monitor` / `pprof` / `standalone`（单机）/ `agent`（Agent 模式）/ `redis`（可选）/ `daemon`（守护进程，仅 Linux）。`log` 与 `monitor` 两种模式共享；`standalone` 仅单机；`agent` 仅 Agent 模式。
+三个进程分别使用独立配置：
 
-> 资源路径（`flow` / `proto` / `scripts` / `adapter`）是 **CLI flag**，不是 config.json 字段——留空则回退到 `<config 所在目录>` 下的默认子目录。
+| 进程 | 配置文件 | 顶层配置 |
+| --- | --- | --- |
+| `cmd/stressbot` | `conf/stressbot.toml` | `log` / `monitor` / `pprof` / `standalone` / 可选 `redis` / `network` / `daemon` |
+| `cmd/agent` | `conf/agent.toml` | `log` / `monitor` / `pprof` / `agent` / `daemon` |
+| `cmd/admin` | `conf/admin.toml` | `server` / `controlPlane` / 可选 `mysql` / `redis` / `log` / `pprof` / `daemon` |
 
-### 单机模式示例
+配置采用 TOML 严格解码，未知字段会导致启动失败；支持 `${VAR}`、`${VAR:-default}` 环境变量展开和 `$$` 字面转义。完整字段、默认值和安全说明直接见三份 `conf/*.toml` 样例。
 
-```json
-{
-  "log": {
-    "path": "log/stressbot.log",
-    "level": "info",
-    "printConsole": true,
-    "maxSizeMB": 100,
-    "maxBackups": 5,
-    "maxAge": 7,
-    "localTime": true,
-    "compress": true,
-    "weChatToken": ""
-  },
-  "monitor": {
-    "apdexThresholdMs": 100,
-    "timingDetail": "rtt",
-    "http": { "port": 6061 }
-  },
-  "pprof": { "port": 6060 },
-  "standalone": {
-    "bot": {
-      "accountPrefix": "bot_",
-      "startNumber": 1,
-      "totalBots": 100,
-      "concurrency": 20,
-      "mainService": "logic"
-    },
-    "stateExtra": { "version": "0.31.49.171222", "channel": "mine" }
-  },
-  "agent": { "enabled": false },
-  "redis": { "host": "127.0.0.1", "port": 6379, "keyPrefix": "stressbot" },
-  "daemon": false
-}
+单机资源路径（`flow` / `proto` / `scripts` / `adapter`）是 CLI flag，不写入 TOML；留空时回退到配置文件所在目录下的 `flow/flow.json`、`proto/`、`scripts/`、`adapter/`。
+
+### 单机配置要点
+
+```toml
+[standalone]
+duration = "10m"
+
+[standalone.bot]
+accountPrefix = "bot_"
+startNumber = 1
+totalBots = 100
+concurrency = 20
+mainService = "logic"
+
+[standalone.stateExtra]
+version = "0.31.49.171222"
+channel = "mine"
 ```
 
-字段说明：
+`[standalone.rampUp]` 可配置 `[[standalone.rampUp.stages]]`；各阶段 `count` 之和必须等于 `standalone.bot.totalBots`。脚本使用 `share` 时配置 `[redis]`，实现位于 `state/shared`。
 
-- `log`：`path` / `level` / `printConsole` / `maxSizeMB` / `maxBackups` / `maxAge` / `localTime` / `compress` / `weChatToken`（企微告警 Hook 密钥，DPanic 级别自动推送）。
-- `monitor`：`apdexThresholdMs`（Apdex T 阈值，默认 100）/ `timingDetail`（`rtt`/`codec`/`full`，默认 rtt）/ `http`（HTTP JSON 端点，省略 = 不启用）。**无** `csvPath`/`reportInterval`——CSV 在任务结束自动导出，Console Reporter 单机模式固定 5s 一次。
-- `pprof`：`port`（pprof 调试服务，省略 = 不启用）。
-- `standalone.bot`：`accountPrefix` / `startNumber` / `totalBots`（总数）/ `concurrency`（并发启动数，0=不限）/ `mainService`（主服务名，必填）。
-- `standalone.stateExtra`：注入所有机器人初始 state 的 `map[string]string`。
-- `standalone.duration`：运行时长（如 `"10m"`、`"1h"`），省略或 `0` = 一直运行直到手动停止。
-- `redis`：共享态配置（见 sharedstate），省略则 `share` 模块返回 `ErrNotEnabled`。
+### Agent 配置要点
 
-### Agent 模式示例
+```toml
+[agent]
+id = "agent-001"
+adminAddress = "127.0.0.1:7720"
+name = "agent-001"
+maxBots = 5000
+heartbeatInterval = "10s"
+metricsInterval = "5s"
+reconnectMaxRetries = -1
+taskWorkDir = ""
 
-```json
-{
-  "log": { "path": "log/agent.log", "level": "info", "printConsole": true, "maxSizeMB": 100 },
-  "monitor": { "apdexThresholdMs": 100, "timingDetail": "rtt" },
-  "pprof": { "port": 6060 },
-  "agent": {
-    "enabled": true,
-    "adminUrl": "http://127.0.0.1:7718",
-    "publicUrl": "http://127.0.0.1:7719",
-    "port": 7719,
-    "maxBots": 5000,
-    "heartbeatInterval": "10s",
-    "heartbeatTimeout": "5s",
-    "heartbeatFailThreshold": 3,
-    "requestTimeout": "30s",
-    "reconnectMaxRetries": -1,
-    "metricsInterval": "5s"
-  },
-  "daemon": false
-}
+[agent.reconnect]
+initialInterval = "5s"
+maxInterval = "30s"
+taskReportTimeout = "30s"
 ```
 
-`agent` 字段：`enabled` / `adminUrl`（Admin 地址）/ `publicUrl`（Agent 对外可达地址）/ `port`（本地 HTTP 端口，默认 7719）/ `maxBots`（单节点上限，默认 5000）/ `heartbeatInterval` / `heartbeatTimeout` / `heartbeatFailThreshold`（连续失败多少次放弃任务，默认 3）/ `requestTimeout` / `reconnectMaxRetries`（最大重连，-1=持续）/ `metricsInterval`（压力+系统指标同步上报间隔，默认 5s）。Agent 模式不需要 `standalone`——运行参数由 Admin 通过 `TaskAssignment` 下发；codec 配置随任务资源下发。
+Agent 没有 `enabled`、`publicUrl` 或本地 HTTP 端口；任务运行参数和 codec 资源均由 Admin 通过 gRPC 控制面下发。
 
 ### 启动策略
 
@@ -789,7 +775,7 @@ pending → starting → running → stopping → stopped
 
 含 `reset` 的渐进加压会被切分为多个**阶段段落**：历史列表中折叠为同任务下的阶段组，每段可单独查看详情/对比，时序与聚合按段号归档；无 `reset` 时仍是单条连续历史，趋势图按配置近似标注阶段切换线。详见 `docs/ramp-up.md` §6.6。
 
-`rampUp` 配置（随 `TaskAssignment` 下发，非 config.json）：
+`rampUp` 配置（分布式模式随任务下发；单机模式写入 `stressbot.toml`）：
 
 ```json
 "rampUp": {
@@ -801,31 +787,31 @@ pending → starting → running → stopping → stopped
 }
 ```
 
-## admin-config.json
+### Admin 配置要点
 
-```json
-{
-  "port": 7718,
-  "publicUrl": "http://127.0.0.1:7718",
-  "staticDir": "cmd/web/dist",
-  "agentRegistry": {
-    "unhealthyAfter": "30s",
-    "offlineAfter": "60s"
-  },
-  "mysql": {
-    "host": "127.0.0.1", "port": 3306,
-    "username": "root", "password": "***", "database": "stressbot",
-    "dialTimeout": "5s", "readTimeout": "30s", "writeTimeout": "30s",
-    "maxOpenConns": 10, "maxIdleConns": 5, "connMaxLifetime": "1h"
-  },
-  "redis": { "host": "127.0.0.1", "port": 6379, "keyPrefix": "stressbot" },
-  "history": { "retentionDays": 90 },
-  "log": { "path": "log/admin.log", "level": "info", "maxSizeMB": 100, "maxBackups": 10 },
-  "daemon": false
-}
+```toml
+[server]
+listenHost = "127.0.0.1"
+port = 7718
+staticDir = "cmd/web/dist"
+
+[controlPlane]
+listenHost = "127.0.0.1"
+port = 7720
+heartbeatInterval = "10s"
+unhealthyAfter = "30s"
+offlineAfter = "60s"
+
+[mysql]
+host = "127.0.0.1"
+port = 3306
+username = "root"
+password = "${STRESSBOT_MYSQL_PASSWORD}"
+database = "stressbot"
+retentionDays = 90
 ```
 
-字段：`port`（HTTP 端口，默认 7718）/ `publicUrl` / `staticDir`（前端静态目录）/ `agentRegistry`（`unhealthyAfter` + `offlineAfter`）/ `mysql`（**顶层**，全局共享 `*sql.DB`）/ `redis` / `history`（仅 `retentionDays`，默认 90）/ `log` / `pprof`（`port`，省略 = 不启用，默认 6060）/ `daemon`。
+Admin 启动时按代码内嵌的当前版本 DDL 创建所需表；首版不维护数据库版本迁移链。`[mysql]` 省略或 `host` 为空时禁用历史归档。
 
 ---
 
@@ -936,7 +922,7 @@ gnet `OnTraffic`：peek header → `BodyLength()` 纯 Go 计算 → read frame �
 | SessionRegistry / CommandBus | gRPC 会话管理 + 可靠命令投递 |
 | CommandStore | 有界内存命令日志与确认状态 |
 | BundleStore | 按 SHA-256 流式下发任务资源包 |
-| TelemetryIngestor | 有界 latest-wins 指标接入 |
+| MetricsIngestor | 有界 latest-wins 指标接入 |
 | HistoryStore | MySQL 历史归档 |
 | Sampler | 周期采样时序数据 |
 
@@ -955,6 +941,8 @@ gnet `OnTraffic`：peek header → `BodyLength()` 纯 Go 计算 → read frame �
 ### HTTP 管理 API
 
 > 浏览器管理 API 统一前缀 **`/sbot/`**（仅错误码目录保留字面 `/api/`）。Agent 上行控制、资源下载与指标上报已经迁移到独立 gRPC 控制面。
+
+OpenAPI 契约统一位于 `api/admin/openapi.yaml`。Admin 运行后可访问 `/sbot/docs` 使用 Swagger UI，或通过 `/sbot/openapi.yaml` 获取原始契约。
 
 **任务管理：**
 
@@ -1019,7 +1007,6 @@ Admin 不提供日志查询、代理或下载 API。Admin/Agent 只写本地 JSO
 | GET | `/sbot/baseline/adapter/index.json` | codec 适配器索引 |
 | GET | `/sbot/baseline/adapter/{name}` | 取一个适配器文件 |
 | GET | `/sbot/baseline/flow/flow.json` | 取基线 flow.json |
-| GET | `/sbot/baseline/config.json` | 取基线 config.json |
 
 **流程模板库：**
 
@@ -1061,7 +1048,7 @@ Admin 不提供日志查询、代理或下载 API。Admin/Agent 只写本地 JSO
 |------|------|
 | `AgentControlService.Session` | 双向流：会话、心跳、租约、命令、命令确认和最终报告 |
 | `AgentBundleService.DownloadBundle` | 支持 offset 续传的任务资源包服务端流 |
-| `AgentTelemetryService.Report` | 压测指标和系统指标客户端流 |
+| `AgentMetricsService.Report` | 压测指标和系统指标客户端流 |
 
 ## 集群部署
 
@@ -1201,7 +1188,7 @@ stressbot 不内置日志环形缓冲、日志 HTTP API 或前端日志面板。
 ```bash
 cd cmd/web
 npm install
-npm run dev    # http://localhost:5173，conf/ 挂载 + /api 代理到 Admin
+npm run dev    # http://localhost:5173，开发服务器将 /sbot/ 代理到 Admin
 npm run build  # → dist/，Admin 静态托管
 npm run test   # Vitest
 ```
@@ -1216,10 +1203,10 @@ npm run test   # Vitest
 
 ## 调试与 Tips
 
-- 日志级别与输出路径由 `config.json` 的 `log` 段配置。
+- 日志级别与输出路径由当前运行模式对应 TOML 文件的 `log` 段配置。
 - Lua 脚本异常会被 `pcall` 捕获，不会导致整个机器人崩溃。
 - 任何 `tcpRequest` / `tcpListen` 都可用 `optional: true` 避免非致命错误终止业务循环。
 - `mainService` 配置的连接断开时自动停止该机器人（防止僵尸连接）。
 - Admin 重启后，活跃状态的任务自动重置为 `failed`。
-- Agent 连续心跳失败 `heartbeatFailThreshold` 次后放弃当前任务（默认 3）。
+- Agent 控制会话断开或任务租约失效后会取消当前任务；Admin 重启后活跃任务会重置为 `failed`。
 - 跨机器人共享数据用 `share` 模块（需配置 `redis` 段）。

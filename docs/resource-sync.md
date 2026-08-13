@@ -216,7 +216,7 @@ localHash == serverHash ?
 
 ### 7.2 后端：写回基线
 
-Admin 在创建任务时调用 `writeBaselineFiles`（`[admin/handlers.go](../admin/handlers.go)`），把上传的 flow / proto / scripts / adapter 写入 `conf/` 对应目录，使下次拉取时本地与基线一致：
+Admin 在创建任务时调用 `writeBaselineFiles`（[`admin/httpapi/baseline_routes.go`](../admin/httpapi/baseline_routes.go)），把上传的 flow / proto / scripts / adapter 写入 `conf/` 对应目录，使下次拉取时本地与基线一致：
 
 ```go
 s.writeBaselineFiles(&cfg, flowData)   // 创建任务流程内调用
@@ -244,7 +244,7 @@ handleSubmit
 
 ## 8. 后端基线读取端点
 
-供前端拉取使用，全部为只读（`[admin/handlers.go](../admin/handlers.go)`）：
+供前端拉取使用，全部为只读（[`admin/httpapi/baseline_routes.go`](../admin/httpapi/baseline_routes.go)）：
 
 | 端点 | 说明 |
 |------|------|
@@ -255,7 +255,6 @@ handleSubmit
 | `GET /sbot/baseline/adapter/index.json` | adapter 文件名列表 |
 | `GET /sbot/baseline/adapter/{name}` | 指定 codec/errors 文件内容 |
 | `GET /sbot/baseline/flow/flow.json` | 基线流程 |
-| `GET /sbot/baseline/config.json` | 基线运行配置 |
 
 前端读取统一经过 `[cmd/web/src/services/baselineApi.ts](../cmd/web/src/services/baselineApi.ts)`，组件不直接 fetch。基线前缀由 `services/env.ts` 的 `BASELINE_PREFIX`（默认 `/sbot/baseline`）集中管理。
 
@@ -274,7 +273,7 @@ handleSubmit
 | `[cmd/web/src/services/taskActions.ts](../cmd/web/src/services/taskActions.ts)` | 启动任务编排（隐式提交点） |
 | `[cmd/web/src/components/modules/ResourcesDrawer.tsx](../cmd/web/src/components/modules/ResourcesDrawer.tsx)` | 资源管理面板（拉取按钮 + 三 Tab） |
 | `[cmd/web/src/components/modules/BaselineSyncModal.tsx](../cmd/web/src/components/modules/BaselineSyncModal.tsx)` | 冲突解决对比面板 |
-| `[admin/handlers.go](../admin/handlers.go)` | 基线读取端点 + 创建任务时写盘 `writeBaselineFiles` |
+| [`admin/httpapi/baseline_routes.go`](../admin/httpapi/baseline_routes.go) | 基线读取端点 + 创建任务时写盘 `writeBaselineFiles` |
 
 核心函数速查（resourcesStore）：
 

@@ -1,5 +1,7 @@
 # Admin 服务端实施文档
 
+> **历史说明（2026-08-13）**：本文记录旧 HTTP 控制面和重构前包布局，仅供追溯，不再作为当前实现契约。现行架构与接口请以 `README.md`、`AGENTS.md`、`api/admin/openapi.yaml` 和 `docs/superpowers/specs/2026-08-13-package-architecture-design.md` 为准。
+
 > **角色定位**：Admin 是分布式压测系统的**控制中枢**，对前端提供管控 API（任务/Agent/指标/系统/历史/日志/基线资源），对 Agent 提供注册/心跳/上报接口和命令下发能力。
 > **本文档目标读者**：负责 `admin/` 包及 `cmd/admin/` 入口的开发者。
 > **文档性质**：本文档基于实际代码生成，标注了与原始设计计划的差异。

@@ -1,5 +1,7 @@
 # 分布式压测管理系统 — 技术文档
 
+> **历史说明（2026-08-13）**：本文记录旧分布式架构和重构前目录，仅供追溯。当前 Admin-Agent 通信使用 gRPC；现行说明请以 `README.md`、`AGENTS.md`、`controlplane/proto/control.proto` 和 `docs/superpowers/specs/2026-08-13-package-architecture-design.md` 为准。
+
 > 本文档基于实际代码实现编写，反映 `admin/`（16 文件）、`agent/`（8 文件）、`monitor/` 的真实架构。
 > 与原始设计计划 `plans/design-distributed-master.md` 存在的差异均已标注。
 

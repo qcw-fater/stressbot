@@ -157,7 +157,7 @@ RampUp *RampUpConfig `json:"rampUp,omitempty"`  // 指针类型
 
 ### 3.2 创建任务时的校验
 
-**文件**: `admin/handlers.go`（第 482-504 行）
+**文件**: `admin/httpapi/task_routes.go`
 
 ```go
 if cfg.RobotConfig.RampUp != nil {
@@ -178,9 +178,9 @@ if cfg.RobotConfig.RampUp != nil {
 
 ### 3.3 分布式缩放：scaleRampUp
 
-**文件**: `admin/handlers.go`（第 1651-1717 行）
+**文件**: `admin/task/distribution.go`
 
-当多个 Agent 参与任务时，每个 Agent 分到的机器人数量按比例缩放。`scaleRampUp` 将每个阶段的 `count` 按 `assignedBots / totalBots` 比例分配。
+当多个 Agent 参与任务时，每个 Agent 分到的机器人数量按比例缩放。`ScaleRampUp` 将每个阶段的 `count` 按 `assignedBots / totalBots` 比例分配。
 
 **算法**：
 
@@ -194,18 +194,18 @@ if cfg.RobotConfig.RampUp != nil {
    - **保证** `sum(counts) == assignedBots`，每个 `count >= 0`
 4. Concurrency / Reset / HoldSec 等语义字段**原样保留**（不缩放）
 
-**调用位置**: `startTaskBackground()`（第 787 行）
+**调用位置**: `admin/command/dispatcher.go`
 
 ```go
 TaskAssignment{
-    RampUp: scaleRampUp(rc.RampUp, taskTotalBots, a.TotalBots),
+    RampUp: admintask.ScaleRampUp(rc.RampUp, taskTotalBots, a.TotalBots, assignments, a.AgentID),
     // ...
 }
 ```
 
 ### 3.4 任务分配与下发
 
-**文件**: `admin/handlers.go`
+**文件**: `admin/httpapi/task_routes.go`、`admin/command/dispatcher.go`
 
 - `handleStartTask()`（第 678-718 行）：调用 `assigner.Assign()` 计算分配方案
 - `startTaskBackground()`（第 720-857 行）：并行推送到所有 Agent
@@ -229,7 +229,7 @@ type TaskAssignment struct {
 
 ### 4.2 转换为 Manager 配置
 
-**文件**: `agent/task_runner.go`（第 197-217 行）
+**文件**: `agent/task/runner.go`
 
 ```go
 if r.assignment.RampUp != nil && len(r.assignment.RampUp.Stages) > 0 {
@@ -346,7 +346,7 @@ func (m *Manager) startBatch(fromIndex, count, conc int) (int, error) {
 
 ### 4.6 阶段完成报告
 
-**文件**: `admin/handlers.go`（第 246-344 行）
+**文件**: `admin/grpcapi/control_service.go`、`admin/task/completion.go`
 
 Agent 在阶段重置时通过 `OnStageReset(stageIdx)` 回调向 Admin 上报阶段完成报告：
 
@@ -360,7 +360,7 @@ func handleAgentTaskDone():
 
 ### 4.7 中途取消处理
 
-**文件**: `agent/task_runner.go`（第 213-220 行）
+**文件**: `agent/task/runner.go`
 
 ```go
 if startErr != nil {
@@ -591,17 +591,17 @@ StageCount int `json:"stageCount,omitempty"`
   │  robotConfig.rampUp = { stages }
   │
   ▼  POST /sbot/tasks (FormData: robotConfig JSON)
-后端 handleCreateTask (admin/handlers.go:482)
+后端 handleCreateTask (admin/httpapi/task_routes.go)
   │  校验: stages 非空, count>0, holdSec>=0, sum==totalBots
   │
   ▼  POST /sbot/tasks/{id}/start
-后端 startTaskBackground (admin/handlers.go:720)
+后端 startTaskBackground (admin/httpapi/task_routes.go)
   │  assigner.Assign() → 每个 Agent 分配方案
   │  scaleRampUp(rampUp, total, assigned)  // 按比例缩放
   │  TaskAssignment.RampUp = scaled
   │
   ▼  Agent RPC 推送 (JSON)
-Agent task_runner.Run (agent/task_runner.go:197)
+Agent task.Runner.Run (agent/task/runner.go)
   │  转换为 robot.RampUpConfig
   │  mgr.OnStageReset = callback
   │  mgr.StartWithRampUp()
@@ -657,11 +657,11 @@ robot/manager.StartWithRampUp (robot/manager.go:155)
 | `cmd/web/src/services/taskActions.ts` | 组装 FormData 提交 robotConfig（含 rampUp） |
 | `cmd/web/src/services/tasksApi.ts` | createTask / startTask API 封装 |
 | `admin/types.go` | Go 类型：RampUpConfig / RampUpStage / HistoryRecord.StageCount |
-| `admin/handlers.go` | 创建任务校验 + scaleRampUp + 阶段报告处理 |
+| `admin/httpapi/task_routes.go`、`admin/task/distribution.go`、`admin/task/completion.go` | 创建任务校验 + RampUp 分配 + 阶段报告处理 |
 | `admin/history.go` | 归档 stage_count + config archive + List/Get 读取 |
 | `admin/history_schema.go` | DB DDL：stage_count / stage_index 列 |
 | `agent/types.go` | Agent 端 TaskAssignment.RampUp 类型 |
-| `agent/task_runner.go` | 解析 rampUp 配置 + 调用 StartWithRampUp + 取消处理 |
+| `agent/task/runner.go` | 解析 rampUp 配置 + 调用 StartWithRampUp + 取消处理 |
 | `robot/manager.go` | StartWithRampUp / resetBots / startBatch 核心执行 |
 | `cmd/web/src/components/monitoring/MonitorDock.tsx` | 运行时阶段进度计算 + 分段进度条 |
 | `cmd/web/src/components/monitoring/MonitorDock.css` | 分段进度条样式 + 脉冲动画 |

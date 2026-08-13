@@ -1,5 +1,7 @@
 # 前端 API 接口文档
 
+> **历史说明（2026-08-13）**：本文中的手写端点清单保留作历史参考，不再作为当前 API 契约。现行浏览器管理 API 以 `api/admin/openapi.yaml` 为唯一来源，并由 `/sbot/docs` 展示。
+
 ## 概述
 
 前端仅与 Admin 服务器通信（不直连 Agent）。所有端点前缀 `/sbot/`。Admin 代理所有 Agent 相关请求。
