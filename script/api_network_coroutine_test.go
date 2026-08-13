@@ -6,14 +6,14 @@ import (
 	"strings"
 	"testing"
 
-	"stressbot/adapter"
 	"stressbot/engine"
 	"stressbot/errcode"
+	"stressbot/protocol"
 
 	lua "github.com/yuin/gopher-lua"
 )
 
-// fakeAdapter 测试用 adapter.Adapter 桩：encode 返回 encodeBytes（nil 模拟编码失败），
+// fakeAdapter 测试用 protocol.Adapter 桩：encode 返回 encodeBytes（nil 模拟编码失败），
 // ExpectedRouteKey 返回 routeKey，DescribeError 返回 errDesc。
 type fakeAdapter struct {
 	encodeBytes   []byte // EncodeTCP/EncodeUDP 返回值；nil 模拟编码失败
@@ -48,7 +48,7 @@ func (a *fakeAdapter) ExpectedRouteKey(route any) string {
 func (a *fakeAdapter) Close()                      {}
 func (a *fakeAdapter) DescribeError(uint64) string { return a.errDesc }
 
-var _ adapter.Adapter = (*fakeAdapter)(nil)
+var _ protocol.Adapter = (*fakeAdapter)(nil)
 
 // doNet 执行一段 Lua 源码（自动前置 require("network")），用于直接驱动同步早期返回分支。
 func doNet(t *testing.T, L *lua.LState, src string) error {
@@ -252,7 +252,7 @@ func TestTCPSend_SendErr(t *testing.T) {
 	adp := &fakeAdapter{encodeBytes: []byte("encoded"), routeKey: "C2S.Login"}
 	resolver := &fakeResolver{adp: adp}
 	ns := &fakeNetSender{
-		tcpSendErr: engine.NewActionError(errcode.ErrConnNotFound, "conn-missing"),
+		tcpSendErr: errcode.NewActionError(errcode.ErrConnNotFound, "conn-missing"),
 	}
 	L := newTestState(t, context.Background(), ns, resolver)
 	defer L.Close()
@@ -306,7 +306,7 @@ func TestUDPSend_SendErr(t *testing.T) {
 	adp := &fakeAdapter{encodeBytes: []byte("udpkt"), routeKey: "3:1"}
 	resolver := &fakeResolver{adp: adp}
 	ns := &fakeNetSender{
-		udpSendErr: engine.NewActionError(errcode.ErrSendFailed, "write-fail"),
+		udpSendErr: errcode.NewActionError(errcode.ErrSendFailed, "write-fail"),
 	}
 	L := newTestState(t, context.Background(), ns, resolver)
 	defer L.Close()
@@ -520,7 +520,7 @@ func TestHTTPRequest_404_PassesThrough(t *testing.T) {
 // TestHTTPRequest_FrameworkErr NetSender 返回 error → (err table, 0, "")。
 func TestHTTPRequest_FrameworkErr(t *testing.T) {
 	ns := &fakeNetSender{
-		httpErr: engine.NewActionError(errcode.ErrConnNotFound, "conn-gone"),
+		httpErr: errcode.NewActionError(errcode.ErrConnNotFound, "conn-gone"),
 	}
 	ctx := &Context{NetSender: ns, Waiter: &recordingWaiter{}}
 
@@ -594,7 +594,7 @@ func TestConnectTCP_PreCanceled(t *testing.T) {
 // TestConnectTCP_DialErr 拨号返回 error → err table（从 ActionError 提取）。
 func TestConnectTCP_DialErr(t *testing.T) {
 	ns := &fakeNetSender{
-		connectErr: engine.NewActionError(errcode.ErrConnClosed, "dial-fail"),
+		connectErr: errcode.NewActionError(errcode.ErrConnClosed, "dial-fail"),
 	}
 	ctx := &Context{NetSender: ns, Waiter: &recordingWaiter{}}
 

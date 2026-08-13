@@ -1,17 +1,19 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"os/signal"
 	"runtime/debug"
+	"syscall"
 
 	"stressbot/admin"
-	"stressbot/utils"
-	stresslog "stressbot/utils/log"
-
-	// pprof 通过 utils.StartPprofServer 间接引用
-	_ "net/http/pprof"
+	"stressbot/config"
+	"stressbot/internal/daemon"
+	"stressbot/internal/stresslog"
 
 	"go.uber.org/zap"
 )
@@ -20,29 +22,36 @@ import (
 var Version = "dev"
 
 func main() {
-	var closeLog func() error
-	exitProcess := func(code int) {
-		if closeLog != nil {
-			_ = closeLog()
-		}
-		os.Exit(code)
-	}
+	os.Exit(run(os.Args[1:]))
+}
 
-	// 进程级顶层 recover：防止任何未捕获的 panic 直接让进程崩溃，
-	// 同时尽量把 stack trace 写入日志而不是仅 stderr。
+type options struct {
+	configPath string
+	daemon     bool
+}
+
+func parseOptions(args []string) (options, error) {
+	var opts options
+	flags := flag.NewFlagSet("admin", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	flags.StringVar(&opts.configPath, "config", "conf/admin.toml", "Admin 配置文件路径")
+	flags.BoolVar(&opts.daemon, "d", false, "以守护进程模式运行")
+	if err := flags.Parse(args); err != nil {
+		return options{}, err
+	}
+	return opts, nil
+}
+
+func run(args []string) (exitCode int) {
+	var closeLog func() error
 	defer func() {
 		if rec := recover(); rec != nil {
-			// 日志系统可能还没初始化，两路都写一份
-			fmt.Fprintf(os.Stderr, "[ADMIN] 顶层 panic: %v\n%s\n", rec, debug.Stack())
+			stack := debug.Stack()
+			fmt.Fprintf(os.Stderr, "[ADMIN] 顶层 panic: %v\n%s\n", rec, stack)
 			if stresslog.GetLogger() != nil {
-				stresslog.Error("[ADMIN] 顶层 panic",
-					zap.Any("panic", rec),
-					zap.String("stack", string(debug.Stack())))
+				stresslog.Error("[ADMIN] 顶层 panic", zap.Any("panic", rec), zap.String("stack", string(stack)))
 			}
-			if closeLog != nil {
-				_ = closeLog()
-			}
-			os.Exit(2)
+			exitCode = 2
 		}
 		if closeLog != nil {
 			if err := closeLog(); err != nil {
@@ -51,54 +60,51 @@ func main() {
 		}
 	}()
 
-	configPath := flag.String("config", "conf/admin.toml", "Admin 配置文件路径")
-	daemonFlag := flag.Bool("d", false, "以守护进程模式运行")
-	flag.Parse()
-
-	// -d 模式：fork 子进程后父进程退出
-	if *daemonFlag {
-		utils.Daemon("-d")
-		return
+	opts, err := parseOptions(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "解析启动参数失败: %v\n", err)
+		return 1
 	}
 
-	cfg, err := admin.LoadConfig(*configPath)
+	if opts.daemon {
+		daemon.Daemon("-d")
+		return 0
+	}
+
+	cfg, err := admin.LoadConfig(opts.configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
-		exitProcess(1)
+		return 1
 	}
-
-	// 配置中启用守护进程且当前不是守护进程子进程
 	if cfg.Daemon && os.Getppid() != 1 {
-		utils.Daemon()
-		return
+		daemon.Daemon()
+		return 0
 	}
 
-	// 初始化日志（直接使用配置文件全字段，不再手动重建丢失 MaxAge/Compress 等）
 	closeLog = stresslog.InitLog(cfg.Log.Path, "admin", &cfg.Log, "")
-
 	stresslog.Info("[MAIN] Admin 服务器启动", zap.String("version", Version))
 
-	srv, err := admin.NewAdminServer(*cfg)
+	server, err := admin.NewAdminServer(*cfg)
 	if err != nil {
 		stresslog.Error("[MAIN] 初始化 Admin 服务器失败", zap.Error(err))
-		exitProcess(1)
+		return 1
 	}
 
-	// pprof 调试服务（独立端口，不依赖 monitor），数据库迁移成功后才开放。
 	var stopPprof func()
 	if cfg.Pprof != nil {
-		pprofPort := cfg.Pprof.Port
-		if pprofPort <= 0 {
-			pprofPort = 6060
+		port := cfg.Pprof.Port
+		if port <= 0 {
+			port = 6060
 		}
-		stopPprof = utils.StartPprofServer(pprofPort)
+		stopPprof = config.StartPprofServer(port)
+		defer stopPprof()
 	}
 
-	if err := srv.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Admin 服务器退出: %v\n", err)
-		exitProcess(1)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	if err := server.Run(ctx); err != nil {
+		stresslog.Error("[MAIN] Admin 服务器退出", zap.Error(err))
+		return 1
 	}
-	if stopPprof != nil {
-		stopPprof()
-	}
+	return 0
 }

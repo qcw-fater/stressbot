@@ -3,6 +3,7 @@ package robot
 import (
 	"context"
 	"errors"
+	flowdef "stressbot/flow"
 	"testing"
 
 	"stressbot/engine"
@@ -43,9 +44,9 @@ func TestRobotActionHandlerDeclarativeSuccessRecordsOnce(t *testing.T) {
 	mc := resetActionHandlerMonitor(t)
 	h := &robotActionHandler{robot: newActionHandlerTestRobot(context.Background())}
 
-	err := h.ExecuteAction(context.Background(), &engine.ActionDef{
+	err := h.ExecuteAction(context.Background(), &flowdef.ActionDef{
 		Name:    "clear_ok",
-		Pattern: engine.PatternClearState,
+		Pattern: flowdef.PatternClearState,
 		Keys:    []string{"unused"},
 	})
 	if err != nil {
@@ -73,7 +74,7 @@ func TestRobotActionHandlerDeclarativeFailureRecordsOnce(t *testing.T) {
 	mc := resetActionHandlerMonitor(t)
 	h := &robotActionHandler{robot: newActionHandlerTestRobot(context.Background())}
 
-	err := h.ExecuteAction(context.Background(), &engine.ActionDef{
+	err := h.ExecuteAction(context.Background(), &flowdef.ActionDef{
 		Name:    "bad_pattern",
 		Pattern: "badPattern",
 	})
@@ -104,11 +105,11 @@ func TestRobotActionHandlerCancelSideEffectRecordsCanceled(t *testing.T) {
 	cancel()
 	h := &robotActionHandler{robot: newActionHandlerTestRobot(ctx)}
 
-	err := h.ExecuteAction(ctx, &engine.ActionDef{
+	err := h.ExecuteAction(ctx, &flowdef.ActionDef{
 		Name:    "cancel_side_effect",
 		Pattern: "badPattern",
 	})
-	if actionErr, ok := errors.AsType[*engine.ActionError](err); !ok || actionErr.Code != errcode.ErrActionCanceled {
+	if actionErr, ok := errors.AsType[*errcode.ActionError](err); !ok || actionErr.Code != errcode.ErrActionCanceled {
 		t.Fatalf("取消期副作用错误应归一化为 ErrActionCanceled，实际 %v", err)
 	}
 

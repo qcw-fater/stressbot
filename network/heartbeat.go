@@ -3,7 +3,7 @@ package network
 import (
 	"time"
 
-	stresslog "stressbot/utils/log"
+	"stressbot/internal/stresslog"
 
 	"go.uber.org/zap"
 )

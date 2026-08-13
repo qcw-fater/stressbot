@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	flowdef "stressbot/flow"
 	"testing"
 	"time"
 )
@@ -19,12 +20,12 @@ func TestSwitchNodeJSONModel(t *testing.T) {
 		"defaultNext":"normal"
 	}`)
 
-	var node Node
+	var node flowdef.Node
 	if err := json.Unmarshal(data, &node); err != nil {
 		t.Fatalf("unmarshal switch node: %v", err)
 	}
-	if node.Type != NodeSwitch {
-		t.Fatalf("Type = %q, want %q", node.Type, NodeSwitch)
+	if node.Type != flowdef.NodeSwitch {
+		t.Fatalf("Type = %q, want %q", node.Type, flowdef.NodeSwitch)
 	}
 	if len(node.Cases) != 2 {
 		t.Fatalf("len(Cases) = %d, want 2", len(node.Cases))
@@ -49,7 +50,7 @@ type switchTestHandler struct {
 	onBoolean      func() // 每次 ExecuteCondition 的副作用钩子（测试用，如求值时取消 ctx）
 }
 
-func (h *switchTestHandler) ExecuteAction(_ context.Context, actionDef *ActionDef) error {
+func (h *switchTestHandler) ExecuteAction(_ context.Context, actionDef *flowdef.ActionDef) error {
 	h.actions = append(h.actions, actionDef.Name)
 	if h.actionErrors != nil {
 		return h.actionErrors[actionDef.Name]
@@ -57,7 +58,7 @@ func (h *switchTestHandler) ExecuteAction(_ context.Context, actionDef *ActionDe
 	return nil
 }
 
-func (h *switchTestHandler) ExecuteCondition(condition *CompiledCondition) bool {
+func (h *switchTestHandler) ExecuteCondition(condition *flowdef.CompiledCondition) bool {
 	if h.onBoolean != nil {
 		h.onBoolean()
 	}
@@ -66,29 +67,29 @@ func (h *switchTestHandler) ExecuteCondition(condition *CompiledCondition) bool 
 	return h.booleanResults[expression]
 }
 
-func (h *switchTestHandler) RegisterListen([]ListenRef) error { return nil }
+func (h *switchTestHandler) RegisterListen([]flowdef.ListenRef) error { return nil }
 
 func (h *switchTestHandler) CooperativeSleep(ctx context.Context, _ time.Duration) error {
 	h.sleepCalls++
 	return ctx.Err()
 }
 
-func newSwitchTestExecutor(handler *switchTestHandler, switchNode *Node) *Executor {
-	flow := &TaskFlow{
+func newSwitchTestExecutor(handler *switchTestHandler, switchNode *flowdef.Node) *Executor {
+	flow := &flowdef.TaskFlow{
 		DefaultDelayMs: -1,
-		Nodes: map[string]*Node{
+		Nodes: map[string]*flowdef.Node{
 			"main":     switchNode,
-			"advanced": {Type: NodeAction, Action: "advanced", DelayMs: -1},
-			"normal":   {Type: NodeAction, Action: "normal", DelayMs: -1},
-			"fallback": {Type: NodeAction, Action: "fallback", DelayMs: -1},
+			"advanced": {Type: flowdef.NodeAction, Action: "advanced", DelayMs: -1},
+			"normal":   {Type: flowdef.NodeAction, Action: "normal", DelayMs: -1},
+			"fallback": {Type: flowdef.NodeAction, Action: "fallback", DelayMs: -1},
 		},
-		Actions: map[string]*ActionDef{
-			"advanced": {Name: "advanced", Pattern: PatternClearState},
-			"normal":   {Name: "normal", Pattern: PatternClearState},
-			"fallback": {Name: "fallback", Pattern: PatternClearState},
+		Actions: map[string]*flowdef.ActionDef{
+			"advanced": {Name: "advanced", Pattern: flowdef.PatternClearState},
+			"normal":   {Name: "normal", Pattern: flowdef.PatternClearState},
+			"fallback": {Name: "fallback", Pattern: flowdef.PatternClearState},
 		},
 	}
-	if err := PrepareTaskFlow(flow); err != nil {
+	if err := flowdef.PrepareTaskFlow(flow); err != nil {
 		panic(err)
 	}
 	return NewExecutor(flow, handler, "switch-test")
@@ -96,9 +97,9 @@ func newSwitchTestExecutor(handler *switchTestHandler, switchNode *Node) *Execut
 
 func TestExecutorDoesNotParseUnpreparedCondition(t *testing.T) {
 	handler := &switchTestHandler{booleanResults: map[string]bool{"state:ready": true}}
-	flow := &TaskFlow{Nodes: map[string]*Node{
-		"main": {Type: NodeBoolean, Condition: "state:ready", TrueNext: "yes"},
-		"yes":  {Type: NodeSequence},
+	flow := &flowdef.TaskFlow{Nodes: map[string]*flowdef.Node{
+		"main": {Type: flowdef.NodeBoolean, Condition: "state:ready", TrueNext: "yes"},
+		"yes":  {Type: flowdef.NodeSequence},
 	}}
 	executor := NewExecutor(flow, handler, "test")
 	if err := executor.Run(context.Background()); err != nil {
@@ -114,7 +115,7 @@ func TestExecuteSwitchRunsFirstMatchingCase(t *testing.T) {
 		"state:level >= 10": true,
 		"state:level >= 1":  true,
 	}}
-	exec := newSwitchTestExecutor(h, &Node{Type: NodeSwitch, Cases: []SwitchCase{
+	exec := newSwitchTestExecutor(h, &flowdef.Node{Type: flowdef.NodeSwitch, Cases: []flowdef.SwitchCase{
 		{Condition: "state:level >= 10", Next: "advanced"},
 		{Condition: "state:level >= 1", Next: "normal"},
 	}, DefaultNext: "fallback"})
@@ -135,7 +136,7 @@ func TestExecuteSwitchRunsDefaultWhenNoCaseMatches(t *testing.T) {
 		"state:level >= 10": false,
 		"state:level >= 1":  false,
 	}}
-	exec := newSwitchTestExecutor(h, &Node{Type: NodeSwitch, Cases: []SwitchCase{
+	exec := newSwitchTestExecutor(h, &flowdef.Node{Type: flowdef.NodeSwitch, Cases: []flowdef.SwitchCase{
 		{Condition: "state:level >= 10", Next: "advanced"},
 		{Condition: "state:level >= 1", Next: "normal"},
 	}, DefaultNext: "fallback"})
@@ -153,7 +154,7 @@ func TestExecuteSwitchRunsDefaultWhenNoCaseMatches(t *testing.T) {
 
 func TestExecuteSwitchEndsWhenNoCaseMatchesAndNoDefault(t *testing.T) {
 	h := &switchTestHandler{booleanResults: map[string]bool{"state:ready": false}}
-	exec := newSwitchTestExecutor(h, &Node{Type: NodeSwitch, Cases: []SwitchCase{
+	exec := newSwitchTestExecutor(h, &flowdef.Node{Type: flowdef.NodeSwitch, Cases: []flowdef.SwitchCase{
 		{Condition: "state:ready", Next: "advanced"},
 	}})
 
@@ -174,10 +175,10 @@ func TestExecuteSwitchPropagatesChildError(t *testing.T) {
 		booleanResults: map[string]bool{"state:ready": true},
 		actionErrors:   map[string]error{"advanced": boom},
 	}
-	exec := newSwitchTestExecutor(h, &Node{Type: NodeSwitch, Cases: []SwitchCase{
+	exec := newSwitchTestExecutor(h, &flowdef.Node{Type: flowdef.NodeSwitch, Cases: []flowdef.SwitchCase{
 		{Condition: "state:ready", Next: "advanced"},
 	}, DefaultNext: "fallback"})
-	exec.flow.Nodes["advanced"].OnError = &OnErrorDef{Strategy: StrategyAbort}
+	exec.flow.Nodes["advanced"].OnError = &flowdef.OnErrorDef{Strategy: flowdef.StrategyAbort}
 
 	err := exec.Run(context.Background())
 	if !errors.Is(err, boom) {
@@ -191,7 +192,7 @@ func TestExecuteSwitchPropagatesChildError(t *testing.T) {
 // 命中 case 但 Next 为空：视为本分支正常结束，不回退 default，也不执行任何 action。
 func TestExecuteSwitchMatchedEmptyNextEndsWithoutDefault(t *testing.T) {
 	h := &switchTestHandler{booleanResults: map[string]bool{"state:ready": true}}
-	exec := newSwitchTestExecutor(h, &Node{Type: NodeSwitch, Cases: []SwitchCase{
+	exec := newSwitchTestExecutor(h, &flowdef.Node{Type: flowdef.NodeSwitch, Cases: []flowdef.SwitchCase{
 		{Condition: "state:ready", Next: ""},
 	}, DefaultNext: "fallback"})
 
@@ -212,10 +213,10 @@ func TestExecuteSwitchNormalizesErrSkip(t *testing.T) {
 		booleanResults: map[string]bool{"state:ready": true},
 		actionErrors:   map[string]error{"advanced": errors.New("fail")},
 	}
-	exec := newSwitchTestExecutor(h, &Node{Type: NodeSwitch, Cases: []SwitchCase{
+	exec := newSwitchTestExecutor(h, &flowdef.Node{Type: flowdef.NodeSwitch, Cases: []flowdef.SwitchCase{
 		{Condition: "state:ready", Next: "advanced"},
 	}, DefaultNext: "fallback"})
-	exec.flow.Nodes["advanced"].OnError = &OnErrorDef{Strategy: StrategySkip}
+	exec.flow.Nodes["advanced"].OnError = &flowdef.OnErrorDef{Strategy: flowdef.StrategySkip}
 
 	if err := exec.Run(context.Background()); err != nil {
 		t.Fatalf("Run error = %v, want nil（errSkip 应被归一化为分支正常结束）", err)
@@ -228,7 +229,7 @@ func TestExecuteSwitchNormalizesErrSkip(t *testing.T) {
 // 空 cases + 有 defaultNext：前端校验会拦，但后端不应 panic，直接走 default。
 func TestExecuteSwitchEmptyCasesRunsDefault(t *testing.T) {
 	h := &switchTestHandler{}
-	exec := newSwitchTestExecutor(h, &Node{Type: NodeSwitch, Cases: nil, DefaultNext: "fallback"})
+	exec := newSwitchTestExecutor(h, &flowdef.Node{Type: flowdef.NodeSwitch, Cases: nil, DefaultNext: "fallback"})
 
 	if err := exec.Run(context.Background()); err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -248,7 +249,7 @@ func TestExecuteSwitchStopsOnContextCancelBetweenCases(t *testing.T) {
 		booleanResults: map[string]bool{"c0": false, "c1": false},
 		onBoolean:      func() { cancel() }, // 求值 c0 时取消 ctx
 	}
-	exec := newSwitchTestExecutor(h, &Node{Type: NodeSwitch, Cases: []SwitchCase{
+	exec := newSwitchTestExecutor(h, &flowdef.Node{Type: flowdef.NodeSwitch, Cases: []flowdef.SwitchCase{
 		{Condition: "c0", Next: "advanced"},
 		{Condition: "c1", Next: "normal"},
 	}, DefaultNext: "fallback"})

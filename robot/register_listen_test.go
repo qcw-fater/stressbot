@@ -1,10 +1,10 @@
 package robot
 
 import (
+	"stressbot/binding"
+	flowdef "stressbot/flow"
 	"strings"
 	"testing"
-
-	"stressbot/engine"
 )
 
 // TestEffectiveListenQueueSize 验证 ListenRef.QueueSize 的有效值解析（2-A2.1）。
@@ -24,35 +24,35 @@ func TestEffectiveListenQueueSize(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		ref     engine.ListenRef
+		ref     flowdef.ListenRef
 		want    int
 		wantErr bool
 		errSub  string
 	}{
 		{
 			name: "nil_缺省为1",
-			ref:  engine.ListenRef{Server: "tcp:logic", Listen: "L"},
+			ref:  flowdef.ListenRef{Server: "tcp:logic", Listen: "L"},
 			want: 1,
 		},
 		{
 			name: "显式3",
-			ref:  engine.ListenRef{Server: "tcp:logic", Listen: "L", QueueSize: &three},
+			ref:  flowdef.ListenRef{Server: "tcp:logic", Listen: "L", QueueSize: &three},
 			want: 3,
 		},
 		{
 			name: "显式1",
-			ref:  engine.ListenRef{Server: "tcp:logic", Listen: "L", QueueSize: &one},
+			ref:  flowdef.ListenRef{Server: "tcp:logic", Listen: "L", QueueSize: &one},
 			want: 1,
 		},
 		{
 			name:    "显式0_报错",
-			ref:     engine.ListenRef{Server: "tcp:logic", Listen: "L", QueueSize: &zero},
+			ref:     flowdef.ListenRef{Server: "tcp:logic", Listen: "L", QueueSize: &zero},
 			wantErr: true,
 			errSub:  "queueSize",
 		},
 		{
 			name:    "显式负数_报错",
-			ref:     engine.ListenRef{Server: "tcp:logic", Listen: "L", QueueSize: &neg},
+			ref:     flowdef.ListenRef{Server: "tcp:logic", Listen: "L", QueueSize: &neg},
 			wantErr: true,
 			errSub:  "queueSize",
 		},
@@ -92,35 +92,35 @@ func TestValidateListenDef(t *testing.T) {
 	tests := []struct {
 		name    string
 		listen  string
-		cbDef   *engine.ListenDef
+		cbDef   *flowdef.ListenDef
 		wantErr bool
 		errSubs []string
 	}{
 		{
 			name:    "纯缓存listen_空def_通过",
 			listen:  "frameData",
-			cbDef:   &engine.ListenDef{},
+			cbDef:   &flowdef.ListenDef{},
 			wantErr: false,
 		},
 		{
 			name:   "s2cProto+store_通过",
 			listen: "roomUpdateData",
-			cbDef: &engine.ListenDef{
+			cbDef: &flowdef.ListenDef{
 				S2CProto: "game.RoomUpdate",
-				Store:    []engine.StoreMapping{{Field: "id", Setter: "roomId"}},
+				Store:    []binding.StoreMapping{{Field: "id", Setter: "roomId"}},
 			},
 			wantErr: false,
 		},
 		{
 			name:    "纯script_通过",
 			listen:  "frameData",
-			cbDef:   &engine.ListenDef{Script: "listen_frame_data.lua"},
+			cbDef:   &flowdef.ListenDef{Script: "listen_frame_data.lua"},
 			wantErr: false,
 		},
 		{
 			name:   "script+s2cProto_通过",
 			listen: "roomPush",
-			cbDef: &engine.ListenDef{
+			cbDef: &flowdef.ListenDef{
 				S2CProto: "game.RoomUpdate",
 				Script:   "listen_room.lua",
 			},
@@ -129,9 +129,9 @@ func TestValidateListenDef(t *testing.T) {
 		{
 			name:   "store与script并存_报错",
 			listen: "roomPush",
-			cbDef: &engine.ListenDef{
+			cbDef: &flowdef.ListenDef{
 				Script: "listen_room.lua",
-				Store:  []engine.StoreMapping{{Field: "id", Setter: "roomId"}},
+				Store:  []binding.StoreMapping{{Field: "id", Setter: "roomId"}},
 			},
 			wantErr: true,
 			errSubs: []string{"roomPush", "store", "script", "互斥"},

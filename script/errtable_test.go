@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"stressbot/engine"
 	"stressbot/errcode"
 
 	lua "github.com/yuin/gopher-lua"
@@ -84,7 +83,7 @@ func TestErrTableFromActionErrPreservesWrappedActionError(t *testing.T) {
 	L := lua.NewState()
 	defer L.Close()
 
-	wrapped := fmt.Errorf("包装: %w", engine.NewActionError(errcode.ErrRecvTimeout, "service=logic route=1:2 recv 超时"))
+	wrapped := fmt.Errorf("包装: %w", errcode.NewActionError(errcode.ErrRecvTimeout, "service=logic route=1:2 recv 超时"))
 	tb := errTableFromActionErr(L, wrapped)
 	if got := tb.RawGetString("code"); got != lua.LNumber(int(errcode.ErrRecvTimeout)) {
 		t.Fatalf("code = %v, want %d", got, int(errcode.ErrRecvTimeout))
@@ -97,7 +96,7 @@ func TestErrTableFromActionErrPreservesWrappedActionError(t *testing.T) {
 func TestBuildActionError(t *testing.T) {
 	// 框架码
 	err := buildActionError(int(errcode.ErrRecvTimeout), "service=logic route=1:2", "match_succeed.lua")
-	ae, ok := errors.AsType[*engine.ActionError](err)
+	ae, ok := errors.AsType[*errcode.ActionError](err)
 	if !ok {
 		t.Fatalf("err 不是 *ActionError: %T", err)
 	}
@@ -109,7 +108,7 @@ func TestBuildActionError(t *testing.T) {
 	}
 	// 业务码
 	err = buildActionError(1004, "队伍已满: route=CreateTeam", "guild_join.lua")
-	ae, ok = errors.AsType[*engine.ActionError](err)
+	ae, ok = errors.AsType[*errcode.ActionError](err)
 	if !ok {
 		t.Fatal("业务码 err 不是 *ActionError")
 	}

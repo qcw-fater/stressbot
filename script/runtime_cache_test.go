@@ -7,9 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"stressbot/engine"
 	"stressbot/errcode"
-	stresslog "stressbot/utils/log"
+	"stressbot/internal/stresslog"
 
 	lua "github.com/yuin/gopher-lua"
 )
@@ -114,7 +113,7 @@ func TestRunActionScript_ReturnNil(t *testing.T) {
 }
 
 // TestRunActionScript_ReturnErrTable 脚本 return robot.error(code, detail) →
-// 重建 *engine.ActionError，code/detail 透传，detail 补 script=。
+// 重建 *errcode.ActionError，code/detail 透传，detail 补 script=。
 func TestRunActionScript_ReturnErrTable(t *testing.T) {
 	rp := newPoolWithScript(t, "err.lua", `
 		function execute(r)
@@ -127,9 +126,9 @@ func TestRunActionScript_ReturnErrTable(t *testing.T) {
 	if err == nil {
 		t.Fatalf("return err table 应产生 error")
 	}
-	ae, ok := errors.AsType[*engine.ActionError](err)
+	ae, ok := errors.AsType[*errcode.ActionError](err)
 	if !ok {
-		t.Fatalf("error 应为 *engine.ActionError，实际 %T: %v", err, err)
+		t.Fatalf("error 应为 *errcode.ActionError，实际 %T: %v", err, err)
 	}
 	if ae.Code != errcode.ErrLuaScriptCheck {
 		t.Fatalf("code=%d，want ErrLuaScriptCheck(%d)", ae.Code, errcode.ErrLuaScriptCheck)
@@ -152,7 +151,7 @@ func TestRunActionScript_ReturnNumber_FailLoud(t *testing.T) {
 		t.Fatalf("return number 应 fail loud，实际 nil")
 	}
 	// 应为框架错误（ErrLuaExecFailed 包装），非 ActionError 透传的脚本业务错误。
-	if ae, ok := errors.AsType[*engine.ActionError](err); ok {
+	if ae, ok := errors.AsType[*errcode.ActionError](err); ok {
 		t.Fatalf("旧式 return number 应包装为框架错误，不应透传 *ActionError（code=%d）", ae.Code)
 	}
 }

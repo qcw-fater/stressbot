@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"os"
+	flowdef "stressbot/flow"
 	"testing"
 	"time"
 
 	"stressbot/errcode"
-	stresslog "stressbot/utils/log"
+	"stressbot/internal/stresslog"
 
 	"go.uber.org/zap"
 )
@@ -32,7 +33,7 @@ type executorActionTestHandler struct {
 	sleepDurations []time.Duration
 }
 
-func (h *executorActionTestHandler) ExecuteAction(ctx context.Context, actionDef *ActionDef) error {
+func (h *executorActionTestHandler) ExecuteAction(ctx context.Context, actionDef *flowdef.ActionDef) error {
 	h.gotCtx = ctx
 	h.actionCalls++
 	h.actionNames = append(h.actionNames, actionDef.Name)
@@ -44,9 +45,9 @@ func (h *executorActionTestHandler) ExecuteAction(ctx context.Context, actionDef
 	return h.err
 }
 
-func (h *executorActionTestHandler) ExecuteCondition(*CompiledCondition) bool { return true }
+func (h *executorActionTestHandler) ExecuteCondition(*flowdef.CompiledCondition) bool { return true }
 
-func (h *executorActionTestHandler) RegisterListen([]ListenRef) error {
+func (h *executorActionTestHandler) RegisterListen([]flowdef.ListenRef) error {
 	h.registerCalls++
 	return h.registerErr
 }
@@ -58,14 +59,14 @@ func (h *executorActionTestHandler) CooperativeSleep(ctx context.Context, d time
 }
 
 func newExecutorActionTest(handler *executorActionTestHandler) *Executor {
-	return NewExecutor(&TaskFlow{
+	return NewExecutor(&flowdef.TaskFlow{
 		DefaultDelayMs: 1,
-		Nodes: map[string]*Node{
-			"cleanup": {Type: NodeAction, Action: "cleanup", DelayMs: -1},
+		Nodes: map[string]*flowdef.Node{
+			"cleanup": {Type: flowdef.NodeAction, Action: "cleanup", DelayMs: -1},
 		},
-		Actions: map[string]*ActionDef{
-			"a":       {Name: "a", Pattern: PatternClearState},
-			"cleanup": {Name: "cleanup", Pattern: PatternClearState},
+		Actions: map[string]*flowdef.ActionDef{
+			"a":       {Name: "a", Pattern: flowdef.PatternClearState},
+			"cleanup": {Name: "cleanup", Pattern: flowdef.PatternClearState},
 		},
 	}, handler, "test")
 }
@@ -85,7 +86,7 @@ func TestExecutorExecuteActionPassesContextToHandler(t *testing.T) {
 	handler := &executorActionTestHandler{}
 	ex := newExecutorActionTest(handler)
 
-	if err := ex.executeAction(ctx, &Node{Type: NodeAction, Action: "a", DelayMs: -1}); err != nil {
+	if err := ex.executeAction(ctx, &flowdef.Node{Type: flowdef.NodeAction, Action: "a", DelayMs: -1}); err != nil {
 		t.Fatalf("executeAction 返回错误: %v", err)
 	}
 	if handler.gotCtx != ctx {
@@ -99,7 +100,7 @@ func TestExecutorExecuteActionNodeDelayCancellationPropagates(t *testing.T) {
 	handler := &executorActionTestHandler{}
 	ex := newExecutorActionTest(handler)
 
-	err := ex.executeAction(ctx, &Node{Type: NodeAction, Action: "a", DelayMs: 1})
+	err := ex.executeAction(ctx, &flowdef.Node{Type: flowdef.NodeAction, Action: "a", DelayMs: 1})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("nodeDelay 期间取消应向上传播，实际 %v", err)
 	}
@@ -112,10 +113,10 @@ func TestExecutorExecuteActionCanceledBypassesOnErrorDelayAndStrategy(t *testing
 	handler := &executorActionTestHandler{err: context.Canceled}
 	ex := newExecutorActionTest(handler)
 
-	err := ex.executeAction(context.Background(), &Node{
-		Type:    NodeAction,
+	err := ex.executeAction(context.Background(), &flowdef.Node{
+		Type:    flowdef.NodeAction,
 		Action:  "a",
-		OnError: &OnErrorDef{Strategy: StrategyAbort, Handler: "cleanup", Retry: &RetryDef{MaxRetries: 1}},
+		OnError: &flowdef.OnErrorDef{Strategy: flowdef.StrategyAbort, Handler: "cleanup", Retry: &flowdef.RetryDef{MaxRetries: 1}},
 		DelayMs: 1,
 	})
 	if !errors.Is(err, context.Canceled) {
@@ -130,13 +131,13 @@ func TestExecutorExecuteActionCanceledBypassesOnErrorDelayAndStrategy(t *testing
 }
 
 func TestExecutorExecuteActionActionCanceledBypassesOnErrorDelayAndStrategy(t *testing.T) {
-	handler := &executorActionTestHandler{err: NewActionError(errcode.ErrActionCanceled, "stopping")}
+	handler := &executorActionTestHandler{err: errcode.NewActionError(errcode.ErrActionCanceled, "stopping")}
 	ex := newExecutorActionTest(handler)
 
-	err := ex.executeAction(context.Background(), &Node{
-		Type:    NodeAction,
+	err := ex.executeAction(context.Background(), &flowdef.Node{
+		Type:    flowdef.NodeAction,
 		Action:  "a",
-		OnError: &OnErrorDef{Strategy: StrategyAbort, Handler: "cleanup", Retry: &RetryDef{MaxRetries: 1}},
+		OnError: &flowdef.OnErrorDef{Strategy: flowdef.StrategyAbort, Handler: "cleanup", Retry: &flowdef.RetryDef{MaxRetries: 1}},
 		DelayMs: 1,
 	})
 	if !errors.Is(err, context.Canceled) {
@@ -151,16 +152,16 @@ func TestExecutorExecuteActionActionCanceledBypassesOnErrorDelayAndStrategy(t *t
 }
 
 func TestExecutorExecuteActionAbortWrapsErrExecFailed(t *testing.T) {
-	handler := &executorActionTestHandler{err: NewActionError(errcode.ErrUnknownPattern, "pattern=bad")}
+	handler := &executorActionTestHandler{err: errcode.NewActionError(errcode.ErrUnknownPattern, "pattern=bad")}
 	ex := newExecutorActionTest(handler)
 
-	err := ex.executeAction(context.Background(), &Node{
-		Type:    NodeAction,
+	err := ex.executeAction(context.Background(), &flowdef.Node{
+		Type:    flowdef.NodeAction,
 		Action:  "a",
-		OnError: &OnErrorDef{Strategy: StrategyAbort},
+		OnError: &flowdef.OnErrorDef{Strategy: flowdef.StrategyAbort},
 		DelayMs: 1,
 	})
-	if actionErr, ok := errors.AsType[*ActionError](err); !ok || actionErr.Code != errcode.ErrExecFailed {
+	if actionErr, ok := errors.AsType[*errcode.ActionError](err); !ok || actionErr.Code != errcode.ErrExecFailed {
 		t.Fatalf("失败路径应按 abort 包装 ErrExecFailed，实际 %v", err)
 	}
 	if handler.sleepCalls != 1 {
@@ -169,13 +170,13 @@ func TestExecutorExecuteActionAbortWrapsErrExecFailed(t *testing.T) {
 }
 
 func TestExecutorExecuteActionSkipReturnsErrSkip(t *testing.T) {
-	handler := &executorActionTestHandler{err: NewActionError(errcode.ErrUnknownPattern, "pattern=bad")}
+	handler := &executorActionTestHandler{err: errcode.NewActionError(errcode.ErrUnknownPattern, "pattern=bad")}
 	ex := newExecutorActionTest(handler)
 
-	err := ex.executeAction(context.Background(), &Node{
-		Type:    NodeAction,
+	err := ex.executeAction(context.Background(), &flowdef.Node{
+		Type:    flowdef.NodeAction,
 		Action:  "a",
-		OnError: &OnErrorDef{Strategy: StrategySkip},
+		OnError: &flowdef.OnErrorDef{Strategy: flowdef.StrategySkip},
 		DelayMs: -1,
 	})
 	if !errors.Is(err, errSkip) {
@@ -186,16 +187,16 @@ func TestExecutorExecuteActionSkipReturnsErrSkip(t *testing.T) {
 func TestExecutorExecuteActionResumeReturnsNil(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
-		onError *OnErrorDef
+		onError *flowdef.OnErrorDef
 	}{
 		{name: "empty", onError: nil},
-		{name: "resume", onError: &OnErrorDef{Strategy: StrategyResume}},
+		{name: "resume", onError: &flowdef.OnErrorDef{Strategy: flowdef.StrategyResume}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			handler := &executorActionTestHandler{err: NewActionError(errcode.ErrUnknownPattern, "pattern=bad")}
+			handler := &executorActionTestHandler{err: errcode.NewActionError(errcode.ErrUnknownPattern, "pattern=bad")}
 			ex := newExecutorActionTest(handler)
 
-			err := ex.executeAction(context.Background(), &Node{Type: NodeAction, Action: "a", OnError: tc.onError, DelayMs: -1})
+			err := ex.executeAction(context.Background(), &flowdef.Node{Type: flowdef.NodeAction, Action: "a", OnError: tc.onError, DelayMs: -1})
 			if err != nil {
 				t.Fatalf("resume/空 strategy 应返回 nil，实际 %v", err)
 			}
@@ -204,14 +205,14 @@ func TestExecutorExecuteActionResumeReturnsNil(t *testing.T) {
 }
 
 func TestExecutorExecuteActionIgnoreCodesReturnsNilAndRunsDelayAndListen(t *testing.T) {
-	handler := &executorActionTestHandler{err: NewActionError(errcode.ErrRecvTimeout, "timeout")}
+	handler := &executorActionTestHandler{err: errcode.NewActionError(errcode.ErrRecvTimeout, "timeout")}
 	ex := newExecutorActionTest(handler)
 
-	err := ex.executeAction(context.Background(), &Node{
-		Type:       NodeAction,
+	err := ex.executeAction(context.Background(), &flowdef.Node{
+		Type:       flowdef.NodeAction,
 		Action:     "a",
-		OnError:    &OnErrorDef{IgnoreCodes: []errcode.ErrorCode{errcode.ErrRecvTimeout}},
-		ListenRefs: []ListenRef{{Server: "tcp:logic", Listen: "push"}},
+		OnError:    &flowdef.OnErrorDef{IgnoreCodes: []errcode.ErrorCode{errcode.ErrRecvTimeout}},
+		ListenRefs: []flowdef.ListenRef{{Server: "tcp:logic", Listen: "push"}},
 		DelayMs:    1,
 	})
 	if err != nil {
@@ -226,13 +227,13 @@ func TestExecutorExecuteActionIgnoreCodesReturnsNilAndRunsDelayAndListen(t *test
 }
 
 func TestExecutorExecuteActionIgnoreCodesSkipsHandlerRetryStrategy(t *testing.T) {
-	handler := &executorActionTestHandler{err: NewActionError(errcode.ErrRecvTimeout, "timeout")}
+	handler := &executorActionTestHandler{err: errcode.NewActionError(errcode.ErrRecvTimeout, "timeout")}
 	ex := newExecutorActionTest(handler)
 
-	err := ex.executeAction(context.Background(), &Node{
-		Type:    NodeAction,
+	err := ex.executeAction(context.Background(), &flowdef.Node{
+		Type:    flowdef.NodeAction,
 		Action:  "a",
-		OnError: &OnErrorDef{IgnoreCodes: []errcode.ErrorCode{errcode.ErrRecvTimeout}, Handler: "cleanup", Retry: &RetryDef{MaxRetries: 2}, Strategy: StrategyAbort},
+		OnError: &flowdef.OnErrorDef{IgnoreCodes: []errcode.ErrorCode{errcode.ErrRecvTimeout}, Handler: "cleanup", Retry: &flowdef.RetryDef{MaxRetries: 2}, Strategy: flowdef.StrategyAbort},
 		DelayMs: -1,
 	})
 	if err != nil {
@@ -248,14 +249,14 @@ func TestExecutorExecuteActionIgnoreCodesSkipsHandlerRetryStrategy(t *testing.T)
 
 func TestExecutorExecuteActionRetrySuccess(t *testing.T) {
 	handler := &executorActionTestHandler{errsByAction: map[string][]error{
-		"a": {NewActionError(errcode.ErrRecvTimeout, "timeout"), nil},
+		"a": {errcode.NewActionError(errcode.ErrRecvTimeout, "timeout"), nil},
 	}}
 	ex := newExecutorActionTest(handler)
 
-	err := ex.executeAction(context.Background(), &Node{
-		Type:    NodeAction,
+	err := ex.executeAction(context.Background(), &flowdef.Node{
+		Type:    flowdef.NodeAction,
 		Action:  "a",
-		OnError: &OnErrorDef{Retry: &RetryDef{MaxRetries: 1, RetryDelayMs: 5}},
+		OnError: &flowdef.OnErrorDef{Retry: &flowdef.RetryDef{MaxRetries: 1, RetryDelayMs: 5}},
 		DelayMs: 1,
 	})
 	if err != nil {
@@ -275,17 +276,17 @@ func TestExecutorExecuteActionRetrySuccess(t *testing.T) {
 func TestExecutorExecuteActionRetryExhausted(t *testing.T) {
 	handler := &executorActionTestHandler{errsByAction: map[string][]error{
 		"a": {
-			NewActionError(errcode.ErrRecvTimeout, "timeout1"),
-			NewActionError(errcode.ErrRecvTimeout, "timeout2"),
-			NewActionError(errcode.ErrRecvTimeout, "timeout3"),
+			errcode.NewActionError(errcode.ErrRecvTimeout, "timeout1"),
+			errcode.NewActionError(errcode.ErrRecvTimeout, "timeout2"),
+			errcode.NewActionError(errcode.ErrRecvTimeout, "timeout3"),
 		},
 	}}
 	ex := newExecutorActionTest(handler)
 
-	err := ex.executeAction(context.Background(), &Node{
-		Type:    NodeAction,
+	err := ex.executeAction(context.Background(), &flowdef.Node{
+		Type:    flowdef.NodeAction,
 		Action:  "a",
-		OnError: &OnErrorDef{Retry: &RetryDef{MaxRetries: 2, RetryDelayMs: 5}},
+		OnError: &flowdef.OnErrorDef{Retry: &flowdef.RetryDef{MaxRetries: 2, RetryDelayMs: 5}},
 		DelayMs: 1,
 	})
 	if err != nil {
@@ -301,15 +302,15 @@ func TestExecutorExecuteActionRetryExhausted(t *testing.T) {
 
 func TestExecutorExecuteActionHandlerRunsForEachFailedAttempt(t *testing.T) {
 	handler := &executorActionTestHandler{errsByAction: map[string][]error{
-		"a":       {NewActionError(errcode.ErrRecvTimeout, "timeout1"), NewActionError(errcode.ErrRecvTimeout, "timeout2"), nil},
+		"a":       {errcode.NewActionError(errcode.ErrRecvTimeout, "timeout1"), errcode.NewActionError(errcode.ErrRecvTimeout, "timeout2"), nil},
 		"cleanup": {nil, nil},
 	}}
 	ex := newExecutorActionTest(handler)
 
-	err := ex.executeAction(context.Background(), &Node{
-		Type:    NodeAction,
+	err := ex.executeAction(context.Background(), &flowdef.Node{
+		Type:    flowdef.NodeAction,
 		Action:  "a",
-		OnError: &OnErrorDef{Handler: "cleanup", Retry: &RetryDef{MaxRetries: 2}},
+		OnError: &flowdef.OnErrorDef{Handler: "cleanup", Retry: &flowdef.RetryDef{MaxRetries: 2}},
 		DelayMs: -1,
 	})
 	if err != nil {
@@ -322,16 +323,16 @@ func TestExecutorExecuteActionHandlerRunsForEachFailedAttempt(t *testing.T) {
 
 func TestExecutorExecuteActionHandlerFailureStopsRetry(t *testing.T) {
 	handler := &executorActionTestHandler{errsByAction: map[string][]error{
-		"a":       {NewActionError(errcode.ErrRecvTimeout, "timeout")},
-		"cleanup": {NewActionError(errcode.ErrUnknownPattern, "cleanup failed")},
+		"a":       {errcode.NewActionError(errcode.ErrRecvTimeout, "timeout")},
+		"cleanup": {errcode.NewActionError(errcode.ErrUnknownPattern, "cleanup failed")},
 	}}
 	ex := newExecutorActionTest(handler)
-	ex.flow.Nodes["cleanup"] = &Node{Type: NodeAction, Action: "cleanup", OnError: &OnErrorDef{Strategy: StrategyAbort}, DelayMs: -1}
+	ex.flow.Nodes["cleanup"] = &flowdef.Node{Type: flowdef.NodeAction, Action: "cleanup", OnError: &flowdef.OnErrorDef{Strategy: flowdef.StrategyAbort}, DelayMs: -1}
 
-	err := ex.executeAction(context.Background(), &Node{
-		Type:    NodeAction,
+	err := ex.executeAction(context.Background(), &flowdef.Node{
+		Type:    flowdef.NodeAction,
 		Action:  "a",
-		OnError: &OnErrorDef{Handler: "cleanup", Retry: &RetryDef{MaxRetries: 2}},
+		OnError: &flowdef.OnErrorDef{Handler: "cleanup", Retry: &flowdef.RetryDef{MaxRetries: 2}},
 		DelayMs: -1,
 	})
 	if err == nil {
@@ -344,16 +345,16 @@ func TestExecutorExecuteActionHandlerFailureStopsRetry(t *testing.T) {
 
 func TestExecutorExecuteActionHandlerSkipIsNormalCompletion(t *testing.T) {
 	handler := &executorActionTestHandler{errsByAction: map[string][]error{
-		"a":       {NewActionError(errcode.ErrRecvTimeout, "timeout"), nil},
-		"cleanup": {NewActionError(errcode.ErrUnknownPattern, "skip cleanup")},
+		"a":       {errcode.NewActionError(errcode.ErrRecvTimeout, "timeout"), nil},
+		"cleanup": {errcode.NewActionError(errcode.ErrUnknownPattern, "skip cleanup")},
 	}}
 	ex := newExecutorActionTest(handler)
-	ex.flow.Nodes["cleanup"] = &Node{Type: NodeAction, Action: "cleanup", OnError: &OnErrorDef{Strategy: StrategySkip}, DelayMs: -1}
+	ex.flow.Nodes["cleanup"] = &flowdef.Node{Type: flowdef.NodeAction, Action: "cleanup", OnError: &flowdef.OnErrorDef{Strategy: flowdef.StrategySkip}, DelayMs: -1}
 
-	err := ex.executeAction(context.Background(), &Node{
-		Type:    NodeAction,
+	err := ex.executeAction(context.Background(), &flowdef.Node{
+		Type:    flowdef.NodeAction,
 		Action:  "a",
-		OnError: &OnErrorDef{Handler: "cleanup", Retry: &RetryDef{MaxRetries: 1}},
+		OnError: &flowdef.OnErrorDef{Handler: "cleanup", Retry: &flowdef.RetryDef{MaxRetries: 1}},
 		DelayMs: -1,
 	})
 	if err != nil {
@@ -368,16 +369,16 @@ func TestExecutorExecuteActionListenRefsOnlyOnSuccessOrIgnore(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		handler := &executorActionTestHandler{}
 		ex := newExecutorActionTest(handler)
-		err := ex.executeAction(context.Background(), &Node{Type: NodeAction, Action: "a", ListenRefs: []ListenRef{{Server: "tcp:logic", Listen: "push"}}, DelayMs: -1})
+		err := ex.executeAction(context.Background(), &flowdef.Node{Type: flowdef.NodeAction, Action: "a", ListenRefs: []flowdef.ListenRef{{Server: "tcp:logic", Listen: "push"}}, DelayMs: -1})
 		if err != nil || handler.registerCalls != 1 {
 			t.Fatalf("成功应注册 listenRefs，err=%v registerCalls=%d", err, handler.registerCalls)
 		}
 	})
 
 	t.Run("failure", func(t *testing.T) {
-		handler := &executorActionTestHandler{err: NewActionError(errcode.ErrRecvTimeout, "timeout")}
+		handler := &executorActionTestHandler{err: errcode.NewActionError(errcode.ErrRecvTimeout, "timeout")}
 		ex := newExecutorActionTest(handler)
-		err := ex.executeAction(context.Background(), &Node{Type: NodeAction, Action: "a", ListenRefs: []ListenRef{{Server: "tcp:logic", Listen: "push"}}, DelayMs: -1})
+		err := ex.executeAction(context.Background(), &flowdef.Node{Type: flowdef.NodeAction, Action: "a", ListenRefs: []flowdef.ListenRef{{Server: "tcp:logic", Listen: "push"}}, DelayMs: -1})
 		if err != nil || handler.registerCalls != 0 {
 			t.Fatalf("普通失败不应注册 listenRefs，err=%v registerCalls=%d", err, handler.registerCalls)
 		}
@@ -385,17 +386,17 @@ func TestExecutorExecuteActionListenRefsOnlyOnSuccessOrIgnore(t *testing.T) {
 }
 
 func TestExecutorExecuteActionListenRegisterFailureDoesNotRetry(t *testing.T) {
-	handler := &executorActionTestHandler{registerErr: NewActionError(errcode.ErrListenRegister, "listen failed")}
+	handler := &executorActionTestHandler{registerErr: errcode.NewActionError(errcode.ErrListenRegister, "listen failed")}
 	ex := newExecutorActionTest(handler)
 
-	err := ex.executeAction(context.Background(), &Node{
-		Type:       NodeAction,
+	err := ex.executeAction(context.Background(), &flowdef.Node{
+		Type:       flowdef.NodeAction,
 		Action:     "a",
-		OnError:    &OnErrorDef{Retry: &RetryDef{MaxRetries: 2}, Strategy: StrategyAbort},
-		ListenRefs: []ListenRef{{Server: "tcp:logic", Listen: "push"}},
+		OnError:    &flowdef.OnErrorDef{Retry: &flowdef.RetryDef{MaxRetries: 2}, Strategy: flowdef.StrategyAbort},
+		ListenRefs: []flowdef.ListenRef{{Server: "tcp:logic", Listen: "push"}},
 		DelayMs:    -1,
 	})
-	if actionErr, ok := errors.AsType[*ActionError](err); !ok || actionErr.Code != errcode.ErrListenRegister {
+	if actionErr, ok := errors.AsType[*errcode.ActionError](err); !ok || actionErr.Code != errcode.ErrListenRegister {
 		t.Fatalf("监听注册失败应按 ErrListenRegister abort，实际 %v", err)
 	}
 	if got := countActionCalls(handler.actionNames, "a"); got != 1 {

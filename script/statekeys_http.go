@@ -7,7 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"stressbot/protox"
+	"stressbot/protocol/protox"
 	"stressbot/state"
 )
 

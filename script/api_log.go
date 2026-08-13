@@ -1,7 +1,7 @@
 package script
 
 import (
-	stresslog "stressbot/utils/log"
+	"stressbot/internal/stresslog"
 
 	lua "github.com/yuin/gopher-lua"
 	"go.uber.org/zap"

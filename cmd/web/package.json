@@ -9,7 +9,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext .ts,.tsx",
-    "generate:api": "openapi-typescript ../../api/openapi/admin.yaml -o src/generated/admin-api.ts",
+    "generate:api": "openapi-typescript ../../api/admin/openapi.yaml -o src/generated/admin-api.ts",
     "test": "vitest run",
     "test:ui": "vitest --ui",
     "type-check": "tsc -b --noEmit"

@@ -9,7 +9,7 @@ import (
 	lua "github.com/yuin/gopher-lua"
 	"google.golang.org/protobuf/proto"
 
-	"stressbot/protox"
+	"stressbot/protocol/protox"
 )
 
 // newFrozenTestMessage 构造并经序列化→反序列化还原线上 wire 行为的测试消息

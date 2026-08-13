@@ -3,14 +3,14 @@ package robot
 import (
 	"context"
 	"fmt"
-	"stressbot/adapter"
-	"stressbot/engine"
+	flowdef "stressbot/flow"
+	"stressbot/internal/stresslog"
+	"stressbot/internal/workpool"
 	"stressbot/network"
-	"stressbot/protox"
+	"stressbot/protocol"
+	"stressbot/protocol/protox"
 	"stressbot/script"
-	"stressbot/sharedstate"
-	"stressbot/utils"
-	stresslog "stressbot/utils/log"
+	"stressbot/state/shared"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -46,21 +46,21 @@ type ManagerConfig struct {
 	//   - 业务 Lua：经 script.Context.Resolver 在 api_network.go 内 Resolve。
 	// 全链路由 main.go/task_runner 启动期 LoadCodecResolver 构造并透传。
 	// 业务 codec 不再经 Lua，生产路径只接收 CodecResolver。
-	CodecResolver  adapter.CodecResolver `json:"-"`
-	RequestTimeout time.Duration         `json:"requestTimeout"`
-	MainService    string                `json:"mainService"`
-	HTTPTimeout    time.Duration         `json:"httpTimeout"`
-	RampUp         *RampUpConfig         `json:"rampUp"`
-	Duration       time.Duration         `json:"duration"` // 运行时长，0 = 一直运行
+	CodecResolver  protocol.CodecResolver `json:"-"`
+	RequestTimeout time.Duration          `json:"requestTimeout"`
+	MainService    string                 `json:"mainService"`
+	HTTPTimeout    time.Duration          `json:"httpTimeout"`
+	RampUp         *RampUpConfig          `json:"rampUp"`
+	Duration       time.Duration          `json:"duration"` // 运行时长，0 = 一直运行
 	// Shared 任务级共享状态后端（可为 nil，表示未启用）。Manager 仅透传给每个 Robot，
 	// 不负责 Cleanup/Close：单机由 cmd/agent 负责，分布式由 Agent(Close)+Admin(Cleanup) 负责。
-	Shared sharedstate.Store `json:"-"`
+	Shared shared.Store `json:"-"`
 }
 
 // Manager 机器人管理器。
 type Manager struct {
 	cfg     ManagerConfig
-	flow    *engine.TaskFlow
+	flow    *flowdef.TaskFlow
 	factory *protox.Factory
 	dialer  *network.Dialer
 	luaPool *script.RuntimePool
@@ -106,7 +106,7 @@ type Manager struct {
 // 每个 Robot 的 ctx 又由 Manager.ctx 派生，形成 task → manager → robot 取消链。
 // 这样任务取消（含 ramp-up 创建阶段进行中）能立即沿链传播，让 startBatch/holdSec 尽快退出，
 // 不再依赖"跑完 ramp-up 才在外层 select 命中 ctx.Done"。
-func NewManager(parent context.Context, cfg ManagerConfig, flow *engine.TaskFlow, factory *protox.Factory,
+func NewManager(parent context.Context, cfg ManagerConfig, flow *flowdef.TaskFlow, factory *protox.Factory,
 	dialer *network.Dialer, luaPool *script.RuntimePool) *Manager {
 
 	ctx, cancel := context.WithCancel(parent)
@@ -345,7 +345,7 @@ const closeRobotsTimeout = 15 * time.Second
 // 正常提交的任务整体超过 closeRobotsTimeout 后强制返回；协程池拒绝时改为同步清理，
 // 确保资源实际释放，不再等待超时后伪造未执行的清理结果。
 func closeRobotsConcurrent(robots []*Robot, reason CleanupReason) CleanupStatus {
-	return closeRobotsConcurrentWithSubmit(robots, reason, utils.GetWorkPool().Submit)
+	return closeRobotsConcurrentWithSubmit(robots, reason, workpool.GetWorkPool().Submit)
 }
 
 func closeRobotsConcurrentWithSubmit(robots []*Robot, reason CleanupReason, submit func(func()) error) CleanupStatus {
@@ -533,7 +533,7 @@ func (m *Manager) Done() <-chan struct{} {
 
 // startDurationTimer 启动运行时长定时器，到期后自动 StopAll。
 func (m *Manager) startDurationTimer() error {
-	return m.startDurationTimerWithSubmit(utils.GetWorkPool().Submit)
+	return m.startDurationTimerWithSubmit(workpool.GetWorkPool().Submit)
 }
 
 func (m *Manager) startDurationTimerWithSubmit(submit func(func()) error) error {

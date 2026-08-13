@@ -35,7 +35,7 @@ dist/
 /log/
 data/
 bugs/
-metrics/
+/metrics/
 
 # AI 与工具产物
 .claude/
@@ -43,6 +43,7 @@ metrics/
 .learnings/
 .playwright-mcp/
 .superpowers/
+.zcode/
 
 # 部署测试
 deploy/

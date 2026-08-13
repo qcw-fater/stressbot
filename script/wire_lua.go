@@ -1,7 +1,7 @@
 package script
 
 import (
-	"stressbot/protox"
+	"stressbot/protocol/protox"
 
 	lua "github.com/yuin/gopher-lua"
 	"google.golang.org/protobuf/reflect/protoreflect"

@@ -6,20 +6,20 @@ import (
 	"testing"
 	"time"
 
-	"stressbot/adapter"
 	"stressbot/engine"
+	"stressbot/protocol"
 	"stressbot/state"
 
 	lua "github.com/yuin/gopher-lua"
 )
 
 type fakeResolver struct {
-	adp      adapter.Adapter
-	adps     map[string]adapter.Adapter
+	adp      protocol.Adapter
+	adps     map[string]protocol.Adapter
 	resolved []string
 }
 
-func (r *fakeResolver) Resolve(server string) adapter.Adapter {
+func (r *fakeResolver) Resolve(server string) protocol.Adapter {
 	if r == nil {
 		return nil
 	}
@@ -168,7 +168,7 @@ func TestFakeNetSenderSecretKeyCopiesInput(t *testing.T) {
 }
 
 // newTestState 注册全部模块 + 注入 fake Context。
-func newTestState(t interface{ Helper() }, ctx context.Context, ns engine.NetSender, resolver adapter.CodecResolver) *lua.LState {
+func newTestState(t interface{ Helper() }, ctx context.Context, ns engine.NetSender, resolver protocol.CodecResolver) *lua.LState {
 	t.Helper()
 	L := lua.NewState()
 	registerAPIs(L)
@@ -186,4 +186,4 @@ func newTestState(t interface{ Helper() }, ctx context.Context, ns engine.NetSen
 }
 
 var _ engine.NetSender = (*fakeNetSender)(nil)
-var _ adapter.CodecResolver = (*fakeResolver)(nil)
+var _ protocol.CodecResolver = (*fakeResolver)(nil)

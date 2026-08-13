@@ -1,8 +1,8 @@
 package network
 
 import (
+	"stressbot/internal/stresslog"
 	"stressbot/monitor"
-	stresslog "stressbot/utils/log"
 	"sync"
 	"time"
 

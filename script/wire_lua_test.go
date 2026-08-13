@@ -10,7 +10,7 @@ import (
 	lua "github.com/yuin/gopher-lua"
 	"google.golang.org/protobuf/proto"
 
-	"stressbot/protox"
+	"stressbot/protocol/protox"
 )
 
 // ── D1 直转器 Lua 出口差分：wireValueToLuaTable ≡ protoMessageToLuaTable(解码) ──

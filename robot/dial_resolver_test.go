@@ -4,16 +4,16 @@ import (
 	"context"
 	"testing"
 
-	"stressbot/adapter"
 	"stressbot/network"
+	"stressbot/protocol"
 )
 
 // stubResolver 测试用 CodecResolver：按显式 map 返回，未映射返回 nil（与生产 codecResolver 同语义）。
 type stubResolver struct {
-	byServer map[string]adapter.Adapter
+	byServer map[string]protocol.Adapter
 }
 
-func (s *stubResolver) Resolve(server string) adapter.Adapter { return s.byServer[server] }
+func (s *stubResolver) Resolve(server string) protocol.Adapter { return s.byServer[server] }
 
 // TestConnectTCP_ResolverNil_FailLoud 验证 Resolve 未命中 server → 拨号中止、返回 false、不触达 dialer。
 //
@@ -32,7 +32,7 @@ func TestConnectTCP_ResolverNil_FailLoud(t *testing.T) {
 		ctx:     context.Background(),
 		cancel:  func() {},
 		// resolver 仅映射 tcp:logic；tcp:unknown 未映射 → nil。
-		resolver: &stubResolver{byServer: map[string]adapter.Adapter{
+		resolver: &stubResolver{byServer: map[string]protocol.Adapter{
 			"tcp:logic": fakeAdapter{},
 		}},
 		// r.dialer 故意留 nil：fail-loud 路径在 Resolve 之后即返回，不会读 r.dialer。
@@ -60,7 +60,7 @@ func TestConnectUDP_ResolverNil_FailLoud(t *testing.T) {
 		client:  network.NewClient("bot_test2", 0, ""),
 		ctx:     context.Background(),
 		cancel:  func() {},
-		resolver: &stubResolver{byServer: map[string]adapter.Adapter{
+		resolver: &stubResolver{byServer: map[string]protocol.Adapter{
 			"udp:battle": fakeAdapter{},
 		}},
 	}
@@ -79,7 +79,7 @@ func TestConnectUDP_ResolverNil_FailLoud(t *testing.T) {
 func TestConnectTCP_ResolverHit_ResolveNonNil(t *testing.T) {
 	want := fakeAdapter{}
 	r := &Robot{
-		resolver: &stubResolver{byServer: map[string]adapter.Adapter{"tcp:logic": want}},
+		resolver: &stubResolver{byServer: map[string]protocol.Adapter{"tcp:logic": want}},
 	}
 
 	got := r.resolver.Resolve("tcp:logic")
@@ -92,7 +92,7 @@ func TestConnectTCP_ResolverHit_ResolveNonNil(t *testing.T) {
 	}
 }
 
-// fakeAdapter 仅满足 adapter.Adapter 接口签名，方法不需要正确行为
+// fakeAdapter 仅满足 protocol.Adapter 接口签名，方法不需要正确行为
 // （fail-loud 路径在 codec 方法被调用之前即返回；resolver 命中路径只验证 Resolve 非 nil）。
 type fakeAdapter struct{}
 

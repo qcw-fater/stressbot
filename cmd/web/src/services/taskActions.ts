@@ -29,7 +29,7 @@ import type { FlowJson } from '@/components/FlowEditor/codec/flowToJson';
 
 const DRAFT_STASH_KEY = 'stressbot:flow:stash';
 
-/** 与后端 sharedstate.UsesShare 一致：检测脚本是否引用 share 模块。 */
+/** 与后端 state/shared.UsesShare 一致：检测脚本是否引用 share 模块。 */
 const SHARE_REQUIRE_RE = /require\s*\(?\s*['"]share['"]/;
 
 /**

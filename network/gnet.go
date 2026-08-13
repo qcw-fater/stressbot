@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"stressbot/adapter"
+	"stressbot/internal/stresslog"
 	"stressbot/monitor"
-	stresslog "stressbot/utils/log"
+	"stressbot/protocol"
 
 	"github.com/panjf2000/gnet/v2"
 	"go.uber.org/zap"
@@ -65,7 +65,7 @@ type EventServer struct {
 	gnet.BuiltinEventEngine
 
 	registry     *connRegistry
-	adp          adapter.Adapter // 仅用于 OnTraffic 的帧切割元信息（HeaderSize/BodyLength）
+	adp          protocol.Adapter // 仅用于 OnTraffic 的帧切割元信息（HeaderSize/BodyLength）
 	tickInterval time.Duration
 }
 
@@ -73,7 +73,7 @@ type EventServer struct {
 var _ gnet.EventHandler = (*EventServer)(nil)
 
 // NewEventServer 创建 gnet 事件处理器
-func NewEventServer(adp adapter.Adapter, heartbeatInterval time.Duration) *EventServer {
+func NewEventServer(adp protocol.Adapter, heartbeatInterval time.Duration) *EventServer {
 	return &EventServer{
 		registry:     newConnRegistry(),
 		adp:          adp,
@@ -87,7 +87,7 @@ func NewEventServer(adp adapter.Adapter, heartbeatInterval time.Duration) *Event
 // "Dial 返回后、注册前首包到达被丢弃" 的竞态（H5）。
 type dialPayload struct {
 	conn  *Connection
-	adp   adapter.Adapter
+	adp   protocol.Adapter
 	isUDP bool
 }
 
@@ -323,7 +323,7 @@ type Dialer struct {
 }
 
 // NewDialer 创建拨号器
-func NewDialer(adp adapter.Adapter, heartbeatInterval time.Duration) *Dialer {
+func NewDialer(adp protocol.Adapter, heartbeatInterval time.Duration) *Dialer {
 	server := NewEventServer(adp, heartbeatInterval)
 	return &Dialer{
 		server:     server,
@@ -395,7 +395,7 @@ func (d *Dialer) Stop() error {
 //
 // adp 必须非 nil：上层 Robot.ConnectTCP 已做 Resolve(nil → fail loud)，dial 内仅保留
 // 防御性 nil-guard（adp==nil 视为编程错误，直接返回错误，不再回退 d.server.adp 兜底）。
-func (d *Dialer) DialTCP(ctx context.Context, address string, conn *Connection, adp adapter.Adapter) (gnet.Conn, error) {
+func (d *Dialer) DialTCP(ctx context.Context, address string, conn *Connection, adp protocol.Adapter) (gnet.Conn, error) {
 	return d.dial(ctx, "tcp", address, conn, adp)
 }
 
@@ -403,11 +403,11 @@ func (d *Dialer) DialTCP(ctx context.Context, address string, conn *Connection, 
 // ctx 用于超时/取消：任务停止时不再进入新的 UDP 拨号。
 //
 // adp 语义同 DialTCP：上层 Robot.ConnectUDP 已 Resolve 非 nil 注入。
-func (d *Dialer) DialUDP(ctx context.Context, address string, conn *Connection, adp adapter.Adapter) (gnet.Conn, error) {
+func (d *Dialer) DialUDP(ctx context.Context, address string, conn *Connection, adp protocol.Adapter) (gnet.Conn, error) {
 	return d.dial(ctx, "udp", address, conn, adp)
 }
 
-func (d *Dialer) dial(ctx context.Context, network, address string, conn *Connection, adp adapter.Adapter) (gnet.Conn, error) {
+func (d *Dialer) dial(ctx context.Context, network, address string, conn *Connection, adp protocol.Adapter) (gnet.Conn, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

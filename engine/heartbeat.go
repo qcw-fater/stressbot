@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"stressbot/binding"
 	"time"
 
 	"stressbot/state"
@@ -59,13 +60,13 @@ type HeartbeatConfig struct {
 	Transport  string // "tcp"|"udp"（由连接类型决定）
 	Service    string // 目标服务名
 	IntervalMs int    // 发送间隔（毫秒）
-	Route      any    // 不透明路由（{cmd,act}），与 ActionDef.Route 同构
+	Route      any    // 不透明路由（{cmd,act}），与 flowdef.ActionDef.Route 同构
 	// 双模式 body 构造（互斥）：
-	C2SProto         string           // proto 模式：proto 全名（与 ActionDef.C2SProto 同构）
-	Bindings         []FieldBind      // proto 模式：字段绑定（复用 tcpSend bindFields 解析）
-	Fields           []HeartbeatField // raw-binary 模式：LE 布局；与 C2SProto 互斥
-	SkipWhenMissing  bool             // raw 模式 state 源缺失时跳过本 tick（true）而非报错
-	RequireSecretKey bool             // true=等待连接设置密钥后再启动心跳 timer
+	C2SProto         string              // proto 模式：proto 全名（与 flowdef.ActionDef.C2SProto 同构）
+	Bindings         []binding.FieldBind // proto 模式：字段绑定（复用 tcpSend bindFields 解析）
+	Fields           []HeartbeatField    // raw-binary 模式：LE 布局；与 C2SProto 互斥
+	SkipWhenMissing  bool                // raw 模式 state 源缺失时跳过本 tick（true）而非报错
+	RequireSecretKey bool                // true=等待连接设置密钥后再启动心跳 timer
 }
 
 // appendLE 按 type 将 int64 值以小端字节序追加到 buf。

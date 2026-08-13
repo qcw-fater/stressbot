@@ -7,7 +7,7 @@ import (
 
 	lua "github.com/yuin/gopher-lua"
 
-	"stressbot/protox"
+	"stressbot/protocol/protox"
 )
 
 // newFrozenProtoEnv 构造带 Factory 的测试 LState，并把共享只读消息

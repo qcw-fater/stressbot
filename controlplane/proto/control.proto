@@ -1,0 +1,499 @@
+syntax = "proto3";
+
+package stressbot.control;
+
+option go_package = "stressbot/controlplane/pb;controlpb";
+
+service AgentControlService {
+  rpc Session(stream AgentEvent) returns (stream AdminEvent);
+}
+
+service AgentBundleService {
+  rpc DownloadBundle(BundleRequest) returns (stream BundleChunk);
+}
+
+service AgentMetricsService {
+  rpc Report(stream MetricsEnvelope) returns (MetricsClose);
+}
+
+enum AgentRuntimeStatus {
+  AGENT_RUNTIME_STATUS_UNSPECIFIED = 0;
+  AGENT_RUNTIME_STATUS_IDLE = 1;
+  AGENT_RUNTIME_STATUS_BUSY = 2;
+}
+
+enum TaskResultCode {
+  TASK_RESULT_CODE_UNSPECIFIED = 0;
+  TASK_RESULT_CODE_COMPLETED = 1;
+  TASK_RESULT_CODE_STOPPED = 2;
+  TASK_RESULT_CODE_FAILED = 3;
+}
+
+enum CommandAckStatus {
+  COMMAND_ACK_STATUS_UNSPECIFIED = 0;
+  COMMAND_ACK_STATUS_APPLIED = 1;
+  COMMAND_ACK_STATUS_DUPLICATE = 2;
+  COMMAND_ACK_STATUS_REJECTED = 3;
+}
+
+message AgentEvent {
+  oneof event {
+    Hello hello = 1;
+    Heartbeat heartbeat = 2;
+    CommandAck command_ack = 3;
+    FinalReport final_report = 5;
+  }
+}
+
+message AdminEvent {
+  oneof event {
+    Welcome welcome = 1;
+    HeartbeatAck heartbeat_ack = 2;
+    Command command = 3;
+    ReportAck report_ack = 4;
+    ServerClosing server_closing = 5;
+    ProtocolError protocol_error = 6;
+    CommandReceipt command_receipt = 7;
+  }
+}
+
+message Hello {
+  uint32 protocol_version = 1;
+  string agent_id = 2;
+  string name = 3;
+  string app_version = 4;
+  int32 max_bots = 5;
+  int64 metrics_interval_nanos = 6;
+  repeated string capabilities = 7;
+  AgentRuntimeStatus status = 8;
+  string current_task_id = 9;
+  int32 current_bots = 10;
+  StaticInfo static_info = 12;
+}
+
+message Welcome {
+  uint32 protocol_version = 1;
+  uint64 generation = 2;
+  int64 heartbeat_interval_nanos = 3;
+  int64 lease_duration_nanos = 4;
+  int64 server_time_unix_nano = 5;
+}
+
+message Heartbeat {
+  string agent_id = 1;
+  uint64 generation = 2;
+  int64 sent_at_unix_nano = 3;
+  AgentRuntimeStatus status = 4;
+  string current_task_id = 5;
+  int32 current_bots = 6;
+  string app_version = 7;
+}
+
+message HeartbeatAck {
+  uint64 generation = 1;
+  int64 server_time_unix_nano = 2;
+  int64 lease_deadline_unix_nano = 3;
+}
+
+message Command {
+  string command_id = 1;
+  uint64 sequence = 2;
+  string agent_id = 3;
+  string task_id = 4;
+  int64 created_at_unix_nano = 5;
+  uint64 delivery_generation = 6;
+  oneof body {
+    StartTask start_task = 10;
+    StopTask stop_task = 11;
+    Shutdown shutdown = 12;
+  }
+}
+
+message CommandAck {
+  string command_id = 1;
+  uint64 sequence = 2;
+  string agent_id = 3;
+  string task_id = 4;
+  CommandAckStatus status = 5;
+  string reason = 6;
+  int64 acknowledged_at_unix_nano = 7;
+}
+
+// CommandReceipt confirms that Admin durably committed a command ACK.  Agent
+// must not perform process-ending side effects (notably Shutdown) before this
+// receipt arrives.
+message CommandReceipt {
+  string command_id = 1;
+  uint64 sequence = 2;
+}
+
+message StartTask {
+  TaskAssignment assignment = 1;
+  BundleDescriptor bundle = 2;
+}
+
+message StopTask {
+  string reason = 1;
+}
+
+message Shutdown {
+  string reason = 1;
+}
+
+message FinalReport {
+  string report_id = 1;
+  string agent_id = 2;
+  string task_id = 3;
+  TaskResultCode result = 4;
+  string error_message = 5;
+  int64 finished_at_unix_nano = 6;
+  int32 stage_index = 7;
+  CollectorSnapshot snapshot = 8;
+  CleanupStatus cleanup_status = 9;
+}
+
+message ReportAck {
+  string report_id = 1;
+  string task_id = 2;
+  int32 stage_index = 3;
+  bool accepted = 4;
+  string reason = 5;
+}
+
+message ServerClosing {
+  string reason = 1;
+  int64 reconnect_after_nanos = 2;
+}
+
+message ProtocolError {
+  string code = 1;
+  string message = 2;
+}
+
+message BundleDescriptor {
+  bytes sha256 = 1;
+  int64 size = 2;
+}
+
+message BundleRequest {
+  string agent_id = 1;
+  bytes sha256 = 2;
+  int64 offset = 3;
+}
+
+message BundleChunk {
+  bytes sha256 = 1;
+  int64 total_size = 2;
+  int64 offset = 3;
+  bytes data = 4;
+}
+
+message MetricsEnvelope {
+  string agent_id = 1;
+  uint64 generation = 2;
+  uint64 dropped_intervals = 3;
+  oneof payload {
+    StressMetrics stress = 10;
+    SystemMetrics system = 11;
+  }
+}
+
+message StressMetrics {
+  string task_id = 1;
+  int64 reported_at_unix_nano = 2;
+  CollectorSnapshot snapshot = 3;
+}
+
+message SystemMetrics {
+  SystemMetricSnapshot snapshot = 1;
+}
+
+message MetricsClose {
+  uint64 accepted = 1;
+  uint64 rejected = 2;
+}
+
+message TaskAssignment {
+  string task_id = 1;
+  string task_name = 2;
+  int32 start_number = 3;
+  int32 start_index = 4;
+  int32 total_bots = 5;
+  string account_prefix = 6;
+  int32 concurrent_num = 7;
+  string main_service = 8;
+  map<string, string> state_extra = 9;
+  int64 heartbeat_interval_nanos = 10;
+  int64 tcp_timeout_nanos = 11;
+  int64 http_timeout_nanos = 12;
+  int32 apdex_t_millis = 13;
+  string log_level = 14;
+  RampUpConfig ramp_up = 15;
+  SharedRuntimeAssignment shared = 16;
+}
+
+message RampUpConfig {
+  repeated RampUpStage stages = 1;
+}
+
+message RampUpStage {
+  int32 count = 1;
+  int32 concurrency = 2;
+  int32 hold_seconds = 3;
+  bool reset = 4;
+}
+
+message SharedRuntimeAssignment {
+  string run_id = 1;
+  RedisConfig redis = 2;
+}
+
+message RedisConfig {
+  string host = 1;
+  int32 port = 2;
+  string username = 3;
+  string password = 4;
+  string key_prefix = 5;
+  string default_claim_ttl = 6;
+  string operation_timeout = 7;
+  string dial_timeout = 8;
+  string read_timeout = 9;
+  string write_timeout = 10;
+  int32 max_open_connections = 11;
+  int32 max_idle_connections = 12;
+  string connection_max_lifetime = 13;
+}
+
+message StaticInfo {
+  string hostname = 1;
+  string os = 2;
+  string arch = 3;
+  int32 cpu_count = 4;
+  uint64 memory_total_bytes = 5;
+  string go_version = 6;
+  string kernel_version = 7;
+  int64 started_at_unix_nano = 8;
+}
+
+message SystemMetricSnapshot {
+  int64 timestamp_unix_nano = 1;
+  uint64 sequence = 2;
+  optional double host_cpu_percent = 3;
+  optional uint64 host_memory_total_bytes = 4;
+  optional uint64 host_memory_used_bytes = 5;
+  optional double host_memory_percent = 6;
+  optional double host_network_send_bytes_per_second = 7;
+  optional double host_network_receive_bytes_per_second = 8;
+  optional double process_cpu_percent = 9;
+  optional uint64 process_rss_bytes = 10;
+  uint64 process_heap_bytes = 11;
+  int32 process_goroutines = 12;
+  optional int32 process_threads = 13;
+  optional int32 process_file_descriptors = 14;
+}
+
+message CleanupStatus {
+  string status = 1;
+  string reason = 2;
+  string message = 3;
+  int64 duration_millis = 4;
+  int32 total_robots = 5;
+  int32 cleaned_robots = 6;
+  int32 timeout_robots = 7;
+  int32 lua_returned = 8;
+  int32 lua_skipped = 9;
+  repeated CleanupIssue issues = 10;
+}
+
+message CleanupIssue {
+  int32 robot_id = 1;
+  string account = 2;
+  string phase = 3;
+  bool wait_done = 4;
+  bool close_all_done = 5;
+  string message = 6;
+}
+
+message HistogramSnapshot {
+  int64 count = 1;
+  optional double min_millis = 2;
+  optional double max_millis = 3;
+  optional double average_millis = 4;
+  optional double p50_millis = 5;
+  optional double p90_millis = 6;
+  optional double p95_millis = 7;
+  optional double p99_millis = 8;
+  int64 sum_nanos = 9;
+  bytes sketch = 10;
+}
+
+message ErrorEntry {
+  uint64 code = 1;
+  string code_name = 2;
+  repeated string messages = 3;
+  int64 count = 4;
+}
+
+message ActionSnapshot {
+  string name = 1;
+  int64 sample_count = 2;
+  int64 success_count = 3;
+  int64 failure_count = 4;
+  int64 timeout_count = 5;
+  int64 canceled_count = 6;
+  int64 executing = 7;
+  double success_rate = 8;
+  double average_send_bytes = 9;
+  double average_receive_bytes = 10;
+  int64 byte_sample_count = 11;
+  string kind = 12;
+  double rtt_apdex = 13;
+  HistogramSnapshot rtt = 14;
+  HistogramSnapshot listen_wait = 15;
+  int64 listen_ready_count = 16;
+  int64 listen_timeout_count = 17;
+  double listen_timeout_rate = 18;
+  HistogramSnapshot total_duration = 19;
+  double timeout_average_millis = 20;
+  double client_average_millis = 21;
+  double build_average_millis = 22;
+  double encode_average_millis = 23;
+  double send_average_millis = 24;
+  double decode_wait_average_millis = 25;
+  double decode_average_millis = 26;
+  double dispatch_to_action_wait_average_millis = 27;
+  double parse_store_average_millis = 28;
+  int64 build_sample_count = 29;
+  int64 encode_sample_count = 30;
+  int64 send_sample_count = 31;
+  int64 decode_wait_sample_count = 32;
+  int64 decode_sample_count = 33;
+  int64 dispatch_wait_sample_count = 34;
+  int64 parse_store_sample_count = 35;
+  int64 rtt_sample_count = 36;
+  int64 rtt_apdex_sample_count = 37;
+  int64 listen_wait_sample_count = 38;
+  int64 total_duration_sample_count = 39;
+  double average_qps = 40;
+  double period_qps = 41;
+  repeated ErrorEntry errors = 42;
+  int64 apdex_satisfied = 43;
+  int64 apdex_tolerating = 44;
+  int64 rtt_failed_count = 45;
+  int64 total_send_bytes = 46;
+  int64 total_receive_bytes = 47;
+  int64 timeout_total_nanos = 48;
+  int64 client_cost_sum_nanos = 49;
+  int64 client_cost_count = 50;
+  int64 build_cost_sum_nanos = 51;
+  int64 encode_cost_sum_nanos = 52;
+  int64 send_cost_sum_nanos = 53;
+  int64 decode_wait_sum_nanos = 54;
+  int64 decode_cost_sum_nanos = 55;
+  int64 dispatch_wait_sum_nanos = 56;
+  int64 parse_store_sum_nanos = 57;
+}
+
+message SnapshotSummary {
+  int64 sample_count = 1;
+  int64 success_count = 2;
+  int64 failure_count = 3;
+  int64 timeout_count = 4;
+  int64 canceled_count = 5;
+  int64 executing = 6;
+  double success_rate = 7;
+  double rtt_apdex = 8;
+  int64 rtt_apdex_sample_count = 9;
+  HistogramSnapshot rtt = 10;
+  HistogramSnapshot listen_wait = 11;
+  HistogramSnapshot total_duration = 12;
+  double client_average_millis = 13;
+  int64 client_cost_count = 14;
+  double build_average_millis = 15;
+  double encode_average_millis = 16;
+  double send_average_millis = 17;
+  double decode_wait_average_millis = 18;
+  double decode_average_millis = 19;
+  double dispatch_to_action_wait_average_millis = 20;
+  double parse_store_average_millis = 21;
+  int64 build_sample_count = 22;
+  int64 encode_sample_count = 23;
+  int64 send_sample_count = 24;
+  int64 decode_wait_sample_count = 25;
+  int64 decode_sample_count = 26;
+  int64 dispatch_wait_sample_count = 27;
+  int64 parse_store_sample_count = 28;
+  double average_qps = 29;
+}
+
+message MonitorSystemSnapshot {
+  int32 goroutines = 1;
+  double memory_allocated_megabytes = 2;
+  double memory_system_megabytes = 3;
+  uint32 garbage_collection_count = 4;
+}
+
+message ConnectionSnapshot {
+  int64 established = 1;
+  int64 active = 2;
+  int64 closed = 3;
+  int64 failed = 4;
+  int64 dropped = 5;
+}
+
+message BandwidthSnapshot {
+  int64 total_send_bytes = 1;
+  int64 total_receive_bytes = 2;
+  double send_megabytes_per_second = 3;
+  double receive_megabytes_per_second = 4;
+}
+
+message RobotSnapshot {
+  int64 started = 1;
+  int64 running = 2;
+  int64 stopped = 3;
+  int64 errored = 4;
+}
+
+message RampUpSnapshot {
+  int32 current_stage = 1;
+  int32 total_stages = 2;
+}
+
+message WindowBandwidthSnapshot {
+  int64 send_bytes = 1;
+  int64 receive_bytes = 2;
+  double send_megabytes_per_second = 3;
+  double receive_megabytes_per_second = 4;
+}
+
+message ReportWindow {
+  uint64 sequence = 1;
+  int64 started_at_unix_nano = 2;
+  int64 ended_at_unix_nano = 3;
+  double duration_seconds = 4;
+  double expected_interval_seconds = 5;
+  SnapshotSummary summary = 6;
+  WindowBandwidthSnapshot bandwidth = 7;
+  repeated ActionSnapshot actions = 8;
+  int64 invalid_metric_samples = 9;
+}
+
+message CollectorSnapshot {
+  int64 timestamp_unix_nano = 1;
+  uint64 collection_epoch = 2;
+  int64 uptime_nanos = 3;
+  double uptime_seconds = 4;
+  int64 total_actions = 5;
+  int32 apdex_t_millis = 6;
+  string timing_detail = 7;
+  SnapshotSummary summary = 8;
+  MonitorSystemSnapshot system = 9;
+  RobotSnapshot robots = 10;
+  RampUpSnapshot ramp_up = 11;
+  ConnectionSnapshot connections = 12;
+  BandwidthSnapshot bandwidth = 13;
+  repeated ActionSnapshot actions = 14;
+  int64 invalid_metric_samples = 15;
+  ReportWindow window = 16;
+}

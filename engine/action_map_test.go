@@ -2,6 +2,8 @@ package engine
 
 import (
 	"errors"
+	"stressbot/binding"
+	flowdef "stressbot/flow"
 	"strings"
 	"testing"
 
@@ -12,13 +14,13 @@ import (
 func TestResolveMapBindingFixedKeysDynamicValues(t *testing.T) {
 	ae := &ActionExecutor{store: state.NewStore()}
 
-	fb := &FieldBind{
+	fb := &binding.FieldBind{
 		Field: "params",
-		Type:  BindMap,
-		Entries: []MapEntryBind{
-			{Key: 1, Value: FieldBind{Type: BindFixed, Value: 9}},
-			{Key: 2, Value: FieldBind{Type: BindRandomInt, Min: 0, Max: 0}},
-			{Key: 3, Value: FieldBind{Type: BindRandomBool}},
+		Type:  binding.BindMap,
+		Entries: []binding.MapEntryBind{
+			{Key: 1, Value: binding.FieldBind{Type: binding.BindFixed, Value: 9}},
+			{Key: 2, Value: binding.FieldBind{Type: binding.BindRandomInt, Min: 0, Max: 0}},
+			{Key: 3, Value: binding.FieldBind{Type: binding.BindRandomBool}},
 		},
 	}
 
@@ -45,12 +47,12 @@ func TestResolveMapBindingFixedKeysDynamicValues(t *testing.T) {
 func TestResolveMapBindingSkipsOptionalNilEntry(t *testing.T) {
 	ae := &ActionExecutor{store: state.NewStore()}
 
-	fb := &FieldBind{
+	fb := &binding.FieldBind{
 		Field: "params",
-		Type:  BindMap,
-		Entries: []MapEntryBind{
-			{Key: 1, Value: FieldBind{Type: BindState, Source: "missing", Optional: true}},
-			{Key: 2, Value: FieldBind{Type: BindFixed, Value: 7}},
+		Type:  binding.BindMap,
+		Entries: []binding.MapEntryBind{
+			{Key: 1, Value: binding.FieldBind{Type: binding.BindState, Source: "missing", Optional: true}},
+			{Key: 2, Value: binding.FieldBind{Type: binding.BindFixed, Value: 7}},
 		},
 	}
 
@@ -71,11 +73,11 @@ func TestResolveMapBindingSkipsOptionalNilEntry(t *testing.T) {
 func TestResolveMapBindingRequiredNilEntryReturnsError(t *testing.T) {
 	ae := &ActionExecutor{store: state.NewStore()}
 
-	fb := &FieldBind{
+	fb := &binding.FieldBind{
 		Field: "params",
-		Type:  BindMap,
-		Entries: []MapEntryBind{
-			{Key: 1, Value: FieldBind{Type: BindState, Source: "missing", Required: true}},
+		Type:  binding.BindMap,
+		Entries: []binding.MapEntryBind{
+			{Key: 1, Value: binding.FieldBind{Type: binding.BindState, Source: "missing", Required: true}},
 		},
 	}
 
@@ -83,7 +85,7 @@ func TestResolveMapBindingRequiredNilEntryReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("resolveFieldValueStrict expected error for required nil entry")
 	}
-	actionErr, ok := errors.AsType[*ActionError](err)
+	actionErr, ok := errors.AsType[*errcode.ActionError](err)
 	if !ok {
 		t.Fatalf("err = %T, want *ActionError", err)
 	}
@@ -102,15 +104,15 @@ func TestResolveMapBindingSkipsConditionFalseEntry(t *testing.T) {
 	s.Set("enabled", false)
 	ae := &ActionExecutor{store: s}
 
-	bindings := []FieldBind{{
+	bindings := []binding.FieldBind{{
 		Field: "params",
-		Type:  BindMap,
-		Entries: []MapEntryBind{
-			{Key: 1, Value: FieldBind{Type: BindFixed, Value: 9, Condition: "state:enabled"}},
-			{Key: 2, Value: FieldBind{Type: BindFixed, Value: 7}},
+		Type:  binding.BindMap,
+		Entries: []binding.MapEntryBind{
+			{Key: 1, Value: binding.FieldBind{Type: binding.BindFixed, Value: 9, Condition: "state:enabled"}},
+			{Key: 2, Value: binding.FieldBind{Type: binding.BindFixed, Value: 7}},
 		},
 	}}
-	if err := PrepareFieldBindings(bindings); err != nil {
+	if err := flowdef.PrepareFieldBindings(bindings); err != nil {
 		t.Fatal(err)
 	}
 	fb := &bindings[0]
@@ -131,11 +133,11 @@ func TestResolveMapBindingSkipsConditionFalseEntry(t *testing.T) {
 func TestResolveMapBindingNonComparableKeyReturnsError(t *testing.T) {
 	ae := &ActionExecutor{store: state.NewStore()}
 
-	fb := &FieldBind{
+	fb := &binding.FieldBind{
 		Field: "params",
-		Type:  BindMap,
-		Entries: []MapEntryBind{
-			{Key: []any{1}, Value: FieldBind{Type: BindFixed, Value: 9}},
+		Type:  binding.BindMap,
+		Entries: []binding.MapEntryBind{
+			{Key: []any{1}, Value: binding.FieldBind{Type: binding.BindFixed, Value: 9}},
 		},
 	}
 
@@ -143,7 +145,7 @@ func TestResolveMapBindingNonComparableKeyReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("resolveFieldValueStrict expected error for non-comparable key")
 	}
-	actionErr, ok := errors.AsType[*ActionError](err)
+	actionErr, ok := errors.AsType[*errcode.ActionError](err)
 	if !ok {
 		t.Fatalf("err = %T, want *ActionError", err)
 	}
@@ -160,16 +162,16 @@ func TestResolveMapBindingNonComparableKeyReturnsError(t *testing.T) {
 func TestResolveMapBindingNestedMapReturnsError(t *testing.T) {
 	ae := &ActionExecutor{store: state.NewStore()}
 
-	fb := &FieldBind{
+	fb := &binding.FieldBind{
 		Field: "params",
-		Type:  BindMap,
-		Entries: []MapEntryBind{
+		Type:  binding.BindMap,
+		Entries: []binding.MapEntryBind{
 			{
 				Key: 1,
-				Value: FieldBind{
-					Type: BindMap,
-					Entries: []MapEntryBind{
-						{Key: 2, Value: FieldBind{Type: BindFixed, Value: 9}},
+				Value: binding.FieldBind{
+					Type: binding.BindMap,
+					Entries: []binding.MapEntryBind{
+						{Key: 2, Value: binding.FieldBind{Type: binding.BindFixed, Value: 9}},
 					},
 				},
 			},
@@ -180,7 +182,7 @@ func TestResolveMapBindingNestedMapReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("resolveFieldValueStrict expected error for nested map")
 	}
-	actionErr, ok := errors.AsType[*ActionError](err)
+	actionErr, ok := errors.AsType[*errcode.ActionError](err)
 	if !ok {
 		t.Fatalf("err = %T, want *ActionError", err)
 	}

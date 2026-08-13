@@ -4,15 +4,15 @@ import (
 	"context"
 	"testing"
 
-	"stressbot/adapter"
-	"stressbot/codec"
 	"stressbot/network"
+	"stressbot/protocol"
+	"stressbot/protocol/codec"
 	"stressbot/state"
 )
 
 func TestRegisterCodecHeartbeat_RequireSecretKey_PendingUntilSecretKey(t *testing.T) {
-	resolver := adapter.NewCodecResolverWithHeartbeat(
-		map[string]adapter.Adapter{"udp:battle": fakeAdapter{}},
+	resolver := protocol.NewCodecResolverWithHeartbeat(
+		map[string]protocol.Adapter{"udp:battle": fakeAdapter{}},
 		map[string]*codec.HeartbeatConfigDef{
 			"udp:battle": {
 				IntervalMs:       150,
@@ -46,8 +46,8 @@ func TestRegisterCodecHeartbeat_RequireSecretKey_PendingUntilSecretKey(t *testin
 }
 
 func TestRegisterCodecHeartbeat_NoRequireSecretKey_StartsImmediately(t *testing.T) {
-	resolver := adapter.NewCodecResolverWithHeartbeat(
-		map[string]adapter.Adapter{"tcp:logic": fakeAdapter{}},
+	resolver := protocol.NewCodecResolverWithHeartbeat(
+		map[string]protocol.Adapter{"tcp:logic": fakeAdapter{}},
 		map[string]*codec.HeartbeatConfigDef{
 			"tcp:logic": {
 				IntervalMs: 5000,

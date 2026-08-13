@@ -8,7 +8,7 @@ import (
 
 	"stressbot/monitor"
 
-	stresslog "stressbot/utils/log"
+	"stressbot/internal/stresslog"
 )
 
 // TestMain 初始化全局日志（network 包代码在 NewConnection、work_pool 等热路径

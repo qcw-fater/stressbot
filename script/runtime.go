@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"stressbot/adapter"
 	"stressbot/engine"
-	"stressbot/protox"
-	"stressbot/sharedstate"
+	"stressbot/internal/stresslog"
+	"stressbot/protocol"
+	"stressbot/protocol/protox"
 	"stressbot/state"
-	stresslog "stressbot/utils/log"
+	"stressbot/state/shared"
 	"strings"
 	"sync"
 	"time"
@@ -57,18 +57,18 @@ type Context struct {
 	//
 	// 与 r.resolver（Robot 持有的 CodecResolver）是同一对象，SetContext 注入；
 	// 与 engine.ActionExecutor.resolver 共享同一份 codec 映射，encode/decode 双向一致。
-	Resolver  adapter.CodecResolver
+	Resolver  protocol.CodecResolver
 	NetSender engine.NetSender
 	Ctx       context.Context
 
 	// adapterCache Resolve 结果的每机器人缓存，见 ResolveAdapter。
 	// 仅执行器 goroutine 访问（与 topThread / trampThreads 同一约束），无需加锁。
-	adapterCache map[adapterCacheKey]adapter.Adapter
+	adapterCache map[adapterCacheKey]protocol.Adapter
 
 	// Shared 任务级共享状态后端（Redis）。多个 Robot 共享同一实例。
 	// 未启用共享状态（无 Redis 配置 / 任务未使用 share）时为 nil，
 	// share.* API 返回 ErrNotEnabled，不 panic。
-	Shared sharedstate.Store
+	Shared shared.Store
 
 	// DefaultRequestTimeout 当 Lua 脚本调 network.tcp_request / udp_request 未显式传
 	// timeout 参数时使用的默认值。来自 robotConfig.timeoutSec → ResolvedConfig.RequestTimeout。
@@ -116,7 +116,7 @@ type adapterCacheKey struct {
 //
 // 未命中（Resolve 返回 nil）不入缓存：那是配置错误的 fail-loud 路径，本就罕见，
 // 缓存它反而会让运行期补上的映射永远看不见。
-func (c *Context) ResolveAdapter(proto, service string) adapter.Adapter {
+func (c *Context) ResolveAdapter(proto, service string) protocol.Adapter {
 	if c == nil || c.Resolver == nil {
 		return nil
 	}
@@ -129,7 +129,7 @@ func (c *Context) ResolveAdapter(proto, service string) adapter.Adapter {
 		return nil
 	}
 	if c.adapterCache == nil {
-		c.adapterCache = make(map[adapterCacheKey]adapter.Adapter, 8)
+		c.adapterCache = make(map[adapterCacheKey]protocol.Adapter, 8)
 	}
 	c.adapterCache[key] = adp
 	return adp
@@ -534,7 +534,7 @@ func (rp *RuntimePool) PrecompileScripts(dirs []string) error {
 //
 // send/recv WireBytes 由脚本内 network API 自动累计到 Context；脚本额外返回的 send/recv
 // 会被忽略，避免重复统计。返回的 error 仅为脚本执行框架错误（加载/resume/Waiter）；
-// 脚本业务失败经 err table 重建为 *engine.ActionError 返回。
+// 脚本业务失败经 err table 重建为 *errcode.ActionError 返回。
 func (rp *RuntimePool) RunActionScript(L *lua.LState, scriptName string) (send, recv int, timing engine.ActionTiming, err error) {
 	ctx := GetContext(L)
 	if ctx != nil {

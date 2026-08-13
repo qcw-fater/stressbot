@@ -2,12 +2,12 @@ package robot
 
 import (
 	"context"
+	flowdef "stressbot/flow"
 	"strings"
 	"testing"
 
-	"stressbot/adapter"
-	"stressbot/engine"
 	"stressbot/network"
+	"stressbot/protocol"
 )
 
 // TestRegisterListen_ResolverNil_FailLoud 验证 T2-C2：listen routeKey 走 resolver，
@@ -18,7 +18,7 @@ import (
 // nil→fail loud）。本用例直接验 fail-loud 路径（refs 第一项的 server 未映射即报错返回）。
 func TestRegisterListen_ResolverNil_FailLoud(t *testing.T) {
 	// stubResolver 仅映射 tcp:logic；tcp:unknown 未映射 → nil。
-	res := &stubResolver{byServer: map[string]adapter.Adapter{
+	res := &stubResolver{byServer: map[string]protocol.Adapter{
 		"tcp:logic": fakeAdapter{},
 	}}
 	r := &Robot{
@@ -31,7 +31,7 @@ func TestRegisterListen_ResolverNil_FailLoud(t *testing.T) {
 	}
 	h := &robotActionHandler{robot: r, flow: nil}
 
-	err := h.RegisterListen([]engine.ListenRef{
+	err := h.RegisterListen([]flowdef.ListenRef{
 		{Server: "tcp:unknown", Listen: "L"},
 	})
 	if err == nil {
@@ -48,7 +48,7 @@ func TestRegisterListen_ResolverNil_FailLoud(t *testing.T) {
 // TestRegisterListen_ResolverHit_NoError 验证 resolver 命中时 RegisterListen 不报 codec 错误
 // （走到连接查找阶段，因未建立连接 GetTCPConn 返回 nil → Debug 跳过，最终返回 nil）。
 func TestRegisterListen_ResolverHit_NoError(t *testing.T) {
-	res := &stubResolver{byServer: map[string]adapter.Adapter{
+	res := &stubResolver{byServer: map[string]protocol.Adapter{
 		"tcp:logic": fakeAdapter{},
 	}}
 	// 真实空 client（无连接）→ GetTCPConn 返回 nil → 跳过该 group，不报错。
@@ -62,7 +62,7 @@ func TestRegisterListen_ResolverHit_NoError(t *testing.T) {
 	}
 	h := &robotActionHandler{robot: r, flow: nil}
 
-	err := h.RegisterListen([]engine.ListenRef{
+	err := h.RegisterListen([]flowdef.ListenRef{
 		{Server: "tcp:logic", Listen: ""},
 	})
 	if err != nil {
@@ -81,7 +81,7 @@ func TestRegisterListen_ResolverHit_NoError(t *testing.T) {
 // nil 回调队列」的区分由 code review 守护，而非本断言。本断言只防止「配置笔误直接
 // hard-fail 中断整个流程」这一回归。
 func TestRegisterListen_MissingListenDef_NoHardFail(t *testing.T) {
-	res := &stubResolver{byServer: map[string]adapter.Adapter{
+	res := &stubResolver{byServer: map[string]protocol.Adapter{
 		"tcp:logic": fakeAdapter{},
 	}}
 	r := &Robot{
@@ -92,9 +92,9 @@ func TestRegisterListen_MissingListenDef_NoHardFail(t *testing.T) {
 		resolver: res,
 		client:   network.NewClient("bot_test3", 0, ""),
 	}
-	h := &robotActionHandler{robot: r, flow: &engine.TaskFlow{Listens: map[string]*engine.ListenDef{}}}
+	h := &robotActionHandler{robot: r, flow: &flowdef.TaskFlow{Listens: map[string]*flowdef.ListenDef{}}}
 
-	err := h.RegisterListen([]engine.ListenRef{
+	err := h.RegisterListen([]flowdef.ListenRef{
 		{Server: "tcp:logic", Listen: "missing", Route: map[string]any{"cmd": 1, "act": 2}},
 	})
 	if err != nil {

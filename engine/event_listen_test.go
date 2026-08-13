@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	flowdef "stressbot/flow"
 	"testing"
 	"time"
 
@@ -34,17 +35,17 @@ func TestExecListenUsesSingleEventWait(t *testing.T) {
 		wantTCP int
 		wantUDP int
 	}{
-		{name: "tcp", pattern: PatternTCPListen, wantTCP: 1},
-		{name: "udp", pattern: PatternUDPListen, wantUDP: 1},
+		{name: "tcp", pattern: flowdef.PatternTCPListen, wantTCP: 1},
+		{name: "udp", pattern: flowdef.PatternUDPListen, wantUDP: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sender := &eventListenSender{}
 			ae := NewActionExecutor(nil, sender, nil, nil, TimingLevelRTTOnly)
 
-			_, _, timing, err := ae.Execute(t.Context(), &ActionDef{
+			_, _, timing, err := ae.Execute(t.Context(), &flowdef.ActionDef{
 				Name: "wait_push", Pattern: tc.pattern, Service: "logic", Timeout: 1,
 			})
-			var actionErr *ActionError
+			var actionErr *errcode.ActionError
 			if !errors.As(err, &actionErr) || actionErr.Code != errcode.ErrListenTimeout {
 				t.Fatalf("Execute() error = %v, want ErrListenTimeout", err)
 			}

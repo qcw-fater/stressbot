@@ -8,15 +8,17 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"stressbot/binding"
+	flowdef "stressbot/flow"
 	"strings"
 	"time"
 
-	"stressbot/adapter"
 	"stressbot/errcode"
-	"stressbot/protox"
+	json "stressbot/internal/jsonx"
+	"stressbot/internal/stresslog"
+	"stressbot/protocol"
+	"stressbot/protocol/protox"
 	"stressbot/state"
-	json "stressbot/utils/jsonx"
-	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -180,18 +182,18 @@ func (t *ActionTiming) WireRTTSum() time.Duration {
 }
 
 // ActionExecutor 声明式动作执行器。
-// 根据 ActionDef 的 Pattern 分派到具体的执行方法，处理消息构建、发送、接收和状态存储。
+// 根据 flowdef.ActionDef 的 Pattern 分派到具体的执行方法，处理消息构建、发送、接收和状态存储。
 //
 // encode 侧（protocolEncode / ExpectedRouteKey / DescribeError）通过 resolver 按
 // "<proto>:<service>"（proto 由 pattern 推导，service=def.Service）Resolve 出该连接的
 // Go SchemaAdapter。Resolve nil 时由调用方 fail loud（ErrEncodeFailed），不静默兜底；
 // 业务 encode/decode/dial/心跳/listen/Lua 网络 API 全程经 CodecResolver，无 Lua codec 生产路径。
 type ActionExecutor struct {
-	netSender   NetSender             // 网络发送委托，由 Robot 层实现
-	store       *state.Store          // Robot 状态存储，保存服务器响应字段和中间变量
-	factory     *protox.Factory       // 动态 protobuf 消息工厂，用于创建/序列化/解析 proto 消息
-	resolver    adapter.CodecResolver // 按 "<proto>:<service>" 解析每连接的 Go codec adapter
-	timingLevel int                   // 计时细分级别：0=rtt, 1=codec, 2=full
+	netSender   NetSender              // 网络发送委托，由 Robot 层实现
+	store       *state.Store           // Robot 状态存储，保存服务器响应字段和中间变量
+	factory     *protox.Factory        // 动态 protobuf 消息工厂，用于创建/序列化/解析 proto 消息
+	resolver    protocol.CodecResolver // 按 "<proto>:<service>" 解析每连接的 Go codec adapter
+	timingLevel int                    // 计时细分级别：0=rtt, 1=codec, 2=full
 	// coopIO 协作式阻塞 I/O（由 Robot 调度器注入 sched.runIO）：声明式 httpRequest / tcpConnect /
 	// udpConnect 的阻塞调用经它在后台 goroutine 执行，调用 goroutine 等待期间 drain Robot mailbox。
 	// 与 Lua await_*（share/http/connect）同源（同一 runIO 原语），声明式与脚本两条路径协作式语义一致。
@@ -306,7 +308,7 @@ type NetSender interface {
 // NewActionExecutor 创建声明式动作执行器。
 // resolver 按 "<proto>:<service>" 解析每连接的 Go codec adapter（T2-C2 起 encode 侧）。
 // timingLevel: 0=仅 RTT, 1=含编解码, 2=完整客户端细分。
-func NewActionExecutor(store *state.Store, sender NetSender, factory *protox.Factory, resolver adapter.CodecResolver, timingLevel int) *ActionExecutor {
+func NewActionExecutor(store *state.Store, sender NetSender, factory *protox.Factory, resolver protocol.CodecResolver, timingLevel int) *ActionExecutor {
 	return &ActionExecutor{
 		netSender:   sender,
 		store:       store,
@@ -320,36 +322,36 @@ func NewActionExecutor(store *state.Store, sender NetSender, factory *protox.Fac
 //
 // timing 仅在确实发生 send→recv 网络窗口的 pattern 中填充（request/listen/http）；
 // send-only / connect / close / state 类动作 timing 为零值，monitor 据此跳过 latency 直方图。
-func (ae *ActionExecutor) Execute(ctx context.Context, def *ActionDef) (sendBytes, recvBytes int, timing ActionTiming, err error) {
+func (ae *ActionExecutor) Execute(ctx context.Context, def *flowdef.ActionDef) (sendBytes, recvBytes int, timing ActionTiming, err error) {
 	switch def.Pattern {
-	case PatternTCPSend:
+	case flowdef.PatternTCPSend:
 		sendBytes, timing, err = ae.execSend("tcp", def)
-	case PatternTCPRequest:
+	case flowdef.PatternTCPRequest:
 		sendBytes, recvBytes, timing, err = ae.execRequest("tcp", def)
-	case PatternTCPConnect:
+	case flowdef.PatternTCPConnect:
 		err = ae.execTCPConnect(def)
-	case PatternTCPClose:
+	case flowdef.PatternTCPClose:
 		err = ae.execTCPClose(def)
-	case PatternTCPListen:
+	case flowdef.PatternTCPListen:
 		recvBytes, timing, err = ae.execListen(ctx, "tcp", def)
-	case PatternUDPSend:
+	case flowdef.PatternUDPSend:
 		sendBytes, timing, err = ae.execSend("udp", def)
-	case PatternUDPRequest:
+	case flowdef.PatternUDPRequest:
 		sendBytes, recvBytes, timing, err = ae.execRequest("udp", def)
-	case PatternUDPConnect:
+	case flowdef.PatternUDPConnect:
 		err = ae.execUDPConnect(def)
-	case PatternUDPClose:
+	case flowdef.PatternUDPClose:
 		err = ae.execUDPClose(def)
-	case PatternUDPListen:
+	case flowdef.PatternUDPListen:
 		recvBytes, timing, err = ae.execListen(ctx, "udp", def)
-	case PatternHTTPRequest:
+	case flowdef.PatternHTTPRequest:
 		sendBytes, recvBytes, timing, err = ae.execHTTPRequest(def)
-	case PatternClearState:
+	case flowdef.PatternClearState:
 		err = ae.execClearState(def)
-	case PatternSetState:
+	case flowdef.PatternSetState:
 		err = ae.execSetState(def)
 	default:
-		err = NewActionError(errcode.ErrUnknownPattern, "pattern="+def.Pattern)
+		err = errcode.NewActionError(errcode.ErrUnknownPattern, "pattern="+def.Pattern)
 	}
 	return
 }
@@ -357,8 +359,8 @@ func (ae *ActionExecutor) Execute(ctx context.Context, def *ActionDef) (sendByte
 // buildBody 构建消息体字节（序列化 proto 消息）。
 // 直接复用当前执行器构造 proto body（不再经 BuildProtoBody 新建临时 ActionExecutor），
 // 与心跳 proto 模式共享同一 bindFields 语义，行为保持不变。
-// 为保留旧错误上下文（"action=Name field=..."），将 ActionDef.Name 注入 bindFields actionName。
-func (ae *ActionExecutor) buildBody(def *ActionDef) ([]byte, error) {
+// 为保留旧错误上下文（"action=Name field=..."），将 flowdef.ActionDef.Name 注入 bindFields actionName。
+func (ae *ActionExecutor) buildBody(def *flowdef.ActionDef) ([]byte, error) {
 	body, _, err := ae.BuildProtoBody(def.C2SProto, def.Bindings, def.Name)
 	if err != nil {
 		return nil, err
@@ -373,10 +375,10 @@ func (ae *ActionExecutor) buildBody(def *ActionDef) ([]byte, error) {
 //
 // 参数：
 //   - c2sProto：proto 全名；空串 → 返回 (nil, false, nil)（空 body，与 buildBody 旧行为对齐）；
-//   - bindings：字段绑定列表（与 ActionDef.Bindings 同构，复用 bindFields 的 condition/optional/required/map 等全套语义）；
+//   - bindings：字段绑定列表（与 flowdef.ActionDef.Bindings 同构，复用 bindFields 的 condition/optional/required/map 等全套语义）；
 //   - store：线程安全 state.Store（ActionExecutor 传 ae.store；心跳闭包传 robot.state）；
 //   - factory：protox.Factory（ActionExecutor 传 ae.factory；心跳闭包传 robot.factory）；
-//   - actionName：错误上下文标识（tcpSend 传 ActionDef.Name；心跳传 action 名或空串）。
+//   - actionName：错误上下文标识（tcpSend 传 flowdef.ActionDef.Name；心跳传 action 名或空串）。
 //
 // 返回：
 //   - body：序列化后的字节流（c2sProto 空时为 nil）；
@@ -384,7 +386,7 @@ func (ae *ActionExecutor) buildBody(def *ActionDef) ([]byte, error) {
 //   - err：proto 创建/绑定/序列化失败（含 ActionError，中文上下文，不静默兜底）。
 //
 // 不变量：buildBody 重构后 tcpSend/request 行为零变化（既有测试全绿）。
-func BuildProtoBody(c2sProto string, bindings []FieldBind, store *state.Store, factory *protox.Factory, actionName string) (body []byte, skip bool, err error) {
+func BuildProtoBody(c2sProto string, bindings []binding.FieldBind, store *state.Store, factory *protox.Factory, actionName string) (body []byte, skip bool, err error) {
 	// 一次性调用（无常驻执行器）时的便捷入口：临时 ActionExecutor 仅承载 store+factory。
 	// 高频路径（tcpSend/request 经 buildBody、心跳 tick）应改持有可复用执行器并调 (*ActionExecutor).BuildProtoBody，
 	// 避免每次分配临时执行器。
@@ -401,20 +403,20 @@ func BuildProtoBody(c2sProto string, bindings []FieldBind, store *state.Store, f
 //   - c2sProto 为空 → 返回 (nil,false,nil)（空 body，与旧 buildBody 行为对齐）；
 //   - skip 恒为 false（保留给未来 binding 缺失「跳过」语义）；
 //   - err 含 proto 创建/绑定/序列化失败（ActionError，中文上下文）。
-func (ae *ActionExecutor) BuildProtoBody(c2sProto string, bindings []FieldBind, actionName string) (body []byte, skip bool, err error) {
+func (ae *ActionExecutor) BuildProtoBody(c2sProto string, bindings []binding.FieldBind, actionName string) (body []byte, skip bool, err error) {
 	if c2sProto == "" {
 		return nil, false, nil
 	}
 	msg, err := ae.factory.Create(c2sProto)
 	if err != nil {
-		return nil, false, NewActionError(errcode.ErrCreateMsg, "action="+actionName+" proto="+c2sProto, err)
+		return nil, false, errcode.NewActionError(errcode.ErrCreateMsg, "action="+actionName+" proto="+c2sProto, err)
 	}
 	if err := ae.bindFields(msg, bindings, actionName); err != nil {
 		return nil, false, err
 	}
 	body, err = ae.factory.Serialize(msg)
 	if err != nil {
-		return nil, false, NewActionError(errcode.ErrSerialize, "action="+actionName+" proto="+c2sProto, err)
+		return nil, false, errcode.NewActionError(errcode.ErrSerialize, "action="+actionName+" proto="+c2sProto, err)
 	}
 	return body, false, nil
 }
@@ -430,7 +432,7 @@ func (ae *ActionExecutor) BuildProtoBody(c2sProto string, bindings []FieldBind, 
 //  3. StoreAs 写入：值非 nil 且配置了 StoreAs → 写入 state
 //  4. 空 Field 跳过：Field 为空字符串 → 跳过 proto 赋值（仅 StoreAs 的绑定会走到这里）
 //  5. proto 赋值：调用 Factory.SetField 写入消息字段
-func (ae *ActionExecutor) bindFields(msg proto.Message, bindings []FieldBind, actionName string) error {
+func (ae *ActionExecutor) bindFields(msg proto.Message, bindings []binding.FieldBind, actionName string) error {
 	for i := range bindings {
 		fb := &bindings[i]
 
@@ -449,8 +451,8 @@ func (ae *ActionExecutor) bindFields(msg proto.Message, bindings []FieldBind, ac
 			if fb.Optional {
 				continue
 			}
-			if fb.Required || isImplicitRequired(fb.Type) {
-				return NewActionError(errcode.ErrBindField, "action="+actionName+" field="+fb.Field)
+			if fb.Required || binding.IsImplicitRequired(fb.Type) {
+				return errcode.NewActionError(errcode.ErrBindField, "action="+actionName+" field="+fb.Field)
 			}
 		}
 
@@ -465,31 +467,31 @@ func (ae *ActionExecutor) bindFields(msg proto.Message, bindings []FieldBind, ac
 		}
 
 		if err := ae.factory.SetField(msg, fb.Field, value); err != nil {
-			return NewActionError(errcode.ErrBindField, "action="+actionName+" field="+fb.Field, err)
+			return errcode.NewActionError(errcode.ErrBindField, "action="+actionName+" field="+fb.Field, err)
 		}
 	}
 	return nil
 }
 
-func (ae *ActionExecutor) resolveFieldValueStrict(fb *FieldBind, actionName, fieldName string) (any, error) {
-	if fb.Type != BindMap {
+func (ae *ActionExecutor) resolveFieldValueStrict(fb *binding.FieldBind, actionName, fieldName string) (any, error) {
+	if fb.Type != binding.BindMap {
 		return ae.resolveFieldValue(fb), nil
 	}
 
 	return ae.resolveMapValueStrict(fb, actionName, fieldName)
 }
 
-func (ae *ActionExecutor) resolveMapValueStrict(fb *FieldBind, actionName, fieldName string) (any, error) {
+func (ae *ActionExecutor) resolveMapValueStrict(fb *binding.FieldBind, actionName, fieldName string) (any, error) {
 	result := make(map[any]any, len(fb.Entries))
 	for _, entry := range fb.Entries {
 		if !isComparableMapKey(entry.Key) {
-			return nil, NewActionError(errcode.ErrBindField, fmt.Sprintf("action=%s field=%s mapKey=%v key 不可比较", actionName, fieldName, entry.Key))
+			return nil, errcode.NewActionError(errcode.ErrBindField, fmt.Sprintf("action=%s field=%s mapKey=%v key 不可比较", actionName, fieldName, entry.Key))
 		}
 		if !ae.bindingConditionSatisfied(&entry.Value) {
 			continue
 		}
-		if entry.Value.Type == BindMap {
-			return nil, NewActionError(errcode.ErrBindField, fmt.Sprintf("action=%s field=%s mapKey=%v 不支持嵌套 map", actionName, fieldName, entry.Key))
+		if entry.Value.Type == binding.BindMap {
+			return nil, errcode.NewActionError(errcode.ErrBindField, fmt.Sprintf("action=%s field=%s mapKey=%v 不支持嵌套 map", actionName, fieldName, entry.Key))
 		}
 
 		value := ae.resolveFieldValue(&entry.Value)
@@ -497,8 +499,8 @@ func (ae *ActionExecutor) resolveMapValueStrict(fb *FieldBind, actionName, field
 			if entry.Value.Optional {
 				continue
 			}
-			if entry.Value.Required || isImplicitRequired(entry.Value.Type) {
-				return nil, NewActionError(errcode.ErrBindField, fmt.Sprintf("action=%s field=%s mapKey=%v value 缺失", actionName, fieldName, entry.Key))
+			if entry.Value.Required || binding.IsImplicitRequired(entry.Value.Type) {
+				return nil, errcode.NewActionError(errcode.ErrBindField, fmt.Sprintf("action=%s field=%s mapKey=%v value 缺失", actionName, fieldName, entry.Key))
 			}
 			continue
 		}
@@ -515,20 +517,20 @@ func isComparableMapKey(key any) bool {
 }
 
 // resolveFieldValue 解析字段绑定值，返回 Go 原生类型。
-func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
+func (ae *ActionExecutor) resolveFieldValue(fb *binding.FieldBind) any {
 	var val any
 
 	switch fb.Type {
-	case BindFixed, "":
+	case binding.BindFixed, "":
 		val = fb.Value
 
-	case BindState:
+	case binding.BindState:
 		if fb.Source == "" {
 			return nil
 		}
 		val = ae.store.Get(fb.Source)
 
-	case BindStateFirst:
+	case binding.BindStateFirst:
 		// 零拷贝取首元素（不再 GetList 全表拷贝）。
 		v, ok := ae.store.PickFromList(fb.Source, func(int) int { return 0 })
 		if !ok {
@@ -536,7 +538,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		}
 		val = v
 
-	case BindStateRandom:
+	case binding.BindStateRandom:
 		if len(fb.Filters) == 0 {
 			// 无过滤器：读锁内直接随机取一个，避免 GetList 全表拷贝。
 			v, ok := ae.store.PickFromList(fb.Source, rand.Intn)
@@ -557,7 +559,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 			val = filtered[rand.Intn(len(filtered))]
 		}
 
-	case BindStateRandomN:
+	case binding.BindStateRandomN:
 		list := ae.store.GetList(fb.Source)
 		if len(list) == 0 {
 			return nil
@@ -583,7 +585,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		}
 		return picked
 
-	case BindStateMapKey:
+	case binding.BindStateMapKey:
 		// 零拷贝随机取一个 key（不再构造 keys 切片）。
 		k, ok := ae.store.PickMapKey(fb.Source, rand.Intn)
 		if !ok {
@@ -591,7 +593,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		}
 		return k
 
-	case BindStateMapValue:
+	case binding.BindStateMapValue:
 		if len(fb.Filters) == 0 {
 			// 无过滤器：读锁内直接随机取一个 value，避免 GetMap 全表拷贝。
 			v, ok := ae.store.PickMapValue(fb.Source, rand.Intn)
@@ -616,13 +618,13 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 			val = values[rand.Intn(len(values))]
 		}
 
-	case BindRandomPick:
+	case binding.BindRandomPick:
 		if len(fb.Values) == 0 {
 			return nil
 		}
 		val = fb.Values[rand.Intn(len(fb.Values))]
 
-	case BindRandomPickN:
+	case binding.BindRandomPickN:
 		if len(fb.Values) == 0 {
 			return nil
 		}
@@ -632,7 +634,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		}
 		return pickN(fb.Values, n)
 
-	case BindRandomPickMap:
+	case binding.BindRandomPickMap:
 		if len(fb.Values) == 0 || fb.KeySource == "" {
 			return nil
 		}
@@ -658,7 +660,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		}
 		return nil
 
-	case BindRandomExclude:
+	case binding.BindRandomExclude:
 		var pool []any
 		if len(fb.Values) > 0 {
 			pool = fb.Values
@@ -683,14 +685,14 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		}
 		val = filtered[rand.Intn(len(filtered))]
 
-	case BindRandomInt:
+	case binding.BindRandomInt:
 		lo, hi := fb.Min, fb.Max
 		if lo >= hi {
 			return lo
 		}
 		return rand.Intn(hi-lo+1) + lo
 
-	case BindRandomFloat:
+	case binding.BindRandomFloat:
 		lo, hi := float64(fb.Min), float64(fb.Max)
 		if lo >= hi {
 			return lo
@@ -703,10 +705,10 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		scale := math.Pow10(prec)
 		return math.Round(v*scale) / scale
 
-	case BindRandomBool:
+	case binding.BindRandomBool:
 		return rand.Intn(2) == 1
 
-	case BindRandomString:
+	case binding.BindRandomString:
 		length := fb.Length
 		if length <= 0 {
 			length = 8
@@ -714,10 +716,10 @@ func (ae *ActionExecutor) resolveFieldValue(fb *FieldBind) any {
 		charset := resolveRandomStringCharset(fb.Charset)
 		return randomStringCharset(length, charset)
 
-	case BindListSize:
+	case binding.BindListSize:
 		return ae.store.ListLen(fb.Source)
 
-	case BindMap:
+	case binding.BindMap:
 		return nil
 
 	default:
@@ -791,18 +793,18 @@ func navigatePathValues(v any, path string) []any {
 
 // resolveAddress 解析 address 配置：支持 "state:key" 取 StateStore，否则按字面量
 func (ae *ActionExecutor) resolveAddress(addr string) string {
-	if strings.HasPrefix(addr, PrefixState) {
-		key := addr[len(PrefixState):]
+	if strings.HasPrefix(addr, flowdef.PrefixState) {
+		key := addr[len(flowdef.PrefixState):]
 		return ae.store.GetString(key)
 	}
 	return addr
 }
 
 // execTCPConnect 建立 TCP 连接
-func (ae *ActionExecutor) execTCPConnect(def *ActionDef) error {
+func (ae *ActionExecutor) execTCPConnect(def *flowdef.ActionDef) error {
 	addr := ae.resolveAddress(def.Address)
 	if addr == "" {
-		return NewActionError(errcode.ErrAddrEmpty, "action="+def.Name+" service="+def.Service)
+		return errcode.NewActionError(errcode.ErrAddrEmpty, "action="+def.Name+" service="+def.Service)
 	}
 	// 协作式 Class B：拨号阻塞至连接建立，在后台 goroutine 执行，等待窗口内执行器 drain mailbox。
 	var err error
@@ -817,10 +819,10 @@ func (ae *ActionExecutor) execTCPConnect(def *ActionDef) error {
 }
 
 // execUDPConnect 建立 UDP 连接
-func (ae *ActionExecutor) execUDPConnect(def *ActionDef) error {
+func (ae *ActionExecutor) execUDPConnect(def *flowdef.ActionDef) error {
 	addr := ae.resolveAddress(def.Address)
 	if addr == "" {
-		return NewActionError(errcode.ErrAddrEmpty, "action="+def.Name+" service="+def.Service)
+		return errcode.NewActionError(errcode.ErrAddrEmpty, "action="+def.Name+" service="+def.Service)
 	}
 	// 协作式 Class B：拨号阻塞至连接建立，在后台 goroutine 执行，等待窗口内执行器 drain mailbox。
 	var err error
@@ -835,23 +837,23 @@ func (ae *ActionExecutor) execUDPConnect(def *ActionDef) error {
 }
 
 // execTCPClose 关闭 TCP 连接
-func (ae *ActionExecutor) execTCPClose(def *ActionDef) error {
+func (ae *ActionExecutor) execTCPClose(def *flowdef.ActionDef) error {
 	ae.netSender.CloseTCP(def.Service)
 	stresslog.Debug("[ACTION] TCPClose 成功", zap.String("action", def.Name), zap.String("service", def.Service))
 	return nil
 }
 
 // execUDPClose 关闭 UDP 连接
-func (ae *ActionExecutor) execUDPClose(def *ActionDef) error {
+func (ae *ActionExecutor) execUDPClose(def *flowdef.ActionDef) error {
 	ae.netSender.CloseUDP(def.Service)
 	stresslog.Debug("[ACTION] UDPClose 成功", zap.String("action", def.Name), zap.String("service", def.Service))
 	return nil
 }
 
 // execClearState 清除 StateStore 中的多个 key
-func (ae *ActionExecutor) execClearState(def *ActionDef) error {
-	if err := validateClearStateKeys(def.Name, def.Keys); err != nil {
-		return NewActionError(errcode.ErrStateConfig, "action="+def.Name, err)
+func (ae *ActionExecutor) execClearState(def *flowdef.ActionDef) error {
+	if err := flowdef.ValidateClearStateKeys(def.Name, def.Keys); err != nil {
+		return errcode.NewActionError(errcode.ErrStateConfig, "action="+def.Name, err)
 	}
 	for _, key := range def.Keys {
 		ae.store.Delete(key)
@@ -861,7 +863,7 @@ func (ae *ActionExecutor) execClearState(def *ActionDef) error {
 }
 
 // execSetState 从 bindings 设置 StateStore
-func (ae *ActionExecutor) execSetState(def *ActionDef) error {
+func (ae *ActionExecutor) execSetState(def *flowdef.ActionDef) error {
 	for i := range def.Bindings {
 		fb := &def.Bindings[i]
 
@@ -879,10 +881,10 @@ func (ae *ActionExecutor) execSetState(def *ActionDef) error {
 }
 
 // execHTTPRequest HTTP 请求
-func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, ActionTiming, error) {
+func (ae *ActionExecutor) execHTTPRequest(def *flowdef.ActionDef) (int, int, ActionTiming, error) {
 	resolvedURL := ae.resolveAddress(def.URL)
 	if resolvedURL == "" {
-		return 0, 0, ActionTiming{}, NewActionError(errcode.ErrURLEmpty, "action="+def.Name)
+		return 0, 0, ActionTiming{}, errcode.NewActionError(errcode.ErrURLEmpty, "action="+def.Name)
 	}
 
 	method := def.Method
@@ -891,13 +893,13 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, ActionTimin
 	}
 	contentType := def.ContentType
 	if contentType == "" {
-		contentType = ContentJSON
+		contentType = flowdef.ContentJSON
 	}
 
 	var body []byte
 	if len(def.Bindings) > 0 {
 		switch contentType {
-		case ContentJSON:
+		case flowdef.ContentJSON:
 			bodyMap := make(map[string]any)
 			for i := range def.Bindings {
 				fb := &def.Bindings[i]
@@ -913,9 +915,9 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, ActionTimin
 			var err error
 			body, err = json.Marshal(bodyMap)
 			if err != nil {
-				return 0, 0, ActionTiming{}, NewActionError(errcode.ErrMarshalBody, "action="+def.Name+" type=json", err)
+				return 0, 0, ActionTiming{}, errcode.NewActionError(errcode.ErrMarshalBody, "action="+def.Name+" type=json", err)
 			}
-		case ContentForm:
+		case flowdef.ContentForm:
 			// application/x-www-form-urlencoded：直接编码为 k=v&k2=v2，
 			// 而非 JSON（此前误用 json.Marshal 导致发送 {"k":"v"} 与 form 头不匹配）。
 			formData := make(url.Values)
@@ -976,11 +978,11 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, ActionTimin
 		if statusText := http.StatusText(exchange.StatusCode); statusText != "" {
 			hdetail += " " + statusText
 		}
-		return exchange.SendWireBytes, exchange.RecvWireBytes, timing, NewActionError(errcode.ErrHTTPStatus, hdetail)
+		return exchange.SendWireBytes, exchange.RecvWireBytes, timing, errcode.NewActionError(errcode.ErrHTTPStatus, hdetail)
 	}
 
 	if len(def.Store) > 0 && len(respBody) > 0 {
-		if contentType == ContentJSON {
+		if contentType == flowdef.ContentJSON {
 			var respMap map[string]any
 			if err := json.Unmarshal(respBody, &respMap); err != nil {
 				stresslog.Warn("[ACTION] HTTP 响应 JSON 解析失败",
@@ -1015,7 +1017,7 @@ func (ae *ActionExecutor) execHTTPRequest(def *ActionDef) (int, int, ActionTimin
 //
 // 动作响应不走广播去重：请求-响应的内容逐机器人唯一（登录、各类查询带自身数据），
 // 进共享缓存必然 miss 且会把真正复用的广播条目从 LRU 挤出去（线上 018→019 实测污染）。
-func (ae *ActionExecutor) parseAndStoreResponse(def *ActionDef, respBody []byte) error {
+func (ae *ActionExecutor) parseAndStoreResponse(def *flowdef.ActionDef, respBody []byte) error {
 	if len(def.Store) == 0 {
 		return nil
 	}
@@ -1031,7 +1033,7 @@ func (ae *ActionExecutor) parseAndStoreResponse(def *ActionDef, respBody []byte)
 
 	md, ok := ae.factory.MessageDescriptor(def.S2CProto)
 	if !ok {
-		return NewActionError(errcode.ErrParseFailed, "action="+def.Name+" proto="+def.S2CProto+" 未找到消息类型")
+		return errcode.NewActionError(errcode.ErrParseFailed, "action="+def.Name+" proto="+def.S2CProto+" 未找到消息类型")
 	}
 	if protox.WireDegraded(md) {
 		return ae.parseAndStoreDecoded(def, respBody)
@@ -1040,7 +1042,7 @@ func (ae *ActionExecutor) parseAndStoreResponse(def *ActionDef, respBody []byte)
 	// respBody 可能是网络缓冲区视图，留存前必须独立快照（与旧路径 Parse 的读取时序等价安全）。
 	snapshot := protox.WireSnapshot(respBody)
 	if err := protox.ValidateWire(md, snapshot); err != nil {
-		return NewActionError(errcode.ErrParseFailed, "action="+def.Name+" proto="+def.S2CProto, err)
+		return errcode.NewActionError(errcode.ErrParseFailed, "action="+def.Name+" proto="+def.S2CProto, err)
 	}
 
 	stresslog.Debug("[ACTION] TCPResponseProto", zap.String("proto", def.S2CProto), zap.Int("bodyLen", len(respBody)))
@@ -1051,10 +1053,10 @@ func (ae *ActionExecutor) parseAndStoreResponse(def *ActionDef, respBody []byte)
 
 // parseAndStoreDecoded 旧解码存储路径：影子验证失配降级的 schema 走这里
 // （解码整条消息，整存 Freeze、路径 GetFieldForStore）。
-func (ae *ActionExecutor) parseAndStoreDecoded(def *ActionDef, respBody []byte) error {
+func (ae *ActionExecutor) parseAndStoreDecoded(def *flowdef.ActionDef, respBody []byte) error {
 	respMsg, err := ae.factory.Parse(def.S2CProto, respBody)
 	if err != nil {
-		return NewActionError(errcode.ErrParseFailed, "action="+def.Name+" proto="+def.S2CProto, err)
+		return errcode.NewActionError(errcode.ErrParseFailed, "action="+def.Name+" proto="+def.S2CProto, err)
 	}
 	ae.storeResponseProto(def.Store, respMsg)
 	return nil
@@ -1065,7 +1067,7 @@ func (ae *ActionExecutor) parseAndStoreDecoded(def *ActionDef, respBody []byte) 
 // 整存映射直接存 wv；路径映射经 wv 惰性导航（存在性/取值语义与解码路径等价）。
 // 路径产物先过保留规划：无整存映射时，若全部子 span 字节和小于整包，逐个复制为
 // 独立缓冲（不钉整包快照）；有整存映射时共享同一快照（本就常驻）。
-func (ae *ActionExecutor) storeResponseWire(mappings []StoreMapping, wv *protox.WireValue) {
+func (ae *ActionExecutor) storeResponseWire(mappings []binding.StoreMapping, wv *protox.WireValue) {
 	debugOn := stresslog.DebugEnabled()
 	hasWhole := false
 	var pathSetters []string
@@ -1114,7 +1116,7 @@ func (ae *ActionExecutor) storeResponseWire(mappings []StoreMapping, wv *protox.
 // map[string]any 装箱树常驻 state（大消息 × 数千机器人 = GB 级常驻），路径读取经
 // state.PathNavigator 惰性取值，Lua robot.get 在边界现场转真 table（脚本语义不变）。
 // respMsg 解码后仅经本方法存入 state、无后续写方，满足 Freeze 的不可变契约。
-func (ae *ActionExecutor) storeResponseProto(mappings []StoreMapping, respMsg proto.Message) {
+func (ae *ActionExecutor) storeResponseProto(mappings []binding.StoreMapping, respMsg proto.Message) {
 	debugOn := stresslog.DebugEnabled()
 	var frozen *protox.Frozen
 	for _, m := range mappings {
@@ -1148,18 +1150,18 @@ func (ae *ActionExecutor) storeResponseProto(mappings []StoreMapping, respMsg pr
 // T2-C2 起 DescribeError 按 def.Service + pattern(proto) 推 server 串 Resolve 取 adapter。
 // Resolve nil 时 DescribeError 返回空串（与未配置 errors.json 等价），不在此 fail loud——
 // headerErr 描述缺失不致命，仅 detail 不含人类可读前缀；上层仍按 NewActionError 上抛原错误码。
-func (ae *ActionExecutor) handleHeaderError(proto string, def *ActionDef, headerErr uint64, routeKey string, respBody []byte) *ActionError {
+func (ae *ActionExecutor) handleHeaderError(proto string, def *flowdef.ActionDef, headerErr uint64, routeKey string, respBody []byte) *errcode.ActionError {
 	ae.parseAndStoreResponse(def, respBody)
 	desc := ae.describeError(proto, def.Service, headerErr)
 	detail := "service=" + def.Service + " route=" + routeKey
 	if desc != "" {
 		detail = desc + ": " + detail
 	}
-	return NewActionError(errcode.ErrorCode(headerErr), detail)
+	return errcode.NewActionError(errcode.ErrorCode(headerErr), detail)
 }
 
 // storeResponse 将响应字段存储到 StateStore
-func (ae *ActionExecutor) storeResponse(mappings []StoreMapping, fieldMap map[string]any) {
+func (ae *ActionExecutor) storeResponse(mappings []binding.StoreMapping, fieldMap map[string]any) {
 	debugOn := stresslog.DebugEnabled()
 	if debugOn {
 		stresslog.Debug("[ACTION] storeResponse",
@@ -1187,7 +1189,7 @@ func (ae *ActionExecutor) storeResponse(mappings []StoreMapping, fieldMap map[st
 }
 
 // applyFilters 按过滤条件筛选列表项
-func (ae *ActionExecutor) applyFilters(list []any, filters []FilterDef) []any {
+func (ae *ActionExecutor) applyFilters(list []any, filters []binding.FilterDef) []any {
 	if len(filters) == 0 {
 		return list
 	}
@@ -1201,7 +1203,7 @@ func (ae *ActionExecutor) applyFilters(list []any, filters []FilterDef) []any {
 }
 
 // matchFilters 检查列表项是否满足所有过滤条件
-func (ae *ActionExecutor) matchFilters(item any, filters []FilterDef) bool {
+func (ae *ActionExecutor) matchFilters(item any, filters []binding.FilterDef) bool {
 	for _, f := range filters {
 		fieldVals := navigatePathValues(item, f.Path)
 
@@ -1222,25 +1224,25 @@ func (ae *ActionExecutor) matchFilters(item any, filters []FilterDef) bool {
 // matchFilterValues 按 mode 聚合多个 path 取值的比较结果。
 func matchFilterValues(values []any, targetVal any, op string, mode string) bool {
 	if len(values) == 0 {
-		return mode == FilterModeNone
+		return mode == binding.FilterModeNone
 	}
 
 	switch mode {
-	case FilterModeAll:
+	case binding.FilterModeAll:
 		for _, v := range values {
 			if !state.CompareValues(v, targetVal, op) {
 				return false
 			}
 		}
 		return true
-	case FilterModeNone:
+	case binding.FilterModeNone:
 		for _, v := range values {
 			if state.CompareValues(v, targetVal, op) {
 				return false
 			}
 		}
 		return true
-	case FilterModeAny, "":
+	case binding.FilterModeAny, "":
 		for _, v := range values {
 			if state.CompareValues(v, targetVal, op) {
 				return true
@@ -1258,11 +1260,11 @@ func matchFilterValues(values []any, targetVal any, op string, mode string) bool
 }
 
 // bindingConditionSatisfied 执行加载期已准备的字段绑定条件。
-func (ae *ActionExecutor) bindingConditionSatisfied(binding *FieldBind) bool {
+func (ae *ActionExecutor) bindingConditionSatisfied(binding *binding.FieldBind) bool {
 	if binding == nil || strings.TrimSpace(binding.Condition) == "" {
 		return true
 	}
-	condition := binding.preparedCondition()
+	condition := binding.PreparedCondition()
 	if condition == nil {
 		stresslog.Error("[ENGINE] 字段绑定条件尚未准备",
 			zap.String("condition", binding.Condition), zap.Error(errConditionNotPrepared))
@@ -1305,7 +1307,7 @@ func (ae *ActionExecutor) protocolSend(protocol, service string, packet []byte) 
 
 // protocolEncode encodes a packet via TCP or UDP adapter resolved by "<proto>:<service>".
 //
-// proto 由调用方按 pattern 推导（"tcp" / "udp"）；service 来自 ActionDef.Service。
+// proto 由调用方按 pattern 推导（"tcp" / "udp"）；service 来自 flowdef.ActionDef.Service。
 // Resolve nil（该连接未配置 codec）时返回 nil，调用方（execSend / execRequest）必须将其
 // 翻译为 ErrEncodeFailed fail loud（不静默兜底）。
 func (ae *ActionExecutor) protocolEncode(proto, service string, route any, body, key []byte) []byte {
@@ -1320,9 +1322,9 @@ func (ae *ActionExecutor) protocolEncode(proto, service string, route any, body,
 }
 
 // resolveAdapter 按 "<proto>:<service>" 从 resolver 解析该连接的 codec adapter。
-// proto 必须是 "tcp" / "udp"；非空 service 由调用方保证（ActionDef.Service 已校验）。
+// proto 必须是 "tcp" / "udp"；非空 service 由调用方保证（flowdef.ActionDef.Service 已校验）。
 // 未映射返回 nil，调用方 fail loud。
-func (ae *ActionExecutor) resolveAdapter(proto, service string) adapter.Adapter {
+func (ae *ActionExecutor) resolveAdapter(proto, service string) protocol.Adapter {
 	if ae.resolver == nil {
 		return nil
 	}
@@ -1369,7 +1371,7 @@ func (ae *ActionExecutor) protocolRequest(protocol, service string, packet []byt
 // ── 统一执行方法 ─────────────────────────────────────────────────────
 
 // execSend sends a message without waiting for response.
-func (ae *ActionExecutor) execSend(protocol string, def *ActionDef) (int, ActionTiming, error) {
+func (ae *ActionExecutor) execSend(protocol string, def *flowdef.ActionDef) (int, ActionTiming, error) {
 	var buildStart time.Time
 	if ae.timingLevel >= TimingLevelFull {
 		buildStart = time.Now()
@@ -1396,7 +1398,7 @@ func (ae *ActionExecutor) execSend(protocol string, def *ActionDef) (int, Action
 		timing.Client.Observed |= TimingStageEncode
 	}
 	if packet == nil {
-		return 0, timing, NewActionError(errcode.ErrEncodeFailed,
+		return 0, timing, errcode.NewActionError(errcode.ErrEncodeFailed,
 			"action="+def.Name+" service="+def.Service+" route="+routeKey+
 				"；codec 未映射（resolver.Resolve("+protocol+":"+def.Service+") nil）")
 	}
@@ -1423,7 +1425,7 @@ func (ae *ActionExecutor) execSend(protocol string, def *ActionDef) (int, Action
 }
 
 // execRequest sends a request and waits for response.
-func (ae *ActionExecutor) execRequest(protocol string, def *ActionDef) (int, int, ActionTiming, error) {
+func (ae *ActionExecutor) execRequest(protocol string, def *flowdef.ActionDef) (int, int, ActionTiming, error) {
 	var buildStart time.Time
 	if ae.timingLevel >= TimingLevelFull {
 		buildStart = time.Now()
@@ -1469,7 +1471,7 @@ func (ae *ActionExecutor) execRequest(protocol string, def *ActionDef) (int, int
 		encodeObserved = TimingStageEncode
 	}
 	if packet == nil {
-		return 0, 0, ActionTiming{Client: ClientTiming{BuildCost: buildCost, EncodeCost: encodeCost, Observed: buildObserved | encodeObserved}}, NewActionError(errcode.ErrEncodeFailed,
+		return 0, 0, ActionTiming{Client: ClientTiming{BuildCost: buildCost, EncodeCost: encodeCost, Observed: buildObserved | encodeObserved}}, errcode.NewActionError(errcode.ErrEncodeFailed,
 			"action="+def.Name+" service="+def.Service+" route="+routeKey+
 				"；codec 未映射（resolver.Resolve("+protocol+":"+def.Service+") nil）")
 	}
@@ -1524,7 +1526,7 @@ func (ae *ActionExecutor) execRequest(protocol string, def *ActionDef) (int, int
 
 // execListen 事件等待并消费已通过 ListenRefs 预缓存的推送消息。
 // 不再自行注册监听；若对应 route 未在前驱节点通过 listenRefs 预注册，将始终超时。
-func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *ActionDef) (int, ActionTiming, error) {
+func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *flowdef.ActionDef) (int, ActionTiming, error) {
 	timeout := def.Timeout
 	if timeout <= 0 {
 		timeout = DefaultListenTimeoutSec
@@ -1558,7 +1560,7 @@ func (ae *ActionExecutor) execListen(ctx context.Context, protocol string, def *
 	if exchange == nil {
 		var timeoutTiming ActionTiming
 		timeoutTiming.AddListenTimeout()
-		return 0, timeoutTiming, NewActionError(errcode.ErrListenTimeout,
+		return 0, timeoutTiming, errcode.NewActionError(errcode.ErrListenTimeout,
 			"action="+def.Name+" service="+def.Service+" route="+routeKey+
 				fmt.Sprintf(" timeout=%ds elapsed=%v", timeout, time.Since(start))+
 				"；route 未通过 listenRefs 预注册，请在前驱节点添加 listenRefs 并设置 listen=null")

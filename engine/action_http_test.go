@@ -1,13 +1,14 @@
 package engine
 
 import (
+	flowdef "stressbot/flow"
 	"strings"
 	"testing"
 
 	"go.uber.org/zap"
 	"stressbot/errcode"
+	"stressbot/internal/stresslog"
 	"stressbot/state"
-	stresslog "stressbot/utils/log"
 )
 
 // httpStatusNetSender 注入指定 StatusCode + Body 的 HTTP 响应，复用 fakeNetSender
@@ -39,16 +40,16 @@ func TestHTTPRequest_Non2xx_DetailIncludesStatusAndBody(t *testing.T) {
 	body := []byte(`{"error":1004,"errstr":"队伍已满"}`)
 	fake := &httpStatusNetSender{
 		fakeNetSender: &fakeNetSender{},
-		statusCode:             404,
-		body:                   body,
+		statusCode:    404,
+		body:          body,
 	}
 	ae := &ActionExecutor{netSender: fake, store: state.NewStore()}
 
-	_, _, _, err := ae.execHTTPRequest(&ActionDef{Name: actionName, URL: "http://x/y"})
+	_, _, _, err := ae.execHTTPRequest(&flowdef.ActionDef{Name: actionName, URL: "http://x/y"})
 	if err == nil {
 		t.Fatal("非 2xx 应返回 error")
 	}
-	ae2, ok := err.(*ActionError)
+	ae2, ok := err.(*errcode.ActionError)
 	if !ok {
 		t.Fatalf("应返回 *ActionError，实际 %T：%v", err, err)
 	}

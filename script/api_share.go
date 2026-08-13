@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"stressbot/sharedstate"
+	"stressbot/state/shared"
 
 	lua "github.com/yuin/gopher-lua"
 )
@@ -79,7 +79,7 @@ func shareCtx(L *lua.LState) *Context {
 // pushNotEnabled 推送「未启用共享状态」错误（first, errString）。
 func pushNotEnabled(L *lua.LState, first lua.LValue) int {
 	L.Push(first)
-	L.Push(lua.LString(sharedstate.ErrNotEnabled.Error()))
+	L.Push(lua.LString(shared.ErrNotEnabled.Error()))
 	return 2
 }
 
@@ -97,7 +97,7 @@ func pushResult3(L *lua.LState, value lua.LValue, ok bool, err error) int {
 
 // pushNotEnabled3 「未启用共享状态」的三值返回 (nil, false, err)。
 func pushNotEnabled3(L *lua.LState) int {
-	return pushResult3(L, lua.LNil, false, sharedstate.ErrNotEnabled)
+	return pushResult3(L, lua.LNil, false, shared.ErrNotEnabled)
 }
 
 // resultVals / resultVals3 是 pushResult / pushResult3 的协作式渲染版：在执行器 goroutine 上

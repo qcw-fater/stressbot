@@ -4,13 +4,15 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"stressbot/binding"
+	flowdef "stressbot/flow"
 	"testing"
 
-	"stressbot/protox"
+	"stressbot/protocol/protox"
 	"stressbot/state"
 
 	"go.uber.org/zap"
-	stresslog "stressbot/utils/log"
+	"stressbot/internal/stresslog"
 )
 
 // TestActionExecutorBuildBodyWithMapBinding 端到端测试：
@@ -49,19 +51,19 @@ message GuildEditInfoC2S {
 		factory: factory,
 	}
 
-	// 4) 定义 ActionDef：map binding 使用 fixed key + randomInt（min==max 保证确定性）
-	def := &ActionDef{
+	// 4) 定义 flowdef.ActionDef：map binding 使用 fixed key + randomInt（min==max 保证确定性）
+	def := &flowdef.ActionDef{
 		Name:     "GuildEditInfo",
-		Pattern:  PatternTCPSend,
+		Pattern:  flowdef.PatternTCPSend,
 		C2SProto: "maptest.GuildEditInfoC2S",
-		Bindings: []FieldBind{
+		Bindings: []binding.FieldBind{
 			{
 				Field: "params",
-				Type:  BindMap,
-				Entries: []MapEntryBind{
-					{Key: 1, Value: FieldBind{Type: BindRandomInt, Min: 0, Max: 0}},
-					{Key: 2, Value: FieldBind{Type: BindRandomInt, Min: 1, Max: 1}},
-					{Key: 3, Value: FieldBind{Type: BindRandomInt, Min: 200, Max: 200}},
+				Type:  binding.BindMap,
+				Entries: []binding.MapEntryBind{
+					{Key: 1, Value: binding.FieldBind{Type: binding.BindRandomInt, Min: 0, Max: 0}},
+					{Key: 2, Value: binding.FieldBind{Type: binding.BindRandomInt, Min: 1, Max: 1}},
+					{Key: 3, Value: binding.FieldBind{Type: binding.BindRandomInt, Min: 200, Max: 200}},
 				},
 			},
 		},

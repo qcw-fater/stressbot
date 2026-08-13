@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	json "stressbot/utils/jsonx"
+	json "stressbot/internal/jsonx"
 )
 
 func TestTakeReportSnapshotPartitionsActionsExactlyOnce(t *testing.T) {

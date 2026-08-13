@@ -32,11 +32,6 @@ export async function fetchBaselineFlow<T = unknown>(): Promise<T | null> {
   return fetchJson<T>(`${BASELINE_PREFIX}/flow/flow.json`);
 }
 
-/** 获取基线运行配置（stressbot.toml，单机模式参考） */
-export async function fetchBaselineConfig<T = unknown>(): Promise<T | null> {
-  return fetchJson<T>(`${BASELINE_PREFIX}/config.json`);
-}
-
 /**
  * 获取基线脚本文件名列表。
  *

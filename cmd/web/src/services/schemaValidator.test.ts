@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { validateCodecStructure, validateFlowStructure } from './schemaValidator';
 
-import validFlow from '../../../../schemas/testdata/valid/flow-all-kinds.json';
-import validCodec from '../../../../schemas/testdata/valid/codec-pipeline.json';
-import invalidFlowExtra from '../../../../schemas/testdata/invalid/flow-extra-property.json';
-import invalidFlowMissing from '../../../../schemas/testdata/invalid/flow-missing-required.json';
-import invalidFlowQueue from '../../../../schemas/testdata/invalid/flow-negative-queue.json';
-import invalidFlowEnum from '../../../../schemas/testdata/invalid/flow-unknown-enum.json';
-import invalidFlowType from '../../../../schemas/testdata/invalid/flow-wrong-type.json';
-import invalidCodecExtra from '../../../../schemas/testdata/invalid/codec-extra-property.json';
-import invalidCodecMissing from '../../../../schemas/testdata/invalid/codec-missing-required.json';
-import invalidCodecRange from '../../../../schemas/testdata/invalid/codec-out-of-range.json';
-import invalidCodecEnum from '../../../../schemas/testdata/invalid/codec-unknown-enum.json';
-import invalidCodecType from '../../../../schemas/testdata/invalid/codec-wrong-type.json';
+import validFlow from '../../../../config/validation/testdata/valid/flow-all-kinds.json';
+import validCodec from '../../../../config/validation/testdata/valid/codec-pipeline.json';
+import invalidFlowExtra from '../../../../config/validation/testdata/invalid/flow-extra-property.json';
+import invalidFlowMissing from '../../../../config/validation/testdata/invalid/flow-missing-required.json';
+import invalidFlowQueue from '../../../../config/validation/testdata/invalid/flow-negative-queue.json';
+import invalidFlowEnum from '../../../../config/validation/testdata/invalid/flow-unknown-enum.json';
+import invalidFlowType from '../../../../config/validation/testdata/invalid/flow-wrong-type.json';
+import invalidCodecExtra from '../../../../config/validation/testdata/invalid/codec-extra-property.json';
+import invalidCodecMissing from '../../../../config/validation/testdata/invalid/codec-missing-required.json';
+import invalidCodecRange from '../../../../config/validation/testdata/invalid/codec-out-of-range.json';
+import invalidCodecEnum from '../../../../config/validation/testdata/invalid/codec-unknown-enum.json';
+import invalidCodecType from '../../../../config/validation/testdata/invalid/codec-wrong-type.json';
 
 describe('shared JSON Schema corpus', () => {
   it.each([

@@ -4,15 +4,15 @@ import (
 	"strings"
 	"testing"
 
-	"stressbot/adapter"
+	"stressbot/protocol"
 )
 
 // stubResolverE 测试用 CodecResolver：按显式 map 返回，未映射返回 nil（与生产 codecResolver 同语义）。
 type stubResolverE struct {
-	byServer map[string]adapter.Adapter
+	byServer map[string]protocol.Adapter
 }
 
-func (s *stubResolverE) Resolve(server string) adapter.Adapter { return s.byServer[server] }
+func (s *stubResolverE) Resolve(server string) protocol.Adapter { return s.byServer[server] }
 
 // encodeSpyAdapter 记录被调用的方法 + 入参，用于断言 encode/ExpectedRouteKey/DescribeError
 // 走的是 resolver.Resolve 出来的那个 adapter（而非历史 r.adp）。
@@ -37,7 +37,7 @@ type routeKeyCall struct {
 	route any
 }
 
-func (a *encodeSpyAdapter) HeaderSize() int { return a.headerSize }
+func (a *encodeSpyAdapter) HeaderSize() int       { return a.headerSize }
 func (a *encodeSpyAdapter) BodyLength([]byte) int { return 0 }
 func (a *encodeSpyAdapter) EncodeTCP(route any, body, secretKey []byte) []byte {
 	a.encodeCalls = append(a.encodeCalls, encodeCall{proto: "tcp", route: route, body: body, secretKey: secretKey})
@@ -71,7 +71,7 @@ func (a *encodeSpyAdapter) Close() {}
 func TestProtocolEncode_ResolverDispatchesByProtoService(t *testing.T) {
 	tcpAdp := &encodeSpyAdapter{encodeReturned: []byte("tcp-pkt"), routeKeyReturned: "tcp-rk"}
 	udpAdp := &encodeSpyAdapter{encodeReturned: []byte("udp-pkt"), routeKeyReturned: "udp-rk"}
-	resolver := &stubResolverE{byServer: map[string]adapter.Adapter{
+	resolver := &stubResolverE{byServer: map[string]protocol.Adapter{
 		"tcp:logic":  tcpAdp,
 		"udp:battle": udpAdp,
 	}}
@@ -105,7 +105,7 @@ func TestProtocolEncode_ResolverDispatchesByProtoService(t *testing.T) {
 // TestProtocolEncode_ResolverNil_FailLoud 验证 protocolEncode 在 Resolve nil 时返回 nil，
 // 调用方（execSend/execRequest）必须将其翻译为 ErrEncodeFailed fail-loud。
 func TestProtocolEncode_ResolverNil_ReturnsNil(t *testing.T) {
-	resolver := &stubResolverE{byServer: map[string]adapter.Adapter{}}
+	resolver := &stubResolverE{byServer: map[string]protocol.Adapter{}}
 	ae := &ActionExecutor{resolver: resolver}
 	got := ae.protocolEncode("tcp", "missing", "route", nil, nil)
 	if got != nil {
@@ -118,7 +118,7 @@ func TestProtocolEncode_ResolverNil_ReturnsNil(t *testing.T) {
 func TestResolveAdapterForPattern(t *testing.T) {
 	logic := &encodeSpyAdapter{}
 	battle := &encodeSpyAdapter{}
-	resolver := &stubResolverE{byServer: map[string]adapter.Adapter{
+	resolver := &stubResolverE{byServer: map[string]protocol.Adapter{
 		"tcp:logic":  logic,
 		"udp:battle": battle,
 	}}
@@ -128,7 +128,7 @@ func TestResolveAdapterForPattern(t *testing.T) {
 		name    string
 		proto   string
 		service string
-		want    adapter.Adapter
+		want    protocol.Adapter
 	}{
 		{name: "tcp logic", proto: "tcp", service: "logic", want: logic},
 		{name: "udp battle", proto: "udp", service: "battle", want: battle},
@@ -149,7 +149,7 @@ func TestResolveAdapterForPattern(t *testing.T) {
 // 走 resolver.Resolve 出的 adapter（不再走 ae.adp）。
 func TestExpectedRouteKeyViaResolver(t *testing.T) {
 	logic := &encodeSpyAdapter{routeKeyReturned: "logic-route"}
-	resolver := &stubResolverE{byServer: map[string]adapter.Adapter{"tcp:logic": logic}}
+	resolver := &stubResolverE{byServer: map[string]protocol.Adapter{"tcp:logic": logic}}
 	ae := &ActionExecutor{resolver: resolver}
 
 	got := ae.expectedRouteKey("tcp", "logic", "route-val")
@@ -164,7 +164,7 @@ func TestExpectedRouteKeyViaResolver(t *testing.T) {
 // TestDescribeErrorViaResolver 验证 headerErr 描述走 resolver.Resolve(proto:service) 出的 adapter。
 func TestDescribeErrorViaResolver(t *testing.T) {
 	battle := &encodeSpyAdapter{describeReturned: "battle-err"}
-	resolver := &stubResolverE{byServer: map[string]adapter.Adapter{"udp:battle": battle}}
+	resolver := &stubResolverE{byServer: map[string]protocol.Adapter{"udp:battle": battle}}
 	ae := &ActionExecutor{resolver: resolver}
 
 	got := ae.describeError("udp", "battle", 1001)
@@ -180,7 +180,7 @@ func TestDescribeErrorViaResolver(t *testing.T) {
 func TestResolveAdapterServerStringFormat(t *testing.T) {
 	called := []string{}
 	resolver := &stubResolverE{
-		byServer: map[string]adapter.Adapter{},
+		byServer: map[string]protocol.Adapter{},
 	}
 	// 用包装 resolver 记录入参。
 	wrap := &recordingResolver{inner: resolver, seen: &called}
@@ -199,17 +199,17 @@ func TestResolveAdapterServerStringFormat(t *testing.T) {
 }
 
 type recordingResolver struct {
-	inner adapter.CodecResolver
+	inner protocol.CodecResolver
 	seen  *[]string
 }
 
-func (r *recordingResolver) Resolve(server string) adapter.Adapter {
+func (r *recordingResolver) Resolve(server string) protocol.Adapter {
 	*r.seen = append(*r.seen, server)
 	return r.inner.Resolve(server)
 }
 
 // 兜底编译期断言：stubResolverE 实现 CodecResolver。
-var _ adapter.CodecResolver = (*stubResolverE)(nil)
+var _ protocol.CodecResolver = (*stubResolverE)(nil)
 
 // _ 避免 strings 包未使用（保留 import 占位以便后续断言文案扩展）。
 var _ = strings.Contains

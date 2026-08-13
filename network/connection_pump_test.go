@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"stressbot/adapter"
+	"stressbot/protocol"
 
-	stresslog "stressbot/utils/log"
+	"stressbot/internal/stresslog"
 )
 
-// fakeAdapter 是 connectionPump 测试用的最小 adapter.Adapter 实现。
+// fakeAdapter 是 connectionPump 测试用的最小 protocol.Adapter 实现。
 //
 // 只关心 DecodeTCP / DecodeUDP（pump 的 decode 热路径）；其余方法返回零值即可，
 // 因为 pump 测试不涉及 encode/routeKey/BodyLength（那些由 OnTraffic 在 gnet 侧已处理，
@@ -51,12 +51,12 @@ func (a *fakeAdapter) ExpectedRouteKey(route any) string { return "test.route" }
 func (a *fakeAdapter) Close()                            {}
 func (a *fakeAdapter) DescribeError(code uint64) string  { return "" }
 
-// 编译期断言：fakeAdapter 实现 adapter.Adapter。
-var _ adapter.Adapter = (*fakeAdapter)(nil)
+// 编译期断言：fakeAdapter 实现 protocol.Adapter。
+var _ protocol.Adapter = (*fakeAdapter)(nil)
 
 // startPumpedConnection 构造一个已启动 connectionPump 的测试连接（带可控 sendFunc）。
 // 返回连接与一个记录所有发送字节原子计数器。
-func startPumpedConnection(t *testing.T, adp adapter.Adapter, isUDP bool) (*Connection, *int32) {
+func startPumpedConnection(t *testing.T, adp protocol.Adapter, isUDP bool) (*Connection, *int32) {
 	t.Helper()
 	conn := newTestConnection(t)
 	var sent int32

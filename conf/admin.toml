@@ -74,7 +74,7 @@ username = "root"
 # 使用 ${VAR} 语法时，环境变量未定义会导致启动失败（fail-loud，不会静默用空密码）。
 password = "${STRESSBOT_MYSQL_PASSWORD}"
 
-# database 数据库名。启动时会自动建表/迁移，无需手动初始化。
+# database 数据库名。启动时自动创建当前版本所需表；首版不维护版本迁移链。
 database = "stressbot"
 
 # retentionDays 历史数据保留天数。超过此天数的归档记录自动清理（每天定时执行）。

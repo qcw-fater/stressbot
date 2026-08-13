@@ -2,13 +2,12 @@ package agent
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"io"
 	"time"
 
-	"stressbot/controlplane/controlv1"
-	"stressbot/utils"
+	"stressbot/agent/metrics"
+	"stressbot/agent/session"
+	"stressbot/controlplane/pb"
+	"stressbot/internal/workpool"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -16,56 +15,25 @@ import (
 )
 
 const (
-	maxControlMessageSize  = 16 << 20
-	controlProtocolVersion = 1
+	maxControlMessageSize = 16 << 20
 )
 
-type sessionSender struct {
-	outgoing  chan *controlv1.AgentEvent
-	heartbeat chan *controlv1.Heartbeat
-	reports   *ReportOutbox
-}
-
-func newSessionSender(reports *ReportOutbox) *sessionSender {
-	return &sessionSender{outgoing: make(chan *controlv1.AgentEvent, 64), heartbeat: make(chan *controlv1.Heartbeat, 1), reports: reports}
-}
-
-func (s *sessionSender) offer(event *controlv1.AgentEvent) error {
-	select {
-	case s.outgoing <- event:
-		return nil
-	default:
-		return fmt.Errorf("会话发送队列已满")
-	}
-}
-
-func (s *sessionSender) offerHeartbeat(heartbeat *controlv1.Heartbeat) {
-	select {
-	case s.heartbeat <- heartbeat:
-	default:
-		select {
-		case <-s.heartbeat:
-		default:
-		}
-		select {
-		case s.heartbeat <- heartbeat:
-		default:
-		}
-	}
+func newSessionSender(reports *session.ReportOutbox) *session.Sender {
+	return session.NewSender(reports)
 }
 
 func (a *Agent) runConnection(parent context.Context, conn *grpc.ClientConn) error {
-	client := controlv1.NewAgentControlServiceClient(conn)
+	client := controlpb.NewAgentControlServiceClient(conn)
 	stream, err := client.Session(parent)
 	if err != nil {
 		return err
 	}
 	statusValue, taskID, bots := a.runtimeState()
-	hello := &controlv1.Hello{ProtocolVersion: controlProtocolVersion, AgentId: a.id, Name: a.cfg.Name, AppVersion: a.cfg.AppVersion,
+	hello := &controlpb.Hello{ProtocolVersion: session.ProtocolVersion, AgentId: a.id, Name: a.cfg.Name, AppVersion: a.cfg.AppVersion,
 		MaxBots: int32(a.cfg.MaxBots), MetricsIntervalNanos: int64(a.cfg.MetricsInterval), Status: statusValue,
 		CurrentTaskId: taskID, CurrentBots: int32(bots),
-		StaticInfo: staticInfoToProto(a.sysmon.Static())}
-	if err := stream.Send(&controlv1.AgentEvent{Event: &controlv1.AgentEvent_Hello{Hello: hello}}); err != nil {
+		StaticInfo: metrics.StaticInfoToProto(a.sysmon.Static())}
+	if err := stream.Send(&controlpb.AgentEvent{Event: &controlpb.AgentEvent_Hello{Hello: hello}}); err != nil {
 		return err
 	}
 	first, err := stream.Recv()
@@ -73,7 +41,7 @@ func (a *Agent) runConnection(parent context.Context, conn *grpc.ClientConn) err
 		return err
 	}
 	welcome := first.GetWelcome()
-	if welcome == nil || welcome.ProtocolVersion != controlProtocolVersion {
+	if welcome == nil || welcome.ProtocolVersion != session.ProtocolVersion {
 		return status.Error(codes.FailedPrecondition, "Admin 未返回有效 Welcome")
 	}
 	ctx, cancel := context.WithCancel(parent)
@@ -82,19 +50,19 @@ func (a *Agent) runConnection(parent context.Context, conn *grpc.ClientConn) err
 	sender := newSessionSender(a.reportOutbox)
 	a.reportOutbox.Wake()
 	a.executor.Outcomes().Wake()
-	bundleClient := controlv1.NewAgentBundleServiceClient(conn)
-	telemetryClient := controlv1.NewAgentTelemetryServiceClient(conn)
-	sendDone, recvDone, telemetryDone := make(chan error, 1), make(chan error, 1), make(chan error, 1)
-	if err := utils.GetWorkPool().Submit(func() { sendDone <- a.sessionSendLoop(ctx, sender, stream) }); err != nil {
+	bundleClient := controlpb.NewAgentBundleServiceClient(conn)
+	metricsClient := controlpb.NewAgentMetricsServiceClient(conn)
+	sendDone, recvDone, metricsDone := make(chan error, 1), make(chan error, 1), make(chan error, 1)
+	if err := workpool.GetWorkPool().Submit(func() { sendDone <- a.sessionSendLoop(ctx, sender, stream) }); err != nil {
 		return err
 	}
-	if err := utils.GetWorkPool().Submit(func() { recvDone <- a.sessionRecvLoop(ctx, sender, stream, bundleClient, welcome.Generation) }); err != nil {
+	if err := workpool.GetWorkPool().Submit(func() { recvDone <- a.sessionRecvLoop(ctx, stream, bundleClient, welcome.Generation) }); err != nil {
 		return err
 	}
-	if err := utils.GetWorkPool().Submit(func() { telemetryDone <- a.telemetry.sendLoop(ctx, telemetryClient, a.id, welcome.Generation) }); err != nil {
+	if err := workpool.GetWorkPool().Submit(func() { metricsDone <- a.metrics.SendLoop(ctx, metricsClient, a.id, welcome.Generation) }); err != nil {
 		return err
 	}
-	if err := utils.GetWorkPool().Submit(func() { a.heartbeatProducer(ctx, sender, welcome) }); err != nil {
+	if err := workpool.GetWorkPool().Submit(func() { a.heartbeatProducer(ctx, sender, welcome) }); err != nil {
 		return err
 	}
 	select {
@@ -104,114 +72,41 @@ func (a *Agent) runConnection(parent context.Context, conn *grpc.ClientConn) err
 		return err
 	case err := <-recvDone:
 		return err
-	case err := <-telemetryDone:
+	case err := <-metricsDone:
 		return err
 	}
 }
 
-func (a *Agent) sessionSendLoop(ctx context.Context, sender *sessionSender, stream controlv1.AgentControlService_SessionClient) error {
-	for {
-		select {
-		case event := <-sender.outgoing:
-			if err := stream.Send(event); err != nil {
-				return err
-			}
-		default:
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case event := <-sender.outgoing:
-			if err := stream.Send(event); err != nil {
-				return err
-			}
-		case <-a.executor.Outcomes().notify:
-			for _, ack := range a.executor.Outcomes().Snapshot() {
-				if err := stream.Send(&controlv1.AgentEvent{Event: &controlv1.AgentEvent_CommandAck{CommandAck: ack}}); err != nil {
-					return err
-				}
-			}
-		case heartbeat := <-sender.heartbeat:
-			if err := stream.Send(&controlv1.AgentEvent{Event: &controlv1.AgentEvent_Heartbeat{Heartbeat: heartbeat}}); err != nil {
-				return err
-			}
-		case <-sender.reports.notify:
-			for _, report := range sender.reports.Snapshot() {
-				if err := stream.Send(&controlv1.AgentEvent{Event: &controlv1.AgentEvent_FinalReport{FinalReport: report}}); err != nil {
-					return err
-				}
-			}
-		}
-	}
+func (a *Agent) sessionSendLoop(ctx context.Context, sender *session.Sender, stream controlpb.AgentControlService_SessionClient) error {
+	return session.SendLoop(ctx, sender, stream, a.executor.Outcomes())
 }
 
-func (a *Agent) sessionRecvLoop(ctx context.Context, sender *sessionSender, stream controlv1.AgentControlService_SessionClient, bundleClient controlv1.AgentBundleServiceClient, generation uint64) error {
-	for {
-		event, err := stream.Recv()
-		if err != nil {
-			return err
-		}
-		switch body := event.GetEvent().(type) {
-		case *controlv1.AdminEvent_Command:
-			if body.Command.DeliveryGeneration != generation {
-				return status.Error(codes.Aborted, "命令 delivery generation 不匹配")
-			}
-			if err := a.executor.Enqueue(ctx, bundleClient, body.Command); err != nil {
-				return err
-			}
-		case *controlv1.AdminEvent_HeartbeatAck:
-			if body.HeartbeatAck.Generation != generation {
-				return status.Error(codes.Aborted, "心跳 ACK generation 不匹配")
-			}
-			remaining := time.Duration(body.HeartbeatAck.LeaseDeadlineUnixNano - body.HeartbeatAck.ServerTimeUnixNano)
-			if remaining < 0 {
-				remaining = 0
-			}
-			a.leaseDeadline.Store(time.Now().Add(remaining).UnixNano())
-		case *controlv1.AdminEvent_ReportAck:
-			a.reportOutbox.Acknowledge(body.ReportAck)
-		case *controlv1.AdminEvent_CommandReceipt:
-			if a.executor.Outcomes().Confirm(body.CommandReceipt) {
-				a.confirmShutdown(body.CommandReceipt.CommandId, body.CommandReceipt.Sequence)
-			}
-		case *controlv1.AdminEvent_ServerClosing:
-			return status.Error(codes.Unavailable, body.ServerClosing.Reason)
-		case *controlv1.AdminEvent_ProtocolError:
-			return status.Error(codes.FailedPrecondition, body.ProtocolError.Message)
-		case *controlv1.AdminEvent_Welcome:
-			return status.Error(codes.FailedPrecondition, "重复 Welcome")
-		default:
-			return status.Error(codes.InvalidArgument, "未知 AdminEvent")
-		}
-	}
+func (a *Agent) sessionRecvLoop(ctx context.Context, stream controlpb.AgentControlService_SessionClient, bundleClient controlpb.AgentBundleServiceClient, generation uint64) error {
+	return session.ReceiveLoop(ctx, stream, bundleClient, generation, session.ReceiveCallbacks{
+		EnqueueCommand:    a.executor.Enqueue,
+		UpdateLease:       func(remaining time.Duration) { a.leaseDeadline.Store(time.Now().Add(remaining).UnixNano()) },
+		AcknowledgeReport: a.reportOutbox.Acknowledge,
+		ConfirmCommand:    a.executor.Outcomes().Confirm,
+		ConfirmShutdown:   a.confirmShutdown,
+	})
 }
 
-func (a *Agent) heartbeatProducer(ctx context.Context, sender *sessionSender, welcome *controlv1.Welcome) {
-	interval := time.Duration(welcome.HeartbeatIntervalNanos)
-	if interval <= 0 {
-		interval = a.cfg.HeartbeatInterval
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case now := <-ticker.C:
-			statusValue, taskID, bots := a.runtimeState()
-			sender.offerHeartbeat(&controlv1.Heartbeat{AgentId: a.id, Generation: welcome.Generation, SentAtUnixNano: now.UnixNano(),
-				Status: statusValue, CurrentTaskId: taskID, CurrentBots: int32(bots), AppVersion: a.cfg.AppVersion})
-		}
-	}
+func (a *Agent) heartbeatProducer(ctx context.Context, sender *session.Sender, welcome *controlpb.Welcome) {
+	session.HeartbeatProducer(ctx, sender, welcome, a.cfg.HeartbeatInterval, a.id, a.cfg.AppVersion, a.runtimeState)
 }
 
-func (a *Agent) runtimeState() (controlv1.AgentRuntimeStatus, string, int) {
+func (a *Agent) runtimeState() (controlpb.AgentRuntimeStatus, string, int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.currentTask != nil {
-		return controlv1.AgentRuntimeStatus_AGENT_RUNTIME_STATUS_BUSY, a.currentTask.TaskID, a.currentTask.TotalBots
+		return controlpb.AgentRuntimeStatus_AGENT_RUNTIME_STATUS_BUSY, a.currentTask.TaskID, a.currentTask.TotalBots
 	}
-	return controlv1.AgentRuntimeStatus_AGENT_RUNTIME_STATUS_IDLE, "", 0
+	return controlpb.AgentRuntimeStatus_AGENT_RUNTIME_STATUS_IDLE, "", 0
+}
+
+// RuntimeState 实现内部命令执行器所需的当前任务状态查询。
+func (a *Agent) RuntimeState() (controlpb.AgentRuntimeStatus, string, int) {
+	return a.runtimeState()
 }
 
 func (a *Agent) leaseLoop(ctx context.Context) {
@@ -232,8 +127,5 @@ func (a *Agent) leaseLoop(ctx context.Context) {
 }
 
 func normalizeClientSessionError(err error) error {
-	if err == nil || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
-		return nil
-	}
-	return err
+	return session.NormalizeError(err)
 }

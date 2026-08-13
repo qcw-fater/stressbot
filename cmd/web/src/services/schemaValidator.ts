@@ -1,6 +1,6 @@
 import Ajv2020, { type ErrorObject, type ValidateFunction } from 'ajv/dist/2020';
-import flowSchema from '../../../../schemas/flow.schema.json';
-import codecSchema from '../../../../schemas/codec.schema.json';
+import flowSchema from '../../../../config/validation/flow.schema.json';
+import codecSchema from '../../../../config/validation/codec.schema.json';
 
 export interface SchemaIssue {
   /** JSON Pointer；根对象使用 /。 */

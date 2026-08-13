@@ -22,7 +22,7 @@ type RequestTiming struct {
 
 // Message 网络消息。
 type Message struct {
-	RouteKey  string        // 路由键字符串（由 adapter.Decode 产生）
+	RouteKey  string        // 路由键字符串（由 protocol.Decode 产生）
 	Data      []byte        // 消息体字节
 	HeaderErr uint64        // 协议头错误码，0 表示无错误
 	WireBytes int           // 入站完整帧长度，包含协议头和消息体

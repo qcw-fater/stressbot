@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	flowdef "stressbot/flow"
 	"testing"
 	"time"
 )
@@ -15,39 +16,39 @@ type waitTestHandler struct {
 	sleepErr   error
 }
 
-func (h *waitTestHandler) ExecuteAction(_ context.Context, actionDef *ActionDef) error {
+func (h *waitTestHandler) ExecuteAction(_ context.Context, actionDef *flowdef.ActionDef) error {
 	h.actions = append(h.actions, actionDef.Name)
 	return nil
 }
 
-func (h *waitTestHandler) ExecuteCondition(*CompiledCondition) bool { return false }
+func (h *waitTestHandler) ExecuteCondition(*flowdef.CompiledCondition) bool { return false }
 
-func (h *waitTestHandler) RegisterListen([]ListenRef) error { return nil }
+func (h *waitTestHandler) RegisterListen([]flowdef.ListenRef) error { return nil }
 
 func (h *waitTestHandler) CooperativeSleep(_ context.Context, d time.Duration) error {
 	h.sleepCalls = append(h.sleepCalls, d)
 	return h.sleepErr
 }
 
-func waitNodeFromJSON(t *testing.T, raw string) *Node {
+func waitNodeFromJSON(t *testing.T, raw string) *flowdef.Node {
 	t.Helper()
-	var node Node
+	var node flowdef.Node
 	if err := json.Unmarshal([]byte(raw), &node); err != nil {
 		t.Fatalf("unmarshal wait node: %v", err)
 	}
 	return &node
 }
 
-func newWaitTestExecutor(handler *waitTestHandler, waitNode *Node, afterNode *Node) *Executor {
-	nodes := map[string]*Node{"main": waitNode}
-	actions := map[string]*ActionDef{}
+func newWaitTestExecutor(handler *waitTestHandler, waitNode *flowdef.Node, afterNode *flowdef.Node) *Executor {
+	nodes := map[string]*flowdef.Node{"main": waitNode}
+	actions := map[string]*flowdef.ActionDef{}
 	if afterNode != nil {
 		nodes["after"] = afterNode
-		if afterNode.Type == NodeAction && afterNode.Action != "" {
-			actions[afterNode.Action] = &ActionDef{Name: afterNode.Action, Pattern: PatternClearState}
+		if afterNode.Type == flowdef.NodeAction && afterNode.Action != "" {
+			actions[afterNode.Action] = &flowdef.ActionDef{Name: afterNode.Action, Pattern: flowdef.PatternClearState}
 		}
 	}
-	return NewExecutor(&TaskFlow{
+	return NewExecutor(&flowdef.TaskFlow{
 		DefaultDelayMs: -1,
 		Nodes:          nodes,
 		Actions:        actions,
@@ -74,7 +75,7 @@ func TestExecuteWaitRunsThenAfterSleep(t *testing.T) {
 	exec := newWaitTestExecutor(
 		h,
 		waitNodeFromJSON(t, `{"type":"wait","waitMs":10,"then":"after"}`),
-		&Node{Type: NodeAction, Action: "after", DelayMs: -1},
+		&flowdef.Node{Type: flowdef.NodeAction, Action: "after", DelayMs: -1},
 	)
 
 	if err := exec.Run(context.Background()); err != nil {
@@ -93,7 +94,7 @@ func TestExecuteWaitRunsThenWhenDurationIsMissing(t *testing.T) {
 	exec := newWaitTestExecutor(
 		h,
 		waitNodeFromJSON(t, `{"type":"wait","then":"after"}`),
-		&Node{Type: NodeAction, Action: "after", DelayMs: -1},
+		&flowdef.Node{Type: flowdef.NodeAction, Action: "after", DelayMs: -1},
 	)
 
 	if err := exec.Run(context.Background()); err != nil {
@@ -112,7 +113,7 @@ func TestExecuteWaitDoesNotRunThenWhenSleepIsCanceled(t *testing.T) {
 	exec := newWaitTestExecutor(
 		h,
 		waitNodeFromJSON(t, `{"type":"wait","waitMs":10,"then":"after"}`),
-		&Node{Type: NodeAction, Action: "after", DelayMs: -1},
+		&flowdef.Node{Type: flowdef.NodeAction, Action: "after", DelayMs: -1},
 	)
 
 	err := exec.Run(context.Background())
@@ -138,7 +139,7 @@ func TestExecuteWaitPropagatesThenControlSignal(t *testing.T) {
 	exec := newWaitTestExecutor(
 		h,
 		waitNodeFromJSON(t, `{"type":"wait","waitMs":10,"then":"after"}`),
-		&Node{Type: NodeBreak},
+		&flowdef.Node{Type: flowdef.NodeBreak},
 	)
 
 	if err := exec.Run(context.Background()); !errors.Is(err, errBreak) {

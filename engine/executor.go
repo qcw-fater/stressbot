@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"math/rand"
 	"slices"
+	flowdef "stressbot/flow"
 	"strings"
 	"time"
 
 	"stressbot/errcode"
+	"stressbot/internal/stresslog"
 	"stressbot/monitor"
-	stresslog "stressbot/utils/log"
 
 	"go.uber.org/zap"
 )
@@ -28,7 +29,7 @@ var (
 
 // Executor 流程执行器，每个 Robot 持有一个独立实例。
 type Executor struct {
-	flow           *TaskFlow
+	flow           *flowdef.TaskFlow
 	handler        ActionHandler
 	defaultDelayMs int    // 解析自 flow.DefaultDelayMs，初始化后只读
 	caller         string // 调用方标识，用于日志追踪
@@ -39,14 +40,14 @@ type Executor struct {
 type ActionHandler interface {
 	// ExecuteAction 执行声明式动作或 Lua 脚本，返回 nil 表示成功。
 	// ctx 来自当前流程执行上下文，供声明式 / Lua 动作外壳共享同一取消语义。
-	ExecuteAction(ctx context.Context, actionDef *ActionDef) error
+	ExecuteAction(ctx context.Context, actionDef *flowdef.ActionDef) error
 	// ExecuteCondition 执行加载期已经准备的 state 或 Lua 条件。
-	ExecuteCondition(condition *CompiledCondition) bool
+	ExecuteCondition(condition *flowdef.CompiledCondition) bool
 	// RegisterListen 批量注册持久化推送监听（注册本身不阻塞流程）。推送到达后的处理分两路，
 	// 均不在网络 pump goroutine 内碰业务 LState：① script 回调——pump 只把回调**投递到 Robot
 	// 任务队列**，由执行器 goroutine 在 await / 等待窗口的 select 内就地**串行**执行；② 声明式
 	// store——pump 直接写线程安全的 state.Store（纯 Go，无 LState）。
-	RegisterListen(refs []ListenRef) error
+	RegisterListen(refs []flowdef.ListenRef) error
 	// CooperativeSleep 协作式休眠 d（节点延迟 / wait 节点用）。与裸 time.After 的区别：
 	// 等待期间持续 drain 任务队列（跑 listen 回调等），不让「会等待」的点饿死推送回调——
 	// 这是 actor 运行时「任何阻塞点都不裸阻塞」的统一约束。d<=0 立即返回。
@@ -56,7 +57,7 @@ type ActionHandler interface {
 
 // NewExecutor 创建流程执行器。
 // caller 用于日志中标识调用方（如机器人账号），便于追踪问题。
-func NewExecutor(flow *TaskFlow, handler ActionHandler, caller string) *Executor {
+func NewExecutor(flow *flowdef.TaskFlow, handler ActionHandler, caller string) *Executor {
 	// defaultDelayMs 兜底：flow 未配置（0）时按引擎默认 1000ms，兑现 DefaultDelayMs 字段注释承诺的
 	// 「0=引擎默认(1000ms)」。保证漏配的流程每个 action 节点仍有 drain 窗口（listen 回调靠节点延迟
 	// drain，不在节点入口单独 drain）。
@@ -73,7 +74,7 @@ func NewExecutor(flow *TaskFlow, handler ActionHandler, caller string) *Executor
 }
 
 // Flow 返回流程图定义
-func (e *Executor) Flow() *TaskFlow {
+func (e *Executor) Flow() *flowdef.TaskFlow {
 	return e.flow
 }
 
@@ -115,23 +116,23 @@ func (e *Executor) executeNode(ctx context.Context, nodeID string) error {
 	stresslog.Debug("[ENGINE] 执行节点", zap.String("caller", e.caller), zap.String("node", nodeID), zap.String("type", node.Type))
 
 	switch node.Type {
-	case NodeSequence:
+	case flowdef.NodeSequence:
 		return e.executeSequence(ctx, node)
-	case NodeAction:
+	case flowdef.NodeAction:
 		return e.executeAction(ctx, node)
-	case NodeLoop:
+	case flowdef.NodeLoop:
 		return e.executeLoop(ctx, node)
-	case NodeBoolean:
+	case flowdef.NodeBoolean:
 		return e.executeBoolean(ctx, node)
-	case NodeSwitch:
+	case flowdef.NodeSwitch:
 		return e.executeSwitch(ctx, node)
-	case NodeWeighted:
+	case flowdef.NodeWeighted:
 		return e.executeWeighted(ctx, node)
-	case NodeWait:
+	case flowdef.NodeWait:
 		return e.executeWait(ctx, node)
-	case NodeBreak:
+	case flowdef.NodeBreak:
 		return errBreak
-	case NodeContinue:
+	case flowdef.NodeContinue:
 		return errContinue
 	default:
 		return fmt.Errorf("%w: %s (node=%s, caller=%s)", ErrUnknownNodeType, node.Type, nodeID, e.caller)
@@ -145,7 +146,7 @@ func (e *Executor) executeNode(ctx context.Context, nodeID string) error {
 // ctx 取消处理：当 sequence 因 ctx 取消而中断时，给剩余的 action 子节点补记
 // canceled 样本（见 reportRemainingCanceled）。避免出现"上一节点 500 样本、
 // 下一节点 481 样本"的监控盲区——19 个 robot 在节点间断流但面板无法呈现。
-func (e *Executor) executeSequence(ctx context.Context, node *Node) error {
+func (e *Executor) executeSequence(ctx context.Context, node *flowdef.Node) error {
 	for i, childID := range node.Next {
 		if ctx.Err() != nil {
 			e.reportRemainingCanceled(node.Next[i:])
@@ -181,7 +182,7 @@ func (e *Executor) reportRemainingCanceled(remaining []string) {
 	}
 	for _, id := range remaining {
 		n, ok := e.flow.Nodes[id]
-		if !ok || n.Type != NodeAction || n.Action == "" {
+		if !ok || n.Type != flowdef.NodeAction || n.Action == "" {
 			continue
 		}
 		mc.RecordPendingCanceled(n.Action)
@@ -190,7 +191,7 @@ func (e *Executor) reportRemainingCanceled(remaining []string) {
 
 // executeLoop 循环节点：循环执行单个 body 节点。
 // 支持次数控制、前置条件、后置条件、break/continue 信号捕获。
-func (e *Executor) executeLoop(ctx context.Context, node *Node) error {
+func (e *Executor) executeLoop(ctx context.Context, node *flowdef.Node) error {
 	if node.LoopCount == 0 {
 		stresslog.Debug("[ENGINE] loop 节点 loopCount=0，跳过循环体")
 		return nil
@@ -203,7 +204,7 @@ func (e *Executor) executeLoop(ctx context.Context, node *Node) error {
 
 		// 前置条件检查（对应 Go: for condition { }）
 		if node.Condition != "" {
-			if !e.evaluatePreparedCondition(node.Condition, node.preparedCondition()) {
+			if !e.evaluatePreparedCondition(node.Condition, node.PreparedCondition()) {
 				stresslog.Debug("[ENGINE] loop 前置条件不满足，退出循环",
 					zap.String("caller", e.caller), zap.Int("iteration", i))
 				break
@@ -215,7 +216,7 @@ func (e *Executor) executeLoop(ctx context.Context, node *Node) error {
 		// 一旦命中 continue 就跳过退出判断 → 永不退出。
 		checkBreak := func() bool {
 			return node.BreakCondition != "" &&
-				e.evaluatePreparedCondition(node.BreakCondition, node.preparedBreakCondition())
+				e.evaluatePreparedCondition(node.BreakCondition, node.PreparedBreakCondition())
 		}
 
 		// 执行循环体（单个节点）
@@ -243,7 +244,7 @@ func (e *Executor) executeLoop(ctx context.Context, node *Node) error {
 }
 
 // executeAction 动作节点：执行指定 action。
-func (e *Executor) executeAction(ctx context.Context, node *Node) error {
+func (e *Executor) executeAction(ctx context.Context, node *flowdef.Node) error {
 	if node.Action == "" {
 		return nil
 	}
@@ -296,12 +297,12 @@ func (e *Executor) executeAction(ctx context.Context, node *Node) error {
 			return err
 		}
 		return applyOnErrorStrategy(onErrorStrategy(node), func() error {
-			return NewActionError(errcode.ErrExecFailed, "action="+node.Action, err)
+			return errcode.NewActionError(errcode.ErrExecFailed, "action="+node.Action, err)
 		})
 	}
 }
 
-func (e *Executor) finishActionSuccess(ctx context.Context, node *Node, actionDef *ActionDef) error {
+func (e *Executor) finishActionSuccess(ctx context.Context, node *flowdef.Node, actionDef *flowdef.ActionDef) error {
 	if err := e.registerActionListens(ctx, node, actionDef); err != nil {
 		return err
 	}
@@ -318,7 +319,7 @@ func (e *Executor) finishActionSuccess(ctx context.Context, node *Node, actionDe
 	return nil
 }
 
-func (e *Executor) finishActionAccepted(ctx context.Context, node *Node, actionDef *ActionDef, err error) error {
+func (e *Executor) finishActionAccepted(ctx context.Context, node *flowdef.Node, actionDef *flowdef.ActionDef, err error) error {
 	fields := []zap.Field{
 		zap.String("caller", e.caller),
 		zap.String("action", node.Action),
@@ -337,7 +338,7 @@ func (e *Executor) finishActionAccepted(ctx context.Context, node *Node, actionD
 	return nil
 }
 
-func (e *Executor) registerActionListens(ctx context.Context, node *Node, actionDef *ActionDef) error {
+func (e *Executor) registerActionListens(ctx context.Context, node *flowdef.Node, actionDef *flowdef.ActionDef) error {
 	if len(node.ListenRefs) == 0 {
 		return nil
 	}
@@ -351,20 +352,20 @@ func (e *Executor) registerActionListens(ctx context.Context, node *Node, action
 			return err
 		}
 		return applyOnErrorStrategy(onErrorStrategy(node), func() error {
-			return NewActionError(errcode.ErrListenRegister, "action="+node.Action, err)
+			return errcode.NewActionError(errcode.ErrListenRegister, "action="+node.Action, err)
 		})
 	}
 	return nil
 }
 
-func (e *Executor) executeOnErrorHandler(ctx context.Context, node *Node) error {
+func (e *Executor) executeOnErrorHandler(ctx context.Context, node *flowdef.Node) error {
 	if node.OnError == nil || node.OnError.Handler == "" {
 		return nil
 	}
 	return e.executeNode(ctx, node.OnError.Handler)
 }
 
-func (e *Executor) retryDelay(ctx context.Context, retry *RetryDef) error {
+func (e *Executor) retryDelay(ctx context.Context, retry *flowdef.RetryDef) error {
 	if retry == nil || retry.RetryDelayMs <= 0 {
 		return nil
 	}
@@ -372,7 +373,7 @@ func (e *Executor) retryDelay(ctx context.Context, retry *RetryDef) error {
 }
 
 func actionErrorLogFields(err error) []zap.Field {
-	actionErr, ok := errors.AsType[*ActionError](err)
+	actionErr, ok := errors.AsType[*errcode.ActionError](err)
 	if !ok || actionErr == nil {
 		return nil
 	}
@@ -382,7 +383,7 @@ func actionErrorLogFields(err error) []zap.Field {
 	}
 }
 
-func (e *Executor) logActionFailure(msg string, node *Node, actionDef *ActionDef, retriesUsed, maxRetries int, err error, extraFields ...zap.Field) {
+func (e *Executor) logActionFailure(msg string, node *flowdef.Node, actionDef *flowdef.ActionDef, retriesUsed, maxRetries int, err error, extraFields ...zap.Field) {
 	fields := []zap.Field{
 		zap.String("caller", e.caller),
 		zap.String("action", node.Action),
@@ -395,14 +396,14 @@ func (e *Executor) logActionFailure(msg string, node *Node, actionDef *ActionDef
 	}
 	fields = append(fields, extraFields...)
 	fields = append(fields, actionErrorLogFields(err)...)
-	if onErrorStrategy(node) == StrategyAbort {
+	if onErrorStrategy(node) == flowdef.StrategyAbort {
 		stresslog.Error(msg, fields...)
 		return
 	}
 	stresslog.Warn(msg, fields...)
 }
 
-func (e *Executor) logActionRetry(node *Node, actionDef *ActionDef, retriesUsed, maxRetries int, err error) {
+func (e *Executor) logActionRetry(node *flowdef.Node, actionDef *flowdef.ActionDef, retriesUsed, maxRetries int, err error) {
 	fields := []zap.Field{
 		zap.String("caller", e.caller),
 		zap.String("action", node.Action),
@@ -417,21 +418,21 @@ func (e *Executor) logActionRetry(node *Node, actionDef *ActionDef, retriesUsed,
 	stresslog.Warn("[ENGINE] 动作失败后准备重试", fields...)
 }
 
-func onErrorHandler(node *Node) string {
+func onErrorHandler(node *flowdef.Node) string {
 	if node == nil || node.OnError == nil {
 		return ""
 	}
 	return node.OnError.Handler
 }
 
-func onErrorStrategy(node *Node) string {
+func onErrorStrategy(node *flowdef.Node) string {
 	if node == nil || node.OnError == nil || node.OnError.Strategy == "" {
-		return StrategyResume
+		return flowdef.StrategyResume
 	}
 	return node.OnError.Strategy
 }
 
-func onErrorMaxRetries(node *Node) int {
+func onErrorMaxRetries(node *flowdef.Node) int {
 	if node == nil || node.OnError == nil || node.OnError.Retry == nil || node.OnError.Retry.MaxRetries <= 0 {
 		return 0
 	}
@@ -439,14 +440,14 @@ func onErrorMaxRetries(node *Node) int {
 }
 
 func actionErrorCode(err error) (errcode.ErrorCode, bool) {
-	actionErr, ok := errors.AsType[*ActionError](err)
+	actionErr, ok := errors.AsType[*errcode.ActionError](err)
 	if !ok || actionErr == nil {
 		return 0, false
 	}
 	return actionErr.Code, true
 }
 
-func isIgnoredActionError(node *Node, err error) bool {
+func isIgnoredActionError(node *flowdef.Node, err error) bool {
 	if node == nil || node.OnError == nil || len(node.OnError.IgnoreCodes) == 0 {
 		return false
 	}
@@ -461,7 +462,7 @@ func normalizeActionCancel(err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
-	if actionErr, ok := errors.AsType[*ActionError](err); ok && actionErr.Code == errcode.ErrActionCanceled {
+	if actionErr, ok := errors.AsType[*errcode.ActionError](err); ok && actionErr.Code == errcode.ErrActionCanceled {
 		return context.Canceled
 	}
 	return nil
@@ -471,9 +472,9 @@ func normalizeActionCancel(err error) error {
 // abortErr 函数在 strategy 为 "abort" 时调用，用于构造带有上下文信息的 ActionError。
 func applyOnErrorStrategy(strategy string, abortErr func() error) error {
 	switch strategy {
-	case StrategyAbort:
+	case flowdef.StrategyAbort:
 		return abortErr()
-	case StrategySkip:
+	case flowdef.StrategySkip:
 		return errSkip
 	default:
 		return nil
@@ -481,8 +482,8 @@ func applyOnErrorStrategy(strategy string, abortErr func() error) error {
 }
 
 // executeBoolean 条件分支节点。
-func (e *Executor) executeBoolean(ctx context.Context, node *Node) error {
-	result := e.evaluatePreparedCondition(node.Condition, node.preparedCondition())
+func (e *Executor) executeBoolean(ctx context.Context, node *flowdef.Node) error {
+	result := e.evaluatePreparedCondition(node.Condition, node.PreparedCondition())
 
 	stresslog.Debug("[ENGINE] boolean 条件判断",
 		zap.String("caller", e.caller), zap.Bool("result", result), zap.String("next", func() string {
@@ -516,13 +517,13 @@ func (e *Executor) executeBoolean(ctx context.Context, node *Node) error {
 //   - 无 case 命中且无 default：warn（分支静默结束，压测里易藏 bug，默认可见；补 default 可消除）
 //
 // 子流程内的失败由 executeAction 自行 warn，此处不重复。
-func (e *Executor) executeSwitch(ctx context.Context, node *Node) error {
+func (e *Executor) executeSwitch(ctx context.Context, node *flowdef.Node) error {
 	for i := range node.Cases {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		conditionCase := &node.Cases[i]
-		if !e.evaluatePreparedCondition(conditionCase.Condition, conditionCase.preparedCondition()) {
+		if !e.evaluatePreparedCondition(conditionCase.Condition, conditionCase.PreparedCondition()) {
 			continue
 		}
 		// 命中第 i 条 case
@@ -558,7 +559,7 @@ func (e *Executor) executeSwitch(ctx context.Context, node *Node) error {
 	return err
 }
 
-func (e *Executor) evaluatePreparedCondition(source string, condition *CompiledCondition) bool {
+func (e *Executor) evaluatePreparedCondition(source string, condition *flowdef.CompiledCondition) bool {
 	if strings.TrimSpace(source) == "" {
 		return true
 	}
@@ -572,7 +573,7 @@ func (e *Executor) evaluatePreparedCondition(source string, condition *CompiledC
 }
 
 // executeWeighted 加权随机节点：按权重随机选择一个 option 执行。
-func (e *Executor) executeWeighted(ctx context.Context, node *Node) error {
+func (e *Executor) executeWeighted(ctx context.Context, node *flowdef.Node) error {
 	if len(node.Options) == 0 {
 		return nil
 	}
@@ -614,7 +615,7 @@ func (e *Executor) executeWeighted(ctx context.Context, node *Node) error {
 }
 
 // executeWait 等待节点：暂停指定时间。支持固定和随机两种模式。
-func (e *Executor) executeWait(ctx context.Context, node *Node) error {
+func (e *Executor) executeWait(ctx context.Context, node *flowdef.Node) error {
 	var ms int
 
 	if node.WaitMin > 0 && node.WaitMax > 0 {
@@ -651,7 +652,7 @@ func (e *Executor) executeWait(ctx context.Context, node *Node) error {
 // nodeDelay 执行节点级延迟，仅在 action 节点执行完后调用。
 // 延迟值优先级：node.DelayMs > e.defaultDelayMs。
 // 使用协作式休眠，等待期间继续 drain 任务队列；ctx 取消时向上传播取消。
-func (e *Executor) nodeDelay(ctx context.Context, node *Node) error {
+func (e *Executor) nodeDelay(ctx context.Context, node *flowdef.Node) error {
 	ms := node.DelayMs
 	if ms == 0 {
 		ms = e.defaultDelayMs

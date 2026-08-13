@@ -1,6 +1,9 @@
 package engine
 
-import "testing"
+import (
+	"stressbot/binding"
+	"testing"
+)
 
 func TestNavigatePathValuesWildcard(t *testing.T) {
 	item := map[string]any{
@@ -19,28 +22,28 @@ func TestNavigatePathValuesWildcard(t *testing.T) {
 func TestMatchFilterValuesModes(t *testing.T) {
 	values := []any{1, 2, 3}
 
-	if !matchFilterValues(values, 2, "eq", FilterModeAny) {
+	if !matchFilterValues(values, 2, "eq", binding.FilterModeAny) {
 		t.Fatal("any should match when one value equals target")
 	}
-	if matchFilterValues(values, 2, "eq", FilterModeAll) {
+	if matchFilterValues(values, 2, "eq", binding.FilterModeAll) {
 		t.Fatal("all should not match when only one value equals target")
 	}
-	if !matchFilterValues(values, 4, "eq", FilterModeNone) {
+	if !matchFilterValues(values, 4, "eq", binding.FilterModeNone) {
 		t.Fatal("none should match when no value equals target")
 	}
-	if matchFilterValues(values, 2, "eq", FilterModeNone) {
+	if matchFilterValues(values, 2, "eq", binding.FilterModeNone) {
 		t.Fatal("none should not match when one value equals target")
 	}
 }
 
 func TestMatchFilterValuesEmptyModes(t *testing.T) {
-	if matchFilterValues(nil, 1, "eq", FilterModeAny) {
+	if matchFilterValues(nil, 1, "eq", binding.FilterModeAny) {
 		t.Fatal("empty any should be false")
 	}
-	if matchFilterValues(nil, 1, "eq", FilterModeAll) {
+	if matchFilterValues(nil, 1, "eq", binding.FilterModeAll) {
 		t.Fatal("empty all should be false")
 	}
-	if !matchFilterValues(nil, 1, "eq", FilterModeNone) {
+	if !matchFilterValues(nil, 1, "eq", binding.FilterModeNone) {
 		t.Fatal("empty none should be true")
 	}
 }
@@ -54,7 +57,7 @@ func TestMatchFiltersWildcardNone(t *testing.T) {
 		},
 	}
 
-	ok := ae.matchFilters(item, []FilterDef{{Path: "shopData[].ID", Op: "eq", Value: 1, Mode: FilterModeNone}})
+	ok := ae.matchFilters(item, []binding.FilterDef{{Path: "shopData[].ID", Op: "eq", Value: 1, Mode: binding.FilterModeNone}})
 	if !ok {
 		t.Fatal("item without ID=1 should pass none filter")
 	}
@@ -63,7 +66,7 @@ func TestMatchFiltersWildcardNone(t *testing.T) {
 		map[string]any{"ID": 1},
 		map[string]any{"ID": 3},
 	}
-	ok = ae.matchFilters(item, []FilterDef{{Path: "shopData[].ID", Op: "eq", Value: 1, Mode: FilterModeNone}})
+	ok = ae.matchFilters(item, []binding.FilterDef{{Path: "shopData[].ID", Op: "eq", Value: 1, Mode: binding.FilterModeNone}})
 	if ok {
 		t.Fatal("item with ID=1 should not pass none filter")
 	}

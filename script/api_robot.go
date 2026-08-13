@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"stressbot/protox"
+	"stressbot/protocol/protox"
 	"stressbot/state"
 
 	lua "github.com/yuin/gopher-lua"

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"stressbot/errcode"
-	stresslog "stressbot/utils/log"
+	"stressbot/internal/stresslog"
 
 	"go.uber.org/zap"
 )
@@ -220,11 +220,11 @@ func TimingDetailAtLeast(current, required TimingDetailLevel) bool {
 
 // CollectorConfig 监控配置。
 type CollectorConfig struct {
-	ApdexThresholdMs int           `toml:"apdexThresholdMs" json:"apdexThresholdMs"` // Apdex T 阈值（毫秒），默认 100
-	TimingDetail     string        `toml:"timingDetail"     json:"timingDetail"`     // 计时细分级别：rtt / codec / full，默认 rtt
-	ReportInterval   string        `toml:"reportInterval"   json:"reportInterval"`   // 监控指标上报间隔（如 "5s"），仅单机模式用
-	HTTP             *HTTPConfig   `toml:"http"             json:"http"`             // nil = 不启用 HTTP JSON 端点
-	Sketch           SketchConfig  `toml:"sketch"           json:"sketch"`           // DDSketch 延迟分布精度参数
+	ApdexThresholdMs int          `toml:"apdexThresholdMs" json:"apdexThresholdMs"` // Apdex T 阈值（毫秒），默认 100
+	TimingDetail     string       `toml:"timingDetail"     json:"timingDetail"`     // 计时细分级别：rtt / codec / full，默认 rtt
+	ReportInterval   string       `toml:"reportInterval"   json:"reportInterval"`   // 监控指标上报间隔（如 "5s"），仅单机模式用
+	HTTP             *HTTPConfig  `toml:"http"             json:"http"`             // nil = 不启用 HTTP JSON 端点
+	Sketch           SketchConfig `toml:"sketch"           json:"sketch"`           // DDSketch 延迟分布精度参数
 }
 
 // SketchConfig DDSketch 延迟分布精度配置。

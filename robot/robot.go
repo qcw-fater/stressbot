@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"stressbot/binding"
+	flowdef "stressbot/flow"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,18 +18,18 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"stressbot/adapter"
-	"stressbot/codec"
 	"stressbot/engine"
 	"stressbot/errcode"
+	"stressbot/internal/stresslog"
+	"stressbot/internal/workpool"
 	"stressbot/monitor"
 	"stressbot/network"
-	"stressbot/protox"
+	"stressbot/protocol"
+	"stressbot/protocol/codec"
+	"stressbot/protocol/protox"
 	"stressbot/script"
-	"stressbot/sharedstate"
 	"stressbot/state"
-	"stressbot/utils"
-	stresslog "stressbot/utils/log"
+	"stressbot/state/shared"
 )
 
 // Robot 单个压测机器人实例。
@@ -57,13 +59,13 @@ type Robot struct {
 	//   - dial/decode：ConnectTCP/UDP 拨号前 Resolve，nil → fail loud；非 nil 注入 Connection；
 	//   - encode/心跳/listen：engine.ActionExecutor / robotActionHandler / netSenderAdapter 各自 Resolve；
 	//   - 业务 Lua：通过 script.Context.Resolver（= r.resolver）在 api_network.go 内 Resolve。
-	resolver       adapter.CodecResolver
-	shared         sharedstate.Store // 任务级共享状态后端（可为 nil）
-	mainService    string            // 主连接服务名，意外断开时停止机器人
-	requestTimeout time.Duration     // robotConfig.timeoutSec 注入；用作 Lua tcp/udp_request 默认 timeout
-	timingLevel    int               // monitor.timingDetail 映射后的 engine 计时级别
-	execDone       chan struct{}     // executor goroutine 结束信号，cleanup 等待它安全退出
-	done           chan struct{}     // Robot 生命周期结束信号，Close 时等待
+	resolver       protocol.CodecResolver
+	shared         shared.Store  // 任务级共享状态后端（可为 nil）
+	mainService    string        // 主连接服务名，意外断开时停止机器人
+	requestTimeout time.Duration // robotConfig.timeoutSec 注入；用作 Lua tcp/udp_request 默认 timeout
+	timingLevel    int           // monitor.timingDetail 映射后的 engine 计时级别
+	execDone       chan struct{} // executor goroutine 结束信号，cleanup 等待它安全退出
+	done           chan struct{} // Robot 生命周期结束信号，Close 时等待
 	// sched 是 Robot 的协作式调度核心（actor 运行时）：mailbox + 统一等待 pump。
 	// 网络 pump goroutine 经 sched.enqueue 投递异步 Lua 工作（listen 回调），
 	// 由执行器 goroutine 在等待窗口的 select 内就地串行消费（节点入口不再单独 drain）。详见 scheduler.go。
@@ -85,7 +87,7 @@ type Config struct {
 	HTTPTimeout    time.Duration     // HTTP 请求超时
 	RequestTimeout time.Duration     // 网络请求超时（TCP/UDP RequestResponse）
 	MainService    string            // 主连接服务名，意外断开时停止机器人
-	Shared         sharedstate.Store // 任务级共享状态后端（可为 nil，表示未启用）
+	Shared         shared.Store      // 任务级共享状态后端（可为 nil，表示未启用）
 }
 
 // NewRobot 创建机器人实例。
@@ -102,8 +104,8 @@ type Config struct {
 // parent 为 Manager 的上下文（其本身派生自任务级 ctx）：Robot 的生命周期 ctx 由它派生，
 // 形成 task → manager → robot 取消链，任务/Manager 取消能立即传播到每个 Robot（含正在拨号/
 // 执行 Lua 的机器人），而不仅依赖 StopAll 逐个 cancel。
-func NewRobot(parent context.Context, cfg Config, flow *engine.TaskFlow, factory *protox.Factory,
-	resolver adapter.CodecResolver,
+func NewRobot(parent context.Context, cfg Config, flow *flowdef.TaskFlow, factory *protox.Factory,
+	resolver protocol.CodecResolver,
 	dialer *network.Dialer, luaPool *script.RuntimePool) (*Robot, error) {
 
 	if resolver == nil {
@@ -193,7 +195,7 @@ func (r *Robot) GetFactory() *protox.Factory { return r.factory }
 
 // Start 启动机器人。协程池拒绝任务时返回错误，调用方不得把该 Robot 计为已启动。
 func (r *Robot) Start() error {
-	return r.startWithSubmit(utils.GetWorkPool().Submit)
+	return r.startWithSubmit(workpool.GetWorkPool().Submit)
 }
 
 func (r *Robot) startWithSubmit(submit func(func()) error) error {
@@ -339,7 +341,7 @@ func (r *Robot) Close() CleanupStatus {
 }
 
 func (r *Robot) cleanup(reason CleanupReason, executorDone bool) CleanupStatus {
-	return r.cleanupWithSubmit(reason, executorDone, utils.GetWorkPool().Submit)
+	return r.cleanupWithSubmit(reason, executorDone, workpool.GetWorkPool().Submit)
 }
 
 func (r *Robot) cleanupWithSubmit(reason CleanupReason, executorDone bool, submit func(func()) error) CleanupStatus {
@@ -585,8 +587,8 @@ func (r *Robot) CloseUDP(service string) {
 
 // robotActionHandler 实现 engine.ActionHandler 接口，将流程引擎的动作委托给 Robot 执行。
 type robotActionHandler struct {
-	robot *Robot           // 关联的机器人实例
-	flow  *engine.TaskFlow // 流程配置（用于查找回调定义）
+	robot *Robot            // 关联的机器人实例
+	flow  *flowdef.TaskFlow // 流程配置（用于查找回调定义）
 }
 
 // actionRunResult 是声明式 / Lua 动作内核返回给机器人层外壳的统一结果。
@@ -610,7 +612,7 @@ type actionRunResult struct {
 //   - Lua 动作 wallClock 覆盖主流程同步执行脚本的总耗时。
 //   - timing.Requests：每次 request-response 的独立 WireRTT 样本。
 //   - clientCost 由 monitor 用 wallClock - sum(WireRTT) 计算。
-func (h *robotActionHandler) ExecuteAction(ctx context.Context, actionDef *engine.ActionDef) error {
+func (h *robotActionHandler) ExecuteAction(ctx context.Context, actionDef *flowdef.ActionDef) error {
 	if mc := monitor.Global(); mc != nil && actionDef.Name != "" {
 		mc.RecordActionStart(actionDef.Name)
 	}
@@ -626,14 +628,14 @@ func (h *robotActionHandler) ExecuteAction(ctx context.Context, actionDef *engin
 	return result.err
 }
 
-func (h *robotActionHandler) runActionBody(ctx context.Context, actionDef *engine.ActionDef) actionRunResult {
-	if actionDef.Pattern == engine.PatternLua {
+func (h *robotActionHandler) runActionBody(ctx context.Context, actionDef *flowdef.ActionDef) actionRunResult {
+	if actionDef.Pattern == flowdef.PatternLua {
 		return h.runLuaAction(actionDef)
 	}
 	return h.runDeclarativeAction(ctx, actionDef)
 }
 
-func (h *robotActionHandler) runDeclarativeAction(ctx context.Context, actionDef *engine.ActionDef) actionRunResult {
+func (h *robotActionHandler) runDeclarativeAction(ctx context.Context, actionDef *flowdef.ActionDef) actionRunResult {
 	start := time.Now()
 	sendBytes, recvBytes, timing, err := h.robot.actionExec.Execute(ctx, actionDef)
 	return actionRunResult{
@@ -664,8 +666,8 @@ func (h *robotActionHandler) normalizeActionCancel(ctx context.Context, err erro
 		return err
 	}
 
-	if actionErr, ok := errors.AsType[*engine.ActionError](err); ok && !isCanceledCode(actionErr.Code) {
-		return engine.NewActionError(errcode.ErrActionCanceled, "stopping: "+actionErr.Detail)
+	if actionErr, ok := errors.AsType[*errcode.ActionError](err); ok && !isCanceledCode(actionErr.Code) {
+		return errcode.NewActionError(errcode.ErrActionCanceled, "stopping: "+actionErr.Detail)
 	}
 	return err
 }
@@ -723,7 +725,7 @@ func classifyResult(err error) monitor.ActionResult {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return monitor.ResultCanceled
 	}
-	if actionErr, ok := errors.AsType[*engine.ActionError](err); ok {
+	if actionErr, ok := errors.AsType[*errcode.ActionError](err); ok {
 		if isCanceledCode(actionErr.Code) {
 			return monitor.ResultCanceled
 		}
@@ -753,17 +755,17 @@ func isCanceledCode(code errcode.ErrorCode) bool {
 // - nil → 成功；
 // - *engine.ActionError → 透传，补 action=<actionDef.Name> 上下文（若 detail 未含）；
 // - 非 ActionError → 包装 ErrLuaExecFailed（detail 带 script=）。
-func (h *robotActionHandler) runLuaAction(actionDef *engine.ActionDef) actionRunResult {
+func (h *robotActionHandler) runLuaAction(actionDef *flowdef.ActionDef) actionRunResult {
 	if h.robot.l == nil || h.robot.luaPool == nil {
 		stresslog.Error("[ROBOT] Lua 运行时未初始化，无法执行脚本",
 			zap.Int("id", h.robot.id), zap.String("account", h.robot.account), zap.String("script", actionDef.Script))
-		return actionRunResult{err: engine.NewActionError(errcode.ErrLuaNotInit, "")}
+		return actionRunResult{err: errcode.NewActionError(errcode.ErrLuaNotInit, "")}
 	}
 
 	if actionDef.Script == "" {
 		stresslog.Error("[ROBOT] 脚本名为空，无法执行",
 			zap.Int("id", h.robot.id), zap.String("account", h.robot.account), zap.String("action", actionDef.Name))
-		return actionRunResult{err: engine.NewActionError(errcode.ErrLuaNoScript, "")}
+		return actionRunResult{err: errcode.NewActionError(errcode.ErrLuaNoScript, "")}
 	}
 
 	start := time.Now()
@@ -782,7 +784,7 @@ func (h *robotActionHandler) runLuaAction(actionDef *engine.ActionDef) actionRun
 		return result
 	}
 
-	if actionErr, ok := errors.AsType[*engine.ActionError](err); ok {
+	if actionErr, ok := errors.AsType[*errcode.ActionError](err); ok {
 		// 脚本 return err table 重建的 ActionError：透传，补 action= 上下文。
 		actionErr.Detail = appendActionDetail(actionErr.Detail, actionDef.Name)
 		result.err = actionErr
@@ -791,7 +793,7 @@ func (h *robotActionHandler) runLuaAction(actionDef *engine.ActionDef) actionRun
 	// 框架错误（脚本加载失败 / await 非法 / 返回非法值 等）：包装 ErrLuaExecFailed。
 	result.sendBytes = 0
 	result.recvBytes = 0
-	result.err = engine.NewActionError(errcode.ErrLuaExecFailed, "script="+actionDef.Script, err)
+	result.err = errcode.NewActionError(errcode.ErrLuaExecFailed, "script="+actionDef.Script, err)
 	return result
 }
 
@@ -808,7 +810,7 @@ func appendActionDetail(detail, actionName string) string {
 }
 
 // ExecuteCondition 执行加载期已准备的条件判断。
-func (h *robotActionHandler) ExecuteCondition(condition *engine.CompiledCondition) bool {
+func (h *robotActionHandler) ExecuteCondition(condition *flowdef.CompiledCondition) bool {
 	if script, ok := condition.LuaScript(); ok {
 		return h.executeLuaBoolean(script)
 	}
@@ -865,7 +867,7 @@ func (r *Robot) cooperativeSleep(ctx context.Context, d time.Duration) error {
 }
 
 // RegisterListen 注册持久化监听
-func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
+func (h *robotActionHandler) RegisterListen(refs []flowdef.ListenRef) error {
 	type connKey struct {
 		proto   string
 		service string
@@ -962,7 +964,7 @@ func (h *robotActionHandler) RegisterListen(refs []engine.ListenRef) error {
 //
 // 抽成纯函数便于单测；由 RegisterListen 在注册阶段（运行时）调用。
 // 这里不做静默 clamp（遵循「禁止兼容性兜底」），显式 0/负数一律报错暴露配置错误。
-func effectiveListenQueueSize(ref engine.ListenRef) (int, error) {
+func effectiveListenQueueSize(ref flowdef.ListenRef) (int, error) {
 	if ref.QueueSize == nil {
 		return defaultListenQueueSize, nil
 	}
@@ -983,7 +985,7 @@ func effectiveListenQueueSize(ref engine.ListenRef) (int, error) {
 // 唯一约束：store 与 script 互斥——同一条推送不允许既走 Go 声明式 store、又走 Lua handler
 // 改写 state，避免双写与顺序语义混乱。需要兼得时把 store 逻辑写进 Lua handler。
 // 抽成纯函数便于单测（不依赖 robot/network 状态）。
-func validateListenDef(listenName string, cbDef *engine.ListenDef) error {
+func validateListenDef(listenName string, cbDef *flowdef.ListenDef) error {
 	if cbDef == nil {
 		return nil
 	}
@@ -1019,7 +1021,7 @@ func parseServer(server string) (proto, service string, ok bool) {
 //   - 否则（纯缓存 listen，如 frameData）：返回 nil，消息仅入 listen queue 供主流程消费。
 //
 // store 与 script 互斥由 validateListenDef 在注册前 fail-loud 保证，故此处分支无歧义。
-func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.ListenDef) network.ListenCallBack {
+func (h *robotActionHandler) createListenCallback(cbName string, cbDef *flowdef.ListenDef) network.ListenCallBack {
 	if cbDef.Script != "" {
 		return func(msg *network.Message) {
 			if h.robot.ctx.Err() != nil {
@@ -1063,7 +1065,7 @@ func (h *robotActionHandler) createListenCallback(cbName string, cbDef *engine.L
 		// 所有权安全），SetPath 投执行器任务队列。pump 不再持有对 msg 的引用。
 		puts, err := h.buildListenStorePuts(cbDef, msg.Data)
 		if err != nil {
-			callbackErr := engine.NewActionError(errcode.ErrCallbackParse, "proto="+cbDef.S2CProto, err)
+			callbackErr := errcode.NewActionError(errcode.ErrCallbackParse, "proto="+cbDef.S2CProto, err)
 			stresslog.Error("[ROBOT] 解析推送消息失败",
 				zap.Int("id", h.robot.id),
 				zap.String("account", h.robot.account),
@@ -1101,7 +1103,7 @@ type storePut struct {
 
 // buildListenStorePuts 在 pump 内从推送字节物化 Go-store 待写键值（wire-first）。
 // 返回错误 = 消息字节非法（等价旧路径解码失败）。
-func (h *robotActionHandler) buildListenStorePuts(cbDef *engine.ListenDef, data []byte) ([]storePut, error) {
+func (h *robotActionHandler) buildListenStorePuts(cbDef *flowdef.ListenDef, data []byte) ([]storePut, error) {
 	md, ok := h.robot.factory.MessageDescriptor(cbDef.S2CProto)
 	if !ok {
 		return nil, fmt.Errorf("未找到消息类型: %s", cbDef.S2CProto)
@@ -1151,7 +1153,7 @@ func (h *robotActionHandler) buildListenStorePuts(cbDef *engine.ListenDef, data 
 
 // buildListenStorePutsDecoded 旧解码路径（影子验证失配降级的 schema）：
 // 解码整条消息，整存 Freeze、路径 GetFieldForStore。
-func (h *robotActionHandler) buildListenStorePutsDecoded(cbDef *engine.ListenDef, data []byte) ([]storePut, error) {
+func (h *robotActionHandler) buildListenStorePutsDecoded(cbDef *flowdef.ListenDef, data []byte) ([]storePut, error) {
 	respMsg, err := h.robot.factory.Parse(cbDef.S2CProto, data)
 	if err != nil {
 		return nil, err
@@ -1177,7 +1179,7 @@ func (h *robotActionHandler) buildListenStorePutsDecoded(cbDef *engine.ListenDef
 // 解码失败 / 脚本失败均记 callback 失败指标，不向上传播——listen 回调是旁路推送，
 // 失败不应中断主流程。配置了 s2cProto 时解码后以字段表传给 on_message(r, msg)，
 // 否则以二进制安全的 Lua string 传递原始消息体。
-func (h *robotActionHandler) runListenScript(cbName string, cbDef *engine.ListenDef, msg *network.Message) {
+func (h *robotActionHandler) runListenScript(cbName string, cbDef *flowdef.ListenDef, msg *network.Message) {
 	if h.robot.ctx.Err() != nil {
 		return
 	}
@@ -1207,7 +1209,7 @@ func (h *robotActionHandler) runListenScript(cbName string, cbDef *engine.Listen
 	}
 
 	if runErr != nil {
-		cbErr := engine.NewActionError(errcode.ErrCallbackLua, "script="+cbDef.Script, runErr)
+		cbErr := errcode.NewActionError(errcode.ErrCallbackLua, "script="+cbDef.Script, runErr)
 		stresslog.Error("[ROBOT] 监听脚本执行失败",
 			zap.Int("id", h.robot.id),
 			zap.String("account", h.robot.account),
@@ -1231,7 +1233,7 @@ var errListenParseFailed = errors.New("listen 推送解析失败")
 // runListenScriptDecoded 解码路径的 listen 脚本执行（wire 直转的回落分支）：
 // 大消息走广播消费去重（protox.FrozenCache，与 await_listen 降级路径同一缓存），
 // 小消息独占解码。解析失败记 callback 失败指标并返回哨兵错误。
-func (h *robotActionHandler) runListenScriptDecoded(cbName string, cbDef *engine.ListenDef, msg *network.Message, start time.Time) error {
+func (h *robotActionHandler) runListenScriptDecoded(cbName string, cbDef *flowdef.ListenDef, msg *network.Message, start time.Time) error {
 	var respMsg proto.Message
 	var perr error
 	if len(msg.Data) >= protox.DedupMinBytes {
@@ -1244,7 +1246,7 @@ func (h *robotActionHandler) runListenScriptDecoded(cbName string, cbDef *engine
 		respMsg, perr = h.robot.factory.Parse(cbDef.S2CProto, msg.Data)
 	}
 	if perr != nil {
-		cbErr := engine.NewActionError(errcode.ErrCallbackParse, "proto="+cbDef.S2CProto, perr)
+		cbErr := errcode.NewActionError(errcode.ErrCallbackParse, "proto="+cbDef.S2CProto, perr)
 		stresslog.Error("[ROBOT] 解析监听推送失败",
 			zap.Int("id", h.robot.id),
 			zap.String("account", h.robot.account),
@@ -1274,7 +1276,7 @@ var _ engine.NetSender = (*netSenderAdapter)(nil)
 func (ns *netSenderAdapter) TCPSend(service string, packet []byte) (int, error) {
 	conn := ns.robot.client.GetTCPConn(service)
 	if conn == nil {
-		return 0, engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
+		return 0, errcode.NewActionError(errcode.ErrConnNotFound, "service="+service)
 	}
 	return conn.Send(packet)
 }
@@ -1350,7 +1352,7 @@ func (ns *netSenderAdapter) cooperativeRequest(proto, service string, packet []b
 		return ex, outcome.Err
 	case outcome.Canceled:
 		return &engine.NetExchange{SendWireBytes: len(packet)},
-			engine.NewActionError(errcode.ErrActionCanceled, "service="+service+" route="+routeKey)
+			errcode.NewActionError(errcode.ErrActionCanceled, "service="+service+" route="+routeKey)
 	default:
 		if stresslog.DebugEnabled() && outcome.Exchange != nil {
 			stresslog.Debug("[ACTION] 协作请求收到响应",
@@ -1380,10 +1382,10 @@ func (r *Robot) getHTTPClient() *http.Client {
 func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body []byte) (*engine.HTTPExchange, error) {
 	exchange := &engine.HTTPExchange{}
 	if reqURL == "" {
-		return exchange, engine.NewActionError(errcode.ErrURLEmpty, "")
+		return exchange, errcode.NewActionError(errcode.ErrURLEmpty, "")
 	}
 	if !strings.HasPrefix(reqURL, "http://") && !strings.HasPrefix(reqURL, "https://") {
-		return exchange, engine.NewActionError(errcode.ErrURLScheme, "url="+reqURL)
+		return exchange, errcode.NewActionError(errcode.ErrURLScheme, "url="+reqURL)
 	}
 
 	var req *http.Request
@@ -1394,26 +1396,26 @@ func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body
 		case "json":
 			req, err = http.NewRequestWithContext(ns.robot.ctx, method, reqURL, bytes.NewReader(body))
 			if err != nil {
-				return exchange, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
+				return exchange, errcode.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 			}
 			req.Header.Set("Content-Type", "application/json")
 		case "form":
 			// body 已由 engine 层编码为 x-www-form-urlencoded（k=v&...），此处直接透传。
 			req, err = http.NewRequestWithContext(ns.robot.ctx, method, reqURL, bytes.NewReader(body))
 			if err != nil {
-				return exchange, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
+				return exchange, errcode.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 			}
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		default:
 			req, err = http.NewRequestWithContext(ns.robot.ctx, method, reqURL, bytes.NewReader(body))
 			if err != nil {
-				return exchange, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
+				return exchange, errcode.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 			}
 		}
 	} else {
 		req, err = http.NewRequestWithContext(ns.robot.ctx, method, reqURL, nil)
 		if err != nil {
-			return exchange, engine.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
+			return exchange, errcode.NewActionError(errcode.ErrHTTPBuild, "url="+reqURL, err)
 		}
 	}
 	exchange.SendWireBytes = httpRequestBytes(req, body)
@@ -1424,10 +1426,10 @@ func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body
 		exchange.NetLatency = time.Since(netStart)
 		if ns.robot.ctx.Err() != nil {
 			stresslog.Debug("[HTTP] 请求已取消", zap.String("url", reqURL), zap.Error(err))
-			return exchange, engine.NewActionError(errcode.ErrActionCanceled, "url="+reqURL, err)
+			return exchange, errcode.NewActionError(errcode.ErrActionCanceled, "url="+reqURL, err)
 		}
 		stresslog.Warn("[HTTP] 请求失败", zap.String("url", reqURL), zap.Error(err))
-		return exchange, engine.NewActionError(errcode.ErrSendFailed, "url="+reqURL, err)
+		return exchange, errcode.NewActionError(errcode.ErrSendFailed, "url="+reqURL, err)
 	}
 	defer resp.Body.Close()
 
@@ -1437,7 +1439,7 @@ func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body
 	exchange.Body = respBody
 	exchange.RecvWireBytes = httpResponseBytes(resp, respBody)
 	if err != nil {
-		return exchange, engine.NewActionError(errcode.ErrHTTPReadBody, "url="+reqURL, err)
+		return exchange, errcode.NewActionError(errcode.ErrHTTPReadBody, "url="+reqURL, err)
 	}
 
 	return exchange, nil
@@ -1496,7 +1498,7 @@ func httpHeaderBytes(header http.Header) int {
 func (ns *netSenderAdapter) UDPSend(service string, data []byte) (int, error) {
 	conn := ns.robot.client.GetUDPConn(service)
 	if conn == nil {
-		return 0, engine.NewActionError(errcode.ErrConnNotFound, "service="+service)
+		return 0, errcode.NewActionError(errcode.ErrConnNotFound, "service="+service)
 	}
 	return conn.Send(data)
 }
@@ -1506,9 +1508,9 @@ func (ns *netSenderAdapter) ConnectTCP(service, address string) error {
 	ok := ns.robot.ConnectTCP(service, address)
 	if !ok {
 		if ns.robot.ctx.Err() != nil {
-			return engine.NewActionError(errcode.ErrActionCanceled, "service="+service+" address="+address)
+			return errcode.NewActionError(errcode.ErrActionCanceled, "service="+service+" address="+address)
 		}
-		return engine.NewActionError(errcode.ErrConnClosed, "service="+service+" address="+address)
+		return errcode.NewActionError(errcode.ErrConnClosed, "service="+service+" address="+address)
 	}
 	return nil
 }
@@ -1518,9 +1520,9 @@ func (ns *netSenderAdapter) ConnectUDP(service, address string) error {
 	ok := ns.robot.ConnectUDP(service, address)
 	if !ok {
 		if ns.robot.ctx.Err() != nil {
-			return engine.NewActionError(errcode.ErrActionCanceled, "service="+service+" address="+address)
+			return errcode.NewActionError(errcode.ErrActionCanceled, "service="+service+" address="+address)
 		}
-		return engine.NewActionError(errcode.ErrConnClosed, "service="+service+" address="+address)
+		return errcode.NewActionError(errcode.ErrConnClosed, "service="+service+" address="+address)
 	}
 	return nil
 }
@@ -1655,7 +1657,7 @@ func (ns *netSenderAdapter) RegisterCodecHeartbeat(transport, service string) er
 	if ns.robot == nil || ns.robot.resolver == nil {
 		return nil
 	}
-	hb := adapter.Heartbeat(ns.robot.resolver, transport+":"+service)
+	hb := protocol.Heartbeat(ns.robot.resolver, transport+":"+service)
 	if hb == nil {
 		return nil
 	}
@@ -1740,7 +1742,7 @@ func (ns *netSenderAdapter) startPendingHeartbeatAfterSecretKey(transport, servi
 //   - resolver key 字符串 + 解析结果 → 定型/缓存：不再每 tick 拼串 + 查表。
 func (ns *netSenderAdapter) installHeartbeat(cfg engine.HeartbeatConfig) error {
 	if ns.robot.ctx.Err() != nil {
-		return engine.NewActionError(errcode.ErrActionCanceled, "service="+cfg.Service)
+		return errcode.NewActionError(errcode.ErrActionCanceled, "service="+cfg.Service)
 	}
 	var conn *network.Connection
 	if cfg.Transport == "udp" {
@@ -1751,7 +1753,7 @@ func (ns *netSenderAdapter) installHeartbeat(cfg engine.HeartbeatConfig) error {
 	if conn == nil {
 		stresslog.Warn("[ROBOT] 连接级心跳安装失败：连接不存在",
 			zap.String("transport", cfg.Transport), zap.String("service", cfg.Service))
-		return engine.NewActionError(errcode.ErrConnNotFound,
+		return errcode.NewActionError(errcode.ErrConnNotFound,
 			"transport="+cfg.Transport+" service="+cfg.Service)
 	}
 
@@ -1772,7 +1774,7 @@ func (ns *netSenderAdapter) installHeartbeat(cfg engine.HeartbeatConfig) error {
 	// SchemaAdapter 后 Encode。Resolve nil（codec 未映射）→ Warn+skip 本 tick（不 fail 流程，
 	// 单 tick encode 失败不应终止整条心跳 goroutine。
 	fields := append([]engine.HeartbeatField(nil), cfg.Fields...)
-	bindings := append([]engine.FieldBind(nil), cfg.Bindings...)
+	bindings := append([]binding.FieldBind(nil), cfg.Bindings...)
 	c2sProto := cfg.C2SProto
 	st := ns.robot.state
 	resolver := ns.robot.resolver
@@ -1806,7 +1808,7 @@ func (ns *netSenderAdapter) installHeartbeat(cfg engine.HeartbeatConfig) error {
 	// adapter 在任务生命周期内不变，首次解析成功后缓存；nil 不缓存，保留原
 	// 「每 tick 重试 + Warn」语义（codec 映射可能晚于心跳安装就绪）。
 	resolveKey := transport + ":" + cfg.Service
-	var cachedAdp adapter.Adapter
+	var cachedAdp protocol.Adapter
 
 	// proto 模式复用同一执行器：goBuilder 由本连接 pump 单 goroutine 串行调用，
 	// 无并发，避免每 tick 新建临时 ActionExecutor（仅承载 store+factory，与旧临时实例等价）。
@@ -1896,21 +1898,21 @@ func (ns *netSenderAdapter) installHeartbeat(cfg engine.HeartbeatConfig) error {
 	return nil
 }
 
-func codecFieldBindsToEngine(in []codec.FieldBind) ([]engine.FieldBind, error) {
+func codecFieldBindsToEngine(in []codec.FieldBind) ([]binding.FieldBind, error) {
 	out := codecFieldBindsToEngineRaw(in)
-	if err := engine.PrepareFieldBindings(out); err != nil {
+	if err := flowdef.PrepareFieldBindings(out); err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func codecFieldBindsToEngineRaw(in []codec.FieldBind) []engine.FieldBind {
+func codecFieldBindsToEngineRaw(in []codec.FieldBind) []binding.FieldBind {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]engine.FieldBind, len(in))
+	out := make([]binding.FieldBind, len(in))
 	for i := range in {
-		out[i] = engine.FieldBind{
+		out[i] = binding.FieldBind{
 			Field:         in[i].Field,
 			Type:          in[i].Type,
 			Value:         in[i].Value,
@@ -1937,26 +1939,26 @@ func codecFieldBindsToEngineRaw(in []codec.FieldBind) []engine.FieldBind {
 	return out
 }
 
-func codecMapEntryBindsToEngineRaw(in []codec.MapEntryBind) []engine.MapEntryBind {
+func codecMapEntryBindsToEngineRaw(in []codec.MapEntryBind) []binding.MapEntryBind {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]engine.MapEntryBind, len(in))
+	out := make([]binding.MapEntryBind, len(in))
 	for i := range in {
-		out[i] = engine.MapEntryBind{Key: in[i].Key}
+		out[i] = binding.MapEntryBind{Key: in[i].Key}
 		converted := codecFieldBindsToEngineRaw([]codec.FieldBind{in[i].Value})
 		out[i].Value = converted[0]
 	}
 	return out
 }
 
-func codecFilterDefsToEngine(in []codec.FilterDef) []engine.FilterDef {
+func codecFilterDefsToEngine(in []codec.FilterDef) []binding.FilterDef {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]engine.FilterDef, len(in))
+	out := make([]binding.FilterDef, len(in))
 	for i := range in {
-		out[i] = engine.FilterDef{
+		out[i] = binding.FilterDef{
 			Path:   in[i].Path,
 			Op:     in[i].Op,
 			Value:  in[i].Value,

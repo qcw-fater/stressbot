@@ -4,1863 +4,1833 @@
  */
 
 export interface paths {
-  '/sbot/tasks': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listTasks"];
+        put?: never;
+        post: operations["createTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['listTasks'];
-    put?: never;
-    post: operations['createTask'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/tasks/{id}': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
+    "/sbot/tasks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get: operations["getTask"];
+        put?: never;
+        post?: never;
+        delete: operations["deleteTask"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getTask'];
-    put?: never;
-    post?: never;
-    delete: operations['deleteTask'];
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/tasks/{id}/config/{path}': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-        path: components['parameters']['ResourcePath'];
-      };
-      cookie?: never;
+    "/sbot/tasks/{id}/config/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+                path: components["parameters"]["ResourcePath"];
+            };
+            cookie?: never;
+        };
+        get: operations["getTaskConfigFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getTaskConfigFile'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/tasks/{id}/start': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
+    "/sbot/tasks/{id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["startTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get?: never;
-    put?: never;
-    post: operations['startTask'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/tasks/{id}/stop': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
+    "/sbot/tasks/{id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["stopRunningTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get?: never;
-    put?: never;
-    post: operations['stopRunningTask'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/agents': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAgents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['listAgents'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/agents/{id}': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
+    "/sbot/agents/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get: operations["getAgent"];
+        put?: never;
+        post?: never;
+        delete: operations["deleteAgent"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getAgent'];
-    put?: never;
-    post?: never;
-    delete: operations['deleteAgent'];
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/agents/{id}/shutdown': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
+    "/sbot/agents/{id}/shutdown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["shutdownManagedAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get?: never;
-    put?: never;
-    post: operations['shutdownManagedAgent'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/agents/shutdown-all': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/agents/shutdown-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["shutdownAllAgents"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get?: never;
-    put?: never;
-    post: operations['shutdownAllAgents'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/metrics': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getMetrics'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/metrics/summary': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/metrics/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getMetricsSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getMetricsSummary'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/metrics/agents': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/metrics/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getAgentMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getAgentMetrics'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/metrics/agents/{id}': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
+    "/sbot/metrics/agents/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get: operations["getSingleAgentMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getSingleAgentMetrics'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/system': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/system": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getClusterSystem"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getClusterSystem'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/system/agents': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/system/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getSystemAgents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getSystemAgents'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/system/agents/{id}': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
+    "/sbot/system/agents/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get: operations["getSystemAgent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getSystemAgent'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/history': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['listHistory'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/history/tags': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/history/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getHistoryTags"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getHistoryTags'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/history/compare': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/history/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["compareHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['compareHistory'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/history/{id}': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
+    "/sbot/history/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get: operations["getHistory"];
+        put: operations["updateHistory"];
+        post?: never;
+        delete: operations["deleteHistory"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getHistory'];
-    put: operations['updateHistory'];
-    post?: never;
-    delete: operations['deleteHistory'];
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/history/{id}/agents': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
+    "/sbot/history/{id}/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get: operations["getHistoryAgents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getHistoryAgents'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/history/{id}/config': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
+    "/sbot/history/{id}/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get: operations["getHistoryConfig"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getHistoryConfig'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/history/{id}/config/archive': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
+    "/sbot/history/{id}/config/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get: operations["getHistoryConfigArchive"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getHistoryConfigArchive'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/history/{id}/timeseries': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
+    "/sbot/history/{id}/timeseries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get: operations["getHistoryTimeseries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getHistoryTimeseries'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/history/{id}/clone': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
+    "/sbot/history/{id}/clone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cloneHistory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get?: never;
-    put?: never;
-    post: operations['cloneHistory'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/baseline/proto/index.json': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/baseline/proto/index.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getBaselineProtoIndex"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getBaselineProtoIndex'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/baseline/proto/{name}': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        name: components['parameters']['Name'];
-      };
-      cookie?: never;
+    "/sbot/baseline/proto/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: components["parameters"]["Name"];
+            };
+            cookie?: never;
+        };
+        get: operations["getBaselineProtoFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getBaselineProtoFile'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/baseline/scripts/index.json': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/baseline/scripts/index.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getBaselineScriptIndex"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getBaselineScriptIndex'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/baseline/scripts/{name}': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        name: components['parameters']['Name'];
-      };
-      cookie?: never;
+    "/sbot/baseline/scripts/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: components["parameters"]["Name"];
+            };
+            cookie?: never;
+        };
+        get: operations["getBaselineScriptFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getBaselineScriptFile'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/baseline/adapter/index.json': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/baseline/adapter/index.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getBaselineAdapterIndex"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getBaselineAdapterIndex'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/baseline/adapter/{name}': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        name: components['parameters']['Name'];
-      };
-      cookie?: never;
+    "/sbot/baseline/adapter/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: components["parameters"]["Name"];
+            };
+            cookie?: never;
+        };
+        get: operations["getBaselineAdapterFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getBaselineAdapterFile'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/baseline/flow/flow.json': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/baseline/flow/flow.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getBaselineFlow"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getBaselineFlow'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/baseline/config.json': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/api/error-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getErrorCodeIndex"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getBaselineConfig'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/api/error-codes': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/flows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listFlows"];
+        put?: never;
+        post: operations["createFlow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getErrorCodeIndex'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/flows': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/flows/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getFlowSnapshot"];
+        put: operations["replaceFlowSnapshot"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['listFlows'];
-    put?: never;
-    post: operations['createFlow'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/flows/snapshot': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/flows/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get: operations["getFlow"];
+        put: operations["updateFlow"];
+        post?: never;
+        delete: operations["deleteFlow"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getFlowSnapshot'];
-    put: operations['replaceFlowSnapshot'];
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/flows/{id}': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
+    "/sbot/action-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listActionTemplates"];
+        put?: never;
+        post: operations["createActionTemplate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getFlow'];
-    put: operations['updateFlow'];
-    post?: never;
-    delete: operations['deleteFlow'];
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/action-templates': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/action-templates/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getActionTemplateSnapshot"];
+        put: operations["replaceActionTemplateSnapshot"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['listActionTemplates'];
-    put?: never;
-    post: operations['createActionTemplate'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/action-templates/snapshot': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/action-templates/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get: operations["getActionTemplate"];
+        put: operations["updateActionTemplate"];
+        post?: never;
+        delete: operations["deleteActionTemplate"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getActionTemplateSnapshot'];
-    put: operations['replaceActionTemplateSnapshot'];
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/action-templates/{id}': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
+    "/sbot/listen-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listListenTemplates"];
+        put?: never;
+        post: operations["createListenTemplate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getActionTemplate'];
-    put: operations['updateActionTemplate'];
-    post?: never;
-    delete: operations['deleteActionTemplate'];
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/listen-templates': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/listen-templates/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getListenTemplateSnapshot"];
+        put: operations["replaceListenTemplateSnapshot"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['listListenTemplates'];
-    put?: never;
-    post: operations['createListenTemplate'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/listen-templates/snapshot': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/listen-templates/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get: operations["getListenTemplate"];
+        put: operations["updateListenTemplate"];
+        post?: never;
+        delete: operations["deleteListenTemplate"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getListenTemplateSnapshot'];
-    put: operations['replaceListenTemplateSnapshot'];
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/listen-templates/{id}': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
+    "/sbot/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getCapabilities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getListenTemplate'];
-    put: operations['updateListenTemplate'];
-    post?: never;
-    delete: operations['deleteListenTemplate'];
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/capabilities': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/codec/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["previewCodec"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get: operations['getCapabilities'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/codec/preview': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/sbot/codec/algorithms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getCodecAlgorithms"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    get?: never;
-    put?: never;
-    post: operations['previewCodec'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/sbot/codec/algorithms': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get: operations['getCodecAlgorithms'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
-  schemas: {
-    ManagementApiError: {
-      code: string;
-      message: string;
-      details?: unknown;
-    } & {
-      [key: string]: unknown;
-    };
-    CapabilitiesResponse: {
-      sharedState: boolean;
-      sharedAddr?: string;
-      flowLibrary: boolean;
-      templateLibrary: boolean;
-    };
-  };
-  responses: {
-    /** @description 成功 */
-    JsonOK: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/json': unknown;
-      };
-    };
-    /** @description 已创建 */
-    JsonCreated: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/json': unknown;
-      };
-    };
-    /** @description 文件内容 */
-    FileOK: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/json': unknown;
-        'text/plain': string;
-        'application/octet-stream': string;
-      };
-    };
-    /** @description 请求不合法 */
-    BadRequest: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/json': components['schemas']['ManagementApiError'];
-      };
-    };
-    /** @description 资源不存在 */
-    NotFound: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/json': components['schemas']['ManagementApiError'];
-      };
-    };
-    /** @description 状态或版本冲突 */
-    Conflict: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/json': components['schemas']['ManagementApiError'];
-      };
-    };
-    /** @description 内部错误 */
-    ServerError: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/json': components['schemas']['ManagementApiError'];
-      };
-    };
-  };
-  parameters: {
-    Id: string;
-    Name: string;
-    ResourcePath: string;
-  };
-  requestBodies: {
-    TaskCreateMultipart: {
-      content: {
-        'multipart/form-data': {
-          name: string;
-          totalBots: number;
-          /** Format: binary */
-          'flow.json': string;
-          robotConfig?: string;
-          /** Format: date-time */
-          deadline?: string;
-          flowTemplateId?: string;
+    schemas: {
+        ManagementApiError: {
+            code: string;
+            message: string;
+            details?: unknown;
         } & {
-          [key: string]: unknown;
+            [key: string]: unknown;
         };
-      };
-    };
-    JsonObject: {
-      content: {
-        'application/json': {
-          [key: string]: unknown;
+        CapabilitiesResponse: {
+            sharedState: boolean;
+            sharedAddr?: string;
+            flowLibrary: boolean;
+            templateLibrary: boolean;
         };
-      };
     };
-    OptionalJsonObject: {
-      content: {
-        'application/json': {
-          [key: string]: unknown;
+    responses: {
+        /** @description 成功 */
+        JsonOK: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": unknown;
+            };
         };
-      };
+        /** @description 已创建 */
+        JsonCreated: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": unknown;
+            };
+        };
+        /** @description 文件内容 */
+        FileOK: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": unknown;
+                "text/plain": string;
+                "application/octet-stream": string;
+            };
+        };
+        /** @description 请求不合法 */
+        BadRequest: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ManagementApiError"];
+            };
+        };
+        /** @description 资源不存在 */
+        NotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ManagementApiError"];
+            };
+        };
+        /** @description 状态或版本冲突 */
+        Conflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ManagementApiError"];
+            };
+        };
+        /** @description 内部错误 */
+        ServerError: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ManagementApiError"];
+            };
+        };
     };
-  };
-  headers: never;
-  pathItems: never;
+    parameters: {
+        Id: string;
+        Name: string;
+        ResourcePath: string;
+    };
+    requestBodies: {
+        TaskCreateMultipart: {
+            content: {
+                "multipart/form-data": {
+                    name: string;
+                    totalBots: number;
+                    /** Format: binary */
+                    "flow.json": string;
+                    robotConfig?: string;
+                    /** Format: date-time */
+                    deadline?: string;
+                    flowTemplateId?: string;
+                } & {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        JsonObject: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        OptionalJsonObject: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+    };
+    headers: never;
+    pathItems: never;
 }
 export type $defs = Record<string, never>;
 export interface operations {
-  listTasks: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  createTask: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: components['requestBodies']['TaskCreateMultipart'];
-    responses: {
-      201: components['responses']['JsonCreated'];
-      400: components['responses']['BadRequest'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getTask: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  deleteTask: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getTaskConfigFile: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-        path: components['parameters']['ResourcePath'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['FileOK'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  startTask: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  stopRunningTask: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  listAgents: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getAgent: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  deleteAgent: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  shutdownManagedAgent: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  shutdownAllAgents: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getMetrics: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      400: components['responses']['BadRequest'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getMetricsSummary: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      400: components['responses']['BadRequest'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getAgentMetrics: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      400: components['responses']['BadRequest'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getSingleAgentMetrics: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getClusterSystem: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getSystemAgents: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getSystemAgent: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  listHistory: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      400: components['responses']['BadRequest'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getHistoryTags: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  compareHistory: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      400: components['responses']['BadRequest'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getHistory: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  updateHistory: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody: components['requestBodies']['JsonObject'];
-    responses: {
-      200: components['responses']['JsonOK'];
-      400: components['responses']['BadRequest'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  deleteHistory: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getHistoryAgents: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getHistoryConfig: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getHistoryConfigArchive: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getHistoryTimeseries: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      400: components['responses']['BadRequest'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  cloneHistory: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: components['requestBodies']['OptionalJsonObject'];
-    responses: {
-      201: components['responses']['JsonCreated'];
-      400: components['responses']['BadRequest'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getBaselineProtoIndex: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getBaselineProtoFile: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        name: components['parameters']['Name'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['FileOK'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getBaselineScriptIndex: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getBaselineScriptFile: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        name: components['parameters']['Name'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['FileOK'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getBaselineAdapterIndex: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getBaselineAdapterFile: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        name: components['parameters']['Name'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['FileOK'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getBaselineFlow: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getBaselineConfig: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getErrorCodeIndex: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  listFlows: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  createFlow: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: components['requestBodies']['JsonObject'];
-    responses: {
-      201: components['responses']['JsonCreated'];
-      400: components['responses']['BadRequest'];
-      409: components['responses']['Conflict'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getFlowSnapshot: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  replaceFlowSnapshot: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: components['requestBodies']['JsonObject'];
-    responses: {
-      200: components['responses']['JsonOK'];
-      400: components['responses']['BadRequest'];
-      409: components['responses']['Conflict'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getFlow: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  updateFlow: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody: components['requestBodies']['JsonObject'];
-    responses: {
-      200: components['responses']['JsonOK'];
-      400: components['responses']['BadRequest'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  deleteFlow: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  listActionTemplates: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  createActionTemplate: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: components['requestBodies']['JsonObject'];
-    responses: {
-      201: components['responses']['JsonCreated'];
-      400: components['responses']['BadRequest'];
-      409: components['responses']['Conflict'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getActionTemplateSnapshot: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  replaceActionTemplateSnapshot: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: components['requestBodies']['JsonObject'];
-    responses: {
-      200: components['responses']['JsonOK'];
-      400: components['responses']['BadRequest'];
-      409: components['responses']['Conflict'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getActionTemplate: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  updateActionTemplate: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody: components['requestBodies']['JsonObject'];
-    responses: {
-      200: components['responses']['JsonOK'];
-      400: components['responses']['BadRequest'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  deleteActionTemplate: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  listListenTemplates: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  createListenTemplate: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: components['requestBodies']['JsonObject'];
-    responses: {
-      201: components['responses']['JsonCreated'];
-      400: components['responses']['BadRequest'];
-      409: components['responses']['Conflict'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getListenTemplateSnapshot: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  replaceListenTemplateSnapshot: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: components['requestBodies']['JsonObject'];
-    responses: {
-      200: components['responses']['JsonOK'];
-      400: components['responses']['BadRequest'];
-      409: components['responses']['Conflict'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getListenTemplate: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  updateListenTemplate: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody: components['requestBodies']['JsonObject'];
-    responses: {
-      200: components['responses']['JsonOK'];
-      400: components['responses']['BadRequest'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  deleteListenTemplate: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: components['parameters']['Id'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
-      500: components['responses']['ServerError'];
-    };
-  };
-  getCapabilities: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description 服务器能力 */
-      200: {
-        headers: {
-          [name: string]: unknown;
+    listTasks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
         };
-        content: {
-          'application/json': components['schemas']['CapabilitiesResponse'];
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            500: components["responses"]["ServerError"];
         };
-      };
-      500: components['responses']['ServerError'];
     };
-  };
-  previewCodec: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    createTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["TaskCreateMultipart"];
+        responses: {
+            201: components["responses"]["JsonCreated"];
+            400: components["responses"]["BadRequest"];
+            500: components["responses"]["ServerError"];
+        };
     };
-    requestBody: components['requestBodies']['JsonObject'];
-    responses: {
-      200: components['responses']['JsonOK'];
-      400: components['responses']['BadRequest'];
-      500: components['responses']['ServerError'];
+    getTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["ServerError"];
+        };
     };
-  };
-  getCodecAlgorithms: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    deleteTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["ServerError"];
+        };
     };
-    requestBody?: never;
-    responses: {
-      200: components['responses']['JsonOK'];
-      500: components['responses']['ServerError'];
+    getTaskConfigFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+                path: components["parameters"]["ResourcePath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["FileOK"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["ServerError"];
+        };
     };
-  };
+    startTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    stopRunningTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    listAgents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    deleteAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    shutdownManagedAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    shutdownAllAgents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getMetrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            400: components["responses"]["BadRequest"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getMetricsSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            400: components["responses"]["BadRequest"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getAgentMetrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            400: components["responses"]["BadRequest"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getSingleAgentMetrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getClusterSystem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getSystemAgents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getSystemAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    listHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            400: components["responses"]["BadRequest"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getHistoryTags: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    compareHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            400: components["responses"]["BadRequest"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    updateHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["JsonObject"];
+        responses: {
+            200: components["responses"]["JsonOK"];
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    deleteHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getHistoryAgents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getHistoryConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getHistoryConfigArchive: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getHistoryTimeseries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    cloneHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: components["requestBodies"]["OptionalJsonObject"];
+        responses: {
+            201: components["responses"]["JsonCreated"];
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getBaselineProtoIndex: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getBaselineProtoFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: components["parameters"]["Name"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["FileOK"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getBaselineScriptIndex: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getBaselineScriptFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: components["parameters"]["Name"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["FileOK"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getBaselineAdapterIndex: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getBaselineAdapterFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: components["parameters"]["Name"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["FileOK"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getBaselineFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getErrorCodeIndex: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    listFlows: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    createFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["JsonObject"];
+        responses: {
+            201: components["responses"]["JsonCreated"];
+            400: components["responses"]["BadRequest"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getFlowSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    replaceFlowSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["JsonObject"];
+        responses: {
+            200: components["responses"]["JsonOK"];
+            400: components["responses"]["BadRequest"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    updateFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["JsonObject"];
+        responses: {
+            200: components["responses"]["JsonOK"];
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    deleteFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    listActionTemplates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    createActionTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["JsonObject"];
+        responses: {
+            201: components["responses"]["JsonCreated"];
+            400: components["responses"]["BadRequest"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getActionTemplateSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    replaceActionTemplateSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["JsonObject"];
+        responses: {
+            200: components["responses"]["JsonOK"];
+            400: components["responses"]["BadRequest"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getActionTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    updateActionTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["JsonObject"];
+        responses: {
+            200: components["responses"]["JsonOK"];
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    deleteActionTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    listListenTemplates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    createListenTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["JsonObject"];
+        responses: {
+            201: components["responses"]["JsonCreated"];
+            400: components["responses"]["BadRequest"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getListenTemplateSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    replaceListenTemplateSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["JsonObject"];
+        responses: {
+            200: components["responses"]["JsonOK"];
+            400: components["responses"]["BadRequest"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getListenTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    updateListenTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["JsonObject"];
+        responses: {
+            200: components["responses"]["JsonOK"];
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    deleteListenTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getCapabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 服务器能力 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilitiesResponse"];
+                };
+            };
+            500: components["responses"]["ServerError"];
+        };
+    };
+    previewCodec: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["JsonObject"];
+        responses: {
+            200: components["responses"]["JsonOK"];
+            400: components["responses"]["BadRequest"];
+            500: components["responses"]["ServerError"];
+        };
+    };
+    getCodecAlgorithms: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["JsonOK"];
+            500: components["responses"]["ServerError"];
+        };
+    };
 }

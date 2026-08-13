@@ -7,15 +7,15 @@ import (
 	"net/http"
 	"time"
 
-	"stressbot/utils"
-	json "stressbot/utils/jsonx"
-	stresslog "stressbot/utils/log"
+	json "stressbot/internal/jsonx"
+	"stressbot/internal/stresslog"
+	"stressbot/internal/workpool"
 
 	"go.uber.org/zap"
 )
 
 // RegisterHandlers 将 /metrics 和 /metrics/summary 注册到 http.DefaultServeMux。
-// pprof 由 utils.StartPprofServer 独立管理，不与此模块耦合。
+// pprof 由 config.StartPprofServer 独立管理，不与此模块耦合。
 func RegisterHandlers(c *MetricsCollector) {
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		snap := c.Snapshot(nil, 0).PublicCopy()
@@ -40,7 +40,7 @@ func RegisterHandlers(c *MetricsCollector) {
 
 // StartHTTPServer 启动 HTTP 服务（非阻塞），返回优雅关闭函数。
 func StartHTTPServer(port int) (stop func(), err error) {
-	return startHTTPServerWithSubmit(port, utils.GetWorkPool().Submit)
+	return startHTTPServerWithSubmit(port, workpool.GetWorkPool().Submit)
 }
 
 func startHTTPServerWithSubmit(port int, submit func(func()) error) (stop func(), err error) {

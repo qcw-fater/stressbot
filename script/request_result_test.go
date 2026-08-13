@@ -58,7 +58,7 @@ func TestRequestResultValues(t *testing.T) {
 
 	t.Run("request_timeout", func(t *testing.T) {
 		ctx := &Context{}
-		out := WaitOutcome{Err: engine.NewActionError(errcode.ErrRecvTimeout, "timeout")}
+		out := WaitOutcome{Err: errcode.NewActionError(errcode.ErrRecvTimeout, "timeout")}
 		vals := requestResultValues(L, ctx, spec, out)
 		code, _, ok := parseErr(t, vals)
 		if !ok {
@@ -91,7 +91,7 @@ func TestRequestResultValues(t *testing.T) {
 	t.Run("nil_exchange_defaults", func(t *testing.T) {
 		ctx := &Context{}
 		// Err 非空但 Exchange 为 nil：应用 spec.Packet 长度兜底 SendWireBytes，不 panic。
-		out := WaitOutcome{Err: engine.NewActionError(errcode.ErrConnNotFound, "x")}
+		out := WaitOutcome{Err: errcode.NewActionError(errcode.ErrConnNotFound, "x")}
 		vals := requestResultValues(L, ctx, spec, out)
 		code, _, ok := parseErr(t, vals)
 		if !ok {

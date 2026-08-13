@@ -7,12 +7,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"stressbot/adapter"
 	"stressbot/engine"
 	"stressbot/errcode"
+	"stressbot/internal/stresslog"
+	"stressbot/internal/timerpool"
+	"stressbot/internal/workpool"
 	"stressbot/monitor"
-	"stressbot/utils"
-	stresslog "stressbot/utils/log"
+	"stressbot/protocol"
 
 	"go.uber.org/zap"
 )
@@ -89,7 +90,7 @@ type Connection struct {
 	// 详见 connectionPump godoc。pump goroutine 是 inbound decode / listen 分发 / 心跳
 	// pump goroutine 独占处理 inbound/control 和心跳 timer；inboundCh/controlCh 由外部投递、pump 消费，
 	// pumpDone 由 pump 关闭、外部等待。adp/isUDP 在 StartPump 时一次性注入后只读。
-	adp       adapter.Adapter   // decode 用的协议适配器（Go SchemaAdapter），StartPump 时一次性注入
+	adp       protocol.Adapter  // decode 用的协议适配器（Go SchemaAdapter），StartPump 时一次性注入
 	isUDP     bool              // 该连接是否 UDP（决定调 DecodeUDP / DecodeTCP）
 	inboundCh chan inboundFrame // 待解码的 raw msg buffer（OnTraffic 投递→pump 消费）
 	controlCh chan pumpCmd      // pump 控制通道（注册/停止心跳、stop）
@@ -252,11 +253,11 @@ func (c *Connection) GetSecretKey() []byte {
 func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOverride ...time.Duration) (*Message, RequestTiming, error) {
 	var timing RequestTiming
 	if c == nil {
-		return nil, timing, engine.NewActionError(errcode.ErrConnNotFound, "routeKey="+routeKey)
+		return nil, timing, errcode.NewActionError(errcode.ErrConnNotFound, "routeKey="+routeKey)
 	}
 	if c.isClose.Load() == 1 {
 		stresslog.Warn("[NETWORK] RequestResponse 连接已关闭", zap.String("service", c.serviceName), zap.String("routeKey", routeKey), zap.String("robot", c.robotName))
-		return nil, timing, engine.NewActionError(errcode.ErrConnClosed, c.serviceName+" routeKey="+routeKey)
+		return nil, timing, errcode.NewActionError(errcode.ErrConnClosed, c.serviceName+" routeKey="+routeKey)
 	}
 
 	ch := make(chan *Message, 1)
@@ -294,8 +295,8 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 	// 池化 timer 而非 time.After：响应通常在毫秒级到达即提前返回，
 	// time.After 的底层 timer 要到 timeout（默认 60s）才回收，高 QPS 下会堆积
 	// 数十万个悬挂 timer；池化后连每请求一次的 timer 分配也一并消除。
-	timeoutTimer := utils.GetTimer(timeout)
-	defer utils.PutTimer(timeoutTimer)
+	timeoutTimer := timerpool.GetTimer(timeout)
+	defer timerpool.PutTimer(timeoutTimer)
 	select {
 	case <-c.ctx.Done():
 		// ACK 可能先于 ctx cancel 入队但 select 随机选到了此分支，drain channel。
@@ -322,7 +323,7 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 				zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
 				zap.String("robot", c.robotName),
 				zap.Duration("elapsed", elapsed))
-			return nil, timing, engine.NewActionError(errcode.ErrActionCanceled,
+			return nil, timing, errcode.NewActionError(errcode.ErrActionCanceled,
 				c.serviceName+" routeKey="+routeKey+" (local close)")
 		}
 		reason := c.loadCloseReason()
@@ -335,7 +336,7 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 			zap.String("robot", c.robotName),
 			zap.String("cause", reason),
 			zap.Duration("elapsed", elapsed))
-		return nil, timing, engine.NewActionError(errcode.ErrConnDropped, detail)
+		return nil, timing, errcode.NewActionError(errcode.ErrConnDropped, detail)
 	case resp := <-ch:
 		actionUnblocked := time.Now()
 		timing.WireRTT = safeSub(resp.Timing.RecvFrameAt, stamp.start())
@@ -361,7 +362,7 @@ func (c *Connection) RequestResponse(sendData []byte, routeKey string, timeoutOv
 			zap.String("service", c.serviceName), zap.String("routeKey", routeKey),
 			zap.String("robot", c.robotName),
 			zap.Duration("timeout", timeout))
-		return nil, timing, engine.NewActionError(errcode.ErrRecvTimeout, c.serviceName+" routeKey="+routeKey+" timeout="+timeout.String())
+		return nil, timing, errcode.NewActionError(errcode.ErrRecvTimeout, c.serviceName+" routeKey="+routeKey+" timeout="+timeout.String())
 	}
 }
 
@@ -385,10 +386,10 @@ type PendingRequest struct {
 // timeout<=0 时回退到连接默认超时。
 func (c *Connection) SendRequest(sendData []byte, routeKey string, timeout time.Duration) (*PendingRequest, error) {
 	if c == nil {
-		return nil, engine.NewActionError(errcode.ErrConnNotFound, "routeKey="+routeKey)
+		return nil, errcode.NewActionError(errcode.ErrConnNotFound, "routeKey="+routeKey)
 	}
 	if c.isClose.Load() == 1 {
-		return nil, engine.NewActionError(errcode.ErrConnClosed, c.serviceName+" routeKey="+routeKey)
+		return nil, errcode.NewActionError(errcode.ErrConnClosed, c.serviceName+" routeKey="+routeKey)
 	}
 	if timeout <= 0 {
 		timeout = c.requestTimeout
@@ -493,17 +494,17 @@ func (c *Connection) sendTimed(data []byte, onWritten WriteDoneFunc) (int, error
 
 func (c *Connection) send(data []byte, onWritten WriteDoneFunc) (int, error) {
 	if c == nil {
-		return 0, engine.NewActionError(errcode.ErrConnNotFound, "")
+		return 0, errcode.NewActionError(errcode.ErrConnNotFound, "")
 	}
 	if c.isClose.Load() == 1 {
-		return 0, engine.NewActionError(errcode.ErrConnClosed, c.serviceName)
+		return 0, errcode.NewActionError(errcode.ErrConnClosed, c.serviceName)
 	}
 	if c.sendFunc == nil {
 		stresslog.Warn("[NETWORK] Send sendFunc 未注入",
 			zap.String("service", c.serviceName),
 			zap.String("robot", c.robotName),
 			zap.Int("pktLen", len(data)))
-		return 0, engine.NewActionError(errcode.ErrSendFailed, c.serviceName)
+		return 0, errcode.NewActionError(errcode.ErrSendFailed, c.serviceName)
 	}
 
 	n := len(data)
@@ -514,7 +515,7 @@ func (c *Connection) send(data []byte, onWritten WriteDoneFunc) (int, error) {
 			zap.String("robot", c.robotName),
 			zap.Int("pktLen", n),
 			zap.Error(err))
-		return 0, engine.NewActionError(errcode.ErrSendFailed, c.serviceName, err)
+		return 0, errcode.NewActionError(errcode.ErrSendFailed, c.serviceName, err)
 	}
 	// 全局带宽统计
 	monitor.Global().AddBandwidth(int64(n), 0)
@@ -524,7 +525,7 @@ func (c *Connection) send(data []byte, onWritten WriteDoneFunc) (int, error) {
 // RegisterListen 为指定 routeKey 注册持久化推送监听。是唯一的监听注册入口。
 //
 // 参数：
-//   - routeKey: 路由键（由 adapter.ExpectedRouteKey 计算）。
+//   - routeKey: 路由键（由 protocol.ExpectedRouteKey 计算）。
 //   - cb: nil = 缓存模式（消息进 queue，由 GetListenResp/main-flow 消费）；非 nil = 回调模式。
 //   - queueSize: 缓存队列容量（>=1，cap<1 由 newListenQueue panic）。首次注册时预创建队列。
 //
@@ -702,11 +703,11 @@ func (c *Connection) ListenNotify(routeKey string) <-chan struct{} {
 //
 // pump 是 network 内部调度，不泄漏到 flow/engine/Lua：外层只感知 RegisterListen /
 // GetListenResp / RegisterHeartbeat 这些已存在的接口。
-func (c *Connection) StartPump(adp adapter.Adapter, isUDP bool) error {
-	return c.startPumpWithSubmit(adp, isUDP, utils.GetWorkPool().Submit)
+func (c *Connection) StartPump(adp protocol.Adapter, isUDP bool) error {
+	return c.startPumpWithSubmit(adp, isUDP, workpool.GetWorkPool().Submit)
 }
 
-func (c *Connection) startPumpWithSubmit(adp adapter.Adapter, isUDP bool, submit func(func()) error) error {
+func (c *Connection) startPumpWithSubmit(adp protocol.Adapter, isUDP bool, submit func(func()) error) error {
 	if c == nil {
 		return fmt.Errorf("connection 不能为空")
 	}

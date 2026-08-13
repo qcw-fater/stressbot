@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"stressbot/utils"
+	"stressbot/internal/workpool"
 )
 
 // Reporter 定时向控制台输出指标摘要。
@@ -32,7 +32,7 @@ func NewReporter(c *MetricsCollector, interval time.Duration) *Reporter {
 // Start 启动定时报告。
 func (r *Reporter) Start() {
 	r.prevTime = time.Now()
-	utils.GetWorkPool().GoWithStop(func(poolStop <-chan struct{}) {
+	workpool.GetWorkPool().GoWithStop(func(poolStop <-chan struct{}) {
 		ticker := time.NewTicker(r.interval)
 		defer ticker.Stop()
 		for {

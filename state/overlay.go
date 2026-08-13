@@ -1,3 +1,4 @@
+// Package state
 // overlay.go 提供 Overlay——不可变导航基座（PathNavigator，如 protox.WireValue /
 // protox.Frozen）之上的可变覆盖层，是 SetPath 对 wire-first 整存值做写时物化（COW）
 // 的写模型：

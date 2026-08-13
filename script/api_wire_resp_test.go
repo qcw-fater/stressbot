@@ -7,7 +7,7 @@ import (
 
 	lua "github.com/yuin/gopher-lua"
 
-	"stressbot/protox"
+	"stressbot/protocol/protox"
 )
 
 // newWireRespState 构造带响应句柄的 Lua 环境：resp 全局变量是

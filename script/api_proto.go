@@ -3,7 +3,7 @@ package script
 import (
 	"strconv"
 
-	"stressbot/protox"
+	"stressbot/protocol/protox"
 
 	lua "github.com/yuin/gopher-lua"
 	"google.golang.org/protobuf/proto"
@@ -192,7 +192,7 @@ func wrapFrozenMessage(L *lua.LState, fz *protox.Frozen) *lua.LUserData {
 
 // wrapWireView 将 wire 惰性视图（*protox.WireValue）包装为与普通 proto 消息
 // 同元表的 LUserData（D2）：listen 消费不再整包解码，读访问器按需 wire 扫描
-//（get_field/get_path → GetFieldCompat，list_* → List*Compat，get_field_map →
+// （get_field/get_path → GetFieldCompat，list_* → List*Compat，get_field_map →
 // 直转器，serialize → 原始字节）；set_field 与 Frozen 同款 fail-loud。
 // list_get/iter_list 的 message 元素继续包视图，只读性全树传播。
 // schema 降级后视图自动回落：unwrapProtoUD 现场解码为只读消息走原反射路径。

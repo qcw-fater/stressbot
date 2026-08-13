@@ -8,12 +8,13 @@ import (
 
 	"stressbot/engine"
 	"stressbot/errcode"
+	"stressbot/internal/timerpool"
+	"stressbot/internal/workpool"
 	"stressbot/network"
 	"stressbot/script"
-	"stressbot/utils"
 
 	"go.uber.org/zap"
-	stresslog "stressbot/utils/log"
+	"stressbot/internal/stresslog"
 )
 
 // robotScheduler 是单个 Robot 的协作式调度核心（actor 运行时）。
@@ -90,7 +91,7 @@ func (s *robotScheduler) wait(ctx context.Context, deadline time.Time, wake <-ch
 	var timer *time.Timer
 	defer func() {
 		if timer != nil {
-			utils.PutTimer(timer)
+			timerpool.PutTimer(timer)
 		}
 	}()
 	for {
@@ -114,7 +115,7 @@ func (s *robotScheduler) wait(ctx context.Context, deadline time.Time, wake <-ch
 		// timer 只覆盖整个剩余 deadline；listen 到达由 wake 唤醒。
 		// t.exec() 前必 Stop：回调里嵌套 wait 会再从池取，互不干扰。
 		if timer == nil {
-			timer = utils.GetTimer(remaining)
+			timer = timerpool.GetTimer(remaining)
 		} else {
 			timer.Reset(remaining)
 		}
@@ -148,7 +149,7 @@ func (s *robotScheduler) awaitResponse(spec *script.WaitSpec) script.WaitOutcome
 		conn = s.robot.client.GetTCPConn(spec.Service)
 	}
 	if conn == nil {
-		return script.WaitOutcome{Err: engine.NewActionError(errcode.ErrConnNotFound, "service="+spec.Service)}
+		return script.WaitOutcome{Err: errcode.NewActionError(errcode.ErrConnNotFound, "service="+spec.Service)}
 	}
 
 	pr, err := conn.SendRequest(spec.Packet, spec.RouteKey, spec.Duration)
@@ -158,8 +159,8 @@ func (s *robotScheduler) awaitResponse(spec *script.WaitSpec) script.WaitOutcome
 	defer pr.Close()
 
 	// 单一池化 timer 计满整个超时窗口（每请求一只 NewTimer 的分配消除）。
-	timer := utils.GetTimer(pr.Timeout())
-	defer utils.PutTimer(timer)
+	timer := timerpool.GetTimer(pr.Timeout())
+	defer timerpool.PutTimer(timer)
 	for {
 		if ctx.Err() != nil {
 			return script.WaitOutcome{Canceled: true}
@@ -181,7 +182,7 @@ func (s *robotScheduler) awaitResponse(spec *script.WaitSpec) script.WaitOutcome
 		case <-ctx.Done():
 			return script.WaitOutcome{Canceled: true}
 		case <-timer.C:
-			return script.WaitOutcome{Err: engine.NewActionError(errcode.ErrRecvTimeout,
+			return script.WaitOutcome{Err: errcode.NewActionError(errcode.ErrRecvTimeout,
 				"service="+spec.Service+" route="+spec.RouteKey+" timeout="+pr.Timeout().String())}
 		}
 	}
@@ -207,7 +208,7 @@ func (s *robotScheduler) awaitResponse(spec *script.WaitSpec) script.WaitOutcome
 // 让后台作业的结果无人接收（虽 done 缓冲 1 不泄漏），且声明式路径拿不到 Go 结果，故统一等作业完成。
 // job panic 由协程池 recover + 本地 recover 兜底，并始终 signal done，避免调用方永久阻塞。
 func (s *robotScheduler) runIO(job func()) error {
-	return s.runIOWithSubmit(job, utils.GetWorkPool().Submit)
+	return s.runIOWithSubmit(job, workpool.GetWorkPool().Submit)
 }
 
 func (s *robotScheduler) runIOWithSubmit(job func(), submit func(func()) error) error {

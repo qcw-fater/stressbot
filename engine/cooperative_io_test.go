@@ -2,6 +2,7 @@ package engine
 
 import (
 	"errors"
+	flowdef "stressbot/flow"
 	"sync/atomic"
 	"testing"
 
@@ -42,13 +43,13 @@ func TestDeclarativeIO_RoutesThroughCoopIO(t *testing.T) {
 		return nil
 	})
 
-	if err := ae.execTCPConnect(&ActionDef{Name: "c", Service: "logic", Address: "127.0.0.1:1"}); err != nil {
+	if err := ae.execTCPConnect(&flowdef.ActionDef{Name: "c", Service: "logic", Address: "127.0.0.1:1"}); err != nil {
 		t.Fatalf("execTCPConnect err: %v", err)
 	}
-	if err := ae.execUDPConnect(&ActionDef{Name: "c", Service: "battle", Address: "127.0.0.1:2"}); err != nil {
+	if err := ae.execUDPConnect(&flowdef.ActionDef{Name: "c", Service: "battle", Address: "127.0.0.1:2"}); err != nil {
 		t.Fatalf("execUDPConnect err: %v", err)
 	}
-	if _, _, _, err := ae.execHTTPRequest(&ActionDef{Name: "h", URL: "http://x/y"}); err != nil {
+	if _, _, _, err := ae.execHTTPRequest(&flowdef.ActionDef{Name: "h", URL: "http://x/y"}); err != nil {
 		t.Fatalf("execHTTPRequest err: %v", err)
 	}
 
@@ -62,7 +63,7 @@ func TestDeclarativeIO_RoutesThroughCoopIO(t *testing.T) {
 
 	// 未注入 coopIO（engine 独立运行/测试）时回退同步调用，仍能完成。
 	ae2 := &ActionExecutor{netSender: fake, store: state.NewStore()}
-	if err := ae2.execTCPConnect(&ActionDef{Name: "c", Service: "logic", Address: "127.0.0.1:1"}); err != nil {
+	if err := ae2.execTCPConnect(&flowdef.ActionDef{Name: "c", Service: "logic", Address: "127.0.0.1:1"}); err != nil {
 		t.Fatalf("无 coopIO 回退应同步成功: %v", err)
 	}
 	if atomic.LoadInt32(&fake.connectTCP) != 2 {
@@ -76,7 +77,7 @@ func TestDeclarativeIOReturnsCooperativeSubmissionError(t *testing.T) {
 	sentinel := errors.New("pool rejected")
 	ae.SetCooperativeIO(func(func()) error { return sentinel })
 
-	err := ae.execTCPConnect(&ActionDef{Name: "c", Service: "logic", Address: "127.0.0.1:1"})
+	err := ae.execTCPConnect(&flowdef.ActionDef{Name: "c", Service: "logic", Address: "127.0.0.1:1"})
 
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("execTCPConnect() error = %v, want %v", err, sentinel)

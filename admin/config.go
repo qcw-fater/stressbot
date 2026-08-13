@@ -5,21 +5,21 @@ import (
 	"strings"
 	"time"
 
-	"stressbot/sharedstate"
-	"stressbot/utils"
-	json "stressbot/utils/jsonx"
-	stresslog "stressbot/utils/log"
+	"stressbot/config"
+	json "stressbot/internal/jsonx"
+	"stressbot/internal/stresslog"
+	"stressbot/state/shared"
 )
 
 // Config Admin 服务端配置（对应 admin.toml）。
 type Config struct {
-	Server       ServerConfig             `toml:"server"       json:"server"`       // 管理面（HTTP，面向浏览器）
-	ControlPlane ControlPlaneConfig       `toml:"controlPlane" json:"controlPlane"` // 控制面（gRPC，面向 Agent）
-	MySQL        *MySQLConfig             `toml:"mysql"        json:"mysql"`        // MySQL 历史归档（nil=不启用）
-	Redis        *sharedstate.RedisConfig `toml:"redis"        json:"redis"`        // Redis 共享状态（nil=不启用）
-	Log          stresslog.Config         `toml:"log"          json:"log"`          // 日志
-	Pprof        *utils.PprofConfig       `toml:"pprof"        json:"pprof"`        // pprof 调试（nil=不启用）
-	Daemon       bool                     `toml:"daemon"       json:"daemon"`       // 守护进程模式（仅 Linux）
+	Server       ServerConfig        `toml:"server"       json:"server"`       // 管理面（HTTP，面向浏览器）
+	ControlPlane ControlPlaneConfig  `toml:"controlPlane" json:"controlPlane"` // 控制面（gRPC，面向 Agent）
+	MySQL        *MySQLConfig        `toml:"mysql"        json:"mysql"`        // MySQL 历史归档（nil=不启用）
+	Redis        *shared.RedisConfig `toml:"redis"        json:"redis"`        // Redis 共享状态（nil=不启用）
+	Log          stresslog.Config    `toml:"log"          json:"log"`          // 日志
+	Pprof        *config.PprofConfig `toml:"pprof"        json:"pprof"`        // pprof 调试（nil=不启用）
+	Daemon       bool                `toml:"daemon"       json:"daemon"`       // 守护进程模式（仅 Linux）
 }
 
 // ServerConfig 管理面（HTTP，面向浏览器）配置。
@@ -48,13 +48,13 @@ type ControlPlaneConfig struct {
 // MySQLConfig MySQL 连接配置（对应 [mysql] 段；host 留空=不启用）。
 // retentionDays 从原 [history] 段并入——历史归档强依赖 MySQL。
 type MySQLConfig struct {
-	Host          string             `toml:"host"          json:"host"`          // 主机地址
-	Port          int                `toml:"port"          json:"port"`          // 端口号（默认 3306）
-	Username      string             `toml:"username"      json:"username"`      // 用户名
-	Password      string             `toml:"password"      json:"password"`      // 密码
-	Database      string             `toml:"database"      json:"database"`      // 数据库名
-	RetentionDays int                `toml:"retentionDays" json:"retentionDays"` // 历史数据保留天数（默认 90）
-	Pool          utils.ConnPoolConfig `toml:"pool"       json:"pool"`          // 连接池参数
+	Host          string                `toml:"host"          json:"host"`          // 主机地址
+	Port          int                   `toml:"port"          json:"port"`          // 端口号（默认 3306）
+	Username      string                `toml:"username"      json:"username"`      // 用户名
+	Password      string                `toml:"password"      json:"password"`      // 密码
+	Database      string                `toml:"database"      json:"database"`      // 数据库名
+	RetentionDays int                   `toml:"retentionDays" json:"retentionDays"` // 历史数据保留天数（默认 90）
+	Pool          config.ConnPoolConfig `toml:"pool"       json:"pool"`             // 连接池参数
 }
 
 // DSN 拼接标准 MySQL 连接字符串，含 timeout 参数。
@@ -87,6 +87,11 @@ func (c *Config) RedisEnabled() bool {
 	return c.Redis != nil && c.Redis.Enabled()
 }
 
+// MySQLEnabled 返回服务器是否配置了 MySQL；host 为空时明确禁用。
+func (c *Config) MySQLEnabled() bool {
+	return c.MySQL != nil && strings.TrimSpace(c.MySQL.Host) != ""
+}
+
 // Defaults 返回填充了默认值的 Admin 配置。
 func Defaults() Config {
 	return Config{
@@ -104,7 +109,7 @@ func Defaults() Config {
 		},
 		MySQL: &MySQLConfig{
 			RetentionDays: 90,
-			Pool: utils.ConnPoolConfig{
+			Pool: config.ConnPoolConfig{
 				MaxOpenConns:    10,
 				MaxIdleConns:    5,
 				ConnMaxLifetime: "1h",
@@ -125,7 +130,7 @@ func Defaults() Config {
 
 // LoadConfig 从 TOML 文件加载配置。
 func LoadConfig(path string) (*Config, error) {
-	cfg, err := utils.LoadTOML(path, Defaults())
+	cfg, err := config.LoadTOML(path, Defaults())
 	if err != nil {
 		return nil, err
 	}

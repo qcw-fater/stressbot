@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"stressbot/engine"
 	"stressbot/errcode"
-	"stressbot/protox"
-	stresslog "stressbot/utils/log"
+	"stressbot/internal/stresslog"
+	"stressbot/protocol/protox"
 	"time"
 
 	lua "github.com/yuin/gopher-lua"

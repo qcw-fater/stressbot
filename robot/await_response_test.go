@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"stressbot/engine"
 	"stressbot/errcode"
 	"stressbot/monitor"
 	"stressbot/network"
@@ -25,7 +24,7 @@ func newResponseRobot(ctx context.Context) *Robot {
 
 func wantCode(t *testing.T, err error, want errcode.ErrorCode) {
 	t.Helper()
-	ae, ok := errors.AsType[*engine.ActionError](err)
+	ae, ok := errors.AsType[*errcode.ActionError](err)
 	if !ok {
 		t.Fatalf("err ?? ActionError: %v", err)
 	}

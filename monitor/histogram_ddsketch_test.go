@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	json "stressbot/utils/jsonx"
+	json "stressbot/internal/jsonx"
 )
 
 func metricValue(t *testing.T, value *float64) float64 {

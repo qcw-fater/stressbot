@@ -7,7 +7,7 @@ import (
 
 	"stressbot/monitor"
 
-	stresslog "stressbot/utils/log"
+	"stressbot/internal/stresslog"
 )
 
 // TestMain 初始化全局日志 + monitor collector。

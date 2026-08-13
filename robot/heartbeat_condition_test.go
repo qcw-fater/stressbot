@@ -3,7 +3,7 @@ package robot
 import (
 	"testing"
 
-	"stressbot/codec"
+	"stressbot/protocol/codec"
 )
 
 func TestCodecFieldBindsRejectMalformedCondition(t *testing.T) {

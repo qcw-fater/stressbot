@@ -2,6 +2,7 @@ package robot
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -13,6 +14,26 @@ import (
 
 func newBookkeepManager() *Manager {
 	return NewManager(context.Background(), ManagerConfig{}, nil, nil, nil, nil)
+}
+
+func TestManagerParentCancellationInterruptsRampUp(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	m := NewManager(ctx, ManagerConfig{
+		RampUp: &RampUpConfig{Stages: []RampUpStage{{Count: 0}, {Count: 0}}},
+	}, nil, nil, nil, nil)
+	m.OnStageChange = func(current, _ int) {
+		if current == 1 {
+			cancel()
+		}
+	}
+
+	err := m.StartWithRampUp()
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("StartWithRampUp() error = %v, want context.Canceled", err)
+	}
+	if !doneClosed(m) {
+		t.Fatal("取消 ramp-up 后应结束创建阶段并关闭 Done")
+	}
 }
 
 func doneClosed(m *Manager) bool {

@@ -3,13 +3,15 @@ package engine
 import (
 	"os"
 	"path/filepath"
+	"stressbot/binding"
+	flowdef "stressbot/flow"
 	"testing"
 
-	"stressbot/protox"
+	"stressbot/protocol/protox"
 	"stressbot/state"
 
 	"go.uber.org/zap"
-	stresslog "stressbot/utils/log"
+	"stressbot/internal/stresslog"
 )
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -53,10 +55,10 @@ func TestBuildProtoBody_SimpleBindings(t *testing.T) {
 	st := state.NewStore()
 	st.Set("sharedValue", int64(0x0102030405060708))
 
-	bindings := []FieldBind{
-		{Field: "seq", Type: BindFixed, Value: 42},
-		{Field: "value", Type: BindState, Source: "sharedValue"},
-		{Field: "token", Type: BindFixed, Value: "abc"},
+	bindings := []binding.FieldBind{
+		{Field: "seq", Type: binding.BindFixed, Value: 42},
+		{Field: "value", Type: binding.BindState, Source: "sharedValue"},
+		{Field: "token", Type: binding.BindFixed, Value: "abc"},
 	}
 
 	body, skip, err := BuildProtoBody("hbtest.HeartbeatC2S", bindings, st, factory, "Heartbeat")
@@ -147,13 +149,13 @@ func TestBuildBody_RefactoredViaBuildProtoBody(t *testing.T) {
 	store := state.NewStore()
 	ae := &ActionExecutor{store: store, factory: factory}
 
-	def := &ActionDef{
+	def := &flowdef.ActionDef{
 		Name:     "Heartbeat",
-		Pattern:  PatternTCPSend,
+		Pattern:  flowdef.PatternTCPSend,
 		C2SProto: "hbtest.HeartbeatC2S",
-		Bindings: []FieldBind{
-			{Field: "seq", Type: BindFixed, Value: 7},
-			{Field: "token", Type: BindFixed, Value: "xyz"},
+		Bindings: []binding.FieldBind{
+			{Field: "seq", Type: binding.BindFixed, Value: 7},
+			{Field: "token", Type: binding.BindFixed, Value: "xyz"},
 		},
 	}
 	body, err := ae.buildBody(def)

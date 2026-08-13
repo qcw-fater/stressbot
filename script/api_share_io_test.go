@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// fakeKVStore 是 sharedstate.Store 的最小内存实现，仅 KV 走真实存储，其余返回零值。
+// fakeKVStore 是 shared.Store 的最小内存实现，仅 KV 走真实存储，其余返回零值。
 // 用于验证 share.* 的协作式 awaitIO 路径（yield WaitIO → 后台作业 → renderer 产出 Lua 值）。
 type fakeKVStore struct{ kv map[string]any }
 

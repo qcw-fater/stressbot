@@ -4,7 +4,6 @@ import (
 	"errors"
 	"strings"
 
-	"stressbot/engine"
 	"stressbot/errcode"
 
 	lua "github.com/yuin/gopher-lua"
@@ -48,7 +47,7 @@ func parseErrTable(v lua.LValue) (code int, detail string, ok bool) {
 	return int(codeVal), string(detailVal), true
 }
 
-// buildActionError 由 code+detail 构造 *engine.ActionError，补 script= 上下文。
+// buildActionError 由 code+detail 构造 *errcode.ActionError，补 script= 上下文。
 func buildActionError(code int, detail, scriptName string) error {
 	full := detail
 	if !strings.Contains(full, "script=") {
@@ -57,13 +56,13 @@ func buildActionError(code int, detail, scriptName string) error {
 		}
 		full += "script=" + scriptName
 	}
-	return engine.NewActionError(errcode.ErrorCode(code), full)
+	return errcode.NewActionError(errcode.ErrorCode(code), full)
 }
 
-// errTableFromActionErr 从 *engine.ActionError 提取 code+detail 构造 err table（不压栈）。
+// errTableFromActionErr 从 *errcode.ActionError 提取 code+detail 构造 err table（不压栈）。
 // 供“网络层已有完整 ActionError”的分支使用。
 func errTableFromActionErr(L *lua.LState, err error) *lua.LTable {
-	if ae, ok := errors.AsType[*engine.ActionError](err); ok {
+	if ae, ok := errors.AsType[*errcode.ActionError](err); ok {
 		return newErrTable(L, int(ae.ErrorCode()), ae.ErrorDetail())
 	}
 	return newErrTable(L, int(errcode.ErrSendFailed), err.Error())
