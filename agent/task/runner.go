@@ -163,7 +163,13 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 	//     Agent 只负责 Close（断开连接）；统一 Cleanup 由 Admin 在任务终态时触发，
 	//     避免多 Agent 共享同一 runId 时某个 Agent 先结束就删掉别人还在用的 key。
 	var sharedStore shared.Store
-	if r.assignment.Shared != nil && r.assignment.Shared.Redis.Enabled() {
+	if r.assignment.Shared == nil {
+		stresslog.Info("[TASK] 共享状态未启用：任务脚本未使用 share",
+			zap.String("taskID", taskID))
+	} else if !r.assignment.Shared.Redis.Enabled() {
+		stresslog.Warn("[TASK] 共享状态未启用：任务分配缺少有效 Redis 配置",
+			zap.String("taskID", taskID))
+	} else {
 		resolved, rerr := r.assignment.Shared.Redis.Resolve()
 		if rerr != nil {
 			return runFailed(fmt.Sprintf("Redis 共享状态配置无效: %v", rerr))
@@ -178,9 +184,6 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 			zap.String("taskID", taskID),
 			zap.String("addr", fmt.Sprintf("%s:%d", resolved.Host, resolved.Port)),
 			zap.String("runId", r.assignment.Shared.RunID))
-	} else {
-		stresslog.Info("[TASK] 共享状态未启用",
-			zap.String("taskID", taskID))
 	}
 
 	// 10. 创建 Robot Manager

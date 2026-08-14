@@ -190,7 +190,7 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 			return nil, fmt.Errorf("连接 Redis 共享状态失败 (addr=%s): %w", fmt.Sprintf("%s:%d", resolved.Host, resolved.Port), perr)
 		}
 		_ = pingStore.Close()
-		stresslog.Info("[ADMIN] Redis 共享状态已启用",
+		stresslog.Info("[ADMIN] Redis 共享状态能力已就绪",
 			zap.String("addr", fmt.Sprintf("%s:%d", resolved.Host, resolved.Port)),
 			zap.String("keyPrefix", resolved.KeyPrefix))
 		s.sharedCleanup = admintask.NewSharedCleanup("data", cfg.Redis)
