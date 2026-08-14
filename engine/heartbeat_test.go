@@ -81,10 +81,9 @@ func TestAppendLE_WidthByType(t *testing.T) {
 // ──────────────────────────────────────────────────────────────────────────
 
 //go:fix inline
-func i64ptr(v int64) *int64 { return new(v) }
+func i64ptr(v int64) *int64 { return &v }
 
-//go:fix inline
-func f64ptr(v float64) *float64 { return new(v) }
+func f64ptr(v float64) *float64 { return &v }
 
 func TestBuildHeartbeatBody_Fixed(t *testing.T) {
 	fields := []HeartbeatField{{Type: "u16", Source: "fixed", Value: i64ptr(0x0102)}}
@@ -275,7 +274,7 @@ func TestBuildHeartbeatBody_RandomInt_MissingMax(t *testing.T) {
 // ──────────────────────────────────────────────────────────────────────────
 
 func TestBuildHeartbeatBody_F32_Fixed(t *testing.T) {
-	fields := []HeartbeatField{{Type: "f32", Source: "fixed", FloatValue: new(1.0)}}
+	fields := []HeartbeatField{{Type: "f32", Source: "fixed", FloatValue: f64ptr(1.0)}}
 	body, skip, err := BuildHeartbeatBody(fields, state.NewStore(), nil, false)
 	if err != nil || skip {
 		t.Fatalf("unexpected: body=%x skip=%v err=%v", body, skip, err)
@@ -287,7 +286,7 @@ func TestBuildHeartbeatBody_F32_Fixed(t *testing.T) {
 }
 
 func TestBuildHeartbeatBody_F64_Fixed(t *testing.T) {
-	fields := []HeartbeatField{{Type: "f64", Source: "fixed", FloatValue: new(1.0)}}
+	fields := []HeartbeatField{{Type: "f64", Source: "fixed", FloatValue: f64ptr(1.0)}}
 	body, skip, err := BuildHeartbeatBody(fields, state.NewStore(), nil, false)
 	if err != nil || skip {
 		t.Fatalf("unexpected: body=%x skip=%v err=%v", body, skip, err)

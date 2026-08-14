@@ -38,10 +38,10 @@ func TestCapabilitiesTemplateLibraryDisabledWithoutBothStores(t *testing.T) {
 	if templateLibraryCapability(t, &Handler{}) {
 		t.Fatal("expected disabled without MySQL stores")
 	}
-	if templateLibraryCapability(t, &Handler{actionTemplates: NewActionTemplateStore(db)}) {
+	if templateLibraryCapability(t, &Handler{actionTemplates: newActionTemplateStore(db)}) {
 		t.Fatal("expected disabled when Listen store is missing")
 	}
-	if templateLibraryCapability(t, &Handler{listenTemplates: NewListenTemplateStore(db)}) {
+	if templateLibraryCapability(t, &Handler{listenTemplates: newListenTemplateStore(db)}) {
 		t.Fatal("expected disabled when Action store is missing")
 	}
 }
@@ -53,8 +53,8 @@ func TestCapabilitiesTemplateLibraryEnabledWithBothStores(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	server := &Handler{
-		actionTemplates: NewActionTemplateStore(db),
-		listenTemplates: NewListenTemplateStore(db),
+		actionTemplates: newActionTemplateStore(db),
+		listenTemplates: newListenTemplateStore(db),
 	}
 	if !templateLibraryCapability(t, server) {
 		t.Fatal("expected enabled with both stores")
@@ -78,7 +78,7 @@ func TestTemplateCRUDRouteRejectsBodyOverLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	server := &Handler{actionTemplates: NewActionTemplateStore(db)}
+	server := &Handler{actionTemplates: newActionTemplateStore(db)}
 	body := `{"name":"x","pattern":"tcpRequest","data":{},"padding":"` + strings.Repeat("x", (1<<20)+1) + `"}`
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/sbot/action-templates", strings.NewReader(body))

@@ -39,7 +39,7 @@ func NewFactory(registry *Registry) *Factory {
 }
 
 // Close 释放 Factory 持有的任务级资源：清空两个去重缓存并从 /debug/dedup 统计
-// 列表反注册。任务（TaskRunner）级 Factory 必须在任务结束时调用——统计列表是
+// 列表反注册。任务 runner 持有的 Factory 必须在任务结束时调用——统计列表是
 // 包级全局，不反注册会把缓存连同全部条目（解码树 + wire 字节 + descriptor）
 // 跨任务钉住，每轮任务累积泄漏数百 MB。幂等，可安全多次调用；Close 后 Factory
 // 仍可用（缓存只是清空重新计），但按约定不应再被使用。
@@ -170,7 +170,6 @@ func (f *Factory) setNestedField(ref protoreflect.Message, parts []string, value
 
 	// 处理数组索引
 	fieldName := part
-	idx := -1
 	if strings.HasPrefix(part, "[") && strings.HasSuffix(part, "]") {
 		return fmt.Errorf("路径不能以数组索引开头: %s", part)
 	}
@@ -203,12 +202,11 @@ func (f *Factory) setNestedField(ref protoreflect.Message, parts []string, value
 		if !field.IsList() {
 			return fmt.Errorf("字段 %s 不是 repeated，但路径包含数组索引 %s", fieldName, nextPart)
 		}
-		idxStr := nextPart[1 : len(nextPart)-1]
-		if idxStr != "" {
-			fmt.Sscanf(idxStr, "%d", &idx)
-		} else {
-			idx = 0
+		parsedIndex, ok := parseIndexSeg(nextPart)
+		if !ok || parsedIndex < 0 {
+			return fmt.Errorf("无效数组索引: %s", nextPart)
 		}
+		idx := parsedIndex
 
 		list := ref.Mutable(field).List()
 		for list.Len() <= idx {
@@ -417,7 +415,7 @@ func setMapField(ref protoreflect.Message, field protoreflect.FieldDescriptor, v
 
 	protomap := ref.Mutable(field).Map()
 	// 清空已有条目
-	protomap.Range(func(k protoreflect.MapKey, v protoreflect.Value) bool {
+	protomap.Range(func(k protoreflect.MapKey, _ protoreflect.Value) bool {
 		protomap.Clear(k)
 		return true
 	})
@@ -522,10 +520,9 @@ func getNestedFieldValue(ref protoreflect.Message, parts []string) (any, error) 
 		if !field.IsList() {
 			return nil, fmt.Errorf("字段 %s 不是 repeated，但路径包含数组索引 %s", part, nextPart)
 		}
-		idxStr := nextPart[1 : len(nextPart)-1]
-		idx := 0
-		if idxStr != "" {
-			fmt.Sscanf(idxStr, "%d", &idx)
+		idx, ok := parseIndexSeg(nextPart)
+		if !ok || idx < 0 {
+			return nil, fmt.Errorf("无效数组索引: %s", nextPart)
 		}
 
 		list := ref.Get(field).List()
@@ -577,10 +574,7 @@ func (f *Factory) GetListItem(msg proto.Message, fieldPath string, idx int) (any
 	}
 	elem := list.Get(idx)
 	if field.Kind() == protoreflect.MessageKind {
-		if pm, ok := elem.Message().Interface().(proto.Message); ok {
-			return pm, nil
-		}
-		return nil, fmt.Errorf("字段 %s 元素不是 proto.Message", field.Name())
+		return elem.Message().Interface(), nil
 	}
 	return fromScalarValue(field, elem), nil
 }
@@ -769,11 +763,11 @@ func fromScalarValue(field protoreflect.FieldDescriptor, val protoreflect.Value)
 	case protoreflect.BoolKind:
 		return val.Bool()
 	case protoreflect.Int32Kind, protoreflect.Sint32Kind, protoreflect.Sfixed32Kind:
-		return int64(val.Int())
+		return val.Int()
 	case protoreflect.Int64Kind, protoreflect.Sint64Kind, protoreflect.Sfixed64Kind:
 		return val.Int()
 	case protoreflect.Uint32Kind, protoreflect.Fixed32Kind:
-		return uint64(val.Uint())
+		return val.Uint()
 	case protoreflect.Uint64Kind, protoreflect.Fixed64Kind:
 		return val.Uint()
 	case protoreflect.FloatKind:

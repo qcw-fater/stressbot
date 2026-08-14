@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	admintask "stressbot/admin/task"
 )
 
 type historyWindowRecorder struct {
@@ -18,8 +20,8 @@ func (r *historyWindowRecorder) AppendTimeseries(_ context.Context, _ string, po
 
 func TestSamplerPersistsAcceptedWindowsExactlyOnce(t *testing.T) {
 	clock := &metricStoreTestClock{now: time.Unix(100, 0)}
-	store := NewMetricsWindowStore(clock.Now)
-	report := metricStoreTestReport(t, "task-1", "agent-1", 1, time.Unix(90, 0), time.Unix(95, 0))
+	store := NewWindowStore(clock.Now)
+	report := metricStoreTestReport(t, "task-1", 1, time.Unix(90, 0), time.Unix(95, 0))
 	if _, err := store.Accept(report, "task-1", 5*time.Second, 100*time.Millisecond); err != nil {
 		t.Fatalf("接收窗口: %v", err)
 	}
@@ -28,7 +30,7 @@ func TestSamplerPersistsAcceptedWindowsExactlyOnce(t *testing.T) {
 	}
 
 	recorder := &historyWindowRecorder{}
-	tasks, err := NewTaskStore(t.TempDir())
+	tasks, err := admintask.NewStore(t.TempDir())
 	if err != nil {
 		t.Fatalf("create task store: %v", err)
 	}
@@ -66,8 +68,8 @@ func TestSamplerPersistsAcceptedWindowsExactlyOnce(t *testing.T) {
 
 func TestSamplerStopFlushesFinalAcceptedWindow(t *testing.T) {
 	clock := &metricStoreTestClock{now: time.Unix(100, 0)}
-	store := NewMetricsWindowStore(clock.Now)
-	report := metricStoreTestReport(t, "task-1", "agent-1", 1, time.Unix(90, 0), time.Unix(95, 0))
+	store := NewWindowStore(clock.Now)
+	report := metricStoreTestReport(t, "task-1", 1, time.Unix(90, 0), time.Unix(95, 0))
 	if _, err := store.Accept(report, "task-1", 5*time.Second, 100*time.Millisecond); err != nil {
 		t.Fatalf("接收窗口: %v", err)
 	}

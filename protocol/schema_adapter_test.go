@@ -17,7 +17,7 @@ import (
 
 // loadSchemaCodecForTest 加载 testdata schema + errorMap 构造 *codec.SchemaCodec。
 // 路径相对仓库根（测试 CWD 在 adapter/，向上回溯一级到仓库根）。
-func loadSchemaCodecForTest(t *testing.T) (*codec.CodecSchema, map[uint64]string) {
+func loadSchemaCodecForTest(t *testing.T) (*codec.Schema, map[uint64]string) {
 	t.Helper()
 	// 从 adapter/ 向上找仓库根（含 codec/testdata 的目录）。
 	root := findAdapterRepoRoot(t)

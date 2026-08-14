@@ -22,9 +22,9 @@ type Sampler struct {
 	interval   time.Duration
 	aggregator *Aggregator
 	history    historyWriter
-	windows    *MetricsWindowStore
-	registry   *agent.AgentRegistry
-	tasks      *admintask.TaskStore
+	windows    *WindowStore
+	registry   *agent.Registry
+	tasks      *admintask.Store
 
 	mu      sync.Mutex
 	current *samplerJob
@@ -73,7 +73,7 @@ func taskSystemAgentIDs(task *admintask.Task) []string {
 	return ids
 }
 
-func NewSampler(interval time.Duration, agg *Aggregator, hist historyWriter, reg *agent.AgentRegistry, tasks *admintask.TaskStore, windows *MetricsWindowStore) *Sampler {
+func NewSampler(interval time.Duration, agg *Aggregator, hist historyWriter, reg *agent.Registry, tasks *admintask.Store, windows *WindowStore) *Sampler {
 	return &Sampler{
 		interval:   interval,
 		aggregator: agg,
@@ -100,7 +100,7 @@ func (s *Sampler) Start(taskID string) error {
 		done:      make(chan struct{}),
 	}
 	s.current = job
-	workpool.GetWorkPool().GoWithStop(func(stopCh <-chan struct{}) {
+	workpool.Default().GoWithStop(func(stopCh <-chan struct{}) {
 		defer close(job.done)
 		s.loop(ctx, taskID, job.startedAt, stopCh)
 	})
@@ -135,14 +135,14 @@ func (s *Sampler) Stop(taskID string) {
 }
 
 func (s *Sampler) retryFinalFlush(taskID string, startedAt time.Time) {
-	workpool.GetWorkPool().GoWithStop(func(stopCh <-chan struct{}) {
-		policy := retry.NewExponentialBackOff(retry.RetryPolicy{
+	workpool.Default().GoWithStop(func(stopCh <-chan struct{}) {
+		policy := retry.NewExponentialBackOff(retry.Policy{
 			Initial: time.Second,
 			Max:     30 * time.Second,
 			Factor:  2,
 			Jitter:  0.5,
 		})
-		_ = retry.RetryWithStop(stopCh, func() error {
+		_ = retry.WithStop(stopCh, func() error {
 			now := time.Now()
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			_, err := s.sampleOnce(ctx, taskID, now, int(now.Sub(startedAt).Seconds()))
@@ -350,7 +350,7 @@ func (s *Sampler) currentStageIndex(taskID string) int {
 }
 
 // distinctResetCount 统计阶段段落报告中不同 StageIndex（>0）的数量。
-func distinctResetCount(reports []admintask.TaskCompletionReport) int {
+func distinctResetCount(reports []admintask.CompletionReport) int {
 	seen := map[int]struct{}{}
 	for _, r := range reports {
 		if r.StageIndex > 0 {

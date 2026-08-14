@@ -47,10 +47,10 @@ func (a *encodeSpyAdapter) EncodeUDP(route any, body, secretKey []byte) []byte {
 	a.encodeCalls = append(a.encodeCalls, encodeCall{proto: "udp", route: route, body: body, secretKey: secretKey})
 	return a.encodeReturned
 }
-func (a *encodeSpyAdapter) DecodeTCP(data, secretKey []byte) (string, []byte, uint64) {
+func (a *encodeSpyAdapter) DecodeTCP(_, _ []byte) (string, []byte, uint64) {
 	return "", nil, 0
 }
-func (a *encodeSpyAdapter) DecodeUDP(data, secretKey []byte) (string, []byte, uint64) {
+func (a *encodeSpyAdapter) DecodeUDP(_, _ []byte) (string, []byte, uint64) {
 	return "", nil, 0
 }
 func (a *encodeSpyAdapter) ExpectedRouteKey(route any) string {

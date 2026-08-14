@@ -53,7 +53,7 @@ func TestIntegrationKV(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	if _, ok, _ := mustGet(t, store, "missing"); ok {
+	if _, ok := mustGet(t, store, "missing"); ok {
 		t.Fatal("missing key should not exist")
 	}
 
@@ -196,7 +196,7 @@ func TestIntegrationCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 
 	_ = store.Set(ctx, "k1", "v", 0)
@@ -211,11 +211,11 @@ func TestIntegrationCleanup(t *testing.T) {
 	}
 }
 
-func mustGet(t *testing.T, store *RedisStore, key string) (any, bool, error) {
+func mustGet(t *testing.T, store *RedisStore, key string) (any, bool) {
 	t.Helper()
 	v, ok, err := store.Get(context.Background(), key)
 	if err != nil {
 		t.Fatalf("get %s: %v", key, err)
 	}
-	return v, ok, nil
+	return v, ok
 }

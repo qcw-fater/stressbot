@@ -40,7 +40,7 @@ func listFlowDetails(ctx context.Context, q flowSnapshotQuerier) ([]FlowTemplate
 	if err != nil {
 		return nil, fmt.Errorf("list flow snapshot: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	items := []FlowTemplateDetail{}
 	for rows.Next() {
@@ -95,7 +95,7 @@ func (s *FlowTemplateStore) ReplaceSnapshot(ctx context.Context, req ReplaceFlow
 	if err != nil {
 		return nil, fmt.Errorf("begin replace flow snapshot: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	current, err := listFlowDetails(ctx, tx)
 	if err != nil {

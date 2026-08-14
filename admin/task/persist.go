@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	json "stressbot/internal/jsonx"
 	"stressbot/internal/stresslog"
@@ -35,7 +34,7 @@ func saveTaskFile(dataDir string, task *Task) error {
 
 	dst := taskFilePath(dataDir, task.ID)
 	if err := os.Rename(tmp, dst); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return fmt.Errorf("rename: %w", err)
 	}
 	return nil
@@ -48,16 +47,6 @@ func removeTaskFile(dataDir, taskID string) error {
 func loadTaskFiles(dataDir string) ([]*Task, error) {
 	dir := filepath.Join(dataDir, "tasks")
 
-	// 清理旧版残留的 .tmp.json 文件
-	if entries, err := os.ReadDir(dir); err == nil {
-		for _, e := range entries {
-			if strings.HasSuffix(e.Name(), ".tmp.json") {
-				os.Remove(filepath.Join(dir, e.Name()))
-				stresslog.Info("[ADMIN] 清理旧版残留文件", zap.String("file", e.Name()))
-			}
-		}
-	}
-
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -68,7 +57,7 @@ func loadTaskFiles(dataDir string) ([]*Task, error) {
 
 	var tasks []*Task
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".json" || strings.HasSuffix(e.Name(), ".tmp") {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(dir, e.Name()))

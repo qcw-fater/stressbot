@@ -18,8 +18,8 @@ import (
 const flowTemplateNameMax = 80
 
 // FlowTemplateStore 流程模板库存储。
-// db 由 AdminServer 统一管理（共享全局 MySQL 实例），本结构不负责 Close。
-// 当全局 MySQL 未配置时 AdminServer.flows 为 nil，相关接口返回 FLOW_LIBRARY_DISABLED。
+// db 由 Admin Server 统一管理（共享全局 MySQL 实例），本结构不负责 Close。
+// 当全局 MySQL 未配置时 Admin Server 不装配该 Store，相关接口返回 FLOW_LIBRARY_DISABLED。
 type FlowTemplateStore struct {
 	db     *sql.DB
 	mu     sync.RWMutex
@@ -137,7 +137,7 @@ func (s *FlowTemplateStore) List(ctx context.Context) ([]FlowTemplateSummary, er
 	if err != nil {
 		return nil, fmt.Errorf("list flow_template: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	items := []FlowTemplateSummary{}
 	for rows.Next() {
@@ -146,6 +146,9 @@ func (s *FlowTemplateStore) List(ctx context.Context) ([]FlowTemplateSummary, er
 			return nil, fmt.Errorf("scan flow_template: %w", err)
 		}
 		items = append(items, it)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate flow_template: %w", err)
 	}
 	return items, nil
 }

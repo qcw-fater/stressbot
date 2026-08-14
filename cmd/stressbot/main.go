@@ -102,18 +102,19 @@ func run(args []string) (exitCode int) {
 	closeLog = stresslog.InitLog(logPath, "stressbot", cfg.Log, "")
 	stresslog.Info("[MAIN] stressbot 启动", zap.String("version", Version))
 
-	defer workpool.GetWorkPool().Shutdown()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	defer workpool.Default().Shutdown()
 	if cfg.Pprof != nil {
 		port := cfg.Pprof.Port
 		if port <= 0 {
 			port = 6060
 		}
-		stopPprof := config.StartPprofServer(port)
+		stopPprof := config.StartPprofServer(ctx, port)
 		defer stopPprof()
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 	if err := standalone.Run(ctx, cfg, paths); err != nil {
 		stresslog.Error("[MAIN] 单机模式运行失败", zap.Error(err))
 		return 1

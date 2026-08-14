@@ -25,7 +25,7 @@ import (
 const (
 
 	// maxIdleTrampThreads 每 Robot 缓存的空闲 thread 上限：主流程 1 条 + 嵌套
-	//（主脚本 await 期间 drain 出的 listen 回调）常见 1-2 条，4 覆盖极端嵌套；
+	// （主脚本 await 期间 drain 出的 listen 回调）常见 1-2 条，4 覆盖极端嵌套；
 	// 超出直接弃用，防御性上界。
 	maxIdleTrampThreads = 4
 
@@ -125,7 +125,7 @@ func (c *Context) closeTrampThreads() {
 func (rp *RuntimePool) trampMainFn(L *lua.LState) (*lua.LFunction, error) {
 	reg, ok := L.Get(lua.RegistryIndex).(*lua.LTable)
 	if !ok {
-		return nil, fmt.Errorf("Lua registry 类型异常")
+		return nil, fmt.Errorf("lua registry 类型异常")
 	}
 	if fn, ok := reg.RawGetInt(trampFnRegistrySlot).(*lua.LFunction); ok {
 		return fn, nil
@@ -150,7 +150,7 @@ func (rp *RuntimePool) trampMainFn(L *lua.LState) (*lua.LFunction, error) {
 func trampSentinel(L *lua.LState) (*lua.LUserData, error) {
 	reg, ok := L.Get(lua.RegistryIndex).(*lua.LTable)
 	if !ok {
-		return nil, fmt.Errorf("Lua registry 类型异常")
+		return nil, fmt.Errorf("lua registry 类型异常")
 	}
 	if ud, ok := reg.RawGetInt(trampSentinelRegistrySlot).(*lua.LUserData); ok {
 		return ud, nil

@@ -15,7 +15,7 @@ func TestInitializeSchemaExecutesCurrentStatementsInOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	for _, statement := range currentSchema() {
 		mock.ExpectExec(regexp.QuoteMeta(statement.ddl)).
@@ -46,7 +46,7 @@ func TestInitializeSchemaExecErrorIncludesTableName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	first := currentSchema()[0]
 	sentinel := errors.New("asserted schema error")

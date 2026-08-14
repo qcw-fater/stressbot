@@ -10,7 +10,7 @@ import (
 )
 
 func TestNewExponentialBackOffUsesPolicy(t *testing.T) {
-	b := NewExponentialBackOff(RetryPolicy{
+	b := NewExponentialBackOff(Policy{
 		Initial: time.Second,
 		Max:     4 * time.Second,
 		Factor:  2,
@@ -26,7 +26,7 @@ func TestNewExponentialBackOffUsesPolicy(t *testing.T) {
 }
 
 func TestNewExponentialBackOffJitterStaysWithinBounds(t *testing.T) {
-	b := NewExponentialBackOff(RetryPolicy{
+	b := NewExponentialBackOff(Policy{
 		Initial: time.Second,
 		Max:     time.Second,
 		Factor:  2,
@@ -46,7 +46,7 @@ func TestRetryWithStopRetriesUntilSuccess(t *testing.T) {
 	b := &sequenceBackOff{durations: []time.Duration{0, 0}}
 	var notified []time.Duration
 
-	err := RetryWithStop(nil, func() error {
+	err := WithStop(nil, func() error {
 		if calls.Add(1) < 3 {
 			return errors.New("temporary")
 		}
@@ -71,12 +71,12 @@ func TestRetryWithStopDoesNotRunWhenAlreadyStopped(t *testing.T) {
 	close(stop)
 	var calls atomic.Int32
 
-	err := RetryWithStop(stop, func() error {
+	err := WithStop(stop, func() error {
 		calls.Add(1)
 		return nil
 	}, nil, &sequenceBackOff{})
 
-	if !errors.Is(err, ErrRetryStopped) {
+	if !errors.Is(err, ErrStopped) {
 		t.Fatalf("RetryWithStop() error = %v, want ErrRetryStopped", err)
 	}
 	if got := calls.Load(); got != 0 {
@@ -90,7 +90,7 @@ func TestRetryWithStopInterruptsWait(t *testing.T) {
 	started := make(chan struct{})
 
 	go func() {
-		done <- RetryWithStop(stop, func() error {
+		done <- WithStop(stop, func() error {
 			close(started)
 			return errors.New("temporary")
 		}, nil, &sequenceBackOff{durations: []time.Duration{time.Hour}})
@@ -100,7 +100,7 @@ func TestRetryWithStopInterruptsWait(t *testing.T) {
 	close(stop)
 	select {
 	case err := <-done:
-		if !errors.Is(err, ErrRetryStopped) {
+		if !errors.Is(err, ErrStopped) {
 			t.Fatalf("RetryWithStop() error = %v, want ErrRetryStopped", err)
 		}
 	case <-time.After(time.Second):
@@ -112,7 +112,7 @@ func TestRetryWithStopUnwrapsPermanentError(t *testing.T) {
 	want := errors.New("permanent")
 	var calls atomic.Int32
 
-	err := RetryWithStop(nil, func() error {
+	err := WithStop(nil, func() error {
 		calls.Add(1)
 		return backoff.Permanent(want)
 	}, nil, &sequenceBackOff{durations: []time.Duration{0}})
@@ -129,7 +129,7 @@ func TestRetryWithStopReturnsLastErrorWhenBackOffStops(t *testing.T) {
 	want := errors.New("last")
 	var calls atomic.Int32
 
-	err := RetryWithStop(nil, func() error {
+	err := WithStop(nil, func() error {
 		calls.Add(1)
 		return want
 	}, nil, backoff.WithMaxRetries(&sequenceBackOff{durations: []time.Duration{0}}, 1))

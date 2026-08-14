@@ -14,9 +14,9 @@ func TestBuildAgentListItemDropsStaleResourceValues(t *testing.T) {
 	used := uint64(500)
 	processCPU := 12.5
 	rss := uint64(256)
-	agent := &adminagent.AgentNode{
+	agent := &adminagent.Node{
 		ID:              "node-a",
-		Status:          adminagent.AgentIdle,
+		Status:          adminagent.Idle,
 		SystemInterval:  "5s",
 		SystemUpdatedAt: now.Add(-16 * time.Second),
 		LatestSystem: &adminagent.SystemSnapshot{
@@ -47,9 +47,9 @@ func TestBuildAgentListItemUsesValidatedFreshResourceValues(t *testing.T) {
 	total := uint64(4_000)
 	used := uint64(1_000)
 	wrongPercent := 99.0
-	agent := &adminagent.AgentNode{
+	agent := &adminagent.Node{
 		ID:              "node-a",
-		Status:          adminagent.AgentBusy,
+		Status:          adminagent.Busy,
 		SystemInterval:  "5s",
 		SystemUpdatedAt: now.Add(-10 * time.Second),
 		LatestSystem: &adminagent.SystemSnapshot{

@@ -168,7 +168,7 @@ func TestFakeNetSenderSecretKeyCopiesInput(t *testing.T) {
 }
 
 // newTestState 注册全部模块 + 注入 fake Context。
-func newTestState(t interface{ Helper() }, ctx context.Context, ns engine.NetSender, resolver protocol.CodecResolver) *lua.LState {
+func newTestState(ctx context.Context, t interface{ Helper() }, ns engine.NetSender, resolver protocol.CodecResolver) *lua.LState {
 	t.Helper()
 	L := lua.NewState()
 	registerAPIs(L)

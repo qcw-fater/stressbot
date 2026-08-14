@@ -12,9 +12,9 @@ import (
 
 // newWireRespState 构造带响应句柄的 Lua 环境：resp 全局变量是
 // wrapRespMessage(解码消息, body 快照) 的产物，模拟 network.tcp_request_route 返回值。
-func newWireRespState(t *testing.T) (*lua.LState, *protox.Factory, []byte) {
+func newWireRespState(t *testing.T) (*lua.LState, []byte) {
 	t.Helper()
-	L := newTestState(t, context.Background(), &fakeNetSender{}, nil)
+	L := newTestState(context.Background(), t, &fakeNetSender{}, nil)
 	t.Cleanup(L.Close)
 
 	f, msg := newFrozenTestFactoryMessage(t)
@@ -25,13 +25,13 @@ func newWireRespState(t *testing.T) (*lua.LState, *protox.Factory, []byte) {
 		t.Fatalf("Serialize 失败: %v", err)
 	}
 	L.SetGlobal("resp", wrapRespMessage(L, msg, protox.WireSnapshot(raw)))
-	return L, f, raw
+	return L, raw
 }
 
 // TestRespCleanStoreReuseRaw 未改写的响应 robot.set 后以 *WireValue 入库，
 // 且直接复用响应携带的 body 快照（零重编码）；读路径惰性取值与旧展开语义一致。
 func TestRespCleanStoreReuseRaw(t *testing.T) {
-	L, _, raw := newWireRespState(t)
+	L, raw := newWireRespState(t)
 
 	if err := L.DoString(`
 		local robot = require("robot")
@@ -72,7 +72,7 @@ func TestRespCleanStoreReuseRaw(t *testing.T) {
 // TestRespDirtyStoreRemarshal proto.set_field 改写响应后 robot.set 不得复用旧快照：
 // 重编码为当前内容，入库值反映改写。
 func TestRespDirtyStoreRemarshal(t *testing.T) {
-	L, _, raw := newWireRespState(t)
+	L, raw := newWireRespState(t)
 
 	if err := L.DoString(`
 		local robot = require("robot")
@@ -103,7 +103,7 @@ func TestRespDirtyStoreRemarshal(t *testing.T) {
 // TestRespChildDirtyPropagates 经 list_get 取出的子消息被改写时，
 // 同样置脏根句柄（同根共享脏标记），存储不得复用原始快照。
 func TestRespChildDirtyPropagates(t *testing.T) {
-	L, _, raw := newWireRespState(t)
+	L, raw := newWireRespState(t)
 
 	if err := L.DoString(`
 		local robot = require("robot")
@@ -131,7 +131,7 @@ func TestRespChildDirtyPropagates(t *testing.T) {
 // TestRespStoreThenNestedWrite 整存响应后的嵌套路径写入走 Overlay COW：
 // 写值可读回、兄弟字段保留、原始字节不受影响。
 func TestRespStoreThenNestedWrite(t *testing.T) {
-	L, _, _ := newWireRespState(t)
+	L, _ := newWireRespState(t)
 
 	if err := L.DoString(`
 		local robot = require("robot")

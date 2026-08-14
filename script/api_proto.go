@@ -119,14 +119,6 @@ func checkProtoMsg(L *lua.LState) proto.Message {
 	return msg
 }
 
-// checkProtoMsgRO 从栈中获取 proto 消息及其只读性（跳过 self 参数）。
-// readonly=true 表示消息来自广播去重的共享 *Frozen（多机器人共享同一份解码结果），
-// 调用方返回其子消息时必须保持只读传播（继续包 Frozen），绝不能交出可变包装。
-func checkProtoMsgRO(L *lua.LState) (proto.Message, bool) {
-	msg, readonly, _ := checkProtoMsgFull(L)
-	return msg, readonly
-}
-
 // checkProtoMsgFull 从栈中获取 proto 消息、只读性与响应句柄（跳过 self 参数）。
 func checkProtoMsgFull(L *lua.LState) (proto.Message, bool, *respHandle) {
 	top := L.GetTop()
@@ -471,7 +463,7 @@ func protoIterList(L *lua.LState) int {
 	}
 	if wv := findWireView(L); wv != nil {
 		// wire 视图：列表游标——一遍收集元素跨度，message 元素惰性产出子视图
-		//（零解码，脚本读哪个字段才扫哪个字段），与 list_get 的子视图语义对齐。
+		// （零解码，脚本读哪个字段才扫哪个字段），与 list_get 的子视图语义对齐。
 		// 出错推 nil、非 list 字段空迭代，行为与解码分支一致。
 		fieldName := findFirstStringArg(L)
 		if fieldName == "" {

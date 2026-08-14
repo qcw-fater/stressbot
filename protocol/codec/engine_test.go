@@ -73,17 +73,6 @@ func genBody(n int) []byte {
 	return b
 }
 
-// hexStr 用于失败诊断。
-func hexStr(b []byte) string {
-	const h = "0123456789abcdef"
-	out := make([]byte, 0, len(b)*2+2)
-	out = append(out, '0', 'x')
-	for _, c := range b {
-		out = append(out, h[c>>4], h[c&0xF])
-	}
-	return string(out)
-}
-
 // ---------------------------------------------------------------------------
 // TCP/UDP encode 结构性断言
 // ---------------------------------------------------------------------------

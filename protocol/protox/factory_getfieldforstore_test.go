@@ -107,6 +107,18 @@ func buildStoreTestBag(t *testing.T, f *Factory) proto.Message {
 	return parsed
 }
 
+func TestFieldPathsRejectInvalidListIndex(t *testing.T) {
+	factory := newStoreTestFactory(t)
+	bag := buildStoreTestBag(t, factory)
+
+	if err := factory.SetField(bag, "items[invalid].id", int64(3)); err == nil {
+		t.Fatal("SetField() error = nil, want invalid list index error")
+	}
+	if _, err := factory.GetField(bag, "items[invalid].id"); err == nil {
+		t.Fatal("GetField() error = nil, want invalid list index error")
+	}
+}
+
 // TestGetFieldForStoreEquivalence 校验 GetFieldForStore(msg, path) 与旧路径
 // navigatePath(GetFieldMap(msg), path) 对各类路径逐字等价（P1 优化的正确性契约）。
 func TestGetFieldForStoreEquivalence(t *testing.T) {

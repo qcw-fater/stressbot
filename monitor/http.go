@@ -17,21 +17,21 @@ import (
 // RegisterHandlers 将 /metrics 和 /metrics/summary 注册到 http.DefaultServeMux。
 // pprof 由 config.StartPprofServer 独立管理，不与此模块耦合。
 func RegisterHandlers(c *MetricsCollector) {
-	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
 		snap := c.Snapshot(nil, 0).PublicCopy()
 		w.Header().Set("Content-Type", "application/json")
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(snap)
 	})
-	http.HandleFunc("/metrics/summary", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/metrics/summary", func(w http.ResponseWriter, _ *http.Request) {
 		snap := c.Snapshot(nil, 0)
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		fmt.Fprintf(w, "uptime: %s\n", snap.Uptime.Round(time.Second))
-		fmt.Fprintf(w, "robots: started=%d running=%d stopped=%d errored=%d\n",
+		_, _ = fmt.Fprintf(w, "uptime: %s\n", snap.Uptime.Round(time.Second))
+		_, _ = fmt.Fprintf(w, "robots: started=%d running=%d stopped=%d errored=%d\n",
 			snap.Robots.Started, snap.Robots.Running, snap.Robots.Stopped, snap.Robots.Errored)
 		for _, a := range snap.Actions {
-			fmt.Fprintf(w, "%s: samples=%d success=%d timeout=%d failure=%d avg=%.1fms p99=%.1fms apdex=%.3f qps=%.2f\n",
+			_, _ = fmt.Fprintf(w, "%s: samples=%d success=%d timeout=%d failure=%d avg=%.1fms p99=%.1fms apdex=%.3f qps=%.2f\n",
 				a.Name, a.SampleCount, a.SuccessCount, a.TimeoutCount, a.FailureCount,
 				histogramValue(a.RTT.AvgMs), histogramValue(a.RTT.P99Ms), a.RTTApdex, a.AvgQPS)
 		}
@@ -40,7 +40,7 @@ func RegisterHandlers(c *MetricsCollector) {
 
 // StartHTTPServer 启动 HTTP 服务（非阻塞），返回优雅关闭函数。
 func StartHTTPServer(port int) (stop func(), err error) {
-	return startHTTPServerWithSubmit(port, workpool.GetWorkPool().Submit)
+	return startHTTPServerWithSubmit(port, workpool.Default().Submit)
 }
 
 func startHTTPServerWithSubmit(port int, submit func(func()) error) (stop func(), err error) {

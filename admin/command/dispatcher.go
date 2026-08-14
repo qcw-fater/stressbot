@@ -44,7 +44,7 @@ func (d *Dispatcher) ScheduleStart(ctx context.Context, task *admintask.Task, as
 	commands := make([]*controlpb.Command, 0, len(assignments))
 	startNumber := assignments[0].StartNumber
 	for _, assignment := range assignments {
-		domain := admintask.TaskAssignment{
+		domain := admintask.Dispatch{
 			TaskID: task.ID, TaskName: task.Name, StartNumber: startNumber,
 			StartIndex: admintask.AssignmentStartIndex(assignment, startNumber), TotalBots: assignment.TotalBots,
 			AccountPrefix: stringOr(robotConfig.AccountPrefix, "bot_", "robotConfig.accountPrefix"),

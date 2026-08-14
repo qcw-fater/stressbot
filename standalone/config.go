@@ -20,8 +20,8 @@ type BotConfig struct {
 	MainService   string `toml:"mainService"`
 }
 
-// StandaloneConfig 单机模式专用配置。
-type StandaloneConfig struct {
+// Settings 保存单机模式专用配置。
+type Settings struct {
 	Bot        BotConfig           `toml:"bot"`
 	StateExtra map[string]string   `toml:"stateExtra"`
 	Duration   string              `toml:"duration"`
@@ -42,7 +42,7 @@ type Config struct {
 	Log        *stresslog.Config        `toml:"log"`
 	Monitor    *monitor.CollectorConfig `toml:"monitor"`
 	Pprof      *config.PprofConfig      `toml:"pprof"`
-	Standalone *StandaloneConfig        `toml:"standalone"`
+	Standalone *Settings                `toml:"standalone"`
 	Redis      *shared.RedisConfig      `toml:"redis"`
 	Network    NetworkConfig            `toml:"network"`
 	Daemon     bool                     `toml:"daemon"`
@@ -50,7 +50,7 @@ type Config struct {
 
 // Defaults 返回填充默认值的单机配置。
 func Defaults() Config {
-	return Config{Standalone: &StandaloneConfig{Bot: BotConfig{
+	return Config{Standalone: &Settings{Bot: BotConfig{
 		AccountPrefix: "bot_",
 		StartNumber:   1,
 		TotalBots:     1,
@@ -63,7 +63,7 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 	if cfg.Standalone == nil {
-		cfg.Standalone = &StandaloneConfig{}
+		cfg.Standalone = &Settings{}
 	}
 	s := cfg.Standalone
 	if s.Bot.StartNumber == 0 {

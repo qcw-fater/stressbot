@@ -13,8 +13,9 @@ import (
 // 其整树比对分支即 walker 的 L1 fuzz）。本文件补确定性语义行与降级回退。
 
 // assertTreeEqual 整树直转 vs oracle 解码树逐字比对。
-func assertTreeEqual(t *testing.T, f *Factory, name string, raw []byte) {
+func assertTreeEqual(t *testing.T, f *Factory, raw []byte) {
 	t.Helper()
+	const name = "wiretest.Everything"
 	wv := wireOf(t, f, name, raw)
 
 	sink := newMapTreeSink()
@@ -49,7 +50,7 @@ func TestWalkWireSemanticsMatrix(t *testing.T) {
 		setF(t, f, m, "node.id", int64(7))
 		setF(t, f, m, "i32", int64(2))
 	})
-	assertTreeEqual(t, f, "wiretest.Everything", append(mustMarshal(t, a), mustMarshal(t, b)...))
+	assertTreeEqual(t, f, append(mustMarshal(t, a), mustMarshal(t, b)...))
 
 	// oneof 交替：A(node) → B(str) → A(node)，最终 node 只含第三段。
 	na := buildEverything(t, f, func(m proto.Message) {
@@ -58,7 +59,7 @@ func TestWalkWireSemanticsMatrix(t *testing.T) {
 	})
 	nb := buildEverything(t, f, func(m proto.Message) { setF(t, f, m, "choice_str", "mid") })
 	nc := buildEverything(t, f, func(m proto.Message) { setF(t, f, m, "choice_node.id", int64(3)) })
-	assertTreeEqual(t, f, "wiretest.Everything",
+	assertTreeEqual(t, f,
 		append(append(mustMarshal(t, na), mustMarshal(t, nb)...), mustMarshal(t, nc)...))
 
 	// map 重复 key：后一条 entry 整体替换。
@@ -68,7 +69,7 @@ func TestWalkWireSemanticsMatrix(t *testing.T) {
 	mb := buildEverything(t, f, func(m proto.Message) {
 		setF(t, f, m, "mstr", map[any]any{"k": int64(2)})
 	})
-	assertTreeEqual(t, f, "wiretest.Everything", append(mustMarshal(t, ma), mustMarshal(t, mb)...))
+	assertTreeEqual(t, f, append(mustMarshal(t, ma), mustMarshal(t, mb)...))
 
 	// 空消息出现：node 出现但内容为空 → 在场空表。
 	empty := buildEverything(t, f, func(m proto.Message) {
@@ -79,7 +80,7 @@ func TestWalkWireSemanticsMatrix(t *testing.T) {
 	nodeFd := md.Fields().ByName("node")
 	raw = protowire.AppendTag(raw, nodeFd.Number(), protowire.BytesType)
 	raw = protowire.AppendBytes(raw, nil)
-	assertTreeEqual(t, f, "wiretest.Everything", raw)
+	assertTreeEqual(t, f, raw)
 }
 
 // TestWalkWireAccsPoolNoContamination 池化 scratch 的复用隔离（P2 契约）：
@@ -101,9 +102,9 @@ func TestWalkWireAccsPoolNoContamination(t *testing.T) {
 	sparse := buildEverything(t, f, func(m proto.Message) { setF(t, f, m, "i32", int64(9)) })
 
 	for range 8 {
-		assertTreeEqual(t, f, "wiretest.Everything", mustMarshal(t, full))
-		assertTreeEqual(t, f, "wiretest.Everything", mustMarshal(t, empty))
-		assertTreeEqual(t, f, "wiretest.Everything", mustMarshal(t, sparse))
+		assertTreeEqual(t, f, mustMarshal(t, full))
+		assertTreeEqual(t, f, mustMarshal(t, empty))
+		assertTreeEqual(t, f, mustMarshal(t, sparse))
 	}
 }
 

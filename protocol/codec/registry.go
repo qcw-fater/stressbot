@@ -24,7 +24,7 @@ import (
 // 接口（与 brief 逐字一致）
 // ---------------------------------------------------------------------------
 
-// Cipher：offset 为明文前缀长度——前 offset 字节保持明文，仅处理 data[offset:]。
+// Cipher 约定 offset 为明文前缀长度——前 offset 字节保持明文，仅处理 data[offset:]。
 // 返回值长度必须等于 len(data)（前缀原样 + 处理后的尾部拼接）。
 type Cipher interface {
 	Encrypt(data, key []byte, offset int, params map[string]any) (out []byte, err error)
@@ -50,13 +50,13 @@ type Compressor interface {
 	Decompress(data []byte) ([]byte, error)
 }
 
-// Checksum：Sum 对给定区域算校验值（最多 8 字节语义；调用方按目标字段 size
+// Checksum 的 Sum 对给定区域算校验值（最多 8 字节语义；调用方按目标字段 size
 // 截取/对齐）。
 type Checksum interface {
 	Sum(data []byte, params map[string]any) uint64
 }
 
-// Hasher：key 非空走 HMAC 变体。
+// Hasher 在 key 非空时使用 HMAC 变体。
 type Hasher interface {
 	Hash(data, key []byte, params map[string]any) []byte
 }

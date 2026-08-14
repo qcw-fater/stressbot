@@ -43,7 +43,7 @@ type PreviewResult struct {
 // Preview 编译 schema 并执行单次 encode 或 decode，返回帧/字段解释。
 //
 // 入参：
-//   - schema：*CodecSchema（调用方应已 LoadSchema 得到；Preview 内部再次 Validate+编译）。
+//   - schema：*Schema（调用方应已 LoadSchema 得到；Preview 内部再次 Validate+编译）。
 //   - mode："encode" | "decode"。
 //   - transport："tcp" | "udp"（当前不影响单 codec 计算；保留入参为 T3/T4 语义清晰）。
 //   - route：route 字段 map（key 为字段名，value 支持 int/float/string，数值化取整）。
@@ -54,7 +54,7 @@ type PreviewResult struct {
 //
 // 失败语义：schema==nil / 编译失败 / 坏 hex / 未知 mode / 未知 transport → 填 Error 返回，
 // 不 panic。合法 encode/decode 返回 FrameHex/BodyHex + Fields。
-func Preview(schema *CodecSchema, mode, transport string, route map[string]any, bodyHex, keyHex, frameHex string) PreviewResult {
+func Preview(schema *Schema, mode, transport string, route map[string]any, bodyHex, keyHex, frameHex string) PreviewResult {
 	res := PreviewResult{Mode: mode}
 
 	// ---- 1. transport 校验（保留语义；当前不影响计算）----
@@ -97,7 +97,7 @@ func Preview(schema *CodecSchema, mode, transport string, route map[string]any, 
 }
 
 // previewEncode 执行 encode 并填 FrameHex + Fields。
-func previewEncode(res PreviewResult, c *SchemaCodec, schema *CodecSchema, route map[string]any, bodyHex string, key []byte) PreviewResult {
+func previewEncode(res PreviewResult, c *SchemaCodec, schema *Schema, route map[string]any, bodyHex string, key []byte) PreviewResult {
 	body, err := decodeHexOrError(bodyHex)
 	if err != nil {
 		res.Error = fmt.Sprintf("bodyHex 非法：%v", err)
@@ -134,7 +134,7 @@ func normalizeRouteMap(route map[string]any) map[string]any {
 }
 
 // previewDecode 执行 decode 并填 BodyHex + RouteKey + HeaderErr + Fields。
-func previewDecode(res PreviewResult, c *SchemaCodec, schema *CodecSchema, frameHex string, key []byte) PreviewResult {
+func previewDecode(res PreviewResult, c *SchemaCodec, schema *Schema, frameHex string, key []byte) PreviewResult {
 	frame, err := decodeHexOrError(frameHex)
 	if err != nil {
 		res.Error = fmt.Sprintf("frameHex 非法：%v", err)
@@ -155,7 +155,7 @@ func previewDecode(res PreviewResult, c *SchemaCodec, schema *CodecSchema, frame
 
 // extractFields 按 schema.Header 的 (name, offset, size, type, endian) 从 header 字节
 // 读出每个字段的数值化值。endian 缺省回退 schema.EndianDefault（le/be）。
-func extractFields(schema *CodecSchema, header []byte) []PreviewField {
+func extractFields(schema *Schema, header []byte) []PreviewField {
 	if schema == nil || len(schema.Header) == 0 || len(header) == 0 {
 		return nil
 	}
@@ -166,9 +166,10 @@ func extractFields(schema *CodecSchema, header []byte) []PreviewField {
 		pf := PreviewField{Name: f.Name, Offset: f.Offset, Size: f.Size}
 		if end <= len(header) {
 			order := defaultEndian
-			if f.Endian == "be" {
+			switch f.Endian {
+			case "be":
 				order = binary.BigEndian
-			} else if f.Endian == "le" {
+			case "le":
 				order = binary.LittleEndian
 			}
 			pf.Value = readFieldU64(header[f.Offset:end], order, f.Type)

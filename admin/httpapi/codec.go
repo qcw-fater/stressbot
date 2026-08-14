@@ -6,11 +6,11 @@
 //
 // 设计约束（与 t4-2-brief 逐条对齐）：
 //   - **纯计算**：handler 内只做「解析请求 → 调 codec → 返回 JSON」，不读 conf/adapter、
-//     不入库、不下发任务、不依赖 AdminServer 的任何运行态字段（tasks/agents/history...）。
+//     不入库、不下发任务、不依赖 Handler 的任何运行态字段（tasks/agents/history...）。
 //     schema 来自请求体（用户正在编辑的 codec 配置），而非磁盘文件。
 //   - **preview 返回 HTTP 200 即使 PreviewResult.Error 非空**：这是编辑器预览语义，
 //     前端据 Error 字段展示提示，不是 HTTP 错误。仅当请求 JSON 本身非法（unmarshal 失败）
-//     或 schema 字段反序列化为 CodecSchema 失败时才返回 400。
+//     或 schema 字段反序列化为 codec.Schema 失败时才返回 400。
 //   - 遵循现有 admin handler 模式（方法签名 http.HandlerFunc、json 解码、writeJSON/writeError）。
 package httpapi
 
@@ -26,7 +26,7 @@ import (
 // codecPreviewRequest 是 POST /sbot/codec/preview 的请求体。
 //
 // schema 用 json.RawMessage 承载，分两步反序列化：先解出整张请求体，再把 schema 原文
-// unmarshal 成 *codec.CodecSchema。这样 schema 解析失败能单独返回 400（坏 schema），与
+// unmarshal 成 *codec.Schema。这样 schema 解析失败能单独返回 400（坏 schema），与
 // 请求体整体非法 JSON 区分清晰。
 type codecPreviewRequest struct {
 	Schema    json.RawMessage `json:"schema"`              // 完整 codec.json 内容（对象形式）
@@ -42,11 +42,11 @@ type codecPreviewRequest struct {
 //
 // 处理流程：
 //  1. 解析请求体；非法 JSON → 400。
-//  2. schema 字段反序列化为 *codec.CodecSchema；失败 → 400（schema 结构非法）。
+//  2. schema 字段反序列化为 *codec.Schema；失败 → 400（schema 结构非法）。
 //  3. 调 codec.Preview（纯计算，失败填 Error 不 panic）。
 //  4. 返回 PreviewResult JSON（**HTTP 200 即使 Error 非空**）。
 //
-// 端点不访问 AdminServer 的任何运行态字段，handler 是 *AdminServer 方法仅为遵循现有
+// 端点不访问 Handler 的任何运行态字段，作为 Handler 方法仅为遵循现有
 // admin handler 注册约定。
 func (s *Handler) handleCodecPreview(w http.ResponseWriter, r *http.Request) {
 	var req codecPreviewRequest
@@ -65,7 +65,7 @@ func (s *Handler) handleCodecPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var schema codec.CodecSchema
+	var schema codec.Schema
 	if err := json.Unmarshal(req.Schema, &schema); err != nil {
 		writeError(w, apierror.ErrInvalidArgument.WithMessage("invalid schema: "+err.Error()))
 		return
@@ -80,6 +80,6 @@ func (s *Handler) handleCodecPreview(w http.ResponseWriter, r *http.Request) {
 //
 // 直接返回 codec.Algorithms()（纯计算，按 op 分组稳定排序：cipher→compress→checksum→hash）。
 // 不接受入参（query 忽略）。
-func (s *Handler) handleCodecAlgorithms(w http.ResponseWriter, r *http.Request) {
+func (s *Handler) handleCodecAlgorithms(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, codec.Algorithms())
 }

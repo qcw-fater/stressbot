@@ -33,7 +33,7 @@ type grpcControlService struct {
 // callbacks, keeping this package focused on protocol/session handling.
 type Dependencies struct {
 	Sessions               *SessionRegistry
-	Agents                 *agent.AgentRegistry
+	Agents                 *agent.Registry
 	Commands               CommandBus
 	Bundles                *bundle.Store
 	Metrics                *metrics.Ingestor
@@ -41,7 +41,7 @@ type Dependencies struct {
 	LeaseDuration          time.Duration
 	OwnsActiveTask         func(agentID, taskID string) bool
 	ScheduleStop           func(context.Context, string, []string, string) error
-	AcceptTaskReport       func(admintask.TaskCompletionReport) error
+	AcceptTaskReport       func(admintask.CompletionReport) error
 	IsPermanentReportError func(error) bool
 }
 
@@ -109,7 +109,7 @@ func (svc *grpcControlService) Session(stream controlpb.AgentControlService_Sess
 	if err := svc.deps.Commands.Replay(session.Context(), session); err != nil {
 		return status.Error(codes.Unavailable, err.Error())
 	}
-	if err := workpool.GetWorkPool().Submit(func() {
+	if err := workpool.Default().Submit(func() {
 		if sendErr := svc.sendLoop(session, stream); sendErr != nil {
 			stresslog.Debug("[ADMIN] gRPC 会话发送循环结束", zap.String("agentID", session.AgentID()), zap.Error(sendErr))
 			session.Cancel()
@@ -207,7 +207,7 @@ func (svc *grpcControlService) handleEvent(session *Session, event *controlpb.Ag
 			session.OfferHeartbeat(&controlpb.HeartbeatAck{Generation: session.Generation(), ServerTimeUnixNano: now.UnixNano(), LeaseDeadlineUnixNano: now.Add(svc.deps.LeaseDuration).UnixNano()})
 		} else if session.TryMarkOrphanStop() {
 			agentID, taskID := session.AgentID(), hb.CurrentTaskId
-			workpool.GetWorkPool().Go(func() {
+			workpool.Default().Go(func() {
 				ctx, cancel := commandContext()
 				err := svc.deps.ScheduleStop(ctx, taskID, []string{agentID}, "Admin 不再持有该任务，停止孤儿压测")
 				cancel()
@@ -242,7 +242,7 @@ func (svc *grpcControlService) handleEvent(session *Session, event *controlpb.Ag
 					message = "节点拒绝停止命令，无法等待该节点的完成报告"
 				}
 				cleanup := robot.UnknownCleanupStatus(robot.CleanupReasonStopWaitTimeout, message)
-				reportErr := svc.deps.AcceptTaskReport(admintask.TaskCompletionReport{
+				reportErr := svc.deps.AcceptTaskReport(admintask.CompletionReport{
 					AgentID: session.AgentID(), TaskID: command.TaskId, Result: admintask.ResultFailed, ErrorMsg: ack.Reason,
 					FinishedAt: time.Now(), CleanupStatus: &cleanup,
 				})
@@ -290,18 +290,18 @@ func (svc *grpcControlService) handleEvent(session *Session, event *controlpb.Ag
 	return nil
 }
 
-func agentNodeFromHello(hello *controlpb.Hello) *agent.AgentNode {
-	return &agent.AgentNode{ID: hello.AgentId, Name: hello.Name, AppVersion: hello.AppVersion, MaxBots: int(hello.MaxBots),
+func agentNodeFromHello(hello *controlpb.Hello) *agent.Node {
+	return &agent.Node{ID: hello.AgentId, Name: hello.Name, AppVersion: hello.AppVersion, MaxBots: int(hello.MaxBots),
 		StressInterval: time.Duration(hello.MetricsIntervalNanos).String(), SystemInterval: time.Duration(hello.MetricsIntervalNanos).String(),
 		StaticInfo: staticInfoFromProto(hello.StaticInfo), Status: runtimeStatusAdmin(hello.Status), LastHeartbeatAt: time.Now(),
 		CurrentTaskID: hello.CurrentTaskId, CurrentBots: int(hello.CurrentBots)}
 }
 
-func runtimeStatusAdmin(statusValue controlpb.AgentRuntimeStatus) agent.AgentStatus {
+func runtimeStatusAdmin(statusValue controlpb.AgentRuntimeStatus) agent.Status {
 	if statusValue == controlpb.AgentRuntimeStatus_AGENT_RUNTIME_STATUS_BUSY {
-		return agent.AgentBusy
+		return agent.Busy
 	}
-	return agent.AgentIdle
+	return agent.Idle
 }
 
 func runtimeStatusString(statusValue controlpb.AgentRuntimeStatus) string {
@@ -328,6 +328,6 @@ func (e *permanentReportError) Error() string { return e.err.Error() }
 func (e *permanentReportError) Unwrap() error { return e.err }
 
 func isPermanentReportError(err error) bool {
-	var target *permanentReportError
-	return errors.As(err, &target)
+	_, ok := errors.AsType[*permanentReportError](err)
+	return ok
 }

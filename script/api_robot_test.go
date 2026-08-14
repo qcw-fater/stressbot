@@ -8,7 +8,7 @@ import (
 )
 
 func TestRobotError(t *testing.T) {
-	L := newTestState(t, context.Background(), &fakeNetSender{}, nil)
+	L := newTestState(context.Background(), t, &fakeNetSender{}, nil)
 	defer L.Close()
 	if err := L.DoString(`
 		local robot = require("robot")

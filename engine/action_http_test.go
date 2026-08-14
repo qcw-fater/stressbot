@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	flowdef "stressbot/flow"
 	"strings"
 	"testing"
@@ -49,7 +50,7 @@ func TestHTTPRequest_Non2xx_DetailIncludesStatusAndBody(t *testing.T) {
 	if err == nil {
 		t.Fatal("非 2xx 应返回 error")
 	}
-	ae2, ok := err.(*errcode.ActionError)
+	ae2, ok := errors.AsType[*errcode.ActionError](err)
 	if !ok {
 		t.Fatalf("应返回 *ActionError，实际 %T：%v", err, err)
 	}

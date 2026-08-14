@@ -14,7 +14,7 @@ import (
 // （wrapFrozenMessage 包装的 *Frozen）注入全局 fmsg。
 func newFrozenProtoEnv(t *testing.T) *lua.LState {
 	t.Helper()
-	L := newTestState(t, context.Background(), &fakeNetSender{}, nil)
+	L := newTestState(context.Background(), t, &fakeNetSender{}, nil)
 	t.Cleanup(L.Close)
 	f, msg := newFrozenTestFactoryMessage(t)
 	GetContext(L).Factory = f

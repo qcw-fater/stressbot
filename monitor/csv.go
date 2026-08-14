@@ -8,7 +8,7 @@ import (
 )
 
 // ExportCSV 将快照写入 CSV 文件。
-func ExportCSV(c *MetricsCollector, path string) error {
+func ExportCSV(c *MetricsCollector, path string) (err error) {
 	snap := c.Snapshot(nil, 0)
 	if len(snap.Actions) == 0 {
 		return nil
@@ -23,10 +23,13 @@ func ExportCSV(c *MetricsCollector, path string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); err == nil {
+			err = closeErr
+		}
+	}()
 
 	w := csv.NewWriter(f)
-	defer w.Flush()
 
 	// 新增"网络样本数 / 客户端开销"两列，对应 latency 拆分后的 monitor 模型。
 	// 网络延迟列保留原名，但语义已改为"纯网络往返"，不再含客户端构建/解析。
@@ -39,11 +42,13 @@ func ExportCSV(c *MetricsCollector, path string) error {
 		"Apdex", "平均发送字节", "平均接收字节",
 		"平均QPS", "压测时长(s)",
 	}
-	_ = w.Write(header) // CSV 写入错误不影响主流程
+	if err := w.Write(header); err != nil {
+		return fmt.Errorf("写入 CSV 表头失败: %w", err)
+	}
 
 	uptimeSec := snap.UptimeSec
 	for _, a := range snap.Actions {
-		_ = w.Write([]string{ // 同上
+		if err := w.Write([]string{
 			a.Name,
 			fmt.Sprintf("%d", a.SampleCount),
 			fmt.Sprintf("%d", a.SuccessCount),
@@ -64,7 +69,13 @@ func ExportCSV(c *MetricsCollector, path string) error {
 			fmt.Sprintf("%.1f", a.AvgRecvBytes),
 			fmt.Sprintf("%.2f", a.AvgQPS),
 			fmt.Sprintf("%.1f", uptimeSec),
-		})
+		}); err != nil {
+			return fmt.Errorf("写入 CSV 数据失败: %w", err)
+		}
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return fmt.Errorf("刷新 CSV 数据失败: %w", err)
 	}
 	return nil
 }

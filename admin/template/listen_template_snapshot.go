@@ -71,7 +71,7 @@ func readListenSnapshotRows(ctx context.Context, q listenSnapshotQuerier) ([]Lis
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]ListenTemplate, 0)
 	for rows.Next() {
 		item, err := scanListenTemplate(rows)

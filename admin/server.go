@@ -22,7 +22,7 @@ const (
 	managementIdleTimeout       = 120 * time.Second
 )
 
-func (s *AdminServer) newManagementServer() *http.Server {
+func (s *Server) newManagementServer() *http.Server {
 	return &http.Server{
 		Addr: net.JoinHostPort(s.cfg.Server.ListenHost, strconv.Itoa(s.cfg.Server.Port)),
 		Handler: httpapi.NewHandler(httpapi.Dependencies{
@@ -47,13 +47,14 @@ type adminServeResult struct {
 	err  error
 }
 
-func (s *AdminServer) serveServers(ctx context.Context) error {
-	managementListener, err := net.Listen("tcp", s.managementSrv.Addr)
+func (s *Server) serveServers(ctx context.Context) error {
+	var listenConfig net.ListenConfig
+	managementListener, err := listenConfig.Listen(ctx, "tcp", s.managementSrv.Addr)
 	if err != nil {
 		return fmt.Errorf("management server listen: %w", err)
 	}
 	controlPlaneAddr := net.JoinHostPort(s.cfg.ControlPlane.ListenHost, strconv.Itoa(s.cfg.ControlPlane.Port))
-	controlPlaneListener, err := net.Listen("tcp", controlPlaneAddr)
+	controlPlaneListener, err := listenConfig.Listen(ctx, "tcp", controlPlaneAddr)
 	if err != nil {
 		_ = managementListener.Close()
 		return fmt.Errorf("control plane server listen: %w", err)
@@ -61,7 +62,7 @@ func (s *AdminServer) serveServers(ctx context.Context) error {
 
 	results := make(chan adminServeResult, 2)
 	serve := func(name string, server *http.Server, listener net.Listener) {
-		workpool.GetWorkPool().Go(func() {
+		workpool.Default().Go(func() {
 			err := server.Serve(listener)
 			if errors.Is(err, http.ErrServerClosed) {
 				err = nil
@@ -70,7 +71,7 @@ func (s *AdminServer) serveServers(ctx context.Context) error {
 		})
 	}
 	serve("management", s.managementSrv, managementListener)
-	workpool.GetWorkPool().Go(func() {
+	workpool.Default().Go(func() {
 		err := s.grpcSrv.Serve(controlPlaneListener)
 		if errors.Is(err, grpc.ErrServerStopped) {
 			err = nil
@@ -91,14 +92,14 @@ func (s *AdminServer) serveServers(ctx context.Context) error {
 	}
 }
 
-func (s *AdminServer) shutdownServers(ctx context.Context) error {
+func (s *Server) shutdownServers(ctx context.Context) error {
 	var shutdownErr error
 	if s.sessions != nil {
 		s.sessions.Close("Admin 正在关闭")
 	}
 	if s.grpcSrv != nil {
 		done := make(chan struct{})
-		workpool.GetWorkPool().Go(func() {
+		workpool.Default().Go(func() {
 			s.grpcSrv.GracefulStop()
 			close(done)
 		})

@@ -7,17 +7,17 @@ import (
 )
 
 // Status represents an Admin-side Agent availability state.
-type AgentStatus string
+type Status string
 
 const (
-	AgentIdle      AgentStatus = "idle"
-	AgentBusy      AgentStatus = "busy"
-	AgentUnhealthy AgentStatus = "unhealthy"
-	AgentOffline   AgentStatus = "offline"
+	Idle      Status = "idle"
+	Busy      Status = "busy"
+	Unhealthy Status = "unhealthy"
+	Offline   Status = "offline"
 )
 
-// AgentNode is the registry's current view of a connected Agent.
-type AgentNode struct {
+// Node is the registry's current view of a connected Agent.
+type Node struct {
 	ID             string     `json:"agentId"`
 	Name           string     `json:"name"`
 	Address        string     `json:"address"`
@@ -27,10 +27,10 @@ type AgentNode struct {
 	SystemInterval string     `json:"systemInterval"`
 	StaticInfo     StaticInfo `json:"staticInfo"`
 
-	Status          AgentStatus `json:"status"`
-	LastHeartbeatAt time.Time   `json:"lastHeartbeatAt"`
-	CurrentTaskID   string      `json:"currentTaskId,omitempty"`
-	CurrentBots     int         `json:"currentBots"`
+	Status          Status    `json:"status"`
+	LastHeartbeatAt time.Time `json:"lastHeartbeatAt"`
+	CurrentTaskID   string    `json:"currentTaskId,omitempty"`
+	CurrentBots     int       `json:"currentBots"`
 
 	LatestStress    *monitor.CollectorSnapshot `json:"-"`
 	LatestSystem    *SystemSnapshot            `json:"-"`

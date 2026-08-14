@@ -16,7 +16,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (s *Handler) handleGetMetrics(w http.ResponseWriter, r *http.Request) {
+func (s *Handler) handleGetMetrics(w http.ResponseWriter, _ *http.Request) {
 	active := s.tasks.ActiveTask()
 	if active == nil {
 		writeJSON(w, http.StatusOK, &metrics.StressAggregate{
@@ -37,7 +37,7 @@ func (s *Handler) handleGetMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetMetricsSummary 文本摘要。
-func (s *Handler) handleGetMetricsSummary(w http.ResponseWriter, r *http.Request) {
+func (s *Handler) handleGetMetricsSummary(w http.ResponseWriter, _ *http.Request) {
 	active := s.tasks.ActiveTask()
 	if active == nil {
 		writeJSON(w, http.StatusOK, map[string]string{"summary": "no active task"})
@@ -67,10 +67,10 @@ func (s *Handler) handleGetMetricsSummary(w http.ResponseWriter, r *http.Request
 		}
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Write([]byte(b.String()))
+	_, _ = w.Write([]byte(b.String()))
 }
 
-func (s *Handler) handleGetAgentMetrics(w http.ResponseWriter, r *http.Request) {
+func (s *Handler) handleGetAgentMetrics(w http.ResponseWriter, _ *http.Request) {
 	agents := s.agents.List()
 	items := make([]map[string]any, 0, len(agents))
 	for _, a := range agents {
@@ -102,18 +102,18 @@ func (s *Handler) handleGetSingleAgentMetrics(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, agent.LatestStress.PublicCopy())
 }
 
-func (s *Handler) handleGetSystem(w http.ResponseWriter, r *http.Request) {
+func (s *Handler) handleGetSystem(w http.ResponseWriter, _ *http.Request) {
 	active := s.tasks.ActiveTask()
 	snap := s.aggregator.AggregateSystem(taskSystemAgentIDs(active))
 	writeJSON(w, http.StatusOK, snap)
 }
 
-func (s *Handler) handleGetSystemAgents(w http.ResponseWriter, r *http.Request) {
+func (s *Handler) handleGetSystemAgents(w http.ResponseWriter, _ *http.Request) {
 	agents := s.agents.List()
 	now := time.Now()
 	items := make([]map[string]any, 0, len(agents))
 	for _, a := range agents {
-		if a.Status == adminagent.AgentOffline {
+		if a.Status == adminagent.Offline {
 			continue
 		}
 		item := map[string]any{

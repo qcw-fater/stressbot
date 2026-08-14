@@ -38,20 +38,20 @@ func cleanupStatusToProto(src *robot.CleanupStatus) *controlpb.CleanupStatus {
 	return out
 }
 
-func taskResultToProto(src agenttask.TaskResult) controlpb.TaskResultCode {
+func taskResultToProto(src agenttask.Result) controlpb.TaskResultCode {
 	switch src {
-	case agenttask.TaskCompleted:
+	case agenttask.Completed:
 		return controlpb.TaskResultCode_TASK_RESULT_CODE_COMPLETED
-	case agenttask.TaskStopped:
+	case agenttask.Stopped:
 		return controlpb.TaskResultCode_TASK_RESULT_CODE_STOPPED
-	case agenttask.TaskFailed:
+	case agenttask.Failed:
 		return controlpb.TaskResultCode_TASK_RESULT_CODE_FAILED
 	default:
 		return controlpb.TaskResultCode_TASK_RESULT_CODE_UNSPECIFIED
 	}
 }
 
-func finalReportToProto(reportID string, src agenttask.TaskCompletionReport) *controlpb.FinalReport {
+func finalReportToProto(reportID string, src agenttask.CompletionReport) *controlpb.FinalReport {
 	return &controlpb.FinalReport{
 		ReportId:           reportID,
 		AgentId:            src.AgentID,

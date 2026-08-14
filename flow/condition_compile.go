@@ -180,12 +180,10 @@ func (p *conditionParser) peek() token {
 	return p.tokens[p.pos]
 }
 
-func (p *conditionParser) next() token {
-	token := p.tokens[p.pos]
-	if token.kind != tokEOF {
+func (p *conditionParser) next() {
+	if p.tokens[p.pos].kind != tokEOF {
 		p.pos++
 	}
-	return token
 }
 
 func (p *conditionParser) atEnd() bool {

@@ -241,8 +241,8 @@ func TestLoadTOML_UnknownFieldError(t *testing.T) {
 		t.Errorf("错误消息应包含「未知字段」，得到: %v", err)
 	}
 
-	var strictErr *toml.StrictMissingError
-	if !errors.As(err, &strictErr) {
+	strictErr, ok := errors.AsType[*toml.StrictMissingError](err)
+	if !ok {
 		t.Fatalf("错误链应包含 *toml.StrictMissingError，得到: %T: %v", err, err)
 	}
 	if len(strictErr.Errors) != 1 || strings.Join(strictErr.Errors[0].Key(), ".") != "misspelled" {

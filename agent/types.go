@@ -1,9 +1,9 @@
 package agent
 
-// AgentStatus Agent 运行状态。
-type AgentStatus string
+// Status 表示 Agent 运行状态。
+type Status string
 
 const (
-	StatusIdle AgentStatus = "idle"
-	StatusBusy AgentStatus = "busy"
+	StatusIdle Status = "idle"
+	StatusBusy Status = "busy"
 )

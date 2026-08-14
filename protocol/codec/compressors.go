@@ -147,7 +147,7 @@ func readAllSized(r io.Reader, hint int) ([]byte, error) {
 		out = append(out, rest...)
 		perr = rerr
 	}
-	if perr != nil && perr != io.EOF {
+	if perr != nil && !errors.Is(perr, io.EOF) {
 		return nil, perr
 	}
 	return out, nil

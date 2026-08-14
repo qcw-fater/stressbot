@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,23 +19,6 @@ import (
 
 	"go.uber.org/zap"
 )
-
-// taskExpectedAgents 返回该任务合法完成上报的 Agent 集合：优先 SucceededAgents，
-// 为空时回退到 Assignments 的 Agent 列表（与完成阈值口径一致）。
-// 用于校验 gRPC 最终报告来源，拒绝未分配节点的伪造或迟到报告。
-func taskExpectedAgents(t *admintask.Task) map[string]struct{} {
-	set := make(map[string]struct{})
-	if len(t.SucceededAgents) > 0 {
-		for _, id := range t.SucceededAgents {
-			set[id] = struct{}{}
-		}
-		return set
-	}
-	for _, a := range t.Assignments {
-		set[a.AgentID] = struct{}{}
-	}
-	return set
-}
 
 // ── 前端-任务 ──
 
@@ -58,7 +42,7 @@ func (s *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var cfg admintask.TaskConfig
+	var cfg admintask.Config
 
 	// flow.json（必需）
 	flowFile, _, err := r.FormFile("flow.json")
@@ -216,7 +200,7 @@ func (s *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	if flowTemplateID != "" && s.flows != nil {
 		if _, err := s.flows.Get(r.Context(), flowTemplateID); err != nil {
 			// 区分"模板不存在"（404）与 DB 故障（500），避免把连接错误误报为模板缺失。
-			if ae, ok := err.(*apierror.Error); ok && ae.Code == apierror.ErrFlowTemplateNotFound.Code {
+			if ae, ok := errors.AsType[*apierror.Error](err); ok && ae.Code == apierror.ErrFlowTemplateNotFound.Code {
 				writeError(w, apierror.ErrFlowTemplateNotFound.WithMessage("来源流程模板不存在"))
 			} else {
 				writeError(w, apierror.ErrInternal.WithMessage(err.Error()))
@@ -231,7 +215,7 @@ func (s *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	task := &admintask.Task{
 		ID:             s.nextID(),
 		Name:           name,
-		State:          admintask.TaskPending,
+		State:          admintask.Pending,
 		TotalBots:      totalBots,
 		Config:         cfg,
 		FlowTemplateID: flowTemplateID,
@@ -331,7 +315,7 @@ func (s *Handler) handleGetTaskConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(task.Config.FlowJSON)
+		_, _ = w.Write(task.Config.FlowJSON)
 
 	case "config.json":
 		// Agent 运行时配置（robotConfig + 超时等）
@@ -342,7 +326,7 @@ func (s *Handler) handleGetTaskConfig(w http.ResponseWriter, r *http.Request) {
 			"deadline":    task.Config.Deadline,
 		})
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(configJSON)
+		_, _ = w.Write(configJSON)
 
 	default:
 		// adapter/*_codec.json（按 basename 匹配 Codecs）或 adapter/errors.json
@@ -354,24 +338,24 @@ func (s *Handler) handleGetTaskConfig(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				w.Header().Set("Content-Type", "application/json")
-				w.Write(task.Config.ErrorMap)
+				_, _ = w.Write(task.Config.ErrorMap)
 				return
 			}
 			if data, found := task.Config.Codecs[name]; found {
 				w.Header().Set("Content-Type", "application/json")
-				w.Write(data)
+				_, _ = w.Write(data)
 				return
 			}
 		}
 		// proto 文件或 lua 脚本
 		if data, found := task.Config.ProtoFiles[path]; found {
 			w.Header().Set("Content-Type", "application/octet-stream")
-			w.Write(data)
+			_, _ = w.Write(data)
 			return
 		}
 		if data, found := task.Config.LuaScripts[path]; found {
 			w.Header().Set("Content-Type", "application/octet-stream")
-			w.Write(data)
+			_, _ = w.Write(data)
 			return
 		}
 		// 尝试去掉 proto/ 或 scripts/ 前缀匹配
@@ -381,12 +365,12 @@ func (s *Handler) handleGetTaskConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if data, found := task.Config.ProtoFiles[baseName]; found {
 			w.Header().Set("Content-Type", "application/octet-stream")
-			w.Write(data)
+			_, _ = w.Write(data)
 			return
 		}
 		if data, found := task.Config.LuaScripts[baseName]; found {
 			w.Header().Set("Content-Type", "application/octet-stream")
-			w.Write(data)
+			_, _ = w.Write(data)
 			return
 		}
 		http.NotFound(w, r)
@@ -410,23 +394,26 @@ func (s *Handler) handleStartTask(w http.ResponseWriter, r *http.Request) {
 	// 若使用但服务器未配置 Redis，直接失败并提示，避免任务跑起来后 share.* 全部报错。
 	sharedUsed := taskUsesShare(task)
 	if sharedUsed && !s.redisEnabled() {
-		if _, terr := s.tasks.Transition(id, admintask.TaskStarting, admintask.TaskFailed); terr != nil {
+		if _, terr := s.tasks.Transition(id, admintask.Starting, admintask.Failed); terr != nil {
 			stresslog.Warn("[ADMIN] 状态转换失败 starting→failed",
 				zap.String("taskID", id), zap.Error(terr))
 		}
 		writeError(w, apierror.ErrSharedUnavailable.WithMessage("任务脚本使用了共享状态(share)，但服务器未配置 Redis，无法启动"))
 		return
 	}
-	s.tasks.Update(id, func(t *admintask.Task) {
+	if err := s.tasks.Update(id, func(t *admintask.Task) {
 		t.SharedUsed = sharedUsed
 		t.SharedRunID = id
-	})
+	}); err != nil {
+		writeError(w, err)
+		return
+	}
 
 	// 分配 Agent
-	idleAgents := s.agents.ListByStatus(adminagent.AgentIdle)
+	idleAgents := s.agents.ListByStatus(adminagent.Idle)
 	assignments, err := s.assigner.Assign(task, idleAgents, task.Config.RobotConfig.StartNumber)
 	if err != nil {
-		if _, terr := s.tasks.Transition(id, admintask.TaskStarting, admintask.TaskFailed); terr != nil {
+		if _, terr := s.tasks.Transition(id, admintask.Starting, admintask.Failed); terr != nil {
 			stresslog.Warn("[ADMIN] 状态转换失败 starting→failed",
 				zap.String("taskID", id), zap.Error(terr))
 		}
@@ -443,7 +430,7 @@ func (s *Handler) handleStartTask(w http.ResponseWriter, r *http.Request) {
 		zap.Int("assignments", len(assignments)))
 
 	if err := admintask.ValidateDistributedConcurrency(task.Config.RobotConfig, assignments); err != nil {
-		if _, terr := s.tasks.Transition(id, admintask.TaskStarting, admintask.TaskFailed); terr != nil {
+		if _, terr := s.tasks.Transition(id, admintask.Starting, admintask.Failed); terr != nil {
 			stresslog.Warn("[ADMIN] 状态转换失败 starting→failed",
 				zap.String("taskID", id), zap.Error(terr))
 		}
@@ -452,9 +439,12 @@ func (s *Handler) handleStartTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 保存分配方案
-	s.tasks.Update(id, func(t *admintask.Task) {
+	if err := s.tasks.Update(id, func(t *admintask.Task) {
 		t.Assignments = assignments
-	})
+	}); err != nil {
+		writeError(w, err)
+		return
+	}
 
 	// 启动 Sampler
 	if s.sampler != nil {
@@ -464,7 +454,7 @@ func (s *Handler) handleStartTask(w http.ResponseWriter, r *http.Request) {
 	// 异步推送任务到各 Agent（捕获值，避免 data race）
 	taskID := task.ID
 	taskName := task.Name
-	workpool.GetWorkPool().Go(func() { s.startTaskBackground(taskID, taskName, assignments) })
+	workpool.Default().Go(func() { s.startTaskBackground(taskID, taskName, assignments) })
 
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"taskId":      id,
@@ -485,15 +475,17 @@ func (s *Handler) startTaskBackground(taskID, taskName string, assignments []adm
 	succeeded, err := s.scheduleStartCommands(ctx, task, assignments)
 	cancel()
 	if err == nil {
-		_ = s.tasks.Update(taskID, func(current *admintask.Task) { current.SucceededAgents = succeeded })
-		_, err = s.tasks.Transition(taskID, admintask.TaskStarting, admintask.TaskRunning)
+		if updateErr := s.tasks.Update(taskID, func(current *admintask.Task) { current.SucceededAgents = succeeded }); updateErr != nil {
+			stresslog.Warn("[ADMIN] 保存成功下发节点失败", zap.String("taskID", taskID), zap.Error(updateErr))
+		}
+		_, err = s.tasks.Transition(taskID, admintask.Starting, admintask.Running)
 		if err == nil {
 			s.finishTaskIfFullyReported(taskID)
 		}
 	}
 	if err != nil {
 		stresslog.Error("[ADMIN] 创建 gRPC 启动命令失败", zap.String("taskID", taskID), zap.String("taskName", taskName), zap.Error(err))
-		_, _ = s.tasks.Transition(taskID, admintask.TaskStarting, admintask.TaskFailed)
+		_, _ = s.tasks.Transition(taskID, admintask.Starting, admintask.Failed)
 		if s.sampler != nil {
 			s.sampler.Stop(taskID)
 		}
@@ -510,12 +502,12 @@ func (s *Handler) handleStopTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, apierror.ErrTaskNotFound)
 		return
 	}
-	if task.State != admintask.TaskRunning {
+	if task.State != admintask.Running {
 		writeError(w, apierror.ErrTaskInvalidState.WithMessage(fmt.Sprintf("task is %s, expected running", task.State)))
 		return
 	}
 
-	if _, err := s.tasks.Transition(id, admintask.TaskRunning, admintask.TaskStopping); err != nil {
+	if _, err := s.tasks.Transition(id, admintask.Running, admintask.Stopping); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -536,13 +528,13 @@ func (s *Handler) handleStopTask(w http.ResponseWriter, r *http.Request) {
 		err := s.scheduleStopCommands(ctx, id, grpcTargets, "用户停止任务")
 		cancel()
 		if err != nil {
-			_, _ = s.tasks.Transition(id, admintask.TaskStopping, admintask.TaskRunning)
+			_, _ = s.tasks.Transition(id, admintask.Stopping, admintask.Running)
 			writeError(w, apierror.ErrInternal.WithMessage("创建停止命令失败: "+err.Error()))
 			return
 		}
 		allReported := s.synthesizeOfflineReports(id)
 		if allReported {
-			_, _ = s.tasks.Transition(id, admintask.TaskStopping, admintask.TaskStopped)
+			_, _ = s.tasks.Transition(id, admintask.Stopping, admintask.Stopped)
 		} else {
 			s.startStopTimeout(id)
 		}

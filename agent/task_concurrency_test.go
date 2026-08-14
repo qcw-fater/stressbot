@@ -26,7 +26,7 @@ func TestSubmitTaskConcurrentOnlyOneReservation(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			err := a.submitTaskWithSubmit(
-				&agenttask.TaskAssignment{TaskID: fmt.Sprintf("task-%d", i)},
+				&agenttask.Assignment{TaskID: fmt.Sprintf("task-%d", i)},
 				func(func()) error {
 					submitted.Add(1)
 					return nil
@@ -62,7 +62,7 @@ func TestCancelOldTaskConcurrentWithReplacementNeverCancelsNewTask(t *testing.T)
 		_, oldCancel := context.WithCancel(context.Background())
 		newCtx, newCancel := context.WithCancel(context.Background())
 		a := &Agent{
-			currentTask: &agenttask.TaskAssignment{TaskID: "old-task"},
+			currentTask: &agenttask.Assignment{TaskID: "old-task"},
 			taskCancel:  oldCancel,
 		}
 		start := make(chan struct{})
@@ -77,7 +77,7 @@ func TestCancelOldTaskConcurrentWithReplacementNeverCancelsNewTask(t *testing.T)
 			defer wg.Done()
 			<-start
 			a.mu.Lock()
-			a.currentTask = &agenttask.TaskAssignment{TaskID: "new-task"}
+			a.currentTask = &agenttask.Assignment{TaskID: "new-task"}
 			a.taskCancel = newCancel
 			a.mu.Unlock()
 		}()

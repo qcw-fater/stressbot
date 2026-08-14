@@ -511,7 +511,7 @@ func luaToGoValue(v lua.LValue) any {
 		isArray := true
 		maxIdx := 0
 		count := 0
-		tb.ForEach(func(k, val lua.LValue) {
+		tb.ForEach(func(k, _ lua.LValue) {
 			count++
 			if k.Type() == lua.LTNumber {
 				idx := int(lua.LVAsNumber(k))

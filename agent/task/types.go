@@ -9,20 +9,20 @@ import (
 	"stressbot/state/shared"
 )
 
-// TaskResult 是 Agent 任务的终态。
-type TaskResult string
+// Result 是 Agent 任务的终态。
+type Result string
 
 const (
-	TaskCompleted TaskResult = "completed"
-	TaskStopped   TaskResult = "stopped"
-	TaskFailed    TaskResult = "failed"
+	Completed Result = "completed"
+	Stopped   Result = "stopped"
+	Failed    Result = "failed"
 )
 
-// TaskCompletionReport 是 Agent 向 Admin 确认的任务最终报告。
-type TaskCompletionReport struct {
+// CompletionReport 是 Agent 向 Admin 确认的任务最终报告。
+type CompletionReport struct {
 	AgentID       string                     `json:"agentId"`
 	TaskID        string                     `json:"taskId"`
-	Result        TaskResult                 `json:"result"`
+	Result        Result                     `json:"result"`
 	ErrorMsg      string                     `json:"errorMsg,omitempty"`
 	FinishedAt    time.Time                  `json:"finishedAt"`
 	FinalSnapshot *monitor.CollectorSnapshot `json:"finalSnapshot"`
@@ -30,8 +30,8 @@ type TaskCompletionReport struct {
 	CleanupStatus *robot.CleanupStatus       `json:"cleanupStatus,omitempty"`
 }
 
-// TaskAssignment 是 Admin 下发给单个 Agent 的任务分片。
-type TaskAssignment struct {
+// Assignment 是 Admin 下发给单个 Agent 的任务分片。
+type Assignment struct {
 	TaskID            string                   `json:"taskId"`
 	TaskName          string                   `json:"taskName"`
 	StartNumber       int                      `json:"startNumber"`
@@ -54,7 +54,7 @@ type TaskAssignment struct {
 }
 
 // Validate 校验任务分片必须包含全局机器人起始下标。
-func (a TaskAssignment) Validate() error {
+func (a Assignment) Validate() error {
 	if a.StartIndex == nil {
 		return fmt.Errorf("任务分配缺少必填字段 startIndex")
 	}

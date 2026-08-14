@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 	"sync"
@@ -70,7 +71,7 @@ func NewIngestor(
 
 func (i *Ingestor) Start(ctx context.Context) error {
 	for worker := 0; worker < i.workers; worker++ {
-		if err := workpool.GetWorkPool().Submit(func() { i.runWorker(ctx) }); err != nil {
+		if err := workpool.Default().Submit(func() { i.runWorker(ctx) }); err != nil {
 			return err
 		}
 	}
@@ -81,7 +82,7 @@ func (i *Ingestor) Offer(envelope *controlpb.MetricsEnvelope) error {
 	if envelope == nil || envelope.AgentId == "" || envelope.Generation == 0 {
 		return fmt.Errorf("指标帧身份无效")
 	}
-	kind := metricsKind(0)
+	var kind metricsKind
 	switch envelope.GetPayload().(type) {
 	case *controlpb.MetricsEnvelope_Stress:
 		kind = metricsStress
@@ -183,7 +184,7 @@ func (i *Ingestor) processKey(ctx context.Context, key metricsKey) {
 			return fmt.Errorf("指标帧缺少 payload")
 		}
 	})
-	if err != nil && err != context.Canceled {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		i.rejected.Add(1)
 		i.mu.Lock()
 		i.errors[key] = err

@@ -1,5 +1,4 @@
-// Package utils 提供通用工具函数
-// work_pool.go 实现了基于 ants 的协程池管理，支持优雅关闭和 goroutine 追踪
+// Package workpool 提供基于 ants 的协程池管理，支持优雅关闭和 goroutine 追踪。
 package workpool
 
 import (
@@ -31,8 +30,8 @@ type goroutineInfo struct {
 	caller  string
 }
 
-// WorkPool 协程池
-type WorkPool struct {
+// Pool 管理受控 goroutine 的提交、追踪与关闭。
+type Pool struct {
 	pool       *ants.Pool
 	goroutines sync.Map // uint32 -> goroutineInfo，用于追踪 goroutine
 	wg         sync.WaitGroup
@@ -54,13 +53,13 @@ var (
 )
 
 var (
-	workPool     *WorkPool
+	workPool     *Pool
 	workPoolOnce sync.Once
 )
 
-// InitWorkPool 初始化协程池（单例模式）。
+// Init 初始化默认协程池（单例模式）。
 // 参数已移除：原 PoolConfig 永远传 nil，现使用包级常量 poolCap/poolExpiryDuration/poolShutdownTimeout。
-func InitWorkPool() {
+func Init() {
 	workPoolOnce.Do(func() {
 		opts := ants.Options{
 			ExpiryDuration: poolExpiryDuration,
@@ -74,7 +73,7 @@ func InitWorkPool() {
 			panic(err)
 		}
 
-		workPool = &WorkPool{
+		workPool = &Pool{
 			pool:   pool,
 			stopCh: make(chan struct{}),
 		}
@@ -84,21 +83,19 @@ func InitWorkPool() {
 	})
 }
 
-// GetWorkPool 获取协程池实例
-func GetWorkPool() *WorkPool {
-	if workPool == nil {
-		InitWorkPool()
-	}
+// Default 获取默认协程池实例。
+func Default() *Pool {
+	Init()
 	return workPool
 }
 
 // IsStopped 检查协程池是否已停止
-func (p *WorkPool) IsStopped() bool {
+func (p *Pool) IsStopped() bool {
 	return p.stopped.Load()
 }
 
 // StopChan 获取停止通道，用于监听关闭信号
-func (p *WorkPool) StopChan() <-chan struct{} {
+func (p *Pool) StopChan() <-chan struct{} {
 	return p.stopCh
 }
 
@@ -107,7 +104,7 @@ func (p *WorkPool) StopChan() <-chan struct{} {
 // 性能：getCaller / goroutines.Store / start-end 双向 Debug 日志只在 Debug 级别开启时执行。
 // info 级别下大规模启动（万级 robot 创建数十万 goroutine）单次 submit 开销从 1-10us 降到 <100ns。
 // 副作用：info 级别下 goroutines map 始终为空，printLeakedGoroutines 仅在 debug 启动时有效。
-func (p *WorkPool) submit(task func(stopCh <-chan struct{})) error {
+func (p *Pool) submit(task func(stopCh <-chan struct{})) error {
 	if p.IsStopped() {
 		return ErrPoolStopped
 	}
@@ -186,27 +183,27 @@ func (p *WorkPool) submit(task func(stopCh <-chan struct{})) error {
 }
 
 // Submit 提交普通任务
-func (p *WorkPool) Submit(task func()) error {
+func (p *Pool) Submit(task func()) error {
 	return p.submit(func(_ <-chan struct{}) { task() })
 }
 
 // SubmitWithStop 提交带停止通知的任务
-func (p *WorkPool) SubmitWithStop(task func(stopCh <-chan struct{})) error {
+func (p *Pool) SubmitWithStop(task func(stopCh <-chan struct{})) error {
 	return p.submit(task)
 }
 
 // Go 提交普通任务并忽略错误
-func (p *WorkPool) Go(task func()) {
+func (p *Pool) Go(task func()) {
 	_ = p.submit(func(_ <-chan struct{}) { task() })
 }
 
 // GoWithStop 提交带停止通知的任务并忽略错误
-func (p *WorkPool) GoWithStop(task func(stopCh <-chan struct{})) {
+func (p *Pool) GoWithStop(task func(stopCh <-chan struct{})) {
 	_ = p.submit(task)
 }
 
 // Shutdown 优雅关闭协程池，等待所有任务完成或超时
-func (p *WorkPool) Shutdown() {
+func (p *Pool) Shutdown() {
 	if !p.stopped.CompareAndSwap(false, true) {
 		return
 	}
@@ -241,8 +238,8 @@ func (p *WorkPool) Shutdown() {
 }
 
 // printLeakedGoroutines 打印泄漏的 goroutine 信息
-func (p *WorkPool) printLeakedGoroutines() {
-	p.goroutines.Range(func(key, value any) bool {
+func (p *Pool) printLeakedGoroutines() {
+	p.goroutines.Range(func(_, value any) bool {
 		info := value.(*goroutineInfo)
 		stresslog.Error("leaked goroutine",
 			zap.Uint32("id", info.id),
@@ -253,7 +250,7 @@ func (p *WorkPool) printLeakedGoroutines() {
 }
 
 // getCaller 获取调用者信息
-func (p *WorkPool) getCaller() string {
+func (p *Pool) getCaller() string {
 	pcs := make([]uintptr, 1)
 	n := runtime.Callers(4, pcs)
 	if n == 0 {
@@ -267,27 +264,27 @@ func (p *WorkPool) getCaller() string {
 // === 状态查询方法 ===
 
 // Running 获取正在运行的 goroutine 数
-func (p *WorkPool) Running() int { return p.pool.Running() }
+func (p *Pool) Running() int { return p.pool.Running() }
 
 // Free 获取空闲 goroutine 数
-func (p *WorkPool) Free() int { return p.pool.Free() }
+func (p *Pool) Free() int { return p.pool.Free() }
 
 // Cap 获取协程池容量
-func (p *WorkPool) Cap() int { return p.pool.Cap() }
+func (p *Pool) Cap() int { return p.pool.Cap() }
 
 // Waiting 获取等待中的任务数（ants 池级别）
-func (p *WorkPool) Waiting() int { return p.pool.Waiting() }
+func (p *Pool) Waiting() int { return p.pool.Waiting() }
 
 // GoCount 获取当前管理的 goroutine 数
-func (p *WorkPool) GoCount() int32 { return p.goCount.Load() }
+func (p *Pool) GoCount() int32 { return p.goCount.Load() }
 
 // Stats 获取任务统计信息
-func (p *WorkPool) Stats() (submitted, completed, failed int64) {
+func (p *Pool) Stats() (submitted, completed, failed int64) {
 	return p.submitted.Load(), p.completed.Load(), p.failed.Load()
 }
 
 // Tune 动态调整协程池容量
-func (p *WorkPool) Tune(size int) { p.pool.Tune(size) }
+func (p *Pool) Tune(size int) { p.pool.Tune(size) }
 
 // Reboot 重启协程池
-func (p *WorkPool) Reboot() { p.pool.Reboot() }
+func (p *Pool) Reboot() { p.pool.Reboot() }

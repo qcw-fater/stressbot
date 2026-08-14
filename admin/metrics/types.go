@@ -93,15 +93,15 @@ type AgentSystemBrief struct {
 // AgentListItem is the list-facing Agent projection. Resource values are only
 // populated while the latest system snapshot is fresh by the Admin clock.
 type AgentListItem struct {
-	AgentID       string            `json:"agentId"`
-	Name          string            `json:"name"`
-	Address       string            `json:"address"`
-	AppVersion    string            `json:"appVersion"`
-	MaxBots       int               `json:"maxBots"`
-	Status        agent.AgentStatus `json:"status"`
-	CurrentTaskID string            `json:"currentTaskId"`
-	CurrentBots   int               `json:"currentBots"`
-	StaticInfo    agent.StaticInfo  `json:"staticInfo"`
+	AgentID       string           `json:"agentId"`
+	Name          string           `json:"name"`
+	Address       string           `json:"address"`
+	AppVersion    string           `json:"appVersion"`
+	MaxBots       int              `json:"maxBots"`
+	Status        agent.Status     `json:"status"`
+	CurrentTaskID string           `json:"currentTaskId"`
+	CurrentBots   int              `json:"currentBots"`
+	StaticInfo    agent.StaticInfo `json:"staticInfo"`
 
 	LastHeartbeatAt          time.Time  `json:"lastHeartbeatAt"`
 	StressUpdatedAt          *time.Time `json:"stressUpdatedAt"`

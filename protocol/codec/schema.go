@@ -20,8 +20,8 @@ import (
 	"stressbot/config/validation"
 )
 
-// CodecSchema 是 codec.json 的根类型。
-type CodecSchema struct {
+// Schema 是 codec.json 的根类型。
+type Schema struct {
 	Version       int                 `json:"version"`
 	EndianDefault string              `json:"endianDefault"` // "le" | "be"
 	Frame         FrameSpec           `json:"frame"`
@@ -244,7 +244,7 @@ var checksumFromRe = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A
 // ---------- LoadSchema ----------
 
 // LoadSchema 读取 codec.json，json.Unmarshal 后调用 Validate。
-func LoadSchema(path string) (*CodecSchema, error) {
+func LoadSchema(path string) (*Schema, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("读取 codec schema 文件失败 %q: %w", path, err)
@@ -252,7 +252,7 @@ func LoadSchema(path string) (*CodecSchema, error) {
 	if err := validation.ValidateCodec(raw); err != nil {
 		return nil, fmt.Errorf("codec schema 结构校验失败 %q: %w", path, err)
 	}
-	var s CodecSchema
+	var s Schema
 	if err := json.Unmarshal(raw, &s); err != nil {
 		return nil, fmt.Errorf("解析 codec schema 文件失败 %q: %w", path, err)
 	}
@@ -281,7 +281,7 @@ func (e *errCollector) err() error {
 }
 
 // Validate 对 schema 做结构校验，聚合多条中文错误后返回。
-func (s *CodecSchema) Validate() error {
+func (s *Schema) Validate() error {
 	var ec errCollector
 	s.validateBase(&ec)
 	s.validateHeader(&ec)
@@ -291,7 +291,7 @@ func (s *CodecSchema) Validate() error {
 	return ec.err()
 }
 
-func (s *CodecSchema) validateBase(ec *errCollector) {
+func (s *Schema) validateBase(ec *errCollector) {
 	if s.Version != 1 {
 		ec.addf("codec schema version 必须为 1（当前 %d）", s.Version)
 	}
@@ -309,7 +309,7 @@ func (s *CodecSchema) validateBase(ec *errCollector) {
 	}
 }
 
-func (s *CodecSchema) validateHeader(ec *errCollector) {
+func (s *Schema) validateHeader(ec *errCollector) {
 	headerSize := s.Frame.HeaderSize
 
 	// 字段名唯一性 + 基础属性 + type/role 合法性。
@@ -335,13 +335,14 @@ func (s *CodecSchema) validateHeader(ec *errCollector) {
 			ec.addf("%s：物理区间 [offset=%d, offset+size=%d) 越界（headerSize=%d）", prefix, f.Offset, f.Offset+f.Size, headerSize)
 		}
 		width, known := validFieldTypes[f.Type]
-		if !known {
+		switch {
+		case !known:
 			ec.addf("%s：未知 type %q", prefix, f.Type)
-		} else if width > 0 {
+		case width > 0:
 			if f.Size != width {
 				ec.addf("%s：type %q 的 size 必须为 %d（当前 %d）", prefix, f.Type, width, f.Size)
 			}
-		} else { // bytes
+		default: // bytes
 			if f.Size <= 0 {
 				ec.addf("%s：type bytes 必须显式指定 size>0", prefix)
 			}
@@ -408,7 +409,7 @@ func (s *CodecSchema) validateHeader(ec *errCollector) {
 	}
 
 	// 暂存 routeNames / flagsBits 供 pipeline 与 routeKeyTemplate 校验复用。
-	s.validatePipelineRefs(ec, routeNames, flagsBits)
+	s.validatePipelineRefs(ec, flagsBits)
 }
 
 func validateFlagBits(ec *errCollector, f *Field) {
@@ -464,7 +465,7 @@ func validateValueSource(ec *errCollector, f *Field) {
 
 var routeKeyPlaceholderRe = regexp.MustCompile(`\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
-func (s *CodecSchema) validateRouteKeyTemplate(ec *errCollector) {
+func (s *Schema) validateRouteKeyTemplate(ec *errCollector) {
 	if s.RouteKeyTmpl == "" {
 		return // 已在 base 报
 	}
@@ -477,7 +478,7 @@ func (s *CodecSchema) validateRouteKeyTemplate(ec *errCollector) {
 	}
 }
 
-func (s *CodecSchema) isRouteField(name string) bool {
+func (s *Schema) isRouteField(name string) bool {
 	for i := range s.Header {
 		f := &s.Header[i]
 		if f.Role == "route" && f.Name == name {
@@ -489,7 +490,7 @@ func (s *CodecSchema) isRouteField(name string) bool {
 
 // ---------- pipeline ----------
 
-func (s *CodecSchema) validateHeartbeat(ec *errCollector) {
+func (s *Schema) validateHeartbeat(ec *errCollector) {
 	hb := s.Heartbeat
 	if hb == nil {
 		return
@@ -505,7 +506,7 @@ func (s *CodecSchema) validateHeartbeat(ec *errCollector) {
 	}
 }
 
-func (s *CodecSchema) validatePipeline(ec *errCollector) {
+func (s *Schema) validatePipeline(ec *errCollector) {
 	// step name 唯一。
 	stepNames := make(map[string]int) // name → index
 	for i := range s.Pipeline {
@@ -550,16 +551,12 @@ func (s *CodecSchema) validatePipeline(ec *errCollector) {
 		}
 		produceMap[st.Name] = pn
 		// offset（encrypt）。
-		if st.Op == "encrypt" {
-			if st.Offset == nil {
-				// 视为 {0,0}；无需报错。
-			} else {
-				if st.Offset.Encode < 0 {
-					ec.addf("%s：encrypt offset.encode 不能为负（当前 %d）", prefix, st.Offset.Encode)
-				}
-				if st.Offset.Decode < 0 {
-					ec.addf("%s：encrypt offset.decode 不能为负（当前 %d）", prefix, st.Offset.Decode)
-				}
+		if st.Op == "encrypt" && st.Offset != nil {
+			if st.Offset.Encode < 0 {
+				ec.addf("%s：encrypt offset.encode 不能为负（当前 %d）", prefix, st.Offset.Encode)
+			}
+			if st.Offset.Decode < 0 {
+				ec.addf("%s：encrypt offset.decode 不能为负（当前 %d）", prefix, st.Offset.Decode)
 			}
 		}
 		// over（独立 checksum/hash 步）。
@@ -579,18 +576,14 @@ func (s *CodecSchema) validatePipeline(ec *errCollector) {
 
 // validatePipelineRefs 校验跨 header↔pipeline 的引用：flag、checksumOut.from、when.appliesWith。
 // 在 validateHeader 末尾调用，因那时 routeNames/flagsBits 已就绪。
-func (s *CodecSchema) validatePipelineRefs(ec *errCollector, routeNames map[string]struct{}, flagsBits map[string][]FlagBit) {
+func (s *Schema) validatePipelineRefs(ec *errCollector, flagsBits map[string][]FlagBit) {
 	// 构造 flagName → flagField 反查（全局 flag 名空间）。
-	flagNameToField := make(map[string]string) // flag bit name → flags field name
-	for fName, bits := range flagsBits {
+	flagNames := make(map[string]struct{})
+	for _, bits := range flagsBits {
 		for _, b := range bits {
-			if _, dup := flagNameToField[b.Name]; dup {
-				// 同名命名位跨多个 flags 字段 —— 罕见但允许，引用时只需存在。
-			}
-			flagNameToField[b.Name] = fName
+			flagNames[b.Name] = struct{}{}
 		}
 	}
-	_ = routeNames
 
 	// 每个 flag 命名位至多被一个 step 绑定；flag 引用必须存在。
 	boundFlag := make(map[string]string) // flag bit name → step name
@@ -599,7 +592,7 @@ func (s *CodecSchema) validatePipelineRefs(ec *errCollector, routeNames map[stri
 		if st.Flag == "" {
 			continue
 		}
-		if _, ok := flagNameToField[st.Flag]; !ok {
+		if _, ok := flagNames[st.Flag]; !ok {
 			ec.addf("pipeline 步骤 %q 的 flag %q 未在任何 role:\"flags\" 字段的命名位中声明", st.Name, st.Flag)
 			continue
 		}

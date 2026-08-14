@@ -215,9 +215,9 @@ func TestSetPath_StoreResponseSim_GuildInfo(t *testing.T) {
 	}
 
 	// 3b. guildId 可正确读取
-	gotGuildId := s.GetPath("playerData.guildInfo.guildId")
-	if gotGuildId != int64(12345) {
-		t.Fatalf("阶段3b: guildId = %v, want 12345", gotGuildId)
+	gotGuildID := s.GetPath("playerData.guildInfo.guildId")
+	if gotGuildID != int64(12345) {
+		t.Fatalf("阶段3b: guildId = %v, want 12345", gotGuildID)
 	}
 
 	// 3c. 条件: playerData.guildInfo != nil → true
@@ -227,7 +227,7 @@ func TestSetPath_StoreResponseSim_GuildInfo(t *testing.T) {
 	}
 
 	// 3d. 条件: playerData.guildInfo.guildId != 0 → true
-	if gotGuildId == nil || gotGuildId == int64(0) {
+	if gotGuildID == nil || gotGuildID == int64(0) {
 		t.Fatal("阶段3d: playerData.guildInfo.guildId != 0 应为 true")
 	}
 
@@ -301,7 +301,7 @@ func TestSetPath_Concurrent(t *testing.T) {
 // 注：P1b 单写方化后，生产环境嵌套容器写只发生在执行器 goroutine，GetPath 返回值为内部别名
 // 仅供执行器消费；本测的跨 goroutine 写方保留，仍覆盖"导航与写并发"这一锁纪律（读方不遍历
 // 返回值，只做锁内导航——与 pump 侧顶层标量访问 vs 执行器写的真实并发形态一致）。
-func TestGetPath_ConcurrentWithWriters(t *testing.T) {
+func TestGetPath_ConcurrentWithWriters(_ *testing.T) {
 	s := NewStore()
 	s.SetPath("root.branch.leaf", 0)
 

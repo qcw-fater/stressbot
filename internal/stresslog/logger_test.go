@@ -157,7 +157,7 @@ func TestFatalLogsFlushBeforeExit(t *testing.T) {
 	for _, kind := range []string{"structured", "formatted"} {
 		t.Run(kind, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "stressbot.log")
-			cmd := exec.Command(os.Args[0], "-test.run=^TestFatalLogsFlushBeforeExit$")
+			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestFatalLogsFlushBeforeExit$")
 			cmd.Env = append(os.Environ(),
 				"STRESSBOT_FATAL_LOG_HELPER=1",
 				"STRESSBOT_FATAL_LOG_PATH="+path,

@@ -331,7 +331,7 @@ func (ae *ActionExecutor) Execute(ctx context.Context, def *flowdef.ActionDef) (
 	case flowdef.PatternTCPConnect:
 		err = ae.execTCPConnect(def)
 	case flowdef.PatternTCPClose:
-		err = ae.execTCPClose(def)
+		ae.execTCPClose(def)
 	case flowdef.PatternTCPListen:
 		recvBytes, timing, err = ae.execListen(ctx, "tcp", def)
 	case flowdef.PatternUDPSend:
@@ -341,7 +341,7 @@ func (ae *ActionExecutor) Execute(ctx context.Context, def *flowdef.ActionDef) (
 	case flowdef.PatternUDPConnect:
 		err = ae.execUDPConnect(def)
 	case flowdef.PatternUDPClose:
-		err = ae.execUDPClose(def)
+		ae.execUDPClose(def)
 	case flowdef.PatternUDPListen:
 		recvBytes, timing, err = ae.execListen(ctx, "udp", def)
 	case flowdef.PatternHTTPRequest:
@@ -349,11 +349,11 @@ func (ae *ActionExecutor) Execute(ctx context.Context, def *flowdef.ActionDef) (
 	case flowdef.PatternClearState:
 		err = ae.execClearState(def)
 	case flowdef.PatternSetState:
-		err = ae.execSetState(def)
+		ae.execSetState(def)
 	default:
 		err = errcode.NewActionError(errcode.ErrUnknownPattern, "pattern="+def.Pattern)
 	}
-	return
+	return sendBytes, recvBytes, timing, err
 }
 
 // buildBody 构建消息体字节（序列化 proto 消息）。
@@ -648,7 +648,7 @@ func (ae *ActionExecutor) resolveFieldValue(fb *binding.FieldBind) any {
 			if !ok {
 				continue
 			}
-			k, _ := m["key"]
+			k := m["key"]
 			if fmt.Sprintf("%v", k) != keyStr {
 				continue
 			}
@@ -837,17 +837,15 @@ func (ae *ActionExecutor) execUDPConnect(def *flowdef.ActionDef) error {
 }
 
 // execTCPClose 关闭 TCP 连接
-func (ae *ActionExecutor) execTCPClose(def *flowdef.ActionDef) error {
+func (ae *ActionExecutor) execTCPClose(def *flowdef.ActionDef) {
 	ae.netSender.CloseTCP(def.Service)
 	stresslog.Debug("[ACTION] TCPClose 成功", zap.String("action", def.Name), zap.String("service", def.Service))
-	return nil
 }
 
 // execUDPClose 关闭 UDP 连接
-func (ae *ActionExecutor) execUDPClose(def *flowdef.ActionDef) error {
+func (ae *ActionExecutor) execUDPClose(def *flowdef.ActionDef) {
 	ae.netSender.CloseUDP(def.Service)
 	stresslog.Debug("[ACTION] UDPClose 成功", zap.String("action", def.Name), zap.String("service", def.Service))
-	return nil
 }
 
 // execClearState 清除 StateStore 中的多个 key
@@ -863,7 +861,7 @@ func (ae *ActionExecutor) execClearState(def *flowdef.ActionDef) error {
 }
 
 // execSetState 从 bindings 设置 StateStore
-func (ae *ActionExecutor) execSetState(def *flowdef.ActionDef) error {
+func (ae *ActionExecutor) execSetState(def *flowdef.ActionDef) {
 	for i := range def.Bindings {
 		fb := &def.Bindings[i]
 
@@ -877,7 +875,6 @@ func (ae *ActionExecutor) execSetState(def *flowdef.ActionDef) error {
 		}
 		ae.store.SetPath(fb.Field, val)
 	}
-	return nil
 }
 
 // execHTTPRequest HTTP 请求
@@ -1151,7 +1148,10 @@ func (ae *ActionExecutor) storeResponseProto(mappings []binding.StoreMapping, re
 // Resolve nil 时 DescribeError 返回空串（与未配置 errors.json 等价），不在此 fail loud——
 // headerErr 描述缺失不致命，仅 detail 不含人类可读前缀；上层仍按 NewActionError 上抛原错误码。
 func (ae *ActionExecutor) handleHeaderError(proto string, def *flowdef.ActionDef, headerErr uint64, routeKey string, respBody []byte) *errcode.ActionError {
-	ae.parseAndStoreResponse(def, respBody)
+	if err := ae.parseAndStoreResponse(def, respBody); err != nil {
+		stresslog.Debug("[ACTION] 错误响应解析失败，保留服务端 header 错误",
+			zap.String("action", def.Name), zap.Uint64("headerError", headerErr), zap.Error(err))
+	}
 	desc := ae.describeError(proto, def.Service, headerErr)
 	detail := "service=" + def.Service + " route=" + routeKey
 	if desc != "" {

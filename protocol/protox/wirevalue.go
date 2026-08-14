@@ -14,8 +14,6 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 )
 
-// ── Wire-first 状态面：WireValue ─────────────────────────────────
-//
 // WireValue 是「原始 protobuf wire 字节 + 消息描述符」的不可变封装——state 整存
 // 映射的新存储形态（取代解码态 Frozen）。
 //
@@ -376,15 +374,16 @@ func wireCollectSingular(md protoreflect.MessageDescriptor, b []byte, fd protore
 
 	structOK := scanLevel(b, func(num protowire.Number, typ protowire.Type, u uint64, bs []byte) bool {
 		var f2 protoreflect.FieldDescriptor
-		if num == fd.Number() {
+		switch {
+		case num == fd.Number():
 			f2 = fd
-		} else if watchOneof {
+		case watchOneof:
 			cand := md.Fields().ByNumber(num)
 			if cand == nil || cand.ContainingOneof() != od {
 				return true
 			}
 			f2 = cand
-		} else {
+		default:
 			return true
 		}
 		if !wireTypeMatches(f2, typ) {
@@ -572,11 +571,11 @@ func parseMapEntry(keyFd, valFd protoreflect.FieldDescriptor, bs []byte) (string
 	if keyScalar == nil {
 		keyScalar = fromScalarValue(keyFd, keyFd.Default())
 	}
-	return mapKeyToString(keyFd, keyScalar), st, true
+	return mapKeyToString(keyScalar), st, true
 }
 
 // mapKeyToString 把已解码的 map key 标量转为字符串键，与 protoreflect.MapKey.String() 一致。
-func mapKeyToString(keyFd protoreflect.FieldDescriptor, v any) string {
+func mapKeyToString(v any) string {
 	switch x := v.(type) {
 	case bool:
 		if x {

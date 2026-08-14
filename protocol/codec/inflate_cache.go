@@ -36,7 +36,7 @@ const (
 	inflateDedupMinBytes = 1024
 
 	// inflateCacheMaxEntries / inflateCacheMaxBytes 真条目双上界
-	//（字节按 压缩快照+解压产物 计，即真实钉住量）。
+	// （字节按 压缩快照+解压产物 计，即真实钉住量）。
 	inflateCacheMaxEntries = 1024
 	inflateCacheMaxBytes   = 48 << 20
 

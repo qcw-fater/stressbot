@@ -2,6 +2,7 @@ package template
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -201,7 +202,7 @@ func TestReplaceSnapshotRejectsStaleRevisionWithoutWriting(t *testing.T) {
 			Flow:                json.RawMessage(`{"nodes":{},"actions":{}}`),
 		}},
 	})
-	apiErr, ok := err.(*Error)
+	apiErr, ok := errors.AsType[*Error](err)
 	if !ok || apiErr.Code != "FLOW_SNAPSHOT_CONFLICT" {
 		t.Fatalf("error = %#v", err)
 	}

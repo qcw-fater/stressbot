@@ -16,14 +16,14 @@ func buildStagePlan(cfg *admintask.RampUpConfig) admintask.StagePlan {
 
 // ── 历史归档 ─────────────────────────────────────────
 
-// HistoryRecord 历史任务列表中的单条记录。
-type HistoryRecord struct {
+// Record 是历史任务列表中的单条记录。
+type Record struct {
 	// ID 任务 ID。
 	ID string `json:"id"`
 	// Name 任务名称。
 	Name string `json:"name"`
 	// State 最终状态。
-	State admintask.TaskState `json:"state"`
+	State admintask.State `json:"state"`
 	// TotalBots 总 bot 数。
 	TotalBots int `json:"totalBots"`
 	// AgentCount 参与 Agent 数。
@@ -70,7 +70,7 @@ type HistoryRecord struct {
 	// HasResetStages 父任务是否含 reset 阶段（决定列表是否展开为阶段组）。
 	HasResetStages bool `json:"hasResetStages,omitempty"`
 	// Children 阶段段落子记录（仅有 reset 的父任务且 includeStages 时填充）。
-	Children []HistoryRecord `json:"children,omitempty"`
+	Children []Record `json:"children,omitempty"`
 
 	// ── 阶段段落指标摘要（从 task_aggregated 提取，仅 recordKind=="stage" 有值）──
 
@@ -98,13 +98,13 @@ type ConfigSummary struct {
 	ScriptCount int `json:"scriptCount"`
 }
 
-// HistoryDetail 历史任务详情归档模型，保留完整内部数据供调试和兼容使用。
-type HistoryDetail struct {
-	HistoryRecord
+// Detail 是历史任务详情归档模型，保留完整内部数据供调试使用。
+type Detail struct {
+	Record
 	// Assignments Agent 分配方案。
 	Assignments []admintask.Assignment `json:"assignments"`
 	// AgentReports 各 Agent 完成报告。
-	AgentReports []HistoryAgentReport `json:"agentReports"`
+	AgentReports []AgentReport `json:"agentReports"`
 	// AgentEvents Agent 状态变化事件。
 	AgentEvents []admintask.AgentEvent `json:"agentEvents,omitempty"`
 	// FinalSnapshot 最终聚合压测指标。
@@ -113,94 +113,94 @@ type HistoryDetail struct {
 	FinalSystem metrics.ClusterSystemSnapshot `json:"finalSystem"`
 }
 
-// HistoryDetailResponse 历史详情页展示响应，只包含界面实际消费的数据。
-type HistoryDetailResponse struct {
-	HistoryRecord
+// DetailResponse 是历史详情页展示响应，只包含界面实际消费的数据。
+type DetailResponse struct {
+	Record
 	// AgentReports 各节点完成结果摘要。
-	AgentReports []HistoryAgentReportSummary `json:"agentReports"`
+	AgentReports []AgentReportSummary `json:"agentReports"`
 	// AgentEvents 节点状态变化事件。
 	AgentEvents []admintask.AgentEvent `json:"agentEvents,omitempty"`
 	// FinalSnapshot 最终聚合压测指标摘要。
-	FinalSnapshot HistoryStressSnapshotSummary `json:"finalSnapshot"`
+	FinalSnapshot StressSnapshotSummary `json:"finalSnapshot"`
 	// FinalSystem 最终聚合系统指标摘要。
-	FinalSystem HistorySystemSummary `json:"finalSystem"`
+	FinalSystem SystemSummary `json:"finalSystem"`
 }
 
-// HistoryStressSnapshotSummary 历史详情页使用的压测指标摘要。
-type HistoryStressSnapshotSummary struct {
+// StressSnapshotSummary 是历史详情页使用的压测指标摘要。
+type StressSnapshotSummary struct {
 	Timestamp    time.Time                  `json:"timestamp"`
 	UptimeSec    float64                    `json:"uptimeSeconds"`
 	TotalActions int64                      `json:"totalActions"`
 	ApdexT       int                        `json:"apdexT"`
 	TimingDetail monitor.TimingDetailLevel  `json:"timingDetail"`
-	Summary      HistoryMetricsSummary      `json:"summary"`
+	Summary      MetricsSummary             `json:"summary"`
 	Robots       monitor.RobotSnapshot      `json:"robots"`
 	Connections  monitor.ConnectionSnapshot `json:"connections"`
 	Bandwidth    monitor.BandwidthSnapshot  `json:"bandwidth"`
-	Actions      []HistoryActionSummary     `json:"actions"`
+	Actions      []ActionSummary            `json:"actions"`
 }
 
-// HistoryMetricsSummary 是历史详情保留的跨动作统一汇总。
-type HistoryMetricsSummary struct {
-	SampleCount               int64                   `json:"sampleCount"`
-	SuccessCount              int64                   `json:"successCount"`
-	FailureCount              int64                   `json:"failureCount"`
-	TimeoutCount              int64                   `json:"timeoutCount"`
-	CanceledCount             int64                   `json:"canceledCount"`
-	Executing                 int64                   `json:"executing"`
-	SuccessRate               float64                 `json:"successRate"`
-	RTTApdex                  float64                 `json:"rttApdex"`
-	RTTApdexSampleCount       int64                   `json:"rttApdexSampleCount"`
-	RTT                       HistoryHistogramSummary `json:"rtt"`
-	ListenWait                HistoryHistogramSummary `json:"listenWait"`
-	TotalDuration             HistoryHistogramSummary `json:"totalDuration"`
-	ClientAvgMs               float64                 `json:"nonRTTAvgMs"`
-	BuildAvgMs                float64                 `json:"buildAvgMs"`
-	EncodeAvgMs               float64                 `json:"encodeAvgMs"`
-	SendAvgMs                 float64                 `json:"sendAvgMs"`
-	DecodeWaitAvgMs           float64                 `json:"decodeWaitAvgMs"`
-	DecodeAvgMs               float64                 `json:"decodeAvgMs"`
-	DispatchToActionWaitAvgMs float64                 `json:"dispatchToActionWaitAvgMs"`
-	ParseStoreAvgMs           float64                 `json:"parseStoreAvgMs"`
-	AvgQPS                    float64                 `json:"avgQps"`
+// MetricsSummary 是历史详情保留的跨动作统一汇总。
+type MetricsSummary struct {
+	SampleCount               int64            `json:"sampleCount"`
+	SuccessCount              int64            `json:"successCount"`
+	FailureCount              int64            `json:"failureCount"`
+	TimeoutCount              int64            `json:"timeoutCount"`
+	CanceledCount             int64            `json:"canceledCount"`
+	Executing                 int64            `json:"executing"`
+	SuccessRate               float64          `json:"successRate"`
+	RTTApdex                  float64          `json:"rttApdex"`
+	RTTApdexSampleCount       int64            `json:"rttApdexSampleCount"`
+	RTT                       HistogramSummary `json:"rtt"`
+	ListenWait                HistogramSummary `json:"listenWait"`
+	TotalDuration             HistogramSummary `json:"totalDuration"`
+	ClientAvgMs               float64          `json:"nonRTTAvgMs"`
+	BuildAvgMs                float64          `json:"buildAvgMs"`
+	EncodeAvgMs               float64          `json:"encodeAvgMs"`
+	SendAvgMs                 float64          `json:"sendAvgMs"`
+	DecodeWaitAvgMs           float64          `json:"decodeWaitAvgMs"`
+	DecodeAvgMs               float64          `json:"decodeAvgMs"`
+	DispatchToActionWaitAvgMs float64          `json:"dispatchToActionWaitAvgMs"`
+	ParseStoreAvgMs           float64          `json:"parseStoreAvgMs"`
+	AvgQPS                    float64          `json:"avgQps"`
 }
 
-// HistoryActionSummary 历史 action 表格和报告使用的展示字段。
-type HistoryActionSummary struct {
-	Name                      string                  `json:"name"`
-	SampleCount               int64                   `json:"sampleCount"`
-	SuccessCount              int64                   `json:"successCount"`
-	FailureCount              int64                   `json:"failureCount"`
-	TimeoutCount              int64                   `json:"timeoutCount"`
-	CanceledCount             int64                   `json:"canceledCount"`
-	Executing                 int64                   `json:"executing"`
-	SuccessRate               float64                 `json:"successRate"`
-	AvgSendBytes              float64                 `json:"avgSendBytes"`
-	AvgRecvBytes              float64                 `json:"avgRecvBytes"`
-	Kind                      monitor.ActionKind      `json:"kind"`
-	RTTApdex                  float64                 `json:"rttApdex"`
-	RTTApdexSampleCount       int64                   `json:"rttApdexSampleCount"`
-	RTT                       HistoryHistogramSummary `json:"rtt"`
-	ListenWait                HistoryHistogramSummary `json:"listenWait"`
-	ListenWaitSampleCount     int64                   `json:"listenWaitSampleCount"`
-	ListenTimeoutRate         float64                 `json:"listenTimeoutRate"`
-	TotalDuration             HistoryHistogramSummary `json:"totalDuration"`
-	ClientAvgMs               float64                 `json:"nonRTTAvgMs"`
-	BuildAvgMs                float64                 `json:"buildAvgMs"`
-	EncodeAvgMs               float64                 `json:"encodeAvgMs"`
-	SendAvgMs                 float64                 `json:"sendAvgMs"`
-	DecodeWaitAvgMs           float64                 `json:"decodeWaitAvgMs"`
-	DecodeAvgMs               float64                 `json:"decodeAvgMs"`
-	DispatchToActionWaitAvgMs float64                 `json:"dispatchToActionWaitAvgMs"`
-	ParseStoreAvgMs           float64                 `json:"parseStoreAvgMs"`
-	RTTSampleCount            int64                   `json:"rttSampleCount"`
-	TotalDurationSampleCount  int64                   `json:"totalDurationSampleCount"`
-	AvgQPS                    float64                 `json:"avgQps"`
-	Errors                    []monitor.ErrorEntry    `json:"errors,omitempty"`
+// ActionSummary 是历史 action 表格和报告使用的展示字段。
+type ActionSummary struct {
+	Name                      string               `json:"name"`
+	SampleCount               int64                `json:"sampleCount"`
+	SuccessCount              int64                `json:"successCount"`
+	FailureCount              int64                `json:"failureCount"`
+	TimeoutCount              int64                `json:"timeoutCount"`
+	CanceledCount             int64                `json:"canceledCount"`
+	Executing                 int64                `json:"executing"`
+	SuccessRate               float64              `json:"successRate"`
+	AvgSendBytes              float64              `json:"avgSendBytes"`
+	AvgRecvBytes              float64              `json:"avgRecvBytes"`
+	Kind                      monitor.ActionKind   `json:"kind"`
+	RTTApdex                  float64              `json:"rttApdex"`
+	RTTApdexSampleCount       int64                `json:"rttApdexSampleCount"`
+	RTT                       HistogramSummary     `json:"rtt"`
+	ListenWait                HistogramSummary     `json:"listenWait"`
+	ListenWaitSampleCount     int64                `json:"listenWaitSampleCount"`
+	ListenTimeoutRate         float64              `json:"listenTimeoutRate"`
+	TotalDuration             HistogramSummary     `json:"totalDuration"`
+	ClientAvgMs               float64              `json:"nonRTTAvgMs"`
+	BuildAvgMs                float64              `json:"buildAvgMs"`
+	EncodeAvgMs               float64              `json:"encodeAvgMs"`
+	SendAvgMs                 float64              `json:"sendAvgMs"`
+	DecodeWaitAvgMs           float64              `json:"decodeWaitAvgMs"`
+	DecodeAvgMs               float64              `json:"decodeAvgMs"`
+	DispatchToActionWaitAvgMs float64              `json:"dispatchToActionWaitAvgMs"`
+	ParseStoreAvgMs           float64              `json:"parseStoreAvgMs"`
+	RTTSampleCount            int64                `json:"rttSampleCount"`
+	TotalDurationSampleCount  int64                `json:"totalDurationSampleCount"`
+	AvgQPS                    float64              `json:"avgQps"`
+	Errors                    []monitor.ErrorEntry `json:"errors,omitempty"`
 }
 
-// HistoryHistogramSummary 历史界面需要的 RTT 分位摘要。
-type HistoryHistogramSummary struct {
+// HistogramSummary 是历史界面需要的 RTT 分位摘要。
+type HistogramSummary struct {
 	Count int64    `json:"count"`
 	MinMs *float64 `json:"minMs"`
 	MaxMs *float64 `json:"maxMs"`
@@ -211,8 +211,8 @@ type HistoryHistogramSummary struct {
 	P99Ms *float64 `json:"p99Ms"`
 }
 
-// HistorySystemSummary 历史详情页使用的集群系统资源摘要。
-type HistorySystemSummary struct {
+// SystemSummary 是历史详情页使用的集群系统资源摘要。
+type SystemSummary struct {
 	AvgCPUPercent    float64  `json:"avgCpuPercent"`
 	MaxCPUPercent    float64  `json:"maxCpuPercent"`
 	HotAgentName     string   `json:"hotAgentName,omitempty"`
@@ -228,14 +228,14 @@ type HistorySystemSummary struct {
 	TotalFDs         int32    `json:"totalFds"`
 }
 
-// HistoryAgentReport 单个 Agent 的历史完成报告。
-type HistoryAgentReport struct {
+// AgentReport 是单个 Agent 的历史完成报告。
+type AgentReport struct {
 	// AgentID Agent 唯一标识。
 	AgentID string `json:"agentId"`
 	// AgentName 显示名称。
 	AgentName string `json:"agentName"`
 	// Result 完成结果。
-	Result admintask.TaskResult `json:"result"`
+	Result admintask.Result `json:"result"`
 	// ErrorMsg 错误信息。
 	ErrorMsg string `json:"errorMsg,omitempty"`
 	// FinishedAt 完成时间。
@@ -246,18 +246,18 @@ type HistoryAgentReport struct {
 	CleanupStatus *robot.CleanupStatus `json:"cleanupStatus,omitempty"`
 }
 
-// HistoryAgentReportSummary 单个节点的历史完成结果摘要。
-type HistoryAgentReportSummary struct {
+// AgentReportSummary 是单个节点的历史完成结果摘要。
+type AgentReportSummary struct {
 	AgentID       string               `json:"agentId"`
 	AgentName     string               `json:"agentName"`
-	Result        admintask.TaskResult `json:"result"`
+	Result        admintask.Result     `json:"result"`
 	ErrorMsg      string               `json:"errorMsg,omitempty"`
 	FinishedAt    time.Time            `json:"finishedAt"`
 	CleanupStatus *robot.CleanupStatus `json:"cleanupStatus,omitempty"`
 }
 
-// HistoryFilter 历史任务查询过滤条件。
-type HistoryFilter struct {
+// Filter 是历史任务查询过滤条件。
+type Filter struct {
 	// State 按状态过滤。
 	State string
 	// StartedAfter 开始时间下界。
@@ -282,12 +282,12 @@ type HistoryFilter struct {
 	IncludeStages bool
 }
 
-// HistoryListResponse 历史任务列表响应。
-type HistoryListResponse struct {
+// ListResponse 是历史任务列表响应。
+type ListResponse struct {
 	// Total 符合条件的总数。
 	Total int `json:"total"`
 	// Items 当前页记录。
-	Items []HistoryRecord `json:"items"`
+	Items []Record `json:"items"`
 }
 
 // UpdateHistoryRequest 更新历史任务元数据请求。
@@ -303,19 +303,19 @@ type UpdateHistoryRequest struct {
 // CompareResponse 历史任务对比响应。
 type CompareResponse struct {
 	// Tasks 对比任务的轻量指标列表。
-	Tasks []HistoryCompareTask `json:"tasks"`
+	Tasks []CompareTask `json:"tasks"`
 	// Diff 差异对比数据。
 	Diff CompareDiff `json:"diff"`
 }
 
-// HistoryCompareTask 历史对比页使用的任务摘要。
-type HistoryCompareTask struct {
-	ID            string                 `json:"id"`
-	Name          string                 `json:"name"`
-	StartedAt     *time.Time             `json:"startedAt,omitempty"`
-	DurationSec   int                    `json:"durationSec"`
-	TotalBots     int                    `json:"totalBots"`
-	FinalSnapshot HistoryCompareSnapshot `json:"finalSnapshot"`
+// CompareTask 是历史对比页使用的任务摘要。
+type CompareTask struct {
+	ID            string          `json:"id"`
+	Name          string          `json:"name"`
+	StartedAt     *time.Time      `json:"startedAt,omitempty"`
+	DurationSec   int             `json:"durationSec"`
+	TotalBots     int             `json:"totalBots"`
+	FinalSnapshot CompareSnapshot `json:"finalSnapshot"`
 	// ParentID 阶段段落对比项所属父任务 ID（整体项为空）。
 	ParentID string `json:"parentId,omitempty"`
 	// StageIndex 对比项阶段段落号；-1 表示整体/最终。
@@ -324,24 +324,24 @@ type HistoryCompareTask struct {
 	StageLabel string `json:"stageLabel,omitempty"`
 }
 
-// HistoryCompareSnapshot 历史对比页使用的压测摘要。
-type HistoryCompareSnapshot struct {
-	TotalActions int64                  `json:"totalActions"`
-	Actions      []HistoryCompareAction `json:"actions"`
+// CompareSnapshot 是历史对比页使用的压测摘要。
+type CompareSnapshot struct {
+	TotalActions int64           `json:"totalActions"`
+	Actions      []CompareAction `json:"actions"`
 }
 
-// HistoryCompareAction 历史对比页使用的 action 指标。
-type HistoryCompareAction struct {
-	Name                     string                  `json:"name"`
-	SampleCount              int64                   `json:"sampleCount"`
-	Kind                     monitor.ActionKind      `json:"kind"`
-	RTTApdex                 float64                 `json:"rttApdex"`
-	RTT                      HistoryHistogramSummary `json:"rtt"`
-	RTTSampleCount           int64                   `json:"rttSampleCount"`
-	ListenWait               HistoryHistogramSummary `json:"listenWait"`
-	ListenWaitSampleCount    int64                   `json:"listenWaitSampleCount"`
-	TotalDuration            HistoryHistogramSummary `json:"totalDuration"`
-	TotalDurationSampleCount int64                   `json:"totalDurationSampleCount"`
+// CompareAction 是历史对比页使用的 action 指标。
+type CompareAction struct {
+	Name                     string             `json:"name"`
+	SampleCount              int64              `json:"sampleCount"`
+	Kind                     monitor.ActionKind `json:"kind"`
+	RTTApdex                 float64            `json:"rttApdex"`
+	RTT                      HistogramSummary   `json:"rtt"`
+	RTTSampleCount           int64              `json:"rttSampleCount"`
+	ListenWait               HistogramSummary   `json:"listenWait"`
+	ListenWaitSampleCount    int64              `json:"listenWaitSampleCount"`
+	TotalDuration            HistogramSummary   `json:"totalDuration"`
+	TotalDurationSampleCount int64              `json:"totalDurationSampleCount"`
 	// AvgSendBytes 仅用于给缺 Kind 的老归档就地推断类别（有发送字节即发送类）。
 	AvgSendBytes float64 `json:"avgSendBytes"`
 }
@@ -354,8 +354,8 @@ type CompareDiff struct {
 
 // ── 时序采样 ─────────────────────────────────────────
 
-// HistoryTrendPointResponse 历史趋势图响应点。
-type HistoryTrendPointResponse struct {
+// TrendPointResponse 是历史趋势图响应点。
+type TrendPointResponse struct {
 	// SampledAt 采样时间。
 	SampledAt time.Time `json:"sampledAt"`
 	// ElapsedSec 距任务启动的秒数。
@@ -433,7 +433,7 @@ type TimeseriesResponse struct {
 	// TaskID 任务 ID。
 	TaskID string `json:"taskId"`
 	// Points 趋势采样点。
-	Points []HistoryTrendPointResponse `json:"points"`
+	Points []TrendPointResponse `json:"points"`
 	// Sampled 是否经过读取侧降采样。
 	Sampled bool `json:"sampled"`
 	// OriginalCount 原始点数。
@@ -442,16 +442,16 @@ type TimeseriesResponse struct {
 	MaxPoints int `json:"maxPoints"`
 }
 
-// HistoryConfigSummaryResponse 历史配置摘要响应。
-type HistoryConfigSummaryResponse struct {
+// ConfigSummaryResponse 是历史配置摘要响应。
+type ConfigSummaryResponse struct {
 	TaskID      string                `json:"taskId"`
 	Name        string                `json:"name"`
 	TotalBots   int                   `json:"totalBots"`
 	RobotConfig admintask.RobotConfig `json:"robotConfig"`
 }
 
-// HistoryConfigArchiveResponse 历史完整配置归档响应。
-type HistoryConfigArchiveResponse struct {
+// ConfigArchiveResponse 是历史完整配置归档响应。
+type ConfigArchiveResponse struct {
 	TaskID      string                `json:"taskId"`
 	Name        string                `json:"name"`
 	TotalBots   int                   `json:"totalBots"`

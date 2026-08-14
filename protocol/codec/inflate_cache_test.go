@@ -97,7 +97,7 @@ func TestDecodeInflateDedupE2E(t *testing.T) {
 		key[i] = byte(i*7 + 1)
 	}
 	// 4KB 高熵块重复 16 次 = 64KB：可压缩（触发 compress 步），压缩产物 ≥4KB
-	//（高熵块至少完整出现一次），稳过 inflateDedupMinBytes 门槛。
+	// （高熵块至少完整出现一次），稳过 inflateDedupMinBytes 门槛。
 	block := make([]byte, 4096)
 	st := uint32(0xBEEF1234)
 	for i := range block {

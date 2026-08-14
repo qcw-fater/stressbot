@@ -682,13 +682,15 @@ func (c *MetricsCollector) RampUpStage() (current, total int) {
 	return int(c.rampUpCurrentStage.Load()), int(c.rampUpTotalStages.Load())
 }
 
-// 连接生命周期钩子。对 nil receiver 安全（monitor 未 Init 时 no-op）。
+// ConnEstablished 记录连接建立。对 nil receiver 安全（monitor 未 Init 时 no-op）。
 func (c *MetricsCollector) ConnEstablished() {
 	if c != nil && c.enabled {
 		c.connEstablished.Add(1)
 		c.connActive.Add(1)
 	}
 }
+
+// ConnClosed 记录连接关闭。对 nil receiver 安全（monitor 未 Init 时 no-op）。
 func (c *MetricsCollector) ConnClosed() {
 	if c != nil && c.enabled {
 		c.connActive.Add(-1)

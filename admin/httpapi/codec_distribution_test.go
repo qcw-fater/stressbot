@@ -26,14 +26,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// codecDistTestFiles 是 T1.6 产物的相对路径，用作上传/落盘测试输入字节。
-var codecDistTestFiles = []string{
-	"conf/adapter/tcp_logic_codec.json",
-	"conf/adapter/tcp_battle_codec.json",
-	"conf/adapter/udp_battle_codec.json",
-	"conf/adapter/errors.json",
-}
-
 // codecDistRepoRoot 在测试初始化（chdir 前）解析得到的仓库根绝对路径，用于后续
 // 在临时目录中也能读到 T1.6 产物 conf/adapter/*.json。
 var codecDistRepoRoot = func() string {
@@ -113,29 +105,22 @@ func newCodecDistMultipart(t *testing.T) (*bytes.Buffer, string) {
 	return &buf, mw.FormDataContentType()
 }
 
-// setupCodecDistServer 构造一个最小 AdminServer（仅 TaskStore），并将 cwd 切到临时目录，
+// setupCodecDistHandler 构造一个仅配置任务存储的 Handler，并将 cwd 切到临时目录，
 // 使 writeBaselineFiles 落盘的 conf/* 位于隔离目录。同时把全局 logger 替换为 nop logger，
-// 避免未初始化 zap 时 handler 中的日志调用 panic。返回 server、临时目录、还原函数。
-func setupCodecDistServer(t *testing.T) (*Handler, string, func()) {
+// 避免未初始化 zap 时 handler 中的日志调用 panic。返回 server、临时目录、日志还原函数；
+// t.Chdir 会在测试结束时自动恢复工作目录。
+func setupCodecDistHandler(t *testing.T) (*Handler, string, func()) {
 	t.Helper()
-	origCwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getcwd: %v", err)
-	}
 	dir := t.TempDir()
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("chdir tempdir: %v", err)
-	}
-	ts, err := NewTaskStore(filepath.Join(dir, "data"))
+	t.Chdir(dir)
+	ts, err := admintask.NewStore(filepath.Join(dir, "data"))
 	if err != nil {
-		_ = os.Chdir(origCwd)
-		t.Fatalf("NewTaskStore: %v", err)
+		t.Fatalf("create task store: %v", err)
 	}
 	origLogger := stresslog.GetLogger()
 	stresslog.ReplaceLogger(zap.NewNop())
 	srv := &Handler{tasks: ts, nextID: testNextID}
 	cleanup := func() {
-		_ = os.Chdir(origCwd)
 		if origLogger != nil {
 			stresslog.ReplaceLogger(origLogger)
 		}
@@ -146,7 +131,7 @@ func setupCodecDistServer(t *testing.T) (*Handler, string, func()) {
 // TestCodecDist_UploadPopulatesMultiCodec 上传多份 codec 文件后，TaskConfig.Codecs
 // 含每个 *_codec.json，且 ErrorMap 非空。
 func TestCodecDist_UploadPopulatesMultiCodec(t *testing.T) {
-	srv, _, cleanup := setupCodecDistServer(t)
+	srv, _, cleanup := setupCodecDistHandler(t)
 	defer cleanup()
 
 	body, ct := newCodecDistMultipart(t)
@@ -202,11 +187,11 @@ func expectedCodecConfigFiles() []string {
 // TestCodecDist_BaselineWriteAndReadRoundTrip writeBaselineFiles 落盘后磁盘有各 *_codec.json +
 // errors.json；baseline HTTP 端点能读到这些文件。
 func TestCodecDist_BaselineWriteAndReadRoundTrip(t *testing.T) {
-	srv, dir, cleanup := setupCodecDistServer(t)
+	srv, dir, cleanup := setupCodecDistHandler(t)
 	defer cleanup()
 
 	// 直接构造一个含多 codec 的 TaskConfig，落盘
-	cfg := &admintask.TaskConfig{
+	cfg := &admintask.Config{
 		FlowJSON: json.RawMessage(`{}`),
 		Codecs:   map[string][]byte{},
 	}
@@ -258,10 +243,10 @@ func TestCodecDist_BaselineWriteAndReadRoundTrip(t *testing.T) {
 // TestCodecDist_DownloadServesMultiFiles handleGetTaskConfig 能取到多个 adapter/*_codec.json
 // 与 adapter/errors.json。
 func TestCodecDist_DownloadServesMultiFiles(t *testing.T) {
-	srv, _, cleanup := setupCodecDistServer(t)
+	srv, _, cleanup := setupCodecDistHandler(t)
 	defer cleanup()
 
-	cfg := &admintask.TaskConfig{
+	cfg := &admintask.Config{
 		FlowJSON: json.RawMessage(`{}`),
 		Codecs:   map[string][]byte{},
 	}
@@ -277,7 +262,7 @@ func TestCodecDist_DownloadServesMultiFiles(t *testing.T) {
 	task := &admintask.Task{
 		ID:        "t-download",
 		Name:      "download-test",
-		State:     admintask.TaskPending,
+		State:     admintask.Pending,
 		TotalBots: 1,
 		Config:    *cfg,
 	}

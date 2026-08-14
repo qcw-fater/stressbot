@@ -134,7 +134,7 @@ func (s *ListenTemplateStore) List(ctx context.Context) ([]ListenTemplate, error
 	if err != nil {
 		return nil, mapTemplateWriteError(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]ListenTemplate, 0)
 	for rows.Next() {
 		item, err := scanListenTemplate(rows)

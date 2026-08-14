@@ -7,11 +7,11 @@ import (
 	"testing"
 )
 
-// validSchema returns a deep, fully-valid CodecSchema mirroring
+// validSchema returns a deep, fully-valid Schema mirroring
 // testdata/tcp_logic_codec.json (master plan §3.1). Tests clone it and
 // mutate a single field to exercise one Validate rule at a time.
-func validSchema() *CodecSchema {
-	return &CodecSchema{
+func validSchema() *Schema {
+	return &Schema{
 		Version:       1,
 		EndianDefault: "le",
 		Frame: FrameSpec{
@@ -42,7 +42,7 @@ func validSchema() *CodecSchema {
 }
 
 // assertValid fails the test if the schema does not validate cleanly.
-func assertValid(t *testing.T, s *CodecSchema) {
+func assertValid(t *testing.T, s *Schema) {
 	t.Helper()
 	if err := s.Validate(); err != nil {
 		t.Fatalf("expected valid schema, got error: %v", err)
@@ -51,7 +51,7 @@ func assertValid(t *testing.T, s *CodecSchema) {
 
 // assertInvalid fails the test if the schema validates; subMsg (if non-empty)
 // must appear in the aggregated error text.
-func assertInvalid(t *testing.T, s *CodecSchema, subMsg ...string) {
+func assertInvalid(t *testing.T, s *Schema, subMsg ...string) {
 	t.Helper()
 	err := s.Validate()
 	if err == nil {

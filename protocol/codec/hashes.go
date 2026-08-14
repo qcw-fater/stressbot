@@ -28,7 +28,7 @@ func (md5Hasher) newHash(key []byte) hash.Hash {
 	return md5.New()
 }
 
-func (h md5Hasher) Hash(data, key []byte, params map[string]any) []byte {
+func (h md5Hasher) Hash(data, key []byte, _ map[string]any) []byte {
 	hh := h.newHash(key)
 	hh.Write(data)
 	return hh.Sum(nil)
@@ -44,7 +44,7 @@ func (sha1Hasher) newHash(key []byte) hash.Hash {
 	return sha1.New()
 }
 
-func (h sha1Hasher) Hash(data, key []byte, params map[string]any) []byte {
+func (h sha1Hasher) Hash(data, key []byte, _ map[string]any) []byte {
 	hh := h.newHash(key)
 	hh.Write(data)
 	return hh.Sum(nil)
@@ -60,7 +60,7 @@ func (sha256Hasher) newHash(key []byte) hash.Hash {
 	return sha256.New()
 }
 
-func (h sha256Hasher) Hash(data, key []byte, params map[string]any) []byte {
+func (h sha256Hasher) Hash(data, key []byte, _ map[string]any) []byte {
 	hh := h.newHash(key)
 	hh.Write(data)
 	return hh.Sum(nil)

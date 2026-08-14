@@ -10,7 +10,7 @@ import (
 )
 
 // FromProto 校验并转换控制面任务分配与资源包描述。
-func FromProto(src *controlpb.TaskAssignment, bundle *controlpb.BundleDescriptor) (*TaskAssignment, error) {
+func FromProto(src *controlpb.TaskAssignment, bundle *controlpb.BundleDescriptor) (*Assignment, error) {
 	if src == nil {
 		return nil, fmt.Errorf("任务分配不能为空")
 	}
@@ -24,7 +24,7 @@ func FromProto(src *controlpb.TaskAssignment, bundle *controlpb.BundleDescriptor
 		return nil, fmt.Errorf("任务资源包描述无效")
 	}
 	startIndex := int(src.StartIndex)
-	out := &TaskAssignment{
+	out := &Assignment{
 		TaskID: src.TaskId, TaskName: src.TaskName, StartNumber: int(src.StartNumber), StartIndex: &startIndex,
 		TotalBots: int(src.TotalBots), AccountPrefix: src.AccountPrefix, ConcurrentNum: int(src.ConcurrentNum),
 		MainService: src.MainService, StateExtra: cloneStringMap(src.StateExtra),

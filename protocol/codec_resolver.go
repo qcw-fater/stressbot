@@ -85,7 +85,7 @@ func InferCodecMap(codecDir string) (map[string]string, error) {
 	return m, nil
 }
 
-// CodecResolver：server 串（"<proto>:<service>"，如 "tcp:logic"/"tcp:battle"/"udp:battle"）→ Adapter。
+// CodecResolver 将 server 串（"<proto>:<service>"，如 "tcp:logic"/"tcp:battle"/"udp:battle"）解析为 Adapter。
 // 缺映射返回 nil，由调用方 fail loud（不在 resolver 内 panic）。
 type CodecResolver interface {
 	Resolve(server string) Adapter
@@ -112,14 +112,14 @@ func Heartbeat(resolver CodecResolver, server string) *codec.HeartbeatConfigDef 
 	return nil
 }
 
-// NewCodecResolver：显式 map 构造（每个声明的 server → 其 codec）。
+// NewCodecResolver 从显式映射构造解析器（每个声明的 server → 其 codec）。
 // 入参 byServer 可为空（构造不校验，与 loader 不同——loader 对空映射 fail loud，但
 // 直接构造允许上层传入已组装好的映射，含空集）。
 func NewCodecResolver(byServer map[string]Adapter) CodecResolver {
 	return NewCodecResolverWithHeartbeat(byServer, nil)
 }
 
-// NewCodecResolverWithHeartbeat：显式 map 构造，同时携带连接级可选心跳配置。
+// NewCodecResolverWithHeartbeat 从显式映射构造解析器，同时携带连接级可选心跳配置。
 func NewCodecResolverWithHeartbeat(byServer map[string]Adapter, heartbeat map[string]*codec.HeartbeatConfigDef) CodecResolver {
 	// 防御性拷贝：避免上层后续修改影响 resolver 内部状态（resolver 构造后应只读）。
 	copied := make(map[string]Adapter, len(byServer))

@@ -155,7 +155,7 @@ func TestAwaitIO_DispatchesAndDrains(t *testing.T) {
 		IOJob: func() script.IORenderer {
 			jobRan.Add(1)
 			time.Sleep(20 * time.Millisecond) // 模拟阻塞 I/O 往返
-			return func(L *lua.LState) []lua.LValue {
+			return func(_ *lua.LState) []lua.LValue {
 				return []lua.LValue{lua.LString("done")}
 			}
 		},

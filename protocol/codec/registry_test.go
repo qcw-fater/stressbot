@@ -29,9 +29,9 @@ import (
 // ---------------------------------------------------------------------------
 
 // mustEncDec 对 cipher 做 Encrypt→Decrypt 往返，断言恢复原文（流密码 + offset 通用版）。
-func cipherRoundTrip(t *testing.T, name string, c Cipher, data, key []byte, offset int, params map[string]any) {
+func cipherRoundTrip(t *testing.T, name string, c Cipher, data, key []byte, offset int) {
 	t.Helper()
-	enc, err := c.Encrypt(data, key, offset, params)
+	enc, err := c.Encrypt(data, key, offset, nil)
 	if err != nil {
 		t.Fatalf("%s: Encrypt 失败: %v", name, err)
 	}
@@ -41,7 +41,7 @@ func cipherRoundTrip(t *testing.T, name string, c Cipher, data, key []byte, offs
 			t.Errorf("%s: offset=%d 前缀被改动\n  enc前缀: %x\n  原前缀:   %x", name, offset, enc[:offset], data[:offset])
 		}
 	}
-	dec, err := c.Decrypt(enc, key, offset, params)
+	dec, err := c.Decrypt(enc, key, offset, nil)
 	if err != nil {
 		t.Fatalf("%s: Decrypt 失败: %v", name, err)
 	}
@@ -194,7 +194,7 @@ func TestXorCipherRoundTrip(t *testing.T) {
 	data := randBytes(128, 2)
 	key := []byte("short-key")
 	for _, off := range []int{0, 1, 11, 64} {
-		cipherRoundTrip(t, "xor", c, data, key, off, nil)
+		cipherRoundTrip(t, "xor", c, data, key, off)
 	}
 }
 
@@ -203,7 +203,7 @@ func TestXorCarryRolRoundTrip(t *testing.T) {
 	data := randBytes(256, 3)
 	key := key32('K')
 	for _, off := range []int{0, 1, 11, 100} {
-		cipherRoundTrip(t, "xor_carry_rol", c, data, key, off, nil)
+		cipherRoundTrip(t, "xor_carry_rol", c, data, key, off)
 	}
 }
 
@@ -298,7 +298,7 @@ func TestRc4RoundTrip(t *testing.T) {
 	data := randBytes(256, 5)
 	key := []byte("testkey1234567890")
 	for _, off := range []int{0, 1, 11, 100} {
-		cipherRoundTrip(t, "rc4", c, data, key, off, nil)
+		cipherRoundTrip(t, "rc4", c, data, key, off)
 	}
 }
 
@@ -311,7 +311,7 @@ func TestRc4KeyLengths(t *testing.T) {
 		for i := range key {
 			key[i] = byte(i + kl)
 		}
-		cipherRoundTrip(t, "rc4", c, data, key, 0, nil)
+		cipherRoundTrip(t, "rc4", c, data, key, 0)
 	}
 }
 
@@ -337,16 +337,19 @@ func TestRC4RejectsOversizedKeyBeforeMutatingInPlace(t *testing.T) {
 	want := bytes.Clone(data)
 
 	err := inPlace.DecryptInPlace(data, key, 0, nil)
-	var keySizeErr rc4.KeySizeError
-	if !errors.As(err, &keySizeErr) {
+	if _, ok := errors.AsType[rc4.KeySizeError](err); !ok {
 		t.Fatalf("DecryptInPlace() error = %v, want rc4.KeySizeError", err)
 	}
 	if !bytes.Equal(data, want) {
 		t.Fatalf("DecryptInPlace() modified data before error: got %x want %x", data, want)
 	}
 
-	if _, err := c.Encrypt(want, key, 0, nil); !errors.As(err, &keySizeErr) {
-		t.Fatalf("Encrypt() error = %v, want rc4.KeySizeError", err)
+	if _, err := c.Encrypt(want, key, 0, nil); err != nil {
+		if _, ok := errors.AsType[rc4.KeySizeError](err); !ok {
+			t.Fatalf("Encrypt() error = %v, want rc4.KeySizeError", err)
+		}
+	} else {
+		t.Fatal("Encrypt() error = nil, want rc4.KeySizeError")
 	}
 }
 

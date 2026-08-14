@@ -138,7 +138,7 @@ type CapabilitiesResponse struct {
 
 // handleCapabilities 返回服务器能力（当前仅共享状态可用性），供前端展示与校验提示。
 // 出于安全考虑，不返回原始 Redis 地址，只返回脱敏后的展示地址。
-func (s *Handler) handleCapabilities(w http.ResponseWriter, r *http.Request) {
+func (s *Handler) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 	resp := CapabilitiesResponse{
 		SharedState:     s.redisEnabled(),
 		FlowLibrary:     s.flows != nil,

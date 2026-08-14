@@ -19,33 +19,34 @@ func Daemon(skip ...string) {
 		return
 	}
 
-	if os.Getppid() != 1 {
-		filePath, _ := filepath.Abs(os.Args[0])
-		newCmd := []string{os.Args[0]}
-		add := 0
-		for _, v := range os.Args[1:] {
-			if add == 1 {
-				add = 0
-				continue
-			} else {
-				add = 0
-			}
-			for _, s := range skip {
-				if strings.Contains(v, s) {
-					if strings.Contains(v, "--") {
-						add = 2
-					} else {
-						add = 1
-					}
-					break
+	if os.Getppid() == 1 {
+		return
+	}
+
+	filePath, _ := filepath.Abs(os.Args[0])
+	newCmd := []string{os.Args[0]}
+	add := 0
+	for _, v := range os.Args[1:] {
+		if add == 1 {
+			add = 0
+			continue
+		}
+		add = 0
+		for _, s := range skip {
+			if strings.Contains(v, s) {
+				if strings.Contains(v, "--") {
+					add = 2
+				} else {
+					add = 1
 				}
-			}
-			if add == 0 {
-				newCmd = append(newCmd, v)
+				break
 			}
 		}
-		cmd := exec.Command(filePath)
-		cmd.Args = newCmd
-		_ = cmd.Start()
+		if add == 0 {
+			newCmd = append(newCmd, v)
+		}
 	}
+	cmd := exec.Command(filePath)
+	cmd.Args = newCmd
+	_ = cmd.Start()
 }

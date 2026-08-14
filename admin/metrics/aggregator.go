@@ -11,12 +11,12 @@ import (
 
 // Aggregator 压测/系统指标聚合器。
 type Aggregator struct {
-	registry *agentregistry.AgentRegistry
-	windows  *MetricsWindowStore
+	registry *agentregistry.Registry
+	windows  *WindowStore
 	now      func() time.Time
 }
 
-func NewAggregator(registry *agentregistry.AgentRegistry, windows *MetricsWindowStore, now func() time.Time) *Aggregator {
+func NewAggregator(registry *agentregistry.Registry, windows *WindowStore, now func() time.Time) *Aggregator {
 	if now == nil {
 		now = time.Now
 	}
@@ -39,7 +39,7 @@ type StressAggregate struct {
 // AggregateStress 聚合指定任务的压测指标。
 func (a *Aggregator) AggregateStress(taskID string) (*StressAggregate, error) {
 	agents := a.registry.List()
-	assigned := make(map[string]*agentregistry.AgentNode)
+	assigned := make(map[string]*agentregistry.Node)
 	totalAgents := 0
 	assignedAgents := 0
 	offlineAgents := 0
@@ -49,7 +49,7 @@ func (a *Aggregator) AggregateStress(taskID string) (*StressAggregate, error) {
 		}
 		assignedAgents++
 		assigned[agent.ID] = agent
-		if agent.Status == agentregistry.AgentOffline {
+		if agent.Status == agentregistry.Offline {
 			offlineAgents++
 			continue
 		}
@@ -71,7 +71,7 @@ func (a *Aggregator) AggregateStress(taskID string) (*StressAggregate, error) {
 		reportingAgents++
 		cumulative = append(cumulative, &state.Cumulative)
 		freshFor := max(3*state.ExpectedEvery, 15*time.Second)
-		if agent.Status == agentregistry.AgentOffline || now.Sub(state.ReceivedAt) > freshFor {
+		if agent.Status == agentregistry.Offline || now.Sub(state.ReceivedAt) > freshFor {
 			staleAgents++
 			continue
 		}
@@ -208,7 +208,7 @@ func (a *Aggregator) AggregateSystem(agentIDs []string) ClusterSystemSnapshot {
 	now := a.now()
 	cluster := ClusterSystemSnapshot{Timestamp: now, Agents: make([]AgentSystemBrief, 0)}
 	agents := a.registry.List()
-	byID := make(map[string]*agentregistry.AgentNode, len(agents))
+	byID := make(map[string]*agentregistry.Node, len(agents))
 	for _, agent := range agents {
 		byID[agent.ID] = agent
 	}
@@ -228,7 +228,7 @@ func (a *Aggregator) AggregateSystem(agentIDs []string) ClusterSystemSnapshot {
 		if !ok {
 			cluster.OfflineCount++
 			cluster.MissingAgents++
-			cluster.Agents = append(cluster.Agents, AgentSystemBrief{AgentID: id, Status: string(agentregistry.AgentOffline)})
+			cluster.Agents = append(cluster.Agents, AgentSystemBrief{AgentID: id, Status: string(agentregistry.Offline)})
 			continue
 		}
 
@@ -239,11 +239,11 @@ func (a *Aggregator) AggregateSystem(agentIDs []string) ClusterSystemSnapshot {
 			LastHeartbeatAt: agent.LastHeartbeatAt,
 		}
 		switch agent.Status {
-		case agentregistry.AgentIdle, agentregistry.AgentBusy:
+		case agentregistry.Idle, agentregistry.Busy:
 			cluster.OnlineCount++
-		case agentregistry.AgentUnhealthy:
+		case agentregistry.Unhealthy:
 			cluster.UnhealthyCount++
-		case agentregistry.AgentOffline:
+		case agentregistry.Offline:
 			cluster.OfflineCount++
 		}
 
@@ -254,13 +254,13 @@ func (a *Aggregator) AggregateSystem(agentIDs []string) ClusterSystemSnapshot {
 		}
 
 		receivedAt := agent.SystemUpdatedAt
-		brief.ReceivedAt = new(receivedAt)
+		brief.ReceivedAt = pointer(receivedAt)
 		if !agent.LatestSystem.Timestamp.IsZero() {
-			brief.SampledAt = new(agent.LatestSystem.Timestamp)
+			brief.SampledAt = pointer(agent.LatestSystem.Timestamp)
 		}
 		age := now.Sub(receivedAt)
-		brief.SnapshotAgeSeconds = new(age.Seconds())
-		fresh := (agent.Status == agentregistry.AgentIdle || agent.Status == agentregistry.AgentBusy) && age >= 0 && age <= systemSnapshotFreshFor(agent.SystemInterval)
+		brief.SnapshotAgeSeconds = pointer(age.Seconds())
+		fresh := (agent.Status == agentregistry.Idle || agent.Status == agentregistry.Busy) && age >= 0 && age <= systemSnapshotFreshFor(agent.SystemInterval)
 		if !fresh {
 			brief.IsStale = true
 			cluster.StaleAgents++
@@ -281,19 +281,19 @@ func (a *Aggregator) AggregateSystem(agentIDs []string) ClusterSystemSnapshot {
 			hostCPUWeighted += *value * cpuWeight
 			hostCPUWeight += cpuWeight
 			if cluster.MaxHostCPUPercent == nil || *value > *cluster.MaxHostCPUPercent {
-				cluster.MaxHostCPUPercent = new(*value)
+				cluster.MaxHostCPUPercent = pointer(*value)
 				cluster.HotHostCPUAgentID = agent.ID
 				cluster.HotHostCPUAgentName = agent.Name
 			}
 		}
 
 		if total, used, percent, ok := validHostMemory(snapshot); ok {
-			brief.HostMemPercent = new(percent)
+			brief.HostMemPercent = pointer(percent)
 			cluster.HostMemoryReportingAgents++
 			totalMemory += total
 			usedMemory += used
 			if cluster.MaxHostMemPercent == nil || percent > *cluster.MaxHostMemPercent {
-				cluster.MaxHostMemPercent = new(percent)
+				cluster.MaxHostMemPercent = pointer(percent)
 				cluster.HotHostMemAgentID = agent.ID
 				cluster.HotHostMemAgentName = agent.Name
 			}
@@ -316,18 +316,18 @@ func (a *Aggregator) AggregateSystem(agentIDs []string) ClusterSystemSnapshot {
 			processCPUWeighted += *value * cpuWeight
 			processCPUWeight += cpuWeight
 			if cluster.MaxProcessCPUPercent == nil || *value > *cluster.MaxProcessCPUPercent {
-				cluster.MaxProcessCPUPercent = new(*value)
+				cluster.MaxProcessCPUPercent = pointer(*value)
 				cluster.HotProcessCPUAgentID = agent.ID
 				cluster.HotProcessCPUAgentName = agent.Name
 			}
 		}
 		if snapshot.ProcessRSSBytes != nil {
 			value := *snapshot.ProcessRSSBytes
-			brief.ProcessRSSBytes = new(value)
+			brief.ProcessRSSBytes = pointer(value)
 			cluster.ProcessRSSReportingAgents++
 			totalRSS += value
 			if cluster.MaxProcessRSSBytes == nil || value > *cluster.MaxProcessRSSBytes {
-				cluster.MaxProcessRSSBytes = new(value)
+				cluster.MaxProcessRSSBytes = pointer(value)
 				cluster.HotProcessRSSAgentID = agent.ID
 				cluster.HotProcessRSSAgentName = agent.Name
 			}
@@ -335,23 +335,23 @@ func (a *Aggregator) AggregateSystem(agentIDs []string) ClusterSystemSnapshot {
 
 		heap := snapshot.ProcessHeapBytes
 		goroutines := snapshot.ProcessGoroutines
-		brief.ProcessHeapBytes = new(heap)
-		brief.ProcessGoroutines = new(goroutines)
+		brief.ProcessHeapBytes = pointer(heap)
+		brief.ProcessGoroutines = pointer(goroutines)
 		totalHeap += heap
 		totalGoroutines += goroutines
 		if snapshot.ProcessThreads != nil && *snapshot.ProcessThreads >= 0 {
 			value := *snapshot.ProcessThreads
-			brief.ProcessThreads = new(value)
+			brief.ProcessThreads = pointer(value)
 			cluster.ProcessThreadsReportingAgents++
 			totalThreads += value
 		}
 		if snapshot.ProcessFDs != nil && *snapshot.ProcessFDs >= 0 {
 			value := *snapshot.ProcessFDs
-			brief.ProcessFDs = new(value)
+			brief.ProcessFDs = pointer(value)
 			cluster.ProcessFDsReportingAgents++
 			totalFDs += value
 			if cluster.MaxProcessFDs == nil || value > *cluster.MaxProcessFDs {
-				cluster.MaxProcessFDs = new(value)
+				cluster.MaxProcessFDs = pointer(value)
 				cluster.HotProcessFDsAgentID = agent.ID
 				cluster.HotProcessFDsAgentName = agent.Name
 			}
@@ -363,39 +363,39 @@ func (a *Aggregator) AggregateSystem(agentIDs []string) ClusterSystemSnapshot {
 		cluster.CoverageRatio = float64(cluster.ReportingAgents) / float64(cluster.AgentCount)
 	}
 	if hostCPUWeight > 0 {
-		cluster.AvgHostCPUPercent = new(hostCPUWeighted / hostCPUWeight)
+		cluster.AvgHostCPUPercent = pointer(hostCPUWeighted / hostCPUWeight)
 	}
 	if totalMemory > 0 {
-		cluster.TotalHostMemBytes = new(totalMemory)
-		cluster.UsedHostMemBytes = new(usedMemory)
-		cluster.AvgHostMemPercent = new(float64(usedMemory) / float64(totalMemory) * 100)
+		cluster.TotalHostMemBytes = pointer(totalMemory)
+		cluster.UsedHostMemBytes = pointer(usedMemory)
+		cluster.AvgHostMemPercent = pointer(float64(usedMemory) / float64(totalMemory) * 100)
 	}
 	if cluster.HostNetSendReportingAgents > 0 {
-		cluster.TotalHostNetSendBytesPerSec = new(netSend)
+		cluster.TotalHostNetSendBytesPerSec = pointer(netSend)
 	}
 	if cluster.HostNetRecvReportingAgents > 0 {
-		cluster.TotalHostNetRecvBytesPerSec = new(netRecv)
+		cluster.TotalHostNetRecvBytesPerSec = pointer(netRecv)
 	}
 	if processCPUWeight > 0 {
-		cluster.AvgProcessCPUPercent = new(processCPUWeighted / processCPUWeight)
+		cluster.AvgProcessCPUPercent = pointer(processCPUWeighted / processCPUWeight)
 	}
 	if cluster.ReportingAgents > 0 {
-		cluster.TotalProcessHeapBytes = new(totalHeap)
-		cluster.TotalProcessGoroutines = new(totalGoroutines)
+		cluster.TotalProcessHeapBytes = pointer(totalHeap)
+		cluster.TotalProcessGoroutines = pointer(totalGoroutines)
 	}
 	if cluster.ProcessRSSReportingAgents > 0 {
-		cluster.TotalProcessRSSBytes = new(totalRSS)
+		cluster.TotalProcessRSSBytes = pointer(totalRSS)
 	}
 	if cluster.ProcessThreadsReportingAgents > 0 {
-		cluster.TotalProcessThreads = new(totalThreads)
+		cluster.TotalProcessThreads = pointer(totalThreads)
 	}
 	if cluster.ProcessFDsReportingAgents > 0 {
-		cluster.TotalProcessFDs = new(totalFDs)
+		cluster.TotalProcessFDs = pointer(totalFDs)
 	}
 	return cluster
 }
 
-func uniqueSystemAgentIDs(agentIDs []string, agents []*agentregistry.AgentNode) []string {
+func uniqueSystemAgentIDs(agentIDs []string, agents []*agentregistry.Node) []string {
 	set := make(map[string]struct{})
 	if agentIDs == nil {
 		for _, agent := range agents {
@@ -434,7 +434,7 @@ func validPercent(value *float64) *float64 {
 	if value == nil || math.IsNaN(*value) || math.IsInf(*value, 0) || *value < 0 || *value > 100 {
 		return nil
 	}
-	return new(*value)
+	return pointer(*value)
 }
 
 func ValidPercent(value *float64) *float64 { return validPercent(value) }
@@ -443,7 +443,7 @@ func validNonNegative(value *float64) *float64 {
 	if value == nil || math.IsNaN(*value) || math.IsInf(*value, 0) || *value < 0 {
 		return nil
 	}
-	return new(*value)
+	return pointer(*value)
 }
 
 func validHostMemory(snapshot *agentregistry.SystemSnapshot) (uint64, uint64, float64, bool) {
@@ -462,22 +462,7 @@ func ValidHostMemory(snapshot *agentregistry.SystemSnapshot) (uint64, uint64, fl
 	return validHostMemory(snapshot)
 }
 
-//go:fix inline
-func float64Pointer(value float64) *float64 { return new(value) }
-
-//go:fix inline
-func uint64Pointer(value uint64) *uint64 { return new(value) }
-
-//go:fix inline
-func int32Pointer(value int32) *int32 { return new(value) }
-
-//go:fix inline
-func intPointer(value int) *int { return new(value) }
-
-//go:fix inline
-func timePointer(value time.Time) *time.Time { return new(value) }
+func pointer[T any](value T) *T { return &value }
 
 // Now 当前时间（可被测试覆盖）。
-var Now = func() time.Time {
-	return time.Now()
-}
+var Now = time.Now

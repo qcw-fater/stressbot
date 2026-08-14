@@ -12,13 +12,13 @@ import (
 // 保证 json.encode 输出稳定且与旧实现一致。
 var jsonStdConfig = sonic.ConfigStd
 
-// loadJsonModule 加载 json 命名空间模块。
+// loadJSONModule 加载 json 命名空间模块。
 // Lua 用法：
 //
 //	local json = require("json")
 //	local t = json.decode('{"key":"value"}')  → Lua table
 //	local s = json.encode({key = "value"})    → JSON string
-func loadJsonModule(L *lua.LState) int {
+func loadJSONModule(L *lua.LState) int {
 	mod := L.NewTable()
 
 	L.SetField(mod, "decode", L.NewFunction(jsonDecode))

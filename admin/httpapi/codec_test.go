@@ -9,8 +9,8 @@
 //   - preview 未知 mode → 200 + Error。
 //   - algorithms：200，返回清单含 xor_carry_rol/gzip/xor8，按 op 分组（cipher→compress→checksum→hash）。
 //
-// 测试策略：codec 端点为纯计算（不读 AdminServer 状态），用零值 *AdminServer +
-// httptest.NewRecorder 直接驱动 handler，避免 NewAdminServer 的重依赖（TaskStore 落
+// 测试策略：codec 端点为纯计算（不读 Handler 状态），用零值 *Handler +
+// httptest.NewRecorder 直接驱动 handler，避免完整服务器装配的重依赖（任务存储落
 // 盘、Redis 连通性校验）。
 package httpapi
 
@@ -79,7 +79,7 @@ func doCodecPreview(t *testing.T, body any) (int, codec.PreviewResult, []byte) {
 	rec := httptest.NewRecorder()
 	s.handleCodecPreview(rec, req)
 	resp := rec.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var pr codec.PreviewResult
 	_ = json.NewDecoder(resp.Body).Decode(&pr)
 	return resp.StatusCode, pr, rec.Body.Bytes()
@@ -232,7 +232,7 @@ func TestCodecPreview_InvalidRequestBody_400(t *testing.T) {
 }
 
 func TestCodecPreview_SchemaNotObject_400(t *testing.T) {
-	// schema 字段是字符串而非对象 → 反序列化 CodecSchema 失败 → 400。
+	// schema 字段是字符串而非对象 → 反序列化 codec.Schema 失败 → 400。
 	req := map[string]any{
 		"schema":    "not-an-object",
 		"mode":      "encode",
@@ -255,7 +255,7 @@ func TestCodecAlgorithms_OK(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.handleCodecAlgorithms(rec, req)
 	resp := rec.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d want 200", resp.StatusCode)
 	}
@@ -298,7 +298,7 @@ func TestCodecAlgorithms_OK(t *testing.T) {
 }
 
 func TestCodecAlgorithms_RouteRegistered(t *testing.T) {
-	// 端点必须注册到 /sbot/ 路由表。用零值 AdminServer 取 mux 后发请求——未注册的
+	// 端点必须注册到 /sbot/ 路由表。用零值 Handler 取 mux 后发请求——未注册的
 	// /sbot/codec/algorithms 会落到静态文件 fallback 返回 404，命中 handler 才是 200。
 	s := &Handler{}
 	mux := s.registerManagementRoutes()

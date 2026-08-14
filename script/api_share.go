@@ -110,7 +110,7 @@ func resultVals(first lua.LValue, err error) []lua.LValue {
 }
 
 func resultVals3(value lua.LValue, ok bool, err error) []lua.LValue {
-	var third lua.LValue = lua.LNil
+	third := lua.LNil
 	if err != nil {
 		third = lua.LString(err.Error())
 	}
@@ -174,7 +174,7 @@ func shareSet(L *lua.LState) int {
 		opCtx, cancel := opContext(ctx)
 		defer cancel()
 		err := ctx.Shared.Set(opCtx, key, value, ttl)
-		return func(L *lua.LState) []lua.LValue {
+		return func(_ *lua.LState) []lua.LValue {
 			if err != nil {
 				return resultVals(lua.LFalse, err)
 			}
@@ -219,7 +219,7 @@ func shareDel(L *lua.LState) int {
 		opCtx, cancel := opContext(ctx)
 		defer cancel()
 		err := ctx.Shared.Delete(opCtx, key)
-		return func(L *lua.LState) []lua.LValue {
+		return func(_ *lua.LState) []lua.LValue {
 			if err != nil {
 				return resultVals(lua.LFalse, err)
 			}
@@ -240,7 +240,7 @@ func shareExists(L *lua.LState) int {
 		opCtx, cancel := opContext(ctx)
 		defer cancel()
 		exists, err := ctx.Shared.Exists(opCtx, key)
-		return func(L *lua.LState) []lua.LValue {
+		return func(_ *lua.LState) []lua.LValue {
 			if err != nil {
 				return resultVals(lua.LFalse, err)
 			}
@@ -262,7 +262,7 @@ func shareExpire(L *lua.LState) int {
 		opCtx, cancel := opContext(ctx)
 		defer cancel()
 		ok, err := ctx.Shared.Expire(opCtx, key, ttl)
-		return func(L *lua.LState) []lua.LValue {
+		return func(_ *lua.LState) []lua.LValue {
 			if err != nil {
 				return resultVals(lua.LFalse, err)
 			}
@@ -287,7 +287,7 @@ func shareIncr(L *lua.LState) int {
 		opCtx, cancel := opContext(ctx)
 		defer cancel()
 		n, err := ctx.Shared.Incr(opCtx, key, delta, ttl)
-		return func(L *lua.LState) []lua.LValue {
+		return func(_ *lua.LState) []lua.LValue {
 			if err != nil {
 				return resultVals(lua.LNil, err)
 			}
@@ -312,7 +312,7 @@ func shareClaim(L *lua.LState) int {
 		opCtx, cancel := opContext(ctx)
 		defer cancel()
 		ok, err := ctx.Shared.Claim(opCtx, key, owner, ttl)
-		return func(L *lua.LState) []lua.LValue {
+		return func(_ *lua.LState) []lua.LValue {
 			if err != nil {
 				return resultVals(lua.LFalse, err)
 			}
@@ -334,7 +334,7 @@ func shareRelease(L *lua.LState) int {
 		opCtx, cancel := opContext(ctx)
 		defer cancel()
 		ok, err := ctx.Shared.Release(opCtx, key, owner)
-		return func(L *lua.LState) []lua.LValue {
+		return func(_ *lua.LState) []lua.LValue {
 			if err != nil {
 				return resultVals(lua.LFalse, err)
 			}
@@ -355,7 +355,7 @@ func shareOwner(L *lua.LState) int {
 		opCtx, cancel := opContext(ctx)
 		defer cancel()
 		owner, ok, err := ctx.Shared.Owner(opCtx, key)
-		return func(L *lua.LState) []lua.LValue {
+		return func(_ *lua.LState) []lua.LValue {
 			if err != nil {
 				return resultVals(lua.LNil, err)
 			}
@@ -381,7 +381,7 @@ func shareRenew(L *lua.LState) int {
 		opCtx, cancel := opContext(ctx)
 		defer cancel()
 		ok, err := ctx.Shared.Renew(opCtx, key, owner, ttl)
-		return func(L *lua.LState) []lua.LValue {
+		return func(_ *lua.LState) []lua.LValue {
 			if err != nil {
 				return resultVals(lua.LFalse, err)
 			}
@@ -406,7 +406,7 @@ func shareQueuePush(L *lua.LState) int {
 		opCtx, cancel := opContext(ctx)
 		defer cancel()
 		err := ctx.Shared.QueuePush(opCtx, key, value, ttl)
-		return func(L *lua.LState) []lua.LValue {
+		return func(_ *lua.LState) []lua.LValue {
 			if err != nil {
 				return resultVals(lua.LFalse, err)
 			}
@@ -451,7 +451,7 @@ func shareQueueLen(L *lua.LState) int {
 		opCtx, cancel := opContext(ctx)
 		defer cancel()
 		n, err := ctx.Shared.QueueLen(opCtx, key)
-		return func(L *lua.LState) []lua.LValue {
+		return func(_ *lua.LState) []lua.LValue {
 			if err != nil {
 				return resultVals(lua.LNil, err)
 			}
@@ -473,7 +473,7 @@ func shareQueueExpire(L *lua.LState) int {
 		opCtx, cancel := opContext(ctx)
 		defer cancel()
 		ok, err := ctx.Shared.QueueExpire(opCtx, key, ttl)
-		return func(L *lua.LState) []lua.LValue {
+		return func(_ *lua.LState) []lua.LValue {
 			if err != nil {
 				return resultVals(lua.LFalse, err)
 			}
@@ -499,7 +499,7 @@ func shareHashSet(L *lua.LState) int {
 		opCtx, cancel := opContext(ctx)
 		defer cancel()
 		err := ctx.Shared.HashSet(opCtx, key, field, value, ttl)
-		return func(L *lua.LState) []lua.LValue {
+		return func(_ *lua.LState) []lua.LValue {
 			if err != nil {
 				return resultVals(lua.LFalse, err)
 			}
@@ -574,7 +574,7 @@ func shareHashDel(L *lua.LState) int {
 		opCtx, cancel := opContext(ctx)
 		defer cancel()
 		err := ctx.Shared.HashDelete(opCtx, key, field)
-		return func(L *lua.LState) []lua.LValue {
+		return func(_ *lua.LState) []lua.LValue {
 			if err != nil {
 				return resultVals(lua.LFalse, err)
 			}
@@ -598,7 +598,7 @@ func shareHashIncr(L *lua.LState) int {
 		opCtx, cancel := opContext(ctx)
 		defer cancel()
 		n, err := ctx.Shared.HashIncr(opCtx, key, field, delta, ttl)
-		return func(L *lua.LState) []lua.LValue {
+		return func(_ *lua.LState) []lua.LValue {
 			if err != nil {
 				return resultVals(lua.LNil, err)
 			}
@@ -620,7 +620,7 @@ func shareHashExpire(L *lua.LState) int {
 		opCtx, cancel := opContext(ctx)
 		defer cancel()
 		ok, err := ctx.Shared.HashExpire(opCtx, key, ttl)
-		return func(L *lua.LState) []lua.LValue {
+		return func(_ *lua.LState) []lua.LValue {
 			if err != nil {
 				return resultVals(lua.LFalse, err)
 			}

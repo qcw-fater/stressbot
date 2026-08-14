@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	// Register the standard pprof handlers on http.DefaultServeMux.
 	_ "net/http/pprof"
 	"sync"
 	"time"
 
+	// Register stressbot-specific diagnostic handlers on http.DefaultServeMux.
 	_ "stressbot/internal/debughttp"
 	"stressbot/internal/stresslog"
 	"stressbot/internal/workpool"
@@ -26,10 +28,14 @@ type PprofConfig struct {
 // StartPprofServer 在指定端口启动 pprof HTTP 服务（非阻塞）。
 // 任何模式（standalone / agent / admin）均可通过配置启用。
 // 返回的函数用于优雅关闭服务。
-func StartPprofServer(port int) (stop func()) {
+func StartPprofServer(ctx context.Context, port int) (stop func()) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	addr := fmt.Sprintf(":%d", port)
 	srv := &http.Server{Addr: addr}
-	listener, err := net.Listen("tcp", addr)
+	var listenConfig net.ListenConfig
+	listener, err := listenConfig.Listen(ctx, "tcp", addr)
 	if err != nil {
 		stresslog.Error("[DEBUG] pprof 服务启动失败", zap.String("addr", addr), zap.Error(err))
 		return func() {}
@@ -45,7 +51,7 @@ func StartPprofServer(port int) (stop func()) {
 			_ = listener.Close()
 		})
 	}
-	pool := workpool.GetWorkPool()
+	pool := workpool.Default()
 	pool.Go(func() {
 		stresslog.Info("[DEBUG] pprof 服务启动",
 			zap.String("endpoint", "http://localhost"+addr+"/debug/pprof/"))
@@ -56,7 +62,10 @@ func StartPprofServer(port int) (stop func()) {
 	// 即使命令入口尚未来得及显式关闭 pprof，全局协程池关闭时也会先
 	// 关闭监听器，让 Serve worker 退出，避免 Shutdown 误报泄漏任务。
 	pool.GoWithStop(func(stopCh <-chan struct{}) {
-		<-stopCh
+		select {
+		case <-ctx.Done():
+		case <-stopCh:
+		}
 		stopServer()
 	})
 	return stopServer

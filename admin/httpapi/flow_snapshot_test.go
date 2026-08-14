@@ -47,7 +47,7 @@ func TestFlowSnapshotRouteReturnsSnapshot(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "name", "node_count", "action_count", "created_at", "updated_at", "flow_json", "layout_json",
 		}))
-	s := &Handler{staticDir: t.TempDir(), flows: NewFlowTemplateStore(db)}
+	s := &Handler{staticDir: t.TempDir(), flows: newFlowTemplateStore(db)}
 	rr := httptest.NewRecorder()
 	s.registerManagementRoutes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/sbot/flows/snapshot", nil))
 
@@ -68,7 +68,7 @@ func TestReplaceFlowSnapshotRejectsBodyOverLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	s := &Handler{flows: NewFlowTemplateStore(db)}
+	s := &Handler{flows: newFlowTemplateStore(db)}
 	body := `{"expectedRevision":"sha256:test","items":[],"padding":"` + strings.Repeat("x", 50<<20) + `"}`
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPut, "/sbot/flows/snapshot", strings.NewReader(body))

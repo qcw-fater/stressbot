@@ -32,7 +32,7 @@ func NewReporter(c *MetricsCollector, interval time.Duration) *Reporter {
 // Start 启动定时报告。
 func (r *Reporter) Start() {
 	r.prevTime = time.Now()
-	workpool.GetWorkPool().GoWithStop(func(poolStop <-chan struct{}) {
+	workpool.Default().GoWithStop(func(poolStop <-chan struct{}) {
 		ticker := time.NewTicker(r.interval)
 		defer ticker.Stop()
 		for {

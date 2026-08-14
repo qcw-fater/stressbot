@@ -457,7 +457,7 @@ func (c *SchemaCodec) FrameSignature() FrameSignature {
 // NewSchemaCodec 构造
 // ---------------------------------------------------------------------------
 
-// NewSchemaCodec 把已 Load 的 *CodecSchema 一次性编译成不可变的 *SchemaCodec。
+// NewSchemaCodec 把已 Load 的 *Schema 一次性编译成不可变的 *SchemaCodec。
 //
 // 编译步骤：
 //  1. 调 schema.Validate()；失败直接返回其 error。
@@ -469,7 +469,7 @@ func (c *SchemaCodec) FrameSignature() FrameSignature {
 //  7. checksumOut.from 解析为 (stepIdx, produceName)。
 //
 // errorMap 直接采用入参（允许 nil → 空 map）。NewSchemaCodec 不读文件。
-func NewSchemaCodec(schema *CodecSchema, errorMap map[uint64]string) (*SchemaCodec, error) {
+func NewSchemaCodec(schema *Schema, errorMap map[uint64]string) (*SchemaCodec, error) {
 	if schema == nil {
 		return nil, fmt.Errorf("codec schema 编译失败：schema 为空")
 	}
@@ -539,11 +539,12 @@ func NewSchemaCodec(schema *CodecSchema, errorMap map[uint64]string) (*SchemaCod
 			return nil, fmt.Errorf("codec schema 编译失败：字段 %q 类型 %q 暂未实现（浮点未做 IEEE-754 位转换，会静默错帧），请勿使用", f.Name, f.Type)
 		}
 		// endian：字段级优先，否则回退 EndianDefault。
-		if f.Endian == "be" {
+		switch f.Endian {
+		case "be":
 			cf.endian = binary.BigEndian
-		} else if f.Endian == "le" {
+		case "le":
 			cf.endian = binary.LittleEndian
-		} else {
+		default:
 			cf.endian = defaultEndian
 		}
 		// flags：记录位索引。

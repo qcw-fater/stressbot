@@ -36,8 +36,7 @@ func LoadTOML[T any](path string, defaults T) (*T, error) {
 	cfg := defaults
 	dec := toml.NewDecoder(bytes.NewReader(data)).DisallowUnknownFields()
 	if err := dec.Decode(&cfg); err != nil {
-		var strictErr *toml.StrictMissingError
-		if errors.As(err, &strictErr) {
+		if strictErr, ok := errors.AsType[*toml.StrictMissingError](err); ok {
 			keys := make([]string, 0, len(strictErr.Errors))
 			for i := range strictErr.Errors {
 				keys = append(keys, strings.Join(strictErr.Errors[i].Key(), "."))

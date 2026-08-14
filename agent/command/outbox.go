@@ -17,10 +17,10 @@ type commandOutcome struct {
 	element   *list.Element
 }
 
-// CommandOutcomeOutbox retains the exact outcome (including rejection) until
+// OutcomeOutbox retains the exact outcome (including rejection) until
 // Admin confirms durable receipt. Session generations only replay snapshots;
 // they never consume or delete outcomes themselves.
-type CommandOutcomeOutbox struct {
+type OutcomeOutbox struct {
 	mu       sync.Mutex
 	capacity int
 	items    map[string]*commandOutcome
@@ -28,14 +28,15 @@ type CommandOutcomeOutbox struct {
 	notify   chan struct{}
 }
 
-func NewCommandOutcomeOutbox(capacity int) *CommandOutcomeOutbox {
+// NewOutcomeOutbox creates a bounded command outcome outbox.
+func NewOutcomeOutbox(capacity int) *OutcomeOutbox {
 	if capacity <= 0 {
 		capacity = 4096
 	}
-	return &CommandOutcomeOutbox{capacity: capacity, items: make(map[string]*commandOutcome), order: list.New(), notify: make(chan struct{}, 1)}
+	return &OutcomeOutbox{capacity: capacity, items: make(map[string]*commandOutcome), order: list.New(), notify: make(chan struct{}, 1)}
 }
 
-func (o *CommandOutcomeOutbox) FindAndReplay(commandID string) *controlpb.CommandAck {
+func (o *OutcomeOutbox) FindAndReplay(commandID string) *controlpb.CommandAck {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	item := o.items[commandID]
@@ -49,7 +50,7 @@ func (o *CommandOutcomeOutbox) FindAndReplay(commandID string) *controlpb.Comman
 	return proto.Clone(item.ack).(*controlpb.CommandAck)
 }
 
-func (o *CommandOutcomeOutbox) Record(ack *controlpb.CommandAck) error {
+func (o *OutcomeOutbox) Record(ack *controlpb.CommandAck) error {
 	if ack == nil || ack.CommandId == "" {
 		return fmt.Errorf("命令结果缺少 commandId")
 	}
@@ -84,7 +85,7 @@ func (o *CommandOutcomeOutbox) Record(ack *controlpb.CommandAck) error {
 	return nil
 }
 
-func (o *CommandOutcomeOutbox) Snapshot() []*controlpb.CommandAck {
+func (o *OutcomeOutbox) Snapshot() []*controlpb.CommandAck {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	out := make([]*controlpb.CommandAck, 0)
@@ -97,7 +98,7 @@ func (o *CommandOutcomeOutbox) Snapshot() []*controlpb.CommandAck {
 	return out
 }
 
-func (o *CommandOutcomeOutbox) Confirm(receipt *controlpb.CommandReceipt) bool {
+func (o *OutcomeOutbox) Confirm(receipt *controlpb.CommandReceipt) bool {
 	if receipt == nil {
 		return false
 	}
@@ -113,16 +114,16 @@ func (o *CommandOutcomeOutbox) Confirm(receipt *controlpb.CommandReceipt) bool {
 	return true
 }
 
-func (o *CommandOutcomeOutbox) Wake() {
+func (o *OutcomeOutbox) Wake() {
 	o.mu.Lock()
 	o.wakeLocked()
 	o.mu.Unlock()
 }
 
 // Notifications 返回结果队列的边沿通知通道。
-func (o *CommandOutcomeOutbox) Notifications() <-chan struct{} { return o.notify }
+func (o *OutcomeOutbox) Notifications() <-chan struct{} { return o.notify }
 
-func (o *CommandOutcomeOutbox) wakeLocked() {
+func (o *OutcomeOutbox) wakeLocked() {
 	select {
 	case o.notify <- struct{}{}:
 	default:

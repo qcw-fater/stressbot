@@ -325,7 +325,7 @@ end`,
 
 	var ctx *Context
 	w := &recordingWaiter{}
-	w.onAwait = func(spec *WaitSpec) {
+	w.onAwait = func(_ *WaitSpec) {
 		if err := rp.RunListenScriptRaw(L, "cb.lua", []byte("x")); err != nil {
 			t.Errorf("嵌套 listen 回调失败: %v", err)
 		}

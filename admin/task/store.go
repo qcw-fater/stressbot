@@ -33,8 +33,8 @@ type Adapter[T any, S comparable] struct {
 	Conflict        func(map[string]any) error
 }
 
-// Store is the concurrency-safe task repository and lifecycle state machine.
-type Store[T any, S comparable] struct {
+// Repository is a concurrency-safe task repository and lifecycle state machine.
+type Repository[T any, S comparable] struct {
 	mu    sync.RWMutex
 	tasks map[string]T
 
@@ -47,8 +47,9 @@ type Store[T any, S comparable] struct {
 	recoveredIDs []string
 }
 
-func NewStore[T any, S comparable](dataDir string, adapter Adapter[T, S]) (*Store[T, S], error) {
-	store := &Store[T, S]{tasks: make(map[string]T), dataDir: dataDir, adapter: adapter}
+// NewRepository loads a generic task repository from dataDir.
+func NewRepository[T any, S comparable](dataDir string, adapter Adapter[T, S]) (*Repository[T, S], error) {
+	store := &Repository[T, S]{tasks: make(map[string]T), dataDir: dataDir, adapter: adapter}
 	items, err := adapter.Load(dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("load tasks: %w", err)
@@ -65,7 +66,7 @@ func NewStore[T any, S comparable](dataDir string, adapter Adapter[T, S]) (*Stor
 	return store, nil
 }
 
-func (s *Store[T, S]) SetOnTerminal(fn func(T)) {
+func (s *Repository[T, S]) SetOnTerminal(fn func(T)) {
 	s.onTerminal = fn
 	for _, id := range s.recoveredIDs {
 		if item, ok := s.tasks[id]; ok {
@@ -75,7 +76,7 @@ func (s *Store[T, S]) SetOnTerminal(fn func(T)) {
 	s.recoveredIDs = nil
 }
 
-func (s *Store[T, S]) Create(item T) error {
+func (s *Repository[T, S]) Create(item T) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id := s.adapter.ID(item)
@@ -86,7 +87,7 @@ func (s *Store[T, S]) Create(item T) error {
 	return s.adapter.Save(s.dataDir, item)
 }
 
-func (s *Store[T, S]) Get(id string) (T, bool) {
+func (s *Repository[T, S]) Get(id string) (T, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	item, ok := s.tasks[id]
@@ -97,7 +98,7 @@ func (s *Store[T, S]) Get(id string) (T, bool) {
 	return s.adapter.Clone(item), true
 }
 
-func (s *Store[T, S]) List() []T {
+func (s *Repository[T, S]) List() []T {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]T, 0, len(s.tasks))
@@ -107,7 +108,7 @@ func (s *Store[T, S]) List() []T {
 	return out
 }
 
-func (s *Store[T, S]) ListByState(state S) []T {
+func (s *Repository[T, S]) ListByState(state S) []T {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]T, 0)
@@ -119,7 +120,7 @@ func (s *Store[T, S]) ListByState(state S) []T {
 	return out
 }
 
-func (s *Store[T, S]) Update(id string, update func(T)) error {
+func (s *Repository[T, S]) Update(id string, update func(T)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	item, ok := s.tasks[id]
@@ -130,7 +131,7 @@ func (s *Store[T, S]) Update(id string, update func(T)) error {
 	return s.adapter.Save(s.dataDir, item)
 }
 
-func (s *Store[T, S]) Delete(id string) error {
+func (s *Repository[T, S]) Delete(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	item, ok := s.tasks[id]
@@ -144,7 +145,7 @@ func (s *Store[T, S]) Delete(id string) error {
 	return s.adapter.Remove(s.dataDir, id)
 }
 
-func (s *Store[T, S]) Transition(id string, from, to S) (T, error) {
+func (s *Repository[T, S]) Transition(id string, from, to S) (T, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	item, ok := s.tasks[id]
@@ -178,20 +179,20 @@ func (s *Store[T, S]) Transition(id string, from, to S) (T, error) {
 			s.activeID = ""
 		}
 		if s.onTerminal != nil {
-			copy := s.adapter.TerminalClone(item)
-			workpool.GetWorkPool().Go(func() { s.onTerminal(copy) })
+			clone := s.adapter.TerminalClone(item)
+			workpool.Default().Go(func() { s.onTerminal(clone) })
 		}
 	}
 	return item, nil
 }
 
-func (s *Store[T, S]) ActiveTaskID() string {
+func (s *Repository[T, S]) ActiveTaskID() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.activeID
 }
 
-func (s *Store[T, S]) ActiveTask() T {
+func (s *Repository[T, S]) ActiveTask() T {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.activeID != "" {
@@ -203,13 +204,13 @@ func (s *Store[T, S]) ActiveTask() T {
 	return zero
 }
 
-func (s *Store[T, S]) HasActive() bool {
+func (s *Repository[T, S]) HasActive() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.activeID != ""
 }
 
-func (s *Store[T, S]) Begin(id string, pending, starting S) (T, error) {
+func (s *Repository[T, S]) Begin(id string, pending, starting S) (T, error) {
 	s.startMu.Lock()
 	defer s.startMu.Unlock()
 

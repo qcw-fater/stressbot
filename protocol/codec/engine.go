@@ -134,7 +134,7 @@ func (c *SchemaCodec) encode(route any, body []byte, key []byte) []byte {
 	for i := range c.steps {
 		step := &c.steps[i]
 		// 候选生效判定：encodeWhen.applies + appliesWithIdx 串行依赖。
-		candidate := step.encodeWhen.applies(len(work), keySatisfies(step, key), rmap)
+		candidate := step.encodeWhen.applies(len(work), keySatisfies(key), rmap)
 		if candidate && step.encodeWhen.appliesWithIdx >= 0 {
 			if step.encodeWhen.appliesWithIdx >= len(applied) || !applied[step.encodeWhen.appliesWithIdx] {
 				candidate = false
@@ -201,7 +201,7 @@ func (c *SchemaCodec) encode(route any, body []byte, key []byte) []byte {
 			if !ok {
 				continue
 			}
-			region := c.regionForOver(step, work, bodyPlain, nil)
+			region := regionForOver(work)
 			val := chk.Sum(region, nil)
 			stashSingle(stash, i, step, val)
 			// 独立 checksum 步通常不置 flag（无 flag 则 flagMask=0）。
@@ -215,7 +215,7 @@ func (c *SchemaCodec) encode(route any, body []byte, key []byte) []byte {
 			if !ok {
 				continue
 			}
-			region := c.regionForOver(step, work, bodyPlain, nil)
+			region := regionForOver(work)
 			hb := h.Hash(region, key, nil)
 			stashSingleBytes(stash, i, step, hb)
 		}
@@ -279,7 +279,7 @@ func (c *SchemaCodec) encode(route any, body []byte, key []byte) []byte {
 //
 // 注意：keyLen 的精确长度校验在 encrypt 分支由 keyLenSatisfied 单独判定；applies() 内的
 // requireKey 仅看 key 是否存在（非空）。
-func keySatisfies(step *compiledStep, key []byte) bool {
+func keySatisfies(key []byte) bool {
 	return len(key) > 0
 }
 
@@ -435,7 +435,7 @@ func stashSingleBytes(stash map[int]map[string]uint64, stepIdx int, step *compil
 
 // regionForOver 计算独立 checksum/hash 步的 over region。
 // v1 现协议不用；正确实现以备未来扩展。
-func (c *SchemaCodec) regionForOver(step *compiledStep, work, bodyPlain, header []byte) []byte {
+func regionForOver(work []byte) []byte {
 	// 现协议 schema 的独立 checksum 步无 Over 字段（nil），返回 work 作为安全默认。
 	// Over 的真正解析需要编译期存 step.over；当前 schema 未用到。这里保守返回 work。
 	return work
@@ -770,7 +770,7 @@ func (c *SchemaCodec) inflateShareSafe(stepIdx int, flags uint64) bool {
 // 瞬态 scratch 池化（与 walkWireLevel 的 accs 池同性质，非"内存换 CPU"缓存交易）：
 // 池内常驻 ∝ 并发解码数，GC 周期自动清空。**归还纪律**：只有 work 被解压产物 /
 // 共享产物 / 复制版解密产物顶替后才归还；任何可能让缓冲作为 body 外泄的路径
-//（解压失败 keep、提前 return）一律不归还，缓冲降级为普通堆分配交给 GC。
+// （解压失败 keep、提前 return）一律不归还，缓冲降级为普通堆分配交给 GC。
 
 var workBufPool sync.Pool
 

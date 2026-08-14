@@ -8,11 +8,11 @@ import (
 	"stressbot/internal/timerpool"
 )
 
-// ErrRetryStopped 表示重试在下一次操作执行前被调用方终止。
-var ErrRetryStopped = errors.New("重试已停止")
+// ErrStopped 表示重试在下一次操作执行前被调用方终止。
+var ErrStopped = errors.New("重试已停止")
 
-// RetryPolicy 描述指数退避策略。Jitter 为 0 时关闭抖动，取值范围为 [0, 1]。
-type RetryPolicy struct {
+// Policy 描述指数退避策略。Jitter 为 0 时关闭抖动，取值范围为 [0, 1]。
+type Policy struct {
 	Initial time.Duration
 	Max     time.Duration
 	Factor  float64
@@ -21,7 +21,7 @@ type RetryPolicy struct {
 
 // NewExponentialBackOff 使用 cenkalti/backoff 构造无总时长上限的指数退避实例。
 // 实例非并发安全，每条重试链路必须独占一个实例。
-func NewExponentialBackOff(policy RetryPolicy) *backoff.ExponentialBackOff {
+func NewExponentialBackOff(policy Policy) *backoff.ExponentialBackOff {
 	initial := policy.Initial
 	if initial <= 0 {
 		initial = time.Second
@@ -53,9 +53,9 @@ func NewExponentialBackOff(policy RetryPolicy) *backoff.ExponentialBackOff {
 	)
 }
 
-// RetryWithStop 执行 op，直到成功、退避策略停止、遇到永久错误或 stop 关闭。
+// WithStop 执行 op，直到成功、退避策略停止、遇到永久错误或 stop 关闭。
 // 等待使用项目 timer 池；stop 已关闭时不会再发起一次 op。
-func RetryWithStop(stop <-chan struct{}, op func() error, notify func(error, time.Duration), b backoff.BackOff) error {
+func WithStop(stop <-chan struct{}, op func() error, notify func(error, time.Duration), b backoff.BackOff) error {
 	if b == nil {
 		return errors.New("重试退避策略不能为空")
 	}
@@ -63,15 +63,14 @@ func RetryWithStop(stop <-chan struct{}, op func() error, notify func(error, tim
 
 	for {
 		if stopped(stop) {
-			return ErrRetryStopped
+			return ErrStopped
 		}
 
 		err := op()
 		if err == nil {
 			return nil
 		}
-		var permanent *backoff.PermanentError
-		if errors.As(err, &permanent) {
+		if permanent, ok := errors.AsType[*backoff.PermanentError](err); ok {
 			return permanent.Err
 		}
 
@@ -83,7 +82,7 @@ func RetryWithStop(stop <-chan struct{}, op func() error, notify func(error, tim
 			notify(err, wait)
 		}
 		if !waitRetry(stop, wait) {
-			return ErrRetryStopped
+			return ErrStopped
 		}
 	}
 }

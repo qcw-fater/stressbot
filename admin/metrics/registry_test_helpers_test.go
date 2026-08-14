@@ -11,21 +11,19 @@ import (
 	"go.uber.org/zap"
 )
 
-type AgentRegistry = agent.AgentRegistry
-type AgentNode = agent.AgentNode
+type Registry = agent.Registry
+type Node = agent.Node
 type SystemSnapshot = agent.SystemSnapshot
 type Task = admintask.Task
-type TaskConfig = admintask.TaskConfig
+type TaskConfig = admintask.Config
 type RobotConfig = admintask.RobotConfig
 
 const (
-	AgentIdle = agent.AgentIdle
-	AgentBusy = agent.AgentBusy
+	Idle = agent.Idle
+	Busy = agent.Busy
 )
 
-var NewTaskStore = admintask.NewTaskStore
-
-func newTestAgentRegistry(nodes ...*AgentNode) *AgentRegistry {
+func newTestAgentRegistry(nodes ...*Node) *Registry {
 	if stresslog.GetLogger() == nil {
 		stresslog.ReplaceLogger(zap.NewNop())
 	}

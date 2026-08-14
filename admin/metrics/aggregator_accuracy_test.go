@@ -31,10 +31,10 @@ func aggregatorTestReport(t *testing.T, agentID string, sequence uint64, start, 
 
 func TestAggregatorSeparatesCumulativeFactsFromFreshLiveRates(t *testing.T) {
 	clock := &metricStoreTestClock{}
-	store := NewMetricsWindowStore(clock.Now)
+	store := NewWindowStore(clock.Now)
 	registry := newTestAgentRegistry()
 	for _, id := range []string{"a", "b"} {
-		if err := registry.Register(&AgentNode{ID: id, Status: AgentBusy, CurrentTaskID: "task-1"}); err != nil {
+		if err := registry.Register(&Node{ID: id, Status: Busy, CurrentTaskID: "task-1"}); err != nil {
 			t.Fatalf("register agent %s: %v", id, err)
 		}
 	}
@@ -83,9 +83,9 @@ func TestAggregatorSeparatesCumulativeFactsFromFreshLiveRates(t *testing.T) {
 func TestAggregateSystemUsesAssignedScopeAndFreshAdminReceiptTimes(t *testing.T) {
 	now := time.Date(2026, 8, 4, 11, 0, 0, 0, time.UTC)
 	registry := newTestAgentRegistry(
-		systemAgentNode("a", "node-a", AgentBusy, 4, "5s", now.Add(-10*time.Second), systemSnapshotValues(20, 100, 50, 10, 200, 5, 1, 2)),
-		systemAgentNode("b", "node-b", AgentBusy, 8, "5s", now.Add(-16*time.Second), systemSnapshotValues(90, 100, 90, 80, 900, 90, 9, 9)),
-		systemAgentNode("outside", "outside", AgentBusy, 64, "5s", now, systemSnapshotValues(99, 1_000, 999, 99, 9_999, 999, 99, 99)),
+		systemAgentNode("a", "node-a", 4, "5s", now.Add(-10*time.Second), systemSnapshotValues(20, 100, 50, 10, 200, 5, 1, 2)),
+		systemAgentNode("b", "node-b", 8, "5s", now.Add(-16*time.Second), systemSnapshotValues(90, 100, 90, 80, 900, 90, 9, 9)),
+		systemAgentNode("outside", "outside", 64, "5s", now, systemSnapshotValues(99, 1_000, 999, 99, 9_999, 999, 99, 99)),
 	)
 	aggregator := NewAggregator(registry, nil, func() time.Time { return now })
 
@@ -116,8 +116,8 @@ func TestAggregateSystemAggregatesEachValidFieldWithExplicitCoverage(t *testing.
 	b := systemSnapshotValues(60, 300, 240, 30, 300, 9, 0, 200)
 	b.HostNetSendBytesPerSec = nil
 	registry := newTestAgentRegistry(
-		systemAgentNode("a", "node-a", AgentBusy, 4, "10s", now.Add(-5*time.Second), a),
-		systemAgentNode("b", "node-b", AgentBusy, 12, "10s", now.Add(-5*time.Second), b),
+		systemAgentNode("a", "node-a", 4, "10s", now.Add(-5*time.Second), a),
+		systemAgentNode("b", "node-b", 12, "10s", now.Add(-5*time.Second), b),
 	)
 	aggregator := NewAggregator(registry, nil, func() time.Time { return now })
 
@@ -155,11 +155,11 @@ func TestAggregateSystemReturnsAnEmptyAgentArrayForAnEmptyScope(t *testing.T) {
 	}
 }
 
-func systemAgentNode(id, name string, status agent.AgentStatus, cpus int, interval string, receivedAt time.Time, snapshot SystemSnapshot) *AgentNode {
-	return &AgentNode{
+func systemAgentNode(id, name string, cpus int, interval string, receivedAt time.Time, snapshot SystemSnapshot) *Node {
+	return &Node{
 		ID:              id,
 		Name:            name,
-		Status:          status,
+		Status:          Busy,
 		SystemInterval:  interval,
 		StaticInfo:      agent.StaticInfo{NumCPU: cpus},
 		LatestSystem:    &snapshot,
@@ -171,29 +171,20 @@ func systemSnapshotValues(hostCPU float64, totalMemory, usedMemory uint64, proce
 	memoryPercent := float64(usedMemory) / float64(totalMemory) * 100
 	threads := int32(3)
 	return SystemSnapshot{
-		HostCPUPercent:         new(hostCPU),
-		HostMemTotalBytes:      new(totalMemory),
-		HostMemUsedBytes:       new(usedMemory),
-		HostMemPercent:         new(memoryPercent),
-		HostNetSendBytesPerSec: new(send),
-		HostNetRecvBytesPerSec: new(recv),
-		ProcessCPUPercent:      new(processCPU),
-		ProcessRSSBytes:        new(rss),
+		HostCPUPercent:         pointer(hostCPU),
+		HostMemTotalBytes:      pointer(totalMemory),
+		HostMemUsedBytes:       pointer(usedMemory),
+		HostMemPercent:         pointer(memoryPercent),
+		HostNetSendBytesPerSec: pointer(send),
+		HostNetRecvBytesPerSec: pointer(recv),
+		ProcessCPUPercent:      pointer(processCPU),
+		ProcessRSSBytes:        pointer(rss),
 		ProcessHeapBytes:       50,
 		ProcessGoroutines:      7,
 		ProcessThreads:         &threads,
-		ProcessFDs:             new(fds),
+		ProcessFDs:             pointer(fds),
 	}
 }
-
-//go:fix inline
-func adminFloatPointer(value float64) *float64 { return new(value) }
-
-//go:fix inline
-func adminUint64Pointer(value uint64) *uint64 { return new(value) }
-
-//go:fix inline
-func adminInt32Pointer(value int32) *int32 { return new(value) }
 
 func assertAdminFloatPointer(t *testing.T, name string, got *float64, want float64) {
 	t.Helper()

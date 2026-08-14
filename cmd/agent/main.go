@@ -95,18 +95,19 @@ func run(args []string) (exitCode int) {
 		return 1
 	}
 
-	defer workpool.GetWorkPool().Shutdown()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	defer workpool.Default().Shutdown()
 	if cfg.Pprof != nil {
 		port := cfg.Pprof.Port
 		if port <= 0 {
 			port = 6060
 		}
-		stopPprof := config.StartPprofServer(port)
+		stopPprof := config.StartPprofServer(ctx, port)
 		defer stopPprof()
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 	if err := node.Run(ctx); err != nil {
 		stresslog.Error("[MAIN] Agent 运行失败", zap.Error(err))
 		return 1

@@ -29,32 +29,34 @@ type Host interface {
 	AgentID() string
 	RuntimeState() (controlpb.AgentRuntimeStatus, string, int)
 	CancelTask(expectedTaskID, reason string) (string, bool)
-	ReserveTask(task *agenttask.TaskAssignment) (context.Context, context.CancelCauseFunc, error)
-	LaunchReservedTask(context.Context, context.CancelCauseFunc, *agenttask.TaskAssignment, func(func()) error) error
-	ReleaseReservedTask(*agenttask.TaskAssignment, context.CancelCauseFunc, error)
+	ReserveTask(task *agenttask.Assignment) (context.Context, context.CancelCauseFunc, error)
+	LaunchReservedTask(context.Context, context.CancelCauseFunc, *agenttask.Assignment, func(func()) error) error
+	ReleaseReservedTask(*agenttask.Assignment, context.CancelCauseFunc, error)
 	PrepareShutdown(commandID string, sequence uint64)
 	CancelControlPlane()
 }
 
 var errTaskSessionInterrupted = errors.New("启动任务时控制会话中断")
 
-type CommandExecutor struct {
+// Executor 按顺序执行控制面下发的命令，并保留待确认结果。
+type Executor struct {
 	host     Host
 	cache    *bundle.Cache
-	outcomes *CommandOutcomeOutbox
+	outcomes *OutcomeOutbox
 	queue    chan commandRequest
 	mu       sync.Mutex
 	inflight map[string]struct{}
 	deferred map[string]commandRequest
 }
 
-func NewCommandExecutor(host Host, cache *bundle.Cache) *CommandExecutor {
-	return &CommandExecutor{host: host, cache: cache, outcomes: NewCommandOutcomeOutbox(4096), queue: make(chan commandRequest, 64),
+// NewExecutor 创建命令执行器。
+func NewExecutor(host Host, cache *bundle.Cache) *Executor {
+	return &Executor{host: host, cache: cache, outcomes: NewOutcomeOutbox(4096), queue: make(chan commandRequest, 64),
 		inflight: make(map[string]struct{}), deferred: make(map[string]commandRequest)}
 }
 
-func (e *CommandExecutor) Start(ctx context.Context) error {
-	return workpool.GetWorkPool().Submit(func() {
+func (e *Executor) Start(ctx context.Context) error {
+	return workpool.Default().Submit(func() {
 		for {
 			select {
 			case <-ctx.Done():
@@ -67,7 +69,7 @@ func (e *CommandExecutor) Start(ctx context.Context) error {
 	})
 }
 
-func (e *CommandExecutor) Enqueue(ctx context.Context, client controlpb.AgentBundleServiceClient, command *controlpb.Command) error {
+func (e *Executor) Enqueue(ctx context.Context, client controlpb.AgentBundleServiceClient, command *controlpb.Command) error {
 	request := commandRequest{ctx: ctx, client: client, cmd: command}
 	select {
 	case e.queue <- request:
@@ -77,7 +79,7 @@ func (e *CommandExecutor) Enqueue(ctx context.Context, client controlpb.AgentBun
 	}
 }
 
-func (e *CommandExecutor) execute(request commandRequest) *controlpb.CommandAck {
+func (e *Executor) execute(request commandRequest) *controlpb.CommandAck {
 	command := request.cmd
 	ack := &controlpb.CommandAck{CommandId: command.CommandId, Sequence: command.Sequence, AgentId: e.host.AgentID(),
 		TaskId: command.TaskId, Status: controlpb.CommandAckStatus_COMMAND_ACK_STATUS_APPLIED, AcknowledgedAtUnixNano: time.Now().UnixNano()}
@@ -114,7 +116,7 @@ func (e *CommandExecutor) execute(request commandRequest) *controlpb.CommandAck 
 	return ack
 }
 
-func (e *CommandExecutor) beginStart(request commandRequest, ack *controlpb.CommandAck, start *controlpb.StartTask) {
+func (e *Executor) beginStart(request commandRequest, ack *controlpb.CommandAck, start *controlpb.StartTask) {
 	command := request.cmd
 	e.mu.Lock()
 	if _, exists := e.inflight[command.CommandId]; exists {
@@ -148,7 +150,7 @@ func (e *CommandExecutor) beginStart(request commandRequest, ack *controlpb.Comm
 		e.completeStart(request, ack)
 		return
 	}
-	if err := workpool.GetWorkPool().Submit(func() {
+	if err := workpool.Default().Submit(func() {
 		sessionCanceled := make(chan struct{})
 		stopSessionCancel := context.AfterFunc(request.ctx, func() {
 			taskCancel(errTaskSessionInterrupted)
@@ -159,7 +161,7 @@ func (e *CommandExecutor) beginStart(request commandRequest, ack *controlpb.Comm
 			<-sessionCanceled
 		}
 		if err == nil && context.Cause(taskCtx) == nil {
-			err = e.host.LaunchReservedTask(taskCtx, taskCancel, domain, workpool.GetWorkPool().Submit)
+			err = e.host.LaunchReservedTask(taskCtx, taskCancel, domain, workpool.Default().Submit)
 		}
 		if err != nil || context.Cause(taskCtx) != nil {
 			cause := context.Cause(taskCtx)
@@ -184,7 +186,7 @@ func (e *CommandExecutor) beginStart(request commandRequest, ack *controlpb.Comm
 	}
 }
 
-func (e *CommandExecutor) completeStart(request commandRequest, ack *controlpb.CommandAck) {
+func (e *Executor) completeStart(request commandRequest, ack *controlpb.CommandAck) {
 	if ack != nil {
 		// Publish the exact outcome before making the command non-inflight; a
 		// concurrently replayed delivery can then only replay this outcome.
@@ -208,7 +210,7 @@ func (e *CommandExecutor) completeStart(request commandRequest, ack *controlpb.C
 	}
 }
 
-func (e *CommandExecutor) finish(request commandRequest, ack *controlpb.CommandAck) {
+func (e *Executor) finish(request commandRequest, ack *controlpb.CommandAck) {
 	if ack == nil {
 		return
 	}
@@ -223,7 +225,7 @@ func (e *CommandExecutor) finish(request commandRequest, ack *controlpb.CommandA
 	}
 }
 
-func (e *CommandExecutor) Outcomes() *CommandOutcomeOutbox { return e.outcomes }
+func (e *Executor) Outcomes() *OutcomeOutbox { return e.outcomes }
 
 func isTransientCommandError(err error) bool {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

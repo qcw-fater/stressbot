@@ -9,13 +9,14 @@ import (
 	"stressbot/monitor"
 )
 
-type MetricsSink interface {
+// Sink 接收 Agent 采集的压测指标与系统指标。
+type Sink interface {
 	OfferStress(taskID string, reportedAt time.Time, snapshot *monitor.CollectorSnapshot)
 	OfferSystem(snapshot SystemSnapshot)
 }
 
 type StressReporter struct {
-	sink         MetricsSink
+	sink         Sink
 	taskID       string
 	interval     time.Duration
 	src          *monitor.MetricsCollector
@@ -26,12 +27,12 @@ type StressReporter struct {
 	windowStart  time.Time
 }
 
-func NewStressReporter(sink MetricsSink, taskID string, interval time.Duration, src *monitor.MetricsCollector) *StressReporter {
+func NewStressReporter(sink Sink, taskID string, interval time.Duration, src *monitor.MetricsCollector) *StressReporter {
 	return &StressReporter{sink: sink, taskID: taskID, interval: interval, src: src, stopCh: make(chan struct{}), nextSequence: 1, windowStart: time.Now()}
 }
 
 func (r *StressReporter) Start(ctx context.Context) {
-	workpool.GetWorkPool().Go(func() { r.run(ctx) })
+	workpool.Default().Go(func() { r.run(ctx) })
 }
 
 func (r *StressReporter) Snapshot() *monitor.CollectorSnapshot { return r.src.Snapshot(nil, 0) }
@@ -70,18 +71,18 @@ func (r *StressReporter) reportOnce(now time.Time) {
 }
 
 type SystemReporter struct {
-	sink     MetricsSink
+	sink     Sink
 	interval time.Duration
 	src      *SystemMonitor
 	stopCh   chan struct{}
 	stopOnce sync.Once
 }
 
-func NewSystemReporter(sink MetricsSink, interval time.Duration, src *SystemMonitor) *SystemReporter {
+func NewSystemReporter(sink Sink, interval time.Duration, src *SystemMonitor) *SystemReporter {
 	return &SystemReporter{sink: sink, interval: interval, src: src, stopCh: make(chan struct{})}
 }
 
-func (r *SystemReporter) Start(ctx context.Context) { workpool.GetWorkPool().Go(func() { r.run(ctx) }) }
+func (r *SystemReporter) Start(ctx context.Context) { workpool.Default().Go(func() { r.run(ctx) }) }
 
 func (r *SystemReporter) Stop() { r.stopOnce.Do(func() { close(r.stopCh) }) }
 

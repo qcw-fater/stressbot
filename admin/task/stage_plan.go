@@ -53,7 +53,7 @@ func (p StagePlan) FinalSegmentNo() int {
 	return len(p.Segments)
 }
 
-// buildStagePlan 基于 RampUp 配置（理论计划）推导阶段段落。
+// BuildStagePlan 基于 RampUp 配置（理论计划）推导阶段段落。
 func BuildStagePlan(cfg *RampUpConfig) StagePlan {
 	plan := StagePlan{resetIndexToSegmentNo: map[int]int{}}
 	if cfg == nil || len(cfg.Stages) == 0 {

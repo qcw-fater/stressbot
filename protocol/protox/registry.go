@@ -31,14 +31,14 @@ func NewRegistry(files *protoregistry.Files) *Registry {
 // indexMessages 遍历所有文件，索引消息类型
 func (r *Registry) indexMessages() {
 	r.files.RangeFiles(func(fd protoreflect.FileDescriptor) bool {
-		indexFromDescriptor(fd.Messages(), r.messages, string(fd.Package()))
+		indexFromDescriptor(fd.Messages(), r.messages)
 		return true
 	})
 	stresslog.Info("[PROTOX] 已索引消息类型", zap.Int("count", len(r.messages)))
 }
 
 // indexFromDescriptor 递归索引嵌套消息
-func indexFromDescriptor(msgs protoreflect.MessageDescriptors, result map[string]protoreflect.MessageDescriptor, pkg string) {
+func indexFromDescriptor(msgs protoreflect.MessageDescriptors, result map[string]protoreflect.MessageDescriptor) {
 	for i := 0; i < msgs.Len(); i++ {
 		md := msgs.Get(i)
 		fullName := string(md.FullName())
@@ -56,7 +56,7 @@ func indexFromDescriptor(msgs protoreflect.MessageDescriptors, result map[string
 
 		// 递归处理嵌套消息
 		if md.Messages().Len() > 0 {
-			indexFromDescriptor(md.Messages(), result, pkg)
+			indexFromDescriptor(md.Messages(), result)
 		}
 	}
 }

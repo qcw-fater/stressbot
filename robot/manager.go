@@ -108,7 +108,6 @@ type Manager struct {
 // 不再依赖"跑完 ramp-up 才在外层 select 命中 ctx.Done"。
 func NewManager(parent context.Context, cfg ManagerConfig, flow *flowdef.TaskFlow, factory *protox.Factory,
 	dialer *network.Dialer, luaPool *script.RuntimePool) *Manager {
-
 	ctx, cancel := context.WithCancel(parent)
 	return &Manager{
 		cfg:      cfg,
@@ -345,7 +344,7 @@ const closeRobotsTimeout = 15 * time.Second
 // 正常提交的任务整体超过 closeRobotsTimeout 后强制返回；协程池拒绝时改为同步清理，
 // 确保资源实际释放，不再等待超时后伪造未执行的清理结果。
 func closeRobotsConcurrent(robots []*Robot, reason CleanupReason) CleanupStatus {
-	return closeRobotsConcurrentWithSubmit(robots, reason, workpool.GetWorkPool().Submit)
+	return closeRobotsConcurrentWithSubmit(robots, reason, workpool.Default().Submit)
 }
 
 func closeRobotsConcurrentWithSubmit(robots []*Robot, reason CleanupReason, submit func(func()) error) CleanupStatus {
@@ -533,7 +532,7 @@ func (m *Manager) Done() <-chan struct{} {
 
 // startDurationTimer 启动运行时长定时器，到期后自动 StopAll。
 func (m *Manager) startDurationTimer() error {
-	return m.startDurationTimerWithSubmit(workpool.GetWorkPool().Submit)
+	return m.startDurationTimerWithSubmit(workpool.Default().Submit)
 }
 
 func (m *Manager) startDurationTimerWithSubmit(submit func(func()) error) error {

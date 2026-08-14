@@ -14,7 +14,7 @@ type metricStoreTestClock struct {
 func (c *metricStoreTestClock) Now() time.Time    { return c.now }
 func (c *metricStoreTestClock) Set(now time.Time) { c.now = now }
 
-func metricStoreTestReport(t *testing.T, taskID, agentID string, sequence uint64, startedAt, endedAt time.Time) StressReport {
+func metricStoreTestReport(t *testing.T, taskID string, sequence uint64, startedAt, endedAt time.Time) StressReport {
 	t.Helper()
 	collector := monitor.NewCollector(monitor.CollectorConfig{ApdexThresholdMs: 100, TimingDetail: "rtt"})
 	collector.RecordActionStart("login")
@@ -28,17 +28,17 @@ func metricStoreTestReport(t *testing.T, taskID, agentID string, sequence uint64
 		ExpectedIntervalSeconds: 5,
 	})
 	return StressReport{
-		AgentID:    agentID,
+		AgentID:    "agent-1",
 		TaskID:     taskID,
 		ReportedAt: endedAt.Add(24 * time.Hour),
 		Snapshot:   snapshot,
 	}
 }
 
-func TestMetricsWindowStoreAcceptIsIdempotentAndUsesReceiveTime(t *testing.T) {
+func TestWindowStoreAcceptIsIdempotentAndUsesReceiveTime(t *testing.T) {
 	clock := &metricStoreTestClock{now: time.Unix(100, 0)}
-	store := NewMetricsWindowStore(clock.Now)
-	report := metricStoreTestReport(t, "task-1", "agent-1", 1, time.Unix(90, 0), time.Unix(95, 0))
+	store := NewWindowStore(clock.Now)
+	report := metricStoreTestReport(t, "task-1", 1, time.Unix(90, 0), time.Unix(95, 0))
 
 	first, err := store.Accept(report, "task-1", 5*time.Second, 100*time.Millisecond)
 	if err != nil {
@@ -68,25 +68,25 @@ func TestMetricsWindowStoreAcceptIsIdempotentAndUsesReceiveTime(t *testing.T) {
 	}
 }
 
-func TestMetricsWindowStoreAcceptsSequenceGapAndRejectsTaskMismatch(t *testing.T) {
+func TestWindowStoreAcceptsSequenceGapAndRejectsTaskMismatch(t *testing.T) {
 	clock := &metricStoreTestClock{now: time.Unix(100, 0)}
-	store := NewMetricsWindowStore(clock.Now)
+	store := NewWindowStore(clock.Now)
 
-	gap := metricStoreTestReport(t, "task-1", "agent-1", 2, time.Unix(90, 0), time.Unix(95, 0))
+	gap := metricStoreTestReport(t, "task-1", 2, time.Unix(90, 0), time.Unix(95, 0))
 	if result, err := store.Accept(gap, "task-1", 5*time.Second, 100*time.Millisecond); err != nil || result.Status != MetricWindowAccepted {
 		t.Fatalf("首个可见窗口 sequence=2 应被接受: result=%+v err=%v", result, err)
 	}
 
-	mismatch := metricStoreTestReport(t, "task-old", "agent-1", 1, time.Unix(90, 0), time.Unix(95, 0))
+	mismatch := metricStoreTestReport(t, "task-old", 1, time.Unix(90, 0), time.Unix(95, 0))
 	if _, err := store.Accept(mismatch, "task-1", 5*time.Second, 100*time.Millisecond); err == nil {
 		t.Fatal("任务不匹配应被拒绝")
 	}
 }
 
-func TestMetricsWindowStoreRejectsMalformedSketch(t *testing.T) {
+func TestWindowStoreRejectsMalformedSketch(t *testing.T) {
 	clock := &metricStoreTestClock{now: time.Unix(100, 0)}
-	store := NewMetricsWindowStore(clock.Now)
-	report := metricStoreTestReport(t, "task-1", "agent-1", 1, time.Unix(90, 0), time.Unix(95, 0))
+	store := NewWindowStore(clock.Now)
+	report := metricStoreTestReport(t, "task-1", 1, time.Unix(90, 0), time.Unix(95, 0))
 	report.Snapshot.Window.Actions[0].RTT.Sketch = nil
 
 	if _, err := store.Accept(report, "task-1", 5*time.Second, 100*time.Millisecond); err == nil {
@@ -94,10 +94,10 @@ func TestMetricsWindowStoreRejectsMalformedSketch(t *testing.T) {
 	}
 }
 
-func TestMetricsWindowStoreRejectsDataOnEmptyHistogram(t *testing.T) {
+func TestWindowStoreRejectsDataOnEmptyHistogram(t *testing.T) {
 	clock := &metricStoreTestClock{now: time.Unix(100, 0)}
-	store := NewMetricsWindowStore(clock.Now)
-	report := metricStoreTestReport(t, "task-1", "agent-1", 1, time.Unix(90, 0), time.Unix(95, 0))
+	store := NewWindowStore(clock.Now)
+	report := metricStoreTestReport(t, "task-1", 1, time.Unix(90, 0), time.Unix(95, 0))
 	zero := 0.0
 	report.Snapshot.Window.Actions[0].ListenWait.MinMs = &zero
 
@@ -106,10 +106,10 @@ func TestMetricsWindowStoreRejectsDataOnEmptyHistogram(t *testing.T) {
 	}
 }
 
-func TestMetricsWindowStoreRejectsDerivedAverageMismatch(t *testing.T) {
+func TestWindowStoreRejectsDerivedAverageMismatch(t *testing.T) {
 	clock := &metricStoreTestClock{now: time.Unix(100, 0)}
-	store := NewMetricsWindowStore(clock.Now)
-	report := metricStoreTestReport(t, "task-1", "agent-1", 1, time.Unix(90, 0), time.Unix(95, 0))
+	store := NewWindowStore(clock.Now)
+	report := metricStoreTestReport(t, "task-1", 1, time.Unix(90, 0), time.Unix(95, 0))
 	action := &report.Snapshot.Actions[0]
 	action.EncodeSampleCount = 1
 	action.EncodeCostSumNs = int64(time.Millisecond)
@@ -120,10 +120,10 @@ func TestMetricsWindowStoreRejectsDerivedAverageMismatch(t *testing.T) {
 	}
 }
 
-func TestMetricsWindowStoreHistoryPeekAckKeepsStableBatch(t *testing.T) {
+func TestWindowStoreHistoryPeekAckKeepsStableBatch(t *testing.T) {
 	clock := &metricStoreTestClock{now: time.Unix(100, 0)}
-	store := NewMetricsWindowStore(clock.Now)
-	first := metricStoreTestReport(t, "task-1", "agent-1", 1, time.Unix(90, 0), time.Unix(95, 0))
+	store := NewWindowStore(clock.Now)
+	first := metricStoreTestReport(t, "task-1", 1, time.Unix(90, 0), time.Unix(95, 0))
 	if _, err := store.Accept(first, "task-1", 5*time.Second, 100*time.Millisecond); err != nil {
 		t.Fatalf("接收第一窗口: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestMetricsWindowStoreHistoryPeekAckKeepsStableBatch(t *testing.T) {
 	if !ok || len(batch1.Windows) != 1 {
 		t.Fatalf("第一批窗口数 = %d, want 1", len(batch1.Windows))
 	}
-	second := metricStoreTestReport(t, "task-1", "agent-1", 2, time.Unix(95, 0), time.Unix(100, 0))
+	second := metricStoreTestReport(t, "task-1", 2, time.Unix(95, 0), time.Unix(100, 0))
 	// 使用同一个 Collector 生成累计分布更接近生产；本测试只验证批次生命周期，
 	// 因而将第二个报告作为独立节点，避免手工伪造 sketch 与精确计数不一致。
 	second.AgentID = "agent-2"
@@ -154,10 +154,10 @@ func TestMetricsWindowStoreHistoryPeekAckKeepsStableBatch(t *testing.T) {
 	}
 }
 
-func TestMetricsWindowStoreReleasesTerminalTaskAfterHistoryAck(t *testing.T) {
+func TestWindowStoreReleasesTerminalTaskAfterHistoryAck(t *testing.T) {
 	clock := &metricStoreTestClock{now: time.Unix(100, 0)}
-	store := NewMetricsWindowStore(clock.Now)
-	report := metricStoreTestReport(t, "task-1", "agent-1", 1, time.Unix(90, 0), time.Unix(95, 0))
+	store := NewWindowStore(clock.Now)
+	report := metricStoreTestReport(t, "task-1", 1, time.Unix(90, 0), time.Unix(95, 0))
 	if _, err := store.Accept(report, "task-1", 5*time.Second, 100*time.Millisecond); err != nil {
 		t.Fatalf("接收窗口: %v", err)
 	}
@@ -181,10 +181,10 @@ func TestMetricsWindowStoreReleasesTerminalTaskAfterHistoryAck(t *testing.T) {
 	}
 }
 
-func TestMetricsWindowStoreDropTaskDiscardsUnpersistedHistory(t *testing.T) {
+func TestWindowStoreDropTaskDiscardsUnpersistedHistory(t *testing.T) {
 	clock := &metricStoreTestClock{now: time.Unix(100, 0)}
-	store := NewMetricsWindowStore(clock.Now)
-	report := metricStoreTestReport(t, "task-1", "agent-1", 1, time.Unix(90, 0), time.Unix(95, 0))
+	store := NewWindowStore(clock.Now)
+	report := metricStoreTestReport(t, "task-1", 1, time.Unix(90, 0), time.Unix(95, 0))
 	if _, err := store.Accept(report, "task-1", 5*time.Second, 100*time.Millisecond); err != nil {
 		t.Fatalf("接收窗口: %v", err)
 	}
@@ -198,15 +198,15 @@ func TestMetricsWindowStoreDropTaskDiscardsUnpersistedHistory(t *testing.T) {
 	}
 }
 
-func TestMetricsWindowStoreAllowsCumulativeResetOnlyWithNewEpoch(t *testing.T) {
+func TestWindowStoreAllowsCumulativeResetOnlyWithNewEpoch(t *testing.T) {
 	clock := &metricStoreTestClock{now: time.Unix(100, 0)}
-	store := NewMetricsWindowStore(clock.Now)
-	first := metricStoreTestReport(t, "task-1", "agent-1", 1, time.Unix(90, 0), time.Unix(95, 0))
+	store := NewWindowStore(clock.Now)
+	first := metricStoreTestReport(t, "task-1", 1, time.Unix(90, 0), time.Unix(95, 0))
 	first.Snapshot.CollectionEpoch = 7
 	if _, err := store.Accept(first, "task-1", 5*time.Second, 100*time.Millisecond); err != nil {
 		t.Fatalf("接收第一窗口: %v", err)
 	}
-	second := metricStoreTestReport(t, "task-1", "agent-1", 2, time.Unix(95, 0), time.Unix(100, 0))
+	second := metricStoreTestReport(t, "task-1", 2, time.Unix(95, 0), time.Unix(100, 0))
 	second.Snapshot.CollectionEpoch = 8
 	second.Snapshot.TotalActions = 0
 	second.Snapshot.Actions = nil

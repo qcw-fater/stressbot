@@ -31,7 +31,7 @@ type SupervisorConfig struct {
 
 // RunSupervisor 维护到 Admin 的长连接，并在可恢复错误后指数退避重连。
 func RunSupervisor(ctx context.Context, cfg SupervisorConfig, runConnection func(context.Context, *grpc.ClientConn) error) error {
-	policy := retry.NewExponentialBackOff(retry.RetryPolicy{Initial: cfg.ReconnectInterval, Max: cfg.ReconnectMaxInterval, Factor: 2, Jitter: 1})
+	policy := retry.NewExponentialBackOff(retry.Policy{Initial: cfg.ReconnectInterval, Max: cfg.ReconnectMaxInterval, Factor: 2, Jitter: 1})
 	attempts := 0
 	for {
 		if err := ctx.Err(); err != nil {

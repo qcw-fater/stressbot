@@ -186,13 +186,14 @@ func walkWireLevel(md protoreflect.MessageDescriptor, b []byte, sink WireTreeSin
 				}
 				oneofWinner[od] = fd.Index()
 			}
-			if fd.Kind() == protoreflect.MessageKind {
+			switch fd.Kind() {
+			case protoreflect.MessageKind:
 				acc.spans = append(acc.spans, bs)
-			} else if fd.Kind() == protoreflect.GroupKind {
+			case protoreflect.GroupKind:
 				// proto3 无 group；出现即回落解码路径（与 wireNavigate 拒绝一致）
 				collectErr = fmt.Errorf("字段 %s 为 group 类型，不支持直转", fd.FullName())
 				return false
-			} else {
+			default:
 				acc.scalar = decodeScalarWire(fd, u, bs)
 				acc.hasScalar = true
 			}
@@ -219,13 +220,14 @@ func walkWireLevel(md protoreflect.MessageDescriptor, b []byte, sink WireTreeSin
 			valFd := fd.MapValue()
 			for _, k := range acc.keys {
 				st := acc.entries[k]
-				if valFd.Kind() == protoreflect.MessageKind {
+				switch {
+				case valFd.Kind() == protoreflect.MessageKind:
 					if err := walkWireLevel(valFd.Message(), concatSpans(st.spans), ms.MessageEntry(k), depth-1); err != nil {
 						return err
 					}
-				} else if st.hasScalar {
+				case st.hasScalar:
 					ms.ScalarEntry(k, st.scalar)
-				} else {
+				default:
 					ms.ScalarEntry(k, fromScalarValue(valFd, valFd.Default()))
 				}
 			}

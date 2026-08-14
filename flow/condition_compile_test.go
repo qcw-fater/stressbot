@@ -91,7 +91,6 @@ func TestCompiledConditionCanBeSharedAcrossStores(t *testing.T) {
 	}
 
 	for i := 0; i < 32; i++ {
-		i := i
 		t.Run(fmt.Sprintf("store_%d", i), func(t *testing.T) {
 			t.Parallel()
 			store := state.NewStore()

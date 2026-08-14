@@ -10,12 +10,12 @@ import (
 )
 
 type AcceptanceService struct {
-	agents  *agent.AgentRegistry
-	tasks   *admintask.TaskStore
-	windows *MetricsWindowStore
+	agents  *agent.Registry
+	tasks   *admintask.Store
+	windows *WindowStore
 }
 
-func NewAcceptanceService(agents *agent.AgentRegistry, tasks *admintask.TaskStore, windows *MetricsWindowStore) *AcceptanceService {
+func NewAcceptanceService(agents *agent.Registry, tasks *admintask.Store, windows *WindowStore) *AcceptanceService {
 	return &AcceptanceService{agents: agents, tasks: tasks, windows: windows}
 }
 

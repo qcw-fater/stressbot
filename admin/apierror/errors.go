@@ -19,16 +19,16 @@ func NewError(code string, httpStatus int) *Error {
 
 // WithMessage returns a copy carrying a user-facing message.
 func (e *Error) WithMessage(message string) *Error {
-	copy := *e
-	copy.Message = message
-	return &copy
+	clone := *e
+	clone.Message = message
+	return &clone
 }
 
 // WithDetails returns a copy carrying structured error details.
 func (e *Error) WithDetails(details map[string]any) *Error {
-	copy := *e
-	copy.Details = details
-	return &copy
+	clone := *e
+	clone.Details = details
+	return &clone
 }
 
 var (

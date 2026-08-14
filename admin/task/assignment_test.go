@@ -8,9 +8,9 @@ import (
 
 func TestAssignmentStartIndexUsesTaskGlobalOrdinal(t *testing.T) {
 	task := &Task{ID: "task-global-index", TotalBots: 10}
-	agents := []*agent.AgentNode{
-		{ID: "agent-a", Name: "A", Status: agent.AgentIdle, MaxBots: 6},
-		{ID: "agent-b", Name: "B", Status: agent.AgentIdle, MaxBots: 4},
+	agents := []*agent.Node{
+		{ID: "agent-a", Name: "A", Status: agent.Idle, MaxBots: 6},
+		{ID: "agent-b", Name: "B", Status: agent.Idle, MaxBots: 4},
 	}
 
 	assignments, err := NewAssigner().Assign(task, agents, 100)
@@ -37,12 +37,12 @@ func TestAssignmentStartIndexIsZeroForDebugSingleAgent(t *testing.T) {
 	task := &Task{
 		ID:        "task-debug-index",
 		TotalBots: 3,
-		Config: TaskConfig{RobotConfig: RobotConfig{
+		Config: Config{RobotConfig: RobotConfig{
 			DebugMode: true,
 		}},
 	}
-	agents := []*agent.AgentNode{
-		{ID: "agent-a", Name: "A", Status: agent.AgentIdle, MaxBots: 10},
+	agents := []*agent.Node{
+		{ID: "agent-a", Name: "A", Status: agent.Idle, MaxBots: 10},
 	}
 
 	assignments, err := NewAssigner().Assign(task, agents, 50)

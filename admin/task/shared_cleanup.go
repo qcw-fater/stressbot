@@ -108,22 +108,22 @@ func (s *SharedCleanup) Enqueue(runID string) {
 		return
 	}
 	s.add(runID)
-	workpool.GetWorkPool().Go(func() { s.attempt(runID) })
+	workpool.Default().Go(func() { s.attempt(runID) })
 }
 
-func (s *SharedCleanup) attempt(runID string) bool {
+func (s *SharedCleanup) attempt(runID string) {
 	if !s.enabled() {
-		return false
+		return
 	}
 	resolved, err := s.redis.Resolve()
 	if err != nil {
 		stresslog.Error("[ADMIN] 共享状态清理：配置解析失败", zap.String("runId", runID), zap.Error(err))
-		return false
+		return
 	}
 	store, err := shared.NewRedisStore(resolved, runID)
 	if err != nil {
 		stresslog.Warn("[ADMIN] 共享状态清理：连接 Redis 失败，稍后重试", zap.String("runId", runID), zap.Error(err))
-		return false
+		return
 	}
 	defer func() { _ = store.Close() }()
 
@@ -131,11 +131,10 @@ func (s *SharedCleanup) attempt(runID string) bool {
 	defer cancel()
 	if err := store.Cleanup(ctx); err != nil {
 		stresslog.Warn("[ADMIN] 共享状态清理失败，稍后重试", zap.String("runId", runID), zap.Error(err))
-		return false
+		return
 	}
 	s.remove(runID)
 	stresslog.Info("[ADMIN] 共享状态已清理", zap.String("runId", runID))
-	return true
 }
 
 func (s *SharedCleanup) Start(ctx context.Context) {
@@ -144,9 +143,9 @@ func (s *SharedCleanup) Start(ctx context.Context) {
 	}
 	for _, id := range s.list() {
 		runID := id
-		workpool.GetWorkPool().Go(func() { s.attempt(runID) })
+		workpool.Default().Go(func() { s.attempt(runID) })
 	}
-	workpool.GetWorkPool().Go(func() {
+	workpool.Default().Go(func() {
 		ticker := time.NewTicker(sharedCleanupRetryInterval)
 		defer ticker.Stop()
 		for {

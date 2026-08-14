@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"stressbot/protocol"
-
-	"stressbot/internal/stresslog"
 )
 
 // fakeAdapter 是 connectionPump 测试用的最小 protocol.Adapter 实现。
@@ -28,43 +26,43 @@ func newFakeAdapter() *fakeAdapter {
 	return &fakeAdapter{decodeRouteKey: "test.route"}
 }
 
-func (a *fakeAdapter) HeaderSize() int                                     { return 4 }
-func (a *fakeAdapter) BodyLength(headerData []byte) int                    { return 0 }
-func (a *fakeAdapter) EncodeTCP(route any, body []byte, key []byte) []byte { return nil }
-func (a *fakeAdapter) EncodeUDP(route any, body []byte, key []byte) []byte { return nil }
+func (a *fakeAdapter) HeaderSize() int                            { return 4 }
+func (a *fakeAdapter) BodyLength(_ []byte) int                    { return 0 }
+func (a *fakeAdapter) EncodeTCP(_ any, _ []byte, _ []byte) []byte { return nil }
+func (a *fakeAdapter) EncodeUDP(_ any, _ []byte, _ []byte) []byte { return nil }
 
-func (a *fakeAdapter) DecodeTCP(data []byte, key []byte) (string, []byte, uint64) {
+func (a *fakeAdapter) DecodeTCP(data []byte, _ []byte) (string, []byte, uint64) {
 	a.decodeCalls.Add(1)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.decodeRouteKey, data, 0
 }
 
-func (a *fakeAdapter) DecodeUDP(data []byte, key []byte) (string, []byte, uint64) {
+func (a *fakeAdapter) DecodeUDP(data []byte, _ []byte) (string, []byte, uint64) {
 	a.decodeCalls.Add(1)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.decodeRouteKey, data, 0
 }
 
-func (a *fakeAdapter) ExpectedRouteKey(route any) string { return "test.route" }
-func (a *fakeAdapter) Close()                            {}
-func (a *fakeAdapter) DescribeError(code uint64) string  { return "" }
+func (a *fakeAdapter) ExpectedRouteKey(_ any) string { return "test.route" }
+func (a *fakeAdapter) Close()                        {}
+func (a *fakeAdapter) DescribeError(_ uint64) string { return "" }
 
 // 编译期断言：fakeAdapter 实现 protocol.Adapter。
 var _ protocol.Adapter = (*fakeAdapter)(nil)
 
 // startPumpedConnection 构造一个已启动 connectionPump 的测试连接（带可控 sendFunc）。
 // 返回连接与一个记录所有发送字节原子计数器。
-func startPumpedConnection(t *testing.T, adp protocol.Adapter, isUDP bool) (*Connection, *int32) {
+func startPumpedConnection(t *testing.T, adp protocol.Adapter) (*Connection, *int32) {
 	t.Helper()
 	conn := newTestConnection(t)
 	var sent int32
-	conn.sendFunc = func(data []byte, _ WriteDoneFunc) error {
+	conn.sendFunc = func(_ []byte, _ WriteDoneFunc) error {
 		atomic.AddInt32(&sent, 1)
 		return nil
 	}
-	if err := conn.StartPump(adp, isUDP); err != nil {
+	if err := conn.StartPump(adp, false); err != nil {
 		t.Fatalf("StartPump() error = %v", err)
 	}
 	return conn, &sent
@@ -143,7 +141,7 @@ func TestStartPumpBuffersFirstFrameBeforeWorkerRuns(t *testing.T) {
 // responseMap → 响应投递到 RequestResponse 的 channel。
 func TestPump_InboundDispatch_RequestResponse(t *testing.T) {
 	adp := newFakeAdapter()
-	conn, _ := startPumpedConnection(t, adp, false)
+	conn, _ := startPumpedConnection(t, adp)
 	defer conn.Close()
 
 	// 预埋 responseMap（模拟 inflight RequestResponse）。
@@ -173,7 +171,7 @@ func TestPump_InboundDispatch_RequestResponse(t *testing.T) {
 // → 同步 dispatchListen → Push 到 listenQueues → GetListenResp FIFO pop。
 func TestPump_InboundDispatch_ListenQueue(t *testing.T) {
 	adp := newFakeAdapter()
-	conn, _ := startPumpedConnection(t, adp, false)
+	conn, _ := startPumpedConnection(t, adp)
 	defer conn.Close()
 
 	const routeKey = "test.route"
@@ -209,7 +207,7 @@ func TestPump_InboundDispatch_ListenQueue(t *testing.T) {
 // TestPump_InboundDispatch_ListenCallback 验证：命中 listenResp（非 nil cb）→ 同步调 cb。
 func TestPump_InboundDispatch_ListenCallback(t *testing.T) {
 	adp := newFakeAdapter()
-	conn, _ := startPumpedConnection(t, adp, false)
+	conn, _ := startPumpedConnection(t, adp)
 	defer conn.Close()
 
 	const routeKey = "test.route"
@@ -237,7 +235,7 @@ func TestPump_InboundDispatch_ListenCallback(t *testing.T) {
 // 到期时调 builder → Send。
 func TestPump_Control_RegisterHeartbeat(t *testing.T) {
 	adp := newFakeAdapter()
-	conn, sent := startPumpedConnection(t, adp, false)
+	conn, sent := startPumpedConnection(t, adp)
 	defer conn.Close()
 
 	var builderCalls atomic.Int32
@@ -266,7 +264,7 @@ func TestPump_Control_RegisterHeartbeat(t *testing.T) {
 // TestPump_Control_StopHeartbeat 验证：StopHeartbeat 经 controlCh 让 pump 停止心跳，之后不再发送。
 func TestPump_Control_StopHeartbeat(t *testing.T) {
 	adp := newFakeAdapter()
-	conn, sent := startPumpedConnection(t, adp, false)
+	conn, sent := startPumpedConnection(t, adp)
 	defer conn.Close()
 
 	builder := func() []byte { return []byte("ping") }
@@ -298,7 +296,7 @@ func TestPump_Control_StopHeartbeat(t *testing.T) {
 // WaitPumpDone 在合理时间内返回。
 func TestPump_Close_NoLeak(t *testing.T) {
 	adp := newFakeAdapter()
-	conn, _ := startPumpedConnection(t, adp, false)
+	conn, _ := startPumpedConnection(t, adp)
 
 	// 注册心跳，确认 Close 时 pump 同时停心跳 timer。
 	builder := func() []byte { return []byte("ping") }
@@ -324,11 +322,8 @@ func TestPump_Close_NoLeak(t *testing.T) {
 // 构造：向 inboundCh 投递远超 pumpInboundBatchSize 的消息，同时注册短间隔心跳；
 // 期望在 inbound 处理过程中，心跳仍按间隔被触发（因为每处理 batch 上限就回外层检查 heartbeat due）。
 func TestPump_BoundedBatch_DoesNotStarveHeartbeat(t *testing.T) {
-	if !stresslog.DebugEnabled() {
-		// 本测试不依赖日志，这里仅避免 logger nil；newTestConnection 已 InitLog。
-	}
 	adp := newFakeAdapter()
-	conn, sent := startPumpedConnection(t, adp, false)
+	conn, sent := startPumpedConnection(t, adp)
 	defer conn.Close()
 
 	// 先注册短间隔心跳。

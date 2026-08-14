@@ -134,8 +134,9 @@ func wireOf(t *testing.T, f *Factory, name string, raw []byte) *WireValue {
 }
 
 // assertNavEqual 双侧导航一次并比对（存在性 + 物化后逐字相等）。
-func assertNavEqual(t *testing.T, f *Factory, name string, raw []byte, path string) {
+func assertNavEqual(t *testing.T, f *Factory, raw []byte, path string) {
 	t.Helper()
+	const name = "wiretest.Everything"
 	wv := wireOf(t, f, name, raw)
 
 	oracleMsg, err := f.Parse(name, raw)
@@ -202,7 +203,7 @@ func TestWireSemanticsMergeSingularMessage(t *testing.T) {
 	raw := append(mustMarshal(t, a), mustMarshal(t, b)...)
 
 	for _, p := range []string{"node", "node.leaf", "node.leaf.id", "node.leaf.tag", "node.name", "node.id"} {
-		assertNavEqual(t, f, "wiretest.Everything", raw, p)
+		assertNavEqual(t, f, raw, p)
 	}
 }
 
@@ -217,7 +218,7 @@ func TestWireSemanticsOneof(t *testing.T) {
 	m2 := buildEverything(t, f, func(m proto.Message) { setF(t, f, m, "choice_str", "win") })
 	raw := append(mustMarshal(t, m1), mustMarshal(t, m2)...)
 	for _, p := range []string{"choice_num", "choice_str", "choice_node"} {
-		assertNavEqual(t, f, "wiretest.Everything", raw, p)
+		assertNavEqual(t, f, raw, p)
 	}
 
 	// A(node) → B(str) → A(node)：最终 node 只含第三段内容（不与第一段 merge）。
@@ -229,7 +230,7 @@ func TestWireSemanticsOneof(t *testing.T) {
 	nc := buildEverything(t, f, func(m proto.Message) { setF(t, f, m, "choice_node.id", int64(3)) })
 	raw2 := append(append(mustMarshal(t, na), mustMarshal(t, nb)...), mustMarshal(t, nc)...)
 	for _, p := range []string{"choice_node", "choice_node.id", "choice_node.name", "choice_str", "choice_num"} {
-		assertNavEqual(t, f, "wiretest.Everything", raw2, p)
+		assertNavEqual(t, f, raw2, p)
 	}
 }
 
@@ -250,7 +251,7 @@ func TestWireSemanticsScalarLastWins(t *testing.T) {
 	})
 	raw := append(mustMarshal(t, a), mustMarshal(t, b)...)
 	for _, p := range []string{"i32", "str", "opt_i"} {
-		assertNavEqual(t, f, "wiretest.Everything", raw, p)
+		assertNavEqual(t, f, raw, p)
 	}
 }
 
@@ -276,7 +277,7 @@ func TestWireSemanticsPackedMix(t *testing.T) {
 	raw = protowire.AppendBytes(raw, protowire.AppendVarint(nil, 4))
 
 	for _, p := range []string{"rints", "rints[0]", "rints[2]", "rints[3]", "rints[4]"} {
-		assertNavEqual(t, f, "wiretest.Everything", raw, p)
+		assertNavEqual(t, f, raw, p)
 	}
 }
 
@@ -293,7 +294,7 @@ func TestWireSemanticsMapDuplicateKey(t *testing.T) {
 	})
 	raw := append(mustMarshal(t, a), mustMarshal(t, b)...)
 	for _, p := range []string{"mstr", "mstr.k", "mstr.keep", "mstr.missing"} {
-		assertNavEqual(t, f, "wiretest.Everything", raw, p)
+		assertNavEqual(t, f, raw, p)
 	}
 }
 
@@ -309,7 +310,7 @@ func TestWireSemanticsWrongWireType(t *testing.T) {
 	raw = protowire.AppendTag(raw, 2, protowire.BytesType)
 	raw = protowire.AppendBytes(raw, []byte{0x01, 0x02})
 
-	assertNavEqual(t, f, "wiretest.Everything", raw, "i32")
+	assertNavEqual(t, f, raw, "i32")
 }
 
 // TestWireSemanticsEmptyOccurrences 空 message 出现 → 存在；
@@ -323,14 +324,14 @@ func TestWireSemanticsEmptyOccurrences(t *testing.T) {
 	raw = protowire.AppendTag(raw, 17, protowire.BytesType)
 	raw = protowire.AppendBytes(raw, nil)
 	for _, p := range []string{"node", "node.id", "node.leaf"} {
-		assertNavEqual(t, f, "wiretest.Everything", raw, p)
+		assertNavEqual(t, f, raw, p)
 	}
 
 	// rints 零长度 packed → 解码后空列表 → 不存在。
 	var raw2 []byte
 	raw2 = protowire.AppendTag(raw2, 19, protowire.BytesType)
 	raw2 = protowire.AppendBytes(raw2, nil)
-	assertNavEqual(t, f, "wiretest.Everything", raw2, "rints")
+	assertNavEqual(t, f, raw2, "rints")
 }
 
 // TestWireValidateRejects ValidateWire 与 proto.Unmarshal 对非法字节的拒绝一致。
@@ -489,14 +490,14 @@ func collectPathCorpus(md protoreflect.MessageDescriptor, tree map[string]any) [
 
 // unmarshalGuarded 带 panic 防护的 oracle 解码（损坏字节可能触发 protobuf-go
 // 上游 panic 而非 error，见调用处注释）。
-func unmarshalGuarded(md protoreflect.MessageDescriptor, data []byte) (err error, panicked bool) {
+func unmarshalGuarded(md protoreflect.MessageDescriptor, data []byte) (panicked bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			panicked = true
 		}
 	}()
 	probe := dynamicpb.NewMessage(md)
-	return proto.Unmarshal(data, probe), false
+	return false, proto.Unmarshal(data, probe)
 }
 
 // TestWireDifferentialFuzz 随机消息（含 wire 级拼接变异）全路径语料双侧比对，
@@ -566,7 +567,7 @@ func TestWireDifferentialFuzz(t *testing.T) {
 			for j := 0; j < 1+rnd.Intn(3); j++ {
 				corrupt[rnd.Intn(len(corrupt))] ^= byte(1 << rnd.Intn(8))
 			}
-			oracleErr, panicked := unmarshalGuarded(md, corrupt)
+			panicked, oracleErr := unmarshalGuarded(md, corrupt)
 			if panicked {
 				// protobuf-go 上游 bug：个别损坏的 map entry 会让 dynamicpb 解码
 				// panic（Value.MapKey on nil，decode.go unmarshalMap）而非报错。

@@ -69,8 +69,8 @@ type metricStateShard struct {
 	states map[metricStateKey]*AgentMetricState
 }
 
-// MetricsWindowStore commits sequenced Agent windows exactly once.
-type MetricsWindowStore struct {
+// WindowStore commits sequenced Agent windows exactly once.
+type WindowStore struct {
 	mu              sync.RWMutex
 	stateShards     [metricStateShardCount]metricStateShard
 	pendingHistory  map[string][]MetricHistoryWindow
@@ -79,11 +79,12 @@ type MetricsWindowStore struct {
 	now             func() time.Time
 }
 
-func NewMetricsWindowStore(now func() time.Time) *MetricsWindowStore {
+// NewWindowStore creates an empty metrics window store.
+func NewWindowStore(now func() time.Time) *WindowStore {
 	if now == nil {
 		now = time.Now
 	}
-	store := &MetricsWindowStore{
+	store := &WindowStore{
 		pendingHistory:  make(map[string][]MetricHistoryWindow),
 		historyInFlight: make(map[string]*MetricHistoryBatch),
 		terminalTasks:   make(map[string]struct{}),
@@ -95,7 +96,7 @@ func NewMetricsWindowStore(now func() time.Time) *MetricsWindowStore {
 	return store
 }
 
-func (s *MetricsWindowStore) Accept(
+func (s *WindowStore) Accept(
 	report StressReport,
 	expectedTaskID string,
 	expectedEvery time.Duration,
@@ -104,7 +105,7 @@ func (s *MetricsWindowStore) Accept(
 	return s.AcceptWithDrops(report, expectedTaskID, expectedEvery, expectedApdexT, 0)
 }
 
-func (s *MetricsWindowStore) AcceptWithDrops(
+func (s *WindowStore) AcceptWithDrops(
 	report StressReport,
 	expectedTaskID string,
 	expectedEvery time.Duration,
@@ -187,7 +188,7 @@ func (s *MetricsWindowStore) AcceptWithDrops(
 	return MetricWindowAcceptResult{Status: MetricWindowAccepted}, nil
 }
 
-func (s *MetricsWindowStore) metricShard(key metricStateKey) *metricStateShard {
+func (s *WindowStore) metricShard(key metricStateKey) *metricStateShard {
 	hash := uint64(1469598103934665603)
 	for i := 0; i < len(key.taskID); i++ {
 		hash = (hash ^ uint64(key.taskID[i])) * 1099511628211
@@ -220,7 +221,7 @@ func validateMetricReport(snapshot *monitor.CollectorSnapshot, expectedEvery, ex
 		return fmt.Errorf("指标上报周期不匹配: report=%.6fs expected=%.6fs", window.ExpectedIntervalSeconds, expectedEvery.Seconds())
 	}
 	if snapshot.ApdexT != int(expectedApdexT/time.Millisecond) {
-		return fmt.Errorf("Apdex 阈值不匹配: report=%dms expected=%dms", snapshot.ApdexT, expectedApdexT/time.Millisecond)
+		return fmt.Errorf("apdex 阈值不匹配: report=%dms expected=%dms", snapshot.ApdexT, expectedApdexT/time.Millisecond)
 	}
 	if snapshot.TotalActions < 0 || snapshot.InvalidMetricSamples < 0 || window.InvalidMetricSamples < 0 ||
 		window.Bandwidth.SendBytes < 0 || window.Bandwidth.RecvBytes < 0 ||
@@ -404,10 +405,10 @@ func validHistogramValues(histogram monitor.HistogramSnapshot) bool {
 			return false
 		}
 	}
-	min, max := *histogram.MinMs, *histogram.MaxMs
-	if min > *histogram.P50Ms || *histogram.P50Ms > *histogram.P90Ms ||
+	minimum, maximum := *histogram.MinMs, *histogram.MaxMs
+	if minimum > *histogram.P50Ms || *histogram.P50Ms > *histogram.P90Ms ||
 		*histogram.P90Ms > *histogram.P95Ms || *histogram.P95Ms > *histogram.P99Ms ||
-		*histogram.P99Ms > max || *histogram.AvgMs < min || *histogram.AvgMs > max {
+		*histogram.P99Ms > maximum || *histogram.AvgMs < minimum || *histogram.AvgMs > maximum {
 		return false
 	}
 	expectedAverage := float64(histogram.SumNs) / float64(histogram.Count) / float64(time.Millisecond)
@@ -442,7 +443,7 @@ func validateCumulativeMonotonic(previous, current *monitor.CollectorSnapshot) e
 	return nil
 }
 
-func (s *MetricsWindowStore) PendingHistoryCount(taskID string) int {
+func (s *WindowStore) PendingHistoryCount(taskID string) int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	count := len(s.pendingHistory[taskID])
@@ -452,7 +453,7 @@ func (s *MetricsWindowStore) PendingHistoryCount(taskID string) int {
 	return count
 }
 
-func (s *MetricsWindowStore) PeekHistory(taskID string) (MetricHistoryBatch, bool) {
+func (s *WindowStore) PeekHistory(taskID string) (MetricHistoryBatch, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if batch := s.historyInFlight[taskID]; batch != nil {
@@ -471,7 +472,7 @@ func (s *MetricsWindowStore) PeekHistory(taskID string) (MetricHistoryBatch, boo
 	return cloneMetricHistoryBatch(*batch), true
 }
 
-func (s *MetricsWindowStore) AckHistory(taskID string, token [sha256.Size]byte) bool {
+func (s *WindowStore) AckHistory(taskID string, token [sha256.Size]byte) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	batch := s.historyInFlight[taskID]
@@ -485,7 +486,7 @@ func (s *MetricsWindowStore) AckHistory(taskID string, token [sha256.Size]byte) 
 
 // MarkTaskTerminal releases a completed task after every accepted window has
 // either been persisted or is no longer in flight.
-func (s *MetricsWindowStore) MarkTaskTerminal(taskID string) {
+func (s *WindowStore) MarkTaskTerminal(taskID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.terminalTasks[taskID] = struct{}{}
@@ -493,13 +494,13 @@ func (s *MetricsWindowStore) MarkTaskTerminal(taskID string) {
 }
 
 // DropTask releases a completed task when history persistence is disabled.
-func (s *MetricsWindowStore) DropTask(taskID string) {
+func (s *WindowStore) DropTask(taskID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.dropTaskLocked(taskID)
 }
 
-func (s *MetricsWindowStore) cleanupTerminalTaskLocked(taskID string) {
+func (s *WindowStore) cleanupTerminalTaskLocked(taskID string) {
 	if _, terminal := s.terminalTasks[taskID]; !terminal {
 		return
 	}
@@ -509,7 +510,7 @@ func (s *MetricsWindowStore) cleanupTerminalTaskLocked(taskID string) {
 	s.dropTaskLocked(taskID)
 }
 
-func (s *MetricsWindowStore) dropTaskLocked(taskID string) {
+func (s *WindowStore) dropTaskLocked(taskID string) {
 	for i := range s.stateShards {
 		shard := &s.stateShards[i]
 		shard.mu.Lock()
@@ -567,7 +568,7 @@ func metricHistoryBatchToken(windows []MetricHistoryWindow) [sha256.Size]byte {
 	return token
 }
 
-func (s *MetricsWindowStore) AgentState(taskID, agentID string) (AgentMetricState, bool) {
+func (s *WindowStore) AgentState(taskID, agentID string) (AgentMetricState, bool) {
 	key := metricStateKey{taskID: taskID, agentID: agentID}
 	shard := s.metricShard(key)
 	shard.mu.RLock()
@@ -579,7 +580,7 @@ func (s *MetricsWindowStore) AgentState(taskID, agentID string) (AgentMetricStat
 	return *state, true
 }
 
-func (s *MetricsWindowStore) States(taskID string) []AgentMetricState {
+func (s *WindowStore) States(taskID string) []AgentMetricState {
 	states := make([]AgentMetricState, 0)
 	for i := range s.stateShards {
 		shard := &s.stateShards[i]

@@ -16,8 +16,8 @@ import (
 type Dependencies struct {
 	StaticDir       string
 	Redis           *shared.RedisConfig
-	Tasks           *admintask.TaskStore
-	Agents          *agent.AgentRegistry
+	Tasks           *admintask.Store
+	Agents          *agent.Registry
 	Aggregator      *metrics.Aggregator
 	Assigner        *admintask.Assigner
 	History         *history.Store
@@ -38,8 +38,8 @@ type Dependencies struct {
 type Handler struct {
 	staticDir       string
 	redis           *shared.RedisConfig
-	tasks           *admintask.TaskStore
-	agents          *agent.AgentRegistry
+	tasks           *admintask.Store
+	agents          *agent.Registry
 	aggregator      *metrics.Aggregator
 	assigner        *admintask.Assigner
 	history         *history.Store
@@ -101,10 +101,6 @@ func (s *Handler) scheduleStopCommands(ctx context.Context, taskID string, agent
 
 func (s *Handler) scheduleShutdownCommands(ctx context.Context, agentIDs []string, reason string) error {
 	return s.scheduleShutdown(ctx, agentIDs, reason)
-}
-
-func (s *Handler) writeJSON(w http.ResponseWriter, status int, value any) {
-	WriteJSON(w, status, value)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) { WriteJSON(w, status, value) }

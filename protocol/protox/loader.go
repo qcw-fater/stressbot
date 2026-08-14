@@ -122,7 +122,7 @@ func (l *Loader) collectFiles() ([]string, error) {
 // logLoaded 打印加载的 proto 文件信息
 func logLoaded(reg *protoregistry.Files) {
 	count := 0
-	reg.RangeFiles(func(fd protoreflect.FileDescriptor) bool {
+	reg.RangeFiles(func(_ protoreflect.FileDescriptor) bool {
 		count++
 		return true
 	})

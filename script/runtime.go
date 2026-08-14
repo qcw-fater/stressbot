@@ -415,7 +415,7 @@ func (rp *RuntimePool) loadScriptFn(L *lua.LState, scriptName string, entry scri
 	}
 	reg, ok := L.Get(lua.RegistryIndex).(*lua.LTable)
 	if !ok {
-		return nil, fmt.Errorf("Lua registry 类型异常")
+		return nil, fmt.Errorf("lua registry 类型异常")
 	}
 	if v := reg.RawGetInt(slot); v != lua.LNil {
 		return v, nil
@@ -621,7 +621,7 @@ func (rp *RuntimePool) buildResumeVals(L *lua.LState, ctx *Context, spec *WaitSp
 // 出另一回调）安全：resumeCoroutine 每次 resume 前重设 topThread。
 func (rp *RuntimePool) RunListenScript(L *lua.LState, scriptName string, respMsg proto.Message) error {
 	robotUD := createRobotUserData(L)
-	var msgVal lua.LValue = lua.LNil
+	msgVal := lua.LNil
 	if respMsg != nil {
 		msgVal = protoMessageToLuaTable(L, respMsg)
 	}
@@ -749,7 +749,7 @@ func registerAPIs(L *lua.LState) {
 	L.PreloadModule("network", loadNetworkModule)
 	L.PreloadModule("utils", loadUtilsModule)
 	L.PreloadModule("log", loadLogModule)
-	L.PreloadModule("json", loadJsonModule)
+	L.PreloadModule("json", loadJSONModule)
 	L.PreloadModule("share", loadShareModule)
 }
 
@@ -776,24 +776,5 @@ func createRobotUserData(L *lua.LState) *lua.LUserData {
 	ud := L.NewUserData()
 	ud.Value = GetContext(L)
 	L.SetMetatable(ud, robotMetatable(L))
-	return ud
-}
-
-// createProtoMessageUserData 创建 proto 消息对象
-func createProtoMessageUserData(L *lua.LState, data []byte, protoName string) *lua.LUserData {
-	ctx := GetContext(L)
-	var msg any
-	if ctx != nil && ctx.Factory != nil && protoName != "" {
-		parsed, err := ctx.Factory.Parse(protoName, data)
-		if err == nil {
-			msg = parsed
-		}
-	}
-
-	if pm, ok := msg.(proto.Message); ok {
-		return wrapProtoMessage(L, pm)
-	}
-	ud := L.NewUserData()
-	ud.Value = msg
 	return ud
 }

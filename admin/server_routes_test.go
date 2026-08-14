@@ -6,7 +6,7 @@ import (
 )
 
 func TestAdminManagementListenerAddress(t *testing.T) {
-	server := &AdminServer{cfg: Config{
+	server := &Server{cfg: Config{
 		Server: ServerConfig{
 			ListenHost: "127.0.0.1",
 			Port:       7718,
@@ -22,8 +22,8 @@ func TestAdminManagementListenerAddress(t *testing.T) {
 	}
 }
 
-func TestAdminServerShutdownIsIdempotent(t *testing.T) {
-	server := &AdminServer{stopCh: make(chan struct{})}
+func TestServerShutdownIsIdempotent(t *testing.T) {
+	server := &Server{stopCh: make(chan struct{})}
 	if err := server.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -32,9 +32,9 @@ func TestAdminServerShutdownIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestAdminServerShutdownStopsRuntimeBeforeWaitingForWorkPool(t *testing.T) {
+func TestServerShutdownStopsRuntimeBeforeWaitingForPool(t *testing.T) {
 	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
-	server := &AdminServer{
+	server := &Server{
 		runtimeCtx:    runtimeCtx,
 		runtimeCancel: runtimeCancel,
 		stopCh:        make(chan struct{}),

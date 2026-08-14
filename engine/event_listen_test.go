@@ -45,8 +45,7 @@ func TestExecListenUsesSingleEventWait(t *testing.T) {
 			_, _, timing, err := ae.Execute(t.Context(), &flowdef.ActionDef{
 				Name: "wait_push", Pattern: tc.pattern, Service: "logic", Timeout: 1,
 			})
-			var actionErr *errcode.ActionError
-			if !errors.As(err, &actionErr) || actionErr.Code != errcode.ErrListenTimeout {
+			if actionErr, ok := errors.AsType[*errcode.ActionError](err); !ok || actionErr.Code != errcode.ErrListenTimeout {
 				t.Fatalf("Execute() error = %v, want ErrListenTimeout", err)
 			}
 			if sender.tcpCalls != tc.wantTCP || sender.udpCalls != tc.wantUDP {

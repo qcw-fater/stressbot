@@ -21,7 +21,7 @@ import (
 )
 
 // loadSchemaForPreview 加载 testdata/tcp_logic_codec.json（preview 不接 errorMap）。
-func loadSchemaForPreview(t *testing.T) *codec.CodecSchema {
+func loadSchemaForPreview(t *testing.T) *codec.Schema {
 	t.Helper()
 	// 兼容从 codec/ 或仓库根运行。
 	candidates := []string{
@@ -198,7 +198,7 @@ func TestPreview_NilSchema_Error(t *testing.T) {
 
 func TestPreview_BadSchema_Error(t *testing.T) {
 	// 缺 role:"length" 字段的非法 schema。
-	bad := &codec.CodecSchema{
+	bad := &codec.Schema{
 		Version:       1,
 		EndianDefault: "le",
 		Frame:         codec.FrameSpec{HeaderSize: 12},

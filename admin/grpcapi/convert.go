@@ -11,7 +11,7 @@ import (
 	"stressbot/robot"
 )
 
-func TaskAssignmentToProto(src admintask.TaskAssignment) (*controlpb.TaskAssignment, error) {
+func TaskAssignmentToProto(src admintask.Dispatch) (*controlpb.TaskAssignment, error) {
 	if src.TaskID == "" || src.StartIndex < 0 || src.TotalBots <= 0 {
 		return nil, fmt.Errorf("任务分配参数无效")
 	}
@@ -153,15 +153,15 @@ func cleanupStatusFromProto(src *controlpb.CleanupStatus) *robot.CleanupStatus {
 	return out
 }
 
-func finalReportFromProto(src *controlpb.FinalReport) (admintask.TaskCompletionReport, error) {
+func finalReportFromProto(src *controlpb.FinalReport) (admintask.CompletionReport, error) {
 	if src == nil || src.AgentId == "" || src.TaskId == "" || src.ReportId == "" {
-		return admintask.TaskCompletionReport{}, fmt.Errorf("最终报告缺少身份字段")
+		return admintask.CompletionReport{}, fmt.Errorf("最终报告缺少身份字段")
 	}
 	result, err := taskResultFromProto(src.Result)
 	if err != nil {
-		return admintask.TaskCompletionReport{}, err
+		return admintask.CompletionReport{}, err
 	}
-	return admintask.TaskCompletionReport{
+	return admintask.CompletionReport{
 		AgentID:       src.AgentId,
 		TaskID:        src.TaskId,
 		Result:        result,
@@ -173,7 +173,7 @@ func finalReportFromProto(src *controlpb.FinalReport) (admintask.TaskCompletionR
 	}, nil
 }
 
-func taskResultFromProto(src controlpb.TaskResultCode) (admintask.TaskResult, error) {
+func taskResultFromProto(src controlpb.TaskResultCode) (admintask.Result, error) {
 	switch src {
 	case controlpb.TaskResultCode_TASK_RESULT_CODE_COMPLETED:
 		return admintask.ResultCompleted, nil
@@ -212,21 +212,24 @@ func cloneFloat64Admin(src *float64) *float64 {
 	if src == nil {
 		return nil
 	}
-	return new(*src)
+	value := *src
+	return &value
 }
 
 func cloneUint64Admin(src *uint64) *uint64 {
 	if src == nil {
 		return nil
 	}
-	return new(*src)
+	value := *src
+	return &value
 }
 
 func cloneInt32Admin(src *int32) *int32 {
 	if src == nil {
 		return nil
 	}
-	return new(*src)
+	value := *src
+	return &value
 }
 
 func timeFromUnixNanoAdmin(value int64) time.Time {

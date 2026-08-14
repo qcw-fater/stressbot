@@ -208,7 +208,7 @@ func (s *robotScheduler) awaitResponse(spec *script.WaitSpec) script.WaitOutcome
 // 让后台作业的结果无人接收（虽 done 缓冲 1 不泄漏），且声明式路径拿不到 Go 结果，故统一等作业完成。
 // job panic 由协程池 recover + 本地 recover 兜底，并始终 signal done，避免调用方永久阻塞。
 func (s *robotScheduler) runIO(job func()) error {
-	return s.runIOWithSubmit(job, workpool.GetWorkPool().Submit)
+	return s.runIOWithSubmit(job, workpool.Default().Submit)
 }
 
 func (s *robotScheduler) runIOWithSubmit(job func(), submit func(func()) error) error {

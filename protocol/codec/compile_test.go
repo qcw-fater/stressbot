@@ -7,7 +7,7 @@ import (
 )
 
 // loadTestSchema 加载 testdata 下的合法 tcp schema（T1.1 已经覆盖 LoadSchema）。
-func loadTestSchema(t *testing.T) *CodecSchema {
+func loadTestSchema(t *testing.T) *Schema {
 	t.Helper()
 	s, err := LoadSchema("testdata/tcp_logic_codec.json")
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,7 +97,7 @@ func Run(ctx context.Context, cfg *Config, paths Paths) error {
 	if err != nil {
 		return fmt.Errorf("启动网络引擎失败: %w", err)
 	}
-	defer dialer.Stop()
+	defer runner.StopDialer(dialer)
 
 	manager := robot.NewManager(ctx, managerConfig, resources.Flow, resources.Factory, dialer, luaPool)
 	if standaloneConfig.RampUp != nil && len(standaloneConfig.RampUp.Stages) > 0 {
@@ -144,7 +145,11 @@ func parseDuration(value string) (time.Duration, error) {
 }
 
 func openSharedStore(cfg *shared.RedisConfig, scriptsDir string) (shared.Store, error) {
-	if !detectShareUsage(scriptsDir) {
+	usesShare, err := detectShareUsage(scriptsDir)
+	if err != nil {
+		return nil, fmt.Errorf("检查脚本共享状态使用失败: %w", err)
+	}
+	if !usesShare {
 		stresslog.Info("[MAIN] Redis 共享状态未启用（脚本未使用 share）")
 		return nil, nil
 	}
@@ -225,20 +230,29 @@ func exportMetrics(cfg *monitor.CollectorConfig) {
 	}
 }
 
-func detectShareUsage(scriptsDir string) bool {
+func detectShareUsage(scriptsDir string) (bool, error) {
 	found := false
-	_ = filepath.WalkDir(scriptsDir, func(path string, entry os.DirEntry, err error) error {
-		if err != nil || found {
-			return nil
+	err := filepath.WalkDir(scriptsDir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if found {
+			return fs.SkipAll
 		}
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".lua") {
 			return nil
 		}
-		data, readErr := os.ReadFile(path)
-		if readErr == nil && shared.UsesShare(string(data)) {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if shared.UsesShare(string(data)) {
 			found = true
 		}
 		return nil
 	})
-	return found
+	if err != nil {
+		return false, err
+	}
+	return found, nil
 }

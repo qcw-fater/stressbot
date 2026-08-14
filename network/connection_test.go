@@ -340,7 +340,7 @@ func TestConnection_RegisterListen_ConflictMode(t *testing.T) {
 	if err := conn.RegisterListen(routeKey, nil, 1); err != nil {
 		t.Fatalf("首次 RegisterListen(nil-cb) 失败: %v", err)
 	}
-	cb := func(m *Message) {}
+	cb := func(_ *Message) {}
 	err := conn.RegisterListen(routeKey, cb, 1)
 	if err == nil {
 		t.Fatal("cb 模式不一致的重复注册应返回 error，实际 nil")
@@ -354,11 +354,11 @@ func TestConnection_RegisterListen_ModeConsistentIdempotent(t *testing.T) {
 	defer conn.Close()
 
 	const routeKey = "S2C.CbIdem"
-	cb1 := func(m *Message) {}
+	cb1 := func(_ *Message) {}
 	if err := conn.RegisterListen(routeKey, cb1, 1); err != nil {
 		t.Fatalf("首次 RegisterListen(cb) 失败: %v", err)
 	}
-	cb2 := func(m *Message) {}
+	cb2 := func(_ *Message) {}
 	if err := conn.RegisterListen(routeKey, cb2, 1); err != nil {
 		t.Fatalf("同模式幂等注册应 nil error，实际 %v", err)
 	}

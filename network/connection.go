@@ -112,10 +112,6 @@ type Connection struct {
 
 const (
 	inboundChSize = 256 // inbound 通道缓冲区大小，满则反压（关闭连接）
-	// defaultListenQueueSize 监听缓存队列默认容量。
-	// 容量 1 与旧「单槽 map[string]*Message」语义逐字节等价（同 routeKey 新消息覆盖旧消息）。
-	// 2-A2 起可由 ListenRef.queueSize 显式覆盖（本任务不接配置）。
-	defaultListenQueueSize = 1
 )
 
 type inboundFrame struct {
@@ -704,7 +700,7 @@ func (c *Connection) ListenNotify(routeKey string) <-chan struct{} {
 // pump 是 network 内部调度，不泄漏到 flow/engine/Lua：外层只感知 RegisterListen /
 // GetListenResp / RegisterHeartbeat 这些已存在的接口。
 func (c *Connection) StartPump(adp protocol.Adapter, isUDP bool) error {
-	return c.startPumpWithSubmit(adp, isUDP, workpool.GetWorkPool().Submit)
+	return c.startPumpWithSubmit(adp, isUDP, workpool.Default().Submit)
 }
 
 func (c *Connection) startPumpWithSubmit(adp protocol.Adapter, isUDP bool, submit func(func()) error) error {

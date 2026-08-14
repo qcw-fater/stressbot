@@ -79,7 +79,7 @@ func (s *Handler) handleListHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	q := r.URL.Query()
-	filter := history.HistoryFilter{
+	filter := history.Filter{
 		State:         q.Get("state"),
 		Search:        q.Get("search"),
 		Limit:         parseIntOrDefault(q.Get("limit"), 20),
@@ -292,7 +292,7 @@ func (s *Handler) handleCloneHistory(w http.ResponseWriter, r *http.Request) {
 	newTask := &admintask.Task{
 		ID:        s.nextID(),
 		Name:      cloneName,
-		State:     admintask.TaskPending,
+		State:     admintask.Pending,
 		TotalBots: totalBots,
 		Config:    *cfg,
 		CreatedAt: time.Now(),
@@ -320,7 +320,7 @@ func (s *Handler) handleCompareHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tasks := make([]history.HistoryCompareTask, 0, len(targets))
+	tasks := make([]history.CompareTask, 0, len(targets))
 	for _, t := range targets {
 		task, err := s.history.GetCompareTask(r.Context(), t.id, t.stageIndex)
 		if err != nil {

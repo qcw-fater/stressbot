@@ -91,7 +91,7 @@ func luaDeepEqual(a, b lua.LValue) (bool, string) {
 		}
 	})
 	other := 0
-	tb.ForEach(func(k, _ lua.LValue) { other++ })
+	tb.ForEach(func(_, _ lua.LValue) { other++ })
 	if other != seen {
 		return false, fmt.Sprintf("键数量不同: %d vs %d", seen, other)
 	}
@@ -208,7 +208,7 @@ func TestWireViewProtoAPI(t *testing.T) {
 	protox.SetWireShadowEnabled(false)
 	t.Cleanup(func() { protox.SetWireShadowEnabled(true) })
 
-	L := newTestState(t, context.Background(), &fakeNetSender{}, nil)
+	L := newTestState(context.Background(), t, &fakeNetSender{}, nil)
 	t.Cleanup(L.Close)
 	f := newWireLuaTestFactory(t)
 	GetContext(L).Factory = f
@@ -281,7 +281,7 @@ func TestRobotGetViewSemantics(t *testing.T) {
 	protox.SetWireShadowEnabled(false)
 	t.Cleanup(func() { protox.SetWireShadowEnabled(true) })
 
-	L := newTestState(t, context.Background(), &fakeNetSender{}, nil)
+	L := newTestState(context.Background(), t, &fakeNetSender{}, nil)
 	t.Cleanup(L.Close)
 	f := newWireLuaTestFactory(t)
 	GetContext(L).Factory = f

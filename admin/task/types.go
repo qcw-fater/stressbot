@@ -11,39 +11,39 @@ import (
 
 // ── Task ──────────────────────────────────────────────
 
-// TaskState 表示任务生命周期状态。
-type TaskState string
+// State 表示任务生命周期状态。
+type State string
 
 const (
-	// TaskPending 任务已创建，等待启动。
-	TaskPending TaskState = "pending"
-	// TaskStarting 任务正在启动（分配 Agent、推送配置）。
-	TaskStarting TaskState = "starting"
-	// TaskRunning 任务执行中。
-	TaskRunning TaskState = "running"
-	// TaskStopping 任务正在停止（等待 Agent 上报完成）。
-	TaskStopping TaskState = "stopping"
-	// TaskStopped 任务已正常停止。
-	TaskStopped TaskState = "stopped"
-	// TaskFailed 任务失败。
-	TaskFailed TaskState = "failed"
+	// Pending 表示任务已创建，等待启动。
+	Pending State = "pending"
+	// Starting 表示任务正在启动（分配 Agent、推送配置）。
+	Starting State = "starting"
+	// Running 表示任务执行中。
+	Running State = "running"
+	// Stopping 表示任务正在停止（等待 Agent 上报完成）。
+	Stopping State = "stopping"
+	// Stopped 表示任务已正常停止。
+	Stopped State = "stopped"
+	// Failed 表示任务失败。
+	Failed State = "failed"
 )
 
 // IsActiveState 返回该状态是否占据单例位。
-func IsActiveState(s TaskState) bool {
-	return s == TaskStarting || s == TaskRunning || s == TaskStopping
+func IsActiveState(s State) bool {
+	return s == Starting || s == Running || s == Stopping
 }
 
-// TaskResult 表示任务结束原因。
-type TaskResult string
+// Result 表示任务结束原因。
+type Result string
 
 const (
 	// ResultCompleted 任务自然完成。
-	ResultCompleted TaskResult = "completed"
+	ResultCompleted Result = "completed"
 	// ResultStopped 任务被手动停止。
-	ResultStopped TaskResult = "stopped"
+	ResultStopped Result = "stopped"
 	// ResultFailed 任务失败。
-	ResultFailed TaskResult = "failed"
+	ResultFailed Result = "failed"
 )
 
 // Task 代表一次压测任务的完整数据。
@@ -53,23 +53,23 @@ type Task struct {
 	// Name 任务名称。
 	Name string `json:"name"`
 	// State 当前状态。
-	State TaskState `json:"state"`
+	State State `json:"state"`
 	// TotalBots 总机器人数量。
 	TotalBots int `json:"totalBots"`
 	// Config 任务配置（流程、proto、脚本等）。
-	Config TaskConfig `json:"config"`
+	Config Config `json:"config"`
 	// Assignments Agent 分配方案。
 	Assignments []Assignment `json:"assignments,omitempty"`
 	// SucceededAgents 实际成功接收任务的 Agent ID 列表（部分 Agent 可能推送失败）。
 	SucceededAgents []string `json:"succeededAgents,omitempty"`
 	// Reports Agent 最终完成报告，key 为 agentID。
-	Reports map[string]TaskCompletionReport `json:"reports,omitempty"`
+	Reports map[string]CompletionReport `json:"reports,omitempty"`
 	// CleanupSummary 所有节点最终清理状态汇总。
 	CleanupSummary *robot.CleanupStatus `json:"cleanupSummary,omitempty"`
 	// StageReports reset 边界阶段段落报告。
 	// 仅在有 reset=true 的渐进式加压任务中产生：每次 reset 前，Agent 快照并上报该段落的累计指标，
 	// StageIndex 为「即将进入的配置阶段下标」（0-based，>=1）。归档时映射为连续 1-based 段落号。
-	StageReports []TaskCompletionReport `json:"stageReports,omitempty"`
+	StageReports []CompletionReport `json:"stageReports,omitempty"`
 	// AgentEvents 任务期间 Agent 状态变化事件。
 	AgentEvents []AgentEvent `json:"agentEvents,omitempty"`
 	// CreatedAt 创建时间。
@@ -89,8 +89,8 @@ type Task struct {
 	FlowTemplateID string `json:"flowTemplateId,omitempty"`
 }
 
-// TaskConfig 包含创建任务时上传的所有资源。
-type TaskConfig struct {
+// Config 包含创建任务时上传的所有资源。
+type Config struct {
 	// FlowJSON flow.json 原始内容。
 	FlowJSON json.RawMessage `json:"flowJson"`
 	// ProtoFiles proto 文件名 → 内容。
@@ -108,11 +108,11 @@ type TaskConfig struct {
 }
 
 // BundleFlowJSON implements bundle.Source without coupling task models to the bundle package.
-func (c *TaskConfig) BundleFlowJSON() []byte              { return c.FlowJSON }
-func (c *TaskConfig) BundleProtoFiles() map[string][]byte { return c.ProtoFiles }
-func (c *TaskConfig) BundleLuaScripts() map[string][]byte { return c.LuaScripts }
-func (c *TaskConfig) BundleCodecs() map[string][]byte     { return c.Codecs }
-func (c *TaskConfig) BundleErrorMap() []byte              { return c.ErrorMap }
+func (c *Config) BundleFlowJSON() []byte              { return c.FlowJSON }
+func (c *Config) BundleProtoFiles() map[string][]byte { return c.ProtoFiles }
+func (c *Config) BundleLuaScripts() map[string][]byte { return c.LuaScripts }
+func (c *Config) BundleCodecs() map[string][]byte     { return c.Codecs }
+func (c *Config) BundleErrorMap() []byte              { return c.ErrorMap }
 
 // RobotConfig 任务级运行时配置（前端 → admin → agent）。
 // 超时字段统一用 int 秒数，admin 转为 "Ns" duration 字符串下发。
@@ -194,8 +194,8 @@ type Assignment struct {
 	TotalBots int `json:"totalBots"`
 }
 
-// TaskAssignment Admin → Agent 下发的任务分配。
-type TaskAssignment struct {
+// Dispatch 表示 Admin 向 Agent 下发的任务运行参数。
+type Dispatch struct {
 	// TaskID 任务 ID。
 	TaskID string `json:"taskId"`
 	// TaskName 任务名称。
@@ -244,14 +244,14 @@ type SharedRuntimeAssignment struct {
 
 // ── 上报报文 ──────────────────────────────────────────
 
-// TaskCompletionReport Agent 任务完成报告。
-type TaskCompletionReport struct {
+// CompletionReport 表示 Agent 上报的任务完成结果。
+type CompletionReport struct {
 	// AgentID Agent 唯一标识。
 	AgentID string `json:"agentId"`
 	// TaskID 任务 ID。
 	TaskID string `json:"taskId"`
 	// Result 完成结果。
-	Result TaskResult `json:"result"`
+	Result Result `json:"result"`
 	// ErrorMsg 错误信息。
 	ErrorMsg string `json:"errorMsg,omitempty"`
 	// FinishedAt 完成时间。

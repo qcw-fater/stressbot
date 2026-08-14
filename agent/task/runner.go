@@ -2,10 +2,10 @@ package task
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"stressbot/config"
@@ -18,17 +18,15 @@ import (
 	"go.uber.org/zap"
 )
 
-// taskCleanupTimeout 任务清理（停止 gnet 引擎 + 关闭适配器）的超时时间。
-// 部分机器人卡死时 gnet.Client.Stop() 可能长时间阻塞，需要超时保护。
-// RunResult 表示 TaskRunner 一次执行的最终结果。
+// RunResult 表示 Runner 一次执行的最终结果。
 type RunResult struct {
-	Result        TaskResult
+	Result        Result
 	ErrorMsg      string
 	CleanupStatus robot.CleanupStatus
 }
 
 func runFailed(msg string) RunResult {
-	return RunResult{Result: TaskFailed, ErrorMsg: msg, CleanupStatus: robot.UnknownCleanupStatus(robot.CleanupReasonStopWaitTimeout, "任务启动失败，未进入机器人清理阶段")}
+	return RunResult{Result: Failed, ErrorMsg: msg, CleanupStatus: robot.UnknownCleanupStatus(robot.CleanupReasonStopWaitTimeout, "任务启动失败，未进入机器人清理阶段")}
 }
 
 type robotStopper interface {
@@ -37,19 +35,19 @@ type robotStopper interface {
 
 func finishManagerStartFailure(ctx context.Context, stopper robotStopper, startErr error) RunResult {
 	cleanup := stopper.StopAll()
-	if ctx.Err() == context.Canceled || strings.Contains(startErr.Error(), context.Canceled.Error()) {
-		return RunResult{Result: TaskStopped, CleanupStatus: cleanup}
+	if errors.Is(ctx.Err(), context.Canceled) || errors.Is(startErr, context.Canceled) {
+		return RunResult{Result: Stopped, CleanupStatus: cleanup}
 	}
 	return RunResult{
-		Result:        TaskFailed,
+		Result:        Failed,
 		ErrorMsg:      fmt.Sprintf("启动机器人失败: %v", startErr),
 		CleanupStatus: cleanup,
 	}
 }
 
-// TaskRunner 管理单次压测任务的执行：拉配置、写目录、起 Manager、等完成。
-type TaskRunner struct {
-	assignment *TaskAssignment
+// Runner 管理单次压测任务的执行：拉配置、写目录、起 Manager、等完成。
+type Runner struct {
+	assignment *Assignment
 	collector  *monitor.MetricsCollector
 	workDir    string
 
@@ -59,16 +57,16 @@ type TaskRunner struct {
 	OnStageReset func(nextStageIdx int)
 }
 
-// NewTaskRunner 创建任务执行器。
-func NewTaskRunner(assignment *TaskAssignment, collector *monitor.MetricsCollector) *TaskRunner {
-	return &TaskRunner{
+// NewRunner 创建任务执行器。
+func NewRunner(assignment *Assignment, collector *monitor.MetricsCollector) *Runner {
+	return &Runner{
 		assignment: assignment,
 		collector:  collector,
 	}
 }
 
 // Run 执行任务。阻塞直到任务完成或 ctx 被取消。
-func (r *TaskRunner) Run(ctx context.Context) RunResult {
+func (r *Runner) Run(ctx context.Context) RunResult {
 	taskID := r.assignment.TaskID
 	if err := r.assignment.Validate(); err != nil {
 		return runFailed(err.Error())
@@ -163,13 +161,14 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 	//     Agent 只负责 Close（断开连接）；统一 Cleanup 由 Admin 在任务终态时触发，
 	//     避免多 Agent 共享同一 runId 时某个 Agent 先结束就删掉别人还在用的 key。
 	var sharedStore shared.Store
-	if r.assignment.Shared == nil {
+	switch {
+	case r.assignment.Shared == nil:
 		stresslog.Info("[TASK] 共享状态未启用：任务脚本未使用 share",
 			zap.String("taskID", taskID))
-	} else if !r.assignment.Shared.Redis.Enabled() {
+	case !r.assignment.Shared.Redis.Enabled():
 		stresslog.Warn("[TASK] 共享状态未启用：任务分配缺少有效 Redis 配置",
 			zap.String("taskID", taskID))
-	} else {
+	default:
 		resolved, rerr := r.assignment.Shared.Redis.Resolve()
 		if rerr != nil {
 			return runFailed(fmt.Sprintf("Redis 共享状态配置无效: %v", rerr))
@@ -234,9 +233,9 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 	}
 	if startErr != nil {
 		result := finishManagerStartFailure(ctx, mgr, startErr)
-		if result.Result == TaskStopped {
+		if result.Result == Stopped {
 			// 渐进式加压在 ctx cancel 后会从 StartWithRampUp 返回 context.Canceled，
-			// 这是"用户主动停止"而非"失败"，按 TaskStopped 上报，避免历史归档误判为失败。
+			// 这是"用户主动停止"而非"失败"，按 Stopped 上报，避免历史归档误判为失败。
 			stresslog.Info("[TASK] 启动阶段被取消", zap.String("taskID", taskID), zap.Error(startErr))
 		} else {
 			stresslog.Error("[TASK] 启动机器人失败，已停止已创建机器人",
@@ -260,15 +259,15 @@ func (r *TaskRunner) Run(ctx context.Context) RunResult {
 	// 13. 停止所有机器人
 	cleanup := mgr.StopAll()
 
-	if ctx.Err() == context.Canceled {
-		return RunResult{Result: TaskStopped, CleanupStatus: cleanup}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return RunResult{Result: Stopped, CleanupStatus: cleanup}
 	}
 	stresslog.Info("[TASK] 任务已完成", zap.String("taskID", taskID), zap.Int("totalBots", r.assignment.TotalBots))
-	return RunResult{Result: TaskCompleted, CleanupStatus: cleanup}
+	return RunResult{Result: Completed, CleanupStatus: cleanup}
 }
 
 // Cleanup 清理临时目录。
-func (r *TaskRunner) Cleanup() {
+func (r *Runner) Cleanup() {
 	if r.workDir == "" {
 		return
 	}

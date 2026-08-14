@@ -76,7 +76,7 @@ func (o *ReportOutbox) Acknowledge(ack *controlpb.ReportAck) {
 	if ack.Accepted {
 		pending.done <- nil
 	} else {
-		pending.done <- fmt.Errorf("Admin 拒绝最终报告: %s", ack.Reason)
+		pending.done <- fmt.Errorf("admin 拒绝最终报告: %s", ack.Reason)
 	}
 	close(pending.done)
 }

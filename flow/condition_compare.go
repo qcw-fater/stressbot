@@ -177,7 +177,7 @@ func strictCompare(a, b any, op string) (bool, error) {
 		}
 		return !eq, nil
 	case ">", ">=", "<", "<=":
-		if !(aIsNum && bIsNum) {
+		if !aIsNum || !bIsNum {
 			return false, fmt.Errorf("%s 需要数值操作数（%T 与 %T）", op, a, b)
 		}
 		c := cmpNumbersExact(a, b)

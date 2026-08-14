@@ -6,7 +6,7 @@
 // 设计要点：
 //   - 仅 import codec 包（**不 import gopher-lua**）——生产代码无 Lua 依赖。
 //   - 9 方法逐字匹配 protocol.Adapter 接口；编译期断言 var _ Adapter = (*SchemaAdapter)(nil)。
-//   - LoadSchema / LoadErrorMap 由调用方（loader）先做，NewSchemaAdapter 收 *CodecSchema + errorMap。
+//   - LoadSchema / LoadErrorMap 由调用方（loader）先做，NewSchemaAdapter 收 *codec.Schema + errorMap。
 //   - Close 是幂等 no-op（codec.SchemaCodec 无资源需释放，编译产物无锁无状态）。
 package protocol
 
@@ -28,14 +28,14 @@ type SchemaAdapter struct {
 // 编译期接口断言：SchemaAdapter 必须实现 protocol.Adapter 全 9 方法，签名逐字一致。
 var _ Adapter = (*SchemaAdapter)(nil)
 
-// NewSchemaAdapter 编译 *codec.CodecSchema 并包装为 Adapter。
+// NewSchemaAdapter 编译 *codec.Schema 并包装为 Adapter。
 //
 // 入参：
-//   - schema：已 LoadSchema 得到的 *CodecSchema（Validate 由 NewSchemaCodec 内部再调一次）。
+//   - schema：已 LoadSchema 得到的 *codec.Schema（Validate 由 NewSchemaCodec 内部再调一次）。
 //   - errorMap：已 LoadErrorMap 得到的 code→desc 映射；nil 视为空 map（DescribeError 永远返回空串）。
 //
 // 失败（schema 非法 / 算法缺失 / 引用悬空等）返回 error，调用方应放弃该 codec 切换。
-func NewSchemaAdapter(schema *codec.CodecSchema, errorMap map[uint64]string) (Adapter, error) {
+func NewSchemaAdapter(schema *codec.Schema, errorMap map[uint64]string) (Adapter, error) {
 	sc, err := codec.NewSchemaCodec(schema, errorMap)
 	if err != nil {
 		return nil, err

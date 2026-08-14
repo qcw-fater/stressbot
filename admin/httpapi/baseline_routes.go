@@ -16,7 +16,7 @@ import (
 
 // writeBaselineFiles 将上传的 flow/proto/scripts/adapter 写入磁盘基线目录，
 // 使前端下次同步时本地资源与基线一致，不再误报冲突。
-func (s *Handler) writeBaselineFiles(cfg *admintask.TaskConfig, flowData []byte) {
+func (s *Handler) writeBaselineFiles(cfg *admintask.Config, flowData []byte) {
 	if err := safeWriteFile("conf/flow", "flow.json", flowData); err != nil {
 		stresslog.Warn("写入基线 flow.json 失败", zap.Error(err))
 	}
@@ -64,7 +64,7 @@ func safeWriteFile(dir, name string, data []byte) error {
 
 // ── 基线资源读取 ──
 
-func (s *Handler) handleBaselineProtoIndex(w http.ResponseWriter, r *http.Request) {
+func (s *Handler) handleBaselineProtoIndex(w http.ResponseWriter, _ *http.Request) {
 	files, err := baselineResources.List(resourceProto, ".proto")
 	if err != nil {
 		writeError(w, err)
@@ -77,7 +77,7 @@ func (s *Handler) handleBaselineProtoFile(w http.ResponseWriter, r *http.Request
 	serveBaselineResource(w, r, resourceProto)
 }
 
-func (s *Handler) handleBaselineScriptIndex(w http.ResponseWriter, r *http.Request) {
+func (s *Handler) handleBaselineScriptIndex(w http.ResponseWriter, _ *http.Request) {
 	files, err := baselineResources.List(resourceScripts, ".lua")
 	if err != nil {
 		writeError(w, err)
@@ -93,7 +93,7 @@ func (s *Handler) handleBaselineScriptFile(w http.ResponseWriter, r *http.Reques
 // handleBaselineCodecIndex 列出 adapter 基线目录下的 codec/errors 文件名（T3 前端基线同步枚举用）。
 // 目录契约：conf/adapter 下只有 *_codec.json 与 errors.json（上传写入侧已拒绝其它）。
 // handler 只按 .json 后缀如实列目录，不二次过滤文件名（前端按 errors.json/其余分类）。
-func (s *Handler) handleBaselineCodecIndex(w http.ResponseWriter, r *http.Request) {
+func (s *Handler) handleBaselineCodecIndex(w http.ResponseWriter, _ *http.Request) {
 	files, err := baselineResources.List(resourceAdapter, ".json")
 	if err != nil {
 		writeError(w, err)

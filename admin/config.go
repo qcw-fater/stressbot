@@ -180,7 +180,7 @@ func validateConfig(cfg *Config) error {
 			return fmt.Errorf("invalid redis config: %w", err)
 		}
 	}
-	// MySQL 连通性校验推迟到装配阶段（NewAdminServer 里 openDB + ping）。
+	// MySQL 连通性校验推迟到装配阶段（NewServer 里 openDB + ping）。
 	return nil
 }
 

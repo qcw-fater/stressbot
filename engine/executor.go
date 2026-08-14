@@ -275,12 +275,8 @@ func (e *Executor) executeAction(ctx context.Context, node *flowdef.Node) error 
 		}
 
 		e.logActionFailure("[ENGINE] 动作执行失败", node, actionDef, retriesUsed, maxRetries, err)
-		if err := e.executeOnErrorHandler(ctx, node); err != nil {
-			if errors.Is(err, errSkip) {
-				// handler 内部的 skip 表示 handler 子流程正常收束，不作为原 action 错误继续传播。
-			} else {
-				return err
-			}
+		if err := e.executeOnErrorHandler(ctx, node); err != nil && !errors.Is(err, errSkip) {
+			return err
 		}
 
 		if retriesUsed < maxRetries {
@@ -618,7 +614,8 @@ func (e *Executor) executeWeighted(ctx context.Context, node *flowdef.Node) erro
 func (e *Executor) executeWait(ctx context.Context, node *flowdef.Node) error {
 	var ms int
 
-	if node.WaitMin > 0 && node.WaitMax > 0 {
+	switch {
+	case node.WaitMin > 0 && node.WaitMax > 0:
 		if node.WaitMin >= node.WaitMax {
 			stresslog.Warn("[ENGINE] wait 节点 waitMin >= waitMax，使用 waitMin",
 				zap.Int("waitMin", node.WaitMin), zap.Int("waitMax", node.WaitMax))
@@ -626,15 +623,13 @@ func (e *Executor) executeWait(ctx context.Context, node *flowdef.Node) error {
 		} else {
 			ms = rand.Intn(node.WaitMax-node.WaitMin+1) + node.WaitMin
 		}
-	} else if node.WaitMin > 0 || node.WaitMax > 0 {
+	case node.WaitMin > 0 || node.WaitMax > 0:
 		stresslog.Warn("[ENGINE] wait 节点 waitMin/waitMax 必须同时 > 0",
 			zap.Int("waitMin", node.WaitMin), zap.Int("waitMax", node.WaitMax))
-	} else if node.WaitMs > 0 {
+	case node.WaitMs > 0:
 		ms = node.WaitMs
-	} else {
-		if node.WaitMs < 0 {
-			stresslog.Warn("[ENGINE] wait 节点 waitMs < 0，跳过", zap.Int("waitMs", node.WaitMs))
-		}
+	case node.WaitMs < 0:
+		stresslog.Warn("[ENGINE] wait 节点 waitMs < 0，跳过", zap.Int("waitMs", node.WaitMs))
 	}
 
 	if ms > 0 {

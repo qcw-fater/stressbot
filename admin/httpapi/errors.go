@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 
 	"stressbot/admin/apierror"
@@ -14,7 +15,7 @@ func WriteJSON(w http.ResponseWriter, status int, value any) {
 }
 
 func WriteError(w http.ResponseWriter, err error) {
-	if apiErr, ok := err.(*apierror.Error); ok {
+	if apiErr, ok := errors.AsType[*apierror.Error](err); ok {
 		WriteJSON(w, apiErr.HTTPStatus, apiErr)
 		return
 	}

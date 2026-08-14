@@ -32,14 +32,14 @@ type Agent struct {
 	sysmon        *metrics.SystemMonitor
 	collector     *monitor.MetricsCollector
 	metrics       *metrics.LatestMetrics
-	executor      *command.CommandExecutor
+	executor      *command.Executor
 	bundleCache   *bundle.Cache
 	reportOutbox  *session.ReportOutbox
 	leaseDeadline atomic.Int64
 
 	mu              sync.Mutex
-	status          AgentStatus
-	currentTask     *agenttask.TaskAssignment
+	status          Status
+	currentTask     *agenttask.Assignment
 	taskCancel      context.CancelFunc
 	taskCancelCause context.CancelCauseFunc
 	shuttingDown    bool
@@ -69,7 +69,7 @@ func New(cfg *ResolvedConfig, collector *monitor.MetricsCollector) (*Agent, erro
 		metrics: metrics.NewLatestMetrics(), bundleCache: bundleCache,
 		reportOutbox: session.NewReportOutbox(128), status: StatusIdle, stopCh: make(chan struct{}),
 	}
-	agent.executor = command.NewCommandExecutor(agent, bundleCache)
+	agent.executor = command.NewExecutor(agent, bundleCache)
 	return agent, nil
 }
 
@@ -87,9 +87,9 @@ func (a *Agent) Run(ctx context.Context) error {
 	if err := a.executor.Start(runtimeCtx); err != nil {
 		return fmt.Errorf("启动命令执行器失败: %w", err)
 	}
-	workpool.GetWorkPool().Go(func() { a.leaseLoop(runtimeCtx) })
+	workpool.Default().Go(func() { a.leaseLoop(runtimeCtx) })
 	connectionDone := make(chan error, 1)
-	if err := workpool.GetWorkPool().Submit(func() { connectionDone <- a.connectionSupervisor(runtimeCtx) }); err != nil {
+	if err := workpool.Default().Submit(func() { connectionDone <- a.connectionSupervisor(runtimeCtx) }); err != nil {
 		return fmt.Errorf("启动 gRPC 连接管理器失败: %w", err)
 	}
 
@@ -104,7 +104,8 @@ func (a *Agent) Run(ctx context.Context) error {
 			runErr = err
 		}
 	}
-	return errors.Join(runErr, a.shutdown())
+	a.shutdown()
+	return runErr
 }
 
 func (a *Agent) triggerStop() { a.stopOnce.Do(func() { close(a.stopCh) }) }
@@ -138,17 +139,17 @@ func (a *Agent) CancelTask(expectedTaskID, reason string) (string, bool) {
 }
 
 // ReserveTask 为开始命令预留唯一任务槽位。
-func (a *Agent) ReserveTask(task *agenttask.TaskAssignment) (context.Context, context.CancelCauseFunc, error) {
+func (a *Agent) ReserveTask(task *agenttask.Assignment) (context.Context, context.CancelCauseFunc, error) {
 	return a.reserveTask(task)
 }
 
 // LaunchReservedTask 启动已经预留的任务。
-func (a *Agent) LaunchReservedTask(taskCtx context.Context, taskCancel context.CancelCauseFunc, task *agenttask.TaskAssignment, submit func(func()) error) error {
+func (a *Agent) LaunchReservedTask(taskCtx context.Context, taskCancel context.CancelCauseFunc, task *agenttask.Assignment, submit func(func()) error) error {
 	return a.launchReservedTask(taskCtx, taskCancel, task, submit)
 }
 
 // ReleaseReservedTask 释放启动失败或会话中断的任务预留。
-func (a *Agent) ReleaseReservedTask(task *agenttask.TaskAssignment, cancel context.CancelCauseFunc, cause error) {
+func (a *Agent) ReleaseReservedTask(task *agenttask.Assignment, cancel context.CancelCauseFunc, cause error) {
 	a.releaseReservedTask(task, cancel, cause)
 }
 
@@ -164,7 +165,7 @@ func (a *Agent) CancelControlPlane() {
 	}
 }
 
-func (a *Agent) Status() AgentStatus {
+func (a *Agent) Status() Status {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.status
@@ -193,17 +194,12 @@ func (a *Agent) cancelCurrentTask(reason string) (string, bool) { return a.cance
 
 var errAgentShuttingDown = errors.New("agent 正在关闭，拒绝新任务")
 var errTaskStopRequested = errors.New("任务被控制命令取消")
-var errTaskSessionInterrupted = errors.New("启动任务时控制会话中断")
 
 type taskBusyError struct{ currentTaskID string }
 
 func (e *taskBusyError) Error() string { return "已有任务运行: " + e.currentTaskID }
 
-func (a *Agent) submitTask(task *agenttask.TaskAssignment) error {
-	return a.submitTaskWithSubmit(task, workpool.GetWorkPool().Submit)
-}
-
-func (a *Agent) submitTaskWithSubmit(task *agenttask.TaskAssignment, submit func(func()) error) error {
+func (a *Agent) submitTaskWithSubmit(task *agenttask.Assignment, submit func(func()) error) error {
 	taskCtx, taskCancel, err := a.reserveTask(task)
 	if err != nil {
 		return err
@@ -211,7 +207,7 @@ func (a *Agent) submitTaskWithSubmit(task *agenttask.TaskAssignment, submit func
 	return a.launchReservedTask(taskCtx, taskCancel, task, submit)
 }
 
-func (a *Agent) reserveTask(task *agenttask.TaskAssignment) (context.Context, context.CancelCauseFunc, error) {
+func (a *Agent) reserveTask(task *agenttask.Assignment) (context.Context, context.CancelCauseFunc, error) {
 	a.mu.Lock()
 	if a.shuttingDown {
 		a.mu.Unlock()
@@ -229,7 +225,7 @@ func (a *Agent) reserveTask(task *agenttask.TaskAssignment) (context.Context, co
 	return taskCtx, taskCancel, nil
 }
 
-func (a *Agent) launchReservedTask(taskCtx context.Context, taskCancel context.CancelCauseFunc, task *agenttask.TaskAssignment, submit func(func()) error) error {
+func (a *Agent) launchReservedTask(taskCtx context.Context, taskCancel context.CancelCauseFunc, task *agenttask.Assignment, submit func(func()) error) error {
 	a.mu.Lock()
 	if a.currentTask != task {
 		a.mu.Unlock()
@@ -252,7 +248,7 @@ func (a *Agent) launchReservedTask(taskCtx context.Context, taskCancel context.C
 	return nil
 }
 
-func (a *Agent) releaseReservedTask(task *agenttask.TaskAssignment, cancel context.CancelCauseFunc, cause error) {
+func (a *Agent) releaseReservedTask(task *agenttask.Assignment, cancel context.CancelCauseFunc, cause error) {
 	cancel(cause)
 	a.mu.Lock()
 	if a.currentTask == task {
@@ -261,7 +257,7 @@ func (a *Agent) releaseReservedTask(task *agenttask.TaskAssignment, cancel conte
 	a.mu.Unlock()
 }
 
-func (a *Agent) executeTask(taskCtx context.Context, taskCancel context.CancelFunc, task *agenttask.TaskAssignment) {
+func (a *Agent) executeTask(taskCtx context.Context, taskCancel context.CancelFunc, task *agenttask.Assignment) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			stresslog.Error("[AGENT] executeTask panic", zap.String("taskID", task.TaskID), zap.Any("panic", recovered), zap.String("stack", string(debug.Stack())))
@@ -286,11 +282,11 @@ func (a *Agent) executeTask(taskCtx context.Context, taskCancel context.CancelFu
 	a.mu.Unlock()
 	stressReporter.Start(taskCtx)
 
-	runner := agenttask.NewTaskRunner(task, a.collector)
+	runner := agenttask.NewRunner(task, a.collector)
 	runner.OnStageReset = func(nextStageIndex int) {
 		snapshot := stressReporter.Snapshot()
 		a.collector.Reset()
-		report := agenttask.TaskCompletionReport{AgentID: a.id, TaskID: task.TaskID, Result: agenttask.TaskCompleted,
+		report := agenttask.CompletionReport{AgentID: a.id, TaskID: task.TaskID, Result: agenttask.Completed,
 			StageIndex: nextStageIndex, FinalSnapshot: snapshot, FinishedAt: time.Now()}
 		if _, err := a.offerTaskReport(report); err != nil {
 			stresslog.Warn("[AGENT] reset 阶段报告进入待确认队列失败", zap.String("taskID", task.TaskID), zap.Int("stageIndex", nextStageIndex), zap.Error(err))
@@ -299,7 +295,7 @@ func (a *Agent) executeTask(taskCtx context.Context, taskCancel context.CancelFu
 	runResult := runner.Run(taskCtx)
 	stressReporter.Stop()
 	finalSnapshot := a.collector.Snapshot(nil, 0)
-	report := agenttask.TaskCompletionReport{AgentID: a.id, TaskID: task.TaskID, Result: runResult.Result, ErrorMsg: runResult.ErrorMsg,
+	report := agenttask.CompletionReport{AgentID: a.id, TaskID: task.TaskID, Result: runResult.Result, ErrorMsg: runResult.ErrorMsg,
 		FinishedAt: time.Now(), FinalSnapshot: finalSnapshot, CleanupStatus: &runResult.CleanupStatus}
 	reportCtx, reportCancel := context.WithTimeout(context.Background(), a.cfg.TaskReportTimeout)
 	done, err := a.offerTaskReport(report)
@@ -321,12 +317,12 @@ func (a *Agent) executeTask(taskCtx context.Context, taskCancel context.CancelFu
 	debug.FreeOSMemory()
 }
 
-func (a *Agent) offerTaskReport(report agenttask.TaskCompletionReport) (<-chan error, error) {
+func (a *Agent) offerTaskReport(report agenttask.CompletionReport) (<-chan error, error) {
 	reportID := fmt.Sprintf("%s-%s-%d-%d", a.id, report.TaskID, report.StageIndex, time.Now().UnixNano())
 	return a.reportOutbox.Offer(finalReportToProto(reportID, report))
 }
 
-func (a *Agent) shutdown() error {
+func (a *Agent) shutdown() {
 	stresslog.Info("[AGENT] 正在关闭...")
 	a.triggerStop()
 	a.mu.Lock()
@@ -336,7 +332,7 @@ func (a *Agent) shutdown() error {
 		stresslog.Info("[AGENT] 等待当前任务完成清理与报告", zap.String("taskID", taskID))
 	}
 	done := make(chan struct{})
-	workpool.GetWorkPool().Go(func() { a.taskWG.Wait(); close(done) })
+	workpool.Default().Go(func() { a.taskWG.Wait(); close(done) })
 	timer := timerpool.GetTimer(a.cfg.TaskReportTimeout + 5*time.Second)
 	select {
 	case <-done:
@@ -357,5 +353,4 @@ func (a *Agent) shutdown() error {
 		a.cancel()
 	}
 	stresslog.Info("[AGENT] 已退出")
-	return nil
 }

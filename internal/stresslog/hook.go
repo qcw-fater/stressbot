@@ -1,14 +1,17 @@
 package stresslog
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 )
 
-var webHookUrl = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send"
+var webHookURL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send"
+
+var webhookHTTPClient = &http.Client{Timeout: 5 * time.Second}
 
 type Content struct {
 	Content       string   `json:"content"`
@@ -49,21 +52,19 @@ func postQYWXMsg(data string) {
 	msg.Markdown = Content{
 		Content: data,
 	}
-	bytes, _ := json.Marshal(msg)
-	req, _ := http.NewRequest("POST", webHookUrl+"?key="+token+"&debug=1", strings.NewReader(string(bytes)))
+	payload, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, webHookURL+"?key="+token+"&debug=1", bytes.NewReader(payload))
+	if err != nil {
+		return
+	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	resp, err := webhookHTTPClient.Do(req)
 	if err != nil {
 		return
 	}
-	defer func(Body io.ReadCloser) {
-		err = Body.Close()
-		if err != nil {
-		}
-	}(resp.Body)
-
-	_, err = io.ReadAll(resp.Body)
-	if err != nil {
-		return
-	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
 }

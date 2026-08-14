@@ -30,7 +30,6 @@ func FormatProcessInfo() (data string) {
 		data += "Directory: " + WorkingDirectory + "\n"
 		// 主机名
 		data += "HostName: " + hostName + "\n"
-
 	}
 	return
 }

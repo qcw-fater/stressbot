@@ -53,18 +53,18 @@ func NewStore(root string, maxConcurrentStreams int) (*Store, error) {
 		return nil, fmt.Errorf("创建资源包目录失败: %w", err)
 	}
 	store := &Store{root: root, streamSem: make(chan struct{}, maxConcurrentStreams)}
-	store.buffers.New = func() any { return make([]byte, bundleChunkSize) }
+	store.buffers.New = func() any { return new([bundleChunkSize]byte) }
 	return store, nil
 }
 
-func (s *Store) GetBuffer() []byte { return s.buffers.Get().([]byte) }
+func (s *Store) GetBuffer() []byte { return s.buffers.Get().(*[bundleChunkSize]byte)[:] }
 
 func (s *Store) PutBuffer(buffer []byte) {
 	if cap(buffer) != bundleChunkSize {
 		return
 	}
 	clear(buffer)
-	s.buffers.Put(buffer[:bundleChunkSize])
+	s.buffers.Put((*[bundleChunkSize]byte)(buffer[:bundleChunkSize]))
 }
 
 // Source exposes only the immutable task resources needed to build a bundle.
@@ -101,7 +101,7 @@ func (s *Store) Build(cfg Source) (Descriptor, error) {
 	zw := zip.NewWriter(io.MultiWriter(tmp, hash))
 	for _, entry := range entries {
 		header := &zip.FileHeader{Name: entry.name, Method: zip.Deflate}
-		header.SetModTime(bundleModTime)
+		header.Modified = bundleModTime
 		header.SetMode(0o644)
 		writer, createErr := zw.CreateHeader(header)
 		if createErr != nil {

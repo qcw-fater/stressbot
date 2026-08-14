@@ -107,7 +107,6 @@ type Config struct {
 func NewRobot(parent context.Context, cfg Config, flow *flowdef.TaskFlow, factory *protox.Factory,
 	resolver protocol.CodecResolver,
 	dialer *network.Dialer, luaPool *script.RuntimePool) (*Robot, error) {
-
 	if resolver == nil {
 		return nil, fmt.Errorf("NewRobot: resolver 不能为 nil（codec 未配置）")
 	}
@@ -195,7 +194,7 @@ func (r *Robot) GetFactory() *protox.Factory { return r.factory }
 
 // Start 启动机器人。协程池拒绝任务时返回错误，调用方不得把该 Robot 计为已启动。
 func (r *Robot) Start() error {
-	return r.startWithSubmit(workpool.GetWorkPool().Submit)
+	return r.startWithSubmit(workpool.Default().Submit)
 }
 
 func (r *Robot) startWithSubmit(submit func(func()) error) error {
@@ -341,7 +340,7 @@ func (r *Robot) Close() CleanupStatus {
 }
 
 func (r *Robot) cleanup(reason CleanupReason, executorDone bool) CleanupStatus {
-	return r.cleanupWithSubmit(reason, executorDone, workpool.GetWorkPool().Submit)
+	return r.cleanupWithSubmit(reason, executorDone, workpool.Default().Submit)
 }
 
 func (r *Robot) cleanupWithSubmit(reason CleanupReason, executorDone bool, submit func(func()) error) CleanupStatus {
@@ -375,7 +374,7 @@ func (r *Robot) cleanupWithSubmit(reason CleanupReason, executorDone bool, submi
 
 		timer := time.NewTimer(robotCloseTimeout)
 		defer timer.Stop()
-		for !(waitDone && closeDone) {
+		for !waitDone || !closeDone {
 			select {
 			case <-execDoneCh:
 				waitDone = true
@@ -1200,7 +1199,7 @@ func (h *robotActionHandler) runListenScript(cbName string, cbDef *flowdef.Liste
 		}
 		if !handled {
 			runErr = h.runListenScriptDecoded(cbName, cbDef, msg, start)
-			if runErr == errListenParseFailed {
+			if errors.Is(runErr, errListenParseFailed) {
 				return // 解析失败已记指标
 			}
 		}
@@ -1431,7 +1430,7 @@ func (ns *netSenderAdapter) HTTPRequest(reqURL, method, contentType string, body
 		stresslog.Warn("[HTTP] 请求失败", zap.String("url", reqURL), zap.Error(err))
 		return exchange, errcode.NewActionError(errcode.ErrSendFailed, "url="+reqURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	exchange.NetLatency = time.Since(netStart)
@@ -1821,7 +1820,8 @@ func (ns *netSenderAdapter) installHeartbeat(cfg engine.HeartbeatConfig) error {
 		//   两者皆无 → 空 body（静态心跳）。
 		var body []byte
 		var skip bool
-		if c2sProto != "" {
+		switch {
+		case c2sProto != "":
 			b, skipB, err := hbExec.BuildProtoBody(c2sProto, bindings, "heartbeat:"+cfg.Service)
 			if err != nil {
 				stresslog.Warn("[ROBOT] 心跳 proto body 构建失败",
@@ -1832,7 +1832,7 @@ func (ns *netSenderAdapter) installHeartbeat(cfg engine.HeartbeatConfig) error {
 				return nil
 			}
 			body, skip = b, skipB
-		} else if hbPlan != nil {
+		case hbPlan != nil:
 			// 编译布局快路径：body 是 plan 的复用缓冲，encode 会把它拷进新分配的整包，
 			// 本 tick 之外不得引用。
 			b, skipB, err := hbPlan.Build(st, privateCounters, skipWhenMissing)
@@ -1844,7 +1844,7 @@ func (ns *netSenderAdapter) installHeartbeat(cfg engine.HeartbeatConfig) error {
 				return nil
 			}
 			body, skip = b, skipB
-		} else if len(fields) > 0 {
+		case len(fields) > 0:
 			b, skipB, err := engine.BuildHeartbeatBody(fields, st, privateCounters, skipWhenMissing)
 			if err != nil {
 				stresslog.Warn("[ROBOT] 心跳 body 构建失败",

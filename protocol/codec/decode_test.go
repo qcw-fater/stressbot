@@ -98,7 +98,7 @@ func TestDecodeTCP_BadGzip_OnErrorFail(t *testing.T) {
 	hdr[7] = 1  // act
 	hdr[10] = 2 // flags: compressed only（bit1）
 	// bcc=0（未加密）
-	frame := append(hdr, body...)
+	frame := append(append([]byte(nil), hdr...), body...)
 
 	route, gotBody, errCode := ut.DecodeTCP(frame, key)
 	// enc 步 flag 未置位 → 不走 bcc 校验；gz 步 onError=fail → 解压失败 → 空路由。
@@ -167,7 +167,7 @@ func TestDecodeTCP_BadGzip_OnErrorKeep(t *testing.T) {
 	hdr[6] = 7
 	hdr[7] = 1
 	hdr[10] = 2 // compressed
-	frame := append(hdr, body...)
+	frame := append(append([]byte(nil), hdr...), body...)
 
 	route, gotBody, _ := ut.DecodeTCP(frame, key)
 	// keep：routeKey 仍按 cmd:act 拼，body 保留原字节。

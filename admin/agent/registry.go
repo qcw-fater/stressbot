@@ -16,17 +16,17 @@ import (
 // statusChange 状态变更事件，锁外触发 onChange。
 type statusChange struct {
 	agentID string
-	from    AgentStatus
-	to      AgentStatus
+	from    Status
+	to      Status
 }
 
-// AgentRegistry Agent 注册表。
-type AgentRegistry struct {
+// Registry 管理 Agent 注册信息与健康状态。
+type Registry struct {
 	mu        sync.RWMutex
-	agents    map[string]*AgentNode
+	agents    map[string]*Node
 	instances map[string]agentInstance
 	cfg       Config
-	onChange  func(agentID string, from, to AgentStatus)
+	onChange  func(agentID string, from, to Status)
 	onRestart func(agentID, taskID string)
 
 	unhealthyThreshold time.Duration
@@ -40,9 +40,10 @@ type Config struct {
 	NotFoundError      error
 }
 
-func NewRegistry(cfg Config, onChange func(string, AgentStatus, AgentStatus)) *AgentRegistry {
-	return &AgentRegistry{
-		agents:             make(map[string]*AgentNode),
+// NewRegistry 创建 Agent 注册表。
+func NewRegistry(cfg Config, onChange func(string, Status, Status)) *Registry {
+	return &Registry{
+		agents:             make(map[string]*Node),
 		instances:          make(map[string]agentInstance),
 		cfg:                cfg,
 		onChange:           onChange,
@@ -51,7 +52,7 @@ func NewRegistry(cfg Config, onChange func(string, AgentStatus, AgentStatus)) *A
 	}
 }
 
-func (r *AgentRegistry) notFoundError() error {
+func (r *Registry) notFoundError() error {
 	if r.cfg.NotFoundError != nil {
 		return r.cfg.NotFoundError
 	}
@@ -59,7 +60,7 @@ func (r *AgentRegistry) notFoundError() error {
 }
 
 // fireOnChange 在锁外触发回调，防止死锁。
-func (r *AgentRegistry) fireOnChange(changes []statusChange) {
+func (r *Registry) fireOnChange(changes []statusChange) {
 	if r.onChange == nil {
 		return
 	}
@@ -72,11 +73,11 @@ func (r *AgentRegistry) fireOnChange(changes []statusChange) {
 //
 //   - 同 ID 重新注册：旧 entry 覆盖为新的 idle 节点；
 //   - 旧节点关联的运行任务由调度层通过 onAgentStatusChange + 心跳超时安全网处理。
-func (r *AgentRegistry) Register(node *AgentNode) error {
+func (r *Registry) Register(node *Node) error {
 	r.mu.Lock()
 	existing, exists := r.agents[node.ID]
 	previousInstance, hadInstance := r.instances[node.ID]
-	from := AgentStatus("")
+	from := Status("")
 	if exists {
 		from = existing.Status
 	}
@@ -121,7 +122,7 @@ func (r *AgentRegistry) Register(node *AgentNode) error {
 }
 
 // Heartbeat 处理心跳。
-func (r *AgentRegistry) Heartbeat(agentID string, req HeartbeatRequest) error {
+func (r *Registry) Heartbeat(agentID string, req HeartbeatRequest) error {
 	r.mu.Lock()
 	node, ok := r.agents[agentID]
 	if !ok {
@@ -160,24 +161,24 @@ type agentInstance struct {
 	taskID    string
 }
 
-func heartbeatAgentStatus(value, taskID string) (AgentStatus, error) {
+func heartbeatAgentStatus(value, taskID string) (Status, error) {
 	switch value {
 	case "busy":
 		if taskID == "" {
 			return "", fmt.Errorf("busy 心跳缺少 currentTaskId")
 		}
-		return AgentBusy, nil
+		return Busy, nil
 	case "idle":
 		if taskID != "" {
 			return "", fmt.Errorf("idle 心跳不能携带 currentTaskId")
 		}
-		return AgentIdle, nil
+		return Idle, nil
 	default:
 		return "", fmt.Errorf("未知节点状态 %q", value)
 	}
 }
 
-func (r *AgentRegistry) SetOnRestart(fn func(agentID, taskID string)) {
+func (r *Registry) SetOnRestart(fn func(agentID, taskID string)) {
 	r.mu.Lock()
 	r.onRestart = fn
 	r.mu.Unlock()
@@ -185,7 +186,7 @@ func (r *AgentRegistry) SetOnRestart(fn func(agentID, taskID string)) {
 
 // StartTask synchronizes the registry as soon as a Start ACK is committed, so
 // the first metrics window does not have to wait for the next heartbeat.
-func (r *AgentRegistry) StartTask(agentID, taskID string, bots int) error {
+func (r *Registry) StartTask(agentID, taskID string, bots int) error {
 	r.mu.Lock()
 	node, ok := r.agents[agentID]
 	if !ok {
@@ -193,19 +194,19 @@ func (r *AgentRegistry) StartTask(agentID, taskID string, bots int) error {
 		return r.notFoundError()
 	}
 	from := node.Status
-	node.Status, node.CurrentTaskID, node.CurrentBots = AgentBusy, taskID, bots
+	node.Status, node.CurrentTaskID, node.CurrentBots = Busy, taskID, bots
 	r.instances[agentID] = agentInstance{startedAt: node.StaticInfo.StartedAt, taskID: taskID}
 	node.LastHeartbeatAt = time.Now()
 	r.mu.Unlock()
-	if from != AgentBusy {
-		r.fireOnChange([]statusChange{{agentID: agentID, from: from, to: AgentBusy}})
+	if from != Busy {
+		r.fireOnChange([]statusChange{{agentID: agentID, from: from, to: Busy}})
 	}
 	return nil
 }
 
 // CompleteTask 仅在 taskID 仍是节点当前任务时清理任务状态。
 // 返回 false 表示完成报告已经迟到，节点可能已开始执行其他任务。
-func (r *AgentRegistry) CompleteTask(agentID, taskID string) (bool, error) {
+func (r *Registry) CompleteTask(agentID, taskID string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -219,7 +220,7 @@ func (r *AgentRegistry) CompleteTask(agentID, taskID string) (bool, error) {
 
 	node.CurrentTaskID = ""
 	node.CurrentBots = 0
-	node.Status = AgentIdle
+	node.Status = Idle
 	r.instances[agentID] = agentInstance{startedAt: node.StaticInfo.StartedAt}
 	node.LatestStress = nil
 	node.StressUpdatedAt = time.Time{}
@@ -227,7 +228,7 @@ func (r *AgentRegistry) CompleteTask(agentID, taskID string) (bool, error) {
 }
 
 // Touch 用于"任何 Agent 请求"路径上刷新心跳时间。
-func (r *AgentRegistry) Touch(agentID, appVersion string) {
+func (r *Registry) Touch(agentID, appVersion string) {
 	r.mu.Lock()
 	node, ok := r.agents[agentID]
 	if !ok {
@@ -244,18 +245,18 @@ func (r *AgentRegistry) Touch(agentID, appVersion string) {
 
 // touchLocked 更新心跳时间、appVersion，并处理 unhealthy/offline → 在线 的恢复。
 // 调用方必须已持有 r.mu。返回状态变更事件（锁外触发）。
-func (r *AgentRegistry) touchLocked(node *AgentNode, appVersion string) *statusChange {
+func (r *Registry) touchLocked(node *Node, appVersion string) *statusChange {
 	node.LastHeartbeatAt = time.Now()
 	if appVersion != "" {
 		node.AppVersion = appVersion
 	}
 
-	if node.Status == AgentUnhealthy || node.Status == AgentOffline {
+	if node.Status == Unhealthy || node.Status == Offline {
 		from := node.Status
 		if node.CurrentTaskID != "" {
-			node.Status = AgentBusy
+			node.Status = Busy
 		} else {
-			node.Status = AgentIdle
+			node.Status = Idle
 		}
 		stresslog.Warn("agent 状态恢复",
 			zap.String("agentID", node.ID),
@@ -270,7 +271,7 @@ func (r *AgentRegistry) touchLocked(node *AgentNode, appVersion string) *statusC
 }
 
 // Deregister 注销 Agent。
-func (r *AgentRegistry) Deregister(agentID string) error {
+func (r *Registry) Deregister(agentID string) error {
 	r.mu.Lock()
 	node, ok := r.agents[agentID]
 	if !ok {
@@ -280,7 +281,7 @@ func (r *AgentRegistry) Deregister(agentID string) error {
 
 	var change *statusChange
 	if node.CurrentTaskID != "" {
-		change = &statusChange{agentID: agentID, from: node.Status, to: AgentOffline}
+		change = &statusChange{agentID: agentID, from: node.Status, to: Offline}
 	}
 	delete(r.agents, agentID)
 	stresslog.Info("agent 注销",
@@ -298,7 +299,7 @@ func (r *AgentRegistry) Deregister(agentID string) error {
 }
 
 // Get 获取 Agent 的读安全副本（无则返回 false）。
-func (r *AgentRegistry) Get(agentID string) (*AgentNode, bool) {
+func (r *Registry) Get(agentID string) (*Node, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	node, ok := r.agents[agentID]
@@ -309,10 +310,10 @@ func (r *AgentRegistry) Get(agentID string) (*AgentNode, bool) {
 }
 
 // List 列出所有 Agent 的读安全副本。
-func (r *AgentRegistry) List() []*AgentNode {
+func (r *Registry) List() []*Node {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	out := make([]*AgentNode, 0, len(r.agents))
+	out := make([]*Node, 0, len(r.agents))
 	for _, n := range r.agents {
 		out = append(out, cloneNodeForRead(n))
 	}
@@ -320,10 +321,10 @@ func (r *AgentRegistry) List() []*AgentNode {
 }
 
 // ListByStatus 按状态列出 Agent 的读安全副本。
-func (r *AgentRegistry) ListByStatus(status AgentStatus) []*AgentNode {
+func (r *Registry) ListByStatus(status Status) []*Node {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	var out []*AgentNode
+	var out []*Node
 	for _, n := range r.agents {
 		if n.Status == status {
 			out = append(out, cloneNodeForRead(n))
@@ -332,20 +333,20 @@ func (r *AgentRegistry) ListByStatus(status AgentStatus) []*AgentNode {
 	return out
 }
 
-// cloneNodeForRead 返回 AgentNode 的读安全浅拷贝。
+// cloneNodeForRead 返回 Node 的读安全浅拷贝。
 //
-// Register/Heartbeat/Touch/UpdateStress/scanAndMarkStatus 均在 r.mu 写锁内就地改写 *AgentNode
+// Register/Heartbeat/Touch/UpdateStress/scanAndMarkStatus 均在 r.mu 写锁内就地改写 *Node
 // 的标量字段（Status/CurrentTaskID/CurrentBots/LastHeartbeatAt 等），若 Get/List 直接返回内部
 // 指针，调用方在锁外读取这些字段会与写入并发触发 data race。指针字段 LatestStress/LatestSystem
 // 以「整体重新赋值」方式更新（不就地改写指向的快照对象），浅拷贝持有的指针即为一致快照。
 // 调用方必须持有 r.mu。
-func cloneNodeForRead(n *AgentNode) *AgentNode {
+func cloneNodeForRead(n *Node) *Node {
 	cp := *n
 	return &cp
 }
 
 // UpdateStress 更新 Agent 压测指标快照。
-func (r *AgentRegistry) UpdateStress(agentID string, snap *monitor.CollectorSnapshot, at time.Time) {
+func (r *Registry) UpdateStress(agentID string, snap *monitor.CollectorSnapshot, at time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if node, ok := r.agents[agentID]; ok {
@@ -355,7 +356,7 @@ func (r *AgentRegistry) UpdateStress(agentID string, snap *monitor.CollectorSnap
 }
 
 // UpdateSystem 更新 Agent 系统指标快照。
-func (r *AgentRegistry) UpdateSystem(agentID string, snap *SystemSnapshot, at time.Time) {
+func (r *Registry) UpdateSystem(agentID string, snap *SystemSnapshot, at time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if node, ok := r.agents[agentID]; ok {
@@ -368,9 +369,9 @@ func (r *AgentRegistry) UpdateSystem(agentID string, snap *SystemSnapshot, at ti
 }
 
 // StartHealthChecker 启动心跳超时检测协程。
-func (r *AgentRegistry) StartHealthChecker(ctx context.Context) {
+func (r *Registry) StartHealthChecker(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
-	workpool.GetWorkPool().GoWithStop(func(stopCh <-chan struct{}) {
+	workpool.Default().GoWithStop(func(stopCh <-chan struct{}) {
 		defer ticker.Stop()
 		for {
 			select {
@@ -385,20 +386,20 @@ func (r *AgentRegistry) StartHealthChecker(ctx context.Context) {
 	})
 }
 
-func (r *AgentRegistry) scanAndMarkStatus() {
+func (r *Registry) scanAndMarkStatus() {
 	var changes []statusChange
 
 	r.mu.Lock()
 	now := time.Now()
 	for _, node := range r.agents {
 		lag := now.Sub(node.LastHeartbeatAt)
-		var newStatus AgentStatus
+		var newStatus Status
 
 		switch {
 		case lag >= r.offlineThreshold:
-			newStatus = AgentOffline
+			newStatus = Offline
 		case lag >= r.unhealthyThreshold:
-			newStatus = AgentUnhealthy
+			newStatus = Unhealthy
 		default:
 			continue
 		}
@@ -419,7 +420,7 @@ func (r *AgentRegistry) scanAndMarkStatus() {
 		}
 
 		// offline → 直接删除（任务已通过 onChange 回调处理）
-		if node.Status == AgentOffline {
+		if node.Status == Offline {
 			delete(r.agents, node.ID)
 			stresslog.Info("agent 已离线，自动清理",
 				zap.String("agentID", node.ID),

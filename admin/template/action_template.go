@@ -164,7 +164,7 @@ func (s *ActionTemplateStore) List(ctx context.Context) ([]ActionTemplate, error
 	if err != nil {
 		return nil, mapTemplateWriteError(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]ActionTemplate, 0)
 	for rows.Next() {
 		item, err := scanActionTemplate(rows)

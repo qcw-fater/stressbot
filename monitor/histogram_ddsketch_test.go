@@ -41,7 +41,9 @@ func TestLatencyHistogramDDSketchQuantilesStayAccurateAndBounded(t *testing.T) {
 	}
 	values = append(values, time.Nanosecond, 61*time.Second, 10*time.Minute, time.Hour)
 	for _, value := range values {
-		h.Record(value)
+		if err := h.Record(value); err != nil {
+			t.Fatalf("Record(%s) error = %v", value, err)
+		}
 	}
 
 	snap := h.Snapshot()
@@ -86,11 +88,17 @@ func TestLatencyHistogramDDSketchMergeMatchesSingleSketch(t *testing.T) {
 	right := newLatencyHistogram()
 	for i := 1; i <= 10_000; i++ {
 		value := time.Duration(i*i) * time.Microsecond
-		all.Record(value)
+		if err := all.Record(value); err != nil {
+			t.Fatalf("all.Record(%s) error = %v", value, err)
+		}
 		if i%2 == 0 {
-			left.Record(value)
+			if err := left.Record(value); err != nil {
+				t.Fatalf("left.Record(%s) error = %v", value, err)
+			}
 		} else {
-			right.Record(value)
+			if err := right.Record(value); err != nil {
+				t.Fatalf("right.Record(%s) error = %v", value, err)
+			}
 		}
 	}
 

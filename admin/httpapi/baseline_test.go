@@ -6,7 +6,7 @@
 //     errors.json 四个（集合相等，顺序不强制）；
 //   - 不含旧 codec.lua / error.lua。
 //
-// 复用 codec_distribution_test.go 中已搭建的临时目录 + AdminServer 构造方式（setupCodecDistServer）。
+// 复用 codec_distribution_test.go 中已搭建的临时目录和 Handler 构造方式（setupCodecDistHandler）。
 package httpapi
 
 import (
@@ -24,7 +24,7 @@ import (
 // TestBaselineCodecIndex_ListsJsonFiles 镜像 handleBaselineCodecIndex：
 // 写入 4 份目标 .json + 2 份干扰 .lua 后，索引端点应只列出 4 份 .json（集合相等，排除 .lua）。
 func TestBaselineCodecIndex_ListsJsonFiles(t *testing.T) {
-	srv, dir, cleanup := setupCodecDistServer(t)
+	srv, dir, cleanup := setupCodecDistHandler(t)
 	defer cleanup()
 
 	// 落盘 4 份目标 .json（用 T1.6 产物字节，保证非空、真实可用）

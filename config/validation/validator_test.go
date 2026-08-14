@@ -19,7 +19,6 @@ func TestSharedSchemaCorpus(t *testing.T) {
 			t.Fatalf("corpus %q is empty", pattern)
 		}
 		for _, name := range files {
-			name := name
 			t.Run(filepath.Base(name), func(t *testing.T) {
 				data, err := Files.ReadFile(name)
 				if err != nil {

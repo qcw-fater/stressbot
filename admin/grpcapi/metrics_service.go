@@ -1,6 +1,7 @@
 package grpcapi
 
 import (
+	"errors"
 	"io"
 
 	"stressbot/controlplane/pb"
@@ -19,7 +20,7 @@ func (svc *grpcMetricsService) Report(stream controlpb.AgentMetricsService_Repor
 	var agentID string
 	for {
 		envelope, err := stream.Recv()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return stream.SendAndClose(&controlpb.MetricsClose{Accepted: accepted, Rejected: rejected})
 		}
 		if err != nil {
@@ -41,7 +42,6 @@ func (svc *grpcMetricsService) Report(stream controlpb.AgentMetricsService_Repor
 			return status.Error(codes.InvalidArgument, previousErr.Error())
 		}
 		if err := svc.deps.Metrics.Offer(envelope); err != nil {
-			rejected++
 			return status.Error(codes.ResourceExhausted, err.Error())
 		}
 		accepted++

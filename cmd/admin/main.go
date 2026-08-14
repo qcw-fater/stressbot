@@ -84,11 +84,14 @@ func run(args []string) (exitCode int) {
 	closeLog = stresslog.InitLog(cfg.Log.Path, "admin", &cfg.Log, "")
 	stresslog.Info("[MAIN] Admin 服务器启动", zap.String("version", Version))
 
-	server, err := admin.NewAdminServer(*cfg)
+	server, err := admin.NewServer(*cfg)
 	if err != nil {
 		stresslog.Error("[MAIN] 初始化 Admin 服务器失败", zap.Error(err))
 		return 1
 	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	var stopPprof func()
 	if cfg.Pprof != nil {
@@ -96,12 +99,10 @@ func run(args []string) (exitCode int) {
 		if port <= 0 {
 			port = 6060
 		}
-		stopPprof = config.StartPprofServer(port)
+		stopPprof = config.StartPprofServer(ctx, port)
 		defer stopPprof()
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 	if err := server.Run(ctx); err != nil {
 		stresslog.Error("[MAIN] Admin 服务器退出", zap.Error(err))
 		return 1

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"time"
 
+	// Register the MySQL database/sql driver used by Open.
 	_ "github.com/go-sql-driver/mysql"
 )
 

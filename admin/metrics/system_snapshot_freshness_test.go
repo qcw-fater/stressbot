@@ -9,7 +9,7 @@ func TestUpdateSystemDoesNotRefreshDuplicateSnapshotSequence(t *testing.T) {
 	t0 := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	t1 := t0.Add(time.Minute)
 	registry := newTestAgentRegistry(
-		&AgentNode{
+		&Node{
 			ID:              "a",
 			LatestSystem:    &SystemSnapshot{Sequence: 5},
 			SystemUpdatedAt: t0,

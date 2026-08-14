@@ -101,7 +101,7 @@ func TestIntegrationDetectClusterMode(t *testing.T) {
 		Addr:        fmt.Sprintf("%s:%d", resolved.Host, resolved.Port),
 		DialTimeout: resolved.DialTimeout,
 	})
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), resolved.DialTimeout)
 	defer cancel()
 	if err := c.Ping(ctx).Err(); err != nil {

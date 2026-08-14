@@ -27,11 +27,11 @@ type fakeAdapter struct {
 
 func (a *fakeAdapter) HeaderSize() int       { return a.headerSize }
 func (a *fakeAdapter) BodyLength([]byte) int { return a.bodyLen }
-func (a *fakeAdapter) EncodeTCP(route any, body []byte, secretKey []byte) []byte {
+func (a *fakeAdapter) EncodeTCP(_ any, _ []byte, _ []byte) []byte {
 	a.encodeCalls++
 	return a.encodeBytes
 }
-func (a *fakeAdapter) EncodeUDP(route any, body []byte, secretKey []byte) []byte {
+func (a *fakeAdapter) EncodeUDP(_ any, _ []byte, _ []byte) []byte {
 	a.encodeCalls++
 	return a.encodeBytes
 }
@@ -41,7 +41,7 @@ func (a *fakeAdapter) DecodeTCP([]byte, []byte) (string, []byte, uint64) {
 func (a *fakeAdapter) DecodeUDP([]byte, []byte) (string, []byte, uint64) {
 	return "", nil, 0
 }
-func (a *fakeAdapter) ExpectedRouteKey(route any) string {
+func (a *fakeAdapter) ExpectedRouteKey(_ any) string {
 	a.routeKeyCalls++
 	return a.routeKey
 }
@@ -67,8 +67,9 @@ func errTableCode(t *testing.T, vals []lua.LValue, idx int) (int, bool) {
 }
 
 // requireErrTable 断言 idx 位置是 err table 且 code==wantCode。
-func requireErrTable(t *testing.T, vals []lua.LValue, idx int, wantCode errcode.ErrorCode) {
+func requireErrTable(t *testing.T, vals []lua.LValue, wantCode errcode.ErrorCode) {
 	t.Helper()
+	const idx = 0
 	code, ok := errTableCode(t, vals, idx)
 	if !ok {
 		t.Fatalf("vals[%d]=%v，期望 err table", idx, vals[idx])
@@ -86,7 +87,7 @@ func requireErrTable(t *testing.T, vals []lua.LValue, idx int, wantCode errcode.
 // TestTCPRquest_EncodeFail_ResolverNil ctx.Resolver 为 nil → buildPacket 返回 nil →
 // pushResult(ErrEncodeFailed, nil)，不进入 awaitYield。
 func TestTCPRequest_EncodeFail_ResolverNil(t *testing.T) {
-	L := newTestState(t, context.Background(), &fakeNetSender{}, nil)
+	L := newTestState(context.Background(), t, &fakeNetSender{}, nil)
 	defer L.Close()
 
 	// resolver nil：函数体开头 ctx.Resolver nil 判定走 RaiseError（network not available）。
@@ -103,7 +104,7 @@ func TestTCPRequest_EncodeFail_ResolverNil(t *testing.T) {
 // buildPacket 返回 nil → pushResult(ErrEncodeFailed, nil)，直接返回（不走 awaitYield）。
 func TestTCPRequest_EncodeFail_CodecUnmapped(t *testing.T) {
 	resolver := &fakeResolver{adp: nil} // Resolve 一律返回 nil
-	L := newTestState(t, context.Background(), &fakeNetSender{}, resolver)
+	L := newTestState(context.Background(), t, &fakeNetSender{}, resolver)
 	defer L.Close()
 
 	err := doNet(t, L, `local e, d = network.tcp_request('logic', 'C2S.Login', nil); return e, d`)
@@ -111,7 +112,7 @@ func TestTCPRequest_EncodeFail_CodecUnmapped(t *testing.T) {
 		t.Fatalf("不期望 error: %v", err)
 	}
 	vals := popReturns(L, 2)
-	requireErrTable(t, vals, 0, errcode.ErrEncodeFailed)
+	requireErrTable(t, vals, errcode.ErrEncodeFailed)
 	if vals[1] != lua.LNil {
 		t.Fatalf("encode 失败 data 应为 nil，实际 %v", vals[1])
 	}
@@ -122,7 +123,7 @@ func TestTCPRequest_EncodeFail_CodecUnmapped(t *testing.T) {
 func TestTCPRequest_EncodeFail_AdapterEncodeNil(t *testing.T) {
 	adp := &fakeAdapter{encodeBytes: nil, routeKey: "S2C.Login"} // EncodeTCP 返回 nil
 	resolver := &fakeResolver{adp: adp}
-	L := newTestState(t, context.Background(), &fakeNetSender{}, resolver)
+	L := newTestState(context.Background(), t, &fakeNetSender{}, resolver)
 	defer L.Close()
 
 	err := doNet(t, L, `local e, d = network.tcp_request('logic', 'C2S.Login', nil); return e, d`)
@@ -130,7 +131,7 @@ func TestTCPRequest_EncodeFail_AdapterEncodeNil(t *testing.T) {
 		t.Fatalf("不期望 error: %v", err)
 	}
 	vals := popReturns(L, 2)
-	requireErrTable(t, vals, 0, errcode.ErrEncodeFailed)
+	requireErrTable(t, vals, errcode.ErrEncodeFailed)
 	if vals[1] != lua.LNil {
 		t.Fatalf("encode 失败 data 应为 nil，实际 %v", vals[1])
 	}
@@ -143,7 +144,7 @@ func TestTCPRequest_EncodeFail_AdapterEncodeNil(t *testing.T) {
 func TestTCPRequest_EmptyService(t *testing.T) {
 	adp := &fakeAdapter{encodeBytes: []byte("pkt"), routeKey: "S2C.Login"}
 	resolver := &fakeResolver{adp: adp}
-	L := newTestState(t, context.Background(), &fakeNetSender{}, resolver)
+	L := newTestState(context.Background(), t, &fakeNetSender{}, resolver)
 	defer L.Close()
 
 	err := doNet(t, L, `return network.tcp_request('', 'C2S.Login', nil)`)
@@ -159,7 +160,7 @@ func TestTCPRequest_EmptyService(t *testing.T) {
 // pushResult(ErrEncodeFailed, nil)，直接返回（不进入 awaitYield）。
 func TestUDPRequest_EncodeFail_CodecUnmapped(t *testing.T) {
 	resolver := &fakeResolver{adp: nil}
-	L := newTestState(t, context.Background(), &fakeNetSender{}, resolver)
+	L := newTestState(context.Background(), t, &fakeNetSender{}, resolver)
 	defer L.Close()
 
 	err := doNet(t, L, `local e, d = network.udp_request('battle', '3:1', 'body'); return e, d`)
@@ -167,7 +168,7 @@ func TestUDPRequest_EncodeFail_CodecUnmapped(t *testing.T) {
 		t.Fatalf("不期望 error: %v", err)
 	}
 	vals := popReturns(L, 2)
-	requireErrTable(t, vals, 0, errcode.ErrEncodeFailed)
+	requireErrTable(t, vals, errcode.ErrEncodeFailed)
 	if vals[1] != lua.LNil {
 		t.Fatalf("encode 失败 data 应为 nil，实际 %v", vals[1])
 	}
@@ -178,7 +179,7 @@ func TestUDPRequest_EncodeFail_CodecUnmapped(t *testing.T) {
 func TestUDPRequest_EncodeFail_AdapterEncodeNil(t *testing.T) {
 	adp := &fakeAdapter{encodeBytes: nil, routeKey: "3:1"}
 	resolver := &fakeResolver{adp: adp}
-	L := newTestState(t, context.Background(), &fakeNetSender{}, resolver)
+	L := newTestState(context.Background(), t, &fakeNetSender{}, resolver)
 	defer L.Close()
 
 	err := doNet(t, L, `local e, d = network.udp_request('battle', '3:1', 'body'); return e, d`)
@@ -186,7 +187,7 @@ func TestUDPRequest_EncodeFail_AdapterEncodeNil(t *testing.T) {
 		t.Fatalf("不期望 error: %v", err)
 	}
 	vals := popReturns(L, 2)
-	requireErrTable(t, vals, 0, errcode.ErrEncodeFailed)
+	requireErrTable(t, vals, errcode.ErrEncodeFailed)
 }
 
 // ---------------------------------------------------------------------------
@@ -198,7 +199,7 @@ func TestTCPSend_Success(t *testing.T) {
 	adp := &fakeAdapter{encodeBytes: []byte("encoded"), routeKey: "C2S.Login"}
 	resolver := &fakeResolver{adp: adp}
 	ns := &fakeNetSender{}
-	L := newTestState(t, context.Background(), ns, resolver)
+	L := newTestState(context.Background(), t, ns, resolver)
 	defer L.Close()
 
 	err := doNet(t, L, `local e = network.tcp_send('logic', 'C2S.Login', nil); return e`)
@@ -221,7 +222,7 @@ func TestTCPSend_Success(t *testing.T) {
 func TestTCPSend_EncodeFail_ResolverNil(t *testing.T) {
 	// networkTCPSend 只要求 ctx.NetSender 非 nil（resolver 未在 guard 中），故 resolver nil
 	// 会让 buildPacket 返回 nil。
-	L := newTestState(t, context.Background(), &fakeNetSender{}, nil)
+	L := newTestState(context.Background(), t, &fakeNetSender{}, nil)
 	defer L.Close()
 
 	err := doNet(t, L, `local e = network.tcp_send('logic', 'C2S.Login', nil); return e`)
@@ -229,14 +230,14 @@ func TestTCPSend_EncodeFail_ResolverNil(t *testing.T) {
 		t.Fatalf("不期望 error: %v", err)
 	}
 	vals := popReturns(L, 1)
-	requireErrTable(t, vals, 0, errcode.ErrEncodeFailed)
+	requireErrTable(t, vals, errcode.ErrEncodeFailed)
 }
 
 // TestTCPSend_EncodeFail_AdapterEncodeNil EncodeTCP 返回 nil → pushErr(ErrEncodeFailed)。
 func TestTCPSend_EncodeFail_AdapterEncodeNil(t *testing.T) {
 	adp := &fakeAdapter{encodeBytes: nil, routeKey: "C2S.Login"}
 	resolver := &fakeResolver{adp: adp}
-	L := newTestState(t, context.Background(), &fakeNetSender{}, resolver)
+	L := newTestState(context.Background(), t, &fakeNetSender{}, resolver)
 	defer L.Close()
 
 	err := doNet(t, L, `local e = network.tcp_send('logic', 'C2S.Login', nil); return e`)
@@ -244,7 +245,7 @@ func TestTCPSend_EncodeFail_AdapterEncodeNil(t *testing.T) {
 		t.Fatalf("不期望 error: %v", err)
 	}
 	vals := popReturns(L, 1)
-	requireErrTable(t, vals, 0, errcode.ErrEncodeFailed)
+	requireErrTable(t, vals, errcode.ErrEncodeFailed)
 }
 
 // TestTCPSend_SendErr 发送层返回错误 → err table（从 *ActionError 提取）。
@@ -254,7 +255,7 @@ func TestTCPSend_SendErr(t *testing.T) {
 	ns := &fakeNetSender{
 		tcpSendErr: errcode.NewActionError(errcode.ErrConnNotFound, "conn-missing"),
 	}
-	L := newTestState(t, context.Background(), ns, resolver)
+	L := newTestState(context.Background(), t, ns, resolver)
 	defer L.Close()
 
 	err := doNet(t, L, `local e = network.tcp_send('logic', 'C2S.Login', nil); return e`)
@@ -262,7 +263,7 @@ func TestTCPSend_SendErr(t *testing.T) {
 		t.Fatalf("不期望 error: %v", err)
 	}
 	vals := popReturns(L, 1)
-	requireErrTable(t, vals, 0, errcode.ErrConnNotFound)
+	requireErrTable(t, vals, errcode.ErrConnNotFound)
 }
 
 // TestUDPSend_Success 编码+发送成功 → 压 lua.LNil。
@@ -270,7 +271,7 @@ func TestUDPSend_Success(t *testing.T) {
 	adp := &fakeAdapter{encodeBytes: []byte("udpkt"), routeKey: "3:1"}
 	resolver := &fakeResolver{adp: adp}
 	ns := &fakeNetSender{}
-	L := newTestState(t, context.Background(), ns, resolver)
+	L := newTestState(context.Background(), t, ns, resolver)
 	defer L.Close()
 
 	err := doNet(t, L, `local e = network.udp_send('battle', '3:1', 'body'); return e`)
@@ -290,7 +291,7 @@ func TestUDPSend_Success(t *testing.T) {
 // pushErr(ErrEncodeFailed)。
 func TestUDPSend_EncodeFail_CodecUnmapped(t *testing.T) {
 	resolver := &fakeResolver{adp: nil}
-	L := newTestState(t, context.Background(), &fakeNetSender{}, resolver)
+	L := newTestState(context.Background(), t, &fakeNetSender{}, resolver)
 	defer L.Close()
 
 	err := doNet(t, L, `local e = network.udp_send('battle', '3:1', 'body'); return e`)
@@ -298,7 +299,7 @@ func TestUDPSend_EncodeFail_CodecUnmapped(t *testing.T) {
 		t.Fatalf("不期望 error: %v", err)
 	}
 	vals := popReturns(L, 1)
-	requireErrTable(t, vals, 0, errcode.ErrEncodeFailed)
+	requireErrTable(t, vals, errcode.ErrEncodeFailed)
 }
 
 // TestUDPSend_SendErr 发送层错误 → err table。
@@ -308,7 +309,7 @@ func TestUDPSend_SendErr(t *testing.T) {
 	ns := &fakeNetSender{
 		udpSendErr: errcode.NewActionError(errcode.ErrSendFailed, "write-fail"),
 	}
-	L := newTestState(t, context.Background(), ns, resolver)
+	L := newTestState(context.Background(), t, ns, resolver)
 	defer L.Close()
 
 	err := doNet(t, L, `local e = network.udp_send('battle', '3:1', 'body'); return e`)
@@ -316,7 +317,7 @@ func TestUDPSend_SendErr(t *testing.T) {
 		t.Fatalf("不期望 error: %v", err)
 	}
 	vals := popReturns(L, 1)
-	requireErrTable(t, vals, 0, errcode.ErrSendFailed)
+	requireErrTable(t, vals, errcode.ErrSendFailed)
 }
 
 // ---------------------------------------------------------------------------
@@ -326,7 +327,7 @@ func TestUDPSend_SendErr(t *testing.T) {
 
 func TestTCPListenRejectsRemovedFifthArgument(t *testing.T) {
 	resolver := &fakeResolver{adp: &fakeAdapter{routeKey: "3:1"}}
-	L := newTestState(t, context.Background(), &fakeNetSender{}, resolver)
+	L := newTestState(context.Background(), t, &fakeNetSender{}, resolver)
 	defer L.Close()
 
 	err := doNet(t, L, `return network.tcp_listen('logic', '3:1', '', 10, 100)`)
@@ -343,7 +344,7 @@ func TestTryTCPListen_QueueEmpty(t *testing.T) {
 	adp := &fakeAdapter{routeKey: "3:1"}
 	resolver := &fakeResolver{adp: adp}
 	ns := &fakeNetSender{listenResp: nil}
-	L := newTestState(t, context.Background(), ns, resolver)
+	L := newTestState(context.Background(), t, ns, resolver)
 	defer L.Close()
 
 	err := doNet(t, L, `local code, data = network.try_tcp_listen('logic', '3:1'); return code, data`)
@@ -365,7 +366,7 @@ func TestTryTCPListen_QueueEmpty(t *testing.T) {
 // TestTryTCPListen_CodecUnmapped resolver.Resolve 返回 nil → pushResult(ErrEncodeFailed, nil)。
 func TestTryTCPListen_CodecUnmapped(t *testing.T) {
 	resolver := &fakeResolver{adp: nil}
-	L := newTestState(t, context.Background(), &fakeNetSender{}, resolver)
+	L := newTestState(context.Background(), t, &fakeNetSender{}, resolver)
 	defer L.Close()
 
 	err := doNet(t, L, `local code, data = network.try_tcp_listen('logic', '3:1'); return code, data`)
@@ -373,7 +374,7 @@ func TestTryTCPListen_CodecUnmapped(t *testing.T) {
 		t.Fatalf("不期望 error: %v", err)
 	}
 	vals := popReturns(L, 2)
-	requireErrTable(t, vals, 0, errcode.ErrEncodeFailed)
+	requireErrTable(t, vals, errcode.ErrEncodeFailed)
 }
 
 // TestTryTCPListen_HeaderErr 命中消息但 HeaderErr 非零 → (err table, body)。
@@ -381,7 +382,7 @@ func TestTryTCPListen_HeaderErr(t *testing.T) {
 	adp := &fakeAdapter{routeKey: "3:1"}
 	resolver := &fakeResolver{adp: adp}
 	ns := &fakeNetSender{listenResp: &engine.NetExchange{HeaderErr: 1001, Body: []byte("e"), RecvWireBytes: 5}}
-	L := newTestState(t, context.Background(), ns, resolver)
+	L := newTestState(context.Background(), t, ns, resolver)
 	defer L.Close()
 
 	err := doNet(t, L, `local code, data = network.try_tcp_listen('logic', '3:1'); return code, data`)
@@ -406,7 +407,7 @@ func TestTryTCPListen_NormalMessage(t *testing.T) {
 	adp := &fakeAdapter{routeKey: "3:1"}
 	resolver := &fakeResolver{adp: adp}
 	ns := &fakeNetSender{listenResp: &engine.NetExchange{Body: []byte("hello"), RecvWireBytes: 5}}
-	L := newTestState(t, context.Background(), ns, resolver)
+	L := newTestState(context.Background(), t, ns, resolver)
 	defer L.Close()
 
 	err := doNet(t, L, `local code, data = network.try_tcp_listen('logic', '3:1'); return code, data`)
@@ -427,7 +428,7 @@ func TestTryUDPListen_QueueEmpty(t *testing.T) {
 	adp := &fakeAdapter{routeKey: "3:1"}
 	resolver := &fakeResolver{adp: adp}
 	ns := &fakeNetSender{listenResp: nil}
-	L := newTestState(t, context.Background(), ns, resolver)
+	L := newTestState(context.Background(), t, ns, resolver)
 	defer L.Close()
 
 	err := doNet(t, L, `local code, data = network.try_udp_listen('battle', '3:1'); return code, data`)
@@ -446,7 +447,7 @@ func TestTryUDPListen_QueueEmpty(t *testing.T) {
 // TestTryUDPListen_CodecUnmapped UDP 对称：codec 未映射 → err table。
 func TestTryUDPListen_CodecUnmapped(t *testing.T) {
 	resolver := &fakeResolver{adp: nil}
-	L := newTestState(t, context.Background(), &fakeNetSender{}, resolver)
+	L := newTestState(context.Background(), t, &fakeNetSender{}, resolver)
 	defer L.Close()
 
 	err := doNet(t, L, `local code, data = network.try_udp_listen('battle', '3:1'); return code, data`)
@@ -454,7 +455,7 @@ func TestTryUDPListen_CodecUnmapped(t *testing.T) {
 		t.Fatalf("不期望 error: %v", err)
 	}
 	vals := popReturns(L, 2)
-	requireErrTable(t, vals, 0, errcode.ErrEncodeFailed)
+	requireErrTable(t, vals, errcode.ErrEncodeFailed)
 }
 
 // ---------------------------------------------------------------------------

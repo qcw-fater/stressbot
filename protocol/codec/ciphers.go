@@ -83,9 +83,6 @@ func encryptXor(data, key []byte) {
 	}
 }
 
-// decryptXor 与 encryptXor 相同（XOR 对称）。
-func decryptXor(data, key []byte) { encryptXor(data, key) }
-
 // errInvalidPadding PKCS#7 填充校验失败时返回的错误。
 var errInvalidPadding = errors.New("invalid pkcs7 padding")
 
@@ -192,19 +189,19 @@ func uint32sToBytes(v []uint32) []byte {
 // noneCipher 直通：前缀明文 + data[offset:] 原样返回，len(out)==len(data)。
 type noneCipher struct{}
 
-func (noneCipher) Encrypt(data, key []byte, offset int, params map[string]any) ([]byte, error) {
+func (noneCipher) Encrypt(data, _ []byte, _ int, _ map[string]any) ([]byte, error) {
 	out := make([]byte, len(data))
 	copy(out, data)
 	return out, nil
 }
 
-func (noneCipher) Decrypt(data, key []byte, offset int, params map[string]any) ([]byte, error) {
+func (noneCipher) Decrypt(data, _ []byte, _ int, _ map[string]any) ([]byte, error) {
 	out := make([]byte, len(data))
 	copy(out, data)
 	return out, nil
 }
 
-func (noneCipher) DecryptInPlace(data, key []byte, offset int, params map[string]any) error {
+func (noneCipher) DecryptInPlace(_ []byte, _ []byte, _ int, _ map[string]any) error {
 	return nil // 直通：原地即恒等
 }
 
@@ -222,15 +219,15 @@ func (xorCipher) apply(data, key []byte, offset int) []byte {
 	return out
 }
 
-func (c xorCipher) Encrypt(data, key []byte, offset int, params map[string]any) ([]byte, error) {
+func (c xorCipher) Encrypt(data, key []byte, offset int, _ map[string]any) ([]byte, error) {
 	return c.apply(data, key, offset), nil
 }
 
-func (c xorCipher) Decrypt(data, key []byte, offset int, params map[string]any) ([]byte, error) {
+func (c xorCipher) Decrypt(data, key []byte, offset int, _ map[string]any) ([]byte, error) {
 	return c.apply(data, key, offset), nil
 }
 
-func (c xorCipher) DecryptInPlace(data, key []byte, offset int, params map[string]any) error {
+func (c xorCipher) DecryptInPlace(data, key []byte, offset int, _ map[string]any) error {
 	if len(key) == 0 || len(data) == 0 {
 		return nil
 	}
@@ -323,15 +320,15 @@ func (rc4Cipher) apply(data, key []byte, offset int) ([]byte, error) {
 	return out, nil
 }
 
-func (c rc4Cipher) Encrypt(data, key []byte, offset int, params map[string]any) ([]byte, error) {
+func (c rc4Cipher) Encrypt(data, key []byte, offset int, _ map[string]any) ([]byte, error) {
 	return c.apply(data, key, offset)
 }
 
-func (c rc4Cipher) Decrypt(data, key []byte, offset int, params map[string]any) ([]byte, error) {
+func (c rc4Cipher) Decrypt(data, key []byte, offset int, _ map[string]any) ([]byte, error) {
 	return c.apply(data, key, offset)
 }
 
-func (c rc4Cipher) DecryptInPlace(data, key []byte, offset int, params map[string]any) error {
+func (c rc4Cipher) DecryptInPlace(data, key []byte, offset int, _ map[string]any) error {
 	if len(key) == 0 || len(data) == 0 {
 		return nil
 	}
@@ -354,7 +351,7 @@ func (c rc4Cipher) DecryptInPlace(data, key []byte, offset int, params map[strin
 //   - Decrypt 对 data[offset:] 做反向；len(out) ≤ len(data)（去填充后）。
 type aesEcbCipher struct{}
 
-func (aesEcbCipher) Encrypt(data, key []byte, offset int, params map[string]any) ([]byte, error) {
+func (aesEcbCipher) Encrypt(data, key []byte, offset int, _ map[string]any) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -369,7 +366,7 @@ func (aesEcbCipher) Encrypt(data, key []byte, offset int, params map[string]any)
 	return out, nil
 }
 
-func (aesEcbCipher) Decrypt(data, key []byte, offset int, params map[string]any) ([]byte, error) {
+func (aesEcbCipher) Decrypt(data, key []byte, offset int, _ map[string]any) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -525,7 +522,7 @@ func (xxteaCipher) keyWords(key []byte) [4]uint32 {
 	return k
 }
 
-func (c xxteaCipher) Encrypt(data, key []byte, offset int, params map[string]any) ([]byte, error) {
+func (c xxteaCipher) Encrypt(data, key []byte, offset int, _ map[string]any) ([]byte, error) {
 	// keyWords 对不足 16 字节的 key 会静默零填充 → 加解密结果错误却不报错。
 	// 显式校验，把"静默错密钥"变成可定位的错误。
 	if len(key) < xxteaKeyLen {
@@ -547,7 +544,7 @@ func (c xxteaCipher) Encrypt(data, key []byte, offset int, params map[string]any
 	return out, nil
 }
 
-func (c xxteaCipher) Decrypt(data, key []byte, offset int, params map[string]any) ([]byte, error) {
+func (c xxteaCipher) Decrypt(data, key []byte, offset int, _ map[string]any) ([]byte, error) {
 	if len(key) < xxteaKeyLen {
 		return nil, fmt.Errorf("xxtea key 长度非法：需 %d 字节，实际 %d", xxteaKeyLen, len(key))
 	}

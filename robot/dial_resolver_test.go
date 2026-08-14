@@ -96,16 +96,16 @@ func TestConnectTCP_ResolverHit_ResolveNonNil(t *testing.T) {
 // （fail-loud 路径在 codec 方法被调用之前即返回；resolver 命中路径只验证 Resolve 非 nil）。
 type fakeAdapter struct{}
 
-func (fakeAdapter) HeaderSize() int                                    { return 12 }
-func (fakeAdapter) BodyLength([]byte) int                              { return 0 }
-func (fakeAdapter) EncodeTCP(route any, body, secretKey []byte) []byte { return nil }
-func (fakeAdapter) EncodeUDP(route any, body, secretKey []byte) []byte { return nil }
-func (fakeAdapter) DecodeTCP(data, secretKey []byte) (string, []byte, uint64) {
+func (fakeAdapter) HeaderSize() int                     { return 12 }
+func (fakeAdapter) BodyLength([]byte) int               { return 0 }
+func (fakeAdapter) EncodeTCP(_ any, _, _ []byte) []byte { return nil }
+func (fakeAdapter) EncodeUDP(_ any, _, _ []byte) []byte { return nil }
+func (fakeAdapter) DecodeTCP(_, _ []byte) (string, []byte, uint64) {
 	return "", nil, 0
 }
-func (fakeAdapter) DecodeUDP(data, secretKey []byte) (string, []byte, uint64) {
+func (fakeAdapter) DecodeUDP(_, _ []byte) (string, []byte, uint64) {
 	return "", nil, 0
 }
-func (fakeAdapter) ExpectedRouteKey(route any) string { return "" }
-func (fakeAdapter) DescribeError(uint64) string       { return "" }
-func (fakeAdapter) Close()                            {}
+func (fakeAdapter) ExpectedRouteKey(_ any) string { return "" }
+func (fakeAdapter) DescribeError(uint64) string   { return "" }
+func (fakeAdapter) Close()                        {}

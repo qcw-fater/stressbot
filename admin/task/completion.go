@@ -13,11 +13,11 @@ import (
 )
 
 type CompletionService struct {
-	tasks  *TaskStore
-	agents *agent.AgentRegistry
+	tasks  *Store
+	agents *agent.Registry
 }
 
-func NewCompletionService(tasks *TaskStore, agents *agent.AgentRegistry) *CompletionService {
+func NewCompletionService(tasks *Store, agents *agent.Registry) *CompletionService {
 	return &CompletionService{tasks: tasks, agents: agents}
 }
 
@@ -27,8 +27,8 @@ func (e *PermanentReportError) Error() string { return e.Err.Error() }
 func (e *PermanentReportError) Unwrap() error { return e.Err }
 
 func IsPermanentReportError(err error) bool {
-	var target *PermanentReportError
-	return errors.As(err, &target) || errors.Is(err, apierror.ErrTaskNotFound)
+	_, ok := errors.AsType[*PermanentReportError](err)
+	return ok || errors.Is(err, apierror.ErrTaskNotFound)
 }
 
 func (s *CompletionService) OwnsActiveTask(agentID, taskID string) bool {
@@ -46,10 +46,10 @@ func (s *CompletionService) OwnsActiveTask(agentID, taskID string) bool {
 	return ok
 }
 
-func (s *CompletionService) Accept(report TaskCompletionReport) error {
+func (s *CompletionService) Accept(report CompletionReport) error {
 	s.agents.Touch(report.AgentID, "")
 	isFinal := report.StageIndex <= 0
-	var transition TaskState
+	var transition State
 	memberValid := false
 	err := s.tasks.Update(report.TaskID, func(task *Task) {
 		expected := ExpectedAgents(task)
@@ -68,7 +68,7 @@ func (s *CompletionService) Accept(report TaskCompletionReport) error {
 			return
 		}
 		if task.Reports == nil {
-			task.Reports = make(map[string]TaskCompletionReport)
+			task.Reports = make(map[string]CompletionReport)
 		}
 		task.Reports[report.AgentID] = report
 		completed := 0
@@ -79,7 +79,7 @@ func (s *CompletionService) Accept(report TaskCompletionReport) error {
 		}
 		if len(expected) > 0 && completed >= len(expected) {
 			task.CleanupSummary = AggregateCleanup(task)
-			if task.State == TaskRunning || task.State == TaskStopping {
+			if task.State == Running || task.State == Stopping {
 				transition = task.State
 			}
 		}
@@ -96,17 +96,18 @@ func (s *CompletionService) Accept(report TaskCompletionReport) error {
 				zap.String("taskID", report.TaskID), zap.String("agentID", report.AgentID), zap.Error(err))
 		}
 	}
-	if transition == TaskRunning {
-		_, err = s.tasks.Transition(report.TaskID, TaskRunning, TaskStopped)
-	} else if transition == TaskStopping {
-		_, err = s.tasks.Transition(report.TaskID, TaskStopping, TaskStopped)
+	switch transition {
+	case Running:
+		_, err = s.tasks.Transition(report.TaskID, Running, Stopped)
+	case Stopping:
+		_, err = s.tasks.Transition(report.TaskID, Stopping, Stopped)
 	}
 	return err
 }
 
 func (s *CompletionService) FinishIfFullyReported(taskID string) {
 	task, ok := s.tasks.Get(taskID)
-	if !ok || task.State != TaskRunning {
+	if !ok || task.State != Running {
 		return
 	}
 	expected := ExpectedAgents(task)
@@ -119,7 +120,7 @@ func (s *CompletionService) FinishIfFullyReported(taskID string) {
 		}
 	}
 	_ = s.tasks.Update(taskID, func(current *Task) { current.CleanupSummary = AggregateCleanup(current) })
-	_, _ = s.tasks.Transition(taskID, TaskRunning, TaskStopped)
+	_, _ = s.tasks.Transition(taskID, Running, Stopped)
 }
 
 func AggregateCleanup(task *Task) *robot.CleanupStatus {

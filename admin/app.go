@@ -37,14 +37,14 @@ import (
 	"google.golang.org/grpc"
 )
 
-// AdminServer 同时承载浏览器管理面与 Admin-Agent gRPC 控制面。
-type AdminServer struct {
+// Server 同时承载浏览器管理面与 Admin-Agent gRPC 控制面。
+type Server struct {
 	cfg Config
 
-	tasks           *admintask.TaskStore
-	agents          *agent.AgentRegistry
+	tasks           *admintask.Store
+	agents          *agent.Registry
 	aggregator      *metrics.Aggregator
-	metricsWindows  *metrics.MetricsWindowStore
+	metricsWindows  *metrics.WindowStore
 	assigner        *admintask.Assigner
 	bundles         *bundle.Store
 	sessions        *grpcapi.SessionRegistry
@@ -61,7 +61,7 @@ type AdminServer struct {
 	listenTemplates *template.ListenTemplateStore // 可选（共享监听模板库，依赖全局 MySQL）
 	sampler         *metrics.Sampler              // 可选
 
-	db *sql.DB // 全局共享 MySQL 连接池（HistoryStore 复用，由 AdminServer 统一 Close）
+	db *sql.DB // 全局共享 MySQL 连接池（HistoryStore 复用，由 Server 统一 Close）
 
 	sharedCleanup *admintask.SharedCleanup // 共享状态待清理队列（可选）
 
@@ -75,14 +75,15 @@ type AdminServer struct {
 	shutdownPool  func()
 }
 
-func NewAdminServer(cfg Config) (*AdminServer, error) {
+// NewServer 创建并装配 Admin 服务器。
+func NewServer(cfg Config) (*Server, error) {
 	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
-	s := &AdminServer{
+	s := &Server{
 		cfg:           cfg,
 		runtimeCtx:    runtimeCtx,
 		runtimeCancel: runtimeCancel,
 		stopCh:        make(chan struct{}),
-		shutdownPool:  func() { workpool.GetWorkPool().Shutdown() },
+		shutdownPool:  func() { workpool.Default().Shutdown() },
 	}
 	assembled := false
 	defer func() {
@@ -113,8 +114,8 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 			zap.String("database", cfg.MySQL.Database))
 	}
 
-	// 2. TaskStore
-	tasks, err := admintask.NewTaskStore("data")
+	// 2. 任务存储
+	tasks, err := admintask.NewStore("data")
 	if err != nil {
 		return nil, fmt.Errorf("init task store: %w", err)
 	}
@@ -139,7 +140,7 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 	s.completion = admintask.NewCompletionService(s.tasks, s.agents)
 
 	// 4. MetricsAggregator
-	s.metricsWindows = metrics.NewMetricsWindowStore(time.Now)
+	s.metricsWindows = metrics.NewWindowStore(time.Now)
 	s.aggregator = metrics.NewAggregator(s.agents, s.metricsWindows, time.Now)
 	s.metricsAccept = metrics.NewAcceptanceService(s.agents, s.tasks, s.metricsWindows)
 	s.metricsIngestor = metrics.NewIngestor(
@@ -182,7 +183,7 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 	if cfg.RedisEnabled() {
 		resolved, rerr := cfg.Redis.Resolve()
 		if rerr != nil {
-			return nil, fmt.Errorf("Redis 共享状态配置无效: %w", rerr)
+			return nil, fmt.Errorf("redis 共享状态配置无效: %w", rerr)
 		}
 		// 启动时 PING 验证 Redis 连通性（不持久占用连接）
 		pingStore, perr := shared.NewRedisStore(resolved, "admin-ping")
@@ -204,9 +205,9 @@ func NewAdminServer(cfg Config) (*AdminServer, error) {
 }
 
 // Run 启动 Admin 服务器（阻塞）。
-func (s *AdminServer) Run(ctx context.Context) error {
+func (s *Server) Run(ctx context.Context) error {
 	// 初始化协程池
-	workpool.InitWorkPool()
+	workpool.Init()
 
 	// 启动心跳检测
 	runtimeCtx := s.runtimeCtx
@@ -262,14 +263,14 @@ func (s *AdminServer) Run(ctx context.Context) error {
 }
 
 // Shutdown 优雅关闭。
-func (s *AdminServer) Shutdown(ctx context.Context) error {
+func (s *Server) Shutdown(ctx context.Context) error {
 	s.shutdownOnce.Do(func() {
 		s.shutdownErr = s.shutdown(ctx)
 	})
 	return s.shutdownErr
 }
 
-func (s *AdminServer) shutdown(ctx context.Context) error {
+func (s *Server) shutdown(ctx context.Context) error {
 	// 先停止所有由 Run 启动的长生命周期任务，再等待全局工作池。
 	// 若把 cancel 留在 Run 的 defer 中，Shutdown 会先等待指标 worker，
 	// 而 worker 又只能在 Shutdown 返回后收到 cancel，形成关闭死锁。
@@ -289,7 +290,7 @@ func (s *AdminServer) shutdown(ctx context.Context) error {
 	if s.history != nil {
 		shutdownErr = errors.Join(shutdownErr, s.history.Close())
 	}
-	// 全局共享 MySQL 连接池：HistoryStore 不再 Close，由 AdminServer 统一关闭。
+	// 全局共享 MySQL 连接池：HistoryStore 不再 Close，由 Server 统一关闭。
 	if s.db != nil {
 		if err := s.db.Close(); err != nil {
 			shutdownErr = errors.Join(shutdownErr, err)
@@ -298,7 +299,7 @@ func (s *AdminServer) shutdown(ctx context.Context) error {
 	return shutdownErr
 }
 
-func (s *AdminServer) onTaskTerminal(task *admintask.Task) {
+func (s *Server) onTaskTerminal(task *admintask.Task) {
 	// 停止 Sampler
 	if s.sampler != nil {
 		s.sampler.Stop(task.ID)
@@ -316,7 +317,7 @@ func (s *AdminServer) onTaskTerminal(task *admintask.Task) {
 		return
 	}
 	taskID := task.ID
-	workpool.GetWorkPool().Go(func() {
+	workpool.Default().Go(func() {
 		if s.metricsWindows != nil {
 			defer s.metricsWindows.MarkTaskTerminal(taskID)
 		}
@@ -351,7 +352,7 @@ func (s *AdminServer) onTaskTerminal(task *admintask.Task) {
 // cleanupSharedState 在任务终态时统一清理该任务的共享状态命名空间。
 // 仅当任务使用了共享状态且服务器配置了 Redis 时执行。清理登记到待清理队列：
 // 立即尝试一次，失败则持久化并由定时任务/重启后重试，避免无 TTL 的 key 永久泄漏。
-func (s *AdminServer) cleanupSharedState(task *admintask.Task) {
+func (s *Server) cleanupSharedState(task *admintask.Task) {
 	if task == nil || !task.SharedUsed || !s.cfg.RedisEnabled() {
 		return
 	}
@@ -397,7 +398,7 @@ func assignedAgentIDs(task *admintask.Task) []string {
 	return ids
 }
 
-func (s *AdminServer) onAgentStatusChange(agentID string, from, to agent.AgentStatus) {
+func (s *Server) onAgentStatusChange(agentID string, from, to agent.Status) {
 	task := s.tasks.ActiveTask()
 	if task == nil {
 		return
@@ -418,15 +419,18 @@ func (s *AdminServer) onAgentStatusChange(agentID string, from, to agent.AgentSt
 	}
 
 	// 节点恢复（offline → idle/busy）：记录 reconnected 事件
-	if from == agent.AgentOffline && (to == agent.AgentIdle || to == agent.AgentBusy) {
-		s.tasks.Update(task.ID, func(t *admintask.Task) {
+	if from == agent.Offline && (to == agent.Idle || to == agent.Busy) {
+		if err := s.tasks.Update(task.ID, func(t *admintask.Task) {
 			t.AgentEvents = append(t.AgentEvents, admintask.AgentEvent{
 				AgentID:   agentID,
 				AgentName: agentName,
 				Type:      "reconnected",
 				Timestamp: time.Now(),
 			})
-		})
+		}); err != nil {
+			stresslog.Warn("[ADMIN] 记录节点恢复事件失败", zap.String("taskID", task.ID), zap.Error(err))
+			return
+		}
 		stresslog.Info("[ADMIN] 分配节点恢复",
 			zap.String("taskID", task.ID),
 			zap.String("agentID", agentID),
@@ -435,11 +439,11 @@ func (s *AdminServer) onAgentStatusChange(agentID string, from, to agent.AgentSt
 	}
 
 	// 节点离线：记录事件
-	if to != agent.AgentOffline {
+	if to != agent.Offline {
 		return
 	}
 
-	s.tasks.Update(task.ID, func(t *admintask.Task) {
+	if err := s.tasks.Update(task.ID, func(t *admintask.Task) {
 		t.AgentEvents = append(t.AgentEvents, admintask.AgentEvent{
 			AgentID:   agentID,
 			AgentName: agentName,
@@ -447,7 +451,10 @@ func (s *AdminServer) onAgentStatusChange(agentID string, from, to agent.AgentSt
 			Timestamp: time.Now(),
 			Detail:    "心跳超时",
 		})
-	})
+	}); err != nil {
+		stresslog.Warn("[ADMIN] 记录节点离线事件失败", zap.String("taskID", task.ID), zap.Error(err))
+		return
+	}
 
 	stresslog.Warn("[ADMIN] 分配节点离线",
 		zap.String("taskID", task.ID),
@@ -455,15 +462,15 @@ func (s *AdminServer) onAgentStatusChange(agentID string, from, to agent.AgentSt
 		zap.String("agentName", agentName))
 
 	// 任务正在 stopping 时节点离线 → 立刻合成 report
-	if task.State == admintask.TaskStopping {
+	if task.State == admintask.Stopping {
 		complete := false
-		s.tasks.Update(task.ID, func(t *admintask.Task) {
+		if err := s.tasks.Update(task.ID, func(t *admintask.Task) {
 			if t.Reports == nil {
-				t.Reports = make(map[string]admintask.TaskCompletionReport)
+				t.Reports = make(map[string]admintask.CompletionReport)
 			}
 			if _, exists := t.Reports[agentID]; !exists {
 				cleanup := robot.UnknownCleanupStatus(robot.CleanupReasonOfflineSynthetic, "节点离线，清理状态未知")
-				t.Reports[agentID] = admintask.TaskCompletionReport{
+				t.Reports[agentID] = admintask.CompletionReport{
 					AgentID:       agentID,
 					TaskID:        task.ID,
 					Result:        admintask.ResultFailed,
@@ -476,9 +483,12 @@ func (s *AdminServer) onAgentStatusChange(agentID string, from, to agent.AgentSt
 				t.CleanupSummary = admintask.AggregateCleanup(t)
 				complete = true
 			}
-		})
+		}); err != nil {
+			stresslog.Warn("[ADMIN] 合成离线节点报告失败", zap.String("taskID", task.ID), zap.Error(err))
+			return
+		}
 		if complete {
-			if _, err := s.tasks.Transition(task.ID, admintask.TaskStopping, admintask.TaskStopped); err != nil {
+			if _, err := s.tasks.Transition(task.ID, admintask.Stopping, admintask.Stopped); err != nil {
 				stresslog.Warn("[ADMIN] 状态转换失败", zap.String("taskID", task.ID), zap.Error(err))
 			}
 		}
@@ -489,7 +499,7 @@ func (s *AdminServer) onAgentStatusChange(agentID string, from, to agent.AgentSt
 	s.checkAndStopIfAllLost(task.ID)
 }
 
-func (s *AdminServer) onAgentRestart(agentID, lostTaskID string) {
+func (s *Server) onAgentRestart(agentID, lostTaskID string) {
 	task := s.tasks.ActiveTask()
 	if task == nil || task.ID != lostTaskID {
 		return
@@ -498,16 +508,19 @@ func (s *AdminServer) onAgentRestart(agentID, lostTaskID string) {
 	if !ok {
 		return
 	}
-	_ = s.tasks.Update(task.ID, func(t *admintask.Task) {
+	if err := s.tasks.Update(task.ID, func(t *admintask.Task) {
 		t.AgentEvents = append(t.AgentEvents, admintask.AgentEvent{AgentID: agentID, AgentName: assignment.AgentName, Type: "restarted", Timestamp: time.Now(), Detail: "节点进程实例已变化，原任务已丢失"})
 		if t.Reports == nil {
-			t.Reports = make(map[string]admintask.TaskCompletionReport)
+			t.Reports = make(map[string]admintask.CompletionReport)
 		}
 		if _, exists := t.Reports[agentID]; !exists {
 			cleanup := robot.UnknownCleanupStatus(robot.CleanupReasonOfflineSynthetic, "节点进程重启，清理状态未知")
-			t.Reports[agentID] = admintask.TaskCompletionReport{AgentID: agentID, TaskID: t.ID, Result: admintask.ResultFailed, ErrorMsg: "节点进程重启，任务已丢失", FinishedAt: time.Now(), CleanupStatus: &cleanup}
+			t.Reports[agentID] = admintask.CompletionReport{AgentID: agentID, TaskID: t.ID, Result: admintask.ResultFailed, ErrorMsg: "节点进程重启，任务已丢失", FinishedAt: time.Now(), CleanupStatus: &cleanup}
 		}
-	})
+	}); err != nil {
+		stresslog.Warn("[ADMIN] 记录节点重启报告失败", zap.String("taskID", task.ID), zap.Error(err))
+		return
+	}
 	stresslog.Warn("[ADMIN] 节点进程重启，任务在该节点已丢失", zap.String("taskID", task.ID), zap.String("agentID", agentID), zap.String("agentName", assignment.AgentName))
 	s.checkAndStopIfAllLost(task.ID)
 }
@@ -523,14 +536,14 @@ func taskExpectedAssignment(task *admintask.Task, agentID string) (admintask.Ass
 
 // synthesizeOfflineReports 为已离线且未上报的分配节点合成 stopped report。
 // 返回 true 表示所有分配节点都已有 report（可以立刻转 stopped）。
-func (s *AdminServer) synthesizeOfflineReports(taskID string) bool {
+func (s *Server) synthesizeOfflineReports(taskID string) bool {
 	if _, ok := s.tasks.Get(taskID); !ok {
 		return false
 	}
 	allReported := true
-	s.tasks.Update(taskID, func(t *admintask.Task) {
+	if err := s.tasks.Update(taskID, func(t *admintask.Task) {
 		if t.Reports == nil {
-			t.Reports = make(map[string]admintask.TaskCompletionReport)
+			t.Reports = make(map[string]admintask.CompletionReport)
 		}
 		targets := t.SucceededAgents
 		if len(targets) == 0 {
@@ -544,9 +557,9 @@ func (s *AdminServer) synthesizeOfflineReports(taskID string) bool {
 				continue
 			}
 			node, nodeOk := s.agents.Get(agentID)
-			if !nodeOk || node.Status == agent.AgentOffline {
+			if !nodeOk || node.Status == agent.Offline {
 				cleanup := robot.UnknownCleanupStatus(robot.CleanupReasonOfflineSynthetic, "节点离线，未上报清理结果")
-				t.Reports[agentID] = admintask.TaskCompletionReport{
+				t.Reports[agentID] = admintask.CompletionReport{
 					AgentID:       agentID,
 					TaskID:        taskID,
 					Result:        admintask.ResultStopped,
@@ -573,7 +586,10 @@ func (s *AdminServer) synthesizeOfflineReports(taskID string) bool {
 		if allReported {
 			t.CleanupSummary = admintask.AggregateCleanup(t)
 		}
-	})
+	}); err != nil {
+		stresslog.Warn("[ADMIN] 合成离线节点报告失败", zap.String("taskID", taskID), zap.Error(err))
+		return false
+	}
 	return allReported
 }
 
@@ -585,20 +601,20 @@ const stopWaitTimeout = 60 * time.Second
 
 // startStopTimeout 启动停止超时安全网。
 // stopWaitTimeout 后如果任务仍在 stopping，为剩余未上报节点合成 report 并转 stopped。
-func (s *AdminServer) startStopTimeout(taskID string) {
-	workpool.GetWorkPool().Go(func() {
+func (s *Server) startStopTimeout(taskID string) {
+	workpool.Default().Go(func() {
 		time.Sleep(stopWaitTimeout)
 		task, ok := s.tasks.Get(taskID)
-		if !ok || task.State != admintask.TaskStopping {
+		if !ok || task.State != admintask.Stopping {
 			return
 		}
 		stresslog.Warn("[ADMIN] 停止超时，合成未上报节点的 report",
 			zap.String("taskID", taskID),
 			zap.Int("reported", len(task.Reports)),
 			zap.Int("total", len(task.SucceededAgents)))
-		s.tasks.Update(taskID, func(t *admintask.Task) {
+		if err := s.tasks.Update(taskID, func(t *admintask.Task) {
 			if t.Reports == nil {
-				t.Reports = make(map[string]admintask.TaskCompletionReport)
+				t.Reports = make(map[string]admintask.CompletionReport)
 			}
 			targets := t.SucceededAgents
 			if len(targets) == 0 {
@@ -610,7 +626,7 @@ func (s *AdminServer) startStopTimeout(taskID string) {
 			for _, agentID := range targets {
 				if _, exists := t.Reports[agentID]; !exists {
 					cleanup := robot.UnknownCleanupStatus(robot.CleanupReasonStopWaitTimeout, "停止等待超时，节点未响应，清理状态未知")
-					t.Reports[agentID] = admintask.TaskCompletionReport{
+					t.Reports[agentID] = admintask.CompletionReport{
 						AgentID:       agentID,
 						TaskID:        taskID,
 						Result:        admintask.ResultStopped,
@@ -621,8 +637,11 @@ func (s *AdminServer) startStopTimeout(taskID string) {
 				}
 			}
 			t.CleanupSummary = admintask.AggregateCleanup(t)
-		})
-		if _, err := s.tasks.Transition(taskID, admintask.TaskStopping, admintask.TaskStopped); err != nil {
+		}); err != nil {
+			stresslog.Warn("[ADMIN] 合成停止超时报告失败", zap.String("taskID", taskID), zap.Error(err))
+			return
+		}
+		if _, err := s.tasks.Transition(taskID, admintask.Stopping, admintask.Stopped); err != nil {
 			stresslog.Warn("[ADMIN] 状态转换失败", zap.String("taskID", taskID), zap.Error(err))
 		}
 	})
@@ -632,7 +651,7 @@ func (s *AdminServer) startStopTimeout(taskID string) {
 // 是 → 调用 autoStopTask 收尾；否则不动作。
 //
 // 用户需求 §3.2：单节点丢失不停止任务，全部节点丢失才停止。
-func (s *AdminServer) checkAndStopIfAllLost(taskID string) {
+func (s *Server) checkAndStopIfAllLost(taskID string) {
 	task, ok := s.tasks.Get(taskID)
 	if !ok || !admintask.IsActiveState(task.State) {
 		return
@@ -650,7 +669,7 @@ func (s *AdminServer) checkAndStopIfAllLost(taskID string) {
 			continue
 		}
 		node, nodeOk := s.agents.Get(agentID)
-		if nodeOk && node.Status != agent.AgentOffline && node.CurrentTaskID == taskID {
+		if nodeOk && node.Status != agent.Offline && node.CurrentTaskID == taskID {
 			anyAlive = true
 			break
 		}
@@ -663,22 +682,22 @@ func (s *AdminServer) checkAndStopIfAllLost(taskID string) {
 }
 
 // autoStopTask 自动停止任务（deadline 超时或全部节点失效）。
-func (s *AdminServer) autoStopTask(taskID string, reason string) {
+func (s *Server) autoStopTask(taskID string, reason string) {
 	task, ok := s.tasks.Get(taskID)
 	if !ok || !admintask.IsActiveState(task.State) {
 		return
 	}
 
-	if task.State == admintask.TaskStarting {
+	if task.State == admintask.Starting {
 		// TaskStarting 阶段所有节点失效：直接转 TaskFailed，无需发送停止 RPC
-		if _, err := s.tasks.Transition(taskID, admintask.TaskStarting, admintask.TaskFailed); err != nil {
+		if _, err := s.tasks.Transition(taskID, admintask.Starting, admintask.Failed); err != nil {
 			stresslog.Error("[ADMIN] 自动停止任务状态转换失败", zap.Error(err))
 		}
 		return
 	}
 
-	if task.State == admintask.TaskRunning {
-		if _, err := s.tasks.Transition(taskID, admintask.TaskRunning, admintask.TaskStopping); err != nil {
+	if task.State == admintask.Running {
+		if _, err := s.tasks.Transition(taskID, admintask.Running, admintask.Stopping); err != nil {
 			stresslog.Error("[ADMIN] 自动停止任务状态转换失败", zap.Error(err))
 			return
 		}
@@ -698,9 +717,9 @@ func (s *AdminServer) autoStopTask(taskID string, reason string) {
 	}
 	cancel()
 
-	s.tasks.Update(taskID, func(t *admintask.Task) {
+	if err := s.tasks.Update(taskID, func(t *admintask.Task) {
 		if t.Reports == nil {
-			t.Reports = make(map[string]admintask.TaskCompletionReport)
+			t.Reports = make(map[string]admintask.CompletionReport)
 		}
 		targets := t.SucceededAgents
 		if len(targets) == 0 {
@@ -712,7 +731,7 @@ func (s *AdminServer) autoStopTask(taskID string, reason string) {
 		for _, agentID := range targets {
 			if _, ok := t.Reports[agentID]; !ok {
 				cleanup := robot.UnknownCleanupStatus(robot.CleanupReasonStopWaitTimeout, "节点已失效，清理状态未知")
-				t.Reports[agentID] = admintask.TaskCompletionReport{
+				t.Reports[agentID] = admintask.CompletionReport{
 					AgentID:       agentID,
 					TaskID:        taskID,
 					Result:        admintask.ResultFailed,
@@ -723,9 +742,12 @@ func (s *AdminServer) autoStopTask(taskID string, reason string) {
 			}
 		}
 		t.CleanupSummary = admintask.AggregateCleanup(t)
-	})
+	}); err != nil {
+		stresslog.Warn("[ADMIN] 合成自动停止报告失败", zap.String("taskID", taskID), zap.Error(err))
+		return
+	}
 
-	if _, err := s.tasks.Transition(taskID, admintask.TaskStopping, admintask.TaskFailed); err != nil {
+	if _, err := s.tasks.Transition(taskID, admintask.Stopping, admintask.Failed); err != nil {
 		stresslog.Warn("[ADMIN] 状态转换失败", zap.String("taskID", taskID), zap.Error(err))
 	}
 }
@@ -742,9 +764,9 @@ func generateID() string {
 }
 
 // startDeadlineWatchdog 定期检查活跃任务是否超时。
-func (s *AdminServer) startDeadlineWatchdog(ctx context.Context) {
+func (s *Server) startDeadlineWatchdog(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
-	workpool.GetWorkPool().GoWithStop(func(stopCh <-chan struct{}) {
+	workpool.Default().GoWithStop(func(stopCh <-chan struct{}) {
 		defer ticker.Stop()
 		for {
 			select {
@@ -755,7 +777,7 @@ func (s *AdminServer) startDeadlineWatchdog(ctx context.Context) {
 			case <-ticker.C:
 				func() {
 					task := s.tasks.ActiveTask()
-					if task == nil || task.State != admintask.TaskRunning {
+					if task == nil || task.State != admintask.Running {
 						return
 					}
 					if task.Config.Deadline != nil && time.Now().After(*task.Config.Deadline) {

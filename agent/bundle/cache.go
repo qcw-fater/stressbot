@@ -144,7 +144,7 @@ func verifyBundleFile(name string, digest []byte, size int64) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
 	if err != nil {
 		return err
@@ -167,12 +167,12 @@ func extractBundle(archive, published string) error {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 	zr, err := zip.OpenReader(archive)
 	if err != nil {
 		return fmt.Errorf("打开资源包失败: %w", err)
 	}
-	defer zr.Close()
+	defer func() { _ = zr.Close() }()
 	for _, entry := range zr.File {
 		if entry.FileInfo().IsDir() || !entry.Mode().IsRegular() || entry.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("资源包包含不允许的条目: %s", entry.Name)

@@ -122,7 +122,6 @@ func (t *LatestMetrics) SendLoop(ctx context.Context, client controlpb.AgentMetr
 				t.restore(stress, system)
 				return err
 			}
-			stress = nil
 		}
 		if system != nil {
 			envelope := &controlpb.MetricsEnvelope{AgentId: agentID, Generation: generation, DroppedIntervals: system.dropped,

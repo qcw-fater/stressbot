@@ -12,7 +12,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (s *Handler) handleListAgents(w http.ResponseWriter, r *http.Request) {
+func (s *Handler) handleListAgents(w http.ResponseWriter, _ *http.Request) {
 	agents := s.agents.List()
 	now := time.Now()
 	items := make([]metrics.AgentListItem, 0, len(agents))
@@ -25,7 +25,7 @@ func (s *Handler) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func buildAgentListItem(agent *adminagent.AgentNode, now time.Time) metrics.AgentListItem {
+func buildAgentListItem(agent *adminagent.Node, now time.Time) metrics.AgentListItem {
 	item := metrics.AgentListItem{
 		AgentID:         agent.ID,
 		Name:            agent.Name,
@@ -39,18 +39,18 @@ func buildAgentListItem(agent *adminagent.AgentNode, now time.Time) metrics.Agen
 		LastHeartbeatAt: agent.LastHeartbeatAt,
 	}
 	if !agent.StressUpdatedAt.IsZero() {
-		item.StressUpdatedAt = new(agent.StressUpdatedAt)
+		item.StressUpdatedAt = pointer(agent.StressUpdatedAt)
 	}
 	if agent.LatestSystem == nil || agent.SystemUpdatedAt.IsZero() {
 		return item
 	}
 
-	item.SystemUpdatedAt = new(agent.SystemUpdatedAt)
+	item.SystemUpdatedAt = pointer(agent.SystemUpdatedAt)
 	age := now.Sub(agent.SystemUpdatedAt)
 	if age >= 0 {
-		item.SystemSnapshotAgeSeconds = new(age.Seconds())
+		item.SystemSnapshotAgeSeconds = pointer(age.Seconds())
 	}
-	fresh := (agent.Status == adminagent.AgentIdle || agent.Status == adminagent.AgentBusy) &&
+	fresh := (agent.Status == adminagent.Idle || agent.Status == adminagent.Busy) &&
 		age >= 0 && age <= systemSnapshotFreshFor(agent.SystemInterval)
 	item.SystemStale = !fresh
 	if !fresh {
@@ -60,15 +60,17 @@ func buildAgentListItem(agent *adminagent.AgentNode, now time.Time) metrics.Agen
 	snapshot := agent.LatestSystem
 	item.HostCPUPercent = validPercent(snapshot.HostCPUPercent)
 	if _, _, percent, ok := validHostMemory(snapshot); ok {
-		item.HostMemPercent = new(percent)
+		item.HostMemPercent = pointer(percent)
 	}
 	item.ProcessCPUPercent = validPercent(snapshot.ProcessCPUPercent)
 	if snapshot.ProcessRSSBytes != nil {
-		item.ProcessRSSBytes = new(*snapshot.ProcessRSSBytes)
+		item.ProcessRSSBytes = pointer(*snapshot.ProcessRSSBytes)
 	}
-	item.ProcessGoroutines = new(snapshot.ProcessGoroutines)
+	item.ProcessGoroutines = pointer(snapshot.ProcessGoroutines)
 	return item
 }
+
+func pointer[T any](value T) *T { return &value }
 
 func (s *Handler) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -87,7 +89,7 @@ func (s *Handler) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, apierror.ErrAgentNotFound)
 		return
 	}
-	if agent.Status != adminagent.AgentOffline {
+	if agent.Status != adminagent.Offline {
 		writeError(w, apierror.ErrAgentBusy.WithMessage("can only delete offline agents"))
 		return
 	}
@@ -106,7 +108,7 @@ func (s *Handler) handleShutdownAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, apierror.ErrAgentNotFound)
 		return
 	}
-	if agent.Status == adminagent.AgentOffline {
+	if agent.Status == adminagent.Offline {
 		writeError(w, apierror.ErrAgentOffline.WithMessage("agent is offline, cannot send shutdown"))
 		return
 	}
@@ -127,7 +129,7 @@ func (s *Handler) handleShutdownAllAgents(w http.ResponseWriter, _ *http.Request
 	succeeded = make([]string, 0)
 	failed = make([]string, 0)
 	for _, a := range all {
-		if a.Status == adminagent.AgentOffline {
+		if a.Status == adminagent.Offline {
 			continue
 		}
 		succeeded = append(succeeded, a.ID)

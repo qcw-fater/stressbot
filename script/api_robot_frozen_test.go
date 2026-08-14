@@ -84,7 +84,7 @@ message Bag {
 // robot.get / robot.get_path 现场转真 table（type=="table"、proto3 默认值字段在场、
 // 嵌套/列表可自由遍历），与旧的"展开 map 常驻 + goValueToLua"产出逐字一致。
 func TestRobotGetFrozen(t *testing.T) {
-	L := newTestState(t, context.Background(), &fakeNetSender{}, nil)
+	L := newTestState(context.Background(), t, &fakeNetSender{}, nil)
 	defer L.Close()
 
 	msg := newFrozenTestMessage(t)

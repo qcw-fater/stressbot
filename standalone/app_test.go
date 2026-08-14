@@ -81,3 +81,10 @@ func TestResolveStandalonePaths_PartialOverride(t *testing.T) {
 		t.Errorf("adapter 空 flag 应回退默认: got=%q", got.Adapter)
 	}
 }
+
+func TestDetectShareUsageReportsWalkErrors(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	if _, err := detectShareUsage(missing); err == nil {
+		t.Fatal("detectShareUsage() error = nil, want missing directory error")
+	}
+}

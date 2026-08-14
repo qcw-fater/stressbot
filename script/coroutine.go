@@ -268,7 +268,7 @@ func (rp *RuntimePool) resumeCoroutine(co *coroutine, ctx *Context, resumeVals [
 							"await_* 只能在动作脚本顶层直接调用，不可置于 pcall/xpcall 或 coroutine.create 内", co.name)
 				}
 				co.doneOK = true
-				var ret lua.LValue = lua.LNil
+				ret := lua.LNil
 				if len(rets) > 0 {
 					ret = rets[0]
 				}

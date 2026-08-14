@@ -53,16 +53,16 @@ func (a *Agent) runConnection(parent context.Context, conn *grpc.ClientConn) err
 	bundleClient := controlpb.NewAgentBundleServiceClient(conn)
 	metricsClient := controlpb.NewAgentMetricsServiceClient(conn)
 	sendDone, recvDone, metricsDone := make(chan error, 1), make(chan error, 1), make(chan error, 1)
-	if err := workpool.GetWorkPool().Submit(func() { sendDone <- a.sessionSendLoop(ctx, sender, stream) }); err != nil {
+	if err := workpool.Default().Submit(func() { sendDone <- a.sessionSendLoop(ctx, sender, stream) }); err != nil {
 		return err
 	}
-	if err := workpool.GetWorkPool().Submit(func() { recvDone <- a.sessionRecvLoop(ctx, stream, bundleClient, welcome.Generation) }); err != nil {
+	if err := workpool.Default().Submit(func() { recvDone <- a.sessionRecvLoop(ctx, stream, bundleClient, welcome.Generation) }); err != nil {
 		return err
 	}
-	if err := workpool.GetWorkPool().Submit(func() { metricsDone <- a.metrics.SendLoop(ctx, metricsClient, a.id, welcome.Generation) }); err != nil {
+	if err := workpool.Default().Submit(func() { metricsDone <- a.metrics.SendLoop(ctx, metricsClient, a.id, welcome.Generation) }); err != nil {
 		return err
 	}
-	if err := workpool.GetWorkPool().Submit(func() { a.heartbeatProducer(ctx, sender, welcome) }); err != nil {
+	if err := workpool.Default().Submit(func() { a.heartbeatProducer(ctx, sender, welcome) }); err != nil {
 		return err
 	}
 	select {
@@ -124,8 +124,4 @@ func (a *Agent) leaseLoop(ctx context.Context) {
 			}
 		}
 	}
-}
-
-func normalizeClientSessionError(err error) error {
-	return session.NormalizeError(err)
 }

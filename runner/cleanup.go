@@ -17,7 +17,7 @@ type dialerStopper interface{ Stop() error }
 // StopDialer stops the network engine with a bounded wait. If the shared work
 // pool rejects cleanup, it falls back to synchronous cleanup immediately.
 func StopDialer(dialer *network.Dialer) {
-	stopDialerWithSubmit(dialer, workpool.GetWorkPool().Submit)
+	stopDialerWithSubmit(dialer, workpool.Default().Submit)
 }
 
 func stopDialerWithSubmit(dialer dialerStopper, submit func(func()) error) {

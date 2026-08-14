@@ -4,7 +4,7 @@ package errcode
 type ErrorCode uint64
 
 const (
-	// 网络层 (1-10)
+	// ErrConnNotFound 表示目标连接尚未建立（网络层 1-10）。
 	ErrConnNotFound   ErrorCode = 1 // 连接未建立（GetTCPConn/GetUDPConn 返回 nil）
 	ErrConnClosed     ErrorCode = 2 // 连接已关闭（isClose == 1）
 	ErrSendFailed     ErrorCode = 3 // socket 写入失败（Send 返回 false）
@@ -12,21 +12,21 @@ const (
 	ErrConnDropped    ErrorCode = 5 // 等待期间连接被对端断开（gnet OnClose 触发的 ctx.Done）
 	ErrActionCanceled ErrorCode = 6 // 等待期间连接被本地主动关闭（任务停止 / robot.Stop / 业务 Close）
 
-	// 协议层 (11-20)
+	// ErrEncodeFailed 表示 Adapter 编码失败（协议层 11-20）。
 	ErrEncodeFailed ErrorCode = 11 // Adapter 编码返回 nil
 	ErrParseFailed  ErrorCode = 12 // S2C proto 解析失败
 
-	// 构建层 (21-30)
+	// ErrCreateMsg 表示创建 C2S protobuf 消息失败（构建层 21-30）。
 	ErrCreateMsg  ErrorCode = 21 // 创建 C2S proto 消息失败
 	ErrBindField  ErrorCode = 22 // 必需字段绑定失败（Required=true）
 	ErrSerialize  ErrorCode = 23 // C2S 消息序列化失败
 	ErrExecFailed ErrorCode = 24 // 动作执行失败（onError.strategy=abort）
 
-	// 监听层 (31-40)
+	// ErrListenTimeout 表示等待监听消息超时（监听层 31-40）。
 	ErrListenTimeout  ErrorCode = 31 // TCP/UDP Listen 轮询超时
 	ErrListenRegister ErrorCode = 32 // 注册持久监听失败
 
-	// 配置层 (41-50)
+	// ErrAddrEmpty 表示连接地址为空（配置层 41-50）。
 	ErrAddrEmpty       ErrorCode = 41 // 连接地址为空
 	ErrURLEmpty        ErrorCode = 42 // HTTP URL 为空
 	ErrURLScheme       ErrorCode = 43 // HTTP URL 协议错误（缺 http:// 前缀）
@@ -38,13 +38,13 @@ const (
 	ErrHeartbeatConfig ErrorCode = 49 // 声明式心跳配置错误（intervalMs<=0 / route 缺失 / 字段非法）
 	ErrStateConfig     ErrorCode = 50 // 状态动作配置错误（如 clearState 清除内置状态）
 
-	// Lua 层 (51-60)
+	// ErrLuaNotInit 表示 Lua 运行时尚未初始化（Lua 层 51-60）。
 	ErrLuaNotInit     ErrorCode = 51 // Lua 运行时未初始化
 	ErrLuaNoScript    ErrorCode = 52 // lua 动作缺少 script 配置
 	ErrLuaExecFailed  ErrorCode = 53 // Lua 脚本执行异常
 	ErrLuaScriptCheck ErrorCode = 54 // 脚本校验失败
 
-	// 回调层 (61-70)
+	// ErrCallbackLua 表示 Lua 回调脚本执行失败（回调层 61-70）。
 	ErrCallbackLua   ErrorCode = 61 // Lua 回调脚本执行失败
 	ErrCallbackParse ErrorCode = 62 // 推送消息解析失败
 )
