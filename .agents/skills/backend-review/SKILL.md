@@ -672,6 +672,7 @@ pending → starting → running → stopping → stopped
 - [Heap 差分归因] 相邻 heap 的 `inuse_space` 小幅正差不能单独判定泄漏；必须同时核对 `inuse_objects`、调用树与业务相位。若同一分配点出现“字节增加但对象数下降”，优先按采样估算/GC 相位波动处理，再用连续强制 GC 快照验证斜率。
 - [协程与连接预热] `newRegistry → acquireTrampThread` 的存活量要结合每 Robot idle thread 上限和 callback 嵌套深度判断；`startPumpWithSubmit` 的 alloc churn 要结合 flow 中连接反复建立/关闭判断，不能把有界 trampoline 缓存或战斗连接周转误报为泄漏。
 - [高频 Lua 数据面] 将动作 QPS 与脚本源码对齐：若同一脚本每秒执行上万次并重复做常量路由表物化、逐字段二进制打包、state 字符串查找和 Lua→Go 调用，应优先编译为每 Robot 复用的 Go 数据面计划；不要先给 gopher-lua 的所有表增加通用缓存。计划复用 body scratch 的前提仍是 Adapter Encode 在返回前复制 body。
+- [TOML 配置依赖] TOML 解码与环境变量插值是两项独立职责；替换解析库时必须同时保留严格未知字段检查，以及“先解码到结构体、再展开字符串字段”的顺序。禁止先对原始 TOML 字节插值，避免环境变量内容改变 TOML 语法或字段类型；当前公开插值契约仅为 `${VAR}`、`${VAR:-default}`、`$$`，且无默认值的未定义变量必须 fail-loud。可以用三方库实现插值，但必须先做语义对拍；首选维护中的 Drone 兼容 fork `fluxcd/pkg/envsubst`，使用 `EvalEnv(s, true)` 可原生保留上述严格语义并删除本地 AST 预检；`a8m/envsubst.StringRestricted(s, true, false)` 可作次选，`compose-go/template` 的裸未定义变量默认置空，直接采用会破坏 fail-loud 语义。
 
 ---
 

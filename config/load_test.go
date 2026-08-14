@@ -1,18 +1,22 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 func TestExpandString(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   string
-		env     map[string]string
-		want    string
-		wantErr bool
+		name            string
+		input           string
+		env             map[string]string
+		want            string
+		wantErr         bool
+		wantErrContains string
 	}{
 		{
 			name:  "无$符号原样返回",
@@ -49,14 +53,27 @@ func TestExpandString(t *testing.T) {
 			want:  "fallback",
 		},
 		{
-			name:    "无default_未定义报错",
-			input:   "${TOTALLY_MISSING}",
-			wantErr: true,
+			name:            "无default_未定义报错",
+			input:           "${TOTALLY_MISSING}",
+			wantErr:         true,
+			wantErrContains: "TOTALLY_MISSING",
+		},
+		{
+			name:  "无default_变量定义为空",
+			input: "${TEST_EMPTY}",
+			env:   map[string]string{"TEST_EMPTY": ""},
+			want:  "",
 		},
 		{
 			name:  "美元符号转义",
 			input: "$$abc",
 			want:  "$abc",
+		},
+		{
+			name:  "环境变量表达式转义",
+			input: "$${TEST_HOST}",
+			env:   map[string]string{"TEST_HOST": "不会展开"},
+			want:  "${TEST_HOST}",
 		},
 		{
 			name:  "混合多种语法",
@@ -83,6 +100,9 @@ func TestExpandString(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Errorf("expandString(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
 				return
+			}
+			if tt.wantErrContains != "" && !strings.Contains(err.Error(), tt.wantErrContains) {
+				t.Errorf("expandString(%q) error = %v, want contains %q", tt.input, err, tt.wantErrContains)
 			}
 			if !tt.wantErr && got != tt.want {
 				t.Errorf("expandString(%q) = %q, want %q", tt.input, got, tt.want)
@@ -219,5 +239,13 @@ func TestLoadTOML_UnknownFieldError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "未知字段") {
 		t.Errorf("错误消息应包含「未知字段」，得到: %v", err)
+	}
+
+	var strictErr *toml.StrictMissingError
+	if !errors.As(err, &strictErr) {
+		t.Fatalf("错误链应包含 *toml.StrictMissingError，得到: %T: %v", err, err)
+	}
+	if len(strictErr.Errors) != 1 || strings.Join(strictErr.Errors[0].Key(), ".") != "misspelled" {
+		t.Fatalf("未知字段详情不正确: %#v", strictErr.Errors)
 	}
 }

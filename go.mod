@@ -3,18 +3,18 @@ module stressbot
 go 1.26.0
 
 require (
-	github.com/BurntSushi/toml v1.6.0
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/DataDog/sketches-go v1.4.8
 	github.com/bufbuild/protocompile v0.14.1
 	github.com/bytedance/sonic v1.15.2
 	github.com/cenkalti/backoff/v4 v4.3.0
-	github.com/drone/envsubst v1.0.3
+	github.com/fluxcd/pkg/envsubst v1.7.0
 	github.com/getkin/kin-openapi v0.146.0
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/oapi-codegen/nethttp-middleware v1.2.0
 	github.com/panjf2000/ants/v2 v2.12.1
 	github.com/panjf2000/gnet/v2 v2.10.0
+	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/shirou/gopsutil/v4 v4.26.7
