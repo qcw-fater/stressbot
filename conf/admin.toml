@@ -72,7 +72,8 @@ username = "root"
 # password MySQL 密码。
 # 推荐用环境变量注入（${STRESSBOT_MYSQL_PASSWORD}），避免明文密码写入配置文件。
 # 使用 ${VAR} 语法时，环境变量未定义会导致启动失败（fail-loud，不会静默用空密码）。
-password = "${STRESSBOT_MYSQL_PASSWORD}"
+# password = "${STRESSBOT_MYSQL_PASSWORD}"
+password = "123456"
 
 # database 数据库名。启动时自动创建当前版本所需表；首版不维护版本迁移链。
 database = "stressbot"
@@ -170,6 +171,6 @@ compress = true
 
 # ─── pprof 调试 ────────────────────────────────────────
 # 启用后 http://localhost:<port>/debug/pprof 可获取 Go runtime profile。
-[pprof]
+# [pprof]
 # port pprof HTTP 监听端口。
-port = 6060
+# port = 6060

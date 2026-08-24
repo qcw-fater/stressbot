@@ -439,7 +439,7 @@
     "syncLoop": {
       "type": "loop",
       "body": "SyncFrameData",
-      "loopCount": 50
+      "loopCount": 100
     },
     "SyncFrameData": {
       "type": "action",
