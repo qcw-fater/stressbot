@@ -6,6 +6,7 @@
 // gnet 的写完成回调给出数据真正交给内核的时刻，以它为起点，WireRTT 就只剩链路 + 服务端。
 //
 // 观测：/debug/rtt。
+
 package network
 
 import (

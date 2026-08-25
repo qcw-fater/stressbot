@@ -1,3 +1,6 @@
+// Package main 是 Admin 服务器的进程入口：解析启动参数与守护进程化后，
+// 加载 conf/admin.toml 配置、初始化日志与可选 pprof，启动承载 Web 管理面
+// 与 Agent 控制面的 Admin 服务器，随 SIGINT/SIGTERM 优雅退出。
 package main
 
 import (

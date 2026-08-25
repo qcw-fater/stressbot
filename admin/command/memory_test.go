@@ -3,9 +3,8 @@ package command
 import (
 	"context"
 	"errors"
+	controlpb "stressbot/controlplane/pb"
 	"testing"
-
-	"stressbot/controlplane/pb"
 )
 
 func TestMemoryCommandStoreEvictsOldestTerminalCommand(t *testing.T) {

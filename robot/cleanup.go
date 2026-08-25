@@ -5,6 +5,8 @@ import "time"
 // CleanupState 表示 Robot/Manager 资源清理结果。
 type CleanupState string
 
+// CleanupState 清理结果四态：OK 全部资源归还；Partial 部分成功；Timeout 等待超时
+// （Lua 运行时隔离未归还，避免复用可能仍被占用的运行时）；Unknown 清理状态未知（节点未上报等）。
 const (
 	CleanupOK      CleanupState = "ok"
 	CleanupPartial CleanupState = "partial"
@@ -15,6 +17,9 @@ const (
 // CleanupReason 表示触发清理的原因。
 type CleanupReason string
 
+// CleanupReason 触发清理的原因：natural 流程自然结束；admin_stop 手动/服务端停止任务；
+// agent_shutdown Agent 进程退出；ramp_reset 渐进加压 reset 重建机器人；duration_stop 到达任务截止时间；
+// offline_synthetic 节点离线/重启时 Admin 合成的未知状态；stop_wait_timeout 等待节点上报清理结果超时。
 const (
 	CleanupReasonNatural          CleanupReason = "natural"
 	CleanupReasonAdminStop        CleanupReason = "admin_stop"

@@ -1,3 +1,5 @@
+// Package admin 装配 Admin 服务器：任务调度、节点管理、指标聚合、历史归档与共享模板库，
+// 同时承载浏览器管理面（HTTP）与 Admin-Agent 控制面（gRPC）。
 package admin
 
 import (
@@ -21,7 +23,7 @@ import (
 	admintask "stressbot/admin/task"
 	"stressbot/admin/template"
 	"stressbot/config"
-	"stressbot/controlplane/pb"
+	controlpb "stressbot/controlplane/pb"
 	"sync"
 	"sync/atomic"
 	"time"

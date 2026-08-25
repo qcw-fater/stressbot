@@ -33,7 +33,7 @@ func TestNewExponentialBackOffJitterStaysWithinBounds(t *testing.T) {
 		Jitter:  0.5,
 	})
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		got := b.NextBackOff()
 		if got < 500*time.Millisecond || got > 1500*time.Millisecond {
 			t.Fatalf("jittered backoff = %s, want within [500ms, 1.5s]", got)

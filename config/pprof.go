@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+
 	// Register the standard pprof handlers on http.DefaultServeMux.
 	_ "net/http/pprof"
 	"sync"

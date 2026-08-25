@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -143,37 +144,37 @@ func LoadConfig(path string) (*Config, error) {
 // validateConfig 校验配置合法性和联动约束。
 func validateConfig(cfg *Config) error {
 	if cfg.Server.Port <= 0 {
-		return fmt.Errorf("server.port is required and must be > 0")
+		return errors.New("server.port is required and must be > 0")
 	}
 	if cfg.ControlPlane.Port <= 0 {
-		return fmt.Errorf("controlPlane.port is required and must be > 0")
+		return errors.New("controlPlane.port is required and must be > 0")
 	}
 	if cfg.Server.ListenHost == "" {
-		return fmt.Errorf("server.listenHost is required")
+		return errors.New("server.listenHost 未配置")
 	}
 	if cfg.ControlPlane.ListenHost == "" {
-		return fmt.Errorf("controlPlane.listenHost is required")
+		return errors.New("controlPlane.listenHost 未配置")
 	}
 	heartbeat, err := time.ParseDuration(cfg.ControlPlane.HeartbeatInterval)
 	if err != nil {
 		return fmt.Errorf("invalid controlPlane.heartbeatInterval: %w", err)
 	}
 	if heartbeat <= 0 {
-		return fmt.Errorf("controlPlane.heartbeatInterval must be > 0")
+		return errors.New("controlPlane.heartbeatInterval must be > 0")
 	}
 	lease, err := time.ParseDuration(cfg.ControlPlane.UnhealthyAfter)
 	if err != nil {
 		return fmt.Errorf("invalid controlPlane.unhealthyAfter: %w", err)
 	}
 	if lease <= heartbeat {
-		return fmt.Errorf("controlPlane.unhealthyAfter must be greater than controlPlane.heartbeatInterval")
+		return errors.New("controlPlane.unhealthyAfter 必须大于 controlPlane.heartbeatInterval")
 	}
 	offline, err := time.ParseDuration(cfg.ControlPlane.OfflineAfter)
 	if err != nil {
 		return fmt.Errorf("invalid controlPlane.offlineAfter: %w", err)
 	}
 	if offline <= lease {
-		return fmt.Errorf("controlPlane.offlineAfter must be greater than controlPlane.unhealthyAfter")
+		return errors.New("controlPlane.offlineAfter 必须大于 controlPlane.unhealthyAfter")
 	}
 	if cfg.RedisEnabled() {
 		if _, err := cfg.Redis.Resolve(); err != nil {

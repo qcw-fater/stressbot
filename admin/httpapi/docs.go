@@ -2,8 +2,7 @@ package httpapi
 
 import (
 	"net/http"
-
-	"stressbot/api/admin"
+	adminapi "stressbot/api/admin"
 )
 
 const swaggerUIPage = `<!doctype html>

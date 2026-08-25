@@ -8,6 +8,7 @@
 package shared
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -65,7 +66,7 @@ func (c RedisConfig) Enabled() bool {
 // host 为空时返回错误（调用方应在 Resolve 前用 Enabled() 判断）。
 func (c RedisConfig) Resolve() (ResolvedRedisConfig, error) {
 	if c.Host == "" {
-		return ResolvedRedisConfig{}, fmt.Errorf("state/shared: redis.host 为空，未启用共享状态")
+		return ResolvedRedisConfig{}, errors.New("state/shared: redis.host 为空，未启用共享状态")
 	}
 
 	port := c.Port

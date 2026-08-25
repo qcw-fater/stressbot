@@ -1,11 +1,14 @@
+// Package retry 提供指数退避重试：封装 cenkalti/backoff，等待间隔走项目
+// timer 池，并支持经 stop 通道在下一次执行前终止整条重试链路。
 package retry
 
 import (
 	"errors"
 	"time"
 
-	"github.com/cenkalti/backoff/v4"
 	"stressbot/internal/timerpool"
+
+	"github.com/cenkalti/backoff/v4"
 )
 
 // ErrStopped 表示重试在下一次操作执行前被调用方终止。

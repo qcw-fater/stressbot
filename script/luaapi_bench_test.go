@@ -68,7 +68,7 @@ func runAPIBench(b *testing.B, body string) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		if _, _, _, err := rp.RunActionScript(L, "bench.lua"); err != nil {
 			b.Fatalf("执行失败: %v", err)
 		}
@@ -92,7 +92,7 @@ func BenchmarkGetContext(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		if GetContext(L) == nil {
 			b.Fatal("GetContext 返回 nil")
 		}

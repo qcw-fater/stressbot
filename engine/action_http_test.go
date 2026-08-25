@@ -6,10 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"go.uber.org/zap"
 	"stressbot/errcode"
 	"stressbot/internal/stresslog"
 	"stressbot/state"
+
+	"go.uber.org/zap"
 )
 
 // httpStatusNetSender 注入指定 StatusCode + Body 的 HTTP 响应，复用 fakeNetSender

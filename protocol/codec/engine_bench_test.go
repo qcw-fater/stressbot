@@ -89,7 +89,7 @@ func BenchmarkSchemaCodec_Encode(b *testing.B) {
 	for _, sz := range benchSizes {
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				_ = ut.EncodeTCP(route, sz.body, key)
 			}
 		})
@@ -106,7 +106,7 @@ func BenchmarkSchemaCodec_Decode(b *testing.B) {
 		frame := ut.EncodeTCP(route, sz.body, key)
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				_, _, _ = ut.DecodeTCP(frame, key)
 			}
 		})

@@ -1,4 +1,4 @@
-// Package codec — 编译层：schema → 不可变编译产物 SchemaCodec。
+// 编译层：schema → 不可变编译产物 SchemaCodec。
 //
 // 本文件（compile.go）只负责编译，不实现 encode/decode/BodyLength/ExpectedRouteKey
 // 执行逻辑；运行时执行逻辑在 engine.go 中以同包方法形式实现。
@@ -13,10 +13,12 @@
 //   - onlySmaller（compress「仅当变小才采用」）无法在编译期或 applies() 预判——
 //     取决于 encode 时压缩后的实际字节数；它仅在 encode 的 compress 步内处理，
 //     applies() 不引用。
+
 package codec
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -471,7 +473,7 @@ func (c *SchemaCodec) FrameSignature() FrameSignature {
 // errorMap 直接采用入参（允许 nil → 空 map）。NewSchemaCodec 不读文件。
 func NewSchemaCodec(schema *Schema, errorMap map[uint64]string) (*SchemaCodec, error) {
 	if schema == nil {
-		return nil, fmt.Errorf("codec schema 编译失败：schema 为空")
+		return nil, errors.New("codec schema 编译失败：schema 为空")
 	}
 	if err := schema.Validate(); err != nil {
 		return nil, err

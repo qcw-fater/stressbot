@@ -400,7 +400,7 @@ func randScalarValue(rnd *rand.Rand, fd protoreflect.FieldDescriptor) protorefle
 // randFill 随机填充消息（约半数字段被设置；嵌套深度受限）。
 func randFill(rnd *rand.Rand, ref protoreflect.Message, depth int) {
 	fields := ref.Descriptor().Fields()
-	for i := 0; i < fields.Len(); i++ {
+	for i := range fields.Len() {
 		fd := fields.Get(i)
 		if rnd.Intn(2) == 0 {
 			continue
@@ -481,7 +481,7 @@ func collectPathCorpus(md protoreflect.MessageDescriptor, tree map[string]any) [
 
 	// 描述符全字段（含未设置：标量默认值在场、message/空容器不存在）。
 	fields := md.Fields()
-	for i := 0; i < fields.Len(); i++ {
+	for i := range fields.Len() {
 		out = append(out, string(fields.Get(i).Name()))
 	}
 	out = append(out, "nope", "node.nope", "str.x", "node[0]", "mstr[0]", "nodes.k")
@@ -564,7 +564,7 @@ func TestWireDifferentialFuzz(t *testing.T) {
 		// 合法性判定等价：随机损坏若干字节，ValidateWire 与 Unmarshal 同判。
 		if len(raw) > 0 {
 			corrupt := append([]byte(nil), raw...)
-			for j := 0; j < 1+rnd.Intn(3); j++ {
+			for range 1 + rnd.Intn(3) {
 				corrupt[rnd.Intn(len(corrupt))] ^= byte(1 << rnd.Intn(8))
 			}
 			panicked, oracleErr := unmarshalGuarded(md, corrupt)

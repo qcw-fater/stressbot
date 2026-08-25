@@ -3,7 +3,7 @@ package grpcapi
 import (
 	"time"
 
-	"stressbot/controlplane/pb"
+	controlpb "stressbot/controlplane/pb"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -11,6 +11,8 @@ import (
 
 const maxControlMessageSize = 16 << 20
 
+// NewServer 构造 Admin gRPC 服务器：注册 Agent 控制、资源包与指标三个
+// 服务，并设置 16MB 消息上限与 keepalive 参数（长连接保活、防激进客户端）。
 func NewServer(deps Dependencies) *grpc.Server {
 	server := grpc.NewServer(
 		grpc.MaxRecvMsgSize(maxControlMessageSize),

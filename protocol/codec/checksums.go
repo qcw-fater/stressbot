@@ -1,4 +1,4 @@
-// Package codec — checksum 算法实现。
+// checksum 算法实现。
 //
 // 注册的校验和算法：
 //   - none：恒 0（不校验）。
@@ -7,6 +7,7 @@
 //   - crc16：CRC-16/CCITT（多项式 0x1021，初值 0xFFFF，无输入/输出反转）。
 //   - crc32：CRC-32/IEEE（标准库 hash/crc32.ChecksumIEEE）。
 //   - crc32c：CRC-32/Castagnoli（标准库 hash/crc32.MakeTable(crc32.Castagnoli)）。
+
 package codec
 
 import "hash/crc32"

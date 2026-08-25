@@ -467,7 +467,7 @@ func writeFieldUint(buf []byte, f compiledField, v uint64) {
 	switch f.kind {
 	case kindBytes:
 		// bytes 字段：v 解释为字面字节填充（v1 schema 中无 bytes 角色写入路径；保留）。
-		for i := 0; i < f.size; i++ {
+		for i := range f.size {
 			buf[f.offset+i] = byte(v >> (uint(i) * 8))
 		}
 	default:

@@ -1,27 +1,29 @@
+// Package task 实现压测任务在 Agent 侧的领域模型与执行：
+// 把控制面 protobuf 任务分配转换为领域 Assignment，由 Runner 加载资源包并驱动机器人运行。
 package task
 
 import (
-	"fmt"
+	"errors"
 	"time"
 
 	"stressbot/config"
-	"stressbot/controlplane/pb"
+	controlpb "stressbot/controlplane/pb"
 	"stressbot/state/shared"
 )
 
 // FromProto 校验并转换控制面任务分配与资源包描述。
 func FromProto(src *controlpb.TaskAssignment, bundle *controlpb.BundleDescriptor) (*Assignment, error) {
 	if src == nil {
-		return nil, fmt.Errorf("任务分配不能为空")
+		return nil, errors.New("任务分配不能为空")
 	}
 	if src.TaskId == "" {
-		return nil, fmt.Errorf("任务分配缺少 taskId")
+		return nil, errors.New("任务分配缺少 taskId")
 	}
 	if src.StartIndex < 0 || src.TotalBots <= 0 || src.ConcurrentNum < 0 {
-		return nil, fmt.Errorf("任务分配包含无效数量")
+		return nil, errors.New("任务分配包含无效数量")
 	}
 	if bundle == nil || len(bundle.Sha256) != 32 || bundle.Size <= 0 {
-		return nil, fmt.Errorf("任务资源包描述无效")
+		return nil, errors.New("任务资源包描述无效")
 	}
 	startIndex := int(src.StartIndex)
 	out := &Assignment{

@@ -1,3 +1,5 @@
+// Package bundle 实现内容寻址的任务资源包存储：将 flow/proto/Lua/codec 等资源
+// 构建为 zip 归档，按 sha256 摘要落盘复用，并以受限并发流式下发。
 package bundle
 
 import (
@@ -22,6 +24,8 @@ const bundleChunkSize = 256 << 10
 
 var bundleModTime = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 
+// 资源包下发参数校验错误：ErrBundleArgument 表示摘要长度非法或偏移为负，
+// ErrBundleOffset 表示下发偏移超出归档大小。
 var (
 	ErrBundleArgument = errors.New("资源包参数无效")
 	ErrBundleOffset   = errors.New("资源包偏移无效")
@@ -45,6 +49,8 @@ type Store struct {
 	buffers   sync.Pool
 }
 
+// NewStore 创建以 root 为根目录的资源包存储；maxConcurrentStreams 限制同时打开的
+// 下发句柄数（<=0 时取 128）。
 func NewStore(root string, maxConcurrentStreams int) (*Store, error) {
 	if maxConcurrentStreams <= 0 {
 		maxConcurrentStreams = 128
@@ -57,8 +63,11 @@ func NewStore(root string, maxConcurrentStreams int) (*Store, error) {
 	return store, nil
 }
 
+// GetBuffer 从复用池租借 bundleChunkSize 大小的临时缓冲，供下发流分块读取使用。
 func (s *Store) GetBuffer() []byte { return s.buffers.Get().(*[bundleChunkSize]byte)[:] }
 
+// PutBuffer 归还 GetBuffer 租借的缓冲；容量不符的切片直接丢弃，归还前清零内容
+// 防止经池钉住已读取的归档数据。
 func (s *Store) PutBuffer(buffer []byte) {
 	if cap(buffer) != bundleChunkSize {
 		return
@@ -76,9 +85,12 @@ type Source interface {
 	BundleErrorMap() []byte
 }
 
+// Build 将 Source 暴露的任务资源（flow.json、proto、Lua 脚本、codec 与 errors.json）
+// 打包为 Deflate zip，按内容 sha256 寻址经临时文件原子落盘；同摘要归档已存在时
+// 校验大小一致后直接复用。返回归档描述符。
 func (s *Store) Build(cfg Source) (Descriptor, error) {
 	if cfg == nil || len(cfg.BundleFlowJSON()) == 0 {
-		return Descriptor{}, fmt.Errorf("任务缺少 flow.json")
+		return Descriptor{}, errors.New("任务缺少 flow.json")
 	}
 	entries, err := collectBundleEntries(cfg)
 	if err != nil {
@@ -176,7 +188,7 @@ func collectBundleEntries(cfg Source) ([]bundleEntry, error) {
 	}
 	if len(cfg.BundleErrorMap()) > 0 {
 		if _, exists := seen["adapter/errors.json"]; exists {
-			return nil, fmt.Errorf("资源包路径重复: adapter/errors.json")
+			return nil, errors.New("资源包路径重复: adapter/errors.json")
 		}
 		entries = append(entries, bundleEntry{name: "adapter/errors.json", data: append([]byte(nil), cfg.BundleErrorMap()...)})
 	}
@@ -199,6 +211,8 @@ func normalizeBundlePath(dir, name string) (string, error) {
 	return path.Join(dir, clean), nil
 }
 
+// Open 打开摘要对应的归档并定位到 offset，返回文件句柄、归档总大小与释放函数。
+// 并发受 streamSem 限制（ctx 取消时等待让位）；调用方必须关闭文件并调用释放函数归还信号量。
 func (s *Store) Open(ctx context.Context, digest []byte, offset int64) (*os.File, int64, func(), error) {
 	if len(digest) != sha256.Size || offset < 0 {
 		return nil, 0, nil, ErrBundleArgument

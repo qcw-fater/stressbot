@@ -93,7 +93,7 @@ func expandValue(rv reflect.Value) error {
 		return expandValue(rv.Elem())
 
 	case reflect.Struct:
-		for i := 0; i < rv.NumField(); i++ {
+		for i := range rv.NumField() {
 			field := rv.Field(i)
 			// 跳过不可导出字段
 			if !field.CanInterface() {

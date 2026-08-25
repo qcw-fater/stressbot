@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 // ExportCSV 将快照写入 CSV 文件。
@@ -50,11 +51,11 @@ func ExportCSV(c *MetricsCollector, path string) (err error) {
 	for _, a := range snap.Actions {
 		if err := w.Write([]string{
 			a.Name,
-			fmt.Sprintf("%d", a.SampleCount),
-			fmt.Sprintf("%d", a.SuccessCount),
-			fmt.Sprintf("%d", a.TimeoutCount),
-			fmt.Sprintf("%d", a.FailureCount),
-			fmt.Sprintf("%d", a.RTTSampleCount),
+			strconv.FormatInt(a.SampleCount, 10),
+			strconv.FormatInt(a.SuccessCount, 10),
+			strconv.FormatInt(a.TimeoutCount, 10),
+			strconv.FormatInt(a.FailureCount, 10),
+			strconv.FormatInt(a.RTTSampleCount, 10),
 			fmt.Sprintf("%.4f", a.SuccessRate),
 			formatHistogramCSV(a.RTT.AvgMs),
 			fmt.Sprintf("%.2f", a.ClientAvgMs),

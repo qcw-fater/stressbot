@@ -23,7 +23,7 @@ import (
 // Run 加载单机资源、启动机器人，并阻塞到运行结束或 ctx 被取消。
 func Run(ctx context.Context, cfg *Config, paths Paths) error {
 	if cfg == nil || cfg.Standalone == nil {
-		return fmt.Errorf("单机配置不能为空")
+		return errors.New("单机配置不能为空")
 	}
 	standaloneConfig := cfg.Standalone
 
@@ -154,7 +154,7 @@ func openSharedStore(cfg *shared.RedisConfig, scriptsDir string) (shared.Store, 
 		return nil, nil
 	}
 	if cfg == nil || !cfg.Enabled() {
-		return nil, fmt.Errorf("流程脚本使用了共享状态 share，但未配置 Redis")
+		return nil, errors.New("流程脚本使用了共享状态 share，但未配置 Redis")
 	}
 	resolved, err := cfg.Resolve()
 	if err != nil {

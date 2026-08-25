@@ -11,6 +11,7 @@
 package flow
 
 import (
+	"errors"
 	"fmt"
 	"math"
 )
@@ -215,18 +216,18 @@ func evalArith(op string, a, b any) (any, error) {
 			return nil, fmt.Errorf("%% 需要整数操作数（%T 与 %T）", a, b)
 		}
 		if rb.i == 0 {
-			return nil, fmt.Errorf("%% by zero")
+			return nil, errors.New("%% by zero")
 		}
 		return ra.i % rb.i, nil
 	case "/":
 		if intArith {
 			if rb.i == 0 {
-				return nil, fmt.Errorf("division by zero")
+				return nil, errors.New("条件表达式除数为零")
 			}
 			return ra.i / rb.i, nil
 		}
 		if rb.f == 0 {
-			return nil, fmt.Errorf("division by zero")
+			return nil, errors.New("条件表达式除数为零")
 		}
 		return ra.f / rb.f, nil
 	case "*":
@@ -256,7 +257,7 @@ func negate(v any) (any, error) {
 		return nil, fmt.Errorf("一元负号需要数值，实际 %T", v)
 	}
 	if r.bigU {
-		return nil, fmt.Errorf("一元负号：uint64 超出 int64 范围")
+		return nil, errors.New("一元负号：uint64 超出 int64 范围")
 	}
 	if r.isInt {
 		return -r.i, nil

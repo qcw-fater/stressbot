@@ -50,7 +50,7 @@ func TestContentLRUHitMiss(t *testing.T) {
 // 验证条目数上界驱逐
 func TestContentLRUEntryBound(t *testing.T) {
 	c := newByteCache(2, 1<<20)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		key := []byte(fmt.Sprintf("k%d", i))
 		c.Insert(key, simpleHash(key), i, 1)
 	}
@@ -140,11 +140,11 @@ func TestContentLRUCollisionDefense(t *testing.T) {
 func TestContentLRUConcurrent(t *testing.T) {
 	c := newByteCache(100, 1<<20)
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < 100; j++ {
+			for j := range 100 {
 				key := []byte(fmt.Sprintf("k%d", j%10))
 				h := simpleHash(key)
 				if _, ok := c.Lookup(h, key); !ok {

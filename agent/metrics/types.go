@@ -3,7 +3,7 @@ package metrics
 import (
 	"time"
 
-	"stressbot/controlplane/pb"
+	controlpb "stressbot/controlplane/pb"
 )
 
 // SystemSnapshot 是单次系统资源采集快照。

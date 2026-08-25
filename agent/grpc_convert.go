@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"stressbot/controlplane"
-	"stressbot/controlplane/pb"
+	controlpb "stressbot/controlplane/pb"
 	"stressbot/robot"
 )
 

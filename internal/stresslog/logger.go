@@ -203,6 +203,7 @@ func InitLog(logPath, serviceName string, conf *Config, buildLogLevel string) fu
 	}
 }
 
+// GetLogger 返回当前全局 zap logger；未调用 InitLog 前为 nil。
 func GetLogger() *zap.Logger {
 	return logger
 }
@@ -219,49 +220,85 @@ func syncFile() {
 	}
 }
 
+// Debug 以结构化字段打 debug 级别日志。
 func Debug(msg string, fields ...zap.Field) { logger.Debug(msg, fields...) }
-func Info(msg string, fields ...zap.Field)  { logger.Info(msg, fields...) }
-func Warn(msg string, fields ...zap.Field)  { logger.Warn(msg, fields...) }
+
+// Info 以结构化字段打 info 级别日志。
+func Info(msg string, fields ...zap.Field) { logger.Info(msg, fields...) }
+
+// Warn 以结构化字段打 warn 级别日志。
+func Warn(msg string, fields ...zap.Field) { logger.Warn(msg, fields...) }
+
+// Error 以结构化字段打 error 级别日志，并立即刷新文件缓冲避免崩溃丢日志。
 func Error(msg string, fields ...zap.Field) {
 	logger.Error(msg, fields...)
 	syncFile()
 }
+
+// DPanic 以结构化字段打 dpanic 级别日志（开发态触发 panic），并立即刷新文件缓冲。
 func DPanic(msg string, fields ...zap.Field) {
 	logger.DPanic(msg, fields...)
 	syncFile()
 }
+
+// Fatal 以结构化字段打 fatal 级别日志，随后由 zap 退出进程。
 func Fatal(msg string, fields ...zap.Field) { logger.Fatal(msg, fields...) }
 
+// DebugS 以松散键值对打 debug 级别日志。
 func DebugS(msg string, keysAndValues ...any) { sugarLogger.Debugw(msg, keysAndValues...) }
-func InfoS(msg string, keysAndValues ...any)  { sugarLogger.Infow(msg, keysAndValues...) }
-func WarnS(msg string, keysAndValues ...any)  { sugarLogger.Warnw(msg, keysAndValues...) }
+
+// InfoS 以松散键值对打 info 级别日志。
+func InfoS(msg string, keysAndValues ...any) { sugarLogger.Infow(msg, keysAndValues...) }
+
+// WarnS 以松散键值对打 warn 级别日志。
+func WarnS(msg string, keysAndValues ...any) { sugarLogger.Warnw(msg, keysAndValues...) }
+
+// ErrorS 以松散键值对打 error 级别日志，并立即刷新文件缓冲。
 func ErrorS(msg string, keysAndValues ...any) {
 	sugarLogger.Errorw(msg, keysAndValues...)
 	syncFile()
 }
+
+// DPanicS 以松散键值对打 dpanic 级别日志，并立即刷新文件缓冲。
 func DPanicS(msg string, keysAndValues ...any) {
 	sugarLogger.DPanicw(msg, keysAndValues...)
 	syncFile()
 }
 
+// DebugF 按 printf 模板打 debug 级别日志。
 func DebugF(template string, args ...any) { sugarLogger.Debugf(template, args...) }
-func InfoF(template string, args ...any)  { sugarLogger.Infof(template, args...) }
-func WarnF(template string, args ...any)  { sugarLogger.Warnf(template, args...) }
+
+// InfoF 按 printf 模板打 info 级别日志。
+func InfoF(template string, args ...any) { sugarLogger.Infof(template, args...) }
+
+// WarnF 按 printf 模板打 warn 级别日志。
+func WarnF(template string, args ...any) { sugarLogger.Warnf(template, args...) }
+
+// ErrorF 按 printf 模板打 error 级别日志，并立即刷新文件缓冲。
 func ErrorF(template string, args ...any) {
 	sugarLogger.Errorf(template, args...)
 	syncFile()
 }
+
+// DPanicF 按 printf 模板打 dpanic 级别日志，并立即刷新文件缓冲。
 func DPanicF(template string, args ...any) {
 	sugarLogger.DPanicf(template, args...)
 	syncFile()
 }
+
+// FatalF 按 printf 模板打 fatal 级别日志，随后由 zap 退出进程。
 func FatalF(template string, args ...any) { sugarLogger.Fatalf(template, args...) }
 
+// SetLogLevel 原子调整全局日志级别，对文件与控制台输出同时生效。
 func SetLogLevel(level zapcore.Level) { loglevel.SetLevel(level) }
-func GetLogLevel() zapcore.Level      { return loglevel.Level() }
 
+// GetLogLevel 返回当前全局日志级别。
+func GetLogLevel() zapcore.Level { return loglevel.Level() }
+
+// DebugEnabled 报告当前是否启用 debug 级别日志。
 func DebugEnabled() bool { return LevelEnabled(zapcore.DebugLevel) }
 
+// LevelEnabled 报告指定级别是否被当前全局级别放行；logger 未初始化时恒为 false。
 func LevelEnabled(level zapcore.Level) bool {
 	if logger == nil {
 		return false
@@ -269,6 +306,7 @@ func LevelEnabled(level zapcore.Level) bool {
 	return loglevel.Enabled(level)
 }
 
+// StrToLevel 把配置字符串解析为 zap 级别：debug/info/warn/error 之外的取值回退 info。
 func StrToLevel(level string) zapcore.Level {
 	switch level {
 	case "debug":

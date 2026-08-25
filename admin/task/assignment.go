@@ -8,6 +8,7 @@ import (
 // Assigner 任务分配器。
 type Assigner struct{}
 
+// NewAssigner 创建任务分配器；Assigner 无内部状态，仅为后续扩展保留构造入口。
 func NewAssigner() *Assigner {
 	return &Assigner{}
 }

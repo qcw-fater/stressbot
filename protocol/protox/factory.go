@@ -1,6 +1,7 @@
 package protox
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -89,7 +90,7 @@ func (f *Factory) Create(name string) (proto.Message, error) {
 func (f *Factory) SetField(msg proto.Message, fieldPath string, value any) error {
 	parts := f.splitPathCached(fieldPath)
 	if len(parts) == 0 {
-		return fmt.Errorf("fieldPath 为空")
+		return errors.New("fieldPath 为空")
 	}
 	return f.setNestedField(msg.ProtoReflect(), parts, value)
 }
@@ -491,7 +492,7 @@ func toMapKey(key any, field protoreflect.FieldDescriptor) (protoreflect.MapKey,
 func (f *Factory) GetField(msg proto.Message, fieldPath string) (any, error) {
 	parts := f.splitPathCached(fieldPath)
 	if len(parts) == 0 {
-		return nil, fmt.Errorf("fieldPath 为空")
+		return nil, errors.New("fieldPath 为空")
 	}
 	return getNestedFieldValue(msg.ProtoReflect(), parts)
 }
@@ -581,7 +582,7 @@ func (f *Factory) GetListItem(msg proto.Message, fieldPath string, idx int) (any
 
 func (f *Factory) getListField(ref protoreflect.Message, parts []string) (protoreflect.FieldDescriptor, protoreflect.List, error) {
 	if len(parts) == 0 {
-		return nil, nil, fmt.Errorf("fieldPath 为空")
+		return nil, nil, errors.New("fieldPath 为空")
 	}
 	for _, part := range parts[:len(parts)-1] {
 		if strings.HasPrefix(part, "[") && strings.HasSuffix(part, "]") {
@@ -632,7 +633,7 @@ func messageToMap(ref protoreflect.Message) map[string]any {
 
 	// 遍历所有字段描述符（不仅限于已设置的字段）
 	fields := ref.Descriptor().Fields()
-	for i := 0; i < fields.Len(); i++ {
+	for i := range fields.Len() {
 		fd := fields.Get(i)
 
 		// 跳过未设置的非 repeated message 字段
@@ -737,7 +738,7 @@ func fromFieldValue(field protoreflect.FieldDescriptor, val protoreflect.Value) 
 	if field.IsList() {
 		list := val.List()
 		result := make([]any, 0, list.Len())
-		for i := 0; i < list.Len(); i++ {
+		for i := range list.Len() {
 			result = append(result, fromScalarValue(field, list.Get(i)))
 		}
 		return result

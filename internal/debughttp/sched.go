@@ -1,3 +1,5 @@
+// Package debughttp 提供挂在进程默认 HTTP mux 上的压测调优观测端点，
+// 启用 pprof 调试服务的进程自动获得，无需额外配置。
 package debughttp
 
 import (

@@ -1,6 +1,7 @@
 package protox
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
@@ -111,7 +112,7 @@ const wireWalkRecursionLimit = protowire.DefaultRecursionLimit
 // 理论不可达），调用方应回落解码路径。调用前应先 MaterializeAllowed。
 func (wv *WireValue) Walk(sink WireTreeSink) error {
 	if wv == nil || wv.desc == nil {
-		return fmt.Errorf("WireValue 为空")
+		return errors.New("WireValue 为空")
 	}
 	return walkWireLevel(wv.desc, wv.raw, sink, wireWalkRecursionLimit)
 }
@@ -119,7 +120,7 @@ func (wv *WireValue) Walk(sink WireTreeSink) error {
 // walkWireLevel 单遍收集一个 message 层级并按字段序产出。
 func walkWireLevel(md protoreflect.MessageDescriptor, b []byte, sink WireTreeSink, depth int) error {
 	if depth <= 0 {
-		return fmt.Errorf("wire 嵌套超过递归上限")
+		return errors.New("wire 嵌套超过递归上限")
 	}
 	fields := md.Fields()
 	accsPtr := getWireAccs(fields.Len())
@@ -208,7 +209,7 @@ func walkWireLevel(md protoreflect.MessageDescriptor, b []byte, sink WireTreeSin
 	}
 
 	// 按 descriptor 字段序产出（与 messageToMap / protoMessageToLuaTable 一致）。
-	for i := 0; i < fields.Len(); i++ {
+	for i := range fields.Len() {
 		fd := fields.Get(i)
 		acc := &accs[i]
 		switch {

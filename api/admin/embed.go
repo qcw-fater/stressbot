@@ -1,3 +1,5 @@
+// Package adminapi 内嵌管理面的 OpenAPI 契约文档（openapi.yaml），
+// 供运行时校验器与契约测试共用同一份规范。
 package adminapi
 
 import (

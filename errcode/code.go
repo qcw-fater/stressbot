@@ -1,8 +1,12 @@
+// Package errcode 定义统一的错误码体系：单一 ErrorCode 维度携带框架/业务错误，
+// 码段契约 < 100 为框架自产码、≥ 100 为服务器返回的业务码，动作失败统一封装为 ActionError。
 package errcode
 
 // ErrorCode 统一错误码类型。码段契约：< 100 框架码（工具自产，本 registry 分配），≥ 100 业务码（服务器返回）。单一 code 唯一标识，不再需要 Kind 维度。
 type ErrorCode uint64
 
+// 29 个框架错误码按码段分组，每组首个常量上方注明所属层与码段区间；行尾注释为触发条件。
+// ≥ 100 的业务码由服务器经 errors.json 描述，不在此登记。
 const (
 	// ErrConnNotFound 表示目标连接尚未建立（网络层 1-10）。
 	ErrConnNotFound   ErrorCode = 1 // 连接未建立（GetTCPConn/GetUDPConn 返回 nil）

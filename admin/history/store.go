@@ -66,7 +66,7 @@ const TaskConfigArchiveUpsertSQL = upsertTaskConfigArchiveSQL
 // retentionDays <= 0 时用默认 90。
 func NewStore(db *sql.DB, retentionDays int, notFound error, starred func(string) error) *Store {
 	if notFound == nil {
-		notFound = errors.New("history not found")
+		notFound = errors.New("历史记录不存在")
 	}
 	if starred == nil {
 		starred = errors.New
@@ -949,6 +949,8 @@ func normalizeTimeseriesMaxPoints(maxPoints int) int {
 	return maxPoints
 }
 
+// SampleTrendPoints 将趋势采样点等间距降采样到 maxPoints 以内：按索引比例取点并去重，
+// 不足或恰好 maxPoints 时原样返回；maxPoints <= 1 时只保留最后一个点。
 func SampleTrendPoints(points []TrendPointResponse, maxPoints int) []TrendPointResponse {
 	if len(points) <= maxPoints {
 		return points
@@ -970,6 +972,8 @@ func SampleTrendPoints(points []TrendPointResponse, maxPoints int) []TrendPointR
 	return result
 }
 
+// ProjectStressSnapshot 把 monitor 的 CollectorSnapshot 投影为对外 API 的
+// StressSnapshotSummary 形态（摘要、机器人、连接、带宽与逐动作统计逐字段映射）。
 func ProjectStressSnapshot(s monitor.CollectorSnapshot) StressSnapshotSummary {
 	actions := make([]ActionSummary, 0, len(s.Actions))
 	for _, a := range s.Actions {

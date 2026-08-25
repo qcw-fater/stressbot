@@ -1,4 +1,4 @@
-// Package codec — 算法注册表与元数据导出。
+// 算法注册表与元数据导出。
 //
 // 本文件（registry.go）只负责：
 //   - 四张算法注册表（cipher / compressor / checksum / hasher）及其接口；
@@ -13,6 +13,7 @@
 //     许测试或未来扩展在不重启进程时增注册）。
 //   - 查找缺失返回 (nil, false)——由编译层 fail loud，本层不 panic。
 //   - 不 import gopher-lua；与 adapter/ 完全解耦。
+
 package codec
 
 import (

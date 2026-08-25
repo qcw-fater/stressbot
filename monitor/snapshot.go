@@ -202,6 +202,8 @@ type CollectorSnapshot struct {
 	Window               *ReportWindow      `json:"window"`
 }
 
+// ReportMeta 一次上报窗口的元信息：窗口序号（从 1 递增）、起止时间与约定上报周期，
+// 由 Agent 上报器在切窗口时填写，Admin 侧据此做顺序与周期校验。
 type ReportMeta struct {
 	Sequence                uint64
 	StartedAt               time.Time
@@ -209,6 +211,7 @@ type ReportMeta struct {
 	ExpectedIntervalSeconds float64
 }
 
+// WindowBandwidthSnapshot 活动区间窗口的带宽快照：区间收发字节数与对应速率。
 type WindowBandwidthSnapshot struct {
 	SendBytes int64   `json:"sendBytes"`
 	RecvBytes int64   `json:"recvBytes"`
@@ -216,6 +219,8 @@ type WindowBandwidthSnapshot struct {
 	RecvMBps  float64 `json:"recvMBps"`
 }
 
+// ReportWindow 单次上报的活动区间指标：窗口起止、时长、汇总、带宽与各动作快照；
+// Sequence 从 1 递增，Admin 侧按节点用它做去重与顺序校验。
 type ReportWindow struct {
 	Sequence                uint64                  `json:"sequence,omitempty"`
 	StartedAt               time.Time               `json:"startedAt"`

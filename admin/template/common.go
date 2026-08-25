@@ -21,6 +21,9 @@ import (
 // IDPolicy controls how IDs are handled when restoring a template snapshot.
 type IDPolicy string
 
+// IDPolicy 为快照恢复的 ID 处理策略：IDPreserve 完整恢复（条目必须自带 ID 与时间戳），
+// IDGenerateMissing 合并恢复（缺 ID 的条目生成新 ID，已有 ID 须存在于目标库）。
+// NameMax/DescriptionMax 为模板名称与描述的长度上限（字符数）。
 const (
 	IDPreserve        IDPolicy = "preserve"
 	IDGenerateMissing IDPolicy = "generate-missing"
@@ -54,6 +57,8 @@ type templateDefaultRef struct {
 	QueueSize *int            `json:"queueSize,omitempty"`
 }
 
+// ComputeRevision 将 items 按 id 升序排序后序列化并取 sha256，
+// 得到与输入顺序无关的集合内容版本号（"sha256:" 前缀）。
 func ComputeRevision[T any](items []T, id func(T) string) (string, error) {
 	stable := append([]T(nil), items...)
 	sort.Slice(stable, func(i, j int) bool { return id(stable[i]) < id(stable[j]) })
@@ -65,23 +70,25 @@ func ComputeRevision[T any](items []T, id func(T) string) (string, error) {
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
+// ValidateIdentity 校验快照条目的身份字段：ID 长度不超过 32、idPolicy 取值合法、名称非空；
+// IDPreserve 策略下还要求条目自带 ID 且创建/更新时间齐备。
 func ValidateIdentity(id, name string, policy IDPolicy, createdAt, updatedAt time.Time) error {
 	if id != "" && len(id) > 32 {
-		return fmt.Errorf("模板 ID 不能超过 32 个字符")
+		return errors.New("模板 ID 不能超过 32 个字符")
 	}
 	if policy == IDPreserve {
 		if id == "" {
-			return fmt.Errorf("完整恢复中的模板 ID 不能为空")
+			return errors.New("完整恢复中的模板 ID 不能为空")
 		}
 		if createdAt.IsZero() || updatedAt.IsZero() {
-			return fmt.Errorf("完整恢复中的模板时间无效")
+			return errors.New("完整恢复中的模板时间无效")
 		}
 	}
 	if policy != IDPreserve && policy != IDGenerateMissing {
-		return fmt.Errorf("模板快照 idPolicy 无效")
+		return errors.New("模板快照 idPolicy 无效")
 	}
 	if name == "" {
-		return fmt.Errorf("模板名称不能为空")
+		return errors.New("模板名称不能为空")
 	}
 	return nil
 }
@@ -152,10 +159,11 @@ func mapTemplateWriteError(err error) error {
 // MapWriteError translates database failures to the Admin API error contract.
 func MapWriteError(err error) error { return mapTemplateWriteError(err) }
 
+// NormalizeName 去除首尾空白并校验模板名称：非空且不超过 NameMax 个字符。
 func NormalizeName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return "", fmt.Errorf("模板名称不能为空")
+		return "", errors.New("模板名称不能为空")
 	}
 	if utf8.RuneCountInString(name) > NameMax {
 		return "", fmt.Errorf("模板名称不能超过 %d 个字符", NameMax)
@@ -163,6 +171,7 @@ func NormalizeName(name string) (string, error) {
 	return name, nil
 }
 
+// NormalizeDescription 校验模板描述不超过 DescriptionMax 个字符（保留原文，不去除空白）。
 func NormalizeDescription(description string) (string, error) {
 	if utf8.RuneCountInString(description) > DescriptionMax {
 		return "", fmt.Errorf("模板描述不能超过 %d 个字符", DescriptionMax)
@@ -170,6 +179,8 @@ func NormalizeDescription(description string) (string, error) {
 	return description, nil
 }
 
+// RequireJSONObject 校验 raw 是非空 JSON 对象并按字段名返回解构结果；
+// label 用于拼接"xxx必须是 JSON 对象"错误文案。
 func RequireJSONObject(raw json.RawMessage, label string) (map[string]json.RawMessage, error) {
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "" || !strings.HasPrefix(trimmed, "{") {

@@ -1,3 +1,5 @@
+// Package agent 组装 Agent 节点应用：加载配置、维持与 Admin 的 gRPC 控制会话、
+// 执行下发命令与压测任务，并上报系统/压测指标。
 package agent
 
 import (
@@ -22,6 +24,8 @@ import (
 	"go.uber.org/zap"
 )
 
+// Agent 表示一个 Agent 节点运行时实例，聚合系统监控、命令执行器、资源包缓存、
+// 待确认报告队列与当前任务的生命周期状态。
 type Agent struct {
 	id      string
 	cfg     *ResolvedConfig
@@ -54,6 +58,8 @@ type Agent struct {
 	shutdownSeq    uint64
 }
 
+// New 创建 Agent 实例：初始化系统监控、资源包缓存、待确认报告队列与命令执行器，
+// 并绑定全局指标 collector。
 func New(cfg *ResolvedConfig, collector *monitor.MetricsCollector) (*Agent, error) {
 	static := CollectStaticInfo()
 	sysmon, err := metrics.NewSystemMonitor(cfg.MetricsInterval, static)
@@ -73,6 +79,8 @@ func New(cfg *ResolvedConfig, collector *monitor.MetricsCollector) (*Agent, erro
 	return agent, nil
 }
 
+// Run 启动 Agent 并阻塞运行：拉起系统监控、命令执行器、租约维持循环与 gRPC 连接管理，
+// 直至收到外部退出请求（ctx）、本地关闭命令或控制会话终止，随后执行 shutdown 清理并返回。
 func (a *Agent) Run(ctx context.Context) error {
 	var runErr error
 	stresslog.Info("[AGENT] 启动中", zap.String("agentID", a.id), zap.String("name", a.cfg.Name),
@@ -128,6 +136,7 @@ func (a *Agent) confirmShutdown(commandID string, sequence uint64) {
 	}
 }
 
+// ID 返回节点 ID。
 func (a *Agent) ID() string { return a.id }
 
 // AgentID 实现内部命令执行器的节点身份接口。
@@ -165,6 +174,7 @@ func (a *Agent) CancelControlPlane() {
 	}
 }
 
+// Status 返回节点当前运行状态（idle/busy），持锁读取。
 func (a *Agent) Status() Status {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -229,7 +239,7 @@ func (a *Agent) launchReservedTask(taskCtx context.Context, taskCancel context.C
 	a.mu.Lock()
 	if a.currentTask != task {
 		a.mu.Unlock()
-		return fmt.Errorf("任务启动预留已失效")
+		return errors.New("任务启动预留已失效")
 	}
 	if cause := context.Cause(taskCtx); cause != nil {
 		a.mu.Unlock()

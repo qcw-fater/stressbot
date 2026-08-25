@@ -13,8 +13,9 @@ import (
 	"stressbot/network"
 	"stressbot/script"
 
-	"go.uber.org/zap"
 	"stressbot/internal/stresslog"
+
+	"go.uber.org/zap"
 )
 
 // robotScheduler 是单个 Robot 的协作式调度核心（actor 运行时）。

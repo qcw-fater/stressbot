@@ -6,13 +6,13 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	adminapi "stressbot/api/admin"
 	"strings"
 	"testing"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/getkin/kin-openapi/routers/legacy"
-	"stressbot/api/admin"
 )
 
 func TestManagementOpenAPIFreezesCurrentRoutes(t *testing.T) {

@@ -145,7 +145,7 @@ func TestWireCollectListLimit(t *testing.T) {
 	}
 
 	fields := md.Fields()
-	for i := 0; i < fields.Len(); i++ {
+	for i := range fields.Len() {
 		fd := fields.Get(i)
 		if !fd.IsList() {
 			continue

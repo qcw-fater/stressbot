@@ -17,6 +17,8 @@ const (
 	defaultSketchMaxBins          = 2048
 )
 
+// ErrInvalidMetricSample 表示延迟样本无效（负耗时或 DDSketch Add 失败），
+// 拒绝进分布的样本由调用方计入 invalidMetricSamples。
 var ErrInvalidMetricSample = errors.New("无效监控耗时样本")
 
 // LatencyHistogram 使用 DDSketch 保存可合并的延迟分布，同时保存精确的
@@ -99,6 +101,8 @@ type HistogramSnapshot struct {
 	Sketch []byte   `json:"sketch,omitempty"`
 }
 
+// Snapshot 生成携带 DDSketch 编码的可合并分布快照（Count/Min/Max/Avg 与
+// 分位数展示值，毫秒）；空分布返回零值快照。生成失败意味着内部数据已损坏，直接 panic。
 func (h *LatencyHistogram) Snapshot() HistogramSnapshot {
 	h.mu.Lock()
 	defer h.mu.Unlock()

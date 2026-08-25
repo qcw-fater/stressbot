@@ -2,6 +2,7 @@ package script
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	lua "github.com/yuin/gopher-lua"
@@ -125,7 +126,7 @@ func (c *Context) closeTrampThreads() {
 func (rp *RuntimePool) trampMainFn(L *lua.LState) (*lua.LFunction, error) {
 	reg, ok := L.Get(lua.RegistryIndex).(*lua.LTable)
 	if !ok {
-		return nil, fmt.Errorf("lua registry 类型异常")
+		return nil, errors.New("lua registry 类型异常")
 	}
 	if fn, ok := reg.RawGetInt(trampFnRegistrySlot).(*lua.LFunction); ok {
 		return fn, nil
@@ -139,7 +140,7 @@ func (rp *RuntimePool) trampMainFn(L *lua.LState) (*lua.LFunction, error) {
 	fn, ok := L.Get(-1).(*lua.LFunction)
 	L.SetTop(savedTop)
 	if !ok {
-		return nil, fmt.Errorf("蹦床 chunk 未返回函数")
+		return nil, errors.New("蹦床 chunk 未返回函数")
 	}
 	reg.RawSetInt(trampFnRegistrySlot, fn)
 	return fn, nil
@@ -150,7 +151,7 @@ func (rp *RuntimePool) trampMainFn(L *lua.LState) (*lua.LFunction, error) {
 func trampSentinel(L *lua.LState) (*lua.LUserData, error) {
 	reg, ok := L.Get(lua.RegistryIndex).(*lua.LTable)
 	if !ok {
-		return nil, fmt.Errorf("lua registry 类型异常")
+		return nil, errors.New("lua registry 类型异常")
 	}
 	if ud, ok := reg.RawGetInt(trampSentinelRegistrySlot).(*lua.LUserData); ok {
 		return ud, nil

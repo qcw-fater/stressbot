@@ -7,9 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"stressbot/internal/stresslog"
+
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/reflect/protoreflect"
-	"stressbot/internal/stresslog"
 )
 
 func newMapTestFactory(t *testing.T) *Factory {

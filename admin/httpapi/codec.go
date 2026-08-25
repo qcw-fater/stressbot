@@ -12,6 +12,7 @@
 //     前端据 Error 字段展示提示，不是 HTTP 错误。仅当请求 JSON 本身非法（unmarshal 失败）
 //     或 schema 字段反序列化为 codec.Schema 失败时才返回 400。
 //   - 遵循现有 admin handler 模式（方法签名 http.HandlerFunc、json 解码、writeJSON/writeError）。
+
 package httpapi
 
 import (

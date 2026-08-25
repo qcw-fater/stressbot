@@ -19,6 +19,7 @@
 package protocol
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -149,7 +150,7 @@ func NewCodecResolverWithHeartbeat(byServer map[string]Adapter, heartbeat map[st
 // 顺序：为错误信息稳定，按 server 串排序后遍历。
 func LoadCodecResolver(codecDir string, codecs map[string]string, errorsFile string) (CodecResolver, error) {
 	if len(codecs) == 0 {
-		return nil, fmt.Errorf("codec 加载失败：未声明任何连接的 codec 映射")
+		return nil, errors.New("codec 加载失败：未声明任何连接的 codec 映射")
 	}
 
 	// 可选加载共享 errors.json（一次）。

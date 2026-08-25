@@ -2,29 +2,35 @@ package command
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"strconv"
 
 	"stressbot/admin/bundle"
 	"stressbot/admin/grpcapi"
 	admintask "stressbot/admin/task"
-	"stressbot/controlplane/pb"
+	controlpb "stressbot/controlplane/pb"
 	"stressbot/internal/stresslog"
 	"stressbot/state/shared"
 
 	"go.uber.org/zap"
 )
 
+// Dispatcher 把任务层意图编排为控制命令：按任务配置与 Agent 分片组装
+// StartTask/StopTask/Shutdown 命令并经 Bus 批量下发。
 type Dispatcher struct {
 	bundles *bundle.Store
 	bus     *Bus
 	redis   *shared.RedisConfig
 }
 
+// NewDispatcher 创建命令调度器；redis 在任务使用共享状态脚本时随命令下发。
 func NewDispatcher(bundles *bundle.Store, bus *Bus, redis *shared.RedisConfig) *Dispatcher {
 	return &Dispatcher{bundles: bundles, bus: bus, redis: redis}
 }
 
+// ScheduleStart 启动任务：构建资源包描述符，按 Agent 分片拆分并发度与
+// 渐进加压、补齐缺省参数并组装 StartTask 命令批量写入 Bus，返回目标
+// Agent 列表；缺省参数以 Warn 日志标注后回退默认值。
 func (d *Dispatcher) ScheduleStart(ctx context.Context, task *admintask.Task, assignments []admintask.Assignment) ([]string, error) {
 	descriptor, err := d.bundles.Build(&task.Config)
 	if err != nil {
@@ -79,6 +85,7 @@ func (d *Dispatcher) ScheduleStart(ctx context.Context, task *admintask.Task, as
 	return agentIDs, nil
 }
 
+// ScheduleStop 为每个目标 Agent 生成 StopTask 命令（携带停止原因）并批量写入 Bus。
 func (d *Dispatcher) ScheduleStop(ctx context.Context, taskID string, agentIDs []string, reason string) error {
 	commands := make([]*controlpb.Command, 0, len(agentIDs))
 	for _, agentID := range agentIDs {
@@ -88,6 +95,8 @@ func (d *Dispatcher) ScheduleStop(ctx context.Context, taskID string, agentIDs [
 	return d.bus.CreateBatch(ctx, commands)
 }
 
+// ScheduleShutdown 为每个在线 Agent 生成 Shutdown 命令并批量写入 Bus；
+// agentIDs 为空时报错，不做空投递。
 func (d *Dispatcher) ScheduleShutdown(ctx context.Context, agentIDs []string, reason string) error {
 	commands := make([]*controlpb.Command, 0, len(agentIDs))
 	for _, agentID := range agentIDs {
@@ -95,7 +104,7 @@ func (d *Dispatcher) ScheduleShutdown(ctx context.Context, agentIDs []string, re
 			Body: &controlpb.Command_Shutdown{Shutdown: &controlpb.Shutdown{Reason: reason}}})
 	}
 	if len(commands) == 0 {
-		return fmt.Errorf("没有可关闭的在线节点")
+		return errors.New("没有可关闭的在线节点")
 	}
 	return d.bus.CreateBatch(ctx, commands)
 }

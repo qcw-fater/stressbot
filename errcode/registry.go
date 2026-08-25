@@ -43,4 +43,5 @@ var codeNameIndex = func() map[uint64]string {
 
 func (c ErrorCode) String() string { return codeNameIndex[uint64(c)] }
 
+// AllCodes 返回全部框架错误码元数据的副本，供 HTTP 端点 /sbot/api/error-codes 下发给前端。
 func AllCodes() []CodeInfo { return append([]CodeInfo(nil), codeRegistry...) }

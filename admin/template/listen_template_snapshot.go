@@ -82,6 +82,9 @@ func readListenSnapshotRows(ctx context.Context, q listenSnapshotQuerier) ([]Lis
 	}
 	return items, rows.Err()
 }
+
+// Snapshot 导出监听模板库全量快照（按 id 排序），Revision 为内容摘要，
+// 用作整体恢复前的乐观锁预检。
 func (s *ListenTemplateStore) Snapshot(ctx context.Context) (*Snapshot[ListenTemplate], error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -95,6 +98,10 @@ func (s *ListenTemplateStore) Snapshot(ctx context.Context) (*Snapshot[ListenTem
 	}
 	return &Snapshot[ListenTemplate]{Revision: revision, Items: items}, nil
 }
+
+// ReplaceSnapshot 在事务内整体替换监听模板库：先校验 ExpectedRevision 与当前内容摘要
+// 一致（不一致返回快照冲突），再按 IDPolicy（preserve 完整恢复 / generate-missing 合并增量）
+// DELETE + 重插全部条目，返回替换后的新快照。
 func (s *ListenTemplateStore) ReplaceSnapshot(ctx context.Context, req ReplaceSnapshotRequest[ListenTemplate]) (_ *ReplaceSnapshotResponse[ListenTemplate], retErr error) {
 	if _, err := prepareListenSnapshotItems(nil, req.Items, req.IDPolicy, time.Now(), s.nextID); err != nil && req.IDPolicy == IDPreserve {
 		return nil, err

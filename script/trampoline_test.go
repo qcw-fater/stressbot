@@ -416,7 +416,7 @@ func BenchmarkNewThreadPerTask(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		thread, cancel := L.NewThread()
 		st, rerr, _ := L.Resume(thread, entry, lua.LNil)
 		if st != lua.ResumeOK || rerr != nil {
@@ -446,7 +446,7 @@ func BenchmarkRunActionScript(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		if _, _, _, err := rp.RunActionScript(L, "bench.lua"); err != nil {
 			b.Fatalf("执行失败: %v", err)
 		}

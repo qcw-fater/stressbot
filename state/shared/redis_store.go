@@ -47,7 +47,7 @@ var _ Store = (*RedisStore)(nil)
 // 故在此 fail-fast。
 func NewRedisStore(cfg ResolvedRedisConfig, runID string) (*RedisStore, error) {
 	if runID == "" {
-		return nil, fmt.Errorf("state/shared: runID 不能为空")
+		return nil, errors.New("state/shared: runID 不能为空")
 	}
 	if strings.ContainsAny(runID, "{}") {
 		return nil, fmt.Errorf("state/shared: runID %q 含花括号，会截断 {runID} hashtag 导致 Cluster 跨 slot", runID)
@@ -167,12 +167,15 @@ func ttlSeconds(ttl time.Duration) int64 {
 	return sec
 }
 
+// DefaultClaimTTL 返回配置的默认 claim 租约时长（Lua 层不传 ttl 时使用）。
 func (s *RedisStore) DefaultClaimTTL() time.Duration { return s.cfg.DefaultClaimTTL }
 
+// OpTimeout 返回单次操作超时，Lua 层据此派生 opCtx。
 func (s *RedisStore) OpTimeout() time.Duration { return s.cfg.OpTimeout }
 
 // ── KV ────────────────────────────────────────────────
 
+// Set 写入 KV：编码后经 Lua 脚本原子完成 SET + 可选 EXPIRE + 索引 SADD。
 func (s *RedisStore) Set(ctx context.Context, key string, value any, ttl time.Duration) error {
 	enc, err := encodeValue(value)
 	if err != nil {
@@ -182,6 +185,7 @@ func (s *RedisStore) Set(ctx context.Context, key string, value any, ttl time.Du
 	return setScript.Run(ctx, s.rdb, []string{k, s.indexKey()}, enc, ttlSeconds(ttl)).Err()
 }
 
+// Get 读取 KV 并解码；key 不存在返回 (nil, false, nil)。
 func (s *RedisStore) Get(ctx context.Context, key string) (any, bool, error) {
 	k := s.key(typeKV, key)
 	raw, err := s.rdb.Get(ctx, k).Result()
@@ -241,6 +245,8 @@ func (s *RedisStore) Incr(ctx context.Context, key string, delta int64, ttl time
 
 // ── Claim / Lock ──────────────────────────────────────
 
+// Claim 以 owner 身份竞争锁：锁不存在或已超时被清则获取成功并设置租约；
+// 已被他人持有则失败。ttl<=0 时使用 DefaultClaimTTL。
 func (s *RedisStore) Claim(ctx context.Context, key, owner string, ttl time.Duration) (bool, error) {
 	if ttl <= 0 {
 		ttl = s.cfg.DefaultClaimTTL
@@ -253,6 +259,7 @@ func (s *RedisStore) Claim(ctx context.Context, key, owner string, ttl time.Dura
 	return n == 1, nil
 }
 
+// Release 释放锁：仅当锁仍由该 owner 持有时删除（Lua 校验，防误删他人锁）。
 func (s *RedisStore) Release(ctx context.Context, key, owner string) (bool, error) {
 	k := s.key(typeClaim, key)
 	n, err := releaseScript.Run(ctx, s.rdb, []string{k}, owner).Int64()
@@ -262,6 +269,7 @@ func (s *RedisStore) Release(ctx context.Context, key, owner string) (bool, erro
 	return n == 1, nil
 }
 
+// Owner 查询锁当前持有者；锁不存在返回 ("", false, nil)。
 func (s *RedisStore) Owner(ctx context.Context, key string) (string, bool, error) {
 	k := s.key(typeClaim, key)
 	v, err := s.rdb.Get(ctx, k).Result()
@@ -274,6 +282,8 @@ func (s *RedisStore) Owner(ctx context.Context, key string) (string, bool, error
 	return v, true, nil
 }
 
+// Renew 续租：仅当锁仍由该 owner 持有时把 TTL 重置为新值，租约过期即失效。
+// ttl<=0 时使用 DefaultClaimTTL。
 func (s *RedisStore) Renew(ctx context.Context, key, owner string, ttl time.Duration) (bool, error) {
 	if ttl <= 0 {
 		ttl = s.cfg.DefaultClaimTTL
@@ -288,6 +298,7 @@ func (s *RedisStore) Renew(ctx context.Context, key, owner string, ttl time.Dura
 
 // ── Queue / List ──────────────────────────────────────
 
+// QueuePush 向队列尾部追加元素（FIFO），经 Lua 脚本原子完成 RPUSH + 可选 EXPIRE + 索引 SADD。
 func (s *RedisStore) QueuePush(ctx context.Context, key string, value any, ttl time.Duration) error {
 	enc, err := encodeValue(value)
 	if err != nil {
@@ -297,6 +308,7 @@ func (s *RedisStore) QueuePush(ctx context.Context, key string, value any, ttl t
 	return queuePushScript.Run(ctx, s.rdb, []string{k, s.indexKey()}, enc, ttlSeconds(ttl)).Err()
 }
 
+// QueuePop 从队列头部弹出并解码一个元素；队列为空返回 (nil, false, nil)。
 func (s *RedisStore) QueuePop(ctx context.Context, key string) (any, bool, error) {
 	k := s.key(typeQueue, key)
 	raw, err := s.rdb.LPop(ctx, k).Result()
@@ -313,10 +325,12 @@ func (s *RedisStore) QueuePop(ctx context.Context, key string) (any, bool, error
 	return v, true, nil
 }
 
+// QueueLen 返回队列当前长度。
 func (s *RedisStore) QueueLen(ctx context.Context, key string) (int64, error) {
 	return s.rdb.LLen(ctx, s.key(typeQueue, key)).Result()
 }
 
+// QueueExpire 为队列设置过期时间；ttl<=0 按契约 no-op 返回 false，key 不存在返回 false。
 func (s *RedisStore) QueueExpire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
 	// 契约：ttl<=0 表示不设置过期 → no-op；直接传 0 给 EXPIRE 会立即删 key。正数亚秒按 1 秒。
 	if ttl <= 0 {
@@ -327,6 +341,7 @@ func (s *RedisStore) QueueExpire(ctx context.Context, key string, ttl time.Durat
 
 // ── Hash ──────────────────────────────────────────────
 
+// HashSet 写入单个 hash 字段：编码后经 Lua 脚本原子完成 HSET + 可选 EXPIRE + 索引 SADD。
 func (s *RedisStore) HashSet(ctx context.Context, key, field string, value any, ttl time.Duration) error {
 	enc, err := encodeValue(value)
 	if err != nil {
@@ -336,6 +351,7 @@ func (s *RedisStore) HashSet(ctx context.Context, key, field string, value any, 
 	return hashSetScript.Run(ctx, s.rdb, []string{k, s.indexKey()}, field, enc, ttlSeconds(ttl)).Err()
 }
 
+// HashGet 读取单个 hash 字段并解码；key 或字段不存在返回 (nil, false, nil)。
 func (s *RedisStore) HashGet(ctx context.Context, key, field string) (any, bool, error) {
 	k := s.key(typeHash, key)
 	raw, err := s.rdb.HGet(ctx, k, field).Result()
@@ -352,6 +368,8 @@ func (s *RedisStore) HashGet(ctx context.Context, key, field string) (any, bool,
 	return v, true, nil
 }
 
+// HashGetAll 读取整个 hash 并逐字段解码；key 不存在返回 (nil, false, nil)，
+// 存在但为空 hash 返回 (空 map, true, nil)——两者以一次 EXISTS 探测区分。
 func (s *RedisStore) HashGetAll(ctx context.Context, key string) (map[string]any, bool, error) {
 	k := s.key(typeHash, key)
 	raw, err := s.rdb.HGetAll(ctx, k).Result()
@@ -380,6 +398,7 @@ func (s *RedisStore) HashGetAll(ctx context.Context, key string) (map[string]any
 	return out, true, nil
 }
 
+// HashDelete 删除单个 hash 字段；字段不存在不视为错误。
 func (s *RedisStore) HashDelete(ctx context.Context, key, field string) error {
 	return s.rdb.HDel(ctx, s.key(typeHash, key), field).Err()
 }
@@ -390,6 +409,7 @@ func (s *RedisStore) HashIncr(ctx context.Context, key, field string, delta int6
 	return hashIncrScript.Run(ctx, s.rdb, []string{k, s.indexKey()}, field, delta, ttlSeconds(ttl)).Int64()
 }
 
+// HashExpire 为 hash 设置过期时间；ttl<=0 按契约 no-op 返回 false，key 不存在返回 false。
 func (s *RedisStore) HashExpire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
 	// 契约：ttl<=0 表示不设置过期 → no-op；直接传 0 给 EXPIRE 会立即删 key。正数亚秒按 1 秒。
 	if ttl <= 0 {
@@ -443,6 +463,7 @@ func (s *RedisStore) Cleanup(ctx context.Context) error {
 	return nil
 }
 
+// Close 关闭底层 Redis 连接；未初始化客户端时为 no-op。
 func (s *RedisStore) Close() error {
 	if s.rdb == nil {
 		return nil

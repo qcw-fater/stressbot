@@ -5,9 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"stressbot/internal/stresslog"
+
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/reflect/protoreflect"
-	"stressbot/internal/stresslog"
 )
 
 func newNestedTestFactory(t *testing.T) *Factory {

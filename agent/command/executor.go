@@ -1,3 +1,5 @@
+// Package command 实现控制面下发命令的顺序执行与结果留存：
+// 命令经队列串行处理，结果进入待确认 outbox，直到 Admin 确认接收后才可淘汰。
 package command
 
 import (
@@ -9,7 +11,7 @@ import (
 
 	"stressbot/agent/bundle"
 	agenttask "stressbot/agent/task"
-	"stressbot/controlplane/pb"
+	controlpb "stressbot/controlplane/pb"
 	"stressbot/internal/stresslog"
 	"stressbot/internal/workpool"
 
@@ -55,6 +57,8 @@ func NewExecutor(host Host, cache *bundle.Cache) *Executor {
 		inflight: make(map[string]struct{}), deferred: make(map[string]commandRequest)}
 }
 
+// Start 启动命令消费循环（提交到协程池）：从队列逐条取出命令执行，
+// 并将结果写入 outbox；ctx 结束后循环退出。
 func (e *Executor) Start(ctx context.Context) error {
 	return workpool.Default().Submit(func() {
 		for {
@@ -69,6 +73,8 @@ func (e *Executor) Start(ctx context.Context) error {
 	})
 }
 
+// Enqueue 将一条控制面命令放入执行队列，队列已满时阻塞；
+// ctx 先结束则放弃入队并返回其错误。
 func (e *Executor) Enqueue(ctx context.Context, client controlpb.AgentBundleServiceClient, command *controlpb.Command) error {
 	request := commandRequest{ctx: ctx, client: client, cmd: command}
 	select {
@@ -105,7 +111,7 @@ func (e *Executor) execute(request commandRequest) *controlpb.CommandAck {
 		// Process exit is deferred until Admin durably commits this ACK and
 		// returns CommandReceipt.
 	default:
-		err = fmt.Errorf("未知命令类型")
+		err = errors.New("未知命令类型")
 	}
 	if err != nil {
 		if isTransientCommandError(err) {
@@ -134,7 +140,7 @@ func (e *Executor) beginStart(request commandRequest, ack *controlpb.CommandAck,
 		return
 	}
 	if currentTaskID != "" {
-		ack.Status, ack.Reason = controlpb.CommandAckStatus_COMMAND_ACK_STATUS_REJECTED, fmt.Sprintf("已有任务运行: %s", currentTaskID)
+		ack.Status, ack.Reason = controlpb.CommandAckStatus_COMMAND_ACK_STATUS_REJECTED, "已有任务运行: "+currentTaskID
 		e.completeStart(request, ack)
 		return
 	}
@@ -225,6 +231,7 @@ func (e *Executor) finish(request commandRequest, ack *controlpb.CommandAck) {
 	}
 }
 
+// Outcomes 返回命令结果的待确认 outbox，供控制会话读取快照、接收通知与确认。
 func (e *Executor) Outcomes() *OutcomeOutbox { return e.outcomes }
 
 func isTransientCommandError(err error) bool {

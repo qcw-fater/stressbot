@@ -1,3 +1,5 @@
+// Package httpapi 提供 Admin 浏览器管理面（前缀 /sbot/）的 HTTP 传输层：
+// 请求路由、参数编解码、OpenAPI 校验、panic 边界与日志中间件。
 package httpapi
 
 import (

@@ -4,8 +4,9 @@ import (
 	"errors"
 	"testing"
 
-	"go.uber.org/zap"
 	"stressbot/internal/stresslog"
+
+	"go.uber.org/zap"
 )
 
 type recordingDialerStopper struct{ calls int }

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"stressbot/controlplane"
-	"stressbot/controlplane/pb"
+	controlpb "stressbot/controlplane/pb"
 	"stressbot/monitor"
 )
 
@@ -33,8 +33,11 @@ type LatestMetrics struct {
 	notify       chan struct{}
 }
 
+// NewLatestMetrics 创建最新帧缓冲。
 func NewLatestMetrics() *LatestMetrics { return &LatestMetrics{notify: make(chan struct{}, 1)} }
 
+// OfferStress 覆盖压测帧槽位并唤醒发送循环；任务切换时丢弃旧任务帧并清零丢弃计数，
+// 未发送的被覆盖帧计入 dropped，随下一帧带给 Admin 补账。
 func (t *LatestMetrics) OfferStress(taskID string, reportedAt time.Time, snapshot *monitor.CollectorSnapshot) {
 	t.mu.Lock()
 	if t.stressTaskID != taskID {
@@ -50,6 +53,7 @@ func (t *LatestMetrics) OfferStress(taskID string, reportedAt time.Time, snapsho
 	t.wake()
 }
 
+// OfferSystem 覆盖系统帧槽位并唤醒发送循环；未发送的被覆盖帧计入 dropped。
 func (t *LatestMetrics) OfferSystem(snapshot SystemSnapshot) {
 	t.mu.Lock()
 	if t.system != nil {

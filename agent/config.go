@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -39,7 +40,7 @@ func LoadConfig(path, version string) (*AppConfig, error) {
 // NewFromConfig 完成 Agent 应用所需的配置解析与指标初始化。
 func NewFromConfig(cfg *AppConfig) (*Agent, error) {
 	if cfg == nil {
-		return nil, fmt.Errorf("Agent 配置不能为空")
+		return nil, errors.New("Agent 配置不能为空")
 	}
 	resolved, err := cfg.Agent.Resolve()
 	if err != nil {
@@ -106,10 +107,10 @@ func Defaults() Config {
 // Resolve 校验并解析配置，填充默认值。
 func (c *Config) Resolve() (*ResolvedConfig, error) {
 	if c.ID == "" {
-		return nil, fmt.Errorf("agent.id 不能为空")
+		return nil, errors.New("agent.id 不能为空")
 	}
 	if c.AdminAddress == "" {
-		return nil, fmt.Errorf("agent.adminAddress 不能为空")
+		return nil, errors.New("agent.adminAddress 不能为空")
 	}
 	if _, _, err := net.SplitHostPort(c.AdminAddress); err != nil {
 		return nil, fmt.Errorf("agent.adminAddress 必须是 host:port: %w", err)
@@ -149,6 +150,7 @@ func resolveReconnectRetries(value int) int {
 	return value
 }
 
+// CollectStaticInfo 采集节点静态信息：主机名、OS/架构/CPU 核数、Go 版本与进程启动时间。
 func CollectStaticInfo() metrics.StaticInfo {
 	hostname, _ := os.Hostname()
 	return metrics.StaticInfo{Hostname: hostname, OS: runtime.GOOS, Arch: runtime.GOARCH, NumCPU: runtime.NumCPU(), GoVersion: runtime.Version(), StartedAt: time.Now()}

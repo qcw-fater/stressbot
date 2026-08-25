@@ -316,14 +316,15 @@ func (e *Executor) finishActionSuccess(ctx context.Context, node *flowdef.Node, 
 }
 
 func (e *Executor) finishActionAccepted(ctx context.Context, node *flowdef.Node, actionDef *flowdef.ActionDef, err error) error {
-	fields := []zap.Field{
+	extra := actionErrorLogFields(err)
+	fields := make([]zap.Field, 0, 5+len(extra))
+	fields = append(fields,
 		zap.String("caller", e.caller),
 		zap.String("action", node.Action),
 		zap.String("pattern", actionDef.Pattern),
 		zap.Int("ignoreCodeCount", len(node.OnError.IgnoreCodes)),
-		zap.Error(err),
-	}
-	fields = append(fields, actionErrorLogFields(err)...)
+		zap.Error(err))
+	fields = append(fields, extra...)
 	stresslog.Warn("[ENGINE] 动作错误码已忽略，流程继续", fields...)
 	if listenErr := e.registerActionListens(ctx, node, actionDef); listenErr != nil {
 		return listenErr
@@ -380,7 +381,9 @@ func actionErrorLogFields(err error) []zap.Field {
 }
 
 func (e *Executor) logActionFailure(msg string, node *flowdef.Node, actionDef *flowdef.ActionDef, retriesUsed, maxRetries int, err error, extraFields ...zap.Field) {
-	fields := []zap.Field{
+	extra := actionErrorLogFields(err)
+	fields := make([]zap.Field, 0, 8+len(extraFields)+len(extra))
+	fields = append(fields,
 		zap.String("caller", e.caller),
 		zap.String("action", node.Action),
 		zap.String("pattern", actionDef.Pattern),
@@ -388,10 +391,9 @@ func (e *Executor) logActionFailure(msg string, node *flowdef.Node, actionDef *f
 		zap.String("handler", onErrorHandler(node)),
 		zap.Int("retryUsed", retriesUsed),
 		zap.Int("maxRetries", maxRetries),
-		zap.Error(err),
-	}
+		zap.Error(err))
 	fields = append(fields, extraFields...)
-	fields = append(fields, actionErrorLogFields(err)...)
+	fields = append(fields, extra...)
 	if onErrorStrategy(node) == flowdef.StrategyAbort {
 		stresslog.Error(msg, fields...)
 		return
@@ -400,7 +402,9 @@ func (e *Executor) logActionFailure(msg string, node *flowdef.Node, actionDef *f
 }
 
 func (e *Executor) logActionRetry(node *flowdef.Node, actionDef *flowdef.ActionDef, retriesUsed, maxRetries int, err error) {
-	fields := []zap.Field{
+	extra := actionErrorLogFields(err)
+	fields := make([]zap.Field, 0, 8+len(extra))
+	fields = append(fields,
 		zap.String("caller", e.caller),
 		zap.String("action", node.Action),
 		zap.String("pattern", actionDef.Pattern),
@@ -408,9 +412,8 @@ func (e *Executor) logActionRetry(node *flowdef.Node, actionDef *flowdef.ActionD
 		zap.Int("retryUsed", retriesUsed),
 		zap.Int("maxRetries", maxRetries),
 		zap.Int("retryDelayMs", node.OnError.Retry.RetryDelayMs),
-		zap.Error(err),
-	}
-	fields = append(fields, actionErrorLogFields(err)...)
+		zap.Error(err))
+	fields = append(fields, extra...)
 	stresslog.Warn("[ENGINE] 动作失败后准备重试", fields...)
 }
 

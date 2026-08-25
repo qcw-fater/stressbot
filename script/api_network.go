@@ -38,8 +38,8 @@ import (
 //	network.set_udp_secret_key(service, key)
 //	network.get_tcp_secret_key(service)
 //	network.get_udp_secret_key(service)
-//	network.ensure_tcp_listener(service, response_key)
-//	network.ensure_udp_listener(service, response_key)
+//	network.ensure_tcp_listener(service, route_key)
+//	network.ensure_udp_listener(service, route_key)
 func loadNetworkModule(L *lua.LState) int {
 	mod := L.NewTable()
 
@@ -1010,7 +1010,7 @@ func networkGetUDPSecretKey(L *lua.LState) int {
 
 // networkEnsureTCPListener 为 TCP routeKey 注册监听器占位。
 // tcp_listen 不再自动注册，Lua 脚本需在触发推送前显式调用此函数。
-// 签名：network.ensure_tcp_listener(service, response_key)
+// 签名：network.ensure_tcp_listener(service, route_key)
 // queueSize 固定为 1（Lua 不暴露 queueSize；大容量请用 flow listenRefs 的 queueSize 配置）。
 func networkEnsureTCPListener(L *lua.LState) int {
 	ctx := GetContext(L)
@@ -1025,7 +1025,7 @@ func networkEnsureTCPListener(L *lua.LState) int {
 
 // networkEnsureUDPListener 为 UDP routeKey 注册监听器占位。
 // udp_listen 不再自动注册，Lua 脚本需在触发推送前显式调用此函数。
-// 签名：network.ensure_udp_listener(service, response_key)
+// 签名：network.ensure_udp_listener(service, route_key)
 // queueSize 固定为 1（Lua 不暴露 queueSize；大容量请用 flow listenRefs 的 queueSize 配置）。
 func networkEnsureUDPListener(L *lua.LState) int {
 	ctx := GetContext(L)

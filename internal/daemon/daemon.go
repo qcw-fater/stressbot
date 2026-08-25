@@ -1,3 +1,5 @@
+// Package daemon 提供把当前进程转为守护进程的能力：父进程 fork 子进程后
+// 立即返回，子进程以 ppid=1 继续执行原逻辑；Windows 不支持，保持前台运行。
 package daemon
 
 import (

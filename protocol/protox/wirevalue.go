@@ -1,6 +1,7 @@
 package protox
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -84,7 +85,7 @@ func (wv *WireValue) ProtoName() string {
 // 产物为现场新建的独占消息，调用方可自由持有；不缓存（避免解码树钉在 WireValue 上）。
 func (wv *WireValue) Message() (proto.Message, error) {
 	if wv == nil || wv.desc == nil {
-		return nil, fmt.Errorf("WireValue 为空")
+		return nil, errors.New("WireValue 为空")
 	}
 	msg := dynamicpb.NewMessage(wv.desc)
 	if err := proto.Unmarshal(wv.raw, msg); err != nil {
@@ -679,7 +680,7 @@ func ValidateWire(desc protoreflect.MessageDescriptor, raw []byte) error {
 
 func validateWireLevel(md protoreflect.MessageDescriptor, b []byte, depth int) error {
 	if depth <= 0 {
-		return fmt.Errorf("wire 嵌套超过递归上限")
+		return errors.New("wire 嵌套超过递归上限")
 	}
 	for len(b) > 0 {
 		num, typ, n := protowire.ConsumeTag(b)
@@ -736,7 +737,7 @@ func validateWireLevel(md protoreflect.MessageDescriptor, b []byte, depth int) e
 // validateMapEntry 校验 map entry 载荷（string key/value 的 UTF-8、message value 递归）。
 func validateMapEntry(fd protoreflect.FieldDescriptor, bs []byte, depth int) error {
 	if depth <= 0 {
-		return fmt.Errorf("wire 嵌套超过递归上限")
+		return errors.New("wire 嵌套超过递归上限")
 	}
 	keyFd := fd.MapKey()
 	valFd := fd.MapValue()

@@ -13,10 +13,14 @@ var webHookURL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send"
 
 var webhookHTTPClient = &http.Client{Timeout: 5 * time.Second}
 
+// Content 是企业微信 markdown 消息的正文体，MentionedList 声明需要 @ 的成员。
 type Content struct {
 	Content       string   `json:"content"`
 	MentionedList []string `json:"mentioned_list,omitempty"`
 }
+
+// WebHookMsg 是企业微信 webhook 的消息信封：Msgtype 固定为 markdown，
+// 正文由 Markdown 携带。
 type WebHookMsg struct {
 	Msgtype  string  `json:"msgtype"`
 	Markdown Content `json:"markdown"`

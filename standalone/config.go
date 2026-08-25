@@ -1,6 +1,7 @@
 package standalone
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -57,6 +58,8 @@ func Defaults() Config {
 	}}}
 }
 
+// LoadConfig 从 TOML 文件加载单机配置并补默认值：bot 关键字段为空时回填默认，
+// mainService 缺失报错；配置了 rampUp.stages 时校验各阶段 count 之和必须等于 totalBots。
 func LoadConfig(path string) (*Config, error) {
 	cfg, err := config.LoadTOML(path, Defaults())
 	if err != nil {
@@ -76,7 +79,7 @@ func LoadConfig(path string) (*Config, error) {
 		s.Bot.AccountPrefix = "bot_"
 	}
 	if s.Bot.MainService == "" {
-		return nil, fmt.Errorf("standalone.bot.mainService is required")
+		return nil, errors.New("standalone.bot.mainService 未配置")
 	}
 	if s.RampUp != nil && len(s.RampUp.Stages) > 0 {
 		sum := 0

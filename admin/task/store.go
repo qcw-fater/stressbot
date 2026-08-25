@@ -66,6 +66,8 @@ func NewRepository[T any, S comparable](dataDir string, adapter Adapter[T, S]) (
 	return store, nil
 }
 
+// SetOnTerminal 注册终态回调，任务进入终态时以 TerminalClone 副本异步调用；
+// 加载期被恢复为终态的任务会立即补放一次回调（此时尚未注册），随后清空缓冲。
 func (s *Repository[T, S]) SetOnTerminal(fn func(T)) {
 	s.onTerminal = fn
 	for _, id := range s.recoveredIDs {
@@ -76,6 +78,7 @@ func (s *Repository[T, S]) SetOnTerminal(fn func(T)) {
 	s.recoveredIDs = nil
 }
 
+// Create 新建任务并落盘；ID 已存在时返回 Duplicate 错误且不覆盖原任务。
 func (s *Repository[T, S]) Create(item T) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -87,6 +90,7 @@ func (s *Repository[T, S]) Create(item T) error {
 	return s.adapter.Save(s.dataDir, item)
 }
 
+// Get 按 ID 取任务的深拷贝（Clone），不存在时返回零值和 false；返回值可安全并发修改。
 func (s *Repository[T, S]) Get(id string) (T, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -98,6 +102,7 @@ func (s *Repository[T, S]) Get(id string) (T, bool) {
 	return s.adapter.Clone(item), true
 }
 
+// List 返回全部任务的 Clone 副本，顺序由 map 遍历决定。
 func (s *Repository[T, S]) List() []T {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -108,6 +113,7 @@ func (s *Repository[T, S]) List() []T {
 	return out
 }
 
+// ListByState 返回处于指定状态的任务 Clone 副本。
 func (s *Repository[T, S]) ListByState(state S) []T {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -120,6 +126,7 @@ func (s *Repository[T, S]) ListByState(state S) []T {
 	return out
 }
 
+// Update 在持锁下对任务应用 update 变更并落盘；任务不存在时返回 NotFound 错误。
 func (s *Repository[T, S]) Update(id string, update func(T)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -131,6 +138,7 @@ func (s *Repository[T, S]) Update(id string, update func(T)) error {
 	return s.adapter.Save(s.dataDir, item)
 }
 
+// Delete 删除任务并移除落盘文件；活跃任务不允许删除，返回 InvalidState 错误。
 func (s *Repository[T, S]) Delete(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -145,6 +153,8 @@ func (s *Repository[T, S]) Delete(id string) error {
 	return s.adapter.Remove(s.dataDir, id)
 }
 
+// Transition 以 CAS 语义执行状态转换：校验当前状态等于 from 且转换边合法（validTransition），
+// 成功后按目标状态补记 startedAt/stoppedAt、落盘；进入终态时清除 activeID 并异步触发 onTerminal。
 func (s *Repository[T, S]) Transition(id string, from, to S) (T, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -186,12 +196,14 @@ func (s *Repository[T, S]) Transition(id string, from, to S) (T, error) {
 	return item, nil
 }
 
+// ActiveTaskID 返回当前活跃任务 ID，无活跃任务时为空串。
 func (s *Repository[T, S]) ActiveTaskID() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.activeID
 }
 
+// ActiveTask 返回当前活跃任务的 Clone 副本，无活跃任务时返回零值。
 func (s *Repository[T, S]) ActiveTask() T {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -204,12 +216,15 @@ func (s *Repository[T, S]) ActiveTask() T {
 	return zero
 }
 
+// HasActive 报告是否存在活跃任务（单活跃任务约束的快速判定）。
 func (s *Repository[T, S]) HasActive() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.activeID != ""
 }
 
+// Begin 启动入口：在 startMu 串行化下先检查单活跃任务约束（冲突时带活跃任务详情返回 Conflict），
+// 再执行 pending→starting 转换并登记 activeID；保证并发启动只有一个能成功。
 func (s *Repository[T, S]) Begin(id string, pending, starting S) (T, error) {
 	s.startMu.Lock()
 	defer s.startMu.Unlock()

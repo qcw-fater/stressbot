@@ -17,6 +17,8 @@ import (
 
 const sharedCleanupRetryInterval = 60 * time.Second
 
+// SharedCleanup 兜底清理任务运行期写入 Redis 的共享状态：失败的 runID 持久化在
+// dataDir 下的 JSON 文件中，启动时恢复并由后台定时重试，直到 Cleanup 成功才移除。
 type SharedCleanup struct {
 	redis   *shared.RedisConfig
 	mu      sync.Mutex
@@ -24,6 +26,7 @@ type SharedCleanup struct {
 	path    string
 }
 
+// NewSharedCleanup 创建共享状态清理器，从 dataDir 读取并恢复上次未清理完的 runID 列表。
 func NewSharedCleanup(dataDir string, redis *shared.RedisConfig) *SharedCleanup {
 	cleanup := &SharedCleanup{
 		redis: redis, pending: make(map[string]struct{}),
@@ -103,6 +106,7 @@ func (s *SharedCleanup) list() []string {
 	return ids
 }
 
+// Enqueue 登记一个待清理的 runID 并异步发起首次清理尝试；runID 为空或未启用 Redis 时直接忽略。
 func (s *SharedCleanup) Enqueue(runID string) {
 	if runID == "" || !s.enabled() {
 		return
@@ -137,6 +141,7 @@ func (s *SharedCleanup) attempt(runID string) {
 	stresslog.Info("[ADMIN] 共享状态已清理", zap.String("runId", runID))
 }
 
+// Start 启动后台清理：先补跑恢复出的全部待清理 runID，再以固定间隔重试未成功的项，直到 ctx 取消。
 func (s *SharedCleanup) Start(ctx context.Context) {
 	if !s.enabled() {
 		return

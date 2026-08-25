@@ -1,4 +1,4 @@
-// Package codec — 压缩算法实现。
+// 压缩算法实现。
 //
 // 本层只做无阈值 gzip——压缩触发阈值由 engine 的 `when` 决定，本层不感知。
 // gzip 实现由标准库 compress/gzip 驱动，sync.Pool 复用 *gzip.Writer / *gzip.Reader，
@@ -7,6 +7,7 @@
 // 注册的压缩算法：
 //   - none：透传不压缩。
 //   - gzip：标准库 gzip，仅当压缩后变小时采用（onlySmaller）。
+
 package codec
 
 import (

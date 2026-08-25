@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"stressbot/binding"
 	flowdef "stressbot/flow"
 	"strings"
@@ -108,7 +109,7 @@ func NewRobot(parent context.Context, cfg Config, flow *flowdef.TaskFlow, factor
 	resolver protocol.CodecResolver,
 	dialer *network.Dialer, luaPool *script.RuntimePool) (*Robot, error) {
 	if resolver == nil {
-		return nil, fmt.Errorf("NewRobot: resolver 不能为 nil（codec 未配置）")
+		return nil, errors.New("NewRobot: resolver 不能为 nil（codec 未配置）")
 	}
 
 	ctx, cancel := context.WithCancel(parent)
@@ -158,7 +159,7 @@ func NewRobot(parent context.Context, cfg Config, flow *flowdef.TaskFlow, factor
 	// 不再依赖 r.l 上的适配器脚本副本。
 	if r.l == nil {
 		cancel()
-		return nil, fmt.Errorf("NewRobot: Lua 运行时池未提供 LState")
+		return nil, errors.New("NewRobot: Lua 运行时池未提供 LState")
 	}
 
 	r.state.Set("id", cfg.ID)
@@ -1460,7 +1461,7 @@ func httpRequestBytes(req *http.Request, body []byte) int {
 	}
 	total += httpHeaderBytes(req.Header)
 	if len(body) > 0 {
-		total += len("Content-Length") + 2 + len(fmt.Sprintf("%d", len(body))) + 2
+		total += len("Content-Length") + 2 + len(strconv.Itoa(len(body))) + 2
 	}
 	total += 2 + len(body)
 	return total
@@ -1472,12 +1473,12 @@ func httpResponseBytes(resp *http.Response, body []byte) int {
 	}
 	status := resp.Status
 	if status == "" {
-		status = fmt.Sprintf("%d", resp.StatusCode)
+		status = strconv.Itoa(resp.StatusCode)
 	}
 	total := len("HTTP/1.1") + 1 + len(status) + 2
 	total += httpHeaderBytes(resp.Header)
 	if resp.ContentLength >= 0 && resp.Header.Get("Content-Length") == "" {
-		total += len("Content-Length") + 2 + len(fmt.Sprintf("%d", resp.ContentLength)) + 2
+		total += len("Content-Length") + 2 + len(strconv.FormatInt(resp.ContentLength, 10)) + 2
 	}
 	total += 2 + len(body)
 	return total

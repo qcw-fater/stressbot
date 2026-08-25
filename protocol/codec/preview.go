@@ -1,4 +1,4 @@
-// Package codec — Preview helper（T1.7 第 4 项）。
+// Preview helper（T1.7 第 4 项）。
 //
 // Preview 是给 T4 Admin 的 `POST /sbot/codec/preview` 端点使用的纯计算 helper：
 // 接收一份 codec schema + 单次 encode/decode 入参，返回帧/字段解释，便于前端在不
@@ -12,6 +12,7 @@
 //     已在 schema 里固化；保留 transport 仅为 T3/T4 语义清晰（未来若 codec 多 transport
 //     再接线）。
 //   - route 字段值支持 int/float/string（数值化：math.Floor 截断取整）。
+
 package codec
 
 import (

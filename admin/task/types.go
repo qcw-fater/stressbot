@@ -108,11 +108,19 @@ type Config struct {
 }
 
 // BundleFlowJSON implements bundle.Source without coupling task models to the bundle package.
-func (c *Config) BundleFlowJSON() []byte              { return c.FlowJSON }
+func (c *Config) BundleFlowJSON() []byte { return c.FlowJSON }
+
+// BundleProtoFiles 以 bundle.Source 形式暴露 proto 文件集，供打包下发使用。
 func (c *Config) BundleProtoFiles() map[string][]byte { return c.ProtoFiles }
+
+// BundleLuaScripts 以 bundle.Source 形式暴露 Lua 脚本集，供打包下发使用。
 func (c *Config) BundleLuaScripts() map[string][]byte { return c.LuaScripts }
-func (c *Config) BundleCodecs() map[string][]byte     { return c.Codecs }
-func (c *Config) BundleErrorMap() []byte              { return c.ErrorMap }
+
+// BundleCodecs 以 bundle.Source 形式暴露声明式 codec 文件集，供打包下发使用。
+func (c *Config) BundleCodecs() map[string][]byte { return c.Codecs }
+
+// BundleErrorMap 以 bundle.Source 形式暴露共享 errors.json，供打包下发使用。
+func (c *Config) BundleErrorMap() []byte { return c.ErrorMap }
 
 // RobotConfig 任务级运行时配置（前端 → admin → agent）。
 // 超时字段统一用 int 秒数，admin 转为 "Ns" duration 字符串下发。

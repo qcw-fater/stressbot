@@ -676,7 +676,7 @@ func protoMessageToLuaTable(L *lua.LState, msg proto.Message) *lua.LTable {
 	// 用字段总数作为 hash 容量上限（实际会跳过未设置字段，略有富余但远优于默认 32 槽，
 	// 且 message 表无数组部分，省掉默认 array 的 512 字节）
 	result := L.CreateTable(0, fields.Len())
-	for i := 0; i < fields.Len(); i++ {
+	for i := range fields.Len() {
 		fd := fields.Get(i)
 
 		// 跳过未设置的非 repeated message 字段（与 factory.GetFieldMap 一致）
@@ -702,7 +702,7 @@ func protoFieldToLua(L *lua.LState, field protoreflect.FieldDescriptor, val prot
 	if field.IsList() {
 		list := val.List()
 		tb := L.CreateTable(list.Len(), 0)
-		for i := 0; i < list.Len(); i++ {
+		for i := range list.Len() {
 			tb.RawSetInt(i+1, protoScalarToLua(L, field, list.Get(i)))
 		}
 		return tb

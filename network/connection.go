@@ -1,7 +1,13 @@
+// Package network 提供基于 gnet 的 TCP/UDP 连接层。
+//
+// Client 管理多服务命名连接池；Connection 处理收发、请求-响应匹配（responseMap +
+// buffered channel + 超时 select）、持久化监听队列/回调分发与 per-connection 声明式心跳；
+// Dialer 封装 gnet 事件循环并注入 sendFunc/closeFunc。
 package network
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -705,10 +711,10 @@ func (c *Connection) StartPump(adp protocol.Adapter, isUDP bool) error {
 
 func (c *Connection) startPumpWithSubmit(adp protocol.Adapter, isUDP bool, submit func(func()) error) error {
 	if c == nil {
-		return fmt.Errorf("connection 不能为空")
+		return errors.New("connection 不能为空")
 	}
 	if adp == nil {
-		return fmt.Errorf("adapter 不能为空")
+		return errors.New("adapter 不能为空")
 	}
 	if !c.pumpRun.CompareAndSwap(0, 1) {
 		return nil
@@ -983,6 +989,8 @@ func (c *Connection) decodeAndDispatch(frame inboundFrame) {
 // 命中 isClose 分支被误报为反压（一次实测 567 条，95% 集中在 stopping 后 5 秒内）。
 type EnqueueResult int
 
+// EnqueueResult 三态取值：EnqueueOK 成功入队；EnqueueClosed 连接已关/未启动 pump（静默丢包，
+// 不得再 Close）；EnqueueChFull inboundCh 真满（真反压，调用方应关连接释放资源）。
 const (
 	EnqueueOK     EnqueueResult = iota // 成功入队
 	EnqueueClosed                      // 连接已关闭 / 尚未启动 pump：静默丢包，调用方不应再 Close

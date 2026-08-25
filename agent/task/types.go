@@ -1,6 +1,7 @@
 package task
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 // Result 是 Agent 任务的终态。
 type Result string
 
+// 任务终态枚举：Completed 正常完成，Stopped 被控制命令停止，Failed 执行失败。
 const (
 	Completed Result = "completed"
 	Stopped   Result = "stopped"
@@ -56,7 +58,7 @@ type Assignment struct {
 // Validate 校验任务分片必须包含全局机器人起始下标。
 func (a Assignment) Validate() error {
 	if a.StartIndex == nil {
-		return fmt.Errorf("任务分配缺少必填字段 startIndex")
+		return errors.New("任务分配缺少必填字段 startIndex")
 	}
 	if *a.StartIndex < 0 {
 		return fmt.Errorf("任务分配 startIndex 不能为负数（当前 %d）", *a.StartIndex)

@@ -158,7 +158,7 @@ func frozenFieldValue(fd protoreflect.FieldDescriptor, val protoreflect.Value) a
 	if fd.IsList() {
 		list := val.List()
 		out := make([]any, 0, list.Len())
-		for i := 0; i < list.Len(); i++ {
+		for i := range list.Len() {
 			out = append(out, frozenScalarValue(fd, list.Get(i)))
 		}
 		return out

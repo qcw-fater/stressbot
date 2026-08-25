@@ -5,6 +5,7 @@ package script
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -415,7 +416,7 @@ func (rp *RuntimePool) loadScriptFn(L *lua.LState, scriptName string, entry scri
 	}
 	reg, ok := L.Get(lua.RegistryIndex).(*lua.LTable)
 	if !ok {
-		return nil, fmt.Errorf("lua registry 类型异常")
+		return nil, errors.New("lua registry 类型异常")
 	}
 	if v := reg.RawGetInt(slot); v != lua.LNil {
 		return v, nil

@@ -8,11 +8,12 @@ import (
 	"sync"
 	"time"
 
+	"stressbot/internal/workpool"
+
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/shirou/gopsutil/v4/net"
 	"github.com/shirou/gopsutil/v4/process"
-	"stressbot/internal/workpool"
 )
 
 type systemProbe interface {
@@ -35,7 +36,7 @@ func (p *gopsutilSystemProbe) hostCPUPercent() (float64, error) {
 		return 0, err
 	}
 	if len(values) == 0 {
-		return 0, errors.New("system CPU metric unavailable")
+		return 0, errors.New("系统 CPU 指标不可用")
 	}
 	return values[0], nil
 }
@@ -75,7 +76,7 @@ func (p *gopsutilSystemProbe) hostNetworkCounters() (uint64, uint64, error) {
 		return 0, 0, err
 	}
 	if len(values) == 0 {
-		return 0, 0, errors.New("system network metric unavailable")
+		return 0, 0, errors.New("系统网络指标不可用")
 	}
 	return values[0].BytesSent, values[0].BytesRecv, nil
 }
@@ -100,6 +101,8 @@ type SystemMonitor struct {
 	sequence              uint64
 }
 
+// NewSystemMonitor 创建系统资源监控，采集目标为当前进程；
+// 创建时若能读到主机内存则补全 StaticInfo 中的主机总内存。
 func NewSystemMonitor(interval time.Duration, static StaticInfo) (*SystemMonitor, error) {
 	self, err := process.NewProcess(int32(os.Getpid()))
 	if err != nil {
@@ -117,16 +120,19 @@ func NewSystemMonitor(interval time.Duration, static StaticInfo) (*SystemMonitor
 	}, nil
 }
 
+// Static 返回启动时采集的不可变信息（主机内存总量在创建时尽力补全）。
 func (m *SystemMonitor) Static() StaticInfo {
 	return m.static
 }
 
+// Snapshot 返回最近一次采样的系统快照；尚未完成首次采样时为零值。
 func (m *SystemMonitor) Snapshot() SystemSnapshot {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.latest
 }
 
+// Start 立即采样一次并启动固定周期采样循环，随 stopCh 退出。
 func (m *SystemMonitor) Start(_ <-chan struct{}) {
 	m.collect()
 	workpool.Default().Go(func() { m.loop(workpool.Default().StopChan()) })

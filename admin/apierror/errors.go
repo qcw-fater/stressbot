@@ -1,3 +1,4 @@
+// Package apierror 定义 Admin 管理 API 的稳定 JSON 错误契约与全量错误码。
 package apierror
 
 import "net/http"
@@ -31,6 +32,9 @@ func (e *Error) WithDetails(details map[string]any) *Error {
 	return &clone
 }
 
+// 管理 API 的稳定错误码集合（code 与 HTTP 状态一一映射），覆盖任务状态机、
+// 节点可用性、容量与参数校验、历史归档、共享状态、流程库与三类模板库。
+// Message 默认取 code，可经 WithMessage/WithDetails 细化。
 var (
 	ErrTaskNotFound             = NewError("TASK_NOT_FOUND", http.StatusNotFound)
 	ErrTaskConflict             = NewError("TASK_CONFLICT", http.StatusConflict)

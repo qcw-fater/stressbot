@@ -1,19 +1,23 @@
 package grpcapi
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
 	"stressbot/admin/agent"
 	admintask "stressbot/admin/task"
 	"stressbot/controlplane"
-	"stressbot/controlplane/pb"
+	controlpb "stressbot/controlplane/pb"
 	"stressbot/robot"
 )
 
+// TaskAssignmentToProto 把任务分派配置转换为 proto TaskAssignment：校验
+// 任务身份与分片参数，HeartbeatInterval/TCPTimeout/HTTPTimeout 以 duration
+// 字符串解析为纳秒（必须大于 0）。
 func TaskAssignmentToProto(src admintask.Dispatch) (*controlpb.TaskAssignment, error) {
 	if src.TaskID == "" || src.StartIndex < 0 || src.TotalBots <= 0 {
-		return nil, fmt.Errorf("任务分配参数无效")
+		return nil, errors.New("任务分配参数无效")
 	}
 	out := &controlpb.TaskAssignment{
 		TaskId:        src.TaskID,
@@ -99,6 +103,8 @@ func staticInfoFromProto(src *controlpb.StaticInfo) agent.StaticInfo {
 	}
 }
 
+// SystemSnapshotFromProto 把 Agent 上报的系统指标 proto 快照（主机与
+// 进程两级 CPU/内存/网络指标）转换为领域模型 agent.SystemSnapshot。
 func SystemSnapshotFromProto(src *controlpb.SystemMetricSnapshot) *agent.SystemSnapshot {
 	if src == nil {
 		return nil
@@ -155,7 +161,7 @@ func cleanupStatusFromProto(src *controlpb.CleanupStatus) *robot.CleanupStatus {
 
 func finalReportFromProto(src *controlpb.FinalReport) (admintask.CompletionReport, error) {
 	if src == nil || src.AgentId == "" || src.TaskId == "" || src.ReportId == "" {
-		return admintask.CompletionReport{}, fmt.Errorf("最终报告缺少身份字段")
+		return admintask.CompletionReport{}, errors.New("最终报告缺少身份字段")
 	}
 	result, err := taskResultFromProto(src.Result)
 	if err != nil {
@@ -192,7 +198,7 @@ func durationNanos(raw string) (int64, error) {
 		return 0, err
 	}
 	if duration <= 0 {
-		return 0, fmt.Errorf("duration 必须大于 0")
+		return 0, errors.New("duration 必须大于 0")
 	}
 	return int64(duration), nil
 }

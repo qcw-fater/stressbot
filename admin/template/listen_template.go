@@ -13,6 +13,8 @@ import (
 	json "stressbot/internal/jsonx"
 )
 
+// ListenTemplate 是可复用的监听定义模板：Kind 取 silent/declarative/lua 且必须与
+// Data 内容形态一致；DefaultRef 为插入流程时的默认连接引用（server/route/queueSize）。
 type ListenTemplate struct {
 	ID          string          `json:"id"`
 	Name        string          `json:"name"`
@@ -23,6 +25,9 @@ type ListenTemplate struct {
 	CreatedAt   time.Time       `json:"createdAt"`
 	UpdatedAt   time.Time       `json:"updatedAt"`
 }
+
+// ListenTemplateSaveRequest 是创建/更新监听模板的请求体，保存前经
+// validateListenTemplateSave 归一化并校验 Kind 与 Data 形态一致、DefaultRef 字段完整。
 type ListenTemplateSaveRequest struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
@@ -89,15 +94,19 @@ func validateListenTemplateSave(req ListenTemplateSaveRequest) (ListenTemplateSa
 	return req, nil
 }
 
+// ListenTemplateStore 是监听模板的 MySQL 存取层，内置 ID 生成器与读写锁。
 type ListenTemplateStore struct {
 	db     *sql.DB
 	mu     sync.RWMutex
 	nextID func() string
 }
 
+// NewListenTemplateStore 创建监听模板存储；nextID 供创建与快照合并生成新模板 ID。
 func NewListenTemplateStore(db *sql.DB, nextID func() string) *ListenTemplateStore {
 	return &ListenTemplateStore{db: db, nextID: nextID}
 }
+
+// Create 校验并插入一条监听模板，重名（唯一键冲突）映射为 ErrTemplateNameConflict。
 func (s *ListenTemplateStore) Create(ctx context.Context, req ListenTemplateSaveRequest) (*ListenTemplate, error) {
 	req, err := validateListenTemplateSave(req)
 	if err != nil {
@@ -127,6 +136,8 @@ func scanListenTemplate(scanner interface{ Scan(...any) error }) (*ListenTemplat
 	}
 	return &item, nil
 }
+
+// List 按 updated_at 倒序列出全部监听模板。
 func (s *ListenTemplateStore) List(ctx context.Context) ([]ListenTemplate, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -158,11 +169,16 @@ func (s *ListenTemplateStore) get(ctx context.Context, id string) (*ListenTempla
 	}
 	return item, nil
 }
+
+// Get 按 ID 查询单个监听模板，缺失时返回 ErrListenTemplateNotFound。
 func (s *ListenTemplateStore) Get(ctx context.Context, id string) (*ListenTemplate, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.get(ctx, id)
 }
+
+// Update 校验并覆盖指定监听模板的可编辑字段，返回更新后的记录；
+// 目标不存在时返回 ErrListenTemplateNotFound。
 func (s *ListenTemplateStore) Update(ctx context.Context, id string, req ListenTemplateSaveRequest) (*ListenTemplate, error) {
 	req, err := validateListenTemplateSave(req)
 	if err != nil {
@@ -183,6 +199,8 @@ func (s *ListenTemplateStore) Update(ctx context.Context, id string, req ListenT
 	}
 	return s.get(ctx, id)
 }
+
+// Delete 按 ID 删除监听模板；目标不存在时返回 ErrListenTemplateNotFound。
 func (s *ListenTemplateStore) Delete(ctx context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

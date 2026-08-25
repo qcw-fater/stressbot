@@ -1,14 +1,17 @@
+// Package command 实现 Admin 下发给 Agent 的控制命令日志与调度：
+// 命令的写入、按会话的未决投递与 ACK 确认（Bus + Store），以及
+// 启动/停止/关停命令的组装编排（Dispatcher）。
 package command
 
 import (
 	"container/list"
 	"context"
-	"fmt"
+	"errors"
 	"sync"
 	"time"
 
 	"stressbot/admin/grpcapi"
-	"stressbot/controlplane/pb"
+	controlpb "stressbot/controlplane/pb"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -18,6 +21,8 @@ type cachedCommand struct {
 	command *controlpb.Command
 }
 
+// Bus 是命令投递总线：写入经 Store 持久化并唤醒目标 Agent 会话，
+// 读取以 LRU 缓存加速按 ID 解析（返回 proto 克隆，调用方可安全修改）。
 type Bus struct {
 	store    Store
 	sessions *grpcapi.SessionRegistry
@@ -28,6 +33,8 @@ type Bus struct {
 	items    map[string]*list.Element
 }
 
+// NewBus 创建命令总线；capacity 为 LRU 缓存条数上限（非正数回退 8192），
+// idgen 用于给缺少 CommandId 的命令补齐 ID。
 func NewBus(store Store, sessions *grpcapi.SessionRegistry, capacity int, idgen func() string) *Bus {
 	if capacity <= 0 {
 		capacity = 8192
@@ -35,6 +42,8 @@ func NewBus(store Store, sessions *grpcapi.SessionRegistry, capacity int, idgen 
 	return &Bus{store: store, sessions: sessions, idgen: idgen, capacity: capacity, order: list.New(), items: make(map[string]*list.Element)}
 }
 
+// CreateBatch 补齐命令的 CommandId 与 CreatedAtUnixNano 后批量写入 Store，
+// 随后逐条进入缓存并唤醒对应 Agent 的会话以触发投递。
 func (b *Bus) CreateBatch(ctx context.Context, commands []*controlpb.Command) error {
 	now := time.Now().UnixNano()
 	for _, command := range commands {
@@ -55,6 +64,8 @@ func (b *Bus) CreateBatch(ctx context.Context, commands []*controlpb.Command) er
 	return nil
 }
 
+// Resolve 按命令 ID 解析：优先命中 LRU 缓存（并刷新热度），未命中回落
+// Store 读取后回填缓存；两种路径都返回 proto 克隆。
 func (b *Bus) Resolve(ctx context.Context, id string) (*controlpb.Command, error) {
 	b.mu.Lock()
 	if element := b.items[id]; element != nil {
@@ -72,6 +83,8 @@ func (b *Bus) Resolve(ctx context.Context, id string) (*controlpb.Command, error
 	return proto.Clone(command).(*controlpb.Command), nil
 }
 
+// Replay 请求会话重放未决命令：仅发出命令就绪信号，由会话发送循环重新
+// 调用 PendingBatch 拉取补发；ctx 已取消时直接返回错误。
 func (b *Bus) Replay(ctx context.Context, session *grpcapi.Session) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -100,16 +113,18 @@ func (b *Bus) PendingBatch(ctx context.Context, session *grpcapi.Session) ([]*co
 	return commands, nil
 }
 
+// Acknowledge 处理 Agent 的命令 ACK：校验 AgentId/Sequence/TaskId 与日志
+// 记录一致后写入 Store 落终态，并返回被确认的命令。
 func (b *Bus) Acknowledge(ctx context.Context, ack *controlpb.CommandAck) (*controlpb.Command, error) {
 	if ack == nil || ack.CommandId == "" {
-		return nil, fmt.Errorf("命令 ACK 缺少 commandId")
+		return nil, errors.New("命令 ACK 缺少 commandId")
 	}
 	command, err := b.Resolve(ctx, ack.CommandId)
 	if err != nil {
 		return nil, err
 	}
 	if command.AgentId != ack.AgentId || command.Sequence != ack.Sequence || command.TaskId != ack.TaskId {
-		return nil, fmt.Errorf("命令 ACK 与日志记录不匹配")
+		return nil, errors.New("命令 ACK 与日志记录不匹配")
 	}
 	if err := b.store.Acknowledge(ctx, ack.CommandId, ack.Status, ack.Reason); err != nil {
 		return nil, err

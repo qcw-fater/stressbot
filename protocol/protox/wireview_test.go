@@ -131,7 +131,7 @@ func TestWireViewCompatDifferentialFuzz(t *testing.T) {
 
 		// 列表兼容读：对全部顶层 repeated 字段比对长度与逐元素产物。
 		fields := md.Fields()
-		for i := 0; i < fields.Len(); i++ {
+		for i := range fields.Len() {
 			fd := fields.Get(i)
 			if !fd.IsList() {
 				continue

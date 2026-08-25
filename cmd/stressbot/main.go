@@ -1,3 +1,6 @@
+// Package main 是单机压测模式（standalone）的进程入口：解析启动参数
+// （-config 及 flow/proto/scripts/adapter 资源路径覆盖）与守护进程化后，
+// 加载配置、初始化日志与可选 pprof，并在单进程内加载资源、启动机器人加压。
 package main
 
 import (

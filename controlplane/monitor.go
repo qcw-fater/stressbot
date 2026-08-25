@@ -4,7 +4,7 @@ package controlplane
 import (
 	"time"
 
-	"stressbot/controlplane/pb"
+	controlpb "stressbot/controlplane/pb"
 	"stressbot/monitor"
 )
 

@@ -8,16 +8,17 @@ import (
 	"strings"
 	"sync"
 
+	adminapi "stressbot/api/admin"
+
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
 	nethttpmiddleware "github.com/oapi-codegen/nethttp-middleware"
-	"stressbot/api/admin"
 )
 
 var (
 	managementSpecOnce sync.Once
 	managementSpec     *openapi3.T
-	managementSpecErr  error
+	errManagementSpec  error
 )
 
 // Wrap installs the management API schema validator and panic boundary.
@@ -56,12 +57,12 @@ func isDocumentationPath(requestPath string) bool {
 
 func managementOpenAPISpec() (*openapi3.T, error) {
 	managementSpecOnce.Do(func() {
-		managementSpec, managementSpecErr = openapi3.NewLoader().LoadFromData(adminapi.AdminSpec())
-		if managementSpecErr == nil {
-			managementSpecErr = managementSpec.Validate(context.Background())
+		managementSpec, errManagementSpec = openapi3.NewLoader().LoadFromData(adminapi.AdminSpec())
+		if errManagementSpec == nil {
+			errManagementSpec = managementSpec.Validate(context.Background())
 		}
 	})
-	return managementSpec, managementSpecErr
+	return managementSpec, errManagementSpec
 }
 
 func isTaskConfigCatchAll(requestPath string) bool {

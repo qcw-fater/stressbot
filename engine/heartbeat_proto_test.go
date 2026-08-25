@@ -10,8 +10,9 @@ import (
 	"stressbot/protocol/protox"
 	"stressbot/state"
 
-	"go.uber.org/zap"
 	"stressbot/internal/stresslog"
+
+	"go.uber.org/zap"
 )
 
 // ──────────────────────────────────────────────────────────────────────────

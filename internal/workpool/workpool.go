@@ -48,8 +48,8 @@ type Pool struct {
 
 // 错误定义
 var (
-	ErrPoolStopped  = errors.New("work pool is stopped")
-	ErrSubmitFailed = errors.New("submit task to pool failed")
+	ErrPoolStopped  = errors.New("工作协程池已停止")
+	ErrSubmitFailed = errors.New("提交任务到协程池失败")
 )
 
 var (

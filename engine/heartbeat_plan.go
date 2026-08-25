@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 
 	"stressbot/state"
@@ -117,7 +118,7 @@ func (p *HeartbeatPlan) Size() int {
 // 残留字节不会外泄（skip 的 tick 不发包）。
 func (p *HeartbeatPlan) Build(st *state.Store, privateCounters map[int]int64, skipWhenMissing bool) (body []byte, skip bool, err error) {
 	if p == nil {
-		return nil, false, fmt.Errorf("心跳布局未编译（plan 为 nil）")
+		return nil, false, errors.New("心跳布局未编译（plan 为 nil）")
 	}
 	for i := range p.slots {
 		s := &p.slots[i]

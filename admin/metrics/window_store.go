@@ -3,6 +3,7 @@ package metrics
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -12,13 +13,17 @@ import (
 	"stressbot/monitor"
 )
 
+// MetricWindowAcceptStatus 窗口受理结果状态。
 type MetricWindowAcceptStatus string
 
+// 窗口受理结果：MetricWindowAccepted 表示窗口校验通过并已提交；
+// MetricWindowDuplicate 表示序列号不大于该节点已提交值，为重复上报。
 const (
 	MetricWindowAccepted  MetricWindowAcceptStatus = "accepted"
 	MetricWindowDuplicate MetricWindowAcceptStatus = "duplicate"
 )
 
+// MetricWindowAcceptResult 单帧窗口的受理结果。
 type MetricWindowAcceptResult struct {
 	Status MetricWindowAcceptStatus
 }
@@ -43,6 +48,8 @@ type AgentMetricState struct {
 	LatestWindow     monitor.ReportWindow
 }
 
+// MetricHistoryWindow 待归档的节点窗口：除窗口数据外另存机器人/连接即时状态，
+// 供历史时序聚合使用。
 type MetricHistoryWindow struct {
 	AgentID      string
 	ApdexT       int
@@ -52,6 +59,8 @@ type MetricHistoryWindow struct {
 	Window       monitor.ReportWindow
 }
 
+// MetricHistoryBatch 一次历史采样批次：Token 由各节点窗口序列号区间哈希生成，
+// 用于 AckHistory 确认消费的是同一批次。
 type MetricHistoryBatch struct {
 	Token   [sha256.Size]byte
 	Windows []MetricHistoryWindow
@@ -96,6 +105,7 @@ func NewWindowStore(now func() time.Time) *WindowStore {
 	return store
 }
 
+// Accept 校验并提交一帧指标窗口（丢弃计数为 0 的便捷封装），语义同 AcceptWithDrops。
 func (s *WindowStore) Accept(
 	report StressReport,
 	expectedTaskID string,
@@ -105,6 +115,10 @@ func (s *WindowStore) Accept(
 	return s.AcceptWithDrops(report, expectedTaskID, expectedEvery, expectedApdexT, 0)
 }
 
+// AcceptWithDrops 校验并提交一帧指标窗口：先在锁外做 DTO 与 DDSketch 全量校验，
+// 再按 (任务, 节点) 分片加锁检查序列号、丢弃计数、采集代次与累计单调性，
+// 全部通过才覆盖该节点的累计/窗口状态并把窗口追加进待归档历史。
+// 序列号重复返回 duplicate（非错误），其余校验失败返回错误。
 func (s *WindowStore) AcceptWithDrops(
 	report StressReport,
 	expectedTaskID string,
@@ -113,17 +127,17 @@ func (s *WindowStore) AcceptWithDrops(
 	droppedIntervals uint64,
 ) (MetricWindowAcceptResult, error) {
 	if report.AgentID == "" {
-		return MetricWindowAcceptResult{}, fmt.Errorf("指标上报缺少节点 ID")
+		return MetricWindowAcceptResult{}, errors.New("指标上报缺少节点 ID")
 	}
 	if report.TaskID == "" || report.TaskID != expectedTaskID {
 		return MetricWindowAcceptResult{}, fmt.Errorf("指标上报任务不匹配: report=%q current=%q", report.TaskID, expectedTaskID)
 	}
 	if report.Snapshot == nil || report.Snapshot.Window == nil {
-		return MetricWindowAcceptResult{}, fmt.Errorf("指标上报缺少统计窗口")
+		return MetricWindowAcceptResult{}, errors.New("指标上报缺少统计窗口")
 	}
 	window := report.Snapshot.Window
 	if window.Sequence == 0 {
-		return MetricWindowAcceptResult{}, fmt.Errorf("指标窗口序列号必须从 1 开始")
+		return MetricWindowAcceptResult{}, errors.New("指标窗口序列号必须从 1 开始")
 	}
 
 	// Validate the full DTO and DDSketch payload before taking shared state
@@ -190,11 +204,11 @@ func (s *WindowStore) AcceptWithDrops(
 
 func (s *WindowStore) metricShard(key metricStateKey) *metricStateShard {
 	hash := uint64(1469598103934665603)
-	for i := 0; i < len(key.taskID); i++ {
+	for i := range len(key.taskID) {
 		hash = (hash ^ uint64(key.taskID[i])) * 1099511628211
 	}
 	hash = (hash ^ 0xff) * 1099511628211
-	for i := 0; i < len(key.agentID); i++ {
+	for i := range len(key.agentID) {
 		hash = (hash ^ uint64(key.agentID[i])) * 1099511628211
 	}
 	return &s.stateShards[hash&(metricStateShardCount-1)]
@@ -202,7 +216,7 @@ func (s *WindowStore) metricShard(key metricStateKey) *metricStateShard {
 
 func validateMetricReport(snapshot *monitor.CollectorSnapshot, expectedEvery, expectedApdexT time.Duration) error {
 	if snapshot.CollectionEpoch == 0 {
-		return fmt.Errorf("指标采集代次必须从 1 开始")
+		return errors.New("指标采集代次必须从 1 开始")
 	}
 	switch snapshot.TimingDetail {
 	case monitor.TimingRTTOnly, monitor.TimingCodecDetail, monitor.TimingFullDetail:
@@ -211,11 +225,11 @@ func validateMetricReport(snapshot *monitor.CollectorSnapshot, expectedEvery, ex
 	}
 	window := snapshot.Window
 	if !window.StartedAt.Before(window.EndedAt) {
-		return fmt.Errorf("指标窗口时间范围无效")
+		return errors.New("指标窗口时间范围无效")
 	}
 	actualDuration := window.EndedAt.Sub(window.StartedAt)
 	if math.Abs(window.DurationSeconds-actualDuration.Seconds()) > float64(time.Millisecond)/float64(time.Second) {
-		return fmt.Errorf("指标窗口时长与起止时间不一致")
+		return errors.New("指标窗口时长与起止时间不一致")
 	}
 	if expectedEvery <= 0 || math.Abs(window.ExpectedIntervalSeconds-expectedEvery.Seconds()) > float64(time.Millisecond)/float64(time.Second) {
 		return fmt.Errorf("指标上报周期不匹配: report=%.6fs expected=%.6fs", window.ExpectedIntervalSeconds, expectedEvery.Seconds())
@@ -229,11 +243,11 @@ func validateMetricReport(snapshot *monitor.CollectorSnapshot, expectedEvery, ex
 		snapshot.Robots.Started < 0 || snapshot.Robots.Running < 0 || snapshot.Robots.Stopped < 0 || snapshot.Robots.Errored < 0 ||
 		snapshot.Connections.Established < 0 || snapshot.Connections.Active < 0 || snapshot.Connections.Closed < 0 ||
 		snapshot.Connections.Failed < 0 || snapshot.Connections.Dropped < 0 {
-		return fmt.Errorf("指标报告含负数计数")
+		return errors.New("指标报告含负数计数")
 	}
 	if !validDerivedValue(window.Bandwidth.SendMBps, float64(window.Bandwidth.SendBytes)/1024/1024/window.DurationSeconds) ||
 		!validDerivedValue(window.Bandwidth.RecvMBps, float64(window.Bandwidth.RecvBytes)/1024/1024/window.DurationSeconds) {
-		return fmt.Errorf("指标窗口带宽速率与字节数不一致")
+		return errors.New("指标窗口带宽速率与字节数不一致")
 	}
 	if err := validateMetricActions("累计", snapshot.Actions); err != nil {
 		return err
@@ -242,10 +256,10 @@ func validateMetricReport(snapshot *monitor.CollectorSnapshot, expectedEvery, ex
 		return err
 	}
 	if totalActionSamples(snapshot.Actions) != snapshot.TotalActions {
-		return fmt.Errorf("累计动作总数与动作明细不一致")
+		return errors.New("累计动作总数与动作明细不一致")
 	}
 	if totalActionSamples(window.Actions) != window.Summary.SampleCount {
-		return fmt.Errorf("窗口样本总数与动作明细不一致")
+		return errors.New("窗口样本总数与动作明细不一致")
 	}
 	return nil
 }
@@ -417,7 +431,7 @@ func validHistogramValues(histogram monitor.HistogramSnapshot) bool {
 
 func validateCumulativeMonotonic(previous, current *monitor.CollectorSnapshot) error {
 	if current.TotalActions < previous.TotalActions || current.InvalidMetricSamples < previous.InvalidMetricSamples {
-		return fmt.Errorf("顶层累计计数变小")
+		return errors.New("顶层累计计数变小")
 	}
 	currentByName := make(map[string]monitor.ActionSnapshot, len(current.Actions))
 	for _, action := range current.Actions {
@@ -443,6 +457,7 @@ func validateCumulativeMonotonic(previous, current *monitor.CollectorSnapshot) e
 	return nil
 }
 
+// PendingHistoryCount 返回任务尚未持久化的历史窗口数，含正在发送中的批次。
 func (s *WindowStore) PendingHistoryCount(taskID string) int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -453,6 +468,8 @@ func (s *WindowStore) PendingHistoryCount(taskID string) int {
 	return count
 }
 
+// PeekHistory 取出任务的全部待归档窗口组成批次并移入 in-flight，返回批次副本；
+// 已有 in-flight 批次（上次未被 Ack）时直接返回该批次，不合并新窗口。
 func (s *WindowStore) PeekHistory(taskID string) (MetricHistoryBatch, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -472,6 +489,7 @@ func (s *WindowStore) PeekHistory(taskID string) (MetricHistoryBatch, bool) {
 	return cloneMetricHistoryBatch(*batch), true
 }
 
+// AckHistory 确认 in-flight 批次已持久化并删除之；token 与当前批次不匹配时返回 false。
 func (s *WindowStore) AckHistory(taskID string, token [sha256.Size]byte) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -568,6 +586,7 @@ func metricHistoryBatchToken(windows []MetricHistoryWindow) [sha256.Size]byte {
 	return token
 }
 
+// AgentState 读取任务下某节点最近一次提交的累计/窗口状态副本。
 func (s *WindowStore) AgentState(taskID, agentID string) (AgentMetricState, bool) {
 	key := metricStateKey{taskID: taskID, agentID: agentID}
 	shard := s.metricShard(key)
@@ -580,6 +599,7 @@ func (s *WindowStore) AgentState(taskID, agentID string) (AgentMetricState, bool
 	return *state, true
 }
 
+// States 返回任务下全部节点的指标状态副本。
 func (s *WindowStore) States(taskID string) []AgentMetricState {
 	states := make([]AgentMetricState, 0)
 	for i := range s.stateShards {

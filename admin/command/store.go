@@ -4,16 +4,20 @@ import (
 	"context"
 	"errors"
 
-	"stressbot/controlplane/pb"
+	controlpb "stressbot/controlplane/pb"
 )
 
 const commandReplayBatchSize = 256
 
+// 命令日志的哨兵错误：ErrCommandNotFound 表示按 ID 未命中（读路径与
+// ACK 路径共用），ErrCommandStoreFull 表示容量腾挪后仍装不下新批次。
 var (
 	ErrCommandNotFound  = errors.New("命令不存在")
 	ErrCommandStoreFull = errors.New("内存命令日志已满")
 )
 
+// Store 是 Admin 侧命令日志的持久化接口：批量写入、按 ID 读取、按 Agent
+// 与 Sequence 游标拉取未决命令（limit 为单批上限）、按 ACK 状态确认落终态。
 type Store interface {
 	CreateBatch(context.Context, []*controlpb.Command) error
 	Get(context.Context, string) (*controlpb.Command, error)

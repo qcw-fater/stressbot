@@ -5,6 +5,7 @@ package protox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,7 +44,7 @@ func (l *Loader) Load() (*protoregistry.Files, error) {
 	}
 
 	if len(files) == 0 {
-		return nil, fmt.Errorf("未找到任何 .proto 文件")
+		return nil, errors.New("未找到任何 .proto 文件")
 	}
 
 	// 构建 resolver：先从源文件目录查找，再回退到标准 proto 导入

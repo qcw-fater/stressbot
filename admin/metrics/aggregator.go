@@ -16,6 +16,7 @@ type Aggregator struct {
 	now      func() time.Time
 }
 
+// NewAggregator 创建聚合器。now 为可注入时钟，nil 时使用 time.Now。
 func NewAggregator(registry *agentregistry.Registry, windows *WindowStore, now func() time.Time) *Aggregator {
 	if now == nil {
 		now = time.Now
@@ -428,6 +429,8 @@ func systemSnapshotFreshFor(interval string) time.Duration {
 	return value
 }
 
+// SystemSnapshotFreshFor 返回系统指标快照的新鲜窗口：上报周期的 3 倍且不低于
+// 15 秒；周期解析失败或非正时按 5 秒计。
 func SystemSnapshotFreshFor(interval string) time.Duration { return systemSnapshotFreshFor(interval) }
 
 func validPercent(value *float64) *float64 {
@@ -437,6 +440,8 @@ func validPercent(value *float64) *float64 {
 	return pointer(*value)
 }
 
+// ValidPercent 过滤百分比样本：nil、NaN/Inf 或超出 [0,100] 的值返回 nil，
+// 否则返回解引用副本。
 func ValidPercent(value *float64) *float64 { return validPercent(value) }
 
 func validNonNegative(value *float64) *float64 {
@@ -458,6 +463,8 @@ func validHostMemory(snapshot *agentregistry.SystemSnapshot) (uint64, uint64, fl
 	return total, used, float64(used) / float64(total) * 100, true
 }
 
+// ValidHostMemory 从系统快照提取主机内存（总量、已用字节与使用率百分比）；
+// 总量/已用缺失、总量为 0 或已用大于总量时 ok=false。
 func ValidHostMemory(snapshot *agentregistry.SystemSnapshot) (uint64, uint64, float64, bool) {
 	return validHostMemory(snapshot)
 }

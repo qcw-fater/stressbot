@@ -8,11 +8,13 @@
 // 实现为 copy-on-write 表：读侧只做原子 Load + map 读（无锁、无读者计数竞争），
 // 写侧整表复制 + CAS（表在预热后不再增长，写是一次性的）。容量上限防御损坏
 // 帧产出无界垃圾键把表撑爆——超限后直接返回新分配串，不再驻留（正确性无损）。
+
 package codec
 
-import "maps"
-
-import "sync/atomic"
+import (
+	"maps"
+	"sync/atomic"
+)
 
 // internMaxEntries routeKey 驻留表容量上限（正常负载几十条；上限只防损坏帧）。
 const internMaxEntries = 4096

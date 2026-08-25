@@ -1,4 +1,4 @@
-// Package codec 是声明式协议编解码引擎的纯 Go 实现。
+// 声明式协议编解码引擎的纯 Go 实现。
 //
 // 本文件（schema.go）只负责 schema 类型定义、JSON 反序列化（LoadSchema）
 // 与结构校验（Validate）。算法注册表、compile、encode/decode 在后续文件中实现。
@@ -7,6 +7,7 @@
 //   - 不 import gopher-lua；与 adapter/ 完全解耦。
 //   - 畸形配置必须以中文错误显式失败。
 //   - Validate 聚合多条错误后一次性返回，方便前端展示。
+
 package codec
 
 import (
@@ -162,11 +163,15 @@ type FieldBind struct {
 	Condition     string         `json:"condition"`
 }
 
+// MapEntryBind 是 map 型绑定的单个 entry：Key 为 map 键字面量，
+// Value 为该键的值绑定，与 binding.MapEntryBind 同构。
 type MapEntryBind struct {
 	Key   any       `json:"key"`
 	Value FieldBind `json:"value"`
 }
 
+// FilterDef 是绑定值的过滤器声明（path/op/value/source/mode），
+// 与 binding.FilterDef 同构，codec 包只承载不解释。
 type FilterDef struct {
 	Path   string `json:"path"`
 	Op     string `json:"op"`
@@ -189,6 +194,8 @@ type HeartbeatField struct {
 	Unit       string   `json:"unit,omitempty"`
 }
 
+// 绑定与心跳字段的取值来源常量：BindState 用于 FieldBind 的 type/source，
+// HeartbeatSource* 用于 HeartbeatField 的 source。
 const (
 	BindState                   = "state"
 	HeartbeatSourceCounter      = "counter"

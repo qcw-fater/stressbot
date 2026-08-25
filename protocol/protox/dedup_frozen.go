@@ -123,15 +123,15 @@ func estimateMessageCost(ref protoreflect.Message) int {
 			cost += 24 + l.Len()*16
 			switch fd.Kind() {
 			case protoreflect.MessageKind, protoreflect.GroupKind:
-				for i := 0; i < l.Len(); i++ {
+				for i := range l.Len() {
 					cost += estimateMessageCost(l.Get(i).Message())
 				}
 			case protoreflect.StringKind:
-				for i := 0; i < l.Len(); i++ {
+				for i := range l.Len() {
 					cost += len(l.Get(i).String())
 				}
 			case protoreflect.BytesKind:
-				for i := 0; i < l.Len(); i++ {
+				for i := range l.Len() {
 					cost += len(l.Get(i).Bytes())
 				}
 			}

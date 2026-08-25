@@ -1,3 +1,5 @@
+// Package bundle 实现 Admin 下发资源包的本地内容寻址缓存：按 SHA-256 摘要下载、
+// 校验并解压到任务工作目录，供压测任务加载。
 package bundle
 
 import (
@@ -13,14 +15,17 @@ import (
 	"strings"
 	"sync"
 
-	"stressbot/controlplane/pb"
+	controlpb "stressbot/controlplane/pb"
 )
 
+// Cache 是按 SHA-256 摘要内容寻址的资源包缓存，根目录为 <root>/stressbot-bundles，
+// 所有操作互斥串行执行。
 type Cache struct {
 	root string
 	mu   sync.Mutex
 }
 
+// NewCache 创建资源包缓存，root 为任务工作目录，实际缓存在其 stressbot-bundles 子目录。
 func NewCache(root string) (*Cache, error) {
 	root = filepath.Join(root, "stressbot-bundles")
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -29,9 +34,12 @@ func NewCache(root string) (*Cache, error) {
 	return &Cache{root: root}, nil
 }
 
+// Ensure 确保指定摘要的资源包已在本地发布，返回解压后的目录。
+// 已发布（存在 .ready 标记）直接复用；否则复用或断点续传下载 zip（含 SHA-256 与大小校验），
+// 再解压为同名目录。发布目录以摘要命名，相同内容只落一份。
 func (c *Cache) Ensure(ctx context.Context, client controlpb.AgentBundleServiceClient, agentID string, digest []byte, size int64) (string, error) {
 	if client == nil || len(digest) != sha256.Size || size <= 0 {
-		return "", fmt.Errorf("资源包参数无效")
+		return "", errors.New("资源包参数无效")
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -111,7 +119,7 @@ func (c *Cache) downloadAttempt(ctx context.Context, client controlpb.AgentBundl
 		if offset > size {
 			_ = file.Close()
 			_ = os.Remove(part)
-			return fmt.Errorf("资源包大小超出声明值")
+			return errors.New("资源包大小超出声明值")
 		}
 	}
 	if offset != size {
@@ -157,7 +165,7 @@ func verifyBundleFile(name string, digest []byte, size int64) error {
 		return err
 	}
 	if !equalDigest(hash.Sum(nil), digest) {
-		return fmt.Errorf("资源包 SHA-256 校验失败")
+		return errors.New("资源包 SHA-256 校验失败")
 	}
 	return nil
 }

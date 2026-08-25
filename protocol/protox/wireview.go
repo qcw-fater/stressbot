@@ -1,6 +1,7 @@
 package protox
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -34,11 +35,11 @@ import (
 // GetFieldCompat 按 GetField 语义读取字段（含影子采样）。
 func (wv *WireValue) GetFieldCompat(path string) (any, error) {
 	if wv == nil || wv.desc == nil {
-		return nil, fmt.Errorf("WireValue 为空")
+		return nil, errors.New("WireValue 为空")
 	}
 	parts := navSplitCached(path)
 	if len(parts) == 0 {
-		return nil, fmt.Errorf("fieldPath 为空")
+		return nil, errors.New("fieldPath 为空")
 	}
 	got, gerr := wireGetNested(wv.desc, wv.raw, parts)
 	// fd 链暂未接入 wireGetNested（其层级推进含「缺席按默认值实例下钻」的
@@ -235,7 +236,7 @@ func sscanfIndex(seg string) int {
 // limit 语义同 wireCollectList：>0 时收集到至少 limit 个元素即停，<=0 收全量。
 func wireListField(md protoreflect.MessageDescriptor, b []byte, parts []string, limit int) (protoreflect.FieldDescriptor, []wireElem, error) {
 	if len(parts) == 0 {
-		return nil, nil, fmt.Errorf("fieldPath 为空")
+		return nil, nil, errors.New("fieldPath 为空")
 	}
 	for _, part := range parts[:len(parts)-1] {
 		if strings.HasPrefix(part, "[") && strings.HasSuffix(part, "]") {
@@ -310,7 +311,7 @@ func (c *WireListCursor) Item(i int) any {
 // 字段时"空迭代"的历史行为；结构损坏 / 路径非法返回 error。
 func (wv *WireValue) ListCursorCompat(path string) (*WireListCursor, error) {
 	if wv == nil || wv.desc == nil {
-		return nil, fmt.Errorf("WireValue 为空")
+		return nil, errors.New("WireValue 为空")
 	}
 	fd, elems, err := wireListField(wv.desc, wv.raw, navSplitCached(path), 0)
 	if err != nil {
@@ -329,7 +330,7 @@ func (wv *WireValue) ListCursorCompat(path string) (*WireListCursor, error) {
 // ListLenCompat GetListLen 的 wire 版。
 func (wv *WireValue) ListLenCompat(path string) (int, error) {
 	if wv == nil || wv.desc == nil {
-		return 0, fmt.Errorf("WireValue 为空")
+		return 0, errors.New("WireValue 为空")
 	}
 	fd, elems, err := wireListField(wv.desc, wv.raw, navSplitCached(path), 0)
 	if err != nil {
@@ -345,7 +346,7 @@ func (wv *WireValue) ListLenCompat(path string) (int, error) {
 // （调用方以只读视图包装，只读性全树传播）。
 func (wv *WireValue) ListItemCompat(path string, idx int) (any, error) {
 	if wv == nil || wv.desc == nil {
-		return nil, fmt.Errorf("WireValue 为空")
+		return nil, errors.New("WireValue 为空")
 	}
 	if idx < 0 {
 		return nil, fmt.Errorf("数组索引越界: %d", idx)

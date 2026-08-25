@@ -1,4 +1,4 @@
-// Package codec — hash/HMAC 算法实现。
+// hash/HMAC 算法实现。
 //
 // 接口语义：Hasher.Hash(data, key, params) []byte；
 //   - key 为空 → 走原始哈希；
@@ -8,6 +8,7 @@
 // 可按需 hex/base64 编码。
 //
 // 注册的哈希算法：md5、sha1、sha256（key 非空时自动走对应 HMAC）。
+
 package codec
 
 import (

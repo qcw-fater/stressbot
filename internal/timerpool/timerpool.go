@@ -1,3 +1,5 @@
+// Package timerpool 提供全局 time.Timer 池：高频等待点通过 Get/Put 复用
+// timer 消除逐次分配，正确性依赖 Go 1.23+ 的无缓冲 timer channel 语义。
 package timerpool
 
 import (

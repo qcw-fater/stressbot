@@ -1,3 +1,5 @@
+// Package stresslog 提供基于 zap + lumberjack 的全局日志：控制台与轮转文件
+// 双输出、级别可调，DPanic 及以上级别自动推送企业微信告警。
 package stresslog
 
 import (
@@ -51,6 +53,9 @@ func GetLocalIP() string {
 	}
 	return ""
 }
+
+// PushPanicMsgToQYWX 把 DPanic 及以上级别的日志条目拼装为带调用位置、
+// 进程信息与堆栈的 Markdown 告警文本，推送到企业微信 webhook。
 func PushPanicMsgToQYWX(entry zapcore.Entry) {
 	data := "# " + entry.Message + "\n"
 	data += "Time: " + time.Now().Format("2006-01-02 15:04:05") + "\n"

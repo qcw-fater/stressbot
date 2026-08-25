@@ -1,3 +1,5 @@
+// Package engine 遍历 flow 流程图并执行声明式动作：构建绑定字段、编码发送、
+// 等待响应与监听推送，实际网络与机器人工作通过 ActionHandler 接口委托外部完成。
 package engine
 
 import (
@@ -42,6 +44,10 @@ const (
 	randomStringCharsetAlphanum = randomStringCharsetAlpha + randomStringCharsetNumeric
 )
 
+// TimingStage* 位掩码标记一次 action 实际观测到的计时点：RTT（网络往返）、ListenWait（监听等待）、
+// Build/Encode/Send（客户端构建与编码发送）、DecodeWait/Decode（响应到达与解码）、
+// DispatchWait（分派等待）、ParseStore（解析入 state）。RequestTiming/ClientTiming 的 Observed
+// 字段按位组合这些标志，用于区分「耗时为 0」与「该计时点未发生」。
 const (
 	TimingStageRTT uint16 = 1 << iota
 	TimingStageListenWait

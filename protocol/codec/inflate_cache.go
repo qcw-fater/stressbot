@@ -18,6 +18,7 @@
 //
 // 生命周期：进程级全局（codec 无任务边界感知），双上界 LRU 自清洁；跨任务的
 // 陈旧条目最多钉住 maxBytes，由后续驱逐自然换血。观测：/debug/inflate。
+
 package codec
 
 import (

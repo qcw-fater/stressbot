@@ -25,6 +25,9 @@ type RequestTiming struct {
 // TimingStage 区分“没有采集”与“实际测得 0ns”。
 type TimingStage uint16
 
+// TimingStage 位标志取值：StageRTT 为纯网络往返，StageListenWait 为监听等待，
+// 其余为客户端单 action 的构建/编码/发送/解码排队/解码/分发等待/解析入库各阶段。
+// Observed 置位表示该阶段实际测过，用于区分「未采集」与「测得 0ns」。
 const (
 	StageRTT TimingStage = 1 << iota
 	StageListenWait
@@ -37,6 +40,7 @@ const (
 	StageParseStore
 )
 
+// Has 报告是否采集过指定阶段（s 与 stage 有位交集即视为采集过）。
 func (s TimingStage) Has(stage TimingStage) bool { return s&stage != 0 }
 
 // ClientTiming 单次 action 的客户端侧耗时拆解。
@@ -78,6 +82,8 @@ func (t *ActionTiming) wireRTTSum() time.Duration {
 // ActionResult 动作执行结果类型。
 type ActionResult int
 
+// ActionResult 取值：ResultSuccess 成功；ResultFailure 业务失败（非超时）；
+// ResultTimeout 超时（请求/监听在窗口内无响应）；ResultCanceled 因任务停止或连接断开被取消。
 const (
 	ResultSuccess  ActionResult = iota // 执行成功
 	ResultFailure                      // 执行失败（非超时）
@@ -194,8 +200,11 @@ func newActionMetrics(relativeAccuracy float64, maxBins int) *actionMetrics {
 	}
 }
 
+// TimingDetailLevel 计时细分级别，决定耗时拆解的采集粒度（级别越高开销越大）。
 type TimingDetailLevel string
 
+// TimingDetailLevel 取值：TimingRTTOnly 仅采集 RTT；TimingCodecDetail 增加
+// 编解码相关分项；TimingFullDetail 含全部客户端分项。
 const (
 	TimingRTTOnly     TimingDetailLevel = "rtt"
 	TimingCodecDetail TimingDetailLevel = "codec"
@@ -282,6 +291,7 @@ var (
 	globalOnce sync.Once
 )
 
+// NormalizeTimingDetail 归一化计时级别：空串与非法值均回退到 TimingRTTOnly。
 func NormalizeTimingDetail(value string) TimingDetailLevel {
 	switch TimingDetailLevel(value) {
 	case TimingCodecDetail:
@@ -647,17 +657,23 @@ func (c *MetricsCollector) RobotStarted() {
 		c.robotsStarted.Add(1)
 	}
 }
+
+// RobotRunning 记录一个机器人进入运行态（running 计数 +1）。对 nil receiver 安全。
 func (c *MetricsCollector) RobotRunning() {
 	if c != nil && c.enabled {
 		c.robotsRunning.Add(1)
 	}
 }
+
+// RobotStopped 记录一个机器人正常停止（running -1、stopped +1）。对 nil receiver 安全。
 func (c *MetricsCollector) RobotStopped() {
 	if c != nil && c.enabled {
 		c.robotsRunning.Add(-1)
 		c.robotsStopped.Add(1)
 	}
 }
+
+// RobotErrored 记录一个机器人异常退出（running -1、errored +1）。对 nil receiver 安全。
 func (c *MetricsCollector) RobotErrored() {
 	if c != nil && c.enabled {
 		c.robotsRunning.Add(-1)
@@ -697,11 +713,16 @@ func (c *MetricsCollector) ConnClosed() {
 		c.connClosed.Add(1)
 	}
 }
+
+// ConnFailed 记录一次连接建立失败。对 nil receiver 安全（monitor 未 Init 时 no-op）。
 func (c *MetricsCollector) ConnFailed() {
 	if c != nil && c.enabled {
 		c.connFailed.Add(1)
 	}
 }
+
+// ConnDropped 记录一次连接意外断开（服务端关闭/网络异常，不影响 active 计数——
+// 该路径由 ConnClosed 统一扣减）。对 nil receiver 安全（monitor 未 Init 时 no-op）。
 func (c *MetricsCollector) ConnDropped() {
 	if c != nil && c.enabled {
 		c.connDropped.Add(1)
@@ -760,6 +781,7 @@ func (c *MetricsCollector) Enabled() bool {
 	return c != nil && c.enabled
 }
 
+// TimingDetail 返回当前计时细分级别；nil receiver 返回 TimingRTTOnly。
 func (c *MetricsCollector) TimingDetail() TimingDetailLevel {
 	if c == nil {
 		return TimingRTTOnly

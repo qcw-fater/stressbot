@@ -11,6 +11,7 @@
 //
 // 并发契约与嵌套容器一致：Overlay 的 overrides 只由执行器 goroutine 在 Store 写锁内
 // 改写；读经 Store 读锁（GetPath）或执行器自身，无并发写。
+
 package state
 
 // tombstone 标记 overlay 中被置 nil 的键：读视为不存在，物化时从基座结果中删除。

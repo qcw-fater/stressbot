@@ -13,16 +13,21 @@ import (
 	json "stressbot/internal/jsonx"
 )
 
+// FlowSnapshot 是流程模板库的全量导出：Revision 为内容摘要，
+// 用作整体恢复的乐观锁预检。
 type FlowSnapshot struct {
 	Revision string               `json:"revision"`
 	Items    []FlowTemplateDetail `json:"items"`
 }
 
+// ReplaceFlowSnapshotRequest 是整体替换流程模板库的请求：
+// ExpectedRevision 必须与当前库内容摘要一致，否则替换被拒绝。
 type ReplaceFlowSnapshotRequest struct {
 	ExpectedRevision string               `json:"expectedRevision"`
 	Items            []FlowTemplateDetail `json:"items"`
 }
 
+// ReplaceFlowSnapshotResponse 返回替换后流程库的内容摘要与条目数。
 type ReplaceFlowSnapshotResponse struct {
 	Revision string `json:"revision"`
 	Count    int    `json:"count"`
@@ -67,6 +72,7 @@ func listFlowDetails(ctx context.Context, q flowSnapshotQuerier) ([]FlowTemplate
 	return items, nil
 }
 
+// Snapshot 导出流程模板库全量快照（按 id 排序），Revision 为内容摘要。
 func (s *FlowTemplateStore) Snapshot(ctx context.Context) (*FlowSnapshot, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -82,6 +88,9 @@ func (s *FlowTemplateStore) Snapshot(ctx context.Context) (*FlowSnapshot, error)
 	return &FlowSnapshot{Revision: revision, Items: items}, nil
 }
 
+// ReplaceSnapshot 在事务内整体替换流程模板库：先校验每条记录（ID 唯一且不超过 32 字符、
+// 名称合法、节点/动作数与 flow_json 一致、layout 为合法 JSON），比对 ExpectedRevision
+// 通过后 DELETE + 重插全部条目；摘要不一致返回 ErrFlowSnapshotConflict。
 func (s *FlowTemplateStore) ReplaceSnapshot(ctx context.Context, req ReplaceFlowSnapshotRequest) (*ReplaceFlowSnapshotResponse, error) {
 	items := append([]FlowTemplateDetail(nil), req.Items...)
 	if err := validateFlowSnapshotItems(items); err != nil {
@@ -162,7 +171,7 @@ func validateFlowSnapshotItems(items []FlowTemplateDetail) error {
 			return apierror.ErrInvalidArgument.WithMessage(fmt.Sprintf("第 %d 个流程 ID 无效", i+1))
 		}
 		if _, ok := seen[item.ID]; ok {
-			return apierror.ErrInvalidArgument.WithMessage(fmt.Sprintf("流程 ID 重复：%s", item.ID))
+			return apierror.ErrInvalidArgument.WithMessage("流程 ID 重复：" + item.ID)
 		}
 		seen[item.ID] = struct{}{}
 

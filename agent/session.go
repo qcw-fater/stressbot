@@ -6,7 +6,7 @@ import (
 
 	"stressbot/agent/metrics"
 	"stressbot/agent/session"
-	"stressbot/controlplane/pb"
+	controlpb "stressbot/controlplane/pb"
 	"stressbot/internal/workpool"
 
 	"google.golang.org/grpc"

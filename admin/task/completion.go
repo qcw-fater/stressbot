@@ -12,25 +12,33 @@ import (
 	"go.uber.org/zap"
 )
 
+// CompletionService 汇总各 Agent 的任务完成汇报：接收阶段/最终报告，
+// 全部预期 Agent 汇报完毕后聚合清理摘要并把任务推进到 Stopped。
 type CompletionService struct {
 	tasks  *Store
 	agents *agent.Registry
 }
 
+// NewCompletionService 创建完成汇报服务，tasks 提供任务存储，agents 提供节点注册表。
 func NewCompletionService(tasks *Store, agents *agent.Registry) *CompletionService {
 	return &CompletionService{tasks: tasks, agents: agents}
 }
 
+// PermanentReportError 标记不可重试的汇报错误（如节点不属于该任务）：调用方应终态 NACK
+// 丢弃，不能按瞬时故障重放，否则 Agent 会无限重发同一份报告。
 type PermanentReportError struct{ Err error }
 
 func (e *PermanentReportError) Error() string { return e.Err.Error() }
 func (e *PermanentReportError) Unwrap() error { return e.Err }
 
+// IsPermanentReportError 判断汇报错误是否不可重试：PermanentReportError 或任务已不存在。
 func IsPermanentReportError(err error) bool {
 	_, ok := errors.AsType[*PermanentReportError](err)
 	return ok || errors.Is(err, apierror.ErrTaskNotFound)
 }
 
+// OwnsActiveTask 判断 agentID 是否仍是 taskID 活跃任务的待汇报成员：
+// 任务须为当前活跃任务、该 Agent 在预期名单中且尚未提交最终报告（用于会话接管与心跳路由判定）。
 func (s *CompletionService) OwnsActiveTask(agentID, taskID string) bool {
 	if taskID == "" {
 		return false
@@ -46,6 +54,9 @@ func (s *CompletionService) OwnsActiveTask(agentID, taskID string) bool {
 	return ok
 }
 
+// Accept 接收一份 Agent 汇报：StageIndex>0 视为阶段报告（同 Agent 同阶段幂等覆盖），
+// 否则为最终报告；全员汇报完毕时聚合清理摘要并按当前状态流转到 Stopped。
+// 汇报者不在预期名单时返回 PermanentReportError。
 func (s *CompletionService) Accept(report CompletionReport) error {
 	s.agents.Touch(report.AgentID, "")
 	isFinal := report.StageIndex <= 0
@@ -105,6 +116,8 @@ func (s *CompletionService) Accept(report CompletionReport) error {
 	return err
 }
 
+// FinishIfFullyReported 补偿收口：若任务处于 Running 且所有预期 Agent 均已提交最终报告，
+// 则补写聚合清理摘要并流转到 Stopped；任一条件不满足时静默返回。
 func (s *CompletionService) FinishIfFullyReported(taskID string) {
 	task, ok := s.tasks.Get(taskID)
 	if !ok || task.State != Running {
@@ -123,6 +136,8 @@ func (s *CompletionService) FinishIfFullyReported(taskID string) {
 	_, _ = s.tasks.Transition(taskID, Running, Stopped)
 }
 
+// AggregateCleanup 汇总全部 Agent 的最终清理状态：未上报者按停止等待超时补 unknown，
+// 再经 MergeCleanupStatus 以 AdminStop 为主因合并成单份任务级清理摘要；无报告时返回 nil。
 func AggregateCleanup(task *Task) *robot.CleanupStatus {
 	if task == nil || len(task.Reports) == 0 {
 		return nil

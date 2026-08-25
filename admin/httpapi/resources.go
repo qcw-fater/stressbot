@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -36,11 +37,11 @@ func (r resourceStore) List(kind resourceKind, extension string) ([]string, erro
 
 func (r resourceStore) File(kind resourceKind, name string) (string, error) {
 	if name == "" {
-		return "", fmt.Errorf("缺少文件名")
+		return "", errors.New("缺少文件名")
 	}
 	base := filepath.Base(name)
 	if base == "." || base == ".." || base != name {
-		return "", fmt.Errorf("文件名无效")
+		return "", errors.New("文件名无效")
 	}
 	return filepath.Join(r.root, string(kind), base), nil
 }

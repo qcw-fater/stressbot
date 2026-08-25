@@ -1,3 +1,4 @@
+// Package task 提供 Admin 侧压测任务的存储、状态机流转、Agent 分配与完成汇报汇总。
 package task
 
 import (
@@ -57,6 +58,7 @@ func NewStore(dataDir string) (*Store, error) {
 	return &Store{Repository: store}, nil
 }
 
+// StartTask 将任务从 Pending 推进到 Starting（校验状态机合法性与单活跃任务约束）。
 func (s *Store) StartTask(id string) (*Task, error) {
 	return s.Begin(id, Pending, Starting)
 }

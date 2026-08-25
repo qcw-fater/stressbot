@@ -1,3 +1,4 @@
+// Package mysql 提供 Admin 的 MySQL 连接池初始化与数据库结构（内置 DDL）管理。
 package mysql
 
 import (

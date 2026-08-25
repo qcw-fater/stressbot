@@ -39,7 +39,7 @@ func (r *Registry) indexMessages() {
 
 // indexFromDescriptor 递归索引嵌套消息
 func indexFromDescriptor(msgs protoreflect.MessageDescriptors, result map[string]protoreflect.MessageDescriptor) {
-	for i := 0; i < msgs.Len(); i++ {
+	for i := range msgs.Len() {
 		md := msgs.Get(i)
 		fullName := string(md.FullName())
 		result[fullName] = md

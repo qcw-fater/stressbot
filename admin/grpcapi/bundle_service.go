@@ -1,3 +1,5 @@
+// Package grpcapi 实现 Admin 控制面的 gRPC 服务：Agent 双向会话流
+// （命令投递/心跳/最终报告）、指标上报与资源包分块下载。
 package grpcapi
 
 import (
@@ -7,7 +9,7 @@ import (
 	"os"
 
 	"stressbot/admin/bundle"
-	"stressbot/controlplane/pb"
+	controlpb "stressbot/controlplane/pb"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

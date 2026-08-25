@@ -2,7 +2,7 @@ package metrics
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"sync"
 	"time"
 
@@ -73,6 +73,7 @@ func taskSystemAgentIDs(task *admintask.Task) []string {
 	return ids
 }
 
+// NewSampler 创建时序采样器。
 func NewSampler(interval time.Duration, agg *Aggregator, hist historyWriter, reg *agent.Registry, tasks *admintask.Store, windows *WindowStore) *Sampler {
 	return &Sampler{
 		interval:   interval,
@@ -84,6 +85,7 @@ func NewSampler(interval time.Duration, agg *Aggregator, hist historyWriter, reg
 	}
 }
 
+// Start 为指定任务启动采样循环；同一时刻只允许一个任务在采，已有任务时返回冲突错误。
 func (s *Sampler) Start(taskID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -107,6 +109,9 @@ func (s *Sampler) Start(taskID string) error {
 	return nil
 }
 
+// Stop 停止指定任务的采样循环并等待退出，随后冲刷一次终态指标；
+// 任务 ID 不匹配时不做任何事。终态写入失败转入后台指数退避重试，
+// 避免任务停止时丢失最后一段趋势数据。
 func (s *Sampler) Stop(taskID string) {
 	s.mu.Lock()
 	job := s.current
@@ -232,7 +237,7 @@ func (s *Sampler) sampleOnce(ctx context.Context, taskID string, sampledAt time.
 		return false, err
 	}
 	if !s.windows.AckHistory(taskID, batch.Token) {
-		return false, fmt.Errorf("确认历史指标批次失败")
+		return false, errors.New("确认历史指标批次失败")
 	}
 	return true, nil
 }

@@ -1,6 +1,7 @@
 package flow
 
 import (
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -81,7 +82,7 @@ func (p *conditionProgram) evalNode(index conditionNodeIndex, context *condition
 		return node.value, nil
 	case conditionNodePath:
 		if context.store == nil {
-			err := fmt.Errorf("state store 为空")
+			err := errors.New("state store 为空")
 			context.recordError(err)
 			return nil, err
 		}

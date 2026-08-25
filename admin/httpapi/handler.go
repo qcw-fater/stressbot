@@ -13,6 +13,8 @@ import (
 	"stressbot/state/shared"
 )
 
+// Dependencies 是 HTTP 管理面的装配依赖：各领域存储/注册表/模板资源，
+// 以及任务调度与收尾回调（由应用层注入，Handler 只做转发）。
 type Dependencies struct {
 	StaticDir       string
 	Redis           *shared.RedisConfig
@@ -35,6 +37,8 @@ type Dependencies struct {
 	StartStopTimeout          func(string)
 }
 
+// Handler 是浏览器管理 API 的处理器集合：持有任务、Agent、指标、历史
+// 与模板资源依赖；具体路由在各 *_routes.go 中注册。
 type Handler struct {
 	staticDir       string
 	redis           *shared.RedisConfig
@@ -57,6 +61,7 @@ type Handler struct {
 	startStopTimeout          func(string)
 }
 
+// NewHandler 用 Dependencies 装配 Handler，任务调度回调收存为内部函数字段。
 func NewHandler(deps Dependencies) *Handler {
 	return &Handler{
 		staticDir: deps.StaticDir, redis: deps.Redis, tasks: deps.Tasks, agents: deps.Agents,
@@ -71,6 +76,8 @@ func NewHandler(deps Dependencies) *Handler {
 	}
 }
 
+// Routes 返回管理面完整路由处理器：顶层带 panic 恢复中间件，并托管前端
+// 静态资源。
 func (s *Handler) Routes() http.Handler { return s.registerManagementRoutes() }
 
 func (s *Handler) redisEnabled() bool { return s.redis != nil && s.redis.Enabled() }

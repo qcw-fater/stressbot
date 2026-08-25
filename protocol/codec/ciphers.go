@@ -1,4 +1,4 @@
-// Package codec — cipher 算法实现。
+// cipher 算法实现。
 //
 // 每个 cipher 在外层做 offset 适配（前 offset 字节明文保留 + 对 data[offset:] 做核心变换），
 // 核心变换（encryptXorCarryRol 等）为各算法的加密/解密本体。
@@ -9,6 +9,7 @@
 //   - Encrypt/Decrypt(data, key, offset, params) → out, err
 //   - data[:offset] 必须原样保留到 out 中；只变换 data[offset:]；len(out)==len(data)。
 //   - offset 越界（> len(data)）钳位到 len(data)；负值视为 0。
+
 package codec
 
 import (
@@ -84,7 +85,7 @@ func encryptXor(data, key []byte) {
 }
 
 // errInvalidPadding PKCS#7 填充校验失败时返回的错误。
-var errInvalidPadding = errors.New("invalid pkcs7 padding")
+var errInvalidPadding = errors.New("pkcs7 填充非法")
 
 // pkcs7Pad PKCS#7 填充。块对齐时额外填充一个完整块。
 func pkcs7Pad(data []byte, blockSize int) []byte {
@@ -374,7 +375,7 @@ func (aesEcbCipher) Decrypt(data, key []byte, offset int, _ map[string]any) ([]b
 	off := clampOffset(offset, len(data))
 	ct := data[off:]
 	if len(ct)%aes.BlockSize != 0 {
-		return nil, errors.New("ciphertext is not a multiple of block size")
+		return nil, errors.New("密文长度不是块大小的整数倍")
 	}
 	plain := make([]byte, len(ct))
 	for i := 0; i < len(ct); i += aes.BlockSize {
@@ -444,7 +445,7 @@ func (c aesCbcCipher) Decrypt(data, key []byte, offset int, params map[string]an
 	off := clampOffset(offset, len(data))
 	ct := data[off:]
 	if len(ct)%aes.BlockSize != 0 {
-		return nil, errors.New("ciphertext is not a multiple of block size")
+		return nil, errors.New("密文长度不是块大小的整数倍")
 	}
 	plain := make([]byte, len(ct))
 	mode := cipher.NewCBCDecrypter(block, iv)
@@ -551,7 +552,7 @@ func (c xxteaCipher) Decrypt(data, key []byte, offset int, _ map[string]any) ([]
 	off := clampOffset(offset, len(data))
 	body := data[off:]
 	if len(body)%4 != 0 || len(body) < 8 {
-		return nil, errors.New("invalid xxtea data length")
+		return nil, errors.New("xxtea 数据长度非法")
 	}
 	k := c.keyWords(key)
 	dec := decryptXXTEA(body, k)

@@ -3,12 +3,13 @@ package command
 import (
 	"container/list"
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
 	"time"
 
-	"stressbot/controlplane/pb"
+	controlpb "stressbot/controlplane/pb"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -18,6 +19,8 @@ type memoryCommand struct {
 	state   string
 }
 
+// MemoryStore 是 Store 的内存实现：命令按 ID 索引，每个 Agent 维持按
+// Sequence 递增的未决队列，落终态的命令进入 FIFO 供容量满时优先淘汰。
 type MemoryStore struct {
 	mu               sync.RWMutex
 	commands         map[string]*memoryCommand
@@ -27,6 +30,7 @@ type MemoryStore struct {
 	capacity         int
 }
 
+// NewMemoryStore 创建内存命令日志；capacity 为命令总条数上限，非正数回退 100000。
 func NewMemoryStore(capacity int) *MemoryStore {
 	if capacity <= 0 {
 		capacity = 100_000
@@ -39,6 +43,9 @@ func NewMemoryStore(capacity int) *MemoryStore {
 	}
 }
 
+// CreateBatch 批量写入命令：先整批校验身份字段、body 类型与 ID 唯一性
+// （任一失败整批拒绝），再腾出容量（不足返回 ErrCommandStoreFull），
+// 逐条分配全局递增 Sequence 后以 pending 状态入队并克隆留存。
 func (s *MemoryStore) CreateBatch(ctx context.Context, commands []*controlpb.Command) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -48,7 +55,7 @@ func (s *MemoryStore) CreateBatch(ctx context.Context, commands []*controlpb.Com
 	seen := make(map[string]struct{}, len(commands))
 	for _, command := range commands {
 		if command == nil || command.CommandId == "" || command.AgentId == "" {
-			return fmt.Errorf("命令身份字段无效")
+			return errors.New("命令身份字段无效")
 		}
 		if _, err := commandKind(command); err != nil {
 			return err
@@ -98,6 +105,7 @@ func (s *MemoryStore) makeRoomLocked(needed int) bool {
 	return true
 }
 
+// Get 按命令 ID 读取，返回 proto 克隆；不存在时返回 ErrCommandNotFound。
 func (s *MemoryStore) Get(ctx context.Context, id string) (*controlpb.Command, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -111,6 +119,8 @@ func (s *MemoryStore) Get(ctx context.Context, id string) (*controlpb.Command, e
 	return proto.Clone(record.command).(*controlpb.Command), nil
 }
 
+// Pending 返回指定 Agent 中 Sequence 大于 after 的未决命令（二分定位游标），
+// 单批上限 limit，非法值回退 commandReplayBatchSize；结果为 proto 克隆。
 func (s *MemoryStore) Pending(ctx context.Context, agentID string, after uint64, limit int) ([]*controlpb.Command, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -132,6 +142,8 @@ func (s *MemoryStore) Pending(ctx context.Context, agentID string, after uint64,
 	return out, nil
 }
 
+// Acknowledge 把 pending 命令落为终态（APPLIED/DUPLICATE → acked，
+// REJECTED → rejected）并从未决队列挪入终态 FIFO；重复 ACK 幂等无效果。
 func (s *MemoryStore) Acknowledge(ctx context.Context, id string, status controlpb.CommandAckStatus, _ string) error {
 	if err := ctx.Err(); err != nil {
 		return err

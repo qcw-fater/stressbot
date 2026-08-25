@@ -1,3 +1,6 @@
+// Package main 是 Agent 节点的进程入口：解析启动参数与守护进程化后，
+// 加载 conf/agent.toml 配置、初始化日志与可选 pprof，构造 Agent 节点并
+// 主动连接 Admin 接收下发任务，随 SIGINT/SIGTERM 优雅退出。
 package main
 
 import (

@@ -155,14 +155,14 @@ func utilsRandomPickN(L *lua.LState) int {
 	if n > length {
 		n = length
 	}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		j := rand.Intn(len(all)-i) + i
 		all[i], all[j] = all[j], all[i]
 	}
 
 	// 构建结果表
 	result := L.CreateTable(n, 0)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		result.RawSetInt(i+1, all[i])
 	}
 
@@ -266,13 +266,13 @@ func utilsRandFilter(L *lua.LState) int {
 	if count > len(candidates) {
 		count = len(candidates)
 	}
-	for i := 0; i < count; i++ {
+	for i := range count {
 		j := rand.Intn(len(candidates)-i) + i
 		candidates[i], candidates[j] = candidates[j], candidates[i]
 	}
 
 	result := L.CreateTable(count, 0)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		result.RawSetInt(i+1, candidates[i])
 	}
 	L.Push(result)

@@ -11,7 +11,7 @@ import (
 	"stressbot/admin/bundle"
 	"stressbot/admin/metrics"
 	admintask "stressbot/admin/task"
-	"stressbot/controlplane/pb"
+	controlpb "stressbot/controlplane/pb"
 	"stressbot/internal/stresslog"
 	"stressbot/internal/workpool"
 	"stressbot/robot"
@@ -45,6 +45,8 @@ type Dependencies struct {
 	IsPermanentReportError func(error) bool
 }
 
+// CommandBus 是控制面服务依赖的命令投递接口：重放唤醒会话、按投递游标
+// 批量取未决命令、确认 Agent 的命令 ACK。
 type CommandBus interface {
 	Replay(context.Context, *Session) error
 	PendingBatch(context.Context, *Session) ([]*controlpb.Command, error)

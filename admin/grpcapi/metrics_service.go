@@ -4,7 +4,7 @@ import (
 	"errors"
 	"io"
 
-	"stressbot/controlplane/pb"
+	controlpb "stressbot/controlplane/pb"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

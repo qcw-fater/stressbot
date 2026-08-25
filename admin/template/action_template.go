@@ -1,3 +1,5 @@
+// Package template 实现共享模板库的 MySQL 存储：动作/监听/流程三类模板的
+// CRUD、保存前校验与带乐观锁的快照导出/整体恢复。
 package template
 
 import (
@@ -14,6 +16,8 @@ import (
 	json "stressbot/internal/jsonx"
 )
 
+// ActionTemplate 是可复用的动作定义模板：Pattern 限定 14 种动作形态，
+// Data 为对应 ActionDef 的 JSON 对象。
 type ActionTemplate struct {
 	ID          string          `json:"id"`
 	Name        string          `json:"name"`
@@ -24,6 +28,8 @@ type ActionTemplate struct {
 	UpdatedAt   time.Time       `json:"updatedAt"`
 }
 
+// ActionTemplateSaveRequest 是创建/更新动作模板的请求体，保存前经
+// validateActionTemplateSave 归一化并按 pattern 校验必填字段（service/route/address 等）。
 type ActionTemplateSaveRequest struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
@@ -116,16 +122,19 @@ func validateActionTemplateSave(req ActionTemplateSaveRequest) (ActionTemplateSa
 	return req, nil
 }
 
+// ActionTemplateStore 是动作模板的 MySQL 存取层，内置 ID 生成器与读写锁。
 type ActionTemplateStore struct {
 	db     *sql.DB
 	mu     sync.RWMutex
 	nextID func() string
 }
 
+// NewActionTemplateStore 创建动作模板存储；nextID 供创建与快照合并生成新模板 ID。
 func NewActionTemplateStore(db *sql.DB, nextID func() string) *ActionTemplateStore {
 	return &ActionTemplateStore{db: db, nextID: nextID}
 }
 
+// Create 校验并插入一条动作模板，重名（唯一键冲突）映射为 ErrTemplateNameConflict。
 func (s *ActionTemplateStore) Create(ctx context.Context, req ActionTemplateSaveRequest) (*ActionTemplate, error) {
 	req, err := validateActionTemplateSave(req)
 	if err != nil {
@@ -156,6 +165,7 @@ func scanActionTemplate(scanner interface{ Scan(...any) error }) (*ActionTemplat
 	return &item, nil
 }
 
+// List 按 updated_at 倒序列出全部动作模板。
 func (s *ActionTemplateStore) List(ctx context.Context) ([]ActionTemplate, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -190,12 +200,15 @@ func (s *ActionTemplateStore) get(ctx context.Context, id string) (*ActionTempla
 	return item, nil
 }
 
+// Get 按 ID 查询单个动作模板，缺失时返回 ErrActionTemplateNotFound。
 func (s *ActionTemplateStore) Get(ctx context.Context, id string) (*ActionTemplate, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.get(ctx, id)
 }
 
+// Update 校验并覆盖指定动作模板的可编辑字段，返回更新后的记录；
+// 目标不存在时返回 ErrActionTemplateNotFound。
 func (s *ActionTemplateStore) Update(ctx context.Context, id string, req ActionTemplateSaveRequest) (*ActionTemplate, error) {
 	req, err := validateActionTemplateSave(req)
 	if err != nil {
@@ -217,6 +230,7 @@ func (s *ActionTemplateStore) Update(ctx context.Context, id string, req ActionT
 	return s.get(ctx, id)
 }
 
+// Delete 按 ID 删除动作模板；目标不存在时返回 ErrActionTemplateNotFound。
 func (s *ActionTemplateStore) Delete(ctx context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

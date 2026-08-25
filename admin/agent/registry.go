@@ -1,7 +1,10 @@
+// Package agent 维护 Admin 侧的 Agent 节点注册表：注册/注销、心跳健康判定、
+// 状态变更回调与压测/系统指标快照留存。
 package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -56,7 +59,7 @@ func (r *Registry) notFoundError() error {
 	if r.cfg.NotFoundError != nil {
 		return r.cfg.NotFoundError
 	}
-	return fmt.Errorf("agent 不存在")
+	return errors.New("agent 不存在")
 }
 
 // fireOnChange 在锁外触发回调，防止死锁。
@@ -165,12 +168,12 @@ func heartbeatAgentStatus(value, taskID string) (Status, error) {
 	switch value {
 	case "busy":
 		if taskID == "" {
-			return "", fmt.Errorf("busy 心跳缺少 currentTaskId")
+			return "", errors.New("busy 心跳缺少 currentTaskId")
 		}
 		return Busy, nil
 	case "idle":
 		if taskID != "" {
-			return "", fmt.Errorf("idle 心跳不能携带 currentTaskId")
+			return "", errors.New("idle 心跳不能携带 currentTaskId")
 		}
 		return Idle, nil
 	default:
@@ -178,6 +181,9 @@ func heartbeatAgentStatus(value, taskID string) (Status, error) {
 	}
 }
 
+// SetOnRestart 设置节点进程重启回调：Register 发现同 ID 节点以不同 StartedAt
+// 重新注册且旧实例仍持有任务时，在锁外以 (agentID, taskID) 触发，
+// 供调度层为丢失的任务合成报告。
 func (r *Registry) SetOnRestart(fn func(agentID, taskID string)) {
 	r.mu.Lock()
 	r.onRestart = fn
